@@ -10,6 +10,16 @@
 // free of any charting API so the math itself is easy to verify in isolation.
 import type { Candle } from '../api/types'
 
+// 前端「自然日」的唯一口径：UTC+8（无夏令时），与图表时间轴 / 行情头日内统计
+// （chartConfig.computeDayStats）同源。以前 VWAP 与日内统计各写一份 `8 * 3600`，
+// 改一处忘一处就会出现「VWAP 在这根重置、涨跌幅却在下一根重置」。
+// 提醒：后端按 STATS_TZ 切天，两端若要对账须先确认那个值。
+// The single frontend definition of a "natural day": UTC+8 (no DST), shared with
+// the chart axis and the quote strip's day stats (chartConfig.computeDayStats).
+// VWAP and the day stats used to carry independent copies of `8 * 3600`.
+// Note: the backend slices days by STATS_TZ — reconcile that first if comparing.
+export const DAY_TZ_OFFSET_SEC = 8 * 3600
+
 // 简单移动平均 / simple moving average
 export function sma(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(values.length).fill(null)
@@ -171,15 +181,33 @@ export function closes(bars: Candle[]): number[] {
 // arrays with null over the warm-up head, like everything above.
 
 // 真实波幅（Wilder 平滑）/ Average True Range with Wilder smoothing
+//
+// 口径必须与后端 app/services/strategy/indicators.py 的 atr() **逐行一致**：后端
+// 是信号判定与回测的真源，图上画的 ATR 与 SuperTrend 若和它不是同一条线，用户
+// 照着图上的 ATR 值设阈值，触发时机就与所见不符。
+// 2026-09-19 修正前这里差两处：① 种子取 tr[1..period] 的均值（排除首根那个退化成
+// high−low 的 TR、多吃一根 tr[period]），后端取 trs[0..period-1]；② 首个有效值写在
+// out[period]，后端写在 out[period-1]。Wilder 是指数衰减递推，种子差异不会消失只会
+// 变小，所以整条曲线都对不上。现按后端口径：种子含首根、首值落在 out[period-1]。
+// warmup 守卫也同步成后端的 `n < period`（原来是 `<= period`，少给一根值）。
+//
+// Must match the backend's atr() (app/services/strategy/indicators.py) line for
+// line: the backend is the source of truth for signal verdicts and backtests, so
+// a different ATR curve here would make on-chart thresholds fire at times the
+// user didn't see. Fixed 2026-09-19: the seed now includes the first bar's
+// degenerate TR (trs[0..period-1], not tr[1..period]) and the first value lands
+// on out[period-1] (not out[period]); the warm-up guard matches too.
 export function atr(bars: Candle[], period = 14): (number | null)[] {
   const out: (number | null)[] = new Array(bars.length).fill(null)
-  if (bars.length <= period) return out
+  if (bars.length < period || period < 1) return out
+  // 首根没有前收盘价，真实波幅退化为当根高低差（与后端同）。
+  // The first bar has no previous close, so its TR degenerates to high − low.
   const tr = bars.map((b, i) => (i === 0 ? b.h - b.l : Math.max(b.h - b.l, Math.abs(b.h - bars[i - 1].c), Math.abs(b.l - bars[i - 1].c))))
   let sum = 0
-  for (let i = 1; i <= period; i++) sum += tr[i]
+  for (let i = 0; i < period; i++) sum += tr[i]
   let prev = sum / period
-  out[period] = prev
-  for (let i = period + 1; i < bars.length; i++) {
+  out[period - 1] = prev
+  for (let i = period; i < bars.length; i++) {
     prev = (prev * (period - 1) + tr[i]) / period
     out[i] = prev
   }
@@ -230,6 +258,17 @@ export function superTrend(bars: Candle[], period = 10, mult = 3): SuperTrendRes
   return { bull, bear }
 }
 
+// SAR 的预热根数：初始方向是靠前两根收盘价猜的，而 SAR 是路径依赖的递推——往左
+// 翻页加载更多历史后窗口首根变了，初始方向可能整体翻向，表现为"往左拖一下，SAR
+// 的点全变了"。经过几次翻转后状态完全由价格走势决定、与种子无关，所以把还没收敛
+// 的头部直接不画（而不是画一段会随窗口变化的值）。
+// SAR warm-up: the initial direction is guessed from the first two closes and the
+// recursion is path-dependent, so paging in older history can flip the whole
+// series ("the dots all moved when I scrolled left"). After a few flips the state
+// is driven by price action alone, so the un-converged head is left undrawn
+// rather than drawn with values that shift as the window grows.
+const SAR_WARMUP_BARS = 10
+
 // 抛物线转向 SAR（Wilder）/ Parabolic SAR
 export function parabolicSar(bars: Candle[], step = 0.02, max = 0.2): (number | null)[] {
   const n = bars.length
@@ -265,7 +304,7 @@ export function parabolicSar(bars: Candle[], step = 0.02, max = 0.2): (number | 
         af = Math.min(max, af + step)
       }
     }
-    out[i] = sar
+    if (i >= SAR_WARMUP_BARS) out[i] = sar
   }
   return out
 }
@@ -274,7 +313,7 @@ export function parabolicSar(bars: Candle[], step = 0.02, max = 0.2): (number | 
 // VWAP anchored to the natural day (UTC+8, same zone as the chart axis).
 export function vwap(bars: Candle[]): (number | null)[] {
   const out: (number | null)[] = new Array(bars.length).fill(null)
-  const TZ = 8 * 3600
+  const TZ = DAY_TZ_OFFSET_SEC
   let day = -1
   let pv = 0
   let vol = 0

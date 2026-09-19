@@ -178,6 +178,24 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     }
   }
 
+  // 进入某个表单时用**当前**持仓值重置一次。卡的 key 是 ticket，持仓推送更新时组件
+  // 不会重建，所以 useState 的初值停在挂载那一刻：部分平仓之后仓位手数变小了，
+  // closeVol 还是旧的全量值；桥接报回新的止损止盈后，改单表单里还是旧数字，
+  // 用户"只改止盈"就会把刚变的止损又覆盖回去。
+  // Reset from the *current* position when entering a form. The card is keyed by
+  // ticket and never remounts on a feed update, so the useState initial values
+  // stay frozen at mount: after a partial close, closeVol still holds the old full
+  // size, and a bridge-reported SL/TP change leaves stale numbers in the modify
+  // form — so "just editing the TP" would write the old SL back.
+  const openForm = (next: Exclude<Mode, 'view'>) => {
+    if (next === 'close') setCloseVol(String(roundLots(p.volume)))
+    else {
+      setSl(p.stopLoss ? String(p.stopLoss) : '')
+      setTp(p.takeProfit ? String(p.takeProfit) : '')
+    }
+    setMode(next)
+  }
+
   // ── 两形态共用的动作区 / action area shared by both shapes ──
   const actions = canAct && mode === 'view' && (
     <div className="mt-3 flex gap-2">
@@ -189,14 +207,14 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         {t('positions.closeAll')}
       </button>
       <button
-        onClick={() => setMode('close')}
+        onClick={() => openForm('close')}
         disabled={busy}
         className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
       >
         {t('positions.partialClose')}
       </button>
       <button
-        onClick={() => setMode('modify')}
+        onClick={() => openForm('modify')}
         disabled={busy}
         className="flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50"
       >

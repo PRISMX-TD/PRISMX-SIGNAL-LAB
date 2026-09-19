@@ -89,6 +89,54 @@ export const INDICATOR_FORM: Record<IndicatorId, IndicatorForm> = {
   obv: { params: [C('color', 'color')], lineStyle: true },
 }
 
+// ── 参数之间的相对约束 / relative constraints between parameters ──
+// 每个 num 参数各有独立区间就够了吗？不够。MACD 的 fast(2–200) 与 slow(2–400) 各
+// 自合法的组合里包含 fast=50 / slow=12——此时 DIF 整体反号，图形与所有读法都反过来
+// 而界面毫无提示；RSI 的 overbought(50–99) 与 oversold(1–50) 同理可以都取 50，超买
+// 超卖线重合。这里登记「必须小于」的成对关系：[小的, 大的]。
+// Per-parameter ranges aren't enough: MACD's fast(2–200) and slow(2–400) each
+// accept fast=50 / slow=12, which flips the whole DIF sign with no warning, and
+// RSI's overbought/oversold can both be 50. These pairs declare "must be less
+// than" as [smaller, larger].
+const PARAM_ORDER: Partial<Record<IndicatorId, [string, string][]>> = {
+  macd: [['fast', 'slow']],
+  rsi: [['oversold', 'overbought']],
+}
+
+// 违反相对约束时，**推另一个**而不是把用户刚改的值弹回去——用户刚输入的那个数字
+// 被改掉是最让人困惑的交互（"我明明填的 50"）。推过去的值仍按该字段自己的区间夹紧。
+// On violation, push the *other* parameter rather than bouncing back the one the
+// user just typed (having your own input silently rewritten is the most confusing
+// outcome). The pushed value is still clamped to its own field range.
+export function enforceParamOrder(
+  id: IndicatorId,
+  cfg: Record<string, unknown>,
+  changedKeys: string[],
+): Record<string, unknown> {
+  const pairs = PARAM_ORDER[id]
+  if (!pairs) return cfg
+  const range = (key: string): { min: number; max: number } | null => {
+    const f = INDICATOR_FORM[id].params.find((p) => p.kind === 'num' && p.key === key)
+    return f && f.kind === 'num' ? { min: f.min, max: f.max } : null
+  }
+  let out = cfg
+  for (const [lo, hi] of pairs) {
+    const loV = out[lo]
+    const hiV = out[hi]
+    if (typeof loV !== 'number' || typeof hiV !== 'number' || loV < hiV) continue
+    if (changedKeys.includes(lo)) {
+      const r = range(hi)
+      const next = r ? Math.min(r.max, Math.max(r.min, loV + 1)) : loV + 1
+      out = { ...out, [hi]: next }
+    } else {
+      const r = range(lo)
+      const next = r ? Math.min(r.max, Math.max(r.min, hiV - 1)) : hiV - 1
+      out = { ...out, [lo]: next }
+    }
+  }
+  return out
+}
+
 // ── 图上的 series 描述 / series drawn on the chart ──
 export interface SeriesSpec {
   key: string

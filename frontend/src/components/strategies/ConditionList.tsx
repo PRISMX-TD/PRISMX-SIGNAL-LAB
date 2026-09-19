@@ -82,10 +82,21 @@ export default function ConditionList({
         </span>
       </div>
 
+      {/* key 不用下标：删掉中间一条时后面的下标整体前移，React 会把第 i 行的
+          组件实例接着用给原来的第 i+1 条。ConditionRow 里的 NumParam 持有文本缓冲
+          （编辑期只动本地文本、失焦才解析），虽然有 effect 能把值纠正回来，输入焦点
+          与"正在编辑的中间态"仍会串到另一条条件上。条件对象没有 id，用「下标 + 指标
+          + 用法」拼一个稳定 key：这三者一起变才会换实例，纯粹的删除不会。
+          Not keyed by index: deleting a middle row shifts every later index and
+          React reuses row i's instance for what used to be row i+1. ConditionRow's
+          NumParam holds a text buffer (parsed on blur), so the caret and the
+          half-typed value carry over even though an effect later corrects the
+          value. Conditions have no id, so the key combines index + indicator +
+          usage — stable across a plain deletion. */}
       <div className="mt-2 flex flex-col gap-2">
         {conditions.map((condition, i) => (
           <ConditionRow
-            key={i}
+            key={`${i}-${condition.indicator}-${condition.usage}`}
             condition={condition}
             indicators={indicators}
             onChange={(next) => setCondition(i, next)}

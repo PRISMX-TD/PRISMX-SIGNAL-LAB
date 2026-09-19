@@ -17,6 +17,7 @@ import type { Order, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
+import { checkSlTp } from '../order/orderMath'
 import { symbolMeta } from '../../utils/symbolMeta'
 import ConfirmModal from '../ConfirmModal'
 
@@ -29,6 +30,19 @@ interface Props {
 }
 
 type Tab = 'positions' | 'orders'
+
+// 待确认的危险动作。全平以前有 ConfirmModal、部分平仓与撤单直接发——同一行里
+// 危险度相当的三个动作确认级别却不一致，最容易误触的反而没拦。2026-09-19 统一成
+// 一个确认队列：全平 / 部分平仓 / 撤单 / 会清掉已有止损止盈的改单都走这里。
+// A pending dangerous action. Full close had a ConfirmModal while partial close
+// and cancel fired straight away — three comparably risky actions in one row with
+// inconsistent confirmation. Unified 2026-09-19 into one queue that also covers a
+// modify which would clear an existing SL/TP.
+type Pending =
+  | { kind: 'close'; position: Position }
+  | { kind: 'partial'; position: Position; volume: number }
+  | { kind: 'cancel'; order: Order }
+  | { kind: 'clearSlTp'; position: Position; sl: number; tp: number }
 
 // 一条正在平仓的仓位：发出时刻、发出时的手数、是否部分平仓。行在这段时间里压暗并
 // 显示"平仓中"，直到持仓推送里它消失（全平）或手数变小（部分），或超时兜底放开。
@@ -49,15 +63,42 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('positions')
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [confirmClose, setConfirmClose] = useState<Position | null>(null)
+  const [pending, setPending] = useState<Pending | null>(null)
   // 展开做部分平仓 / 改止损止盈的仓位 ticket，及其表单值 / expanded position for
   // partial-close / modify, plus its form values
   const [expanded, setExpanded] = useState<number | null>(null)
   const [form, setForm] = useState<{ vol: string; sl: string; tp: string }>({ vol: '', sl: '', tp: '' })
+  // 展开那一刻填进表单的值。用来区分"用户改过这一格"与"还是打开时那个快照"：
+  // 桥接推来新的止损止盈后，没被用户碰过的格子要跟着更新，否则用户只改止盈按下
+  // 「修改」，另一条腿会把刚变的止损又覆盖回旧值（与 PositionOverlay 的确认框同一
+  // 类问题）。用户已经改过的格子绝不覆盖——正在打字的内容被改掉是最糟的交互。
+  // The values the form was opened with, used to tell "the user edited this field"
+  // from "still the opening snapshot": when the bridge reports a new SL/TP, an
+  // untouched field must follow, or pressing Modify after editing only the TP
+  // would write the stale SL back over the newer one. A field the user has typed
+  // in is never overwritten.
+  const [formInit, setFormInit] = useState<{ vol: string; sl: string; tp: string }>({ vol: '', sl: '', tp: '' })
   const [closing, setClosing] = useState<Record<number, Closing>>({})
   const [fresh, setFresh] = useState<Record<number, true>>({})
   const seenTickets = useRef<Set<number> | null>(null)
   const mountedAt = useRef(Date.now())
+
+  // 高亮 / 平仓中兜底都靠 setTimeout，id 以前没人收着，切页签或关抽屉把组件卸载
+  // 之后它们照样会 setFresh / setClosing。React 18 不报错，但持仓多时就是一串悬挂
+  // 定时器。统一收进这里，卸载时全清。
+  // The flash and closing-timeout callbacks used to fire after unmount (switching
+  // tabs / closing the sheet) because their timer ids were never kept. Collected
+  // here and cleared on unmount.
+  const timers = useRef<Set<number>>(new Set())
+  const later = (fn: () => void, ms: number) => {
+    const id = window.setTimeout(() => { timers.current.delete(id); fn() }, ms)
+    timers.current.add(id)
+    return id
+  }
+  useEffect(() => () => {
+    for (const id of timers.current) window.clearTimeout(id)
+    timers.current.clear()
+  }, [])
 
   // 持仓推送到达：① 平仓中的行若已消失 / 手数已变小就放开；② 新出现的 ticket 高亮一下。
   // On each positions push: release closing rows that are gone or shrunk; flash new tickets.
@@ -92,7 +133,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
           for (const tk of newcomers) next[tk] = true
           return next
         })
-        window.setTimeout(() => {
+        later(() => {
           setFresh((prev) => {
             const next = { ...prev }
             for (const tk of newcomers) delete next[tk]
@@ -108,7 +149,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     setClosing((prev) => ({ ...prev, [ticket]: { at: Date.now(), volume, partial } }))
     // 超时放开：持仓推送不来（桥接掉线）时也不能永远压着这一行。
     // Timed release for when no positions push ever arrives (bridge offline).
-    window.setTimeout(() => {
+    later(() => {
       setClosing((prev) => {
         const c = prev[ticket]
         if (!c || Date.now() - c.at < CLOSING_TIMEOUT_MS) return prev
@@ -138,8 +179,26 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
       return
     }
     setExpanded(p.ticket)
-    setForm({ vol: String(p.volume), sl: p.stopLoss ? String(p.stopLoss) : '', tp: p.takeProfit ? String(p.takeProfit) : '' })
+    const next = { vol: String(p.volume), sl: p.stopLoss ? String(p.stopLoss) : '', tp: p.takeProfit ? String(p.takeProfit) : '' }
+    setForm(next)
+    setFormInit(next)
   }
+
+  // 展开期间持仓被推送更新时，同步那些用户还没碰过的格子（见 formInit 的说明）。
+  // Sync the untouched fields while the row is expanded (see formInit).
+  useEffect(() => {
+    if (expanded == null) return
+    const p = positions.find((x) => x.ticket === expanded)
+    if (!p) return
+    const latest = { vol: String(p.volume), sl: p.stopLoss ? String(p.stopLoss) : '', tp: p.takeProfit ? String(p.takeProfit) : '' }
+    if (formInit.vol === latest.vol && formInit.sl === latest.sl && formInit.tp === latest.tp) return
+    setForm((f) => ({
+      vol: f.vol === formInit.vol ? latest.vol : f.vol,
+      sl: f.sl === formInit.sl ? latest.sl : f.sl,
+      tp: f.tp === formInit.tp ? latest.tp : f.tp,
+    }))
+    setFormInit(latest)
+  }, [positions, expanded, formInit])
 
   const closePosition = async (p: Position, volume?: number) => {
     if (!p.ticket) return
@@ -271,14 +330,36 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               const volNum = parseFloat(form.vol)
               const volBad = Number.isNaN(volNum) || volNum < pMinVol || volNum > p.volume
                 || !isLotOnStep(volNum, p.symbol)
-              // 改止损止盈方向校验（现价缺失时跳过）/ SL/TP direction check (skipped without a price)
+              // 改止损止盈校验统一走下单表单那份 checkSlTp：方向（买单止损须低于
+              // 现价）之外还带「两条腿都填时不许互穿」，后者不依赖现价，所以桥接
+              // 没报现价的仓位也挡得住。以前这里是独立的一份，只有方向那一半。
+              // Route the modify check through the order form's checkSlTp: besides
+              // the side rule it enforces that a filled pair doesn't cross, which
+              // needs no current price — so positions with no reported price are
+              // still guarded. This used to be a separate, weaker copy.
               const slN = form.sl.trim() === '' ? null : parseFloat(form.sl)
               const tpN = form.tp.trim() === '' ? null : parseFloat(form.tp)
               const ref = p.currentPrice
-              const slBad = slN != null && !Number.isNaN(slN) && ref != null && ref > 0 && (isBuy ? slN >= ref : slN <= ref)
-              const tpBad = tpN != null && !Number.isNaN(tpN) && ref != null && ref > 0 && (isBuy ? tpN <= ref : tpN >= ref)
+              const { slInvalid: slBad, tpInvalid: tpBad } =
+                checkSlTp(isBuy, slN, tpN, ref != null && ref > 0 ? ref : null)
+              // 「留空 = 清除」是这张表单刻意的语义（分组标题里写着「0 或留空清除」），
+              // 但只改一条腿时另一条被顺手清掉是真事故。要清掉已有的止损/止盈就弹
+              // 确认，其余照旧直接发。/ "Blank clears" is this form's deliberate
+              // semantic (the group label says so), but clearing the other leg by
+              // accident while editing one is a real incident. Clearing an existing
+              // SL/TP now asks first; everything else still submits directly.
+              const modSl = parseFloat(form.sl) || 0
+              const modTp = parseFloat(form.tp) || 0
+              const wouldClear = (!!p.stopLoss && p.stopLoss > 0 && modSl === 0)
+                || (!!p.takeProfit && p.takeProfit > 0 && modTp === 0)
               return (
-                <Fragment key={p.ticket ?? i}>
+                // key 用 ticket；ticket 缺失的仓位（极少，旧记录）拿品种+方向+开仓价
+                // 兜底，而不是数组下标——下标会在推送重排时把展开态与输入框内容串到
+                // 另一条仓位上。/ Key by ticket, falling back to a content-derived key
+                // rather than the array index, which would carry the expanded state
+                // and the typed values onto a different position when the feed
+                // reorders.
+                <Fragment key={p.ticket ?? `${p.symbol}-${p.side}-${p.entryPrice ?? i}`}>
                   <div className={`term-pr ${isOpen ? 'open' : ''} ${isClosing ? 'closing' : ''} ${isFresh ? 'fresh' : ''}`} style={{ animationDelay: `${i * 40}ms` }}>
                     <div className="term-pr-id">
                       <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
@@ -295,7 +376,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                         <span className="term-closing" role="status"><i aria-hidden="true" />{t('charts.dock.closing')}</span>
                       ) : (
                         <>
-                          <button type="button" className="warn" disabled={!p.ticket || busy} onClick={() => setConfirmClose(p)}>
+                          <button type="button" className="warn" disabled={!p.ticket || busy} onClick={() => setPending({ kind: 'close', position: p })}>
                             {t('charts.dock.close')}
                           </button>
                           <button type="button" className={isOpen ? 'on' : ''} aria-expanded={isOpen} disabled={!p.ticket || busy} onClick={() => toggleExpand(p)}>
@@ -324,7 +405,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                             })}
                             onChange={(e) => setForm((f) => ({ ...f, vol: limitLotInput(e.target.value, p.symbol) }))}
                           />
-                          <button type="button" className="term-pr-btn" disabled={busy || volBad} onClick={() => closePosition(p, volNum)}>
+                          <button type="button" className="term-pr-btn" disabled={busy || volBad} onClick={() => setPending({ kind: 'partial', position: p, volume: volNum })}>
                             {t('charts.dock.closeLots', { lots: volBad ? '' : volNum })}
                           </button>
                         </div>
@@ -332,21 +413,36 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                       <div className="term-pr-xg">
                         <span className="term-pr-xk">{t('charts.dock.modifySlTp')}</span>
                         <div className="term-pr-xr">
+                          {/* placeholder 用「留空即清除」而不是 SL / TP：持仓卡
+                              （PositionCard）早就是这么写的，这两处行为完全一样却
+                              只有那边说了，最容易误删止损的恰好是没说的这一处。
+                              The placeholder spells out "blank clears", matching
+                              PositionCard: identical behaviour, and this was the
+                              copy that didn't say so. */}
                           <input
                             className={`term-pr-inp ${slBad ? 'bad' : ''}`}
-                            placeholder={String(t('charts.ticket.sl'))}
+                            placeholder={String(t('positions.clearHint'))}
+                            aria-label={String(t('charts.ticket.sl'))}
                             value={form.sl}
                             inputMode="decimal"
                             onChange={(e) => setForm((f) => ({ ...f, sl: e.target.value.replace(/[^0-9.]/g, '') }))}
                           />
                           <input
                             className={`term-pr-inp ${tpBad ? 'bad' : ''}`}
-                            placeholder={String(t('charts.ticket.tp'))}
+                            placeholder={String(t('positions.clearHint'))}
+                            aria-label={String(t('charts.ticket.tp'))}
                             value={form.tp}
                             inputMode="decimal"
                             onChange={(e) => setForm((f) => ({ ...f, tp: e.target.value.replace(/[^0-9.]/g, '') }))}
                           />
-                          <button type="button" className="term-pr-btn" disabled={busy || slBad || tpBad} onClick={() => modifyPosition(p, parseFloat(form.sl) || 0, parseFloat(form.tp) || 0)}>
+                          <button
+                            type="button"
+                            className="term-pr-btn"
+                            disabled={busy || slBad || tpBad}
+                            onClick={() => (wouldClear
+                              ? setPending({ kind: 'clearSlTp', position: p, sl: modSl, tp: modTp })
+                              : modifyPosition(p, modSl, modTp))}
+                          >
                             {t('charts.dock.modify')}
                           </button>
                         </div>
@@ -373,7 +469,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
                 </div>
                 <div className="c-st"><span className="term-tag pending">{t('charts.dock.pending')}</span></div>
                 <div className="term-pa">
-                  <button type="button" className="warn" disabled={busyId === `o-${o.id}`} onClick={() => cancelOrder(o)}>
+                  <button type="button" className="warn" disabled={busyId === `o-${o.id}`} onClick={() => setPending({ kind: 'cancel', order: o })}>
                     {t('charts.dock.cancel')}
                   </button>
                 </div>
@@ -383,25 +479,82 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
         )}
       </div>
 
-      {confirmClose && (
-        <ConfirmModal
-          title={String(t('charts.dock.confirmCloseTitle'))}
-          message={String(t('charts.dock.confirmCloseMsg', {
-            symbol: displaySymbol(confirmClose.symbol),
-            side: confirmClose.side === 'BUY' ? t('charts.dock.buy') : t('charts.dock.sell'),
-            volume: confirmClose.volume,
-          }))}
-          confirmLabel={String(t('charts.dock.close'))}
-          danger
-          busy={busyId === `p-${confirmClose.ticket}`}
-          onConfirm={() => {
-            const p = confirmClose
-            setConfirmClose(null)
-            void closePosition(p)
-          }}
-          onCancel={() => setConfirmClose(null)}
-        />
-      )}
+      {pending && (() => {
+        const sideOf = (side: string) => String(side === 'BUY' ? t('charts.dock.buy') : t('charts.dock.sell'))
+        // 四种危险动作共用一个确认框；文案全部由既有键拼出，不新造字符串。
+        // One dialog for all four dangerous actions, worded from existing keys.
+        const view = pending.kind === 'close'
+          ? {
+              title: String(t('charts.dock.confirmCloseTitle')),
+              message: String(t('charts.dock.confirmCloseMsg', {
+                symbol: displaySymbol(pending.position.symbol),
+                side: sideOf(pending.position.side),
+                volume: pending.position.volume,
+              })),
+              label: String(t('charts.dock.close')),
+              busyId: `p-${pending.position.ticket}`,
+            }
+          : pending.kind === 'partial'
+            ? {
+                title: String(t('charts.dock.closeLots', { lots: pending.volume })),
+                message: String(t('charts.dock.confirmCloseMsg', {
+                  symbol: displaySymbol(pending.position.symbol),
+                  side: sideOf(pending.position.side),
+                  volume: pending.volume,
+                })),
+                label: String(t('charts.dock.close')),
+                busyId: `p-${pending.position.ticket}`,
+              }
+            : pending.kind === 'cancel'
+              ? {
+                  title: String(t('charts.dock.cancel')),
+                  message: `${displaySymbol(pending.order.symbol)} · ${sideOf(pending.order.side)} ${pending.order.volume}`,
+                  label: String(t('charts.dock.cancel')),
+                  busyId: `o-${pending.order.id}`,
+                }
+              : {
+                  title: String(t('charts.posmark.confirmModifyTitle')),
+                  // 每条被清掉的腿写一行「从 X 改至 —」，用的是拖动改单那条同样的
+                  // 模板，所以「清除」这件事是看得见的，而不是藏在留空语义里。
+                  // One line per cleared leg reusing the drag-modify template, so
+                  // the removal is visible rather than implied by an empty field.
+                  message: (['sl', 'tp'] as const)
+                    .filter((leg) => {
+                      const cur = leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit
+                      const next = leg === 'sl' ? pending.sl : pending.tp
+                      return !!cur && cur > 0 && next === 0
+                    })
+                    .map((leg) => String(t('charts.posmark.confirmModifyMsg', {
+                      symbol: displaySymbol(pending.position.symbol),
+                      side: sideOf(pending.position.side),
+                      ticket: String(pending.position.ticket ?? ''),
+                      kind: String(leg === 'sl' ? t('charts.ticket.sl') : t('charts.ticket.tp')),
+                      from: String((leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit) ?? '—'),
+                      to: '—',
+                    })))
+                    .join(' · '),
+                  label: String(t('charts.dock.modify')),
+                  busyId: `p-${pending.position.ticket}`,
+                }
+        return (
+          <ConfirmModal
+            title={view.title}
+            message={view.message}
+            confirmLabel={view.label}
+            danger
+            busy={busyId === view.busyId}
+            onConfirm={() => {
+              const act = pending
+              setPending(null)
+              if (act.kind === 'close') void closePosition(act.position)
+              else if (act.kind === 'partial') void closePosition(act.position, act.volume)
+              else if (act.kind === 'cancel') void cancelOrder(act.order)
+              else void modifyPosition(act.position, act.sl, act.tp)
+            }}
+            onCancel={() => setPending(null)}
+          />
+        )
+      })()}
     </div>
   )
 }

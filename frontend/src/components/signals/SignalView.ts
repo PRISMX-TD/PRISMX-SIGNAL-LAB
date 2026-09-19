@@ -95,6 +95,15 @@ export function effectiveStatus(signal: Signal, now: number): EffStatus {
 // 精度。位数取三者中最长的一个（上限 5），数值本身不变。
 // All three prices on a ticket share one precision: the longest fractional
 // length among them (capped at 5); the values are untouched.
+// 边界（2026-09-19 审计 T-54）：这是**只给信号牌面对齐用**的推导位数，不是价格精度
+// 的真源。资金路径（图表报价条 / 下单票 / 持仓面板 / 拖动改单）已统一到券商上报的
+// Quote.digits，见 components/charts/chartConfig.ts 的 priceDigits()。信号牌上没有
+// 报价在手，且要解决的是"同一张牌上三个价位位数不一"这个纯排版问题，所以保留这份
+// 推导——但不要把它当精度用去算点差、点数或任何要发给 MT5 的价格。
+// Boundary (audit T-54): this derives digits purely to align the three prices on a
+// signal ticket; it is NOT the source of truth for price precision. The money path
+// is unified on the broker-reported Quote.digits (see chartConfig.priceDigits()).
+// Never use this to compute spreads, point distances or anything sent to MT5.
 function decimalsOf(v: number | null): number {
   if (v == null || !Number.isFinite(v)) return 0
   const frac = String(v).split('.')[1]

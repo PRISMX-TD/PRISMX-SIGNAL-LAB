@@ -24,6 +24,7 @@ import type {
 import type { Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
+import { checkSlTp } from '../order/orderMath'
 import { isChartAlive } from './chartLifecycle'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
@@ -210,12 +211,19 @@ interface Props {
   // Positions already filtered by the selected account; filtered by symbol here.
   positions: Position[]
   symbol: string
+  // 展示用小数位（拿不到精度时是兜底的 2 位）/ display precision (2 when unknown)
   digits: number
+  // 券商权威精度；null = 真的不知道。**只有它非空时才允许对要发给 MT5 的价格取整**
+  // ——按猜的位数取整会把止损实打实地挪走（AUDUSD 按 2 位取整 = 偏 43 个点）。
+  // The broker's authoritative precision; null means genuinely unknown. Rounding
+  // a price destined for MT5 is only allowed when this is non-null: rounding to a
+  // guessed precision physically moves the stop (43 points on AUDUSD at 2 digits).
+  exactDigits: number | null
   visible: boolean
   onToast: (msg: string, kind: 'success' | 'error' | 'info') => void
 }
 
-export default function PositionOverlay({ chart, series, positions, symbol, digits, visible, onToast }: Props) {
+export default function PositionOverlay({ chart, series, positions, symbol, digits, exactDigits, visible, onToast }: Props) {
   const { t } = useTranslation()
 
   // 拖拽中的线与其当前价位（未提交），以及已提交待回执的乐观值。
@@ -362,10 +370,22 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     if (!visible) return
     const el = overlayRef.current
     if (!el) return
-    const onHover = (e: PointerEvent) => {
+    // 命中判定按帧合并：这是个常驻的捕获期全局监听，鼠标一动就要遍历全部持仓做
+    // priceToCoordinate + setState。指针事件在高刷屏 / 高回报率鼠标上一帧能来好
+    // 几个，逐个算是纯浪费（同一帧内画面只会呈现最后一次的结果）。
+    // Coalesce hit-testing per frame: this is an always-on capture-phase global
+    // listener that walks every position and calls setState. Pointer events can
+    // arrive several times per frame on a high-refresh display, and only the last
+    // one can possibly be painted.
+    let frame = 0
+    let last: { x: number; y: number } | null = null
+    const evaluate = () => {
+      frame = 0
+      const p = last
+      if (!p) return
       if (dragRef.current) { el.style.pointerEvents = 'auto'; return }
       const r = el.getBoundingClientRect()
-      const x = e.clientX - r.left, y = e.clientY - r.top
+      const x = p.x - r.left, y = p.y - r.top
       if (x < 0 || y < 0 || x > r.width || y > r.height) {
         el.style.pointerEvents = 'none'
         setHovered(null)
@@ -375,8 +395,18 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
       el.style.pointerEvents = h ? 'auto' : 'none'
       setHovered(h ? h.key : null)
     }
+    const onHover = (e: PointerEvent) => {
+      last = { x: e.clientX, y: e.clientY }
+      // 拖拽中要立刻放行指针事件，不能等到下一帧才把 pointerEvents 切成 auto。
+      // Mid-drag the overlay must claim pointer events immediately, not next frame.
+      if (dragRef.current) { el.style.pointerEvents = 'auto'; return }
+      if (frame === 0) frame = window.requestAnimationFrame(evaluate)
+    }
     window.addEventListener('pointermove', onHover, true)
-    return () => window.removeEventListener('pointermove', onHover, true)
+    return () => {
+      window.removeEventListener('pointermove', onHover, true)
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+    }
   }, [hitLine, visible])
 
   // 隐藏时清掉悬停态，免得再显示出来时还留着上次的高亮。
@@ -471,11 +501,18 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     if (!m) return
     // 按品种精度取整：拖出来的价格是任意小数，直接发过去 MT5 也会自己截断，
     // 不如前端先规整，让线的落点和提示里的数字一致。
-    // Round to the symbol's precision: a dragged price is an arbitrary float
-    // that MT5 would truncate anyway; normalizing up front keeps the line and
-    // the toast in agreement.
-    const factor = Math.pow(10, digits)
-    const next = Math.round(drag.price * factor) / factor
+    // **但精度必须是券商上报的真值**（exactDigits）。以前这里用的是展示位数，而
+    // 展示位数在拿不到报价时退回 2 位——对 5 位品种按 2 位取整，等于把用户拖出来
+    // 的止损挪走最多约 50 个点，而这个数是**真发给 MT5** 的。拿不到真精度时干脆
+    // 不取整，原样发过去让券商自己截断。
+    // Round to the symbol's precision so the line and the toast agree — but only
+    // with the broker's real precision. This used to use the display digits,
+    // which fall back to 2, so a 5-digit symbol's dragged stop was rounded to
+    // 0.01 (up to ~50 points off) and that rounded value was what MT5 received.
+    // With no authoritative precision, send the raw price and let the broker
+    // truncate it.
+    const factor = exactDigits != null ? Math.pow(10, exactDigits) : null
+    const next = factor != null ? Math.round(drag.price * factor) / factor : drag.price
     // 对比原始持仓的止损/止盈（而非标记覆盖后的值——拖拽过程中 pick() 已经把
     // 标记值换成了拖拽位置，拿 m.sl/m.tp 比 next 永远是同一个价，会被当成
     // "没有实质性变动"而静默跳过，于是线弹回去、确认框不弹）。
@@ -485,34 +522,58 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     // confirm dialog as "no meaningful change", snapping the line back).
     const rawSl = m.pos.stopLoss
     const rawTp = m.pos.takeProfit
-    const orig = drag.kind === 'sl' ? (rawSl && rawSl > 0 ? rawSl : null) : (rawTp && rawTp > 0 ? rawTp : null)
-    if (next <= 0 || (orig != null && Math.abs(next - orig) < 1 / factor / 2)) return
+    const slNow = rawSl && rawSl > 0 ? rawSl : null
+    const tpNow = rawTp && rawTp > 0 ? rawTp : null
+    const orig = drag.kind === 'sl' ? slNow : tpNow
+    // "没有实质性变动"的判据跟着取整精度走；不取整时用一个极小的价格容差。
+    // The "no meaningful change" epsilon follows the rounding precision; with no
+    // rounding it falls back to a tiny price tolerance.
+    const eps = factor != null ? 1 / factor / 2 : 1e-9
+    if (next <= 0 || (orig != null && Math.abs(next - orig) < eps)) return
 
-    // 方向校验：与底部持仓面板同一套规则（买单止损须低于现价、止盈须高于现价）。
-    // Direction check: same rule as the positions dock.
+    // 方向校验统一走下单表单那份 checkSlTp：除了「买单止损须低于现价」这条，它还
+    // 带上了「两条腿都在时不许互穿」（买单 SL < TP），而且那条**不依赖现价**。
+    // 以前这里整段包在 `if (ref != null && ref > 0)` 里，桥接旧版 / 刚接入还没推
+    // 过价的仓位上，拖到错误一侧的止损会被原样提交。
+    // Route the direction check through the order form's checkSlTp: besides the
+    // "a BUY's SL must sit below the current price" rule it also enforces that the
+    // two legs don't cross, which needs no reference price. This used to be wholly
+    // wrapped in `if (ref != null && ref > 0)`, so a position with no reported
+    // price (older bridge, freshly connected) accepted a wrong-side stop as-is.
     const ref = m.pos.currentPrice
     const isBuy = m.pos.side === 'BUY'
-    if (ref != null && ref > 0) {
-      const wrong = drag.kind === 'sl'
-        ? (isBuy ? next >= ref : next <= ref)
-        : (isBuy ? next <= ref : next >= ref)
-      if (wrong) {
-        onToast(String(t('charts.dock.slTpWrong')), 'error')
-        return
-      }
+    const nextSl = drag.kind === 'sl' ? next : slNow
+    const nextTp = drag.kind === 'tp' ? next : tpNow
+    const { slInvalid, tpInvalid } = checkSlTp(isBuy, nextSl, nextTp, ref != null && ref > 0 ? ref : null)
+    if (drag.kind === 'sl' ? slInvalid : tpInvalid) {
+      onToast(String(t('charts.dock.slTpWrong')), 'error')
+      return
     }
 
     // 弹出确认框而非直接发送 —— 避免误拖 / show confirm dialog instead of sending immediately
     setConfirmState({ key: drag.key, ticket: drag.ticket, kind: drag.kind, newPrice: next, marker: m })
-  }, [chart, digits, onToast, t])
+  }, [chart, exactDigits, onToast, t])
 
   // 用户确认改单 / user confirms the modify
   const handleConfirm = useCallback(async () => {
     const cs = confirmState
     if (!cs) return
+    // 另一条腿必须**现取**，不能用拖拽那一刻的 Marker 快照：MODIFY 要求两条腿一起
+    // 发，用户可能盯着确认框几十秒，其间桥接推过新的止损止盈（或别处改了单），
+    // 按旧快照发回去就是用旧值覆盖新值。fresh 找不到（仓位已平/已消失）时退回快照。
+    // Re-read the other leg now rather than trusting the drag-time snapshot: a
+    // MODIFY carries both legs, the dialog can sit open for a minute, and the
+    // bridge may have reported a new SL/TP meanwhile — sending the snapshot would
+    // overwrite the newer value with the older one. Falls back to the snapshot if
+    // the position is gone.
+    const fresh = symPositions.find((p) => p.ticket === cs.ticket)
     const m = cs.marker
-    const sl = cs.kind === 'sl' ? cs.newPrice : (m.sl ?? 0)
-    const tp = cs.kind === 'tp' ? cs.newPrice : (m.tp ?? 0)
+    const liveSl = fresh?.stopLoss
+    const liveTp = fresh?.takeProfit
+    const otherSl = fresh ? (liveSl && liveSl > 0 ? liveSl : 0) : (m.sl ?? 0)
+    const otherTp = fresh ? (liveTp && liveTp > 0 ? liveTp : 0) : (m.tp ?? 0)
+    const sl = cs.kind === 'sl' ? cs.newPrice : otherSl
+    const tp = cs.kind === 'tp' ? cs.newPrice : otherTp
     setPending((prev) => ({ ...prev, [cs.key]: { price: cs.newPrice, at: Date.now() } }))
     setConfirmState(null)
     const ok = await submitModify(m, sl, tp)
@@ -523,7 +584,7 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
         return next2
       })
     }
-  }, [confirmState, submitModify])
+  }, [confirmState, submitModify, symPositions])
 
   // 用户取消改单 —— 线弹回真实价位（confirmState 一清，markers 就走回真实值）
   // User cancels — line snaps back to the truth (clearing confirmState lets

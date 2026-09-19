@@ -38,6 +38,16 @@ export default function WatchlistPanel({ symbols, quotes, active, onSelect, digi
   const [dirs, setDirs] = useState<Record<string, Dir>>({})
   const [, setTick] = useState(0)
 
+  // 报价推送每一拍都是新对象引用，所以这个 effect 每拍都跑。它只在**真的有品种
+  // 跳价**时才 setTick 重渲染——以前是无条件 setTick，于是每一拍都要重排整张自选
+  // 表并重算每行 sparkline 的 min/max，品种一多就是持续的主线程开销。
+  // 另外 dirs 以前只增不清（浅合并），某品种最后一次跳动的颜色会永久留着；现在
+  // 这一拍没动的品种显式置 null，颜色跟着行情停。
+  // The quotes object is a fresh reference on every push, so this effect runs on
+  // every one. It now re-renders only when a symbol actually ticked — it used to
+  // setTick unconditionally, re-laying the whole watchlist and recomputing every
+  // sparkline's min/max each push. Symbols that didn't tick also get their
+  // direction cleared, instead of keeping their last tick's color forever.
   useEffect(() => {
     const nextDirs: Record<string, Dir> = {}
     let changed = false
@@ -48,9 +58,11 @@ export default function WatchlistPanel({ symbols, quotes, active, onSelect, digi
       const prev = prevRef.current[sym]
       if (prev != null && mid !== prev) {
         nextDirs[sym] = mid > prev ? 'up' : 'down'
-        changed = true
+      } else {
+        nextDirs[sym] = null
       }
       if (prev !== mid) {
+        changed = true
         const h = histRef.current[sym] ?? []
         h.push(mid)
         if (h.length > SPARK_LEN) h.shift()
@@ -58,7 +70,14 @@ export default function WatchlistPanel({ symbols, quotes, active, onSelect, digi
       }
       prevRef.current[sym] = mid
     }
-    if (changed) setDirs((d) => ({ ...d, ...nextDirs }))
+    if (!changed) return
+    setDirs((d) => {
+      // 方向没变就返回原对象，省掉一次无意义的重渲染。
+      // Return the same object when nothing changed to skip a pointless render.
+      const keys = new Set([...Object.keys(d), ...Object.keys(nextDirs)])
+      for (const k of keys) if (d[k] !== nextDirs[k]) return nextDirs
+      return d
+    })
     setTick((n) => n + 1)
   }, [quotes, symbols])
 

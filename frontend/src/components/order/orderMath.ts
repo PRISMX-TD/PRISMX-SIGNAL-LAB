@@ -46,7 +46,7 @@ export function defaultVolume(remembered?: number | string | null, symbol?: stri
  *  原先写死按 0.01 取整，对步长 0.1 的原油会产出 0.13 这种永远不会成交的手数。
  *  Clamp to [minLot, 10] and floor onto the symbol's step. The old hardcoded 0.01
  *  floor produced volumes like 0.13 on WTI, which can never fill. */
-function clampLots(raw: number, symbol?: string | null): number {
+export function clampLots(raw: number, symbol?: string | null): number {
   const step = lotStep(symbol)
   const floored = Math.floor(raw / step + 1e-6) * step
   return roundLots(Math.max(minLot(symbol), Math.min(VOLUME_MAX, floored)))
@@ -67,9 +67,45 @@ export function stepVolume(raw: string, dir: 1 | -1, symbol?: string | null): st
   return clampLots(v + dir * step, symbol).toFixed(lotDigits(symbol))
 }
 
-/** 只留数字和小数点 / keep digits and the decimal point only. */
+/**
+ * 把用户敲进价格 / 手数输入框的东西规整成一个能被 parseFloat 正确读出来的十进制串。
+ *
+ * 这不只是"过滤非法字符"，几种最常见的输入都必须被**读懂**而不是被丢掉：
+ *
+ *   全角数字 `３３００`  中文输入法没切回半角就会打出来，双语界面上极其常见。
+ *                      直接按非法字符删掉等于把用户填的止损清空。→ 转成半角。
+ *   逗号小数点 `3300,5` 许多地区的小数点就是逗号。只删非法字符会得到 `33005`
+ *                      ——比原来错得更离谱。→ 当成小数点。
+ *   多个小数点 `1.2.3`  多半是手滑。`parseFloat` 会悄悄读成 `1.2`，而 `1.2` 作为
+ *                      黄金的止损方向校验还恰好通过。→ 只保留第一个小数点。
+ *
+ * 为什么这件事值得这么较真：止损输入框此前完全不过滤，上面三种输入都会静默产生
+ * 一个错误的止损、或者干脆变成 NaN 最后以 `null` 发出去——下的是裸单，而界面全程
+ * 不报错（2026-09-19 审计）。
+ *
+ * Normalize what a user typed into a price / lot field into a string parseFloat
+ * can read correctly. This deliberately *understands* the common inputs instead of
+ * discarding them: full-width digits (a Chinese IME left in full-width mode, very
+ * likely on a bilingual UI), a comma decimal separator (stripping it turns 3300,5
+ * into 33005 — worse than the original), and a stray second dot (parseFloat
+ * silently reads 1.2.3 as 1.2, which even passes the SL side check for gold).
+ *
+ * The stop-loss field previously applied no filtering at all, so each of these
+ * silently produced a wrong stop or a NaN that went out as `null` — a naked order,
+ * with no error shown anywhere (2026-09-19 audit).
+ */
 export function sanitizeDecimal(raw: string): string {
-  return raw.replace(/[^0-9.]/g, '')
+  const normalized = raw
+    // 全角数字 / 全角句点 / 全角逗号 → 半角 / full-width digits and separators → ASCII
+    .replace(/[０-９]/g, (d) => String.fromCharCode(d.charCodeAt(0) - 0xfee0))
+    .replace(/[．。]/g, '.')
+    .replace(/[，,]/g, '.')
+    .replace(/[^0-9.]/g, '')
+  // 只保留第一个小数点，其余丢掉（`1.2.3` → `1.23`，而不是被 parseFloat 读成 `1.2`）
+  // Keep only the first decimal point, dropping the rest.
+  const first = normalized.indexOf('.')
+  if (first === -1) return normalized
+  return normalized.slice(0, first + 1) + normalized.slice(first + 1).replace(/\./g, '')
 }
 
 /** 空串 → null，否则 parseFloat（可能是 NaN，由校验函数处理）。
@@ -94,11 +130,26 @@ export interface SlTpCheck {
  * SL > TP (SELL), catching a swapped SL/TP before MT5 has to reject it.
  */
 export function checkSlTp(isBuy: boolean, slNum: number | null, tpNum: number | null, entryRef: number | null): SlTpCheck {
-  const slOk = slNum != null && !Number.isNaN(slNum)
-  const tpOk = tpNum != null && !Number.isNaN(tpNum)
+  // 「填了但读不出来」必须判非法，不能当成「没填」。
+  //
+  // 原来这里是 `slOk = slNum != null && !Number.isNaN(slNum)`，NaN 走进了「没填」
+  // 那一支：slInvalid 恒为 false，界面不报错、滑动确认不禁用，而 NaN 经
+  // JSON.stringify 会变成 `null` —— 下出去的是一张没有止损的裸单，用户却以为自己
+  // 设了止损。sanitizeDecimal 已经在输入层把常见的脏输入救回来了，这里是最后一道
+  // 兜底（比如用户只敲了一个 `.`）。
+  //
+  // "Filled but unreadable" must be invalid, never "empty". NaN used to fall into
+  // the empty branch, leaving slInvalid false — no error shown, submission not
+  // blocked — while JSON.stringify turns NaN into `null`, i.e. a naked order the
+  // user believes is protected. sanitizeDecimal now rescues the common cases at the
+  // input layer; this is the last-resort backstop (a lone "." still parses to NaN).
+  const slNan = slNum != null && Number.isNaN(slNum)
+  const tpNan = tpNum != null && Number.isNaN(tpNum)
+  const slOk = slNum != null && !slNan
+  const tpOk = tpNum != null && !tpNan
   const cross = slOk && tpOk && (isBuy ? slNum! >= tpNum! : slNum! <= tpNum!)
-  const slInvalid = cross || (slOk && entryRef != null && (isBuy ? slNum! >= entryRef : slNum! <= entryRef))
-  const tpInvalid = cross || (tpOk && entryRef != null && (isBuy ? tpNum! <= entryRef : tpNum! >= entryRef))
+  const slInvalid = slNan || cross || (slOk && entryRef != null && (isBuy ? slNum! >= entryRef : slNum! <= entryRef))
+  const tpInvalid = tpNan || cross || (tpOk && entryRef != null && (isBuy ? tpNum! <= entryRef : tpNum! >= entryRef))
   return { slInvalid, tpInvalid }
 }
 

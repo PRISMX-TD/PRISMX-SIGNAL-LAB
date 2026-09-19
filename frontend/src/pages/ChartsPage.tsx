@@ -58,7 +58,8 @@ import { useChartData } from '../components/charts/useChartData'
 import { useGlobalQuotes, usePositions } from '../store/live'
 import type { Side } from '../components/order/useOrderForm'
 import {
-  DEFAULT_INDICATORS, INTERVAL_KEY, SYMBOL_DECIMALS, SYMBOL_KEY, type IndicatorFlags,
+  DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
+  priceDigits, resolvePriceDigits, type IndicatorFlags,
 } from '../components/charts/chartConfig'
 
 // IndicatorFlags 原本定义在这里，IndicatorSettingsModal 等按老路径引用；保留再导出。
@@ -96,7 +97,13 @@ export default function ChartsPage() {
     mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, getPref<Partial<IndicatorSettings>>('charts', 'indicatorSettings', {}))
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [drawVersion, setDrawVersion] = useState(0)
+  // 外部画线工具栏（DrawToolsRow / FullscreenToolbar）改的是 DrawLayer 内部状态，
+  // 经 ref 调用，不会让本页重渲染——按钮的按下态就不会跟着变。这个计数器只为
+  // "踢一脚重渲染"存在，值本身没人读，所以只取 setter。
+  // The draw toolbars mutate DrawLayer state through a ref, which doesn't
+  // re-render this page (so their pressed states would go stale). This counter
+  // exists only to force one; nobody reads the value, hence setter-only.
+  const [, setDrawVersion] = useState(0)
   const bumpDraw = useCallback(() => setDrawVersion((v) => v + 1), [])
   // 持仓标记显隐：跟随用户走、云端同步（与指标开关同一套持久化模式）。默认开，
   // 有单时直接看得到入场/止损/止盈，不需要先去翻某个开关。
@@ -138,15 +145,31 @@ export default function ChartsPage() {
   const positions = usePositions()
   const { toast, placeManualOrder, showToast } = useOrderPlacement()
 
-  // 每个品种的价格轴小数位（与图表 series 精度一致），供自选列表/报价条统一取用。
-  // Per-symbol price precision (matches the chart series), shared by the
-  // watchlist and quote strip.
-  const digitsFor = useCallback((s: string) => SYMBOL_DECIMALS[s] ?? 2, [])
+  // 每个品种的价格轴小数位：**优先用券商随报价上报的 digits**，拿不到才退回
+  // chartConfig 里那张兜底表。这条链一路喂给报价条、下单票、自选表、持仓面板与
+  // 图上的持仓标记层——以前它只查一张 7 条的写死表，表外品种（AUDUSD 之流）一律
+  // 按 2 位，点差恒显示 0、止损点数差三个量级。
+  // Per-symbol price precision, preferring the broker-reported Quote.digits and
+  // falling back to the table only when no quote has arrived. Feeds the quote
+  // strip, ticket, watchlist, positions dock and the on-chart markers.
+  const digitsFor = useCallback(
+    (s: string) => priceDigits(s, globalQuotes[s]),
+    [globalQuotes],
+  )
 
   // 当前品种的全站统一报价（EA 推送，含 bid/ask）；报价条与下单价用它。
   // The active symbol's site-wide quote (EA-pushed, bid/ask); used by the
   // quote strip and the ticket's price.
   const activeQuote = symbol ? globalQuotes[symbol] : undefined
+
+  // exactDigits 为 null = 这个品种的精度我们还不知道（没收到报价、也不在兜底表
+  // 里）。展示走 decimals（退回 2 位只是显示难看），但**发给 MT5 的价格绝不能按
+  // 一个猜的位数取整**——所以拖动改单那层拿的是 exactDigits，见 PositionOverlay。
+  // exactDigits === null means the precision is genuinely unknown. Display falls
+  // back to 2 digits (merely ugly), but prices sent to MT5 must never be rounded
+  // to a guessed precision — hence PositionOverlay takes exactDigits.
+  const exactDigits = resolvePriceDigits(symbol, activeQuote)
+  const decimals = exactDigits ?? FALLBACK_DECIMALS
 
   // 右栏账户条展示的账户：优先在线账号，否则第一个绑定的。
   // Account shown in the right-rail strip: prefer an online one, else the first bound.
@@ -264,9 +287,8 @@ export default function ChartsPage() {
   // refit key only changes on entering/leaving fullscreen (a real resize).
   const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen)
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
-  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, engine)
+  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine)
 
-  const decimals = SYMBOL_DECIMALS[symbol] ?? 2
   const px = (v: number | null | undefined) => (v != null ? v.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—')
   const spreadPts = activeQuote && activeQuote.ask >= activeQuote.bid ? Math.round((activeQuote.ask - activeQuote.bid) * Math.pow(10, decimals)) : null
   const openTrade = (side: Side) => { setTradeSide(side); setSheet('trade') }
@@ -291,9 +313,6 @@ export default function ChartsPage() {
 
   return (
     <div className="term-shell">
-      {/* drawVersion 用于外部画线工具栏状态变更时强制 ChartsPage 重渲染 */}
-      {void drawVersion}
-
       {/* 左栏：自选（桌面常驻；手机从报价条的品种名点开抽屉）
           Left column: watchlist (desktop; on mobile it opens as a sheet from the quote strip) */}
       <aside className="term-col term-col-left">
@@ -405,6 +424,7 @@ export default function ChartsPage() {
                 positions={accountPositions}
                 symbol={symbol}
                 digits={decimals}
+                exactDigits={exactDigits}
                 visible={showPositions}
                 onToast={showToast}
               />

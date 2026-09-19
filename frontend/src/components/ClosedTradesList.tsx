@@ -18,7 +18,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Pager from './Pager'
-import { displaySymbol, fmtLots, fmtTime } from '../api/utils'
+import { displaySymbol, fmtLots, fmtTime, roundLots } from '../api/utils'
 import type { ClosedTrade } from '../api/types'
 
 const PAGE_SIZE = 10
@@ -102,7 +102,13 @@ function groupPositions(trades: ClosedTrade[]): PositionRow[] {
       symbol: legs[0].symbol,
       side: legs[0].side,
       positionTicket: legs[0].positionTicket,
-      volume: Math.round(volume * 100) / 100,
+      // 合成手数走 roundLots（按千分之一取整，最多 3 位），不要自己写死两位：
+      // api/utils 里明确写着"所有展示手数的地方都走 roundLots"，0.001 步长的券商上
+      // 各腿相加的 0.125 会被这里的两位取整显示成 0.13。
+      // Round through roundLots (to 0.001, max 3 decimals) rather than a
+      // hard-coded 2: api/utils states every displayed lot size goes through it,
+      // and on a 0.001-step broker the summed 0.125 rendered as 0.13.
+      volume: roundLots(volume),
       openTime: openTimes[0] ?? null,
       openPrice: withOpen?.openPrice ?? null,
       sl: withSl?.sl ?? null,

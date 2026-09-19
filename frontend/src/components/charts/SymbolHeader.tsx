@@ -10,10 +10,10 @@
 // are computed by ChartsPage from the loaded candle window. The big price uses
 // the FX big-figure/pip convention (see splitPrice). On mobile it folds to two
 // rows and the symbol becomes a button that opens the watchlist sheet.
-import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
+import { useClock } from '../signals/hooks'
 import { INTERVALS } from './chartConfig'
 
 export interface DayStats {
@@ -54,18 +54,21 @@ export function splitPrice(price: number | null, digits: number): { base: string
   return { base: s, pip: '', sup: '' }
 }
 
-function useClock(): string {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-  return new Date(now).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' })
+// 右下角那个走秒的时钟单独成组件：时间一变只重渲染这一个 <span>，而不是整条报价
+// 条（大价格 + 五个统计 + 中间价拆位都要重算）。用的是 signals/hooks 里那个全局
+// 共享时钟——单定时器 + useSyncExternalStore + 无订阅自动停表，本文件原来自己又
+// 写了一份 setInterval + useState，每秒把整条报价条重渲染一次。
+// The ticking clock is its own component so a second's passing re-renders one
+// <span> instead of the whole strip. It subscribes to the shared clock in
+// signals/hooks (one interval, auto-stopped when unsubscribed); this file used to
+// carry a duplicate setInterval that re-rendered the entire strip every second.
+function Clock() {
+  const now = useClock()
+  return <>{new Date(now).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' })}</>
 }
 
 export default function SymbolHeader({ symbol, interval, bid, ask, digits, dayStats, fallbackPrice, stale, onSymbolClick }: Props) {
   const { t } = useTranslation()
-  const clock = useClock()
   // 点差按最小价位单位（point）计：(ask - bid) × 10^digits，四舍五入。
   // Spread in points: (ask - bid) × 10^digits, rounded.
   const spread =
@@ -113,8 +116,17 @@ export default function SymbolHeader({ symbol, interval, bid, ask, digits, daySt
       </div>
 
       <div className="term-qs-st no-sb">
-        <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="up" />
-        <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="down" />
+        {/* 配色跟下单票的连体按钮走：卖（bid）红、买（ask）绿——同一个页面上报价条
+            和下单票的颜色以前恰好相反（报价条 bid 绿 ask 红），仪表盘的报价表
+            （QuotesTable）也是 bid 红 ask 绿，三处里只有这里是反的。
+            （标签措辞本身的口径问题另议，见审计 T-52：那要产品先定「买价 = ask
+            还是 bid」，这里只对齐颜色，不动取值与文案。）
+            Colors follow the ticket's conjoined buttons — sell (bid) red, buy
+            (ask) green. This strip was the only place with the inverse; the
+            dashboard's quotes table already matched the ticket. The label wording
+            is a separate, product-level question (audit T-52) and is untouched. */}
+        <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="down" />
+        <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="up" />
         <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
         <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
         <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
@@ -122,7 +134,7 @@ export default function SymbolHeader({ symbol, interval, bid, ask, digits, daySt
 
       <div className={`term-qs-live ${stale ? 'stale' : ''}`}>
         <i />
-        {stale ? t('charts.stale') : 'Live'} · UTC+8 {clock}
+        {stale ? t('charts.stale') : 'Live'} · UTC+8 <Clock />
       </div>
     </div>
   )

@@ -1088,7 +1088,11 @@ export default function StrategiesPage() {
     volume: number, mt5Login: string | null, stopLoss: number | null,
     takeProfit: number | null, clientOrderId: string,
   ) => {
-    if (!orderTarget) return
+    // 抛错而不是 return：OrderSheet 的契约是「Promise 正常 resolve = 已提交」，
+    // 提前 return 也算 resolve，于是一单都没发、界面却渲染出「已提交」回执。
+    // Throw rather than return: OrderSheet treats a resolved promise as "submitted"
+    // and renders a receipt, so an early return fabricates a confirmation.
+    if (!orderTarget) throw new Error(String(t('common.error')))
     await placeManualOrder(orderTarget.symbol, orderTarget.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
   }
 

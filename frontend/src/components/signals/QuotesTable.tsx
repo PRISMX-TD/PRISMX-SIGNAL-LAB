@@ -33,11 +33,11 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
     <section className="card glass dash-quotes p-4 sm:p-6">
       {/* 标题栏（仅桌面）：左「实时行情报价」右 MT5 状态 / title bar, desktop only */}
       <div className="hidden sm:flex items-center justify-between mb-4">
-        <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading', '实时行情报价')}</h3>
+        <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading')}</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
           <span className={`font-semibold ${mt5Online ? 'text-up' : 'text-neutral-500'}`}>
-            {mt5Online ? t('signals.focus.live', 'MT5 在线') : t('signals.focus.offline', 'MT5 离线')}
+            {mt5Online ? t('signals.focus.live') : t('signals.focus.offline')}
           </span>
         </div>
       </div>
@@ -46,20 +46,20 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
       <div className="qt-mobile-row sm:hidden">
         <div className="flex items-center gap-2">
           <b className="text-sm font-bold text-white">{focusMeta ? displaySymbol(focusMeta.sym) : '-'}</b>
-          {focusQ?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
+          {focusQ?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed')}</span>}
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
         </div>
         <div className="flex items-center gap-5 ml-auto">
           <div className="text-center">
-            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.bid', '买价')}</div>
+            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.bid')}</div>
             <span className="num font-bold text-sm" style={{ color: 'var(--up)' }}>{focusAsk}</span>
           </div>
           <div className="text-center">
-            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.spread', '点差')}</div>
+            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.spread')}</div>
             <span className="num text-xs text-neutral-400">{spread}</span>
           </div>
           <div className="text-center">
-            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.ask', '卖价')}</div>
+            <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.ask')}</div>
             <span className="num font-bold text-sm" style={{ color: 'var(--down)' }}>{focusBid}</span>
           </div>
         </div>
@@ -70,9 +70,9 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
         <table className="qt-table">
           <thead>
             <tr>
-              <th>{t('signals.focus.symbol', '交易品种')}</th>
-              <th>{t('signals.focus.bid', '卖价')}</th>
-              <th>{t('signals.focus.ask', '买价')}</th>
+              <th>{t('signals.focus.symbol')}</th>
+              <th>{t('signals.focus.bid')}</th>
+              <th>{t('signals.focus.ask')}</th>
             </tr>
           </thead>
           <tbody>
@@ -95,7 +95,7 @@ const QuotesTable: FC<Props> = ({ symbols, quotes, mt5Online, focusSymbol }) => 
                         <div className="nm">
                           <b className="flex items-center gap-1.5">
                             {displaySymbol(sym)}
-                            {q?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed', '休市')}</span>}
+                            {q?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed')}</span>}
                           </b>
                           <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
                         </div>

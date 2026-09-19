@@ -41,14 +41,41 @@ export function useOrderPlacement() {
   const { orders, refreshAll } = useLive()
   const [toast, setToast] = useState<OrderToast | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
-  const fallbackTimer = useRef<number | undefined>(undefined)
-  // 正在等待回执的订单 id / order id awaiting its receipt
-  const pendingId = useRef<string | null>(null)
+  // 正在等待回执的订单 id 集合。两件事必须这样：
+  // ① 是**集合**不是单个 id：终端下单票允许连续下多单（成功即 rotateOrderId），
+  //    以前第二笔一提交就把第一笔的 id 覆盖掉，第一笔的成交/被拒提示永远不出现，
+  //    用户以为它还在路上。
+  // ② 是 **state** 不是 ref：下面监听 orders 的 effect 依赖它。网关账号几乎即时
+  //    成交，ORDER_UPDATE 可能在这里登记之前就把 orders 更新完了——那一轮 effect
+  //    已经跑过，ref 赋值不会再触发它，于是要一直等到 20 秒兜底才提示"未收到回
+  //    执"，而单其实早就成交了。登记本身即状态变化，effect 会再跑一次对账。
+  // The set of order ids awaiting a receipt. It must be a set (the terminal ticket
+  // allows back-to-back orders; a single ref dropped the first one's receipt) and
+  // it must be state, not a ref: the watcher effect below depends on it, and a
+  // gateway account can fill before registration, in which case a ref assignment
+  // would never re-run the effect and the user would wait out the 20s fallback.
+  const [pendingIds, setPendingIds] = useState<string[]>([])
+  // 同一份数据的 ref 镜像：定时器回调要在不触发渲染的情况下判断"这笔还在等吗"，
+  // 而 setState 的更新函数里不能做 toast 这类副作用（StrictMode 会跑两次）。
+  // A ref mirror so timer callbacks can ask "is this one still pending?" without
+  // doing side effects inside a setState updater (StrictMode runs those twice).
+  const pendingRef = useRef<Set<string>>(new Set())
+  const fallbackTimers = useRef<Map<string, number>>(new Map())
+
+  const settle = useCallback((id: string) => {
+    const timer = fallbackTimers.current.get(id)
+    if (timer != null) window.clearTimeout(timer)
+    fallbackTimers.current.delete(id)
+    if (!pendingRef.current.delete(id)) return false
+    setPendingIds((prev) => prev.filter((x) => x !== id))
+    return true
+  }, [])
 
   useEffect(
     () => () => {
       if (toastTimer.current) window.clearTimeout(toastTimer.current)
-      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
+      for (const timer of fallbackTimers.current.values()) window.clearTimeout(timer)
+      fallbackTimers.current.clear()
     },
     []
   )
@@ -61,19 +88,17 @@ export function useOrderPlacement() {
 
   // 监听 live orders：等待中的订单到达终态即提示 / watch live orders for the terminal state
   useEffect(() => {
-    if (!pendingId.current) return
-    const o = orders.find((x) => x.id === pendingId.current)
-    if (!o) return
-    if (o.status === 'FILLED') {
-      pendingId.current = null
-      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
-      showToast(t('order.filled', { price: o.filledPrice ?? '-' }), 'success')
-    } else if (o.status === 'REJECTED' || o.status === 'FAILED') {
-      pendingId.current = null
-      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
-      showToast(t('order.rejected', { msg: o.message ? localizeApiError(o.message) : '-' }), 'error')
+    if (pendingIds.length === 0) return
+    for (const id of pendingIds) {
+      const o = orders.find((x) => x.id === id)
+      if (!o) continue
+      if (o.status === 'FILLED') {
+        if (settle(id)) showToast(t('order.filled', { price: o.filledPrice ?? '-' }), 'success')
+      } else if (o.status === 'REJECTED' || o.status === 'FAILED') {
+        if (settle(id)) showToast(t('order.rejected', { msg: o.message ? localizeApiError(o.message) : '-' }), 'error')
+      }
     }
-  }, [orders, showToast, t])
+  }, [orders, pendingIds, settle, showToast, t])
 
   // 下单 + 等待回执的共享核心；signalId 为 null 即手动下单（图表页）。
   // clientOrderId 由下单弹窗持有并在重试间保持不变（一个弹窗=一笔下单意图），
@@ -112,17 +137,20 @@ export function useOrderPlacement() {
         return placed
       }
       showToast(t('order.submitted'), 'info', 8000)
-      pendingId.current = placed.id
-      if (fallbackTimer.current) window.clearTimeout(fallbackTimer.current)
-      fallbackTimer.current = window.setTimeout(() => {
-        if (pendingId.current === placed.id) {
-          pendingId.current = null
-          showToast(t('order.ackTimeout'), 'info')
-        }
+      if (!pendingRef.current.has(placed.id)) {
+        pendingRef.current.add(placed.id)
+        setPendingIds((prev) => [...prev, placed.id])
+      }
+      // 每笔一个兜底定时器（以前全局只有一个，第二笔会把第一笔的兜底也顶掉）。
+      // One fallback timer per order; a single shared one cancelled the first
+      // order's fallback as soon as a second went out.
+      const timer = window.setTimeout(() => {
+        if (settle(placed.id)) showToast(t('order.ackTimeout'), 'info')
       }, RECEIPT_FALLBACK_MS)
+      fallbackTimers.current.set(placed.id, timer)
       return placed
     },
-    [refreshAll, showToast, t]
+    [refreshAll, settle, showToast, t]
   )
 
   const placeOrder = useCallback(
@@ -266,11 +294,21 @@ const HERO_EXCLUDED = new Set(['BTCUSD'])
 // symbol list (whatever the EA is actually pushing, see
 // useLive().activeSymbols, minus BTCUSD) ∪ any symbol with a current ACTIVE
 // signal (so a signal for a symbol the EA isn't configured with still shows up).
+// now 在这里只用来剔除已过期的信号，不参与任何展示，所以按 10 秒分桶。调用方传的
+// 是每秒一跳的时钟，直接进 memo 依赖就是每秒产出一个新数组、下游列表每秒重算一遍
+// ——而信号的存活时长以分钟计，晚 10 秒判过期没有任何可感知差异。
+// `now` is used only to drop expired signals, never rendered, so it's bucketed to
+// 10s. Callers pass a per-second clock, which as a raw dependency produced a new
+// array every second and re-ran the whole downstream list; signal lifespans are
+// measured in minutes, so expiring up to 10s late is imperceptible.
+const FOCUS_EXPIRY_BUCKET_MS = 10_000
+
 export function useFocusEntries(signals: Signal[], now: number, activeSymbols: string[]): FocusEntry[] {
+  const nowBucket = Math.floor(now / FOCUS_EXPIRY_BUCKET_MS) * FOCUS_EXPIRY_BUCKET_MS
   return useMemo(() => {
     const repBySymbol = new Map<string, Signal>()
     for (const s of signals) {
-      if (effectiveStatus(s, now) === 'EXPIRED') continue
+      if (effectiveStatus(s, nowBucket) === 'EXPIRED') continue
       const cur = repBySymbol.get(s.symbol)
       if (!cur || new Date(s.createdAt).getTime() > new Date(cur.createdAt).getTime()) {
         repBySymbol.set(s.symbol, s)
@@ -283,5 +321,5 @@ export function useFocusEntries(signals: Signal[], now: number, activeSymbols: s
       const state: FocusState = !signal ? 'WATCH' : signal.side === 'BUY' ? 'LONG' : 'SHORT'
       return { symbol, state, signal }
     })
-  }, [signals, now, activeSymbols])
+  }, [signals, nowBucket, activeSymbols])
 }

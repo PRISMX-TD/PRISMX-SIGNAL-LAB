@@ -18,7 +18,7 @@ import { displaySymbol, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
 import OrderConnectNotice from '../OrderConnectNotice'
 import SlideToConfirm from './SlideToConfirm'
-import { quickLots, QUICK_RISK_PCTS, formatMoney } from './orderMath'
+import { quickLots, QUICK_RISK_PCTS, formatMoney, sanitizeDecimal } from './orderMath'
 import type { OrderForm } from './useOrderForm'
 
 export type OrderConfirm = (
@@ -226,9 +226,15 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           <div className="slide-row">
             <span className="k">{t('signals.colSl')} / {t('signals.colTp')}</span>
             <div className="flex items-center gap-2">
-              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-down text-right ${form.slInvalid ? 'border-down' : 'border-down/40'}`} value={form.sl} onChange={(e) => form.setSl(e.target.value)} placeholder={slPlaceholder} />
+              {/* 经 sanitizeDecimal 再落进 state：全角数字、逗号小数点、多余的小数点
+                  都在这里被读懂并规整，而不是原样存下去等 parseFloat 悄悄读错。
+                  inputMode="decimal" 让手机弹数字键盘，与停靠面板的改单输入一致。
+                  Values go through sanitizeDecimal before hitting state so full-width
+                  digits, comma decimals and stray dots are understood rather than left
+                  for parseFloat to misread. */}
+              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-down text-right ${form.slInvalid ? 'border-down' : 'border-down/40'}`} value={form.sl} inputMode="decimal" onChange={(e) => form.setSl(sanitizeDecimal(e.target.value))} placeholder={slPlaceholder} />
               <i className="text-neutral-500">/</i>
-              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-up text-right ${form.tpInvalid ? 'border-down' : 'border-up/40'}`} value={form.tp} onChange={(e) => form.setTp(e.target.value)} placeholder={tpPlaceholder} />
+              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-up text-right ${form.tpInvalid ? 'border-down' : 'border-up/40'}`} value={form.tp} inputMode="decimal" onChange={(e) => form.setTp(sanitizeDecimal(e.target.value))} placeholder={tpPlaceholder} />
             </div>
           </div>
           {form.slTpInvalid && (

@@ -10,14 +10,21 @@ import type { DayStats } from './SymbolHeader'
 import {
   FOLLOW_LIVE_SLACK_BARS,
   HISTORY_FIRST_PAGE, HISTORY_PAGE_SIZE, HISTORY_PREFETCH_BARS, MAX_CLIENT_BARS, POLL_MS, STALE_MS,
-  SYMBOL_DECIMALS, computeDayStats, toLwPoint,
+  computeDayStats, toLwPoint,
 } from './chartConfig'
 import type { ChartEngine } from './useChartEngine'
 
-export function useChartData(symbol: string, interval: string, engine: ChartEngine) {
+// digits：价格轴小数位，由 ChartsPage 按「券商报价 digits 优先、兜底表其次」解析好
+// 后传入（以前这里自己查那张 7 条的写死表，表外品种的价格轴 minMove 被压成 0.01，
+// 外汇 K 线画出来是阶梯）。
+// digits: the price-scale precision, resolved by ChartsPage (broker-reported
+// Quote.digits first, table fallback second). This used to be looked up here from
+// a 7-entry table, which flattened FX candles into stairs.
+export function useChartData(symbol: string, interval: string, digits: number, engine: ChartEngine) {
   const {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef, recomputeIndicators,
+    drawReady,
   } = engine
 
   // 数据状态：加载中 / 有数据 / 空（该品种周期暂无数据）/延迟
@@ -34,6 +41,24 @@ export function useChartData(symbol: string, interval: string, engine: ChartEngi
   // (first open as the reference), no new backend. Cleared on symbol change,
   // updated once history/poll data lands.
   const [dayStats, setDayStats] = useState<DayStats | null>(null)
+
+  // 价格轴小数位单独一个 effect：不设的话库默认 2 位，外汇对（如 EURUSD）会把
+  // 1.08543 截断成 1.09 这种不可用的精度。刻意**不**放进下面那个大 effect——
+  // digits 会在首笔报价到达时从兜底值变成券商真值，混在一起会让整段历史被重拉。
+  // Price-scale precision in its own effect: without it the library defaults to
+  // 2 digits and truncates FX pairs to an unusable 1.09. Deliberately kept out of
+  // the big effect below: digits flips from the fallback to the broker's real
+  // value when the first quote lands, which would otherwise refetch all history.
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!series) return
+    series.applyOptions({
+      priceFormat: { type: 'price', precision: digits, minMove: Math.pow(10, -digits) },
+    })
+    // drawReady 进依赖：series 是在引擎建图那一拍才出现的，它翻 true 就是"图表
+    // 已就绪"的信号。/ drawReady is a dependency because the series only exists
+    // once the engine has built the chart.
+  }, [digits, drawReady, seriesRef])
 
   // 切品种/周期：拉历史快照 + 起轮询最新价 / on symbol or interval change: fetch history + poll latest
   useEffect(() => {
@@ -71,29 +96,38 @@ export function useChartData(symbol: string, interval: string, engine: ChartEngi
     }
 
     // 把一根 bar 合并进 candlesRef：相同时间戳覆盖（形成中的 bar），新时间戳
-    // 追加并按 MAX_CLIENT_BARS 截断——语义上镜像后端 chart_store.merge_bars。
+    // 追加并按 MAX_CLIENT_BARS 截断；乱序到达的（比当前最后一根更早、且不等于
+    // 它）按时间插回原位，而不是像以前那样直接丢掉——后端聚合延迟或切周期时
+    // 残留的上一次响应都会造成乱序，丢掉会让指标窗口与真实行情错位。
+    // 注意：图表 series 那边（applyBar）仍然只能追加，lightweight-charts 的
+    // update() 对更早的时间会抛错；乱序 bar 只补进 candlesRef 供指标重算。
     // Merge one bar into candlesRef: same timestamp overwrites (bar still
-    // forming), newer timestamp appends and gets trimmed to
-    // MAX_CLIENT_BARS — mirrors the backend's chart_store.merge_bars semantics.
+    // forming), newer appends and trims to MAX_CLIENT_BARS, and an out-of-order
+    // bar is now inserted at its time position instead of being dropped (backend
+    // aggregation lag or a leftover response from the previous interval both
+    // produce these, and dropping them skews the indicator windows). The chart
+    // series itself (applyBar) still only appends — update() throws on older
+    // times — so an out-of-order bar only reaches the indicator input.
     const mergeCandle = (b: Candle) => {
       const arr = candlesRef.current
       const lastT = arr.length ? arr[arr.length - 1].t : -Infinity
-      if (b.t < lastT) return
-      if (b.t === lastT) arr[arr.length - 1] = b
-      else {
+      if (b.t > lastT) {
         arr.push(b)
         if (arr.length > MAX_CLIENT_BARS) arr.shift()
+        return
       }
+      if (b.t === lastT) {
+        arr[arr.length - 1] = b
+        return
+      }
+      // 乱序：从尾部往前找落点（乱序一般只差一两根，线性回扫比二分更划算）。
+      // Out of order: scan back from the tail (usually only a bar or two behind).
+      for (let i = arr.length - 2; i >= 0; i--) {
+        if (arr[i].t === b.t) { arr[i] = b; return }
+        if (arr[i].t < b.t) { arr.splice(i + 1, 0, b); return }
+      }
+      arr.unshift(b)
     }
-
-    // 按品种设置价格轴小数位数，否则默认按 2 位显示，外汇对（如 EURUSD）
-    // 会把 1.08543 截断成 1.09 这种不可用的精度。
-    // Set the price-scale precision per symbol; otherwise it defaults to 2
-    // digits, truncating FX pairs (e.g. EURUSD) to an unusable 1.08543 -> 1.09.
-    const decimals = SYMBOL_DECIMALS[symbol] ?? 2
-    series.applyOptions({
-      priceFormat: { type: 'price', precision: decimals, minMove: Math.pow(10, -decimals) },
-    })
 
     chartApi.history(symbol, interval, HISTORY_FIRST_PAGE).then((r) => {
       if (!alive) return
@@ -137,17 +171,31 @@ export function useChartData(symbol: string, interval: string, engine: ChartEngi
         hasMoreHistoryRef.current = r.hasMore
         if (r.bars.length === 0) return
         const range = chartRef.current?.timeScale().getVisibleLogicalRange()
-        const merged = [...r.bars, ...candlesRef.current].slice(-MAX_CLIENT_BARS)
+        // 前置分页要保留**最早**的 MAX_CLIENT_BARS 根，不是最后那些。
+        // 原来写的是 slice(-MAX)：缓存已经满 20000 根时，新取回来的一页会被整段
+        // 切掉（merged 与原数组相同），可下面仍按 r.bars.length 平移视窗，图表就
+        // 凭空右跳 500 根「自己弹回去」；而且 hasMore 还是 true，下一次拖动继续
+        // 请求同一页，流量白烧。按实际插入量平移，才与真实结果一致。
+        // Keep the *earliest* MAX_CLIENT_BARS when prepending, not the last ones:
+        // slice(-MAX) dropped the entire freshly fetched page once the cache was
+        // full, yet the viewport was still shifted by r.bars.length, so the chart
+        // jumped 500 bars right ("it snapped back") and re-requested the same page
+        // on every further drag. Shift by what was actually inserted.
+        const merged = [...r.bars, ...candlesRef.current].slice(0, MAX_CLIENT_BARS)
+        const inserted = merged.length - candlesRef.current.length
         candlesRef.current = merged
         barTimesRef.current = merged.map((b) => b.t)
         series.setData(merged.map(toLwPoint))
         recomputeIndicators()
-        // 往左插了 r.bars.length 根，原来的逻辑下标整体右移同样的量。
-        // Inserting r.bars.length bars on the left shifts every logical index right.
-        if (range) {
+        // 一根都没插进去 = 客户端缓存已满，再往左拉也放不下，停止预取。
+        // Nothing fitted: the client cache is full, so stop prefetching.
+        if (inserted <= 0) hasMoreHistoryRef.current = false
+        // 往左插了 inserted 根，原来的逻辑下标整体右移同样的量。
+        // Inserting `inserted` bars on the left shifts every logical index right.
+        if (range && inserted > 0) {
           chartRef.current?.timeScale().setVisibleLogicalRange({
-            from: range.from + r.bars.length,
-            to: range.to + r.bars.length,
+            from: range.from + inserted,
+            to: range.to + inserted,
           })
         }
       }).catch(() => {
@@ -236,7 +284,18 @@ export function useChartData(symbol: string, interval: string, engine: ChartEngi
       window.removeEventListener('focus', onVisible)
       chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
     }
-  }, [symbol, interval, recomputeIndicators])
+    // drawReady 必须在依赖里：本 effect 第一行就要 seriesRef.current，而 series 是
+    // useChartEngine 的建图 effect 造出来的。现在能跑通只是因为两个 Hook 在同一个
+    // 组件里、建图那个先注册先执行；一旦有人调换 useChartData / useChartEngine 的
+    // 调用顺序，或图表因容器尚未挂载而延后创建，这里就会静默 return，页面永久空白
+    // 且没有任何报错路径。drawReady 翻 true 时重跑一次，才是显式的就绪信号。
+    // drawReady must be a dependency: this effect needs seriesRef.current on its
+    // first line, and the series is created by useChartEngine's effect. It only
+    // works today because that hook is registered first in the same component —
+    // swap the call order (or delay chart creation until the container mounts)
+    // and this silently returns, leaving a permanently blank page with no error
+    // path. Re-running when drawReady flips is the explicit readiness signal.
+  }, [symbol, interval, drawReady, recomputeIndicators])
 
   return { hasData, stale, lastPrice, dayStats }
 }

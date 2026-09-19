@@ -28,8 +28,9 @@ import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
-import { baseSymbol, displaySymbol, fmtLots, localizeApiError } from '../api/utils'
-import type { ClosedTrade, Order, OrderStatus } from '../api/types'
+import { baseSymbol, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
+import type { ClosedTrade, Order, OrderStatus, Position } from '../api/types'
+import ConfirmModal from '../components/ConfirmModal'
 import PositionCard from '../components/PositionCard'
 import PerformanceSummary from '../components/PerformanceSummary'
 import ClosedTradesList from '../components/ClosedTradesList'
@@ -59,8 +60,20 @@ const TABS: OrdersTab[] = ['positions', 'performance', 'activity']
 // 时间全部按 UTC+8 显示，与 fmtTime 同一时区；没带时区的 ISO 串按 UTC 解。
 // All times render in UTC+8 like fmtTime; a zone-less ISO string is read as UTC.
 const TZ = 'Asia/Shanghai'
+// 解析统一走 api/utils 的 parseTime，不再在这里维护第五份同样的正则。
+//
+// 这条正则曾经在四个文件里各抄一份，其中 AccountPage 那份漏了两个反斜杠
+// （`[+-]d{2}` 而不是 `[+-]\d{2}`），成了只在特定输入下才发作的哑弹。同一条规则
+// 散落多处、然后其中一处跟丢，是这次审计里出现频率最高的一类问题——所以这里不是
+// 「把正则修对」，而是让它只剩一份。
+//
+// Parsing goes through api/utils.parseTime rather than a fifth copy of the same
+// regex. That regex lived in four files, and AccountPage's copy was missing two
+// backslashes — a latent bug that only fires on particular input. One rule copied
+// to several places with one copy drifting was the single most common finding in
+// this audit, so the fix is to leave exactly one copy, not to correct the others.
 function parseIso(iso: string): Date {
-  return new Date(/[zZ]|[+-]\d{2}:?\d{2}$/.test(iso) ? iso : iso + 'Z')
+  return parseTime(iso) ?? new Date(NaN)
 }
 function clockOf(iso: string): string {
   return parseIso(iso).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -75,6 +88,15 @@ function priceParts(n: number): { int: string; frac: string | null } {
   const i = s.indexOf('.')
   return i < 0 ? { int: s, frac: null } : { int: s.slice(0, i), frac: s.slice(i + 1) }
 }
+// 仓位卡的 key：优先 ticket；缺 ticket（极少，旧记录）时用内容拼一个，绝不落到
+// 数组下标上——PositionCard 内部持有编辑态（平仓手数 / 止损 / 止盈 / 当前模式），
+// key 一旦是下标，持仓推送重排就会把 A 仓位的编辑态显示到 B 仓位的卡上。
+// Position card key: ticket first, then a content-derived key, never the array
+// index — PositionCard holds edit state (close volume, SL, TP, mode), and an
+// index key would move A's half-typed form onto B's card when the feed reorders.
+const positionKey = (p: Position, i: number): string =>
+  p.ticket != null ? `t${p.ticket}` : `${p.login ?? ''}-${p.symbol}-${p.side}-${p.entryPrice ?? ''}-${i}`
+
 const money2 = (n: number | null | undefined): string =>
   n == null ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -93,6 +115,11 @@ export default function OrdersPage() {
 
   const [statusF, setStatusF] = useState<StatusFilter>('ALL')
   const [symbolF, setSymbolF] = useState('')
+  // 切进日期区间时把状态 / 品种筛选清回默认：那两个在服务端分页下只作用于当前页，
+  // 留着值会让页面与分页器互相矛盾（见筛选条上的说明）。
+  // Reset the status/symbol filters when switching into a date range: they only
+  // apply to the current server page there, which contradicts the pager.
+  const clearRowFilters = () => { setStatusF('ALL'); setSymbolF('') }
 
   // 全页只有一个账号选择器：页头选中的账号同时决定账户横条、持仓、胜率卡、
   // 纪律分、已平仓明细和操作记录。以前账户卡和绩效区各有一套，点了上面那套
@@ -376,6 +403,12 @@ export default function OrdersPage() {
     for (const o of visibleOrders) seenStatus.current.set(o.id, o.status)
   })
 
+  // 撤单同样是不可逆动作，却是全站唯一没有二次确认的那个（全平有 ConfirmModal、
+  // 拖动改止损有确认框、图表页的部分平仓与撤单 2026-09-19 也补齐了）。
+  // Cancelling is irreversible too and was the last such action with no confirm
+  // step (full close, drag-to-modify and the charts dock all ask first).
+  const [confirmCancel, setConfirmCancel] = useState<Order | null>(null)
+
   const doCancel = async (id: string) => {
     setCancellingId(id)
     try {
@@ -439,7 +472,7 @@ export default function OrdersPage() {
           {o.status === 'PENDING' && (
             <button
               type="button"
-              onClick={() => doCancel(o.id)}
+              onClick={() => setConfirmCancel(o)}
               disabled={cancellingId === o.id}
               className="btn rounded-pill border border-down/40 bg-down/10 text-down hover:bg-down/20"
             >
@@ -643,13 +676,13 @@ export default function OrdersPage() {
           ) : isPhone ? (
             <div className="pos-mlist">
               {visiblePositions.map((p, i) => (
-                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} mobile />
+                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} mobile />
               ))}
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {visiblePositions.map((p, i) => (
-                <PositionCard key={p.ticket ?? i} position={p} onActionDone={showToast} />
+                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} />
               ))}
             </div>
           )}
@@ -698,7 +731,18 @@ export default function OrdersPage() {
                   role="tab"
                   aria-selected={statusF === s}
                   onClick={() => setStatusF(s)}
-                  className={`ord-chip ${statusF === s ? 'on' : ''}`}
+                  // 日期筛选下后端只回当前这一页（orderApi.list 不接受 status /
+                  // symbol 参数），再在这 10 条上本地过滤就会出现「页面上只剩 2 行、
+                  // 分页器却写着共 137 条 / 14 页，翻下一页又是随机几行」，用户会以
+                  // 为数据丢了。两个筛选因此在日期区间下禁用（切进去时一并清空），
+                  // 而不是留着给出一个自相矛盾的画面。
+                  // Under a date filter the backend returns one page only
+                  // (orderApi.list takes no status/symbol), so filtering those 10
+                  // rows locally left 2 rows under a pager claiming "137 items /
+                  // 14 pages". Both filters are therefore disabled (and cleared)
+                  // while a date range is set, rather than contradicting the pager.
+                  disabled={dateFilterActive}
+                  className={`ord-chip ${statusF === s ? 'on' : ''} ${dateFilterActive ? 'opacity-40' : ''}`}
                 >
                   {s === 'ALL' ? t('signals.all') : t(`orders.status.${s}`)}
                   {statusCounts && statusCounts[s] != null && <b>{statusCounts[s]}</b>}
@@ -706,12 +750,15 @@ export default function OrdersPage() {
               ))}
             </div>
             <div className="ord-tb-r">
+              {/* 同上：日期区间下这个框也禁用，见状态芯片处的说明。
+                  Disabled under a date range as well; see the status chips. */}
               <input
                 value={symbolF}
                 onChange={(e) => setSymbolF(e.target.value)}
                 placeholder={t('orders.symbolPlaceholder')}
                 aria-label={t('orders.filterSymbol')}
-                className="input ord-in-sym w-36"
+                disabled={dateFilterActive}
+                className={`input ord-in-sym w-36 ${dateFilterActive ? 'opacity-40' : ''}`}
               />
               <div className="ord-tb-dates">
                 <input
@@ -719,7 +766,7 @@ export default function OrdersPage() {
                   value={sinceF}
                   max={untilF || undefined}
                   aria-label={t('orders.filterFrom')}
-                  onChange={(e) => { setSinceF(e.target.value); setPage(0) }}
+                  onChange={(e) => { setSinceF(e.target.value); clearRowFilters(); setPage(0) }}
                   className="input"
                 />
                 <span className="ord-tb-sep">–</span>
@@ -728,7 +775,7 @@ export default function OrdersPage() {
                   value={untilF}
                   min={sinceF || undefined}
                   aria-label={t('orders.filterTo')}
-                  onChange={(e) => { setUntilF(e.target.value); setPage(0) }}
+                  onChange={(e) => { setUntilF(e.target.value); clearRowFilters(); setPage(0) }}
                   className="input"
                 />
               </div>
@@ -785,6 +832,25 @@ export default function OrdersPage() {
             />
           )}
         </>
+      )}
+
+      {confirmCancel && (
+        <ConfirmModal
+          title={t('common.cancel')}
+          // 把要撤的那一单原样复述一遍（品种 · 方向 手数 · 单号），不另造文案。
+          // Restate what's about to be cancelled; no new copy invented.
+          message={`${displaySymbol(confirmCancel.symbol)} · ${confirmCancel.side === 'BUY' ? t('common.buy') : t('common.sell')} ${fmtLots(confirmCancel.volume)}${confirmCancel.mt5Ticket ? ` · #${confirmCancel.mt5Ticket}` : ''}`}
+          confirmLabel={t('common.cancel')}
+          cancelLabel={t('common.close')}
+          danger
+          busy={cancellingId === confirmCancel.id}
+          onConfirm={() => {
+            const o = confirmCancel
+            setConfirmCancel(null)
+            void doCancel(o.id)
+          }}
+          onCancel={() => setConfirmCancel(null)}
+        />
       )}
 
       {toast && (

@@ -16,6 +16,7 @@ import type {
 import { usePrefs } from '../../store/prefs'
 import ConfirmModal from '../ConfirmModal'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { isChartAlive } from './chartLifecycle'
 
 export type Tool = 'cursor' | 'cross' | 'trend' | 'hline' | 'vline' | 'ray' | 'crossline' | 'rect' | 'fib'
 type DrawType = 'trend' | 'hline' | 'vline' | 'ray' | 'crossline' | 'rect' | 'fib'
@@ -445,9 +446,17 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
   const { getPref, setPref } = usePrefs()
 
   // 把 bar 时间访问器按本图表登记，供 primitive 渲染与坐标外推读取（见文件顶部
-  // timeToX/xToTime）。/ Register the bar-times accessor for this chart, read by
-  // the primitive renderer and coordinate extrapolation (timeToX/xToTime above).
-  barTimesByChart.set(chart, barTimes)
+  // timeToX/xToTime）。必须在 effect 里写，不能写在渲染函数体里：那是渲染期副作用，
+  // Strict Mode 双渲染 / 并发渲染下语义不确定，而这行是画线坐标外推的唯一数据来源，
+  // 出问题的表现就是"画线位置错乱"。
+  // Register the bar-times accessor for this chart (read by the primitive renderer
+  // and by timeToX/xToTime). It lives in an effect rather than the render body:
+  // writing to a module-level map during render is a render-phase side effect with
+  // undefined semantics under StrictMode double-rendering and concurrent
+  // rendering — and this line is the only source for drawing coordinates.
+  useEffect(() => {
+    barTimesByChart.set(chart, barTimes)
+  }, [chart, barTimes])
 
   const tol = isTouchDevice ? TOL_MOBILE : TOL_DESKTOP
   const handleSz = isTouchDevice ? HANDLE_MOBILE : HANDLE_DESKTOP
@@ -643,6 +652,24 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
     syncPrims(arr)
   }, [symbol, getPref, series, syncPrims])
 
+  // 卸载时把所有 primitive 从 series 上摘掉。切品种那条路径早就 detach 了，唯独
+  // 卸载没有——现在不暴雷只是因为父组件紧接着就 chart.remove() 把整张图连锅端了，
+  // 两个同类层（PositionOverlay 有完整的 attach/detach + isChartAlive 守卫）生命
+  // 周期处理不对称，后面谁改动谁踩。isChartAlive 的理由见 chartLifecycle.ts：
+  // chart 已销毁时 detach 只会排出一帧在 disposed 对象上的重绘。
+  // Detach every primitive on unmount. The symbol-switch path already did this;
+  // unmount didn't, and only gets away with it because the parent's cleanup runs
+  // chart.remove() right after. PositionOverlay has the symmetric attach/detach
+  // with an isChartAlive guard (see chartLifecycle.ts: detaching from a disposed
+  // chart only schedules a repaint on a dead object).
+  useEffect(() => () => {
+    if (!isChartAlive(chart)) { primsRef.current.clear(); return }
+    for (const [, prim] of primsRef.current) {
+      try { series.detachPrimitive(prim as never) } catch { /* 已 detach / already detached */ }
+    }
+    primsRef.current.clear()
+  }, [chart, series])
+
   // ──── 移除临时 primitive / remove temp primitive ────
   const removeTempPrim = useCallback(() => {
     if (tempPrimRef.current) {
@@ -686,7 +713,13 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
     }
     if (d.type === 'rect') {
       const a = toPx(d.pts[0]), b = toPx(d.pts[1])
-      if (!a.x || !a.y || !b.x || !b.y) return -1
+      // 必须判 null 而不是 falsy：坐标 0 是完全合法的（贴着左边缘 / 贴着顶边的
+      // 手柄），用 !a.x 会把它当成"拿不到坐标"，那个角的手柄就抓不住。本文件其它
+      // 命中判定处都用的是 == null，只有这里漏了。
+      // Null checks, not falsy ones: 0 is a legal coordinate (a handle flush with
+      // the left or top edge), and `!a.x` would read it as "no coordinate",
+      // making that corner ungrabbable. Every other hit test here uses == null.
+      if (a.x == null || a.y == null || b.x == null || b.y == null) return -1
       const x1 = Math.min(a.x, b.x), y1 = Math.min(a.y, b.y), x2 = Math.max(a.x, b.x), y2 = Math.max(a.y, b.y)
       const corners = [{ x: x1, y: y1 }, { x: x2, y: y1 }, { x: x1, y: y2 }, { x: x2, y: y2 }]
       for (let i = 0; i < 4; i++) { if (check(corners[i].x, corners[i].y)) return i }
@@ -763,6 +796,16 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
   const onDown = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     let { x, y } = localXY(e)
     const cur = toolRef.current
+    // 抓住指针：交互层只有 inset-1.5 那么大，不捕获的话指针一拖出这个矩形，
+    // pointerup 就落不到它身上，dragRef 永远非空 → 上面那段 onHover 会把
+    // pointerEvents 永久钉在 auto，图表的拖动平移与滚轮缩放全部失效，只能按 Esc
+    // 解套。SlideToConfirm 与 PositionOverlay 都做了捕获，这里漏了。
+    // Capture the pointer: the layer is only inset-1.5, so without capture a drag
+    // that leaves the rect never delivers pointerup, dragRef stays non-null and
+    // the hover handler pins pointerEvents to 'auto' forever — the chart's own
+    // pan/zoom die until the user presses Esc. Both SlideToConfirm and
+    // PositionOverlay already capture; this one didn't.
+    e.currentTarget.setPointerCapture?.(e.pointerId)
 
     // drawing tool active
     if (cur !== 'cursor' && cur !== 'cross') {
@@ -896,9 +939,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
     }
   }, [chart, series, syncPrims])
 
-  const onUp = useCallback(() => {
+  const onUp = useCallback((e?: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     dragRef.current = null
+    if (e && e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
 
     if (!drag) {
       removeTempPrim()
@@ -939,11 +985,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
       // primitive state and commit it.
       const prim = primsRef.current.get(drag.id)
       if (prim) {
-        const next = drawingsRef.current.map((d) => d.id === drag.id ? {
-          ...d,
-          pts: prim.pts.map((p) => ({ t: p.t, p: p.p })),
-        } : d)
-        commit(next)
+        const pts = prim.pts.map((p) => ({ t: p.t, p: p.p }))
+        // 没真的动过就不压撤销记录：点一下选中也会走到这里，连点几下就把上限 30
+        // 的撤销栈塞满无操作记录，真正的上一步被挤出去，Ctrl+Z 撤不回东西。
+        // Don't push an undo entry when nothing moved: a plain click to select
+        // lands here too, and a few clicks would fill the 30-deep undo stack with
+        // no-ops, evicting the step the user actually wants back.
+        const same = pts.length === drag.origPts.length
+          && pts.every((p, i) => p.t === drag.origPts[i].t && p.p === drag.origPts[i].p)
+        if (!same) {
+          const next = drawingsRef.current.map((d) => d.id === drag.id ? { ...d, pts } : d)
+          commit(next)
+        }
       }
     }
   }, [chart, series, commit, removeTempPrim])
@@ -981,16 +1034,26 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
 
   // ──── 键盘 / keyboard ────
   useEffect(() => {
+    // 焦点在输入框里时，这些快捷键一概不接管——用户在下单票的手数 / 止损框里按
+    // Ctrl+Z 想撤销刚打的字，撤销的却是图表上的画线。Delete 分支本来就排除了输入
+    // 框，Ctrl+Z 漏了。/ Never hijack these while a text field has focus: Ctrl+Z in
+    // the ticket's volume or SL field used to undo a drawing instead of the typing.
+    // The Delete branch already excluded inputs; Ctrl+Z didn't.
+    const inTextField = (target: EventTarget | null): boolean => {
+      const el = target as HTMLElement | null
+      if (!el) return false
+      return !!el.closest?.('input,textarea,select,[contenteditable="true"]')
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (dragRef.current) { dragRef.current = null; removeTempPrim() }
         setTool('cursor'); setSelectedId(null); setCtxMenu(null); setPropsPanel(null)
       } else if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {
+        if (inTextField(e.target)) return
         e.preventDefault()
         if (e.shiftKey) redo(); else undo()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current) {
-        const el = e.target as HTMLElement | null
-        if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return
+        if (inTextField(e.target)) return
         commit(drawingsRef.current.filter((d) => d.id !== selectedRef.current))
         setSelectedId(null); setPropsPanel(null)
       } else if (!(e.target as HTMLElement)?.closest?.('input,textarea,select') && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -1018,13 +1081,24 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
   const [cursorStyle, setCursorStyle] = useState<string>('')
   useEffect(() => {
     const el = overlayRef.current; if (!el) return
-    const onHover = (e: PointerEvent) => {
+    // 命中判定按帧合并：这是常驻的捕获期全局监听，鼠标一动就要遍历全部画线做命中
+    // 判定并 setState。高刷屏 / 高回报率鼠标一帧能来好几个 pointermove，逐个算纯属
+    // 浪费——同一帧里只有最后一次的结果会被画出来。
+    // Coalesce hit-testing per frame: an always-on capture-phase listener that
+    // walks every drawing and calls setState. Several pointermove events can
+    // arrive within one frame and only the last one can possibly be painted.
+    let frame = 0
+    let last: { x: number; y: number } | null = null
+    const evaluate = () => {
+      frame = 0
+      const p = last
+      if (!p) return
       if (dragRef.current) { el.style.pointerEvents = 'auto'; return }
       if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') {
         el.style.pointerEvents = 'auto'; setCursorStyle('crosshair'); return
       }
       const r = el.getBoundingClientRect()
-      const x = e.clientX - r.left, y = e.clientY - r.top
+      const x = p.x - r.left, y = p.y - r.top
       if (x < 0 || y < 0 || x > r.width || y > r.height) { el.style.pointerEvents = 'none'; setCursorStyle(''); return }
       const h = hitDrawing(x, y, true)
       if (h) {
@@ -1040,8 +1114,22 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
         setCursorStyle(toolRef.current === 'cross' ? 'crosshair' : '')
       }
     }
+    const onHover = (e: PointerEvent) => {
+      last = { x: e.clientX, y: e.clientY }
+      // 拖拽中 / 画图工具激活时必须立刻接管指针，不能等到下一帧才切 auto。
+      // Mid-drag or with a tool active, the layer must claim the pointer at once.
+      if (dragRef.current || (toolRef.current !== 'cursor' && toolRef.current !== 'cross')) {
+        el.style.pointerEvents = 'auto'
+        if (!dragRef.current) setCursorStyle('crosshair')
+        return
+      }
+      if (frame === 0) frame = window.requestAnimationFrame(evaluate)
+    }
     window.addEventListener('pointermove', onHover, true)
-    return () => window.removeEventListener('pointermove', onHover, true)
+    return () => {
+      window.removeEventListener('pointermove', onHover, true)
+      if (frame !== 0) window.cancelAnimationFrame(frame)
+    }
   }, [hitDrawing, hitHandle])
 
   // 切换工具时立即同步一次,不用等下一次 pointermove 才生效(比如从画图工具

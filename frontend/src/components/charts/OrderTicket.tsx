@@ -15,7 +15,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
 import type { MT5Account, Order, Quote } from '../../api/types'
-import { localizeApiError } from '../../api/utils'
+import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
 
@@ -149,6 +149,10 @@ export default function OrderTicket({
   const tpPts = entry != null && form.tpNum != null && !form.tpInvalid ? Math.round(Math.abs(form.tpNum - entry) * pt) : null
   const rMult = slPts && tpPts ? tpPts / slPts : null
   const sideLabel = isBuy ? t('charts.ticket.buy') : t('charts.ticket.sell')
+  // 手数按该品种的步长位数显示：原油步长 0.1，写死两位会显示成 "0.10"。
+  // Lot digits follow the symbol's step: WTI steps by 0.1, so a hard-coded 2
+  // decimals renders "0.10".
+  const lotD = lotDecimals(symbol)
 
   return (
     <div className={`term-tk no-sb ${className}`}>
@@ -200,7 +204,7 @@ export default function OrderTicket({
       {form.sizeMode === 'quick' ? (
         <div className="term-pre">
           {quickLots(symbol).map((q) => (
-            <button key={q} type="button" onClick={() => form.setVolume(q.toFixed(2))}>{q.toFixed(2)}</button>
+            <button key={q} type="button" onClick={() => form.setVolume(q.toFixed(lotD))}>{q.toFixed(lotD)}</button>
           ))}
         </div>
       ) : (
@@ -211,6 +215,15 @@ export default function OrderTicket({
         </div>
       )}
       {form.riskNeedsSl && <p className="term-warn">{t('charts.ticket.riskNeedsSl')}</p>}
+      {/* riskUnsupported 必须和 riskNeedsSl 一起渲染（下单弹窗 OrderSheet 早就两条
+          都给）：拿不到美元基准的交叉盘上切「按风险%」，手数既不会被重算也不会报
+          错，用户以为按 1% 风险下单，实际用的是上一次的手数。三个入口共用同一个
+          hook 的好处不该被 UI 层的漏渲染抵消。
+          riskUnsupported must render alongside riskNeedsSl (the order modal has
+          shown both all along): on a cross with no USD basis, switching to risk-%
+          sizing neither resizes nor warns, so the user believes they sized by 1%
+          risk while the previous lot size is what actually goes out. */}
+      {form.riskUnsupported && <p className="term-warn">{t('order.riskUnsupportedPair')}</p>}
 
       {/* 止损 / 止盈，下面直接给点数与 R / SL & TP with points and R underneath */}
       <div className="term-two">
@@ -248,7 +261,7 @@ export default function OrderTicket({
           </>
         ) : (
           <>
-            {t('charts.ticket.place', { side: sideLabel, volume: (form.parsedVolume ?? 0).toFixed(2) })}
+            {t('charts.ticket.place', { side: sideLabel, volume: (form.parsedVolume ?? 0).toFixed(lotD) })}
             {entry != null && <span className="px">@ {entry.toFixed(digits)}</span>}
           </>
         )}

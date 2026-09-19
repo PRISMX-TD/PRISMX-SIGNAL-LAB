@@ -68,6 +68,15 @@ export function useChartFullscreen(containerRef: RefObject<HTMLDivElement>) {
 
   useBackToClose(isFullscreen, exitFullscreen)
 
+  // 卸载兜底：`chart-fullscreen` 是挂在 <body> 上的全局类，只在 exitFullscreen 里
+  // 摘。全屏状态下若组件被直接卸载（路由跳转、不经返回手势），这个类会留在 body
+  // 上继续影响全站布局，而用户已经不在图表页了，没有任何入口能把它摘掉。
+  // Unmount safety net: `chart-fullscreen` is a global <body> class removed only
+  // by exitFullscreen. Unmounting while fullscreen (e.g. a route change that
+  // doesn't go through the back gesture) would leave it stuck on the body,
+  // affecting the whole app with no way left to clear it.
+  useEffect(() => () => { document.body.classList.remove('chart-fullscreen') }, [])
+
   // 用户通过系统手势/返回键退出原生全屏时，同步 CSS 全屏状态
   useEffect(() => {
     const onFsChange = () => {

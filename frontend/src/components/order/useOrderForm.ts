@@ -17,12 +17,13 @@
 // online for the docked ticket) — that difference is intentional.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MT5Account, Quote } from '../../api/types'
-import { brokerSymbol, limitLotInput, snapLot, clientOrderId } from '../../api/utils'
+import { brokerSymbol, limitLotInput, clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
 import { useLastVolume } from '../../utils/useLastVolume'
 import {
   canSizeByRisk,
   checkSlTp,
+  clampLots,
   defaultVolume,
   estimateMargin,
   normalizeVolume,
@@ -157,14 +158,26 @@ export function useOrderForm({
   const typeVolume = (raw: string) => { touchedRef.current = true; setVolumeState(limitLotInput(raw, symbol)) }
   const blurVolume = () => setVolume(normalizeVolume(volume, symbol))
   const stepLot = (dir: 1 | -1) => setVolume(stepVolume(volume, dir, symbol))
-  // 提交用的手数必须落在该品种的步长上。输入时已按位数截断、失焦还会吸附，但手机上
-  // 滑动确认可能不先失焦，所以这里再吸附一次兜底——按钮上显示的也是这个值，用户在
-  // 滑之前就能看到最终手数，不会被"悄悄改了"。
-  // The submitted volume must sit on the symbol's step. Typing is truncated and blur
-  // snaps, but the mobile slider can fire without a blur, so snap here too. The button
-  // label reads this value, so the user sees the final lots before confirming.
+  // 提交用的手数必须落在该品种的步长上**且不超过上限**。输入时已按位数截断、失焦还会
+  // 吸附，但手机上滑动确认可能不先失焦，所以这里再收敛一次兜底——按钮上显示的也是这个
+  // 值，用户在滑之前就能看到最终手数，不会被"悄悄改了"。
+  //
+  // 这里用 `clampLots` 而不是 `snapLot`：两者都会把手数向下吸附到步长，但只有
+  // `clampLots` 带上限（VOLUME_MAX，10 手）。`snapLot` 没有上限，于是"在手机上输入
+  // 50 手、直接滑动确认、全程不失焦"这条路径会把 50 手原样提交——失焦那条路径明明
+  // 夹到 10。上限是风控闸，不能取决于用户有没有点一下别处。
+  //
+  // The submitted volume must sit on the symbol's step *and* respect the cap.
+  // Typing truncates and blur snaps, but the mobile slider can fire without a blur,
+  // so converge once more here; the button label reads this value, so the user sees
+  // the final lots before confirming.
+  //
+  // `clampLots`, not `snapLot`: both floor onto the step, but only clampLots applies
+  // the VOLUME_MAX ceiling. With snapLot, "type 50 lots on a phone and slide to
+  // confirm without ever blurring" submitted 50 — while the blur path capped it at
+  // 10. A risk limit must not depend on whether the user happened to tap elsewhere.
   const parsedVolumeRaw = parseFloat(volume)
-  const parsedVolume = parsedVolumeRaw > 0 ? snapLot(parsedVolumeRaw, symbol) : null
+  const parsedVolume = parsedVolumeRaw > 0 ? clampLots(parsedVolumeRaw, symbol) : null
 
   // 偏好从云端晚到（本地缓存为空的新设备 / 新浏览器）：用户还没碰过手数时补应用记忆值。
   // Prefs arriving late from the cloud (fresh device, empty local cache): apply

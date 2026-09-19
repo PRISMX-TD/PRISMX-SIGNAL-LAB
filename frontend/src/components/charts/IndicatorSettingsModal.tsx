@@ -21,7 +21,8 @@ import {
   type IndicatorSettings, type LineDash, type LineWidth, type LinesConfig, type PaneSize,
 } from './indicatorSettings'
 import {
-  GROUPS, INDICATOR_FORM, INDICATOR_IDS, INDICATOR_META, TEMPLATES, computeIndicator, refLines, seriesSpecs, summaryOf,
+  GROUPS, INDICATOR_FORM, INDICATOR_IDS, INDICATOR_META, TEMPLATES, computeIndicator, enforceParamOrder,
+  refLines, seriesSpecs, summaryOf,
   type IndicatorId,
 } from './indicatorCatalog'
 import { useBackToClose } from '../../utils/useBackToClose'
@@ -148,7 +149,17 @@ function LineList<T extends LinesConfig>({ cfg, onChange }: { cfg: T; onChange: 
 function Preview({ id, settings, getCandles }: { id: IndicatorId; settings: IndicatorSettings; getCandles: () => Candle[] }) {
   const { t } = useTranslation()
   const ref = useRef<HTMLCanvasElement>(null)
-  const bars = useMemo(() => getCandles().slice(-PREVIEW_BARS), [getCandles])
+  // 只在本组件挂载时取一次 K 线快照。getCandles 由 ChartsPage 以内联箭头函数传入，
+  // 每次渲染都是新引用，挂在依赖里等于 memo 从不命中：每次渲染都重切 120 根并把
+  // 指标全算一遍。预览本来就是"打开面板那一刻的行情"，不需要跟着轮询走。
+  // Snapshot the candles once on mount. getCandles arrives as an inline arrow from
+  // ChartsPage, so it's a new reference every render and listing it as a
+  // dependency meant the memo never hit — re-slicing 120 bars and recomputing the
+  // indicator on every render. The preview is meant to be the market as of when
+  // the panel opened anyway, not a live view.
+  const candlesRef = useRef(getCandles)
+  candlesRef.current = getCandles
+  const bars = useMemo(() => candlesRef.current().slice(-PREVIEW_BARS), [])
   const specs = seriesSpecs(id, settings)
 
   useEffect(() => {
@@ -288,7 +299,13 @@ export default function IndicatorSettingsModal({ indicators, onToggle, onSetIndi
   const meta = INDICATOR_META[sel]
   const form = INDICATOR_FORM[sel]
   const cfg = settings[sel] as Record<string, unknown>
-  const set = (patch: Record<string, unknown>) => onChange({ ...settings, [sel]: { ...cfg, ...patch } })
+  // 每次改参数都过一遍相对约束（MACD fast < slow、RSI 超卖 < 超买）：单字段区间
+  // 拦不住这类组合，而 fast > slow 会让 DIF 整体反号且界面毫无提示。
+  // Every edit passes the relative constraints (MACD fast < slow, RSI oversold <
+  // overbought): per-field ranges can't catch these, and fast > slow silently
+  // inverts the whole MACD.
+  const set = (patch: Record<string, unknown>) =>
+    onChange({ ...settings, [sel]: enforceParamOrder(sel, { ...cfg, ...patch }, Object.keys(patch)) })
   const lbl = (key: string) => String(t(`charts.indicators.${key}`))
 
   return createPortal(

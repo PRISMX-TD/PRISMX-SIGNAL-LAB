@@ -5,24 +5,71 @@
 // Constants, types and pure helpers for the charts page, moved out of
 // pages/ChartsPage.tsx on 2026-09-06 verbatim.
 import type { UTCTimestamp } from 'lightweight-charts'
-import type { Candle } from '../../api/types'
+import type { Candle, Quote } from '../../api/types'
 import type { Tool } from './DrawLayer'
 import type { DayStats } from './SymbolHeader'
 import type { IndicatorId } from './indicatorCatalog'
+import { baseSymbol } from '../../api/utils'
+import { DAY_TZ_OFFSET_SEC } from '../../utils/indicators'
 
-// 图表价格轴的小数位数：贵金属/原油 2~3 位，外汇对按经纪商常见的 5 位报价
-// （日元对 3 位），加密货币 2 位。未在表中的品种回退到 2 位。
-// Decimal precision for the price scale: metals/oil use 2~3 digits, FX pairs
-// use the broker-standard 5-digit quoting (JPY pairs use 3), crypto uses 2.
-// Unlisted symbols fall back to 2 digits.
+// 价格精度的**兜底**表，不是真源。真源是券商随报价上报的 Quote.digits（桥接
+// v1.3.23 起按账户报价携带，EA 全站报价也带），走 priceDigits() 取。
+// 这张表只在还没收到任何报价时用（切品种的头一两拍、休市无推送）。
+// 键一律是 baseSymbol() 归一后的名字：券商后缀（XAUUSD.s）与信号名（BTCUSDT）
+// 都会先被归一，所以这里只写基础名。
+//
+// 2026-09-19：原表只有 7 条，且按**原始** symbol 查——券商品种表里真实存在的
+// AUDUSD / NZDUSD / USDCHF / USDCAD / EURGBP / EURJPY / GBPJPY / ETHUSD 全部漏
+// 查、一律按 2 位，后果不止是显示：点差 = 价差 × 10^digits 恒为 0、止损点数算成
+// 千分之一、价格轴 minMove 被压成 0.01 让 K 线变阶梯，而图上拖动止损线时按这个
+// 位数取整的价格是**真发给 MT5** 的（见 PositionOverlay）。
+//
+// Price-precision *fallback* table — not the source of truth. The broker's own
+// Quote.digits (bridge >= 1.3.23 per-account quotes, plus the EA site-wide feed)
+// is authoritative; read it through priceDigits(). This table only covers the
+// window before any quote has arrived (first ticks after a symbol switch, or a
+// closed market with no pushes). Keys are baseSymbol()-normalized names.
 export const SYMBOL_DECIMALS: Record<string, number> = {
   XAUUSD: 2,
   XAGUSD: 3,
   WTI: 2,
   EURUSD: 5,
   GBPUSD: 5,
+  AUDUSD: 5,
+  NZDUSD: 5,
+  USDCHF: 5,
+  USDCAD: 5,
+  EURGBP: 5,
   USDJPY: 3,
+  EURJPY: 3,
+  GBPJPY: 3,
   BTCUSD: 2,
+  ETHUSD: 2,
+}
+
+// 拿不到任何精度线索时的最后兜底 / last-resort precision with no clue at all
+export const FALLBACK_DECIMALS = 2
+
+// 券商上报的精度，拿不到时返回 null。返回 null 的含义是"我不知道这个品种几位"，
+// 调用方据此决定是显示兜底位数，还是干脆不做取整（改单价格就属于后者——宁可原样
+// 发给 MT5 让券商自己截断，也不能按一个猜的位数把止损挪走几十个点）。
+// The broker-reported precision, or null when unknown. null means "we don't know
+// this symbol's digits", letting callers choose between a display fallback and
+// not rounding at all (a modify price takes the latter: better to send the raw
+// value and let the broker truncate than to move a stop by tens of points).
+export function resolvePriceDigits(symbol: string, quote?: Quote | null): number | null {
+  const d = quote?.digits
+  // 0 位是合法精度（有些指数/加密 CFD 就是整数报价），所以只能判类型与范围，
+  // 不能用 `quote?.digits ||`。/ 0 is a valid precision, so check the type and
+  // range rather than truthiness.
+  if (typeof d === 'number' && Number.isFinite(d) && d >= 0 && d <= 10) return Math.trunc(d)
+  const fallback = SYMBOL_DECIMALS[baseSymbol(symbol)]
+  return fallback ?? null
+}
+
+// 展示用精度：拿不到就退回 2 位 / display precision, falling back to 2
+export function priceDigits(symbol: string, quote?: Quote | null): number {
+  return resolvePriceDigits(symbol, quote) ?? FALLBACK_DECIMALS
 }
 export const INTERVALS: { code: string; label: string }[] = [
   { code: '1', label: '1m' },
@@ -163,8 +210,10 @@ export function fmtLegendNum(v: number | null | undefined, digits: number): stri
 // than today), so it never renders empty.
 export function computeDayStats(bars: { t: number; o: number; h: number; l: number; c: number }[]): DayStats | null {
   if (bars.length === 0) return null
-  // UTC+8 无夏令时，当日零点的 epoch 秒 / UTC+8 has no DST; epoch of today's midnight
-  const TZ_OFFSET = 8 * 3600
+  // UTC+8 无夏令时，当日零点的 epoch 秒。口径与 VWAP 共用同一个常量（见
+  // utils/indicators.ts 的 DAY_TZ_OFFSET_SEC），不再各写一份。
+  // UTC+8 has no DST; epoch of today's midnight. Shares one constant with VWAP.
+  const TZ_OFFSET = DAY_TZ_OFFSET_SEC
   const nowSec = Date.now() / 1000
   const dayStart = Math.floor((nowSec + TZ_OFFSET) / 86400) * 86400 - TZ_OFFSET
   const today = bars.filter((b) => b.t >= dayStart)

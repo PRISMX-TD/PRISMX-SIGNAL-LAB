@@ -517,7 +517,16 @@ export default function BacktestPanel({
     return () => { alive = false }
   }, [symbol, interval])
 
+  // 本次回测的序号。蜡烛图是回测返回后另发一次请求取的，用户在这中间换了品种 /
+  // 周期 / 区间再跑一次时，先发的那次若后回来就会把新一轮的蜡烛覆盖掉——图上是
+  // 另一个品种的行情，标记全落在范围外。回来时对一下序号，过期的直接丢弃。
+  // A run counter: the candles are fetched in a follow-up request, so an earlier
+  // run's response landing after a newer one would paint another symbol's bars
+  // with every marker outside the range. Stale responses are discarded by id.
+  const runIdRef = useRef(0)
+
   const run = useCallback(async () => {
+    const runId = ++runIdRef.current
     setRunning(true)
     setError(null)
     try {
@@ -527,6 +536,7 @@ export default function BacktestPanel({
         oneTradeAtATime, exitTimeoutBars,
         days, riskPct, capital, mode,
       })
+      if (runId !== runIdRef.current) return
       setResult(res)
       setTradePage(0)
       onResult?.(res)
@@ -544,12 +554,15 @@ export default function BacktestPanel({
       // root cause of "the markers are off"). A failure leaves the chart empty
       // without affecting the metrics.
       if (!res.insufficientData) {
-        strategyApi.backtestBars(symbol, interval, days).then((h) => setBars(h.bars)).catch(() => setBars([]))
+        strategyApi.backtestBars(symbol, interval, days)
+          .then((h) => { if (runId === runIdRef.current) setBars(h.bars) })
+          .catch(() => { if (runId === runIdRef.current) setBars([]) })
       }
     } catch (e) {
+      if (runId !== runIdRef.current) return
       setError(e instanceof Error ? localizeApiError(e.message) : 'Unknown error')
     } finally {
-      setRunning(false)
+      if (runId === runIdRef.current) setRunning(false)
     }
   }, [
     rules, symbol, interval, stopLossMethod, stopLossValue, takeProfitMethod,

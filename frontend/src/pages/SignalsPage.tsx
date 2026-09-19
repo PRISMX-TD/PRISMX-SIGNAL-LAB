@@ -64,7 +64,16 @@ export default function SignalsPage() {
   const openTrade = useCallback((s: DisplaySignal) => setActiveSignal(s), [])
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
-    if (!activeSignal) return
+    // 抛错而不是 return：OrderSheet 的契约是「Promise 正常 resolve = 已提交」，它会
+    // 据此渲染「已提交」回执卡。提前 return 也算正常 resolve，于是一单都没发出去、
+    // 界面却给了确认——这是假回执。弹窗打开时 activeSignal 不会为空，但契约上的这个
+    // 洞值得堵上：同一契约下任何提前 return 都会变成假回执。
+    // Throw rather than return: OrderSheet's contract is "the promise resolving
+    // means submitted", and it renders a "submitted" receipt on that. An early
+    // return also resolves, producing a confirmation for an order that was never
+    // sent. activeSignal can't be null while the modal is open, but the hole in
+    // the contract is worth closing.
+    if (!activeSignal) throw new Error(String(t('common.error')))
     const sig = activeSignal
     // 提交成功后不在这里关弹窗：SlideOrderModal 自己会展示"已提交"回执卡片，
     // 再等 2 秒调用 onCancel 关闭。这里若立刻 setActiveSignal(null)，弹窗会
@@ -87,54 +96,58 @@ export default function SignalsPage() {
 
   return (
     <div className="max-w-[1520px] mx-auto">
-      {!loaded ? (
-        <SkeletonPage cards={3} />
-      ) : (
-        <div className="content-fade">
-          <button onClick={() => navigate('/dashboard')} className="mb-4 flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-            {t('signals.focus.backToDashboard', '返回仪表盘')}
+      {/* 加载态只换数据区：返回链接与三个页签不依赖任何数据，跟着骨架一起闪掉是
+          "加载态把已经能渲染的壳也拿掉"——全站约定是页头 / 控件常驻。StrategiesPage
+          的分区加载（各请求各自落地、各自结束加载态）就是这个写法。
+          Only the data area swaps to a skeleton: the back link and the three tabs
+          depend on no data, and blanking them too violates the site rule that the
+          head and controls stay put while data loads. */}
+      <div className="content-fade">
+        <button onClick={() => navigate('/dashboard')} className="mb-4 flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+          {t('signals.focus.backToDashboard')}
+        </button>
+
+        {/* 标签页切换 / Tab switcher */}
+        <div className="seg-tabs mb-5">
+          <button
+            type="button"
+            onClick={() => setActiveTab('signals')}
+            className={activeTab === 'signals' ? 'on' : ''}
+          >
+            {t('signals.tabs.realtime')}
           </button>
-
-          {/* 标签页切换 / Tab switcher */}
-          <div className="seg-tabs mb-5">
-            <button
-              type="button"
-              onClick={() => setActiveTab('signals')}
-              className={activeTab === 'signals' ? 'on' : ''}
-            >
-              {t('signals.tabs.realtime')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('strategies')}
-              className={activeTab === 'strategies' ? 'on' : ''}
-            >
-              {t('signals.tabs.platformStrategies')}
-            </button>
-            {/* 策略分析：FREE 与 PRO 同样可见、不延迟。只显示管理员公开名单里的
-                策略（后端过滤，见 GET /signals/strategy-analysis）。
-                Strategy analysis: FREE and PRO alike, no delay; only whitelisted
-                strategies, filtered server-side. */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('analysis')}
-              className={activeTab === 'analysis' ? 'on' : ''}
-            >
-              {t('signals.tabs.analysis')}
-            </button>
-          </div>
-
-          {activeTab === 'signals' ? (
-            <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan}
-                        activeSymbols={activeSymbols} />
-          ) : activeTab === 'strategies' ? (
-            <PlatformStrategiesGuide />
-          ) : (
-            <StrategyAnalysis />
-          )}
+          <button
+            type="button"
+            onClick={() => setActiveTab('strategies')}
+            className={activeTab === 'strategies' ? 'on' : ''}
+          >
+            {t('signals.tabs.platformStrategies')}
+          </button>
+          {/* 策略分析：FREE 与 PRO 同样可见、不延迟。只显示管理员公开名单里的
+              策略（后端过滤，见 GET /signals/strategy-analysis）。
+              Strategy analysis: FREE and PRO alike, no delay; only whitelisted
+              strategies, filtered server-side. */}
+          <button
+            type="button"
+            onClick={() => setActiveTab('analysis')}
+            className={activeTab === 'analysis' ? 'on' : ''}
+          >
+            {t('signals.tabs.analysis')}
+          </button>
         </div>
-      )}
+
+        {!loaded && activeTab === 'signals' ? (
+          <SkeletonPage cards={3} />
+        ) : activeTab === 'signals' ? (
+          <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan}
+                      activeSymbols={activeSymbols} />
+        ) : activeTab === 'strategies' ? (
+          <PlatformStrategiesGuide />
+        ) : (
+          <StrategyAnalysis />
+        )}
+      </div>
       {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
       {toast && <div className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
     </div>
