@@ -136,7 +136,15 @@ def _hash_legacy_api_tokens() -> None:
 # rev 24 — mt5_accounts.margin（已用保证金，用来算保证金比例）。不回填：猜不出历史
 #          占用，NULL 走「还没刷新过」分支显示「—」；gateway 账号下一轮资金刷新
 #          （15 秒）就有值，bridge 账号要等 1.4.1 及以上的桥接上报。
-CURRENT_SCHEMA_REV = 24
+# rev 25 — 六个 MT5 票号列 int4 → int8（orders.ticket / mt5_ticket / mt5_position、
+#          closed_trades.position_ticket / deal_ticket、auto_managed_positions.
+#          position_ticket）。MT5 票号是 ulong，int4 上限 21.47 亿，越界时 commit 抛
+#          DataError——那是**成交之后**才失败，真仓已开而订单被记成「超时未执行」，
+#          用户重下就双倍仓位。只在 Postgres 上执行（SQLite 的 INTEGER 已是 64 位），
+#          按 information_schema 判断当前类型做到幂等。
+#          ⚠ int4→int8 会重写整表并持 ACCESS EXCLUSIVE 锁，而迁移跑在 uvicorn bind
+#          端口之前：停机时间随 orders / closed_trades 行数增长，上线前务必先量。
+CURRENT_SCHEMA_REV = 25
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1169,6 +1177,79 @@ def _migrate_columns() -> None:
     if "platform_settings" in tables:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM platform_settings WHERE key = 'discipline'"))
+
+    # ── rev 25：MT5 票号列 int4 → int8 ────────────────────────────────────────
+    #
+    # 为什么非改不可：MT5 的订单号 / 成交号 / 仓位号都是 ulong，而这六列建表时用的
+    # 是 SQLAlchemy 的 Integer，在 Postgres 上就是 int4，上限 2,147,483,647。券商的
+    # 票号是单调增长的，越界只是时间问题。
+    #
+    # 越界的失败形态特别恶劣，所以值得在这里写清楚：它**不是**"存不下就截断"，而是
+    # commit 时抛 DataError，也就是**交易已经在券商那边成交了、回来落库才失败**。
+    # 于是订单卡在 PENDING，5 分钟后被 stale 判定改写成 FAILED「指令超时未执行」，
+    # 而真仓位就挂在那里。用户看到"未执行"会重下一单 —— 仓位翻倍。平仓明细那边
+    # 同理，upsert_leg 只捕 IntegrityError，DataError 会直接炸掉整批回扫。
+    #
+    # 只对 Postgres 执行：SQLite 的 INTEGER 本来就是 64 位动态宽度，不需要也不支持
+    # 这种 ALTER。判断用 information_schema 而不是无脑 ALTER，是为了幂等 —— 已经是
+    # bigint 的库重启时不该再被锁一次。
+    #
+    # ⚠ 运维注意：int4 → int8 在 Postgres 上**不是** binary-coercible，会重写整张表
+    # 并持有 ACCESS EXCLUSIVE 锁。而本迁移是在 uvicorn bind 端口**之前**同步跑的，
+    # 所以这次重启的停机时间取决于 orders / closed_trades 的行数。上线前先量一下：
+    #   SELECT reltuples::bigint FROM pg_class WHERE relname IN ('orders','closed_trades');
+    # 行数大到停机不可接受时，改为在维护窗口手工执行下面这几条 ALTER，再重启服务
+    # （迁移是幂等的，手工执行完这里就自动跳过）。
+    #
+    # rev 25: widen the MT5 ticket columns from int4 to int8.
+    #
+    # MT5 order / deal / position ids are ulong; these six columns were created as
+    # SQLAlchemy Integer, which is int4 on Postgres (max 2,147,483,647). Broker
+    # tickets only ever grow, so overflow is a matter of time.
+    #
+    # The failure mode deserves spelling out: it does not truncate, it raises
+    # DataError at commit — i.e. *after* the trade has filled at the broker. The
+    # order is then stranded in PENDING, rewritten to FAILED ("command timed out,
+    # never executed") by the stale sweep five minutes later, while the real
+    # position sits open. A user who sees "not executed" places it again, and the
+    # position doubles. Same story for close legs: upsert_leg only catches
+    # IntegrityError, so a DataError takes down the whole back-fill batch.
+    #
+    # Postgres only: SQLite's INTEGER is already 64-bit and does not support this
+    # ALTER. The information_schema check keeps it idempotent so an
+    # already-migrated database is not re-locked on every restart.
+    #
+    # ⚠ Ops note: int4 → int8 is NOT binary-coercible on Postgres; it rewrites the
+    # table under an ACCESS EXCLUSIVE lock, and this migration runs synchronously
+    # *before* uvicorn binds its port. Downtime therefore scales with the row
+    # counts of orders / closed_trades — measure before deploying, and if it is
+    # too long, run these ALTERs by hand in a maintenance window and then restart
+    # (the migration is idempotent and will skip them).
+    _TICKET_COLUMNS_INT8 = (
+        ("orders", "ticket"),
+        ("orders", "mt5_ticket"),
+        ("orders", "mt5_position"),
+        ("closed_trades", "position_ticket"),
+        ("closed_trades", "deal_ticket"),
+        ("auto_managed_positions", "position_ticket"),
+    )
+    if is_postgres:
+        for _table, _column in _TICKET_COLUMNS_INT8:
+            if _table not in tables:
+                continue
+            with engine.begin() as conn:
+                current = conn.execute(
+                    text(
+                        "SELECT data_type FROM information_schema.columns "
+                        "WHERE table_name = :t AND column_name = :c"
+                    ),
+                    {"t": _table, "c": _column},
+                ).scalar()
+                # 已是 bigint（或列不存在，交给别处补）就跳过 / already bigint, or no
+                # such column (added elsewhere): nothing to do.
+                if current != "integer":
+                    continue
+                conn.execute(text(f"ALTER TABLE {_table} ALTER COLUMN {_column} TYPE BIGINT"))
 
     # ── 统一索引块 ────────────────────────────────────────────────────────────
     # create_all 只给**新建**的表建索引，已存在的表不会补，所以这些要手工建。

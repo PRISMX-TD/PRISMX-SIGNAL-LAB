@@ -397,7 +397,19 @@ class Order(Base):
     side = Column(String, nullable=False)
     volume = Column(Float, nullable=False)
     # 目标持仓 ticket（平仓/改单用）/ target position ticket (close/modify)
-    ticket = Column(Integer, nullable=True)
+    #
+    # 必须是 BigInteger 而不是 Integer：MT5 的票号是 ulong，而 Postgres 的 Integer
+    # 是 int4，上限 2,147,483,647。越界的后果不是"存不下就截断"，是 commit 抛
+    # DataError——成交之后才落库失败，于是真已成交的单被记成"指令超时未执行"，
+    # 用户看到失败就重下，仓位翻倍。SQLite 的 INTEGER 本来就是 64 位，所以这条
+    # 只对生产的 Postgres 有意义（迁移见 rev 25）。
+    #
+    # Must be BigInteger, not Integer: MT5 tickets are ulong while Postgres
+    # Integer is int4 (max 2,147,483,647). Overflow does not truncate — it raises
+    # DataError at commit, *after* the trade filled, so a real fill is recorded as
+    # never-executed and the user re-places it. SQLite's INTEGER is already
+    # 64-bit, so this matters only for production Postgres (see rev 25).
+    ticket = Column(BigInteger, nullable=True)
     # 自定义/目标止损止盈（绝对价）/ custom or target SL & TP (absolute price)
     sl = Column(Float, nullable=True)
     tp = Column(Float, nullable=True)
@@ -408,7 +420,7 @@ class Order(Base):
     delivered = Column(Boolean, default=False)
     # 最近一次下发时间，用于超时重发判定 / last delivery time, for ack-timeout re-delivery
     delivered_at = Column(DateTime, nullable=True)
-    mt5_ticket = Column(Integer, nullable=True)
+    mt5_ticket = Column(BigInteger, nullable=True)  # 64 位，理由见上面的 ticket / 64-bit, see ticket above
     # 成交后的真实仓位号。mt5_ticket 存的是订单号或成交号，与仓位号是不同的编号
     # 体系，不能拿来匹配平仓成交。Gateway 开仓后反查填入；Bridge 侧为空（那边靠
     # 魔术号码判归属，不需要这个）。
@@ -416,7 +428,7 @@ class Order(Base):
     # a different numbering space, so it can't be matched against closing deals.
     # Filled in for gateway opens; stays null for bridge (which attributes by
     # magic number and doesn't need it).
-    mt5_position = Column(Integer, nullable=True)
+    mt5_position = Column(BigInteger, nullable=True)  # 64 位，理由见上面的 ticket / 64-bit, see ticket above
     filled_price = Column(Float, nullable=True)
     message = Column(String, nullable=True)
     trade_mode = Column(Integer, nullable=True)  # 成交时从账号行拷贝的不可变快照；-1=确认无法判定
@@ -578,8 +590,8 @@ class ClosedTrade(Base):
     close_volume = Column(Float, nullable=False)  # 这一笔平仓的手数（可能是部分平仓）/ this leg's volume
     close_price = Column(Float, nullable=False)
     profit = Column(Float, nullable=False)  # MT5 计算的真实盈亏（账户货币）/ MT5's real P&L, account currency
-    position_ticket = Column(Integer, nullable=False)  # 仓位编号，同一仓位的多次部分平仓共享 / shared across partial closes
-    deal_ticket = Column(Integer, nullable=False)  # MT5 成交编号，用于去重 / MT5 deal ticket, for dedup
+    position_ticket = Column(BigInteger, nullable=False)  # 仓位编号，同一仓位的多次部分平仓共享；64 位理由见 Order.ticket / shared across partial closes; 64-bit, see Order.ticket
+    deal_ticket = Column(BigInteger, nullable=False)  # MT5 成交编号，用于去重；64 位理由见 Order.ticket / MT5 deal ticket for dedup; 64-bit, see Order.ticket
     closed_at = Column(DateTime, nullable=False)
     # ---- MT5 历史「仓位」视图的其余字段（2026-09-07，rev 17）。全部可空：旧记录靠
     # 桥接 / 网关一次性回扫补齐（services/closed_trade_store.upsert_leg 只补空列）。
@@ -684,7 +696,7 @@ class AutoManagedPosition(Base):
 
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    position_ticket = Column(Integer, nullable=False)
+    position_ticket = Column(BigInteger, nullable=False)  # 64 位理由见 Order.ticket / 64-bit, see Order.ticket
     mt5_login = Column(String, nullable=True)
     entry = Column(Float, nullable=True)
     initial_sl = Column(Float, nullable=True)  # 0/None = 开仓无止损，无法自动管理 / no SL at open, unmanageable
