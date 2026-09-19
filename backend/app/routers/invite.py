@@ -27,8 +27,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, User
-from app.routers.admin import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, _log_change, _resolve_range_or_422
+from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, Payment, User
 from app.schemas import (
     AgentLinkOut,
     AgentLinkUserOut,
@@ -46,10 +45,26 @@ from app.schemas import (
 )
 from app.services.account_type import CONTEST, DEMO, REAL
 from app.services.admin_overview import activity_daily, headline
+# 代理身份的判定与分页/范围解析都在 services 层：前者 account.py 也要用，后者
+# admin.py 也要用，从 router 互相 import 会把两个路由绑死（见那两个模块的开头）。
+# Both predicates live in services: account.py needs the first, admin.py the
+# second, and importing across routers would tie them together (see their docs).
+from app.services.agents import is_agent
+from app.services.audit import log_change as _log_change
 from app.services.deps import get_current_user, require_admin
 from app.services.gamification import mask_account
 from app.services.gateway_binding import is_revoked, not_removed
-from app.services.settings_store import get_trial_settings
+from app.services.notification_feed import (
+    KIND_AGENT_PLAN_CHANGE,
+    create_notification,
+    notify_ws,
+)
+from app.services.pagination import (
+    PAGE_SIZE_DEFAULT,
+    PAGE_SIZE_MAX,
+    resolve_range_or_422 as _resolve_range_or_422,
+)
+from app.services.plans import PLAN_DAYS, trial_grant_days
 from app.services.stats_time import RangeSpec
 from app.services.stats_time import today as stats_today
 
@@ -186,28 +201,13 @@ def _trial_grant_days(db: Session, link: InviteLink) -> int | None:
     """
     if not bool(link.grants_trial):
         return None
-    trial = get_trial_settings(db)
-    if not trial["trial_enabled"]:
-        return None
-    days = int(trial["trial_days"])
-    # 天数非正时当成"不发"处理：管理端 schema 把 trial_days 下限设成 ge=1，
-    # 正常途径永远到不了这里，但 platform_settings 是能被手改的。真让 0（或负数）
-    # 流出去，apply_invite 会把 plan_expires_at 设成"现在"、燃掉用户唯一一次
-    # 试用机会却不留审计行（auth.py 判的是 if granted_days，0 是假值），前端两处
-    # `if (r.trialDays)` 也会把它当没有活动——三个消费方全都不认 0，只有这里认，
-    # 干脆在唯一的判定点堵死。
-    #
-    # A non-positive day count is treated as "no grant": the admin schema
-    # bounds trial_days at ge=1 so this is unreachable through normal channels,
-    # but platform_settings can be hand-edited. Letting 0 (or negative) through
-    # would make apply_invite set plan_expires_at to "now", burn the user's
-    # one-time trial with no audit row (auth.py checks `if granted_days`, and 0
-    # is falsy), while both frontends' `if (r.trialDays)` treat it as no offer
-    # too. None of the three consumers accept 0 — only this function did, so
-    # the guard belongs at this single decision point.
-    if days <= 0:
-        return None
-    return days
+    # 全局那一半（总闸 + 天数非正当成不发）在 services/plans.trial_grant_days，
+    # 与「登录后自己领」那条路共用同一处判定——见那个函数的说明。本函数只再叠上
+    # 链接自己的开关。
+    # The global half (master switch + non-positive day count) lives in
+    # services/plans.trial_grant_days, shared with the self-claim path; this
+    # function only adds the per-link switch on top.
+    return trial_grant_days(db)
 
 
 def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
@@ -290,14 +290,12 @@ def _link_out(
 # ---------- 代理指派 / agent assignment ----------
 
 
-def is_agent(db: Session, user_id: str) -> bool:
-    """该用户是否至少持有一条被指派的链接。/auth/me 靠它下发 isAgent 给前端露入口。
-    Whether the user holds at least one assigned link; /auth/me ships it as isAgent."""
-    return (
-        db.query(InviteLinkAgent.id).filter(InviteLinkAgent.user_id == user_id).first()
-        is not None
-    )
-
+# is_agent 现在住在 services/agents.py，这里从上面 import 进来当本模块的名字用：
+# 「代理」这个概念的入口本来就在这个文件，从 app.routers.invite 取它的既有调用方
+# （含测试）不该因为一次内部搬家而改动。
+# is_agent now lives in services/agents.py and is re-exported here: this file is
+# where the agent concept is documented, and existing callers (tests included)
+# shouldn't have to move for an internal relocation.
 
 def _agents_by_link(db: Session, link_ids: list[str]) -> dict[str, list[InviteLinkAgentOut]]:
     """一次 join 取出这批链接各自的代理，避免每行一查。One join for all links, no N+1."""
@@ -594,6 +592,37 @@ def agent_overview(db: Session, user: User, link_id: str, spec: RangeSpec) -> Ag
 # at a time; a year takes six clicks. The friction is deliberate.
 AGENT_MAX_EXTEND_DAYS = 60
 
+# 每个客户在任意滚动 30 天窗口内、由代理累计延长的上限（天）。
+#
+# 单次上限单独存在时其实挡不住什么：这个端点限流 30/分钟，60 天 × 30 次 = 每分钟
+# 1800 天，"防一次点到 2099 年"的说法在连点面前不成立。真正要封的是总量——一个
+# 客户一个月最多从代理这里拿到 90 天（三次满额），再多就该是管理员或者一笔付费
+# 订单的事。90 这个数字给的是"季度套餐"的余量：正常的续期节奏够用，批量刷权益
+# 的路子走不通。
+#
+# 窗口按"滚动 30 天"而不是自然月：自然月会在每月 1 号把额度清零，于是 30 号加
+# 满、1 号再加满，一次就能拿到两倍。
+#
+# Cumulative cap per customer within any rolling 30-day window. The per-call cap
+# alone stops nothing: at 30 requests/minute it allows 1800 days a minute, so the
+# "can't reach year 2099" claim doesn't survive a script. What has to be bounded
+# is the total — 90 days a month from an agent (three full-size grants), beyond
+# which it belongs to an admin or to a paid order. Rolling rather than calendar
+# month, because a calendar reset lets the 30th and the 1st stack into double.
+AGENT_EXTEND_WINDOW_DAYS = 30
+AGENT_MAX_EXTEND_DAYS_PER_WINDOW = 90
+
+# 累计额度靠审计表本身来算，不新建表、不加列：每次延长都额外写一条
+# `agent:{code}:extend_days` 行，new_value 就是这次加的天数。审计行是这个操作
+# 已经必须写的东西，让它顺便当账本，比为一个配额引一张新表（迁移、清理、
+# schema_rev）划算得多；数得准的前提是**每次延长都写**，别在别处绕开它。
+# The quota is computed from the audit table itself — one extra
+# `agent:{code}:extend_days` row per extension, new_value being the day count.
+# The audit row has to be written anyway, which beats a new table (migration,
+# retention, schema_rev) for one quota. It only counts right if every extension
+# writes one; do not add a path that skips it.
+_AGENT_EXTEND_AUDIT_SUFFIX = ":extend_days"
+
 
 def _agent_target(db: Session, link: InviteLink, email: str) -> User:
     """按 (链接, 邮箱) 找人。不是这条链接带来的、或者压根不存在，都是同一个 404。
@@ -617,26 +646,135 @@ def _agent_target(db: Session, link: InviteLink, email: str) -> User:
     return target
 
 
+def _agent_extended_days(db: Session, target_id: str, now: datetime) -> int:
+    """这个客户在最近 AGENT_EXTEND_WINDOW_DAYS 天里，已经被代理累计延长了几天。
+
+    数的是审计表里 `agent:*:extend_days` 那批行（见
+    _AGENT_EXTEND_AUDIT_SUFFIX）。**不按链接分组**：额度是给"这个客户"的，
+    否则把同一个人挂到两条链接下就能拿两份额度，而代理本来就可能持有多条链接。
+
+    new_value 是自己写的整数字符串，仍然用 try 兜一层——这张表的行也可能来自
+    人工 SQL 修补，一条脏值不该让正常的延长请求 500。
+
+    How many days agents have already added to this customer inside the rolling
+    window, counted off the audit rows. Deliberately not grouped by link: the
+    quota belongs to the customer, or holding two links would double it. The
+    day count is parsed defensively because rows can also come from hand-written
+    SQL, and one bad value must not 500 a legitimate request.
+    """
+    since = (now - timedelta(days=AGENT_EXTEND_WINDOW_DAYS)).replace(tzinfo=None)
+    rows = (
+        db.query(AdminAuditLog.new_value)
+        .filter(
+            AdminAuditLog.target_user_id == target_id,
+            AdminAuditLog.field.like(f"agent:%{_AGENT_EXTEND_AUDIT_SUFFIX}"),
+            AdminAuditLog.created_at >= since,
+        )
+        .all()
+    )
+    total = 0
+    for (value,) in rows:
+        try:
+            total += int(value)
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
+def _has_live_paid_plan(db: Session, target_id: str, now: datetime) -> bool:
+    """这个人手里有没有一笔**还在有效期内**的已完成付款。
+
+    判据是付款本身而不是 users.plan：plan 是个会被覆盖的当前状态，一旦代理已经
+    点下降级，事后再看 plan 只能看到 FREE，付过钱这件事就查不出来了。payments
+    表是不可变的事实，按 finished_at + 套餐天数算出这笔钱买到的窗口，落在窗口里
+    就说明"他现在的权益是花钱买的"。
+
+    只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED 的从来没到过。
+
+    Whether this user holds a completed payment whose window hasn't lapsed. The
+    verdict comes from the payments table rather than users.plan, because plan is
+    mutable current state — once a downgrade lands, it reads FREE and the fact
+    that money changed hands is no longer visible. Payments are immutable facts:
+    finished_at plus the plan's day count is the window the money bought.
+    """
+    rows = (
+        db.query(Payment.plan, Payment.finished_at)
+        .filter(Payment.user_id == target_id, Payment.status == "FINISHED")
+        .all()
+    )
+    for plan, finished_at in rows:
+        if finished_at is None:
+            continue
+        ends = finished_at if finished_at.tzinfo else finished_at.replace(tzinfo=timezone.utc)
+        if ends + timedelta(days=PLAN_DAYS.get(plan, 30)) > now:
+            return True
+    return False
+
+
+def _notify_admins_agent_write(db: Session, agent: User, target: User, summary: str) -> list[str]:
+    """代理动了别人的会员，给每位管理员留一条站内通知，返回收到的管理员 id。
+
+    为什么必须有：代理页是 /agent/* 下唯一的写端点，改的是**别人的**付费权益，
+    而此前它唯一的痕迹是审计表里两行——没有人会定期去翻审计表，于是"某个代理
+    把一批客户开成 PRO"这件事在被客户投诉之前完全不可见。铃铛里一条通知是让
+    这件事有人看见的最低成本做法（对比：新工单也是这么通知管理员的）。
+
+    不发系统推送，理由与 tickets._notify_admins_new_ticket 一样：管理员就那几个
+    人，往每台设备推一条只会把后台日常变成噪音。代理自己是管理员时不通知自己
+    （他不会是——_agent_target 已经挡了管理员做目标，但操作者这一侧没挡）。
+
+    One in-app notification per admin whenever an agent changes someone else's
+    paid entitlement. This is the only write endpoint under /agent/*, and its
+    only previous trace was two audit rows that nobody reads on a schedule — so
+    an agent upgrading a batch of customers was invisible until a customer
+    complained. No tray push, for the same reason as new tickets: admins are a
+    handful of people and per-device fan-out turns routine work into noise.
+    """
+    admin_ids = [
+        r[0] for r in db.query(User.id).filter(User.role == "admin").all()
+        if r[0] != agent.id
+    ]
+    for admin_id in admin_ids:
+        create_notification(
+            db,
+            admin_id,
+            KIND_AGENT_PLAN_CHANGE,
+            text=summary,
+            link=f"/admin?tab=users&q={target.email}",
+            ref_id=target.id,
+        )
+    return admin_ids
+
+
 def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate) -> AgentLinkUserOut:
     """代理调整自己名下客户的会员等级与到期日。返回改完之后的那一行。
 
-    三条边界：
+    五条边界：
     ① 只能动自己名下链接带来的人（_owned_link + _agent_target，都是 404）；
     ② 一次最多延长 AGENT_MAX_EXTEND_DAYS 天（schema 里已卡 le=60，这里再兜一次——
        schema 是给 HTTP 的，这个函数本身也会被测试与将来的调用方直接用）；
-    ③ **不限期 PRO 不许碰**。那是管理员手动给的（内部赠送 / KOL 合作，
+    ③ 每个客户在滚动 30 天内累计最多 AGENT_MAX_EXTEND_DAYS_PER_WINDOW 天。单次
+       上限在 30/分钟 的限流下形同虚设（每分钟 1800 天），真正封住"无限开 PRO"
+       的是这一条，见 AGENT_MAX_EXTEND_DAYS_PER_WINDOW 的说明；
+    ④ **正在付费有效期内的客户不许降级**。代理一点降级就能抹掉用户真金白银买来
+       的权益，用户既收不到通知也没有申诉入口，直接 409 让他去找管理员——退款
+       与例外是运营决策，不该由一个代理单方面完成；
+    ⑤ **不限期 PRO 不许碰**。那是管理员手动给的（内部赠送 / KOL 合作，
        plan_expires_at 为空 = 永久），延长会把永久变成有限期、降级会直接撤销管理员
        的决定——两种都是代理在覆盖管理员，所以一律 409 让他去找管理员。
 
     每个真正变化的字段各写一条审计行，field 带 `agent:{code}:` 前缀：这样一眼看出
-    这次改动来自代理页而不是后台，而 admin_user_id 记的就是那个代理。
+    这次改动来自代理页而不是后台，而 admin_user_id 记的就是那个代理。写操作同时
+    给每位管理员留一条站内通知（见 _notify_admins_agent_write）。
 
     Agent-side plan change for one of their own referrals, returning the updated
-    row. Three boundaries: only their own referrals (404 otherwise); at most
-    AGENT_MAX_EXTEND_DAYS per call; and never-expiring PRO is off limits (409) —
-    that is an admin's manual grant, and both extending and downgrading it would
-    have an agent overrule an admin. Every changed field gets its own audit row,
-    prefixed so the agent view is distinguishable from the back office.
+    row. Five boundaries: their own referrals only (404 otherwise); the per-call
+    day cap; a rolling 30-day cumulative cap per customer (the per-call cap is
+    meaningless at 30 requests/minute); no downgrading a customer still inside a
+    paid window (409 — refunds and exceptions are an operator's call, not an
+    agent's); and never-expiring PRO is off limits (409), since extending or
+    downgrading it would have an agent overrule an admin. Every changed field
+    gets its own prefixed audit row, and every write notifies the admins.
     """
     link = _owned_link(db, agent, link_id)
     target = _agent_target(db, link, body.email)
@@ -649,6 +787,7 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
 
     old_plan, old_expiry = target.plan, target.plan_expires_at
     now = datetime.now(timezone.utc)
+    granted_days = 0
 
     if body.action == "extend":
         days = body.days
@@ -656,6 +795,17 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
             raise HTTPException(
                 status_code=422,
                 detail=f"一次最多延长 {AGENT_MAX_EXTEND_DAYS} 天 / At most {AGENT_MAX_EXTEND_DAYS} days per change",
+            )
+        used = _agent_extended_days(db, target.id, now)
+        if used + days > AGENT_MAX_EXTEND_DAYS_PER_WINDOW:
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    f"该客户 {AGENT_EXTEND_WINDOW_DAYS} 天内最多累计延长 "
+                    f"{AGENT_MAX_EXTEND_DAYS_PER_WINDOW} 天（已用 {used} 天），请联系管理员 / "
+                    f"At most {AGENT_MAX_EXTEND_DAYS_PER_WINDOW} days per customer per "
+                    f"{AGENT_EXTEND_WINDOW_DAYS} days ({used} already used); contact an admin"
+                ),
             )
         # 从"还没过期的到期日"往后接，过期或 FREE 则从此刻起算——否则给一个
         # 上个月就到期的人加 30 天，会算出一个仍然在过去的到期日。
@@ -668,7 +818,16 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
                 base = current
         target.plan = "PRO"
         target.plan_expires_at = (base + timedelta(days=days)).replace(tzinfo=None)
+        granted_days = days
     else:
+        if _has_live_paid_plan(db, target.id, now):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "该用户有仍在有效期内的付费订单，请联系管理员 / "
+                    "This user has a paid order still within its term; contact an admin"
+                ),
+            )
         target.plan = "FREE"
         target.plan_expires_at = None
 
@@ -681,8 +840,30 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     _log_change(
         db, agent.id, target.id, f"agent:{link.code}:plan_expires_at", old_expiry, target.plan_expires_at
     )
+    if granted_days:
+        # 配额账本那一行（见 _AGENT_EXTEND_AUDIT_SUFFIX）。old_value 用 0 而不是
+        # None：log_change 在 old == new 时会跳过写入，天数恒为正所以不会撞上，
+        # 但显式写出来免得将来有人把"加 0 天"当成合法输入。
+        # The quota ledger row. old_value is an explicit 0 because log_change
+        # skips no-op writes; the day count is always positive so it never
+        # collides, but spelling it out keeps a future "extend by 0" honest.
+        _log_change(
+            db,
+            agent.id,
+            target.id,
+            f"agent:{link.code}{_AGENT_EXTEND_AUDIT_SUFFIX}",
+            0,
+            granted_days,
+        )
+    summary = (
+        f"{agent.email} → {target.email}: "
+        + (f"+{granted_days}d PRO" if granted_days else "PRO → FREE")
+    )
+    admin_ids = _notify_admins_agent_write(db, agent, target, summary)
     db.commit()
     db.refresh(target)
+    for admin_id in admin_ids:
+        notify_ws(admin_id)
     return _agent_user_out(db, target)
 
 

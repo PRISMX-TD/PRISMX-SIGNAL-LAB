@@ -42,9 +42,18 @@ class TradingViewSignal(BaseModel):
     secret: str = Field(min_length=1, max_length=128)
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     side: Literal["BUY", "SELL", "buy", "sell"]
-    entry: float | None = None
-    stopLoss: float | None = Field(default=None, ge=0)
-    takeProfit: float | None = Field(default=None, ge=0)
+    # entry 与下面两个字段同样要卡下界并禁掉 NaN/Inf。Python 的 float("nan")
+    # 是合法输入，但 json.dumps 会把它写成裸 `NaN`——那不是合法 JSON，而这个值
+    # 会经 WS 广播直达前端，JSON.parse 当场抛错，表现为"整个信号面板不刷新了"，
+    # 且服务端一切正常、日志干干净净。价格没有负数，ge=0 顺带把符号也管住。
+    # entry needs the same lower bound and non-finite rejection as the two fields
+    # below. float("nan") is accepted by Python but json.dumps emits a bare NaN,
+    # which is not valid JSON — and this value is broadcast over WS, so
+    # JSON.parse throws on the client and the whole signal panel stops updating
+    # while the server looks perfectly healthy. Prices are never negative either.
+    entry: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    stopLoss: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    takeProfit: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     # 策略名，展示在前端 indicator 字段 / strategy name shown in the UI
     strategy: str | None = Field(default=None, max_length=128)
     # 外部唯一编号，用于去重；省略则不去重 / external unique id for dedup; optional

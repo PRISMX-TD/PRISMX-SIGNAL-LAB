@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.database import get_db
 from app.models import Ticket, TicketReply, User
@@ -41,6 +41,20 @@ from app.services.notification_feed import (
 logger = logging.getLogger("prismx.tickets")
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
+
+# 列表端点的预加载：两个列表都要为每一行取最新一条回复（_latest_reply）及其作者，
+# 懒加载下这就是每行 2 条查询，管理端一页 200 条 = 400+ 条查询，全是 by-id 的小
+# 查询，看不出慢但把一次列表变成一轮扫射。selectinload 把它压成"每种关系一条
+# IN 查询"，与这个文件里其余批量取数的写法一致。
+# 管理端还要 Ticket.user（列表要显示提交者邮箱），那一条在用到的地方单独加——
+# 用户端列表用的是自己的 user.email，不需要。
+# Eager loads for the list endpoints: both need the newest reply and its author
+# per row (_latest_reply), which lazily is two queries per row — 400+ on a
+# 200-row admin page. All tiny by-id lookups, individually invisible, together a
+# burst. selectinload collapses them to one IN query per relationship. The admin
+# list additionally needs Ticket.user for the submitter's email; the user-facing
+# list already has that user in hand.
+_LIST_EAGER_LOADS = selectinload(Ticket.replies).selectinload(TicketReply.author)
 
 
 def _now() -> datetime:
@@ -103,10 +117,52 @@ def _notify_admins_new_ticket(db: Session, ticket: Ticket, submitter: User) -> l
     return admin_ids
 
 
+def _notify_admins_ticket_reply(db: Session, ticket: Ticket, author: User) -> list[str]:
+    """用户追加回复时给每位管理员写一条站内通知，返回收到通知的管理员 id。
+
+    为什么必须有：新工单会通知全体管理员（_notify_admins_new_ticket），但用户在
+    已有工单里追问就完全静默。管理端列表按 updated_at 倒序，而追加一条 reply
+    **不会**触发 Ticket 行的 onupdate（那个 onupdate 只在 Ticket 自己被 UPDATE 时
+    生效），所以那条工单连往上冒都不会——用户回了话，管理员这边没有任何变化。
+    这两件事要一起修，只修一件仍然看不见（排序修了但没人知道要去看，通知修了
+    但点进列表还是在第二页）。
+
+    复用 KIND_TICKET_REPLY：这条通知对管理员的意思就是"工单有新回复"，与管理员
+    回复时发给用户的那条同一件事、方向相反。link 指向后台的工单详情。
+    不发系统推送，理由同 _notify_admins_new_ticket。
+
+    Notify every admin when a user adds a reply. New tickets already fan out, but
+    a follow-up on an existing ticket was silent — and since the admin list is
+    ordered by updated_at while appending a reply does not touch the Ticket row
+    (its onupdate only fires on an UPDATE of Ticket itself), the ticket did not
+    even float to the top. Both halves have to be fixed together or the user's
+    reply stays invisible either way. Reuses KIND_TICKET_REPLY: to an admin this
+    means exactly "the ticket has a new reply", same event, other direction.
+    """
+    admin_ids = [
+        r[0] for r in db.query(User.id).filter(User.role == "admin").all()
+        if r[0] != author.id
+    ]
+    for admin_id in admin_ids:
+        create_notification(
+            db,
+            admin_id,
+            KIND_TICKET_REPLY,
+            text=ticket.title,
+            link=f"/admin?tab=tickets&ticket={ticket.id}",
+            ref_id=ticket.id,
+        )
+    return admin_ids
+
+
 def _latest_reply(ticket: Ticket) -> TicketReplyOut | None:
     """最新的那条回复（可能有也可能没有）/ the most recent reply, if any."""
-    # 按 replies relationship 查询——ORM relationship 默认按 id 排序，
-    # 所以这里单独查 created_at desc 取最新一条
+    # relationship 上配了 order_by="TicketReply.created_at"（见 models），所以
+    # ticket.replies 已经按时间升序，取最后一个就是最新的那条。
+    # 别按"默认按 id 排序"去理解这一段——那是这条注释以前的说法，早就不成立了。
+    # The relationship carries order_by="TicketReply.created_at" (see models), so
+    # replies is already oldest-first and the last element is the newest. (This
+    # comment used to claim "ordered by id by default"; that stopped being true.)
     if ticket.replies:
         r = ticket.replies[-1] if ticket.replies else None
         if not r:
@@ -164,6 +220,7 @@ def list_my_tickets(
     Current user's tickets, newest first, each with a latest-reply preview."""
     tickets = (
         db.query(Ticket)
+        .options(_LIST_EAGER_LOADS)
         .filter(Ticket.user_id == user.id)
         .order_by(Ticket.updated_at.desc())
         .all()
@@ -190,12 +247,18 @@ def get_ticket(
     user: User = Depends(get_current_user),
 ):
     """工单详情 + 全部回复。仅工单所有者或管理员可访问。
-    Ticket detail with all replies. Only the owner or an admin may access."""
+
+    「不存在」与「不是你的」回同一个 404：403 等于确认这个 id 真的存在，而
+    /agent 那边（invite._owned_link）已经是统一 404 的做法，同一个产品里不该有
+    两种口径。id 是 UUID、实际可猜性低，所以这是对齐而不是补漏洞。
+
+    Not-found and not-yours share one 404: a 403 confirms the id exists, and the
+    agent endpoints already answer 404 for both. Ids are UUIDs so this is
+    consistency work, not a hole being closed.
+    """
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    if not ticket:
+    if not ticket or (ticket.user_id != user.id and user.role != "admin"):
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
-    if ticket.user_id != user.id and user.role != "admin":
-        raise HTTPException(status_code=403, detail="无权访问该工单 / Access denied")
     replies = (
         db.query(TicketReply)
         .filter(TicketReply.ticket_id == ticket_id)
@@ -215,10 +278,12 @@ def reply_to_ticket(
     """追加回复。closed 工单拒绝，除非传 reopen: true。
     Add a reply. Closed tickets are rejected unless reopen is true."""
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    if not ticket:
+    # 与 get_ticket 同一口径：不存在与不是你的都是 404。留一个 403 在这里等于
+    # 把详情那边刚统一掉的存在性信号从另一个端点原样漏出去。
+    # Same verdict as get_ticket: a lingering 403 here would leak from one
+    # endpoint exactly what the other just stopped leaking.
+    if not ticket or ticket.user_id != user.id:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
-    if ticket.user_id != user.id:
-        raise HTTPException(status_code=403, detail="无权回复该工单 / Access denied")
     if ticket.status == "closed" and not body.reopen:
         raise HTTPException(
             status_code=400,
@@ -226,15 +291,25 @@ def reply_to_ticket(
         )
     if body.reopen:
         ticket.status = "open"
-        ticket.updated_at = _now()
     reply = TicketReply(
         ticket_id=ticket.id,
         author_id=user.id,
         body=body.body.strip(),
     )
     db.add(reply)
+    # updated_at 无条件更新，不再只在 reopen 时更新：两端的列表都按它倒序排，
+    # 不动它的话用户的追问会一直沉在"最后一次有人改过工单状态"的位置。
+    # onupdate 指望不上——追加一行 reply 不是对 Ticket 行的 UPDATE。
+    # updated_at is bumped unconditionally now, not only on reopen: both lists
+    # sort by it, so a follow-up would otherwise stay buried at whenever the
+    # ticket itself was last touched. The column's onupdate can't help — adding
+    # a reply is not an UPDATE of the Ticket row.
+    ticket.updated_at = _now()
+    admin_ids = _notify_admins_ticket_reply(db, ticket, user)
     db.commit()
     db.refresh(ticket)
+    for admin_id in admin_ids:
+        notify_ws(admin_id)
     replies = (
         db.query(TicketReply)
         .filter(TicketReply.ticket_id == ticket_id)
@@ -265,7 +340,13 @@ def list_all_tickets(
         query = query.filter(Ticket.status == status_filter)
     if category:
         query = query.filter(Ticket.category == category)
-    tickets = query.order_by(Ticket.updated_at.desc()).offset(offset).limit(limit).all()
+    tickets = (
+        query.options(selectinload(Ticket.user), _LIST_EAGER_LOADS)
+        .order_by(Ticket.updated_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return [
         TicketListItem(
             id=t.id,

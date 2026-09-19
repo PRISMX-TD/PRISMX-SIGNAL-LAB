@@ -16,8 +16,8 @@ from app.schemas import PhoneRequest, ProfilePatchIn, UserOut
 from app.services.gamification.conditions import LEVEL_TITLES, level_of
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
+from app.services.agents import is_agent
 from app.services.deps import get_current_user
-from app.routers.invite import is_agent
 from app.services.settings_store import get_gamification_settings
 
 router = APIRouter(prefix="/auth", tags=["account"])
@@ -391,13 +391,54 @@ class UserPrefsIn(BaseModel):
         # 塞进这个每次登录都要整份读回来的字段。/ Prefs are small UI/drawing
         # settings; cap the serialized size so an oversized JSON can't be
         # stuffed into this field, which is read back in full on every login.
-        if len(json.dumps(v, ensure_ascii=False)) > 256 * 1024:
+        if len(json.dumps(v, ensure_ascii=False)) > PREFS_NAMESPACE_MAX_BYTES:
             raise ValueError("偏好数据过大 / prefs payload too large")
         return v
 
 
-def _get_or_create_prefs(db: Session, user_id: str) -> UserPref:
-    pref = db.query(UserPref).filter(UserPref.user_id == user_id).first()
+# 单个命名空间的上限（上面的 validator 用），以及整份文档的两道总量上限。
+#
+# 只卡单个命名空间是不够的：合并保存永远不删旧的键，所以命名空间数量无上限时，
+# 一个客户端换着名字连发几千次，每次都在上限之内，最后 pref.data 仍然能被撑到
+# 几百 MB——而这个字段**每次登录都要整份读回来并整份推给所有在线设备**，撑大它
+# 等于给自己的每一次登录都加一次超大读。16 个命名空间是给真实用途留的余量
+# （目前实际在用的是个位数），1MB 是"所有命名空间加起来"的硬顶。
+#
+# The per-namespace cap above is not enough on its own: the merge never drops
+# keys, so without a count limit a client cycling namespace names can inflate
+# pref.data without ever exceeding the per-write cap — and this field is read
+# back in full on every login and pushed in full to every online device. 16
+# namespaces is headroom over the handful actually in use; 1MB is the ceiling
+# for the merged document.
+PREFS_NAMESPACE_MAX_BYTES = 256 * 1024
+PREFS_MAX_NAMESPACES = 16
+PREFS_DOCUMENT_MAX_BYTES = 1024 * 1024
+
+
+def _get_or_create_prefs(db: Session, user_id: str, lock: bool = False) -> UserPref:
+    """取（必要时新建）偏好行。lock=True 时用 SELECT ... FOR UPDATE 取。
+
+    合并保存必须加锁：那是一次读-改-写，两台设备同时改**不同**命名空间时，
+    两个事务都会读到同一份旧文档，后提交的那个把先提交的那次改动整段覆盖掉
+    （经典 lost update；SQLAlchemy 默认 READ COMMITTED，行锁不会自己出现）。
+    而"两台设备互相覆盖"正是当初引入按命名空间合并要解决的问题——不加锁的话
+    合并只是把冲突窗口从"整份"缩小到"整份，但需要两次写挨得更近"，没有消除它。
+
+    SQLite 不支持 FOR UPDATE，会静默忽略；测试跑在 SQLite 上因此走的是无锁路径，
+    生产（Postgres）才真正拿到行锁。这与 payments.py 锁用户行的处理一致。
+
+    Fetch (creating if absent) the prefs row; lock=True takes it FOR UPDATE.
+    The merge-save is a read-modify-write, so without a row lock two devices
+    editing different namespaces both read the same old document and the later
+    commit silently drops the earlier change — the very lost update that
+    per-namespace merging was introduced to prevent. SQLite ignores FOR UPDATE
+    (so tests take the unlocked path); Postgres is where it bites, same as the
+    user-row lock in payments.py.
+    """
+    q = db.query(UserPref).filter(UserPref.user_id == user_id)
+    if lock:
+        q = q.with_for_update()
+    pref = q.first()
     if not pref:
         pref = UserPref(user_id=user_id)
         db.add(pref)
@@ -417,6 +458,51 @@ def get_prefs(
     except (json.JSONDecodeError, TypeError):
         data = {}
     return UserPrefsOut(data=data)
+
+
+def save_prefs(db: Session, user_id: str, namespace: str, data: dict) -> dict:
+    """按命名空间合并保存，返回合并后的完整文档。阻塞的同步函数（调用方放线程池）。
+
+    拆成模块级函数而不是 put_prefs 里的闭包，是为了能被测试直接驱动：路由是
+    async 且要过线程池，而 conftest 的内存 SQLite 是 SingletonThreadPool——换个线程
+    就是换一个空库。invite.py 的 record_click / telemetry 的 record_pageview 同理。
+
+    Merge-save one namespace, returning the merged document. Blocking; callers
+    run it in a thread pool. A module-level function rather than a closure so
+    tests can drive it directly: the route is async and hops threads, while the
+    tests' in-memory SQLite is per-thread. Same precedent as record_click.
+    """
+    # 整段读-改-写都在行锁之下（见 _get_or_create_prefs），锁随 commit 释放。
+    # The whole read-modify-write runs under the row lock; commit releases it.
+    pref = _get_or_create_prefs(db, user_id, lock=True)
+    try:
+        existing = json.loads(pref.data or "{}")
+    except (json.JSONDecodeError, TypeError):
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    # 两道总量校验放在合并之后、落库之前：判据必须是"合并后的那一份"。
+    # 覆盖一个已存在的命名空间不增加数量，所以只在新增时数；大小则无论
+    # 新增还是覆盖都要重算——把一个小命名空间改大同样能撑爆文档。
+    # Both totals are checked on the merged document, not the request body.
+    # Overwriting an existing namespace doesn't add one, so the count is
+    # only checked for new keys; the size is rechecked either way, since
+    # growing an existing namespace inflates the document just as well.
+    if namespace not in existing and len(existing) >= PREFS_MAX_NAMESPACES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"偏好命名空间最多 {PREFS_MAX_NAMESPACES} 个 / "
+                f"at most {PREFS_MAX_NAMESPACES} preference namespaces"
+            ),
+        )
+    existing[namespace] = data
+    encoded = json.dumps(existing, ensure_ascii=False)
+    if len(encoded) > PREFS_DOCUMENT_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="偏好数据过大 / prefs payload too large")
+    pref.data = encoded
+    db.commit()
+    return existing
 
 
 @router.put("/prefs", response_model=UserPrefsOut)
@@ -448,20 +534,7 @@ async def put_prefs(
     pushing only the changed namespace would make them drop whatever other
     namespaces they hold locally that this request never mentioned.
     """
-    def _save() -> dict:
-        pref = _get_or_create_prefs(db, current_user.id)
-        try:
-            existing = json.loads(pref.data or "{}")
-        except (json.JSONDecodeError, TypeError):
-            existing = {}
-        if not isinstance(existing, dict):
-            existing = {}
-        existing[body.namespace] = body.data
-        pref.data = json.dumps(existing, ensure_ascii=False)
-        db.commit()
-        return existing
-
-    merged = await run_in_threadpool(_save)
+    merged = await run_in_threadpool(save_prefs, db, current_user.id, body.namespace, body.data)
     await manager.push_to_client(
         current_user.id, {"type": "PREFS_UPDATE", "data": merged}
     )

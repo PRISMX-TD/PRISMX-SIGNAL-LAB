@@ -8,9 +8,10 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
@@ -25,6 +26,7 @@ from app.services.nowpayments import (
     verify_ipn_signature,
 )
 from app.core.config import settings
+from app.services.plans import PLAN_DAYS, trial_grant_days
 from app.services.settings_store import get_pricing_settings, get_trial_settings
 
 logger = logging.getLogger("prismx.payments")
@@ -32,7 +34,11 @@ logger = logging.getLogger("prismx.payments")
 router = APIRouter(prefix="/payments", tags=["payments"])
 
 # ═══ 定价 / Pricing ═══
-PLAN_DAYS: dict[str, int] = {"pro_monthly": 30, "pro_yearly": 365}
+# PLAN_DAYS 搬去了 services/plans.py：代理端的「付费保护」也要按它算这笔钱买到的
+# 窗口（routers/invite._has_live_paid_plan），而从 router import router 是
+# services/pagination.py 顶部那段说明要消灭的东西。这里保留名字，调用点不动。
+# PLAN_DAYS moved to services/plans.py — the agent-side paid guard needs it too,
+# and importing it across routers is what services/pagination.py's note is about.
 
 # 币种列表进程内缓存：这份列表几乎不变，之前每次调用都不带登录校验、也不
 # 缓存地直接转发给 NOWPayments——任何人（不用登录）反复刷这个接口就能把
@@ -71,8 +77,21 @@ def _resolve_pricing(db: Session) -> dict:
 
 # ═══ 请求体 / Request schemas ═══
 class CreatePaymentRequest(BaseModel):
-    plan: str  # pro_monthly / pro_yearly
-    pay_currency: str  # e.g. btc, eth, usdttrc20
+    # plan 用 Literal 而不是 str：值域本来就只有两个，写进类型里让 FastAPI 在解析
+    # 阶段就挡掉别的值（顺带出现在 OpenAPI 里），下面 `body.plan not in PLAN_DAYS`
+    # 那道判断照旧留着——它防的是 PLAN_DAYS 与这里将来不同步。
+    # Literal rather than str: the value set is two items, so FastAPI rejects
+    # anything else before the handler runs. The PLAN_DAYS check below stays as a
+    # guard against the two drifting apart.
+    plan: Literal["pro_monthly", "pro_yearly"]
+    # 长度必须卡住：这个字符串会原样进入发给 NOWPayments 的请求体，并原样写进
+    # payments.pay_currency 列。真实币种代码不超过十几个字符，没有上限等于允许
+    # 把任意长的串转发给第三方、并落进一张会长期保留的表。
+    # The cap is load-bearing: this string is forwarded verbatim to NOWPayments
+    # and stored verbatim in payments.pay_currency. Real ticker codes are a dozen
+    # characters at most; without a bound this relays arbitrary-length strings to
+    # a third party and persists them in a table we keep forever.
+    pay_currency: str = Field(min_length=1, max_length=32)  # e.g. usdttrc20
 
 
 # ═══ 端点 / Endpoints ═══
@@ -86,6 +105,20 @@ def get_plans(db: Session = Depends(get_db)):
     yearly = sale["yearly"] if sale else pricing["yearly"]
     monthly_original = pricing["monthly"]
     yearly_original = pricing["yearly"]
+
+    # 年付省多少由**当前定价**算出来，不写死。以前这里是 `"save_20"` 字面量：
+    # 管理员把年付调成不便宜（甚至比月付 ×12 更贵，put_pricing 刻意允许这件事）
+    # 之后，前端仍然照着标签说"省 20%"——一个由后台设置就能造出来的虚假宣传。
+    # 不省钱时不给标签，让前端什么都不显示，而不是显示一个"省 0%"。
+    # The yearly saving is computed from live pricing rather than hard-coded. It
+    # used to be the literal "save_20", so an admin making the yearly plan no
+    # cheaper (or dearer — put_pricing deliberately allows that) left the
+    # frontend advertising a 20% saving that didn't exist. No saving, no tag.
+    yearly_tag = None
+    if not sale and monthly > 0 and yearly < monthly * 12:
+        saved_percent = int(round((1 - yearly / (monthly * 12)) * 100))
+        if saved_percent > 0:
+            yearly_tag = f"save_{saved_percent}"
 
     plans = [
         {
@@ -101,7 +134,7 @@ def get_plans(db: Session = Depends(get_db)):
             "price_usd": yearly,
             "original_price_usd": yearly_original if sale else None,
             "days": 365,
-            "tag": "save_20" if not sale else None,
+            "tag": yearly_tag,
         },
     ]
     # 公开试用信息：只有「开关 + 天数」两个营销事实，不含任何用户数据。
@@ -184,11 +217,18 @@ def claim_trial(
     concurrent clicks from the same user can't both succeed — same approach as
     the FINISHED-state claim in _sync_payment_status.
     """
-    trial = get_trial_settings(db)
-    if not trial["trial_enabled"]:
+    # 「此刻能发几天」与注册送试用那条路共用同一处判定（services/plans）：总闸关着
+    # 和天数被手改成 0 都归在一起答 None。原先这里只看总闸、天数照单全收，
+    # trial_days=0 时会写出一个"现在就到期"的 PRO，同时把 trial_used_at 盖上——
+    # 用户唯一一次试用就这么没了，而且不可逆。详见 plans.trial_grant_days。
+    # The day count comes from the same decision point as the invite-time grant
+    # (services/plans): switch off and a hand-edited 0 both answer None. This
+    # endpoint used to check only the switch and take the number on faith, which
+    # stamped trial_used_at on a membership that expired instantly — irreversible.
+    days = trial_grant_days(db)
+    if days is None:
         raise HTTPException(status_code=400, detail="试用功能未开放 / Free trial is not available")
 
-    days = int(trial["trial_days"])
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=days)
 
@@ -246,6 +286,24 @@ async def create_payment_order(
     # 只接受 USDT（多链）/ accept USDT only (any chain)
     if not body.pay_currency.lower().startswith("usdt"):
         raise HTTPException(status_code=400, detail="Only USDT is accepted")
+
+    # 不限期 PRO（内测/赠送，plan_expires_at 为空）不许下单。入账那一段本来就对这
+    # 类用户什么都不做——付款不能把「永久」改成有期限，见 _sync_payment_status 里
+    # 那个 `pass` 分支——结果就是钱收了、权益一点没变、页面上也没有任何提示。
+    # 拦在下单这一步，是这条链路上唯一能在收钱**之前**说话的地方。
+    # Permanent PRO (comp grant, null expiry) cannot open an order. Crediting
+    # already does nothing for these users — a payment must not turn "never
+    # expires" into a deadline (see the `pass` branch in _sync_payment_status) —
+    # so the money would arrive, change nothing, and say nothing. Order creation
+    # is the only point on this path that can speak before the funds move.
+    if _user.plan == "PRO" and _user.plan_expires_at is None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "你的会员已是不限期，无需付费续费 / "
+                "Your membership never expires; there is nothing to renew"
+            ),
+        )
 
     # 未完成支付订单数量上限：限流之外的第二道闸，防止在库里堆积大量悬而未决
     # 的支付记录，也避免每次进付款页都新开一笔。达到上限时提示用户先完成或
@@ -524,6 +582,116 @@ def _webhook_sync_work(
     return True
 
 
+# ═══ 支付状态机 / payment state machine ═══
+#
+# 终态：到达之后不再被任何**非终态**覆盖。
+#
+# 以前只有 FINISHED 受保护，其余状态可以互相覆盖，于是一条迟到/乱序的 waiting
+# 回调能把 EXPIRED 或 FAILED 改回 PROCESSING——而 PROCESSING 计入
+# MAX_OPEN_PAYMENTS_PER_USER，用户会被一笔早就过期的订单挡住，再也创建不了新订单，
+# 且没有任何一处解释得了原因（那笔订单在他自己的页面上显示的是"已过期"）。
+#
+# FINISHED_MISMATCH 也在里面：它表示"NOWPayments 说付完了，但金额/币种对不上"，
+# 是需要人工看一眼的终局，同样不该被后续的 waiting 抹掉。它**不是** FINISHED，
+# 所以抢占入账的那条条件 UPDATE（status != 'FINISHED'）仍然能在后续真的对上账时
+# 接手——补款后才对上的场景不会因为这个状态被永久锁死。
+#
+# Terminal states: never overwritten by a non-terminal one. Only FINISHED used to
+# be protected, so a late out-of-order "waiting" callback could flip EXPIRED or
+# FAILED back to PROCESSING — which counts toward MAX_OPEN_PAYMENTS_PER_USER and
+# silently locks the user out of creating new orders, with nothing anywhere to
+# explain it. FINISHED_MISMATCH joins them: "they say it's paid but the numbers
+# disagree" is a state for a human to look at. It is deliberately NOT FINISHED,
+# so the conditional claim below can still take over if a later callback does
+# reconcile.
+STATUS_FINISHED_MISMATCH = "FINISHED_MISMATCH"
+_TERMINAL_STATUSES = frozenset({"FINISHED", "EXPIRED", "FAILED", STATUS_FINISHED_MISMATCH})
+
+# 金额比较的相对容差。两边都是浮点、且中途经过 JSON 与第三方的十进制格式化，
+# 严格相等会把正常的 199.0 vs 199.00000000000003 判成对不上账。
+# Relative tolerance for amount comparison: both sides are floats that have been
+# through JSON and a third party's decimal formatting, so exact equality would
+# flag a perfectly normal 199.0 vs 199.00000000000003 as a mismatch.
+_AMOUNT_TOLERANCE = 1e-6
+
+
+def _as_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _close_enough(a: float, b: float) -> bool:
+    return abs(a - b) <= max(abs(a), abs(b)) * _AMOUNT_TOLERANCE + 1e-9
+
+
+def _finished_mismatch_reason(record: Payment, np_data: dict) -> str | None:
+    """入账前核对金额与币种；对得上返回 None，对不上返回一句说明。
+
+    **为什么要核对**：入账这件事此前完全建立在 `payment_status == "finished"`
+    这一个字符串上——本地存着的应付金额、币种、实付金额一个都没参与判断。
+    NOWPayments 自己只在全额到账时才置 finished，所以这不是一个当下可利用的
+    漏洞，而是防御纵深缺的一层：签名密钥一旦泄露、sandbox 配置一旦误上生产
+    （config.py 已有启动闸门兜底）、或者对方将来改了 finished 的语义，缺这一层
+    就等于零成本白送 PRO，而且事后只能靠人工对账才可能发现。
+
+    缺字段不算不一致：NOWPayments 不同版本的回调载荷字段不完全一样，把"没给这个
+    字段"当成对不上账会让所有正常支付都卡住——那是把防御纵深变成拒绝服务。
+
+    Reconcile amounts and currency before crediting; None means "matches".
+    Crediting used to rest entirely on one status string, with the stored
+    amount, currency and received amount taking no part. NOWPayments only
+    reports finished on full payment, so this is depth rather than a live hole —
+    but without it a leaked IPN key, a sandbox config reaching production (the
+    startup gate backstops that) or a change in their semantics hands out PRO for
+    free, discoverable only by manual reconciliation. Absent fields are not
+    treated as mismatches: payload shapes vary by API version, and failing closed
+    on a missing key would stall every legitimate payment.
+    """
+    np_currency = np_data.get("pay_currency")
+    if isinstance(np_currency, str) and np_currency and record.pay_currency:
+        if np_currency.strip().lower() != record.pay_currency.strip().lower():
+            return f"pay_currency {np_currency!r} != {record.pay_currency!r}"
+
+    price = _as_float(np_data.get("price_amount"))
+    if price is not None and record.amount_usd is not None:
+        if not _close_enough(price, float(record.amount_usd)):
+            return f"price_amount {price} != amount_usd {record.amount_usd}"
+
+    paid = _as_float(np_data.get("actually_paid"))
+    expected = _as_float(record.pay_amount)
+    if paid is not None and expected:
+        # 少付才算问题，多付不算：链上手续费算法差异会让用户多转一点点。
+        # Under-payment only; over-payment is normal (on-chain fee rounding).
+        if paid < expected * (1 - _AMOUNT_TOLERANCE):
+            return f"actually_paid {paid} < pay_amount {expected}"
+    return None
+
+
+def _payment_audit(db: Session, record: Payment, field: str, old_value, new_value) -> None:
+    """支付链路上的审计行。
+
+    AdminAuditLog.target_user_id 是指向 users.id 的非空外键，而这些事件没有管理员
+    操作者，所以沿用仓库里"没有管理员时用用户自身占位"的约定（同
+    services/plan_expiry.py 的 plan:auto_expire、payments.claim_trial 的
+    plan:trial_claim）。field 带 `payment:` / `plan:` 前缀区分来源。
+
+    An audit row for the payment path. There is no admin actor, so the user
+    stands in for both columns per the repo's existing convention; the field
+    prefix says where it came from.
+    """
+    db.add(
+        AdminAuditLog(
+            admin_user_id=record.user_id,
+            target_user_id=record.user_id,
+            field=field,
+            old_value=None if old_value is None else str(old_value),
+            new_value=None if new_value is None else str(new_value),
+        )
+    )
+
+
 def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_data: dict):
     """同步 NOWPayments 的回调/查询状态到本地 Payment 表，支付完成时升级/续期用户。
 
@@ -569,8 +737,66 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
         except (TypeError, ValueError):
             pass
 
+    # 退款到得比我们想的晚：本地已经按 FINISHED 给过时长了。**不自动降级**——
+    # 退款可能是部分退、可能是运营谈好的例外、也可能是对方误操作，而降级会当场
+    # 撤掉一个已经在用的人的权益。这里只做一件事：把它变成"有人会看到的"。
+    # 不改状态（FINISHED 是既成事实），留一条 error 日志 + 一条审计行给人工处理。
+    # A refund arriving after we already credited the time. Deliberately no
+    # automatic downgrade: the refund may be partial, an agreed exception, or
+    # their mistake, and downgrading would yank entitlement from someone using
+    # it. The one job here is to make it visible — an error log and an audit row
+    # for a human, with the status left alone because FINISHED already happened.
+    if np_status_val == "refunded" and record.status == "FINISHED":
+        logger.error(
+            "NOWPayments 报告退款，但本地已入账且不自动降级，请人工处理: "
+            "payment=%s user=%s plan=%s actually_paid=%s / refund reported after "
+            "the payment was credited; handle manually",
+            record.nowpayments_payment_id,
+            record.user_id,
+            record.plan,
+            record.actually_paid,
+        )
+        _payment_audit(
+            db, record, "payment:refund_after_finished", "FINISHED", "refunded"
+        )
+        db.commit()
+        return
+
     if new_status == "FINISHED":
         now = datetime.now(timezone.utc)
+        # 入账前先对账。对不上就落 FINISHED_MISMATCH 并**不给时长**：钱的事宁可
+        # 停在这里等人看，也不能因为一个状态字符串就发出权益。
+        # Reconcile before crediting. On a mismatch the row lands in
+        # FINISHED_MISMATCH with nothing credited: on the money path, stopping
+        # for a human beats handing out entitlement on the strength of a string.
+        mismatch = _finished_mismatch_reason(record, np_data)
+        if mismatch is not None:
+            logger.error(
+                "NOWPayments 报告完成但金额/币种对不上，未入账: payment=%s user=%s %s / "
+                "finished with mismatched amounts, not credited",
+                record.nowpayments_payment_id,
+                record.user_id,
+                mismatch,
+            )
+            claimed_mismatch = (
+                db.query(Payment)
+                .filter(
+                    Payment.id == record.id,
+                    Payment.status.notin_(("FINISHED", STATUS_FINISHED_MISMATCH)),
+                )
+                .update(
+                    {"status": STATUS_FINISHED_MISMATCH, "finished_at": now},
+                    synchronize_session=False,
+                )
+            )
+            if claimed_mismatch:
+                _payment_audit(
+                    db, record, "payment:finished_mismatch", record.status, mismatch
+                )
+            db.commit()
+            db.refresh(record)
+            return
+
         # 原子抢占：只有把状态从非 FINISHED 改成 FINISHED 的这一方负责加时长
         # Atomic claim: only the session that flips status to FINISHED credits time
         claimed = (
@@ -589,6 +815,7 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
                 .first()
             )
             if user:
+                old_plan, old_expiry = user.plan, user.plan_expires_at
                 was_trial = user.plan_is_trial
                 if was_trial:
                     # 试用期内付费转正：付费时长从付款时刻起算，不叠加试用剩余
@@ -626,13 +853,35 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
                             base = current
                     user.plan = "PRO"
                     user.plan_expires_at = base + timedelta(days=days)
+                # 付费导致的等级变化写审计行。试用领取（plan:trial_claim）、注册送
+                # （plan:invite_trial）、自动到期（plan:auto_expire）、管理员与代理
+                # 改动都各有一条，唯独"付了钱升上去"这一条没有——于是"这个人的 PRO
+                # 是怎么来的"在审计链上正好缺付费这一段，而那恰恰是最需要查的一段。
+                # 永久 PRO 那条分支什么都没改，old == new，log 不出来也不该 log。
+                # The paid upgrade gets an audit row like every other plan change
+                # (trial claim, invite trial, auto-expiry, admin and agent edits).
+                # Paid was the one link missing from "how did this user get PRO",
+                # which is the link most worth auditing. The comp-grant branch
+                # changes nothing, so old == new and nothing is written.
+                if (user.plan, user.plan_expires_at) != (old_plan, old_expiry):
+                    _payment_audit(
+                        db,
+                        record,
+                        "plan:payment",
+                        f"{old_plan}({old_expiry})",
+                        f"{user.plan}({user.plan_expires_at})",
+                    )
         db.commit()
         # 让调用方拿到抢占后的最新字段（status/finished_at）
         # Reload so callers see the claimed values (status/finished_at)
         db.refresh(record)
-    elif record.status != "FINISHED" and record.status != new_status:
-        # FINISHED 是终态：乱序迟到的旧回调不允许把它改回 PROCESSING 等
-        # FINISHED is terminal — a late out-of-order callback must not regress it
+    elif record.status not in _TERMINAL_STATUSES and record.status != new_status:
+        # 终态不可回退（见 _TERMINAL_STATUSES）：乱序迟到的旧回调既不能把 FINISHED
+        # 改回 PROCESSING，也不能把 EXPIRED/FAILED 改回 PROCESSING 把用户的
+        # MAX_OPEN_PAYMENTS_PER_USER 名额永久占住。
+        # Terminal states never regress (see _TERMINAL_STATUSES): a late callback
+        # can neither un-finish a payment nor revive an EXPIRED/FAILED one into
+        # PROCESSING, where it would permanently occupy an open-payment slot.
         record.status = new_status
         db.commit()
     elif actually_paid_changed:

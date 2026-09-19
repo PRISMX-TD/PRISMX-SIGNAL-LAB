@@ -557,5 +557,11 @@ def test_plan_change_writes_audit_rows_marked_as_agent(db_session):
         .all()
     )
     fields = {r.field for r in rows}
-    assert fields == {f"agent:{link.code}:plan", f"agent:{link.code}:plan_expires_at"}
+    # extend_days 那条是配额账本（见 AGENT_MAX_EXTEND_DAYS_PER_WINDOW），与前两条
+    # 一样带 agent:{code}: 前缀，所以这里一并断言。
+    assert fields == {
+        f"agent:{link.code}:plan",
+        f"agent:{link.code}:plan_expires_at",
+        f"agent:{link.code}:extend_days",
+    }
     assert all(r.admin_user_id == agent.id and r.target_user_id == target.id for r in rows)

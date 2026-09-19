@@ -28,7 +28,12 @@ from app.schemas import (
     UserOut,
 )
 from app.services.email_domains import is_disposable_email
-from app.services.password_reset import consume_token, issue_token, send_reset_email
+from app.services.password_reset import (
+    consume_token,
+    issue_token,
+    send_reset_email,
+    too_many_recent_requests,
+)
 from app.services.phone import compose_phone
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -299,8 +304,24 @@ def forgot_password(
     fallback for a real user locked out of Google.
     """
     email = req.email.lower()
+    # 按邮箱的频次上限（见 password_reset.too_many_recent_requests）。上面那个
+    # 装饰器是按 IP 的，换 IP 就绕过去了，对"持续骚扰某一个邮箱"完全无效。
+    #
+    # **超限也返回同一句话、同一个状态码**，不能回 429：这个端点的全部安全性建立
+    # 在"响应不随邮箱是否存在而变"上，而一旦超限回 429、未超限回 200，攻击者只要
+    # 对一个邮箱连发四次就能从状态码差异里读出计数在不在动——那正好又是一个存在性
+    # 探针（计数只对存在的邮箱递增就更糟，所以计数对谁都递增，见下面的位置）。
+    # 计数放在查库**之前**，正是为了让不存在的邮箱与存在的邮箱走完全相同的路径。
+    #
+    # Per-email cap; the decorator above is per IP and a rotated IP walks around
+    # it. Over-limit deliberately returns the same body and status as a normal
+    # request rather than a 429: this endpoint's entire safety rests on the
+    # response not varying with the address, and a distinguishable 429 would hand
+    # back an existence oracle through the counter's behaviour. The count is
+    # taken before the lookup so both cases take the identical path.
+    over_limit = too_many_recent_requests(email)
     user = db.query(User).filter(User.email == email).first()
-    if user is not None:
+    if user is not None and not over_limit:
         raw = issue_token(db, user, requested_ip=request.client.host if request.client else None)
         db.commit()
         # 明文令牌只传给发信函数，不进日志、不进响应。

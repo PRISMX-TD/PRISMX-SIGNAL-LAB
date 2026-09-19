@@ -23,6 +23,16 @@ from datetime import datetime, timezone
 
 PLANS = ("FREE", "PRO")
 
+# 每个付费套餐买到的天数。放在这里而不是 routers/payments.py：除了下单与入账，
+# 「这笔付费到今天还在不在有效期内」也要用它（代理降级前的付费保护，见
+# routers/invite.py），而那是另一个 router——router 之间互相 import 正是
+# services/pagination.py 顶部那段说明要消灭的东西。
+# Days bought by each paid plan. Kept here rather than in routers/payments.py
+# because "is this payment still inside its window" is also asked from another
+# router (the paid-customer guard in routers/invite.py), and router-to-router
+# imports are exactly what services/pagination.py's note is about.
+PLAN_DAYS: dict[str, int] = {"pro_monthly": 30, "pro_yearly": 365}
+
 
 def is_plan_expired(plan: str | None, expires_at: datetime | None, now: datetime | None = None) -> bool:
     """付费等级是否已过期。FREE 无所谓到期；expires_at 为空表示永久（内测/赠送）。
@@ -39,6 +49,37 @@ def is_plan_expired(plan: str | None, expires_at: datetime | None, now: datetime
     if expires_at.tzinfo is None:
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     return expires_at < now
+
+
+def trial_grant_days(db) -> int | None:
+    """全局试用总闸此刻能发几天；不发（关着或天数非正）返回 None。
+
+    发放试用有两条路——注册时带 ref（routers/invite.apply_invite）和登录后自己领
+    （routers/payments.claim_trial）——它们此前各读各的 platform_settings，只有前者
+    判了 `trial_days <= 0`。天数被手改成 0 时（管理端 schema 卡了 ge=1，但
+    platform_settings 是能直接改库的），后者会照发不误：plan_expires_at 设成"此刻"，
+    用户唯一一次试用当场烧掉却立刻到期，而 trial_used_at 已经写上了——不可逆。
+
+    两条路合流到这一处判定，就不会再出现"一条改了、另一条忘了"的分叉。天数为 0
+    时下游三个消费方（apply_invite、claim_trial、前端的 `if (r.trialDays)`）本来
+    就全都当成"没有活动"，只有旧的 claim_trial 例外。
+
+    How many trial days the global switch grants right now, or None. The two
+    granting paths (invite-time and self-claim) each read the settings
+    themselves, and only the first checked for a non-positive day count — so a
+    hand-edited 0 let the self-claim burn a user's one-time trial on a
+    membership that expired the instant it was granted, with trial_used_at
+    already stamped. One decision point, so the two can't diverge again.
+    """
+    from app.services.settings_store import get_trial_settings
+
+    trial = get_trial_settings(db)
+    if not trial["trial_enabled"]:
+        return None
+    days = int(trial["trial_days"])
+    if days <= 0:
+        return None
+    return days
 
 
 def is_realtime_plan(plan: str | None) -> bool:

@@ -211,11 +211,26 @@ async def client_error(request: Request) -> Response:
 
 
 @router.post("/pageview", status_code=204)
+@limiter.limit("60/minute")
 def report_pageview(
+    request: Request,
     payload: PageViewIn,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """/telemetry/pageview 的薄壳；实际逻辑见 record_pageview。
+
+    拆开是为了可测：限流装饰器要求 request 是真的 Request 实例，而本仓库的测试是
+    service 级的、没有 TestClient——invite.py 的 record_click / click 是同一个先例。
+
+    A thin shell over record_pageview. Split for testability: the rate limiter
+    demands a genuine Request and this repo's tests are service-level with no
+    TestClient — the same precedent as invite.py's record_click / click.
+    """
+    record_pageview(db, user, payload)
+
+
+def record_pageview(db: Session, user: User, payload: PageViewIn) -> None:
     """累加一次页面访问。返回 204，前端不需要任何响应体。
 
     不在白名单的 path 静默忽略（照样返回 204）——这是埋点上报，不是业务操作，
@@ -223,11 +238,26 @@ def report_pageview(
 
     管理员的访问一概不计（见下方注释），同样静默返回。
 
+    限流 60/分钟：正常前端一次页面切换才发一条，一分钟 60 条已经远在真实行为之
+    上；没有它的话，任何一个登录用户都能靠脚本把某个页面的 views 刷成任意数字，
+    而这些数字正是后台用来判断"该做哪个页面"的依据——被污染了也看不出来，因为
+    它跟正常流量长得一模一样。人数不受影响（PageVisitorDay 按天去重），失真的
+    只有次数与平均停留，所以限流是这里唯一能拦的地方。
+    同一条路径最多三次 commit 也一并收成一次，见下面 _bump_view / _mark_visitor。
+
     Accumulates one page view. Returns 204; the client needs no response body.
     Unknown paths are silently ignored (still 204) — this is telemetry, not a
     business action; surfacing an error to the user over a stats issue serves
     no one and would force the client to handle a failure it can't act on.
     Admin visits are never counted (see the comment below), also silently.
+
+    Rate limited at 60/min: a real client sends one per navigation, so this sits
+    far above genuine behaviour, while without it any logged-in user can script
+    a page's view count to any number — and the resulting numbers are what the
+    back office reads to decide what to build next, indistinguishable from real
+    traffic once written. Visitor counts are unaffected (deduped per day); views
+    and average dwell are what distorts. The up-to-three commits on this path are
+    also collapsed into one, see _bump_view / _mark_visitor below.
     """
     if payload.path not in ALLOWED_PATHS:
         return
@@ -262,61 +292,79 @@ def report_pageview(
     # stay UTC and are re-bucketed at query time.
     visitor_day = local_day(now_utc)
 
-    # 先尝试更新已有桶，没有再插。并发下两个请求可能都发现"没有"然后同时插，
-    # 唯一约束会让后到的那个报 IntegrityError——回滚后改成更新即可，行为等价。
-    # Try updating an existing bucket first, insert if absent. Under concurrency
-    # both requests may find none and insert; the unique constraint makes the
-    # loser raise IntegrityError — roll back and update instead, which is
-    # equivalent.
+    # 计数与人数标记合并成**一次** commit。从前这条路径最多要提交三次（建桶、
+    # 更新桶、写标记），三次各自往返一遍数据库，而这是全站调用最频繁的写端点之一。
+    # 唯一约束冲突改由 SAVEPOINT（begin_nested）吸收：冲突只作废那一小段，外层
+    # 事务还活着，所以"撞了就换一条路走"这个既有行为一点没变，只是不再需要为它
+    # 单独提交一次。
+    # Counting and the visitor marker now share one commit. This path used to
+    # commit up to three times (create bucket, update bucket, write marker), each
+    # a round trip, on one of the busiest write endpoints on the site. Unique
+    # violations are absorbed by a SAVEPOINT instead: only the nested block is
+    # rolled back, the outer transaction survives, so the existing "collide, then
+    # take the other branch" behaviour is unchanged — it just no longer needs a
+    # commit of its own.
+    _bump_view(db, payload.path, bucket, seconds)
+    _mark_visitor(db, payload.path, visitor_day, user.id)
+    db.commit()
+
+
+def _bump_view(db: Session, path: str, bucket, seconds: float) -> None:
+    """把这一次访问累加进 (页面, 小时) 桶；桶不存在就建。**不 commit**。
+
+    先尝试更新已有桶，没有再插。并发下两个请求可能都发现"没有"然后同时插，
+    唯一约束会让后到的那个报 IntegrityError——那一小段回滚到 SAVEPOINT 后重查
+    并改成更新即可，行为等价。
+
+    Accumulate one view into the (page, hour) bucket, creating it if absent; does
+    not commit. Concurrent inserts collide on the unique constraint; the loser
+    rolls back to the savepoint, re-reads and updates instead — equivalent.
+    """
     row = (
         db.query(PageViewStat)
-        .filter(PageViewStat.path == payload.path, PageViewStat.time_bucket == bucket)
+        .filter(PageViewStat.path == path, PageViewStat.time_bucket == bucket)
         .one_or_none()
     )
     if row is None:
-        db.add(PageViewStat(
-            path=payload.path,
-            time_bucket=bucket,
-            views=1,
-            total_seconds=seconds,
-        ))
         try:
-            db.commit()
-            # 新桶已建好，计数部分到此结束；人数登记仍要走，别在这里直接 return。
-            # Bucket created, counting done; the visitor marker still needs
-            # writing — don't return early here.
-            _mark_visitor(db, payload.path, visitor_day, user.id)
+            with db.begin_nested():
+                db.add(PageViewStat(
+                    path=path,
+                    time_bucket=bucket,
+                    views=1,
+                    total_seconds=seconds,
+                ))
             return
         except IntegrityError:
-            db.rollback()
             row = (
                 db.query(PageViewStat)
-                .filter(PageViewStat.path == payload.path, PageViewStat.time_bucket == bucket)
+                .filter(PageViewStat.path == path, PageViewStat.time_bucket == bucket)
                 .one()
             )
 
     row.views = (row.views or 0) + 1
     row.total_seconds = (row.total_seconds or 0.0) + seconds
-    db.commit()
-    _mark_visitor(db, payload.path, visitor_day, user.id)
 
 
 def _mark_visitor(db: Session, path: str, day, user_id: str) -> None:
-    """登记「该用户当天来过该页」，重复登记是无操作。
+    """登记「该用户当天来过该页」，重复登记是无操作。**不 commit**。
 
     用 INSERT 撞唯一约束来判重，而不是先 SELECT 再 INSERT：后者在并发下
     两个请求可能都查到"没有"然后都插，多出来的那行会让人数被重复计算。
-    这里让数据库的唯一约束做唯一裁判，撞了就回滚忽略。
+    这里让数据库的唯一约束做唯一裁判，撞了就回滚那一小段（SAVEPOINT）并忽略——
+    回滚范围只有这次 INSERT，同一事务里刚累加好的访问次数不受影响。
 
-    Registers "this user visited this page today"; repeats are no-ops.
+    Registers "this user visited this page today"; repeats are no-ops, and does
+    not commit.
 
     Dedup is done by letting an INSERT hit the unique constraint rather than
     SELECT-then-INSERT: under concurrency the latter lets two requests both see
     "absent" and both insert, and the extra row would double-count a visitor.
-    The DB constraint is the single arbiter; on conflict we roll back and ignore.
+    The DB constraint is the single arbiter; a conflict rolls back the savepoint
+    only, leaving the view count accumulated in the same transaction intact.
     """
-    db.add(PageVisitorDay(path=path, day=day, user_id=user_id))
     try:
-        db.commit()
+        with db.begin_nested():
+            db.add(PageVisitorDay(path=path, day=day, user_id=user_id))
     except IntegrityError:
-        db.rollback()
+        pass

@@ -839,6 +839,68 @@ def _event_prefs_allow(db, user_id: str, event_type: str) -> bool:
     return can_use_push(plan)
 
 
+# 批量判定一次取多少个 id。SQLite 的 IN 参数个数有编译期上限（老版本 999），
+# Postgres 没有硬上限但超长 IN 同样会让计划变差；500 两边都舒服。
+# Chunk size for the batched lookups: SQLite has a compile-time limit on IN
+# parameters (999 on older builds) and an over-long IN degrades plans on
+# Postgres too; 500 is comfortable on both.
+_BATCH_CHUNK = 500
+
+
+def _chunks(items: list[str]):
+    for i in range(0, len(items), _BATCH_CHUNK):
+        yield items[i:i + _BATCH_CHUNK]
+
+
+def _bulk_prefs_allow(db, user_ids: list[str], event_type: str) -> list[str]:
+    """一次把这批人的偏好与等级全查出来，返回其中允许收这类通知的那些。
+
+    与 _event_prefs_allow 逐人判定的结果**必须完全一致**——它只是把"每人 2 条
+    查询"换成"每 500 人 2 条查询"。判定本身仍然走 _parse_event_types /
+    ALWAYS_ON_EVENTS / _within_push_window / can_use_push 这几个既有函数，不在这里
+    重写一套，否则两处早晚会分叉（而分叉的表现是"某些人莫名收不到公告"）。
+
+    为什么要批量：公告推送原先对每个有订阅的用户各查 pref、查 plan、查 subs，
+    订阅用户过千时一次发布就是几千条查询，而且这整段在线程池里串行跑。
+
+    The batched twin of _event_prefs_allow: same verdict, two queries per 500
+    users instead of two per user. The decision still goes through the existing
+    predicates rather than a reimplementation, which would eventually diverge and
+    show up as "some people stopped getting announcements". Announcement push
+    used to issue three queries per subscribed user, serially, in one pass.
+    """
+    prefs: dict[str, object] = {}
+    plans: dict[str, str | None] = {}
+    for chunk in _chunks(user_ids):
+        for pref in db.query(NotificationPref).filter(NotificationPref.user_id.in_(chunk)).all():
+            prefs[pref.user_id] = pref
+        for uid, plan in db.query(User.id, User.plan).filter(User.id.in_(chunk)).all():
+            plans[uid] = plan
+
+    allowed: list[str] = []
+    for uid in user_ids:
+        pref = prefs.get(uid)
+        if pref is None or not pref.enabled:
+            continue
+        if event_type not in ALWAYS_ON_EVENTS and event_type not in _parse_event_types(pref.event_types):
+            continue
+        if not _within_push_window(pref):
+            continue
+        if not can_use_push(plans.get(uid)):
+            continue
+        allowed.append(uid)
+    return allowed
+
+
+def _subs_by_user(db, user_ids: list[str]) -> dict[str, list]:
+    """这批人各自的推送订阅，一次分组查完。Subscriptions per user, batched."""
+    out: dict[str, list] = {}
+    for chunk in _chunks(user_ids):
+        for sub in db.query(PushSubscription).filter(PushSubscription.user_id.in_(chunk)).all():
+            out.setdefault(sub.user_id, []).append(sub)
+    return out
+
+
 def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) -> None:
     """给触发了某个事件的用户推送一条通知（若其偏好允许）。同步、阻塞网络 IO，
     调用方须放线程池（见 dispatch_event_push_async）。
@@ -972,8 +1034,8 @@ def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> N
     try:
         user_ids = [row[0] for row in db.query(PushSubscription.user_id).distinct().all()]
         # WS 兜底的名单不能从 PushSubscription 里取：没有订阅的设备（大陆那条路）
-        # 在那张表里根本不存在。改从"此刻在线的人"出发，逐个走同一套 _event_prefs_allow。
-        ws_targets = [u for u in _online_user_ids() if _event_prefs_allow(db, u, EVENT_ANNOUNCEMENT)]
+        # 在那张表里根本不存在。改从"此刻在线的人"出发，走同一套判定（批量版）。
+        ws_targets = _bulk_prefs_allow(db, list(_online_user_ids()), EVENT_ANNOUNCEMENT)
         if ws_targets:
             _ws_fallback(ws_targets, title, body,
                          url=f"/announcements/{announcement_id}",
@@ -992,11 +1054,15 @@ def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> N
         push_headers = {"Urgency": "normal", "TTL": str(86400)}
         failed_ids: list[str] = []
         sent = 0
-        for uid in user_ids:
-            if not _event_prefs_allow(db, uid, EVENT_ANNOUNCEMENT):
-                continue
-            subs = db.query(PushSubscription).filter(PushSubscription.user_id == uid).all()
-            for sub in subs:
+        # 判定与取订阅都批量做完再发（见 _bulk_prefs_allow）：这一段在线程池里
+        # 串行跑，逐人三查时订阅用户过千就是几千条查询排在真正的发送前面。
+        # Both the verdicts and the subscriptions are fetched in bulk before any
+        # sending (see _bulk_prefs_allow): this pass is serial inside a worker
+        # thread, and the per-user queries used to queue up ahead of the sends.
+        targets = _bulk_prefs_allow(db, user_ids, EVENT_ANNOUNCEMENT)
+        subs_by_user = _subs_by_user(db, targets)
+        for uid in targets:
+            for sub in subs_by_user.get(uid, []):
                 ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
                 sent += int(ok)
                 if stale:

@@ -31,7 +31,31 @@ from app.models import PasswordResetToken, User
 from app.routers.auth import forgot_password as _forgot_decorated
 from app.routers.auth import reset_password as _reset_decorated
 from app.schemas import ForgotPasswordRequest, ResetPasswordRequest
-from app.services.password_reset import consume_token, hash_token, issue_token
+from app.services.password_reset import (
+    RESET_MAX_PER_HOUR,
+    consume_token,
+    hash_token,
+    issue_token,
+    too_many_recent_requests,
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_request_counter():
+    """每个用例开始前清掉「按邮箱的申请频次」计数。
+
+    那个计数住在 shared_state（没配 Redis 时是进程内内存），跨用例不会自己消失：
+    本文件里好几个用例都对同一个邮箱调 forgot_password，不清的话第四次就撞上
+    每小时 3 次的上限，失败的还是一个跟频次毫无关系的用例。
+    Clears the per-email request counter, which lives in shared_state and would
+    otherwise carry across tests — several cases here hit the same address, and
+    the fourth would trip the hourly cap inside a test about something else.
+    """
+    from app.services import shared_state
+
+    shared_state.reset_for_tests()
+    yield
+    shared_state.reset_for_tests()
 
 # 剥掉 slowapi 装饰器，与 test_email_domains.py 同一手法（限流与这些判据无关，
 # 带着装饰器调用需要一个挂了 limiter 的 app.state，那是给测试造场景）。

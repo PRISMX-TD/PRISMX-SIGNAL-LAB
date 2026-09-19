@@ -25,6 +25,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -35,6 +36,14 @@ logger = logging.getLogger("prismx.password_reset")
 
 # 32 字节 urlsafe ≈ 43 个字符、256 位熵。暴力猜测在限流之外本身也不可行。
 _TOKEN_BYTES = 32
+
+# 同一个邮箱每小时最多能触发几封重置邮件。3 封的依据：一个真的在找回密码的人，
+# 连点两次「没收到，重发」已经是上限行为；再多就不是找回密码了。
+# Reset emails one address can trigger per hour. Three is the ceiling of genuine
+# behaviour — someone who really lost their password clicks "resend" twice at
+# most; beyond that it isn't password recovery.
+RESET_MAX_PER_HOUR = 3
+_RESET_COUNT_KEY = "pwreset:{email}"
 
 
 def hash_token(raw: str) -> str:
@@ -57,22 +66,68 @@ def _aware(dt: datetime | None) -> datetime | None:
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def too_many_recent_requests(email: str) -> bool:
+    """这个邮箱在最近一小时里是不是已经申请过 RESET_MAX_PER_HOUR 次了。
+
+    **为什么要按邮箱数**：路由上的限流是按 IP 的（3/分钟），而这个端点是匿名的、
+    收件人由请求方指定——攻击者换一个出口 IP 就能接着对**同一个受害者邮箱**触发
+    发信。后果是三层：受害者收件箱被灌满（他什么都没做）、我们的 Resend 额度被
+    烧、以及发信域名因为投诉率上升被标记，最后一层会波及全站所有邮件。
+    这与登录锁定按邮箱计数是同一个道理：IP 限流挡不住轮换 IP 打同一个标的。
+
+    计数存在 shared_state（配了 REDIS_URL 就是全体 worker 共享的一份），与
+    core/rate_limit 的失败锁定用的是同一套后端；这里只调用它，不改那个模块。
+    固定一小时窗口：incr_with_ttl 在第一次写入时定 TTL，键过期即归零。
+
+    判定失败一律放行（fail-open）：这是防滥用，不是鉴权。Redis 抖动的时候，
+    让真用户拿不到重置邮件比多发几封信严重得多。
+
+    Whether this address has already asked RESET_MAX_PER_HOUR times this hour.
+    The route's limiter is per IP, but this endpoint is anonymous and the
+    recipient is chosen by the caller, so rotating egress IPs keeps the mail
+    flowing at one victim: their inbox fills, our sending quota burns, and the
+    complaint rate can get the sending domain flagged — which hits every mail the
+    site sends. Same reasoning as the per-email login lockout. Counters live in
+    shared_state (one shared copy across workers with REDIS_URL), the same
+    backend core/rate_limit uses; this only calls it. Fails open on error: this
+    is abuse control, not authentication, and a Redis hiccup must not stop a real
+    user from recovering their account.
+    """
+    from app.services import shared_state
+
+    try:
+        n = shared_state.incr_with_ttl(_RESET_COUNT_KEY.format(email=email.lower()), 3600)
+    except Exception:  # noqa: BLE001
+        logger.warning("找回密码频次计数失败，放行 / reset-request counter failed, allowing", exc_info=True)
+        return False
+    return n > RESET_MAX_PER_HOUR
+
+
 def issue_token(db: Session, user: User, requested_ip: str | None = None) -> str:
     """给这个用户签发一个新令牌，返回**明文**（只在这一刻存在）。
 
     顺手清掉这个人已经过期或用过的旧行：这张表只在申请时写入，没有别的清理时
     机，不清就会随时间无限长大。
+
+    删除条件必须**同时**包含"用过的"和"已过期的"。原来只删 `used_at IS NOT NULL`，
+    而绝大多数令牌的结局恰恰是"发出去了、用户没点、30 分钟后过期"——那批行一条
+    都清不掉，这张表于是只增不减，而 docstring 与模型注释都写着会清理过期行，
+    没人会去查。
     """
+    now = _now()
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,
-        PasswordResetToken.used_at.isnot(None),
+        or_(
+            PasswordResetToken.used_at.isnot(None),
+            PasswordResetToken.expires_at < now,
+        ),
     ).delete(synchronize_session=False)
 
     raw = secrets.token_urlsafe(_TOKEN_BYTES)
     db.add(PasswordResetToken(
         user_id=user.id,
         token_hash=hash_token(raw),
-        expires_at=_now() + timedelta(minutes=settings.PASSWORD_RESET_TTL_MINUTES),
+        expires_at=now + timedelta(minutes=settings.PASSWORD_RESET_TTL_MINUTES),
         requested_ip=requested_ip,
     ))
     return raw
@@ -100,7 +155,14 @@ def consume_token(db: Session, raw: str) -> User | None:
     user = db.query(User).filter(User.id == row.user_id).first()
     if user is None:
         # 账号在申请与点击之间被删了。令牌照样作废，不留一个指向空用户的活令牌。
+        # 这一支必须自己 commit：调用方（auth.reset_password）拿到 None 就直接抛
+        # HTTPException，那条路径上没有任何 commit，作废写进 session 就随请求结束
+        # 一起回滚了——注释说"照样作废"，实际一次也没作废过。
+        # This branch commits on its own: the caller raises on None and never
+        # commits, so the invalidation would roll back with the request. The
+        # comment said the token is voided; without this it never was.
         row.used_at = _now()
+        db.commit()
         return None
 
     now = _now()

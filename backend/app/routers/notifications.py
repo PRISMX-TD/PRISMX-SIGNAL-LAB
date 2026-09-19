@@ -15,6 +15,7 @@ what the user pressed the button on is one "notifications" panel, not two system
 import json
 import re
 from datetime import datetime, timezone
+from typing import Annotated
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -52,6 +53,27 @@ from app.services.push_dispatch import (
 
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
+# 白名单里单个条目的长度上限。指标类别与品种代码都是十几个字符量级；卡住它是为了
+# 不让 64 个条目各自带上几 KB，把上面那条"最多 64 个"绕过去。
+# Per-item length cap for the whitelists: categories and symbol codes run to a
+# dozen characters, and bounding them stops 64 multi-kilobyte items from walking
+# around the item-count cap.
+_PrefItem = Annotated[str, Field(max_length=64)]
+
+# 每个用户最多保留多少条推送订阅。一条订阅 = 一台设备上的一个浏览器/一个 App
+# 安装，正常人手里最多三五台；20 是给"换过几台设备、重装过几次浏览器"留的余量。
+# 没有上限时，脚本可以注册上千条，而**每一条信号派发都要逐条 _send_one 一次真实
+# 的网络请求**——那不是存储问题，是让一个用户就能把派发线程拖到几分钟一轮。
+# 超出时淘汰最旧的：新订阅一定是当前这台设备，留着它比留一条几个月前的死订阅
+# 有意义（死订阅本来也会在派发失败时被清理，只是时机不定）。
+# Cap on stored push subscriptions per user. One row is one browser or app
+# install; a real person has a handful, and 20 leaves room for replaced devices
+# and reinstalls. Uncapped, a script can register thousands — and every signal
+# dispatch makes one real HTTP request per row, so a single user could stretch a
+# dispatch pass into minutes. Over the cap the oldest rows go: the new one is the
+# device in the user's hand, which beats keeping a months-dead endpoint.
+MAX_PUSH_SUBSCRIPTIONS_PER_USER = 20
+
 # ---- 通知偏好 / Notification prefs ----
 
 
@@ -74,8 +96,22 @@ class NotificationPrefsOut(BaseModel):
 
 class NotificationPrefsIn(BaseModel):
     enabled: bool = False
-    selected_categories: list[str] = Field(default_factory=list)
-    selected_symbols: list[str] = Field(default_factory=list)
+    # 两个白名单都卡长度与元素长度。它们整份序列化成 JSON 存在
+    # notification_prefs 的一列里，而**每一条信号派发都要把它读出来解析一遍**
+    # （push_dispatch 按类别/品种过滤），所以这一列撑大不只是占存储，是给每次
+    # 派发都加一次大字段读 + JSON 解析。上限取现实值的数倍：指标类别与活跃品种
+    # 都只有几十个量级，64 足够，同时把"塞进上千个 UUID"挡在外面。
+    # event_types 不限长——它在写入前就被 EVENT_TYPES 过滤成已知值了（见
+    # put_prefs），上限由那个集合本身给出。
+    # Both whitelists are bounded in length and element size. They are serialized
+    # into one column that every signal dispatch reads and parses to filter by
+    # category/symbol, so an inflated list costs a wide read plus a JSON parse on
+    # every push, not just disk. The caps are multiples of reality (categories
+    # and active symbols number in the dozens) while ruling out a thousand UUIDs.
+    # event_types needs no cap: put_prefs filters it against EVENT_TYPES first,
+    # so that set is its bound.
+    selected_categories: list[_PrefItem] = Field(default_factory=list, max_length=64)
+    selected_symbols: list[_PrefItem] = Field(default_factory=list, max_length=64)
     event_types: list[str] = Field(default_factory=list)
     # 时段三项是可选字段：请求里不带 = 不改动（老版本前端/快捷开关不会把已存
     # 的时段清掉），显式传 null = 清除限制。
@@ -331,8 +367,43 @@ def push_subscribe(
                 keys_auth=auth,
             )
         )
+        # 超出上限就淘汰最旧的几条（见 MAX_PUSH_SUBSCRIPTIONS_PER_USER）。
+        # 只在**新增**这一支做：更新一条已有订阅不会让总数变多。
+        # 用 flush 而不是先 commit 再删：整件事（新增 + 淘汰）要么一起成，要么
+        # 一起不成，不能出现"新的加进去了、旧的没删掉"的中间态。
+        # Trim the oldest rows once over the cap, and only on the insert branch —
+        # refreshing an existing row doesn't change the count. flush rather than a
+        # separate commit so the insert and the eviction land together.
+        db.flush()
+        _prune_push_subscriptions(db, current_user.id)
     db.commit()
     return {"ok": True}
+
+
+def _prune_push_subscriptions(db: Session, user_id: str) -> None:
+    """把这个用户超出上限的订阅删掉，最旧的先走。
+
+    按 created_at 升序取出"多出来的那几条"再按 id 删，而不是写一条带
+    OFFSET 的 DELETE：不同数据库对 DELETE ... LIMIT/OFFSET 的支持不一致
+    （SQLite 默认编译就不带），两条查询在这里不值得为之冒方言风险。
+
+    Drop this user's over-quota subscriptions, oldest first. Two queries rather
+    than a DELETE with OFFSET, whose support differs across databases (SQLite
+    doesn't compile it in by default) for no gain at this size.
+    """
+    rows = (
+        db.query(PushSubscription.id)
+        .filter(PushSubscription.user_id == user_id)
+        .order_by(PushSubscription.created_at.asc())
+        .all()
+    )
+    excess = len(rows) - MAX_PUSH_SUBSCRIPTIONS_PER_USER
+    if excess <= 0:
+        return
+    doomed = [r[0] for r in rows[:excess]]
+    db.query(PushSubscription).filter(PushSubscription.id.in_(doomed)).delete(
+        synchronize_session=False
+    )
 
 
 @router.post("/push/unsubscribe")

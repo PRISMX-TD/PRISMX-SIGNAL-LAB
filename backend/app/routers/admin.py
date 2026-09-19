@@ -14,11 +14,12 @@ access there's a record to check against.
 import json
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
@@ -28,7 +29,8 @@ from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.admin_overview import build_overview, potential_customers as build_potential_customers
 from app.services.admin_trader_levels import DEFAULT_USER_LIMIT, LEVEL_COUNT, level_rows, level_users
-from app.services.stats_time import RangeError, RangeSpec, day_start_utc, local_day, resolve_range, today as stats_today
+from app.services.pagination import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, resolve_range_or_422
+from app.services.stats_time import day_start_utc, local_day, today as stats_today
 from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
@@ -64,8 +66,17 @@ from app.services.settings_store import (
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-PAGE_SIZE_DEFAULT = 50
-PAGE_SIZE_MAX = 200
+# 分页常量与范围解析都搬去了 services/pagination.py（理由见那个模块的开头）。
+# 这里保留同名别名，本文件几十处调用点不动——与下面 _log_change 的处理一致。
+# Both moved to services/pagination.py (see its docstring); same-named aliases
+# keep this file's call sites untouched, exactly like _log_change below.
+_resolve_range_or_422 = resolve_range_or_422
+
+
+def _like_escape(value: str) -> str:
+    """把 LIKE 的元字符转义掉，供 `ilike(..., escape="\\\\")` 使用。
+    Escape LIKE metacharacters for use with `ilike(..., escape="\\\\")`."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _user_out(u: User, account_count: int) -> AdminUserOut:
@@ -123,11 +134,25 @@ def list_users(
         # forcing them to resolve it to an email first would make the column
         # useless. Numbers are stored E.164 but typed without the +, or with a
         # local trunk zero, so a digits-only query also matches by suffix.
-        like = f"%{q}%"
-        conds = [User.email.ilike(like), User.phone.ilike(like)]
-        digits = "".join(ch for ch in q if ch.isdigit())
+        # LIKE 的通配符要先转义再拼进模式串：搜索词里的 % 会匹配任意串、_ 匹配任意
+        # 单字符，管理员搜 "a_b@x.io" 时命中的会是一批毫不相干的人，而这类"结果多
+        # 了几个"在人工核对时极难察觉。escape 字符本身也要先转义，否则 `\` 结尾的
+        # 查询词会让数据库报语法错。
+        # Escape LIKE wildcards before building the pattern: a % or _ typed into
+        # the box silently widens the match, and "a few extra rows" is the kind of
+        # wrongness nobody notices by eye. The escape character itself goes first,
+        # or a trailing backslash becomes a syntax error.
+        like = f"%{_like_escape(q)}%"
+        conds = [User.email.ilike(like, escape="\\"), User.phone.ilike(like, escape="\\")]
+        digits = "".join(ch for ch in q if ch.isdigit()).lstrip("0")
+        # 去掉前导 0 之后可能什么都不剩（q="000"）。那时这个后缀条件会退化成
+        # `phone LIKE '%'`，把所有填了手机号的用户都捞出来——搜索框里打三个零，
+        # 返回的却是半个用户表。纯数字都被吃光就等于没有号码可搜，跳过即可。
+        # Stripping leading zeros can leave nothing (q="000"), and the suffix
+        # condition would degrade to `phone LIKE '%'` — typing three zeros would
+        # return every user who has a phone number. No digits left, no suffix match.
         if digits:
-            conds.append(User.phone.ilike(f"%{digits.lstrip('0')}"))
+            conds.append(User.phone.ilike(f"%{_like_escape(digits)}", escape="\\"))
         query = query.filter(or_(*conds))
     if plan:
         query = query.filter(User.plan == plan)
@@ -157,6 +182,37 @@ def list_users(
 # router）。这里保留同名别名，本文件几十处调用点不动。
 # Audit logging lives in services/audit.py now; same-named alias keeps call sites.
 _log_change = log_change
+
+
+def _log_settings_diff(db: Session, admin_id: str, prefix: str, old: dict, new: dict) -> None:
+    """平台设置的审计：逐键比较，只给**真的变了**的键各写一条带旧值的行。
+
+    此前这一批端点全是 `_log_change(..., f"setting:{prefix}", None, json.dumps(new))`
+    ——old_value 恒为 None。审计行存在的唯一理由是回答"改之前是多少"，记一个
+    永远是 null 的旧值等于没记：定价被调过一次之后，再想知道上一档价格只能翻
+    数据库备份。合作券商锁那个端点（put_settings）本来就是逐键 diff 的写法，
+    这里把其余八处统一成同一套。
+
+    逐键而不是整份：整份 JSON 的 diff 要人眼比对两个几百字符的字符串才能看出
+    改了哪一项，而按键拆开之后「谁把年付价从 199 改成 99」是一行就能读懂的事。
+    值统一走 json.dumps，避免 True/"true"、1/1.0 这类 str() 差异被误判成变化。
+
+    Per-key audit for the platform-settings endpoints. These all used to log a
+    None old_value, which defeats the only purpose an audit row has — answering
+    "what was it before". The partner-broker endpoint (put_settings) already
+    diffs per key; this brings the other eight in line. Per key rather than
+    whole-document because a JSON blob diff has to be eyeballed, and values go
+    through json.dumps so True vs "true" isn't mistaken for a change.
+    """
+    for key, new_value in new.items():
+        _log_change(
+            db,
+            admin_id,
+            admin_id,
+            f"setting:{prefix}:{key}",
+            json.dumps(old.get(key), ensure_ascii=False),
+            json.dumps(new_value, ensure_ascii=False),
+        )
 
 
 @router.patch("/users/bulk", response_model=dict)
@@ -310,14 +366,6 @@ def put_settings(
     db.commit()
     invalidate_settings_cache()
     return _broker_settings_out(get_broker_settings(db))
-
-
-def _resolve_range_or_422(range_: str | None, from_: date | None, to: date | None) -> RangeSpec:
-    """看板的时间范围参数。预设由后端解析（见 stats_time），非法一律 422。"""
-    try:
-        return resolve_range(range_, from_, to, stats_today())
-    except RangeError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
 
 
 @router.get("/overview", response_model=AdminOverviewOut)
@@ -655,9 +703,10 @@ def put_winrate_publication_settings(
     # that carried no strategy name) is never publishable: it renders as "unnamed
     # strategy", and publishing a nameless one means nothing to a user.
     names = sorted({n.strip() for n in body.publicStrategies if n.strip()})
-    save_winrate_settings(db, {"public_strategies": names})
-    _log_change(db, admin.id, admin.id, "setting:winrate", None,
-                json.dumps({"public_strategies": names}, ensure_ascii=False))
+    old = get_winrate_settings(db)
+    data = {"public_strategies": names}
+    save_winrate_settings(db, data)
+    _log_settings_diff(db, admin.id, "winrate", old, data)
     db.commit()
     invalidate_winrate_settings_cache()
     return get_winrate_publication_settings(db, admin)
@@ -701,6 +750,27 @@ def put_pricing(
     `if ...: pass`, but an empty branch reads like something is missing; a sentence
     says it better.
     """
+    # 价格必须为正、折扣不能到 100%：schema 只卡了 ge=0 / le=100，而 0 元套餐和
+    # 100% 折扣都会算出 0 元订单 —— NOWPayments 直接拒收，用户侧看到的是一句
+    # "支付订单创建失败"（502），没人会想到是后台把价格设成了 0。价格本身是运营
+    # 决策（年付贵过月付也随他），但"0 元 PRO"不是定价，是个开不了的口子。
+    # 约束写在路由里而不是 schema：那份 schema 归另一处维护，见审计报告 F-12。
+    # Prices must be positive and a sale cannot reach 100%: the schema only bounds
+    # ge=0 / le=100, but either extreme produces a zero-value order that
+    # NOWPayments refuses, surfacing to the user as "could not create the payment"
+    # with nothing pointing at the admin who typed a 0. Pricing itself stays an
+    # operational call; a free PRO plan isn't pricing, it's an open door.
+    if body.proMonthlyPrice <= 0 or body.proYearlyPrice <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="套餐价格必须大于 0 / plan prices must be greater than zero",
+        )
+    if body.saleEnabled and body.salePercent >= 100:
+        raise HTTPException(
+            status_code=400,
+            detail="折扣必须小于 100% / the sale percentage must be below 100",
+        )
+    old = get_pricing_settings(db)
     data = {
         "pro_monthly_price": body.proMonthlyPrice,
         "pro_yearly_price": body.proYearlyPrice,
@@ -710,7 +780,7 @@ def put_pricing(
         "sale_end_at": body.saleEndAt.strip() or None,
     }
     save_pricing_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:pricing", None, json.dumps(data))
+    _log_settings_diff(db, admin.id, "pricing", old, data)
     db.commit()
     invalidate_pricing_cache()
     return get_pricing(db, admin)
@@ -738,12 +808,13 @@ def put_trial(
     admin: User = Depends(require_admin),
 ):
     """保存免费试用设置。Save free-trial settings."""
+    old = get_trial_settings(db)
     data = {
         "trial_enabled": body.trialEnabled,
         "trial_days": body.trialDays,
     }
     save_trial_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:trial", None, json.dumps(data))
+    _log_settings_diff(db, admin.id, "trial", old, data)
     db.commit()
     invalidate_trial_cache()
     return get_trial(db, admin)
@@ -772,13 +843,14 @@ def put_email_gate(
     admin: User = Depends(require_admin),
 ):
     """保存一次性邮箱闸门设置。Save the disposable-email gate settings."""
+    old = get_email_gate_settings(db)
     data = {
         "disposable_block_enabled": body.disposableBlockEnabled,
         "extra_blocked_domains": body.extraBlockedDomains,
         "extra_allowed_domains": body.extraAllowedDomains,
     }
     save_email_gate_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:email_gate", None, json.dumps(data, ensure_ascii=False))
+    _log_settings_diff(db, admin.id, "email_gate", old, data)
     db.commit()
     invalidate_email_gate_cache()
     return get_email_gate(db, admin)
@@ -809,6 +881,7 @@ def put_social(
     admin: User = Depends(require_admin),
 ):
     """保存官方社交主页地址。Save the official social links."""
+    old = get_social_settings(db)
     data = {
         "facebook_url": body.facebookUrl,
         "instagram_url": body.instagramUrl,
@@ -817,7 +890,7 @@ def put_social(
         "telegram_url": body.telegramUrl,
     }
     save_social_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:social", None, json.dumps(data))
+    _log_settings_diff(db, admin.id, "social", old, data)
     db.commit()
     invalidate_social_cache()
     return get_social(db, admin)
@@ -844,9 +917,10 @@ def put_candle_history(
     """保存 K 线历史保留天数（只影响 1 分钟线；其余周期永久保留）。
     Save the candle-history retention window (only affects 1-minute candles;
     other intervals are kept permanently)."""
+    old = get_candle_settings(db)
     data = {"m1_retention_days": body.m1RetentionDays}
     save_candle_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:candle_history", None, json.dumps(data))
+    _log_settings_diff(db, admin.id, "candle_history", old, data)
     db.commit()
     invalidate_candle_cache()
     return get_candle_history(db, admin)
@@ -876,9 +950,10 @@ def put_strategy_platform_settings(
     """保存自定义策略平台设置（每用户策略数上限、是否 PRO 专属）。
     Save the custom-strategy platform settings (max strategies per user,
     whether the feature is PRO-exclusive)."""
+    old = get_strategy_settings(db)
     data = {"max_strategies_per_user": body.maxStrategiesPerUser, "pro_only": body.proOnly}
     save_strategy_settings(db, data)
-    _log_change(db, admin.id, admin.id, "setting:strategy", None, json.dumps(data))
+    _log_settings_diff(db, admin.id, "strategy", old, data)
     db.commit()
     invalidate_strategy_settings_cache()
     return get_strategy_platform_settings(db, admin)
@@ -920,6 +995,7 @@ def put_strategy_cost_settings(
     """保存交易成本配置：写审计日志、提交后失效缓存，与 candle-history 同构。
     Save the trading-cost config: audit-logged, cache invalidated after commit;
     same shape as the candle-history endpoint."""
+    old = get_strategy_costs(db)
     data = {
         "default_spread": body.defaultSpread,
         "default_commission_per_lot": body.defaultCommissionPerLot,
@@ -934,7 +1010,7 @@ def put_strategy_cost_settings(
         },
     }
     save_strategy_costs(db, data)
-    _log_change(db, admin.id, admin.id, "setting:strategy_costs", None, json.dumps(data))
+    _log_settings_diff(db, admin.id, "strategy_costs", old, data)
     db.commit()
     invalidate_strategy_costs_cache()
     return get_strategy_cost_settings(db, admin)
@@ -944,25 +1020,47 @@ def put_strategy_cost_settings(
 
 @router.post("/upload-image", response_model=dict)
 async def upload_admin_image(
+    request: Request,
     file: UploadFile = File(...),
     _admin: User = Depends(require_admin),
 ):
     """上传一张策略配图，返回公开 URL。仅管理员。
 
-    只读一次到内存并在读完后按上限判断：策略配图上限 4MB（见 UPLOAD_MAX_BYTES），
-    不值得为它引入流式落盘。注意不能信任 Content-Length——它由客户端提供，所以
-    实际拦截依据是读到的字节数。
+    两道大小判断，缺一不可：
+    ① **先看声明的大小**（starlette 从 multipart 分片算出的 `file.size`，回落到
+       请求头 Content-Length）。这一道纯粹是为了别把几百 MB 先 spool 到临时文件
+       再整段读进内存——传错文件的人不该顺手把服务端的内存吃掉。
+    ② **再看真正读到的字节数**（upload_image 内部那道）。声明值由客户端提供，
+       可以随便写，所以它只配当快速拒绝的依据，永远不是最终裁决。
+
+    删掉①会回到"先读完再说"，删掉②会让一个谎报 Content-Length 的请求直接绕过
+    上限——两道各防一件事，别合并成一道。
+
     Upload one strategy illustration and return its public URL. Admin only.
 
-    The file is read into memory once and checked against the cap afterwards:
-    illustrations are capped at 4MB (see UPLOAD_MAX_BYTES), which doesn't justify
-    streaming to disk. Content-Length is client-supplied and therefore not
-    trusted; the real check is on the bytes actually read.
+    Two size checks, both load-bearing. The declared size (starlette's
+    multipart-derived `file.size`, falling back to Content-Length) is checked
+    first, purely to avoid spooling hundreds of megabytes to a temp file and
+    reading them into memory before finding out. It is client-supplied, so it can
+    only ever justify a fast rejection — the authoritative check stays on the
+    bytes actually read (inside upload_image). Neither replaces the other.
     """
     if not is_upload_configured():
         raise HTTPException(
             status_code=503,
             detail="后台未配置图片存储，请改用外链图片地址 / Image storage isn't configured; use an external image URL instead",
+        )
+    declared = file.size
+    if declared is None:
+        try:
+            declared = int(request.headers.get("content-length") or 0) or None
+        except ValueError:
+            declared = None
+    if declared is not None and declared > settings.UPLOAD_MAX_BYTES:
+        mb = settings.UPLOAD_MAX_BYTES / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"图片超过 {mb:.0f}MB 上限 / the image exceeds the {mb:.0f}MB limit",
         )
     data = await file.read()
     try:
@@ -1025,8 +1123,18 @@ def put_admin_platform_strategies(
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=400, detail="策略 id 重复 / duplicate strategy id")
     items = [it.model_dump() for it in body.items]
+    # 这一处只记 id 清单而不是整份内容：介绍文本一条可能上千字，把新旧两份整体
+    # 写进审计表既撑爆表也没人读得动。能回答"哪条被删了/加了/换了顺序"就够，
+    # 具体文案的历史不归审计表管。
+    # Only the id list is audited here, not the write-ups themselves: one entry
+    # can run to thousands of characters, and storing both copies would bloat the
+    # table without being readable. "Which entries came, went or moved" is what
+    # this row needs to answer; prose history isn't the audit table's job.
+    old_ids = [it.get("id") for it in get_platform_strategies(db)["items"]]
     save_platform_strategies(db, items)
-    _log_change(db, admin.id, admin.id, "setting:platform_strategies", None, json.dumps({"count": len(items), "ids": ids}, ensure_ascii=False))
+    _log_settings_diff(
+        db, admin.id, "platform_strategies", {"ids": old_ids}, {"ids": ids}
+    )
     db.commit()
     invalidate_platform_strategies_cache()
     return get_admin_platform_strategies(db, admin)
