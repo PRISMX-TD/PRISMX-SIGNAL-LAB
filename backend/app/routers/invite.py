@@ -42,8 +42,9 @@ from app.schemas import (
     InviteLinkUpdate,
 )
 from app.services.account_type import CONTEST, DEMO, REAL
-from app.services.deps import get_current_user, require_admin
+from app.services.deps import get_current_user, is_account_online, require_admin
 from app.services.gamification import mask_account
+from app.services.gateway_binding import is_revoked, not_removed
 from app.services.settings_store import get_trial_settings
 from app.services.stats_time import today as stats_today
 
@@ -367,7 +368,9 @@ def _mt5_users(db: Session, codes: list[str]) -> dict[str, int]:
     """每条链接名下「至少有一个有效 MT5 绑定」的人数。
 
     已撤销的绑定（revoked_at 非空）不算：那条连接此刻是断的，算进来会让代理以为
-    人还挂着。COUNT(DISTINCT user_id) 而不是数账号——一人绑两个仍是一个人。
+    人还挂着。这一条同时也把用户自己解绑的软删行挡在外面——两者共用 revoked_at，
+    而这里要的正是"两种都不算"。COUNT(DISTINCT user_id) 而不是数账号——一人绑两
+    个仍是一个人。
 
     Per-link count of people holding at least one live MT5 binding. Revoked rows
     are excluded (that connection is down right now) and the count is DISTINCT on
@@ -400,31 +403,56 @@ def _last_active_days(db: Session, user_ids: list[str]) -> dict[str, date]:
 
 
 def _mt5_accounts(db: Session, user_ids: list[str]) -> dict[str, list[AgentMT5AccountOut]]:
-    """这批用户各自的 MT5 绑定，最近连接的在前；下发前打码，见 AgentMT5AccountOut。
+    """这批用户各自的 MT5 绑定，在线的在前；下发前打码，见 AgentMT5AccountOut。
+
+    三处口径都不是本文件自己定的，全部复用全站唯一的判定，别在这里另写一套：
+    - 软删的行（用户自己在界面上解绑）用 not_removed() 排除，与所有"当前有效
+      账号"的查询一致——对代理来说那个账号等于不存在，既不该列出来，更不该被
+      说成"需重连"；
+    - 「需重连」走 gateway_binding.is_revoked，它对桥接行恒为 False：桥接的凭证
+      在用户自己手里，密码改了就是登不上、没有心跳，不套这套语义；
+    - 在线走 deps.is_account_online（账户页同一口径）：直连 = 未撤销且网关可达，
+      桥接 = 心跳在窗口内。**直连从不写 last_heartbeat**，所以那一列不能当作两条
+      通道通用的"最近连接"——首版这么干，结果每个直连账号都显示「从未连接」。
 
     排序在 Python 侧做：从没连过的行 last_heartbeat 是 NULL，而 NULL 在 ORDER BY
     DESC 里的位置 SQLite 与 Postgres 正好相反（一个排最后、一个排最前），交给库
     排会出现"本地看着对、线上顺序全反"。
 
-    MT5 bindings per user, most recently seen first, masked on the way out.
+    MT5 bindings per user, online ones first, masked on the way out. All three
+    verdicts reuse the single site-wide definition rather than re-deriving one
+    here: soft-removed rows are excluded via not_removed(); "needs re-verify"
+    comes from gateway_binding.is_revoked (always False for bridge rows); online
+    comes from deps.is_account_online. The gateway never writes last_heartbeat,
+    so that column is not a channel-agnostic "last connected" — the first cut
+    used it as one and rendered every gateway account as "never connected".
     Sorted in Python because NULL last_heartbeat sorts opposite ways under
-    SQLite and Postgres in ORDER BY ... DESC — leaving it to the database gives
-    one order locally and the reverse in production.
+    SQLite and Postgres in ORDER BY ... DESC.
     """
     if not user_ids:
         return {}
-    rows = db.query(MT5Account).filter(MT5Account.user_id.in_(user_ids)).all()
-    # 从没心跳过的按 datetime.min 排，于是自然落到最后 / never-seen rows sort last
-    rows.sort(key=lambda a: a.last_heartbeat or datetime.min, reverse=True)
+    rows = (
+        db.query(MT5Account)
+        .filter(MT5Account.user_id.in_(user_ids), not_removed())
+        .all()
+    )
+    # 在线的排最前，其余按最近心跳倒序（没心跳的按 datetime.min 落到最后）。
+    # Online first, then by most recent heartbeat; never-seen rows sort last.
+    rows.sort(key=lambda a: (is_account_online(a), a.last_heartbeat or datetime.min), reverse=True)
     out: dict[str, list[AgentMT5AccountOut]] = {}
     for a in rows:
+        gateway = getattr(a, "source", None) == "gateway"
         out.setdefault(a.user_id, []).append(
             AgentMT5AccountOut(
                 login=mask_account(a.login),
                 server=a.server,
                 accountType=_TRADE_MODE_NAME.get(a.trade_mode),
-                lastConnectedAt=a.last_heartbeat,
-                revoked=a.revoked_at is not None,
+                channel="gateway" if gateway else "bridge",
+                online=is_account_online(a),
+                # 直连行这一列永远是 NULL，前端也不读；照原样给桥接行用。
+                # Always NULL on gateway rows (and unread there); real for bridge.
+                lastConnectedAt=None if gateway else a.last_heartbeat,
+                revoked=is_revoked(a),
             )
         )
     return out

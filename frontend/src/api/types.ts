@@ -189,7 +189,19 @@ export interface AgentMT5Account {
   login: string
   server: string | null
   accountType: 'real' | 'demo' | 'contest' | null
+  // gateway = 平台与券商直连（用户不用开电脑），bridge = 用户电脑上的桥接程序。
+  // 「还连着吗」在两条通道上不是一回事：online 两边都算得准，而 lastConnectedAt
+  // **只有桥接有**——直连根本不写心跳，对直连行它恒为 null，别拿它说"从未连接"。
+  // gateway = the platform talks to the broker directly; bridge = the user's own
+  // desktop app. online is meaningful on both; lastConnectedAt is bridge-only,
+  // because the gateway never writes a heartbeat — never render it as "never
+  // connected" on a gateway row.
+  channel: 'gateway' | 'bridge'
+  online: boolean
   lastConnectedAt: string | null
+  // 只对直连行成立：券商侧密码变过，这次绑定的授权作废，要用户重新验证主密码。
+  // Gateway rows only: the broker-side password changed, so this binding needs
+  // the user to verify their master password again.
   revoked: boolean
 }
 

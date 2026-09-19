@@ -39,6 +39,25 @@ const isRecentDay = (day: string) => day >= statsDay(Date.now() - 6 * 86_400_000
 
 const MT5_TYPE_KEY = { real: 'agent.mt5Real', demo: 'agent.mt5Demo', contest: 'agent.mt5Contest' } as const
 
+// 一条绑定此刻怎么说。分通道，因为「还连着吗」在两条通道上根本不是一回事：
+// 直连由平台与券商保持连接，用户不用开电脑，压根没有"最近连接时间"这个概念
+// （后端也不写心跳）；桥接要用户电脑上的程序在跑，离线时说"上次是什么时候"
+// 才有意义。首版对两条通道一视同仁地读心跳，于是每个直连账号都显示「从未连接」。
+// What one binding says right now, per channel — "still connected?" is not the
+// same question on the two. A gateway binding is held by the platform and has no
+// last-seen concept at all (no heartbeat is ever written); a bridge binding is up
+// only while the user's desktop app runs, so its last-seen time is worth saying.
+// The first cut read the heartbeat on both and called every gateway account
+// "never connected".
+type TFn = ReturnType<typeof useTranslation>['t']
+
+function connectionText(a: AgentMT5Account, t: TFn): string {
+  if (a.online) return t('agent.mt5Online')
+  if (a.channel === 'gateway') return t('agent.mt5Offline')
+  if (a.lastConnectedAt) return t('agent.mt5Last', { time: fmtTime(a.lastConnectedAt) })
+  return t('agent.mt5Never')
+}
+
 function LastActive({ day }: { day: string | null }) {
   const { t } = useTranslation()
   if (!day) return <span className="text-neutral-500">{t('agent.neverActive')}</span>
@@ -84,9 +103,8 @@ function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
               a phone and nothing on desktop. */}
           <p className="break-words text-[11px] text-neutral-500">
             {a.server ? `${a.server} · ` : ''}
-            {a.lastConnectedAt
-              ? t('agent.mt5Last', { time: fmtTime(a.lastConnectedAt) })
-              : t('agent.mt5Never')}
+            {t(a.channel === 'gateway' ? 'agent.mt5Gateway' : 'agent.mt5Bridge')} ·{' '}
+            <span className={a.online ? 'text-up' : undefined}>{connectionText(a, t)}</span>
           </p>
         </li>
       ))}
@@ -278,6 +296,7 @@ export default function AgentPage() {
         <div className="mt-3 space-y-1 text-xs leading-relaxed text-neutral-500">
           <p>{t('agent.clicksNote')}</p>
           <p>{t('agent.statsNote')}</p>
+          <p>{t('agent.mt5Note')}</p>
         </div>
       )}
 

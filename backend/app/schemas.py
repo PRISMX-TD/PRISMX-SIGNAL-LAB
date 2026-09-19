@@ -1526,13 +1526,38 @@ class AgentMT5AccountOut(BaseModel):
     # Mapped from trade_mode; trade_mode_source is withheld — self-reported vs
     # broker-derived is a risk-control distinction an agent would misread.
     accountType: Literal["real", "demo", "contest"] | None = None
-    # 最近一次心跳（桥接/网关在线上报）；从未连过为 null。
-    # Last heartbeat from the bridge/gateway; null if it never connected.
+    # 这个账号走哪条通道：gateway = 平台与券商直连（用户不必开电脑），
+    # bridge = 用户自己电脑上的桥接程序上报。**必须下发**：两条通道的"还连着吗"
+    # 是两种东西，只给一个时间或一个布尔值，前端没法说人话（见 lastConnectedAt）。
+    # Which channel this binding uses: gateway (the platform talks to the broker
+    # directly, the user's machine is not involved) or bridge (reported by the
+    # user's own desktop app). Shipped deliberately: "still connected?" means two
+    # different things on the two channels.
+    channel: Literal["gateway", "bridge"]
+    # 此刻是否在线，后端算好（services.deps.is_account_online，与账户页同一口径）：
+    # 直连 = 未撤销且网关可达；桥接 = 心跳在 7 秒窗口内。
+    # Whether it is online right now, computed server-side with the same helper
+    # the account page uses: gateway = not revoked and the gateway is reachable;
+    # bridge = heartbeat within the 7-second window.
+    online: bool = False
+    # 最近一次心跳 —— **只有桥接通道有**。直连从不写这一列（平台直连券商，没有
+    # 用户侧心跳这回事），所以对直连行它永远是 null，前端也不拿它说话。
+    # 2026-09-19 首版把它当成两条通道通用的"最近连接时间"，于是每个直连账号都被
+    # 显示成「从未连接」；别再把这一列当通用信号用。
+    # Last heartbeat — bridge channel only. The gateway never writes it (there is
+    # no user-side heartbeat when the platform talks to the broker itself), so it
+    # is always null on gateway rows and the frontend does not read it there. The
+    # first cut treated it as a channel-agnostic "last connected" and rendered
+    # every gateway account as "never connected"; do not reintroduce that.
     lastConnectedAt: datetime | None = None
-    # True = 这次绑定已失效，需用户重新验证（见 MT5Account.revoked_at）。列出来而
-    # 不是隐藏：代理看见"绑过但掉了"才知道要去提醒人重连。
-    # True = binding revoked, needs re-verification. Shown rather than hidden so
-    # the agent can tell the person to reconnect.
+    # True = 这次直连绑定的授权已作废，需用户重新验证一次主密码（券商侧改过密码 /
+    # 账号转手 / 被重置，见 services/gateway_binding）。**只对直连行成立**：桥接的
+    # 凭证在用户自己手里，密码变了就是登不上、没有心跳，不套这套语义。
+    # 列出来而不是隐藏：代理看见"绑过但掉了"才知道要去提醒人重新验证。
+    # True = this gateway binding's authorisation is void and the user must
+    # re-verify their master password. Gateway rows only — a bridge credential
+    # lives on the user's machine, where a changed password simply stops the
+    # heartbeat. Listed rather than hidden so the agent can nudge them.
     revoked: bool = False
 
 

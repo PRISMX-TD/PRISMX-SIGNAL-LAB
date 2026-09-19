@@ -16,6 +16,7 @@ from app.routers.invite import (
     unassign_agent,
 )
 from app.services.account_type import DEMO, REAL
+from app.services.gateway_binding import REASON_PASSWORD_CHANGED, REASON_USER_REMOVED
 from app.services.stats_time import today as stats_today
 
 
@@ -247,6 +248,7 @@ def test_user_row_carries_last_active_day_and_masked_mt5(db_session):
     first = row.mt5Accounts[0]
     assert first.server == "B-Real 3"
     assert first.accountType == "real"
+    assert first.channel == "bridge"
     assert first.lastConnectedAt == datetime(2026, 9, 18, 6, 0)
     assert first.revoked is False
     assert row.mt5Accounts[1].accountType == "demo"
@@ -269,17 +271,72 @@ def test_user_row_without_activity_or_mt5_is_empty_not_zero(db_session):
     assert row.mt5Accounts == []
 
 
-def test_revoked_binding_is_listed_and_flagged(db_session):
-    """撤销的绑定仍然列出并标记——代理要看见"绑过但掉了"才会去提醒人重连。"""
+def test_revoked_gateway_binding_is_listed_and_flagged(db_session):
+    """撤销的直连绑定仍然列出并标「需重连」——代理要看见"绑过但掉了"才会去提醒人。"""
     admin = _mk_user(db_session, "a@x.io", role="admin")
     agent = _mk_user(db_session, "agent@x.io")
     link = _mk_link(db_session)
     assign_agent(db_session, admin, link, agent)
     u = _mk_user(db_session, "u@x.io", invite_code=link.code)
-    _mk_mt5(db_session, u, "88888888", revoked_at=datetime(2026, 9, 10), revoked_reason="password_changed")
+    _mk_mt5(db_session, u, "601130", source="gateway",
+            revoked_at=datetime(2026, 9, 10), revoked_reason=REASON_PASSWORD_CHANGED)
 
     row = agent_link_users(db_session, agent, link.id).users[0]
     assert len(row.mt5Accounts) == 1
+    assert row.mt5Accounts[0].channel == "gateway"
     assert row.mt5Accounts[0].revoked is True
+    assert row.mt5Accounts[0].online is False
     # 撤销原因不下发：那是风控内部口径 / the reason stays internal
     assert "revokedReason" not in row.mt5Accounts[0].model_dump()
+
+
+def test_gateway_binding_never_claims_never_connected(db_session):
+    """直连账号不写心跳：lastConnectedAt 恒为 null，在线与否由通道自己说了算。
+
+    首版拿 last_heartbeat 当两条通道通用的「最近连接」，于是每个直连账号都被显示
+    成「从未连接」——这条用例就是钉这个回归的。
+    """
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    u = _mk_user(db_session, "u@x.io", invite_code=link.code)
+    _mk_mt5(db_session, u, "601129", source="gateway", server="B-Real 3", trade_mode=REAL)
+
+    acc = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts[0]
+    assert acc.channel == "gateway"
+    assert acc.lastConnectedAt is None
+    assert acc.revoked is False
+
+
+def test_user_removed_binding_is_not_listed_at_all(db_session):
+    """用户自己解绑的账号（软删）对代理来说等于不存在：既不列出，也不算进已连人数。
+
+    软删与「需重连」共用 revoked_at，照 revoked_at 判会把它标成"需重连"，等于让
+    代理去催一个用户主动删掉的账号。
+    """
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    u = _mk_user(db_session, "u@x.io", invite_code=link.code)
+    _mk_mt5(db_session, u, "80499999", revoked_at=datetime(2026, 9, 10),
+            revoked_reason=REASON_USER_REMOVED)
+
+    assert agent_link_users(db_session, agent, link.id).users[0].mt5Accounts == []
+    assert agent_links(db_session, agent)[0].mt5Users == 0
+
+
+def test_bridge_row_is_never_flagged_for_reverification(db_session):
+    """桥接行不套「需重连」：那条通道的凭证在用户手里，密码改了就是没有心跳。"""
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    u = _mk_user(db_session, "u@x.io", invite_code=link.code)
+    _mk_mt5(db_session, u, "80488888", source="bridge",
+            revoked_at=datetime(2026, 9, 10), revoked_reason=REASON_PASSWORD_CHANGED)
+
+    acc = agent_link_users(db_session, agent, link.id).users[0].mt5Accounts[0]
+    assert acc.channel == "bridge"
+    assert acc.revoked is False
