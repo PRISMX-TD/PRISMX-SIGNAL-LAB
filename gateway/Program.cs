@@ -516,6 +516,8 @@ namespace Prismx.Mt5Gateway
             Console.WriteLine("用法:");
             Console.WriteLine("  mt5gateway.exe selftest [客户账号] [品种] [手数]   自检");
             Console.WriteLine("  mt5gateway.exe serve                              常驻服务");
+            Console.WriteLine("  mt5gateway.exe sym [关键词]                       搜券商品种表(默认 EURUSD)");
+            Console.WriteLine("  mt5gateway.exe closeall <账号> [品种]              平掉该账号全部/指定品种仓位");
             Console.WriteLine();
             Console.WriteLine("配置来自同目录的 gateway.ini。");
             Console.WriteLine();

@@ -76,7 +76,8 @@ comment_prefix = PRISMX
 # 服务器推来首个 tick(几十到几百毫秒)。这里点名的品种把这步提前到启动时做。
 # 下过单的品种会被自动记住、重连后自动重选,所以这项只影响"进程启动后每个品种
 # 的第一笔"。填错名字只会在日志里记一条警告,不影响其它品种。
-# 具体品种名先跑 selftest 或看 /symbols 的输出,例如:
+# 具体品种名先跑 selftest,或用 `mt5gateway.exe sym <关键词>` 搜品种表——网关没有
+# /symbols 接口(那是后端的 /api/symbols)。例如:
 #   preselect_symbols = XAUUSD.s, EURUSD.s, BTCUSD.s
 # 留空 = 不预选。
 preselect_symbols =

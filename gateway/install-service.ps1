@@ -309,8 +309,9 @@ if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
     Write-Note "删除了同名的旧任务"
 }
 
-# WorkingDirectory 必须设成 gateway 目录:程序用相对路径找 gateway.ini 和
-# bases\ 缓存目录,工作目录不对会直接起不来。这是最容易踩的坑。
+# WorkingDirectory 必须设成 gateway 目录:MT5 SDK 按**当前工作目录**建 bases\ 缓存
+# 目录,工作目录不对会直接起不来。这是最容易踩的坑。
+# (gateway.ini 不受此影响——Program.cs 按 exe 所在目录拼绝对路径找它。)
 $action = New-ScheduledTaskAction -Execute $ExePath -Argument "serve" -WorkingDirectory $GatewayDir
 
 # 两个触发器,各管一件事:
