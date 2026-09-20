@@ -12,6 +12,13 @@ from scripts import check_symbol_aliases as chk
 
 def test_all_four_tables_parse_and_agree():
     tables = chk.load_all()
+    # ea/ 不进仓库（.gitignore），全新克隆 / CI 上没有那份源码：EA 那张表只能在开发机上
+    # 核对，这里只要求其余三份齐全并一致；开发机上四份都在，仍是全量对比。
+    # ea/ is kept out of the repo, so on a fresh clone / CI only three tables exist; the
+    # EA one is checked on dev machines, where all four are present.
+    assert {"backend", "bridge", "gateway"} <= set(tables)
+    if not chk.EA.exists():
+        assert "ea" not in tables
     for side, groups in tables.items():
         assert groups, f"{side} 没解析到别名组"
         assert any("BTCUSD" in g and "BTCUSDT" in g for g in groups), side

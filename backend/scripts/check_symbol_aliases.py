@@ -63,12 +63,20 @@ def _groups_from_mql(text: str) -> list[frozenset[str]]:
 
 
 def load_all() -> dict[str, list[frozenset[str]]]:
-    return {
+    """四份表；`ea/` 按设计不进仓库（.gitignore），文件不在时那一张表**不出现在结果里**，
+    而不是解析成空表——空表会被 find_drift 报成「解析规则过期」，那是另一种故障。
+    CI（全新克隆）上就是这种情况，EA 那一份只能在开发机上核对。
+    All four tables; the EA source is kept out of the repo by design, so when the file
+    is absent that table is omitted rather than parsed as empty (an empty table reads
+    as "parser broken" in find_drift). A fresh clone / CI is exactly this case."""
+    tables = {
         "backend": backend_groups(),
         "bridge": _groups_from_python(BRIDGE.read_text(encoding="utf-8")),
         "gateway": _groups_from_csharp(GATEWAY.read_text(encoding="utf-8")),
-        "ea": _groups_from_mql(EA.read_text(encoding="utf-8")),
     }
+    if EA.exists():
+        tables["ea"] = _groups_from_mql(EA.read_text(encoding="utf-8"))
+    return tables
 
 
 def find_drift(tables: dict[str, list[frozenset[str]]]) -> list[str]:
@@ -106,13 +114,15 @@ def main() -> int:
     tables = load_all()
     for side, groups in tables.items():
         print(f"{side:8s} " + " | ".join("/".join(sorted(g)) for g in groups))
+    if "ea" not in tables:
+        print(f"ea       （跳过：{EA.relative_to(REPO)} 不在本机，ea/ 不进仓库 / skipped, file absent）")
     problems = find_drift(tables)
     if problems:
         print("\n不一致 / drift:")
         for p in problems:
             print("  - " + p)
         return 1
-    print("\n四份别名表一致 / all four alias tables agree")
+    print(f"\n{len(tables)} 份别名表一致 / all {len(tables)} alias tables agree")
     return 0
 
 
