@@ -12,7 +12,8 @@
   },
   "notifFeed": {
     "ticket_reply": "工单有新回复",
-    "ticket_new": "有新工单待处理"
+    "ticket_new": "有新工单待处理",
+    "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -990,6 +991,7 @@
     "filterFrom": "起始日期",
     "filterTo": "截止日期",
     "clearDateFilter": "清除日期",
+    "filterDisabledUnderDate": "选了日期区间时，状态与品种筛选暂不可用；清除日期即可恢复。",
     "pageInfo": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "cancelSent": "撤销请求已发出",
     "proExclusive": "PRO专属",
@@ -1240,6 +1242,13 @@
     "sourceTitle": "开源与校验",
     "sourceDesc": "安装包托管于 GitHub Releases。你可以在发布页查看版本说明与文件校验信息。",
     "sourceLink": "在 GitHub 查看发布页"
+  },
+  "accountDisabled": {
+    "title": "账号已被停用",
+    "body": "你的账号已被管理员停用，暂时无法使用平台的任何功能。",
+    "reasonLabel": "停用原因",
+    "contact": "如果你认为这是误判，或想了解如何恢复，请通过下方渠道联系客服，并说明你的注册邮箱。",
+    "logout": "退出登录"
   },
   "admin": {
     "title": "管理者页面",
@@ -1636,6 +1645,24 @@
     "neverExpires": "永不过期",
     "promoteTitle": "确认提升为管理员",
     "promoteBody": "{{email}} 将拿到后台的全部权限，包括改别人的角色与套餐。后台没有降权审计，改回去不会留痕。",
+    "colStatus": "状态",
+    "statusActive": "正常",
+    "statusDisabled": "已停用",
+    "disable": "停用账号",
+    "enable": "恢复账号",
+    "disableTitle": "确认停用账号",
+    "disableBody": "{{email}} 将无法登录，也无法使用任何需要登录的功能（信号、下单、图表、成就）。",
+    "disableSessionWarn": "该用户所有会话会立刻失效，包括他此刻正开着的网页与 App。",
+    "disableReasonLabel": "停用原因（用户可见）",
+    "disableReasonPlaceholder": "例如：违反交易规则，已于 9 月 20 日通知",
+    "disableReasonHint": "这段话会原样展示给该用户本人，也是客服日后唯一能查到的说明，请写清楚是什么事、下一步找谁。",
+    "disableConfirm": "确认停用",
+    "disabledOk": "已停用该账号",
+    "enableTitle": "确认恢复账号",
+    "enableBody": "{{email}} 将重新可以登录并正常使用全部功能。",
+    "enableOldReason": "当初停用的原因是：{{reason}}",
+    "enableConfirm": "确认恢复",
+    "enabledOk": "已恢复该账号",
     "brokerTitle": "合作券商限制",
     "brokerLockEnabled": "启用（仅允许合作券商账号连接）",
     "brokerPatterns": "服务器匹配关键字（逗号分隔）",

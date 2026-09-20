@@ -61,6 +61,7 @@ import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
   priceDigits, resolvePriceDigits, type IndicatorFlags,
 } from '../components/charts/chartConfig'
+import { readStorage } from '../utils/safeStorage'
 
 // IndicatorFlags 原本定义在这里，IndicatorSettingsModal 等按老路径引用；保留再导出。
 // IndicatorFlags used to be defined here; re-exported so old import paths keep working.
@@ -82,10 +83,19 @@ export default function ChartsPage() {
   // effect below corrects it once activeSymbols is ready — falls back to the
   // active list's first entry if the guess is no longer active (or empty).
   const [symbol, setSymbol] = useState<string>(
-    () => getPref<string>('charts', 'symbol', '') || localStorage.getItem(SYMBOL_KEY) || ''
+    // 走 readStorage 而不是裸 localStorage：这两行在 useState 的初始化器里，
+    // 位于 ErrorBoundary 的渲染路径上——隐私模式 / 站点数据被禁用时，连属性访问
+    // 本身都会抛 SecurityError，图表页就直接变成错误卡。读不到当成"没存过"即可，
+    // 云端 prefs 才是这个偏好的真源。见 utils/safeStorage.ts 的开头。
+    // readStorage rather than a bare localStorage: these two run inside useState
+    // initialisers, on the render path — in private mode or with site data
+    // blocked even the property access throws SecurityError and the charts page
+    // degrades to an error card. A failed read simply means "nothing stored";
+    // the cloud prefs are this preference's real source. See utils/safeStorage.ts.
+    () => getPref<string>('charts', 'symbol', '') || readStorage(SYMBOL_KEY) || ''
   )
   const [interval, setIntervalCode] = useState<string>(
-    () => getPref<string>('charts', 'interval', '') || localStorage.getItem(INTERVAL_KEY) || '15'
+    () => getPref<string>('charts', 'interval', '') || readStorage(INTERVAL_KEY) || '15'
   )
   // 指标开关 + 参数：都跟随用户走，云端同步（见下方持久化 effect），与
   // 品种/周期无关。/ Indicator toggles + settings: follow the user, cloud

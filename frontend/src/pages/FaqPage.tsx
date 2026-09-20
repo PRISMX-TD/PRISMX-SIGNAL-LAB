@@ -15,7 +15,7 @@ export default function FaqPage() {
   const lang = usePublicLang()
 
   return (
-    <div className="relative min-h-[100dvh]">
+    <div className="relative min-h-screen supports-[min-height:100dvh]:min-h-[100dvh]">
       <AuroraBackground />
 
       <header className="relative z-10 border-b border-white/[0.06]">

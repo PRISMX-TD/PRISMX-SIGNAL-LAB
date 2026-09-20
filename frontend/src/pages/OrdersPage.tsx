@@ -42,6 +42,7 @@ import { useIsPhone } from '../utils/useMediaQuery'
 import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 import { formatMarginLevel } from '../components/order/orderMath'
+import { readStorage, writeStorage } from '../utils/safeStorage'
 
 type StatusFilter = 'ALL' | OrderStatus
 const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 'FAILED', 'CANCELLED']
@@ -164,11 +165,21 @@ export default function OrdersPage() {
   // Phone and desktop render different account blocks and position shapes (see header comment)
   const isPhone = useIsPhone()
 
+  // 读写都走 safeStorage：裸 localStorage 的属性访问在隐私模式 / 站点数据被禁用
+  // 时会抛 SecurityError，而这里的读发生在 useState 的初始化器里（渲染路径上），
+  // 抛出来就是整页错误卡。读不到退回默认页签，写不进只是刷新后不记得停在哪个
+  // 页签——都远好过看不到订单。见 utils/safeStorage.ts 的开头。
+  // Both sides go through safeStorage: a bare localStorage property access throws
+  // SecurityError in private mode or with site data blocked, and the read here
+  // runs inside a useState initialiser (on the render path), so a throw is a
+  // full-page error card. A failed read falls back to the default tab and a
+  // failed write merely forgets which tab you were on — both far better than
+  // not seeing your orders. See utils/safeStorage.ts.
   const [tab, setTab] = useState<OrdersTab>(() => {
-    const saved = localStorage.getItem(TAB_STORAGE_KEY)
+    const saved = readStorage(TAB_STORAGE_KEY)
     return TABS.includes(saved as OrdersTab) ? (saved as OrdersTab) : 'positions'
   })
-  useEffect(() => { localStorage.setItem(TAB_STORAGE_KEY, tab) }, [tab])
+  useEffect(() => { writeStorage(TAB_STORAGE_KEY, tab) }, [tab])
 
   // 操作记录：每页 10 条。不设日期筛选时用 useLive().orders（WS 实时更新、秒级
   // 新鲜，覆盖最近约 100 条），在本地按 10 条一页切片——下单/成交能即时看到，
@@ -790,6 +801,26 @@ export default function OrdersPage() {
               )}
             </div>
           </div>
+
+          {/* 禁用需要配一句说明。此前状态芯片与品种框在日期区间下只是变灰、不可点，
+              没有任何文字告诉人为什么——而灰掉的控件最常见的解读是"坏了"，不是
+              "这个组合不支持"。disabled 元素在 Chrome 上不派发鼠标事件，title 提示
+              根本弹不出来，所以必须是一行可见的文字。
+              role="status" 让读屏在切进日期区间时把这句话读出来，否则视障用户只会
+              发现焦点跳过了那几个控件。
+              A disabled control needs a sentence next to it. The status chips and
+              symbol box merely greyed out under a date range with nothing saying
+              why — and a greyed control reads as "broken" far more often than as
+              "unsupported combination". A title tooltip cannot work here: Chrome
+              dispatches no mouse events on disabled elements, so it has to be
+              visible text. role="status" makes a screen reader announce it when
+              the date range goes on, otherwise those controls just silently drop
+              out of the tab order. */}
+          {dateFilterActive && (
+            <p role="status" className="mt-2 text-xs text-neutral-500">
+              {t('orders.filterDisabledUnderDate')}
+            </p>
+          )}
 
           {pageLoading && visibleOrders.length === 0 ? (
             skeletonSlips

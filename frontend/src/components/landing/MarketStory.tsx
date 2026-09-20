@@ -38,7 +38,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CASES, P_ENTRY, P_SL, P_TP, type Candle } from './verdictData'
 import { useSectionProgress } from './useSectionProgress'
-import { onMediaQuery } from './onMediaQuery'
+import { onMediaQuery } from '../../utils/onMediaQuery'
 
 const BEATS = 5
 

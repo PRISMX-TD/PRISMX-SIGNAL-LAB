@@ -8,6 +8,7 @@ import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
 import MetaPixel from './components/MetaPixel'
 import RefCapture from './components/RefCapture'
+import AccountDisabledGate from './components/AccountDisabledGate'
 import PublicShell from './seo/PublicShell'
 // 「成长」外壳不走 lazy：几十行的壳，三条路由共用，拆 chunk 只多一次往返。
 // The Growth shell is not lazy: a few dozen lines shared by three routes —
@@ -150,6 +151,17 @@ export default function App() {
               invite copy on first-visit landings only — exactly the case a
               manual second-visit test would miss. */}
           <RefCapture />
+          {/* 账号被停用时接管整屏。挂在 <Routes> 之外、与 MetaPixel/RefCapture 同层：
+              停用是账号级状态，和当前停在哪个路由无关——挂进某条路由就会变成"只有
+              那一页会提示"，而他正好可能停在别的页面上。它自己在未停用时返回 null，
+              不占任何 DOM。
+              Takes the whole screen when the account is disabled. Mounted outside
+              <Routes>, alongside MetaPixel/RefCapture: being disabled is an
+              account-level state independent of the current route, and hanging it
+              off one route would mean only that page ever says so — while the user
+              may well be sitting on another. It renders null otherwise, costing no
+              DOM. */}
+          <AccountDisabledGate />
           <PwaBackGuard>
           <RouteErrorBoundary>
           <Suspense fallback={<PageFallback />}>

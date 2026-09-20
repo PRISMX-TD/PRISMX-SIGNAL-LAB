@@ -134,6 +134,26 @@ export interface AdminUser {
   createdAt: string | null
   lastActiveAt: string | null
   mt5AccountCount: number
+  // 停用状态。非空 disabledAt = 已停用，该账号的每个需要登录的接口都返回 403。
+  //
+  // 两个字段都写成**可选**（`?`），是因为前端先于后端上线：后端还没加这两列时
+  // 整份 users 响应里根本没有它们，声明成必填会让 TS 的类型与真实载荷对不上，
+  // 而运行时读到的是 undefined —— `undefined` 与 `null` 在"是否已停用"这个判断
+  // 上同义（都不是已停用），所以界面自然降级成"全员正常"，不会崩也不会误报。
+  // 后端上线后无需再改这里。
+  //
+  // Disabled state. A non-null disabledAt means the account is disabled and
+  // every authenticated endpoint answers 403 for it.
+  //
+  // Both are optional (`?`) because the frontend ships ahead of the backend:
+  // until those columns exist the users payload simply lacks them, and
+  // declaring them required would make the type disagree with reality while
+  // runtime reads undefined. For the "is this disabled?" question `undefined`
+  // and `null` mean the same thing (no), so the UI degrades to "everyone is
+  // active" — no crash, no false positives. Nothing here changes once the
+  // backend lands.
+  disabledAt?: string | null
+  disabledReason?: string | null
 }
 
 // 邀请链接（管理后台）。registrations 按隐藏归因码统计，与备注文本解耦。

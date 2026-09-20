@@ -24,6 +24,7 @@ import PedestalStage from '../components/badges/PedestalStage'
 import { materialOf } from '../components/badges/medal'
 import { BadgeProgressBar } from '../components/badges/BadgeProgressBar'
 import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
+import { readJson, writeJson } from '../utils/safeStorage'
 
 // 勋章库分三层：进阶勋章（各有铜 / 银 / 金三档）、特殊勋章（无档位）、绝版勋章
 // （窗口关闭后永久停发），严格按接口的 shelf 字段分组，空层不渲染。
@@ -59,23 +60,37 @@ const MINT_STAGGER_CAP = 3
 const EQUIP_SLOTS = 3
 const MINT_DURATION_MS = 2200
 
+// 存取走 utils/safeStorage：与全站其余缓存同一层，不再在这里各写一遍 try/catch。
+// readJson 比原来手写的那版多做一件事——解析失败会把那份坏缓存**删掉**再返回
+// 兜底值；留着它意味着每次进这一页都重走一遍同样的失败，而这份缓存丢了只是重放
+// 一次铸造动画，没有任何值得保留的理由。
+// 另外 readJson 的兜底值必须是**新建的**数组：共享一个常量数组会让下面的 new Set
+// 在多次调用间共用同一份底数据。这里每次调用现造一个 []，天然没这个问题。
+//
+// Through utils/safeStorage like every other cache on the site, rather than yet
+// another hand-rolled try/catch. readJson does one thing the old version didn't:
+// a parse failure *removes* the corrupt entry before returning the fallback.
+// Keeping it would replay the same failure on every visit, and losing this cache
+// costs one extra mint animation — nothing worth preserving.
 function readSeenBadges(): Set<string> {
-  try {
-    const raw = localStorage.getItem(SEEN_BADGES_KEY)
-    return raw ? new Set(JSON.parse(raw)) : new Set()
-  } catch {
-    return new Set()
-  }
+  const ids = readJson<unknown>(SEEN_BADGES_KEY, [])
+  // 存的是字符串数组，但缓存是用户可改的：别人写进去的任何东西都可能在这里被
+  // 读到。不是数组就当没有；数组里的非字符串项过滤掉，免得 Set 里混进 undefined
+  // 之类的东西去和徽章 id 比较。
+  // The stored shape is a string array, but this cache is user-writable, so
+  // anything can turn up here. A non-array is treated as absent, and non-string
+  // entries are dropped so nothing odd ends up being compared against badge ids.
+  if (!Array.isArray(ids)) return new Set()
+  return new Set(ids.filter((x): x is string => typeof x === 'string'))
 }
 
 function writeSeenBadges(ids: Set<string>): void {
-  try {
-    localStorage.setItem(SEEN_BADGES_KEY, JSON.stringify([...ids]))
-  } catch {
-    // 存储不可用（隐私模式/已满）：静默放弃，下次加载顶多重放一次铸造动画。
-    // Storage unavailable (private mode / full quota): give up silently —
-    // worst case the mint animation replays once on the next load.
-  }
+  // 写不进（隐私模式/配额满）静默放弃：writeJson 返回 false 而不抛，
+  // 下次加载顶多重放一次铸造动画。
+  // A failed write (private mode / full quota) is dropped silently: writeJson
+  // returns false instead of throwing, and the worst case is the mint animation
+  // replaying once on the next load.
+  writeJson(SEEN_BADGES_KEY, [...ids])
 }
 
 function markBadgeSeen(id: string): void {

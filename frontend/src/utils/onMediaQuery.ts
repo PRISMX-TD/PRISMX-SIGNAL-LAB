@@ -12,6 +12,16 @@
 //
 // 返回一个退订函数，调用方在 effect 的 cleanup 里调用。
 //
+// 2026-09-20：从 components/landing/ 搬到 utils/。它原本只服务落地页的两个组件，
+// 但 utils/useMediaQuery.ts 犯的是一模一样的错（订单页的手机/桌面分支靠它，
+// Safari 12/13 上一进 /orders 就白屏），而从 utils/ 反向 import 落地页组件目录
+// 是错误的依赖方向。搬过来之后三个调用点共用同一份判据。
+// 2026-09-20: moved here from components/landing/. It served the landing page's
+// two components, but utils/useMediaQuery.ts had the identical bug (the orders
+// page's phone/desktop split depends on it, so Safari 12/13 blanked /orders on
+// entry), and importing a landing-page component from utils/ would be the wrong
+// dependency direction. All three call sites now share one implementation.
+//
 // `mql.addEventListener('change', fn)` requires MediaQueryList to implement
 // EventTarget, which Safari only did from version 14. This project's build target
 // explicitly includes `safari12` (see vite.config.ts), so iOS 12/13 are in scope.

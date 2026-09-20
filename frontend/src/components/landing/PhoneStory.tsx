@@ -38,7 +38,7 @@ import { useTranslation } from 'react-i18next'
 import { PhoneChrome, ScreenRank, ScreenPlan, ScreenOrder, ScreenRecord, ScreenBoard } from './PhoneScreens'
 import { createPhoneGL, type PhoneGLHandle } from './PhoneGL'
 import { useSectionProgress } from './useSectionProgress'
-import { onMediaQuery } from './onMediaQuery'
+import { onMediaQuery } from '../../utils/onMediaQuery'
 
 type T = (k: string) => string
 

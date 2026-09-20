@@ -12,7 +12,8 @@
   },
   "notifFeed": {
     "ticket_reply": "New reply on your ticket",
-    "ticket_new": "New ticket to handle"
+    "ticket_new": "New ticket to handle",
+    "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions."
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -990,6 +991,7 @@
     "filterFrom": "From date",
     "filterTo": "To date",
     "clearDateFilter": "Clear dates",
+    "filterDisabledUnderDate": "Status and symbol filters are unavailable while a date range is set — clear the dates to use them.",
     "pageInfo": "Page {{page}} / {{totalPages}} · {{total}} total",
     "cancelSent": "Cancel request sent",
     "proExclusive": "PRO Exclusive",
@@ -1240,6 +1242,13 @@
     "sourceTitle": "Source and verification",
     "sourceDesc": "The installer is hosted on GitHub Releases, where you can review release notes and file checksums.",
     "sourceLink": "View releases on GitHub"
+  },
+  "accountDisabled": {
+    "title": "Account disabled",
+    "body": "An administrator has disabled your account, so none of the platform is available for now.",
+    "reasonLabel": "Reason",
+    "contact": "If you believe this is a mistake, or want to know how to get access back, contact support through one of the channels below and include your registered email address.",
+    "logout": "Sign out"
   },
   "admin": {
     "title": "Admin",
@@ -1636,6 +1645,24 @@
     "neverExpires": "never expires",
     "promoteTitle": "Confirm admin promotion",
     "promoteBody": "{{email}} will gain every admin permission, including changing other people’s roles and plans. Demotions are not audited, so undoing it leaves no trace.",
+    "colStatus": "Status",
+    "statusActive": "Active",
+    "statusDisabled": "Disabled",
+    "disable": "Disable account",
+    "enable": "Restore account",
+    "disableTitle": "Confirm account disable",
+    "disableBody": "{{email}} will not be able to sign in, nor use anything that needs an account (signals, orders, charts, achievements).",
+    "disableSessionWarn": "Every session this user has ends immediately, including the browser tab and app they have open right now.",
+    "disableReasonLabel": "Reason (shown to the user)",
+    "disableReasonPlaceholder": "e.g. Breach of trading rules, notified on 20 Sep",
+    "disableReasonHint": "This text is shown to that user verbatim and is the only explanation support will find later — say what happened and who to contact next.",
+    "disableConfirm": "Disable account",
+    "disabledOk": "Account disabled",
+    "enableTitle": "Confirm account restore",
+    "enableBody": "{{email}} will be able to sign in again with full access.",
+    "enableOldReason": "It was originally disabled for: {{reason}}",
+    "enableConfirm": "Restore account",
+    "enabledOk": "Account restored",
     "brokerTitle": "Partner broker lock",
     "brokerLockEnabled": "Enabled (only partner-broker accounts can connect)",
     "brokerPatterns": "Server match keywords (comma-separated)",

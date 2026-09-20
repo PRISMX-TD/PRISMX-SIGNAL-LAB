@@ -10,6 +10,8 @@ import { adminApi, isAbortError } from '../api/client'
 import { fmtDate, fmtDay, fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import ConfirmModal from '../components/ConfirmModal'
+import DisableUserModal from '../components/admin/DisableUserModal'
+import { isUserDisabled } from '../components/admin/userStatus'
 import Pager from '../components/Pager'
 import { SkeletonLine } from '../components/Skeleton'
 import OverviewPanel from '../components/admin/overview/OverviewPanel'
@@ -851,6 +853,60 @@ export default function AdminPage() {
   // note) can be corrected on the spot and don't deserve an extra click.
   const [promoteTarget, setPromoteTarget] = useState<AdminUser | null>(null)
 
+  // ---- 停用 / 恢复 ----
+  //
+  // 两个方向都要确认，理由不对称但都成立：停用会立刻把人挡在门外（他的每个接口
+  // 都变 403，正在用的会话当场断），恢复则是把一个曾被判定有问题的账号重新放
+  // 进来——后者点错的代价比前者小，但一样是"对别人生效、自己看不见后果"的操作。
+  //
+  // savingId 没有复用：它管的是同一行的"保存"按钮，和停用开关是两个独立的
+  // 请求，共用一个 id 会让其中一个转圈时把另一个也禁掉。
+  //
+  // Both directions confirm. The reasons differ but both hold: disabling locks
+  // someone out at once (every endpoint turns 403, live sessions drop mid-use),
+  // while restoring lets an account previously judged problematic back in — a
+  // cheaper mistake, but still one that takes effect on someone else, out of
+  // sight of whoever clicked.
+  //
+  // savingId is deliberately not reused: it drives that row's Save button, and
+  // the status toggle is an independent request — sharing one id would have
+  // either spinner disable the other control.
+  const [disableTarget, setDisableTarget] = useState<AdminUser | null>(null)
+  const [enableTarget, setEnableTarget] = useState<AdminUser | null>(null)
+  const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
+
+  // reason 为 null 表示"恢复"，非 null 表示"停用并附上这个原因"。合成一个函数
+  // 是因为两条路除了调用哪个端点之外，成功/失败后的处理完全一样。
+  // A null reason means restore, a non-null one means disable with that reason.
+  // One function because the two paths differ only in which endpoint is called;
+  // everything after the response is identical.
+  const applyDisabled = async (u: AdminUser, reason: string | null) => {
+    setStatusSavingId(u.id)
+    try {
+      const updated = reason === null ? await adminApi.enableUser(u.id) : await adminApi.disableUser(u.id, reason)
+      // 后端返回整行就地替换，否则重拉——见 client.ts 里这两个端点的注释：
+      // 返回体的形状还没跟后端最终确认，这里不拿它当前提。
+      // Replace the row in place when the backend returns one, otherwise refetch
+      // — see the comment on these two endpoints in client.ts: the response
+      // shape is not finalised with the backend, so nothing here depends on it.
+      if (updated?.id === u.id) {
+        setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)))
+        setDrafts((prev) => ({ ...prev, [u.id]: toDraft(updated) }))
+      } else {
+        void load()
+      }
+      showToast('ok', reason === null ? t('admin.enabledOk') : t('admin.disabledOk'))
+      setDisableTarget(null)
+      setEnableTarget(null)
+    } catch (err) {
+      // 刻意不关弹窗：失败时保留已填的原因，管理员可以直接重试。
+      // The dialog stays open on failure so the typed reason survives a retry.
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setStatusSavingId(null)
+    }
+  }
+
   const requestSave = (u: AdminUser) => {
     const d = drafts[u.id]
     if (!d) return
@@ -1359,6 +1415,13 @@ export default function AdminPage() {
                   />
                 </th>
                 <th className="px-4 py-3 font-medium">{t('admin.colEmail')}</th>
+                {/* 状态列紧跟邮箱：停用是这张表上唯一"人还在不在"的信息，排在角色/
+                    等级后面就会被一排下拉框淹没。同一格既是指示灯也是开关。
+                    The status column sits right after the email: it is the only
+                    "can this person still get in" fact in the table, and further
+                    right it drowns among the dropdowns. One cell is both the
+                    indicator and the control. */}
+                <th className="px-4 py-3 font-medium">{t('admin.colStatus')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colPhone')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colRole')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colPlan')}</th>
@@ -1373,8 +1436,19 @@ export default function AdminPage() {
               {users.map((u) => {
                 const d = drafts[u.id] ?? toDraft(u)
                 const dirty = isDirty(u, d)
+                const disabled = isUserDisabled(u)
                 return (
-                  <tr key={u.id} className={`border-b border-white/5 align-top last:border-0 ${selectedIds.has(u.id) ? 'bg-prism-600/[0.06]' : ''}`}>
+                  // 停用行整行染红，压过勾选的紫底：勾选是"我正在操作它"，停用是
+                  // "它现在的状态"，后者更该被一眼看见，而两种底色叠在一起谁也读不清。
+                  // A disabled row is tinted red, overriding the selection tint:
+                  // selection means "I'm working on it", disabled is what it *is*,
+                  // and the latter deserves the glance. Stacking both reads as neither.
+                  <tr
+                    key={u.id}
+                    className={`border-b border-white/5 align-top last:border-0 ${
+                      disabled ? 'bg-down/[0.07]' : selectedIds.has(u.id) ? 'bg-prism-600/[0.06]' : ''
+                    }`}
+                  >
                     <td className="px-4 py-3">
                       <input
                         type="checkbox"
@@ -1387,6 +1461,46 @@ export default function AdminPage() {
                     <td className="px-4 py-3">
                       <div className="max-w-[220px] truncate font-mono text-xs text-neutral-200">{u.email}</div>
                       <div className="mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</div>
+                    </td>
+                    {/* 状态：开关走全站唯一的 Switch（见 components/Switch.tsx 与
+                        设计约定），checked = 账号可用。它不是即时开关——两个方向都
+                        先开确认框，状态只在后端确认之后才翻，所以按下去到翻过来
+                        之间开关保持原样并转圈（busy）。
+                        Status: the toggle is the site's one Switch component (see
+                        components/Switch.tsx and the UI conventions), checked =
+                        the account works. It is not an instant toggle — both
+                        directions open a confirmation first and the state flips
+                        only after the backend agrees, so between press and flip it
+                        stays put and spins (busy). */}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={!disabled}
+                          busy={statusSavingId === u.id}
+                          onChange={(next) => (next ? setEnableTarget(u) : setDisableTarget(u))}
+                          aria-label={t(disabled ? 'admin.enable' : 'admin.disable')}
+                        />
+                        <span className={`whitespace-nowrap text-xs ${disabled ? 'font-semibold text-down' : 'text-neutral-400'}`}>
+                          {t(disabled ? 'admin.statusDisabled' : 'admin.statusActive')}
+                        </span>
+                      </div>
+                      {/* 停用时间与原因跟在开关下面：没有它们，一行"已停用"只回答
+                          了"是不是"，回答不了客服真正会被问到的"什么时候、为什么"。
+                          原因可能很长，截断显示并把全文放进 title。
+                          Time and reason sit under the toggle: without them a bare
+                          "disabled" answers only whether, not the when and why
+                          support will actually be asked. The reason can run long,
+                          so it is clamped with the full text in the title. */}
+                      {disabled && (
+                        <div className="mt-1.5 max-w-[200px] space-y-0.5">
+                          <div className="text-[11px] text-neutral-500">{fmtTime(u.disabledAt)}</div>
+                          {u.disabledReason && (
+                            <div className="truncate text-[11px] text-neutral-400" title={u.disabledReason}>
+                              {u.disabledReason}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </td>
                     {/* 手机号：存量用户为空。用「—」而不是留白，否则看起来像渲染坏了。
                         Empty for grandfathered users; an em dash rather than blank
@@ -1515,6 +1629,37 @@ export default function AdminPage() {
           message={t('admin.promoteBody', { email: promoteTarget.email })}
           onConfirm={() => void save(promoteTarget)}
           onCancel={() => setPromoteTarget(null)}
+        />
+      )}
+
+      {/* 停用的确认（带原因输入）/ disable confirmation, with the reason field */}
+      {disableTarget && (
+        <DisableUserModal
+          email={disableTarget.email}
+          busy={statusSavingId === disableTarget.id}
+          onConfirm={(reason) => void applyDisabled(disableTarget, reason)}
+          onCancel={() => setDisableTarget(null)}
+        />
+      )}
+
+      {/* 恢复的确认。用普通 ConfirmModal 且不标 danger——恢复是把权限还回去，
+          不是破坏性操作；文案里带上当初停用的原因，省得管理员去别处翻"当时为什么
+          停的"就直接放行。
+          Restore confirmation: plain ConfirmModal and not danger — handing access
+          back is not destructive. The copy carries the original reason so nobody
+          has to go looking elsewhere for why it was disabled before undoing it. */}
+      {enableTarget && (
+        <ConfirmModal
+          center
+          busy={statusSavingId === enableTarget.id}
+          title={t('admin.enableTitle')}
+          message={
+            t('admin.enableBody', { email: enableTarget.email }) +
+            (enableTarget.disabledReason ? ' ' + t('admin.enableOldReason', { reason: enableTarget.disabledReason }) : '')
+          }
+          confirmLabel={t('admin.enableConfirm')}
+          onConfirm={() => void applyDisabled(enableTarget, null)}
+          onCancel={() => setEnableTarget(null)}
         />
       )}
 

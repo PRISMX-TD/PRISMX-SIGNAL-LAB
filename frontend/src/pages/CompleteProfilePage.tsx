@@ -78,13 +78,13 @@ export default function CompleteProfilePage() {
   }
 
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden">
+    <div className="relative min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] overflow-hidden">
       <AuroraBackground />
       <div className="absolute right-4 top-4 z-10">
         <LanguageToggle />
       </div>
 
-      <div className="relative z-10 flex min-h-[100dvh] items-center justify-center px-4 py-12">
+      <div className="relative z-10 flex min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           <div className="mb-8 flex flex-col items-center">
             <Logo size={72} />

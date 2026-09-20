@@ -86,7 +86,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden">
+    <div className="relative min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] overflow-hidden">
       <AuroraBackground />
 
       {/* top-[calc(1rem+env(safe-area-inset-top))]：这个容器是 min-h-[100dvh] 从物理
@@ -105,7 +105,7 @@ export default function LoginPage() {
         <LanguageToggle />
       </div>
 
-      <div className="relative z-10 flex min-h-[100dvh] items-center justify-center px-4">
+      <div className="relative z-10 flex min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] items-center justify-center px-4">
         <div className="w-full max-w-md">
           {/* 品牌区改为左对齐。登录页此前是「居中 logo + 居中渐变标题 + 居中副标 +
               居中卡片」的四层同轴堆叠——这正是被反复点名的居中英雄模板。左对齐之后
@@ -149,8 +149,16 @@ export default function LoginPage() {
               </button>
             </div>
 
+            {/* 邀请试用横幅的三处硬编码 #E0A83C 换成 tailwind 的 gold 键（读
+                tokens.css 的 --gold-rgb，见 tailwind.config.js）。同一个金色在站内
+                还有别的出处，写死十六进制意味着改主题时这一块会被落下。
+                The invite-trial banner's three hard-coded #E0A83C values become
+                tailwind's gold key (reading --gold-rgb from tokens.css, see
+                tailwind.config.js). The same gold appears elsewhere on the site,
+                and a literal hex here is the block left behind when the theme
+                moves. */}
             {mode === 'register' && inviteTrialDays !== null && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg border border-[#E0A83C]/40 bg-[#E0A83C]/10 px-3 py-2.5 text-[13px] font-semibold text-[#E0A83C]">
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2.5 text-[13px] font-semibold text-gold">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
                 </svg>

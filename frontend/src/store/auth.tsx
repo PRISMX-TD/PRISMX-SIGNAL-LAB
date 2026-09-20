@@ -1,12 +1,23 @@
 // 认证状态 / Auth context
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { User } from '../api/types'
-import { authApi, clearToken, getToken, setToken, setUnauthorizedHandler, userApi } from '../api/client'
+import { authApi, clearToken, getToken, setAccountDisabledHandler, setToken, setUnauthorizedHandler, userApi } from '../api/client'
 import { readJson, writeJson } from '../utils/safeStorage'
 
 interface AuthContextValue {
   user: User | null
   isAuthed: boolean
+  // 账号被管理员停用时后端下发的那句双语说明（含原因）；未被停用为 null。
+  // 由 api/client 的 403 复验确认后写入，AccountDisabledGate 据此接管整个界面。
+  // 刻意不写进 localStorage：这是服务端的当下判断，恢复之后必须立刻消失，
+  // 而缓存下来就会出现"后台已恢复、用户这台设备还在弹封号"的鬼状态。
+  // The backend's bilingual notice (reason included) when an admin has disabled
+  // this account; null otherwise. Written once api/client's 403 re-check
+  // confirms it, and AccountDisabledGate takes over the UI from there.
+  // Deliberately never persisted: it is a server-side judgement of right now and
+  // must vanish the moment the account is restored, whereas a cached copy leaves
+  // one device insisting on a ban that has already been lifted.
+  disabledNotice: string | null
   login: (email: string, password: string) => Promise<void>
   register: (email: string, password: string, phoneCountry: string, phone: string) => Promise<void>
   // 补录手机号成功后就地更新登录态，让路由守卫立刻放行（不必重新登录）
@@ -111,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // login, which reads as the app flashing an inner page. Deciding here rather
   // than in the effect below removes that frame entirely.
   const [user, setUser] = useState<User | null>(() => (getToken() ? readCachedUser() : null))
+  const [disabledNotice, setDisabledNotice] = useState<string | null>(null)
 
   useEffect(() => {
     // token 缺失则清空用户 / clear user if token missing
@@ -134,7 +146,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearUserScopedStorage()
       setUser(null)
     })
-    return () => setUnauthorizedHandler(null)
+    // 账号被停用：与 401 相反，**不清登录态、不跳登录页**。
+    //
+    // 被停用的人重新登录只会再被拒一次（登录接口之后的每一个请求都是 403），
+    // 把他推回登录页只会让他在登录框和"登录已过期"之间反复横跳，而真正的原因
+    // 一个字也看不到。这里只记下后端那句说明，由 AccountDisabledGate 铺一层
+    // 遮罩把话说清楚，并把"登出"留成他自己按的一个按钮。
+    //
+    // A disabled account, unlike an expired session, keeps its auth state and is
+    // not redirected: signing in again only gets refused again (every request
+    // after the login call is a 403), so bouncing them to the login page just
+    // loops them between the form and "session expired" while the actual reason
+    // is never shown. We record the backend's sentence, let
+    // AccountDisabledGate state it plainly, and leave signing out as a button
+    // they press themselves.
+    setAccountDisabledHandler((notice) => setDisabledNotice(notice))
+    return () => {
+      setUnauthorizedHandler(null)
+      setAccountDisabledHandler(null)
+    }
   }, [])
 
   const persist = useCallback((u: User, token: string) => {
@@ -187,6 +217,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     clearToken()
     clearUserScopedStorage()
     setUser(null)
+    // 停用提示跟着会话一起结束：否则登出后回到登录页，遮罩还盖在上面，
+    // 换一个账号登录也进不去。
+    // The disabled notice ends with the session: otherwise the overlay would
+    // still cover the login page after signing out, locking out even a
+    // different account.
+    setDisabledNotice(null)
   }, [])
 
   // planExpiresAt 一并带回来：到期横幅（components/PlanExpiryBanner）要靠它算
@@ -284,8 +320,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // initialiser above and the 401 handler clears both together, so there is no
   // need to hit localStorage during render.
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isAuthed: !!user, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser }),
-    [user, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser],
+    () => ({ user, isAuthed: !!user, disabledNotice, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser }),
+    [user, disabledNotice, login, register, submitPhone, submitNickname, loginWithGoogle, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

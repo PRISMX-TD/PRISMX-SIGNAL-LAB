@@ -600,15 +600,30 @@ export default function LandingPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
 
-  // 根容器的 min-h：min-h-screen 在前、min-h-[100dvh] 在后。
-  // dvh 是 Chrome 108+，缺兜底时旧内核上这条 min-height 完全不生效。min-h-screen
-  // 编译成 100vh，所有目标浏览器都认识；认识 dvh 的按源码顺序覆盖上去，渲染不变。
-  // min-h-screen first, min-h-[100dvh] second: dvh is Chrome 108+ and without a
-  // fallback the min-height simply did not apply on older engines. min-h-screen
-  // compiles to 100vh, understood by every target; engines that know dvh override
-  // it by source order and render identically.
+  // 根容器的 min-h：100vh 打底，dvh 走 supports- 变体覆盖。
+  // dvh 是 Chrome 108+，缺兜底时旧内核上这条 min-height 完全不生效；min-h-screen
+  // 编译成 100vh，所有目标浏览器都认识，认识 dvh 的再被 @supports 块覆盖回来。
+  //
+  // 2026-09-20 更正：这里原本写的是「两个 min-h 类并列，靠源码顺序覆盖」——那个
+  // 说法是错的。产物里的先后由 tailwind 自己的工具类排序决定，与 class 属性的书写
+  // 顺序无关，而 .min-h-screen 排在 .min-h-\[100dvh\] 之后，于是并列写法的净效果是
+  // 100vh 永远赢、dvh 从未生效（在 dist/assets/*.css 里按字节位置核过）。改用
+  // supports- 变体：它落在 @supports 块里，排在全部 min-h 工具类之后，覆盖才真的成立。
+  //
+  // Root min-h: 100vh as the floor, dvh layered on via the supports- variant.
+  // dvh is Chrome 108+ and without a fallback the min-height did not apply at all
+  // on older engines; min-h-screen compiles to 100vh, which every target
+  // understands, and engines that know dvh get it back from the @supports block.
+  //
+  // Corrected 2026-09-20: this used to claim two side-by-side min-h classes
+  // override by source order. They do not — output order comes from tailwind's
+  // own utility sort, not the class attribute, and .min-h-screen sorts *after*
+  // the arbitrary dvh utility, so the net effect was 100vh always winning and the
+  // dvh never applying (checked by byte offset in dist/assets/*.css). The
+  // supports- variant lands in an @supports block after every min-h utility,
+  // which is what actually makes the override hold.
   return (
-    <div id="top" className="relative min-h-screen min-h-[100dvh] bg-ink-950 text-white">
+    <div id="top" className="relative min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] bg-ink-950 text-white">
       {/* 结构层：一个贯穿全页的 3D 空间，静态网格退居为它的基线。
           Structural layer: a 3D space spanning the whole page, with the static
           grid demoted to its baseline. */}

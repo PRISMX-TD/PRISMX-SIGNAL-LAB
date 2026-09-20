@@ -15,9 +15,14 @@ export function getToken(): string | null {
 }
 export function setToken(token: string) {
   writeStorage(TOKEN_KEY, token)
+  // 换了 token 就是换了一个会话：上一位用户是不是被停用，与这一位无关。
+  // A new token is a new session: whether the previous one was disabled says
+  // nothing about this one.
+  accountDisabled = false
 }
 export function clearToken() {
   removeStorage(TOKEN_KEY)
+  accountDisabled = false
 }
 
 // ---- 邀请链接归因 / invite-link attribution ----
@@ -51,6 +56,115 @@ export function clearRef() {
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: (() => void) | null) {
   onUnauthorized = fn
+}
+
+// ---- 账号被停用（403）/ account disabled (403) ----
+//
+// 管理员停用一个账号之后，**所有需要登录的接口**都返回 403，响应体是
+// `{"detail": "<中英双语说明，含管理员填的原因>"}`。
+//
+// 为什么不能"见 403 就当停用"：403 在本站是个多义状态码，绝大多数 403 与停用
+// 无关——游戏化/排行榜/比赛三个内测开关（见 App.tsx 各路由的注释）、非 PRO 用户
+// 启用自定义策略、非管理员打 /admin/*，都返回 403 并由各自页面降级成一句提示。
+// 把它们一律当成"你被停用了"，等于每个还没开放的内测入口都弹一个封号弹窗。
+//
+// 为什么不能靠文案匹配：detail 是后端可随时改写的自然语言（还带管理员填的原因），
+// 拿它做控制流，文案一改前端就静默失灵。
+//
+// 所以用**复验**：收到任何一个 403 时，另外打一次 /auth/me。这个端点对"已登录且
+// 未被停用"的人恒为 200——它没有任何其它 403 的理由（不看角色、不看套餐、不看内测
+// 开关）。它也 403，就只剩"这个账号被停用了"一种解释，并且那次响应的 detail 正是
+// 我们要展示给用户的那句话（含原因），不必从触发它的那个接口的报错里猜。
+//
+// 代价是每个会话最多一次额外请求：确认过就不再复验（accountDisabled），
+// 复验在途时后到的 403 直接返回（probing），换 token / 登出时标志复位。
+//
+// After an admin disables an account every authenticated endpoint answers 403
+// with `{"detail": "<bilingual text including the admin's reason>"}`.
+//
+// Why "any 403 means disabled" is wrong: 403 is overloaded here and most of them
+// have nothing to do with a disabled account — the three beta switches
+// (gamification / leaderboard / competitions, see the per-route comments in
+// App.tsx), a non-PRO user enabling a custom strategy, a non-admin hitting
+// /admin/* — each returns 403 and is degraded into an inline hint by its own
+// page. Treating those as "you are banned" would pop a ban dialog on every
+// not-yet-released beta entry point.
+//
+// Why matching on the message is wrong: detail is free-form text the backend may
+// reword at any time (and it embeds the admin's reason). Driving control flow off
+// it means the frontend silently stops working the day someone edits the copy.
+//
+// Hence a re-check: on any 403, issue one extra GET /auth/me. That endpoint is
+// always 200 for a logged-in, non-disabled user — it has no other reason to
+// return 403 (it inspects neither role, nor plan, nor beta switches). If it 403s
+// too, "this account is disabled" is the only explanation left, and that
+// response's detail is exactly the sentence to show (reason included), so there
+// is no need to guess from whichever endpoint tripped first.
+//
+// Cost: at most one extra request per session — confirmed accounts skip the
+// re-check (accountDisabled), 403s landing while one is in flight are dropped
+// (probing), and both flags reset when the token changes or is cleared.
+const ACCOUNT_PROBE_PATH = '/auth/me'
+let accountDisabled = false
+let probing = false
+let onAccountDisabled: ((notice: string) => void) | null = null
+
+/** 由 AuthProvider 注册：拿到后端那句双语说明（含停用原因）后弹全局遮罩。
+ *  Registered by AuthProvider: receives the backend's bilingual notice
+ *  (including the reason) and raises the site-wide overlay. */
+export function setAccountDisabledHandler(fn: ((notice: string) => void) | null) {
+  onAccountDisabled = fn
+}
+
+function confirmDisabled(notice: string) {
+  accountDisabled = true
+  onAccountDisabled?.(notice)
+}
+
+function checkAccountDisabled(path: string, detail: string) {
+  // 没 token 的 403 与账号状态无关（公开端点的门控），已确认过的不再复验。
+  // A 403 without a token says nothing about an account; a confirmed one needs
+  // no further checking.
+  if (!getToken() || accountDisabled) return
+  // 触发 403 的就是复验端点本身：不必再打一次，这次的 detail 就是那句话。
+  // The probe endpoint is the one that 403'd: no second call needed, this
+  // response's detail is already the message.
+  if (path === ACCOUNT_PROBE_PATH) {
+    confirmDisabled(detail)
+    return
+  }
+  if (probing) return
+  probing = true
+  // 刻意用裸 fetch 而不是 request()：走 request() 会让这次复验的 403 再次进到
+  // 这里，形成自我递归。同理它也不该带超时/续期那套——它只是一次判据查询。
+  // Deliberately a bare fetch rather than request(): going through request()
+  // would feed this probe's own 403 back into this function and recurse. It
+  // likewise wants none of the timeout/renewal machinery — it is one lookup.
+  void (async () => {
+    try {
+      const token = getToken()
+      if (!token) return
+      const res = await fetch(`${API_BASE}/api${ACCOUNT_PROBE_PATH}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (res.status !== 403) return
+      let notice = detail
+      try {
+        const body = await res.json()
+        if (typeof body?.detail === 'string' && body.detail.trim()) notice = body.detail
+      } catch {
+        // 响应体不是 JSON：退回触发这次复验的那条 detail，总比无话可说强。
+        // Body wasn't JSON: fall back to the detail that triggered the probe —
+        // still better than saying nothing.
+      }
+      confirmDisabled(notice)
+    } catch {
+      // 网络失败：这次判不出来，不做任何结论。下一个 403 会再试一次。
+      // Network failure: no conclusion drawn. The next 403 tries again.
+    } finally {
+      probing = false
+    }
+  })()
 }
 // 限流（429）的兜底文案。写成后端惯用的「中文 / English」双语格式，
 // localizeApiError 会按界面语言取对应那半，不必单独走 i18n。
@@ -219,6 +333,21 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
       // bare "HTTP 429" again.
       if (res.status === 429) detail = RATE_LIMITED
     }
+    // 403 的两种含义要分开：**没登录**是 401（上面已清 token 并跳登录页），
+    // 403 是"身份有效但这件事不让你做"——**绝不能**跳登录页，那会把被停用的人
+    // 塞进"登录 → 立刻又被拒 → 再跳登录"的死循环，而他每次看到的都是"登录已
+    // 过期"这种与事实无关的说法。这里只在复验确认账号被停用时抬一次全局遮罩；
+    // 其余 403（内测门控、非 PRO、非管理员）仍然只是一次普通的报错，由调用点
+    // 各自降级。
+    // The two meanings of 403 must stay apart: "not logged in" is 401 (handled
+    // above — token cleared, redirect to login), while 403 means "your identity
+    // is fine, this particular thing is refused". It must *never* redirect to
+    // login: that traps a disabled user in log-in → refused → log-in again,
+    // each round telling them their "session expired", which is not what
+    // happened. This only raises the site-wide overlay once the re-check
+    // confirms a disabled account; every other 403 (beta gates, non-PRO,
+    // non-admin) stays an ordinary error for its call site to degrade.
+    if (res.status === 403) checkAccountDisabled(path, detail)
     throw new Error(detail)
   }
   // 204 / 空体：成功但没有内容（邀请点击打点、将来任何"只需知道成功"的端点）。
@@ -938,6 +1067,32 @@ export const adminApi = {
     request<{ updated: number }>('/admin/users/bulk', {
       method: 'PATCH',
       body: JSON.stringify({ userIds, ...payload }),
+    }),
+  // ---- 停用 / 恢复账号 / disable & restore an account ----
+  //
+  // ⚠️ 路径与请求体是与后端**口头约定**的形状，后端实现时如有出入，改这两处即可
+  // （调用点只认这两个函数）。约定：
+  //   POST /admin/users/{id}/disable   body { reason: string }
+  //   POST /admin/users/{id}/enable    无 body / no body
+  // 返回值按本文件里 updateUser 的先例声明为整行 AdminUser；但调用点**不假定**
+  // 一定拿得到（见 AdminPage 的 applyDisabled），响应不是一行用户就退回重新拉表，
+  // 所以后端即使返回 `{ok:true}` 或 204 也不会把界面弄坏。
+  //
+  // ⚠️ These paths and bodies are the shape *agreed verbally* with the backend;
+  // if the implementation differs, only these two functions need changing (call
+  // sites know nothing else). Return values are declared as a whole AdminUser
+  // row following updateUser's precedent above, but the call site does not
+  // assume one arrives (see applyDisabled in AdminPage): anything that isn't a
+  // user row falls back to refetching the table, so a backend returning
+  // `{ok:true}` or 204 still leaves the UI correct.
+  disableUser: (userId: string, reason: string) =>
+    request<AdminUser | null>(`/admin/users/${encodeURIComponent(userId)}/disable`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+  enableUser: (userId: string) =>
+    request<AdminUser | null>(`/admin/users/${encodeURIComponent(userId)}/enable`, {
+      method: 'POST',
     }),
   // 邀请链接 / invite links
   listInviteLinks: () => request<{ links: InviteLink[] }>('/admin/invite-links'),

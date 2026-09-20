@@ -666,7 +666,25 @@ export default function Layout() {
 
   return (
     <LiveProvider>
-      <div className="relative flex min-h-[100dvh] flex-col">
+      {/* 100vh 打底，dvh 走 supports- 变体覆盖。dvh 要 Chrome 108+，而产物下限是
+          Chrome 70（见 vite.config.ts 的 target）：只写 dvh 时这条 min-height 在旧
+          内核上**整条不生效**，壳撑不满一屏、底部导航跟着内容往上跑。
+          ⚠️ 不能写成「两个 min-h 类并列」那种兜底：tailwind 产物里的先后由它自己的
+          工具类排序决定，与 class 属性里的书写顺序无关，而 .min-h-screen 恰好排在
+          .min-h-\[100dvh\] **之后**——并列写法的净效果是 100vh 永远赢，dvh 等于白写。
+          已在 dist/assets/*.css 里实测：@supports 块位于全部 min-h 工具类之后。
+          100vh as the floor, dvh layered on through the supports- variant. dvh
+          needs Chrome 108+ while the build floor is Chrome 70 (vite.config.ts's
+          target), and with only the dvh value the whole min-height is dropped on
+          older engines — the shell stops filling the viewport and the tab bar
+          rides up with the content.
+          ⚠️ Do NOT fall back by listing two min-h classes side by side: order in
+          the output comes from tailwind's own utility sort, not from the class
+          attribute, and .min-h-screen happens to sort *after* the arbitrary dvh
+          utility — so side-by-side means 100vh always wins and the dvh is inert.
+          Verified in dist/assets/*.css: the @supports block follows every min-h
+          utility. */}
+      <div className="relative flex min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] flex-col">
         <AuroraBackground />
         {/* pt-[env(safe-area-inset-top)]：iOS 的 apple-mobile-web-app-status-bar-style
             是 black-translucent（见 index.html），意味着状态栏是透明的，页面内容
