@@ -45,7 +45,19 @@ except Exception:
     _TRAY_AVAILABLE = False
 
 # ---------- 版本 / Version ----------
-APP_VERSION = "1.4.1"
+# 1.4.2（2026-09-19 审计修复）：回执协议加了第三态。桥接现在除 `success` 外还上报
+# `status`（FILLED / REJECTED / FAILED）与实际执行的 `volume`，后端按 `status` 落库、
+# 不带该字段的旧桥接回落到老口径（见 backend/app/routers/bridge.py 的
+# BridgeResultRequest）。这是**线上协议变更**，所以必须升版本号——后端的兼容分支、
+# 以及下载页「有新版本可更新」的提示都以这个号为准。
+# 同版还加了：自更新的 Ed25519 签名校验、PLACED 后的二次确认、positions_get 的
+# None 与 () 分开处理、MODIFY 缺字段不再按 0 下发、开仓强制正手数。
+#
+# 1.4.2 (2026-09-19 audit): the result protocol gained a third state. The bridge now
+# reports `status` (FILLED / REJECTED / FAILED) and the executed `volume` alongside
+# `success`. This is a wire-protocol change, so the version must move: the backend's
+# compatibility branch and the "update available" prompt both key on it.
+APP_VERSION = "1.4.2"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
