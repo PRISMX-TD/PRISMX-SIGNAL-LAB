@@ -59,17 +59,49 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        /// <summary>
+        /// 释放等待用的事件句柄。每笔交易 new 一个 DealerSink,而每笔都会 Wait(最长 60 秒)
+        /// ——ManualResetEventSlim 一旦真正阻塞就会升级成内核事件;以前 finally 里把
+        /// request / result 都 Dispose 了,独独漏了这个,于是交易路径上每笔漏一个句柄,
+        /// 靠 GC 终结器慢慢回收。
+        /// 必须在 Abandon() 之后调用:Abandon 会等正在执行的回调结束,此后回调只走
+        /// 「_abandoned 分支」,而那个分支在 _waitReleased 为真时不再碰 _done。
+        /// Release the wait handle. One DealerSink per trade, and every trade Waits (up to
+        /// 60s), so the ManualResetEventSlim escalates to a kernel event; finally disposed
+        /// request/result but never this, leaking one handle per trade to the finalizer.
+        /// Call after Abandon(): from then on callbacks take the abandoned branch, which
+        /// no longer touches _done once _waitReleased is set.
+        /// </summary>
+        public void ReleaseWait()
+        {
+            lock (_lock)
+            {
+                _waitReleased = true;
+                _done.Dispose();
+            }
+        }
+
         private bool _abandoned;
+        private bool _waitReleased;
 
         public override void OnDealerAnswer(CIMTRequest request)
         {
+            // _done.Set() 一律在锁内做:原来正常路径的 Set 在锁外,与 ReleaseWait 的
+            // Dispose 之间有一个窗口——回调释放锁之后、Set 之前,超时路径恰好跑完
+            // Abandon 与 ReleaseWait,这个 Set 就打在已释放的句柄上,而它在原生回调
+            // 线程里,抛出来就是进程级崩溃。
+            // Set() always under the lock: the old normal path Set outside it, leaving a
+            // window between releasing the lock and Set where the timeout path could run
+            // Abandon + ReleaseWait, so Set hit a disposed handle — on a native callback
+            // thread, where an exception takes the process down.
             lock (_lock)
             {
                 // 调用方已经放弃等待并即将/已经释放 _result:什么都不能碰。
                 // The caller gave up and is about to dispose _result: touch nothing.
                 if (_abandoned)
                 {
-                    _done.Set();
+                    if (!_waitReleased)
+                        _done.Set();
                     return;
                 }
 
@@ -85,9 +117,9 @@ namespace Prismx.Mt5Gateway
                 {
                     Log.Error("拷贝 dealer 回执失败:{0}", ex.Message);
                 }
-            }
 
-            _done.Set();
+                _done.Set();
+            }
         }
 
         public override void OnDealerResult(CIMTConfirm confirm)
@@ -850,6 +882,17 @@ namespace Prismx.Mt5Gateway
                         return;
                     }
 
+                    // 重连重建时先退掉上一份订阅。以前直接用新 sink 覆盖字段,旧的仍注册
+                    // 在原生层——断线重连是常态(含 SDK 自愈那条分支),每次都漏一个。
+                    // Unsubscribe the previous sink before replacing it: the field used
+                    // to be overwritten while the old sink stayed registered natively,
+                    // leaking one per reconnect (including the SDK self-heal branch).
+                    if (_posSink != null)
+                    {
+                        try { _manager.PositionUnsubscribe(_posSink); }
+                        catch (Exception ex) { Log.Warn("退订旧持仓 sink 失败:{0}", ex.Message); }
+                    }
+
                     _posSink = sink;
                     _posSubscribed = true;
                     Log.Info("持仓订阅已建立:开平仓将即时推送");
@@ -894,6 +937,14 @@ namespace Prismx.Mt5Gateway
                     {
                         Log.Warn("DealSubscribe 失败:{0},平仓明细改由轮询兜底", sub);
                         return;
+                    }
+
+                    // 同 SubscribePositions:先退订旧 sink,免得每次重连漏一个。
+                    // Same as SubscribePositions: drop the old sink first.
+                    if (_dealSink != null)
+                    {
+                        try { _manager.DealUnsubscribe(_dealSink); }
+                        catch (Exception ex) { Log.Warn("退订旧成交 sink 失败:{0}", ex.Message); }
                     }
 
                     _dealSink = sink;
@@ -2301,7 +2352,11 @@ namespace Prismx.Mt5Gateway
                     Log.Warn("开仓请求的 SL/TP 未生效,补发改单:login={0} ticket={1}",
                         login, ticket);
 
-                    TradeResult m = ModifyPosition(login, ticket, stopLoss, takeProfit);
+                    // 这里的 0 是「没要求这一侧」,不是「清除」——翻译成 null。
+                    // A 0 here means "not requested", not "clear": pass null.
+                    TradeResult m = ModifyPosition(login, ticket,
+                        stopLoss > 0 ? (double?)stopLoss : null,
+                        takeProfit > 0 ? (double?)takeProfit : null);
 
                     if (!m.Ok)
                     {
@@ -2874,12 +2929,29 @@ namespace Prismx.Mt5Gateway
         }
 
         //+------------------------------------------------------------------+
-        //| 改持仓的 SL/TP。传 0 表示清除该项。                              |
+        //| 改持仓的 SL/TP。0 = 清除该项;null = 保留仓位上的现值,不碰。      |
+        //|                                                                  |
+        //| 两者必须分开。以前这里无条件对两侧都置 CHANGED 标志,而 MT5 对    |
+        //| 「CHANGED + 价格 0」的语义是清除:一条只带 stopLoss 的改单(自动   |
+        //| 仓管的保本 / 追踪止损就是这种形状)会把用户的止盈一并抹掉。       |
+        //| 「保留」的做法与 OpenPositionCore 一致:不置该侧的 CHANGED 标志,  |
+        //| 服务器就不碰那一侧。                                             |
+        //| 桥接侧 mt5_worker._modify_position 同一语义;它的注释曾声称网关    |
+        //| 「早就只对非 0 的一侧置标志」——那只对开仓成立,改单是这次才改的。 |
+        //|                                                                  |
+        //| 0 clears a side; null keeps the position's current value. These  |
+        //| used to be the same thing here: both CHANGED flags were always    |
+        //| set, so a stop-only modify (exactly what auto-management sends)   |
+        //| wiped the take-profit. "Keep" mirrors OpenPositionCore: no        |
+        //| CHANGED flag for that side, so the server leaves it alone.        |
         //+------------------------------------------------------------------+
         public TradeResult ModifyPosition(ulong login, ulong ticket,
-            double stopLoss, double takeProfit)
+            double? stopLoss, double? takeProfit)
         {
             Stopwatch sw = Stopwatch.StartNew();
+
+            if (!stopLoss.HasValue && !takeProfit.HasValue)
+                return TradeResult.Fail("MT_RET_ERR_PARAMS", "改单请求两侧都未指定 / neither stopLoss nor takeProfit given");
 
             // 改单只要品种名和归属校验,本地 pump 快照足够——品种不会变,登录号不会变,
             // 手数过期与否在这里无关紧要。
@@ -2905,10 +2977,22 @@ namespace Prismx.Mt5Gateway
                 req.Action(CIMTRequest.EnTradeActions.TA_DEALER_POS_MODIFY);
                 req.Symbol(symbol);
                 req.Position(ticket);
-                req.PriceSL(stopLoss);
-                req.PriceTP(takeProfit);
-                req.Flags(CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL |
-                          CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP);
+
+                CIMTRequest.EnTradeActionFlags flags = 0;
+
+                if (stopLoss.HasValue)
+                {
+                    req.PriceSL(stopLoss.Value);
+                    flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL;
+                }
+
+                if (takeProfit.HasValue)
+                {
+                    req.PriceTP(takeProfit.Value);
+                    flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP;
+                }
+
+                req.Flags(flags);
             });
 
             r.ElapsedMs = sw.ElapsedMilliseconds;
@@ -3062,7 +3146,12 @@ namespace Prismx.Mt5Gateway
                 // something DealerUnsubscribe does not guarantee. Done outside _gate so
                 // waiting for a callback never interleaves with the global lock.
                 if (sink != null)
+                {
                     sink.Abandon();
+                    // Abandon 之后回调再也不碰这个句柄,可以放心释放(见 ReleaseWait 说明)。
+                    // Safe once abandoned: no callback touches the handle any more.
+                    sink.ReleaseWait();
+                }
 
                 lock (_gate)
                 {

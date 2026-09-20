@@ -251,8 +251,12 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
                 timeout=timeout,
             ))
         elif order.action == "MODIFY":
+            # sl / tp 原样透传：None 表示「这一侧没说」，gateway_client 会发成 null、
+            # 网关保留现值；0 才是清除。写成 `or 0` 会把两者混为一谈（见 trade_modify 注释）。
+            # Pass sl/tp through as-is: None means "unspecified" (sent as null, gateway
+            # keeps the current value); 0 is an explicit clear. `or 0` conflates the two.
             rsp = run_on_main_loop(gw_modify(
-                login, order.ticket or 0, order.sl or 0, order.tp or 0,
+                login, order.ticket or 0, order.sl, order.tp,
             ), timeout=65.0)
         else:
             order.status = "FAILED"

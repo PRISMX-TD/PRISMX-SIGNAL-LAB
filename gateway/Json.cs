@@ -371,6 +371,29 @@ namespace Prismx.Mt5Gateway
                 CultureInfo.InvariantCulture, out result) ? result : fallback;
         }
 
+        /// <summary>
+        /// 可空 double:键不存在、值是 JSON null、或解析不出数字时返回 null 而不是 0。
+        /// 用在「没传 = 保留现状,传 0 = 清除」这类必须区分「没说」与「说了 0」的字段上
+        /// (改单的 stopLoss / takeProfit)。GetDouble 的 fallback=0 在那里会把「没传」
+        /// 变成「清除」。
+        /// Nullable double: a missing key, a JSON null or an unparsable value yield null
+        /// rather than 0 — for fields where "unspecified" and "explicitly zero" must
+        /// differ (the modify endpoint's stopLoss / takeProfit). GetDouble's fallback of
+        /// 0 would turn "not sent" into "clear it".
+        /// </summary>
+        public double? GetNullableDouble(string key)
+        {
+            string v;
+            if (!_values.TryGetValue(key, out v) || v == null || v == "null")
+                return null;
+
+            double result;
+            if (!double.TryParse(v, NumberStyles.Float, CultureInfo.InvariantCulture, out result))
+                return null;
+
+            return result;
+        }
+
         public bool GetBool(string key, bool fallback = false)
         {
             string v;

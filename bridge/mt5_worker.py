@@ -371,7 +371,7 @@ def _resolve_broker_symbol(requested: str, suffix: str = "") -> str | None:
             break
     if fallback is None:
         _unresolved_until[key] = time.monotonic() + _SYMBOLS_CACHE_TTL
-    elif fallback is not None:
+    else:
         # 走到这里说明：品种确实存在，但对这个账号所在的组是**不可交易**的
         # （trade_mode = DISABLED，常见于只读组、或该品种只对部分组开放）。
         # 仍然把它返回，让下单请求发出去、由券商给出权威的拒绝理由；但要在日志里
@@ -700,7 +700,8 @@ def _positions_payload() -> list:
     positions = mt5.positions_get()
     if not positions:
         return []
-    login = str(mt5.account_info().login) if mt5.account_info() else None
+    info = mt5.account_info()
+    login = str(info.login) if info else None
     out = []
     for p in positions:
         if getattr(p, "magic", 0) != PRISMX_MAGIC:
@@ -996,7 +997,7 @@ def _position_facts(pos_id: int, pos_deals, login: str) -> dict:
     return facts
 
 
-def _closed_trades_payload(path: str, deep_backfill: bool = False) -> list:
+def _closed_trades_payload(deep_backfill: bool = False) -> list:
     """检测该终端账号最近的平仓成交，且仅限本平台开的仓位（个人胜率用）。
 
     先按仓位编号在 MT5 历史里查这个仓位的开仓成交是不是打了 PRISMX 的魔术号
@@ -1610,7 +1611,16 @@ def _close_position(cmd: dict) -> dict:
         "type": order_type,
         "position": ticket,
         "price": price,
-        "deviation": 20,
+        # 与开仓同一套折算（见 _DEVIATION_FRACTION 上的说明）。以前这里写死 20：那段
+        # 说明论证的「20 在黄金上只值 0.20 美元、行情快时换来一串 REQUOTE」对平仓一样
+        # 成立，但修复只落在了开仓路径上——而平仓被拒比开仓被拒严重得多，那是仓位
+        # 平不掉。
+        # Same per-symbol conversion as the open path (see _DEVIATION_FRACTION). This
+        # used to be a hard-coded 20: the argument above — 20 points is $0.20 on gold
+        # and buys requotes in a fast market — applies equally to closes, but the fix
+        # only landed on opens. A rejected close is worse than a rejected open: the
+        # position stays exposed.
+        "deviation": _deviation_points(symbol, price),
         "magic": PRISMX_MAGIC,
         "comment": "PRISMX close",
         "type_time": mt5.ORDER_TIME_GTC,
@@ -1695,8 +1705,9 @@ def _modify_position(cmd: dict) -> dict:
     # TRADE_ACTION_SLTP 是"把这个仓位的 sl/tp 设成这两个值"，而 0 的语义是清除。
     # 原来缺字段一律取 0，于是一条只想移动止损的 MODIFY（自动仓管的保本、追踪止损
     # 都是这么发的，只带 stopLoss 是最自然的写法）会把用户原有的止盈一并抹掉，
-    # 而且没有任何提示。网关那边早就是"只对非 0 的那一侧置 CHANGED 标志"，
-    # 这里对齐同一语义。
+    # 而且没有任何提示。网关侧 Mt5Link.ModifyPosition 自 2026-09-21 起同样区分
+    # 「没传（null）= 保留」与「传 0 = 清除」——此前它对两侧无条件置 CHANGED，
+    # 缺的一侧会被清成 0；这段注释曾误以为网关早已如此（那只对开仓成立）。
     #
     # 真要清除某一侧，仍然可以显式传 0——区别在于"没说"和"说了 0"不再是一回事。
     #
@@ -1704,9 +1715,12 @@ def _modify_position(cmd: dict) -> dict:
     # send 0. TRADE_ACTION_SLTP sets both sides, and 0 means "clear". Defaulting a
     # missing field to 0 meant a MODIFY that only moved the stop — exactly how
     # auto-management sends break-even and trailing updates — silently wiped the
-    # user's take-profit. The gateway has always flagged only the non-zero side as
-    # CHANGED; this matches that. Passing an explicit 0 still clears a side: the
-    # difference is that "unspecified" and "explicitly zero" are no longer the same.
+    # user's take-profit. The gateway's Mt5Link.ModifyPosition makes the same
+    # distinction since 2026-09-21 (null keeps, 0 clears); before that it set both
+    # CHANGED flags unconditionally and a missing side was cleared to 0 — this
+    # comment used to claim otherwise, which was only true of the open path.
+    # Passing an explicit 0 still clears a side: the difference is that
+    # "unspecified" and "explicitly zero" are no longer the same.
     def _side(key: str, current) -> float:
         raw = cmd.get(key)
         if raw is None:
@@ -1795,8 +1809,6 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
         return False, f"unknown action: {action}"
 
     # 数值字段必须可转为有限浮点 / numeric fields must be finite floats
-    import math
-
     for key in ("volume", "entry", "stopLoss", "takeProfit"):
         if key in cmd and cmd[key] is not None:
             try:
@@ -1971,7 +1983,7 @@ def poll_terminal(
     # _closed_trades_payload's own internal retry logic, and wasn't covered
     # by either of the previous two fixes.
     try:
-        out["closedTrades"] = _closed_trades_payload(path, deep_backfill)
+        out["closedTrades"] = _closed_trades_payload(deep_backfill)
     except Exception as e:
         if not out["error"]:
             out["error"] = str(e)

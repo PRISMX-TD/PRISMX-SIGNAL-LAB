@@ -569,8 +569,21 @@ async def trade_close(
     return _trade_rsp(data)
 
 
-async def trade_modify(login: int, ticket: int, sl: float = 0, tp: float = 0) -> TradeRsp:
-    """改 SL/TP（传 0 表示清除该项）。"""
+async def trade_modify(
+    login: int, ticket: int, sl: float | None = None, tp: float | None = None
+) -> TradeRsp:
+    """改 SL/TP。0 = 清除该项；None 发成 JSON null = 网关保留仓位上的现值。
+
+    两者必须分开。以前签名是 `sl: float = 0, tp: float = 0`，调用方再 `order.tp or 0`
+    ——于是一条只带止损的改单（自动仓管的保本 / 追踪止损就是这种形状）到网关就成了
+    takeProfit=0，而网关对 0 的处理是清除：用户的止盈被顺手抹掉。桥接通道
+    （routers/bridge.py 的 MODIFY 分支）早就是发 null，这里对齐。
+    Modify SL/TP. 0 clears a side; None goes out as JSON null and the gateway keeps
+    the position's current value. Previously both defaulted to 0 and callers wrote
+    `order.tp or 0`, so a stop-only modify (exactly what auto-management sends)
+    reached the gateway as takeProfit=0 — which it treats as "clear". The bridge
+    channel (routers/bridge.py MODIFY) already sends null; this matches it.
+    """
     data = await _post("/trade/modify", {
         "login": login,
         "ticket": ticket,

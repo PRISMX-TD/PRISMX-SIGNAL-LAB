@@ -12,6 +12,7 @@
 //| 开到公网 —— 这个 token 等于全体客户的下单权限。                   |
 //+------------------------------------------------------------------+
 using System;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -135,6 +136,16 @@ namespace Prismx.Mt5Gateway
 
         private void AcceptLoop()
         {
+            // 连续接收失败的次数。listener 进入持续报错状态(不是停止)时,以前这里是
+            // 无退避的 continue——HttpThreads(默认 16)条线程一起空转把 CPU 打满,
+            // 而且一条日志都不留。现在按次数线性退避到 1 秒,并在第 1 次和之后每
+            // 100 次记一条错误。
+            // Consecutive accept failures. When the listener is in a persistent error
+            // state (not stopping) this used to `continue` with no back-off, so all
+            // HttpThreads (16 by default) spun the CPU flat out and logged nothing.
+            // Now back off linearly up to 1s and log the 1st and every 100th failure.
+            int consecutiveErrors = 0;
+
             while (!_stopping)
             {
                 HttpListenerContext ctx;
@@ -142,12 +153,18 @@ namespace Prismx.Mt5Gateway
                 try
                 {
                     ctx = _listener.GetContext();
+                    consecutiveErrors = 0;
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
                     if (_stopping)
                         break;
 
+                    consecutiveErrors++;
+                    if (consecutiveErrors == 1 || consecutiveErrors % 100 == 0)
+                        Log.Error("接收连接失败(连续 {0} 次):{1}", consecutiveErrors, ex.Message);
+
+                    Thread.Sleep(Math.Min(1000, 50 * consecutiveErrors));
                     continue;
                 }
 
@@ -789,7 +806,11 @@ namespace Prismx.Mt5Gateway
         }
 
         //+------------------------------------------------------------------+
-        //| POST /trade/modify  改 SL/TP(传 0 = 清除该项)                   |
+        //| POST /trade/modify  改 SL/TP                                     |
+        //|   传 0 = 清除该项;不传 / 传 null = 保留仓位上的现值。            |
+        //|   两者必须分开:自动仓管移动止损时只带 stopLoss,若把缺省当 0,   |
+        //|   一条「把止损挪到保本」的指令会顺手把用户的止盈抹掉。            |
+        //|   0 clears; missing/null keeps the position's current value.     |
         //+------------------------------------------------------------------+
         private void HandleModify(HttpListenerContext ctx, JsonObject body)
         {
@@ -805,11 +826,20 @@ namespace Prismx.Mt5Gateway
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
-            TradeResult r = _link.ModifyPosition(login, ticket,
-                body.GetDouble("stopLoss"), body.GetDouble("takeProfit"));
+            // 不能用 GetDouble:它对缺省字段回 0,而 0 在 MT5 里是「清除」。以前这里就是
+            // GetDouble,于是只带 stopLoss 的改单会把止盈清掉——后端 gateway_execute 给
+            // 网关账号发的自动仓管改单正是这种形状。
+            // Not GetDouble: it yields 0 for a missing field, and 0 means "clear" to MT5.
+            // That is exactly how a stop-only modify used to wipe the take-profit.
+            double? stopLoss = body.GetNullableDouble("stopLoss");
+            double? takeProfit = body.GetNullableDouble("takeProfit");
+
+            TradeResult r = _link.ModifyPosition(login, ticket, stopLoss, takeProfit);
 
             Log.Info("改单 login={0} ticket={1} SL={2} TP={3} -> {4} {5} 耗时 {6}ms(其中 dealer {7}ms)",
-                login, ticket, body.GetDouble("stopLoss"), body.GetDouble("takeProfit"),
+                login, ticket,
+                stopLoss.HasValue ? stopLoss.Value.ToString(CultureInfo.InvariantCulture) : "keep",
+                takeProfit.HasValue ? takeProfit.Value.ToString(CultureInfo.InvariantCulture) : "keep",
                 r.Ok ? "成功" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
 
             // 改单天然幂等(同样的 SL/TP 设两次结果一样),不走缓存。
