@@ -55,7 +55,6 @@ gateway/gateway.ini
 # MT5 SDK 运行时 DLL（由 build.ps1 从 SDK 复制，不入库）
 # MT5 SDK runtime DLLs: copied by build.ps1, not committed
 gateway/*.dll
-mt5probe/*.dll
 
 # MT5 Manager API SDK 本体（约 110 MB，MetaQuotes 官方分发，不入库）
 #
@@ -120,10 +119,14 @@ bridge/*.log
 *.md
 docs/
 .trae/
-
-# ===== 数据库运维脚本（含表结构与权限信息）=====
-# DB ops scripts: contain schema and privilege details
-supabase/
+# 例外：桥接的 README 入库（2026-09-21）。必须写在 *.md 之后——.gitignore 后面的规则
+# 覆盖前面的，放在前面会被 *.md 重新盖掉。bridge_app.py 顶部的注释把「发版签名」流程指向
+# 它，而这条链路做错一次（私钥换法不对、资产名改了）全部存量用户会退回手动下载。不含密钥。
+# Exception: the bridge README is tracked (2026-09-21). It has to follow *.md — later
+# rules win, so placed earlier it would be re-ignored. bridge_app.py points at its
+# release-signing section, and one mistake there sends every installed user back to
+# manual downloads. No secrets in it.
+!bridge/README.md
 
 # ===== EA：本地/MT5 机器专用，不纳入公开仓库 =====
 # EA: local/MT5-machine only, kept out of the public repo
@@ -154,13 +157,6 @@ $RECYCLE.BIN/
 logs/
 bases/
 
-# ===== 未被代码引用的本地素材（不纳入仓库）=====
-# Unused local-only assets, not referenced by any code, kept out of the repo
-logo/
-
-# Claude Code 个人本地设置（权限放行），不入库
-.claude/settings.local.json
-
 # /brag 生成的宣传视频与素材：几十 MB 的 mp4/jpg，本地产物，不入库。
 # 加这条的理由与上面 MetaTrader5SDK 那段相同——一个 `git add .` 就会把它们提交进
 # 历史，而 git 历史里的大文件事后删不干净。
@@ -168,3 +164,13 @@ logo/
 # reason as the MetaTrader5SDK rule above — one `git add .` writes them into
 # history permanently.
 brag-output*/
+
+# 安卓打包器 apppack 的源码与产物镜像（独立 git 仓库，无 remote，不进本仓库）。
+# 此前只写在 .git/info/exclude 里——那是本机私有文件，不随仓库分发：换一台机器
+# 克隆后这个目录就成了未跟踪目录，一个 `git add .` 会把 136 MB（含签名私钥路径与
+# APK/AAB 产物）提交进历史。理由与上面 MetaTrader5SDK / brag-output 两条相同。
+# The Android packager (its own git repo, no remote). Previously ignored only via
+# .git/info/exclude, which is machine-local and does not travel with clones — on a
+# fresh clone one `git add .` would commit 136 MB (signing-key paths, APK/AAB
+# artifacts) into history. Same reasoning as MetaTrader5SDK / brag-output above.
+APP Pack/

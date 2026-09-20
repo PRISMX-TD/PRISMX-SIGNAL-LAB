@@ -16,3 +16,13 @@
 # routers/gateway.py over that line, so it was stored unnormalised and diffed as
 # binary. Explicit attribute, not auto-detection.
 *.py text
+# 同一条启发式也会咬到网关的 C# 源码与 EA 的 MQL5 源码：Mt5Link.cs 150 KB 中英双语
+# 注释，密度不输 routers/gateway.py。桥接的 PyInstaller spec 内容是 Python 但扩展名
+# 不在 *.py 之内，一并声明。
+# The same heuristic bites the gateway's C# and the EA's MQL5 sources (Mt5Link.cs is
+# 150 KB of bilingual comments), and the bridge's PyInstaller spec is Python under a
+# non-.py extension.
+*.cs text
+*.mq5 text
+*.mqh text
+bridge/PRISMX-Bridge.spec text
