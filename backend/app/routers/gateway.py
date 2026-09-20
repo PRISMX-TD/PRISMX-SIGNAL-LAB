@@ -3,11 +3,12 @@
 与 bridge 不同：gateway 账号不需要用户运行本地桥接程序，由后端直接通过
 gateway HTTP 操作 MT5 Manager API。
 """
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -21,6 +22,7 @@ from app.core.rate_limit import (
     record_failed_mt5_verify,
 )
 from app.models import ClosedTrade, MT5Account, Order, User
+from app.schemas import LOGIN_PATTERN
 from app.services.account_type import SOURCE_GROUP, classify_group
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import get_current_user
@@ -36,6 +38,7 @@ from app.services.gateway_client import (
 )
 from app.services.plans import max_mt5_accounts
 from app.services.settings_store import get_account_type_settings
+from app.services import shared_state
 # 余额推送与 bridge 共用同一份去重状态（_last_pushed_balances），所以直接复用
 # bridge 里的函数，而不是各自维护一套——两套状态会互相覆盖对方的余额。
 # bridge 不导入 gateway，这个方向不会形成循环导入。
@@ -429,7 +432,15 @@ def list_gateway_accounts(
 @limiter.limit("10/minute")
 def refresh_gateway_account(
     request: Request,
-    login: str,
+    # 路径参数按 LOGIN_PATTERN（纯数字，≤20 位）校验，与请求体里的 login 同一把尺。
+    # 下面 `int(login)` 是无条件的：不校验时，一个非数字的 login 只要在库里配得上
+    # （历史脏数据、手工插入的行），就会在这里抛 ValueError 变成 500——而正确答案
+    # 是「这个路径参数本来就不合法」，应当 422。校验放在路由层，函数体不必再兜。
+    # The path parameter is validated with the same LOGIN_PATTERN as the request
+    # bodies. `int(login)` below is unconditional, so without this a non-numeric
+    # login that happens to match a row (legacy or hand-inserted data) raises
+    # ValueError and surfaces as a 500 when the honest answer is 422.
+    login: str = Path(pattern=LOGIN_PATTERN),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -551,6 +562,152 @@ GATEWAY_POSITIONS_INTERVAL = 2.0
 # 券商不推 UPDATE（探针实测），所以浮盈变化拿不到事件，仍由上面那个 2 秒轮询
 # 负责。这里快的是「仓位出现/消失」，不是「浮盈跳动」。
 GATEWAY_EVENT_POLL_INTERVAL = 0.25
+
+# ---- 事件队列的单一消费者 / single consumer for the event queues ----
+#
+# GET /position-events 与 GET /deal-events 是**破坏性读取**：gateway 那端一次调用
+# 就把内存队列清空，同一个事件绝不会返回第二次。所以整个后端集群同一时刻只能有
+# 一个消费者——两个 worker 同时拉，事件就被随机瓜分：A 拿到某账号的开仓事件、B 拿
+# 到它的平仓事件，于是 A 的在线用户收不到平仓推送、B 的收不到开仓推送，而且这种
+# 丢失是静默的（队列里本来就没有了，谁也不会报错）。
+#
+# 现状下这条循环已经由 `services/background.py` 的 `lock:background-loops` 选主，
+# 正常情况下只有 leader worker 在跑。但那把锁是**全部后台循环共用**的一把粗粒度锁，
+# 而且换主时有一段重叠窗口：leader 卡住 → 锁过期 → B 抢到并启动循环，A 要到自己
+# 下一轮 `poll()`（最多 15 秒后）才知道自己已经不是 leader 并停掉循环。这 15 秒里
+# 两个进程都在拉队列。破坏性读取经不起"最多 15 秒的双消费者"，所以这里再加一把
+# **只管这两个队列**的细锁，把单一消费者写成这段代码自己的不变式，而不是依赖另一
+# 个模块的调度时序。
+#
+# 拿不到锁时：什么都不做，睡一个续期周期再试（不是崩、也不是忙等 0.25 秒空转）。
+# 事件会积在 gateway 队列里由持有者取走；真持有者死了，锁最多 TTL 秒后过期，
+# 本 worker 接手——这与 background.py 的接管语义一致。
+#
+# The two event endpoints are *destructive* reads: one call drains the gateway's
+# in-memory queue and no event is ever returned twice, so the whole backend must
+# have exactly one consumer. Two workers draining concurrently split the stream
+# at random — one gets an account's open event, the other its close — and the
+# loss is silent. `background.py`'s `lock:background-loops` already elects a
+# leader for this loop, but it is one coarse lock shared by every background
+# loop and leaves an overlap window on handover: the old leader keeps running
+# until its next `poll()`, up to POLL_SECONDS later. A destructive read cannot
+# tolerate "two consumers for up to 15 seconds", so this second, narrow lock
+# makes single-consumer an invariant of this code rather than a consequence of
+# another module's timing. Without the lock the pump idles for one renew period
+# (no crash, no busy-wait) and the holder drains the queue.
+GATEWAY_EVENTS_LOCK = "gateway-events"
+# TTL 要明显大于续期周期，才经得起一次 GC 停顿或一次慢的 Manager API 往返；
+# 又要小到持有者进程猝死时接管不至于太久（事件泵停摆期间慢拍仍在工作，只是
+# 开平仓退回 2 秒轮询的延迟）。/ TTL comfortably above the renew period but
+# small enough that a dead holder is replaced quickly; the slow tick covers the gap.
+GATEWAY_EVENTS_LOCK_TTL = 30
+# 续期/重试周期。事件泵本身 0.25 秒一拍，不能每拍都去 Redis 抢一次锁（那是
+# 每秒 4 次同步 Redis 往返，还得各走一次线程池）；每 10 秒确认一次领导权，
+# 期间用缓存的结论。/ The pump ticks every 250ms; re-electing every tick would
+# be four Redis round-trips a second, so leadership is re-checked every 10s.
+GATEWAY_EVENTS_LOCK_RENEW = 10.0
+
+
+class EventQueueLease:
+    """两个事件队列的消费权。持有期间本 worker 才可以去 drain_*，其余 worker 空转。
+
+    用法：事件泵每一拍先 `await lease.acquire()`，False 就睡一个续期周期跳过本拍；
+    循环退出时 `await lease.release()`，让接手的 worker 不必等满 TTL。
+
+    没配 REDIS_URL 时直接放行：那种部署本来就必须是单 worker（main.py 启动时会说
+    这件事），不存在第二个消费者，多一次锁往返纯属开销，行为与加锁前完全一致。
+
+    A lease over the two destructive event queues: only its holder may drain
+    them, the others idle. The pump calls `acquire()` each tick and skips the
+    tick for one renew period when it returns False; `release()` on shutdown
+    lets the next worker take over without waiting out the TTL. Without
+    REDIS_URL the deployment is single-worker by definition, so the lease is a
+    no-op and behaviour is exactly as before.
+    """
+
+    def __init__(
+        self,
+        ttl: int = GATEWAY_EVENTS_LOCK_TTL,
+        renew: float = GATEWAY_EVENTS_LOCK_RENEW,
+        owner: str | None = None,
+    ) -> None:
+        self._ttl = ttl
+        self._renew = renew
+        self._owner = owner or shared_state.WORKER_ID
+        self.held = False
+        self._checked_at: float | None = None
+
+    async def acquire(self, now: float | None = None) -> bool:
+        if not shared_state.enabled():
+            self.held = True
+            return True
+        now = time.monotonic() if now is None else now
+        # 距上次确认不到一个续期周期就沿用结论：事件泵 0.25 秒一拍，每拍都抢锁
+        # 等于每秒 4 次 Redis 往返。锁的 TTL 是续期周期的三倍，缓存期内不会过期。
+        # Reuse the last verdict within a renew period; the TTL is three times
+        # that, so the lock cannot expire while the verdict is cached.
+        if self._checked_at is not None and (now - self._checked_at) < self._renew:
+            return self.held
+        self._checked_at = now
+        try:
+            # try_lock 是同步 Redis 调用（socket_timeout=2s），不能在事件循环上直接跑。
+            # try_lock is a blocking Redis call and must not run on the loop.
+            held = await asyncio.to_thread(
+                shared_state.try_lock, GATEWAY_EVENTS_LOCK, self._ttl, self._owner
+            )
+        except Exception as e:  # noqa: BLE001
+            # Redis 抖动时沿用上一轮的结论，等下一轮再定——与 background.py 的
+            # 领导锁同一策略：正在跑的先别停，没在跑的也别贸然开始。绝不因此抛异常，
+            # 否则一次网络抖动就把事件泵整条打掉。
+            # Keep the previous verdict through a Redis wobble and decide next
+            # round, exactly as background.py does. Never raise: one hiccup must
+            # not take the pump down.
+            logger.warning(
+                "gateway 事件队列租约不可用，本轮沿用上次结论(held=%s) / "
+                "event-queue lease unavailable, keeping last verdict: %s",
+                self.held, e,
+            )
+            return self.held
+        if held != self.held:
+            if held:
+                logger.info("本 worker 接管 gateway 事件队列 / this worker now drains the gateway event queues (%s)", self._owner)
+            else:
+                logger.warning("gateway 事件队列消费权丢失，本 worker 停止拉取 / event-queue lease lost (%s)", self._owner)
+        self.held = held
+        return held
+
+    async def release(self) -> None:
+        """交还消费权（关服/循环退出时）。失败只记日志：锁最迟 TTL 秒后自己过期。
+        Hand the lease back on shutdown; on failure the lock expires by itself."""
+        if not self.held:
+            return
+        self.held = False
+        self._checked_at = None
+        if not shared_state.enabled():
+            return
+        try:
+            await asyncio.to_thread(shared_state.release_lock, GATEWAY_EVENTS_LOCK, self._owner)
+        except asyncio.CancelledError:
+            # 这条路径几乎总是在取消里走到的（关服、或 BackgroundLoops 换主时
+            # cancel 掉整条循环），而任务一旦进入取消状态，线程池这一跳就走不完，
+            # await 会立刻再抛一次 CancelledError。不就地补一次释放的话，锁会一直
+            # 挂到 TTL 到期——那段时间**没有任何 worker 在消费事件队列**，开平仓
+            # 退回慢拍的 2 秒延迟。所以同步释放完再把取消抛出去。
+            # Almost always reached under cancellation (shutdown, or
+            # BackgroundLoops cancelling the loop on handover); a cancelled task
+            # cannot complete the thread hop, so release inline and re-raise.
+            # Otherwise the lock idles for a full TTL with nobody draining.
+            self._release_blocking()
+            raise
+        except Exception as e:  # noqa: BLE001
+            logger.debug("释放 gateway 事件队列租约失败 / releasing event-queue lease failed: %s", e)
+
+    def _release_blocking(self) -> None:
+        try:
+            shared_state.release_lock(GATEWAY_EVENTS_LOCK, self._owner)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("释放 gateway 事件队列租约失败 / releasing event-queue lease failed: %s", e)
+
 
 # 账号资金刷新间隔。资金变化不像持仓那样需要秒级跟随，而每次刷新都是一次
 # Manager API 往返，按每个账号独立计时，避免 2 秒一轮把 gateway 打满。
@@ -1547,8 +1704,27 @@ async def gateway_positions_loop() -> None:
         regardless of user count: the gateway just drains an in-memory queue.
         Positions are only read when an event actually arrives.
         """
+        lease = EventQueueLease()
+        try:
+            await _event_pump_body(lease)
+        finally:
+            # 关服或换主时把消费权交回去，接手的 worker 不必等满 TTL。
+            # Hand the lease back so a successor need not wait out the TTL.
+            await lease.release()
+
+    async def _event_pump_body(lease: "EventQueueLease") -> None:
         while True:
             try:
+                # 消费权：这两个队列是破坏性读取，全后端只能有一个消费者（见
+                # EventQueueLease）。拿不到就睡一个续期周期——不是 0.25 秒空转，
+                # 那会在非 leader 的每个 worker 上白烧 CPU 与日志。
+                # The queues are destructive reads with exactly one allowed
+                # consumer. Without the lease, idle for a full renew period
+                # rather than spinning at 250ms on every non-leader worker.
+                if not await lease.acquire():
+                    await asyncio.sleep(GATEWAY_EVENTS_LOCK_RENEW)
+                    continue
+
                 # 没有人在看就不必拉。事件会积在 gateway 的队列里（满了丢最老的），
                 # 但那不影响正确性：事件只是「去读一次持仓」的触发器，重新有人
                 # 连上时拉到积压事件，照样会推一次完整快照。
@@ -1556,7 +1732,7 @@ async def gateway_positions_loop() -> None:
                 # gateway queue (oldest dropped when full), which is harmless:
                 # they're just triggers to re-read positions, and the snapshot
                 # pushed on reconnect is complete regardless.
-                if not manager.connected_user_ids():
+                if not await manager.connected_user_ids_async():
                     await asyncio.sleep(GATEWAY_EVENT_POLL_INTERVAL)
                     continue
 
@@ -1607,7 +1783,7 @@ async def gateway_positions_loop() -> None:
                     for uid, lg in pairs:
                         owner.setdefault(str(lg), []).append(uid)
                     by_user = _accounts_by_user(pairs)
-                    connected = set(manager.connected_user_ids())
+                    connected = set(await manager.connected_user_ids_async())
 
                     # 一个用户可能在同一批事件里出现多次（同时开两笔、或开+平），
                     # 但快照推一次就够了，按用户去重避免重复读持仓。
@@ -1703,7 +1879,7 @@ async def gateway_positions_loop() -> None:
                 # pushed to a watching frontend; with nobody watching, the query
                 # (a round trip to remote Supabase) is pure waste. A connecting
                 # client is picked up on the next tick, behavior unchanged.
-                connected = set(manager.connected_user_ids())
+                connected = set(await manager.connected_user_ids_async())
                 if not connected:
                     await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)
                     continue

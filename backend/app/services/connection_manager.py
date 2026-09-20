@@ -363,9 +363,47 @@ class ConnectionManager:
             return_exceptions=True,
         )
 
+    async def connected_user_ids_async(self) -> list[str]:
+        """协程里读在线名单：把同步 Redis 调用挪到线程池。
+
+        `connected_user_ids` 在配了 Redis 时会走一次同步 `set_members`（客户端
+        `socket_timeout=2s`）。协程里直接调它，Redis 一抖动就把事件循环整个冻住
+        最多 2 秒——而这个名单恰恰被两条高频循环在 async 上下文里反复读：网关慢拍
+        每 2 秒一次、事件泵每 0.25 秒一次。
+
+        为什么不是把 `connected_user_ids` 本身改成 `async def`：它还有三个**同步**
+        调用方在本次可改范围之外（`routers/bridge.py` 的 `_forget_idle_users`、
+        `services/push_dispatch.py:_online_user_ids`、`services/signal_broadcast.py`），
+        改签名会当场把它们打断，而那几个文件不归这次改动。所以判定逻辑只保留一份
+        （下面那个同步方法），这里只包一层线程池，协程侧的调用方改用它即可。
+
+        Read the roster from a coroutine without blocking the loop.
+        `connected_user_ids` makes one synchronous Redis call (client
+        socket_timeout=2s) when Redis is on; called straight from a coroutine, a
+        Redis hiccup freezes the whole event loop for up to two seconds — and this
+        roster is read by two hot loops in async context (the gateway slow tick
+        every 2s, the event pump every 250ms).
+
+        Why not make `connected_user_ids` itself `async def`: three *synchronous*
+        callers live outside this change's scope (bridge.py's
+        `_forget_idle_users`, push_dispatch's `_online_user_ids`,
+        signal_broadcast), and changing the signature would break them on the
+        spot. So the logic stays in one place — the sync method below — and this
+        is just a thread hop for coroutine callers.
+        """
+        # 没配 Redis 时根本没有阻塞调用（纯字典读），多一次线程调度反而是浪费。
+        # Without Redis there is nothing blocking (a dict read); skip the hop.
+        if not shared_state.enabled():
+            return self.connected_user_ids()
+        return await _offload(self.connected_user_ids)
+
     def connected_user_ids(self) -> list[str]:
         """当前有前端连接的用户 id 列表（多 worker 时含连在其它 worker 的），供按等级
         过滤广播时查询这些用户的 plan。
+
+        **配了 Redis 时这是一次阻塞调用**，协程里请改用 `connected_user_ids_async`。
+        Blocking when Redis is on; coroutines should use connected_user_ids_async.
+
         User ids with an active client connection right now (across workers with
         Redis), so callers can look up these users' plans before a plan-filtered
         broadcast."""

@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 
 from app.models import MT5Account, UserActiveDay, UserStrategy, UserTask
+from . import periods
 from .stats import compute_comprehensive_stats
 
 GROUPS = [
@@ -68,7 +69,13 @@ def current_active_streak(db, user_id, today: date | None = None) -> int:
     yesterday → the run is broken → 0; not yet today but active yesterday →
     still alive (today can extend it). Judging itself still uses
     has_consecutive_active_days over any historical window."""
-    today = today or datetime.now(timezone.utc).date()
+    # 「今天」同样走游戏化日历的唯一出处，与 UserActiveDay.day 的写入口径
+    # （UTC 自然日）严格同尺；就地写 datetime.now(timezone.utc).date() 也对，
+    # 但那是第二处日历规则，改口径时必然漏掉一处。
+    # "Today" comes from the one gamification calendar helper, on the same ruler
+    # as UserActiveDay.day; spelling it out here would be a second copy of the
+    # rule and the one a future change forgets.
+    today = today or periods.today()
     rows = db.query(UserActiveDay.day).filter(UserActiveDay.user_id == user_id).all()
     days = {date.fromisoformat(r[0]) for r in rows}
     anchor = today if today in days else today - timedelta(days=1)

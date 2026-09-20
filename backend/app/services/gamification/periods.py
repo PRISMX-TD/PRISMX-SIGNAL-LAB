@@ -1,11 +1,47 @@
-"""周期 key 与窗口（设计 §4.1：UTC 自然周/自然月；§1.6：结束后 48h 重算窗）。"""
-from datetime import datetime, timedelta, timezone
+"""周期 key 与窗口（设计 §4.1：UTC 自然周/自然月；§1.6：结束后 48h 重算窗）。
+
+**本模块是游戏化日历的唯一出处。** 整条游戏化链路——周/月 key、`UserActiveDay.day`、
+连续活跃天、成就页的「交易天数」——都按 **UTC 自然日**切天，与后台看板的
+`services/stats_time.py`（按 `STATS_TZ`=Asia/Shanghai 切天）是两把**刻意不同**的尺：
+看板回答运营的「本地的今天有多少人」，游戏化回答用户的「我闯到第几关」，两者没有
+必须一致的理由，但各自内部必须一致。所以切天动作集中在这里的 `day_key` / `today`，
+不要再在别处写第二遍 `strftime("%Y-%m-%d")`——那正是两把尺悄悄长出第三把的方式。
+（口径差异与为什么不统一，见 `stats.trade_days` 处的长注释。）
+
+This module is the single source of the gamification calendar: everything in
+that chain — week/month keys, UserActiveDay.day, activity streaks, the
+achievements page's "trading days" — cuts days on the **UTC** calendar, while the
+admin dashboard (services/stats_time.py) deliberately cuts on STATS_TZ. The two
+answer different questions and need not agree with each other, but each must be
+internally consistent, so the day cut lives in day_key/today here rather than
+being re-spelled as strftime("%Y-%m-%d") elsewhere.
+"""
+from datetime import date, datetime, timedelta, timezone
 
 RECOMPUTE_GRACE_HOURS = 48
 
 
 def _utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc) if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def day_key(dt: datetime) -> str:
+    """游戏化的「哪一天」：UTC 自然日的 `YYYY-MM-DD`。
+
+    naive 值按 UTC 解读（库里的 DateTime 全是 naive UTC），aware 值先换算到 UTC，
+    所以同一个时刻无论以什么形式传进来都落在同一天——直接 `dt.strftime` 做不到
+    这一点：一个带 +08:00 的值会被原样格式化成本地日期。
+    The gamification "which day": a UTC calendar date. Naive values are read as
+    UTC (every DateTime column is naive UTC) and aware ones are converted, so one
+    instant lands on one day whichever form it arrives in — plain `dt.strftime`
+    would format an aware +08:00 value on its own local date.
+    """
+    return _utc(dt).strftime("%Y-%m-%d")
+
+
+def today(now: datetime | None = None) -> date:
+    """游戏化日历里的「今天」（UTC 自然日）。/ Today on the gamification (UTC) calendar."""
+    return _utc(now or datetime.now(timezone.utc)).date()
 
 
 def week_key(dt: datetime) -> str:

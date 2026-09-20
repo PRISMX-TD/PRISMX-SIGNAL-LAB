@@ -5,6 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import ClosedTrade, Order
 from app.services.symbol_aliases import symbol_match_set
+# 相对导入而不是 `from app.services.gamification import periods`：本模块由包的
+# __init__ 在 periods 之前导入，走包属性那条路会撞上"包还没初始化完"。
+# Relative import: __init__ imports this module before periods, so going through
+# the package attribute would hit a partially-initialised package.
+from . import periods
 from app.services.trade_performance import position_id_of
 from app.utils.timeutil import aware
 
@@ -193,22 +198,40 @@ def compute_comprehensive_stats(db, user_id, data: dict | None = None) -> dict:
         "trades": n, "wins": wins, "losses": n - wins,
         "win_rate": (wins / n) if n else None,
         "lots": sum(weighted_lots(o) for o in real),
-        # 切天用裸 `created_at`（UTC），**不**走 `services/stats_time.py` 的
-        # STATS_TZ。这是刻意的，不是漏改：整个游戏化链路的日历都在 UTC 上——
-        # `periods.py` 的周/月 key、`UserActiveDay.day`、`longest_active_streak`
-        # 的连续日，全是 UTC 日历日。trade_days 要和 streak_3 / 活跃日同一把尺，
-        # 否则同一个用户「交易了 30 天」和「活跃了 30 天」会按两套日历各算各的。
-        # 后台看板用 STATS_TZ 是另一回事：那边给运营看「本地的今天」，
-        # 与用户闯关进度不是同一个口径。两套并存需知情，不要"顺手统一"。
-        # Days are cut on the raw UTC created_at, deliberately *not* through
-        # services/stats_time.py's STATS_TZ. The whole gamification calendar is
-        # UTC — periods.py's week/month keys, UserActiveDay.day, the streak run —
-        # and trade_days must share that ruler with streak_3, or one user's "traded
-        # 30 days" and "active 30 days" would be counted on two different
-        # calendars. The admin dashboard's STATS_TZ serves a different purpose
-        # (an operator's local "today") and is not this metric. Both exist on
-        # purpose; don't "unify" them in passing.
-        "trade_days": len({o.created_at.strftime("%Y-%m-%d") for o in real if o.created_at}),
+        # 切天走 `periods.day_key`（UTC 自然日），**不**走 `services/stats_time.py`
+        # 的 STATS_TZ。这是刻意的，不是漏改，2026-09-20 复核后维持：
+        #
+        #   · 整个游戏化链路的日历都在 UTC 上——`periods.py` 的周/月 key、
+        #     `UserActiveDay.day`（由 `services/deps._touch_last_active` 按 UTC 写）、
+        #     `longest_active_streak` / `current_active_streak` 的连续日。trade_days
+        #     必须和 streak_3 同一把尺，否则同一个用户「交易了 30 天」和「活跃了
+        #     30 天」按两套日历各算各的。
+        #   · 只把这一个指标改成 STATS_TZ，等于在游戏化内部再劈一道口径（判定用
+        #     UTC 的活跃日 + 上海时区的交易日），比现在更糟。要改就得连
+        #     `deps._touch_last_active` 的写入口径一起改，那是跨模块的产品决策，
+        #     还要连带决定存量 `user_active_days` 是否回填、已发勋章与已判等级是否
+        #     复核——不是这一行能承担的。
+        #   · 后台看板用 STATS_TZ 是另一回事：那边回答运营的「本地的今天有多少人」，
+        #     与用户闯关进度不是同一个问题。两把尺并存是设计，不是缺陷。
+        #
+        # 切天动作本身收到 `periods.day_key` 里，全链路只此一处实现（原来这里是
+        # 就地 `strftime`，日历规则散落两处、改一处漏一处是迟早的事）。
+        #
+        # Days are cut with periods.day_key (UTC calendar), deliberately *not*
+        # through services/stats_time.py's STATS_TZ; re-reviewed 2026-09-20 and
+        # kept. The whole gamification calendar is UTC — periods.py's week/month
+        # keys, UserActiveDay.day (written in UTC by deps._touch_last_active) and
+        # the streak runs — so trade_days must share that ruler with streak_3.
+        # Moving only this metric to STATS_TZ would split the calendar *inside*
+        # gamification (UTC active days judged against Shanghai trading days),
+        # which is worse than the present state; moving the whole chain means
+        # changing deps._touch_last_active too and deciding whether to backfill
+        # user_active_days and re-check already-awarded badges and levels — a
+        # cross-module product call, not a one-line fix. The dashboard's STATS_TZ
+        # answers a different question (an operator's local "today"). Two rulers
+        # on purpose. The cut itself now lives in periods.day_key so the calendar
+        # rule has exactly one implementation.
+        "trade_days": len({periods.day_key(o.created_at) for o in real if o.created_at}),
         "profit": sum(p for _, p in res_real),
         "trades_any": len(res_all),
         "per_login": dict(per_login),

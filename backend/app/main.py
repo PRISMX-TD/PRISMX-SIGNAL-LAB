@@ -14,7 +14,7 @@ from app.core.config import settings, _WORKER_COUNT
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
-from app.services.deps import require_admin
+from app.services.deps import get_current_user, require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
 from app.routers import account, admin, announcements, auth, automation, bridge, chart, competitions, ea, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, site, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
@@ -227,7 +227,24 @@ app.include_router(tickets.router, prefix=settings.API_PREFIX)
 app.include_router(tickets.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(invite.router, prefix=settings.API_PREFIX)
 app.include_router(invite.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
-app.include_router(invite.agent_router, prefix=settings.API_PREFIX)
+# 代理端点要求**登录**（不是管理员）：「是不是代理」由 invite_link_agents 里有没有
+# 这个人的行决定，每个端点再按 link 归属校验，见 invite.agent_router 的说明。
+# 挂载级依赖与 admin_router 同一个理由：端点上各自写一次 Depends(get_current_user)
+# 是给读代码的人看的，这一行才是兜底——将来有人加一个忘了写依赖的 /agent/* 端点，
+# 不会因为这一处疏漏就变成任何人（含未登录）都能拉代理看板与客户名单。
+# FastAPI 对同一依赖在单次请求内只求值一次，重复声明不会多打一次库。
+# The agent endpoints require a *logged-in user*, not an admin: agent-ness is a
+# row in invite_link_agents, and each endpoint re-checks link ownership (see
+# invite.agent_router). The mount-level dependency exists for the same reason as
+# on the admin routers — the per-endpoint Depends is what a reader sees, this
+# line is the backstop, so a future /agent/* endpoint that forgets its dependency
+# cannot ship as an open door onto agents' dashboards and customer lists.
+# FastAPI evaluates an identical dependency once per request, so it costs nothing.
+app.include_router(
+    invite.agent_router,
+    prefix=settings.API_PREFIX,
+    dependencies=[Depends(get_current_user)],
+)
 app.include_router(gamification.router, prefix=settings.API_PREFIX)
 app.include_router(gamification.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(competitions.router, prefix=settings.API_PREFIX)

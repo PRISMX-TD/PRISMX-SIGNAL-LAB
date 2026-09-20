@@ -102,11 +102,12 @@ async def run_subscriber() -> None:
     """多 worker：把别的 worker 发来的唤醒落到本进程的事件上。断线 3 秒后重连。
     Multi-worker only: apply wakes published by other workers; reconnect on drop."""
     while True:
+        pubsub = client = None
         try:
-            sub = shared_state.new_async_pubsub(CHANNEL)
+            sub = shared_state.new_async_pubsub(CHANNEL, with_client=True)
             if sub is None:
                 return
-            pubsub, channel = sub
+            pubsub, channel, client = sub
             await pubsub.subscribe(channel)
             async for msg in pubsub.listen():
                 if msg.get("type") != "message":
@@ -127,6 +128,30 @@ async def run_subscriber() -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("bridge_wake 订阅中断，3 秒后重连 / subscriber dropped, reconnecting in 3s: %s", e)
             await asyncio.sleep(3)
+        finally:
+            # 每绕一圈 new_async_pubsub 都新建一个客户端（连同它自己的连接池）。
+            # 不关掉的话，Redis 每抖动一次这条循环就重来一轮、多留一组连接——一段
+            # 不稳定期下来连接数线性堆高，最后撞 maxclients，而这条链路上挂着的是
+            # 「下单立刻叫醒桥接」，堵住就退回 1.5 秒轮询。异常路径也要走到，所以
+            # 放 finally 而不是循环末尾。与 connection_manager.run_fanout_subscriber
+            # 同源同解（审计 F-09）。
+            # Every pass creates a fresh client (with its own pool); leaving it
+            # open leaks one set of connections per Redis wobble until maxclients
+            # is hit. Must run on the error path too, hence finally. Same fix as
+            # connection_manager.run_fanout_subscriber.
+            await _close_pubsub(pubsub, client)
+
+
+async def _close_pubsub(pubsub, client) -> None:
+    """关闭订阅与客户端；关闭失败只记日志，绝不把订阅循环带下去。
+    Close pubsub + client; a cleanup failure must never kill the loop."""
+    for obj in (pubsub, client):
+        if obj is None:
+            continue
+        try:
+            await obj.aclose()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("关闭 Redis 订阅连接失败 / closing pubsub connection failed: %s", e)
 
 
 def start_tasks() -> list[asyncio.Task]:

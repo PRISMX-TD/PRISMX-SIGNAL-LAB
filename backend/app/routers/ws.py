@@ -11,6 +11,7 @@ import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.core.security import decode_token_payload
@@ -38,9 +39,12 @@ def _authenticate(token: str) -> str | None:
     """校验 token 并返回 user_id；会话版本不匹配（改密码后已失效）返回 None。
     与 services/deps.get_current_user 同一套 tv 校验规则，见其说明。
 
+    **同步阻塞**（里面有一次数据库查询），协程里必须经 run_in_threadpool 调用。
+
     Validate the token and return the user_id; a session-version mismatch
     (invalidated by a password change) returns None. Same "tv" check as
     services/deps.get_current_user — see its docstring for the rationale.
+    Blocking (it queries the DB); coroutines must call it via run_in_threadpool.
     """
     payload = decode_token_payload(token)
     user_id = payload.get("sub") if payload else None
@@ -124,7 +128,17 @@ async def ws_client(websocket: WebSocket):
     except Exception:
         token = ""
 
-    user_id = _authenticate(token)
+    # 鉴权要查一次库（token_version）。生产库是远端 Supabase，一次往返几十毫秒起，
+    # 网络不好时更久——直接在协程里同步查，这段时间整个事件循环停摆：所有 HTTP 请求、
+    # 所有 WebSocket 推送、桥接长轮询一起卡住。而 WS 建连恰恰是个会突发的事件（部署
+    # 重启、移动端从后台回来、网络切换，都会让一批客户端同时重连）。挪进线程池。
+    # Authentication makes one DB query (token_version). Against a remote
+    # Supabase that is tens of milliseconds at best, and running it synchronously
+    # inside the coroutine stalls the entire event loop for that time — every
+    # HTTP request, every WebSocket push and the bridge long-poll with it. WS
+    # connects arrive in bursts (a restart, phones resuming, a network switch all
+    # reconnect a batch at once), so it goes to the thread pool.
+    user_id = await run_in_threadpool(_authenticate, token)
     if not user_id:
         # 告知失败原因后关闭。这里同样要防"对端已经走了"：超时分支走到这里时连接
         # 通常还在（所以这条 AUTH_FAIL 有意义），但客户端完全可能恰好在这一刻断开。
