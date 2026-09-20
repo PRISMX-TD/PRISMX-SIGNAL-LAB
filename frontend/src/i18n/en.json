@@ -2256,7 +2256,7 @@
     "title": "One step left before you can trade",
     "subtitle": "No MT5 account is connected yet, so signals can't reach a terminal to execute.",
     "s1Title": "Open a {{name}} account",
-    "s1Desc": "Skip this if you already have one. If not, open one through our link — meet the conditions and free PRO comes with it.",
+    "s1Desc": "Skip this if you already have one. Meet the conditions and PRO access is free.",
     "s2Title": "Enter your login to connect",
     "s2Desc": "Type your MT5 login and password on the Connect MT5 page. Once it verifies you're connected — no bridge app, no VPS.",
     "s3Title": "Trade from the signal panel",
