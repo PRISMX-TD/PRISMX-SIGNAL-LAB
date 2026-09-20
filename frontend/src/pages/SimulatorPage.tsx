@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import Pager from '../components/Pager'
 import { segBtn } from '../utils/segBtn'
 import { simulateApi } from '../api/client'
-import { displaySymbol, fmtTime, localizeApiError } from '../api/utils'
+import { displaySymbol, fmtTime, localizeApiError, fmtMoney } from '../api/utils'
 import { SkeletonLine } from '../components/Skeleton'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { SimulateResult } from '../api/types'
@@ -38,10 +38,6 @@ const CURVE_H = 240
 // 参数改动后的防抖：滑杆连续拖动时不要每一格都打一次接口。
 // Debounce after a param change: dragging the slider shouldn't fire a request per notch.
 const DEBOUNCE_MS = 300
-
-function fmtMoney(v: number): string {
-  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 
 // 本金输入框：自己维护一份文本缓冲，只在失焦（或回车）时才解析+夹紧+回传。
 // 沿用指标设置弹窗踩过的坑（见《技术架构》§3.2 的偏好写入约定）：每敲一键就解析

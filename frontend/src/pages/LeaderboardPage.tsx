@@ -32,6 +32,7 @@ import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
 import type { LeaderboardBoard, LeaderboardPayload, LeaderboardRow } from '../api/types'
+import { fmtScorePct, fmtUsd } from '../api/utils'
 
 const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
 type Period = 'week' | 'month'
@@ -68,15 +69,7 @@ const SKEL_MINE = 90
 // handles that the same way. The return board additionally carries an
 // explicit sign (the design board's pct() prints "+3.9%"), the win-rate
 // board doesn't (always non-negative).
-const fmtScorePct = (v: number): string => `${(v * 100).toFixed(1)}%`
 const fmtScoreSigned = (v: number): string => `${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`
-
-// 最低本金门槛的展示格式：整数美元不带小数（500 而不是 500.00），非整数才保留
-// 两位——管理端目前只允许输入正数，没有强制整数，所以两种都要处理。
-// Display formatting for USD figures: a whole-dollar amount renders without
-// decimals (500, not 500.00); anything else keeps two. The admin form only
-// requires a positive number, not an integer, so both shapes are possible.
-const fmtUsd = (v: number): string => (Number.isInteger(v) ? String(v) : v.toFixed(2))
 
 // 周期边界/封存时间一律按 UTC 自然周/月定义（见后端 periods.py）——页头日期
 // 必须跟着用 UTC 而不是浏览器本地时区，否则不同时区的用户会看到与后端判定

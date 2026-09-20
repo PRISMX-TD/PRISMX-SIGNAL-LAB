@@ -1,7 +1,9 @@
 // 通用确认弹窗：替代原生 confirm()，与玻璃拟态风格保持一致
 // Generic confirm modal: replaces native confirm(), matches the glass aesthetic
+import { useId, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
+import { useDialogA11y } from '../utils/useDialogA11y'
 
 interface Props {
   title: string
@@ -27,6 +29,17 @@ export default function ConfirmModal({
   onCancel,
 }: Props) {
   const { t } = useTranslation()
+
+  // 键盘与读屏：Esc 取消（提交中不许关）、Tab 困在框内、焦点进出。这是平仓确认的
+  // 载体，此前 Tab 会跑到遮罩后面页面上的按钮——见 utils/useDialogA11y 的说明。
+  // 手机返回手势由渲染方按既有惯例自己挂 useBackToClose，这里不重复。
+  // Keyboard/screen-reader: Escape cancels (not while busy), Tab is trapped, focus
+  // moves in and back out. This dialog fronts position closes, and Tab used to
+  // reach the page behind it — see utils/useDialogA11y. The back gesture stays the
+  // renderer's job (useBackToClose), per the existing convention.
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(sheetRef, () => { if (!busy) onCancel() })
 
   const overlayClass = center
     ? 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6'
@@ -57,8 +70,16 @@ export default function ConfirmModal({
   // wrapper's transform does the same (see SlideOrderModal/ChartOrderModal).
   return createPortal(
     <div className={overlayClass} onClick={onCancel}>
-      <div className={sheetClass} onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-white">{title}</h3>
+      <div
+        ref={sheetRef}
+        className={sheetClass}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
         <p className="mt-3 text-sm leading-relaxed text-neutral-300">{message}</p>
         <div className="mt-5 flex gap-3">
           <button onClick={onCancel} disabled={busy} className="btn-ghost flex-1 py-2 text-sm">

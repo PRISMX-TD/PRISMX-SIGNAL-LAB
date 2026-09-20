@@ -1,9 +1,10 @@
 // Token 生成后的强提醒弹窗：大字展示 + 一键复制，关闭前必须确认已保存
 // Strong reveal modal shown right after generating a token: large text +
 // one-click copy; the user must confirm they've saved it before closing.
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
+import { useDialogA11y } from '../utils/useDialogA11y'
 
 interface Props {
   token: string
@@ -13,6 +14,13 @@ interface Props {
 export default function TokenRevealModal({ token, onClose }: Props) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
+  // 只补 role / 焦点陷阱，**不**让 Esc 关：唯一的关闭按钮语义是"我已保存 token"，Esc
+  // 一键跳过这个确认就违背了弹窗存在的目的。
+  // role + focus trap only; Escape deliberately does NOT close — the sole close
+  // button means "I have saved the token", and Escape would skip that acknowledgement.
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(sheetRef, onClose, { closeOnEscape: false })
 
   const copy = async () => {
     await navigator.clipboard.writeText(token)
@@ -28,7 +36,7 @@ export default function TokenRevealModal({ token, onClose }: Props) {
   // would override .slide-sheet's mobile media query.
   return createPortal(
     <div className="slide-overlay">
-      <div className="slide-sheet sm:w-[420px]">
+      <div ref={sheetRef} className="slide-sheet sm:w-[420px]" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <div className="flex flex-col items-center text-center">
           <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-prism-600/15 text-prism-300">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -36,7 +44,7 @@ export default function TokenRevealModal({ token, onClose }: Props) {
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
           </div>
-          <h3 className="text-lg font-bold text-white">{t('bind.tokenTitle')}</h3>
+          <h3 id={titleId} className="text-lg font-bold text-white">{t('bind.tokenTitle')}</h3>
           <p className="mt-1 text-sm text-amber-400/90">{t('bind.tokenJustOnce')}</p>
         </div>
 

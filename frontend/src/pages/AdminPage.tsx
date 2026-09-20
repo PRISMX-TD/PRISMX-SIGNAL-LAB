@@ -10,6 +10,8 @@ import { adminApi, isAbortError } from '../api/client'
 import { fmtDate, fmtDay, fmtTime, localizeApiError } from '../api/utils'
 import Select from '../components/Select'
 import ConfirmModal from '../components/ConfirmModal'
+import OpsSettingsPanel from '../components/admin/OpsSettingsPanel'
+import SystemSettingsPanel from '../components/admin/SystemSettingsPanel'
 import DisableUserModal from '../components/admin/DisableUserModal'
 import { isUserDisabled } from '../components/admin/userStatus'
 import Pager from '../components/Pager'
@@ -21,7 +23,7 @@ import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
-import type { AdminBrokerSettings, AdminPricingSettings, AdminEmailGateSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
@@ -46,6 +48,8 @@ const PAGE_SIZE = 50
 // system 调系统参数（纪律分算法、K 线保留、策略平台上限）——影响后台怎么算
 // ops 与 system 的界线是"改了之后谁受影响"：ops 直接改变商业条款，system 改变
 // 计算与存储行为。混在一起就是原来那个 7 组配置堆在一页、找不到东西的样子。
+// 两段的表单与读写各自住在 components/admin/OpsSettingsPanel.tsx 与
+// SystemSettingsPanel.tsx——与其余页签一样自成 Panel；本文件只剩页签路由和用户表。
 // Four sections, mirroring the Orders page tab pattern. The ops/system split is
 // by blast radius: ops changes commercial terms users see and pay, system
 // changes how the backend computes and stores. Lumping them together is what
@@ -64,21 +68,6 @@ const PAGE_SIZE = 50
 // folding it into data would bury the operating metrics and page stats.
 type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'tickets' | 'gamification' | 'competitions'
 const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'tickets', 'gamification', 'competitions']
-
-// 社交平台字段表：数组顺序就是后台表单顺序。平台名是品牌名，不进 i18n；
-// placeholder 给出该平台「官方主页」的典型形状，省得填的人去猜要放个人页、
-// 分享短链还是 App 内跳转链接——这五个平台的链接形态差别不小。
-// Social field table; array order is the form order. Platform names are brands
-// and stay out of i18n. Each placeholder shows what that platform's official
-// page URL normally looks like, so nobody has to guess between a profile page,
-// a share shortlink and an in-app deep link — the five differ a fair amount.
-const SOCIAL_FIELDS: { key: keyof AdminSocialSettings; label: string; placeholder: string }[] = [
-  { key: 'facebookUrl', label: 'Facebook', placeholder: 'https://www.facebook.com/yourpage' },
-  { key: 'instagramUrl', label: 'Instagram', placeholder: 'https://www.instagram.com/youraccount' },
-  { key: 'xUrl', label: 'X', placeholder: 'https://x.com/youraccount' },
-  { key: 'discordUrl', label: 'Discord', placeholder: 'https://discord.gg/xxxxxxx' },
-  { key: 'telegramUrl', label: 'Telegram', placeholder: 'https://t.me/yourchannel' },
-]
 
 interface Draft {
   role: UserRole
@@ -415,61 +404,17 @@ export default function AdminPage() {
   const [savingId, setSavingId] = useState<string | null>(null)
   const { toast, showToast } = useToast()
 
-  // 合作券商锁设置（patterns 在输入框里以逗号分隔编辑）
-  // partner-broker lock settings (patterns edited as a comma-separated string)
-  const [brokerSettings, setBrokerSettings] = useState<AdminBrokerSettings | null>(null)
-  const [brokerPatternsText, setBrokerPatternsText] = useState('')
-  const [savingBroker, setSavingBroker] = useState(false)
-
-  // 订阅定价设置 / subscription pricing settings
-  const [pricing, setPricing] = useState<AdminPricingSettings | null>(null)
-  const [savingPricing, setSavingPricing] = useState(false)
-
-  // 免费试用设置 / free-trial settings
-  const [trial, setTrial] = useState<AdminTrialSettings | null>(null)
-  const [savingTrial, setSavingTrial] = useState(false)
-  // trial 是表单草稿：ops 分页勾选框每点一下就改它，只在 load()/saveTrial()
-  // 时才跟服务器对齐。邀请分页的送试用列要判断"全局试用现在到底是不是开着"，
-  // 读草稿会在草稿被改过、还没保存时给出错误答案（勾了没存 → 列会显示送
-  // 试用可用，实际发不出去；反之亦然）。所以单独存一份已保存值，只在
-  // load()/saveTrial() 里更新，传给 InviteLinksPanel 的必须是这个。
-  // `trial` is a form draft: the ops-tab checkbox mutates it on every click and
-  // it only reconciles with the server in load()/saveTrial(). The invites tab
-  // needs "is the global trial actually on right now", and reading the draft
-  // gives the wrong answer whenever it has been edited but not saved yet
-  // (ticked-not-saved makes the trial column look live when it isn't, and vice
-  // versa). Keep the persisted value separate, updated only in load() and
-  // saveTrial(), and pass THAT to InviteLinksPanel.
+  // 邀请页签的「送试用」列要判断"全局试用现在到底是不是开着"。试用表单本身住在运营
+  // 设置页签（OpsSettingsPanel）里且是草稿，保存成功后经 onTrialSaved 回传到这里；首屏
+  // 在 load() 里和用户表一起读一次已保存值。传给 InviteLinksPanel 的必须是这个已保存
+  // 值，不能是草稿——草稿被改过、还没保存时会给出错误答案（勾了没存 → 列会显示送
+  // 试用可用，实际发不出去；反之亦然）。
+  // The invites tab needs "is the global trial actually on right now". The trial form
+  // lives on the ops tab (OpsSettingsPanel) and is a draft; a successful save reports
+  // back via onTrialSaved, and load() reads the persisted value once alongside the user
+  // list. InviteLinksPanel must get this persisted value, never the draft — an edited
+  // but unsaved draft gives the wrong answer in both directions.
   const [savedTrialEnabled, setSavedTrialEnabled] = useState(false)
-
-
-  // 注册邮箱限制（一次性邮箱闸门）/ signup email gate
-  //
-  // 两个名单在界面上是多行文本框，state 里也就存文本而不是数组：管理员正在
-  // 敲的中间状态（空行、还没打完的域名）如果每次 onChange 都往数组里塞，光标
-  // 会因为重新渲染跳走，空行也会被吃掉。保存时才切成数组，和券商锁那个
-  // brokerPatternsText 是同一个先例。
-  //
-  // The two lists are textareas, so the draft lives as text rather than an
-  // array: parsing on every keystroke eats the blank line the admin is typing
-  // through and moves the caret. Split on save — same precedent as
-  // brokerPatternsText above.
-  const [emailGate, setEmailGate] = useState<AdminEmailGateSettings | null>(null)
-  const [emailBlockedText, setEmailBlockedText] = useState('')
-  const [emailAllowedText, setEmailAllowedText] = useState('')
-  const [savingEmailGate, setSavingEmailGate] = useState(false)
-
-  // 官方社交主页 / official social links
-  const [social, setSocial] = useState<AdminSocialSettings | null>(null)
-  const [savingSocial, setSavingSocial] = useState(false)
-
-  // K 线历史保留策略设置 / candle-history retention settings
-  const [candleSettings, setCandleSettings] = useState<AdminCandleSettings | null>(null)
-  const [savingCandle, setSavingCandle] = useState(false)
-
-  // 自定义策略平台设置 / custom-strategy platform settings
-  const [strategySettings, setStrategySettings] = useState<AdminStrategySettings | null>(null)
-  const [savingStrategy, setSavingStrategy] = useState(false)
 
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
@@ -506,13 +451,13 @@ export default function AdminPage() {
     const wantedPage = opts.page ?? page
     setLoading(true)
     try {
-      // 八个接口分区加载：以前是一个 Promise.all，任一失败整页报错、其余几块
-      // 明明拿到了数据也不显示。现在各自成败各自算，失败的块保留旧值（首屏就是
-      // 空态），只提示"N 项没加载出来"。其它页面早就吃过这个教训。
-      // Eight endpoints settle independently: a single Promise.all used to fail the
-      // whole page when any one of them failed, hiding data the others had
-      // already returned. Each section now keeps its previous value on failure
-      // and one toast says how many didn't load.
+      // 用户表与「全局试用是否开着」一起读；后者只给邀请页签用（见 savedTrialEnabled）。
+      // 七组设置的读写已搬进 OpsSettingsPanel / SystemSettingsPanel，在各自面板里各自成败。
+      // 两个请求各自 settle：一个失败另一个照常显示，只提示"N 项没加载出来"。
+      // The user list plus "is the global trial on" (invites tab only; see
+      // savedTrialEnabled). The seven settings sections now load inside
+      // OpsSettingsPanel / SystemSettingsPanel and fail independently there. The two
+      // calls settle separately so one failure never hides the other's data.
       const results = await Promise.allSettled([
         adminApi.listUsers(
           {
@@ -523,202 +468,32 @@ export default function AdminPage() {
           },
           ctrl.signal,
         ),
-        adminApi.getSettings(),
-        adminApi.getPricing(),
         adminApi.getTrial(),
-        adminApi.getSocial(),
-        adminApi.getEmailGate(),
-        adminApi.getCandleHistory(),
-        adminApi.getStrategySettings(),
       ])
-      // 这一批已经被后来的一次 load 取代：其余七个接口没有 signal、照样会成功返回，
-      // 若继续往下走就会用上一次的数据把新的一次盖掉——正是这里要防的那件事。
-      // This batch has been superseded by a later load: the other seven calls
-      // carry no signal and still resolve, so falling through would overwrite the
-      // newer load's data with this one's — exactly what the guard is for.
+      // 这一批已经被后来的一次 load 取代：getTrial 没有 signal、照样会成功返回，若继续
+      // 往下走就会用上一次的数据把新的一次盖掉——正是这里要防的那件事。
+      // Superseded by a later load: getTrial carries no signal and still resolves, so
+      // falling through would overwrite the newer load's data with this one's.
       if (loadCtrl.current !== ctrl) return
-      const [usersRes, settingsRes, pricingRes, trialRes, socialRes, emailGateRes, candleRes, strategyRes] = results
+      const [usersRes, trialRes] = results
       setPage(wantedPage)
-      let failed = 0
-      const ok = <T,>(r: PromiseSettledResult<T>): T | null => {
-        if (r.status === 'fulfilled') return r.value
-        failed += 1
-        return null
+      if (usersRes.status === 'fulfilled') {
+        setUsers(usersRes.value.users)
+        setTotal(usersRes.value.total)
+        setDrafts(Object.fromEntries(usersRes.value.users.map((u) => [u.id, toDraft(u)])))
       }
-      const users = ok(usersRes)
-      if (users) {
-        setUsers(users.users)
-        setTotal(users.total)
-        setDrafts(Object.fromEntries(users.users.map((u) => [u.id, toDraft(u)])))
-      }
-      const settings = ok(settingsRes)
-      if (settings) {
-        setBrokerSettings(settings)
-        setBrokerPatternsText(settings.brokerPatterns.join(', '))
-      }
-      const pricingVal = ok(pricingRes)
-      if (pricingVal) setPricing(pricingVal)
-      const trialVal = ok(trialRes)
-      if (trialVal) {
-        setTrial(trialVal)
-        setSavedTrialEnabled(trialVal.trialEnabled)
-      }
-      const socialVal = ok(socialRes)
-      if (socialVal) setSocial(socialVal)
-      const emailGateVal = ok(emailGateRes)
-      if (emailGateVal) {
-        setEmailGate(emailGateVal)
-        setEmailBlockedText(emailGateVal.extraBlockedDomains.join('\n'))
-        setEmailAllowedText(emailGateVal.extraAllowedDomains.join('\n'))
-      }
-      const candleVal = ok(candleRes)
-      if (candleVal) setCandleSettings(candleVal)
-      const strategyVal = ok(strategyRes)
-      if (strategyVal) setStrategySettings(strategyVal)
-      if (failed > 0) {
-        const firstErr = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
-        const reason = firstErr?.reason
+      if (trialRes.status === 'fulfilled') setSavedTrialEnabled(trialRes.value.trialEnabled)
+      const firstErr = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
+      if (firstErr) {
+        const failed = results.filter((r) => r.status === 'rejected').length
+        const reason = firstErr.reason
         const detail = reason instanceof Error ? localizeApiError(reason.message) : ''
-        // 分隔符用破折号而不是原来那个硬编码的全角「：」——中式标点在英文界面下
-        // 会渲染成「... loaded：detail」。破折号在两种语言里都成立，也就不必按语言
-        // 分叉，更不必为一个标点新开一条 i18n 文案。
-        // An em dash rather than the hard-coded fullwidth colon this used to
-        // carry: Chinese punctuation renders as "... loaded：detail" on the
-        // English UI. A dash reads correctly in both languages, so no
-        // per-language branch and no i18n entry for a punctuation mark.
+        // 分隔符用破折号而不是全角「：」：中式标点在英文界面下会渲染成「... loaded：detail」。
+        // An em dash rather than a fullwidth colon, which reads wrong on the English UI.
         showToast('err', t('admin.loadPartialError', { n: failed, total: results.length }) + (detail ? ` — ${detail}` : ''))
       }
     } finally {
       if (loadCtrl.current === ctrl) setLoading(false)
-    }
-  }
-
-  const saveBrokerSettings = async () => {
-    if (!brokerSettings) return
-    setSavingBroker(true)
-    try {
-      const updated = await adminApi.updateSettings({
-        ...brokerSettings,
-        brokerPatterns: brokerPatternsText.split(',').map((p) => p.trim()).filter(Boolean),
-      })
-      setBrokerSettings(updated)
-      setBrokerPatternsText(updated.brokerPatterns.join(', '))
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingBroker(false)
-    }
-  }
-
-  const savePricing = async () => {
-    if (!pricing) return
-    setSavingPricing(true)
-    try {
-      const updated = await adminApi.updatePricing(pricing)
-      setPricing(updated)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingPricing(false)
-    }
-  }
-
-  const saveTrial = async () => {
-    if (!trial) return
-    setSavingTrial(true)
-    try {
-      const updated = await adminApi.updateTrial(trial)
-      setTrial(updated)
-      setSavedTrialEnabled(updated.trialEnabled)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingTrial(false)
-    }
-  }
-
-  const saveSocial = async () => {
-    if (!social) return
-    // 先在本地挡一道协议错误。后端也校验，但那是一条英文 422，管理员看到的是
-    // 一串字段名而不是"Telegram 这一行填错了"——填五个框的表单必须说清是哪个。
-    // Catch the scheme error locally first. The backend validates too, but its
-    // 422 names the raw field, not "the Telegram row is wrong" — on a five-box
-    // form the message has to say which box.
-    const bad = SOCIAL_FIELDS.find((f) => {
-      const v = (social[f.key] || '').trim()
-      return v !== '' && !/^https?:\/\//i.test(v)
-    })
-    if (bad) {
-      showToast('err', t('admin.socialInvalidUrl', { platform: bad.label }))
-      return
-    }
-    setSavingSocial(true)
-    try {
-      const updated = await adminApi.updateSocial(social)
-      setSocial(updated)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingSocial(false)
-    }
-  }
-
-  const saveEmailGate = async () => {
-    if (!emailGate) return
-    setSavingEmailGate(true)
-    try {
-      const split = (text: string) =>
-        text.split('\n').map((d) => d.trim()).filter(Boolean)
-      const updated = await adminApi.updateEmailGate({
-        ...emailGate,
-        extraBlockedDomains: split(emailBlockedText),
-        extraAllowedDomains: split(emailAllowedText),
-      })
-      setEmailGate(updated)
-      // 回填后端规范化后的结果：后端会去掉粘贴时带的 @、结尾的点并去重，不回填
-      // 的话框里留着的还是管理员刚敲的原样，下次保存又要被规范化一遍，看着像没存上。
-      // Reflect the server's normalisation (stripped @ prefixes, trailing dots,
-      // duplicates) — otherwise the box still shows the raw input and the next
-      // save looks like it didn't take.
-      setEmailBlockedText(updated.extraBlockedDomains.join('\n'))
-      setEmailAllowedText(updated.extraAllowedDomains.join('\n'))
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingEmailGate(false)
-    }
-  }
-
-  const saveCandleSettings = async () => {
-    if (!candleSettings) return
-    setSavingCandle(true)
-    try {
-      const updated = await adminApi.updateCandleHistory(candleSettings)
-      setCandleSettings(updated)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingCandle(false)
-    }
-  }
-
-  const saveStrategySettings = async () => {
-    if (!strategySettings) return
-    setSavingStrategy(true)
-    try {
-      const updated = await adminApi.updateStrategySettings(strategySettings)
-      setStrategySettings(updated)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
-    } finally {
-      setSavingStrategy(false)
     }
   }
 
@@ -974,337 +749,9 @@ export default function AdminPage() {
 
       {tab === 'data' && <OverviewPanel />}
 
-      {tab === 'ops' && (
-        <>
-      {/* 合作券商锁设置 / partner-broker lock settings */}
-      {brokerSettings && (
-        <div className="glass mb-5 p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.brokerTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <Switch checked={brokerSettings.brokerLockEnabled} onChange={(v) => setBrokerSettings({ ...brokerSettings, brokerLockEnabled: v })} />
-              {t('admin.brokerLockEnabled')}
-            </label>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <div>
-              <label className="label">{t('admin.brokerPatterns')}</label>
-              <input
-                className="input"
-                value={brokerPatternsText}
-                onChange={(e) => setBrokerPatternsText(e.target.value)}
-                placeholder="MakeCapital"
-              />
-              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.brokerPatternsHint')}</p>
-            </div>
-            <div>
-              <label className="label">{t('admin.brokerDisplayName')}</label>
-              <input
-                className="input"
-                value={brokerSettings.brokerDisplayName}
-                onChange={(e) => setBrokerSettings({ ...brokerSettings, brokerDisplayName: e.target.value })}
-                placeholder="MakeCapital"
-              />
-            </div>
-            <div>
-              <label className="label">{t('admin.brokerReferralUrl')}</label>
-              <input
-                className="input"
-                value={brokerSettings.brokerReferralUrl}
-                onChange={(e) => setBrokerSettings({ ...brokerSettings, brokerReferralUrl: e.target.value })}
-                placeholder="https://…"
-              />
-              {/* 这个字段以前填了没有任何效果（前端没人渲染它）。现在它同时决定
-                  三处推广位是否出现，所以把作用范围写在旁边。
-                  This field used to have no effect at all (nothing rendered it).
-                  It now gates three promo placements, so say so next to it. */}
-              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.brokerReferralUrlHint')}</p>
-            </div>
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingBroker}
-            onClick={saveBrokerSettings}
-          >
-            {savingBroker ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
+      {tab === 'ops' && <OpsSettingsPanel onTrialSaved={setSavedTrialEnabled} />}
 
-      {/* 订阅定价设置 / subscription pricing settings */}
-      {pricing && (
-        <div className="glass mb-5 p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.pricingTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <Switch checked={pricing.saleEnabled} onChange={(v) => setPricing({ ...pricing, saleEnabled: v })} />
-              {t('admin.saleEnabled')}
-            </label>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div>
-              <label className="label">{t('admin.proMonthlyPrice')}</label>
-              <div className="flex items-center gap-1">
-                <span className="text-neutral-400">$</span>
-                <input
-                  type="number"
-                  className="input"
-                  step="0.01"
-                  min="0"
-                  value={pricing.proMonthlyPrice}
-                  onChange={(e) => setPricing({ ...pricing, proMonthlyPrice: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
-            </div>
-            <div>
-              <label className="label">{t('admin.proYearlyPrice')}</label>
-              <div className="flex items-center gap-1">
-                <span className="text-neutral-400">$</span>
-                <input
-                  type="number"
-                  className="input"
-                  step="0.01"
-                  min="0"
-                  value={pricing.proYearlyPrice}
-                  onChange={(e) => setPricing({ ...pricing, proYearlyPrice: parseFloat(e.target.value) || 0 })}
-                />
-              </div>
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
-            </div>
-            <div>
-              <label className="label">{t('admin.salePercent')}</label>
-              <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  className="input"
-                  min="0"
-                  max="100"
-                  value={pricing.salePercent}
-                  onChange={(e) => setPricing({ ...pricing, salePercent: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
-                  disabled={!pricing.saleEnabled}
-                />
-                <span className="text-neutral-400">%</span>
-              </div>
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.salePercentHint')}</p>
-            </div>
-            <div>
-              <label className="label">{t('admin.saleBadge')}</label>
-              <input
-                className="input"
-                value={pricing.saleBadge}
-                onChange={(e) => setPricing({ ...pricing, saleBadge: e.target.value })}
-                disabled={!pricing.saleEnabled}
-                placeholder="SUMMER"
-                maxLength={32}
-              />
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.saleBadgeHint')}</p>
-            </div>
-          </div>
-          {pricing.saleEnabled && (
-            <div className="mt-4 rounded-lg border border-prism-400/20 bg-prism-500/10 px-4 py-3 text-sm text-prism-300">
-              {/* toFixed(2)：29.9 × 0.85 的浮点结果是 25.414999999999996，而这正是
-                  管理员用来判断"这个折扣要不要保存"的那个数字。
-                  toFixed(2): 29.9 × 0.85 renders as 25.414999999999996 in binary
-                  floating point, and this is the number the admin reads to decide
-                  whether to save the discount. */}
-              {t('admin.salePreview')}:{" "}
-              <strong>${(pricing.proMonthlyPrice * (1 - pricing.salePercent / 100)).toFixed(2)}</strong> /{t('upgrade.monthly')}{" "}
-              &middot;{" "}
-              <strong>${(pricing.proYearlyPrice * (1 - pricing.salePercent / 100)).toFixed(2)}</strong> /{t('upgrade.yearly')}
-            </div>
-          )}
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingPricing}
-            onClick={savePricing}
-          >
-            {savingPricing ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
-      {/* 免费试用设置 / free-trial settings */}
-      {trial && (
-        <div className="glass mb-5 p-5">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.trialTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <Switch checked={trial.trialEnabled} onChange={(v) => setTrial({ ...trial, trialEnabled: v })} />
-              {t('admin.trialEnabled')}
-            </label>
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div>
-              <label className="label">{t('admin.trialDays')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="90"
-                value={trial.trialDays}
-                onChange={(e) => setTrial({ ...trial, trialDays: Math.min(90, Math.max(1, parseInt(e.target.value) || 1)) })}
-                disabled={!trial.trialEnabled}
-              />
-            </div>
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingTrial}
-            onClick={saveTrial}
-          >
-            {savingTrial ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
-      {/* 注册邮箱限制 / signup email gate */}
-      {emailGate && (
-        <div className="glass mb-5 p-5">
-          <div className="mb-1.5 flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.emailGateTitle')}</h3>
-            <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-              <Switch
-                checked={emailGate.disposableBlockEnabled}
-                onChange={(v) => setEmailGate({ ...emailGate, disposableBlockEnabled: v })}
-              />
-              {t('admin.emailGateEnabled')}
-            </label>
-          </div>
-          <p className="mb-4 text-xs text-neutral-500">{t('admin.emailGateHint')}</p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div>
-              <label className="label">{t('admin.emailGateExtraBlocked')}</label>
-              <textarea
-                className="input min-h-28 font-mono text-xs"
-                spellCheck={false}
-                value={emailBlockedText}
-                onChange={(e) => setEmailBlockedText(e.target.value)}
-                placeholder={'mailinator.com\n10minutemail.com'}
-              />
-              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.emailGateListHint')}</p>
-            </div>
-            <div>
-              <label className="label">{t('admin.emailGateExtraAllowed')}</label>
-              <textarea
-                className="input min-h-28 font-mono text-xs"
-                spellCheck={false}
-                value={emailAllowedText}
-                onChange={(e) => setEmailAllowedText(e.target.value)}
-                placeholder={'mycompany.com\nuniversity.edu.cn'}
-              />
-              <p className="mt-1.5 text-xs text-neutral-500">{t('admin.emailGateAllowedHint')}</p>
-            </div>
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingEmailGate}
-            onClick={saveEmailGate}
-          >
-            {savingEmailGate ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
-      {/* 官方社交主页 / official social links */}
-      {social && (
-        <div className="glass mb-5 p-5">
-          <h3 className="mb-1.5 font-display text-lg font-semibold text-neutral-100">{t('admin.socialTitle')}</h3>
-          <p className="mb-4 text-xs text-neutral-500">{t('admin.socialHint')}</p>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {SOCIAL_FIELDS.map((f) => (
-              <div key={f.key}>
-                <label className="label">{f.label}</label>
-                <input
-                  className="input"
-                  type="url"
-                  inputMode="url"
-                  spellCheck={false}
-                  maxLength={512}
-                  value={social[f.key]}
-                  onChange={(e) => setSocial({ ...social, [f.key]: e.target.value })}
-                  placeholder={f.placeholder}
-                />
-              </div>
-            ))}
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingSocial}
-            onClick={saveSocial}
-          >
-            {savingSocial ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
-        </>
-      )}
-
-      {tab === 'system' && (
-        <>
-      {/* K 线历史保留策略设置 / candle-history retention settings */}
-      {candleSettings && (
-        <div className="glass mb-5 p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.candleHistoryTitle')}</h3>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div>
-              <label className="label">{t('admin.candleM1Retention')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="365"
-                value={candleSettings.m1RetentionDays}
-                onChange={(e) => setCandleSettings({ m1RetentionDays: Math.min(365, Math.max(1, parseInt(e.target.value) || 1)) })}
-              />
-            </div>
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingCandle}
-            onClick={saveCandleSettings}
-          >
-            {savingCandle ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
-      {/* 自定义策略平台设置 / custom-strategy platform settings */}
-      {strategySettings && (
-        <div className="glass mb-5 p-5">
-          <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.strategyPlatformTitle')}</h3>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
-            <div>
-              <label className="label">{t('admin.strategyMaxPerUser')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="50"
-                value={strategySettings.maxStrategiesPerUser}
-                onChange={(e) => setStrategySettings({ ...strategySettings, maxStrategiesPerUser: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
-              />
-            </div>
-            <div className="flex items-end pb-2">
-              <label className="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-                <Switch checked={strategySettings.proOnly} onChange={(v) => setStrategySettings({ ...strategySettings, proOnly: v })} />
-                {t('admin.strategyProOnly')}
-              </label>
-            </div>
-          </div>
-          <button
-            className="btn-primary mt-4 px-5 py-2 text-sm disabled:opacity-40"
-            disabled={savingStrategy}
-            onClick={saveStrategySettings}
-          >
-            {savingStrategy ? t('common.loading') : t('common.save')}
-          </button>
-        </div>
-      )}
-
-        </>
-      )}
+      {tab === 'system' && <SystemSettingsPanel />}
 
       {tab === 'winrate' && <StrategyWinratePanel />}
 

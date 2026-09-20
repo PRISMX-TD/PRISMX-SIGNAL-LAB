@@ -39,7 +39,7 @@ import {
 import { strategyApi } from '../../api/client'
 import { bollinger, closes, donchianHigh, donchianLow, ema, macd, rsi, sma } from '../../utils/indicators'
 import { deriveOverlays, overlayColor, type DerivedOverlay } from './conditionOverlays'
-import { fmtDate, localizeApiError } from '../../api/utils'
+import { fmtDate, localizeApiError, fmtMoney } from '../../api/utils'
 import CoverageNotice from './CoverageNotice'
 import EquityCurve from './EquityCurve'
 import { NumberField } from './NumberField'
@@ -72,10 +72,6 @@ const TRADE_PAGE_SIZE = 20
 // trades get lines and markers; the summary and the paginated trade table still
 // use the full set — the cap applies only to what is drawn on the chart.
 const CHART_TRADE_CAP = 500
-
-function fmtMoney(v: number): string {
-  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 
 // fmtChartTime / toLinePoints 与图表页共用一份：utils/chartSeries.ts。
 // fmtChartTime / toLinePoints are shared with the chart page: utils/chartSeries.ts.

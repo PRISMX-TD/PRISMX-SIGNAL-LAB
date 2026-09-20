@@ -18,7 +18,7 @@ import Switch from '../Switch'
 import ConfirmModal from '../ConfirmModal'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
-import { fmtDay as fmtDayUtc8, localizeApiError } from '../../api/utils'
+import { fmtDay, localizeApiError } from '../../api/utils'
 import ImageField from './ImageField'
 import StrategyBlocksEditor from './StrategyBlocksEditor'
 import type { Announcement, AnnouncementInput } from '../../api/types'
@@ -44,21 +44,6 @@ function toDraft(a: Announcement): Draft {
     blocks: a.blocks, coverImageUrl: a.coverImageUrl, pinned: a.pinned, published: a.published, notify: false,
     popup: a.popup,
   }
-}
-
-// 改走 api/utils 的 fmtDay（固定 UTC+8）。本地那份用的是
-// toLocaleDateString(undefined, …)，即浏览器本地时区——公告的发布日在欧美时区的
-// 管理员那里会整天偏移，且界面上没有任何后缀说明这是哪个时区（见 api/utils 头注）。
-// 这里只多包一层"空值返回空串"：api/utils 的 fmtDay 对空值返回 'Invalid Date'，
-// 那在"尚未发布"的草稿行上会当成一条错误显示出来。
-// Now uses api/utils' fmtDay, which pins UTC+8. The local copy used
-// toLocaleDateString(undefined, …), i.e. the browser's zone, so an announcement's
-// publish date was off by a day for an admin outside UTC+8 with nothing in the UI
-// saying which zone it was (see api/utils' header). The only wrapping left is
-// "empty in, empty out": api/utils' fmtDay renders 'Invalid Date' for a null,
-// which would read as an error on an unpublished draft row.
-function fmtDay(iso: string | null): string {
-  return iso ? fmtDayUtc8(iso) : ''
 }
 
 function Field({ label, value, onChange, placeholder, maxLength }: {
@@ -294,7 +279,7 @@ export default function AnnouncementsPanel() {
               <span className={`tag ${a.published ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'}`}>
                 {a.published ? t('admin.announcements.published') : t('admin.announcements.draft')}
               </span>
-              <span className="font-mono text-xs text-neutral-500">{fmtDay(a.publishedAt ?? a.updatedAt)}</span>
+              <span className="font-mono text-xs text-neutral-500">{fmtDay(a.publishedAt ?? a.updatedAt, '')}</span>
               <button type="button" onClick={() => setDraft(toDraft(a))} className="rounded px-2 py-1 text-xs text-neutral-300 hover:bg-white/10">
                 {t('admin.announcements.edit')}
               </button>

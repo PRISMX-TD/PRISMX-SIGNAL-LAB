@@ -45,7 +45,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { adminApi } from '../../api/client'
-import { localizeApiError } from '../../api/utils'
+import { localizeApiError, fmtScorePct, fmtProgressNum } from '../../api/utils'
 import { fmtPct } from '../winrate/shared'
 import { SkeletonLine } from '../Skeleton'
 import BadgeIcon from '../badges/BadgeIcon'
@@ -74,16 +74,6 @@ type PreviewPeriod = 'week' | 'month'
 // reason to open up arbitrary input here.
 const PREVIEW_PERIODS: PreviewPeriod[] = ['week', 'month']
 const PREVIEW_BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
-
-// score 是分数（0.124 = 12.4%），同 LeaderboardPage 的 fmtScorePct 口径——两处
-// 各自维护一份而不抽公共模块，因为这是唯一的重复点，抽出去反而要多绕一层导入。
-// score is a fraction (0.124 = 12.4%), matching LeaderboardPage's
-// fmtScorePct — kept as a separate local copy rather than a shared module
-// since this is the only overlap; extracting it would add an import hop for
-// one line of logic.
-function fmtScorePct(v: number): string {
-  return `${(v * 100).toFixed(1)}%`
-}
 
 // 单条开关行：三个可翻开关（等级勋章 / 排行榜 / 比赛）共用的布局——翻开要
 // confirm、只升不降的纪律在各自的 toggle 处理函数里，这个组件只管展示。
@@ -125,14 +115,6 @@ function CheckIcon() {
       <path d="M5 13l4 4L19 7" />
     </svg>
   )
-}
-
-// 进度数字格式化，同 AchievementsPage 的口径（整数不带小数点，小数最多两位）。
-// Progress number formatting, matching AchievementsPage's rule (no decimals
-// when whole, at most 2dp otherwise).
-function fmtProgressNum(n: number): string {
-  const rounded = Math.round(n * 100) / 100
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2)
 }
 
 function taskStateTagClass(state: 'locked' | 'pending' | 'done'): string {

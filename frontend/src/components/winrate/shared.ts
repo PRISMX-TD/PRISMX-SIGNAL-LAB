@@ -239,7 +239,6 @@ export const VERDICT_BG: Record<VerdictKind, string> = {
 }
 
 export const fmtPct = (v: number, digits = PCT_DIGITS): string => `${(v * 100).toFixed(digits)}%`
-export const fmtInt = (n: number): string => n.toLocaleString('en-US')
 
 /** 某个 IANA 时区在给定时刻的 UTC 偏移（分钟）。夏令时体现在这里。
  *  A zone's UTC offset in minutes at a given instant; DST shows up here. */

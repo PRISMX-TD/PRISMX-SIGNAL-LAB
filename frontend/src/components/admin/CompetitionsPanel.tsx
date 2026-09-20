@@ -32,7 +32,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
-import { fmtDate, localizeApiError } from '../../api/utils'
+import { fmtDate, localizeApiError, fmtScorePct } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import Select from '../Select'
 import ConfirmModal from '../ConfirmModal'
@@ -85,15 +85,6 @@ const STATUS_TAG_CLASS: Record<CompetitionStatus, string> = {
   running: 'bg-up/15 text-up',
   ended: 'bg-neutral-500/15 text-neutral-400',
   settled: 'bg-blue-400/15 text-blue-300',
-}
-
-// score 是分数（0.124 = 12.4%），同 CompetitionsPage/LeaderboardPage 的口径——
-// 各自维护一份而不抽公共模块，理由同 GamificationPanel 文件头的说明。
-// score is a fraction (0.124 = 12.4%), matching CompetitionsPage/
-// LeaderboardPage — kept local rather than shared, same reasoning as
-// GamificationPanel's file-header comment.
-function fmtScorePct(v: number): string {
-  return `${(v * 100).toFixed(1)}%`
 }
 
 // datetime-local <input> 往返：读时把 ISO 转成输入框要的本地时间字符串，

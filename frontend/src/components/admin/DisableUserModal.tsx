@@ -18,11 +18,12 @@
 // comments on portalling and on never setting .slide-sheet's width inline), with
 // only the input area added, so this reads as the same component rather than a
 // second dialog style appearing in the admin area.
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import { DISABLE_REASON_MAX, normalizeDisableReason } from './userStatus'
+import { useDialogA11y } from '../../utils/useDialogA11y'
 
 interface Props {
   /** 被停用者的邮箱，写进确认文案——按下去之前要能确认"是这个人"。
@@ -38,6 +39,11 @@ interface Props {
 export default function DisableUserModal({ email, busy, onConfirm, onCancel }: Props) {
   const { t } = useTranslation()
   const [raw, setRaw] = useState('')
+  // 与 ConfirmModal 同款的键盘/读屏处理（见 utils/useDialogA11y）。
+  // Same keyboard/screen-reader handling as ConfirmModal (see utils/useDialogA11y).
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(sheetRef, () => { if (!busy) onCancel() })
 
   // 规范化只做一次，确认框显示的字数、按钮的可用性、真正发出去的值都来自它。
   // 两处各算一遍迟早会对不上（AdminPage 的 bulkPayload 注释里记过同一条教训）。
@@ -48,8 +54,16 @@ export default function DisableUserModal({ email, busy, onConfirm, onCancel }: P
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm" onClick={onCancel}>
-      <div className="glass-card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-white">{t('admin.disableTitle')}</h3>
+      <div
+        ref={sheetRef}
+        className="glass-card w-full max-w-sm p-6"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
+        <h3 id={titleId} className="text-lg font-bold text-white">{t('admin.disableTitle')}</h3>
         <p className="mt-3 text-sm leading-relaxed text-neutral-300">
           {t('admin.disableBody', { email })}
         </p>

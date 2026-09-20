@@ -14,7 +14,6 @@ import { contractSize, lotStep, minLot, roundLots, suggestVolumeByRisk, usdMargi
 
 const QUICK_LOTS_BASE = [0.01, 0.1, 0.5, 1.0]
 export const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
-export const VOLUME_MIN = 0.01
 export const VOLUME_MAX = 10
 
 /** 快捷手数按品种过滤：步长 0.1 的品种（原油）填不出 0.01，别给用户一个点了就报错的按钮。

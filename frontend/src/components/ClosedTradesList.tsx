@@ -257,7 +257,15 @@ export default function ClosedTradesList({ trades }: Props) {
             {pageRows.map((row) => {
               const expanded = open === row.key
               return (
-                <div key={row.key} className="py-3" onClick={() => toggle(row.key)}>
+                <div key={row.key} className="py-3">
+                  {/* 头部是 button 而不是挂 onClick 的裸 div：键盘和读屏才到得了，
+                      aria-expanded 说明它是可展开的。展开区放在 button 外面做兄弟——
+                      button 里不能再套交互元素。
+                      The header is a button, not a div with onClick, so keyboard and
+                      screen-reader users can reach it; aria-expanded announces the
+                      state. The expanded area is a sibling — interactive content is
+                      not allowed inside a button. */}
+                  <button type="button" aria-expanded={expanded} className="block w-full text-left" onClick={() => toggle(row.key)}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-sm font-semibold text-neutral-100">{displaySymbol(row.symbol)}</span>
@@ -274,8 +282,9 @@ export default function ClosedTradesList({ trades }: Props) {
                     <span>{row.openTime ? fmtTime(row.openTime) : DASH}</span>
                     <span>{fmtTime(row.closeTime)}</span>
                   </div>
+                  </button>
                   {expanded && (
-                    <div className="mt-2 space-y-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="mt-2 space-y-2">
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-xs">
                         <span className="text-neutral-500">{t('orders.closed.sl')}</span><span className="text-right text-down/90">{price(row.sl)}</span>
                         <span className="text-neutral-500">{t('orders.closed.tp')}</span><span className="text-right text-up/90">{price(row.tp)}</span>

@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { gamificationApi } from '../api/client'
 import type { PublicProfile } from '../api/types'
-import { localizeApiError, parseTime } from '../api/utils'
+import { fmtDay, localizeApiError } from '../api/utils'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import { materialOf } from '../components/badges/medal'
@@ -34,20 +34,6 @@ function fmtPct(score: number, signed: boolean): string {
 function fmtMonth(iso: string | null): string {
   if (!iso) return '—'
   return iso.replace('-', '/')
-}
-
-// 解析走 parseTime：裸 new Date(iso) 不给无时区标记的时间戳补 'Z'，会被当成浏览器
-// 本地时间解析——后面 timeZone: 'Asia/Shanghai' 只管渲染，救不了已经错掉的时刻。
-// 后端目前一律返回带 Z 的串，所以这是预防而不是现成故障（见 api/utils 头注）。
-// Parsing goes through parseTime: a bare new Date(iso) does not append 'Z' to a
-// tz-less timestamp and parses it as browser-local time — the later
-// timeZone: 'Asia/Shanghai' only affects rendering and cannot undo an instant
-// that was already read wrong. The backend currently always emits a Z suffix, so
-// this is prevention rather than a live failure (see api/utils' header).
-function fmtDay(iso: string | null): string {
-  const d = parseTime(iso)
-  if (!d || Number.isNaN(d.getTime())) return ''
-  return d.toLocaleDateString('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' })
 }
 
 export default function ProfilePage() {
@@ -175,7 +161,7 @@ export default function ProfilePage() {
                     </span>
                   )}
                   {b.awardedAt && (
-                    <small className="ach-meta">{t('gamification.stage.awardedOn', { date: fmtDay(b.awardedAt) })}</small>
+                    <small className="ach-meta">{t('gamification.stage.awardedOn', { date: fmtDay(b.awardedAt, '') })}</small>
                   )}
                 </li>
               )

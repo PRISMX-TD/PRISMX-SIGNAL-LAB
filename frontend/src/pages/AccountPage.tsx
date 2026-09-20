@@ -8,7 +8,7 @@ import { Link, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, setToken } from "../api/client"
 import type { ProfilePatch } from "../api/types"
-import { localizeApiError, parseTime } from "../api/utils"
+import { fmtDay, localizeApiError } from "../api/utils"
 import { getSWReg } from "../utils/push"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import PushDiagnostics from "../components/PushDiagnostics"
@@ -604,14 +604,14 @@ export default function AccountPage() {
             <div className="acct-plate-cols">
               <div className="min-w-0">
                 <div className="acct-plate-k">{t("account.plateMemberSince")}</div>
-                <div className="acct-plate-v">{fmtDay(info.createdAt)}</div>
+                <div className="acct-plate-v">{fmtDay(info.createdAt, "—")}</div>
               </div>
               <div className="min-w-0">
                 <div className="acct-plate-k">{t("account.plateValidThru")}</div>
                 <div className="acct-plate-v">
                   {isPro
                     ? info.planExpiresAt
-                      ? fmtDay(info.planExpiresAt)
+                      ? fmtDay(info.planExpiresAt, "—")
                       : t("account.neverExpires")
                     : "—"}
                 </div>
@@ -960,37 +960,6 @@ export default function AccountPage() {
 }
 
 // ── 页内小部件 / page-local helpers ──
-
-// 身份牌只印日期不印时分：一张牌上的「加入于 / 有效期至」是日历日，带上
-// 19:23 只会把三列挤爆。时区仍按全站惯例取 UTC+8，日期不需要再打标签。
-// The plate prints calendar days, not clock times: "member since / valid thru"
-// are dates, and a 19:23 suffix only overflows the three columns. The zone is
-// still the site-wide UTC+8; a bare date needs no label.
-// 解析一律借 api/utils 的 parseTime，本页不再自带一份"补 Z"的判断。
-//
-// 这里原本抄了一份时区正则，而且抄错了：`[+-]d{2}:?d{2}$` 漏了两个反斜杠，`\d`
-// 写成了字面量 `d`，于是 `+08:00` 这类偏移量后缀永远匹配不上，只有带 z/Z 的字符
-// 串才被认作"已带时区"。目前不出故障，是因为后端经 pydantic 序列化后一律吐 `Z`，
-// 走的是完好的那半个分支；但序列化格式换一次，这里就会给 `+08:00` 再拼一个 `Z`，
-// `new Date()` 直接 Invalid Date，身份牌上的「加入于 / 有效期至」渲染成一行乱码。
-// 正确的修法不是补那两个反斜杠——那样全仓就有第五份同样的实现等着下一次抄错。
-// 唯一真源是 api/utils 的 parseTime（fmtTime/fmtDate/fmtDay 三个都走它）。
-//
-// Parsing goes through api/utils' parseTime; this page no longer carries its own
-// "append Z" logic. It used to hold a copy of the timezone regex, and the copy
-// was wrong: `[+-]d{2}:?d{2}$` is missing two backslashes, so `\d` became a
-// literal `d` and an offset suffix like `+08:00` could never match — only z/Z
-// counted as "already zoned". Nothing breaks today because pydantic serialises
-// everything as `Z`, which takes the intact half of the branch; but one change
-// to that format and this would append a second `Z` to `+08:00`, producing an
-// Invalid Date and rendering "member since / valid thru" as garbage. The fix is
-// not to add the backslashes — that would leave a fifth copy of the same logic
-// waiting to be miscopied again. parseTime in api/utils is the single source.
-function fmtDay(iso: string | null | undefined): string {
-  const d = parseTime(iso)
-  if (!d || Number.isNaN(d.getTime())) return "—"
-  return d.toLocaleDateString("en-GB", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" })
-}
 
 // 密码强度：纯视觉反馈，不是校验——校验仍是 handlePassword 的「至少 8 位」和后端。
 // 不足 8 位一律记「弱」，之后按长度 ≥12、字母+数字、含符号各加一档。

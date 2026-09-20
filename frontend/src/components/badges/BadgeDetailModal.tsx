@@ -12,7 +12,7 @@
 // condition, its current holder count, and which tier you are on.
 // Portal-to-body + centered glass card + Escape/backdrop close, following
 // ConfirmModal's precedent.
-import { useEffect } from 'react'
+import { useId, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import BadgeIcon from './BadgeIcon'
@@ -20,7 +20,8 @@ import LimitedClosesLine from './LimitedClosesLine'
 import { BadgeProgressBar } from './BadgeProgressBar'
 import MedalTilt from './MedalTilt'
 import { FAMILY_OF, materialOf } from './medal'
-import { fmtDate } from '../../api/utils'
+import { fmtDate, fmtOwnerPct } from '../../api/utils'
+import { useDialogA11y } from '../../utils/useDialogA11y'
 import type { GamificationBadge } from '../../api/types'
 
 interface Props {
@@ -29,26 +30,16 @@ interface Props {
   onClose: () => void
 }
 
-// population 为 0（数据库为空的边界情况）时不做除零——直接报 0.0%，比 NaN%
-// 更能看。population zero (an empty-database edge case) avoids a
-// divide-by-zero — reports 0.0% outright rather than NaN%.
-function fmtOwnerPct(owners: number, population: number): string {
-  if (population <= 0) return '0.0%'
-  return `${((owners / population) * 100).toFixed(1)}%`
-}
-
 const TIERS = [1, 2, 3] as const
 
 export default function BadgeDetailModal({ badge, population, onClose }: Props) {
   const { t } = useTranslation()
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc 关闭、Tab 困在卡内、焦点进出：以前只有一个裸的 Esc 监听（见 utils/useDialogA11y）。
+  // Escape / focus trap / focus restore — this used to be a bare Escape listener only.
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(sheetRef, onClose)
 
   const family = FAMILY_OF(badge.id)
   const material = materialOf(badge.id, badge.tier)
@@ -60,7 +51,15 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
       onClick={onClose}
     >
-      <div className="glass-card relative w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={sheetRef}
+        className="glass-card relative w-full max-w-md p-6"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
         <button
           type="button"
           onClick={onClose}
@@ -74,7 +73,7 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
           <MedalTilt ariaLabel={t(`gamification.badges.${badge.id}.name`)}>
             <BadgeIcon id={badge.id} tier={badge.tier} earned={badge.earned} size={240} />
           </MedalTilt>
-          <h3 className="font-display text-xl font-bold text-white">
+          <h3 id={titleId} className="font-display text-xl font-bold text-white">
             {t(`gamification.badges.${badge.id}.name`)}
             {tiered && badge.earned && (
               <span className="ml-2 text-base font-semibold text-neutral-300">· {t(`gamification.tier.${badge.tier}`)}</span>

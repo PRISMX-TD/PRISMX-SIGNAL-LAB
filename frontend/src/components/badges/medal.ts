@@ -123,8 +123,6 @@ const FAM_ENAMEL: Partial<Record<BadgeFamily, string>> = {
 // Fallback family for an unknown id — a plain coin with a bare-ring emblem, never throws.
 const FALLBACK_FAMILY: BadgeFamily = 'growth'
 
-export const BADGE_FAMILY: Record<string, BadgeFamily> = FAMILY
-
 export function FAMILY_OF(id: string): BadgeFamily {
   return FAMILY[id] ?? FALLBACK_FAMILY
 }
@@ -135,16 +133,6 @@ export const P = (r: number, a: number, cx = 32, cy = 32): [number, number] => {
   return [cx + r * Math.cos(t), cy + r * Math.sin(t)]
 }
 export const f = (n: number): string => (+n).toFixed(2)
-export const sector = (R: number, r: number, a1: number, a2: number): string => {
-  const [x1, y1] = P(R, a1), [x2, y2] = P(R, a2), [x3, y3] = P(r, a2), [x4, y4] = P(r, a1)
-  const lg = (a2 - a1) > 180 ? 1 : 0
-  return `M${f(x1)} ${f(y1)}A${R} ${R} 0 ${lg} 1 ${f(x2)} ${f(y2)}L${f(x3)} ${f(y3)}A${r} ${r} 0 ${lg} 0 ${f(x4)} ${f(y4)}Z`
-}
-export const poly = (n: number, r: number, rot = 0): string => {
-  let d = ''
-  for (let i = 0; i < n; i++) { const [x, y] = P(r, rot + i * 360 / n); d += (i ? 'L' : 'M') + f(x) + ' ' + f(y) }
-  return d + 'Z'
-}
 export const starN = (n: number, R: number, r: number, rot = 0): string => {
   let d = ''
   for (let i = 0; i < 2 * n; i++) { const [x, y] = P(i % 2 ? r : R, rot + i * 180 / n); d += (i ? 'L' : 'M') + f(x) + ' ' + f(y) }

@@ -97,8 +97,15 @@ export function parseTime(iso: string | null | undefined): Date | null {
 // 精确到分钟的时刻详情已经有 fmtDate/fmtTime。
 // Date-only, no time-of-day — for spots that only need "which day" (limited
 // badge closing dates, etc.); minute-precision detail already has fmtDate/fmtTime.
-export function fmtDay(iso: string | null | undefined): string {
-  const d = parseTime(iso) ?? new Date(NaN)
+export function fmtDay(iso: string | null | undefined, fallback?: string): string {
+  // fallback：空值 / 解析失败时要显示什么。不传则沿用旧行为（渲染出 'Invalid Date'）。
+  // 账户页、主页、公告面板以前各自包一层"空值返回 —/空串"，2026-09-21 收口到这里。
+  // fallback: what to render for an empty or unparsable value; omitted keeps the old
+  // behaviour ('Invalid Date'). Account, profile and announcements each wrapped this
+  // themselves; folded in on 2026-09-21.
+  const parsed = parseTime(iso)
+  if (fallback !== undefined && (!parsed || Number.isNaN(parsed.getTime()))) return fallback
+  const d = parsed ?? new Date(NaN)
   return d.toLocaleDateString('en-GB', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -135,6 +142,56 @@ export function fmtDayShort(iso: string | null | undefined): string {
       : { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' },
   )
 }
+// ---------- 数字格式化（榜单 / 成就 / 比赛 / 现金流规则共用） ----------
+//
+// 下面五个函数以前散在 2~4 个文件里各抄一份，每份旁边都有一条"只此一处重复、不值得抽"
+// 的注释——fmtScorePct 抄到第 4 份时那条注释本身已经过期。口径统一放在这里：
+// Number formatting shared by leaderboard / achievements / competitions / cashflow
+// rules. Each used to be copied into 2–4 files with a "sole duplicate, not worth
+// extracting" note beside it; by the 4th copy of fmtScorePct that note was stale.
+
+// 分数 → 百分比，一位小数：0.124 → "12.4%"。榜单 score 与比赛得分都是分数。
+// 收益榜可能为负，toFixed 同样处理；要带正号的看 LeaderboardPage 的 fmtScoreSigned。
+// Fraction → percent with one decimal (0.124 → "12.4%"). Negative values (return board)
+// go through toFixed unchanged; the signed variant lives in LeaderboardPage.
+export function fmtScorePct(v: number): string {
+  return `${(v * 100).toFixed(1)}%`
+}
+
+// 美元数额：整数不带小数（500 而不是 500.00），非整数保留两位。管理端只要求正数、
+// 不强制整数，所以两种形状都要处理。
+// USD amounts: whole dollars render without decimals, anything else keeps two. The
+// admin form only requires a positive number, so both shapes occur.
+export function fmtUsd(v: number): string {
+  return Number.isInteger(v) ? String(v) : v.toFixed(2)
+}
+
+// 进度数字：手数类条件可能带小数（统计四舍五入到 4 位），笔数 / 天数是整数。
+// 统一"整数不带小数点，小数最多两位"，不按条件类型特判。
+// Progress numbers: lot-based conditions can carry a fraction (stats round to 4dp),
+// trade/day counts are integers. Uniformly "no decimals when whole, at most 2dp".
+export function fmtProgressNum(n: number): string {
+  const rounded = Math.round(n * 100) / 100
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2)
+}
+
+// 勋章持有比例。population 为 0（数据库为空的边界情况）时不做除零——直接报 0.0%，
+// 比 NaN% 更能看。
+// Badge ownership share. A zero population (empty-database edge case) avoids a
+// divide-by-zero and reports 0.0% outright rather than NaN%.
+export function fmtOwnerPct(owners: number, population: number): string {
+  if (population <= 0) return '0.0%'
+  return `${((owners / population) * 100).toFixed(1)}%`
+}
+
+// 金额两位小数带千分位（回测面板 / 模拟器的账户曲线）。下单表单那边的
+// components/order/orderMath.formatMoney 是另一套口径（按品种精度），别混用。
+// Two-decimal money with thousands separators (backtest panel / simulator). The order
+// form's orderMath.formatMoney is a different rule (per-symbol precision); don't mix.
+export function fmtMoney(v: number): string {
+  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 // 每个品种一个 pip 的价格大小，用于把价差换算成点数。
 // 匹配不到的品种返回 null，调用方只显示价差、不显示点数。
 // Price size of one pip per symbol, to convert price distance into pips.

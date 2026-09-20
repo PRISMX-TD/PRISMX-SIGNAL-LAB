@@ -11,11 +11,12 @@
 // merged 2026-09-06. What differs (countdown row, expiry block, SL/TP
 // placeholders) comes in as props. Form state is useOrderForm's; submit and
 // receipt state live here.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { useDialogA11y } from '../../utils/useDialogA11y'
 import OrderConnectNotice from '../OrderConnectNotice'
 import SlideToConfirm from './SlideToConfirm'
 import { quickLots, QUICK_RISK_PCTS, formatMoney, sanitizeDecimal } from './orderMath'
@@ -69,6 +70,14 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   // any popstate and broke the account switcher).
   useBackToClose(acctMenuOpen, () => setAcctMenuOpen(false))
 
+  // role / 焦点陷阱 / 焦点还回。Esc 不交给它：下面那个自带 submitting 守卫的监听已经在管
+  // （提交中不许关），两处都处理会在提交中被关掉。
+  // role + focus trap + focus restore. Escape stays with the listener below, which
+  // guards against closing mid-submit; letting both handle it would defeat that guard.
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(sheetRef, onCancel, { closeOnEscape: false })
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !submitting) onCancelRef.current() }
     window.addEventListener('keydown', onKey)
@@ -107,7 +116,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   // transform would become the containing block for fixed and mislocate the modal.
   return createPortal(
     <div className="slide-overlay" onClick={onCancel}>
-      <div className="slide-sheet" onClick={(e) => e.stopPropagation()}>
+      <div ref={sheetRef} className="slide-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <button className="slide-cancel-x" onClick={onCancel}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>
@@ -116,7 +125,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           <div className="flex items-center justify-center gap-2">
             <div className="slide-sheet-ava" style={{ background: avaBg, color: tone }}>{symLetter}</div>
           </div>
-          <h3 className="text-lg mt-2.5 text-white font-bold">
+          <h3 id={titleId} className="text-lg mt-2.5 text-white font-bold">
             {isBuy ? t('common.buy') : t('common.sell')} {displaySymbol(symbol)}
           </h3>
           <p className="text-xs text-neutral-300 mt-1">

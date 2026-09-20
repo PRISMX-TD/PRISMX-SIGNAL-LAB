@@ -22,7 +22,7 @@ import { useTranslation } from 'react-i18next'
 import ProfileLink from '../components/ProfileLink'
 import type { TFunction } from 'i18next'
 import { competitionApi } from '../api/client'
-import { fmtDate, fmtDay, localizeApiError, parseTime } from '../api/utils'
+import { fmtDate, fmtDay, localizeApiError, parseTime, fmtScorePct } from '../api/utils'
 import { useLive } from '../store/live'
 import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
@@ -36,12 +36,6 @@ import type {
   LeaderboardPayload,
   MT5Account,
 } from '../api/types'
-
-// score 是分数（0.124 = 12.4%），与 LeaderboardPage 同一套显示规则——两榜口径
-// 不同但显示格式一致，各自本地定义一份，不为一行代码搭一个共享模块。
-// score is a fraction (0.124 = 12.4%); same display rule as LeaderboardPage.
-// Both pages define this locally rather than sharing a module for one line.
-const fmtScorePct = (v: number): string => `${(v * 100).toFixed(1)}%`
 
 // tradeMode: 0=模拟, 1=竞赛, 2=实盘, null/undefined=尚未判定（见后端
 // services/account_type.py）。报名只认实盘，未判定的一律当"非实盘"处理，

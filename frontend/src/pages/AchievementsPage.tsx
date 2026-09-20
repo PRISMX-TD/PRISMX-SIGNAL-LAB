@@ -13,7 +13,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { gamificationApi, userApi } from '../api/client'
-import { localizeApiError, fmtDate } from '../api/utils'
+import { localizeApiError, fmtDate, fmtProgressNum, fmtOwnerPct } from '../api/utils'
 import { fmtPct } from '../components/winrate/shared'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
@@ -97,24 +97,6 @@ function markBadgeSeen(id: string): void {
   const seen = readSeenBadges()
   seen.add(id)
   writeSeenBadges(seen)
-}
-
-// 进度数字：手数类条件可能带小数（stats 保留 4 位），笔数/天数类是整数——统一
-// "整数不带小数点，小数最多两位"，不针对条件类型特判。
-// Progress numbers: lot-based conditions can carry a fraction (stats round to
-// 4dp); trade/day counts are integers. Uniformly "no decimals when whole, at
-// most 2dp otherwise" rather than special-casing by condition type.
-function fmtProgressNum(n: number): string {
-  const rounded = Math.round(n * 100) / 100
-  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(2)
-}
-
-// population 为 0（数据库为空的边界情况）时不做除零——直接报 0.0%，比 NaN% 更能看。
-// population zero (an empty-database edge case) avoids a divide-by-zero — reports
-// 0.0% outright rather than NaN%.
-function fmtOwnerPct(owners: number, population: number): string {
-  if (population <= 0) return '0.0%'
-  return `${((owners / population) * 100).toFixed(1)}%`
 }
 
 function CheckIcon() {

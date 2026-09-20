@@ -30,9 +30,7 @@
 // disclosure: the browser already gives the keyboard affordance and the
 // click-the-heading-to-expand semantics.
 import { useTranslation } from 'react-i18next'
-
-// 与 LeaderboardPage 的同名助手一致：整数不带小数点，非整数保留两位。
-const fmtUsd = (v: number): string => (Number.isInteger(v) ? String(v) : v.toFixed(2))
+import { fmtUsd } from '../api/utils'
 
 const CASES = [1, 2, 3, 4] as const
 
