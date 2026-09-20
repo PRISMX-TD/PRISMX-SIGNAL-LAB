@@ -20,15 +20,12 @@ On a re-delivery the bridge re-runs only the confirmation, never the execution. 
 case here asserts order_send was called zero times, because re-executing is precisely
 what the idempotency cache exists to prevent.
 """
-import os
-import sys
 import types
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import bridge_app  # noqa: E402
-import mt5_worker  # noqa: E402
+import bridge_app
+import mt5_worker
 
 
 TERMINAL = r"C:\fake\terminal64.exe"

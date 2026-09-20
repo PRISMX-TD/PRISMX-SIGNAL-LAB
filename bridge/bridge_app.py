@@ -19,6 +19,7 @@ import logging
 import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -215,17 +216,42 @@ def _setup_logger() -> logging.Logger:
     lg = logging.getLogger("prismx_bridge")
     lg.setLevel(logging.INFO)
     if not lg.handlers:
-        try:
-            handler = RotatingFileHandler(
-                LOG_PATH, maxBytes=512 * 1024, backupCount=3, encoding="utf-8"
-            )
-            handler.setFormatter(
-                logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-            )
-            lg.addHandler(handler)
-        except Exception:
-            pass
+        # 首选用户目录；建不起来（只读 profile、漫游目录不可写、被安全软件拦）就退到
+        # 系统临时目录。以前这里失败就静默放弃，此后整个程序所有 logger.warning 全部
+        # 无声——而桥接偏偏是「出了问题只能靠日志」的那类程序（用户机器上没人盯控制台，
+        # console=False 连 stderr 都没有）。两处都失败才真的没有日志，并把原因留在
+        # LOG_SETUP_ERROR 里给状态栏用。
+        # Prefer the home directory; if that fails (read-only profile, unwritable roaming
+        # folder, security software) fall back to the system temp dir. This used to give
+        # up silently, after which every logger.warning in the process vanished — on a
+        # program whose only diagnostic channel is the log (nobody watches a console on
+        # the user's machine, and console=False means there is no stderr). Only when both
+        # fail is there truly no log, and the reason is kept in LOG_SETUP_ERROR.
+        global LOG_SETUP_ERROR
+        fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        errors: list[str] = []
+        for candidate in (LOG_PATH, os.path.join(tempfile.gettempdir(), "prismx_bridge.log")):
+            try:
+                handler = RotatingFileHandler(
+                    candidate, maxBytes=512 * 1024, backupCount=3, encoding="utf-8"
+                )
+                handler.setFormatter(fmt)
+                lg.addHandler(handler)
+                if candidate != LOG_PATH:
+                    lg.warning("日志文件退到临时目录 / log file fell back to %s: %s", candidate, errors[-1])
+                break
+            except Exception as e:  # noqa: BLE001 - 日志系统自身的错误没有更好的去处
+                errors.append(f"{candidate}: {e!r}")
+        else:
+            LOG_SETUP_ERROR = "; ".join(errors)
     return lg
+
+
+# 日志系统自己建不起来时的原因（两个候选路径都失败才会有值）。日志写不了就没别的
+# 地方能报这件事，所以留一个模块级变量给状态栏 / 排障时读。
+# Why the logger could not be set up (set only when both candidate paths failed).
+# There is nowhere else to report this when the log itself is unavailable.
+LOG_SETUP_ERROR: str | None = None
 
 
 logger = _setup_logger()
@@ -321,7 +347,10 @@ def save_config(cfg: dict) -> None:
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(out, f)
     except Exception:
-        pass
+        # 不致命（内存里的配置照常生效），但下次启动会退回默认——要能查到是为什么。
+        # Not fatal (the in-memory config still applies), but the next launch reverts
+        # to defaults; that has to be traceable.
+        logger.warning("配置写盘失败 / failed to persist config to %s", CONFIG_PATH, exc_info=True)
     if token and not enc:
         raise TokenStorageError("DPAPI encryption unavailable; token not persisted")
 
@@ -403,7 +432,15 @@ def _save_executed_cache(results: dict[str, dict], stamps: dict[str, float]) -> 
         with open(EXECUTED_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(payload, f)
     except Exception:
-        pass
+        # 「不致命」只对本次进程成立：这份缓存是重启后「重发的指令绝不重新执行」的
+        # 唯一依据，写不进去 = 下次启动可能重复下单。网关侧同一场景会 Log.Error
+        # （Idempotency.cs），桥接以前却是裸 pass，两边标准要一致。
+        # "Never fatal" holds only for this process: the cache is the sole basis for
+        # "a re-delivered command is never re-executed" after a restart, so a failed
+        # write means a possible duplicate order next launch. The gateway logs this
+        # case (Idempotency.cs); the bridge used to swallow it.
+        logger.warning("已执行缓存写盘失败 / failed to persist executed cache to %s",
+                       EXECUTED_CACHE_PATH, exc_info=True)
 
 
 def _load_pending_reports() -> list[dict]:
@@ -422,7 +459,8 @@ def _save_pending_reports(reports: list[dict]) -> None:
         with open(REPORTS_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(reports, f)
     except Exception:
-        pass
+        logger.warning("未回报队列写盘失败 / failed to persist pending reports to %s",
+                       REPORTS_CACHE_PATH, exc_info=True)
 
 
 def _load_pending_trades() -> list[dict]:
@@ -441,7 +479,8 @@ def _save_pending_trades(trades: list[dict]) -> None:
         with open(TRADES_CACHE_PATH, "w", encoding="utf-8") as f:
             json.dump(trades, f)
     except Exception:
-        pass
+        logger.warning("平仓明细队列写盘失败 / failed to persist pending trades to %s",
+                       TRADES_CACHE_PATH, exc_info=True)
 
 
 def scan_terminals() -> list[str]:
@@ -466,8 +505,22 @@ def scan_terminals() -> list[str]:
                 if exe and exe not in paths:
                     paths.append(exe)
     except Exception:
-        pass
+        # 以前这里静默返回空列表，界面上就是一句「未检测到正在运行的 MT5 终端」，
+        # 真实原因（psutil 装坏、权限不足、被安全软件拦）一个字不留。每 1.5 秒
+        # 一拍，所以限频到一分钟一条，别把日志刷满。
+        # This used to return [] silently, which the UI renders as "no running MT5
+        # terminal" — the real cause (broken psutil, missing privileges, security
+        # software) never surfaced. Called every 1.5s, so rate-limit to one line a
+        # minute rather than flooding the log.
+        global _scan_error_logged_at
+        now = time.monotonic()
+        if now - _scan_error_logged_at > 60:
+            _scan_error_logged_at = now
+            logger.warning("扫描 MT5 终端进程失败 / scanning for MT5 terminals failed", exc_info=True)
     return paths
+
+
+_scan_error_logged_at: float = -1e9
 
 
 # ---------- 后端 HTTP 客户端 / Backend HTTP client ----------
@@ -666,7 +719,8 @@ class BridgeEngine:
         terminal read. Falls back to the 1.5s cadence against an old backend.
         """
         while not self._stop.is_set():
-            accounts = self._accounts_snapshot
+            with self._state_lock:
+                accounts = self._accounts_snapshot
             if not accounts:
                 self._stop.wait(0.5)
                 continue
@@ -715,7 +769,8 @@ class BridgeEngine:
                 # cached FAILED gets its confirmation re-run first (see below).
                 self._report_result(self._reconfirm_cached(coid, cached, cmd), http)
                 continue
-            path = self._login_to_path.get(str(cmd.get("login")))
+            with self._state_lock:
+                path = self._login_to_path.get(str(cmd.get("login")))
             if path:
                 by_path.setdefault(path, []).append(cmd)
             else:
@@ -841,7 +896,9 @@ class BridgeEngine:
             # entry predates the field): nothing to confirm, so re-report unchanged.
             return cached
 
-        path = self._login_to_path.get(str(cmd.get("login")))
+        with self._state_lock:
+
+            path = self._login_to_path.get(str(cmd.get("login")))
         if not path:
             logger.warning(
                 "重发指令想二次确认但账号不在本机 / cannot re-confirm, login not attached: coid=%s login=%s",
@@ -921,7 +978,8 @@ class BridgeEngine:
         if not paths:
             # 终端没了：清掉快照，指令循环随即停止发 poll（否则会拿着旧账号列表继续挂着）。
             # No terminal: drop the snapshot so the command loop stops polling with stale accounts.
-            self._accounts_snapshot = []
+            with self._state_lock:
+                self._accounts_snapshot = []
             self.on_status([], "未检测到正在运行的 MT5 终端 / No running MT5 terminal found")
             return
 
@@ -968,15 +1026,24 @@ class BridgeEngine:
 
         if not accounts:
             msg = worker_errors[0] if worker_errors else "已连接终端但未读到已登录账号 / terminal attached but no logged-in account"
-            self._accounts_snapshot = []
+            with self._state_lock:
+                self._accounts_snapshot = []
             self.on_status([], msg)
             return
 
         # 给指令循环留快照：它用这份账号列表发长轮询、按 login 找终端。
-        # Snapshots for the command loop: accounts for its poll, login -> terminal for routing.
-        self._login_to_path = dict(login_to_path)
-        self._accounts_snapshot = accounts
+        # 三份快照在同一把锁里一起换，指令线程读到的账号列表与 login→终端映射
+        # 必定来自同一拍；以前只有 _positions_by_path 加锁，另两份裸赋值——CPython
+        # 下不会撕裂，但两者可能差一拍，且同一批状态两种口径本身就是隐患。
+        # Snapshots for the command loop: accounts for its poll, login -> terminal for
+        # routing. All three are swapped under one lock so the command thread always
+        # sees an accounts list and a login map from the same tick; previously only
+        # _positions_by_path was locked and the other two were bare assignments —
+        # atomic in CPython, but possibly one tick apart, and two conventions for one
+        # set of state is a hazard in itself.
         with self._state_lock:
+            self._login_to_path = dict(login_to_path)
+            self._accounts_snapshot = accounts
             for stale in [k for k in self._positions_by_path if k not in paths]:
                 self._positions_by_path.pop(stale, None)
 
@@ -1155,7 +1222,13 @@ class BridgeEngine:
         with self._state_lock:
             # 重试期间指令循环可能又排进了新的失败回执，别把它们冲掉。
             # The command loop may have queued new failures meanwhile; keep them.
-            newer = [r for r in self._pending_reports if r not in pending]
+            # 按对象身份而不是逐字段比较：pending 是同一批 dict 的引用拷贝，`r not in
+            # pending` 对每条都要和整批做 dict 相等比较，队列积压到几百条时每轮 O(n²)。
+            # Identity, not equality: `pending` holds references to the same dicts, and
+            # `r not in pending` compared every element against the whole batch — O(n²)
+            # per flush once a few hundred reports back up.
+            pending_ids = {id(r) for r in pending}
+            newer = [r for r in self._pending_reports if id(r) not in pending_ids]
             self._pending_reports = still_pending + newer
             if self._pending_reports != pending:
                 _save_pending_reports(self._pending_reports)

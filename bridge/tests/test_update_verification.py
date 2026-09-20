@@ -15,13 +15,11 @@ machine signed into the user's real trading account; these four cases pin it dow
 """
 import hashlib
 import os
-import sys
 
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import bridge_app  # noqa: E402
+import bridge_app
 
 
 # ---------- 工具 / helpers ----------

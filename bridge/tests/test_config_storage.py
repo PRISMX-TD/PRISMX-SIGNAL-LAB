@@ -8,13 +8,10 @@ The bridge never writes the API token in plaintext; a DPAPI failure persists the
 backend URL only and raises TokenStorageError for the UI to warn about.
 """
 import json
-import os
-import sys
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import bridge_app  # noqa: E402
+import bridge_app
 
 
 @pytest.fixture()

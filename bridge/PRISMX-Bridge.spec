@@ -12,8 +12,11 @@ Release 的资产名、以及 bridge_app.py 的 BRIDGE_ASSET_FILENAME 保持一�
   * upx=False：不压缩。UPX 壳是 Windows Defender / 第三方杀软的高危特征之一，
     对本程序体积收益也有限。
 
-本文件被 .gitignore 排除（bridge/*.spec 是构建产物那一类），发版时在本地生成
-即可；内容以 README「打包成 exe」一节为准。
+本文件**入库**（2026-09-20 起，见 .gitignore 里 `!bridge/PRISMX-Bridge.spec` 那段说明）：
+它不是 PyInstaller 的生成物，而是手工维护的——hiddenimports（pystray/PIL 的运行时
+后端、cryptography 的 ed25519 与 Rust 扩展）、datas、upx/console 的取舍都写在这里。
+不入库的话只有打过包的那台机器能复现构建，重新生成的 spec 漏掉的依赖不会报错，
+只会让「一键更新」悄悄退回手动下载。打包与发版签名流程见 README。
 """
 
 block_cipher = None

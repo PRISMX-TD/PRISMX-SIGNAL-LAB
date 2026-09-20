@@ -20,14 +20,11 @@ Three-state execution results. PLACED means "accepted", not "filled"; the bridge
 now confirms before claiming a fill, and reports FAILED — never REJECTED — when
 the outcome is unknown. See backend/app/routers/bridge.py BridgeResultRequest.
 """
-import os
-import sys
 import types
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import mt5_worker  # noqa: E402
+import mt5_worker
 
 
 class FakeMt5:
