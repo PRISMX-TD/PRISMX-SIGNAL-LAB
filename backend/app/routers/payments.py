@@ -26,7 +26,8 @@ from app.services.nowpayments import (
     verify_ipn_signature,
 )
 from app.core.config import settings
-from app.services.plans import PLAN_DAYS, trial_grant_days
+from app.services.notification_feed import create_notification, notify_ws
+from app.services.plans import PLAN_DAYS, refund_revocation, trial_grant_days
 from app.services.settings_store import get_pricing_settings, get_trial_settings
 
 logger = logging.getLogger("prismx.payments")
@@ -604,8 +605,36 @@ def _webhook_sync_work(
 # disagree" is a state for a human to look at. It is deliberately NOT FINISHED,
 # so the conditional claim below can still take over if a later callback does
 # reconcile.
+#
+# REFUNDED 是「已经入账、事后被退款、权益已按退款收回」的终局。它必须与 FAILED
+# 分开：FAILED 表示钱从来没到过，而 REFUNDED 表示钱到过、权益发过、又收回了——
+# routers/invite._has_live_paid_plan 正是靠 `status == "FINISHED"` 判断「他现在的
+# 权益是花钱买的」，把这一行留在 FINISHED 上会让一笔退掉的钱继续替用户挡住代理
+# 的降级操作。同时它是终态：退款之后再来一条迟到的 waiting/finished 回调，既不能
+# 把它拉回 PROCESSING 占住下单名额，也不能让它重新走一遍入账。
+#
+# REFUNDED is the end state for "credited, later refunded, entitlement clawed
+# back". It is deliberately not FAILED: FAILED means the money never arrived,
+# REFUNDED means it arrived, bought something, and was taken back. Keeping the
+# row at FINISHED would let refunded money keep satisfying
+# invite._has_live_paid_plan's `status == "FINISHED"` paid-customer guard. Being
+# terminal also stops a late waiting/finished callback from reviving the row into
+# an open-payment slot or running it through crediting a second time.
 STATUS_FINISHED_MISMATCH = "FINISHED_MISMATCH"
-_TERMINAL_STATUSES = frozenset({"FINISHED", "EXPIRED", "FAILED", STATUS_FINISHED_MISMATCH})
+STATUS_REFUNDED = "REFUNDED"
+_TERMINAL_STATUSES = frozenset(
+    {"FINISHED", "EXPIRED", "FAILED", STATUS_FINISHED_MISMATCH, STATUS_REFUNDED}
+)
+
+# 站内通知的类别名。前端按 `notifFeed.<kind>` 取标题文案，本次没有改 frontend/，
+# 所以铃铛面板里这条的标题会先渲染成裸 key——与 notification_feed.py 里
+# KIND_AGENT_PLAN_CHANGE 当时的处境一样，text 里已经把事情说清楚了，补上
+# en.json / zh.json 的 `notifFeed.plan_refund` 之前它只是看着像 bug。
+# Notification kind. The frontend renders the title from `notifFeed.<kind>`; this
+# change doesn't touch frontend/, so the bell shows a bare key until
+# `notifFeed.plan_refund` lands in en.json / zh.json — same situation
+# KIND_AGENT_PLAN_CHANGE was in. The text body already carries the substance.
+NOTIFY_KIND_PLAN_REFUND = "plan_refund"
 
 # 金额比较的相对容差。两边都是浮点、且中途经过 JSON 与第三方的十进制格式化，
 # 严格相等会把正常的 199.0 vs 199.00000000000003 判成对不上账。
@@ -692,6 +721,213 @@ def _payment_audit(db: Session, record: Payment, field: str, old_value, new_valu
     )
 
 
+def _as_utc(value: datetime | None) -> datetime | None:
+    """把库里取出来的 naive 时间当 UTC 看待（同 plans.is_plan_expired 的约定）。
+    Read a naive timestamp from the DB as UTC (same convention as is_plan_expired)."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+def _other_payments_entitlement_floor(db: Session, record: Payment) -> datetime | None:
+    """这个用户**除这一笔之外**的已完成付款，单独就能保证的最晚到期时间。
+
+    公式与 routers/invite._has_live_paid_plan 完全一致（finished_at + 套餐天数）：
+    那边回答的是「这个人手里有没有一笔还在窗口里的付款」，这边回答的是「把这笔
+    退款扣完之后，还有哪笔付款的窗口不许被扣穿」——同一个「这笔钱买到的窗口」。
+
+    为什么需要它：减天数的前提是「这笔的天数还留在当前到期时间里」。用户会员断档
+    之后又付了一笔时，后一笔是从付款时刻重新起算的，当前到期时间里根本没有这笔被
+    退款的天数，再减一次就是从后一笔身上扣。用这个下限一夹，断档重付的情况下一天
+    都扣不掉，正是我们要的保守方向。
+
+    只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED/REFUNDED 的不该给窗口。
+    record 本身在调用前已经被抢占改成 REFUNDED，不会被这个查询选中；仍显式排掉它
+    的 id，是为了不让这段逻辑的正确性依赖调用顺序。
+
+    The latest expiry this user's *other* finished payments guarantee on their
+    own — same finished_at + plan-days formula as invite._has_live_paid_plan.
+    Subtracting this payment's days assumes those days are still inside the
+    current expiry; after a lapse-and-rebuy they aren't, and subtracting would
+    come out of the newer payment. This floor makes that case revoke nothing.
+    FINISHED only, and this record's own id is excluded explicitly so the result
+    doesn't depend on the caller having already flipped it to REFUNDED.
+    """
+    rows = (
+        db.query(Payment.plan, Payment.finished_at)
+        .filter(
+            Payment.user_id == record.user_id,
+            Payment.status == "FINISHED",
+            Payment.id != record.id,
+        )
+        .all()
+    )
+    floor: datetime | None = None
+    for plan, finished_at in rows:
+        if finished_at is None:
+            continue
+        ends = finished_at if finished_at.tzinfo else finished_at.replace(tzinfo=timezone.utc)
+        ends = ends + timedelta(days=PLAN_DAYS.get(plan, 30))
+        if floor is None or ends > floor:
+            floor = ends
+    return floor
+
+
+def _revoke_refunded_entitlement(db: Session, record: Payment) -> None:
+    """退款到得比我们想的晚：本地已经按 FINISHED 给过时长了，把这笔给出的权益收回。
+
+    2026-09-19 的审计修复当时只做了一半——只 logger.error + 写审计行、不自动降级，
+    理由是「属产品决策」。负责人已决定要做自动降级，所以这里补上，但保留了那两条
+    人工可见的痕迹：**自动降级不等于不需要人看**（部分退款、运营谈好的例外、对方
+    误操作都长这个样子，只有人能分辨）。
+
+    收回的口径见 services/plans.refund_revocation：减掉这笔买的天数、并以「别的已
+    完成付款单独保证的窗口」为下限，而不是简单地设成 FREE。原则是宁可少扣——
+    误扣一个正常付费用户的权益，比晚几天收回一个退款用户的权益严重得多。
+
+    A refund arriving after we already credited the time: take back what this
+    payment gave. The 2026-09-19 audit fix deliberately stopped at "log it and
+    let a human decide"; the product decision is now to downgrade automatically.
+    Both human-visible traces stay — automatic does not mean unattended, since a
+    partial refund, an agreed exception and the provider's own mistake all look
+    exactly like this and only a person can tell them apart.
+
+    How much is taken back lives in plans.refund_revocation: subtract the days
+    this payment bought, floored by what other finished payments guarantee on
+    their own, rather than resetting to FREE. Under-revoking is the safe side.
+    """
+    now = datetime.now(timezone.utc)
+    logger.error(
+        "NOWPayments 报告退款，本地已入账，正在自动收回该笔权益（请人工复核是否为部分退款）: "
+        "payment=%s user=%s plan=%s actually_paid=%s / refund reported after the "
+        "payment was credited; revoking its entitlement automatically, review by hand",
+        record.nowpayments_payment_id,
+        record.user_id,
+        record.plan,
+        record.actually_paid,
+    )
+
+    # 原子抢占，同入账那一段：只有把 FINISHED 改成 REFUNDED 的这一方去动用户权益。
+    # IPN 回调与前端 /status 轮询可能同时送来同一条 refunded，没有这道抢占就会
+    # 把同一笔的天数扣两次——扣错方向的双重执行比双重入账更难被发现（用户只会
+    # 觉得"我的会员怎么少了"）。
+    # Atomic claim, mirroring the crediting path: only the session that flips
+    # FINISHED → REFUNDED touches the entitlement. The IPN callback and the
+    # frontend's 5s /status poll can deliver the same refund at once, and a
+    # double revoke is even harder to notice than a double credit.
+    claimed = (
+        db.query(Payment)
+        .filter(Payment.id == record.id, Payment.status == "FINISHED")
+        .update({"status": STATUS_REFUNDED}, synchronize_session=False)
+    )
+    if not claimed:
+        db.commit()
+        db.refresh(record)
+        return
+
+    # 支付层的痕迹（沿用既有 field 名，管理端/人工按它查退款）。
+    # The payment-level trace keeps its existing field name.
+    _payment_audit(
+        db, record, "payment:refund_after_finished", "FINISHED", STATUS_REFUNDED
+    )
+
+    # 锁住用户行：同一用户的另一笔支付可能正在入账，两边都在改 plan_expires_at。
+    # Lock the user row: another payment of the same user may be crediting right
+    # now, and both sides write plan_expires_at.
+    user = db.query(User).filter(User.id == record.user_id).with_for_update().first()
+    notify_user_id: str | None = None
+    if user is not None:
+        old_plan, old_expiry = user.plan, user.plan_expires_at
+        skip, new_plan, new_expiry = refund_revocation(
+            plan=user.plan,
+            plan_expires_at=user.plan_expires_at,
+            plan_is_trial=bool(user.plan_is_trial),
+            days=PLAN_DAYS.get(record.plan, 30),
+            entitlement_floor=_other_payments_entitlement_floor(db, record),
+            now=now,
+        )
+        if skip is not None:
+            # 一个字段都没动也要留痕：「为什么这笔退款没有收回任何权益」是人工
+            # 复核时第一个要问的问题，不写下来就只能靠重算当时的状态去猜。
+            # Even a no-op is recorded: "why did this refund take nothing back"
+            # is the first question a reviewer asks, and without the row the only
+            # way to answer it is to reconstruct the state at the time.
+            _payment_audit(
+                db, record, "plan:refund_skipped", f"{old_plan}({old_expiry})", skip
+            )
+        elif (new_plan, new_expiry) == (old_plan, _as_utc(old_expiry)):
+            # 比较前先把旧值当 UTC 归一：库里取出来的是 naive，判定函数返回的是
+            # aware，直接比会永远判成"变了"，于是断档重付那种「一天都没扣」的情况
+            # 也会写审计行 + 发通知——用户收到一条"你的会员被收回了"，而权益其实
+            # 一点没动，比不通知更糟。
+            # Normalise before comparing: the stored value is naive and the
+            # predicate returns aware, so a raw comparison always reads as
+            # "changed" and the lapse-and-rebuy case (which revokes nothing) would
+            # still tell the user their membership was taken away.
+            # 下限把这笔的天数全挡住了（断档重付）：权益没变，就不该留一条"变了"
+            # 的审计行，也不该去打扰用户。同 plan:payment 那边的处理。
+            # The floor absorbed the whole subtraction (lapse-and-rebuy): nothing
+            # changed, so neither an audit row nor a notification is warranted —
+            # same rule as the plan:payment row.
+            _payment_audit(
+                db, record, "plan:refund_skipped", f"{old_plan}({old_expiry})",
+                "skip:covered_by_other_payment",
+            )
+        else:
+            user.plan = new_plan
+            user.plan_expires_at = new_expiry
+            if new_plan == "FREE":
+                # 与 plan_expiry.downgrade_if_expired 保持一致：降回 FREE 时顺手
+                # 清掉试用标记（非试用用户本来就是 False，无条件清是安全的）。
+                # Same as plan_expiry.downgrade_if_expired: clear the trial flag
+                # on the way back to FREE (already False for non-trial users).
+                user.plan_is_trial = False
+            _payment_audit(
+                db,
+                record,
+                "plan:refund",
+                f"{old_plan}({old_expiry})",
+                f"{new_plan}({new_expiry})",
+            )
+            # 站内通知：权益被收回是用户会立刻察觉的事（信号变延迟、下不了单），
+            # 没有任何说明的话他只会当成故障来报工单。通知随本次事务一起落盘
+            # （create_notification 只 add+flush，不 commit），写失败不该让降级回滚。
+            # In-app notice: losing entitlement is immediately visible (signals go
+            # delayed, ordering stops), and with no explanation the user files a
+            # bug report. The row rides this transaction; a failure here must not
+            # roll the downgrade back.
+            try:
+                create_notification(
+                    db,
+                    user.id,
+                    NOTIFY_KIND_PLAN_REFUND,
+                    text=(
+                        "订单已退款，该笔购买的会员时长已收回 / "
+                        "Your payment was refunded; the membership days it bought were removed"
+                    ),
+                    link="/upgrade",
+                    ref_id=record.id,
+                )
+                notify_user_id = user.id
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "退款降级的站内通知写入失败（降级本身已生效）: payment=%s user=%s / "
+                    "in-app notice failed, the downgrade itself stands",
+                    record.nowpayments_payment_id,
+                    record.user_id,
+                    exc_info=True,
+                )
+
+    db.commit()
+    db.refresh(record)
+    # WS 只在落盘之后发：面板收到信号会立刻回来拉 /notifications/feed，提前发就
+    # 可能拉到一个还没提交的空列表。notify_ws 自己吞异常。
+    # The WS ping goes out only after the commit — the bell refetches the feed the
+    # moment it arrives, and a premature ping would read an uncommitted list.
+    if notify_user_id:
+        notify_ws(notify_user_id)
+
+
 def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_data: dict):
     """同步 NOWPayments 的回调/查询状态到本地 Payment 表，支付完成时升级/续期用户。
 
@@ -737,29 +973,19 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
         except (TypeError, ValueError):
             pass
 
-    # 退款到得比我们想的晚：本地已经按 FINISHED 给过时长了。**不自动降级**——
-    # 退款可能是部分退、可能是运营谈好的例外、也可能是对方误操作，而降级会当场
-    # 撤掉一个已经在用的人的权益。这里只做一件事：把它变成"有人会看到的"。
-    # 不改状态（FINISHED 是既成事实），留一条 error 日志 + 一条审计行给人工处理。
-    # A refund arriving after we already credited the time. Deliberately no
-    # automatic downgrade: the refund may be partial, an agreed exception, or
-    # their mistake, and downgrading would yank entitlement from someone using
-    # it. The one job here is to make it visible — an error log and an audit row
-    # for a human, with the status left alone because FINISHED already happened.
+    # 退款到得比我们想的晚：本地已经按 FINISHED 给过时长了 → 自动收回这笔给出的
+    # 权益（口径与理由见 _revoke_refunded_entitlement / plans.refund_revocation）。
+    # 必须挡在下面整段之前：走到下面 new_status 会是 FAILED，既覆盖不了终态
+    # FINISHED，也不会有人去动用户的会员，退款就白退了。
+    # 这个判断只在 FINISHED 上成立，所以收回之后状态变成 REFUNDED，重复的 refunded
+    # 回调不会再进来扣第二次。
+    # A refund arriving after we credited the time → revoke what this payment
+    # gave. It must short-circuit ahead of the block below, where "refunded" maps
+    # to FAILED, fails to overwrite the terminal FINISHED, and nobody ever looks
+    # at the membership. The condition only holds while the row is FINISHED, so
+    # the flip to REFUNDED makes repeat callbacks no-ops rather than double debits.
     if np_status_val == "refunded" and record.status == "FINISHED":
-        logger.error(
-            "NOWPayments 报告退款，但本地已入账且不自动降级，请人工处理: "
-            "payment=%s user=%s plan=%s actually_paid=%s / refund reported after "
-            "the payment was credited; handle manually",
-            record.nowpayments_payment_id,
-            record.user_id,
-            record.plan,
-            record.actually_paid,
-        )
-        _payment_audit(
-            db, record, "payment:refund_after_finished", "FINISHED", "refunded"
-        )
-        db.commit()
+        _revoke_refunded_entitlement(db, record)
         return
 
     if new_status == "FINISHED":
