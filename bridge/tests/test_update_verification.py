@@ -155,11 +155,27 @@ def test_placeholder_key_disables_self_update(monkeypatch):
         bridge_app.verify_sums_signature(b"anything", _b64(b"\x00" * 64))
 
 
-def test_shipped_default_is_the_placeholder():
-    """仓库里的默认值就该是占位符：真公钥是发版时才填的。
-    The checked-in default must stay the placeholder; the real key is filled at release."""
-    assert bridge_app.UPDATE_PUBLIC_KEY_B64 == bridge_app._UPDATE_PUBLIC_KEY_PLACEHOLDER
-    assert bridge_app.update_signing_ready() is False
+def test_shipped_key_is_configured_and_self_update_is_on():
+    """仓库里的公钥必须是**真的**，自更新必须是开着的。
+
+    这条断言 2026-09-20 反了过来。此前它断言「默认值就该是占位符」，那在公钥还没生成
+    时是对的——它守的是「别在没意识到的情况下以为自更新能用」。公钥生成并填入之后，
+    值得守的变成了反面：**别让它悄悄退回占位符**。
+
+    退回去不会有任何报错：程序照常启动、照常交易，只有一键更新的入口整个消失，用户
+    退回手动下载，而谁都不会收到通知。合并冲突解错一边、或者为了本地调试临时改回去
+    忘了改回来，都会造成这个结果——所以让它在测试里响。
+
+    Inverted on 2026-09-20. It used to assert the default was still the placeholder,
+    which guarded "don't assume self-update works before a key exists". With the key in
+    place the valuable invariant is the opposite: don't let it silently revert. A
+    reversion raises nothing — the app runs and trades, only one-click update vanishes.
+    """
+    assert bridge_app.UPDATE_PUBLIC_KEY_B64 != bridge_app._UPDATE_PUBLIC_KEY_PLACEHOLDER, \
+        "公钥退回占位符了：自更新会整个关闭，且不会有任何报错"
+    assert bridge_app.update_signing_ready() is True
+    # 顺带钉住格式：Ed25519 原始公钥是 32 字节，base64 后固定 44 个字符。
+    assert len(bridge_app.UPDATE_PUBLIC_KEY_B64) == 44
 
 
 def test_blank_or_malformed_key_disables_self_update(monkeypatch):

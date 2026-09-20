@@ -33,6 +33,46 @@ foreach ($ref in @("MetaQuotes.MT5CommonAPI64.dll", "MetaQuotes.MT5ManagerAPI64.
     }
 }
 
+# 打印这 5 个 DLL 的来源、版本与 SHA256。
+#
+# 为什么值得占几行输出:上面那个"找不到 SDK 就用本目录"的退路意味着 VPS 上的 DLL
+# 版本从此只由"上一次编译时拷进来的那份"决定,而仓库里既没有这几个 DLL 的校验和、
+# 也没有版本号记录——真出现"换了台机器之后连不上券商"时,没有任何办法回答"两边跑
+# 的是不是同一份 Manager API"。Start() 里有运行期版本比对兜底,但那是失败之后才说话。
+# 这里不去猜哪个版本才对(仓库里判定不了),只把每次编译实际用了什么记进构建输出,
+# 让下次比对有据可依。
+#
+# Record where each DLL came from, its version and its hash. The "fall back to this
+# folder" path above means the VPS's Manager API version is decided by whatever was
+# copied in last time, and the repo pins neither a version nor a checksum — so after a
+# machine move there is no way to answer "are both sides running the same API?". This
+# does not guess which version is correct (the repo cannot tell); it just makes every
+# build state what it actually used.
+Write-Host ""
+Write-Host "引用 DLL 来源:$libs" -ForegroundColor Cyan
+foreach ($dll in @(
+    "MetaQuotes.MT5CommonAPI64.dll",
+    "MetaQuotes.MT5ManagerAPI64.dll",
+    "MT5APIManager64.dll",
+    "MT5APIManager64avx.dll",
+    "MT5APIManager64avx2.dll"
+)) {
+    $p = Join-Path $libs $dll
+    if (-not (Test-Path $p)) {
+        # 原生 DLL 缺失不阻断编译(编译只需要那两个托管包装器),但产出的 exe 连不上
+        # 券商,所以必须显眼地说出来,而不是等运行时报一个看不懂的加载失败。
+        # A missing native DLL does not break compilation, only the resulting exe.
+        Write-Host ("  {0,-32} 缺失 / MISSING" -f $dll) -ForegroundColor Red
+        continue
+    }
+    $item = Get-Item $p
+    $ver = $item.VersionInfo.FileVersion
+    if (-not $ver) { $ver = "-" }
+    $sha = (Get-FileHash $p -Algorithm SHA256).Hash
+    Write-Host ("  {0,-32} v{1,-14} {2,10} 字节  SHA256 {3}" -f $dll, $ver, $item.Length, $sha)
+}
+Write-Host ""
+
 Push-Location $PSScriptRoot
 try {
     $sources = @(

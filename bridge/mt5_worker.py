@@ -431,11 +431,26 @@ def _alternate_filling(symbol: str, current):
     info = mt5.symbol_info(symbol)
     mask = getattr(info, "filling_mode", 0) if info is not None else 0
     options = []
-    fok_bit = getattr(mt5, "SYMBOL_FILLING_FOK", 1)
-    ioc_bit = getattr(mt5, "SYMBOL_FILLING_IOC", 2)
-    if mask & fok_bit:
+    # SYMBOL_FILLING_FOK / SYMBOL_FILLING_IOC **在 MetaTrader5 这个 Python 包里并不存在**
+    # （实测：`getattr(mt5, "SYMBOL_FILLING_FOK", None)` 是 None），只有 MQL5 那边有。
+    # 所以这两个位掩码值只能按 MQL5 的定义硬写：FOK = 1、IOC = 2。
+    # 不要改成 `getattr(mt5, "SYMBOL_FILLING_FOK", 1)` 那种写法——那看起来像「包里有就用包里的」，
+    # 实际永远走默认值，反而掩盖了「这是硬编码的协议常量」这件事。
+    #
+    # 而 ORDER_FILLING_FOK / ORDER_FILLING_IOC 确实存在（0 / 1），照常从包里读。
+    # 注意这两套值不是一回事：位掩码用来问「这个品种支持哪些模式」，ORDER_FILLING_* 才是
+    # 下单请求里填的值。
+    #
+    # SYMBOL_FILLING_FOK / SYMBOL_FILLING_IOC do NOT exist in the MetaTrader5 Python
+    # package (verified) — they are MQL5-side names — so the bitmask values are written
+    # out per the MQL5 definition. ORDER_FILLING_* do exist and are read from the module.
+    # The two sets are different things: the mask answers "which modes does this symbol
+    # support", ORDER_FILLING_* is what goes into the request.
+    SYMBOL_FILLING_FOK = 1
+    SYMBOL_FILLING_IOC = 2
+    if mask & SYMBOL_FILLING_FOK:
         options.append(getattr(mt5, "ORDER_FILLING_FOK", None))
-    if mask & ioc_bit:
+    if mask & SYMBOL_FILLING_IOC:
         options.append(getattr(mt5, "ORDER_FILLING_IOC", None))
     for opt in options:
         if opt is not None and opt != current:
@@ -1314,8 +1329,16 @@ def _confirm_order_filled(order_ticket: int) -> bool | None:
             if state == mt5.ORDER_STATE_FILLED:
                 return True
             # 明确的终态且不是成交：券商拒了 / 撤了 / 过期，这才是真的「没成交」。
-            # A terminal state that is not FILLED: rejected, cancelled or expired —
-            # only this counts as a confirmed non-fill.
+            #
+            # 刻意不含 ORDER_STATE_PARTIAL（=3，部分成交）：那是「成交了一部分」，既不是
+            # 确认成交也不是确认没成交。它会走到下面的超时分支落 FAILED，措辞是「请先核对
+            # 持仓」——对部分成交恰好是对的：仓位确实建立了，只是手数比请求的小，用户必须
+            # 自己看一眼。报 FILLED 会谎称全额成交，报 REJECTED 会诱导重下。
+            #
+            # Deliberately excludes ORDER_STATE_PARTIAL (3): a partial fill is neither a
+            # confirmed fill nor a confirmed non-fill. It falls through to the timeout
+            # branch and lands as FAILED ("verify your positions"), which is right — a
+            # position does exist, just smaller than requested.
             if state in (mt5.ORDER_STATE_REJECTED, mt5.ORDER_STATE_CANCELED,
                          mt5.ORDER_STATE_EXPIRED):
                 return False
@@ -1611,6 +1634,23 @@ def _close_position(cmd: dict) -> dict:
         "success": success,
         "status": status,
         "mt5Ticket": ticket,
+        # **平仓单自己的订单号**，与上面的 mt5Ticket（仓位号）是两回事。
+        #
+        # 为什么要单独带一个：重发时的二次确认要查「这张单成没成」，而查的对象必须是
+        # 订单号。平仓回执里的 mt5Ticket 放的是仓位号，而 MT5 的仓位号就是当初**开仓**
+        # 那张单的订单号——拿它去查订单历史，查到的是那张早已成交的开仓单，于是一笔
+        # 没平成的平仓会被升级成「已平」，而仓位还在裸奔。那正是这套确认要防的事故。
+        #
+        # 有了这个字段，bridge_app._reconfirm_cached 才能对平仓也做「只重跑确认、不重跑
+        # 执行」。后端不认识它，pydantic 默认忽略多余字段（已实测），所以纯属桥接自用。
+        #
+        # The closing order's own ticket, distinct from mt5Ticket (the position id).
+        # Re-delivery confirmation must look up an *order*, and a position id in MT5 is
+        # the opening order's ticket — querying that would find the long-since-filled
+        # open and upgrade a failed close to "closed" while the position is still open.
+        # This field lets _reconfirm_cached cover closes too. The backend ignores
+        # unknown fields (verified), so it is purely bridge-internal.
+        "mt5OrderTicket": int(getattr(result, "order", 0) or 0) or None,
         "filledPrice": filled_price,
         # 实际平掉的手数（部分平仓会被步长规整，也可能因为请求量大于持仓量而变成全平）。
         # The volume actually closed: a partial close is step-aligned, and a request

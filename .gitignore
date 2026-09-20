@@ -94,11 +94,26 @@ pnpm-debug.log*
 # ===== Bridge 打包产物 / build artifacts =====
 bridge/build/
 bridge/dist/
-bridge/*.spec
 bridge/build_log.txt
 bridge/*.log
 *.exe
 *.msi
+
+# 打包配置**要**入库（2026-09-20 改）。此前 `bridge/*.spec` 被一并忽略，理由大概是
+# 「PyInstaller 会自己生成」——但这份 spec 早就不是生成物了：它手工维护着 hiddenimports
+# （pystray/PIL 的运行时后端、cryptography 的 ed25519 与 Rust 扩展）、datas、以及
+# upx=False / console=False 这些带解释的取舍。
+#
+# 不入库的代价是实打实的：**只有打过包的那台机器能复现构建**，换台机器重新生成一份
+# 干净 spec，漏掉的依赖不会报错，只会让对应功能静默失效——cryptography 那条尤其阴，
+# 漏了之后程序照常跑、照常交易，只有「一键更新」悄悄退回手动下载。
+#
+# The packaging spec is tracked as of 2026-09-20. It is hand-maintained (hiddenimports
+# for runtime-only backends and the lazily imported cryptography/ed25519 Rust binding,
+# plus explained upx/console choices), not a generated artifact. Leaving it untracked
+# meant only one machine could reproduce a build, and a regenerated spec would drop
+# those imports silently — the app still runs, only one-click update quietly dies.
+!bridge/PRISMX-Bridge.spec
 
 # ===== 文档 / Markdown（不纳入仓库；md 里常含密钥/内部信息）=====
 # Docs / Markdown — never committed; may contain keys or internal info.

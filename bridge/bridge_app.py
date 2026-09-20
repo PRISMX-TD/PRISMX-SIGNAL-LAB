@@ -31,6 +31,14 @@ from urllib import error, request
 from urllib.parse import urlparse
 
 from mt5_worker import poll_terminal, read_positions
+# 下划线开头但刻意从这里引：一张单到底成没成交的判据（查 history_orders_get、哪些
+# 状态算终态、ORDER_STATE_PARTIAL 为什么不算）全部长在 mt5_worker 里，重发时的二次
+# 确认（见 BridgeEngine._reconfirm_cached）必须与执行路径用**同一份**判据，另写一份
+# 迟早会与它分叉。
+# Imported despite the underscore: mt5_worker owns the entire "did this order fill"
+# judgement, and the re-delivery re-confirmation must use that exact same judgement
+# rather than a second copy that will drift away from it.
+from mt5_worker import _confirm_order_filled as confirm_order_filled
 
 # 系统托盘：可选依赖，缺失时静默降级为"点 X 直接退出"的旧行为，不影响主功能。
 # System tray: optional dependency; missing it silently falls back to the old
@@ -98,16 +106,29 @@ UPDATE_CHECK_INTERVAL = 600
 UPDATE_SUMS_ASSET = "SHA256SUMS"
 UPDATE_SUMS_SIG_ASSET = "SHA256SUMS.sig"
 
-# ⚠⚠⚠ 必须替换成真正的发布公钥，否则自更新**一直是关闭的** ⚠⚠⚠
-# ⚠⚠⚠ REPLACE WITH THE REAL RELEASE PUBLIC KEY — SELF-UPDATE STAYS OFF UNTIL YOU DO ⚠⚠⚠
-# 生成方式见 bridge/README.md「发版签名」一节：私钥只存在发布者手上（离线/密钥库），
-# 这里填的是 Ed25519 公钥的 32 字节原始值的 base64（44 个字符，以 "=" 结尾）。
-# 留着占位符时 update_signing_ready() 恒为 False：提示条只会引导手动下载，
-# 一键自更新的入口整个不出现——「没配公钥」绝不等于「不校验就放行」。
+# 发布公钥（2026-09-20 生成并启用）。Ed25519 公钥的 32 字节原始值的 base64，44 个字符。
+#
+# 配套私钥**不在本仓库、也不在任何仓库里**，只存在发布者手上（本机 2026-09-20 放在
+# 仓库之外的 C:\prismx-release-keys\，需另行离线备份）。泄漏它等于能给全体桥接用户
+# 推送任意可执行文件，而运行它的正是用户登录着真实 MT5 账号的那台机器。
+#
+# 换公钥要当心：**已经装在用户机器上的旧版本认的是旧公钥**。轮换时要么新旧两把都签，
+# 要么先发一版把公钥换成新的、等存量升上来再停签旧的，否则存量用户会全部退回手动下载。
+#
+# 留着占位符时 update_signing_ready() 恒为 False：提示条只会引导手动下载，一键自更新
+# 的入口整个不出现——「没配公钥」绝不等于「不校验就放行」。生成与签名流程见
+# bridge/README.md「发版签名」一节。
+#
+# Release public key, generated and enabled 2026-09-20 (base64 of the raw 32-byte
+# Ed25519 key). The matching private key lives only with the publisher, never in any
+# repository: leaking it means being able to push arbitrary executables to every
+# bridge user, on the machine where their live MT5 account is logged in. Rotating it
+# needs care — installed builds trust the old key, so sign with both across a
+# transition or existing users all fall back to manual downloads.
 # Placeholder ⇒ update_signing_ready() is False ⇒ the one-click path is not offered
 # at all. An unconfigured key must never degrade into "skip the check".
 _UPDATE_PUBLIC_KEY_PLACEHOLDER = "!!!-REPLACE-ME-WITH-RELEASE-ED25519-PUBLIC-KEY-BASE64-!!!"
-UPDATE_PUBLIC_KEY_B64 = _UPDATE_PUBLIC_KEY_PLACEHOLDER
+UPDATE_PUBLIC_KEY_B64 = "MMxilfHqz6Pzr9hKDsUpzH2mRas92g6EGPsUeCoa5Ac="
 
 # 只接受 GitHub 的下载域名。browser_download_url 会 302 到对象存储，所以请求前的
 # URL 和跟随重定向后的最终 URL 都要查一遍——否则一个被改写的 Release JSON 就能把
@@ -686,9 +707,13 @@ class BridgeEngine:
         by_path: dict[str, list] = {}
         for cmd in commands:
             coid = str(cmd.get("clientOrderId"))
-            if coid in self._executed:
-                # 重发的指令：直接重报缓存结果 / re-delivered: re-report cached result
-                self._report_result(self._executed[coid], http)
+            cached = self._executed.get(coid)
+            if cached is not None:
+                # 重发的指令：只重报缓存结果，**绝不重新执行**。缓存里是 FAILED
+                # （不知道成没成）时先重跑一次确认，见 _reconfirm_cached。
+                # Re-delivered: re-report the cached result, never re-execute. A
+                # cached FAILED gets its confirmation re-run first (see below).
+                self._report_result(self._reconfirm_cached(coid, cached, cmd), http)
                 continue
             path = self._login_to_path.get(str(cmd.get("login")))
             if path:
@@ -711,26 +736,28 @@ class BridgeEngine:
                     # 重报一次 FAILED 是安全的，而重新执行可能开出第二笔仓位——
                     # 在两者之间只能选前者。
                     #
-                    # 已知代价：如果那张单后来其实成交了，缓存会让它在后端一直停在
-                    # FAILED（后端把 FAILED 当非终态、允许被更正，但更正永远不会来）。
-                    # 用户不会因此受损——FAILED 的文案就是「请先核对持仓」，而且平仓
-                    # 明细回扫会把真实仓位补进记录——只是订单行看起来停在未确认。
-                    # 更好的做法是重发时**只重跑确认、不重跑执行**，把 FAILED 升级成
-                    # FILLED；那要改动指令循环的形状，留作后续。
+                    # 缓存 FAILED 曾经的代价是「那张单后来其实成交了，却在后端永远
+                    # 停在 FAILED」——后端把 FAILED 当非终态、允许被更正，但更正永远
+                    # 不会来。**这条代价已经消掉了**：后端重发同一 clientOrderId 时，
+                    # `_reconfirm_cached` 会拿这条记录里的订单号**只重跑确认、不重跑
+                    # 执行**，查到成交就把缓存条目就地升级成 FILLED 再回报。
+                    # 仍然确认不了的那部分（没有订单号、平仓/改单、账号已不在本机）
+                    # 照旧重报 FAILED，判据与取舍见 _reconfirm_cached 的注释。
                     #
                     # FAILED ("outcome unknown") is cached deliberately. When the
                     # backend re-delivers the same clientOrderId, re-reporting FAILED
                     # is safe while re-executing could open a second position, and
                     # that is the whole choice.
                     #
-                    # Known cost: if the order did fill, the cache pins it at FAILED
-                    # in the backend forever (FAILED is non-terminal there and may be
-                    # corrected, but the correction never arrives). No user harm —
-                    # FAILED reads as "verify your positions", and the closed-trade
-                    # rescan still records the real position — the order row just
-                    # stays unconfirmed. The better fix is to re-run only the
-                    # confirmation on a re-delivery and upgrade FAILED to FILLED,
-                    # which needs the command loop reshaped; left as follow-up.
+                    # Caching FAILED used to cost this: an order that did fill stayed
+                    # FAILED in the backend forever (FAILED is non-terminal there and
+                    # may be corrected, but the correction never arrived). That cost is
+                    # gone — on a re-delivery of the same clientOrderId,
+                    # _reconfirm_cached re-runs only the *confirmation*, never the
+                    # execution, and upgrades the cached entry to FILLED when the order
+                    # turns out to have filled. What still cannot be confirmed (no order
+                    # ticket, closes/modifies, account no longer attached here) is
+                    # re-reported as FAILED exactly as before.
                     self._remember_executed(coid, r)
                 logger.info(
                     "下单结果 / order result: coid=%s success=%s ticket=%s price=%s msg=%s",
@@ -750,6 +777,134 @@ class BridgeEngine:
                     http.post("/api/bridge/positions", {"data": merged})
             except Exception as e:
                 logger.warning("成交后即时上报持仓失败 / immediate positions report failed: %s", e)
+
+    def _reconfirm_cached(self, coid: str, cached: dict, cmd: dict) -> dict:
+        """后端重发同一 clientOrderId 时，对缓存里的 FAILED **只重跑确认、不重跑执行**。
+
+        为什么要有这一步：FAILED 的意思是「不知道成没成」。把它写进 24 小时幂等缓存是
+        刻意的（重报一次 FAILED 安全，重新执行可能开出第二笔仓），代价是那笔**后来其实
+        成交了**的单会在后端一直停在 FAILED。这里把代价消掉：重发时拿缓存里记下的订单号
+        去查这张单**现在**的终态，成交了就把缓存条目升级成 FILLED 并回报新结果；后端允许
+        FAILED 被更正（routers/bridge.py 的 WHERE 里只有 FILLED/REJECTED 是终态）。
+
+        不变式：**这条路径一次 order_send 都不会发**。`poll_terminal` 不带 orders 时
+        它的执行循环是 `for cmd in orders or []`，一条都不会走到；随后只有
+        `_confirm_order_filled`（读订单历史）与 `read_positions`（读持仓）两次只读查询。
+        重新执行正是这套缓存要防的事，所以这条不变式有一条专门的用例钉着
+        （tests/test_redelivery_reconfirm.py，断言 order_send 调用次数为 0）。
+
+        查询借道 `poll_terminal(read_state=False)` 只是为了**附着到正确的终端**
+        （`_ensure_attached`），并且整段在 `self._mt5_lock` 里——MetaTrader5 包是进程级
+        单连接，另起一条 MT5 调用路径就会和状态循环、指令循环撞车。
+
+        On a re-delivery, re-run only the confirmation — never the execution. FAILED
+        means "outcome unknown"; caching it is deliberate (re-reporting FAILED is safe,
+        re-executing could open a second position), and this removes its one cost: an
+        order that did fill no longer stays FAILED forever. The invariant that matters
+        is that nothing here can reach order_send — poll_terminal with no orders only
+        attaches, and the two follow-up calls are read-only. It all runs under
+        self._mt5_lock because the MetaTrader5 package is one process-wide attachment.
+        """
+        if str(cached.get("status") or "").upper() != "FAILED":
+            return cached
+
+        # 要查的必须是**订单号**，而不同动作的回执里订单号放在不同字段：
+        #
+        #   ORDER          `mt5Ticket` 就是订单号
+        #   CLOSE / MODIFY `mt5Ticket` 是**仓位号**，订单号另放在 `mt5OrderTicket`
+        #
+        # 这个区分不是洁癖：MT5 的仓位号就是当初**开仓**那张单的订单号。拿平仓回执里的
+        # `mt5Ticket` 去查订单历史，查到的是那张早已 FILLED 的开仓单，于是一笔没平成的
+        # 平仓被升级成「已平」，而仓位还在裸奔——那正是这整套确认要防的事故。
+        #
+        # 所以平仓改用 `mt5OrderTicket`（mt5_worker._close_position 1.4.2 起带上的平仓单
+        # 自己的订单号）。老桥接的缓存条目里没有这个字段，取不到就照旧重报 FAILED，不猜。
+        #
+        # The ticket to look up is always an *order* ticket, but different actions put it
+        # in different fields: ORDER receipts carry it as mt5Ticket, while close/modify
+        # receipts put the *position* id there and the order ticket in mt5OrderTicket.
+        # This matters because an MT5 position id IS the opening order's ticket, so using
+        # it on a close would find that long-since-filled open and upgrade a failed close
+        # to "closed" while the position is still open — the exact accident this guards.
+        # Cache entries written by older builds lack mt5OrderTicket; those are re-reported
+        # unchanged rather than guessed at.
+        action = str(cmd.get("action") or "ORDER").upper()
+        ticket_field = "mt5Ticket" if action == "ORDER" else "mt5OrderTicket"
+        try:
+            ticket = int(cached.get(ticket_field) or 0)
+        except (TypeError, ValueError):
+            ticket = 0
+        if ticket <= 0:
+            # 没有可查的订单号（order_send 直接返回 None，或老版本缓存没带这个字段）：
+            # 无从确认，照旧重报，绝不猜。
+            # No order ticket to look up (order_send returned None, or an older cache
+            # entry predates the field): nothing to confirm, so re-report unchanged.
+            return cached
+
+        path = self._login_to_path.get(str(cmd.get("login")))
+        if not path:
+            logger.warning(
+                "重发指令想二次确认但账号不在本机 / cannot re-confirm, login not attached: coid=%s login=%s",
+                coid, cmd.get("login"),
+            )
+            return cached
+
+        try:
+            with self._mt5_lock:
+                # 不带 orders = 只附着，不执行 / no orders: attach only, execute nothing
+                res = poll_terminal(path, read_state=False)
+                if res.get("error"):
+                    logger.warning(
+                        "重发指令二次确认时附着终端失败 / attach failed while re-confirming: coid=%s %s",
+                        coid, res["error"],
+                    )
+                    return cached
+                filled = confirm_order_filled(ticket)
+                # 成交价只在确认成交后才需要，多一次持仓读取不值得花在不会用到的分支上。
+                # The fill price is only needed once the fill is confirmed.
+                positions = read_positions(path) if filled is True else None
+        except Exception as e:
+            logger.warning("重发指令二次确认异常 / re-confirmation error: coid=%s %s", coid, e)
+            return cached
+
+        if filled is not True:
+            # 确认没成交、或仍然确认不了，都照旧重报 FAILED。
+            # 刻意不改判 REJECTED：REJECTED 在界面上的意思是「可以安全重下」，而这里
+            # 既可能是单子还挂着、也可能是部分成交，重下就可能变成双倍仓位。
+            # A confirmed non-fill and an inconclusive check both stay FAILED, never
+            # REJECTED — REJECTED reads as "safe to place it again", and the order may
+            # still be working or partially filled.
+            logger.info(
+                "重发指令二次确认仍未成交 / still not a confirmed fill: coid=%s ticket=%s confirmed=%s",
+                coid, ticket, filled,
+            )
+            return cached
+
+        upgraded = dict(cached)
+        upgraded["status"] = "FILLED"
+        upgraded["success"] = True
+        upgraded["message"] = "执行结果已二次确认为成交 / Fill confirmed on re-delivery"
+        # 补一个成交价：开仓成功后仓位号就是这张单的订单号，所以持仓表里那条的入场价
+        # 就是本单的成交价。读不到就维持原样（后端此时写 NULL，与升级前一致，不会更差）。
+        # Backfill a fill price: an opening order's ticket is its position's ticket, so
+        # that position's entry price is this order's fill price. Left as-is if absent.
+        if not upgraded.get("filledPrice"):
+            for pos in positions or []:
+                try:
+                    same = int(pos.get("ticket") or 0) == ticket
+                except (TypeError, ValueError):
+                    same = False
+                if same:
+                    upgraded["filledPrice"] = pos.get("entryPrice")
+                    break
+        # 升级后的结果写回缓存：下一次重发直接命中 FILLED，不必再查一遍。
+        # Write the upgrade back so a further re-delivery hits FILLED directly.
+        self._remember_executed(coid, upgraded)
+        logger.info(
+            "重发指令二次确认为已成交，缓存 FAILED→FILLED / upgraded on re-delivery: coid=%s ticket=%s price=%s",
+            coid, ticket, upgraded.get("filledPrice"),
+        )
+        return upgraded
 
     def _loop(self):
         while not self._stop.is_set():
@@ -2078,13 +2233,50 @@ if __name__ == "__main__":
     # hidden self-test: verify numpy / MetaTrader5 import in the bundled exe
     if "--selftest" in sys.argv:
         out = os.path.join(os.path.expanduser("~"), ".prismx_selftest.txt")
+        parts = []
+        ok = True
         try:
             import numpy as _np
             import MetaTrader5 as _mt5
-            msg = f"OK numpy={_np.__version__} mt5={_mt5.__version__}"
+            parts.append(f"numpy={_np.__version__} mt5={_mt5.__version__}")
         except Exception as _e:  # noqa: BLE001
-            msg = f"FAIL {_e!r}"
+            ok = False
+            parts.append(f"core-import-failed={_e!r}")
+
+        # 自更新链路也要自检，而且必须**在打包产物里**验。
+        #
+        # cryptography 在 _load_update_public_key() 里是函数内惰性 import，这是刻意的
+        # （打包漏了只禁用自更新，不让整个程序起不来）——但正因为如此，漏打进包不会有
+        # 任何报错：程序照常启动、照常交易，只有「一键更新」悄悄退回手动下载。而验签
+        # 自更新正是 1.4.2 的主要内容，这种失败形态必须在发版前就被看见。
+        #
+        # 一并把公钥是不是还停在占位符也报出来：那同样会让一键更新整个不出现，而且
+        # 同样不报错。发版前看一眼这一行，比装到用户机器上才发现强。
+        #
+        # The self-update chain is checked here too, and it must be checked in the
+        # packaged binary: cryptography is imported lazily inside a function (so a
+        # packaging miss only disables self-update rather than the app), which means a
+        # miss is completely silent — the app runs and trades, only one-click update
+        # quietly degrades. Verified self-update is the headline of 1.4.2, so that
+        # failure mode has to be visible before release. The placeholder public key is
+        # reported for the same reason: equally silent, equally disabling.
+        try:
+            import cryptography as _crypto
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import (  # noqa: F401
+                Ed25519PublicKey as _Ed25519PublicKey,
+            )
+            parts.append(f"cryptography={_crypto.__version__}")
+        except Exception as _e:  # noqa: BLE001
+            ok = False
+            parts.append(f"cryptography-missing={_e!r}")
+
+        parts.append(f"update_signing_ready={update_signing_ready()}")
+        if not update_signing_ready():
+            ok = False
+
+        msg = ("OK " if ok else "FAIL ") + " ".join(parts)
         with open(out, "w", encoding="utf-8") as _f:
             _f.write(msg)
-        sys.exit(0)
+        print(msg)
+        sys.exit(0 if ok else 1)
     main()

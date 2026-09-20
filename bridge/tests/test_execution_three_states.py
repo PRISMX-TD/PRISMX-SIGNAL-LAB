@@ -31,16 +31,39 @@ import mt5_worker  # noqa: E402
 
 
 class FakeMt5:
-    """够用的 MT5 替身：只提供本组用例碰到的常量与查询。"""
+    """够用的 MT5 替身：只提供本组用例碰到的常量与查询。
+
+    **这里的数值必须与真实 MetaTrader5 包一致**，否则用例只是自洽而不反映现实。
+    下面这组是在本机对着装好的 MetaTrader5 包逐个打印核对过的（2026-09-20）：
+
+        TRADE_RETCODE_DONE         10009
+        TRADE_RETCODE_PLACED       10008
+        TRADE_RETCODE_INVALID_FILL 10030
+        ORDER_STATE_CANCELED           2
+        ORDER_STATE_PARTIAL            3   （部分成交，本模块刻意不当终态）
+        ORDER_STATE_FILLED             4
+        ORDER_STATE_REJECTED           5
+        ORDER_STATE_EXPIRED            6
+
+    最初这份替身把 REJECTED 写成 2、CANCELED 写成 3（那其实分别是 CANCELED 与 PARTIAL），
+    用例照样全绿——因为被测代码是从 `mt5` 模块读常量的，替身自洽就够。但那样一来这份文件
+    就成了一份会误导人的「常量表」，所以按真值改正。
+
+    These values are verified against the installed MetaTrader5 package; an earlier
+    version of this fake had REJECTED/CANCELED wrong (tests still passed, since the code
+    reads the constants from the module), which made this file misleading documentation.
+    """
 
     TRADE_RETCODE_DONE = 10009
     TRADE_RETCODE_PLACED = 10008
     TRADE_RETCODE_REJECT = 10006
-    ORDER_STATE_FILLED = 4
-    ORDER_STATE_REJECTED = 2
-    ORDER_STATE_CANCELED = 3
-    ORDER_STATE_EXPIRED = 6
+    TRADE_RETCODE_INVALID_FILL = 10030
     ORDER_STATE_PLACED = 1
+    ORDER_STATE_CANCELED = 2
+    ORDER_STATE_PARTIAL = 3
+    ORDER_STATE_FILLED = 4
+    ORDER_STATE_REJECTED = 5
+    ORDER_STATE_EXPIRED = 6
 
     def __init__(self, history=None, positions=None):
         self._history = history
@@ -393,3 +416,44 @@ def test_alternate_filling_returns_none_when_there_is_no_other_option(monkeypatc
     monkeypatch.setattr(mt5_worker, "mt5", fake)
 
     assert mt5_worker._alternate_filling("XAUUSD", 101) is None
+
+
+# ---- 部分成交单独一条 / partial fills are their own case --------------------
+
+def test_partial_fill_is_failed_not_filled(monkeypatch, fast_confirm):
+    """部分成交 → FAILED（「请先核对持仓」），既不是 FILLED 也不是 REJECTED。
+
+    ORDER_STATE_PARTIAL 刻意不在「确认没成交」那一组里：仓位确实建立了，只是手数比请求的
+    小。报 FILLED 会谎称全额成交，报 REJECTED 会诱导用户重下（那才是真的加仓）。
+    """
+    monkeypatch.setattr(mt5_worker, "mt5",
+                        FakeMt5(history=[_order(FakeMt5.ORDER_STATE_PARTIAL)]))
+    status, filled = mt5_worker._result_from_retcode(_result(FakeMt5.TRADE_RETCODE_PLACED))
+    assert status == "FAILED"
+    assert filled is False
+
+
+def test_fake_constants_match_the_real_metatrader5_package():
+    """守住这份替身与真包不漂移。
+
+    被测代码从 `mt5` 模块读常量，所以替身写错值用例照样会绿——这条断言是唯一能把
+    「替身说的」和「真包说的」对上的地方。本机没装 MetaTrader5 时自动跳过（CI / Linux）。
+    """
+    real = pytest.importorskip("MetaTrader5")
+    for name in ("TRADE_RETCODE_DONE", "TRADE_RETCODE_PLACED", "TRADE_RETCODE_INVALID_FILL",
+                 "ORDER_STATE_PLACED", "ORDER_STATE_CANCELED", "ORDER_STATE_FILLED",
+                 "ORDER_STATE_REJECTED", "ORDER_STATE_EXPIRED"):
+        assert getattr(FakeMt5, name) == getattr(real, name), \
+            f"{name}: 替身 {getattr(FakeMt5, name)} != 真包 {getattr(real, name)}"
+
+
+def test_symbol_filling_bits_are_not_in_the_python_package():
+    """钉住一个反直觉的事实：SYMBOL_FILLING_* 在 Python 包里不存在，只有 MQL5 有。
+
+    `_alternate_filling` 因此把位掩码值（FOK=1 / IOC=2）硬写进代码。如果哪天 MetaQuotes
+    把它们加进包里、而值又不是 1/2，这条会红，提醒去核对而不是继续用硬编码。
+    """
+    real = pytest.importorskip("MetaTrader5")
+    for name in ("SYMBOL_FILLING_FOK", "SYMBOL_FILLING_IOC"):
+        assert getattr(real, name, None) is None, \
+            f"{name} 现在存在了（={getattr(real, name)}），去核对 _alternate_filling 的硬编码值"
