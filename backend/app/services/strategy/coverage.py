@@ -23,13 +23,6 @@ from app.models import Candle
 from app.services import quotes_store
 from app.services.candle_store import INTERVAL_SECONDS
 
-# 判定断档的容差倍数：相邻两根间隔超过 1.5 个周期才算缺口。取 1.5 而非 1.0 是
-# 因为 EA 上报的时间戳可能有秒级抖动，1.0 会把正常序列判成满是缺口。
-# Gap tolerance: a step longer than 1.5 intervals counts as a gap. 1.5 rather
-# than 1.0 because EA timestamps can jitter by seconds, and 1.0 would report a
-# perfectly normal series as riddled with gaps.
-GAP_TOLERANCE_MULTIPLIER = 1.5
-
 # 显式查询覆盖度时的品种数上限。刻意独立于 rules.MAX_SYMBOLS：后者是"单条策略最多
 # 盯几个品种"（约束实时评估的计算量），而这里是只读聚合查询，用途是把未接入品种
 # 置灰，必须能一次看完平台全部品种。取 32 是留足接入余量的防滥用护栏，不是业务规则；

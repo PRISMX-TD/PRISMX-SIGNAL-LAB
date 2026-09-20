@@ -407,20 +407,6 @@ def _commit_order_or_existing(
     return _serialize(order), True
 
 
-def _resolve_single_online_login(db: Session, user_id: str) -> str | None:
-    """恰好一个账号在线时返回它的 login，否则返回 None。
-
-    用于 CLOSE/MODIFY 未指定 mt5Login 的情况：bridge 账号本来就有兜底路由，
-    但 gateway 账号必须有明确 login 才能直接执行。
-    Returns the login when exactly one account is online, else None. Used when
-    CLOSE/MODIFY omit mt5Login: the bridge has its own fallback routing, but
-    gateway accounts need an explicit login to execute.
-    """
-    accounts = db.query(MT5Account).filter(MT5Account.user_id == user_id, not_removed()).all()
-    online = [a for a in accounts if is_account_online(a)]
-    return online[0].login if len(online) == 1 else None
-
-
 def _require_close_login(db: Session, user_id: str, requested: str | None) -> str | None:
     """给 CLOSE / MODIFY 解析目标账号；**只有在「多个账号在线」这一种解析不出来的
     情况下**当场 400，其余沿用原行为。

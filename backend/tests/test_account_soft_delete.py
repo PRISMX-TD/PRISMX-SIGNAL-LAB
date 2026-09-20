@@ -105,7 +105,7 @@ def test_gateway_unbind_is_soft_and_reverify_revives(db_session, monkeypatch):
         gateway_mod.unbind_gateway_account("601144", user=u, db=db_session)
 
     # 重新验证：走真实 gateway_verify，只桩掉 HTTP / re-verify through the real endpoint
-    rsp = SimpleNamespace(ok=True, valid=True, retcode="OK", login=601144, name="N", group="MCSA\I-STD-SLAB-USD",
+    rsp = SimpleNamespace(ok=True, valid=True, retcode="OK", login=601144, name="N", group=r"MCSA\I-STD-SLAB-USD",
                           leverage=100, balance=9.0, equity=9.0, last_pass_change=111, status=200,
                           error="", message="")
     monkeypatch.setattr(gateway_mod, "gw_verify", lambda login, pw: rsp)

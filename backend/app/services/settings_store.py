@@ -58,17 +58,76 @@ TRIAL_DEFAULTS: dict = {
 }
 
 _CACHE_TTL_SECONDS = 30
-_cache: dict = {}
-_cache_at: float = 0.0
 _lock = threading.Lock()
+
+
+class _TtlCache:
+    """一段设置的进程内 TTL 缓存。每个设置段（券商锁、定价、试用……）各持有一个实例。
+
+    以前每段都是一份手抄的「模块级 `_xxx_cache` + `_xxx_cache_at` + `global` +
+    `with _lock` + 比 TTL + `invalidate_xxx()`」——同一个模板抄了 12 遍，约 400 行。
+    加第 13 段要照抄 5 处，而漏抄 `invalidate` **不报错**，只表现为「后台改了设置 30 秒
+    不生效」，属于最难查的那种静默失败。收口成一个类之后，每段只剩一行声明。
+
+    锁是模块级共享的：这些段的读写都是几十字节的字典拷贝，锁内不做 I/O，分段加锁
+    没有可测量的收益。
+
+    One settings section's in-process TTL cache; each section (broker lock, pricing,
+    trial, …) owns one instance. Previously every section hand-copied the same
+    "module-level `_xxx_cache` + `_xxx_cache_at` + `global` + lock + TTL compare +
+    `invalidate_xxx()`" template — 12 copies, ~400 lines. Adding a 13th meant copying
+    five places, and forgetting `invalidate` raised nothing: the only symptom was an
+    admin change taking up to 30s to land. One class, one line per section.
+
+    The lock is shared module-wide on purpose: reads and writes here are dict copies
+    of a few dozen bytes with no I/O under the lock, so per-section locks would buy
+    nothing measurable.
+    """
+
+    def __init__(self) -> None:
+        self._data: dict = {}
+        self._at: float = 0.0
+
+    def get(self, db, loader) -> dict:
+        """命中且未过期就回缓存，否则用 `loader(db)` 回源并刷新。返回的是缓存本体，
+        调用方按需拷贝（各 get_* 都会 dict()/list() 一层再交出去）。
+        Return the cached dict if fresh, else reload via `loader(db)`. Returns the
+        cached object itself; callers copy as needed (every get_* does)."""
+        now = time.time()
+        with _lock:
+            if self._data and now - self._at < _CACHE_TTL_SECONDS:
+                return self._data
+        data = loader(db)
+        with _lock:
+            self._data = data
+            self._at = now
+        return data
+
+    def invalidate(self) -> None:
+        """管理员保存后调用，强制下次读取回源数据库。
+        Called after an admin save so the next read hits the DB."""
+        with _lock:
+            self._at = 0.0
+
+
+def set_setting(db, key: str, value) -> None:
+    """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
+    Write one setting (no commit; caller commits, then invalidates the cache)."""
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
+    encoded = json.dumps(value, ensure_ascii=False)
+    if row is None:
+        db.add(PlatformSetting(key=key, value=encoded))
+    else:
+        row.value = encoded
+
+
+_cache = _TtlCache()
 
 
 def invalidate_settings_cache() -> None:
     """管理员保存后调用，强制下次读取回源数据库。
     Called after an admin save so the next read hits the DB."""
-    global _cache_at
-    with _lock:
-        _cache_at = 0.0
+    _cache.invalidate()
 
 
 def _load_broker_from_db(db) -> dict:
@@ -112,41 +171,22 @@ def _load_pricing_from_db(db) -> dict:
 def get_broker_settings(db) -> dict:
     """读取合作券商设置（带缓存）。调用方传入现成的 db session。
     Read partner-broker settings (cached). Caller supplies its db session."""
-    global _cache, _cache_at
-    now = time.time()
-    with _lock:
-        if _cache and now - _cache_at < _CACHE_TTL_SECONDS:
-            return dict(_cache)
-    data = _load_broker_from_db(db)
-    with _lock:
-        _cache = data
-        _cache_at = now
+    data = _cache.get(db, _load_broker_from_db)
     return dict(data)
 
 
 # ---- 定价独立缓存（短 TTL，保证管理员改了后台几乎立即生效） ----
-_pricing_cache: dict = {}
-_pricing_cache_at: float = 0.0
+_pricing_cache = _TtlCache()
 
 
 def invalidate_pricing_cache() -> None:
-    global _pricing_cache_at
-    with _lock:
-        _pricing_cache_at = 0.0
+    _pricing_cache.invalidate()
 
 
 def get_pricing_settings(db) -> dict:
     """读取订阅定价设置（独立缓存，与券商设置分开）。
     Read subscription pricing settings (separate cache from broker settings)."""
-    global _pricing_cache, _pricing_cache_at
-    now = time.time()
-    with _lock:
-        if _pricing_cache and now - _pricing_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_pricing_cache)
-    data = _load_pricing_from_db(db)
-    with _lock:
-        _pricing_cache = data
-        _pricing_cache_at = now
+    data = _pricing_cache.get(db, _load_pricing_from_db)
     return dict(data)
 
 
@@ -155,23 +195,15 @@ def save_pricing_settings(db, data: dict) -> None:
     Write pricing settings (no commit; caller commits then invalidates cache)."""
     merged = _load_pricing_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "pricing").first()
-    if row is None:
-        db.add(PlatformSetting(key="pricing", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "pricing", merged)
 
 
 # ---- 免费试用独立缓存（与券商/定价设置分开） ----
-_trial_cache: dict = {}
-_trial_cache_at: float = 0.0
+_trial_cache = _TtlCache()
 
 
 def invalidate_trial_cache() -> None:
-    global _trial_cache_at
-    with _lock:
-        _trial_cache_at = 0.0
+    _trial_cache.invalidate()
 
 
 def _load_trial_from_db(db) -> dict:
@@ -193,15 +225,7 @@ def _load_trial_from_db(db) -> dict:
 def get_trial_settings(db) -> dict:
     """读取免费试用设置（独立缓存）。
     Read free-trial settings (separate cache)."""
-    global _trial_cache, _trial_cache_at
-    now = time.time()
-    with _lock:
-        if _trial_cache and now - _trial_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_trial_cache)
-    data = _load_trial_from_db(db)
-    with _lock:
-        _trial_cache = data
-        _trial_cache_at = now
+    data = _trial_cache.get(db, _load_trial_from_db)
     return dict(data)
 
 
@@ -210,26 +234,18 @@ def save_trial_settings(db, data: dict) -> None:
     Write free-trial settings (no commit; caller commits then invalidates cache)."""
     merged = _load_trial_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "trial").first()
-    if row is None:
-        db.add(PlatformSetting(key="trial", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "trial", merged)
 
 
 CANDLE_DEFAULTS: dict = {
     "m1_retention_days": 30,
 }
 
-_candle_cache: dict = {}
-_candle_cache_at: float = 0.0
+_candle_cache = _TtlCache()
 
 
 def invalidate_candle_cache() -> None:
-    global _candle_cache_at
-    with _lock:
-        _candle_cache_at = 0.0
+    _candle_cache.invalidate()
 
 
 def _load_candle_from_db(db) -> dict:
@@ -250,27 +266,14 @@ def _load_candle_from_db(db) -> dict:
 def get_candle_settings(db) -> dict:
     """读取 K 线历史保留策略设置（独立缓存）。
     Read candle-history retention settings (separate cache)."""
-    global _candle_cache, _candle_cache_at
-    now = time.time()
-    with _lock:
-        if _candle_cache and now - _candle_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_candle_cache)
-    data = _load_candle_from_db(db)
-    with _lock:
-        _candle_cache = data
-        _candle_cache_at = now
+    data = _candle_cache.get(db, _load_candle_from_db)
     return dict(data)
 
 
 def save_candle_settings(db, data: dict) -> None:
     merged = _load_candle_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "candle_history").first()
-    if row is None:
-        db.add(PlatformSetting(key="candle_history", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "candle_history", merged)
 
 
 # 胜率对外公开设置。`public_strategies` 是**白名单**，存的是 signals.indicator 里的
@@ -306,14 +309,11 @@ WINRATE_DEFAULTS: dict = {
     "public_strategies": [],
 }
 
-_winrate_settings_cache: dict = {}
-_winrate_settings_cache_at: float = 0.0
+_winrate_settings_cache = _TtlCache()
 
 
 def invalidate_winrate_settings_cache() -> None:
-    global _winrate_settings_cache_at
-    with _lock:
-        _winrate_settings_cache_at = 0.0
+    _winrate_settings_cache.invalidate()
 
 
 def _load_winrate_settings_from_db(db) -> dict:
@@ -343,27 +343,14 @@ def _load_winrate_settings_from_db(db) -> dict:
 def get_winrate_settings(db) -> dict:
     """读取胜率对外公开设置（独立缓存）。
     Read the win-rate publication settings (its own cache)."""
-    global _winrate_settings_cache, _winrate_settings_cache_at
-    now = time.time()
-    with _lock:
-        if _winrate_settings_cache and now - _winrate_settings_cache_at < _CACHE_TTL_SECONDS:
-            return {"public_strategies": list(_winrate_settings_cache["public_strategies"])}
-    data = _load_winrate_settings_from_db(db)
-    with _lock:
-        _winrate_settings_cache = data
-        _winrate_settings_cache_at = now
+    data = _winrate_settings_cache.get(db, _load_winrate_settings_from_db)
     return {"public_strategies": list(data["public_strategies"])}
 
 
 def save_winrate_settings(db, data: dict) -> None:
     merged = _load_winrate_settings_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "winrate").first()
-    if row is None:
-        db.add(PlatformSetting(key="winrate", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "winrate", merged)
 
 
 STRATEGY_DEFAULTS: dict = {
@@ -371,14 +358,11 @@ STRATEGY_DEFAULTS: dict = {
     "pro_only": True,
 }
 
-_strategy_settings_cache: dict = {}
-_strategy_settings_cache_at: float = 0.0
+_strategy_settings_cache = _TtlCache()
 
 
 def invalidate_strategy_settings_cache() -> None:
-    global _strategy_settings_cache_at
-    with _lock:
-        _strategy_settings_cache_at = 0.0
+    _strategy_settings_cache.invalidate()
 
 
 def _load_strategy_settings_from_db(db) -> dict:
@@ -400,27 +384,14 @@ def get_strategy_settings(db) -> dict:
     """读取自定义策略平台参数（每用户策略数上限、是否 PRO 专属，独立缓存）。
     Read the custom-strategy platform settings (max strategies per user,
     PRO-exclusive flag; separate cache)."""
-    global _strategy_settings_cache, _strategy_settings_cache_at
-    now = time.time()
-    with _lock:
-        if _strategy_settings_cache and now - _strategy_settings_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_strategy_settings_cache)
-    data = _load_strategy_settings_from_db(db)
-    with _lock:
-        _strategy_settings_cache = data
-        _strategy_settings_cache_at = now
+    data = _strategy_settings_cache.get(db, _load_strategy_settings_from_db)
     return dict(data)
 
 
 def save_strategy_settings(db, data: dict) -> None:
     merged = _load_strategy_settings_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "strategy").first()
-    if row is None:
-        db.add(PlatformSetting(key="strategy", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "strategy", merged)
 
 
 # 交易成本默认值。点差/滑点为价格单位；手续费为「一手往返合计、折算到价格
@@ -439,14 +410,11 @@ STRATEGY_COST_DEFAULTS: dict = {
     "per_symbol": {},
 }
 
-_strategy_costs_cache: dict = {}
-_strategy_costs_cache_at: float = 0.0
+_strategy_costs_cache = _TtlCache()
 
 
 def invalidate_strategy_costs_cache() -> None:
-    global _strategy_costs_cache_at
-    with _lock:
-        _strategy_costs_cache_at = 0.0
+    _strategy_costs_cache.invalidate()
 
 
 def _load_strategy_costs_from_db(db) -> dict:
@@ -470,27 +438,14 @@ def get_strategy_costs(db) -> dict:
     """读取按品种的交易成本配置（独立缓存，与其他设置段互不影响）。
     Read the per-symbol trading-cost config (its own cache, independent of the
     other settings sections)."""
-    global _strategy_costs_cache, _strategy_costs_cache_at
-    now = time.time()
-    with _lock:
-        if _strategy_costs_cache and now - _strategy_costs_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_strategy_costs_cache)
-    data = _load_strategy_costs_from_db(db)
-    with _lock:
-        _strategy_costs_cache = data
-        _strategy_costs_cache_at = now
+    data = _strategy_costs_cache.get(db, _load_strategy_costs_from_db)
     return dict(data)
 
 
 def save_strategy_costs(db, data: dict) -> None:
     merged = _load_strategy_costs_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "strategy_costs").first()
-    if row is None:
-        db.add(PlatformSetting(key="strategy_costs", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "strategy_costs", merged)
 
 
 
@@ -523,14 +478,11 @@ PLATFORM_STRATEGY_DEFAULTS: dict = {
     "items": [],
 }
 
-_platform_strategies_cache: dict = {}
-_platform_strategies_cache_at: float = 0.0
+_platform_strategies_cache = _TtlCache()
 
 
 def invalidate_platform_strategies_cache() -> None:
-    global _platform_strategies_cache_at
-    with _lock:
-        _platform_strategies_cache_at = 0.0
+    _platform_strategies_cache.invalidate()
 
 
 def _load_platform_strategies_from_db(db) -> dict:
@@ -549,15 +501,7 @@ def _load_platform_strategies_from_db(db) -> dict:
 def get_platform_strategies(db) -> dict:
     """读取平台策略介绍清单（独立缓存）。
     Read the platform strategy write-ups (its own cache)."""
-    global _platform_strategies_cache, _platform_strategies_cache_at
-    now = time.time()
-    with _lock:
-        if _platform_strategies_cache and now - _platform_strategies_cache_at < _CACHE_TTL_SECONDS:
-            return {"items": list(_platform_strategies_cache["items"])}
-    data = _load_platform_strategies_from_db(db)
-    with _lock:
-        _platform_strategies_cache = data
-        _platform_strategies_cache_at = now
+    data = _platform_strategies_cache.get(db, _load_platform_strategies_from_db)
     return {"items": list(data["items"])}
 
 
@@ -565,12 +509,7 @@ def save_platform_strategies(db, items: list) -> None:
     """整表覆盖保存：管理员编辑的是完整清单（含排序），逐项 merge 无意义。
     Whole-list replace: the admin edits the complete ordered list, so merging
     item by item would be meaningless."""
-    encoded = json.dumps({"items": items}, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "platform_strategies").first()
-    if row is None:
-        db.add(PlatformSetting(key="platform_strategies", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "platform_strategies", {"items": items})
 
 
 # ---------- 官方社交主页 / official social links ----------
@@ -590,14 +529,11 @@ SOCIAL_DEFAULTS: dict = {
     "telegram_url": "",
 }
 
-_social_cache: dict = {}
-_social_cache_at: float = 0.0
+_social_cache = _TtlCache()
 
 
 def invalidate_social_cache() -> None:
-    global _social_cache_at
-    with _lock:
-        _social_cache_at = 0.0
+    _social_cache.invalidate()
 
 
 def _load_social_from_db(db) -> dict:
@@ -640,15 +576,7 @@ def _load_social_from_db(db) -> dict:
 def get_social_settings(db) -> dict:
     """读取官方社交主页地址（独立缓存）。
     Read the official social links (its own cache)."""
-    global _social_cache, _social_cache_at
-    now = time.time()
-    with _lock:
-        if _social_cache and now - _social_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_social_cache)
-    data = _load_social_from_db(db)
-    with _lock:
-        _social_cache = data
-        _social_cache_at = now
+    data = _social_cache.get(db, _load_social_from_db)
     return dict(data)
 
 
@@ -657,23 +585,7 @@ def save_social_settings(db, data: dict) -> None:
     Write the social links (no commit; caller commits then invalidates)."""
     merged = _load_social_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "social").first()
-    if row is None:
-        db.add(PlatformSetting(key="social", value=encoded))
-    else:
-        row.value = encoded
-
-
-def set_setting(db, key: str, value) -> None:
-    """写入单个设置项（不提交事务，调用方负责 commit 后再 invalidate）。
-    Write one setting (no commit; caller commits, then invalidates the cache)."""
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == key).first()
-    encoded = json.dumps(value, ensure_ascii=False)
-    if row is None:
-        db.add(PlatformSetting(key=key, value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "social", merged)
 
 
 def server_matches_broker(server: str | None, patterns: list) -> bool:
@@ -808,14 +720,11 @@ ACCOUNT_TYPE_DEFAULTS: dict = {
     ],
 }
 
-_account_type_cache: dict = {}
-_account_type_cache_at: float = 0.0
+_account_type_cache = _TtlCache()
 
 
 def invalidate_account_type_cache() -> None:
-    global _account_type_cache_at
-    with _lock:
-        _account_type_cache_at = 0.0
+    _account_type_cache.invalidate()
 
 
 def _load_account_type_from_db(db) -> dict:
@@ -836,27 +745,14 @@ def _load_account_type_from_db(db) -> dict:
 def get_account_type_settings(db) -> dict:
     """读取组名 -> 账户类型的前缀映射（独立缓存）。
     Read the group-prefix -> account-type mapping (its own cache)."""
-    global _account_type_cache, _account_type_cache_at
-    now = time.time()
-    with _lock:
-        if _account_type_cache and now - _account_type_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_account_type_cache)
-    data = _load_account_type_from_db(db)
-    with _lock:
-        _account_type_cache = data
-        _account_type_cache_at = now
+    data = _account_type_cache.get(db, _load_account_type_from_db)
     return dict(data)
 
 
 def save_account_type_settings(db, data: dict) -> None:
     merged = _load_account_type_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "account_type").first()
-    if row is None:
-        db.add(PlatformSetting(key="account_type", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "account_type", merged)
     invalidate_account_type_cache()
 
 
@@ -899,14 +795,11 @@ GAMIFICATION_DEFAULTS: dict = {
     "winrate_require_profit": False,
 }
 
-_gamification_cache: dict = {}
-_gamification_cache_at: float = 0.0
+_gamification_cache = _TtlCache()
 
 
 def invalidate_gamification_cache() -> None:
-    global _gamification_cache_at
-    with _lock:
-        _gamification_cache_at = 0.0
+    _gamification_cache.invalidate()
 
 
 def _load_gamification_from_db(db) -> dict:
@@ -970,15 +863,7 @@ def _load_gamification_from_db(db) -> dict:
 def get_gamification_settings(db) -> dict:
     """读取游戏化设置（独立缓存）。
     Read gamification settings (separate cache)."""
-    global _gamification_cache, _gamification_cache_at
-    now = time.time()
-    with _lock:
-        if _gamification_cache and now - _gamification_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_gamification_cache)
-    data = _load_gamification_from_db(db)
-    with _lock:
-        _gamification_cache = data
-        _gamification_cache_at = now
+    data = _gamification_cache.get(db, _load_gamification_from_db)
     return dict(data)
 
 
@@ -987,12 +872,7 @@ def save_gamification_settings(db, data: dict) -> None:
     Write gamification settings (no commit; caller commits then invalidates cache)."""
     merged = _load_gamification_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "gamification").first()
-    if row is None:
-        db.add(PlatformSetting(key="gamification", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "gamification", merged)
 
 
 # 一次性邮箱闸门默认值。DB 无记录时使用，管理员在后台修改后写入
@@ -1016,14 +896,11 @@ EMAIL_GATE_DEFAULTS: dict = {
     "extra_allowed_domains": [],
 }
 
-_email_gate_cache: dict = {}
-_email_gate_cache_at: float = 0.0
+_email_gate_cache = _TtlCache()
 
 
 def invalidate_email_gate_cache() -> None:
-    global _email_gate_cache_at
-    with _lock:
-        _email_gate_cache_at = 0.0
+    _email_gate_cache.invalidate()
 
 
 def _load_email_gate_from_db(db) -> dict:
@@ -1053,15 +930,7 @@ def _load_email_gate_from_db(db) -> dict:
 def get_email_gate_settings(db) -> dict:
     """读取一次性邮箱闸门设置（独立缓存）。
     Read the disposable-email gate settings (separate cache)."""
-    global _email_gate_cache, _email_gate_cache_at
-    now = time.time()
-    with _lock:
-        if _email_gate_cache and now - _email_gate_cache_at < _CACHE_TTL_SECONDS:
-            return dict(_email_gate_cache)
-    data = _load_email_gate_from_db(db)
-    with _lock:
-        _email_gate_cache = data
-        _email_gate_cache_at = now
+    data = _email_gate_cache.get(db, _load_email_gate_from_db)
     return dict(data)
 
 
@@ -1071,9 +940,4 @@ def save_email_gate_settings(db, data: dict) -> None:
     invalidates cache)."""
     merged = _load_email_gate_from_db(db)
     merged.update(data)
-    encoded = json.dumps(merged, ensure_ascii=False)
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == "email_gate").first()
-    if row is None:
-        db.add(PlatformSetting(key="email_gate", value=encoded))
-    else:
-        row.value = encoded
+    set_setting(db, "email_gate", merged)

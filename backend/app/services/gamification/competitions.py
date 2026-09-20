@@ -631,14 +631,23 @@ def settle_competition(db, comp: Competition, admin_id: str,
     settled_comps = (db.query(Competition)
                         .filter(Competition.status == "settled")
                         .order_by(Competition.starts_at.asc()).all())
+    # 冠军一次查完：以前是对每场比赛单独发一次 .first()，比赛场次只增不减，
+    # 结算耗时随历史线性变长。final_rank == 1 每场至多一人（final_rank 唯一），
+    # 所以按 competition_id 建字典不会互相覆盖；没有冠军的场次在字典里缺席，
+    # 下面 .get() 读出 None，与原先的语义一致。
+    # Fetch every champion in one query: this used to issue one .first() per
+    # settled competition, and the count only grows, so settlement got slower
+    # with every season. final_rank == 1 holds at most one row per competition,
+    # so keying by competition_id cannot collide; competitions without a
+    # champion are simply absent and .get() below yields None as before.
     winner_by_comp: dict[str, str | None] = {}
-    for c in settled_comps:
-        row = (db.query(CompetitionParticipant.user_id)
-                 .filter(CompetitionParticipant.competition_id == c.id,
-                         CompetitionParticipant.final_rank == 1).first())
-        winner_by_comp[c.id] = row[0] if row else None
+    if settled_comps:
+        rows = (db.query(CompetitionParticipant.competition_id, CompetitionParticipant.user_id)
+                  .filter(CompetitionParticipant.competition_id.in_([c.id for c in settled_comps]),
+                          CompetitionParticipant.final_rank == 1).all())
+        winner_by_comp = {comp_id: uid for comp_id, uid in rows}
     for prev, cur in zip(settled_comps, settled_comps[1:]):
-        w_prev, w_cur = winner_by_comp[prev.id], winner_by_comp[cur.id]
+        w_prev, w_cur = winner_by_comp.get(prev.id), winner_by_comp.get(cur.id)
         if w_prev is not None and w_prev == w_cur:
             _award(w_cur, "comp_back_to_back")
 

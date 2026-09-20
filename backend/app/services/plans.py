@@ -21,8 +21,6 @@ automatically in database._migrate_columns: BETA→PRO, PLUS→PRO, PARTNER→PR
 
 from datetime import datetime, timedelta, timezone
 
-PLANS = ("FREE", "PRO")
-
 # 每个付费套餐买到的天数。放在这里而不是 routers/payments.py：除了下单与入账，
 # 「这笔付费到今天还在不在有效期内」也要用它（代理降级前的付费保护，见
 # routers/invite.py），而那是另一个 router——router 之间互相 import 正是

@@ -98,7 +98,14 @@ class BackgroundLoops:
             try:
                 shared_state.release_lock(LOCK_NAME, owner=self._owner)
             except Exception:
-                pass
+                # 释放失败不阻断关停（锁有 TTL 兜底，最坏是别的 worker 晚 15 秒接手），
+                # 但必须留痕：以前这里是裸 pass，多 worker 下选主链路出问题时连一条
+                # 日志都没有，事后完全无从排查。
+                # Never block shutdown on this (the lock's TTL guarantees another
+                # worker takes over within 15s at worst), but do leave a trace: this
+                # used to be a bare pass, so a faulty leader-lock path on a
+                # multi-worker deployment left nothing to investigate afterwards.
+                logger.warning("leader lock release failed for %s", LOCK_NAME, exc_info=True)
         self.cancel_all()
 
     @property

@@ -585,6 +585,16 @@ def _poll_db_work(
     )
     commands = []
     voided: list[Order] = []
+    # 关联信号一次查完再进循环。这条路径挂在桥接 1.5 秒轮询后面，是全站最热的
+    # 循环之一；以前对每个待下发订单单独 .first() 一次 Signal，N 单 N 次往返。
+    # Prefetch the linked signals before the loop. This sits behind the bridge's
+    # 1.5s poll — one of the hottest loops in the service — and used to issue one
+    # Signal .first() per pending order, N round trips for N orders.
+    signal_ids = {o.signal_id for o in pending if o.signal_id}
+    signal_by_id: dict[str, Signal] = (
+        {sig.id: sig for sig in db.query(Signal).filter(Signal.id.in_(signal_ids)).all()}
+        if signal_ids else {}
+    )
     for o in pending:
         # 跳过 gateway 账号的订单（已由 orders.py 实时执行）
         if o.mt5_login and o.mt5_login in gateway_logins:
@@ -641,7 +651,7 @@ def _poll_db_work(
             continue
         entry = stop_loss = take_profit = 0.0
         if o.signal_id:
-            sig = db.query(Signal).filter(Signal.id == o.signal_id).first()
+            sig = signal_by_id.get(o.signal_id)
             if sig:
                 entry = sig.entry or 0.0
                 stop_loss = sig.stop_loss or 0.0
