@@ -9,7 +9,7 @@ JSON 连合法都不是（裸 `NaN` 不是 JSON），而且随桶累加不会自
 **密码为什么按字节。** bcrypt 只看前 72 字节（core/security._to_72），后面的被静默
 丢弃：两个只在第 73 字节之后不同的密码在登录时是同一个密码。原来的 max_length=128
 按字符算，而一个汉字在 UTF-8 里占 3 字节——24 个汉字就到顶，用户以为「更长更安全」
-其实后面全白打。设置密码的入口（注册 / 重置）按字节卡住并明确告知；登录侧刻意不
+其实后面全白打。设置密码的三个入口（注册 / 重置 / 账户设置里的改密码）按字节卡住并明确告知；登录侧刻意不
 收紧，否则存量里密码超过 72 字节的用户会被直接挡在门外。
 
 Input bounds: non-numeric floats (NaN / Inf) and the real password length cap.
@@ -121,6 +121,26 @@ def test_reset_uses_the_same_rule_as_registration():
     with pytest.raises(ValidationError):
         ResetPasswordRequest(token="t" * 20, password="a" * (MAX_PASSWORD_BYTES + 1))
     assert ResetPasswordRequest(token="t" * 20, password="a" * MAX_PASSWORD_BYTES)
+
+
+def test_change_password_uses_the_same_rule_as_registration():
+    """账户设置里的改密码是第三个设密码的入口，规则必须与另外两个一致。
+
+    这个入口曾经只有 max_length=128（按字符），于是同一个 25 个汉字的密码在注册
+    时被明确拒绝、在这里被接受——而接受之后 bcrypt 只存前 24 个字，用户下次登录
+    时输入完整密码反而登得进去（前 72 字节相同），根本察觉不到自己设的密码被截过。
+    The third set-a-password entry point, previously capped by characters only:
+    the same 25-character CJK password was rejected at signup and accepted here,
+    silently truncated to its first 72 bytes.
+    """
+    from app.routers.account import ChangePasswordRequest
+
+    with pytest.raises(ValidationError) as err:
+        ChangePasswordRequest(new_password="a" * (MAX_PASSWORD_BYTES + 1))
+    assert "字节" in str(err.value) and "bytes" in str(err.value)
+    with pytest.raises(ValidationError):
+        ChangePasswordRequest(new_password="密" * 25)
+    assert ChangePasswordRequest(new_password="密" * 24).new_password == "密" * 24
 
 
 def test_login_is_deliberately_not_tightened():

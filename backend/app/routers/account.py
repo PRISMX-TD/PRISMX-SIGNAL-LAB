@@ -12,7 +12,13 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models import MT5Account, User, UserPref, UserTask
-from app.schemas import PhoneRequest, ProfilePatchIn, UserOut
+# _validate_password_bytes 是 schemas 的模块私有名，这里刻意跨模块引用它：这条
+# 规则（bcrypt 的 72 字节上限）在全站只能有一份实现，为了"不引用私有名"而在这里
+# 抄一份，就是三个设密码入口各自漂移的开始。
+# Deliberately importing schemas' module-private validator: the 72-byte bcrypt
+# rule must exist exactly once. Re-implementing it here to avoid touching an
+# underscore name is how the three set-password entry points drift apart.
+from app.schemas import PhoneRequest, ProfilePatchIn, UserOut, _validate_password_bytes
 from app.services.gamification.conditions import LEVEL_TITLES, level_of
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
@@ -321,8 +327,24 @@ def set_phone(
 
 class ChangePasswordRequest(BaseModel):
     old_password: str | None = Field(None, description="旧密码（首次设置密码时可为空）")
-    # 与注册的密码规则保持一致（≥8 位）/ same rule as registration (≥8 chars)
+    # 与注册/重置的密码规则保持一致：≥8 字符，且按 **UTF-8 字节** ≤72。
+    # 这是全站第三个"设密码"的入口，另外两个（RegisterRequest / ResetPasswordRequest）
+    # 早就按字节卡了。三处口径必须一样，否则用户会撞上"注册时能用的密码，改密码时
+    # 被拒"这种自相矛盾。max_length=128 保留着当第一道粗筛（字符数），真正的上限是
+    # 下面的字节校验——bcrypt 只取前 72 字节，超出部分**静默丢弃**：用户以为自己设了
+    # 一个 30 个汉字的强密码，实际生效的只有前 24 个，剩下的敲了等于没敲。
+    # Same rule as registration and reset: >= 8 characters and <= 72 *UTF-8 bytes*.
+    # This is the third place a password gets set and the last one still counting
+    # characters only; all three must agree or a password accepted at signup gets
+    # rejected here. max_length stays as a cheap first pass — the real cap is the
+    # byte check below, because bcrypt reads only the first 72 bytes and silently
+    # drops the rest (a 30-character CJK password is really its first 24).
     new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_within_bcrypt_limit(cls, v: str) -> str:
+        return _validate_password_bytes(v)
 
 
 @router.post("/password")

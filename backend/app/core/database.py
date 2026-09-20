@@ -144,7 +144,13 @@ def _hash_legacy_api_tokens() -> None:
 #          按 information_schema 判断当前类型做到幂等。
 #          ⚠ int4→int8 会重写整表并持 ACCESS EXCLUSIVE 锁，而迁移跑在 uvicorn bind
 #          端口之前：停机时间随 orders / closed_trades 行数增长，上线前务必先量。
-CURRENT_SCHEMA_REV = 25
+# rev 26 — users.disabled_at + users.disabled_reason（管理员停用账号）。两列都可空、
+#          **不回填**：NULL 就是「没被停用」，正是存量用户该有的状态。纯 ADD COLUMN，
+#          不重写表，所以这次迁移不产生可感知的停机。
+#          停用是闸门不是等级：plan=FREE 仍然能登录能下单，所以不能拿 plan 当封禁用
+#          （否则每一处 `if plan == "FREE"` 都会跟着变味）。判定点在
+#          services/deps.get_current_user，停用后所有需要登录的接口一律 403。
+CURRENT_SCHEMA_REV = 26
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -725,6 +731,13 @@ def _migrate_columns() -> None:
             "public_id": "VARCHAR(16)",
             "stats_public": "BOOLEAN",
             "nickname_key": "VARCHAR",
+            # rev 26：管理员停用账号。两列都可空且**不回填**——NULL 就是「没被停用」，
+            # 这正是存量用户应有的状态，不需要猜也不需要写。
+            # rev 26: admin account disabling. Both nullable and deliberately not
+            # back-filled — NULL already means "not disabled", which is correct for
+            # every existing row.
+            "disabled_at": datetime_type,
+            "disabled_reason": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():

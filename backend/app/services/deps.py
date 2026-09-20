@@ -103,6 +103,40 @@ def get_current_user(
     if token_tv != (user.token_version or 0):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="会话已失效，请重新登录 / Session invalidated, please log in again")
 
+    # 账号停用闸门：判定放在这里，于是**每一个**需要登录的接口都跟着拒绝，而不是
+    # 只挡登录入口。停用要立刻生效，而本站 JWT 有效期 30 天——只挡登录的话，封号
+    # 对一个已经登录着的人在一个月内毫无作用。停用时同步自增 token_version（见
+    # routers/admin.disable_user），这里的 tv 校验因此也会把旧 token 一并挡掉；
+    # 两道判断是有意重复的：tv 那道让 WebSocket 重连等不经过本函数的入口也失效，
+    # 本道保证「原因」能原样告诉用户，也保证清空 disabled_at 就能干净恢复。
+    #
+    # 用 403 不用 401：401 的语义是「你没证明你是谁」，前端据此清 token 跳登录页，
+    # 用户会以为掉线了、再登一次、再被踢——循环里没人看得到理由。403 是「你是谁我
+    # 知道，但不给你用」，理由随 detail 一起呈现。
+    #
+    # 放在 tv 校验之后、_touch_last_active 之前：被停用的人不该再被计进 DAU 与
+    # user_active_days，否则运营看到的活跃数里混着一批根本进不来的账号。
+    #
+    # The disabled-account gate. Deciding it here makes *every* authenticated
+    # endpoint refuse, not just the login route — tokens here live 30 days, so a
+    # login-only check would leave a banned user fully operational for a month.
+    # Disabling also bumps token_version, so the check above catches the old
+    # tokens too; the duplication is intentional (that one also covers entry
+    # points which never call this function, like a WebSocket reconnect, while
+    # this one carries the reason back to the user and makes clearing the column
+    # a clean restore). 403, not 401: 401 means "you didn't prove who you are",
+    # which makes the frontend drop the token and bounce to the login page, so
+    # the user re-logs in, gets kicked again, and never sees why. Placed before
+    # _touch_last_active so a disabled account stops counting towards DAU.
+    if user.disabled_at is not None:
+        reason = (user.disabled_reason or "").strip()
+        detail = (
+            f"账号已被停用：{reason} / This account has been disabled: {reason}"
+            if reason
+            else "账号已被停用，如有疑问请联系客服 / This account has been disabled — please contact support"
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
     # 会员到期即时生效：本人任一带凭证请求都会自愈等级——到期后第一次请求就把
     # plan 落库改回 FREE，之后所有 is_realtime_plan(user.plan) 等判断自然看到 FREE。
     # 不发请求、但仍被 WS 广播/推送直接按 DB plan 命中的在线用户，由后台

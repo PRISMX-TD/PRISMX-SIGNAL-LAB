@@ -6,7 +6,14 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.rate_limit import clear_failed_logins, is_login_locked, limiter, record_failed_login
+from app.core.rate_limit import (
+    clear_failed_logins,
+    is_login_locked,
+    limiter,
+    login_source,
+    record_failed_login,
+    remember_login_source,
+)
 from app.core.security import (
     create_access_token,
     generate_api_token,
@@ -243,20 +250,26 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
 def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     """用户登录 / User login."""
     email = req.email.lower()
-    if is_login_locked(email):
-        # 单个账号在短时间内失败次数过多：即使攻击者轮换 IP 绕过按 IP 限流，
-        # 也无法继续对这一个账号撞库。
-        # Too many failed attempts for this one account recently: blocks
-        # credential-stuffing against a single account even if the attacker
-        # rotates IPs to dodge the per-IP limiter above.
+    # 锁定按「账号 + 来源」算，不是只按账号——只按账号的话，知道你邮箱的人从他
+    # 自己的网络连错几次就能把你锁在门外（完整取舍见 core/rate_limit.py 的说明）。
+    # Lockout is keyed by (account, source), not by account alone: keyed by
+    # account, anyone who knows your address can lock you out from their own
+    # network. Full rationale in core/rate_limit.py.
+    source = login_source(request)
+    if is_login_locked(email, source):
         raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试 / Too many login attempts, please try again later")
 
     user = db.query(User).filter(User.email == email).first()
     if not user or not verify_password(req.password, user.password_hash):
-        record_failed_login(email)
+        record_failed_login(email, source)
         raise HTTPException(status_code=401, detail="邮箱或密码错误 / Invalid email or password")
 
-    clear_failed_logins(email)
+    clear_failed_logins(email, source)
+    # 登录成功即认下这个来源：之后本人从这里再登录，走的是宽松得多的那条阈值，
+    # 攻击者从别处怎么试都动不到它。/ A successful login marks this source as
+    # familiar, so the owner's later attempts from here ride the loose threshold
+    # and nothing an attacker does elsewhere can touch it.
+    remember_login_source(email, source)
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
 
@@ -342,8 +355,8 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
     找回密码的场景里，"别人可能正拿着我的旧 token"是主要担心的事之一，只改密码
     不动版本号的话那些会话会继续有效。
 
-    顺手清掉这个邮箱的登录失败计数：被撞库锁了 15 分钟的人来重置密码，改完还
-    登不进去会以为没改成功。
+    顺手清掉这个邮箱在**当前来源**上的登录失败计数：被锁了几分钟的人来重置密码，
+    改完还登不进去会以为没改成功。
 
     Deliberately does not sign the user in: reset links get forwarded, sit in
     browser history, and are pre-fetched by corporate mail gateways, so turning
@@ -365,5 +378,12 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
     user.password_hash = hash_password(req.password)
     user.token_version = (user.token_version or 0) + 1
     db.commit()
-    clear_failed_logins(user.email)
+    # 只清「这个账号 + 发起重置的这个来源」那一条计数：锁定本来就是按来源分开算
+    # 的，被锁住的正是用户此刻所在的这个来源（他就是在这里试错才被锁的），清它
+    # 就够。从别的网络重置则不影响那边——那边也没有人被锁。
+    # Clears the counter for this account *on the source doing the reset*: the
+    # lockout is per source to begin with, and the locked one is the source the
+    # user is sitting on right now (it is where they mistyped). A reset from
+    # another network leaves that network alone, where nothing is locked either.
+    clear_failed_logins(user.email, login_source(request))
     return MessageOut(message="密码已重置，请用新密码登录 / Password updated — please sign in with it")

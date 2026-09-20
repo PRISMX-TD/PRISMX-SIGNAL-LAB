@@ -20,7 +20,8 @@ LOGIN_PATTERN = r"^[0-9]{1,20}$"
 # 在登录时完全等价。原来只有 max_length=128（按字符算），而 UTF-8 下一个汉字占
 # 3 字节 —— 24 个汉字就到顶，用户以为"密码越长越安全"，其实后面全白打。
 #
-# 只在**设置密码**的入口卡（注册、重置），登录的 AuthRequest 保持 128 字符不动：
+# 只在**设置密码**的入口卡（注册、重置，以及账户设置里的改密码——见
+# routers/account.ChangePasswordRequest），登录的 AuthRequest 保持 128 字符不动：
 # 存量里可能已经有超过 72 字节的密码，在登录侧收紧会把这些人直接挡在门外，而
 # bcrypt 本来就能用前 72 字节验通他们。
 #
@@ -115,8 +116,8 @@ class ResetPasswordRequest(BaseModel):
     """用邮件里的令牌设置新密码。
 
     密码规则与 `RegisterRequest` 保持一致（8 字符起、≤72 字节）。不在这里加复杂度
-    规则——全站只有注册和这里两个设密码的入口，两处规则必须一样，否则用户会遇到
-    "注册时能用的密码，重置时被拒"。
+    规则——全站设密码的入口只有三个（注册、这里、账户设置里的改密码），三处规则
+    必须一样，否则用户会遇到"注册时能用的密码，重置时被拒"。
 
     登录的 `AuthRequest` 刻意更松（仍是 128 字符）：那边不是在设密码，收紧只会把
     存量里密码超过 72 字节的用户挡在门外。/ Deliberately looser on the login side.
@@ -228,6 +229,24 @@ class AdminUserOut(BaseModel):
     createdAt: datetime | None = None
     lastActiveAt: datetime | None = None
     mt5AccountCount: int = 0
+    # 停用状态。null = 正常；有值 = 已被停用，该账号的所有接口都在返回 403。
+    # 与 plan 无关（停用是闸门、plan 是等级，见 models 里 disabled_at 的说明），
+    # 所以列表里必须**单独**看得见——只看 plan 的话，一个被封的 PRO 和一个正常的
+    # PRO 在管理端长得一模一样。
+    # Disabled state; null = normal. Independent of plan (a gate, not a tier —
+    # see disabled_at in models), so it has to be visible on its own: judged by
+    # plan alone, a banned PRO and an active PRO look identical in the console.
+    disabledAt: datetime | None = None
+    disabledReason: str | None = None
+
+
+class AdminUserDisableIn(BaseModel):
+    """停用某账号。原因会**原样展示给被停用的用户**（见 deps.get_current_user），
+    所以别写内部黑话；留空则用一句通用文案。
+    Disabling an account. The reason is echoed verbatim to the user, so keep it
+    presentable; empty falls back to a generic sentence."""
+
+    reason: str | None = Field(default=None, max_length=256)
 
 
 class AdminUserUpdate(BaseModel):

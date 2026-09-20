@@ -65,7 +65,7 @@ def test_login_and_email_namespaces_do_not_collide():
         rate_limit.record_failed_mt5_verify("500123")
 
     assert rate_limit.is_mt5_verify_locked("500123")
-    assert not rate_limit.is_login_locked("500123")
+    assert not rate_limit.is_login_locked("500123", "src1")
 
 
 def test_success_clears_the_counter():

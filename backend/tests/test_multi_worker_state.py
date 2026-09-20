@@ -50,11 +50,12 @@ def test_lockout_shared_across_workers(redis_on):
 
 
 def test_lockout_entry_expires_after_quiet_spell(redis_off, monkeypatch):
-    rate_limit.record_failed_login("a@t.co")
+    rate_limit.record_failed_login("a@t.co", "src1")
     _max, lockout = rate_limit._POLICIES["login"]
     real = time.time
     monkeypatch.setattr(time, "time", lambda: real() + lockout + 2)
-    assert rate_limit._read("login", "a@t.co") is None    # 阈值以下的计数安静一段时间后归零
+    # 阈值以下的计数安静一段时间后归零（键按「账号|来源」算，见 rate_limit 的说明）
+    assert rate_limit._read("login", "a@t.co|src1") is None
 
 
 # ---- 回测闸门 / backtest gate -------------------------------------------------

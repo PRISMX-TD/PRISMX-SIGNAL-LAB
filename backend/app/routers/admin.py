@@ -12,7 +12,7 @@ field, from what, to what, when), so once more than one person has admin
 access there's a record to check against.
 """
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Path, Query, Request, UploadFile
 from sqlalchemy import func, or_
@@ -24,7 +24,7 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
-from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.admin_overview import build_overview, potential_customers as build_potential_customers
@@ -108,6 +108,8 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
         createdAt=u.created_at,
         lastActiveAt=u.last_active_at,
         mt5AccountCount=account_count,
+        disabledAt=u.disabled_at,
+        disabledReason=u.disabled_reason,
     )
 
 
@@ -293,6 +295,141 @@ def update_user(
         _log_change(db, admin.id, target.id, "plan_note", target.plan_note, fields["planNote"])
         target.plan_note = fields["planNote"]
 
+    db.commit()
+    db.refresh(target)
+
+    account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
+    return _user_out(target, account_count)
+
+
+# ---------- 账号停用 / account disable ----------
+#
+# 停用是**闸门**，与 plan（等级）分开——为什么分开见 models 里 disabled_at 的注释。
+# 这两个端点只动 disabled_at / disabled_reason / token_version 三样，绝不碰 plan、
+# 不碰到期时间、不删任何数据：恢复时把两列清掉，这个人的历史、归因、成绩原样还在。
+#
+# Disabling is a gate, not a tier (see disabled_at in models). These two endpoints
+# touch only disabled_at / disabled_reason / token_version — never plan, never the
+# expiry, and they delete nothing, so enabling restores the account intact.
+
+
+def _audit_disable_state(user: User) -> str:
+    """把停用状态序列化成审计行里的一个值 / the disable state as one audit value."""
+    return json.dumps(
+        {
+            "disabledAt": user.disabled_at.isoformat() if user.disabled_at else None,
+            "reason": user.disabled_reason,
+        },
+        ensure_ascii=False,
+    )
+
+
+def _require_disable_target(db: Session, admin: User, user_id: str) -> User:
+    """取出可停用的目标用户，否则抛错（只用于停用，恢复那侧刻意不套这两条）。
+
+    两条硬规则：
+    ① 不能停用自己——手滑一次就是把自己锁在门外，而解锁的入口正好也在门里面；
+    ② 不能停用其他管理员。管理员之间互停是一条能把**所有人**关在外面的路径
+       （两人互停，或一人把其余管理员全停掉），而这张表没有任何后台之外的恢复
+       入口，真锁死了只能上服务器改库。管理员不该被停用，该被降权：先把 role
+       改成 user（PATCH /users/{id}），再停用——多的这一步是有意的，它让"封掉
+       一个同事"成为一个需要明确两步的决定，而不是一次误点。
+
+    Two hard rules: an admin can't disable themselves (one slip locks you out of
+    the only console that could undo it), and can't disable another admin (mutual
+    or sweeping disables can lock *everyone* out, with no recovery path short of
+    editing the database by hand). Demote first (PATCH role -> user), then
+    disable; the extra step is deliberate — banning a colleague should be a
+    decision, not a misclick.
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    if target.id == admin.id:
+        raise HTTPException(status_code=400, detail="不能停用自己 / You cannot disable your own account")
+    if target.role == "admin":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "不能停用管理员账号，请先把角色改为普通用户 / "
+                "Admin accounts cannot be disabled — change the role to user first"
+            ),
+        )
+    return target
+
+
+@router.post("/users/{user_id}/disable", response_model=AdminUserOut)
+def disable_user(
+    user_id: str,
+    body: AdminUserDisableIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """停用某账号：立刻失效其全部会话，之后所有需要登录的接口都返回 403 并带上原因。
+
+    token_version 同步自增，与改密码同一处理：停用只写 disabled_at 的话，这个人手里
+    那张有效期 30 天的 token 仍然能通过滑动续期一直换新，封号要等到他自己退出登录
+    才生效。自增之后旧 token 全部作废，连不经过 get_current_user 的入口（WebSocket
+    建连只校验 tv）也一并断掉。
+
+    重复停用一个已停用的账号不报错，按"改原因"处理（审计里看得到旧原因）。
+
+    Disable an account: every existing session dies immediately and every
+    authenticated endpoint then returns 403 with the reason. token_version is
+    bumped exactly as on a password change — writing disabled_at alone would leave
+    the user's 30-day token valid (and self-renewing), so the ban would only land
+    when they happened to log out. The bump also covers entry points that never
+    call get_current_user, such as a WebSocket connect, which checks tv only.
+    Disabling an already-disabled account is not an error; it edits the reason.
+    """
+    target = _require_disable_target(db, admin, user_id)
+
+    before = _audit_disable_state(target)
+    reason = (body.reason or "").strip() or None
+    # naive UTC：与库里其它时间列（created_at / last_active_at）同一口径。
+    # Naive UTC, like every other datetime column in this schema.
+    target.disabled_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    target.disabled_reason = reason
+    target.token_version = (target.token_version or 0) + 1
+    _log_change(db, admin.id, target.id, "account:disable", before, _audit_disable_state(target))
+    db.commit()
+    db.refresh(target)
+
+    account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
+    return _user_out(target, account_count)
+
+
+@router.post("/users/{user_id}/enable", response_model=AdminUserOut)
+def enable_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """恢复某账号：清掉两列即可，该用户重新登录后一切照旧。
+
+    这里**不动** token_version：停用时作废的那些 token 本来就该留在作废状态（其中
+    可能正有一张是被封的原因），恢复不是"把旧会话还给他"，是"允许他重新登录"。
+
+    恢复这一侧**不套停用的那两条规则**（不能停自己、不能停管理员）：那两条是为了
+    防止把人关在门外，而恢复是往开的方向走，套上去只会制造一个死结——比如一个被
+    停用的账号事后被提成了管理员，再想恢复就没有任何入口了。
+
+    Enabling clears the two columns; the user logs in again and everything is as
+    it was. token_version is deliberately left alone: the tokens invalidated at
+    disable time should stay invalid (one of them may be why the account was
+    banned). Enabling restores access, not old sessions. The disable-side guards
+    are *not* applied here: they exist to keep people from being locked out, and
+    this direction unlocks — applying them would create a dead end (a disabled
+    account later promoted to admin could never be restored).
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+
+    before = _audit_disable_state(target)
+    target.disabled_at = None
+    target.disabled_reason = None
+    _log_change(db, admin.id, target.id, "account:enable", before, _audit_disable_state(target))
     db.commit()
     db.refresh(target)
 

@@ -12,13 +12,21 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.models import AdminAuditLog, Payment, User
+from app.models import AdminAuditLog, Payment, User, UserNotification
 from app.routers.payments import (
+    NOTIFY_KIND_PLAN_REFUND,
     STATUS_FINISHED_MISMATCH,
+    STATUS_REFUNDED,
     _sync_payment_status,
     claim_trial,
     create_payment_order,
     get_plans,
+)
+from app.services.plans import (
+    REFUND_SKIP_NOT_PAID,
+    REFUND_SKIP_PERMANENT,
+    REFUND_SKIP_TRIAL,
+    refund_revocation,
 )
 
 
@@ -188,22 +196,6 @@ def test_non_terminal_states_still_advance(db_session):
     assert rec.status == "PROCESSING"
 
 
-def test_refund_after_finished_is_logged_but_never_auto_downgrades(db_session):
-    """退款后不自动降级（那是产品决策），但必须留下痕迹。"""
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=25))
-    rec = _mk_payment(db_session, user, status="FINISHED", finished_at=now)
-
-    _sync_payment_status(db_session, rec, "refunded", _np(status="refunded"))
-    db_session.refresh(user)
-    db_session.refresh(rec)
-    assert rec.status == "FINISHED"          # 状态不动
-    assert user.plan == "PRO"                # 不自动降级
-    assert db_session.query(AdminAuditLog).filter(
-        AdminAuditLog.field == "payment:refund_after_finished"
-    ).count() == 1
-
-
 def test_refund_before_finished_is_just_a_failure(db_session):
     user = _mk_user(db_session)
     rec = _mk_payment(db_session, user, status="PROCESSING")
@@ -337,3 +329,290 @@ def test_yearly_tag_reflects_the_real_discount(db_session, monkeypatch):
     )
     yearly = next(p for p in get_plans(db_session)["plans"] if p["id"] == "pro_yearly")
     assert yearly["tag"] is None
+
+
+# ---------- DO-02 退款自动收回权益 / refund revokes the entitlement ----------
+#
+# 这一组的判据只有一条：**扣的必须正好是这笔钱买的那一段**。
+# 误扣一个正常付费用户的权益，比晚几天收回一个退款用户的权益严重得多——所以
+# 「不该误伤」的那几种（后面又付了一笔、之前就有有效期、不限期 PRO）比「该扣」的
+# 那几种测得更细。
+
+
+def _audit(db, field):
+    return db.query(AdminAuditLog).filter(AdminAuditLog.field == field).all()
+
+
+def _same_day(a, b, tol_seconds: int = 120) -> bool:
+    """比较两个到期时间。库里存的是 naive UTC，允许几分钟误差（now 各算各的）。"""
+    if a is None or b is None:
+        return a is b
+    a = a.replace(tzinfo=None) if a.tzinfo else a
+    b = b.replace(tzinfo=None) if b.tzinfo else b
+    return abs((a - b).total_seconds()) <= tol_seconds
+
+
+def _refund(db, rec):
+    _sync_payment_status(db, rec, "refunded", _np(status="refunded"))
+
+
+def test_refund_after_finished_revokes_only_this_payments_days(db_session):
+    """用户此前就有有效期（续费叠加）：只扣掉这笔加的那 30 天，之前的 25 天不动。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # 5 天前买过一笔月付（还剩 25 天），刚才又买了一笔月付叠上去 → 到期 now+55
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=55))
+    _mk_payment(
+        db_session, user, status="FINISHED", np_id="np-old",
+        finished_at=now - timedelta(days=5),
+    )
+    rec = _mk_payment(db_session, user, status="FINISHED", np_id="np-new", finished_at=now)
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+    db_session.refresh(rec)
+
+    assert rec.status == STATUS_REFUNDED
+    assert user.plan == "PRO", "前一笔付费买到的窗口不许被这次退款吃掉"
+    assert _same_day(user.plan_expires_at, now + timedelta(days=25))
+
+
+def test_refund_of_the_only_payment_drops_the_user_to_free(db_session):
+    """这笔是唯一的权益来源：收回之后没有任何东西兜底 → 落回 FREE。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=25))
+    rec = _mk_payment(
+        db_session, user, status="FINISHED", finished_at=now - timedelta(days=5)
+    )
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+
+    assert user.plan == "FREE"
+    # 到期时间一并清空，理由同 plan_expiry.downgrade_if_expired（留着过去的时间戳，
+    # 管理员将来重新升级却忘了改到期时间的人会当场再次过期）。
+    assert user.plan_expires_at is None
+
+
+def test_refund_never_touches_a_later_payment_after_a_lapse(db_session):
+    """会员断档过、后来又付了一笔：那一笔是从付款时刻重新起算的，
+    当前到期时间里根本没有被退款那笔的天数——一天都不许扣。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=28))
+    old = _mk_payment(
+        db_session, user, status="FINISHED", np_id="np-lapsed",
+        finished_at=now - timedelta(days=100),
+    )
+    _mk_payment(
+        db_session, user, status="FINISHED", np_id="np-fresh",
+        finished_at=now - timedelta(days=2),
+    )
+
+    _refund(db_session, old)
+    db_session.refresh(user)
+    db_session.refresh(old)
+
+    assert old.status == STATUS_REFUNDED
+    assert user.plan == "PRO"
+    assert _same_day(user.plan_expires_at, now + timedelta(days=28)), "新付的那笔必须原封不动"
+    # 权益没变就不该留一条「变了」的审计行，也不该去打扰用户
+    assert _audit(db_session, "plan:refund") == []
+    assert db_session.query(UserNotification).count() == 0
+
+
+def test_refund_preserves_a_later_stacked_payment(db_session):
+    """用户此后又付了一笔（叠加在旧窗口上）：那笔的权益必须保住。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    # 10 天前月付（到期 now+20），1 天前年付叠上去（到期 now+385）
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=385))
+    monthly = _mk_payment(
+        db_session, user, status="FINISHED", np_id="np-m",
+        finished_at=now - timedelta(days=10),
+    )
+    _mk_payment(
+        db_session, user, status="FINISHED", np_id="np-y", plan="pro_yearly",
+        amount_usd=199.0, pay_amount=199.0, finished_at=now - timedelta(days=1),
+    )
+
+    _refund(db_session, monthly)
+    db_session.refresh(user)
+
+    assert user.plan == "PRO"
+    # 年付单独就保证到 now+364，扣完月付的 30 天（now+355）比它还早 → 以它为下限
+    assert _same_day(user.plan_expires_at, now + timedelta(days=364))
+
+
+def test_refund_leaves_permanent_pro_completely_alone(db_session):
+    """不限期 PRO：这笔钱当初什么都没给出（入账走的是 pass 分支），
+    退款自然没有东西可收回；NULL 也没法减天数。留给人工看。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=None)
+    rec = _mk_payment(db_session, user, status="FINISHED", finished_at=now)
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+    db_session.refresh(rec)
+
+    assert user.plan == "PRO" and user.plan_expires_at is None
+    assert rec.status == STATUS_REFUNDED          # 订单本身仍落终态
+    assert _audit(db_session, "plan:refund") == []
+    skipped = _audit(db_session, "plan:refund_skipped")
+    assert len(skipped) == 1 and skipped[0].new_value == REFUND_SKIP_PERMANENT
+
+
+def test_refund_does_not_touch_a_current_trial_plan(db_session):
+    """当前 PRO 带着试用标记：付费入账会把它清成 False，所以这是别处赋予的权益，
+    不知道从哪来就不动。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(
+        db_session, plan="PRO", plan_expires_at=now + timedelta(days=5), plan_is_trial=True
+    )
+    rec = _mk_payment(db_session, user, status="FINISHED", finished_at=now)
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+
+    assert user.plan == "PRO" and _same_day(user.plan_expires_at, now + timedelta(days=5))
+    skipped = _audit(db_session, "plan:refund_skipped")
+    assert len(skipped) == 1 and skipped[0].new_value == REFUND_SKIP_TRIAL
+
+
+def test_refund_of_an_already_free_user_changes_nothing(db_session):
+    """管理员先降过 / 到期扫描已经收走了：没有可收回的权益。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session)
+    rec = _mk_payment(db_session, user, status="FINISHED", finished_at=now)
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+
+    assert user.plan == "FREE" and user.plan_expires_at is None
+    skipped = _audit(db_session, "plan:refund_skipped")
+    assert len(skipped) == 1 and skipped[0].new_value == REFUND_SKIP_NOT_PAID
+
+
+def test_trial_converted_to_paid_falls_back_to_free_on_refund(db_session):
+    """试用期内付费转正后退款：付费时试用剩余天数被**刻意丢弃**（不叠加），
+    库里已经没有原来的试用到期时间了，所以收回这笔之后只能回到 FREE。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(
+        db_session,
+        plan="PRO",
+        plan_expires_at=now + timedelta(days=20),   # 10 天前付的月付
+        plan_is_trial=False,
+        trial_used_at=now - timedelta(days=15),
+    )
+    rec = _mk_payment(
+        db_session, user, status="FINISHED", finished_at=now - timedelta(days=10)
+    )
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+
+    assert user.plan == "FREE" and user.plan_expires_at is None
+    assert user.plan_is_trial is False
+    assert user.trial_used_at is not None, "试用是终身一次的凭据，退款不该把它还回去"
+
+
+def test_refund_writes_both_audit_rows_with_the_old_values(db_session):
+    """支付层 + 权益层各一条，旧值必须记下来（否则事后无法复原扣了多少）。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=25))
+    rec = _mk_payment(
+        db_session, user, status="FINISHED", finished_at=now - timedelta(days=5)
+    )
+
+    _refund(db_session, rec)
+
+    pay_rows = _audit(db_session, "payment:refund_after_finished")
+    assert len(pay_rows) == 1
+    assert pay_rows[0].old_value == "FINISHED" and pay_rows[0].new_value == STATUS_REFUNDED
+
+    plan_rows = _audit(db_session, "plan:refund")
+    assert len(plan_rows) == 1
+    assert plan_rows[0].target_user_id == user.id
+    assert plan_rows[0].old_value.startswith("PRO(")
+    assert "FREE" in plan_rows[0].new_value
+
+
+def test_refund_notifies_the_user_in_app(db_session):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=25))
+    rec = _mk_payment(
+        db_session, user, status="FINISHED", finished_at=now - timedelta(days=5)
+    )
+
+    _refund(db_session, rec)
+
+    rows = db_session.query(UserNotification).all()
+    assert len(rows) == 1
+    assert rows[0].user_id == user.id
+    assert rows[0].kind == NOTIFY_KIND_PLAN_REFUND
+    assert rows[0].ref_id == rec.id and rows[0].text
+
+
+def test_refunded_is_terminal_and_never_revokes_twice(db_session):
+    """重复的 refunded 回调不能扣第二次；迟到的 waiting 也拉不回 PROCESSING。"""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=now + timedelta(days=55))
+    rec = _mk_payment(db_session, user, status="FINISHED", finished_at=now)
+
+    _refund(db_session, rec)
+    db_session.refresh(user)
+    first = user.plan_expires_at
+
+    _refund(db_session, rec)          # 同一条回调又来一次
+    _sync_payment_status(db_session, rec, "waiting", _np(status="waiting"))
+    db_session.refresh(user)
+    db_session.refresh(rec)
+
+    assert rec.status == STATUS_REFUNDED
+    assert user.plan_expires_at == first, "第二次退款回调不许再扣一次"
+    assert len(_audit(db_session, "plan:refund")) == 1
+
+
+def test_refunded_payment_no_longer_counts_as_a_live_paid_plan(db_session):
+    """代理降级前的付费保护按 status == FINISHED 判定：退掉的钱不该继续替用户挡着。"""
+    from app.routers.invite import _has_live_paid_plan
+
+    now = datetime.now(timezone.utc)
+    naive = now.replace(tzinfo=None)
+    user = _mk_user(db_session, plan="PRO", plan_expires_at=naive + timedelta(days=25))
+    rec = _mk_payment(
+        db_session, user, status="FINISHED", finished_at=naive - timedelta(days=5)
+    )
+    assert _has_live_paid_plan(db_session, user.id, now) is True
+
+    _refund(db_session, rec)
+    assert _has_live_paid_plan(db_session, user.id, now) is False
+
+
+# ---------- 纯判定的边角 / pure-predicate corners ----------
+
+
+def test_refund_revocation_never_extends_the_expiry():
+    """下限比现有到期还晚时不顺势延长：退款是收回，任何情况下都不该变成赠送。"""
+    now = datetime.now(timezone.utc)
+    skip, plan, expiry = refund_revocation(
+        plan="PRO",
+        plan_expires_at=now + timedelta(days=10),
+        plan_is_trial=False,
+        days=30,
+        entitlement_floor=now + timedelta(days=300),
+        now=now,
+    )
+    assert skip is None and plan == "PRO"
+    assert expiry == now + timedelta(days=10)
+
+
+def test_refund_revocation_accepts_naive_timestamps():
+    """库里取出来的是 naive UTC（SQLite/旧行），不能因此算错一整个时区的天数。"""
+    now = datetime.now(timezone.utc)
+    skip, plan, expiry = refund_revocation(
+        plan="PRO",
+        plan_expires_at=(now + timedelta(days=40)).replace(tzinfo=None),
+        plan_is_trial=False,
+        days=30,
+        now=now,
+    )
+    assert skip is None and plan == "PRO"
+    assert abs((expiry - (now + timedelta(days=10))).total_seconds()) < 1

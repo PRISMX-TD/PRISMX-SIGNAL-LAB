@@ -128,6 +128,32 @@ class User(Base):
     # before the change; the password-change request itself gets back a
     # freshly stamped token so the user isn't logged out by their own action.
     token_version = Column(Integer, default=0, nullable=False)
+    # 账号被管理员停用的时刻；null = 正常。停用与 plan 是两件事：
+    #
+    #   plan = FREE   「你能用，但没有付费权益」——这是**等级**
+    #   disabled_at   「你不能用」——这是**闸门**
+    #
+    # 之所以要分开：此前遇到恶意用户只能把他降成 FREE，而 FREE 仍然能登录、能下单、
+    # 能上榜，等于没处理。把两者混在 plan 里会让「免费用户」和「被封的人」共用一条
+    # 判断，任何一处写 `if plan == "FREE"` 的地方都会跟着变味。
+    #
+    # 判定点在 services/deps.get_current_user：停用后**所有**需要登录的接口一律 403，
+    # 不是只挡登录——已经拿着有效 token 的会话必须立刻失效，否则封号要等 30 天 token
+    # 过期才生效。停用时同步自增 token_version，滑动续期也就跟着断了。
+    #
+    # 停用不删数据、不动 plan、不动成绩：恢复时只要清掉这一列即可，历史与归因都还在
+    # （与 mt5_accounts.revoked_at 的软删同一思路）。
+    #
+    # When an admin disabled this account; null = normal. Disabling is a gate, not a
+    # tier: plan=FREE still means "may use the product", so reusing plan for bans made
+    # every `if plan == "FREE"` branch ambiguous. Enforced in get_current_user, so every
+    # authenticated endpoint refuses — not just login — otherwise a ban would not take
+    # effect until the 30-day token expired. Nothing is deleted; clearing the column
+    # restores the account with its history intact.
+    disabled_at = Column(DateTime, nullable=True)
+    # 停用原因，给管理员自己看的备注，也会原样回给被停用的用户（所以别写内部黑话）。
+    # Reason shown to the admin and echoed to the disabled user — keep it presentable.
+    disabled_reason = Column(String, nullable=True)
     # 该邮箱首次成功通过 Google 验证的时间；null = 从未通过 Google 验证过。
     # 唯一用途：区分"账号预劫持"防护里两种表面相同、实质不同的情况——
     # ① 攻击者抢先用受害者邮箱注册了密码账号，受害者第一次尝试 Google 登录

@@ -289,11 +289,19 @@ def test_reset_clears_the_login_lockout(db_session):
     """被撞库锁了的人来重置密码，改完还登不进去会以为没改成功。"""
     from app.core.rate_limit import is_login_locked, record_failed_login
 
+    from app.core.rate_limit import login_source
+
+    # 锁定按「账号 + 来源」算，所以这里要用重置请求自己那个来源去记失败：本用例
+    # 传的 request 是 None，login_source 取不到 IP 会落到 "unknown" 那个桶。
+    # The lockout is keyed by (account, source), so the failures are recorded on
+    # the same source the reset will clear — request is None here, which
+    # login_source maps to the "unknown" bucket.
+    source = login_source(None)
     user = _mk_user(db_session, email="locked@example.com")
     for _ in range(10):
-        record_failed_login("locked@example.com")
-    assert is_login_locked("locked@example.com")
+        record_failed_login("locked@example.com", source)
+    assert is_login_locked("locked@example.com", source)
 
     raw = _issue(db_session, user)
     _reset(request=None, req=ResetPasswordRequest(token=raw, password="a-brand-new-password"), db=db_session)
-    assert not is_login_locked("locked@example.com")
+    assert not is_login_locked("locked@example.com", source)

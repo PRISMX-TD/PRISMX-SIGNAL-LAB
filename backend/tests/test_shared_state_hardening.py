@@ -58,7 +58,7 @@ def test_concurrent_failures_are_all_counted(monkeypatch):
 
     def hit():
         barrier.wait()          # 让所有线程落在同一个读-改-写窗口里
-        rate_limit.record_failed_login("victim@t.co")
+        rate_limit.record_failed_login("victim@t.co", "src1")
 
     workers = [threading.Thread(target=hit) for _ in range(threads)]
     for w in workers:
@@ -67,35 +67,35 @@ def test_concurrent_failures_are_all_counted(monkeypatch):
         w.join()
 
     monkeypatch.setattr(shared_state, "kv_get", real_kv_get)
-    assert rate_limit._read("login", "victim@t.co") == threads
+    assert rate_limit._read("login", "victim@t.co|src1") == threads
 
 
 def test_lockout_trips_exactly_at_the_threshold():
     max_attempts, _ = rate_limit._POLICIES["login"]
     for _ in range(max_attempts - 1):
-        rate_limit.record_failed_login("a@t.co")
-    assert not rate_limit.is_login_locked("a@t.co")
-    rate_limit.record_failed_login("a@t.co")
-    assert rate_limit.is_login_locked("a@t.co")
+        rate_limit.record_failed_login("a@t.co", "src1")
+    assert not rate_limit.is_login_locked("a@t.co", "src1")
+    rate_limit.record_failed_login("a@t.co", "src1")
+    assert rate_limit.is_login_locked("a@t.co", "src1")
 
 
 def test_the_window_slides_with_the_latest_failure(monkeypatch):
     """窗口从**最后一次**失败算起。固定窗口的话，攻击者卡着边界就能让计数周期性清零。"""
     _max, lockout = rate_limit._POLICIES["login"]
     real = time.time
-    rate_limit.record_failed_login("b@t.co")
+    rate_limit.record_failed_login("b@t.co", "src1")
 
     monkeypatch.setattr(time, "time", lambda: real() + lockout - 1)
-    rate_limit.record_failed_login("b@t.co")          # 第二次失败把过期时间推后
+    rate_limit.record_failed_login("b@t.co", "src1")  # 第二次失败把过期时间推后
     monkeypatch.setattr(time, "time", lambda: real() + lockout + 2)
-    assert rate_limit._read("login", "b@t.co") == 2   # 按第一次算的话这时已经归零了
+    assert rate_limit._read("login", "b@t.co|src1") == 2   # 按第一次算的话这时已经归零了
 
 
 def test_legacy_entries_do_not_crash_the_counter():
     """升级前留在 Redis 里的旧格式（[count, ts]）读出来不能抛，当作没有计数即可。"""
-    shared_state.kv_set_json(rate_limit._lock_key("login", "old@t.co"), [3, time.time()], ttl=60)
-    assert rate_limit._read("login", "old@t.co") is None
-    assert not rate_limit.is_login_locked("old@t.co")
+    shared_state.kv_set_json(rate_limit._lock_key("login", "old@t.co|src1"), [3, time.time()], ttl=60)
+    assert rate_limit._read("login", "old@t.co|src1") is None
+    assert not rate_limit.is_login_locked("old@t.co", "src1")
 
 
 # ---------- 锁的释放 / lock release ----------
