@@ -1,8 +1,11 @@
 // 详细说明的内容块编辑器：逐块添加、排序、删除，每块可选类型。
 //
-// 为什么不做富文本编辑器：所见即所得要么产出 HTML（渲染时就得解析，管理员输入
-// 成了注入面），要么引入一个编辑器库及其体积。分块把排版限制在四种已知类型内，
-// 渲染侧一行标记都不用解析。
+// 为什么这里仍然是分块而不是富文本：策略介绍是一份**结构固定**的说明（小标题、
+// 段落、要点、配图），分块正好把它按住，渲染侧一行标记都不用解析。公告在
+// 2026-09-21 走了另一条路（见 admin/RichTextEditor）：那边是每次都要重新排版的
+// 活动文案，分块编辑成了负担，于是换成富文本框，并把"渲染侧不解析标记"这条约束
+// 挪到了两端——入库前后端按白名单重建 HTML，渲染时前端按同一份白名单解析成
+// React 节点。两种做法各有适用面，不要把其中一种当成全站规矩。
 //
 // 图片块支持直接上传（走后端代理到 Supabase Storage），也允许手填外链——后台没
 // 配置存储时上传端点返回 503，手填仍然可用，功能不会整体不可用。
@@ -10,10 +13,15 @@
 // Editor for the long description's content blocks: add, reorder, delete, each
 // with a type.
 //
-// Why not a rich-text editor: WYSIWYG either produces HTML (which then must be
-// parsed at render time, making admin input an injection surface) or pulls in an
-// editor library and its weight. Blocks keep layout inside four known types, so
-// the render side parses no markup at all.
+// Why this one is still blocks rather than rich text: a strategy write-up has a
+// fixed structure (subheading, paragraph, bullets, illustration) and blocks hold
+// it to exactly that, with the render side parsing no markup at all.
+// Announcements went the other way on 2026-09-21 (see admin/RichTextEditor):
+// campaign copy is retypeset every time, block editing became a chore, so they
+// moved to a WYSIWYG box and the "render side parses no markup" constraint moved
+// to both ends instead — the backend rebuilds the HTML against a whitelist before
+// storing it, and the client parses it into React nodes against the same list.
+// Both shapes have their place; neither is a site-wide rule.
 //
 // Image blocks accept a direct upload (proxied through the backend to Supabase
 // Storage) and also a pasted URL: when storage isn't configured the upload

@@ -4,13 +4,15 @@
      置顶标记 ｜ 标题与摘要 ｜ 日期），下段是原有的推送开关压成一行。角标：有未读
      公告显示紫色数字，无未读才退回推送状态点。
    · 列表页：与客服工单同一套账本行。
-   · 详情页：沿用策略详情的文章版式（guide.css 的 .guide-detail / .guide-h / .guide-p /
-     .guide-ul / .guide-fig），单栏 760px。
+   · 详情页：单栏 760px 的文章版式。正文排版 2026-09-21 从 guide.css 独立出来（.ann-rich），
+     因为后台换成了富文本框——排版规则从此由公告自己说了算，同一份也给后台编辑区用。
    材质同全站：实色面、无模糊无光晕；紫只落在未读点 / 未读数、置顶刻度与主按钮。
    Added 2026-09-08: the bell panel redone as an opaque 360px surface with recent
    announcements as ledger rows over the existing push toggle; a list page sharing
-   the support ledger; a detail page reusing the strategy article layout in one
-   760px column. Violet only as unread ink and the pinned tick. */
+   the support ledger; a detail page as one 760px article column. Body typography
+   split off from guide.css into .ann-rich on 2026-09-21, when the admin moved to a
+   rich-text box: announcements now own their layout rules, and the same set dresses
+   the editor. Violet only as unread ink and the pinned tick. */
 
 /* ── 铃铛 / bell ── */
 .nb {
@@ -359,10 +361,170 @@
   margin-top: 36px;
   min-width: 0;
 }
-.ann-body .guide-p,
-.ann-body .guide-ul li {
-  font-size: 15px;
+
+/* 封面图：不裁切。原来是 max-height: 420px + object-fit: cover，一张竖着的活动
+   海报会被从腰部切断，奖金、时间、规则全在被切掉的那半截里。现在按原图
+   比例完整展示，只在比栏宽还宽时等比缩小；图比栏窄就按原尺寸居中，不拉伸。
+   The cover image, uncropped. It used to be max-height: 420px with object-fit:
+   cover, which sliced a tall campaign poster at the waist — prize, dates and terms
+   all live in the half that got cut. It now shows in full at its own aspect ratio,
+   scaled down only when it is wider than the column; a narrower image sits centred
+   at its natural size rather than being stretched. */
+.ann-cover {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto 32px;
+  border-radius: var(--r-tile);
 }
+
+/* ── 富文本正文 / rich body ──
+   后台富文本框的产物，按白名单解成 React 节点后落到这里（components/RichText）。
+   同一套样式也给后台的编辑框用（.rte-input 带着 .ann-rich），所见才真的是所得。
+   字号 / 对齐 / 颜色只认 fs-* ・ta-* ・c-* 这几个 class，跟后端白名单一一对应；
+   库里的 style 属性在入库那一步就已经不存在，这里不必对任意值做防御。
+   The body produced by the admin's rich-text box, parsed into React nodes against
+   a whitelist (components/RichText). The same rules dress the admin's editor
+   (.rte-input carries .ann-rich), so what is seen really is what is got. Size,
+   alignment and colour come only from the fs-* / ta-* / c-* classes, one for one
+   with the backend whitelist; a style attribute cannot survive the way in, so
+   nothing here has to defend against arbitrary values. */
+.ann-rich {
+  min-width: 0;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-2);
+  overflow-wrap: break-word;
+}
+.ann-rich p {
+  margin: 0 0 14px;
+  line-height: 1.8;
+}
+.ann-rich h2 {
+  margin: 32px 0 12px;
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 700;
+  color: #fff;
+}
+.ann-rich h3 {
+  margin: 26px 0 10px;
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--text);
+}
+.ann-rich > :first-child { margin-top: 0; }
+.ann-rich > :last-child { margin-bottom: 0; }
+/* 加粗比正文亮一档。落在彩色文字里时跟着那段的颜色走：元素自己的 color 规则
+   永远胜过从父级继承来的颜色（与权重无关），直接写死就会出现“一段标红的重点
+   里一加粗反而变灰”。--rich-strong 由颜色 class 沿继承链传下来，绕开这一点。
+   Bold reads one step brighter than body copy, but follows the colour of the run
+   it sits in: an element's own color rule always beats a colour inherited from its
+   parent, regardless of specificity, so hard-coding one here would turn a bold
+   word inside a red highlight grey. --rich-strong comes down the inheritance chain
+   from the colour class instead. */
+.ann-rich strong {
+  font-weight: 700;
+  color: var(--rich-strong, var(--text));
+}
+.ann-rich em { font-style: italic; }
+.ann-rich u { text-decoration: underline; text-underline-offset: 3px; }
+.ann-rich s { text-decoration: line-through; }
+.ann-rich a {
+  color: var(--purple-hi);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.ann-rich a:hover { color: #fff; }
+.ann-rich blockquote {
+  margin: 18px 0;
+  padding: 2px 0 2px 16px;
+  border-left: 2px solid var(--purple-hi);
+  color: var(--text-3);
+}
+.ann-rich ul,
+.ann-rich ol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 0;
+  list-style: none;
+}
+.ann-rich ol { counter-reset: ann-ol; }
+.ann-rich li {
+  position: relative;
+  padding-left: 20px;
+  line-height: 1.7;
+}
+/* 项目符号：2px 品牌紫竖线。紫在正文里只以线出现，不做圆点——与策略介绍
+   同一条规矩。/ Bullet: a 2px violet tick. Violet appears in body copy only as a
+   line, never a dot — the same rule the strategy write-ups follow. */
+.ann-rich ul > li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.55em;
+  width: 2px;
+  height: 14px;
+  border-radius: 1px;
+  background: var(--purple-hi);
+}
+.ann-rich ol > li {
+  counter-increment: ann-ol;
+  padding-left: 26px;
+}
+.ann-rich ol > li::before {
+  content: counter(ann-ol) '.';
+  position: absolute;
+  left: 0;
+  top: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--purple-hi);
+}
+.ann-rich-rule {
+  margin: 28px 0;
+  border: 0;
+  height: 1px;
+  background: var(--line);
+}
+/* 正文里的图也不裁切，与封面同一口径：多大就多大，最多缩到栏宽。
+   Body images follow the cover: shown whole, scaled down only to the column. */
+.ann-rich img {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+  margin: 24px auto;
+  border-radius: var(--r-tile);
+}
+/* 字号三档 + 默认。行高跟着字号走，否则 22px 的标语夹在 1.8 的行距里会敷得散。
+   Three size steps plus the default. Line height tracks the size, or a 22px line
+   sits too loosely inside a 1.8 rhythm. */
+.ann-rich .fs-sm { font-size: 13px; }
+.ann-rich .fs-lg { font-size: 18px; }
+.ann-rich .fs-xl { font-size: 22px; }
+/* :where() 让这两条不带权重：否则 p.fs-xl（0,2,1）会压过下面的 .c-violet（0,2,0），
+   一句被调大的标语就再也上不了颜色。
+   :where() keeps these at zero specificity: otherwise p.fs-xl (0,2,1) outranks
+   .c-violet (0,2,0) below and an enlarged line could never take a colour. */
+.ann-rich :where(p, li).fs-lg { line-height: 1.6; }
+.ann-rich :where(p, li).fs-xl {
+  line-height: 1.45;
+  color: var(--text);
+}
+.ann-rich .ta-center { text-align: center; }
+.ann-rich .ta-right { text-align: right; }
+.ann-rich .c-hi { color: #fff; --rich-strong: #fff; }
+.ann-rich .c-dim { color: var(--text-3); --rich-strong: var(--text-3); }
+.ann-rich .c-violet { color: var(--purple-hi); --rich-strong: var(--purple-hi); }
+.ann-rich .c-up { color: var(--up); --rich-strong: var(--up); }
+.ann-rich .c-down { color: var(--down); --rich-strong: var(--down); }
+.ann-rich .c-amber { color: var(--mid); --rich-strong: var(--mid); }
 .ann-detail .guide-pager {
   margin-top: 48px;
 }
@@ -659,4 +821,142 @@
   .ann-pop-bar,
   .ann-pop-x { animation: none; }
   .ann-pop-art:hover .ann-pop-photo { transform: none; }
+}
+
+/* ═════════════ 后台：公告正文编辑器 / admin: the announcement body editor ═════════════
+   2026-09-21 起后台不再是一串内容块，而是一个所见即所得的框。编辑区直接挂
+   .ann-rich —— 与详情页同一套排版规则，管理员在框里看到的行距、字号、项目符号
+   就是用户会看到的那一份，不必保存一次再切到用户端核对。
+   工具条是暗底上的一排小方块：按钮只有 hover 才起底色，选中的字色由文字本身表达，
+   不给每个功能再配一个状态点。
+   From 2026-09-21 the admin writes in one WYSIWYG box instead of a block list. The
+   editable area carries .ann-rich itself, so the leading, sizes and bullets in the
+   box are the ones users get — no save-then-go-look round trip. The toolbar is a
+   row of small squares on the dark surface: buttons take a background only on
+   hover, and the state of a mark is told by the text itself rather than by giving
+   every control its own indicator dot. */
+.rte {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 0.02);
+  overflow: hidden;
+}
+.rte:focus-within { border-color: var(--line-hi); }
+.rte-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--nest);
+}
+.rte-btn {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.rte-btn:hover:not(:disabled) {
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+}
+.rte-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.rte-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--line);
+}
+.rte-select {
+  height: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.rte-colors {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+.rte-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid rgb(255 255 255 / 0.28);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.rte-swatch:hover { transform: scale(1.15); }
+.rte-spin {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid rgb(255 255 255 / 0.25);
+  border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+.rte-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: rgb(255 255 255 / 0.02);
+}
+.rte-shell { position: relative; }
+/* 占位文字压在编辑区上而不是用 :empty ——contenteditable 里"空"的 DOM 是
+   <p><br></p>，:empty 选不中。
+   The placeholder overlays the area instead of using :empty: an "empty"
+   contenteditable is <p><br></p> in the DOM, which :empty never matches. */
+.rte-ph {
+  position: absolute;
+  left: 17px;
+  top: 14px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.rte-input {
+  min-height: 280px;
+  padding: 14px 16px;
+  outline: none;
+}
+.rte-input:focus-visible { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+/* 编辑区里的图片给一条淡边、并压到 360px 以内：淡边是为了看清图的边界，限高是因为
+   一张 1600×2400 的竖版海报在正文里是完整展示的，但在编辑框里会顶出一千多像素，
+   管理员要为了改图下面那行字滚半天。这是编辑区与发布页唯一一处刻意的不一致，
+   限的是高度、不是比例，图还是完整的那一张。
+   Images inside the editor get a hairline and a 360px ceiling. The hairline shows
+   where the image ends; the ceiling exists because a 1600×2400 poster is shown
+   whole on the page but would push a thousand-odd pixels through the writing box,
+   leaving the admin to scroll for the line underneath it. This is the one
+   deliberate difference between the editor and the published page — it caps height,
+   not proportions, and the whole image is still visible. */
+.rte-input img {
+  max-height: 360px;
+  outline: 1px solid var(--line);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rte-swatch:hover { transform: none; }
+  .rte-spin { animation-duration: 2s; }
 }

@@ -1,8 +1,25 @@
-// 公告详情页（/announcements/:id）：沿用策略详情的文章版式（guide.css），单栏 760px。
+// 公告详情页（/announcements/:id）：单栏 760px 的文章版式。
 // GET 详情的同时后端记已读；上一条 / 下一条来自同一份已发布清单。
-// Announcement detail (/announcements/:id), reusing the strategy article layout in
-// one 760px column. Fetching the detail marks it read on the backend; prev/next
-// come from the same published list.
+//
+// 正文是后台富文本框的产物，交给 RichText 按白名单解成 React 节点；2026-09-21
+// 之前写的公告还是四种内容块，在 announcementRichBody 里现转成同一种形态，
+// 详情页不必同时养两套渲染路径。
+//
+// 图片一律不裁切：封面图与正文里的图都按原图比例完整展示，最多缩到栏宽。
+// 公告配图往往是一整张海报，切掉下半截等于把活动细则切掉。
+//
+// Announcement detail (/announcements/:id) as one 760px article column. Fetching
+// the detail marks it read on the backend; prev/next come from the same published
+// list.
+//
+// The body is what the admin's rich-text box produced, handed to RichText to be
+// parsed into React nodes against a whitelist. Posts written before 2026-09-21 are
+// still four kinds of content block and are converted on the fly by
+// announcementRichBody, so this page keeps only one rendering path.
+//
+// No image is ever cropped: the cover and any image in the body show in full at
+// their own aspect ratio, scaled down only to fit the column. Announcement art is
+// usually a whole poster, and cutting the bottom off cuts the terms off with it.
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -10,7 +27,8 @@ import { announcementApi } from '../api/client'
 import { localizeApiError, parseTime } from '../api/utils'
 import { safeHttpUrl } from '../utils/safeUrl'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
-import { StrategyBlocks } from '../components/strategyGuide'
+import RichText from '../components/RichText'
+import { announcementRichBody } from '../utils/richText'
 import { SkeletonPage } from '../components/Skeleton'
 import type { Announcement } from '../api/types'
 
@@ -91,9 +109,9 @@ export default function AnnouncementPage() {
         {summary && <p className="lede">{summary}</p>}
       </header>
 
-      <article className="guide-article ann-body">
-        {cover && <img src={cover} alt={title} className="guide-hero-img" />}
-        <StrategyBlocks blocks={item.blocks} isZh={isZh} />
+      <article className="ann-body">
+        {cover && <img src={cover} alt={title} className="ann-cover" />}
+        <RichText html={announcementRichBody(item.blocks, isZh ? 'zh' : 'en')} />
       </article>
 
       {(prev || next) && (

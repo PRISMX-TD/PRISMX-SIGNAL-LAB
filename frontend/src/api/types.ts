@@ -881,15 +881,30 @@ export interface PlatformStrategyBlock {
 }
 
 // ---------- 公告 / Announcements ----------
-// 正文复用策略介绍的内容块（PlatformStrategyBlock）：同一套块编辑器与渲染器。
-// The body reuses the strategy guide's blocks: same editor, same renderer.
+// 正文：2026-09-21 起新内容只有一种形态——一块 kind: 'rich'，textZh / textEn
+// 里是一段受限 HTML（后台富文本框的产物，白名单见 utils/richText）。
+// 前四种 kind 是之前的分块模型，保留只为读：库里已经存着的公告不该因为
+// 换了编辑器就变成空白页，管理员下次打开并保存一次就并成一块 rich。
+// The body: from 2026-09-21 new content has one shape only — a single
+// kind: 'rich' block whose textZh / textEn hold restricted HTML (what the admin's
+// rich-text box produces; the whitelist lives in utils/richText). The other four
+// kinds are the older block model, kept for reading: rows already stored must not
+// turn into blank pages because the editor changed, and one save collapses them.
+export type AnnouncementBlockKind = PlatformStrategyBlockKind | 'rich'
+
+export interface AnnouncementBlock {
+  kind: AnnouncementBlockKind
+  textZh: string
+  textEn: string
+  imageUrl: string
+}
 export interface Announcement {
   id: string
   titleZh: string
   titleEn: string
   summaryZh: string
   summaryEn: string
-  blocks: PlatformStrategyBlock[]
+  blocks: AnnouncementBlock[]
   coverImageUrl: string
   pinned: boolean
   published: boolean
@@ -926,7 +941,7 @@ export interface AnnouncementInput {
   titleEn: string
   summaryZh: string
   summaryEn: string
-  blocks: PlatformStrategyBlock[]
+  blocks: AnnouncementBlock[]
   coverImageUrl: string
   pinned: boolean
   published: boolean

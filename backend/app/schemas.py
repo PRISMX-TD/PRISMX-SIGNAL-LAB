@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
+from app.services.rich_text import MAX_RICH_LEN, sanitize_rich_html
 from app.services.strategy.presets import TEMPLATE_KEYS as STRATEGY_TEMPLATES
 
 # 共用校验规则 / shared validation rules
@@ -914,7 +915,9 @@ class PlatformStrategyBlock(BaseModel):
 
     为什么用结构化块而不是一段长文本：一整块纯文本在页面上会挤成一团，而支持
     Markdown/HTML 又要引入解析器和随之而来的注入面。分块把排版表达力限制在四
-    种已知类型内，渲染时不需要解析任何标记语言。
+    种已知类型内，渲染时不需要解析任何标记语言。（公告 2026-09-21 换成了富文本，
+    见下面的 AnnouncementBlock：那边的正文每次都要重排，分块成了负担，注入面
+    改由两端的白名单收口。策略介绍结构固定，仍然是分块合适。）
 
     text 字段的含义随 kind 而变：
       heading   小标题，单行
@@ -928,7 +931,11 @@ class PlatformStrategyBlock(BaseModel):
     Why structured blocks instead of one long string: a single text blob reads as
     an undifferentiated wall, while supporting Markdown/HTML would mean shipping
     a parser and its injection surface. Blocks keep layout expressiveness inside
-    four known types, so rendering parses no markup at all.
+    four known types, so rendering parses no markup at all. (Announcements moved
+    to rich text on 2026-09-21 — see AnnouncementBlock below: that body is
+    retypeset for every post, which made blocks a chore, and the injection surface
+    is closed off by a whitelist at both ends instead. A strategy write-up has a
+    fixed structure, so blocks still fit here.)
 
     The meaning of `text` depends on `kind`:
       heading   a single-line subheading
@@ -1002,11 +1009,41 @@ class PlatformStrategyListOut(BaseModel):
 
 
 # ---------- 公告 / Announcements ----------
-# 正文块直接复用 PlatformStrategyBlock：四种类型、camelCase 字段、同一套校验，
-# 管理端的块编辑器与用户端的渲染器也因此可以原样复用。
-# The body reuses PlatformStrategyBlock: same four kinds, same camelCase fields and
-# validation, so the admin block editor and the user-side renderer carry over as is.
-AnnouncementBlock = PlatformStrategyBlock
+
+
+class AnnouncementBlock(BaseModel):
+    """公告正文的一块。
+
+    2026-09-21 起新内容只有一种形态：kind == "rich"，textZh / textEn 里是一段
+    受限 HTML（后台那个富文本框的产物，白名单见 services/rich_text）。前四种
+    kind 是这之前的分块模型，保留只为**读**：库里已经存着的公告不该因为换了编辑器
+    就变成空白页，管理员下次打开那条公告、保存一次，就自动并成一块 rich。
+
+    为什么不新开两列存正文：blocks 本来就是一列 JSON，rich 只是它的第五种块型，
+    加列意味着一次迁移 + schema_rev，而这次改动并不需要新的查询维度。
+
+    One block of an announcement body.
+
+    From 2026-09-21 new content has exactly one shape: kind == "rich", with
+    restricted HTML in textZh / textEn (what the admin's rich-text box produces;
+    the whitelist lives in services/rich_text). The other four kinds are the older
+    block model, kept for *reading*: rows already in the database must not turn
+    into blank pages because the editor changed, and the next time an admin opens
+    and saves one it collapses into a single rich block.
+
+    Why not two new columns for the body: blocks is already one JSON column and
+    rich is simply its fifth kind. A column would mean a migration plus a
+    schema_rev bump for a change that needs no new query dimension.
+    """
+
+    kind: Literal["heading", "paragraph", "list", "image", "rich"] = "paragraph"
+    # rich 块整篇正文都在这里，所以上限按 rich_text.MAX_RICH_LEN 走；旧块型实际
+    # 远达不到。/ A rich block holds the whole body, so the cap follows
+    # rich_text.MAX_RICH_LEN; the legacy kinds never come close.
+    textZh: str = Field(default="", max_length=MAX_RICH_LEN)
+    textEn: str = Field(default="", max_length=MAX_RICH_LEN)
+    # 仅 kind == "image" 使用 / used only when kind == "image"
+    imageUrl: str = Field(default="", max_length=500)
 
 
 class AnnouncementIn(BaseModel):
@@ -1041,6 +1078,22 @@ class AnnouncementIn(BaseModel):
         if v and not re.match(r"^https?://", v, re.IGNORECASE):
             raise ValueError("图片地址必须以 http(s):// 开头 / image URL must start with http(s)://")
         return v
+
+    # 富文本在**入库前**过白名单，而不是渲染时再说。前端渲染侧同样按白名单解析
+    # （utils/richText），但那道只保护正常路径上的浏览器；库里存什么由这里定，
+    # 直接打 API 的请求也逃不掉。
+    # Rich text is whitelisted on the way *in*, not at render time. The client
+    # parses against the same whitelist (utils/richText), but that only protects
+    # browsers on the normal path; what lands in the database is decided here, so
+    # a request straight at the API gets the same treatment.
+    @field_validator("blocks")
+    @classmethod
+    def _clean_rich_blocks(cls, blocks: list[AnnouncementBlock]) -> list[AnnouncementBlock]:
+        for b in blocks:
+            if b.kind == "rich":
+                b.textZh = sanitize_rich_html(b.textZh)
+                b.textEn = sanitize_rich_html(b.textEn)
+        return blocks
 
     @model_validator(mode="after")
     def _popup_needs_cover(self) -> "AnnouncementIn":
