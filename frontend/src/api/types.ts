@@ -154,6 +154,15 @@ export interface AdminUser {
   // backend lands.
   disabledAt?: string | null
   disabledReason?: string | null
+  // 注册归因：这个人算在哪条邀请链接名下（invite_links.code），也就是哪个代理
+  // 能在 /agent 页看到他。列表把它映射成链接备注显示——码本身对人没有意义。
+  // 与上面两个字段同样写成可选：后端没上线时这个键不存在，undefined 与 null 在
+  // "有没有归因"这个判断上同义，界面自然退化成"全员未归因"。
+  // Signup attribution: which invite link (invite_links.code) this user counts
+  // towards — i.e. whose /agent page they appear on. The list maps it to the
+  // link's label, since the code means nothing to a human. Optional for the same
+  // reason as the two fields above.
+  inviteCode?: string | null
 }
 
 // 邀请链接（管理后台）。registrations 按隐藏归因码统计，与备注文本解耦。

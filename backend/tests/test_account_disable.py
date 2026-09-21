@@ -291,7 +291,7 @@ def test_the_user_list_shows_the_disabled_state(db_session):
     disable_user(banned.id, AdminUserDisableIn(reason="涉嫌刷单"), db=db_session, admin=admin)
 
     # 直接调路由函数，所以 Query(...) 默认值要当普通参数显式传（本套件没有 TestClient）
-    listed = list_users(q=None, plan=None, role=None, limit=50, offset=0, db=db_session, _admin=admin)
+    listed = list_users(q=None, plan=None, role=None, invite_code=None, limit=50, offset=0, db=db_session, _admin=admin)
     rows = {u["email"]: u for u in listed["users"]}
     assert rows["b@example.com"]["disabledAt"] is not None
     assert rows["b@example.com"]["disabledReason"] == "涉嫌刷单"

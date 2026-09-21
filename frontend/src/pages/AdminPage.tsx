@@ -23,10 +23,25 @@ import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
-import type { AdminUser, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
+import type { AdminUser, InviteLink, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
+
+// 归因筛选里「只看没有归因的人」的哨兵值，与后端 routers/admin.py 的 NO_INVITE
+// 是同一个字符串——真码是 8 位、字母表里没有 o，'none' 永远撞不上某条真链接。
+// Sentinel for "only unattributed" in the filter; the same string as NO_INVITE in
+// routers/admin.py. Real codes are 8 chars from an alphabet without "o".
+const NO_INVITE = 'none'
+
+// 批量指派下拉里「清除归因」的哨兵。只活在前端：发出去时翻译成 payload 里的
+// null（见 bulkPayload）。不能用 NO_INVITE——那是"筛选出没归因的人"，不是"把
+// 归因清掉"，两个意思撞在一个值上迟早会把筛选条件当成要写入的值发出去。
+// Sentinel for "clear attribution" in the bulk dropdown. Frontend-only: it
+// becomes a null in the payload (see bulkPayload). Deliberately not NO_INVITE,
+// which means "show the unattributed" — one value for both would eventually send
+// a filter term as a value to write.
+const BULK_CLEAR_INVITE = '__clear__'
 
 // 用户表每页条数。跟后端 routers/admin.py 的 PAGE_SIZE_DEFAULT 对齐（上限
 // PAGE_SIZE_MAX=200），也跟代理页的 PAGE_SIZE 一致——同一套「上一页/下一页」
@@ -400,6 +415,14 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [planFilter, setPlanFilter] = useState('')
+  // 按注册归因筛选：'' = 全部，NO_INVITE = 只看没有归因的人，其余是某条链接的 code。
+  // Filter by attribution: '' all, NO_INVITE only unattributed, otherwise a link's code.
+  const [inviteFilter, setInviteFilter] = useState('')
+  // 邀请链接表：既给筛选器和批量指派当选项，也负责把用户行上的 code 映射成人
+  // 看得懂的备注名。归因列显示的是备注，不是那串随机码。
+  // The invite links: options for the filter and the bulk assign box, and the
+  // code → label map for the attribution column. Nobody can read the raw code.
+  const [inviteLinks, setInviteLinks] = useState<InviteLink[]>([])
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [savingId, setSavingId] = useState<string | null>(null)
   const { toast, showToast } = useToast()
@@ -427,6 +450,14 @@ export default function AdminPage() {
   // empty string can't double as both "leave unchanged" and "clear it"
   const [bulkSetExpiry, setBulkSetExpiry] = useState(false)
   const [bulkExpiry, setBulkExpiry] = useState('')
+  // 批量指派归因：'' = 不修改，BULK_CLEAR_INVITE = 清除归因，其余是链接 code。
+  // 清除要单独一档而不是复用空串：空串同时表示"不改"和"清空"的话，管理员想撤回
+  // 一次指派就做不到——而指派错人恰恰是这个功能最可能出的错。
+  // Bulk attribution: '' leaves it alone, BULK_CLEAR_INVITE clears it, anything
+  // else is a link code. Clearing needs its own option — if the empty string
+  // meant both "unchanged" and "clear", an assignment could never be undone,
+  // and assigning the wrong people is exactly this feature's likely mistake.
+  const [bulkInvite, setBulkInvite] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
   const headerCheckboxRef = useRef<HTMLInputElement>(null)
 
@@ -444,7 +475,7 @@ export default function AdminPage() {
     loadCtrl.current = null
   }, [])
 
-  const load = async (opts: { q?: string; plan?: string; page?: number } = {}) => {
+  const load = async (opts: { q?: string; plan?: string; invite?: string; page?: number } = {}) => {
     loadCtrl.current?.abort()
     const ctrl = new AbortController()
     loadCtrl.current = ctrl
@@ -463,19 +494,28 @@ export default function AdminPage() {
           {
             q: (opts.q ?? query) || undefined,
             plan: (opts.plan ?? planFilter) || undefined,
+            inviteCode: (opts.invite ?? inviteFilter) || undefined,
             limit: PAGE_SIZE,
             offset: wantedPage * PAGE_SIZE,
           },
           ctrl.signal,
         ),
         adminApi.getTrial(),
+        // 链接表给归因列/筛选器/批量指派用。拉不到会进那句"N 项没加载出来"的
+        // 提示，但界面照常可用：归因列退化成显示原始 code（仍然看得出谁挂在哪，
+        // 只是不好读），两个下拉只剩固定选项。allSettled 保证它挂掉不连累用户表。
+        // The link list feeds the attribution column, the filter and the bulk
+        // assign box. A failure is not fatal: the column falls back to the raw
+        // code — still correct, just unreadable — and the two dropdowns are left
+        // with their fixed options. allSettled keeps it from taking the table down.
+        adminApi.listInviteLinks(),
       ])
       // 这一批已经被后来的一次 load 取代：getTrial 没有 signal、照样会成功返回，若继续
       // 往下走就会用上一次的数据把新的一次盖掉——正是这里要防的那件事。
       // Superseded by a later load: getTrial carries no signal and still resolves, so
       // falling through would overwrite the newer load's data with this one's.
       if (loadCtrl.current !== ctrl) return
-      const [usersRes, trialRes] = results
+      const [usersRes, trialRes, linksRes] = results
       setPage(wantedPage)
       if (usersRes.status === 'fulfilled') {
         setUsers(usersRes.value.users)
@@ -483,6 +523,7 @@ export default function AdminPage() {
         setDrafts(Object.fromEntries(usersRes.value.users.map((u) => [u.id, toDraft(u)])))
       }
       if (trialRes.status === 'fulfilled') setSavedTrialEnabled(trialRes.value.trialEnabled)
+      if (linksRes.status === 'fulfilled') setInviteLinks(linksRes.value.links)
       const firstErr = results.find((r) => r.status === 'rejected') as PromiseRejectedResult | undefined
       if (firstErr) {
         const failed = results.filter((r) => r.status === 'rejected').length
@@ -517,6 +558,26 @@ export default function AdminPage() {
     setSelectedIds(new Set())
     load({ page: 0 })
   }
+
+  // 归因筛选改一下就立刻查，不用再点一次「搜索」：它是个下拉，选完就是明确的
+  // 意图，而下拉改了表格不动会让人以为没生效。新值走 opts 传进去——setState
+  // 是异步的，load() 里读到的还会是旧值。
+  // The attribution filter queries on change instead of waiting for the search
+  // button: picking from a dropdown is already an unambiguous intent, and a
+  // table that doesn't move reads as broken. The new value goes through opts
+  // because setState is async and load() would otherwise read the old one.
+  const changeInviteFilter = (value: string) => {
+    setInviteFilter(value)
+    setSelectedIds(new Set())
+    load({ invite: value, page: 0 })
+  }
+
+  // code → 链接备注。链接拉不到、或者用户挂着一条已被删掉的码时退回显示码本身，
+  // 绝不显示空白——空白会被读成"没有归因"，而那是另一回事。
+  // code → label, falling back to the code itself when the link list is missing
+  // or the code is unknown. Never blank: blank reads as "no attribution", which
+  // is a different fact.
+  const linkLabel = (code: string) => inviteLinks.find((l) => l.code === code)?.label || code
 
   const goToPage = (next: number) => {
     setSelectedIds(new Set())
@@ -561,7 +622,7 @@ export default function AdminPage() {
   // disagree — which is how "the dialog said plan, the request said admin"
   // happens.
   const bulkPayload = () => {
-    const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null }> = {}
+    const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; inviteCode: string | null }> = {}
     const changes: string[] = []
     if (bulkRole) {
       payload.role = bulkRole as UserRole
@@ -574,6 +635,11 @@ export default function AdminPage() {
     if (bulkSetExpiry) {
       payload.planExpiresAt = bulkExpiry ? new Date(`${bulkExpiry}T00:00:00Z`).toISOString() : null
       changes.push(t('admin.changeExpiry', { value: bulkExpiry || t('admin.neverExpires') }))
+    }
+    if (bulkInvite) {
+      const clearing = bulkInvite === BULK_CLEAR_INVITE
+      payload.inviteCode = clearing ? null : bulkInvite
+      changes.push(t('admin.changeInvite', { value: clearing ? t('admin.inviteNone') : linkLabel(bulkInvite) }))
     }
     return { payload, changes }
   }
@@ -591,7 +657,7 @@ export default function AdminPage() {
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const applyBulk = async () => {
-    if (!bulkRole && !bulkPlan && !bulkSetExpiry) return
+    if (!bulkRole && !bulkPlan && !bulkSetExpiry && !bulkInvite) return
     setBulkConfirm(false)
     setBulkSaving(true)
     try {
@@ -603,6 +669,7 @@ export default function AdminPage() {
       setBulkPlan('')
       setBulkSetExpiry(false)
       setBulkExpiry('')
+      setBulkInvite('')
       load()
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
@@ -785,6 +852,16 @@ export default function AdminPage() {
           onChange={setPlanFilter}
           options={[{ value: '', label: t('signals.all') }, ...PLAN_OPTIONS.map((p) => ({ value: p, label: p }))]}
         />
+        <span className="text-xs text-neutral-500">{t('admin.colInvite')}</span>
+        <Select
+          value={inviteFilter}
+          onChange={changeInviteFilter}
+          options={[
+            { value: '', label: t('signals.all') },
+            { value: NO_INVITE, label: t('admin.inviteNone') },
+            ...inviteLinks.map((l) => ({ value: l.code, label: l.label })),
+          ]}
+        />
         <button type="submit" className="btn-primary px-5 py-2 text-sm">{t('admin.search')}</button>
         <span className="ml-auto text-xs text-neutral-500">{t('admin.totalCount', { n: total })}</span>
       </form>
@@ -824,9 +901,25 @@ export default function AdminPage() {
               onChange={(e) => setBulkExpiry(e.target.value)}
             />
           )}
+          <span className="text-xs text-neutral-500">{t('admin.colInvite')}</span>
+          {/* 停用的链接照样列出来：归因是历史事实，把人补挂到一条已下线的合作
+              链接下是正当操作（那条链接的数据还要继续看）。
+              Retired links stay in the list: attribution is a historical fact and
+              backfilling onto a link that is no longer handed out is legitimate —
+              its numbers are still being read. */}
+          <Select
+            value={bulkInvite}
+            onChange={setBulkInvite}
+            openUpward
+            options={[
+              { value: '', label: t('admin.bulkNoChange') },
+              { value: BULK_CLEAR_INVITE, label: t('admin.inviteClear') },
+              ...inviteLinks.map((l) => ({ value: l.code, label: l.label })),
+            ]}
+          />
           <button
             className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
-            disabled={(!bulkRole && !bulkPlan && !bulkSetExpiry) || bulkSaving}
+            disabled={(!bulkRole && !bulkPlan && !bulkSetExpiry && !bulkInvite) || bulkSaving}
             onClick={() => setBulkConfirm(true)}
           >
             {bulkSaving ? t('common.loading') : t('admin.bulkApply')}
@@ -848,7 +941,7 @@ export default function AdminPage() {
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-sm text-neutral-500">{t('admin.noUsers')}</div>
         ) : (
-          <table className="w-full min-w-[900px] text-left text-sm">
+          <table className="w-full min-w-[1020px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
                 <th className="px-4 py-3">
@@ -874,6 +967,14 @@ export default function AdminPage() {
                 <th className="px-4 py-3 font-medium">{t('admin.colPlan')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colExpiresAt')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colNote')}</th>
+                {/* 归因列：这个人算在哪条邀请链接名下，也就是哪个代理能看到他。
+                    只读——改它走批量指派（勾一个人也走那条路），免得一张表里
+                    多出第五个会写库的控件。
+                    Which link this user counts towards, i.e. whose agent page
+                    they appear on. Read-only; changes go through bulk assign
+                    (ticking one row works), rather than adding a fifth
+                    write-capable control to this table. */}
+                <th className="whitespace-nowrap px-4 py-3 font-medium">{t('admin.colInvite')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colMt5Count')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colLastActive')}</th>
                 <th className="px-4 py-3 font-medium">{t('admin.colAction')}</th>
@@ -988,6 +1089,13 @@ export default function AdminPage() {
                         onChange={(e) => updateDraft(u.id, { planNote: e.target.value })}
                       />
                     </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-xs">
+                      {u.inviteCode ? (
+                        <span className="text-neutral-200" title={u.inviteCode}>{linkLabel(u.inviteCode)}</span>
+                      ) : (
+                        <span className="text-neutral-600">{t('admin.inviteNone')}</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center font-mono text-xs text-neutral-300">{u.mt5AccountCount}</td>
                     <td className="px-4 py-3 text-xs text-neutral-400">{fmtTime(u.lastActiveAt)}</td>
                     <td className="px-4 py-3">
@@ -1042,6 +1150,14 @@ export default function AdminPage() {
       {bulkConfirm && (() => {
         const { changes } = bulkPayload()
         const promoting = bulkRole === 'admin'
+        // 指派归因 = 把这些人的邮箱交给那个代理（/agent 的名单页返回邮箱）。
+        // 这是本操作唯一对外可见、且撤不回来的后果——撤销只能停止继续显示，
+        // 看过的人已经看过了。所以它和"提权成管理员"一样进确认框正文。
+        // Assigning attribution hands these people's email addresses to that
+        // agent (the /agent list returns them). It is the one outward-visible,
+        // unrecallable consequence here — undoing only stops future display —
+        // so it goes in the dialog body, like the promote-to-admin warning.
+        const assigningInvite = !!bulkInvite && bulkInvite !== BULK_CLEAR_INVITE
         return (
           <ConfirmModal
             center
@@ -1057,7 +1173,8 @@ export default function AdminPage() {
               // ConfirmModal renders `message` in a plain <p> that collapses
               // them. Preserving them would mean changing ConfirmModal's styling,
               // which every one of its dozen call sites would inherit.
-              (promoting ? ' ' + t('admin.bulkConfirmAdminWarn') : '')
+              (promoting ? ' ' + t('admin.bulkConfirmAdminWarn') : '') +
+              (assigningInvite ? ' ' + t('admin.bulkConfirmInviteWarn', { agent: linkLabel(bulkInvite) }) : '')
             }
             confirmLabel={t('admin.bulkApply')}
             onConfirm={() => void applyBulk()}

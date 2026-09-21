@@ -239,6 +239,20 @@ class AdminUserOut(BaseModel):
     # plan alone, a banned PRO and an active PRO look identical in the console.
     disabledAt: datetime | None = None
     disabledReason: str | None = None
+    # 注册归因：这个用户算在哪条邀请链接名下（invite_links.code），也就是哪个
+    # 代理能在 /agent 页看到他。列表里必须看得见——看不见就没法核对批量指派改
+    # 对了没有，而这个字段此前只有数据库里有，后台任何页面都读不到它。
+    # 这里只回码不回链接备注：备注是 invite_links 那张表的字段，会被改名，
+    # 跟着快照到用户行上迟早对不上。前端本来就要拉链接列表做下拉，映射成
+    # 名字在那边做。
+    # Signup attribution: which invite link (invite_links.code) this user counts
+    # towards — i.e. which agent sees them on /agent. It has to be visible in the
+    # list, or there is no way to check that a bulk assignment landed on the right
+    # people; until now the column existed only in the database. Only the code is
+    # returned, never the link's label: labels get renamed, and a snapshot of one
+    # on the user row would drift. The frontend already fetches the link list for
+    # its dropdown and maps code to name there.
+    inviteCode: str | None = None
 
 
 class AdminUserDisableIn(BaseModel):
@@ -261,6 +275,19 @@ class AdminUserUpdate(BaseModel):
     # tell "omitted" from "explicitly set to null" instead of a sentinel.
     planExpiresAt: datetime | None = Field(default=None)
     planNote: str | None = Field(default=None, max_length=256)
+    # 注册归因码。语义同 planExpiresAt：不传 = 不动；显式传 null = 清除归因
+    # （那个代理从此看不到这个人）；传字符串 = 改挂到这条链接下，码必须在
+    # invite_links 里真实存在，否则 400——写进一个不存在的码不会报错，只会让
+    # 这个人从此不属于任何代理，且没有任何地方会提示。
+    # 刻意**不**连带改 plan_note：备注常是手写的，归因与备注是两件事，要一起
+    # 改就在同一次批量里把两个字段都传上。
+    # Attribution code. Same convention as planExpiresAt: omitted = unchanged,
+    # explicit null = clear it (that agent stops seeing this user), a string =
+    # reassign to that link. The code must exist in invite_links or this 400s —
+    # writing an unknown code raises nothing and would silently orphan the user.
+    # Deliberately does not touch plan_note: notes are often hand-written, and
+    # the two are separate facts. Send both fields if you want both changed.
+    inviteCode: str | None = Field(default=None, max_length=64)
 
 
 class VisibilityPatchIn(BaseModel):

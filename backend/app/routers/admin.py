@@ -22,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
-from app.models import AdminAuditLog, MT5Account, PageVisitorDay, PageViewStat, User
+from app.models import AdminAuditLog, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
 from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
@@ -72,6 +72,13 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # keep this file's call sites untouched, exactly like _log_change below.
 _resolve_range_or_422 = resolve_range_or_422
 
+# 用户列表里「筛出没有归因的人」的哨兵值。真码是 8 位、字母表
+# ("23456789abcdefghjkmnpqrstuvwxyz") 里没有 o，所以 "none" 既不够长也不合法，
+# 永远不可能和某条真链接的 code 撞上。
+# Sentinel for "show unattributed users" in the list filter. Real codes are 8
+# characters from an alphabet without "o", so "none" can never collide with one.
+NO_INVITE = "none"
+
 
 def _like_escape(value: str) -> str:
     """把 LIKE 的元字符转义掉，供 `ilike(..., escape="\\\\")` 使用。
@@ -110,6 +117,7 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
         mt5AccountCount=account_count,
         disabledAt=u.disabled_at,
         disabledReason=u.disabled_reason,
+        inviteCode=u.invite_code,
     )
 
 
@@ -118,6 +126,12 @@ def list_users(
     q: str | None = Query(default=None, max_length=128, description="按邮箱或手机号模糊搜索 / fuzzy search by email or phone"),
     plan: str | None = Query(default=None),
     role: str | None = Query(default=None),
+    invite_code: str | None = Query(
+        default=None,
+        alias="inviteCode",
+        max_length=64,
+        description='按注册归因筛选；传 "none" 筛出完全没有归因的人 / filter by attribution, "none" = unattributed',
+    ),
     limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -160,6 +174,16 @@ def list_users(
         query = query.filter(User.plan == plan)
     if role:
         query = query.filter(User.role == role)
+    if invite_code:
+        # 「未归因」必须能单独筛出来：批量指派的常见起手式就是"把这批还没归因
+        # 的人挂到某个代理下"，没有这一档就只能翻页用眼睛找空格。
+        # Unattributed needs a filter of its own: "assign these unattributed
+        # people to an agent" is the common opening move, and without it the only
+        # way to find them is to page through looking for blanks.
+        if invite_code == NO_INVITE:
+            query = query.filter(User.invite_code.is_(None))
+        else:
+            query = query.filter(User.invite_code == invite_code.strip().lower())
 
     total = query.count()
     rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
@@ -184,6 +208,82 @@ def list_users(
 # router）。这里保留同名别名，本文件几十处调用点不动。
 # Audit logging lives in services/audit.py now; same-named alias keeps call sites.
 _log_change = log_change
+
+
+def _resolve_invite_code(db: Session, raw: str | None) -> str | None:
+    """把管理端传来的归因码归一并校验，返回要写进 users.invite_code 的值。
+
+    None 或空串 = 清除归因。码一律 strip + lower 后再查：invite_links.code 本身
+    全小写，而人从后台复制粘贴时常常带上空格或大小写（invite.py 的
+    _normalize_code 出于同样理由存在）。
+
+    码在 invite_links 里不存在就 400。这一条是整个功能里最要紧的校验：写进一个
+    不存在的码不会报任何错，只会让这批人从此不属于任何代理，而代理页只会表现为
+    "人数莫名其妙少了"，没有任何地方会提示。
+
+    Normalize and validate an attribution code from the admin console, returning
+    the value to write into users.invite_code. None or empty clears it. Codes are
+    stripped and lowercased before lookup — invite_links.code is lowercase, while
+    a code pasted out of the console often carries whitespace or case (the same
+    reason _normalize_code exists in invite.py).
+
+    An unknown code 400s. This is the check that matters most here: writing one
+    raises nothing and simply orphans everyone in the batch, and the agent page
+    would just show inexplicably fewer people.
+    """
+    if raw is None:
+        return None
+    code = raw.strip().lower()
+    if not code:
+        return None
+    if db.query(InviteLink.id).filter(InviteLink.code == code).first() is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"邀请码不存在：{code} / No invite link with code {code}",
+        )
+    return code
+
+
+def _apply_user_fields(db: Session, admin: User, target: User, fields: dict) -> None:
+    """把一份已 exclude_unset 的字段字典落到一个用户上，每个真的要改的字段各写
+    一条审计。单用户 PATCH 与批量 PATCH 共用本函数。
+
+    收敛成一处而不是两边各写一遍：这两段此前是逐字重复的，加第五个字段（归因码）
+    时只改一边不会有任何报错——批量那条路径会安静地忽略这个字段，管理员勾了十个
+    人点保存、提示"已更新 10 位"，而归因一个都没写进去。同一个文件里 _user_out
+    的注释讲的是同一件事。
+
+    Apply an exclude_unset field dict to one user, writing one audit row per field
+    that actually changes. Shared by the single-user and bulk PATCH handlers.
+
+    One definition rather than two: these bodies were duplicated verbatim, and
+    adding a fifth field (the attribution code) to only one of them raises
+    nothing — the bulk path would quietly drop it, reporting "10 updated" while
+    writing no attribution at all. See _user_out's comment in this file for the
+    same lesson.
+    """
+    if "role" in fields and fields["role"] is not None:
+        _log_change(db, admin.id, target.id, "role", target.role, fields["role"])
+        target.role = fields["role"]
+    if "plan" in fields and fields["plan"] is not None:
+        _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
+        target.plan = fields["plan"]
+        # 管理员手动改等级视为权威操作，覆盖任何试用状态。
+        # An admin's manual plan change is authoritative and overrides any trial state.
+        target.plan_is_trial = False
+    if "planExpiresAt" in fields:
+        _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
+        target.plan_expires_at = fields["planExpiresAt"]
+    if "planNote" in fields:
+        _log_change(db, admin.id, target.id, "plan_note", target.plan_note, fields["planNote"])
+        target.plan_note = fields["planNote"]
+    if "inviteCode" in fields:
+        # 传进来的已经是 _resolve_invite_code 校验过的值（调用方负责校验一次，
+        # 而不是每个目标各查一遍库）。
+        # Already validated by _resolve_invite_code — the caller checks once
+        # rather than re-querying per target.
+        _log_change(db, admin.id, target.id, "invite_code", target.invite_code, fields["inviteCode"])
+        target.invite_code = fields["inviteCode"]
 
 
 def _log_settings_diff(db: Session, admin_id: str, prefix: str, old: dict, new: dict) -> None:
@@ -223,14 +323,14 @@ def bulk_update_users(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """批量调整多个用户的角色/等级/到期时间/备注，逻辑与单个用户的 PATCH 完全一致，
+    """批量调整多个用户的角色/等级/到期时间/备注/注册归因，逻辑与单个用户的 PATCH 完全一致，
     只是对一批目标各跑一遍；每个用户每个实际变化的字段仍各写一条审计日志——
     批量操作不会因为"批量"而降低可追责性。
 
     注册路由时必须排在 PATCH /users/{{user_id}} 之前：否则 "bulk" 会被当成
     user_id 匹配到那条参数化路由上。
 
-    Bulk-adjust role/plan/expiry/note for multiple users at once — same logic
+    Bulk-adjust role/plan/expiry/note/attribution for several users at once — same logic
     as the single-user PATCH, just run per target; every field that actually
     changes on every user still gets its own audit row. A bulk operation
     doesn't get less traceable just for being bulk.
@@ -242,23 +342,16 @@ def bulk_update_users(
     if not fields:
         raise HTTPException(status_code=400, detail="没有要修改的字段 / No fields to update")
 
+    # 归因码在进循环**之前**校验一次：码是错的就整批都不动，而不是改到第三个
+    # 人时抛 400、留下前两个已改、后面没改的半截状态。
+    # Validate the code once before the loop: a bad code aborts the whole batch
+    # rather than 400-ing on the third target and leaving the first two changed.
+    if "inviteCode" in fields:
+        fields["inviteCode"] = _resolve_invite_code(db, fields["inviteCode"])
+
     targets = db.query(User).filter(User.id.in_(body.userIds)).all()
     for target in targets:
-        if "role" in fields and fields["role"] is not None:
-            _log_change(db, admin.id, target.id, "role", target.role, fields["role"])
-            target.role = fields["role"]
-        if "plan" in fields and fields["plan"] is not None:
-            _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
-            target.plan = fields["plan"]
-            # 管理员手动改等级视为权威操作，覆盖任何试用状态。
-            # An admin's manual plan change is authoritative and overrides any trial state.
-            target.plan_is_trial = False
-        if "planExpiresAt" in fields:
-            _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
-            target.plan_expires_at = fields["planExpiresAt"]
-        if "planNote" in fields:
-            _log_change(db, admin.id, target.id, "plan_note", target.plan_note, fields["planNote"])
-            target.plan_note = fields["planNote"]
+        _apply_user_fields(db, admin, target, fields)
     db.commit()
     return {"updated": len(targets)}
 
@@ -270,30 +363,18 @@ def update_user(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """调整某用户的角色 / 订阅等级 / 到期时间 / 备注，每个实际变化的字段各写一条审计日志。
-    Adjust a user's role / plan / expiry / note; each field that actually
-    changes gets its own audit log row."""
+    """调整某用户的角色 / 订阅等级 / 到期时间 / 备注 / 注册归因，每个实际变化的字段各写一条审计日志。
+    Adjust a user's role / plan / expiry / note / attribution; each field that
+    actually changes gets its own audit log row."""
     target = db.query(User).filter(User.id == user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在 / User not found")
 
     fields = body.model_dump(exclude_unset=True)
+    if "inviteCode" in fields:
+        fields["inviteCode"] = _resolve_invite_code(db, fields["inviteCode"])
 
-    if "role" in fields and fields["role"] is not None:
-        _log_change(db, admin.id, target.id, "role", target.role, fields["role"])
-        target.role = fields["role"]
-    if "plan" in fields and fields["plan"] is not None:
-        _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
-        target.plan = fields["plan"]
-        # 管理员手动改等级视为权威操作，覆盖任何试用状态。
-        # An admin's manual plan change is authoritative and overrides any trial state.
-        target.plan_is_trial = False
-    if "planExpiresAt" in fields:
-        _log_change(db, admin.id, target.id, "plan_expires_at", target.plan_expires_at, fields["planExpiresAt"])
-        target.plan_expires_at = fields["planExpiresAt"]
-    if "planNote" in fields:
-        _log_change(db, admin.id, target.id, "plan_note", target.plan_note, fields["planNote"])
-        target.plan_note = fields["planNote"]
+    _apply_user_fields(db, admin, target, fields)
 
     db.commit()
     db.refresh(target)

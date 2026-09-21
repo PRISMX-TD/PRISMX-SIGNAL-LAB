@@ -1040,13 +1040,18 @@ export const adminApi = {
   // AdminPage.load aborts the previous query on every new one, killing the race
   // at the source rather than filtering stale results afterwards.
   listUsers: (
-    params: { q?: string; plan?: string; role?: string; limit?: number; offset?: number } = {},
+    // inviteCode: 传某条链接的 code 只看它带来的人；传 'none' 只看完全没有归因的人
+    // （真码是 8 位、字母表里没有 o，'none' 永远撞不上）。
+    // inviteCode: a link's code shows only its signups; 'none' shows only
+    // unattributed users (real codes are 8 chars from an alphabet without "o").
+    params: { q?: string; plan?: string; role?: string; inviteCode?: string; limit?: number; offset?: number } = {},
     signal?: AbortSignal,
   ) => {
     const qs = new URLSearchParams()
     if (params.q) qs.set('q', params.q)
     if (params.plan) qs.set('plan', params.plan)
     if (params.role) qs.set('role', params.role)
+    if (params.inviteCode) qs.set('inviteCode', params.inviteCode)
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
@@ -1054,7 +1059,7 @@ export const adminApi = {
   },
   updateUser: (
     userId: string,
-    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null }>
+    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null }>
   ) =>
     request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
@@ -1062,7 +1067,9 @@ export const adminApi = {
     }),
   bulkUpdateUsers: (
     userIds: string[],
-    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null }>
+    // inviteCode: 传 code = 改挂到那条链接下；显式传 null = 清除归因；不传 = 不动。
+    // inviteCode: a code reassigns, explicit null clears, omitted leaves it alone.
+    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null }>
   ) =>
     request<{ updated: number }>('/admin/users/bulk', {
       method: 'PATCH',

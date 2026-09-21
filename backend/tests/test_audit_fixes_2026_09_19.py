@@ -276,7 +276,7 @@ def test_all_zero_query_does_not_match_every_phone(db_session):
     _mk_user(db_session, "p1@x.io", phone="+60123456789")
     _mk_user(db_session, "p2@x.io", phone="+60987654321")
 
-    out = list_users(q="000", plan=None, role=None, limit=50, offset=0, db=db_session, _admin=admin)
+    out = list_users(q="000", plan=None, role=None, invite_code=None, limit=50, offset=0, db=db_session, _admin=admin)
     assert out["total"] == 0
 
 
@@ -288,10 +288,10 @@ def test_like_wildcards_in_the_query_are_literal(db_session):
     _mk_user(db_session, "a_b@x.io")
 
     # "a_b" 只能命中真的带下划线的那个，不能靠 _ 通配到 "ab"
-    out = list_users(q="a_b", plan=None, role=None, limit=50, offset=0, db=db_session, _admin=admin)
+    out = list_users(q="a_b", plan=None, role=None, invite_code=None, limit=50, offset=0, db=db_session, _admin=admin)
     assert {u["email"] for u in out["users"]} == {"a_b@x.io"}
     # "%" 同理，不是"匹配所有"
-    assert list_users(q="%", plan=None, role=None, limit=50, offset=0, db=db_session, _admin=admin)["total"] == 0
+    assert list_users(q="%", plan=None, role=None, invite_code=None, limit=50, offset=0, db=db_session, _admin=admin)["total"] == 0
 
 
 def test_phone_suffix_search_still_works(db_session):
@@ -300,7 +300,7 @@ def test_phone_suffix_search_still_works(db_session):
 
     admin = _mk_user(db_session, "a@x.io", role="admin")
     _mk_user(db_session, "p@x.io", phone="+60123456789")
-    out = list_users(q="0123456789", plan=None, role=None, limit=50, offset=0, db=db_session, _admin=admin)
+    out = list_users(q="0123456789", plan=None, role=None, invite_code=None, limit=50, offset=0, db=db_session, _admin=admin)
     assert {u["email"] for u in out["users"]} == {"p@x.io"}
 
 
