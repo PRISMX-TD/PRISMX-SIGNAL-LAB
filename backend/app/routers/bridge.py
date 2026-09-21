@@ -33,7 +33,7 @@ from app.services.push_dispatch import (
     EVENT_ORDER_REJECTED,
     dispatch_event_push_async,
 )
-from app.services import bridge_version_check, bridge_wake
+from app.services import bridge_version_check, bridge_wake, close_all
 from app.services.account_type import SOURCE_SELF, apply_self_reported, classify_account_with_source
 from app.services.settings_store import (
     get_account_type_settings,
@@ -769,6 +769,17 @@ async def bridge_poll(
     for payload in voided_payloads:
         await manager.push_to_client(user.id, payload)
 
+    # 作废掉的若是一键平仓的子指令，整批到齐后补发那条汇总通知——桥接一直没上线
+    # 的那一批就是在这里收尾的，否则用户只会在订单页看到一片"已取消"。
+    # If any voided command belonged to a close-all batch, close that batch's
+    # summary here; a batch the bridge never fetched ends its life on this path.
+    if any(close_all.is_close_all((p.get("data") or {}).get("clientOrderId")) for p in voided_payloads):
+        await run_in_threadpool(
+            close_all.push_summaries_for_children,
+            db, user.id,
+            [(p.get("data") or {}).get("clientOrderId") for p in voided_payloads],
+        )
+
     # 账号在线状态：仅变化时推送 / account status: push only on change
     await _push_accounts_status_if_changed(user.id, online_logins, balances)
 
@@ -983,6 +994,17 @@ async def bridge_result(
         return {"ok": True, "duplicate": True}
 
     await manager.push_to_client(user.id, order_update_payload(order))
+
+    # 一键平仓的子指令：逐条不推，整批回执齐了由 close_all 发一条汇总。十笔仓位
+    # 十条通知既吵又看不出结果，而"全部平仓"这个动作用户只做了一次。
+    # Close-all children: no per-command push; close_all sends one summary once
+    # the whole batch has resolved. Ten positions must not mean ten notifications
+    # for what the user experienced as a single action.
+    if close_all.is_close_all(order.client_order_id):
+        await run_in_threadpool(
+            close_all.push_summary_for_child, db, user.id, order.client_order_id
+        )
+        return {"ok": True}
 
     # Web Push 通知（若用户开启了对应事件类型）：跳过自动仓管生成的指令——
     # 那类指令已经在触发那一刻（auto_manage.evaluate_positions）单独推送过

@@ -512,6 +512,34 @@
   color: var(--text);
 }
 
+/* ── 全部平仓 / close-all（持仓区标题行右端）──
+   克制：一圈发丝线 + 跌色文字，悬停才上色块。它不可撤销、一次动很多张仓位，
+   所以要好找，但不能比单张卡上的平仓按钮更抢眼——按错的代价不对等。
+   Restrained on purpose: hairline outline and down-coloured text, filling only on
+   hover. Irreversible and wide-reaching, so easy to find yet never louder than the
+   per-card close — the cost of a mis-click isn't symmetric. */
+.ord-closeall {
+  align-self: center;
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(var(--down-rgb) / 0.4);
+  color: var(--down);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.ord-closeall:hover:not(:disabled) {
+  background: rgb(var(--down-rgb) / 0.14);
+  color: var(--down);
+}
+.ord-closeall:active:not(:disabled) { transform: translateY(1px); }
+.ord-closeall:disabled { opacity: 0.5; cursor: default; }
+
 /* ── 持仓区标题里的计数 / count in the section title ── */
 .ord-sec-n {
   margin-left: 8px;
@@ -1061,6 +1089,10 @@
     gap: 2px 14px;
   }
   .ord-sec h3 { font-size: 16px; }
+  /* 手机上把热区抬到 36px：桌面的 30px 在手指下太窄，而这一行在 375px
+     下恰好排满（标题 / 买卖 / 按钮），再窄就只能靠 flex-wrap 折行。
+     Bigger touch target on phones; the row is exactly full at 375px and wraps below that. */
+  .ord-closeall { height: 36px; padding: 0 16px; }
   .ord-p-after { margin-top: 16px; }
 
   /* 状态芯片：同样压成一条横滑，六个芯片不再折成两行 /

@@ -11,7 +11,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,8 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.schemas import (
+    CloseAllOut,
+    CloseAllRequest,
     ClosePositionRequest,
     ModifyPositionRequest,
     OrderOut,
@@ -29,7 +31,7 @@ from app.services.connection_manager import manager
 from app.services.deps import (get_current_user, is_account_online,
                                validate_order, validate_sl_tp_direction)
 from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot, symbol_match_set
-from app.services import bridge_wake
+from app.services import bridge_wake, close_all
 from app.services.gateway_binding import not_removed
 from app.services.gateway_client import run_on_main_loop
 # 网关执行与订单载荷都搬到了 services（2026-09-06）：自动仓管与 routers/bridge 现在
@@ -643,6 +645,75 @@ def close_position(
     return result
 
 
+@router.post("/close-all", response_model=CloseAllOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
+def close_all_positions(
+    request: Request,
+    req: CloseAllRequest,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """一键平仓：把当前持仓（可限定单个账号）一次全部排成 CLOSE 指令。
+
+    平仓对象取自后端自己的持仓快照（connection_manager，桥接 ~1.5 秒 / 网关 2 秒
+    上报一次），不取客户端传来的列表——客户端那份也是这里推过去的，让它回传只是
+    多一次可被篡改的往返。
+
+    返回的是**受理**回执而不是成交结果：网关账号的执行放进后台（单笔最坏 65 秒，
+    十笔串起来必然超时），桥接账号的由桥接轮询取走，两边的结果都沿既有的
+    ORDER_UPDATE / POSITIONS 推送回前端。整批完成后再发一条汇总 Web Push，逐条
+    的那份在 routers/bridge 里按前缀跳过——一次"全部平仓"只该响一次。
+
+    Close every open position (optionally scoped to one account) in one batch.
+    The position set comes from the backend's own snapshot rather than the
+    client's copy. The response acknowledges acceptance, not fills: gateway
+    execution runs off-request and results arrive over the existing pushes, with
+    a single summary push once the whole batch resolves.
+    """
+    # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
+    _assert_account_owned(db, user.id, req.mt5Login)
+
+    positions = manager.get_positions(user.id)
+    batch, created, skipped = close_all.queue(
+        db, user.id, req.clientOrderId, req.mt5Login, positions
+    )
+
+    if not created:
+        # 一笔都没排下去：要么范围内本来就没持仓，要么全都已经有平仓指令在途。
+        # 后者不是错误（连点第二下），照常返回受理回执，由前端说清楚。
+        # Nothing queued: either nothing is open in scope, or every position
+        # already has a close in flight (a double tap). Neither is an error.
+        if skipped == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="当前没有可平仓的持仓 / No open positions to close",
+            )
+        return CloseAllOut(
+            batchId=batch, requested=skipped, queued=0, skipped=skipped, orders=[]
+        )
+
+    # 落库成功就叫醒长轮询中的桥接，别等它下一拍才发现有活 / wake the long poll
+    bridge_wake.notify(user.id)
+
+    gw_logins = close_all.gateway_logins(db, user.id)
+    gw_ids = [o.id for o in created if o.mt5_login and o.mt5_login in gw_logins]
+    if gw_ids:
+        # 响应发出之后才跑（Starlette 的 BackgroundTasks）。同步函数会被放到线程池，
+        # 而那时请求的 DB 会话已经关闭，所以后台任务自己开一个新会话。
+        # Runs after the response is sent; the request's session is already closed
+        # by then, so the task opens its own.
+        background.add_task(close_all.execute_gateway_batch, user.id, batch, gw_ids)
+
+    return CloseAllOut(
+        batchId=batch,
+        requested=len(created) + skipped,
+        queued=len(created),
+        skipped=skipped,
+        orders=[_serialize(o) for o in created],
+    )
+
+
 @router.post("/modify", response_model=OrderOut)
 @limiter.limit(settings.RATE_LIMIT_ORDER)
 def modify_position(
@@ -726,6 +797,18 @@ async def stale_order_monitor_loop() -> None:
             for o in voided:
                 db.refresh(o)
                 out.append((o.user_id, order_update_payload(o)))
+            # 作废的若是一键平仓的子指令，这一批就此收尾——补发那条汇总通知，
+            # 否则"桥接从头到尾没上线"的一批只会在订单页留下一片"已取消"，
+            # 而按下按钮的人始终不知道其实一笔都没平。
+            # A voided close-all child ends its batch here; send the summary the
+            # ack path would otherwise have sent, so "nothing actually closed"
+            # doesn't stay silent.
+            by_user: dict[str, list[str]] = {}
+            for o in voided:
+                if close_all.is_close_all(o.client_order_id):
+                    by_user.setdefault(o.user_id, []).append(o.client_order_id)
+            for user_id, cids in by_user.items():
+                close_all.push_summaries_for_children(db, user_id, cids)
             return out
         finally:
             db.close()

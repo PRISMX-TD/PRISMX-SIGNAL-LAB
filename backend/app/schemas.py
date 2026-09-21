@@ -1523,6 +1523,40 @@ class OrderOut(BaseModel):
     updatedAt: datetime
 
 
+class CloseAllRequest(BaseModel):
+    """一键平仓：把范围内的持仓全部排成 CLOSE 指令。
+
+    clientOrderId 是**整批**的编号，服务端会给每条子指令拼成
+    `ca_<clientOrderId>#<ticket>`；40 字符的上限是给前缀、分隔符和票号留位置
+    （子指令仍要落进 64 字符的 client_order_id 列）。
+    clientOrderId identifies the *batch*; children are `ca_<id>#<ticket>`, and
+    the 40-char cap leaves room for the prefix, separator and ticket inside the
+    64-char client_order_id column.
+    """
+    clientOrderId: str = Field(min_length=1, max_length=40)
+    # 只平这个账号的仓；不传表示当前用户名下全部账号
+    # Scope to one account; omitted means every account of this user
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
+
+
+class CloseAllOut(BaseModel):
+    """一键平仓的受理回执。
+
+    注意这是"已受理"，不是"已成交"：网关账号的执行放在后台（单笔最坏 65 秒），
+    桥接账号的由桥接轮询取走，结果统一沿 ORDER_UPDATE / POSITIONS 推送回来。
+    An acceptance receipt, not a fill report — execution happens off the request
+    and results arrive over the existing pushes.
+    """
+    batchId: str
+    # 范围内看到的持仓数 / positions seen in scope
+    requested: int
+    # 本次新排下去的平仓指令数 / close commands queued by this call
+    queued: int
+    # 已有平仓指令在途、本次跳过的仓位数 / positions already being closed
+    skipped: int
+    orders: list[OrderOut] = []
+
+
 # ---------- 工单系统 / Ticket System ----------
 
 class TicketCreate(BaseModel):

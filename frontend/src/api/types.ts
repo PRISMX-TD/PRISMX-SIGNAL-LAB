@@ -769,6 +769,22 @@ export interface Order {
   updatedAt: string
 }
 
+// 一键平仓的受理回执。注意是「已受理」不是「已成交」：网关账号的执行在后端
+// 后台跑（单笔最坏 65 秒），桥接账号的由桥接轮询取走，结果统一沿 ORDER_UPDATE /
+// POSITIONS 推送回来——所以这里没有成交价，也不该等它。
+// Acceptance receipt for close-all, not a fill report: execution happens off the
+// request on the backend and results arrive over the existing pushes.
+export interface CloseAllResult {
+  batchId: string
+  // 范围内看到的持仓数 / positions seen in scope
+  requested: number
+  // 本次新排下去的平仓指令数 / close commands queued by this call
+  queued: number
+  // 已有平仓指令在途、本次跳过的仓位数 / positions already being closed
+  skipped: number
+  orders: Order[]
+}
+
 export interface MT5Account {
   login: string
   server?: string | null

@@ -28,7 +28,7 @@ import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
-import { baseSymbol, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
+import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
 import type { ClosedTrade, Order, OrderStatus, Position } from '../api/types'
 import ConfirmModal from '../components/ConfirmModal'
 import PositionCard from '../components/PositionCard'
@@ -39,6 +39,7 @@ import OnboardingCard from '../components/OnboardingCard'
 import PageHead from '../components/PageHead'
 import AccountMast from '../components/AccountMast'
 import { useIsPhone } from '../utils/useMediaQuery'
+import { useBackToClose } from '../utils/useBackToClose'
 import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 import { formatMarginLevel } from '../components/order/orderMath'
@@ -436,6 +437,40 @@ export default function OrdersPage() {
     ? `${activeAccount.login} · ${activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '')}`.replace(/ · $/, '')
     : ''
 
+  // 一键平仓。一个请求就干完，不在这里循环调 /orders/close：循环会在页面被切走
+  // 时半途而废，还共用下单那个按 IP 的限流桶，仓位多时可能只平掉一半。
+  // 接口回的是“已受理”而不是“已成交”：成交随持仓推送把卡拿掉，与单张平仓同一套体感。
+  // One request instead of a loop over /orders/close, which a page switch would
+  // abandon and which shares the per-IP order rate-limit bucket. The response
+  // acknowledges acceptance; fills arrive over the positions feed as usual.
+  const [confirmCloseAll, setConfirmCloseAll] = useState(false)
+  const [closingAll, setClosingAll] = useState(false)
+  useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
+  // 确认框开着时最后一笔仓位没了（止损止盈触发、自动仓管、另一台设备平掉）：
+  // 把框收掉，别让用户对着一个“平掉 0 笔持仓”的问题按确认。
+  // Dismiss the dialog if the last position goes while it's open (a stop firing,
+  // auto-management, another device) rather than asking to close nothing.
+  useEffect(() => {
+    if (visiblePositions.length === 0) setConfirmCloseAll(false)
+  }, [visiblePositions.length])
+
+  const doCloseAll = async () => {
+    setConfirmCloseAll(false)
+    setClosingAll(true)
+    try {
+      const res = await orderApi.closeAll({
+        clientOrderId: clientOrderId(),
+        mt5Login: selectedLogin ?? null,
+      })
+      if (res.queued > 0) showToast(t('orders.closeAll.sent', { count: res.queued }), 'info')
+      else showToast(t('orders.closeAll.busy'), 'info')
+    } catch (e) {
+      showToast(e instanceof Error ? localizeApiError(e.message) : t('orders.closeAll.failed'), 'error')
+    } finally {
+      setClosingAll(false)
+    }
+  }
+
   // 一张回执单 / one receipt slip
   const renderSlip = (o: Order, i: number) => {
     const meta = symbolMeta(baseSymbol(o.symbol))
@@ -680,6 +715,22 @@ export default function OrdersPage() {
                 )}
               </div>
             )}
+            {/* 全部平仓：与它作用的那些仓位同一个标题行，有仓才出现。不做成主按钮：
+                这是个不可撤销且一次动很多张仓的动作，应该好找、但不应该比单张卡上的平仓更显眼。
+                Close-all sits on the same heading row as the positions it acts on and
+                only exists when there are any. Deliberately not a primary button: it
+                is irreversible and touches many positions, so it should be easy to
+                find but never louder than the per-card close. */}
+            {visiblePositions.length > 0 && (
+              <button
+                type="button"
+                className="ord-closeall"
+                disabled={closingAll}
+                onClick={() => setConfirmCloseAll(true)}
+              >
+                {t('orders.closeAll.btn')}
+              </button>
+            )}
           </div>
           {!isPhone && <p className="ord-p">{t('orders.positionsScopeHint')}</p>}
           {visiblePositions.length === 0 ? (
@@ -714,6 +765,22 @@ export default function OrdersPage() {
               values and reasonably concludes it leaked across accounts or
               failed to save. Hence the divider plus an explicit scope note. */}
           <AutoManageCard isPro={isPro} scopeHint={t('orders.autoManageScopeHint')} />
+
+          {confirmCloseAll && (
+            <ConfirmModal
+              title={t('orders.closeAll.title')}
+              message={t('orders.closeAll.msg', {
+                account: accountLabel || (selectedLogin ?? ''),
+                count: visiblePositions.length,
+                pnl: `${posSummary.pnl >= 0 ? '+' : ''}${posSummary.pnl.toFixed(2)}`,
+              })}
+              confirmLabel={t('orders.closeAll.confirm')}
+              danger
+              busy={closingAll}
+              onConfirm={doCloseAll}
+              onCancel={() => setConfirmCloseAll(false)}
+            />
+          )}
         </>
       )}
 

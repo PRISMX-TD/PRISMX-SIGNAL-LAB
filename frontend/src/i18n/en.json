@@ -851,6 +851,15 @@
     },
     "positions": "Open Positions",
     "positionsScopeHint": "Only shows positions opened via PRISMX orders; positions you open manually in the MT5 client never appear here and are never affected by actions here.",
+    "closeAll": {
+      "btn": "Close all",
+      "title": "Close every position?",
+      "msg": "Closes all {{count}} position(s) on {{account}} at market. Floating P&L right now is {{pnl}}. This cannot be undone.",
+      "confirm": "Close all",
+      "sent": "{{count}} close order(s) submitted; positions disappear as they fill",
+      "busy": "These positions are already being closed",
+      "failed": "Could not submit the close-all request"
+    },
     "am": {
       "be": {
         "pre": "Once open profit reaches",
