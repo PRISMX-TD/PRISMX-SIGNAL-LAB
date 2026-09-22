@@ -27,6 +27,15 @@ interface Props {
   digitsFor: (symbol: string) => number
   onToast: (msg: string, kind: 'success' | 'error' | 'info') => void
   className?: string
+  // 一键平仓的作用范围，必须与传进来的 positions 同一个口径（见 ChartsPage 的
+  // accountPositions）：null = 不限账号，正是单账号 / 数据没带 login 时列表的范围。
+  // 两者一旦不一致，按钮就会平掉屏幕上看不见的仓位。
+  // Close-all scope; must match exactly how `positions` was filtered (see
+  // ChartsPage's accountPositions). null = every account, which is precisely the
+  // list's scope for a single-account user or login-less rows. If the two drift,
+  // the button closes positions that aren't on screen.
+  mt5Login?: string | null
+  accountLabel?: string
 }
 
 type Tab = 'positions' | 'orders'
@@ -37,8 +46,10 @@ type Tab = 'positions' | 'orders'
 // A pending dangerous action. Full close had a ConfirmModal while partial close
 // and cancel fired straight away — three comparably risky actions in one row with
 // inconsistent confirmation. Unified 2026-09-19 into one queue that also covers a
-// modify which would clear an existing SL/TP.
+// modify which would clear an existing SL/TP, and 2026-09-22's close-all.
+// 一键平仓（2026-09-22）也走这个队列，不另开一个确认框。
 type Pending =
+  | { kind: 'closeAll' }
   | { kind: 'close'; position: Position }
   | { kind: 'partial'; position: Position; volume: number }
   | { kind: 'cancel'; order: Order }
@@ -58,8 +69,11 @@ const FRESH_MS = 1400
 // 挂载后这段时间内出现的仓位视为首屏加载，不算"新成交"，不高亮。
 // Rows arriving this soon after mount are the initial load, not a fresh fill.
 const FRESH_GRACE_MS = 3000
+// busyId 里代表"一键平仓正在发"的哨兵值（其余值是 p-<ticket> / o-<id>）。
+// Sentinel busyId for the in-flight close-all (other values are p-<ticket> / o-<id>).
+const CLOSE_ALL_ID = 'close-all'
 
-export default function PositionsDock({ positions, orders, digitsFor, onToast, className = '' }: Props) {
+export default function PositionsDock({ positions, orders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '' }: Props) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('positions')
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -245,6 +259,39 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     }
   }
 
+  // 一键平仓：一个请求排完整批指令（后端 POST /orders/close-all），不在这里循环调
+  // closePosition——循环共用下单那个按 IP 的限流桶，仓位多时可能只平掉一半；
+  // 且每条回执都会单独推一条通知，而后端那条路径整批只响一次（见 services/close_all.py）。
+  // 接口只回"已受理"，所以这里把看得见的仓位全部标成"平仓中"，等持仓推送把行拿掉
+  // ——与单行平仓一模一样的体感。只标本次真的排下去的那几笔（queued）意义不大，
+  // 因为被跳过的那几笔本来就已经在平了（skipped），整批都该是“平仓中”。
+  // One request queues the whole batch (POST /orders/close-all) instead of looping
+  // closePosition here: the loop shares the per-IP order rate-limit bucket and one
+  // notification per receipt, while the backend path notifies once per batch. The
+  // response only acknowledges, so every visible row is marked "closing" and waits
+  // for the positions feed — identical to how a single close behaves.
+  const closeAllPositions = async () => {
+    setBusyId(CLOSE_ALL_ID)
+    const tickets = positions.map((p) => p.ticket).filter((tk): tk is number => !!tk)
+    try {
+      const res = await orderApi.closeAll({ clientOrderId: clientOrderId(), mt5Login })
+      for (const tk of tickets) {
+        const p = positions.find((x) => x.ticket === tk)
+        markClosing(tk, p?.volume ?? 0, false)
+      }
+      onToast(
+        res.queued > 0
+          ? String(t('orders.closeAll.sent', { count: res.queued }))
+          : String(t('orders.closeAll.busy')),
+        'info',
+      )
+    } catch (e) {
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('orders.closeAll.failed')), 'error')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const modifyPosition = async (p: Position, sl: number, tp: number) => {
     if (!p.ticket) return
     setBusyId(`p-${p.ticket}`)
@@ -303,6 +350,21 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
             {t('charts.dock.colPnl')}
             <b className={pnlSum >= 0 ? 'up' : 'down'}>{pnlSum >= 0 ? '+' : ''}{pnlSum.toFixed(2)}</b>
           </span>
+        )}
+        {/* 全部平仓：只在持仓页签且有仓时出现。文案与订单页共用 orders.closeAll.*，
+            不在 charts.dock.* 下再抄一份——同一个动作两个入口，文案要是两份就会各自漂移。
+            Close-all appears on the positions tab only. Wording is shared with the
+            orders page (orders.closeAll.*) rather than copied under charts.dock.*:
+            one action with two entry points must not carry two copies of the text. */}
+        {tab === 'positions' && positions.length > 0 && (
+          <button
+            type="button"
+            className="term-dk-closeall"
+            disabled={busyId === CLOSE_ALL_ID}
+            onClick={() => setPending({ kind: 'closeAll' })}
+          >
+            {t('orders.closeAll.btn')}
+          </button>
         )}
       </div>
 
@@ -481,10 +543,24 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
 
       {pending && (() => {
         const sideOf = (side: string) => String(side === 'BUY' ? t('charts.dock.buy') : t('charts.dock.sell'))
-        // 四种危险动作共用一个确认框；文案全部由既有键拼出，不新造字符串。
-        // One dialog for all four dangerous actions, worded from existing keys.
-        const view = pending.kind === 'close'
-          ? {
+        // 五种危险动作共用一个确认框；文案全部由既有键拼出，不新造字符串。
+        // （原来是一条四层嵌套三元，加到五种就读不动了，改成提前返回。）
+        // One dialog for all five dangerous actions, worded from existing keys.
+        const view = ((): { title: string; message: string; label: string; busyId: string } => {
+          if (pending.kind === 'closeAll') {
+            return {
+              title: String(t('orders.closeAll.title')),
+              message: String(t('orders.closeAll.msg', {
+                account: accountLabel || mt5Login || '',
+                count: positions.length,
+                pnl: `${pnlSum >= 0 ? '+' : ''}${pnlSum.toFixed(2)}`,
+              })),
+              label: String(t('orders.closeAll.confirm')),
+              busyId: CLOSE_ALL_ID,
+            }
+          }
+          if (pending.kind === 'close') {
+            return {
               title: String(t('charts.dock.confirmCloseTitle')),
               message: String(t('charts.dock.confirmCloseMsg', {
                 symbol: displaySymbol(pending.position.symbol),
@@ -494,48 +570,52 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               label: String(t('charts.dock.close')),
               busyId: `p-${pending.position.ticket}`,
             }
-          : pending.kind === 'partial'
-            ? {
-                title: String(t('charts.dock.closeLots', { lots: pending.volume })),
-                message: String(t('charts.dock.confirmCloseMsg', {
-                  symbol: displaySymbol(pending.position.symbol),
-                  side: sideOf(pending.position.side),
-                  volume: pending.volume,
-                })),
-                label: String(t('charts.dock.close')),
-                busyId: `p-${pending.position.ticket}`,
-              }
-            : pending.kind === 'cancel'
-              ? {
-                  title: String(t('charts.dock.cancel')),
-                  message: `${displaySymbol(pending.order.symbol)} · ${sideOf(pending.order.side)} ${pending.order.volume}`,
-                  label: String(t('charts.dock.cancel')),
-                  busyId: `o-${pending.order.id}`,
-                }
-              : {
-                  title: String(t('charts.posmark.confirmModifyTitle')),
-                  // 每条被清掉的腿写一行「从 X 改至 —」，用的是拖动改单那条同样的
-                  // 模板，所以「清除」这件事是看得见的，而不是藏在留空语义里。
-                  // One line per cleared leg reusing the drag-modify template, so
-                  // the removal is visible rather than implied by an empty field.
-                  message: (['sl', 'tp'] as const)
-                    .filter((leg) => {
-                      const cur = leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit
-                      const next = leg === 'sl' ? pending.sl : pending.tp
-                      return !!cur && cur > 0 && next === 0
-                    })
-                    .map((leg) => String(t('charts.posmark.confirmModifyMsg', {
-                      symbol: displaySymbol(pending.position.symbol),
-                      side: sideOf(pending.position.side),
-                      ticket: String(pending.position.ticket ?? ''),
-                      kind: String(leg === 'sl' ? t('charts.ticket.sl') : t('charts.ticket.tp')),
-                      from: String((leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit) ?? '—'),
-                      to: '—',
-                    })))
-                    .join(' · '),
-                  label: String(t('charts.dock.modify')),
-                  busyId: `p-${pending.position.ticket}`,
-                }
+          }
+          if (pending.kind === 'partial') {
+            return {
+              title: String(t('charts.dock.closeLots', { lots: pending.volume })),
+              message: String(t('charts.dock.confirmCloseMsg', {
+                symbol: displaySymbol(pending.position.symbol),
+                side: sideOf(pending.position.side),
+                volume: pending.volume,
+              })),
+              label: String(t('charts.dock.close')),
+              busyId: `p-${pending.position.ticket}`,
+            }
+          }
+          if (pending.kind === 'cancel') {
+            return {
+              title: String(t('charts.dock.cancel')),
+              message: `${displaySymbol(pending.order.symbol)} · ${sideOf(pending.order.side)} ${pending.order.volume}`,
+              label: String(t('charts.dock.cancel')),
+              busyId: `o-${pending.order.id}`,
+            }
+          }
+          return {
+            title: String(t('charts.posmark.confirmModifyTitle')),
+            // 每条被清掉的腿写一行「从 X 改至 —」，用的是拖动改单那条同样的
+            // 模板，所以「清除」这件事是看得见的，而不是藏在留空语义里。
+            // One line per cleared leg reusing the drag-modify template, so
+            // the removal is visible rather than implied by an empty field.
+            message: (['sl', 'tp'] as const)
+              .filter((leg) => {
+                const cur = leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit
+                const next = leg === 'sl' ? pending.sl : pending.tp
+                return !!cur && cur > 0 && next === 0
+              })
+              .map((leg) => String(t('charts.posmark.confirmModifyMsg', {
+                symbol: displaySymbol(pending.position.symbol),
+                side: sideOf(pending.position.side),
+                ticket: String(pending.position.ticket ?? ''),
+                kind: String(leg === 'sl' ? t('charts.ticket.sl') : t('charts.ticket.tp')),
+                from: String((leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit) ?? '—'),
+                to: '—',
+              })))
+              .join(' · '),
+            label: String(t('charts.dock.modify')),
+            busyId: `p-${pending.position.ticket}`,
+          }
+        })()
         return (
           <ConfirmModal
             title={view.title}
@@ -546,7 +626,8 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
             onConfirm={() => {
               const act = pending
               setPending(null)
-              if (act.kind === 'close') void closePosition(act.position)
+              if (act.kind === 'closeAll') void closeAllPositions()
+              else if (act.kind === 'close') void closePosition(act.position)
               else if (act.kind === 'partial') void closePosition(act.position, act.volume)
               else if (act.kind === 'cancel') void cancelOrder(act.order)
               else void modifyPosition(act.position, act.sl, act.tp)

@@ -220,6 +220,16 @@ export default function ChartsPage() {
     () => (multiAccount && activeAccount ? orders.filter((o) => String(o.mt5Login ?? '') === String(activeAccount.login)) : orders),
     [multiAccount, activeAccount, orders],
   )
+  // 停靠区「全部平仓」的作用范围，必须跟 accountPositions 一个口径：多账户才限定
+  // 到选中账户，否则不限（null）——单账户或数据没带 login 时，列表本来就是全部。
+  // 两者一旦不一致，那个按钮就会平掉屏幕上看不见的仓位。
+  // The dock's close-all scope, kept in lockstep with accountPositions: narrowed to
+  // the selected account only when there are several, otherwise unscoped (null),
+  // which is exactly the list's own scope. Drift here closes off-screen positions.
+  const closeAllLogin = multiAccount && activeAccount ? activeAccount.login : null
+  const closeAllLabel = activeAccount
+    ? `${activeAccount.login}${activeAccount.company ? ` · ${activeAccount.company}` : ''}`
+    : ''
 
   // 云端偏好加载完成后覆盖本地初始值 / override initial values when cloud prefs arrive
   useEffect(() => {
@@ -483,7 +493,7 @@ export default function ChartsPage() {
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
         {!isFullscreen && (
           <div className="hidden lg:flex lg:flex-shrink-0 lg:flex-col">
-            <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} />
+            <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
           </div>
         )}
 
@@ -553,7 +563,7 @@ export default function ChartsPage() {
                 </>
               )}
               {sheet === 'positions' && (
-                <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} />
+                <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
               )}
             </div>
           </div>
