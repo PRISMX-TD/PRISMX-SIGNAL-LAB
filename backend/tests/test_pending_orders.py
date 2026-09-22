@@ -27,7 +27,7 @@ from pydantic import ValidationError
 from app.models import Order, User
 from app.schemas import OrderRequest
 from app.services.gateway_client import TradeRsp
-from app.services.gateway_execute import apply_trade_result
+from app.services.gateway_execute import _failure_message, apply_trade_result
 from app.services.order_payload import OPENED_POSITION, serialize_order
 from app.services.pending_orders import PENDING_TYPE_NAMES, pending_row
 
@@ -182,3 +182,46 @@ def test_pending_type_names_cover_exactly_the_four_pending_types():
         "BUY_LIMIT", "SELL_LIMIT", "BUY_STOP", "SELL_STOP",
     }
     assert 0 not in PENDING_TYPE_NAMES and 1 not in PENDING_TYPE_NAMES
+
+
+# ---- 5. 网关版本落后时的措辞 / wording when the gateway build lags ------------
+#
+# 网关是手动拷 .cs 重新编译部署的，不跟着 main 自动走，所以「后端已上线、网关还没
+# 编译」是**必然出现**的一段窗口，不是异常。用户在这段时间里点挂单，看到的那句话
+# 是这个产品对他唯一的交代。
+
+def test_unknown_endpoint_reads_as_a_version_gap_not_as_raw_gateway_text():
+    """旧网关回的 404 不能原样透出来。
+
+    网关对没见过的路径回 `{"ok": false, "error": "not_found", "message": "未知接口:/trade/pending"}`，
+    body 里没有 retcode。照旧拼法会得到一句以冒号开头的 `": 未知接口:/trade/pending"`——
+    用户既看不懂那是什么，也做不了任何事。
+    """
+    order = _pending_order()
+
+    apply_trade_result(order, TradeRsp(ok=False, retcode="", message="未知接口:/trade/pending",
+                                       deal=0, order=0, price=0.0, error="not_found"))
+
+    assert order.status == "REJECTED", (
+        "请求连端点都没命中，可以确定什么都没执行——这正是 REJECTED（可以安全重下）的含义；"
+        "记成 FAILED 会让界面叫用户去 MT5 核对一张根本不存在的挂单"
+    )
+    assert "未知接口" not in order.message
+    assert not order.message.startswith(":")
+    assert "网关" in order.message and "未发出" in order.message
+
+
+def test_failure_message_never_starts_with_a_stray_colon():
+    """网关的 WriteError 那几条路径（401 / 403 / 404）body 里都没有 retcode。"""
+    assert _failure_message(
+        TradeRsp(ok=False, retcode="", message="组不在白名单", deal=0, order=0, price=0.0)
+    ) == "组不在白名单"
+    # 两者都有时仍按老格式拼，运维 grep 日志的习惯不变。
+    assert _failure_message(
+        TradeRsp(ok=False, retcode="MT_RET_REQUEST_INVALID_PRICE", message="买入限价必须低于当前卖价",
+                 deal=0, order=0, price=0.0)
+    ) == "MT_RET_REQUEST_INVALID_PRICE: 买入限价必须低于当前卖价"
+    # 只有返回码、没有文案时也不能拖一个尾巴冒号。
+    assert _failure_message(
+        TradeRsp(ok=False, retcode="MT_RET_ERR_NOTFOUND", message="", deal=0, order=0, price=0.0)
+    ) == "MT_RET_ERR_NOTFOUND"

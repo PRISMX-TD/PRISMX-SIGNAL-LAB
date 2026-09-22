@@ -75,6 +75,30 @@ PLACED_UNCONFIRMED = "MT_RET_REQUEST_PLACED_UNCONFIRMED"
 _UNKNOWN_OUTCOME_ERRORS = frozenset({"timeout", "request_failed"})
 
 
+# 网关对没见过的路径回的 error 值（HttpServer 的 default 分支，body 里没有 retcode）。
+# 它唯一的含义是「这台网关的版本不认识这个接口」——网关是手动拷 .cs 重新编译部署的
+# （不跟着 main 自动走），所以后端先上线、网关还没编译的空窗期是**必然会出现**的，
+# 不是异常情况。
+# The gateway's `error` for an unknown path. It means exactly one thing: that gateway
+# build predates this endpoint. The gateway is deployed by hand (copy the .cs, rebuild)
+# rather than riding main, so a window where the backend is ahead of it is expected.
+_GATEWAY_UNKNOWN_ENDPOINT = "not_found"
+
+
+def _failure_message(rsp: TradeRsp) -> str:
+    """把回执拼成一句给用户看的失败原因。
+
+    不能直接写 `rsp.retcode + ": " + rsp.message`：网关的 WriteError 那条路径
+    （401 token 不对、403 组不在白名单、404 未知接口）body 里根本没有 retcode，
+    于是拼出来的是一句以冒号开头的 `": 未知接口:/trade/pending"`——界面上就这么显示。
+    Not a plain `retcode + ": " + message`: the gateway's WriteError responses (bad
+    token, group not whitelisted, unknown endpoint) carry no retcode, which produced a
+    message that literally started with a colon.
+    """
+    parts = [p for p in (rsp.retcode, rsp.message) if p]
+    return ": ".join(parts)
+
+
 def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
     """根据 gateway 回执更新订单状态。"""
     if rsp.ok and order.action == "PENDING":
@@ -121,7 +145,29 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
         # blocks further closes on that position. FAILED, so the UI says "check your
         # positions" instead of inviting a retry.
         order.status = "FAILED"
-        order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
+        order.message = _failure_message(rsp)
+    elif rsp.error == _GATEWAY_UNKNOWN_ENDPOINT:
+        # 这台网关的版本还不认识这个接口（典型：挂单已经随 main 上线，而网关的
+        # .cs 还没拷过去重新编译）。原样透出 "未知接口:/trade/pending" 对用户毫无
+        # 意义——他既不知道那是什么，也做不了任何事。说清楚是平台侧还没更新完，
+        # 并且明确「你的单没有发出去」，避免他跑去 MT5 里找一张不存在的挂单。
+        #
+        # 落 REJECTED 而不是 FAILED：请求连端点都没命中，可以确定什么都没执行，
+        # 这正是 REJECTED（可以安全重下）的含义。
+        #
+        # This gateway build predates the endpoint (typically: the feature shipped with
+        # main while the gateway's .cs has not been copied over and rebuilt yet).
+        # Echoing "unknown endpoint:/trade/pending" tells the user nothing they can act
+        # on, so say it is a platform-side version gap and state plainly that nothing
+        # was sent — otherwise they go looking in MT5 for an order that never existed.
+        # REJECTED, not FAILED: the request never reached an endpoint, so it certainly
+        # did not execute, which is exactly what REJECTED means.
+        order.status = "REJECTED"
+        order.message = (
+            "交易网关暂不支持该操作（网关版本待更新），本次指令未发出 / "
+            "the trading gateway does not support this operation yet "
+            "(pending a gateway update); nothing was sent"
+        )
     elif rsp.error in _UNKNOWN_OUTCOME_ERRORS:
         # 网关没回话、或连接在半路断了，都不等于拒绝：这笔可能已经执行
         # （见 call_gateway_idempotent）。落 FAILED 而不是 REJECTED，界面据此提示
@@ -144,10 +190,10 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
         # user told "declined" re-places under a *new* clientOrderId, which the
         # gateway's idempotency cache cannot match — a genuine duplicate position.
         order.status = "FAILED"
-        order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
+        order.message = _failure_message(rsp)
     else:
         order.status = "REJECTED"
-        order.message = rsp.retcode + (": " + rsp.message if rsp.message else "")
+        order.message = _failure_message(rsp)
 
 
 # 一次网关交易调用的时限（秒）。dealer 回执最长 60 秒（gateway.ini 的
