@@ -2587,6 +2587,8 @@
       "swipeHint": "Swipe to rotate",
       "gyroEnable": "Enable tilt reflections",
       "collected": "Collected",
+      "backToCurrent": "Back to current stage",
+      "startPoint": "Granted on sign-up — this level has no stage",
       "vault": "Badge Vault",
       "vaultHint": "Eight tiered badges in bronze, silver and gold · special and limited badges shelved separately · unearned ones show their outline and condition",
       "noEquip": "No badge equipped yet",

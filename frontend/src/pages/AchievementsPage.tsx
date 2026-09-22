@@ -343,6 +343,12 @@ export default function AchievementsPage() {
   const [equipMsg, setEquipMsg] = useState<string | null>(null)
   const [mintIds, setMintIds] = useState<Set<string>>(new Set())
   const [detailBadge, setDetailBadge] = useState<GamificationBadge | null>(null)
+  // 链条上被点开回看的等级（null = 没点过，看默认那一关）。不写进 localStorage：
+  // 回看旧关卡是一次性的好奇，下次再进这一页应该回到「我现在要做什么」。
+  // Which level's stage the user clicked back to (null = none, show the default
+  // stage). Deliberately not persisted: reviewing an old stage is a one-off
+  // curiosity, and the next visit should land back on "what do I do now".
+  const [viewLevel, setViewLevel] = useState<number | null>(null)
   // 只在数据第一次到达时判定一次「哪些勋章要放铸造动画」——之后佩戴/取消
   // 佩戴触发的 setMe 会换新的 badges 数组引用，但不该重新判定一遍（不然乐观
   // 更新一次佩戴态就重放一次铸造动画）。
@@ -468,10 +474,26 @@ export default function AchievementsPage() {
 
   const nextGroup = me.groups.find((g) => g.tasks.some((task) => !task.done))
   const remaining = nextGroup ? nextGroup.tasks.filter((task) => !task.done).length : 0
-  // 关卡序号 = 组在 groups 里的下标 + 1；通往的称号 = 当前等级 + 1。
-  // Stage number = the group's index + 1; the title it leads to = current level + 1.
-  const stageIndex = nextGroup ? me.groups.indexOf(nextGroup) + 1 : me.groups.length
-  const nextTitleKey = LEVEL_KEYS[Math.min(me.level, LEVEL_KEYS.length - 1)]
+  // 关卡与等级的对应：完成第 i 组就升到第 i+2 级（后端 level_of），所以「通往 L 级
+  // 的那一关」就是 groups[L-2]；L=1（入门）是注册即有的起点，没有关卡。
+  // Stage-to-level mapping: clearing group i grants level i+2 (the backend's
+  // level_of), so "the stage that leads to L" is groups[L-2]; L=1 is the sign-up
+  // starting point and has no stage.
+  const groupForLevel = (lv: number) => (lv >= 2 ? me.groups[lv - 2] : undefined)
+  // 没点过链条时看的就是「下一关」，它通向 me.level + 1；满级后没有下一关（null）。
+  // （nextGroup 必定是 groups[me.level - 1]：level_of 从头数到第一组没做完的为止。）
+  // Without a pick, the shown stage is the next one, leading to me.level + 1;
+  // at max level there is none. (nextGroup is always groups[me.level - 1].)
+  const defaultLevel = me.level < LEVEL_KEYS.length ? me.level + 1 : null
+  const shownLevel = viewLevel ?? defaultLevel
+  const shownGroup = shownLevel != null ? groupForLevel(shownLevel) : undefined
+  const shownDone = shownGroup ? shownGroup.tasks.filter((task) => task.done).length : 0
+  // 在回看旧关卡（不是默认那一关）时才给返回入口。满级后没有「当前关卡」
+  // 可返回（五关全通），那时链条就是唯一的导航，再给一个返回链接会点到一片空白。
+  // The "back" affordance only when looking at something other than the default.
+  // At max level there is no current stage to return to (all five cleared), so the
+  // rail is the only navigation and a back link would land on nothing.
+  const canReturn = defaultLevel != null && viewLevel != null && viewLevel !== defaultLevel
   const earnedCount = me.badges.filter((b) => b.earned).length
   // 三层严格按接口的 shelf 分：进阶 / 特殊 / 绝版。空层不渲染。
   // Three shelves strictly by the API's `shelf`; empty shelves are skipped.
@@ -498,14 +520,34 @@ export default function AchievementsPage() {
               ? `${t('gamification.remainingToNext', { count: remaining })} · ${t(`gamification.groups.${nextGroup.group}`)}`
               : t('gamification.maxLevel')}
           </p>
+          {/* 链条上每一级都可点，点一下看「怎么到的这一级」（下方关卡区换成那一关）。
+              已过的关卡在这之前只能看一眼就永远消失，而数据一直都在（/gamification/me
+              回的是全部五组）。aria-current 标的是你实际在哪一级，aria-pressed 标的是你正在看哪一级——
+              两件事不同，别用同一个属性表达。
+              Every level on the rail is clickable and swaps the stage section below to
+              "how you reached that level". Cleared stages used to vanish for good even
+              though the data was always there (/gamification/me returns all five
+              groups). aria-current marks where you actually are; aria-pressed marks
+              what you are looking at — two different facts, two different attributes. */}
           <ol className="ach-rail" aria-label={t('gamification.levelLabel')}>
             {LEVEL_KEYS.map((key, i) => {
               const lv = i + 1
-              const cls = lv < me.level ? 'on' : lv === me.level ? 'on cur' : ''
+              const cls = [
+                lv < me.level ? 'on' : lv === me.level ? 'on cur' : '',
+                viewLevel === lv ? 'sel' : '',
+              ].filter(Boolean).join(' ')
               return (
                 <li key={key} className={cls} aria-current={lv === me.level ? 'step' : undefined}>
-                  <i aria-hidden />
-                  <b>{t(`gamification.levelShort.${key}`)}</b>
+                  <button
+                    type="button"
+                    className="ach-rail-btn"
+                    aria-label={t(`gamification.titles.${key}`)}
+                    aria-pressed={lv === shownLevel}
+                    onClick={() => setViewLevel(lv)}
+                  >
+                    <i aria-hidden />
+                    <b>{t(`gamification.levelShort.${key}`)}</b>
+                  </button>
                 </li>
               )
             })}
@@ -583,21 +625,50 @@ export default function AchievementsPage() {
         </section>
       )}
 
-      {/* ── 当前关卡 / current stage ───────────────────────────── */}
-      {nextGroup && (
+      {/* ── 关卡（默认是下一关，点链条可回看旧关）/ stage ───────────── */}
+      {shownGroup && (
         <section aria-labelledby="ach-stage-title">
           <div className="ach-sec-h">
             <h3 id="ach-stage-title">
-              <b>{t(`gamification.groups.${nextGroup.group}`)}</b>
-              {t('gamification.stage.nth', { n: stageIndex })} · {t('gamification.stage.toward', { title: t(`gamification.titles.${nextTitleKey}`) })}
+              <b>{t(`gamification.groups.${shownGroup.group}`)}</b>
+              {t('gamification.stage.nth', { n: (shownLevel ?? 1) - 1 })} · {t('gamification.stage.toward', { title: t(`gamification.titles.${LEVEL_KEYS[(shownLevel ?? 1) - 1]}`) })}
             </h3>
-            <StageRing done={nextGroup.tasks.length - remaining} total={nextGroup.tasks.length} />
+            <div className="ach-stage-r">
+              {canReturn && (
+                <button type="button" className="ach-link" onClick={() => setViewLevel(null)}>
+                  {t('gamification.stage.backToCurrent')}
+                </button>
+              )}
+              <StageRing done={shownDone} total={shownGroup.tasks.length} />
+            </div>
           </div>
           <ul className="tk-grid">
-            {nextGroup.tasks.map((task, i) => (
+            {shownGroup.tasks.map((task, i) => (
               <TaskTile key={task.id} task={task} index={i} t={t} />
             ))}
           </ul>
+        </section>
+      )}
+
+      {/* 入门（L1）没有关卡：注册就是这一级。点到它时不能什么都不发生——
+          那会像按钮坏了，而不是「这一级本来就没有关卡」。
+          Level 1 has no stage — signing up is the level. Clicking it must say so
+          rather than do nothing, which would read as a broken button. */}
+      {shownLevel === 1 && (
+        <section aria-labelledby="ach-origin-title">
+          <div className="ach-sec-h">
+            <h3 id="ach-origin-title">
+              <b>{t(`gamification.titles.${LEVEL_KEYS[0]}`)}</b>
+              {t('gamification.stage.startPoint')}
+            </h3>
+            {canReturn && (
+              <div className="ach-stage-r">
+                <button type="button" className="ach-link" onClick={() => setViewLevel(null)}>
+                  {t('gamification.stage.backToCurrent')}
+                </button>
+              </div>
+            )}
+          </div>
         </section>
       )}
 

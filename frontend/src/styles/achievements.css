@@ -319,6 +319,46 @@
 }
 .ach-rail .on b { color: #a1a1aa; }
 .ach-rail .cur b { color: #f4f4f5; font-weight: 700; }
+/* 链条变成可点：按钮只是把点和字裹起来撑满整格，不带任何自己的视觉——
+   .on / .cur 的配色规则都括在 li 上，用的是后代选择器，套一层按钮照常命中。
+   （不用 display:contents：产物语法下限是 Chrome 70，那一代它会把按钮从无障碍树里拿掉。）
+   The rail became clickable: the button only wraps the dot and label and fills the
+   grid cell, carrying no visuals of its own — the .on / .cur rules live on the li
+   and are descendant selectors, so an extra wrapper still matches. (Not
+   display:contents: the build floor is Chrome 70, where it drops buttons from the
+   accessibility tree.) */
+.ach-rail-btn {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* 手指/鼠标停上去时只把字提亮，不动点——点的颜色是「达没达到」的事实，
+   不能被悬停态覆写。/ Hover only lifts the label; the dot's colour states a
+   fact (reached or not) and must not be overwritten by a hover style. */
+.ach-rail-btn:hover b { color: #f4f4f5; }
+.ach-rail-btn:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 4px; border-radius: 10px; }
+/* 正在回看的那一级：点外面一圈紫环。与 .cur 的白心不冲突——一个说「你在哪」、
+   一个说「你在看哪」，可以同时落在同一颗点上。
+   The level being reviewed gets a violet halo, which coexists with .cur's white pip:
+   one says where you are, the other what you are looking at. */
+/* 用 box-shadow 而不是 outline 画这圈：outline 跟随 border-radius 是 Chrome 94 /
+   Safari 16.4 才有的，而产物的语法下限是 Chrome 70——老 WebView 会在圆点外面
+   画出一个方框。比 .on 那圈又大又亮（4px/0.18 → 5px/0.5），小尺寸下也分得出。
+   box-shadow rather than outline: outline only follows border-radius from Chrome 94
+   / Safari 16.4, and the build floor is Chrome 70, where an old WebView would draw a
+   square around the dot. Bigger and brighter than .on's halo so it reads at this size. */
+.ach-rail .sel i { box-shadow: 0 0 0 5px rgba(110, 66, 255, 0.5); }
+.ach-rail .sel b { color: #f4f4f5; }
+
+/* 关卡标题行右侧：返回链接 + 进度环。/ Right side of the stage heading. */
+.ach-stage-r { display: flex; align-items: center; gap: 14px; }
+.ach-stage-r .ach-link { margin-top: 0; white-space: nowrap; }
 
 .ach-stats {
   display: flex;

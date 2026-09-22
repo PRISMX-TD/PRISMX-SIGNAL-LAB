@@ -2585,6 +2585,8 @@
       "swipeHint": "左右滑动切换",
       "gyroEnable": "开启陀螺仪反光",
       "collected": "已收集",
+      "backToCurrent": "返回当前关卡",
+      "startPoint": "注册即达成，这一级没有关卡",
       "vault": "勋章库",
       "vaultHint": "八枚进阶勋章各有铜银金三档 · 特殊与绝版单独陈列 · 未获得的显示轮廓与条件",
       "noEquip": "还没佩戴勋章",
