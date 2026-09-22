@@ -520,34 +520,55 @@ export default function AchievementsPage() {
               ? `${t('gamification.remainingToNext', { count: remaining })} · ${t(`gamification.groups.${nextGroup.group}`)}`
               : t('gamification.maxLevel')}
           </p>
-          {/* 链条上每一级都可点，点一下看「怎么到的这一级」（下方关卡区换成那一关）。
-              已过的关卡在这之前只能看一眼就永远消失，而数据一直都在（/gamification/me
-              回的是全部五组）。aria-current 标的是你实际在哪一级，aria-pressed 标的是你正在看哪一级——
+          {/* 链条上可点的只有「已达成的那几级 + 正在挑战的这一级」，点一下看
+              「怎么到的这一级」（下方关卡区换成那一关）。已过的关卡在这之前只能看
+              一眼就永远消失，而数据一直都在（/gamification/me 回的是全部五组）。
+              再往后的等级不可点：那些门槛属于以后，现在露出来只会把注意力从
+              手头这一关上括走。不可点的那几级渲染成纯展示元素（没有 button），而不是
+              disabled 按钮——它们不是「暂时不能按」，是根本不是控件。
+              aria-current 标的是你实际在哪一级，aria-pressed 标的是你正在看哪一级——
               两件事不同，别用同一个属性表达。
-              Every level on the rail is clickable and swaps the stage section below to
-              "how you reached that level". Cleared stages used to vanish for good even
-              though the data was always there (/gamification/me returns all five
-              groups). aria-current marks where you actually are; aria-pressed marks
-              what you are looking at — two different facts, two different attributes. */}
+              Only reached levels plus the one being challenged are clickable; clicking
+              swaps the stage section below to "how you reached that level". Cleared
+              stages used to vanish for good even though the data was always there
+              (/gamification/me returns all five groups). Levels beyond the current
+              challenge stay inert: those thresholds belong to later, and showing them
+              now only pulls attention off the stage in hand. Locked levels render as
+              plain content rather than a disabled button — they aren't "a control you
+              can't press right now", they aren't controls at all.
+              aria-current marks where you actually are; aria-pressed marks what you
+              are looking at — two different facts, two different attributes. */}
           <ol className="ach-rail" aria-label={t('gamification.levelLabel')}>
             {LEVEL_KEYS.map((key, i) => {
               const lv = i + 1
+              // 可点 = 已达成（含当前级）或正在挑战的下一级。满级时 defaultLevel 为
+              // null，此时 lv <= me.level 已经覆盖全部六级。
+              // Clickable = reached (current included) or the next one being challenged.
+              // At max level defaultLevel is null and lv <= me.level already covers all six.
+              const open = lv <= me.level || lv === defaultLevel
               const cls = [
                 lv < me.level ? 'on' : lv === me.level ? 'on cur' : '',
                 viewLevel === lv ? 'sel' : '',
               ].filter(Boolean).join(' ')
+              const face = (
+                <>
+                  <i aria-hidden />
+                  <b>{t(`gamification.levelShort.${key}`)}</b>
+                </>
+              )
               return (
                 <li key={key} className={cls} aria-current={lv === me.level ? 'step' : undefined}>
-                  <button
-                    type="button"
-                    className="ach-rail-btn"
-                    aria-label={t(`gamification.titles.${key}`)}
-                    aria-pressed={lv === shownLevel}
-                    onClick={() => setViewLevel(lv)}
-                  >
-                    <i aria-hidden />
-                    <b>{t(`gamification.levelShort.${key}`)}</b>
-                  </button>
+                  {open ? (
+                    <button
+                      type="button"
+                      className="ach-rail-btn"
+                      aria-label={t(`gamification.titles.${key}`)}
+                      aria-pressed={lv === shownLevel}
+                      onClick={() => setViewLevel(lv)}
+                    >
+                      {face}
+                    </button>
+                  ) : face}
                 </li>
               )
             })}
