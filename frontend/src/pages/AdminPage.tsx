@@ -43,18 +43,24 @@ const NO_INVITE = 'none'
 // a filter term as a value to write.
 const BULK_CLEAR_INVITE = '__clear__'
 
-// 用户表每页条数。跟后端 routers/admin.py 的 PAGE_SIZE_DEFAULT 对齐（上限
-// PAGE_SIZE_MAX=200），也跟代理页的 PAGE_SIZE 一致——同一套「上一页/下一页」
-// 控件在两边表现一样，管理员不用重新建立手感。
-// 此前这里写死 limit: 100 且没有任何翻页控件：第 101 位之后的用户在后台只能
-// 靠搜索关键字撞，无法浏览；「全选」也只覆盖那 100 条，却看不出来。
-// Rows per page in the user table, matching the backend's PAGE_SIZE_DEFAULT in
-// routers/admin.py (ceiling PAGE_SIZE_MAX=200) and the agent page's PAGE_SIZE,
-// so the same prev/next control behaves identically in both places. This used
-// to be a hard-coded limit: 100 with no pager at all — user 101 onwards was
-// unreachable except by guessing a search term, and "select all" silently
+// 用户表每页条数：管理员自己选，默认 20。后端 `limit` 的上限是 PAGE_SIZE_MAX=200，
+// 三档都在其内。
+// 默认从 50 改成 20（2026-09-22）：这张表一行有七八个控件、一屏放不下 50 行，翻到
+// 底的代价比翻页高；而「全选」勾的是**当前这一页**，一页 50 条时那一勾覆盖的人远
+// 多于屏幕上看得见的，正是批量操作最容易估错人数的地方（见 handleSearch 的注释）。
+// 此前这里写死 limit: 100 且没有任何翻页控件：第 101 位之后的用户在后台只能靠搜索
+// 关键字撞，无法浏览；「全选」也只覆盖那 100 条，却看不出来。
+// Rows per page, chosen by the admin; 20 by default. The backend caps `limit` at
+// PAGE_SIZE_MAX=200, so all three fit.
+// The default dropped from 50 to 20 (2026-09-22): a row here carries seven or
+// eight controls, 50 of them never fit on a screen, and "select all" ticks the
+// current page — at 50 that covers far more people than are visible, which is
+// exactly how a bulk edit's count gets misjudged (see handleSearch's comment).
+// It used to be a hard-coded limit: 100 with no pager at all — user 101 onwards
+// was unreachable except by guessing a search term, and "select all" silently
 // covered only those first 100.
-const PAGE_SIZE = 50
+const PAGE_SIZE_OPTIONS = [10, 20, 50]
+const DEFAULT_PAGE_SIZE = 20
 
 // 后台分为四类，与订单页的 Tab 模式一致：
 // data   看数据（指标、页面访问统计）
@@ -423,6 +429,7 @@ export default function AdminPage() {
   // The invite links: options for the filter and the bulk assign box, and the
   // code → label map for the attribution column. Nobody can read the raw code.
   const [inviteLinks, setInviteLinks] = useState<InviteLink[]>([])
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [savingId, setSavingId] = useState<string | null>(null)
   const { toast, showToast } = useToast()
@@ -475,11 +482,17 @@ export default function AdminPage() {
     loadCtrl.current = null
   }, [])
 
-  const load = async (opts: { q?: string; plan?: string; invite?: string; page?: number } = {}) => {
+  const load = async (opts: { q?: string; plan?: string; invite?: string; size?: number; page?: number } = {}) => {
     loadCtrl.current?.abort()
     const ctrl = new AbortController()
     loadCtrl.current = ctrl
     const wantedPage = opts.page ?? page
+    // 新值走 opts：setState 是异步的，改完每页条数紧接着 load()，这里读到的还是旧值，
+    // 于是第一次请求仍按旧条数发，表格与下拉说的不是一回事。
+    // The new value comes through opts: setState is async, so a load() fired right
+    // after changing the page size would still send the old limit and the table
+    // would disagree with the dropdown.
+    const wantedSize = opts.size ?? pageSize
     setLoading(true)
     try {
       // 用户表与「全局试用是否开着」一起读；后者只给邀请页签用（见 savedTrialEnabled）。
@@ -495,8 +508,8 @@ export default function AdminPage() {
             q: (opts.q ?? query) || undefined,
             plan: (opts.plan ?? planFilter) || undefined,
             inviteCode: (opts.invite ?? inviteFilter) || undefined,
-            limit: PAGE_SIZE,
-            offset: wantedPage * PAGE_SIZE,
+            limit: wantedSize,
+            offset: wantedPage * wantedSize,
           },
           ctrl.signal,
         ),
@@ -517,6 +530,7 @@ export default function AdminPage() {
       if (loadCtrl.current !== ctrl) return
       const [usersRes, trialRes, linksRes] = results
       setPage(wantedPage)
+      setPageSize(wantedSize)
       if (usersRes.status === 'fulfilled') {
         setUsers(usersRes.value.users)
         setTotal(usersRes.value.total)
@@ -572,6 +586,15 @@ export default function AdminPage() {
     load({ invite: value, page: 0 })
   }
 
+  // 改每页条数：回第一页并清空勾选，理由同搜索与翻页（勾的必须是看得见的）。
+  // Changing the page size returns to page one and clears the selection, for the
+  // same reason searching and paging do: what is ticked must be what is visible.
+  const changePageSize = (value: string) => {
+    const next = Number(value)
+    setSelectedIds(new Set())
+    load({ size: next, page: 0 })
+  }
+
   // code → 链接备注。链接拉不到、或者用户挂着一条已被删掉的码时退回显示码本身，
   // 绝不显示空白——空白会被读成"没有归因"，而那是另一回事。
   // code → label, falling back to the code itself when the link list is missing
@@ -595,7 +618,7 @@ export default function AdminPage() {
 
   const allSelected = users.length > 0 && users.every((u) => selectedIds.has(u.id))
   const someSelected = users.some((u) => selectedIds.has(u.id))
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
 
   useEffect(() => {
     if (headerCheckboxRef.current) {
@@ -863,7 +886,21 @@ export default function AdminPage() {
           ]}
         />
         <button type="submit" className="btn-primary px-5 py-2 text-sm">{t('admin.search')}</button>
-        <span className="ml-auto text-xs text-neutral-500">{t('admin.totalCount', { n: total })}</span>
+        {/* 每页条数挨着总数放：两者说的是同一件事（这张表现在给你看多少），
+            而翻页控件在表格下方、滚到底才看得见。
+            Rows-per-page sits next to the total: both answer "how much of this
+            table am I being shown", while the pager is below the table and only
+            visible after scrolling. */}
+        <span className="ml-auto flex items-center gap-2 text-xs text-neutral-500">
+          {t('admin.perPage')}
+          <Select
+            value={String(pageSize)}
+            onChange={changePageSize}
+            ariaLabel={t('admin.perPage')}
+            options={PAGE_SIZE_OPTIONS.map((n) => ({ value: String(n), label: String(n) }))}
+          />
+          {t('admin.totalCount', { n: total })}
+        </span>
       </form>
 
       {/* 批量操作条：勾选至少一位用户后出现 / bulk action bar, shown once ≥1 user is selected */}
@@ -941,10 +978,10 @@ export default function AdminPage() {
         ) : users.length === 0 ? (
           <div className="p-8 text-center text-sm text-neutral-500">{t('admin.noUsers')}</div>
         ) : (
-          <table className="w-full min-w-[1020px] text-left text-sm">
+          <table className="w-full min-w-[880px] text-left text-sm">
             <thead>
               <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
-                <th className="px-4 py-3">
+                <th className="px-3 py-3">
                   <input
                     ref={headerCheckboxRef}
                     type="checkbox"
@@ -954,19 +991,28 @@ export default function AdminPage() {
                     aria-label={t('admin.bulkSelectAll')}
                   />
                 </th>
-                <th className="px-4 py-3 font-medium">{t('admin.colEmail')}</th>
+                {/* 邮箱格里同时放手机号与注册时间：手机号本来占一整列（列宽 100+），
+                    但它不是可改的设置项，把它挤在设置之间等于用最贵的横向空间放
+                    一条只读信息。搜索框本来就同时搜邮箱与手机号，两者同格也更贴近
+                    管理员的心智。表头写成「邮箱 / 手机号」，免得列没了被当成不再显示。
+                    The email cell carries the phone and signup time too. Phone used
+                    to own a full column although it is not an editable setting —
+                    the most expensive horizontal space spent on read-only text. The
+                    search box already matches both, so they belong together. The
+                    header says "Email / Phone" so the missing column doesn't read
+                    as the field being gone. */}
+                <th className="px-3 py-3 font-medium">{t('admin.colEmail')} / {t('admin.colPhone')}</th>
                 {/* 状态列紧跟邮箱：停用是这张表上唯一"人还在不在"的信息，排在角色/
                     等级后面就会被一排下拉框淹没。同一格既是指示灯也是开关。
                     The status column sits right after the email: it is the only
                     "can this person still get in" fact in the table, and further
                     right it drowns among the dropdowns. One cell is both the
                     indicator and the control. */}
-                <th className="px-4 py-3 font-medium">{t('admin.colStatus')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colPhone')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colRole')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colPlan')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colExpiresAt')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colNote')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colStatus')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colRole')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colPlan')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colExpiresAt')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colNote')}</th>
                 {/* 归因列：这个人算在哪条邀请链接名下，也就是哪个代理能看到他。
                     只读——改它走批量指派（勾一个人也走那条路），免得一张表里
                     多出第五个会写库的控件。
@@ -974,10 +1020,10 @@ export default function AdminPage() {
                     they appear on. Read-only; changes go through bulk assign
                     (ticking one row works), rather than adding a fifth
                     write-capable control to this table. */}
-                <th className="whitespace-nowrap px-4 py-3 font-medium">{t('admin.colInvite')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colMt5Count')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colLastActive')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colAction')}</th>
+                <th className="whitespace-nowrap px-3 py-3 font-medium">{t('admin.colInvite')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colMt5Count')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colLastActive')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colAction')}</th>
               </tr>
             </thead>
             <tbody>
@@ -997,7 +1043,7 @@ export default function AdminPage() {
                       disabled ? 'bg-down/[0.07]' : selectedIds.has(u.id) ? 'bg-prism-600/[0.06]' : ''
                     }`}
                   >
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <input
                         type="checkbox"
                         checked={selectedIds.has(u.id)}
@@ -1006,9 +1052,15 @@ export default function AdminPage() {
                         aria-label={u.email}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="max-w-[220px] truncate font-mono text-xs text-neutral-200">{u.email}</div>
-                      <div className="mt-1 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</div>
+                      {/* 手机号：存量用户为空。用「—」而不是留白，否则看起来像渲染坏了。
+                          Empty for grandfathered users; an em dash rather than blank
+                          space, which would read as a rendering bug. */}
+                      <div className="mt-1 whitespace-nowrap font-mono text-[11px] text-neutral-400">
+                        {u.phone || <span className="text-neutral-600">—</span>}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-neutral-500">{fmtTime(u.createdAt)}</div>
                     </td>
                     {/* 状态：开关走全站唯一的 Switch（见 components/Switch.tsx 与
                         设计约定），checked = 账号可用。它不是即时开关——两个方向都
@@ -1020,7 +1072,7 @@ export default function AdminPage() {
                         directions open a confirmation first and the state flips
                         only after the backend agrees, so between press and flip it
                         stays put and spins (busy). */}
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <div className="flex items-center gap-2">
                         <Switch
                           checked={!disabled}
@@ -1050,55 +1102,56 @@ export default function AdminPage() {
                         </div>
                       )}
                     </td>
-                    {/* 手机号：存量用户为空。用「—」而不是留白，否则看起来像渲染坏了。
-                        Empty for grandfathered users; an em dash rather than blank
-                        space, which would read as a rendering bug. */}
-                    <td className="px-4 py-3">
-                      <div className="whitespace-nowrap font-mono text-xs text-neutral-300">
-                        {u.phone || <span className="text-neutral-500">—</span>}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <Select
                         value={d.role}
                         onChange={(v) => updateDraft(u.id, { role: v as UserRole })}
+                        className="select-tight"
                         options={ROLE_OPTIONS.map((r) => ({ value: r, label: r }))}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <Select
                         value={d.plan}
                         onChange={(v) => updateDraft(u.id, { plan: v as UserPlan })}
+                        className="select-tight"
                         options={PLAN_OPTIONS.map((p) => ({ value: p, label: p }))}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3">
                       <input
                         type="date"
-                        className="input w-auto py-1 text-xs"
+                        className="input w-[132px] py-1 text-xs"
                         value={d.planExpiresAt}
                         onChange={(e) => updateDraft(u.id, { planExpiresAt: e.target.value })}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    {/* 占位文字只写「内部备注」，完整的「用户不可见」放进 title：
+                        这一列收窄之后长占位会被截成半句，而截掉的恰好是最要紧的
+                        那半句。
+                        The placeholder is short enough to fit; "not shown to the
+                        user" moved into the title, because the truncated version
+                        cut off exactly the part that matters. */}
+                    <td className="px-3 py-3">
                       <input
                         type="text"
-                        className="input w-40 py-1 text-xs"
+                        className="input w-28 py-1 text-xs"
                         placeholder={t('admin.notePlaceholder')}
+                        title={t('admin.noteHint')}
                         value={d.planNote}
                         onChange={(e) => updateDraft(u.id, { planNote: e.target.value })}
                       />
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-xs">
+                    <td className="whitespace-nowrap px-3 py-3 text-xs">
                       {u.inviteCode ? (
                         <span className="text-neutral-200" title={u.inviteCode}>{linkLabel(u.inviteCode)}</span>
                       ) : (
                         <span className="text-neutral-600">{t('admin.inviteNone')}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-center font-mono text-xs text-neutral-300">{u.mt5AccountCount}</td>
-                    <td className="px-4 py-3 text-xs text-neutral-400">{fmtTime(u.lastActiveAt)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-3 py-3 text-center font-mono text-xs text-neutral-300">{u.mt5AccountCount}</td>
+                    <td className="px-3 py-3 text-xs text-neutral-400">{fmtTime(u.lastActiveAt)}</td>
+                    <td className="px-3 py-3">
                       <div className="flex gap-2">
                         <button
                           className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"

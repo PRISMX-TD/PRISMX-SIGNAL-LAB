@@ -24,6 +24,16 @@
   .select-trigger:hover {
     border-color: var(--line-hi);
   }
+  /* 密排表格里的下拉：选项都是 user/admin/FREE/PRO 这类短词，84px 的通用下限是
+     为长文本留的余量，在管理端用户表那种十列并排的地方每个下拉都白占 20px。
+     只收下限，不动内边距与字号——收了那两样会和同一行的输入框对不齐。
+     Dropdowns in dense tables: the options are short words (user/admin/FREE/PRO),
+     so the generic 84px floor — headroom meant for long labels — just wastes 20px
+     per dropdown in a ten-column admin table. Only the floor changes; padding and
+     font stay, or it would stop lining up with the inputs beside it. */
+  .select-tight .select-trigger {
+    min-width: 64px;
+  }
   /* 表单内的下拉：尺寸对齐 .input，让它和同一表单里的输入框/文本域看起来是一套。
      Form-sized dropdown: matches .input's metrics so it reads as part of the
      same field set as the inputs/textareas around it. */
