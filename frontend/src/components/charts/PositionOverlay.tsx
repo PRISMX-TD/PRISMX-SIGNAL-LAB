@@ -1,10 +1,19 @@
-// 图表持仓标记层：把当前选中账户在本品种上的持仓画到主图上——开仓价、止损、
-// 止盈各一条线（带价格标签），并支持直接拖动止损/止盈线改单：松手即发 MODIFY
-// 指令，与底部持仓面板的"管理"表单走完全同一套后端流程。可在工具栏一键显隐。
-// Position markers layer: draws the selected account's positions for the current
-// symbol onto the main pane — entry / SL / TP lines with price labels — and lets
-// the user drag the SL/TP lines to modify them: dropping sends the same MODIFY
-// command the dock's "manage" form does. Toggleable from the toolbar.
+// 图表订单标记层：把当前选中账户在本品种上的**持仓**与**挂单**画到主图上——
+// 各自的入场价、止损、止盈各一条线（带价格标签）。持仓的止损/止盈线可以直接拖动
+// 改单：松手即发 MODIFY 指令，与底部持仓面板的"管理"表单走完全同一套后端流程。
+// 可在工具栏一键显隐。
+//
+// 挂单的线是**只读**的：后端没有「改挂单」这条指令，画成可拖的会是个骗局。
+// 它们用另一套颜色 + 点线画（见 PENDING_*），因为它们说的是"还没发生的事"——
+// 同一个品种上同时有持仓和挂单时，两组线必须一眼分得开。
+//
+// Order markers layer: draws the selected account's positions **and pending orders**
+// for the current symbol — entry / SL / TP lines with price labels for each. A
+// position's SL/TP lines can be dragged to modify; dropping sends the same MODIFY the
+// dock's "manage" form does. Pending-order lines are read-only (there is no
+// modify-pending command, so a draggable line would be a lie) and painted in their own
+// colours with a dotted stroke, because they describe something that has not happened
+// yet and must be distinguishable at a glance from live positions on the same symbol.
 //
 // 渲染走 lightweight-charts 的 ISeriesPrimitive（与 DrawLayer 一致）；命中与
 // 拖拽用一层默认 pointer-events:none 的透明覆盖层，只有真的悬停到某条止损/
@@ -21,7 +30,7 @@ import type {
   IChartApi, ISeriesApi, IPrimitivePaneView, IPrimitivePaneRenderer,
   AutoscaleInfo, Logical,
 } from 'lightweight-charts'
-import type { Position } from '../../api/types'
+import type { PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
 import { checkSlTp } from '../order/orderMath'
@@ -32,9 +41,72 @@ const isTouchDevice = typeof window !== 'undefined'
   && (window.matchMedia?.('(pointer: coarse)').matches ?? false)
 const TOL = isTouchDevice ? 14 : 6
 
+// 画布调色板是这一层自己的，与 tokens.css 的 --up/--down 刻意不同源：canvas 读不到
+// CSS 变量，而这几条线画在 K 线上，饱和度要比卡片上的数据色更高才压得住。
+// The canvas palette is local on purpose: canvas cannot read CSS variables, and these
+// lines sit on top of candles where they need more saturation than the card tokens.
 const UP_COLOR = '#2ee07e'
 const DOWN_COLOR = '#ff4d67'
 const ENTRY_COLOR = '#22d3ee'
+
+// 挂单用另一套：触发价琥珀色（与持仓的青色入场线一眼分开），止损止盈保持红/绿的
+// **色相**但调浅——方向语义（红=止损、绿=止盈）不能因为换色就丢掉，而"浅一档 + 点线"
+// 恰好说的就是它们还没生效。
+// Pending orders get their own set: amber for the trigger (unmistakable against the
+// cyan entry line), and lighter tints of the same red/green for SL/TP — the direction
+// semantics (red = stop, green = target) must survive the recolour, while "one shade
+// lighter, dotted" is exactly what "not active yet" should look like.
+const PENDING_COLOR = '#f5a524'
+const PENDING_DOWN_COLOR = '#ff9db0'
+const PENDING_UP_COLOR = '#8fe3b4'
+
+// 持仓线用长虚线，挂单线用点线。颜色之外再给一个形状上的差别：色觉障碍用户、
+// 以及截图被压过之后，形状仍然分得开。
+// Positions dash, pending orders dot. A second, non-colour channel so the two groups
+// stay separable for colour-blind users and in a recompressed screenshot.
+const DASH_ENTRY = [2, 3]
+const DASH_LEVEL = [6, 4]
+const DASH_PENDING = [2, 4]
+
+// 标签矩形，用来让同一帧里价位挨得近的标签互相让开（见 _placeLabel）。
+// A drawn label's rect, used to keep labels at nearby prices from stacking.
+interface LabelBox { x: number; y: number; w: number; h: number }
+
+const LABEL_H = 15
+const LABEL_X0 = 6
+// 右边留给价格轴的最新价气泡，标签不许挤进去。
+// Reserved for the price axis's last-price bubble; labels must not reach it.
+const LABEL_RIGHT_GUARD = 70
+
+/**
+ * 给一个标签找一个不与本帧已画标签重叠的横向位置：从最左开始，撞上就挪到那个
+ * 标签的右边再试，实在放不下就原地压着画。
+ *
+ * 为什么需要：一张挂单自带三条线（触发价 / 止损 / 止盈），同一个品种上挂两三张
+ * 单时，价位差十几个点的标签在屏幕上只差几像素，叠在一起就全都读不出来了——
+ * 而"看得见"正是这层标记存在的唯一理由。持仓标记一直有同样的毛病，只是一张
+ * 持仓最多三条线、不容易撞上。
+ *
+ * Find a horizontal slot for a label that does not overlap the ones already drawn this
+ * frame: start at the left, and on a collision hop to the right of the offender. One
+ * pending order brings three lines, so two or three orders on the same symbol put
+ * labels a few pixels apart and they become mutually unreadable — which defeats the
+ * only purpose this layer has. Positions always had the same flaw, just less often.
+ */
+function placeLabel(taken: LabelBox[], y: number, w: number, bw: number): number {
+  let x = LABEL_X0
+  // 每次至多挪 8 次:够躲开一屏里现实可能出现的标签数,又不至于在病态输入下空转。
+  // At most 8 hops: enough for any realistic screenful, bounded for pathological input.
+  for (let i = 0; i < 8; i++) {
+    const hit = taken.find((b) =>
+      Math.abs(b.y - y) < LABEL_H && x < b.x + b.w && x + bw > b.x)
+    if (!hit) break
+    const next = hit.x + hit.w + 4
+    if (next + bw > w - LABEL_RIGHT_GUARD) break
+    x = next
+  }
+  return x
+}
 
 // 改单指令已发出、桥接还没把新值报回来的这段时间里，先按用户拖到的值显示，
 // 免得线"弹回"旧价位看起来像没生效。超过这个时限就放弃等待，回归真实数据。
@@ -53,6 +125,18 @@ interface Marker {
   tp: number | null
 }
 
+/** 一张挂单的三条线。与 Marker 分开放，是因为它**不参与命中判定与拖拽**——
+ *  hitLine 只遍历 markers，挂单混进去就会变成"能拖但拖了没用"。
+ *  Kept apart from Marker because it takes no part in hit-testing or dragging:
+ *  hitLine only walks `markers`, and folding these in would make them look draggable. */
+interface PendingMarker {
+  ticket: number
+  label: string
+  price: number
+  sl: number | null
+  tp: number | null
+}
+
 const keyOf = (ticket: number, kind: LineKind) => `${ticket}:${kind}`
 
 // 渲染模型：一次画完全部持仓标记，比"每条线一个 primitive"少一大堆 attach/
@@ -62,6 +146,7 @@ const keyOf = (ticket: number, kind: LineKind) => `${ticket}:${kind}`
 // only a getter and reads the latest state each frame.
 interface RenderModel {
   markers: Marker[]
+  pending: PendingMarker[]
   digits: number
   hovered: string | null
   dragging: string | null
@@ -108,17 +193,38 @@ class PosPrimitive {
   _render(ctx: CanvasRenderingContext2D, w: number) {
     const series = this._series
     if (!series) return
-    const { markers, digits, hovered, dragging } = this._get()
+    const { markers, pending, digits, hovered, dragging } = this._get()
+    // 本帧已画出的标签框。按画的顺序累积,后画的躲开先画的——所以画序决定了谁
+    // 留在最左边:挂单先画,持仓的标签会被挤到右边一点。持仓才是更该一眼看到的,
+    // 但它的线本身是高亮可拖的,已经足够显眼,让位给标签的可读性更划算。
+    // Label rects already drawn this frame; later labels dodge earlier ones, so paint
+    // order decides who keeps the leftmost slot. Pending orders paint first, nudging
+    // position labels right — positions matter more, but their lines are already the
+    // highlighted, draggable ones, so trading that slot for legibility is the better deal.
+    const taken: LabelBox[] = []
+
+    // 挂单先画：持仓的线是可交互的（悬停加粗、能拖），价位重叠时它压在上面才对。
+    // Pending first: position lines are interactive, so they belong on top when the
+    // two overlap at the same price.
+    for (const q of pending) {
+      this._line(ctx, w, series, q.price, PENDING_COLOR, q.label, DASH_PENDING, false, false, false, taken)
+      if (q.sl != null) {
+        this._line(ctx, w, series, q.sl, PENDING_DOWN_COLOR, `SL ${q.sl.toFixed(digits)}`, DASH_PENDING, false, false, false, taken)
+      }
+      if (q.tp != null) {
+        this._line(ctx, w, series, q.tp, PENDING_UP_COLOR, `TP ${q.tp.toFixed(digits)}`, DASH_PENDING, false, false, false, taken)
+      }
+    }
 
     for (const m of markers) {
-      this._line(ctx, w, series, m.entry, ENTRY_COLOR, entryLabel(m, digits), false, false)
+      this._line(ctx, w, series, m.entry, ENTRY_COLOR, entryLabel(m, digits), DASH_ENTRY, false, false, false, taken)
       if (m.sl != null) {
         const k = keyOf(m.ticket, 'sl')
-        this._line(ctx, w, series, m.sl, DOWN_COLOR, `SL ${m.sl.toFixed(digits)}`, hovered === k, dragging === k)
+        this._line(ctx, w, series, m.sl, DOWN_COLOR, `SL ${m.sl.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken)
       }
       if (m.tp != null) {
         const k = keyOf(m.ticket, 'tp')
-        this._line(ctx, w, series, m.tp, UP_COLOR, `TP ${m.tp.toFixed(digits)}`, hovered === k, dragging === k)
+        this._line(ctx, w, series, m.tp, UP_COLOR, `TP ${m.tp.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken)
       }
     }
   }
@@ -128,18 +234,24 @@ class PosPrimitive {
   // grip while hovered/dragged).
   private _line(
     ctx: CanvasRenderingContext2D, w: number, series: ISeriesApi<'Candlestick'>,
-    price: number, color: string, label: string, hovered: boolean, dragging: boolean,
+    price: number, color: string, label: string, dash: number[],
+    hovered: boolean, dragging: boolean, draggable: boolean, taken: LabelBox[],
   ) {
     const y = series.priceToCoordinate(price) as number | null
     if (y == null) return
     const active = hovered || dragging
-    const draggable = color !== ENTRY_COLOR
+    // draggable 由调用方显式给出。原来这里是 `color !== ENTRY_COLOR`——只要不是入场
+    // 色就当作能拖，于是挂单的止损止盈线一加进来就会画出抓手，暗示一个后端根本
+    // 不存在的动作。
+    // draggable is passed in. It used to be inferred as `color !== ENTRY_COLOR`, which
+    // would have drawn a grip on pending SL/TP lines the moment they were added —
+    // advertising an action the backend does not have.
 
     ctx.save()
     ctx.strokeStyle = color
     ctx.globalAlpha = active ? 1 : 0.85
     ctx.lineWidth = active ? 2 : 1
-    ctx.setLineDash(color === ENTRY_COLOR ? [2, 3] : [6, 4])
+    ctx.setLineDash(dash)
     ctx.beginPath()
     ctx.moveTo(0, y)
     ctx.lineTo(w, y)
@@ -152,7 +264,9 @@ class PosPrimitive {
     ctx.font = '10px ui-monospace, SFMono-Regular, Menlo, monospace'
     ctx.textBaseline = 'middle'
     const tw = ctx.measureText(label).width
-    const bx = 6, bh = 15, bw = tw + 10
+    const bh = LABEL_H, bw = tw + 10
+    const bx = placeLabel(taken, y, w, bw)
+    taken.push({ x: bx, y, w: bw, h: bh })
     ctx.globalAlpha = 1
     ctx.fillStyle = 'rgba(10, 7, 16, 0.82)'
     ctx.fillRect(bx, y - bh / 2, bw, bh)
@@ -210,6 +324,9 @@ interface Props {
   // 已按选中账户过滤好的持仓（ChartsPage 的 accountPositions）；本组件再按品种筛。
   // Positions already filtered by the selected account; filtered by symbol here.
   positions: Position[]
+  // 已按选中账户过滤好的挂单（ChartsPage 的 accountPendingOrders）；同样在这里按品种筛。
+  // Pending orders already filtered by the selected account; filtered by symbol here.
+  pendingOrders: PendingOrder[]
   symbol: string
   // 展示用小数位（拿不到精度时是兜底的 2 位）/ display precision (2 when unknown)
   digits: number
@@ -223,7 +340,7 @@ interface Props {
   onToast: (msg: string, kind: 'success' | 'error' | 'info') => void
 }
 
-export default function PositionOverlay({ chart, series, positions, symbol, digits, exactDigits, visible, onToast }: Props) {
+export default function PositionOverlay({ chart, series, positions, pendingOrders, symbol, digits, exactDigits, visible, onToast }: Props) {
   const { t } = useTranslation()
 
   // 拖拽中的线与其当前价位（未提交），以及已提交待回执的乐观值。
@@ -258,6 +375,28 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
     const base = baseSymbol(symbol)
     return positions.filter((p) => baseSymbol(p.symbol) === base && p.ticket != null && p.entryPrice != null)
   }, [positions, symbol])
+
+  // 挂单按同一套规则筛（券商后缀同样要剥掉）。这里没有乐观值那一套：挂单不能拖着
+  // 改，界面上也没有任何会先改本地再等回执的动作，所以推什么就画什么。
+  // Pending orders filtered the same way (broker suffix stripped too). No optimistic
+  // overlay here: nothing in the UI edits a pending order locally ahead of a receipt,
+  // so what the feed says is what gets drawn.
+  const symPending = useMemo<PendingMarker[]>(() => {
+    const base = baseSymbol(symbol)
+    return pendingOrders
+      .filter((o) => baseSymbol(o.symbol) === base && o.price > 0)
+      .map((o) => ({
+        ticket: o.ticket,
+        // 标签直接写 MT5 的类型名：这四个词（BUY LIMIT / SELL STOP…）是交易员的
+        // 通用语，比翻译过的中文更不容易误读，也和底部「挂单」页签对得上。
+        // The label uses MT5's own type names: those four terms are the trader's lingua
+        // franca, less ambiguous than a translation and consistent with the dock.
+        label: `${o.type.replace('_', ' ')} ${o.volume.toFixed(2)} @ ${o.price.toFixed(digits)}`,
+        price: o.price,
+        sl: o.stopLoss && o.stopLoss > 0 ? o.stopLoss : null,
+        tp: o.takeProfit && o.takeProfit > 0 ? o.takeProfit : null,
+      }))
+  }, [pendingOrders, symbol, digits])
 
   // 标记列表：真实持仓叠加"已提交待回执"的乐观值 + 正在拖动的实时值 + 待确认的拖拽值。
   // Markers: real positions overlaid with in-flight optimistic values, the
@@ -309,8 +448,8 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
   }, [symPositions])
 
   // primitive 每帧读这份快照 / the primitive reads this snapshot each frame
-  const modelRef = useRef<RenderModel>({ markers, digits, hovered, dragging: dragKey })
-  modelRef.current = { markers, digits, hovered, dragging: dragKey }
+  const modelRef = useRef<RenderModel>({ markers, pending: symPending, digits, hovered, dragging: dragKey })
+  modelRef.current = { markers, pending: symPending, digits, hovered, dragging: dragKey }
 
   const primRef = useRef<PosPrimitive | null>(null)
 
@@ -336,7 +475,7 @@ export default function PositionOverlay({ chart, series, positions, symbol, digi
 
   useEffect(() => {
     primRef.current?.requestUpdate()
-  }, [markers, digits, hovered, dragKey])
+  }, [markers, symPending, digits, hovered, dragKey])
 
   // ──── 命中判定 / hit testing ────
   const overlayRef = useRef<HTMLDivElement>(null)

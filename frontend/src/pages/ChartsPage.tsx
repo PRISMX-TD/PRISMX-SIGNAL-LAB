@@ -449,6 +449,7 @@ export default function ChartsPage() {
                 chart={chartRef.current}
                 series={seriesRef.current}
                 positions={accountPositions}
+                pendingOrders={accountPendingOrders}
                 symbol={symbol}
                 digits={decimals}
                 exactDigits={exactDigits}
