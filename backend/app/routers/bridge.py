@@ -694,7 +694,7 @@ def _poll_db_work(
         # to 0.0 above) silently wiped the user's take-profit. Sending null makes the
         # bridge keep the position's current value, while an explicit 0 still clears.
         # Opens are unaffected: there 0 genuinely means "no stop".
-        if action == "MODIFY":
+        if action in ("MODIFY", "MODIFY_PENDING"):
             out_sl = o.sl if o.sl is not None else None
             out_tp = o.tp if o.tp is not None else None
         else:
@@ -715,7 +715,13 @@ def _poll_db_work(
             # Pending-order only: trigger price and MT5 type. Read only when
             # action=PENDING; other commands carry 0/None and older bridges that
             # don't know these keys keep working unchanged.
-            "price": o.price or 0.0,
+            # 改挂单的触发价必须发 null 而不是 0：`or 0.0` 会把「这次不改触发价、
+            # 只动止损」变成「把触发价改成 0」。下挂单那边 0 不可能出现（schema 要求
+            # price > 0），所以只有 MODIFY_PENDING 需要区分。
+            # A MODIFY_PENDING must send null, not 0: `or 0.0` would turn "keep the
+            # trigger, move the stop" into "set the trigger to 0". Placement can never
+            # see 0 (the schema requires price > 0), so only the modify needs the split.
+            "price": (o.price if action == "MODIFY_PENDING" else (o.price or 0.0)),
             "pendingType": o.pending_type,
         })
         o.delivered = True

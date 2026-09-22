@@ -3114,9 +3114,9 @@ namespace Prismx.Mt5Gateway
             // copying OpenPositionCore here was wrong in a way the logs barely show.
             // RETURN is the standard mode for a pending order; FOK/IOC are only the
             // fallback if the broker refuses it.
-            CIMTOrder.EnOrderFilling fill = CIMTOrder.EnOrderFilling.ORDER_FILL_RETURN;
+            CIMTOrder.EnOrderFilling used;
 
-            Func<CIMTOrder.EnOrderFilling, TradeResult> send = mode => SendDealerRequest(req =>
+            TradeResult r = SendPendingRequest(symbol, group, out used, mode => req =>
             {
                 req.Login(login);
                 req.Action(CIMTRequest.EnTradeActions.TA_DEALER_ORD_PENDING);
@@ -3155,42 +3155,6 @@ namespace Prismx.Mt5Gateway
                 }
             });
 
-            TradeResult r = send(fill);
-
-            // 券商不接受 RETURN 时,换一个它自己声明支持的模式重发一次。
-            //
-            // 只在 INVALID_FILL 这一个返回码上重试,且只重试一次:这个码的含义是
-            // "这张单没被受理",所以重发不存在挂出两张的风险;换成别的失败码就不能
-            // 这么做。候选来自品种配置的 FillFlags 位掩码(FOK=1 / IOC=2),不是瞎猜——
-            // 猜错只会换来第二个同样的返回码。
-            //
-            // Retry once with a mode the symbol actually declares, only on
-            // INVALID_FILL: that code means the order was not accepted, so re-sending
-            // cannot leave two resting. Candidates come from the symbol's FillFlags
-            // rather than guesswork.
-            if (!r.Ok && r.Retcode == MTRetCode.MT_RET_REQUEST_INVALID_FILL.ToString())
-            {
-                CIMTOrder.EnOrderFilling alt;
-                uint declared;
-
-                if (TryAlternateFilling(symbol, group, fill, out alt, out declared))
-                {
-                    Log.Warn("挂单成交模式 {0} 被拒,改用 {1} 重试一次:login={2} {3} FillFlags={4}",
-                        fill, alt, login, symbol, declared);
-                    fill = alt;
-                    r = send(fill);
-                }
-                else
-                {
-                    // FillFlags 是排查这条路的**唯一**有用数字:0 = 品种配置没读出来,
-                    // 非 0 = 券商只认它里面那几种而我们都试过了。
-                    // FillFlags is the one number worth having here: 0 means the symbol
-                    // config could not be read, non-zero means we exhausted what it allows.
-                    Log.Warn("挂单成交模式 {0} 被拒,该品种没有其它可用模式:login={1} {2} FillFlags={3}",
-                        fill, login, symbol, declared);
-                }
-            }
-
             // 注意:这里**不做**开仓那条"SL/TP 被拒就去掉重发"的降级。
             //
             // 开仓那边降级是对的:仓位马上就要存在,让它裸奔也好过下不出去。挂单
@@ -3207,10 +3171,58 @@ namespace Prismx.Mt5Gateway
             if (r.Ok)
             {
                 Log.Info("挂单已建立:login={0} {1} {2} {3} 手 @ {4} 成交模式={5} ticket={6}",
-                    login, symbol, orderType, lots, price, fill, r.Order);
+                    login, symbol, orderType, lots, price, used, r.Order);
             }
 
             return r;
+        }
+
+        /// <summary>
+        /// 发一个挂单类的 dealer 请求,并在券商拒绝成交模式时降级重发一次。
+        ///
+        /// 挂单必须显式带 TypeFill(见 PlacePendingCore 里的实测记录),而"带哪个"要看
+        /// 券商:先用 RETURN(挂单的标准模式),被拒再换一个品种自己声明支持的。下挂单
+        /// 与改挂单共用这一段,免得两边各写一份、其中一边忘了降级。
+        ///
+        /// 只在 INVALID_FILL 这一个返回码上重试,且只重试一次:这个码的含义是"这张单
+        /// 没被受理",所以重发不存在挂出两张的风险;换成别的失败码就不能这么做。候选
+        /// 来自品种配置的 FillFlags 位掩码,不是瞎猜——猜错只会换来第二个同样的返回码。
+        ///
+        /// `build(mode)` 按给定成交模式产出填请求的委托;`used` 回传最终用的那个模式。
+        ///
+        /// Send a pending-order dealer request, degrading once if the broker refuses the
+        /// filling mode. Shared by placement and modification so the fallback cannot go
+        /// missing on one of them. Retried only on INVALID_FILL ("not accepted"), so a
+        /// re-send can never leave two orders resting, and only with a mode the symbol
+        /// itself declares.
+        /// </summary>
+        private TradeResult SendPendingRequest(string symbol, string group,
+            out CIMTOrder.EnOrderFilling used, Func<CIMTOrder.EnOrderFilling, Action<CIMTRequest>> build)
+        {
+            used = CIMTOrder.EnOrderFilling.ORDER_FILL_RETURN;
+            TradeResult r = SendDealerRequest(build(used));
+
+            if (r.Ok || r.Retcode != MTRetCode.MT_RET_REQUEST_INVALID_FILL.ToString())
+                return r;
+
+            CIMTOrder.EnOrderFilling alt;
+            uint declared;
+
+            if (!TryAlternateFilling(symbol, group, used, out alt, out declared))
+            {
+                // FillFlags 是排查这条路的**唯一**有用数字:0 = 品种配置没读出来,
+                // 非 0 = 券商只认它里面那几种而我们都试过了。
+                // FillFlags is the one number worth having here: 0 means the symbol
+                // config could not be read, non-zero means we exhausted what it allows.
+                Log.Warn("挂单成交模式 {0} 被拒,该品种没有其它可用模式:{1} FillFlags={2}",
+                    used, symbol, declared);
+                return r;
+            }
+
+            Log.Warn("挂单成交模式 {0} 被拒,改用 {1} 重试一次:{2} FillFlags={3}",
+                used, alt, symbol, declared);
+            used = alt;
+            return SendDealerRequest(build(used));
         }
 
         /// <summary>
@@ -3312,6 +3324,130 @@ namespace Prismx.Mt5Gateway
                 case "SELL_STOP": type = CIMTOrder.EnOrderType.OP_SELL_STOP; return true;
                 default: type = CIMTOrder.EnOrderType.OP_BUY; return false;
             }
+        }
+
+        //+------------------------------------------------------------------+
+        //| 改挂单:触发价 / 止损 / 止盈                                      |
+        //|                                                                  |
+        //| 三项的语义与改持仓(ModifyPosition)完全一致:null = 保留现值、     |
+        //| 0 = 清除(仅 SL/TP;触发价没有"清除"这回事,0 当作没传)。          |
+        //| 三项都没传就不发 dealer,直接回参数错——发一个什么都不改的请求    |
+        //| 只会白占一个 dealer 名额,还会在日志里留下一条看不出意图的记录。  |
+        //|                                                                  |
+        //| Same semantics as ModifyPosition: null keeps, 0 clears (SL/TP only —    |
+        //| a trigger price has no "clear", so 0 reads as absent). With nothing      |
+        //| specified no dealer request goes out.                                    |
+        //+------------------------------------------------------------------+
+        public TradeResult ModifyPending(ulong login, ulong ticket,
+            double? price, double? stopLoss, double? takeProfit)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            TradeResult r = ModifyPendingCore(login, ticket, price, stopLoss, takeProfit);
+            r.ElapsedMs = sw.ElapsedMilliseconds;
+            return r;
+        }
+
+        private TradeResult ModifyPendingCore(ulong login, ulong ticket,
+            double? price, double? stopLoss, double? takeProfit)
+        {
+            if (!price.HasValue && !stopLoss.HasValue && !takeProfit.HasValue)
+                return TradeResult.Fail("MT_RET_ERR_PARAMS",
+                    "改挂单请求三项都未指定 / neither price, stopLoss nor takeProfit given");
+
+            OrderInfo ord;
+            ulong ordLogin;
+            MTRetCode ores;
+
+            // 与撤单同一条前置:读回这张挂单。这里除了校验归属,还要拿它的品种、
+            // 类型、手数填进请求——ORD_MODIFY 改的是这张单的某几项,其余项必须
+            // 原样带上,不能留空让服务器去猜。
+            // Same prologue as the cancel path: read the order back, both to verify
+            // ownership and to echo the fields this request is not changing.
+            if (!ReadPendingOrder(ticket, out ord, out ordLogin, out ores))
+                return TradeResult.Fail(ores.ToString(),
+                    "找不到挂单 #" + ticket + "(可能已成交、已过期或已撤销)");
+
+            if (ordLogin != login)
+                return TradeResult.Fail("MT_RET_ERR_PERMISSIONS",
+                    "挂单 #" + ticket + " 不属于账号 " + login);
+
+            double newPrice = price.HasValue && price.Value > 0 ? price.Value : ord.PriceOrder;
+
+            // 改了触发价就再查一次方向。挂单挂了一阵之后行情可能已经走到触发价的另
+            // 一侧,这时把买入限价往上拖会越过市价、变成一张服务器必拒的单——当场
+            // 说清楚"该往哪边改",比回一个 MT_RET_REQUEST_INVALID_PRICE 有用得多。
+            // Re-check the direction when the trigger moves: the market may have crossed
+            // the order's price while it rested, and dragging a buy limit above the
+            // market produces a request the server will certainly refuse. Saying which
+            // way it has to move beats echoing INVALID_PRICE.
+            if (price.HasValue)
+            {
+                double bid, ask;
+                MTRetCode qres;
+
+                if (GetQuote(ord.Symbol, out bid, out ask, out qres) && bid > 0 && ask > 0)
+                {
+                    string priceErr = ValidatePendingPrice(
+                        (CIMTOrder.EnOrderType)ord.Type, newPrice, bid, ask);
+
+                    if (priceErr != null)
+                    {
+                        Log.Warn("改挂单触发价方向不对,已拦下:login={0} ticket={1} price={2} bid={3} ask={4}",
+                            login, ticket, newPrice, bid, ask);
+                        return TradeResult.Fail(
+                            MTRetCode.MT_RET_REQUEST_INVALID_PRICE.ToString(), priceErr);
+                    }
+                }
+            }
+
+            CIMTOrder.EnOrderFilling usedFill;
+
+            TradeResult r = SendPendingRequest(ord.Symbol, GroupForLogin(login), out usedFill, mode => req =>
+            {
+                req.Login(login);
+                req.Action(CIMTRequest.EnTradeActions.TA_DEALER_ORD_MODIFY);
+                req.Order(ticket);
+                req.Symbol(ord.Symbol);
+                req.Type((CIMTOrder.EnOrderType)ord.Type);
+                req.Volume(SMTMath.VolumeToInt(ord.Volume));
+                req.PriceOrder(newPrice);
+                req.TypeFill(mode);
+                req.TypeTime(CIMTOrder.EnOrderTime.ORDER_TIME_GTC);
+
+                CIMTRequest.EnTradeActionFlags flags = 0;
+
+                if (price.HasValue)
+                    flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_PRICE;
+
+                // 没传的那一侧不置 CHANGED 标志,服务器就不碰它——与 ModifyPosition
+                // 同一套。传 0 仍然是清除:标志置上、价格给 0。
+                // An unspecified side gets no CHANGED flag and the server leaves it
+                // alone, exactly as in ModifyPosition. An explicit 0 still clears.
+                if (stopLoss.HasValue)
+                {
+                    req.PriceSL(stopLoss.Value);
+                    flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL;
+                }
+
+                if (takeProfit.HasValue)
+                {
+                    req.PriceTP(takeProfit.Value);
+                    flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP;
+                }
+
+                req.Flags(flags);
+            });
+
+            if (r.Ok)
+            {
+                Log.Info("改挂单成功:login={0} ticket={1} price={2} SL={3} TP={4}",
+                    login, ticket,
+                    price.HasValue ? newPrice.ToString(CultureInfo.InvariantCulture) : "keep",
+                    stopLoss.HasValue ? stopLoss.Value.ToString(CultureInfo.InvariantCulture) : "keep",
+                    takeProfit.HasValue ? takeProfit.Value.ToString(CultureInfo.InvariantCulture) : "keep");
+            }
+
+            return r;
         }
 
         //+------------------------------------------------------------------+

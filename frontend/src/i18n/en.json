@@ -644,7 +644,9 @@
       "confirmModifyTitle": "Confirm modify",
       "confirmModifyMsg": "Change {{symbol}} {{side}} #{{ticket}} {{kind}} from {{from}} to {{to}}",
       "confirm": "Confirm",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "confirmModifyPendingTitle": "Confirm order change",
+      "confirmModifyPendingMsg": "Change {{symbol}} {{type}} #{{ticket}} {{kind}} from {{from}} to {{to}}"
     },
     "fullscreen": {
       "enter": "Fullscreen",
@@ -772,7 +774,8 @@
       "triggerPrice": "Trigger",
       "cancelPendingTitle": "Cancel pending order",
       "cancelPendingMsg": "Cancel {{symbol}} {{type}} {{volume}} lots @ {{price}}? This cannot be undone."
-    }
+    },
+    "autoOpenAfterPlace": "Open after placing"
   },
   "winrate": {
     "strategyTitle": "Signal Win Rate",

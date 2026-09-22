@@ -759,7 +759,7 @@ export type OrderStatus = 'PENDING' | 'PLACED' | 'FILLED' | 'REJECTED' | 'FAILED
 // 与 POST /orders/{id}/cancel 撤平台指令行不是一回事）。
 // PENDING places an MT5 pending order, CANCEL_PENDING removes one at the broker —
 // distinct from cancelling a platform command row.
-export type OrderAction = 'ORDER' | 'CLOSE' | 'MODIFY' | 'PENDING' | 'CANCEL_PENDING'
+export type OrderAction = 'ORDER' | 'CLOSE' | 'MODIFY' | 'PENDING' | 'MODIFY_PENDING' | 'CANCEL_PENDING'
 // 挂单类型。方向已经编在名字里，所以 side 与它必须一致（后端由 side × orderType 拼出）。
 // The MT5 pending type; its direction is part of the name and always agrees with side.
 export type PendingType = 'BUY_LIMIT' | 'SELL_LIMIT' | 'BUY_STOP' | 'SELL_STOP'

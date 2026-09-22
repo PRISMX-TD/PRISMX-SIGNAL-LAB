@@ -630,6 +630,29 @@ async def trade_pending(
     return _trade_rsp(data)
 
 
+async def trade_modify_pending(
+    login: int, ticket: int, price: float | None = None,
+    sl: float | None = None, tp: float | None = None,
+    client_order_id: str = "", timeout: float | None = None,
+) -> TradeRsp:
+    """改挂单的触发价 / 止损 / 止盈。三项都是 None = 保留现值；SL/TP 传 0 = 清除。
+
+    与 trade_modify 同一套「null ≠ 0」的语义，理由见那边的注释——这里更要紧：
+    图表上拖一条线只改一项，另外两项必须原样留着。
+    Same "null is not 0" contract as trade_modify, and it matters more here: dragging
+    one line on the chart changes one field and the other two must survive untouched.
+    """
+    data = await _post("/trade/modify-pending", {
+        "login": login,
+        "ticket": ticket,
+        "price": price,
+        "stopLoss": sl,
+        "takeProfit": tp,
+        "clientOrderId": client_order_id,
+    }, timeout=timeout)
+    return _trade_rsp(data)
+
+
 async def trade_cancel(
     login: int, ticket: int, client_order_id: str = "", timeout: float | None = None,
 ) -> TradeRsp:

@@ -528,6 +528,25 @@ export const orderApi = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  // 改一张真实的 MT5 挂单：触发价 / 止损 / 止盈。**省略哪一项就保留哪一项**——
+  // 图表上拖一条线只改一项，另外两项不传，券商上的现值原样留着。止损止盈传 0
+  // 是清除；触发价没有「清除」，后端会拒掉 0。
+  // Modify a real MT5 pending order. Omitting a field keeps it: dragging one line on
+  // the chart sends that one field and the broker's other values survive untouched.
+  // 0 clears SL/TP; a trigger price has no "clear" and the backend refuses 0.
+  modifyPending: (payload: {
+    clientOrderId: string
+    ticket: number
+    symbol: string
+    mt5Login?: string | null
+    price?: number
+    stopLoss?: number
+    takeProfit?: number
+  }) =>
+    request<Order>('/orders/modify-pending', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   // 撤一张真实的 MT5 挂单（按券商票号）。与 orderApi.cancel 不是一回事：那个撤的
   // 是平台侧还没下发的指令行，碰不到券商。
   // Remove a real MT5 pending order by its broker ticket. Distinct from

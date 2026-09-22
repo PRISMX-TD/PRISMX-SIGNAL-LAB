@@ -23,6 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
 import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions } from '../store/live'
@@ -176,7 +177,15 @@ export default function OrdersPage() {
   // full-page error card. A failed read falls back to the default tab and a
   // failed write merely forgets which tab you were on — both far better than
   // not seeing your orders. See utils/safeStorage.ts.
+  // 别的页面可以带着 `state.tab` 跳过来指定落在哪个页签（跟信号下完单之后就是这么
+  // 跳的）。它只覆盖**这一次进入**：随后 setTab 照常写 localStorage，所以用户的
+  // 长期选择不会被一次跳转改掉——「带我去看这一笔」不该等于「以后都从这儿开始」。
+  // Another page can navigate here with `state.tab` to land on a specific tab (that is
+  // how placing from a signal arrives). It overrides this entry only; later setTab calls
+  // still persist normally, so a one-off jump never rewrites the user's standing choice.
+  const jumpTab = (useLocation().state as { tab?: OrdersTab } | null)?.tab
   const [tab, setTab] = useState<OrdersTab>(() => {
+    if (jumpTab && TABS.includes(jumpTab)) return jumpTab
     const saved = readStorage(TAB_STORAGE_KEY)
     return TABS.includes(saved as OrdersTab) ? (saved as OrdersTab) : 'positions'
   })

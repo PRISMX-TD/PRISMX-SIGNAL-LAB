@@ -1518,6 +1518,42 @@ class OrderRequest(BaseModel):
         return self
 
 
+class ModifyPendingRequest(BaseModel):
+    """改一张真实的 MT5 挂单：触发价 / 止损 / 止盈。
+
+    三项都是「不传 = 保留现值」，止损止盈额外支持传 0 = 清除。触发价没有「清除」
+    这回事，所以它只有「不传」和「改成某个正数」两种。
+
+    为什么不复用 ModifyPositionRequest：那个的 stopLoss/takeProfit 默认值是 0，
+    语义是「没说就清除」——对改持仓是历史包袱（调用方必须两条腿都填），照搬到
+    挂单上会让一次「只拖触发价」的改单顺手把用户的止损止盈全抹掉。
+    All three default to "keep"; 0 additionally clears SL/TP. Deliberately not
+    ModifyPositionRequest, whose SL/TP default to 0 ("clear when unspecified") — a
+    drag that only moves the trigger would wipe both stops.
+    """
+    clientOrderId: str = Field(min_length=1, max_length=64)
+    ticket: int = Field(gt=0)
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
+    price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    stopLoss: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    takeProfit: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _something_to_change(self):
+        """三项全空的改单没有意义，拦在这里而不是让它一路走到券商。
+
+        放过去的代价不只是白跑一趟：它会在 orders 表里留下一条看不出意图的
+        MODIFY_PENDING 记录，日后排查「这张单到底被谁动过」时纯属噪声。
+        An empty modify is refused here rather than at the broker: letting it through
+        also leaves an intentless row in the orders table, pure noise when someone
+        later asks who touched this order.
+        """
+        if self.price is None and self.stopLoss is None and self.takeProfit is None:
+            raise ValueError("改单必须至少指定一项 / a modify must change at least one of price, stopLoss, takeProfit")
+        return self
+
+
 class CancelPendingRequest(BaseModel):
     """撤销一张真实的 MT5 挂单（按券商票号）。
 

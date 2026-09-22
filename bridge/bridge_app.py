@@ -81,7 +81,15 @@ except Exception:
 # `pendingOrders` so the web can list and cancel real MT5 pending orders. Another
 # wire-protocol change; a bridge that omits `pendingOrders` leaves the frontend's
 # existing list alone rather than clearing it.
-APP_VERSION = "1.4.3"
+# 1.4.4（2026-09-23）：新增 MODIFY_PENDING 指令——网页图表上拖挂单的触发价 /
+# 止损 / 止盈那条线即可改单。三项都是「没带 = 保留挂单上的现值」，止损止盈传 0
+# 仍是清除（与 MODIFY 同一套语义）。指令集变了，所以版本号必须动。
+#
+# 1.4.4 (2026-09-23): new MODIFY_PENDING command — dragging a pending order's trigger,
+# stop or target line on the web chart edits it. All three default to "keep what the
+# order has"; 0 still clears SL/TP, as with MODIFY. The command set changed, so the
+# version must move.
+APP_VERSION = "1.4.4"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。

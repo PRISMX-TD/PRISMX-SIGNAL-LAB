@@ -1,6 +1,6 @@
 // 信号面板页：信号网格 + 返回仪表盘 + 平台策略介绍
 // Signals page: signal grid + back to dashboard + platform strategies guide
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
@@ -45,6 +45,20 @@ export default function SignalsPage() {
     }, { replace: true })
   }, [setSearchParams])
   const [activeSignal, setActiveSignal] = useState<DisplaySignal | null>(null)
+  // 跟信号下完单之后，弹窗自己收起来的那一刻把用户带到「订单回执 · 持仓与账户」。
+  //
+  // 为什么挂在关闭回调上而不是下单成功那一刻：SlideOrderModal 成功后会先展示一张
+  // "已提交"的回执卡片，2 秒后才自己调 onCancel。提交成功就立刻 navigate 会在那张
+  // 卡片渲染出来之前把整个弹窗卸载掉，用户永远看不到自己那一单被受理了。
+  //
+  // 用 ref 而不是 state：这个标记只在回调之间传一次，进 state 会白白多一轮渲染。
+  //
+  // After placing from a signal, land the user on the Orders page's positions tab at the
+  // moment the modal closes itself. Hooked on the close rather than on success because
+  // the modal shows a "submitted" receipt card for ~2s first, and navigating on success
+  // would unmount it before the user ever sees that their order was accepted. A ref, not
+  // state: the flag only travels between callbacks and would cost a render as state.
+  const placedRef = useRef(false)
   // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
   // mobile, swiping back should close it first rather than exiting the
@@ -92,6 +106,11 @@ export default function SignalsPage() {
     } else {
       await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     }
+    // 走到这里说明指令已经被后端受理（失败会抛，OrderSheet 靠这个 promise 判成败）。
+    // 打上标记，等弹窗自己收起来时带用户去看这一单。
+    // Reaching here means the backend accepted it (a failure throws, which is how
+    // OrderSheet tells the two apart). Flag it so the close takes the user to it.
+    placedRef.current = true
   }
 
   return (
@@ -148,7 +167,13 @@ export default function SignalsPage() {
           <StrategyAnalysis />
         )}
       </div>
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => setActiveSignal(null)} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => {
+        setActiveSignal(null)
+        if (placedRef.current) {
+          placedRef.current = false
+          navigate('/orders', { state: { tab: 'positions' } })
+        }
+      }} onConfirm={handleConfirm} />}
       {toast && <div className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
     </div>
   )

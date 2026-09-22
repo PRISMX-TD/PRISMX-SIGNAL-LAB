@@ -644,7 +644,9 @@
       "confirmModifyTitle": "确认改单",
       "confirmModifyMsg": "{{symbol}} {{side}} #{{ticket}} 的{{kind}}从 {{from}} 改至 {{to}}",
       "confirm": "确认",
-      "cancel": "取消"
+      "cancel": "取消",
+      "confirmModifyPendingTitle": "确认改挂单",
+      "confirmModifyPendingMsg": "{{symbol}} {{type}} #{{ticket}} 的{{kind}}从 {{from}} 改至 {{to}}"
     },
     "fullscreen": {
       "enter": "全屏",
@@ -772,7 +774,8 @@
       "triggerPrice": "触发价",
       "cancelPendingTitle": "撤销挂单",
       "cancelPendingMsg": "确认撤销 {{symbol}} {{type}} {{volume}} 手 @ {{price}}？撤销后不可恢复。"
-    }
+    },
+    "autoOpenAfterPlace": "下单后自动打开"
   },
   "winrate": {
     "strategyTitle": "信号客观胜率",

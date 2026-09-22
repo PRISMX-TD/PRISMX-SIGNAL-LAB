@@ -3,17 +3,17 @@
 // 改单：松手即发 MODIFY 指令，与底部持仓面板的"管理"表单走完全同一套后端流程。
 // 可在工具栏一键显隐。
 //
-// 挂单的线是**只读**的：后端没有「改挂单」这条指令，画成可拖的会是个骗局。
-// 它们用另一套颜色 + 点线画（见 PENDING_*），因为它们说的是"还没发生的事"——
-// 同一个品种上同时有持仓和挂单时，两组线必须一眼分得开。
+// 挂单的三条线同样可以拖：触发价、止损、止盈，松手发 MODIFY_PENDING。它们用另一
+// 套颜色 + 点线画（见 PENDING_*），因为它们说的是"还没发生的事"——同一个品种上
+// 同时有持仓和挂单时，两组线必须一眼分得开。
 //
 // Order markers layer: draws the selected account's positions **and pending orders**
 // for the current symbol — entry / SL / TP lines with price labels for each. A
 // position's SL/TP lines can be dragged to modify; dropping sends the same MODIFY the
-// dock's "manage" form does. Pending-order lines are read-only (there is no
-// modify-pending command, so a draggable line would be a lie) and painted in their own
-// colours with a dotted stroke, because they describe something that has not happened
-// yet and must be distinguishable at a glance from live positions on the same symbol.
+// dock's "manage" form does. A pending order's three lines drag the same way and send
+// MODIFY_PENDING. They are painted in their own colours with a dotted stroke, because
+// they describe something that has not happened yet and must be distinguishable at a
+// glance from live positions on the same symbol.
 //
 // 渲染走 lightweight-charts 的 ISeriesPrimitive（与 DrawLayer 一致）；命中与
 // 拖拽用一层默认 pointer-events:none 的透明覆盖层，只有真的悬停到某条止损/
@@ -33,7 +33,7 @@ import type {
 import type { PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
-import { checkSlTp } from '../order/orderMath'
+import { checkPendingPrice, checkSlTp } from '../order/orderMath'
 import { isChartAlive } from './chartLifecycle'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
@@ -124,7 +124,31 @@ function placeLabel(taken: LabelBox[], top: number, bottom: number, w: number, b
 // up waiting after this long and fall back to the reported truth.
 const OVERRIDE_TTL_MS = 60_000
 
-type LineKind = 'sl' | 'tp'
+// 'price' 只属于挂单——那是它的触发价；持仓的入场价是既成事实，改不了。
+// 'price' belongs to pending orders only: their trigger. A position's entry already
+// happened and cannot be edited.
+type LineKind = 'sl' | 'tp' | 'price'
+
+// 一条线属于哪一类。键里必须带上它：持仓票号与挂单票号来自 MT5 的不同编号空间，
+// 撞号完全可能，只按 `${ticket}:${kind}` 做键会让两条线共用一个身份——悬停高亮
+// 跑到另一条上，拖一条提交的是另一条。
+// Which family a line belongs to. The key must carry it: position tickets and order
+// tickets come from different MT5 numbering spaces and can collide, so keying on
+// `${ticket}:${kind}` alone would let two lines share one identity — hover highlighting
+// the wrong one, and a drag submitting against the wrong one.
+type LineScope = 'pos' | 'ord'
+
+/** 命中的那条线。必须是个具名类型、并显式标成 hitLine 的返回值：`best` 只在内层
+ *  回调里被赋值，TypeScript 会把它窄化成 `null`，调用方拿到的就成了 `never`。
+ *  A named type, and hitLine's return annotation: `best` is only assigned inside a
+ *  callback, so TypeScript narrows it to `null` and callers end up with `never`. */
+interface LineHit {
+  key: string
+  scope: LineScope
+  ticket: number
+  kind: LineKind
+  dist: number
+}
 
 interface Marker {
   ticket: number
@@ -134,19 +158,23 @@ interface Marker {
   tp: number | null
 }
 
-/** 一张挂单的三条线。与 Marker 分开放，是因为它**不参与命中判定与拖拽**——
- *  hitLine 只遍历 markers，挂单混进去就会变成"能拖但拖了没用"。
- *  Kept apart from Marker because it takes no part in hit-testing or dragging:
- *  hitLine only walks `markers`, and folding these in would make them look draggable. */
+/** 一张挂单的三条线。与 Marker 分开放，是因为两者能改的东西不一样：持仓只能改
+ *  止损止盈，挂单连入场价（触发价）也能改，而且走的是另一条后端指令。
+ *  Kept apart from Marker because they are editable in different ways: a position's
+ *  entry already happened, a pending order's trigger has not — and they go out as
+ *  different backend commands. */
 interface PendingMarker {
   ticket: number
   label: string
+  /** 券商上报的原始挂单，改单时要拿它的 login 与品种原名回传。
+   *  The reported order, whose login and raw symbol go back with a modify. */
+  order: PendingOrder
   price: number
   sl: number | null
   tp: number | null
 }
 
-const keyOf = (ticket: number, kind: LineKind) => `${ticket}:${kind}`
+const keyOf = (scope: LineScope, ticket: number, kind: LineKind) => `${scope}:${ticket}:${kind}`
 
 // 渲染模型：一次画完全部持仓标记，比"每条线一个 primitive"少一大堆 attach/
 // detach 记账。primitive 只持有一个取数函数，每帧读最新状态。
@@ -228,23 +256,26 @@ class PosPrimitive {
     // Pending first: position lines are interactive, so they belong on top when the
     // two overlap at the same price.
     for (const q of pending) {
-      this._line(ctx, w, series, q.price, PENDING_COLOR, q.label, DASH_PENDING, false, false, false, taken, h)
+      const kp = keyOf('ord', q.ticket, 'price')
+      this._line(ctx, w, series, q.price, PENDING_COLOR, q.label, DASH_PENDING, hovered === kp, dragging === kp, true, taken, h)
       if (q.sl != null) {
-        this._line(ctx, w, series, q.sl, PENDING_DOWN_COLOR, `SL ${q.sl.toFixed(digits)}`, DASH_PENDING, false, false, false, taken, h)
+        const k = keyOf('ord', q.ticket, 'sl')
+        this._line(ctx, w, series, q.sl, PENDING_DOWN_COLOR, `SL ${q.sl.toFixed(digits)}`, DASH_PENDING, hovered === k, dragging === k, true, taken, h)
       }
       if (q.tp != null) {
-        this._line(ctx, w, series, q.tp, PENDING_UP_COLOR, `TP ${q.tp.toFixed(digits)}`, DASH_PENDING, false, false, false, taken, h)
+        const k = keyOf('ord', q.ticket, 'tp')
+        this._line(ctx, w, series, q.tp, PENDING_UP_COLOR, `TP ${q.tp.toFixed(digits)}`, DASH_PENDING, hovered === k, dragging === k, true, taken, h)
       }
     }
 
     for (const m of markers) {
       this._line(ctx, w, series, m.entry, ENTRY_COLOR, entryLabel(m, digits), DASH_ENTRY, false, false, false, taken, h)
       if (m.sl != null) {
-        const k = keyOf(m.ticket, 'sl')
+        const k = keyOf('pos', m.ticket, 'sl')
         this._line(ctx, w, series, m.sl, DOWN_COLOR, `SL ${m.sl.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken, h)
       }
       if (m.tp != null) {
-        const k = keyOf(m.ticket, 'tp')
+        const k = keyOf('pos', m.ticket, 'tp')
         this._line(ctx, w, series, m.tp, UP_COLOR, `TP ${m.tp.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken, h)
       }
     }
@@ -366,17 +397,23 @@ interface Props {
   // a price destined for MT5 is only allowed when this is non-null: rounding to a
   // guessed precision physically moves the stop (43 points on AUDUSD at 2 digits).
   exactDigits: number | null
+  // 参考价（图表最新收盘价），只用于**本地**校验拖出来的挂单触发价在不在正确的
+  // 一侧。null = 不校验，交给网关判——它读得到真实买卖价，是更权威的那一层。
+  // Reference price (the chart's latest close), used only to check locally that a
+  // dragged trigger lands on the correct side. null skips the check and defers to the
+  // gateway, which has the real bid/ask and is the authority.
+  refPrice?: number | null
   visible: boolean
   onToast: (msg: string, kind: 'success' | 'error' | 'info') => void
 }
 
-export default function PositionOverlay({ chart, series, positions, pendingOrders, symbol, digits, exactDigits, visible, onToast }: Props) {
+export default function PositionOverlay({ chart, series, positions, pendingOrders, symbol, digits, exactDigits, refPrice, visible, onToast }: Props) {
   const { t } = useTranslation()
 
   // 拖拽中的线与其当前价位（未提交），以及已提交待回执的乐观值。
   // The line being dragged plus its uncommitted price, and optimistic values
   // for modifies that are submitted but not yet reported back by the bridge.
-  const dragRef = useRef<{ key: string; ticket: number; kind: LineKind; price: number } | null>(null)
+  const dragRef = useRef<{ key: string; scope: LineScope; ticket: number; kind: LineKind; price: number } | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dragPrice, setDragPrice] = useState<number | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -385,13 +422,14 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   // 拖拽松手后待确认的改单信息；确认框显示期间线停在拖到的位置，取消则弹回。
   // Pending confirm state after a drag is released; the line stays at the
   // dragged position while the dialog is open, reverting on cancel.
-  type ConfirmState = {
-    key: string
-    ticket: number
-    kind: LineKind
-    newPrice: number
-    marker: Marker
-  }
+  // 两支联合而不是一个带可选字段的结构：确认与提交的两条路要的东西完全不同
+  // （持仓要重读另一条腿，挂单不用），用 scope 判别式强制在编译期分开。
+  // A union rather than one shape with optional fields: the two confirm/submit paths
+  // need different things (a position must re-read its other leg, a pending order must
+  // not), and the discriminant makes the compiler keep them apart.
+  type ConfirmState =
+    | { key: string; scope: 'pos'; ticket: number; kind: LineKind; newPrice: number; marker: Marker }
+    | { key: string; scope: 'ord'; ticket: number; kind: LineKind; newPrice: number; order: PendingMarker }
   const [confirmState, setConfirmState] = useState<ConfirmState | null>(null)
 
   // 品种匹配去掉券商后缀再比：持仓上报的可能是 XAUUSD.m 之类，而图表用的是基础
@@ -406,27 +444,44 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     return positions.filter((p) => baseSymbol(p.symbol) === base && p.ticket != null && p.entryPrice != null)
   }, [positions, symbol])
 
-  // 挂单按同一套规则筛（券商后缀同样要剥掉）。这里没有乐观值那一套：挂单不能拖着
-  // 改，界面上也没有任何会先改本地再等回执的动作，所以推什么就画什么。
-  // Pending orders filtered the same way (broker suffix stripped too). No optimistic
-  // overlay here: nothing in the UI edits a pending order locally ahead of a receipt,
-  // so what the feed says is what gets drawn.
+  // 挂单按同一套规则筛（券商后缀同样要剥掉），并和持仓一样叠上三层覆盖：正在
+  // 拖动的实时值、松手待确认的值、已提交待回执的乐观值。三层的理由与持仓一字不
+  // 差——线不能在提交后弹回旧价位，那看起来就像改单没生效。
+  // Pending orders, filtered the same way and carrying the same three overlays as
+  // positions: the live dragged value, the released-awaiting-confirm value, and the
+  // submitted-awaiting-receipt optimistic one. Same reason as positions — the line must
+  // not snap back to the old price after a submit, which reads as "it didn't work".
   const symPending = useMemo<PendingMarker[]>(() => {
     const base = baseSymbol(symbol)
+    const now = Date.now()
     return pendingOrders
       .filter((o) => baseSymbol(o.symbol) === base && o.price > 0)
-      .map((o) => ({
-        ticket: o.ticket,
-        // 标签直接写 MT5 的类型名：这四个词（BUY LIMIT / SELL STOP…）是交易员的
-        // 通用语，比翻译过的中文更不容易误读，也和底部「挂单」页签对得上。
-        // The label uses MT5's own type names: those four terms are the trader's lingua
-        // franca, less ambiguous than a translation and consistent with the dock.
-        label: `${o.type.replace('_', ' ')} ${o.volume.toFixed(2)} @ ${o.price.toFixed(digits)}`,
-        price: o.price,
-        sl: o.stopLoss && o.stopLoss > 0 ? o.stopLoss : null,
-        tp: o.takeProfit && o.takeProfit > 0 ? o.takeProfit : null,
-      }))
-  }, [pendingOrders, symbol, digits])
+      .map((o) => {
+        const pick = (kind: LineKind, real: number | undefined): number | null => {
+          const k = keyOf('ord', o.ticket, kind)
+          if (dragKey === k && dragPrice != null) return dragPrice
+          if (confirmState && confirmState.key === k) return confirmState.newPrice
+          const opt = pending[k]
+          if (opt && now - opt.at < OVERRIDE_TTL_MS) return opt.price > 0 ? opt.price : null
+          return real && real > 0 ? real : null
+        }
+        // 触发价永远有值（挂单没有"没有触发价"这回事），所以单独取、不走 pick 的
+        // null 分支。/ A trigger always exists, so it never takes pick's null branch.
+        const price = pick('price', o.price) ?? o.price
+        return {
+          ticket: o.ticket,
+          order: o,
+          // 标签直接写 MT5 的类型名：这四个词（BUY LIMIT / SELL STOP…）是交易员的
+          // 通用语，比翻译过的中文更不容易误读，也和底部「挂单」页签对得上。
+          // The label uses MT5's own type names: those four terms are the trader's lingua
+          // franca, less ambiguous than a translation and consistent with the dock.
+          label: `${o.type.replace('_', ' ')} ${o.volume.toFixed(2)} @ ${price.toFixed(digits)}`,
+          price,
+          sl: pick('sl', o.stopLoss),
+          tp: pick('tp', o.takeProfit),
+        }
+      })
+  }, [pendingOrders, symbol, digits, dragKey, dragPrice, pending, confirmState])
 
   // 标记列表：真实持仓叠加"已提交待回执"的乐观值 + 正在拖动的实时值 + 待确认的拖拽值。
   // Markers: real positions overlaid with in-flight optimistic values, the
@@ -436,7 +491,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     return symPositions.map((p) => {
       const ticket = p.ticket as number
       const pick = (kind: LineKind, real: number | undefined): number | null => {
-        const k = keyOf(ticket, kind)
+        const k = keyOf('pos', ticket, kind)
         // 正在拖动中 / being dragged
         if (dragKey === k && dragPrice != null) return dragPrice
         // 松手后等待确认 / released, awaiting confirmation
@@ -547,22 +602,32 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   // ──── 命中判定 / hit testing ────
   const markersRef = useRef<Marker[]>(markers)
   markersRef.current = markers
+  const pendingRef = useRef<PendingMarker[]>(symPending)
+  pendingRef.current = symPending
 
-  // y 像素 → 命中的止损/止盈线（只有这两种可拖，开仓价线不可拖）。
-  // y pixel → the SL/TP line under it (entry lines aren't draggable).
-  const hitLine = useCallback((y: number) => {
-    let best: { key: string; ticket: number; kind: LineKind; dist: number } | null = null
-    for (const m of markersRef.current) {
-      for (const kind of ['sl', 'tp'] as LineKind[]) {
-        const price = kind === 'sl' ? m.sl : m.tp
-        if (price == null) continue
-        const ly = series.priceToCoordinate(price) as number | null
-        if (ly == null) continue
-        const dist = Math.abs(y - ly)
-        if (dist <= TOL && (!best || dist < best.dist)) {
-          best = { key: keyOf(m.ticket, kind), ticket: m.ticket, kind, dist }
-        }
+  // y 像素 → 命中的可拖线。持仓只有止损/止盈可拖（开仓价是既成事实）；挂单三条
+  // 都可拖——触发价还没成交，本来就是可以改的。
+  // y pixel → the draggable line under it. A position exposes SL/TP only (its entry
+  // already happened); a pending order exposes all three, its trigger included.
+  const hitLine = useCallback((y: number): LineHit | null => {
+    let best: LineHit | null = null
+    const consider = (scope: LineScope, ticket: number, kind: LineKind, price: number | null) => {
+      if (price == null) return
+      const ly = series.priceToCoordinate(price) as number | null
+      if (ly == null) return
+      const dist = Math.abs(y - ly)
+      if (dist <= TOL && (!best || dist < best.dist)) {
+        best = { key: keyOf(scope, ticket, kind), scope, ticket, kind, dist }
       }
+    }
+    for (const m of markersRef.current) {
+      consider('pos', m.ticket, 'sl', m.sl)
+      consider('pos', m.ticket, 'tp', m.tp)
+    }
+    for (const q of pendingRef.current) {
+      consider('ord', q.ticket, 'price', q.price)
+      consider('ord', q.ticket, 'sl', q.sl)
+      consider('ord', q.ticket, 'tp', q.tp)
     }
     return best
   }, [series])
@@ -645,6 +710,35 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     }
   }, [onToast, t])
 
+  const submitModifyPending = useCallback(async (q: PendingMarker, kind: LineKind, price: number) => {
+    try {
+      // 只发拖动的那一项，另外两项留空 = 保留券商上的现值。
+      //
+      // 这里不需要像持仓那条路那样"重读另一条腿":MODIFY 要求两条腿一起发,所以那边
+      // 必须现取另一条、否则会拿旧值覆盖新值;而 MODIFY_PENDING 从协议到网关都是
+      // 「没传的不碰」,少发一项就是少改一项,压根没有覆盖的机会。
+      //
+      // Only the dragged field goes out; the other two are omitted and therefore kept.
+      // Unlike the position path there is no "re-read the other leg": a MODIFY carries
+      // both legs, so it must, while MODIFY_PENDING leaves out what it does not send —
+      // there is nothing to accidentally overwrite.
+      await orderApi.modifyPending({
+        clientOrderId: clientOrderId(),
+        ticket: q.ticket,
+        symbol: q.order.symbol,
+        mt5Login: q.order.login ?? null,
+        price: kind === 'price' ? price : undefined,
+        stopLoss: kind === 'sl' ? price : undefined,
+        takeProfit: kind === 'tp' ? price : undefined,
+      })
+      onToast(String(t('charts.dock.modifySent')), 'info')
+      return true
+    } catch (e) {
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.modifyFailed')), 'error')
+      return false
+    }
+  }, [onToast, t])
+
   // 把 y 夹在主图 pane 内：覆盖层铺满整个容器，但价格坐标只在主图 pane 里有
   // 意义——开了副图（成交量/RSI/MACD）时往下拖会越过主图底边，
   // coordinateToPrice 在那之外是线性外推，会算出离谱的价位。
@@ -670,7 +764,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     if (price == null) return
     e.preventDefault()
     el.setPointerCapture(e.pointerId)
-    dragRef.current = { key: h.key, ticket: h.ticket, kind: h.kind, price }
+    dragRef.current = { key: h.key, scope: h.scope, ticket: h.ticket, kind: h.kind, price }
     setDragKey(h.key)
     setDragPrice(price)
     // 拖线期间关掉图表自身的拖动平移，否则同一次按压会连带把图表也拖走。
@@ -702,8 +796,6 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     setDragPrice(null)
     if (!drag) return
 
-    const m = markersRef.current.find((x) => x.ticket === drag.ticket)
-    if (!m) return
     // 按品种精度取整：拖出来的价格是任意小数，直接发过去 MT5 也会自己截断，
     // 不如前端先规整，让线的落点和提示里的数字一致。
     // **但精度必须是券商上报的真值**（exactDigits）。以前这里用的是展示位数，而
@@ -718,6 +810,62 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     // truncate it.
     const factor = exactDigits != null ? Math.pow(10, exactDigits) : null
     const next = factor != null ? Math.round(drag.price * factor) / factor : drag.price
+    // "没有实质性变动"的判据跟着取整精度走；不取整时用一个极小的价格容差。
+    // The "no meaningful change" epsilon follows the rounding precision; with no
+    // rounding it falls back to a tiny price tolerance.
+    const eps = factor != null ? 1 / factor / 2 : 1e-9
+    if (next <= 0) return
+
+    // ── 挂单：三条线都能拖，松手发 MODIFY_PENDING ──
+    if (drag.scope === 'ord') {
+      const q = pendingRef.current.find((x) => x.ticket === drag.ticket)
+      if (!q) return
+      // 比的是**券商上报的原值**，不是 q 上那个已经被拖拽覆盖过的值——理由与持仓
+      // 那条一字不差，见下面的长注释。
+      // Compared against the broker-reported values, not q's drag-overridden ones —
+      // same reasoning as the position path below.
+      const o = q.order
+      const rawSl = o.stopLoss && o.stopLoss > 0 ? o.stopLoss : null
+      const rawTp = o.takeProfit && o.takeProfit > 0 ? o.takeProfit : null
+      const orig = drag.kind === 'price' ? o.price : drag.kind === 'sl' ? rawSl : rawTp
+      if (orig != null && Math.abs(next - orig) < eps) return
+
+      const isBuy = o.side === 'BUY'
+      // 挂单的参照价是它自己的触发价，不是现价——止损止盈是相对"将来会在哪进场"
+      // 而言的。拖触发价时用新的那个价去比另外两条腿。
+      // A pending order's reference is its own trigger, not the market: its stops are
+      // relative to where it will enter. Dragging the trigger re-checks both legs
+      // against the new one.
+      const entry = drag.kind === 'price' ? next : o.price
+      const nextSl = drag.kind === 'sl' ? next : rawSl
+      const nextTp = drag.kind === 'tp' ? next : rawTp
+      const { slInvalid, tpInvalid } = checkSlTp(isBuy, nextSl, nextTp, entry)
+      if (drag.kind === 'price' ? (slInvalid || tpInvalid) : drag.kind === 'sl' ? slInvalid : tpInvalid) {
+        onToast(String(t('charts.dock.slTpWrong')), 'error')
+        return
+      }
+
+      // 触发价还要在市价正确的一侧：买入限价必须低于现价、买入止损必须高于，反之
+      // 亦然。拿不到参考价就跳过——网关会用真实买卖价再判一次，那是权威的一层。
+      // The trigger must also sit on the right side of the market. With no reference
+      // price this is skipped; the gateway re-checks against the real bid/ask.
+      if (drag.kind === 'price') {
+        const err = checkPendingPrice(
+          o.type.endsWith('LIMIT') ? 'LIMIT' : 'STOP', isBuy, next,
+          refPrice ?? null, refPrice ?? null,
+        )
+        if (err) {
+          onToast(String(t(err, { price: refPrice != null ? refPrice.toFixed(digits) : '—' })), 'error')
+          return
+        }
+      }
+
+      setConfirmState({ key: drag.key, scope: 'ord', ticket: drag.ticket, kind: drag.kind, newPrice: next, order: q })
+      return
+    }
+
+    const m = markersRef.current.find((x) => x.ticket === drag.ticket)
+    if (!m) return
     // 对比原始持仓的止损/止盈（而非标记覆盖后的值——拖拽过程中 pick() 已经把
     // 标记值换成了拖拽位置，拿 m.sl/m.tp 比 next 永远是同一个价，会被当成
     // "没有实质性变动"而静默跳过，于是线弹回去、确认框不弹）。
@@ -730,11 +878,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     const slNow = rawSl && rawSl > 0 ? rawSl : null
     const tpNow = rawTp && rawTp > 0 ? rawTp : null
     const orig = drag.kind === 'sl' ? slNow : tpNow
-    // "没有实质性变动"的判据跟着取整精度走；不取整时用一个极小的价格容差。
-    // The "no meaningful change" epsilon follows the rounding precision; with no
-    // rounding it falls back to a tiny price tolerance.
-    const eps = factor != null ? 1 / factor / 2 : 1e-9
-    if (next <= 0 || (orig != null && Math.abs(next - orig) < eps)) return
+    if (orig != null && Math.abs(next - orig) < eps) return
 
     // 方向校验统一走下单表单那份 checkSlTp：除了「买单止损须低于现价」这条，它还
     // 带上了「两条腿都在时不许互穿」（买单 SL < TP），而且那条**不依赖现价**。
@@ -756,13 +900,26 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     }
 
     // 弹出确认框而非直接发送 —— 避免误拖 / show confirm dialog instead of sending immediately
-    setConfirmState({ key: drag.key, ticket: drag.ticket, kind: drag.kind, newPrice: next, marker: m })
-  }, [chart, exactDigits, onToast, t])
+    setConfirmState({ key: drag.key, scope: 'pos', ticket: drag.ticket, kind: drag.kind, newPrice: next, marker: m })
+  }, [chart, exactDigits, refPrice, digits, onToast, t])
 
   // 用户确认改单 / user confirms the modify
   const handleConfirm = useCallback(async () => {
     const cs = confirmState
     if (!cs) return
+    if (cs.scope === 'ord') {
+      setPending((prev) => ({ ...prev, [cs.key]: { price: cs.newPrice, at: Date.now() } }))
+      setConfirmState(null)
+      const okPending = await submitModifyPending(cs.order, cs.kind, cs.newPrice)
+      if (!okPending) {
+        setPending((prev) => {
+          const rest = { ...prev }
+          delete rest[cs.key]
+          return rest
+        })
+      }
+      return
+    }
     // 另一条腿必须**现取**，不能用拖拽那一刻的 Marker 快照：MODIFY 要求两条腿一起
     // 发，用户可能盯着确认框几十秒，其间桥接推过新的止损止盈（或别处改了单），
     // 按旧快照发回去就是用旧值覆盖新值。fresh 找不到（仓位已平/已消失）时退回快照。
@@ -789,7 +946,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
         return next2
       })
     }
-  }, [confirmState, submitModify, symPositions])
+  }, [confirmState, submitModify, submitModifyPending, symPositions])
 
   // 用户取消改单 —— 线弹回真实价位（confirmState 一清，markers 就走回真实值）
   // User cancels — line snaps back to the truth (clearing confirmState lets
@@ -808,14 +965,49 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     return () => window.removeEventListener('keydown', onKey)
   }, [confirmState])
 
-  // 确认框里用的品种名：去后缀 / symbol name for the confirm dialog, suffix stripped
-  const displaySymbol = useMemo(() => {
-    if (!confirmState) return ''
-    return baseSymbol(confirmState.marker.pos.symbol)
-  }, [confirmState])
-  const oldPrice = confirmState
-    ? (confirmState.kind === 'sl' ? confirmState.marker.sl : confirmState.marker.tp)
-    : null
+  // 确认框的文案。持仓与挂单两支各自取自己的字段，在这里一次算好，JSX 里只管渲染。
+  // 挂单那支多一个「触发价」维度，而且用 MT5 的类型名（BUY LIMIT…）代替买/卖——
+  // 它已经把方向说在里面了，再加一个「买」只会让人以为那是两件事。
+  // The dialog's copy, resolved here so the JSX just renders. The pending branch adds a
+  // "trigger" dimension and names the MT5 type instead of buy/sell — the type already
+  // states the direction, and showing both reads as two separate facts.
+  const confirmCopy = useMemo(() => {
+    if (!confirmState) return null
+    const kindLabel = (k: LineKind) =>
+      k === 'sl' ? String(t('charts.ticket.sl'))
+        : k === 'tp' ? String(t('charts.ticket.tp'))
+          : String(t('charts.ticket.triggerPrice'))
+    if (confirmState.scope === 'ord') {
+      const o = confirmState.order.order
+      const from = confirmState.kind === 'price' ? o.price
+        : confirmState.kind === 'sl' ? o.stopLoss
+          : o.takeProfit
+      return {
+        title: String(t('charts.posmark.confirmModifyPendingTitle')),
+        message: String(t('charts.posmark.confirmModifyPendingMsg', {
+          symbol: baseSymbol(o.symbol),
+          type: String(t(`order.pending.type.${o.type}`)),
+          ticket: String(confirmState.ticket),
+          kind: kindLabel(confirmState.kind),
+          from: from != null && from > 0 ? from.toFixed(digits) : '—',
+          to: confirmState.newPrice.toFixed(digits),
+        })),
+      }
+    }
+    const m = confirmState.marker
+    const from = confirmState.kind === 'sl' ? m.sl : m.tp
+    return {
+      title: String(t('charts.posmark.confirmModifyTitle')),
+      message: String(t('charts.posmark.confirmModifyMsg', {
+        symbol: baseSymbol(m.pos.symbol),
+        side: m.pos.side === 'BUY' ? String(t('charts.dock.buy')) : String(t('charts.dock.sell')),
+        ticket: String(confirmState.ticket),
+        kind: kindLabel(confirmState.kind),
+        from: from != null ? from.toFixed(digits) : '—',
+        to: confirmState.newPrice.toFixed(digits),
+      })),
+    }
+  }, [confirmState, digits, t])
 
   // 提前返回必须放在所有 Hook 之后：父组件用 visible 属性切换显示而不是条件挂载，
   // 若在 useMemo 之前返回，visible 翻转时 Hook 数量会变，React 直接报错。
@@ -837,7 +1029,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
       />
 
       {/* 拖拽松手后的确认弹窗 / confirmation dialog after releasing a dragged line */}
-      {confirmState && (
+      {confirmState && confirmCopy && (
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-transparent">
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
           <div
@@ -845,19 +1037,8 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
             style={{ minWidth: 280 }}
             onKeyDown={(e) => { if (e.key === 'Escape') handleCancelConfirm() }}
           >
-            <p className="mb-1 text-xs font-medium text-neutral-300">
-              {String(t('charts.posmark.confirmModifyTitle'))}
-            </p>
-            <p className="mb-3 text-sm text-neutral-200">
-              {String(t('charts.posmark.confirmModifyMsg', {
-                symbol: displaySymbol,
-                side: confirmState.marker.pos.side === 'BUY' ? String(t('charts.dock.buy')) : String(t('charts.dock.sell')),
-                ticket: String(confirmState.ticket),
-                kind: confirmState.kind === 'sl' ? String(t('charts.ticket.sl')) : String(t('charts.ticket.tp')),
-                from: oldPrice != null ? oldPrice.toFixed(digits) : '—',
-                to: confirmState.newPrice.toFixed(digits),
-              }))}
-            </p>
+            <p className="mb-1 text-xs font-medium text-neutral-300">{confirmCopy.title}</p>
+            <p className="mb-3 text-sm text-neutral-200">{confirmCopy.message}</p>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"

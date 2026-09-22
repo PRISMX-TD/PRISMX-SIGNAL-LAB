@@ -41,6 +41,7 @@ import {
 } from '../components/charts/indicatorSettings'
 import DrawLayer, { type DrawLayerHandle } from '../components/charts/DrawLayer'
 import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
+import Switch from '../components/Switch'
 import SymbolHeader from '../components/charts/SymbolHeader'
 import WatchlistPanel from '../components/charts/WatchlistPanel'
 import AccountSummary from '../components/charts/AccountSummary'
@@ -123,6 +124,16 @@ export default function ChartsPage() {
   const [showPositions, setShowPositions] = useState<boolean>(
     () => getPref<boolean>('charts', 'showPositions', true)
   )
+  // 手机上下完单自动把抽屉切到「持仓」。默认开：下完单第一件想做的事就是看它成没
+  // 成、仓位长什么样，而手机上那张下单票占满整屏，不切过去就什么都看不见。
+  // 开关放在持仓抽屉的抬头里——正是它弹出来的那个地方，嫌烦的人一眼就能关掉。
+  // Auto-switch the mobile sheet to positions after placing. On by default: the first
+  // thing you want after an order is to see whether it landed, and on a phone the
+  // ticket fills the screen so nothing is visible until you switch. The switch lives in
+  // the header of the very sheet that pops up, where anyone annoyed by it will look.
+  const [afterPlaceOpen, setAfterPlaceOpen] = useState<boolean>(
+    () => getPref<boolean>('charts', 'afterPlaceShowPositions', true)
+  )
 
   // 手机端抽屉：自选 / 下单票 / 持仓，一次只开一个；tradeSide 记住从交易条的哪一侧
   // 点进来。桌面（lg+）三栏常驻，抽屉不渲染（CSS 里 ≥1024 直接 display:none）。
@@ -130,6 +141,12 @@ export default function ChartsPage() {
   // remembers which side of the trade bar opened the ticket. Desktop shows the
   // three columns and the sheets are display:none at ≥1024.
   const [sheet, setSheet] = useState<Sheet>(null)
+  // 下单回来之后要判断「当时是不是从抽屉里下的」，必须读**那一刻**的值而不是渲染
+  // 闭包里的：等回执期间用户完全可能自己把抽屉关了，那就不该再替他弹开。
+  // Read at callback time, not from the render closure: the user can close the sheet
+  // while the fill is in flight, and we must not pop it back open on their behalf.
+  const sheetRef = useRef<Sheet>(null)
+  sheetRef.current = sheet
   const [tradeSide, setTradeSide] = useState<Side>('BUY')
   // 手机端画线工具是否展开：默认收起（只留周期 + 持仓 + 画笔 + 指标），点画笔才展开
   // 换行工具行，避免小屏被十几个小图标塞满。
@@ -303,6 +320,10 @@ export default function ChartsPage() {
     setPref('charts', 'showPositions', showPositions)
   }, [showPositions, setPref])
 
+  useEffect(() => {
+    setPref('charts', 'afterPlaceShowPositions', afterPlaceOpen)
+  }, [afterPlaceOpen, setPref])
+
   const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
@@ -332,9 +353,25 @@ export default function ChartsPage() {
       selectedLogin={effectiveLogin}
       onSelectLogin={setSelectedLogin}
       initialSide={initialSide}
-      onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) =>
-        placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price)
-      }
+      onPlace={async (side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) => {
+        const placed = await placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price)
+        // 只在「这一单是从手机的下单抽屉里下的」时才切。判据就是抽屉当时开在
+        // trade 上——桌面右栏下单时 sheet 恒为 null，绝不会误触发（桌面本来就
+        // 三栏全见，也没有「切过去」这回事）。
+        // Switch only when the order came from the mobile ticket sheet, which is exactly
+        // what `sheet === 'trade'` means: on desktop it is always null, so the
+        // right-rail ticket can never trip this — and desktop shows all three columns
+        // anyway, so there is nothing to switch to.
+        // 被拒 / 结果未知的单不切走：那两种情况下用户要看的是下单票底下那条就地
+        // 回执（写着为什么失败），切到持仓等于把错误原因从他眼前拿掉，而持仓那边
+        // 什么新东西都没有。
+        // Don't switch on a rejected or unconfirmed order: there the user needs the
+        // inline receipt under the ticket, which says why. Switching hides the reason
+        // and shows a positions list that gained nothing.
+        const settled = placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')
+        if (afterPlaceOpen && !settled && sheetRef.current === 'trade') setSheet('positions')
+        return placed
+      }}
     />
   )
 
@@ -453,6 +490,7 @@ export default function ChartsPage() {
                 symbol={symbol}
                 digits={decimals}
                 exactDigits={exactDigits}
+                refPrice={lastPrice}
                 visible={showPositions}
                 onToast={showToast}
               />
@@ -549,6 +587,17 @@ export default function ChartsPage() {
                 <h3>{sheet === 'watchlist' ? t('charts.watchlist.title') : sheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
                 <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : accountPositions.length}</span>
               </div>
+              {/* 「下单后自动打开」就放在它自己弹出来的这张抽屉的抬头里：嫌它烦的人
+                  正好在这儿，不用去设置页里找一个自己都不知道叫什么的开关。
+                  The "open after placing" switch sits in the header of the sheet that
+                  does the popping — whoever is annoyed by it is already looking here,
+                  instead of hunting a settings page for a name they don't know. */}
+              {sheet === 'positions' && (
+                <label className="term-sheet-pref">
+                  <span>{t('charts.autoOpenAfterPlace')}</span>
+                  <Switch checked={afterPlaceOpen} onChange={setAfterPlaceOpen} aria-label={String(t('charts.autoOpenAfterPlace'))} />
+                </label>
+              )}
               <button type="button" className="term-sheet-x" onClick={() => setSheet(null)} aria-label={t('common.close')}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
               </button>

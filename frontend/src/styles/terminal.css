@@ -1094,6 +1094,15 @@
   .term-sheet-ph { height: 48px; padding: 0 12px 0 16px; }
   .term-sheet-ttl { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
   .term-sheet-ttl span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* 抽屉抬头里的偏好开关：文字 + Switch，挤在标题与关闭按钮之间。
+     Preference switch in the sheet header, between the title and the close button. */
+  .term-sheet-pref {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    margin-left: auto; margin-right: 10px;
+    font: 500 11.5px/1 "JetBrains Mono", ui-monospace, monospace;
+    color: var(--text-3);
+    cursor: pointer;
+  }
   .term-sheet-x {
     display: grid; place-items: center; flex: none;
     width: 32px; height: 32px; border-radius: 50%;

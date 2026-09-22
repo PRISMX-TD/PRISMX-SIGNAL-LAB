@@ -417,9 +417,10 @@ class Order(Base):
     signal_id = Column(String, ForeignKey("signals.id"), nullable=True)
     client_order_id = Column(String, nullable=False)
     # 指令类型：ORDER 开仓 / CLOSE 平仓（含部分）/ MODIFY 改 SL·TP /
-    #           PENDING 挂单（限价·止损）/ CANCEL_PENDING 撤挂单
+    #           PENDING 挂单（限价·止损）/ MODIFY_PENDING 改挂单 / CANCEL_PENDING 撤挂单
     # command action: ORDER (open) / CLOSE (incl. partial) / MODIFY (SL·TP) /
-    #                 PENDING (place a limit·stop order) / CANCEL_PENDING (remove one)
+    #                 PENDING (place a limit·stop order) / MODIFY_PENDING (change its
+    #                 trigger·SL·TP) / CANCEL_PENDING (remove one)
     action = Column(String, default="ORDER")
     symbol = Column(String, nullable=False)
     side = Column(String, nullable=False)

@@ -20,6 +20,7 @@ from app.services.gateway_client import (
     trade_cancel as gw_cancel,
     trade_close as gw_close,
     trade_modify as gw_modify,
+    trade_modify_pending as gw_modify_pending,
     trade_open as gw_open,
     trade_pending as gw_pending,
 )
@@ -323,6 +324,16 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
                 order.pending_type or "", order.volume or 0.01, order.price or 0,
                 order.sl or 0, order.tp or 0,
                 order.client_order_id or "",
+                client_order_id=order.client_order_id or "",
+                timeout=timeout,
+            ))
+        elif order.action == "MODIFY_PENDING":
+            # price / sl / tp 原样透传：None = 这一项没说，网关保留现值。
+            # 与 MODIFY 分支同理，绝不能写 `or 0`——那会把「没说」变成「清除」。
+            # Passed through as-is: None means unspecified and the gateway keeps the
+            # current value. As in the MODIFY branch, never `or 0`.
+            rsp = call_gateway_idempotent(order, lambda timeout: gw_modify_pending(
+                login, order.ticket or 0, order.price, order.sl, order.tp,
                 client_order_id=order.client_order_id or "",
                 timeout=timeout,
             ))

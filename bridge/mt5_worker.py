@@ -2084,6 +2084,143 @@ def _cancel_pending(cmd: dict) -> dict:
     }
 
 
+def _modify_pending(cmd: dict) -> dict:
+    """改一张挂单的触发价 / 止损 / 止盈 / modify a pending order.
+
+    三项都是「指令里没带 = 保留挂单上的现值」，止损止盈额外支持显式传 0 = 清除。
+    与 `_modify_position` 同一套语义，理由见那边的长注释——这里更要紧：图表上拖
+    一条线只改一项，另外两项必须原样留着，`cmd.get(k) or 0` 那种写法会把用户没碰
+    过的止损一起抹掉。
+
+    TRADE_ACTION_MODIFY 要求把这张单的其余字段原样带上（品种、类型、手数），所以
+    先读回它再发——顺便也就校验了归属与存在性。
+
+    All three default to "keep what the order already has"; an explicit 0 additionally
+    clears SL/TP. Same contract as _modify_position, and it matters more here: dragging
+    one line on the chart touches one field, and `cmd.get(k) or 0` would wipe the stop
+    the user never touched. TRADE_ACTION_MODIFY needs the order's other fields echoed
+    back, so it is read first — which also checks ownership and existence.
+    """
+    client_order_id = cmd["clientOrderId"]
+    ticket = int(cmd.get("ticket", 0))
+    found = mt5.orders_get(ticket=ticket)
+    # None（查询失败）与 ()（确实没有）不是一回事，理由同 _close_position。
+    # None (query failed) is not () (absent) — same reasoning as _close_position.
+    if found is None:
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
+                "message": f"orders_get failed: {mt5.last_error()}"}
+    if len(found) == 0:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Pending order not found"}
+    order = found[0]
+    # 只改本平台挂的单（魔术号匹配），理由同 _close_position。
+    # Only modify orders this platform placed; see _close_position.
+    if getattr(order, "magic", 0) != PRISMX_MAGIC:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Not a PRISMX-managed order"}
+
+    symbol = order.symbol
+    info = mt5.symbol_info(symbol)
+    digits = info.digits if info else 5
+
+    def _keep(key: str, current) -> float:
+        raw = cmd.get(key)
+        if raw is None:
+            return round(float(current or 0.0), digits)
+        return round(float(raw or 0.0), digits)
+
+    price = _keep("price", getattr(order, "price_open", 0.0))
+    if price <= 0:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Pending order needs a trigger price"}
+
+    side = "BUY" if _pending_type_name(getattr(order, "type", -1)) in ("BUY_LIMIT", "BUY_STOP") else "SELL"
+    sl = _keep("stopLoss", getattr(order, "sl", 0.0))
+    tp = _keep("takeProfit", getattr(order, "tp", 0.0))
+    # 最小距离照样按**新的**触发价夹，理由与下挂单时完全一样：按市价夹会把止损拖到
+    # 贴着现价，触发那一刻就被打掉。
+    # Clamp against the *new* trigger, for exactly the reason placement does.
+    sl, tp = _clamp_pending_stops(symbol, side, price, sl, tp)
+
+    request = {
+        "action": mt5.TRADE_ACTION_MODIFY,
+        "order": ticket,
+        "symbol": symbol,
+        "price": price,
+        "sl": sl,
+        "tp": tp,
+        "type_time": mt5.ORDER_TIME_GTC,
+        # 与下挂单同一个模式，理由见 _place_pending 里的注释。
+        "type_filling": getattr(mt5, "ORDER_FILLING_RETURN", 2),
+    }
+
+    result = mt5.order_send(request)
+    if result is None:
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
+                "message": f"order_send failed: {mt5.last_error()}"}
+
+    invalid_fill = getattr(mt5, "TRADE_RETCODE_INVALID_FILL", None)
+    if invalid_fill is not None and result.retcode == invalid_fill:
+        alt = _alternate_filling(symbol, request["type_filling"])
+        if alt is not None:
+            logger.info("改挂单成交模式被拒，改用 %s 重试一次 / pending modify filling rejected, retrying with %s", alt, alt)
+            request["type_filling"] = alt
+            retried = mt5.order_send(request)
+            if retried is not None:
+                result = retried
+
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        status, success = "FILLED", True
+    elif result.retcode == mt5.TRADE_RETCODE_PLACED:
+        # 改单的确认方式是回读这张单，看新值是不是真的落上了。挂单仍在（不像撤单
+        # 那样消失），所以 _confirm_pending_placed 在这里帮不上忙。
+        # The confirmation is to read the order back and compare: it is still there
+        # (unlike a cancel), so _confirm_pending_placed cannot answer this one.
+        applied = _confirm_pending_modified(ticket, price, sl, tp, digits)
+        status, success = ("FILLED", True) if applied else ("FAILED", False)
+    else:
+        status, success = "REJECTED", False
+
+    return {
+        "clientOrderId": client_order_id,
+        "success": success,
+        "status": status,
+        "mt5Ticket": ticket,
+        "message": (
+            "Pending order updated" if success
+            else _unconfirmed_reason() if status == "FAILED"
+            else _reject_reason(result.retcode)
+        ),
+    }
+
+
+def _confirm_pending_modified(ticket: int, price: float, sl: float, tp: float, digits: int) -> bool:
+    """回读挂单，确认触发价 / 止损 / 止盈真的改成了请求的值。
+
+    容差取一个最小价格单位：券商会按品种精度取整，逐位相等的比较会假阴性
+    （与 `_confirm_stops_applied` 同一处理）。
+    Read the order back and confirm the new values took, with a one-tick tolerance
+    because brokers round to the symbol's precision (same as _confirm_stops_applied).
+    """
+    if mt5 is None or not ticket:
+        return False
+    tol = 10 ** (-digits) / 2
+    deadline = time.time() + _CONFIRM_TOTAL_SECONDS
+    while time.time() < deadline:
+        try:
+            found = mt5.orders_get(ticket=ticket)
+        except Exception:
+            found = None
+        if found:
+            o = found[0]
+            if (abs(float(getattr(o, "price_open", 0.0) or 0.0) - price) <= tol
+                    and abs(float(getattr(o, "sl", 0.0) or 0.0) - sl) <= tol
+                    and abs(float(getattr(o, "tp", 0.0) or 0.0) - tp) <= tol):
+                return True
+        time.sleep(_CONFIRM_INTERVAL_SECONDS)
+    return False
+
+
 def _validate_command(cmd: dict) -> tuple[bool, str]:
     """校验单条指令的结构与字段范围 / validate one command's shape and field ranges.
 
@@ -2096,7 +2233,7 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
     if not cmd.get("clientOrderId"):
         return False, "missing clientOrderId"
     action = (cmd.get("action") or "ORDER").upper()
-    if action not in ("ORDER", "CLOSE", "MODIFY", "PENDING", "CANCEL_PENDING"):
+    if action not in ("ORDER", "CLOSE", "MODIFY", "PENDING", "MODIFY_PENDING", "CANCEL_PENDING"):
         return False, f"unknown action: {action}"
 
     # 数值字段必须可转为有限浮点 / numeric fields must be finite floats
@@ -2109,7 +2246,7 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
             if not math.isfinite(v) or v < 0:
                 return False, f"out-of-range value for {key}"
 
-    if action in ("CLOSE", "MODIFY", "CANCEL_PENDING"):
+    if action in ("CLOSE", "MODIFY", "MODIFY_PENDING", "CANCEL_PENDING"):
         try:
             ticket = int(cmd.get("ticket", 0))
         except (TypeError, ValueError):
@@ -2175,7 +2312,7 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
     """按指令类型分发执行 / dispatch by command action.
 
     action: ORDER（默认下单）/ CLOSE（平仓）/ MODIFY（改 SL·TP）/
-            PENDING（挂单）/ CANCEL_PENDING（撤挂单）。
+            PENDING（挂单）/ MODIFY_PENDING（改挂单）/ CANCEL_PENDING（撤挂单）。
     校验失败或执行异常都返回失败回执，保证一条畸形指令不影响同批其它指令。
     Validation failures and execution exceptions both yield a failure receipt so
     a single malformed command never breaks the rest of the batch.
@@ -2196,6 +2333,8 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
             result = _modify_position(cmd)
         elif action == "PENDING":
             result = _place_pending(cmd, suffix)
+        elif action == "MODIFY_PENDING":
+            result = _modify_pending(cmd)
         elif action == "CANCEL_PENDING":
             result = _cancel_pending(cmd)
         else:

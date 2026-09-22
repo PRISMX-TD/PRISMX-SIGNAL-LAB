@@ -316,6 +316,9 @@ namespace Prismx.Mt5Gateway
                 case "/trade/cancel":
                     RequirePost(ctx, method, HandleCancel);
                     return;
+                case "/trade/modify-pending":
+                    RequirePost(ctx, method, HandleModifyPending);
+                    return;
                 default:
                     WriteError(ctx, 404, "not_found", "未知接口:" + path);
                     return;
@@ -940,6 +943,58 @@ namespace Prismx.Mt5Gateway
 
                 Log.Info("撤挂单 login={0} ticket={1} -> {2} {3} 耗时 {4}ms(其中 dealer {5}ms)",
                     login, ticket, r.Ok ? "已撤" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
+
+                return r;
+            });
+        }
+
+        //+------------------------------------------------------------------+
+        //| POST /trade/modify-pending  改挂单(触发价 / SL / TP)            |
+        //| { login, ticket, price, stopLoss, takeProfit }                    |
+        //|                                                                  |
+        //| 三项都是「不传 / null = 保留现值」,SL/TP 传 0 = 清除。与          |
+        //| /trade/modify 同一套语义,理由见那边的注释。                      |
+        //| All three are "missing/null = keep"; 0 clears SL/TP. Same         |
+        //| semantics as /trade/modify — see the note there.                  |
+        //+------------------------------------------------------------------+
+        private void HandleModifyPending(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong login = body.GetUlong("login");
+            ulong ticket = body.GetUlong("ticket");
+
+            if (login == 0 || ticket == 0)
+            {
+                WriteError(ctx, 400, "bad_request", "login 与 ticket 必填");
+                return;
+            }
+
+            if (!EnsureTradableAccount(ctx, login))
+                return;
+
+            // 同 /trade/modify:绝不能用 GetDouble,它对缺省字段回 0,而 0 在 SL/TP 上
+            // 是「清除」。触发价那一项 0 也不能当成「改成 0」——挂单没有 0 这个价。
+            // As in /trade/modify: GetDouble yields 0 for a missing field and 0 means
+            // "clear" for SL/TP. A 0 trigger price is likewise never a real request.
+            double? price = body.GetNullableDouble("price");
+            double? stopLoss = body.GetNullableDouble("stopLoss");
+            double? takeProfit = body.GetNullableDouble("takeProfit");
+
+            // 改单天然幂等(同样的价位改两次结果一样),但仍走缓存:第二次会因为挂单
+            // 的现值已经等于目标值而…… 不,服务器照样会答成功。真正的理由与撤单不同——
+            // 这里走缓存只是为了让「超时后后端用同一 clientOrderId 再问一次」拿到
+            // 首次的结果,而不是再发一个 dealer 请求。
+            // Idempotent by nature, but still cached so the backend's post-timeout
+            // re-ask replays the first result instead of spending another dealer slot.
+            ExecuteIdempotent(ctx, login, "modify-pending", body.GetString("clientOrderId"), delegate
+            {
+                TradeResult r = _link.ModifyPending(login, ticket, price, stopLoss, takeProfit);
+
+                Log.Info("改挂单 login={0} ticket={1} price={2} SL={3} TP={4} -> {5} {6} 耗时 {7}ms(其中 dealer {8}ms)",
+                    login, ticket,
+                    price.HasValue ? price.Value.ToString(CultureInfo.InvariantCulture) : "keep",
+                    stopLoss.HasValue ? stopLoss.Value.ToString(CultureInfo.InvariantCulture) : "keep",
+                    takeProfit.HasValue ? takeProfit.Value.ToString(CultureInfo.InvariantCulture) : "keep",
+                    r.Ok ? "成功" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
 
                 return r;
             });

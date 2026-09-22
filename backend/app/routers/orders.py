@@ -21,6 +21,7 @@ from app.core.rate_limit import limiter
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.schemas import (
     CancelPendingRequest,
+    ModifyPendingRequest,
     CloseAllOut,
     CloseAllRequest,
     ClosePositionRequest,
@@ -732,6 +733,98 @@ def close_position(
     if gw_payload is not None:
         run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
         db.refresh(order)
+        return _serialize(order)
+
+    return result
+
+
+@router.post("/modify-pending", response_model=OrderOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
+def modify_pending_order(
+    request: Request,
+    req: ModifyPendingRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """改一张真实的 MT5 挂单：触发价 / 止损 / 止盈，以 MODIFY_PENDING 指令落库。
+
+    没传的那一项保留券商上的现值（落库为 NULL，一路 null 传到网关 / 桥接）。
+    止损止盈传 0 = 清除；触发价没有「清除」，schema 已经把 0 挡在门外。
+    Unspecified fields keep the broker's current value (stored NULL and sent as null
+    all the way down). 0 clears SL/TP; a trigger price has no "clear" and the schema
+    already refuses 0.
+    """
+    _assert_account_owned(db, user.id, req.mt5Login)
+
+    # 方向校验需要知道这是买单还是卖单，而这条指令里没有 side——它只认票号。
+    # 从当初下这张挂单的那条记录上把方向找回来：平台只显示自己挂的单，所以正常
+    # 情况下这条记录一定在。找不到就跳过（老记录、或票号对不上），把判断交给网关
+    # ——它读得到那张单自己的类型，本来就是更权威的那一层。
+    #
+    # 这里能校到的是「SL/TP 相对新触发价是否合理」。只拖触发价、不动 SL/TP 时，
+    # 后端不知道券商上现有的 SL/TP 是多少（那份实时快照不落库），所以「把触发价
+    # 拖过了现有止损」这种情况只能由券商拒绝——这是已知的缺口，不是遗漏。
+    #
+    # The direction rules need a side, and this command carries only a ticket. Recover
+    # it from the row that placed the order (the platform only ever shows its own, so
+    # it is normally there); a miss just defers to the gateway, which can read the
+    # order's own type and is the authority anyway.
+    #
+    # What this catches is SL/TP against the *new* trigger. Dragging only the trigger
+    # cannot be checked here — the broker's live SL/TP is not persisted — so "trigger
+    # dragged past the existing stop" is left to the broker. A known gap, not an oversight.
+    placed = (
+        db.query(Order)
+        .filter(
+            Order.user_id == user.id,
+            Order.action == "PENDING",
+            Order.mt5_ticket == req.ticket,
+            Order.pending_type.isnot(None),
+        )
+        .order_by(Order.created_at.desc())
+        .first()
+    )
+    side = None
+    if placed and placed.pending_type:
+        side = "BUY" if placed.pending_type.startswith("BUY") else "SELL"
+    if side:
+        validate_sl_tp_direction(side, req.stopLoss or 0.0, req.takeProfit or 0.0)
+        if req.price is not None:
+            _validate_pending_levels(side, req.price, req.stopLoss or 0.0, req.takeProfit or 0.0)
+
+    existing = (
+        db.query(Order)
+        .filter(Order.user_id == user.id, Order.client_order_id == req.clientOrderId)
+        .first()
+    )
+    if existing:
+        return _serialize(existing)
+
+    order = Order(
+        user_id=user.id,
+        client_order_id=req.clientOrderId,
+        action="MODIFY_PENDING",
+        symbol=req.symbol,
+        # 与 CANCEL_PENDING 同理：改单没有方向，side 只为满足非空列。
+        # As with CANCEL_PENDING: a modify has no side; this only satisfies the column.
+        side="BUY",
+        volume=0.0,
+        ticket=req.ticket,
+        price=req.price,
+        sl=req.stopLoss,
+        tp=req.takeProfit,
+        mt5_login=_require_close_login(db, user.id, req.mt5Login),
+        status="PENDING",
+    )
+    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    if not created:
+        return result
+
+    gw_payload = _try_gateway_execute(db, order)
+    if gw_payload is not None:
+        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
+        db.refresh(order)
+        _refresh_pending_after(db, order)
         return _serialize(order)
 
     return result
