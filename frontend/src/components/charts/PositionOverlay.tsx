@@ -68,9 +68,13 @@ const DASH_ENTRY = [2, 3]
 const DASH_LEVEL = [6, 4]
 const DASH_PENDING = [2, 4]
 
-// 标签矩形，用来让同一帧里价位挨得近的标签互相让开（见 _placeLabel）。
-// A drawn label's rect, used to keep labels at nearby prices from stacking.
-interface LabelBox { x: number; y: number; w: number; h: number }
+// 一个"这块地方已经被占了"的矩形：本帧已画出的标签，以及主图的指标图例。
+// 存的是真实上下边界而不是"中心 y + 固定高度"——图例是个会换行的 DOM 元素，
+// 高度随开了几个指标而变，用固定高度算它必然算错。
+// An occupied rect: labels already drawn this frame, plus the main indicator legend.
+// Real top/bottom rather than "centre y + fixed height", because the legend is a
+// wrapping DOM element whose height depends on how many overlays are on.
+interface LabelBox { x: number; w: number; top: number; bottom: number }
 
 const LABEL_H = 15
 const LABEL_X0 = 6
@@ -93,16 +97,21 @@ const LABEL_RIGHT_GUARD = 70
  * labels a few pixels apart and they become mutually unreadable — which defeats the
  * only purpose this layer has. Positions always had the same flaw, just less often.
  */
-function placeLabel(taken: LabelBox[], y: number, w: number, bw: number): number {
+function placeLabel(taken: LabelBox[], top: number, bottom: number, w: number, bw: number): number {
   let x = LABEL_X0
   // 每次至多挪 8 次:够躲开一屏里现实可能出现的标签数,又不至于在病态输入下空转。
   // At most 8 hops: enough for any realistic screenful, bounded for pathological input.
   for (let i = 0; i < 8; i++) {
     const hit = taken.find((b) =>
-      Math.abs(b.y - y) < LABEL_H && x < b.x + b.w && x + bw > b.x)
+      top < b.bottom && bottom > b.top && x < b.x + b.w && x + bw > b.x)
     if (!hit) break
     const next = hit.x + hit.w + 4
-    if (next + bw > w - LABEL_RIGHT_GUARD) break
+    // 右边放不下就退回最左边原样画:那正是加这套让位之前的样子,叠一下总好过
+    // 把标签推到价格轴上、或者推出画布外彻底看不见。
+    // No room to the right → fall back to the leftmost slot, i.e. exactly how it
+    // looked before any of this: an overlap beats shoving the label onto the price
+    // axis or off-canvas entirely.
+    if (next + bw > w - LABEL_RIGHT_GUARD) return LABEL_X0
     x = next
   }
   return x
@@ -150,6 +159,9 @@ interface RenderModel {
   digits: number
   hovered: string | null
   dragging: string | null
+  /** 主图指标图例当前占的位置；没有开启主图指标时为 null。
+   *  Where the main indicator legend currently sits; null when no overlay is on. */
+  legendBox: () => LabelBox | null
 }
 
 class PosPrimitive {
@@ -190,10 +202,10 @@ class PosPrimitive {
     this._ru?.()
   }
 
-  _render(ctx: CanvasRenderingContext2D, w: number) {
+  _render(ctx: CanvasRenderingContext2D, w: number, h: number) {
     const series = this._series
     if (!series) return
-    const { markers, pending, digits, hovered, dragging } = this._get()
+    const { markers, pending, digits, hovered, dragging, legendBox } = this._get()
     // 本帧已画出的标签框。按画的顺序累积,后画的躲开先画的——所以画序决定了谁
     // 留在最左边:挂单先画,持仓的标签会被挤到右边一点。持仓才是更该一眼看到的,
     // 但它的线本身是高亮可拖的,已经足够显眼,让位给标签的可读性更划算。
@@ -203,28 +215,37 @@ class PosPrimitive {
     // highlighted, draggable ones, so trading that slot for legibility is the better deal.
     const taken: LabelBox[] = []
 
+    // 指标图例先占位。它是画在 canvas 之上的 DOM（z-index 20），谁也不会让谁——
+    // 之前一条贴着图表顶部的标记线，标签就直接被 "MA 89 4279.40" 盖住读不出来。
+    // 图例不是我们画的，所以只能让标签躲它。
+    // The indicator legend claims its space first. It is a DOM element painted above the
+    // canvas (z-index 20), so neither yields: a marker near the top of the chart had its
+    // label buried under "MA 89 4279.40". We do not draw the legend, so the label dodges.
+    const legend = legendBox()
+    if (legend) taken.push(legend)
+
     // 挂单先画：持仓的线是可交互的（悬停加粗、能拖），价位重叠时它压在上面才对。
     // Pending first: position lines are interactive, so they belong on top when the
     // two overlap at the same price.
     for (const q of pending) {
-      this._line(ctx, w, series, q.price, PENDING_COLOR, q.label, DASH_PENDING, false, false, false, taken)
+      this._line(ctx, w, series, q.price, PENDING_COLOR, q.label, DASH_PENDING, false, false, false, taken, h)
       if (q.sl != null) {
-        this._line(ctx, w, series, q.sl, PENDING_DOWN_COLOR, `SL ${q.sl.toFixed(digits)}`, DASH_PENDING, false, false, false, taken)
+        this._line(ctx, w, series, q.sl, PENDING_DOWN_COLOR, `SL ${q.sl.toFixed(digits)}`, DASH_PENDING, false, false, false, taken, h)
       }
       if (q.tp != null) {
-        this._line(ctx, w, series, q.tp, PENDING_UP_COLOR, `TP ${q.tp.toFixed(digits)}`, DASH_PENDING, false, false, false, taken)
+        this._line(ctx, w, series, q.tp, PENDING_UP_COLOR, `TP ${q.tp.toFixed(digits)}`, DASH_PENDING, false, false, false, taken, h)
       }
     }
 
     for (const m of markers) {
-      this._line(ctx, w, series, m.entry, ENTRY_COLOR, entryLabel(m, digits), DASH_ENTRY, false, false, false, taken)
+      this._line(ctx, w, series, m.entry, ENTRY_COLOR, entryLabel(m, digits), DASH_ENTRY, false, false, false, taken, h)
       if (m.sl != null) {
         const k = keyOf(m.ticket, 'sl')
-        this._line(ctx, w, series, m.sl, DOWN_COLOR, `SL ${m.sl.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken)
+        this._line(ctx, w, series, m.sl, DOWN_COLOR, `SL ${m.sl.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken, h)
       }
       if (m.tp != null) {
         const k = keyOf(m.ticket, 'tp')
-        this._line(ctx, w, series, m.tp, UP_COLOR, `TP ${m.tp.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken)
+        this._line(ctx, w, series, m.tp, UP_COLOR, `TP ${m.tp.toFixed(digits)}`, DASH_LEVEL, hovered === k, dragging === k, true, taken, h)
       }
     }
   }
@@ -236,9 +257,18 @@ class PosPrimitive {
     ctx: CanvasRenderingContext2D, w: number, series: ISeriesApi<'Candlestick'>,
     price: number, color: string, label: string, dash: number[],
     hovered: boolean, dragging: boolean, draggable: boolean, taken: LabelBox[],
+    h: number,
   ) {
     const y = series.priceToCoordinate(price) as number | null
     if (y == null) return
+    // 价位在可见区间之外就整条不画。priceToCoordinate 对区间外的价格照样给坐标
+    // （负数或超出画布），线本身被裁掉看不见，却会留下半截标签牌卡在图表顶/底边
+    // 上——一块读不全的碎片，比什么都不画更碍事。
+    // Skip entirely when the price is outside the visible range. priceToCoordinate
+    // still returns a coordinate there (negative or past the canvas); the line itself
+    // is clipped away but its label plate leaves a half-cut fragment pinned to the top
+    // or bottom edge — an unreadable scrap, worse than drawing nothing.
+    if (y < 0 || y > h) return
     const active = hovered || dragging
     // draggable 由调用方显式给出。原来这里是 `color !== ENTRY_COLOR`——只要不是入场
     // 色就当作能拖，于是挂单的止损止盈线一加进来就会画出抓手，暗示一个后端根本
@@ -265,8 +295,8 @@ class PosPrimitive {
     ctx.textBaseline = 'middle'
     const tw = ctx.measureText(label).width
     const bh = LABEL_H, bw = tw + 10
-    const bx = placeLabel(taken, y, w, bw)
-    taken.push({ x: bx, y, w: bw, h: bh })
+    const bx = placeLabel(taken, y - bh / 2, y + bh / 2, w, bw)
+    taken.push({ x: bx, w: bw, top: y - bh / 2, bottom: y + bh / 2 })
     ctx.globalAlpha = 1
     ctx.fillStyle = 'rgba(10, 7, 16, 0.82)'
     ctx.fillRect(bx, y - bh / 2, bw, bh)
@@ -312,7 +342,7 @@ class PosRenderer implements IPrimitivePaneRenderer {
   }
   draw(target: CanvasRenderingTarget2D): void {
     target.useMediaCoordinateSpace((scope) => {
-      this._prim._render(scope.context, scope.mediaSize.width)
+      this._prim._render(scope.context, scope.mediaSize.width, scope.mediaSize.height)
     })
   }
 }
@@ -447,9 +477,46 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     })
   }, [symPositions])
 
+  // 覆盖层根节点。声明提到这里（而不是留在命中判定那一段）是因为 readLegendBox
+  // 的闭包要用它——ref 在回调真正被调用时早已初始化，但让声明在使用之前，读的人
+  // 不必先去确认这件事。
+  // The overlay root. Declared here rather than down in the hit-testing section because
+  // readLegendBox closes over it; the ref is initialised long before that callback runs,
+  // but declaring it first spares the reader from having to verify that.
+  const overlayRef = useRef<HTMLDivElement>(null)
+
+  // 主图指标图例的让位框。每帧现测而不是缓存起来：图例的宽度随指标数值的位数
+  // 变（4279.40 → 967.4 就窄一截），高度随开了几个指标换行而变，任何"变了再测"
+  // 的写法都得盯住这两件事；而这里一帧只读一个元素的 rect，且是在 canvas 的绘制
+  // 回调里——布局此刻已经是干净的，不会触发重排。
+  // 元素引用缓存着，只有它从 DOM 上掉了才重新查（关掉全部主图指标时会掉）。
+  //
+  // Measured per frame rather than cached: the legend's width tracks the digit count of
+  // the indicator values and its height tracks how many overlays wrap onto a second row,
+  // so any "re-measure when it changes" scheme has to watch both. This reads one
+  // element's rect per frame inside the canvas paint callback, where layout is already
+  // clean, so it forces no reflow. The element reference is cached and only re-queried
+  // once it leaves the DOM (which happens when every main overlay is switched off).
+  const legendElRef = useRef<HTMLElement | null>(null)
+  const readLegendBox = useCallback((): LabelBox | null => {
+    const host = overlayRef.current
+    if (!host) return null
+    let el = legendElRef.current
+    if (!el || !el.isConnected) {
+      el = (host.parentElement?.querySelector('.term-legend.main') as HTMLElement | null) ?? null
+      legendElRef.current = el
+    }
+    if (!el) return null
+    const hr = host.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 || r.height === 0) return null
+    // 四周留 4px：标签紧贴着图例也一样难读。/ 4px of air; touching is as bad as overlapping.
+    return { x: r.left - hr.left - 4, w: r.width + 8, top: r.top - hr.top - 4, bottom: r.bottom - hr.top + 4 }
+  }, [])
+
   // primitive 每帧读这份快照 / the primitive reads this snapshot each frame
-  const modelRef = useRef<RenderModel>({ markers, pending: symPending, digits, hovered, dragging: dragKey })
-  modelRef.current = { markers, pending: symPending, digits, hovered, dragging: dragKey }
+  const modelRef = useRef<RenderModel>({ markers, pending: symPending, digits, hovered, dragging: dragKey, legendBox: readLegendBox })
+  modelRef.current = { markers, pending: symPending, digits, hovered, dragging: dragKey, legendBox: readLegendBox }
 
   const primRef = useRef<PosPrimitive | null>(null)
 
@@ -478,7 +545,6 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   }, [markers, symPending, digits, hovered, dragKey])
 
   // ──── 命中判定 / hit testing ────
-  const overlayRef = useRef<HTMLDivElement>(null)
   const markersRef = useRef<Marker[]>(markers)
   markersRef.current = markers
 

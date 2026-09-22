@@ -730,8 +730,17 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast);
 }
-.term-side button:first-child { border-radius: var(--r-panel) 0 0 var(--r-panel); }
-.term-side button:last-child { border-radius: 0 var(--r-panel) var(--r-panel) 0; }
+/* 必须是 -of-type 而不是 -child：点差徽记那个 <span> 就挂在 .term-side 里，且排在
+   两个按钮之后，于是有点差时买入按钮不是 :last-child——右侧圆角整个不生效，连体
+   按钮左圆右方。没点差时（span 不渲染）又是好的，所以这个 bug 只在有报价时出现，
+   本地空数据下看不到。
+   -of-type, not -child: the spread badge <span> lives inside .term-side after both
+   buttons, so with a spread present the buy button is not :last-child and its right
+   radius silently never applied — rounded on the left, square on the right. Without a
+   spread the span isn't rendered and it looked fine, which is why this only showed up
+   against live quotes. */
+.term-side button:first-of-type { border-radius: var(--r-panel) 0 0 var(--r-panel); }
+.term-side button:last-of-type { border-radius: 0 var(--r-panel) var(--r-panel) 0; }
 .term-side button:active { transform: scale(0.985); }
 .term-side .lab {
   font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
