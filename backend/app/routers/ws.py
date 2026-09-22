@@ -184,6 +184,14 @@ async def ws_client(websocket: WebSocket):
                 "data": cached,
                 "funds": manager.account_funds_from_positions(cached),
             })
+        # 连接即补推最近一次挂单快照，理由同持仓：刷新后挂单列表不该先空一拍。
+        # 挂单不带 funds——浮盈是持仓的概念，挂单还没有仓位。
+        # Re-push the latest pending-orders snapshot too, for the same reason as
+        # positions. No funds ride along: floating P/L belongs to positions, and a
+        # pending order has none yet.
+        cached_pending = manager.get_pending_orders(user_id)
+        if cached_pending:
+            await websocket.send_json({"type": "PENDING_ORDERS", "data": cached_pending})
         # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
         # re-push the latest per-account quotes snapshot on connect (order-confirm page)
         cached_quotes = manager.get_quotes(user_id)

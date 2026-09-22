@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import or_, tuple_
 
 from app.models import ClosedTrade, Order
+from app.services.order_payload import OPENED_POSITION
 
 
 def known_position_ids(db, user_id: str, logins: set[str]) -> set[tuple[str, int]]:
@@ -38,8 +39,7 @@ def known_position_ids(db, user_id: str, logins: set[str]) -> set[tuple[str, int
         db.query(Order.mt5_login, Order.mt5_ticket, Order.mt5_position)
         .filter(
             Order.user_id == user_id,
-            Order.action == "ORDER",
-            Order.status == "FILLED",
+            OPENED_POSITION,
             Order.mt5_login.in_(list(logins)),
         )
         .all()
@@ -199,8 +199,7 @@ def compute_personal_winrate(
         Order.position_last_seen_open,
     ).filter(
         Order.user_id == user_id,
-        Order.action == "ORDER",
-        Order.status == "FILLED",
+        OPENED_POSITION,
         Order.mt5_ticket.isnot(None),
         Order.created_at >= cutoff,
     )
@@ -353,8 +352,7 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
         db.query(Order)
         .filter(
             Order.user_id == user_id,
-            Order.action == "ORDER",
-            Order.status == "FILLED",
+            OPENED_POSITION,
             or_(
                 tuple_(Order.mt5_login, Order.mt5_ticket).in_(pair_list),
                 tuple_(Order.mt5_login, Order.mt5_position).in_(pair_list),

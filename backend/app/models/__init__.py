@@ -416,8 +416,10 @@ class Order(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     signal_id = Column(String, ForeignKey("signals.id"), nullable=True)
     client_order_id = Column(String, nullable=False)
-    # 指令类型：ORDER 开仓 / CLOSE 平仓（含部分）/ MODIFY 改 SL·TP
-    # command action: ORDER (open) / CLOSE (incl. partial) / MODIFY (SL·TP)
+    # 指令类型：ORDER 开仓 / CLOSE 平仓（含部分）/ MODIFY 改 SL·TP /
+    #           PENDING 挂单（限价·止损）/ CANCEL_PENDING 撤挂单
+    # command action: ORDER (open) / CLOSE (incl. partial) / MODIFY (SL·TP) /
+    #                 PENDING (place a limit·stop order) / CANCEL_PENDING (remove one)
     action = Column(String, default="ORDER")
     symbol = Column(String, nullable=False)
     side = Column(String, nullable=False)
@@ -439,6 +441,31 @@ class Order(Base):
     # 自定义/目标止损止盈（绝对价）/ custom or target SL & TP (absolute price)
     sl = Column(Float, nullable=True)
     tp = Column(Float, nullable=True)
+    # 挂单的触发价（action=PENDING 时必填；其余指令为空）。
+    #
+    # 不复用 filled_price：那一列记的是"实际成交在哪"，是回执；这一列是"要在哪
+    # 触发"，是指令。挂单成交后两者都有值且通常不相等（滑点、跳空），混在一列里
+    # 会让"用户挂在哪"这个信息在成交那一刻被回执覆盖掉。
+    #
+    # The pending order's trigger price (required when action=PENDING, null
+    # otherwise). Deliberately not reusing filled_price: that column records where
+    # the order actually filled (a receipt), this one where it was asked to trigger
+    # (a command). Both exist once a pending order fills and they usually differ, so
+    # sharing a column would let the receipt erase where the user placed it.
+    price = Column(Float, nullable=True)
+    # 挂单类型：BUY_LIMIT / SELL_LIMIT / BUY_STOP / SELL_STOP（action=PENDING 时必填）。
+    #
+    # 显式存下来，而不是在执行层按「触发价在现价哪一侧」现推：限价和止损是两种
+    # 完全相反的意图（一个在更好的价位等回调，一个在突破后追），而价格随时在动。
+    # 桥接通道的指令最长可以在库里躺 5 分钟才被取走，那期间价格穿过触发价的话，
+    # 现推就会把用户下的限价单静默变成止损单——方向一样、意图相反。
+    #
+    # The pending order's MT5 type. Stored rather than derived at execution time from
+    # "which side of the market is the trigger price on": limit and stop are opposite
+    # intents, and the market moves. A bridge command can sit up to five minutes
+    # before it is fetched; if the price crosses the trigger in that window, deriving
+    # would silently turn the user's limit order into a stop order.
+    pending_type = Column(String, nullable=True)
     # 目标 MT5 账号 login（多账号路由用）/ target MT5 login for routing
     mt5_login = Column(String, nullable=True)
     status = Column(String, default="PENDING")  # PENDING / FILLED / REJECTED / FAILED / CANCELLED

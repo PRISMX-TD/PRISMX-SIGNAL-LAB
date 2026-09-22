@@ -1793,6 +1793,297 @@ def _confirm_stops_applied(ticket: int, sl: float, tp: float, digits: int) -> bo
     return False
 
 
+# MT5 挂单类型名 -> MetaTrader5 包里的常量名。指令里传的是名字（BUY_LIMIT…），
+# 不是数字：数字在协议层看不出对错，而挂单类型填反的后果是"在价格另一侧成交"。
+# Pending type name -> MetaTrader5 constant name. The wire carries names, not the
+# raw ints: a wrong int is invisible in a payload, and a wrong pending type fills
+# on the opposite side of the market.
+_PENDING_TYPES = {
+    "BUY_LIMIT": "ORDER_TYPE_BUY_LIMIT",
+    "SELL_LIMIT": "ORDER_TYPE_SELL_LIMIT",
+    "BUY_STOP": "ORDER_TYPE_BUY_STOP",
+    "SELL_STOP": "ORDER_TYPE_SELL_STOP",
+}
+
+# 反向表：读挂单时把 MT5 的类型数值翻回名字。用 getattr 现算而不是写死 2/3/4/5，
+# 数值以本机装的 MetaTrader5 包为准。
+# Reverse map, built from the installed package rather than hard-coded 2/3/4/5.
+def _pending_type_name(raw_type: int) -> str | None:
+    if mt5 is None:
+        return None
+    for name, const in _PENDING_TYPES.items():
+        value = getattr(mt5, const, None)
+        if value is not None and int(raw_type) == int(value):
+            return name
+    return None
+
+
+def _pending_orders_payload() -> list:
+    """读取本平台挂在券商那边的挂单 / read this platform's pending orders.
+
+    与 `_positions_payload` 同一条边界：只上报魔术号匹配的单。用户自己在 MT5
+    客户端里挂的单不会出现在网页上，也就不会被网页误撤——撤单是不可逆的，
+    而"帮用户撤掉一张他自己挂的单"是这里最容易犯、后果最难解释的错。
+
+    形状与后端 services/pending_orders.pending_row 完全一致（两条通道的挂单
+    最终进同一张表，前端整表替换）。`price` 是触发价，不是成交价——挂单还没成交。
+
+    Same boundary as _positions_payload: only orders whose magic matches. An order
+    the user placed by hand in the MT5 client never surfaces on the web and so can
+    never be cancelled from there — cancellation is irreversible, and silently
+    removing someone's own order is the worst mistake available here.
+
+    The shape matches the backend's services/pending_orders.pending_row exactly, so
+    both channels feed one table. `price` is the trigger price, not a fill price.
+    """
+    orders = mt5.orders_get()
+    if not orders:
+        return []
+    info = mt5.account_info()
+    login = str(info.login) if info else None
+    out = []
+    for o in orders:
+        if getattr(o, "magic", 0) != PRISMX_MAGIC:
+            continue
+        name = _pending_type_name(getattr(o, "type", -1))
+        # 认不出类型就整行丢掉，绝不猜方向：界面上少一行，好过多一行写错买卖方向的。
+        # An unrecognised type drops the row rather than guessing its direction.
+        if name is None:
+            continue
+        out.append({
+            "ticket": int(o.ticket),
+            "symbol": o.symbol,
+            "type": name,
+            "side": "BUY" if name.startswith("BUY") else "SELL",
+            # volume_current 而不是 volume_initial：部分成交过的挂单上，剩下的
+            # 才是还挂着的量。/ what is still resting, not what was originally asked.
+            "volume": float(getattr(o, "volume_current", 0.0) or 0.0),
+            "price": float(getattr(o, "price_open", 0.0) or 0.0),
+            "stopLoss": float(getattr(o, "sl", 0.0) or 0.0),
+            "takeProfit": float(getattr(o, "tp", 0.0) or 0.0),
+            "login": login,
+        })
+    return out
+
+
+def _clamp_pending_stops(symbol: str, side: str, price: float, sl: float, tp: float):
+    """把挂单的止损止盈夹到离**触发价**足够远的地方。
+
+    不能复用 `_compute_stops`：那个函数按**当前市价**夹最小止损距离，对市价单是
+    对的，对挂单则完全错位——挂单的参照点是它自己的触发价，而触发价按定义就离
+    市价有一段距离。用市价去夹，一张「现价 3900、买入止损挂 3950、止损 3930」的
+    单会被"修正"成止损贴着 3900，触发的瞬间就被打掉。
+
+    方向由后端在落库前校验过（_validate_pending_levels），这里只管距离。
+
+    Clamp a pending order's SL/TP against its own trigger price, not the market.
+    _compute_stops clamps against the live price, which is right for a market order
+    and wrong here: a pending order's trigger sits away from the market by
+    definition, so market-based clamping would drag the stop next to the current
+    price and have it taken out the instant the order triggers. Direction is already
+    validated backend-side; this only enforces distance.
+    """
+    info = mt5.symbol_info(symbol)
+    if info is None or price <= 0:
+        return sl, tp
+    point = info.point or 0.0
+    digits = info.digits or 5
+    stops_level = getattr(info, "trade_stops_level", 0) or 0
+    min_dist = (stops_level if stops_level > 0 else 10) * point
+
+    if side == "BUY":
+        if sl > 0 and price - sl < min_dist:
+            sl = price - min_dist
+        if tp > 0 and tp - price < min_dist:
+            tp = price + min_dist
+    else:
+        if sl > 0 and sl - price < min_dist:
+            sl = price + min_dist
+        if tp > 0 and price - tp < min_dist:
+            tp = price - min_dist
+
+    return (round(sl, digits) if sl > 0 else 0.0,
+            round(tp, digits) if tp > 0 else 0.0)
+
+
+def _confirm_pending_placed(ticket: int) -> bool:
+    """回读挂单表，确认这张挂单真的挂上了。
+
+    为什么需要：`order_send` 回 TRADE_RETCODE_PLACED 的意思是「券商收下了这个
+    请求」，不是「挂单已经在那儿了」。开仓路径上这个差别酿过事故（见
+    `_confirm_order_filled`），挂单这边的确认方式更简单——挂单成功的唯一证据就是
+    它出现在 `orders_get` 里。
+
+    查不到返回 False，调用方据此落 FAILED（不知道成没成），而不是 REJECTED
+    （可以安全重下）——重下一张可能已经挂上的单，等于挂了两张。
+
+    A PLACED retcode means "the request was accepted", not "the order is there".
+    The only proof a pending order exists is finding it in orders_get. Not found →
+    False → FAILED ("don't know"), never REJECTED ("safe to retry"), because
+    retrying an order that did get placed leaves two of them resting.
+    """
+    if mt5 is None or not ticket:
+        return False
+    deadline = time.time() + _CONFIRM_TOTAL_SECONDS
+    while time.time() < deadline:
+        try:
+            found = mt5.orders_get(ticket=ticket)
+        except Exception:
+            found = None
+        if found:
+            return True
+        time.sleep(_CONFIRM_INTERVAL_SECONDS)
+    return False
+
+
+def _place_pending(cmd: dict, suffix: str = "") -> dict:
+    """执行一条挂单指令 / place one pending order."""
+    client_order_id = cmd["clientOrderId"]
+    requested = cmd["symbol"]
+    type_name = (cmd.get("pendingType") or "").upper()
+    const = _PENDING_TYPES.get(type_name)
+    order_type = getattr(mt5, const, None) if const else None
+    if order_type is None:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": f"Unsupported pending type: {type_name}"}
+
+    symbol = _resolve_broker_symbol(requested, suffix)
+    if not symbol or not mt5.symbol_select(symbol, True):
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": f"Symbol not available: {requested}"}
+
+    volume = _normalize_volume(symbol, float(cmd.get("volume", 0.0) or 0.0))
+    info = mt5.symbol_info(symbol)
+    digits = info.digits if info else 5
+    price = round(float(cmd.get("price", 0.0) or 0.0), digits)
+    if price <= 0:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Pending order needs a trigger price"}
+
+    side = "BUY" if type_name.startswith("BUY") else "SELL"
+    sl, tp = _clamp_pending_stops(
+        symbol, side, price,
+        float(cmd.get("stopLoss", 0.0) or 0.0),
+        float(cmd.get("takeProfit", 0.0) or 0.0),
+    )
+
+    request = {
+        "action": mt5.TRADE_ACTION_PENDING,
+        "symbol": symbol,
+        "volume": volume,
+        "type": order_type,
+        "price": price,
+        "magic": PRISMX_MAGIC,
+        "comment": "PRISMX",
+        "type_time": mt5.ORDER_TIME_GTC,
+        # 挂单用 RETURN，不是市价单那套 IOC：挂单的成交模式说的是「触发之后剩余
+        # 部分怎么办」，而 IOC/FOK 在多数券商上对挂单直接非法（INVALID_FILL）。
+        # `_alternate_filling` 刻意不返回 RETURN（对市价单语义不符），所以下面
+        # 降级重试的候选是 FOK/IOC —— 只在券商确实拒了 RETURN 时才轮到它们。
+        # Pending orders use RETURN, not the market path's IOC: the filling mode here
+        # describes what happens to the remainder after a trigger, and IOC/FOK are
+        # outright invalid for pending orders at most brokers. _alternate_filling
+        # never returns RETURN (wrong semantics for market orders), so the fallback
+        # candidates are FOK/IOC, reached only if the broker rejects RETURN.
+        "type_filling": getattr(mt5, "ORDER_FILLING_RETURN", 2),
+    }
+    if sl > 0:
+        request["sl"] = sl
+    if tp > 0:
+        request["tp"] = tp
+
+    result = mt5.order_send(request)
+    if result is None:
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
+                "message": f"order_send failed: {mt5.last_error()}"}
+
+    invalid_fill = getattr(mt5, "TRADE_RETCODE_INVALID_FILL", None)
+    if invalid_fill is not None and result.retcode == invalid_fill:
+        alt = _alternate_filling(symbol, request["type_filling"])
+        if alt is not None:
+            logger.info("挂单成交模式被拒，改用 %s 重试一次 / pending filling rejected, retrying with %s", alt, alt)
+            request["type_filling"] = alt
+            retried = mt5.order_send(request)
+            if retried is not None:
+                result = retried
+
+    ticket = int(getattr(result, "order", 0) or 0)
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        status, success = "PLACED", True
+    elif result.retcode == mt5.TRADE_RETCODE_PLACED:
+        ok = _confirm_pending_placed(ticket)
+        status, success = ("PLACED", True) if ok else ("FAILED", False)
+    else:
+        status, success = "REJECTED", False
+
+    return {
+        "clientOrderId": client_order_id,
+        "success": success,
+        "status": status,
+        # 挂单票号。后端把它同时记进 mt5_position——MT5 里挂单触发后生成的仓位
+        # 沿用这张挂单的票号，所以平仓明细的归属不用等任何回填。
+        # The pending ticket; the backend also stores it as mt5_position because the
+        # position this order eventually opens keeps the very same ticket.
+        "mt5Ticket": ticket or None,
+        # 规整后的真实手数，理由同 _execute_order。
+        "volume": volume,
+        "message": (
+            "Pending order placed" if success
+            else _unconfirmed_reason() if status == "FAILED"
+            else _reject_reason(result.retcode)
+        ),
+    }
+
+
+def _cancel_pending(cmd: dict) -> dict:
+    """撤销一张挂单 / remove one pending order."""
+    client_order_id = cmd["clientOrderId"]
+    ticket = int(cmd.get("ticket", 0))
+    found = mt5.orders_get(ticket=ticket)
+    # None（查询失败）与 ()（确实没有）不是一回事，理由同 _close_position。
+    # None (query failed) is not () (absent) — same reasoning as _close_position.
+    if found is None:
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
+                "message": f"orders_get failed: {mt5.last_error()}"}
+    if len(found) == 0:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Pending order not found"}
+    order = found[0]
+    # 只撤本平台挂的单（魔术号匹配），理由同 _close_position：网页从来只显示
+    # 本平台的挂单，一个外来票号正常情况下根本到不了这里。
+    # Only cancel orders this platform placed; a foreign ticket cannot arrive here
+    # through normal use, exactly as in _close_position.
+    if getattr(order, "magic", 0) != PRISMX_MAGIC:
+        return {"clientOrderId": client_order_id, "success": False,
+                "message": "Not a PRISMX-managed order"}
+
+    result = mt5.order_send({"action": mt5.TRADE_ACTION_REMOVE, "order": ticket})
+    if result is None:
+        return {"clientOrderId": client_order_id, "success": False, "status": "FAILED",
+                "message": f"order_send failed: {mt5.last_error()}"}
+
+    if result.retcode == mt5.TRADE_RETCODE_DONE:
+        status, success = "FILLED", True
+    elif result.retcode == mt5.TRADE_RETCODE_PLACED:
+        # 撤单的确认与挂单相反：单**不在**挂单表里才算撤掉了。
+        # The confirmation is the mirror image: it worked when the order is gone.
+        status, success = ("FILLED", True) if not _confirm_pending_placed(ticket) else ("FAILED", False)
+    else:
+        status, success = "REJECTED", False
+
+    return {
+        "clientOrderId": client_order_id,
+        "success": success,
+        "status": status,
+        "mt5Ticket": ticket,
+        "message": (
+            "Pending order cancelled" if success
+            else _unconfirmed_reason() if status == "FAILED"
+            else _reject_reason(result.retcode)
+        ),
+    }
+
+
 def _validate_command(cmd: dict) -> tuple[bool, str]:
     """校验单条指令的结构与字段范围 / validate one command's shape and field ranges.
 
@@ -1805,11 +2096,11 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
     if not cmd.get("clientOrderId"):
         return False, "missing clientOrderId"
     action = (cmd.get("action") or "ORDER").upper()
-    if action not in ("ORDER", "CLOSE", "MODIFY"):
+    if action not in ("ORDER", "CLOSE", "MODIFY", "PENDING", "CANCEL_PENDING"):
         return False, f"unknown action: {action}"
 
     # 数值字段必须可转为有限浮点 / numeric fields must be finite floats
-    for key in ("volume", "entry", "stopLoss", "takeProfit"):
+    for key in ("volume", "entry", "stopLoss", "takeProfit", "price"):
         if key in cmd and cmd[key] is not None:
             try:
                 v = float(cmd[key])
@@ -1818,13 +2109,39 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
             if not math.isfinite(v) or v < 0:
                 return False, f"out-of-range value for {key}"
 
-    if action in ("CLOSE", "MODIFY"):
+    if action in ("CLOSE", "MODIFY", "CANCEL_PENDING"):
         try:
             ticket = int(cmd.get("ticket", 0))
         except (TypeError, ValueError):
             return False, "invalid ticket"
         if ticket <= 0:
             return False, "invalid ticket"
+
+    if action == "PENDING":
+        # 挂单类型必须是认得的四种之一。认不出就拒，绝不猜：猜错的后果是
+        # 「在价格的另一侧成交」，而不是一条报错。
+        # The pending type must be one of the four known names; an unknown one is
+        # refused rather than guessed, since a wrong guess fills on the other side
+        # of the market instead of producing an error.
+        if (cmd.get("pendingType") or "").upper() not in _PENDING_TYPES:
+            return False, f"invalid pendingType: {cmd.get('pendingType')}"
+        symbol = cmd.get("symbol")
+        if not symbol or not isinstance(symbol, str) or len(symbol) > 30:
+            return False, "invalid symbol"
+        # 手数与触发价都必须是真实的正数，理由同下面 ORDER 那段：`_normalize_volume`
+        # 会把 0 抬成最小手数，而 0 触发价会被券商拒成一个看不懂的返回码。
+        # Both must be genuinely positive, for the reason spelled out under ORDER:
+        # _normalize_volume raises 0 to the minimum lot, and a 0 trigger price earns
+        # an opaque broker rejection.
+        try:
+            volume = float(cmd.get("volume", 0.0) or 0.0)
+            price = float(cmd.get("price", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            return False, "invalid volume/price"
+        if volume <= 0:
+            return False, "missing or non-positive volume for PENDING"
+        if price <= 0:
+            return False, "missing or non-positive price for PENDING"
 
     if action == "ORDER":
         side = cmd.get("side")
@@ -1857,7 +2174,8 @@ def _validate_command(cmd: dict) -> tuple[bool, str]:
 def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
     """按指令类型分发执行 / dispatch by command action.
 
-    action: ORDER（默认下单）/ CLOSE（平仓）/ MODIFY（改 SL·TP）。
+    action: ORDER（默认下单）/ CLOSE（平仓）/ MODIFY（改 SL·TP）/
+            PENDING（挂单）/ CANCEL_PENDING（撤挂单）。
     校验失败或执行异常都返回失败回执，保证一条畸形指令不影响同批其它指令。
     Validation failures and execution exceptions both yield a failure receipt so
     a single malformed command never breaks the rest of the batch.
@@ -1876,6 +2194,10 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
             result = _close_position(cmd)
         elif action == "MODIFY":
             result = _modify_position(cmd)
+        elif action == "PENDING":
+            result = _place_pending(cmd, suffix)
+        elif action == "CANCEL_PENDING":
+            result = _cancel_pending(cmd)
         else:
             result = _execute_order(cmd, suffix)
         # 不变式：**任何走到 order_send 的路径都必须自己写明 status**。到这里还没有
@@ -1935,13 +2257,15 @@ def poll_terminal(
       {
         "account": {...} | None,   # 含 detectedSuffix / includes detectedSuffix
         "positions": [...],
+        "pendingOrders": [...],    # 券商那边真实挂着的挂单 / pending orders resting at the broker
         "quotes": [...],           # bid/ask 报价 / bid/ask quotes
         "results": [...],          # 下单回执 / order results
         "closedTrades": [...],     # 新检测到的真实平仓明细（个人胜率用）/ newly detected real closes (personal win-rate)
         "error": str | None,
       }
     """
-    out = {"account": None, "positions": [], "quotes": [], "results": [], "closedTrades": [], "error": None}
+    out = {"account": None, "positions": [], "pendingOrders": [], "quotes": [],
+           "results": [], "closedTrades": [], "error": None}
     if mt5 is None:
         out["error"] = f"MetaTrader5 import failed: {_IMPORT_ERROR}"
         return out
@@ -1960,6 +2284,7 @@ def poll_terminal(
         if read_state:
             out["account"] = _account_payload(suffix)
             out["positions"] = _positions_payload()
+            out["pendingOrders"] = _pending_orders_payload()
             out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
             out["results"].append(_dispatch_command(cmd, suffix))
@@ -1988,6 +2313,22 @@ def poll_terminal(
         if not out["error"]:
             out["error"] = str(e)
     return out
+
+
+def read_pending_orders(path: str) -> list | None:
+    """只读当前挂单（不读账号、持仓、报价、平仓明细）。读不到返回 None。
+
+    与 `read_positions` 成对：挂单 / 撤挂单执行完立刻调用它并上报，让网页上的
+    挂单"挂上即出现、撤掉即消失"，不等下一拍 1.5 秒的常规上报。
+    The pending-order twin of read_positions, for the immediate report right after a
+    place/cancel so the web reflects it without waiting for the next status tick.
+    """
+    if mt5 is None or not _ensure_attached(path):
+        return None
+    try:
+        return _pending_orders_payload()
+    except Exception:
+        return None
 
 
 def read_positions(path: str) -> list | None:

@@ -159,6 +159,9 @@ class _FakeManager:
     def get_positions(self, user_id):
         return []
 
+    def get_pending_orders(self, user_id):
+        return []
+
     def get_quotes(self, user_id):
         return []
 

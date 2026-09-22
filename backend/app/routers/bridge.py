@@ -710,6 +710,13 @@ def _poll_db_work(
             "entry": entry,
             "stopLoss": out_sl,
             "takeProfit": out_tp,
+            # 挂单专用：触发价与 MT5 挂单类型。只有 action=PENDING 会读它们；
+            # 其余指令带的是 0 / None，老桥接不认识这两个键也一样照旧工作。
+            # Pending-order only: trigger price and MT5 type. Read only when
+            # action=PENDING; other commands carry 0/None and older bridges that
+            # don't know these keys keep working unchanged.
+            "price": o.price or 0.0,
+            "pendingType": o.pending_type,
         })
         o.delivered = True
         o.delivered_at = now
@@ -854,7 +861,14 @@ class BridgeResultRequest(BaseModel):
     # duplicate position. The gateway channel has had PLACED_UNCONFIRMED → FAILED
     # all along (services/gateway_execute.py); the bridge channel had no way to
     # say it, which is why the two channels' state machines disagreed.
-    status: Literal["FILLED", "REJECTED", "FAILED"] | None = None
+    # PLACED 是挂单专用的第四态（桥接 >= 1.4.3）："单已经挂在券商那边了，但还没
+    # 成交，而且本来也不该成交"。不能并进 FILLED——那会让一张可能永远不触发的挂单
+    # 立刻被算成一笔完成的交易（胜率、勋章、竞赛、管理端统计都按 FILLED 数）。
+    # PLACED is a fourth state, for pending orders only (bridge >= 1.4.3): the order
+    # now sits at the broker, unfilled — and is not supposed to fill yet. It cannot be
+    # folded into FILLED, which would count an order that may never trigger as a
+    # completed trade everywhere FILLED is counted.
+    status: Literal["FILLED", "REJECTED", "FAILED", "PLACED"] | None = None
     mt5Ticket: int | None = None
     filledPrice: float | None = None
     # 实际执行的手数（桥接 1.4.2 起上报）。桥接会按券商的步长与上下限规整用户填的
@@ -943,6 +957,14 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     # The executed volume replaces the intended one; older bridges omit it.
     if req.volume is not None:
         values["volume"] = req.volume
+    # 挂单挂出成功：票号同时写进 mt5_position。MT5 里挂单触发后生成的仓位沿用
+    # 这张挂单的票号，所以现在记下来，等它成交再平仓时，平仓明细按仓位号归属
+    # （order_payload.OPENED_POSITION）不用任何回填就能对上。
+    # A placed pending order: record its ticket as mt5_position too. The position it
+    # eventually opens keeps that ticket, so the later close attributes correctly
+    # (see OPENED_POSITION) with no backfill.
+    if final_status == "PLACED" and req.mt5Ticket:
+        values["mt5_position"] = req.mt5Ticket
     # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
     # Backfill the actual executing account for fallback-routed orders; never
     # overwrite an order that already specified its target account.
@@ -968,7 +990,7 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     # alone: that's the idempotency check, now expressed by the WHERE clause.
     claimed = (
         db.query(Order)
-        .filter(Order.id == order.id, Order.status.notin_(("FILLED", "REJECTED")))
+        .filter(Order.id == order.id, Order.status.notin_(("FILLED", "REJECTED", "PLACED")))
         .update(values, synchronize_session=False)
     )
     db.commit()
@@ -1014,7 +1036,17 @@ async def bridge_result(
     # "auto-manage triggered" push at the moment the rule fired
     # (auto_manage.evaluate_positions), no need to notify the same action twice.
     if not order.client_order_id.startswith(AUTO_PREFIX):
-        if order.status == "FILLED":
+        if order.status == "PLACED":
+            # 「已挂出」不是「已成交」，措辞必须分开：用户看到"成交"会以为仓位已经
+            # 建立，从而按已有仓位去设止损、算风险，而实际上什么都还没发生。
+            # "Placed" must not read as "filled": a user told their order filled will
+            # manage a position that does not exist yet.
+            await dispatch_event_push_async(
+                user.id, EVENT_ORDER_FILLED,
+                f"挂单已挂出 {order.symbol}",
+                f"{order.side} {order.volume} 手 @ {order.price}｜触发后才会成交 / fills when triggered",
+            )
+        elif order.status == "FILLED":
             await dispatch_event_push_async(
                 user.id, EVENT_ORDER_FILLED,
                 f"订单已成交 {order.symbol}",
@@ -1042,6 +1074,14 @@ async def bridge_result(
 
 class BridgePositionsRequest(BaseModel):
     data: list = []
+    # 券商服务器上真实挂着的挂单（桥接 >= 1.4.3）。可选：旧桥接不带这个键，
+    # 此时**不推**空列表——推空会把前端那份挂单清掉，而"旧桥接没上报"并不等于
+    # "这个账号没有挂单"。None 与 [] 必须区分，所以缺省是 None 而不是 []。
+    # Pending orders living at the broker (bridge >= 1.4.3). Optional, and when
+    # absent nothing is pushed: an empty push would clear the frontend's list, but
+    # "an old bridge didn't report" is not "this account has no pending orders".
+    # None and [] mean different things, hence the None default.
+    pendingOrders: list | None = None
 
 
 @router.post("/positions")
@@ -1067,6 +1107,8 @@ async def bridge_positions(
     # skips ticks identical to the previous one. The account card now shares the
     # positions table's data instead of waiting on the 5s /bridge/accounts poll.
     await manager.push_positions(user.id, req.data, source="bridge")
+    if req.pendingOrders is not None:
+        await manager.push_pending_orders(user.id, req.pendingOrders, source="bridge")
     # 拿实时持仓给个人胜率对账：给仍持仓的本平台仓位盖时间戳，让平仓明细漏报的
     # 仓位最终退出"进行中"。对账失败绝不影响持仓上报本身。
     # Reconcile personal win-rate against live positions: stamp still-open

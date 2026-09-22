@@ -55,7 +55,7 @@ import FullscreenToolbar from '../components/charts/FullscreenToolbar'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
 import { useChartEngine } from '../components/charts/useChartEngine'
 import { useChartData } from '../components/charts/useChartData'
-import { useGlobalQuotes, usePositions } from '../store/live'
+import { useGlobalQuotes, usePendingOrders, usePositions } from '../store/live'
 import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
@@ -153,6 +153,7 @@ export default function ChartsPage() {
   const accountQuotes = useQuotes()
   const globalQuotes = useGlobalQuotes()
   const positions = usePositions()
+  const pendingOrders = usePendingOrders()
   const { toast, placeManualOrder, showToast } = useOrderPlacement()
 
   // 每个品种的价格轴小数位：**优先用券商随报价上报的 digits**，拿不到才退回
@@ -219,6 +220,12 @@ export default function ChartsPage() {
   const accountOrders = useMemo(
     () => (multiAccount && activeAccount ? orders.filter((o) => String(o.mt5Login ?? '') === String(activeAccount.login)) : orders),
     [multiAccount, activeAccount, orders],
+  )
+  // 挂单同一套过滤口径（键名是 login，与持仓一致，不是订单那边的 mt5Login）。
+  // Pending orders filter the same way; their key is `login`, as on positions.
+  const accountPendingOrders = useMemo(
+    () => (multiAccount && activeAccount ? pendingOrders.filter((o) => String(o.login ?? '') === String(activeAccount.login)) : pendingOrders),
+    [multiAccount, activeAccount, pendingOrders],
   )
   // 停靠区「全部平仓」的作用范围，必须跟 accountPositions 一个口径：多账户才限定
   // 到选中账户，否则不限（null）——单账户或数据没带 login 时，列表本来就是全部。
@@ -325,8 +332,8 @@ export default function ChartsPage() {
       selectedLogin={effectiveLogin}
       onSelectLogin={setSelectedLogin}
       initialSide={initialSide}
-      onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid) =>
-        placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid)
+      onPlace={(side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) =>
+        placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price)
       }
     />
   )
@@ -493,7 +500,7 @@ export default function ChartsPage() {
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
         {!isFullscreen && (
           <div className="hidden lg:flex lg:flex-shrink-0 lg:flex-col">
-            <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
+            <PositionsDock positions={accountPositions} orders={accountOrders} pendingOrders={accountPendingOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
           </div>
         )}
 
@@ -563,7 +570,7 @@ export default function ChartsPage() {
                 </>
               )}
               {sheet === 'positions' && (
-                <PositionsDock positions={accountPositions} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
+                <PositionsDock positions={accountPositions} orders={accountOrders} pendingOrders={accountPendingOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
               )}
             </div>
           </div>

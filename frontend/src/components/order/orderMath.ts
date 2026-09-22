@@ -9,7 +9,7 @@
 // modal, chart manual modal, docked terminal ticket). Each used to carry its own
 // copy of these formulas; merged 2026-09-06 so a rule change lands everywhere at
 // once. No React here — state orchestration lives in useOrderForm.ts.
-import type { Quote } from '../../api/types'
+import type { OrderEntryType, PendingType, Quote } from '../../api/types'
 import { contractSize, lotStep, minLot, roundLots, suggestVolumeByRisk, usdMarginBasis } from '../../api/utils'
 
 const QUICK_LOTS_BASE = [0.01, 0.1, 0.5, 1.0]
@@ -116,6 +116,49 @@ export function parseOptionalNumber(raw: string): number | null {
 export interface SlTpCheck {
   slInvalid: boolean
   tpInvalid: boolean
+}
+
+/** 挂单的 MT5 类型 = 方向 × 入场方式。市价单没有类型，返回 null。
+ *  The MT5 pending type is direction x entry mode; a market order has none. */
+export function pendingTypeOf(isBuy: boolean, entryType: OrderEntryType): PendingType | null {
+  if (entryType === 'MARKET') return null
+  return `${isBuy ? 'BUY' : 'SELL'}_${entryType}` as PendingType
+}
+
+/**
+ * 挂单触发价的方向校验。返回 null 表示合法，否则返回一个 i18n key。
+ *
+ * 限价 = 在比现价**更有利**的位置等回调（买在下方、卖在上方）；
+ * 止损 = 在**更不利**的位置等突破（买在上方、卖在下方）。
+ * 买单参照卖价（ask，买入的成交价），卖单参照买价（bid），与市价单取价一致。
+ *
+ * 填反了不是小错：一张本想「跌到 3900 再买」的单，价格填在现价上方就成了「涨到
+ * 3900 就追」，方向相同而意图相反。MT5 会拒（invalid price），但用户拿到的是一个
+ * 裸返回码；在这里拦住，用户看到的是该往哪边改。
+ * 拿不到报价时不判——宁可放过去让服务端判，也不要因为本地报价缺失而拦下合法的单。
+ *
+ * Direction check for a pending order's trigger price; null means valid, otherwise an
+ * i18n key. A limit waits at a better price than the market, a stop chases a worse
+ * one; buys compare against ask, sells against bid. Getting it backwards inverts the
+ * intent while keeping the direction, and MT5 answers only with a bare retcode. With
+ * no quote available nothing is judged: better to let the server decide than to block
+ * a valid order over a missing local price.
+ */
+export function checkPendingPrice(
+  entryType: OrderEntryType,
+  isBuy: boolean,
+  priceNum: number | null,
+  bid: number | null,
+  ask: number | null,
+): string | null {
+  if (entryType === 'MARKET') return null
+  if (priceNum == null || Number.isNaN(priceNum) || priceNum <= 0) return 'order.pending.priceRequired'
+  const ref = isBuy ? ask : bid
+  if (ref == null || !(ref > 0)) return null
+  const wantAbove = isBuy ? entryType === 'STOP' : entryType === 'LIMIT'
+  if (wantAbove && priceNum <= ref) return 'order.pending.mustBeAbove'
+  if (!wantAbove && priceNum >= ref) return 'order.pending.mustBeBelow'
+  return null
 }
 
 /**

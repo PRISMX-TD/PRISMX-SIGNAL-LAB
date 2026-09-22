@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
-import type { MT5Account, Order, Quote } from '../../api/types'
+import type { MT5Account, Order, OrderEntryType, Quote } from '../../api/types'
 import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
@@ -31,6 +31,9 @@ interface Props {
   // 图表最新收盘价：连报价都没有时的最后兜底 / chart's latest close, last-resort fallback
   refPrice: number
   digits: number
+  // orderType/price 是挂单用的：市价单传 'MARKET' + null，行为与这两个参数
+  // 出现之前完全一致。/ The last two are for pending orders; 'MARKET' + null
+  // reproduces the exact behaviour from before they existed.
   onPlace: (
     side: Side,
     volume: number,
@@ -38,6 +41,8 @@ interface Props {
     stopLoss: number | null,
     takeProfit: number | null,
     clientOrderId: string,
+    orderType: OrderEntryType,
+    price: number | null,
   ) => Promise<Order | void>
   // 受控的选中账户 login（由父级 ChartsPage 持有，用于联动账户摘要/持仓/挂单）。
   // Controlled selected-account login (owned by ChartsPage to sync the summary/positions/orders).
@@ -95,7 +100,7 @@ export default function OrderTicket({
   const elapsedMs = useElapsedMs(sentAt)
   const [receipt, setReceipt] = useState<Receipt | null>(null)
 
-  const canSubmit = form.hasAccounts && !form.slTpInvalid && !submitting
+  const canSubmit = form.hasAccounts && !form.slTpInvalid && form.priceError == null && !submitting
   const ccy = selected?.accountCurrency ?? ''
 
   const submit = async () => {
@@ -113,14 +118,24 @@ export default function OrderTicket({
       // 不会变成两笔。成功后换新号，下一单是新的。
       // The idempotency key stays fixed until a success, so a retry after "received
       // but no receipt" can't double-place; rotated after success for the next order.
-      const placed = await onPlace(side, vol, form.login || null, form.slNum, form.tpNum, form.orderId)
+      const placed = await onPlace(
+        side, vol, form.login || null, form.slNum, form.tpNum, form.orderId,
+        form.entryType, form.entryType === 'MARKET' ? null : form.priceNum,
+      )
       form.rotateOrderId()
       const secs = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`
       // 回执按状态分三种：网关账号当场成交给成交价和耗时；桥接账号后端只是收单，
       // 说"已受理"而不是"已成交"；被拒直接给原因。以前三种情况都是同一句"已提交"。
       // Three receipts by status: a gateway fill shows price and elapsed; a bridge
       // account is merely accepted (not filled); a rejection shows its reason.
-      if (placed && placed.status === 'FILLED') {
+      if (placed && placed.status === 'PLACED') {
+        // 「已挂出」不是「已成交」：挂单要等触发才有仓位，说成交会让用户以为
+        // 仓位已经建立。/ "Placed" is not "filled": there is no position until it
+        // triggers, and saying otherwise makes the user manage one that isn't there.
+        const px = placed.price != null ? placed.price.toFixed(digits) : '—'
+        setReceipt({ kind: 'ok', msg: String(t('charts.ticket.pendingPlaced', { price: px })), detail: secs })
+        setTimeout(() => setReceipt(null), 4000)
+      } else if (placed && placed.status === 'FILLED') {
         const px = placed.filledPrice != null ? placed.filledPrice.toFixed(digits) : '—'
         setReceipt({ kind: 'ok', msg: String(t('charts.ticket.filledAt', { price: px })), detail: secs })
         setTimeout(() => setReceipt(null), 4000)
@@ -149,6 +164,16 @@ export default function OrderTicket({
   const tpPts = entry != null && form.tpNum != null && !form.tpInvalid ? Math.round(Math.abs(form.tpNum - entry) * pt) : null
   const rMult = slPts && tpPts ? tpPts / slPts : null
   const sideLabel = isBuy ? t('charts.ticket.buy') : t('charts.ticket.sell')
+  // 触发价离现价多远（点）。挂单最常见的失误是挂得太近被立刻触发，或太远
+  // 一整天都不动——这个数字是用户唯一能一眼判断的依据。
+  // How far the trigger sits from the market, in points: the one number that tells
+  // the user at a glance whether it will fire immediately or sit there all day.
+  const marketRef = isBuy ? form.ask : form.bid
+  const gapPts = form.entryType !== 'MARKET' && marketRef != null && form.priceNum != null
+    && !Number.isNaN(form.priceNum) && form.priceError == null
+    ? Math.round(Math.abs(form.priceNum - marketRef) * pt)
+    : null
+  const pendingLabel = form.pendingType ? String(t(`order.pending.type.${form.pendingType}` as const)) : ''
   // 手数按该品种的步长位数显示：原油步长 0.1，写死两位会显示成 "0.10"。
   // Lot digits follow the symbol's step: WTI steps by 0.1, so a hard-coded 2
   // decimals renders "0.10".
@@ -180,6 +205,46 @@ export default function OrderTicket({
         </button>
         {spread != null && <span className="term-spread">{spread}<small>{t('charts.ticket.points')}</small></span>}
       </div>
+
+      {/* 入场方式：市价立刻成交，限价/止损在触发价上等着 / entry mode */}
+      <div className="term-fk">
+        <span>{t('charts.ticket.entryMode')}</span>
+        <span className="term-mode" role="tablist">
+          {(['MARKET', 'LIMIT', 'STOP'] as OrderEntryType[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={form.entryType === m}
+              className={form.entryType === m ? 'on' : ''}
+              onClick={() => form.setEntryType(m)}
+            >
+              {t(`charts.ticket.entry.${m}`)}
+            </button>
+          ))}
+        </span>
+      </div>
+      {form.entryType !== 'MARKET' && (
+        <label className="term-fld">
+          <span className="term-fk"><span>{t('charts.ticket.triggerPrice')}</span><span>{pendingLabel}</span></span>
+          <input
+            className={`term-inp ${form.priceError ? 'bad' : ''}`}
+            value={form.price}
+            inputMode="decimal"
+            placeholder="—"
+            aria-label={String(t('charts.ticket.triggerPrice'))}
+            onChange={(e) => form.setPrice(e.target.value.replace(/[^0-9.]/g, ''))}
+          />
+          <span className="term-fh">
+            {gapPts != null && t('charts.ticket.awayFromMarket', { points: gapPts })}
+          </span>
+        </label>
+      )}
+      {form.priceError && (
+        <p className="term-warn">
+          {t(form.priceError, { price: marketRef != null ? marketRef.toFixed(digits) : '—' })}
+        </p>
+      )}
 
       {/* 手数 + 模式 / volume + size mode */}
       <div className="term-fk">
@@ -261,7 +326,9 @@ export default function OrderTicket({
           </>
         ) : (
           <>
-            {t('charts.ticket.place', { side: sideLabel, volume: (form.parsedVolume ?? 0).toFixed(lotD) })}
+            {form.entryType === 'MARKET'
+              ? t('charts.ticket.place', { side: sideLabel, volume: (form.parsedVolume ?? 0).toFixed(lotD) })
+              : t('charts.ticket.placePending', { type: pendingLabel, volume: (form.parsedVolume ?? 0).toFixed(lotD) })}
             {entry != null && <span className="px">@ {entry.toFixed(digits)}</span>}
           </>
         )}
@@ -272,7 +339,14 @@ export default function OrderTicket({
           {receipt.detail && <span className="px">{receipt.detail}</span>}
         </p>
       ) : (
-        <p className="term-ctah">{t('charts.ticket.footnote')}</p>
+        // 脚注随入场方式换：原来那句写死「市价单」，挂单模式下就是错的，而这行
+        // 恰恰是用户确认"我到底下的是哪种单"的最后一眼。
+        // The footnote follows the entry mode: the original text hard-coded "market
+        // order", which is simply wrong in a pending mode — and this line is the last
+        // thing the user reads before confirming what kind of order they are placing.
+        <p className="term-ctah">
+          {t(form.entryType === 'MARKET' ? 'charts.ticket.footnote' : 'charts.ticket.footnotePending')}
+        </p>
       )}
     </div>
   )

@@ -19,7 +19,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { checkSlTp, clampLots, normalizeVolume, parseOptionalNumber, sanitizeDecimal } from './orderMath'
+import { checkPendingPrice, checkSlTp, clampLots, normalizeVolume, parseOptionalNumber, pendingTypeOf, sanitizeDecimal } from './orderMath'
 
 // ---------------------------------------------------------------------------
 // 输入清洗 / input sanitising
@@ -162,5 +162,80 @@ describe('normalizeVolume', () => {
   it('与 clampLots 给出同一个上限 —— 失焦与提交两条路径不能有分歧', () => {
     // 两条路径口径不一致正是那条 P1 的成因。
     expect(parseFloat(normalizeVolume('50', 'XAUUSD'))).toBe(clampLots(50, 'XAUUSD'))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 挂单：类型推导与触发价方向 / pending orders: type and trigger side
+// ---------------------------------------------------------------------------
+//
+// 为什么值得单独测：挂单填反的后果不是报错，而是**意图被悄悄反转**——一张本想
+// 「跌到 3900 再买」的限价单，价格填在现价上方就成了「涨到 3900 就追」，方向相同、
+// 手数相同、界面上看起来一模一样，只有触发时机完全相反。这正是「不报错、只让用户
+// 得到另一件事」那一类，和这个文件里原有两条 P1 同源。
+//
+// A wrong-side trigger does not error, it silently inverts the intent: a limit meant
+// to buy a dip becomes a stop chasing a breakout — same direction, same size, and the
+// UI looks identical. Same family as the two P1s this file already covers.
+
+describe('pendingTypeOf', () => {
+  it('按方向 × 入场方式拼出 MT5 类型', () => {
+    expect(pendingTypeOf(true, 'LIMIT')).toBe('BUY_LIMIT')
+    expect(pendingTypeOf(true, 'STOP')).toBe('BUY_STOP')
+    expect(pendingTypeOf(false, 'LIMIT')).toBe('SELL_LIMIT')
+    expect(pendingTypeOf(false, 'STOP')).toBe('SELL_STOP')
+  })
+
+  it('市价单没有挂单类型', () => {
+    expect(pendingTypeOf(true, 'MARKET')).toBeNull()
+  })
+})
+
+describe('checkPendingPrice', () => {
+  const BID = 3300
+  const ASK = 3300.4
+
+  it('市价单一律不判', () => {
+    expect(checkPendingPrice('MARKET', true, null, BID, ASK)).toBeNull()
+  })
+
+  it('买入限价要在卖价下方，买入止损要在上方', () => {
+    expect(checkPendingPrice('LIMIT', true, 3290, BID, ASK)).toBeNull()
+    expect(checkPendingPrice('LIMIT', true, 3310, BID, ASK)).toBe('order.pending.mustBeBelow')
+    expect(checkPendingPrice('STOP', true, 3310, BID, ASK)).toBeNull()
+    expect(checkPendingPrice('STOP', true, 3290, BID, ASK)).toBe('order.pending.mustBeAbove')
+  })
+
+  it('卖出限价要在买价上方，卖出止损要在下方', () => {
+    expect(checkPendingPrice('LIMIT', false, 3310, BID, ASK)).toBeNull()
+    expect(checkPendingPrice('LIMIT', false, 3290, BID, ASK)).toBe('order.pending.mustBeAbove')
+    expect(checkPendingPrice('STOP', false, 3290, BID, ASK)).toBeNull()
+    expect(checkPendingPrice('STOP', false, 3310, BID, ASK)).toBe('order.pending.mustBeBelow')
+  })
+
+  it('买单比 ask、卖单比 bid，不是两边共用一个参考价', () => {
+    // 正好挂在 bid 上：买入限价合法（低于 ask），卖出限价非法（不高于 bid）。
+    // 只有两边各用各的参考价才能得出这个结果——共用一个价（比如中间价）会让
+    // 其中一边判反，而点差越大这一格越宽。
+    expect(checkPendingPrice('LIMIT', true, BID, BID, ASK)).toBeNull()
+    expect(checkPendingPrice('LIMIT', false, BID, BID, ASK)).toBe('order.pending.mustBeAbove')
+  })
+
+  it('等于参考价不算合法：券商还有最小距离要求，贴着挂必被拒', () => {
+    expect(checkPendingPrice('LIMIT', true, ASK, BID, ASK)).toBe('order.pending.mustBeBelow')
+    expect(checkPendingPrice('STOP', true, ASK, BID, ASK)).toBe('order.pending.mustBeAbove')
+  })
+
+  it('没填 / 填不出数字 / 非正数都要拦，不能当成"没填就放过"', () => {
+    // 放过去的后果是一张 price=0 的挂单发到券商，回来一个看不懂的返回码。
+    expect(checkPendingPrice('LIMIT', true, null, BID, ASK)).toBe('order.pending.priceRequired')
+    expect(checkPendingPrice('LIMIT', true, NaN, BID, ASK)).toBe('order.pending.priceRequired')
+    expect(checkPendingPrice('LIMIT', true, 0, BID, ASK)).toBe('order.pending.priceRequired')
+  })
+
+  it('拿不到报价时只校验"填了正数"，不判方向', () => {
+    // 本地没报价就拦下合法的单是更坏的结果：方向交给服务端与券商判。
+    expect(checkPendingPrice('LIMIT', true, 3290, null, null)).toBeNull()
+    expect(checkPendingPrice('STOP', false, 3290, null, null)).toBeNull()
   })
 })

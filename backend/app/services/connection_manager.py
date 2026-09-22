@@ -86,9 +86,19 @@ class ConnectionManager:
         # for whichever account is selected. The site-wide display feed is
         # separate; see quotes_store.py (EA-pushed, not user/account-scoped).
         self._quotes: dict[str, dict[str, dict]] = {}
+        # user_id -> source -> 最近一次**挂单**快照。分区理由与 _positions 完全
+        # 相同（bridge 与 gateway 各自只看得见自己那批账号），推送时同样合并。
+        # user_id -> source -> latest pending-orders snapshot, partitioned and
+        # merged for exactly the same reason as _positions.
+        self._pending_orders: dict[str, dict[str, list]] = {}
         # user_id -> 上一次 POSITIONS 推送内容的摘要，用于跳过重复推送
         # user_id -> digest of the last POSITIONS payload, to skip repeat pushes
         self._last_positions_push: dict[str, bytes] = {}
+        # 同上，PENDING_ORDERS 那一路。挂单在休市/无操作时长时间一动不动，
+        # 重复帧比持仓还多，去重的收益更大。
+        # Same for PENDING_ORDERS. Pending orders sit unchanged for long stretches,
+        # so this skips even more repeat frames than the positions one.
+        self._last_pending_push: dict[str, bytes] = {}
         self._lock = asyncio.Lock()
 
     # ---------- 持仓缓存 / Positions cache ----------
@@ -96,6 +106,17 @@ class ConnectionManager:
         """某用户全部来源合并后的最新持仓，供前端重连时补推。
         Merged latest positions across all sources, for re-push on reconnect."""
         by_source = self._positions.get(user_id)
+        if not by_source:
+            return []
+        merged: list = []
+        for rows in by_source.values():
+            merged.extend(rows)
+        return merged
+
+    def get_pending_orders(self, user_id: str) -> list:
+        """某用户全部来源合并后的最新挂单，供前端重连时补推。
+        Merged latest pending orders across all sources, for re-push on reconnect."""
+        by_source = self._pending_orders.get(user_id)
         if not by_source:
             return []
         merged: list = []
@@ -240,7 +261,9 @@ class ConnectionManager:
                     # and quotes, until the process restarts. The next tick after
                     # a reconnect (within 1.5s) refills them, so dropping is free.
                     self._last_positions_push.pop(user_id, None)
+                    self._last_pending_push.pop(user_id, None)
                     self._positions.pop(user_id, None)
+                    self._pending_orders.pop(user_id, None)
                     self._quotes.pop(user_id, None)
 
     async def push_to_client(self, user_id: str, message: dict) -> None:
@@ -338,6 +361,29 @@ class ConnectionManager:
         if self._last_positions_push.get(user_id) == digest:
             return
         self._last_positions_push[user_id] = digest
+        await self.push_to_client(user_id, message)
+
+    async def push_pending_orders(
+        self, user_id: str, orders: list, source: str = "bridge"
+    ) -> None:
+        """推送挂单快照（券商服务器上真实挂着的限价/止损单），内容不变则跳过。
+
+        与 POSITIONS 一样是整表替换语义，所以同样要按来源合并后再推：只推本次
+        上报的那一部分，会让另一条通道的挂单在前端整批消失又出现。
+
+        Push the snapshot of pending orders living at the broker, skipping unchanged
+        ticks. Same whole-table-replace semantics as POSITIONS, hence the same
+        merge-across-sources rule: pushing only the reporting path's own slice would
+        make the other channel's orders vanish and reappear on the frontend.
+        """
+        self._pending_orders.setdefault(user_id, {})[source] = orders or []
+        merged = self.get_pending_orders(user_id)
+        message = {"type": "PENDING_ORDERS", "data": merged}
+        payload = json.dumps(message, sort_keys=True, default=str)
+        digest = hashlib.blake2b(payload.encode(), digest_size=16).digest()
+        if self._last_pending_push.get(user_id) == digest:
+            return
+        self._last_pending_push[user_id] = digest
         await self.push_to_client(user_id, message)
 
     async def broadcast_to_clients(self, message: dict) -> None:

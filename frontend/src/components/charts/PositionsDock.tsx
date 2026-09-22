@@ -13,7 +13,7 @@
 // touch) and "manage" expands partial-close / modify SL·TP under the row.
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { Order, Position } from '../../api/types'
+import type { Order, PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
@@ -24,6 +24,14 @@ import ConfirmModal from '../ConfirmModal'
 interface Props {
   positions: Position[]
   orders: Order[]
+  // 券商那边真实挂着的挂单（PENDING_ORDERS 推送）。与上面的 `orders` 是两回事：
+  // 那是平台侧的指令行（含还没被桥接取走的），这是 MT5 里真的挂着的单。
+  // 「挂单」页签两样都显示，但分组、措辞和操作都不同——撤一条指令行只是让它不再
+  // 下发，撤一张挂单要真的发一条指令到券商。
+  // Orders actually resting at the broker. Distinct from `orders` above, which are
+  // platform command rows: cancelling one of those merely stops it from being
+  // dispatched, while cancelling one of these sends a real command to the broker.
+  pendingOrders: PendingOrder[]
   digitsFor: (symbol: string) => number
   onToast: (msg: string, kind: 'success' | 'error' | 'info') => void
   className?: string
@@ -53,6 +61,7 @@ type Pending =
   | { kind: 'close'; position: Position }
   | { kind: 'partial'; position: Position; volume: number }
   | { kind: 'cancel'; order: Order }
+  | { kind: 'cancelPending'; order: PendingOrder }
   | { kind: 'clearSlTp'; position: Position; sl: number; tp: number }
 
 // 一条正在平仓的仓位：发出时刻、发出时的手数、是否部分平仓。行在这段时间里压暗并
@@ -73,7 +82,7 @@ const FRESH_GRACE_MS = 3000
 // Sentinel busyId for the in-flight close-all (other values are p-<ticket> / o-<id>).
 const CLOSE_ALL_ID = 'close-all'
 
-export default function PositionsDock({ positions, orders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '' }: Props) {
+export default function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '' }: Props) {
   const { t } = useTranslation()
   const [tab, setTab] = useState<Tab>('positions')
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -182,8 +191,14 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     })
   }
 
-  // 未完成的开仓挂单（等待桥接拉取执行）/ open-orders still pending execution
-  const pendingOrders = orders.filter((o) => o.status === 'PENDING' && (o.action ?? 'ORDER') === 'ORDER')
+  // 还没被执行的平台指令（等桥接拉取）。这不是「挂单」，是「指令在路上」——
+  // 挂单指令（action='PENDING'）在挂出去之前也长这样，所以两种都收。
+  // Platform commands not yet executed (waiting for the bridge). These are not
+  // pending orders but commands in flight; a pending-order command looks like this
+  // too until it reaches the broker, so both actions are collected.
+  const inFlight = orders.filter(
+    (o) => o.status === 'PENDING' && ['ORDER', 'PENDING'].includes(o.action ?? 'ORDER'),
+  )
   const pnlSum = positions.reduce((s, p) => s + p.profit, 0)
 
   const toggleExpand = (p: Position) => {
@@ -328,6 +343,34 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
     }
   }
 
+  // 撤一张真实的 MT5 挂单。走 orderApi.cancelPending（发指令到券商），不是
+  // orderApi.cancel（只作废平台指令行）——两者名字像，作用完全不同。
+  // Cancel a real MT5 pending order via orderApi.cancelPending, which sends a command
+  // to the broker — not orderApi.cancel, which only voids a platform command row.
+  const cancelPendingOrder = async (o: PendingOrder) => {
+    setBusyId(`q-${o.ticket}`)
+    try {
+      const res = await orderApi.cancelPending({
+        clientOrderId: clientOrderId(),
+        ticket: o.ticket,
+        symbol: o.symbol,
+        mt5Login: o.login ?? null,
+      })
+      // 网关账号当场回结果；桥接账号只是收单，行要等下一拍挂单快照才消失。
+      // A gateway account answers synchronously; a bridge one is merely accepted and
+      // the row goes away with the next pending-orders snapshot.
+      if (res.status === 'REJECTED' || res.status === 'FAILED') {
+        onToast(res.message ? localizeApiError(res.message) : String(t('charts.dock.cancelFailed')), 'error')
+      } else {
+        onToast(String(t('charts.dock.cancelSent')), 'info')
+      }
+    } catch (e) {
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.cancelFailed')), 'error')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   const fmt = (n: number | null | undefined, digits: number) => (n == null ? '—' : n.toFixed(digits))
   const Cell = ({ k, v, tone, area }: { k: string; v: string; tone?: 'up' | 'down'; area: string }) => (
     <div className={area}>
@@ -343,7 +386,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
           {t('charts.dock.positions')} <b>{positions.length}</b>
         </button>
         <button type="button" role="tab" aria-selected={tab === 'orders'} className={`term-dk-tab ${tab === 'orders' ? 'on' : ''}`} onClick={() => setTab('orders')}>
-          {t('charts.dock.orders')} <b>{pendingOrders.length}</b>
+          {t('charts.dock.orders')} <b>{pendingOrders.length + inFlight.length}</b>
         </button>
         {positions.length > 0 && (
           <span className="term-dk-sum">
@@ -516,28 +559,62 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               )
             })
           )
-        ) : pendingOrders.length === 0 ? (
+        ) : pendingOrders.length === 0 && inFlight.length === 0 ? (
           <div className="term-dk-empty">{t('charts.dock.noOrders')}</div>
         ) : (
-          pendingOrders.map((o, i) => {
-            const meta = symbolMeta(o.symbol)
-            const isBuy = o.side === 'BUY'
-            return (
-              <div key={o.id} className="term-pr pend" style={{ animationDelay: `${i * 40}ms` }}>
-                <div className="term-pr-id">
-                  <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
-                  <b>{displaySymbol(o.symbol)}</b>
-                  <span className={`term-tag ${isBuy ? 'buy' : 'sell'}`}>{isBuy ? t('charts.dock.buy') : t('charts.dock.sell')} {o.volume.toFixed(2)}</span>
+          <>
+            {/* 券商那边真实挂着的挂单：有触发价、有止损止盈，撤单会真的发指令过去。
+                Real orders resting at the broker: they carry a trigger price and
+                SL/TP, and cancelling one sends a command to the broker. */}
+            {pendingOrders.map((o, i) => {
+              const meta = symbolMeta(o.symbol)
+              const isBuy = o.side === 'BUY'
+              const d = digitsFor(o.symbol)
+              return (
+                <div key={`q-${o.login ?? ''}-${o.ticket}`} className="term-pr pend q" style={{ animationDelay: `${i * 40}ms` }}>
+                  <div className="term-pr-id">
+                    <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+                    <b>{displaySymbol(o.symbol)}</b>
+                    <span className={`term-tag ${isBuy ? 'buy' : 'sell'}`}>
+                      {t(`order.pending.type.${o.type}`)} {o.volume.toFixed(2)}
+                    </span>
+                  </div>
+                  <Cell k={String(t('charts.dock.triggerPrice'))} v={fmt(o.price, d)} area="c-en" />
+                  <Cell k={String(t('charts.ticket.sl'))} v={o.stopLoss ? fmt(o.stopLoss, d) : '—'} area="c-sl" />
+                  <Cell k={String(t('charts.ticket.tp'))} v={o.takeProfit ? fmt(o.takeProfit, d) : '—'} area="c-tp" />
+                  <div className="term-pa">
+                    <button type="button" className="warn" disabled={busyId === `q-${o.ticket}`} onClick={() => setPending({ kind: 'cancelPending', order: o })}>
+                      {t('charts.dock.cancel')}
+                    </button>
+                  </div>
                 </div>
-                <div className="c-st"><span className="term-tag pending">{t('charts.dock.pending')}</span></div>
-                <div className="term-pa">
-                  <button type="button" className="warn" disabled={busyId === `o-${o.id}`} onClick={() => setPending({ kind: 'cancel', order: o })}>
-                    {t('charts.dock.cancel')}
-                  </button>
+              )
+            })}
+            {/* 平台指令在路上（还没到券商）。与上面那组分开，因为「撤」的含义不同：
+                这里只是让它不再下发，仓位/挂单本来就还不存在。
+                Commands still in flight to the broker. Kept apart because "cancel"
+                means something else here: it only stops the dispatch, and nothing
+                exists at the broker yet either way. */}
+            {inFlight.map((o, i) => {
+              const meta = symbolMeta(o.symbol)
+              const isBuy = o.side === 'BUY'
+              return (
+                <div key={o.id} className="term-pr pend" style={{ animationDelay: `${(pendingOrders.length + i) * 40}ms` }}>
+                  <div className="term-pr-id">
+                    <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+                    <b>{displaySymbol(o.symbol)}</b>
+                    <span className={`term-tag ${isBuy ? 'buy' : 'sell'}`}>{isBuy ? t('charts.dock.buy') : t('charts.dock.sell')} {o.volume.toFixed(2)}</span>
+                  </div>
+                  <div className="c-st"><span className="term-tag pending">{t('charts.dock.pending')}</span></div>
+                  <div className="term-pa">
+                    <button type="button" className="warn" disabled={busyId === `o-${o.id}`} onClick={() => setPending({ kind: 'cancel', order: o })}>
+                      {t('charts.dock.cancel')}
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )
-          })
+              )
+            })}
+          </>
         )}
       </div>
 
@@ -581,6 +658,19 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               })),
               label: String(t('charts.dock.close')),
               busyId: `p-${pending.position.ticket}`,
+            }
+          }
+          if (pending.kind === 'cancelPending') {
+            return {
+              title: String(t('charts.dock.cancelPendingTitle')),
+              message: String(t('charts.dock.cancelPendingMsg', {
+                symbol: displaySymbol(pending.order.symbol),
+                type: String(t(`order.pending.type.${pending.order.type}`)),
+                volume: pending.order.volume,
+                price: fmt(pending.order.price, digitsFor(pending.order.symbol)),
+              })),
+              label: String(t('charts.dock.cancel')),
+              busyId: `q-${pending.order.ticket}`,
             }
           }
           if (pending.kind === 'cancel') {
@@ -630,6 +720,7 @@ export default function PositionsDock({ positions, orders, digitsFor, onToast, c
               else if (act.kind === 'close') void closePosition(act.position)
               else if (act.kind === 'partial') void closePosition(act.position, act.volume)
               else if (act.kind === 'cancel') void cancelOrder(act.order)
+              else if (act.kind === 'cancelPending') void cancelPendingOrder(act.order)
               else void modifyPosition(act.position, act.sl, act.tp)
             }}
             onCancel={() => setPending(null)}

@@ -544,6 +544,14 @@
 }
 .term-pr:hover, .term-pr.open { background: var(--surface); }
 .term-pr.pend { grid-template-columns: minmax(0, 1.4fr) auto auto; justify-content: space-between; }
+/* 真实挂单行（.q）比「指令在路上」那行多三格：触发价 / 止损 / 止盈。
+   上面那条三列的模板放不下，多出来的格子会折到第二行去。
+   A broker-side pending row carries three more cells than an in-flight command row;
+   the three-column template above pushes them onto a second line. */
+.term-pr.pend.q {
+  grid-template-columns: minmax(0, 1.4fr) 1fr 1fr 1fr auto;
+  justify-content: initial;
+}
 .term-pr .k {
   margin-bottom: 4px;
   font: 500 9.5px/1 "JetBrains Mono", ui-monospace, monospace;
@@ -1119,6 +1127,9 @@
   .term-pr .c-tp { grid-area: tp; }
   .term-pa { grid-area: pa; justify-content: flex-start; }
   .term-pr.pend { grid-template-areas: "id id id st" "pa pa pa pa"; }
+  /* 真实挂单行在窄屏收成三行：品种一行，触发价 / 止损 / 止盈一行，操作一行。 */
+  .term-pr.pend.q { grid-template-areas: "id id id id" "en sl tp tp" "pa pa pa pa"; }
+  .term-pr .c-en { grid-area: en; }
   .term-pr .c-st { grid-area: st; text-align: right; }
 }
 

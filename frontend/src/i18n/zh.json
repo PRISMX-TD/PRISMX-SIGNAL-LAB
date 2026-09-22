@@ -369,7 +369,19 @@
     "ackTimeout": "暂未收到回执，请在订单页查看最新状态",
     "timeoutNote": "指令若在 5 分钟内未被执行（如桥接程序离线），将自动取消，不会在之后按过时价格成交。本平台仅提供信号工具，不构成投资建议，交易风险自负。",
     "noBridge": "尚未连接 MT5。前往「连接 MT5」填入账号和密码即可直接连接，无需安装任何程序。",
-    "allOffline": "已连接的 MT5 账户当前都已离线。请前往「连接 MT5」查看连接状态后重试。"
+    "allOffline": "已连接的 MT5 账户当前都已离线。请前往「连接 MT5」查看连接状态后重试。",
+    "pendingPlaced": "挂单已挂出 @ {{price}}",
+    "pending": {
+      "priceRequired": "请填写触发价",
+      "mustBeAbove": "触发价必须高于现价 {{price}}",
+      "mustBeBelow": "触发价必须低于现价 {{price}}",
+      "type": {
+        "BUY_LIMIT": "买入限价",
+        "SELL_LIMIT": "卖出限价",
+        "BUY_STOP": "买入止损",
+        "SELL_STOP": "卖出止损"
+      }
+    }
   },
   "account": {
     "title": "账户详情",
@@ -692,7 +704,18 @@
       "waitingFill": "等待券商回执",
       "filledAt": "已成交 @ {{price}}",
       "accepted": "已受理，等待桥接执行",
-      "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在订单页。"
+      "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在订单页。",
+      "entryMode": "入场方式",
+      "entry": {
+        "MARKET": "市价",
+        "LIMIT": "限价",
+        "STOP": "止损"
+      },
+      "triggerPrice": "触发价",
+      "awayFromMarket": "距现价 {{points}} 点",
+      "placePending": "{{type}} · {{volume}} 手",
+      "pendingPlaced": "挂单已挂出 @ {{price}}",
+      "footnotePending": "挂单送到 MT5 后一直有效，触发才会成交；可在下方「挂单」页签撤销。"
     },
     "account": {
       "title": "账户",
@@ -745,7 +768,10 @@
       "closed": "已平仓 @ {{price}}",
       "partialClosed": "已平掉 {{lots}} 手 @ {{price}}",
       "modified": "止损止盈已更新",
-      "confirmCloseMsg": "确认平掉 {{symbol}} {{side}} {{volume}} 手？"
+      "confirmCloseMsg": "确认平掉 {{symbol}} {{side}} {{volume}} 手？",
+      "triggerPrice": "触发价",
+      "cancelPendingTitle": "撤销挂单",
+      "cancelPendingMsg": "确认撤销 {{symbol}} {{type}} {{volume}} 手 @ {{price}}？撤销后不可恢复。"
     }
   },
   "winrate": {

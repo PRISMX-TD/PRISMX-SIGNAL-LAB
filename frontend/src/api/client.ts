@@ -1,5 +1,5 @@
 // REST 客户端封装 / REST client wrapper
-import type { Signal, Order, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
+import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
@@ -505,6 +505,13 @@ export const orderApi = {
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
     return request<{ orders: Order[]; total: number }>(`/orders${suffix}`)
   },
+  // orderType 省略 = MARKET，行为与这个字段存在之前完全一致。
+  // LIMIT / STOP 要带 price（触发价），后端会真的在 MT5 里挂一张单；两者都带或
+  // 都不带由后端校验（市价单带 price 会被拒——那说明调用方以为自己在挂单）。
+  // Omitting orderType means MARKET, identical to the behaviour before this field
+  // existed. LIMIT / STOP require `price` and place a real MT5 pending order; the
+  // backend rejects a market order carrying a price, since that means the caller
+  // believed they were placing a pending one.
   place: (payload: {
     signalId: string | null
     symbol: string
@@ -514,8 +521,24 @@ export const orderApi = {
     mt5Login?: string | null
     stopLoss?: number | null
     takeProfit?: number | null
+    orderType?: OrderEntryType
+    price?: number | null
   }) =>
     request<Order>('/orders', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  // 撤一张真实的 MT5 挂单（按券商票号）。与 orderApi.cancel 不是一回事：那个撤的
+  // 是平台侧还没下发的指令行，碰不到券商。
+  // Remove a real MT5 pending order by its broker ticket. Distinct from
+  // orderApi.cancel, which voids a not-yet-dispatched platform command row.
+  cancelPending: (payload: {
+    clientOrderId: string
+    ticket: number
+    symbol: string
+    mt5Login?: string | null
+  }) =>
+    request<Order>('/orders/cancel-pending', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

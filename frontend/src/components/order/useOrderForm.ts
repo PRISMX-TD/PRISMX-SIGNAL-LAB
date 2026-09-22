@@ -16,13 +16,15 @@
 // also decides how the account list is filtered (sticky for modals, plain
 // online for the docked ticket) — that difference is intentional.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MT5Account, Quote } from '../../api/types'
+import type { MT5Account, OrderEntryType, PendingType, Quote } from '../../api/types'
 import { brokerSymbol, limitLotInput, clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
 import { useLastVolume } from '../../utils/useLastVolume'
 import {
   canSizeByRisk,
+  checkPendingPrice,
   checkSlTp,
+  pendingTypeOf,
   clampLots,
   defaultVolume,
   estimateMargin,
@@ -66,8 +68,22 @@ export interface OrderForm {
   quote: Quote | undefined
   bid: number | null
   ask: number | null
-  /** 入场参考价：买用卖价、卖用买价 / entry reference: ask for BUY, bid for SELL */
+  /** 入场参考价。市价单是「买用卖价、卖用买价」；挂单则是**用户填的触发价**——
+   *  止损止盈校验、风险预览、保证金估算全都以它为准，这正是挂单该比的那个价。
+   *  Entry reference: ask/bid for a market order, the user's trigger price for a
+   *  pending one — which is exactly what its SL/TP, risk and margin must compare to. */
   entryRef: number | null
+  /** 下单方式：市价 / 限价 / 止损 / market, limit or stop entry */
+  entryType: OrderEntryType
+  setEntryType: (t: OrderEntryType) => void
+  /** 挂单触发价的输入值（市价模式下不用）/ the trigger price input (unused for MARKET) */
+  price: string
+  setPrice: (v: string) => void
+  priceNum: number | null
+  /** 触发价不合法时的 i18n key，合法为 null / i18n key when the trigger price is wrong */
+  priceError: string | null
+  /** 最终的 MT5 挂单类型；市价单为 null / the MT5 pending type, null for a market order */
+  pendingType: PendingType | null
   volume: string
   /** 用户主动设置（快捷档等）：会记忆为下次默认 / explicit pick, remembered as the next default */
   setVolume: (v: string) => void
@@ -139,7 +155,34 @@ export function useOrderForm({
   const ref = refPrice != null && refPrice > 0 ? refPrice : null
   const bid = quote?.bid ?? ref
   const ask = quote?.ask ?? ref
-  const entryRef = isBuy ? ask : bid
+  const marketRef = isBuy ? ask : bid
+
+  // ---- 下单方式与触发价 / entry mode & trigger price ---------------------------
+  const [entryType, setEntryTypeState] = useState<OrderEntryType>('MARKET')
+  const [price, setPrice] = useState('')
+  const priceNum = parseOptionalNumber(price)
+  // 切到挂单时把触发价预填成当前市价：用户接下来要做的是「把它改到想挂的位置」，
+  // 从一个空框开始等于要求他先抄一遍现价。切回市价不清空——来回切一下不该丢掉
+  // 刚填的价格。/ Prefill the trigger with the current market when switching to a
+  // pending mode: the next thing the user does is nudge it, and an empty field would
+  // make them copy the current price by hand first. Switching back to MARKET keeps
+  // the value, so toggling twice doesn't discard what was typed.
+  const setEntryType = (t: OrderEntryType) => {
+    setEntryTypeState(t)
+    if (t !== 'MARKET' && price.trim() === '' && marketRef != null) {
+      setPrice(marketRef.toString())
+    }
+  }
+  const pendingType = pendingTypeOf(isBuy, entryType)
+  const priceError = checkPendingPrice(entryType, isBuy, priceNum, bid, ask)
+
+  // 挂单的参考价是触发价本身，不是市价。挂单的止损止盈、风险、保证金全部相对
+  // 触发价而言——拿市价去比，一张「现价 3900、挂 3950 买入止损、止损 3930」的单
+  // 会被判成「止损高于入场价」而报错，而它其实完全正确。
+  // A pending order's reference is its own trigger, not the market: its SL/TP, risk
+  // and margin are all relative to where it will enter. Comparing against the market
+  // would flag a perfectly valid buy-stop at 3950 with a stop at 3930 as invalid.
+  const entryRef = entryType === 'MARKET' ? marketRef : (priceError == null ? priceNum : null)
 
   // ---- 手数 / volume ----------------------------------------------------------
   // 默认 = 用户上次自己设的手数（没有就 0.01），不再按净值推算。只有用户主动
@@ -206,7 +249,13 @@ export function useOrderForm({
     const suggested = suggestVolumeForRisk(symbol, selected?.equity, riskPct, slNum, entryRef, quote)
     if (suggested != null) setVolumeState(suggested)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- slNum/entryRef derive from these
-  }, [sizeMode, riskPct, sl, selected?.equity, symbol, quote?.bid, quote?.ask, quote?.tickSize, quote?.tickValue, quote?.contractSize, refPrice])
+    // entryType / price 也在列：挂单模式下 entryRef 是触发价，改触发价就得按新的
+    // 入场价重算手数——漏了它，用户把触发价从 3900 拖到 3950 之后，手数还停在按
+    // 3900 算出来的那个数，风险就不是他选的 1% 了。
+    // entryType / price belong here: in a pending mode entryRef *is* the trigger, so
+    // moving it must resize. Without them, dragging the trigger from 3900 to 3950
+    // leaves the lots sized for 3900 and the risk is no longer the 1% that was chosen.
+  }, [sizeMode, riskPct, sl, selected?.equity, symbol, quote?.bid, quote?.ask, quote?.tickSize, quote?.tickValue, quote?.contractSize, refPrice, entryType, price])
 
   const riskNeedsSl = sizeMode === 'risk' && slNum == null
   const riskUnsupported = sizeMode === 'risk' && slNum != null && !canSizeByRisk(symbol, quote)
@@ -241,6 +290,7 @@ export function useOrderForm({
   return {
     isBuy, accounts, hasAccounts: accounts.length > 0, login, selected, chooseLogin,
     quote, bid, ask, entryRef,
+    entryType, setEntryType, price, setPrice, priceNum, priceError, pendingType,
     volume, setVolume, typeVolume, blurVolume, stepLot, parsedVolume,
     sizeMode, setSizeMode, riskPct, setRiskPct, riskNeedsSl, riskUnsupported,
     sl, tp, setSl, setTp, slNum, tpNum, slInvalid, tpInvalid, slTpInvalid: slInvalid || tpInvalid,

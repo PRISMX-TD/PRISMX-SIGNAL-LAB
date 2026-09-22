@@ -1,7 +1,7 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
-import type { BrokerLock, MT5Account, Order, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
+import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { usePrefs } from './prefs'
@@ -99,6 +99,11 @@ const QuotesContext = createContext<Record<string, Record<string, Quote>>>({})
 // Site-wide display quotes (EA-pushed, not account-scoped): symbol -> Quote.
 const GlobalQuotesContext = createContext<Record<string, Quote>>({})
 const PositionsContext = createContext<Position[]>([])
+// 券商那边真实挂着的挂单。与持仓分开放：两者变化频率、消费方都不同——挂单只在
+// 用户下单/撤单/触发时才变，而持仓每一两秒就跟着浮盈动一次。
+// Pending orders resting at the broker. Kept apart from positions: they change only
+// when one is placed, cancelled or triggered, while positions move with every tick.
+const PendingOrdersContext = createContext<PendingOrder[]>([])
 // 账号实时浮动盈亏：login -> 该账号所有持仓的 profit 之和，随 POSITIONS 同拍下发。
 // 与账号列表分开放，因为它和持仓一样高频；放进 LiveContext 会让整树跟着抖。
 // 某 login 不在表里表示该账号当前没有持仓，浮盈按 0 处理（不是"未知"）。
@@ -207,6 +212,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [strategySignals, setStrategySignals] = useState<StrategySignal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
+  const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([])
   const [accountFunds, setAccountFunds] = useState<Record<string, number>>({})
   const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
   const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
@@ -444,6 +450,15 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         setAccountFunds((prev) => keepIfEqual(prev, nextFunds))
         break
       }
+      case 'PENDING_ORDERS': {
+        // 整表替换（与 POSITIONS 同一语义）：后端推的是该用户全部账号的挂单快照。
+        // 只有真收到这一帧才替换——旧版桥接不上报挂单时后端根本不推，前端保留
+        // 现有列表而不是清空。/ Whole-table replace, same as POSITIONS. The frame only
+        // arrives when a channel actually reported, so an old bridge that reports no
+        // pending orders leaves the list alone instead of blanking it.
+        setPendingOrders((prev) => keepIfEqual(prev, (msg.data as PendingOrder[]) || []))
+        break
+      }
       case 'QUOTES': {
         // 按交易商账户区分的报价（下单确认页用），合并变化项到现有快照
         // Per-broker-account quotes (order-confirmation pages), merge changed
@@ -609,13 +624,15 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   return (
     <LiveContext.Provider value={value}>
       <PositionsContext.Provider value={positions}>
-        <AccountFundsContext.Provider value={accountFunds}>
-          <QuotesContext.Provider value={quotes}>
-            <GlobalQuotesContext.Provider value={globalQuotes}>
-              {children}
-            </GlobalQuotesContext.Provider>
-          </QuotesContext.Provider>
-        </AccountFundsContext.Provider>
+        <PendingOrdersContext.Provider value={pendingOrders}>
+          <AccountFundsContext.Provider value={accountFunds}>
+            <QuotesContext.Provider value={quotes}>
+              <GlobalQuotesContext.Provider value={globalQuotes}>
+                {children}
+              </GlobalQuotesContext.Provider>
+            </QuotesContext.Provider>
+          </AccountFundsContext.Provider>
+        </PendingOrdersContext.Provider>
       </PositionsContext.Provider>
     </LiveContext.Provider>
   )
@@ -642,6 +659,11 @@ export function useGlobalQuotes() {
 // 只订阅持仓 / subscribe to positions only
 export function usePositions() {
   return useContext(PositionsContext)
+}
+
+// 只订阅挂单 / subscribe to pending orders only
+export function usePendingOrders() {
+  return useContext(PendingOrdersContext)
 }
 
 // 只订阅账号实时浮动盈亏：login -> profit 之和。

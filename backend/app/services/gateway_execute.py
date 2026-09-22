@@ -17,9 +17,11 @@ from app.services.gateway_binding import is_revoked
 from app.services.gateway_client import (
     TradeRsp,
     run_on_main_loop,
+    trade_cancel as gw_cancel,
     trade_close as gw_close,
     trade_modify as gw_modify,
     trade_open as gw_open,
+    trade_pending as gw_pending,
 )
 from app.services.order_payload import order_update_payload
 from app.services.symbol_aliases import broker_symbol
@@ -75,7 +77,31 @@ _UNKNOWN_OUTCOME_ERRORS = frozenset({"timeout", "request_failed"})
 
 def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
     """根据 gateway 回执更新订单状态。"""
-    if rsp.ok:
+    if rsp.ok and order.action == "PENDING":
+        # 挂单成功的终态是 PLACED，不是 FILLED——它还没成交，只是挂在券商那边等。
+        #
+        # 借用 FILLED 会让这一笔立刻被当成"已完成的交易"：个人胜率、勋章、
+        # 竞赛成绩、管理端「交易过的用户」都按 FILLED 统计，而这笔可能永远不触发。
+        # 反过来留在 PENDING 也不行——那是「平台指令还没执行」的意思，5 分钟后会被
+        # stale 清扫判定成超时作废，而券商那边的单还好端端挂着。
+        #
+        # A placed pending order is PLACED, not FILLED: nothing traded yet. Reusing
+        # FILLED would immediately count it as a completed trade everywhere (win-rate,
+        # badges, competitions, admin stats) for something that may never trigger;
+        # leaving it PENDING means "not executed yet" and the stale sweep would void
+        # it five minutes later while the order sits happily at the broker.
+        order.status = "PLACED"
+        # 挂单票号。MT5 里挂单触发后生成的仓位**沿用这张挂单的票号**，所以这里
+        # 同时写进 mt5_position——等它成交、再平仓时，平仓明细的归属（按仓位号
+        # 匹配，见 order_payload.OPENED_POSITION）不用等任何回填就能对上。
+        # The pending ticket. In MT5 the position a pending order opens keeps that
+        # order's ticket, so recording it as mt5_position now means the eventual
+        # close attributes correctly with no backfill (see OPENED_POSITION).
+        order.mt5_ticket = rsp.order or None
+        if rsp.order:
+            order.mt5_position = rsp.order
+        order.message = ""
+    elif rsp.ok:
         order.status = "FILLED"
         order.mt5_ticket = rsp.order if rsp.order else rsp.deal
         # 仓位号单独存。mt5_ticket 是订单号/成交号，与仓位号不同源，平仓明细的
@@ -240,6 +266,23 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
                 order.side or "BUY", order.volume or 0.01,
                 order.sl or 0, order.tp or 0,
                 order.client_order_id or "",
+                client_order_id=order.client_order_id or "",
+                timeout=timeout,
+            ))
+        elif order.action == "PENDING":
+            # 品种名同开仓：发券商基础名，后缀由网关按账号组解析。
+            # Same symbol handling as an open: broker base name, gateway adds the suffix.
+            rsp = call_gateway_idempotent(order, lambda timeout: gw_pending(
+                login, broker_symbol(order.symbol),
+                order.pending_type or "", order.volume or 0.01, order.price or 0,
+                order.sl or 0, order.tp or 0,
+                order.client_order_id or "",
+                client_order_id=order.client_order_id or "",
+                timeout=timeout,
+            ))
+        elif order.action == "CANCEL_PENDING":
+            rsp = call_gateway_idempotent(order, lambda timeout: gw_cancel(
+                login, order.ticket or 0,
                 client_order_id=order.client_order_id or "",
                 timeout=timeout,
             ))

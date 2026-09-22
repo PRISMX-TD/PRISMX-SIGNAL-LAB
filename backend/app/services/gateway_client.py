@@ -181,6 +181,27 @@ class PositionRsp:
 
 
 @dataclass
+class PendingOrderRsp:
+    """一张挂在券商服务器上的挂单。字段与 gateway 的 OrderInfo 对应。
+
+    `type` 是 MT5 的订单类型原值（CIMTOrder.EnOrderType）：2=BUY_LIMIT、3=SELL_LIMIT、
+    4=BUY_STOP、5=SELL_STOP。转成名字在 routers/gateway 做，这里保持与网关同形。
+    A pending order living at the broker. `type` is MT5's raw order type
+    (2=BUY_LIMIT, 3=SELL_LIMIT, 4=BUY_STOP, 5=SELL_STOP); naming happens in the
+    router so this stays shaped like the gateway's own payload.
+    """
+
+    ticket: int
+    symbol: str
+    type: int
+    volume: float
+    price_order: float
+    stop_loss: float
+    take_profit: float
+    comment: str
+
+
+@dataclass
 class DealRsp:
     """一笔成交（历史）。字段与 gateway 的 DealInfo 对应。"""
 
@@ -376,6 +397,33 @@ async def get_positions(login: int) -> tuple[list[PositionRsp], str]:
     return positions, ""
 
 
+async def get_pending_orders(login: int) -> tuple[list[PendingOrderRsp], str]:
+    """读取该账号挂在券商服务器上的挂单列表。返回 (列表, 错误信息)。
+
+    与持仓不同，这里**不按 comment 前缀过滤**：gateway 账号没有 MT5 客户端，
+    这条通道上的挂单只可能是平台下的。桥接那侧仍按魔术号过滤（见
+    mt5_worker._pending_orders_payload），因为那边用户真的能在客户端里自己挂单。
+    Unlike bridge accounts there is no comment/magic filter here: a gateway account
+    has no MT5 client, so every order on this channel was placed by the platform.
+    """
+    data = await _post("/orders", {"login": login})
+    if not data.get("ok"):
+        return [], data.get("error", "unknown")
+    return [
+        PendingOrderRsp(
+            ticket=o.get("ticket", 0),
+            symbol=o.get("symbol", ""),
+            type=o.get("type", 0),
+            volume=o.get("volume", 0.0),
+            price_order=o.get("priceOrder", 0.0),
+            stop_loss=o.get("stopLoss", 0.0) or 0.0,
+            take_profit=o.get("takeProfit", 0.0) or 0.0,
+            comment=o.get("comment", ""),
+        )
+        for o in data.get("orders", [])
+    ], ""
+
+
 async def drain_position_events() -> tuple[list[PositionEvent], bool]:
     """取走 gateway 订阅积压的开/平仓事件。返回 (事件列表, 订阅是否可用)。
 
@@ -549,6 +597,46 @@ async def trade_open(
         "stopLoss": stop_loss,
         "takeProfit": take_profit,
         "tag": tag,
+        "clientOrderId": client_order_id,
+    }, timeout=timeout)
+    return _trade_rsp(data)
+
+
+async def trade_pending(
+    login: int, symbol: str, order_type: str, volume: float, price: float,
+    stop_loss: float = 0, take_profit: float = 0, tag: str = "",
+    client_order_id: str = "", timeout: float | None = None,
+) -> TradeRsp:
+    """挂单（限价 / 止损）。`order_type` 是 BUY_LIMIT / SELL_LIMIT / BUY_STOP / SELL_STOP。
+
+    回执里的 `order` 是券商给的挂单票号——撤单、以及把这条指令与挂单列表对上，
+    靠的都是它。`deal` / `price` 在挂单成功时为 0：还没有成交。
+    `client_order_id` 的幂等语义同 trade_open：重复请求不会挂出第二张单。
+    The receipt's `order` is the broker's ticket for the new pending order (the
+    handle for cancelling it and for matching it against the orders list); `deal`
+    and `price` are 0 because nothing filled. Idempotency works as in trade_open.
+    """
+    data = await _post("/trade/pending", {
+        "login": login,
+        "symbol": symbol,
+        "type": order_type.upper(),
+        "volume": volume,
+        "price": price,
+        "stopLoss": stop_loss,
+        "takeProfit": take_profit,
+        "tag": tag,
+        "clientOrderId": client_order_id,
+    }, timeout=timeout)
+    return _trade_rsp(data)
+
+
+async def trade_cancel(
+    login: int, ticket: int, client_order_id: str = "", timeout: float | None = None,
+) -> TradeRsp:
+    """撤销一张挂单（按券商票号）。`client_order_id` 的幂等语义同 trade_open。"""
+    data = await _post("/trade/cancel", {
+        "login": login,
+        "ticket": ticket,
         "clientOrderId": client_order_id,
     }, timeout=timeout)
     return _trade_rsp(data)

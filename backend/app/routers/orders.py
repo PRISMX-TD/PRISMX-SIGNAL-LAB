@@ -20,6 +20,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.schemas import (
+    CancelPendingRequest,
     CloseAllOut,
     CloseAllRequest,
     ClosePositionRequest,
@@ -46,6 +47,7 @@ from app.services.order_payload import (
     serialize_order as _serialize,
     void_stale_order,
 )
+from app.services.pending_orders import gateway_logins, push_gateway_pending_orders
 from app.services.plans import is_realtime_plan
 from app.services.trade_performance import compute_personal_winrate
 
@@ -201,12 +203,33 @@ def place_order(
     # SL/TP direction check (server-side backstop for the UI's own check).
     validate_sl_tp_direction(req.side, stop_loss, take_profit)
 
+    # 挂单还能多校一层：触发价是已知的，所以止损止盈必须落在它正确的那一侧。
+    # 市价单做不到这一步（后端没有报价），但挂单的入场价就写在请求里，放过去
+    # 只会换来券商的 invalid stops——那时用户看到的只是一个裸返回码。
+    # A pending order allows one more check the market path cannot do: its entry
+    # price is in the request, so SL/TP must sit on the right side of it. Letting it
+    # through only earns an "invalid stops" rejection from the broker, which reaches
+    # the user as a bare retcode.
+    pending_type = None
+    if req.orderType != "MARKET":
+        pending_type = f"{req.side}_{req.orderType}"
+        _validate_pending_levels(req.side, req.price or 0.0, stop_loss, take_profit)
+
     # 4) 落库为 PENDING，等待桥接轮询拉取 / persist as PENDING for the bridge to poll
+    #    注意 status 与 action 是两件事：status=PENDING 说的是「这条平台指令还没被
+    #    执行」，action=PENDING 说的是「这条指令要在 MT5 里挂一张单」。挂单指令也
+    #    从 status=PENDING 开始，执行成功后落 PLACED（见 gateway_execute）。
+    #    status and action are unrelated: status=PENDING means "this platform command
+    #    has not executed yet", action=PENDING means "what it asks for is an MT5
+    #    pending order". A pending-order command also starts at status=PENDING and
+    #    settles at PLACED once executed.
     order = Order(
         user_id=user.id,
         signal_id=req.signalId,
         client_order_id=req.clientOrderId,
-        action="ORDER",
+        action="ORDER" if req.orderType == "MARKET" else "PENDING",
+        pending_type=pending_type,
+        price=req.price,
         symbol=req.symbol,
         side=req.side,
         volume=req.volume,
@@ -234,6 +257,8 @@ def place_order(
     if gw_payload is not None:
         run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
         db.refresh(order)
+        if order.action == "PENDING":
+            _refresh_pending_after(db, order)
         return _serialize(order)
 
     return result
@@ -560,6 +585,73 @@ def list_closed_trades(
     }
 
 
+def _refresh_pending_after(db: Session, order: Order) -> None:
+    """挂单 / 撤挂单执行完之后，立刻重推一帧挂单快照。
+
+    不等 gateway 慢拍那 5 秒：用户刚按下的动作要马上在「挂单」页签里看得见，
+    否则会以为没生效而再按一次。只对 gateway 账号做——桥接账号的挂单快照跟着
+    桥接自己下一拍（约 1.5 秒）的 /bridge/positions 一起上来，已经够快了。
+
+    失败只记日志：这是一次锦上添花的刷新，慢拍稍后会补上，绝不能让它把一次
+    已经成功的挂单变成给用户的报错。
+    Re-push the pending-orders snapshot right after a place/cancel instead of waiting
+    out the gateway's 5s tick, so the user sees their action land and doesn't press
+    again. Gateway accounts only — a bridge reports its own within ~1.5s. Failures are
+    logged and swallowed: this is a courtesy refresh, and it must never turn a
+    successful placement into an error.
+    """
+    try:
+        logins = gateway_logins(db, order.user_id)
+        if logins:
+            run_on_main_loop(push_gateway_pending_orders(order.user_id, logins), timeout=10.0)
+    except Exception:
+        logger.exception("挂单快照即时刷新失败 user=%s", order.user_id)
+
+
+def _validate_pending_levels(
+    side: str, price: float, stop_loss: float, take_profit: float
+) -> None:
+    """挂单的止损止盈必须落在触发价正确的那一侧。
+
+    买单：SL < 触发价 < TP；卖单反之。0 表示该侧没设，跳过。
+
+    与 validate_sl_tp_direction 的分工：那条只看 SL 与 TP 的相对关系（不需要入场
+    价，所以市价单也能用），这条比的是它们与**入场价**的关系。挂单是少数几种后端
+    确实知道入场价的情形，不用白不用——否则这笔单会一路走到券商才被判 invalid
+    stops，用户拿到的是一个裸返回码，而不是「止损要低于买入价」。
+
+    A pending order's SL/TP must sit on the correct side of its trigger price (BUY:
+    SL < price < TP). Complements validate_sl_tp_direction, which only compares SL
+    against TP because a market order has no entry price on the server. A pending
+    order does carry one, and using it turns a bare broker "invalid stops" retcode
+    into a sentence the user can act on.
+    """
+    if price <= 0:
+        return
+    if side == "BUY":
+        if stop_loss and stop_loss > 0 and stop_loss >= price:
+            raise HTTPException(
+                status_code=400,
+                detail="买入挂单的止损必须低于触发价 / a buy order's stop-loss must be below the trigger price",
+            )
+        if take_profit and take_profit > 0 and take_profit <= price:
+            raise HTTPException(
+                status_code=400,
+                detail="买入挂单的止盈必须高于触发价 / a buy order's take-profit must be above the trigger price",
+            )
+    else:
+        if stop_loss and stop_loss > 0 and stop_loss <= price:
+            raise HTTPException(
+                status_code=400,
+                detail="卖出挂单的止损必须高于触发价 / a sell order's stop-loss must be above the trigger price",
+            )
+        if take_profit and take_profit > 0 and take_profit >= price:
+            raise HTTPException(
+                status_code=400,
+                detail="卖出挂单的止盈必须低于触发价 / a sell order's take-profit must be below the trigger price",
+            )
+
+
 def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:
     """校验目标账号归属当前用户（指定 mt5Login 时）。
     Verify the target account belongs to the current user (when mt5Login given).
@@ -640,6 +732,65 @@ def close_position(
     if gw_payload is not None:
         run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
         db.refresh(order)
+        return _serialize(order)
+
+    return result
+
+
+@router.post("/cancel-pending", response_model=OrderOut)
+@limiter.limit(settings.RATE_LIMIT_ORDER)
+def cancel_pending_order(
+    request: Request,
+    req: CancelPendingRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """撤销一张真实的 MT5 挂单：以 CANCEL_PENDING 指令落库，等待桥接拉取。
+
+    与 POST /orders/{order_id}/cancel 不是一回事，两个都要留着：
+      - 这里撤的是**券商服务器上**的挂单，按券商票号定位，要真的发一条指令出去；
+      - 那里撤的是平台侧还没被桥接取走的指令行，纯数据库操作，碰不到券商。
+    Distinct from POST /orders/{order_id}/cancel, which voids a not-yet-dispatched
+    platform command row without ever reaching the broker. This removes an order
+    that already lives at the broker, addressed by its broker ticket.
+    """
+    _assert_account_owned(db, user.id, req.mt5Login)
+
+    # 幂等：同一 clientOrderId 只撤一次 / idempotency by clientOrderId
+    existing = (
+        db.query(Order)
+        .filter(Order.user_id == user.id, Order.client_order_id == req.clientOrderId)
+        .first()
+    )
+    if existing:
+        return _serialize(existing)
+
+    order = Order(
+        user_id=user.id,
+        client_order_id=req.clientOrderId,
+        action="CANCEL_PENDING",
+        symbol=req.symbol,
+        # 撤单没有方向可言，但 side 是非空列。填 BUY 只为满足约束，任何消费方
+        # 都不该读 CANCEL_PENDING 指令的 side——与 CLOSE 指令带的是真实持仓方向
+        # 不同，这里没有对应的真实方向可填。
+        # A cancel has no direction, but `side` is NOT NULL. This placeholder exists
+        # only to satisfy the column; no consumer should read a CANCEL_PENDING's side.
+        # (A CLOSE does carry the position's real side — there is no analogue here.)
+        side="BUY",
+        volume=0.0,
+        ticket=req.ticket,
+        mt5_login=_require_close_login(db, user.id, req.mt5Login),
+        status="PENDING",
+    )
+    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    if not created:
+        return result
+
+    gw_payload = _try_gateway_execute(db, order)
+    if gw_payload is not None:
+        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
+        db.refresh(order)
+        _refresh_pending_after(db, order)
         return _serialize(order)
 
     return result

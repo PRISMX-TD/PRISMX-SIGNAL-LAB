@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { orderApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import { useLive } from '../../store/live'
-import type { Signal } from '../../api/types'
+import type { OrderEntryType, Signal } from '../../api/types'
 import {
   NEW_HIGHLIGHT_MS,
   effectiveStatus,
@@ -92,7 +92,9 @@ export function useOrderPlacement() {
     for (const id of pendingIds) {
       const o = orders.find((x) => x.id === id)
       if (!o) continue
-      if (o.status === 'FILLED') {
+      if (o.status === 'PLACED') {
+        if (settle(id)) showToast(t('order.pendingPlaced', { price: o.price ?? '-' }), 'success')
+      } else if (o.status === 'FILLED') {
         if (settle(id)) showToast(t('order.filled', { price: o.filledPrice ?? '-' }), 'success')
       } else if (o.status === 'REJECTED' || o.status === 'FAILED') {
         if (settle(id)) showToast(t('order.rejected', { msg: o.message ? localizeApiError(o.message) : '-' }), 'error')
@@ -120,6 +122,8 @@ export function useOrderPlacement() {
       stopLoss: number | null
       takeProfit: number | null
       clientOrderId: string
+      orderType?: OrderEntryType
+      price?: number | null
     }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
@@ -128,6 +132,14 @@ export function useOrderPlacement() {
       // 下面就地给出不同的回执（成交价、耗时），而不是只有一句"已提交"。
       // Hand the receipt back to the caller: the charts ticket renders a
       // status-specific inline receipt (fill price, elapsed) under the button.
+      if (placed.status === 'PLACED') {
+        // 挂单挂出成功。这一支必须排在 FILLED 之前、而且不能并进去：挂单还没
+        // 成交，说"已成交"会让用户以为仓位已经建立。
+        // A placed pending order. Kept ahead of and apart from FILLED: nothing has
+        // traded, and saying it has makes the user believe a position exists.
+        showToast(t('order.pendingPlaced', { price: placed.price ?? '-' }), 'success')
+        return placed
+      }
       if (placed.status === 'FILLED') {
         showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success')
         return placed
@@ -175,7 +187,9 @@ export function useOrderPlacement() {
     [submitOrder]
   )
 
-  // 图表页手动下单（不绑定信号）/ manual order from the charts page (no signal)
+  // 图表页手动下单（不绑定信号）：市价或挂单。orderType 省略 = 市价，与这两个
+  // 参数出现之前完全一致。/ Manual order from the charts page (no signal), market or
+  // pending. Omitting orderType means MARKET, exactly as before these params existed.
   const placeManualOrder = useCallback(
     (
       symbol: string,
@@ -184,8 +198,13 @@ export function useOrderPlacement() {
       mt5Login: string | null,
       stopLoss: number | null,
       takeProfit: number | null,
-      clientOrderId: string
-    ) => submitOrder({ signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit, clientOrderId }),
+      clientOrderId: string,
+      orderType: OrderEntryType = 'MARKET',
+      price: number | null = null
+    ) => submitOrder({
+      signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit, clientOrderId,
+      orderType, price,
+    }),
     [submitOrder]
   )
 

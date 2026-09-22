@@ -150,7 +150,12 @@ def _hash_legacy_api_tokens() -> None:
 #          停用是闸门不是等级：plan=FREE 仍然能登录能下单，所以不能拿 plan 当封禁用
 #          （否则每一处 `if plan == "FREE"` 都会跟着变味）。判定点在
 #          services/deps.get_current_user，停用后所有需要登录的接口一律 403。
-CURRENT_SCHEMA_REV = 26
+# rev 27 — orders.price + orders.pending_type（图表页挂单：触发价与 MT5 挂单类型）。
+#          两列都可空、**不回填**：NULL 就是「这条指令不是挂单」，正是存量每一行
+#          该有的状态。纯 ADD COLUMN，不重写表，不产生可感知的停机。
+#          price 与 filled_price 是两件事：后者是"成交在哪"（回执），前者是"要在
+#          哪触发"（指令），挂单触发之后两者同时有值且通常不等。
+CURRENT_SCHEMA_REV = 27
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -426,6 +431,11 @@ def _migrate_columns() -> None:
             # real position id after a gateway fill; closed-trade attribution key
             "mt5_position": "INTEGER",
             "trade_mode": "INTEGER",
+            # rev 27：挂单的触发价。不回填——NULL 就是「这条不是挂单」。
+            # rev 27: a pending order's trigger price. Not backfilled: NULL means
+            # "this command is not a pending order", which every existing row is.
+            "price": "FLOAT",
+            "pending_type": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():

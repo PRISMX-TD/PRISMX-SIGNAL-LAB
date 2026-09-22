@@ -31,7 +31,7 @@ from tkinter import messagebox, ttk
 from urllib import error, request
 from urllib.parse import urlparse
 
-from mt5_worker import poll_terminal, read_positions
+from mt5_worker import poll_terminal, read_pending_orders, read_positions
 # 下划线开头但刻意从这里引：一张单到底成没成交的判据（查 history_orders_get、哪些
 # 状态算终态、ORDER_STATE_PARTIAL 为什么不算）全部长在 mt5_worker 里，重发时的二次
 # 确认（见 BridgeEngine._reconfirm_cached）必须与执行路径用**同一份**判据，另写一份
@@ -66,7 +66,22 @@ except Exception:
 # reports `status` (FILLED / REJECTED / FAILED) and the executed `volume` alongside
 # `success`. This is a wire-protocol change, so the version must move: the backend's
 # compatibility branch and the "update available" prompt both key on it.
-APP_VERSION = "1.4.2"
+# 1.4.3（2026-09-22 图表页挂单）：新增两种指令 PENDING（挂限价/止损单）与
+# CANCEL_PENDING（撤挂单），回执协议加入第四态 `PLACED`（"单已挂在券商那边、
+# 尚未成交，本来也不该成交"——不能并进 FILLED，否则一张可能永远不触发的挂单会
+# 被当成一笔完成的交易计进胜率与勋章）。状态上报同时带上 `pendingOrders`，
+# 网页据此显示并撤销真实的 MT5 挂单。
+# 又一次**线上协议变更**：不带 `pendingOrders` 的旧桥接，后端会保留前端已有的
+# 挂单列表而不是清空（见 BridgePositionsRequest.pendingOrders 的注释）。
+#
+# 1.4.3 (2026-09-22, pending orders from the charts page): two new commands,
+# PENDING and CANCEL_PENDING, plus a fourth result state `PLACED` (resting at the
+# broker, unfilled and not meant to fill — folding it into FILLED would count an
+# order that may never trigger as a completed trade). Status reports now carry
+# `pendingOrders` so the web can list and cancel real MT5 pending orders. Another
+# wire-protocol change; a bridge that omits `pendingOrders` leaves the frontend's
+# existing list alone rather than clearing it.
+APP_VERSION = "1.4.3"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -690,6 +705,12 @@ class BridgeEngine:
         self._accounts_snapshot: list = []
         self._login_to_path: dict[str, str] = {}
         self._positions_by_path: dict[str, list] = {}
+        # 同 _positions_by_path，挂单那一路：上报是整表替换，所以即时上报时必须
+        # 拿本终端的新快照与其它终端的旧快照合并，不能只发本终端这一份。
+        # The pending-order twin of _positions_by_path. Reports replace the whole
+        # table, so an immediate report must merge this terminal's fresh snapshot with
+        # the other terminals' latest rather than sending only its own.
+        self._pending_by_path: dict[str, list] = {}
         self._state_lock = threading.Lock()
         self._cmd_thread: threading.Thread | None = None
 
@@ -825,11 +846,25 @@ class BridgeEngine:
             try:
                 with self._mt5_lock:
                     fresh = read_positions(path)
-                if fresh is not None:
+                    # 挂单也一起重读：这一批指令里可能有挂单/撤挂单，用户按下去
+                    # 之后要立刻在「挂单」页签里看到结果，而不是等下一拍。
+                    # 读失败（None）就沿用上一份快照，不发空表——空表在整表替换
+                    # 语义下等于"挂单都没了"。
+                    # Re-read pending orders too: the batch may contain a place or a
+                    # cancel and the user must see it land immediately. A failed read
+                    # (None) keeps the previous snapshot; an empty one would read as
+                    # "all pending orders are gone" under replace semantics.
+                    fresh_pending = read_pending_orders(path)
+                if fresh is not None or fresh_pending is not None:
                     with self._state_lock:
-                        self._positions_by_path[path] = fresh
+                        if fresh is not None:
+                            self._positions_by_path[path] = fresh
+                        if fresh_pending is not None:
+                            self._pending_by_path[path] = fresh_pending
                         merged = [pos for lst in self._positions_by_path.values() for pos in lst]
-                    http.post("/api/bridge/positions", {"data": merged})
+                        merged_pending = [o for lst in self._pending_by_path.values() for o in lst]
+                    http.post("/api/bridge/positions",
+                              {"data": merged, "pendingOrders": merged_pending})
             except Exception as e:
                 logger.warning("成交后即时上报持仓失败 / immediate positions report failed: %s", e)
 
@@ -986,6 +1021,7 @@ class BridgeEngine:
         # 1) 逐个终端读取账号与持仓 / read account & positions per terminal
         accounts: list = []
         positions: list = []
+        pending_orders: list = []
         quotes_by_account: list = []
         closed_trades: list = []
         login_to_path: dict[str, str] = {}
@@ -1014,8 +1050,10 @@ class BridgeEngine:
                 login_to_path[acc["login"]] = path
                 _path_login[path] = acc["login"]
                 positions.extend(res.get("positions", []))
+                pending_orders.extend(res.get("pendingOrders", []))
                 with self._state_lock:
                     self._positions_by_path[path] = list(res.get("positions", []))
+                    self._pending_by_path[path] = list(res.get("pendingOrders", []))
                 # 按账户上报，不跨终端合并——下单确认页要按选中账户取对应
                 # 交易商的报价。/ report per account, no cross-terminal merge —
                 # the order-confirmation page needs the selected account's own
@@ -1046,6 +1084,8 @@ class BridgeEngine:
             self._accounts_snapshot = accounts
             for stale in [k for k in self._positions_by_path if k not in paths]:
                 self._positions_by_path.pop(stale, None)
+            for stale in [k for k in self._pending_by_path if k not in paths]:
+                self._pending_by_path.pop(stale, None)
 
         # 2) 先上报持仓（触发自动仓位管理评估，命令立即入队），
         #    再拉指令（同一拍即可拿到刚入队的命令），比先 poll 再 positions
@@ -1058,7 +1098,11 @@ class BridgeEngine:
         # the price or missing it.
         # 3) 上报持仓 / report positions
         try:
-            self._http.post("/api/bridge/positions", {"data": positions})
+            # 挂单与持仓同一帧上报：两张表在网页上是并排的，分两次发会让它们
+            # 来回错开一拍。/ Pending orders ride the same report: the two tables sit
+            # side by side on the web and separate posts would leave them a tick apart.
+            self._http.post("/api/bridge/positions",
+                            {"data": positions, "pendingOrders": pending_orders})
         except Exception as e:  # noqa: BLE001
             # 这一步以前是完全静默的：用户报「网页上仓位不刷新」时，日志里
             # 连一次失败的痕迹都找不到。与本文件其它上报路径保持一致，记一行。

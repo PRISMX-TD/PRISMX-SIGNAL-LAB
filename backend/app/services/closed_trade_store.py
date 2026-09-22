@@ -26,6 +26,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import ClosedTrade, Order
+from app.services.order_payload import OPENED_POSITION
 
 # 载荷键 → 列名。两条通道的载荷与 POST /bridge/trade-history 同构。
 # Payload key → column. Both channels share the /bridge/trade-history shape.
@@ -71,8 +72,7 @@ def platform_position_facts(db: Session, user_id: str, login: str, position_tick
         db.query(Order)
         .filter(
             Order.user_id == user_id,
-            Order.action == "ORDER",
-            Order.status == "FILLED",
+            OPENED_POSITION,
             Order.mt5_position == int(position_ticket),
             same_login,
         )

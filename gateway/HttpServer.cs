@@ -310,6 +310,12 @@ namespace Prismx.Mt5Gateway
                 case "/trade/modify":
                     RequirePost(ctx, method, HandleModify);
                     return;
+                case "/trade/pending":
+                    RequirePost(ctx, method, HandlePending);
+                    return;
+                case "/trade/cancel":
+                    RequirePost(ctx, method, HandleCancel);
+                    return;
                 default:
                     WriteError(ctx, 404, "not_found", "未知接口:" + path);
                     return;
@@ -845,6 +851,98 @@ namespace Prismx.Mt5Gateway
             // 改单天然幂等(同样的 SL/TP 设两次结果一样),不走缓存。
             // Modify is naturally idempotent; no cache needed.
             WriteTradeResult(ctx, r, false);
+        }
+
+        //+------------------------------------------------------------------+
+        //| POST /trade/pending  挂单(限价 / 止损)                           |
+        //| { login, symbol, type:"BUY_LIMIT"|"SELL_LIMIT"|"BUY_STOP"|       |
+        //|   "SELL_STOP", volume, price, stopLoss, takeProfit, tag,         |
+        //|   clientOrderId }                                                |
+        //|                                                                  |
+        //| price 是触发价,必填——与 /trade/open 最大的区别就在这里:开仓由    |
+        //| 网关取市价,挂单由用户指定。                                      |
+        //| price is the trigger price and is required: unlike /trade/open,  |
+        //| where the gateway reads the market, the user names it here.      |
+        //+------------------------------------------------------------------+
+        private void HandlePending(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong login = body.GetUlong("login");
+            string symbol = body.GetString("symbol");
+            double volume = body.GetDouble("volume");
+            double price = body.GetDouble("price");
+
+            if (login == 0 || symbol.Length == 0 || volume <= 0 || price <= 0)
+            {
+                WriteError(ctx, 400, "bad_request", "login/symbol/volume/price 必填且 volume>0、price>0");
+                return;
+            }
+
+            CIMTOrder.EnOrderType orderType;
+
+            if (!Mt5Link.TryParsePendingType(body.GetString("type"), out orderType))
+            {
+                WriteError(ctx, 400, "bad_request",
+                    "type 只能是 BUY_LIMIT / SELL_LIMIT / BUY_STOP / SELL_STOP");
+                return;
+            }
+
+            if (!EnsureTradableAccount(ctx, login))
+                return;
+
+            double stopLoss = body.GetDouble("stopLoss");
+            double takeProfit = body.GetDouble("takeProfit");
+            string tag = body.GetString("tag");
+
+            // 挂单同样要幂等:重复请求等于在券商那边挂出两张一模一样的单,而这种
+            // 重复远比重复开仓难发现——它不会立刻变成仓位,要等触发那一刻才双倍。
+            // Pending orders are guarded too: a duplicate leaves two identical orders
+            // at the broker, which is harder to notice than a duplicate position —
+            // nothing looks wrong until the moment they both trigger.
+            ExecuteIdempotent(ctx, login, "pending", body.GetString("clientOrderId"), delegate
+            {
+                TradeResult r = _link.PlacePending(login, symbol, orderType, volume, price,
+                    stopLoss, takeProfit, tag);
+
+                Log.Info("挂单 login={0} {1} {2} {3} 手 @ {4} -> {5} {6} 耗时 {7}ms(其中 dealer {8}ms)",
+                    login, symbol, orderType, volume, price, r.Ok ? "已挂" : "失败", r.Retcode,
+                    r.ElapsedMs, r.DealerMs);
+
+                return r;
+            });
+        }
+
+        //+------------------------------------------------------------------+
+        //| POST /trade/cancel  撤挂单                                       |
+        //| { login, ticket, clientOrderId }                                 |
+        //+------------------------------------------------------------------+
+        private void HandleCancel(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong login = body.GetUlong("login");
+            ulong ticket = body.GetUlong("ticket");
+
+            if (login == 0 || ticket == 0)
+            {
+                WriteError(ctx, 400, "bad_request", "login 与 ticket 必填");
+                return;
+            }
+
+            if (!EnsureTradableAccount(ctx, login))
+                return;
+
+            // 撤单本身天然幂等(撤两次的结果一样是"这张单没了"),但仍走缓存:第二次
+            // 会因为挂单已不存在而回"找不到挂单",把一次成功的撤单说成失败。
+            // Cancelling twice ends in the same state, but the second call answers
+            // "order not found" — which would report a successful cancel as a failure.
+            // The cache replays the real outcome instead.
+            ExecuteIdempotent(ctx, login, "cancel", body.GetString("clientOrderId"), delegate
+            {
+                TradeResult r = _link.CancelPending(login, ticket);
+
+                Log.Info("撤挂单 login={0} ticket={1} -> {2} {3} 耗时 {4}ms(其中 dealer {5}ms)",
+                    login, ticket, r.Ok ? "已撤" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
+
+                return r;
+            });
         }
 
         /// <summary>

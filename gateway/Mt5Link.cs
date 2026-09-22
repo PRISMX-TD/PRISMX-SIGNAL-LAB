@@ -11,6 +11,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Threading;
 using MetaQuotes.MT5CommonAPI;
 using MetaQuotes.MT5ManagerAPI;
@@ -2997,6 +2998,297 @@ namespace Prismx.Mt5Gateway
 
             r.ElapsedMs = sw.ElapsedMilliseconds;
             return r;
+        }
+
+        //+------------------------------------------------------------------+
+        //| 挂单(限价 / 止损)                                                |
+        //|                                                                  |
+        //| 与市价开仓的三处关键差别:                                        |
+        //|  1. Action 用 TA_DEALER_ORD_PENDING,不是 POS_EXECUTE;            |
+        //|  2. PriceOrder 是**用户指定的触发价**,不是当前市价——这里取价     |
+        //|     只为校验方向,不参与请求;                                     |
+        //|  3. MT_RET_REQUEST_PLACED 在这里就是**正确的成功**:挂单本来就     |
+        //|     只是"订单已建立、等待触发",没有"已挂单但未成交"的歧义。      |
+        //|     因此绝不能像开仓那样走 ConfirmOpen 去找仓位——那笔仓位本来     |
+        //|     就不该存在,确认只会把一次成功的挂单判成失败。                 |
+        //|                                                                  |
+        //| A pending order differs from a market open in three ways: the     |
+        //| dealer action, PriceOrder carrying the user's trigger price       |
+        //| rather than the market, and PLACED being the correct success      |
+        //| (there is no fill to confirm — running ConfirmOpen here would     |
+        //| turn a successful placement into a reported failure).             |
+        //+------------------------------------------------------------------+
+        public TradeResult PlacePending(ulong login, string symbol,
+            CIMTOrder.EnOrderType orderType, double lots, double price,
+            double stopLoss, double takeProfit, string tag)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            TradeResult r = PlacePendingCore(login, symbol, orderType, lots, price,
+                stopLoss, takeProfit, tag);
+            r.ElapsedMs = sw.ElapsedMilliseconds;
+            return r;
+        }
+
+        private TradeResult PlacePendingCore(ulong login, string symbol,
+            CIMTOrder.EnOrderType orderType, double lots, double price,
+            double stopLoss, double takeProfit, string tag)
+        {
+            symbol = ResolveSymbol(login, symbol);
+
+            // 手数校验与市价开仓同一套:非法手数不会被当场拒,而是变成一张永不
+            // 成交的订单。挂单本来就是"挂着等"的形状,这里更难被用户发现。
+            // Same volume validation as a market open — an invalid volume is not
+            // refused outright but becomes an order that can never fill, which is
+            // even harder to notice on an order that is supposed to sit and wait.
+            string volErr = ValidateVolumeForSymbol(symbol, GroupForLogin(login), lots, "挂单");
+
+            if (volErr != null)
+            {
+                Log.Warn("挂单手数不合法,已拦下:login={0} {1} lots={2} -> {3}",
+                    login, symbol, lots, volErr);
+                return TradeResult.Fail(
+                    MTRetCode.MT_RET_REQUEST_INVALID_VOLUME.ToString(), volErr);
+            }
+
+            if (price <= 0)
+                return TradeResult.Fail("MT_RET_ERR_PARAMS",
+                    "挂单必须指定触发价 / a pending order needs a trigger price");
+
+            // 触发价方向自查:买入限价必须低于卖价、买入止损必须高于卖价,反之亦然。
+            // 服务器也会拒(MT_RET_REQUEST_INVALID_PRICE),但那是个裸返回码;这里
+            // 当场给出说得清的原因,用户改一个数字就能过。
+            // 取不到价就跳过这一步,交给服务器判——宁可少拦一次,也不要因为本地
+            // 报价缺失就拒掉一张合法的挂单。
+            // Local sanity check on the trigger price. The server rejects these too,
+            // but only with a bare retcode; failing here says which way the price has
+            // to move. Skipped when no quote is available: better to let the server
+            // decide than to refuse a valid order over a missing local quote.
+            double bid, ask;
+            MTRetCode qres;
+
+            if (GetQuote(symbol, out bid, out ask, out qres) && bid > 0 && ask > 0)
+            {
+                string priceErr = ValidatePendingPrice(orderType, price, bid, ask);
+
+                if (priceErr != null)
+                {
+                    Log.Warn("挂单触发价方向不对,已拦下:login={0} {1} {2} price={3} bid={4} ask={5}",
+                        login, symbol, orderType, price, bid, ask);
+                    return TradeResult.Fail(
+                        MTRetCode.MT_RET_REQUEST_INVALID_PRICE.ToString(), priceErr);
+                }
+            }
+
+            TradeResult r = SendDealerRequest(req =>
+            {
+                req.Login(login);
+                req.Action(CIMTRequest.EnTradeActions.TA_DEALER_ORD_PENDING);
+                req.Type(orderType);
+                req.Volume(SMTMath.VolumeToInt(lots));
+                req.Symbol(symbol);
+                req.PriceOrder(price);
+                // GTC:挂单一直有效到成交或撤销。不做成可配置的到期时间——界面上
+                // 没有这个输入,给一个用户没选过的到期时间比不给更糟。
+                // GTC: valid until filled or cancelled. Deliberately not configurable —
+                // the UI has no expiry field, and inventing one the user never chose
+                // would be worse than none.
+                req.TypeTime(CIMTOrder.EnOrderTime.ORDER_TIME_GTC);
+                req.Comment(BuildComment(tag));
+
+                // SL/TP 与开仓同一套写法:只设非 0 的那一侧并置对应 CHANGED 标志。
+                // Same as the open path: only the non-zero side is set, with its flag.
+                if (stopLoss > 0 || takeProfit > 0)
+                {
+                    CIMTRequest.EnTradeActionFlags flags = 0;
+
+                    if (stopLoss > 0)
+                    {
+                        req.PriceSL(stopLoss);
+                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL;
+                    }
+
+                    if (takeProfit > 0)
+                    {
+                        req.PriceTP(takeProfit);
+                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP;
+                    }
+
+                    req.Flags(flags);
+                }
+            });
+
+            // 注意:这里**不做**开仓那条"SL/TP 被拒就去掉重发"的降级。
+            //
+            // 开仓那边降级是对的:仓位马上就要存在,让它裸奔也好过下不出去。挂单
+            // 相反——什么都还没建立,这时候悄悄把用户设的止损丢掉、回一个"挂单成功",
+            // 等它某天触发时仓位是裸的,而用户完全不知情。直接报错,用户改一下价格
+            // 重挂即可,零风险敞口。
+            //
+            // Deliberately no "retry without SL/TP" fallback here. On a market open
+            // that degradation is right: the position is about to exist anyway, and
+            // unprotected beats undeliverable. For a pending order nothing exists yet,
+            // so silently dropping the stop and answering "placed" would leave an
+            // unprotected position whenever it eventually triggers — with the user
+            // never told. Failing loudly costs them one edit and risks nothing.
+            if (r.Ok)
+            {
+                Log.Info("挂单已建立:login={0} {1} {2} {3} 手 @ {4} ticket={5}",
+                    login, symbol, orderType, lots, price, r.Order);
+            }
+
+            return r;
+        }
+
+        /// <summary>
+        /// 挂单触发价的方向自查。合法返回 null,不合法返回可直接展示给用户的原因。
+        ///
+        /// 限价 = 在比现价更有利的位置等,止损 = 在更不利的位置突破后追。买单参照
+        /// ask(买入的成交价),卖单参照 bid,与市价开仓取价的口径一致。
+        ///
+        /// 不检查最小止损距离(SYMBOL_TRADE_STOPS_LEVEL):那是按品种配的,这里没有
+        /// 现成入口,而服务器会拒。方向搞反是最常见的一种错,挡住它收益最大。
+        ///
+        /// Direction check for a pending order's trigger price. Limit orders wait at a
+        /// better price than the market, stop orders chase a worse one; buys compare
+        /// against ask and sells against bid, matching how market opens pick a price.
+        /// The per-symbol minimum stop distance is left to the server — getting the
+        /// direction backwards is the common mistake and the one worth catching.
+        /// </summary>
+        internal static string ValidatePendingPrice(CIMTOrder.EnOrderType orderType,
+            double price, double bid, double ask)
+        {
+            switch (orderType)
+            {
+                case CIMTOrder.EnOrderType.OP_BUY_LIMIT:
+                    return price < ask ? null
+                        : "买入限价必须低于当前卖价 " + ask.ToString(CultureInfo.InvariantCulture)
+                          + " / buy limit must be below ask";
+                case CIMTOrder.EnOrderType.OP_BUY_STOP:
+                    return price > ask ? null
+                        : "买入止损必须高于当前卖价 " + ask.ToString(CultureInfo.InvariantCulture)
+                          + " / buy stop must be above ask";
+                case CIMTOrder.EnOrderType.OP_SELL_LIMIT:
+                    return price > bid ? null
+                        : "卖出限价必须高于当前买价 " + bid.ToString(CultureInfo.InvariantCulture)
+                          + " / sell limit must be above bid";
+                case CIMTOrder.EnOrderType.OP_SELL_STOP:
+                    return price < bid ? null
+                        : "卖出止损必须低于当前买价 " + bid.ToString(CultureInfo.InvariantCulture)
+                          + " / sell stop must be below bid";
+                default:
+                    return "不支持的挂单类型 / unsupported pending order type";
+            }
+        }
+
+        /// <summary>
+        /// 把 HTTP 层的挂单类型名解析成 SDK 枚举。认不出来返回 false。
+        /// Parse the wire-level pending type name into the SDK enum.
+        /// </summary>
+        internal static bool TryParsePendingType(string name, out CIMTOrder.EnOrderType type)
+        {
+            switch ((name ?? "").ToUpperInvariant())
+            {
+                case "BUY_LIMIT": type = CIMTOrder.EnOrderType.OP_BUY_LIMIT; return true;
+                case "SELL_LIMIT": type = CIMTOrder.EnOrderType.OP_SELL_LIMIT; return true;
+                case "BUY_STOP": type = CIMTOrder.EnOrderType.OP_BUY_STOP; return true;
+                case "SELL_STOP": type = CIMTOrder.EnOrderType.OP_SELL_STOP; return true;
+                default: type = CIMTOrder.EnOrderType.OP_BUY; return false;
+            }
+        }
+
+        //+------------------------------------------------------------------+
+        //| 撤挂单                                                           |
+        //|                                                                  |
+        //| 先读回这张挂单:一是校验归属(不能让 A 账号撤掉 B 账号的单),      |
+        //| 二是把品种/类型/手数/价格原样填回请求——服务器对 ORD_REMOVE 主要  |
+        //| 认订单号,但填全了才不至于在某些配置下被判成参数不全。            |
+        //| 读不到就说明它已经不在了(成交、过期、或早就被撤),这时回一个      |
+        //| 说得清的"挂单不存在",而不是让 dealer 白等一轮再回裸返回码。      |
+        //|                                                                  |
+        //| Read the order back first: to verify ownership, and to echo its   |
+        //| fields into the request. A missing order means it already filled, |
+        //| expired or was cancelled — answered here rather than after a      |
+        //| wasted dealer round trip.                                         |
+        //+------------------------------------------------------------------+
+        public TradeResult CancelPending(ulong login, ulong ticket)
+        {
+            Stopwatch sw = Stopwatch.StartNew();
+            TradeResult r = CancelPendingCore(login, ticket);
+            r.ElapsedMs = sw.ElapsedMilliseconds;
+            return r;
+        }
+
+        private TradeResult CancelPendingCore(ulong login, ulong ticket)
+        {
+            OrderInfo ord;
+            ulong ordLogin;
+            MTRetCode ores;
+
+            if (!ReadPendingOrder(ticket, out ord, out ordLogin, out ores))
+                return TradeResult.Fail(ores.ToString(),
+                    "找不到挂单 #" + ticket + "(可能已成交、已过期或已撤销)");
+
+            if (ordLogin != login)
+                return TradeResult.Fail("MT_RET_ERR_PERMISSIONS",
+                    "挂单 #" + ticket + " 不属于账号 " + login);
+
+            return SendDealerRequest(req =>
+            {
+                req.Login(login);
+                req.Action(CIMTRequest.EnTradeActions.TA_DEALER_ORD_REMOVE);
+                req.Order(ticket);
+                req.Symbol(ord.Symbol);
+                req.Type((CIMTOrder.EnOrderType)ord.Type);
+                req.Volume(SMTMath.VolumeToInt(ord.Volume));
+                req.PriceOrder(ord.PriceOrder);
+            });
+        }
+
+        /// <summary>
+        /// 按票号向服务器读一张挂单。找不到返回 false。
+        /// Read one pending order by ticket from the server; false when it is gone.
+        /// </summary>
+        private bool ReadPendingOrder(ulong ticket, out OrderInfo info, out ulong login, out MTRetCode res)
+        {
+            info = null;
+            login = 0;
+
+            lock (_gate)
+            {
+                using (CIMTOrderArray arr = _manager.OrderCreateArray())
+                {
+                    res = _manager.OrderRequestByTickets(new ulong[] { ticket }, arr);
+
+                    if (res != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                    {
+                        if (res == MTRetCode.MT_RET_OK)
+                            res = MTRetCode.MT_RET_ERR_NOTFOUND;
+                        return false;
+                    }
+
+                    CIMTOrder o = arr.Next(0);
+
+                    if (o == null)
+                    {
+                        res = MTRetCode.MT_RET_ERR_NOTFOUND;
+                        return false;
+                    }
+
+                    login = o.Login();
+                    info = new OrderInfo
+                    {
+                        Ticket = o.Order(),
+                        Symbol = o.Symbol(),
+                        Type = o.Type(),
+                        Volume = SMTMath.VolumeToDouble(o.VolumeCurrent()),
+                        PriceOrder = o.PriceOrder(),
+                        StopLoss = o.PriceSL(),
+                        TakeProfit = o.PriceTP(),
+                        Comment = o.Comment()
+                    };
+                    return true;
+                }
+            }
         }
 
         //+------------------------------------------------------------------+

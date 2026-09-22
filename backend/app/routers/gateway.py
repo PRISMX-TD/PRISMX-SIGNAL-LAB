@@ -36,6 +36,8 @@ from app.services.gateway_client import (
     run_on_main_loop,
     verify_account as gw_verify,
 )
+from app.services.order_payload import OPENED_POSITION
+from app.services.pending_orders import push_gateway_pending_orders
 from app.services.plans import max_mt5_accounts
 from app.services.settings_store import get_account_type_settings
 from app.services import shared_state
@@ -715,6 +717,21 @@ class EventQueueLease:
 # API round-trip, so throttle per account instead of hitting it every 2s.
 GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
 
+# 挂单快照的刷新间隔（按用户计时）。
+#
+# 比持仓那 2 秒慢得多，因为挂单本来就不会自己动：它只在用户下单 / 撤单 / 触发成交
+# 时才变，而前两种情况本平台自己就是发起方——下完立刻主动推一帧（见
+# routers/orders 里的 refresh），根本不用等这条轮询。剩下"被触发"这一种，下一拍
+# 5 秒内也就跟上了，而那一刻持仓表会先一步出现新仓位。
+# 每一次读都是一次跨公网到网关的往返，egress 在这个项目上是长期约束。
+#
+# Pending-orders refresh interval, throttled per user. Much slower than the 2s
+# positions tick because pending orders only change when the user places or cancels
+# one — both of which this platform initiates and pushes immediately — or when one
+# triggers, which the positions table surfaces first anyway. Each read is a round
+# trip across the public internet to the gateway, and egress is a standing concern.
+GATEWAY_PENDING_INTERVAL = 5.0
+
 # 一轮里同时处理的用户数上限。
 #
 # 每轮要为每个在线用户各做几次 Manager API 往返。串行时一轮耗时随用户数线性
@@ -1352,8 +1369,7 @@ async def gateway_positions_loop() -> None:
                 int(t): c for (t, c) in db.query(Order.mt5_position, Order.created_at).filter(
                     Order.user_id == user_id,
                     Order.mt5_login == login,
-                    Order.action == "ORDER",
-                    Order.status == "FILLED",
+                    OPENED_POSITION,
                     Order.mt5_position.isnot(None),
                 ).all()
             }
@@ -1418,6 +1434,13 @@ async def gateway_positions_loop() -> None:
     # login -> 上次刷新/扫描的 monotonic 时间戳
     last_account_refresh: dict[str, float] = {}
     last_deals_scan: dict[str, float] = {}
+    # 挂单扫描按 **user_id** 计时，不是按 login：PENDING_ORDERS 是整表替换，
+    # 一帧必须包含该用户全部 gateway 账号的挂单。按 login 各自计时的话，某一拍
+    # 只轮到其中一个账号，推出去的就是残缺快照，其它账号的挂单会闪掉。
+    # Throttled per user, not per login: the frame replaces the whole table, so it
+    # must carry every gateway account at once. Per-login timers would make some
+    # ticks push a partial snapshot and flicker the other accounts' orders away.
+    last_pending_scan: dict[str, float] = {}
     # login -> 最近一次读到的余额。资金 15 秒才刷一次，而推送判断每拍都要做，
     # 所以必须跨拍留着；只用本拍刷到的会让没轮到刷新的账号余额忽然消失。
     # login -> last known balance. Funds refresh every 15s but the push check runs
@@ -1657,6 +1680,15 @@ async def gateway_positions_loop() -> None:
             # floating P/L, skip unchanged ticks. The gateway funds refresh runs
             # every 15s, which would leave the account card behind.
             await manager.push_positions(user_id, data, source="gateway")
+
+            # --- 挂单快照 ---
+            # 单独一趟、单独节奏，不搭持仓那趟车：上面的循环会跳过"已确认空仓"的
+            # 账号，而空仓账号照样可以挂着单——搭车会让这些账号的挂单永远读不到。
+            # A separate pass on its own cadence: the loop above skips accounts known
+            # to be flat, yet a flat account can still hold pending orders.
+            if now - last_pending_scan.get(user_id, 0.0) >= GATEWAY_PENDING_INTERVAL:
+                last_pending_scan[user_id] = now
+                await push_gateway_pending_orders(user_id, logins)
 
             # 余额变化时推 ACCOUNTS_STATUS，让账户卡片不必等前端 5 秒轮询。
             # 用只管余额的那个函数：gateway 账号没有心跳，不能参与在线状态判定。

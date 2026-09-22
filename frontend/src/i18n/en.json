@@ -369,7 +369,19 @@
     "ackTimeout": "No receipt yet, check the Orders page for the latest status",
     "timeoutNote": "If the command is not executed within 5 minutes (e.g. the Bridge is offline), it is cancelled automatically and will never fill later at a stale price. This platform provides signal tooling only, not investment advice. Trade at your own risk.",
     "noBridge": "No MT5 connected yet. Head to Connect MT5 and enter your login and password — there is nothing to install.",
-    "allOffline": "All connected MT5 accounts are currently offline. Check their status on the Connect MT5 page, then retry."
+    "allOffline": "All connected MT5 accounts are currently offline. Check their status on the Connect MT5 page, then retry.",
+    "pendingPlaced": "Pending order placed @ {{price}}",
+    "pending": {
+      "priceRequired": "Enter a trigger price",
+      "mustBeAbove": "Trigger price must be above the market ({{price}})",
+      "mustBeBelow": "Trigger price must be below the market ({{price}})",
+      "type": {
+        "BUY_LIMIT": "Buy Limit",
+        "SELL_LIMIT": "Sell Limit",
+        "BUY_STOP": "Buy Stop",
+        "SELL_STOP": "Sell Stop"
+      }
+    }
   },
   "account": {
     "title": "Account",
@@ -692,7 +704,18 @@
       "waitingFill": "Waiting for the broker",
       "filledAt": "Filled @ {{price}}",
       "accepted": "Accepted, waiting for the bridge to execute",
-      "footnote": "Market order, delivered to MT5 via PRISMX Bridge; the receipt lands on the Orders page."
+      "footnote": "Market order, delivered to MT5 via PRISMX Bridge; the receipt lands on the Orders page.",
+      "entryMode": "Entry",
+      "entry": {
+        "MARKET": "Market",
+        "LIMIT": "Limit",
+        "STOP": "Stop"
+      },
+      "triggerPrice": "Trigger price",
+      "awayFromMarket": "{{points}} pts from market",
+      "placePending": "{{type}} · {{volume}} lots",
+      "pendingPlaced": "Order placed @ {{price}}",
+      "footnotePending": "A pending order rests at the broker until it triggers; cancel it from the Orders tab below."
     },
     "account": {
       "title": "Account",
@@ -745,7 +768,10 @@
       "closed": "Closed @ {{price}}",
       "partialClosed": "Closed {{lots}} lots @ {{price}}",
       "modified": "SL/TP updated",
-      "confirmCloseMsg": "Close {{symbol}} {{side}} {{volume}} lots?"
+      "confirmCloseMsg": "Close {{symbol}} {{side}} {{volume}} lots?",
+      "triggerPrice": "Trigger",
+      "cancelPendingTitle": "Cancel pending order",
+      "cancelPendingMsg": "Cancel {{symbol}} {{type}} {{volume}} lots @ {{price}}? This cannot be undone."
     }
   },
   "winrate": {

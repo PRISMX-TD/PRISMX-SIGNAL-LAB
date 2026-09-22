@@ -748,8 +748,24 @@ export interface ClosedTrade {
   comment?: string | null
 }
 
-export type OrderStatus = 'PENDING' | 'FILLED' | 'REJECTED' | 'FAILED' | 'CANCELLED'
-export type OrderAction = 'ORDER' | 'CLOSE' | 'MODIFY'
+// PLACED 只属于挂单：单已经挂在券商那边、还没成交，而且本来也不该成交。
+// 它是终态，不能与 FILLED 混用——挂单可能永远不触发，当成成交会把一笔不存在的
+// 交易记进胜率、勋章与竞赛。
+// PLACED belongs to pending orders only: resting at the broker, unfilled, and not
+// meant to fill. It is terminal and distinct from FILLED — a pending order may never
+// trigger, and treating it as a fill records a trade that never happened.
+export type OrderStatus = 'PENDING' | 'PLACED' | 'FILLED' | 'REJECTED' | 'FAILED' | 'CANCELLED'
+// PENDING = 下一张挂单；CANCEL_PENDING = 撤一张挂单（撤的是券商那边真实的挂单，
+// 与 POST /orders/{id}/cancel 撤平台指令行不是一回事）。
+// PENDING places an MT5 pending order, CANCEL_PENDING removes one at the broker —
+// distinct from cancelling a platform command row.
+export type OrderAction = 'ORDER' | 'CLOSE' | 'MODIFY' | 'PENDING' | 'CANCEL_PENDING'
+// 挂单类型。方向已经编在名字里，所以 side 与它必须一致（后端由 side × orderType 拼出）。
+// The MT5 pending type; its direction is part of the name and always agrees with side.
+export type PendingType = 'BUY_LIMIT' | 'SELL_LIMIT' | 'BUY_STOP' | 'SELL_STOP'
+// 下单方式：市价立刻成交，限价/止损挂在指定价位等触发。
+// How to enter: market fills now; limit/stop rest at a price until triggered.
+export type OrderEntryType = 'MARKET' | 'LIMIT' | 'STOP'
 
 export interface Order {
   id: string
@@ -764,6 +780,11 @@ export interface Order {
   status: OrderStatus
   mt5Ticket: number | null
   filledPrice: number | null
+  // 挂单的触发价（action='PENDING' 才有）。与 filledPrice 并存且通常不等：
+  // 一个是"挂在哪"，一个是"成交在哪"。
+  // A pending order's trigger price; coexists with filledPrice and usually differs.
+  price?: number | null
+  pendingType?: PendingType | null
   message: string | null
   createdAt: string
   updatedAt: string
@@ -1280,6 +1301,25 @@ export interface Position {
   login?: string | null
 }
 
+// 券商服务器上真实挂着的一张挂单（PENDING_ORDERS 推送，两条通道同一形状）。
+// 字段名与 Position 刻意保持一致，两张表的行能共用同一批读法：区别只在
+// `price` 是**触发价**而不是入场价，而且没有 profit / currentPrice——挂单还没有仓位。
+// One pending order resting at the broker (PENDING_ORDERS push, same shape from both
+// channels). Field names deliberately mirror Position so both tables read alike; the
+// difference is that `price` is the *trigger* price and there is no profit or current
+// price, because no position exists yet.
+export interface PendingOrder {
+  ticket: number
+  symbol: string
+  type: PendingType
+  side: 'BUY' | 'SELL'
+  volume: number
+  price: number
+  stopLoss?: number
+  takeProfit?: number
+  login?: string | null
+}
+
 // 随 POSITIONS 一起下发的账号实时资金：按 login 汇总的持仓浮动盈亏。
 // 前端用它加上余额算实时净值，不必等 5 秒一次的账号列表轮询。
 // Live per-account funds shipped with POSITIONS: floating P/L summed per login.
@@ -1290,7 +1330,7 @@ export interface AccountFunds {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
   data?: unknown
   // 仅 POSITIONS 携带 / only present on POSITIONS
   funds?: AccountFunds[]

@@ -1482,6 +1482,54 @@ class OrderRequest(BaseModel):
     # 自定义止损止盈（绝对价，省略则用信号默认值）/ custom SL·TP (absolute; falls back to signal)
     stopLoss: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     takeProfit: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    # 下单方式：MARKET 市价立刻成交（默认，与本字段出现前的行为一致）；
+    # LIMIT / STOP 是挂单，在 price 上等触发，真的挂进 MT5。
+    #
+    # 只有「市价 / 限价 / 止损」三种，而不是 MT5 那四个类型名（BUY_LIMIT…）：
+    # 方向已经由 side 说了，再要一个自带方向的类型名就有了两个真源，两者说法不一致
+    # 时（side=BUY + type=SELL_LIMIT）无论信哪个都是猜。最终类型由 side × orderType
+    # 在执行层拼出来。
+    #
+    # How to enter: MARKET fills now (the default, identical to the behavior before
+    # this field existed); LIMIT / STOP place a real MT5 pending order waiting at
+    # `price`. Only three values rather than MT5's four type names (BUY_LIMIT…):
+    # `side` already carries the direction, and a type name that carries it too gives
+    # two sources of truth that can disagree. The MT5 type is composed from
+    # side × orderType at the execution layer.
+    orderType: Literal["MARKET", "LIMIT", "STOP"] = "MARKET"
+    # 挂单的触发价（orderType != MARKET 时必填）/ trigger price, required unless MARKET
+    price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _pending_needs_price(self):
+        """挂单必须带触发价；市价单不接受触发价。
+
+        两个方向都拦：漏了价的挂单落库后会变成一条永远无法执行的指令（网关直接拒、
+        桥接把它当 0 发出去），而给市价单带价则说明调用方以为自己在挂单——放过去
+        就会立刻成交，与用户的意图正好相反。
+        A pending order without a price becomes a command that can never execute; a
+        price on a market order means the caller believed they were placing a pending
+        one, and letting it through fills immediately instead — the opposite intent.
+        """
+        if self.orderType != "MARKET" and self.price is None:
+            raise ValueError("挂单必须指定触发价 / a pending order needs a trigger price")
+        if self.orderType == "MARKET" and self.price is not None:
+            raise ValueError("市价单不接受触发价 / a market order takes no trigger price")
+        return self
+
+
+class CancelPendingRequest(BaseModel):
+    """撤销一张真实的 MT5 挂单（按券商票号）。
+
+    与 POST /orders/{id}/cancel 是两回事：那个撤的是平台侧还没被桥接取走的指令行，
+    这个撤的是已经挂在券商服务器上的订单。
+    Distinct from POST /orders/{id}/cancel, which voids a platform command row that
+    was never dispatched; this removes an order that already sits at the broker.
+    """
+    clientOrderId: str = Field(min_length=1, max_length=64)
+    ticket: int = Field(gt=0)
+    symbol: str = Field(pattern=SYMBOL_PATTERN)
+    mt5Login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
 
 
 class ClosePositionRequest(BaseModel):
@@ -1518,6 +1566,14 @@ class OrderOut(BaseModel):
     status: str
     mt5Ticket: int | None = None
     filledPrice: float | None = None
+    # 挂单的触发价（action=PENDING 才有）。与 filledPrice 并存且通常不等：
+    # 前者是"挂在哪"，后者是"成交在哪"。
+    # A pending order's trigger price (action=PENDING only). Coexists with
+    # filledPrice and usually differs: where it waits vs. where it filled.
+    price: float | None = None
+    # 挂单类型 BUY_LIMIT / SELL_LIMIT / BUY_STOP / SELL_STOP（action=PENDING 才有）
+    # The MT5 pending type (action=PENDING only)
+    pendingType: str | None = None
     message: str | None = None
     createdAt: datetime
     updatedAt: datetime
