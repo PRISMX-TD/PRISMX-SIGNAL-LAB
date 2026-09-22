@@ -667,6 +667,10 @@ namespace Prismx.Mt5Gateway
             public double VolMin;
             public double VolMax;
             public double VolStep;
+            // 该品种允许的成交模式位掩码(CIMTConSymbol.EnFillingFlags:FOK=1 / IOC=2 / BOC=4)。
+            // 与手数限制同一次 SymbolGet 读出来,不额外多一次往返。
+            // Allowed filling modes; read in the same SymbolGet as the volume limits.
+            public uint FillFlags;
         }
 
         /// <summary>账号可交易性的缓存条目。Group 留着供日志与错误信息用。</summary>
@@ -2072,9 +2076,18 @@ namespace Prismx.Mt5Gateway
         public bool GetSymbolLimits(string symbol, string group, out double volMin, out double volMax,
             out double volStep, out MTRetCode res)
         {
+            uint ignored;
+            return GetSymbolLimits(symbol, group, out volMin, out volMax, out volStep,
+                out ignored, out res);
+        }
+
+        public bool GetSymbolLimits(string symbol, string group, out double volMin, out double volMax,
+            out double volStep, out uint fillFlags, out MTRetCode res)
+        {
             volMin = 0;
             volMax = 0;
             volStep = 0;
+            fillFlags = 0;
             res = MTRetCode.MT_RET_OK;
 
             string groupKey = string.IsNullOrEmpty(group) ? "" : group.ToUpperInvariant();
@@ -2088,6 +2101,7 @@ namespace Prismx.Mt5Gateway
                     volMin = hit.VolMin;
                     volMax = hit.VolMax;
                     volStep = hit.VolStep;
+                    fillFlags = hit.FillFlags;
                     return true;
                 }
 
@@ -2107,11 +2121,13 @@ namespace Prismx.Mt5Gateway
                     volMin = SMTMath.VolumeToDouble(sym.VolumeMin());
                     volMax = SMTMath.VolumeToDouble(sym.VolumeMax());
                     volStep = SMTMath.VolumeToDouble(sym.VolumeStep());
+                    fillFlags = (uint)sym.FillFlags();
 
                     SymbolLimits entry;
                     entry.VolMin = volMin;
                     entry.VolMax = volMax;
                     entry.VolStep = volStep;
+                    entry.FillFlags = fillFlags;
                     _limitsCache[cacheKey] = entry;
 
                     return true;
@@ -3040,7 +3056,8 @@ namespace Prismx.Mt5Gateway
             // Same volume validation as a market open — an invalid volume is not
             // refused outright but becomes an order that can never fill, which is
             // even harder to notice on an order that is supposed to sit and wait.
-            string volErr = ValidateVolumeForSymbol(symbol, GroupForLogin(login), lots, "挂单");
+            string group = GroupForLogin(login);
+            string volErr = ValidateVolumeForSymbol(symbol, group, lots, "挂单");
 
             if (volErr != null)
             {
@@ -3079,7 +3096,27 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
-            TradeResult r = SendDealerRequest(req =>
+            // 成交模式必须显式指定。
+            //
+            // 这一条是生产实测补的(2026-09-23):不设 TypeFill 时默认值是 0 =
+            // ORDER_FILL_FOK,本券商对挂单直接回 MT_RET_REQUEST_INVALID_FILL——
+            // 而**市价开仓用同一个默认值却一路正常**,所以照抄 OpenPositionCore
+            // 的写法在这里是错的,且错得很隐蔽:日志里只有一个返回码,看不出
+            // 是哪个字段的问题。
+            //
+            // RETURN 才是挂单的标准模式:触发后能成交多少成交多少,剩余部分继续挂着。
+            // FOK(全部成交否则取消)/ IOC(成交部分、撤销剩余)对一张"挂在那儿等"的
+            // 单语义本来就别扭,只作为券商拒绝 RETURN 时的降级。
+            //
+            // Filling mode must be set explicitly. Verified in production: leaving it
+            // at the default (0 = FOK) makes this broker answer INVALID_FILL for
+            // pending orders — while market opens with that same default work fine, so
+            // copying OpenPositionCore here was wrong in a way the logs barely show.
+            // RETURN is the standard mode for a pending order; FOK/IOC are only the
+            // fallback if the broker refuses it.
+            CIMTOrder.EnOrderFilling fill = CIMTOrder.EnOrderFilling.ORDER_FILL_RETURN;
+
+            Func<CIMTOrder.EnOrderFilling, TradeResult> send = mode => SendDealerRequest(req =>
             {
                 req.Login(login);
                 req.Action(CIMTRequest.EnTradeActions.TA_DEALER_ORD_PENDING);
@@ -3087,6 +3124,7 @@ namespace Prismx.Mt5Gateway
                 req.Volume(SMTMath.VolumeToInt(lots));
                 req.Symbol(symbol);
                 req.PriceOrder(price);
+                req.TypeFill(mode);
                 // GTC:挂单一直有效到成交或撤销。不做成可配置的到期时间——界面上
                 // 没有这个输入,给一个用户没选过的到期时间比不给更糟。
                 // GTC: valid until filled or cancelled. Deliberately not configurable —
@@ -3117,6 +3155,42 @@ namespace Prismx.Mt5Gateway
                 }
             });
 
+            TradeResult r = send(fill);
+
+            // 券商不接受 RETURN 时,换一个它自己声明支持的模式重发一次。
+            //
+            // 只在 INVALID_FILL 这一个返回码上重试,且只重试一次:这个码的含义是
+            // "这张单没被受理",所以重发不存在挂出两张的风险;换成别的失败码就不能
+            // 这么做。候选来自品种配置的 FillFlags 位掩码(FOK=1 / IOC=2),不是瞎猜——
+            // 猜错只会换来第二个同样的返回码。
+            //
+            // Retry once with a mode the symbol actually declares, only on
+            // INVALID_FILL: that code means the order was not accepted, so re-sending
+            // cannot leave two resting. Candidates come from the symbol's FillFlags
+            // rather than guesswork.
+            if (!r.Ok && r.Retcode == MTRetCode.MT_RET_REQUEST_INVALID_FILL.ToString())
+            {
+                CIMTOrder.EnOrderFilling alt;
+                uint declared;
+
+                if (TryAlternateFilling(symbol, group, fill, out alt, out declared))
+                {
+                    Log.Warn("挂单成交模式 {0} 被拒,改用 {1} 重试一次:login={2} {3} FillFlags={4}",
+                        fill, alt, login, symbol, declared);
+                    fill = alt;
+                    r = send(fill);
+                }
+                else
+                {
+                    // FillFlags 是排查这条路的**唯一**有用数字:0 = 品种配置没读出来,
+                    // 非 0 = 券商只认它里面那几种而我们都试过了。
+                    // FillFlags is the one number worth having here: 0 means the symbol
+                    // config could not be read, non-zero means we exhausted what it allows.
+                    Log.Warn("挂单成交模式 {0} 被拒,该品种没有其它可用模式:login={1} {2} FillFlags={3}",
+                        fill, login, symbol, declared);
+                }
+            }
+
             // 注意:这里**不做**开仓那条"SL/TP 被拒就去掉重发"的降级。
             //
             // 开仓那边降级是对的:仓位马上就要存在,让它裸奔也好过下不出去。挂单
@@ -3132,11 +3206,55 @@ namespace Prismx.Mt5Gateway
             // never told. Failing loudly costs them one edit and risks nothing.
             if (r.Ok)
             {
-                Log.Info("挂单已建立:login={0} {1} {2} {3} 手 @ {4} ticket={5}",
-                    login, symbol, orderType, lots, price, r.Order);
+                Log.Info("挂单已建立:login={0} {1} {2} {3} 手 @ {4} 成交模式={5} ticket={6}",
+                    login, symbol, orderType, lots, price, fill, r.Order);
             }
 
             return r;
+        }
+
+        /// <summary>
+        /// 挑一个该品种声明支持、且与当前不同的成交模式;没有就返回 false。
+        ///
+        /// 位掩码来自品种配置(`CIMTConSymbol.FillFlags`):FOK=1 / IOC=2 / BOC=4。
+        /// 刻意**不把 BOC 当候选**:那是 book-or-cancel(只挂不吃),语义与"到价成交"
+        /// 完全不同,拿它当降级会把用户的单变成另一种东西。读不到品种配置时也返回
+        /// false——宁可回那个明确的 INVALID_FILL,也不要瞎试一个模式。
+        ///
+        /// Pick a filling mode the symbol declares and that differs from the current
+        /// one. BOC is deliberately excluded: book-or-cancel is a different instruction,
+        /// not a degraded form of this one. Unreadable symbol config yields false, so
+        /// the caller returns the broker's explicit INVALID_FILL rather than guessing.
+        /// </summary>
+        private bool TryAlternateFilling(string symbol, string group,
+            CIMTOrder.EnOrderFilling current, out CIMTOrder.EnOrderFilling alt, out uint flags)
+        {
+            alt = CIMTOrder.EnOrderFilling.ORDER_FILL_RETURN;
+            flags = 0;
+
+            double volMin, volMax, volStep;
+            MTRetCode sres;
+
+            if (!GetSymbolLimits(symbol, group, out volMin, out volMax, out volStep,
+                    out flags, out sres))
+                return false;
+
+            const uint FILL_FLAGS_FOK = 1;
+            const uint FILL_FLAGS_IOC = 2;
+
+            if ((flags & FILL_FLAGS_FOK) != 0 && current != CIMTOrder.EnOrderFilling.ORDER_FILL_FOK)
+            {
+                alt = CIMTOrder.EnOrderFilling.ORDER_FILL_FOK;
+                return true;
+            }
+
+            if ((flags & FILL_FLAGS_IOC) != 0 && current != CIMTOrder.EnOrderFilling.ORDER_FILL_IOC)
+            {
+                alt = CIMTOrder.EnOrderFilling.ORDER_FILL_IOC;
+                return true;
+            }
+
+            return false;
         }
 
         /// <summary>
@@ -3465,6 +3583,21 @@ namespace Prismx.Mt5Gateway
                     return "服务器未在超时内答复,确认 dealer 通道与请求路由配置";
                 case MTRetCode.MT_RET_ERR_PERMISSIONS:
                     return "权限不足,确认 manager 账号有 RIGHT_TRADES_DEALER";
+                case MTRetCode.MT_RET_REQUEST_INVALID_FILL:
+                    // 兜底那句("检查品种名、手数、保证金、市场是否开市")把人引向
+                    // 四个都不相干的方向:这个码只说明**成交模式**不被该品种接受,
+                    // 与品种名、手数、保证金、开市与否统统无关。挂单路径已经会自动
+                    // 换一个品种声明支持的模式重试,走到这里说明连那个也被拒了。
+                    // The generic fallback points at four irrelevant things; this code is
+                    // only ever about the filling mode. The pending path already retries
+                    // with a mode the symbol declares, so reaching here means that failed too.
+                    return "该品种不接受本次请求的成交模式(filling mode),日志里的 FillFlags 是它声明支持的模式";
+                case MTRetCode.MT_RET_REQUEST_INVALID_PRICE:
+                    // 同理:价格类拒绝不该被说成"检查手数和保证金"。挂单最常见的原因
+                    // 是触发价离现价太近(小于品种的最小止损距离)。
+                    // Price rejections must not read as "check your volume and margin";
+                    // for a pending order the usual cause is a trigger too close to market.
+                    return "价格不被接受(挂单触发价可能离现价太近,小于该品种的最小距离)";
                 default:
                     return "交易被拒绝(检查品种名、手数、保证金、市场是否开市)";
             }
