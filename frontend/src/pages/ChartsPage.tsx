@@ -422,7 +422,7 @@ export default function ChartsPage() {
             <div className="term-tb">
               <IntervalSeg value={interval} onChange={setIntervalCode} />
               <div className="term-tbr">
-                <button type="button" className="term-tbr-btn lg:hidden" onClick={() => setSheet('positions')}>
+                <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => setSheet('positions')}>
                   {t('charts.openPositions')} <b>{accountPositions.length}</b>
                 </button>
                 {drawReady && (

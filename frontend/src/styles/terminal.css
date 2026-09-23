@@ -417,6 +417,10 @@
 }
 .term-tbr .term-tool-btn { width: 26px; height: 26px; box-shadow: inset 0 0 0 1px var(--line-hi); }
 .term-tbr .term-tool-btn.on { box-shadow: none; }
+/* 手机「持仓」入口：紫底实色，一眼认出。/ Mobile positions entry: solid violet. */
+.term-tbr-btn--pos { background: var(--purple); color: #fff; box-shadow: none; }
+.term-tbr-btn--pos:hover { background: var(--purple-vivid); }
+.term-tbr-btn--pos b { background: rgba(255, 255, 255, 0.22); color: #fff; }
 
 /* 图表容器：无边框无圆角，K 线自带底色。/ Chart container: seamless. */
 .term-chart {
