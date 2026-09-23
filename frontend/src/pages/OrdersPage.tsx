@@ -31,6 +31,7 @@ import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
 import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
 import type { ClosedTrade, Order, OrderStatus, Position } from '../api/types'
+import Toast from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
 import PositionCard from '../components/PositionCard'
 import PerformanceSummary from '../components/PerformanceSummary'
@@ -306,13 +307,6 @@ export default function OrdersPage() {
     toastTimer.current = window.setTimeout(() => setToast(null), 4000)
     refreshAll()
   }
-
-  const toastStyle =
-    toast?.kind === 'error'
-      ? 'border-down/40 bg-down/15 text-down'
-      : toast?.kind === 'info'
-        ? 'border-prism-600/40 bg-prism-600/15 text-prism-300'
-        : 'border-up/40 bg-up/15 text-up'
 
   // 持仓汇总 / positions summary
   const posSummary = useMemo(() => {
@@ -960,13 +954,7 @@ export default function OrdersPage() {
         />
       )}
 
-      {toast && (
-        <div
-          className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastStyle}`}
-        >
-          {toast.msg}
-        </div>
-      )}
+      {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )
 }

@@ -12,6 +12,7 @@ import ConfirmModal from '../components/ConfirmModal'
 import TokenRevealModal from '../components/TokenRevealModal'
 import { useBackToClose } from '../utils/useBackToClose'
 import type { MT5Account } from '../api/types'
+import Toast from '../components/Toast'
 
 export default function BridgePage() {
   const { t } = useTranslation()
@@ -311,9 +312,7 @@ export default function BridgePage() {
         />
       )}
       {deleteError && (
-        <div className="fixed above-tabbar left-1/2 z-50 -translate-x-1/2 rounded-xl border border-down/40 lg:bottom-6 bg-down/15 px-5 py-3 text-sm text-down">
-          {deleteError}
-        </div>
+        <Toast kind="error" message={deleteError} />
       )}
     </div>
   )

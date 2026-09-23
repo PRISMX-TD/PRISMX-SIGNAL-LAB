@@ -148,7 +148,11 @@ export function useOrderPlacement() {
         showToast(t('order.rejected', { msg: placed.message ? localizeApiError(placed.message) : '-' }), 'error')
         return placed
       }
-      showToast(t('order.submitted'), 'info', 8000)
+      // 4 秒，不是原来的 8 秒。那个 8 秒是为「贴在底部、半透明、容易错过」配的补偿
+      // ——提示现在在屏幕正中且是实色，读到它用不了两秒，再压八秒就只剩碍眼。
+      // 4s, down from 8. The 8 compensated for a translucent strip at the bottom edge
+      // that was easy to miss; a centred opaque card is read in under two.
+      showToast(t('order.submitted'), 'info', 4000)
       if (!pendingRef.current.has(placed.id)) {
         pendingRef.current.add(placed.id)
         setPendingIds((prev) => [...prev, placed.id])

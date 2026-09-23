@@ -31,7 +31,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
 import { useLive, useQuotes } from '../store/live'
-import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { useOrderPlacement } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useLastAccount } from '../utils/useLastAccount'
 import {
@@ -41,6 +41,7 @@ import {
 } from '../components/charts/indicatorSettings'
 import DrawLayer, { type DrawLayerHandle } from '../components/charts/DrawLayer'
 import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
+import Toast from '../components/Toast'
 import Switch from '../components/Switch'
 import SymbolHeader from '../components/charts/SymbolHeader'
 import WatchlistPanel from '../components/charts/WatchlistPanel'
@@ -641,9 +642,7 @@ export default function ChartsPage() {
       )}
 
       {toast && (
-        <div className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastToneClass(toast.kind)}`}>
-          {toast.msg}
-        </div>
+        <Toast kind={toast.kind} message={toast.msg} />
       )}
     </div>
   )

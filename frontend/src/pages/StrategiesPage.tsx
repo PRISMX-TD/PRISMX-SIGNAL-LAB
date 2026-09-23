@@ -54,10 +54,11 @@ import {
   type ConditionPayload,
   type UsageCatalog,
 } from '../components/strategies/conditionTypes'
-import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { useOrderPlacement } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import { TEMPLATE_LABEL_KEYS } from '../utils/strategyTemplates'
+import Toast from '../components/Toast'
 
 // 每个预设的一句话说明。这些文案 i18n 里一直有（templateXxxDesc），但自从模板
 // 参数表单被条件编辑器取代后就没有出口了——预设选择器只显示名字，"MACD 金叉死叉"
@@ -1323,9 +1324,7 @@ export default function StrategiesPage() {
       )}
 
       {toast && (
-        <div className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastToneClass(toast.kind)}`}>
-          {toast.msg}
-        </div>
+        <Toast kind={toast.kind} message={toast.msg} />
       )}
     </div>
   )

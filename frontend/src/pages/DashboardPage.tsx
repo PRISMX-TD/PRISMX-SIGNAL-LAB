@@ -14,8 +14,9 @@ import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
 import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
+import Toast from '../components/Toast'
 import SlideOrderModal from '../components/SlideOrderModal'
-import { useFocusEntries, useNow, useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { useFocusEntries, useNow, useOrderPlacement } from '../components/signals/hooks'
 import { trendStance, strategySignalToDisplay, type DisplaySignal, type TrendStance } from '../components/signals/SignalView'
 import type { FocusState } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -163,7 +164,7 @@ export default function DashboardPage() {
           navigate('/orders', { state: { tab: 'positions' } })
         }
       }} onConfirm={handleConfirm} />}
-      {toast && <div className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
+      {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )
 }

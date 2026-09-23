@@ -7,8 +7,9 @@ import { useAuth } from '../store/auth'
 import { useLive, useQuotes } from '../store/live'
 import SignalGrid from '../components/signals/SignalGrid'
 import { SkeletonPage } from '../components/Skeleton'
+import Toast from '../components/Toast'
 import SlideOrderModal from '../components/SlideOrderModal'
-import { useOrderPlacement, toastToneClass } from '../components/signals/hooks'
+import { useOrderPlacement } from '../components/signals/hooks'
 import { strategySignalToDisplay, type DisplaySignal } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
 import PlatformStrategiesGuide from '../components/PlatformStrategiesGuide'
@@ -174,7 +175,7 @@ export default function SignalsPage() {
           navigate('/orders', { state: { tab: 'positions' } })
         }
       }} onConfirm={handleConfirm} />}
-      {toast && <div className={`fixed above-tabbar left-1/2 z-50 -translate-x-1/2 animate-fade-in-up rounded-xl border px-5 py-3 text-sm shadow-prism lg:bottom-6 ${toastToneClass(toast.kind)}`}>{toast.msg}</div>}
+      {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )
 }

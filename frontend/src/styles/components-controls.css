@@ -1,4 +1,61 @@
 @layer components {
+  /* ── 浮层提示 / toast ──
+     全站唯一一份，组件见 components/Toast.tsx（那里写了为什么从底部半透明改成
+     正中实色）。几何与配色全在这里，调用方只给 kind 与文案。
+
+     三条不要改坏的：
+       · **实色面**。旧版是色相的 15% 透明底 + 同色文字，盖在行情图上读不出来。
+         底色用 --surface-2 比卡片面再亮一档，配 1px 描边与一层重投影，落在任何
+         背景上都是一块"浮起来的板子"。
+       · **pointer-events: none**。它在屏幕正中，不能挡手——盖住的那几秒图表照样
+         能拖能点。这是正中方案成立的前提。
+       · **宽度自适应**。max-width 用 min(92vw, 420px)：手机上左右各留 4vw，桌面上
+         不超过 420 让长句折行而不是拉成一条横贯屏幕的细线。
+
+     One toast site-wide; see components/Toast.tsx for why it moved from a translucent
+     bottom strip to an opaque centred card. Opaque surface (the old 15% tint was
+     unreadable over a chart), pointer-events:none (centre must never block the hands),
+     and a width that adapts instead of stretching across the screen. */
+  .toast {
+    position: fixed;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    /* 全站最高：底部抽屉、确认框、全屏图表工具栏都在它之下（现存最高是 z-[70]）。
+       Above everything: the highest z-index in use elsewhere is 70. */
+    z-index: 90;
+    pointer-events: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: max-content;
+    max-width: min(92vw, 420px);
+    padding: 14px 18px;
+    border-radius: var(--r-panel);
+    border: 1px solid var(--line-hi);
+    background: var(--surface-2);
+    box-shadow: 0 20px 56px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(0 0 0 / 0.3);
+    font: 500 14px/1.45 inherit;
+    color: var(--text);
+    animation: toast-in 0.22s var(--ease-out) both;
+  }
+  .toast-ic { flex: none; }
+  /* 语义只由图标与描边承担，文字保持白色高对比——旧版把文字也染成色相，正是读不清
+     的原因。/ Tone lives in the icon and the border; the text stays white, because
+     tinting it is what made the old one hard to read. */
+  .toast.success { border-color: rgb(var(--up-rgb) / 0.5); }
+  .toast.success .toast-ic { color: var(--up); }
+  .toast.error { border-color: rgb(var(--down-rgb) / 0.5); }
+  .toast.error .toast-ic { color: var(--down); }
+  /* info 用 --purple-hi 而不是 --purple：后者是按钮填充那档深紫，画成 50% 的描边在
+     深色面上几乎看不见边。/ --purple-hi, not --purple: the latter is the deep
+     button-fill tone and all but disappears as a 50% border on a dark surface. */
+  .toast.info { border-color: rgb(var(--purple-hi-rgb) / 0.5); }
+  .toast.info .toast-ic { color: var(--purple-hi); }
+  @media (prefers-reduced-motion: reduce) {
+    .toast { animation: none; }
+  }
+
   /* ── 通用自定义下拉（替代原生 select）/ generic custom dropdown ── */
   .select-picker {
     position: relative;
