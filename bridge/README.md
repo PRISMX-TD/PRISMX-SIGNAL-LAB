@@ -85,7 +85,7 @@ pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 
 | 东西 | 在哪 | 作用 |
 |---|---|---|
-| 发布私钥 `bridge-release-private.pem` | **只在发布者手上**，本机 `C:\prismx-release-keys\`（不在任何仓库；需另行离线备份） | 给每个版本的哈希清单签名 |
+| 发布私钥 `bridge-release-private.pem` | **只在发布者手上**，项目根的 `keys\bridge\`（被 `.gitignore` 的 `/keys/` 排除，不入库；另有离线备份） | 给每个版本的哈希清单签名 |
 | 发布公钥 `UPDATE_PUBLIC_KEY_B64` | 硬编码在 `bridge_app.py` | 用户机器上的桥接用它验签 |
 | `release_sign.py` | 本目录，入库 | 一条命令出 `SHA256SUMS` + `SHA256SUMS.sig`，并用代码里的公钥反验一次 |
 
@@ -102,7 +102,7 @@ python release_sign.py --key D:\keys\bridge-release-private.pem
 手工等价（排障用）：
 ```python
 from cryptography.hazmat.primitives import serialization
-key = serialization.load_pem_private_key(open(r"C:\prismx-release-keys\bridge-release-private.pem", "rb").read(), None)
+key = serialization.load_pem_private_key(open(r"..\keys\bridge\bridge-release-private.pem", "rb").read(), None)
 sig = key.sign(open("dist/SHA256SUMS", "rb").read())   # 签原始字节，不是十六进制字符串
 ```
 

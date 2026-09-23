@@ -11,7 +11,7 @@
   3. 用 bridge_app.py 里硬编码的发布公钥 UPDATE_PUBLIC_KEY_B64 反过来验一次——私钥和
      代码里的公钥不是一对时当场报错，而不是等用户机器上的一键更新全部静默退回手动下载。
 
-私钥**不在任何仓库里**，默认读 C:\\prismx-release-keys\\bridge-release-private.pem（PKCS8
+私钥**不在任何仓库里**，默认读项目根的 keys\\bridge\\bridge-release-private.pem（被 .gitignore 排除；PKCS8
 PEM；加了口令就会提示输入）。泄漏它等于能给全体桥接用户推送任意可执行文件，见
 bridge_app.py 顶部关于自更新来源校验的说明。换钥的注意事项见 README。
 
@@ -34,7 +34,8 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_KEY = r"C:\prismx-release-keys\bridge-release-private.pem"
+# 项目根的 keys/ 目录（.gitignore 的 /keys/ 排除，不入库）。/ keys/ at the project root, git-ignored.
+DEFAULT_KEY = os.path.join(os.path.dirname(HERE), "keys", "bridge", "bridge-release-private.pem")
 ASSET = "PRISMX-Bridge-Setup.exe"   # 须与 bridge_app.BRIDGE_ASSET_FILENAME 一致
 
 

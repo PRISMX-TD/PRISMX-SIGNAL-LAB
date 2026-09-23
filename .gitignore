@@ -174,3 +174,8 @@ brag-output*/
 # fresh clone one `git add .` would commit 136 MB (signing-key paths, APK/AAB
 # artifacts) into history. Same reasoning as MetaTrader5SDK / brag-output above.
 APP Pack/
+
+# ===== 本地密钥目录 / local signing keys =====
+# 发版要用的私钥集中放在项目根的 keys/，绝不入库（仓库是公开的）。
+# Release signing keys live in keys/ at the project root; never committed (public repo).
+/keys/
