@@ -59,7 +59,7 @@ def test_open_and_close_carry_client_order_id(stub, db_session):
     gx.try_gateway_execute(db_session, o)
     assert len(stub.calls) == 1
     path, body = stub.calls[0]
-    assert path == "/trade/open" and body["clientOrderId"] == "co_abc" and body["tag"] == "co_abc"
+    assert path == "/trade/open" and body["clientOrderId"] == "co_abc" and body["tag"] == "CHART"
     assert o.status == "FILLED" and o.mt5_position == 22
 
     stub.calls.clear()
@@ -148,3 +148,12 @@ def test_gateway_account_lookup_is_scoped_to_the_ordering_user(stub, db_session)
 
     gx.try_gateway_execute(db_session, o)
     assert o.status == "FILLED" and len(stub.calls) == 1
+
+
+def test_open_tag_reflects_order_source():
+    """备注标签：带 signal_id = SIG，source=STRATEGY = STRAT，其余 = CHART。"""
+    from app.services.order_payload import order_source_tag
+    assert order_source_tag(Order(signal_id="s1")) == "SIG"
+    assert order_source_tag(Order(signal_id="s1", source="STRATEGY")) == "SIG"
+    assert order_source_tag(Order(source="STRATEGY")) == "STRAT"
+    assert order_source_tag(Order()) == "CHART"
