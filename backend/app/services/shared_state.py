@@ -136,13 +136,13 @@ class _MemoryBackend:
             self._kv.pop(key, None)
             return True
 
-    def incr(self, key: str) -> int:
+    def incr(self, key: str, by: int = 1) -> int:
         with self._lock:
             hit = self._kv.get(key)
             cur = int(hit[0]) if hit is not None and self._alive(hit[1]) else 0
             exp = hit[1] if hit is not None and self._alive(hit[1]) else None
-            self._kv[key] = (str(cur + 1), exp)
-            return cur + 1
+            self._kv[key] = (str(cur + by), exp)
+            return cur + by
 
     def expire(self, key: str, seconds: int) -> None:
         with self._lock:
@@ -255,7 +255,7 @@ def kv_set_json(key: str, value: Any, ttl: int | None = None) -> None:
     kv_set(key, json.dumps(value, ensure_ascii=False, default=str), ttl)
 
 
-def incr_with_ttl(key: str, ttl: int, refresh: bool = False) -> int:
+def incr_with_ttl(key: str, ttl: int, refresh: bool = False, by: int = 1) -> int:
     """自增；第一次写入时定过期。
 
     refresh=True 则每次自增都把过期时间往后推（滑动窗口：距**最后一次**自增
@@ -269,12 +269,12 @@ def incr_with_ttl(key: str, ttl: int, refresh: bool = False) -> int:
     """
     if enabled():
         r = _redis()
-        n = r.incr(_k(key))
-        if n == 1 or refresh:
+        n = r.incr(_k(key), by)
+        if n == by or refresh:
             r.expire(_k(key), ttl)
         return int(n)
-    n = _memory.incr(_k(key))
-    if n == 1 or refresh:
+    n = _memory.incr(_k(key), by)
+    if n == by or refresh:
         _memory.expire(_k(key), ttl)
     return n
 

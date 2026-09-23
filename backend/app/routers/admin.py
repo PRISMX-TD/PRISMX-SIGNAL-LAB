@@ -24,6 +24,7 @@ from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
 from app.models import AdminAuditLog, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
+from app.services import net_quality
 from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.strategy_winrate import compute_strategy_session_winrate
@@ -602,6 +603,22 @@ def overview(
     """
     spec = _resolve_range_or_422(range_, from_, to)
     return build_overview(db, spec, stats_today())
+
+
+@router.get("/net-quality", response_model=dict)
+def net_quality_stats(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """用户连接质量：当前在线连接的延迟分布、最近 24 小时趋势、延迟最差的连接。
+    实时数据，不受看板时间范围影响；口径在 services/net_quality.py。
+    Live connection quality; not bound to the dashboard range. See services/net_quality."""
+    data = net_quality.snapshot()
+    ids = {w["userId"] for w in data["worst"] if w["userId"] is not None}
+    emails = dict(db.query(User.id, User.email).filter(User.id.in_(ids)).all()) if ids else {}
+    for w in data["worst"]:
+        w["email"] = emails.get(w["userId"])
+    return data
 
 
 @router.get("/potential-customers", response_model=AdminPotentialCustomersOut)

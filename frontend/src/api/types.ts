@@ -395,6 +395,21 @@ export interface AdminTradingDay {
   fills: number
 }
 
+// 管理后台连接质量（GET /admin/net-quality）/ admin connection quality
+export interface AdminNetQuality {
+  thresholds: { good: number; fair: number }
+  live: {
+    connections: number
+    users: number
+    dist: { good: number; fair: number; poor: number; unknown: number }
+    byKind: { app: number; web: number }
+    p50: number | null
+    p90: number | null
+  }
+  worst: { userId: number | null; email: string | null; rtt: number; jit: number | null; kind: 'app' | 'web' }[]
+  hourly: { hour: string; connects: number; disconnects: number; good: number; fair: number; poor: number; avgRtt: number | null }[]
+}
+
 export interface AdminOverview {
   range: AdminOverviewRange
   headline: AdminOverviewHeadline

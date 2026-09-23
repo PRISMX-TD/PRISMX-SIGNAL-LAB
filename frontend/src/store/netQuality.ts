@@ -53,6 +53,17 @@ export const netQuality = {
   },
 }
 
+// 捎在下一帧 PING 里给服务端做管理后台统计（services/net_quality.py）。
+// 不另发请求：心跳本来就要发，多带两个数字。
+// Rides on the next PING for the admin stats (services/net_quality.py) — no
+// extra request, the heartbeat goes out anyway.
+export function pingPayload(): { rtt?: number; jit?: number; app: boolean } {
+  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+  const app = !!cap?.isNativePlatform?.()
+  if (snap.state !== 'online' || !snap.samples.length) return { app }
+  return { rtt: snap.samples[snap.samples.length - 1], jit: jitter(snap) ?? undefined, app }
+}
+
 const subscribe = (l: () => void) => {
   listeners.add(l)
   return () => listeners.delete(l)

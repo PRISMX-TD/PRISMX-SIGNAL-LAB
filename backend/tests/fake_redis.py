@@ -42,9 +42,9 @@ class FakeRedis:
             n += int(self.hashes.pop(k, None) is not None) + int(self.lists.pop(k, None) is not None) + int(self.zsets.pop(k, None) is not None)
         return n
 
-    def incr(self, key):
+    def incr(self, key, amount=1):
         self._gc(key)
-        v = int(self.kv.get(key, "0")) + 1
+        v = int(self.kv.get(key, "0")) + amount
         self.kv[key] = str(v); return v
 
     def expire(self, key, seconds):

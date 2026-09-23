@@ -1690,6 +1690,25 @@
       "nonePublic": "Nothing published; users see an empty state.",
       "countPublic_one": "{{count}} strategy published.",
       "countPublic_other": "{{count}} strategies published."
+    },
+    "netQuality": {
+      "title": "User connection quality (live)",
+      "hint": "Round trip from user devices to the server, updated with the 10s heartbeat. Ignores the range above; refreshes every 30s. <{{good}}ms good, <{{fair}}ms fair, above is poor.",
+      "failed": "Failed to load connection quality",
+      "online": "Connections / users",
+      "p50": "Median latency",
+      "p90": "P90 latency",
+      "disconnects24": "24h drops / connects",
+      "good": "Good",
+      "fair": "Fair",
+      "poor": "Poor",
+      "unknown": "Not measured",
+      "trend": "Last 24 hours (hourly samples, stacked by quality)",
+      "avg": "avg",
+      "disconnectsShort": "drops",
+      "now": "now",
+      "worst": "Highest-latency connections now",
+      "noData": "No readings yet"
     }
   },
   "simulator": {

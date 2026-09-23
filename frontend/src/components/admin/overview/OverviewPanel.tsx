@@ -15,6 +15,7 @@ import PageStatsCard from '../PageStatsCard'
 import ActivityChart from './ActivityChart'
 import FunnelCard from './FunnelCard'
 import HeadlineCards from './HeadlineCards'
+import NetQualityCard from './NetQualityCard'
 import PlanBreakdown from './PlanBreakdown'
 import TraderLevelsCard from './TraderLevelsCard'
 import RangePicker from './RangePicker'
@@ -89,6 +90,8 @@ export default function OverviewPanel() {
       ) : (
         <>
           <HeadlineCards headline={overview.data.headline} />
+          {/* 实时数据，自己拉、自己刷新 / live, self-fetching */}
+          <NetQualityCard />
           <ActivityChart daily={overview.data.activityDaily} dataSince={overview.data.visitorDataSince} />
           <FunnelCard funnel={overview.data.funnel} />
           <RetentionCard retention={overview.data.retention} dataSince={overview.data.visitorDataSince} />

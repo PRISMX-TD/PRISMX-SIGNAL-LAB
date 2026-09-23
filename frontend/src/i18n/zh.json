@@ -1688,6 +1688,25 @@
       "noStrategies": "近 {{days}} 天没有任何策略发出过信号。",
       "nonePublic": "当前一个都没公开，用户端显示空态。",
       "countPublic_other": "已公开 {{count}} 个策略。"
+    },
+    "netQuality": {
+      "title": "用户连接质量（实时）",
+      "hint": "用户设备到服务器的往返延迟，随心跳每 10 秒更新；不受上方时间范围影响，本卡 30 秒自动刷新。<{{good}}ms 良好，<{{fair}}ms 一般，以上较差。",
+      "failed": "连接质量读取失败",
+      "online": "在线连接 / 用户",
+      "p50": "延迟中位数",
+      "p90": "延迟 P90",
+      "disconnects24": "24h 断开 / 连接",
+      "good": "良好",
+      "fair": "一般",
+      "poor": "较差",
+      "unknown": "未测到",
+      "trend": "最近 24 小时（每小时样本，按质量堆叠）",
+      "avg": "平均",
+      "disconnectsShort": "断开",
+      "now": "现在",
+      "worst": "当前延迟最高的连接",
+      "noData": "暂无读数"
     }
   },
   "simulator": {

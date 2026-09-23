@@ -9,6 +9,7 @@ MT5 execution goes exclusively through the PRISMX Bridge HTTP polling
 import asyncio
 import json
 import logging
+import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
@@ -16,7 +17,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import SessionLocal
 from app.core.security import decode_token_payload
 from app.models import User
-from app.services import quotes_store
+from app.services import net_quality, quotes_store
 from app.services.connection_manager import manager
 
 logger = logging.getLogger("prismx.ws")
@@ -61,14 +62,24 @@ def _authenticate(token: str) -> str | None:
     return user_id
 
 
-def _is_ping(raw: str) -> bool:
-    """客户端帧是不是应用层心跳 {"type":"PING"}。非 JSON、非对象一律不是。
-    Whether a client frame is the app-level heartbeat; anything unparseable isn't."""
+async def _netq(fn, *args) -> None:
+    """连接质量统计只是旁路记账：走线程池（同步 Redis），失败只记日志，绝不影响这条连接。
+    Connection-quality stats are side bookkeeping: off the loop (sync Redis), and a
+    failure is logged, never allowed to touch the socket."""
+    try:
+        await asyncio.to_thread(fn, *args)
+    except Exception:
+        logger.debug("net_quality %s failed", getattr(fn, "__name__", fn), exc_info=True)
+
+
+def _parse_ping(raw: str) -> dict | None:
+    """是心跳就返回帧本身（里面可能捎带 rtt/jit，见 services/net_quality），否则 None。
+    The PING frame itself (may carry rtt/jit, see services/net_quality), else None."""
     try:
         frame = json.loads(raw)
     except (TypeError, ValueError):
-        return False
-    return isinstance(frame, dict) and frame.get("type") == "PING"
+        return None
+    return frame if isinstance(frame, dict) and frame.get("type") == "PING" else None
 
 
 # ---------- 前端通道 / Client channel ----------
@@ -153,6 +164,8 @@ async def ws_client(websocket: WebSocket):
         return
 
     await manager.register_client(user_id, websocket)
+    conn_id = uuid.uuid4().hex
+    await _netq(net_quality.record_connect, conn_id, user_id)
     # register 之后的一切都必须在 try 里。
     #
     # 下面这四帧补推原来在 try 之外：客户端在鉴权成功后立刻断开（移动端切后台、
@@ -226,8 +239,10 @@ async def ws_client(websocket: WebSocket):
             # doesn't" reports). A client-driven PING with a reply deadline is the
             # only way the page can tell a zombie from a quiet connection.
             raw = await websocket.receive_text()
-            if _is_ping(raw):
+            ping = _parse_ping(raw)
+            if ping is not None:
                 await websocket.send_json({"type": "PONG"})
+                await _netq(net_quality.record_sample, conn_id, user_id, *net_quality.parse_ping(ping))
     except WebSocketDisconnect:
         pass
     except Exception:
@@ -241,3 +256,4 @@ async def ws_client(websocket: WebSocket):
         # the try added more of them. This makes "registered implies unregistered"
         # structural rather than a thing each branch has to get right.
         await manager.unregister_client(user_id, websocket)
+        await _netq(net_quality.record_disconnect, conn_id)

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getToken, API_BASE } from '../api/client'
 import type { WSMessage } from '../api/types'
-import { netQuality } from './netQuality'
+import { netQuality, pingPayload } from './netQuality'
 
 // 应用层心跳。协议层的 ping/pong 由浏览器自动应答、页面 JS 看不见，所以它只能让
 // **服务端**发现死连接；而出问题的是客户端这一侧——安卓 App 切后台再回前台，TCP 早被
@@ -143,7 +143,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     const probe = (timeoutMs: number) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       try {
-        ws.send(JSON.stringify({ type: 'PING' }))
+        ws.send(JSON.stringify({ type: 'PING', ...pingPayload() }))
         pingSentAt = performance.now()
       } catch {
         // send 在 OPEN 态抛错本身就是坏了 / a throw while OPEN already means broken
