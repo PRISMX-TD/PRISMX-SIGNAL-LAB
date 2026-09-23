@@ -96,7 +96,8 @@ def _trend_lock(symbol: str) -> threading.Lock:
         return lock
 
 
-def _persist_signal_sync(payload: TradingViewSignal):
+def _persist_signal_sync(payload: TradingViewSignal, source: str = "tradingview",
+                         default_indicator: str = "TradingView"):
     """信号落库的同步段。返回 (去重命中的既有 id, 序列化数据, ORM 实例)。
 
     now 刻意留在这个函数内、且仍在去重查询之后计算——保持与改造前逐行相同的位置，
@@ -121,8 +122,8 @@ def _persist_signal_sync(payload: TradingViewSignal):
             entry=payload.entry,
             stop_loss=payload.stopLoss,
             take_profit=payload.takeProfit,
-            indicator=payload.strategy or "TradingView",
-            source="tradingview",
+            indicator=payload.strategy or default_indicator,
+            source=source,
             external_id=payload.id,
             status="ACTIVE",
             created_at=now,
@@ -172,6 +173,30 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
     # push: real-time-tier clients only; FREE tier sees it once it expires
     await broadcast_signal_new_realtime(data)
     # Web Push 通知：线程池执行，避免阻塞事件循环 / web push off the event loop
+    await dispatch_push_async(sig)
+    return {"ok": True, "deduped": False, "id": data["id"]}
+
+
+@router.post("/mt5-signal", response_model=dict)
+@limiter.limit("60/minute")
+async def mt5_signal_webhook(request: Request, payload: TradingViewSignal):
+    """接收 MT5 信号 EA 推送的交易信号，载荷与 /tradingview 相同。
+    密钥用 EA_TOKEN（与行情 EA 同一个），放在 body 的 "secret" 字段；落库 source="mt5"，
+    其余去重/广播/推送流程与 /tradingview 完全一致。
+    Receive a trading signal from the MT5 signal EA; same payload as /tradingview.
+    Authenticated with EA_TOKEN (shared with the market-feed EA) in the body's
+    "secret" field; stored with source="mt5", otherwise identical pipeline.
+    """
+    if not settings.EA_TOKEN or not secrets.compare_digest(
+        payload.secret.encode("utf-8"), settings.EA_TOKEN.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="EA Token 无效 / invalid EA token")
+
+    deduped_id, data, sig = await run_in_threadpool(_persist_signal_sync, payload, "mt5", "MT5")
+    if deduped_id is not None:
+        return {"ok": True, "deduped": True, "id": deduped_id}
+
+    await broadcast_signal_new_realtime(data)
     await dispatch_push_async(sig)
     return {"ok": True, "deduped": False, "id": data["id"]}
 

@@ -6,7 +6,7 @@ PENDING（还没走出结果）与 STALE（行情追踪中断，见 signal_resol
 分母，但如实回给前端展示。两处口径必须保持一致，否则同一批信号在"总胜率"和
 "分时段胜率"里会给出互相矛盾的数字。
 
-只统计 source == "tradingview" 的信号。mock 引擎那批的 indicator 是
+只统计外部策略信号（EXTERNAL_SIGNAL_SOURCES：tradingview / mt5）。mock 引擎那批的 indicator 是
 "MA5/MA20 金叉, RSI=34.7 / Dead cross" 这种把参数值拼进去的描述文本，按它分组
 会炸出上百个只有一条样本的"策略"；TradingView 警报的 strategy 字段才是稳定的
 策略名（见 routers/webhook.py 的 _persist_signal_sync）。
@@ -21,7 +21,7 @@ and STALE (price tracking broke, see signal_resolution.py) excluded but still
 reported for display. The two must stay in step or the same signals would yield
 contradictory "overall" and "per-session" numbers.
 
-Only source == "tradingview" signals are counted. The mock engine's `indicator`
+Only external strategy signals (EXTERNAL_SIGNAL_SOURCES: tradingview / mt5) are counted. The mock engine's `indicator`
 is descriptive text with parameter values baked in ("MA5/MA20 golden cross,
 RSI=34.7"), which would explode into hundreds of one-sample "strategies";
 TradingView's `strategy` field is the stable name (see _persist_signal_sync in
@@ -37,7 +37,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import Signal
+from app.models import EXTERNAL_SIGNAL_SOURCES, Signal
 
 
 @dataclass(frozen=True)
@@ -461,7 +461,7 @@ def compute_strategy_session_winrate(
         Signal.indicator, Signal.symbol, Signal.side, Signal.created_at,
         Signal.result, Signal.resolved_at,
     ).filter(
-        Signal.source == "tradingview",
+        Signal.source.in_(EXTERNAL_SIGNAL_SOURCES),
         Signal.created_at >= cutoff_naive,
     )
     # 白名单过滤在**取数这一层**，不是在结果里删几行：用户端的时段胜率、品种胜率
@@ -508,7 +508,7 @@ def compute_strategy_session_winrate(
     last_resolved = (
         db.query(func.max(Signal.resolved_at))
         .filter(
-            Signal.source == "tradingview",
+            Signal.source.in_(EXTERNAL_SIGNAL_SOURCES),
             Signal.result.in_(("HIT_TP", "HIT_SL")),
         )
         .scalar()

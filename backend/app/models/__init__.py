@@ -348,6 +348,14 @@ class MT5Account(Base):
     last_heartbeat = Column(DateTime, nullable=True)
 
 
+# 外部策略信号的来源：TradingView 警报与 MT5 信号 EA。胜率统计只看这两类，
+# 不含 mock 引擎。新增来源时在这里补上，统计口径自动跟随。
+# Sources of external strategy signals: TradingView alerts and the MT5 signal
+# EA. Win-rate stats count only these (never the mock engine); add new sources
+# here and every stats query follows.
+EXTERNAL_SIGNAL_SOURCES = ("tradingview", "mt5")
+
+
 class Signal(Base):
     """交易信号 / Trading signal."""
     __tablename__ = "signals"
@@ -370,7 +378,7 @@ class Signal(Base):
     stop_loss = Column(Float)
     take_profit = Column(Float)
     indicator = Column(String)
-    # 来源：mock 内置引擎 / tradingview Webhook / source of the signal
+    # 来源：mock 内置引擎 / tradingview Webhook / mt5 信号 EA / source of the signal
     source = Column(String, default="mock")
     # 外部唯一编号（如 TradingView 警报自带的 id），用于去重，可空。
     # External unique id (e.g. from a TradingView alert) for dedup; nullable.

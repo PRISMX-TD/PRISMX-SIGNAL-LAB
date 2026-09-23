@@ -8,7 +8,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Signal, User
+from app.models import EXTERNAL_SIGNAL_SOURCES, Signal, User
 from app.schemas import AdminStrategyWinRateOut, PlatformStrategyListOut, PlatformStrategyOut, SignalOut
 from app.services.deps import get_current_user, require_admin
 from app.services.plans import is_realtime_plan
@@ -193,7 +193,7 @@ def signal_winrate(
     counts = {"PENDING": 0, "HIT_TP": 0, "HIT_SL": 0, "STALE": 0}
     rows = (
         db.query(Signal.result, func.count())
-        .filter(Signal.source == "tradingview")
+        .filter(Signal.source.in_(EXTERNAL_SIGNAL_SOURCES))
         .group_by(Signal.result)
         .all()
     )
@@ -251,7 +251,7 @@ def _simulate_normalized(db: Session, days: int, risk: float, mode: str) -> dict
     rows = (
         db.query(Signal)
         .filter(
-            Signal.source == "tradingview",
+            Signal.source.in_(EXTERNAL_SIGNAL_SOURCES),
             Signal.result.in_(("HIT_TP", "HIT_SL")),
             Signal.created_at >= cutoff,
         )
