@@ -24,7 +24,7 @@ from app.services.gateway_client import (
     trade_open as gw_open,
     trade_pending as gw_pending,
 )
-from app.services.order_payload import order_update_payload
+from app.services.order_payload import order_source_tag, order_update_payload
 from app.services.symbol_aliases import broker_symbol
 
 # 日志名沿用 prismx.orders：运维按它 grep 网关执行日志，搬文件不该改日志面貌。
@@ -312,7 +312,7 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
                 login, broker_symbol(order.symbol),
                 order.side or "BUY", order.volume or 0.01,
                 order.sl or 0, order.tp or 0,
-                order.client_order_id or "",
+                order_source_tag(order),
                 client_order_id=order.client_order_id or "",
                 timeout=timeout,
             ))
@@ -323,7 +323,7 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
                 login, broker_symbol(order.symbol),
                 order.pending_type or "", order.volume or 0.01, order.price or 0,
                 order.sl or 0, order.tp or 0,
-                order.client_order_id or "",
+                order_source_tag(order),
                 client_order_id=order.client_order_id or "",
                 timeout=timeout,
             ))

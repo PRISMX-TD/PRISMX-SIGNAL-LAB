@@ -124,6 +124,7 @@ export function useOrderPlacement() {
       clientOrderId: string
       orderType?: OrderEntryType
       price?: number | null
+      source?: 'STRATEGY' | null
     }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
@@ -212,11 +213,30 @@ export function useOrderPlacement() {
     [submitOrder]
   )
 
+  // 个人策略信号下单：与手动下单同一条路径（不带 signalId），只多标一个来源，
+  // 让券商备注写成 PRISMX-STRAT。/ Personal strategy order: the manual path plus
+  // a source flag so the broker comment reads PRISMX-STRAT.
+  const placeStrategyOrder = useCallback(
+    (
+      symbol: string,
+      side: 'BUY' | 'SELL',
+      volume: number,
+      mt5Login: string | null,
+      stopLoss: number | null,
+      takeProfit: number | null,
+      clientOrderId: string,
+    ) => submitOrder({
+      signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit, clientOrderId,
+      source: 'STRATEGY',
+    }),
+    [submitOrder]
+  )
+
   // showToast 暴露给终端的持仓/挂单面板：平仓/撤单直接走 orderApi（不经
   // submitOrder），需要复用同一套 toast 展示。/ Exposed so the terminal's
   // positions/orders dock (which calls orderApi.close/cancel directly, not via
   // submitOrder) can surface feedback through the same toast.
-  return { toast, placeOrder, placeManualOrder, showToast }
+  return { toast, placeOrder, placeManualOrder, placeStrategyOrder, showToast }
 }
 
 // 每秒滴答的当前时间，用于实时倒计时 / a per-second ticking clock for live countdowns

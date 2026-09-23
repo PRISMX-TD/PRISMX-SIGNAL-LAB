@@ -1383,6 +1383,13 @@ def _result_from_retcode(result, confirm: bool = True) -> tuple[str, bool]:
     return "REJECTED", False
 
 
+def _open_comment(cmd: dict) -> str:
+    """开仓 / 挂单的备注：PRISMX-SIG（跟单）或 PRISMX-CHART（图表）；没带 tag 的老后端仍是 PRISMX。
+    Comment for opens / pending orders: PRISMX-<tag>, or plain PRISMX without a tag."""
+    tag = "".join(ch for ch in str(cmd.get("tag") or "") if ch.isalnum())[:12]
+    return f"PRISMX-{tag}" if tag else "PRISMX"
+
+
 def _execute_order(cmd: dict, suffix: str = "") -> dict:
     """执行单条下单指令 / execute one order command."""
     requested = cmd["symbol"]
@@ -1431,7 +1438,7 @@ def _execute_order(cmd: dict, suffix: str = "") -> dict:
         "price": price,
         "deviation": _deviation_points(symbol, price),
         "magic": PRISMX_MAGIC,
-        "comment": "PRISMX",
+        "comment": _open_comment(cmd),
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
@@ -1974,7 +1981,7 @@ def _place_pending(cmd: dict, suffix: str = "") -> dict:
         "type": order_type,
         "price": price,
         "magic": PRISMX_MAGIC,
-        "comment": "PRISMX",
+        "comment": _open_comment(cmd),
         "type_time": mt5.ORDER_TIME_GTC,
         # 挂单用 RETURN，不是市价单那套 IOC：挂单的成交模式说的是「触发之后剩余
         # 部分怎么办」，而 IOC/FOK 在多数券商上对挂单直接非法（INVALID_FILL）。

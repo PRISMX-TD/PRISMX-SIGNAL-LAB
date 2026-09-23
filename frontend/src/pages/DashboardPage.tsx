@@ -43,7 +43,7 @@ export default function DashboardPage() {
     [signals, strategySignals, t]
   )
   const focusEntries = useFocusEntries(combinedSignals, now, activeSymbols)
-  const { toast, placeOrder, placeManualOrder } = useOrderPlacement()
+  const { toast, placeOrder, placeStrategyOrder } = useOrderPlacement()
 
   const [focusIdx, setFocusIdx] = useState(0)
   const [activeSignal, setActiveSignal] = useState<DisplaySignal | null>(null)
@@ -99,7 +99,7 @@ export default function DashboardPage() {
     // signalId-less manual path so they never pollute the platform win-rate
     // stats; platform signals still go through placeOrder as before.
     if (sig.strategySignal) {
-      await placeManualOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+      await placeStrategyOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     } else {
       await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     }

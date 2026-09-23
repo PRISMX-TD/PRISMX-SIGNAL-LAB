@@ -99,3 +99,23 @@ def void_stale_order(o: Order) -> None:
     """把超时订单置为 FAILED（不提交事务）/ mark a stale order FAILED (no commit)."""
     o.status = "FAILED"
     o.message = STALE_ORDER_MESSAGE
+
+
+# 下单来源标签，写进券商单子的备注（comment）：跟信号 = SIG，个人策略 = STRAT，图表手动 = CHART。
+# 判据：有 signal_id = SIG；订单 source=STRATEGY（个人策略信号）= STRAT；其余 = CHART。
+# 备注仍以 PRISMX 开头（如 "PRISMX-SIG"），按前缀判归属的逻辑不受影响。
+# Order-source tag written into the broker comment: SIG for signal copy-trades,
+# CHART for manual chart orders. Keyed on signal_id; comments still start with
+# PRISMX so prefix-based attribution is unaffected.
+SOURCE_TAG_SIGNAL = "SIG"
+SOURCE_TAG_CHART = "CHART"
+# 个人策略信号（订单 source=STRATEGY）/ personal strategy signals
+SOURCE_TAG_STRATEGY = "STRAT"
+
+
+def order_source_tag(o) -> str:
+    if getattr(o, "signal_id", None):
+        return SOURCE_TAG_SIGNAL
+    if getattr(o, "source", None) == "STRATEGY":
+        return SOURCE_TAG_STRATEGY
+    return SOURCE_TAG_CHART

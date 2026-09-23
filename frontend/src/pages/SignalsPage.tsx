@@ -65,7 +65,7 @@ export default function SignalsPage() {
   // mobile, swiping back should close it first rather than exiting the
   // signals page outright (see useBackToClose's comment).
   useBackToClose(activeSignal != null, () => setActiveSignal(null))
-  const { toast, placeOrder, placeManualOrder } = useOrderPlacement()
+  const { toast, placeOrder, placeStrategyOrder } = useOrderPlacement()
 
   // 个人策略信号混进普通信号网格一起展示——同样的卡片、按时间统一排序，
   // 不再单独占一块地方。/ Personal strategy signals are folded into the
@@ -103,7 +103,7 @@ export default function SignalsPage() {
     // signalId-less manual path so they never pollute the platform win-rate
     // stats; platform signals still go through placeOrder as before.
     if (sig.strategySignal) {
-      await placeManualOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+      await placeStrategyOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     } else {
       await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     }

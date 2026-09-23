@@ -793,7 +793,7 @@ export default function StrategiesPage() {
   const { user } = useAuth()
   const { accounts, activeSymbols, refreshAll } = useLive()
   const quotesByAccount = useQuotes()
-  const { toast, placeManualOrder } = useOrderPlacement()
+  const { toast, placeStrategyOrder } = useOrderPlacement()
 
   const [strategies, setStrategies] = useState<UserStrategy[]>([])
   const [signals, setSignals] = useState<StrategySignal[]>([])
@@ -1094,7 +1094,7 @@ export default function StrategiesPage() {
     // Throw rather than return: OrderSheet treats a resolved promise as "submitted"
     // and renders a receipt, so an early return fabricates a confirmation.
     if (!orderTarget) throw new Error(String(t('common.error')))
-    await placeManualOrder(orderTarget.symbol, orderTarget.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+    await placeStrategyOrder(orderTarget.symbol, orderTarget.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
   }
 
   // 新建按钮上移到页头：目录拿不到时禁用——新草稿的第一条条件必须由目录给出，

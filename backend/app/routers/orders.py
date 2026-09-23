@@ -227,6 +227,8 @@ def place_order(
     order = Order(
         user_id=user.id,
         signal_id=req.signalId,
+        # 带 signalId 的一律算跟单，不接受 STRATEGY 标记 / a signalId always wins
+        source=(req.source if not req.signalId else None),
         client_order_id=req.clientOrderId,
         action="ORDER" if req.orderType == "MARKET" else "PENDING",
         pending_type=pending_type,

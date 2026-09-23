@@ -1497,6 +1497,11 @@ class OrderRequest(BaseModel):
     # two sources of truth that can disagree. The MT5 type is composed from
     # side × orderType at the execution layer.
     orderType: Literal["MARKET", "LIMIT", "STOP"] = "MARKET"
+    # 下单来源：STRATEGY = 个人策略信号（券商备注 PRISMX-STRAT）；省略 = 按 signalId 判
+    # 跟单（PRISMX-SIG）或图表（PRISMX-CHART）。
+    # Order source: STRATEGY for personal strategy signals (comment PRISMX-STRAT);
+    # omitted means SIG / CHART decided by signalId.
+    source: Literal["STRATEGY"] | None = None
     # 挂单的触发价（orderType != MARKET 时必填）/ trigger price, required unless MARKET
     price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 

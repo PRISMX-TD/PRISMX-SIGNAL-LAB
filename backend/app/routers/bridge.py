@@ -19,7 +19,7 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
-from app.services.order_payload import is_stale_pending, order_update_payload, void_stale_order
+from app.services.order_payload import is_stale_pending, order_source_tag, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
@@ -723,6 +723,9 @@ def _poll_db_work(
             # see 0 (the schema requires price > 0), so only the modify needs the split.
             "price": (o.price if action == "MODIFY_PENDING" else (o.price or 0.0)),
             "pendingType": o.pending_type,
+            # 下单来源（SIG / CHART），桥接写进备注；老桥接不认识就照旧写 PRISMX。
+            # Order source (SIG / CHART) for the comment; older bridges ignore it.
+            "tag": order_source_tag(o),
         })
         o.delivered = True
         o.delivered_at = now

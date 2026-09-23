@@ -155,7 +155,9 @@ def _hash_legacy_api_tokens() -> None:
 #          该有的状态。纯 ADD COLUMN，不重写表，不产生可感知的停机。
 #          price 与 filled_price 是两件事：后者是"成交在哪"（回执），前者是"要在
 #          哪触发"（指令），挂单触发之后两者同时有值且通常不等。
-CURRENT_SCHEMA_REV = 27
+# rev 28 — orders.source（下单来源：STRATEGY = 个人策略信号；NULL = 按 signal_id 判跟单 /
+#          图表）。可空、不回填，纯 ADD COLUMN，不产生可感知的停机。
+CURRENT_SCHEMA_REV = 28
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -436,6 +438,9 @@ def _migrate_columns() -> None:
             # "this command is not a pending order", which every existing row is.
             "price": "FLOAT",
             "pending_type": "VARCHAR",
+            # 下单来源（STRATEGY / NULL）。不回填：旧单按 signal_id 判 SIG / CHART。
+            # order source (STRATEGY / NULL); not backfilled.
+            "source": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():

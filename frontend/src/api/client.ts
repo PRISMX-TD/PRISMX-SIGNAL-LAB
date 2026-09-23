@@ -523,6 +523,9 @@ export const orderApi = {
     takeProfit?: number | null
     orderType?: OrderEntryType
     price?: number | null
+    // 下单来源：个人策略信号传 'STRATEGY'，后端写进券商备注（PRISMX-STRAT）。
+    // Order source: 'STRATEGY' for personal strategy signals (broker comment PRISMX-STRAT).
+    source?: 'STRATEGY' | null
   }) =>
     request<Order>('/orders', {
       method: 'POST',
