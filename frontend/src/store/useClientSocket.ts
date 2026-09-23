@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { getToken, API_BASE } from '../api/client'
 import type { WSMessage } from '../api/types'
+import { netQuality } from './netQuality'
 
 // 应用层心跳。协议层的 ping/pong 由浏览器自动应答、页面 JS 看不见，所以它只能让
 // **服务端**发现死连接；而出问题的是客户端这一侧——安卓 App 切后台再回前台，TCP 早被
@@ -25,7 +26,10 @@ import type { WSMessage } from '../api/types'
 // all* arrives within the deadline. Any frame counts, not just PONG — during
 // market hours quotes tick every 1.5s and are the heartbeat; PONG only covers
 // the silence of weekends and closed sessions.
-const HEARTBEAT_INTERVAL_MS = 25_000
+// 10 秒一次：同时用来测往返延迟给顶栏信号图标，25 秒太久、数字不够及时。
+// Every 10s: the round trip doubles as the header signal icon's latency reading,
+// and 25s made that number too stale.
+const HEARTBEAT_INTERVAL_MS = 10_000
 // PING 之后多久没收到任何帧就判死。10 秒对任何能用的网络都绰绰有余；再长只是让用户
 // 多盯几秒冻住的报价。/ Silence after a PING that counts as dead. Ten seconds is
 // ample on any usable network; longer just means staring at frozen quotes.
@@ -57,6 +61,8 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     // Consecutive reconnect count, used only to compute the backoff delay;
     // reset to zero once auth succeeds.
     let attempt = 0
+    // 最近一帧 PING 的发出时间，PONG 回来时算往返 / when the last PING left, for RTT on PONG
+    let pingSentAt: number | null = null
 
     // 断线重连采用指数退避 + 抖动，而不是固定间隔。
     //
@@ -97,6 +103,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       if (heartbeatTimer) window.clearInterval(heartbeatTimer)
       heartbeatTimer = undefined
       clearDeadline()
+      pingSentAt = null
     }
 
     // 僵尸连接的处置：不等 onclose（它正是不会来的那个事件），自己把这条连接判死。
@@ -111,6 +118,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       const dead = ws
       ws = null
       stopHeartbeat()
+      netQuality.setState('offline')
       if (dead) {
         dead.onopen = null
         dead.onmessage = null
@@ -136,6 +144,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       try {
         ws.send(JSON.stringify({ type: 'PING' }))
+        pingSentAt = performance.now()
       } catch {
         // send 在 OPEN 态抛错本身就是坏了 / a throw while OPEN already means broken
         dropDeadConnection()
@@ -275,10 +284,15 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         // 任何一帧到达都证明连接活着，先清掉心跳期限再做别的。
         // Any frame proves the connection alive; clear the deadline before anything else.
         clearDeadline()
+        netQuality.touch()
         try {
           const msg = JSON.parse(ev.data) as WSMessage
           // PONG 只为心跳而生，不交给业务层 / PONG exists only for the heartbeat
-          if (msg.type === 'PONG') return
+          if (msg.type === 'PONG') {
+            if (pingSentAt != null) netQuality.addSample(performance.now() - pingSentAt)
+            pingSentAt = null
+            return
+          }
           // WS 鉴权失败：关闭并交给 onclose 用下一轮读到的新 token 重试，
           // 不强制登出、也不永久放弃——登录态是否失效只由 REST 的 401 决定
           // （见 client.ts）。真正登出时上面的"没有 token"分支会停止重连。
@@ -296,7 +310,10 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
             setConnected(true)
             // 连上了才算这一轮重连成功，退避从头开始 / a successful round resets backoff
             attempt = 0
+            netQuality.setState('online')
             startHeartbeat()
+            // 连上立刻测一次，不让图标空等 10 秒 / measure right away instead of waiting 10s
+            probe(HEARTBEAT_TIMEOUT_MS)
           }
           handlerRef.current(msg)
         } catch {
@@ -325,6 +342,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
 
       socket.onclose = () => {
         stopHeartbeat()
+        netQuality.setState('offline')
         setConnected(false)
         if (!closed) scheduleReconnect()
       }

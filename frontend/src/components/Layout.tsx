@@ -13,6 +13,7 @@ import SocialLinks from './SocialLinks'
 import PlanExpiryBanner from './PlanExpiryBanner'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
+import SignalIndicator from './SignalIndicator'
 import NotificationBell from './NotificationBell'
 import UserMenu from './UserMenu'
 import AuroraBackground from './AuroraBackground'
@@ -766,9 +767,17 @@ export default function Layout() {
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
+              <SignalIndicator />
               <EAStatusBadge />
               <NotificationBell />
-              <LanguageToggle />
+              {/* 手机顶栏只留 信号 / EA / 铃铛 三项：语言与登出都是低频操作，
+                  收进底部「其他」面板（2026-09-23）。
+                  Mobile header keeps only signal / EA / bell: language and
+                  logout are low-frequency and live in the "more" sheet
+                  (2026-09-23). */}
+              <div className="hidden lg:block">
+                <LanguageToggle />
+              </div>
               {/* 桌面：头像菜单收纳账户/下载/升级/管理/退出 / desktop: avatar menu */}
               <div className="hidden lg:block">
                 <UserMenu
@@ -782,20 +791,6 @@ export default function Layout() {
                   onLogout={handleLogout}
                 />
               </div>
-              {/* 移动端登出图标按钮：其余低频项在底部"其他"面板里 / mobile
-                  icon-only logout — the rest of the low-frequency items live
-                  in the bottom "more" sheet */}
-              <button
-                onClick={() => setConfirmLogout(true)}
-                aria-label={t('nav.logout')}
-                className="btn-ghost px-2 py-1.5 lg:hidden"
-              >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
-                </svg>
-              </button>
             </div>
           </div>
         </header>
@@ -965,6 +960,10 @@ export default function Layout() {
                     <span>{it.label}</span>
                   </NavLink>
                 ))}
+              </div>
+              <div className="mt-3 flex items-center justify-between px-1 text-sm text-neutral-300">
+                <span>{t('netSignal.language')}</span>
+                <LanguageToggle />
               </div>
               <button type="button" className="lg-sheet-logout" onClick={() => setConfirmLogout(true)}>
                 {t('nav.logout')}

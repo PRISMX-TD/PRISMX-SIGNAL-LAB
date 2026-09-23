@@ -2905,5 +2905,20 @@
     "noteSealedBoard": "周期结束后成绩就封存了，之后再怎么出入金、怎么交易，都不会改动已经结束的排名。",
     "noteSealedComp": "比赛结束后名次以终审结果为准，之后的出入金和交易都不会再改动它。",
     "noteNoFlow": "从不出入金的账户，算法与以前完全一样，没有任何变化。"
+  },
+  "netSignal": {
+    "title": "连接信号",
+    "connecting": "连接中",
+    "offline": "已断开",
+    "good": "良好",
+    "fair": "一般",
+    "poor": "较差",
+    "latency": "延迟",
+    "jitter": "波动",
+    "lastData": "上次收到数据",
+    "secondsAgo": "{{n}} 秒前",
+    "reconnects": "本次重连次数",
+    "hint": "这是你的设备到 PRISMX 服务器的往返延迟。低于 {{good}}ms 为良好，{{fair}}ms 以上下单和报价可能有明显延迟。",
+    "language": "语言 / Language"
   }
 }

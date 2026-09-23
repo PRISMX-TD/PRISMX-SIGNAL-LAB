@@ -2907,5 +2907,20 @@
     "noteSealedBoard": "Once a period ends its results are sealed; no later deposit, withdrawal or trade can change a finished ranking.",
     "noteSealedComp": "Once a competition ends, the settled result is final; later deposits, withdrawals and trades no longer move it.",
     "noteNoFlow": "For accounts that never deposit or withdraw, the calculation is exactly what it always was."
+  },
+  "netSignal": {
+    "title": "Connection",
+    "connecting": "Connecting",
+    "offline": "Disconnected",
+    "good": "Good",
+    "fair": "Fair",
+    "poor": "Poor",
+    "latency": "Latency",
+    "jitter": "Jitter",
+    "lastData": "Last data",
+    "secondsAgo": "{{n}}s ago",
+    "reconnects": "Reconnects",
+    "hint": "Round-trip time from this device to the PRISMX server. Under {{good}}ms is good; above {{fair}}ms quotes and orders may lag noticeably.",
+    "language": "Language / 语言"
   }
 }
