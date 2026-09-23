@@ -89,7 +89,13 @@ except Exception:
 # stop or target line on the web chart edits it. All three default to "keep what the
 # order has"; 0 still clears SL/TP, as with MODIFY. The command set changed, so the
 # version must move.
-APP_VERSION = "1.4.4"
+#
+# 1.4.5 (2026-09-23)：开仓 / 挂单的券商备注按后端下发的来源标签写成 PRISMX-SIG（跟单）/
+# PRISMX-STRAT（个人策略）/ PRISMX-CHART（图表）；后端没带标签时仍写 PRISMX。
+#
+# 1.4.5 (2026-09-23): open / pending-order comments carry the backend's source tag —
+# PRISMX-SIG / PRISMX-STRAT / PRISMX-CHART; plain PRISMX when no tag is sent.
+APP_VERSION = "1.4.5"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -152,7 +158,12 @@ UPDATE_SUMS_SIG_ASSET = "SHA256SUMS.sig"
 # Placeholder ⇒ update_signing_ready() is False ⇒ the one-click path is not offered
 # at all. An unconfigured key must never degrade into "skip the check".
 _UPDATE_PUBLIC_KEY_PLACEHOLDER = "!!!-REPLACE-ME-WITH-RELEASE-ED25519-PUBLIC-KEY-BASE64-!!!"
-UPDATE_PUBLIC_KEY_B64 = "MMxilfHqz6Pzr9hKDsUpzH2mRas92g6EGPsUeCoa5Ac="
+#
+# 2026-09-23 轮换（1.4.5 起）：原私钥丢失、无备份，改用新钥匙。1.4.4 及更早的桥接认的是旧公钥，
+# 对 1.4.5 验签失败、退回手动下载——这一次全体用户手动装一次，之后一键更新恢复。
+# Rotated 2026-09-23 (from 1.4.5): the old private key was lost with no backup, so
+# 1.4.4 and earlier fail verification on 1.4.5 and fall back to a manual download once.
+UPDATE_PUBLIC_KEY_B64 = "UNHIYssYy10URzaUCYcBRV19euvIPA1VcsADhNewG5I="
 
 # 只接受 GitHub 的下载域名。browser_download_url 会 302 到对象存储，所以请求前的
 # URL 和跟随重定向后的最终 URL 都要查一遍——否则一个被改写的 Release JSON 就能把
