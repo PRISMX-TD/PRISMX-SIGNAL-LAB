@@ -577,6 +577,23 @@ def mark_notification_read(
     return {"ok": True}
 
 
+@router.delete("/feed", response_model=dict)
+def clear_notification_feed(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """清空本人的站内通知（铃铛「消息」段）。只删自己的行；公告不受影响。
+    Delete all of this user's feed rows (the bell's "messages" section). Only the
+    caller's own rows; announcements are untouched."""
+    n = (
+        db.query(UserNotification)
+        .filter(UserNotification.user_id == current_user.id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"cleared": n}
+
+
 @router.post("/read-all", response_model=ReadAllOut)
 def mark_all_read(
     db: Session = Depends(get_db),

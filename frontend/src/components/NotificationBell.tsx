@@ -68,6 +68,7 @@ export default function NotificationBell() {
   const [feed, setFeed] = useState<NotificationFeedItem[]>([])
   const [feedUnread, setFeedUnread] = useState(0)
   const [readingAll, setReadingAll] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
   const refresh = () => {
@@ -219,6 +220,23 @@ export default function NotificationBell() {
     }
   }
 
+  // 清空消息：确认后乐观清掉列表再落库，失败就重拉。只动「消息」段，公告不受影响。
+  // Clear messages: confirm, clear optimistically, persist; refetch on failure.
+  // Only the feed — announcements are untouched.
+  async function handleClearFeed() {
+    if (clearing || !window.confirm(t("notifPanel.clearConfirm"))) return
+    setClearing(true)
+    setFeed([])
+    setFeedUnread(0)
+    try {
+      await notificationApi.clearFeed()
+    } catch {
+      loadFeed()
+    } finally {
+      setClearing(false)
+    }
+  }
+
   // 点开一条通知即已读。不等接口返回、也不处理失败：用户已经在跳页了，
   // 下次拉 feed 时以服务端为准。
   // Following a notification marks it read. Not awaited and failures are ignored:
@@ -276,6 +294,9 @@ export default function NotificationBell() {
             <section aria-label={t("notifPanel.messages")}>
               <div className="nb-sec-head">
                 <span className="cap">{t("notifPanel.messages")}</span>
+                <button type="button" className="nb-readall" onClick={handleClearFeed} disabled={clearing}>
+                  {t("notifPanel.clearMessages")}
+                </button>
               </div>
               {feed.map((n) => (
                 <Link

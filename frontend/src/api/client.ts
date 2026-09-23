@@ -959,6 +959,8 @@ export const notificationApi = {
   feed: (limit = 20) => request<NotificationFeed>(`/notifications/feed?limit=${limit}`),
   markFeedRead: (id: string) =>
     request<{ ok: boolean }>(`/notifications/feed/${encodeURIComponent(id)}/read`, { method: 'POST' }),
+  // 清空本人的站内通知（不动公告）。 / Delete this user's feed rows (announcements untouched).
+  clearFeed: () => request<{ cleared: number }>('/notifications/feed', { method: 'DELETE' }),
   // 一键已读：站内通知与已发布公告一起清。两者在用户眼里是同一个「通知」面板，
   // 所以是一个接口而不是两个。
   // Mark all read across both the feed and published announcements — one endpoint,

@@ -4,6 +4,8 @@
     "unread": "未读",
     "messages": "消息",
     "markAllRead": "全部已读",
+    "clearMessages": "清空",
+    "clearConfirm": "清空全部消息？清空后无法恢复（公告不受影响）。",
     "announcements": "公告",
     "allAnnouncements": "全部公告",
     "noAnnouncements": "暂无公告",
@@ -13,7 +15,8 @@
   "notifFeed": {
     "ticket_reply": "工单有新回复",
     "ticket_new": "有新工单待处理",
-    "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服"
+    "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服",
+    "agent_plan_change": "代理修改了客户会员"
   },
   "nav": {
     "dashboard": "仪表盘",

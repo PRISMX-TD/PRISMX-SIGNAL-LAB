@@ -29,13 +29,9 @@ KIND_TICKET_NEW = "ticket_new"
 # 代理改了某个客户的会员（/agent 下唯一的写端点，见 routers/invite.agent_set_plan）。
 # 收件人只有管理员：这条通知的用途是让"代理动了别人的付费权益"这件事有人看见，
 # 而不是通知被改的那个人。
-# ⚠️ 前端 i18n 还欠两条文案：`notifFeed.agent_plan_change`（en.json / zh.json），
-# 没有的话铃铛面板会把标题渲染成裸 key。text 里已经带了「谁改了谁、改了什么」，
-# 所以缺文案不影响可读性，但补上之前这条通知看着像个 bug。
-# An agent changed a customer's plan; admins only. NOTE: the frontend still needs
-# `notifFeed.agent_plan_change` in en.json and zh.json — without it the bell
-# renders the bare key. The text body already carries who/whom/what, so the row
-# stays readable, but it looks like a bug until the copy lands.
+# 标题文案在前端 i18n 的 `notifFeed.agent_plan_change`；text 里带「谁改了谁、改了什么」。
+# An agent changed a customer's plan; admins only. The title lives in the frontend's
+# `notifFeed.agent_plan_change`; the text body carries who/whom/what.
 KIND_AGENT_PLAN_CHANGE = "agent_plan_change"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再

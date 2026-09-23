@@ -4,6 +4,8 @@
     "unread": "unread",
     "messages": "Messages",
     "markAllRead": "Mark all read",
+    "clearMessages": "Clear",
+    "clearConfirm": "Clear all messages? This can't be undone (announcements are unaffected).",
     "announcements": "Announcements",
     "allAnnouncements": "All announcements",
     "noAnnouncements": "No announcements yet",
@@ -13,7 +15,8 @@
   "notifFeed": {
     "ticket_reply": "New reply on your ticket",
     "ticket_new": "New ticket to handle",
-    "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions."
+    "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions.",
+    "agent_plan_change": "An agent changed a customer's plan"
   },
   "nav": {
     "dashboard": "Dashboard",
