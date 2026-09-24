@@ -2156,7 +2156,7 @@
         {
           "h": "Where your data lives",
           "p": [
-            "The database is hosted on Supabase (PostgreSQL, Singapore region). The backend runs on a cloud server; the frontend is hosted and delivered by Vercel.",
+            "The database is hosted on Supabase (PostgreSQL, Singapore region). The backend runs on a cloud server in Singapore; the frontend is hosted and delivered by Vercel.",
             "All traffic between clients and servers is encrypted in transit over HTTPS/WSS.",
             "Because the Service is distributed across the regions above, your data may be transferred outside your own country and stored and processed there. By using the Service you acknowledge and agree to this."
           ]
