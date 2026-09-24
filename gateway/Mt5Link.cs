@@ -899,6 +899,17 @@ namespace Prismx.Mt5Gateway
             // does not wait for a first tick.
             PreselectSymbols(_cfg.PreselectSymbols, "启动");
 
+            // 查询通道:启动时就连一次,之后由 watchdog 维护。连不上不影响启动,
+            // 查询自动走交易连接。
+            // Query channels: connect once now, then the watchdog maintains them. A
+            // failure never blocks startup; queries fall back to the trading link.
+            if (_cfg.ReadChannels > 0)
+            {
+                _reads = new ReadPool(_cfg);
+                _reads.Maintain();
+                Log.Info("查询通道 {0}/{1} 条已连接", _reads.ConnectedCount, _reads.Count);
+            }
+
             _watchdog = new Thread(WatchdogLoop);
             _watchdog.IsBackground = true;
             _watchdog.Name = "mt5-watchdog";
@@ -1428,6 +1439,9 @@ namespace Prismx.Mt5Gateway
                 if (!_stopping)
                     CheckSelfHeal();
 
+                if (!_stopping && _reads != null)
+                    _reads.Maintain();
+
                 if (_stopping || _connected)
                 {
                     delaySec = 2;
@@ -1560,17 +1574,72 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        //+------------------------------------------------------------------+
+        //| 服务器查询:优先走查询通道(见 ReadChannel.cs),不可用时退回交易连接 |
+        //+------------------------------------------------------------------+
+
+        /// <summary>查询通道池;null 表示没开(read_channels = 0)。
+        /// Query channel pool; null when disabled.</summary>
+        private ReadPool _reads;
+
+        /// <summary>查询通道:配置的条数与当前已连上的条数,供 /health 暴露。
+        /// Configured and connected query channels, for /health.</summary>
+        public int ReadChannelsConfigured
+        {
+            get { return _reads != null ? _reads.Count : 0; }
+        }
+
+        public int ReadChannelsConnected
+        {
+            get { return _reads != null ? _reads.ConnectedCount : 0; }
+        }
+
+        /// <summary>网络/连接/超时类错误:说明这条连接本身出了问题,而不是查询结果。
+        /// Network/connection/timeout class: the link failed, not the query.</summary>
+        private static bool IsLinkError(MTRetCode res)
+        {
+            string code = res.ToString();
+            return code.Contains("NETWORK") || code.Contains("CONNECTION") || code.Contains("TIMEOUT");
+        }
+
         /// <summary>读账号资料 + 资金。返回 null 表示读取失败。</summary>
         public AccountInfo GetAccount(ulong login, out MTRetCode res)
         {
-            lock (_gate)
+            ReadChannel rc = _reads != null ? _reads.Acquire() : null;
+
+            if (rc != null)
+            {
+                try
+                {
+                    AccountInfo r = GetAccountOn(rc.Manager, rc.Gate, login, out res);
+                    if (!IsLinkError(res))
+                        return r;
+                    rc.MarkBroken(res);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("查询通道执行 GetAccount 异常,改走交易连接:{0}", ex.Message);
+                    rc.MarkBroken(MTRetCode.MT_RET_ERR_NETWORK);
+                }
+                finally
+                {
+                    _reads.Release(rc);
+                }
+            }
+
+            return GetAccountOn(_manager, _gate, login, out res);
+        }
+
+        private AccountInfo GetAccountOn(CIMTManagerAPI m, object gate, ulong login, out MTRetCode res)
+        {
+            lock (gate)
             {
                 AccountInfo info = new AccountInfo();
                 info.Login = login;
 
-                using (CIMTUser user = _manager.UserCreate())
+                using (CIMTUser user = m.UserCreate())
                 {
-                    res = _manager.UserRequest(login, user);
+                    res = m.UserRequest(login, user);
                     if (res != MTRetCode.MT_RET_OK)
                         return null;
 
@@ -1580,9 +1649,9 @@ namespace Prismx.Mt5Gateway
                     info.LastPassChange = user.LastPassChange();
                 }
 
-                using (CIMTAccount account = _manager.UserCreateAccount())
+                using (CIMTAccount account = m.UserCreateAccount())
                 {
-                    res = _manager.UserAccountRequest(login, account);
+                    res = m.UserAccountRequest(login, account);
                     if (res != MTRetCode.MT_RET_OK)
                         return null;
 
@@ -1756,11 +1825,38 @@ namespace Prismx.Mt5Gateway
         /// <summary>读持仓。</summary>
         public PositionInfo[] GetPositions(ulong login, out MTRetCode res)
         {
-            lock (_gate)
+            ReadChannel rc = _reads != null ? _reads.Acquire() : null;
+
+            if (rc != null)
             {
-                using (CIMTPositionArray arr = _manager.PositionCreateArray())
+                try
                 {
-                    res = _manager.PositionRequest(login, arr);
+                    PositionInfo[] r = GetPositionsOn(rc.Manager, rc.Gate, login, out res);
+                    if (!IsLinkError(res))
+                        return r;
+                    rc.MarkBroken(res);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("查询通道执行 GetPositions 异常,改走交易连接:{0}", ex.Message);
+                    rc.MarkBroken(MTRetCode.MT_RET_ERR_NETWORK);
+                }
+                finally
+                {
+                    _reads.Release(rc);
+                }
+            }
+
+            return GetPositionsOn(_manager, _gate, login, out res);
+        }
+
+        private PositionInfo[] GetPositionsOn(CIMTManagerAPI m, object gate, ulong login, out MTRetCode res)
+        {
+            lock (gate)
+            {
+                using (CIMTPositionArray arr = m.PositionCreateArray())
+                {
+                    res = m.PositionRequest(login, arr);
 
                     // 账号一笔持仓都没有时,服务器返回 NOTFOUND。
                     // 这是正常状态而非错误,要返回空列表,不能当失败。
@@ -1810,11 +1906,38 @@ namespace Prismx.Mt5Gateway
         /// <summary>读挂单。</summary>
         public OrderInfo[] GetOrders(ulong login, out MTRetCode res)
         {
-            lock (_gate)
+            ReadChannel rc = _reads != null ? _reads.Acquire() : null;
+
+            if (rc != null)
             {
-                using (CIMTOrderArray arr = _manager.OrderCreateArray())
+                try
                 {
-                    res = _manager.OrderRequestOpen(login, arr);
+                    OrderInfo[] r = GetOrdersOn(rc.Manager, rc.Gate, login, out res);
+                    if (!IsLinkError(res))
+                        return r;
+                    rc.MarkBroken(res);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("查询通道执行 GetOrders 异常,改走交易连接:{0}", ex.Message);
+                    rc.MarkBroken(MTRetCode.MT_RET_ERR_NETWORK);
+                }
+                finally
+                {
+                    _reads.Release(rc);
+                }
+            }
+
+            return GetOrdersOn(_manager, _gate, login, out res);
+        }
+
+        private OrderInfo[] GetOrdersOn(CIMTManagerAPI m, object gate, ulong login, out MTRetCode res)
+        {
+            lock (gate)
+            {
+                using (CIMTOrderArray arr = m.OrderCreateArray())
+                {
+                    res = m.OrderRequestOpen(login, arr);
 
                     // 同上:没有挂单时返回 NOTFOUND,属正常状态
                     if (res == MTRetCode.MT_RET_ERR_NOTFOUND)
@@ -1874,11 +1997,38 @@ namespace Prismx.Mt5Gateway
         /// </summary>
         public DealInfo[] GetDeals(ulong login, long fromUnix, long toUnix, out MTRetCode res)
         {
-            lock (_gate)
+            ReadChannel rc = _reads != null ? _reads.Acquire() : null;
+
+            if (rc != null)
             {
-                using (CIMTDealArray arr = _manager.DealCreateArray())
+                try
                 {
-                    res = _manager.DealRequest(login, fromUnix, toUnix, arr);
+                    DealInfo[] r = GetDealsOn(rc.Manager, rc.Gate, login, fromUnix, toUnix, out res);
+                    if (!IsLinkError(res))
+                        return r;
+                    rc.MarkBroken(res);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warn("查询通道执行 GetDeals 异常,改走交易连接:{0}", ex.Message);
+                    rc.MarkBroken(MTRetCode.MT_RET_ERR_NETWORK);
+                }
+                finally
+                {
+                    _reads.Release(rc);
+                }
+            }
+
+            return GetDealsOn(_manager, _gate, login, fromUnix, toUnix, out res);
+        }
+
+        private DealInfo[] GetDealsOn(CIMTManagerAPI m, object gate, ulong login, long fromUnix, long toUnix, out MTRetCode res)
+        {
+            lock (gate)
+            {
+                using (CIMTDealArray arr = m.DealCreateArray())
+                {
+                    res = m.DealRequest(login, fromUnix, toUnix, arr);
 
                     // 区间内没有任何成交时返回 NOTFOUND,属正常状态
                     if (res == MTRetCode.MT_RET_ERR_NOTFOUND)
@@ -4080,6 +4230,12 @@ namespace Prismx.Mt5Gateway
                     _manager.Dispose();
                     _manager = null;
                 }
+            }
+
+            if (_reads != null)
+            {
+                _reads.Dispose();
+                _reads = null;
             }
 
             SMTManagerAPIFactory.Shutdown();

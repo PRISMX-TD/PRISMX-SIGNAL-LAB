@@ -64,6 +64,10 @@ http_threads = 16
 # 一条睡着的线程;到上限后新请求排队等空位。/health 不占名额,永远立即回答。
 http_max_concurrent = 256
 
+# 查询通道条数:另开几条只做查询的连接(同一 manager 账号),持仓/成交/挂单/资金查询
+# 走它们,不再挡住下单。0 = 不开。券商须允许同一 manager 账号多处同时登录。
+read_channels = 2
+
 # 显式解除两条启动检查(allowed_groups 为空、绑全网卡却没配 allowed_ips)。
 # 这两条各自都是最后一道闸,只在临时排障时打开,别长期留着。
 # i_know_what_im_doing = true

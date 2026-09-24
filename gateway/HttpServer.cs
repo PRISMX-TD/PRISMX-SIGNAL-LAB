@@ -352,6 +352,11 @@ namespace Prismx.Mt5Gateway
                     // Self-heal timers; past 180s / 15min the gateway restarts itself.
                     .Field("gateBlockedSec", (uint)_link.GateBlockedSec)
                     .Field("degradedSec", (uint)_link.DegradedSec)
+                    // 查询通道:配了几条、连上几条。连上的少于配置的,查询部分回到了交易连接上。
+                    // Query channels configured / connected; fewer connected means some
+                    // queries are back on the trading link.
+                    .Field("readChannels", (uint)_link.ReadChannelsConfigured)
+                    .Field("readChannelsConnected", (uint)_link.ReadChannelsConnected)
                  .EndObject();
                 // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
                 // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),

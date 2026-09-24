@@ -85,6 +85,14 @@ namespace Prismx.Mt5Gateway
         // hundred cost little. At the cap new requests wait for a slot, not rejected.
         public int HttpMaxConcurrent = 256;
 
+        // 查询通道条数:另开几条只做查询的 Manager 连接(同一个 manager 账号),把持仓/
+        // 成交/挂单/资金这些服务器查询从交易连接上挪走,见 ReadChannel.cs。0 = 不开,
+        // 全部走交易连接(改造前的行为)。券商须允许同一 manager 账号多处同时登录。
+        // Extra query-only Manager connections (same manager account) that take the
+        // server queries off the trading link; 0 = off. The broker must allow the
+        // manager account to be logged in more than once.
+        public int ReadChannels = 2;
+
         public static Config Load(string path)
         {
             if (!File.Exists(path))
@@ -169,6 +177,12 @@ namespace Prismx.Mt5Gateway
                         if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out maxc)
                             && maxc > 0 && maxc <= 2048)
                             cfg.HttpMaxConcurrent = maxc;
+                        break;
+                    case "read_channels":
+                        int rch;
+                        if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out rch)
+                            && rch >= 0 && rch <= 8)
+                            cfg.ReadChannels = rch;
                         break;
                     case "i_know_what_im_doing":
                         cfg.IKnowWhatImDoing = val.Equals("true", StringComparison.OrdinalIgnoreCase)

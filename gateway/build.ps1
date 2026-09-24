@@ -83,7 +83,8 @@ try {
         "Models.cs",
         "Json.cs",
         "Log.cs",
-        "Idempotency.cs"
+        "Idempotency.cs",
+        "ReadChannel.cs"
     )
 
     & $csc /nologo /target:exe /platform:x64 /optimize+ /out:mt5gateway.exe `
