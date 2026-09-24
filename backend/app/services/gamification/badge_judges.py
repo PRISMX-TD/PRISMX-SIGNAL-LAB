@@ -10,9 +10,10 @@ awarding and equipping live in badges.py. Signature is (db, user, ctx) -> bool.
 """
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
+from sqlalchemy import and_, func
 
-from app.models import Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account, Order
+from app.models import (ClosedTrade, Competition, CompetitionParticipant, LeaderboardSnapshot,
+                        MT5Account, Order)
 from .stats import load_trade_data
 
 FOUNDER_DEADLINE = datetime(2027, 1, 1, tzinfo=timezone.utc)
@@ -46,11 +47,29 @@ def _has_real_fill(db, user_id) -> bool:
     trade_mode, so without this filter a user who only ever modified a stop
     or closed a position this platform never opened — on a real account —
     would be judged as having a real trade. Mirrors stats.py's
-    _filled_orders, which only counts ORDER for the same reason.
+    _filled_orders, which only counts opening orders for the same reason.
+
+    挂单触发出来的实盘仓位也算（2026-09-24，与 stats._filled_orders 同步）：挂单行
+    停在 PLACED、看不出触发没有，所以要求它有一条已核验的平仓腿——与
+    stats._drop_untriggered 同一条规则。挂单的仓位号就是 mt5_position（两条通道
+    挂出时都写）。
+    A real position opened by a pending order counts too (2026-09-24, in step
+    with stats._filled_orders). The row stays PLACED either way, so it needs a
+    verified closing leg — the rule stats._drop_untriggered applies. Both channels
+    record a pending order's position id in mt5_position when it is placed.
     """
+    if (db.query(Order.id)
+          .filter(Order.user_id == user_id, Order.status == "FILLED",
+                  Order.action == "ORDER", Order.trade_mode == REAL)
+          .first() is not None):
+        return True
     return (db.query(Order.id)
-              .filter(Order.user_id == user_id, Order.status == "FILLED",
-                      Order.action == "ORDER", Order.trade_mode == REAL)
+              .join(ClosedTrade, and_(ClosedTrade.user_id == Order.user_id,
+                                      ClosedTrade.mt5_login == Order.mt5_login,
+                                      ClosedTrade.position_ticket == Order.mt5_position,
+                                      ClosedTrade.verified.is_(True)))
+              .filter(Order.user_id == user_id, Order.action == "PENDING",
+                      Order.status == "PLACED", Order.trade_mode == REAL)
               .first() is not None)
 
 

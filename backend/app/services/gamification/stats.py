@@ -10,6 +10,7 @@ from app.services.symbol_aliases import symbol_match_set
 # Relative import: __init__ imports this module before periods, so going through
 # the package attribute would hit a partially-initialised package.
 from . import periods
+from app.services.order_payload import OPENED_POSITION
 from app.services.trade_performance import position_id_of
 from app.utils.timeutil import aware
 
@@ -57,7 +58,16 @@ def _now():
 
 
 def _filled_orders(db, user_id, cutoff=None, logins=None, modes=None, before=None):
-    """该用户的已成交开仓单。可选的三个过滤条件都是**下推到 SQL 的筛子**，
+    """该用户的开仓单：已成交的市价单，加上已挂到券商那边的挂单
+    （`order_payload.OPENED_POSITION`，与平仓归属、个人胜率同一条判据）。
+
+    挂单是 2026-09-24 才并进来的。此前这里只认 (ORDER, FILLED)，限价 / 止损单
+    触发出来的仓位整仓平掉了也不算一笔交易——只用挂单的用户「小试牛刀」永远 0/5，
+    后面的笔数、手数、胜率、勋章、榜单全都漏算。挂单行的状态挂出后就停在 PLACED，
+    看不出有没有触发过；没触发的挂单没有平仓腿，走 `_resolve` 的统计自然剔掉，
+    不走 `_resolve` 的（手数、交易日）由 `_drop_untriggered` 剔掉。
+
+    可选的三个过滤条件都是**下推到 SQL 的筛子**，
     不是新语义——调用方原本就在 Python 侧用同样的条件过滤，只是那样要先把这个
     用户全生命周期的订单整张读进内存。
 
@@ -80,10 +90,18 @@ def _filled_orders(db, user_id, cutoff=None, logins=None, modes=None, before=Non
     it — but the lower bound cannot, because positions anchor to their lifetime
     and one opened long before the period still counts when it closes inside it.
     NULL created_at rows are kept so the push-down is row-for-row equivalent.
+
+    Placed pending orders are included since 2026-09-24 (OPENED_POSITION, the
+    same rule closed-leg attribution and personal win rate use): a position a
+    limit/stop order opened used to count as no trade at all, so pending-only
+    users sat at 0/5 on "First Steps" and every later count missed them. A
+    pending row stays PLACED whether or not it ever triggered; untriggered ones
+    have no closing legs, so `_resolve` drops them and `_drop_untriggered` drops
+    them from the counts that don't go through `_resolve` (lots, trading days).
     """
     q = (db.query(Order)
-           .filter(Order.user_id == user_id, Order.action == "ORDER",
-                   Order.status == "FILLED", Order.mt5_ticket.isnot(None)))
+           .filter(Order.user_id == user_id, OPENED_POSITION,
+                   Order.mt5_ticket.isnot(None)))
     if cutoff is not None:
         q = q.filter(Order.created_at >= cutoff)
     if logins is not None:
@@ -128,6 +146,20 @@ def _resolve(orders, legs_map):
     return resolved
 
 
+def _drop_untriggered(orders, legs_map):
+    """去掉没有平仓腿的挂单——看不出它触发过，就不算一笔交易。
+    市价单照旧开仓即算（手数、交易日不等平仓）；挂单要等第一条平仓腿落地才算，
+    还持着没平的那段时间里它的手数晚一步进账，但绝不会把挂了又撤、从未成交的单
+    算成交易。
+    Drop pending orders that have no closing leg: with no sign they ever
+    triggered, they are not trades. Market orders still count from the fill;
+    a triggered pending order starts counting (lots, trading days) once its first
+    leg lands — a little late while still open, but a placed-then-cancelled order
+    is never counted as a trade."""
+    return [o for o in orders
+            if o.action != "PENDING" or legs_map.get((o.mt5_login, position_id_of(o)))]
+
+
 def load_trade_data(db, user_id) -> dict:
     """一次把该用户全部 FILLED 开仓单和对应的 verified 平仓腿读进来。
 
@@ -144,7 +176,8 @@ def load_trade_data(db, user_id) -> dict:
     """
     orders = _filled_orders(db, user_id)
     keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
-    return {"orders": orders, "legs": _legs_by_position(db, user_id, keys)}
+    legs = _legs_by_position(db, user_id, keys)
+    return {"orders": _drop_untriggered(orders, legs), "legs": legs}
 
 
 def _orders_since(orders, cutoff):
@@ -160,6 +193,7 @@ def compute_comprehensive_stats(db, user_id, data: dict | None = None) -> dict:
         orders = _filled_orders(db, user_id, cutoff)
         keys = {(o.mt5_login, position_id_of(o)) for o in orders if position_id_of(o)}
         legs_map = _legs_by_position(db, user_id, keys)
+        orders = _drop_untriggered(orders, legs_map)
     else:
         orders = _orders_since(data["orders"], cutoff)
         legs_map = data["legs"]

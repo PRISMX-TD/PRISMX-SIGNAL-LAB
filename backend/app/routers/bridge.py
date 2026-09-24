@@ -982,12 +982,14 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
         values["mt5_login"] = req.login
 
     # 成交打章：从账号行拷贝 trade_mode 快照（设计 §1.2），失败/拒绝不打章。
-    # 只认 FILLED——FAILED 是「不知道成没成」，打章等于当成交，正是要避免的。
+    # 认 FILLED 与挂出成功的挂单（PLACED，理由见 gamification/stamp.py）——
+    # FAILED 是「不知道成没成」，打章等于当成交，正是要避免的。
     # Stamp the trade_mode snapshot from the account row on a genuine fill
-    # (design §1.2); rejected orders are left unstamped. FILLED only — FAILED
-    # means "we don't know", and stamping it would assert a fill we can't prove.
-    if final_status == "FILLED":
-        from app.services.gamification.stamp import lookup_trade_mode
+    # (design §1.2), or on a placed pending order (see gamification/stamp.py);
+    # rejected orders are left unstamped. Never FAILED — it means "we don't
+    # know", and stamping it would assert a fill we can't prove.
+    from app.services.gamification.stamp import is_stampable, lookup_trade_mode
+    if is_stampable(final_status, order.action):
         tm = lookup_trade_mode(db, user_id, login)
         if tm is not None:
             values["trade_mode"] = tm

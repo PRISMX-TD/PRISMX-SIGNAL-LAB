@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.core.database import SessionLocal
 from app.models import ClosedTrade, MT5Account, Order, User
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 
 from app.services.account_type import SOURCE_SELF, VERIFIED_SOURCES, classify_account_with_source
 from app.services.settings_store import get_account_type_settings
@@ -120,8 +120,15 @@ def backfill_account_trade_modes(db) -> int:
 
 
 def backfill_order_trade_modes(db) -> tuple[int, int]:
+    # 挂出成功的挂单同样补章（stamp.is_stampable）：2026-09-24 之前挂单从不打章，
+    # 存量那批靠这里补上，否则触发过的实盘挂单永远进不了实盘口径。
+    # Placed pending orders are backfilled too (stamp.is_stampable): before
+    # 2026-09-24 they were never stamped, and without one a triggered real pending
+    # order could never count as real.
     orders = (db.query(Order)
-                .filter(Order.status == "FILLED", Order.trade_mode.is_(None),
+                .filter(or_(Order.status == "FILLED",
+                            and_(Order.action == "PENDING", Order.status == "PLACED")),
+                        Order.trade_mode.is_(None),
                         Order.mt5_login.isnot(None)).all())
     acct = {(a.user_id, a.login): a.trade_mode for a in db.query(MT5Account).all()}
     stamped = sentinel = 0
