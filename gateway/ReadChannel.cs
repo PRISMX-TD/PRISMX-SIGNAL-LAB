@@ -78,6 +78,14 @@ namespace Prismx.Mt5Gateway
         {
             _cfg = cfg;
             _id = id;
+
+            // 必须从"现在"起算,不能留默认的 0:Environment.TickCount 在开机约 24.9 天后
+            // 变成负数,TickCount - 0 < 0 会被当成"还没到重试时间",于是永远不去连
+            // ——实盘 VPS 上正是这样,两条通道一次都没尝试,日志里也没有任何报错。
+            // Must start from "now", not 0: TickCount goes negative after ~24.9 days of
+            // uptime, and TickCount - 0 < 0 then reads as "not yet" forever — exactly
+            // what happened on the live VPS, silently.
+            _nextRetryAt = Environment.TickCount;
         }
 
         public bool IsConnected
