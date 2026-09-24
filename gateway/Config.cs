@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PRISMX MT5 Gateway - 配置                                        |
 //|                                                                  |
 //| 配置从 gateway.ini 读取(与 exe 同目录)。凭据不写死在代码里,      |
@@ -75,6 +75,16 @@ namespace Prismx.Mt5Gateway
         // stuck closes queued every endpoint including the unauthenticated /health.
         public int HttpThreads = 16;
 
+        // 同时在处理中的请求上限。HttpThreads 条线程现在只负责 accept,接到请求就交给
+        // 线程池去处理,自己立刻回去接下一个——所以 16 笔在等 dealer 回执的慢单不会再
+        // 把第 17 笔(以及 /health)堵在门外。每笔在途请求大部分时间是在等券商,只占一条
+        // 睡着的线程,几百条的代价很小。到上限后新请求排队等空位,不会被拒绝。
+        // Requests in flight at once. HttpThreads now only accept and hand each request
+        // to the pool, so 16 slow closes waiting on the dealer no longer lock out the
+        // 17th (or /health). An in-flight request mostly sleeps on the broker, so a few
+        // hundred cost little. At the cap new requests wait for a slot, not rejected.
+        public int HttpMaxConcurrent = 256;
+
         public static Config Load(string path)
         {
             if (!File.Exists(path))
@@ -128,8 +138,13 @@ namespace Prismx.Mt5Gateway
                         break;
                     case "dealer_timeout_ms":
                         int ms;
+                        // 上限 2 分钟:幂等缓存把执行超过 5 分钟的条目当成"已中断"收尾,
+                        // dealer 超时比这还长,就会在交易还在跑时放出重复请求。
+                        // Capped at 2 min: the idempotency cache closes out entries older
+                        // than 5 min, so a longer dealer wait would release a duplicate
+                        // while the trade is still running.
                         if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out ms) && ms > 0)
-                            cfg.DealerTimeoutMs = ms;
+                            cfg.DealerTimeoutMs = Math.Min(ms, 120000);
                         break;
                     case "comment_prefix":
                         cfg.CommentPrefix = val;
@@ -148,6 +163,12 @@ namespace Prismx.Mt5Gateway
                         if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out threads)
                             && threads > 0 && threads <= 256)
                             cfg.HttpThreads = threads;
+                        break;
+                    case "http_max_concurrent":
+                        int maxc;
+                        if (int.TryParse(val, NumberStyles.Integer, CultureInfo.InvariantCulture, out maxc)
+                            && maxc > 0 && maxc <= 2048)
+                            cfg.HttpMaxConcurrent = maxc;
                         break;
                     case "i_know_what_im_doing":
                         cfg.IKnowWhatImDoing = val.Equals("true", StringComparison.OrdinalIgnoreCase)

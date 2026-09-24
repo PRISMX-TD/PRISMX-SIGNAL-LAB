@@ -27,6 +27,7 @@ unique, the batch is greppable at ack time, and a client retry is idempotent.
 """
 import logging
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from sqlalchemy.orm import Session
 
@@ -34,6 +35,9 @@ from app.models import MT5Account, Order
 from app.services.gateway_binding import not_removed
 
 logger = logging.getLogger("prismx.close_all")
+
+# 一次"全部平仓"里同时发往网关的平仓笔数上限 / closes sent to the gateway at once per batch
+CLOSE_ALL_PARALLEL = 16
 
 # 子指令 clientOrderId 的前缀与分隔符。前缀让回执侧一眼认出"这是一键平仓的
 # 子指令"（与自动仓管的 AUTO_PREFIX 同一个套路）；分隔符选 `#` 而不是 `_`，
@@ -235,28 +239,50 @@ def execute_gateway_batch(user_id: str, batch: str, order_ids: list[str]) -> Non
     from app.services.connection_manager import manager
     from app.services.gateway_client import run_on_main_loop
 
-    db = SessionLocal()
-    try:
-        orders = db.query(Order).filter(Order.id.in_(order_ids)).all() if order_ids else []
-        for order in orders:
-            if order.status != "PENDING":
-                continue
+    def _one(order_id: str) -> None:
+        # 每笔一个自己的会话：Session 不能跨线程共用。
+        # One session per close — a Session must not be shared across threads.
+        db = SessionLocal()
+        try:
+            order = db.query(Order).filter(Order.id == order_id).first()
+            if order is None or order.status != "PENDING":
+                return
             try:
                 payload = gateway_execute.try_gateway_execute(db, order)
             except Exception:
                 logger.exception(
                     "close_all: gateway 执行失败 (user=%s cmd=%s)", user_id, order.client_order_id
                 )
-                continue
+                return
             if payload is None:
-                continue
+                return
             try:
                 run_on_main_loop(manager.push_to_client(user_id, payload), timeout=5.0)
             except Exception:
                 logger.warning("close_all: ORDER_UPDATE 推送失败 (cmd=%s)", order.client_order_id)
-        push_summary_if_done(db, user_id, batch)
+        finally:
+            db.close()
+
+    # 并行平仓：以前逐笔串行，十笔仓位的最后一笔要等前面九笔的 dealer 回执都回来
+    # 才发出去——行情快的时候这几秒就是滑点。各笔互不相干（不同仓位、各自的
+    # clientOrderId），网关那边本来就能同时处理几百笔。
+    # Closes run in parallel: serially, the tenth close waited for nine dealer
+    # round-trips first, and in a fast market those seconds are slippage. The
+    # closes are independent (own position, own clientOrderId) and the gateway
+    # handles hundreds at once.
+    try:
+        if order_ids:
+            workers = min(CLOSE_ALL_PARALLEL, len(order_ids))
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="close-all") as pool:
+                list(pool.map(_one, order_ids))
     except Exception:
         logger.exception("close_all: 批次执行异常 (user=%s batch=%s)", user_id, batch)
+
+    db = SessionLocal()
+    try:
+        push_summary_if_done(db, user_id, batch)
+    except Exception:
+        logger.exception("close_all: 汇总推送异常 (user=%s batch=%s)", user_id, batch)
     finally:
         db.close()
 

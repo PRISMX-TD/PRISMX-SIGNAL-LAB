@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -79,6 +79,14 @@ namespace Prismx.Mt5Gateway
         /// Persistence file; null means memory-only (tests and CLI tools).</summary>
         private readonly string _storePath;
         private bool _storeBroken;
+
+        /// <summary>常开的追加句柄。以前每笔交易 File.AppendAllText 一次=开文件、写、
+        /// 关文件,而这是在 _lock 里做的,高峰时所有交易都要排这个队。整理文件前关掉,
+        /// 下次追加再开。持 _lock 访问。
+        /// Kept-open append handle. AppendAllText opened and closed the file per trade
+        /// under _lock, so a burst queued on it. Closed before a rewrite, reopened on
+        /// the next append. Accessed under _lock.</summary>
+        private StreamWriter _writer;
 
         /// <summary>
         /// 重启时复原出来的"可能已在券商侧执行、结果未知"的回复。
@@ -314,16 +322,31 @@ namespace Prismx.Mt5Gateway
 
             try
             {
-                string dir = Path.GetDirectoryName(_storePath);
+                if (_writer == null)
+                {
+                    string dir = Path.GetDirectoryName(_storePath);
 
-                if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                    Directory.CreateDirectory(dir);
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                        Directory.CreateDirectory(dir);
 
-                File.AppendAllText(_storePath, line + Environment.NewLine, Encoding.UTF8);
+                    FileStream fs = new FileStream(_storePath, FileMode.Append, FileAccess.Write,
+                        FileShare.ReadWrite | FileShare.Delete);
+                    _writer = new StreamWriter(fs, new UTF8Encoding(false));
+                }
+
+                // Flush 把这一行交给操作系统,与原来 AppendAllText 关文件时的保证相同:
+                // 进程被硬杀也不会丢(操作系统还在)。
+                // Flush hands the line to the OS — the same guarantee AppendAllText gave
+                // on close, which is what survives a process kill.
+                _writer.Write(line);
+                _writer.Write(Environment.NewLine);
+                _writer.Flush();
                 _storeBroken = false;
             }
             catch (Exception ex)
             {
+                CloseWriterLocked();
+
                 // 磁盘满/权限问题不该挡住下单,但必须吵一次:这时候幂等保护退化回
                 // 了"只在内存里",也就是重启后会丢。
                 // A broken store must not block trading, but it does mean the
@@ -334,6 +357,17 @@ namespace Prismx.Mt5Gateway
                     Log.Error("幂等缓存写盘失败,重启后将无法识别重复请求:{0}", ex.Message);
                 }
             }
+        }
+
+        private void CloseWriterLocked()
+        {
+            if (_writer == null)
+                return;
+
+            try { _writer.Dispose(); }
+            catch { }
+
+            _writer = null;
         }
 
         /// <summary>把当前表整个写回文件(去掉已过期的行)。调用方持 _lock。
@@ -359,13 +393,21 @@ namespace Prismx.Mt5Gateway
 
                 // 先写临时文件再替换:整理过程中被硬杀时,原文件仍然是完整的那一份。
                 // Temp file then replace, so a kill mid-rewrite leaves the original intact.
+                CloseWriterLocked();
+
                 string tmp = _storePath + ".tmp";
                 File.WriteAllText(tmp, sb.ToString(), Encoding.UTF8);
 
+                // File.Replace 是一步完成的替换。原来先删再移:两步之间被硬杀,或者 Move
+                // 失败(杀毒软件、索引服务正开着旧文件),就会一个文件都不剩,重启后过去
+                // 24 小时的防重记录全丢。
+                // File.Replace swaps in one step. Delete-then-move could leave no file at
+                // all if killed in between or if Move failed (antivirus holding the old
+                // file), losing 24h of duplicate protection on the next restart.
                 if (File.Exists(_storePath))
-                    File.Delete(_storePath);
-
-                File.Move(tmp, _storePath);
+                    File.Replace(tmp, _storePath, null);
+                else
+                    File.Move(tmp, _storePath);
             }
             catch (Exception ex)
             {

@@ -106,3 +106,21 @@ def test_probe_exception_is_treated_as_failure_not_crash(monkeypatch):
 
     monkeypatch.setattr(gc, "run_on_main_loop", boom)
     assert gc.is_gateway_online() is False
+
+
+def test_connected_without_dealer_channel_is_not_online(monkeypatch):
+    """连着但 dealer 通道没起来：查得到持仓、下不了单，不能显示在线。
+    Connected but no dealer channel can't trade, so it must not read as online."""
+    clock = _Clock()
+    _reset(monkeypatch, clock)
+    _probe(monkeypatch, [{"ok": True, "mt5Connected": True, "dealerActive": False}])
+    assert gc.is_gateway_online() is False
+
+
+def test_older_gateway_without_dealer_field_still_online(monkeypatch):
+    """旧网关不报 dealerActive，缺省按可用，别把它们全判离线。
+    Older gateways omit dealerActive; default to usable."""
+    clock = _Clock()
+    _reset(monkeypatch, clock)
+    _probe(monkeypatch, [{"ok": True, "mt5Connected": True}])
+    assert gc.is_gateway_online() is True

@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PRISMX MT5 Gateway - HTTP 服务层                                 |
 //|                                                                  |
 //| 对外提供 REST 接口给 FastAPI 后端调用。                          |
@@ -12,6 +12,7 @@
 //| 开到公网 —— 这个 token 等于全体客户的下单权限。                   |
 //+------------------------------------------------------------------+
 using System;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -72,6 +73,20 @@ namespace Prismx.Mt5Gateway
         private void ExecuteIdempotent(HttpListenerContext ctx, ulong login, string action,
             string clientOrderId, Func<TradeResult> run)
         {
+            // 整笔耗时(含等锁、取价、dealer 回执、成交确认),每笔一行日志,用来看
+            // 高峰时到底慢在网关里还是慢在券商那边(dealer 那一段另有 dealerMs)。
+            // Whole-trade wall time, one line per trade; the dealer leg is logged
+            // separately as dealerMs, so the rest is time spent inside the gateway.
+            Func<TradeResult> timedRun = run;
+            run = () =>
+            {
+                Stopwatch sw = Stopwatch.StartNew();
+                TradeResult tr = timedRun();
+                Log.Info("{0} 耗时 {1} 毫秒 login={2} -> {3} {4}", action, sw.ElapsedMilliseconds,
+                    login, tr != null && tr.Ok ? "成功" : "失败", tr != null ? tr.Retcode : "");
+                return tr;
+            };
+
             if (clientOrderId.Length == 0)
             {
                 WriteTradeResult(ctx, run(), false);
@@ -117,19 +132,37 @@ namespace Prismx.Mt5Gateway
             WriteTradeResult(ctx, r, false);
         }
 
+        /// <summary>在途请求的名额。/health 不占名额。
+        /// Slots for in-flight requests; /health never takes one.</summary>
+        private SemaphoreSlim _slots;
+
         public void Start()
         {
-            _listener.Start();
-            Log.Info("HTTP 服务已启动:{0}", _cfg.ListenPrefix);
+            _slots = new SemaphoreSlim(_cfg.HttpMaxConcurrent, _cfg.HttpMaxConcurrent);
 
-            // 处理线程数见 Config.HttpThreads:每个线程处理完一个请求才回去 accept,
-            // 所以这个数就是并发上限,也是「几笔卡住的慢单能把 /health 一起堵死」的门槛。
-            // Each thread serves one request to completion, so this is the ceiling.
+            // 线程池默认按每秒一两条的速度慢慢加线程。在途请求大多是在睡着等 dealer
+            // 回执,一波行情同时进来几十笔时,慢速扩容本身就会变成排队。所以把下限直接
+            // 抬到并发上限:这些线程平时不存在,要用时立刻有。
+            // The pool normally grows by a thread or two per second; with most requests
+            // asleep on the dealer, a burst would queue on that ramp. Raise the floor to
+            // the cap so threads are there the moment they're needed.
+            int minWorker, minIo;
+            ThreadPool.GetMinThreads(out minWorker, out minIo);
+            ThreadPool.SetMinThreads(Math.Max(minWorker, _cfg.HttpMaxConcurrent + _cfg.HttpThreads), minIo);
+
+            _listener.Start();
+            Log.Info("HTTP 服务已启动:{0}(接收线程 {1},并发上限 {2})",
+                _cfg.ListenPrefix, _cfg.HttpThreads, _cfg.HttpMaxConcurrent);
+
+            // 这些线程只 accept:接到请求就交给线程池,自己马上回去接下一个。以前每条线程
+            // 要把一个请求处理完(最坏等 dealer 60 秒)才回来,线程数就是并发上限。
+            // These threads only accept and hand off; they used to serve each request to
+            // completion (up to the 60s dealer wait), which made their count the ceiling.
             for (int i = 0; i < _cfg.HttpThreads; i++)
             {
                 Thread t = new Thread(AcceptLoop);
                 t.IsBackground = true;
-                t.Name = "http-" + i;
+                t.Name = "http-accept-" + i;
                 t.Start();
             }
         }
@@ -168,22 +201,111 @@ namespace Prismx.Mt5Gateway
                     continue;
                 }
 
+                // 接收线程上的一切都要兜住:这是普通线程,异常漏出去就是整个进程退出,
+                // 而这里还在鉴权之前——一个畸形请求就能把网关打挂。
+                // Everything on the accept thread is guarded: it's a plain thread, so an
+                // escaping exception ends the process, and this runs before auth.
                 try
                 {
-                    Handle(ctx);
+                    // /health 就地回答,不占名额也不进线程池:网关再忙,监控也要能立刻
+                    // 得到答复,否则会被误判成失联而去重启。
+                    // /health is answered inline, outside the slots and the pool, so a
+                    // busy gateway never looks dead to monitoring.
+                    if (IsHealth(ctx))
+                    {
+                        Serve(ctx);
+                        continue;
+                    }
+
+                    // 接收线程从不等名额,接到就派出去、马上回去接下一个。等名额的是
+                    // 派出去的那个工作项——否则名额满时接收线程全堵在这里,连 /health
+                    // 都没人去接。
+                    // The acceptor never waits for a slot; the work item does. Otherwise a
+                    // full house parks every acceptor here and nobody picks up /health.
+                    ThreadPool.QueueUserWorkItem(ServeQueued, ctx);
                 }
                 catch (Exception ex)
                 {
-                    Log.Error("处理请求异常:{0}", ex.Message);
+                    Log.Error("接收后处理异常:{0}", ex.Message);
 
-                    try
-                    {
-                        WriteError(ctx, 500, "internal_error", ex.Message);
-                    }
-                    catch
-                    {
-                        // 连接可能已断,忽略
-                    }
+                    try { ctx.Response.Abort(); }
+                    catch { }
+                }
+            }
+        }
+
+        /// <summary>排队等名额的上限。到点还没轮到就回 503,让后端按"未执行"处理重试,
+        /// 而不是无限期挂着。此时请求还没碰 MT5,回 503 是安全的。
+        /// How long a queued request waits for a slot before a 503. Nothing has touched
+        /// MT5 yet, so the 503 is safe.</summary>
+        private const int SlotWaitMs = 30000;
+
+        private static bool IsLiveReadPath(string path)
+        {
+            switch (path)
+            {
+                case "/verify":
+                case "/account":
+                case "/positions":
+                case "/orders":
+                case "/deals":
+                case "/quote":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsHealth(HttpListenerContext ctx)
+        {
+            Uri url = ctx.Request.Url;
+            if (url == null)
+                return false;
+
+            string path = (url.AbsolutePath ?? "").TrimEnd('/');
+            return path.Equals("/health", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void ServeQueued(object state)
+        {
+            HttpListenerContext ctx = (HttpListenerContext)state;
+
+            if (!_slots.Wait(SlotWaitMs))
+            {
+                Log.Warn("并发已满 {0} 秒仍未轮到,回 503", SlotWaitMs / 1000);
+
+                try { WriteError(ctx, 503, "busy", "网关繁忙,本次请求未执行,请稍后重试"); }
+                catch { }
+                return;
+            }
+
+            try
+            {
+                Serve(ctx);
+            }
+            finally
+            {
+                _slots.Release();
+            }
+        }
+
+        private void Serve(HttpListenerContext ctx)
+        {
+            try
+            {
+                Handle(ctx);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("处理请求异常:{0}", ex.Message);
+
+                try
+                {
+                    WriteError(ctx, 500, "internal_error", ex.Message);
+                }
+                catch
+                {
+                    // 连接可能已断,忽略
                 }
             }
         }
@@ -225,6 +347,11 @@ namespace Prismx.Mt5Gateway
                     // snapshot cannot track partial closes / SL·TP edits and the
                     // server-reread fallback in ClosePosition is what keeps closes working.
                     .Field("positionUpdateEvents", (uint)_link.PositionUpdateEvents)
+                    // 自愈用的两个计时:全局锁多久没拿到、连续多久不能交易。到阈值
+                    // (180 秒 / 15 分钟)网关会自己退出重启,见 Mt5Link.CheckSelfHeal。
+                    // Self-heal timers; past 180s / 15min the gateway restarts itself.
+                    .Field("gateBlockedSec", (uint)_link.GateBlockedSec)
+                    .Field("degradedSec", (uint)_link.DegradedSec)
                  .EndObject();
                 // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
                 // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),
@@ -272,6 +399,21 @@ namespace Prismx.Mt5Gateway
 
                 WriteError(ctx, 413, "payload_too_large",
                     "请求体超过 " + MaxRequestBodyBytes + " 字节上限");
+                return;
+            }
+
+            // 断线时读接口不再拿本地缓存冒充实时数据。持仓/资金/挂单/成交在断线后
+            // 仍能从 pump 缓存读出来,原来照样回 ok,后端就把断线前的旧余额旧持仓当
+            // 成最新的推给用户。现在回 503:后端对读失败本来就是"保留上一次、不覆盖"。
+            // 事件队列(/position-events、/deal-events)不在此列,那是取走已收到的事件。
+            // While disconnected, reads stop passing the local cache off as live data.
+            // The pump cache still answers after a drop, and used to return ok, so the
+            // backend pushed pre-drop balances and positions as current. 503 instead —
+            // the backend already keeps its last snapshot on a failed read. The event
+            // queues are exempt: they hand over events already received.
+            if (!_link.IsConnected && IsLiveReadPath(path))
+            {
+                WriteError(ctx, 503, "mt5_disconnected", "与 MT5 的连接已断开,数据暂不可用");
                 return;
             }
 
@@ -1128,11 +1270,26 @@ namespace Prismx.Mt5Gateway
                 // 上限为止:上面那次 ContentLength64 检查挡不住撒谎的头。
                 // Even with a small (or absent, on chunked transfers) Content-Length,
                 // read no more than the cap: that header can lie.
-                char[] buf = new char[MaxRequestBodyBytes + 1];
+                //
+                // 缓冲区从小开始、不够再翻倍。以前每个请求一上来就分配 64K 字符(128KB,
+                // 落在大对象堆上),而真实请求只有几百字节——几百笔并发时就是频繁的完整
+                // GC 停顿,所有请求一起卡一下。
+                // Start small and double as needed. Each request used to allocate 64K
+                // chars (128KB, on the large object heap) for a few hundred bytes, which
+                // under hundreds of concurrent requests meant frequent full-GC pauses.
+                char[] buf = new char[1024];
                 int total = 0;
 
-                while (total < buf.Length)
+                while (true)
                 {
+                    if (total == buf.Length)
+                    {
+                        if (buf.Length > MaxRequestBodyBytes)
+                            break;
+
+                        Array.Resize(ref buf, Math.Min(buf.Length * 2, MaxRequestBodyBytes + 1));
+                    }
+
                     int n = reader.Read(buf, total, buf.Length - total);
 
                     if (n <= 0)
@@ -1175,6 +1332,29 @@ namespace Prismx.Mt5Gateway
         public void Dispose()
         {
             _stopping = true;
+
+            // 等在途请求做完再关。紧接着 Program 会释放 Mt5Link(销毁 SDK 对象),还在
+            // 跑的请求若这时调进 SDK,就是访问已释放的原生对象——catch 不住的崩溃。
+            // 把名额全部收回来就说明没有在途请求了;最多等一次 dealer 超时再加余量。
+            // Drain before closing: Program disposes Mt5Link next, and a request still
+            // calling into the SDK then touches freed native objects — an uncatchable
+            // crash. Holding every slot means nothing is in flight.
+            if (_slots != null)
+            {
+                int deadline = unchecked(Environment.TickCount + _cfg.DealerTimeoutMs + 10000);
+                int drained = 0;
+
+                while (drained < _cfg.HttpMaxConcurrent)
+                {
+                    int left = unchecked(deadline - Environment.TickCount);
+                    if (left <= 0 || !_slots.Wait(left))
+                        break;
+                    drained++;
+                }
+
+                if (drained < _cfg.HttpMaxConcurrent)
+                    Log.Warn("关闭时仍有 {0} 个请求未完成", _cfg.HttpMaxConcurrent - drained);
+            }
 
             try
             {

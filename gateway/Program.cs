@@ -26,6 +26,16 @@ namespace Prismx.Mt5Gateway
 
             Log.Init(baseDir);
 
+            // 进程级兜底:哪条线程上漏出未处理异常,至少在日志里留下原因——以前崩了就是
+            // 无声无息,只能从"计划任务又把它拉起来了"倒推。
+            // Last-chance log for an unhandled exception on any thread; crashes used to
+            // leave no trace at all.
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                try { Log.Error("未处理异常,进程即将退出:{0}", e.ExceptionObject); }
+                catch { }
+            };
+
             string mode = args.Length > 0 ? args[0].ToLowerInvariant() : "serve";
 
             if (mode == "-h" || mode == "--help" || mode == "help")

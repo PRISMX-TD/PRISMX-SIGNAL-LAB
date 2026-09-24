@@ -84,6 +84,29 @@ namespace Prismx.Mt5Gateway
 
         private bool _abandoned;
         private bool _waitReleased;
+        private bool _answered;
+        private bool _linkDropped;
+
+        /// <summary>连接断了、回执不会再来:叫醒等待方。回执已经到了的不受影响。
+        /// The link died and no answer will come: wake the waiter. An answer that
+        /// already arrived wins.</summary>
+        public void CancelLinkDropped()
+        {
+            lock (_lock)
+            {
+                if (_answered || _abandoned || _waitReleased)
+                    return;
+
+                _linkDropped = true;
+                _done.Set();
+            }
+        }
+
+        /// <summary>等待是被断线叫醒的,而不是等到了回执。/ Woken by a drop, not an answer.</summary>
+        public bool LinkDropped
+        {
+            get { lock (_lock) { return _linkDropped && !_answered; } }
+        }
 
         public override void OnDealerAnswer(CIMTRequest request)
         {
@@ -105,6 +128,13 @@ namespace Prismx.Mt5Gateway
                         _done.Set();
                     return;
                 }
+
+                // 已经按断线叫醒过等待方,这份迟到的回执没人读了。
+                // The waiter was already woken by a drop; nobody reads a late answer.
+                if (_linkDropped)
+                    return;
+
+                _answered = true;
 
                 try
                 {
@@ -143,6 +173,9 @@ namespace Prismx.Mt5Gateway
 
             lock (_lock)
             {
+                if (_linkDropped && !_answered)
+                    return MTRetCode.MT_RET_REQUEST_TIMEOUT;
+
                 if (_assign != MTRetCode.MT_RET_OK)
                     return _assign;
 
@@ -161,16 +194,28 @@ namespace Prismx.Mt5Gateway
             _link = link;
         }
 
+        // 这几个回调都是原生层调进来的:异常若从这里漏回原生代码,整个进程直接退出,
+        // 所有在途交易一起中断。所以每个回调都整段包住,最多丢一条日志。
+        // Called from native code: an exception escaping here ends the process and every
+        // in-flight trade with it, so each callback is wrapped whole.
         public override void OnConnect()
         {
-            Log.Info("MT5 连接已建立");
-            _link.MarkConnected(true);
+            try
+            {
+                Log.Info("MT5 连接已建立");
+                _link.MarkConnected(true);
+            }
+            catch { }
         }
 
         public override void OnDisconnect()
         {
-            Log.Warn("MT5 连接断开,将自动重连");
-            _link.MarkConnected(false);
+            try
+            {
+                Log.Warn("MT5 连接断开,将自动重连");
+                _link.MarkConnected(false);
+            }
+            catch { }
         }
     }
 
@@ -198,16 +243,26 @@ namespace Prismx.Mt5Gateway
         private const int MaxQueueSize = 10000;
         private int _queueSize = 0;
 
+        // 原生层回调:整段包住,异常绝不能漏回原生代码(见 ManagerSink)。
+        // Native callbacks: wrapped whole, nothing may escape into native code.
         public override void OnPositionAdd(CIMTPosition p)
         {
-            if (p == null) return;
-            Enqueue(p.Login(), p.Position(), "add");
+            try
+            {
+                if (p == null) return;
+                Enqueue(p.Login(), p.Position(), "add");
+            }
+            catch { }
         }
 
         public override void OnPositionDelete(CIMTPosition p)
         {
-            if (p == null) return;
-            Enqueue(p.Login(), p.Position(), "delete");
+            try
+            {
+                if (p == null) return;
+                Enqueue(p.Login(), p.Position(), "delete");
+            }
+            catch { }
         }
 
         // UPDATE 不入队:探针显示券商不推浮盈变化,只推结构变化。但要**数一数**:
@@ -351,13 +406,22 @@ namespace Prismx.Mt5Gateway
         private readonly Dictionary<ulong, FillInfo> _fillsByDeal = new Dictionary<ulong, FillInfo>();
         private readonly Dictionary<ulong, FillInfo> _fillsByOrder = new Dictionary<ulong, FillInfo>();
         private readonly Queue<ulong> _fillArrival = new Queue<ulong>();
-        private const int MaxFills = 512;
+        // 这是整台服务器所有账号的成交,不只是我们的。512 在几百笔同时在途、别的账号
+        // 也在成交时可能被挤掉,等的那一方只好退回服务器反查(慢、还要进 _gate)。
+        // Every account's deals on the server, not just ours; 512 could evict a fill
+        // before its waiter looked once hundreds of trades are in flight.
+        private const int MaxFills = 4096;
 
         public override void OnDealAdd(CIMTDeal d)
         {
-            if (d == null) return;
-            Enqueue(d.Login(), d.Deal(), d.PositionID());
-            RememberFill(d);
+            // 原生层回调:整段包住(见 ManagerSink)。/ native callback, wrapped whole
+            try
+            {
+                if (d == null) return;
+                Enqueue(d.Login(), d.Deal(), d.PositionID());
+                RememberFill(d);
+            }
+            catch { }
         }
 
         // 成交是既成事实,改写/删除极少见,交给兜底扫描纠正即可。
@@ -720,6 +784,20 @@ namespace Prismx.Mt5Gateway
                 _posSubscribed = false;
                 _dealSubscribed = false;
                 _needResubscribe = true;
+
+                // dealer 通道也随连接一起没了。以前这个标志断线后仍是 true,SDK 自己重连
+                // 回来时没人重开 dealer,下单全部白等 60 秒超时,/health 还显示 dealer 正常。
+                // The dealer channel dies with the connection. This used to stay true, so
+                // after an SDK self-reconnect nobody restarted it and every order sat out
+                // the 60s timeout while /health still said dealerActive.
+                _dealerActive = false;
+
+                // 正在等回执的请求一个也等不到了(旧会话上的回执不会再来)。立刻叫醒它们,
+                // 按"结果未知"回给后端,而不是每笔都干等满 60 秒。
+                // Requests waiting for an answer will never get one on the dead session.
+                // Wake them now as "outcome unknown" instead of each waiting 60s.
+                foreach (DealerSink s in _liveSinks.Keys)
+                    s.CancelLinkDropped();
             }
 
             _connected = value;
@@ -728,6 +806,11 @@ namespace Prismx.Mt5Gateway
         /// <summary>连接翻转过,订阅需要重建。由 watchdog 在"已连接"分支里消费。
         /// Set on any disconnect; consumed by the watchdog's connected branch.</summary>
         private volatile bool _needResubscribe;
+
+        /// <summary>正在等回执的 dealer 请求。断线时逐个叫醒。
+        /// Dealer requests awaiting an answer; woken on disconnect.</summary>
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<DealerSink, byte> _liveSinks =
+            new System.Collections.Concurrent.ConcurrentDictionary<DealerSink, byte>();
 
         //+------------------------------------------------------------------+
         //| 启动 dealer 通道,记录结果。返回是否成功。                        |
@@ -1128,7 +1211,32 @@ namespace Prismx.Mt5Gateway
             {
                 lock (_gate)
                 {
-                    return _manager.SymbolTotal() > 0;
+                    if (_manager.SymbolTotal() <= 0)
+                        return false;
+
+                    // 品种总数读的是本地 pump 缓存:隧道或券商静默断开时缓存还在,只看它
+                    // 永远判不出半开。再发一个必须到服务器走一趟的查询(查 manager 自己的
+                    // 用户记录)。只有网络/连接/超时类错误才算死——查不到、没权限之类的
+                    // 业务错误恰恰说明服务器在回话。
+                    // SymbolTotal reads the local pump cache, which survives a silent drop,
+                    // so it alone can never see a half-open link. Add a query that must
+                    // round-trip to the server. Only network/connection/timeout errors
+                    // count as dead — a business error (not found, no rights) means the
+                    // server answered.
+                    using (CIMTUser u = _manager.UserCreate())
+                    {
+                        MTRetCode r = _manager.UserRequest(_cfg.ManagerLogin, u);
+                        string code = r.ToString();
+
+                        if (code.Contains("NETWORK") || code.Contains("CONNECTION") ||
+                            code.Contains("TIMEOUT"))
+                        {
+                            Log.Warn("存活探测:服务器往返失败 {0}", r);
+                            return false;
+                        }
+                    }
+
+                    return true;
                 }
             }
             catch (Exception ex)
@@ -1138,8 +1246,173 @@ namespace Prismx.Mt5Gateway
             }
         }
 
-        /// <summary>断线重连。指数退避,最多 30 秒一次。</summary>
+        /// <summary>
+        /// 连接恢复后要做的全部事情:清缓存、重选品种、重开 dealer、重建订阅。
+        /// 两条恢复路径共用这一处——watchdog 自己重连,以及 SDK 自己断了又连上。
+        /// 以前后者只补了订阅,dealer 没重开、缓存没清,于是"连着但下不了单"。
+        /// Everything a restored link needs. Shared by both recovery paths — the
+        /// watchdog's own reconnect and an SDK self-reconnect; the latter used to
+        /// only resubscribe, leaving the dealer down and the caches stale.
+        /// </summary>
+        private void OnLinkRestored(string reason)
+        {
+            // 放在最前面:恢复过程中若又断一次,MarkConnected 会重新立起这个标志,
+            // 下一圈 watchdog 就会再做一遍,而不是被末尾的清零吞掉。
+            // Cleared first, so a drop during the restore re-raises it for the next pass.
+            _needResubscribe = false;
+
+            // 重连后 dealer 通道要重开,否则下单没有回执。
+            // Selected 列表是连接级状态,断线即失效,缓存要清掉重建。
+            // 手数限制与账号可交易性缓存同样清空:断线期间券商可能改过
+            // 品种配置或账号分组,拿旧值校验会放过本该拒绝的请求。
+            // Also clear the limits and tradability caches: the broker may
+            // have changed symbol config or account groups while we were
+            // down, and stale values would pass checks that should fail.
+            List<string> reselect;
+            lock (_gate)
+            {
+                _selected.Clear();
+                _limitsCache.Clear();
+                _tradableCache.Clear();
+                _groupCache.Clear();
+                _symbolCache.Clear();
+                _symbolNames = null;   // 品种名快照同样重建 / rebuild the name snapshot too
+                reselect = new List<string>(_everSelected);
+            }
+
+            // 断线前交易过的品种 + 配置点名的品种,整批重新选上。否则重连后每个
+            // 品种的第一笔单都要多等一次首个 tick。
+            // Re-select everything traded before the drop plus the configured
+            // list; otherwise the first order per symbol after a reconnect waits
+            // for a first tick again.
+            reselect.AddRange(_cfg.PreselectSymbols);
+            PreselectSymbols(reselect, reason);
+
+            // 重连后重开 dealer 通道。返回码此前被直接丢弃——它一旦失败,
+            // 之后所有下单都收不到成交回执,而日志里一个字都没有,只能靠
+            // 用户报"单子下不出去"才发现。现在失败会记 ERROR 并置
+            // dealerActive=false,上面的分支每 10 秒重试直到恢复。
+            // The return code used to be discarded here: if it failed, every
+            // subsequent order silently got no confirmation with nothing in the
+            // log. Now a failure is logged and retried until it recovers.
+            RestartDealer(reason);
+
+            // 持仓与成交订阅都要重建:断线时服务器已清掉我们的订阅状态
+            // Both subscriptions must be rebuilt: the server dropped them on disconnect
+            _posSubscribed = false;
+            SubscribePositions();
+            _dealSubscribed = false;
+            SubscribeDeals();
+        }
+
+        /// <summary>重开 dealer 通道:先停(忽略结果)再启。SDK 自己重连时旧通道是否还
+        /// 算"已启动"说不准,直接再 Start 可能被拒,先 Stop 最稳。
+        /// Stop (result ignored) then start: after an SDK self-reconnect it's unclear
+        /// whether the old channel still counts as started, so a bare Start may fail.</summary>
+        private void RestartDealer(string reason)
+        {
+            lock (_gate)
+            {
+                try { _manager.DealerStop(); }
+                catch { }
+            }
+
+            TryStartDealer(reason);
+        }
+
+        /// <summary>
+        /// watchdog 线程入口。循环体里任何一处 SDK 调用抛出异常,在后台线程上都会直接
+        /// 结束整个进程(在途交易全部中断,要等计划任务 2 分钟后拉起)。这里兜住、记一条、
+        /// 歇 5 秒重新进入循环。
+        /// Watchdog entry. An exception from any SDK call in the loop would end the whole
+        /// process from this background thread; catch it, log, pause and re-enter.
+        /// </summary>
         private void WatchdogLoop()
+        {
+            while (!_stopping)
+            {
+                try
+                {
+                    WatchdogLoopCore();
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    try { Log.Error("watchdog 异常,5 秒后继续:{0}", ex); }
+                    catch { }
+                    Thread.Sleep(5000);
+                }
+            }
+        }
+
+        //+------------------------------------------------------------------+
+        //| 自愈:活着但卡死时自己退出,由计划任务在 2 分钟内拉起新进程       |
+        //+------------------------------------------------------------------+
+
+        // 计划任务只会拉起"已经没了"的进程;活着却卡死的(全局锁被一次挂住的 SDK 调用
+        // 攥着、或者长时间连不上/下不了单)它看不出来,只能等人工重启。这两种情况都由
+        // watchdog 自己判,到阈值就记一条日志并退出进程。在途请求的幂等记录已落盘,
+        // 重启后按"结果未知"回放,不会重复执行。
+        // The scheduled task only revives a process that is gone; one that's alive but
+        // wedged (the global lock held by a hung SDK call, or unable to trade for a
+        // long stretch) needed a manual restart. The watchdog now exits in both cases.
+        // In-flight requests are on disk in the idempotency store and replay as
+        // "outcome unknown" after the restart — never executed twice.
+
+        /// <summary>全局锁连续这么久拿不到,判定为卡死。/ Global lock unobtainable this long = wedged.</summary>
+        private const int GateStuckExitSec = 180;
+
+        /// <summary>连续这么久"没连上或 dealer 不可用",重启进程试试。券商真挂了时每 15 分钟
+        /// 重启一次也无害。/ This long unable to trade: try a fresh process.</summary>
+        private const int DegradedExitSec = 15 * 60;
+
+        private int _gateFreeAt = Environment.TickCount;
+        private int _healthyAt = Environment.TickCount;
+
+        /// <summary>距上次拿到全局锁的秒数,供 /health 暴露。/ Seconds since the global lock was last free.</summary>
+        public int GateBlockedSec
+        {
+            get { return Math.Max(0, unchecked(Environment.TickCount - _gateFreeAt) / 1000); }
+        }
+
+        /// <summary>连续不能交易的秒数,供 /health 暴露。/ Seconds continuously unable to trade.</summary>
+        public int DegradedSec
+        {
+            get { return Math.Max(0, unchecked(Environment.TickCount - _healthyAt) / 1000); }
+        }
+
+        private void CheckSelfHeal()
+        {
+            // 最多等 2 秒拿锁:正常交易只占它几毫秒,拿不到说明有调用挂在里面。
+            // Wait up to 2s: a normal trade holds it for milliseconds.
+            if (Monitor.TryEnter(_gate, 2000))
+            {
+                Monitor.Exit(_gate);
+                _gateFreeAt = Environment.TickCount;
+            }
+
+            if (_connected && _dealerActive)
+                _healthyAt = Environment.TickCount;
+
+            string why = null;
+
+            if (GateBlockedSec >= GateStuckExitSec)
+                why = string.Format("全局锁已 {0} 秒拿不到(某个 MT5 调用挂住了)", GateBlockedSec);
+            else if (DegradedSec >= DegradedExitSec)
+                why = string.Format("已连续 {0} 分钟无法交易(connected={1} dealerActive={2})",
+                    DegradedSec / 60, _connected, _dealerActive);
+
+            if (why == null)
+                return;
+
+            try { Log.Error("自愈:{0},退出进程,由计划任务重新拉起", why); }
+            catch { }
+
+            Environment.Exit(3);
+        }
+
+        /// <summary>断线重连。指数退避,最多 30 秒一次。</summary>
+        private void WatchdogLoopCore()
         {
             int delaySec = 2;
             // dealer 重试节流:连接正常但 dealer 掉了时,每 10 圈(约 10 秒)重试一次。
@@ -1152,6 +1425,9 @@ namespace Prismx.Mt5Gateway
             {
                 Thread.Sleep(1000);
 
+                if (!_stopping)
+                    CheckSelfHeal();
+
                 if (_stopping || _connected)
                 {
                     delaySec = 2;
@@ -1161,12 +1437,8 @@ namespace Prismx.Mt5Gateway
                     // The SDK healed a drop on its own; rebuild the subscriptions.
                     if (!_stopping && _connected && _needResubscribe)
                     {
-                        _needResubscribe = false;
-                        Log.Warn("检测到连接曾经中断,重建持仓与成交订阅");
-                        _posSubscribed = false;
-                        SubscribePositions();
-                        _dealSubscribed = false;
-                        SubscribeDeals();
+                        Log.Warn("检测到连接曾经中断(SDK 已自行重连),重做恢复步骤");
+                        OnLinkRestored("SDK 自动重连后");
                     }
 
                     // 半开连接探测。watchdog 原来唯一的判据是 _connected,而这个标志
@@ -1225,63 +1497,39 @@ namespace Prismx.Mt5Gateway
                 if (_stopping)
                     break;
 
+                // 先把旧会话彻底断掉再连。半开探测判死时只是放倒了标志,SDK 手里还攥着旧
+                // 会话;不 Disconnect 就直接 Connect,可能一直报错,也可能"成功"却还是那根
+                // 死掉的连接。
+                // Tear down the old session first. The half-open path only lowers the
+                // flag; connecting over a live SDK session may fail forever or "succeed"
+                // onto the same dead socket.
+                lock (_gate)
+                {
+                    try { _manager.Disconnect(); }
+                    catch { }
+                }
+
                 MTRetCode res = ConnectOnce();
                 if (res == MTRetCode.MT_RET_OK)
                 {
                     Log.Info("重连成功");
 
-                    // 重连后 dealer 通道要重开,否则下单没有回执。
-                    // Selected 列表是连接级状态,断线即失效,缓存要清掉重建。
-                    // 手数限制与账号可交易性缓存同样清空:断线期间券商可能改过
-                    // 品种配置或账号分组,拿旧值校验会放过本该拒绝的请求。
-                    // Also clear the limits and tradability caches: the broker may
-                    // have changed symbol config or account groups while we were
-                    // down, and stale values would pass checks that should fail.
-                    List<string> reselect;
-                    lock (_gate)
-                    {
-                        _selected.Clear();
-                        _limitsCache.Clear();
-                        _tradableCache.Clear();
-                        _groupCache.Clear();
-                        _symbolCache.Clear();
-                        _symbolNames = null;   // 品种名快照同样重建 / rebuild the name snapshot too
-                        reselect = new List<string>(_everSelected);
-                    }
-
-                    // 断线前交易过的品种 + 配置点名的品种,整批重新选上。否则重连后每个
-                    // 品种的第一笔单都要多等一次首个 tick。
-                    // Re-select everything traded before the drop plus the configured
-                    // list; otherwise the first order per symbol after a reconnect waits
-                    // for a first tick again.
-                    reselect.AddRange(_cfg.PreselectSymbols);
-                    PreselectSymbols(reselect, "重连后");
-
-                    // 重连后重开 dealer 通道。返回码此前被直接丢弃——它一旦失败,
-                    // 之后所有下单都收不到成交回执,而日志里一个字都没有,只能靠
-                    // 用户报"单子下不出去"才发现。现在失败会记 ERROR 并置
-                    // dealerActive=false,上面的分支每 10 秒重试直到恢复。
-                    // The return code used to be discarded here: if it failed, every
-                    // subsequent order silently got no confirmation with nothing in the
-                    // log. Now a failure is logged and retried until it recovers.
-                    TryStartDealer("重连后");
-
-                    // 持仓与成交订阅都要重建:断线时服务器已清掉我们的订阅状态
-                    // Both subscriptions must be rebuilt: the server dropped them on disconnect
-                    // 这里已经重建了,把上面那条"请补订阅"的请求一并消掉,免得下一圈重做。
-                    // Clear the pending request here so the connected branch doesn't redo it.
-                    _needResubscribe = false;
-                    _posSubscribed = false;
-                    SubscribePositions();
-                    _dealSubscribed = false;
-                    SubscribeDeals();
+                    OnLinkRestored("重连后");
 
                     delaySec = 2;
                 }
                 else
                 {
-                    Log.Error("重连失败:{0}", res);
-                    delaySec = Math.Min(delaySec * 2, 30);
+                    Log.Error("重连失败:{0} {1}", res, DescribeConnectError(res));
+
+                    // 密码/权限错误重试再勤也不会好,反而可能让券商按"反复登录失败"封 IP 或
+                    // 账号。这类错误退到 5 分钟一次。
+                    // Auth/permission failures won't heal by retrying and can get the IP or
+                    // account blocked for repeated failed logins; back off to 5 minutes.
+                    string rc = res.ToString();
+                    bool authFailure = rc.StartsWith("MT_RET_AUTH") ||
+                        res == MTRetCode.MT_RET_ERR_PERMISSIONS;
+                    delaySec = authFailure ? 300 : Math.Min(delaySec * 2, 30);
                 }
             }
         }
@@ -3586,6 +3834,7 @@ namespace Prismx.Mt5Gateway
                     fill(request);
 
                     sink = new DealerSink(result);
+                    _liveSinks[sink] = 0;
 
                     // 必须先注册,否则原生层不会回调,表现为"发出去了但永远没答复"
                     MTRetCode reg = sink.RegisterSink();
@@ -3606,8 +3855,26 @@ namespace Prismx.Mt5Gateway
                 res = sink.Wait(_cfg.DealerTimeoutMs);
                 long dealerMs = dsw.ElapsedMilliseconds;
 
+                // 超时或等待中断线:请求**已经发出去了**,券商那边可能已经成交。以前回的是
+                // 普通失败码 MT_RET_REQUEST_TIMEOUT,后端把它落成 REJECTED("被拒绝"),用户
+                // 于是换一个新 clientOrderId 重下——真仓里就多一笔。改回"已发出、结果未知",
+                // 后端落 FAILED 并提示先核对持仓。
+                // Timed out or the link dropped mid-wait: the request *was sent* and may
+                // have filled. The plain MT_RET_REQUEST_TIMEOUT used to land as REJECTED,
+                // inviting a re-place under a new clientOrderId — a duplicate position.
+                // Report "sent, outcome unknown" so the backend records FAILED.
                 if (res == MTRetCode.MT_RET_REQUEST_TIMEOUT)
-                    Log.Warn("dealer 请求 {0} 超时,未收到答复", requestId);
+                {
+                    bool dropped = sink.LinkDropped;
+                    Log.Warn("dealer 请求 {0} {1},未收到答复,结果未知", requestId,
+                        dropped ? "等待中连接断开" : "超时");
+
+                    TradeResult unknown = TradeResult.Fail(PlacedUnconfirmed,
+                        (dropped ? "等待成交回执时与 MT5 的连接断开" : "等待成交回执超时")
+                        + ",这笔指令可能已经执行。请先核对持仓与成交记录,不要直接重下。");
+                    unknown.DealerMs = dealerMs;
+                    return unknown;
+                }
 
                 // 请求被退回队列:通常是服务器上另有 dealer 插件在处理同一队列,
                 // 或该品种当时取不到价。这不是成交,要当失败处理。
@@ -3693,6 +3960,8 @@ namespace Prismx.Mt5Gateway
                 // waiting for a callback never interleaves with the global lock.
                 if (sink != null)
                 {
+                    byte ignoredByte;
+                    _liveSinks.TryRemove(sink, out ignoredByte);
                     sink.Abandon();
                     // Abandon 之后回调再也不碰这个句柄,可以放心释放(见 ReleaseWait 说明)。
                     // Safe once abandoned: no callback touches the handle any more.

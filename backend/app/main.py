@@ -55,6 +55,10 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("prismx.main")
 
 
+# 同步端点线程池的大小，见 lifespan 里的说明 / sync-endpoint pool size, see lifespan
+SYNC_THREAD_LIMIT = 256
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动：建表 + 信号引擎 + 离线检测 + 超时订单清理
@@ -102,6 +106,16 @@ async def lifespan(app: FastAPI):
     from app.services.gateway_client import init_client, set_main_loop, close_client
     set_main_loop(asyncio.get_running_loop())
     init_client()
+
+    # 同步端点（下单/平仓/改单都是 def）跑在 anyio 的线程池里，默认只有 40 条。
+    # 一笔网关交易会占住一条线程直到 dealer 回执（最长 65 秒），于是 40 笔同时在途
+    # 就把**所有**同步接口一起排队——包括跟交易无关的页面。线程大部分时间在睡，
+    # 放到 256 条只多一点内存。
+    # Sync endpoints (every order route is a def) run on anyio's pool of 40. A gateway
+    # trade holds one thread until the dealer answers (up to 65s), so 40 in flight
+    # queued every sync route in the app. The threads mostly sleep; 256 costs little.
+    import anyio.to_thread
+    anyio.to_thread.current_default_thread_limiter().total_tokens = SYNC_THREAD_LIMIT
     from app.services import bridge_wake
     bridge_wake.bind_loop(asyncio.get_running_loop())
     

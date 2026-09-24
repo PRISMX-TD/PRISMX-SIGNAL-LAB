@@ -61,6 +61,18 @@ def run_on_main_loop(coro, timeout: float):
 
 # ---------- httpx 连接池单例 ----------
 
+
+def _timeout(total: float) -> httpx.Timeout:
+    """读写按调用给的时限；建连单独只给 5 秒。
+
+    整体一个数的时候，建连也要等满 60 秒：隧道断了、网关没起来，一笔单要干等
+    一分钟才知道「根本没连上」。连不上是可以马上确定的事，没必要陪着等 dealer
+    的时限。池等待给 10 秒：排不到连接说明这边已经堵死，早点报出来。
+    Read/write use the caller's budget; connecting gets 5s on its own. With a
+    single number, a dead tunnel cost the full 60s just to learn nothing connected.
+    """
+    return httpx.Timeout(total, connect=5.0, pool=10.0)
+
 _client: Optional[httpx.AsyncClient] = None
 
 
@@ -70,11 +82,24 @@ def init_client() -> None:
     if _client is not None:
         return
     _client = httpx.AsyncClient(
-        timeout=httpx.Timeout(60.0),
+        timeout=_timeout(60.0),
+        # 只重试「连不上」（请求还没发出去），对下单 POST 也安全：隧道闪断或网关
+        # 刚重启时，第一次建连失败不必直接判失败。
+        # Retries connect failures only (nothing sent yet), so it's safe for trade
+        # POSTs: a tunnel blip or fresh gateway restart needn't fail the first try.
+        transport=httpx.AsyncHTTPTransport(retries=1),
+        # 连接数要跟得上网关的并发上限（gateway.ini 的 http_max_concurrent，默认
+        # 256）：每笔在途交易最长占一条连接 65 秒，原来的 20 条在一波行情里先于网关
+        # 排满，后面的单只能在这里干等。常驻 64 条，省掉高峰时重新握手的时间。
+        # Must keep pace with the gateway's http_max_concurrent (256): each in-flight
+        # trade holds a connection for up to 65s, and the old 20 filled up before the
+        # gateway did. 64 kept alive so a burst skips the reconnect handshake.
         limits=httpx.Limits(
-            max_keepalive_connections=10,
-            max_connections=20,
-            keepalive_expiry=30.0,
+            max_keepalive_connections=64,
+            max_connections=256,
+            # 比网关侧 HTTP.sys 的空闲回收更早放手，少撞「对面已关、这边还当好的」连接。
+            # Released before the gateway side idles it out, so fewer dead sockets get reused.
+            keepalive_expiry=15.0,
         ),
     )
     logger.info("Gateway 客户端连接池已初始化")
@@ -275,12 +300,12 @@ async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
             if timeout is not None:
                 resp = await _client.post(
                     url, json=body, headers=_headers(),
-                    timeout=httpx.Timeout(timeout),
+                    timeout=_timeout(timeout),
                 )
             else:
                 resp = await _client.post(url, json=body, headers=_headers())
         else:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(timeout or 60)) as client:
+            async with httpx.AsyncClient(timeout=_timeout(timeout or 60)) as client:
                 resp = await client.post(url, json=body, headers=_headers())
         resp.raise_for_status()
         data = resp.json()
@@ -681,7 +706,8 @@ async def trade_close(
 
 
 async def trade_modify(
-    login: int, ticket: int, sl: float | None = None, tp: float | None = None
+    login: int, ticket: int, sl: float | None = None, tp: float | None = None,
+    timeout: float | None = None,
 ) -> TradeRsp:
     """改 SL/TP。0 = 清除该项；None 发成 JSON null = 网关保留仓位上的现值。
 
@@ -700,15 +726,12 @@ async def trade_modify(
         "ticket": ticket,
         "stopLoss": sl,
         "takeProfit": tp,
-    })
-    return TradeRsp(
-        ok=data.get("ok", False),
-        retcode=str(data.get("retcode", "")),
-        message=data.get("message", ""),
-        deal=data.get("deal", 0),
-        order=data.get("order", 0),
-        price=data.get("price", 0.0),
-    )
+    }, timeout=timeout)
+    # 走 _trade_rsp 才带得上 error 字段：以前这里手拼 TradeRsp、丢了 error，
+    # 网关超时于是被当成普通失败落成 REJECTED，而改单其实可能已经生效。
+    # _trade_rsp keeps the error field; the hand-built TradeRsp dropped it, so a
+    # gateway timeout landed as REJECTED although the modify may have applied.
+    return _trade_rsp(data)
 
 
 async def health_check() -> dict:
@@ -768,7 +791,15 @@ def is_gateway_online() -> bool:
 
     try:
         rsp = run_on_main_loop(health_check(), timeout=5.0)
-        ok = bool(rsp.get("ok")) and bool(rsp.get("mt5Connected"))
+        # dealerActive 也要算：连着但 dealer 通道没起来时，查得到持仓却一单都下不了，
+        # 界面不该显示「在线」。旧网关没有这个字段，缺省按可用处理。
+        # dealerActive counts too: connected without a dealer channel shows positions
+        # but can't place a single order. Older gateways omit it; default to usable.
+        ok = (
+            bool(rsp.get("ok"))
+            and bool(rsp.get("mt5Connected"))
+            and bool(rsp.get("dealerActive", True))
+        )
     except Exception:
         ok = False
 

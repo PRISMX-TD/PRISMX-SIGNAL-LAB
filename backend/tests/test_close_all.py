@@ -331,3 +331,59 @@ def test_endpoint_double_tap_is_accepted_not_an_error(db_session, monkeypatch):
 
     assert (out.queued, out.skipped) == (0, 1)
     assert db_session.query(Order).count() == 1
+
+
+# ---------- 网关平仓并行执行 / gateway closes run in parallel ----------
+
+def test_gateway_batch_closes_run_in_parallel(tmp_path, monkeypatch):
+    """十笔平仓不该一笔等一笔：每笔 0.3 秒，串行要 3 秒，并行应远低于此。
+    同时验证每笔都用自己的会话执行到了、且全部完成后才发汇总。
+    Ten closes must not queue behind each other; also checks every close ran (each
+    on its own session) and the summary goes out once they are all done."""
+    import threading
+    import time as _time
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    import app.core.database as database
+    import app.models  # noqa: F401
+    from app.core.database import Base
+    from app.services import gateway_execute
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'ca.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    monkeypatch.setattr(database, "SessionLocal", Session)
+    sent = _capture_pushes(monkeypatch)
+
+    db = Session()
+    _user(db)
+    batch, created, _ = close_all.queue(db, "u1", "co_par", None, [_pos(3000 + i) for i in range(10)])
+    ids = [o.id for o in created]
+    db.close()
+
+    seen_threads = set()
+    lock = threading.Lock()
+
+    def fake_execute(sess, order):
+        with lock:
+            seen_threads.add(threading.get_ident())
+        _time.sleep(0.3)
+        order.status = "FILLED"
+        sess.commit()
+        return None
+
+    monkeypatch.setattr(gateway_execute, "try_gateway_execute", fake_execute)
+
+    started = _time.perf_counter()
+    close_all.execute_gateway_batch("u1", batch, ids)
+    elapsed = _time.perf_counter() - started
+
+    assert elapsed < 1.5, f"平仓仍在串行执行 / closes still serial: {elapsed:.2f}s"
+    assert len(seen_threads) > 1
+
+    check = Session()
+    assert all(o.status == "FILLED" for o in close_all.batch_orders(check, "u1", batch))
+    check.close()
+    assert len(sent) == 1

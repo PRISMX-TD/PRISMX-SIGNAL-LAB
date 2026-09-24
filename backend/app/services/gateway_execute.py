@@ -296,6 +296,30 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
 
     login = int(order.mt5_login)
 
+    # 调网关之前先把事务结束掉，把数据库连接还回池里。否则这个会话会一直攥着一条
+    # 连接等 dealer 回执（最长 65 秒，超时再问一次共 140 秒），而池子总共只有
+    # DB_POOL_SIZE + DB_MAX_OVERFLOW（默认 30）条：一波行情里第 31 笔在途交易起，
+    # 整个后端——不止下单——都在排队等连接，等满 pool_timeout 就直接报错。
+    # expire_on_commit 暂时关掉，下面组请求要读的字段就不会被作废、不会为此再
+    # 去查一次库。此时 order 早已落库（调用方先 commit 了 PENDING），这里提交的
+    # 只是上面几次查询开的只读事务；调用方若还有未提交的改动，原本也会在本函数
+    # 末尾那次 commit 一起提交，并不改变语义。
+    #
+    # End the transaction before the gateway call so the connection goes back to
+    # the pool. Otherwise the session holds one for the whole dealer wait (65s, 140s
+    # with the re-ask) out of a pool of DB_POOL_SIZE + DB_MAX_OVERFLOW (30 by
+    # default): from the 31st in-flight trade the whole backend queues for a
+    # connection and errors at pool_timeout. expire_on_commit is switched off for
+    # this one commit so the fields read below stay loaded. The order row is
+    # already committed by the caller; any other pending change would have been
+    # committed by this function's final commit anyway.
+    prev_expire = db.expire_on_commit
+    db.expire_on_commit = False
+    try:
+        db.commit()
+    finally:
+        db.expire_on_commit = prev_expire
+
     try:
         if order.action == "ORDER":
             # 发给 gateway 的是券商基础名：order.symbol 存的是信号侧写法
@@ -355,9 +379,17 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
             # 网关保留现值；0 才是清除。写成 `or 0` 会把两者混为一谈（见 trade_modify 注释）。
             # Pass sl/tp through as-is: None means "unspecified" (sent as null, gateway
             # keeps the current value); 0 is an explicit clear. `or 0` conflates the two.
-            rsp = run_on_main_loop(gw_modify(
+            #
+            # 同样走「超时再问一次」：改单没有 clientOrderId 缓存，第二问就是再改一次，
+            # 而设成同一组 SL/TP 天然幂等，重发无害。这样超时落 FAILED（请核对）
+            # 而不是 REJECTED——止损可能已经改上了。
+            # Also via the timeout re-ask: with no clientOrderId cache the second ask
+            # re-sends the modify, harmless since setting the same SL/TP is idempotent.
+            # A timeout now lands as FAILED ("check"), not REJECTED.
+            rsp = call_gateway_idempotent(order, lambda timeout: gw_modify(
                 login, order.ticket or 0, order.sl, order.tp,
-            ), timeout=65.0)
+                timeout=timeout,
+            ))
         else:
             order.status = "FAILED"
             order.message = f"未知指令类型: {order.action}"

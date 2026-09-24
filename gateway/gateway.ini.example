@@ -1,4 +1,4 @@
-# PRISMX MT5 Gateway 配置
+﻿# PRISMX MT5 Gateway 配置
 #
 # 用法:复制本文件为 gateway.ini,填入真实值。
 # gateway.ini 含明文密码,已在 .gitignore 里排除,不要提交进版本库。
@@ -57,10 +57,12 @@ allowed_groups = demo
 # 成交回执等待上限(毫秒)
 dealer_timeout_ms = 60000
 
-# HTTP 处理线程数。每个线程处理完一个请求才回去 accept,所以这就是并发上限。
-# 一次平仓最坏 = dealer_timeout_ms + 两次确认重读;线程数偏小时,几笔卡住的慢单
-# 就会把**所有**接口(含不鉴权的 /health)排到队尾,监控会误判成"网关失联"。
+# 接收连接的线程数。它们只负责 accept,接到请求马上交给线程池处理,不再是并发上限。
 http_threads = 16
+
+# 同时处理中的请求上限。一次平仓最坏 = dealer_timeout_ms + 两次确认重读,期间只占
+# 一条睡着的线程;到上限后新请求排队等空位。/health 不占名额,永远立即回答。
+http_max_concurrent = 256
 
 # 显式解除两条启动检查(allowed_groups 为空、绑全网卡却没配 allowed_ips)。
 # 这两条各自都是最后一道闸,只在临时排障时打开,别长期留着。

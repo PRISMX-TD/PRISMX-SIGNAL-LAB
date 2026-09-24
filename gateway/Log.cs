@@ -1,4 +1,4 @@
-//+------------------------------------------------------------------+
+﻿//+------------------------------------------------------------------+
 //| PRISMX MT5 Gateway - 日志                                        |
 //|                                                                  |
 //| 同时写控制台和按天滚动的文件。作为 Windows 服务跑的时候没有控制台, |
@@ -84,13 +84,33 @@ namespace Prismx.Mt5Gateway
 
         private static void Write(string level, string format, params object[] args)
         {
-            string message = args.Length == 0 ? format : string.Format(format, args);
+            // 写日志绝不能抛:每个 catch 分支都在写日志,日志一抛异常就从 catch 里漏出去,
+            // 在线程池或原生回调线程上直接结束进程。格式串写错也只该少一条日志。
+            // Logging must never throw: every catch block logs, so a throwing logger
+            // escapes the catch and kills the process on a pool or native thread.
+            string message;
+            try
+            {
+                message = args.Length == 0 ? format : string.Format(format, args);
+            }
+            catch
+            {
+                message = format;
+            }
+
             string line = string.Format("{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}",
                 DateTime.Now, level, message);
 
             lock (Gate)
             {
-                Console.WriteLine(line);
+                // 以服务方式运行时没有控制台,不写。手动运行时 stdout 断了(管道关闭)
+                // 会抛 IOException,吞掉。
+                // No console under the service; a broken stdout pipe throws, swallowed.
+                if (Environment.UserInteractive)
+                {
+                    try { Console.WriteLine(line); }
+                    catch { }
+                }
 
                 if (_dir == null)
                     return;

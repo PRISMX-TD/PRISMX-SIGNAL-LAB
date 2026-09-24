@@ -43,3 +43,27 @@ def test_defaults_are_none_not_zero(monkeypatch):
     asyncio.run(gateway_client.trade_modify(601144, 12345))
     assert sent["body"]["stopLoss"] is None
     assert sent["body"]["takeProfit"] is None
+
+
+def test_timeout_error_survives_into_trade_rsp(monkeypatch):
+    """网关超时的 error 字段必须带出来，后端才会落 FAILED（可能已生效）而不是 REJECTED。
+    The timeout error must survive so the backend records FAILED, not REJECTED."""
+    async def fake_post(path, body, timeout=None):
+        return {"ok": False, "error": "timeout", "message": "Gateway 响应超时"}
+
+    monkeypatch.setattr(gateway_client, "_post", fake_post)
+    rsp = asyncio.run(gateway_client.trade_modify(601144, 12345, sl=3300.5))
+    assert rsp.ok is False
+    assert rsp.error == "timeout"
+
+
+def test_timeout_is_forwarded_to_post(monkeypatch):
+    seen = {}
+
+    async def fake_post(path, body, timeout=None):
+        seen["timeout"] = timeout
+        return {"ok": True, "retcode": "MT_RET_REQUEST_DONE"}
+
+    monkeypatch.setattr(gateway_client, "_post", fake_post)
+    asyncio.run(gateway_client.trade_modify(601144, 12345, sl=1.0, timeout=65.0))
+    assert seen["timeout"] == 65.0
