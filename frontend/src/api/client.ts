@@ -486,6 +486,23 @@ export const chartApi = {
 }
 
 // 下单 / Orders
+// 直接执行型交易请求（下单 / 平仓 / 改单 / 挂单增改撤）的超时。
+//
+// 网关账号的这几个请求是同步执行的：后端等 dealer 回执最长 65 秒，拿不到结果还会用
+// 同一个 clientOrderId 再问一次（最长 75 秒），合计约 150 秒（见后端
+// services/gateway_execute.call_gateway_idempotent）。原来走全局 30 秒默认值，于是
+// 券商一慢，页面先报"请求失败"，而那笔单子在后端仍在执行、很可能已经成交——用户看到
+// 失败去重下，就是重复开仓。这里给到比后端上限还长一点，让页面拿到的是真实结果。
+// 正常情况下这些请求仍是几百毫秒返回，只影响出问题时要等多久。
+//
+// Timeout for directly-executed trade requests. Gateway accounts execute these
+// synchronously: the backend waits up to 65s for the dealer and then re-asks with
+// the same clientOrderId for up to 75s, ~150s in total. The global 30s default made
+// the page report failure while the order was still executing (and likely filled),
+// inviting a duplicate re-submit. Set just above the backend ceiling; healthy calls
+// still return in a few hundred milliseconds.
+const TRADE_TIMEOUT_MS = 160_000
+
 export const orderApi = {
   // 不传参数时行为不变(最新 100 条),供 useLive() 的实时订单跟踪继续用；
   // 传 limit/offset/since/until/login 时用于订单页的分页、日期与账号筛选。
@@ -530,6 +547,7 @@ export const orderApi = {
     request<Order>('/orders', {
       method: 'POST',
       body: JSON.stringify(payload),
+      requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   // 改一张真实的 MT5 挂单：触发价 / 止损 / 止盈。**省略哪一项就保留哪一项**——
   // 图表上拖一条线只改一项，另外两项不传，券商上的现值原样留着。止损止盈传 0
@@ -549,6 +567,7 @@ export const orderApi = {
     request<Order>('/orders/modify-pending', {
       method: 'POST',
       body: JSON.stringify(payload),
+      requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   // 撤一张真实的 MT5 挂单（按券商票号）。与 orderApi.cancel 不是一回事：那个撤的
   // 是平台侧还没下发的指令行，碰不到券商。
@@ -563,6 +582,7 @@ export const orderApi = {
     request<Order>('/orders/cancel-pending', {
       method: 'POST',
       body: JSON.stringify(payload),
+      requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   close: (payload: {
     clientOrderId: string
@@ -575,6 +595,7 @@ export const orderApi = {
     request<Order>('/orders/close', {
       method: 'POST',
       body: JSON.stringify(payload),
+      requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   // 一键平仓：后端按自己那份持仓快照排指令，前端不回传持仓列表。
   // clientOrderId 是整批的编号（后端拼成 ca_<id>#<ticket>），重发同一个不会平两遍。
@@ -597,6 +618,7 @@ export const orderApi = {
     request<Order>('/orders/modify', {
       method: 'POST',
       body: JSON.stringify(payload),
+      requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),
   // login：只看这一个账号（订单页的账号标签）；不传则统计当前仍绑定的全部账号。
