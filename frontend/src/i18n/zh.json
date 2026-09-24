@@ -2296,6 +2296,8 @@
     "copyFailed": "复制失败，请手动选中复制",
     "usersTitle": "经此链接注册的用户",
     "usersEmpty": "还没有人经这条链接注册。",
+    "searchPlaceholder": "搜索昵称或邮箱",
+    "searchEmpty": "没有匹配的用户。",
     "colUser": "用户",
     "colPlan": "等级",
     "colExpiry": "会员到期",

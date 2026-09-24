@@ -2298,6 +2298,8 @@
     "copyFailed": "Copy failed — select and copy manually",
     "usersTitle": "Users who registered through this link",
     "usersEmpty": "Nobody has registered through this link yet.",
+    "searchPlaceholder": "Search nickname or email",
+    "searchEmpty": "No matching users.",
     "colUser": "User",
     "colPlan": "Tier",
     "colExpiry": "Expires",

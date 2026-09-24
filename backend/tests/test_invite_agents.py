@@ -140,6 +140,25 @@ def test_user_list_is_read_only_and_masked(db_session):
         assert forbidden not in row
 
 
+def test_user_list_search_by_nickname_or_email(db_session):
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    link = _mk_link(db_session)
+    assign_agent(db_session, admin, link, agent)
+    _mk_user(db_session, "alice@example.com", invite_code=link.code, nickname="小王", phone="+60123456789")
+    _mk_user(db_session, "bob@example.com", invite_code=link.code, nickname="Bob")
+    _mk_user(db_session, "a_b@example.com", invite_code=link.code)
+    _mk_user(db_session, "alice2@other.io", invite_code="othr2345")
+
+    assert {u.email for u in agent_link_users(db_session, agent, link.id, q="ALICE").users} == {"alice@example.com"}
+    assert agent_link_users(db_session, agent, link.id, q="小王").total == 1
+    # 手机号不可搜 / phone isn't searchable
+    assert agent_link_users(db_session, agent, link.id, q="12345678").total == 0
+    # _ 按字面匹配 / _ matches literally
+    assert agent_link_users(db_session, agent, link.id, q="a_b").total == 1
+    assert agent_link_users(db_session, agent, link.id, q="  ").total == 3
+
+
 def test_user_list_of_unowned_link_is_404(db_session):
     admin = _mk_user(db_session, "a@x.io", role="admin")
     agent = _mk_user(db_session, "agent@x.io")

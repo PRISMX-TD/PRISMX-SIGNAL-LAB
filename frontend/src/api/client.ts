@@ -1524,10 +1524,11 @@ export const pushApi = {
 // Non-agents get an empty list; links that aren't mine answer 404.
 export const agentApi = {
   links: () => request<{ links: AgentLink[] }>('/agent/links'),
-  linkUsers: (id: string, params: { limit?: number; offset?: number } = {}) => {
+  linkUsers: (id: string, params: { limit?: number; offset?: number; q?: string } = {}) => {
     const qs = new URLSearchParams()
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
+    if (params.q) qs.set('q', params.q)
     const q = qs.toString()
     return request<AgentLinkUsers>(`/agent/links/${encodeURIComponent(id)}/users${q ? `?${q}` : ''}`)
   },

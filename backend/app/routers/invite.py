@@ -21,12 +21,13 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
+from app.routers.admin import _like_escape
 from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, Payment, User
 from app.schemas import (
     AgentLinkOut,
@@ -527,14 +528,27 @@ def _owned_link(db: Session, user: User, link_id: str) -> InviteLink:
 
 
 def agent_link_users(
-    db: Session, user: User, link_id: str, limit: int = PAGE_SIZE_DEFAULT, offset: int = 0
+    db: Session,
+    user: User,
+    link_id: str,
+    limit: int = PAGE_SIZE_DEFAULT,
+    offset: int = 0,
+    q: str | None = None,
 ) -> AgentLinkUsersOut:
     """经某条链接注册的用户名单，只读，字段见 AgentLinkUserOut。
     The read-only signup list for one link; fields per AgentLinkUserOut."""
     link = _owned_link(db, user, link_id)
-    q = db.query(User).filter(User.invite_code == link.code)
-    total = q.count()
-    rows = q.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+    query = db.query(User).filter(User.invite_code == link.code)
+    q = (q or "").strip()
+    if q:
+        # 只搜名单上本来就看得到的昵称与邮箱——手机号不在代理视野内，不能拿来撞。
+        # 通配符转义理由同 admin 用户搜索。
+        # Search only what the list already shows (nickname, email); phone is
+        # outside the agent's view. Wildcards escaped as in the admin search.
+        like = f"%{_like_escape(q)}%"
+        query = query.filter(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
+    total = query.count()
+    rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
     # 活跃日与 MT5 绑定各一条批量查询，只针对当前这一页的人——名单可以很长，
     # 逐行查会让页数一多就变成几百条查询。
     # One batched query each for activity and bindings, scoped to this page only.
@@ -1122,7 +1136,8 @@ def my_agent_link_users(
     link_id: str,
     limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, max_length=128, description="按昵称或邮箱模糊搜索 / fuzzy search by nickname or email"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return agent_link_users(db, user, link_id, limit, offset)
+    return agent_link_users(db, user, link_id, limit, offset, q)

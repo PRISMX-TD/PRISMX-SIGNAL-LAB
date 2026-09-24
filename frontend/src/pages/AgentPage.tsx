@@ -176,6 +176,17 @@ export default function AgentPage() {
   // The client whose membership is being changed. The updated row is patched in
   // place rather than refetching: changing someone on page 3 must not jump back.
   const [editing, setEditing] = useState<AgentLinkUser | null>(null)
+  // 搜索词：输入框即时更新，300ms 防抖后才去拉，并回到第一页。
+  // Search: the box updates instantly; the fetch waits 300ms and resets to page one.
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setQuery(search.trim())
+      setOffset(0)
+    }, 300)
+    return () => clearTimeout(id)
+  }, [search])
 
   useEffect(() => {
     let alive = true
@@ -200,7 +211,7 @@ export default function AgentPage() {
     setPage(null)
     setPageError(null)
     agentApi
-      .linkUsers(selectedId, { limit: PAGE_SIZE, offset })
+      .linkUsers(selectedId, { limit: PAGE_SIZE, offset, q: query || undefined })
       .then((res) => {
         if (alive) setPage(res)
       })
@@ -210,7 +221,7 @@ export default function AgentPage() {
     return () => {
       alive = false
     }
-  }, [selectedId, offset])
+  }, [selectedId, offset, query])
 
   const select = (id: string) => {
     if (id === selectedId) return
@@ -378,6 +389,16 @@ export default function AgentPage() {
             </div>
           )}
 
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t('agent.searchPlaceholder')}
+            aria-label={t('agent.searchPlaceholder')}
+            maxLength={128}
+            className="mb-3 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-white/30 focus:outline-none sm:max-w-xs"
+          />
+
           <div className="glass p-0">
             {page == null && !pageError ? (
               <div className="space-y-2 p-4" aria-busy="true">
@@ -386,7 +407,9 @@ export default function AgentPage() {
                 <SkeletonLine width="80%" height={16} />
               </div>
             ) : page && page.users.length === 0 ? (
-              <div className="p-8 text-center text-sm text-neutral-500">{t('agent.usersEmpty')}</div>
+              <div className="p-8 text-center text-sm text-neutral-500">
+                {t(query ? 'agent.searchEmpty' : 'agent.usersEmpty')}
+              </div>
             ) : page ? (
               <>
                 <div className="hidden overflow-x-auto sm:block">
