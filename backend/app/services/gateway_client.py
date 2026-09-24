@@ -62,6 +62,22 @@ def run_on_main_loop(coro, timeout: float):
 # ---------- httpx 连接池单例 ----------
 
 
+# 只读接口（资金 / 持仓 / 挂单）的时限。
+#
+# 以前这些调用不传时限，落到客户端默认的 60 秒。它们大多由后台轮询发起，而轮询是
+# 「一轮等所有人做完再睡」的节奏——网关那边一次读取卡住（查询连接半开、券商慢），
+# 这一轮就被拖满 60 秒，**所有**网关用户的持仓与浮盈一起冻住。正常读取是几百毫秒，
+# 15 秒已经是它的几十倍；到点就放弃，这一拍保留上一次的数据，下一拍再读。
+# Read-only calls (funds / positions / pending orders). They used to fall through to
+# the client's 60s default; one stuck read then held a whole polling round — and
+# every gateway user's positions with it — for a minute. Healthy reads take a few
+# hundred ms; give up at 15s and keep the previous snapshot until the next tick.
+READ_TIMEOUT = 15.0
+# 成交历史读取：首扫会回看 7 天甚至一年，比单纯读持仓重，单独放宽。
+# Deal history: first scans look back a week or a year, so allow more.
+DEALS_READ_TIMEOUT = 30.0
+
+
 def _timeout(total: float) -> httpx.Timeout:
     """读写按调用给的时限；建连单独只给 5 秒。
 
@@ -381,9 +397,9 @@ async def verify_account(login: int, password: str) -> VerifyRsp:
     )
 
 
-async def get_account(login: int) -> AccountRsp | None:
+async def get_account(login: int, timeout: float = READ_TIMEOUT) -> AccountRsp | None:
     """读取账号资金信息。"""
-    data = await _post("/account", {"login": login})
+    data = await _post("/account", {"login": login}, timeout=timeout)
     if not data.get("ok"):
         return None
     return AccountRsp(
@@ -400,9 +416,9 @@ async def get_account(login: int) -> AccountRsp | None:
     )
 
 
-async def get_positions(login: int) -> tuple[list[PositionRsp], str]:
+async def get_positions(login: int, timeout: float = READ_TIMEOUT) -> tuple[list[PositionRsp], str]:
     """读取持仓列表。返回 (列表, 错误信息)。"""
-    data = await _post("/positions", {"login": login})
+    data = await _post("/positions", {"login": login}, timeout=timeout)
     if not data.get("ok"):
         return [], data.get("error", "unknown")
     positions = []
@@ -422,7 +438,7 @@ async def get_positions(login: int) -> tuple[list[PositionRsp], str]:
     return positions, ""
 
 
-async def get_pending_orders(login: int) -> tuple[list[PendingOrderRsp], str]:
+async def get_pending_orders(login: int, timeout: float = READ_TIMEOUT) -> tuple[list[PendingOrderRsp], str]:
     """读取该账号挂在券商服务器上的挂单列表。返回 (列表, 错误信息)。
 
     与持仓不同，这里**不按 comment 前缀过滤**：gateway 账号没有 MT5 客户端，
@@ -431,7 +447,7 @@ async def get_pending_orders(login: int) -> tuple[list[PendingOrderRsp], str]:
     Unlike bridge accounts there is no comment/magic filter here: a gateway account
     has no MT5 client, so every order on this channel was placed by the platform.
     """
-    data = await _post("/orders", {"login": login})
+    data = await _post("/orders", {"login": login}, timeout=timeout)
     if not data.get("ok"):
         return [], data.get("error", "unknown")
     return [
@@ -544,7 +560,9 @@ async def drain_deal_events() -> tuple[list[int], bool]:
     return logins, bool(data.get("subscribed"))
 
 
-async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[DealRsp], str]:
+async def get_deals(
+    login: int, from_unix: int, to_unix: int, timeout: float = DEALS_READ_TIMEOUT,
+) -> tuple[list[DealRsp], str]:
     """读取一段时间内的成交历史。返回 (列表, 错误信息)。
 
     ⚠️ 时间参数与返回的 DealRsp.time **都在券商服务器墙钟的参照系里，不是 UTC**
@@ -561,7 +579,7 @@ async def get_deals(login: int, from_unix: int, to_unix: int) -> tuple[list[Deal
     "Manager API reads plain UTC seconds" was wrong and was disproved in
     production on 2026-09-05.
     """
-    data = await _post("/deals", {"login": login, "from": from_unix, "to": to_unix})
+    data = await _post("/deals", {"login": login, "from": from_unix, "to": to_unix}, timeout=timeout)
     if not data.get("ok"):
         return [], data.get("error", "unknown")
     deals = []
@@ -782,42 +800,138 @@ _HEALTH_GRACE_SECONDS = 30
 # ok_at is the last *successful* probe; `at` is the last probe of any outcome.
 _health_cache: dict = {"at": 0.0, "online": False, "ok_at": 0.0}
 
+# 后台探活的间隔与"探活结果还算新鲜"的上限。
+#
+# 以前在线状态是**请求线程里现探**的：TTL 一过，下一个来列账号 / 下单的请求就在
+# 自己的线程里发一次 /health 并干等（最长 5 秒），期间还攥着一条数据库连接；而探活
+# 没有"同一时刻只探一次"，网关一慢，每个并发请求各探一次，同步线程与连接池被一起
+# 拖满，前端随之报"无法连接到服务器"——网关抖一下，整站跟着抖。
+# 现在由每个 worker 上的一条后台协程定时探活，请求线程只读缓存、从不阻塞。
+#
+# Background probe cadence and how old a probe result may get before it's no
+# longer trusted. Liveness used to be probed inline: once the TTL lapsed, the next
+# request probed /health on its own thread and waited (up to 5s) while holding a DB
+# connection, with no single-flight — a slow gateway made every concurrent request
+# probe at once and starved the sync pool and the DB pool. Now one background task
+# per worker probes on a timer and request threads only read the cache.
+_HEALTH_PROBE_INTERVAL_SECONDS = 5.0
+_HEALTH_MONITOR_STALE_SECONDS = 20.0
+
+# 后台探活协程是否在跑。没在跑（单测、脚本）时退回旧的"请求里现探"。
+# Whether the background monitor runs; without it (tests, scripts) fall back to
+# the old inline probe.
+_health_monitor_running = False
+
+
+def _probe_ok(rsp: dict) -> bool:
+    # dealerActive 也要算：连着但 dealer 通道没起来时，查得到持仓却一单都下不了，
+    # 界面不该显示「在线」。旧网关没有这个字段，缺省按可用处理。
+    # dealerActive counts too: connected without a dealer channel shows positions
+    # but can't place a single order. Older gateways omit it; default to usable.
+    return (
+        bool(rsp.get("ok"))
+        and bool(rsp.get("mt5Connected"))
+        and bool(rsp.get("dealerActive", True))
+    )
+
+
+def _online_at(now: float) -> bool:
+    """按最近一次成功探活算在线：宽限期内都算。
+
+    ok_at > 0 的判断不能省：进程刚起来时 ok_at 还是 0，而 monotonic() 的起点因平台
+    而异，可能恰好小于宽限期，那样会在从未成功探活过的情况下报「在线」。
+    Online while within the grace period of the last successful probe. The
+    ok_at > 0 check matters: monotonic()'s origin is platform-dependent, so without
+    it a never-probed process could report online.
+    """
+    ok_at = _health_cache["ok_at"]
+    return ok_at > 0.0 and now - ok_at < _HEALTH_GRACE_SECONDS
+
+
+def _record_probe(ok: bool, now: float, detail: str = "") -> bool:
+    """记下一次探活结果，返回据此判定的在线状态；状态翻转时记一行日志。
+
+    这行日志是排查「用户说连接不稳定」的第一手证据：以前在线判定翻来翻去一个字
+    都不留，只能靠用户描述猜是网关、隧道还是前端。
+    Record one probe and return the resulting verdict, logging on every flip — the
+    first-hand evidence when users report instability, which used to leave no trace.
+    """
+    was = _health_cache["online"]
+    _health_cache["at"] = now
+    if ok:
+        _health_cache["ok_at"] = now
+    online = _online_at(now)
+    _health_cache["online"] = online
+    if online != was:
+        if online:
+            logger.info("Gateway 在线状态 -> 在线 / gateway is online")
+        else:
+            ok_at = _health_cache["ok_at"]
+            logger.warning(
+                "Gateway 在线状态 -> 离线（%s没有成功探活，最近一次：%s）/ gateway is offline",
+                "%.0f 秒" % (now - ok_at) if ok_at > 0.0 else "启动以来一直",
+                detail or "unknown",
+            )
+    return online
+
+
+def _describe_probe(rsp: dict) -> str:
+    """探活失败时说明是哪一项不满足，写进状态翻转日志。/ Which condition failed."""
+    if not rsp.get("ok"):
+        return "不可达 unreachable: %s" % (rsp.get("error") or "no response")
+    return "mt5Connected=%s dealerActive=%s" % (rsp.get("mt5Connected"), rsp.get("dealerActive"))
+
+
+async def gateway_health_monitor_loop() -> None:
+    """每个 worker 一条：定时探活网关，把结果写进在线缓存。
+
+    不走 BackgroundLoops 的选主：is_gateway_online() 在每个 worker 的请求线程里都会
+    被调用，每个 worker 都要有自己新鲜的缓存。探活本身只是一次轻量 GET（网关在接收
+    线程上就地回答，不碰 MT5），多几个 worker 各探一次无所谓。
+    One per worker: probe the gateway on a timer and feed the liveness cache. Not
+    leader-elected — every worker's request threads read is_gateway_online(), so each
+    needs a fresh cache; the probe is a cheap GET answered without touching MT5.
+    """
+    global _health_monitor_running
+    _health_monitor_running = True
+    try:
+        while True:
+            try:
+                rsp = await health_check()
+                ok = _probe_ok(rsp)
+                _record_probe(ok, time.monotonic(), "" if ok else _describe_probe(rsp))
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("gateway 探活循环异常 / health monitor iteration failed")
+            await asyncio.sleep(_HEALTH_PROBE_INTERVAL_SECONDS)
+    finally:
+        _health_monitor_running = False
+
 
 def is_gateway_online() -> bool:
-    """Gateway 是否可达（10 秒缓存 + 30 秒失败宽限）。同步接口，供 serializer 调用。"""
+    """Gateway 是否可用（30 秒失败宽限）。同步接口，供 serializer 调用。
+
+    后台探活在跑时只读缓存，绝不阻塞请求线程。缓存太旧（探活协程停了、主循环卡住）
+    或根本没有后台探活（单测、脚本）时，退回旧的"10 秒 TTL + 现探"。
+    Reads the cache while the background monitor runs — never blocks a request thread.
+    Falls back to the old "10s TTL + inline probe" when the cache is stale or there
+    is no monitor (tests, scripts).
+    """
     now = time.monotonic()
-    if now - _health_cache["at"] < _HEALTH_TTL_SECONDS:
-        return _health_cache["online"]
+    at = _health_cache["at"]
+    if _health_monitor_running and at > 0.0 and now - at < _HEALTH_MONITOR_STALE_SECONDS:
+        return _online_at(now)
+
+    if now - at < _HEALTH_TTL_SECONDS:
+        return _online_at(now)
 
     try:
         rsp = run_on_main_loop(health_check(), timeout=5.0)
-        # dealerActive 也要算：连着但 dealer 通道没起来时，查得到持仓却一单都下不了，
-        # 界面不该显示「在线」。旧网关没有这个字段，缺省按可用处理。
-        # dealerActive counts too: connected without a dealer channel shows positions
-        # but can't place a single order. Older gateways omit it; default to usable.
-        ok = (
-            bool(rsp.get("ok"))
-            and bool(rsp.get("mt5Connected"))
-            and bool(rsp.get("dealerActive", True))
-        )
-    except Exception:
+        ok = _probe_ok(rsp)
+        detail = "" if ok else _describe_probe(rsp)
+    except Exception as e:
         ok = False
+        detail = "探活超时或异常 probe failed: %s" % e
 
-    _health_cache["at"] = now
-
-    if ok:
-        _health_cache["ok_at"] = now
-        _health_cache["online"] = True
-    else:
-        # 宽限期内沿用上一次的成功结果。ok_at > 0 的判断不能省：进程刚起来时
-        # ok_at 还是 0，而 monotonic() 的起点因平台而异，可能恰好小于宽限期，
-        # 那样会在从未成功探活过的情况下报「在线」。
-        # The ok_at > 0 check matters: at startup ok_at is 0 and monotonic()'s
-        # origin is platform-dependent, so without it a never-probed process
-        # could report online.
-        _health_cache["online"] = (
-            _health_cache["ok_at"] > 0.0
-            and now - _health_cache["ok_at"] < _HEALTH_GRACE_SECONDS
-        )
-
-    return _health_cache["online"]
+    return _record_probe(ok, now, detail)

@@ -154,6 +154,14 @@ async def lifespan(app: FastAPI):
     # 多 worker 时每个进程都要跑的 WS 转发订阅与在线名单续期（单 worker 为空）。
     # Per-worker WS fan-out subscriber and presence refresh (empty on a single worker).
     cross_worker_tasks = manager.start_cross_worker_tasks() + bridge_wake.start_tasks()
+    # 网关探活：每个 worker 一条，不选主——每个 worker 的请求线程都要读在线状态，
+    # 各自要有新鲜的缓存（见 gateway_client.gateway_health_monitor_loop）。
+    # Gateway liveness probe: one per worker, not leader-elected, since every
+    # worker's request threads read the liveness cache.
+    from app.services.gateway_client import gateway_health_monitor_loop
+    cross_worker_tasks.append(
+        asyncio.create_task(gateway_health_monitor_loop(), name="gateway-health")
+    )
     yield
     # 关闭：停止后台任务（多 worker 时顺带释放领导锁）/ shutdown: stop background tasks
     loops.shutdown()

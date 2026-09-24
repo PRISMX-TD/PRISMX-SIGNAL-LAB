@@ -13,6 +13,9 @@ import app.services.gateway_client as gc
 
 def _reset(monkeypatch, clock):
     monkeypatch.setattr(gc.time, "monotonic", clock)
+    # 默认按"没有后台探活"跑（单测与脚本的情形），走请求里现探的旧路径。
+    # Default to "no background monitor", i.e. the inline-probe fallback path.
+    monkeypatch.setattr(gc, "_health_monitor_running", False)
     gc._health_cache.update({"at": 0.0, "online": False, "ok_at": 0.0})
 
 
@@ -124,3 +127,130 @@ def test_older_gateway_without_dealer_field_still_online(monkeypatch):
     _reset(monkeypatch, clock)
     _probe(monkeypatch, [{"ok": True, "mt5Connected": True}])
     assert gc.is_gateway_online() is True
+
+
+# ---- 后台探活 / background monitor ------------------------------------------------
+#
+# 在线状态原来是请求线程里现探的：TTL 一过，下一个请求就在自己的线程里干等 /health
+# （最长 5 秒）且攥着数据库连接，并发请求各探一次，网关一慢整站跟着堵。现在由每个
+# worker 一条后台协程探活，请求只读缓存。
+# Liveness used to be probed on request threads (blocking up to 5s while holding a
+# DB connection, no single-flight). A per-worker background task now probes and
+# requests only read the cache.
+
+
+def _no_inline_probe(monkeypatch):
+    def forbidden(coro, timeout):
+        coro.close()
+        raise AssertionError("后台探活在跑时，请求线程不该自己探活 / request thread must not probe")
+
+    monkeypatch.setattr(gc, "run_on_main_loop", forbidden)
+
+
+def test_monitor_running_reads_cache_without_probing(monkeypatch):
+    clock = _Clock()
+    _reset(monkeypatch, clock)
+    monkeypatch.setattr(gc, "_health_monitor_running", True)
+    gc._record_probe(True, clock())
+    _no_inline_probe(monkeypatch)
+
+    clock.advance(gc._HEALTH_TTL_SECONDS + 1)   # 旧路径这里会现探 / old path would probe here
+    assert gc.is_gateway_online() is True
+
+
+def test_monitor_failures_respect_the_same_grace(monkeypatch):
+    """后台探活失败也是 30 秒宽限，不会一次失败就闪离线。"""
+    clock = _Clock()
+    _reset(monkeypatch, clock)
+    monkeypatch.setattr(gc, "_health_monitor_running", True)
+    _no_inline_probe(monkeypatch)
+
+    gc._record_probe(True, clock())
+    clock.advance(5)
+    gc._record_probe(False, clock(), "mt5Connected=False dealerActive=True")
+    assert gc.is_gateway_online() is True
+
+    clock.advance(gc._HEALTH_GRACE_SECONDS)
+    gc._record_probe(False, clock(), "mt5Connected=False dealerActive=True")
+    assert gc.is_gateway_online() is False
+
+
+def test_stale_monitor_falls_back_to_inline_probe(monkeypatch):
+    """探活协程停了（或主循环卡住）时，缓存不能永远被当成新鲜的。
+    A stalled monitor must not have its last verdict trusted forever."""
+    clock = _Clock()
+    _reset(monkeypatch, clock)
+    monkeypatch.setattr(gc, "_health_monitor_running", True)
+    gc._record_probe(True, clock())
+    probes = {"n": 0}
+
+    def fake(coro, timeout):
+        coro.close()
+        probes["n"] += 1
+        return _DOWN
+
+    monkeypatch.setattr(gc, "run_on_main_loop", fake)
+
+    clock.advance(gc._HEALTH_MONITOR_STALE_SECONDS + 1)
+    assert gc.is_gateway_online() is True          # 现探失败，但仍在宽限期内 / still in grace
+    assert probes["n"] == 1                        # 缓存太旧，确实现探了 / it did probe inline
+
+    clock.advance(gc._HEALTH_GRACE_SECONDS)
+    assert gc.is_gateway_online() is False
+    assert probes["n"] == 2
+
+
+def test_verdict_flips_are_logged(monkeypatch, caplog):
+    """在线状态每次翻转都要留一行日志：排查「连接不稳定」时这是第一手证据。"""
+    clock = _Clock()
+    _reset(monkeypatch, clock)
+
+    with caplog.at_level("INFO", logger="prismx.gateway"):
+        gc._record_probe(True, clock())
+        clock.advance(gc._HEALTH_GRACE_SECONDS + 1)
+        gc._record_probe(False, clock(), "mt5Connected=False dealerActive=True")
+        clock.advance(1)
+        gc._record_probe(False, clock(), "mt5Connected=False dealerActive=True")  # 不再翻转 / no flip
+
+    flips = [r.getMessage() for r in caplog.records if "在线状态" in r.getMessage()]
+    assert len(flips) == 2
+    assert "在线" in flips[0]
+    assert "离线" in flips[1] and "mt5Connected=False" in flips[1]
+
+
+def test_monitor_loop_probes_and_feeds_the_cache(monkeypatch):
+    """跑一小段真实的探活协程：结果写进缓存，is_gateway_online 读到的是它。"""
+    import asyncio
+
+    # 不能用 _reset 的假时钟：它替换的是整个 time.monotonic，asyncio 的调度也靠它，
+    # 时钟不走 sleep 就永远醒不来。这里用真实时间。
+    # Not _reset's fake clock: it replaces time.monotonic globally, which asyncio's
+    # scheduler relies on, so sleeps would never wake. Real time here.
+    monkeypatch.setattr(gc, "_health_monitor_running", False)
+    monkeypatch.setitem(gc._health_cache, "at", 0.0)
+    monkeypatch.setitem(gc._health_cache, "online", False)
+    monkeypatch.setitem(gc._health_cache, "ok_at", 0.0)
+    _no_inline_probe(monkeypatch)
+    monkeypatch.setattr(gc, "_HEALTH_PROBE_INTERVAL_SECONDS", 0.01)
+    calls = {"n": 0}
+
+    async def fake_health():
+        calls["n"] += 1
+        return {"ok": True, "mt5Connected": True, "dealerActive": True}
+
+    monkeypatch.setattr(gc, "health_check", fake_health)
+
+    async def main():
+        task = asyncio.create_task(gc.gateway_health_monitor_loop())
+        await asyncio.sleep(0.05)
+        assert gc._health_monitor_running is True
+        assert gc.is_gateway_online() is True
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(main())
+    assert calls["n"] >= 2
+    assert gc._health_monitor_running is False   # 协程退出后回到现探 / back to inline probing
