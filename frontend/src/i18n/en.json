@@ -2040,8 +2040,9 @@
         {
           "h": "What the Service is, and what it isn't",
           "p": [
-            "The Service is a trading-signal and execution toolkit: we show you signals produced by technical indicators, and provide a local bridge app that forwards your confirmed instructions to your own MT5 terminal.",
-            "The Service is not an advisory service and does not constitute investment advice, an offer, or a solicitation. We do not decide for you, do not trade on your behalf, and never touch or custody your funds — your money stays in your own broker account at all times.",
+            "The Service is a trading-signal and execution toolkit: we show you signals produced by technical indicators, and provide two ways to route your instructions to your MT5 account — through a partner broker's direct gateway, or through a bridge app running on your own computer.",
+            "The Service is not an advisory service and does not constitute investment advice, an offer, or a solicitation. We do not make trading decisions for you, and never touch or custody your funds — your money stays in your own broker account at all times.",
+            "Automated features such as strategy auto-orders, break-even and trailing stops are only active once you switch them on and configure them yourself. Instructions sent under rules you set are treated as instructions you gave personally, and you can switch these features off at any time.",
             "Whether to trade, what to trade and at what size are entirely your decisions, and the consequences are entirely yours. The Service makes no promise or guarantee about any trading outcome."
           ]
         },
@@ -2072,7 +2073,7 @@
         {
           "h": "Third-party services",
           "p": [
-            "The Service depends on several third parties: your MT5 broker (trade execution), TradingView (signal source), NOWPayments (payments), Google (optional sign-in), and browser vendors' push services.",
+            "The Service depends on several third parties: your MT5 broker (trade execution), the partner broker's direct gateway (routing instructions and verifying bindings in direct mode), TradingView (signal source), NOWPayments (payments), Google (optional sign-in), and browser vendors' push services.",
             "Each has its own terms and policies, independent of these terms, and we are not responsible for their availability, execution quality or conduct. In particular, your final fill price, spread, slippage and any rejection are entirely determined by your broker."
           ]
         },
@@ -2084,11 +2085,30 @@
           ]
         },
         {
+          "h": "No warranty and force majeure",
+          "p": [
+            "The Service — including signals, statistics, backtest results and execution tools — is provided \"as is\" and \"as available\". To the maximum extent permitted by law, we make no warranty of any kind, express or implied, including as to accuracy, timeliness, merchantability, fitness for a particular purpose or non-infringement.",
+            "We are not liable for interruption, delay or failure to execute caused by force majeure or events beyond our reasonable control, including natural disasters, network or power failures, failures of upstream data feeds, brokers or gateway providers, cyberattacks, and changes in law, regulation or regulatory requirements."
+          ]
+        },
+        {
           "h": "Limitation of liability",
           "p": [
             "To the maximum extent permitted by law, we are not liable for any trading loss, lost profit, lost opportunity or indirect loss arising from your use of, or inability to use, the Service.",
-            "Whatever the cause of action, our total aggregate liability to you is capped at the subscription fees you actually paid us in the twelve months preceding the event giving rise to the claim.",
+            "Whatever the cause of action, our total aggregate liability to you is capped at the greater of the subscription fees you actually paid us in the twelve months preceding the event giving rise to the claim, or USD 100.",
             "Nothing here excludes or limits liability that cannot be excluded by law."
+          ]
+        },
+        {
+          "h": "Indemnity",
+          "p": [
+            "You agree to indemnify and hold us harmless from any third-party claim, loss or expense (including reasonable legal fees) arising from your breach of these terms, your violation of applicable law, or your infringement of any third party's rights."
+          ]
+        },
+        {
+          "h": "Restricted jurisdictions",
+          "p": [
+            "The Service is not offered to persons in countries or regions whose laws prohibit or restrict trading tools, signal services or cryptocurrency payments of this kind. You are responsible for confirming that your use of the Service is lawful where you are, and you must not circumvent regional restrictions using a VPN, proxy or false information. Any consequences of violating your local law are yours alone."
           ]
         },
         {
@@ -2096,7 +2116,7 @@
           "p": [
             "We may update these terms from time to time. Substantive changes will be reflected in the \"Last updated\" date on this page and, where reasonable, flagged in the app. Continuing to use the Service after a change means you accept the new terms.",
             "You may stop using the Service at any time and may contact us to delete your account. We may also terminate your account for a serious breach of these terms.",
-            "The limitation-of-liability section survives termination."
+            "The no-warranty, limitation-of-liability and indemnity sections survive termination."
           ]
         }
       ]
@@ -2118,10 +2138,10 @@
         {
           "h": "What we don't collect",
           "p": [
-            "We never obtain — and technically cannot obtain — your MT5 trading account password. The bridge app reads terminals you have already logged into on your own computer.",
+            "In bridge mode we never obtain your MT5 trading account password — the bridge app reads terminals you have already logged into on your own computer. In direct mode, the MT5 main password you enter when binding is passed over an encrypted channel to the broker gateway for a one-time verification only; we do not store it.",
             "We never touch or custody any of your funds.",
             "We do not collect identity documents, bank card numbers or postal addresses. Crypto payments are handled by NOWPayments; we retain only the payment id, amount, currency and status.",
-            "We do not sell your personal data, nor trade it for any third party's marketing resources. Your browser's local storage holds only your login token and interface preferences (language, chart settings, selected tab)."
+            "We do not sell your personal data. Your browser's local storage holds only your login token and interface preferences (language, chart settings, selected tab)."
           ]
         },
         {
@@ -2144,8 +2164,8 @@
         {
           "h": "Who we share it with",
           "p": [
-            "We do not sell your personal data and do not trade it with anyone for marketing.",
-            "To operate, necessary data reaches these providers: Google (only if you use Google sign-in, to verify your identity), NOWPayments (payment processing), browser vendors' push services such as Google / Apple / Mozilla (only when notifications are on, to deliver them), and the cloud and database providers named above.",
+            "We do not sell your personal data.",
+            "To operate, necessary data reaches these providers: Google (only if you use Google sign-in, to verify your identity), the partner broker's direct gateway (only in direct mode, to verify bindings and route trade instructions), NOWPayments (payment processing), browser vendors' push services such as Google / Apple / Mozilla (only when notifications are on, to deliver them), and the cloud and database providers named above.",
             "Advertising measurement: this site loads the Meta Pixel (Facebook advertising pixel). It stores cookies such as `_fbp` in your browser and reports which pages of this site you visited back to Meta, so we can measure ad performance and show retargeted ads. It cannot read your MT5 account, positions, trade history or payment details. You can limit this tracking through your browser's cookie settings, an ad blocker, or the Ad Preferences section of your Meta account.",
             "We may disclose information where legally required, or where necessary to protect the Service and its users' legitimate interests."
           ]
