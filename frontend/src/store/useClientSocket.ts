@@ -56,6 +56,9 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     let reconnectTimer: number | undefined
     let heartbeatTimer: number | undefined
     let deadlineTimer: number | undefined
+    // 当前期限到点的时刻（performance.now()），没有期限时无意义。
+    // When the pending deadline fires (performance.now()); meaningless without one.
+    let deadlineAt = 0
     let closed = false
     // 连续重连次数，只用于计算退避间隔；鉴权成功后归零。
     // Consecutive reconnect count, used only to compute the backoff delay;
@@ -99,6 +102,28 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       deadlineTimer = undefined
     }
 
+    // 给出"时限内必须收到任何帧"的期限，但**绝不把已有的期限往后推**。
+    //
+    // 以前每次 PING 都先清掉旧期限再重新计时。心跳间隔与时限同为 10 秒时，下一次
+    // PING 总是恰好在旧期限到点前一刻到来，把它清掉、再往后推 10 秒——期限永远不会
+    // 触发，僵尸连接也就永远认不出来（切回前台的 5 秒探测同理，常被下一次心跳顶掉）。
+    // 现在只有"收到一帧"能清掉期限；新的 PING 只能把期限提前（比如切回前台的短时限），
+    // 不能推迟。
+    //
+    // Arm the "some frame must arrive by then" deadline, but never push an existing
+    // one later. Each PING used to clear and re-arm it; with a 10s interval equal to
+    // the 10s timeout the next PING always landed just before the old deadline and
+    // postponed it again, so it never fired and zombies were never caught (the 5s
+    // resume probe was often overridden the same way). Now only an incoming frame
+    // clears the deadline; a new PING may bring it forward, never push it back.
+    const armDeadline = (timeoutMs: number) => {
+      const due = performance.now() + timeoutMs
+      if (deadlineTimer !== undefined && deadlineAt <= due) return
+      clearDeadline()
+      deadlineAt = due
+      deadlineTimer = window.setTimeout(dropDeadConnection, timeoutMs)
+    }
+
     const stopHeartbeat = () => {
       if (heartbeatTimer) window.clearInterval(heartbeatTimer)
       heartbeatTimer = undefined
@@ -137,9 +162,9 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       connect()
     }
 
-    // 发一帧 PING，并给出"时限内必须收到任何帧"的最后期限；任何一帧到达都会在
-    // onmessage 里清掉这个期限。/ Send a PING and arm the "any frame must arrive
-    // by then" deadline; any incoming frame clears it in onmessage.
+    // 发一帧 PING，并给出"时限内必须收到任何帧"的最后期限（见 armDeadline）；任何一帧
+    // 到达都会在 onmessage 里清掉这个期限。/ Send a PING and arm the "any frame must
+    // arrive by then" deadline (see armDeadline); any incoming frame clears it in onmessage.
     const probe = (timeoutMs: number) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       try {
@@ -150,8 +175,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         dropDeadConnection()
         return
       }
-      clearDeadline()
-      deadlineTimer = window.setTimeout(dropDeadConnection, timeoutMs)
+      armDeadline(timeoutMs)
     }
 
     const startHeartbeat = () => {
