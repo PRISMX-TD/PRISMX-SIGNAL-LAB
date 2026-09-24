@@ -746,7 +746,42 @@ GATEWAY_PENDING_INTERVAL = 5.0
 # concurrency is worse though: the gateway side is a single Manager API
 # connection, so flooding it just causes queueing and timeouts. 8 is the
 # compromise.
+#
+# （2026-09-24）网关现在有独立的查询连接（gateway.ini 的 read_channels），查询不再
+# 与下单抢同一条连接；但查询连接也就两三条，这里放得再宽也只是在网关那边排队，
+# 所以上限不变。真正让一轮变慢的是下面两件事，已分别处理：单个用户卡住会拖住整轮
+# （见 GATEWAY_TICK_WAIT），自动仓管的下单占着名额等 dealer（改为在名额之外执行）。
+# (2026-09-24) The gateway now carries queries on separate connections, but only
+# two or three of them, so a wider cap would just queue there. What actually slowed
+# ticks — one stuck user holding the round, and auto-management trades waiting on
+# the dealer inside a slot — is handled separately (GATEWAY_TICK_WAIT, and running
+# auto-management outside the slot).
 GATEWAY_MAX_CONCURRENT_USERS = 8
+
+# 慢拍每一轮最多等多久就进入下一轮。
+#
+# 以前一轮要等**所有**用户都处理完才睡下一个 2 秒：只要有一个用户的某次读取卡住
+# （网关慢、查询连接半开，旧版一卡 60 秒），全体网关用户的持仓、浮盈、余额一起冻住，
+# 用户看到的就是「连接不稳定」。现在每个用户各自一个任务：正常情况下仍等这一轮全部
+# 做完（节奏与以前一样），但最多等这么久；还没做完的用户在后台继续，下一轮跳过它，
+# 其他人照常刷新。
+# How long a slow tick waits before moving on. A tick used to wait for every user,
+# so one stuck read froze positions, P/L and balances for all gateway users. Each
+# user is now its own task: normally the tick still waits for all of them (same
+# cadence as before), but at most this long; a user still in flight carries on in
+# the background and is skipped next tick while everyone else refreshes.
+GATEWAY_TICK_WAIT = 5.0
+
+# 已确认空仓的账号多久复查一次持仓。
+#
+# 空仓账号平时靠 ADD 事件唤醒、慢拍跳过它们。但事件会丢：网关的事件队列是**整个券商
+# 服务器**共用的（满 10000 条丢最老的），没人在线时事件泵也不拉；丢了一条 ADD，这个
+# 账号的新仓位就永远不会出现在界面上。定期复查一次把这种情况的上限压到这个间隔。
+# How often a known-flat account is re-read anyway. Flat accounts are skipped and
+# woken by ADD events, but events can be lost (the gateway queue is shared by the
+# whole broker server and drops the oldest past 10,000; the pump doesn't drain while
+# nobody is online). One lost ADD used to hide a new position forever; this bounds it.
+GATEWAY_FLAT_RECHECK_INTERVAL = 30.0
 
 # 平仓明细扫描间隔与回看窗口。
 #
@@ -1480,6 +1515,68 @@ async def gateway_positions_loop() -> None:
     # Cap in-flight users per tick so we don't saturate the gateway's single link.
     sem = asyncio.Semaphore(GATEWAY_MAX_CONCURRENT_USERS)
 
+    # login -> 上次真正读过持仓的时刻。空仓账号靠它定期复查（GATEWAY_FLAT_RECHECK_INTERVAL）。
+    # login -> last actual positions read; drives the flat-account recheck.
+    last_positions_read: dict[str, float] = {}
+
+    # 慢拍里仍在处理中的用户：上一轮还没做完的，这一轮跳过，不叠第二个任务。
+    # Users whose slow-tick task is still running; skipped rather than doubled up.
+    users_in_flight: set[str] = set()
+
+    # 自动仓管仍在执行中的用户。评估一旦触发下单，会在工作线程里同步等 dealer 回执
+    # （最长两分多钟）；以前它就在慢拍的名额里等，这期间整轮都停着。现在挪到名额之外
+    # 单独跑，同一用户同一时刻只跑一份——两份并发评估会在各自提交之前都看到"还没
+    # 分批止盈"，于是各下一笔平仓。
+    # Users with an auto-management pass still running. A pass that fires an order
+    # waits for the dealer synchronously (minutes, worst case) and used to do so
+    # inside a tick slot, stalling the round. It now runs outside the slot, one per
+    # user at a time: two concurrent passes would each see "not yet partially closed"
+    # before either commits and both send a close.
+    auto_manage_in_flight: set[str] = set()
+
+    # 慢拍与事件泵派出去的后台任务。留着引用（否则可能被 GC 回收），循环退出时一并取消。
+    # Tasks spawned by the tick and the pump; referenced so they aren't GC'd, and
+    # cancelled when the loop exits.
+    side_tasks: set[asyncio.Task] = set()
+
+    def _spawn(coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        side_tasks.add(task)
+        task.add_done_callback(side_tasks.discard)
+        return task
+
+    def _reconcile_sync(user_id: str, data: list[dict]) -> None:
+        """胜率对账。会话在工作线程里自己开关：外层任务被取消时线程仍会跑完，
+        会话不能由外层先关掉。/ Owns its session inside the worker thread, so a
+        cancelled caller can never close it while the thread is still using it."""
+        db = SessionLocal()
+        try:
+            mark_positions_seen(db, user_id, data)
+        finally:
+            db.close()
+
+    def _auto_manage_sync(user_id: str, data: list[dict]) -> None:
+        """自动仓位管理：评估规则，触发了就在这里直接执行 gateway 指令。
+        在飞标记也在线程里清：只有评估真正结束，同一用户才允许下一份评估开始。
+        Auto-management pass. The in-flight mark is cleared here in the thread, so
+        the next pass for this user can only start once this one has truly ended."""
+        db = SessionLocal()
+        try:
+            evaluate_positions(db, user_id, data)
+        except Exception:
+            logger.exception("gateway auto_manage failed (user=%s)", user_id)
+        finally:
+            db.close()
+            auto_manage_in_flight.discard(user_id)
+
+    async def _run_auto_manage(user_id: str, data: list[dict]) -> None:
+        try:
+            await run_in_threadpool(_auto_manage_sync, user_id, data)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("gateway auto_manage task failed (user=%s)", user_id)
+
     async def _scan_deals(user_id: str, login: str) -> None:
         """拉取并入库一个账号的平仓明细。
 
@@ -1559,6 +1656,7 @@ async def gateway_positions_loop() -> None:
         """
         data: list[dict] = []
         for lg in logins:
+            last_positions_read[lg] = time.monotonic()
             rows, ok = await _read_positions(lg)
             if not ok:
                 # 某个账号读失败：放弃这次即时推送，交给慢拍。
@@ -1636,9 +1734,19 @@ async def gateway_positions_loop() -> None:
                 # refresh. Safe because entries come only from an actual empty
                 # poll, and only while the subscription is alive to re-add them
                 # via ADD events. Worst case is redundant polling, never a miss.
-                if subscription_state["alive"] and login in known_flat:
+                #
+                # 例外是定期复查（GATEWAY_FLAT_RECHECK_INTERVAL）：ADD 事件是会丢的，
+                # 丢了一条就不能让这个账号永远被跳过。
+                # Except for the periodic recheck: ADD events can be lost, and one lost
+                # event must not hide the account forever.
+                if (
+                    subscription_state["alive"]
+                    and login in known_flat
+                    and now - last_positions_read.get(login, 0.0) < GATEWAY_FLAT_RECHECK_INTERVAL
+                ):
                     continue
 
+                last_positions_read[login] = now
                 rows, ok = await _read_positions(login)
                 if not ok:
                     # 读失败就放弃整轮推送，与快拍保持一致（见 _push_user_snapshot）。
@@ -1701,18 +1809,31 @@ async def gateway_positions_loop() -> None:
 
             # 与 /bridge/positions 保持一致：驱动胜率对账与自动仓管。
             # 任一步失败都不影响持仓推送本身。
-            db = SessionLocal()
             try:
-                try:
-                    await run_in_threadpool(mark_positions_seen, db, user_id, data)
-                except Exception:
-                    logger.exception("gateway position reconciliation failed (user=%s)", user_id)
-                try:
-                    await run_in_threadpool(evaluate_positions, db, user_id, data)
-                except Exception:
-                    logger.exception("gateway auto_manage failed (user=%s)", user_id)
-            finally:
-                db.close()
+                await run_in_threadpool(_reconcile_sync, user_id, data)
+            except Exception:
+                logger.exception("gateway position reconciliation failed (user=%s)", user_id)
+
+            # 自动仓管挪到名额之外跑（见 auto_manage_in_flight）。上一份还没结束就跳过
+            # 这一拍：下一拍拿到的是更新的持仓，由它来评估。
+            # Auto-management runs outside the slot (see auto_manage_in_flight). If the
+            # previous pass is still running, skip this tick; the next one evaluates
+            # fresher positions anyway.
+            if user_id not in auto_manage_in_flight:
+                auto_manage_in_flight.add(user_id)
+                _spawn(_run_auto_manage(user_id, data))
+
+    async def _run_user(user_id: str, logins: list[str]) -> None:
+        """慢拍里一个用户的任务：跑完（或失败）才清掉在飞标记。
+        One user's slow-tick task; the in-flight mark clears only when it ends."""
+        try:
+            await _process_user(user_id, logins)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("gateway user tick failed (user=%s)", user_id)
+        finally:
+            users_in_flight.discard(user_id)
 
     def _accounts_by_user(pairs: list[tuple[str, str]]) -> dict[str, list[str]]:
         """(user_id, login) 列表聚合成 user_id -> [login]。
@@ -1865,13 +1986,16 @@ async def gateway_positions_loop() -> None:
                         for uid in owner.get(login, ()):
                             deal_scans.append(_scan_deals(uid, login))
 
-                    if deal_scans:
-                        results = await asyncio.gather(*deal_scans, return_exceptions=True)
-                        for r in results:
-                            if isinstance(r, asyncio.CancelledError):
-                                raise r
-                            if isinstance(r, Exception):
-                                logger.error("gateway 成交事件扫描失败", exc_info=r)
+                    # 扫描派到后台跑，不在这一拍里等：首扫要回看 7 天甚至一年，一批跟单
+                    # 平仓又会同时触发几十个账号，以前全部等完才轮到下面的持仓快照与
+                    # 下一拍事件，0.25 秒的快拍就这样被拖成十几秒。_scan_deals 自带
+                    # 防重（deals_in_flight）与异常兜底。
+                    # Scans run in the background instead of holding this beat: first
+                    # scans look back a week or a year and a copy-trade burst fires
+                    # dozens at once, which used to stretch the 250ms pump to many
+                    # seconds. _scan_deals dedupes and catches its own errors.
+                    for scan in deal_scans:
+                        _spawn(scan)
 
                     if affected:
                         results = await asyncio.gather(
@@ -1921,28 +2045,22 @@ async def gateway_positions_loop() -> None:
                 targets = [(uid, lg) for uid, lg in by_user.items() if uid in connected]
 
                 if targets:
-                    # 并发跑各用户，并发度由 sem 限制。
-                    # return_exceptions=True 是关键：单个用户炸了不能让整轮中断，
-                    # 否则一个坏账号会连带拖停所有人的持仓推送。
-                    # return_exceptions=True matters: one user blowing up must not
-                    # abort the tick, or a single bad account would stall everyone's
-                    # position pushes.
-                    results = await asyncio.gather(
-                        *(_process_user(uid, lg) for uid, lg in targets),
-                        return_exceptions=True,
-                    )
-                    for (uid, _), r in zip(targets, results):
-                        if isinstance(r, asyncio.CancelledError):
-                            # 关服时的正常取消，往上抛让循环退出
-                            raise r
-                        if isinstance(r, Exception):
-                            # 用 error + exc_info 而不是 exception()：这里不在 except
-                            # 块里，exception() 取不到当前异常，只能显式传。
-                            # error(exc_info=...) rather than exception(): we're not
-                            # inside an except block, so there's no "current" exception.
-                            logger.error(
-                                "gateway user tick failed (user=%s)", uid, exc_info=r
-                            )
+                    # 每个用户一个任务，并发度由 sem 限制。上一轮还没做完的用户这一轮
+                    # 跳过；这一轮最多等 GATEWAY_TICK_WAIT 秒，卡住的用户留在后台继续，
+                    # 不再拖住其他人（见 GATEWAY_TICK_WAIT）。单个用户炸了只记日志，
+                    # 不影响别人（_run_user 里兜住）。
+                    # One task per user, concurrency capped by sem. Users still in flight
+                    # from the last tick are skipped; this tick waits at most
+                    # GATEWAY_TICK_WAIT and a stuck user carries on in the background
+                    # instead of holding everyone else. Failures are contained in _run_user.
+                    spawned = []
+                    for uid, lg in targets:
+                        if uid in users_in_flight:
+                            continue
+                        users_in_flight.add(uid)
+                        spawned.append(_spawn(_run_user(uid, lg)))
+                    if spawned:
+                        await asyncio.wait(spawned, timeout=GATEWAY_TICK_WAIT)
 
             except asyncio.CancelledError:
                 raise
@@ -1957,3 +2075,9 @@ async def gateway_positions_loop() -> None:
         await _positions_loop()
     finally:
         pump_task.cancel()
+        # 关服或换主：派出去的用户任务、扫描、自动仓管一并取消。工作线程里的那一段
+        # 会自己跑完（线程取消不了，也各自管着自己的数据库会话）。
+        # Shutdown or handover: cancel spawned user tasks, scans and auto-management.
+        # Work already in a thread finishes on its own and owns its own DB session.
+        for task in list(side_tasks):
+            task.cancel()
