@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback, u
 import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
+import { applyAccountsStatus } from './accountsStatus'
 import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
@@ -521,23 +522,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // 余额随消息带过来，不必为了拿它再请求一次 /bridge/accounts。
         // Account liveness or balance changed. Both are applied in place; the
         // balance rides along, so no extra /bridge/accounts request is needed.
+        // gateway 账号不吃这条消息里的在线名单，见 applyAccountsStatus。
+        // Gateway accounts ignore this message's online list; see applyAccountsStatus.
         const data = msg.data as { onlineLogins?: string[]; balances?: Record<string, number> }
-        const online = new Set(data?.onlineLogins || [])
-        const balances = data?.balances
         setAccounts((prev) =>
-          keepIfEqual(
-            prev,
-            prev.map((a) => {
-              const next = { ...a, online: online.has(a.login) }
-              // 只更新推送里出现的账号。未出现不代表余额归零，可能是该账号
-              // 当前离线、或来自 gateway 这条不走本推送的链路——一律保留原值。
-              // Only touch logins present in the push. Absence doesn't mean zero:
-              // the account may be offline, or come from the gateway path which
-              // doesn't use this message. Keep the existing value either way.
-              if (balances && a.login in balances) next.balance = balances[a.login]
-              return next
-            }),
-          ),
+          keepIfEqual(prev, applyAccountsStatus(prev, data?.onlineLogins, data?.balances)),
         )
         break
       }
