@@ -2428,18 +2428,33 @@ namespace Prismx.Mt5Gateway
             return r;
         }
 
+        /// <summary>发单前置步骤合计超过这个毫秒数就记一行分段耗时。
+        /// Log the per-step breakdown when the pre-send steps exceed this.</summary>
+        internal const int PrepSlowLogMs = 100;
+
         private TradeResult OpenPositionCore(ulong login, string symbol, bool isBuy, double lots,
             double stopLoss, double takeProfit, string tag)
         {
+            // 发单前各步分段计时。实盘日志里见过 dealer 只用 155ms、整笔却 1.7 秒的开仓,
+            // 多出来的时间就在这几步里;合计超过 PrepSlowLogMs 才记一行,平时不刷屏。
+            // Per-step timing before the dealer send. Live logs showed a 1.7s open whose
+            // dealer leg was 155ms; the rest is in these steps. Logged only when slow.
+            Stopwatch prep = Stopwatch.StartNew();
+
             // 自动补后缀:不同组需要不同后缀品种(如 EURUSD.s)
             symbol = ResolveSymbol(login, symbol);
+            long tResolve = prep.ElapsedMilliseconds;
 
             // 手数校验必须在补完后缀之后做,否则查不到品种、校验白写(详见
             // ValidateVolumeForSymbol 的注释)。非法手数不会被服务器当场拒绝,
             // 而是变成一张永不成交的订单,后患远大于一次明确的报错。
             // 手数限制按**账号所在组**读:组配置可以覆盖品种的最小/最大/步长。
             // Volume limits are read per account group, which can override the symbol's.
-            string volErr = ValidateVolumeForSymbol(symbol, GroupForLogin(login), lots, "开仓");
+            string group = GroupForLogin(login);
+            long tGroup = prep.ElapsedMilliseconds;
+
+            string volErr = ValidateVolumeForSymbol(symbol, group, lots, "开仓");
+            long tVolume = prep.ElapsedMilliseconds;
 
             if (volErr != null)
             {
@@ -2453,7 +2468,18 @@ namespace Prismx.Mt5Gateway
             double bid, ask;
             MTRetCode qres;
 
-            if (!GetQuote(symbol, out bid, out ask, out qres))
+            bool quoted = GetQuote(symbol, out bid, out ask, out qres);
+            long tQuote = prep.ElapsedMilliseconds;
+
+            if (tQuote >= PrepSlowLogMs)
+            {
+                Log.Warn("开仓前置步骤偏慢 {0}ms:品种解析 {1}ms,账号组 {2}ms,手数校验 {3}ms,取价 {4}ms"
+                    + "(login={5} {6})",
+                    tQuote, tResolve, tGroup - tResolve, tVolume - tGroup, tQuote - tVolume,
+                    login, symbol);
+            }
+
+            if (!quoted)
             {
                 return TradeResult.Fail(qres.ToString(),
                     "取价失败,无法下单(品种名是否正确?该品种是否有行情?)");

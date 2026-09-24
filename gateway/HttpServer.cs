@@ -1153,7 +1153,15 @@ namespace Prismx.Mt5Gateway
             MTRetCode res;
             string group;
 
-            if (!_link.CheckAccountGroup(login, out group, out res))
+            // 账号检查缓存过期时要向服务器查一次,慢了单独记一行(与开仓分段计时对照看)。
+            // A cache miss here costs a server round-trip; log it when slow.
+            Stopwatch checkSw = Stopwatch.StartNew();
+            bool allowed = _link.CheckAccountGroup(login, out group, out res);
+
+            if (checkSw.ElapsedMilliseconds >= Mt5Link.PrepSlowLogMs)
+                Log.Warn("账号可交易检查偏慢 {0}ms(login={1})", checkSw.ElapsedMilliseconds, login);
+
+            if (!allowed)
             {
                 WriteError(ctx, 404, res.ToString(), "账号不存在或无法读取");
                 return false;
