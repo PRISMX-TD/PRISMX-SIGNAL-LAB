@@ -2453,7 +2453,7 @@
     "tasks": {
       "set_nickname": "Make Your Mark — set a nickname",
       "bind_account": "Enter the Arena — bind your first MT5 account",
-      "first_trades_5": "First Steps — complete 5 trades total (demo counts)",
+      "first_trades_5": "First Steps — complete 5 trades placed on the platform (demo counts)",
       "streak_3": "Three-Day Pact — stay active 3 days in a row",
       "trade_days_30": "Thirty Days Strong — 30 real-account trading days",
       "trades_100": "Battle-Tested — complete 100 trades total",
