@@ -805,7 +805,8 @@ export default function AdminPage() {
   }
 
   return (
-    <div>
+    // 后台是内部工具，不加节日按钮小饰。/ admin is an internal tool: no festival button charms
+    <div data-fd-plain>
       <PageHead as="h1" title={t('admin.title')} subtitle={t('admin.subtitle')} />
 
       {toast && (

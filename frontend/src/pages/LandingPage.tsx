@@ -31,6 +31,9 @@ import { useTranslation } from 'react-i18next'
 import { paymentApi, inviteApi, readRef } from '../api/client'
 import { SUPPORT_EMAIL } from '../config/site'
 import Logo from '../components/Logo'
+import FestivalRibbon from '../festival/FestivalRibbon'
+import { FestivalCorner, FestivalGround, FestivalTopper } from '../festival/FestivalDecor'
+import { FestivalFinale } from '../festival/FestivalStage'
 import SocialLinks from '../components/SocialLinks'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import PedestalStage from '../components/badges/PedestalStage'
@@ -121,6 +124,8 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
           solid ? 'border-b border-white/[0.07] bg-ink-950/85 backdrop-blur-md' : 'border-b border-transparent'
         }`}
       >
+        {/* 节日问候条：顶栏最上方，可关闭。/ festival ribbon atop the nav, dismissible */}
+        <FestivalRibbon />
         <div className={`${SHELL} flex h-16 items-center gap-8`}>
           <a href="#top" className="flex shrink-0 items-center gap-2.5">
             <Logo size={30} />
@@ -143,8 +148,10 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
             >
               {t('landing.signIn')}
             </a>
-            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary h-10 px-4 text-[13px] lg:h-9">
+            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary relative h-10 px-4 text-[13px] lg:h-9">
               {t('landing.getStarted')}
+              {/* 顶栏按钮下面是滚动的内容：不挂会垂下去的装饰。/ nothing hangs from the header button */}
+              <FestivalTopper kind="button" hang={false} />
             </button>
           </div>
         </div>
@@ -215,7 +222,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
   }, [])
 
   return (
-    <section ref={ref} id="pricing" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
+    <section ref={ref} id="pricing" className={`${SHELL} relative scroll-mt-24 py-20 sm:py-28`}>
       <Heading title={t('landing.prTitle')} subtitle={t('landing.prSubtitle')} />
 
       <div className="mt-14 grid grid-cols-1 gap-5 lg:grid-cols-12">
@@ -244,7 +251,8 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
         </div>
 
         {/* PRO：实色紫面 / solid pigment plane */}
-        <div className="reveal reveal-d1 flex flex-col rounded-card bg-prism-600 p-7 lg:col-span-7">
+        <div className="reveal reveal-d1 relative flex flex-col rounded-card bg-prism-600 p-7 lg:col-span-7">
+          <FestivalTopper kind="card" />
           {/* 试用横幅：贯穿卡顶的实色金条。第一版是价格下方的白药丸，反馈是
               「不明显」——它和卡内其它元素同宽同层级，扫视时不占任何优先级。
               横幅解决的正是这个：它改变卡片的**轮廓**（顶部多出一条色带），
@@ -327,7 +335,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
 function ClosingCta({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate> }) {
   const ref = useReveal<HTMLElement>()
   return (
-    <section ref={ref} className={`${SHELL} py-20 sm:py-28`}>
+    <section ref={ref} className={`${SHELL} relative py-20 sm:py-28`}>
       <div className="rule-spectral reveal mb-12">
         <i />
       </div>
@@ -339,9 +347,10 @@ function ClosingCta({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavi
         <div className="lg:col-span-4 lg:col-start-9">
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-primary h-12 w-full px-8 text-[15px]"
+            className="btn btn-primary relative h-12 w-full px-8 text-[15px]"
           >
             {t('landing.ctaButton')}
+            <FestivalTopper kind="button" />
           </button>
           <p className="mt-3 text-[12px] text-neutral-500">{t('landing.ctaNote')}</p>
         </div>
@@ -361,7 +370,8 @@ function Foot({ t }: { t: T }) {
     { h: '#faq', k: 'navFaq' },
   ]
   return (
-    <footer className="border-t border-white/[0.07]">
+    <footer className="relative border-t border-white/[0.07]">
+      <FestivalGround sit />
       <div className={`${SHELL} grid grid-cols-2 gap-x-8 gap-y-10 py-14 md:grid-cols-12`}>
         <div className="col-span-2 md:col-span-4">
           <div className="flex items-center gap-2.5">
@@ -494,13 +504,21 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
     </>
   )
   return (
-    <section ref={ref} id="rank" className={`${SHELL} scroll-mt-24 py-20 sm:py-28`}>
+    <section ref={ref} id="rank" className={`${SHELL} relative scroll-mt-24 py-20 sm:py-28`}>
       <Heading title={t('landing.ggTitle')} subtitle={t('landing.ggSubtitle')} />
 
       {/* ── 进阶：成就页陈列台 / climb: the achievements stage ── */}
       <div className="ach reveal mt-12">
         <h3 className="mb-4 text-[13px] font-semibold text-neutral-400">{t('landing.ggClimb')}</h3>
         <div className="ach-stage">
+          {/* 节日角饰挂在陈列台卡片的右上角里：卡片的圆角和上沿是真实的边，丝线、松枝、
+              彩带都从这条边上出来（卡片裁掉超出的部分）。分区本身的上沿看不见，挂在那里
+              会悬在半空。
+              The festival corner sits inside the stage card's top-right corner: the
+              card's rounded corner and top edge are real edges, and threads, swags
+              and streamers come out of them (the card clips the overflow). The
+              section's own top edge is invisible, and anything hung there floats. */}
+          <FestivalCorner />
           <div className="ach-stage-l">
             <h4 className="ach-title">
               <span className="ach-lv num">L{CURRENT_LEVEL}</span>
@@ -636,7 +654,11 @@ export default function LandingPage() {
         <GrowthStage t={t} navigate={navigate} />
         <Pricing t={t} navigate={navigate} />
         <FaqSection />
-        <ClosingCta t={t} navigate={navigate} />
+        {/* 收尾区的节日布景铺满整宽，在文案之下。/ the full-width festival finale sits beneath the closing copy */}
+        <div className="relative">
+          <FestivalFinale />
+          <ClosingCta t={t} navigate={navigate} />
+        </div>
         <Foot t={t} />
         <MobileStickyCta />
       </div>

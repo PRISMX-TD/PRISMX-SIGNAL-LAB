@@ -39,6 +39,8 @@ import { PhoneChrome, ScreenRank, ScreenPlan, ScreenOrder, ScreenRecord, ScreenB
 import { createPhoneGL, type PhoneGLHandle } from './PhoneGL'
 import { useSectionProgress } from './useSectionProgress'
 import { onMediaQuery } from '../../utils/onMediaQuery'
+import FestivalStage from '../../festival/FestivalStage'
+import { FestivalTopper } from '../../festival/FestivalDecor'
 
 type T = (k: string) => string
 
@@ -505,6 +507,9 @@ export default function PhoneStory() {
       data-active={active}
     >
       <div className="story-stage">
+        {/* 节日布景：叠在手机和文案之下，只在第一幕出现。
+            Festival set dressing beneath the phone and copy, scene one only. */}
+        <FestivalStage scene={active} />
         {/* ── 手机 / the phone ── */}
         <div className="story-phone">
           <div className="dev-scene">
@@ -572,9 +577,10 @@ export default function PhoneStory() {
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3">
               <button
                 onClick={() => navigate('/login?mode=register')}
-                className="btn btn-primary h-11 px-6 text-[13px] sm:h-12 sm:px-7 sm:text-[15px] lg:h-[52px] lg:px-8 lg:text-[17px]"
+                className="btn btn-primary relative h-11 px-6 text-[13px] sm:h-12 sm:px-7 sm:text-[15px] lg:h-[52px] lg:px-8 lg:text-[17px]"
               >
                 {t('landing.ctaPrimary')}
+                <FestivalTopper kind="button" />
               </button>
               <a
                 href="#rank"

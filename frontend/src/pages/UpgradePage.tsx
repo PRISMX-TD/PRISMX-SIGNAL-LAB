@@ -693,7 +693,7 @@ export default function UpgradePage() {
             <button
               onClick={handlePay}
               disabled={loading || !selectedPlan}
-              className="btn-primary relative mt-6 flex w-full items-center justify-center gap-2 py-3.5 text-base disabled:opacity-60"
+              data-fd-plain className="btn-primary relative mt-6 flex w-full items-center justify-center gap-2 py-3.5 text-base disabled:opacity-60"
             >
               {loading ? (
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
@@ -738,7 +738,7 @@ export default function UpgradePage() {
         {expired ? (
           <div className="glass mt-6 p-8 text-center">
             <p className="text-sm leading-relaxed text-neutral-400">{t("upgrade.expiredRetry")}</p>
-            <button onClick={handleRetry} className="btn-primary mt-5 px-7 py-2.5">{t("upgrade.retry")}</button>
+            <button onClick={handleRetry} data-fd-plain className="btn-primary mt-5 px-7 py-2.5">{t("upgrade.retry")}</button>
           </div>
         ) : (
           <>
@@ -788,7 +788,7 @@ export default function UpgradePage() {
               </div>
               <button
                 onClick={() => copyAddress(state.payAddress)}
-                className={`btn-ghost mt-3.5 w-full py-2.5 ${copyState === "fail" ? "text-down" : ""}`}
+                data-fd-plain className={`btn-ghost mt-3.5 w-full py-2.5 ${copyState === "fail" ? "text-down" : ""}`}
               >
                 {copyState === "ok"
                   ? t("upgrade.copied")
@@ -811,7 +811,7 @@ export default function UpgradePage() {
             </div>
 
             <div className="mt-5 text-center">
-              <button onClick={handleRetry} className="btn-ghost px-6 py-2">{t("common.cancel")}</button>
+              <button onClick={handleRetry} data-fd-plain className="btn-ghost px-6 py-2">{t("common.cancel")}</button>
             </div>
           </>
         )}
@@ -861,7 +861,7 @@ export default function UpgradePage() {
             </p>
           </div>
         )}
-        <button onClick={handleRetry} className="btn-primary mt-7 px-8 py-3">{t("upgrade.retry")}</button>
+        <button onClick={handleRetry} data-fd-plain className="btn-primary mt-7 px-8 py-3">{t("upgrade.retry")}</button>
       </div>
     );
   }

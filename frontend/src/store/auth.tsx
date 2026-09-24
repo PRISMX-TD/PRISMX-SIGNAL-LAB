@@ -66,6 +66,11 @@ const LOGOUT_KEEP_KEYS = new Set([
   'prismx.ref',
   'prismx.ref.clicked',
   'prismx_bridge_update_dismissed_version',
+  // 节日装饰的开关与「已关闭问候」记录：设备偏好，与账号无关。
+  // Festival decoration switch and greeting dismissal: device preferences.
+  'prismx_festival_off',
+  'prismx_festival_dismissed',
+  'prismx_festival_demo',
 ])
 
 function clearUserScopedStorage() {

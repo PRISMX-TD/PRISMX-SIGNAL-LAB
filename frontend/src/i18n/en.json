@@ -2963,5 +2963,39 @@
     "reconnects": "Reconnects",
     "hint": "Round-trip time from this device to the PRISMX server. Under {{good}}ms is good; above {{fair}}ms quotes and orders may lag noticeably.",
     "language": "Language / 语言"
+  },
+  "festival": {
+    "names": {
+      "spring": "Lunar New Year",
+      "midautumn": "Mid-Autumn",
+      "halloween": "Halloween",
+      "christmas": "Christmas",
+      "newyear": "New Year"
+    },
+    "greeting": {
+      "spring": "Happy Lunar New Year",
+      "midautumn": "Happy Mid-Autumn Festival",
+      "halloween": "Happy Halloween",
+      "christmas": "Merry Christmas",
+      "newyear": "Happy New Year"
+    },
+    "newYearSub": "Here's to {{year}}",
+    "empty": {
+      "spring": "No new signals yet. The lanterns are keeping watch.",
+      "midautumn": "No new signals yet. Time to enjoy the moon.",
+      "halloween": "No new signals yet. The pumpkin is keeping watch.",
+      "christmas": "No new signals yet. The snow is still falling.",
+      "newyear": "No new signals yet. The year is just getting started."
+    },
+    "greetHintA": "Festival decorations can be turned off in ",
+    "greetHintLink": "account settings",
+    "greetHintB": ".",
+    "close": "Dismiss festival greeting",
+    "settings": {
+      "title": "Festival decorations",
+      "desc": "During festivals, the logo, greetings and empty states get festive artwork.",
+      "toggle": "Show festival decorations",
+      "toggleDesc": "When off, no festival appears. Market colours and buttons are never affected."
+    }
   }
 }

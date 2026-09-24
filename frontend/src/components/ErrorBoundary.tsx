@@ -125,6 +125,7 @@ function ErrorFallback({ kind }: { kind: ErrorKind }) {
         <p className="mt-2 text-sm text-neutral-400">{desc}</p>
         <button
           onClick={reload}
+          data-fd-plain
           className="btn-primary mt-6 h-11 w-full text-sm font-semibold"
         >
           {t('common.errorBoundary.reload')}

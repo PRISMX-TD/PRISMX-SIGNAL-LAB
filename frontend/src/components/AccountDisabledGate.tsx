@@ -102,7 +102,7 @@ export default function AccountDisabledGate() {
         )}
         <SocialLinks className="mt-4" />
 
-        <button onClick={logout} className="btn-primary mt-6 w-full py-2 text-sm">
+        <button onClick={logout} data-fd-plain className="btn-primary mt-6 w-full py-2 text-sm">
           {t('accountDisabled.logout')}
         </button>
       </div>

@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { useBackToClose } from "../utils/useBackToClose"
+import { FestivalTopper } from "../festival/FestivalDecor"
 
 export default function UserMenu({
   email,
@@ -70,9 +71,10 @@ export default function UserMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("nav.account")}
-        className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-prism-600/20 text-sm font-semibold text-prism-200 transition hover:bg-prism-600/30"
+        className="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-prism-600/20 text-sm font-semibold text-prism-200 transition hover:bg-prism-600/30"
       >
         {initial}
+        <FestivalTopper kind="avatar" />
       </button>
 
       {open && (

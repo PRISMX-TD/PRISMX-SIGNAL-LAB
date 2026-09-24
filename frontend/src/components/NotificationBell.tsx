@@ -28,6 +28,7 @@ import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
 import { useBackToClose } from "../utils/useBackToClose"
 import Switch from "./Switch"
+import { FestivalEmptyMini, FestivalTopper } from "../festival/FestivalDecor"
 
 type Status = "off" | "on" | "attention"
 const PANEL_ITEMS = 5
@@ -271,6 +272,7 @@ export default function NotificationBell() {
         ) : (
           status !== "off" && <i className="nb-dot" aria-hidden="true" />
         )}
+        <FestivalTopper kind="mini" />
       </button>
 
       {open && (
@@ -331,7 +333,10 @@ export default function NotificationBell() {
                 <span className="skeleton" style={{ display: "block", width: "85%", height: 10 }} />
               </div>
             ) : shown.length === 0 ? (
-              <p className="nb-empty">{t("notifPanel.noAnnouncements")}</p>
+              <p className="nb-empty">
+                <FestivalEmptyMini />
+                {t("notifPanel.noAnnouncements")}
+              </p>
             ) : (
               shown.map((a) => (
                 <Link

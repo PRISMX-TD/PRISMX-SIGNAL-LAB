@@ -16,6 +16,7 @@ import { SkeletonBlock, SkeletonLine } from "../components/Skeleton"
 import BadgeIcon from "../components/badges/BadgeIcon"
 import Switch from "../components/Switch"
 import PageHead from "../components/PageHead"
+import FestivalSetting from "../festival/FestivalSetting"
 import {
   ALL_SENTINEL,
   EVENT_STRATEGY_SIGNAL,
@@ -954,6 +955,9 @@ export default function AccountPage() {
             <PushDiagnostics />
           </div>
         </section>
+
+        {/* 节日装饰 / festival decorations */}
+        <FestivalSetting index={rowIndex++} />
       </div>
     </div>
   )

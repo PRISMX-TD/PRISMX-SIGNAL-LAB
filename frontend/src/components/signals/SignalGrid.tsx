@@ -12,6 +12,8 @@ import { effectiveStatus, fmtIssueClock, fmtPx, priceDecimals, resultLabel, resu
 import TtlRing from './TtlRing'
 import { useClock, useNewSignalIds } from './hooks'
 import { symbolMeta } from '../../utils/symbolMeta'
+import FestivalEmpty from '../../festival/FestivalEmpty'
+import { FestivalBurst } from '../../festival/FestivalDecor'
 
 interface Props {
   signals: Signal[]
@@ -262,9 +264,13 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           // say which symbol has nothing right now, or the reader concludes the
           // filter is broken.
           <div className="sig-empty">
-            {effectiveSymbol === 'ALL'
-              ? t('signals.focus.noExecutable')
-              : t('signals.noneForSymbol', { symbol: effectiveSymbol })}
+            {effectiveSymbol === 'ALL' ? (
+              // 整个面板为空时，节日期间换成节日插画；原句保留在插画下方。
+              // An empty panel shows festival art in season; the original line stays below it.
+              <FestivalEmpty fallback={t('signals.focus.noExecutable')} />
+            ) : (
+              t('signals.noneForSymbol', { symbol: effectiveSymbol })
+            )}
           </div>
         )}
         {filtered.map((sig, idx) => {
@@ -295,6 +301,10 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
               className={`card glass sig-card${newIds.has(sig.id) ? ' is-new' : ''}${isExpired ? ' is-expired' : ''}`}
               style={style}
             >
+              {/* 新信号进场：节日期间从右上角迸一小把节日碎片，牌面本身不动。
+                  A new arrival bursts a few festival shards from the top-right
+                  corner in season; the card itself is untouched. */}
+              {newIds.has(sig.id) && <FestivalBurst />}
               {/* 牌头：身份芯片 + 品种（展示字宽）+ 方向；右侧盈亏比。策略名与
                   发出时间从页脚挪到品种下面——它们是这条信号的「署名」，跟品种
                   是一组，不该和下单按钮挤在最后一行。

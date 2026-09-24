@@ -3,6 +3,7 @@ import { lazyRetry } from './utils/lazyRetry'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
+import { FestivalProvider, FESTIVAL_DEMO } from './festival/FestivalProvider'
 import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -22,6 +23,8 @@ import GrowthHub from './pages/GrowthHub'
 // lazyRetry, not bare lazy: retry, then one reload, then the error card.
 // Route-level code splitting: only the current page's code loads up front;
 // heavy pages (e.g. the charts page) load on demand.
+// 节日预览面板只在演示构建里加载。/ The festival preview panel only loads in demo builds.
+const FestivalDemoPanel = lazyRetry(() => import('./festival/demo/DemoPanel'), 'FestivalDemoPanel')
 const LandingPage = lazyRetry(() => import('./pages/LandingPage'), 'LandingPage')
 const LoginPage = lazyRetry(() => import('./pages/LoginPage'), 'LoginPage')
 const ResetPasswordPage = lazyRetry(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage')
@@ -125,6 +128,7 @@ export default function App() {
   return (
     <AuthProvider>
       <PrefsProvider>
+        <FestivalProvider>
         <BrowserRouter>
           {/* SPA 路由切换时补发 Meta Pixel 的 PageView。必须在 BrowserRouter 内
               （要用 useLocation）、Routes 外（要覆盖全部路由，含 Layout 之外的
@@ -319,7 +323,13 @@ export default function App() {
           </Suspense>
           </RouteErrorBoundary>
           </PwaBackGuard>
+          {FESTIVAL_DEMO && (
+            <Suspense fallback={null}>
+              <FestivalDemoPanel />
+            </Suspense>
+          )}
         </BrowserRouter>
+        </FestivalProvider>
       </PrefsProvider>
     </AuthProvider>
   )

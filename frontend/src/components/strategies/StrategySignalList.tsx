@@ -72,7 +72,7 @@ export default function StrategySignalList({ signals, now, onOrder }: StrategySi
                   gives way to "expired". */}
               {actionable && <TtlRing expireAt={new Date(createdMs + SIGNAL_TTL_MS).toISOString()} now={now} label={t('strategy.ttlLabel')} />}
               {actionable ? (
-                <button type="button" onClick={() => onOrder(sig)} className="btn btn-primary">
+                <button type="button" onClick={() => onOrder(sig)} data-fd-plain className="btn btn-primary">
                   {t('strategy.oneClickOrder')}
                 </button>
               ) : (

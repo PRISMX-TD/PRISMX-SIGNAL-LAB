@@ -9,6 +9,8 @@ import { notificationApi, pushApi } from '../api/client'
 import { ensurePushSubscription, pushSupported } from '../utils/push'
 import { recordDiag } from '../utils/pushDiag'
 import Logo from './Logo'
+import FestivalGreeting from '../festival/FestivalGreeting'
+import { FestivalAmbient, FestivalGarland, FestivalGround, FestivalTopper } from '../festival/FestivalDecor'
 import SocialLinks from './SocialLinks'
 import PlanExpiryBanner from './PlanExpiryBanner'
 import LanguageToggle from './LanguageToggle'
@@ -231,6 +233,8 @@ function TabItem({ to, icon, label }: { to: string; icon: string; label: string 
         <TabIcon name={icon} />
       </span>
       <span className="leading-none">{label}</span>
+      {/* 只在选中的那个 Tab 上显示（见 festival.css）。/ shown on the active tab only */}
+      <FestivalTopper kind="mini" />
     </NavLink>
   )
 }
@@ -687,6 +691,7 @@ export default function Layout() {
           utility. */}
       <div className="relative flex min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] flex-col">
         <AuroraBackground />
+        {!isTerminal && <FestivalAmbient />}
         {/* pt-[env(safe-area-inset-top)]：iOS 的 apple-mobile-web-app-status-bar-style
             是 black-translucent（见 index.html），意味着状态栏是透明的，页面内容
             天然延伸到刘海/灵动岛下面——不加这段内边距，logo/导航就会被系统状态栏
@@ -793,6 +798,7 @@ export default function Layout() {
               </div>
             </div>
           </div>
+          <FestivalGarland />
         </header>
         <ConnectionBanner />
         {/* 到期提醒放在这里而不是某个页面里：到期影响的是整个产品（实时信号、
@@ -843,6 +849,10 @@ export default function Layout() {
               : 'mx-auto max-w-7xl px-4 pt-6 sm:px-6 clears-tabbar sm:pb-6'
           }`}
         >
+          {/* 节日问候卡：放在路由切换容器之外，换页不重播。行情终端全屏，不放。
+              Festival greeting: outside the per-route wrapper so it does not
+              replay on navigation; skipped on the full-bleed terminal. */}
+          {!isTerminal && <FestivalGreeting />}
           {/* 懒加载页面切换时导航保持可见 / keep the nav visible while a lazy page loads */}
           <Suspense
             fallback={
@@ -901,7 +911,8 @@ export default function Layout() {
               slate → neutral: slate is a blue-tinted grey from a different family than
               this system's neutral zinc greys, and the two read as mismatched
               temperatures side by side. Unified on neutral throughout. */}
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[12px] text-neutral-500">
+          <div className="relative flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[12px] text-neutral-500">
+            <FestivalGround sit />
             <span>© {new Date().getFullYear()} PRISMX</span>
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <NavLink key={d} to={`/${d}`} className="transition-colors hover:text-neutral-300">

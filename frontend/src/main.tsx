@@ -7,6 +7,8 @@ import './styles/index.css'
 import './i18n'
 import App from './App'
 import { recordDiag } from './utils/pushDiag'
+import { FESTIVAL_DEMO } from './festival/FestivalProvider'
+import { installMockBackend, mockActive } from './festival/demo/mockBackend'
 
 // 产品决定：无论安卓还是 iOS，无论浏览器标签页还是主屏幕安装的 PWA，都不允许
 // 双指缩放/双击缩放——页面本身用 initial-scale=1.0 + width=device-width 做到了
@@ -101,6 +103,11 @@ document.addEventListener('touchend', e => {
   if (now - lastTouchEnd <= 300) e.preventDefault()
   lastTouchEnd = now
 }, { passive: false })
+
+// 节日演示：从演示面板进入「App 演示」后，用示例数据代替后端（生产构建不生效）。
+// Festival demo: after "Enter app demo" in the demo panel, sample data stands in
+// for the backend. Inert in production builds.
+if (FESTIVAL_DEMO && mockActive()) installMockBackend()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

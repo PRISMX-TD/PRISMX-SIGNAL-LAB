@@ -1,0 +1,149 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   按钮小饰 / button charms  (图在 charm.ts，变量由 FestivalProvider 写到 <html>)
+   ───────────────────────────────────────────────────────────────────────────
+   只加一个 ::before，不改按钮的颜色、尺寸和点击区域；::after 已经被触屏的热区扩展
+   占用，这里不碰。小饰放在上沿正中：药丸按钮再窄，正中也是平的。
+   下列按钮保持干净——
+   · 下单、执行、平仓改单、付款、自动托管这类动到钱和仓位的按钮；
+   · 弹窗里的按钮（多是确认、取消、危险操作）；
+   · 固定栏、吸顶栏里的按钮：伸出栏外的部分会压住从后面滚过的内容；
+   · 已经挂着大挂件的按钮、禁用的按钮、小号按钮（text-xs / 11px / h-8）；
+   · 标了 data-fd-plain 的按钮或区域（错误页、封禁页、后台等）；
+   · 上方挨着字或别的控件、被 charm.ts 标了 data-fd-crowded 的按钮。
+   One ::before only: the button's colour, size and hit area never change, and
+   ::after (already the touch hit-area extension) is left alone. The charm sits
+   at the centre of the top edge, which is flat however narrow the pill is.
+   These stay plain —
+   · buttons that move money or positions: order, execute, close/modify, pay,
+     auto-manage;
+   · buttons inside dialogs (mostly confirm, cancel and destructive actions);
+   · buttons in fixed or sticky bars, where anything poking out would lie over
+     content scrolling behind;
+   · buttons already carrying a large topper, disabled buttons, small buttons
+     (text-xs / 11px / h-8);
+   · buttons or regions marked data-fd-plain (error page, blocked page, admin…);
+   · buttons with text or a control right above, marked data-fd-crowded by charm.ts.
+   兼容下限 Chrome 70：不用 :is()/:where()，排除规则写成后置的覆盖。
+   Chrome 70 floor: no :is()/:where(); exclusions are later overriding rules.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-festival] .btn-primary,
+[data-festival] .btn-ghost,
+[data-festival] .btn-secondary,
+[data-festival] .btn-brand {
+  position: relative;
+}
+[data-festival] .btn-primary::before,
+[data-festival] .btn-ghost::before,
+[data-festival] .btn-secondary::before,
+[data-festival] .btn-brand::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: var(--fd-charm-top, -9px);
+  width: var(--fd-charm-w, 20px);
+  height: var(--fd-charm-h, 10px);
+  margin-left: calc(var(--fd-charm-w, 20px) / -2);
+  background: var(--fd-charm) no-repeat center / 100% 100%;
+  transform-origin: 50% 100%;
+  pointer-events: none;
+}
+/* 圣诞：积雪横向平铺在上沿中段，两端随圆角淡出。/ Christmas: snow tiled along the middle of the top edge, faded out towards the rounded ends */
+[data-festival='christmas'] .btn-primary::before,
+[data-festival='christmas'] .btn-ghost::before,
+[data-festival='christmas'] .btn-secondary::before,
+[data-festival='christmas'] .btn-brand::before {
+  left: 22%;
+  right: 22%;
+  width: auto;
+  margin-left: 0;
+  background-repeat: repeat-x;
+  background-size: 26px 10px;
+  background-position: 0 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
+}
+/* 悬停：小饰轻轻跳一下（积雪不跳）。/ hover: the charm gives a small hop (snow does not) */
+@media (prefers-reduced-motion: no-preference) {
+  [data-festival] .btn-primary:hover::before,
+  [data-festival] .btn-ghost:hover::before,
+  [data-festival] .btn-secondary:hover::before,
+  [data-festival] .btn-brand:hover::before {
+    animation: fd-charm-hop 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  [data-festival='christmas'] .btn-primary:hover::before,
+  [data-festival='christmas'] .btn-ghost:hover::before,
+  [data-festival='christmas'] .btn-secondary:hover::before,
+  [data-festival='christmas'] .btn-brand:hover::before {
+    animation: none;
+  }
+}
+@keyframes fd-charm-hop {
+  0%, 100% { transform: none; }
+  32% { transform: translateY(-3px); }
+  60% { transform: none; }
+  78% { transform: translateY(-1px); }
+}
+/* 保持干净的按钮（见文件头）。/ buttons that stay plain (see the header) */
+[data-festival] .btn-primary:disabled::before,
+[data-festival] .btn-primary[data-fd-topper]::before,
+[data-festival] .btn-primary[data-fd-crowded]::before,
+[data-festival] .btn-primary[data-fd-plain]::before,
+[data-festival] [data-fd-plain] .btn-primary::before,
+[data-festival] [role='dialog'] .btn-primary::before,
+[data-festival] .fixed .btn-primary::before,
+[data-festival] .sticky .btn-primary::before,
+[data-festival] .btn-primary.text-xs::before,
+[data-festival] .btn-primary.text-\[11px\]::before,
+[data-festival] .btn-primary.h-8::before,
+[data-festival] .btn-primary.text-down::before,
+[data-festival] .btn-primary.sig-cta::before,
+[data-festival] .btn-primary.dh-exec-cta::before,
+[data-festival] .btn-primary.dh-mini-cta::before,
+[data-festival] .btn-ghost:disabled::before,
+[data-festival] .btn-ghost[data-fd-topper]::before,
+[data-festival] .btn-ghost[data-fd-crowded]::before,
+[data-festival] .btn-ghost[data-fd-plain]::before,
+[data-festival] [data-fd-plain] .btn-ghost::before,
+[data-festival] [role='dialog'] .btn-ghost::before,
+[data-festival] .fixed .btn-ghost::before,
+[data-festival] .sticky .btn-ghost::before,
+[data-festival] .btn-ghost.text-xs::before,
+[data-festival] .btn-ghost.text-\[11px\]::before,
+[data-festival] .btn-ghost.h-8::before,
+[data-festival] .btn-ghost.text-down::before,
+[data-festival] .btn-ghost.sig-cta::before,
+[data-festival] .btn-ghost.dh-exec-cta::before,
+[data-festival] .btn-ghost.dh-mini-cta::before,
+[data-festival] .btn-secondary:disabled::before,
+[data-festival] .btn-secondary[data-fd-topper]::before,
+[data-festival] .btn-secondary[data-fd-crowded]::before,
+[data-festival] .btn-secondary[data-fd-plain]::before,
+[data-festival] [data-fd-plain] .btn-secondary::before,
+[data-festival] [role='dialog'] .btn-secondary::before,
+[data-festival] .fixed .btn-secondary::before,
+[data-festival] .sticky .btn-secondary::before,
+[data-festival] .btn-secondary.text-xs::before,
+[data-festival] .btn-secondary.text-\[11px\]::before,
+[data-festival] .btn-secondary.h-8::before,
+[data-festival] .btn-secondary.text-down::before,
+[data-festival] .btn-secondary.sig-cta::before,
+[data-festival] .btn-secondary.dh-exec-cta::before,
+[data-festival] .btn-secondary.dh-mini-cta::before,
+[data-festival] .btn-brand:disabled::before,
+[data-festival] .btn-brand[data-fd-topper]::before,
+[data-festival] .btn-brand[data-fd-crowded]::before,
+[data-festival] .btn-brand[data-fd-plain]::before,
+[data-festival] [data-fd-plain] .btn-brand::before,
+[data-festival] [role='dialog'] .btn-brand::before,
+[data-festival] .fixed .btn-brand::before,
+[data-festival] .sticky .btn-brand::before,
+[data-festival] .btn-brand.text-xs::before,
+[data-festival] .btn-brand.text-\[11px\]::before,
+[data-festival] .btn-brand.h-8::before,
+[data-festival] .btn-brand.text-down::before,
+[data-festival] .btn-brand.sig-cta::before,
+[data-festival] .btn-brand.dh-exec-cta::before,
+[data-festival] .btn-brand.dh-mini-cta::before {
+  content: none;
+}

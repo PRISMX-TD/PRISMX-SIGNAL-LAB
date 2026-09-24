@@ -2961,5 +2961,39 @@
     "reconnects": "本次重连次数",
     "hint": "这是你的设备到 PRISMX 服务器的往返延迟。低于 {{good}}ms 为良好，{{fair}}ms 以上下单和报价可能有明显延迟。",
     "language": "语言 / Language"
+  },
+  "festival": {
+    "names": {
+      "spring": "春节",
+      "midautumn": "中秋",
+      "halloween": "万圣节",
+      "christmas": "圣诞",
+      "newyear": "新年"
+    },
+    "greeting": {
+      "spring": "新春快乐，开市大吉",
+      "midautumn": "中秋快乐，花好月圆",
+      "halloween": "万圣节快乐",
+      "christmas": "圣诞快乐",
+      "newyear": "新年快乐"
+    },
+    "newYearSub": "{{year}}，继续进阶",
+    "empty": {
+      "spring": "暂时没有新信号，灯笼先替你守着。",
+      "midautumn": "暂时没有新信号，先赏个月吧。",
+      "halloween": "暂时没有新信号，南瓜灯先替你盯着。",
+      "christmas": "暂时没有新信号，雪还在下。",
+      "newyear": "暂时没有新信号，新的一年慢慢来。"
+    },
+    "greetHintA": "节日装饰可在",
+    "greetHintLink": "账户设置",
+    "greetHintB": "里关闭",
+    "close": "关闭节日问候",
+    "settings": {
+      "title": "节日装饰",
+      "desc": "节日期间，Logo、问候和空状态会换上节日插画。",
+      "toggle": "显示节日装饰",
+      "toggleDesc": "关闭后所有节日都不再出现。涨跌色和按钮任何时候都不受影响。"
+    }
   }
 }
