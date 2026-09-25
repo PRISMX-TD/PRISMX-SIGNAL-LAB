@@ -31,7 +31,13 @@ from tkinter import messagebox, ttk
 from urllib import error, request
 from urllib.parse import urlparse
 
-from mt5_worker import poll_terminal, read_pending_orders, read_positions
+from mt5_worker import (
+    poll_terminal,
+    read_live_quotes,
+    read_pending_orders,
+    read_positions,
+    scan_closed_trades,
+)
 # 下划线开头但刻意从这里引：一张单到底成没成交的判据（查 history_orders_get、哪些
 # 状态算终态、ORDER_STATE_PARTIAL 为什么不算）全部长在 mt5_worker 里，重发时的二次
 # 确认（见 BridgeEngine._reconfirm_cached）必须与执行路径用**同一份**判据，另写一份
@@ -95,7 +101,16 @@ except Exception:
 #
 # 1.4.5 (2026-09-23): open / pending-order comments carry the backend's source tag —
 # PRISMX-SIG / PRISMX-STRAT / PRISMX-CHART; plain PRISMX when no tag is sent.
-APP_VERSION = "1.4.5"
+#
+# 1.4.6（2026-09-25）：报价改由独立线程每 0.5 秒上报（只发有变化的，单终端时生效，
+# 多终端退回主循环原路径）；状态轮询拆成两段短锁，平仓扫描不再挡住下单指令。
+# 线上协议没变。
+#
+# 1.4.6 (2026-09-25): quotes go out from their own thread every 0.5 s (changes only;
+# single-terminal only, multi-terminal falls back to the main loop); the status poll
+# takes the MT5 lock in two short sections so the closed-trade scan no longer blocks
+# commands. No wire-protocol change.
+APP_VERSION = "1.4.6"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -195,6 +210,27 @@ POLL_INTERVAL = 1.5  # 状态上报间隔（秒）/ status report interval (seco
 # and returns the instant a command is committed. The backend caps it at 5s because
 # liveness is a 7-second heartbeat window refreshed by this very request.
 COMMAND_WAIT_SECONDS = 5.0
+
+# 报价线程：单独一条线程只读关注品种的 tick，每 QUOTE_INTERVAL 秒一次，只发有变化的。
+# 以前报价排在「读终端（含 15 分钟平仓扫描）→ 上报持仓 → poll」之后、每拍再固定睡
+# 1.5 秒，网页上实际 2~3 秒才跳一次。/api/bridge/quotes 后端没有限频（slowapi 没配
+# 默认限额、该路由也没加装饰器），鉴权有 10 秒缓存，所以 0.5 秒（最多每秒 2 个请求、
+# 且只在价格变了时才发）是安全的；取区间里偏保守的一端。
+# Quote thread: reads only the watched symbols' ticks every QUOTE_INTERVAL seconds and
+# sends only what changed. Quotes used to queue behind the terminal read (including the
+# 15-minute closed-trade scan), the positions report and the poll, then sleep 1.5s, so
+# the web saw a new price every 2-3s. /api/bridge/quotes has no rate limit (no slowapi
+# default, no decorator) and auth is cached for 10s; 0.5s — at most 2 requests a second,
+# and only when a price moved — is the conservative end of the range.
+QUOTE_INTERVAL = 0.5
+# 报价请求自己的超时：报价过几秒就没用了，没必要像其它上报一样等 10 秒。
+# The quote post's own timeout: a quote is worthless after a few seconds anyway.
+QUOTE_HTTP_TIMEOUT = 3.0
+# 报价线程多久没有成功跑完一轮，状态循环就接回原来的报价上报（线程挂了、卡在网络
+# 上、或者还没读到第一份元数据）。
+# How long without a successful quote-thread round before the status loop resumes
+# sending quotes itself (thread died, stuck on the network, or no metadata yet).
+QUOTE_THREAD_STALE_SECONDS = 3.0
 
 # 单次平仓明细上报的最大条数。重连补扫可能一次产出几百条，整包发容易超时，
 # 而超时的整包会原样退回重试队列反复重发。见 _post_trades。
@@ -711,10 +747,37 @@ class BridgeEngine:
         # whichever broker account is selected, and different brokers can
         # legitimately quote the same symbol differently.
         self._last_quotes: dict[tuple, tuple] = {}
-        # 两条循环各一条 keep-alive 连接（见 BackendClient 的说明）。
-        # One keep-alive connection per loop (see BackendClient).
+        # 报价线程与状态循环（兜底路径）共用上面这份去重表，用这把锁保护。共用而不是
+        # 各记一份：交接时各自的「上次发过什么」对不上，价格在另一条路径上变过又变回
+        # 来，这边会误判"没变"，网页就停在中间那个价上。
+        # The quote thread and the status loop (fallback path) share the dedupe table
+        # above under this lock. Separate tables would disagree at a hand-over: a price
+        # that moved on the other path and came back would read as unchanged here and
+        # the web would stick at the intermediate price.
+        self._quotes_lock = threading.Lock()
+        # 两条循环各一条 keep-alive 连接（见 BackendClient 的说明）。报价线程再单独
+        # 一条：它每 0.5 秒一发，和状态循环共用一条会互相堵在 BackendClient 的锁外。
+        # One keep-alive connection per loop (see BackendClient); the quote thread gets
+        # its own too, since at one post every 0.5s it would otherwise queue behind the
+        # status loop on BackendClient's lock.
         self._http = BackendClient(self.backend, token)
         self._cmd_http = BackendClient(self.backend, token)
+        self._quote_http = BackendClient(self.backend, token)
+        self._quote_thread: threading.Thread | None = None
+        # 报价线程这一刻该读的终端：仅当本机**恰好一个** MT5 终端时由状态循环填上，
+        # 否则为 None（报价线程空转，状态循环照旧发报价）。见 _quote_loop。
+        # The terminal the quote thread should read: set by the status loop only when
+        # exactly one MT5 terminal is running, else None. See _quote_loop.
+        self._quote_path: str | None = None
+        # 报价线程最近一次成功跑完一轮的时刻（monotonic）；状态循环据此判断要不要兜底。
+        # When the quote thread last completed a round (monotonic); the status loop
+        # uses it to decide whether to fall back.
+        self._quote_ok_at: float = 0.0
+        self._quote_err_logged_at: float = -1e9
+        self._quote_failing = False
+        # 上一拍报价由谁发（True=报价线程，False=状态循环），只用来在切换时记一行日志。
+        # Who sent quotes last tick (True = quote thread); only for logging hand-overs.
+        self._quotes_via_thread: bool | None = None
         # MetaTrader5 包附着的是进程级单连接，两条循环不能同时碰它。
         # The MetaTrader5 module is one process-wide attachment; the two loops
         # must not touch it concurrently.
@@ -739,11 +802,18 @@ class BridgeEngine:
         self._thread.start()
         self._cmd_thread = threading.Thread(target=self._command_loop, daemon=True, name="bridge-commands")
         self._cmd_thread.start()
+        self._quote_thread = threading.Thread(target=self._quote_loop, daemon=True, name="bridge-quotes")
+        self._quote_thread.start()
 
     def stop(self):
         self._stop.set()
         self._http.close()
         self._cmd_http.close()
+        # 报价线程的连接由它自己在退出时关（见 _quote_loop 的 finally）：这里去 close
+        # 会在它正发着请求时卡在 BackendClient 的锁上，而 stop() 是在界面线程里调的。
+        # The quote thread closes its own connection on exit (see _quote_loop's
+        # finally): closing it here would block on BackendClient's lock mid-request,
+        # and stop() runs on the UI thread.
 
     # ---------- 指令循环 / command loop ----------
     def _command_loop(self):
@@ -792,6 +862,124 @@ class BridgeEngine:
                 # 后端没把请求挂住（旧版后端）：退回定频，别把后端打满。
                 # The backend returned at once (older backend): fall back to the fixed cadence.
                 self._stop.wait(max(0.2, POLL_INTERVAL - elapsed))
+
+    # ---------- 报价线程 / quote thread ----------
+    def _quote_loop(self):
+        """每 QUOTE_INTERVAL 秒读一遍关注品种的 tick，只把有变化的发给后端。
+
+        只在本机**恰好一个** MT5 终端时工作（`_quote_path` 由状态循环按此填写）。多终端
+        时 MetaTrader5 包每读一台就要 shutdown + initialize 切一次，报价线程若也去切，
+        就会和状态循环、指令循环抢连接；只读「碰巧附着着的那台」又会让各终端的报价
+        刷新快慢不一。所以多终端时报价线程什么都不做，状态循环照旧发报价——退化成原
+        来的行为，而不是半对的新行为。
+
+        MT5 调用都在 `_mt5_lock` 里，锁内只有 `read_live_quotes` 那几次短读（它不会
+        触发附着或切换）；HTTP 在锁外。一轮没有成功跑完（读不到、发不出去、抛异常）
+        就不刷新 `_quote_ok_at`，状态循环超过 QUOTE_THREAD_STALE_SECONDS 看不到心跳就
+        接回原路径；线程整个退出（is_alive() 为假）同理。
+
+        Every QUOTE_INTERVAL seconds, read the watched symbols' ticks and post only what
+        changed. Works only with exactly one MT5 terminal: with several, every read means
+        a shutdown + initialize switch, which this thread must never trigger (it would
+        fight the other loops for the connection), and reading "whichever happens to be
+        attached" would refresh terminals unevenly — so it idles and the status loop
+        keeps sending quotes as before. MT5 calls run under _mt5_lock and are only the
+        short reads in read_live_quotes; HTTP happens outside it. A round that doesn't
+        complete leaves _quote_ok_at alone, and the status loop takes over once the
+        heartbeat is older than QUOTE_THREAD_STALE_SECONDS (likewise if the thread dies).
+        """
+        logger.info("报价线程已启动 / quote thread started (interval %.2fs)", QUOTE_INTERVAL)
+        try:
+            while not self._stop.is_set():
+                t0 = time.monotonic()
+                try:
+                    if self._quote_round():
+                        self._quote_ok_at = time.monotonic()
+                        if self._quote_failing:
+                            self._quote_failing = False
+                            logger.info("报价线程已恢复 / quote thread recovered")
+                except Exception as e:  # noqa: BLE001 - 单轮失败不该带走整条线程
+                    self._quote_failing = True
+                    # 每 0.5 秒一轮，后端断开时不限频会把日志刷满；一分钟一条。
+                    # Rounds are 0.5s apart; rate-limit to a line a minute.
+                    now = time.monotonic()
+                    if now - self._quote_err_logged_at > 60:
+                        self._quote_err_logged_at = now
+                        logger.warning("报价线程本轮失败，由状态循环兜底 / quote round failed, "
+                                       "status loop falls back: %s", e)
+                self._stop.wait(max(0.05, QUOTE_INTERVAL - (time.monotonic() - t0)))
+        except BaseException:
+            # 走到这里是循环本身出了问题（不是单轮失败）：记下来，线程退出，状态循环
+            # 看到 is_alive() 为假会自动接回原来的报价上报。
+            # Something broke the loop itself rather than one round: log it and let
+            # the thread end; the status loop sees is_alive() go false and takes over.
+            logger.exception("报价线程异常退出，已退回状态循环上报报价 / quote thread died, "
+                             "status loop resumes quote reporting")
+            raise
+        finally:
+            self._quote_http.close()
+            logger.info("报价线程已退出 / quote thread stopped")
+
+    def _quote_round(self) -> bool:
+        """报价线程的一轮。返回 True = 这一轮完整跑完（读到了、该发的都发出去了）。
+        One quote-thread round; True when it completed (read, and posted what changed)."""
+        with self._state_lock:
+            path = self._quote_path
+        if not path or self._stop.is_set():
+            return False
+        with self._mt5_lock:
+            # 拿锁可能等了一会儿，其间桥接可能已被停掉：停了就别再碰 MT5。
+            # Acquiring the lock may have taken a while; don't touch MT5 once stopped.
+            if self._stop.is_set():
+                return False
+            quotes = read_live_quotes(path)
+        if quotes is None:
+            return False
+        self._send_quotes(quotes, self._quote_http, timeout=QUOTE_HTTP_TIMEOUT)
+        return True
+
+    def _quote_thread_serving(self) -> bool:
+        """报价线程此刻是否在正常出报价；否则状态循环自己发（原路径）。
+        Whether the quote thread is currently delivering; if not, the status loop sends."""
+        t = self._quote_thread
+        if t is None or not t.is_alive():
+            return False
+        with self._state_lock:
+            if not self._quote_path:
+                return False
+        return time.monotonic() - self._quote_ok_at < QUOTE_THREAD_STALE_SECONDS
+
+    def _send_quotes(self, quotes: list, http: "BackendClient", timeout: float = 10.0) -> None:
+        """只上报相对上次**成功发出**的值有变化的 (账号, 品种)。发送失败就把这几条的去重
+        记录退回去，下一轮照样算"有变化"重发——以前是先记后发，发失败的报价要等价格
+        再跳一次才会补上。失败照常抛给调用方。
+        Post only (login, symbol) entries that differ from what was last sent. On failure
+        the dedupe entries are rolled back so the next round resends them (they used to be
+        recorded before the post, so a failed quote waited for the next price move).
+        Failures still propagate to the caller."""
+        changed: list = []
+        with self._quotes_lock:
+            for q in quotes:
+                key = (q["login"], q["symbol"])
+                val = (q["bid"], q["ask"])
+                prev = self._last_quotes.get(key)
+                if prev != val:
+                    self._last_quotes[key] = val
+                    changed.append((key, prev, val, q))
+        if not changed:
+            return
+        try:
+            http.post("/api/bridge/quotes", {"data": [c[3] for c in changed]}, timeout=timeout)
+        except Exception:
+            with self._quotes_lock:
+                for key, prev, val, _q in changed:
+                    # 另一条路径已经发过更新的值就别覆盖它 / keep a newer value the other path sent
+                    if self._last_quotes.get(key) == val:
+                        if prev is None:
+                            self._last_quotes.pop(key, None)
+                        else:
+                            self._last_quotes[key] = prev
+            raise
 
     def _execute_commands(self, commands: list, http: "BackendClient") -> None:
         """按 login 分组执行指令并回报；已执行过的只重报缓存结果，不重复下单。
@@ -1034,6 +1222,7 @@ class BridgeEngine:
             # No terminal: drop the snapshot so the command loop stops polling with stale accounts.
             with self._state_lock:
                 self._accounts_snapshot = []
+                self._quote_path = None
             self.on_status([], "未检测到正在运行的 MT5 终端 / No running MT5 terminal found")
             return
 
@@ -1050,8 +1239,17 @@ class BridgeEngine:
             deep = login_hint is not None and login_hint in _backfill_requested and login_hint not in _backfill_done
             if deep:
                 _backfill_done.add(login_hint)
+            # 分两段拿 MT5 锁：① 账号 / 持仓 / 挂单 / 报价；② 平仓明细扫描（下面，账号
+            # 读到了才做）。以前一整段攥着锁，扫描最慢的那一截也挡在下单指令前面；现在
+            # 段间释放，指令线程可以插进来。第 ② 段会重新确认附着的是这台终端——段间
+            # 指令线程可能已切到别的终端（多终端时）。
+            # The MT5 lock is taken in two segments: (1) account / positions / pending /
+            # quotes, (2) the closed-trade scan (below, only when an account was read). It
+            # used to be one hold, so even the slow scan sat in front of any order; now the
+            # command thread can get in between. Segment (2) re-confirms the attachment,
+            # since the command thread may have switched terminals in the gap.
             with self._mt5_lock:
-                res = poll_terminal(path, deep_backfill=deep)
+                res = poll_terminal(path, deep_backfill=deep, scan_closed=False)
             if res.get("error"):
                 worker_errors.append(res["error"])
                 # 只要账号在线（accounts 非空），这个错误此前完全不会展示在状态栏
@@ -1079,12 +1277,19 @@ class BridgeEngine:
                 # broker quote.
                 for q in res.get("quotes", []):
                     quotes_by_account.append({**q, "login": acc["login"]})
-                closed_trades.extend(res.get("closedTrades", []))
+                # 第 ② 段：平仓明细扫描，单独一次锁 / segment (2): closed-trade scan
+                with self._mt5_lock:
+                    scan = scan_closed_trades(path, deep_backfill=deep)
+                if scan.get("error"):
+                    worker_errors.append(scan["error"])
+                    logger.warning("scan_closed_trades(%s) 报错 / error: %s", path, scan["error"])
+                closed_trades.extend(scan.get("closedTrades", []))
 
         if not accounts:
             msg = worker_errors[0] if worker_errors else "已连接终端但未读到已登录账号 / terminal attached but no logged-in account"
             with self._state_lock:
                 self._accounts_snapshot = []
+                self._quote_path = None
             self.on_status([], msg)
             return
 
@@ -1101,6 +1306,13 @@ class BridgeEngine:
         with self._state_lock:
             self._login_to_path = dict(login_to_path)
             self._accounts_snapshot = accounts
+            # 报价线程只接单终端（原因见 _quote_loop）；多终端时置空，由本循环照旧发报价。
+            # 按扫描到的终端数判断，而不是按有账号的终端数：没登录的那台终端照样会被
+            # 本循环逐拍附着，连接一样在切来切去。
+            # The quote thread only serves a single terminal (see _quote_loop). Counted by
+            # terminals found, not by terminals with an account: a logged-out terminal is
+            # still attached every tick, so the connection still switches.
+            self._quote_path = paths[0] if len(paths) == 1 and paths[0] in login_to_path.values() else None
             for stale in [k for k in self._positions_by_path if k not in paths]:
                 self._positions_by_path.pop(stale, None)
             for stale in [k for k in self._pending_by_path if k not in paths]:
@@ -1203,20 +1415,23 @@ class BridgeEngine:
             return
 
         # 5) 上报报价：仅上报相对上一轮变化的 (账号, 品种) 以省流量。
-        # Report quotes: only (account, symbol) entries changed since last tick.
-        try:
-            changed: list = []
-            for q in quotes_by_account:
-                key = (q["login"], q["symbol"])
-                val = (q["bid"], q["ask"])
-                if self._last_quotes.get(key) != val:
-                    self._last_quotes[key] = val
-                    changed.append(q)
-            if changed:
-                self._http.post("/api/bridge/quotes", {"data": changed})
-        except Exception as e:  # noqa: BLE001
-            # 同上：报价不刷新时也要在日志里留下线索 / leave a trace here too
-            logger.warning("上报报价失败 / failed to report quotes: %s", e)
+        #    报价线程在正常出报价时（单终端、心跳新鲜）这一步跳过，由它每 0.5 秒发；
+        #    线程退出、卡住或多终端时自动回到这里，与改动前完全一样。
+        # Report quotes: only (account, symbol) entries changed since last tick. Skipped
+        # while the quote thread is delivering (single terminal, fresh heartbeat); if it
+        # dies, stalls, or there are several terminals, this path resumes unchanged.
+        via_thread = self._quote_thread_serving()
+        if via_thread != self._quotes_via_thread:
+            self._quotes_via_thread = via_thread
+            logger.info("报价上报改由%s / quotes now reported by %s",
+                        "报价线程" if via_thread else "状态循环",
+                        "the quote thread" if via_thread else "the status loop")
+        if not via_thread:
+            try:
+                self._send_quotes(quotes_by_account, self._http)
+            except Exception as e:  # noqa: BLE001
+                # 同上：报价不刷新时也要在日志里留下线索 / leave a trace here too
+                logger.warning("上报报价失败 / failed to report quotes: %s", e)
 
         # 6) 上报新检测到的真实平仓明细（个人胜率）；失败则入队下一轮重试。
         # 这一步之前完全不写日志，无论成功失败都看不出"到底有没有尝试上报"，

@@ -647,19 +647,26 @@ def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
     detected suffix finds neither.
     """
     out = []
+    meta: list[tuple[str, str, int, dict]] = []
     for base in base_symbols or []:
         broker_sym = _resolve_broker_symbol(base, suffix)
         if not broker_sym:
             continue
         if not mt5.symbol_select(broker_sym, True):
             continue
-        tick = mt5.symbol_info_tick(broker_sym)
-        if tick is None or tick.bid <= 0 or tick.ask <= 0:
-            continue
         # 交易商的小数位数，按其严格四舍五入，消除浮点残差（如 1.32386999…）。
         # Broker's decimal digits; round strictly to remove float noise.
         info = mt5.symbol_info(broker_sym)
         digits = int(info.digits) if info is not None else 5
+        spec = _symbol_spec(info)
+        # 品种已解析、已选入行情窗口：不管这一刻有没有报价都记进元数据，
+        # 报价线程下一拍可能就读得到（刚开盘、刚补上报价的那一刻）。
+        # Resolved and selected: record it whether or not it has a quote this very
+        # moment — the quote thread may well read one on its next pass.
+        meta.append((base, broker_sym, digits, spec))
+        tick = mt5.symbol_info_tick(broker_sym)
+        if tick is None or tick.bid <= 0 or tick.ask <= 0:
+            continue
         entry = {
             "symbol": base,
             "bid": round(float(tick.bid), digits),
@@ -667,7 +674,72 @@ def _quotes_payload(base_symbols: list[str], suffix: str = "") -> list:
             "digits": digits,
         }
         # 券商真实合约规格（见 _symbol_spec）/ broker's real contract spec
-        entry.update(_symbol_spec(info))
+        entry.update(spec)
+        out.append(entry)
+    # 留给报价线程（read_live_quotes）用的元数据：品种名解析、小数位、合约规格都在
+    # 这里（状态循环里）算好，报价线程只管读 tick，锁内的活越短越好。
+    # Metadata for the quote thread (read_live_quotes): resolution, digits and the
+    # contract spec are worked out here, on the status loop, so the quote thread only
+    # has to read ticks and its time under the MT5 lock stays short.
+    if _attached_path is not None:
+        _live_quote_meta[_attached_path] = {"login": _current_login(), "symbols": meta}
+    return out
+
+
+# 终端路径 -> {"login": 登录号, "symbols": [(基础名, 券商真名, 小数位, 合约规格), ...]}。
+# 由 _quotes_payload 每拍刷新，read_live_quotes 只读它。
+# terminal path -> {"login", "symbols": [(base, broker name, digits, spec), ...]},
+# refreshed by _quotes_payload every status tick and only read by read_live_quotes.
+_live_quote_meta: dict[str, dict] = {}
+
+
+def read_live_quotes(path: str) -> list | None:
+    """报价线程专用：只在**当前已附着**的终端上读一遍关注品种的最新 tick。
+
+    与 `read_positions` 这类函数的关键区别：这里**绝不调用 `_ensure_attached`**。
+    多终端时切换附着是 shutdown + initialize（最长 10 秒超时），那是状态循环与指令
+    循环的事；报价线程要是也能触发切换，就会和它们抢着把连接切来切去。所以当前附着
+    的不是 `path`、或者还没有元数据（状态循环还没跑完第一拍），一律返回 None，调用方
+    什么都不发，由状态循环的原路径兜底。
+
+    锁内只做 1 次 account_info（确认账号没换）+ 每品种 1 次 symbol_info_tick。品种名
+    解析、小数位、合约规格用的是状态循环算好的元数据（见 `_quotes_payload`）。
+    返回的每条已带 login，格式与状态循环上报的那份一致。
+
+    Quote-thread only: read the watched symbols' latest ticks on the terminal that is
+    *already* attached. Unlike read_positions this never calls _ensure_attached —
+    switching terminals (shutdown + initialize, up to a 10s timeout) belongs to the
+    status and command loops, and a quote thread able to trigger it would fight them
+    over the connection. Not attached to `path`, or no metadata yet: None, and the
+    caller sends nothing. Under the lock: one account_info plus one symbol_info_tick
+    per symbol; resolution, digits and spec come from _quotes_payload's metadata.
+    """
+    if mt5 is None or _attached_path != path:
+        return None
+    meta = _live_quote_meta.get(path)
+    if not meta:
+        return None
+    login = _current_login()
+    # 终端里换了账号（或掉线）：元数据里的品种名与规格可能已不适用，等状态循环刷新。
+    # Account switched (or dropped) in the terminal: wait for the status loop to refresh.
+    if not login or login != meta.get("login"):
+        return None
+    out = []
+    for base, broker_sym, digits, spec in meta.get("symbols") or []:
+        try:
+            tick = mt5.symbol_info_tick(broker_sym)
+        except Exception:
+            continue
+        if tick is None or tick.bid <= 0 or tick.ask <= 0:
+            continue
+        entry = {
+            "symbol": base,
+            "bid": round(float(tick.bid), digits),
+            "ask": round(float(tick.ask), digits),
+            "digits": digits,
+            "login": login,
+        }
+        entry.update(spec)
         out.append(entry)
     return out
 
@@ -2388,9 +2460,16 @@ def poll_terminal(
     orders: list[dict] | None = None,
     deep_backfill: bool = False,
     read_state: bool = True,
+    scan_closed: bool = True,
 ) -> dict:
     """连接一个终端，读取账号/持仓，并执行传入的下单指令。
     Attach to one terminal, read account/positions, execute given orders.
+
+    scan_closed=False 跳过平仓明细扫描：状态循环把扫描拆出去单独调
+    `scan_closed_trades`，两段各拿一次 MT5 锁、段间释放，让下单指令能插进来。
+    scan_closed=False skips the closed-trade scan: the status loop runs it separately
+    through scan_closed_trades, taking the MT5 lock once per segment so a command can
+    get in between.
 
     read_state=False 只执行指令：不读账号、持仓、报价，也不扫平仓明细。指令循环拿到
     指令后用它立刻下单——以前每条指令都要先等一整轮终端读取（账号 + 持仓 + 7 个报价 +
@@ -2437,7 +2516,7 @@ def poll_terminal(
     except Exception as e:
         out["error"] = str(e)
 
-    if not read_state:
+    if not read_state or not scan_closed:
         return out
 
     # 已平仓明细检测独立成一个 try，不与上面账号/持仓/报价/下单共用同一个
@@ -2458,6 +2537,41 @@ def poll_terminal(
     except Exception as e:
         if not out["error"]:
             out["error"] = str(e)
+    return out
+
+
+def scan_closed_trades(path: str, deep_backfill: bool = False) -> dict:
+    """只做平仓明细扫描（`poll_terminal(scan_closed=False)` 拆出去的那一段）。
+    Closed-trade scan only — the segment poll_terminal(scan_closed=False) leaves out.
+
+    为什么要单独成段：15 分钟回看（补扫时 7 天、后端点名时一年）要逐仓位查成交历史，
+    是一拍里最慢的一段。以前它和账号/持仓/报价一起攥在同一把 MT5 锁里，指令线程
+    领到的单只能干等整拍读完。拆开后，调用方每段各拿一次锁，段间释放。
+    Why a separate segment: the lookback (7 days on catch-up, a year when the backend
+    asks) walks deal history per position and is the slowest part of a tick. Held in
+    one lock with the account/positions read, a freshly received order had to wait
+    for all of it; split, the caller takes the lock per segment and releases between.
+
+    段间锁已释放过，指令线程可能已经把连接切到了别的终端（多终端时），所以这里照
+    `read_positions` 的做法重新 `_ensure_attached`，确认读的仍是 `path` 那台。
+    The lock was released in between and the command loop may have attached another
+    terminal meanwhile, so re-attach to `path` first, as read_positions does.
+
+    返回 / returns: {"closedTrades": [...], "error": str | None}
+    """
+    out = {"closedTrades": [], "error": None}
+    if mt5 is None:
+        out["error"] = f"MetaTrader5 import failed: {_IMPORT_ERROR}"
+        return out
+    if not _ensure_attached(path):
+        out["error"] = f"initialize failed: {mt5.last_error()}"
+        return out
+    # 与 poll_terminal 里那段同一口径：异常只记进 error，不往外抛。
+    # Same convention as the block in poll_terminal: errors are reported, not raised.
+    try:
+        out["closedTrades"] = _closed_trades_payload(deep_backfill)
+    except Exception as e:
+        out["error"] = str(e)
     return out
 
 
