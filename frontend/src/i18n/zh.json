@@ -1151,14 +1151,24 @@
     "activatesInstantly": "链上确认后即刻自动开通"
   },
   "appDownload": {
-    "title": "下载 App",
-    "subtitle": "安卓手机安装包，装好后用本账号登录即可",
-    "platform": "适用于 Android 8.0 及以上",
+    "title": "把 Signal Lab 装进手机",
+    "subtitle": "信号、持仓与通知随身查看。安装后用当前账号登录即可。",
+    "platform": "Android 8.0 及以上",
+    "iosNotice": "App 目前仅支持 Android，iPhone 请继续使用网页版。",
+    "scanTitle": "用手机扫码下载",
+    "scanDesc": "用浏览器或相机扫描",
+    "stepsTitle": "安装只需三步",
+    "s1Title": "下载安装包",
+    "s1Desc": "点击上方按钮，或在电脑上扫码，把 SignalLab.apk 下载到手机。",
+    "s2Title": "允许安装",
+    "s2Desc": "若提示「未知来源」，在设置中允许当前浏览器安装应用。",
+    "s3Title": "登录使用",
+    "s3Desc": "打开 Signal Lab，用本账号登录，设置与策略自动同步。",
+    "n1": "新版本发布后重新下载安装即可覆盖升级，登录状态与设置不会丢失。",
+    "n2": "请只从本页下载安装包，不要安装他人转发的 APK。",
+    "n3": "安装包托管在 GitHub，个别网络下下载较慢，可稍后重试。",
     "downloadBtn": "下载 APK",
-    "notesTitle": "安装说明",
-    "n1": "若手机提示「禁止安装未知来源应用」，请在设置中允许浏览器安装应用。",
-    "n2": "新版本发布后重新下载安装即可覆盖升级，登录状态与设置不会丢失。",
-    "n3": "请只从本页下载安装包，不要安装他人转发的 APK。"
+    "notesTitle": "安装说明"
   },
   "download": {
     "title": "下载 PRISMX 桥接程序",

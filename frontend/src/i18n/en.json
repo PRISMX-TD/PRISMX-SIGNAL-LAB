@@ -1151,14 +1151,24 @@
     "activatesInstantly": "Activates instantly after on-chain confirmation"
   },
   "appDownload": {
-    "title": "Get the Android app",
-    "subtitle": "Android installer — sign in with this account once installed",
+    "title": "Put Signal Lab on your phone",
+    "subtitle": "Signals, positions and alerts wherever you are. Sign in with this account once installed.",
     "platform": "Android 8.0 or later",
+    "iosNotice": "The app is Android only for now. On iPhone, keep using the web version.",
+    "scanTitle": "Scan to download",
+    "scanDesc": "Use your phone camera or browser",
+    "stepsTitle": "Three steps to install",
+    "s1Title": "Download",
+    "s1Desc": "Tap the button above, or scan the code on your computer, to get SignalLab.apk on your phone.",
+    "s2Title": "Allow install",
+    "s2Desc": "If your phone blocks unknown sources, allow your browser to install apps in Settings.",
+    "s3Title": "Sign in",
+    "s3Desc": "Open Signal Lab and sign in with this account. Settings and strategies sync automatically.",
+    "n1": "When a new version is out, install it over the old one. Your login and settings are kept.",
+    "n2": "Only download the installer from this page. Never install an APK someone forwarded to you.",
+    "n3": "The installer is hosted on GitHub and may download slowly on some networks. Try again later if it stalls.",
     "downloadBtn": "Download APK",
-    "notesTitle": "Install notes",
-    "n1": "If your phone blocks \"unknown sources\", allow your browser to install apps in Settings.",
-    "n2": "When a new version is out, download and install it over the old one — your login and settings are kept.",
-    "n3": "Only download the installer from this page; never install an APK someone forwarded to you."
+    "notesTitle": "Install notes"
   },
   "download": {
     "title": "Download PRISMX Bridge",
