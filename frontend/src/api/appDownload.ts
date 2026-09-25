@@ -9,9 +9,3 @@ import { GITHUB_REPO } from './bridgeDownload'
 export const APP_RELEASE_TAG = 'app-latest'
 export const APP_FILENAME = 'SignalLab.apk'
 export const APP_DOWNLOAD_URL = `${GITHUB_REPO}/releases/download/${APP_RELEASE_TAG}/${APP_FILENAME}`
-
-// 已在 APK 里运行时不再展示下载入口。/ Hide the entry when already running inside the app.
-export function isNativeApp(): boolean {
-  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
-  return !!cap?.isNativePlatform?.()
-}

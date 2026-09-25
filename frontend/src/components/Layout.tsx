@@ -431,6 +431,7 @@ export default function Layout() {
   const moreItems = [
     { to: '/bind', icon: 'bind', label: t('nav.bind') },
     { to: '/account', icon: 'account', label: t('nav.account') },
+    { to: '/app-download', icon: 'download', label: t('nav.appDownload') },
     { to: '/support', icon: 'support', label: t('nav.support') },
     { to: '/announcements', icon: 'announcements', label: t('nav.announcements') },
     ...(user?.plan !== 'PRO' ? [{ to: '/upgrade', icon: 'upgrade', label: t('nav.upgrade') }] : []),

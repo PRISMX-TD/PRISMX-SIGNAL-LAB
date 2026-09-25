@@ -15,7 +15,6 @@ import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { useBackToClose } from "../utils/useBackToClose"
 import { FestivalTopper } from "../festival/FestivalDecor"
-import { isNativeApp } from "../api/appDownload"
 
 export default function UserMenu({
   email,
@@ -114,12 +113,10 @@ export default function UserMenu({
           <Link to="/strategies" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.strategies")}
           </Link>
-          {/* 已在 App 内运行时不显示下载入口。Hidden when already inside the app. */}
-          {!isNativeApp() && (
-            <Link to="/app-download" onClick={() => setOpen(false)} className={linkClass}>
-              {t("nav.appDownload")}
-            </Link>
-          )}
+          {/* App 内也显示：已装的用户要靠它拿新版 APK。Shown in the app too: installed users get new APKs here. */}
+          <Link to="/app-download" onClick={() => setOpen(false)} className={linkClass}>
+            {t("nav.appDownload")}
+          </Link>
           <Link to="/support" onClick={() => setOpen(false)} className={linkClass}>
             {t("nav.support")}
           </Link>
