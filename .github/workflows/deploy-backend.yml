@@ -9,6 +9,11 @@
 #   VPS_SSH_KEY      专用部署密钥的私钥（ed25519，公钥已放进 VPS 上 ubuntu 用户的 authorized_keys）
 #   VPS_KNOWN_HOSTS  `ssh-keyscan -t ed25519 <VPS_HOST>` 的输出（固定主机指纹，防中间人）
 # VPS 侧的一次性准备见运维手册《部署与上线进度》2.2 节。
+#
+# 部署前先跑后端测试（job test，步骤与 tests.yml 的 backend job 一致），不过不部署。
+# 放在同一个工作流里用 needs 串起来，而不是等 tests.yml 的结果：两个工作流各自触发、
+# 没有依赖关系，跨工作流等待（workflow_run）只在默认分支上生效、还拿不到路径过滤，
+# 反而更绕。手动触发（workflow_dispatch）同样先测后部署。
 name: Deploy backend
 
 on:
@@ -27,7 +32,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # 与 tests.yml 的 backend job 保持一致；改那边的安装/运行方式时这里跟着改。
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install
+        run: pip install -r requirements-dev.txt
+      - name: Test
+        # -p no:cacheprovider：CI 机器是一次性的，别往工作区写 .pytest_cache。
+        # PYTHONUTF8：与本地一致——.env 与注释里有中文，别让编码成为 CI 独有的失败原因。
+        env:
+          PYTHONUTF8: "1"
+        run: python -m pytest -q -p no:cacheprovider
+
   deploy:
+    # 测试红了就不部署。
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

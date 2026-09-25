@@ -14,14 +14,16 @@
 #            与预渲染（那是 Vercel 的活，几分钟的产物构建在这里只是重复烧时间）。
 #
 # 这里不部署、不需要任何 secret；deploy-backend.yml 的触发条件不受影响。
-# 若要让部署等测试通过再跑，是下一步的事——先把「红了能看见」立起来。
+# 部署等测试：deploy-backend.yml 里自带一个同样步骤的 test job，deploy 用 needs 等它通过
+# （改这里 backend job 的安装/运行方式时，那边跟着改）。
 #
 # Test gate for pushes and PRs: backend / bridge / frontend, three independent jobs.
 # Until now the 1500+ backend tests, 60+ bridge tests and the symbol-alias drift check
 # only ran when someone remembered to. The bridge job is Windows-only because the
 # MetaTrader5 wheel is; no live terminal is needed. Frontend mirrors the first half of
 # `npm run build` (sw check → vitest → tsc) and skips the Vite build, which is Vercel's
-# job. No secrets, no deploy; gating the deploy on this is a later step.
+# job. No secrets, no deploy; deploy-backend.yml carries its own copy of the backend
+# test job and gates the deploy on it with `needs:`.
 name: Tests
 
 on:
