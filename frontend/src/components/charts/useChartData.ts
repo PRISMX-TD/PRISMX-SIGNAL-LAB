@@ -21,7 +21,18 @@ import { keepIfEqual } from '../../store/keepIfEqual'
 // digits: the price-scale precision, resolved by ChartsPage (broker-reported
 // Quote.digits first, table fallback second). This used to be looked up here from
 // a 7-entry table, which flattened FX candles into stairs.
-export function useChartData(symbol: string, interval: string, digits: number, engine: ChartEngine) {
+// liveBidRef：当前品种的券商实时买价（由 ChartsPage 的叶子组件 LiveBarSync 写入）。
+// K 线库与券商报价是两条链路，收盘价常差几个点；最新一根的 close 统一钉在券商 bid 上，
+// 报价条大字、图表最新价标签、下单面板 SELL 价就是同一个数。
+// liveBidRef: the broker's live bid for this symbol (written by LiveBarSync). The
+// candle store and broker quotes are separate feeds; pinning the forming bar's
+// close to the bid makes header, chart price label and ticket SELL one number.
+export function withLiveClose(b: Candle, bid: number | null | undefined): Candle {
+  if (bid == null || !(bid > 0)) return b
+  return { ...b, c: bid, h: Math.max(b.h, bid), l: Math.min(b.l, bid) }
+}
+
+export function useChartData(symbol: string, interval: string, digits: number, engine: ChartEngine, liveBidRef?: { current: number | null }) {
   const {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef, recomputeIndicators,
@@ -230,8 +241,11 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     const poll = () => {
       chartApi.latest(symbol, interval).then((r) => {
         if (!alive) return
-        for (const b of r.bars) applyBar(b)
-        for (const b of r.bars) mergeCandle(b)
+        // 最新一根用券商 bid 做收盘价，免得每 2 秒被 K 线库的收盘价拽回去。
+        // The newest bar takes the broker bid as close so the poll doesn't yank it back.
+        const bars = r.bars.map((b, i) => (i === r.bars.length - 1 ? withLiveClose(b, liveBidRef?.current) : b))
+        for (const b of bars) applyBar(b)
+        for (const b of bars) mergeCandle(b)
         // 追加新出现的 bar 时间，保持 barTimesRef 与图表同步 / keep bar times in sync
         for (const b of r.bars) {
           const arr = barTimesRef.current
@@ -239,7 +253,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         }
         if (r.bars.length > 0) {
           setHasData(true)
-          setLastPrice(r.bars[r.bars.length - 1].c)
+          setLastPrice(bars[bars.length - 1].c)
           recomputeIndicators()
           // 同值不换引用：每 2 秒一轮询，K 线没动时别让报价条与整页白白重渲染。
           // Keep the reference when unchanged, so a quiet 2s poll re-renders nothing.

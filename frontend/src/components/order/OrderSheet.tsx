@@ -351,7 +351,6 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5"><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></svg>
           <span>{t('order.riskNote')}</span>
         </div>
-        <p className="px-1 -mt-2.5 mb-3 text-[11px] leading-relaxed text-neutral-500">{t('order.timeoutNote')}</p>
 
         {!form.hasAccounts && <OrderConnectNotice neverConnected={totalAccounts === 0} />}
         {form.hasAccounts && blocked?.banner}

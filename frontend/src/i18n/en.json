@@ -367,7 +367,7 @@
     "signalExpiresIn": "Signal expires in",
     "signalExpiredInModal": "This signal just expired and can no longer be traded",
     "slTpInvalid": "Fix the stop loss / take profit before confirming",
-    "riskNote": "Live prices may differ slightly from entry due to network latency. Execution is subject to your MT5 broker. Please double-check volume and side.",
+    "riskNote": "Fills at the MT5 broker price; auto-cancelled if not executed in 5 min. Signal tool only, not investment advice.",
     "submitting": "Submitting…",
     "submitted": "Submitted, waiting for fill confirmation…",
     "filled": "Filled @ {{price}}",

@@ -56,13 +56,13 @@ import IndicatorLegends from '../components/charts/IndicatorLegends'
 import FullscreenToolbar from '../components/charts/FullscreenToolbar'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
 import { useChartEngine } from '../components/charts/useChartEngine'
-import { useChartData } from '../components/charts/useChartData'
+import { useChartData, withLiveClose } from '../components/charts/useChartData'
 import { useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
 import type { Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
-  priceDigits, resolvePriceDigits, type IndicatorFlags,
+  priceDigits, resolvePriceDigits, toLwPoint, type IndicatorFlags,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
@@ -140,6 +140,26 @@ function PositionsCount({ scopeLogin }: { scopeLogin: string | null }) {
 function LiveSymbolHeader(props: Omit<ComponentProps<typeof SymbolHeader>, 'bid' | 'ask'>) {
   const q = useGlobalQuote(props.symbol)
   return <SymbolHeader {...props} bid={q?.bid ?? null} ask={q?.ask ?? null} />
+}
+
+// 实时 K 线收盘：券商 bid 一跳，最新一根的 close 立刻跟着动，并把 bid 留给轮询用。
+// Live bar close: each broker bid tick moves the forming bar's close and is kept for the poll.
+function LiveBarSync({ symbol, engine, liveBidRef }: { symbol: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null } }) {
+  const bid = useGlobalQuote(symbol)?.bid ?? null
+  useEffect(() => { liveBidRef.current = null }, [symbol, liveBidRef])
+  useEffect(() => {
+    liveBidRef.current = bid
+    const arr = engine.candlesRef.current
+    const series = engine.seriesRef.current
+    if (bid == null || !series || arr.length === 0) return
+    const last = arr[arr.length - 1]
+    if (last.t !== engine.lastTimeRef.current) return
+    const next = withLiveClose(last, bid)
+    if (next.c === last.c && next.h === last.h && next.l === last.l) return
+    arr[arr.length - 1] = next
+    try { series.update(toLwPoint(next)) } catch { /* series 正在切换 / series switching */ }
+  }, [bid, engine, liveBidRef])
+  return null
 }
 
 export default function ChartsPage() {
@@ -402,7 +422,8 @@ export default function ChartsPage() {
   // refit key only changes on entering/leaving fullscreen (a real resize).
   const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen)
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
-  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine)
+  const liveBidRef = useRef<number | null>(null)
+  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef)
 
   const openTrade = useCallback((side: Side) => { setTradeSide(side); setSheet('trade') }, [])
   const openWatchlistSheet = useCallback(() => setSheet('watchlist'), [])
@@ -466,6 +487,7 @@ export default function ChartsPage() {
 
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
+        <LiveBarSync symbol={symbol} engine={engine} liveBidRef={liveBidRef} />
         {!isFullscreen && (
           <LiveSymbolHeader
             symbol={symbol}

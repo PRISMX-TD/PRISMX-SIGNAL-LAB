@@ -61,7 +61,7 @@ export default function WatchlistPanel({ symbols, quotes: quotesProp, active, on
     for (const sym of symbols) {
       const q = quotes[sym]
       if (!q) continue
-      const mid = (q.bid + q.ask) / 2
+      const mid = q.bid // 与报价条、图表一致用 bid / bid, matching header and chart
       const prev = prevRef.current[sym]
       if (prev != null && mid !== prev) {
         nextDirs[sym] = mid > prev ? 'up' : 'down'
@@ -113,7 +113,7 @@ export default function WatchlistPanel({ symbols, quotes: quotesProp, active, on
           filtered.map((sym) => {
             const q = quotes[sym]
             const digits = digitsFor(sym)
-            const mid = q ? (q.bid + q.ask) / 2 : null
+            const mid = q ? q.bid : null
             const dir = dirs[sym]
             const meta = symbolMeta(sym)
             return (

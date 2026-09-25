@@ -80,9 +80,12 @@ export default function SymbolHeader({ symbol, interval, bid, ask, digits, daySt
   const changeStr = changePct == null ? '—' : `${up ? '+' : ''}${(changePct * 100).toFixed(2)}%`
   const bidStr = fmt(bid ?? (fallbackPrice || null), digits)
   const askStr = fmt(ask ?? (fallbackPrice || null), digits)
-  // 大字用中间价：买卖价的公允折中。/ The headline is the mid price.
-  const mid = bid != null && ask != null ? (bid + ask) / 2 : fallbackPrice || null
-  const parts = splitPrice(mid, digits)
+  // 大字用买价 bid（MT5 惯例，K 线也按 bid 画），与图表最新价标签、下单 SELL 价一致。
+  // 以前用中间价，页面上同时出现 mid / bid / ask / K 线收盘四个数，看着乱。
+  // The headline is the bid (MT5 convention; candles are bid-based too), matching
+  // the chart's last-price label and the ticket's SELL price.
+  const headline = bid ?? (fallbackPrice || null)
+  const parts = splitPrice(headline, digits)
   const meta = symbolMeta(symbol)
   const ivLabel = INTERVALS.find((iv) => iv.code === interval)?.label ?? interval
 

@@ -367,7 +367,7 @@
     "signalExpiresIn": "信号剩余",
     "signalExpiredInModal": "该信号刚刚过期，无法再下单",
     "slTpInvalid": "请先修正止损/止盈再确认下单",
-    "riskNote": "当前报价可能因网络延迟与入场价存在细微偏差，实际成交以 MT5 经纪商执行为准。请再次确认手数及买卖方向。",
+    "riskNote": "以 MT5 实际成交价为准，5 分钟未执行自动取消。仅为信号工具，不构成投资建议。",
     "submitting": "提交中…",
     "submitted": "已提交，等待成交回执…",
     "filled": "已成交 @ {{price}}",

@@ -285,12 +285,12 @@
   }
   .slide-note {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     align-items: flex-start;
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-3);
-    margin: 12px 4px 16px;
-    line-height: 1.6;
+    margin: 8px 4px 10px;
+    line-height: 1.45;
   }
   .slide-close-btn {
     width: 100%;
@@ -736,7 +736,9 @@
       border-radius: var(--r-lg) var(--r-lg) 0 0;
       max-height: 92vh;
       max-height: calc(var(--vvh, 100vh) * 0.92);
-      padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
+      /* 底部多留 12px：全面屏手势条附近误触会把滑块甩掉。
+         Extra 12px so the slider sits clear of the gesture bar. */
+      padding: 20px 16px calc(28px + env(safe-area-inset-bottom));
       /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效——桌面居中弹窗
          用位移动画会显得突兀，desktop 那份只保留上面 overlay 的淡入。
          Only layer the slide-up here, where it's actually a bottom sheet — a
