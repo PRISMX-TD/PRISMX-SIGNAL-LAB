@@ -314,11 +314,20 @@ def _matched_user_ids(db, cat: str, symbol: str) -> set[str]:
             user_ids.add(p.user_id)
     if not user_ids:
         return user_ids
+    # 被管理员停用的账号不收推送（disabled_at 是闸门，与等级无关）：直接在同一条
+    # 查询里筛掉，不逐人判定。恢复（清空 disabled_at）后下一条信号就照常推。
+    # Admin-disabled accounts get no push (disabled_at is a gate, independent of
+    # plan): filtered in the same query. Re-enabling takes effect on the next signal.
     realtime_ids = {
         uid
-        for uid, plan in db.query(User.id, User.plan).filter(User.id.in_(user_ids)).all()
+        for uid, plan in db.query(User.id, User.plan)
+        .filter(User.id.in_(user_ids), User.disabled_at.is_(None))
+        .all()
         if can_use_push(plan)
     }
+    skipped = len(user_ids) - len(realtime_ids)
+    if skipped:
+        logger.debug("[push] %d matched user(s) dropped (FREE plan or disabled account)", skipped)
     return realtime_ids
 
 
@@ -942,7 +951,16 @@ def _event_prefs_allow(db, user_id: str, event_type: str) -> bool:
         return False
     if not _within_push_window(pref):
         return False
-    plan = db.query(User.plan).filter(User.id == user_id).scalar()
+    row = db.query(User.plan, User.disabled_at).filter(User.id == user_id).first()
+    if row is None:
+        return False
+    plan, disabled_at = row
+    # 停用账号一律不推（账户事件、自动仓管动作、成就、掉线提醒……都走这里）。
+    # Disabled accounts get no event push at all (account events, auto-manage
+    # actions, badges, bridge-offline alerts all pass through here).
+    if disabled_at is not None:
+        logger.debug("[push] skip event %r for disabled user %s", event_type, user_id)
+        return False
     return can_use_push(plan)
 
 
@@ -981,7 +999,14 @@ def _bulk_prefs_allow(db, user_ids: list[str], event_type: str) -> list[str]:
     for chunk in _chunks(user_ids):
         for pref in db.query(NotificationPref).filter(NotificationPref.user_id.in_(chunk)).all():
             prefs[pref.user_id] = pref
-        for uid, plan in db.query(User.id, User.plan).filter(User.id.in_(chunk)).all():
+        # 停用账号不进 plans：下面 `uid not in plans` 就把它挡掉，与 _event_prefs_allow
+        # 的「停用不推」一致。/ Disabled accounts are left out of `plans`, so the
+        # membership check below drops them, matching _event_prefs_allow.
+        for uid, plan in (
+            db.query(User.id, User.plan)
+            .filter(User.id.in_(chunk), User.disabled_at.is_(None))
+            .all()
+        ):
             plans[uid] = plan
 
     allowed: list[str] = []
@@ -993,7 +1018,7 @@ def _bulk_prefs_allow(db, user_ids: list[str], event_type: str) -> list[str]:
             continue
         if not _within_push_window(pref):
             continue
-        if not can_use_push(plans.get(uid)):
+        if uid not in plans or not can_use_push(plans[uid]):
             continue
         allowed.append(uid)
     return allowed
@@ -1074,6 +1099,12 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
         try:
             user = db.query(User).filter(User.id == recipient_id).first()
             if not user:
+                return
+            # 停用账号不推工单回复（站内通知照常落库，恢复后在通知中心能看到）。
+            # No ticket-reply push to a disabled account (the in-app notification
+            # is still stored and shows up once the account is re-enabled).
+            if user.disabled_at is not None:
+                logger.debug("[push] skip ticket reply push for disabled user %s", recipient_id)
                 return
             # 工单回复不看通知开关/白名单（历史行为），但推送时段照样遵守——时段
             # 的意义就是"这段时间外别吵我"，工单回复也不例外。没有偏好行 = 没设过

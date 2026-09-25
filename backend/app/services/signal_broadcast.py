@@ -74,7 +74,14 @@ def _plan_group_user_ids(connected: list[str], free_only: bool, now: datetime) -
         for i in range(0, len(connected), _PLAN_LOOKUP_CHUNK):
             rows = (
                 db.query(User.id, User.plan, User.plan_expires_at)
-                .filter(User.id.in_(connected[i:i + _PLAN_LOOKUP_CHUNK]))
+                # 停用账号不收信号广播：停用时只作废 token，不会踢掉已经建好的 WS，
+                # 所以这里要自己筛（与 push_dispatch 的「停用不推」一致）。
+                # Disabled accounts get no signal broadcast: disabling voids tokens
+                # but doesn't drop an already-open WS, so filter here too.
+                .filter(
+                    User.id.in_(connected[i:i + _PLAN_LOOKUP_CHUNK]),
+                    User.disabled_at.is_(None),
+                )
                 .all()
             )
             targets.extend(

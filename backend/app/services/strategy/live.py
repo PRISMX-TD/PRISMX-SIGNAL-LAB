@@ -27,7 +27,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from app.core.database import SessionLocal
-from app.models import Candle, StrategySignal, StrategyWatch, UserStrategy
+from app.models import Candle, StrategySignal, StrategyWatch, User, UserStrategy
 from app.services.connection_manager import manager
 from app.services.push_dispatch import EVENT_STRATEGY_SIGNAL, dispatch_event_push_async
 from app.services.strategy import costs as ct
@@ -168,13 +168,20 @@ def _evaluate_sync(symbol: str, interval: str, new_ts: list[int] | None = None) 
         # empty we only pay one extra PENDING count. Most (symbol, interval)
         # combos have nothing in either table (2 MAU), so the common path trades
         # two cheap metadata queries for one 400-row candle read.
+        # 被管理员停用的账号，其策略不再触发新信号（也就不会推送）；已有 PENDING
+        # 信号的判定不受影响（下面的 resolve 与候选无关）。恢复后下一根 K 线照常。
+        # Strategies of admin-disabled accounts fire no new signals (hence no
+        # push); resolution of existing PENDING signals is unaffected (it doesn't
+        # depend on candidates). Re-enabling resumes from the next bar.
         candidates = (
             db.query(UserStrategy)
             .join(StrategyWatch, StrategyWatch.strategy_id == UserStrategy.id)
+            .join(User, User.id == UserStrategy.user_id)
             .filter(
                 StrategyWatch.symbol == symbol,
                 StrategyWatch.interval == interval,
                 UserStrategy.enabled.is_(True),
+                User.disabled_at.is_(None),
             )
             .all()
         )
