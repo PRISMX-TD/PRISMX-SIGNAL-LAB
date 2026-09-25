@@ -13,12 +13,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Quote } from '../../api/types'
+import { useGlobalQuotes } from '../../store/live'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
 
 interface Props {
   symbols: string[]
-  quotes: Record<string, Quote>
+  // 不传就自己订阅全站报价：自选表本来就要看每个品种的每一跳，订阅放在这里，
+  // 图表页顶层就不必为它重渲染。/ Omitted → subscribes to the site-wide quotes
+  // itself: the watchlist needs every tick of every symbol, and owning the
+  // subscription here spares the charts page's top level.
+  quotes?: Record<string, Quote>
   active: string
   onSelect: (symbol: string) => void
   digitsFor: (symbol: string) => number
@@ -28,8 +33,10 @@ interface Props {
 type Dir = 'up' | 'down' | null
 const SPARK_LEN = 40
 
-export default function WatchlistPanel({ symbols, quotes, active, onSelect, digitsFor, className = '' }: Props) {
+export default function WatchlistPanel({ symbols, quotes: quotesProp, active, onSelect, digitsFor, className = '' }: Props) {
   const { t } = useTranslation()
+  const ctxQuotes = useGlobalQuotes()
+  const quotes = quotesProp ?? ctxQuotes
   const [query, setQuery] = useState('')
   // 每个品种上一次的中间价（判断涨跌）与最近 40 笔中间价（画迷你走势）。
   // Per-symbol previous mid (tick direction) and the last 40 mids (sparkline).

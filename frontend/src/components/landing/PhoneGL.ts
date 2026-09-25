@@ -116,7 +116,9 @@ export async function createPhoneGL(opts: {
     return null
   }
 
-  const THREE = await import('three')
+  // 与 LandingSpace 共用 three-lite.ts：只取用到的类，其余由 tree-shaking 摇掉。
+  // Shares three-lite.ts with LandingSpace: only the classes in use; the rest is tree-shaken.
+  const { THREE } = await import('./three-lite')
   const { CSS3DRenderer, CSS3DObject } = await import('three/examples/jsm/renderers/CSS3DRenderer.js')
 
   /* ── 记住屏幕节点的原位，dispose 时放回去 ──

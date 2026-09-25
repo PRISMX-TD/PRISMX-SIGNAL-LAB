@@ -31,6 +31,48 @@ declare global {
 
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
 
+// GIS 脚本改为按钮挂载时才插入（原来写死在 index.html 的 <head> 里，每一页都去连
+// accounts.google.com，而它在大陆连不通，会把 window load 拖到超时）。
+// 只插一次：模块级标记 + DOM 里已有同 src 的 script 就不再插（登录页 ↔ 注册切换、
+// StrictMode 双挂载都会让 effect 跑不止一次）。
+// **已经有 window.google.accounts.id 时绝不插**：安卓 App（APP Pack）在 <head> 里同步
+// 装了一个原生 Credential Manager 桥占住这个全局，真 GIS 晚到会把桥覆盖掉——APP Pack
+// 原来靠在构建时摘掉 index.html 里那条 <script> 防这件事（stripGsiScript），现在脚本
+// 是动态插的，摘不到，所以这里必须自己让开。
+// 返回 false = 脚本加载失败（onerror），调用方可以不等 10 秒超时直接给出提示。
+// The GIS script is now injected when the button mounts (it used to sit in
+// index.html's <head>, hitting accounts.google.com on every page and holding up
+// window load where that host is unreachable). Injected once: module flag plus a
+// DOM check. Never injected when window.google.accounts.id already exists: the
+// Android app (APP Pack) installs a native Credential Manager bridge there
+// synchronously in <head>, and a late real GIS would overwrite it — APP Pack used
+// to prevent that by stripping the static <script> at build time, which it cannot
+// do for a dynamic one. Resolves false when the script fails to load.
+const GSI_SRC = 'https://accounts.google.com/gsi/client'
+let gsiLoad: Promise<boolean> | null = null
+function loadGsiScript(): Promise<boolean> {
+  if (window.google?.accounts?.id) return Promise.resolve(true)
+  if (gsiLoad) return gsiLoad
+  gsiLoad = new Promise<boolean>((resolve) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${GSI_SRC}"]`)
+    const el = existing ?? document.createElement('script')
+    el.addEventListener('load', () => resolve(true), { once: true })
+    el.addEventListener('error', () => {
+      // 失败后允许下次挂载重试（换个网络、再进一次登录页）/ allow a retry on a later mount
+      gsiLoad = null
+      el.remove()
+      resolve(false)
+    }, { once: true })
+    if (!existing) {
+      el.src = GSI_SRC
+      el.async = true
+      el.defer = true
+      document.head.appendChild(el)
+    }
+  })
+  return gsiLoad
+}
+
 interface Props {
   onCredential: (credential: string) => void
   onError?: (msg: string) => void
@@ -79,6 +121,15 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
     let cancelled = false
     let initialized = false
 
+    // 挂载时才去拉 GIS（见 loadGsiScript）。加载失败不必等满下面 10 秒的轮询。
+    // Fetch GIS on mount (see loadGsiScript); a load error needn't wait out the 10s poll.
+    void loadGsiScript().then((ok) => {
+      if (!ok && !cancelled && !window.google?.accounts?.id) {
+        window.clearInterval(timer)
+        setUnavailable(true)
+      }
+    })
+
     const render = () => {
       const gsi = window.google?.accounts?.id
       // 必须先 initialize() 再 renderButton() / must initialize before rendering
@@ -104,7 +155,7 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
     // 10Hz 空跑到用户离开为止：纯耗电与主线程噪音，恰好落在"大陆访问慢 + 老机器"
     // 这条既定痛点上。更糟的是按钮永远停在 opacity-0（ready 恒为 false），那层透明
     // 覆盖层挡着下面那个装饰按钮，用户点上去毫无反应、也没有任何说明。
-    // 10 秒 / 100 次：GSI 脚本是 async defer 的外链，正常网络下几百毫秒内到位；
+    // 10 秒 / 100 次：GSI 脚本是挂载时插入的 async 外链，正常网络下几百毫秒内到位；
     // 等满 10 秒还没有，就不是"慢"，是根本到不了。
     //
     // Poll for the async GSI script — but with a deadline. This 100ms timer used

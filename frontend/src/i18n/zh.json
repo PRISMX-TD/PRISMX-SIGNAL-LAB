@@ -353,6 +353,8 @@
     "account": "账户",
     "estMargin": "预估保证金占用",
     "currentPrice": "现价",
+    "refPrice": "参考价",
+    "slowBroker": "券商响应较慢，请勿重复下单",
     "sizeMode": "手数模式",
     "sizeModeLots": "手数",
     "sizeModeRisk": "风险百分比",
@@ -924,6 +926,7 @@
     "filterDisabledUnderDate": "选了日期区间时，状态与品种筛选暂不可用；清除日期即可恢复。",
     "pageInfo": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "cancelSent": "撤销请求已发出",
+    "cancelling": "撤单中…",
     "proExclusive": "PRO专属",
     "tab": {
       "positions": "持仓与账户",

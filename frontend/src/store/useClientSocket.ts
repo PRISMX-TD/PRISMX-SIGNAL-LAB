@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { getToken, API_BASE } from '../api/client'
 import type { WSMessage } from '../api/types'
 import { netQuality, pingPayload } from './netQuality'
+import { reconnectDelay } from './reconnectBackoff'
 
 // 应用层心跳。协议层的 ping/pong 由浏览器自动应答、页面 JS 看不见，所以它只能让
 // **服务端**发现死连接；而出问题的是客户端这一侧——安卓 App 切后台再回前台，TCP 早被
@@ -26,20 +27,36 @@ import { netQuality, pingPayload } from './netQuality'
 // all* arrives within the deadline. Any frame counts, not just PONG — during
 // market hours quotes tick every 1.5s and are the heartbeat; PONG only covers
 // the silence of weekends and closed sessions.
-// 10 秒一次：同时用来测往返延迟给顶栏信号图标，25 秒太久、数字不够及时。
-// Every 10s: the round trip doubles as the header signal icon's latency reading,
-// and 25s made that number too stale.
-const HEARTBEAT_INTERVAL_MS = 10_000
-// PING 之后多久没收到任何帧就判死。10 秒对任何能用的网络都绰绰有余；再长只是让用户
-// 多盯几秒冻住的报价。/ Silence after a PING that counts as dead. Ten seconds is
-// ample on any usable network; longer just means staring at frozen quotes.
-const HEARTBEAT_TIMEOUT_MS = 10_000
+// 心跳每 5 秒检查一次（以前 10 秒）。以前「10 秒一拍 + 10 秒时限」，僵尸连接最坏要
+// 20 秒才认出来——对一个下单产品，20 秒冻住却看着正常的报价太久了。现在最坏约 10 秒。
+// Heartbeat checks every 5s (was 10s). With "10s interval + 10s deadline" a zombie
+// took up to 20s to be caught — far too long to stare at plausible frozen quotes in
+// a trading product. Worst case is now ~10s.
+const HEARTBEAT_INTERVAL_MS = 5_000
+// PING 之后多久没收到任何帧就判死。PONG 在任何能用的网络上都是百毫秒级，5 秒仍留了
+// 一个数量级的余量。/ Silence after a PING that counts as dead. A PONG takes
+// hundreds of ms on any usable network; 5s still leaves an order of magnitude.
+const HEARTBEAT_TIMEOUT_MS = 5_000
+// PING 的频率不跟着翻倍：后端每收一帧 PING 都要写几次 Redis（连接质量统计，见
+// backend services/net_quality.py），全站连接数一乘就不是小数。所以心跳拍子虽是 5 秒，
+// 但**最近 5 秒内刚收到过帧**（开市时报价 1.5 秒一帧）且上一次 PING 不到 10 秒时，
+// 这一拍就不发——连接刚被证明活着，再问一次没有信息量。于是开市时仍是约 10 秒一帧
+// PING（顶栏延迟读数照旧新鲜），只有安静时段（收市、周末）才是 5 秒一帧。
+// The PING rate is deliberately not doubled: every PING costs the backend a few
+// Redis writes (connection-quality stats, backend services/net_quality.py), which
+// multiplies across all connections. So although the heartbeat ticks every 5s, a
+// tick skips the PING when a frame arrived within the last 5s (quotes tick every
+// 1.5s in market hours) and the last PING is under 10s old — the socket was just
+// proven alive. Market hours therefore stay at ~one PING per 10s (the header
+// latency reading stays fresh); only quiet sessions go to one per 5s.
+const PING_MIN_GAP_MS = 10_000
 // 回到前台 / 网络恢复时用的探测时限。这一刻用户正看着屏幕，宁可判快一点：判错的代价
-// 只是一次多余的重连，判慢的代价是几秒钟"看起来正常"的假数据。
+// 只是一次多余的重连（首次重连只等约 300ms），判慢的代价是几秒钟"看起来正常"的假数据。
 // Probe deadline used on resume / network-back. The user is looking at the
 // screen right now, so err on the fast side: a false positive costs one spare
-// reconnect, a slow verdict costs seconds of plausible-looking stale data.
-const RESUME_PROBE_TIMEOUT_MS = 5_000
+// reconnect (~300ms first retry), a slow verdict costs seconds of plausible-looking
+// stale data.
+const RESUME_PROBE_TIMEOUT_MS = 3_000
 
 // 返回当前 WebSocket 连接状态，供上层在断线时提示"数据可能已过时"。
 // Returns the current WebSocket connection state, so callers can warn that
@@ -66,6 +83,10 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     let attempt = 0
     // 最近一帧 PING 的发出时间，PONG 回来时算往返 / when the last PING left, for RTT on PONG
     let pingSentAt: number | null = null
+    // 最近一次收到任何帧 / 发出 PING 的时刻（performance.now()），给心跳判断「这一拍要不要发」。
+    // When any frame last arrived / a PING last left, for the "ping this tick?" decision.
+    let lastFrameAt = 0
+    let lastPingAt = 0
 
     // 断线重连采用指数退避 + 抖动，而不是固定间隔。
     //
@@ -73,26 +94,23 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     // 都在每 2 秒撞一次门，后端刚要恢复就被自家前端的重连洪峰再打垮一次。
     // 退避把这个洪峰摊平；抖动（±25%）则避免所有标签页卡在同一毫秒一起重试。
     //
-    // 首次重试仍然约 2 秒——用户感知到的"断一下就回来"没有变慢，只有连续失败
-    // 才逐步退到 4/8/16/30 秒封顶。真正长时间断线时，下面的 online /
-    // visibilitychange 监听会在网络恢复或用户切回页面的瞬间立刻重连，不必等
-    // 退避计时器走完。
+    // 首次重试约 300ms、封顶 10 秒，具体见 reconnectBackoff.ts 的说明。真正长时间
+    // 断线时，下面的 online / visibilitychange 监听会在网络恢复或用户切回页面的瞬间
+    // 立刻重连，不必等退避计时器走完。
     //
     // Reconnect with exponential backoff + jitter instead of a fixed interval.
     // The problem with a flat 2s retry isn't any single page, it's the total:
     // during an outage every open tab knocks every 2 seconds, and the backend
     // gets flattened by its own frontend's reconnect surge just as it comes
-    // back. Backoff spreads that surge out; the ±25% jitter keeps tabs from
-    // retrying on the same millisecond. The first retry is still ~2s, so a
-    // brief blip feels exactly as fast as before — only repeated failures back
-    // off to a 30s ceiling. For genuinely long outages, the online /
+    // back. Backoff spreads that surge out and jitter keeps tabs from retrying
+    // on the same millisecond. First retry ~300ms, capped at 10s — see
+    // reconnectBackoff.ts. For genuinely long outages, the online /
     // visibilitychange listeners below reconnect the instant the network
     // returns or the user comes back, without waiting out the timer.
     const scheduleReconnect = () => {
       if (closed) return
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
-      const base = Math.min(30000, 2000 * 2 ** attempt)
-      const delay = base * (0.75 + Math.random() * 0.5)
+      const delay = reconnectDelay(attempt)
       attempt += 1
       reconnectTimer = window.setTimeout(connect, delay)
     }
@@ -170,6 +188,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       try {
         ws.send(JSON.stringify({ type: 'PING', ...pingPayload() }))
         pingSentAt = performance.now()
+        lastPingAt = pingSentAt
       } catch {
         // send 在 OPEN 态抛错本身就是坏了 / a throw while OPEN already means broken
         dropDeadConnection()
@@ -180,7 +199,13 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
 
     const startHeartbeat = () => {
       stopHeartbeat()
-      heartbeatTimer = window.setInterval(() => probe(HEARTBEAT_TIMEOUT_MS), HEARTBEAT_INTERVAL_MS)
+      heartbeatTimer = window.setInterval(() => {
+        const now = performance.now()
+        // 刚收到过帧、且 PING 不久前才发过：连接活着，这一拍不发（见 PING_MIN_GAP_MS）。
+        // A frame just arrived and a PING went out recently: alive, skip this tick.
+        if (now - lastFrameAt < HEARTBEAT_INTERVAL_MS && now - lastPingAt < PING_MIN_GAP_MS) return
+        probe(HEARTBEAT_TIMEOUT_MS)
+      }, HEARTBEAT_INTERVAL_MS)
     }
 
     // 有"情况变了"的明确信号时立即处理：网络恢复、或用户把页面切回前台。
@@ -308,6 +333,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         // 任何一帧到达都证明连接活着，先清掉心跳期限再做别的。
         // Any frame proves the connection alive; clear the deadline before anything else.
         clearDeadline()
+        lastFrameAt = performance.now()
         netQuality.touch()
         try {
           const msg = JSON.parse(ev.data) as WSMessage
@@ -336,7 +362,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
             attempt = 0
             netQuality.setState('online')
             startHeartbeat()
-            // 连上立刻测一次，不让图标空等 10 秒 / measure right away instead of waiting 10s
+            // 连上立刻测一次，不让图标空等一拍 / measure right away instead of waiting a tick
             probe(HEARTBEAT_TIMEOUT_MS)
           }
           handlerRef.current(msg)

@@ -29,15 +29,14 @@ import type { Signal } from '../../api/types'
 import { calcRiskReward, displaySymbol } from '../../api/utils'
 import { fmtIssueClock, fmtPx, priceDecimals, riskFraction, rrTone } from './SignalView'
 import { symbolMeta } from '../../utils/symbolMeta'
-import TtlRing from './TtlRing'
+import { ClockTtlRing } from './TtlRing'
 
 interface Props {
   signal: Signal | null
-  now: number
   onTrade: (s: Signal) => void
 }
 
-const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
+const SignalExec: FC<Props> = ({ signal, onTrade }) => {
   const { t } = useTranslation()
   const rr = signal ? calcRiskReward(signal.symbol, signal.entry, signal.stopLoss, signal.takeProfit) : null
   const isBuy = signal?.side === 'BUY'
@@ -58,7 +57,7 @@ const SignalExec: FC<Props> = ({ signal, now, onTrade }) => {
           {t('signals.focus.signalHeading')}
         </h3>
         {signal ? (
-          <TtlRing expireAt={signal.expireAt} now={now} label={t('signals.focus.remainingTtl')} />
+          <ClockTtlRing expireAt={signal.expireAt} label={t('signals.focus.remainingTtl')} />
         ) : (
           <span className="sig-ttl"><b className="num">--:--</b></span>
         )}

@@ -12,6 +12,11 @@ export default defineConfig({
     },
   },
   build: {
+    // 产出 dist/.vite/manifest.json 给 scripts/prerender.mjs 用：按它给预渲染的公开页
+    // 注入对应页面 chunk 的 <link rel="modulepreload">（脚本读完即删，不随站点发布）。
+    // Emits dist/.vite/manifest.json for scripts/prerender.mjs, which injects
+    // modulepreload links for each prerendered page's chunk (deleted after reading).
+    manifest: true,
     // 产物的语法下限：Chrome / 安卓 WebView 70（2018 年 10 月）、Safari 12、Firefox 68。
     //
     // Vite 默认是 'modules'（≈ Chrome 87），会把 `??` / `?.` / 类字段原样留在产物里——
@@ -81,9 +86,26 @@ export default defineConfig({
         // react-i18next all belong in the same chunk, and `/node_modules/react/`
         // would split them out.
         manualChunks(id: string) {
+          // three-lite.ts（落地页 3D 用到的 three 子集出口）只被动态 import，但 Rollup 会把
+          // 它和别的共享小模块（实测是 festival/FestivalDecor，落地页 / Layout / 信号页都静态
+          // 引用）并进同一个 chunk——于是 three 整块变成这三处的**静态**依赖，首屏跟着下
+          // 500 KB。钉进 three 块，它就只会随动态 import 出现。
+          // three-lite.ts (the three subset the landing 3D uses) is only imported
+          // dynamically, but Rollup merged it with an unrelated shared module
+          // (festival/FestivalDecor, statically used by landing / Layout / signals),
+          // turning the whole three chunk into a static dependency of all three.
+          // Pinning it into the three chunk keeps three behind the dynamic import.
+          if (id.includes('/src/components/landing/three-lite')) return 'three'
           if (!id.includes('node_modules')) return
           if (id.includes('/node_modules/three/')) return 'three'
           if (id.includes('/node_modules/lightweight-charts/')) return 'charts'
+          // qrcode.react 的路径里也含 "react"，会被下面那条宽松匹配吞进 vendor（首屏必下），
+          // 而它只在懒加载页面里用到（二维码）。先挑出来、不指定块名，交给 Rollup 跟着用到
+          // 它的懒页面走。
+          // qrcode.react's path contains "react" too, so the loose match below pulled it
+          // into vendor (on the critical path) although only lazy pages use it. Excluded
+          // first with no chunk name, so Rollup places it with the lazy pages that use it.
+          if (id.includes('/node_modules/qrcode.react/')) return
           if (
             id.includes('react') ||
             id.includes('scheduler') ||

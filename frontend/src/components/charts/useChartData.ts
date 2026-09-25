@@ -13,6 +13,7 @@ import {
   computeDayStats, toLwPoint,
 } from './chartConfig'
 import type { ChartEngine } from './useChartEngine'
+import { keepIfEqual } from '../../store/keepIfEqual'
 
 // digits：价格轴小数位，由 ChartsPage 按「券商报价 digits 优先、兜底表其次」解析好
 // 后传入（以前这里自己查那张 7 条的写死表，表外品种的价格轴 minMove 被压成 0.01，
@@ -240,7 +241,9 @@ export function useChartData(symbol: string, interval: string, digits: number, e
           setHasData(true)
           setLastPrice(r.bars[r.bars.length - 1].c)
           recomputeIndicators()
-          setDayStats(computeDayStats(candlesRef.current))
+          // 同值不换引用：每 2 秒一轮询，K 线没动时别让报价条与整页白白重渲染。
+          // Keep the reference when unchanged, so a quiet 2s poll re-renders nothing.
+          setDayStats((prev) => keepIfEqual(prev, computeDayStats(candlesRef.current)))
           // 自动跟踪最新 bar：仅在用户未手动离开实时位置时跟随滚动
           // Auto-follow the latest bar only when the user hasn't scrolled away
           if (isFollowingLiveRef.current) {

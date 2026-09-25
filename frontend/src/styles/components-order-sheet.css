@@ -247,3 +247,26 @@
     white-space: nowrap;
   }
 }
+
+/* 手机上的触控尺寸：快捷手数 / 风险% 芯片原来约 22px 高、步进按钮 28px，手指按不准，
+   按错一档就是错一个数量级的手数。只在窄屏放大，桌面（鼠标）保持紧凑。
+   Touch sizes on phones: the quick-lot / risk-% chips were ~22px tall and the
+   steppers 28px — easy to miss, and one chip off is an order of magnitude of
+   lots. Enlarged on narrow screens only; desktop (mouse) stays compact.
+   刻意放在 @layer 之外：芯片上还挂着 Tailwind 的 px-2 / text-xs，层内规则压不过
+   utilities 层。/ Deliberately outside @layer: the chips also carry Tailwind px-2 /
+   text-xs, which a layered rule can't override. */
+@media (max-width: 767px) {
+  .stepper button {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+  }
+  .slide-chip {
+    min-width: 44px;
+    min-height: 40px;
+    padding-left: 10px;
+    padding-right: 10px;
+    font-size: 13px;
+  }
+}

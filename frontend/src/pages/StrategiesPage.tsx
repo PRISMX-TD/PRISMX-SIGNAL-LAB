@@ -59,6 +59,8 @@ import { useBackToClose } from '../utils/useBackToClose'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import { TEMPLATE_LABEL_KEYS } from '../utils/strategyTemplates'
 import Toast from '../components/Toast'
+// 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
+import '../styles/strategies.css'
 
 // 每个预设的一句话说明。这些文案 i18n 里一直有（templateXxxDesc），但自从模板
 // 参数表单被条件编辑器取代后就没有出口了——预设选择器只显示名字，"MACD 金叉死叉"

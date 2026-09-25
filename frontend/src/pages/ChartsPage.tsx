@@ -26,11 +26,11 @@
 // the chart fills the screen with a fixed sell | spread | buy bar, and the
 // watchlist / ticket / positions open as bottom sheets. The chart container is
 // always mounted — sheets overlay it, never unmount it.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
-import { useLive, useQuotes } from '../store/live'
+import { useLive } from '../store/live'
 import { useOrderPlacement } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useLastAccount } from '../utils/useLastAccount'
@@ -57,19 +57,90 @@ import FullscreenToolbar from '../components/charts/FullscreenToolbar'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
 import { useChartEngine } from '../components/charts/useChartEngine'
 import { useChartData } from '../components/charts/useChartData'
-import { useGlobalQuotes, usePendingOrders, usePositions } from '../store/live'
+import { useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
+import type { Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
   priceDigits, resolvePriceDigits, type IndicatorFlags,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
+// 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
+import '../styles/terminal.css'
 
 // IndicatorFlags 原本定义在这里，IndicatorSettingsModal 等按老路径引用；保留再导出。
 // IndicatorFlags used to be defined here; re-exported so old import paths keep working.
 export type { IndicatorFlags }
 
 type Sheet = 'watchlist' | 'trade' | 'positions' | null
+
+// ── 高频数据下放 / high-frequency data pushed down ──────────────────────────────
+// 本页以前在顶层订阅全部报价（全站 + 按账户）、持仓与挂单：任何一个品种跳一下价、
+// 任何一张仓位的浮盈动一下，整页——图表外壳、工具条、自选、下单票、停靠区——全部
+// 重渲染。现在顶层只订阅「低频」的东西（账户、订单、当前品种的价格精度），报价与
+// 持仓由真正要用它们的叶子组件各自订阅：下单票自己读按账户报价、报价条 / 交易条按
+// 当前品种读一条全站报价、持仓标记层与停靠区自己读持仓并按账户过滤。图上的持仓线、
+// 挂单线照旧随推送实时更新——它们的订阅只是挪进了 LiveOverlay。
+// This page used to subscribe at the top to every quote (site-wide and per
+// account), positions and pending orders, so any symbol ticking or any position's
+// P/L moving re-rendered everything — chart shell, toolbar, watchlist, ticket, dock.
+// The top level now subscribes only to low-frequency data (accounts, orders, the
+// active symbol's precision); quotes and positions are read by the leaves that use
+// them. The on-chart position / pending lines still update live — their
+// subscription simply moved into LiveOverlay.
+
+// 全部品种的「品种:精度」签名：只有新品种出现、或券商精度变了它才变，于是
+// digitsFor 不会因为每一跳价换新引用。/ A "symbol:digits" signature over all quotes;
+// it changes only when a symbol appears or a broker's precision changes, so
+// digitsFor keeps its identity across ticks.
+function digitsSignature(quotes: Record<string, Quote>): string {
+  let sig = ''
+  for (const k in quotes) sig += `${k}:${quotes[k]?.digits ?? ''}|`
+  return sig
+}
+
+// 按账户过滤持仓 / 挂单：scopeLogin 为 null 即不过滤（单账户或数据不带 login，见
+// ChartsPage 里 scopeLogin 的说明）。/ Positions / pending orders scoped to an
+// account; null means unscoped (see scopeLogin in ChartsPage).
+function useScopedPositions(scopeLogin: string | null) {
+  const positions = usePositions()
+  return useMemo(
+    () => (scopeLogin ? positions.filter((p) => String(p.login ?? '') === String(scopeLogin)) : positions),
+    [positions, scopeLogin],
+  )
+}
+function useScopedPendingOrders(scopeLogin: string | null) {
+  const pendingOrders = usePendingOrders()
+  return useMemo(
+    () => (scopeLogin ? pendingOrders.filter((o) => String(o.login ?? '') === String(scopeLogin)) : pendingOrders),
+    [pendingOrders, scopeLogin],
+  )
+}
+
+type OverlayProps = Omit<ComponentProps<typeof PositionOverlay>, 'positions' | 'pendingOrders'> & { scopeLogin: string | null }
+function LiveOverlay({ scopeLogin, ...rest }: OverlayProps) {
+  const positions = useScopedPositions(scopeLogin)
+  const pendingOrders = useScopedPendingOrders(scopeLogin)
+  return <PositionOverlay {...rest} positions={positions} pendingOrders={pendingOrders} />
+}
+
+type DockProps = Omit<ComponentProps<typeof PositionsDock>, 'positions' | 'pendingOrders'> & { scopeLogin: string | null }
+function LiveDock({ scopeLogin, ...rest }: DockProps) {
+  const positions = useScopedPositions(scopeLogin)
+  const pendingOrders = useScopedPendingOrders(scopeLogin)
+  return <PositionsDock {...rest} positions={positions} pendingOrders={pendingOrders} />
+}
+
+// 只渲染持仓数的小叶子（工具条按钮 / 抽屉抬头）/ a leaf that renders just the count
+function PositionsCount({ scopeLogin }: { scopeLogin: string | null }) {
+  return <>{useScopedPositions(scopeLogin).length}</>
+}
+
+// 报价条：只订阅当前品种那一条全站报价 / quote strip reading just the active symbol's quote
+function LiveSymbolHeader(props: Omit<ComponentProps<typeof SymbolHeader>, 'bid' | 'ask'>) {
+  const q = useGlobalQuote(props.symbol)
+  return <SymbolHeader {...props} bid={q?.bid ?? null} ask={q?.ask ?? null} />
+}
 
 export default function ChartsPage() {
   const { t } = useTranslation()
@@ -168,10 +239,6 @@ export default function ChartsPage() {
   } = useChartFullscreen(containerRef)
 
   const { accounts, activeSymbols, orders } = useLive()
-  const accountQuotes = useQuotes()
-  const globalQuotes = useGlobalQuotes()
-  const positions = usePositions()
-  const pendingOrders = usePendingOrders()
   const { toast, placeManualOrder, showToast } = useOrderPlacement()
 
   // 每个品种的价格轴小数位：**优先用券商随报价上报的 digits**，拿不到才退回
@@ -181,15 +248,15 @@ export default function ChartsPage() {
   // Per-symbol price precision, preferring the broker-reported Quote.digits and
   // falling back to the table only when no quote has arrived. Feeds the quote
   // strip, ticket, watchlist, positions dock and the on-chart markers.
+  // 依赖的是精度签名而不是整张报价表：跳价不换引用，精度变了才换（见 digitsSignature）。
+  // Keyed on the precision signature, not the quote map: ticks keep the identity.
+  const peekQuotes = useGlobalQuotesPeek()
+  const digitsKey = useGlobalQuotesSelect(digitsSignature)
   const digitsFor = useCallback(
-    (s: string) => priceDigits(s, globalQuotes[s]),
-    [globalQuotes],
+    (s: string) => priceDigits(s, peekQuotes()[s]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- digitsKey is the change signal
+    [peekQuotes, digitsKey],
   )
-
-  // 当前品种的全站统一报价（EA 推送，含 bid/ask）；报价条与下单价用它。
-  // The active symbol's site-wide quote (EA-pushed, bid/ask); used by the
-  // quote strip and the ticket's price.
-  const activeQuote = symbol ? globalQuotes[symbol] : undefined
 
   // exactDigits 为 null = 这个品种的精度我们还不知道（没收到报价、也不在兜底表
   // 里）。展示走 decimals（退回 2 位只是显示难看），但**发给 MT5 的价格绝不能按
@@ -197,7 +264,9 @@ export default function ChartsPage() {
   // exactDigits === null means the precision is genuinely unknown. Display falls
   // back to 2 digits (merely ugly), but prices sent to MT5 must never be rounded
   // to a guessed precision — hence PositionOverlay takes exactDigits.
-  const exactDigits = resolvePriceDigits(symbol, activeQuote)
+  // 只订阅「当前品种的精度」这个原始值，跳价不会让本页重渲染。
+  // Subscribes to the active symbol's precision only; ticks don't re-render the page.
+  const exactDigits = useGlobalQuotesSelect((q) => resolvePriceDigits(symbol, symbol ? q[symbol] : undefined))
   const decimals = exactDigits ?? FALLBACK_DECIMALS
 
   // 右栏账户条展示的账户：优先在线账号，否则第一个绑定的。
@@ -231,19 +300,16 @@ export default function ChartsPage() {
   // 避免误伤。/ Filter positions/orders by the selected account — only when there
   // are multiple accounts; single-account or login-less data shows as-is.
   const multiAccount = accounts.length > 1
-  const accountPositions = useMemo(
-    () => (multiAccount && activeAccount ? positions.filter((p) => String(p.login ?? '') === String(activeAccount.login)) : positions),
-    [multiAccount, activeAccount, positions],
-  )
+  // 持仓 / 挂单的过滤账号：多账户才限定到选中账户，否则 null 不过滤。过滤本身在叶子
+  // 组件里做（useScopedPositions），见文件前部「高频数据下放」。挂单的键名是 login，
+  // 与持仓一致，不是订单那边的 mt5Login。
+  // The account positions / pending orders are scoped to: the selection only when
+  // there are several accounts, else null (unscoped). The filtering happens in the
+  // leaves (useScopedPositions); see "high-frequency data pushed down" above.
+  const scopeLogin = multiAccount && activeAccount ? activeAccount.login : null
   const accountOrders = useMemo(
     () => (multiAccount && activeAccount ? orders.filter((o) => String(o.mt5Login ?? '') === String(activeAccount.login)) : orders),
     [multiAccount, activeAccount, orders],
-  )
-  // 挂单同一套过滤口径（键名是 login，与持仓一致，不是订单那边的 mt5Login）。
-  // Pending orders filter the same way; their key is `login`, as on positions.
-  const accountPendingOrders = useMemo(
-    () => (multiAccount && activeAccount ? pendingOrders.filter((o) => String(o.login ?? '') === String(activeAccount.login)) : pendingOrders),
-    [multiAccount, activeAccount, pendingOrders],
   )
   // 停靠区「全部平仓」的作用范围，必须跟 accountPositions 一个口径：多账户才限定
   // 到选中账户，否则不限（null）——单账户或数据没带 login 时，列表本来就是全部。
@@ -251,7 +317,7 @@ export default function ChartsPage() {
   // The dock's close-all scope, kept in lockstep with accountPositions: narrowed to
   // the selected account only when there are several, otherwise unscoped (null),
   // which is exactly the list's own scope. Drift here closes off-screen positions.
-  const closeAllLogin = multiAccount && activeAccount ? activeAccount.login : null
+  const closeAllLogin = scopeLogin
   const closeAllLabel = activeAccount
     ? `${activeAccount.login}${activeAccount.company ? ` · ${activeAccount.company}` : ''}`
     : ''
@@ -338,23 +404,14 @@ export default function ChartsPage() {
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
   const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine)
 
-  const px = (v: number | null | undefined) => (v != null ? v.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—')
-  const spreadPts = activeQuote && activeQuote.ask >= activeQuote.bid ? Math.round((activeQuote.ask - activeQuote.bid) * Math.pow(10, decimals)) : null
-  const openTrade = (side: Side) => { setTradeSide(side); setSheet('trade') }
+  const openTrade = useCallback((side: Side) => { setTradeSide(side); setSheet('trade') }, [])
+  const openWatchlistSheet = useCallback(() => setSheet('watchlist'), [])
+  const pickFromSheet = useCallback((s: string) => { setSymbol(s); setSheet(null) }, [])
 
-  const ticket = (initialSide?: Side) => (
-    <OrderTicket
-      key={initialSide ?? 'desk'}
-      symbol={symbol}
-      accounts={accounts}
-      quotesByAccount={accountQuotes}
-      globalQuote={activeQuote}
-      refPrice={lastPrice}
-      digits={decimals}
-      selectedLogin={effectiveLogin}
-      onSelectLogin={setSelectedLogin}
-      initialSide={initialSide}
-      onPlace={async (side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) => {
+  // 稳定的下单回调：OrderTicket 已 memo，内联箭头函数会让它每次都重渲染。
+  // A stable place callback: OrderTicket is memoized and an inline arrow would defeat it.
+  const onPlace = useCallback<ComponentProps<typeof OrderTicket>['onPlace']>(
+      async (side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) => {
         const placed = await placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price)
         // 只在「这一单是从手机的下单抽屉里下的」时才切。判据就是抽屉当时开在
         // trade 上——桌面右栏下单时 sheet 恒为 null，绝不会误触发（桌面本来就
@@ -372,7 +429,23 @@ export default function ChartsPage() {
         const settled = placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')
         if (afterPlaceOpen && !settled && sheetRef.current === 'trade') setSheet('positions')
         return placed
-      }}
+      },
+      [placeManualOrder, symbol, afterPlaceOpen],
+  )
+
+  // 下单票自己订阅报价（按账户 + 当前品种的全站报价），这里不再传。
+  // The ticket subscribes to its own quotes (per account + the symbol's site-wide one).
+  const ticket = (initialSide?: Side) => (
+    <OrderTicket
+      key={initialSide ?? 'desk'}
+      symbol={symbol}
+      accounts={accounts}
+      refPrice={lastPrice}
+      digits={decimals}
+      selectedLogin={effectiveLogin}
+      onSelectLogin={setSelectedLogin}
+      initialSide={initialSide}
+      onPlace={onPlace}
     />
   )
 
@@ -385,7 +458,6 @@ export default function ChartsPage() {
         <WatchlistPanel
           className="flex min-h-0 flex-1 flex-col"
           symbols={activeSymbols}
-          quotes={globalQuotes}
           active={symbol}
           onSelect={setSymbol}
           digitsFor={digitsFor}
@@ -395,16 +467,14 @@ export default function ChartsPage() {
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
         {!isFullscreen && (
-          <SymbolHeader
+          <LiveSymbolHeader
             symbol={symbol}
             interval={interval}
-            bid={activeQuote?.bid ?? null}
-            ask={activeQuote?.ask ?? null}
             digits={decimals}
             dayStats={dayStats}
             fallbackPrice={lastPrice}
             stale={stale}
-            onSymbolClick={() => setSheet('watchlist')}
+            onSymbolClick={openWatchlistSheet}
           />
         )}
 
@@ -423,7 +493,7 @@ export default function ChartsPage() {
               <IntervalSeg value={interval} onChange={setIntervalCode} />
               <div className="term-tbr">
                 <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => setSheet('positions')}>
-                  {t('charts.openPositions')} <b>{accountPositions.length}</b>
+                  {t('charts.openPositions')} <b><PositionsCount scopeLogin={scopeLogin} /></b>
                 </button>
                 {drawReady && (
                   <button
@@ -483,11 +553,10 @@ export default function ChartsPage() {
                 being later in the DOM puts the draw layer on top, so drawing
                 naturally takes precedence over dragging an SL line. */}
             {drawReady && chartRef.current && seriesRef.current && (
-              <PositionOverlay
+              <LiveOverlay
                 chart={chartRef.current}
                 series={seriesRef.current}
-                positions={accountPositions}
-                pendingOrders={accountPendingOrders}
+                scopeLogin={scopeLogin}
                 symbol={symbol}
                 digits={decimals}
                 exactDigits={exactDigits}
@@ -540,24 +609,14 @@ export default function ChartsPage() {
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
         {!isFullscreen && (
           <div className="hidden lg:flex lg:flex-shrink-0 lg:flex-col">
-            <PositionsDock positions={accountPositions} orders={accountOrders} pendingOrders={accountPendingOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
+            <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
           </div>
         )}
 
         {/* 手机端底部交易条：卖 | 点差 | 买，点开下单票抽屉
             Mobile trade bar: sell | spread | buy, opens the ticket sheet */}
         {!isFullscreen && (
-          <div className="term-mbar">
-            <button type="button" className="sell" onClick={() => openTrade('SELL')}>
-              <span className="lab">{t('charts.ticket.sell')}</span>
-              <span className="px"><PipText s={px(activeQuote?.bid)} /></span>
-            </button>
-            <div className="sp">{t('charts.ticket.spreadUnit')}<b>{spreadPts ?? '—'}</b></div>
-            <button type="button" className="buy" onClick={() => openTrade('BUY')}>
-              <span className="lab">{t('charts.ticket.buy')}</span>
-              <span className="px"><PipText s={px(activeQuote?.ask)} /></span>
-            </button>
-          </div>
+          <MobileTradeBar symbol={symbol} decimals={decimals} lastPrice={lastPrice} onTrade={openTrade} />
         )}
       </section>
 
@@ -586,7 +645,7 @@ export default function ChartsPage() {
             <div className="term-ph term-sheet-ph">
               <div className="term-sheet-ttl">
                 <h3>{sheet === 'watchlist' ? t('charts.watchlist.title') : sheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
-                <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : accountPositions.length}</span>
+                <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : <PositionsCount scopeLogin={scopeLogin} />}</span>
               </div>
               {/* 「下单后自动打开」就放在它自己弹出来的这张抽屉的抬头里：嫌它烦的人
                   正好在这儿，不用去设置页里找一个自己都不知道叫什么的开关。
@@ -608,9 +667,8 @@ export default function ChartsPage() {
                 <WatchlistPanel
                   className="flex min-h-0 flex-1 flex-col"
                   symbols={activeSymbols}
-                  quotes={globalQuotes}
                   active={symbol}
-                  onSelect={(s) => { setSymbol(s); setSheet(null) }}
+                  onSelect={pickFromSheet}
                   digitsFor={digitsFor}
                 />
               )}
@@ -621,7 +679,7 @@ export default function ChartsPage() {
                 </>
               )}
               {sheet === 'positions' && (
-                <PositionsDock positions={accountPositions} orders={accountOrders} pendingOrders={accountPendingOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
+                <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
               )}
             </div>
           </div>
@@ -644,6 +702,34 @@ export default function ChartsPage() {
       {toast && (
         <Toast kind={toast.kind} message={toast.msg} />
       )}
+    </div>
+  )
+}
+
+// 手机端底部交易条：卖 | 点差 | 买。自己订阅当前品种的报价，跳价只重画这一条。
+// Mobile trade bar: sell | spread | buy. Subscribes to the active symbol's quote itself,
+// so a tick repaints just this bar.
+function MobileTradeBar({ symbol, decimals, lastPrice, onTrade }: {
+  symbol: string
+  decimals: number
+  lastPrice: number
+  onTrade: (side: Side) => void
+}) {
+  const { t } = useTranslation()
+  const q = useGlobalQuote(symbol)
+  const px = (v: number | null | undefined) => (v != null ? v.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—')
+  const spreadPts = q && q.ask >= q.bid ? Math.round((q.ask - q.bid) * Math.pow(10, decimals)) : null
+  return (
+    <div className="term-mbar">
+      <button type="button" className="sell" onClick={() => onTrade('SELL')}>
+        <span className="lab">{t('charts.ticket.sell')}</span>
+        <span className="px"><PipText s={px(q?.bid)} /></span>
+      </button>
+      <div className="sp">{t('charts.ticket.spreadUnit')}<b>{spreadPts ?? '—'}</b></div>
+      <button type="button" className="buy" onClick={() => onTrade('BUY')}>
+        <span className="lab">{t('charts.ticket.buy')}</span>
+        <span className="px"><PipText s={px(q?.ask)} /></span>
+      </button>
     </div>
   )
 }

@@ -38,7 +38,7 @@ const RECEIPT_FALLBACK_MS = 20000
  */
 export function useOrderPlacement() {
   const { t } = useTranslation()
-  const { orders, refreshAll } = useLive()
+  const { orders, refreshOrders } = useLive()
   const [toast, setToast] = useState<OrderToast | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   // 正在等待回执的订单 id 集合。两件事必须这样：
@@ -128,7 +128,12 @@ export function useOrderPlacement() {
     }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
-      refreshAll()
+      // 只重拉订单：下单只会新增一条订单行，持仓 / 挂单随 WS 推送。以前这里是
+      // refreshAll，一单打七个接口、且每份都换新对象，整站跟着重渲染一遍。
+      // Refetch orders only: placing adds an order row, positions / pending orders
+      // ride the WS. This used to be refreshAll — seven requests per order, each
+      // swapping in fresh objects and re-rendering the whole app.
+      void refreshOrders()
       // 把回执原样交回调用方：图表页的下单票要按 FILLED / PENDING / REJECTED 在按钮
       // 下面就地给出不同的回执（成交价、耗时），而不是只有一句"已提交"。
       // Hand the receipt back to the caller: the charts ticket renders a
@@ -167,7 +172,7 @@ export function useOrderPlacement() {
       fallbackTimers.current.set(placed.id, timer)
       return placed
     },
-    [refreshAll, settle, showToast, t]
+    [refreshOrders, settle, showToast, t]
   )
 
   const placeOrder = useCallback(
@@ -246,6 +251,34 @@ export function useNow(intervalMs = 1000): number {
     const t = window.setInterval(() => setNow(Date.now()), intervalMs)
     return () => window.clearInterval(t)
   }, [intervalMs])
+  return now
+}
+
+// 按 bucketMs 分桶的当前时间：只在跨过桶边界时更新一次（setTimeout 对齐到下一个边界），
+// 给「只关心过没过期、不显示秒数」的地方用。useNow(1000) 每秒 setState，挂在页面顶层
+// 就是整页每秒重渲染一遍——仪表盘以前就是这样。
+// The current time floored to bucketMs, updating once per bucket boundary (the
+// timeout is aligned to the next boundary). For callers that only care whether
+// something expired, never the seconds: useNow(1000) sets state every second, and at
+// a page's top level that is a whole-page re-render every second — as the dashboard was.
+export function useBucketedNow(bucketMs: number): number {
+  const floor = (n: number) => Math.floor(n / bucketMs) * bucketMs
+  const [now, setNow] = useState(() => floor(Date.now()))
+  useEffect(() => {
+    let timer: number | undefined
+    const arm = () => {
+      const n = Date.now()
+      // +5ms：别恰好落在边界前一毫秒，导致 floor 还是上一个桶 / land just past the boundary
+      timer = window.setTimeout(() => {
+        setNow(floor(Date.now()))
+        arm()
+      }, bucketMs - (n % bucketMs) + 5)
+    }
+    setNow(floor(Date.now()))
+    arm()
+    return () => { if (timer != null) window.clearTimeout(timer) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- floor derives from bucketMs
+  }, [bucketMs])
   return now
 }
 

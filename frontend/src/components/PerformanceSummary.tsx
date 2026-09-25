@@ -28,14 +28,23 @@ export default function PerformanceSummary({ login, accountLabel }: Props) {
   const { t } = useTranslation()
   const { closedTradeTick } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
+  // 还没有数据且最近一次请求失败：显示错误与「重试」，而不是永远转骨架屏。已有数据时
+  // 失败（轮询偶发）不打扰，继续显示上一份。retryTick 只为「点重试就重跑下面的 effect」。
+  // No data yet and the latest request failed: show an error with Retry instead of
+  // a skeleton forever. A failed poll while data is shown stays quiet and keeps the
+  // last figures. retryTick exists only to re-run the effect below on Retry.
+  const [failed, setFailed] = useState(false)
+  const [retryTick, setRetryTick] = useState(0)
 
   // 切账号先清空再拉（不闪上一个账号的数），因新平仓重拉时不清。
   // Clear on account switch (no stale flash); keep on refetch-after-close.
-  useEffect(() => { setData(null) }, [login])
+  useEffect(() => { setData(null); setFailed(false) }, [login])
   useEffect(() => {
     let mounted = true
     const load = () => {
-      orderApi.winrate(login).then((r) => { if (mounted) setData(r) }).catch(() => {})
+      orderApi.winrate(login)
+        .then((r) => { if (mounted) { setData(r); setFailed(false) } })
+        .catch(() => { if (mounted) setFailed(true) })
     }
     load()
     const timer = window.setInterval(() => { if (!document.hidden) load() }, 45_000)
@@ -48,7 +57,7 @@ export default function PerformanceSummary({ login, accountLabel }: Props) {
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }
-  }, [login, closedTradeTick])
+  }, [login, closedTradeTick, retryTick])
 
   const pct = data?.winRate != null ? (data.winRate * 100).toFixed(1) : null
   const verdict = data
@@ -69,7 +78,18 @@ export default function PerformanceSummary({ login, accountLabel }: Props) {
             Use .ord-k, the established label eyebrow across the orders surface.
             The previous .ord-eyebrow was never defined anywhere. */}
         <div className="ord-k">{t('orders.perf.winRate')}</div>
-        {data === null ? (
+        {data === null && failed ? (
+          <p className="ord-perf-nodata" role="alert">
+            <span className="text-down">{t('admin.loadError')}</span>{' '}
+            <button
+              type="button"
+              onClick={() => { setFailed(false); setRetryTick((n) => n + 1) }}
+              className="text-prism-400 underline hover:text-prism-300"
+            >
+              {t('connStatus.retry')}
+            </button>
+          </p>
+        ) : data === null ? (
           <SkeletonLine width={140} height={34} className="mt-3" />
         ) : pct == null ? (
           <p className="ord-perf-nodata">{t('winrate.noData')}</p>

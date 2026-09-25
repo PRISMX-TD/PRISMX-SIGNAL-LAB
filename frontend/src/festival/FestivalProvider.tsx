@@ -8,7 +8,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { detect, newYearNumber, parseYmd, windowId, ymd, type FestivalKey, type FestivalWindow } from './calendar'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
-import { applyCharm, startCharmGuard } from './charm'
+import { loadFestivalHeavy, type FestivalHeavy } from './load'
 
 // 三个键都是**设备偏好**，与账号无关，已加进 auth.tsx 的登出保留名单。
 // All three keys are device preferences, not account data, and are on the
@@ -56,6 +56,11 @@ interface FestivalContextValue {
 }
 
 const Ctx = createContext<FestivalContextValue | null>(null)
+
+// 节日重包加载过之后留个引用：节日结束（或用户关掉装饰）时要用它把按钮小饰的变量清掉。
+// Kept once the heavy chunk has loaded: when the festival ends (or decorations
+// are switched off) it clears the button-charm variables.
+let charmModule: FestivalHeavy | null = null
 
 function readDemo(): DemoState {
   if (!FESTIVAL_DEMO) return DEMO_DEFAULT
@@ -177,12 +182,38 @@ export function FestivalProvider({ children }: { children: ReactNode }) {
   // 节日键也写到 <html> 上，CSS 可以按 [data-festival] 取色；按钮小饰的图也一并写成变量。
   // Mirror the key onto <html> so CSS can pick colours by [data-festival]; the
   // button charm's artwork goes on as variables alongside it.
+  // 按钮小饰（charm.ts / charm.css）和 festival.css 都在节日重包里（见 heavy.ts）：
+  // 在节日窗口里才加载，这里顺带预热，让各处轻壳的 lazy() 拿到的是同一个已在路上的请求。
+  // festival.css 里还有 [data-festival] 下的全站规则，所以只要节日生效就要加载，
+  // 不能指望某个装饰组件恰好出现在当前页面上。
+  // The button charm (charm.ts / charm.css) and festival.css live in the heavy
+  // chunk (see heavy.ts), loaded only inside a festival window; this also warms
+  // it so every shell's lazy() joins the request already in flight. festival.css
+  // carries site-wide [data-festival] rules, so it must load whenever a festival
+  // is on, not only when some decoration happens to be on the current page.
   useEffect(() => {
     const root = document.documentElement
     if (win) root.setAttribute('data-festival', win.key)
     else root.removeAttribute('data-festival')
-    applyCharm(win ? win.key : null)
-    return win ? startCharmGuard() : undefined
+    if (!win) {
+      if (charmModule) charmModule.applyCharm(null)
+      return
+    }
+    let alive = true
+    let stopGuard: (() => void) | null = null
+    loadFestivalHeavy()
+      .then((m) => {
+        charmModule = m
+        if (!alive) return
+        m.applyCharm(win.key)
+        stopGuard = m.startCharmGuard()
+      })
+      // 重包拉不下来：没有按钮小饰，其余照常。/ chunk unavailable: no button charm, nothing else affected
+      .catch(() => {})
+    return () => {
+      alive = false
+      if (stopGuard) stopGuard()
+    }
   }, [win])
 
   const value = useMemo<FestivalContextValue>(

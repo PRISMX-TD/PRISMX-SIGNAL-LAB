@@ -353,6 +353,8 @@
     "account": "Account",
     "estMargin": "Est. margin used",
     "currentPrice": "Live",
+    "refPrice": "Ref. price",
+    "slowBroker": "The broker is responding slowly — please don’t place the order again",
     "sizeMode": "Sizing",
     "sizeModeLots": "Lots",
     "sizeModeRisk": "Risk %",
@@ -924,6 +926,7 @@
     "filterDisabledUnderDate": "Status and symbol filters are unavailable while a date range is set — clear the dates to use them.",
     "pageInfo": "Page {{page}} / {{totalPages}} · {{total}} total",
     "cancelSent": "Cancel request sent",
+    "cancelling": "Cancelling…",
     "proExclusive": "PRO Exclusive",
     "tab": {
       "positions": "Positions & Account",

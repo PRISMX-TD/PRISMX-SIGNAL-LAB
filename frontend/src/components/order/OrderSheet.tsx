@@ -15,12 +15,37 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol, localizeApiError } from '../../api/utils'
+import { useLive } from '../../store/live'
 import { useBackToClose } from '../../utils/useBackToClose'
 import { useDialogA11y } from '../../utils/useDialogA11y'
 import OrderConnectNotice from '../OrderConnectNotice'
 import SlideToConfirm from './SlideToConfirm'
 import { quickLots, QUICK_RISK_PCTS, formatMoney, sanitizeDecimal } from './orderMath'
 import type { OrderForm } from './useOrderForm'
+import { useVisualViewportVars } from './useVisualViewportVars'
+
+// 提交后多久还没回执就提示「券商响应较慢，请勿重复下单」。直连账号的下单请求最长
+// 要等约 160 秒（api/client.ts 的 TRADE_TIMEOUT_MS），而人盯着转圈超过几秒就会开始
+// 怀疑「是不是没点上」——那正是重复下单的时刻。
+// How long a submit may wait before "the broker is slow, don't place again" shows.
+// A gateway order can take ~160s (TRADE_TIMEOUT_MS in api/client.ts), and a few
+// seconds of spinner is when people start doubting the tap — the double-order moment.
+const SLOW_SUBMIT_MS = 5000
+
+// 提交进行中挡住返回手势：压一条历史记录占位，用户划返回只消费这一条、弹窗不关；
+// 消费掉之后换一个 key 重新挂载，再压一条，于是连划几次都挡得住。提交一结束它就卸载，
+// useBackToClose 的清理会把占位记录撤掉。页面自己的 useBackToClose 在栈里更靠下，
+// 这期间收不到「关闭我」（见 useBackToClose 的 openStack 说明）。
+// Blocks the back gesture while a submit is in flight: it pushes a placeholder
+// history entry, so a back swipe consumes only that and the sheet stays; after each
+// consumption it remounts under a new key and pushes again, so repeated swipes are
+// all absorbed. It unmounts as soon as the submit settles and useBackToClose's
+// cleanup pops the placeholder. The page's own useBackToClose sits lower in the
+// stack and never sees a "close me" meanwhile (see openStack in useBackToClose).
+function BackBlocker({ onBack }: { onBack: () => void }) {
+  useBackToClose(true, onBack)
+  return null
+}
 
 export type OrderConfirm = (
   volume: number,
@@ -60,6 +85,42 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   const [acctMenuOpen, setAcctMenuOpen] = useState(false)
   const onCancelRef = useRef(onCancel)
   onCancelRef.current = onCancel
+  // 真正「请求在路上」的那段时间。submitting 在成功后不复位（滑动条不再出现），所以
+  // 拦关闭要看这个，而不是 submitting：回执出来之后用户当然可以关。
+  // The span where the request is actually in flight. submitting stays true after a
+  // success (so the slider doesn't come back), hence close-blocking keys off this —
+  // once the receipt is out the user may of course close.
+  const inFlight = receipt === 'waiting'
+  const inFlightRef = useRef(inFlight)
+  inFlightRef.current = inFlight
+  // 提交中点遮罩 / ✕ / 按 Esc / 划返回都不关：请求还在路上时关掉弹窗，用户看不到结果，
+  // 最常见的下一步就是再下一单。/ While in flight, scrim / ✕ / Esc / back don't
+  // close: closing mid-request hides the outcome and the usual next move is to place again.
+  const guardedCancel = () => {
+    if (inFlightRef.current) return
+    onCancelRef.current()
+  }
+  const [backGen, setBackGen] = useState(0)
+  // 提交超过 SLOW_SUBMIT_MS 仍未返回 / the submit has been waiting past SLOW_SUBMIT_MS
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    if (!inFlight) { setSlow(false); return }
+    const timer = window.setTimeout(() => setSlow(true), SLOW_SUBMIT_MS)
+    return () => window.clearTimeout(timer)
+  }, [inFlight])
+  // 回执之后的自动关闭 / 复位计时器。以前没人收着：用户划返回关掉弹窗后它照样在 2 秒后
+  // 调 onCancel，而那时页面上可能已经开着**下一张**下单弹窗——被这个过期的计时器关掉。
+  // The post-receipt auto-close / reset timers. Nobody used to keep them: after a
+  // back-swipe close they still fired onCancel 2s later, possibly closing the *next*
+  // order sheet the user had just opened.
+  const timersRef = useRef<number[]>([])
+  useEffect(() => () => { for (const id of timersRef.current) window.clearTimeout(id) }, [])
+  const later = (fn: () => void, ms: number) => { timersRef.current.push(window.setTimeout(fn, ms)) }
+  // 断线时报价与持仓都可能已过时，弹窗里要直说——用户正要按这个价下单。
+  // Quotes may be stale while disconnected; say so right here, where the price is used.
+  const { wsDisconnected } = useLive()
+  const overlayRef = useRef<HTMLDivElement>(null)
+  useVisualViewportVars(overlayRef)
 
   // 账户切换菜单套在这个（已全屏的）弹窗内部：划返回应该先收起菜单，再收起外层弹窗。
   // 弹窗本身的返回手势由渲染它的页面用 useBackToClose 处理——这里绝不能再挂一个裸的
@@ -76,13 +137,13 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   // guards against closing mid-submit; letting both handle it would defeat that guard.
   const sheetRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
-  useDialogA11y(sheetRef, onCancel, { closeOnEscape: false })
+  useDialogA11y(sheetRef, guardedCancel, { closeOnEscape: false })
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !submitting) onCancelRef.current() }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !inFlightRef.current) onCancelRef.current() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [submitting])
+  }, [])
 
   const { isBuy, selected, accounts } = form
   const canSubmit = form.hasAccounts && !blocked && !form.slTpInvalid
@@ -99,25 +160,31 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
       await onConfirm(vol, form.login || null, form.slNum, form.tpNum, form.orderId)
       form.rotateOrderId()
       setReceipt('ok')
-      setTimeout(() => onCancelRef.current(), 2000)
+      later(() => onCancelRef.current(), 2000)
     } catch (err) {
       setReceipt('error')
       setError(err instanceof Error ? localizeApiError(err.message) : 'error')
-      setTimeout(() => { setReceipt(null); setSubmitting(false) }, 2000)
+      later(() => { setReceipt(null); setSubmitting(false) }, 2000)
     }
   }
 
   const symLetter = (symbol[0] ?? '?').toUpperCase()
   const tone = isBuy ? 'var(--up)' : 'var(--down)'
   const avaBg = isBuy ? 'rgba(46,224,126,0.15)' : 'rgba(255,77,103,0.15)'
+  // 头部价格标签：拿到实时报价（且连接在线）才叫「现价」；否则 priceText 其实是信号
+  // 入场价 / 图表最后收盘价，叫「参考价」才诚实。
+  // Head price label: "current price" only with a live quote over a live socket;
+  // otherwise priceText is the signal entry / last chart close, honestly a "reference".
+  const hasLiveQuote = form.quote != null && !wsDisconnected
 
   // 用 Portal 挂到 body：页面内容外层 .page-enter 有 transform 动画，会成为 fixed 定位的
   // 包含块，导致弹窗相对内容区而非视口定位。/ Portal to body: the .page-enter wrapper's
   // transform would become the containing block for fixed and mislocate the modal.
   return createPortal(
-    <div className="slide-overlay" onClick={onCancel}>
-      <div ref={sheetRef} className="slide-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
-        <button className="slide-cancel-x" onClick={onCancel}>
+    <div ref={overlayRef} className="slide-overlay" onClick={guardedCancel}>
+      {inFlight && <BackBlocker key={backGen} onBack={() => setBackGen((g) => g + 1)} />}
+      <div ref={sheetRef} className="slide-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={inFlight || undefined} tabIndex={-1}>
+        <button className="slide-cancel-x" onClick={guardedCancel} disabled={inFlight} aria-label={t('common.close')}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>
 
@@ -129,11 +196,18 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
             {isBuy ? t('common.buy') : t('common.sell')} {displaySymbol(symbol)}
           </h3>
           <p className="text-xs text-neutral-300 mt-1">
-            {t('order.currentPrice')} <span className="num" style={{ color: tone }}>{priceText}</span>
+            {hasLiveQuote ? t('order.currentPrice') : t('order.refPrice')} <span className="num" style={{ color: tone }}>{priceText}</span>
             {selected && <> · {t('order.account')} {selected.login}</>}
           </p>
           {headExtra}
         </div>
+
+        {wsDisconnected && (
+          <div className="slide-ws-warn" role="status">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5" aria-hidden="true"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
+            <span>{t('connStatus.reconnecting')}</span>
+          </div>
+        )}
 
         <div className="slide-sheet-rows">
           {accounts.length > 1 && (
@@ -188,7 +262,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           <div className="slide-row">
             <span className="k">{t('order.volume')}</span>
             <span className="stepper">
-              <button onClick={() => form.stepLot(-1)}>−</button>
+              <button type="button" onClick={() => form.stepLot(-1)} aria-label="−">−</button>
               <input
                 className="lot-val num lot-input"
                 value={form.volume}
@@ -196,7 +270,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
                 onChange={(e) => form.typeVolume(e.target.value)}
                 onBlur={form.blurVolume}
               />
-              <button onClick={() => form.stepLot(1)}>+</button>
+              <button type="button" onClick={() => form.stepLot(1)} aria-label="+">+</button>
             </span>
           </div>
           {form.sizeMode === 'quick' ? (
@@ -204,7 +278,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
               <span className="k" />
               <div className="flex gap-1.5">
                 {quickLots(symbol).map((q) => (
-                  <button key={q} onClick={() => form.setVolume(q.toFixed(2))} className="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-neutral-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
+                  <button type="button" key={q} onClick={() => form.setVolume(q.toFixed(2))} className="slide-chip px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-neutral-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
                     {q.toFixed(2)}
                   </button>
                 ))}
@@ -215,7 +289,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
               <span className="k">{t('order.riskPct')}</span>
               <div className="flex items-center gap-1.5">
                 {QUICK_RISK_PCTS.map((p) => (
-                  <button key={p} onClick={() => form.setRiskPct(String(p))} className={chipBtn(form.riskPct === String(p))}>{p}%</button>
+                  <button type="button" key={p} onClick={() => form.setRiskPct(String(p))} className={`slide-chip ${chipBtn(form.riskPct === String(p))}`}>{p}%</button>
                 ))}
               </div>
             </div>
@@ -288,7 +362,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
         {receipt && (
           <div className="receipt-card">
             <div className={`receipt-line ${receipt === 'ok' ? 'ok' : 'wait'}`}>
-              {receipt === 'waiting' && <><span className="spinner" />{t('order.submitting')}...</>}
+              {receipt === 'waiting' && <><span className="spinner" />{t('order.submitting')}</>}
               {/* 提交成功那一刻订单几乎总是还是 PENDING（真正成交要等桥接执行 + 回执），
                   所以这里如实写"已提交"，成交 / 拒绝由页面级 toast（监听 WS ORDER_UPDATE）稍后报告。
                   The order is still PENDING the instant submit resolves; the honest label is
@@ -296,13 +370,17 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
               {receipt === 'ok' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>{t('order.submitted')}</>}
               {receipt === 'error' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>{error || t('order.rejected', { msg: '' })}</>}
             </div>
+            {receipt === 'waiting' && slow && (
+              <p className="slide-slow" role="status">{t('order.slowBroker')}</p>
+            )}
           </div>
         )}
 
         {!submitting && canSubmit && <SlideToConfirm disabled={submitting} onConfirm={handleSubmit} />}
 
-        {receipt && (
-          <button onClick={onCancel} className="btn btn-ghost slide-close-btn">{t('common.close')}</button>
+        {/* 请求在路上时不给「关闭」：见 guardedCancel。/ No close while in flight; see guardedCancel. */}
+        {receipt && !inFlight && (
+          <button onClick={guardedCancel} className="btn btn-ghost slide-close-btn">{t('common.close')}</button>
         )}
       </div>
     </div>,

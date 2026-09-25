@@ -11,10 +11,11 @@
 // (full close, with a confirm); cancel reuses orderApi.cancel. Since 2026-09-08
 // this is hairline rows rather than a table: actions appear on hover (always on
 // touch) and "manage" expands partial-close / modify SL·TP under the row.
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, memo, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Order, PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
+import { useLive } from '../../store/live'
 import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
 import { checkSlTp } from '../order/orderMath'
@@ -70,8 +71,12 @@ type Pending =
 // row stays dimmed with a "closing" tag until the positions feed drops it (full)
 // or shrinks it (partial), or the timeout releases it.
 type Closing = { at: number; volume: number; partial: boolean }
-// 兜底：桥接离线、回执丢失等情况下不能让一行永远"平仓中"。
-// Safety net so a lost receipt never leaves a row closing forever.
+// 兜底：桥接离线、回执丢失等情况下不能让一行永远"平仓中"。这段时间从**请求返回**
+// 起算——请求本身在直连账号上最长要等约 160 秒（TRADE_TIMEOUT_MS），在路上的那段
+// 时间行一直保持「平仓中」，见 inFlightTickets。
+// Safety net so a lost receipt never leaves a row closing forever. Counted from the
+// request's *return*: the request itself can take ~160s on a gateway account
+// (TRADE_TIMEOUT_MS), and the row stays closing for all of that (see inFlightTickets).
 const CLOSING_TIMEOUT_MS = 12000
 // 新出现的仓位行高亮多久（与 term-flash 动画时长一致）/ how long a new row flashes
 const FRESH_MS = 1400
@@ -82,8 +87,11 @@ const FRESH_GRACE_MS = 3000
 // Sentinel busyId for the in-flight close-all (other values are p-<ticket> / o-<id>).
 const CLOSE_ALL_ID = 'close-all'
 
-export default function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '' }: Props) {
+function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '' }: Props) {
   const { t } = useTranslation()
+  // 首帧持仓还没到时显示骨架而不是「暂无持仓」，见 live.tsx 的 positionsLoaded。
+  // Skeleton rather than "no positions" until the first frame; see positionsLoaded.
+  const { positionsLoaded, refreshOrders } = useLive()
   const [tab, setTab] = useState<Tab>('positions')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
@@ -102,6 +110,9 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
   // in is never overwritten.
   const [formInit, setFormInit] = useState<{ vol: string; sl: string; tp: string }>({ vol: '', sl: '', tp: '' })
   const [closing, setClosing] = useState<Record<number, Closing>>({})
+  // 平仓请求还没返回的 ticket：这些行不受超时兜底影响（兜底只从请求返回后起算）。
+  // Tickets whose close request hasn't returned yet: exempt from the timeout release.
+  const inFlightTickets = useRef<Set<number>>(new Set())
   const [fresh, setFresh] = useState<Record<number, true>>({})
   const seenTickets = useRef<Set<number> | null>(null)
   const mountedAt = useRef(Date.now())
@@ -136,7 +147,8 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
         const ticket = Number(k)
         const c = next[ticket]
         const p = positions.find((x) => x.ticket === ticket)
-        if (!p || (c.partial && p.volume < c.volume - 1e-9) || now - c.at > CLOSING_TIMEOUT_MS) {
+        const timedOut = !inFlightTickets.current.has(ticket) && now - c.at > CLOSING_TIMEOUT_MS
+        if (!p || (c.partial && p.volume < c.volume - 1e-9) || timedOut) {
           delete next[ticket]
           changed = true
         }
@@ -175,7 +187,7 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
     later(() => {
       setClosing((prev) => {
         const c = prev[ticket]
-        if (!c || Date.now() - c.at < CLOSING_TIMEOUT_MS) return prev
+        if (!c || inFlightTickets.current.has(ticket) || Date.now() - c.at < CLOSING_TIMEOUT_MS) return prev
         const next = { ...prev }
         delete next[ticket]
         return next
@@ -236,6 +248,7 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
     setBusyId(`p-${ticket}`)
     // 点下去的这一刻行就进入"平仓中"，不等接口回来——用户看到的第一反应要是即时的。
     // The row enters "closing" the instant the click lands, not when the API returns.
+    inFlightTickets.current.add(ticket)
     markClosing(ticket, p.volume, partial)
     setExpanded(null)
     try {
@@ -252,6 +265,10 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
       // A gateway account fills synchronously: toast the price, the row goes with
       // the next positions push. A bridge account is only accepted: keep "closing"
       // until the bridge executes and the feed drops the row.
+      // 请求回来了：兜底计时从这一刻重新起算（被拒的分支下面会直接放开）。
+      // The request is back: restart the release clock from now (rejections release below).
+      inFlightTickets.current.delete(ticket)
+      markClosing(ticket, p.volume, partial)
       if (res.status === 'FILLED') {
         const px = res.filledPrice != null ? res.filledPrice.toFixed(digitsFor(p.symbol)) : '—'
         onToast(
@@ -267,10 +284,13 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
         onToast(partial ? String(t('charts.dock.partialCloseSent')) : String(t('charts.dock.closeSent')), 'info')
       }
     } catch (e) {
+      inFlightTickets.current.delete(ticket)
       unmarkClosing(ticket)
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.closeFailed')), 'error')
     } finally {
       setBusyId(null)
+      // 平仓只会改变订单行（持仓随 WS 推送），不必整份重拉 / only order rows can change
+      void refreshOrders()
     }
   }
 
@@ -328,6 +348,7 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.modifyFailed')), 'error')
     } finally {
       setBusyId(null)
+      void refreshOrders()
     }
   }
 
@@ -340,6 +361,7 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.cancelFailed')), 'error')
     } finally {
       setBusyId(null)
+      void refreshOrders()
     }
   }
 
@@ -413,7 +435,17 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
 
       <div className="term-dk-body no-sb">
         {tab === 'positions' ? (
-          positions.length === 0 ? (
+          positions.length === 0 && !positionsLoaded ? (
+            // 首帧持仓未到：两行骨架，形状贴近持仓行 / first frame pending: row-shaped skeletons
+            <div aria-busy="true" aria-live="polite">
+              {[0, 1].map((i) => (
+                <div key={i} className="flex items-center justify-between px-4" style={{ minHeight: 48, borderBottom: '1px solid var(--line)' }} aria-hidden="true">
+                  <span className="skeleton" style={{ display: 'block', width: 120, height: 14 }} />
+                  <span className="skeleton" style={{ display: 'block', width: 64, height: 14, marginLeft: 'auto' }} />
+                </div>
+              ))}
+            </div>
+          ) : positions.length === 0 ? (
             <div className="term-dk-empty">{t('charts.dock.noPositions')}</div>
           ) : (
             positions.map((p, i) => {
@@ -730,3 +762,8 @@ export default function PositionsDock({ positions, orders, pendingOrders, digits
     </div>
   )
 }
+
+// memo：图表页每 2 秒随 K 线轮询重渲染一次，停靠区的输入没变就跳过（持仓每拍变化照常更新）。
+// memo: the charts page re-renders with every 2s candle poll; skip when the dock's
+// inputs are unchanged (position ticks still update it as usual).
+export default memo(PositionsDock)

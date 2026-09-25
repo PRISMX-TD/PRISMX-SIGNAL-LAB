@@ -23,8 +23,18 @@
          (zoom itself is locked above, but focus can still trigger a one-off
          viewport jolt unless the font is large enough to not need it).
          viewport-fit=cover pairs with the env(safe-area-inset-*) already in the
-         CSS to handle notched screens. -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+         CSS to handle notched screens.
+         interactive-widget=resizes-content：安卓 Chrome 108+ 默认只缩可视视口，软键盘
+         盖在页面上、挡住底部的输入框与按钮；改成连布局视口一起缩，页面被挤到键盘上方。
+         图表页高度 = Layout.tsx 实测的 --app-vh（visualViewport.height）− 顶栏 − 底栏
+         （innerHeight − 底栏顶边），两者在这个模式下同步变化，算式不受影响。
+         不认识这个键的内核（iOS、旧安卓）直接忽略。
+         interactive-widget=resizes-content: Android Chrome 108+ otherwise shrinks
+         only the visual viewport, so the keyboard covers bottom inputs/buttons; this
+         resizes the layout viewport too. The chart page's height (--app-vh minus
+         header and tab bar, measured in Layout.tsx) tracks both consistently.
+         Engines that don't know the key ignore it. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
 
     <!-- Meta Pixel（Facebook 广告像素）。按 Meta 官方要求尽量靠 <head> 顶部放置：
          越早执行，越能在用户跳走之前完成上报，匹配率越高。放在 SEO/字体标签之前
@@ -41,24 +51,37 @@
          src/components/MetaPixel.tsx. -->
     <!-- Meta Pixel Code -->
     <script>
+      // 2026-09-25 起与 Meta 官方片段有两处不同：
+      // ① 域名判断挪到最前面：非正式域名、原生 App（window.Capacitor，其 WebView 的
+      //    hostname 是 localhost）一律连 fbq 桩都不装、fbevents.js 也不加载。原来 fbevents.js
+      //    在任何域名上都会被插入——本地开发、预览域名、App 里都白白去连 connect.facebook.net，
+      //    而那个域名在大陆是黑洞，挂着的请求会把 window load 一起拖住。
+      // ② fbevents.js 延后到 load 之后的空闲时再插入：init / PageView 仍在这里同步进 fbq
+      //    队列（时间戳不变），脚本到了再一并上报，只是不再和首屏抢网络。
+      // MetaPixel.tsx 的路由补发按 fbq 是否存在判断，这里不装桩它就自然不发。
+      // Since 2026-09-25 this differs from Meta's snippet in two ways: (1) the hostname
+      // check comes first — off the production domain, or inside the native app
+      // (window.Capacitor; its WebView hostname is localhost), neither the fbq stub nor
+      // fbevents.js is installed (it used to be injected everywhere, hitting a host that
+      // is black-holed from mainland China and holding up window load); (2) fbevents.js
+      // is injected on idle after load — init / PageView still enter the fbq queue here
+      // and are flushed once the script lands. MetaPixel.tsx checks fbq before firing.
       !function(f,b,e,v,n,t,s)
-      {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+      {if(f.fbq)return;var h=location.hostname;
+      if(!/(^|\.)prismxsignallab\.com$/.test(h)||h==='localhost'||f.Capacitor)return;
+      n=f.fbq=function(){n.callMethod?
       n.callMethod.apply(n,arguments):n.queue.push(arguments)};
       if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-      n.queue=[];t=b.createElement(e);t.async=!0;
+      n.queue=[];
+      n('init', '1386130166986351');
+      n('track', 'PageView');
+      var inject=function(){t=b.createElement(e);t.async=!0;
       t.src=v;s=b.getElementsByTagName(e)[0];
-      s.parentNode.insertBefore(t,s)}(window, document,'script',
+      s.parentNode.insertBefore(t,s)};
+      var later=function(){if(f.requestIdleCallback)f.requestIdleCallback(inject,{timeout:3000});
+      else setTimeout(inject,1500)};
+      if(b.readyState==='complete')later();else f.addEventListener('load',later)}(window, document,'script',
       'https://connect.facebook.net/en_US/fbevents.js');
-      // 只在正式域名上初始化：本地开发和预览域名不往 Meta 报 PageView，
-      // 免得投放数据里混进开发者自己的访问。src/components/MetaPixel.tsx 里的
-      // 路由补发已经按 fbq 是否存在判断，这里不初始化它就自然不发。
-      // Initialise only on the production hostname: local dev and preview
-      // deployments must not report PageViews to Meta. MetaPixel.tsx already
-      // checks for fbq before firing, so leaving it uninitialised is enough.
-      if (/(^|\.)prismxsignallab\.com$/.test(location.hostname)) {
-        fbq('init', '1386130166986351');
-        fbq('track', 'PageView');
-      }
     </script>
     <!-- End Meta Pixel Code -->
     <!-- 配套的 noscript 兜底像素放在 body 开头，不在这里——HTML 规范规定
@@ -133,8 +156,13 @@
          @font-face 与取舍（为什么不带 Noto Sans SC）见 src/styles/fonts.css。
          Fonts are self-hosted; the old render-blocking Google Fonts link stalled
          first paint from mainland China. See src/styles/fonts.css. -->
-    <!-- Google Identity Services / Google 登录 SDK -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Google Identity Services（Google 登录 SDK）不再写在这里：改由
+         components/GoogleLoginButton.tsx 在按钮挂载时动态插入（只插一次）。
+         绝大多数页面根本没有登录按钮，而 accounts.google.com 在大陆连不通——
+         挂在 head 里的这条外链会让每一页的 window load 都等它超时。
+         GIS is no longer loaded here; GoogleLoginButton.tsx injects it once on
+         mount. Most pages have no sign-in button, and this host is unreachable
+         from mainland China, so a head script held up window load on every page. -->
   </head>
   <body>
     <!-- Meta Pixel 的无脚本兜底：JS 被禁用时靠这个 1x1 图片上报一次 PageView。

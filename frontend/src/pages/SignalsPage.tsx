@@ -64,7 +64,9 @@ export default function SignalsPage() {
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
   // mobile, swiping back should close it first rather than exiting the
   // signals page outright (see useBackToClose's comment).
-  useBackToClose(activeSignal != null, () => setActiveSignal(null))
+  // 划返回关闭也清掉「刚下过单」的标记，理由见 DashboardPage 同一处的注释。
+  // A back-swipe close clears the "just placed" flag too; see DashboardPage.
+  useBackToClose(activeSignal != null, () => { placedRef.current = false; setActiveSignal(null) })
   const { toast, placeOrder, placeStrategyOrder } = useOrderPlacement()
 
   // 个人策略信号混进普通信号网格一起展示——同样的卡片、按时间统一排序，
@@ -76,7 +78,14 @@ export default function SignalsPage() {
     [signals, strategySignals, t]
   )
 
-  const openTrade = useCallback((s: DisplaySignal) => setActiveSignal(s), [])
+  // 每次打开都从干净的标记开始 / every open starts with a clean flag
+  const openTrade = useCallback((s: DisplaySignal) => { placedRef.current = false; setActiveSignal(s) }, [])
+  const closeTrade = () => {
+    setActiveSignal(null)
+    const placed = placedRef.current
+    placedRef.current = false
+    if (placed) navigate('/orders', { state: { tab: 'positions' } })
+  }
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
     // 抛错而不是 return：OrderSheet 的契约是「Promise 正常 resolve = 已提交」，它会
@@ -168,13 +177,7 @@ export default function SignalsPage() {
           <StrategyAnalysis />
         )}
       </div>
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => {
-        setActiveSignal(null)
-        if (placedRef.current) {
-          placedRef.current = false
-          navigate('/orders', { state: { tab: 'positions' } })
-        }
-      }} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={closeTrade} onConfirm={handleConfirm} />}
       {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )

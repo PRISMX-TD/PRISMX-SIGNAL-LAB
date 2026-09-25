@@ -296,6 +296,34 @@
     width: 100%;
     margin-top: 12px;
   }
+  /* 提交进行中 ✕ 不可用（见 OrderSheet 的 guardedCancel）/ ✕ is inert while a submit is in flight */
+  .slide-cancel-x:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  /* 弹窗内的断线黄条：用户正要按这个价下单，报价可能已过时要在这里就说清楚。
+     In-sheet offline strip: the user is about to trade at this price, so say here
+     that it may be stale. */
+  .slide-ws-warn {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-top: 12px;
+    padding: 8px 12px;
+    border-radius: var(--r-tile);
+    border: 1px solid rgb(var(--mid-rgb) / 0.4);
+    background: var(--mid-bg);
+    color: var(--mid);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  /* 「券商响应较慢，请勿重复下单」：跟在回执行下面，同一张卡里 / the slow-broker line under the receipt */
+  .slide-slow {
+    margin: 8px 4px 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--mid);
+  }
 
   /* ══════════════════════════════════════════════
      手机端底部导航 / mobile bottom nav
@@ -683,14 +711,31 @@
     /* ── 执行卡手机版：与桌面同一份标记，字号在 dashboard.css 里缩 ── */
 
     /* ── 下单弹窗：底部全屏上滑 / bottom sheet ── */
+    /* 键盘遮挡：遮罩与弹窗高度跟随可视视口（--vvh / --vvt 由 OrderSheet 的
+       useVisualViewportVars 写在 .slide-overlay 上）。92vh 是布局视口，软键盘弹出时
+       不缩（iOS Safari 尤其如此），弹窗下半截——滑动确认条、止损止盈——就在键盘底下。
+       与 viewport 的 interactive-widget=resizes-content 兼容：那种情况下布局视口本身
+       会缩，--vvh 等于它、--vvt 为 0，效果与不写相同，不会把键盘扣两遍。
+       没有 visualViewport 的旧浏览器拿不到变量，回落到 100% / 100vh，即原来的行为。
+       Keyboard overlap: scrim and sheet follow the visual viewport (--vvh / --vvt,
+       written onto .slide-overlay by OrderSheet's useVisualViewportVars). 92vh is the
+       layout viewport, which doesn't shrink for the soft keyboard (notably iOS
+       Safari), so the slider and SL/TP sat under it. Compatible with
+       interactive-widget=resizes-content (there --vvh equals the shrunken layout
+       viewport and --vvt is 0). Without visualViewport the fallbacks reproduce the
+       old behaviour. */
     .slide-overlay {
       align-items: flex-end;
+      top: var(--vvt, 0px);
+      bottom: auto;
+      height: var(--vvh, 100%);
     }
     .slide-sheet {
       width: 100%;
       max-width: 100%;
       border-radius: var(--r-lg) var(--r-lg) 0 0;
       max-height: 92vh;
+      max-height: calc(var(--vvh, 100vh) * 0.92);
       padding: 20px 16px calc(16px + env(safe-area-inset-bottom));
       /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效——桌面居中弹窗
          用位移动画会显得突兀，desktop 那份只保留上面 overlay 的淡入。

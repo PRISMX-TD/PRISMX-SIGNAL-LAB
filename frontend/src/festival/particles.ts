@@ -35,6 +35,45 @@ interface Options {
   // 数量倍率：App 里的环境层只要落地页的一小部分。
   // Count multiplier: the in-app ambient layer wants a fraction of the landing's.
   density?: number
+  // 帧率上限（fps）。不给就跟随屏幕刷新率。手机上环境层限 30fps（见 particleProfile）。
+  // Frame-rate cap in fps; omitted means the display's own refresh rate. Phones
+  // cap the ambient layer at 30 fps (see particleProfile).
+  maxFps?: number
+  // 画布像素比上限，默认 2。弱机（≤4 核）给 1：填充像素数直接降到四分之一。
+  // Device-pixel-ratio cap, default 2. Weak devices (≤4 cores) get 1, which cuts
+  // the pixels filled per frame to a quarter.
+  maxDpr?: number
+}
+
+// 设备档位：一次性判断，给 ParticleField 的选项用。
+// · phone：窄屏（<1024px）或主要指针是手指 → 30fps；
+// · weak：navigator.hardwareConcurrency ≤ 4 → DPR 限 1、粒子减量（不关掉，节日氛围照旧）。
+// Device tier, read once, feeding ParticleField options.
+// · phone: narrow (<1024px) or a coarse primary pointer → 30 fps;
+// · weak: navigator.hardwareConcurrency ≤ 4 → DPR capped at 1 and fewer
+//   particles (never switched off; the festival still shows).
+export interface ParticleProfile {
+  phone: boolean
+  weak: boolean
+  maxFps: number | undefined
+  maxDpr: number
+}
+
+export function particleProfile(): ParticleProfile {
+  let phone = false
+  try {
+    phone = window.matchMedia('(max-width: 1023px)').matches || window.matchMedia('(pointer: coarse)').matches
+  } catch {
+    phone = false
+  }
+  let weak = false
+  try {
+    const n = navigator.hardwareConcurrency
+    weak = typeof n === 'number' && n > 0 && n <= 4
+  } catch {
+    weak = false
+  }
+  return { phone, weak, maxFps: phone ? 30 : undefined, maxDpr: weak ? 1 : 2 }
 }
 
 const TAU = Math.PI * 2
@@ -315,7 +354,7 @@ export class ParticleField {
 
   resize() {
     const rect = this.canvas.getBoundingClientRect()
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const dpr = Math.min(window.devicePixelRatio || 1, this.opts.maxDpr || 2)
     const w = Math.max(1, Math.round(rect.width))
     const h = Math.max(1, Math.round(rect.height))
     if (w === this.w && h === this.h && dpr === this.dpr) return
@@ -430,13 +469,21 @@ export class ParticleField {
     if (this.running) return
     this.running = true
     this.last = performance.now()
+    // 限帧：rAF 照常每帧回调，但离上一次绘制不到一个帧间隔就跳过（留 2ms 余量，
+    // 免得 60Hz 屏上 33.3ms 的节拍因为抖动被掉成 20fps）。dt 仍按真实间隔积分，速度不变。
+    // Frame cap: rAF still fires every frame, but frames closer than one interval
+    // to the last draw are skipped (2 ms slack, so jitter on a 60 Hz display does
+    // not drop a 33.3 ms cadence to 20 fps). dt still integrates the real gap, so
+    // speeds are unchanged.
+    const gap = this.opts.maxFps ? 1000 / this.opts.maxFps - 2 : 0
     const loop = (now: number) => {
       if (!this.running) return
+      this.raf = requestAnimationFrame(loop)
+      if (gap && now - this.last < gap) return
       const dt = Math.min(0.05, (now - this.last) / 1000)
       this.last = now
       this.step(dt)
       this.draw()
-      this.raf = requestAnimationFrame(loop)
     }
     this.raf = requestAnimationFrame(loop)
   }

@@ -38,6 +38,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type * as TH from 'three'
+import type { ThreeLite } from './three-lite'
 
 export interface ShardsHandle {
   setVisible(v: boolean): void
@@ -55,7 +56,7 @@ function lcg(seed: number) {
 }
 
 export function createBackdropShards(
-  THREE: typeof import('three'),
+  THREE: ThreeLite,
   renderer: TH.WebGLRenderer,
   scene: TH.Scene
 ): ShardsHandle {

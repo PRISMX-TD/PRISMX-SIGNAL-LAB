@@ -16,7 +16,7 @@ import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import Toast from '../components/Toast'
 import SlideOrderModal from '../components/SlideOrderModal'
-import { useFocusEntries, useNow, useOrderPlacement } from '../components/signals/hooks'
+import { useBucketedNow, useFocusEntries, useOrderPlacement } from '../components/signals/hooks'
 import { trendStance, strategySignalToDisplay, type DisplaySignal, type TrendStance } from '../components/signals/SignalView'
 import type { FocusState } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -29,7 +29,14 @@ export default function DashboardPage() {
   // Site-wide display quotes (hero/quotes table) vs per-account quotes (order confirmation)
   const globalQuotes = useGlobalQuotes()
   const accountQuotes = useQuotes()
-  const now = useNow(1000)
+  // 以前是 useNow(1000)：每秒 setState，整个仪表盘（英雄板、报价表、胜率卡）每秒重渲染
+  // 一遍，只为了两个倒计时环。倒计时现在各自订阅共享秒钟（ClockTtlRing），这里只剩
+  // useFocusEntries 用来剔除过期信号——它本来就按 10 秒分桶，所以给它一个 10 秒一跳的钟。
+  // This was useNow(1000): a setState every second re-rendering the whole dashboard
+  // (hero, quotes table, win-rate cards) just for two countdown rings. The rings now
+  // subscribe to the shared clock themselves (ClockTtlRing); what's left is
+  // useFocusEntries dropping expired signals, which buckets to 10s anyway.
+  const now = useBucketedNow(10_000)
   const { sentiment } = useSentiment()
   // 个人策略信号混进普通信号流一起参与焦点轮播的选择——不再单独占一块地方,
   // 设计与排位都跟平台信号一视同仁；市场概览是全平台口径统计,仍然只吃
@@ -65,7 +72,14 @@ export default function DashboardPage() {
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
   // mobile, swiping back should close it first rather than exiting the
   // dashboard outright (see useBackToClose's comment).
-  useBackToClose(activeSignal != null, () => setActiveSignal(null))
+  // 划返回关掉的弹窗同样要把「刚下过单」的标记清掉：以前只有 onCancel 清它，于是
+  // 「下单成功 → 划返回关掉回执」之后标记一直留着，下一次打开任何信号再点取消，
+  // 会莫名其妙跳去订单页。划返回本身就是「我要离开这里」，不再替用户跳转。
+  // A back-swipe close must clear the "just placed" flag too: only onCancel used to,
+  // so "placed → swipe back past the receipt" left it set and the next unrelated
+  // cancel jumped to the orders page. A back swipe means "get me out", so no
+  // navigation on the user's behalf there.
+  useBackToClose(activeSignal != null, () => { placedRef.current = false; setActiveSignal(null) })
 
   const idx = Math.min(focusIdx, Math.max(0, focusEntries.length - 1))
   const cur = focusEntries[idx]
@@ -84,7 +98,14 @@ export default function DashboardPage() {
   const total = focusEntries.length
   const goPrev = useCallback(() => setFocusIdx((i) => (i - 1 + total) % total), [total])
   const goNext = useCallback(() => setFocusIdx((i) => (i + 1) % total), [total])
-  const openTrade = useCallback((s: DisplaySignal) => setActiveSignal(s), [])
+  // 每次打开都从干净的标记开始 / every open starts with a clean flag
+  const openTrade = useCallback((s: DisplaySignal) => { placedRef.current = false; setActiveSignal(s) }, [])
+  const closeTrade = () => {
+    setActiveSignal(null)
+    const placed = placedRef.current
+    placedRef.current = false
+    if (placed) navigate('/orders', { state: { tab: 'positions' } })
+  }
   const goSignals = useCallback(() => navigate('/app'), [navigate])
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
@@ -131,11 +152,11 @@ export default function DashboardPage() {
                 <QuotesTable symbols={activeSymbols} quotes={globalQuotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">
-                <SignalExec signal={cur.signal} now={now} onTrade={openTrade} />
+                <SignalExec signal={cur.signal} onTrade={openTrade} />
                 <SessionWinrateCard />
                 <PersonalWinRateCard className="dash-personal" />
               </div>
-              <SignalOthers entries={otherEntries} now={now} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
+              <SignalOthers entries={otherEntries} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
             </>
           ) : (
             <>
@@ -148,7 +169,7 @@ export default function DashboardPage() {
                 <QuotesTable symbols={activeSymbols} quotes={globalQuotes} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
-                <SignalExec signal={null} now={now} onTrade={openTrade} />
+                <SignalExec signal={null} onTrade={openTrade} />
                 <SessionWinrateCard />
                 <PersonalWinRateCard className="dash-personal" />
               </div>
@@ -157,13 +178,7 @@ export default function DashboardPage() {
           )}
         </div>
       )}
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={() => {
-        setActiveSignal(null)
-        if (placedRef.current) {
-          placedRef.current = false
-          navigate('/orders', { state: { tab: 'positions' } })
-        }
-      }} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={closeTrade} onConfirm={handleConfirm} />}
       {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )

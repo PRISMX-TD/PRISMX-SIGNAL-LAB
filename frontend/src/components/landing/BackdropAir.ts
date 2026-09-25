@@ -41,6 +41,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type * as TH from 'three'
+import type { ThreeLite } from './three-lite'
 
 export type AirVariant = 'none' | 'masses' | 'strata'
 
@@ -77,7 +78,7 @@ function lcg(seed: number) {
    by hand and verification is by measuring the peak luminance inside the copy box
    directly. */
 export function createBackdropAir(
-  THREE: typeof import('three'),
+  THREE: ThreeLite,
   scene: TH.Scene,
   camera: TH.PerspectiveCamera
 ): AirHandle {

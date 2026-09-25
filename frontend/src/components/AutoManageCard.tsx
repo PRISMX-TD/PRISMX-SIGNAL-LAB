@@ -25,7 +25,7 @@
 // left column, or a user who tunes it under account A and switches to B will
 // read the identical values as cross-account leakage or a failed save.
 // Self-fetching and self-saving; callers pass only isPro and scopeHint.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -71,9 +71,19 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
   const [autoSaving, setAutoSaving] = useState(false)
   const [autoMsg, setAutoMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
 
-  useEffect(() => {
-    automationApi.getSettings().then(setAutoCfg).catch(() => {})
+  // 读取失败要进错误态并给「重试」：以前 catch 吞掉之后 autoCfg 永远是 null，
+  // 这块就永远是骨架屏——看起来像「还在加载」，其实早就失败了。
+  // A failed read gets an error state with Retry: the old catch swallowed it,
+  // leaving autoCfg null and the skeleton spinning forever — "still loading"
+  // when it had long since failed.
+  const [loadFailed, setLoadFailed] = useState(false)
+  const load = useCallback(() => {
+    setLoadFailed(false)
+    automationApi.getSettings().then(setAutoCfg).catch(() => setLoadFailed(true))
   }, [])
+  useEffect(() => {
+    if (isPro) load()
+  }, [isPro, load])
 
   async function saveAutoCfg() {
     if (!autoCfg) return
@@ -124,6 +134,13 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
               {t('nav.upgrade')}
             </Link>
           </p>
+        ) : !autoCfg && loadFailed ? (
+          <div className="ord-rule-up" role="alert">
+            <span className="text-down">{t('admin.loadError')}</span>{' '}
+            <button type="button" onClick={load} className="text-prism-400 underline hover:text-prism-300">
+              {t('connStatus.retry')}
+            </button>
+          </div>
         ) : !autoCfg ? (
           <>
             <SkeletonLine height={44} />

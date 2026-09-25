@@ -36,6 +36,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import type * as TH from 'three'
+import type { ThreeLite } from './three-lite'
 import { createBackdropAir, type AirHandle } from './BackdropAir'
 import { createBackdropShards, type ShardsHandle } from './BackdropShards'
 
@@ -87,7 +88,9 @@ export async function createLandingSpace(opts: {
     return null
   }
 
-  const THREE = await import('three')
+  // 只取用到的类（见 three-lite.ts），整包的其余部分由 tree-shaking 摇掉。
+  // Only the classes in use (see three-lite.ts); the rest of three is tree-shaken.
+  const THREE: ThreeLite = (await import('./three-lite')).THREE
   const INST = ++instanceSeq
 
   const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, powerPreference: 'low-power' })

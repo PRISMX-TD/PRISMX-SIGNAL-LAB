@@ -1092,7 +1092,16 @@
   /* 手机上把热区抬到 36px：桌面的 30px 在手指下太窄，而这一行在 375px
      下恰好排满（标题 / 买卖 / 按钮），再窄就只能靠 flex-wrap 折行。
      Bigger touch target on phones; the row is exactly full at 375px and wraps below that. */
-  .ord-closeall { height: 36px; padding: 0 16px; }
+  .ord-closeall { height: 40px; padding: 0 16px; }
+  /* 持仓卡三个动作按钮：手机上热区抬到 44px；红色「全部平仓」与其余两个多拉开一截，
+     它不可撤销，和「部分平仓」挨在一起最容易误触。桌面卡不受影响。
+     Position-card actions: 44px targets on phones, and extra room after the red
+     "close all" — it's irreversible, and sitting flush against "partial close" is
+     where mis-taps happen. The desktop card is unaffected. */
+  .pos-acts { gap: 8px; }
+  .pos-act { min-height: 44px; font-size: 13px; }
+  .pos-act-danger { margin-right: 8px; }
+  .pos-acts-closing { min-height: 44px; }
   .ord-p-after { margin-top: 16px; }
 
   /* 状态芯片：同样压成一条横滑，六个芯片不再折成两行 /

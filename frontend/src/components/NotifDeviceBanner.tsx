@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
-import { notificationApi } from "../api/client"
+import { getSharedNotifPrefs } from "../utils/notifPrefsShared"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { recordDiag } from "../utils/pushDiag"
 import { readStorage, writeStorage } from "../utils/safeStorage"
@@ -28,8 +28,8 @@ export default function NotifDeviceBanner() {
 
   useEffect(() => {
     let alive = true
-    notificationApi
-      .getPrefs()
+    // 共享读取（与 Layout / 铃铛合并成一次请求）/ shared read, deduped with Layout and the bell
+    getSharedNotifPrefs()
       .then((p) => {
         recordDiag("prefs")
         if (alive) setEnabled(p.enabled)

@@ -585,7 +585,7 @@ export default function AccountPage() {
         <PlateTilt>
           <div className="acct-plate-top">
             <span className="acct-plate-brand">
-              <img src="/logo.png" alt="" draggable={false} />
+              <img src="/logo-128.png" srcSet="/logo-128.png 128w, /logo-256.png 256w" sizes="26px" alt="" draggable={false} />
               Signal Lab
             </span>
             <span className={`acct-plan ${isPro ? "pro" : "free"}`}>

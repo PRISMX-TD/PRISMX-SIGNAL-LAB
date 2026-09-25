@@ -27,6 +27,7 @@ import { useLive } from "../store/live"
 import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
 import { useBackToClose } from "../utils/useBackToClose"
+import { getSharedNotifPrefs, invalidateSharedNotifPrefs, updateSharedNotifPrefs } from "../utils/notifPrefsShared"
 import Switch from "./Switch"
 import { FestivalEmptyMini, FestivalTopper } from "../festival/FestivalDecor"
 
@@ -72,9 +73,10 @@ export default function NotificationBell() {
   const [clearing, setClearing] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
 
+  // 共享读取：挂载时与 Layout / NotifDeviceBanner 的同一请求合并（utils/notifPrefsShared）。
+  // Shared read, deduped with Layout's and NotifDeviceBanner's on mount.
   const refresh = () => {
-    notificationApi
-      .getPrefs()
+    getSharedNotifPrefs()
       .then((p) => setEnabled(p.enabled))
       .catch(() => {})
       .finally(() => setLoaded(true))
@@ -167,6 +169,7 @@ export default function NotificationBell() {
       if (!on) {
         setEnabled(false)
         await disableNotifications()
+        updateSharedNotifPrefs({ enabled: false })
       } else {
         // 主开关的落库是整体覆盖，取当前完整偏好再原样带上，避免把用户已选的
         // 策略/品种/事件筛选清空。这一步网络请求必须放在 enableNotifications
@@ -185,6 +188,7 @@ export default function NotificationBell() {
           })),
         )
         setEnabled(true)
+        updateSharedNotifPrefs({ enabled: true })
         // 偏好已经落库=账号层面确实开了，开关就该是「开」。这台设备没能建起推送订阅
         // 是另一件事，如实说一句，但不能把开关弹回「关」——弹回去会和服务端状态对不上，
         // 刷新一次又变回「开」；而在拿不到 Google 推送通道的网络里（中国大陆），
@@ -193,6 +197,9 @@ export default function NotificationBell() {
       }
     } catch (e: unknown) {
       setEnabled(!on)
+      // 落库成没成不确定：丢掉共享值，下一个读的人重新问后端。
+      // Unknown whether the PUT landed: drop the shared value so the next reader asks.
+      invalidateSharedNotifPrefs()
       setErr(e instanceof NotifEnableError ? t(ENABLE_ERROR_KEYS[e.reason]) : t("account.notifError"))
     } finally {
       setBusy(false)

@@ -8,8 +8,8 @@
 
    现在字体文件随站点/随 App 包一起发：
    · Archivo 可变字体（wdth 87–125 / wght 400–800），latin + latin-ext，2 个文件
-   · JetBrains Mono 400/500/600/700，latin + latin-ext，8 个文件
-   共 340 KB。unicode-range 原样保留，浏览器只下载页面真正用到的子集。
+   · JetBrains Mono 400–700（可变字体），latin + latin-ext，2 个文件
+   共 ~220 KB。unicode-range 原样保留，浏览器只下载页面真正用到的子集。
    来源：Google Fonts 的 CSS API（Chrome UA 取 woff2），文件放 public/fonts/。
    两族字体均为 OFL 许可，可自托管。
 
@@ -24,7 +24,7 @@
    That host is black-holed (hangs, not refused) from mainland China, stalling
    first paint for tens of seconds — worst in the app, where everything else is
    local and instant. Archivo + JetBrains Mono are now shipped with the site and
-   the app bundle (340 KB, latin subsets, unicode-range kept). Noto Sans SC is
+   the app bundle (~220 KB, latin subsets, unicode-range kept). Noto Sans SC is
    deliberately NOT bundled (303 subset files, several MB per hot-update zip);
    Chinese falls back to the system CJK face, which on Android is Noto Sans CJK
    itself. */
@@ -49,11 +49,26 @@
   src: url(/fonts/archivo-400-800-87-125-latin.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
+/* jetbrains-mono · 400–700
+   2026-09-25：原来 400/500/600/700 各写一条 @font-face、各指一个文件，共 8 个文件——
+   但这 8 个其实只有 2 份内容（md5 逐一比对：四个字重的 latin 文件完全相同，latin-ext
+   亦然）。Google Fonts 对可变字体的每个字重都回同一份 wght 可变文件，当初按字重分别
+   下载就成了四份拷贝。现在按可变字体的正确写法各一条、font-weight 写成范围，只引用
+   一个文件：浏览器只下载一次，而不是在同一页用到几种字重就按几个 URL 各下一遍。
+   文件名沿用原来的 -400-，内容一个字节没变：/fonts/ 有一年的 immutable 缓存
+   （vercel.json），老用户已缓存的这份继续命中。今后要换字体文件，必须换文件名。
+   Since 2026-09-25: the four weights used to be four @font-face rules pointing at four
+   files each for latin / latin-ext — but md5 shows they are byte-identical (Google
+   Fonts serves the same wght-variable file for every weight). One rule per subset
+   with a weight range now, referencing one file, so it downloads once instead of
+   once per weight used. The -400- filename is kept with unchanged content so the
+   year-long immutable /fonts/ cache (vercel.json) keeps hitting; any future content
+   change must use a new filename. */
 /* jetbrains-mono · latin-ext */
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 700;
   font-display: swap;
   src: url(/fonts/jetbrains-mono-400-latin-ext.woff2) format('woff2');
   unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
@@ -62,62 +77,8 @@
 @font-face {
   font-family: 'JetBrains Mono';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 400 700;
   font-display: swap;
   src: url(/fonts/jetbrains-mono-400-latin.woff2) format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* jetbrains-mono · latin-ext */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-500-latin-ext.woff2) format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* jetbrains-mono · latin */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-500-latin.woff2) format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* jetbrains-mono · latin-ext */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-600-latin-ext.woff2) format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* jetbrains-mono · latin */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 600;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-600-latin.woff2) format('woff2');
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-/* jetbrains-mono · latin-ext */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-latin-ext.woff2) format('woff2');
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-/* jetbrains-mono · latin */
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-700-latin.woff2) format('woff2');
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }

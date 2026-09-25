@@ -1,10 +1,11 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
-import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
 import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { applyAccountsStatus } from './accountsStatus'
+import { keepIfEqual } from './keepIfEqual'
 import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
@@ -36,13 +37,27 @@ interface LiveContextValue {
   anyOnline: boolean
   onlineAccounts: MT5Account[]
   refreshAll: () => Promise<void>
+  // 只重拉订单列表。平仓 / 改单 / 撤单之后用它，不用 refreshAll：那些动作只可能
+  // 改变订单行，持仓与挂单随 WS 推送更新，没必要为一次撤单打七个接口。
+  // Refetch just the order list. Used after close / modify / cancel instead of
+  // refreshAll: those actions can only change order rows, positions and pending
+  // orders ride the WS, and seven requests for one cancel is waste.
+  refreshOrders: () => Promise<void>
+  // 是否已经拿到过一帧持仓（或确认了没有持仓）。之前首帧 POSITIONS 到达前持仓是
+  // 空数组，页面据此显示「暂无持仓」——手上明明有单的用户会以为仓位没了。
+  // Whether a positions frame has arrived (or "none" has been established).
+  // Before the first POSITIONS frame the list is an empty array, which the pages
+  // rendered as "no open positions" — alarming for someone who has some.
+  positionsLoaded: boolean
   // 网页自身到后端的 WebSocket 是否连通；断开时报价/持仓可能已过时。
   // Whether the page's own WebSocket to the backend is up; quotes/positions
   // may be stale while it's down.
   wsConnected: boolean
-  // 曾经连上过之后又断开——用于避免首次加载瞬间的误报横幅。
-  // Was connected at least once and then dropped — avoids a false-positive
-  // banner during the brief instant right after first load.
+  // 曾经连上过之后又断开，或挂载后 WS_FIRST_CONNECT_GRACE_MS 仍没连上——用于避免
+  // 首次加载瞬间的误报横幅，又不至于「一次都没连上」时永远不提示。
+  // Was connected at least once and then dropped, or still not connected
+  // WS_FIRST_CONNECT_GRACE_MS after mount — avoids a false-positive banner in the
+  // instant after first load without staying silent when it never connects.
   wsDisconnected: boolean
   // 后端整体不可达。此前每个请求都各自 .catch() 成空数据、最后无条件
   // setLoaded(true)，于是后端挂掉时页面渲染得完全正常、只是什么都没有——用户
@@ -114,6 +129,52 @@ const PendingOrdersContext = createContext<PendingOrder[]>([])
 // floating P/L is zero -- not unknown.
 const AccountFundsContext = createContext<Record<string, number>>({})
 
+// 全站报价的「外部 store」视图：同一份 globalQuotes，但消费方可以只订阅某一个品种
+// （useGlobalQuote）或某个派生出的原始值（useGlobalQuotesSelect）。Context 做不到
+// 这一点——任何一个品种跳一下价，所有 useGlobalQuotes() 的组件都要重渲染；图表页
+// 以前在顶层读它，于是一跳价整页（含图表外壳、持仓面板、下单票）全部重画。
+// An external-store view of the same globalQuotes so consumers can subscribe to a
+// single symbol (useGlobalQuote) or a derived primitive (useGlobalQuotesSelect).
+// A context can't: any symbol ticking re-renders every useGlobalQuotes() consumer,
+// and the charts page used to read it at the top level, repainting the whole page
+// (shell, dock, ticket) on every tick.
+interface SnapshotStore<T> {
+  get: () => T
+  set: (v: T) => void
+  subscribe: (cb: () => void) => () => void
+}
+function createSnapshotStore<T>(initial: T): SnapshotStore<T> {
+  let value = initial
+  const subs = new Set<() => void>()
+  return {
+    get: () => value,
+    set: (v) => {
+      if (v === value) return
+      value = v
+      subs.forEach((fn) => fn())
+    },
+    subscribe: (cb) => {
+      subs.add(cb)
+      return () => { subs.delete(cb) }
+    },
+  }
+}
+const GlobalQuotesStoreContext = createContext<SnapshotStore<Record<string, Quote>>>(createSnapshotStore({}))
+
+// 挂载后多久还没连上 WS 就当作断线提示（不再要求「曾经连上过」）。
+// How long after mount a never-connected socket counts as disconnected.
+const WS_FIRST_CONNECT_GRACE_MS = 8000
+// 连上之后多久没收到 POSITIONS 就当作「没有持仓」。后端在 AUTH_OK 之后紧接着补推
+// 持仓快照，但**快照为空时不推**（ws.py：`if cached:`），所以没有仓位的用户永远等
+// 不到那一帧，只能按时限认定。/ How long after connecting with no POSITIONS frame we
+// conclude "no positions": the backend re-pushes the snapshot right after AUTH_OK but
+// skips it when empty (ws.py `if cached:`), so a flat user never gets that frame.
+const POSITIONS_AFTER_CONNECT_MS = 3000
+// 连不上也不能让骨架屏永远转下去：挂载后这么久按空处理（断线横幅会同时出现）。
+// Never spin forever: after this long from mount, treat as empty (the offline
+// banner shows alongside).
+const POSITIONS_MOUNT_FALLBACK_MS = 8000
+
 // 失效信号最多保留的条数 / max number of expired signals to keep
 const MAX_EXPIRED = 30
 
@@ -155,35 +216,8 @@ const RESUME_RESYNC_AFTER_MS = 60_000
 // fails once, and a banner for that is just noise.
 const ACCOUNTS_FAIL_THRESHOLD = 2
 
-// 浅比较两个对象的自有字段（值均为原始类型时可靠）/ shallow-compare own fields
-function shallowEqual(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') return false
-  const ka = Object.keys(a as object)
-  const kb = Object.keys(b as object)
-  if (ka.length !== kb.length) return false
-  for (const k of ka) {
-    if ((a as Record<string, unknown>)[k] !== (b as Record<string, unknown>)[k]) return false
-  }
-  return true
-}
-
-// 内容未变则保留旧引用，避免无意义的整树重渲染（持仓每 1.5 秒、账号每 5 秒
-// 会重复推送相同数据）。改用浅比较替代双重 JSON.stringify，省下主线程序列化开销。
-// Keep the previous reference when content is unchanged, so identical pushes
-// (positions every 1.5s, accounts every 5s) don't re-render. Uses a shallow
-// comparison instead of a double JSON.stringify to save main-thread work.
-function keepIfEqual<T>(prev: T, next: T): T {
-  if (prev === next) return prev
-  if (Array.isArray(prev) && Array.isArray(next)) {
-    if (prev.length !== next.length) return next
-    for (let i = 0; i < prev.length; i++) {
-      if (!shallowEqual(prev[i], next[i])) return next
-    }
-    return prev
-  }
-  return shallowEqual(prev, next) ? prev : next
-}
+// shallowEqual / keepIfEqual 挪到 ./keepIfEqual（单独可测），见那个文件的说明。
+// shallowEqual / keepIfEqual live in ./keepIfEqual now (unit-tested there).
 
 // 保留全部有效信号，过期信号只保留最新的 MAX_EXPIRED 条（按生成时间倒序）。
 // Keep all active signals; cap expired ones to the newest MAX_EXPIRED (by created time).
@@ -206,14 +240,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const { applyRemotePrefs } = usePrefs()
   // 只用它的 refreshUser；套餐与信号一起重拉（见下面 resync 的说明）。
   // Only refreshUser is used here; the plan is resynced alongside the signals.
-  const { refreshUser } = useAuth()
+  const { refreshUser, user } = useAuth()
   const refreshUserRef = useRef(refreshUser)
   refreshUserRef.current = refreshUser
+  // 策略信号接口目前只对管理员开放；普通用户每次挂载 / 重连都白拿一个 403。
+  // refreshAll 的依赖是空数组（它被好几处 effect 依赖，不能随 user 变），所以角色走 ref。
+  // The strategy-signals endpoint is admin-only for now; ordinary users used to eat a
+  // 403 on every mount / reconnect. refreshAll has empty deps (several effects depend
+  // on it), so the role is read through a ref.
+  const isAdmin = user?.role === 'admin'
+  const isAdminRef = useRef(isAdmin)
+  isAdminRef.current = isAdmin
   const [signals, setSignals] = useState<Signal[]>([])
   const [strategySignals, setStrategySignals] = useState<StrategySignal[]>([])
   const [orders, setOrders] = useState<Order[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([])
+  const [positionsLoaded, setPositionsLoaded] = useState(false)
   const [accountFunds, setAccountFunds] = useState<Record<string, number>>({})
   const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
   const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
@@ -254,12 +297,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
     const [sig, stratSig, ord, acc, trd, gq, sym] = await Promise.all([
       settle(signalApi.list(), { signals: [] as Signal[] }),
-      // 目前仅管理员可用（功能内部试用中）；非管理员在此静默拿回空数组，
-      // 不影响其它数据的加载。/ Admin-only for now (feature in internal
-      // trial); non-admins silently get an empty array here, without
-      // affecting the rest of the load.
-      strategyApi.signals(20).catch(() => ({ signals: [] })),
-      orderApi.list().catch(() => ({ orders: [], total: 0 })),
+      // 目前仅管理员可用（功能内部试用中）；非管理员根本不发这个请求（以前发了再
+      // 吞掉 403），失败同样静默，不影响其它数据的加载。/ Admin-only for now
+      // (feature in internal trial); non-admins no longer send the request at all
+      // (it used to 403 and be swallowed). Failures stay silent either way.
+      isAdminRef.current
+        ? strategyApi.signals(20).catch(() => null)
+        : Promise.resolve(null),
+      // 失败回 null 而不是空数组：一次网络抖动不该把已有的订单列表清空。
+      // null on failure rather than []: one blip must not wipe the existing list.
+      orderApi.list().catch(() => null),
       settle(accountApi.list(), { accounts: [] as MT5Account[], accountLimit: null, brokerLock: null as BrokerLock | null }),
       trendApi.list().catch(() => ({ trends: [] })),
       quoteApi.list().catch(() => ({ quotes: [] })),
@@ -278,14 +325,19 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     // aren't sitting inside the app at all.
     setBackendUnreachable(!sig.ok && !acc.ok)
 
-    setSignals(capExpired(sig.value.signals))
-    setStrategySignals(stratSig.signals)
-    setOrders(ord.orders)
-    setAccounts(acc.value.accounts)
+    // 每一份都走 keepIfEqual：refreshAll 在重连、回前台、下单后都会跑，接口回来的
+    // 永远是新对象，直接 setState 等于每跑一次就整站重渲染一遍——哪怕什么都没变。
+    // Everything goes through keepIfEqual: refreshAll runs on reconnect, resume and
+    // after placing, and responses are always fresh objects, so a bare setState
+    // re-rendered the whole app every time even when nothing had changed.
+    setSignals((prev) => keepIfEqual(prev, capExpired(sig.value.signals)))
+    if (stratSig) setStrategySignals((prev) => keepIfEqual(prev, stratSig.signals))
+    if (ord) setOrders((prev) => keepIfEqual(prev, ord.orders))
+    setAccounts((prev) => keepIfEqual(prev, acc.value.accounts))
     setAccountLimit(acc.value.accountLimit)
     setBrokerLock((prev) => keepIfEqual(prev, acc.value.brokerLock))
-    setTrends(Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t])))
-    setGlobalQuotes(Object.fromEntries((gq.quotes || []).map((q) => [q.symbol, q])))
+    setTrends((prev) => keepIfEqual(prev, Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t]))))
+    setGlobalQuotes((prev) => keepIfEqual(prev, Object.fromEntries((gq.quotes || []).map((q) => [q.symbol, q]))))
     setActiveSymbols((prev) => keepIfEqual(prev, sym.symbols || []))
     setLoaded(true)
   }, [])
@@ -293,6 +345,28 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshAll()
   }, [refreshAll])
+
+  const refreshOrders = useCallback(async () => {
+    try {
+      const r = await orderApi.list()
+      setOrders((prev) => keepIfEqual(prev, r.orders))
+    } catch {
+      /* 保留现有列表，回执仍会经 WS ORDER_UPDATE 到达 / keep the list; receipts still arrive over WS */
+    }
+  }, [])
+
+  // 挂载时不是管理员、之后才确认是（没有本地缓存的用户资料晚到）：补拉一次策略信号。
+  // 首次运行跳过——挂载那次 refreshAll 已经按当时的角色处理过了。
+  // Role confirmed as admin only after mount (no cached profile): fetch the strategy
+  // signals once. The first run is skipped — mount's refreshAll already handled it.
+  const adminEffectRan = useRef(false)
+  useEffect(() => {
+    if (!adminEffectRan.current) { adminEffectRan.current = true; return }
+    if (!isAdmin) return
+    strategyApi.signals(20)
+      .then((r) => setStrategySignals((prev) => keepIfEqual(prev, r.signals)))
+      .catch(() => {})
+  }, [isAdmin])
 
   // 「掉过线」之后的整份重拉。此前所有数据只在挂载时拉一次，之后全靠 WS 增量推送：
   // 断线期间推过来的 SIGNAL_NEW / SIGNAL_EXPIRED / ORDER_UPDATE 全部丢失，重连后
@@ -436,6 +510,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       }
       case 'POSITIONS': {
         setPositions((prev) => keepIfEqual(prev, (msg.data as Position[]) || []))
+        setPositionsLoaded(true)
         // funds 与 data 同拍，账户卡片因此能和持仓表用同一份浮盈。
         // 整表替换而非合并：后端只下发"有持仓的账号"，合并会让已平完仓的账号
         // 停在旧浮盈上。
@@ -588,7 +663,47 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (wsConnected) setEverConnected(true)
   }, [wsConnected])
-  const wsDisconnected = everConnected && !wsConnected
+  // 一次都没连上也要提示：以前判据只有 everConnected，于是「打开页面就连不上」（弱网、
+  // 代理拦了 WebSocket）的用户永远看不到横幅，只看到一页不动的报价。挂载满
+  // WS_FIRST_CONNECT_GRACE_MS 之后，没连上就算断线。
+  // Warn even when it never connected: with everConnected as the only test, a user
+  // whose socket failed from the start (weak network, a proxy blocking WebSockets)
+  // never saw the banner, just quotes that never moved. After
+  // WS_FIRST_CONNECT_GRACE_MS from mount, not connected counts as disconnected.
+  const [connectGraceOver, setConnectGraceOver] = useState(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => setConnectGraceOver(true), WS_FIRST_CONNECT_GRACE_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+  const wsDisconnected = (everConnected || connectGraceOver) && !wsConnected
+
+  // 持仓「已加载」的两条兜底（正常路径是收到 POSITIONS 帧，见 handleMessage）：
+  // ① 连上后 POSITIONS_AFTER_CONNECT_MS 仍没有持仓帧 → 后端缓存为空，即没有持仓；
+  // ② 挂载满 POSITIONS_MOUNT_FALLBACK_MS 仍没定论（一直连不上）→ 按空处理，别让
+  //    骨架屏永远转下去；断线横幅同时在告诉用户数据可能过时。
+  // Two fallbacks for "positions loaded" (the normal path is a POSITIONS frame):
+  // connected for POSITIONS_AFTER_CONNECT_MS with no frame → the backend cache is
+  // empty, i.e. no positions; still undecided POSITIONS_MOUNT_FALLBACK_MS after
+  // mount (never connected) → treat as empty rather than spin forever, while the
+  // offline banner says the data may be stale.
+  useEffect(() => {
+    if (positionsLoaded || !wsConnected) return
+    const timer = window.setTimeout(() => setPositionsLoaded(true), POSITIONS_AFTER_CONNECT_MS)
+    return () => window.clearTimeout(timer)
+  }, [wsConnected, positionsLoaded])
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPositionsLoaded(true), POSITIONS_MOUNT_FALLBACK_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  // 把最新的全站报价交给外部 store（见 GlobalQuotesStoreContext 的说明）。用 layout
+  // effect：订阅方在同一帧内拿到新值，不会比走 Context 的组件慢半拍。
+  // Hand the latest quotes to the external store (see GlobalQuotesStoreContext).
+  // A layout effect, so subscribers get the value in the same frame as context users.
+  const [globalQuotesStore] = useState(() => createSnapshotStore<Record<string, Quote>>({}))
+  useLayoutEffect(() => {
+    globalQuotesStore.set(globalQuotes)
+  }, [globalQuotes, globalQuotesStore])
 
   // 以桥接上报的在线账号作为统一连接状态来源 / unified connection status from bridge accounts
   const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])
@@ -602,12 +717,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LiveContextValue>(
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-      anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
-      closedTradeTick, announcementTick, notificationTick, refreshNotifications,
+      anyOnline, onlineAccounts, refreshAll, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
+      backendUnreachable, closedTradeTick, announcementTick, notificationTick, refreshNotifications,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-     anyOnline, onlineAccounts, refreshAll, wsConnected, wsDisconnected, backendUnreachable,
-     closedTradeTick, announcementTick, notificationTick, refreshNotifications]
+     anyOnline, onlineAccounts, refreshAll, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
+     backendUnreachable, closedTradeTick, announcementTick, notificationTick, refreshNotifications]
   )
 
   return (
@@ -617,7 +732,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           <AccountFundsContext.Provider value={accountFunds}>
             <QuotesContext.Provider value={quotes}>
               <GlobalQuotesContext.Provider value={globalQuotes}>
-                {children}
+                <GlobalQuotesStoreContext.Provider value={globalQuotesStore}>
+                  {children}
+                </GlobalQuotesStoreContext.Provider>
               </GlobalQuotesContext.Provider>
             </QuotesContext.Provider>
           </AccountFundsContext.Provider>
@@ -643,6 +760,38 @@ export function useQuotes() {
 // Subscribe to the site-wide display quotes only (EA-pushed)
 export function useGlobalQuotes() {
   return useContext(GlobalQuotesContext)
+}
+
+// 只订阅某一个品种的全站报价：其它品种跳价不会让调用方重渲染。GLOBAL_QUOTES 合并
+// 时只替换变化的那几条，所以没跳价的品种拿到的始终是同一个引用。
+// Subscribe to one symbol's site-wide quote only: other symbols ticking won't
+// re-render the caller. GLOBAL_QUOTES merges replace only the changed entries, so an
+// untouched symbol keeps returning the same reference.
+export function useGlobalQuote(symbol: string | null | undefined): Quote | undefined {
+  const store = useContext(GlobalQuotesStoreContext)
+  const get = useCallback(() => (symbol ? store.get()[symbol] : undefined), [store, symbol])
+  return useSyncExternalStore(store.subscribe, get, get)
+}
+
+// 从全站报价里派生一个**原始值**（数字 / 字符串 / 布尔）并只在它变化时重渲染。
+// 选择器必须返回原始值——每次都新造对象会让 useSyncExternalStore 死循环。
+// Derive a primitive from the site-wide quotes and re-render only when it changes.
+// The selector must return a primitive; a fresh object each call would make
+// useSyncExternalStore loop.
+export function useGlobalQuotesSelect<T extends string | number | boolean | null | undefined>(
+  select: (quotes: Record<string, Quote>) => T,
+): T {
+  const store = useContext(GlobalQuotesStoreContext)
+  const selectRef = useRef(select)
+  selectRef.current = select
+  const get = useCallback(() => selectRef.current(store.get()), [store])
+  return useSyncExternalStore(store.subscribe, get, get)
+}
+
+// 不订阅、只在调用时读一眼当前的全站报价（回调里用）。
+// Read the current site-wide quotes at call time without subscribing (for callbacks).
+export function useGlobalQuotesPeek(): () => Record<string, Quote> {
+  return useContext(GlobalQuotesStoreContext).get
 }
 
 // 只订阅持仓 / subscribe to positions only

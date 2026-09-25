@@ -66,6 +66,21 @@ self.addEventListener("activate", (event) => {
     caches
       .keys()
       .then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
+      // 导航预加载：SW 被系统杀掉后，下一次导航要先把 SW 冷启动起来才能发请求——
+      // 开了它，浏览器在启动 SW 的同时就把导航请求发出去，fetch 里用 preloadResponse
+      // 接住，省掉「等 SW 启动」那一段串行（老手机上是几十到几百毫秒）。
+      // 存在性判断：Safari 15.4 以前、Firefox 没有 navigationPreload。enable 失败也不能
+      // 挡住 claim，所以单独 catch。
+      // Navigation preload: when the worker was killed, the next navigation has to
+      // boot it before any request goes out; with preload the browser starts the
+      // navigation request in parallel and fetch() picks it up via preloadResponse.
+      // Feature-checked (absent before Safari 15.4 and in Firefox); a failed enable
+      // must not block claim, hence its own catch.
+      .then(() => {
+        if (self.registration.navigationPreload) {
+          return self.registration.navigationPreload.enable().catch(() => {})
+        }
+      })
       .then(() => self.clients.claim())
   )
 })
@@ -78,9 +93,17 @@ self.addEventListener("fetch", (event) => {
   // not calling respondWith hands the request back to the browser untouched.
   if (req.mode !== "navigate") return
   event.respondWith(
-    fetch(req).catch(() =>
-      caches.match(OFFLINE_URL).then((r) => r || new Response("offline", { status: 503 }))
-    )
+    // 先用导航预加载的响应（activate 里开的），没有（不支持 / 没开上）再自己 fetch。
+    // preloadResponse 在不支持的浏览器上是 undefined，Promise.resolve 一并接住。
+    // 仍是 network-first：预加载失败（断网）与 fetch 失败一样落到离线页。
+    // Prefer the navigation-preload response (enabled on activate), else fetch.
+    // preloadResponse is undefined where unsupported; Promise.resolve covers it.
+    // Still network-first: a failed preload falls back to the offline page like fetch.
+    Promise.resolve(event.preloadResponse)
+      .then((pre) => pre || fetch(req))
+      .catch(() =>
+        caches.match(OFFLINE_URL).then((r) => r || new Response("offline", { status: 503 }))
+      )
   )
 })
 

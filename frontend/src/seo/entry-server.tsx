@@ -7,6 +7,7 @@ import type { ReactElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import { StaticRouter } from 'react-router-dom/server'
 import i18n from '../i18n'
+import en from '../i18n/en.json'
 import LandingPage from '../pages/LandingPage'
 import LegalPage from '../pages/LegalPage'
 import FaqPage from '../pages/FaqPage'
@@ -14,6 +15,13 @@ import { pageById, type PageId, type PublicLang } from './meta'
 import { buildHead } from './head'
 
 export { PUBLIC_PAGES, ORIGIN } from './meta'
+
+// 浏览器端英文包是动态 import 按需拉的（见 i18n/index.ts）；预渲染要同一次进程里
+// 连续渲染中英两套页面，这里直接静态塞进去，changeLanguage('en') 就不走异步加载。
+// In the browser the en bundle is a lazy import (see i18n/index.ts); prerendering
+// renders both languages in one process, so it is added statically here and
+// changeLanguage('en') never goes through the async loader.
+i18n.addResourceBundle('en', 'translation', en, true, true)
 
 const PAGE_ELEMENTS: Record<PageId, () => ReactElement> = {
   home: () => <LandingPage />,

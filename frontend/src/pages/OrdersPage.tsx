@@ -46,6 +46,8 @@ import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 import { formatMarginLevel } from '../components/order/orderMath'
 import { readStorage, writeStorage } from '../utils/safeStorage'
+// 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
+import '../styles/orders.css'
 
 type StatusFilter = 'ALL' | OrderStatus
 const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 'FAILED', 'CANCELLED']
@@ -107,7 +109,7 @@ const money2 = (n: number | null | undefined): string =>
 export default function OrdersPage() {
   const { t, i18n } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const { orders, accounts, refreshAll, closedTradeTick } = useLive()
+  const { orders, accounts, refreshOrders, positionsLoaded, closedTradeTick } = useLive()
   // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
   // Gateway rows don't store a company; the account bar's broker falls back to
   // the partner broker name, matching the bind page.
@@ -305,7 +307,12 @@ export default function OrdersPage() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
     setToast({ msg, kind })
     toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-    refreshAll()
+    // 平仓 / 改单 / 撤单只可能改变订单行：持仓与挂单随 WS 推送，不必整份重拉
+    // （以前是 refreshAll，一次七个接口，且每份都换新对象让整站重渲染）。
+    // Close / modify / cancel can only change order rows; positions and pending
+    // orders ride the WS. This used to be refreshAll: seven requests, each swapping
+    // in fresh objects and re-rendering the whole app.
+    void refreshOrders()
   }
 
   // 持仓汇总 / positions summary
@@ -448,6 +455,14 @@ export default function OrdersPage() {
   // acknowledges acceptance; fills arrive over the positions feed as usual.
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
   const [closingAll, setClosingAll] = useState(false)
+  // 一键平仓涉及的那些仓位：卡片进入「平仓中」，直到持仓推送把它们拿掉。兜底计时从
+  // 请求**返回**起算（与 PositionCard 自己的平仓同一规则），到点仍在的卡放开。
+  // The positions a close-all covers: their cards show "closing" until the feed
+  // removes them. The release timer runs from the request's *return* (the same rule
+  // as PositionCard's own close); cards still there when it fires are released.
+  const [bulkClosing, setBulkClosing] = useState<ReadonlySet<number>>(() => new Set())
+  const bulkTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (bulkTimer.current) window.clearTimeout(bulkTimer.current) }, [])
   useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
   // 确认框开着时最后一笔仓位没了（止损止盈触发、自动仓管、另一台设备平掉）：
   // 把框收掉，别让用户对着一个“平掉 0 笔持仓”的问题按确认。
@@ -460,6 +475,8 @@ export default function OrdersPage() {
   const doCloseAll = async () => {
     setConfirmCloseAll(false)
     setClosingAll(true)
+    if (bulkTimer.current) window.clearTimeout(bulkTimer.current)
+    setBulkClosing(new Set(visiblePositions.map((p) => p.ticket).filter((tk): tk is number => !!tk)))
     try {
       const res = await orderApi.closeAll({
         clientOrderId: clientOrderId(),
@@ -467,7 +484,9 @@ export default function OrdersPage() {
       })
       if (res.queued > 0) showToast(t('orders.closeAll.sent', { count: res.queued }), 'info')
       else showToast(t('orders.closeAll.busy'), 'info')
+      bulkTimer.current = window.setTimeout(() => setBulkClosing(new Set()), 12000)
     } catch (e) {
+      setBulkClosing(new Set())
       showToast(e instanceof Error ? localizeApiError(e.message) : t('orders.closeAll.failed'), 'error')
     } finally {
       setClosingAll(false)
@@ -525,7 +544,7 @@ export default function OrdersPage() {
               disabled={cancellingId === o.id}
               className="btn rounded-pill border border-down/40 bg-down/10 text-down hover:bg-down/20"
             >
-              {t('common.cancel')}
+              {cancellingId === o.id ? t('orders.cancelling') : t('common.cancel')}
             </button>
           )}
           <span key={o.status} className={`ord-stamp ${landed.has(o.id) ? 'land' : ''}`}>
@@ -729,25 +748,36 @@ export default function OrdersPage() {
                 type="button"
                 className="ord-closeall"
                 disabled={closingAll}
+                aria-busy={closingAll || undefined}
                 onClick={() => setConfirmCloseAll(true)}
               >
-                {t('orders.closeAll.btn')}
+                {closingAll ? `${t('charts.dock.closing')}…` : t('orders.closeAll.btn')}
               </button>
             )}
           </div>
           {!isPhone && <p className="ord-p">{t('orders.positionsScopeHint')}</p>}
-          {visiblePositions.length === 0 ? (
+          {/* 首帧持仓还没到时是骨架，不是「暂无持仓」：见 live.tsx 的 positionsLoaded。
+              Skeleton, not "no positions", until the first frame; see positionsLoaded. */}
+          {visiblePositions.length === 0 && !positionsLoaded ? (
+            <div className={isPhone ? 'pos-mlist' : 'mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'} aria-busy="true">
+              {[0, 1].map((i) => (
+                <div key={i} className="skeleton" style={{ height: isPhone ? 168 : 190, borderRadius: 16 }} aria-hidden="true" />
+              ))}
+            </div>
+          ) : visiblePositions.length === 0 ? (
             <p className="py-8 text-sm text-neutral-500">{t('orders.noPositions')}</p>
           ) : isPhone ? (
             <div className="pos-mlist">
               {visiblePositions.map((p, i) => (
-                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} mobile />
+                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} mobile
+                              externalClosing={p.ticket != null && bulkClosing.has(p.ticket)} />
               ))}
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {visiblePositions.map((p, i) => (
-                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} />
+                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast}
+                              externalClosing={p.ticket != null && bulkClosing.has(p.ticket)} />
               ))}
             </div>
           )}

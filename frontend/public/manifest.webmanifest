@@ -2,7 +2,7 @@
   "name": "Signal Lab",
   "short_name": "Signal Lab",
   "description": "聚合智能信号、数据复盘与竞技排位于一体的交易员赋能平台。每一笔经平台下的实盘单，都在为你的等级、勋章和名次记账。资金始终在你自己的券商账户。",
-  "start_url": "/",
+  "start_url": "/dashboard",
   "scope": "/",
   "display": "standalone",
   "background_color": "#09090B",

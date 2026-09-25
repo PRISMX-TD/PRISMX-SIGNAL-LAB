@@ -11,10 +11,11 @@
 // this component owns layout and the inline receipt only. The head (title +
 // symbol) is rendered by the caller: the pane head on desktop, the sheet
 // handle row on mobile. Accounts are a plain online filter here.
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
 import type { MT5Account, Order, OrderEntryType, Quote } from '../../api/types'
+import { useGlobalQuote, useQuotes } from '../../store/live'
 import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
@@ -22,12 +23,18 @@ import { useOrderForm, type Side } from '../order/useOrderForm'
 interface Props {
   symbol: string
   accounts: MT5Account[]
-  // 按交易商账户区分的报价：login -> {symbol: Quote}（下单参考价用选中账户的）
-  // Per-account quotes: login -> {symbol: Quote} (entry price uses the selected account's)
-  quotesByAccount: Record<string, Record<string, Quote>>
-  // 全站统一报价（EA 推送）：选中账户没有该品种报价时的兜底 bid/ask
-  // Site-wide quote (EA-pushed): fallback bid/ask when the account has none
-  globalQuote: Quote | undefined
+  // 按交易商账户区分的报价：login -> {symbol: Quote}（下单参考价用选中账户的）。
+  // 不传就自己订阅（useQuotes）——图表页不再在顶层读报价，见 ChartsPage「高频数据下放」。
+  // Per-account quotes: login -> {symbol: Quote} (entry price uses the selected
+  // account's). Omitted → subscribed here (useQuotes); the charts page no longer
+  // reads quotes at its top level.
+  quotesByAccount?: Record<string, Record<string, Quote>>
+  // 全站统一报价（EA 推送）：选中账户没有该品种报价时的兜底 bid/ask。不传就按 symbol
+  // 自己订阅那一条（useGlobalQuote），其它品种跳价不会牵动这张票。
+  // Site-wide quote (EA-pushed): fallback bid/ask when the account has none. Omitted
+  // → this symbol's quote is subscribed here (useGlobalQuote), so other symbols'
+  // ticks don't touch the ticket.
+  globalQuote?: Quote
   // 图表最新收盘价：连报价都没有时的最后兜底 / chart's latest close, last-resort fallback
   refPrice: number
   digits: number
@@ -78,10 +85,14 @@ function PipPrice({ v, digits }: { v: number | null; digits: number }) {
   return <span className="px">{s.slice(0, -2)}<b>{s.slice(-2)}</b></span>
 }
 
-export default function OrderTicket({
-  symbol, accounts, quotesByAccount, globalQuote, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', className = '',
+function OrderTicket({
+  symbol, accounts, quotesByAccount: quotesByAccountProp, globalQuote: globalQuoteProp, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', className = '',
 }: Props) {
   const { t } = useTranslation()
+  const ctxAccountQuotes = useQuotes()
+  const ctxGlobalQuote = useGlobalQuote(symbol)
+  const quotesByAccount = quotesByAccountProp ?? ctxAccountQuotes
+  const globalQuote = globalQuoteProp ?? ctxGlobalQuote
   const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])
   const [side, setSide] = useState<Side>(initialSide)
   const form = useOrderForm({
@@ -351,3 +362,9 @@ export default function OrderTicket({
     </div>
   )
 }
+
+// memo：图表页每 2 秒随 K 线轮询重渲染，下单票的输入（品种 / 账户 / 精度 / 回调）不变就
+// 跳过；报价变化由它自己的订阅驱动。/ memo: the charts page re-renders on every 2s
+// candle poll; skip when the ticket's inputs are unchanged — quote changes arrive
+// through its own subscriptions.
+export default memo(OrderTicket)

@@ -1,70 +1,20 @@
-// 落地页问候条 / landing ribbon
+// 落地页问候条（轻壳）/ landing ribbon (light shell)
 //
-// 顶栏最上方的一条细横幅：节日小图标 + 问候 + 关闭。底边是节日三色的光谱线，
-// 和导航里那条品牌光谱线是同一个图形语言。
-// A slim strip above the landing nav: festival icon, greeting, close. Its
-// bottom edge is the spectral rule in festival colours — the same graphic
-// language as the brand's own spectral rule.
-import { useEffect, useMemo, useRef } from 'react'
-import { useTranslation } from 'react-i18next'
+// 与 FestivalGreeting 同理：没有节日或已关掉就不加载；否则动态加载 FestivalRibbonImpl.tsx
+// （它自己从高度 0 展开入场）。
+// Same as FestivalGreeting: nothing is loaded without a festival or once
+// dismissed; otherwise FestivalRibbonImpl.tsx loads (it enters from height 0).
 import { useFestivalOptional } from './FestivalProvider'
-import { icon } from './art'
-import { loadGsap } from './motion'
-import SvgArt from './SvgArt'
-import './festival.css'
+import { Deferred, lazyPart } from './lazyPart'
+
+const Impl = lazyPart<object>((m) => m.FestivalRibbon)
 
 export default function FestivalRibbon() {
-  const { t } = useTranslation()
   const f = useFestivalOptional()
-  const ref = useRef<HTMLDivElement>(null)
-  const key = f ? f.festival : null
-  const html = useMemo(() => (key ? icon(key) : ''), [key])
-  const show = !!f && !!key && f.greetingOpen
-
-  useEffect(() => {
-    const el = ref.current
-    if (!show || !el || !f || f.reducedMotion) return
-    let kill: (() => void) | null = null
-    let alive = true
-    loadGsap().then((gsap) => {
-      if (!alive) return
-      const tl = gsap.timeline({ delay: 0.3 })
-      tl.from(el, { height: 0, duration: 0.5, ease: 'power3.out', clearProps: 'height' })
-        .from(el.querySelectorAll('.fa-ribbon-row > *'), { y: 8, opacity: 0, duration: 0.5, stagger: 0.06, ease: 'power3.out' }, 0.15)
-        .from(el.querySelector('.fa-rule'), { scaleX: 0, transformOrigin: '50% 50%', duration: 0.9, ease: 'expo.out' }, 0.2)
-      kill = () => tl.kill()
-    })
-    return () => {
-      alive = false
-      if (kill) kill()
-    }
-  }, [show, key, f && f.replay, f && f.reducedMotion])
-
-  if (!show || !f || !key) return null
-
-  const close = () => {
-    const el = ref.current
-    if (!el || f.reducedMotion) return f.dismissGreeting()
-    loadGsap().then((gsap) => {
-      gsap.to(el, { height: 0, opacity: 0, duration: 0.35, ease: 'power3.inOut', onComplete: () => f.dismissGreeting() })
-    })
-  }
-
+  if (!f || !f.festival || !f.greetingOpen) return null
   return (
-    <div ref={ref} className="fa-ribbon" style={{ overflow: 'hidden' }}>
-      <div className="fa-ribbon-row">
-        <SvgArt html={html} surface="icon" artKey={key} reduced={f.reducedMotion} replay={f.replay} />
-        <b>{t(`festival.greeting.${key}`)}</b>
-        {key === 'newyear' && <span className="fa-ribbon-sub">{t('festival.newYearSub', { year: f.newYear })}</span>}
-        <button type="button" className="fa-ribbon-close" onClick={close} aria-label={t('festival.close')}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
-      </div>
-      <span className="fa-rule">
-        <i />
-      </span>
-    </div>
+    <Deferred>
+      <Impl />
+    </Deferred>
   )
 }

@@ -1,10 +1,12 @@
-import { Suspense, useEffect, useState, type ReactNode } from 'react'
+import { Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { lazyRetry } from './utils/lazyRetry'
+import { onIdle, shouldSkipPrefetch } from './utils/idle'
+import { getToken } from './api/client'
+import { pageFromPath, type PageId } from './seo/meta'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
 import { FestivalProvider, FESTIVAL_DEMO } from './festival/FestivalProvider'
-import Layout from './components/Layout'
 import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
 import MetaPixel from './components/MetaPixel'
@@ -25,33 +27,200 @@ import GrowthHub from './pages/GrowthHub'
 // heavy pages (e.g. the charts page) load on demand.
 // 节日预览面板只在演示构建里加载。/ The festival preview panel only loads in demo builds.
 const FestivalDemoPanel = lazyRetry(() => import('./festival/demo/DemoPanel'), 'FestivalDemoPanel')
-const LandingPage = lazyRetry(() => import('./pages/LandingPage'), 'LandingPage')
-const LoginPage = lazyRetry(() => import('./pages/LoginPage'), 'LoginPage')
-const ResetPasswordPage = lazyRetry(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage')
-const SignalsPage = lazyRetry(() => import('./pages/SignalsPage'), 'SignalsPage')
-const DashboardPage = lazyRetry(() => import('./pages/DashboardPage'), 'DashboardPage')
-const ChartsPage = lazyRetry(() => import('./pages/ChartsPage'), 'ChartsPage')
-const BindPage = lazyRetry(() => import('./pages/BindPage'), 'BindPage')
-const BridgePage = lazyRetry(() => import('./pages/BridgePage'), 'BridgePage')
-const OrdersPage = lazyRetry(() => import('./pages/OrdersPage'), 'OrdersPage')
-const UpgradePage = lazyRetry(() => import('./pages/UpgradePage'), 'UpgradePage')
-const DownloadPage = lazyRetry(() => import('./pages/DownloadPage'), 'DownloadPage')
-const AccountPage = lazyRetry(() => import('./pages/AccountPage'), 'AccountPage')
-const AdminPage = lazyRetry(() => import('./pages/AdminPage'), 'AdminPage')
-const SimulatorPage = lazyRetry(() => import('./pages/SimulatorPage'), 'SimulatorPage')
-const StrategiesPage = lazyRetry(() => import('./pages/StrategiesPage'), 'StrategiesPage')
-const AchievementsPage = lazyRetry(() => import('./pages/AchievementsPage'), 'AchievementsPage')
-const LeaderboardPage = lazyRetry(() => import('./pages/LeaderboardPage'), 'LeaderboardPage')
-const CompetitionsPage = lazyRetry(() => import('./pages/CompetitionsPage'), 'CompetitionsPage')
-const ProfilePage = lazyRetry(() => import('./pages/ProfilePage'), 'ProfilePage')
-const LegalPage = lazyRetry(() => import('./pages/LegalPage'), 'LegalPage')
-const FaqPage = lazyRetry(() => import('./pages/FaqPage'), 'FaqPage')
-const SupportPage = lazyRetry(() => import('./pages/SupportPage'), 'SupportPage')
-const StrategyGuidePage = lazyRetry(() => import('./pages/StrategyGuidePage'), 'StrategyGuidePage')
-const AnnouncementsPage = lazyRetry(() => import('./pages/AnnouncementsPage'), 'AnnouncementsPage')
-const AnnouncementPage = lazyRetry(() => import('./pages/AnnouncementPage'), 'AnnouncementPage')
-const CompleteProfilePage = lazyRetry(() => import('./pages/CompleteProfilePage'), 'CompleteProfilePage')
-const AgentPage = lazyRetry(() => import('./pages/AgentPage'), 'AgentPage')
+// 可预加载的懒页面：用法与 lazyRetry 相同，多一个 preload()。
+// 为什么不直接 lazyRetry：React.lazy 第一次渲染**必然** suspend 一次——哪怕 chunk
+// 早已下载完，工厂返回的 Promise 也要等一个 microtask 才 resolve，而这一次 suspend
+// 足以让 Suspense 把 createRoot 接管的预渲染 HTML 清成空白占位（公开页闪白的根源）。
+// preload() 完成后，新挂载的实例直接渲染真组件，不经过 lazy，不 suspend。
+// 每个挂载实例在首次渲染时就选定走哪条路（useState 初值），之后不再切换：否则
+// 预取在页面已经经由 lazy 挂上之后才完成，下一次重渲染时元素类型从 Lazy 变成真组件，
+// React 会把整页卸载重挂，状态全丢、请求全部重发。
+// preload() 自身不重试、失败静默——真正渲染时 lazyRetry 那条路照旧负责重试与重载。
+// A lazy page with a preload(). React.lazy always suspends on its first render,
+// even for an already-downloaded chunk (the factory promise resolves a microtask
+// later), and that one suspension is enough for Suspense to wipe the prerendered
+// HTML that createRoot took over. Once preload() has finished, newly mounted
+// instances render the real component directly. Each instance picks its path on
+// first render and keeps it — switching Lazy → real component later would remount
+// the page and lose its state. preload() neither retries nor throws to callers
+// that ignore it; the lazyRetry path still owns retries when actually rendering.
+type Preloadable<P> = ComponentType<P> & { preload: () => Promise<void> }
+function lazyPage<P extends object>(
+  factory: () => Promise<{ default: ComponentType<P> }>,
+  name: string,
+): Preloadable<P> {
+  const Lazy = lazyRetry(factory, name) as unknown as ComponentType<P>
+  let Loaded: ComponentType<P> | null = null
+  let pending: Promise<void> | null = null
+  const preload = () => {
+    if (!pending) {
+      pending = factory().then(
+        (m) => {
+          Loaded = m.default
+        },
+        (err) => {
+          pending = null
+          throw err
+        },
+      )
+    }
+    return pending
+  }
+  function Page(props: P) {
+    const [Comp] = useState<ComponentType<P>>(() => Loaded ?? Lazy)
+    return <Comp {...props} />
+  }
+  Page.displayName = `LazyPage(${name})`
+  return Object.assign(Page, { preload })
+}
+
+// 主布局也懒加载：落地页 / 登录页 / 法务页的访客根本用不到它（以及它拉起的 LiveProvider、
+// 通知铃铛、用户菜单……），不该让他们为此多下载、多解析一截入口包。加载中的占位就是外层
+// Suspense 的 PageFallback，与原来切页时一致。登录后的直达与切页由下面的预取兜着，
+// 避免「先等 Layout、再等页面」两段串行。
+// The main layout is lazy too: landing / login / legal visitors never use it (nor the
+// LiveProvider, bell and user menu it pulls in). While loading, the outer Suspense's
+// PageFallback shows, as it always did on page switches. Direct entry and tab switches
+// after login are covered by the warm-up/prefetch below, so Layout and the page load
+// in parallel rather than one after the other.
+const Layout = lazyPage(() => import('./components/Layout'), 'Layout')
+const LandingPage = lazyPage(() => import('./pages/LandingPage'), 'LandingPage')
+const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage')
+const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage')
+const SignalsPage = lazyPage(() => import('./pages/SignalsPage'), 'SignalsPage')
+const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage')
+const ChartsPage = lazyPage(() => import('./pages/ChartsPage'), 'ChartsPage')
+const BindPage = lazyPage(() => import('./pages/BindPage'), 'BindPage')
+const BridgePage = lazyPage(() => import('./pages/BridgePage'), 'BridgePage')
+const OrdersPage = lazyPage(() => import('./pages/OrdersPage'), 'OrdersPage')
+const UpgradePage = lazyPage(() => import('./pages/UpgradePage'), 'UpgradePage')
+const DownloadPage = lazyPage(() => import('./pages/DownloadPage'), 'DownloadPage')
+const AccountPage = lazyPage(() => import('./pages/AccountPage'), 'AccountPage')
+const AdminPage = lazyPage(() => import('./pages/AdminPage'), 'AdminPage')
+const SimulatorPage = lazyPage(() => import('./pages/SimulatorPage'), 'SimulatorPage')
+const StrategiesPage = lazyPage(() => import('./pages/StrategiesPage'), 'StrategiesPage')
+const AchievementsPage = lazyPage(() => import('./pages/AchievementsPage'), 'AchievementsPage')
+const LeaderboardPage = lazyPage(() => import('./pages/LeaderboardPage'), 'LeaderboardPage')
+const CompetitionsPage = lazyPage(() => import('./pages/CompetitionsPage'), 'CompetitionsPage')
+const ProfilePage = lazyPage(() => import('./pages/ProfilePage'), 'ProfilePage')
+const LegalPage = lazyPage(() => import('./pages/LegalPage'), 'LegalPage')
+const FaqPage = lazyPage(() => import('./pages/FaqPage'), 'FaqPage')
+const SupportPage = lazyPage(() => import('./pages/SupportPage'), 'SupportPage')
+const StrategyGuidePage = lazyPage(() => import('./pages/StrategyGuidePage'), 'StrategyGuidePage')
+const AnnouncementsPage = lazyPage(() => import('./pages/AnnouncementsPage'), 'AnnouncementsPage')
+const AnnouncementPage = lazyPage(() => import('./pages/AnnouncementPage'), 'AnnouncementPage')
+const CompleteProfilePage = lazyPage(() => import('./pages/CompleteProfilePage'), 'CompleteProfilePage')
+const AgentPage = lazyPage(() => import('./pages/AgentPage'), 'AgentPage')
+
+// ── 启动预加载与登录后预取 / boot preload and post-login prefetch ──
+type HasPreload = { preload: () => Promise<void> }
+
+// 预渲染过的公开页 → 页面组件。main.tsx 在首次 render 前 await 对应的 preload：
+// 见 lazyPage 头注，这是预渲染内容不被 Suspense 清空的前提。
+// Prerendered public pages → their components; main.tsx awaits the matching
+// preload before the first render (see lazyPage) so Suspense can't blank them.
+const PUBLIC_PAGE_COMPONENTS: Record<PageId, HasPreload> = {
+  home: LandingPage,
+  terms: LegalPage,
+  privacy: LegalPage,
+  risk: LegalPage,
+  faq: FaqPage,
+}
+
+// 登录后直达时顺手并行拉的页面（精确路径）。/ Pages warmed on direct entry (exact paths).
+const APP_ROUTE_PAGES: Record<string, HasPreload> = {
+  '/dashboard': DashboardPage,
+  '/app': SignalsPage,
+  '/charts': ChartsPage,
+  '/orders': OrdersPage,
+  '/bind': BindPage,
+  '/account': AccountPage,
+  '/strategies': StrategiesPage,
+  '/upgrade': UpgradePage,
+  '/download': DownloadPage,
+  '/support': SupportPage,
+  '/announcements': AnnouncementsPage,
+}
+
+// 登录后空闲时预取：外壳 + 底栏四个常用 Tab。/ Prefetched on idle after login: shell + main tabs.
+const PREFETCH_AFTER_LOGIN: HasPreload[] = [Layout, DashboardPage, SignalsPage, ChartsPage, OrdersPage]
+
+/**
+ * 首次 render 之前调用（main.tsx）。公开页返回「该页 chunk 已就绪」的 Promise，调用方
+ * 应当 await；其余情况立即 resolve，只在后台并行预热 Layout 与目标页 chunk——app.html
+ * 的 root 本来就是空的，没有预渲染内容要保护，犯不着为此推迟首帧。
+ * 失败一律吞掉：preload 拉不到时照常 render，lazyRetry 那条路负责重试。
+ * Called before the first render (main.tsx). For public pages the returned promise
+ * means "this page's chunk is ready" and should be awaited; otherwise it resolves at
+ * once and only warms Layout + the target page in the background. Failures are
+ * swallowed — rendering proceeds and lazyRetry handles retries.
+ */
+export function bootPreload(pathname: string): Promise<void> {
+  const authed = !!getToken()
+  const pub = pageFromPath(pathname)
+  // 已登录用户打开首页只是个跳板（Home 立刻重定向 /dashboard），不必等落地页。
+  // For a signed-in user the home page is only a redirect to /dashboard.
+  if (pub && !(pub.page.id === 'home' && authed)) {
+    return PUBLIC_PAGE_COMPONENTS[pub.page.id].preload().catch(() => {})
+  }
+  if (authed) {
+    const target = pub ? '/dashboard' : pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+    void Layout.preload().catch(() => {})
+    void APP_ROUTE_PAGES[target]?.preload().catch(() => {})
+  } else if (pathname === '/login') {
+    void LoginPage.preload().catch(() => {})
+  }
+  return Promise.resolve()
+}
+
+// 登录态成立后，在浏览器空闲时逐个预取常用页面 chunk：一个接一个，每个之间再等一次空闲，
+// 不和当前页面的请求、渲染抢带宽与主线程。省流量模式 / 2G 下不预取。
+// 复用 lazyPage 的 preload（即 App 里各页面同一个 import 函数），模块图天然去重。
+// Once signed in, prefetch the common page chunks one at a time on idle, never
+// competing with the current page. Skipped on Save-Data / 2G. Reuses each page's own
+// import function via preload(), so the module graph dedupes naturally.
+function IdlePrefetch() {
+  const { isAuthed } = useAuth()
+  useEffect(() => {
+    if (!isAuthed || shouldSkipPrefetch()) return
+    let cancelIdle: (() => void) | null = null
+    let stopped = false
+    let i = 0
+    const next = () => {
+      if (stopped || i >= PREFETCH_AFTER_LOGIN.length) return
+      cancelIdle = onIdle(() => {
+        const item = PREFETCH_AFTER_LOGIN[i++]
+        item.preload().catch(() => {}).then(next)
+      }, 3000)
+    }
+    next()
+    return () => {
+      stopped = true
+      cancelIdle?.()
+    }
+  }, [isAuthed])
+  return null
+}
+
+// 给安卓 App 启动页用的「首屏已渲染」信号（APP Pack 里监听这个事件收起启动画面）。
+// 事件名与全局标记名是跨项目约定，不要改。两帧 rAF：等这一次提交真正画到屏幕上；
+// 1 秒定时器兜底——WebView 不可见时 rAF 不跑，信号不能因此永远不发。
+// "First screen rendered" signal for the Android app's launch (APP Pack listens for it
+// to dismiss the splash). The event and flag names are a cross-project contract — do
+// not rename. Two rAFs so the commit has actually been painted; a 1s timer as backup
+// because rAF does not run while the WebView is hidden.
+function announceMounted() {
+  const w = window as Window & { __PRISMX_MOUNTED__?: boolean }
+  let fired = false
+  const fire = () => {
+    if (fired || w.__PRISMX_MOUNTED__) return
+    fired = true
+    w.__PRISMX_MOUNTED__ = true
+    window.dispatchEvent(new Event('prismx:app-mounted'))
+  }
+  requestAnimationFrame(() => requestAnimationFrame(fire))
+  window.setTimeout(fire, 1000)
+}
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed, user } = useAuth()
@@ -125,11 +294,27 @@ function RouteErrorBoundary({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  // 根组件的首次提交 = React 首屏已渲染（子树可能还挂在 Suspense 占位上，但壳已经在屏幕上了）。
+  // The root's first commit = React's first screen (the subtree may still be on a
+  // Suspense fallback, but the shell is on screen).
+  useEffect(() => {
+    announceMounted()
+  }, [])
   return (
     <AuthProvider>
       <PrefsProvider>
         <FestivalProvider>
-        <BrowserRouter>
+        {/* v7_startTransition：路由切换包在 startTransition 里——切到还没下载的懒页面时
+            保留旧页面直到新页面就绪，而不是先闪一下 Suspense 占位。
+            v7_relativeSplatPath：只影响 splat 路由里的相对路径解析；本应用唯一的 splat
+            是 path="*" 的 <Navigate to="/">（绝对路径），行为不变，开它只是提前对齐 v7、
+            顺带消掉控制台的 future-flag 警告。
+            v7_startTransition wraps navigations in startTransition, so switching to a
+            not-yet-loaded lazy page keeps the old page until the new one is ready instead
+            of flashing the Suspense fallback. v7_relativeSplatPath only changes relative
+            resolution inside splat routes; the only splat here is path="*" navigating to
+            the absolute "/", so behaviour is unchanged. */}
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           {/* SPA 路由切换时补发 Meta Pixel 的 PageView。必须在 BrowserRouter 内
               （要用 useLocation）、Routes 外（要覆盖全部路由，含 Layout 之外的
               落地页/登录页/法务页）。见 components/MetaPixel.tsx 的说明。
@@ -166,6 +351,7 @@ export default function App() {
               may well be sitting on another. It renders null otherwise, costing no
               DOM. */}
           <AccountDisabledGate />
+          <IdlePrefetch />
           <PwaBackGuard>
           <RouteErrorBoundary>
           <Suspense fallback={<PageFallback />}>

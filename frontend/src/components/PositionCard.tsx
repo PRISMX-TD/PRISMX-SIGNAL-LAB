@@ -31,28 +31,53 @@ interface Props {
   onActionDone?: (msg: string, kind: 'success' | 'error' | 'info') => void
   // 手机版卡 / the phone card shape
   mobile?: boolean
+  // 外部发起的平仓正在进行（订单页「一键平仓」）：卡同样进入「平仓中」。
+  // A close started from outside (the Orders page's close-all): same closing state.
+  externalClosing?: boolean
 }
 
 type Mode = 'view' | 'close' | 'modify'
 
-export default function PositionCard({ position: p, onActionDone, mobile = false }: Props) {
+// 平仓请求**返回之后**再等多久持仓推送：到点仍没被拿掉就放开卡片（回执丢失 / 桥接掉线）。
+// How long to wait for the positions feed *after* the close request returns before
+// releasing the card (lost receipt / bridge offline).
+const CLOSING_RELEASE_MS = 12000
+
+export default function PositionCard({ position: p, onActionDone, mobile = false, externalClosing = false }: Props) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
-  // 平仓指令已被接受、正在等持仓推送把这张卡拿掉：卡压暗、动作全部禁用。
-  // 卡随持仓消失而卸载，所以正常路径下不需要复位；只留一个超时兜底，防止回执
-  // 丢失时卡永远压着。
-  // A close has been accepted and the card is waiting for the positions feed to
-  // remove it: dimmed, actions disabled. The card unmounts with the position, so
-  // only a timeout release is needed for the lost-receipt case.
+  // 平仓指令已发出 / 已被接受、正在等持仓推送把这张卡拿掉：卡压暗、动作全部禁用、
+  // 显示「平仓中…」。卡随持仓消失而卸载，所以正常路径下不需要复位；只留一个超时兜底，
+  // 防止回执丢失时卡永远压着。
+  //
+  // 兜底计时**只在请求返回之后才开始**。以前点下去就开 12 秒计时，而平仓请求在网关
+  // 直连账号上最长要等约 160 秒（api/client.ts 的 TRADE_TIMEOUT_MS）——12 秒一到按钮就又能点了，请求却还
+  // 在路上，用户再点一次就是第二张平仓单。请求没回来之前 busy 一直保持（与
+  // PositionsDock 的 busyId 同一个思路）。
+  //
+  // A close is in flight or accepted and the card is waiting for the positions feed
+  // to remove it: dimmed, actions disabled, "closing…" shown. The card unmounts with
+  // the position, so only a timeout release is needed for the lost-receipt case.
+  // The release timer starts only once the request has returned. It used to start
+  // on the click, while a close on a gateway account can take ~160s (TRADE_TIMEOUT_MS
+  // in api/client.ts) — after 12s the buttons came back with the request still in
+  // flight, and a second tap was a second close order. busy now holds until the
+  // request settles, like PositionsDock's busyId.
   const [closing, setClosing] = useState(false)
   const closingTimer = useRef<number | undefined>(undefined)
   useEffect(() => () => { if (closingTimer.current) window.clearTimeout(closingTimer.current) }, [])
-  const enterClosing = () => {
-    setClosing(true)
+  const releaseLater = () => {
     if (closingTimer.current) window.clearTimeout(closingTimer.current)
-    closingTimer.current = window.setTimeout(() => { setClosing(false); setBusy(false) }, 12000)
+    closingTimer.current = window.setTimeout(() => { setClosing(false); setBusy(false) }, CLOSING_RELEASE_MS)
   }
+  const releaseNow = () => {
+    if (closingTimer.current) window.clearTimeout(closingTimer.current)
+    closingTimer.current = undefined
+    setClosing(false)
+    setBusy(false)
+  }
+  const isClosing = closing || externalClosing
   const [confirmCloseAll, setConfirmCloseAll] = useState(false)
   // 全屏确认弹窗，手机上划返回应该先关掉它、而不是直接退出当前页面
   // （见 useBackToClose 的说明）。/ A full-screen confirm modal; on mobile,
@@ -116,8 +141,11 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     }
     setBusy(true)
     // 点下去就进入"平仓中"，不等接口——第一反应要即时。被拒或出错再退回来。
+    // 这里不开兜底计时，见 closing 的说明。
     // Enter "closing" on the click itself, not on the response; revert on rejection.
-    enterClosing()
+    // No release timer yet — see the note on `closing`.
+    if (closingTimer.current) window.clearTimeout(closingTimer.current)
+    setClosing(true)
     setMode('view')
     try {
       const res = await orderApi.close({
@@ -134,18 +162,18 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       // card stays dimmed until the positions feed removes or updates it.
       if (res.status === 'FILLED') {
         onActionDone?.(t('positions.closed', { price: res.filledPrice != null ? res.filledPrice : '—' }), 'success')
-        if (!full) { setClosing(false); setBusy(false) }
+        if (!full) releaseNow()
+        else releaseLater()
       } else if (res.status === 'REJECTED' || res.status === 'FAILED') {
-        setClosing(false)
-        setBusy(false)
+        releaseNow()
         onActionDone?.(res.message ? localizeApiError(res.message) : t('positions.closeFailed'), 'error')
       } else {
         onActionDone?.(t('positions.closeSent'), 'info')
-        if (!full) { setClosing(false); setBusy(false) }
+        if (!full) releaseNow()
+        else releaseLater()
       }
     } catch (e) {
-      setClosing(false)
-      setBusy(false)
+      releaseNow()
       onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     }
   }
@@ -197,33 +225,44 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   }
 
   // ── 两形态共用的动作区 / action area shared by both shapes ──
-  const actions = canAct && mode === 'view' && (
-    <div className="mt-3 flex gap-2">
+  // 平仓进行中：三个按钮换成一行「平仓中…」，让人知道点过了、正在处理，而不是只看到
+  // 一张变灰的卡。/ While closing, the three buttons give way to a "closing…" line so
+  // the user can tell the tap registered and is being handled, not just a greyed card.
+  // pos-acts / pos-act：手机上把热区抬到 44px、红色「全部平仓」与其余两个拉开
+  // （orders.css 的手机段），桌面不变。/ Phone-only 44px targets and extra space
+  // after the red close-all (orders.css phone block); desktop unchanged.
+  const actions = canAct && mode === 'view' && (isClosing ? (
+    <div className="pos-acts-closing mt-3 flex items-center justify-center gap-2 rounded-lg border border-white/10 py-1.5 text-xs font-medium text-neutral-300" role="status">
+      <span className="spinner" aria-hidden="true" />
+      {t('charts.dock.closing')}…
+    </div>
+  ) : (
+    <div className="pos-acts mt-3 flex gap-2">
       <button
         onClick={() => setConfirmCloseAll(true)}
         disabled={busy}
-        className="flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
+        className="pos-act pos-act-danger flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
       >
         {t('positions.closeAll')}
       </button>
       <button
         onClick={() => openForm('close')}
         disabled={busy}
-        className="flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+        className="pos-act flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
       >
         {t('positions.partialClose')}
       </button>
       <button
         onClick={() => openForm('modify')}
         disabled={busy}
-        className="flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50"
+        className="pos-act flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50"
       >
         {t('positions.editSlTp')}
       </button>
     </div>
-  )
+  ))
 
-  const closeForm = canAct && mode === 'close' && (
+  const closeForm = canAct && mode === 'close' && !isClosing && (
     <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
       <label className="text-xs text-neutral-400">
         {t('positions.closeVolume')} (max {fmtLots(p.volume)})
@@ -266,7 +305,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     </div>
   )
 
-  const modifyForm = canAct && mode === 'modify' && (
+  const modifyForm = canAct && mode === 'modify' && !isClosing && (
     <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -359,7 +398,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       }
     })()
     return (
-      <article className={`pos-mc ${profitUp ? 'up' : 'down'} ${closing ? 'closing' : ''}`}>
+      <article className={`pos-mc ${profitUp ? 'up' : 'down'} ${isClosing ? 'closing' : ''}`}>
         <header className="pos-mc-hd">
           {ava}
           <div className="pos-mc-id">
@@ -414,7 +453,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
 
   // ── 卡片形态（桌面）/ card shape (desktop) ──
   return (
-    <div className={`glass-neon pos-card p-4 ${closing ? 'closing' : ''}`}>
+    <div className={`glass-neon pos-card p-4 ${isClosing ? 'closing' : ''}`}>
       {/* 头部：品种 + 方向 + 盈亏 / header: symbol + side + P&L */}
       <div className="flex items-start justify-between">
         <div>

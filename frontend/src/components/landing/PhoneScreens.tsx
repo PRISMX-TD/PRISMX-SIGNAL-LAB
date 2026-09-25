@@ -132,7 +132,7 @@ export function PhoneChrome({ t, activeTab }: { t: T; activeTab: string }) {
   return (
     <>
       <div className="pc-head">
-        <img src="/logo.png" alt="" draggable={false} />
+        <img src="/logo-128.png" srcSet="/logo-128.png 128w, /logo-256.png 256w" sizes="32px" alt="" draggable={false} />
         <b>Signal Lab</b>
         {/* 在线点：EAStatusBadge 的语义（已连接），不是装饰。
             The dot carries EAStatusBadge's semantics (connected), not decoration. */}

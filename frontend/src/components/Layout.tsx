@@ -5,7 +5,8 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
-import { notificationApi, pushApi } from '../api/client'
+import { pushApi } from '../api/client'
+import { getSharedNotifPrefs } from '../utils/notifPrefsShared'
 import { ensurePushSubscription, pushSupported } from '../utils/push'
 import { recordDiag } from '../utils/pushDiag'
 import Logo from './Logo'
@@ -588,7 +589,9 @@ export default function Layout() {
     let cancelled = false
     const report = async () => {
       try {
-        const prefs = await notificationApi.getPrefs()
+        // 共享读取：与 NotificationBell / NotifDeviceBanner 同一时刻的请求合并成一次。
+        // Shared read: merged with the bell's and banner's simultaneous requests.
+        const prefs = await getSharedNotifPrefs()
         recordDiag('prefs')
         if (cancelled || !prefs.enabled) return
         await ensurePushSubscription(

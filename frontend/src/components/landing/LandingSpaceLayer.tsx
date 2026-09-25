@@ -16,6 +16,8 @@
 // 走廊是整页的记忆点，把它做成桌面独占等于让一半以上的访客拿到一个平淡版本；
 // 而这一层本身极便宜——没有 CSS3D、没有光照、合并后不到 10 个 draw call、像素比
 // 压到 1.5。真正贵的手机机身（PhoneGL）仍然只在桌面加载。
+// 2026-09-25：three 改经 three-lite.ts 按需取类（tree-shaking 后约 126KB gzip），且不再
+// 挂载即拉，而是等 window load 之后的空闲时段或首次交互（见下方 effect）。
 //
 // 这里原来写着「滚动停止即停表」，与实现不符：LandingSpace 的 pump() 只按
 // document.hidden 起停，滚动停下后 rAF 照跑——因为极慢正弦漂移与指针视差是**有意
@@ -28,7 +30,9 @@
 // moment, and making it desktop-only hands more than half the audience the flat
 // version. The layer itself is cheap - no CSS3D, no lighting, under ten draw calls
 // after merging, pixel ratio capped at 1.5. The expensive phone body still loads
-// on desktop only.
+// on desktop only. Since 2026-09-25 three comes through three-lite.ts (about
+// 126KB gzipped after tree-shaking) and is fetched after window load at the
+// first idle period or first interaction, not on mount (see the effect below).
 //
 // This note used to claim "the clock stops when scrolling does", which the
 // implementation never did: LandingSpace's pump() is driven by document.hidden
@@ -66,7 +70,7 @@ export default function LandingSpaceLayer() {
     let disposed = false
     let handle: SpaceHandle | null = null
 
-    ;(async () => {
+    const build = async () => {
       // 兄弟分区在本 effect 运行前必然已经提交进 DOM（React 先完成整棵树的
       // commit 再跑任何 effect），所以按 id 取到它们是安全的——比把 ref 从
       // 页面组件层层传下来干净得多。
@@ -114,10 +118,67 @@ export default function LandingSpaceLayer() {
         handle.setSolid(BACKDROP)
         document.documentElement.classList.add('space-on')
       }
-    })()
+    }
+
+    /* 建场景的时机：不在挂载时，而在 window load 之后的第一个空闲时段（或用户第一次滚动 /
+       触摸 / 按键，谁先到算谁）。three 的 chunk 不小，挂载就拉会跟首屏的图片、字体、
+       主包抢带宽和主线程；而这一层本来就有静态基线兜底（见文件头），晚一两秒出现只是
+       「先有可用的，再有更好的」往后挪了一点。交互触发也仍走一次空闲回调（300ms 封顶），
+       不在滚动那一帧里同步开工。Safari 没有 requestIdleCallback，用 setTimeout 顶上。
+       When to build: not on mount, but at the first idle period after window load,
+       or on the first scroll / touch / key press, whichever comes first. The three
+       chunk is not small; fetching it on mount competes with the first screen's
+       images, fonts and main bundle for bandwidth and the main thread, and this
+       layer already has a static baseline (see the header), so appearing a second
+       or two later only pushes "working first, better second" back a little. An
+       interaction still goes through one idle callback (capped at 300 ms) rather
+       than starting work inside the scroll frame. Safari has no
+       requestIdleCallback, so setTimeout stands in. */
+    type IdleWin = Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number
+      cancelIdleCallback?: (id: number) => void
+    }
+    const w = window as IdleWin
+    let started = false
+    let idleId = 0
+    let timerId = 0
+    const EARLY = ['scroll', 'pointerdown', 'touchstart', 'keydown'] as const
+    const unlisten = () => {
+      window.removeEventListener('load', onLoad)
+      EARLY.forEach((ev) => window.removeEventListener(ev, onEarly, true))
+    }
+    const start = () => {
+      if (started || disposed) return
+      started = true
+      unlisten()
+      void build()
+    }
+    const whenIdle = (timeout: number) => {
+      if (started || idleId || timerId) return
+      if (w.requestIdleCallback) idleId = w.requestIdleCallback(start, { timeout })
+      else timerId = window.setTimeout(start, Math.min(timeout, 200))
+    }
+    const onLoad = () => whenIdle(2000)
+    let early = false
+    const onEarly = () => {
+      if (early) return
+      early = true
+      // 已经排了一个较长的空闲回调时，换成短的。/ swap a pending long idle wait for a short one
+      if (idleId && w.cancelIdleCallback) w.cancelIdleCallback(idleId)
+      if (timerId) window.clearTimeout(timerId)
+      idleId = 0
+      timerId = 0
+      whenIdle(300)
+    }
+    EARLY.forEach((ev) => window.addEventListener(ev, onEarly, { capture: true, passive: true, once: true }))
+    if (document.readyState === 'complete') onLoad()
+    else window.addEventListener('load', onLoad, { once: true })
 
     return () => {
       disposed = true
+      unlisten()
+      if (idleId && w.cancelIdleCallback) w.cancelIdleCallback(idleId)
+      if (timerId) window.clearTimeout(timerId)
       handleRef.current = null
       if (import.meta.env.DEV) {
         const w = window as unknown as Record<string, unknown>

@@ -14,7 +14,7 @@ import type { Signal } from '../../api/types'
 import { calcRiskReward, displaySymbol } from '../../api/utils'
 import { fmtPx, priceDecimals, riskFraction, rrTone, type FocusState } from './SignalView'
 import { symbolMeta } from '../../utils/symbolMeta'
-import TtlRing from './TtlRing'
+import { ClockTtlRing } from './TtlRing'
 
 interface OtherEntry {
   symbol: string
@@ -25,13 +25,12 @@ interface OtherEntry {
 
 interface Props {
   entries: OtherEntry[]
-  now: number
   onTrade: (s: Signal) => void
   onFocus: (idx: number) => void
   onViewAll: () => void
 }
 
-const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) => {
+const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
   const { t } = useTranslation()
 
   // 最多列 3 条，其余交给「其他活跃信号 ›」/ up to 3 rows; the rest live behind the button
@@ -97,7 +96,7 @@ const SignalOthers: FC<Props> = ({ entries, now, onTrade, onFocus, onViewAll }) 
               </div>
 
               <div className="dh-mini-foot">
-                <TtlRing expireAt={sig.expireAt} now={now} label={t('signals.focus.remainingTtl')} />
+                <ClockTtlRing expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
                 <button
                   onClick={(e) => { e.stopPropagation(); onTrade(sig) }}
                   className="btn btn-primary dh-mini-cta"

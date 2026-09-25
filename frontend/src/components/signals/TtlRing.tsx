@@ -10,6 +10,7 @@
 import { memo, type FC } from 'react'
 import { calcCountdown } from '../../api/utils'
 import { EXPIRING_THRESHOLD_MS, SIGNAL_LIFESPAN_MS } from './SignalView'
+import { useClock } from './hooks'
 
 const RING_R = 9
 const RING_C = 2 * Math.PI * RING_R
@@ -37,3 +38,12 @@ const TtlRing: FC<{ expireAt: string | null; now: number; label: string }> = mem
 })
 
 export default TtlRing
+
+// 自带共享秒钟的版本（与 SignalGrid 的 Countdown 同一个写法）：只有这个环每秒重渲染，
+// 父组件（仪表盘的执行卡 / 其他信号行）不再因为倒计时而每秒重画。
+// Self-clocked variant (same shape as SignalGrid's Countdown): only the ring
+// re-renders each second, so its parents stop repainting for the countdown.
+export const ClockTtlRing: FC<{ expireAt: string | null; label: string }> = memo(({ expireAt, label }) => {
+  const now = useClock()
+  return <TtlRing expireAt={expireAt} now={now} label={label} />
+})

@@ -18,6 +18,26 @@
  * file, the @tailwind directives became @import 'tailwindcss/...' so the two can
  * interleave. To add a section, create a file and slot it by what it must
  * override / be overridden by.
+ *
+ * 2026-09-25 起，四份**只属于某一个懒加载页面**的样式不再列在这里，改由页面自己 import，
+ * Vite 把它们拆进该页的 CSS chunk，跟着页面按需加载，不再挤在首屏阻塞的 CSS 里：
+ *   terminal.css   → pages/ChartsPage.tsx     （.term-* / .ind-*，只在图表页及 components/charts）
+ *   orders.css     → pages/OrdersPage.tsx     （.ord-* / .pos-mc* / .pos-mlist）
+ *   strategies.css → pages/StrategiesPage.tsx （.stg-*）
+ *   bind.css       → pages/BindPage.tsx       （.bind-*）
+ * 懒加载的 CSS 会插在全站 CSS 之后，相当于排到了清单末尾。挪之前逐条核过：这四份的选择器
+ * 全部带本页前缀，清单里排在它们后面的文件没有同等优先级、又能命中同一元素的规则，
+ * 所以顺序后移不改变层叠结果。其余页面级文件没挪：落地页三份要进预渲染 HTML（预渲染只
+ * 注入入口 CSS，挪走会首屏无样式闪一下）；achievements 的陈列台落地页也用；announcements
+ * 的铃铛面板在顶栏；competitions 有全站 .seg-tabs 基定义；support 的 .sup-msg 公告页也用；
+ * account 的 .acct-* 绑定页、订单页也用；signals / dashboard / guide 的类被多个页面与落地页
+ * 手机样机共用。**新挪一份之前按同样的办法核一遍。**
+ * Since 2026-09-25 four stylesheets that belong to exactly one lazy page are no
+ * longer listed here; each page imports its own, so Vite splits it into that
+ * page's CSS chunk. Lazy CSS lands after the global sheet, i.e. at the end of
+ * this list; each was checked to be fully page-prefixed with no later file
+ * holding an equal-specificity rule that could hit the same element, so the
+ * move does not change the cascade. Re-run that check before moving another.
  */
 @import './fonts.css';
 @import 'tailwindcss/base';
@@ -30,7 +50,6 @@
 @import './tokens.css';   /* 设计令牌：色彩 / 字体 / 全局变量（:root） */
 @import './keyframes.css';   /* 全局 keyframes */
 @import './landing-primitives.css';   /* 落地页基础件：小节眉题 / 滚动显现 / 卡片悬浮 / 落地页卡片 */
-@import './terminal.css';   /* 行情图表页（交易终端）：三栏骨架 / 工具栏 / 自选 / 账户 / 下单面板 / 持仓停靠 */
 @import './motion.css';   /* 页面切换 / 骨架屏 / 内容淡入 / tap 反馈 */
 @import './landing-story.css';   /* 落地页叙事：手机机身 / 屏幕五幕 / 文字面板 / WebGL 接管 / 判决印章 */
 @import './tabs.css';   /* 开关（Switch）。**不含**页内 Tab：.seg-tabs 的基定义在
@@ -49,9 +68,7 @@
 @import './signals.css';   /* 信号面板：看板页头 / 信号牌面（价格阶梯 + 倒计时环） */
 @import './guide.css';   /* 策略介绍：目录牌 / 详情页（大标题 + 吸顶规格栏） */
 @import './dashboard.css';   /* 仪表盘：焦点趋势 / 可执行信号牌 / 其他活跃信号 / 行情 / 时段胜率 / 我的表现 */
-@import './bind.css';   /* 连接 MT5：直连面板 / 已绑定账号账本行 / 桥接折叠块 */
 @import './support.css';   /* 客服工单：账本行 / 两栏表单 / 对话流 */
-@import './strategies.css';   /* 自定义策略：三步时间线 / 策略账本行 / 信号小票 / 预设与步骤条 */
 @import './announcements.css';   /* 公告：铃铛面板 / 公告列表 / 公告详情 */
 @import './achievements.css';   /* 成就页：任务瓦片 / 陈列台 */
 @import './competitions.css';   /* 交易比赛：转播台 / 头版 / 详情 */
@@ -61,5 +78,4 @@
 @import './winrate.css';   /* 胜率页：拔河条进场 */
 @import './badges.css';   /* V5 铸币勋章：倾斜流光 + 铸造瞬间 */
 @import './account.css';   /* 账户页：身份牌 / 分区账本 / 药丸选择器 / 推送时段小时条 */
-@import './orders.css';   /* 订单与回执页：页头 / 回执单 / 账本条 / 绩效两个数 */
 @import './profile.css';   /* 公开主页：陈列台 / 榜单四格 / 交易画像 */

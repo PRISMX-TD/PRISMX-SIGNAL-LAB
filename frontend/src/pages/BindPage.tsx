@@ -30,6 +30,8 @@ import { BRIDGE_DOWNLOAD_URL, BRIDGE_FILENAME } from '../api/bridgeDownload'
 import { useLive } from '../store/live'
 import { localizeApiError } from '../api/utils'
 import PartnerBrokerCard, { usePartnerBroker } from '../components/PartnerBrokerCard'
+// 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
+import '../styles/bind.css'
 
 // 券商字母标：英文名取每个词的首字母（最多两个），中文名取前两个字。
 // Broker monogram: initials of up to two words for Latin names, first two

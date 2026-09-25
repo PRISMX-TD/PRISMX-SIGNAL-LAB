@@ -1,7 +1,6 @@
-import i18n from 'i18next'
+import i18n, { type BackendModule, type ResourceKey } from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import zh from './zh.json'
-import en from './en.json'
 import { langFromPath } from '../seo/meta'
 import { readStorage, writeStorage } from '../utils/safeStorage'
 
@@ -41,11 +40,58 @@ function applyHtmlLang(lang: string) {
   document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'
 }
 
-i18n.use(initReactI18next).init({
+// 语言包按需加载：只有中文（默认语言 + fallbackLng，绝大多数用户）静态打进入口包，
+// 英文包（~160 KB）走动态 import，第一次用到时才拉。此前两份 JSON 都在入口包里，
+// 中文用户每次冷启动都白白下载、解析一份永远不看的英文。
+// 以 i18next backend 插件的形式接入，而不是在 setLanguage 里手动拉：store/prefs.tsx
+// 会按云端偏好直接调 i18n.changeLanguage('en')，backend 让 i18next 自己在切换前把
+// 资源加载完（changeLanguage 等 loadResources 回调后才改 language、发
+// languageChanged），任何调用点都不会看到裸 key。
+// partialBundledLanguages：resources 里只有 zh，缺的语言仍交给 backend。
+// read 回 (err, true) 让 BackendConnector 按 350ms 起指数退避重试（最多 5 次）——
+// 大陆拉 Vercel chunk 丢包是常态，与 utils/lazyRetry.ts 同一个理由。
+// SSR（seo/entry-server.tsx）在渲染前把 en 包静态 addResourceBundle 进来，不走这里。
+// Locale bundles load on demand: only zh (default + fallbackLng, most users) is
+// bundled into the entry; en (~160 KB) is a dynamic import fetched on first use.
+// Wired as an i18next backend rather than a manual fetch in setLanguage, because
+// store/prefs.tsx calls i18n.changeLanguage('en') directly from cloud prefs; with
+// a backend, i18next itself loads resources before switching (language and
+// languageChanged only change after loadResources), so no call site ever sees raw
+// keys. read() answers (err, true) so BackendConnector retries with backoff.
+// SSR (seo/entry-server.tsx) adds the en bundle statically before rendering.
+const LAZY_LOCALES: Record<string, () => Promise<{ default: ResourceKey }>> = {
+  en: () => import('./en.json'),
+}
+
+const localeBackend: BackendModule = {
+  type: 'backend',
+  init() {},
+  read(lng, _ns, cb) {
+    if (lng === 'zh') return cb(null, zh)
+    const load = LAZY_LOCALES[lng]
+    // 未知语言（不会出现，兜底）：给空包，让 fallbackLng 接手 / unknown: empty, fallback takes over
+    if (!load) return cb(null, {})
+    load().then(
+      (m) => cb(null, m.default),
+      (err) => cb(err, true),
+    )
+  },
+}
+
+// 首屏渲染前要等它：初始语言是 en 时，init 要等英文包到位才完成；在此之前
+// useTranslation 会 suspend，把预渲染内容清成 Suspense 占位（见 main.tsx）。
+// 初始语言是 zh 时它同步完成（资源已在包里），等一个 microtask 而已。
+// Awaited before the first render: with an initial en, init completes only once
+// the en bundle is in; until then useTranslation suspends and would blank the
+// prerendered markup (see main.tsx). With zh it completes synchronously.
+export const i18nReady: Promise<unknown> = i18n
+  .use(localeBackend)
+  .use(initReactI18next)
+  .init({
   resources: {
     zh: { translation: zh },
-    en: { translation: en },
   },
+  partialBundledLanguages: true,
   lng: saved,
   fallbackLng: 'zh',
   interpolation: { escapeValue: false },
@@ -69,13 +115,28 @@ i18n.use(initReactI18next).init({
   nsSeparator: false,
   keySeparator: '.',
 })
+  // 英文包连重试都拉不下来时 init 仍会 resolve（界面按 fallbackLng 显示中文），
+  // 这里只防 reject 冒成未处理的 Promise 错误。
+  // init still resolves if the en bundle never arrives (UI falls back to zh);
+  // this only keeps a rejection from surfacing as unhandled.
+  .catch(() => {})
 
 applyHtmlLang(saved)
 
+// 用户主动切语言：先把语言包 load 完，再 changeLanguage。记下「最后一次要的语言」：
+// 连点两下（en 还在下载时又点回 zh）时，晚到的 en 不该把界面再翻回英文。
+// User-initiated switch: load the bundle first, then changeLanguage. The last
+// requested language wins, so a late en bundle can't flip the UI back after the
+// user already toggled to zh again.
+let wantedLang: 'zh' | 'en' | null = null
 export function setLanguage(lang: 'zh' | 'en') {
-  i18n.changeLanguage(lang)
+  wantedLang = lang
   writeStorage('prismx_lang', lang)
-  applyHtmlLang(lang)
+  void i18n.loadLanguages(lang).then(() => {
+    if (wantedLang !== lang) return
+    void i18n.changeLanguage(lang)
+    applyHtmlLang(lang)
+  })
 }
 
 // 同步界面语言但不写偏好：公开页按 URL 被动同步时用——访客点开 /en 不该
