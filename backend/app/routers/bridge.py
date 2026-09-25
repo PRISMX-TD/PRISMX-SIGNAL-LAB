@@ -72,7 +72,7 @@ _last_pushed_online: dict[str, set[str]] = {}
 _last_pushed_balances: dict[str, dict[str, float]] = {}
 
 
-def _forget_idle_users(online_users: set[str]) -> None:
+def _forget_idle_users(online_users: set[str], connected_users: set[str]) -> None:
     """丢弃既无在线账号、又无 WS 连接的用户的推送去重状态。
 
     Drop push de-duplication state for users with neither online accounts nor a
@@ -95,10 +95,16 @@ def _forget_idle_users(online_users: set[str]) -> None:
     open the state must persist, or the bridge coming back would re-push
     everything as if never seen. Users that reappear are treated as a first
     observation and get a full push, so dropping is safe.
+
+    connected_users 由调用方在协程里用 `manager.connected_user_ids_async()` 取好再传进来：
+    配了 Redis 时在线名单是一次网络往返，这里若自己调同步的 `connected_user_ids()`，
+    offline_monitor_loop 每 2 秒就会在事件循环上同步等一次（最坏 socket_timeout 2 秒）。
+    connected_users is fetched by the caller via `connected_user_ids_async()`:
+    with Redis the roster is a network round-trip, and calling the sync
+    `connected_user_ids()` here would block the event loop every 2s.
     """
-    connected = set(manager.connected_user_ids())
     for uid in set(_last_pushed_online) | set(_last_pushed_balances):
-        if uid not in online_users and uid not in connected:
+        if uid not in online_users and uid not in connected_users:
             _last_pushed_online.pop(uid, None)
             _last_pushed_balances.pop(uid, None)
 
@@ -1570,7 +1576,9 @@ async def offline_monitor_loop() -> None:
                 # misread as a change.
                 await _push_accounts_status_if_changed(uid, current.get(uid, set()))
 
-            _forget_idle_users(set(current))
+            # 在线名单在这里（推送之后）异步取，与原先在函数里同步读的时机一致。
+            # Fetch the roster here, after the pushes, asynchronously.
+            _forget_idle_users(set(current), set(await manager.connected_user_ids_async()))
         except Exception:
             # 后台任务不因单次异常退出，但必须留下日志便于排查。
             # Never let the loop die on a transient error, but do log it.

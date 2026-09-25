@@ -168,10 +168,11 @@ def test_gateway_balance_change_pushed(_isolate):
 
 def _forget(monkeypatch, online_users, connected):
     """跑一次清理。connected 指当前有 WS 连接的用户。"""
-    monkeypatch.setattr(
-        bridge.manager, "connected_user_ids", lambda: list(connected)
-    )
-    bridge._forget_idle_users(set(online_users))
+    def _no_sync_roster():
+        raise AssertionError("_forget_idle_users 不得同步读在线名单 / must not read the roster synchronously")
+
+    monkeypatch.setattr(bridge.manager, "connected_user_ids", _no_sync_roster)
+    bridge._forget_idle_users(set(online_users), set(connected))
 
 
 def test_idle_user_state_dropped(_isolate, monkeypatch):
@@ -227,3 +228,45 @@ def test_cleanup_only_touches_idle_users(_isolate, monkeypatch):
 
     assert "u1" not in bridge._last_pushed_balances
     assert bridge._last_pushed_balances["u2"] == {"200": 900.0}
+
+
+def test_offline_monitor_reads_roster_async_and_passes_it_in(_isolate, monkeypatch):
+    """offline_monitor_loop 必须在协程里 await 异步名单再交给 _forget_idle_users，
+    绝不能在事件循环上同步读在线名单（配了 Redis 时最坏阻塞 socket_timeout 2 秒）。
+
+    The monitor loop must await the async roster and hand it to
+    _forget_idle_users, never reading it synchronously on the loop.
+    """
+    real_sleep = asyncio.sleep
+
+    async def fast_sleep(_s):
+        await real_sleep(0)
+
+    async def roster_async():
+        return ["u-watching"]
+
+    def roster_sync():
+        raise AssertionError("事件循环上同步读了在线名单 / sync roster read on the loop")
+
+    async def fake_threadpool(fn, *a, **kw):
+        return {"u-online": {"100"}}   # 代替 _scan_online 的扫库结果
+
+    async def no_push(*_a, **_kw):
+        return None
+
+    seen: list[tuple[set, set]] = []
+
+    def fake_forget(online_users, connected_users):
+        seen.append((online_users, connected_users))
+        raise asyncio.CancelledError   # 跑完一轮就退出循环 / stop after one round
+
+    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+    monkeypatch.setattr(bridge.manager, "connected_user_ids_async", roster_async)
+    monkeypatch.setattr(bridge.manager, "connected_user_ids", roster_sync)
+    monkeypatch.setattr(bridge, "run_in_threadpool", fake_threadpool)
+    monkeypatch.setattr(bridge, "_push_accounts_status_if_changed", no_push)
+    monkeypatch.setattr(bridge, "_forget_idle_users", fake_forget)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(bridge.offline_monitor_loop())
+    assert seen == [({"u-online"}, {"u-watching"})]

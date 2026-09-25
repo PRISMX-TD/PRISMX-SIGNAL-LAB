@@ -866,9 +866,9 @@ class ConnectionManager:
         最多 2 秒——而这个名单恰恰被两条高频循环在 async 上下文里反复读：网关慢拍
         每 2 秒一次、事件泵每 0.25 秒一次。
 
-        为什么不是把 `connected_user_ids` 本身改成 `async def`：它还有三个**同步**
-        调用方在本次可改范围之外（`routers/bridge.py` 的 `_forget_idle_users`、
-        `services/push_dispatch.py:_online_user_ids`、`services/signal_broadcast.py`），
+        为什么不是把 `connected_user_ids` 本身改成 `async def`：它还有**同步**
+        调用方（如 `services/push_dispatch.py:_online_user_ids`；`routers/bridge.py`
+        的 `_forget_idle_users` 已改为由协程侧取好名单再传入），
         改签名会当场把它们打断，而那几个文件不归这次改动。所以判定逻辑只保留一份
         （下面那个同步方法），这里只包一层线程池，协程侧的调用方改用它即可。
 
@@ -879,10 +879,9 @@ class ConnectionManager:
         roster is read by two hot loops in async context (the gateway slow tick
         every 2s, the event pump every 250ms).
 
-        Why not make `connected_user_ids` itself `async def`: three *synchronous*
-        callers live outside this change's scope (bridge.py's
-        `_forget_idle_users`, push_dispatch's `_online_user_ids`,
-        signal_broadcast), and changing the signature would break them on the
+        Why not make `connected_user_ids` itself `async def`: *synchronous*
+        callers remain (e.g. push_dispatch's `_online_user_ids`; bridge.py's
+        `_forget_idle_users` now receives the roster from its coroutine caller), and changing the signature would break them on the
         spot. So the logic stays in one place — the sync method below — and this
         is just a thread hop for coroutine callers.
         """
