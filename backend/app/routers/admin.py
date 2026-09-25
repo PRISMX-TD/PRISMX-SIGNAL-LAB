@@ -27,6 +27,7 @@ from app.services.audit import log_change
 from app.services import net_quality
 from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
+from app.services.shared_cache import BRIDGE_AUTH_VERSION
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.admin_overview import build_overview, potential_customers as build_potential_customers
 from app.services.admin_trader_levels import DEFAULT_USER_LIMIT, LEVEL_COUNT, level_rows, level_users
@@ -475,6 +476,13 @@ def disable_user(
     target.token_version = (target.token_version or 0) + 1
     _log_change(db, admin.id, target.id, "account:disable", before, _audit_disable_state(target))
     db.commit()
+    # 桥接走 API Token 而不是 JWT，上面的 token_version 自增挡不住它；它的鉴权缓存里
+    # 还放着停用前装载的 User。commit 之后换共享版本号，所有 worker 约 1 秒内回库
+    # 看到 disabled_at，桥接请求随即 403。
+    # The bridge authenticates by API token, which the token_version bump doesn't
+    # touch, and its auth cache still holds the pre-disable User. Bumping the
+    # shared version after commit makes every worker reload within ~1s.
+    BRIDGE_AUTH_VERSION.bump()
     db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
@@ -513,6 +521,9 @@ def enable_user(
     target.disabled_reason = None
     _log_change(db, admin.id, target.id, "account:enable", before, _audit_disable_state(target))
     db.commit()
+    # 同理：让缓存着「已停用」实例的 worker 立即回库，恢复后桥接不必等 TTL。
+    # Likewise, so cached "disabled" instances don't keep refusing until the TTL.
+    BRIDGE_AUTH_VERSION.bump()
     db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0

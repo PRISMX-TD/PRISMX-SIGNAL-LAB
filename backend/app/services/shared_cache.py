@@ -212,3 +212,16 @@ def invalidate_signal_caches() -> None:
     Call after a new signal is stored. Resolution and expiry rely on the short
     TTLs instead (see routers/signals.py)."""
     delete(SIGNAL_LIST_KEY_REALTIME, SIGNAL_LIST_KEY_FREE, SIGNAL_STATS_KEY, SIGNAL_WINRATE_KEY)
+
+
+# ---------------------------------------------------------------------------
+# 桥接 API Token 鉴权缓存的失效版本号 / bridge API-token auth cache version
+# ---------------------------------------------------------------------------
+# 放在这里而不是 routers/bridge.py：除了重置 Token（routers/ea.py），管理员停用 /
+# 恢复账号（routers/admin.py）也要让这份缓存失效——缓存里的 User 实例带着装载时的
+# disabled_at，版本号不换的话，刚被停用的人还能靠缓存命中继续调桥接接口最多一个
+# TTL。router 之间不互相 import（见 services/pagination.py），所以版本号放在 service。
+# Lives here rather than in routers/bridge.py: besides token resets, an admin
+# disabling / enabling an account must invalidate that cache too (cached User
+# instances carry disabled_at as loaded), and routers don't import each other.
+BRIDGE_AUTH_VERSION = SharedVersion("bridge_auth")

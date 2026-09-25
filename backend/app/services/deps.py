@@ -75,6 +75,21 @@ def is_account_online(row) -> bool:
     return (datetime.now(timezone.utc) - last).total_seconds() < ONLINE_WINDOW
 
 
+def disabled_account_error(user: User) -> HTTPException:
+    """被停用账号的统一拒绝：403 + 原样带回原因（JWT 与桥接 API Token 两条鉴权共用）。
+
+    The single refusal for a disabled account — 403 with the reason — shared by
+    the JWT path (get_current_user) and the bridge API-token path.
+    """
+    reason = (user.disabled_reason or "").strip()
+    detail = (
+        f"账号已被停用：{reason} / This account has been disabled: {reason}"
+        if reason
+        else "账号已被停用，如有疑问请联系客服 / This account has been disabled — please contact support"
+    )
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
 def get_current_user(
     response: Response,
     authorization: str | None = Header(default=None),
@@ -129,13 +144,7 @@ def get_current_user(
     # the user re-logs in, gets kicked again, and never sees why. Placed before
     # _touch_last_active so a disabled account stops counting towards DAU.
     if user.disabled_at is not None:
-        reason = (user.disabled_reason or "").strip()
-        detail = (
-            f"账号已被停用：{reason} / This account has been disabled: {reason}"
-            if reason
-            else "账号已被停用，如有疑问请联系客服 / This account has been disabled — please contact support"
-        )
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+        raise disabled_account_error(user)
 
     # 会员到期即时生效：本人任一带凭证请求都会自愈等级——到期后第一次请求就把
     # plan 落库改回 FREE，之后所有 is_realtime_plan(user.plan) 等判断自然看到 FREE。

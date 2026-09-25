@@ -24,7 +24,7 @@ from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
-from app.services.deps import ONLINE_WINDOW, get_current_user, is_account_online
+from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current_user, is_account_online
 from app.services.gateway_binding import is_removed, is_revoked, mark_removed, not_removed, restore_removed
 from app.services.plans import max_mt5_accounts
 from app.services.push_dispatch import (
@@ -41,7 +41,7 @@ from app.services.settings_store import (
     server_matches_broker,
 )
 from app.services.symbol_aliases import broker_symbol
-from app.services.shared_cache import SharedVersion
+from app.services.shared_cache import BRIDGE_AUTH_VERSION
 from app.services.trade_performance import known_position_ids, mark_positions_seen
 
 logger = logging.getLogger("prismx.bridge")
@@ -199,6 +199,16 @@ def get_bridge_user(
     user = _authenticate_cached(db, x_api_token)
     if not user:
         raise HTTPException(status_code=401, detail="API Token 无效 / Invalid API token")
+    # 账号停用闸门：与 JWT 路径（deps.get_current_user）同一判定、同样 403 与原因。
+    # 桥接不走 get_current_user，这里不挡的话，被停用的人桥接照常上报、照常领单下单。
+    # 缓存命中也要过这一道：管理员停用 / 恢复时会换 BRIDGE_AUTH_VERSION，缓存里的
+    # 旧实例（disabled_at 还是装载时的值）在所有 worker 上最迟约 1 秒被当未命中回库。
+    # The disabled-account gate, identical to the JWT path (403 + reason). The
+    # bridge never goes through get_current_user, so without this a disabled user
+    # keeps reporting and executing orders. Admin disable/enable bumps
+    # BRIDGE_AUTH_VERSION, so stale cached instances are reloaded within ~1s.
+    if user.disabled_at is not None:
+        raise disabled_account_error(user)
     return user
 
 
@@ -236,7 +246,7 @@ _auth_cache_lock = Lock()
 # rare, and an occasional full reload is far cheaper than a Redis lookup on
 # every bridge request. Without Redis the old behaviour stands (this process
 # immediately, others by TTL).
-_auth_version = SharedVersion("bridge_auth")
+_auth_version = BRIDGE_AUTH_VERSION
 
 
 def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
