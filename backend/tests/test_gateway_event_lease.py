@@ -184,10 +184,6 @@ def test_release_without_the_lease_is_a_noop(redis_on):
 
 def test_lease_is_released_even_when_the_pump_is_cancelled(redis_on):
     """取消（关服 / BackgroundLoops 换主）时也要真的把锁还掉。
-
-    这条路径几乎总是在取消里走到：任务一旦进入取消状态，`asyncio.to_thread` 那一跳
-    就走不完，await 会立刻再抛 CancelledError。不就地补一次同步释放的话，锁会挂满
-    TTL——那段时间没有任何 worker 在消费事件队列，开平仓退回慢拍的 2 秒延迟。
     The release must survive cancellation, or the lock idles for a full TTL with
     nobody draining the queues.
     """
@@ -211,3 +207,115 @@ def test_lease_is_released_even_when_the_pump_is_cancelled(redis_on):
     asyncio.run(scenario())
     assert lease.held is False
     assert redis_on.get("prismx:lock:" + GATEWAY_EVENTS_LOCK) is None
+
+
+def test_release_completes_in_the_same_step_it_is_called(redis_on):
+    """release 不能挂在线程池那一跳上：await 它的那一拍里锁就得已经删掉。
+
+    关服时进程随时会死（见下一条用例），任何「下一拍再做」的收尾都可能轮不到；线程池
+    还可能被卡住的网关调用占满。这里用一个永远不返回的 to_thread 模拟占满的线程池。
+    Release must not hop through the thread pool: by the time the await returns
+    the lock is gone, even with a saturated pool.
+    """
+    lease = EventQueueLease(owner="worker-a")
+
+    async def scenario():
+        await lease.acquire(now=0.0)
+        real_to_thread = asyncio.to_thread
+
+        async def saturated(*_a, **_k):
+            await asyncio.sleep(3600)
+
+        asyncio.to_thread = saturated
+        try:
+            await asyncio.wait_for(lease.release(), timeout=1.0)
+        finally:
+            asyncio.to_thread = real_to_thread
+
+    asyncio.run(scenario())
+    assert redis_on.get("prismx:lock:" + GATEWAY_EVENTS_LOCK) is None
+
+
+def test_release_after_a_first_acquire_cancelled_mid_flight(redis_on, monkeypatch):
+    """首次 acquire 的 try_lock 已在线程里 SET 成功、await 却被取消打断：`held` 还是
+    False，锁却已经在 Redis 里。release 不能因为 held=False 就跳过，否则白挂一个 TTL。
+    A first try_lock can succeed in its thread while its await is cancelled; the
+    release must still clear the lock even though `held` never became True.
+    """
+    import threading
+    import time as _time
+
+    real_try_lock = shared_state.try_lock
+    locked = threading.Event()
+
+    def slow_try_lock(name, ttl, owner=shared_state.WORKER_ID):
+        ok = real_try_lock(name, ttl, owner)
+        locked.set()
+        _time.sleep(0.2)        # 结果还没交回事件循环 / result not yet back on the loop
+        return ok
+
+    monkeypatch.setattr(shared_state, "try_lock", slow_try_lock)
+    lease = EventQueueLease(owner="worker-a")
+
+    async def scenario():
+        async def body():
+            try:
+                await lease.acquire(now=0.0)
+            finally:
+                await lease.release()
+
+        task = asyncio.create_task(body())
+        while not locked.is_set():
+            await asyncio.sleep(0.005)
+        assert redis_on.get("prismx:lock:" + GATEWAY_EVENTS_LOCK) == "worker-a"
+        assert lease.held is False
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    assert redis_on.get("prismx:lock:" + GATEWAY_EVENTS_LOCK) is None
+
+
+def test_lease_is_released_before_lifespan_shutdown_returns(redis_on, monkeypatch):
+    """复现 2026-09-25 生产重启：接手的 worker 等满 30 秒 TTL 才拿到事件队列。
+
+    uvicorn 在 lifespan 关闭一返回就把捕获的 SIGTERM 以默认处理器重新 raise，进程
+    立即终止——asyncio.run「取消剩余任务并跑完 finally」那一步根本轮不到。所以判据
+    是：`await loops.aclose()` 返回的那一刻（之后不再给事件循环任何一拍），
+    `lock:gateway-events` 必须已经删掉。这里跑的是真的 gateway_positions_loop：
+    BackgroundLoops 取消它 → 它的 finally 取消事件泵并等泵交还租约。
+    以前 lifespan 只是 `loops.shutdown()`（只 cancel 不等），泵的 finally 还没轮到
+    进程就没了。
+
+    Reproduces the 2026-09-25 restart where the successor waited out the TTL.
+    uvicorn kills the process as soon as lifespan shutdown returns, so the lock
+    must be gone the moment `aclose()` returns, with no further loop steps.
+    """
+    from app.routers import gateway
+    from app.services import background
+    from app.services.connection_manager import manager
+
+    async def nobody_online():
+        return []
+
+    monkeypatch.setattr(manager, "connected_user_ids_async", nobody_online)
+    lock_key = "prismx:lock:" + GATEWAY_EVENTS_LOCK
+
+    async def scenario():
+        loops = background.BackgroundLoops(
+            {"gateway_positions": gateway.gateway_positions_loop}, owner="old-worker"
+        )
+        assert loops.poll() is True
+        for _ in range(200):
+            if redis_on.get(lock_key) is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert redis_on.get(lock_key) == shared_state.WORKER_ID
+
+        await loops.aclose()
+        # 这里就是进程被 SIGTERM 杀掉的那一刻 / this is where the process dies
+        assert redis_on.get(lock_key) is None
+        assert redis_on.get("prismx:lock:" + background.LOCK_NAME) is None
+
+    asyncio.run(scenario())

@@ -694,36 +694,42 @@ class EventQueueLease:
 
     async def release(self) -> None:
         """交还消费权（关服/循环退出时）。失败只记日志：锁最迟 TTL 秒后自己过期。
-        Hand the lease back on shutdown; on failure the lock expires by itself."""
-        if not self.held:
-            return
+
+        **就地同步释放，不走线程池（run_blocking / asyncio.to_thread）。** 2026-09-25 生产切到 Redis 后第一次
+        重启，接手的 worker 整整等满了 TTL（30 秒）才拿到消费权——释放根本没发生。
+        原因不在这里的比对逻辑，而在进程怎么死：uvicorn 在 lifespan 关闭一返回就把
+        捕获的 SIGTERM 以默认处理器重新 raise，进程立即终止，asyncio.run 收尾时「取消
+        剩余任务、跑完它们的 finally」那一步根本轮不到。这时还卡在线程池那一跳里的
+        释放就随进程一起没了（线程池还可能被卡住的网关调用占满，排队本身就要等）。
+        所以释放必须在拿到取消的那一拍里同步做完：一次 EVAL，socket_timeout 2 秒封顶，
+        每条循环的生命周期里只发生一次。调用方（_positions_loop 的 finally、
+        BackgroundLoops.aclose、main.py 的 lifespan）负责等到这一拍真的跑到。
+
+        只要这一轮生命周期里**试过**抢锁就去释放，而不是只看 `held`：首次 acquire 的
+        try_lock 在线程里已经 SET 成功、await 却被取消打断时，`held` 还是 False，锁却
+        已经在 Redis 里了。Lua 比对删除只删自己的，没持有时调用是无害的空操作。
+
+        Release inline, not via the thread pool (run_blocking / asyncio.to_thread). On the first production restart
+        on Redis (2026-09-25) the successor waited out the full TTL: uvicorn
+        re-raises the captured SIGTERM with the default handler as soon as lifespan
+        shutdown returns, killing the process before asyncio.run would cancel and
+        finish the remaining tasks, so a release still waiting on the (possibly
+        saturated) thread pool simply never ran. One bounded EVAL, once per loop
+        lifetime. Release whenever an acquire was attempted, not only when `held`:
+        a first try_lock can succeed in its thread while its await is cancelled.
+        The compare-and-delete makes a release without the lock a harmless no-op.
+        """
+        attempted = self.held or self._checked_at is not None
         self.held = False
         self._checked_at = None
-        if not shared_state.enabled():
+        if not attempted or not shared_state.enabled():
             return
-        try:
-            from app.services.connection_manager import run_blocking
-            await run_blocking(shared_state.release_lock, GATEWAY_EVENTS_LOCK, self._owner)
-        except asyncio.CancelledError:
-            # 这条路径几乎总是在取消里走到的（关服、或 BackgroundLoops 换主时
-            # cancel 掉整条循环），而任务一旦进入取消状态，线程池这一跳就走不完，
-            # await 会立刻再抛一次 CancelledError。不就地补一次释放的话，锁会一直
-            # 挂到 TTL 到期——那段时间**没有任何 worker 在消费事件队列**，开平仓
-            # 退回慢拍的 2 秒延迟。所以同步释放完再把取消抛出去。
-            # Almost always reached under cancellation (shutdown, or
-            # BackgroundLoops cancelling the loop on handover); a cancelled task
-            # cannot complete the thread hop, so release inline and re-raise.
-            # Otherwise the lock idles for a full TTL with nobody draining.
-            self._release_blocking()
-            raise
-        except Exception as e:  # noqa: BLE001
-            logger.debug("释放 gateway 事件队列租约失败 / releasing event-queue lease failed: %s", e)
-
-    def _release_blocking(self) -> None:
         try:
             shared_state.release_lock(GATEWAY_EVENTS_LOCK, self._owner)
         except Exception as e:  # noqa: BLE001
-            logger.debug("释放 gateway 事件队列租约失败 / releasing event-queue lease failed: %s", e)
+            # 必须留痕：DEBUG 级别在生产上等于没有，换主慢了 30 秒都查不到原因。
+            # Must leave a trace: at DEBUG a 30-second handover left nothing to go on.
+            logger.warning("释放 gateway 事件队列租约失败 / releasing event-queue lease failed: %s", e)
 
 
 # 账号资金刷新间隔。资金变化不像持仓那样需要秒级跟随，而每次刷新都是一次
@@ -786,6 +792,10 @@ GATEWAY_MAX_CONCURRENT_USERS = 8
 # cadence as before), but at most this long; a user still in flight carries on in
 # the background and is skipped next tick while everyone else refreshes.
 GATEWAY_TICK_WAIT = 5.0
+# 关服/换主时等事件泵交还消费权的上限。释放是一次同步 EVAL（socket_timeout 2 秒），
+# 这里留足余量但不让一次卡死拖住关停。/ Upper bound on waiting for the pump to
+# hand its lease back on shutdown; the release is one EVAL capped at 2s.
+GATEWAY_PUMP_STOP_WAIT = 3.0
 
 # 已确认空仓的账号多久复查一次持仓。
 #
@@ -2132,3 +2142,10 @@ async def gateway_positions_loop() -> None:
         # Work already in a thread finishes on its own and owns its own DB session.
         for task in list(side_tasks):
             task.cancel()
+        # 等事件泵把 finally（交还消费权）真正跑完再返回。只 cancel 不等的话，关服时
+        # 本任务一结束 lifespan 就可能返回，uvicorn 随即重新 raise SIGTERM 杀掉进程，
+        # 泵的 finally 根本轮不到，锁挂满 TTL（见 EventQueueLease.release）。
+        # asyncio.wait 不会把本任务收到的取消传给泵，超时也不抛，只是放弃等待。
+        # Wait for the pump's finally (the lease release) before returning:
+        # otherwise lifespan can return and uvicorn kills the process first.
+        await asyncio.wait({pump_task}, timeout=GATEWAY_PUMP_STOP_WAIT)

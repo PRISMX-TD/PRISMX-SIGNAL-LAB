@@ -122,6 +122,38 @@ def test_without_redis_loops_start_directly(redis_off):
     asyncio.run(scenario())
 
 
+def test_aclose_waits_for_cancelled_loops_to_finish_cleanup(redis_on):
+    """lifespan 关闭一返回 uvicorn 就重新 raise SIGTERM 杀进程，所以 aclose 必须等到
+    被取消循环的 finally 跑完；卡死的循环则只等到上限，不拖住关停。
+    uvicorn kills the process as soon as lifespan returns: aclose must wait for
+    cancelled loops' cleanup, but only up to its bound."""
+    cleaned = []
+
+    async def tidy():
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            await asyncio.sleep(0.05)       # 收尾要跨几拍 / cleanup spans a few steps
+            cleaned.append("tidy")
+
+    async def stuck():
+        try:
+            await asyncio.sleep(3600)
+        finally:
+            await asyncio.shield(asyncio.sleep(3600))
+
+    async def scenario():
+        loops = background.BackgroundLoops({"tidy": tidy, "stuck": stuck}, owner="worker-A")
+        assert loops.poll() is True
+        await asyncio.sleep(0)
+        t0 = time.monotonic()
+        await loops.aclose(timeout=0.3)
+        assert cleaned == ["tidy"]                          # 收尾已完成 / cleanup done
+        assert time.monotonic() - t0 < 2                    # 卡死的不拖住关停 / bounded
+        assert redis_on.get("prismx:lock:" + background.LOCK_NAME) is None
+    asyncio.run(scenario())
+
+
 # ---- WebSocket 转发 / fan-out --------------------------------------------------
 
 class _Sock:

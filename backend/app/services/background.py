@@ -30,6 +30,11 @@ logger = logging.getLogger("prismx.background")
 LOCK_NAME = "background-loops"
 LOCK_TTL_SECONDS = 60
 POLL_SECONDS = 15
+# 关停时等被取消的循环跑完 finally 的上限（见 aclose）。要盖过网关循环等事件泵
+# 交还租约的 GATEWAY_PUMP_STOP_WAIT（3 秒），又不能让一条卡死的循环拖住关停。
+# Upper bound on waiting for cancelled loops to finish their finally blocks on
+# shutdown; must cover gateway's GATEWAY_PUMP_STOP_WAIT (3s).
+STOP_WAIT_SECONDS = 5.0
 
 LoopFactory = Callable[[], Awaitable[None]]
 
@@ -41,6 +46,9 @@ class BackgroundLoops:
         self._factories = factories
         self._tasks: dict[str, asyncio.Task] = {}
         self._supervisor: asyncio.Task | None = None
+        # 已取消、finally 可能还没跑完的任务；aclose 会等它们。
+        # Cancelled tasks whose finally may still be running; aclose waits on them.
+        self._stopping: set[asyncio.Task] = set()
         # 锁的持有者标识：默认本进程；测试里用不同的值模拟多个 worker。
         # Lock owner: this process by default; tests pass distinct values to simulate workers.
         self._owner = owner or shared_state.WORKER_ID
@@ -54,8 +62,11 @@ class BackgroundLoops:
         self.is_leader = True
 
     def cancel_all(self) -> None:
+        # 换主时也会走到这里；早已退出的任务不必留着等。/ drop tasks that already finished
+        self._stopping = {t for t in self._stopping if not t.done()}
         for task in self._tasks.values():
             task.cancel()
+            self._stopping.add(task)
         self._tasks.clear()
         self.is_leader = False
 
@@ -125,6 +136,33 @@ class BackgroundLoops:
                 # multi-worker deployment left nothing to investigate afterwards.
                 logger.warning("leader lock release failed for %s", LOCK_NAME, exc_info=True)
         self.cancel_all()
+
+    async def aclose(self, timeout: float = STOP_WAIT_SECONDS) -> None:
+        """关停并**等**被取消的循环把 finally 跑完（有上限）。lifespan 关闭必须用这个。
+
+        只 cancel 不等是不够的：uvicorn 在 lifespan 关闭一返回就把捕获的 SIGTERM 以
+        默认处理器重新 raise，进程立即终止，asyncio.run 那步「取消剩余任务并跑完」
+        根本轮不到。循环 finally 里的收尾（例如网关事件泵交还 lock:gateway-events）
+        就随进程一起没了——2026-09-25 生产第一次多 worker 重启，接手方因此白等了
+        30 秒 TTL。领导锁本身在 shutdown() 里同步释放，不受影响。
+
+        Shut down and wait (bounded) for cancelled loops to run their finally
+        blocks. Cancelling alone is not enough: uvicorn re-raises the captured
+        SIGTERM as soon as lifespan shutdown returns, so asyncio.run never gets
+        to finish pending tasks and their cleanup (e.g. the gateway event-queue
+        lease release) dies with the process.
+        """
+        self.shutdown()
+        pending = {t for t in self._stopping if not t.done()}
+        self._stopping.clear()
+        if not pending:
+            return
+        _, still = await asyncio.wait(pending, timeout=timeout)
+        if still:
+            logger.warning(
+                "后台循环 %.0f 秒内没有退出完，放弃等待 / loops still stopping after %.0fs: %s",
+                timeout, timeout, sorted(t.get_name() for t in still),
+            )
 
     @property
     def running(self) -> list[str]:

@@ -164,8 +164,12 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(gateway_health_monitor_loop(), name="gateway-health")
     )
     yield
-    # 关闭：停止后台任务（多 worker 时顺带释放领导锁）/ shutdown: stop background tasks
-    loops.shutdown()
+    # 关闭：停止后台任务（多 worker 时顺带释放领导锁），并等各循环的 finally 跑完——
+    # 这里一返回 uvicorn 就重新 raise SIGTERM 结束进程，没跑完的收尾（比如网关事件泵
+    # 交还消费权）会直接丢掉（见 BackgroundLoops.aclose）。
+    # Shutdown: stop the loops and wait for their finally blocks; uvicorn kills
+    # the process as soon as this returns (see BackgroundLoops.aclose).
+    await loops.aclose()
     for t in cross_worker_tasks:
         t.cancel()
     
