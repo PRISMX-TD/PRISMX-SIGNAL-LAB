@@ -26,3 +26,7 @@
 *.mq5 text
 *.mqh text
 bridge/PRISMX-Bridge.spec text
+# ops/ 下是原样拷到 Linux 服务器上的配置（nginx、systemd 单元、脚本）。Windows 上检出成
+# CRLF 再拷过去，systemd 与 nginx 会把 \r 当成值的一部分。
+# Server configs under ops/ are copied verbatim to Linux hosts; keep them LF.
+ops/** text eol=lf

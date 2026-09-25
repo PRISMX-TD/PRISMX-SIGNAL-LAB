@@ -1,0 +1,8 @@
+[Unit]
+Description=Renew PRISMX edge TLS certificate (lego, DNS-01 via DNSPod)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/prismx-cert.sh

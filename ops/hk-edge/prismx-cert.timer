@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily check for PRISMX edge TLS renewal
+
+[Timer]
+OnCalendar=*-*-* 04:17:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
