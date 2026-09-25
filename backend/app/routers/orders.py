@@ -920,7 +920,11 @@ def close_all_positions(
     # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
     _assert_account_owned(db, user.id, req.mt5Login)
 
-    positions = manager.get_positions(user.id)
+    # 必须取跨 worker 的快照：网关持仓只在领导 worker 的内存里，请求落到另一个
+    # worker 时本进程快照是空的，会误报「没有可平仓的持仓」。
+    # Cross-worker snapshot: gateway positions live only in the leader's memory, so
+    # the local one is empty whenever this request lands on the other worker.
+    positions = manager.get_positions_shared(user.id)
     batch, created, skipped = close_all.queue(
         db, user.id, req.clientOrderId, req.mt5Login, positions
     )

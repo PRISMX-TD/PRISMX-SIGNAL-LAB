@@ -186,7 +186,7 @@ async def ws_client(websocket: WebSocket):
         await websocket.send_json({"type": "AUTH_OK", "userId": user_id})
         # 连接即补推最近一次持仓快照，避免刷新后持仓短暂消失。
         # Re-push the latest positions snapshot on connect to avoid a blank gap after refresh.
-        cached = manager.get_positions(user_id)
+        cached = await manager.get_positions_shared_async(user_id)
         if cached:
             # 带上 funds，否则刷新后账户卡片要等下一拍推送才能拿到实时浮盈，
             # 中间那一两秒会退回"净值-余额"的旧口径，数字会跳一下。

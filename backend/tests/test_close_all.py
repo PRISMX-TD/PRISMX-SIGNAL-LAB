@@ -260,7 +260,7 @@ def _call(db, monkeypatch, positions, login=None, cid="co_e1"):
     from app.services.connection_manager import manager
 
     monkeypatch.setattr(rate_limit.limiter, "enabled", False)
-    monkeypatch.setattr(manager, "get_positions", lambda _uid: positions)
+    monkeypatch.setattr(manager, "get_positions_shared", lambda _uid: positions)
 
     class _Bg:
         def __init__(self):

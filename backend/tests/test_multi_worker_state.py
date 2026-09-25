@@ -222,3 +222,42 @@ def test_chart_store_memory_path_unchanged(redis_off):
     chart_store.replace_series("XAUUSD", "15", [{"t": 1, "o": 1, "h": 1, "l": 1, "c": 1, "v": 0}])
     chart_store.merge_bars("XAUUSD", "15", [{"t": 2, "o": 1, "h": 1, "l": 1, "c": 2, "v": 0}])
     assert [b["t"] for b in chart_store.get_latest("XAUUSD", "15")["bars"]] == [1, 2]
+
+
+# ---- 持仓快照 / positions snapshot --------------------------------------------
+
+def test_positions_snapshot_visible_to_other_worker(redis_on):
+    """网关持仓只在领导 worker 上报；一键平仓落到另一个 worker 也必须看得见。
+    Gateway positions are reported on the leader only; close-all landing on the
+    other worker must still see them (it used to answer "no open positions")."""
+    leader, other = ConnectionManager(), ConnectionManager()
+    rows = [{"login": "100279", "ticket": 11, "symbol": "XAUUSD", "side": "BUY", "profit": -1.0}]
+    asyncio.run(leader.push_positions("u1", rows, source="gateway"))
+    assert other.get_positions("u1") == []           # 本进程确实没有 / truly absent locally
+    assert other.get_positions_shared("u1") == rows
+    assert asyncio.run(other.get_positions_shared_async("u1")) == rows
+
+
+def test_positions_merge_across_workers(redis_on):
+    """桥接上报落在 A、网关在 B：两边推出去的都得是两路合并后的完整快照，否则
+    另一路的持仓行在前端闪。/ Each worker must push the full two-source merge."""
+    a, b = ConnectionManager(), ConnectionManager()
+    gw = [{"login": "1", "ticket": 1, "profit": 1.0}]
+    br = [{"login": "2", "ticket": 2, "profit": 2.0}]
+    asyncio.run(b.push_positions("u1", gw, source="gateway"))
+    published = []
+    orig = shared_state.publish
+    try:
+        shared_state.publish = lambda ch, payload: published.append(payload)
+        asyncio.run(a.push_positions("u1", br, source="bridge"))
+    finally:
+        shared_state.publish = orig
+    tickets = sorted(p["ticket"] for p in published[-1]["message"]["data"])
+    assert tickets == [1, 2]
+
+
+def test_positions_shared_falls_back_to_local_without_redis(redis_off):
+    m = ConnectionManager()
+    rows = [{"login": "1", "ticket": 1, "profit": 1.0}]
+    asyncio.run(m.push_positions("u1", rows, source="gateway"))
+    assert m.get_positions_shared("u1") == rows
