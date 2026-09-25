@@ -35,6 +35,7 @@
     "growth": "成长",
     "growthBadges": "等级勋章",
     "support": "联系客服",
+    "appDownload": "下载 App",
     "announcements": "公告",
     "agent": "代理页面"
   },
@@ -1148,6 +1149,16 @@
     "step3": "保持本页打开，PRO 套餐将自动开通",
     "expiredRetry": "本次支付时效已过，请重新发起支付。",
     "activatesInstantly": "链上确认后即刻自动开通"
+  },
+  "appDownload": {
+    "title": "下载 App",
+    "subtitle": "安卓手机安装包，装好后用本账号登录即可",
+    "platform": "适用于 Android 8.0 及以上",
+    "downloadBtn": "下载 APK",
+    "notesTitle": "安装说明",
+    "n1": "若手机提示「禁止安装未知来源应用」，请在设置中允许浏览器安装应用。",
+    "n2": "新版本发布后重新下载安装即可覆盖升级，登录状态与设置不会丢失。",
+    "n3": "请只从本页下载安装包，不要安装他人转发的 APK。"
   },
   "download": {
     "title": "下载 PRISMX 桥接程序",

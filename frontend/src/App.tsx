@@ -105,6 +105,7 @@ const CompetitionsPage = lazyPage(() => import('./pages/CompetitionsPage'), 'Com
 const ProfilePage = lazyPage(() => import('./pages/ProfilePage'), 'ProfilePage')
 const LegalPage = lazyPage(() => import('./pages/LegalPage'), 'LegalPage')
 const FaqPage = lazyPage(() => import('./pages/FaqPage'), 'FaqPage')
+const AppDownloadPage = lazyPage(() => import('./pages/AppDownloadPage'), 'AppDownloadPage')
 const SupportPage = lazyPage(() => import('./pages/SupportPage'), 'SupportPage')
 const StrategyGuidePage = lazyPage(() => import('./pages/StrategyGuidePage'), 'StrategyGuidePage')
 const AnnouncementsPage = lazyPage(() => import('./pages/AnnouncementsPage'), 'AnnouncementsPage')
@@ -138,6 +139,7 @@ const APP_ROUTE_PAGES: Record<string, HasPreload> = {
   '/strategies': StrategiesPage,
   '/upgrade': UpgradePage,
   '/download': DownloadPage,
+  '/app-download': AppDownloadPage,
   '/support': SupportPage,
   '/announcements': AnnouncementsPage,
 }
@@ -469,6 +471,7 @@ export default function App() {
               <Route path="/upgrade" element={<UpgradePage />} />
               <Route path="/account" element={<AccountPage />} />
               <Route path="/download" element={<DownloadPage />} />
+              <Route path="/app-download" element={<AppDownloadPage />} />
               <Route path="/support" element={<SupportPage />} />
               <Route path="/announcements" element={<AnnouncementsPage />} />
               <Route path="/announcements/:id" element={<AnnouncementPage />} />

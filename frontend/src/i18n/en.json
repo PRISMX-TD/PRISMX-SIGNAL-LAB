@@ -35,6 +35,7 @@
     "growth": "Growth",
     "growthBadges": "Level & Badges",
     "support": "Contact support",
+    "appDownload": "Get the app",
     "announcements": "Announcements",
     "agent": "Agent view"
   },
@@ -1148,6 +1149,16 @@
     "step3": "Keep this page open — your PRO plan unlocks automatically",
     "expiredRetry": "This payment window has closed. Start a new payment.",
     "activatesInstantly": "Activates instantly after on-chain confirmation"
+  },
+  "appDownload": {
+    "title": "Get the Android app",
+    "subtitle": "Android installer — sign in with this account once installed",
+    "platform": "Android 8.0 or later",
+    "downloadBtn": "Download APK",
+    "notesTitle": "Install notes",
+    "n1": "If your phone blocks \"unknown sources\", allow your browser to install apps in Settings.",
+    "n2": "When a new version is out, download and install it over the old one — your login and settings are kept.",
+    "n3": "Only download the installer from this page; never install an APK someone forwarded to you."
   },
   "download": {
     "title": "Download PRISMX Bridge",
