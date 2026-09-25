@@ -65,8 +65,17 @@ pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 1. 改 `bridge_app.py` 里的 `APP_VERSION`（版本号的**唯一来源**；**改了回执协议的字段必须升版本**，见常量旁的注释）；
 2. 按上面命令重新打包；
 3. **签名**：`python release_sign.py`（见下一节），得到 `dist/SHA256SUMS` 与 `dist/SHA256SUMS.sig`；
-4. 在仓库 `PRISMX-TD/PRISMX-SIGNAL-LAB` 建一个新 Release（tag 如 `v1.4.2`），上传**三个**资产，名字一个都不能改：
+4. 用 GitHub CLI 发 Release，上传**三个**资产，名字一个都不能改：
    `PRISMX-Bridge-Setup.exe`、`SHA256SUMS`、`SHA256SUMS.sig`。少了后两个，已装的桥接会认为「这次没签名」，只提示手动下载。
+   ```powershell
+   & "C:\Program Files\GitHub CLI\gh.exe" release create v1.4.6 `
+     dist\PRISMX-Bridge-Setup.exe dist\SHA256SUMS dist\SHA256SUMS.sig `
+     --repo PRISMX-TD/PRISMX-SIGNAL-LAB --target main --latest --notes-file notes.md
+   ```
+   发布说明文件必须**无 BOM**：PowerShell 5.1 的 `Out-File -Encoding utf8` 会加 BOM，说明第一行会乱。
+   用 `[IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding $false))` 写；
+5. 发完从 `https://github.com/PRISMX-TD/PRISMX-SIGNAL-LAB/releases/latest/download/<资产名>` 把三件套下载回来，
+   与 `dist\` 逐字节比对（`fc.exe /b` 或比 SHA-256），一致才算发完。
 
 前端下载页版本号由后端 `bridge_version_check.py` 抓 `releases/latest` 动态提供，无需手动同步；
 网页下载按钮走 `releases/latest`，无需改下载链接代码。桥接只接受 GitHub 的下载域名
