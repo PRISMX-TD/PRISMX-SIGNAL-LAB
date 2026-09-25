@@ -284,16 +284,21 @@ class Settings(BaseSettings):
 
     # 数据库连接池（仅 Postgres 生效；SQLite 忽略）。桥接高频轮询下，可用连接数
     # 直接决定并发上限。pool_size 是常驻连接，max_overflow 是峰值可临时新增的连接，
-    # 二者之和 = 同时可用的最大连接数。务必与 Supabase Pooler 的 "Pool Size" 上限对齐，
-    # 设得比 Pooler 上限还大不会有额外收益（会话模式下多出的连接只会排队）。
-    # DB connection pool (Postgres only; ignored for SQLite). Under the bridge's
-    # high-frequency polling, the number of usable connections is the direct cap
-    # on concurrency. pool_size = persistent connections; max_overflow = extra
-    # connections spun up at peak; their sum is the max concurrent connections.
-    # Keep this aligned with Supabase Pooler's "Pool Size" — setting it larger
-    # than the pooler's limit gains nothing (extra sessions just queue).
-    DB_POOL_SIZE: int = 15
-    DB_MAX_OVERFLOW: int = 15
+    # 二者之和 = 同时可用的最大连接数。这是**每个 worker 进程**的值：总连接数 =
+    # (pool_size + max_overflow) × worker 数，必须低于 Supabase Session Pooler 的
+    # "Pool Size"（当前 30）并给后台脚本、管理面板留余量。超出时多出的连接不是排队，
+    # 而是在 Pooler 那边直接报错；池子小一点，请求只在本进程里排队几毫秒。
+    # 生产 2 个 worker × (8 + 4) = 24 ≤ 30。加 worker 或换 Supabase 档位时同步调整。
+    # DB connection pool (Postgres only; ignored for SQLite). pool_size = persistent
+    # connections; max_overflow = extra connections at peak. These are PER WORKER:
+    # total = (pool_size + max_overflow) × workers, which must stay below Supabase's
+    # Session Pooler "Pool Size" (30 today) with headroom for scripts and the
+    # dashboard. Past that limit the pooler rejects connections outright, whereas a
+    # smaller local pool just queues requests for a few milliseconds.
+    # Production: 2 workers × (8 + 4) = 24 ≤ 30. Revisit when adding workers or
+    # changing the Supabase tier.
+    DB_POOL_SIZE: int = 8
+    DB_MAX_OVERFLOW: int = 4
     # 连接回收秒数：超过此空闲时长的连接下次使用前先重建，规避 Supabase Pooler
     # 主动断开空闲连接后拿到坏连接。/ recycle idle connections to avoid stale ones
     # dropped by the Supabase pooler.
