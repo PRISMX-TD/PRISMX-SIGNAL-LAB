@@ -63,14 +63,18 @@ CLIENT_ERROR_MAX_BYTES = 16384
 CLIENT_ERROR_FIELDS = {
     "kind": 40, "name": 100, "message": 500, "stack": 4000, "path": 200,
     "ua": 300, "app": 8, "online": 8, "lang": 16, "chunk": 80, "retries": 8,
-    "componentStack": 1500,
+    "componentStack": 1500, "step": 40,
 }
-# kind 只认这三个：render = 渲染期抛错（代码问题）；chunk = 懒加载 chunk 重试耗尽
-# 仍拉不到（网络 / 发版陈旧）；chunk-reload = 因此触发了一次整页重载。
+# kind 只认这四个：render = 渲染期抛错（代码问题）；chunk = 懒加载 chunk 重试耗尽
+# 仍拉不到（网络 / 发版陈旧）；chunk-reload = 因此触发了一次整页重载；
+# push = 推送链路某一环失败（frontend/src/utils/pushDiag.ts 抽样上报，step 是哪一环，
+# 前端已抹掉 endpoint / 密钥 / token）。
 # 把它们分开正是这个端点存在的意义——"渲染失败"到底是网络还是代码，靠 kind 答。
 # render = a throw during render (code); chunk = lazy chunk still failing after
-# retries (network / stale deploy); chunk-reload = a full reload was triggered.
-CLIENT_ERROR_KINDS = frozenset({"render", "chunk", "chunk-reload"})
+# retries (network / stale deploy); chunk-reload = a full reload was triggered;
+# push = a push-pipeline step failed (sampled by pushDiag.ts; `step` names it,
+# endpoint / keys / tokens are redacted client-side).
+CLIENT_ERROR_KINDS = frozenset({"render", "chunk", "chunk-reload", "push"})
 client_error_logger = logging.getLogger("prismx.client_error")
 
 # 允许上报的前端路由，与 App.tsx 的受保护路由一一对应。新增页面时要同步加，

@@ -369,6 +369,12 @@ class Signal(Base):
         # keep being tracked toward a result after it's already EXPIRED for
         # trading purposes.
         Index("idx_signals_symbol_result", "symbol", "result"),
+        # 信号列表（created_at 倒序前 50）、每日计数与回放（created_at 窗口）；
+        # 胜率/策略分析先按 source 过滤再取时间窗口（rev 29）。
+        # The list (newest 50), daily counts and replay window on created_at;
+        # win rate / strategy analysis filter on source then a time window (rev 29).
+        Index("idx_signals_created_at", "created_at"),
+        Index("idx_signals_source_created", "source", "created_at"),
     )
 
     id = Column(String, primary_key=True, default=_uuid)
@@ -842,8 +848,12 @@ class Candle(Base):
     """
     __tablename__ = "candles"
     __table_args__ = (
+        # 唯一约束自带同列同序的索引，查询与去重都走它。曾经另有一条同列的
+        # idx_candle_symbol_interval_t，纯冗余，rev 29 删除。
+        # The unique constraint carries an index on exactly these columns, which
+        # serves both lookups and dedup; a duplicate idx_candle_symbol_interval_t
+        # used to sit alongside it and was dropped in rev 29.
         UniqueConstraint("symbol", "interval", "t", name="uq_candle_symbol_interval_t"),
-        Index("idx_candle_symbol_interval_t", "symbol", "interval", "t"),
     )
 
     id = Column(String, primary_key=True, default=_uuid)

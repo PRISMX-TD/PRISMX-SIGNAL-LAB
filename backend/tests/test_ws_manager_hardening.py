@@ -15,6 +15,7 @@ radius of one slow client. (仓库里没有 pytest-asyncio，异步用例一律 
 包一层，与 tests/test_auto_manage_gateway.py 等的写法一致。)
 """
 import asyncio
+import json
 
 import pytest
 
@@ -35,6 +36,11 @@ class FakeWS:
         if self.stalls:
             await asyncio.sleep(3600)
         self.sent.append(message)
+
+    async def send_text(self, text):
+        # 管理器序列化一次再 send_text；失败 / 卡住的行为与 send_json 相同。
+        # The manager send_texts pre-serialized frames; same fail/stall behaviour.
+        await self.send_json(json.loads(text))
 
 
 # ---------- 断开后的缓存回收 / cache reclamation ----------

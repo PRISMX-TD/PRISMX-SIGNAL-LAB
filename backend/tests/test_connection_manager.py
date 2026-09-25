@@ -8,6 +8,7 @@
 """
 
 import asyncio
+import json
 
 from app.services.connection_manager import ConnectionManager
 
@@ -23,6 +24,11 @@ class FakeWS:
         if self.fail:
             raise RuntimeError("connection closed")
         self.sent.append(message)
+
+    async def send_text(self, text: str) -> None:
+        # 管理器序列化一次再 send_text（见 _deliver_local_text），这里解回 dict 方便断言。
+        # The manager serializes once and send_texts; decode back for assertions.
+        await self.send_json(json.loads(text))
 
 
 POS = [{"login": "1", "ticket": 1, "profit": 5.0}]

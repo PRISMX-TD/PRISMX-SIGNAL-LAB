@@ -43,8 +43,10 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import AutoManagedPosition, AutoManageSettings, MT5Account, Order, User
+from app.services import shared_state
 from app.services.plans import can_auto_manage
 from app.services.push_dispatch import EVENT_AUTO_MANAGE, dispatch_event_push
+from app.services.shared_cache import SharedVersion
 from app.services.symbol_aliases import lot_step, min_lot
 
 logger = logging.getLogger("prismx.auto_manage")
@@ -69,16 +71,49 @@ AUTO_PREFIX = "auto_"
 # Short-TTL cache of "does this user need evaluation at all" — most users
 # have automation off, and this keeps their 1.5s position reports DB-free.
 _ELIGIBLE_TTL_SECONDS = 30
-_eligible_cache: dict[str, tuple[bool, float]] = {}
+# 值：(是否有资格, 写入时刻, 写入时的共享版本号) / (eligible, stored at, shared version)
+_eligible_cache: dict[str, tuple[bool, float, str | None]] = {}
 _cache_lock = threading.Lock()
+# 只有「否」会被缓存，所以跨 worker 不一致的后果只是「刚打开开关，别的 worker 上
+# 最多再晚 30 秒才开始评估」——不危险但让人困惑。invalidate_eligibility 同时换掉
+# 这个共享版本号，各 worker 看到版本变了就把整张否定缓存当作失效（本地缓存 1 秒）。
+# 整张而不是单个用户：开关切换是罕见操作，偶尔让所有人多查一次设置的代价很小。
+# Only negatives are cached, so cross-worker drift just delays a freshly enabled
+# switch by up to 30s on other workers — harmless but confusing.
+# invalidate_eligibility also replaces this shared version; on a change every
+# worker treats its whole negative cache as void (version cached locally 1s).
+_eligible_version = SharedVersion("auto_manage_eligibility")
 
-# per-user 评估锁：防止两次并发的 bridge_positions 请求为同一个用户同时
-# 评估、同时看到空的 pending_auto_tickets、同时写入重复的 MODIFY/CLOSE 指令。
-# 排查过生产日志中同一仓位被双重修改的案例；线程池里的并发是不可预期的。
-# Per-user evaluation lock: prevents two concurrent bridge_positions calls for
-# the same user from both seeing an empty pending_auto_tickets and both writing
-# duplicate MODIFY/CLOSE commands. Confirmed by production logs showing the
-# same position being modified twice; thread-pool concurrency is unpredictable.
+# per-user 评估锁：防止两次并发的持仓上报为同一个用户同时评估、同时看到空的
+# pending_auto_tickets、同时写入重复的 MODIFY/CLOSE 指令。排查过生产日志中同一
+# 仓位被双重修改的案例；线程池里的并发是不可预期的。
+#
+# 多 worker 下进程内锁挡不住别的 worker：bridge 的上报可能落在任意一个 worker，
+# gateway 慢拍又在领导 worker 上跑，同一用户完全可能在两个进程里同时被评估。所以
+# 主锁放在 shared_state（配了 Redis 就跨进程，SET NX EX），**拿不到就跳过这一拍**
+# 而不是等：持仓每 1.5~2 秒就会再报一次，下一拍自然补上；排队等待只会让积压的
+# 评估拿着过时的持仓快照依次重跑。锁的 owner 每次调用唯一——shared_state.try_lock
+# 对同一 owner 是可重入的，若用 WORKER_ID，同进程的两个线程会同时「抢到」。
+#
+# TTL 取 _EVAL_LOCK_TTL_SECONDS：评估本身（读 + commit）是毫秒到百毫秒级；之后
+# gateway 执行可能同步等 dealer 很久，锁会先过期——那时新指令已提交为 PENDING，
+# 另一份评估会被 pending_auto_tickets 挡住，不会重复下单。
+#
+# Redis 出错时退回下面的进程内锁（阻塞等待，即改造前的行为）。
+#
+# Per-user evaluation lock: two concurrent position reports for one user would
+# both see an empty pending_auto_tickets and both write duplicate MODIFY/CLOSE
+# commands (seen in production logs). With several workers an in-process lock
+# can't stop another process, so the primary lock lives in shared_state (SET NX
+# EX across workers when Redis is configured) and a pass that can't take it is
+# **skipped**, not queued — positions are re-reported every 1.5-2s, and queued
+# passes would just replay stale snapshots. The owner is unique per call:
+# try_lock is re-entrant per owner, so WORKER_ID would let two threads of one
+# process both "win". The TTL outlives the read-and-commit part by far; if a
+# gateway execution afterwards outlasts it, the new commands are already
+# committed as PENDING and pending_auto_tickets blocks any duplicate. On a
+# Redis error this falls back to the in-process lock below (blocking, as before).
+_EVAL_LOCK_TTL_SECONDS = 10
 _eval_locks: dict[str, threading.Lock] = {}
 
 # 锁字典最大容量：超限时清理掉长期无争用的条目，防止无限膨胀。
@@ -88,7 +123,7 @@ _MAX_LOCKS = 5000
 
 
 def _get_eval_lock(user_id: str) -> threading.Lock:
-    """取 per-user 评估锁；按需创建，超限时清理。"""
+    """取 per-user 进程内评估锁（共享锁不可用时的兜底）；按需创建，超限时清理。"""
     lock = _eval_locks.get(user_id)
     if lock is not None:
         return lock
@@ -112,6 +147,7 @@ def invalidate_eligibility(user_id: str) -> None:
     Called on settings change so the user's eligibility is recomputed at once."""
     with _cache_lock:
         _eligible_cache.pop(user_id, None)
+    _eligible_version.bump()
 
 
 def _is_eligible(db: Session, user_id: str) -> tuple[bool, AutoManageSettings | None]:
@@ -119,9 +155,16 @@ def _is_eligible(db: Session, user_id: str) -> tuple[bool, AutoManageSettings | 
     Evaluate only for PRO users with the master switch on; negatives are
     cached, positives re-read settings every pass (they're about to be used)."""
     now = time.time()
+    # 版本号在查库之前读（见 SharedVersion）/ read before the DB lookup (see SharedVersion)
+    ver = _eligible_version.current()
     with _cache_lock:
         hit = _eligible_cache.get(user_id)
-        if hit is not None and now - hit[1] < _ELIGIBLE_TTL_SECONDS and not hit[0]:
+        if (
+            hit is not None
+            and now - hit[1] < _ELIGIBLE_TTL_SECONDS
+            and not hit[0]
+            and not (ver is not None and hit[2] is not None and ver != hit[2])
+        ):
             return False, None
 
     plan = db.query(User.plan).filter(User.id == user_id).scalar()
@@ -130,7 +173,7 @@ def _is_eligible(db: Session, user_id: str) -> tuple[bool, AutoManageSettings | 
     )
     eligible = bool(can_auto_manage(plan) and settings_row and settings_row.enabled)
     with _cache_lock:
-        _eligible_cache[user_id] = (eligible, now)
+        _eligible_cache[user_id] = (eligible, now, ver)
     return eligible, settings_row if eligible else None
 
 
@@ -145,20 +188,36 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
     The caller catches exceptions — a failure here must never break the
     position-report flow itself.
 
-    同一用户串行评估：持有 per-user 锁，杜绝线程池并发的重复指令竞态。
-    Serialized per user: holds a per-user lock to prevent duplicate-command
-    races caused by concurrent thread-pool evaluations of the same user.
+    同一用户同一时刻只有一份评估：先抢跨 worker 的短锁，抢不到（别的线程或 worker
+    正在评估这个用户）就跳过这一拍、返回 0；Redis 出错时退回进程内的阻塞锁。
+    详见 _EVAL_LOCK_TTL_SECONDS 处的说明。
+    At most one pass per user at a time: take the cross-worker short lock and
+    skip this report (return 0) if another thread or worker holds it; on a
+    Redis error fall back to the blocking in-process lock. See the note at
+    _EVAL_LOCK_TTL_SECONDS.
     """
-    lock = _get_eval_lock(user_id)
-    lock.acquire()
+    name = f"auto_manage:{user_id}"
+    owner = f"{shared_state.WORKER_ID}:{uuid.uuid4().hex[:8]}"
+    try:
+        acquired = shared_state.try_lock(name, _EVAL_LOCK_TTL_SECONDS, owner=owner)
+    except Exception:  # noqa: BLE001 —— Redis 不可用：退回进程内锁 / Redis down: local lock
+        logger.warning("auto_manage: shared lock unavailable, using in-process lock", exc_info=True)
+        lock = _get_eval_lock(user_id)
+        with lock:
+            return _evaluate_positions_locked(db, user_id, positions)
+    if not acquired:
+        return 0
     try:
         return _evaluate_positions_locked(db, user_id, positions)
     finally:
-        lock.release()
+        try:
+            shared_state.release_lock(name, owner=owner)
+        except Exception:  # noqa: BLE001 —— 释放失败就等 TTL 过期 / let the TTL reap it
+            logger.warning("auto_manage: shared lock release failed (user=%s)", user_id, exc_info=True)
 
 
 def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> int:
-    """实际评估逻辑（调用方已持有 per-user 锁）。"""
+    """实际评估逻辑（调用方已持有该用户的评估锁）。"""
     eligible, cfg = _is_eligible(db, user_id)
     if not eligible or cfg is None or not positions:
         return 0

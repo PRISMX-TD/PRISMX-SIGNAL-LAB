@@ -131,6 +131,9 @@ class _Sock:
     async def send_json(self, m):
         self.sent.append(m)
 
+    async def send_text(self, text):
+        self.sent.append(json.loads(text))
+
 
 def test_push_publishes_instead_of_local_send(redis_on):
     async def scenario():

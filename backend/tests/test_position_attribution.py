@@ -163,6 +163,40 @@ def test_mark_positions_seen_stamps_gateway_positions(db_session, models):
     assert stats["openPositions"] == 2
 
 
+def test_mark_positions_seen_throttles_unchanged_positions(db_session, models):
+    """持仓不变时 60 秒内不重复写库；新出现的仓位不受节流、当拍就写；
+    时间戳老过节流间隔的仓位照常刷新。
+
+    修复前每一拍（1.5~2 秒）都把全部持仓的时间戳重写一遍并 commit。
+    """
+    from app.services import trade_performance
+
+    db_session.add(_open_order(models, ticket=88887, position=99997))
+    db_session.add(_open_order(models, ticket=88888, position=99998))
+    db_session.commit()
+
+    report = [{"login": LOGIN, "ticket": 99997}]
+    assert mark_positions_seen(db_session, USER, report) == 1
+    # 同一持仓紧接着再报一次：已在节流窗口内，不写
+    assert mark_positions_seen(db_session, USER, report) == 0
+
+    # 新仓位出现：只写新的那一条，老的仍在窗口内被跳过
+    report.append({"login": LOGIN, "ticket": 99998})
+    assert mark_positions_seen(db_session, USER, report) == 1
+
+    # 把 99997 的时间戳拨到节流间隔之前：下一拍应当刷新它
+    order = db_session.query(models.Order).filter(models.Order.mt5_position == 99997).one()
+    order.position_last_seen_open = (
+        datetime.now(timezone.utc).replace(tzinfo=None)
+        - trade_performance._SEEN_WRITE_INTERVAL - timedelta(seconds=5))
+    db_session.commit()
+    assert mark_positions_seen(db_session, USER, report) == 1
+
+    # 两个仓位都仍算「进行中」——节流不影响读侧的 20 分钟新鲜度判定
+    stats = compute_personal_winrate(db_session, USER, bound_logins=[LOGIN])
+    assert stats["openPositions"] == 2
+
+
 def test_same_ticket_on_two_accounts_not_cross_attributed(db_session, models):
     """两个账号的仓位号撞车时，平仓腿不能算到另一个账号头上。"""
     other = "500999"

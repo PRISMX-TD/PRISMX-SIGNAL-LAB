@@ -68,12 +68,24 @@ PLACED_UNCONFIRMED = "MT_RET_REQUEST_PLACED_UNCONFIRMED"
 # 这些 error 值代表「结果未知」，不代表「被拒绝」——两者在界面上的后果完全相反，
 # 前者要说「先核对持仓」，后者才可以说「可以重下」。
 #   timeout        网关没在时限内回话
-#   request_failed 连接层异常（见 gateway_client 的 except 分支）：可能压根没发出去，
-#                  也可能发出去了、执行了，只是读响应时断了。分不清就必须按"已执行"
+#   request_failed 连接层异常（见 gateway_client 的 except 分支）：请求已经在发或已发出，
+#                  可能执行了，只是写请求 / 读响应时断了。分不清就必须按"已执行"
 #                  的最坏情况处理。
+# 「连接都没建起来」不在这里：gateway_client 把它单独归成 connect_failed（见
+# _NOT_SENT_ERRORS），那种情况可以确定什么都没执行。
 # These error values mean "outcome unknown", not "rejected" — the UI consequences
-# are opposite, and only a rejection may invite a retry.
+# are opposite, and only a rejection may invite a retry. "Never connected" is not
+# among them: gateway_client reports it separately as connect_failed (see
+# _NOT_SENT_ERRORS), where nothing can have executed.
 _UNKNOWN_OUTCOME_ERRORS = frozenset({"timeout", "request_failed"})
+
+# 请求根本没发出去（建连失败 / 建连超时 / 本地连接池排不到连接，见 gateway_client._post）。
+# 网关一个字节都没收到，所以既不需要"用同一 clientOrderId 再问一次"，也不该提示
+# "可能已执行"——那只会让用户去 MT5 里找一笔不存在的单，或者不敢重下。
+# The request never left (connect failure / connect timeout / no pooled connection,
+# see gateway_client._post): nothing reached the gateway, so there is nothing to
+# re-ask about and no reason to warn "may have executed".
+_NOT_SENT_ERRORS = frozenset({"connect_failed"})
 
 
 # 网关对没见过的路径回的 error 值（HttpServer 的 default 分支，body 里没有 retcode）。
@@ -169,6 +181,17 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
             "the trading gateway does not support this operation yet "
             "(pending a gateway update); nothing was sent"
         )
+    elif rsp.error in _NOT_SENT_ERRORS:
+        # 连不上网关：请求没有发出，可以确定没执行。落 REJECTED（可以安全重下），
+        # 提示说清楚是"没发出去"，而不是含糊的"可能已执行、先核对持仓"。
+        # Couldn't reach the gateway: nothing was sent, so nothing executed.
+        # REJECTED (safe to re-place), and say "not sent" rather than the
+        # ambiguous "may have executed, check positions first".
+        order.status = "REJECTED"
+        order.message = (
+            "交易网关暂时连不上，本次指令未发出，可稍后重试 / "
+            "could not reach the trading gateway; nothing was sent, please try again shortly"
+        )
     elif rsp.error in _UNKNOWN_OUTCOME_ERRORS:
         # 网关没回话、或连接在半路断了，都不等于拒绝：这笔可能已经执行
         # （见 call_gateway_idempotent）。落 FAILED 而不是 REJECTED，界面据此提示
@@ -239,7 +262,16 @@ def call_gateway_idempotent(order: Order, make_call) -> TradeRsp:
         order.action, order.client_order_id, rsp.error, rsp.retcode,
     )
     again = _once(GATEWAY_RECONCILE_TIMEOUT)
-    if again.error in _UNKNOWN_OUTCOME_ERRORS or again.retcode == "IN_PROGRESS":
+    # 第二问连不上（connect_failed）也仍是「结果未知」：没发出去的只是这次追问，
+    # 第一次请求已经发出、可能已执行——绝不能因为追问没连上就落成"未发出、可重试"。
+    # A reconcile that fails to connect is still "outcome unknown": only the
+    # follow-up went unsent, while the first request did go out and may have
+    # executed — it must never be reported as "not sent, safe to retry".
+    if (
+        again.error in _UNKNOWN_OUTCOME_ERRORS
+        or again.error in _NOT_SENT_ERRORS
+        or again.retcode == "IN_PROGRESS"
+    ):
         return TradeRsp(
             ok=False, retcode="GATEWAY_TIMEOUT",
             message=(

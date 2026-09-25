@@ -306,17 +306,30 @@ async def admin_create_announcement(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    # 落库整段是同步 SQLAlchemy，放进线程池：这个端点必须是 async（发布后要 await
+    # 广播与推送），而 async 函数里直接查库会卡住整个事件循环。线程池里 refresh 之后
+    # 不再 commit，实例的列都已加载，回到事件循环读属性不会再触发查库。
+    # The persistence is blocking SQLAlchemy, so it runs in the thread pool: the
+    # endpoint has to be async (it awaits the broadcast and push after
+    # publishing), and querying inline would stall the event loop. Nothing
+    # commits after the refresh, so reading the loaded columns back on the loop
+    # never triggers a query.
     _require_title(body)
-    a = Announcement(created_by=admin.id)
-    _apply(a, body)
-    if body.published:
-        a.published = True
-        a.published_at = _now()
-    db.add(a)
-    db.flush()
-    log_change(db, admin.id, admin.id, "announcement:create", None, json.dumps({"id": a.id, "published": a.published}, ensure_ascii=False))
-    db.commit()
-    db.refresh(a)
+
+    def _create_sync() -> Announcement:
+        a = Announcement(created_by=admin.id)
+        _apply(a, body)
+        if body.published:
+            a.published = True
+            a.published_at = _now()
+        db.add(a)
+        db.flush()
+        log_change(db, admin.id, admin.id, "announcement:create", None, json.dumps({"id": a.id, "published": a.published}, ensure_ascii=False))
+        db.commit()
+        db.refresh(a)
+        return a
+
+    a = await run_in_threadpool(_create_sync)
     if a.published:
         await _on_published(a, body.notify)
     return _to_out(a)
@@ -329,18 +342,24 @@ async def admin_update_announcement(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    a = db.query(Announcement).filter(Announcement.id == announcement_id).first()
-    if not a:
-        raise HTTPException(status_code=404, detail="公告不存在 / announcement not found")
-    _require_title(body)
-    was_published = bool(a.published)
-    _apply(a, body)
-    a.published = body.published
-    if body.published and not was_published and a.published_at is None:
-        a.published_at = _now()
-    log_change(db, admin.id, admin.id, "announcement:update", json.dumps({"published": was_published}), json.dumps({"id": a.id, "published": a.published}, ensure_ascii=False))
-    db.commit()
-    db.refresh(a)
+    # 同 admin_create_announcement：查库与落库在线程池里做。
+    # Same as admin_create_announcement: the DB work runs in the thread pool.
+    def _update_sync() -> tuple[Announcement, bool]:
+        a = db.query(Announcement).filter(Announcement.id == announcement_id).first()
+        if not a:
+            raise HTTPException(status_code=404, detail="公告不存在 / announcement not found")
+        _require_title(body)
+        was_published = bool(a.published)
+        _apply(a, body)
+        a.published = body.published
+        if body.published and not was_published and a.published_at is None:
+            a.published_at = _now()
+        log_change(db, admin.id, admin.id, "announcement:update", json.dumps({"published": was_published}), json.dumps({"id": a.id, "published": a.published}, ensure_ascii=False))
+        db.commit()
+        db.refresh(a)
+        return a, was_published
+
+    a, was_published = await run_in_threadpool(_update_sync)
     if a.published and not was_published:
         await _on_published(a, body.notify)
     return _to_out(a)

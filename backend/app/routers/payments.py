@@ -306,35 +306,13 @@ async def create_payment_order(
             ),
         )
 
-    # 未完成支付订单数量上限：限流之外的第二道闸，防止在库里堆积大量悬而未决
-    # 的支付记录，也避免每次进付款页都新开一笔。达到上限时提示用户先完成或
-    # 等待现有订单过期。/ Cap unfinished payments as a second gate beyond the
-    # rate limit — keeps stale pending rows from piling up and stops a fresh
-    # payment being opened on every visit to the pay page.
-    open_count = (
-        db.query(Payment)
-        .filter(
-            Payment.user_id == _user.id,
-            Payment.status.in_(("NEW", "PENDING", "PROCESSING")),
-        )
-        .count()
-    )
-    if open_count >= settings.MAX_OPEN_PAYMENTS_PER_USER:
-        raise HTTPException(
-            status_code=429,
-            detail=(
-                "有未完成的支付订单，请先完成或等待其过期后再创建新的 / "
-                "You have unfinished payments; complete or let them expire before creating a new one"
-            ),
-        )
-
     days = PLAN_DAYS[body.plan]
-    pricing = _resolve_pricing(db)
-    sale = pricing.get("sale")
-    if sale:
-        price_usd = sale["monthly"] if days == 30 else sale["yearly"]
-    else:
-        price_usd = pricing["monthly"] if days == 30 else pricing["yearly"]
+    # 这个端点必须是 async（中间要 await NOWPayments），所以前后两段同步查库都
+    # 放进线程池，而不是直接在事件循环上跑（与 get_payment_status_local 同一做法）。
+    # The endpoint must be async (it awaits NOWPayments in the middle), so both
+    # blocking DB sections go to the thread pool instead of running on the event
+    # loop — the same split as get_payment_status_local.
+    price_usd = await run_in_threadpool(_check_open_and_price, db, _user.id, days)
 
     # 生成内部订单号 / internal order ID for tracking
     order_id = f"prismx_{_user.id}_{uuid.uuid4().hex[:8]}"
@@ -386,9 +364,55 @@ async def create_payment_order(
         pay_address=np_result.get("pay_address", ""),
         status="PENDING",
     )
+    # commit 之后实例整体过期，下面读任何一列都会触发一次刷新查询，所以序列化也在
+    # 线程池里做完，别让那次刷新落回事件循环。
+    # After the commit the instance is expired and the first column read
+    # refreshes it with a query, so serialisation happens in the thread pool too.
+    created = await run_in_threadpool(_persist_new_payment, db, record)
+    # NOWPayments 返回的支付有效期，用于前端倒计时 / payment validity window for the countdown
+    created["valid_until"] = np_result.get("valid_until") or np_result.get("expiration_estimate_date")
+    return created
+
+
+def _check_open_and_price(db: Session, user_id: str, days: int) -> float:
+    """下单前的同步段：未完成订单数闸门 + 算价。供线程池调用。
+
+    未完成支付订单数量上限：限流之外的第二道闸，防止在库里堆积大量悬而未决
+    的支付记录，也避免每次进付款页都新开一笔。达到上限时提示用户先完成或
+    等待现有订单过期。/ Cap unfinished payments as a second gate beyond the
+    rate limit — keeps stale pending rows from piling up and stops a fresh
+    payment being opened on every visit to the pay page.
+    Blocking pre-order section (open-payment gate + pricing), for the threadpool.
+    """
+    open_count = (
+        db.query(Payment)
+        .filter(
+            Payment.user_id == user_id,
+            Payment.status.in_(("NEW", "PENDING", "PROCESSING")),
+        )
+        .count()
+    )
+    if open_count >= settings.MAX_OPEN_PAYMENTS_PER_USER:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                "有未完成的支付订单，请先完成或等待其过期后再创建新的 / "
+                "You have unfinished payments; complete or let them expire before creating a new one"
+            ),
+        )
+
+    pricing = _resolve_pricing(db)
+    sale = pricing.get("sale")
+    if sale:
+        return sale["monthly"] if days == 30 else sale["yearly"]
+    return pricing["monthly"] if days == 30 else pricing["yearly"]
+
+
+def _persist_new_payment(db: Session, record: Payment) -> dict:
+    """落库并序列化新建的支付订单（同步，供线程池调用）。
+    Persist and serialise a new payment (blocking, for the threadpool)."""
     db.add(record)
     db.commit()
-
     return {
         "id": record.id,
         "payment_id": record.nowpayments_payment_id,
@@ -399,8 +423,6 @@ async def create_payment_order(
         "plan": record.plan,
         "status": record.status,
         "created_at": record.created_at.isoformat(),
-        # NOWPayments 返回的支付有效期，用于前端倒计时 / payment validity window for the countdown
-        "valid_until": np_result.get("valid_until") or np_result.get("expiration_estimate_date"),
     }
 
 

@@ -27,7 +27,8 @@ from app.services.account_type import SOURCE_GROUP, classify_group
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import get_current_user
 from app.services.gateway_binding import (
-    enforce, is_removed, is_revoked, mark_removed, not_removed,
+    enforce, gateway_accounts_version, invalidate_gateway_accounts, is_removed, is_revoked,
+    mark_removed, not_removed,
 )
 from app.services.gateway_client import (
     get_account as gw_get_account,
@@ -354,6 +355,9 @@ def gateway_verify(
         except IntegrityError:
             db.rollback()
             raise HTTPException(status_code=409, detail="该账号已绑定")
+        # 轮询循环的账号映射缓存立即失效：新绑定/刚恢复的账号马上开始轮询。
+        # Drop the polling loop's cached account mapping so this account is polled now.
+        invalidate_gateway_accounts()
 
         logger.info(
             "Gateway 绑定成功: user=%s login=%s group=%s trade_mode=%s%s",
@@ -565,6 +569,12 @@ GATEWAY_POSITIONS_INTERVAL = 2.0
 # 负责。这里快的是「仓位出现/消失」，不是「浮盈跳动」。
 GATEWAY_EVENT_POLL_INTERVAL = 0.25
 
+# gateway 轮询循环里 (user_id, login) 映射的缓存时长（见 gateway_positions_loop 的
+# accounts_cache）。绑定/解绑/撤销会主动失效，这个 TTL 只兜其它不经那几处的改动
+# （例如管理端直接改库）。/ TTL of the loop's cached (user_id, login) mapping;
+# bind/unbind/revoke invalidate it actively, the TTL only bounds other writers.
+GATEWAY_ACCOUNTS_CACHE_SECONDS = 5.0
+
 # ---- 事件队列的单一消费者 / single consumer for the event queues ----
 #
 # GET /position-events 与 GET /deal-events 是**破坏性读取**：gateway 那端一次调用
@@ -653,8 +663,12 @@ class EventQueueLease:
         self._checked_at = now
         try:
             # try_lock 是同步 Redis 调用（socket_timeout=2s），不能在事件循环上直接跑。
-            # try_lock is a blocking Redis call and must not run on the loop.
-            held = await asyncio.to_thread(
+            # 走 anyio 的 256 线程池（run_blocking），不走 asyncio.to_thread 那个只有
+            # min(32, CPU+4) 条线程的默认 executor。
+            # try_lock is a blocking Redis call and must not run on the loop; it goes
+            # to anyio's 256-thread pool rather than the small default executor.
+            from app.services.connection_manager import run_blocking
+            held = await run_blocking(
                 shared_state.try_lock, GATEWAY_EVENTS_LOCK, self._ttl, self._owner
             )
         except Exception as e:  # noqa: BLE001
@@ -688,7 +702,8 @@ class EventQueueLease:
         if not shared_state.enabled():
             return
         try:
-            await asyncio.to_thread(shared_state.release_lock, GATEWAY_EVENTS_LOCK, self._owner)
+            from app.services.connection_manager import run_blocking
+            await run_blocking(shared_state.release_lock, GATEWAY_EVENTS_LOCK, self._owner)
         except asyncio.CancelledError:
             # 这条路径几乎总是在取消里走到的（关服、或 BackgroundLoops 换主时
             # cancel 掉整条循环），而任务一旦进入取消状态，线程池这一跳就走不完，
@@ -1273,8 +1288,21 @@ async def gateway_positions_loop() -> None:
 
     # ----- 共享状态与辅助函数 -----
 
+    # (user_id, login) 映射的进程内缓存。慢拍每 2 秒、事件泵每一批事件都要这份映射，
+    # 以前每次都查一遍 mt5_accounts（远端 Supabase 的一次网络往返），而它只在绑定 /
+    # 解绑 / 撤销时才变。缓存 GATEWAY_ACCOUNTS_CACHE_SECONDS 秒，那几处写入提交后
+    # 调 gateway_binding.invalidate_gateway_accounts() 换掉共享版本号，这里比对到版本
+    # 变化即回源——撤销在约 1 秒内生效，不必等 TTL。Redis 不可用时退回单纯的 TTL。
+    # In-process cache of the (user_id, login) mapping. The slow tick (every 2s)
+    # and every event batch need it, and each used to re-query mt5_accounts (a
+    # round trip to remote Supabase) although it only changes on bind, unbind or
+    # revoke. Those writers bump a shared version after committing; a changed
+    # version forces a reload here, so a revocation lands within ~1s rather than
+    # after the TTL. Without Redis this degrades to the plain TTL.
+    accounts_cache: dict = {"at": float("-inf"), "ver": None, "rows": None}
+
     def _gateway_accounts() -> list[tuple[str, str]]:
-        """(user_id, login) 列表。只取有 WS 连接的用户，避免空转。
+        """(user_id, login) 列表（带短缓存，见 accounts_cache）。只取有 WS 连接的用户，避免空转。
 
         已撤销的绑定整条排除：不读持仓、不刷资金、不扫平仓。撤销的含义是
         「这次授权已经作废」，那就不该继续代表用户去券商那边读任何东西——
@@ -1284,6 +1312,22 @@ async def gateway_positions_loop() -> None:
         the account on the user's behalf — and only blocking orders — would be a
         half-measure that contradicts itself.
         """
+        now = time.monotonic()
+        # 版本号在回源之前读（见 shared_cache.SharedVersion）/ read before reloading
+        ver = gateway_accounts_version.current()
+        cached = accounts_cache["rows"]
+        if (
+            cached is not None
+            and now - accounts_cache["at"] < GATEWAY_ACCOUNTS_CACHE_SECONDS
+            and not (ver is not None and accounts_cache["ver"] is not None
+                     and ver != accounts_cache["ver"])
+        ):
+            return list(cached)
+        rows = _load_gateway_accounts()
+        accounts_cache.update(at=now, ver=ver, rows=rows)
+        return list(rows)
+
+    def _load_gateway_accounts() -> list[tuple[str, str]]:
         db = SessionLocal()
         try:
             rows = (
@@ -1889,8 +1933,15 @@ async def gateway_positions_loop() -> None:
                     await asyncio.sleep(GATEWAY_EVENT_POLL_INTERVAL)
                     continue
 
-                events, subscribed = await drain_position_events()
-                deal_logins, deal_subscribed = await drain_deal_events()
+                # 两个队列并发取：两次 GET 互不依赖（各自吞掉自己的异常、返回空），
+                # 结果都拿到之后才开始处理，处理顺序（先持仓事件、后成交）与串行时
+                # 完全相同——并发的只是两次网络往返，每拍省下一个 RTT。
+                # Drain both queues concurrently: the two GETs are independent (each
+                # swallows its own errors) and nothing is processed until both are
+                # back, so handling order is exactly as before — only the two round
+                # trips overlap, saving one RTT per tick.
+                (events, subscribed), (deal_logins, deal_subscribed) = await asyncio.gather(
+                    drain_position_events(), drain_deal_events())
 
                 if deal_subscribed != deal_subscription_state["alive"]:
                     deal_subscription_state["alive"] = deal_subscribed

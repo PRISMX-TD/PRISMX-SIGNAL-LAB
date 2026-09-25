@@ -151,8 +151,10 @@ class TradeRsp:
     replayed: bool = False
     # 传输层错误分类（_post 的 error 字段）："timeout" 表示网关没在时限内回话——
     # 请求可能已经执行，调用方必须用同一 clientOrderId 再问一次而不是当作拒绝。
+    # "connect_failed" 表示连接都没建起来、请求没有发出，可以确定没有执行。
     # Transport-level error class from _post; "timeout" means the gateway may have
     # executed the request, so the caller must re-ask with the same clientOrderId.
+    # "connect_failed" means no connection was made and nothing was sent.
     error: str = ""
     # 网关侧耗时（毫秒）：整个开仓/平仓调用，以及其中等券商 dealer 回执的部分。
     # 2026-09-14 起网关随回执返回；只进日志，不落库。旧网关没有这两个字段，缺省 0。
@@ -329,6 +331,33 @@ async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
         # 平时不刷日志，排查性能时打开即可。
         logger.debug("Gateway %s 耗时 %.1fms", path, (time.perf_counter() - started) * 1000)
         return data
+    except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as e:
+        # 请求根本没发出去：建连失败（拒绝连接、DNS、TLS 握手失败）、建连超时、或在
+        # 本地连接池里排不到连接。httpcore 只在建连阶段（connect_tcp / start_tls）
+        # 抛 ConnectError / ConnectTimeout，写请求、读响应阶段的失败分别是
+        # WriteError / ReadError / RemoteProtocolError 与对应的 *Timeout；PoolTimeout
+        # 发生在拿到连接之前。所以这里可以确定网关一个字节都没收到——与下面的
+        # 「超时 / 连接半路断了，结果未知」不是一回事，调用方可以放心提示「未发出，
+        # 可重试」，而不必吓用户「可能已执行」。
+        # 必须排在 TimeoutException 前面：ConnectTimeout / PoolTimeout 都是它的子类。
+        # transport 的 retries=1 也只作用在这一段（httpcore 的 _connect 里只对
+        # ConnectError / ConnectTimeout 重试），走到这里说明连重试都没连上。
+        #
+        # The request never left: connection refused / DNS / TLS handshake failure,
+        # a connect timeout, or no free connection in the local pool. httpcore raises
+        # ConnectError / ConnectTimeout only while establishing the connection
+        # (connect_tcp / start_tls); failures while writing or reading are
+        # WriteError / ReadError / RemoteProtocolError and their *Timeout twins, and
+        # PoolTimeout happens before a connection is even acquired. So the gateway
+        # received nothing — unlike the "timed out / dropped mid-flight, outcome
+        # unknown" cases below — and callers may say "not sent, safe to retry".
+        # Must precede TimeoutException, which ConnectTimeout and PoolTimeout
+        # subclass. The transport's retries=1 applies to this phase only (httpcore's
+        # _connect retries ConnectError / ConnectTimeout), so reaching here means the
+        # retry failed to connect as well.
+        logger.error("Gateway 连不上，请求未发出 (%.1fms): %s %s",
+                     (time.perf_counter() - started) * 1000, url, e)
+        return {"ok": False, "error": "connect_failed", "message": "Gateway 连接失败，请求未发出", "status": 0}
     except httpx.TimeoutException:
         logger.error("Gateway 超时 (%.1fms): %s", (time.perf_counter() - started) * 1000, url)
         return {"ok": False, "error": "timeout", "message": "Gateway 响应超时", "status": 0}

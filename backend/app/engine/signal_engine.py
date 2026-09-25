@@ -35,7 +35,7 @@ from app.models import Signal
 from app.services.connection_manager import manager
 from app.services.push_dispatch import dispatch_push_async
 from app.services.signal_broadcast import (
-    broadcast_signal_new_free_tier,
+    broadcast_signals_new_free_tier,
     broadcast_signal_new_realtime,
     serialize_signal as _serialize,
 )
@@ -190,11 +190,18 @@ async def signal_expiry_loop() -> None:
         await asyncio.sleep(5)
         try:
             expired_payloads = await run_in_threadpool(_expire_stale_signals)
+            if not expired_payloads:
+                continue
             for payload in expired_payloads:
                 # 实时等级早已看到该信号，只需翻转状态 / real-time tiers already have it, just flip status
                 await manager.broadcast_to_clients({"type": "SIGNAL_EXPIRED", "data": {"id": payload["id"]}})
-                # FREE 等级的第一次揭晓：连同最终状态一起推送 / FREE tier's first reveal, with final state
-                await broadcast_signal_new_free_tier(payload)
+            # FREE 等级的第一次揭晓：连同最终状态一起推送。整轮只查一次在线名单与等级
+            # （查库在线程池里），每条信号一次多目标 publish——以前是每条信号各查一遍库、
+            # 再逐人 await 推送。
+            # FREE tier's first reveal, with final state: one roster/plan lookup per
+            # round (off the loop) and one multi-target publish per signal, instead of
+            # a DB query per signal followed by one awaited push per user.
+            await broadcast_signals_new_free_tier(expired_payloads)
         except Exception:
             logger.exception("signal_expiry_loop error")
 

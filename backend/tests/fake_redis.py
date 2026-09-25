@@ -83,8 +83,14 @@ class FakeRedis:
     def hget(self, key, field):
         return self.hashes.get(key, {}).get(field)
 
-    def hset(self, key, field, value):
-        self.hashes.setdefault(key, {})[field] = str(value); return 1
+    def hset(self, key, field=None, value=None, mapping=None):
+        h = self.hashes.setdefault(key, {})
+        n = 0
+        if field is not None:
+            n += int(field not in h); h[field] = str(value)
+        for f, v in (mapping or {}).items():
+            n += int(f not in h); h[f] = str(v)
+        return n
 
     def hgetall(self, key):
         return dict(self.hashes.get(key, {}))
@@ -157,3 +163,51 @@ class _Pipe:
 
     def execute(self):
         return [getattr(self.r, n)(*a, **kw) for n, a, kw in self.ops]
+
+
+class AsyncFakeRedis:
+    """redis.asyncio 同形的最小替身：命令转给同一个 FakeRedis（模拟几个 worker 共用
+    一台 Redis），只实现 connection_manager 的异步路径用到的那几条。fail=True 时每条
+    命令都抛 ConnectionError，用来钉「Redis 不可达就退回本地投递」。
+    Minimal redis.asyncio stand-in delegating to a shared FakeRedis; fail=True makes
+    every command raise ConnectionError."""
+
+    def __init__(self, sync: FakeRedis, fail: bool = False) -> None:
+        self.sync = sync
+        self.fail = fail
+        self.commands: list[str] = []
+        self.closed = False
+
+    def _run(self, name, *a, **kw):
+        self.commands.append(name)
+        if self.fail:
+            raise ConnectionError("fake redis is down")
+        return getattr(self.sync, name)(*a, **kw)
+
+    async def publish(self, channel, message):
+        return self._run("publish", channel, message)
+
+    async def zadd(self, key, mapping):
+        return self._run("zadd", key, mapping)
+
+    def pipeline(self, transaction=True):
+        return _AsyncPipe(self)
+
+    async def aclose(self):
+        self.closed = True
+
+
+class _AsyncPipe:
+    def __init__(self, r: AsyncFakeRedis) -> None:
+        self.r = r; self.ops: list = []
+
+    def __getattr__(self, name):
+        def rec(*a, **kw):
+            self.ops.append((name, a, kw)); return self
+        return rec
+
+    async def execute(self):
+        self.r.commands.append("pipeline")
+        if self.r.fail:
+            raise ConnectionError("fake redis is down")
+        return [getattr(self.r.sync, n)(*a, **kw) for n, a, kw in self.ops]

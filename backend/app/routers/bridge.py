@@ -41,6 +41,7 @@ from app.services.settings_store import (
     server_matches_broker,
 )
 from app.services.symbol_aliases import broker_symbol
+from app.services.shared_cache import SharedVersion
 from app.services.trade_performance import known_position_ids, mark_positions_seen
 
 logger = logging.getLogger("prismx.bridge")
@@ -215,8 +216,27 @@ def get_bridge_user(
 # requests has one hard requirement: it must be detached with every column
 # loaded (see the expunge in _authenticate_cached and _cached_user_usable).
 _AUTH_CACHE_TTL = 10.0  # 秒 / seconds
-_auth_cache: dict[str, tuple[float, User]] = {}
+# 值：(过期时刻, 用户, 装载时的共享版本号) / (expiry, user, shared version at load time)
+_auth_cache: dict[str, tuple[float, User, str | None]] = {}
 _auth_cache_lock = Lock()
+# 多 worker 下的 Token 失效：重置 Token 的请求只落在一个 worker 上，只清本进程的
+# 缓存的话，别的 worker 还会按旧条目再放行旧 Token 最多 TTL 秒。所以失效时同时
+# 换掉这个共享版本号，各 worker 命中缓存前比对它（本地缓存 1 秒），版本一变就
+# 整体当未命中、回库重新鉴权——旧 Token 在所有 worker 上最迟约 1 秒被拒。
+# 按整体版本而不是按单个哈希失效：重置是罕见操作，偶尔让全部缓存回源一次的代价
+# 远小于每个桥接请求都去 Redis 查一次「这个哈希有没有被吊销」。
+# Redis 不可用时退回原行为（仅本进程立即失效，其它 worker 按 TTL）。
+# Multi-worker token revocation: the reset request lands on one worker, and
+# clearing only that process's cache would let the other workers keep
+# accepting the old token for up to the TTL. The invalidation therefore also
+# replaces this shared version, which every worker checks (cached locally for
+# 1s) before trusting a hit — on a change every entry counts as a miss and is
+# re-authenticated against the DB, so the old token is refused everywhere
+# within ~1s. A whole-cache version rather than a per-hash check: resets are
+# rare, and an occasional full reload is far cheaper than a Redis lookup on
+# every bridge request. Without Redis the old behaviour stands (this process
+# immediately, others by TTL).
+_auth_version = SharedVersion("bridge_auth")
 
 
 def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
@@ -234,6 +254,10 @@ def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
         return
     with _auth_cache_lock:
         _auth_cache.pop(token_hash, None)
+    # 调用方已 commit（新哈希已落库）之后才换版本号：拿到新版本号的 worker，
+    # 回库时一定读到新哈希。/ Bumped after the caller's commit, so any worker
+    # holding the new version re-reads the new hash.
+    _auth_version.bump()
 
 
 def _cached_user_usable(user: User) -> bool:
@@ -259,8 +283,18 @@ def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
         return None
     key = hash_api_token(x_api_token)
     now = time.monotonic()
+    # 版本号必须在回库之前读（见 SharedVersion）：先读版本再查库，就不可能出现
+    # 「拿着新版本号、却缓存了旧哈希查出来的用户」。
+    # Read the version before the DB lookup (see SharedVersion), so an entry can
+    # never carry the new version alongside a user found by the old hash.
+    ver = _auth_version.current()
     hit = _auth_cache.get(key)
-    if hit is not None and hit[0] > now and _cached_user_usable(hit[1]):
+    if (
+        hit is not None
+        and hit[0] > now
+        and not (ver is not None and hit[2] is not None and ver != hit[2])
+        and _cached_user_usable(hit[1])
+    ):
         return hit[1]
     user = authenticate_api_token(db, x_api_token)
     if user is not None:
@@ -296,10 +330,10 @@ def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
         # the state the original comment assumed it already had.
         db.expunge(user)
         with _auth_cache_lock:
-            _auth_cache[key] = (now + _AUTH_CACHE_TTL, user)
+            _auth_cache[key] = (now + _AUTH_CACHE_TTL, user, ver)
             # 简单容量兜底：条目过多时清掉已过期项 / prune expired entries when large
             if len(_auth_cache) > 5000:
-                for k, (exp, _u) in list(_auth_cache.items()):
+                for k, (exp, _u, _v) in list(_auth_cache.items()):
                     if exp <= now:
                         _auth_cache.pop(k, None)
     return user
@@ -1506,7 +1540,9 @@ async def offline_monitor_loop() -> None:
             # offline detection only matters for a frontend that's actively
             # watching. With a remote Supabase, a round trip every 2s adds up.
             # Sensitivity returns to 2s the moment a client connects.
-            if not manager.connected_user_ids():
+            # 在线名单配了 Redis 时是一次网络往返，用 async 版，别在事件循环上同步等。
+            # With Redis the roster is a network round-trip; use the async variant.
+            if not await manager.connected_user_ids_async():
                 await asyncio.sleep(30)
                 continue
 

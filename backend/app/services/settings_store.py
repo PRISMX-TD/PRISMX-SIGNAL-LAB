@@ -4,6 +4,10 @@
 进程内缓存；管理员保存设置时主动失效，改动最迟 30 秒内对桥接生效（单进程
 部署下是立即生效，因为保存和失效发生在同一进程）。
 
+多 worker：失效时同时更新 shared_cache 里的一个共享版本号，各 worker 命中缓存前
+比对它（版本号本地再缓存 1 秒），于是别的 worker 最迟约 1 秒就会回源，而不是
+等满 30 秒。Redis 不可用时退回单纯的 30 秒 TTL。
+
 Platform settings: key-value rows in the DB + an in-process cache; keys never
 written fall back to the code defaults below.
 
@@ -11,6 +15,11 @@ The bridge polls every 1.5s, so hitting the settings table on every poll is
 wasteful — reads go through a 30s-TTL in-process cache, invalidated on admin
 save. Changes propagate to the bridge within 30s at worst (immediately on a
 single-process deployment, since save and invalidation share the process).
+
+Multi-worker: an invalidation also refreshes a shared version in shared_cache
+that every worker checks before trusting its copy (the version is cached
+locally for one second), so other workers reload within ~1s instead of 30s.
+Without a reachable Redis it degrades to the plain 30s TTL.
 """
 import json
 import logging
@@ -18,6 +27,7 @@ import threading
 import time
 
 from app.models import PlatformSetting
+from app.services.shared_cache import SharedVersion
 
 logger = logging.getLogger("prismx.settings")
 
@@ -60,6 +70,15 @@ TRIAL_DEFAULTS: dict = {
 _CACHE_TTL_SECONDS = 30
 _lock = threading.Lock()
 
+# 全部设置段共用一个跨 worker 版本号：任何一段失效都会让所有 worker 上的所有段
+# 回源一次。管理员保存设置一天也没几次，而共用一个版本号意味着每个 worker 每秒
+# 至多读一次 Redis（不随段数增长）。
+# One cross-worker version shared by every section: invalidating any section
+# makes every worker reload every section once. Admin saves are rare, and one
+# shared version keeps it to at most one Redis read per worker per second
+# regardless of how many sections exist.
+_settings_version = SharedVersion("settings")
+
 
 class _TtlCache:
     """一段设置的进程内 TTL 缓存。每个设置段（券商锁、定价、试用……）各持有一个实例。
@@ -87,27 +106,41 @@ class _TtlCache:
     def __init__(self) -> None:
         self._data: dict = {}
         self._at: float = 0.0
+        # 装载时的共享版本号（见 _settings_version）/ shared version at load time
+        self._ver: str | None = None
 
     def get(self, db, loader) -> dict:
-        """命中且未过期就回缓存，否则用 `loader(db)` 回源并刷新。返回的是缓存本体，
-        调用方按需拷贝（各 get_* 都会 dict()/list() 一层再交出去）。
-        Return the cached dict if fresh, else reload via `loader(db)`. Returns the
-        cached object itself; callers copy as needed (every get_* does)."""
+        """命中且未过期、且期间没有任何 worker 失效过，就回缓存；否则用 `loader(db)`
+        回源并刷新。返回的是缓存本体，调用方按需拷贝（各 get_* 都会 dict()/list()
+        一层再交出去）。
+
+        版本号在回源**之前**读（理由见 SharedVersion 的说明）。
+
+        Return the cached dict if fresh and no worker has invalidated since it was
+        loaded, else reload via `loader(db)`. Returns the cached object itself;
+        callers copy as needed (every get_* does). The version is read *before*
+        reloading (see SharedVersion)."""
         now = time.time()
+        ver = _settings_version.current()
         with _lock:
-            if self._data and now - self._at < _CACHE_TTL_SECONDS:
+            if (self._data and now - self._at < _CACHE_TTL_SECONDS
+                    and not (ver is not None and self._ver is not None and ver != self._ver)):
                 return self._data
         data = loader(db)
         with _lock:
             self._data = data
             self._at = now
+            self._ver = ver
         return data
 
     def invalidate(self) -> None:
-        """管理员保存后调用，强制下次读取回源数据库。
-        Called after an admin save so the next read hits the DB."""
+        """管理员保存（并 commit）后调用：本进程下次读取立即回源，其它 worker 经
+        共享版本号在约 1 秒内跟上。
+        Called after an admin save (and commit): this process reloads on the next
+        read; other workers follow within ~1s via the shared version."""
         with _lock:
             self._at = 0.0
+        _settings_version.bump()
 
 
 def set_setting(db, key: str, value) -> None:

@@ -22,13 +22,20 @@ from app.services.gamification import (
 from app.services.gamification import identity, periods
 from app.services.gamification.badge_progress import badge_progress
 from app.services.gamification.stats import compute_account_lifetime_stats, load_trade_data
-from app.services.gamification.boards import _resolved_in_period, board_gates
+from app.services.gamification.boards import _resolved_in_period, board_gates, leaderboard_cache_key
 from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
-from app.services import shared_state
+from app.services import shared_cache, shared_state
 
 LEADERBOARD_BOARDS = ("return_pct", "win_rate")
+
+# 榜单前 50 行的共享缓存时长。快照每轮重算后 snapshot_boards 会主动删键，这个 TTL
+# 兜的只是上榜者改昵称 / 换佩戴勋章这类不触发重算的变化。
+# TTL of the cached top 50. snapshot_boards deletes the key after every
+# recompute; this only bounds changes that don't trigger one (a ranked user's
+# nickname or equipped badge).
+_BOARD_CACHE_SECONDS = 60
 _PERIOD_KEY_RE = re.compile(r"^\d{4}-W\d{2}$|^\d{4}-\d{2}$")
 
 router = APIRouter(prefix="/gamification", tags=["gamification"])
@@ -120,33 +127,26 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     # board_gates(), so the reads below are unchanged and the number shown still comes
     # from the same source as the number used to compute.
     gates = gates_override or board_gates(get_gamification_settings(db))
-    all_rows = (db.query(LeaderboardSnapshot)
-                  .filter(LeaderboardSnapshot.board == board,
-                          LeaderboardSnapshot.period_key == period_key)
-                  .order_by(LeaderboardSnapshot.rank)
-                  .all())
-    top_rows = all_rows[:50]
 
-    users_by_id = {}
-    source_by_acct: dict[tuple[str, str], str | None] = {}
-    if top_rows:
-        ids = {r.user_id for r in top_rows}
-        users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(ids))}
-        if reveal:
-            # 管理端要看得出哪些上榜账户的实盘身份只是桥接自报、没经过券商组名或
-            # 后台规则核实（trade_mode_source=self）——抽查就靠这个标记。
-            # Admins need to see which ranked accounts are only self-reported real
-            # (trade_mode_source=self) so they can spot-check them.
-            for a in db.query(MT5Account).filter(MT5Account.user_id.in_(ids)):
-                source_by_acct.setdefault((a.user_id, a.login), a.trade_mode_source)
+    # 前 50 行 + 快照时间：与观众无关，自然周/月榜按 (board, period_key) 放进
+    # shared_cache（管理端 reveal 与比赛榜 comp:<id> 不走缓存）。观众相关的两处——
+    # isSelf 与账户号是否打码——在下面逐行现算，不进缓存。
+    # The top 50 and the snapshot time don't depend on the viewer, so natural
+    # week/month boards cache them per (board, period_key) in shared_cache (the
+    # admin reveal path and comp:<id> boards bypass it). The two viewer-specific
+    # bits — isSelf and whether the account is masked — are computed per row
+    # below, never cached.
+    cacheable = not reveal and bool(_PERIOD_KEY_RE.match(period_key))
+    cache_key = leaderboard_cache_key(board, period_key)
+    base = shared_cache.get_json(cache_key) if cacheable else None
+    if base is None:
+        base = _board_base(db, board, period_key, reveal=reveal)
+        if cacheable:
+            shared_cache.set_json(cache_key, base, ttl=_BOARD_CACHE_SECONDS)
 
-    # 佩戴勋章的档位随行下发：只有 id 画不出金银铜。
-    # The equipped badge's tier travels with the row: the id alone can't tell gold from bronze.
-    badge_tiers = equipped_badge_tiers(db, users_by_id.values())
     rows = []
-    for r in top_rows:
-        u = users_by_id.get(r.user_id)
-        is_self = r.user_id == viewer.id
+    for b in base["rows"]:
+        is_self = b["userId"] == viewer.id
         # 名字照常展示（昵称原样，没设昵称的退回打码邮箱前缀），打码的是账户号
         # 这一列：别人的账户号中间两位换成 **。真号只在两种情况下出现：这行就是
         # 观众自己（自己的账户号自己当然能看，「我的名次」卡上本来也是全的），
@@ -157,44 +157,55 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
         # real number appears only for the viewer's own row (their own number,
         # which the "my rank" card already shows in full) or on the admin reveal
         # path — the same strict split as §4.3.
-        shown_login = r.mt5_login if (is_self or reveal) else identity.mask_account(r.mt5_login)
+        shown_login = b["login"] if (is_self or reveal) else identity.mask_account(b["login"])
         row = {
-            "rank": r.rank,
-            "displayName": identity.display_name(
-                u.nickname if u else None, u.email if u else None),
+            "rank": b["rank"],
+            "displayName": b["displayName"],
             "login": shown_login,
-            "score": r.score,
-            "sample": r.sample,
+            "score": b["score"],
+            "sample": b["sample"],
             "isSelf": is_self,
-            "equippedBadge": u.equipped_badge if u else None,
-            "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
+            "equippedBadge": b["equippedBadge"],
+            "equippedBadgeTier": b["equippedBadgeTier"],
             # profileId：公开主页的不透明标识（users.public_id），不是 user_id——
             # 见 models.new_public_id 的说明；§4.3「不下发 user_id」不变。
             # profileId: the opaque public-profile token (users.public_id), not the
             # user_id — see models.new_public_id; §4.3's "no user_id" stands.
-            "profileId": u.public_id if u else None,
+            "profileId": b["profileId"],
         }
         # reveal 只由管理端入口传 True（见 admin_leaderboard）。用户端 §4.3 的
         # 契约不变：不下发 user_id、账户号一律打码——这三个字段永远不会出现在
         # /gamification/leaderboard 的响应里，管理员看真实身份是运营需要，
-        # 与"对用户打码"不冲突，但两条路径必须泾渭分明。
+        # 与"对用户打码"不冲突，但两条路径必须泾渭分明。（缓存里虽然存着
+        # userId——isSelf 要靠它判定——但只在服务端，永远不进用户端响应。）
         # reveal is passed True only by the admin entry point (see
         # admin_leaderboard). The user-facing §4.3 contract is unchanged: no
         # user_id, account numbers always masked — these three fields never appear in a
         # /gamification/leaderboard response. Admins seeing real identities is an
         # operational need and doesn't conflict with masking for users, but the
-        # two paths must stay strictly separate.
+        # two paths must stay strictly separate. (The cache does hold userId —
+        # isSelf needs it — but server-side only; it never reaches a user response.)
         if reveal:
-            row["userId"] = r.user_id
-            row["nickname"] = u.nickname if u else None
-            row["email"] = u.email if u else None
-            row["tradeModeSource"] = source_by_acct.get((r.user_id, r.mt5_login))
+            row["userId"] = b["userId"]
+            row["nickname"] = b["nickname"]
+            row["email"] = b["email"]
+            row["tradeModeSource"] = b["tradeModeSource"]
         rows.append(row)
 
+    # 「我的名次」单独按 user_id 查，不再把整榜拉回来找自己：唯一约束
+    # uq_board_period_acct 的前缀 (board, period_key, user_id) 正好覆盖这条查询。
+    # 一人多账户 = 多行，取名次最好的那行（与原来的 min(rank) 相同）。
+    # "My rank" is its own query by user_id instead of scanning the whole board;
+    # the (board, period_key, user_id) prefix of uq_board_period_acct covers it.
+    # Several accounts = several rows; the best rank wins, as before.
     me = None
-    my_rows = [r for r in all_rows if r.user_id == viewer.id]
-    if my_rows:
-        best = min(my_rows, key=lambda r: r.rank)
+    best = (db.query(LeaderboardSnapshot)
+              .filter(LeaderboardSnapshot.board == board,
+                      LeaderboardSnapshot.period_key == period_key,
+                      LeaderboardSnapshot.user_id == viewer.id)
+              .order_by(LeaderboardSnapshot.rank)
+              .first())
+    if best is not None:
         me = {"rank": best.rank, "score": best.score, "sample": best.sample,
               "login": best.mt5_login}
 
@@ -210,18 +221,6 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
     if _PERIOD_KEY_RE.match(period_key):
         period_start, period_end = periods.period_bounds(period_key)
         seal_at = period_end + timedelta(hours=periods.RECOMPUTE_GRACE_HOURS)
-
-    # snapshotAt——「上次刷新」：快照行本身没有单独的 created_at/updated_at
-    # 字段，`computed_at` 就是它（每次 `snapshot_boards` 重算都先删后插，
-    # 所以 computed_at 天然等于"这批快照最后一次写入的时间"）。没有行时
-    # （空榜）没有时间可取，留 None，前端按 optional 处理。
-    # snapshotAt ("last refreshed"): the snapshot rows carry no separate
-    # created_at/updated_at column — `computed_at` fills that role (each
-    # `snapshot_boards` recompute deletes-then-inserts, so computed_at is
-    # already "when this batch of snapshot rows was last written"). With no
-    # rows (an empty board) there is nothing to take a time from; left None,
-    # the frontend treats it as optional.
-    snapshot_at = max((r.computed_at for r in all_rows if r.computed_at), default=None)
 
     # 上期冠军：只在本榜当前为空（`not rows`）时才算——前端只在空榜态渲染这个
     # 字段，非空榜时没有展示位，算了也是白算。同时只对能解析出边界的自然周/月
@@ -327,10 +326,104 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
         payload["periodEnd"] = period_end.isoformat()
         payload["sealAt"] = seal_at.isoformat()
         payload["previousWinner"] = previous_winner
-    if snapshot_at is not None:
-        payload["snapshotAt"] = (snapshot_at if snapshot_at.tzinfo
-                                  else snapshot_at.replace(tzinfo=timezone.utc)).isoformat()
+    if base["snapshotAt"] is not None:
+        payload["snapshotAt"] = base["snapshotAt"]
     return payload
+
+
+def _board_base(db: Session, board: str, period_key: str, reveal: bool) -> dict:
+    """榜单前 50 行与快照时间的「与观众无关」部分，形状可 JSON 化（供缓存）。
+
+    只取前 50 行（`.limit(50)`），不再整榜 `.all()` 之后在 Python 里切片——整榜可能
+    有几千行，而页面只展示 50 行；「我的名次」另有单独的查询。
+
+    Viewer-independent part of the board: the top 50 rows and the snapshot time,
+    JSON-shaped so it can be cached. Fetches only 50 rows with `.limit(50)`
+    rather than loading the whole board and slicing in Python; "my rank" has its
+    own query.
+    """
+    top_rows = (db.query(LeaderboardSnapshot)
+                  .filter(LeaderboardSnapshot.board == board,
+                          LeaderboardSnapshot.period_key == period_key)
+                  .order_by(LeaderboardSnapshot.rank)
+                  .limit(50)
+                  .all())
+
+    users_by_id = {}
+    source_by_acct: dict[tuple[str, str], str | None] = {}
+    if top_rows:
+        ids = {r.user_id for r in top_rows}
+        users_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(ids))}
+        if reveal:
+            # 管理端要看得出哪些上榜账户的实盘身份只是桥接自报、没经过券商组名或
+            # 后台规则核实（trade_mode_source=self）——抽查就靠这个标记。
+            # Admins need to see which ranked accounts are only self-reported real
+            # (trade_mode_source=self) so they can spot-check them.
+            for a in db.query(MT5Account).filter(MT5Account.user_id.in_(ids)):
+                source_by_acct.setdefault((a.user_id, a.login), a.trade_mode_source)
+
+    # 佩戴勋章的档位随行下发：只有 id 画不出金银铜。
+    # The equipped badge's tier travels with the row: the id alone can't tell gold from bronze.
+    badge_tiers = equipped_badge_tiers(db, users_by_id.values())
+    rows = []
+    for r in top_rows:
+        u = users_by_id.get(r.user_id)
+        row = {
+            "rank": r.rank,
+            "userId": r.user_id,
+            "login": r.mt5_login,
+            "displayName": identity.display_name(
+                u.nickname if u else None, u.email if u else None),
+            "score": r.score,
+            "sample": r.sample,
+            "equippedBadge": u.equipped_badge if u else None,
+            "equippedBadgeTier": badge_tiers.get(r.user_id, 0),
+            "profileId": u.public_id if u else None,
+        }
+        if reveal:
+            row["nickname"] = u.nickname if u else None
+            row["email"] = u.email if u else None
+            row["tradeModeSource"] = source_by_acct.get((r.user_id, r.mt5_login))
+        rows.append(row)
+
+    # snapshotAt——「上次刷新」：快照行本身没有单独的 created_at/updated_at
+    # 字段，`computed_at` 就是它（每次 `snapshot_boards` 重算都先删后插，
+    # 所以 computed_at 天然等于"这批快照最后一次写入的时间"）。取整榜的 MAX，
+    # 与原来遍历全部行求最大值同一口径。没有行时（空榜）没有时间可取，
+    # 留 None，前端按 optional 处理。
+    # snapshotAt ("last refreshed"): the snapshot rows carry no separate
+    # created_at/updated_at column — `computed_at` fills that role (each
+    # `snapshot_boards` recompute deletes-then-inserts, so computed_at is
+    # already "when this batch of snapshot rows was last written"). MAX over
+    # the whole board, same as the old scan over every row. With no rows (an
+    # empty board) there is nothing to take a time from; left None, the
+    # frontend treats it as optional.
+    snapshot_at = (db.query(func.max(LeaderboardSnapshot.computed_at))
+                     .filter(LeaderboardSnapshot.board == board,
+                             LeaderboardSnapshot.period_key == period_key)
+                     .scalar())
+    snapshot_iso = None
+    if snapshot_at is not None:
+        snapshot_iso = (snapshot_at if snapshot_at.tzinfo
+                        else snapshot_at.replace(tzinfo=timezone.utc)).isoformat()
+    return {"rows": rows, "snapshotAt": snapshot_iso}
+
+
+# /me 里全站计数的缓存时长（见 build_me_payload）/ TTL of /me's sitewide counts
+_SITEWIDE_COUNTS_SECONDS = 300
+_SITEWIDE_COUNTS_KEY = "gamification:sitewide-badge-counts"
+
+
+def _sitewide_badge_counts(db: Session) -> dict:
+    """全站 (勋章, 档位) 持有人数 + 全站用户数，JSON 形状（供 shared_cache）。
+    Sitewide holders per (badge, tier) plus the user count, JSON-shaped."""
+    tiers = [
+        [bid, tier or 0, n]
+        for bid, tier, n in (db.query(UserBadge.badge_id, UserBadge.tier,
+                                      func.count(UserBadge.id.distinct()))
+                               .group_by(UserBadge.badge_id, UserBadge.tier).all())
+    ]
+    return {"tiers": tiers, "population": db.query(func.count(User.id)).scalar() or 0}
 
 
 def build_me_payload(db: Session, user: User, judge: bool) -> dict:
@@ -338,7 +431,11 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
     if judge and shared_state.kv_get(f"judge:{user.id}") is None:
         shared_state.kv_set(f"judge:{user.id}", str(now), ttl=_JUDGE_THROTTLE_SECONDS)
         judge_and_record_conditions(db, user.id)
-        judge_and_award_badges(db, user.id)
+        if judge_and_award_badges(db, user.id):
+            # 刚发了新勋章：全站持有人数缓存作废，免得本人看到自己那枚「0 人拥有」。
+            # A badge was just awarded: drop the sitewide counts so the user's own
+            # new badge doesn't read "0 holders".
+            shared_cache.delete(_SITEWIDE_COUNTS_KEY)
     # 一次读全该用户的成交数据：综合统计、终身统计、勋章进度三处共用，不各自查库。
     # Load the user's trade data once; stats, lifetime stats and badge progress share it.
     data = load_trade_data(db, user.id)
@@ -354,11 +451,23 @@ def build_me_payload(db: Session, user: User, judge: bool) -> dict:
     # Detail-layer "N holders sitewide": one count grouped by (badge, tier) covers
     # every badge; owners is the total across tiers, tierOwners the current holders
     # per tier (an upgrade moves someone to the new tier). Absent badges zero-fill.
+    #
+    # 这两个全站计数（勋章持有人分组计数 + 全站用户数）与观众无关，却是每次打开
+    # 等级页都要跑的两条全表聚合，放进 shared_cache 5 分钟：「全站 N 人拥有」晚几
+    # 分钟没有人会察觉。JSON 的对象键只能是字符串，所以缓存成 [勋章, 档位, 人数]
+    # 三元组列表，取出后再还原成按整数档位索引的字典。
+    # These two sitewide counts are the same for every viewer yet were two
+    # full-table aggregates on every visit to the level page; cached in
+    # shared_cache for 5 minutes ("N holders" lagging a few minutes is invisible).
+    # JSON object keys must be strings, so the cache holds [badge, tier, n]
+    # triples, rebuilt below into the int-keyed dict.
+    sitewide = shared_cache.cached_json(
+        _SITEWIDE_COUNTS_KEY, _SITEWIDE_COUNTS_SECONDS,
+        lambda: _sitewide_badge_counts(db))
     tier_counts: dict[str, dict[int, int]] = {}
-    for bid, tier, n in (db.query(UserBadge.badge_id, UserBadge.tier, func.count(UserBadge.id.distinct()))
-                           .group_by(UserBadge.badge_id, UserBadge.tier).all()):
-        tier_counts.setdefault(bid, {})[tier or 0] = n
-    population = db.query(func.count(User.id)).scalar() or 0
+    for bid, tier, n in sitewide["tiers"]:
+        tier_counts.setdefault(bid, {})[tier] = n
+    population = sitewide["population"]
     equipped = equipped_list(user)
     equipped_set = set(equipped)
     return {

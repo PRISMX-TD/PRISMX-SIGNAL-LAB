@@ -445,16 +445,19 @@ async def feed_candles(
         # key 的请求交错（详见 _feed_locks 上方的说明）。锁只还原改造前就有的串
         # 行语义，不改变任何对外行为。
         #
-        # chart_store 的两次写入刻意留在事件循环上：它们是纯内存操作、不阻塞，
-        # 而 merge_bars 内部先建 index 再按索引写、稳态下每次追加都触发 500 根
-        # 截断，放进工作线程只会平添撕裂风险，没有任何收益。
+        # chart_store 的两次写入：进程内 dict 那条路刻意留在事件循环上（纯内存、
+        # 不阻塞，而 merge_bars 先建 index 再按索引写、稳态下每次追加都触发 500 根
+        # 截断，放进工作线程只会平添撕裂风险）；配了 Redis 时它们是同步网络往返，
+        # *_async 会把它们挪进线程池（仍在上面那把锁里，顺序语义不变）。
         #
         # The gate work is blocking SQLAlchemy and moves to the thread pool, but
         # filter → cache → persist must stay atomic under one per-key lock: the
         # newly introduced awaits would otherwise let same-key requests interleave.
-        # The chart_store writes deliberately stay on the event loop — they are
-        # pure in-memory work, and merge_bars' index-then-write plus 500-bar
-        # truncation would only gain tearing risk from a worker thread.
+        # The chart_store writes: the in-process dict path deliberately stays on the
+        # event loop (pure memory work; merge_bars' index-then-write plus 500-bar
+        # truncation would only gain tearing risk from a worker thread). With Redis
+        # they are blocking round-trips, so the *_async wrappers offload them — still
+        # inside the lock above, so ordering is unchanged.
         async with _feed_lock((symbol, s.interval)):
             cacheable, tradeable = await run_in_threadpool(
                 candle_store.filter_tradeable_bars_both, db, symbol, s.interval, bars
@@ -466,9 +469,9 @@ async def feed_candles(
                 # is empty: that would wipe the genuine history already cached and blank the
                 # chart. Keep the old data and wait for the next valid batch.
                 if cacheable:
-                    chart_store.replace_series(symbol, s.interval, cacheable)
+                    await chart_store.replace_series_async(symbol, s.interval, cacheable)
             else:
-                chart_store.merge_bars(symbol, s.interval, cacheable)
+                await chart_store.merge_bars_async(symbol, s.interval, cacheable)
             new_ts = await run_in_threadpool(
                 _persist_live_sync, db, symbol, s.interval, bars, tradeable
             )
@@ -516,7 +519,8 @@ async def feed_quotes(req: FeedQuotesRequest, x_ea_token: str | None = Header(de
     if not _valid_ea_token(x_ea_token):
         raise HTTPException(status_code=401, detail="invalid EA token")
     incoming = [{"symbol": q.symbol.upper(), "bid": q.bid, "ask": q.ask, "digits": q.digits, "closed": q.closed} for q in req.data]
-    changed = quotes_store.update(incoming)
+    # 配了 Redis 时 update 是同步往返，经线程池跑 / blocking with Redis, so offloaded
+    changed = await quotes_store.update_async(incoming)
     if changed:
         await manager.broadcast_to_clients({"type": "GLOBAL_QUOTES", "data": changed})
     return {"ok": True}
@@ -527,7 +531,7 @@ async def list_quotes(user: User = Depends(get_current_user)):
     """前端读取全站统一报价快照（首屏用，之后靠 WS GLOBAL_QUOTES 增量更新）。
     Frontend reads the site-wide quote snapshot (first load; WS GLOBAL_QUOTES
     delivers deltas afterwards)."""
-    return {"quotes": quotes_store.get_all()}
+    return {"quotes": await quotes_store.get_all_async()}
 
 
 @router.get("/symbols")
@@ -540,12 +544,12 @@ async def list_active_symbols(user: User = Depends(get_current_user)):
     chart symbol picker / dashboard hero should all render from this list —
     adding or removing a symbol on the EA side is reflected within seconds,
     no frontend code change needed."""
-    return {"symbols": quotes_store.get_active_symbols()}
+    return {"symbols": await quotes_store.get_active_symbols_async()}
 
 
 # ---------- 前端读取 / frontend read ----------
 @router.get("/chart/history")
-async def chart_history(
+def chart_history(
     symbol: str = Query(max_length=32),
     interval: str = Query(),
     limit: int = Query(default=1000, ge=1, le=CHART_HISTORY_MAX_LIMIT),
@@ -589,6 +593,13 @@ async def chart_history(
     currently holds). The fetch is always "newest `limit` rows descending, then
     reversed": an ascending limit would forever return the oldest rows no matter
     how much new data arrives (the same trap documented in _load_backtest_bars).
+
+    普通 def 而不是 async def：整段是同步查库（最多 1000 根，远端 Supabase 一次往返
+    几十毫秒起），FastAPI 会把 def 端点放进线程池跑；写成 async def 则是在事件循环上
+    直接同步查，期间全部 WebSocket 与 HTTP 一起停。
+    A plain def, not async def: the body is a blocking query (up to 1000 rows from
+    remote Supabase), and FastAPI runs def endpoints on the thread pool. As async
+    def it ran on the event loop and stalled every WebSocket and request meanwhile.
     """
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")
@@ -615,4 +626,4 @@ async def chart_latest(
 ):
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")
-    return chart_store.get_latest(symbol.upper(), interval)
+    return await chart_store.get_latest_async(symbol.upper(), interval)

@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 
 from app.models import ClosedTrade, LeaderboardSnapshot, MT5Account, PeriodBaseline, User
+from app.services import shared_cache
 from .periods import active_period_keys, period_bounds
 
 log = logging.getLogger("gamification")
@@ -374,6 +375,12 @@ def compute_board_rows(db, period_key: str) -> dict:
     return {"return_pct": ret_rows, "win_rate": wr_rows}
 
 
+def leaderboard_cache_key(board: str, period_key: str) -> str:
+    """榜单前 50 行在 shared_cache 里的键（读侧见 routers/gamification.build_board_rows_payload）。
+    shared_cache key of a board's cached top 50 (read side: routers/gamification)."""
+    return f"leaderboard:{board}:{period_key}"
+
+
 def snapshot_boards(db, now: datetime) -> dict:
     """快照排名（设计 §1.6/§4）：对每个 active period key，若仍在进行中先拍基线
     + 对账，再算行、排序、定名次，先删后插该 (board, period_key) 的全部快照行，
@@ -419,4 +426,7 @@ def snapshot_boards(db, now: datetime) -> dict:
                                            rank=i, score=r["score"], sample=r["sample"]))
             total_rows += len(rows)
         db.commit()
+        # 新快照已提交：删掉这两个榜的前 50 缓存，所有 worker 下一次读取即看到新名次。
+        # New snapshot committed: drop the cached top 50 so every worker reads it next.
+        shared_cache.delete(*(leaderboard_cache_key(b, key) for b in rows_by_board))
     return {"periods": len(keys), "rows": total_rows}

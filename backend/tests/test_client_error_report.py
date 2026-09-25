@@ -70,3 +70,13 @@ def test_all_three_kinds_are_accepted(caplog):
         for kind in ("render", "chunk", "chunk-reload"):
             assert _post(json.dumps({"kind": kind, "message": kind}).encode()).status_code == 204
     assert sorted(json.loads(l.split(" ", 2)[2])["kind"] for l in _lines(caplog)) == ["chunk", "chunk-reload", "render"]
+
+
+def test_push_kind_is_accepted_with_step(caplog):
+    # pushDiag.ts 的抽样上报：kind=push，step 说明是推送链路的哪一环。
+    with caplog.at_level(logging.WARNING, logger="prismx.client_error"):
+        payload = {"kind": "push", "step": "subscribe", "name": "PushDiag", "message": "AbortError"}
+        assert _post(json.dumps(payload).encode()).status_code == 204
+    (line,) = _lines(caplog)
+    fields = json.loads(line.split(" ", 2)[2])
+    assert fields["kind"] == "push" and fields["step"] == "subscribe"

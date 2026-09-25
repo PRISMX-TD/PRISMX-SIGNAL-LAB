@@ -122,6 +122,21 @@ def position_id_of(order) -> int | None:
 # positions also fall out of "进行中" and self-heal once reporting resumes.
 _OPEN_FRESHNESS = timedelta(minutes=20)
 
+# 写入节流：时间戳距今不足这么久的仓位不再重写。上报每 1.5~2 秒一次，原来每一拍
+# 都把该用户全部持仓的 position_last_seen_open 重写一遍并 commit——持仓没变也照写，
+# 等于每个在线用户每 2 秒一次白写库（行锁 + WAL + 一次 commit 往返）。而读侧只关心
+# 「最近 _OPEN_FRESHNESS（20 分钟）内见过没有」，60 秒的精度绰绰有余。
+# 节流条件直接写进 UPDATE 的 WHERE 而不是放进程内状态：多 worker 下天然一致，
+# 时间戳为空的仓位（新出现的仓号、刚回填上仓位号的订单）不受节流、当拍就写。
+# Write throttle: positions stamped more recently than this are not rewritten.
+# Reports arrive every 1.5-2s and used to rewrite (and commit) every open
+# position's stamp each time, changed or not. The read side only asks "seen
+# within the last _OPEN_FRESHNESS (20 min)", so 60s resolution is plenty. The
+# condition lives in the UPDATE's WHERE rather than in process state: consistent
+# across workers by construction, and a NULL stamp (a brand-new position, or an
+# order whose position id was just filled in) is never throttled.
+_SEEN_WRITE_INTERVAL = timedelta(seconds=60)
+
 # 统计回看窗口（天）。此前这个函数把该用户**全部**历史 FILLED 订单无条件
 # `.all()` 载入 Python 再逐笔聚合，没有任何时间上界——而订单表只增不减、前端
 # 每 45 秒轮询一次。一个交易一年的活跃用户，几千行订单每 45 秒全量载入一遍，
@@ -326,6 +341,11 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
     positions: an open position keeps getting refreshed; once it's closed
     elsewhere and stops appearing, the stamp freezes and, past _OPEN_FRESHNESS,
     compute_personal_winrate stops counting it as open. Returns rows refreshed.
+
+    同一仓位 _SEEN_WRITE_INTERVAL 内只写一次（见该常量的说明），所以持仓不变时
+    绝大多数调用返回 0 且不 commit。/ Each position is rewritten at most once per
+    _SEEN_WRITE_INTERVAL, so with unchanged positions most calls return 0 and
+    commit nothing.
     """
     # 按 (账号, 仓位编号) 精确匹配：仓位编号只在单个账号内唯一，只按编号刷新会把
     # 另一账号同号的已平仓位错误地续成"仍持仓"。/ match by (login, ticket): tickets
@@ -348,6 +368,11 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
     if not pairs:
         return 0
     pair_list = list(pairs)
+    now = datetime.now(timezone.utc)
+    # 列里存的是 naive UTC（见 signal_resolution.sweep_stale_signals 的同款说明），
+    # 比较用去掉时区的阈值，SQLite 与 Postgres 口径一致。
+    # The column stores naive UTC, so compare against a tz-stripped threshold.
+    stale_before = (now - _SEEN_WRITE_INTERVAL).replace(tzinfo=None)
     updated = (
         db.query(Order)
         .filter(
@@ -357,8 +382,17 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
                 tuple_(Order.mt5_login, Order.mt5_ticket).in_(pair_list),
                 tuple_(Order.mt5_login, Order.mt5_position).in_(pair_list),
             ),
+            or_(
+                Order.position_last_seen_open.is_(None),
+                Order.position_last_seen_open < stale_before,
+            ),
         )
-        .update({Order.position_last_seen_open: datetime.now(timezone.utc)}, synchronize_session=False)
+        .update({Order.position_last_seen_open: now}, synchronize_session=False)
     )
-    db.commit()
+    # 一行都没命中（绝大多数拍都是这样）就不 commit：会话里只有这条没改任何行的
+    # UPDATE，关会话时连接归还连接池会照常回滚，省掉一次 commit 往返。
+    # No row matched (the common case): skip the commit. The session holds only
+    # this no-op UPDATE and the pool's reset-on-return rolls it back.
+    if updated:
+        db.commit()
     return updated

@@ -5,7 +5,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import time
 
+import anyio.to_thread
 from fastapi import WebSocket
 
 from app.services import shared_state
@@ -116,8 +118,202 @@ async def _offload(fn, *args):
     request and every WebSocket at once. Rather than converting everything to
     redis.asyncio (a far larger change than the problem warrants), the blocking
     call is handed to a thread and the loop keeps running.
+
+    走 anyio 的默认线程池（main.py 启动时调到 256 条），不走 asyncio.to_thread：后者用
+    的是 loop 的默认 executor，只有 min(32, CPU+4) 条——生产 2 核就是 6 条。Redis 一慢，
+    6 条线程全卡在 socket 上，其余所有 to_thread（推送、在线名单、快照镜像）一起排队。
+    abandon_on_cancel=True 保持 asyncio.to_thread 的取消语义：等待方被取消时立刻抛出，
+    不陪着线程等完这一次往返。
+    Uses anyio's default pool (raised to 256 in main.py) instead of
+    asyncio.to_thread, whose loop executor holds min(32, CPU+4) threads — six on
+    the 2-core production box, all of which a slow Redis can pin at once.
+    abandon_on_cancel=True keeps asyncio.to_thread's cancellation behaviour.
     """
-    return await asyncio.to_thread(fn, *args)
+    return await anyio.to_thread.run_sync(fn, *args, abandon_on_cancel=True)
+
+
+async def run_blocking(fn, *args):
+    """_offload 的公开名，供别的模块把同步 Redis 调用挪出事件循环（见 _offload）。
+    Public name of _offload for other modules (see _offload)."""
+    return await _offload(fn, *args)
+
+
+# ---------- redis.asyncio 单例 / the redis.asyncio singleton ----------
+#
+# 推送（publish）和在线名单（ZSET 读写）是最高频的两类 Redis 调用：持仓每 1.5 秒
+# 每个在线用户一次 publish。原来每一次都是「同步客户端 + 一次线程调度」，线程池一
+# 忙起来推送就跟着排队。这两类改走 redis.asyncio，事件循环上直接 await，不占线程。
+#
+# 生命周期：由 start_cross_worker_tasks（lifespan 启动时调）在主事件循环上建，
+# 配套的 ws:aredis 任务在关停被 cancel 时关掉它。客户端绑定在建它的那个事件循环上，
+# 别的循环（run_on_main_loop 退回 asyncio.run 的脚本 / 单测场景）拿不到它，自动退回
+# 「同步客户端 + 线程池」的老路径，行为不变。
+# 测试里 shared_state 注入的是同步替身（tests/fake_redis.py），那时也不建异步客户端，
+# 同样走老路径；异步路径的用例用 _install_async_redis 注入替身。
+#
+# Publish and the presence ZSET are the hottest Redis calls (one publish per online
+# user every 1.5s for positions). Each used to cost a sync call plus a thread hop,
+# queueing behind a busy pool. They now use redis.asyncio, awaited on the loop.
+# Lifecycle: built on the main loop by start_cross_worker_tasks (called from the
+# lifespan), closed by the companion ws:aredis task when it is cancelled at
+# shutdown. The client is bound to the loop that built it; any other loop (the
+# asyncio.run fallback in scripts/tests) doesn't see it and takes the old
+# sync-client-plus-thread path unchanged. With a sync test double injected into
+# shared_state no async client is built either; tests of the async path inject one
+# via _install_async_redis.
+
+# 连接池上限与取连接的等待：推送并发起来时最多占 64 条连接，排不到 2 秒就报错，
+# 由调用方退回本地投递——而不是无上限地开连接直到撞上 Redis 的 maxclients。
+# Pool cap and checkout wait: at most 64 connections under a push burst; after 2s
+# without one the call fails and the caller falls back to local delivery, rather
+# than opening connections without bound until Redis hits maxclients.
+ASYNC_REDIS_MAX_CONNECTIONS = 64
+ASYNC_REDIS_TIMEOUT_SECONDS = 2.0
+
+_aredis_client = None
+_aredis_loop: asyncio.AbstractEventLoop | None = None
+
+
+def _async_redis():
+    """当前事件循环上可用的 redis.asyncio 客户端；没有则 None（调用方走线程池老路径）。
+    The redis.asyncio client for the running loop, or None (callers use the thread path)."""
+    if _aredis_client is None:
+        return None
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return None
+    return _aredis_client if loop is _aredis_loop else None
+
+
+def _install_async_redis(client, loop: asyncio.AbstractEventLoop | None = None) -> None:
+    """登记异步客户端（生产由 _start_async_redis 调；测试直接注入替身）。None 表示清空。
+    Register the async client (called by _start_async_redis; tests inject a double)."""
+    global _aredis_client, _aredis_loop
+    _aredis_client = client
+    _aredis_loop = (loop or asyncio.get_running_loop()) if client is not None else None
+
+
+def _start_async_redis() -> bool:
+    """在当前（主）事件循环上建 redis.asyncio 客户端。建不了就返回 False，一切照旧走线程池。
+    Build the redis.asyncio client on the current (main) loop; False keeps the thread path."""
+    if not shared_state.enabled() or _aredis_client is not None:
+        return False
+    try:
+        import redis
+        import redis.asyncio as aioredis
+
+        injected = shared_state._redis_client
+        if injected is not None and not isinstance(injected, redis.Redis):
+            # shared_state 里是测试替身：异步客户端连的会是一台不存在的 Redis。
+            # A test double sits in shared_state; an async client would dial nothing real.
+            return False
+        pool = aioredis.BlockingConnectionPool.from_url(
+            shared_state.redis_url(),
+            decode_responses=True,
+            max_connections=ASYNC_REDIS_MAX_CONNECTIONS,
+            timeout=ASYNC_REDIS_TIMEOUT_SECONDS,
+            socket_timeout=ASYNC_REDIS_TIMEOUT_SECONDS,
+            socket_connect_timeout=ASYNC_REDIS_TIMEOUT_SECONDS,
+        )
+        _install_async_redis(aioredis.Redis.from_pool(pool))
+        return True
+    except Exception as e:
+        logger.warning("redis.asyncio 客户端初始化失败，推送继续走线程池 / async redis init failed, using the thread path: %s", e)
+        return False
+
+
+async def _close_async_redis() -> None:
+    client = _aredis_client
+    _install_async_redis(None)
+    if client is None:
+        return
+    try:
+        await client.aclose()
+    except Exception as e:      # 关停路径上不抛 / never raise on shutdown
+        logger.debug("关闭 redis.asyncio 客户端失败 / closing async redis failed: %s", e)
+
+
+async def _hold_async_redis() -> None:
+    """什么都不做，只在被 cancel（关停）时把异步客户端关掉。
+    Does nothing but close the async client when cancelled at shutdown."""
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await _close_async_redis()
+
+
+# ---------- 跨进程转发的消息格式 / fan-out wire format ----------
+#
+# 以前每条消息都是 json.dumps({"from":…, "user":…, "message":{…}})，而**每个** worker
+# 都订阅同一个频道：一条只给某个用户的持仓快照（可达几十 KB），N 个 worker 各自完整
+# json.loads 一遍，再发现这个用户根本不连在自己这里。
+# 现在信封的键顺序固定、目标放在最前面：
+#   {"user":"<id>","message":{…}}                 定向
+#   {"user":null,"message":{…}}                   广播
+#   {"user":"*","users":["a","b"],"message":{…}}  多目标（如按等级过滤后的新信号）
+# 收到后先只解码开头那一小段（目标），不在本地就直接丢，message 一个字节都不解析；
+# 在本地时 message 那一段本身就是合法 JSON 文本，原样 send_text 出去，也不必解析再
+# 序列化。
+# 它仍然是合法 JSON：灰度期间还没升级的老 worker 照旧 json.loads，定向/广播两种照常
+# 投递；多目标那种老 worker 读到的 user 是 "*"，不是任何人的 id，会被安全地丢掉
+# （不会误投给不该收的人）。反过来，新 worker 解不出这个前缀时（老 worker 发来的
+# {"from":…} 格式）退回完整 json.loads，两种格式都认。
+#
+# Every message used to be json.dumps({"from", "user", "message"}), and every worker
+# subscribes to the channel, so each one fully parsed a per-user snapshot (tens of
+# KB) only to find the user wasn't connected there. The envelope now has a fixed
+# key order with the target first; a receiver decodes just that head and drops the
+# message untouched when the target isn't local, and when it is, the message slice
+# is already valid JSON text and goes out via send_text as is. It is still valid
+# JSON, so old workers during a rolling deploy parse it as before (a multi-target
+# envelope reads as user "*", which matches nobody and is safely dropped); new
+# workers fall back to a full json.loads for the old {"from", ...} shape.
+
+_ENV_USER = '{"user":'
+_ENV_USERS = ',"users":'
+_ENV_MESSAGE = ',"message":'
+_MULTI_TARGET = "*"
+_decoder = json.JSONDecoder()
+
+
+def _dumps(message: dict) -> str:
+    """推给前端的文本：与 starlette 的 send_json 同一种紧凑写法（ensure_ascii=False），
+    外加 default=str（跨进程那条路一直是这么序列化的）。
+    Frontend text, serialized exactly like starlette's send_json, plus default=str
+    (which the cross-worker path always used)."""
+    return json.dumps(message, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
+def _envelope(user_id: str | None, text: str, users: list[str] | None = None) -> str:
+    head = _ENV_USER + json.dumps(user_id, ensure_ascii=False)
+    if users is not None:
+        head += _ENV_USERS + json.dumps(users, separators=(",", ":"), ensure_ascii=False)
+    return head + _ENV_MESSAGE + text + "}"
+
+
+def _peek_envelope(raw: str):
+    """只解码信封开头的目标部分，返回 (user, users, message 文本)；不是新格式返回 None。
+    Decode only the envelope's target head: (user, users, message text), or None."""
+    if not raw.startswith(_ENV_USER):
+        return None
+    try:
+        user, i = _decoder.raw_decode(raw, len(_ENV_USER))
+        users = None
+        if raw.startswith(_ENV_USERS, i):
+            users, i = _decoder.raw_decode(raw, i + len(_ENV_USERS))
+            if not isinstance(users, list):
+                return None
+        if not raw.startswith(_ENV_MESSAGE, i):
+            return None
+    except ValueError:
+        return None
+    start = i + len(_ENV_MESSAGE)
+    if not (raw.endswith("}") and raw.startswith("{", start)):
+        return None
+    if user is not None and not isinstance(user, str):
+        return None
+    return user, users, raw[start:-1]
 
 
 class ConnectionManager:
@@ -461,17 +657,70 @@ class ConnectionManager:
         的订阅协程投递到自己的 socket（含本进程）；单 worker 直接本地投递。
         Push to all of a user's connections: publish across workers with Redis,
         deliver locally otherwise."""
+        text = _dumps(message)
         if shared_state.enabled():
             try:
-                await _offload(shared_state.publish, WS_CHANNEL, {"user": user_id, "message": message})
+                await self._publish(_envelope(str(user_id), text))
                 return
             except Exception as e:
                 # Redis 不可达：退回本地投递，至少连在本进程的用户不断流。
                 # Redis unreachable: fall back to local delivery so this worker's users still get it.
                 logger.warning("WS 跨进程转发失败，退回本地投递 / fan-out publish failed, delivering locally: %s", e)
-        await self._deliver_local(user_id, message)
+        await self._deliver_local_text(user_id, text)
+
+    async def push_to_users(self, user_ids, message: dict) -> None:
+        """同一条消息推给一批用户：多 worker 时**一次** publish（信封里带目标名单），
+        各 worker 只投给连在自己这里的那些人。
+        以前按等级过滤的新信号是逐人 await push_to_client：一个人一次 publish，在线
+        用户多了，一条信号要排几百次 Redis 往返才发完。
+        One message to a batch of users: a single publish carrying the target list,
+        each worker delivering to its own connections. Plan-filtered signals used to
+        await push_to_client once per user — hundreds of round-trips per signal.
+        """
+        targets = [str(u) for u in dict.fromkeys(user_ids or []) if u]
+        if not targets:
+            return
+        if len(targets) == 1:
+            await self.push_to_client(targets[0], message)
+            return
+        text = _dumps(message)
+        if shared_state.enabled():
+            try:
+                await self._publish(_envelope(_MULTI_TARGET, text, users=targets))
+                return
+            except Exception as e:
+                logger.warning("WS 跨进程多目标转发失败，退回本地投递 / multi-target publish failed, delivering locally: %s", e)
+        await self._deliver_many_local(targets, text)
+
+    async def _publish(self, raw: str) -> None:
+        """把一条信封发布到转发频道：优先 redis.asyncio，拿不到就走「同步客户端 + 线程池」。
+        失败照常抛出，由调用方决定退回本地投递。
+        Publish one envelope: redis.asyncio when available, else the sync client on
+        a worker thread. Failures propagate so the caller can deliver locally."""
+        channel = shared_state._k(WS_CHANNEL)
+        client = _async_redis()
+        if client is not None:
+            await client.publish(channel, raw)
+            return
+        await _offload(lambda: shared_state._redis().publish(channel, raw))
 
     async def _deliver_local(self, user_id: str, message: dict) -> None:
+        """向连在本进程的该用户连接推送（序列化一次，见 _deliver_local_text）。
+        Local delivery; serialized once, see _deliver_local_text."""
+        await self._deliver_local_text(user_id, _dumps(message))
+
+    async def _deliver_many_local(self, user_ids, text: str) -> None:
+        """把同一段文本投给本进程上的这批用户（不在本进程的直接跳过）。
+        Deliver one text to whichever of these users are connected to this process."""
+        local = [u for u in user_ids if u in self._clients]
+        if not local:
+            return
+        await asyncio.gather(
+            *(self._deliver_local_text(u, text) for u in local),
+            return_exceptions=True,
+        )
+
+    async def _deliver_local_text(self, user_id: str, text: str) -> None:
         """向连在**本进程**的该用户连接推送，并顺带清掉发不出去的连接。
 
         Push to all of a user's client connections, dropping any that fail.
@@ -493,12 +742,18 @@ class ConnectionManager:
         slow reader holds up every connection behind it, and in a broadcast that
         delay carries over to the next user. Each send carries its own timeout,
         and a timeout is treated exactly like a failure — a dead connection.
+
+        入参是**已经序列化好**的文本：以前每条连接各自 send_json 一次，同一条广播在
+        N 条连接上就 json.dumps N 遍（持仓快照可达几十 KB）。现在上游序列化一次，
+        这里只 send_text。
+        Takes pre-serialized text: every connection used to send_json on its own,
+        re-serializing one broadcast N times. Now it is serialized once upstream.
         """
         conns = list(self._clients.get(user_id, set()))
         if not conns:
             return
         results = await asyncio.gather(
-            *(asyncio.wait_for(ws.send_json(message), SEND_TIMEOUT_SECONDS) for ws in conns),
+            *(asyncio.wait_for(ws.send_text(text), SEND_TIMEOUT_SECONDS) for ws in conns),
             return_exceptions=True,
         )
         dead = [ws for ws, outcome in zip(conns, results) if isinstance(outcome, BaseException)]
@@ -576,24 +831,30 @@ class ConnectionManager:
 
     async def broadcast_to_clients(self, message: dict) -> None:
         """向所有在线前端广播（如新信号）/ broadcast to all clients (e.g. new signals)."""
+        text = _dumps(message)
         if shared_state.enabled():
             try:
-                await _offload(shared_state.publish, WS_CHANNEL, {"user": None, "message": message})
+                await self._publish(_envelope(None, text))
                 return
             except Exception as e:
                 logger.warning("WS 跨进程广播失败，退回本地 / broadcast publish failed, delivering locally: %s", e)
-        await self._broadcast_local(message)
+        await self._broadcast_local_text(text)
 
     async def _broadcast_local(self, message: dict) -> None:
+        await self._broadcast_local_text(_dumps(message))
+
+    async def _broadcast_local_text(self, text: str) -> None:
         # 用户之间也并发：串行时每个用户最坏要等一个发送超时，在线用户一多，
-        # 一条广播的总耗时就是"用户数 × 超时"。
+        # 一条广播的总耗时就是"用户数 × 超时"。序列化只在上游做一次，这里每条
+        # 连接只是 send_text 同一段文本。
         # Users run concurrently too: serially each one can cost a full send
-        # timeout, making a broadcast take users x timeout in the worst case.
+        # timeout, making a broadcast take users x timeout in the worst case. The
+        # text is serialized once upstream; every connection just sends it.
         user_ids = list(self._clients.keys())
         if not user_ids:
             return
         await asyncio.gather(
-            *(self._deliver_local(user_id, message) for user_id in user_ids),
+            *(self._deliver_local_text(user_id, text) for user_id in user_ids),
             return_exceptions=True,
         )
 
@@ -629,7 +890,26 @@ class ConnectionManager:
         # Without Redis there is nothing blocking (a dict read); skip the hop.
         if not shared_state.enabled():
             return self.connected_user_ids()
-        return await _offload(self.connected_user_ids)
+        client = _async_redis()
+        if client is None:
+            return await _offload(self.connected_user_ids)
+        # 有 redis.asyncio 客户端时直接在事件循环上读（与 shared_state.set_members
+        # 同样的两步：先删过期、再取未过期），一次 pipeline 往返，不占线程。
+        # With the async client, read on the loop itself — the same two steps as
+        # shared_state.set_members, in one pipelined round-trip.
+        local = list(self._clients.keys())
+        try:
+            key = shared_state._k(PRESENCE_KEY)
+            now = time.time()
+            pipe = client.pipeline(transaction=False)
+            pipe.zremrangebyscore(key, "-inf", now)
+            pipe.zrangebyscore(key, now, "+inf")
+            _removed, remote = await pipe.execute()
+        except Exception as e:
+            logger.warning("在线名单读取失败，只用本进程的 / presence read failed, using local only: %s", e)
+            return local
+        seen = set(local)
+        return local + [u for u in remote or [] if u not in seen]
 
     def connected_user_ids(self) -> list[str]:
         """当前有前端连接的用户 id 列表（多 worker 时含连在其它 worker 的），供按等级
@@ -671,7 +951,17 @@ class ConnectionManager:
         loop walks every online user, and a hop each would be pure overhead."""
         if not shared_state.enabled() or not user_ids:
             return
-        await _offload(self._mark_present, *user_ids)
+        client = _async_redis()
+        if client is None:
+            await _offload(self._mark_present, *user_ids)
+            return
+        # 异步客户端：整批一条 ZADD（与 shared_state.set_add 同样的成员级过期写法）。
+        # Async client: one ZADD for the whole batch, same per-member expiry as set_add.
+        try:
+            expires = time.time() + PRESENCE_TTL_SECONDS
+            await client.zadd(shared_state._k(PRESENCE_KEY), {u: expires for u in user_ids})
+        except Exception as e:
+            logger.warning("在线名单写入失败 / presence write failed: %s", e)
 
     async def refresh_presence_loop(self) -> None:
         """每 30 秒把本进程连着的用户续一次期（90 秒过期），进程死了名单自然掉。
@@ -682,10 +972,36 @@ class ConnectionManager:
 
     async def handle_fanout_message(self, raw: str) -> None:
         """处理一条来自 Redis 频道的转发消息（也供测试直接调用）。
-        Handle one fan-out message from the channel (also called directly by tests)."""
+        Handle one fan-out message from the channel (also called directly by tests).
+
+        先按新信封只看目标（见上方「消息格式」）：目标不在本进程就直接返回，message
+        不解析；在本进程则把 message 那段文本原样发出去。认不出新信封（老 worker 发的
+        {"from":…} 格式）才整条 json.loads，按原来的方式处理。
+        New envelopes are routed on their head alone (see "fan-out wire format"):
+        not local → return without parsing the message; local → send the message
+        slice verbatim. Anything else (the old {"from", ...} shape) is parsed in
+        full and handled as before.
+        """
+        if not isinstance(raw, str):
+            return
+        peeked = _peek_envelope(raw)
+        if peeked is not None:
+            user_id, users, text = peeked
+            if users is not None:
+                if user_id == _MULTI_TARGET:
+                    await self._deliver_many_local([str(u) for u in users], text)
+                return
+            if user_id is None:
+                await self._broadcast_local_text(text)
+            elif user_id in self._clients:
+                await self._deliver_local_text(user_id, text)
+            return
+        # 老格式 / legacy shape
         try:
             data = json.loads(raw)
         except (ValueError, TypeError):
+            return
+        if not isinstance(data, dict):
             return
         message = data.get("message")
         if not isinstance(message, dict):
@@ -737,14 +1053,21 @@ class ConnectionManager:
                 logger.debug("关闭 Redis 订阅连接失败 / closing pubsub connection failed: %s", e)
 
     def start_cross_worker_tasks(self) -> list[asyncio.Task]:
-        """多 worker 时每个进程都要跑的两条协程；单 worker 返回空列表。
-        The two per-worker coroutines needed with Redis; empty without it."""
+        """多 worker 时每个进程都要跑的协程；单 worker 返回空列表。
+        顺带在主事件循环上建 redis.asyncio 客户端，并用 ws:aredis 任务托管它的关闭
+        （lifespan 关停时 cancel 这些任务，客户端随之关掉）。
+        The per-worker coroutines needed with Redis; empty without it. Also builds
+        the redis.asyncio client on the main loop, owned by the ws:aredis task so the
+        lifespan's cancel at shutdown closes it."""
         if not shared_state.enabled():
             return []
-        return [
+        tasks = [
             asyncio.create_task(self.run_fanout_subscriber(), name="ws:fanout"),
             asyncio.create_task(self.refresh_presence_loop(), name="ws:presence"),
         ]
+        if _start_async_redis():
+            tasks.append(asyncio.create_task(_hold_async_redis(), name="ws:aredis"))
+        return tasks
 
 
 manager = ConnectionManager()

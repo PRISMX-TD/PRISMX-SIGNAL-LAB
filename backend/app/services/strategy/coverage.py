@@ -16,7 +16,7 @@ length.
 import threading
 import time
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, select, text
 from sqlalchemy.orm import Session
 
 from app.models import Candle
@@ -171,6 +171,19 @@ def coverage_matrix(db: Session, symbols: list[str], intervals: list[str]) -> li
 SYMBOLS_CACHE_TTL_SECONDS = 300
 
 _symbols_lock = threading.Lock()
+
+# 松散索引扫描（见 symbols_with_history）。symbol 列 NOT NULL，递归在 MIN 返回 NULL
+# （已经没有更大的品种）时自然终止。
+# Loose index scan (see symbols_with_history). symbol is NOT NULL, so the
+# recursion ends when MIN comes back NULL (no larger symbol left).
+_DISTINCT_SYMBOLS_SQL = text(
+    "WITH RECURSIVE syms(symbol) AS ("
+    " SELECT MIN(symbol) FROM candles"
+    " UNION ALL"
+    " SELECT (SELECT MIN(c.symbol) FROM candles c WHERE c.symbol > syms.symbol)"
+    " FROM syms WHERE syms.symbol IS NOT NULL"
+    ") SELECT symbol FROM syms WHERE symbol IS NOT NULL"
+)
 _symbols_cache: tuple[float, list[str]] | None = None
 
 
@@ -182,7 +195,12 @@ def symbols_with_history(db: Session) -> list[str]:
     只是会被置灰——这正是置灰要表达的意思。用 active_symbols() 当候选集会让
     候选集与活跃集永远相等，置灰因此永不生效。
 
-    只扫 idx_candle_symbol_interval_t 的首列，返回几个字符串，与历史行数无关。
+    取法是「松散索引扫描」：递归 CTE 每一步只在 uq_candle_symbol_interval_t 的首列
+    上找「比上一个品种大的最小品种」，每步一次索引定位，总代价 ≈ 品种数 × 一次
+    B 树下探，与历史行数无关。原来的 `SELECT DISTINCT symbol` 在 Postgres 上
+    （17 及以前没有 skip scan）要把整棵索引从头扫到尾——candles 是全库最大的表，
+    那是一次随 K 线总量线性增长的全索引扫描。递归 CTE 在 SQLite 与 Postgres 上
+    写法相同，结果与 DISTINCT 完全一致（排序去重）。
 
     Symbols that have candles stored, sorted and deduplicated. This is the
     strategy editor's candidate list, meaning "has history, can be backtested",
@@ -191,8 +209,13 @@ def symbols_with_history(db: Session) -> list[str]:
     Using active_symbols() as the candidate set makes candidates and actives
     identical, so nothing ever greys out.
 
-    Touches only the leading column of idx_candle_symbol_interval_t and returns
-    a handful of strings, independent of how many rows exist.
+    Fetched with a loose index scan: a recursive CTE that repeatedly asks for
+    "the smallest symbol greater than the previous one" on the leading column of
+    uq_candle_symbol_interval_t — one B-tree descent per symbol, independent of
+    row count. The old `SELECT DISTINCT symbol` walks the entire index on
+    Postgres (no skip scan through 17), a full scan of the largest table's index
+    that grows with every stored bar. The CTE is identical on SQLite and
+    Postgres and returns exactly what DISTINCT did.
     """
     global _symbols_cache
     with _symbols_lock:
@@ -200,8 +223,8 @@ def symbols_with_history(db: Session) -> list[str]:
             stored_at, value = _symbols_cache
             if time.time() - stored_at < SYMBOLS_CACHE_TTL_SECONDS:
                 return value
-    rows = db.query(Candle.symbol).distinct().all()
-    symbols = sorted({row[0] for row in rows})
+    rows = db.execute(_DISTINCT_SYMBOLS_SQL).all()
+    symbols = sorted({row[0] for row in rows if row[0] is not None})
     with _symbols_lock:
         _symbols_cache = (time.time(), symbols)
     return symbols

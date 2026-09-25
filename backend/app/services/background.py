@@ -60,14 +60,18 @@ class BackgroundLoops:
         self.is_leader = False
 
     # ---- 监督 / supervise（多 worker）----
-    def poll(self) -> bool:
-        """抢一次锁并据此启停循环；返回本轮是否持有领导权。
-        One election round: acquire/renew the lock and start or stop accordingly."""
+    def _acquire(self) -> bool:
+        """抢 / 续一次领导锁（**同步 Redis 往返**，协程里经 poll_async 走线程池）。
+        One acquire/renew of the leader lock (a blocking Redis round-trip)."""
         try:
-            held = shared_state.try_lock(LOCK_NAME, LOCK_TTL_SECONDS, owner=self._owner)
+            return shared_state.try_lock(LOCK_NAME, LOCK_TTL_SECONDS, owner=self._owner)
         except Exception as e:  # Redis 抖动：已在跑的先别停，等下一轮再定 / keep running until the next round decides
             logger.warning("后台循环领导锁不可用，本轮跳过 / leader lock unavailable: %s", e)
-            held = self.is_leader
+            return self.is_leader
+
+    def _apply(self, held: bool) -> bool:
+        """按抢锁结果启停循环。create_task 必须在事件循环线程上调，所以这一半不进线程。
+        Start or stop the loops per the verdict; must run on the loop thread (create_task)."""
         if held and not self.is_leader:
             logger.info("本 worker 接管后台循环 / this worker now runs the background loops (%s)", self._owner)
             self.start_all()
@@ -76,9 +80,23 @@ class BackgroundLoops:
             self.cancel_all()
         return held
 
+    def poll(self) -> bool:
+        """抢一次锁并据此启停循环；返回本轮是否持有领导权（同步版，测试与脚本用）。
+        One election round: acquire/renew the lock and start or stop accordingly."""
+        return self._apply(self._acquire())
+
+    async def poll_async(self) -> bool:
+        """同 poll，但抢锁那次同步 Redis 往返放进线程池——监督协程每 15 秒跑一次，
+        Redis 一慢就会在事件循环上卡满 socket 超时（2 秒）。启停仍在事件循环上做。
+        Same as poll with the blocking lock call on a worker thread; the supervisor
+        runs every 15s and would otherwise stall the loop for a socket timeout."""
+        from app.services.connection_manager import run_blocking
+
+        return self._apply(await run_blocking(self._acquire))
+
     async def supervise(self) -> None:
         while True:
-            self.poll()
+            await self.poll_async()
             await asyncio.sleep(POLL_SECONDS)
 
     def launch(self) -> None:

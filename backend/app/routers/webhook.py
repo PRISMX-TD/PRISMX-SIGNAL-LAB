@@ -7,12 +7,13 @@ TradingView 的 webhook 只能 POST 一个 URL + JSON body，不能自定义请�
 TradingView can only POST a URL + JSON body without custom headers, so source
 authentication relies on the "secret" field compared (constant-time) to WEBHOOK_SECRET.
 """
+import logging
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -24,6 +25,7 @@ from app.core.rate_limit import limiter
 from app.models import Signal, Trend
 from app.schemas import SYMBOL_PATTERN
 from app.services.connection_manager import manager
+from app.services import shared_cache
 from app.services.push_dispatch import dispatch_push_async
 from app.services.signal_broadcast import (
     broadcast_signal_new_realtime,
@@ -34,6 +36,8 @@ from app.services.signal_resolution import resolve_signals_with_price
 import json
 
 router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+logger = logging.getLogger("prismx.webhook")
 
 
 class TradingViewSignal(BaseModel):
@@ -141,14 +145,48 @@ def _persist_signal_sync(payload: TradingViewSignal, source: str = "tradingview"
                 return existing.id, None, None
             raise
         db.refresh(sig)
+        # 新信号已落库：信号列表/计数/胜率的读缓存立即失效（见 routers/signals.py）。
+        # New signal stored: drop the signal read caches (see routers/signals.py).
+        shared_cache.invalidate_signal_caches()
         return None, _serialize(sig), sig
     finally:
         db.close()
 
 
+async def _fan_out_new_signal(data: dict, sig: Signal) -> None:
+    """新信号落库之后的推送：WS 广播给实时等级的在线用户，再发 Web Push。
+
+    作为响应之后的后台任务跑（见两个信号 webhook）：以前 webhook 要等 WS 广播和
+    **全部** Web Push 逐条发完才返回——订阅一多就是几秒到几十秒，而调用方是 EA 的
+    同步 WebRequest（等它的时候整个 EA 定时器都停着）和有超时重试的 TradingView，
+    慢了只会招来重发。信号在这之前已经落库，推送晚几百毫秒无所谓，调用方却不该陪着等。
+
+    两步各自兜住异常并记日志：后台任务里抛出去的异常没人接，只会在 ASGI 层留一行
+    难以对应的报错；WS 广播失败也不该让 Web Push 跟着不发。
+
+    Post-persist fan-out for a new signal: WS broadcast to real-time users, then
+    Web Push. Runs as a background task after the response (see the two signal
+    webhooks): the webhook used to return only once the broadcast and *every* Web
+    Push had gone out — seconds with many subscriptions — while its callers are
+    the EA's synchronous WebRequest (the EA's timer is frozen meanwhile) and
+    TradingView, which retries on timeout. The signal is already stored, so a
+    few hundred ms of push latency is fine; the caller shouldn't wait for it.
+    Each step catches and logs its own failure: nothing would catch an exception
+    escaping a background task, and a failed broadcast must not skip Web Push.
+    """
+    try:
+        await broadcast_signal_new_realtime(data)
+    except Exception:
+        logger.exception("新信号 WS 广播失败 / new-signal WS broadcast failed (id=%s)", data.get("id"))
+    try:
+        await dispatch_push_async(sig)
+    except Exception:
+        logger.exception("新信号 Web Push 派发失败 / new-signal web push failed (id=%s)", data.get("id"))
+
+
 @router.post("/tradingview", response_model=dict)
 @limiter.limit("60/minute")
-async def tradingview_webhook(request: Request, payload: TradingViewSignal):
+async def tradingview_webhook(request: Request, payload: TradingViewSignal, background_tasks: BackgroundTasks):
     """接收 TradingView 信号：校验密钥 -> 去重 -> 存库 -> 广播。
     Receive a TradingView signal: verify secret -> dedup -> persist -> broadcast.
     """
@@ -169,17 +207,17 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal):
     if deduped_id is not None:
         return {"ok": True, "deduped": True, "id": deduped_id}
 
-    # 3) 推送：只给实时等级的在线用户；FREE 等级要等信号过期后才第一次看到
-    # push: real-time-tier clients only; FREE tier sees it once it expires
-    await broadcast_signal_new_realtime(data)
-    # Web Push 通知：线程池执行，避免阻塞事件循环 / web push off the event loop
-    await dispatch_push_async(sig)
+    # 3) 推送：只给实时等级的在线用户；FREE 等级要等信号过期后才第一次看到。
+    #    WS 广播与 Web Push 都放到响应之后的后台任务里，见 _fan_out_new_signal。
+    # push: real-time-tier clients only; FREE tier sees it once it expires. Both
+    # the WS broadcast and Web Push run after the response, see _fan_out_new_signal.
+    background_tasks.add_task(_fan_out_new_signal, data, sig)
     return {"ok": True, "deduped": False, "id": data["id"]}
 
 
 @router.post("/mt5-signal", response_model=dict)
 @limiter.limit("60/minute")
-async def mt5_signal_webhook(request: Request, payload: TradingViewSignal):
+async def mt5_signal_webhook(request: Request, payload: TradingViewSignal, background_tasks: BackgroundTasks):
     """接收 MT5 信号 EA 推送的交易信号，载荷与 /tradingview 相同。
     密钥用 EA_TOKEN（与行情 EA 同一个），放在 body 的 "secret" 字段；落库 source="mt5"，
     其余去重/广播/推送流程与 /tradingview 完全一致。
@@ -196,8 +234,7 @@ async def mt5_signal_webhook(request: Request, payload: TradingViewSignal):
     if deduped_id is not None:
         return {"ok": True, "deduped": True, "id": deduped_id}
 
-    await broadcast_signal_new_realtime(data)
-    await dispatch_push_async(sig)
+    background_tasks.add_task(_fan_out_new_signal, data, sig)
     return {"ok": True, "deduped": False, "id": data["id"]}
 
 

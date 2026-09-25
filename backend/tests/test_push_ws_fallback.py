@@ -30,6 +30,13 @@ class _FakeManager:
         self.sent.append((user_id, message))
         return ("coro", user_id, message)
 
+    def push_to_users(self, user_ids, message):
+        # 兜底现在整批一次提交（真实现是一次多目标 publish），按人记下来方便断言。
+        # The fallback now submits the whole batch at once; record per user.
+        for uid in user_ids:
+            self.sent.append((uid, message))
+        return ("coro", list(user_ids), message)
+
 
 def _patch(monkeypatch, manager, run=None):
     """把 _ws_fallback 里那两个延迟 import 的目标换掉。
@@ -101,3 +108,19 @@ def test_在线名单读不出来时不抛也不发(monkeypatch):
     _patch(monkeypatch, m)
     pd._ws_fallback(["u1"], "标题", "正文")
     assert m.sent == []
+
+
+def test_整批只提交一次到主循环(monkeypatch):
+    # 以前逐人 run_on_main_loop：每人一次跨线程往返、各自最长等 5 秒，公告这种在线
+    # 几百人的场景要串行排几百次。现在整批一次（push_to_users → 一次多目标 publish）。
+    # One submission to the main loop for the whole batch, not one per user.
+    calls = []
+
+    def run(coro, timeout):
+        calls.append(coro)
+
+    m = _FakeManager(["u1", "u2", "u3"])
+    _patch(monkeypatch, m, run=run)
+    pd._ws_fallback(["u1", "u2", "u3"], "标题", "正文")
+    assert len(calls) == 1
+    assert calls[0][1] == ["u1", "u2", "u3"]

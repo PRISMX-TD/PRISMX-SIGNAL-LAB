@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -183,6 +184,32 @@ app.state.limiter = limiter
 # endpoint decorators; only the rate-limit exception handler is shared.
 app.state.user_limiter = user_limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+# 响应压缩：≥1 KB 的 JSON 才压（信号列表、榜单、订单页这些几十 KB 的负载压完只剩
+# 零头；更小的压了反而多花 CPU）。线上 nginx 没有对 API 开 gzip，这是应用层的兜底。
+# compresslevel 取 5：JSON 在 5 以上压缩率几乎不再提高，CPU 却成倍上涨（Starlette
+# 默认 9）。
+# 对其它通道无影响：Starlette 的 GZipMiddleware 只处理 scope["type"] == "http"，
+# WebSocket 原样放过；text/event-stream 默认不压（本项目也没有 SSE /
+# StreamingResponse 端点）；已带 Content-Encoding 的响应原样透传。
+# 位置：必须是**最里层**（先于 SlowAPIMiddleware 添加）。SlowAPIMiddleware 是
+# BaseHTTPMiddleware，它把下游响应改成分块流式转发（首块 more_body=True）；GZip 若
+# 包在它外面，看到的每个响应都是「流式」，minimum_size 形同虚设——41 字节的
+# {"status":"ok"} 也会被压缩、还丢掉 Content-Length（测试里实测如此）。放在最里层，
+# GZip 直接面对路由返回的完整响应体。CORS 在更外层：预检由它直接应答（远小于
+# 1 KB，不压），普通响应先压缩、再补跨域头，Vary 头两边各自追加、互不覆盖。
+# Response compression for JSON of 1 KB and up (production nginx doesn't gzip
+# the API; this is the application-level fallback). compresslevel 5: past that
+# JSON barely shrinks while CPU climbs (Starlette defaults to 9). WebSockets are
+# untouched (only "http" scopes are handled), text/event-stream is excluded by
+# default (and there are no SSE/streaming endpoints), and responses already
+# carrying Content-Encoding pass through. It must be the *innermost* middleware
+# (added before SlowAPIMiddleware): that one is a BaseHTTPMiddleware which
+# re-streams every response in chunks, so a GZip wrapped around it sees every
+# response as streaming and ignores minimum_size — even a 41-byte body got
+# compressed and lost its Content-Length. Innermost, GZip sees the route's
+# whole body. CORS sits further out: it answers preflights itself (tiny, never
+# compressed) and adds its headers after compression; each appends its own Vary.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
@@ -207,6 +234,14 @@ app.add_middleware(
     # 暴露滑动续期头，跨域下前端 JS 才能读取 / expose the sliding-renewal
     # header so cross-origin frontend JS can read it
     expose_headers=["X-Refreshed-Token"],
+    # 预检结果让浏览器缓存一天：前端每个带 Authorization 头的跨域请求都会先发一次
+    # OPTIONS，不缓存（默认 600 秒）就是隔十分钟每个接口多一个往返。浏览器自己还会
+    # 封顶（Chromium 2 小时、Firefox 24 小时），这里给上限值即可。
+    # Let browsers cache preflights for a day: every cross-origin request with an
+    # Authorization header is preceded by an OPTIONS, which by default (600s) is
+    # re-sent every ten minutes per endpoint. Browsers cap it themselves
+    # (Chromium 2h, Firefox 24h), so the maximum is fine here.
+    max_age=86400,
 )
 
 # 反代真实 IP 还原：挂在同机 Nginx 后面时，把 X-Forwarded-For 里的真实客户端

@@ -99,6 +99,23 @@ def _fresh_gamification_settings_cache():
     invalidate_gamification_cache()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_shared_read_cache():
+    """每个用例前后清掉 services/shared_cache 的读缓存（信号列表、榜单前 50 等）。
+
+    同上一条的道理：这些缓存在没配 Redis 时落在进程内的 shared_state 内存后端，
+    整个测试进程共用一份，一条用例写进去的信号列表会被下一条用例（另一个库）读到。
+
+    Clear services/shared_cache's read caches around every test — same reason as
+    above: without Redis they live in the process-wide shared_state memory
+    backend, so one test's cached signal list would be served to the next test.
+    """
+    from app.services import shared_cache
+    shared_cache.clear_for_tests()
+    yield
+    shared_cache.clear_for_tests()
+
+
 @pytest.fixture()
 def db_session():
     """一次性的内存 SQLite 会话，建全表。

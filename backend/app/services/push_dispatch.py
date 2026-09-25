@@ -1,16 +1,18 @@
 """Web Push 推送派发 / Web Push dispatching.
 当信号引擎或 webhook 产生新信号时调用 dispatch_push 遍历匹配用户并推送。
 
-注意：dispatch_push 内部有阻塞网络 IO（逐个订阅调用推送服务），
-必须放在线程池里执行（见 dispatch_push_async），不能直接在事件循环中调用。
-Note: dispatch_push does blocking network IO (one HTTP call per subscription),
-so it must run in a thread pool (see dispatch_push_async), never directly on
-the event loop.
+注意：dispatch_push 内部有阻塞网络 IO（每个订阅一次推送服务请求，有界并发，见
+_send_all），必须放在线程池里执行（见 dispatch_push_async），不能直接在事件循环中调用。
+Note: dispatch_push does blocking network IO (one HTTP call per subscription,
+bounded-concurrent, see _send_all), so it must run in a thread pool (see
+dispatch_push_async), never directly on the event loop.
 """
 import json
 import logging
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -320,6 +322,10 @@ def _matched_user_ids(db, cat: str, symbol: str) -> set[str]:
     return realtime_ids
 
 
+# 单条 Web Push 请求的时限（秒），与 FCM 那条路的 _FCM_TIMEOUT 同一个量级。
+# Per-request Web Push timeout, in line with the FCM path's _FCM_TIMEOUT.
+_WEBPUSH_TIMEOUT = 10
+
 def _webpush_one(
     sub: PushSubscription, payload: str, pem: str, vapid_claims: dict, headers: dict
 ) -> tuple[bool, bool]:
@@ -361,6 +367,11 @@ def _webpush_one(
             # Confirmed in production logs.
             vapid_claims=dict(vapid_claims),
             headers=headers,
+            # 不传就是 requests 的「永不超时」：推送服务那头一条连接挂住，这个线程
+            # 就永远等下去，整批推送（以及它占着的线程池名额）一起卡死。
+            # Without it requests waits forever: one hung push-service connection
+            # would pin this thread, the whole batch and its pool slot with it.
+            timeout=_WEBPUSH_TIMEOUT,
         )
         return True, False
     except WebPushException as e:
@@ -390,6 +401,9 @@ _FCM_TIMEOUT = 10.0
 # object refreshes its own token; the client keeps a connection pool). Guarded
 # by a lock because dispatch runs on thread-pool workers.
 _fcm_lock = threading.Lock()
+# 访问令牌刷新用的锁（与上面建上下文的锁分开，免得刷新时挡住只读上下文的线程）。
+# Guards the access-token refresh (separate from the context lock above).
+_fcm_token_lock = threading.Lock()
 # None = 本进程还没尝试过；_FCM_UNAVAILABLE = 尝试过、配置不可用（失败也缓存，
 # 否则每条 App 订阅都要重读一次服务账号文件）；元组 = 可用。
 # None = not attempted yet in this process; _FCM_UNAVAILABLE = attempted and
@@ -495,9 +509,15 @@ def _fcm_access_token(creds) -> str:
     The current access token, refreshed in place when stale (google-auth owns
     the expiry bookkeeping)."""
     if not creds.valid:
-        from google.auth.transport.requests import Request
+        # 派发现在是多线程并发发送（见 _send_all），同一份凭证可能被几条线程同时发现
+        # 过期；加锁让刷新只发生一次，其余线程拿刷新后的令牌。
+        # Dispatch sends concurrently now (see _send_all), so several threads can find
+        # the shared credentials stale at once; the lock makes the refresh happen once.
+        with _fcm_token_lock:
+            if not creds.valid:
+                from google.auth.transport.requests import Request
 
-        creds.refresh(Request())
+                creds.refresh(Request())
     return creds.token
 
 
@@ -680,6 +700,95 @@ def _send_one(
     return _webpush_one(sub, payload, pem, vapid_claims, headers)
 
 
+# ---------- 批量发送 / batched sending ----------
+# 以前每个派发函数都是「一个会话从查偏好一路攥到发完最后一条」+「逐条订阅串行 HTTP」：
+# 订阅上千时一次派发要几十秒到几分钟，这期间一直占着一条数据库连接（池子是有限的），
+# 后面的订阅也只能干等前面那条慢请求。现在分三段：
+#   ① 查库：判定 + 取订阅，取完就把会话关掉（订阅行拷成只读快照 _SubRef）；
+#   ② 发送：有界并发（_SEND_CONCURRENCY 条线程），每条请求自带时限；
+#   ③ 清理：真有失效订阅才另开一个会话删掉。
+# Every dispatcher used to hold one DB session from the pref lookup to the last
+# send, sending one subscription at a time — tens of seconds to minutes with
+# thousands of subscriptions, a pooled connection pinned throughout, and every
+# subscription queued behind the slowest request. Now: ① query and snapshot the
+# subscriptions, then close the session; ② send with bounded concurrency, each
+# request with its own timeout; ③ open a fresh session only if something must be
+# pruned.
+
+# 同时在途的推送请求数。推送服务（FCM / Apple / Mozilla）对单个来源的并发很宽松，
+# 16 已足够把上千条订阅压到秒级，又不至于在 2 核机器上开出一大片线程。
+# Concurrent in-flight push requests: push services tolerate far more, and 16
+# already turns thousands of subscriptions into seconds without a thread flood.
+_SEND_CONCURRENCY = 16
+
+
+@dataclass(frozen=True)
+class _SubRef:
+    """一条订阅的只读快照：会话关掉之后发送阶段只读这几个字段，不再碰 ORM 对象。
+    Read-only snapshot of a subscription, so sending never touches ORM rows
+    after the session is closed."""
+    id: str
+    user_id: str
+    endpoint: str
+    keys_p256dh: str
+    keys_auth: str
+
+
+def _snapshot(subs) -> list[_SubRef]:
+    return [
+        _SubRef(
+            id=s.id, user_id=s.user_id, endpoint=s.endpoint,
+            keys_p256dh=s.keys_p256dh, keys_auth=s.keys_auth,
+        )
+        for s in subs
+    ]
+
+
+def _send_guarded(sub, payload: str, pem: str, vapid_claims: dict, headers: dict) -> tuple[bool, bool]:
+    """_send_one 外面再兜一层：webpush 的超时（requests.Timeout）、连接错误这类非
+    WebPushException 的异常以前会一路冒到派发函数最外层，把**整批**剩下的订阅连同
+    清理记账一起放弃。现在只算这一条失败、不清理（网络问题说明不了订阅失效）。
+    A guard around _send_one: a requests Timeout / ConnectionError used to escape to
+    the dispatcher's outer except and abandon the rest of the batch and its pruning.
+    Now it only fails this one row, unpruned — a network error says nothing about
+    the subscription."""
+    try:
+        return _send_one(sub, payload, pem, vapid_claims, headers)
+    except Exception as e:
+        logger.warning("[push] send failed sub=%s: %s", getattr(sub, "id", "?"), e)
+        return False, False
+
+
+def _send_all(subs, payload: str, pem: str, vapid_claims: dict, headers: dict) -> list[tuple[bool, bool]]:
+    """有界并发地把同一条 payload 发给这批订阅，返回与 subs 一一对应的
+    (是否发送成功, 是否应清理)。
+    Send one payload to these subscriptions with bounded concurrency; returns
+    (sent ok, should prune) per subscription, in order."""
+    subs = list(subs)
+    if not subs:
+        return []
+    if len(subs) == 1:
+        return [_send_guarded(subs[0], payload, pem, vapid_claims, headers)]
+    workers = min(_SEND_CONCURRENCY, len(subs))
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="push-send") as pool:
+        return list(pool.map(lambda sub: _send_guarded(sub, payload, pem, vapid_claims, headers), subs))
+
+
+def _prune_subscriptions(sub_ids: list[str]) -> None:
+    """删掉失效订阅（另开一个短会话；发送阶段不持有会话）。
+    Delete dead subscriptions in a short-lived session of their own."""
+    if not sub_ids:
+        return
+    db = SessionLocal()
+    try:
+        db.query(PushSubscription).filter(
+            PushSubscription.id.in_(sub_ids)
+        ).delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
 # ---------- 连不上 FCM 的设备：同一条通知经 WebSocket 再送一份 ----------
 # 大陆网络连不上 Google 的服务器，那些设备永远拿不到 FCM token，也就永远不会有
 # PushSubscription 行——上面每个推送函数里的 `if not subs: return` 对它们恒成立：
@@ -730,8 +839,13 @@ def _ws_fallback(
         if tag:
             data["tag"] = tag
         message = {"type": WS_PUSH_FALLBACK, "data": data}
-        for uid in targets:
-            run_on_main_loop(manager.push_to_client(uid, message), timeout=_WS_FALLBACK_TIMEOUT)
+        # 整批一次提交到主循环（push_to_users：多 worker 时一次 publish 带上名单）。
+        # 以前是逐人 run_on_main_loop，每人一次跨线程往返、各自最长等 5 秒，公告这种
+        # 在线几百人的场景要串行排几百次。
+        # One submission for the whole batch (push_to_users: a single publish with
+        # the target list). It used to be one cross-thread round-trip per user, each
+        # allowed 5s, serially — hundreds of them for an announcement.
+        run_on_main_loop(manager.push_to_users(targets, message), timeout=_WS_FALLBACK_TIMEOUT)
         logger.debug("[push] WS 兜底下发 %d 个在线用户 / mirrored to %d online user(s)",
                      len(targets), len(targets))
     except Exception:
@@ -752,18 +866,21 @@ def dispatch_push(signal: Signal) -> None:
         logger.debug("[push] VAPID keys not configured, skipping push dispatch")
         return
 
-    db = SessionLocal()
     try:
-        user_ids = _matched_user_ids(db, cat, signal.symbol)
-        logger.debug("[push] category %r symbol %r matched %d user(s)", cat, signal.symbol, len(user_ids))
-        if not user_ids:
-            return
-
-        subs = (
-            db.query(PushSubscription)
-            .filter(PushSubscription.user_id.in_(user_ids))
-            .all()
-        )
+        # ① 判定 + 取订阅，取完就关会话（见「批量发送」）/ query, then close the session
+        db = SessionLocal()
+        try:
+            user_ids = _matched_user_ids(db, cat, signal.symbol)
+            logger.debug("[push] category %r symbol %r matched %d user(s)", cat, signal.symbol, len(user_ids))
+            if not user_ids:
+                return
+            subs = _snapshot(
+                db.query(PushSubscription)
+                .filter(PushSubscription.user_id.in_(user_ids))
+                .all()
+            )
+        finally:
+            db.close()
 
         title = f"新信号 {signal.symbol}"
         body = f"{signal.side} · {cat}"
@@ -775,8 +892,6 @@ def dispatch_push(signal: Signal) -> None:
         # 匹配到的这批人就是"该收到这条信号"的人，与有没有推送订阅无关。
         _ws_fallback(user_ids, title, body)
 
-        failed_ids: list[str] = []
-        sent = 0
         # 推送头：高紧急度要求系统尽快下发（即使手机处于 Doze 省电休眠也尝试唤醒），
         # TTL 设为信号存活时长，使离线/休眠设备在该窗口内仍能收到，过期后推送服务自动丢弃。
         # Push headers: high urgency asks the system to deliver ASAP (even under Doze),
@@ -785,24 +900,16 @@ def dispatch_push(signal: Signal) -> None:
             "Urgency": "high",
             "TTL": str(settings.SIGNAL_EXPIRE_MINUTES * 60),
         }
-        for sub in subs:
-            ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
-            if ok:
-                sent += 1
-            if stale:
-                failed_ids.append(sub.id)
+        # ② 有界并发发送 / bounded-concurrency send
+        results = _send_all(subs, payload, pem, vapid_claims, push_headers)
+        sent = sum(1 for ok, _stale in results if ok)
+        failed_ids = [sub.id for sub, (_ok, stale) in zip(subs, results) if stale]
         logger.info("[push] signal %s (%s): sent=%d failed=%d", signal.symbol, cat, sent, len(failed_ids))
 
-        # 清理失败/过期的订阅 / remove stale subscriptions
-        if failed_ids:
-            db.query(PushSubscription).filter(
-                PushSubscription.id.in_(failed_ids)
-            ).delete(synchronize_session=False)
-            db.commit()
+        # ③ 清理失败/过期的订阅 / remove stale subscriptions
+        _prune_subscriptions(failed_ids)
     except Exception:
         logger.exception("[push] Error dispatching push notifications")
-    finally:
-        db.close()
 
 
 # ---------- 事件类通知（单用户）/ event notifications (single user) ----------
@@ -913,14 +1020,17 @@ def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) ->
     pem = settings.vapid_private_key
     if not pem or not settings.VAPID_PUBLIC_KEY:
         return
-    db = SessionLocal()
     try:
-        if not _event_prefs_allow(db, user_id, event_type):
-            return
+        db = SessionLocal()
+        try:
+            if not _event_prefs_allow(db, user_id, event_type):
+                return
+            subs = _snapshot(db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all())
+        finally:
+            db.close()
         # 判定已经过了，先把 WS 兜底发出去——下面那句 `if not subs: return` 正是
         # 大陆设备永远走不通的地方。
         _ws_fallback([user_id], title, body)
-        subs = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
         if not subs:
             return
         vapid_claims = {"sub": settings.VAPID_SUBJECT}
@@ -928,20 +1038,10 @@ def dispatch_event_push(user_id: str, event_type: str, title: str, body: str) ->
         # 账户/交易事件时效性不如新信号那么强，TTL 给固定 1 小时即可。
         # Account/trading events aren't as time-critical as a fresh signal; a flat 1h TTL is enough.
         push_headers = {"Urgency": "high", "TTL": str(3600)}
-        failed_ids: list[str] = []
-        for sub in subs:
-            _ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
-            if stale:
-                failed_ids.append(sub.id)
-        if failed_ids:
-            db.query(PushSubscription).filter(
-                PushSubscription.id.in_(failed_ids)
-            ).delete(synchronize_session=False)
-            db.commit()
+        results = _send_all(subs, payload, pem, vapid_claims, push_headers)
+        _prune_subscriptions([sub.id for sub, (_ok, stale) in zip(subs, results) if stale])
     except Exception:
         logger.exception("[push] dispatch_event_push error (user=%s, event=%s)", user_id, event_type)
-    finally:
-        db.close()
 
 
 async def dispatch_event_push_async(user_id: str, event_type: str, title: str, body: str) -> None:
@@ -969,27 +1069,30 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
     pem = settings.vapid_private_key
     if not pem or not settings.VAPID_PUBLIC_KEY:
         return
-    db = SessionLocal()
     try:
-        user = db.query(User).filter(User.id == recipient_id).first()
-        if not user:
-            return
-        # 工单回复不看通知开关/白名单（历史行为），但推送时段照样遵守——时段
-        # 的意义就是"这段时间外别吵我"，工单回复也不例外。没有偏好行 = 没设过
-        # 时段，照常推。
-        # Ticket replies ignore the master switch/whitelists (historical
-        # behavior) but do honor the push window — its whole point is "don't
-        # buzz me outside these hours", tickets included. No pref row = no
-        # window configured, push as before.
-        pref = db.query(NotificationPref).filter(NotificationPref.user_id == recipient_id).first()
-        if pref is not None and not _within_push_window(pref):
-            return
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == recipient_id).first()
+            if not user:
+                return
+            # 工单回复不看通知开关/白名单（历史行为），但推送时段照样遵守——时段
+            # 的意义就是"这段时间外别吵我"，工单回复也不例外。没有偏好行 = 没设过
+            # 时段，照常推。
+            # Ticket replies ignore the master switch/whitelists (historical
+            # behavior) but do honor the push window — its whole point is "don't
+            # buzz me outside these hours", tickets included. No pref row = no
+            # window configured, push as before.
+            pref = db.query(NotificationPref).filter(NotificationPref.user_id == recipient_id).first()
+            if pref is not None and not _within_push_window(pref):
+                return
+            subs = _snapshot(db.query(PushSubscription).filter(PushSubscription.user_id == recipient_id).all())
+        finally:
+            db.close()
         # 双语标题与正文 / bilingual title and body
         title = "New ticket reply / 工单有新回复"
         body = f"{replier_email} replied to your ticket / {replier_email} 回复了你的工单"
         # 判定已经过了，WS 兜底先发（下面那句 `if not subs: return` 对大陆设备恒成立）。
         _ws_fallback([recipient_id], title, body, url="/support")
-        subs = db.query(PushSubscription).filter(PushSubscription.user_id == recipient_id).all()
         if not subs:
             return
         vapid_claims = {"sub": settings.VAPID_SUBJECT}
@@ -1000,20 +1103,10 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
             "data": {"ticketId": ticket_id},
         })
         push_headers = {"Urgency": "high", "TTL": str(3600)}
-        failed_ids: list[str] = []
-        for sub in subs:
-            _ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
-            if stale:
-                failed_ids.append(sub.id)
-        if failed_ids:
-            db.query(PushSubscription).filter(
-                PushSubscription.id.in_(failed_ids)
-            ).delete(synchronize_session=False)
-            db.commit()
+        results = _send_all(subs, payload, pem, vapid_claims, push_headers)
+        _prune_subscriptions([sub.id for sub, (_ok, stale) in zip(subs, results) if stale])
     except Exception:
         logger.exception("[push] dispatch_ticket_reply error (ticket=%s, user=%s)", ticket_id, recipient_id)
-    finally:
-        db.close()
 
 
 # ---------- 公告推送（全体订阅用户）/ announcement push (every subscribed user) ----------
@@ -1030,12 +1123,23 @@ def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> N
     pem = settings.vapid_private_key
     if not pem or not settings.VAPID_PUBLIC_KEY:
         return
-    db = SessionLocal()
     try:
-        user_ids = [row[0] for row in db.query(PushSubscription.user_id).distinct().all()]
-        # WS 兜底的名单不能从 PushSubscription 里取：没有订阅的设备（大陆那条路）
-        # 在那张表里根本不存在。改从"此刻在线的人"出发，走同一套判定（批量版）。
-        ws_targets = _bulk_prefs_allow(db, list(_online_user_ids()), EVENT_ANNOUNCEMENT)
+        # 判定与取订阅都批量做完、关掉会话再发（见 _bulk_prefs_allow 与「批量发送」）：
+        # 逐人三查时订阅用户过千就是几千条查询排在真正的发送前面，而且整段一直攥着
+        # 一条数据库连接。
+        # Verdicts and subscriptions are fetched in bulk and the session closed
+        # before any sending (see _bulk_prefs_allow and "batched sending").
+        db = SessionLocal()
+        try:
+            user_ids = [row[0] for row in db.query(PushSubscription.user_id).distinct().all()]
+            # WS 兜底的名单不能从 PushSubscription 里取：没有订阅的设备（大陆那条路）
+            # 在那张表里根本不存在。改从"此刻在线的人"出发，走同一套判定（批量版）。
+            ws_targets = _bulk_prefs_allow(db, list(_online_user_ids()), EVENT_ANNOUNCEMENT)
+            targets = _bulk_prefs_allow(db, user_ids, EVENT_ANNOUNCEMENT) if user_ids else []
+            subs_by_user = _subs_by_user(db, targets) if targets else {}
+            subs = _snapshot(sub for uid in targets for sub in subs_by_user.get(uid, []))
+        finally:
+            db.close()
         if ws_targets:
             _ws_fallback(ws_targets, title, body,
                          url=f"/announcements/{announcement_id}",
@@ -1052,31 +1156,12 @@ def dispatch_announcement_push(announcement_id: str, title: str, body: str) -> N
         }, ensure_ascii=False)
         # 公告不紧急：正常优先级，一天内送达即可。/ Not urgent: normal priority, a day's TTL.
         push_headers = {"Urgency": "normal", "TTL": str(86400)}
-        failed_ids: list[str] = []
-        sent = 0
-        # 判定与取订阅都批量做完再发（见 _bulk_prefs_allow）：这一段在线程池里
-        # 串行跑，逐人三查时订阅用户过千就是几千条查询排在真正的发送前面。
-        # Both the verdicts and the subscriptions are fetched in bulk before any
-        # sending (see _bulk_prefs_allow): this pass is serial inside a worker
-        # thread, and the per-user queries used to queue up ahead of the sends.
-        targets = _bulk_prefs_allow(db, user_ids, EVENT_ANNOUNCEMENT)
-        subs_by_user = _subs_by_user(db, targets)
-        for uid in targets:
-            for sub in subs_by_user.get(uid, []):
-                ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
-                sent += int(ok)
-                if stale:
-                    failed_ids.append(sub.id)
-        if failed_ids:
-            db.query(PushSubscription).filter(
-                PushSubscription.id.in_(failed_ids)
-            ).delete(synchronize_session=False)
-            db.commit()
+        results = _send_all(subs, payload, pem, vapid_claims, push_headers)
+        sent = sum(1 for ok, _stale in results if ok)
+        _prune_subscriptions([sub.id for sub, (_ok, stale) in zip(subs, results) if stale])
         logger.info("[push] announcement %s pushed to %d subscriptions", announcement_id, sent)
     except Exception:
         logger.exception("[push] dispatch_announcement_push error (announcement=%s)", announcement_id)
-    finally:
-        db.close()
 
 
 async def dispatch_announcement_push_async(announcement_id: str, title: str, body: str) -> None:
@@ -1119,41 +1204,29 @@ def dispatch_test_push(user_id: str) -> dict:
 
     db = SessionLocal()
     try:
-        subs = db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all()
-        if not subs:
-            return {"sent": 0, "failed": 0, "pruned": 0}
-
-        vapid_claims = {"sub": settings.VAPID_SUBJECT}
-        payload = json.dumps({
-            "title": "测试通知 / Test notification",
-            "body": "推送链路正常。/ Push delivery is working.",
-            "icon": "/icons/icon-192.png",
-            "data": {"url": "/account#notifications"},
-        })
-        push_headers = {"Urgency": "high", "TTL": "60"}
-
-        sent = 0
-        failed = 0
-        stale_ids: list[str] = []
-        for sub in subs:
-            # _webpush_one 内部对 vapid_claims 做 per-subscription 复制，
-            # 继承 aud 复用修复 / _webpush_one copies vapid_claims per
-            # subscription, inheriting the aud-reuse fix.
-            ok, stale = _send_one(sub, payload, pem, vapid_claims, push_headers)
-            if ok:
-                sent += 1
-            else:
-                failed += 1
-            if stale:
-                stale_ids.append(sub.id)
-
-        if stale_ids:
-            db.query(PushSubscription).filter(
-                PushSubscription.id.in_(stale_ids)
-            ).delete(synchronize_session=False)
-            db.commit()
-
-        logger.info("[push] test push user=%s sent=%d failed=%d pruned=%d", user_id, sent, failed, len(stale_ids))
-        return {"sent": sent, "failed": failed, "pruned": len(stale_ids)}
+        subs = _snapshot(db.query(PushSubscription).filter(PushSubscription.user_id == user_id).all())
     finally:
         db.close()
+    if not subs:
+        return {"sent": 0, "failed": 0, "pruned": 0}
+
+    vapid_claims = {"sub": settings.VAPID_SUBJECT}
+    payload = json.dumps({
+        "title": "测试通知 / Test notification",
+        "body": "推送链路正常。/ Push delivery is working.",
+        "icon": "/icons/icon-192.png",
+        "data": {"url": "/account#notifications"},
+    })
+    push_headers = {"Urgency": "high", "TTL": "60"}
+
+    # _webpush_one 内部对 vapid_claims 做 per-subscription 复制，
+    # 继承 aud 复用修复 / _webpush_one copies vapid_claims per
+    # subscription, inheriting the aud-reuse fix.
+    results = _send_all(subs, payload, pem, vapid_claims, push_headers)
+    sent = sum(1 for ok, _stale in results if ok)
+    failed = len(results) - sent
+    stale_ids = [sub.id for sub, (_ok, stale) in zip(subs, results) if stale]
+    _prune_subscriptions(stale_ids)
+
+    logger.info("[push] test push user=%s sent=%d failed=%d pruned=%d", user_id, sent, failed, len(stale_ids))
+    return {"sent": sent, "failed": failed, "pruned": len(stale_ids)}

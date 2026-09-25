@@ -157,7 +157,22 @@ def _hash_legacy_api_tokens() -> None:
 #          哪触发"（指令），挂单触发之后两者同时有值且通常不等。
 # rev 28 — orders.source（下单来源：STRATEGY = 个人策略信号；NULL = 按 signal_id 判跟单 /
 #          图表）。可空、不回填，纯 ADD COLUMN，不产生可感知的停机。
-CURRENT_SCHEMA_REV = 28
+# rev 29 — 索引整理（无列变更）：
+#          + idx_signals_created_at (signals.created_at)：信号列表按 created_at 倒序取
+#            前 50、每日计数按 created_at 取近 7 天、回放按 created_at 取窗口。
+#          + idx_signals_source_created (signals.source, created_at)：胜率与策略分析
+#            都先按 source IN (tradingview, mt5) 过滤再按时间取窗口。
+#          - idx_candle_symbol_interval_t：与唯一约束 uq_candle_symbol_interval_t 同列
+#            同序，是一份纯冗余的索引——candles 是全库最大的表，每写一根 K 线都要多
+#            维护一棵同样的 B 树。代码里没有任何地方按名字引用它（查询走同列的唯一
+#            索引，效果完全相同）。
+#          两条新索引建在普通 CREATE INDEX IF NOT EXISTS 里（与其余索引同一个事务块）：
+#          signals 是小表（每天几百行），建索引亚秒级；CONCURRENTLY 不能在事务里跑，
+#          失败还会留下一条 INVALID 索引让 IF NOT EXISTS 从此跳过，为小表不值得。
+#          删冗余索引单独走：Postgres 上用自动提交连接执行 DROP INDEX CONCURRENTLY，
+#          不拿 ACCESS EXCLUSIVE、不挡 K 线写入；失败只记警告不中断启动（冗余索引多留
+#          一阵无害），见 _drop_redundant_candle_index。
+CURRENT_SCHEMA_REV = 29
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1384,12 +1399,60 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_orders_user_status_created "
             "ON orders(user_id, status, created_at)"
         ))
+        # rev 29：信号按时间取数的两条索引（见 CURRENT_SCHEMA_REV 处的说明）。第二条
+        # 建在本函数补出来的 signals.source 上，所以同样必须留在这个块里。
+        # rev 29: the two time-ordered signal indexes; the second sits on
+        # signals.source, a column this function adds, so it belongs here too.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_signals_created_at ON signals(created_at)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_signals_source_created "
+            "ON signals(source, created_at)"
+        ))
+
+    _drop_redundant_candle_index(is_postgres)
 
     # 全部步骤跑完才记版本号：中途抛异常就不写，下次启动会重跑（所有步骤幂等）。
     # Only recorded after every step succeeded: an exception midway leaves the marker
     # untouched so the next boot retries (every step is idempotent).
     _write_schema_rev(CURRENT_SCHEMA_REV)
     logger.info("列迁移完成，schema_rev=%d", CURRENT_SCHEMA_REV)
+
+
+def _drop_redundant_candle_index(is_postgres: bool) -> None:
+    """rev 29：删掉与唯一约束同列的冗余 K 线索引。幂等（IF EXISTS）。
+
+    Postgres 上用**自动提交**连接跑 DROP INDEX CONCURRENTLY：CONCURRENTLY 不能在
+    事务里执行，而普通 DROP INDEX 要拿 candles 的 ACCESS EXCLUSIVE 锁——candles 是
+    EA 持续写入的最大表，排在一个长查询后面等锁时会连带挡住后面所有 K 线读写。
+    CONCURRENTLY 只等已有事务结束，不挡新请求。
+
+    失败（锁等不到、权限、连接池不支持等）只记警告、不抛：这条索引是冗余的，多留
+    着只是写入稍慢，绝不值得为它让服务起不来（迁移跑在 uvicorn bind 端口之前）。
+    这种情况下 schema_rev 照样会写成 29，之后不会再自动重试，需要时手工执行：
+        DROP INDEX CONCURRENTLY IF EXISTS idx_candle_symbol_interval_t;
+
+    rev 29: drop the candle index that duplicates the unique constraint. On
+    Postgres this runs as DROP INDEX CONCURRENTLY on an autocommit connection
+    (CONCURRENTLY can't run inside a transaction, and a plain DROP takes an
+    ACCESS EXCLUSIVE lock on the busiest table). A failure only logs — the
+    index is redundant, never worth a server that won't start; the statement
+    above can be run by hand.
+    """
+    try:
+        if is_postgres:
+            with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+                conn.execute(text("DROP INDEX CONCURRENTLY IF EXISTS idx_candle_symbol_interval_t"))
+        else:
+            with engine.begin() as conn:
+                conn.execute(text("DROP INDEX IF EXISTS idx_candle_symbol_interval_t"))
+    except Exception:
+        logger.warning(
+            "rev 29：删除冗余索引 idx_candle_symbol_interval_t 失败（不影响启动，可稍后手工执行 "
+            "DROP INDEX CONCURRENTLY IF EXISTS idx_candle_symbol_interval_t）",
+            exc_info=True,
+        )
 
 
 def _disable_legacy_strategies() -> None:

@@ -43,8 +43,22 @@ from datetime import datetime, timezone
 from sqlalchemy import or_
 
 from app.models import MT5Account
+from app.services.shared_cache import SharedVersion
 
 logger = logging.getLogger("prismx.gateway.binding")
+
+# gateway 轮询循环里「(user_id, login) 映射」的进程内缓存靠这个版本号跨 worker
+# 失效（读侧见 routers/gateway.gateway_positions_loop 的 _gateway_accounts）。
+# 绑定、解绑、撤销提交之后调用 invalidate_gateway_accounts()，轮询所在的 worker
+# 最迟约 1 秒就不再读已撤销的账号，新绑定的账号也立刻开始轮询。
+# Cross-worker invalidation for the gateway loop's cached (user_id, login)
+# mapping (read side: _gateway_accounts in routers/gateway). Call
+# invalidate_gateway_accounts() after a bind, unbind or revocation commits.
+gateway_accounts_version = SharedVersion("gateway_accounts")
+
+
+def invalidate_gateway_accounts() -> None:
+    gateway_accounts_version.bump()
 
 # 撤销原因。存进 mt5_accounts.revoked_reason，前端据此选提示文案。
 # Revocation reasons, stored in mt5_accounts.revoked_reason; the frontend picks
@@ -85,6 +99,7 @@ def mark_removed(db, row) -> None:
     row.revoked_reason = REASON_USER_REMOVED
     row.online = False
     db.commit()
+    invalidate_gateway_accounts()
 
 
 def restore_removed(row) -> bool:
@@ -143,6 +158,7 @@ def revoke(db, row, reason: str) -> bool:
     row.revoked_at = datetime.now(timezone.utc)
     row.revoked_reason = reason
     db.commit()
+    invalidate_gateway_accounts()
     logger.warning(
         "Gateway 绑定已撤销: user=%s login=%s reason=%s —— 该账号已停止下单与轮询，"
         "需用户重新验证主密码",

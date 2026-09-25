@@ -211,7 +211,9 @@ async def ws_client(websocket: WebSocket):
         if cached_quotes:
             await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
         # 连接即补推全站统一报价快照（展示用）/ re-push the site-wide quotes snapshot (display)
-        cached_global_quotes = quotes_store.get_all()
+        # 配了 Redis 时这是一次同步往返，经线程池读，别在事件循环上等。
+        # With Redis this is a blocking round-trip; read it via the thread pool.
+        cached_global_quotes = await quotes_store.get_all_async()
         if cached_global_quotes:
             await websocket.send_json({"type": "GLOBAL_QUOTES", "data": cached_global_quotes})
         while True:

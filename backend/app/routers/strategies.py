@@ -347,7 +347,7 @@ def get_coverage(
 
 
 @router.get("/symbols", response_model=dict)
-async def list_candidate_symbols(
+def list_candidate_symbols(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -368,6 +368,12 @@ async def list_candidate_symbols(
     without arguments computes a row per (symbol, interval) pair when all the
     page wants is the names. The statistics are fetched by the backtest panel for
     the one pair it's showing.
+
+    普通 def 而不是 async def：这里全是同步查库（鉴权、K 线品种），放在 async
+    函数里会直接卡在事件循环上；普通 def 由 FastAPI 放进线程池执行。
+    A plain def, not async: everything here is blocking DB work (access check,
+    candle symbols), which inside an async def would run on the event loop
+    itself; FastAPI runs a plain def in its thread pool.
     """
     _check_access(db, user)
     return {

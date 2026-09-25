@@ -14,6 +14,8 @@ lives in the candles table.
 import json
 import time
 
+from starlette.concurrency import run_in_threadpool
+
 from app.services import shared_state
 
 MAX_BARS = 500
@@ -63,27 +65,7 @@ def merge_bars(symbol: str, interval: str, bars: list[dict]) -> None:
     is dropped rather than building a disjointed fragment on an empty list.
     """
     if shared_state.enabled():
-        r = shared_state._redis()
-        k = _key(symbol, interval)
-        if r.llen(k) == 0:
-            return
-        for b in bars:
-            last_raw = r.lindex(k, -1)
-            last_t = json.loads(last_raw)["t"] if last_raw else None
-            body = json.dumps(b, default=str)
-            if last_t is not None and b["t"] == last_t:
-                r.lset(k, -1, body)
-            elif last_t is None or b["t"] > last_t:
-                r.rpush(k, body)
-            else:
-                # 落在中间的旧 bar：进程内实现按时间戳定位覆盖；Redis 侧只覆盖尾部那根，
-                # 更早的一律忽略（tick 只会带最近两根，这条分支实际不会走到）。
-                # An older bar landing mid-series: the in-memory path overwrites by
-                # timestamp; here only the tail is patched (ticks carry the last two
-                # bars, so this branch is theoretical).
-                continue
-        r.ltrim(k, -MAX_BARS, -1)
-        r.set(_ts_key(symbol, interval), str(time.time()))
+        _merge_bars_redis(symbol, interval, bars)
         return
     key = (symbol, interval)
     series = _candles.get(key)
@@ -100,11 +82,97 @@ def merge_bars(symbol: str, interval: str, bars: list[dict]) -> None:
     _updated_at[key] = time.time()
 
 
+def _merge_bars_redis(symbol: str, interval: str, bars: list[dict]) -> None:
+    """Redis 侧的 tick 合并：一次读尾部、本地算好、一个 pipeline 写回。
+
+    以前是 llen 一次，再**每根 bar** 一次 lindex + 一次 lset/rpush，最后 ltrim、set
+    各一次——而且是在 async 接口里同步跑的。现在固定两次往返：先 LINDEX -1 拿到
+    尾部那根（它为空就等价于 llen == 0，没有基线，丢弃这次 tick），然后在本地按
+    原来的逐根规则推演「尾部时间戳」，把要做的 lset/rpush 连同 ltrim、时间戳写入
+    一次性发出去。
+    Tick merge on Redis: read the tail once, work out the edits locally, write them
+    back in one pipeline. It used to be an llen, then an lindex plus an lset/rpush
+    per bar, then ltrim and set — synchronously inside an async endpoint. Now it is
+    two round-trips: LINDEX -1 fetches the tail (None is the same as llen == 0: no
+    baseline, drop the tick), the per-bar rule is replayed locally against a
+    running "tail timestamp", and the resulting lset/rpush plus ltrim and the
+    timestamp go out together.
+
+    读与写之间没有加锁：同一 (品种, 周期) 的写入来自 EA 的同步 WebRequest，一次
+    发完才发下一次，跨 worker 并发写同一条序列的窗口实际上不存在；进程内还有
+    routers/chart.py 的 per-key 锁。
+    No lock between the read and the write: writes to one (symbol, interval) come
+    from the EA's synchronous WebRequest, one after another, so two workers merging
+    the same series concurrently does not happen in practice; within a process the
+    per-key lock in routers/chart.py also applies.
+    """
+    r = shared_state._redis()
+    k = _key(symbol, interval)
+    last_raw = r.lindex(k, -1)
+    if last_raw is None:
+        return
+    try:
+        last_t = json.loads(last_raw)["t"]
+    except (ValueError, TypeError, KeyError):
+        last_t = None
+    pipe = r.pipeline()
+    for b in bars:
+        body = json.dumps(b, default=str)
+        if last_t is not None and b["t"] == last_t:
+            pipe.lset(k, -1, body)
+        elif last_t is None or b["t"] > last_t:
+            pipe.rpush(k, body)
+            last_t = b["t"]
+        # 落在中间的旧 bar：进程内实现按时间戳定位覆盖；Redis 侧只覆盖尾部那根，
+        # 更早的一律忽略（tick 只会带最近两根，这条分支实际不会走到）。
+        # An older bar landing mid-series: the in-memory path overwrites by
+        # timestamp; here only the tail is patched (ticks carry the last two
+        # bars, so this branch is theoretical).
+    pipe.ltrim(k, -MAX_BARS, -1)
+    pipe.set(_ts_key(symbol, interval), str(time.time()))
+    pipe.execute()
+
+
 def get_latest(symbol: str, interval: str, n: int = 2) -> dict:
+    """最近 n 根 + 最后写入时刻。**配了 Redis 时是阻塞调用**，协程里用 get_latest_async。
+    The latest n bars and last-write time. Blocking with Redis on; see get_latest_async."""
     if shared_state.enabled():
         r = shared_state._redis()
-        raw = r.lrange(_key(symbol, interval), -n, -1)
-        ts = r.get(_ts_key(symbol, interval))
-        return {"bars": [json.loads(x) for x in raw], "updatedAt": float(ts) if ts else None}
+        pipe = r.pipeline()
+        pipe.lrange(_key(symbol, interval), -n, -1)
+        pipe.get(_ts_key(symbol, interval))
+        raw, ts = pipe.execute()
+        return {"bars": [json.loads(x) for x in raw or []], "updatedAt": float(ts) if ts else None}
     key = (symbol, interval)
     return {"bars": _candles.get(key, [])[-n:], "updatedAt": _updated_at.get(key)}
+
+
+# ---- 协程入口 / coroutine entry points ----
+# 配了 Redis 时上面三个函数都是同步网络往返（客户端 socket_timeout=2 秒），在 async
+# 接口里直接调，Redis 一抖就把整个事件循环冻住。这里配了 Redis 才挪进线程池；
+# 进程内 dict 的路径是纯内存操作，照旧在事件循环上直接跑（不白跳线程，也不给
+# merge_bars 的「先建索引再按索引写」平添撕裂的机会）。
+# With Redis on, the three functions above are blocking round-trips (2s socket
+# timeout); called from an async endpoint a Redis wobble freezes the whole loop.
+# Only then are they moved to the thread pool; the in-process dict path is pure
+# memory work and stays on the loop (no pointless hop, and no tearing risk for
+# merge_bars' index-then-write).
+
+async def replace_series_async(symbol: str, interval: str, bars: list[dict]) -> None:
+    if not shared_state.enabled():
+        replace_series(symbol, interval, bars)
+        return
+    await run_in_threadpool(replace_series, symbol, interval, bars)
+
+
+async def merge_bars_async(symbol: str, interval: str, bars: list[dict]) -> None:
+    if not shared_state.enabled():
+        merge_bars(symbol, interval, bars)
+        return
+    await run_in_threadpool(merge_bars, symbol, interval, bars)
+
+
+async def get_latest_async(symbol: str, interval: str, n: int = 2) -> dict:
+    if not shared_state.enabled():
+        return get_latest(symbol, interval, n)
+    return await run_in_threadpool(get_latest, symbol, interval, n)

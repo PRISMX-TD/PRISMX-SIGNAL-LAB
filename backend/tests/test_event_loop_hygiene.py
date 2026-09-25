@@ -15,6 +15,7 @@ sync DB queries both stall the whole event loop. Pinned with stand-ins that
 record whether they ran on the loop's own thread.
 """
 import asyncio
+import json
 import threading
 
 import pytest
@@ -50,6 +51,9 @@ class _Sock:
 
     async def send_json(self, m):
         self.sent.append(m)
+
+    async def send_text(self, text):
+        self.sent.append(json.loads(text))
 
 
 # ---- 在线名单 / presence roster ------------------------------------------------

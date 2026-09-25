@@ -17,6 +17,8 @@ instead; see connection_manager.py's _quotes.
 import json
 import time
 
+from starlette.concurrency import run_in_threadpool
+
 from app.services import shared_state
 
 # ---- 进程内 / in-process ----
@@ -47,26 +49,14 @@ def _changed(old: dict | None, q: dict) -> bool:
 
 
 def update(quotes: list[dict]) -> list[dict]:
-    """合并一批报价，仅返回相对上次发生变化的条目。
-    Merge a batch of quotes; return only entries changed since last time."""
+    """合并一批报价，仅返回相对上次发生变化的条目。**配了 Redis 时是阻塞调用**，
+    协程里用 update_async。
+    Merge a batch of quotes; return only entries changed since last time.
+    Blocking with Redis on; coroutines use update_async."""
     changed: list[dict] = []
     now = time.time()
     if shared_state.enabled():
-        r = shared_state._redis()
-        kq, kt, ko = shared_state._k(_KEY_QUOTES), shared_state._k(_KEY_TS), shared_state._k(_KEY_ORDER)
-        for q in quotes or []:
-            sym = q.get("symbol")
-            if not sym:
-                continue
-            raw = r.hget(kq, sym)
-            old = json.loads(raw) if raw else None
-            if old is None:
-                r.rpush(ko, sym)
-            if _changed(old, q):
-                r.hset(kq, sym, json.dumps(q, default=str))
-                changed.append(q)
-            r.hset(kt, sym, str(now))
-        return changed
+        return _update_redis(quotes, now)
     for q in quotes or []:
         sym = q.get("symbol")
         if not sym:
@@ -78,13 +68,94 @@ def update(quotes: list[dict]) -> list[dict]:
     return changed
 
 
+def _update_redis(quotes: list[dict], now: float) -> list[dict]:
+    """Redis 侧的合并：一次 HGETALL 取全部旧值、本地比对，再用一个 pipeline 批量写。
+
+    以前是每个品种 hget + hset + hset 三次往返（首次出现再加一次 rpush），EA 一批
+    报 7 个品种就是 21 次往返，而这段是在 async 接口里直接跑的——Redis 稍慢一点，
+    整个事件循环就陪着等。现在固定两次往返，与品种数无关。
+    Redis merge: one HGETALL for every old value, compare locally, then write in a
+    single pipeline. It used to be hget + hset + hset per symbol (plus an rpush on
+    first sight) — 21 round-trips for a 7-symbol batch, run straight on the event
+    loop. Now it is two round-trips regardless of the batch size.
+
+    「首次出现顺序」表：两个 worker 恰好同时第一次见到同一个品种时会各 rpush 一次，
+    表里就出现重复。这里不为这个罕见窗口加锁或上 Lua，而是读的一侧（_all_redis）
+    按首次出现去重——顺序语义不变，重复项无害。
+    The first-seen order list: two workers seeing a brand-new symbol at the same
+    instant would each rpush it. Rather than a lock or Lua for that rare window, the
+    reader (_all_redis) de-duplicates by first occurrence — same ordering semantics,
+    and a duplicate entry is harmless.
+    """
+    r = shared_state._redis()
+    kq, kt, ko = shared_state._k(_KEY_QUOTES), shared_state._k(_KEY_TS), shared_state._k(_KEY_ORDER)
+    stored = r.hgetall(kq)
+    changed: list[dict] = []
+    new_syms: list[str] = []
+    changed_map: dict[str, str] = {}
+    ts_map: dict[str, str] = {}
+    for q in quotes or []:
+        sym = q.get("symbol")
+        if not sym:
+            continue
+        raw = stored.get(sym)
+        try:
+            old = json.loads(raw) if raw else None
+        except (ValueError, TypeError):
+            old = None
+        # 同一批里同一个品种出现两次：第二次要跟第一次比，而不是跟 Redis 里的旧值比。
+        # A symbol repeated within one batch compares against its first occurrence.
+        if sym in changed_map:
+            old = json.loads(changed_map[sym])
+        elif raw is None and sym not in new_syms:
+            new_syms.append(sym)
+        if _changed(old, q):
+            changed_map[sym] = json.dumps(q, default=str)
+            changed.append(q)
+        ts_map[sym] = str(now)
+    if not ts_map:
+        return changed
+    pipe = r.pipeline()
+    if new_syms:
+        pipe.rpush(ko, *new_syms)
+    if changed_map:
+        pipe.hset(kq, mapping=changed_map)
+    pipe.hset(kt, mapping=ts_map)
+    pipe.execute()
+    return changed
+
+
+async def update_async(quotes: list[dict]) -> list[dict]:
+    """同 update，协程里用：配了 Redis 时挪到线程池（进程内 dict 直接跑，不白跳线程）。
+    Same as update, for coroutines: offloaded with Redis on, inline otherwise."""
+    if not shared_state.enabled():
+        return update(quotes)
+    return await run_in_threadpool(update, quotes)
+
+
 def _all_redis() -> tuple[list[str], dict[str, dict], dict[str, float]]:
     r = shared_state._redis()
-    order = list(r.lrange(shared_state._k(_KEY_ORDER), 0, -1))
-    raw = r.hgetall(shared_state._k(_KEY_QUOTES))
-    ts = r.hgetall(shared_state._k(_KEY_TS))
-    quotes = {sym: json.loads(v) for sym, v in raw.items()}
-    updated = {sym: float(v) for sym, v in ts.items()}
+    # 三条读合成一次往返 / three reads in one round-trip
+    pipe = r.pipeline()
+    pipe.lrange(shared_state._k(_KEY_ORDER), 0, -1)
+    pipe.hgetall(shared_state._k(_KEY_QUOTES))
+    pipe.hgetall(shared_state._k(_KEY_TS))
+    order_raw, raw, ts = pipe.execute()
+    quotes: dict[str, dict] = {}
+    for sym, v in (raw or {}).items():
+        try:
+            quotes[sym] = json.loads(v)
+        except (ValueError, TypeError):
+            continue
+    updated: dict[str, float] = {}
+    for sym, v in (ts or {}).items():
+        try:
+            updated[sym] = float(v)
+        except (ValueError, TypeError):
+            continue
+    # 按首次出现去重（并发首次写入可能留下重复项，见 _update_redis）。
+    # De-duplicate by first occurrence (a concurrent first write may leave one; see _update_redis).
+    order = list(dict.fromkeys(order_raw or []))
     # 顺序表里没有的（理论上不会有）补到末尾 / anything missing from the order list goes last
     seen = set(order)
     order += [s for s in quotes if s not in seen]
@@ -92,10 +163,19 @@ def _all_redis() -> tuple[list[str], dict[str, dict], dict[str, float]]:
 
 
 def get_all() -> list[dict]:
+    """全站报价快照。**配了 Redis 时是阻塞调用**，协程里用 get_all_async。
+    Site-wide snapshot. Blocking with Redis on; coroutines use get_all_async."""
     if shared_state.enabled():
         order, quotes, _ = _all_redis()
         return [quotes[s] for s in order if s in quotes]
     return list(_quotes.values())
+
+
+async def get_all_async() -> list[dict]:
+    """同 get_all，协程里用 / same as get_all, for coroutines."""
+    if not shared_state.enabled():
+        return get_all()
+    return await run_in_threadpool(get_all)
 
 
 def get_digits(symbol: str) -> int | None:
@@ -134,3 +214,11 @@ def get_active_symbols() -> list[str]:
         order, _quotes_r, updated = _all_redis()
         return [sym for sym in order if updated.get(sym, 0) >= cutoff]
     return [sym for sym in _quotes if _updated_at.get(sym, 0) >= cutoff]
+
+
+async def get_active_symbols_async() -> list[str]:
+    """同 get_active_symbols，协程里用（配了 Redis 时挪到线程池）。
+    Same as get_active_symbols, for coroutines (offloaded with Redis on)."""
+    if not shared_state.enabled():
+        return get_active_symbols()
+    return await run_in_threadpool(get_active_symbols)

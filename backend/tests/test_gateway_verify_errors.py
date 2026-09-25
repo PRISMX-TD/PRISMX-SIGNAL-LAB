@@ -110,7 +110,17 @@ def test_timeout_is_flagged_as_such(monkeypatch):
 
 
 def test_unreachable_gateway_has_no_status(monkeypatch):
+    # 连不上（建连失败）单独归成 connect_failed：请求根本没发出，与「发出去了、结果
+    # 未知」的 request_failed 区分开。路由侧照旧按「网关不可用」回 502（见下方映射）。
+    # A connect failure is its own class now — nothing was sent — distinct from
+    # request_failed ("sent, outcome unknown"); the route still answers 502.
     rsp = _verify(monkeypatch, raises=httpx.ConnectError("connection refused"))
+    assert rsp.error == "connect_failed"
+    assert rsp.status == 0
+
+
+def test_mid_flight_transport_error_is_still_request_failed(monkeypatch):
+    rsp = _verify(monkeypatch, raises=httpx.RemoteProtocolError("server disconnected"))
     assert rsp.error == "request_failed"
     assert rsp.status == 0
 
@@ -126,6 +136,7 @@ def _fail(**kw):
     (_fail(error="group_not_allowed", status=403), 403),
     (_fail(error="timeout", status=0), 504),
     (_fail(error="request_failed", status=0), 502),
+    (_fail(error="connect_failed", status=0), 502),
     (_fail(error="unauthorized", status=401), 502),
 ])
 def test_status_mapping(rsp, expected):
