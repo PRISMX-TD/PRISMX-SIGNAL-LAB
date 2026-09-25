@@ -40,34 +40,66 @@ PRESENCE_REFRESH_SECONDS = 30
 # snapshot on the next tick anyway.
 SEND_TIMEOUT_SECONDS = 2
 
-# 多 worker 下的持仓快照共享（配了 REDIS_URL 才启用）。
+# 多 worker 下的持仓 / 挂单 / 分账户报价共享（配了 REDIS_URL 才启用）。
 #
-# 进程内的 _positions 只装得下「本进程收到过的上报」：网关持仓轮询只在抢到领导锁
-# 的那个 worker 上跑，桥接的 /bridge/positions 每拍随机落到某个 worker。于是
-#   · 一键平仓的请求落到另一个 worker 时，那边的快照是空的，接口回「当前没有可平仓
-#     的持仓」——两个 worker 就是一半概率；
+# 进程内的缓存只装得下「本进程收到过的上报」：网关的持仓与挂单轮询只在抢到领导锁
+# 的那个 worker 上跑，桥接的 /bridge/positions、/bridge/quotes 每拍随机落到某个
+# worker。于是
+#   · 一键平仓的请求落到另一个 worker 时，那边的持仓快照是空的，接口回「当前没有
+#     可平仓的持仓」——两个 worker 就是一半概率；
 #   · 同时绑了桥接和网关账号的用户，两个 worker 各自拿「自己那半」合并推送，另一路
-#     的持仓行在前端来回闪。
-# 所以每个来源的快照都镜像一份到 Redis（按来源分键，两条路径各写各的，不存在读改写
-# 竞争），合并与读取都以 Redis 为准；Redis 不可达时退回本进程的那份。
+#     的持仓 / 挂单行在前端来回闪；
+#   · 刷新页面连到另一个 worker，补推的持仓、挂单、报价是空的或旧的；
+#   · 分账户报价按「与本进程上次相比变没变」决定推不推：价格在 A 上从 X 变 Y、
+#     在 B 上又变回 X 时，B 记得的还是 X，认为没变，前端就停在 Y 上。
+# 所以持仓与挂单按来源分键镜像到 Redis（两条上报路径各写各的键，不存在读改写
+# 竞争），分账户报价放进每个用户一张 Redis hash；合并、变化判断与补推都以 Redis
+# 为准，Redis 不可达时退回本进程那份。
 # 过期时间给得宽：来源停报（EA 掉线、用户断开后网关停轮询）时，旧行为是本进程一直
 # 留着最后一份，这里保持「留一阵」而不是两拍后就清空。
 #
-# Cross-worker positions snapshot (only with REDIS_URL). The in-process
-# _positions only holds reports this process received: the gateway poll runs on
-# the leader alone and bridge reports land on whichever worker. Close-all on the
-# other worker then found nothing ("no open positions"), and users with both
-# bridge and gateway accounts saw one source's rows flicker because each worker
-# merged only its own half. Each source's slice is mirrored to its own Redis key
-# (no read-modify-write race) and merges/reads prefer Redis, falling back to the
-# local copy when Redis is unreachable.
-POSITION_SOURCES = ("bridge", "gateway")
-POSITIONS_KEY = "positions:{user}:{source}"
-POSITIONS_TTL_SECONDS = 600
+# Cross-worker positions / pending orders / per-account quotes (only with
+# REDIS_URL). In-process caches only hold reports this process received: the
+# gateway polls run on the leader alone and bridge reports land on whichever
+# worker. Close-all on the other worker found nothing ("no open positions"),
+# users with both bridge and gateway accounts saw one source's rows flicker, a
+# reconnect to the other worker got an empty catch-up, and per-account quotes
+# could stick at a stale price because change detection compared against this
+# process's memory only. Positions and pending orders are mirrored per source to
+# their own Redis keys (no read-modify-write race); per-account quotes live in one
+# Redis hash per user. Merges, change detection and catch-ups prefer Redis and
+# fall back to the local copy when Redis is unreachable.
+SNAPSHOT_SOURCES = ("bridge", "gateway")
+SNAPSHOT_TTL_SECONDS = 600
+# kind -> Redis 键模板 / key template per snapshot kind
+_SNAPSHOT_KEYS = {
+    "positions": "positions:{user}:{source}",
+    "pending": "pending:{user}:{source}",
+}
+# 分账户报价：hash 字段是 "<login>|<symbol>"（login 是纯数字，不会含 "|"）。
+# 桥接约每秒报一次，一小时没报就当这批报价作废。
+# Per-account quotes: hash fields are "<login>|<symbol>" (logins are digits and
+# never contain "|"). Bridges report about once a second; an hour of silence
+# retires the whole set.
+QUOTES_KEY = "uquotes:{user}"
+QUOTES_TTL_SECONDS = 3600
+# 参与「报价变没变」判断的字段 / fields that count toward "quote changed"
+_QUOTE_WATCHED = ("bid", "ask", "contractSize", "tickSize", "tickValue")
 
 
-def _positions_key(user_id: str, source: str) -> str:
-    return POSITIONS_KEY.format(user=user_id, source=source)
+def _snapshot_key(kind: str, user_id: str, source: str) -> str:
+    return _SNAPSHOT_KEYS[kind].format(user=user_id, source=source)
+
+
+def _merge_sources(by_source: dict[str, list]) -> list:
+    merged: list = []
+    for rows in by_source.values():
+        merged.extend(rows)
+    return merged
+
+
+def _quote_changed(old: dict | None, q: dict) -> bool:
+    return old is None or any(old.get(k) != q.get(k) for k in _QUOTE_WATCHED)
 
 
 async def _offload(fn, *args):
@@ -130,41 +162,69 @@ class ConnectionManager:
         self._last_pending_push: dict[str, bytes] = {}
         self._lock = asyncio.Lock()
 
-    # ---------- 持仓缓存 / Positions cache ----------
+    # ---------- 持仓 / 挂单快照 / Positions & pending-orders snapshots ----------
+    def _local(self, kind: str) -> dict[str, dict[str, list]]:
+        return self._positions if kind == "positions" else self._pending_orders
+
     def get_positions(self, user_id: str) -> list:
-        """某用户全部来源合并后的最新持仓，供前端重连时补推。
-        Merged latest positions across all sources, for re-push on reconnect."""
-        by_source = self._positions.get(user_id)
-        if not by_source:
-            return []
-        merged: list = []
-        for rows in by_source.values():
-            merged.extend(rows)
-        return merged
+        """**本进程**收到的持仓，全部来源合并。跨 worker 的读取用 get_positions_shared。
+        Positions this process received, merged across sources. For the
+        cross-worker view use get_positions_shared."""
+        return _merge_sources(self._positions.get(user_id) or {})
 
-    def _shared_by_source(self, user_id: str) -> dict[str, list]:
-        """按来源取 Redis 里的持仓快照，缺的来源用本进程的那份补（**同步**，会阻塞）。
+    def get_pending_orders(self, user_id: str) -> list:
+        """**本进程**收到的挂单，全部来源合并。跨 worker 的读取用 get_pending_orders_shared_async。
+        Pending orders this process received, merged across sources."""
+        return _merge_sources(self._pending_orders.get(user_id) or {})
 
-        没配 Redis 时就是本进程的快照。某个来源在 Redis 里没有键（从没上报过或已
-        过期）而本进程有，说明本进程刚收到、镜像还没写上或写失败了，用本地的。
-        Per-source snapshot from Redis, filling gaps from this process's copy
-        (synchronous; blocks). Without Redis it is simply the local snapshot.
+    def _shared_by_source(
+        self, kind: str, user_id: str, skip: str | None = None
+    ) -> dict[str, dict | list]:
+        """按来源取 Redis 里的快照，缺的来源用本进程那份补（**同步**，会阻塞）。
+
+        没配 Redis 时就是本进程的快照。某来源在 Redis 里没有键（从没上报过、已过期、
+        或镜像写失败）而本进程有，用本地的。`skip` 的来源不去 Redis 读——调用方手里
+        已经有它最新的那份。
+        Per-source snapshot from Redis, gaps filled from this process's copy
+        (synchronous; blocks). Without Redis it is just the local copy. `skip`
+        names a source the caller already holds fresh, so it isn't re-read.
         """
-        local = dict(self._positions.get(user_id) or {})
+        local = dict(self._local(kind).get(user_id) or {})
         if not shared_state.enabled():
             return local
-        merged: dict[str, list] = {}
+        shared: dict[str, list] = {}
         try:
-            for source in POSITION_SOURCES:
-                rows = shared_state.kv_get_json(_positions_key(user_id, source))
+            for source in SNAPSHOT_SOURCES:
+                if source == skip:
+                    continue
+                rows = shared_state.kv_get_json(_snapshot_key(kind, user_id, source))
                 if isinstance(rows, list):
-                    merged[source] = rows
+                    shared[source] = rows
         except Exception as e:
-            logger.warning("读取共享持仓快照失败，退回本进程快照 / shared positions read failed: %s", e)
+            logger.warning("读取共享快照失败，退回本进程快照 / shared %s read failed: %s", kind, e)
             return local
         for source, rows in local.items():
-            merged.setdefault(source, rows)
-        return merged
+            shared.setdefault(source, rows)
+        return shared
+
+    def _mirror_and_merge(self, kind: str, user_id: str, source: str, rows: list) -> list:
+        """把本来源的快照写进 Redis，再按全部来源合并返回（**同步**，放线程里跑）。
+        Write this source's slice to Redis, then merge every source (sync)."""
+        try:
+            shared_state.kv_set_json(_snapshot_key(kind, user_id, source), rows, SNAPSHOT_TTL_SECONDS)
+        except Exception as e:
+            logger.warning("写共享快照失败 / shared %s write failed: %s", kind, e)
+        by_source = self._shared_by_source(kind, user_id, skip=source)
+        by_source[source] = rows
+        return _merge_sources(by_source)
+
+    async def _store_and_merge(self, kind: str, user_id: str, source: str, rows: list) -> list:
+        """记下本来源的最新快照，返回全部来源合并后的完整列表。
+        Record this source's latest slice and return the full merged list."""
+        self._local(kind).setdefault(user_id, {})[source] = rows
+        if not shared_state.enabled():
+            return _merge_sources(self._local(kind)[user_id])
+        return await _offload(self._mirror_and_merge, kind, user_id, source, rows)
 
     def get_positions_shared(self, user_id: str) -> list:
         """全部 worker 视角下该用户的最新持仓（**同步**，同步端点里直接调）。
@@ -175,10 +235,7 @@ class ConnectionManager:
         sync endpoints). Close-all needs this, not get_positions: the request may
         land on a worker that never received the gateway slice.
         """
-        merged: list = []
-        for rows in self._shared_by_source(user_id).values():
-            merged.extend(rows)
-        return merged
+        return _merge_sources(self._shared_by_source("positions", user_id))
 
     async def get_positions_shared_async(self, user_id: str) -> list:
         """同上，协程里用（Redis 调用挪出事件循环）。/ Same, for coroutines."""
@@ -186,32 +243,13 @@ class ConnectionManager:
             return self.get_positions(user_id)
         return await _offload(self.get_positions_shared, user_id)
 
-    def _mirror_and_merge(self, user_id: str, source: str, rows: list) -> list:
-        """把本来源的快照写进 Redis，再按全部来源合并返回（**同步**，放线程里跑）。
-        Write this source's slice to Redis, then merge every source (sync)."""
-        try:
-            shared_state.kv_set_json(_positions_key(user_id, source), rows, POSITIONS_TTL_SECONDS)
-        except Exception as e:
-            logger.warning("写共享持仓快照失败 / shared positions write failed: %s", e)
-        by_source = self._shared_by_source(user_id)
-        # 本来源以刚收到的这份为准，不必再绕 Redis 读回。
-        # This source's slice is the one just received; no need to read it back.
-        by_source[source] = rows
-        merged: list = []
-        for part in by_source.values():
-            merged.extend(part)
-        return merged
-
-    def get_pending_orders(self, user_id: str) -> list:
-        """某用户全部来源合并后的最新挂单，供前端重连时补推。
-        Merged latest pending orders across all sources, for re-push on reconnect."""
-        by_source = self._pending_orders.get(user_id)
-        if not by_source:
-            return []
-        merged: list = []
-        for rows in by_source.values():
-            merged.extend(rows)
-        return merged
+    async def get_pending_orders_shared_async(self, user_id: str) -> list:
+        """全部 worker 视角下该用户的最新挂单（协程）。/ Cross-worker pending orders."""
+        if not shared_state.enabled():
+            return self.get_pending_orders(user_id)
+        return await _offload(
+            lambda: _merge_sources(self._shared_by_source("pending", user_id))
+        )
 
     # ---------- 账号浮动盈亏缓存 / Per-account floating P/L cache ----------
     #
@@ -294,27 +332,90 @@ class ConnectionManager:
         The spec fields take part in change detection too: right after a bridge
         upgrade the first quote may carry the same price as before, and comparing
         bid/ask alone would withhold the spec until the next tick. ts is excluded.
+
+        多 worker 时变化判断对的是 Redis 里那份（全体 worker 共用），不是本进程上次
+        见过的——否则价格在另一个 worker 上变过又变回来时，这里会误判"没变"，前端
+        停在中间那个价上。**同步**，协程里用 update_quotes_async。
+        With several workers the comparison is against the shared Redis copy, not
+        this process's memory; otherwise a price that moved on another worker and
+        came back would read as unchanged here and the frontend would stick at the
+        intermediate price. Synchronous; coroutines use update_quotes_async.
         """
+        valid = [q for q in quotes or [] if q.get("symbol") and q.get("login")]
+        changed = self._update_local_quotes(user_id, valid)
+        if not shared_state.enabled():
+            return changed
+        try:
+            return self._update_shared_quotes(user_id, valid)
+        except Exception as e:
+            logger.warning("共享报价读写失败，按本进程判断 / shared quotes failed: %s", e)
+            return changed
+
+    def _update_local_quotes(self, user_id: str, quotes: list) -> list:
         prev = self._quotes.setdefault(user_id, {})
         changed: list = []
-        watched = ("bid", "ask", "contractSize", "tickSize", "tickValue")
-        for q in quotes or []:
-            sym = q.get("symbol")
-            login = q.get("login")
-            if not sym or not login:
-                continue
-            by_symbol = prev.setdefault(login, {})
-            old = by_symbol.get(sym)
-            if old is None or any(old.get(k) != q.get(k) for k in watched):
-                by_symbol[sym] = q
+        for q in quotes:
+            by_symbol = prev.setdefault(q["login"], {})
+            if _quote_changed(by_symbol.get(q["symbol"]), q):
+                by_symbol[q["symbol"]] = q
                 changed.append(q)
         return changed
 
+    def _update_shared_quotes(self, user_id: str, quotes: list) -> list:
+        r = shared_state._redis()
+        key = shared_state._k(QUOTES_KEY.format(user=user_id))
+        stored = r.hgetall(key)
+        changed: list = []
+        pipe = r.pipeline()
+        for q in quotes:
+            field = f"{q['login']}|{q['symbol']}"
+            raw = stored.get(field)
+            try:
+                old = json.loads(raw) if raw else None
+            except (ValueError, TypeError):
+                old = None
+            if _quote_changed(old, q):
+                pipe.hset(key, field, json.dumps(q, default=str))
+                changed.append(q)
+        # 没变也续期：报价还在报，这批就还活着 / renew even when unchanged: still reporting
+        if quotes:
+            pipe.expire(key, QUOTES_TTL_SECONDS)
+            pipe.execute()
+        return changed
+
+    async def update_quotes_async(self, user_id: str, quotes: list) -> list:
+        """同 update_quotes，协程里用（Redis 调用挪出事件循环）。/ Same, for coroutines."""
+        if not shared_state.enabled():
+            return self.update_quotes(user_id, quotes)
+        return await _offload(self.update_quotes, user_id, quotes)
+
     def get_quotes(self, user_id: str) -> list:
+        """该用户的分账户报价；多 worker 时读 Redis 里共用的那份（**同步**）。
+        The user's per-account quotes; the shared Redis copy with several workers."""
+        if shared_state.enabled():
+            try:
+                raw = shared_state._redis().hgetall(shared_state._k(QUOTES_KEY.format(user=user_id)))
+                out = []
+                for v in raw.values():
+                    try:
+                        q = json.loads(v)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(q, dict):
+                        out.append(q)
+                return out
+            except Exception as e:
+                logger.warning("读取共享报价失败，退回本进程快照 / shared quotes read failed: %s", e)
         out: list = []
         for by_symbol in self._quotes.get(user_id, {}).values():
             out.extend(by_symbol.values())
         return out
+
+    async def get_quotes_async(self, user_id: str) -> list:
+        """同 get_quotes，协程里用。/ Same, for coroutines."""
+        if not shared_state.enabled():
+            return self.get_quotes(user_id)
+        return await _offload(self.get_quotes, user_id)
 
     # ---------- 前端连接 / Client connections ----------
     async def register_client(self, user_id: str, ws: WebSocket) -> None:
@@ -431,12 +532,7 @@ class ConnectionManager:
         re-rendering but can't avoid the transfer and JSON parse. Positions
         contain only primitives, so comparing serialized bytes is sound.
         """
-        rows = positions or []
-        self._positions.setdefault(user_id, {})[source] = rows
-        if shared_state.enabled():
-            merged = await _offload(self._mirror_and_merge, user_id, source, rows)
-        else:
-            merged = self.get_positions(user_id)
+        merged = await self._store_and_merge("positions", user_id, source, positions or [])
         message = {
             "type": "POSITIONS",
             "data": merged,
@@ -469,8 +565,7 @@ class ConnectionManager:
         merge-across-sources rule: pushing only the reporting path's own slice would
         make the other channel's orders vanish and reappear on the frontend.
         """
-        self._pending_orders.setdefault(user_id, {})[source] = orders or []
-        merged = self.get_pending_orders(user_id)
+        merged = await self._store_and_merge("pending", user_id, source, orders or [])
         message = {"type": "PENDING_ORDERS", "data": merged}
         payload = json.dumps(message, sort_keys=True, default=str)
         digest = hashlib.blake2b(payload.encode(), digest_size=16).digest()

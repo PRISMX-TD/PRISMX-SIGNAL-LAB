@@ -168,6 +168,12 @@ class _FakeManager:
     def get_quotes(self, user_id):
         return []
 
+    async def get_pending_orders_shared_async(self, user_id):
+        return []
+
+    async def get_quotes_async(self, user_id):
+        return []
+
     @staticmethod
     def account_funds_from_positions(positions):
         return []

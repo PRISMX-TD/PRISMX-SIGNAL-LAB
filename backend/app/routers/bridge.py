@@ -1183,7 +1183,7 @@ async def bridge_quotes(
     pushed to clients to keep WebSocket traffic minimal.
     """
     incoming = [q.model_dump() for q in req.data]
-    changed = manager.update_quotes(user.id, incoming)
+    changed = await manager.update_quotes_async(user.id, incoming)
     if changed:
         await manager.push_to_client(user.id, {"type": "QUOTES", "data": changed})
     return {"ok": True}

@@ -202,12 +202,12 @@ async def ws_client(websocket: WebSocket):
         # Re-push the latest pending-orders snapshot too, for the same reason as
         # positions. No funds ride along: floating P/L belongs to positions, and a
         # pending order has none yet.
-        cached_pending = manager.get_pending_orders(user_id)
+        cached_pending = await manager.get_pending_orders_shared_async(user_id)
         if cached_pending:
             await websocket.send_json({"type": "PENDING_ORDERS", "data": cached_pending})
         # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
         # re-push the latest per-account quotes snapshot on connect (order-confirm page)
-        cached_quotes = manager.get_quotes(user_id)
+        cached_quotes = await manager.get_quotes_async(user_id)
         if cached_quotes:
             await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
         # 连接即补推全站统一报价快照（展示用）/ re-push the site-wide quotes snapshot (display)

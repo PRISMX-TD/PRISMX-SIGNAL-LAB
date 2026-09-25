@@ -245,15 +245,10 @@ def test_positions_merge_across_workers(redis_on):
     gw = [{"login": "1", "ticket": 1, "profit": 1.0}]
     br = [{"login": "2", "ticket": 2, "profit": 2.0}]
     asyncio.run(b.push_positions("u1", gw, source="gateway"))
-    published = []
-    orig = shared_state.publish
-    try:
-        shared_state.publish = lambda ch, payload: published.append(payload)
-        asyncio.run(a.push_positions("u1", br, source="bridge"))
-    finally:
-        shared_state.publish = orig
-    tickets = sorted(p["ticket"] for p in published[-1]["message"]["data"])
-    assert tickets == [1, 2]
+    redis_on.published.clear()
+    asyncio.run(a.push_positions("u1", br, source="bridge"))
+    msg = json.loads(redis_on.published[-1][1])["message"]
+    assert sorted(p["ticket"] for p in msg["data"]) == [1, 2]
 
 
 def test_positions_shared_falls_back_to_local_without_redis(redis_off):
@@ -261,3 +256,42 @@ def test_positions_shared_falls_back_to_local_without_redis(redis_off):
     rows = [{"login": "1", "ticket": 1, "profit": 1.0}]
     asyncio.run(m.push_positions("u1", rows, source="gateway"))
     assert m.get_positions_shared("u1") == rows
+
+
+def test_pending_orders_visible_and_merged_across_workers(redis_on):
+    """挂单同持仓：网关挂单只在领导 worker 上报，另一个 worker 重连补推要看得见，
+    桥接那路推送时也要带上网关那路。/ Pending orders behave like positions."""
+    leader, other = ConnectionManager(), ConnectionManager()
+    gw = [{"login": "1", "ticket": 21, "type": "BUY_LIMIT"}]
+    br = [{"login": "2", "ticket": 22, "type": "SELL_STOP"}]
+    asyncio.run(leader.push_pending_orders("u1", gw, source="gateway"))
+    assert other.get_pending_orders("u1") == []
+    assert asyncio.run(other.get_pending_orders_shared_async("u1")) == gw
+    redis_on.published.clear()
+    asyncio.run(other.push_pending_orders("u1", br, source="bridge"))
+    msg = json.loads(redis_on.published[-1][1])["message"]
+    assert sorted(o["ticket"] for o in msg["data"]) == [21, 22]
+
+
+def test_account_quotes_change_detection_is_shared(redis_on):
+    """价格在 A 上 X→Y、在 B 上又 Y→X：B 必须判为变化并推送，否则前端停在 Y。
+    A price going X→Y on A and back to X on B must count as a change on B."""
+    a, b = ConnectionManager(), ConnectionManager()
+    x = {"symbol": "XAUUSD", "login": "100", "bid": 1.0, "ask": 1.1}
+    y = {**x, "bid": 2.0, "ask": 2.1}
+    assert b.update_quotes("u1", [x]) == [x]
+    assert a.update_quotes("u1", [y]) == [y]
+    assert b.update_quotes("u1", [x]) == [x]
+    assert b.update_quotes("u1", [x]) == []          # 真没变就不推 / truly unchanged
+    fresh = ConnectionManager()                      # 重连到第三个进程 / reconnect elsewhere
+    assert fresh.get_quotes("u1") == [x]
+    assert asyncio.run(fresh.get_quotes_async("u1")) == [x]
+
+
+def test_account_quotes_local_without_redis(redis_off):
+    m = ConnectionManager()
+    x = {"symbol": "XAUUSD", "login": "100", "bid": 1.0, "ask": 1.1}
+    assert asyncio.run(m.update_quotes_async("u1", [x])) == [x]
+    assert m.update_quotes("u1", [x]) == []
+    assert m.get_quotes("u1") == [x]
+    assert m.update_quotes("u1", [{"symbol": "XAUUSD", "bid": 1.0, "ask": 1.1}]) == []  # 缺 login 丢弃
