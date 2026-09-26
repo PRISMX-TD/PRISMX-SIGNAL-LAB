@@ -393,6 +393,10 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "https://prismxsignallab.com",
         "https://www.prismxsignallab.com",
+        # 备用域名（主域名在大陆被封时用），经香港边缘节点转发，见 ops/hk-edge。
+        # Backup domain (for when the main one is blocked in mainland China), served via the HK edge.
+        "https://pmxsl.com",
+        "https://www.pmxsl.com",
         # Android App（Capacitor WebView）的页面 origin。App 出厂自带完整前端，
         # 不是加载线上网站，所以它对后端而言是一个独立的跨域来源；不放行则 App 内
         # 所有接口调用都会被 CORS 拦下。鉴权走 Bearer 头而非 cookie，放行不引入

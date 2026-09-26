@@ -3,12 +3,12 @@ import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, T
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
+import { API_BASE } from './apiBase'
+
+export { API_BASE }
 
 const TOKEN_KEY = 'prismx_token'
 
-// API 基础地址：生产用 VITE_API_BASE 指向线上后端，开发留空走 Vite 代理。
-// API base: prod uses VITE_API_BASE to point at the deployed backend; dev leaves it empty to use the Vite proxy.
-export const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '')
 
 export function getToken(): string | null {
   return readStorage(TOKEN_KEY)

@@ -11,12 +11,21 @@ set -eu
 export TENCENTCLOUD_PROPAGATION_TIMEOUT=600
 export TENCENTCLOUD_POLLING_INTERVAL=10
 
-exec /usr/local/bin/lego run \
-  --accept-tos --email edge@prismxsignallab.com \
-  --path /etc/lego --env-file /root/.tencent-dns.env \
-  --cert.name prismx-edge --key-type EC256 \
-  --dns tencentcloud \
-  --dns.resolvers 8.8.8.8:53 --dns.resolvers 119.29.29.29:53 \
-  -d api.prismxsignallab.com -d prismxsignallab.com -d www.prismxsignallab.com \
-  --deploy-hook "systemctl reload nginx" \
-  "$@"
+# 两张证书：主域名一张、备用域名 pmxsl.com 单独一张（不合签，见 prismx-edge.conf 里的说明）。
+# 不用 exec：要跑两次。前一张失败也照跑后一张，最后按任一失败返回非零，让 systemd 记下失败。
+issue() {
+  name=$1; shift
+  /usr/local/bin/lego run \
+    --accept-tos --email edge@prismxsignallab.com \
+    --path /etc/lego --env-file /root/.tencent-dns.env \
+    --cert.name "$name" --key-type EC256 \
+    --dns tencentcloud \
+    --dns.resolvers 8.8.8.8:53 --dns.resolvers 119.29.29.29:53 \
+    "$@" \
+    --deploy-hook "systemctl reload nginx"
+}
+
+rc=0
+issue prismx-edge -d api.prismxsignallab.com -d prismxsignallab.com -d www.prismxsignallab.com || rc=1
+issue pmxsl-edge -d api.pmxsl.com -d pmxsl.com -d www.pmxsl.com || rc=1
+exit $rc

@@ -17,13 +17,14 @@
 // Client error reporting to /api/telemetry/client-error (log-only on the
 // backend). Uses bare fetch — never request(), whose 401 handling logs the user
 // out — never throws, and carries no identity.
+
+import { API_BASE } from '../api/apiBase'
+
 // push：推送链路某一环失败（utils/pushDiag.ts 抽样上报，extra.step 标明哪一环）。
 // 后端 CLIENT_ERROR_KINDS 同步认这个值，否则会被静默丢弃。
 // push: a push-pipeline step failed (sampled by utils/pushDiag.ts; extra.step
 // names it). The backend's CLIENT_ERROR_KINDS must list it too or it's dropped.
 export type ClientErrorKind = 'render' | 'chunk' | 'chunk-reload' | 'push'
-
-const API_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/\/$/, '')
 
 // 与 lazyRetry 共用同一份判据：这几句是 Chromium / Safari / Firefox 对「动态
 // import 的模块脚本拉不下来」的原话，以及旧 webpack 时代留下的 ChunkLoadError。
