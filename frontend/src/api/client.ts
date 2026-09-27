@@ -3,7 +3,7 @@ import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, T
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
-import { API_BASE } from './apiBase'
+import { API_BASE, reportApiFailure } from './apiBase'
 
 export { API_BASE }
 
@@ -259,20 +259,39 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const { signal, cleanup } = withTimeout(
-    callerSignal,
-    requestTimeoutMs === undefined ? DEFAULT_TIMEOUT_MS : requestTimeoutMs,
-  )
+  const send = async () => {
+    const { signal, cleanup } = withTimeout(
+      callerSignal,
+      requestTimeoutMs === undefined ? DEFAULT_TIMEOUT_MS : requestTimeoutMs,
+    )
+    try {
+      return await fetch(`${API_BASE}/api${path}`, { ...init, headers, signal })
+    } finally {
+      // 响应头一到就可以撤掉计时器：超时管的是"服务器迟迟不应答"，不是"响应体
+      // 读得慢"。放在 finally 里保证抛错路径也清得掉，不留悬挂的定时器与监听器。
+      // The timer is dropped as soon as headers arrive: the timeout guards against
+      // a server that never answers, not a slow body. In `finally` so the throwing
+      // path clears it too, leaving no dangling timer or listener.
+      cleanup()
+    }
+  }
   let res: Response
   try {
-    res = await fetch(`${API_BASE}/api${path}`, { ...init, headers, signal })
-  } finally {
-    // 响应头一到就可以撤掉计时器：超时管的是"服务器迟迟不应答"，不是"响应体
-    // 读得慢"。放在 finally 里保证抛错路径也清得掉，不留悬挂的定时器与监听器。
-    // The timer is dropped as soon as headers arrive: the timeout guards against
-    // a server that never answers, not a slow body. In `finally` so the throwing
-    // path clears it too, leaving no dangling timer or listener.
-    cleanup()
+    res = await send()
+  } catch (err) {
+    // 网络层失败（连不上 / 超时；调用方自己取消的不算）：可能是当前入口被封，探测一次
+    // 换到能用的那个（apiBase.ts）。只有 GET/HEAD 自动重发一次——下单这类写操作的请求
+    // 可能已经到了后端、只是响应没回来，重发会重复执行，交给用户自己再点。
+    // Network-level failure (unreachable / timeout; not the caller's own abort): the current
+    // entry point may be blocked, so probe and switch (apiBase.ts). Only GET/HEAD are resent
+    // automatically — a write such as an order may have reached the backend with only the
+    // response lost, and resending would run it twice; the user retries those.
+    if (callerSignal?.aborted) throw err
+    const before = API_BASE
+    await reportApiFailure()
+    const method = (init.method ?? 'GET').toUpperCase()
+    if (API_BASE === before || (method !== 'GET' && method !== 'HEAD')) throw err
+    res = await send()
   }
   // 滑动续期：后端在 token 剩余有效期不足一半时经此头下发新 token，
   // 静默替换本地 token，活跃用户不再每天被踢回登录页。

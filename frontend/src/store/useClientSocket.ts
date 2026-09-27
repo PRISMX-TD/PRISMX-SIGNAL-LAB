@@ -2,6 +2,7 @@
 // Client WebSocket hook: receive signal/order/EA-status pushes.
 import { useEffect, useRef, useState } from 'react'
 import { getToken, API_BASE } from '../api/client'
+import { reportApiFailure } from '../api/apiBase'
 import type { WSMessage } from '../api/types'
 import { netQuality, pingPayload } from './netQuality'
 import { reconnectDelay } from './reconnectBackoff'
@@ -323,6 +324,12 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       // Don't put the token in the URL (logged by proxies/gateways); send an AUTH frame after connect.
       const socket = new WebSocket(`${wsBase}/ws/client`)
       ws = socket
+      // 这条连接有没有走到 AUTH_OK：一次都没通就关掉，多半是入口连不上（可能被封），
+      // 让 apiBase 探测、必要时换入口——下一轮重连读 API_BASE 时就是新的了。
+      // Whether this socket ever reached AUTH_OK: closing without it most likely means the entry
+      // point is unreachable (maybe blocked), so let apiBase probe and switch if needed — the
+      // next reconnect reads the new API_BASE.
+      let authed = false
 
       socket.onopen = () => {
         // 首帧提交 JWT 鉴权 / submit JWT for auth as the first frame
@@ -357,6 +364,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
           // 鉴权通过才算真正连上：onopen 只代表握手完成 / only AUTH_OK counts as connected;
           // onopen merely means the handshake finished
           if (msg.type === 'AUTH_OK') {
+            authed = true
             setConnected(true)
             // 连上了才算这一轮重连成功，退避从头开始 / a successful round resets backoff
             attempt = 0
@@ -394,6 +402,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         stopHeartbeat()
         netQuality.setState('offline')
         setConnected(false)
+        if (!authed && !closed) void reportApiFailure()
         if (!closed) scheduleReconnect()
       }
     }
