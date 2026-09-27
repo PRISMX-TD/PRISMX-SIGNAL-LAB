@@ -37,6 +37,19 @@ export type ClientErrorKind = 'render' | 'chunk' | 'chunk-reload' | 'push'
 const CHUNK_ERROR_RE =
   /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading (?:CSS )?chunk|ChunkLoadError|Unable to preload/i
 
+// 中间层（运营商劫持、强制门户、代理错误页）把 chunk 请求答成了 HTML：浏览器把 HTML 当
+// 脚本解析，报的是 `Unexpected token '<'`（Firefox：`expected expression, got '<'`）。
+// 这是网络问题、重试可能就好，不是引擎太老——不单独认它的话会被下面的 OLD_ENGINE_RE
+// 截走，卡片叫用户去更新浏览器。JSON.parse 吃到 HTML 也是同一句开头，但那是接口的事，
+// 按报文里带 JSON 排除。
+// A middlebox (carrier hijack, captive portal, proxy error page) answered a chunk
+// request with HTML, which the browser parses as script: `Unexpected token '<'`
+// (Firefox: `expected expression, got '<'`). That's network — a retry may fix
+// it — not an old engine; unmatched here, OLD_ENGINE_RE below would claim it and
+// tell the user to update their browser. JSON.parse on HTML starts the same way
+// but is an API problem, so messages mentioning JSON are excluded.
+const HTML_AS_JS_RE = /Unexpected token '?<'?|expected expression, got '<'/
+
 // 引擎太老、连 chunk 的语法都解析不了：动态 import 会以 SyntaxError 拒绝。这不是网络
 // 也不是我们的 bug（重试、重载都没用），要给用户的提示是「更新浏览器 / 系统 WebView」。
 // build.target 已降到 Chrome 70，正常不该再出现；留着是为了真出现时说对话。
@@ -47,6 +60,7 @@ const CHUNK_ERROR_RE =
 const OLD_ENGINE_RE = /Unexpected token|Invalid or unexpected token|Unexpected identifier|Unexpected end of input|Unexpected string|Unexpected number|Unexpected reserved word/i
 
 export function isOldEngineError(err: unknown): boolean {
+  if (isChunkLoadError(err)) return false
   if (err instanceof Error && err.name === 'SyntaxError') return true
   const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err)
   return OLD_ENGINE_RE.test(msg)
@@ -54,7 +68,7 @@ export function isOldEngineError(err: unknown): boolean {
 
 export function isChunkLoadError(err: unknown): boolean {
   const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err)
-  return CHUNK_ERROR_RE.test(msg)
+  return CHUNK_ERROR_RE.test(msg) || (HTML_AS_JS_RE.test(msg) && !/JSON/.test(msg))
 }
 
 function isNativeApp(): boolean {
