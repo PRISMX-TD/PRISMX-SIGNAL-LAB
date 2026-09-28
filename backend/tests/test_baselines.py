@@ -153,3 +153,27 @@ def test_reconcile_idempotent_when_no_state_change(db_session):
     assert abs(row.adjust - 200.0) < 1e-6
     assert reconcile_deposits(db_session, PK, now=NOW) == 0   # 无状态变化：再跑一次不重复调整
     assert abs(db_session.query(PeriodBaseline).first().adjust - 200.0) < 1e-6
+
+
+def test_deposit_without_previous_mark_falls_back_one_interval(db_session):
+    """取不到上一次对账时刻（首轮 / 重启后）：入金记在 now − 1 小时，且不早于基线拍照。"""
+    import json as _json
+    u = _user(db_session, email="b8@t.co")
+    _acct(db_session, u, "R1", 1000.0)
+    ensure_baselines(db_session, PK, NOW)
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 1200.0
+    db_session.commit()
+    at = NOW + timedelta(hours=3)
+    assert reconcile_deposits(db_session, PK, now=at) == 1
+    row = db_session.query(PeriodBaseline).first()
+    (stamp, amount), = _json.loads(row.flows)
+    assert datetime.fromisoformat(stamp) == at - timedelta(hours=1) and abs(amount - 200.0) < 1e-6
+    # 基线刚拍（taken_at 晚于 now − 1h）时不早于拍照时刻
+    row.adjust, row.flows = 0.0, None
+    db_session.commit()
+    from app.services.gamification import boards as _boards
+    _boards.shared_state.kv_delete(_boards._reconcile_mark_key(PK))
+    assert reconcile_deposits(db_session, PK, now=NOW + timedelta(minutes=5)) == 1
+    (stamp, _), = _json.loads(db_session.query(PeriodBaseline).first().flows)
+    assert datetime.fromisoformat(stamp) == NOW

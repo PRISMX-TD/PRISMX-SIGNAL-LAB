@@ -139,3 +139,34 @@ def test_return_score_helper_and_denominator():
     assert return_score(b, [(after, after, 60.0)], 500.0) == (0.1, 1)
     assert return_score(b, [(after, after, 60.0)], 700.0) is None   # 本金 600 < 门槛
     assert return_score(b, [], 500.0) == (0.0, 0)
+
+
+def test_refill_from_empty_then_trade_before_next_check_ranks(db_session):
+    """余额归零的账户入金后马上交易、下一轮对账才发现入金：入金记在上一次对账时刻，
+    这期间的单子按入金后的本金算，而不是按 0 算、整行不入榜（2026-09-28 实例）。"""
+    u = _user(db_session, "cf7@t.co"); _acct(db_session, u, "A", 0.0)
+    ensure_baselines(db_session, PK, T0)
+    prev_check = T0 + timedelta(days=1)
+    assert reconcile_deposits(db_session, PK, now=prev_check) == 0      # 还是 0，无流水
+    opened = prev_check + timedelta(minutes=10)                          # 入金后立刻开仓
+    _five_wins(db_session, u, "A", 100.0, opened, opened + timedelta(minutes=10))   # +500
+    acct = db_session.query(MT5Account).filter_by(login="A").first()
+    acct.balance = 1500.0; db_session.commit()                           # 入金 1000 + 盈利 500
+    assert reconcile_deposits(db_session, PK, now=prev_check + timedelta(hours=1)) == 1
+    row = _score(db_session, "A")
+    assert row is not None and abs(row["score"] - 500.0 / 1000.0) < 1e-9
+
+
+def test_withdrawal_still_stamped_at_detection_time(db_session):
+    """出金仍记在发现它的这一轮：上一次对账到这一次之间平掉的单子按出金前的大本金算。"""
+    u = _user(db_session, "cf8@t.co"); _acct(db_session, u, "A", 10000.0)
+    ensure_baselines(db_session, PK, T0)
+    prev_check = T0 + timedelta(days=1)
+    assert reconcile_deposits(db_session, PK, now=prev_check) == 0
+    traded = prev_check + timedelta(minutes=10)
+    _five_wins(db_session, u, "A", 100.0, traded, traded + timedelta(minutes=10))   # +500
+    acct = db_session.query(MT5Account).filter_by(login="A").first()
+    acct.balance = 1500.0; db_session.commit()                           # 赚 500 后提走 9000
+    assert reconcile_deposits(db_session, PK, now=prev_check + timedelta(hours=1)) == 1
+    row = _score(db_session, "A")
+    assert abs(row["score"] - 500.0 / 10000.0) < 1e-9

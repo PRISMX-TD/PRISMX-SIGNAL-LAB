@@ -2,12 +2,12 @@
 import json
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 
 from app.models import ClosedTrade, LeaderboardSnapshot, MT5Account, PeriodBaseline, User
-from app.services import shared_cache
+from app.services import shared_cache, shared_state
 from .periods import active_period_keys, period_bounds
 
 log = logging.getLogger("gamification")
@@ -165,6 +165,62 @@ def _realized_since(db, user_id, login, since, until) -> float:
     return sum(leg.profit or 0.0 for leg in q.all())
 
 
+# ---- 入金流水记在「上一次对账」时刻 / deposits are stamped at the previous check ----
+#
+# 对账每小时才跑一次，入金只能在「上一次对账之后、这一次之前」的某个时刻发生。原来
+# 流水记在「这一次」——入金后一小时内开仓平仓的单子，按时间取本金时入金还不存在：
+# 余额归零后入金再交易的账户，这些单子本金 = 0，整行不入榜（2026-09-28 实例：
+# 周一 06:04 起交易，06:57 才记上入金）。改成入金记在区间的**最早**一端：区间里
+# 的单子本金按入金后算，只会被摊薄，放大不了，与「持仓当中入金按钱多的那一刻算」
+# 同一个保守方向。出金反过来记在最晚一端（仍是「这一次」）：区间里的单子按出金前
+# 的大本金算，同样放大不了。桥接晚报平仓那种「先出后入」的一对流水，入金的记账
+# 时刻正好等于出金那一轮，两条仍在同一时刻相抵。
+# 上一次对账的时刻按 period key 存在 shared_state（有 Redis 跨进程/重启可见）；
+# 取不到（首轮、内存后端重启后）退回「这一次往前一个对账周期」，并且不早于基线
+# 拍照时刻。
+#
+# Reconcile runs hourly, so a deposit happened somewhere between the previous
+# check and this one. Stamping it at *this* check left positions traded in that
+# window with capital from before the deposit — zero for an account refilled from
+# empty, which drops the whole row. Deposits now take the window's earliest end
+# (window positions can only be diluted, never inflated); withdrawals keep the
+# latest end for the same reason. The previous check time lives in shared_state
+# per period key; when missing, fall back to one loop interval back, never
+# earlier than the baseline snapshot.
+RECONCILE_MARK_TTL_SECONDS = 45 * 24 * 3600     # 覆盖一个自然月 + 重算窗 / a month + grace
+DEPOSIT_FALLBACK_LOOKBACK = timedelta(hours=1)  # 与 loop.LOOP_INTERVAL_SECONDS 一致
+
+
+def _reconcile_mark_key(period_key: str) -> str:
+    return f"gami:reconciled_at:{period_key}"
+
+
+def _last_reconciled_at(period_key: str) -> datetime | None:
+    try:
+        raw = shared_state.kv_get(_reconcile_mark_key(period_key))
+        return _aware(datetime.fromisoformat(raw)) if raw else None
+    except Exception:
+        # Redis 不可用 / 值损坏：当作没有记录，走回退，不让对账失败
+        log.warning("reconcile mark unreadable for %s", period_key, exc_info=True)
+        return None
+
+
+def _mark_reconciled(period_key: str, now: datetime) -> None:
+    try:
+        shared_state.kv_set(_reconcile_mark_key(period_key), _aware(now).isoformat(),
+                            RECONCILE_MARK_TTL_SECONDS)
+    except Exception:
+        log.warning("reconcile mark not saved for %s", period_key, exc_info=True)
+
+
+def _deposit_at(row, prev_check: datetime | None, now: datetime) -> datetime:
+    """入金流水的记账时刻：上一次对账（取不到则 now − 一个周期），不早于基线拍照、不晚于 now。"""
+    at = prev_check if prev_check is not None else now - DEPOSIT_FALLBACK_LOOKBACK
+    if row.taken_at is not None:
+        at = max(at, _aware(row.taken_at))
+    return min(at, now)
+
+
 def reconcile_deposits(db, period_key: str, now: datetime = None,
                         bounds: tuple[datetime, datetime] | None = None) -> int:
     """对每条基线，若账号行仍在且 balance 非 NULL：
@@ -198,6 +254,7 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
         return 0    # 已结束周期：期后交易会污染对账，冻结不动（重算窗内也不对账）
     acct_map = {(a.user_id, a.login): a.balance
                 for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))}
+    prev_check = _last_reconciled_at(period_key)
     adjusted = 0
     for row in db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key):
         balance = acct_map.get((row.user_id, row.mt5_login))
@@ -208,8 +265,8 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
         denom = row.baseline + row.adjust
         delta = balance - denom - realized
         if delta > RECONCILE_TOLERANCE:
-            row.adjust += delta                          # 入金：并入此后仓位的本金
-            _append_flow(row, now, delta)
+            row.adjust += delta                          # 入金：记在上一次对账时刻（见上方说明）
+            _append_flow(row, _deposit_at(row, prev_check, now), delta)
             adjusted += 1
         elif delta < 0 and -delta >= max(WITHDRAWAL_MIN_ABS, WITHDRAWAL_MIN_FRAC * denom):
             row.adjust += delta                          # 出金：此后仓位的本金减少
@@ -217,6 +274,7 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
             adjusted += 1
     if adjusted:
         db.commit()
+    _mark_reconciled(period_key, now)
     return adjusted
 
 

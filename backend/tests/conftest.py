@@ -112,8 +112,22 @@ def _fresh_shared_read_cache():
     """
     from app.services import shared_cache
     shared_cache.clear_for_tests()
+    _clear_reconcile_marks()
     yield
     shared_cache.clear_for_tests()
+    _clear_reconcile_marks()
+
+
+def _clear_reconcile_marks():
+    """对账的「上一次对账时刻」也落在 shared_state 内存后端（boards._reconcile_mark_key），
+    同一个 period key 在不同用例里反复用，不清会把上一条用例的时刻带进下一条。
+    The reconcile "previous check" marks live in the same memory backend and the
+    same period keys recur across tests; clear them so one test's clock can't leak."""
+    from app.services import shared_state
+    mem = shared_state._memory
+    keys = mem.keys(shared_state.PREFIX + "gami:reconciled_at:")
+    if keys:
+        mem.delete(*keys)
 
 
 @pytest.fixture()
