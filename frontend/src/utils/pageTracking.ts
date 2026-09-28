@@ -50,6 +50,7 @@ const TRACKED_PATHS = new Set([
   '/upgrade',
   '/account',
   '/download',
+  '/app-download',
   '/simulator',
   '/agent',
 ])

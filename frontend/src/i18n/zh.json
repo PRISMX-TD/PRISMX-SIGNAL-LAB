@@ -1605,6 +1605,7 @@
         "/upgrade": "升级 PRO",
         "/account": "账户设置",
         "/download": "下载桥接",
+        "/app-download": "下载 App",
         "/simulator": "信号回放",
         "/agent": "代理页面"
       }

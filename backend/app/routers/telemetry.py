@@ -117,6 +117,7 @@ ALLOWED_PATHS = frozenset({
     "/upgrade",
     "/account",
     "/download",
+    "/app-download",
     "/simulator",
     "/agent",
 })

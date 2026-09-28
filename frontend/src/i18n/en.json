@@ -1605,6 +1605,7 @@
         "/upgrade": "Upgrade",
         "/account": "Account",
         "/download": "Bridge download",
+        "/app-download": "App download",
         "/simulator": "Signal replay",
         "/agent": "Agent view"
       }
