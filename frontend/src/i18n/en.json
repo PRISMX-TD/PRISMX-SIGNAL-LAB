@@ -91,7 +91,7 @@
     "sh3Desc": "Every close is verified against a real platform order before it counts, and losses render at the same size as wins. Account win rate sits beside the combined win rate. These numbers are the raw material of rank and badges.",
     "sh4Pain": "04 · Competitive ranking",
     "sh4Title": "Rank up, earn badges, take the crown",
-    "sh4Desc": "Return and win-rate boards refresh hourly, ranked by account and by percentage, never by money. Badges land within the hour and are never revoked. Once a contest is settled the placings are frozen for good and the champion is crowned.",
+    "sh4Desc": "Return and win-rate boards refresh every 5 minutes, ranked by account and by percentage, never by money. Badges land within the hour and are never revoked. Once a contest is settled the placings are frozen for good and the champion is crowned.",
     "scrNew": "NEW",
     "scrGold": "Gold",
     "scrBuy": "BUY",

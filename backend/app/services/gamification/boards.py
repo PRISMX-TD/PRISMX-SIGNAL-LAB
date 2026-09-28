@@ -48,7 +48,8 @@ def ensure_baselines(db, period_key: str, now: datetime) -> int:
     # 先插了同一行，本行静默跳过，其余账户照拍。改成攒一批再 commit 的话，一整
     # 批里只要有一行撞约束，整批都会回滚，得另外设计「先查后插 + 失败降级逐条
     # 重试」之类的幂等手段——那是一次真正的重构，风险大于这里省下的往返。
-    # 真要优化先做的是别的：这一趟每小时才跑一次，账户数也远没到瓶颈。
+    # 真要优化先做的是别的：这一趟 5 分钟一次，但只有新账户才走到 commit（已有基线的
+    # 在上面就 continue 了），账户数也远没到瓶颈。
     # Per-account commit inside the loop: at a thousand accounts that's a thousand
     # round trips and looks like an obvious batching target. Keeping it is
     # deliberate — the IntegrityError below *is* the idempotency mechanism (a
@@ -56,7 +57,8 @@ def ensure_baselines(db, period_key: str, now: datetime) -> int:
     # would roll back every row in a batch whenever any one row collided, so it
     # would need a different idempotency design (probe-then-insert with per-row
     # retry on failure) — a real refactor, worth more risk than the round trips
-    # cost. This pass runs hourly and the account count is nowhere near the limit.
+    # cost. The pass runs every 5 minutes, but only new accounts reach the commit
+    # (existing baselines continue above), and the count is nowhere near the limit.
     for a in accounts:
         if a.user_id in opted_out or (a.user_id, a.login) in existing:
             continue
@@ -167,8 +169,9 @@ def _realized_since(db, user_id, login, since, until) -> float:
 
 # ---- 入金流水记在「上一次对账」时刻 / deposits are stamped at the previous check ----
 #
-# 对账每小时才跑一次，入金只能在「上一次对账之后、这一次之前」的某个时刻发生。原来
-# 流水记在「这一次」——入金后一小时内开仓平仓的单子，按时间取本金时入金还不存在：
+# 对账是周期性的（周期榜 5 分钟、比赛 60 秒；2026-09-28 之前周期榜每小时一次），入金
+# 只能在「上一次对账之后、这一次之前」的某个时刻发生。原来流水记在「这一次」——两次
+# 对账之间开仓平仓的单子，按时间取本金时入金还不存在：
 # 余额归零后入金再交易的账户，这些单子本金 = 0，整行不入榜（2026-09-28 实例：
 # 周一 06:04 起交易，06:57 才记上入金）。改成入金记在区间的**最早**一端：区间里
 # 的单子本金按入金后算，只会被摊薄，放大不了，与「持仓当中入金按钱多的那一刻算」
@@ -179,7 +182,7 @@ def _realized_since(db, user_id, login, since, until) -> float:
 # 取不到（首轮、内存后端重启后）退回「这一次往前一个对账周期」，并且不早于基线
 # 拍照时刻。
 #
-# Reconcile runs hourly, so a deposit happened somewhere between the previous
+# Reconcile runs periodically, so a deposit happened somewhere between the previous
 # check and this one. Stamping it at *this* check left positions traded in that
 # window with capital from before the deposit — zero for an account refilled from
 # empty, which drops the whole row. Deposits now take the window's earliest end
@@ -188,7 +191,11 @@ def _realized_since(db, user_id, login, since, until) -> float:
 # per period key; when missing, fall back to one loop interval back, never
 # earlier than the baseline snapshot.
 RECONCILE_MARK_TTL_SECONDS = 45 * 24 * 3600     # 覆盖一个自然月 + 重算窗 / a month + grace
-DEPOSIT_FALLBACK_LOOKBACK = timedelta(hours=1)  # 与 loop.LOOP_INTERVAL_SECONDS 一致
+# 取不到上一次对账时刻时往前退一小时：远宽于 5 分钟的周期，重启/停机的空档也盖得住；
+# 往前退只会把区间里的单子摊薄，不会放大。
+# Fallback when no mark exists: an hour, far wider than the 5-minute cadence so a
+# restart gap is covered; stamping earlier can only dilute, never inflate.
+DEPOSIT_FALLBACK_LOOKBACK = timedelta(hours=1)
 
 
 def _reconcile_mark_key(period_key: str) -> str:

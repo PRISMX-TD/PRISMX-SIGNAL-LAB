@@ -22,7 +22,7 @@ from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
-from app.services.gamification.loop import competition_loop, gamification_loop
+from app.services.gamification.loop import board_loop, competition_loop, gamification_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
@@ -145,6 +145,8 @@ async def lifespan(app: FastAPI):
         "gamification": gamification_loop,
         # 比赛榜快循环（60 秒）/ fast competition-board loop
         "competitions": competition_loop,
+        # 周期榜循环（5 分钟，startup_delay 40s）/ period-board loop
+        "boards": board_loop,
         # K 线历史保留策略 / candle retention sweep
         "candle_retention": candle_retention_sweep_loop,
         # Gateway 账号持仓轮询 / gateway position polling

@@ -43,8 +43,9 @@ def _stub_stages_1_4(monkeypatch):
     monkeypatch.setattr(loop_module, "backfill_order_trade_modes", lambda db: (0, 0))
     monkeypatch.setattr(loop_module, "judge_and_record_conditions", lambda db, uid, *a: [])
     monkeypatch.setattr(loop_module, "judge_and_award_badges", lambda db, uid, *a: [])
-    monkeypatch.setattr(boards_module, "snapshot_boards",
-                         lambda db, now: {"periods": 2, "rows": 5})
+    def _no_boards(db, now):
+        raise AssertionError("周期榜已拆到 board_loop，整趟 pass 不该再算它")
+    monkeypatch.setattr(boards_module, "snapshot_boards", _no_boards)
 
 
 def test_comp_stage_maps_return_values(monkeypatch, loop_db):
@@ -57,10 +58,8 @@ def test_comp_stage_maps_return_values(monkeypatch, loop_db):
     assert result["compCount"] == 3
     assert result["compRows"] == 7
     assert result["compsError"] is False
-    # 前四阶段（含榜单）的键完好、不受 stage 5 打扰
-    assert result["boardPeriods"] == 2
-    assert result["boardRows"] == 5
-    assert result["boardsError"] is False
+    # 前面几个阶段的键完好、不受比赛阶段打扰；周期榜不在这趟里（见 board_loop）
+    assert "boardRows" not in result
     assert result["accounts"] == 0 and result["stamped"] == 0 and result["sentinel"] == 0
     assert result["users"] == 0 and result["newConditions"] == 0 and result["newBadges"] == 0
     assert result["failedUsers"] == 0
@@ -79,10 +78,21 @@ def test_comp_stage_failure_isolated(monkeypatch, loop_db):
     assert result["compsError"] is True
     assert result["compCount"] == 0
     assert result["compRows"] == 0
-    # stage 5 炸了，前四阶段（含榜单）已经拿到的结果原样返回，不被这次异常牵连
-    assert result["boardPeriods"] == 2
-    assert result["boardRows"] == 5
-    assert result["boardsError"] is False
+    # 比赛阶段炸了，前面几个阶段已经拿到的结果原样返回，不被这次异常牵连
     assert result["accounts"] == 0 and result["stamped"] == 0 and result["sentinel"] == 0
     assert result["users"] == 0 and result["newConditions"] == 0 and result["newBadges"] == 0
     assert result["failedUsers"] == 0
+
+
+def test_board_pass_maps_snapshot_result(monkeypatch, loop_db):
+    """周期榜 5 分钟循环：run_board_pass 原样返回 snapshot_boards 的结果。"""
+    monkeypatch.setattr(boards_module, "snapshot_boards", lambda db, now: {"periods": 2, "rows": 5})
+    assert loop_module.run_board_pass() == {"periods": 2, "rows": 5}
+
+
+def test_board_pass_failure_is_contained(monkeypatch, loop_db):
+    """snapshot_boards 抛异常：记日志、回滚，返回 error 标记，不把循环带崩。"""
+    def _boom(db, now):
+        raise RuntimeError("board snapshot exploded")
+    monkeypatch.setattr(boards_module, "snapshot_boards", _boom)
+    assert loop_module.run_board_pass() == {"periods": 0, "rows": 0, "error": True}

@@ -1,6 +1,7 @@
-"""每小时游戏化循环（设计 §3.3/§4.2 成本约束：threadpool、串行、打点）。
+"""游戏化循环（设计 §3.3/§4.2 成本约束：threadpool、串行、打点）：每小时的条件/勋章
+pass、5 分钟的周期榜、60 秒的比赛榜。
 
-生产可以是多 worker：`main.py` 把这里的两条循环交给 `services/background.py` 的
+生产可以是多 worker：`main.py` 把这里的三条循环交给 `services/background.py` 的
 `BackgroundLoops`，多 worker + `REDIS_URL` 时靠 `lock:background-loops` 这把
 Redis 领导锁选主，只有主 worker 真的跑循环。所以「同一趟 pass 被执行多遍」这个
 风险是由领导锁挡住的，不是由「生产只有一个进程」挡住的——这份 docstring 早先
@@ -9,7 +10,8 @@ Redis 领导锁选主，只有主 worker 真的跑循环。所以「同一趟 pa
 注意这条只管住**循环**：按 HTTP 请求触发的按需刷新（`competitions.
 refresh_comp_board`）每个 worker 都会跑，它的节流走 `shared_state`，见那边的说明。
 
-Hourly gamification loop. Production may run several workers: main.py hands both
+Gamification loops (hourly conditions/badges, 5-minute period boards, 60-second
+competitions). Production may run several workers: main.py hands the
 loops below to services/background.py's BackgroundLoops, which elects one leader
 via the Redis lock `lock:background-loops` when REDIS_URL is set, so only the
 leader actually runs them. Duplicate execution is prevented by that leader lock,
@@ -59,6 +61,16 @@ _last_full_pass_day: date | None = None
 # per tick and goes back to sleep, i.e. no load at all.
 COMP_LOOP_INTERVAL_SECONDS = 60
 SLOW_COMP_PASS_WARN_SECONDS = 20
+# 周期榜（收益榜/胜率榜的周榜、月榜）同样拆成一条 5 分钟循环：拍基线 + 对账 + 算行 +
+# 快照只碰有基线的账户，比整趟 pass 轻得多；每小时才刷一次，平仓后要等最多一小时
+# 名次才动。对账越密，入金流水的记账时刻（上一次对账）也离真实入金越近。
+# Period boards (weekly/monthly return + win rate) also get their own 5-minute
+# loop: baselines + reconcile + rows + snapshot only touch accounts with a
+# baseline, far lighter than the full pass, and hourly meant waiting up to an
+# hour for a rank to move. Denser reconciles also stamp deposits closer to when
+# they really happened.
+BOARD_LOOP_INTERVAL_SECONDS = 300
+SLOW_BOARD_PASS_WARN_SECONDS = 30
 
 
 def backfill_account_trade_modes(db) -> int:
@@ -242,23 +254,19 @@ def run_gamification_pass(full: bool | None = None) -> dict:
                 log.exception("gamification pass: user %s judging failed", uid)
                 db.rollback()
                 failed += 1
-        now = datetime.now(timezone.utc)     # 榜单与比赛快照共用同一个时钟，同一轮内口径一致
-        board_stats = {}
-        try:
-            from .boards import snapshot_boards
-            board_stats = snapshot_boards(db, now)
-        except Exception:
-            # 榜单快照失败不该拖累前三阶段已经判出的结果——记日志、回滚榜单相关的
-            # 未提交残留，本轮的条件/勋章判定照常返回，下一轮再补拍快照。
-            log.exception("gamification pass: board snapshot failed")
-            db.rollback()
-            board_stats = {"error": True}
+        # 周期榜（周/月）不在这里算：它有自己的 5 分钟循环（board_loop）。两边都跑
+        # 会让 reconcile_deposits 在两个线程里并发对同一批基线行，同一笔入金可能
+        # 被记两次，所以只能有一处。
+        # Period boards are not computed here: they have their own 5-minute loop
+        # (board_loop). Running both would let reconcile_deposits hit the same
+        # baseline rows from two threads and double-count a deposit.
+        now = datetime.now(timezone.utc)
         comp_stats = {}
         try:
             from .competitions import snapshot_competitions
             comp_stats = snapshot_competitions(db, now)
         except Exception:
-            # 同上：比赛快照失败不该拖累前四阶段（含榜单）已经落定的结果——记日志、
+            # 比赛快照失败不该拖累前面几个阶段已经落定的结果——记日志、
             # 回滚比赛相关的未提交残留，本轮其余结果照常返回，下一轮再补拍快照。
             log.exception("gamification pass: competition snapshot failed")
             db.rollback()
@@ -274,9 +282,6 @@ def run_gamification_pass(full: bool | None = None) -> dict:
                 "users": len(uids), "full": full,
                 "newConditions": conds, "newBadges": badges,
                 "failedUsers": failed,
-                "boardPeriods": board_stats.get("periods", 0),
-                "boardRows": board_stats.get("rows", 0),
-                "boardsError": board_stats.get("error", False),
                 "compCount": comp_stats.get("comps", 0),
                 "compRows": comp_stats.get("rows", 0),
                 "compsError": comp_stats.get("error", False)}
@@ -336,6 +341,40 @@ def run_competition_pass() -> dict:
             return {"comps": 0, "rows": 0, "error": True}
     finally:
         db.close()
+
+
+def run_board_pass() -> dict:
+    """只刷周期榜快照（boards.snapshot_boards），不碰条件/勋章/比赛。
+    Refresh the period-board snapshots only; no conditions, badges or competitions."""
+    from .boards import snapshot_boards
+    db = SessionLocal()
+    try:
+        return snapshot_boards(db, datetime.now(timezone.utc))
+    except Exception:
+        # 与比赛快循环一致：记日志、回滚残留，下一轮再来，绝不把循环带崩。
+        # Same as the competition loop: log, roll back, retry next tick.
+        log.exception("board pass failed")
+        db.rollback()
+        return {"periods": 0, "rows": 0, "error": True}
+    finally:
+        db.close()
+
+
+async def board_loop(startup_delay: float = 40.0):
+    """周期榜循环（默认 5 分钟）/ period-board loop (5 minutes by default)."""
+    await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
+    from starlette.concurrency import run_in_threadpool
+    while True:
+        try:
+            t0 = time.monotonic()
+            result = await run_in_threadpool(run_board_pass)
+            dur = time.monotonic() - t0
+            log.info("board pass %.1fs %s", dur, result)
+            if dur > SLOW_BOARD_PASS_WARN_SECONDS:
+                log.warning("board pass slow: %.1fs", dur)
+        except Exception:
+            log.exception("board loop failed")
+        await asyncio.sleep(BOARD_LOOP_INTERVAL_SECONDS)
 
 
 async def competition_loop(startup_delay: float = 35.0):
