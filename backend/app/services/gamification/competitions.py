@@ -512,9 +512,9 @@ def settle_competition(db, comp: Competition, admin_id: str,
     from whenever an admin manually advances status to "ended" — the two can
     diverge, and only `ends_at` is the cutoff the spec defines.
 
-    终审前先刷新一遍本场比赛的快照（`_snapshot_one_comp`，与每小时循环
-    `snapshot_competitions` 共用同一份实现）：最近一次落盘的快照最长可能有一小
-    时陈旧——「取消资格 → 立刻终审」这个自然的管理流程会踩到这个陈旧窗口：
+    终审前先刷新一遍本场比赛的快照（`_snapshot_one_comp`，与比赛快循环
+    `snapshot_competitions` 共用同一份实现）：最近一次落盘的快照总有一段陈旧窗口
+    （快循环最长约一分钟）——「取消资格 → 立刻终审」这个自然的管理流程会踩到这个陈旧窗口：
     被取消资格的人还占着上一次快照里的名次（compute_comp_rows 已经把 disqualified
     参赛者排除在计分之外，但那是下一次快照才生效），若终审直接读旧快照，永久
     名次表会把他钉在榜上、幸存者拿不到该有的名次（比如没有 rank 1）、

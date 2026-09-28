@@ -1,21 +1,11 @@
-"""循环第 5 阶段（Phase 3 Task 7）：run_gamification_pass 把 snapshot_competitions
-接入每小时循环，返回 dict 增 compCount/compRows/compsError，现有键不改名。
+"""游戏化各循环的分工（2026-09-28 起）：每小时 pass 只判条件/勋章，周期榜只由
+board_loop（5 分钟）算，比赛榜只由 competition_loop（60 秒）算。每张榜只能有一处
+对账——两处并发跑 reconcile_deposits，同一笔入金可能被记两次。
 
-run_gamification_pass 自己开 SessionLocal，不吃 conftest 的 db_session fixture
-（Phase 2 Task 5 在榜单那一站就撞过这个限制）。数据路径（running 比赛真的算出
-快照行、settled/draft/upcoming 不碰）已经在 test_comp_scoring.py 里覆盖到
-snapshot_competitions 本身；这里只测循环这一层的集成契约：
-  (a) snapshot_competitions 返回值 -> compCount/compRows/compsError 的映射对不对
-  (b) snapshot_competitions 抛异常 -> compsError=True，且前四阶段（含榜单）的
-      结果不被这次异常牵连
-
-做法：monkeypatch loop.SessionLocal 接到一套内存 SQLite（同 conftest.py::
-db_session 的手法），再把前四阶段的函数钉成 no-op——backfill_* 和
-judge_and_record_conditions/judge_and_award_badges 是 loop 模块的顶层名字，
-直接 monkeypatch.setattr(loop, ...) 就行；boards.snapshot_boards 和
-competitions.snapshot_competitions 是 run_gamification_pass 内部按调用现场
-`from .xxx import yyy` 现拿的（不是 loop 模块顶层名字），得 monkeypatch 到
-它们各自的源模块上，下一次现场 import 才会捡到打过补丁的版本。
+run_gamification_pass / run_board_pass 自己开 SessionLocal，不吃 conftest 的
+db_session fixture，所以这里 monkeypatch loop.SessionLocal 接到一套内存 SQLite。
+boards.snapshot_boards 和 competitions.snapshot_competitions 是调用现场
+`from .xxx import yyy` 现拿的，得 monkeypatch 到各自的源模块上。
 """
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -48,37 +38,16 @@ def _stub_stages_1_4(monkeypatch):
     monkeypatch.setattr(boards_module, "snapshot_boards", _no_boards)
 
 
-def test_comp_stage_maps_return_values(monkeypatch, loop_db):
+def test_hourly_pass_computes_neither_board(monkeypatch, loop_db):
+    """整趟 pass 不碰周期榜也不碰比赛榜（两者任一被调用，桩就会抛）。"""
     _stub_stages_1_4(monkeypatch)
-    monkeypatch.setattr(competitions_module, "snapshot_competitions",
-                         lambda db, now: {"comps": 3, "rows": 7})
+    def _no_comps(db, now):
+        raise AssertionError("比赛榜只由 competition_loop 算，整趟 pass 不该再算它")
+    monkeypatch.setattr(competitions_module, "snapshot_competitions", _no_comps)
 
     result = loop_module.run_gamification_pass()
 
-    assert result["compCount"] == 3
-    assert result["compRows"] == 7
-    assert result["compsError"] is False
-    # 前面几个阶段的键完好、不受比赛阶段打扰；周期榜不在这趟里（见 board_loop）
-    assert "boardRows" not in result
-    assert result["accounts"] == 0 and result["stamped"] == 0 and result["sentinel"] == 0
-    assert result["users"] == 0 and result["newConditions"] == 0 and result["newBadges"] == 0
-    assert result["failedUsers"] == 0
-
-
-def test_comp_stage_failure_isolated(monkeypatch, loop_db):
-    _stub_stages_1_4(monkeypatch)
-
-    def _boom(db, now):
-        raise RuntimeError("competition snapshot exploded")
-
-    monkeypatch.setattr(competitions_module, "snapshot_competitions", _boom)
-
-    result = loop_module.run_gamification_pass()
-
-    assert result["compsError"] is True
-    assert result["compCount"] == 0
-    assert result["compRows"] == 0
-    # 比赛阶段炸了，前面几个阶段已经拿到的结果原样返回，不被这次异常牵连
+    assert not any(k.startswith(("board", "comp")) for k in result)
     assert result["accounts"] == 0 and result["stamped"] == 0 and result["sentinel"] == 0
     assert result["users"] == 0 and result["newConditions"] == 0 and result["newBadges"] == 0
     assert result["failedUsers"] == 0

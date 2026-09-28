@@ -49,7 +49,8 @@ CANDIDATE_SLACK = timedelta(minutes=10)
 # Both empty after a restart, so the first pass is always full — nothing to persist.
 _last_pass_started_at: datetime | None = None
 _last_full_pass_day: date | None = None
-# 比赛榜单单独一条快循环：整点那趟 pass 一小时才跑一次，对正在进行的比赛来说太慢——
+# 比赛榜只由这条快循环算（整趟 pass 不再算它，理由见 run_gamification_pass 末尾）。
+# 整点那趟 pass 一小时才跑一次，对正在进行的比赛来说太慢——
 # 用户平仓后要等最多一小时名次才动。比赛快照只碰 running/ended 的比赛与它们的参赛
 # 账户，比整趟 pass（全体用户的条件 + 勋章 + 两张周期榜）轻得多，可以跑得密。
 # 没有进行中的比赛时这条循环只花一次 count 查询就睡下，等于不产生负载。
@@ -254,23 +255,13 @@ def run_gamification_pass(full: bool | None = None) -> dict:
                 log.exception("gamification pass: user %s judging failed", uid)
                 db.rollback()
                 failed += 1
-        # 周期榜（周/月）不在这里算：它有自己的 5 分钟循环（board_loop）。两边都跑
-        # 会让 reconcile_deposits 在两个线程里并发对同一批基线行，同一笔入金可能
-        # 被记两次，所以只能有一处。
-        # Period boards are not computed here: they have their own 5-minute loop
-        # (board_loop). Running both would let reconcile_deposits hit the same
-        # baseline rows from two threads and double-count a deposit.
-        now = datetime.now(timezone.utc)
-        comp_stats = {}
-        try:
-            from .competitions import snapshot_competitions
-            comp_stats = snapshot_competitions(db, now)
-        except Exception:
-            # 比赛快照失败不该拖累前面几个阶段已经落定的结果——记日志、
-            # 回滚比赛相关的未提交残留，本轮其余结果照常返回，下一轮再补拍快照。
-            log.exception("gamification pass: competition snapshot failed")
-            db.rollback()
-            comp_stats = {"error": True}
+        # 周期榜与比赛榜都不在这里算：各有自己的循环（board_loop 5 分钟、
+        # competition_loop 60 秒）。两处都算会让 reconcile_deposits 在两个线程里并发
+        # 对同一批基线行，同一笔入金可能被记两次，所以每张榜只能有一处对账。
+        # Neither period nor competition boards are computed here: each has its own
+        # loop (board_loop, competition_loop). Computing them in two places would let
+        # reconcile_deposits hit the same baseline rows from two threads and
+        # double-count a deposit, so each board is reconciled in exactly one place.
         # 只有整趟跑到这里才推进水位：中途异常抛出去的话，下一趟会以更早的
         # since 重判，宁可重复不可漏判。
         # Advance the watermark only on completion; an exception leaves it, so the
@@ -281,10 +272,7 @@ def run_gamification_pass(full: bool | None = None) -> dict:
         return {"accounts": acc, "stamped": stamped, "sentinel": sentinel,
                 "users": len(uids), "full": full,
                 "newConditions": conds, "newBadges": badges,
-                "failedUsers": failed,
-                "compCount": comp_stats.get("comps", 0),
-                "compRows": comp_stats.get("rows", 0),
-                "compsError": comp_stats.get("error", False)}
+                "failedUsers": failed}
     finally:
         db.close()
 
@@ -378,11 +366,9 @@ async def board_loop(startup_delay: float = 40.0):
 
 
 async def competition_loop(startup_delay: float = 35.0):
-    """比赛榜快循环（默认 60 秒）。整点那趟 pass 仍然照常也会刷比赛快照——
-    两者都是「先删后插同一批行」，重复执行幂等，不需要互斥。
-    Fast competition-board loop (60s by default). The hourly pass still refreshes
-    competition snapshots as well; both are delete-then-insert over the same rows,
-    so running them both is idempotent and needs no mutual exclusion."""
+    """比赛榜快循环（默认 60 秒），比赛快照与对账只在这里跑（整趟 pass 不再算）。
+    Fast competition-board loop (60s by default) — the only place competition
+    snapshots and their reconcile run (the hourly pass no longer does)."""
     await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
     from starlette.concurrency import run_in_threadpool
     while True:
