@@ -61,7 +61,28 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _ticket_out(ticket: Ticket, replies: list[TicketReply]) -> TicketOut:
+def _author_email(author: User, viewer_is_admin: bool) -> str:
+    """回复作者在当前查看者眼里的邮箱：管理员的邮箱不给普通用户看，回空串，
+    前端据此显示「客服」。管理员查看时照常给全。
+    The reply author's email as the viewer may see it: staff emails are never
+    shown to regular users (empty string; the UI shows "Support" instead)."""
+    if author.role == "admin" and not viewer_is_admin:
+        return ""
+    return author.email
+
+
+def _reply_out(r: TicketReply, viewer_is_admin: bool) -> TicketReplyOut:
+    return TicketReplyOut(
+        id=r.id,
+        authorId=r.author_id,
+        authorEmail=_author_email(r.author, viewer_is_admin),
+        authorRole=r.author.role,
+        body=r.body,
+        createdAt=r.created_at,
+    )
+
+
+def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: bool) -> TicketOut:
     """把 ORM 对象转成 TicketOut / convert ORM objects to TicketOut."""
     user: User = ticket.user  # relationship backref
     return TicketOut(
@@ -74,17 +95,7 @@ def _ticket_out(ticket: Ticket, replies: list[TicketReply]) -> TicketOut:
         status=ticket.status,
         createdAt=ticket.created_at,
         updatedAt=ticket.updated_at,
-        replies=[
-            TicketReplyOut(
-                id=r.id,
-                authorId=r.author_id,
-                authorEmail=r.author.email,
-                authorRole=r.author.role,
-                body=r.body,
-                createdAt=r.created_at,
-            )
-            for r in replies
-        ],
+        replies=[_reply_out(r, viewer_is_admin) for r in replies],
     )
 
 
@@ -155,7 +166,7 @@ def _notify_admins_ticket_reply(db: Session, ticket: Ticket, author: User) -> li
     return admin_ids
 
 
-def _latest_reply(ticket: Ticket) -> TicketReplyOut | None:
+def _latest_reply(ticket: Ticket, viewer_is_admin: bool) -> TicketReplyOut | None:
     """最新的那条回复（可能有也可能没有）/ the most recent reply, if any."""
     # relationship 上配了 order_by="TicketReply.created_at"（见 models），所以
     # ticket.replies 已经按时间升序，取最后一个就是最新的那条。
@@ -167,14 +178,7 @@ def _latest_reply(ticket: Ticket) -> TicketReplyOut | None:
         r = ticket.replies[-1] if ticket.replies else None
         if not r:
             return None
-        return TicketReplyOut(
-            id=r.id,
-            authorId=r.author_id,
-            authorEmail=r.author.email,
-            authorRole=r.author.role,
-            body=r.body,
-            createdAt=r.created_at,
-        )
+        return _reply_out(r, viewer_is_admin)
     return None
 
 
@@ -208,7 +212,7 @@ def create_ticket(
     db.refresh(ticket)
     for admin_id in admin_ids:
         notify_ws(admin_id)
-    return _ticket_out(ticket, [reply])
+    return _ticket_out(ticket, [reply], user.role == "admin")
 
 
 @router.get("", response_model=list[TicketListItem])
@@ -234,7 +238,7 @@ def list_my_tickets(
             priority=t.priority,
             status=t.status,
             updatedAt=t.updated_at,
-            latestReply=_latest_reply(t),
+            latestReply=_latest_reply(t, user.role == "admin"),
         )
         for t in tickets
     ]
@@ -265,7 +269,7 @@ def get_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies)
+    return _ticket_out(ticket, replies, user.role == "admin")
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketOut)
@@ -316,7 +320,7 @@ def reply_to_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies)
+    return _ticket_out(ticket, replies, user.role == "admin")
 
 
 # ---- 管理员端 / admin endpoints ----
@@ -356,7 +360,7 @@ def list_all_tickets(
             priority=t.priority,
             status=t.status,
             updatedAt=t.updated_at,
-            latestReply=_latest_reply(t),
+            latestReply=_latest_reply(t, True),
         )
         for t in tickets
     ]
@@ -378,7 +382,7 @@ def admin_get_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies)
+    return _ticket_out(ticket, replies, True)
 
 
 @admin_router.post("/{ticket_id}/reply", response_model=TicketOut)
@@ -430,7 +434,9 @@ def admin_reply_to_ticket(
     # 推送通知给工单提交者 / notify the ticket submitter
     try:
         from app.services.push_dispatch import dispatch_ticket_reply
-        dispatch_ticket_reply(ticket.id, ticket.user_id, admin.email)
+        # 推送文案里不带管理员邮箱，与接口对用户隐藏邮箱一致（见 _author_email）。
+        # No staff email in the push text either, matching _author_email.
+        dispatch_ticket_reply(ticket.id, ticket.user_id)
     except Exception:
         # 行为不变（通知失败不影响回复成功），但要留痕：这个 except 连 import 失败
         # 都一起吞，推送链路整体坏掉时表现为「用户再也收不到工单回复通知」，而服务端
@@ -449,7 +455,7 @@ def admin_reply_to_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies)
+    return _ticket_out(ticket, replies, True)
 
 
 @admin_router.patch("/{ticket_id}", response_model=TicketOut)
@@ -475,4 +481,4 @@ def admin_update_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies)
+    return _ticket_out(ticket, replies, True)

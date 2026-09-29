@@ -85,13 +85,16 @@ function Message({ authorEmail, authorRole, body, createdAt, index, t }: {
   t: ReturnType<typeof useTranslation>['t']
 }) {
   const isAdmin = authorRole === 'admin'
+  // 后端不给普通用户下发管理员邮箱（空串），这时名字位置显示「客服」，标签就不重复了。
+  // Staff emails are withheld from users (empty string): show "Support" as the name instead.
+  const name = authorEmail || t('admin.staff')
   return (
     <div className={`sup-msg-row${isAdmin ? ' staff' : ''}`} style={{ '--i': index } as React.CSSProperties}>
-      <span className="sup-ava" aria-hidden="true">{initial(authorEmail)}</span>
+      <span className="sup-ava" aria-hidden="true">{initial(name)}</span>
       <div className="min-w-0">
         <div className="sup-msg-meta">
-          <span className="name">{authorEmail}</span>
-          {isAdmin && <span className="staff">{t('admin.staff')}</span>}
+          <span className="name">{name}</span>
+          {isAdmin && authorEmail && <span className="staff">{t('admin.staff')}</span>}
           <span className="time num">{fmtStamp(createdAt)}</span>
         </div>
         <p className="sup-msg-body">{body}</p>

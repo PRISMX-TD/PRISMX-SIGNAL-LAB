@@ -1086,7 +1086,7 @@ async def dispatch_event_push_async(user_id: str, event_type: str, title: str, b
 # same VAPID / WebPush channel as the event-push functions above.
 
 
-def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str) -> None:
+def dispatch_ticket_reply(ticket_id: str, recipient_id: str) -> None:
     """工单有新回复时推送通知给接收方。同步、阻塞网络 IO，
     调用方须确保不在事件循环中直接调用。
     Push a notification when a ticket gets a new reply. Synchronous,
@@ -1121,7 +1121,7 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str, replier_email: str)
             db.close()
         # 双语标题与正文 / bilingual title and body
         title = "New ticket reply / 工单有新回复"
-        body = f"{replier_email} replied to your ticket / {replier_email} 回复了你的工单"
+        body = "Support replied to your ticket / 客服回复了你的工单"
         # 判定已经过了，WS 兜底先发（下面那句 `if not subs: return` 对大陆设备恒成立）。
         _ws_fallback([recipient_id], title, body, url="/support")
         if not subs:

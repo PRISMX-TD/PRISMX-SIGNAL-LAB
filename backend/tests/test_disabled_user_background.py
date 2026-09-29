@@ -141,11 +141,11 @@ def test_announcement_push_skips_disabled(db_session, push_env, monkeypatch):
 
 def test_ticket_reply_push_skips_disabled(db_session, push_env):
     _user(db_session, "off", disabled=True)
-    pd.dispatch_ticket_reply("t1", "off", "admin@t.local")
+    pd.dispatch_ticket_reply("t1", "off")
     assert push_env.ws == [] and push_env.sent == []
 
     _set_disabled(db_session, "off", False)
-    pd.dispatch_ticket_reply("t1", "off", "admin@t.local")
+    pd.dispatch_ticket_reply("t1", "off")
     assert push_env.ws == [["off"]] and push_env.sent == [["off"]]
 
 
