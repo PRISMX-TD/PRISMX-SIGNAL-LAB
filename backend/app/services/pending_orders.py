@@ -12,6 +12,7 @@ rendering. The bridge emits this shape directly (mt5_worker._pending_orders_payl
 this module translates the gateway's OrderInfo into it. Field names deliberately
 match the POSITIONS payload so both tables share row-rendering code.
 """
+import asyncio
 import logging
 
 from sqlalchemy.orm import Session
@@ -99,10 +100,52 @@ async def push_gateway_pending_orders(user_id: str, logins: list[str]) -> None:
     """
     if not logins:
         return
+    # 多账号并行读（以前逐个串行，N 个账号就是 N 倍网关往返）。return_exceptions 是为了
+    # 让「任一失败整帧不推」的语义不被某个账号的异常打断：先收齐，再统一检查。
+    # Read all accounts in parallel (was serial: N accounts = N gateway round trips).
+    # return_exceptions keeps the "any failure cancels the whole frame" rule intact:
+    # collect everything first, then check.
+    results = await asyncio.gather(
+        *(read_gateway_pending_orders(login) for login in logins), return_exceptions=True
+    )
     rows: list[dict] = []
-    for login in logins:
-        got, ok = await read_gateway_pending_orders(login)
+    for res in results:
+        if isinstance(res, BaseException):
+            logger.warning("Gateway 挂单读取异常，本帧不推 / pending read raised, frame skipped: %s", res)
+            return
+        got, ok = res
         if not ok:
             return
         rows.extend(got)
     await manager.push_pending_orders(user_id, rows, source="gateway")
+
+
+def submit_to_main_loop(coro, what: str) -> None:
+    """把协程提交到主事件循环后立即返回（不等结果）；异常经 done_callback 记日志。
+
+    与 gateway_client.run_on_main_loop 的区别：那个会 future.result(timeout) 阻塞调用
+    线程，这里是 fire-and-forget。没捕获到主循环（单测 / 脚本）时退回同步 asyncio.run，
+    行为与 run_on_main_loop 的降级一致，只是异常改为记日志。
+    Submit a coroutine to the main loop and return at once; failures are logged via a
+    done-callback (otherwise they would vanish silently). Without a captured main loop
+    (tests / scripts) it falls back to a synchronous asyncio.run.
+    """
+    from app.services import gateway_client
+
+    loop = gateway_client._main_loop
+    if loop is None or loop.is_closed():
+        try:
+            asyncio.run(coro)
+        except Exception:  # noqa: BLE001
+            logger.exception("主循环任务失败 / main-loop task failed: %s", what)
+        return
+    future = asyncio.run_coroutine_threadsafe(coro, loop)
+
+    def _log_failure(f) -> None:
+        if f.cancelled():
+            return
+        exc = f.exception()
+        if exc is not None:
+            logger.error("主循环任务失败 / main-loop task failed: %s: %r", what, exc)
+
+    future.add_done_callback(_log_failure)

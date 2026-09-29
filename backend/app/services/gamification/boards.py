@@ -155,16 +155,35 @@ def return_score(b, resolved, min_baseline: float):
     return sum(total / d for d, total in by_denom.items()), len(resolved)
 
 
-def _realized_since(db, user_id, login, since, until) -> float:
-    """sum(ClosedTrade.profit)，不过滤 verified：对账针对的是余额变动，任何已
-    报告的平仓（无论能否被服务端核对）都会真实地改变 MT5 账户余额。
+def _realized_since_bulk(db, baselines, until) -> dict:
+    """对一批基线一次查出各自的已实现盈亏：{(user_id, mt5_login): sum(profit)}。
+    每条基线各查一次（N+1）改成一条 `user_id IN (...) AND closed_at >= min(taken_at)`
+    只取 4 列，再在 Python 里按各基线自己的 taken_at 求和（平仓时间 >= taken_at）。
+    没用 tuple IN：SQLite 测试库兼容，且 idx_closed_trades_position 的 (user_id,
+    mt5_login) 前缀已能服务这个过滤。口径同原来逐条查询：不过滤 verified——对账针对的
+    是余额变动，任何已报告的平仓（无论能否被服务端核对）都会真实地改变 MT5 账户余额。
+    Realized profit for a whole batch of baselines in one query instead of one per
+    baseline: one `user_id IN (...) AND closed_at >= min(taken_at)` read of four
+    columns, summed in Python against each baseline's own taken_at. No tuple IN
+    (SQLite test DB); the (user_id, mt5_login) prefix of an existing index serves it.
+    Same semantics as before: verified is not filtered — any reported close moves
+    the MT5 balance.
     """
-    q = (db.query(ClosedTrade)
-           .filter(ClosedTrade.user_id == user_id, ClosedTrade.mt5_login == login,
-                   ClosedTrade.closed_at >= since))
+    if not baselines:
+        return {}
+    taken = {(b.user_id, b.mt5_login): _aware(b.taken_at) for b in baselines}
+    q = (db.query(ClosedTrade.user_id, ClosedTrade.mt5_login, ClosedTrade.closed_at, ClosedTrade.profit)
+           .filter(ClosedTrade.user_id.in_({u for u, _l in taken}),
+                   ClosedTrade.closed_at >= min(taken.values())))
     if until is not None:
         q = q.filter(ClosedTrade.closed_at < until)
-    return sum(leg.profit or 0.0 for leg in q.all())
+    out = {k: 0.0 for k in taken}
+    for uid, login, closed_at, profit in q.all():
+        k = (uid, login)
+        since = taken.get(k)
+        if since is not None and _aware(closed_at) >= since:
+            out[k] += profit or 0.0
+    return out
 
 
 # ---- 入金流水记在「上一次对账」时刻 / deposits are stamped at the previous check ----
@@ -241,7 +260,7 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
     在此之前平掉的仓位本金不受影响（取的是它平仓时刻的本金）。
 
     只对当前进行中的周期调用（结束周期不对账）：周期结束后账户仍在正常交易，
-    期后的盈亏会被 _realized_since 当成「realized」减掉，从而把期后的正常
+    期后的盈亏会被 _realized_since_bulk 当成「realized」减掉，从而把期后的正常
     交易误判成入金、永久污染一个已封存周期的分母——即使在 48h 重算窗内也不
     对账，重算窗只重算榜单快照，不重开基线/对账。
 
@@ -263,12 +282,12 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
                 for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))}
     prev_check = _last_reconciled_at(period_key)
     adjusted = 0
-    for row in db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key):
-        balance = acct_map.get((row.user_id, row.mt5_login))
-        if balance is None:
-            continue                                    # 解绑/无余额：冻结不动
-        realized = _realized_since(db, row.user_id, row.mt5_login,
-                                   _aware(row.taken_at), end)
+    baseline_rows = [r for r in db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key)
+                     if acct_map.get((r.user_id, r.mt5_login)) is not None]
+    realized_by_acct = _realized_since_bulk(db, baseline_rows, end)   # 一次查询，不再每条基线一次
+    for row in baseline_rows:
+        balance = acct_map[(row.user_id, row.mt5_login)]      # 解绑/无余额的基线已滤掉：冻结不动
+        realized = realized_by_acct[(row.user_id, row.mt5_login)]
         denom = row.baseline + row.adjust
         delta = balance - denom - realized
         if delta > RECONCILE_TOLERANCE:
@@ -440,6 +459,52 @@ def compute_board_rows(db, period_key: str) -> dict:
     return {"return_pct": ret_rows, "win_rate": wr_rows}
 
 
+# 快照没变时最多隔这么久才碰一次 computed_at（前端「上次刷新」读它的 MAX）。
+# When nothing changed, computed_at ("last refreshed" on the page) is touched at most this often.
+SNAPSHOT_TOUCH_SECONDS = 3600
+
+
+def replace_snapshot_rows(db, board: str, period_key: str, rows: list[dict], force: bool = False) -> bool:
+    """把 (board, period_key) 的快照替换成已排好序的 rows（并原地写入 rank）；返回是否真的写了库。
+
+    先读现有快照与新名次逐行比对（rank/user/login/score/sample）：完全一致就跳过
+    delete+insert——清淡时段名次一整天不动，以前每 5 分钟（比赛榜每 60 秒）照样全删
+    全插。比对对象是库里的行本身而不是 Redis 里存的指纹，所以管理员删行、迁移、
+    另一个 worker 抢先写这类情况下不会出现「指纹说没变、库却不一样」。不动的时候
+    computed_at 也停住，超过 SNAPSHOT_TOUCH_SECONDS 才用一条 UPDATE 刷一次，页面上
+    的「上次刷新」不至于几小时不动。force=True 一律重写。**调用方的 commit 照旧**：
+    同一会话里 ensure_baselines / reconcile_deposits 的改动靠它落库。
+    Replace a board's snapshot with the ranked rows (setting rank in place); returns
+    whether the DB was written. Compare the stored rows against the new ranking first
+    and skip delete+insert when identical. The comparison is against the table itself,
+    not a Redis fingerprint, so admin deletes, migrations or another worker's write
+    can't leave a fingerprint that disagrees with the table. computed_at is touched by
+    one UPDATE at most every SNAPSHOT_TOUCH_SECONDS. force always rewrites. The caller
+    still commits — baseline/reconcile changes in the same session ride on it.
+    """
+    for i, r in enumerate(rows, start=1):
+        r["rank"] = i
+    cond = (LeaderboardSnapshot.board == board, LeaderboardSnapshot.period_key == period_key)
+    if not force:
+        old = (db.query(LeaderboardSnapshot.rank, LeaderboardSnapshot.user_id, LeaderboardSnapshot.mt5_login,
+                        LeaderboardSnapshot.score, LeaderboardSnapshot.sample, LeaderboardSnapshot.computed_at)
+                 .filter(*cond).order_by(LeaderboardSnapshot.rank).all())
+        new = [(r["rank"], r["userId"], r["login"], r["score"], r["sample"]) for r in rows]
+        if [tuple(o[:5]) for o in old] == new:
+            newest = max((o[5] for o in old if o[5] is not None), default=None)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            if newest is not None and (now - newest).total_seconds() > SNAPSHOT_TOUCH_SECONDS:
+                db.query(LeaderboardSnapshot).filter(*cond).update(
+                    {LeaderboardSnapshot.computed_at: now}, synchronize_session=False)
+            return False
+    db.query(LeaderboardSnapshot).filter(*cond).delete()
+    for r in rows:
+        db.add(LeaderboardSnapshot(board=board, period_key=period_key,
+                                   user_id=r["userId"], mt5_login=r["login"],
+                                   rank=r["rank"], score=r["score"], sample=r["sample"]))
+    return True
+
+
 def leaderboard_cache_key(board: str, period_key: str) -> str:
     """榜单前 50 行在 shared_cache 里的键（读侧见 routers/gamification.build_board_rows_payload）。
     shared_cache key of a board's cached top 50 (read side: routers/gamification)."""
@@ -463,6 +528,7 @@ def snapshot_boards(db, now: datetime) -> dict:
             ensure_baselines(db, key, now)
             reconcile_deposits(db, key, now=now)
         rows_by_board = compute_board_rows(db, key)
+        changed_boards: list[str] = []
         for board, rows in rows_by_board.items():
             # 排序键 = (分数降序, 笔数降序, 账户号升序)。
             # **没有并列名次的概念**：同分同笔数时按账户号字典序分先后，两行拿到的
@@ -482,16 +548,14 @@ def snapshot_boards(db, now: datetime) -> dict:
             # prize money on the line, an exact tie is decided by account number —
             # whether that is acceptable is a product call, recorded here as-is.
             rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
-            db.query(LeaderboardSnapshot).filter(
-                LeaderboardSnapshot.board == board,
-                LeaderboardSnapshot.period_key == key).delete()
-            for i, r in enumerate(rows, start=1):
-                db.add(LeaderboardSnapshot(board=board, period_key=key,
-                                           user_id=r["userId"], mt5_login=r["login"],
-                                           rank=i, score=r["score"], sample=r["sample"]))
+            if replace_snapshot_rows(db, board, key, rows):
+                changed_boards.append(board)
             total_rows += len(rows)
         db.commit()
-        # 新快照已提交：删掉这两个榜的前 50 缓存，所有 worker 下一次读取即看到新名次。
-        # New snapshot committed: drop the cached top 50 so every worker reads it next.
-        shared_cache.delete(*(leaderboard_cache_key(b, key) for b in rows_by_board))
+        # 新快照已提交：删掉**真的变了**的榜的前 50 缓存，所有 worker 下一次读取即看到新名次；
+        # 没变的榜不击穿缓存。
+        # New snapshot committed: drop the cached top 50 of boards that really changed;
+        # unchanged boards keep their cache.
+        if changed_boards:
+            shared_cache.delete(*(leaderboard_cache_key(b, key) for b in changed_boards))
     return {"periods": len(keys), "rows": total_rows}

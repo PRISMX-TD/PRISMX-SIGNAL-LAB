@@ -151,7 +151,16 @@ def _expire_stale_signals() -> list[dict]:
         now = datetime.now(timezone.utc)
         active = (
             db.query(Signal)
-            .filter(Signal.status == "ACTIVE", Signal.expire_at.isnot(None))
+            # 时间条件推进 SQL（库里存 naive UTC，signal_resolution 同款比法）：每 5 秒不再把
+            # 全部 ACTIVE 信号整行搬回来再丢掉。下面的 Python 比较照旧当兜底。
+            # Time condition pushed into SQL (stored as naive UTC, same as
+            # signal_resolution): no more pulling every ACTIVE row back every 5s only to
+            # discard it. The Python comparison below stays as the safety net.
+            .filter(
+                Signal.status == "ACTIVE",
+                Signal.expire_at.isnot(None),
+                Signal.expire_at <= now.replace(tzinfo=None),
+            )
             .all()
         )
         newly_expired: list[Signal] = []

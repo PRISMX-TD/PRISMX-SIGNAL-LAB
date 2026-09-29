@@ -1,4 +1,5 @@
 """等级/勋章用户端 + 管理端（设计 §6、§11 发布策略）。"""
+import logging
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -37,6 +38,8 @@ LEADERBOARD_BOARDS = ("return_pct", "win_rate")
 # nickname or equipped badge).
 _BOARD_CACHE_SECONDS = 60
 _PERIOD_KEY_RE = re.compile(r"^\d{4}-W\d{2}$|^\d{4}-\d{2}$")
+
+logger = logging.getLogger("prismx.gamification")
 
 router = APIRouter(prefix="/gamification", tags=["gamification"])
 
@@ -426,10 +429,34 @@ def _sitewide_badge_counts(db: Session) -> dict:
     return {"tiers": tiers, "population": db.query(func.count(User.id)).scalar() or 0}
 
 
+def _judge_due(user_id: str, now: float) -> bool:
+    """本次 /me 要不要跑一遍勋章判定（节流键不在才跑，并顺手占位）。
+
+    Redis 出错时朝「少做」退化：读失败视为「刚判定过」直接跳过，而不是每个 /me 都去跑
+    一遍判定与发勋章的重查询（那会在 Redis 故障窗口里给数据库加压）；写占位失败只记
+    日志——最坏是下一次 /me 再判一次。
+    Whether this /me should run badge judging (only when the throttle key is absent,
+    claiming it on the way). On a Redis error it degrades towards doing *less*: a failed
+    read counts as "just judged" and skips, rather than every /me running the heavy
+    judge-and-award queries during a Redis outage; a failed claim only logs.
+    """
+    key = f"judge:{user_id}"
+    try:
+        if shared_state.kv_get(key) is not None:
+            return False
+    except Exception:  # noqa: BLE001
+        logger.debug("judge throttle read failed, skipping this pass", exc_info=True)
+        return False
+    try:
+        shared_state.kv_set(key, str(now), ttl=_JUDGE_THROTTLE_SECONDS)
+    except Exception:  # noqa: BLE001
+        logger.debug("judge throttle write failed", exc_info=True)
+    return True
+
+
 def build_me_payload(db: Session, user: User, judge: bool) -> dict:
     now = time.monotonic()
-    if judge and shared_state.kv_get(f"judge:{user.id}") is None:
-        shared_state.kv_set(f"judge:{user.id}", str(now), ttl=_JUDGE_THROTTLE_SECONDS)
+    if judge and _judge_due(user.id, now):
         judge_and_record_conditions(db, user.id)
         if judge_and_award_badges(db, user.id):
             # 刚发了新勋章：全站持有人数缓存作废，免得本人看到自己那枚「0 人拥有」。
@@ -517,7 +544,7 @@ _SUMMARY_CACHE_SECONDS = 60
 
 
 def build_winrate_summary_payload(db: Session, user: User) -> dict:
-    cached = shared_state.kv_get_json(f"winrate-summary:{user.id}")
+    cached = shared_cache.get_json(f"winrate-summary:{user.id}")
     if cached is not None:
         return cached
 
@@ -582,7 +609,7 @@ def build_winrate_summary_payload(db: Session, user: User) -> dict:
         "remainingToNext": remaining_to_next,
         "isMaxLevel": is_max_level,
     }
-    shared_state.kv_set_json(f"winrate-summary:{user.id}", payload, ttl=_SUMMARY_CACHE_SECONDS)
+    shared_cache.set_json(f"winrate-summary:{user.id}", payload, ttl=_SUMMARY_CACHE_SECONDS)
     return payload
 
 
@@ -622,12 +649,12 @@ MSG_PROFILE_NOT_FOUND = "该用户未公开主页 / Profile not available"
 
 def _profile_stats(db: Session, target: User) -> dict:
     key = f"profile-stats:{target.public_id}"
-    cached = shared_state.kv_get_json(key)
+    cached = shared_cache.get_json(key)
     if cached is not None:
         return cached
     stats = compute_comprehensive_stats(db, target.id)
     payload = {"winRate": stats["win_rate"], "windowDays": stats["window_days"], "trades": stats["trades"]}
-    shared_state.kv_set_json(key, payload, ttl=_PROFILE_STATS_CACHE_SECONDS)
+    shared_cache.set_json(key, payload, ttl=_PROFILE_STATS_CACHE_SECONDS)
     return payload
 
 

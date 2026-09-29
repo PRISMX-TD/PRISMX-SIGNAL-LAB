@@ -35,6 +35,7 @@ behaviour is correct; what was wrong is whether the caller persisted those
 writes. So these go through the whole _trend_db_work path and re-read across a
 fresh session to prove the writes actually reached the database.
 """
+import json
 import os
 import tempfile
 import uuid
@@ -174,3 +175,86 @@ def test_trend_row_is_written_even_with_no_pending_signals(env):
         assert db.query(Trend).filter(Trend.symbol == "XAUUSD").first() is not None
     finally:
         db.close()
+
+
+# ---- 趋势没变：不写库、不广播，信号判定照跑 / unchanged trend: no write, no broadcast ----
+
+def _trend_row(maker):
+    from app.models import Trend
+    db = maker()
+    try:
+        row = db.query(Trend).filter(Trend.symbol == "XAUUSD").first()
+        return None if row is None else (row.timeframes, row.updated_at)
+    finally:
+        db.close()
+
+
+def test_unchanged_trend_skips_write_but_still_resolves_signals(env):
+    wh.reset_trend_state_for_tests()
+    t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t2 = datetime(2026, 1, 1, 0, 0, 5, tzinfo=timezone.utc)
+    d1 = wh._trend_db_work("XAUUSD", {"M5": "UP"}, t1, None, None)
+    assert d1["_changed"] is True
+    first = _trend_row(env)
+    assert first is not None
+    # 第二帧同趋势：不写（updated_at 不动）、标记未变
+    d2 = wh._trend_db_work("XAUUSD", {"M5": "UP"}, t2, None, None)
+    assert d2["_changed"] is False
+    assert _trend_row(env) == first
+    # 有高低点时信号判定仍照跑：先记基线，再用穿过 TP 的价格判出 HIT_TP
+    sid = _add_signal(env, side="BUY", sl=1900.0, tp=2100.0)
+    d3 = wh._trend_db_work("XAUUSD", {"M5": "UP"}, t2, 2001.0, 2002.0)
+    assert d3["_changed"] is False
+    assert _trend_row(env) == first
+    d4 = wh._trend_db_work("XAUUSD", {"M5": "UP"}, t2, 2001.0, 2150.0)
+    assert d4["_changed"] is False
+    assert _read(env, sid).result == "HIT_TP"
+    # 趋势变了：写库并标记 changed
+    d5 = wh._trend_db_work("XAUUSD", {"M5": "DOWN"}, t2, None, None)
+    assert d5["_changed"] is True
+    assert "DOWN" in _trend_row(env)[0]
+
+
+def test_unchanged_trend_refreshes_after_interval(env, monkeypatch):
+    wh.reset_trend_state_for_tests()
+    t1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    t2 = datetime(2026, 1, 1, 0, 6, tzinfo=timezone.utc)
+    wh._trend_db_work("XAUUSD", {"M5": "UP"}, t1, None, None)
+    monkeypatch.setattr(wh, "_TREND_REFRESH_SECONDS", 0.0)
+    d = wh._trend_db_work("XAUUSD", {"M5": "UP"}, t2, None, None)
+    assert d["_changed"] is True
+
+
+def test_route_broadcasts_only_changed_symbols(env, monkeypatch):
+    import asyncio
+    wh.reset_trend_state_for_tests()
+    monkeypatch.setattr(wh, "_valid_trend_secret", lambda s: True)
+    sent = []
+
+    async def _bc(msg):
+        sent.append(msg)
+
+    monkeypatch.setattr(wh.manager, "broadcast_to_clients", _bc)
+
+    class _Req:
+        def __init__(self, body):
+            self._b = body
+            self.client = None
+            self.headers = {}
+
+        async def body(self):
+            return self._b
+
+    def _post(trends):
+        body = json.dumps({"secret": "x", "items": [
+            {"symbol": "XAUUSD", "trends": trends["XAUUSD"]},
+            {"symbol": "EURUSD", "trends": trends["EURUSD"]},
+        ]}).encode()
+        return asyncio.run(wh.tradingview_trend.__wrapped__(_Req(body)) if hasattr(wh.tradingview_trend, "__wrapped__") else wh.tradingview_trend(_Req(body)))
+
+    _post({"XAUUSD": {"M5": "UP"}, "EURUSD": {"M5": "UP"}})
+    assert sorted(m["data"]["symbol"] for m in sent) == ["EURUSD", "XAUUSD"]
+    sent.clear()
+    _post({"XAUUSD": {"M5": "UP"}, "EURUSD": {"M5": "DOWN"}})
+    assert [m["data"]["symbol"] for m in sent] == ["EURUSD"]
+    assert all("_changed" not in m["data"] for m in sent)

@@ -95,10 +95,31 @@ def is_stale_pending(o: Order, now: datetime | None = None) -> bool:
     return created < now - timedelta(seconds=settings.ORDER_PENDING_TIMEOUT_SECONDS)
 
 
-def void_stale_order(o: Order) -> None:
-    """把超时订单置为 FAILED（不提交事务）/ mark a stale order FAILED (no commit)."""
+# 网关通道的超时提示：网关单在后端进程里同步下发，PENDING 卡住多半是后端重启/被截断，
+# 请求其实可能已经发到网关甚至已经成交。此时说「已自动取消，请重新下单」是错误引导
+# （照做就是重复仓），必须改成「结果未知，先核对持仓」。状态仍是 FAILED——本代码库里
+# FAILED 的语义正是「不知道成没成」（与 _UNKNOWN_OUTCOME_ERRORS 分支一致），不是自动取消。
+# Gateway-channel timeout wording: a gateway order is sent from inside the backend
+# process, so a stuck PENDING usually means a restart cut it short — the request may
+# well have reached the gateway and filled. "Cancelled, please re-place" would invite
+# a duplicate position; say "outcome unknown, verify first". Status stays FAILED, which
+# in this codebase means "we don't know" (same as the _UNKNOWN_OUTCOME_ERRORS branch).
+GATEWAY_STALE_ORDER_MESSAGE = (
+    "结果未知：这笔指令长时间没有收到执行结果（可能是服务重启期间被中断），券商那边可能已经"
+    "执行。请先在 MT5 核对持仓，确认没有成交后再决定是否重下"
+    " / Outcome unknown: no execution result was received (the service may have restarted"
+    " mid-request) and the order may already have executed. Check your MT5 positions"
+    " before deciding to retry."
+)
+
+
+def void_stale_order(o: Order, gateway: bool = False) -> None:
+    """把超时订单置为 FAILED（不提交事务）/ mark a stale order FAILED (no commit).
+
+    gateway=True：网关通道的单，文案改成「结果未知，先核对持仓」，不误导用户重下。
+    gateway=True: a gateway-channel order; uses the outcome-unknown wording."""
     o.status = "FAILED"
-    o.message = STALE_ORDER_MESSAGE
+    o.message = GATEWAY_STALE_ORDER_MESSAGE if gateway else STALE_ORDER_MESSAGE
 
 
 # 下单来源标签，写进券商单子的备注（comment）：跟信号 = SIG，个人策略 = STRAT，图表手动 = CHART。

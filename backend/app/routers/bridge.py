@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.services.order_payload import is_stale_pending, order_source_tag, order_update_payload, void_stale_order
@@ -33,7 +33,7 @@ from app.services.push_dispatch import (
     EVENT_ORDER_REJECTED,
     dispatch_event_push_async,
 )
-from app.services import bridge_version_check, bridge_wake, close_all
+from app.services import bridge_version_check, bridge_wake, close_all, shared_state
 from app.services.account_type import SOURCE_SELF, apply_self_reported, classify_account_with_source
 from app.services.settings_store import (
     get_account_type_settings,
@@ -42,7 +42,7 @@ from app.services.settings_store import (
 )
 from app.services.symbol_aliases import broker_symbol
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
-from app.services.trade_performance import known_position_ids, mark_positions_seen
+from app.services.trade_performance import invalidate_trade_caches, known_position_ids, mark_positions_seen
 
 logger = logging.getLogger("prismx.bridge")
 
@@ -391,11 +391,11 @@ class BridgePollRequest(BaseModel):
     bridgeVersion: str | None = Field(default=None, max_length=32)
     # 长轮询（桥接 v1.4 起）：没有待执行指令时最多挂这么久，期间有指令落库立即返回。
     # 0 = 立即返回，旧版桥接不带这个字段就是这个行为。上限 5 秒是硬约束：账号在线
-    # 判定看 7 秒内的心跳（deps.ONLINE_WINDOW），而心跳正是每次 /poll 刷的，等待必须
+    # 判定看 10 秒内的心跳（deps.ONLINE_WINDOW），而心跳正是每次 /poll 刷的，等待必须
     # 明显短于这个窗口，否则桥接一边挂着一边被判离线。
     # Long-poll budget (bridge >= 1.4): hold the request this long when there is
     # nothing to deliver, return at once when a command lands. 0 = immediate (older
-    # bridges). Capped at 5s because liveness is a 7-second heartbeat window and the
+    # bridges). Capped at 5s because liveness is a 10-second heartbeat window and the
     # heartbeat is refreshed by this very call.
     waitSeconds: float = Field(default=0.0, ge=0, le=5)
     # 是否领取指令。桥接 v1.4 拆成两条循环：状态上报循环每 1.5 秒上报账号（刷心跳）
@@ -405,8 +405,22 @@ class BridgePollRequest(BaseModel):
     fetchCommands: bool = True
 
 
+# 心跳落库节流：距上次写入不足这么久就不再 UPDATE last_heartbeat。桥接状态循环每
+# 1.5 秒一拍，取 2.5 秒 → 实际每 3 秒写一次；ONLINE_WINDOW=10 秒仍能容忍连丢两拍
+# （最长间隔 3.0+1.5+1.5=6 秒 < 10）。绝不能把这个值拉到逼近 ONLINE_WINDOW。
+# Heartbeat write throttle: skip the last_heartbeat UPDATE when the stored value is
+# fresher than this. Bridge beats every 1.5s → a write every ~3s; two consecutive lost
+# beats still fit in ONLINE_WINDOW=10. Never raise this close to ONLINE_WINDOW.
+HEARTBEAT_WRITE_MIN_INTERVAL = 2.5
+
+
 def _upsert_account(
-    db: Session, user_id: str, acc: BridgeAccount, existing_count: int, account_limit: int | None
+    db: Session,
+    user_id: str,
+    acc: BridgeAccount,
+    existing_count: int,
+    account_limit: int | None,
+    known_rows: dict[tuple[str, str | None], MT5Account] | None = None,
 ) -> tuple[MT5Account | None, bool]:
     """插入或更新一个账号记录。若是全新账号且该用户等级的账户上限已用满，
     返回 (None, False)，不插入——调用方据此把该 login 记入"超额被拒"列表。
@@ -415,15 +429,21 @@ def _upsert_account(
     user's plan-based account limit is already reached, returns (None, False)
     without inserting — the caller records this login as rejected.
     """
-    row = (
-        db.query(MT5Account)
-        .filter(
-            MT5Account.user_id == user_id,
-            MT5Account.login == acc.login,
-            MT5Account.server == (acc.server or None),
+    key = (acc.login, acc.server or None)
+    if known_rows is not None:
+        # 调用方已一次取全该用户的账号行（含软删），这里不再逐账号 SELECT。
+        # Caller preloaded all of this user's rows (soft-removed included): no per-account SELECT.
+        row = known_rows.get(key)
+    else:
+        row = (
+            db.query(MT5Account)
+            .filter(
+                MT5Account.user_id == user_id,
+                MT5Account.login == acc.login,
+                MT5Account.server == (acc.server or None),
+            )
+            .first()
         )
-        .first()
-    )
     created = False
     # 用户删过、桥接又报上来了：按"新账号"对待——受账户数上限约束，放行则复活。
     # A soft-removed row the bridge reports again counts as new: subject to the
@@ -439,6 +459,8 @@ def _upsert_account(
         row = MT5Account(user_id=user_id, login=acc.login, server=acc.server, source="bridge")
         db.add(row)
         created = True
+        if known_rows is not None:
+            known_rows[key] = row
     if acc.accountName is not None:
         row.account_name = acc.accountName
     if acc.accountCurrency is not None:
@@ -482,22 +504,33 @@ def _upsert_account(
     elif acc.tradeMode is not None and not (row.mt5_group or "").strip():
         row.trade_mode = acc.tradeMode
         row.trade_mode_source = SOURCE_SELF
-    row.online = True
-    row.last_heartbeat = datetime.now(timezone.utc)
+    now_hb = datetime.now(timezone.utc)
+    last_hb = row.last_heartbeat
+    if last_hb is not None and last_hb.tzinfo is None:
+        last_hb = last_hb.replace(tzinfo=timezone.utc)
+    # 已在线且心跳很新：不写（其余字段没变时 SQLAlchemy 也不会产生 UPDATE）。
+    # Already online with a fresh heartbeat: leave it (no UPDATE if nothing else changed).
+    if (
+        created
+        or not row.online
+        or last_hb is None
+        or (now_hb - last_hb).total_seconds() >= HEARTBEAT_WRITE_MIN_INTERVAL
+    ):
+        row.online = True
+        row.last_heartbeat = now_hb
     return row, created
 
 
-def _poll_db_work(
+def _report_accounts_db_work(
     db: Session, user: User, req: BridgePollRequest
-) -> tuple[list[dict], list[dict], set[str], dict[str, float], list[str], list[str]]:
-    """bridge_poll 的全部同步数据库工作（在线程池中执行）。
-    All blocking DB work of bridge_poll (runs in a thread pool).
+) -> tuple[set[str], dict[str, float], dict[str, str], list[str], list[str], set[str]]:
+    """第一段：上报账号（闸门 + upsert + 提交）。
+    Stage one: report the accounts (gates + upsert + commit).
 
-    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合, 账号余额 {login: balance},
-    超额被拒的 login 列表, 非合作券商被拒的 login 列表)。
-    Returns (commands to deliver, voided-order push payloads, online logins,
-    balances keyed by login, logins rejected for exceeding the plan's account
-    limit, logins rejected for not matching the partner broker).
+    返回 (在线账号集合, 余额 {login: balance}, 后缀 {login: suffix}, 超额被拒 login,
+    非合作券商被拒 login, 该用户网关来源账号的 login 集合)。
+    Returns (online logins, balances, suffix by login, over-limit rejected, broker
+    rejected, this user's gateway-sourced logins).
     """
     # 1) upsert 本次上报的账号。两道闸门，先券商后配额：
     #    ① 合作券商锁开启时，MT5 服务器名不含任一关键字的账号一律拒绝——
@@ -518,13 +551,17 @@ def _poll_db_work(
     # 该用户所有已绑定账号的 login，按 login 升序——用于账户数上限的"稳定裁剪"。
     # This user's bound account logins, sorted ascending — the stable ordering
     # used to enforce the plan's account-count cap.
-    bound_logins_ordered = [
-        row[0]
-        for row in db.query(MT5Account.login)
-        .filter(MT5Account.user_id == user.id, not_removed())
-        .order_by(MT5Account.login.asc())
-        .all()
-    ]
+    # 该用户的全部账号行（含软删）只查这一次：绑定名单、逐账号 upsert 的查找表、
+    # 网关来源名单都从这份列表里分组，以前是 3+N 次查询。
+    # One query for all of this user's rows (soft-removed included); the bound list,
+    # the per-account upsert lookup and the gateway list are all grouped in Python
+    # (used to be 3+N queries).
+    all_rows = db.query(MT5Account).filter(MT5Account.user_id == user.id).all()
+    known_rows: dict[tuple[str, str | None], MT5Account] = {}
+    for r in all_rows:
+        known_rows.setdefault((r.login, r.server or None), r)
+    bound_logins_ordered = sorted(r.login for r in all_rows if not is_removed(r))
+    gateway_logins: set[str] = {r.login for r in all_rows if r.source == "gateway"}
     existing_count = len(bound_logins_ordered)
     bound_set = set(bound_logins_ordered)
     # 受订阅等级账户数上限约束时，已绑定账号里只有"按 login 升序的前 N 个"允许
@@ -562,7 +599,9 @@ def _poll_db_work(
         if allowed_bound is not None and acc.login in bound_set and acc.login not in allowed_bound:
             rejected_logins.append(acc.login)
             continue
-        row, created = _upsert_account(db, user.id, acc, existing_count, account_limit)
+        row, created = _upsert_account(
+            db, user.id, acc, existing_count, account_limit, known_rows=known_rows
+        )
         if row is None:
             rejected_logins.append(acc.login)
             continue
@@ -590,15 +629,22 @@ def _poll_db_work(
         )
         user.bridge_version = req.bridgeVersion  # 同步缓存实例，避免下拍重复 UPDATE / keep the cached instance in sync
     db.commit()
+    return online_logins, balances, suffix_by_login, rejected_logins, broker_rejected, gateway_logins
 
-    # 只上报状态的那条循环到此为止：指令由带长轮询的那条循环领，这里若也领走，
-    # 指令就落到了"先读完整轮终端再执行"的慢路径上。陈旧指令的作废另有
-    # stale_order_monitor_loop 每 10 秒兜底，不靠这里。
-    # The status-only loop stops here: commands go to the long-polling loop, which
-    # executes them immediately instead of after a full terminal read.
-    if not req.fetchCommands:
-        return [], [], online_logins, balances, rejected_logins, broker_rejected
 
+def _fetch_commands_db_work(
+    db: Session,
+    user: User,
+    online_logins: set[str],
+    suffix_by_login: dict[str, str],
+    gateway_logins: set[str],
+) -> tuple[list[dict], list[dict]]:
+    """第二段：取待执行指令 + 作废陈旧单 + 标记已下发。长轮询被唤醒后只跑这一段。
+    Stage two: fetch pending commands, void stale ones, mark delivered. After a
+    long-poll wake only this stage runs.
+
+    返回 (待下发指令, 被作废订单的推送载荷)。/ Returns (commands, voided payloads).
+    """
     # 2) 取该用户、目标账号匹配的待执行订单 / fetch matching pending orders.
     #    包含两类：从未下发的；以及已下发但超时未回执的（可能回执丢失，需重发）。
     #    Includes: never-delivered orders, and delivered-but-unacked orders past
@@ -624,15 +670,10 @@ def _poll_db_work(
         .order_by(Order.created_at.asc())
         .all()
     )
-    # Gateway 账号的订单由 orders.py 实时执行，bridge 不轮询。
-    # 提前查出所有 gateway 来源的 login，循环里直接跳过对应订单。
-    # Gateway-sourced orders are executed directly by orders.py — skip them here.
-    gateway_logins = set(
-        row[0] for row in db.query(MT5Account.login).filter(
-            MT5Account.user_id == user.id,
-            MT5Account.source == "gateway",
-        ).all()
-    )
+    # Gateway 账号的订单由 orders.py 实时执行，bridge 不轮询：gateway_logins 由
+    # 第一段从账号行里分组得到，循环里直接跳过对应订单。
+    # Gateway-sourced orders are executed directly by orders.py — skipped via the
+    # gateway_logins set grouped in stage one.
     commands = []
     voided: list[Order] = []
     # 关联信号一次查完再进循环。这条路径挂在桥接 1.5 秒轮询后面，是全站最热的
@@ -785,10 +826,49 @@ def _poll_db_work(
     # payloads for voided orders (the actual push happens back on the event loop)
     voided_payloads = [order_update_payload(o) for o in voided]
 
-    return (
-        commands, voided_payloads, online_logins, balances,
-        rejected_logins, broker_rejected,
+    return commands, voided_payloads
+
+
+def _poll_first_pass(db: Session, user: User, req: BridgePollRequest) -> tuple:
+    """首轮：上报账号 + （fetchCommands 时）取指令。比 _poll_db_work 多返回
+    suffix_by_login 与 gateway_logins，供长轮询唤醒后的「只取指令」复用。
+    First pass: report accounts + (when fetchCommands) fetch commands. Also returns
+    suffix_by_login and gateway_logins for the wake-up fetch-only pass."""
+    (
+        online_logins, balances, suffix_by_login, rejected_logins, broker_rejected, gateway_logins,
+    ) = _report_accounts_db_work(db, user, req)
+    # 只上报状态的那条循环到此为止：指令由带长轮询的那条循环领，这里若也领走，
+    # 指令就落到了"先读完整轮终端再执行"的慢路径上。陈旧指令的作废另有
+    # stale_order_monitor_loop 每 10 秒兜底，不靠这里。
+    # The status-only loop stops here: commands go to the long-polling loop, which
+    # executes them immediately instead of after a full terminal read.
+    if not req.fetchCommands:
+        return (
+            [], [], online_logins, balances, rejected_logins, broker_rejected,
+            suffix_by_login, gateway_logins,
+        )
+    commands, voided_payloads = _fetch_commands_db_work(
+        db, user, online_logins, suffix_by_login, gateway_logins
     )
+    return (
+        commands, voided_payloads, online_logins, balances, rejected_logins, broker_rejected,
+        suffix_by_login, gateway_logins,
+    )
+
+
+def _poll_db_work(
+    db: Session, user: User, req: BridgePollRequest
+) -> tuple[list[dict], list[dict], set[str], dict[str, float], list[str], list[str]]:
+    """bridge_poll 的全部同步数据库工作（在线程池中执行）。
+    All blocking DB work of bridge_poll (runs in a thread pool).
+
+    返回 (待下发指令, 被作废订单的推送载荷, 在线账号集合, 账号余额 {login: balance},
+    超额被拒的 login 列表, 非合作券商被拒的 login 列表)。
+    Returns (commands to deliver, voided-order push payloads, online logins,
+    balances keyed by login, logins rejected for exceeding the plan's account
+    limit, logins rejected for not matching the partner broker).
+    """
+    return _poll_first_pass(db, user, req)[:6]
 
 
 @router.post("/poll")
@@ -815,19 +895,20 @@ async def bridge_poll(
 
     (
         commands, voided_payloads, online_logins, balances,
-        rejected_logins, broker_rejected,
+        rejected_logins, broker_rejected, suffix_by_login, gateway_logins,
     ) = await run_in_threadpool(
-        _poll_db_work, db, user, req
+        _poll_first_pass, db, user, req
     )
 
     if long_poll and not commands:
         db.close()
         if await bridge_wake.wait(user.id, req.waitSeconds):
-            (
-                commands, voided_again, online_logins, balances,
-                rejected_logins, broker_rejected,
-            ) = await run_in_threadpool(
-                _poll_db_work, db, user, req
+            # 被唤醒：账号刚在几秒内上报过（心跳、上限闸门都刚过），只取指令，不再
+            # 重跑整套账号 upsert + commit；在线名单/后缀沿用首轮结果。
+            # Woken: accounts were reported seconds ago, so only fetch commands —
+            # no second upsert + commit; online set / suffixes reuse stage one.
+            commands, voided_again = await run_in_threadpool(
+                _fetch_commands_db_work, db, user, online_logins, suffix_by_login, gateway_logins,
             )
             voided_payloads = voided_payloads + voided_again
 
@@ -869,7 +950,44 @@ async def bridge_poll(
         "accountLimitExceeded": rejected_logins,
         "brokerRejected": broker_rejected,
         "tradeHistoryBackfill": backfill,
+        # 给桥接 1.4.7+：没人开着网页时它可以放慢报价上报；旧桥接忽略这个键。
+        # For bridge >= 1.4.7: may slow quote uploads when nobody is watching.
+        "wantQuotes": await _want_quotes(user.id),
     }
+
+
+# wantQuotes：该用户此刻有没有网页 WS 在线。先看本进程的连接表（纯字典读）；没命中再看
+# 全站在线名单——名单本进程共用一份、3 秒过期才重读一次 Redis（不是每次 poll 一次），
+# 读失败一律当「有人在看」（宁可多推几秒报价也不能让页面没有报价）。
+# wantQuotes: does this user have a web WS online right now? Local connection table
+# first (a dict read); otherwise the site-wide roster, shared per process and re-read
+# at most once per 3s (never per poll). Any failure means "yes, someone is watching".
+_WANT_QUOTES_TTL = 3.0
+_roster_cache: tuple[float, frozenset[str]] | None = None
+_roster_refreshing = False
+
+
+async def _want_quotes(user_id: str) -> bool:
+    global _roster_cache, _roster_refreshing
+    try:
+        if user_id in manager._clients:
+            return True
+        if not shared_state.enabled():
+            return False  # 单进程：本进程没有连接就是没人在看 / single process: no local client = nobody
+        now = time.monotonic()
+        cached = _roster_cache
+        if (cached is None or now - cached[0] >= _WANT_QUOTES_TTL) and not _roster_refreshing:
+            _roster_refreshing = True
+            try:
+                roster = await manager.connected_user_ids_async()
+                cached = _roster_cache = (time.monotonic(), frozenset(roster))
+            finally:
+                _roster_refreshing = False
+        if cached is None:
+            return True
+        return user_id in cached[1]
+    except Exception:  # noqa: BLE001
+        return True
 
 
 # 回扫名单每用户缓存一分钟：轮询两秒一拍，这条查询不值得每拍都跑。
@@ -1062,9 +1180,81 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     return order, False
 
 
+def _close_all_summary_bg(user_id: str, client_order_id: str) -> None:
+    """后台线程里自己开会话补发一键平仓汇总（请求那条会话在响应发出后就关了）。
+    Send the close-all summary from a worker thread with its own session (the request's
+    session is closed once the response is out)."""
+    db = SessionLocal()
+    try:
+        close_all.push_summary_for_child(db, user_id, client_order_id)
+    finally:
+        db.close()
+
+
+def _result_push_args(order: Order) -> tuple[str, str, str, str] | None:
+    """回执之后要发的 Web Push（user 之外的参数）；不需要推送返回 None。
+    The Web Push to send after a result (args after user_id), or None for no push."""
+    # Web Push 通知（若用户开启了对应事件类型）：跳过自动仓管生成的指令——
+    # 那类指令已经在触发那一刻（auto_manage.evaluate_positions）单独推送过
+    # 一次"自动仓管触发"通知，回执阶段不用再重复通知同一个动作。
+    # Web Push notification (if the user has this event type enabled): skip
+    # commands auto-management generated — those already got an
+    # "auto-manage triggered" push at the moment the rule fired
+    # (auto_manage.evaluate_positions), no need to notify the same action twice.
+    if order.client_order_id.startswith(AUTO_PREFIX):
+        return None
+    if order.status == "PLACED":
+        # 「已挂出」不是「已成交」，措辞必须分开：用户看到"成交"会以为仓位已经
+        # 建立，从而按已有仓位去设止损、算风险，而实际上什么都还没发生。
+        # "Placed" must not read as "filled": a user told their order filled will
+        # manage a position that does not exist yet.
+        return (
+            EVENT_ORDER_FILLED,
+            f"挂单已挂出 {order.symbol}",
+            f"{order.side} {order.volume} 手 @ {order.price}｜触发后才会成交 / fills when triggered",
+        )
+    if order.status == "FILLED":
+        return (
+            EVENT_ORDER_FILLED,
+            f"订单已成交 {order.symbol}",
+            f"{order.side} {order.volume} 手 @ {order.filled_price}",
+        )
+    if order.status == "FAILED":
+        # FAILED 是「不知道成没成」，措辞绝不能说成「被拒绝」——那是在请用户重下，
+        # 而重下正是这个状态下最危险的动作（可能已经成交，再下就是双倍仓位）。
+        # FAILED means "we don't know". It must never read as "rejected",
+        # which invites a retry — the single most dangerous action here, since
+        # the order may already have filled and a retry doubles the position.
+        return (
+            EVENT_ORDER_REJECTED,
+            f"执行结果未确认 {order.symbol}",
+            f"{order.message or '-'}｜请先在 MT5 核对持仓再决定是否重试 / verify the position before retrying",
+        )
+    return (EVENT_ORDER_REJECTED, f"订单被拒绝 {order.symbol}", order.message or "-")
+
+
+async def _result_followups(
+    user_id: str, client_order_id: str, close_all_child: bool,
+    push_args: tuple[str, str, str, str] | None,
+) -> None:
+    """回执 ack 之后的后台收尾：Web Push / 一键平仓汇总。慢（要逐个连 FCM/APNs，
+    最长 10 秒）所以绝不放在 ack 前面，桥接的「回执→重读持仓→领下一条指令」不等它。
+    异常只记日志。
+    Post-ack background work: Web Push / close-all summary. Slow (per-subscription
+    FCM/APNs calls, up to 10s), so never ahead of the ack. Errors are only logged."""
+    try:
+        if close_all_child:
+            await run_in_threadpool(_close_all_summary_bg, user_id, client_order_id)
+        elif push_args is not None:
+            await dispatch_event_push_async(user_id, *push_args)
+    except Exception:  # noqa: BLE001
+        logger.exception("bridge_result 后台推送失败 / background push failed (user=%s)", user_id)
+
+
 @router.post("/result")
 async def bridge_result(
     req: BridgeResultRequest,
+    background: BackgroundTasks,
     user: User = Depends(get_bridge_user),
     db: Session = Depends(get_db),
 ):
@@ -1076,6 +1266,8 @@ async def bridge_result(
     if duplicate:
         return {"ok": True, "duplicate": True}
 
+    # ORDER_UPDATE 的 WS 推送保持在响应之前（用户看到订单状态不受影响）。
+    # The ORDER_UPDATE WS push stays ahead of the response.
     await manager.push_to_client(user.id, order_update_payload(order))
 
     # 一键平仓的子指令：逐条不推，整批回执齐了由 close_all 发一条汇总。十笔仓位
@@ -1083,53 +1275,14 @@ async def bridge_result(
     # Close-all children: no per-command push; close_all sends one summary once
     # the whole batch has resolved. Ten positions must not mean ten notifications
     # for what the user experienced as a single action.
-    if close_all.is_close_all(order.client_order_id):
-        await run_in_threadpool(
-            close_all.push_summary_for_child, db, user.id, order.client_order_id
-        )
-        return {"ok": True}
-
-    # Web Push 通知（若用户开启了对应事件类型）：跳过自动仓管生成的指令——
-    # 那类指令已经在触发那一刻（auto_manage.evaluate_positions）单独推送过
-    # 一次"自动仓管触发"通知，回执阶段不用再重复通知同一个动作。
-    # Web Push notification (if the user has this event type enabled): skip
-    # commands auto-management generated — those already got an
-    # "auto-manage triggered" push at the moment the rule fired
-    # (auto_manage.evaluate_positions), no need to notify the same action twice.
-    if not order.client_order_id.startswith(AUTO_PREFIX):
-        if order.status == "PLACED":
-            # 「已挂出」不是「已成交」，措辞必须分开：用户看到"成交"会以为仓位已经
-            # 建立，从而按已有仓位去设止损、算风险，而实际上什么都还没发生。
-            # "Placed" must not read as "filled": a user told their order filled will
-            # manage a position that does not exist yet.
-            await dispatch_event_push_async(
-                user.id, EVENT_ORDER_FILLED,
-                f"挂单已挂出 {order.symbol}",
-                f"{order.side} {order.volume} 手 @ {order.price}｜触发后才会成交 / fills when triggered",
-            )
-        elif order.status == "FILLED":
-            await dispatch_event_push_async(
-                user.id, EVENT_ORDER_FILLED,
-                f"订单已成交 {order.symbol}",
-                f"{order.side} {order.volume} 手 @ {order.filled_price}",
-            )
-        elif order.status == "FAILED":
-            # FAILED 是「不知道成没成」，措辞绝不能说成「被拒绝」——那是在请用户重下，
-            # 而重下正是这个状态下最危险的动作（可能已经成交，再下就是双倍仓位）。
-            # FAILED means "we don't know". It must never read as "rejected",
-            # which invites a retry — the single most dangerous action here, since
-            # the order may already have filled and a retry doubles the position.
-            await dispatch_event_push_async(
-                user.id, EVENT_ORDER_REJECTED,
-                f"执行结果未确认 {order.symbol}",
-                f"{order.message or '-'}｜请先在 MT5 核对持仓再决定是否重试 / verify the position before retrying",
-            )
-        else:
-            await dispatch_event_push_async(
-                user.id, EVENT_ORDER_REJECTED,
-                f"订单被拒绝 {order.symbol}",
-                order.message or "-",
-            )
+    is_child = close_all.is_close_all(order.client_order_id)
+    background.add_task(
+        _result_followups,
+        user.id,
+        order.client_order_id,
+        is_child,
+        None if is_child else _result_push_args(order),
+    )
     return {"ok": True}
 
 
@@ -1307,6 +1460,10 @@ def _trade_history_db_work(
         # rescans enrich old rows); enrichment counts as inserted for the push.
         if upsert_leg(db, user_id, leg.login, leg.model_dump(), is_ours) in ("inserted", "enriched"):
             inserted += 1
+    if inserted:
+        # 新平仓落库 / 补列：胜率与已平仓明细的 60 秒缓存立刻作废。
+        # New / enriched legs: drop the 60s win-rate and closed-trades caches.
+        invalidate_trade_caches(user_id, {leg.login for leg in legs})
     return inserted, unverified
 
 
@@ -1471,6 +1628,9 @@ def delete_account(
             detail="账号仍在线，请先断开桥接程序再删除 / Account is online; disconnect the bridge before deleting",
         )
     mark_removed(db, row)
+    # 绑定集合变了：胜率/已平仓明细的按用户缓存立刻作废。
+    # The bound set changed: drop the per-user win-rate / closed-trades caches.
+    invalidate_trade_caches(user.id, [login])
     return {"ok": True}
 
 

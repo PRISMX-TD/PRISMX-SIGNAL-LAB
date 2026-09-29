@@ -35,6 +35,15 @@ USER = "u-1"
 LOGIN = "500123"
 
 
+@pytest.fixture(autouse=True)
+def _reset_seen_throttle():
+    """mark_positions_seen 有进程内 30 秒限频，用例之间不能互相看到对方的记录。"""
+    from app.services import trade_performance
+    trade_performance._seen_throttle.clear()
+    yield
+    trade_performance._seen_throttle.clear()
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -190,6 +199,8 @@ def test_mark_positions_seen_throttles_unchanged_positions(db_session, models):
         datetime.now(timezone.utc).replace(tzinfo=None)
         - trade_performance._SEEN_WRITE_INTERVAL - timedelta(seconds=5))
     db_session.commit()
+    # 进程内 30 秒限频同样要「过期」才会再发 UPDATE（这里直接清掉，等价于 30 秒后）
+    trade_performance._seen_throttle.clear()
     assert mark_positions_seen(db_session, USER, report) == 1
 
     # 两个仓位都仍算「进行中」——节流不影响读侧的 20 分钟新鲜度判定
@@ -210,3 +221,49 @@ def test_same_ticket_on_two_accounts_not_cross_attributed(db_session, models):
 
     assert stats["totalResolved"] == 1
     assert stats["wins"] == 1
+
+
+def test_mark_positions_seen_process_throttle_by_user_and_position_set(db_session, models, monkeypatch):
+    """进程内限频：同一用户 + 同一批仓位 30 秒内根本不碰数据库；仓位集合一变立刻放行；
+    换用户互不影响；过了 30 秒再放行。"""
+    from app.services import trade_performance as tp
+
+    db_session.add(_open_order(models, ticket=71, position=7001))
+    db_session.commit()
+
+    executed = []
+    real_query = db_session.query
+
+    def counting_query(*a, **k):
+        executed.append(1)
+        return real_query(*a, **k)
+
+    monkeypatch.setattr(db_session, "query", counting_query)
+    clock = [1000.0]
+    monkeypatch.setattr(tp.time, "monotonic", lambda: clock[0])
+
+    report = [{"login": LOGIN, "ticket": 7001}]
+    assert mark_positions_seen(db_session, USER, report) == 1
+    n = len(executed)
+    assert n >= 1
+
+    # 30 秒内同集合：一次查询都不发
+    clock[0] += 29
+    assert mark_positions_seen(db_session, USER, report) == 0
+    assert len(executed) == n
+
+    # 集合变了：立刻放行（发查询）
+    report2 = report + [{"login": LOGIN, "ticket": 7002}]
+    mark_positions_seen(db_session, USER, report2)
+    assert len(executed) > n
+    n = len(executed)
+
+    # 别的用户不受影响
+    mark_positions_seen(db_session, "other-user", report2)
+    assert len(executed) > n
+    n = len(executed)
+
+    # 过了 30 秒：放行
+    clock[0] += 31
+    mark_positions_seen(db_session, USER, report2)
+    assert len(executed) > n

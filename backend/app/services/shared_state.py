@@ -185,6 +185,37 @@ _memory = _MemoryBackend()
 _redis_client: Any = None
 _redis_lock = threading.Lock()
 
+# 同步 Redis 连接池上限 = main.SYNC_THREAD_LIMIT（256 条同步端点线程）+ 64 余量（WS 记账、
+# EA 喂数走的是同一个池）。用阻塞池：池满时「Redis 慢」表现为「等 timeout 秒后失败」，而不是
+# 无限开连接直到撞上 Redis 的 maxclients。
+# Cap of the sync Redis pool: main.SYNC_THREAD_LIMIT (256 sync-endpoint threads) + 64 spare
+# (WS bookkeeping and EA feeds share it). A blocking pool turns "Redis is slow" into "wait
+# `timeout` seconds, then fail" instead of opening connections without bound.
+SYNC_REDIS_MAX_CONNECTIONS = 320
+SYNC_REDIS_POOL_TIMEOUT_SECONDS = 2.0
+# 空闲多久的连接先 PING 再用：避开被中间设备静默掐断的旧连接（否则白等一个 socket 超时）。
+# Connections idle longer than this are PINGed before reuse (silently cut by middleboxes).
+REDIS_HEALTH_CHECK_INTERVAL_SECONDS = 30
+
+
+def redis_retry(retries: int = 1, *, async_client: bool = False) -> Any:
+    """Redis 客户端的重试策略：**只**对 ConnectionError 重试（连接被掐 / Redis 重启的那一瞬间），
+    1 次、20~200ms 指数退避。**不**对 TimeoutError 重试——那会把一次 2 秒的卡顿变成 6 秒并占着
+    线程。redis-py 默认是 Retry(NoBackoff(), 0)（零重试），而 Retry 的默认 supported_errors 又含
+    TimeoutError，所以必须显式收窄。
+    Retry policy: ConnectionError only (a dropped connection / the instant Redis restarts), one
+    attempt with a 20-200ms backoff. Not TimeoutError, which would turn a 2s stall into 6s while
+    holding a thread. redis-py's default is zero retries, and Retry's default supported errors
+    include TimeoutError, hence the explicit narrowing."""
+    from redis.backoff import ExponentialBackoff
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    if async_client:
+        from redis.asyncio.retry import Retry
+    else:
+        from redis.retry import Retry
+    return Retry(ExponentialBackoff(cap=0.2, base=0.02), retries, supported_errors=(RedisConnectionError,))
+
 
 def _redis() -> Any:
     """惰性建同步客户端；连不上时抛错由调用方兜底（不在这里吞）。
@@ -196,9 +227,20 @@ def _redis() -> Any:
         if _redis_client is None:
             import redis  # 依赖只在配了 Redis 时才真正需要 / imported only when configured
 
-            _redis_client = redis.Redis.from_url(
-                redis_url(), decode_responses=True, socket_timeout=2.0, socket_connect_timeout=2.0,
+            from redis.exceptions import ConnectionError as RedisConnectionError
+
+            pool = redis.BlockingConnectionPool.from_url(
+                redis_url(),
+                decode_responses=True,
+                socket_timeout=2.0,
+                socket_connect_timeout=2.0,
+                max_connections=SYNC_REDIS_MAX_CONNECTIONS,
+                timeout=SYNC_REDIS_POOL_TIMEOUT_SECONDS,
+                retry=redis_retry(1),
+                retry_on_error=[RedisConnectionError],
+                health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
             )
+            _redis_client = redis.Redis(connection_pool=pool)
     return _redis_client
 
 
@@ -384,7 +426,18 @@ def new_async_pubsub(channel: str, with_client: bool = False) -> Any:
         return None
     import redis.asyncio as aioredis
 
-    client = aioredis.from_url(redis_url(), decode_responses=True)
+    # 订阅端连接：只给「建连超时」和「空闲健康检查」，**不**给 socket_timeout——listen() 在频道
+    # 空闲时本来就无限期阻塞读，加了 socket_timeout 会让空闲订阅被自己超时断开。没有它，Redis 没起来
+    # 时每轮重连的建连都可能挂到系统默认的 TCP 超时。
+    # Subscriber connection: a connect timeout and an idle health check, but deliberately no
+    # socket_timeout — listen() blocks on an idle channel by design and would time itself out.
+    # Without a connect timeout each reconnect can hang for the OS default while Redis is down.
+    client = aioredis.from_url(
+        redis_url(),
+        decode_responses=True,
+        socket_connect_timeout=2.0,
+        health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
+    )
     ps = client.pubsub(ignore_subscribe_messages=True)
     if with_client:
         return ps, _k(channel), client

@@ -1,14 +1,17 @@
 """认证依赖与风控 / Auth dependencies and risk control."""
+import logging
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, Response, status
+from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import SessionLocal, get_db
 from app.core.security import create_access_token, decode_token_payload
 from app.models import User, UserActiveDay
+from app.services import shared_cache
 from app.services.plan_expiry import downgrade_if_expired
 from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
 
@@ -19,11 +22,13 @@ from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
 # silently so active users are never forced to re-login.
 REFRESHED_TOKEN_HEADER = "X-Refreshed-Token"
 
-# 账号在线判定窗口（秒）：桥接每 1.5 秒轮询一次，留 3 个周期容错，
-# 既能快速反映断线（约 6~7 秒内置灰），又不会因偶发丢包误判离线。
-# Online window (s): bridge polls every 1.5s; allow ~3 missed cycles so a
-# disconnect is reflected within ~6-7s without flapping on a single drop.
-ONLINE_WINDOW = 7
+logger = logging.getLogger("prismx.deps")
+
+# 账号在线判定窗口（秒）：桥接心跳约 3 秒一次，留 3 个周期容错，
+# 既能快速反映断线（约 10 秒内置灰），又不会因偶发丢包误判离线。
+# Online window (s): bridge heartbeats every ~3s; allow ~3 missed cycles so a
+# disconnect is reflected within ~10s without flapping on a single drop.
+ONLINE_WINDOW = 10
 
 # last_active_at 落库节流窗口（秒）：DAU 只需要"今天活跃与否"的精度，
 # 没必要每个请求都触发一次 UPDATE。
@@ -88,6 +93,85 @@ def disabled_account_error(user: User) -> HTTPException:
         else "账号已被停用，如有疑问请联系客服 / This account has been disabled — please contact support"
     )
     return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+# ---------------------------------------------------------------------------
+# 轻量鉴权：只看 {tv, disabled}，不拉整行 User / lightweight auth
+# ---------------------------------------------------------------------------
+
+def get_auth_state(user_id: str) -> dict | None:
+    """该用户的 {"tv": token_version, "d": 是否已停用}；用户不存在返回 None。**同步阻塞**。
+
+    先读 shared_cache（`auth:tv:<id>`，300 秒；Redis 出错当未命中），未命中才查一次
+    `users(token_version, disabled_at)` 两列并写回。不存在的用户不缓存（token 已验过签，
+    来这里的「不存在」只有已删号，一次查库无所谓）。失效见 shared_cache 里的说明与本文件末尾
+    的 ORM 事件。
+
+    The user's {"tv", "d"}; None when the user doesn't exist. Blocking. Reads shared_cache first
+    (a Redis error counts as a miss), then one two-column query, written back. Missing users are
+    not cached. Invalidation: see shared_cache and the ORM events at the bottom of this file.
+    """
+    key = shared_cache.auth_state_key(user_id)
+    hit = shared_cache.get_json(key)
+    if isinstance(hit, dict) and isinstance(hit.get("tv"), int) and isinstance(hit.get("d"), bool):
+        return hit
+    db = SessionLocal()
+    try:
+        row = db.query(User.token_version, User.disabled_at).filter(User.id == user_id).first()
+    finally:
+        db.close()
+    if row is None:
+        return None
+    state = {"tv": int(row[0] or 0), "d": row[1] is not None}
+    shared_cache.set_json(key, state, ttl=shared_cache.AUTH_STATE_TTL_SECONDS)
+    return state
+
+
+def _disabled_error_from_db(user_id: str) -> HTTPException:
+    """已停用账号才会走到：回库取一次原因，与完整鉴权的 403 文案一致（罕见路径，可以查库）。
+    Only for disabled accounts: fetch the reason so the 403 reads like the full auth's (a rare
+    path, a DB query is fine)."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user is None:
+            return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在 / User not found")
+        return disabled_account_error(user)
+    finally:
+        db.close()
+
+
+def check_token_light(token: str) -> str:
+    """验签 + 会话版本 + 停用三道判定，只用缓存的 {tv, d}。通过返回 user_id，否则抛 HTTPException。
+    不查整行 User、不碰 last_active_at / plan 自愈、不下发滑动续期头。
+    Signature + session version + disabled, from the cached {tv, d} only. Returns the user_id or
+    raises HTTPException. No full User row, no last_active_at / plan self-heal, no renewal header."""
+    payload = decode_token_payload(token)
+    user_id = payload.get("sub") if payload else None
+    if not user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="凭证无效 / Invalid token")
+    state = get_auth_state(user_id)
+    if state is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在 / User not found")
+    token_tv = payload.get("tv") if isinstance(payload.get("tv"), int) else 0
+    if token_tv != state["tv"]:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="会话已失效，请重新登录 / Session invalidated, please log in again")
+    if state["d"]:
+        raise _disabled_error_from_db(user_id)
+    return user_id
+
+
+def get_current_user_id_light(authorization: str | None = Header(default=None)) -> str:
+    """FastAPI 依赖：高频、只读内存缓存的接口（/chart/latest、/quotes、/symbols 等）用它代替
+    get_current_user——省掉每次请求的 users 查询（远端库上还带一次 pre_ping，共 2 次往返）。
+    返回 user_id。判定语义与 get_current_user 的 tv / 停用两道相同；**不**更新 last_active_at（DAU
+    交给 /bridge/accounts 之类仍走完整鉴权的请求），**不**下发 X-Refreshed-Token（同理）。
+    FastAPI dependency for hot, cache-only endpoints, replacing get_current_user's per-request
+    users query (two remote round-trips with pre_ping). Same tv / disabled semantics; does not
+    touch last_active_at nor issue X-Refreshed-Token (endpoints on the full auth cover those)."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少凭证 / Missing token")
+    return check_token_light(authorization.split(" ", 1)[1])
 
 
 def get_current_user(
@@ -310,3 +394,47 @@ def validate_sl_tp_direction(
             status_code=400,
             detail="卖单止损必须高于止盈 / For a SELL, stop-loss must be above take-profit",
         )
+
+
+# ---------------------------------------------------------------------------
+# 让轻量鉴权缓存跟着 users 表的两列走 / keep the auth cache in step with the two columns
+# ---------------------------------------------------------------------------
+# 凡是经 ORM 改了 User.token_version / User.disabled_at（或删了用户）的事务，在 commit **之后**
+# 自动删掉 auth:tv:<id>。先在 flush 阶段（after_update / after_delete）把 user_id 记进
+# session.info，等 Session 真正 commit 了才删：提前删的话，别的请求可能在 commit 之前把旧值又
+# 读回缓存。回滚则丢掉记录。
+# Any ORM transaction that changes User.token_version / User.disabled_at (or deletes a user)
+# deletes auth:tv:<id> *after* the commit. The id is noted in session.info at flush time and only
+# acted on once the Session really commits — deleting earlier would let a concurrent request
+# re-cache the old value before the commit. A rollback discards the note.
+_AUTH_INVALIDATE_KEY = "prismx_auth_invalidate"
+
+
+def _note_auth_change(target: User) -> None:
+    session = object_session(target)
+    if session is not None and target.id:
+        session.info.setdefault(_AUTH_INVALIDATE_KEY, set()).add(target.id)
+
+
+@event.listens_for(User, "after_update")
+def _user_updated(mapper, connection, target: User) -> None:
+    state = sa_inspect(target)
+    if state.attrs.token_version.history.has_changes() or state.attrs.disabled_at.history.has_changes():
+        _note_auth_change(target)
+
+
+@event.listens_for(User, "after_delete")
+def _user_deleted(mapper, connection, target: User) -> None:
+    _note_auth_change(target)
+
+
+@event.listens_for(Session, "after_commit")
+def _invalidate_auth_after_commit(session: Session) -> None:
+    ids = session.info.pop(_AUTH_INVALIDATE_KEY, None)
+    if ids:
+        shared_cache.invalidate_auth_state(*ids)
+
+
+@event.listens_for(Session, "after_rollback")
+def _forget_auth_changes_on_rollback(session: Session) -> None:
+    session.info.pop(_AUTH_INVALIDATE_KEY, None)

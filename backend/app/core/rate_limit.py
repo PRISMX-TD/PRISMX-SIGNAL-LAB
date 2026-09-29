@@ -2,11 +2,14 @@
 Rate limiter: slowapi-based, keyed by client IP.
 """
 import hashlib
+import logging
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.services import shared_state
+
+logger = logging.getLogger("prismx.rate_limit")
 
 # 存储后端：默认进程内内存，单实例部署足够。多实例部署必须指向 Redis，否则每个
 # 实例各算各的计数，等比放大攻击者可试的次数——两个实例就等于限流放宽一倍。
@@ -28,9 +31,45 @@ from app.services import shared_state
 # the gate happily lets it start — the silent, unalarmed degradation that gate
 # exists to prevent. redis_url() already implements "REDIS_URL first, else
 # RATE_LIMIT_STORAGE_URI".
+
+
+def limiter_options() -> dict:
+    """两个 slowapi Limiter 共用的「Redis 故障怎么办」参数（rate_limit / strategy_limits 都用）。
+
+    · in_memory_fallback_enabled + swallow_errors：Redis 抛错时 slowapi 自动切到进程内
+      MemoryStorage（按 2^n 秒指数退避去探测恢复，恢复后自动切回），而不是让 40 多个带
+      @limiter.limit 的接口在进入函数体之前就 500。代价：故障窗口内限流退化成「每 worker
+      各算各的」，几秒到几十秒可以接受。
+    · storage_options 的两个超时：limits 用 redis.from_url(uri, **options) 建客户端，
+      不传就是 socket_timeout=None——Redis 卡住（不是挂掉）时，这些同步端点线程会无限期
+      阻塞。只在真的走 Redis 时才传（内存存储没有 socket）。
+    参数名以已安装的 slowapi 0.1.9 / limits 5.8 源码为准。
+
+    Shared "what if Redis is down" options for both slowapi limiters. With the in-memory
+    fallback and swallow_errors, a Redis failure switches slowapi to a process-local
+    MemoryStorage (probing for recovery on a 2^n-second backoff, switching back
+    automatically) instead of 500-ing 40+ decorated endpoints before their bodies run;
+    the price is per-worker counting for a few seconds. The two socket timeouts keep a
+    *stalled* Redis from parking sync-endpoint threads forever (limits builds the client
+    via redis.from_url(uri, **options), whose default socket_timeout is None). Only
+    passed when Redis is actually used.
+    """
+    opts: dict = {
+        "in_memory_fallback_enabled": True,
+        "swallow_errors": True,
+    }
+    if shared_state.redis_url():
+        opts["storage_options"] = {
+            "socket_timeout": 1.0,
+            "socket_connect_timeout": 1.0,
+        }
+    return opts
+
+
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=shared_state.redis_url() or None,
+    **limiter_options(),
 )
 
 # ---------------------------------------------------------------------------
@@ -99,9 +138,14 @@ def _lock_key(namespace: str, key: str) -> str:
 
 
 def _read(namespace: str, key: str) -> int | None:
-    """当前失败计数；键不存在或已过期返回 None。
-    The current failure count; None when the entry is absent or expired."""
-    raw = shared_state.kv_get(_lock_key(namespace, key))
+    """当前失败计数；键不存在或已过期返回 None。Redis 出错也返回 None（放行）。
+    The current failure count; None when the entry is absent or expired — and when
+    Redis errors (fail open, see _guard)."""
+    try:
+        raw = shared_state.kv_get(_lock_key(namespace, key))
+    except Exception:  # noqa: BLE001
+        logger.warning("失败锁定计数读取失败，放行 / lockout read failed, failing open", exc_info=True)
+        return None
     if raw is None:
         return None
     try:
@@ -145,11 +189,17 @@ def _record_failure(namespace: str, key: str) -> None:
     # refresh=True keeps the original "expires one window after the *last*
     # failure" semantics; without it the expiry is pinned to the first failure and
     # an attacker could ride the window boundary to reset the count.
-    shared_state.incr_with_ttl(_lock_key(namespace, key), lockout_seconds + 1, refresh=True)
+    try:
+        shared_state.incr_with_ttl(_lock_key(namespace, key), lockout_seconds + 1, refresh=True)
+    except Exception:  # noqa: BLE001
+        logger.warning("失败锁定计数写入失败，忽略 / lockout write failed, ignored", exc_info=True)
 
 
 def _clear_failures(namespace: str, key: str) -> None:
-    shared_state.kv_delete(_lock_key(namespace, key))
+    try:
+        shared_state.kv_delete(_lock_key(namespace, key))
+    except Exception:  # noqa: BLE001
+        logger.warning("失败锁定计数清除失败，忽略 / lockout clear failed, ignored", exc_info=True)
 
 
 class _FailuresCompat:
@@ -272,18 +322,31 @@ def _pair(email: str, source: str) -> str:
 
 
 def is_known_login_source(email: str, source: str) -> bool:
-    """该账号近期是否从这个来源成功登录过 / has this account logged in from here."""
-    return source in shared_state.set_members(_known_sources_key(email))
+    """该账号近期是否从这个来源成功登录过 / has this account logged in from here.
+
+    Redis 出错按「不是常用来源」处理：这是滥用控制而不是鉴权，Redis 抖一下不能让真用户
+    登录 500（与 services/password_reset 同一口径；IP 级限流与 bcrypt 仍在）。
+    A Redis error reads as "not a familiar source": this is abuse control, not
+    authentication, so a hiccup must not 500 a real login (same stance as
+    services/password_reset; the per-IP limiter and bcrypt still apply)."""
+    try:
+        return source in shared_state.set_members(_known_sources_key(email))
+    except Exception:  # noqa: BLE001
+        logger.warning("常用来源读取失败，按陌生来源处理 / known-source read failed", exc_info=True)
+        return False
 
 
 def remember_login_source(email: str, source: str) -> None:
     """登录成功后把来源记进该账号的常用名单（超上限淘汰最旧的）。
     Record the source on success, evicting the oldest past the cap."""
-    members = shared_state.set_members(_known_sources_key(email))
-    if source not in members and len(members) >= KNOWN_SOURCES_PER_ACCOUNT:
-        for stale in members[: len(members) - KNOWN_SOURCES_PER_ACCOUNT + 1]:
-            shared_state.set_remove(_known_sources_key(email), stale)
-    shared_state.set_add(_known_sources_key(email), source, KNOWN_SOURCE_TTL_SECONDS)
+    try:
+        members = shared_state.set_members(_known_sources_key(email))
+        if source not in members and len(members) >= KNOWN_SOURCES_PER_ACCOUNT:
+            for stale in members[: len(members) - KNOWN_SOURCES_PER_ACCOUNT + 1]:
+                shared_state.set_remove(_known_sources_key(email), stale)
+        shared_state.set_add(_known_sources_key(email), source, KNOWN_SOURCE_TTL_SECONDS)
+    except Exception:  # noqa: BLE001
+        logger.warning("常用来源写入失败，忽略 / known-source write failed, ignored", exc_info=True)
 
 
 def is_login_locked(email: str, source: str) -> bool:

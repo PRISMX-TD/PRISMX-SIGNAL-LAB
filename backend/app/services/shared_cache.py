@@ -225,3 +225,43 @@ def invalidate_signal_caches() -> None:
 # disabling / enabling an account must invalidate that cache too (cached User
 # instances carry disabled_at as loaded), and routers don't import each other.
 BRIDGE_AUTH_VERSION = SharedVersion("bridge_auth")
+
+
+# ---------------------------------------------------------------------------
+# 轻量鉴权缓存 {tv, d} / lightweight auth-state cache
+# ---------------------------------------------------------------------------
+# WS 建连与高频纯内存接口（/chart/latest、/quotes、/symbols）鉴权只需要两个事实：token_version
+# 对不对、账号有没有被停用——用不着把整行 users 拉回来，更用不着每次都走远端库。这里把这两个事实
+# 按用户缓存 300 秒（Redis 里全 worker 共享，没配 Redis 就是进程内内存）。
+#
+# 失效（谁改了这两列，谁的 commit 之后就该删这个键）：
+#   · 改密（account.py）/ 重置密码（auth.py）/ 管理员停用（admin.py）：token_version 自增；
+#   · 管理员恢复（admin.py）：disabled_at 清空（tv 不动，所以光靠 tv 变化发现不了）。
+# services/deps.py 在 User 模型上挂了 ORM 事件（after_update / after_delete + Session after_commit），
+# 凡是通过 ORM 改了 token_version / disabled_at 的提交都会**自动**调用 invalidate_auth_state，
+# 不依赖每个调用点记得写一行；显式调用也安全（幂等）。绕过 ORM 的原生 SQL / Query.update 改这两列
+# 不会触发事件——那种写法要自己调用下面这个函数。
+# 读不到 / Redis 出错一律当未命中回源，写不进去只是少一次缓存，和本模块其它函数同一口径。
+#
+# The WS connect and the hot in-memory endpoints only need two facts about a user: is the token's
+# tv current and is the account disabled — not the whole users row, and not a remote DB hop each
+# time. Cached per user for 300s (shared across workers with Redis, in-process otherwise).
+# Invalidation happens after the commit that changes either column; services/deps.py hooks ORM
+# events on User so every ORM commit that touches token_version / disabled_at calls
+# invalidate_auth_state automatically (an explicit call is idempotent and safe). Raw SQL or
+# Query.update bypasses the events and must call it by hand.
+AUTH_STATE_KEY = "auth:tv:{user_id}"
+AUTH_STATE_TTL_SECONDS = 300
+
+
+def auth_state_key(user_id: str) -> str:
+    return AUTH_STATE_KEY.format(user_id=user_id)
+
+
+def invalidate_auth_state(*user_ids: str) -> None:
+    """让这些用户的 {tv, d} 缓存立即对所有 worker 失效（改密 / 停用 / 恢复 / 重置密码之后调）。
+    Drop these users' cached {tv, d} on every worker (after a password change / disable / enable /
+    password reset)."""
+    keys = [auth_state_key(u) for u in user_ids if u]
+    if keys:
+        delete(*keys)

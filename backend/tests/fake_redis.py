@@ -148,7 +148,7 @@ class FakeRedis:
         self.published.append((channel, message)); return 1
 
     # -- pipeline：顺序执行，够用 / sequential, good enough --
-    def pipeline(self):
+    def pipeline(self, transaction=True):
         return _Pipe(self)
 
 
@@ -189,6 +189,15 @@ class AsyncFakeRedis:
 
     async def zadd(self, key, mapping):
         return self._run("zadd", key, mapping)
+
+    async def zrem(self, key, *members):
+        return self._run("zrem", key, *members)
+
+    async def get(self, key):
+        return self._run("get", key)
+
+    async def set(self, key, value, ex=None, nx=False):
+        return self._run("set", key, value, ex=ex, nx=nx)
 
     def pipeline(self, transaction=True):
         return _AsyncPipe(self)

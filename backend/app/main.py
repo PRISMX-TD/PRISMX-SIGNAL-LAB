@@ -1,14 +1,16 @@
 """PRISMX Signal Lab 后端入口 / Backend entrypoint."""
 import asyncio
+import functools
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
+from sqlalchemy.exc import TimeoutError as SQLAlchemyPoolTimeoutError
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.core.config import settings, _WORKER_COUNT
@@ -17,7 +19,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, announcements, auth, automation, bridge, chart, competitions, ea, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, site, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, site, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -56,6 +58,84 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logger = logging.getLogger("prismx.main")
 
 
+# ---------- WebSocket permessage-deflate 窗口调小 ----------
+# uvicorn 的 websockets 实现（uvicorn 0.30.6 protocols/websockets/websockets_impl.py）在
+# **每条连接**的 WebSocketProtocol.__init__ 里执行 `ServerPerMessageDeflateFactory()`：
+# 无参 = 15 位滑动窗口 + 默认 memLevel，每条连接的压缩上下文合计约 300~400 KB 内存。
+# 这个名字是按模块全局在连接建立时才查的，所以在 import 期把它换成带参数的偏函数即可，
+# 不用动 systemd 的启动命令。窗口 12 位 + memLevel 4：每连接降到几十 KB，压缩率略降
+# （持仓帧几十 KB 的 JSON，重复度高，损失很小）。老 WebView 若不支持窗口协商，
+# 退回不压缩而不是断连。每个 worker 都会先 import 本模块再收连接，所以每个进程都生效。
+# 换了别的 uvicorn / websockets 版本对不上时只记日志、保持默认，不影响启动。
+#
+# Shrink the permessage-deflate window. uvicorn's websockets implementation builds
+# ServerPerMessageDeflateFactory() inside each connection's WebSocketProtocol.__init__:
+# no arguments = a 15-bit window, roughly 300-400 KB of compression context per
+# connection. The name is a module global looked up at connect time, so swapping it for
+# a partial at import time is enough (no systemd change). A 12-bit window with memLevel 4
+# takes it to tens of KB at a small cost in ratio. If a different uvicorn / websockets
+# layout is installed, it only logs and keeps the defaults.
+WS_DEFLATE_WINDOW_BITS = 12
+WS_DEFLATE_MEM_LEVEL = 4
+
+
+def _shrink_ws_deflate_window() -> bool:
+    try:
+        from uvicorn.protocols.websockets import websockets_impl
+        from websockets.extensions.permessage_deflate import ServerPerMessageDeflateFactory
+
+        current = getattr(websockets_impl, "ServerPerMessageDeflateFactory", None)
+        if current is None:
+            return False                    # 没有这个名字：无从替换 / nothing to replace
+        if isinstance(current, functools.partial):
+            return True                     # 已替换过 / already done
+        websockets_impl.ServerPerMessageDeflateFactory = functools.partial(
+            ServerPerMessageDeflateFactory,
+            server_max_window_bits=WS_DEFLATE_WINDOW_BITS,
+            client_max_window_bits=WS_DEFLATE_WINDOW_BITS,
+            compress_settings={"memLevel": WS_DEFLATE_MEM_LEVEL},
+        )
+        return True
+    except Exception as e:  # noqa: BLE001 —— 版本对不上就保持默认 / keep defaults on a version mismatch
+        logger.warning("permessage-deflate 窗口未调小，保持默认 / could not shrink the deflate window: %s", e)
+        return False
+
+
+_shrink_ws_deflate_window()
+
+
+def _raise_nofile_limit() -> None:
+    """把 RLIMIT_NOFILE 软上限抬到硬上限（最多 65536）。
+
+    systemd 默认软上限 1024（Ubuntu 24.04 的 DefaultLimitNOFILE=1024:524288），uvicorn 不会自己
+    抬；每条 WS 占 1 个 fd，再加 DB / Redis / httpx / nginx keepalive，单 worker 约 900 条
+    WebSocket 就 `Too many open files`——accept 失败、nginx 无声 502。软上限抬到硬上限以内不需要
+    root；lifespan 在每个 worker 进程里各执行一次。Windows 没有 resource 模块，直接跳过。
+    硬上限本身若也是 1024，得在 systemd drop-in 里设 LimitNOFILE=65536（这里只记日志）。
+
+    Raise the soft RLIMIT_NOFILE to the hard limit (capped at 65536). systemd's default soft
+    limit is 1024 and uvicorn never raises it; each WebSocket holds an fd, so ~900 sockets per
+    worker hit "Too many open files" and nginx answers a silent 502. Raising soft up to hard
+    needs no root; the lifespan runs once per worker. Skipped where `resource` is missing
+    (Windows). If the hard limit itself is 1024, set LimitNOFILE=65536 in the systemd drop-in.
+    """
+    try:
+        import resource
+    except ImportError:
+        return
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        want = 65536 if hard == resource.RLIM_INFINITY else min(hard, 65536)
+        if soft == resource.RLIM_INFINITY or soft >= want:
+            logger.info("RLIMIT_NOFILE soft=%s hard=%s（无需调整）", soft, hard)
+            return
+        resource.setrlimit(resource.RLIMIT_NOFILE, (want, hard))
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        logger.info("RLIMIT_NOFILE 已抬高 / raised: soft=%s hard=%s", soft, hard)
+    except (ValueError, OSError) as e:
+        logger.warning("抬高 RLIMIT_NOFILE 失败 / could not raise RLIMIT_NOFILE: %s", e)
+
+
 # 同步端点线程池的大小，见 lifespan 里的说明 / sync-endpoint pool size, see lifespan
 SYNC_THREAD_LIMIT = 256
 
@@ -75,6 +155,7 @@ async def lifespan(app: FastAPI):
     # uvicorn's port bind — leaving nginx to serve 502s for the whole window. The
     # first candle_retention_sweep_loop pass once stalled it 83.7s, making startup
     # take 85.6s. Keep this in mind when adding loops.
+    _raise_nofile_limit()
     init_db()
 
     # 进程内状态的部署前提，在日志里说一次。config.py 已经在「明确读出多 worker
@@ -165,7 +246,11 @@ async def lifespan(app: FastAPI):
     cross_worker_tasks.append(
         asyncio.create_task(gateway_health_monitor_loop(), name="gateway-health")
     )
+    # 页面埋点：每个 worker 各起一个 30 秒批量落库任务（不进只在领导 worker 跑的 BackgroundLoops）。
+    # Pageview telemetry: a per-worker 30s batch flusher (not in the leader-only BackgroundLoops).
+    pv_task = telemetry.start_pageview_flusher()
     yield
+    await telemetry.stop_pageview_flusher(pv_task)
     # 关闭：停止后台任务（多 worker 时顺带释放领导锁），并等各循环的 finally 跑完——
     # 这里一返回 uvicorn 就重新 raise SIGTERM 结束进程，没跑完的收尾（比如网关事件泵
     # 交还消费权）会直接丢掉（见 BackgroundLoops.aclose）。
@@ -190,6 +275,20 @@ app.state.limiter = limiter
 # endpoint decorators; only the rate-limit exception handler is shared.
 app.state.user_limiter = user_limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.exception_handler(SQLAlchemyPoolTimeoutError)
+async def _db_pool_timeout_handler(request: Request, exc: SQLAlchemyPoolTimeoutError) -> JSONResponse:
+    """连接池取不到连接（pool_timeout 到期）：回 503 + Retry-After，而不是一片 500。
+    过载时让客户端「稍后再试」比抛 500 更准确，前端也能据此退避而不是当成业务错误。
+    The pool ran out of connections within pool_timeout: answer 503 + Retry-After
+    instead of a blanket 500, so clients back off rather than treating it as a bug."""
+    logger.warning("DB 连接池等待超时 / DB pool timeout on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "服务繁忙，请稍后重试 / Service busy, please retry shortly"},
+        headers={"Retry-After": "2"},
+    )
 # 响应压缩：≥1 KB 的 JSON 才压（信号列表、榜单、订单页这些几十 KB 的负载压完只剩
 # 零头；更小的压了反而多花 CPU）。线上 nginx 没有对 API 开 gzip，这是应用层的兜底。
 # compresslevel 取 5：JSON 在 5 以上压缩率几乎不再提高，CPU 却成倍上涨（Starlette
@@ -197,26 +296,25 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 对其它通道无影响：Starlette 的 GZipMiddleware 只处理 scope["type"] == "http"，
 # WebSocket 原样放过；text/event-stream 默认不压（本项目也没有 SSE /
 # StreamingResponse 端点）；已带 Content-Encoding 的响应原样透传。
-# 位置：必须是**最里层**（先于 SlowAPIMiddleware 添加）。SlowAPIMiddleware 是
-# BaseHTTPMiddleware，它把下游响应改成分块流式转发（首块 more_body=True）；GZip 若
-# 包在它外面，看到的每个响应都是「流式」，minimum_size 形同虚设——41 字节的
-# {"status":"ok"} 也会被压缩、还丢掉 Content-Length（测试里实测如此）。放在最里层，
-# GZip 直接面对路由返回的完整响应体。CORS 在更外层：预检由它直接应答（远小于
-# 1 KB，不压），普通响应先压缩、再补跨域头，Vary 头两边各自追加、互不覆盖。
+# 位置：最里层。曾经这里还有个 SlowAPIMiddleware（BaseHTTPMiddleware，把响应改成分块
+# 流式转发），GZip 必须排在它前面才不会把每个响应都当「流式」处理；那个中间件已删除
+# （限流全靠端点装饰器 @limiter.limit 完成，限流器没有 default_limits，中间件什么都不做），
+# 但 GZip 仍保持最内层：直接面对路由返回的完整响应体。CORS 在更外层：预检由它直接
+# 应答（远小于 1 KB，不压），普通响应先压缩、再补跨域头，Vary 头两边各自追加、互不覆盖。
 # Response compression for JSON of 1 KB and up (production nginx doesn't gzip
 # the API; this is the application-level fallback). compresslevel 5: past that
 # JSON barely shrinks while CPU climbs (Starlette defaults to 9). WebSockets are
 # untouched (only "http" scopes are handled), text/event-stream is excluded by
 # default (and there are no SSE/streaming endpoints), and responses already
-# carrying Content-Encoding pass through. It must be the *innermost* middleware
-# (added before SlowAPIMiddleware): that one is a BaseHTTPMiddleware which
-# re-streams every response in chunks, so a GZip wrapped around it sees every
-# response as streaming and ignores minimum_size — even a 41-byte body got
-# compressed and lost its Content-Length. Innermost, GZip sees the route's
-# whole body. CORS sits further out: it answers preflights itself (tiny, never
-# compressed) and adds its headers after compression; each appends its own Vary.
+# carrying Content-Encoding pass through. Innermost, so GZip sees the route's whole
+# body. (A SlowAPIMiddleware used to sit outside it — a BaseHTTPMiddleware that
+# re-streams every response, which is why GZip had to be inside it. It was removed:
+# limits are enforced entirely by the @limiter.limit endpoint decorators and the
+# limiters have no default_limits, so the middleware did nothing but add a task group
+# and a memory stream per request.) CORS sits further out: it answers preflights
+# itself (tiny, never compressed) and adds its headers after compression; each
+# appends its own Vary.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
-app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -254,15 +352,15 @@ app.add_middleware(
 # IP 还原到 request.client.host，让 slowapi 的按 IP 限流与按邮箱登录锁定按真
 # 实客户端计数，而不是全部落在 Nginx 的本机 IP 上（否则等于没有限流）。只信
 # 任 TRUSTED_PROXY_IPS 里的对端，直连或伪造 XFF 无法借此绕过。必须最后添加
-# ——Starlette 里后添加的中间件在最外层、最先执行，才能在 SlowAPIMiddleware
-# 之前把 client 改写好。留空则不启用（如本地开发直连）。
+# ——Starlette 里后添加的中间件在最外层、最先执行，才能在端点装饰器限流读取
+# request.client 之前把它改写好。留空则不启用（如本地开发直连）。
 # Restore the real client IP behind the same-host Nginx: rewrite
 # request.client.host from X-Forwarded-For so slowapi's per-IP rate limits and
 # per-email login lockout count per real client instead of collapsing onto
 # Nginx's loopback IP. Only peers in TRUSTED_PROXY_IPS are trusted, so a direct
 # connection or a forged XFF can't abuse it. Added last on purpose — in
 # Starlette the most-recently-added middleware is outermost and runs first, so
-# it rewrites `client` before SlowAPIMiddleware sees it. Empty disables it (e.g.
+# it rewrites `client` before the endpoint decorators' limiter reads it. Empty disables it (e.g.
 # local dev with a direct connection).
 if settings.TRUSTED_PROXY_IPS.strip():
     app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=settings.TRUSTED_PROXY_IPS)
@@ -271,6 +369,7 @@ if settings.TRUSTED_PROXY_IPS.strip():
 app.include_router(auth.router, prefix=settings.API_PREFIX)
 app.include_router(signals.router, prefix=settings.API_PREFIX)
 app.include_router(trends.router, prefix=settings.API_PREFIX)
+app.include_router(bootstrap.router, prefix=settings.API_PREFIX)
 app.include_router(orders.router, prefix=settings.API_PREFIX)
 app.include_router(ea.router, prefix=settings.API_PREFIX)
 app.include_router(bridge.router, prefix=settings.API_PREFIX)

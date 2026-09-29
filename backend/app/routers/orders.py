@@ -35,7 +35,6 @@ from app.services.deps import (get_current_user, is_account_online,
 from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot, symbol_match_set
 from app.services import bridge_wake, close_all
 from app.services.gateway_binding import not_removed
-from app.services.gateway_client import run_on_main_loop
 # 网关执行与订单载荷都搬到了 services（2026-09-06）：自动仓管与 routers/bridge 现在
 # 直接 import 服务模块，不再反向 import 本路由。这里的下划线别名只供本文件内部用。
 # Gateway execution and order payload helpers live in services now; auto-manage
@@ -48,9 +47,15 @@ from app.services.order_payload import (
     serialize_order as _serialize,
     void_stale_order,
 )
-from app.services.pending_orders import gateway_logins, push_gateway_pending_orders
+from app.services.pending_orders import gateway_logins, push_gateway_pending_orders, submit_to_main_loop
 from app.services.plans import is_realtime_plan
-from app.services.trade_performance import compute_personal_winrate
+from app.services import shared_cache
+from app.services.trade_performance import (
+    TRADE_CACHE_TTL,
+    closed_trades_cache_key,
+    compute_personal_winrate,
+    winrate_cache_key,
+)
 
 logger = logging.getLogger("prismx.orders")
 
@@ -81,7 +86,10 @@ def place_order(
     #    order bypasses the equity-based lot cap below (no account → equity None
     #    → cap skipped) only to sit 5 minutes and get voided, wasting the user's
     #    attempt. Mirrors the _assert_account_owned check in close/modify.
-    _assert_account_owned(db, user.id, req.mt5Login)
+    # 归属校验并入下面那次账号查询（一笔下单只查一次 mt5_accounts；下游网关执行和
+    # trade_mode 打章直接复用这一行）。
+    # The ownership check reuses the single accounts query below; the gateway execution
+    # and the trade_mode stamp reuse that row too.
 
     # 1) 风控校验：按净值粗估手数上限。指定了目标账号就用它；没指定但只有
     #    一个账号在线时，也用那唯一的在线账号——它正是桥接稍后单账号兜底
@@ -102,6 +110,8 @@ def place_order(
     target_acc = None
     if req.mt5Login:
         target_acc = next((acc for acc in accounts if acc.login == req.mt5Login), None)
+        if target_acc is None:
+            raise HTTPException(status_code=404, detail="账号不存在或不属于当前用户 / Account not found")
     elif len(online_accounts) == 1:
         target_acc = online_accounts[0]
     equity = target_acc.equity if target_acc and target_acc.equity else None
@@ -256,10 +266,17 @@ def place_order(
         return result
 
     # Gateway 账号实时执行，不走 bridge 轮询
-    gw_payload = _try_gateway_execute(db, order)
+    # 已经查到的目标账号行直接交给网关执行（它会自己复核 source == "gateway"）。
+    # Hand the already-loaded target row to the gateway executor (it re-checks the source).
+    gw_payload = _try_gateway_execute(db, order, account=target_acc)
     if gw_payload is not None:
-        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
-        db.refresh(order)
+        # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
+        # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
+        # 按订单 id 整条替换，先后顺序不影响最终状态。
+        # Don't block on the WS push or re-SELECT the order: try_gateway_execute leaves
+        # it final. ORDER_UPDATE may land after this HTTP response; the frontend
+        # replaces by order id, so ordering doesn't matter.
+        submit_to_main_loop(manager.push_to_client(user.id, gw_payload), "ORDER_UPDATE")
         if order.action == "PENDING":
             _refresh_pending_after(db, order)
         return _serialize(order)
@@ -310,8 +327,9 @@ def list_orders(
         if is_stale_pending(o)
     ]
     if stale:
+        gw_pairs = _gateway_login_pairs(db, stale)
         for o in stale:
-            void_stale_order(o)
+            void_stale_order(o, gateway=(o.user_id, o.mt5_login) in gw_pairs)
         db.commit()
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
@@ -490,6 +508,21 @@ def _require_close_login(db: Session, user_id: str, requested: str | None) -> st
     return None
 
 
+def _gateway_login_pairs(db: Session, orders: list[Order]) -> set[tuple[str, str]]:
+    """这批订单里属于网关通道的 (user_id, mt5_login) 集合；没有订单/都没带账号时不查库。
+    Which of these orders' (user_id, mt5_login) are gateway-channel; no query when
+    nothing needs looking up. Removed rows count too: the order was sent while bound."""
+    logins = {o.mt5_login for o in orders if o.mt5_login}
+    if not logins:
+        return set()
+    rows = (
+        db.query(MT5Account.user_id, MT5Account.login)
+        .filter(MT5Account.login.in_(logins), MT5Account.source == "gateway")
+        .all()
+    )
+    return {(r[0], r[1]) for r in rows}
+
+
 def _bound_logins(db: Session, user_id: str) -> list[str]:
     """该用户名下所有 MT5 账号登录名，**含用户已删除（软删）的**。
 
@@ -522,10 +555,18 @@ def order_winrate(
     With login: narrowed to that one account — it must be currently bound, or
     it's treated as not found.
     """
+    # 按用户缓存 60 秒（见 trade_performance.TRADE_CACHE_TTL 处的说明）；命中时零 DB。
+    # Per-user 60s cache; a hit costs no DB at all.
+    key = winrate_cache_key(user.id, login)
+    hit = shared_cache.get_json(key)
+    if hit is not None:
+        return hit
     bound = _bound_logins(db, user.id)
     if login is not None and login not in bound:
         raise HTTPException(status_code=404, detail="账号不存在 / Account not found")
-    return compute_personal_winrate(db, user.id, bound_logins=bound, login=login)
+    out = compute_personal_winrate(db, user.id, bound_logins=bound, login=login)
+    shared_cache.set_json(key, out, TRADE_CACHE_TTL)
+    return out
 
 
 @router.get("/closed-trades", response_model=dict)
@@ -550,15 +591,25 @@ def list_closed_trades(
     promise shouldn't stop at a single percentage; the user should be able to
     see every real fill that number is built from.
     """
+    key = closed_trades_cache_key(user.id)
+    hit = shared_cache.get_json(key)
+    if hit is not None:
+        return hit
     bound = _bound_logins(db, user.id)
+    # 只取用到的列，不拉整行 ORM 对象 / only the columns actually serialised
+    C = ClosedTrade
     rows = (
-        db.query(ClosedTrade)
-        .filter(ClosedTrade.user_id == user.id, ClosedTrade.mt5_login.in_(bound))
-        .order_by(ClosedTrade.closed_at.desc())
+        db.query(
+            C.id, C.mt5_login, C.symbol, C.side, C.close_volume, C.close_price, C.profit,
+            C.position_ticket, C.deal_ticket, C.closed_at, C.open_time, C.open_price,
+            C.gross_profit, C.commission, C.swap, C.sl, C.tp, C.reason, C.comment,
+        )
+        .filter(C.user_id == user.id, C.mt5_login.in_(bound))
+        .order_by(C.closed_at.desc())
         .limit(200)
         .all()
     )
-    return {
+    out = {
         "trades": [
             {
                 "id": r.id,
@@ -586,6 +637,8 @@ def list_closed_trades(
             for r in rows
         ]
     }
+    shared_cache.set_json(key, out, TRADE_CACHE_TTL)
+    return out
 
 
 def _refresh_pending_after(db: Session, order: Order) -> None:
@@ -606,7 +659,11 @@ def _refresh_pending_after(db: Session, order: Order) -> None:
     try:
         logins = gateway_logins(db, order.user_id)
         if logins:
-            run_on_main_loop(push_gateway_pending_orders(order.user_id, logins), timeout=10.0)
+            # 提交即返回，不等网关读完：这帧快照是锦上添花，慢了/失败了都不该拖住响应。
+            # Fire and forget: the snapshot is a courtesy, never worth delaying the response.
+            submit_to_main_loop(
+                push_gateway_pending_orders(order.user_id, logins), "PENDING_ORDERS 快照"
+            )
     except Exception:
         logger.exception("挂单快照即时刷新失败 user=%s", order.user_id)
 
@@ -733,8 +790,13 @@ def close_position(
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
-        db.refresh(order)
+        # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
+        # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
+        # 按订单 id 整条替换，先后顺序不影响最终状态。
+        # Don't block on the WS push or re-SELECT the order: try_gateway_execute leaves
+        # it final. ORDER_UPDATE may land after this HTTP response; the frontend
+        # replaces by order id, so ordering doesn't matter.
+        submit_to_main_loop(manager.push_to_client(user.id, gw_payload), "ORDER_UPDATE")
         return _serialize(order)
 
     return result
@@ -824,8 +886,13 @@ def modify_pending_order(
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
-        db.refresh(order)
+        # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
+        # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
+        # 按订单 id 整条替换，先后顺序不影响最终状态。
+        # Don't block on the WS push or re-SELECT the order: try_gateway_execute leaves
+        # it final. ORDER_UPDATE may land after this HTTP response; the frontend
+        # replaces by order id, so ordering doesn't matter.
+        submit_to_main_loop(manager.push_to_client(user.id, gw_payload), "ORDER_UPDATE")
         _refresh_pending_after(db, order)
         return _serialize(order)
 
@@ -883,8 +950,13 @@ def cancel_pending_order(
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
-        db.refresh(order)
+        # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
+        # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
+        # 按订单 id 整条替换，先后顺序不影响最终状态。
+        # Don't block on the WS push or re-SELECT the order: try_gateway_execute leaves
+        # it final. ORDER_UPDATE may land after this HTTP response; the frontend
+        # replaces by order id, so ordering doesn't matter.
+        submit_to_main_loop(manager.push_to_client(user.id, gw_payload), "ORDER_UPDATE")
         _refresh_pending_after(db, order)
         return _serialize(order)
 
@@ -1009,8 +1081,13 @@ def modify_position(
 
     gw_payload = _try_gateway_execute(db, order)
     if gw_payload is not None:
-        run_on_main_loop(manager.push_to_client(user.id, gw_payload), timeout=5.0)
-        db.refresh(order)
+        # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
+        # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
+        # 按订单 id 整条替换，先后顺序不影响最终状态。
+        # Don't block on the WS push or re-SELECT the order: try_gateway_execute leaves
+        # it final. ORDER_UPDATE may land after this HTTP response; the frontend
+        # replaces by order id, so ordering doesn't matter.
+        submit_to_main_loop(manager.push_to_client(user.id, gw_payload), "ORDER_UPDATE")
         return _serialize(order)
 
     return result
@@ -1036,10 +1113,17 @@ async def stale_order_monitor_loop() -> None:
         db = SessionLocal()
         try:
             voided: list[Order] = []
-            pending = db.query(Order).filter(Order.status == "PENDING").all()
-            for o in pending:
-                if is_stale_pending(o):
-                    void_stale_order(o)
+            # 时间条件推进 SQL（naive UTC，与列一致）；Python 侧 is_stale_pending 照旧兜底。
+            # Push the cutoff into SQL; is_stale_pending below stays as the safety net.
+            cutoff = (datetime.now(timezone.utc) - timedelta(seconds=settings.ORDER_PENDING_TIMEOUT_SECONDS)).replace(tzinfo=None)
+            pending = db.query(Order).filter(Order.status == "PENDING", Order.created_at < cutoff).all()
+            stale = [o for o in pending if is_stale_pending(o)]
+            if stale:
+                # 网关通道的单换成「结果未知，请先核对持仓」的文案（见 order_payload）。
+                # Gateway-channel orders get the "outcome unknown, verify positions" wording.
+                gw_pairs = _gateway_login_pairs(db, stale)
+                for o in stale:
+                    void_stale_order(o, gateway=(o.user_id, o.mt5_login) in gw_pairs)
                     voided.append(o)
             if voided:
                 db.commit()

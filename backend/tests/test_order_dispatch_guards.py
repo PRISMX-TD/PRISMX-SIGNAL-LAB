@@ -42,7 +42,7 @@ def _mk_user(db, uid: str = "u1") -> User:
 
 
 def _mk_account(db, uid: str, login: str, *, online: bool) -> MT5Account:
-    # is_account_online 认的是心跳窗口（deps.ONLINE_WINDOW，7 秒）。
+    # is_account_online 认的是心跳窗口（deps.ONLINE_WINDOW，10 秒）。
     # 给一个远早于窗口的心跳就是"离线"。
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     acc = MT5Account(

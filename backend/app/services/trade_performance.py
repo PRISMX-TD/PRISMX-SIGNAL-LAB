@@ -13,6 +13,7 @@ volume; win/loss is decided by the sign of the sum of all its partial closes'
 profit — not by how many individual closes happened, but by whether the whole
 position ended up profitable.
 """
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import or_, tuple_
@@ -164,6 +165,39 @@ _SEEN_WRITE_INTERVAL = timedelta(seconds=60)
 # number measures has to be visible to the user** — the same rule as
 # strategies.py's streakWindow, so a bounded figure is never read as all-time.
 WINDOW_DAYS = 365
+
+
+# ---- /orders/winrate 与 /orders/closed-trades 的按用户缓存 ----
+# 订单页每 45 秒轮询这两个接口（365 天聚合 + 200 行明细），按用户缓存 60 秒；新平仓落库
+# 时主动失效（invalidate_trade_caches），所以新平仓仍秒级可见。
+# 内存上限：只有正在看订单页的用户会产生条目，每条随 TTL 60 秒自动过期；closed-trades 一份
+# 约 200 行 × 20 字段（几十 KB/用户），全站并发看订单页的用户数 × 几十 KB，Redis 里可忽略。
+# 账号解绑/重绑：`winrate:{uid}:all` 与 `closed:{uid}` 在增删账号处显式失效；带 login 的
+# 单账号键最长滞后一个 TTL。upsert_leg 的补列（enriched）也会失效。
+# Per-user 60s caches for the two Orders-page polls; invalidated when a new close leg
+# lands. Memory bound: entries exist only for users on the orders page and each expires
+# after 60s; a closed-trades value is ~200 rows x 20 fields (tens of KB per user).
+# Bind/unbind invalidates the "all" and closed keys; per-login winrate keys lag at most
+# one TTL.
+TRADE_CACHE_TTL = 60
+
+
+def winrate_cache_key(user_id: str, login: str | None) -> str:
+    return f"winrate:{user_id}:{login or 'all'}"
+
+
+def closed_trades_cache_key(user_id: str) -> str:
+    return f"closed:{user_id}"
+
+
+def invalidate_trade_caches(user_id: str, logins=()) -> None:
+    """新平仓落库 / 账号增删后调用：删掉该用户的胜率与已平仓明细缓存。失败只记日志。
+    Drop this user's win-rate and closed-trades caches; failures are only logged."""
+    from app.services import shared_cache
+
+    keys = [winrate_cache_key(user_id, None), closed_trades_cache_key(user_id)]
+    keys.extend(winrate_cache_key(user_id, lg) for lg in {str(x) for x in logins if x})
+    shared_cache.delete(*keys)
 
 
 def compute_personal_winrate(
@@ -329,6 +363,13 @@ def _is_live_open(order, cutoff: datetime) -> bool:
     return ts >= cutoff
 
 
+# mark_positions_seen 的进程内限频状态：user_id -> (仓位集合, 上次放行的 monotonic 时刻)。
+# Throttle state for mark_positions_seen: user_id -> (position set, last pass monotonic time).
+_SEEN_THROTTLE_SECONDS = 30.0
+_SEEN_THROTTLE_MAX = 5000
+_seen_throttle: dict[str, tuple[frozenset, float]] = {}
+
+
 def mark_positions_seen(db, user_id: str, positions: list) -> int:
     """桥接每次上报持仓时，把其中"本平台开的、仍持仓"的仓位打上最新时间戳。
 
@@ -367,6 +408,24 @@ def mark_positions_seen(db, user_id: str, positions: list) -> int:
     }
     if not pairs:
         return 0
+    # 进程内限频：同一用户、同一批仓位 30 秒内不重复发这条 UPDATE（绝大多数拍都是
+    # 影响 0 行的无效查询）。key 含仓位集合，所以新开仓/平仓导致集合变化时立刻放行。
+    # 多 worker 各有一份，最坏写 2 倍，可接受。内存上限：每用户只留一条（新集合覆盖旧的），
+    # 条目超过 _SEEN_THROTTLE_MAX 时顺手清掉已过期的。
+    # In-process throttle: the same user + same set of positions skips the UPDATE for
+    # 30s (it usually matches zero rows). The key includes the position set, so a new
+    # or closed position goes through at once. Per-worker copies mean at worst 2x writes.
+    # Memory bound: one entry per user (a new set replaces the old); expired entries
+    # are swept once the dict passes _SEEN_THROTTLE_MAX.
+    frozen = frozenset(pairs)
+    mono = time.monotonic()
+    prev = _seen_throttle.get(user_id)
+    if prev is not None and prev[0] == frozen and mono - prev[1] < _SEEN_THROTTLE_SECONDS:
+        return 0
+    if len(_seen_throttle) > _SEEN_THROTTLE_MAX:
+        for uid in [u for u, v in _seen_throttle.items() if mono - v[1] >= _SEEN_THROTTLE_SECONDS]:
+            _seen_throttle.pop(uid, None)
+    _seen_throttle[user_id] = (frozen, mono)
     pair_list = list(pairs)
     now = datetime.now(timezone.utc)
     # 列里存的是 naive UTC（见 signal_resolution.sweep_stale_signals 的同款说明），

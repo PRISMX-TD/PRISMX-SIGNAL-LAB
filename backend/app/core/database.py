@@ -19,14 +19,28 @@ connect_args = {"check_same_thread": False} if _is_sqlite else {}
 # Pool params apply to real pools (Postgres); SQLite doesn't use QueuePool.
 # pool_pre_ping checks a connection before use so a dropped cross-region /
 # pooler connection is transparently replaced instead of erroring.
-_engine_kwargs: dict = {"connect_args": connect_args}
-if not _is_sqlite:
-    _engine_kwargs.update(
-        pool_size=settings.DB_POOL_SIZE,
-        max_overflow=settings.DB_MAX_OVERFLOW,
-        pool_recycle=settings.DB_POOL_RECYCLE,
-        pool_pre_ping=True,
-    )
+def _make_engine_kwargs(is_sqlite: bool) -> dict:
+    kwargs: dict = {"connect_args": connect_args}
+    if not is_sqlite:
+        kwargs.update(
+            pool_size=settings.DB_POOL_SIZE,
+            max_overflow=settings.DB_MAX_OVERFLOW,
+            pool_recycle=settings.DB_POOL_RECYCLE,
+            pool_pre_ping=True,
+            # 取连接超时：过载时快速失败（main.py 转 503），而不是 30 秒后与前端超时一起崩。
+            # Fail fast under overload (main.py maps it to 503) instead of expiring with the
+            # client's 30s timeout.
+            pool_timeout=settings.DB_POOL_TIMEOUT,
+            # LIFO：优先复用最近用过的连接，空闲的那几条沉到池底、被 pool_recycle 回收，
+            # 高峰过后 Supabase 30 连接的上限占用回落得更快。
+            # LIFO reuse keeps the hot connections hot and lets the idle ones age out via
+            # pool_recycle, so the Supabase 30-connection ceiling relaxes faster after a peak.
+            pool_use_lifo=True,
+        )
+    return kwargs
+
+
+_engine_kwargs: dict = _make_engine_kwargs(_is_sqlite)
 
 engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

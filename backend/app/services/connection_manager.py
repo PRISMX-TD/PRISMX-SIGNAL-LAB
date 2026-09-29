@@ -10,7 +10,7 @@ import time
 import anyio.to_thread
 from fastapi import WebSocket
 
-from app.services import shared_state
+from app.services import quotes_store, shared_state
 
 logger = logging.getLogger("prismx.ws")
 
@@ -29,6 +29,7 @@ WS_CHANNEL = "ws"
 PRESENCE_KEY = "ws:users"
 PRESENCE_TTL_SECONDS = 90
 PRESENCE_REFRESH_SECONDS = 30
+PRESENCE_REFRESH_SECONDS_RENEW = PRESENCE_REFRESH_SECONDS
 
 # 单个 socket 的发送超时（秒）。TCP 背压下 send_json 可以长时间不返回：对端还活着
 # 但读得极慢（手机切后台、弱网），内核发送缓冲区一满就卡在那里。持仓每 1.5 秒一拍、
@@ -41,6 +42,33 @@ PRESENCE_REFRESH_SECONDS = 30
 # batch. On timeout we drop it as dead; the frontend reconnects and gets a full
 # snapshot on the next tick anyway.
 SEND_TIMEOUT_SECONDS = 2
+
+# 每条连接自己的发件队列深度。持仓帧可达几十 KB，一条卡住的连接囤的帧越多内存越大，
+# 所以取得浅：队列满就说明这条连接已经落后十几拍（持仓 1.5~2 秒一拍），按死连接摘掉并
+# 关闭，让前端重连拿一份完整快照——比继续攒着强。真正的「卡住」通常在队列满之前就被写协程
+# 里的 SEND_TIMEOUT_SECONDS 超时判死。
+# Depth of each connection's own outbox. Positions frames can reach tens of KB, so a stuck
+# connection must not hoard many: a full queue means it is a dozen ticks behind, and it is
+# dropped (and closed) so the frontend reconnects to a full snapshot. A truly stuck socket
+# usually hits the writer's SEND_TIMEOUT_SECONDS before the queue ever fills.
+OUTBOX_MAXSIZE = 12
+
+# 远端在线名单（别的 worker 上有谁连着）的刷新间隔，以及「多久没刷新成功就不敢信」。
+# 名单只用来做一件事：判断一条推送**可能**有别的 worker 上的接收者，从而决定要不要走 Redis
+# 转发。读不到 / 太旧 = 不知道 = 照常转发（宁多勿少）。
+# How often the remote roster (who is connected on *other* workers) is refreshed, and how old
+# it may get before it is distrusted. It decides one thing only: whether a push may have a
+# receiver on another worker and so must go through Redis. Unreadable or too old means
+# "unknown", which means publish as usual (better too many than too few).
+PRESENCE_VIEW_REFRESH_SECONDS = 2
+PRESENCE_VIEW_MAX_AGE_SECONDS = 10
+
+# 订阅断线后的重连节奏：第一次立刻重连，连续失败才退避，成功一次归零。
+# Fan-out subscriber reconnect pacing: immediately the first time, backing off only on
+# consecutive failures, reset by one success.
+FANOUT_RECONNECT_BACKOFF_SECONDS = (0.0, 0.2, 0.5, 1.0, 3.0)
+# 重订阅后补推本进程用户快照时的并发上限。/ Concurrency cap for the post-resubscribe catch-up.
+RESYNC_CONCURRENCY = 16
 
 # 多 worker 下的持仓 / 挂单 / 分账户报价共享（配了 REDIS_URL 才启用）。
 #
@@ -102,6 +130,69 @@ def _merge_sources(by_source: dict[str, list]) -> list:
 
 def _quote_changed(old: dict | None, q: dict) -> bool:
     return old is None or any(old.get(k) != q.get(k) for k in _QUOTE_WATCHED)
+
+
+def _decode_rows(raw) -> list | None:
+    """Redis 里的一份快照（JSON 文本）→ 行列表；缺失 / 坏数据 / 不是列表都返回 None。
+    A stored snapshot (JSON text) -> rows; None when missing, corrupt or not a list."""
+    if raw is None:
+        return None
+    try:
+        rows = json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+    return rows if isinstance(rows, list) else None
+
+
+def _decode_account_quotes(raw_map) -> list:
+    """按账户报价的 hash（field -> JSON）→ 报价列表，坏值跳过。
+    The per-account quotes hash (field -> JSON) -> quote list, bad values skipped."""
+    out: list = []
+    for v in (raw_map or {}).values():
+        try:
+            q = json.loads(v)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(q, dict):
+            out.append(q)
+    return out
+
+
+def _decode_global_quotes(order_raw, raw_map) -> list:
+    """全站报价（顺序表 + hash）→ 按首次出现顺序的列表；与 quotes_store._all_redis 同口径。
+    Site-wide quotes (order list + hash) in first-seen order; same rules as
+    quotes_store._all_redis."""
+    quotes: dict[str, dict] = {}
+    for sym, v in (raw_map or {}).items():
+        try:
+            quotes[sym] = json.loads(v)
+        except (ValueError, TypeError):
+            continue
+    order = list(dict.fromkeys(order_raw or []))
+    seen = set(order)
+    order += [s for s in quotes if s not in seen]
+    return [quotes[s] for s in order if s in quotes]
+
+
+def _presence_user(member: str) -> tuple[str | None, str]:
+    """在线名单成员 -> (所属 worker, user_id)。老格式（裸 user_id，滚动发布期间旧 worker 写的）
+    返回 (None, member)。
+    A roster member -> (owning worker, user_id). The legacy bare-user-id shape, written by old
+    workers during a rolling deploy, gives (None, member)."""
+    worker, sep, user = member.partition("|")
+    if not sep:
+        return None, member
+    return worker, user
+
+
+class _Outbox:
+    """一条连接自己的发件队列与常驻写协程。/ One connection's outbox and its writer task."""
+
+    __slots__ = ("queue", "task")
+
+    def __init__(self, queue: "asyncio.Queue[str]", task: "asyncio.Task") -> None:
+        self.queue = queue
+        self.task = task
 
 
 async def _offload(fn, *args):
@@ -202,6 +293,7 @@ def _start_async_redis() -> bool:
     try:
         import redis
         import redis.asyncio as aioredis
+        from redis.exceptions import ConnectionError as RedisConnectionError
 
         injected = shared_state._redis_client
         if injected is not None and not isinstance(injected, redis.Redis):
@@ -215,6 +307,11 @@ def _start_async_redis() -> bool:
             timeout=ASYNC_REDIS_TIMEOUT_SECONDS,
             socket_timeout=ASYNC_REDIS_TIMEOUT_SECONDS,
             socket_connect_timeout=ASYNC_REDIS_TIMEOUT_SECONDS,
+            # 只对 ConnectionError 重试 1 次（Redis 重启 / 连接被掐的那一瞬间），不对超时重试。
+            # One retry on ConnectionError only (a restart / a cut connection), never on timeouts.
+            retry=shared_state.redis_retry(1, async_client=True),
+            retry_on_error=[RedisConnectionError],
+            health_check_interval=shared_state.REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
         )
         _install_async_redis(aioredis.Redis.from_pool(pool))
         return True
@@ -316,8 +413,17 @@ def _peek_envelope(raw: str):
     return user, users, raw[start:-1]
 
 
+_QUOTE_FRAME_PREFIXES = ('{"type":"QUOTES"', '{"type":"GLOBAL_QUOTES"')
+
+
 class ConnectionManager:
     def __init__(self) -> None:
+        # 前端在后台时（PING 带 bg:true）标记的连接：只存本进程内存，不碰 Redis；
+        # 全站/按账户报价帧对它们跳过，其余帧照发。空集合时投递路径零额外开销。
+        # Connections whose page is in the background (PING carries bg:true):
+        # in-process only, no Redis. Quote frames skip them, everything else is
+        # delivered. An empty set costs the delivery path nothing.
+        self._background: set[WebSocket] = set()
         # user_id -> 前端连接集合 / set of client connections per user
         self._clients: dict[str, set[WebSocket]] = {}
         # user_id -> source -> 最近一次持仓快照。
@@ -356,6 +462,28 @@ class ConnectionManager:
         # Same for PENDING_ORDERS. Pending orders sit unchanged for long stretches,
         # so this skips even more repeat frames than the positions one.
         self._last_pending_push: dict[str, bytes] = {}
+        # user_id -> {(kind, source): 上次写进 Redis 的那份快照的摘要}。内容没变就不再 SET，只续期。
+        # user_id -> {(kind, source): digest of the slice last written to Redis}; unchanged
+        # content is refreshed with EXPIRE instead of rewritten.
+        self._mirrored: dict[str, dict[tuple[str, str], bytes]] = {}
+        # websocket -> 发件队列 / websocket -> its outbox
+        self._outboxes: dict[WebSocket, _Outbox] = {}
+        # 死连接收尾（关 socket）的后台任务，持有引用防止被 GC。
+        # Background tasks that close dropped sockets; held so they aren't garbage collected.
+        self._reap_tasks: set[asyncio.Task] = set()
+        # 在线名单里的身份。默认是本进程的 WORKER_ID；同进程模拟多个 worker 的测试可以覆盖。
+        # Identity in the presence roster; tests that simulate several workers in one process
+        # may override it.
+        self._worker_id: str = shared_state.WORKER_ID
+        # 「连在**别的** worker 上的用户」视图，由 refresh_presence_loop 每 2 秒刷新。
+        # None = 还没读到过。见 _route。
+        # Users connected on *other* workers, refreshed every 2s by refresh_presence_loop. None
+        # until first read. See _route.
+        self._remote_users: set[str] = set()
+        self._remote_at: float | None = None
+        # 最近一次成功读到的全站报价，Redis 抖动时建连补推退回这一份。
+        # The last site-wide quotes read successfully; connect catch-up falls back to it.
+        self._last_global_quotes: list = []
         self._lock = asyncio.Lock()
 
     # ---------- 持仓 / 挂单快照 / Positions & pending-orders snapshots ----------
@@ -403,24 +531,98 @@ class ConnectionManager:
             shared.setdefault(source, rows)
         return shared
 
-    def _mirror_and_merge(self, kind: str, user_id: str, source: str, rows: list) -> list:
-        """把本来源的快照写进 Redis，再按全部来源合并返回（**同步**，放线程里跑）。
-        Write this source's slice to Redis, then merge every source (sync)."""
-        try:
-            shared_state.kv_set_json(_snapshot_key(kind, user_id, source), rows, SNAPSHOT_TTL_SECONDS)
-        except Exception as e:
-            logger.warning("写共享快照失败 / shared %s write failed: %s", kind, e)
-        by_source = self._shared_by_source(kind, user_id, skip=source)
-        by_source[source] = rows
-        return _merge_sources(by_source)
+    def _mirror_pipeline_sync(
+        self, kind: str, user_id: str, source: str, own_text: str, unchanged: bool
+    ) -> list:
+        """同步版：一个 pipeline 完成「写（或续期）本来源的键 + 读其它来源的键」，返回结果列表；
+        续期返回 0（键在 Redis 里已经没了：重启 / 驱逐）时补一次 SET。放线程里跑。
+        Sync flavour: one pipeline writes (or refreshes) this source's key and reads the others,
+        returning the results; when EXPIRE reports 0 (the key is gone from Redis — restart or
+        eviction) a SET follows. Run it on a thread."""
+        r = shared_state._redis()
+        own_key = shared_state._k(_snapshot_key(kind, user_id, source))
+        pipe = r.pipeline(transaction=False)
+        if unchanged:
+            pipe.expire(own_key, SNAPSHOT_TTL_SECONDS)
+        else:
+            pipe.set(own_key, own_text, ex=SNAPSHOT_TTL_SECONDS)
+        for other in SNAPSHOT_SOURCES:
+            if other != source:
+                pipe.get(shared_state._k(_snapshot_key(kind, user_id, other)))
+        results = pipe.execute()
+        if unchanged and not results[0]:
+            r.set(own_key, own_text, ex=SNAPSHOT_TTL_SECONDS)
+        return results
+
+    async def _mirror_pipeline_async(
+        self, client, kind: str, user_id: str, source: str, own_text: str, unchanged: bool
+    ) -> list:
+        """异步版：同上，直接在事件循环上 await，不占线程。
+        Async flavour: same, awaited on the loop with no thread."""
+        own_key = shared_state._k(_snapshot_key(kind, user_id, source))
+        pipe = client.pipeline(transaction=False)
+        if unchanged:
+            pipe.expire(own_key, SNAPSHOT_TTL_SECONDS)
+        else:
+            pipe.set(own_key, own_text, ex=SNAPSHOT_TTL_SECONDS)
+        for other in SNAPSHOT_SOURCES:
+            if other != source:
+                pipe.get(shared_state._k(_snapshot_key(kind, user_id, other)))
+        results = await pipe.execute()
+        if unchanged and not results[0]:
+            await client.set(own_key, own_text, ex=SNAPSHOT_TTL_SECONDS)
+        return results
 
     async def _store_and_merge(self, kind: str, user_id: str, source: str, rows: list) -> list:
         """记下本来源的最新快照，返回全部来源合并后的完整列表。
-        Record this source's latest slice and return the full merged list."""
-        self._local(kind).setdefault(user_id, {})[source] = rows
+
+        配了 Redis 时：本来源的 rows 只序列化一遍；内容与上次写进 Redis 的相同就**不再 SET**，
+        改成每拍把「EXPIRE 本来源的键」和「GET 其它来源的键」放进同一个 pipeline（仍是 1 次往返），
+        EXPIRE 返回 0（键已经不在了）再补一次 SET——既省掉休市 / 无持仓时的整份写，又不会因为
+        Redis 重启 / 驱逐把键丢了而让别的 worker（一键平仓走共享读）读到空。有异步客户端时直接
+        在事件循环上 await，否则一次线程往返。任何 Redis 错误整体退回本进程的快照。
+
+        Record this source's latest slice and return the full merged list. With Redis the rows
+        are serialized once, and content identical to what was last written is not SET again:
+        each tick pipelines EXPIRE on this source's key with GET on the others (still one
+        round-trip), with a SET only when EXPIRE says the key is gone — saving the full write
+        while the market is closed without letting a Redis restart or eviction leave other
+        workers (close-all reads the shared copy) staring at nothing. Any Redis error falls back
+        to this process's snapshots as a whole.
+        """
+        local = self._local(kind)
+        local.setdefault(user_id, {})[source] = rows
         if not shared_state.enabled():
-            return _merge_sources(self._local(kind)[user_id])
-        return await _offload(self._mirror_and_merge, kind, user_id, source, rows)
+            return _merge_sources(local[user_id])
+        own_text = json.dumps(rows, ensure_ascii=False, default=str)
+        digest = hashlib.blake2b(own_text.encode(), digest_size=16).digest()
+        mirrored = self._mirrored.setdefault(user_id, {})
+        unchanged = mirrored.get((kind, source)) == digest
+        try:
+            client = _async_redis()
+            if client is not None:
+                results = await self._mirror_pipeline_async(client, kind, user_id, source, own_text, unchanged)
+            else:
+                results = await _offload(self._mirror_pipeline_sync, kind, user_id, source, own_text, unchanged)
+        except Exception as e:
+            logger.warning("写/读共享快照失败，退回本进程快照 / shared %s mirror failed, using local: %s", kind, e)
+            mirrored.pop((kind, source), None)
+            return _merge_sources(local[user_id])
+        mirrored[(kind, source)] = digest
+        # 与 _shared_by_source 同一套规则：其它来源以 Redis 为准，Redis 没有的用本进程那份补，
+        # 最后本来源覆盖成刚收到的 rows。
+        # Same rules as _shared_by_source: other sources from Redis, gaps from the local copy,
+        # and this source last, as just received.
+        by_source: dict[str, list] = {}
+        others = [o for o in SNAPSHOT_SOURCES if o != source]
+        for other, raw in zip(others, results[1:]):
+            decoded = _decode_rows(raw)
+            if decoded is not None:
+                by_source[other] = decoded
+        for src, src_rows in dict(local.get(user_id) or {}).items():
+            by_source.setdefault(src, src_rows)
+        by_source[source] = rows
+        return _merge_sources(by_source)
 
     def get_positions_shared(self, user_id: str) -> list:
         """全部 worker 视角下该用户的最新持仓（**同步**，同步端点里直接调）。
@@ -613,10 +815,165 @@ class ConnectionManager:
             return self.get_quotes(user_id)
         return await _offload(self.get_quotes, user_id)
 
+    # ---------- 建连补推快照 / Connect catch-up snapshot ----------
+    def _snapshot_keys(self, user_id: str) -> list[str]:
+        """建连补推要读的键，顺序固定：持仓×来源、挂单×来源、分账户报价、全站报价三件套。
+        Keys read for the connect catch-up, in a fixed order: positions per source, pending per
+        source, per-account quotes, then the three site-wide quote structures."""
+        keys = [shared_state._k(_snapshot_key(kind, user_id, src))
+                for kind in ("positions", "pending") for src in SNAPSHOT_SOURCES]
+        keys.append(shared_state._k(QUOTES_KEY.format(user=user_id)))
+        return keys
+
+    def _snapshot_pipeline_sync(self, user_id: str) -> list:
+        r = shared_state._redis()
+        n = len(SNAPSHOT_SOURCES)
+        keys = self._snapshot_keys(user_id)
+        pipe = r.pipeline(transaction=False)
+        for key in keys[: 2 * n]:
+            pipe.get(key)
+        pipe.hgetall(keys[2 * n])
+        pipe.lrange(shared_state._k(quotes_store._KEY_ORDER), 0, -1)
+        pipe.hgetall(shared_state._k(quotes_store._KEY_QUOTES))
+        return pipe.execute()
+
+    async def _snapshot_pipeline_async(self, client, user_id: str) -> list:
+        n = len(SNAPSHOT_SOURCES)
+        keys = self._snapshot_keys(user_id)
+        pipe = client.pipeline(transaction=False)
+        for key in keys[: 2 * n]:
+            pipe.get(key)
+        pipe.hgetall(keys[2 * n])
+        pipe.lrange(shared_state._k(quotes_store._KEY_ORDER), 0, -1)
+        pipe.hgetall(shared_state._k(quotes_store._KEY_QUOTES))
+        return await pipe.execute()
+
+    def _local_snapshot(self, user_id: str) -> dict:
+        """本进程手里的那一份（没配 Redis，或 Redis 读失败时用）。
+        What this process holds (no Redis, or the Redis read failed)."""
+        return {
+            "positions": self.get_positions(user_id),
+            "pending": self.get_pending_orders(user_id),
+            "quotes": self.get_quotes(user_id) if not shared_state.enabled() else self._local_account_quotes(user_id),
+            "global_quotes": (
+                quotes_store.get_all() if not shared_state.enabled() else list(self._last_global_quotes)
+            ),
+        }
+
+    def _local_account_quotes(self, user_id: str) -> list:
+        out: list = []
+        for by_symbol in self._quotes.get(user_id, {}).values():
+            out.extend(by_symbol.values())
+        return out
+
+    async def connect_snapshot_async(self, user_id: str) -> dict:
+        """WS 建连补推要的全部数据，一次取齐：持仓、挂单、分账户报价、全站报价。
+
+        以前是 4 次线程跳转 + 约 10 次串行 Redis 往返（持仓 2 GET、挂单 2 GET、HGETALL、
+        全站报价 pipeline）；现在是**一个 pipeline、一次往返**：有 redis.asyncio 客户端时直接在
+        事件循环上 await，没有就一次线程往返。解析规则与各自的单独读取一致：持仓 / 挂单按来源
+        以 Redis 为准、Redis 里缺的来源用本进程那份补（`_shared_by_source` 的语义）。
+
+        **不抛异常**：Redis 出错时整体退回本进程的快照，全站报价退回上一份成功读到的——Redis 抖
+        一下不该让刚建好的连接立刻被异常关掉、再 300ms 后重连、再抖一次。
+
+        返回 {"positions", "pending", "quotes", "global_quotes"}，都是列表。
+        Everything the WS connect catch-up needs in one go, in a single pipeline / round-trip
+        (the async client awaits on the loop, otherwise one thread hop). Parsing follows the
+        individual reads: per-source snapshots prefer Redis with local gaps filled. Never raises:
+        a Redis error falls back to this process's snapshots, and the site-wide quotes to the
+        last good read, so a blip doesn't close a fresh connection only for it to reconnect into
+        the next blip. Returns {"positions", "pending", "quotes", "global_quotes"} as lists.
+        """
+        if not shared_state.enabled():
+            return self._local_snapshot(user_id)
+        try:
+            client = _async_redis()
+            if client is not None:
+                results = await self._snapshot_pipeline_async(client, user_id)
+            else:
+                results = await _offload(self._snapshot_pipeline_sync, user_id)
+            n = len(SNAPSHOT_SOURCES)
+            out: dict[str, list] = {}
+            for idx, (kind, name) in enumerate((("positions", "positions"), ("pending", "pending"))):
+                by_source: dict[str, list] = {}
+                for j, src in enumerate(SNAPSHOT_SOURCES):
+                    decoded = _decode_rows(results[idx * n + j])
+                    if decoded is not None:
+                        by_source[src] = decoded
+                for src, rows in dict(self._local(kind).get(user_id) or {}).items():
+                    by_source.setdefault(src, rows)
+                out[name] = _merge_sources(by_source)
+            out["quotes"] = _decode_account_quotes(results[2 * n])
+            out["global_quotes"] = _decode_global_quotes(results[2 * n + 1], results[2 * n + 2])
+            self._last_global_quotes = out["global_quotes"]
+            return out
+        except Exception as e:  # noqa: BLE001
+            logger.warning("建连补推读取失败，退回本进程快照 / connect snapshot read failed, using local: %s", e)
+            return self._local_snapshot(user_id)
+
     # ---------- 前端连接 / Client connections ----------
+    # ---------- 发件队列 / Per-connection outbox ----------
+    def _outbox_for(self, ws: WebSocket, user_id: str) -> _Outbox:
+        """这条连接的发件队列；没有（或写协程已随事件循环一起结束）就新建。
+        This connection's outbox; created if absent (or if its writer ended with a dead loop)."""
+        box = self._outboxes.get(ws)
+        if box is None or box.task.done():
+            queue: asyncio.Queue[str] = asyncio.Queue(maxsize=OUTBOX_MAXSIZE)
+            task = asyncio.create_task(self._writer(user_id, ws, queue), name="ws:writer")
+            box = self._outboxes[ws] = _Outbox(queue, task)
+        return box
+
+    async def _writer(self, user_id: str, ws: WebSocket, queue: "asyncio.Queue[str]") -> None:
+        """一条连接的常驻写协程：按顺序把队列里的帧发出去，每一帧带发送超时。
+
+        发送失败或超时就是死连接：摘掉并关闭它，写协程随之退出。慢连接只拖住它自己这一条队列，
+        订阅循环与同批的其它连接不再等它（以前是 gather 等满 SEND_TIMEOUT_SECONDS）。
+        One writer per connection: sends queued frames in order, each with a send timeout. A
+        failure or timeout means a dead connection: drop and close it, and the writer exits. A
+        slow connection now only stalls its own queue; the subscriber loop and the rest of the
+        batch no longer wait on it (they used to sit out SEND_TIMEOUT_SECONDS in a gather).
+        """
+        while True:
+            text = await queue.get()
+            try:
+                await asyncio.wait_for(ws.send_text(text), SEND_TIMEOUT_SECONDS)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 —— 超时与报错一样按死连接处理 / a timeout is a dead peer too
+                await self._drop_dead(user_id, ws)
+                return
+
+    async def _drop_dead(self, user_id: str, ws: WebSocket) -> None:
+        """把死连接摘出名单，并在后台关掉它，让前端重连、拿一份完整快照。
+
+        只摘不关的话，这条连接的读循环还活着、心跳照常回 PONG，客户端以为一切正常，却再也收不到
+        推送——一条僵尸。关闭放进独立任务并限时：对一个发送缓冲区已满的 socket，close 帧同样可能
+        发不出去，不能让它拖住调用方。
+        Drop the dead connection from the roster and close it in the background so the frontend
+        reconnects to a full snapshot. Dropping alone would leave its read loop alive answering
+        PONGs, a zombie that never receives another push. The close runs as its own bounded task:
+        on a socket whose send buffer is full even the close frame can hang.
+        """
+        await self.unregister_client(user_id, ws)
+        close = getattr(ws, "close", None)
+        if close is None:
+            return
+
+        async def _close() -> None:
+            try:
+                await asyncio.wait_for(close(code=1013), 1.0)
+            except Exception:  # noqa: BLE001 —— 已经死了，关不掉也无所谓 / already dead
+                pass
+
+        task = asyncio.create_task(_close(), name="ws:reap")
+        self._reap_tasks.add(task)
+        task.add_done_callback(self._reap_tasks.discard)
+
     async def register_client(self, user_id: str, ws: WebSocket) -> None:
         async with self._lock:
             self._clients.setdefault(user_id, set()).add(ws)
+            self._outbox_for(ws, user_id)
             # 让持仓去重失效：新连接（多开一个标签页也算）还没收到过任何快照，
             # 若沿用旧摘要，内容不变时下一拍会被跳过，新页面就只能干等到持仓
             # 真的发生变化。
@@ -632,13 +989,27 @@ class ConnectionManager:
         # otherwise stall the whole process for up to one socket timeout.
         await self._mark_present_async(user_id)
 
+    def set_background(self, ws: WebSocket, background: bool) -> None:
+        """标记/取消某连接的后台状态 / mark or clear a connection's background flag."""
+        if background:
+            self._background.add(ws)
+        else:
+            self._background.discard(ws)
+
     async def unregister_client(self, user_id: str, ws: WebSocket) -> None:
+        self._background.discard(ws)
+        last_gone = False
+        box = self._outboxes.pop(ws, None)
+        if box is not None and box.task is not asyncio.current_task():
+            box.task.cancel()
         async with self._lock:
             conns = self._clients.get(user_id)
             if conns:
                 conns.discard(ws)
                 if not conns:
+                    last_gone = True
                     self._clients.pop(user_id, None)
+                    self._mirrored.pop(user_id, None)
                     # 人都走了，这几张按 user_id 存的缓存留着只会占内存：进程不重启
                     # 就永远保着"曾经连过的每个用户 × 他当时的持仓/报价条数"。
                     # 重连后下一拍（1.5 秒内）会重新填上，丢掉没有代价。
@@ -651,14 +1022,63 @@ class ConnectionManager:
                     self._positions.pop(user_id, None)
                     self._pending_orders.pop(user_id, None)
                     self._quotes.pop(user_id, None)
+        # 最后一条连接走了：立刻把「本 worker|该用户」从在线名单摘掉（放锁外、失败只记日志），
+        # 名单即时准确——以前要等上一次续期起 60~90 秒才掉，网关循环这期间继续为已经走掉的人去券商
+        # 拉持仓。
+        # The last connection left: drop "this worker|user" from the roster at once (outside the
+        # lock; a failure only logs). It used to linger 60-90s, during which the gateway loop kept
+        # pulling positions from the broker for someone who had already gone.
+        if last_gone:
+            await self._unmark_present_async(user_id)
+
+    # ---------- 路由：本地直投还是走 Redis 转发 / routing: local delivery or Redis fan-out ----------
+    def _presence_fresh(self) -> bool:
+        return self._remote_at is not None and time.monotonic() - self._remote_at <= PRESENCE_VIEW_MAX_AGE_SECONDS
+
+    def _route(self, targets: list[str] | None) -> str:
+        """这条推送要不要经 Redis 转发：'publish' 或 'local'。
+
+        只有「确定**没有**任何目标连在别的 worker 上」才走 'local'（本进程直投，本进程也没有目标就
+        什么都不发生）：远端名单是每 2 秒刷新的、且没过期，并且里面没有这批目标。名单还没读到过、
+        已经 10 秒没刷新成功（Redis 抖动）、或没配 Redis 以外的任何不确定，一律 'publish'——宁多勿少。
+        这样「桥接 24 小时挂着、网页没人开」的用户，每秒 ~2 次 PUBLISH 不再进 Redis；单 worker 却配了
+        REDIS_URL 的部署零绕路。代价：某用户 2 秒内刚在另一个 worker 上开了第二页，这 2 秒内的
+        一次性事件推送（ORDER_UPDATE 之类）到不了那一页——新页面建连时已从 Redis 补推了持仓 / 挂单 /
+        报价，POSITIONS 下一拍（≤2 秒）也会再来，下单响应本身也带着结果。
+
+        Should this push go through Redis: 'publish' or 'local'. 'local' only when it is certain that
+        no target is connected on another worker: the remote roster is refreshed every 2s, isn't
+        stale, and lacks every target. Never read yet, older than 10s (a Redis blip), anything
+        uncertain: 'publish' — better too many than too few. Users whose bridge runs 24/7 with no
+        page open no longer cost ~2 PUBLISHes a second; a single worker with REDIS_URL set pays no
+        detour at all. The price: a one-off event (ORDER_UPDATE...) in the ~2s after the same user
+        opens a second page on another worker misses that page, which already got positions /
+        pending / quotes on connect and gets the next POSITIONS tick within 2s.
+        """
+        if not shared_state.enabled():
+            return "local"
+        if not self._presence_fresh():
+            return "publish"
+        remote = self._remote_users
+        if targets is None:
+            return "publish" if remote else "local"
+        return "publish" if any(t in remote for t in targets) else "local"
 
     async def push_to_client(self, user_id: str, message: dict) -> None:
         """向指定用户的所有前端连接推送。多 worker 时改为发布到 Redis，由各 worker
         的订阅协程投递到自己的 socket（含本进程）；单 worker 直接本地投递。
         Push to all of a user's connections: publish across workers with Redis,
         deliver locally otherwise."""
-        text = _dumps(message)
+        await self.push_text_to_client(user_id, _dumps(message))
+
+    async def push_text_to_client(self, user_id: str, text: str) -> None:
+        """同 push_to_client，但入参已经是序列化好的帧文本（持仓 / 挂单推送只序列化一遍）。
+        Same as push_to_client, taking already-serialized frame text (positions / pending
+        pushes serialize exactly once)."""
         if shared_state.enabled():
+            if self._route([str(user_id)]) == "local":
+                await self._deliver_local_text(user_id, text)
+                return
             try:
                 await self._publish(_envelope(str(user_id), text))
                 return
@@ -685,6 +1105,9 @@ class ConnectionManager:
             return
         text = _dumps(message)
         if shared_state.enabled():
+            if self._route(targets) == "local":
+                await self._deliver_many_local(targets, text)
+                return
             try:
                 await self._publish(_envelope(_MULTI_TARGET, text, users=targets))
                 return
@@ -752,18 +1175,31 @@ class ConnectionManager:
         conns = list(self._clients.get(user_id, set()))
         if not conns:
             return
-        results = await asyncio.gather(
-            *(asyncio.wait_for(ws.send_text(text), SEND_TIMEOUT_SECONDS) for ws in conns),
-            return_exceptions=True,
-        )
-        dead = [ws for ws, outcome in zip(conns, results) if isinstance(outcome, BaseException)]
+        bg = self._background
+        if bg and text.startswith(_QUOTE_FRAME_PREFIXES):
+            conns = [ws for ws in conns if ws not in bg]
+            if not conns:
+                return
+        dead: list[WebSocket] = []
+        for ws in conns:
+            try:
+                self._outbox_for(ws, user_id).queue.put_nowait(text)
+            except asyncio.QueueFull:
+                dead.append(ws)
         for ws in dead:
-            # 复用 unregister_client 而不是直接改集合，保证"最后一个连接走了就删掉
-            # user_id 这一项"的清理逻辑只有一份。
-            # Reuse unregister_client instead of touching the set directly, so the
-            # "drop the user_id entry once the last connection is gone" logic
-            # lives in exactly one place.
-            await self.unregister_client(user_id, ws)
+            # 队列满 = 这条连接已经落后十几帧：判死清理（复用 unregister_client，保证
+            # 「最后一个连接走了就删掉 user_id 这一项」的清理逻辑只有一份）。
+            # A full queue means this connection is a dozen frames behind: drop it (via
+            # unregister_client, so the "last connection gone -> clean the user entry" logic
+            # lives in exactly one place).
+            await self._drop_dead(user_id, ws)
+        # 让空闲的写协程当场发完：正常连接的一次 send 不需要真正挂起，让出一两拍事件循环，
+        # 帧就已经发出去了（也让发送失败的连接在本次调用内被摘掉）；卡住的连接不会被等。
+        # Let idle writers finish on the spot: a healthy send needs no real suspension, so a
+        # yield or two gets the frame out (and lets a failing connection be dropped within this
+        # call); a stuck connection is not waited for.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
 
     async def push_positions(
         self, user_id: str, positions: list, source: str = "bridge"
@@ -793,19 +1229,24 @@ class ConnectionManager:
             "data": merged,
             "funds": self.account_funds_from_positions(merged),
         }
-        # sort_keys 让相同内容必定得到相同字节，不受 dict 插入顺序影响。
-        # sort_keys makes identical content produce identical bytes regardless of
-        # dict insertion order.
+        # 只序列化一遍：这段文本既是去重摘要的输入，也是要发出去的帧本身（以前先 sort_keys 序列化
+        # 做摘要、真要推时再序列化一遍，几十 KB 的快照白做一次）。不带 sort_keys：键序取决于合并顺序，
+        # 本地行与 Redis 回读行的键序一致（都是 JSON 原序），最坏只是多推一帧，不会漏推。
+        # Serialized exactly once: this text is both the input to the dedup digest and the frame
+        # itself (it used to be dumped with sort_keys for the digest and again when actually
+        # pushing — a wasted pass over a snapshot of tens of KB). No sort_keys: key order follows
+        # the merge order, and local rows and rows read back from Redis share JSON order, so the
+        # worst case is one extra frame, never a missed one.
         # 存 16 字节摘要而不是整份 JSON：持仓多的用户一份快照可达几十 KB，
         # 每个在线用户都留一份原文没必要。
         # Store a 16-byte digest instead of the full JSON: a snapshot can reach
         # tens of KB for users with many positions.
-        payload = json.dumps(message, sort_keys=True, default=str)
-        digest = hashlib.blake2b(payload.encode(), digest_size=16).digest()
+        text = _dumps(message)
+        digest = hashlib.blake2b(text.encode(), digest_size=16).digest()
         if self._last_positions_push.get(user_id) == digest:
             return
         self._last_positions_push[user_id] = digest
-        await self.push_to_client(user_id, message)
+        await self.push_text_to_client(user_id, text)
 
     async def push_pending_orders(
         self, user_id: str, orders: list, source: str = "bridge"
@@ -821,18 +1262,20 @@ class ConnectionManager:
         make the other channel's orders vanish and reappear on the frontend.
         """
         merged = await self._store_and_merge("pending", user_id, source, orders or [])
-        message = {"type": "PENDING_ORDERS", "data": merged}
-        payload = json.dumps(message, sort_keys=True, default=str)
-        digest = hashlib.blake2b(payload.encode(), digest_size=16).digest()
+        text = _dumps({"type": "PENDING_ORDERS", "data": merged})
+        digest = hashlib.blake2b(text.encode(), digest_size=16).digest()
         if self._last_pending_push.get(user_id) == digest:
             return
         self._last_pending_push[user_id] = digest
-        await self.push_to_client(user_id, message)
+        await self.push_text_to_client(user_id, text)
 
     async def broadcast_to_clients(self, message: dict) -> None:
         """向所有在线前端广播（如新信号）/ broadcast to all clients (e.g. new signals)."""
         text = _dumps(message)
         if shared_state.enabled():
+            if self._route(None) == "local":
+                await self._broadcast_local_text(text)
+                return
             try:
                 await self._publish(_envelope(None, text))
                 return
@@ -897,18 +1340,58 @@ class ConnectionManager:
         # With the async client, read on the loop itself — the same two steps as
         # shared_state.set_members, in one pipelined round-trip.
         local = list(self._clients.keys())
+        members = await self._read_roster_async(client)
+        if members is None:
+            logger.warning("在线名单读取失败，只用本进程的 / presence read failed, using local only")
+            return local
+        return self._merge_roster(local, members)
+
+    async def _read_roster_async(self, client) -> list[str] | None:
+        """异步客户端读一次在线名单成员（原样，未解析）；失败返回 None。读到的同时刷新远端视图。
+        Read the roster members once with the async client (raw); None on failure. Also refreshes
+        the remote view."""
         try:
             key = shared_state._k(PRESENCE_KEY)
             now = time.time()
             pipe = client.pipeline(transaction=False)
             pipe.zremrangebyscore(key, "-inf", now)
             pipe.zrangebyscore(key, now, "+inf")
-            _removed, remote = await pipe.execute()
-        except Exception as e:
-            logger.warning("在线名单读取失败，只用本进程的 / presence read failed, using local only: %s", e)
-            return local
+            _removed, members = await pipe.execute()
+        except Exception as e:  # noqa: BLE001
+            logger.debug("presence read failed: %s", e)
+            return None
+        members = list(members or [])
+        self._ingest_roster(members)
+        return members
+
+    def _ingest_roster(self, members: list[str]) -> None:
+        """用刚读到的名单成员刷新「连在别的 worker 上的用户」视图。成员形如 `worker|user`，别人的
+        worker 前缀才算远端；老格式（裸 user_id）也算远端。读取失败时**不**调用本方法——视图保持上一份
+        （清空会误判成「本地独有」而漏投），只是 _remote_at 不再更新，超过 10 秒就不再被信任。
+        Refresh the "users on other workers" view from freshly read roster members. Members look
+        like `worker|user`; only another worker's prefix counts as remote, and so does the legacy
+        bare user id. A failed read never calls this — the view stays as it was (clearing it would
+        read as "local only" and drop pushes), only _remote_at stops advancing so the view is
+        distrusted after 10 seconds."""
+        remote: set[str] = set()
+        for member in members:
+            worker, user = _presence_user(member)
+            if worker != self._worker_id:
+                remote.add(user)
+        self._remote_users = remote
+        self._remote_at = time.monotonic()
+
+    @staticmethod
+    def _merge_roster(local: list[str], members: list[str]) -> list[str]:
+        """本进程的用户 + 名单里其它人（去重，保持顺序）。/ Local users plus everyone else on the roster."""
         seen = set(local)
-        return local + [u for u in remote or [] if u not in seen]
+        out = list(local)
+        for member in members:
+            _worker, user = _presence_user(member)
+            if user not in seen:
+                seen.add(user)
+                out.append(user)
+        return out
 
     def connected_user_ids(self) -> list[str]:
         """当前有前端连接的用户 id 列表（多 worker 时含连在其它 worker 的），供按等级
@@ -924,22 +1407,26 @@ class ConnectionManager:
         if not shared_state.enabled():
             return local
         try:
-            remote = shared_state.set_members(PRESENCE_KEY)
+            members = shared_state.set_members(PRESENCE_KEY)
         except Exception as e:
             logger.warning("在线名单读取失败，只用本进程的 / presence read failed, using local only: %s", e)
             return local
-        seen = set(local)
-        return local + [u for u in remote if u not in seen]
+        self._ingest_roster(members)
+        return self._merge_roster(local, members)
 
     # ---------- 多 worker 的转发与在线名单 / cross-worker fan-out & presence ----------
+    def _presence_member(self, user_id: str) -> str:
+        return f"{self._worker_id}|{user_id}"
+
     def _mark_present(self, *user_ids: str) -> None:
-        """登记若干用户在线。**同步阻塞**，协程里请走 _mark_present_async。
-        Register users as present. Blocking; coroutines use _mark_present_async."""
+        """登记若干用户在线（成员写成 `worker|user`）。**同步阻塞**，协程里请走 _mark_present_async。
+        Register users as present (members are `worker|user`). Blocking; coroutines use
+        _mark_present_async."""
         if not shared_state.enabled():
             return
         for user_id in user_ids:
             try:
-                shared_state.set_add(PRESENCE_KEY, user_id, PRESENCE_TTL_SECONDS)
+                shared_state.set_add(PRESENCE_KEY, self._presence_member(user_id), PRESENCE_TTL_SECONDS)
             except Exception as e:
                 logger.warning("在线名单写入失败 / presence write failed: %s", e)
 
@@ -958,16 +1445,66 @@ class ConnectionManager:
         # Async client: one ZADD for the whole batch, same per-member expiry as set_add.
         try:
             expires = time.time() + PRESENCE_TTL_SECONDS
-            await client.zadd(shared_state._k(PRESENCE_KEY), {u: expires for u in user_ids})
+            await client.zadd(shared_state._k(PRESENCE_KEY), {self._presence_member(u): expires for u in user_ids})
         except Exception as e:
             logger.warning("在线名单写入失败 / presence write failed: %s", e)
 
+    async def _unmark_present_async(self, user_id: str) -> None:
+        """把「本 worker|该用户」从在线名单摘掉（最后一条连接走了）。失败只记日志：成员本来就带
+        90 秒过期，最坏是晚摘一会儿。摘完再看一眼：这一小段里若同一个用户又连上来了，补登一次，
+        免得新连接被这次 ZREM 误摘。
+        Remove "this worker|user" from the roster (its last connection left). A failure only logs —
+        the member expires in 90s anyway. Afterwards, if the same user reconnected in the meantime,
+        re-register, so the fresh connection isn't undone by this ZREM."""
+        if not shared_state.enabled():
+            return
+        member = self._presence_member(user_id)
+        try:
+            client = _async_redis()
+            if client is not None:
+                await client.zrem(shared_state._k(PRESENCE_KEY), member)
+            else:
+                await _offload(shared_state.set_remove, PRESENCE_KEY, member)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("在线名单摘除失败 / presence removal failed: %s", e)
+            return
+        if user_id in self._clients:
+            await self._mark_present_async(user_id)
+
+    async def _refresh_remote_view(self) -> None:
+        """读一次在线名单刷新「别的 worker 上有谁」的视图（1 次往返）。失败保持上一份。
+        Read the roster once to refresh the "who is on other workers" view (one round-trip); a
+        failure keeps the previous view."""
+        client = _async_redis()
+        if client is not None:
+            await self._read_roster_async(client)
+            return
+        try:
+            members = await _offload(shared_state.set_members, PRESENCE_KEY)
+        except Exception as e:  # noqa: BLE001
+            logger.debug("presence view refresh failed: %s", e)
+            return
+        self._ingest_roster(members)
+
     async def refresh_presence_loop(self) -> None:
-        """每 30 秒把本进程连着的用户续一次期（90 秒过期），进程死了名单自然掉。
-        Renew this worker's users every 30s (90s expiry); a dead worker's entries lapse."""
+        """两件事：每 2 秒刷新一次「别的 worker 上有谁」的视图（所有 worker 都做，决定推送要不要经
+        Redis 转发，见 _route）；每 30 秒把本进程连着的用户续一次期（90 秒过期），进程死了名单自然掉。
+        Two jobs: every 2s refresh the "who is on other workers" view (every worker does, deciding
+        whether a push goes through Redis — see _route); every 30s renew this worker's users (90s
+        expiry), so a dead worker's entries lapse."""
+        renew_every = max(1, PRESENCE_REFRESH_SECONDS_RENEW // PRESENCE_VIEW_REFRESH_SECONDS)
+        tick = 0
         while True:
-            await asyncio.sleep(PRESENCE_REFRESH_SECONDS)
-            await self._mark_present_async(*list(self._clients.keys()))
+            try:
+                if tick % renew_every == 0:
+                    await self._mark_present_async(*list(self._clients.keys()))
+                await self._refresh_remote_view()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 —— 循环不能因为一次失败退出 / never let one failure end the loop
+                logger.warning("在线名单刷新失败 / presence refresh failed: %s", e)
+            tick += 1
+            await asyncio.sleep(PRESENCE_VIEW_REFRESH_SECONDS)
 
     async def handle_fanout_message(self, raw: str) -> None:
         """处理一条来自 Redis 频道的转发消息（也供测试直接调用）。
@@ -1012,8 +1549,22 @@ class ConnectionManager:
             await self._deliver_local(str(user_id), message)
 
     async def run_fanout_subscriber(self) -> None:
-        """订阅 Redis 频道并投递到本进程的 socket；断线后 3 秒重连。
-        Subscribe to the channel and deliver locally; reconnect 3s after a drop."""
+        """订阅 Redis 频道并投递到本进程的 socket。
+
+        断线后**立刻**重连（连续失败才 0.2s→0.5s→1s→3s 退避，成功一次归零），而不是固定黑屏 3 秒——
+        pub/sub 发完即忘，断开期间别的 worker 发布的每一条对本 worker 的用户都是永久丢失。重订阅成功后
+        给本进程的用户补推一次持仓 / 挂单快照（去重摘要在发送方进程里，内容不变就不会再发，光等下一拍
+        补不回来）。订阅端连接带建连超时与空闲健康检查（见 shared_state.new_async_pubsub）。
+        Subscribe to the channel and deliver to this process's sockets. Reconnect immediately after a
+        drop (backing off 0.2s -> 0.5s -> 1s -> 3s only on consecutive failures, reset by one
+        success) instead of a fixed 3s blackout: pub/sub is fire-and-forget, so everything other
+        workers publish while we're down is lost for this worker's users for good. After a successful
+        resubscribe, this process's users get a positions / pending catch-up (the dedup digest lives
+        on the sender, so unchanged content is never re-sent and waiting for the next tick wouldn't
+        repair it).
+        """
+        failures = 0
+        resyncs: set[asyncio.Task] = set()
         while True:
             pubsub = client = None
             try:
@@ -1022,15 +1573,29 @@ class ConnectionManager:
                     return
                 pubsub, channel, client = sub
                 await pubsub.subscribe(channel)
+                failures = 0
+                if self._clients:
+                    task = asyncio.create_task(self._resync_local_users(), name="ws:resync")
+                    resyncs.add(task)
+                    task.add_done_callback(resyncs.discard)
                 async for msg in pubsub.listen():
                     if msg.get("type") != "message":
                         continue
                     await self.handle_fanout_message(msg.get("data") or "")
             except asyncio.CancelledError:
+                for task in list(resyncs):
+                    task.cancel()
                 raise
             except Exception as e:
-                logger.warning("WS 转发订阅中断，3 秒后重连 / fan-out subscriber dropped, reconnecting in 3s: %s", e)
-                await asyncio.sleep(3)
+                delay = FANOUT_RECONNECT_BACKOFF_SECONDS[min(failures, len(FANOUT_RECONNECT_BACKOFF_SECONDS) - 1)]
+                failures += 1
+                logger.warning(
+                    "WS 转发订阅中断，%.1f 秒后重连 / fan-out subscriber dropped, reconnecting in %.1fs: %s",
+                    delay, delay, e,
+                )
+                # 第一次立刻重连；sleep(0) 只是让出一拍，避免连续失败时空转独占事件循环。
+                # Immediate the first time; sleep(0) just yields so a failing loop can't hog the loop.
+                await asyncio.sleep(delay)
             finally:
                 # 每一轮都新建了一个客户端（连接池），不关掉的话 Redis 每抖动一次
                 # 就多留一组连接——一段不稳定期下来连接数线性堆高，最后撞上
@@ -1040,6 +1605,38 @@ class ConnectionManager:
                 # linearly through an unstable spell until maxclients is hit. It
                 # has to run on the error path too, hence finally.
                 await self._close_pubsub(pubsub, client)
+
+    async def _resync_local_users(self) -> None:
+        """给本进程当前连着的每个用户补推一份持仓 / 挂单快照（读 Redis 里的共享快照，直接投给本地
+        socket，不再经 Redis 转发）。并发上限 RESYNC_CONCURRENCY；一次性事件，不是常态负担。
+        和建连补推一样，快照为空就不发——免得 Redis 刚重启、键还没重新写满时把前端的表清空。
+        Catch up every locally connected user with a positions / pending snapshot read from Redis and
+        delivered straight to local sockets. Bounded concurrency; a one-off, not a steady load. As on
+        connect, an empty snapshot isn't sent, so a Redis that just restarted can't blank the tables."""
+        users = list(self._clients.keys())
+        if not users:
+            return
+        sem = asyncio.Semaphore(RESYNC_CONCURRENCY)
+
+        async def one(user_id: str) -> None:
+            async with sem:
+                try:
+                    positions = await self.get_positions_shared_async(user_id)
+                    if positions and user_id in self._clients:
+                        await self._deliver_local_text(user_id, _dumps({
+                            "type": "POSITIONS",
+                            "data": positions,
+                            "funds": self.account_funds_from_positions(positions),
+                        }))
+                    pending = await self.get_pending_orders_shared_async(user_id)
+                    if pending and user_id in self._clients:
+                        await self._deliver_local_text(user_id, _dumps({"type": "PENDING_ORDERS", "data": pending}))
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    logger.debug("resync catch-up failed for %s: %s", user_id, e)
+
+        await asyncio.gather(*(one(u) for u in users), return_exceptions=True)
 
     @staticmethod
     async def _close_pubsub(pubsub, client) -> None:

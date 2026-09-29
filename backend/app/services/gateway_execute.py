@@ -11,6 +11,7 @@ routers/orders.py so services (auto-manage) stop importing a router module.
 import logging
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models import MT5Account, Order
 from app.services.gateway_binding import is_revoked
@@ -286,7 +287,33 @@ def call_gateway_idempotent(order: Order, make_call) -> TradeRsp:
     return again
 
 
-def try_gateway_execute(db: Session, order: Order) -> dict | None:
+def _commit_keep_loaded(db: Session, order: Order) -> None:
+    """提交并保持订单字段已加载，省掉紧跟着的 db.refresh 那次 SELECT。
+
+    Order 的列全是 Python 侧默认值（id / created_at / updated_at 的 default、onupdate），
+    flush 之后内存里就是最终值；expire_on_commit 默认会把它们全作废，于是原先要 refresh
+    再读一遍。这里临时关掉作废（与调网关前那次 commit 同一写法）。updated_at 的
+    onupdate 写进内存的是带时区的时间，库里读回来是不带时区的——统一成不带时区，保持
+    推送/响应载荷与原先 refresh 后的形状一致。
+    Commit while keeping the order's fields loaded, saving the refresh SELECT. All Order
+    columns use Python-side defaults so the in-memory values are final after flush; only
+    expire_on_commit would discard them. updated_at is written aware in memory but reads
+    back naive — normalised to naive so payloads keep their previous shape.
+    """
+    prev = db.expire_on_commit
+    db.expire_on_commit = False
+    try:
+        db.commit()
+    finally:
+        db.expire_on_commit = prev
+    ua = order.updated_at
+    if ua is not None and ua.tzinfo is not None:
+        set_committed_value(order, "updated_at", ua.replace(tzinfo=None))
+
+
+def try_gateway_execute(
+    db: Session, order: Order, account: MT5Account | None = None
+) -> dict | None:
     """如果是 gateway 来源账号，立即通过 gateway HTTP 执行订单。
     返回 ORDER_UPDATE 推送载荷，或 None（非 gateway 账号）。
 
@@ -294,7 +321,20 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
     immediately via the gateway HTTP API. Returns an ORDER_UPDATE push payload,
     or None for non-gateway accounts.
     """
-    account = gateway_account(db, order.mt5_login, order.user_id)
+    if account is not None:
+        # 调用方已经查过这一行（place_order 的账号列表）：不再查第三遍，但归属与来源
+        # 必须自己复核——传进来的行不是本单的 gateway 账号就当非 gateway 处理。
+        # The caller already loaded this row: skip the lookup, but re-verify owner,
+        # login and source; a row that is not this order's gateway account means
+        # "not a gateway order".
+        if (
+            account.user_id != order.user_id
+            or account.login != order.mt5_login
+            or account.source != "gateway"
+        ):
+            return None
+    else:
+        account = gateway_account(db, order.mt5_login, order.user_id)
     if account is None:
         return None
 
@@ -330,8 +370,8 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
 
     # 调网关之前先把事务结束掉，把数据库连接还回池里。否则这个会话会一直攥着一条
     # 连接等 dealer 回执（最长 65 秒，超时再问一次共 140 秒），而池子总共只有
-    # DB_POOL_SIZE + DB_MAX_OVERFLOW（默认 30）条：一波行情里第 31 笔在途交易起，
-    # 整个后端——不止下单——都在排队等连接，等满 pool_timeout 就直接报错。
+    # DB_POOL_SIZE + DB_MAX_OVERFLOW（默认 8+4=12，每个 worker 各一池）条：一波行情里第
+    # 13 笔在途交易起，整个 worker——不止下单——都在排队等连接，等满 pool_timeout（8 秒）就直接报错。
     # expire_on_commit 暂时关掉，下面组请求要读的字段就不会被作废、不会为此再
     # 去查一次库。此时 order 早已落库（调用方先 commit 了 PENDING），这里提交的
     # 只是上面几次查询开的只读事务；调用方若还有未提交的改动，原本也会在本函数
@@ -339,9 +379,9 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
     #
     # End the transaction before the gateway call so the connection goes back to
     # the pool. Otherwise the session holds one for the whole dealer wait (65s, 140s
-    # with the re-ask) out of a pool of DB_POOL_SIZE + DB_MAX_OVERFLOW (30 by
-    # default): from the 31st in-flight trade the whole backend queues for a
-    # connection and errors at pool_timeout. expire_on_commit is switched off for
+    # with the re-ask) out of a pool of DB_POOL_SIZE + DB_MAX_OVERFLOW (12 by
+    # default, 8+4, one pool per worker): from the 13th in-flight trade the whole worker queues for a
+    # connection and errors at pool_timeout (8s). expire_on_commit is switched off for
     # this one commit so the fields read below stay loaded. The order row is
     # already committed by the caller; any other pending change would have been
     # committed by this function's final commit anyway.
@@ -430,10 +470,18 @@ def try_gateway_execute(db: Session, order: Order) -> dict | None:
             return order_update_payload(order)
 
         apply_trade_result(order, rsp)
-        from app.services.gamification.stamp import stamp_order_trade_mode
-        stamp_order_trade_mode(db, order)
-        db.commit()
-        db.refresh(order)
+        # 打 trade_mode 章：直接用上面已经加载的账号行，不再单独查一次 mt5_accounts
+        # （规则同 gamification.stamp.stamp_order_trade_mode）。
+        # Stamp trade_mode from the already-loaded account row instead of another
+        # mt5_accounts query (same rule as gamification.stamp.stamp_order_trade_mode).
+        from app.services.gamification.stamp import is_stampable
+        if (
+            is_stampable(order.status, order.action)
+            and order.trade_mode is None
+            and account.trade_mode is not None
+        ):
+            order.trade_mode = account.trade_mode
+        _commit_keep_loaded(db, order)
 
         # 网关耗时并排打出来（gateway_ms 是网关侧总耗时，dealer_ms 是其中等券商回执
         # 的部分）：用户说"下单慢"时，这一行就能分出是网关内部慢还是券商 dealer 慢。

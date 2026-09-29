@@ -49,9 +49,9 @@ class CountingRedis(FakeRedis):
         self.round_trips = 0
         self._in_pipeline = False
 
-    def pipeline(self):
+    def pipeline(self, transaction=True):
         outer = self
-        pipe = super().pipeline()
+        pipe = super().pipeline(transaction)
         real_execute = pipe.execute
 
         def execute():
@@ -444,7 +444,8 @@ def test_async_client_publishes_on_the_loop_without_a_thread(redis_on, monkeypat
     assert aio.commands.count("publish") == 2 and "zadd" in aio.commands and "pipeline" in aio.commands
     assert roster == ["u1"]
     assert ws.sent == []                                     # 发布了，没本地直发
-    assert "u1" in redis_on.zsets["prismx:ws:users"]
+    # 在线名单成员是「worker|user」，让别的 worker 分得清这人连在谁那里
+    assert f"{shared_state.WORKER_ID}|u1" in redis_on.zsets["prismx:ws:users"]
 
 
 def test_async_client_failure_falls_back_to_local_delivery(redis_on):

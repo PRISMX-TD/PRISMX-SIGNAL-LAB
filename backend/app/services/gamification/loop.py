@@ -25,10 +25,11 @@ import logging
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from app.core.database import SessionLocal
+from app.core.database import CURRENT_SCHEMA_REV, SessionLocal
 from app.models import ClosedTrade, MT5Account, Order, User
 from sqlalchemy import and_, or_
 
+from app.services import shared_state
 from app.services.account_type import SOURCE_SELF, VERIFIED_SOURCES, classify_account_with_source
 from app.services.settings_store import get_account_type_settings
 from .conditions import judge_and_record_conditions
@@ -49,6 +50,57 @@ CANDIDATE_SLACK = timedelta(minutes=10)
 # Both empty after a restart, so the first pass is always full — nothing to persist.
 _last_pass_started_at: datetime | None = None
 _last_full_pass_day: date | None = None
+
+# 配了 Redis（多 worker）时两个水位另存一份进 Redis：重启 / 换主后不再必然全量——
+# 全量 pass 要读全体用户的全部历史订单，几乎每天部署一次就白跑一趟。键里带
+# PASS_LOGIC_REV 与 schema 版本：部署改了判定条件/勋章逻辑时**手工把 PASS_LOGIC_REV
+# +1**（或 schema 版本变了），旧水位自然作废，首趟仍走全量，新条件才会对所有人生效；
+# 否则新条件只对当小时有变动的人生效，其余要等次日全量。没配 Redis 时（单进程/测试）
+# 行为与从前一致：只用进程内变量。Redis 出错一律退回进程内变量（宁可全量）。
+# With Redis (multi-worker) the two watermarks are also stored there, so a restart or
+# leader change no longer forces a full pass (which reads every user's whole order
+# history — nearly one wasted run per deploy). Keys carry PASS_LOGIC_REV and the schema
+# revision: bump PASS_LOGIC_REV by hand when a deploy changes the judging rules so the
+# old watermark is void and the first pass is full again. Without Redis, behaviour is
+# unchanged (process variables only); any Redis error falls back to them (a full pass
+# is the safe side).
+PASS_LOGIC_REV = "1"
+WATERMARK_TTL_SECONDS = 2 * 24 * 3600
+
+
+def _wm_key(name: str) -> str:
+    return f"gami:pass:{PASS_LOGIC_REV}:{CURRENT_SCHEMA_REV}:{name}"
+
+
+def _load_watermarks() -> tuple[datetime | None, date | None]:
+    """(上一趟起点, 最近一次全量日)。Redis 里有就用 Redis 的，否则用进程内变量。"""
+    if shared_state.enabled():
+        try:
+            raw_at = shared_state.kv_get(_wm_key("last_at"))
+            raw_day = shared_state.kv_get(_wm_key("full_day"))
+            if raw_at:
+                at = datetime.fromisoformat(raw_at)
+                if at.tzinfo is None:
+                    at = at.replace(tzinfo=timezone.utc)
+                return at, (date.fromisoformat(raw_day) if raw_day else None)
+        except Exception:  # noqa: BLE001 —— 读不到/值坏了：退回进程内，最坏多跑一趟全量
+            log.warning("gamification watermark unreadable; using in-process values", exc_info=True)
+    return _last_pass_started_at, _last_full_pass_day
+
+
+def _save_watermarks(started: datetime, full: bool) -> None:
+    global _last_pass_started_at, _last_full_pass_day
+    _last_pass_started_at = started
+    if full:
+        _last_full_pass_day = started.date()
+    if not shared_state.enabled():
+        return
+    try:
+        shared_state.kv_set(_wm_key("last_at"), started.isoformat(), WATERMARK_TTL_SECONDS)
+        if full:
+            shared_state.kv_set(_wm_key("full_day"), started.date().isoformat(), WATERMARK_TTL_SECONDS)
+    except Exception:  # noqa: BLE001
+        log.warning("gamification watermark not saved to shared state", exc_info=True)
 # 比赛榜只由这条快循环算（整趟 pass 不再算它，理由见 run_gamification_pass 末尾）。
 # 整点那趟 pass 一小时才跑一次，对正在进行的比赛来说太慢——
 # 用户平仓后要等最多一小时名次才动。比赛快照只碰 running/ended 的比赛与它们的参赛
@@ -205,10 +257,10 @@ def run_gamification_pass(full: bool | None = None) -> dict:
     hundred users. Almost nobody changes in a given hour. One full pass a day
     still catches inputs that move on their own (snapshots, month rollover).
     """
-    global _last_pass_started_at, _last_full_pass_day
     started = datetime.now(timezone.utc)
+    last_at, full_day = _load_watermarks()
     if full is None:
-        full = _last_pass_started_at is None or _last_full_pass_day != started.date()
+        full = last_at is None or full_day != started.date()
     # 显式传 full=False 而进程刚起（还没有上一趟 pass 的起点）时，没有增量的下界
     # 可算——`None - timedelta` 会 TypeError。这种情况下退回全量：本来就是「第一趟
     # 必然全量」的语义，人工/控制台调用不该因为传了个参数就把循环打崩。
@@ -216,9 +268,9 @@ def run_gamification_pass(full: bool | None = None) -> dict:
     # from, and `None - timedelta` would raise TypeError. Fall back to a full pass —
     # that's the documented "first pass is always full" behaviour anyway, and a
     # manual call shouldn't be able to crash on an argument.
-    if not full and _last_pass_started_at is None:
+    if not full and last_at is None:
         full = True
-    since = None if full else _last_pass_started_at - CANDIDATE_SLACK
+    since = None if full else last_at - CANDIDATE_SLACK
     db = SessionLocal()
     try:
         acc = backfill_account_trade_modes(db)
@@ -266,9 +318,7 @@ def run_gamification_pass(full: bool | None = None) -> dict:
         # since 重判，宁可重复不可漏判。
         # Advance the watermark only on completion; an exception leaves it, so the
         # next pass re-judges from the earlier point — duplicates are harmless, gaps aren't.
-        _last_pass_started_at = started
-        if full:
-            _last_full_pass_day = started.date()
+        _save_watermarks(started, full)
         return {"accounts": acc, "stamped": stamped, "sentinel": sentinel,
                 "users": len(uids), "full": full,
                 "newConditions": conds, "newBadges": badges,

@@ -14,11 +14,10 @@ import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.concurrency import run_in_threadpool
 
-from app.core.database import SessionLocal
 from app.core.security import decode_token_payload
-from app.models import User
-from app.services import net_quality, quotes_store
-from app.services.connection_manager import manager
+from app.services import net_quality
+from app.services.connection_manager import manager, run_blocking
+from app.services.deps import get_auth_state
 
 logger = logging.getLogger("prismx.ws")
 
@@ -40,34 +39,43 @@ def _authenticate(token: str) -> str | None:
     """校验 token 并返回 user_id；会话版本不匹配（改密码后已失效）返回 None。
     与 services/deps.get_current_user 同一套 tv 校验规则，见其说明。
 
-    **同步阻塞**（里面有一次数据库查询），协程里必须经 run_in_threadpool 调用。
+    **同步阻塞**（缓存未命中时有一次数据库查询），协程里必须经 run_in_threadpool 调用。
 
-    Validate the token and return the user_id; a session-version mismatch
-    (invalidated by a password change) returns None. Same "tv" check as
-    services/deps.get_current_user — see its docstring for the rationale.
-    Blocking (it queries the DB); coroutines must call it via run_in_threadpool.
+    不再每次建连都查库：会话版本与停用状态读 services/deps.get_auth_state 的缓存（`{tv, d}`，
+    Redis / 进程内，300 秒；改密、停用、恢复、重置密码提交后自动失效，见 shared_cache 里的说明）。
+    Redis 出错当未命中、退回查库。已停用的账号也拒绝建连（停用时 tv 同时自增，旧 token 本来就过不了）。
+    部署 / 切网时几百个客户端同一瞬间重连，以前是几百次远端查库排在 12 条连接的池上，现在命中缓存
+    就一次 Redis 读。
+
+    Validate the token and return the user_id; a session-version mismatch (invalidated by a
+    password change) or a disabled account returns None. Same "tv" check as
+    services/deps.get_current_user — see its docstring for the rationale. Blocking (a DB query on a
+    cache miss); coroutines must call it via run_in_threadpool. The tv / disabled facts come from
+    the cached {tv, d} in services/deps.get_auth_state (300s, invalidated automatically after a
+    password change / disable / enable / reset), falling back to the DB when Redis errors — so a
+    reconnect storm no longer queues hundreds of remote queries on a 12-connection pool.
     """
     payload = decode_token_payload(token)
     user_id = payload.get("sub") if payload else None
     if not user_id:
         return None
     token_tv = payload.get("tv") if isinstance(payload.get("tv"), int) else 0
-    db = SessionLocal()
-    try:
-        current_tv = db.query(User.token_version).filter(User.id == user_id).scalar()
-    finally:
-        db.close()
-    if current_tv is None or token_tv != (current_tv or 0):
+    state = get_auth_state(user_id)
+    if state is None or token_tv != state["tv"] or state["d"]:
         return None
     return user_id
 
 
 async def _netq(fn, *args) -> None:
-    """连接质量统计只是旁路记账：走线程池（同步 Redis），失败只记日志，绝不影响这条连接。
-    Connection-quality stats are side bookkeeping: off the loop (sync Redis), and a
-    failure is logged, never allowed to touch the socket."""
+    """连接质量统计只是旁路记账：走 anyio 线程池（main.py 调到 256 条；同步 Redis，每次一个
+    pipeline），失败只记日志，绝不影响这条连接。不用 asyncio.to_thread：它走 loop 的默认
+    executor，2 核机器上只有 6 条线程，每个心跳都排进去，Redis 一抖就全钉住。
+    Connection-quality stats are side bookkeeping: on anyio's pool (raised to 256 in main.py;
+    sync Redis, one pipeline per call), and a failure is logged, never allowed to touch the
+    socket. Not asyncio.to_thread: that is the loop's default executor with only 6 threads on the
+    2-core box, which every heartbeat would queue on and a slow Redis would pin."""
     try:
-        await asyncio.to_thread(fn, *args)
+        await run_blocking(fn, *args)
     except Exception:
         logger.debug("net_quality %s failed", getattr(fn, "__name__", fn), exc_info=True)
 
@@ -165,16 +173,21 @@ async def ws_client(websocket: WebSocket):
 
     await manager.register_client(user_id, websocket)
     conn_id = uuid.uuid4().hex
-    await _netq(net_quality.record_connect, conn_id, user_id)
+    # 连接质量记账不再排在 AUTH_OK 之前：AUTH_OK 发出后才在后台起一个任务去记（持有引用防 GC），
+    # 不阻塞建连关键路径。连接秒断时 record_disconnect 会先等它跑完（见 finally），避免幽灵记录。
+    # Connection-quality bookkeeping no longer sits in front of AUTH_OK: a background task is
+    # started after AUTH_OK (reference held against GC), off the connect critical path. finally
+    # waits for it before record_disconnect so a connect-then-drop leaves no ghost entry.
+    netq_task: asyncio.Task | None = None
     # register 之后的一切都必须在 try 里。
     #
-    # 下面这四帧补推原来在 try 之外：客户端在鉴权成功后立刻断开（移动端切后台、
+    # 下面这几帧补推原来在 try 之外：客户端在鉴权成功后立刻断开（移动端切后台、
     # 页面刷新，都很常见）时，send_json 抛出的异常跳过了所有 unregister，这条死
     # 连接就永远留在 manager._clients 里。后果不只是内存：connected_user_ids() 把
     # 该用户算作在线，于是 gateway 的慢拍与事件泵会持续为一个根本没人看的连接去
     # 券商那边拉持仓——这个项目对 egress 是敏感的。
     #
-    # Everything after register must live inside the try. These four catch-up
+    # Everything after register must live inside the try. These catch-up
     # frames used to sit outside it, so a client that disconnected right after
     # authenticating (backgrounding a mobile app, refreshing the page — both
     # routine) raised past every unregister and left the dead socket in
@@ -184,9 +197,29 @@ async def ws_client(websocket: WebSocket):
     # and egress on this project is a standing concern.
     try:
         await websocket.send_json({"type": "AUTH_OK", "userId": user_id})
-        # 连接即补推最近一次持仓快照，避免刷新后持仓短暂消失。
-        # Re-push the latest positions snapshot on connect to avoid a blank gap after refresh.
-        cached = await manager.get_positions_shared_async(user_id)
+        netq_task = asyncio.create_task(_netq(net_quality.record_connect, conn_id, user_id))
+        # 连接即补推最近一次持仓 / 挂单 / 分账户报价 / 全站报价快照，避免刷新后先空一拍。
+        # 四份数据一次取齐（一个 Redis pipeline、一次往返，见 manager.connect_snapshot_async），
+        # 而不是 4 次线程跳转 + 约 10 次串行往返。
+        #
+        # 取数与发送分开容错：**取数**失败（Redis 抖动等）只记日志、这一拍不补推（连接保留，下一拍
+        # 的 POSITIONS / GLOBAL_QUOTES 广播自然补上）；**发送**不包 try——socket 已死时吞掉发送
+        # 异常，会让流程走到 receive_text 再抛 RuntimeError，日志从「断开」变成「异常」噪音。
+        # Catch up on the latest positions / pending orders / per-account quotes / site-wide quotes
+        # so a refresh doesn't show a blank gap. All four are fetched together (one Redis pipeline,
+        # one round-trip; see manager.connect_snapshot_async) instead of 4 thread hops and ~10
+        # serial round-trips. Fetching and sending are guarded separately: a failed *fetch* (a
+        # Redis blip) only logs and skips the catch-up — the connection stays and the next tick's
+        # POSITIONS / GLOBAL_QUOTES broadcast fills it in — while *sends* are deliberately not
+        # wrapped: swallowing a send error on a dead socket would run on to receive_text and raise a
+        # RuntimeError, turning a disconnect in the log into exception noise.
+        try:
+            snapshot = await manager.connect_snapshot_async(user_id)
+        except Exception:
+            logger.warning("WS 建连补推取数失败，跳过 / connect catch-up fetch failed, skipping (user_id=%s)",
+                           user_id, exc_info=True)
+            snapshot = {}
+        cached = snapshot.get("positions")
         if cached:
             # 带上 funds，否则刷新后账户卡片要等下一拍推送才能拿到实时浮盈，
             # 中间那一两秒会退回"净值-余额"的旧口径，数字会跳一下。
@@ -197,23 +230,17 @@ async def ws_client(websocket: WebSocket):
                 "data": cached,
                 "funds": manager.account_funds_from_positions(cached),
             })
-        # 连接即补推最近一次挂单快照，理由同持仓：刷新后挂单列表不该先空一拍。
         # 挂单不带 funds——浮盈是持仓的概念，挂单还没有仓位。
-        # Re-push the latest pending-orders snapshot too, for the same reason as
-        # positions. No funds ride along: floating P/L belongs to positions, and a
-        # pending order has none yet.
-        cached_pending = await manager.get_pending_orders_shared_async(user_id)
+        # No funds ride along with pending orders: floating P/L belongs to positions.
+        cached_pending = snapshot.get("pending")
         if cached_pending:
             await websocket.send_json({"type": "PENDING_ORDERS", "data": cached_pending})
-        # 连接即补推最近一次报价快照（按交易商账户区分，下单确认页用）
-        # re-push the latest per-account quotes snapshot on connect (order-confirm page)
-        cached_quotes = await manager.get_quotes_async(user_id)
+        # 按交易商账户区分的报价（下单确认页用）/ per-account quotes (order-confirm page)
+        cached_quotes = snapshot.get("quotes")
         if cached_quotes:
             await websocket.send_json({"type": "QUOTES", "data": cached_quotes})
-        # 连接即补推全站统一报价快照（展示用）/ re-push the site-wide quotes snapshot (display)
-        # 配了 Redis 时这是一次同步往返，经线程池读，别在事件循环上等。
-        # With Redis this is a blocking round-trip; read it via the thread pool.
-        cached_global_quotes = await quotes_store.get_all_async()
+        # 全站统一报价（展示用）/ site-wide quotes (display)
+        cached_global_quotes = snapshot.get("global_quotes")
         if cached_global_quotes:
             await websocket.send_json({"type": "GLOBAL_QUOTES", "data": cached_global_quotes})
         while True:
@@ -243,6 +270,9 @@ async def ws_client(websocket: WebSocket):
             raw = await websocket.receive_text()
             ping = _parse_ping(raw)
             if ping is not None:
+                # bg:true = 页面在后台，报价帧对它跳过；不带/false = 前台，取消标记。
+                # bg:true = page in background, quote frames skipped; absent/false clears it.
+                manager.set_background(websocket, ping.get("bg") is True)
                 await websocket.send_json({"type": "PONG"})
                 await _netq(net_quality.record_sample, conn_id, user_id, *net_quality.parse_ping(ping))
     except WebSocketDisconnect:
@@ -258,4 +288,12 @@ async def ws_client(websocket: WebSocket):
         # the try added more of them. This makes "registered implies unregistered"
         # structural rather than a thing each branch has to get right.
         await manager.unregister_client(user_id, websocket)
-        await _netq(net_quality.record_disconnect, conn_id)
+        if netq_task is not None:
+            # record_connect 一定先于 record_disconnect 落地；它自己吞异常（_netq），这里只防取消。
+            # record_connect always lands before record_disconnect; _netq swallows its own errors,
+            # this only guards cancellation.
+            try:
+                await netq_task
+            except Exception:  # noqa: BLE001
+                pass
+            await _netq(net_quality.record_disconnect, conn_id)

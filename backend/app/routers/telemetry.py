@@ -30,15 +30,18 @@ Two hard limits, both to stop this endpoint from being used to bloat the table:
    hours, which would skew the average dwell time badly, so anything above the
    cap counts as the cap.
 """
+import asyncio
 import json
 import logging
+import threading
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Response
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal
 from app.core.rate_limit import limiter
 from app.models import PageVisitorDay, PageViewStat, User
 from app.schemas import PageViewIn
@@ -75,6 +78,7 @@ CLIENT_ERROR_FIELDS = {
 # push = a push-pipeline step failed (sampled by pushDiag.ts; `step` names it,
 # endpoint / keys / tokens are redacted client-side).
 CLIENT_ERROR_KINDS = frozenset({"render", "chunk", "chunk-reload", "push"})
+pv_logger = logging.getLogger("prismx.pageview")
 client_error_logger = logging.getLogger("prismx.client_error")
 
 # 允许上报的前端路由，与 App.tsx 的受保护路由一一对应。新增页面时要同步加，
@@ -220,7 +224,6 @@ async def client_error(request: Request) -> Response:
 def report_pageview(
     request: Request,
     payload: PageViewIn,
-    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """/telemetry/pageview 的薄壳；实际逻辑见 record_pageview。
@@ -232,11 +235,11 @@ def report_pageview(
     demands a genuine Request and this repo's tests are service-level with no
     TestClient — the same precedent as invite.py's record_click / click.
     """
-    record_pageview(db, user, payload)
+    record_pageview(None, user, payload)
 
 
-def record_pageview(db: Session, user: User, payload: PageViewIn) -> None:
-    """累加一次页面访问。返回 204，前端不需要任何响应体。
+def record_pageview(db: Session | None, user: User, payload: PageViewIn) -> None:
+    """累加一次页面访问（只记进本进程内存，见下方「进程内聚合」，30 秒一批落库）。`db` 仅为兼容旧调用，不再使用。返回 204，前端不需要任何响应体。
 
     不在白名单的 path 静默忽略（照样返回 204）——这是埋点上报，不是业务操作，
     为一个统计问题给用户弹错误没有意义，也免得前端为此写错误处理分支。
@@ -297,25 +300,112 @@ def record_pageview(db: Session, user: User, payload: PageViewIn) -> None:
     # stay UTC and are re-bucketed at query time.
     visitor_day = local_day(now_utc)
 
-    # 计数与人数标记合并成**一次** commit。从前这条路径最多要提交三次（建桶、
-    # 更新桶、写标记），三次各自往返一遍数据库，而这是全站调用最频繁的写端点之一。
-    # 唯一约束冲突改由 SAVEPOINT（begin_nested）吸收：冲突只作废那一小段，外层
-    # 事务还活着，所以"撞了就换一条路走"这个既有行为一点没变，只是不再需要为它
-    # 单独提交一次。
-    # Counting and the visitor marker now share one commit. This path used to
-    # commit up to three times (create bucket, update bucket, write marker), each
-    # a round trip, on one of the busiest write endpoints on the site. Unique
-    # violations are absorbed by a SAVEPOINT instead: only the nested block is
-    # rolled back, the outer transaction survives, so the existing "collide, then
-    # take the other branch" behaviour is unchanged — it just no longer needs a
-    # commit of its own.
-    _bump_view(db, payload.path, bucket, seconds)
-    _mark_visitor(db, payload.path, visitor_day, user.id)
-    db.commit()
+    # 只在内存里累加，不碰数据库：这是全站调用最频繁的写端点，以前每次导航要 4~5 次
+    # 往返 + 一个写事务。现在请求路径 0 次 DB 访问，flush_pageviews 每 30 秒批量落库。
+    # 代价：后台看板的次数/人数最多晚 30 秒；进程被杀最多丢这 30 秒（正常关闭会 flush）。
+    # Memory-only accumulation: this is the busiest write endpoint on the site (4-5
+    # round trips and a write transaction per navigation). The request path now does
+    # zero DB work and flush_pageviews writes a batch every 30s. Cost: dashboard
+    # numbers lag up to 30s, and a killed process loses at most that window (a clean
+    # shutdown flushes).
+    with _pv_lock:
+        cell = _pv_buckets.setdefault((payload.path, bucket), [0, 0.0])
+        cell[0] += 1
+        cell[1] += seconds
+        if len(_pv_visitors) < _PV_MAX_VISITORS:
+            _pv_visitors.add((payload.path, visitor_day, user.id))
 
 
-def _bump_view(db: Session, path: str, bucket, seconds: float) -> None:
-    """把这一次访问累加进 (页面, 小时) 桶；桶不存在就建。**不 commit**。
+# ---- 进程内聚合与批量落库 / in-process aggregation and batched flush -------------------
+# 每个 worker 各有一份聚合（所以 flush 任务必须每个 worker 各起一个，见 start_pageview_flusher；
+# 不能放进只在主 worker 跑的 BackgroundLoops）。次数桶按 (页面, UTC 整点)，人数标记按
+# (页面, 看板日, 用户)。
+# One aggregate per worker (hence one flush task per worker — see start_pageview_flusher;
+# it must not live in the leader-only BackgroundLoops).
+PAGEVIEW_FLUSH_INTERVAL_SECONDS = 30
+_PV_MAX_VISITORS = 100_000        # DB 长时间不可用时的内存上限 / memory cap while the DB is down
+_pv_lock = threading.Lock()
+_pv_buckets: dict[tuple, list] = {}     # (path, bucket) -> [views, seconds]
+_pv_visitors: set[tuple] = set()        # (path, day, user_id)
+
+
+def flush_pageviews(db: Session | None = None) -> int:
+    """把内存里攒的访问一次写进库并 commit，返回写入的次数桶数。失败则回滚并把数据放回
+    内存（下一轮再试）。`db` 可注入（测试）；缺省自开会话。同步函数，调用方放线程池。
+    Write the accumulated views in one commit; returns the bucket count. On failure it
+    rolls back and puts the data back for the next round. `db` is injectable for
+    tests; otherwise a session is opened. Synchronous — run it in a thread."""
+    with _pv_lock:
+        buckets, visitors = dict(_pv_buckets), set(_pv_visitors)
+        _pv_buckets.clear()
+        _pv_visitors.clear()
+    if not buckets and not visitors:
+        return 0
+    own = db is None
+    session = SessionLocal() if own else db
+    try:
+        for (path, bucket), (views, seconds) in buckets.items():
+            _bump_view(session, path, bucket, seconds, views=views)
+        _mark_visitors(session, visitors)
+        session.commit()
+        return len(buckets)
+    except Exception:
+        session.rollback()
+        pv_logger.exception("pageview flush failed; keeping %d bucket(s) for the next round", len(buckets))
+        with _pv_lock:
+            for key, (views, seconds) in buckets.items():
+                cell = _pv_buckets.setdefault(key, [0, 0.0])
+                cell[0] += views
+                cell[1] += seconds
+            room = _PV_MAX_VISITORS - len(_pv_visitors)
+            if room > 0:
+                _pv_visitors.update(list(visitors)[:room])
+        return 0
+    finally:
+        if own:
+            session.close()
+
+
+def reset_pageviews_for_tests() -> None:
+    with _pv_lock:
+        _pv_buckets.clear()
+        _pv_visitors.clear()
+
+
+async def pageview_flush_loop(interval: float = PAGEVIEW_FLUSH_INTERVAL_SECONDS) -> None:
+    """每 interval 秒把本 worker 的访问聚合落一次库。
+    Flush this worker's aggregate every `interval` seconds."""
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await run_in_threadpool(flush_pageviews)
+        except Exception:  # noqa: BLE001 —— flush_pageviews 自己已兜底，这里只防循环被打死
+            pv_logger.exception("pageview_flush_loop error")
+
+
+def start_pageview_flusher() -> "asyncio.Task":
+    """在 lifespan 里**每个 worker 各调一次**（不是只在主 worker）；返回任务句柄给 stop 用。
+    Call once in *every* worker's lifespan; hands back the task for the stop call."""
+    return asyncio.create_task(pageview_flush_loop(), name="pageview_flush_loop")
+
+
+async def stop_pageview_flusher(task: "asyncio.Task | None") -> None:
+    """关闭时：停掉循环并最后 flush 一次，正常重启不丢埋点。
+    On shutdown: stop the loop and flush one last time so a clean restart loses nothing."""
+    if task is not None:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    try:
+        await run_in_threadpool(flush_pageviews)
+    except Exception:  # noqa: BLE001
+        pv_logger.exception("final pageview flush failed")
+
+
+def _bump_view(db: Session, path: str, bucket, seconds: float, views: int = 1) -> None:
+    """把 views 次访问累加进 (页面, 小时) 桶；桶不存在就建。**不 commit**。
 
     先尝试更新已有桶，没有再插。并发下两个请求可能都发现"没有"然后同时插，
     唯一约束会让后到的那个报 IntegrityError——那一小段回滚到 SAVEPOINT 后重查
@@ -336,7 +426,7 @@ def _bump_view(db: Session, path: str, bucket, seconds: float) -> None:
                 db.add(PageViewStat(
                     path=path,
                     time_bucket=bucket,
-                    views=1,
+                    views=views,
                     total_seconds=seconds,
                 ))
             return
@@ -347,7 +437,7 @@ def _bump_view(db: Session, path: str, bucket, seconds: float) -> None:
                 .one()
             )
 
-    row.views = (row.views or 0) + 1
+    row.views = (row.views or 0) + views
     row.total_seconds = (row.total_seconds or 0.0) + seconds
 
 
@@ -373,3 +463,30 @@ def _mark_visitor(db: Session, path: str, day, user_id: str) -> None:
             db.add(PageVisitorDay(path=path, day=day, user_id=user_id))
     except IntegrityError:
         pass
+
+
+def _mark_visitors(db: Session, visitors: set) -> None:
+    """批量登记人数标记：先一条查询找出已存在的，只插缺的；批量插撞了唯一约束（别的 worker
+    抢先）就退回逐条 SAVEPOINT 的 _mark_visitor。**不 commit**。
+    Batch-register visitor markers: one query finds the existing ones, only the missing
+    are inserted; a unique-constraint clash with another worker falls back to the
+    per-row SAVEPOINT path. Does not commit."""
+    if not visitors:
+        return
+    paths = {v[0] for v in visitors}
+    days = {v[1] for v in visitors}
+    users = {v[2] for v in visitors}
+    existing = {
+        (r[0], r[1], r[2])
+        for r in db.query(PageVisitorDay.path, PageVisitorDay.day, PageVisitorDay.user_id)
+        .filter(PageVisitorDay.path.in_(paths), PageVisitorDay.day.in_(days), PageVisitorDay.user_id.in_(users))
+    }
+    missing = [v for v in visitors if v not in existing]
+    if not missing:
+        return
+    try:
+        with db.begin_nested():
+            db.add_all([PageVisitorDay(path=p, day=d, user_id=u) for p, d, u in missing])
+    except IntegrityError:
+        for p, d, u in missing:
+            _mark_visitor(db, p, d, u)

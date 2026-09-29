@@ -10,6 +10,7 @@ authentication relies on the "secret" field compared (constant-time) to WEBHOOK_
 import logging
 import secrets
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -87,6 +88,22 @@ class TradingViewSignal(BaseModel):
 # inside the worker thread and the lock must be held there.
 _trend_locks: dict[str, threading.Lock] = {}
 _trend_locks_guard = threading.Lock()
+
+
+# 每品种上次「已落库」的趋势指纹 -> (指纹, 落库时刻 monotonic)。趋势方向几分钟才变一次，
+# EA 每 5 秒推一次：指纹没变就不 UPDATE/commit、不广播（前端也不必每 5 秒白重渲染）。
+# 每个 worker 一份，重启后首帧各写一次，无害。每 _TREND_REFRESH_SECONDS 兜底刷一次
+# updated_at，免得 /trends 的 updatedAt 停在几小时前。
+# Per-symbol fingerprint of the last *persisted* trend. Directions change every few
+# minutes while the EA pushes every 5s: an unchanged fingerprint skips the UPDATE and
+# commit and the broadcast. Per worker; a restart just rewrites once. updated_at is
+# refreshed every _TREND_REFRESH_SECONDS so it doesn't go hours stale.
+_TREND_REFRESH_SECONDS = 300.0
+_trend_state: dict[str, tuple[str, float, object]] = {}
+
+
+def reset_trend_state_for_tests() -> None:
+    _trend_state.clear()
 
 
 def _trend_lock(symbol: str) -> threading.Lock:
@@ -356,27 +373,50 @@ def _trend_db_work(
     identity between Trend.updated_at and the broadcast's updatedAt.
     """
     with _trend_lock(symbol):
+        fp = json.dumps(tf_map, sort_keys=True)
+        prev = _trend_state.get(symbol)
+        unchanged = (
+            prev is not None
+            and prev[0] == fp
+            and prev[2] is SessionLocal   # 换了会话工厂（测试换库）就当没记过 / a swapped factory = a new DB
+            and time.monotonic() - prev[1] < _TREND_REFRESH_SECONDS
+        )
+        data = {"symbol": symbol, "timeframes": tf_map, "updatedAt": now.isoformat()}
+        if unchanged:
+            # 趋势没变：不开会话写 Trend；信号判定（依赖每根 bar 的高低点，与趋势无关）
+            # 仍要跑，没有高低点时整段都不必碰库。
+            # Trend unchanged: no Trend write. Signal resolution depends on each bar's
+            # high/low, not on the trend, so it still runs; without high/low there is
+            # nothing to do at all.
+            data["_changed"] = False
+            if low is None or high is None:
+                return data
+        else:
+            data["_changed"] = True
         db: Session = SessionLocal()
         try:
-            # 每个品种一条，后来的覆盖前面的 / one row per symbol, upsert
-            row = db.query(Trend).filter(Trend.symbol == symbol).first()
-            if row is None:
-                row = Trend(symbol=symbol, timeframes=json.dumps(tf_map), updated_at=now)
-                db.add(row)
-            else:
-                row.timeframes = json.dumps(tf_map)
-                row.updated_at = now
-            try:
-                db.commit()
-            except IntegrityError:
-                # symbol 唯一约束并发冲突：回滚后重取再写 / unique-constraint race
-                db.rollback()
+            if not unchanged:
+                # 每个品种一条，后来的覆盖前面的 / one row per symbol, upsert
                 row = db.query(Trend).filter(Trend.symbol == symbol).first()
-                if row is not None:
+                if row is None:
+                    row = Trend(symbol=symbol, timeframes=json.dumps(tf_map), updated_at=now)
+                    db.add(row)
+                else:
                     row.timeframes = json.dumps(tf_map)
                     row.updated_at = now
+                try:
                     db.commit()
-            data = {"symbol": symbol, "timeframes": tf_map, "updatedAt": now.isoformat()}
+                except IntegrityError:
+                    # symbol 唯一约束并发冲突：回滚后重取再写 / unique-constraint race
+                    db.rollback()
+                    row = db.query(Trend).filter(Trend.symbol == symbol).first()
+                    if row is not None:
+                        row.timeframes = json.dumps(tf_map)
+                        row.updated_at = now
+                        db.commit()
+                # commit 成功之后才记指纹（提交失败会抛出，指纹就不会记，下一帧重写）。
+                # Record the fingerprint only after the commit succeeded.
+                _trend_state[symbol] = (fp, time.monotonic(), SessionLocal)
 
             # 顺带用这根 K 线的高低点判定该品种下所有未分胜负信号是否命中 TP/SL。
             # 与趋势更新共用同一次 webhook 调用，不需要额外的行情通道。
@@ -487,16 +527,19 @@ async def tradingview_trend(request: Request):
         symbol = item.symbol.upper()
         tf_map = {str(k): str(v) for k, v in item.trends.items()}
         data = await run_in_threadpool(_trend_db_work, symbol, tf_map, now, item.low, item.high)
-        results.append((symbol, data))
+        results.append((symbol, data, data.pop("_changed", True)))
 
     # 广播维持每品种一帧：前端已按这个形状处理 TREND_UPDATE，改成一帧多品种就要
     # 同时改前端，而本次改造的目的是减少 EA→后端的请求数，不是动前端契约。
     # Still one frame per symbol: the frontend already handles TREND_UPDATE in this
     # shape. Batching frames would require a frontend change, and the point here is
     # to cut EA→backend requests, not to alter the frontend contract.
-    for _symbol, data in results:
-        await manager.broadcast_to_clients({"type": "TREND_UPDATE", "data": data})
+    # 只发趋势真的变了的品种（契约不变，只是帧更少）。
+    # Only symbols whose trend actually changed are broadcast (same contract, fewer frames).
+    for _symbol, data, changed in results:
+        if changed:
+            await manager.broadcast_to_clients({"type": "TREND_UPDATE", "data": data})
 
     if batch is not None:
-        return {"ok": True, "symbols": [s for s, _ in results]}
+        return {"ok": True, "symbols": [s for s, _d, _c in results]}
     return {"ok": True, "symbol": results[0][0]}

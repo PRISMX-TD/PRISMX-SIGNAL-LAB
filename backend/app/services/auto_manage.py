@@ -196,6 +196,12 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
     Redis error fall back to the blocking in-process lock. See the note at
     _EVAL_LOCK_TTL_SECONDS.
     """
+    # 空持仓表最先返回：不抢 Redis 锁、不查用户等级和自动仓管设置。桥接没仓位时也
+    # 每 1.5 秒报一次空表，这条路径必须是零成本。
+    # Empty table returns first — before the Redis lock and before any user/settings
+    # lookup. A bridge with no positions still reports an empty table every 1.5s.
+    if not positions:
+        return 0
     name = f"auto_manage:{user_id}"
     owner = f"{shared_state.WORKER_ID}:{uuid.uuid4().hex[:8]}"
     try:
@@ -218,8 +224,10 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
 
 def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> int:
     """实际评估逻辑（调用方已持有该用户的评估锁）。"""
+    if not positions:
+        return 0
     eligible, cfg = _is_eligible(db, user_id)
-    if not eligible or cfg is None or not positions:
+    if not eligible or cfg is None:
         return 0
 
     # 只管理本平台开的仓位 / only manage positions opened through PRISMX

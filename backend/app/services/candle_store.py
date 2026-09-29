@@ -13,6 +13,7 @@ import bisect
 import logging
 import threading
 import time
+import uuid
 from datetime import datetime, timezone
 from math import gcd
 
@@ -21,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import Candle
-from app.services import shared_state
+from app.services import shared_cache, shared_state
 from app.services.page_stats import prune_visitor_days, purge_admin_visitors
 from app.services.settings_store import get_candle_settings
 
@@ -614,9 +615,13 @@ class _SeriesWindow:
     returns None so the caller falls back to the database.
     """
 
-    __slots__ = ("lock", "ts", "rows", "t_by_key", "covered_from")
+    __slots__ = ("lock", "ts", "rows", "t_by_key", "covered_from", "synced_ver", "synced_at")
 
     def __init__(self) -> None:
+        # 上次从库同步"别的 worker 写的行"时读到的序列版本号与时刻（多 worker 才用）。
+        # Series version and monotonic time of the last sync of other workers' rows.
+        self.synced_ver: str | None = None
+        self.synced_at = float("-inf")
         self.lock = threading.RLock()
         self.ts: list[int] = []
         self.rows: dict[int, tuple[float, tuple]] = {}      # t -> (close, 指纹 / fingerprint)
@@ -713,6 +718,66 @@ def reset_windows_for_tests() -> None:
     Drop every window; tests use a fresh database per case and must reset this too."""
     with _windows_lock:
         _windows.clear()
+    _version_cache.clear()
+
+# ---- 跨 worker 的序列版本号 / cross-worker series versions ----------------------------
+# 多 worker 时窗口只镜像本进程写过的行，别的 worker 落的行要回库补。以前每次 _window()
+# 都回库查一次（42 个序列 × 每 3 秒 × 2 次），绝大多数 tick 其实没有新收盘 bar。
+# 现在每个 (品种, 周期) 在 Redis 里有一个版本号：谁真正落了新行谁 bump，读窗口的一方
+# 只有看到版本号变了才回库。规则宁多查不算错：读不到版本号（Redis 出错）、窗口从没同步
+# 过、或距上次回库超过 _RESYNC_MAX_AGE_SECONDS，一律回库。bump 失败也只记日志，
+# 兜底靠那个最长间隔。
+# With several workers a window only mirrors rows this process wrote; rows other
+# workers stored must be pulled from the DB. That used to happen on every _window()
+# call although most ticks carry no new closed bar. Each (symbol, interval) now has
+# a Redis version: writers bump it after really inserting, readers hit the DB only
+# when it moved. Errs on the side of querying: an unreadable version, a never-synced
+# window, or one older than _RESYNC_MAX_AGE_SECONDS always re-queries; a failed bump
+# only logs and the max age covers it.
+_RESYNC_MAX_AGE_SECONDS = 60.0
+# 版本号在本进程再缓存这么久（秒）：同一请求里 filter 与 persist 各调一次 _window，
+# EA 两次推送相隔 3 秒，1 秒的滞后不影响正确性。测试里改成 0。
+# Local cache of a version (seconds); the two _window calls in one request share it.
+_VERSION_LOCAL_TTL_SECONDS = 1.0
+_version_cache: dict[tuple[str, str], tuple[str, float]] = {}
+
+
+def _version_key(symbol: str, interval: str) -> str:
+    return f"{shared_cache.CACHE_PREFIX}ver:candle:{symbol}:{interval}"
+
+
+def _series_version(symbol: str, interval: str) -> str | None:
+    """读序列版本号；Redis 出错返回 None（调用方据此回库）。
+    Read the series version; None on any Redis error (caller then re-queries)."""
+    key = (symbol, interval)
+    now = time.monotonic()
+    hit = _version_cache.get(key)
+    if hit is not None and now - hit[1] < _VERSION_LOCAL_TTL_SECONDS:
+        return hit[0]
+    try:
+        value = shared_state.kv_get(_version_key(symbol, interval)) or "0"
+    except Exception:  # noqa: BLE001 —— 读不到就当版本未知 / unknown version
+        logger.debug("candle series version read failed: %s/%s", symbol, interval, exc_info=True)
+        _version_cache.pop(key, None)
+        return None
+    _version_cache[key] = (value, now)
+    return value
+
+
+def _bump_series_version(symbol: str, interval: str) -> None:
+    """落了新行之后（commit 之后）换一个随机版本号。失败只记日志。
+    Write a fresh random version after new rows are committed; failures only log."""
+    if not shared_state.enabled():
+        return
+    token = uuid.uuid4().hex
+    try:
+        shared_state.kv_set(_version_key(symbol, interval), token, ttl=400 * 24 * 3600)
+    except Exception:  # noqa: BLE001
+        logger.warning("candle series version bump failed: %s/%s（其它 worker 将在 %ds 内按时间兜底回库）",
+                       symbol, interval, int(_RESYNC_MAX_AGE_SECONDS), exc_info=True)
+        _version_cache.pop((symbol, interval), None)
+        return
+    _version_cache[(symbol, interval)] = (token, time.monotonic())
 
 
 def _window(db, symbol: str, interval: str) -> _SeriesWindow:
@@ -730,6 +795,10 @@ def _window(db, symbol: str, interval: str) -> _SeriesWindow:
     span = _window_span_seconds(interval)
     now = int(time.time())
     with win.lock:
+        # 版本号必须在回库之前读（写方先 commit 再 bump，先读的版本号只会更旧、不会漏行）。
+        # Read the version before querying: writers commit first and bump second, so an
+        # earlier read can only be older, never miss rows.
+        ver = _series_version(symbol, interval) if shared_state.enabled() else None
         if win.covered_from is None:
             start = now - span
             rows = (
@@ -742,7 +811,12 @@ def _window(db, symbol: str, interval: str) -> _SeriesWindow:
             for r in rows:
                 win.add(*r)
             logger.info("candle window loaded: %s/%s %d bar(s) since %d", symbol, interval, len(rows), start)
-        elif shared_state.enabled():
+            win.synced_ver, win.synced_at = ver, time.monotonic()
+        elif shared_state.enabled() and (
+            ver is None
+            or ver != win.synced_ver
+            or time.monotonic() - win.synced_at > _RESYNC_MAX_AGE_SECONDS
+        ):
             top = win.ts[-1] if win.ts else win.covered_from - 1
             rows = (
                 db.query(Candle.t, Candle.o, Candle.h, Candle.l, Candle.c, Candle.v)
@@ -752,6 +826,7 @@ def _window(db, symbol: str, interval: str) -> _SeriesWindow:
             )
             for r in rows:
                 win.add(*r)
+            win.synced_ver, win.synced_at = ver, time.monotonic()
         win.evict_below(now - span)
     return win
 
@@ -1348,6 +1423,8 @@ def persist_closed_bars(
         for b in new_bars:
             if b["t"] >= win.covered_from:
                 win.add(b["t"], b["o"], b["h"], b["l"], b["c"], b.get("v", 0))
+    if new_bars:
+        _bump_series_version(symbol, interval)   # commit 已完成，通知别的 worker 回库 / after commit
     inserted = sorted(b["t"] for b in new_bars)
     return inserted
 

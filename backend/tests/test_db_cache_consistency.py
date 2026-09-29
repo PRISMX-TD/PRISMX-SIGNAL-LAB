@@ -339,17 +339,26 @@ def test_board_top50_limit_me_beyond_50_and_per_viewer_fields(db_session, monkey
 
 
 def test_snapshot_refresh_drops_board_cache(db_session):
+    """快照真的变了才击穿该榜缓存；没变的榜（这里 win_rate 空对空）缓存保留。"""
+    from app.models import LeaderboardSnapshot, User
     from app.services.gamification import boards, periods
 
     now = datetime.now(timezone.utc)
     keys = periods.active_period_keys(now)
+    u = User(email="stale@t.co", api_token="tok_stale")
+    db_session.add(u)
+    db_session.commit()
     for key in keys:
+        # return_pct 榜库里有一行过期的快照，重算后是空榜 -> 变了
+        db_session.add(LeaderboardSnapshot(board="return_pct", period_key=key, user_id=u.id,
+                                           mt5_login="X", rank=1, score=0.1, sample=5))
         for board in ("return_pct", "win_rate"):
             shared_cache.set_json(boards.leaderboard_cache_key(board, key), {"rows": [], "snapshotAt": None}, 60)
+    db_session.commit()
     boards.snapshot_boards(db_session, now)
     for key in keys:
-        for board in ("return_pct", "win_rate"):
-            assert shared_cache.get_json(boards.leaderboard_cache_key(board, key)) is None
+        assert shared_cache.get_json(boards.leaderboard_cache_key("return_pct", key)) is None
+        assert shared_cache.get_json(boards.leaderboard_cache_key("win_rate", key)) is not None
 
 
 def test_me_sitewide_counts_cached(db_session):

@@ -303,6 +303,17 @@ class Settings(BaseSettings):
     # 主动断开空闲连接后拿到坏连接。/ recycle idle connections to avoid stale ones
     # dropped by the Supabase pooler.
     DB_POOL_RECYCLE: int = 1800
+    # 取连接的最长等待秒数（默认 SQLAlchemy 是 30，恰与前端 30 秒请求超时同时到期）。
+    # 库一慢，256 条同步线程会各在 pool.connect() 上挂 30 秒、整站卡半分钟后一片 500；
+    # 改成 8 秒快速失败（main.py 把 TimeoutError 转成 503 + Retry-After），少数请求
+    # 尽早失败，堆积的请求就少了 3/4。Supabase 跨区 pre_ping 重连本身可能占 1~2 秒，
+    # 所以不取更小。
+    # Max seconds to wait for a pooled connection (SQLAlchemy's default of 30 expires
+    # together with the frontend's 30s request timeout). When the DB slows down, up to
+    # 244 sync threads would each park 30s in pool.connect(); failing at 8s (main.py maps
+    # the TimeoutError to 503 + Retry-After) sheds load early. Not lower: a cross-region
+    # Supabase pre_ping reconnect can itself take 1-2s.
+    DB_POOL_TIMEOUT: int = 8
 
     # MT5 Gateway（C# 程序，直接通过 Manager API 操作 MT5，不需要 bridge 轮询）。
     # Make Capital 用户的订单会走这条通道。
@@ -512,13 +523,13 @@ class Settings(BaseSettings):
     EQUITY_PER_LOT: float = 200.0
 
     # 在线判定窗口不在这里：唯一生效的阈值是 services/deps.py 的 ONLINE_WINDOW，
-    # 它的取值直接绑着 bridge 1.5 秒的轮询周期（留 3 个周期容错），改这里改不动它。
-    # 此处曾有一个 EA_OFFLINE_TIMEOUT_SECONDS = 30 无人读取，数值还和真正生效的 7
+    # 它的取值直接绑着 bridge 的心跳周期（留 3 个周期容错），改这里改不动它。
+    # 此处曾有一个 EA_OFFLINE_TIMEOUT_SECONDS = 30 无人读取，数值还和真正生效的 10
     # 对不上——两个数、一个假的，只会误导排障的人。
     # The liveness threshold does not live here: the only one in effect is
-    # ONLINE_WINDOW in services/deps.py, whose value is tied to bridge's 1.5s
-    # poll (three missed cycles of slack). An unread EA_OFFLINE_TIMEOUT_SECONDS =
-    # 30 used to sit here, disagreeing with the 7 actually in force — two numbers,
+    # ONLINE_WINDOW in services/deps.py, whose value is tied to bridge's ~3s
+    # heartbeat (three missed cycles of slack). An unread EA_OFFLINE_TIMEOUT_SECONDS =
+    # 30 used to sit here, disagreeing with the 10 actually in force — two numbers,
     # one of them fiction, is worse for whoever is debugging than none.
 
     # Web Push / VAPID：私钥以 urlsafe-base64 编码的 DER（PKCS8）存储，直接交给

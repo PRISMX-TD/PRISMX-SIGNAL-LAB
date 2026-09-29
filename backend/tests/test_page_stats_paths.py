@@ -22,7 +22,8 @@ from pathlib import Path
 
 import pytest
 
-from app.routers.telemetry import ALLOWED_PATHS, MAX_DWELL_SECONDS, record_pageview
+from app.routers import telemetry as _telemetry
+from app.routers.telemetry import ALLOWED_PATHS, MAX_DWELL_SECONDS, flush_pageviews, record_pageview
 from app.models import PageVisitorDay, PageViewStat, User
 from app.schemas import PageViewIn
 
@@ -45,6 +46,11 @@ def _tracked_paths_from_frontend() -> set[str]:
 
 def _labels(locale: str) -> dict:
     data = json.loads(_read(f"i18n/{locale}.json"))
+    # 中文/英文语言包可能拆成 {locale}.json + {locale}.more.json（后者按需加载的板块）：合并后再找。
+    # The locale bundle may be split into {locale}.json + {locale}.more.json (lazy sections).
+    more = FRONTEND / "i18n" / f"{locale}.more.json"
+    if more.exists():
+        data = {**data, **json.loads(more.read_text(encoding="utf-8"))}
     return data["admin"]["pageStats"]["page"]
 
 
@@ -137,6 +143,15 @@ def test_untracked_list_has_no_stale_entries():
 
 # ── 上报行为 / reporting behaviour ────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _fresh_pageview_aggregate():
+    """上报只进进程内存、由 flush_pageviews 落库：每个用例前后清空聚合，互不串数。
+    Reporting is memory-only until flush_pageviews; reset the aggregate around each case."""
+    _telemetry.reset_pageviews_for_tests()
+    yield
+    _telemetry.reset_pageviews_for_tests()
+
+
 def _user(db, email="pv@t.co", role="user"):
     u = User(email=email, api_token="tok_" + email, role=role)
     db.add(u); db.commit(); return u
@@ -146,12 +161,14 @@ def test_unknown_path_is_dropped(db_session):
     u = _user(db_session)
     record_pageview(db_session, u, PageViewIn(path="/../../etc/passwd", seconds=10))
     record_pageview(db_session, u, PageViewIn(path="/u/gebnck49j5", seconds=10))  # 未归一的实路径
+    flush_pageviews(db_session)
     assert db_session.query(PageViewStat).count() == 0
 
 
 def test_template_path_is_counted(db_session):
     u = _user(db_session)
     record_pageview(db_session, u, PageViewIn(path="/u/:publicId", seconds=12))
+    flush_pageviews(db_session)
     row = db_session.query(PageViewStat).one()
     assert row.path == "/u/:publicId" and row.views == 1
 
@@ -159,6 +176,7 @@ def test_template_path_is_counted(db_session):
 def test_admin_visits_are_never_recorded(db_session):
     a = _user(db_session, "admin@t.co", role="admin")
     record_pageview(db_session, a, PageViewIn(path="/leaderboard", seconds=30))
+    flush_pageviews(db_session)
     assert db_session.query(PageViewStat).count() == 0
     assert db_session.query(PageVisitorDay).count() == 0
 
@@ -166,6 +184,7 @@ def test_admin_visits_are_never_recorded(db_session):
 def test_dwell_is_capped(db_session):
     u = _user(db_session)
     record_pageview(db_session, u, PageViewIn(path="/leaderboard", seconds=99999))
+    flush_pageviews(db_session)
     assert db_session.query(PageViewStat).one().total_seconds == MAX_DWELL_SECONDS
 
 
@@ -173,6 +192,7 @@ def test_same_user_same_day_counts_once_as_a_visitor(db_session):
     u = _user(db_session)
     for _ in range(3):
         record_pageview(db_session, u, PageViewIn(path="/competitions", seconds=5))
+    flush_pageviews(db_session)
     assert db_session.query(PageViewStat).one().views == 3      # 次数累加
     assert db_session.query(PageVisitorDay).count() == 1        # 人数去重
 
@@ -193,6 +213,7 @@ def test_visitor_day_is_recorded_in_stats_tz(db_session, monkeypatch):
     monkeypatch.setattr(telemetry, "datetime", _FixedDatetime)
     u = _user(db_session, "tz@t.co")
     record_pageview(db_session, u, PageViewIn(path="/dashboard", seconds=5))
+    flush_pageviews(db_session)
     marker = db_session.query(PageVisitorDay).one()
     assert marker.day == date(2026, 9, 16)
     # 次数桶仍是 UTC 整点，不受影响 / hourly bucket stays UTC
@@ -203,3 +224,58 @@ def test_visitor_retention_is_400_days():
     from app.services.page_stats import VISITOR_RETENTION_DAYS
     from app.services.stats_time import MAX_RANGE_DAYS
     assert VISITOR_RETENTION_DAYS == MAX_RANGE_DAYS == 400
+
+
+# ── 进程内聚合 + 批量落库 / in-process aggregation + batched flush ───────────────────
+
+def test_record_pageview_touches_no_database_until_flush(db_session):
+    u = _user(db_session)
+    for _ in range(3):
+        record_pageview(None, u, PageViewIn(path="/dashboard", seconds=4))   # db 传 None 也行：不碰库
+    assert db_session.query(PageViewStat).count() == 0
+    assert db_session.query(PageVisitorDay).count() == 0
+    assert flush_pageviews(db_session) == 1
+    row = db_session.query(PageViewStat).one()
+    assert row.views == 3 and row.total_seconds == 12
+    assert db_session.query(PageVisitorDay).count() == 1
+    assert flush_pageviews(db_session) == 0            # 聚合已清空，再 flush 是空操作
+
+
+def test_flush_accumulates_onto_existing_rows_and_dedups_visitors(db_session):
+    u1, u2 = _user(db_session, "a1@t.co"), _user(db_session, "a2@t.co")
+    record_pageview(None, u1, PageViewIn(path="/dashboard", seconds=2))
+    flush_pageviews(db_session)
+    record_pageview(None, u1, PageViewIn(path="/dashboard", seconds=3))     # 同人同天：人数不增
+    record_pageview(None, u2, PageViewIn(path="/dashboard", seconds=5))     # 新人：人数 +1
+    record_pageview(None, u2, PageViewIn(path="/orders", seconds=1))
+    flush_pageviews(db_session)
+    rows = {r.path: r for r in db_session.query(PageViewStat).all()}
+    assert rows["/dashboard"].views == 3 and rows["/dashboard"].total_seconds == 10
+    assert rows["/orders"].views == 1
+    assert db_session.query(PageVisitorDay).filter_by(path="/dashboard").count() == 2
+
+
+def test_failed_flush_keeps_data_for_next_round(db_session, monkeypatch):
+    u = _user(db_session)
+    record_pageview(None, u, PageViewIn(path="/dashboard", seconds=2))
+    monkeypatch.setattr(_telemetry, "_bump_view", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("db down")))
+    assert flush_pageviews(db_session) == 0
+    monkeypatch.undo()
+    assert db_session.query(PageViewStat).count() == 0
+    assert flush_pageviews(db_session) == 1            # 下一轮补写，没丢
+    assert db_session.query(PageViewStat).one().views == 1
+
+
+def test_flusher_task_flushes_on_stop(db_session, monkeypatch):
+    import asyncio
+    u = _user(db_session)
+    record_pageview(None, u, PageViewIn(path="/dashboard", seconds=2))
+
+    async def _run():
+        task = _telemetry.start_pageview_flusher()
+        await _telemetry.stop_pageview_flusher(task)
+
+    seen = []
+    monkeypatch.setattr(_telemetry, "flush_pageviews", lambda db=None: seen.append(1) or 0)
+    asyncio.run(_run())
+    assert seen                                        # 关闭时做了最后一次 flush

@@ -132,3 +132,71 @@ def test_grace_window_recompute_and_seal(db_session):
     after = {x.id for x in db_session.query(LeaderboardSnapshot)
              .filter_by(period_key="2026-W36")}
     assert before == after                          # 封存：行未被删重建
+
+
+def _statements(db, hook_list):
+    from sqlalchemy import event
+
+    def _hook(conn, cursor, statement, parameters, context, executemany):
+        hook_list.append(statement.lstrip().upper())
+
+    event.listen(db.get_bind(), "before_cursor_execute", _hook)
+    return _hook
+
+
+def test_unchanged_snapshot_skips_delete_insert_and_cache_drop(db_session):
+    """第二趟名次没变：不 delete/insert、不击穿榜单缓存；commit 照旧（对账改动照样落库）。"""
+    from app.services import shared_cache
+    from app.services.gamification import boards
+    _seed_two_accounts(db_session)
+    snapshot_boards(db_session, NOW)
+    first = {(r.board, r.mt5_login): (r.id, r.computed_at) for r in db_session.query(LeaderboardSnapshot).all()}
+    assert first
+    key = "2026-W36"
+    for b in ("return_pct", "win_rate"):
+        shared_cache.set_json(boards.leaderboard_cache_key(b, key), {"rows": [1], "snapshotAt": None}, 60)
+    stmts: list[str] = []
+    _statements(db_session, stmts)
+    snapshot_boards(db_session, NOW)
+    writes = [s for s in stmts if s.startswith(("DELETE FROM LEADERBOARD_SNAPSHOTS", "INSERT INTO LEADERBOARD_SNAPSHOTS"))]
+    assert writes == []
+    for b in ("return_pct", "win_rate"):
+        assert shared_cache.get_json(boards.leaderboard_cache_key(b, key)) is not None
+    db_session.expire_all()
+    again = {(r.board, r.mt5_login): (r.id, r.computed_at) for r in db_session.query(LeaderboardSnapshot).all()}
+    assert again == first   # 行原样没动（id 相同）
+
+
+def test_changed_snapshot_rewrites_and_drops_cache(db_session):
+    from app.services import shared_cache
+    from app.services.gamification import boards
+    (ua, _), _b = _seed_two_accounts(db_session)
+    snapshot_boards(db_session, NOW)
+    key = "2026-W36"
+    for b in ("return_pct", "win_rate"):
+        shared_cache.set_json(boards.leaderboard_cache_key(b, key), {"rows": [1], "snapshotAt": None}, 60)
+    # A 多赢一笔：return 榜分数变、win_rate 榜（仍全胜）样本数变 -> 两榜都要重写
+    closed = T0 + timedelta(hours=30)
+    db_session.add(Order(user_id=ua.id, client_order_id="cA99", symbol="X", side="BUY", volume=0.1,
+                         status="FILLED", mt5_login="A", mt5_ticket=99, trade_mode=2,
+                         created_at=closed - timedelta(hours=1)))
+    db_session.add(ClosedTrade(user_id=ua.id, mt5_login="A", symbol="X", side="BUY", close_volume=0.1,
+                               close_price=1, profit=20.0, position_ticket=99, deal_ticket=990,
+                               closed_at=closed, verified=True))
+    db_session.commit()
+    snapshot_boards(db_session, NOW)
+    for b in ("return_pct", "win_rate"):
+        assert shared_cache.get_json(boards.leaderboard_cache_key(b, key)) is None
+    a_row = db_session.query(LeaderboardSnapshot).filter_by(board="win_rate", period_key=key, mt5_login="A").one()
+    assert a_row.sample == 21
+
+
+def test_reconcile_reads_closed_trades_once_for_all_baselines(db_session):
+    """对账：无论多少条基线，closed_trades 只查一次（原来每条基线一次）。"""
+    from app.services.gamification.boards import reconcile_deposits
+    _seed_two_accounts(db_session)
+    stmts: list[str] = []
+    _statements(db_session, stmts)
+    reconcile_deposits(db_session, "2026-W36", now=NOW)
+    n = [s for s in stmts if s.startswith("SELECT") and "FROM CLOSED_TRADES" in s]
+    assert len(n) == 1

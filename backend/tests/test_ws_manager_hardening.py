@@ -99,29 +99,23 @@ def test_positions_come_back_after_a_reconnect():
 # ---------- 一个慢客户端的影响半径 / one slow client ----------
 
 def test_a_stalled_socket_does_not_hold_up_the_others():
-    """卡住的那个连接不能让同一批里其他人等它——并发发送，超时各算各的。"""
+    """卡住的那个连接不能让同一批里其他人等它——每条连接有自己的发件队列，投递只是入队。
+    以前 gather 要等满发送超时；现在 _deliver_local 立刻返回，健康连接此刻已经收到。"""
     async def scenario():
         mgr = ConnectionManager()
         stalled, healthy = FakeWS(stalls=True), FakeWS()
         await mgr.register_client("u1", stalled)
         await mgr.register_client("u1", healthy)
 
-        task = asyncio.create_task(mgr._deliver_local("u1", {"type": "PING"}))
-        # 转几圈事件循环：并发实现下健康连接此刻已经收到，串行实现还卡在第一个上。
-        for _ in range(5):
-            await asyncio.sleep(0)
-        delivered = list(healthy.sent)
-
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        return delivered
+        # 卡住的连接要 3600 秒才发得完；投递本身必须在远短于发送超时的时间内返回。
+        await asyncio.wait_for(mgr._deliver_local("u1", {"type": "PING"}), 0.5)
+        return list(healthy.sent)
 
     assert asyncio.run(scenario()) == [{"type": "PING"}]
 
 
 def test_a_stalled_socket_is_dropped_on_timeout(monkeypatch):
-    """超时就当死连接摘掉，否则每 1.5 秒一拍会一直对它白发。"""
+    """超时就当死连接摘掉，否则每 1.5 秒一拍会一直对它白发。写协程里的发送超时到点即摘。"""
     monkeypatch.setattr("app.services.connection_manager.SEND_TIMEOUT_SECONDS", 0.01)
 
     async def scenario():
@@ -131,11 +125,68 @@ def test_a_stalled_socket_is_dropped_on_timeout(monkeypatch):
         await mgr.register_client("u1", healthy)
 
         await mgr._deliver_local("u1", {"type": "PING"})
+        await asyncio.sleep(0.1)          # 写协程的 0.01 秒发送超时已到 / the writer's timeout has fired
         return mgr, healthy
 
     mgr, healthy = asyncio.run(scenario())
     assert mgr._clients["u1"] == {healthy}
     assert healthy.sent == [{"type": "PING"}]
+
+
+def test_a_full_outbox_drops_and_closes_the_connection(monkeypatch):
+    """队列满 = 这条连接已经落后十几帧：判死清理，并关掉它让前端重连拿完整快照。
+    只摘不关的话它的读循环还活着、心跳照回 PONG，就成了收不到任何推送的僵尸。"""
+    monkeypatch.setattr("app.services.connection_manager.OUTBOX_MAXSIZE", 3)
+
+    class ClosableStalled(FakeWS):
+        closed_with = None
+
+        async def close(self, code=1000):
+            self.closed_with = code
+
+    async def scenario():
+        mgr = ConnectionManager()
+        stalled, healthy = ClosableStalled(stalls=True), FakeWS()
+        await mgr.register_client("u1", stalled)
+        await mgr.register_client("u1", healthy)
+        for i in range(6):                # 写协程卡在第一帧上，后面的帧只能堆队列
+            await mgr._deliver_local("u1", {"type": "TICK", "i": i})
+        await asyncio.sleep(0.05)         # 让后台关闭任务跑完
+        return mgr, stalled, healthy
+
+    mgr, stalled, healthy = asyncio.run(scenario())
+    assert mgr._clients["u1"] == {healthy}
+    assert [m["i"] for m in healthy.sent] == list(range(6)), "健康连接一帧都不能少、顺序不能乱"
+    assert stalled.closed_with == 1013
+    assert stalled not in mgr._outboxes
+
+
+def test_frames_to_one_connection_keep_their_order():
+    """发件队列是 FIFO，同一条连接上帧的先后顺序与投递顺序一致。"""
+    async def scenario():
+        mgr = ConnectionManager()
+        ws = FakeWS()
+        await mgr.register_client("u1", ws)
+        for i in range(8):
+            await mgr._deliver_local("u1", {"i": i})
+        return ws
+
+    assert [m["i"] for m in asyncio.run(scenario()).sent] == list(range(8))
+
+
+def test_unregister_stops_the_writer_task():
+    """连接注销后写协程必须随之结束，否则每条连接白留一个常驻任务。"""
+    async def scenario():
+        mgr = ConnectionManager()
+        ws = FakeWS()
+        await mgr.register_client("u1", ws)
+        task = mgr._outboxes[ws].task
+        await mgr.unregister_client("u1", ws)
+        await asyncio.sleep(0)
+        return mgr, task
+
+    mgr, task = asyncio.run(scenario())
+    assert task.done() and mgr._outboxes == {}
 
 
 def test_a_failed_socket_is_still_dropped():

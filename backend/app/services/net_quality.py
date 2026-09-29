@@ -16,11 +16,14 @@ frontend's 10s app-level PING already carries the last round trip it measured
 frontends send a bare PING; those connections are counted without latency. All
 state goes through shared_state so admins see a site-wide picture across workers.
 
-这里的函数都是**同步**的（shared_state 用同步 Redis），协程里要走 asyncio.to_thread。
-Every function here is synchronous (sync Redis); call via asyncio.to_thread from coroutines.
+这里的函数都是**同步**的（同步 Redis；record_* 每次只发一个 pipeline），协程里要走 anyio 线程池
+（connection_manager.run_blocking，不要用 asyncio.to_thread）。
+Every function here is synchronous (sync Redis; each record_* sends exactly one pipeline); from
+coroutines call via anyio's pool (connection_manager.run_blocking, not asyncio.to_thread).
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -45,6 +48,36 @@ def _bump(field: str) -> None:
     shared_state.incr_with_ttl(f"netq:h:{_hour_key()}:{field}", _HOUR_TTL)
 
 
+def _pipeline() -> Any:
+    """配了 Redis 时返回同步 pipeline（一条心跳的全部写入合成一次往返），否则 None（走
+    shared_state 的原语，内存后端）。pipeline 不带 MULTI/EXEC：这些只是互不相干的计数与读数。
+    A sync pipeline when Redis is on (all of one heartbeat's writes in one round-trip), else None
+    (the shared_state primitives, i.e. the memory backend). No MULTI/EXEC: these are independent
+    counters and readings."""
+    if not shared_state.enabled():
+        return None
+    return shared_state._redis().pipeline(transaction=False)
+
+
+def _pipe_bump(pipe: Any, field: str, by: int = 1) -> None:
+    """pipeline 版的 incr_with_ttl：INCR 之后总是 EXPIRE（pipeline 里拿不到 INCR 的结果来判断
+    「是不是第一次」，多一条 EXPIRE 不多一次往返，计数键 26 小时才过期，续期无害）。
+    The pipeline twin of incr_with_ttl: INCR followed by an unconditional EXPIRE (a pipeline can't
+    see INCR's result to tell "first write"; the extra EXPIRE costs no round-trip, and refreshing a
+    26-hour counter is harmless)."""
+    key = shared_state._k(f"netq:h:{_hour_key()}:{field}")
+    pipe.incr(key, by)
+    pipe.expire(key, _HOUR_TTL)
+
+
+def _pipe_live(pipe: Any, conn_id: str, row: dict[str, Any]) -> None:
+    """pipeline 版的「进在线集合 + 写这条连接的读数」（与 set_add / kv_set_json 同一写法）。
+    Pipeline twin of "join the live set + write this connection's reading" (same encoding as
+    set_add / kv_set_json)."""
+    pipe.zadd(shared_state._k(_LIVE_SET), {conn_id: time.time() + _LIVE_TTL})
+    pipe.set(shared_state._k(f"netq:conn:{conn_id}"), json.dumps(row, ensure_ascii=False, default=str), ex=_LIVE_TTL)
+
+
 def bucket(rtt: int) -> str:
     return "good" if rtt < GOOD_MS else "fair" if rtt < FAIR_MS else "poor"
 
@@ -63,30 +96,50 @@ def parse_ping(frame: dict[str, Any]) -> tuple[int | None, int | None, str]:
 
 
 def record_connect(conn_id: str, user_id: int) -> None:
-    _bump("connects")
-    shared_state.set_add(_LIVE_SET, conn_id, _LIVE_TTL)
-    shared_state.kv_set_json(f"netq:conn:{conn_id}", {"u": user_id, "t": time.time()}, _LIVE_TTL)
+    pipe = _pipeline()
+    if pipe is None:
+        _bump("connects")
+        shared_state.set_add(_LIVE_SET, conn_id, _LIVE_TTL)
+        shared_state.kv_set_json(f"netq:conn:{conn_id}", {"u": user_id, "t": time.time()}, _LIVE_TTL)
+        return
+    _pipe_bump(pipe, "connects")
+    _pipe_live(pipe, conn_id, {"u": user_id, "t": time.time()})
+    pipe.execute()
 
 
 def record_sample(conn_id: str, user_id: int, rtt: int | None, jit: int | None, kind: str) -> None:
-    shared_state.set_add(_LIVE_SET, conn_id, _LIVE_TTL)
-    shared_state.kv_set_json(
-        f"netq:conn:{conn_id}",
-        {"u": user_id, "rtt": rtt, "jit": jit, "k": kind, "t": time.time()},
-        _LIVE_TTL,
-    )
-    if rtt is None:
+    row = {"u": user_id, "rtt": rtt, "jit": jit, "k": kind, "t": time.time()}
+    pipe = _pipeline()
+    if pipe is None:
+        shared_state.set_add(_LIVE_SET, conn_id, _LIVE_TTL)
+        shared_state.kv_set_json(f"netq:conn:{conn_id}", row, _LIVE_TTL)
+        if rtt is None:
+            return
+        _bump(bucket(rtt))
+        # 样本数 = 好+中+差，这里只累加延迟，平均值在读的时候算。
+        # Sample count is good+fair+poor; only the sum is kept here, averaged on read.
+        shared_state.incr_with_ttl(f"netq:h:{_hour_key()}:sum", _HOUR_TTL, by=rtt)
         return
-    _bump(bucket(rtt))
-    # 样本数 = 好+中+差，这里只累加延迟，平均值在读的时候算。
-    # Sample count is good+fair+poor; only the sum is kept here, averaged on read.
-    shared_state.incr_with_ttl(f"netq:h:{_hour_key()}:sum", _HOUR_TTL, by=rtt)
+    # 每个心跳 PING 一次往返：以前是 zadd、set、incr+expire、incr+expire 四五次串行同步调用。
+    # One round-trip per heartbeat PING; it used to be four or five serial sync calls.
+    _pipe_live(pipe, conn_id, row)
+    if rtt is not None:
+        _pipe_bump(pipe, bucket(rtt))
+        _pipe_bump(pipe, "sum", rtt)
+    pipe.execute()
 
 
 def record_disconnect(conn_id: str) -> None:
-    _bump("disconnects")
-    shared_state.set_remove(_LIVE_SET, conn_id)
-    shared_state.kv_delete(f"netq:conn:{conn_id}")
+    pipe = _pipeline()
+    if pipe is None:
+        _bump("disconnects")
+        shared_state.set_remove(_LIVE_SET, conn_id)
+        shared_state.kv_delete(f"netq:conn:{conn_id}")
+        return
+    _pipe_bump(pipe, "disconnects")
+    pipe.zrem(shared_state._k(_LIVE_SET), conn_id)
+    pipe.delete(shared_state._k(f"netq:conn:{conn_id}"))
+    pipe.execute()
 
 
 def snapshot() -> dict[str, Any]:

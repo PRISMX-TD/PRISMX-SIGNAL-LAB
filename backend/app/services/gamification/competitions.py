@@ -18,7 +18,7 @@ from app.models import (
 from .badges import award_badge
 from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits, return_score
+from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits, replace_snapshot_rows, return_score
 
 
 TRACKS = ("real", "demo")
@@ -177,7 +177,7 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     return rows
 
 
-def _snapshot_one_comp(db, comp: Competition) -> list[dict]:
+def _snapshot_one_comp(db, comp: Competition, force: bool = False) -> list[dict]:
     """单场比赛的算行 + 排名 + 快照原子替换（delete-then-insert），不 commit——
     commit 时机由调用方决定：`snapshot_competitions` 每场比赛提交一次；
     `settle_competition` 把这一步并入终审第一段事务，不单独提交。
@@ -194,14 +194,9 @@ def _snapshot_one_comp(db, comp: Competition) -> list[dict]:
     # the same spot in boards.snapshot_boards (ranks must be unique so
     # settle_competition awards exactly one champion on rank == 1).
     rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
-    db.query(LeaderboardSnapshot).filter(
-        LeaderboardSnapshot.board == comp.metric,
-        LeaderboardSnapshot.period_key == key).delete()
-    for i, r in enumerate(rows, start=1):
-        r["rank"] = i
-        db.add(LeaderboardSnapshot(board=comp.metric, period_key=key,
-                                   user_id=r["userId"], mt5_login=r["login"],
-                                   rank=i, score=r["score"], sample=r["sample"]))
+    # 名次没变就不 delete+insert（见 boards.replace_snapshot_rows）；settle 用 force=True 强制写。
+    # Skip delete+insert when the ranking is unchanged; settle_competition forces a write.
+    replace_snapshot_rows(db, comp.metric, key, rows, force=force)   # 同时写入 r["rank"]
     return rows
 
 
@@ -254,8 +249,11 @@ def refresh_comp_board(db, comp: Competition, force: bool = False) -> bool:
     if comp.status != "running":
         return False
     if not force:
-        n = shared_state.incr_with_ttl(_refresh_throttle_key(comp.id),
-                                        int(REFRESH_MIN_INTERVAL))
+        try:
+            n = shared_state.incr_with_ttl(_refresh_throttle_key(comp.id),
+                                            int(REFRESH_MIN_INTERVAL))
+        except Exception:  # noqa: BLE001 — Redis 抖：视为 n>1，跳过本轮 / Redis blip: skip this round
+            n = 2
         if n > 1:
             return False
     try:
@@ -549,7 +547,7 @@ def settle_competition(db, comp: Competition, admin_id: str,
                     "Settlement opens 24 hours after the competition ends, "
                     "so late closes are counted")
 
-    rows = _snapshot_one_comp(db, comp)   # 先落定最新名次，再读——见上方 docstring
+    rows = _snapshot_one_comp(db, comp, force=True)   # 先落定最新名次，再读——见上方 docstring
     by_login = {p.mt5_login: p for p in
                 db.query(CompetitionParticipant).filter(
                     CompetitionParticipant.competition_id == comp.id)}

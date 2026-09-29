@@ -24,9 +24,9 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.models import Candle, User
-from app.services import candle_store, chart_store, quotes_store
+from app.services import candle_store, chart_store, quotes_store, shared_cache
 from app.services.connection_manager import manager
-from app.services.deps import get_current_user
+from app.services.deps import get_current_user, get_current_user_id_light
 from app.services.strategy import live as strategy_live
 
 logger = logging.getLogger("prismx.chart")
@@ -55,6 +55,17 @@ ALLOWED_INTERVALS = {"1", "5", "15", "60", "240", "D"}
 # cursor, so 1000 is comfortably above one page's need: a safety ceiling only,
 # viewable depth is unaffected.
 CHART_HISTORY_MAX_LIMIT = 1000
+# 前端首屏请求的根数（frontend chartConfig.ts HISTORY_FIRST_PAGE）。只有这一档的首页被缓存并
+# 在新收盘 bar 落库时主动失效；其它 limit 的首页不缓存，免得陈旧的最新 bar 拖 15 秒。
+# The first-page size the frontend asks for; only that first page is cached and
+# invalidated on a new closed bar — other limits are not cached at all.
+CHART_HISTORY_FIRST_PAGE = 50
+_HISTORY_FIRST_TTL = 15      # 秒 / seconds
+_HISTORY_BEFORE_TTL = 120
+
+
+def _history_first_key(symbol: str, interval: str) -> str:
+    return f"chart:history:{symbol}:{interval}:first"
 
 # 喂价端(EA/其运行机器)的时钟如果比服务器明显跑快,会把 K 线时间戳打进
 # "未来"——超过这个阈值(5 分钟,远大于正常网络延迟/处理耗时)才当作真的时钟
@@ -476,6 +487,9 @@ async def feed_candles(
                 _persist_live_sync, db, symbol, s.interval, bars, tradeable
             )
         if new_ts:
+            # 新收盘 bar 落库：首页缓存立即作废（前端首屏 50 根那份）。
+            # A new closed bar landed: drop the cached first page.
+            await run_in_threadpool(shared_cache.delete, _history_first_key(symbol, s.interval))
             # 策略评估是同步 SQLAlchemy + 纯 Python 指标循环：留在事件循环里会
             # 拖住 WebSocket 推送与桥接轮询（生产 2 核单进程）。推送部分本身是
             # 异步的，由 live 内部在提交之后自行 await（见 strategy/live.py）。
@@ -527,7 +541,7 @@ async def feed_quotes(req: FeedQuotesRequest, x_ea_token: str | None = Header(de
 
 
 @router.get("/quotes")
-async def list_quotes(user: User = Depends(get_current_user)):
+async def list_quotes(user_id: str = Depends(get_current_user_id_light)):
     """前端读取全站统一报价快照（首屏用，之后靠 WS GLOBAL_QUOTES 增量更新）。
     Frontend reads the site-wide quote snapshot (first load; WS GLOBAL_QUOTES
     delivers deltas afterwards)."""
@@ -535,7 +549,7 @@ async def list_quotes(user: User = Depends(get_current_user)):
 
 
 @router.get("/symbols")
-async def list_active_symbols(user: User = Depends(get_current_user)):
+async def list_active_symbols(user_id: str = Depends(get_current_user_id_light)):
     """当前活跃品种：EA 的 InpSymbols 里配了什么、正在推什么，这里就返回什么，
     不是写死的列表。前端的报价表/图表选择器/仪表盘英雄板都应该以这份列表为
     准渲染，EA 端增删品种后数十秒内前端会自动跟上，不需要改前端代码。
@@ -603,26 +617,51 @@ def chart_history(
     """
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")
-    q = db.query(Candle).filter(Candle.symbol == symbol.upper(), Candle.interval == interval)
+    sym = symbol.upper()
+
+    def _load() -> dict:
+        # 只取用到的 6 列（元组行），不构造 ORM 实例、不传 id/symbol/interval 三列废数据。
+        # Six columns only: no ORM instances, no id/symbol/interval dead weight.
+        q = db.query(Candle.t, Candle.o, Candle.h, Candle.l, Candle.c, Candle.v).filter(
+            Candle.symbol == sym, Candle.interval == interval
+        )
+        if before is not None:
+            q = q.filter(Candle.t < before)
+        rows = q.order_by(Candle.t.desc()).limit(limit).all()
+        rows.reverse()
+        return {
+            "symbol": sym,
+            "interval": interval,
+            "bars": [{"t": r[0], "o": r[1], "h": r[2], "l": r[3], "c": r[4], "v": r[5]} for r in rows],
+            # 前端据此判断"还能不能继续往左拉":拿满一整页就假定还有更早的。
+            # Tells the client whether to keep paging left: a full page implies more.
+            "hasMore": len(rows) == limit,
+        }
+
+    # 短缓存（全员同值）：首页（before 为空、恰好是首屏那档）缓存 15 秒，新收盘 bar 落库时
+    # 主动删（见 feed 里 `if new_ts:`）——这才是全员共享的主收益。翻页（带 before）缓存 120 秒，
+    # 但命中率别高估：before 取自客户端当前最早那根的 t，M1/M5 每来一根新 K 线该值就变，
+    # 只有同一根 K 线内加载的用户才共享，H1/D1 才明显受益。其它 limit 的首页不缓存。
+    # Short shared cache: the first page (no `before`, the frontend's first-screen size)
+    # is cached 15s and deleted when a new closed bar lands — that is the real win.
+    # Backward pages cache 120s, but don't overrate the hit rate: `before` is the client's
+    # current earliest t, which changes with every new M1/M5 bar, so only users loading
+    # within the same bar share a key; H1/D1 benefit noticeably. Other first-page limits
+    # are not cached.
+    if before is None and limit == CHART_HISTORY_FIRST_PAGE:
+        return shared_cache.cached_json(_history_first_key(sym, interval), _HISTORY_FIRST_TTL, _load)
     if before is not None:
-        q = q.filter(Candle.t < before)
-    rows = q.order_by(Candle.t.desc()).limit(limit).all()
-    rows.reverse()
-    return {
-        "symbol": symbol.upper(),
-        "interval": interval,
-        "bars": [{"t": r.t, "o": r.o, "h": r.h, "l": r.l, "c": r.c, "v": r.v} for r in rows],
-        # 前端据此判断"还能不能继续往左拉":拿满一整页就假定还有更早的。
-        # Tells the client whether to keep paging left: a full page implies more.
-        "hasMore": len(rows) == limit,
-    }
+        return shared_cache.cached_json(
+            f"chart:history:{sym}:{interval}:{limit}:{before}", _HISTORY_BEFORE_TTL, _load
+        )
+    return _load()
 
 
 @router.get("/chart/latest")
 async def chart_latest(
     symbol: str = Query(max_length=32),
     interval: str = Query(),
-    user: User = Depends(get_current_user),
+    user_id: str = Depends(get_current_user_id_light),
 ):
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")

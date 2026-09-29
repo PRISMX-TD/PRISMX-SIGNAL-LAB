@@ -15,6 +15,7 @@ derived data. The order-confirmation page uses per-broker-account quotes
 instead; see connection_manager.py's _quotes.
 """
 import json
+import logging
 import time
 
 from starlette.concurrency import run_in_threadpool
@@ -26,6 +27,13 @@ from app.services import shared_state
 _quotes: dict[str, dict] = {}
 # symbol -> 最近一次被 EA 写入的 epoch 秒 / epoch seconds of the last EA write
 _updated_at: dict[str, float] = {}
+
+logger = logging.getLogger("prismx.quotes_store")
+
+# 上一份成功读到的结果（进程内）：Redis 抖动时 /quotes、/symbols 退回它而不是 500。
+# Last successful read (in-process): on a Redis blip /quotes and /symbols serve it
+# instead of a 500. Empty until the first success.
+_last_good: dict[str, list] = {"all": [], "active": []}
 
 # ---- Redis 键 / keys ----
 # hash：品种 -> 报价 JSON；hash：品种 -> 更新时刻；list：品种首次出现的顺序（对齐 EA
@@ -173,9 +181,16 @@ def get_all() -> list[dict]:
 
 async def get_all_async() -> list[dict]:
     """同 get_all，协程里用 / same as get_all, for coroutines."""
-    if not shared_state.enabled():
-        return get_all()
-    return await run_in_threadpool(get_all)
+    try:
+        if not shared_state.enabled():
+            out = get_all()
+        else:
+            out = await run_in_threadpool(get_all)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("报价读取失败，退回上一份 / quotes read failed, serving last good: %s", e)
+        return list(_last_good["all"])
+    _last_good["all"] = out
+    return out
 
 
 def get_digits(symbol: str) -> int | None:
@@ -219,6 +234,13 @@ def get_active_symbols() -> list[str]:
 async def get_active_symbols_async() -> list[str]:
     """同 get_active_symbols，协程里用（配了 Redis 时挪到线程池）。
     Same as get_active_symbols, for coroutines (offloaded with Redis on)."""
-    if not shared_state.enabled():
-        return get_active_symbols()
-    return await run_in_threadpool(get_active_symbols)
+    try:
+        if not shared_state.enabled():
+            out = get_active_symbols()
+        else:
+            out = await run_in_threadpool(get_active_symbols)
+    except Exception as e:  # noqa: BLE001
+        logger.warning("品种读取失败，退回上一份 / symbols read failed, serving last good: %s", e)
+        return list(_last_good["active"])
+    _last_good["active"] = out
+    return out

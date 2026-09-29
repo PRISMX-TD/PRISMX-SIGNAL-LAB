@@ -363,22 +363,113 @@ def test_window_falls_back_to_db_for_batches_older_than_its_floor(db_session):
     assert counter["n"] >= 1
 
 
-def test_window_pulls_other_workers_rows_only_when_shared_state_enabled(db_session, monkeypatch):
-    """多 worker（配了 REDIS_URL）时每次读窗口前拉"比内存最新一根更晚"的行；单 worker 不拉。"""
+def _fake_shared_state(monkeypatch, store=None):
+    """把 candle_store 看到的 shared_state 换成"已启用 + 内存字典"的替身（多 worker 场景）。
+    Swap in an enabled, dict-backed shared_state so the multi-worker branch runs."""
+    store = {} if store is None else store
+
+    class _SS:
+        enabled = staticmethod(lambda: True)
+        kv_get = staticmethod(lambda k: store.get(k))
+
+        @staticmethod
+        def kv_set(k, v, ttl=None):
+            store[k] = v
+
+    monkeypatch.setattr(cs, "shared_state", _SS)
+    monkeypatch.setattr(cs, "_VERSION_LOCAL_TTL_SECONDS", 0.0)
+    return store
+
+
+def _count_sync_selects(db_session):
+    """只数"同步别的 worker 的行"那条查询（candles.t > ?）；前序收盘价那条是 t < ?。
+    Counts only the sync query (candles.t > ?), not the preceding-closes one (t < ?)."""
+    from sqlalchemy import event
+    counter = {"n": 0}
+
+    def _hook(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "candles.t >" in statement:
+            counter["n"] += 1
+
+    event.listen(db_session.get_bind(), "before_cursor_execute", _hook)
+    return counter
+
+
+def _insert_behind_back(db, symbol, interval, bar):
+    db.add(Candle(symbol=symbol, interval=interval, t=bar["t"], o=bar["o"], h=bar["h"],
+                  l=bar["l"], c=bar["c"], v=bar["v"]))
+    db.commit()
+
+
+def test_window_pulls_other_workers_rows_only_when_version_changed(db_session, monkeypatch):
+    """多 worker（配了 Redis）：只有序列版本号变了才回库补别的 worker 的行；版本没变不查库；
+    单 worker（没配 Redis）从不补。"""
     cur = _now_grid(300)
     first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
     _seed(db_session, "5", [first], symbol="BTCUSD")
-    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])          # 加载窗口
+    store = _fake_shared_state(monkeypatch)
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])          # 加载窗口（记下版本）
     other = _bar(cur - 1500, o=3.0, h=4.0, l=2.5, c=3.5, v=11)
-    # 别的写者直接落库（不经 candle_store）,且不重置窗口
-    db_session.add(Candle(symbol="BTCUSD", interval="5", t=other["t"], o=other["o"], h=other["h"],
-                          l=other["l"], c=other["c"], v=other["v"]))
-    db_session.commit()
+    _insert_behind_back(db_session, "BTCUSD", "5", other)                 # 别的 worker 落库，还没 bump
     copy = [dict(other, t=cur - 300)]
+    counter = _count_sync_selects(db_session)
+    # 版本没变：不回库，看不见 other，复制的 bar 不被判重放
+    assert len(cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy)) == 1
+    assert counter["n"] == 0
+    # 别的 worker bump 之后：回库补齐，副本被拦下
+    store[cs._version_key("BTCUSD", "5")] = "changed"
+    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy) == []
+    assert counter["n"] >= 1
+    # 补齐后版本号已记下，再读不再回库
+    n = counter["n"]
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy)
+    assert counter["n"] == n
+
+
+def test_window_requeries_when_version_unreadable_or_too_old(db_session, monkeypatch):
+    """宁多查不算错：读不到版本号（Redis 出错）或距上次同步超过兜底间隔，都要回库。"""
+    cur = _now_grid(300)
+    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    _seed(db_session, "5", [first], symbol="BTCUSD")
+    store = _fake_shared_state(monkeypatch)
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])
+    other = _bar(cur - 1500, o=3.0, h=4.0, l=2.5, c=3.5, v=11)
+    _insert_behind_back(db_session, "BTCUSD", "5", other)
+    copy = [dict(other, t=cur - 300)]
+    # 时间兜底
+    win = cs._windows[("BTCUSD", "5")]
+    win.synced_at -= cs._RESYNC_MAX_AGE_SECONDS + 1
+    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy) == []
+    # Redis 出错：每次都回库
+    _insert_behind_back(db_session, "BTCUSD", "5", _bar(cur - 1200, o=5.0, h=6.0, l=4.5, c=5.5, v=13))
+    monkeypatch.setattr(cs.shared_state, "kv_get", staticmethod(lambda k: (_ for _ in ()).throw(RuntimeError("redis down"))))
+    counter = _count_sync_selects(db_session)
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy)
+    assert counter["n"] >= 1
+
+
+def test_persist_bumps_series_version_only_when_rows_inserted(db_session, monkeypatch):
+    store = _fake_shared_state(monkeypatch)
+    cur = _now_grid(60)
+    bars = _walk(cur - 10 * 60, 3, 60)
+    key = cs._version_key("BTCUSD", "1")
+    assert key not in store
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", bars, prefiltered=bars) == [b["t"] for b in bars]
+    v1 = store[key]
+    assert cs.persist_closed_bars(db_session, "BTCUSD", "1", bars, prefiltered=bars) == []   # 全已存在
+    assert store[key] == v1
+
+
+def test_window_never_syncs_without_shared_state(db_session, monkeypatch):
+    """单 worker（没配 Redis）：窗口从不回库补行（与从前一致）。"""
+    cur = _now_grid(300)
+    first = _bar(cur - 3000, o=1.0, h=2.0, l=0.5, c=1.5, v=9)
+    _seed(db_session, "5", [first], symbol="BTCUSD")
     monkeypatch.setattr(cs.shared_state, "enabled", lambda: False)
-    assert len(cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy)) == 1   # 单 worker：看不见
-    monkeypatch.setattr(cs.shared_state, "enabled", lambda: True)
-    assert cs.filter_tradeable_bars(db_session, "BTCUSD", "5", copy) == []       # 多 worker：补齐后拦下
+    cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [first])
+    other = _bar(cur - 1500, o=3.0, h=4.0, l=2.5, c=3.5, v=11)
+    _insert_behind_back(db_session, "BTCUSD", "5", other)
+    assert len(cs.filter_tradeable_bars(db_session, "BTCUSD", "5", [dict(other, t=cur - 300)])) == 1
 
 
 def test_window_dedup_survives_unique_constraint_from_another_writer(db_session):

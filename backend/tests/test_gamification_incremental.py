@@ -201,3 +201,61 @@ def test_loop_path_awards_same_as_direct_calls(db_session):
     assert judge_and_award_badges(db_session, u.id) == []
     assert db_session.query(UserTask).filter_by(user_id=u.id).count() == len(got_c)
     assert db_session.query(UserBadge).filter_by(user_id=u.id).count() == len(got_b)
+
+
+# ---- 水位存 Redis / watermarks in shared state ------------------------------------
+
+def _enable_fake_shared_state(monkeypatch):
+    store = {}
+    monkeypatch.setattr(loop_module.shared_state, "enabled", lambda: True)
+    monkeypatch.setattr(loop_module.shared_state, "kv_get", lambda k: store.get(k))
+    monkeypatch.setattr(loop_module.shared_state, "kv_set", lambda k, v, ttl=None: store.__setitem__(k, v))
+    return store
+
+
+def test_watermarks_survive_restart_via_shared_state(monkeypatch, loop_db):
+    """配了 Redis：重启（进程内变量清空）后首趟走增量；PASS_LOGIC_REV 变了则仍全量。"""
+    store = _enable_fake_shared_state(monkeypatch)
+    db = loop_db()
+    _user(db, "idle2@t.co", last_active=NOW - timedelta(days=3))
+    fresh = _user(db, "fresh2@t.co", last_active=datetime.now(timezone.utc)).id
+    db.close()
+    judged: list[str] = []
+    monkeypatch.setattr(loop_module, "judge_and_record_conditions",
+                        lambda db, uid, *a: judged.append(uid) or [])
+    monkeypatch.setattr(loop_module, "judge_and_award_badges", lambda db, uid, *a: [])
+
+    assert loop_module.run_gamification_pass()["full"] is True
+    assert any(k.startswith("gami:pass:") for k in store)
+
+    # 模拟重启：进程内变量清空
+    monkeypatch.setattr(loop_module, "_last_pass_started_at", None)
+    monkeypatch.setattr(loop_module, "_last_full_pass_day", None)
+    judged.clear()
+    r = loop_module.run_gamification_pass()
+    assert r["full"] is False and judged == [fresh]
+
+    # 显式 full=False 也走 Redis 水位，不再兜底成全量
+    monkeypatch.setattr(loop_module, "_last_pass_started_at", None)
+    assert loop_module.run_gamification_pass(full=False)["full"] is False
+
+    # 判定逻辑版本变了：旧水位作废，首趟全量
+    monkeypatch.setattr(loop_module, "_last_pass_started_at", None)
+    monkeypatch.setattr(loop_module, "_last_full_pass_day", None)
+    monkeypatch.setattr(loop_module, "PASS_LOGIC_REV", "2")
+    assert loop_module.run_gamification_pass()["full"] is True
+
+
+def test_unreadable_shared_state_falls_back_to_process_values(monkeypatch, loop_db):
+    monkeypatch.setattr(loop_module.shared_state, "enabled", lambda: True)
+
+    def _boom(*a, **k):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(loop_module.shared_state, "kv_get", _boom)
+    monkeypatch.setattr(loop_module.shared_state, "kv_set", _boom)
+    db = loop_db(); _user(db, "c@t.co", last_active=datetime.now(timezone.utc)); db.close()
+    monkeypatch.setattr(loop_module, "judge_and_record_conditions", lambda db, uid, *a: [])
+    monkeypatch.setattr(loop_module, "judge_and_award_badges", lambda db, uid, *a: [])
+    assert loop_module.run_gamification_pass()["full"] is True      # 没有任何水位：全量
+    assert loop_module.run_gamification_pass()["full"] is False     # 进程内水位照常推进

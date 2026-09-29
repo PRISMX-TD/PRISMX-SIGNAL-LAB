@@ -23,6 +23,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
+from app.core.rate_limit import limiter_options
 from app.core.security import decode_access_token
 from app.services import shared_state
 
@@ -64,7 +65,13 @@ def user_rate_key(request) -> str:
 # per-process — the backtest caps (6/min + 60/h on requests that can saturate a
 # core) divided by the worker count, with config.py's multi-worker gate none the
 # wiser because it only checks whether REDIS_URL is set.
-user_limiter = Limiter(key_func=user_rate_key, storage_uri=shared_state.redis_url() or None)
+# Redis 故障的处理参数与 rate_limit.limiter 共用（内存兜底 + 连接超时，见 limiter_options）。
+# Redis-failure options are shared with rate_limit.limiter (see limiter_options).
+user_limiter = Limiter(
+    key_func=user_rate_key,
+    storage_uri=shared_state.redis_url() or None,
+    **limiter_options(),
+)
 
 
 class BacktestBusy(Exception):

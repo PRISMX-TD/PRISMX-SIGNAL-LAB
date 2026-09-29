@@ -26,7 +26,9 @@ from app.models import (
     User,
     UserNotification,
 )
-from app.routers.announcements import get_announcement, get_popup_announcement, snooze_popup
+from app.routers.announcements import (
+    get_announcement, get_popup_announcement, invalidate_published_cache, list_announcements, snooze_popup,
+)
 from app.routers.notifications import mark_all_read, mark_notification_read, notification_feed
 from app.routers.tickets import admin_reply_to_ticket, create_ticket
 from app.schemas import AdminTicketReplyCreate, AnnouncementIn, TicketCreate
@@ -80,6 +82,9 @@ def _ann(db, *, published=True, popup=False, cover="https://img/x.png", title="�
     )
     db.add(a)
     db.commit()
+    # 与管理端写公告后的失效一致：已发布列表在 shared_cache 里，直写库的用例要自己作废。
+    # Mirror what an admin write does: the published list is cached, so direct DB writes drop it.
+    invalidate_published_cache()
     return a
 
 
@@ -435,3 +440,51 @@ def test_popup_without_cover_is_normalised_at_the_schema():
         AnnouncementIn(titleZh="x", coverImageUrl="https://i/x.png", popup=True, published=True).popup
         is True
     )
+
+
+# ---------- 已发布公告缓存 / published-announcements cache ----------
+
+
+def _count_announcement_selects(db):
+    from sqlalchemy import event
+    n = {"n": 0}
+
+    def _hook(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "FROM ANNOUNCEMENTS" in statement.upper():
+            n["n"] += 1
+
+    event.listen(db.get_bind(), "before_cursor_execute", _hook)
+    return n
+
+
+def test_published_list_and_popup_share_one_cached_read(db_session):
+    u = _user(db_session)
+    a = _ann(db_session, popup=True, title="大促")
+    n = _count_announcement_selects(db_session)
+    first = list_announcements(db=db_session, user=u, limit=100)
+    assert n["n"] == 1 and first.total == 1 and first.unreadCount == 1
+    assert first.items[0].id == a.id and first.items[0].read is False
+    # 再读列表 + 弹窗：都吃缓存，公告表零查询
+    again = list_announcements(db=db_session, user=u, limit=100)
+    got = get_popup_announcement(db_session, u)
+    assert n["n"] == 1
+    assert again.items[0].titleZh == "大促" and got is not None and got.id == a.id
+
+
+def test_published_cache_dropped_on_admin_writes(db_session, monkeypatch):
+    import asyncio
+    from app.routers import announcements as ann_mod
+
+    async def _inline(fn, *a, **k):     # 内存 SQLite 不能跨线程：线程池换成原地调用
+        return fn(*a, **k)
+
+    monkeypatch.setattr(ann_mod, "run_in_threadpool", _inline)
+    u = _user(db_session)
+    admin = _user(db_session, "adm@x.com", role="admin")
+    assert list_announcements(db=db_session, user=u, limit=100).total == 0   # 空列表也进缓存
+    body = AnnouncementIn(titleZh="新公告", titleEn="", summaryZh="", summaryEn="", blocks=[],
+                          coverImageUrl="", pinned=False, published=True, popup=False, notify=False)
+    out = asyncio.run(ann_mod.admin_create_announcement(body, db_session, admin))
+    assert list_announcements(db=db_session, user=u, limit=100).total == 1
+    ann_mod.admin_delete_announcement(out.id, db_session, admin)
+    assert list_announcements(db=db_session, user=u, limit=100).total == 0

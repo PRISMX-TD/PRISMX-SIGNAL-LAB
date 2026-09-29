@@ -32,6 +32,7 @@ can't become a drop point for arbitrary files (it is public, so accepting any
 file would amount to running an open file host).
 """
 import logging
+import struct
 import uuid
 
 import httpx
@@ -73,6 +74,56 @@ def _sniff(data: bytes) -> tuple[str, str]:
     raise UploadError("只支持 PNG / JPEG / GIF / WebP 图片 / Only PNG, JPEG, GIF and WebP images are supported")
 
 
+def _image_size(data: bytes, ext: str) -> tuple[int, int] | None:
+    """纯 Python 读图片头里的宽高（Pillow 没装）；读不出来返回 None。只读头部几十字节，
+    不解码像素。PNG：IHDR；GIF：逻辑屏幕；JPEG：扫 SOFn 标记；WebP：VP8 / VP8L / VP8X。
+    Read width/height from the header in pure Python (Pillow isn't installed); None when
+    it can't be read. Header bytes only, no pixel decoding."""
+    try:
+        if ext == "png" and len(data) >= 24 and data[12:16] == b"IHDR":
+            w, h = struct.unpack(">II", data[16:24])
+        elif ext == "gif" and len(data) >= 10:
+            w, h = struct.unpack("<HH", data[6:10])
+        elif ext == "jpg":
+            i, n = 2, len(data)
+            w = h = 0
+            while i + 9 < n:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marker = data[i + 1]
+                if marker == 0xFF:                       # 填充字节 / fill byte
+                    i += 1
+                    continue
+                if marker in (0xD8, 0x01) or 0xD0 <= marker <= 0xD7:   # 无长度的标记 / no-length markers
+                    i += 2
+                    continue
+                seg = struct.unpack(">H", data[i + 2:i + 4])[0]
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):   # SOF0..15（除 DHT/JPG/DAC）
+                    h, w = struct.unpack(">HH", data[i + 5:i + 9])
+                    break
+                i += 2 + seg
+        elif ext == "webp" and len(data) >= 25:
+            chunk = data[12:16]
+            if chunk == b"VP8 ":
+                w, h = struct.unpack("<HH", data[26:30])
+                w, h = w & 0x3FFF, h & 0x3FFF
+            elif chunk == b"VP8L":
+                b = data[21:25]
+                bits = b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)
+                w, h = (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+            elif chunk == b"VP8X" and len(data) >= 30:
+                w = int.from_bytes(data[24:27], "little") + 1
+                h = int.from_bytes(data[27:30], "little") + 1
+            else:
+                return None
+        else:
+            return None
+    except (struct.error, IndexError):
+        return None
+    return (w, h) if 0 < w <= 65535 and 0 < h <= 65535 else None
+
+
 def upload_image(data: bytes) -> str:
     """上传一张图片，返回可直接放进 <img src> 的公开 URL。
 
@@ -111,6 +162,12 @@ def upload_image(data: bytes) -> str:
                 # No overwrite: the key is a fresh UUID, so a collision means
                 # something else is wrong
                 "x-upsert": "false",
+                # 对象名是随机 UUID 且禁止覆盖，内容一辈子不变：让浏览器与 Supabase CDN 长期缓存。
+                # storage-api 从这个请求头读 cacheControl 存进对象元数据（裸 httpx 不发就按 no-cache 记）。
+                # The key is a random UUID and never overwritten, so the content is immutable:
+                # let browsers and the Supabase CDN cache it for a year. storage-api stores this
+                # header as the object's cacheControl (raw httpx sends none, so it'd be no-cache).
+                "Cache-Control": "max-age=31536000, immutable",
             },
             timeout=30.0,
         )
@@ -123,4 +180,12 @@ def upload_image(data: bytes) -> str:
         logger.warning("supabase storage rejected upload: %s %s", resp.status_code, resp.text[:300])
         raise UploadError("存储服务拒绝了上传，请检查存储桶配置 / storage rejected the upload, check the bucket configuration")
 
-    return f"{base}/storage/v1/object/public/{bucket}/{key}"
+    url = f"{base}/storage/v1/object/public/{bucket}/{key}"
+    # 宽高记进 URL 的 # 片段（不发给服务器、不影响缓存键；只存 URL 字符串，无需改库）：
+    # 前端据此给 <img> 设 width/height，页面不再跳版、正文图才敢懒加载。读不出就不加。
+    # Record the size in the URL fragment (never sent to the server, no effect on cache
+    # keys, no schema change): the frontend sets width/height from it. Omitted when unreadable.
+    size = _image_size(data, ext)
+    if size:
+        url += f"#w={size[0]}&h={size[1]}"
+    return url

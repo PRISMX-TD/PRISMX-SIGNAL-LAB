@@ -43,6 +43,7 @@ from app.schemas import (
     TranslateIn,
     TranslateOut,
 )
+from app.services import shared_cache
 from app.services.audit import log_change
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, require_admin
@@ -95,6 +96,46 @@ def _order_key(a: Announcement):
     return (0 if a.pinned else 1, -ts.timestamp() if isinstance(ts, datetime) else 0)
 
 
+# ---------- 已发布公告的共享缓存 / shared cache of published announcements ----------
+# 公告一年改不了几次，但铃铛面板、公告页、进站弹窗每次都整表读回、逐条解析富文本 JSON。
+# 已发布列表（按置顶/发布时间排好序、blocks 已校验）序列化成 dict 放进 shared_cache
+# （多 worker 共享）：TTL 兜底，管理员新建/编辑/删除提交后主动删键。缓存是全员同值的，
+# 所以不含任何按用户的字段（read 由列表接口现填）。
+# Published announcements change a few times a year, yet every bell open, list view and
+# app-entry popup re-read the table and re-parsed the rich-text JSON. The sorted list
+# (blocks already validated) is cached as dicts in shared_cache; admin create/update/
+# delete drop the key after commit and the TTL is the backstop. No per-user fields in
+# it — `read` is filled in per request.
+PUBLISHED_CACHE_KEY = "announcements:published"
+PUBLISHED_CACHE_TTL = 300
+
+
+def _published_payload(db: Session) -> list[dict]:
+    def _compute() -> list[dict]:
+        rows = db.query(Announcement).filter(Announcement.published.is_(True)).all()
+        rows.sort(key=_order_key)
+        out = []
+        for a in rows:
+            d = _to_out(a).model_dump(mode="json", exclude={"read"})
+            # 弹窗按「发布时间 / 创建时间」挑最新一条，排序键随缓存带上。
+            # The popup picks the newest by publish/create time; carry that sort key along.
+            ts = a.published_at or a.created_at
+            d["_sortTs"] = ts.timestamp() if isinstance(ts, datetime) else 0.0
+            out.append(d)
+        return out
+
+    return shared_cache.cached_json(PUBLISHED_CACHE_KEY, PUBLISHED_CACHE_TTL, _compute)
+
+
+def _out_from_cached(d: dict, read: bool) -> AnnouncementOut:
+    return AnnouncementOut(**{k: v for k, v in d.items() if k != "_sortTs"}, read=read)
+
+
+def invalidate_published_cache() -> None:
+    """管理端写公告并 commit 之后调用。/ Call after an admin write has committed."""
+    shared_cache.delete(PUBLISHED_CACHE_KEY)
+
+
 # ---------- 用户端 / user side ----------
 
 @router.get("", response_model=AnnouncementListOut)
@@ -103,15 +144,14 @@ def list_announcements(
     user: User = Depends(get_current_user),
     limit: int = Query(default=100, ge=1, le=200),
 ):
-    rows = db.query(Announcement).filter(Announcement.published.is_(True)).all()
-    rows.sort(key=_order_key)
+    rows = _published_payload(db)
     read_ids = {
         r[0] for r in db.query(AnnouncementRead.announcement_id)
         .filter(AnnouncementRead.user_id == user.id).all()
     }
-    unread = sum(1 for a in rows if a.id not in read_ids)
+    unread = sum(1 for a in rows if a["id"] not in read_ids)
     return AnnouncementListOut(
-        items=[_to_out(a, read=a.id in read_ids) for a in rows[:limit]],
+        items=[_out_from_cached(a, read=a["id"] in read_ids) for a in rows[:limit]],
         unreadCount=unread,
         total=len(rows),
     )
@@ -162,26 +202,20 @@ def get_popup_announcement(
             AnnouncementPopupSnooze.snooze_until > now,
         ).all()
     }
-    rows = (
-        db.query(Announcement)
-        .filter(
-            Announcement.published.is_(True),
-            Announcement.popup.is_(True),
-            Announcement.cover_image_url != "",
-        )
-        .all()
-    )
+    # 候选来自已发布公告的共享缓存（不再为每个用户每次进站查一遍公告表）；只剩两条按用户的小查询。
+    # Candidates come from the shared published cache; only the two per-user lookups hit the DB.
+    rows = [a for a in _published_payload(db) if a["popup"] and a["coverImageUrl"] != ""]
     skip = opened_ids | snoozed_ids
-    candidates = [a for a in rows if a.id not in skip]
+    candidates = [a for a in rows if a["id"] not in skip]
     if not candidates:
         return None
-    candidates.sort(key=lambda a: a.published_at or a.created_at or datetime.min, reverse=True)
+    candidates.sort(key=lambda a: a["_sortTs"], reverse=True)
     a = candidates[0]
     return AnnouncementPopupOut(
-        id=a.id,
-        titleZh=a.title_zh or "",
-        titleEn=a.title_en or "",
-        coverImageUrl=a.cover_image_url or "",
+        id=a["id"],
+        titleZh=a["titleZh"] or "",
+        titleEn=a["titleEn"] or "",
+        coverImageUrl=a["coverImageUrl"] or "",
     )
 
 
@@ -327,6 +361,7 @@ async def admin_create_announcement(
         log_change(db, admin.id, admin.id, "announcement:create", None, json.dumps({"id": a.id, "published": a.published}, ensure_ascii=False))
         db.commit()
         db.refresh(a)
+        invalidate_published_cache()
         return a
 
     a = await run_in_threadpool(_create_sync)
@@ -357,6 +392,7 @@ async def admin_update_announcement(
         log_change(db, admin.id, admin.id, "announcement:update", json.dumps({"published": was_published}), json.dumps({"id": a.id, "published": a.published}, ensure_ascii=False))
         db.commit()
         db.refresh(a)
+        invalidate_published_cache()
         return a, was_published
 
     a, was_published = await run_in_threadpool(_update_sync)
@@ -381,6 +417,7 @@ def admin_delete_announcement(
     db.delete(a)
     log_change(db, admin.id, admin.id, "announcement:delete", a.title_zh or a.title_en, None)
     db.commit()
+    invalidate_published_cache()
     return {"ok": True}
 
 

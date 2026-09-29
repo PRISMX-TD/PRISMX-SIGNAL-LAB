@@ -530,6 +530,8 @@ def unbind_gateway_account(
         raise HTTPException(status_code=404, detail="Gateway 账号不存在")
 
     mark_removed(db, row)
+    from app.services.trade_performance import invalidate_trade_caches
+    invalidate_trade_caches(user.id, [login])  # 绑定集合变了 / the bound set changed
 
     logger.info("Gateway 解绑: user=%s login=%s", user.id, login)
     return {"ok": True}
@@ -1515,6 +1517,10 @@ async def gateway_positions_loop() -> None:
                 verified = bool(leg.get("attributedByTicket"))
                 if upsert_leg(db, user_id, login, leg, verified) in ("inserted", "enriched"):
                     inserted += 1
+            if inserted:
+                # 新平仓落库：胜率 / 已平仓明细的 60 秒缓存作废 / drop the 60s caches
+                from app.services.trade_performance import invalidate_trade_caches
+                invalidate_trade_caches(user_id, [login])
 
         finally:
             db.close()

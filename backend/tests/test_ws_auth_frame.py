@@ -150,29 +150,27 @@ class _FakeManager:
         self.registered: list[str] = []
         self.unregistered: list[str] = []
 
+    bg_calls: list = []
+
+    def set_background(self, ws, background):
+        self.bg_calls = [*self.bg_calls, background]
+
     async def register_client(self, user_id, ws):
         self.registered.append(user_id)
 
     async def unregister_client(self, user_id, ws):
         self.unregistered.append(user_id)
 
-    def get_positions(self, user_id):
-        return []
+    # 建连补推：一次取齐（见 ConnectionManager.connect_snapshot_async）。snapshot 可被用例替换；
+    # snapshot_error 非空则取数时抛出。
+    snapshot: dict = {}
+    snapshot_error: Exception | None = None
 
-    async def get_positions_shared_async(self, user_id):
-        return []
-
-    def get_pending_orders(self, user_id):
-        return []
-
-    def get_quotes(self, user_id):
-        return []
-
-    async def get_pending_orders_shared_async(self, user_id):
-        return []
-
-    async def get_quotes_async(self, user_id):
-        return []
+    async def connect_snapshot_async(self, user_id):
+        self.snapshot_calls = getattr(self, "snapshot_calls", 0) + 1
+        if self.snapshot_error is not None:
+            raise self.snapshot_error
+        return dict(self.snapshot)
 
     @staticmethod
     def account_funds_from_positions(positions):
@@ -196,7 +194,6 @@ def _authed(monkeypatch) -> _FakeManager:
     fake = _FakeManager()
     monkeypatch.setattr(ws_mod, "_authenticate", lambda token: "user-1" if token == "valid" else None)
     monkeypatch.setattr(ws_mod, "manager", fake)
-    monkeypatch.setattr(ws_mod.quotes_store, "get_all", lambda: [])
     return fake
 
 
@@ -229,3 +226,119 @@ def test_non_ping_frames_are_ignored(monkeypatch, frame):
     ws = _ScriptedWS([frame])
     _run(ws)
     assert ws.sent == [{"type": "AUTH_OK", "userId": "user-1"}], f"对 {frame!r} 回了帧"
+
+
+# ---------- 建连补推 / connect catch-up ----------
+
+
+def test_catch_up_frames_come_from_one_snapshot_call_in_order(monkeypatch):
+    """补推四帧来自同一次 connect_snapshot_async（一个 pipeline），顺序固定：
+    AUTH_OK -> POSITIONS(带 funds) -> PENDING_ORDERS -> QUOTES -> GLOBAL_QUOTES；空的那份不发。"""
+    fake = _authed(monkeypatch)
+    fake.snapshot = {
+        "positions": [{"login": "1", "profit": 2.0}],
+        "pending": [{"ticket": 9}],
+        "quotes": [],
+        "global_quotes": [{"symbol": "XAUUSD"}],
+    }
+    ws = _ScriptedWS([])
+    _run(ws)
+    assert [f["type"] for f in ws.sent] == ["AUTH_OK", "POSITIONS", "PENDING_ORDERS", "GLOBAL_QUOTES"]
+    assert ws.sent[1]["data"] == [{"login": "1", "profit": 2.0}] and "funds" in ws.sent[1]
+    assert fake.snapshot_calls == 1
+
+
+def test_a_failing_catch_up_fetch_keeps_the_connection(monkeypatch):
+    """Redis 抖动时取数失败：只跳过补推，连接留着、PING 照回 PONG——不能「鉴权成功 -> 异常关闭 ->
+    300ms 后重连」形成重连风暴。"""
+    fake = _authed(monkeypatch)
+    fake.snapshot_error = ConnectionError("redis is down")
+    ws = _ScriptedWS(['{"type":"PING"}'])
+    _run(ws)
+    assert ws.sent == [{"type": "AUTH_OK", "userId": "user-1"}, {"type": "PONG"}]
+    assert fake.unregistered == ["user-1"]        # 是被正常断开，不是被异常踢掉
+
+
+def test_a_dead_socket_during_catch_up_still_unregisters(monkeypatch):
+    """发送不包 try：socket 已死时发送异常照常冒出去走 finally 注销，不能把死连接留在名单里。"""
+    fake = _authed(monkeypatch)
+    fake.snapshot = {"positions": [{"login": "1", "profit": 1.0}]}
+
+    class _DiesOnPositions(_ScriptedWS):
+        async def send_json(self, data):
+            if data.get("type") == "POSITIONS":
+                raise RuntimeError("socket closed")
+            await super().send_json(data)
+
+    _run(_DiesOnPositions([]))
+    assert fake.registered == ["user-1"] and fake.unregistered == ["user-1"]
+
+
+def test_connection_quality_is_recorded_after_auth_ok_and_before_disconnect(monkeypatch):
+    """连接质量记账不再卡在 AUTH_OK 之前；但 record_connect 一定先于 record_disconnect 落地，
+    连接秒断也不留幽灵记录。"""
+    _authed(monkeypatch)
+    events: list[str] = []
+
+    class _SpyWS(_ScriptedWS):
+        async def send_json(self, data):
+            events.append("send:" + data["type"])
+            await super().send_json(data)
+
+    def spy(name):
+        def fn(*a, **kw):
+            events.append(name)
+        fn.__name__ = name
+        return fn
+
+    monkeypatch.setattr(ws_mod.net_quality, "record_connect", spy("record_connect"))
+    monkeypatch.setattr(ws_mod.net_quality, "record_disconnect", spy("record_disconnect"))
+    _run(_SpyWS([]))
+    assert events[0] == "send:AUTH_OK"
+    assert events.index("record_connect") < events.index("record_disconnect")
+    assert events[-1] == "record_disconnect"
+
+
+def test_heartbeat_bookkeeping_uses_the_anyio_pool_not_the_default_executor(monkeypatch):
+    """每个 PING 的记账走 anyio 线程池（run_blocking），不再用 asyncio.to_thread（默认 executor 只有 6 条）。"""
+    _authed(monkeypatch)
+    used = []
+
+    async def fake_run_blocking(fn, *args):
+        used.append(getattr(fn, "__name__", str(fn)))
+
+    def no_to_thread(*a, **kw):
+        raise AssertionError("不该走 asyncio.to_thread")
+
+    monkeypatch.setattr(ws_mod, "run_blocking", fake_run_blocking)
+    monkeypatch.setattr(asyncio, "to_thread", no_to_thread)
+    _run(_ScriptedWS(['{"type":"PING","rtt":40}']))
+    assert "record_sample" in used and "record_connect" in used and "record_disconnect" in used
+
+
+# ---------- 鉴权走缓存 / authentication from the cached {tv, d} ----------
+
+
+def test_authenticate_uses_the_cached_state_and_rejects_stale_or_disabled(monkeypatch):
+    """_authenticate 只信 get_auth_state 的 {tv, d}：tv 对得上放行；tv 不符、已停用、用户不存在都拒。"""
+    from app.core.security import create_access_token
+
+    states = {
+        "ok": {"tv": 3, "d": False},
+        "banned": {"tv": 0, "d": True},
+    }
+    monkeypatch.setattr(ws_mod, "get_auth_state", lambda uid: states.get(uid))
+    assert ws_mod._authenticate(create_access_token("ok", 3)) == "ok"
+    assert ws_mod._authenticate(create_access_token("ok", 2)) is None       # 改密之前签的旧 token
+    assert ws_mod._authenticate(create_access_token("banned", 0)) is None   # 已停用
+    assert ws_mod._authenticate(create_access_token("ghost", 0)) is None    # 用户不存在
+    assert ws_mod._authenticate("not-a-jwt") is None
+
+
+def test_ping_bg_flag_marks_and_clears_background(monkeypatch):
+    fake = _authed(monkeypatch)
+    ws = _ScriptedWS(['{"type":"PING","bg":true}', '{"type":"PING"}',
+                      '{"type":"PING","bg":false,"rtt":30}', '{"type":"PING","bg":"yes"}'])
+    _run(ws)
+    assert fake.bg_calls == [True, False, False, False]
+    assert ws.sent[1:] == [{"type": "PONG"}] * 4
