@@ -31,9 +31,13 @@ from app.services.gateway_binding import (
     mark_removed, not_removed,
 )
 from app.services.gateway_client import (
+    batch_available as gw_batch_available,
     get_account as gw_get_account,
+    get_accounts_batch as gw_get_accounts_batch,
     get_deals as gw_get_deals,
+    get_deals_batch as gw_get_deals_batch,
     get_positions as gw_get_positions,
+    get_positions_batch as gw_get_positions_batch,
     run_on_main_loop,
     verify_account as gw_verify,
 )
@@ -740,6 +744,20 @@ class EventQueueLease:
 # API round-trip, so throttle per account instead of hitting it every 2s.
 GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
 
+# 批量预取总开关。为 True 且网关 /health 声明 batchSupported 时，慢拍开头把本拍要读的
+# 持仓 / 资金 / 常规窗口成交各用一次批量调用取回，放进临时缓存；随后每个用户的处理逻辑
+# 一字不改，只是「读」先看缓存、缓存没有（批量不可用、失败、该账号没命中）就照旧逐人读。
+# 旧网关不声明 batchSupported，这条路径就从不启动。设为 False 即整体关闭、行为回到批量出现之前。
+# Master switch for batch prefetch. With it on and the gateway advertising batchSupported,
+# the slow tick starts by fetching this tick's positions / funds / regular-window deals with
+# one batch call each into a scratch cache; each user's handling is unchanged, its reads just
+# look at the cache first and fall back to the per-login call on any miss. Old gateways never
+# advertise batchSupported, so the path never starts. False restores the pre-batch behaviour.
+GATEWAY_BATCH_ENABLED = True
+# 预取结果的有效期（秒）。慢拍 2 秒一拍，预取结果只该在同一拍里被用掉。
+# How long a prefetched value may be used; it belongs to the tick that fetched it.
+GATEWAY_PREFETCH_MAX_AGE = 4.0
+
 # 挂单快照的刷新间隔（按用户计时）。
 #
 # 比持仓那 2 秒慢得多，因为挂单本来就不会自己动：它只在用户下单 / 撤单 / 触发成交
@@ -1255,8 +1273,21 @@ async def _read_positions(login: str) -> tuple[list[dict], bool]:
     Kept at module level rather than nested in the loop so it can be tested.
     """
     positions, err = await gw_get_positions(int(login))
+    return _position_rows(login, positions, err)
+
+
+def _position_rows(login: str, positions, err: str) -> tuple[list[dict], bool]:
+    """_read_positions 的映射与日志部分，单人读与批量预取共用一份。
+    The mapping half of _read_positions, shared by the per-login read and batch prefetch."""
     if err:
-        logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+        # read_busy = 网关读通道全忙、主动放弃本次读取，属预期过载信号（gateway_client
+        # 已限频告警），沿用上一帧即可，不再每拍一条 warning。
+        # read_busy is the gateway declining under load (gateway_client already logs it,
+        # rate-limited); the previous frame stands, so no per-tick warning here.
+        if err == "read_busy":
+            logger.debug("Gateway 持仓读取跳过(read_busy) login=%s", login)
+        else:
+            logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
         return [], False
 
     return [
@@ -1571,6 +1602,20 @@ async def gateway_positions_loop() -> None:
     # don't scan the same account twice.
     deals_in_flight: set[str] = set()
 
+    # 慢拍开头批量预取的结果：kind -> {login: (取回时刻, 值)}。见 GATEWAY_BATCH_ENABLED。
+    # 取用即删；超过 GATEWAY_PREFETCH_MAX_AGE 的当作没有。
+    # Batch-prefetch scratch cache: kind -> {login: (fetched_at, value)}; consumed on use,
+    # stale entries ignored.
+    prefetch: dict[str, dict[str, tuple[float, object]]] = {"pos": {}, "acc": {}, "deals": {}}
+
+    def _take_prefetch(kind: str, login: str):
+        hit = prefetch[kind].pop(login, None)
+        if hit is None:
+            return None
+        if time.monotonic() - hit[0] > GATEWAY_PREFETCH_MAX_AGE:
+            return None
+        return hit[1]
+
     # 一轮内限制同时在飞的用户数，避免把 gateway 的单连接打满。
     # Cap in-flight users per tick so we don't saturate the gateway's single link.
     sem = asyncio.Semaphore(GATEWAY_MAX_CONCURRENT_USERS)
@@ -1637,7 +1682,7 @@ async def gateway_positions_loop() -> None:
         except Exception:
             logger.exception("gateway auto_manage task failed (user=%s)", user_id)
 
-    async def _scan_deals(user_id: str, login: str) -> None:
+    async def _scan_deals(user_id: str, login: str, use_prefetch: bool = False) -> None:
         """拉取并入库一个账号的平仓明细。
 
         快拍（收到成交事件，即时）与慢拍（定时兜底）共用这一份实现——两处各写一遍
@@ -1672,14 +1717,25 @@ async def gateway_positions_loop() -> None:
             # 里"更早"，窗口起点要再往前让出这段。
             # Likewise `from`: with a server clock behind UTC (negative offset) a
             # fresh close sits "earlier" in the server frame, so the start moves back.
-            lookback = GATEWAY_DEALS_CATCHUP_SECONDS if first_scan else GATEWAY_DEALS_LOOKBACK_SECONDS
-            if first_scan and await run_in_threadpool(_needs_deep_backfill, user_id, login):
-                lookback = GATEWAY_DEALS_DEEP_BACKFILL_SECONDS
-                logger.info("Gateway 平仓明细一次性回扫近一年补齐 MT5 字段 login=%s", login)
-            from_unix = int(time.time()) - lookback - int(max(0.0, -cached_server_offset(login)))
-            deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
+            # 只有定时兜底扫描（use_prefetch）且不是首扫时才用慢拍开头批量取回的成交：
+            # 事件触发的扫描要的是刚发生的那一笔，不能吃几秒前的预取结果。
+            # Only the timed fallback scan of a non-first scan uses the tick's batch result;
+            # event-triggered scans want the deal that just happened, not a seconds-old fetch.
+            pre_deals = _take_prefetch("deals", login) if (use_prefetch and not first_scan) else None
+            if pre_deals is not None:
+                deals, derr = pre_deals
+            else:
+                lookback = GATEWAY_DEALS_CATCHUP_SECONDS if first_scan else GATEWAY_DEALS_LOOKBACK_SECONDS
+                if first_scan and await run_in_threadpool(_needs_deep_backfill, user_id, login):
+                    lookback = GATEWAY_DEALS_DEEP_BACKFILL_SECONDS
+                    logger.info("Gateway 平仓明细一次性回扫近一年补齐 MT5 字段 login=%s", login)
+                from_unix = int(time.time()) - lookback - int(max(0.0, -cached_server_offset(login)))
+                deals, derr = await gw_get_deals(int(login), from_unix, to_unix)
             if derr:
-                logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
+                if derr == "read_busy":
+                    logger.debug("Gateway 成交历史读取跳过(read_busy) login=%s", login)
+                else:
+                    logger.warning("Gateway 成交历史读取失败 login=%s: %s", login, derr)
             elif deals:
                 n = await run_in_threadpool(
                     _save_closed_trades, user_id, login, deals
@@ -1737,6 +1793,120 @@ async def gateway_positions_loop() -> None:
         if mine:
             await push_balances_if_changed(user_id, mine)
 
+    def _skips_flat(login: str, now: float) -> bool:
+        """已确认空仓且订阅活着、又没到定期复查时间：这一拍不读持仓。
+        _process_user 与批量预取共用，免得两边对「读不读」的判断出现分歧。
+        Known flat, subscription alive, recheck not due: skip the read. Shared by
+        _process_user and the batch prefetch so they never disagree on what gets read."""
+        return bool(
+            subscription_state["alive"]
+            and login in known_flat
+            and now - last_positions_read.get(login, 0.0) < GATEWAY_FLAT_RECHECK_INTERVAL
+        )
+
+    async def _prefetch_batches(pairs: list[tuple[str, list[str]]]) -> None:
+        """慢拍开头：把本拍要读的持仓 / 资金 / 常规窗口成交各用一次批量调用取回。
+
+        只决定「预取哪些」，不改变任何处理逻辑：判断条件与 _process_user 逐项同源
+        （_skips_flat、last_account_refresh、last_deals_scan、scanned_once）。任何一块
+        批量失败或某个账号没命中，就是缓存里没有它，_process_user 照旧逐人读。
+        另有一道保险：批量说「空仓」而该账号之前不是已确认空仓时不采信，交给逐人读复核——
+        批量接口的语义没有在线上实测过，「凭空少了持仓」是这类改动最坏的后果。
+        首扫 / 深回扫的账号（不在 scanned_once）不进批量：它们各自有不同的回看窗口。
+        Decides only *what* to prefetch — the conditions mirror _process_user's — and changes
+        no handling. A failed chunk or a login without a hit just isn't cached, so the
+        per-login read runs as before. One more guard: an empty result for a login not
+        already known flat is not trusted and is re-read individually — batch semantics
+        have not been observed live, and positions vanishing is the worst outcome.
+        Logins still on their first / deep scan stay out (each has its own window).
+        """
+        now = time.monotonic()
+        for kind in prefetch:
+            prefetch[kind].clear()
+
+        logins: list[str] = []
+        for _uid, lgs in pairs:
+            for lg in lgs:
+                if lg not in logins:
+                    logins.append(lg)
+
+        pos_logins = [lg for lg in logins if not _skips_flat(lg, now)]
+        acc_logins = [
+            lg for lg in logins
+            if now - last_account_refresh.get(lg, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL
+        ]
+        scan_interval = (
+            GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED
+            if deal_subscription_state["alive"]
+            else GATEWAY_DEALS_SCAN_INTERVAL
+        )
+        deal_logins = [
+            lg for lg in logins
+            if lg in scanned_once
+            and lg not in deals_in_flight
+            and now - last_deals_scan.get(lg, 0.0) >= scan_interval
+        ]
+
+        async def _safe(coro):
+            try:
+                return await coro
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("gateway 批量预取异常，本拍退回逐人读取")
+                return None
+
+        async def _positions():
+            if not pos_logins:
+                return None
+            return await _safe(gw_get_positions_batch([int(x) for x in pos_logins]))
+
+        async def _accounts():
+            if not acc_logins:
+                return None
+            return await _safe(gw_get_accounts_batch([int(x) for x in acc_logins]))
+
+        async def _deals():
+            # 窗口起点按各账号自己的服务器时区偏移不同，按偏移分组，同组一次批量。
+            # Window start depends on each login's server offset; one batch per offset group.
+            if not deal_logins:
+                return None
+            groups: dict[int, list[str]] = {}
+            for lg in deal_logins:
+                extra = int(max(0.0, -cached_server_offset(lg)))
+                groups.setdefault(extra, []).append(lg)
+            merged: dict[str, tuple[list, str]] = {}
+            to_unix = int(time.time()) + 86400
+            for extra, lgs in groups.items():
+                from_unix = int(time.time()) - GATEWAY_DEALS_LOOKBACK_SECONDS - extra
+                got = await _safe(gw_get_deals_batch([int(x) for x in lgs], from_unix, to_unix))
+                if got is None:
+                    continue
+                for lg, val in got.items():
+                    merged[str(lg)] = val
+            return merged
+
+        pos_res, acc_res, deal_res = await asyncio.gather(_positions(), _accounts(), _deals())
+        stamp = time.monotonic()
+
+        if pos_res:
+            for lg_int, (plist, err) in pos_res.items():
+                lg = str(lg_int)
+                if err:
+                    continue  # 逐人读会重读并记日志 / the per-login read retries and logs
+                rows, _ok = _position_rows(lg, plist, "")
+                if not rows and lg not in known_flat:
+                    continue
+                prefetch["pos"][lg] = (stamp, rows)
+        if acc_res:
+            for lg_int, acc in acc_res.items():
+                if acc is not None:
+                    prefetch["acc"][str(lg_int)] = (stamp, acc)
+        if deal_res:
+            for lg, (dlist, err) in deal_res.items():
+                if not err:
+                    prefetch["deals"][lg] = (stamp, (dlist, ""))
+
     async def _process_user(user_id: str, logins: list[str]) -> None:
         """处理单个用户：刷资金、扫平仓、拉持仓、推送。
 
@@ -1756,7 +1926,9 @@ async def gateway_positions_loop() -> None:
                 if now - last_account_refresh.get(login, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
                     last_account_refresh[login] = now
                     try:
-                        acc_rsp = await gw_get_account(int(login))
+                        acc_rsp = _take_prefetch("acc", login)
+                        if acc_rsp is None:
+                            acc_rsp = await gw_get_account(int(login))
                         if acc_rsp is not None:
                             bal = await run_in_threadpool(
                                 _save_account_funds, user_id, login, acc_rsp
@@ -1781,7 +1953,7 @@ async def gateway_positions_loop() -> None:
                     else GATEWAY_DEALS_SCAN_INTERVAL
                 )
                 if now - last_deals_scan.get(login, 0.0) >= scan_interval:
-                    await _scan_deals(user_id, login)
+                    await _scan_deals(user_id, login, use_prefetch=True)
 
                 # 已确认空仓的账号跳过：没有持仓就没有浮盈要刷，这一次 MT5 往返
                 # 纯属浪费。安全性靠两点保证：
@@ -1799,15 +1971,15 @@ async def gateway_positions_loop() -> None:
                 # 丢了一条就不能让这个账号永远被跳过。
                 # Except for the periodic recheck: ADD events can be lost, and one lost
                 # event must not hide the account forever.
-                if (
-                    subscription_state["alive"]
-                    and login in known_flat
-                    and now - last_positions_read.get(login, 0.0) < GATEWAY_FLAT_RECHECK_INTERVAL
-                ):
+                if _skips_flat(login, now):
                     continue
 
                 last_positions_read[login] = now
-                rows, ok = await _read_positions(login)
+                pre_rows = _take_prefetch("pos", login)
+                if pre_rows is not None:
+                    rows, ok = pre_rows, True
+                else:
+                    rows, ok = await _read_positions(login)
                 if not ok:
                     # 读失败就放弃整轮推送，与快拍保持一致（见 _push_user_snapshot）。
                     # 只 continue 会把该账号的持仓从 data 里漏掉，然后照样推出去，
@@ -2120,6 +2292,25 @@ async def gateway_positions_loop() -> None:
                     # from the last tick are skipped; this tick waits at most
                     # GATEWAY_TICK_WAIT and a stuck user carries on in the background
                     # instead of holding everyone else. Failures are contained in _run_user.
+                    eligible = [(uid, lg) for uid, lg in targets if uid not in users_in_flight]
+                    # 上一拍没用完的预取结果作废：它只属于取回它的那一拍。
+                    # Leftovers from the previous tick are dropped; they belong to that tick.
+                    for kind in prefetch:
+                        prefetch[kind].clear()
+
+                    # 批量预取：网关声明支持才做，任何异常只是没有缓存、逐人读照旧。
+                    # Batch prefetch only when the gateway advertises it; any failure just
+                    # leaves the cache empty and the per-login reads run as before.
+                    if eligible and GATEWAY_BATCH_ENABLED and gw_batch_available():
+                        try:
+                            await _prefetch_batches(eligible)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            logger.exception("gateway 批量预取失败，本拍逐人读取")
+                            for kind in prefetch:
+                                prefetch[kind].clear()
+
                     spawned = []
                     for uid, lg in targets:
                         if uid in users_in_flight:

@@ -40,7 +40,12 @@ from app.services.gateway_binding import not_removed
 # Gateway execution and order payload helpers live in services now; auto-manage
 # and routers/bridge import them directly instead of this router. The
 # underscored aliases below are for this file's own call sites only.
-from app.services.gateway_execute import try_gateway_execute as _try_gateway_execute
+from app.services.gateway_execute import apply_trade_result, gateway_account, try_gateway_execute as _try_gateway_execute
+from app.services.gateway_client import (
+    TradeRsp,
+    get_trade_result as gw_trade_result,
+    run_on_main_loop,
+)
 from app.services.order_payload import (
     is_stale_pending,
     order_update_payload,
@@ -327,9 +332,7 @@ def list_orders(
         if is_stale_pending(o)
     ]
     if stale:
-        gw_pairs = _gateway_login_pairs(db, stale)
-        for o in stale:
-            void_stale_order(o, gateway=(o.user_id, o.mt5_login) in gw_pairs)
+        _void_stale_orders(db, stale)
         db.commit()
     limit = max(1, min(limit, 500))
     offset = max(0, offset)
@@ -521,6 +524,130 @@ def _gateway_login_pairs(db: Session, orders: list[Order]) -> set[tuple[str, str
         .all()
     )
     return {(r[0], r[1]) for r in rows}
+
+
+# Order.action -> 网关幂等记录里的动作名（gateway/HttpServer.cs 各 ExecuteIdempotent 调用）。
+# MODIFY（改持仓 SL/TP）网关不做幂等缓存，查不到，所以不在表里。
+# Order.action -> the gateway's idempotency action name. MODIFY has no cache entry.
+_GATEWAY_RESULT_ACTIONS = {
+    "ORDER": "open",
+    "CLOSE": "close",
+    "PENDING": "pending",
+    "CANCEL_PENDING": "cancel",
+    "MODIFY_PENDING": "modify-pending",
+}
+# 一次清扫 / 一次列订单最多问几笔网关；超出的这一轮先不作废，10 秒后的下一轮接着问。
+# Lookups per pass; the rest are left PENDING and picked up by the next sweep.
+_STALE_LOOKUPS_PER_PASS = 10
+_STALE_LOOKUP_TIMEOUT = 6.0
+
+
+def _settle_from_gateway(db: Session, o: Order) -> int:
+    """超时的网关 PENDING 单：先问网关这个 clientOrderId 到底有没有结果，有就按真实结果落库。
+
+    只在网关明确答 status=done 时才采信，且 retcode 必须是 MT5 / 网关的正式返回码
+    （或 ok=true）：网关内部异常（retcode=exception）、仍在执行（in_progress）、没有记录
+    （not_found）、旧网关不认识接口、连不上、超时——全部返回 False，调用方照旧走「结果未知」
+    文案。落库走 apply_trade_result，与下单当时收到同样回执时完全一致。网关那头只读。
+    返回 1 = 已按网关记录落库；0 = 网关答了但没有可采信的结果；-1 = 没问通（旧网关 / 连不上 /
+    超时 / 该动作没有幂等记录可查也算 0）。
+    Returns 1 settled, 0 answered without a usable verdict, -1 unreachable / old gateway.
+    A stale gateway PENDING order: ask the gateway what became of this clientOrderId and, if
+    it has a result, record the real outcome. Acted on only for status=done with a proper
+    retcode (or ok); every other answer — exception, in flight, unknown key, old gateway,
+    unreachable, slow — returns False and the caller keeps the "outcome unknown" wording.
+    Recording goes through apply_trade_result, identical to a live receipt.
+    """
+    action = _GATEWAY_RESULT_ACTIONS.get(o.action or "")
+    if action is None or not o.client_order_id or not o.mt5_login:
+        return 0
+    try:
+        login = int(o.mt5_login)
+    except (TypeError, ValueError):
+        return 0
+
+    try:
+        data = run_on_main_loop(
+            gw_trade_result(login, o.client_order_id, action, timeout=_STALE_LOOKUP_TIMEOUT),
+            timeout=_STALE_LOOKUP_TIMEOUT + 4.0,
+        )
+    except Exception as e:
+        logger.warning("查网关订单结果失败 %s: %s", o.client_order_id, e)
+        return -1
+    if not data:
+        return -1
+    if data.get("status") != "done":
+        return 0
+
+    retcode = str(data.get("retcode", "") or "")
+    trade_ok = bool(data.get("tradeOk"))
+    if not trade_ok and not retcode.startswith("MT_RET_"):
+        return 0
+
+    try:
+        rsp = TradeRsp(
+            ok=trade_ok,
+            retcode=retcode,
+            message=str(data.get("message", "") or ""),
+            deal=int(data.get("deal", 0) or 0),
+            order=int(data.get("order", 0) or 0),
+            price=float(data.get("price", 0.0) or 0.0),
+            position=int(data.get("position", 0) or 0),
+            replayed=True,
+        )
+    except (TypeError, ValueError):
+        return 0
+
+    apply_trade_result(o, rsp)
+    from app.services.gamification.stamp import is_stampable
+    if is_stampable(o.status, o.action) and o.trade_mode is None:
+        acc = gateway_account(db, o.mt5_login, o.user_id)
+        if acc is not None and acc.trade_mode is not None:
+            o.trade_mode = acc.trade_mode
+    logger.info(
+        "超时订单按网关记录落库: %s %s -> %s (retcode=%s)",
+        o.action, o.client_order_id, o.status, retcode,
+    )
+    return 1
+
+
+def _void_stale_orders(db: Session, stale: list[Order]) -> list[Order]:
+    """作废一批超时 PENDING 单，返回**实际被改动**的订单。
+
+    网关通道的单先按 _settle_from_gateway 问一次网关，问到成交 / 拒绝就落真实结果；问不到
+    才走原来的 void_stale_order（网关文案「结果未知，先核对持仓」）。一次最多问
+    _STALE_LOOKUPS_PER_PASS 笔，某次问不通（网关不可达 / 旧网关）就不再问这一批的其余
+    订单，直接按未知处理——不让一批订单把数据库连接攥在网络等待上。超出额度的网关单
+    这一轮保持 PENDING，由下一轮清扫接着处理。不提交事务，由调用方提交。
+    Void a batch of stale PENDING orders; returns those actually changed. Gateway-channel
+    orders are first settled from the gateway's record; only unanswered ones fall back to
+    void_stale_order. Lookups are capped per pass and stop after the first unreachable
+    answer so a batch never pins a DB connection on network waits; gateway orders beyond
+    the cap stay PENDING for the next sweep. No commit.
+    """
+    gw_pairs = _gateway_login_pairs(db, stale)
+    changed: list[Order] = []
+    lookups = 0
+    lookup_alive = True
+    for o in stale:
+        is_gw = (o.user_id, o.mt5_login) in gw_pairs
+        if is_gw and o.action in _GATEWAY_RESULT_ACTIONS and lookup_alive:
+            if lookups >= _STALE_LOOKUPS_PER_PASS:
+                continue
+            lookups += 1
+            verdict = _settle_from_gateway(db, o)
+            if verdict == 1:
+                changed.append(o)
+                continue
+            # -1 = 网关没问通：这一批后面的不再问。0 = 网关答了只是没有可采信的结果
+            # （没记录 / 仍在执行 / 内部异常），后面的照常问。
+            # -1 = unreachable: stop asking for the rest of this batch. 0 = it answered
+            # without a usable verdict; keep asking.
+            if verdict < 0:
+                lookup_alive = False
+        void_stale_order(o, gateway=is_gw)
+        changed.append(o)
+    return changed
 
 
 def _bound_logins(db: Session, user_id: str) -> list[str]:
@@ -1121,10 +1248,7 @@ async def stale_order_monitor_loop() -> None:
             if stale:
                 # 网关通道的单换成「结果未知，请先核对持仓」的文案（见 order_payload）。
                 # Gateway-channel orders get the "outcome unknown, verify positions" wording.
-                gw_pairs = _gateway_login_pairs(db, stale)
-                for o in stale:
-                    void_stale_order(o, gateway=(o.user_id, o.mt5_login) in gw_pairs)
-                    voided.append(o)
+                voided.extend(_void_stale_orders(db, stale))
             if voided:
                 db.commit()
             out = []

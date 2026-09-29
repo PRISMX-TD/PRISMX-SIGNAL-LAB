@@ -290,6 +290,43 @@ def _headers() -> dict:
     }
 
 
+# 网关读通道全忙时回 503 + error=read_busy（gateway/HttpServer.cs WriteReadBusy）。
+# Gateway answers 503 + error=read_busy when every query channel stays busy.
+READ_BUSY = "read_busy"
+# 批量读接口没有可用查询通道时的 503（批量不溢到交易连接，见 gateway/HttpServer.cs）。
+# 503 from the batch endpoints when no query channel can serve (batch never spills onto
+# the trading link).
+READ_UNAVAILABLE = "read_unavailable"
+_READ_BUSY_LOG_INTERVAL = 30.0
+_read_busy_last_log = 0.0
+_read_busy_suppressed = 0
+
+
+def _is_read_busy(resp: "httpx.Response") -> bool:
+    if resp.status_code != 503:
+        return False
+    try:
+        body = resp.json()
+    except Exception:
+        return False
+    return isinstance(body, dict) and body.get("error") in (READ_BUSY, READ_UNAVAILABLE)
+
+
+def _note_read_busy(url: str) -> None:
+    """read_busy 限频记一条 warning，其余计数。/ One rate-limited warning, the rest counted."""
+    global _read_busy_last_log, _read_busy_suppressed
+    now = time.monotonic()
+    if now - _read_busy_last_log >= _READ_BUSY_LOG_INTERVAL:
+        logger.warning(
+            "Gateway 读通道繁忙(read_busy)，沿用上一帧: %s（此前 %d 次已合并）",
+            url, _read_busy_suppressed,
+        )
+        _read_busy_last_log = now
+        _read_busy_suppressed = 0
+    else:
+        _read_busy_suppressed += 1
+
+
 async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
     """POST 到 gateway，返回 JSON dict。
 
@@ -362,7 +399,15 @@ async def _post(path: str, body: dict, timeout: float | None = None) -> dict:
         logger.error("Gateway 超时 (%.1fms): %s", (time.perf_counter() - started) * 1000, url)
         return {"ok": False, "error": "timeout", "message": "Gateway 响应超时", "status": 0}
     except httpx.HTTPStatusError as e:
-        logger.error("Gateway HTTP %s: %s %s", e.response.status_code, url, e.response.text[:300])
+        if _is_read_busy(e.response):
+            # 网关查询通道全忙、主动放弃这次读取：过载时每 2 秒一条 error 会刷屏，
+            # 且不是故障（调用方沿用上一帧）。限频降级为 warning。
+            # Gateway query channels saturated and the read was declined on purpose;
+            # an error line every 2s under load is noise and not a fault (callers keep
+            # the previous snapshot). Rate-limited warning instead.
+            _note_read_busy(url)
+        else:
+            logger.error("Gateway HTTP %s: %s %s", e.response.status_code, url, e.response.text[:300])
         # gateway 的 4xx 不是「网关坏了」，是有结构的业务拒绝：组不在白名单
         # (403 group_not_allowed)、账号不存在(404 + MTRetCode)、token 不对
         # (401)。把响应体原样带回给调用方，否则这些全部退化成同一句
@@ -431,6 +476,28 @@ async def get_account(login: int, timeout: float = READ_TIMEOUT) -> AccountRsp |
     data = await _post("/account", {"login": login}, timeout=timeout)
     if not data.get("ok"):
         return None
+    return _parse_account(data, login)
+
+
+def _parse_position(p: dict) -> PositionRsp:
+    """单人 /positions 与批量 /positions-batch 共用，两条路径的字段映射只此一份。
+    Shared by /positions and /positions-batch so the field mapping exists once."""
+    return PositionRsp(
+        ticket=p.get("ticket", 0),
+        symbol=p.get("symbol", ""),
+        side=p.get("side", ""),
+        volume=p.get("volume", 0.0),
+        price_open=p.get("priceOpen", 0.0),
+        price_current=p.get("priceCurrent", 0.0),
+        stop_loss=p.get("stopLoss", 0.0),
+        take_profit=p.get("takeProfit", 0.0),
+        profit=p.get("profit", 0.0),
+        comment=p.get("comment", ""),
+    )
+
+
+def _parse_account(data: dict, login: int) -> AccountRsp:
+    """单人 /account 与批量 /accounts-batch 共用。/ Shared by /account and /accounts-batch."""
     return AccountRsp(
         ok=True,
         login=data.get("login", login),
@@ -445,26 +512,33 @@ async def get_account(login: int, timeout: float = READ_TIMEOUT) -> AccountRsp |
     )
 
 
+def _parse_deal(d: dict) -> DealRsp:
+    """单人 /deals 与批量 /deals-batch 共用。/ Shared by /deals and /deals-batch."""
+    return DealRsp(
+        ticket=d.get("ticket", 0),
+        position_id=d.get("positionId", 0),
+        symbol=d.get("symbol", ""),
+        action=d.get("action", 0),
+        entry=d.get("entry", 0),
+        volume=d.get("volume", 0.0),
+        price=d.get("price", 0.0),
+        profit=d.get("profit", 0.0),
+        commission=d.get("commission", 0.0),
+        storage=d.get("storage", 0.0),
+        time=d.get("time", 0),
+        comment=d.get("comment", ""),
+        reason=d.get("reason", -1),
+        sl=d.get("sl", 0.0) or 0.0,
+        tp=d.get("tp", 0.0) or 0.0,
+    )
+
+
 async def get_positions(login: int, timeout: float = READ_TIMEOUT) -> tuple[list[PositionRsp], str]:
     """读取持仓列表。返回 (列表, 错误信息)。"""
     data = await _post("/positions", {"login": login}, timeout=timeout)
     if not data.get("ok"):
         return [], data.get("error", "unknown")
-    positions = []
-    for p in data.get("positions", []):
-        positions.append(PositionRsp(
-            ticket=p.get("ticket", 0),
-            symbol=p.get("symbol", ""),
-            side=p.get("side", ""),
-            volume=p.get("volume", 0.0),
-            price_open=p.get("priceOpen", 0.0),
-            price_current=p.get("priceCurrent", 0.0),
-            stop_loss=p.get("stopLoss", 0.0),
-            take_profit=p.get("takeProfit", 0.0),
-            profit=p.get("profit", 0.0),
-            comment=p.get("comment", ""),
-        ))
-    return positions, ""
+    return [_parse_position(p) for p in data.get("positions", [])], ""
 
 
 async def get_pending_orders(login: int, timeout: float = READ_TIMEOUT) -> tuple[list[PendingOrderRsp], str]:
@@ -611,26 +685,183 @@ async def get_deals(
     data = await _post("/deals", {"login": login, "from": from_unix, "to": to_unix}, timeout=timeout)
     if not data.get("ok"):
         return [], data.get("error", "unknown")
-    deals = []
-    for d in data.get("deals", []):
-        deals.append(DealRsp(
-            ticket=d.get("ticket", 0),
-            position_id=d.get("positionId", 0),
-            symbol=d.get("symbol", ""),
-            action=d.get("action", 0),
-            entry=d.get("entry", 0),
-            volume=d.get("volume", 0.0),
-            price=d.get("price", 0.0),
-            profit=d.get("profit", 0.0),
-            commission=d.get("commission", 0.0),
-            storage=d.get("storage", 0.0),
-            time=d.get("time", 0),
-            comment=d.get("comment", ""),
-            reason=d.get("reason", -1),
-            sl=d.get("sl", 0.0) or 0.0,
-            tp=d.get("tp", 0.0) or 0.0,
-        ))
-    return deals, ""
+    return [_parse_deal(d) for d in data.get("deals", [])], ""
+
+
+# ---------- 批量读（网关 /positions-batch、/accounts-batch、/deals-batch）----------
+#
+# 网关是手动部署的：后端先上线、网关还没换新的空窗期必然出现，所以批量只在网关 /health
+# 明确报 batchSupported=true 时才用（旧网关没有这个字段 = 不支持），失败时退避一段时间，
+# 调用方自己退回逐人接口。每个函数返回 None 表示「这次批量不可用」，绝不返回残缺结果。
+# The gateway is deployed by hand, so the backend is sometimes ahead of it: batch is used
+# only when /health says batchSupported=true (absent on old builds), backs off after a
+# failure, and callers fall back to the per-login calls. None means "batch unavailable
+# this time"; a partial result is never returned.
+
+# 一次批量调用最多带几个 login（网关上限 100，这里留余量；Manager 服务器对单次请求的
+# login 数可能有上限）。/ Max logins per batch call.
+BATCH_CHUNK = 50
+# 一次批量调用的时限。正常一次几百毫秒；到点就放弃、调用方退回逐人路径。
+# Per-call budget; give up and let the caller fall back.
+BATCH_TIMEOUT = 6.0
+# 批量失败（超时/网关报错/不认识接口）后暂停使用多久。read_busy 不算失败——那是网关在
+# 主动限流，退避也无济于事。
+# Pause after a batch failure. read_busy does not count: it is deliberate shedding.
+BATCH_BACKOFF_SECONDS = 60.0
+# /health 里的 batchSupported 多久没刷新就不再信（后台探活每 5 秒一次）。
+# A batchSupported reading older than this is not trusted (the monitor probes every 5s).
+BATCH_CAPABILITY_MAX_AGE = 30.0
+
+_batch_state: dict = {"supported": False, "seen_at": 0.0, "backoff_until": 0.0}
+
+
+def note_batch_capability(rsp: dict, now: float | None = None) -> None:
+    """后台探活每拿到一次 /health 就调用：记下网关是否声明支持批量。
+    Called by the health monitor on every /health reply."""
+    _batch_state["supported"] = bool(rsp.get("ok")) and bool(rsp.get("batchSupported"))
+    _batch_state["seen_at"] = time.monotonic() if now is None else now
+
+
+def batch_available(now: float | None = None) -> bool:
+    """现在能不能用批量：网关声明支持、声明足够新、且不在退避期。
+    没有后台探活（单测、脚本）时恒为 False，行为与批量出现之前完全一致。
+    Batch may be used: declared by the gateway, declared recently, not backing off.
+    Always False without the health monitor (tests, scripts)."""
+    now = time.monotonic() if now is None else now
+    return (
+        bool(_batch_state["supported"])
+        and now - _batch_state["seen_at"] < BATCH_CAPABILITY_MAX_AGE
+        and now >= _batch_state["backoff_until"]
+    )
+
+
+def _batch_failed(path: str, data: dict) -> None:
+    """一次批量调用没拿到可用结果：read_busy/read_unavailable 只是网关限流不退避，
+    其余（超时、网关旧版 404、502 …）退避一段时间。
+    read_busy / read_unavailable is the gateway shedding load and does not back off; any
+    other failure does."""
+    err = str(data.get("error", ""))
+    if err in (READ_BUSY, READ_UNAVAILABLE):
+        return
+    _batch_state["backoff_until"] = time.monotonic() + BATCH_BACKOFF_SECONDS
+    logger.warning("Gateway 批量读 %s 失败(%s)，%.0f 秒内退回逐人读取", path, err or "unknown", BATCH_BACKOFF_SECONDS)
+
+
+def _chunks(logins: list[int]) -> list[list[int]]:
+    return [logins[i:i + BATCH_CHUNK] for i in range(0, len(logins), BATCH_CHUNK)]
+
+
+async def _post_batch(path: str, logins: list[int], extra: dict | None = None) -> list[dict] | None:
+    """发一块批量请求，返回按网关 results 顺序的逐 login 字典；不可用返回 None。
+    Post one chunk; the per-login result dicts, or None when unusable."""
+    body = {"logins": ",".join(str(int(x)) for x in logins)}
+    if extra:
+        body.update(extra)
+    data = await _post(path, body, timeout=BATCH_TIMEOUT)
+    results = data.get("results")
+    if not data.get("ok") or not isinstance(results, list):
+        _batch_failed(path, data)
+        return None
+    return results
+
+
+async def get_positions_batch(logins: list[int]) -> dict[int, tuple[list[PositionRsp], str]] | None:
+    """一次读一批账号的持仓。返回 {login: (持仓列表, 错误信息)}；任何一块失败整体返回 None
+    （调用方退回逐人读取，不用残缺结果）。
+    Positions for many logins; {login: (positions, err)}, or None if any chunk failed."""
+    out: dict[int, tuple[list[PositionRsp], str]] = {}
+    for chunk in _chunks(logins):
+        results = await _post_batch("/positions-batch", chunk)
+        if results is None:
+            return None
+        for r in results:
+            try:
+                login = int(r.get("login", 0))
+            except (TypeError, ValueError):
+                continue
+            if login not in chunk:
+                continue
+            if not r.get("ok"):
+                out[login] = ([], str(r.get("error", "unknown")))
+                continue
+            out[login] = ([_parse_position(p) for p in r.get("positions", [])], "")
+    return out
+
+
+async def get_accounts_batch(logins: list[int]) -> dict[int, AccountRsp | None] | None:
+    """一次读一批账号的资料+资金。返回 {login: AccountRsp 或 None(该账号读不到)}；
+    任何一块失败整体返回 None。/ Accounts for many logins; None if any chunk failed."""
+    out: dict[int, AccountRsp | None] = {}
+    for chunk in _chunks(logins):
+        results = await _post_batch("/accounts-batch", chunk)
+        if results is None:
+            return None
+        for r in results:
+            try:
+                login = int(r.get("login", 0))
+            except (TypeError, ValueError):
+                continue
+            if login not in chunk:
+                continue
+            out[login] = _parse_account(r, login) if r.get("ok") else None
+    return out
+
+
+async def get_deals_batch(
+    logins: list[int], from_unix: int, to_unix: int,
+) -> dict[int, tuple[list[DealRsp], str]] | None:
+    """一次读一批账号在同一时间窗内的成交。时间语义同 get_deals（券商服务器墙钟，原样透传）。
+    Deals for many logins over one window; same clock semantics as get_deals."""
+    out: dict[int, tuple[list[DealRsp], str]] = {}
+    for chunk in _chunks(logins):
+        results = await _post_batch("/deals-batch", chunk, {"from": from_unix, "to": to_unix})
+        if results is None:
+            return None
+        for r in results:
+            try:
+                login = int(r.get("login", 0))
+            except (TypeError, ValueError):
+                continue
+            if login not in chunk:
+                continue
+            if not r.get("ok"):
+                out[login] = ([], str(r.get("error", "unknown")))
+                continue
+            out[login] = ([_parse_deal(d) for d in r.get("deals", [])], "")
+    return out
+
+
+# ---------- 查单结果（网关 GET /trade/result，只读）----------
+
+async def get_trade_result(
+    login: int, client_order_id: str, action: str, timeout: float = 8.0,
+) -> dict | None:
+    """问网关：这个 clientOrderId 的交易到底有没有结果。只读——网关只查幂等记录，不执行。
+
+    返回网关的 JSON（status = done / in_progress / not_found）；旧网关不认识这个接口、
+    连不上、超时都返回 None。调用方只在 status == "done" 时据此落库，其余一律按
+    「结果未知」处理。
+    Ask the gateway what became of this clientOrderId; read-only on its side (it only
+    peeks the idempotency record). None when the gateway is old, unreachable or slow;
+    callers act only on status == "done" and treat everything else as outcome unknown.
+    """
+    url = settings.GATEWAY_URL.rstrip("/") + "/trade/result"
+    params = {"login": str(int(login)), "clientOrderId": client_order_id, "action": action}
+    try:
+        if _client is not None:
+            resp = await _client.get(url, params=params, headers=_headers(), timeout=_timeout(timeout))
+        else:
+            async with httpx.AsyncClient(timeout=_timeout(timeout)) as client:
+                resp = await client.get(url, params=params, headers=_headers())
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+    except Exception as e:
+        logger.debug("Gateway 查单结果失败 %s: %s", client_order_id, e)
+        return None
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+    return data
 
 
 def _trade_rsp(data: dict) -> TradeRsp:
@@ -929,6 +1160,7 @@ async def gateway_health_monitor_loop() -> None:
                 rsp = await health_check()
                 ok = _probe_ok(rsp)
                 _record_probe(ok, time.monotonic(), "" if ok else _describe_probe(rsp))
+                note_batch_capability(rsp)
             except asyncio.CancelledError:
                 raise
             except Exception:
