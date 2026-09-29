@@ -7,7 +7,7 @@
 // prefilled from the signal. Form logic is order/useOrderForm, shared with the
 // chart modal and the docked ticket.
 import { useTranslation } from 'react-i18next'
-import { useGlobalQuotes } from '../store/live'
+import { useGlobalQuote, useQuotes } from '../store/live'
 import type { MT5Account, Quote, Signal } from '../api/types'
 import { brokerSymbol, calcCountdown } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
@@ -21,13 +21,18 @@ interface Props {
   accounts: MT5Account[]
   // 按交易商账户区分的报价：login -> {symbol: Quote}。选中哪个账户就用哪个交易商的报价。
   // Per-broker-account quotes: whichever account is selected drives which broker's quote is used.
-  quotesByAccount: Record<string, Record<string, Quote>>
+  // 可省略：省略时弹窗自己订阅（顶层页面不必为它订阅报价而每 0.5 秒整页重渲染）。
+  // Optional: when omitted the modal subscribes itself, so pages needn't subscribe just for it
+  // (and re-render the whole page every 0.5s).
+  quotesByAccount?: Record<string, Record<string, Quote>>
   onCancel: () => void
   onConfirm: OrderConfirm
 }
 
-export default function SlideOrderModal({ signal, accounts, quotesByAccount, onCancel, onConfirm }: Props) {
+export default function SlideOrderModal({ signal, accounts, quotesByAccount: quotesByAccountProp, onCancel, onConfirm }: Props) {
   const { t } = useTranslation()
+  const ctxAccountQuotes = useQuotes()
+  const quotesByAccount = quotesByAccountProp ?? ctxAccountQuotes
   // 不用 accounts.filter(a => a.online)：在线标志抖一下就会把切换器整个卸载，
   // 表现为"一点切换账号，弹窗就没了"。见 useStickyOnlineAccounts 的说明。
   // Not a plain online filter — a flickering flag would unmount the switcher mid-click.
@@ -35,13 +40,15 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount, onC
   // 兜底报价：网关账户没有按账户报价，取 EA 全站报价，按券商品种名（BTCUSDT → BTCUSD）查。
   // Fallback quote for gateway accounts (no per-account feed): the site-wide EA
   // feed, keyed by the broker's symbol name (BTCUSDT → BTCUSD).
-  const globalQuotes = useGlobalQuotes()
+  // 只订阅这一个品种：其它品种跳价不会让弹窗重渲染。
+  // Subscribe to this one symbol only: other symbols ticking won't re-render the modal.
+  const fallbackQuote = useGlobalQuote(brokerSymbol(signal.symbol))
   const form = useOrderForm({
     symbol: signal.symbol,
     side: signal.side === 'BUY' ? 'BUY' : 'SELL',
     accounts: availableAccounts,
     quotesByAccount,
-    fallbackQuote: globalQuotes[brokerSymbol(signal.symbol)],
+    fallbackQuote,
     refPrice: signal.entry,
     initialStopLoss: signal.stopLoss,
     initialTakeProfit: signal.takeProfit,

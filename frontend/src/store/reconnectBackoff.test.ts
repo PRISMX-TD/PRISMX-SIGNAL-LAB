@@ -31,3 +31,19 @@ describe('reconnectDelay', () => {
     }
   })
 })
+
+describe('reconnectDelay restart mode', () => {
+  it('restart: first ~1.5s then flat ~2s, both with +-50% jitter, no doubling', () => {
+    expect(reconnectDelay(0, 0.5, 'restart')).toBe(1500)
+    expect(reconnectDelay(0, 0, 'restart')).toBe(750)
+    expect(reconnectDelay(0, 0.999999, 'restart')).toBeLessThanOrEqual(2250)
+    expect(reconnectDelay(1, 0.5, 'restart')).toBe(2000)
+    expect(reconnectDelay(9, 0.5, 'restart')).toBe(2000)
+    expect(reconnectDelay(9, 0, 'restart')).toBe(1000)
+    expect(reconnectDelay(9, 0.999999, 'restart')).toBeLessThanOrEqual(3000)
+  })
+  it('default mode is unchanged', () => {
+    expect(reconnectDelay(0, 0.5)).toBe(300)
+    expect(reconnectDelay(2, 0.5, 'normal')).toBe(1200)
+  })
+})

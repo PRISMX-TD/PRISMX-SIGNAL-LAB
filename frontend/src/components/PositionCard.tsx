@@ -19,11 +19,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
-import { clientOrderId, displaySymbol, fmtLots, isLotOnStep, localizeApiError,
+import { displaySymbol, fmtLots, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, roundLots, snapLot } from '../api/utils'
 import type { Position } from '../api/types'
 import ConfirmModal from './ConfirmModal'
 import { useBackToClose } from '../utils/useBackToClose'
+import { createIdempotencyKeys } from '../utils/idempotencyKeys'
+import { useLive } from '../store/live'
 import { symbolMeta } from '../utils/symbolMeta'
 
 interface Props {
@@ -85,6 +87,11 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   // outright (see useBackToClose's comment).
   useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
   const [closeVol, setCloseVol] = useState(String(roundLots(p.volume)))
+  // 平仓 / 改单的幂等号：只在「没拿到任何响应」时复用，见 idempotencyKeys.ts。
+  // Idempotency ids for close / modify: reused only when no response was received.
+  const [idemKeys] = useState(createIdempotencyKeys)
+  // 回执并入本地订单列表，不再整页重拉 /orders / merge the receipt locally instead of refetching /orders
+  const { upsertOrder } = useLive()
   // 手数步长按品种取（原油 0.1，其余 0.01）：步长决定输入框的 step/min，
   // 也决定失焦时往下吸附到哪一档。/ Per-symbol lot step drives the input.
   const step = lotStep(p.symbol)
@@ -147,15 +154,20 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     if (closingTimer.current) window.clearTimeout(closingTimer.current)
     setClosing(true)
     setMode('view')
+    const idemKey = `close:${p.ticket}:${full ? 'full' : vol}`
+    let answered = false
     try {
       const res = await orderApi.close({
-        clientOrderId: clientOrderId(),
+        clientOrderId: idemKeys.acquire(idemKey),
         ticket: p.ticket,
         symbol: p.symbol,
         side: p.side,
         mt5Login: p.login ?? null,
         volume: full ? undefined : vol,
       })
+      answered = true
+      idemKeys.settle(idemKey)
+      upsertOrder(res)
       // 网关账号当场成交：给成交价；桥接账号只是收单：说"已发出"。卡保持压暗，
       // 直到持仓推送把它拿掉（全平）或手数更新（部分平仓时下一拍就放开）。
       // Gateway fills synchronously (show the price); bridge merely accepts. The
@@ -173,6 +185,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         else releaseLater()
       }
     } catch (e) {
+      if (!answered) idemKeys.afterThrow(idemKey, e)
       releaseNow()
       onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     }
@@ -185,9 +198,11 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       return
     }
     setBusy(true)
+    const idemKey = `modify:${p.ticket}:${sl}:${tp}`
+    let answered = false
     try {
       const res = await orderApi.modify({
-        clientOrderId: clientOrderId(),
+        clientOrderId: idemKeys.acquire(idemKey),
         ticket: p.ticket,
         symbol: p.symbol,
         side: p.side,
@@ -195,11 +210,15 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         stopLoss: parseFloat(sl) || 0,
         takeProfit: parseFloat(tp) || 0,
       })
+      answered = true
+      idemKeys.settle(idemKey)
+      upsertOrder(res)
       if (res.status === 'FILLED') onActionDone?.(t('positions.modified'), 'success')
       else if (res.status === 'REJECTED' || res.status === 'FAILED') onActionDone?.(res.message ? localizeApiError(res.message) : 'error', 'error')
       else onActionDone?.(t('positions.modifySent'), 'info')
       setMode('view')
     } catch (e) {
+      if (!answered) idemKeys.afterThrow(idemKey, e)
       onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
     } finally {
       setBusy(false)

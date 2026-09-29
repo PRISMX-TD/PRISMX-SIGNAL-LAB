@@ -3,7 +3,7 @@ import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, T
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
-import { API_BASE, reportApiFailure } from './apiBase'
+import { API_BASE, API_CANDIDATES, reportApiFailure } from './apiBase'
 
 export { API_BASE }
 
@@ -196,6 +196,23 @@ const DEFAULT_TIMEOUT_MS = 30_000
 // failed"; the former must not surface any message.
 export const ABORT_ERROR_NAME = 'AbortError'
 
+/** 服务器给出了 HTTP 响应（非 2xx）的错误：与「没拿到任何响应」的网络错误 / 超时区分开。
+ *  An error for a non-2xx HTTP response, distinct from network errors / timeouts where no
+ *  response was received. */
+export class ApiHttpError extends Error {
+  status: number
+  constructor(message: string, status: number) {
+    super(message)
+    this.name = 'ApiHttpError'
+    this.status = status
+  }
+}
+
+/** 这个异常是否来自一个真正拿到的 HTTP 响应 / whether the error came from a received HTTP response */
+export function hasHttpResponse(err: unknown): boolean {
+  return err instanceof ApiHttpError
+}
+
 /** 判断一个 catch 到的异常是否只是"请求被取消/超时"，据此决定要不要提示用户。
  *  Whether a caught error is merely a cancelled/timed-out request. */
 export function isAbortError(err: unknown): boolean {
@@ -212,7 +229,17 @@ export function isAbortError(err: unknown): boolean {
 export interface ApiRequestInit extends RequestInit {
   /** 毫秒；0 或负数表示不设超时 / milliseconds; 0 or negative disables the timeout */
   requestTimeoutMs?: number
+  /** 带幂等号（clientOrderId）的写请求：连接级失败（TypeError）时可安全重发一次，
+   *  后端按 clientOrderId 去重。 / Idempotent write (carries clientOrderId): safe to resend once
+   *  after a connection-level failure. */
+  idempotent?: boolean
 }
+
+// GET/HEAD 响应头 8 秒没到就并行探测备用入口（主域名被封时不必等满 30 秒超时）。
+// GET/HEAD whose headers haven't arrived after 8s probe the backup entry in parallel.
+export const HEADERS_GATE_MS = 8_000
+// 幂等写请求在入口没切换时的重发等待。 / Wait before resending an idempotent write.
+export const IDEMPOTENT_RETRY_DELAY_MS = 800
 
 // 把"调用方传来的 signal"与"本次超时"合成一个 signal。
 //
@@ -241,11 +268,13 @@ function withTimeout(external: AbortSignal | null | undefined, timeoutMs: number
     if (timer !== undefined) window.clearTimeout(timer)
     if (external) external.removeEventListener('abort', onExternalAbort)
   }
-  return { signal: controller.signal, cleanup }
+  return { signal: controller.signal, cleanup, abort: () => controller.abort() }
 }
 
 async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T> {
-  const { requestTimeoutMs, signal: callerSignal, ...init } = options
+  const { requestTimeoutMs, signal: callerSignal, idempotent, ...init } = options
+  const method = (init.method ?? 'GET').toUpperCase()
+  const isRead = method === 'GET' || method === 'HEAD'
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
@@ -259,14 +288,36 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const send = async () => {
-    const { signal, cleanup } = withTimeout(
+  // 8 秒门槛切换入口后，被我们 abort 掉的那条挂着的 fetch 会以 AbortError 结束；
+  // 用这个标记区分它与「调用方取消 / 30 秒超时」。
+  // After the 8s gate switches entry points we abort the hanging fetch ourselves; this flag
+  // tells that AbortError apart from a caller cancel / the 30s timeout.
+  let gateSwitched = false
+  const send = async (gate: boolean) => {
+    const { signal, cleanup, abort } = withTimeout(
       callerSignal,
       requestTimeoutMs === undefined ? DEFAULT_TIMEOUT_MS : requestTimeoutMs,
     )
+    let done = false
+    let gateTimer: number | undefined
+    if (gate && isRead && API_CANDIDATES.length > 1) {
+      gateTimer = window.setTimeout(() => {
+        const base = API_BASE
+        void reportApiFailure().then(() => {
+          // 探到了新入口：撤掉挂着的请求，交给 catch 用新 API_BASE 重发（写操作不走这里）。
+          // A new entry point won: cancel the hanging request; the catch resends on the new base.
+          if (!done && API_BASE !== base) {
+            gateSwitched = true
+            abort()
+          }
+        })
+      }, HEADERS_GATE_MS)
+    }
     try {
       return await fetch(`${API_BASE}/api${path}`, { ...init, headers, signal })
     } finally {
+      done = true
+      if (gateTimer !== undefined) window.clearTimeout(gateTimer)
       // 响应头一到就可以撤掉计时器：超时管的是"服务器迟迟不应答"，不是"响应体
       // 读得慢"。放在 finally 里保证抛错路径也清得掉，不留悬挂的定时器与监听器。
       // The timer is dropped as soon as headers arrive: the timeout guards against
@@ -277,21 +328,42 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   }
   let res: Response
   try {
-    res = await send()
+    res = await send(true)
   } catch (err) {
     // 网络层失败（连不上 / 超时；调用方自己取消的不算）：可能是当前入口被封，探测一次
-    // 换到能用的那个（apiBase.ts）。只有 GET/HEAD 自动重发一次——下单这类写操作的请求
-    // 可能已经到了后端、只是响应没回来，重发会重复执行，交给用户自己再点。
-    // Network-level failure (unreachable / timeout; not the caller's own abort): the current
-    // entry point may be blocked, so probe and switch (apiBase.ts). Only GET/HEAD are resent
-    // automatically — a write such as an order may have reached the backend with only the
-    // response lost, and resending would run it twice; the user retries those.
+    // 换到能用的那个（apiBase.ts）。GET/HEAD 自动重发一次；带幂等号的写请求（下单/平仓
+    // 等，后端按 clientOrderId 去重）入口切换后立即重发，入口没切但是连接级 TypeError
+    // 则等 800ms 重发一次；AbortError（超时/取消）与非幂等写请求绝不重发——请求可能已到
+    // 后端，重发会重复执行，交给用户自己再点。非幂等写请求不等探测，直接抛。
+    // Network-level failure (not the caller's own abort): the entry point may be blocked, so
+    // probe and switch (apiBase.ts). GET/HEAD resend once; idempotent writes (orders, deduped
+    // by clientOrderId) resend at once after a switch, or after 800ms on a connection-level
+    // TypeError; AbortError (timeout/cancel) and non-idempotent writes never resend — the
+    // request may have reached the backend. Non-idempotent writes don't await the probe.
     if (callerSignal?.aborted) throw err
-    const before = API_BASE
-    await reportApiFailure()
-    const method = (init.method ?? 'GET').toUpperCase()
-    if (API_BASE === before || (method !== 'GET' && method !== 'HEAD')) throw err
-    res = await send()
+    if (gateSwitched) {
+      res = await send(false)
+    } else {
+      // 写请求超时（AbortError）时请求可能仍在后端执行：即使幂等也不重发，只触发探测。
+      // A timed-out write may still be executing on the backend: never resent even if idempotent,
+      // only a probe is triggered.
+      const canResend = isRead || (idempotent === true && !isAbortError(err))
+      if (!canResend) {
+        void reportApiFailure()
+        throw err
+      }
+      const before = API_BASE
+      await reportApiFailure()
+      if (API_BASE !== before) {
+        res = await send(false)
+      } else if (!isRead && err instanceof TypeError) {
+        await new Promise((r) => window.setTimeout(r, IDEMPOTENT_RETRY_DELAY_MS))
+        if (callerSignal?.aborted) throw err
+        res = await send(false)
+      } else {
+        throw err
+      }
+    }
   }
   // 滑动续期：后端在 token 剩余有效期不足一半时经此头下发新 token，
   // 静默替换本地 token，活跃用户不再每天被踢回登录页。
@@ -367,7 +439,7 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
     // confirms a disabled account; every other 403 (beta gates, non-PRO,
     // non-admin) stays an ordinary error for its call site to degrade.
     if (res.status === 403) checkAccountDisabled(path, detail)
-    throw new Error(detail)
+    throw new ApiHttpError(detail, res.status)
   }
   // 204 / 空体：成功但没有内容（邀请点击打点、将来任何"只需知道成功"的端点）。
   // 以前这里无条件 res.json()，空体会抛 SyntaxError，逼得调用方绕开本封装用裸
@@ -476,6 +548,20 @@ export const quoteApi = {
   list: () => request<{ quotes: Quote[] }>('/quotes'),
 }
 
+// Dashboard 首屏合并接口：每段与对应单独接口响应相同，失败段为 null 并列入 failed。
+// Merged first-screen endpoint: each section equals its standalone response; a failed one is null and listed in failed.
+export interface BootstrapResponse {
+  signals: { signals: Signal[] } | null
+  accounts: { accounts: MT5Account[]; accountLimit: number | null; brokerLock: BrokerLock } | null
+  trends: { trends: Trend[] } | null
+  quotes: { quotes: Quote[] } | null
+  symbols: { symbols: string[] } | null
+  failed?: string[]
+}
+export const bootstrapApi = {
+  get: () => request<BootstrapResponse>('/bootstrap'),
+}
+
 // 当前活跃品种：EA 的 InpSymbols 实际在推什么，就返回什么，不是写死的列表。
 // 报价表/图表选择器/仪表盘英雄板都应以此为准渲染。
 // Currently active symbols: whatever the EA's InpSymbols is actually
@@ -566,6 +652,7 @@ export const orderApi = {
     request<Order>('/orders', {
       method: 'POST',
       body: JSON.stringify(payload),
+      idempotent: true,
       requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   // 改一张真实的 MT5 挂单：触发价 / 止损 / 止盈。**省略哪一项就保留哪一项**——
@@ -586,6 +673,7 @@ export const orderApi = {
     request<Order>('/orders/modify-pending', {
       method: 'POST',
       body: JSON.stringify(payload),
+      idempotent: true,
       requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   // 撤一张真实的 MT5 挂单（按券商票号）。与 orderApi.cancel 不是一回事：那个撤的
@@ -601,6 +689,7 @@ export const orderApi = {
     request<Order>('/orders/cancel-pending', {
       method: 'POST',
       body: JSON.stringify(payload),
+      idempotent: true,
       requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   close: (payload: {
@@ -614,6 +703,7 @@ export const orderApi = {
     request<Order>('/orders/close', {
       method: 'POST',
       body: JSON.stringify(payload),
+      idempotent: true,
       requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   // 一键平仓：后端按自己那份持仓快照排指令，前端不回传持仓列表。
@@ -624,6 +714,7 @@ export const orderApi = {
     request<CloseAllResult>('/orders/close-all', {
       method: 'POST',
       body: JSON.stringify(payload),
+      idempotent: true,
     }),
   modify: (payload: {
     clientOrderId: string
@@ -637,6 +728,7 @@ export const orderApi = {
     request<Order>('/orders/modify', {
       method: 'POST',
       body: JSON.stringify(payload),
+      idempotent: true,
       requestTimeoutMs: TRADE_TIMEOUT_MS,
     }),
   cancel: (id: string) => request<Order>(`/orders/${id}/cancel`, { method: 'POST' }),

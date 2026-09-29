@@ -32,6 +32,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { safeHttpUrl } from '../utils/safeUrl'
+import { imageDims } from '../utils/richText'
 import { signalApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
 import {
@@ -120,7 +121,11 @@ export default function StrategyGuidePage() {
 
       <div className="guide-detail-body">
         <article className="guide-article">
-          {img && <img src={img} alt={name} className="guide-hero-img" />}
+          {/* 有 # 片段尺寸时带上 width/height 提前占位；hero 图宽度是 100%（CSS 定），
+              不设 maxWidth。缺失（老图 / 外链）原样渲染。
+              With a fragment size, width/height reserve the box early; the hero is
+              width:100% by CSS so no maxWidth. Missing sizes render as before. */}
+          {img && <img src={img} alt={name} className="guide-hero-img" {...(imageDims(img) ?? {})} />}
           <StrategyDetail strategy={strategy} isZh={isZh} />
         </article>
 

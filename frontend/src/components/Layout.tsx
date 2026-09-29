@@ -24,6 +24,7 @@ import ConfirmModal from './ConfirmModal'
 import AnnouncementPopup from './AnnouncementPopup'
 import { useBackToClose } from '../utils/useBackToClose'
 import { reportPageView } from '../utils/pageTracking'
+import { onForeground } from '../utils/appVisibility'
 
 // 桌面主导航项。选中态此前是一条「紫 → 青」的渐变下划线：那条青色是全站唯一
 // 出现青的地方，一个孤立的第二品牌色，而两点渐变在 2px 高、几十像素宽的横条上
@@ -630,7 +631,7 @@ export default function Layout() {
     // self-heal on re-activation rather than waiting for a full page reload.
     let lastPerm: NotificationPermission = Notification.permission
     const onVisible = () => {
-      if (!document.hidden) {
+      {
         // 权限在后台被系统撤销（iOS 更新后偶发）
         // Permission was revoked while backgrounded (seen after iOS updates)
         if (Notification.permission !== lastPerm) {
@@ -665,11 +666,14 @@ export default function Layout() {
         if (!cancelled && Notification.permission === "granted") void report()
       }
     }
-    document.addEventListener("visibilitychange", onVisible)
+    // 统一的回前台订阅（含 App 壳事件，2 秒去重）；原来只听 visibilitychange，故不监听 focus。
+    // Unified return-to-foreground subscription (incl. App-shell events, 2s de-dupe); the old code
+    // only listened to visibilitychange, so focus stays off.
+    const offForeground = onForeground(onVisible, undefined, { focus: false })
     return () => {
       cancelled = true
       navigator.serviceWorker.removeEventListener("message", onSwMsg)
-      document.removeEventListener("visibilitychange", onVisible)
+      offForeground()
     }
   }, [])
 

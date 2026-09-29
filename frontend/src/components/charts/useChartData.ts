@@ -9,11 +9,15 @@ import type { Candle } from '../../api/types'
 import type { DayStats } from './SymbolHeader'
 import {
   FOLLOW_LIVE_SLACK_BARS,
-  HISTORY_FIRST_PAGE, HISTORY_PAGE_SIZE, HISTORY_PREFETCH_BARS, MAX_CLIENT_BARS, POLL_MS, STALE_MS,
+  HISTORY_FIRST_PAGE, HISTORY_PAGE_SIZE, HISTORY_PREFETCH_BARS, MAX_CLIENT_BARS, POLL_MS, POLL_SLOW_MS, STALE_MS, WS_FRESH_MS,
+  BOUNDARY_RETRIES, BOUNDARY_RETRY_MS, nextBoundaryPollDelayMs,
   computeDayStats, toLwPoint,
 } from './chartConfig'
 import type { ChartEngine } from './useChartEngine'
 import { keepIfEqual } from '../../store/keepIfEqual'
+import { netQuality } from '../../store/netQuality'
+import { isAppHidden } from '../../utils/appVisibility'
+import { startPolling } from '../../utils/usePollWhileVisible'
 
 // digits：价格轴小数位，由 ChartsPage 按「券商报价 digits 优先、兜底表其次」解析好
 // 后传入（以前这里自己查那张 7 条的写死表，表外品种的价格轴 minMove 被压成 0.01，
@@ -238,8 +242,8 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)
 
-    const poll = () => {
-      chartApi.latest(symbol, interval).then((r) => {
+    const poll = (): Promise<void> => {
+      return chartApi.latest(symbol, interval).then((r) => {
         if (!alive) return
         // 最新一根用券商 bid 做收盘价，免得每 2 秒被 K 线库的收盘价拽回去。
         // The newest bar takes the broker bid as close so the poll doesn't yank it back.
@@ -287,18 +291,53 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // 2-core single-process backend, plus needless battery drain on mobile.
     // Refetch immediately on return so the user never stares at a candle up to
     // 2 seconds stale waiting for the next tick.
-    const timer = window.setInterval(() => {
-      if (!document.hidden) poll()
-    }, POLL_MS)
-    const onVisible = () => { if (!document.hidden) poll() }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
+    // 自适应节奏（原来固定每 2 秒，每次还要为鉴权查一次用户表）：
+    //   · 有 WS 报价（在线、最近 5 秒有帧、且已有该品种的实时买价）→ 10 秒一次，只做 H/L 校正；
+    //     形成中那根 bar 的 close/high/low 由 WS 逐帧维护（withLiveClose），不靠轮询。
+    //   · 否则（WS 断线 / 报价不新鲜 / 休市没帧）→ 3 秒，与 EA 推 K 线的节奏对齐。
+    //   · 慢档下新 bar 靠「K 线边界补拉」发现，见 scheduleBoundary。
+    //   页面 / App 在后台跳过，回前台立即补一次（2 秒去重）——startPolling 都管了。
+    // Adaptive cadence (it was a flat 2s, each poll costing a users-table auth query):
+    //   · live WS quotes (online, a frame in the last 5s, and a live bid for this symbol) → every
+    //     10s, only correcting H/L; the forming bar's close/high/low ride the WS per frame
+    //     (withLiveClose), not the poll.
+    //   · otherwise (WS down / quotes not fresh / market closed) → 3s, aligned with the EA's
+    //     candle push.
+    //   · in the slow mode new bars are found by the boundary catch-up (scheduleBoundary).
+    // Background skipping and the return-to-foreground refetch (2s de-dupe) come from startPolling.
+    const wsLive = () => liveBidRef?.current != null && netQuality.hasRecentFrame(WS_FRESH_MS)
+    const stopPolling = startPolling(() => { void poll() }, () => (wsLive() ? POLL_SLOW_MS : POLL_MS), false)
+
+    // K 线边界补拉：慢档下，每根 bar 开盘后约 3.3 秒拉一次，拉不到新 bar 就每 3 秒再试（最多 2 次）。
+    // Boundary catch-up in the slow mode: ~3.3s after each bar opens, then retry every 3s (at most
+    // twice) until the new bar appears.
+    let boundaryTimer: number | undefined
+    const scheduleBoundary = () => {
+      const delay = nextBoundaryPollDelayMs(interval, Date.now())
+      if (delay == null) return
+      const expectT = Math.floor((Date.now() + delay - 3300) / 1000)
+      boundaryTimer = window.setTimeout(() => {
+        const attempt = (left: number) => {
+          if (!alive) return
+          if (isAppHidden() || !wsLive()) { scheduleBoundary(); return }
+          void poll().then(() => {
+            if (!alive) return
+            if (lastTimeRef.current < expectT && left > 0) {
+              boundaryTimer = window.setTimeout(() => attempt(left - 1), BOUNDARY_RETRY_MS)
+            } else {
+              scheduleBoundary()
+            }
+          })
+        }
+        attempt(BOUNDARY_RETRIES)
+      }, delay)
+    }
+    scheduleBoundary()
 
     return () => {
       alive = false
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
+      stopPolling()
+      if (boundaryTimer !== undefined) window.clearTimeout(boundaryTimer)
       chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)
     }
     // drawReady 必须在依赖里：本 effect 第一行就要 seriesRef.current，而 series 是

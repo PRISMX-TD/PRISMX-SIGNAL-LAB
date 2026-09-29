@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
-import { useLive, useQuotes } from '../store/live'
+import { useLive } from '../store/live'
 import SignalGrid from '../components/signals/SignalGrid'
 import { SkeletonPage } from '../components/Skeleton'
 import Toast from '../components/Toast'
@@ -22,7 +22,6 @@ export default function SignalsPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { signals, strategySignals, accounts, activeSymbols, loaded } = useLive()
-  const accountQuotes = useQuotes()
   // 页签放在 URL 的 ?tab= 上，不放 useState：仪表盘的「当前时段胜率」卡要能直接
   // 跳到「策略分析」（/app?tab=analysis），页签只活在组件里就跳不过来。顺带这一
   // 页也变得可分享、可收藏。用 replace 换页签——切页签不该在浏览器历史里堆一层，
@@ -177,7 +176,7 @@ export default function SignalsPage() {
           <StrategyAnalysis />
         )}
       </div>
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={closeTrade} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} onCancel={closeTrade} onConfirm={handleConfirm} />}
       {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )

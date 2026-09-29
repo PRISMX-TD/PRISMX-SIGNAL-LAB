@@ -2,6 +2,7 @@ import { Suspense, useEffect, useState, type ComponentType, type ReactNode } fro
 import { lazyRetry } from './utils/lazyRetry'
 import { onIdle, shouldSkipPrefetch } from './utils/idle'
 import { getToken } from './api/client'
+import { ensureMoreLocale } from './i18n'
 import { pageFromPath, type PageId } from './seo/meta'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
@@ -45,10 +46,21 @@ const FestivalDemoPanel = lazyRetry(() => import('./festival/demo/DemoPanel'), '
 // the page and lose its state. preload() neither retries nor throws to callers
 // that ignore it; the lazyRetry path still owns retries when actually rendering.
 type Preloadable<P> = ComponentType<P> & { preload: () => Promise<void> }
+// 语言包「核心 + 按需」（见 i18n/index.ts）：默认每个页面都在 chunk 旁一起等按需语言包，
+// 保证渲染时没有裸 key；只有确认只用核心键的页面（Layout、落地/登录/法务/FAQ）才写
+// { core: true } 跳过。i18n.test.ts 会按这里的标记核对每个页面用到的键。
+// Locale core + on-demand split (see i18n/index.ts): by default every page waits for the
+// on-demand locale bundle next to its chunk, so there are no raw keys at render; only pages
+// that use core keys alone (Layout, landing / login / legal / FAQ) pass { core: true }.
+// i18n.test.ts checks each page's keys against these flags.
 function lazyPage<P extends object>(
-  factory: () => Promise<{ default: ComponentType<P> }>,
+  importer: () => Promise<{ default: ComponentType<P> }>,
   name: string,
+  opts?: { core?: boolean },
 ): Preloadable<P> {
+  const factory = opts?.core
+    ? importer
+    : () => Promise.all([importer(), ensureMoreLocale()]).then(([m]) => m)
   const Lazy = lazyRetry(factory, name) as unknown as ComponentType<P>
   let Loaded: ComponentType<P> | null = null
   let pending: Promise<void> | null = null
@@ -83,10 +95,10 @@ function lazyPage<P extends object>(
 // PageFallback shows, as it always did on page switches. Direct entry and tab switches
 // after login are covered by the warm-up/prefetch below, so Layout and the page load
 // in parallel rather than one after the other.
-const Layout = lazyPage(() => import('./components/Layout'), 'Layout')
-const LandingPage = lazyPage(() => import('./pages/LandingPage'), 'LandingPage')
-const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage')
-const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage')
+const Layout = lazyPage(() => import('./components/Layout'), 'Layout', { core: true })
+const LandingPage = lazyPage(() => import('./pages/LandingPage'), 'LandingPage', { core: true })
+const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage', { core: true })
+const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage', { core: true })
 const SignalsPage = lazyPage(() => import('./pages/SignalsPage'), 'SignalsPage')
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage')
 const ChartsPage = lazyPage(() => import('./pages/ChartsPage'), 'ChartsPage')
@@ -103,8 +115,8 @@ const AchievementsPage = lazyPage(() => import('./pages/AchievementsPage'), 'Ach
 const LeaderboardPage = lazyPage(() => import('./pages/LeaderboardPage'), 'LeaderboardPage')
 const CompetitionsPage = lazyPage(() => import('./pages/CompetitionsPage'), 'CompetitionsPage')
 const ProfilePage = lazyPage(() => import('./pages/ProfilePage'), 'ProfilePage')
-const LegalPage = lazyPage(() => import('./pages/LegalPage'), 'LegalPage')
-const FaqPage = lazyPage(() => import('./pages/FaqPage'), 'FaqPage')
+const LegalPage = lazyPage(() => import('./pages/LegalPage'), 'LegalPage', { core: true })
+const FaqPage = lazyPage(() => import('./pages/FaqPage'), 'FaqPage', { core: true })
 const AppDownloadPage = lazyPage(() => import('./pages/AppDownloadPage'), 'AppDownloadPage')
 const SupportPage = lazyPage(() => import('./pages/SupportPage'), 'SupportPage')
 const StrategyGuidePage = lazyPage(() => import('./pages/StrategyGuidePage'), 'StrategyGuidePage')

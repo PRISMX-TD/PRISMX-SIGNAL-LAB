@@ -55,6 +55,7 @@ import {
   type UsageCatalog,
 } from '../components/strategies/conditionTypes'
 import { useOrderPlacement } from '../components/signals/hooks'
+import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
 import { useBackToClose } from '../utils/useBackToClose'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import { TEMPLATE_LABEL_KEYS } from '../utils/strategyTemplates'
@@ -793,7 +794,7 @@ function StrategyEditor({
 export default function StrategiesPage() {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const { accounts, activeSymbols, refreshAll } = useLive()
+  const { accounts, activeSymbols, refreshAll, wsConnected } = useLive()
   const quotesByAccount = useQuotes()
   const { toast, placeStrategyOrder } = useOrderPlacement()
 
@@ -978,22 +979,18 @@ export default function StrategiesPage() {
     return () => window.clearInterval(timer)
   }, [])
 
-  // 我的策略信号轮询：与胜率卡/纪律分卡同一节奏（45 秒 + 切回页面立即刷）。
-  // Poll my strategy signals on the same 45s cadence as the win-rate/discipline
-  // cards, plus an immediate refresh when the tab regains focus.
-  useEffect(() => {
-    const refresh = () => {
-      if (!document.hidden) strategyApi.signals(20).then((r) => setSignals(r.signals)).catch(() => {})
-    }
-    const timer = window.setInterval(refresh, 45_000)
-    document.addEventListener('visibilitychange', refresh)
-    window.addEventListener('focus', refresh)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', refresh)
-      window.removeEventListener('focus', refresh)
-    }
-  }, [])
+  // 我的策略信号轮询：前台才轮询，回前台立即刷（2 秒去重）；WS 在线 3 分钟兜底、断线 45 秒
+  // （与胜率卡同一节奏，见 winratePollMs）。
+  // Poll my strategy signals only while visible, refresh on return (2s de-dupe); 3 min fallback with
+  // the WS up, 45 s without (same cadence as the win-rate card, see winratePollMs).
+  usePollWhileVisible(
+    (isCurrent) => {
+      strategyApi.signals(20).then((r) => { if (isCurrent()) setSignals(r.signals) }).catch(() => {})
+    },
+    () => winratePollMs(wsConnected),
+    [],
+    { immediate: false },
+  )
 
   const openNewDraft = () => {
     setPresetError(null)

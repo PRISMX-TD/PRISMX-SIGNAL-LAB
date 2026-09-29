@@ -20,6 +20,7 @@ import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
 import { checkSlTp } from '../order/orderMath'
 import { symbolMeta } from '../../utils/symbolMeta'
+import { createIdempotencyKeys } from '../../utils/idempotencyKeys'
 import ConfirmModal from '../ConfirmModal'
 
 interface Props {
@@ -91,7 +92,10 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
   const { t } = useTranslation()
   // 首帧持仓还没到时显示骨架而不是「暂无持仓」，见 live.tsx 的 positionsLoaded。
   // Skeleton rather than "no positions" until the first frame; see positionsLoaded.
-  const { positionsLoaded, refreshOrders } = useLive()
+  const { positionsLoaded, upsertOrder } = useLive()
+  // 平仓 / 改单 / 撤挂单的幂等号：只在「没拿到任何响应」时复用，见 idempotencyKeys.ts。
+  // Idempotency ids for close / modify / cancel-pending: reused only when no response arrived.
+  const [idemKeys] = useState(createIdempotencyKeys)
   const [tab, setTab] = useState<Tab>('positions')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
@@ -251,15 +255,20 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
     inFlightTickets.current.add(ticket)
     markClosing(ticket, p.volume, partial)
     setExpanded(null)
+    const idemKey = `close:${ticket}:${partial ? volume : 'full'}`
+    let answered = false
     try {
       const res = await orderApi.close({
-        clientOrderId: clientOrderId(),
+        clientOrderId: idemKeys.acquire(idemKey),
         ticket,
         symbol: p.symbol,
         side: p.side,
         mt5Login: p.login ?? null,
         volume,
       })
+      answered = true
+      idemKeys.settle(idemKey)
+      upsertOrder(res)
       // 网关账号当场回成交：提示里给成交价，行随下一拍持仓推送消失；桥接账号只是
       // 收单，提示"已发出"，行保持"平仓中"直到桥接执行完、持仓推送把它拿掉。
       // A gateway account fills synchronously: toast the price, the row goes with
@@ -284,13 +293,14 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
         onToast(partial ? String(t('charts.dock.partialCloseSent')) : String(t('charts.dock.closeSent')), 'info')
       }
     } catch (e) {
+      if (!answered) idemKeys.afterThrow(idemKey, e)
       inFlightTickets.current.delete(ticket)
       unmarkClosing(ticket)
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.closeFailed')), 'error')
     } finally {
+      // 平仓只会改变订单行（持仓随 WS 推送）：回执已并入本地列表，不再整份重拉。
+      // Only order rows can change (positions ride the WS): the receipt is merged locally, no refetch.
       setBusyId(null)
-      // 平仓只会改变订单行（持仓随 WS 推送），不必整份重拉 / only order rows can change
-      void refreshOrders()
     }
   }
 
@@ -310,6 +320,8 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
     const tickets = positions.map((p) => p.ticket).filter((tk): tk is number => !!tk)
     try {
       const res = await orderApi.closeAll({ clientOrderId: clientOrderId(), mt5Login })
+      // 把排队的 PENDING 平仓行立刻显示出来（原来这里不刷新订单）/ show the queued PENDING close rows at once
+      res.orders?.forEach(upsertOrder)
       for (const tk of tickets) {
         const p = positions.find((x) => x.ticket === tk)
         markClosing(tk, p?.volume ?? 0, false)
@@ -330,9 +342,11 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
   const modifyPosition = async (p: Position, sl: number, tp: number) => {
     if (!p.ticket) return
     setBusyId(`p-${p.ticket}`)
+    const idemKey = `modify:${p.ticket}:${sl}:${tp}`
+    let answered = false
     try {
       const res = await orderApi.modify({
-        clientOrderId: clientOrderId(),
+        clientOrderId: idemKeys.acquire(idemKey),
         ticket: p.ticket,
         symbol: p.symbol,
         side: p.side,
@@ -340,28 +354,31 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
         stopLoss: sl,
         takeProfit: tp,
       })
+      answered = true
+      idemKeys.settle(idemKey)
+      upsertOrder(res)
       if (res.status === 'FILLED') onToast(String(t('charts.dock.modified')), 'success')
       else if (res.status === 'REJECTED' || res.status === 'FAILED') onToast(res.message ? localizeApiError(res.message) : String(t('charts.dock.modifyFailed')), 'error')
       else onToast(String(t('charts.dock.modifySent')), 'info')
       setExpanded(null)
     } catch (e) {
+      if (!answered) idemKeys.afterThrow(idemKey, e)
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.modifyFailed')), 'error')
     } finally {
       setBusyId(null)
-      void refreshOrders()
     }
   }
 
   const cancelOrder = async (o: Order) => {
     setBusyId(`o-${o.id}`)
     try {
-      await orderApi.cancel(o.id)
+      const res = await orderApi.cancel(o.id)
+      upsertOrder(res)
       onToast(String(t('charts.dock.cancelSent')), 'info')
     } catch (e) {
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.cancelFailed')), 'error')
     } finally {
       setBusyId(null)
-      void refreshOrders()
     }
   }
 
@@ -371,13 +388,18 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
   // to the broker — not orderApi.cancel, which only voids a platform command row.
   const cancelPendingOrder = async (o: PendingOrder) => {
     setBusyId(`q-${o.ticket}`)
+    const idemKey = `cancelp:${o.ticket}`
+    let answered = false
     try {
       const res = await orderApi.cancelPending({
-        clientOrderId: clientOrderId(),
+        clientOrderId: idemKeys.acquire(idemKey),
         ticket: o.ticket,
         symbol: o.symbol,
         mt5Login: o.login ?? null,
       })
+      answered = true
+      idemKeys.settle(idemKey)
+      upsertOrder(res)
       // 网关账号当场回结果；桥接账号只是收单，行要等下一拍挂单快照才消失。
       // A gateway account answers synchronously; a bridge one is merely accepted and
       // the row goes away with the next pending-orders snapshot.
@@ -387,6 +409,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
         onToast(String(t('charts.dock.cancelSent')), 'info')
       }
     } catch (e) {
+      if (!answered) idemKeys.afterThrow(idemKey, e)
       onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.cancelFailed')), 'error')
     } finally {
       setBusyId(null)

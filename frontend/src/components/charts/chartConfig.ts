@@ -87,7 +87,50 @@ export const INTERVAL_KEY = 'prismx.charts.interval'
 export const SYMBOL_KEY = 'prismx.charts.symbol'
 
 // 最新价轮询间隔（毫秒）/ latest-price poll interval (ms)
-export const POLL_MS = 2000
+// 没有 WS 报价时 3 秒：EA 每 3 秒才推一次 K 线，2 秒轮询里约 1/3 拿回的和上次一样。
+// Without WS quotes: 3s — the EA pushes candles only every 3s, so ~1/3 of 2s polls returned
+// nothing new.
+export const POLL_MS = 3000
+// 有 WS 报价时放慢到 10 秒：形成中那根 bar 的 close/high/low 已由 WS 报价逐帧维护
+// （withLiveClose），轮询只剩「校正 H/L」与「发现新 bar」，新 bar 靠下面的边界补拉。
+// With live WS quotes: 10s — the forming bar's close/high/low are already maintained per quote
+// frame (withLiveClose), so polling only corrects H/L and discovers new bars, the latter covered
+// by the boundary catch-up below.
+export const POLL_SLOW_MS = 10_000
+// WS 报价被认为「新鲜」的最大帧间隔 / max gap between WS frames to count as live
+export const WS_FRESH_MS = 5_000
+// K 线边界补拉：EA 每 3 秒才推一次 K 线增量，边界后 300ms 时 Redis 里多半还是上一根，
+// 所以等 3.3 秒再拉；拉不到新 bar 就每 3 秒再试，最多 2 次。
+// Boundary catch-up: the EA pushes candle deltas only every 3s, so 300ms after the boundary
+// Redis usually still holds the previous bar — wait 3.3s, then retry every 3s (at most twice)
+// until the new bar shows up.
+export const BOUNDARY_SETTLE_MS = 3300
+export const BOUNDARY_RETRY_MS = 3000
+export const BOUNDARY_RETRIES = 2
+
+// 周期代码 → 秒。只认与时区无关、按 epoch 对齐的周期（1/5/15/60 分钟）；4H / 日线的边界取决于
+// 券商服务器时区，返回 null（不做边界补拉，靠慢轮询发现新 bar）。
+// Interval code → seconds. Only epoch-aligned, timezone-independent intervals (1/5/15/60 min);
+// 4H / daily boundaries depend on the broker's server timezone, so null (no boundary catch-up;
+// the slow poll finds the new bar).
+export function intervalSeconds(code: string): number | null {
+  switch (code) {
+    case '1': return 60
+    case '5': return 300
+    case '15': return 900
+    case '60': return 3600
+    default: return null
+  }
+}
+
+// 距下一根 bar 开盘后 BOUNDARY_SETTLE_MS 还要多久（毫秒）；周期不支持则 null。
+// ms until BOUNDARY_SETTLE_MS after the next bar opens; null for unsupported intervals.
+export function nextBoundaryPollDelayMs(code: string, nowMs: number): number | null {
+  const iv = intervalSeconds(code)
+  if (iv == null) return null
+  const nextOpenMs = (Math.floor(nowMs / 1000 / iv) + 1) * iv * 1000
+  return nextOpenMs - nowMs + BOUNDARY_SETTLE_MS
+}
 // 超过这么久没收到喂价更新，视为数据延迟 / no feed update for this long => stale
 export const STALE_MS = 30_000
 // 客户端保留的最大 K 线根数。以前是 500（对齐后端内存缓存的硬上限），现在

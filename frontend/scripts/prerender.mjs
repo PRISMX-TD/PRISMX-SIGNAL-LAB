@@ -89,7 +89,35 @@ function preloadTags(sources) {
 
 // ① SPA 壳 app.html：登录后路由的 rewrite 兜底。noindex 一举两得——这些路由
 //    本就不该进搜索结果，也防止 Google 收录一堆空壳 URL。
-const shell = template.replace(SEO_BLOCK, '<meta name="robots" content="noindex" />\n    <title>Signal Lab</title>')
+//    只给 app.html 加：① preconnect/dns-prefetch 到 API 域名（公开页首屏不打 API，不加）；
+//    ② 已登录（localStorage 有 prismx_token）才 modulepreload Layout / Dashboard，
+//    /login 访客不白下这几十 KB。内联脚本读 localStorage 必须 try/catch（隐私模式会抛）。
+//    App-shell-only: preconnect to the API host, and modulepreload Layout/Dashboard only
+//    when a token exists (try/catch: private mode throws on localStorage).
+const shellJs = (sources) =>
+  manifest
+    ? preloadTags(sources)
+        .split('\n')
+        .map((l) => (l.match(/rel="modulepreload"[^>]*href="([^"]+)"/) || [])[1])
+        .filter(Boolean)
+    : []
+const shellPreloadFiles = shellJs(['src/components/Layout.tsx', 'src/pages/DashboardPage.tsx'])
+// 登录后页面还要等「按需语言包」（i18n/index.ts 的 ensureMoreLocale）：按上次选的语言一起预载。
+// Signed-in pages also wait for the on-demand locale half: preload the remembered language's.
+const shellMoreZh = shellJs(['src/i18n/zh.more.json'])
+const shellMoreEn = shellJs(['src/i18n/en.more.json'])
+const shellHints = [
+  '<link rel="preconnect" href="https://api.prismxsignallab.com" crossorigin />',
+  '<link rel="dns-prefetch" href="https://api.pmxsl.com" />',
+  shellPreloadFiles.length
+    ? `<script>try{if(localStorage.getItem('prismx_token')){var f=${JSON.stringify(shellPreloadFiles)}.concat(localStorage.getItem('prismx_lang')==='en'?${JSON.stringify(shellMoreEn)}:${JSON.stringify(shellMoreZh)});f.forEach(function(h){var l=document.createElement('link');l.rel='modulepreload';l.crossOrigin='';l.href=h;document.head.appendChild(l)})}}catch(e){}</script>`
+    : '',
+]
+  .filter(Boolean)
+  .join('\n    ')
+const shell = template
+  .replace(SEO_BLOCK, () => '<meta name="robots" content="noindex" />\n    <title>Signal Lab</title>')
+  .replace('</head>', () => `  ${shellHints}\n  </head>`)
 writeFileSync(join(dist, 'app.html'), shell)
 
 // ② 公开页 × 2 语言

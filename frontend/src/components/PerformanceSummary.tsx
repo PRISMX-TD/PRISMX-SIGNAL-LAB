@@ -6,6 +6,7 @@
 // from the backend (same figure and look-back window as the dashboard's compact
 // card). Net P&L and the per-symbol bars were removed at the product owner's
 // request on 2026-09-08 and the head collapsed to one row; do not bring them back.
+import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
@@ -26,7 +27,7 @@ const TONE: Record<string, string> = { strong: 'var(--up)', mid: 'var(--mid)', w
 
 export default function PerformanceSummary({ login, accountLabel }: Props) {
   const { t } = useTranslation()
-  const { closedTradeTick } = useLive()
+  const { closedTradeTick, wsConnected } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
   // 还没有数据且最近一次请求失败：显示错误与「重试」，而不是永远转骨架屏。已有数据时
   // 失败（轮询偶发）不打扰，继续显示上一份。retryTick 只为「点重试就重跑下面的 effect」。
@@ -39,25 +40,17 @@ export default function PerformanceSummary({ login, accountLabel }: Props) {
   // 切账号先清空再拉（不闪上一个账号的数），因新平仓重拉时不清。
   // Clear on account switch (no stale flash); keep on refetch-after-close.
   useEffect(() => { setData(null); setFailed(false) }, [login])
-  useEffect(() => {
-    let mounted = true
-    const load = () => {
+  // 间隔跟 WS 走（在线 3 分钟、断开 45 秒），回前台 2 秒去重；见 usePollWhileVisible。
+  // Interval follows the WS (3 min up, 45s down), 2s return de-dupe; see usePollWhileVisible.
+  usePollWhileVisible(
+    (isCurrent) => {
       orderApi.winrate(login)
-        .then((r) => { if (mounted) { setData(r); setFailed(false) } })
-        .catch(() => { if (mounted) setFailed(true) })
-    }
-    load()
-    const timer = window.setInterval(() => { if (!document.hidden) load() }, 45_000)
-    const onVisible = () => { if (!document.hidden) load() }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-    return () => {
-      mounted = false
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
-    }
-  }, [login, closedTradeTick, retryTick])
+        .then((r) => { if (isCurrent()) { setData(r); setFailed(false) } })
+        .catch(() => { if (isCurrent()) setFailed(true) })
+    },
+    () => winratePollMs(wsConnected),
+    [login, closedTradeTick, retryTick],
+  )
 
   const pct = data?.winRate != null ? (data.winRate * 100).toFixed(1) : null
   const verdict = data

@@ -20,8 +20,26 @@ export const RECONNECT_BASE_MS = 300
 export const RECONNECT_MAX_MS = 10_000
 export const RECONNECT_JITTER = 0.5
 
+// 服务端重启（关闭码 1012 / 1001）：旧进程还在排空、新进程还没绑端口，300ms 的首次重连
+// 必然握手失败。改为首次约 1.5 秒、之后固定约 2 秒（都 ±50% 抖动，不翻倍），后端 2~3 秒
+// 起来后很快接上。
+// Server restart (close code 1012 / 1001): the old process is draining and the new one hasn't
+// bound the port, so a 300ms first retry is doomed. First retry ~1.5s, then a flat ~2s (both
+// ±50% jitter, no doubling).
+export const RESTART_FIRST_MS = 1_500
+export const RESTART_STEP_MS = 2_000
+export type ReconnectMode = 'normal' | 'restart'
+
 /** attempt 从 0 起计；rand 为 [0,1) 的随机数（测试可注入）/ attempt is 0-based; rand ∈ [0,1) */
-export function reconnectDelay(attempt: number, rand: number = Math.random()): number {
+export function reconnectDelay(
+  attempt: number,
+  rand: number = Math.random(),
+  mode: ReconnectMode = 'normal',
+): number {
+  if (mode === 'restart') {
+    const base = Math.max(0, Math.floor(attempt)) === 0 ? RESTART_FIRST_MS : RESTART_STEP_MS
+    return Math.round(base * (1 - RECONNECT_JITTER + rand * 2 * RECONNECT_JITTER))
+  }
   const n = Math.max(0, Math.floor(attempt))
   // 2 ** n 在 n 很大时会变成 Infinity，Math.min 照样夹到上限 / 2**n → Infinity is still capped
   const base = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** n)

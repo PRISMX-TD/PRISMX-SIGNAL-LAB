@@ -16,7 +16,7 @@
 // second pass, because rows written earlier or by another path are not something
 // the render side should gamble on.
 import { createElement, type ReactNode } from 'react'
-import { parseRichBody, richClassName, safeRichHref, safeRichSrc } from '../utils/richText'
+import { canReserveImageSpace, imageDims, parseRichBody, richClassName, safeRichHref, safeRichSrc } from '../utils/richText'
 
 // 直接落地成同名 React 元素的标签 / tags that become the React element of the same name
 const PASSTHROUGH = new Set(['p', 'h2', 'h3', 'blockquote', 'ul', 'ol', 'li', 'strong', 'em', 'u', 's', 'span'])
@@ -55,6 +55,34 @@ function renderNodes(nodes: ArrayLike<ChildNode>, path: string): ReactNode[] {
       // before one loads its box is 0×0 and the lazy observer never sees it enter
       // the viewport — measured, the image simply never loads. A post carries a
       // handful of images and they are the content, so they load outright.
+      //
+      // 2026-09-29：地址 # 片段里带着尺寸（`#w=…&h=…`，上传端写入）的图，补上 width/height
+      // 让浏览器在图片回来前就按比例占位（不跳版），此时盒子不再是 0×0，才可以放心
+      // loading="lazy"——但只在内核支持 aspect-ratio 映射时（Chrome 79+ / Safari 14+），
+      // 更老的 WebView 上盒子仍是 0×0，加了会永远不加载。maxWidth 取 min(栏宽, 原宽)，
+      // 占位就是最终大小，窄图不会先撑满再缩回。老图 / 手填外链没有尺寸，原样渲染。
+      // Since 2026-09-29: an image whose URL fragment carries its size gets width/height so
+      // the browser reserves the box before load (no layout jump); the box is then no longer
+      // 0x0, so loading="lazy" is safe — but only where the aspect-ratio mapping exists
+      // (Chrome 79+ / Safari 14+); on older WebViews the box stays 0x0 and lazy would never
+      // fire. maxWidth is min(column, natural width) so the placeholder is the final size.
+      // Old images / hand-typed links have no size and render as before.
+      const dims = imageDims(src)
+      if (dims) {
+        out.push(
+          <img
+            key={key}
+            src={src}
+            alt={el.getAttribute('alt') || ''}
+            decoding="async"
+            width={dims.width}
+            height={dims.height}
+            loading={canReserveImageSpace() ? 'lazy' : undefined}
+            style={{ maxWidth: `min(100%, ${dims.width}px)` }}
+          />,
+        )
+        return
+      }
       out.push(<img key={key} src={src} alt={el.getAttribute('alt') || ''} decoding="async" />)
       return
     }

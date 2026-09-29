@@ -3,6 +3,7 @@
 // Personal trading performance card: compact on the dashboard (at-a-glance +
 // link to details), detailed on the Orders page (same data, fuller layout).
 // Visible only to the user themself.
+import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
@@ -27,7 +28,7 @@ interface Props {
 export default function PersonalWinRateCard({ variant = 'compact', login, className = '' }: Props) {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const { closedTradeTick } = useLive()
+  const { closedTradeTick, wsConnected } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
   const detailed = variant === 'detailed'
   const [gwr, setGwr] = useState<GamificationWinRateSummary | null>(null)
@@ -41,33 +42,21 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
     setData(null)
   }, [login])
 
-  useEffect(() => {
-    let mounted = true
-    const load = () => {
-      orderApi.winrate(login).then((r) => { if (mounted) setData(r) }).catch(() => {})
-    }
-    load()
-    // 定时刷新 + 回到页面时立即刷新，让战绩随平仓近实时更新，无需手动刷新整页。
-    // 页面在后台时跳过轮询（rAF/定时器也会被浏览器节流），切回前台再补一次。
-    // Poll + refetch on focus so the record tracks new closes in near-real-time
-    // without a full page reload. Skip polling while hidden and refetch on
-    // return so a backgrounded tab doesn't hammer the API.
-    const timer = window.setInterval(() => {
-      if (!document.hidden) load()
-    }, 45_000)
-    const onVisible = () => { if (!document.hidden) load() }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-    return () => {
-      mounted = false
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
-    }
+  // 定时刷新 + 回到页面时立即刷新（focus / visibilitychange / App 壳前台事件合并、2 秒去重），
+  // 让战绩随平仓近实时更新；页面在后台时跳过轮询。间隔跟 WS 走（在线 3 分钟、断开 45 秒）。
+  // Poll + refetch on return to the page (focus / visibilitychange / the App shell's foreground
+  // event merged, 2s de-dupe) so the record tracks new closes; skipped while backgrounded. The
+  // interval follows the WS (3 min up, 45s down).
+  usePollWhileVisible(
+    (isCurrent) => {
+      orderApi.winrate(login).then((r) => { if (isCurrent()) setData(r) }).catch(() => {})
+    },
+    () => winratePollMs(wsConnected),
     // closedTradeTick：后端刚记下新平仓，立刻重拉，胜率不落后于下方的明细列表。
     // closedTradeTick: a new close just landed — refetch now so the rate never
     // lags the trade list beneath it.
-  }, [login, closedTradeTick])
+    [login, closedTradeTick],
+  )
 
   // 综合胜率（考核口径）：只在仪表盘 compact 卡 + 开关打开时拉取，独立端点 +
   // 服务端 60 秒缓存，跟随上面同一个 45 秒轮询/焦点刷新节奏（设计 §2.4/§7）。
@@ -79,29 +68,18 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
   // (§2.4/§7). Failures are silent — a 403 (switch off) or a network error
   // just leaves this block hidden without disturbing the main account
   // win-rate display.
+  const gwrEnabled = !detailed && !!user?.gamificationVisible
   useEffect(() => {
-    if (detailed || !user?.gamificationVisible) {
-      setGwr(null)
-      return
-    }
-    let mounted = true
-    const load = () => {
-      gamificationApi.winrateSummary().then((r) => { if (mounted) setGwr(r) }).catch(() => {})
-    }
-    load()
-    const timer = window.setInterval(() => {
-      if (!document.hidden) load()
-    }, 45_000)
-    const onVisible = () => { if (!document.hidden) load() }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-    return () => {
-      mounted = false
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
-    }
-  }, [detailed, user?.gamificationVisible])
+    if (!gwrEnabled) setGwr(null)
+  }, [gwrEnabled])
+  usePollWhileVisible(
+    (isCurrent) => {
+      gamificationApi.winrateSummary().then((r) => { if (isCurrent()) setGwr(r) }).catch(() => {})
+    },
+    () => winratePollMs(wsConnected),
+    [],
+    { enabled: gwrEnabled },
+  )
 
   const pct = data?.winRate != null ? Math.round(data.winRate * 100) : null
   const gwrPct = gwr?.winRate != null ? Math.round(gwr.winRate * 100) : null

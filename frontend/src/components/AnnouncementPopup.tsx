@@ -69,17 +69,50 @@ export default function AnnouncementPopup() {
   // someone mid-task.
   useEffect(() => {
     let alive = true
+    let timer: ReturnType<typeof setTimeout> | undefined
     announcementApi
       .popup()
       .then((res) => {
         if (!alive || !res) return
         if (sessionClosedId() === res.id) return
-        setData(res)
-        setVisible(true)
+        // 先把图预载并解码完再弹：弹窗本体就是这张图，接口一回就弹会让用户先盯着
+        // 一个空黑卡。3 秒兜底——图慢也照样弹，不至于永远不弹；没有 decode()（老
+        // WebView）就退回 onload/onerror；没有图地址直接弹。此后 <img> 挂上去命中
+        // 内存缓存。
+        // Preload and decode the image before showing: the popup *is* this image, so
+        // popping up on the API reply shows an empty black card first. A 3 s fallback
+        // shows it anyway; without decode() (old WebViews) fall back to onload/onerror;
+        // with no image URL just show. The mounted <img> then hits the memory cache.
+        let shown = false
+        const show = () => {
+          if (shown || !alive) return
+          shown = true
+          if (timer) clearTimeout(timer)
+          setData(res)
+          setVisible(true)
+        }
+        if (!res.coverImageUrl) {
+          show()
+          return
+        }
+        timer = setTimeout(show, 3000)
+        try {
+          const im = new Image()
+          im.src = res.coverImageUrl
+          if (typeof im.decode === 'function') {
+            im.decode().then(show, show)
+          } else {
+            im.onload = show
+            im.onerror = show
+          }
+        } catch {
+          show()
+        }
       })
       .catch(() => {})
     return () => {
       alive = false
+      if (timer) clearTimeout(timer)
     }
   }, [])
 

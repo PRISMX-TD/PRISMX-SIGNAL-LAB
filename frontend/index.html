@@ -150,6 +150,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Signal Lab" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <!-- 只预载 Archivo latin 主字重：字体请求与 CSS 下载并行，不必等 CSS 解析到 @font-face。
+         必须带 crossorigin，否则字体会被下载两遍；文件名与 fonts.css 保持一致。
+         Preload only the Archivo latin file so it downloads in parallel with the CSS;
+         crossorigin is required or the font is fetched twice. Keep in sync with fonts.css. -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/archivo-400-800-87-125-latin.woff2" />
     <!-- 字体：自托管，不再从 Google Fonts 拉。
          那条 <link rel="stylesheet"> 是 render-blocking 的，而该域名在中国大陆是
          黑洞（连接挂着不回）——首屏被卡几十秒，App 里更是启动白屏的唯一原因。

@@ -13,6 +13,7 @@ import { useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
+import { shrinkImage } from './shrinkImage'
 
 export default function ImageField({
   label,
@@ -34,7 +35,7 @@ export default function ImageField({
     setError(null)
     setBusy(true)
     try {
-      const res = await adminApi.uploadImage(file)
+      const res = await adminApi.uploadImage(await shrinkImage(file))
       onChange(res.url)
     } catch (err) {
       setError(localizeApiError(err instanceof Error ? err.message : String(err)))

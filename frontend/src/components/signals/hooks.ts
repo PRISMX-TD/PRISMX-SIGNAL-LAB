@@ -38,7 +38,7 @@ const RECEIPT_FALLBACK_MS = 20000
  */
 export function useOrderPlacement() {
   const { t } = useTranslation()
-  const { orders, refreshOrders } = useLive()
+  const { orders, upsertOrder } = useLive()
   const [toast, setToast] = useState<OrderToast | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   // 正在等待回执的订单 id 集合。两件事必须这样：
@@ -128,12 +128,12 @@ export function useOrderPlacement() {
     }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
-      // 只重拉订单：下单只会新增一条订单行，持仓 / 挂单随 WS 推送。以前这里是
-      // refreshAll，一单打七个接口、且每份都换新对象，整站跟着重渲染一遍。
-      // Refetch orders only: placing adds an order row, positions / pending orders
-      // ride the WS. This used to be refreshAll — seven requests per order, each
-      // swapping in fresh objects and re-rendering the whole app.
-      void refreshOrders()
+      // 不再重拉 /orders：POST 已把这一条订单整条返回，直接并入本地列表（upsertOrder 带防回退，
+      // WS 的终态不会被这条 PENDING 回执覆盖）；持仓 / 挂单随 WS 推送。
+      // No /orders refetch: the POST already returns the whole order, so merge it into the local
+      // list (upsertOrder is regress-safe: a WS terminal state is never overwritten by this
+      // PENDING receipt); positions / pending orders ride the WS.
+      upsertOrder(placed)
       // 把回执原样交回调用方：图表页的下单票要按 FILLED / PENDING / REJECTED 在按钮
       // 下面就地给出不同的回执（成交价、耗时），而不是只有一句"已提交"。
       // Hand the receipt back to the caller: the charts ticket renders a
@@ -172,7 +172,7 @@ export function useOrderPlacement() {
       fallbackTimers.current.set(placed.id, timer)
       return placed
     },
-    [refreshOrders, settle, showToast, t]
+    [upsertOrder, settle, showToast, t]
   )
 
   const placeOrder = useCallback(

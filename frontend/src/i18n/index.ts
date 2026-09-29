@@ -4,6 +4,19 @@ import zh from './zh.json'
 import { langFromPath } from '../seo/meta'
 import { readStorage, writeStorage } from '../utils/safeStorage'
 
+// 语言包拆成「核心 + 按需」两份：
+//   zh.json / en.json           核心：入口、Layout、公开页（落地/法务/FAQ/登录）、预渲染用到的键
+//   zh.more.json / en.more.json 按需：只有登录后的功能页（管理后台、策略、图表、订单……）用到的键
+// 文件名沿用 zh.json / en.json，是因为 seo/entry-server.tsx 与 scripts/prerender.mjs 按这两个名字
+// 引用英文核心包（公开页只用核心键）。按需包由 App.tsx 的 lazyPage 在页面 chunk 旁一起拉
+// （ensureMoreLocale），页面渲染前必然就绪。新增键放哪一份，由 i18n.test.ts 按代码里的实际
+// 引用关系校验：入口/Layout/公开页用到的键必须在核心包里。
+// The bundle is split into core + on-demand halves. zh.json / en.json keep their names
+// because seo/entry-server.tsx and scripts/prerender.mjs import them (public pages only need
+// core keys). The `.more.json` halves are fetched by App.tsx's lazyPage next to the page chunk
+// (ensureMoreLocale), so they are always in before a page renders. i18n.test.ts verifies the
+// placement against real usage: keys used by the entry / Layout / public pages must be core.
+
 // 初始语言判定，按优先级：
 // ① 公开页 URL（/en 前缀 = 英文）——公开页语言由 URL 决定，这也保证预渲染
 //    HTML（英文）与客户端首帧（若按 localStorage 是中文）不会闪一次错语言；
@@ -63,6 +76,49 @@ const LAZY_LOCALES: Record<string, () => Promise<{ default: ResourceKey }>> = {
   en: () => import('./en.json'),
 }
 
+// 按需包（见文件头）。/ On-demand halves (see the file header).
+const MORE_LOCALES: Record<string, () => Promise<{ default: ResourceKey }>> = {
+  zh: () => import('./zh.more.json'),
+  en: () => import('./en.more.json'),
+}
+const moreLoaded = new Set<string>()
+const moreLoading = new Map<string, Promise<void>>()
+
+function loadMore(lng: string): Promise<void> {
+  const load = MORE_LOCALES[lng]
+  if (!load || moreLoaded.has(lng)) return Promise.resolve()
+  let p = moreLoading.get(lng)
+  if (!p) {
+    // 先确保核心包已在库里：i18next 见到「该语言已有资源」就不再走 backend，
+    // 若先塞按需包，英文核心包会永远没人去拉。
+    // Core first: once a language has any resources i18next skips the backend, so adding
+    // the on-demand half first would leave the en core bundle never fetched.
+    p = i18n
+      .loadLanguages(lng)
+      .then(() => load())
+      .then((m) => {
+        i18n.addResourceBundle(lng, 'translation', m.default, true, true)
+        moreLoaded.add(lng)
+      })
+      .finally(() => moreLoading.delete(lng))
+    moreLoading.set(lng, p)
+  }
+  return p
+}
+
+// 登录后功能页渲染前调用（App.tsx 的 lazyPage）：拉当前语言的按需包。之后切换语言时
+// changeLanguage 会先把新语言的按需包补上，所以各调用点（含 store/prefs.tsx 直接调
+// changeLanguage）都不会看到裸 key。失败会 reject，由调用方（lazyRetry）重试。
+// Called before a signed-in feature page renders (lazyPage in App.tsx): fetches the current
+// language's on-demand half. After that, changeLanguage adds the new language's half first,
+// so no call site (including store/prefs.tsx calling changeLanguage directly) sees raw keys.
+// Rejects on failure so the caller (lazyRetry) can retry.
+let moreWanted = false
+export function ensureMoreLocale(): Promise<void> {
+  moreWanted = true
+  return loadMore(i18n.language || saved)
+}
+
 const localeBackend: BackendModule = {
   type: 'backend',
   init() {},
@@ -120,6 +176,16 @@ export const i18nReady: Promise<unknown> = i18n
   // init still resolves if the en bundle never arrives (UI falls back to zh);
   // this only keeps a rejection from surfacing as unhandled.
   .catch(() => {})
+
+// 已经用过按需包之后，任何路径的切换语言都先补上目标语言的按需包（补不上也照常切，
+// 缺的键按 fallbackLng 显示，好过界面卡住）。
+// Once the on-demand half has been used, every language switch first adds the target's
+// half (a failure still switches; missing keys fall back rather than blocking the UI).
+const rawChangeLanguage = i18n.changeLanguage.bind(i18n)
+i18n.changeLanguage = ((lng?: string, callback?: Parameters<typeof rawChangeLanguage>[1]) => {
+  const pre = moreWanted && lng ? loadMore(lng).catch(() => {}) : Promise.resolve()
+  return pre.then(() => rawChangeLanguage(lng, callback))
+}) as typeof i18n.changeLanguage
 
 applyHtmlLang(saved)
 

@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
-import { useGlobalQuotes, useLive, useQuotes } from '../store/live'
+import { useLive } from '../store/live'
 import { useSentiment } from '../api/useSentiment'
 import NotifDeviceBanner from '../components/NotifDeviceBanner'
 import OnboardingCard from '../components/OnboardingCard'
@@ -25,10 +25,11 @@ export default function DashboardPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { signals, strategySignals, anyOnline, accounts, loaded, trends, activeSymbols } = useLive()
-  // 展示用全站统一报价（英雄板/报价表）与按账户区分的报价（下单确认页）分开取
-  // Site-wide display quotes (hero/quotes table) vs per-account quotes (order confirmation)
-  const globalQuotes = useGlobalQuotes()
-  const accountQuotes = useQuotes()
+  // 顶层不再订阅任何报价：QuotesTable 的每一行、SlideOrderModal 各自订阅自己要的那份，
+  // 报价每 0.5 秒一帧只重画跳价的格子，不再让整个仪表盘（含 memo 过的子组件）重渲染。
+  // No quote subscription at the top level any more: each QuotesTable row and SlideOrderModal
+  // subscribe to what they need, so a quote frame (every 0.5s) repaints only the ticking cells
+  // instead of the whole dashboard.
   // 以前是 useNow(1000)：每秒 setState，整个仪表盘（英雄板、报价表、胜率卡）每秒重渲染
   // 一遍，只为了两个倒计时环。倒计时现在各自订阅共享秒钟（ClockTtlRing），这里只剩
   // useFocusEntries 用来剔除过期信号——它本来就按 10 秒分桶，所以给它一个 10 秒一跳的钟。
@@ -149,7 +150,7 @@ export default function DashboardPage() {
             <>
               <div className="dash-col-1">
                 <SignalHero symbol={cur.symbol} cnName={nameOf(cur.symbol)} focusIdx={idx} focusTotal={focusEntries.length} stance={stance} trend={trends[cur.symbol]} sentiment={sentiment[cur.symbol] ?? null} onPrev={goPrev} onNext={goNext} onSelectIdx={setFocusIdx} />
-                <QuotesTable symbols={activeSymbols} quotes={globalQuotes} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
+                <QuotesTable symbols={activeSymbols} mt5Online={anyOnline} focusSymbol={cur?.symbol} />
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={cur.signal} onTrade={openTrade} />
@@ -166,7 +167,7 @@ export default function DashboardPage() {
                   <h2 className="text-lg font-bold text-white">{t('signals.title')}</h2>
                   <p className="text-sm text-neutral-400 max-w-xs">{t('signals.waitingForSignals')}</p>
                 </section>
-                <QuotesTable symbols={activeSymbols} quotes={globalQuotes} mt5Online={anyOnline} />
+                <QuotesTable symbols={activeSymbols} mt5Online={anyOnline} />
               </div>
               <div className="dash-col-2">
                 <SignalExec signal={null} onTrade={openTrade} />
@@ -178,7 +179,7 @@ export default function DashboardPage() {
           )}
         </div>
       )}
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} quotesByAccount={accountQuotes} onCancel={closeTrade} onConfirm={handleConfirm} />}
+      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} onCancel={closeTrade} onConfirm={handleConfirm} />}
       {toast && <Toast kind={toast.kind} message={toast.msg} />}
     </div>
   )

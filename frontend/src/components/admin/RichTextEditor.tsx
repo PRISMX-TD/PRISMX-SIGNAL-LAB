@@ -37,6 +37,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
+import { shrinkImage } from './shrinkImage'
 import {
   RICH_ALIGN_CLASSES,
   RICH_COLORS,
@@ -252,7 +253,7 @@ export default function RichTextEditor({
     setError(null)
     setUploading(true)
     try {
-      const res = await adminApi.uploadImage(file)
+      const res = await adminApi.uploadImage(await shrinkImage(file))
       exec('insertImage', res.url)
     } catch (err) {
       setError(localizeApiError(err instanceof Error ? err.message : String(err)))

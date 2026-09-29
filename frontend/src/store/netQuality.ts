@@ -51,15 +51,24 @@ export const netQuality = {
   touch() {
     snap.lastFrameAt = Date.now()
   },
+  // WS 在线且最近 maxAgeMs 内收到过帧 / WS online and a frame arrived within maxAgeMs
+  hasRecentFrame(maxAgeMs: number): boolean {
+    return snap.state === 'online' && snap.lastFrameAt != null && Date.now() - snap.lastFrameAt < maxAgeMs
+  },
 }
 
 // 捎在下一帧 PING 里给服务端做管理后台统计（services/net_quality.py）。
 // 不另发请求：心跳本来就要发，多带两个数字。
 // Rides on the next PING for the admin stats (services/net_quality.py) — no
 // extra request, the heartbeat goes out anyway.
-export function pingPayload(): { rtt?: number; jit?: number; app: boolean } {
+// hidden=true（App 在后台）：不带 rtt/jit——后台的往返时间被系统节流，不代表网络质量，
+// 后端 rtt 为空时早退、不写统计。
+// hidden=true (app backgrounded): no rtt/jit — backgrounded round trips are OS-throttled and say
+// nothing about the network; the backend early-outs on a missing rtt.
+export function pingPayload(hidden = false): { rtt?: number; jit?: number; app: boolean; bg?: boolean } {
   const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
   const app = !!cap?.isNativePlatform?.()
+  if (hidden) return { app, bg: true }
   if (snap.state !== 'online' || !snap.samples.length) return { app }
   return { rtt: snap.samples[snap.samples.length - 1], jit: jitter(snap) ?? undefined, app }
 }

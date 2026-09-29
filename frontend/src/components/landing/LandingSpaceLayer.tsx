@@ -58,6 +58,24 @@ import type { BackdropMode } from './LandingSpace'
    wrote an slBg key into every visitor's localStorage on mount. */
 const BACKDROP: BackdropMode = 'shardsSmoke'
 
+/* App（Capacitor）与低端机不加载 three.js（约 510KB）：直接留在 SSR 就有的静态
+   网格基线层（CSS 版）。少解析一份大 chunk、少一次 WebGLRenderer 初始化；低端安卓
+   WebView 丢 WebGL 上下文本来就是常态。设备信息缺失（Safari 没有 deviceMemory）时
+   不据此判低端。
+   The Capacitor app and low-end devices skip three.js (~510KB) and stay on the
+   CSS baseline that SSR already renders. Missing device info (Safari has no
+   deviceMemory) never counts as low-end. */
+function skipWebGLSpace(): boolean {
+  const cap = (window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor
+  if (cap?.isNativePlatform?.()) return true
+  const nav = navigator as unknown as { hardwareConcurrency?: number; deviceMemory?: number }
+  const cores = nav.hardwareConcurrency
+  const mem = nav.deviceMemory
+  if (typeof cores === 'number' && cores <= 2) return true
+  if (typeof mem === 'number' && mem <= 2) return true
+  return typeof cores === 'number' && typeof mem === 'number' && cores <= 4 && mem <= 4
+}
+
 export default function LandingSpaceLayer() {
   const host = useRef<HTMLDivElement>(null)
   const handleRef = useRef<SpaceHandle | null>(null)
@@ -66,6 +84,7 @@ export default function LandingSpaceLayer() {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const conn = (navigator as unknown as { connection?: { saveData?: boolean } }).connection
     if (conn?.saveData) return
+    if (skipWebGLSpace()) return
 
     let disposed = false
     let handle: SpaceHandle | null = null

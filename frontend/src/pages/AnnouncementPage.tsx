@@ -28,7 +28,7 @@ import { localizeApiError, parseTime } from '../api/utils'
 import { safeHttpUrl } from '../utils/safeUrl'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import RichText from '../components/RichText'
-import { announcementRichBody } from '../utils/richText'
+import { announcementRichBody, imageSizeProps } from '../utils/richText'
 import { SkeletonPage } from '../components/Skeleton'
 import type { Announcement } from '../api/types'
 
@@ -110,7 +110,7 @@ export default function AnnouncementPage() {
       </header>
 
       <article className="ann-body">
-        {cover && <img src={cover} alt={title} className="ann-cover" />}
+        {cover && <img src={cover} alt={title} className="ann-cover" {...imageSizeProps(cover)} />}
         <RichText html={announcementRichBody(item.blocks, isZh ? 'zh' : 'en')} />
       </article>
 

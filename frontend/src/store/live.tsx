@@ -1,14 +1,32 @@
 // 实时数据共享状态：EA 状态、信号、订单、持仓。
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import type { BootstrapResponse } from '../api/client'
 import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
-import { accountApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
+import { accountApi, bootstrapApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { applyAccountsStatus } from './accountsStatus'
 import { keepIfEqual } from './keepIfEqual'
 import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
+import { isAppHidden, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT } from '../utils/appVisibility'
+import { usePollWhileVisible } from '../utils/usePollWhileVisible'
+import { upsertOrderList } from './orderMerge'
+import { pickBootstrapSection } from './bootstrapMerge'
+
+// refreshAll 的可选项：重连 / 回前台的整份重拉不必再拉 /quotes 与 /symbols——WS 鉴权成功
+// 后服务端会补推同一份全站报价，GLOBAL_QUOTES 分支也会把新品种补进活跃列表。
+// Options for refreshAll: reconnect / resume resyncs skip /quotes and /symbols — after WS auth
+// the server re-pushes the same site-wide quotes and the GLOBAL_QUOTES branch folds new symbols
+// into the active list. Only `=== false` counts, so passing e.g. a click event is harmless.
+export interface RefreshOptions {
+  quotes?: boolean
+  symbols?: boolean
+  // 首屏用 /bootstrap 一次拿 signals/accounts/trends/quotes/symbols；失败段或整体失败回退逐个请求。
+  // First screen: one /bootstrap call; failed sections or a failed call fall back to individual requests.
+  bootstrap?: boolean
+}
 
 interface LiveContextValue {
   signals: Signal[]
@@ -36,7 +54,10 @@ interface LiveContextValue {
   // 聚合连接状态（以桥接上报的账号为准）/ aggregated connection (bridge accounts are the source of truth)
   anyOnline: boolean
   onlineAccounts: MT5Account[]
-  refreshAll: () => Promise<void>
+  refreshAll: (opts?: RefreshOptions) => Promise<void>
+  // 把接口回执里的订单并入本地列表（不再整份重拉 /orders）；带防回退，见 orderMerge.ts。
+  // Merge an order from an API receipt into the local list (no full /orders refetch); regress-safe, see orderMerge.ts.
+  upsertOrder: (order: Order) => void
   // 只重拉订单列表。平仓 / 改单 / 撤单之后用它，不用 refreshAll：那些动作只可能
   // 改变订单行，持仓与挂单随 WS 推送更新，没必要为一次撤单打七个接口。
   // Refetch just the order list. Used after close / modify / cancel instead of
@@ -191,7 +212,24 @@ const MAX_EXPIRED = 30
 // unreachable". Neither needs 5s granularity, and each request pulls the full
 // account list plus subscription config, so it's relaxed to 15s.
 const ACCOUNTS_POLL_MS = 15000
-
+// WS 在线时放宽到 60 秒：在线状态与余额随 ACCOUNTS_STATUS 推送，这条轮询只剩「发现新绑定
+// 账号」与「后端不可达第二判据」。WS 断开时回到 15 秒。
+// With the WS up the poll relaxes to 60s: liveness and balances ride ACCOUNTS_STATUS pushes,
+// leaving only "spot a newly bound account" and the second unreachable signal. Back to 15s
+// while the WS is down.
+const ACCOUNTS_POLL_WS_MS = 60_000
+// /symbols 兜底轮询：只为发现 EA 移除的品种（新品种早已由 GLOBAL_QUOTES 即时补进）。
+// The /symbols fallback poll only spots symbols the EA removed (new ones arrive instantly via
+// GLOBAL_QUOTES).
+const SYMBOLS_POLL_MS = 90_000
+// 首屏不再用 REST 拉 /quotes（WS 一鉴权就补推）；挂载起这么久仍没收到 GLOBAL_QUOTES 才兜底拉一次。
+// The first screen no longer fetches /quotes over REST (the WS pushes it on auth); only if no
+// GLOBAL_QUOTES has arrived this long after mount is REST used once as a fallback.
+const QUOTES_FALLBACK_MS = 3000
+// 重连触发的整份重拉前随机等一会儿，把「后端重启后全员同时重连」的请求尖峰摊开。
+// A reconnect-triggered resync waits a random moment first, spreading the surge of requests
+// when every client reconnects together after a backend restart.
+const RECONNECT_RESYNC_JITTER_MS = 4000
 // 切回前台时，隐藏了至少这么久才整份重拉。短暂切走（回条消息、看一眼通知）连接
 // 多半还活着、什么都没漏，不值得七个请求；隐藏够久则一切都可能变了：后台期间
 // WS 被系统掐断而 onclose 没来（见 useClientSocket 的心跳说明）、套餐到期被降级、
@@ -275,7 +313,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     setNotificationTick((n) => n + 1)
   }, [])
 
-  const refreshAll = useCallback(async () => {
+  const refreshAll = useCallback(async (opts?: RefreshOptions) => {
     // 关键请求单独包一层，除了拿数据还要拿到「这条到底成没成」。其余请求
     // （策略信号、趋势、报价、品种）继续静默吞掉：它们各自失败都属于局部
     // 问题，不能作为「整个后端挂了」的证据。
@@ -295,56 +333,119 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         .then((value): { ok: boolean; value: T | F } => ({ ok: true, value }))
         .catch((): { ok: boolean; value: T | F } => ({ ok: false, value: fallback }))
 
-    const [sig, stratSig, ord, acc, trd, gq, sym] = await Promise.all([
-      settle(signalApi.list(), { signals: [] as Signal[] }),
-      // 目前仅管理员可用（功能内部试用中）；非管理员根本不发这个请求（以前发了再
-      // 吞掉 403），失败同样静默，不影响其它数据的加载。/ Admin-only for now
-      // (feature in internal trial); non-admins no longer send the request at all
-      // (it used to 403 and be swallowed). Failures stay silent either way.
+    const skipQuotes = opts?.quotes === false
+    const skipSymbols = opts?.symbols === false
+    const done = Promise.resolve()
+
+    // bootstrap 失败（含 404 旧后端）只是回退逐个请求，绝不算「后端不可达」。
+    // A failed bootstrap (incl. 404 on an old backend) just falls back; never "unreachable".
+    const bootP: Promise<BootstrapResponse | null> = opts?.bootstrap === true
+      ? bootstrapApi.get().then((b) => (b && typeof b === 'object' ? b : null)).catch(() => null)
+      : Promise.resolve(null)
+    const sect = <K extends 'signals' | 'accounts' | 'trends' | 'quotes' | 'symbols'>(key: K) =>
+      bootP.then((b) => (b ? pickBootstrapSection(b, key) : null))
+
+    const sigP = sect('signals').then((v) => (v ? { ok: true, value: v } : settle(signalApi.list(), { signals: [] as Signal[] })))
+    const accP = sect('accounts').then((v) =>
+      v ? { ok: true, value: v } : settle(accountApi.list(), { accounts: [] as MT5Account[], accountLimit: null, brokerLock: null as BrokerLock | null }),
+    )
+
+    // 其余请求各自「到一个画一个」：不再等 7 个全回来才 setState / setLoaded。每份都走
+    // keepIfEqual（refreshAll 在重连、回前台、下单后都会跑，接口回来的永远是新对象）；
+    // 失败一律保留现有数据（一次网络抖动不该把已有列表 / 趋势 / 报价清空）。
+    // The rest render as each arrives instead of waiting for all seven. Each goes through
+    // keepIfEqual (refreshAll runs on reconnect, resume and after placing, and responses are
+    // always fresh objects); a failure keeps the existing data, since one blip must not wipe it.
+    const rest: Promise<unknown>[] = [
+      // 目前仅管理员可用（功能内部试用中）；非管理员根本不发这个请求。
+      // Admin-only for now; non-admins don't send the request at all.
       isAdminRef.current
-        ? strategyApi.signals(20).catch(() => null)
-        : Promise.resolve(null),
-      // 失败回 null 而不是空数组：一次网络抖动不该把已有的订单列表清空。
-      // null on failure rather than []: one blip must not wipe the existing list.
-      orderApi.list().catch(() => null),
-      settle(accountApi.list(), { accounts: [] as MT5Account[], accountLimit: null, brokerLock: null as BrokerLock | null }),
-      trendApi.list().catch(() => ({ trends: [] })),
-      quoteApi.list().catch(() => ({ quotes: [] })),
-      symbolApi.list().catch(() => ({ symbols: [] })),
-    ])
+        ? strategyApi.signals(20).then((r) => setStrategySignals((prev) => keepIfEqual(prev, r.signals))).catch(() => {})
+        : done,
+      orderApi.list().then((r) => setOrders((prev) => keepIfEqual(prev, r.orders))).catch(() => {}),
+      sect('trends')
+        .then((v) => v ?? trendApi.list())
+        .then((r) => setTrends((prev) => keepIfEqual(prev, Object.fromEntries((r.trends || []).map((t) => [t.symbol, t])))))
+        .catch(() => {}),
+      sect('quotes')
+        .then((v) => (v ? { r: v, boot: true } : skipQuotes ? null : quoteApi.list().then((r) => ({ r, boot: false }))))
+        .then((x) => {
+          if (!x) return
+          const fresh = Object.fromEntries((x.r.quotes || []).map((q) => [q.symbol, q]))
+          if (x.boot) {
+            gotGlobalQuotes.current = true // bootstrap 已带报价，免 3 秒 REST 兜底 / no 3s REST fallback needed
+            // 与 WS 已到的帧合并，WS 更新者优先 / merge under any WS frames already applied
+            setGlobalQuotes((prev) => keepIfEqual(prev, { ...fresh, ...prev }))
+          } else {
+            setGlobalQuotes((prev) => keepIfEqual(prev, fresh))
+          }
+        })
+        .catch(() => {}),
+      skipSymbols
+        ? done
+        : sect('symbols')
+            .then((v) => v ?? symbolApi.list())
+            .then((r) => setActiveSymbols((prev) => keepIfEqual(prev, r.symbols || [])))
+            .catch(() => {}),
+    ]
+
+    // 骨架屏 / backendUnreachable 只等信号 + 账户：它们本来就是「后端不可达」的判据。
+    // Skeleton and backendUnreachable wait only for signals + accounts — the unreachable test.
+    const [sig, acc] = await Promise.all([sigP, accP])
 
     // 两条关键请求都失败才判定后端不可达。选这两条是因为它们覆盖面最广：
     // 一条读全站共享数据、一条读该用户私有数据，两条都打不通，几乎不可能是
     // 单个端点的问题。凭证失效（401）不会走到这里——client.ts 收到 401 会清
     // 登录态并跳登录页，根本不会停留在应用内。
-    // Only when both critical calls fail do we call the backend unreachable.
-    // These two are chosen for breadth: one reads shared site-wide data, the
-    // other this user's private data, and both failing at once is very unlikely
-    // to be a single endpoint's fault. An expired credential never reaches this
-    // path — a 401 makes client.ts clear the session and bounce to login, so we
-    // aren't sitting inside the app at all.
+    // Only when both critical calls fail do we call the backend unreachable. These two are
+    // chosen for breadth: one reads shared site-wide data, the other this user's private data,
+    // and both failing at once is very unlikely to be a single endpoint's fault. An expired
+    // credential never reaches this path — a 401 makes client.ts clear the session and bounce
+    // to login.
     setBackendUnreachable(!sig.ok && !acc.ok)
 
-    // 每一份都走 keepIfEqual：refreshAll 在重连、回前台、下单后都会跑，接口回来的
-    // 永远是新对象，直接 setState 等于每跑一次就整站重渲染一遍——哪怕什么都没变。
-    // Everything goes through keepIfEqual: refreshAll runs on reconnect, resume and
-    // after placing, and responses are always fresh objects, so a bare setState
-    // re-rendered the whole app every time even when nothing had changed.
     setSignals((prev) => keepIfEqual(prev, capExpired(sig.value.signals)))
-    if (stratSig) setStrategySignals((prev) => keepIfEqual(prev, stratSig.signals))
-    if (ord) setOrders((prev) => keepIfEqual(prev, ord.orders))
     setAccounts((prev) => keepIfEqual(prev, acc.value.accounts))
     setAccountLimit(acc.value.accountLimit)
     setBrokerLock((prev) => keepIfEqual(prev, acc.value.brokerLock))
-    setTrends((prev) => keepIfEqual(prev, Object.fromEntries((trd.trends || []).map((t) => [t.symbol, t]))))
-    setGlobalQuotes((prev) => keepIfEqual(prev, Object.fromEntries((gq.quotes || []).map((q) => [q.symbol, q]))))
-    setActiveSymbols((prev) => keepIfEqual(prev, sym.symbols || []))
     setLoaded(true)
+
+    // 保住「返回即全部完成」：refreshAll 的调用方 await 它。
+    // Keep "returns once everything is done": callers await refreshAll.
+    await Promise.all(rest)
   }, [])
 
+  // 首屏不拉 /quotes（WS 鉴权后补推），/symbols 照拉——它的顺序是 EA 的 InpSymbols 顺序，
+  // 而 GLOBAL_QUOTES 分支补进来的是字母序，首屏别让品种顺序跳。
+  // First screen skips /quotes (the WS pushes it after auth) but keeps /symbols: its order is the
+  // EA's InpSymbols order while the GLOBAL_QUOTES branch appends alphabetically.
   useEffect(() => {
-    refreshAll()
+    refreshAll({ quotes: false, bootstrap: true })
   }, [refreshAll])
+
+  // 兜底：从挂载起计时。WS 可能一直连不上（某些代理），此时仍要用 REST 拿到报价。
+  // Fallback timed from mount: the WS may never connect (some proxies), and REST must still
+  // supply quotes then.
+  const gotGlobalQuotes = useRef(false)
+  const gotAccountQuotes = useRef(false)
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (gotGlobalQuotes.current) return
+      quoteApi
+        .list()
+        .then((r) => {
+          if (gotGlobalQuotes.current) return
+          const fromRest = Object.fromEntries((r.quotes || []).map((q) => [q.symbol, q]))
+          setGlobalQuotes((prev) => keepIfEqual(prev, { ...fromRest, ...prev }))
+        })
+        .catch(() => {})
+    }, QUOTES_FALLBACK_MS)
+    return () => window.clearTimeout(timer)
+  }, [])
+
+  const upsertOrder = useCallback((o: Order) => {
+    setOrders((prev) => upsertOrderList(prev, o))
+  }, [])
 
   const refreshOrders = useCallback(async () => {
     try {
@@ -389,74 +490,61 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // the PRO-side filter hides entirely — an empty grid from the same
   // never-reloads disease.
   const resync = useCallback(async () => {
-    await Promise.all([refreshAll(), refreshUserRef.current()])
+    // 报价 / 品种不重拉：WS 鉴权后已补推，见 RefreshOptions。
+    // No quotes / symbols refetch: the WS re-pushes them after auth (see RefreshOptions).
+    await Promise.all([refreshAll({ quotes: false, symbols: false }), refreshUserRef.current()])
   }, [refreshAll])
 
-  // 兜底轮询：每 20 秒刷新一次活跃品种列表——EA 在 InpSymbols 里增删品种后，
-  // 不需要等用户手动刷新页面，网页会在这个间隔内自动跟上。页面在后台时跳过，
-  // 避免无意义请求；切回前台立即补一次。
-  // Fallback polling: refresh the active-symbol list every 20s, so adding or
-  // removing a symbol in the EA's InpSymbols is picked up without a manual
-  // page refresh. Skipped while backgrounded; refetches immediately on
-  // returning to the foreground.
-  useEffect(() => {
-    const poll = () => {
+  // 兜底轮询：每 90 秒刷新一次活跃品种列表，只为发现 EA 在 InpSymbols 里「删掉」的品种
+  // ——新增品种由 GLOBAL_QUOTES 分支第一条报价一到就补进，不靠它。后台（含 App 壳报告的
+  // 后台）跳过，回前台立即补一次（2 秒去重）。
+  // Fallback polling: refresh the active-symbol list every 90s, only to spot symbols the EA
+  // removed from InpSymbols — additions are folded in by the GLOBAL_QUOTES branch on the first
+  // quote and don't rely on this. Skipped while backgrounded (including as reported by the App
+  // shell); refetches on return to the foreground (2s de-dupe).
+  usePollWhileVisible(
+    () => {
       symbolApi.list().then((r) => setActiveSymbols((prev) => keepIfEqual(prev, r.symbols || []))).catch(() => {})
-    }
-    const timer = window.setInterval(() => {
-      if (!document.hidden) poll()
-    }, 20000)
-    const onVisible = () => { if (!document.hidden) poll() }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
-  }, [])
+    },
+    SYMBOLS_POLL_MS,
+    [],
+    { immediate: false },
+  )
 
-  // 兜底轮询（间隔见 ACCOUNTS_POLL_MS）：发现新绑定的账号，并兜住偶发丢失的
-  // WS 推送。在线状态与余额的实时性由推送负责，不依赖这条轮询：账号掉线由后端
-  // ~7s 在线窗口加离线检测任务在数秒内置灰。
-  // 页面在后台（切到别的 App、手机息屏）时跳过，避免无意义耗电；切回前台立即
-  // 补一次，不用等下一拍。
-  // Fallback polling (interval: ACCOUNTS_POLL_MS): spots newly bound accounts and
-  // covers the occasional dropped WS push. Liveness and balances come from pushes
-  // rather than this poll — a disconnect greys out within seconds via the backend's
-  // ~7s online window and offline monitor. Skipped while backgrounded (switched
-  // app, screen locked) to avoid pointless battery drain; refetches immediately on
-  // returning to the foreground instead of waiting for the next tick.
+  // 兜底轮询（间隔见 ACCOUNTS_POLL_MS / ACCOUNTS_POLL_WS_MS）：发现新绑定的账号，并兜住
+  // 偶发丢失的 WS 推送。在线状态与余额的实时性由推送负责，不依赖这条轮询：账号掉线由后端
+  // ~7s 在线窗口加离线检测任务在数秒内置灰。WS 在线 60 秒、断开 15 秒；间隔通过 ref 现读，
+  // WS 抖动不会重跑 effect。页面在后台跳过，回前台立即补一次。
   // 会话中途后端挂掉时，refreshAll 不会再跑（它只在挂载与少数动作时触发），所以
   // 那条判据覆盖不到。这条轮询是全站最稳定的心跳，连续失败即可作为第二条证据；
   // 阈值见 ACCOUNTS_FAIL_THRESHOLD，任一次成功立刻复位。
-  // A mid-session outage isn't covered by refreshAll's check (it only runs on
-  // mount and on a few actions). This poll is the steadiest heartbeat in the app,
-  // so a run of failures is the second piece of evidence; the threshold is
-  // ACCOUNTS_FAIL_THRESHOLD, and any success resets it immediately.
+  // Fallback polling: spots newly bound accounts and covers the occasional dropped WS push.
+  // Liveness and balances come from pushes, not this poll. 60s with the WS up, 15s while down;
+  // the interval is read through a ref so a flapping WS never re-runs the effect. Skipped while
+  // backgrounded, refetches on return. A mid-session outage isn't covered by refreshAll's check,
+  // so a run of failures here is the second piece of evidence (ACCOUNTS_FAIL_THRESHOLD; any
+  // success resets it).
   const accountFailStreak = useRef(0)
-  useEffect(() => {
-    const poll = () => {
-      accountApi
-        .list()
-        .then((r) => {
-          accountFailStreak.current = 0
-          setBackendUnreachable(false)
-          setAccounts((prev) => keepIfEqual(prev, r.accounts))
-        })
-        .catch(() => {
-          accountFailStreak.current += 1
-          if (accountFailStreak.current >= ACCOUNTS_FAIL_THRESHOLD) setBackendUnreachable(true)
-        })
-    }
-    const timer = window.setInterval(() => {
-      if (!document.hidden) poll()
-    }, ACCOUNTS_POLL_MS)
-    const onVisible = () => { if (!document.hidden) poll() }
-    document.addEventListener('visibilitychange', onVisible)
-    return () => {
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-    }
+  const wsConnectedRef = useRef(false)
+  const pollAccounts = useCallback(() => {
+    accountApi
+      .list()
+      .then((r) => {
+        accountFailStreak.current = 0
+        setBackendUnreachable(false)
+        setAccounts((prev) => keepIfEqual(prev, r.accounts))
+      })
+      .catch(() => {
+        accountFailStreak.current += 1
+        if (accountFailStreak.current >= ACCOUNTS_FAIL_THRESHOLD) setBackendUnreachable(true)
+      })
   }, [])
+  usePollWhileVisible(
+    pollAccounts,
+    () => (wsConnectedRef.current ? ACCOUNTS_POLL_WS_MS : ACCOUNTS_POLL_MS),
+    [],
+    { immediate: false },
+  )
 
   const handleMessage = useCallback((msg: WSMessage) => {
     switch (msg.type) {
@@ -497,15 +585,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       case 'ORDER_UPDATE': {
         const updated = msg.data as Order
-        setOrders((prev) => {
-          const idx = prev.findIndex((o) => o.id === updated.id)
-          if (idx >= 0) {
-            const next = [...prev]
-            next[idx] = updated
-            return next
-          }
-          return [updated, ...prev]
-        })
+        setOrders((prev) => upsertOrderList(prev, updated))
         break
       }
       case 'POSITIONS': {
@@ -541,6 +621,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // entries into the snapshot
         const list = (msg.data as Quote[]) || []
         if (list.length === 0) break
+        // App 在后台：丢弃报价帧（不做无谓的整树合并与重渲染），回前台下一帧就续上。
+        // 已收到过一份之后才丢，首份快照照收。
+        // Backgrounded: drop the quote frame (no pointless merge and re-render); the next frame
+        // after returning picks up. Only dropped once a first snapshot has been taken.
+        if (gotAccountQuotes.current && isAppHidden()) break
+        gotAccountQuotes.current = true
         setQuotes((prev) => {
           const next = { ...prev }
           for (const q of list) {
@@ -556,12 +642,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // Site-wide display quotes (EA-pushed); merge changed entries into the snapshot
         const list = (msg.data as Quote[]) || []
         if (list.length === 0) break
+        if (gotGlobalQuotes.current && isAppHidden()) break
+        gotGlobalQuotes.current = true
         setGlobalQuotes((prev) => {
           const next = { ...prev }
           for (const q of list) next[q.symbol] = q
           return next
         })
-        // 顺带把没见过的新品种加进活跃列表——EA 新增品种后不用等 20 秒轮询，
+        // 顺带把没见过的新品种加进活跃列表——EA 新增品种后不用等轮询，
         // 第一条报价一到就能立刻出现。移除品种仍靠轮询的活跃窗口过期判定。
         // Also fold any never-seen symbol into the active list — a symbol the
         // EA newly starts pushing shows up the instant its first quote
@@ -609,6 +697,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   }, [applyRemotePrefs])
 
   const wsConnected = useClientSocket(handleMessage)
+  wsConnectedRef.current = wsConnected
+  // WS 一断立刻补一次账号轮询并回到 15 秒节奏（间隔由 ref 现读）。
+  // On a WS drop poll accounts at once; the interval falls back to 15s (read via the ref).
+  const prevWsConnected = useRef(false)
+  useEffect(() => {
+    if (prevWsConnected.current && !wsConnected) pollAccounts()
+    prevWsConnected.current = wsConnected
+  }, [wsConnected, pollAccounts])
 
   // 重连成功（不是首次连上）就整份重拉——首次连接由挂载那次 refreshAll 覆盖。
   // 心跳判死的僵尸连接也走这里：dropDeadConnection → 新连接 AUTH_OK → 此处。
@@ -618,8 +714,14 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const sawConnection = useRef(false)
   useEffect(() => {
     if (!wsConnected) return
-    if (sawConnection.current) void resync()
+    const reconnected = sawConnection.current
     sawConnection.current = true
+    if (!reconnected) return
+    // 重连触发的重拉随机延迟 0~4 秒摊平尖峰（首连与手动重试、回前台的重拉都不加）。
+    // Random 0–4s delay on reconnect-triggered resyncs to flatten the surge (not applied to the
+    // first connect, manual retries or the resume resync).
+    const timer = window.setTimeout(() => void resync(), Math.random() * RECONNECT_RESYNC_JITTER_MS)
+    return () => window.clearTimeout(timer)
   }, [wsConnected, resync])
 
   // 切回前台且隐藏够久（RESUME_RESYNC_AFTER_MS）也整份重拉。与上面那条会在同一次
@@ -633,16 +735,26 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // expiry, edits elsewhere), the other "pushes missed while disconnected".
   useEffect(() => {
     let hiddenAt: number | null = null
-    const onVisibility = () => {
-      if (document.hidden) {
-        hiddenAt = Date.now()
-        return
-      }
+    // 后台信号有三路：visibilitychange、App 壳的 apppack:background / apppack:foreground。
+    // 用 hiddenAt 是否为空天然去重：第一路回前台就清掉，后面几路不会再重拉一次。
+    // Three background signals: visibilitychange and the App shell's apppack:background /
+    // apppack:foreground. hiddenAt being null de-duplicates naturally: the first return clears it.
+    const onHide = () => {
+      if (hiddenAt == null) hiddenAt = Date.now()
+    }
+    const onShow = () => {
       if (hiddenAt != null && Date.now() - hiddenAt >= RESUME_RESYNC_AFTER_MS) void resync()
       hiddenAt = null
     }
+    const onVisibility = () => (document.hidden ? onHide() : onShow())
     document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
+    window.addEventListener(APP_BACKGROUND_EVENT, onHide)
+    window.addEventListener(APP_FOREGROUND_EVENT, onShow)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener(APP_BACKGROUND_EVENT, onHide)
+      window.removeEventListener(APP_FOREGROUND_EVENT, onShow)
+    }
   }, [resync])
 
   // 曾经连上过之后又断开，才提示"已断线"，避免首次连接前的瞬间误报。
@@ -717,11 +829,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LiveContextValue>(
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-      anyOnline, onlineAccounts, refreshAll, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
+      anyOnline, onlineAccounts, refreshAll, upsertOrder, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
       backendUnreachable, closedTradeTick, announcementTick, notificationTick, refreshNotifications,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-     anyOnline, onlineAccounts, refreshAll, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
+     anyOnline, onlineAccounts, refreshAll, upsertOrder, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
      backendUnreachable, closedTradeTick, announcementTick, notificationTick, refreshNotifications]
   )
 

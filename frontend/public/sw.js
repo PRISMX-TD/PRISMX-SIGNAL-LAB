@@ -42,9 +42,33 @@
 //    of waiting for every tab to close — without them a user can run the old
 //    worker for days after a change.
 // 5. The cache name is versioned and other versions are deleted on activate.
-const CACHE = "prismx-shell-v1"
+//
+// 2026-09-29 补充：网络真失败（fetch / 导航预加载 reject）时，先用缓存的 SPA 壳
+// /app.html 兜底，再没有才回 offline.html。仍是 network-first——在线时永远拿最新页面，
+// 不做「限时竞速」，所以不会给在线用户旧壳。壳只在 activate 时单独 fetch 一份放进缓存，
+// 不缓存任何导航响应（/ 与公开页是预渲染 HTML，不是壳）。壳里引用的带 hash 资源仍靠浏览器
+// 自己的 HTTP 缓存；缓存里没有壳、或壳起不来时，最坏情况和以前一样是一张空白/加载页，
+// 由 lazyRetry 的整页重载兜底。缓存版本号随之升到 v2。
+// Added 2026-09-29: on a genuine network failure (fetch / navigation preload reject) the
+// cached SPA shell /app.html is tried first, offline.html only if that is missing. Still
+// network-first — online users always get the latest page, no timed race, so no stale
+// shell for them. The shell is fetched once on activate; no navigation response is ever
+// cached (/ and the public pages are prerendered HTML, not the shell). Cache bumped to v2.
+const CACHE = "prismx-shell-v2"
 const OFFLINE_URL = "/offline.html"
+const APP_SHELL_URL = "/app.html"
 const SHELL = [OFFLINE_URL, "/icons/icon-192.png"]
+
+// 拉一份最新的 SPA 壳进缓存。失败不影响任何流程（离线时最多少一个兜底）。
+// Fetch a fresh SPA shell into the cache. Failure changes nothing else.
+function cacheAppShell() {
+  return fetch(APP_SHELL_URL, { cache: "no-cache" })
+    .then((res) => {
+      if (!res || !res.ok) return
+      return caches.open(CACHE).then((c) => c.put(APP_SHELL_URL, res))
+    })
+    .catch(() => {})
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -82,6 +106,9 @@ self.addEventListener("activate", (event) => {
         }
       })
       .then(() => self.clients.claim())
+      // claim 之后再去拉壳：不拖慢接管；waitUntil 保证 SW 不会在它完成前被回收。
+      // Shell fetch after claim so takeover isn't delayed; waitUntil keeps the worker alive.
+      .then(() => cacheAppShell())
   )
 })
 
@@ -102,7 +129,11 @@ self.addEventListener("fetch", (event) => {
     Promise.resolve(event.preloadResponse)
       .then((pre) => pre || fetch(req))
       .catch(() =>
-        caches.match(OFFLINE_URL).then((r) => r || new Response("offline", { status: 503 }))
+        // 缓存的 SPA 壳 → 离线页 → 纯文本 503 / cached SPA shell → offline page → plain 503
+        caches
+          .match(APP_SHELL_URL)
+          .then((r) => r || caches.match(OFFLINE_URL))
+          .then((r) => r || new Response("offline", { status: 503 }))
       )
   )
 })

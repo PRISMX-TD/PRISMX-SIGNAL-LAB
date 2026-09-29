@@ -45,6 +45,9 @@ import PhoneStory from '../components/landing/PhoneStory'
 import MarketStory from '../components/landing/MarketStory'
 import LandingSpaceLayer from '../components/landing/LandingSpaceLayer'
 import { usePublicLang } from '../seo/PublicShell'
+// 落地页叙事样式只随本页加载（不再打进全站 CSS）。
+// Story styles ship with the landing page only, not in the global stylesheet.
+import '../styles/landing-story.css'
 import { localePath } from '../seo/meta'
 
 type T = (k: string, opts?: Record<string, unknown>) => string

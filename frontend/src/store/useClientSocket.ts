@@ -6,6 +6,7 @@ import { reportApiFailure } from '../api/apiBase'
 import type { WSMessage } from '../api/types'
 import { netQuality, pingPayload } from './netQuality'
 import { reconnectDelay } from './reconnectBackoff'
+import { isAppHidden, onForeground } from '../utils/appVisibility'
 
 // 应用层心跳。协议层的 ping/pong 由浏览器自动应答、页面 JS 看不见，所以它只能让
 // **服务端**发现死连接；而出问题的是客户端这一侧——安卓 App 切后台再回前台，TCP 早被
@@ -59,6 +60,27 @@ const PING_MIN_GAP_MS = 10_000
 // stale data.
 const RESUME_PROBE_TIMEOUT_MS = 3_000
 
+// App 在后台时心跳放慢：Capacitor 不暂停 WebView，定时器后台照跑，而每帧 PING 让后端写
+// 几次 Redis。协议层 ping（服务端 uvicorn 每 20 秒）足够撑住 NAT，页面层只需偶尔确认。
+// While the app is backgrounded the heartbeat slows down: Capacitor doesn't pause the WebView
+// so timers keep running, and every PING costs the backend a few Redis writes. The protocol
+// ping (uvicorn, every 20s) is enough to hold NAT open; the page only needs an occasional check.
+export const HIDDEN_PING_GAP_MS = 60_000
+
+// 握手时限：WebSocket 构造后 10 秒内没 onopen、或 onopen 后 5 秒内没 AUTH_OK，就当入口连
+// 不通（主域名被封时安卓 WebView 的 TCP 握手会挂 1~2 分钟，既不 onclose 也不切域名）。
+// Handshake deadlines: no onopen within 10s of constructing the socket, or no AUTH_OK within 5s
+// of onopen, means the entry point is unusable (a blocked main domain leaves the Android
+// WebView's TCP handshake hanging 1–2 minutes with neither onclose nor a domain switch).
+export const WS_OPEN_TIMEOUT_MS = 10_000
+export const WS_AUTH_TIMEOUT_MS = 5_000
+// CONNECTING 卡了这么久，回前台 / 网络恢复时不再等它、直接重建。
+// A socket stuck CONNECTING this long is rebuilt on resume / network-back instead of waited on.
+const CONNECTING_STUCK_MS = 3_000
+// 服务端重启（关闭码 1012 / 1001）之后的窗口：这段时间内按重启节奏重连、握手失败不当成入口被封。
+// Window after a server-restart close (1012 / 1001): reconnect at restart pace and don't treat a
+// failed handshake as a blocked entry point. 1006 is deliberately NOT treated as a restart.
+export const RESTART_WINDOW_MS = 30_000
 // 返回当前 WebSocket 连接状态，供上层在断线时提示"数据可能已过时"。
 // Returns the current WebSocket connection state, so callers can warn that
 // quotes/positions may be stale while disconnected.
@@ -88,6 +110,17 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     // When any frame last arrived / a PING last left, for the "ping this tick?" decision.
     let lastFrameAt = 0
     let lastPingAt = 0
+    // 握手计时器（open / AUTH_OK 两段共用）与本次 connect() 的起始时刻。
+    // Handshake timer (shared by the open / AUTH_OK phases) and when this connect() began.
+    let handshakeTimer: number | undefined
+    let connectStartedAt = 0
+    // 服务端重启窗口的截止时刻（performance.now()）/ end of the server-restart window
+    let restartUntil = 0
+    const inRestartWindow = () => performance.now() < restartUntil
+    const clearHandshake = () => {
+      if (handshakeTimer !== undefined) window.clearTimeout(handshakeTimer)
+      handshakeTimer = undefined
+    }
 
     // 断线重连采用指数退避 + 抖动，而不是固定间隔。
     //
@@ -111,7 +144,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     const scheduleReconnect = () => {
       if (closed) return
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
-      const delay = reconnectDelay(attempt)
+      const delay = reconnectDelay(attempt, Math.random(), inRestartWindow() ? 'restart' : 'normal')
       attempt += 1
       reconnectTimer = window.setTimeout(connect, delay)
     }
@@ -161,6 +194,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     const dropDeadConnection = () => {
       const dead = ws
       ws = null
+      clearHandshake()
       stopHeartbeat()
       netQuality.setState('offline')
       if (dead) {
@@ -187,7 +221,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     const probe = (timeoutMs: number) => {
       if (!ws || ws.readyState !== WebSocket.OPEN) return
       try {
-        ws.send(JSON.stringify({ type: 'PING', ...pingPayload() }))
+        ws.send(JSON.stringify({ type: 'PING', ...pingPayload(isAppHidden()) }))
         pingSentAt = performance.now()
         lastPingAt = pingSentAt
       } catch {
@@ -202,6 +236,11 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       stopHeartbeat()
       heartbeatTimer = window.setInterval(() => {
         const now = performance.now()
+        // App 在后台：每 60 秒才发一帧 / backgrounded: one PING per 60s
+        if (isAppHidden()) {
+          if (now - lastPingAt >= HIDDEN_PING_GAP_MS) probe(HEARTBEAT_TIMEOUT_MS)
+          return
+        }
         // 刚收到过帧、且 PING 不久前才发过：连接活着，这一拍不发（见 PING_MIN_GAP_MS）。
         // A frame just arrived and a PING went out recently: alive, skip this tick.
         if (now - lastFrameAt < HEARTBEAT_INTERVAL_MS && now - lastPingAt < PING_MIN_GAP_MS) return
@@ -221,7 +260,15 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     // the failure.
     const reconnectNow = () => {
       if (closed) return
-      if (ws && ws.readyState === WebSocket.CONNECTING) return
+      // 握手还在进行就等它；卡得太久（黑洞式挂起）则不等，往下走重建。
+      // A handshake in progress is waited on; one stuck too long (black-hole hang) is rebuilt below.
+      if (
+        ws &&
+        ws.readyState === WebSocket.CONNECTING &&
+        performance.now() - connectStartedAt < CONNECTING_STUCK_MS
+      ) {
+        return
+      }
       if (ws && ws.readyState === WebSocket.OPEN) {
         probe(RESUME_PROBE_TIMEOUT_MS)
         return
@@ -255,6 +302,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       // that replaced it.
       const previous = ws
       ws = null
+      clearHandshake()
       // 心跳与它的期限一并停掉：旧连接的期限计时器若在新连接握手期间到点，
       // 会调用 dropDeadConnection() 再建一条——正是这里要防的那件事本身。
       // Stop the heartbeat and its deadline too: if the old connection's deadline
@@ -324,6 +372,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       // Don't put the token in the URL (logged by proxies/gateways); send an AUTH frame after connect.
       const socket = new WebSocket(`${wsBase}/ws/client`)
       ws = socket
+      connectStartedAt = performance.now()
       // 这条连接有没有走到 AUTH_OK：一次都没通就关掉，多半是入口连不上（可能被封），
       // 让 apiBase 探测、必要时换入口——下一轮重连读 API_BASE 时就是新的了。
       // Whether this socket ever reached AUTH_OK: closing without it most likely means the entry
@@ -331,7 +380,35 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       // next reconnect reads the new API_BASE.
       let authed = false
 
+      // 握手超时：摘掉这条连接的回调、关掉，让 apppack 探测并切换入口，探完再按退避重连
+      // （此时读到的 API_BASE 才是新的）。
+      // Handshake timeout: detach and close this socket, let apiBase probe/switch the entry point,
+      // then reconnect with backoff once probing is done (so the next connect reads the new base).
+      const onHandshakeTimeout = () => {
+        handshakeTimer = undefined
+        if (ws !== socket) return
+        ws = null
+        stopHeartbeat()
+        socket.onopen = null
+        socket.onmessage = null
+        socket.onclose = null
+        socket.onerror = null
+        try {
+          socket.close()
+        } catch {
+          /* 已经关了 / already closed */
+        }
+        netQuality.setState('offline')
+        setConnected(false)
+        if (closed) return
+        void reportApiFailure().then(scheduleReconnect)
+      }
+      handshakeTimer = window.setTimeout(onHandshakeTimeout, WS_OPEN_TIMEOUT_MS)
+
       socket.onopen = () => {
+        // onopen 到了，改等 AUTH_OK / onopen arrived; now wait for AUTH_OK
+        clearHandshake()
+        handshakeTimer = window.setTimeout(onHandshakeTimeout, WS_AUTH_TIMEOUT_MS)
         // 首帧提交 JWT 鉴权 / submit JWT for auth as the first frame
         socket.send(JSON.stringify({ type: 'AUTH', token }))
       }
@@ -365,6 +442,8 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
           // onopen merely means the handshake finished
           if (msg.type === 'AUTH_OK') {
             authed = true
+            clearHandshake()
+            restartUntil = 0
             setConnected(true)
             // 连上了才算这一轮重连成功，退避从头开始 / a successful round resets backoff
             attempt = 0
@@ -398,21 +477,28 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         if (import.meta.env.DEV) console.error('[ws] connection error', { readyState: socket.readyState })
       }
 
-      socket.onclose = () => {
+      socket.onclose = (ev: CloseEvent) => {
+        clearHandshake()
         stopHeartbeat()
         netQuality.setState('offline')
         setConnected(false)
-        if (!authed && !closed) void reportApiFailure()
+        // 1012 Service Restart / 1001 Going Away：服务端在重启。（1006 不算——它更可能是
+        // 网络断了或被封。）/ server restarting (1006 does not count: more likely a network drop)
+        if (ev && (ev.code === 1012 || ev.code === 1001)) restartUntil = performance.now() + RESTART_WINDOW_MS
+        // 重启期间的握手失败是「后端还没起来」，不是入口被封：不探测、不烧掉探测冷却。
+        // A handshake failing during a restart means "backend not up yet", not a blocked entry
+        // point: no probe, and don't burn the probe cooldown.
+        if (!authed && !closed && !inRestartWindow()) void reportApiFailure()
         if (!closed) scheduleReconnect()
       }
     }
 
     const handleOnline = () => reconnectNow()
-    const handleVisibility = () => {
-      if (!document.hidden) reconnectNow()
-    }
     window.addEventListener('online', handleOnline)
-    document.addEventListener('visibilitychange', handleVisibility)
+    // 回前台：visibilitychange 与 App 壳的 apppack:foreground 合并、按 2 秒去重（不含 focus，
+    // 与原来一致）。/ Back to foreground: visibilitychange + the shell's apppack:foreground,
+    // de-duplicated over 2s (focus deliberately excluded, as before).
+    const offForeground = onForeground(reconnectNow, undefined, { focus: false })
 
     connect()
 
@@ -420,8 +506,9 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       closed = true
       setConnected(false)
       window.removeEventListener('online', handleOnline)
-      document.removeEventListener('visibilitychange', handleVisibility)
+      offForeground()
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      clearHandshake()
       stopHeartbeat()
       ws?.close()
     }

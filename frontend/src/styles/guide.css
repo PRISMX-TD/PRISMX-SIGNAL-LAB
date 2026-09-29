@@ -247,6 +247,11 @@
 }
 .guide-hero-img {
   width: 100%;
+  /* 图带 width/height 属性时（JSX 里读 URL # 片段），属性会变成展示提示把高度钉死，
+     这里显式 height:auto 让它仍由 aspect-ratio + max-height 决定，排版与没属性时一致。
+     When the img carries width/height attributes they become presentational hints and pin
+     the height; height:auto keeps the layout the same as without them. */
+  height: auto;
   max-height: 420px;
   object-fit: cover;
   border-radius: var(--r-tile);

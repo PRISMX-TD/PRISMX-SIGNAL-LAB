@@ -164,7 +164,12 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
     } catch (err) {
       setReceipt('error')
       setError(err instanceof Error ? localizeApiError(err.message) : 'error')
-      later(() => { setReceipt(null); setSubmitting(false) }, 2000)
+      // 报错后立刻把滑动条放回来（以前要干等 2 秒才能重试）。幂等号在失败时不轮换，立即重试
+      // 是安全的；错误回执卡保留到下一次滑动开始（handleSubmit 开头会重置为 'waiting'）。
+      // Bring the slider back at once after an error (it used to wait 2s to allow a retry). The
+      // idempotency id isn't rotated on failure so an immediate retry is safe; the error receipt
+      // card stays until the next slide starts (handleSubmit resets it to 'waiting').
+      setSubmitting(false)
     }
   }
 

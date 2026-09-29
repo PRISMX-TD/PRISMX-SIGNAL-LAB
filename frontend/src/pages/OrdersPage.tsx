@@ -46,6 +46,7 @@ import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 import { formatMarginLevel } from '../components/order/orderMath'
 import { readStorage, writeStorage } from '../utils/safeStorage'
+import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/orders.css'
 
@@ -109,7 +110,7 @@ const money2 = (n: number | null | undefined): string =>
 export default function OrdersPage() {
   const { t, i18n } = useTranslation()
   const { user, refreshUser } = useAuth()
-  const { orders, accounts, refreshOrders, positionsLoaded, closedTradeTick } = useLive()
+  const { orders, accounts, upsertOrder, positionsLoaded, closedTradeTick, wsConnected } = useLive()
   // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
   // Gateway rows don't store a company; the account bar's broker falls back to
   // the partner broker name, matching the bind page.
@@ -261,32 +262,27 @@ export default function OrdersPage() {
   // with the records shown beneath them.
   const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
 
+  // 只在「绩效」页签才拉：trades 唯一的消费者是那个页签里的 ClosedTradesList，停在持仓页签
+  // 却每 45 秒全量拉一次已平仓明细纯属浪费。离开页签就停轮询并把 trades 置空，下次进入重拉。
+  // Only fetched while the Performance tab is showing: trades' sole consumer is the
+  // ClosedTradesList in that tab, so a full closed-trades pull every 45s while parked on
+  // Positions is pure waste. Leaving the tab stops the poll and clears trades so re-entry refetches.
   useEffect(() => {
-    let mounted = true
-    const load = () => {
+    if (tab !== 'performance') setTrades(null)
+  }, [tab])
+  usePollWhileVisible(
+    (isCurrent) => {
       orderApi.closedTrades()
-        .then((r) => { if (mounted) setTrades(r.trades) })
-        .catch(() => { if (mounted) setTrades((prev) => prev ?? []) })
-    }
-    load()
-    const timer = window.setInterval(() => {
-      if (!document.hidden) load()
-    }, 45_000)
-    const onVisible = () => { if (!document.hidden) load() }
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
-    return () => {
-      mounted = false
-      window.clearInterval(timer)
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
-    }
-    // closedTradeTick 变化 = 后端刚记下新平仓，立刻重拉而不是等 45 秒轮询。
-    // 轮询保留：WS 断线期间它是唯一的兜底。
-    // A bumped closedTradeTick means a new close just landed — refetch now
-    // instead of waiting out the 45s poll, which stays as the fallback for
-    // whenever the WS is down.
-  }, [closedTradeTick])
+        .then((r) => { if (isCurrent()) setTrades(r.trades) })
+        .catch(() => { if (isCurrent()) setTrades((prev) => prev ?? []) })
+    },
+    () => winratePollMs(wsConnected),
+    // closedTradeTick 变化 = 后端刚记下新平仓，立刻重拉（不受 2 秒回前台去重影响）。
+    // A bumped closedTradeTick means a new close just landed — refetch now (never swallowed by the
+    // 2s return-to-foreground de-dupe).
+    [closedTradeTick],
+    { enabled: tab === 'performance' },
+  )
 
   const visibleTrades = useMemo(() => {
     if (!trades) return trades
@@ -307,12 +303,10 @@ export default function OrdersPage() {
     if (toastTimer.current) window.clearTimeout(toastTimer.current)
     setToast({ msg, kind })
     toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-    // 平仓 / 改单 / 撤单只可能改变订单行：持仓与挂单随 WS 推送，不必整份重拉
-    // （以前是 refreshAll，一次七个接口，且每份都换新对象让整站重渲染）。
-    // Close / modify / cancel can only change order rows; positions and pending
-    // orders ride the WS. This used to be refreshAll: seven requests, each swapping
-    // in fresh objects and re-rendering the whole app.
-    void refreshOrders()
+    // 平仓 / 改单 / 撤单只可能改变订单行：回执由各动作直接 upsertOrder 并入本地列表，
+    // 持仓与挂单随 WS 推送，这里不再重拉 /orders。
+    // Close / modify / cancel can only change order rows: each action merges its receipt with
+    // upsertOrder, positions and pending orders ride the WS, so no /orders refetch here.
   }
 
   // 持仓汇总 / positions summary
@@ -434,7 +428,8 @@ export default function OrdersPage() {
   const doCancel = async (id: string) => {
     setCancellingId(id)
     try {
-      await orderApi.cancel(id)
+      const res = await orderApi.cancel(id)
+      upsertOrder(res)
       showToast(t('orders.cancelSent'), 'info')
     } catch (e) {
       showToast(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
@@ -482,6 +477,8 @@ export default function OrdersPage() {
         clientOrderId: clientOrderId(),
         mt5Login: selectedLogin ?? null,
       })
+      // 把排队的 PENDING 平仓行立刻显示出来 / show the queued PENDING close rows at once
+      res.orders?.forEach(upsertOrder)
       if (res.queued > 0) showToast(t('orders.closeAll.sent', { count: res.queued }), 'info')
       else showToast(t('orders.closeAll.busy'), 'info')
       bulkTimer.current = window.setTimeout(() => setBulkClosing(new Set()), 12000)
