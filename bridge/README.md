@@ -30,7 +30,7 @@
 - **改挂单缺哪一项就保留哪一项**：MODIFY_PENDING 没带的触发价 / 止损 / 止盈保留挂单上的现值，只有显式传 0 才是清除止损止盈（`mt5_worker._modify_pending`）。图表上拖一条线只发那一项，另外两项绝不能顺手覆盖。
 - **挂单挂出去了 ≠ 成交了**：PENDING 指令成功回的是 `status="PLACED"`，不是 `FILLED`。混用会让一张可能永远不触发的挂单被后端当成一笔完成的交易记进胜率、勋章与竞赛。挂单的止损止盈按**触发价**夹最小距离，不是按现价（`_clamp_pending_stops`）——按现价夹会把止损拖到贴着市价，触发那一刻就被打掉。
 - **滑点按品种精度折算**（`_deviation_points`），开仓与平仓同一套；写死的 point 数在黄金上只值几毛钱，行情一快就是一串 REQUOTE。
-- 后端地址**固定为生产地址**，不读用户输入。
+- 后端地址**固定为生产地址**（`DEFAULT_BACKEND = "https://api.prismxsignallab.com"`），不读用户输入。
 
 ## 前提
 - **仅支持 Windows**（`MetaTrader5` 包限制）
@@ -50,11 +50,11 @@ python bridge_app.py
 ## 打包成 exe
 统一用 `PRISMX-Bridge.spec` 打包（**onefile + 关闭 UPX**，降低 Windows Defender / 第三方杀软误报）：
 ```powershell
-pip install pyinstaller
+pip install -r requirements.txt pyinstaller
 pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 ```
 产出 `dist/PRISMX-Bridge-Setup.exe`（单文件，双击即用），文件名必须与 GitHub Release 资产名、
-`bridge_app.BRIDGE_ASSET_FILENAME`、网页下载页 `DownloadPage.tsx` 的 `BRIDGE_FILENAME` 三处一致。
+`bridge_app.BRIDGE_ASSET_FILENAME`、前端 `frontend/src/api/bridgeDownload.ts` 的 `BRIDGE_FILENAME`（下载页 `DownloadPage.tsx` 与绑定页 `BindPage.tsx` 都引用它）三处一致。
 
 > 注意：spec 里 `upx=False`，不要改回 `--onefile` 的裸命令或开启 UPX，否则误报率会升高。
 > spec **自 2026-09-20 起入库**且手工维护（`hiddenimports` 里有 pystray/PIL 的运行时后端与
@@ -62,13 +62,13 @@ pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 > 只会让「一键更新」悄悄退回手动下载。
 
 ## 发布新版本
-1. 改 `bridge_app.py` 里的 `APP_VERSION`（版本号的**唯一来源**；**改了回执协议的字段必须升版本**，见常量旁的注释）；
+1. 改 `bridge_app.py` 里的 `APP_VERSION`（当前 `1.4.7`；版本号的**唯一来源**；**改了回执协议的字段必须升版本**，见常量旁的注释），并在常量上方补一段该版本的变更说明；
 2. 按上面命令重新打包；
 3. **签名**：`python release_sign.py`（见下一节），得到 `dist/SHA256SUMS` 与 `dist/SHA256SUMS.sig`；
 4. 用 GitHub CLI 发 Release，上传**三个**资产，名字一个都不能改：
    `PRISMX-Bridge-Setup.exe`、`SHA256SUMS`、`SHA256SUMS.sig`。少了后两个，已装的桥接会认为「这次没签名」，只提示手动下载。
    ```powershell
-   & "C:\Program Files\GitHub CLI\gh.exe" release create v1.4.6 `
+   & "C:\Program Files\GitHub CLI\gh.exe" release create v<APP_VERSION> `
      dist\PRISMX-Bridge-Setup.exe dist\SHA256SUMS dist\SHA256SUMS.sig `
      --repo PRISMX-TD/PRISMX-SIGNAL-LAB --target main --latest --notes-file notes.md
    ```
@@ -140,14 +140,14 @@ sig = key.sign(open("dist/SHA256SUMS", "rb").read())   # 签原始字节，不�
   打包下子进程起不来，改成了单进程）。单终端场景保持附着不重连。
 - `PRISMX-Bridge.spec`：PyInstaller 打包配置（onefile / 无 UPX），**入库、手工维护**（见上）。
 - `release_sign.py`：发版签名脚本（见上）。
-- `tests/`：`python -m pytest tests`。覆盖本地配置的加密语义、执行三态（FILLED / REJECTED / FAILED）、
-  重发指令的二次确认、自更新验签。
+- `tests/`：`python -m pytest tests`。五个测试文件分别覆盖本地配置的加密语义（`test_config_storage.py`）、执行三态 FILLED / REJECTED / FAILED（`test_execution_three_states.py`）、
+  重发指令的二次确认（`test_redelivery_reconfirm.py`）、报价独立线程与状态循环分段拿锁（`test_quote_thread_and_lock_split.py`，1.4.6）、自更新验签（`test_update_verification.py`）。
 
 ## 本地文件（都在用户主目录）
 | 文件 | 内容 |
 |---|---|
 | `~/.prismx_bridge.json` | 后端地址（明文）+ `token_enc`（DPAPI 密文） |
-| `~/.prismx_bridge.log` | 运行日志，512KB × 4 份轮转。用户目录建不了时退到系统临时目录的 `prismx_bridge.log` |
+| `~/.prismx_bridge.log` | 运行日志，512KB 一份、当前 + 3 份备份轮转。用户目录建不了时退到系统临时目录的 `prismx_bridge.log` |
 | `~/.prismx_bridge_executed.json` | 幂等缓存（24 小时 TTL） |
 | `~/.prismx_bridge_reports.json` | 未回报的执行结果队列 |
 | `~/.prismx_bridge_trades.json` | 未上报的平仓明细队列 |

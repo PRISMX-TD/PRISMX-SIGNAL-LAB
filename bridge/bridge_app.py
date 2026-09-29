@@ -17,6 +17,7 @@ import http.client
 import json
 import logging
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,7 @@ import tkinter as tk
 import webbrowser
 import winreg
 from ctypes import wintypes
+from collections import deque
 from logging.handlers import RotatingFileHandler
 from tkinter import messagebox, ttk
 from urllib import error, request
@@ -110,7 +112,22 @@ except Exception:
 # single-terminal only, multi-terminal falls back to the main loop); the status poll
 # takes the MT5 lock in two short sections so the closed-trade scan no longer blocks
 # commands. No wire-protocol change.
-APP_VERSION = "1.4.6"
+#
+# 1.4.7（2026-09-29）：减负与稳定性。① 没有持仓/挂单且内容没变时不再每拍上报，约每
+# 15 秒补一次保活；② 后端在 poll 响应里带 wantQuotes=false（没人开着网页）时报价放慢
+# 到约 3 秒，字段缺失（旧后端）或为真时仍 0.5 秒；③ 状态循环的心跳 /poll 约每 3 秒一次
+# （按上次成功计时，失败下一拍立即重试）；④ 后端不可用时指令循环 / 状态循环指数退避加
+# 抖动；⑤ 指令长轮询 HTTP 超时 15→9 秒；⑥ 平仓/下单结果回报交给独立线程排队发送，指令
+# 线程先报持仓、不再逐条等 /result。线上协议没有新增必填字段，回执三态语义不变。
+#
+# 1.4.7 (2026-09-29): load and resilience. Empty/unchanged positions are no longer posted
+# every tick (keep-alive about every 15 s); quotes slow to ~3 s when the backend says
+# wantQuotes=false in the poll reply (missing/true keeps 0.5 s); the status-loop heartbeat
+# poll goes out about every 3 s (timed from the last success, retried next tick on
+# failure); both loops back off exponentially with jitter while the backend is down; the
+# command long-poll HTTP timeout drops 15 -> 9 s; order results are reported by their own
+# thread so the command thread reports positions first. Result semantics are unchanged.
+APP_VERSION = "1.4.7"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -210,6 +227,45 @@ POLL_INTERVAL = 1.5  # 状态上报间隔（秒）/ status report interval (seco
 # and returns the instant a command is committed. The backend caps it at 5s because
 # liveness is a 7-second heartbeat window refreshed by this very request.
 COMMAND_WAIT_SECONDS = 5.0
+# 长轮询的 HTTP 超时必须大于 waitSeconds（后端最多挂这么久才回），留 4 秒缓冲。
+# HTTP timeout of the long poll: must exceed waitSeconds; 4 s of slack.
+COMMAND_HTTP_TIMEOUT = COMMAND_WAIT_SECONDS + 4.0
+
+# 状态循环的心跳 /poll 间隔（秒）。后端 ONLINE_WINDOW=7 秒，指令长轮询每 ~5.5 秒也在刷
+# 心跳；这里取 3 秒，实际拍距 1.5 秒 + 读终端耗时，故放行阈值留 0.5 秒余量，免得
+# 拍距略小于 3 秒时被推迟整整一拍（3 -> 4.5 秒）。
+# Heartbeat /poll cadence of the status loop. The gate keeps 0.5 s of slack so a tick a
+# hair early doesn't slip a whole extra tick (3 -> 4.5 s).
+HEARTBEAT_INTERVAL = 3.0
+HEARTBEAT_SLACK = 0.5
+
+# 空持仓（或内容没变）时的保活上报间隔（秒）。后端快照 TTL 600 秒，远大于此。
+# Keep-alive interval for an unchanged/empty positions report.
+POSITIONS_KEEPALIVE_SECONDS = 15.0
+
+# 没人看网页时（后端 wantQuotes=false）的报价间隔（秒）。
+# Quote interval while nobody is watching the web page (backend said wantQuotes=false).
+QUOTE_INTERVAL_IDLE = 3.0
+
+# 后端不可用时的指数退避上限（秒）：指令循环 / 状态循环。
+# Backoff caps while the backend is unreachable.
+COMMAND_BACKOFF_CAP = 10.0
+STATUS_BACKOFF_CAP = 15.0
+
+
+def _backoff_delay(failures: int, cap: float) -> float:
+    """连续失败 n 次后的等待：min(cap, 1.5 * 2^(n-1)) * uniform(0.8, 1.2)。
+    Wait after n consecutive failures, capped, with +-20% jitter."""
+    n = min(max(1, failures), 16)
+    return min(cap, POLL_INTERVAL * (2 ** (n - 1))) * random.uniform(0.8, 1.2)
+
+
+def _is_backoff_error(e: BaseException) -> bool:
+    """网络类异常与 5xx 才退避；4xx（含 401/403）不是后端挂了。
+    Back off for network errors and 5xx only; 4xx means the backend is up."""
+    if isinstance(e, error.HTTPError):
+        return e.code >= 500
+    return True
 
 # 报价线程：单独一条线程只读关注品种的 tick，每 QUOTE_INTERVAL 秒一次，只发有变化的。
 # 以前报价排在「读终端（含 15 分钟平仓扫描）→ 上报持仓 → poll」之后、每拍再固定睡
@@ -703,6 +759,10 @@ class BackendClient:
         return out
 
 
+class _HeartbeatSkipped(Exception):
+    """本拍跳过心跳 /poll（内部控制流）/ this tick skips the heartbeat poll (control flow)."""
+
+
 class BridgeEngine:
     """协调器：串行轮询本机所有 MT5 终端 + 轮询后端，运行在后台线程。
     Coordinator: serially poll all local MT5 terminals + the backend on a thread.
@@ -778,6 +838,7 @@ class BridgeEngine:
         # 上一拍报价由谁发（True=报价线程，False=状态循环），只用来在切换时记一行日志。
         # Who sent quotes last tick (True = quote thread); only for logging hand-overs.
         self._quotes_via_thread: bool | None = None
+        self._fallback_quotes_at = float("-inf")
         # MetaTrader5 包附着的是进程级单连接，两条循环不能同时碰它。
         # The MetaTrader5 module is one process-wide attachment; the two loops
         # must not touch it concurrently.
@@ -795,6 +856,31 @@ class BridgeEngine:
         self._pending_by_path: dict[str, list] = {}
         self._state_lock = threading.Lock()
         self._cmd_thread: threading.Thread | None = None
+        # 时钟可注入（测试用）/ injectable clock (tests)
+        self._clock = time.monotonic
+        # 持仓上报去重：上次成功发出的摘要与时刻（见 _tick 第 3 步）。
+        # Positions-report dedupe: digest and time of the last successful post.
+        self._pos_digest: str | None = None
+        self._pos_sent_at: float = -1e9
+        # 心跳 /poll：上次**成功**的时刻，以及该次响应里的状态栏警告（跳过的拍沿用）。
+        # Heartbeat poll: time of the last success and the warning it carried.
+        self._hb_ok_at: float = -1e9
+        self._last_warning: str | None = None
+        # 后端说有没有人在看网页；缺失 / True 都按「有人看」。
+        # Whether anyone is watching the web; missing or True means yes.
+        self._want_quotes = True
+        # 两条循环各自的连续失败次数（退避用）。
+        # Consecutive failures per loop (for backoff).
+        self._cmd_fail_n = 0
+        self._status_fail_n = 0
+        # 结果回报：独立线程 + 队列。线程没起（未 start）时 _report_result 退回同步发送。
+        # Result reporting: own thread + queue; without the thread (engine not started)
+        # _report_result falls back to sending synchronously.
+        self._report_q: deque = deque()
+        self._report_wake = threading.Event()
+        self._report_http = BackendClient(self.backend, token)
+        self._report_thread: threading.Thread | None = None
+        self._async_reports = False
 
     def start(self):
         self._stop.clear()
@@ -804,9 +890,13 @@ class BridgeEngine:
         self._cmd_thread.start()
         self._quote_thread = threading.Thread(target=self._quote_loop, daemon=True, name="bridge-quotes")
         self._quote_thread.start()
+        self._async_reports = True
+        self._report_thread = threading.Thread(target=self._report_loop, daemon=True, name="bridge-reports")
+        self._report_thread.start()
 
     def stop(self):
         self._stop.set()
+        self._report_wake.set()
         self._http.close()
         self._cmd_http.close()
         # 报价线程的连接由它自己在退出时关（见 _quote_loop 的 finally）：这里去 close
@@ -844,13 +934,19 @@ class BridgeEngine:
                         "waitSeconds": COMMAND_WAIT_SECONDS,
                         "fetchCommands": True,
                     },
-                    timeout=COMMAND_WAIT_SECONDS + 10.0,
+                    timeout=COMMAND_HTTP_TIMEOUT,
                 )
                 commands = resp.get("commands", [])
                 commands = [c for c in commands if isinstance(c, dict)] if isinstance(commands, list) else []
+                self._note_want_quotes(resp)
+                self._cmd_fail_n = 0
             except Exception as e:
                 logger.warning("指令长轮询失败 / command poll failed: %s", e)
-                self._stop.wait(POLL_INTERVAL)
+                if _is_backoff_error(e):
+                    self._cmd_fail_n += 1
+                    self._stop.wait(_backoff_delay(self._cmd_fail_n, COMMAND_BACKOFF_CAP))
+                else:
+                    self._stop.wait(POLL_INTERVAL)
                 continue
             if commands:
                 try:
@@ -907,7 +1003,7 @@ class BridgeEngine:
                         self._quote_err_logged_at = now
                         logger.warning("报价线程本轮失败，由状态循环兜底 / quote round failed, "
                                        "status loop falls back: %s", e)
-                self._stop.wait(max(0.05, QUOTE_INTERVAL - (time.monotonic() - t0)))
+                self._quote_sleep(t0)
         except BaseException:
             # 走到这里是循环本身出了问题（不是单轮失败）：记下来，线程退出，状态循环
             # 看到 is_alive() 为假会自动接回原来的报价上报。
@@ -919,6 +1015,26 @@ class BridgeEngine:
         finally:
             self._quote_http.close()
             logger.info("报价线程已退出 / quote thread stopped")
+
+    def _note_want_quotes(self, resp: dict) -> None:
+        """记下后端对「有没有人在看网页」的回答；只有显式 False 才算没人看。
+        Record the backend's wantQuotes; only an explicit False means nobody is watching."""
+        if isinstance(resp, dict):
+            self._want_quotes = resp.get("wantQuotes") is not False
+
+    def _quote_interval(self) -> float:
+        return QUOTE_INTERVAL_IDLE if self._want_quotes is False else QUOTE_INTERVAL
+
+    def _quote_sleep(self, t0: float) -> None:
+        """睡到下一轮。放慢期间切成 0.5 秒小段，poll 响应一说有人看了就提前醒。
+        Sleep until the next round. While slowed, wake early in 0.5 s slices once a poll
+        reply says someone is watching again."""
+        while not self._stop.is_set():
+            remaining = self._quote_interval() - (time.monotonic() - t0)
+            if remaining <= 0:
+                return
+            if self._stop.wait(max(0.05, min(remaining, QUOTE_INTERVAL))):
+                return
 
     def _quote_round(self) -> bool:
         """报价线程的一轮。返回 True = 这一轮完整跑完（读到了、该发的都发出去了）。
@@ -947,7 +1063,10 @@ class BridgeEngine:
         with self._state_lock:
             if not self._quote_path:
                 return False
-        return time.monotonic() - self._quote_ok_at < QUOTE_THREAD_STALE_SECONDS
+        # 放慢期间每轮间隔本来就长，心跳新鲜度的门槛跟着放宽。
+        # The freshness bar grows with the (slowed) round interval.
+        stale = QUOTE_THREAD_STALE_SECONDS + (self._quote_interval() - QUOTE_INTERVAL)
+        return time.monotonic() - self._quote_ok_at < stale
 
     def _send_quotes(self, quotes: list, http: "BackendClient", timeout: float = 10.0) -> None:
         """只上报相对上次**成功发出**的值有变化的 (账号, 品种)。发送失败就把这几条的去重
@@ -1072,6 +1191,9 @@ class BridgeEngine:
                         merged_pending = [o for lst in self._pending_by_path.values() for o in lst]
                     http.post("/api/bridge/positions",
                               {"data": merged, "pendingOrders": merged_pending})
+                    # 即时上报后让下一拍的状态循环上报一定放行，不与它的摘要比较。
+                    # Make the next status tick's report unconditional after this one.
+                    self._pos_digest = None
             except Exception as e:
                 logger.warning("成交后即时上报持仓失败 / immediate positions report failed: %s", e)
 
@@ -1212,8 +1334,17 @@ class BridgeEngine:
             except Exception as e:
                 self.last_error = str(e)
                 self.on_status([], self.last_error)
-            # 可被 stop 提前唤醒的等待 / interruptible wait
-            self._stop.wait(POLL_INTERVAL)
+            # 可被 stop 提前唤醒的等待；后端不可用时指数退避 + 抖动。
+            # Interruptible wait; exponential backoff + jitter while the backend is down.
+            if self._status_fail_n > 0:
+                self._stop.wait(_backoff_delay(self._status_fail_n, STATUS_BACKOFF_CAP))
+            else:
+                self._stop.wait(POLL_INTERVAL)
+
+    @staticmethod
+    def _positions_digest(positions: list, pending_orders: list) -> str:
+        blob = json.dumps([positions, pending_orders], sort_keys=True, default=str, separators=(",", ":"))
+        return hashlib.blake2b(blob.encode("utf-8"), digest_size=16).hexdigest()
 
     def _tick(self):
         paths = scan_terminals()
@@ -1332,8 +1463,16 @@ class BridgeEngine:
             # 挂单与持仓同一帧上报：两张表在网页上是并排的，分两次发会让它们
             # 来回错开一拍。/ Pending orders ride the same report: the two tables sit
             # side by side on the web and separate posts would leave them a tick apart.
-            self._http.post("/api/bridge/positions",
-                            {"data": positions, "pendingOrders": pending_orders})
+            # 内容与上次成功发出的一样、且距上次不足保活间隔就不发（空持仓最常见）。
+            # Skip when identical to the last successful post and inside the keep-alive
+            # window (an empty book is the common case).
+            digest = self._positions_digest(positions, pending_orders)
+            now = self._clock()
+            if not (digest == self._pos_digest and now - self._pos_sent_at < POSITIONS_KEEPALIVE_SECONDS):
+                self._http.post("/api/bridge/positions",
+                                {"data": positions, "pendingOrders": pending_orders})
+                self._pos_digest = digest
+                self._pos_sent_at = now
         except Exception as e:  # noqa: BLE001
             # 这一步以前是完全静默的：用户报「网页上仓位不刷新」时，日志里
             # 连一次失败的痕迹都找不到。与本文件其它上报路径保持一致，记一行。
@@ -1348,12 +1487,20 @@ class BridgeEngine:
         # here (fetchCommands=False) but by the command loop's long poll. An older backend
         # ignores the flag and still hands commands over; step 8 below still runs them.
         commands = []
-        warning = None
+        warning = self._last_warning
         try:
+            # 心跳约每 3 秒一次，按上次成功计时；失败的话 _hb_ok_at 不动，下一拍立即重试。
+            # Heartbeat about every 3 s, timed from the last success; a failure leaves
+            # _hb_ok_at alone so the next tick retries at once.
+            if self._clock() - self._hb_ok_at < HEARTBEAT_INTERVAL - HEARTBEAT_SLACK:
+                raise _HeartbeatSkipped()
             resp = self._http.post(
                 "/api/bridge/poll",
                 {"accounts": accounts, "bridgeVersion": APP_VERSION, "fetchCommands": False},
             )
+            self._hb_ok_at = self._clock()
+            self._status_fail_n = 0
+            self._note_want_quotes(resp)
             commands = resp.get("commands", [])
             # 仅接受 list[dict]，过滤畸形元素，防止后续执行链异常。
             # Only accept list[dict]; drop malformed elements to protect the chain.
@@ -1394,6 +1541,11 @@ class BridgeEngine:
                 )
             if parts:
                 warning = "；".join(parts) + "，详见网页「连接 MT5」页 / see the web Bind page for details"
+            else:
+                warning = None
+            self._last_warning = warning
+        except _HeartbeatSkipped:
+            pass
         except error.HTTPError as e:
             # 只有 401/403 才是 Token 的问题。此前所有 HTTP 错误都提示"检查 Token"，
             # 后端 500 时用户只会反复核对一个本来就正确的 Token，永远查不到方向。
@@ -1407,10 +1559,13 @@ class BridgeEngine:
                     f"后端异常 HTTP {e.code}: {e.reason}"
                     f"（与 Token 无关，服务端故障，正在自动重试）"
                 )
+            if _is_backoff_error(e):
+                self._status_fail_n += 1
             self.on_status(accounts, self.last_error)
             return
         except Exception as e:
             self.last_error = f"无法连接后端: {e}"
+            self._status_fail_n += 1
             self.on_status(accounts, self.last_error)
             return
 
@@ -1426,7 +1581,15 @@ class BridgeEngine:
             logger.info("报价上报改由%s / quotes now reported by %s",
                         "报价线程" if via_thread else "状态循环",
                         "the quote thread" if via_thread else "the status loop")
-        if not via_thread:
+        # 没人看网页（wantQuotes=False）时兜底路径也放慢到 QUOTE_INTERVAL_IDLE；
+        # 一旦响应说有人看，_quote_interval() 恢复 0.5 秒，这里每拍都发。
+        # While nobody watches (wantQuotes=False) the fallback path also slows to
+        # QUOTE_INTERVAL_IDLE; once the reply says someone is watching it sends every tick.
+        if not via_thread and (
+            self._clock() - self._fallback_quotes_at >= self._quote_interval() - HEARTBEAT_SLACK
+            or self._want_quotes is not False
+        ):
+            self._fallback_quotes_at = self._clock()
             try:
                 self._send_quotes(quotes_by_account, self._http)
             except Exception as e:  # noqa: BLE001
@@ -1476,13 +1639,53 @@ class BridgeEngine:
             _save_executed_cache(self._executed, self._executed_at)
 
     def _report_result(self, result: dict, http: "BackendClient | None" = None):
-        """回报单条结果，失败则入队下一轮重试 / report one result, queue on failure."""
+        """回报单条结果。报告线程在跑时只入队立即返回（由 _report_loop 发送）；否则同步发，
+        失败入队下一轮重试。
+        Report one result. With the reporter thread running this only enqueues and returns
+        (_report_loop sends it); otherwise it posts synchronously, queueing on failure."""
+        if self._async_reports:
+            self._report_q.append(result)
+            self._report_wake.set()
+            return
         try:
             (http or self._http).post("/api/bridge/result", result)
         except Exception:
             with self._state_lock:
                 if result not in self._pending_reports:
                     self._pending_reports.append(result)
+                    _save_pending_reports(self._pending_reports)
+
+    def _report_loop(self):
+        """独立线程：顺序发送队列里的结果回报。第一条失败就把剩下的都转进持久化的重试队列
+        （状态循环的 _flush_reports 会接手），不逐条空等超时。退出时队列里剩的同样转进去。
+        Own thread: send queued results in order. On the first failure the rest move to
+        the persisted retry list (the status loop's _flush_reports takes over) instead of
+        each waiting out a timeout; whatever is left at exit moves there too."""
+        try:
+            while not self._stop.is_set():
+                self._report_wake.wait(1.0)
+                self._report_wake.clear()
+                self._drain_reports()
+        finally:
+            self._drain_reports(final=True)
+            self._report_http.close()
+
+    def _drain_reports(self, final: bool = False) -> None:
+        failed = final
+        while True:
+            try:
+                r = self._report_q.popleft()
+            except IndexError:
+                return
+            if not failed:
+                try:
+                    self._report_http.post("/api/bridge/result", r)
+                    continue
+                except Exception:
+                    failed = True
+            with self._state_lock:
+                if r not in self._pending_reports:
+                    self._pending_reports.append(r)
                     _save_pending_reports(self._pending_reports)
 
     def _flush_reports(self):
