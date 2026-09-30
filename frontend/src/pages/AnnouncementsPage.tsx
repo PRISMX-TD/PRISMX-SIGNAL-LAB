@@ -21,7 +21,9 @@ export function fmtAnnDay(iso: string | null): string {
 
 export default function AnnouncementsPage() {
   const { t, i18n } = useTranslation()
-  const isZh = i18n.language !== 'en'
+  // 后台内容只存中英两份：只有中文界面取中文，其余语言（含 ja / th / vi）取英文。
+  // Admin content is stored in zh + en only: the zh UI reads zh, every other UI reads en.
+  const isZh = !!i18n.language?.startsWith('zh')
   const pick = (zh: string, en: string) => (isZh ? zh || en : en || zh)
   useDocumentTitle(t('announcements.title'))
   const [items, setItems] = useState<Announcement[] | null>(null)

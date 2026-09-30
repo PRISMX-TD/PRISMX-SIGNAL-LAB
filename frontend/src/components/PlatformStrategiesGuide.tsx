@@ -45,7 +45,9 @@ import { safeHttpUrl } from '../utils/safeUrl'
 
 export default function PlatformStrategiesGuide() {
   const { t, i18n } = useTranslation()
-  const isZh = i18n.language !== 'en'
+  // 后台内容只存中英两份：只有中文界面取中文，其余语言（含 ja / th / vi）取英文。
+  // Admin content is stored in zh + en only: the zh UI reads zh, every other UI reads en.
+  const isZh = !!i18n.language?.startsWith('zh')
   const [items, setItems] = useState<PlatformStrategy[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)

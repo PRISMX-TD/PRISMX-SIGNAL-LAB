@@ -6,7 +6,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '../store/auth'
-import { syncLanguage } from '../i18n'
+import { isAppLang, syncLanguage } from '../i18n'
 import { readStorage } from '../utils/safeStorage'
 import { langFromPath, pageById, ORIGIN, type PageId, type PublicLang } from './meta'
 
@@ -27,7 +27,8 @@ export default function PublicShell({ lang, page, children }: { lang: PublicLang
     // works" — Safari private mode and policy-disabled site data still throw. A
     // failed read falls back to Chinese.
     if (page === 'home' && isAuthed) {
-      syncLanguage(readStorage('prismx_lang') === 'en' ? 'en' : 'zh')
+      const stored = readStorage('prismx_lang')
+      syncLanguage(isAppLang(stored) ? stored : 'zh')
       return
     }
     syncLanguage(lang)

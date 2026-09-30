@@ -5,7 +5,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useAuth } from './auth'
 import { userApi } from '../api/client'
-import i18n from '../i18n'
+import i18n, { isAppLang } from '../i18n'
 import { langFromPath } from '../seo/meta'
 import { readJson, writeJson, writeStorage } from '../utils/safeStorage'
 
@@ -83,7 +83,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         const cloudLang = (data as Record<string, unknown>)?.lang as Record<string, unknown> | undefined
         const lang = cloudLang?.lang as string | undefined
         const onPublicPage = langFromPath(window.location.pathname) !== null
-        if (!onPublicPage && lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
+        if (!onPublicPage && isAppLang(lang) && lang !== i18n.language) {
           i18n.changeLanguage(lang)
           writeStorage('prismx_lang', lang)
         }
@@ -181,7 +181,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     // 同步云端语言偏好(与初始加载一致)/ sync cloud language preference like initial load
     const cloudLang = (doc as Record<string, unknown>)?.lang as Record<string, unknown> | undefined
     const lang = cloudLang?.lang as string | undefined
-    if (lang && (lang === 'zh' || lang === 'en') && lang !== i18n.language) {
+    if (isAppLang(lang) && lang !== i18n.language) {
       i18n.changeLanguage(lang)
       writeStorage('prismx_lang', lang)
     }

@@ -34,7 +34,37 @@ import { readStorage, writeStorage } from '../utils/safeStorage'
 // page that only a browser-settings change can fix.
 const canUseDom = typeof window !== 'undefined'
 const urlLang = canUseDom ? langFromPath(window.location.pathname) : null
-const saved = urlLang || (canUseDom && readStorage('prismx_lang')) || 'zh'
+// 界面支持的语言。zh / en 是完整的两套；ja / th / vi 只覆盖界面文案——公开页（落地、
+// 法务、FAQ）仍只有中英两套 URL，管理后台只给运营用，这两块缺的键按 fallbackLng 落到英文。
+// 公告、邮件这类后台内容只存中英两份，新语言一律显示英文那份（见 api/utils 的 pickLang）。
+// Supported UI languages. zh / en are complete; ja / th / vi cover the app UI only — the
+// public pages (landing, legal, FAQ) still exist only as zh / en URLs and the admin console is
+// operator-only, so keys missing there fall back to English. Announcements / emails are stored
+// in zh + en only; the new languages read the English half (see pickLang in api/utils).
+export type AppLang = 'zh' | 'en' | 'ja' | 'th' | 'vi'
+export const APP_LANGS: { code: AppLang; label: string; short: string }[] = [
+  { code: 'zh', label: '简体中文', short: '中' },
+  { code: 'en', label: 'English', short: 'EN' },
+  { code: 'ja', label: '日本語', short: 'JA' },
+  { code: 'th', label: 'ไทย', short: 'TH' },
+  { code: 'vi', label: 'Tiếng Việt', short: 'VI' },
+]
+export function isAppLang(v: unknown): v is AppLang {
+  return typeof v === 'string' && APP_LANGS.some((l) => l.code === v)
+}
+// 当前界面语言归一成 AppLang（i18n.language 可能是 undefined 或带地区后缀）。
+// Current UI language normalised to an AppLang.
+export function currentLang(): AppLang {
+  const l = (i18n.language || '').slice(0, 2)
+  return isAppLang(l) ? l : 'zh'
+}
+// Intl 用的地区标签 / BCP-47 tag for Intl and <html lang>
+export const LOCALE_TAG: Record<AppLang, string> = {
+  zh: 'zh-CN', en: 'en-GB', ja: 'ja-JP', th: 'th-TH', vi: 'vi-VN',
+}
+
+const stored = canUseDom ? readStorage('prismx_lang') : null
+const saved: AppLang = urlLang || (isAppLang(stored) ? stored : 'zh')
 
 // <html lang> 必须跟着界面语言走，而不是一直停在 index.html 里写死的初值。
 // 它决定屏幕阅读器用哪种语言发音、浏览器要不要弹「翻译此页」、以及搜索引擎
@@ -50,7 +80,7 @@ const saved = urlLang || (canUseDom && readStorage('prismx_lang')) || 'zh'
 // mounts and an effect would apply it a beat late.
 function applyHtmlLang(lang: string) {
   if (typeof document === 'undefined') return
-  document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'
+  document.documentElement.lang = lang === 'en' ? 'en' : isAppLang(lang) ? LOCALE_TAG[lang] : 'zh-CN'
 }
 
 // 语言包按需加载：只有中文（默认语言 + fallbackLng，绝大多数用户）静态打进入口包，
@@ -74,17 +104,33 @@ function applyHtmlLang(lang: string) {
 // SSR (seo/entry-server.tsx) adds the en bundle statically before rendering.
 const LAZY_LOCALES: Record<string, () => Promise<{ default: ResourceKey }>> = {
   en: () => import('./en.json'),
+  ja: () => import('./ja.json'),
+  th: () => import('./th.json'),
+  vi: () => import('./vi.json'),
 }
 
 // 按需包（见文件头）。/ On-demand halves (see the file header).
 const MORE_LOCALES: Record<string, () => Promise<{ default: ResourceKey }>> = {
   zh: () => import('./zh.more.json'),
   en: () => import('./en.more.json'),
+  ja: () => import('./ja.more.json'),
+  th: () => import('./th.more.json'),
+  vi: () => import('./vi.more.json'),
 }
+// 新语言缺的键（公开页 / 管理后台）落到英文，所以按需包也要连英文的一起补。
+// The new languages fall back to English for keys they lack, so their on-demand half
+// brings the English one along.
+const MORE_FALLBACK: Record<string, string> = { ja: 'en', th: 'en', vi: 'en' }
 const moreLoaded = new Set<string>()
 const moreLoading = new Map<string, Promise<void>>()
 
 function loadMore(lng: string): Promise<void> {
+  const fb = MORE_FALLBACK[lng]
+  if (fb) return Promise.all([loadMore(fb), loadOwnMore(lng)]).then(() => {})
+  return loadOwnMore(lng)
+}
+
+function loadOwnMore(lng: string): Promise<void> {
   const load = MORE_LOCALES[lng]
   if (!load || moreLoaded.has(lng)) return Promise.resolve()
   let p = moreLoading.get(lng)
@@ -149,7 +195,7 @@ export const i18nReady: Promise<unknown> = i18n
   },
   partialBundledLanguages: true,
   lng: saved,
-  fallbackLng: 'zh',
+  fallbackLng: { ja: ['en'], th: ['en'], vi: ['en'], default: ['zh'] },
   interpolation: { escapeValue: false },
   // 关掉命名空间分隔符。i18next 默认把 key 里的第一个 `:` 当成「命名空间:键名」
   // 的分隔，而本项目只有一个命名空间，却有带冒号的真实 key（页面访问统计里的
@@ -194,8 +240,8 @@ applyHtmlLang(saved)
 // User-initiated switch: load the bundle first, then changeLanguage. The last
 // requested language wins, so a late en bundle can't flip the UI back after the
 // user already toggled to zh again.
-let wantedLang: 'zh' | 'en' | null = null
-export function setLanguage(lang: 'zh' | 'en') {
+let wantedLang: AppLang | null = null
+export function setLanguage(lang: AppLang) {
   wantedLang = lang
   writeStorage('prismx_lang', lang)
   void i18n.loadLanguages(lang).then(() => {
@@ -207,7 +253,7 @@ export function setLanguage(lang: 'zh' | 'en') {
 
 // 同步界面语言但不写偏好：公开页按 URL 被动同步时用——访客点开 /en 不该
 // 悄悄覆盖他 localStorage 里的语言偏好；主动点语言切换才走 setLanguage。
-export function syncLanguage(lang: 'zh' | 'en') {
+export function syncLanguage(lang: AppLang) {
   if (i18n.language !== lang) i18n.changeLanguage(lang)
   applyHtmlLang(lang)
 }

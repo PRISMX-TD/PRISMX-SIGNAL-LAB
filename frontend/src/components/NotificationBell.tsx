@@ -48,7 +48,8 @@ const PANEL_MESSAGES = 4
 
 export default function NotificationBell() {
   const { t, i18n } = useTranslation()
-  const isZh = i18n.language !== "en"
+  // 后台内容只存中英两份：非中文界面一律取英文 / zh + en only: non-zh UIs read en
+  const isZh = !!i18n.language?.startsWith("zh")
   const { announcementTick, notificationTick } = useLive()
   const [open, setOpen] = useState(false)
   // 弹层不是全屏遮罩，理论上打开时还能点穿到别的导航链接——useBackToClose

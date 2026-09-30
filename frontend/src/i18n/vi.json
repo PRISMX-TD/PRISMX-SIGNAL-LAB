@@ -1,0 +1,529 @@
+{
+  "notifPanel": {
+    "title": "Thông báo",
+    "unread": "chưa đọc",
+    "messages": "Tin nhắn",
+    "markAllRead": "Đánh dấu đã đọc hết",
+    "clearMessages": "Xóa",
+    "clearConfirm": "Xóa tất cả tin nhắn? Không thể hoàn tác (thông báo chung không bị ảnh hưởng).",
+    "announcements": "Thông báo chung",
+    "allAnnouncements": "Tất cả thông báo chung",
+    "noAnnouncements": "Chưa có thông báo chung",
+    "push": "Push",
+    "fullSettings": "Cài đặt đầy đủ"
+  },
+  "notifFeed": {
+    "ticket_reply": "Có phản hồi mới cho yêu cầu hỗ trợ của bạn",
+    "ticket_new": "Có yêu cầu hỗ trợ mới cần xử lý",
+    "plan_refund": "Đơn hàng đã được hoàn tiền — số ngày thành viên tương ứng đã bị thu hồi. Liên hệ hỗ trợ nếu bạn có thắc mắc.",
+    "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng"
+  },
+  "nav": {
+    "dashboard": "Tổng quan",
+    "signals": "Tín hiệu",
+    "charts": "Biểu đồ",
+    "bind": "Liên kết MT5",
+    "orders": "Lệnh",
+    "upgrade": "Nâng cấp",
+    "logout": "Đăng xuất",
+    "logoutConfirm": "Đăng xuất khỏi tài khoản?",
+    "account": "Tài khoản",
+    "more": "Thêm",
+    "admin": "Quản trị",
+    "strategies": "Chiến lược tùy chỉnh",
+    "growth": "Thăng hạng",
+    "growthBadges": "Cấp độ & Huy hiệu",
+    "support": "Liên hệ hỗ trợ",
+    "appDownload": "Tải ứng dụng",
+    "announcements": "Thông báo chung",
+    "agent": "Trang đại lý"
+  },
+  "common": {
+    "loading": "Đang tải…",
+    "confirm": "Xác nhận",
+    "cancel": "Hủy",
+    "close": "Đóng",
+    "errorBoundary": {
+      "title": "Trang này gặp sự cố",
+      "desc": "Trang bị lỗi khi hiển thị. Tài khoản và vị thế của bạn không bị ảnh hưởng — tải lại để tiếp tục.",
+      "reload": "Tải lại",
+      "chunkDesc": "Một phần của trang tải về không thành công, nhiều khả năng do kết nối không ổn định. Kiểm tra mạng rồi tải lại; nếu vẫn lặp lại, hãy thử mạng khác.",
+      "oldBrowserTitle": "Trình duyệt của bạn quá cũ",
+      "oldBrowserDesc": "Trang này dùng tính năng mà trình duyệt (hoặc WebView hệ thống) của bạn không hỗ trợ, nên tải lại sẽ không giúp được. Hãy cập nhật Chrome hoặc WebView hệ thống rồi thử lại; người dùng ứng dụng Android có thể cập nhật 'Android System WebView' trong kho ứng dụng."
+    }
+  },
+  "landing": {
+    "navShowcase": "Cách hoạt động",
+    "navWinrate": "Vì sao đáng tin",
+    "navPricing": "Gói",
+    "navFaq": "Hỏi đáp",
+    "signIn": "Đăng nhập",
+    "getStarted": "Bắt đầu miễn phí",
+    "heroTitle1": "Từ những bước leo hạng",
+    "heroTitle2": "đến ngôi vương",
+    "heroSubtitle": "Tín hiệu thông minh, phân tích giao dịch và xếp hạng thi đấu trong một nơi. Hãy tự khẳng định giá trị thứ hạng trader của bạn: mỗi lệnh thực đặt qua nền tảng đều được tính vào cấp độ, huy hiệu và thứ hạng của bạn.",
+    "ctaPrimary": "Đăng ký miễn phí, bắt đầu leo hạng",
+    "ctaSecondary": "Xem cách xếp hạng",
+    "scrollCue": "Cuộn xuống để xem một lệnh trở thành thứ hạng",
+    "shCaption": "Giao diện minh họa · không phải dữ liệu thực",
+    "sh1Pain": "01 · Tín hiệu chiến lược",
+    "sh1Title": "Mỗi tín hiệu là một kế hoạch giao dịch hoàn chỉnh",
+    "sh1Desc": "Tín hiệu chiến lược thực từ TradingView, kèm điểm vào lệnh, SL, TP, tỷ lệ R:R và thời hạn đếm ngược. Người mới làm theo đúng tín hiệu; trader chuyên nghiệp tự xây chiến lược bằng trình soạn điều kiện và backtest trên dữ liệu lịch sử thực.",
+    "sh2Pain": "02 · Vào lệnh một chạm",
+    "sh2Title": "Trượt để xác nhận, lệnh vào thẳng MT5 của bạn",
+    "sh2Desc": "Tài khoản tại sàn đối tác kết nối bằng số tài khoản và mật khẩu, không cần cài đặt gì. Lệnh được gửi kèm sẵn SL và TP; tính năng tự quản lý vị thế dời SL về hòa vốn, trailing stop và chốt lời từng phần ngay cả khi bạn ngủ.",
+    "sh3Pain": "03 · Phân tích giao dịch chuyên sâu",
+    "sh3Title": "Thắng hay thua, đều được ghi lại đầy đủ",
+    "sh3Desc": "Mỗi lệnh đóng đều được đối chiếu với lệnh thực trên nền tảng trước khi được tính, và lệnh thua hiển thị nổi bật y như lệnh thắng. Tỷ lệ thắng của tài khoản nằm cạnh tỷ lệ thắng tổng hợp. Đây chính là nguyên liệu của thứ hạng và huy hiệu.",
+    "sh4Pain": "04 · Xếp hạng thi đấu",
+    "sh4Title": "Thăng hạng, nhận huy hiệu, giành ngôi vương",
+    "sh4Desc": "Bảng xếp hạng lợi nhuận và tỷ lệ thắng cập nhật mỗi 5 phút, xếp theo tài khoản và theo phần trăm, không bao giờ theo số tiền. Huy hiệu được trao trong vòng một giờ và không bao giờ bị thu hồi. Khi cuộc thi kết thúc, thứ hạng được chốt vĩnh viễn và nhà vô địch đăng quang.",
+    "scrNew": "MỚI",
+    "scrGold": "Vàng",
+    "scrBuy": "BUY",
+    "scrSell": "SELL",
+    "scrEntry": "Vào lệnh",
+    "scrSl": "SL",
+    "scrTp": "TP",
+    "scrRr": "Rủi ro : Lợi nhuận",
+    "scrTtl": "Hết hạn sau 08:45",
+    "scrOrderTitle": "Xác nhận lệnh · XAUUSD",
+    "scrDir": "Chiều lệnh",
+    "scrLots": "Lot",
+    "scrMaxLoss": "Lỗ tối đa lệnh này",
+    "scrFilled": "Đã khớp",
+    "scrRecordTitle": "Tuần này · lịch sử đầy đủ",
+    "scrWin": "Chạm TP",
+    "scrLoss": "Chạm SL · vẫn được ghi lại",
+    "scrRecordFoot": "Quy tắc công khai · lịch sử không thể sửa",
+    "wrEyebrow": "Vì sao đáng tin",
+    "wrTitle": "Mọi kết quả đều do thị trường chấm",
+    "wrSubtitle": "Thứ hạng, huy hiệu và bảng xếp hạng chỉ tính các lệnh thực đã đóng và được máy chủ xác minh. Kết quả tín hiệu do thị trường chấm theo một bộ quy tắc công khai: không chọn lọc, không có chuyện \"lệnh đó không tính\".",
+    "wrSignalFired": "Tín hiệu phát ra",
+    "wrRule1": "Giá chạm TP trước → tính là THẮNG",
+    "wrRule1Note": "Dựa trên giá thị trường thực tế đã chạm, không phụ thuộc giao dịch của bất kỳ ai.",
+    "wrRule2": "Giá chạm SL trước → tính là THUA",
+    "wrRule2Note": "Thua là thua. Lịch sử là vĩnh viễn: không xóa, không giấu.",
+    "wrRule3": "Chạm cả hai trong cùng một nến → tính thận trọng là THUA",
+    "wrRule3Note": "Khi không xác định được thứ tự, chúng tôi thà để con số xấu đi còn hơn đoán theo hướng có lợi cho mình.",
+    "wrRule4": "Tín hiệu gặp gián đoạn dữ liệu giá → không tính vào thống kê",
+    "wrRule4Note": "Không thắng cũng không thua, để dữ liệu lỗi không bao giờ làm sai lệch tỷ lệ thắng.",
+    "prTitle": "Xếp hạng miễn phí. Công cụ mạnh thì trả phí.",
+    "prSubtitle": "Thứ hạng, huy hiệu, bảng xếp hạng và cuộc thi mở cho tất cả mọi người, không có điều kiện riêng cho PRO. PRO mang lại tín hiệu thời gian thực và công cụ vào lệnh.",
+    "prFreeName": "FREE",
+    "prFreeTag": "Gói xếp hạng",
+    "prFreeF1": "Truy cập đầy đủ thứ hạng, huy hiệu, bảng xếp hạng và cuộc thi",
+    "prFreeF2": "Đặt lệnh thủ công từ biểu đồ tới 1 tài khoản MT5",
+    "prFreeF3": "Tín hiệu trễ: xem được sau khi hết hạn, kèm kết quả cuối cùng",
+    "prFreeF4": "Tỷ lệ thắng công khai của nền tảng và toàn bộ quy tắc",
+    "prProName": "PRO",
+    "prProTag": "Toàn bộ công cụ",
+    "prProF1": "Tín hiệu thời gian thực: người dùng FREE nhận trễ khoảng 10 phút",
+    "prProF2": "Vào lệnh một chạm tới MT5 của bạn, trượt để xác nhận",
+    "prProF3": "Tự tính khối lượng lot theo % rủi ro",
+    "prProF4": "Tự quản lý vị thế: dời SL về hòa vốn, trailing stop, chốt lời từng phần",
+    "prProF5": "Tỷ lệ thắng tài khoản và tổng hợp đặt cạnh nhau: hiệu suất thật của bạn",
+    "prProF6": "Không giới hạn tài khoản MT5",
+    "prProF7": "Thông báo đẩy trình duyệt theo thời gian thực",
+    "prTrialList": "giá thường ${{price}}/tháng",
+    "prTrialBadge": "Đang mở — đăng ký là dùng PRO miễn phí",
+    "prTrialCta": "Đăng ký miễn phí — bắt đầu dùng PRO",
+    "prTrialBadgeInvite": "Qua liên kết này: kích hoạt PRO ngay khi đăng ký",
+    "prTrialCtaInvite": "Đăng ký miễn phí — kích hoạt PRO ngay",
+    "prCta": "Đăng ký miễn phí, nâng cấp bên trong",
+    "prNote": "Hai gói tồn tại song song vĩnh viễn; nâng hoặc hạ gói bất cứ lúc nào. Nâng cấp tại trang Nâng cấp sau khi đăng nhập, thanh toán bằng USDT. Giải thưởng cuộc thi cũng được trả bằng thời gian PRO.",
+    "prPerMonth": "tháng",
+    "faqTitle": "Những câu hỏi bạn có thể có",
+    "faq1q": "Tiền của tôi có an toàn không? Các bạn có đụng vào tiền của tôi không?",
+    "faq1a": "Không, và chúng tôi cũng không thể. Tiền của bạn nằm trong tài khoản đứng tên bạn tại sàn đối tác; PRISMX không bao giờ nắm giữ. Trình kết nối của chúng tôi chỉ làm đúng một việc: gửi các lệnh bạn đã xác nhận tới MT5 chạy trên máy của bạn. Bạn có thể ngắt kết nối hoặc đặt lại token bất cứ lúc nào.",
+    "faq2q": "Đây có phải robot giao dịch tự động (EA) không? Nó có tự giao dịch sau lưng tôi không?",
+    "faq2a": "Không. PRISMX không quyết định thay bạn: mọi lệnh đều cần bạn xác nhận rõ ràng trước khi gửi. Điều nó giải quyết là mọi thứ sau khi xác nhận: tính khối lượng, đặt SL/TP, tốc độ khớp lệnh và xác nhận kết quả.",
+    "faq3q": "Dữ liệu thứ hạng và huy hiệu có thật không? Làm sao chống gian lận?",
+    "faq3a": "Hai lớp kiểm tra. Mỗi lệnh đóng phải khớp với một lệnh thực trên nền tảng mới được tính; lệnh không khớp bạn vẫn thấy nhưng không bao giờ được tính vào điều kiện cấp độ, huy hiệu, bảng xếp hạng hay cuộc thi. Tài khoản thực hay demo do máy chủ xác định dựa trên nhóm tài khoản của sàn; chưa xác định được thì không tính. Bản thân kết quả tín hiệu do thị trường chấm theo quy tắc công khai mà chúng tôi không thể sửa.",
+    "faq4q": "Tôi hoàn toàn là người mới. Tôi có dùng được không?",
+    "faq4a": "Được. Người mới có lẽ còn được lợi nhiều nhất. Bạn không cần biết đọc biểu đồ hay chỉ báo: mỗi tín hiệu đều có kế hoạch hoàn chỉnh, và bạn có thể tính khối lượng đơn giản theo \"bao nhiêu % tài khoản tôi chấp nhận rủi ro\". Chúng tôi khuyên bạn bắt đầu với tài khoản demo.",
+    "faq5q": "Tôi cần gì để kết nối?",
+    "faq5a": "Ba thứ: 1) một tài khoản MT5 tại sàn đối tác MakeCapital (thực hoặc demo, mở trong vài phút); 2) một máy tính Windows chạy MT5, luôn bật và có mạng; 3) một tài khoản PRISMX. Điện thoại có thể theo dõi tín hiệu và gửi lệnh từ bất cứ đâu; lệnh được thực thi trên MT5 của máy tính đó.",
+    "faq6q": "Lệnh tôi tự đặt trong MT5 có được tính vào thứ hạng không?",
+    "faq6a": "Không. Chỉ lệnh thực đặt qua nền tảng mới được tính vào thứ hạng, huy hiệu, bảng xếp hạng và cuộc thi. Nhờ vậy mọi thành tích đều có thể kiểm chứng: mỗi lệnh ứng với một lệnh thực trên nền tảng. Lệnh demo chỉ được tính cho duy nhất điều kiện dành cho người mới \"Bước đầu\".",
+    "faq7q": "Hiện tại có mất phí gì không?",
+    "faq7a": "FREE miễn phí vĩnh viễn (tín hiệu trễ cùng lịch sử công khai, để bạn kiểm chứng chúng tôi). PRO là gói đăng ký: xem mục bảng giá trên trang này để biết giá hiện tại, gói năm tiết kiệm hơn, chấp nhận USDT. Mọi thay đổi giá đều được thông báo trước.",
+    "faq8q": "Theo tín hiệu có giúp tôi kiếm tiền không?",
+    "faq8a": "Không ai có thể hứa điều đó, và ai hứa là đang nói dối bạn. Giao dịch luôn có rủi ro và tỷ lệ thắng trong quá khứ không bao giờ đảm bảo kết quả tương lai. Điều PRISMX mang lại là kỷ luật và minh bạch: kế hoạch hoàn chỉnh, SL cố định, lịch sử trung thực. Quyết định, và rủi ro, vẫn là của bạn.",
+    "faq9q": "FREE và PRO khác nhau thực sự ở đâu? Thứ hạng có tốn tiền không?",
+    "faq9a": "Thứ hạng, huy hiệu, bảng xếp hạng và cuộc thi mở cho tất cả, không có điều kiện riêng cho PRO và không có lối tắt trả phí. Khác biệt nằm ở công cụ: FREE xem tín hiệu khoảng 10 phút sau khi hết hạn và chỉ đặt lệnh thủ công từ biểu đồ tới một tài khoản; PRO có tín hiệu thời gian thực, vào lệnh một chạm, tự quản lý vị thế và không giới hạn tài khoản.",
+    "faqViewAll": "Xem tất cả câu hỏi",
+    "ctaTitle": "Lệnh tiếp theo, được ghi vào lịch sử",
+    "ctaSubtitle": "Tham gia miễn phí; thứ hạng và bảng xếp hạng mở cho tất cả. Làm quen quy trình trên tài khoản demo. Hành trình leo hạng bắt đầu từ lệnh thực đầu tiên của bạn.",
+    "ctaButton": "Đăng ký miễn phí, bắt đầu leo hạng",
+    "ctaNote": "Không cần thẻ tín dụng · Đăng ký trong 30 giây",
+    "footerRights": "Bảo lưu mọi quyền",
+    "footerRisk": "Cảnh báo rủi ro: giao dịch forex, kim loại quý và tiền mã hóa có rủi ro cao và có thể dẫn đến mất vốn; hiệu suất tín hiệu trong quá khứ không dự báo kết quả tương lai. Thứ hạng, huy hiệu và bảng xếp hạng chỉ phản ánh lịch sử giao dịch đã xác minh trên nền tảng này, không phải cam kết về năng lực giao dịch hay lợi nhuận tương lai. PRISMX chỉ cung cấp tín hiệu kỹ thuật và công cụ vào lệnh, không phải tư vấn đầu tư; có giao dịch hay không và giao dịch thế nào luôn do bạn quyết định.",
+    "footerLegal": "Điều khoản & chính sách",
+    "footerSupport": "Cần hỗ trợ?",
+    "footerSupportBody": "Vấn đề về tài khoản, thanh toán hay kết nối — cứ email cho chúng tôi.",
+    "navRank": "Hệ thống thăng hạng",
+    "scrBoardTitle": "Bảng lợi nhuận · tuần này",
+    "scrBoardYou": "bạn",
+    "scrBoardGap": "Thêm +0.8% để vượt #6",
+    "scrToast": "Nhận được huy hiệu",
+    "scrToastBadge": "Góp mặt BXH · Đồng",
+    "ggTitle": "Hệ thống thăng hạng",
+    "ggSubtitle": "Cấp độ thể hiện thâm niên, huy hiệu thể hiện kỹ năng, bảng xếp hạng thể hiện phong độ, cuộc thi trao ngôi vương. Cả bốn chỉ tính lệnh thực đặt qua nền tảng.",
+    "ggClimb": "Leo hạng · cấp độ và huy hiệu",
+    "ggCrown": "Đăng quang · bảng xếp hạng và cuộc thi",
+    "ggPrize": "Nhà vô địch nhận 12 tháng PRO cùng huy hiệu Đấu trường Vàng",
+    "ggArena": "Cuộc thi đấu",
+    "scrStatTrades": "Lệnh thực đã đóng",
+    "scrStatLots": "Lot đã giao dịch",
+    "scrStatStreak": "Chuỗi có lãi",
+    "scrUnitTrades": "lệnh",
+    "scrUnitLots": "lot",
+    "scrUnitMonths": "tháng"
+  },
+  "auth": {
+    "forgotLink": "Quên mật khẩu?",
+    "forgotTitle": "Đặt lại mật khẩu",
+    "forgotSubtitle": "Nhập email bạn đã dùng để đăng ký, chúng tôi sẽ gửi liên kết đặt lại.",
+    "forgotSubmit": "Gửi liên kết đặt lại",
+    "resetSentTitle": "Kiểm tra hộp thư",
+    "resetSentBody": "Nếu email này đã đăng ký, liên kết đặt lại đang được gửi đến. Liên kết hết hạn sau 30 phút và chỉ dùng được một lần.",
+    "resetSentHint": "Chưa nhận được? Hãy kiểm tra thư mục spam. Các hộp thư như QQ và 163 lọc thư nước ngoài rất gắt — nếu mãi không nhận được, hãy gửi yêu cầu hỗ trợ để chúng tôi xử lý thủ công.",
+    "resetRequestError": "Không gửi được liên kết. Vui lòng thử lại sau.",
+    "resetTitle": "Đặt mật khẩu mới",
+    "resetSubtitle": "Chọn mật khẩu mới tối thiểu 8 ký tự, rồi đăng nhập bằng mật khẩu đó.",
+    "newPassword": "Mật khẩu mới",
+    "confirmPassword": "Xác nhận mật khẩu",
+    "resetSubmit": "Đặt mật khẩu mới",
+    "resetMismatch": "Hai mật khẩu không khớp",
+    "resetError": "Liên kết không hợp lệ hoặc đã hết hạn — vui lòng yêu cầu liên kết mới",
+    "resetDoneTitle": "Đã cập nhật mật khẩu",
+    "resetDoneBody": "Mật khẩu mới đã có hiệu lực và mọi thiết bị khác đang đăng nhập đã bị đăng xuất. Hãy đăng nhập bằng mật khẩu mới ngay.",
+    "backToLogin": "Quay lại đăng nhập",
+    "loginTitle": "Đăng nhập",
+    "registerTitle": "Tạo tài khoản",
+    "email": "Email",
+    "password": "Mật khẩu",
+    "login": "Đăng nhập",
+    "register": "Đăng ký",
+    "emailPlaceholder": "you@example.com",
+    "passwordPlaceholder": "Nhập mật khẩu",
+    "showPassword": "Hiện mật khẩu",
+    "hidePassword": "Ẩn mật khẩu",
+    "tagline": "Tín hiệu theo chỉ báo · Một chạm tới MT5",
+    "errorFailed": "Thất bại. Vui lòng kiểm tra email và mật khẩu",
+    "or": "hoặc",
+    "googleContinue": "Tiếp tục với Google",
+    "googleError": "Đăng nhập Google thất bại. Vui lòng thử lại",
+    "googleUnavailable": "Không thể đăng nhập Google: mạng này không kết nối được dịch vụ đăng nhập của Google. Vui lòng đăng nhập bằng email.",
+    "phone": "Số điện thoại",
+    "phonePlaceholder": "Số điện thoại (không kèm mã quốc gia)",
+    "phoneHint": "Chọn khu vực và nhập số điện thoại — dùng cho bảo mật tài khoản và thông báo quan trọng",
+    "inviteTrialBanner": "Đăng ký qua liên kết này để nhận {{days}} ngày PRO"
+  },
+  "order": {
+    "slideToConfirm": "Trượt để xác nhận"
+  },
+  "account": {
+    "notifEnable": "Bật thông báo đẩy cho tín hiệu",
+    "notifPermissionDenied": "Quyền thông báo bị từ chối; hãy bật trong cài đặt trình duyệt",
+    "notifBlocked": "Trình duyệt đã chặn thông báo; hãy bật trong cài đặt trình duyệt",
+    "notifError": "Không cập nhật được cài đặt thông báo",
+    "notifUnsupported": "Trình duyệt này không hỗ trợ thông báo đẩy.",
+    "notifIosNeedsInstall": "Trên iPhone/iPad, bạn cần thêm trang này vào Màn hình chính để nhận thông báo. Nhấn Chia sẻ trong Safari, chọn \"Thêm vào MH chính\", rồi mở trang từ biểu tượng đó và bật thông báo.",
+    "notifIosTooOld": "Phiên bản iOS này không hỗ trợ thông báo đẩy web. Hãy cập nhật lên iOS 16.4 trở lên rồi thử lại.",
+    "notifPermissionBlocked": "Quyền thông báo đã bị từ chối và cần bật lại trong cài đặt hệ thống. iPhone/iPad: Cài đặt → Thông báo → Signal Lab. Android Chrome: menu trình duyệt → Cài đặt → Cài đặt trang web → Thông báo.",
+    "notifDeviceFailed": "Đã bật. Thiết bị này hiện không kết nối được máy chủ push, nên thông báo nền có thể không đến; sẽ tự khôi phục khi kết nối lại được."
+  },
+  "connStatus": {
+    "online": "Đã kết nối",
+    "offline": "Mất kết nối",
+    "reconnecting": "Mất kết nối, đang kết nối lại… giá và vị thế có thể chưa cập nhật",
+    "backendDown": "Không kết nối được máy chủ",
+    "backendDownHint": "Những gì bạn thấy không phải “không có dữ liệu” — mà là dữ liệu chúng tôi chưa tải được.",
+    "retry": "Thử lại"
+  },
+  "accountDisabled": {
+    "title": "Tài khoản bị vô hiệu hóa",
+    "body": "Quản trị viên đã vô hiệu hóa tài khoản của bạn, nên tạm thời bạn không thể dùng bất kỳ tính năng nào của nền tảng.",
+    "reasonLabel": "Lý do",
+    "contact": "Nếu bạn cho rằng đây là nhầm lẫn, hoặc muốn biết cách khôi phục quyền truy cập, hãy liên hệ hỗ trợ qua một trong các kênh dưới đây và ghi kèm email đăng ký của bạn.",
+    "logout": "Đăng xuất"
+  },
+  "strategy": {
+    "ind": {
+      "ma": "Đường trung bình (MA)",
+      "macd": "MACD",
+      "rsi": "RSI",
+      "bollinger": "Bollinger Bands",
+      "donchian": "Donchian Channel",
+      "atr": "ATR"
+    },
+    "param": {
+      "maType": "Loại MA",
+      "period": "Chu kỳ",
+      "level": "Mức",
+      "fast": "Nhanh",
+      "slow": "Chậm",
+      "signal": "Signal",
+      "mult": "Hệ số nhân"
+    },
+    "usage": {
+      "ma": {
+        "price_cross_above": "Giá cắt lên MA",
+        "price_cross_below": "Giá cắt xuống MA",
+        "price_above": "Giá nằm trên MA",
+        "price_below": "Giá nằm dưới MA",
+        "rising": "MA đi lên",
+        "falling": "MA đi xuống"
+      },
+      "macd": {
+        "cross_above_zero": "MACD cắt lên trên 0",
+        "cross_below_zero": "MACD cắt xuống dưới 0",
+        "above_zero": "MACD trên 0",
+        "below_zero": "MACD dưới 0",
+        "cross_above_signal": "MACD cắt lên đường Signal",
+        "cross_below_signal": "MACD cắt xuống đường Signal",
+        "rising": "MACD đi lên",
+        "falling": "MACD đi xuống"
+      },
+      "rsi": {
+        "below_level": "RSI dưới mức",
+        "above_level": "RSI trên mức",
+        "cross_above_level": "RSI cắt lên mức",
+        "cross_below_level": "RSI cắt xuống mức",
+        "rising": "RSI đi lên",
+        "falling": "RSI đi xuống"
+      },
+      "bollinger": {
+        "break_upper": "Phá lên dải trên",
+        "break_lower": "Phá xuống dải dưới",
+        "back_above_middle": "Quay lại trên dải giữa",
+        "back_below_middle": "Quay lại dưới dải giữa",
+        "bounce_off_lower": "Bật lên từ dải dưới",
+        "reject_off_upper": "Bị từ chối tại dải trên"
+      },
+      "donchian": {
+        "new_high": "Tạo đỉnh cao nhất N chu kỳ",
+        "new_low": "Tạo đáy thấp nhất N chu kỳ",
+        "upper_half": "Ở nửa trên của kênh",
+        "lower_half": "Ở nửa dưới của kênh"
+      },
+      "atr": {
+        "volatility_above_average": "Biến động trên mức trung bình",
+        "volatility_below_average": "Biến động dưới mức trung bình"
+      }
+    }
+  },
+  "faqPage": {
+    "title": "Câu hỏi thường gặp",
+    "intro": "Mọi điều về an toàn vốn, yêu cầu, cách chấm tín hiệu và gói đăng ký. 9 câu đầu giống phần Hỏi đáp trên trang chủ; các câu sau đi sâu hơn.",
+    "q10": "Chỉ hỗ trợ MT5 thôi sao? Tôi dùng MT4 được không?",
+    "a10": "Hiện chỉ hỗ trợ MT5. Vào lệnh một chạm và tự quản lý vị thế dựa vào khả năng tích hợp của MT5 mà MT4 không đáp ứng được — và tài khoản tại sàn đối tác mặc định là MT5.",
+    "q11": "Máy tính của tôi không bật cả ngày được. Tôi dùng VPS được không?",
+    "a11": "Được. Bất kỳ môi trường Windows nào chạy được MT5 đều có thể đảm nhận vai trò thực thi lệnh, kể cả VPS Windows trên cloud. Cách phổ biến chính là vậy: MT5 trên VPS luôn online, còn điện thoại dùng để theo dõi tín hiệu và gửi lệnh.",
+    "q12": "Chuyện gì xảy ra khi PRO hết hạn hoặc tôi ngừng thanh toán?",
+    "a12": "Bạn chỉ đơn giản quay về FREE. Tài khoản, lịch sử và tỷ lệ thắng cá nhân đều được giữ nguyên — không có gì bị xóa, và bạn có thể nâng cấp lại bất cứ lúc nào. Thanh toán USDT không tự động gia hạn: bảng điều khiển sẽ nhắc bạn trước khi hết hạn, và không thanh toán nghĩa là không bị trừ tiền.",
+    "q13": "Vì sao tôi phải dùng tài khoản MT5 của sàn đối tác?",
+    "a13": "Vì việc chấm tỷ lệ thắng phải khớp với giá khớp lệnh thực tế của bạn. Tín hiệu được chấm, định giá và thực thi trên cùng một nguồn giá; spread và đặc thù báo giá của sàn khác sẽ tạo ra khoảng lệch kiểu \"lịch sử thắng nhưng tài khoản tôi không thắng\". Cố định một nguồn giá là điều giúp lịch sử công khai có thể kiểm chứng."
+  },
+  "planExpiry": {
+    "soon": "PRO hết hạn sau {{days}} ngày",
+    "today": "PRO hết hạn hôm nay",
+    "trialSoon": "Dùng thử miễn phí kết thúc sau {{days}} ngày",
+    "trialToday": "Dùng thử miễn phí kết thúc hôm nay",
+    "body": "Khi hết hạn, gói của bạn trở về FREE: tín hiệu thời gian thực, thông báo đẩy và các kết nối MT5 vượt giới hạn miễn phí đều dừng.",
+    "expired": "PRO đã hết hạn",
+    "trialExpired": "Thời gian dùng thử miễn phí đã kết thúc",
+    "expiredBody": "Tín hiệu thời gian thực và thông báo đẩy đã dừng, các tài khoản MT5 vượt giới hạn miễn phí đã bị ngắt kết nối. Gia hạn để khôi phục ngay.",
+    "renew": "Gia hạn ngay",
+    "upgrade": "Nâng cấp lại",
+    "dismiss": "Bỏ qua"
+  },
+  "announcements": {
+    "title": "Thông báo chung",
+    "pinned": "Đã ghim",
+    "popupOpen": "Xem chi tiết",
+    "popupSnooze": "Không nhắc lại trong 7 ngày"
+  },
+  "gamification": {
+    "title": "Thành tích",
+    "levelLabel": "Cấp độ",
+    "remainingToNext": "Còn {{count}} nữa để lên cấp tiếp theo",
+    "titles": {
+      "novice": "Trader Tập sự",
+      "junior": "Trader Sơ cấp",
+      "elite": "Trader Tinh anh",
+      "senior": "Trader Cao cấp",
+      "chief": "Trader Thủ lĩnh",
+      "legend": "Trader Huyền thoại"
+    },
+    "groups": {
+      "fengshen": "Phong Thần"
+    },
+    "badges": {
+      "starter": {
+        "name": "Khởi đầu",
+        "tiers": {
+          "1": "Đặt biệt danh và liên kết một tài khoản MT5",
+          "2": "Hoàn tất lần đóng lệnh trọn vẹn đầu tiên (tính cả demo)",
+          "3": "Lệnh khớp đầu tiên trên tài khoản thực"
+        }
+      },
+      "regular": {
+        "name": "Chuyên cần",
+        "tiers": {
+          "1": "Đăng nhập 7 ngày liên tiếp",
+          "2": "Đăng nhập 30 ngày liên tiếp",
+          "3": "Đăng nhập 100 ngày liên tiếp"
+        }
+      },
+      "evergreen": {
+        "name": "Thường xanh",
+        "tiers": {
+          "1": "3 tháng liên tiếp có lãi trên tài khoản thực",
+          "2": "6 tháng liên tiếp có lãi trên tài khoản thực",
+          "3": "12 tháng liên tiếp có lãi trên tài khoản thực"
+        }
+      },
+      "winning_hand": {
+        "name": "Tay chơi thắng lợi",
+        "tiers": {
+          "1": "100 lệnh thắng trên một tài khoản, ≥20 lot, tổng P&L dương",
+          "2": "500 lệnh trên một tài khoản, ≥100 lot, tỷ lệ thắng >60%, P&L dương",
+          "3": "Profit factor trung bình 12 tháng gần nhất ≥2, ≥100 lệnh, P&L dương"
+        }
+      },
+      "veteran": {
+        "name": "Lão luyện",
+        "tiers": {
+          "1": "Đóng 100 vị thế thực (cộng dồn mọi tài khoản)",
+          "2": "Đóng 500 vị thế thực (cộng dồn mọi tài khoản)",
+          "3": "Đóng 2000 vị thế thực (cộng dồn mọi tài khoản)"
+        }
+      },
+      "board_return": {
+        "name": "Góp mặt BXH",
+        "tiers": {
+          "1": "Top 10 bảng lợi nhuận tuần (không tính bảng tỷ lệ thắng)",
+          "2": "Top 10 bảng lợi nhuận tháng (không tính bảng tỷ lệ thắng)",
+          "3": "Quán quân bảng lợi nhuận tháng (không tính bảng tỷ lệ thắng)"
+        }
+      },
+      "campaigner": {
+        "name": "Chinh chiến",
+        "tiers": {
+          "1": "Hoàn thành 3 cuộc thi (chỉ tính tham gia, không xét thứ hạng)",
+          "2": "Hoàn thành 10 cuộc thi (chỉ tính tham gia, không xét thứ hạng)",
+          "3": "Hoàn thành 25 cuộc thi (chỉ tính tham gia, không xét thứ hạng)"
+        }
+      },
+      "arena": {
+        "name": "Đấu trường",
+        "tiers": {
+          "1": "Hoàn thành một cuộc thi",
+          "2": "Top 3 trong bất kỳ cuộc thi nào",
+          "3": "Vô địch bất kỳ cuộc thi nào"
+        }
+      },
+      "comp_back_to_back": {
+        "name": "Vô địch liên tiếp",
+        "desc": "Vô địch hai cuộc thi liên tiếp"
+      },
+      "comeback": {
+        "name": "Lội ngược dòng",
+        "desc": "Một tháng lỗ, tiếp theo là một tháng gỡ lại toàn bộ khoản lỗ"
+      },
+      "founder_2026": {
+        "name": "Thành viên sáng lập",
+        "desc": "Đăng ký trong năm 2026 và hoàn thành lệnh thực đầu tiên (giới hạn vĩnh viễn)"
+      }
+    },
+    "winRateCard": {
+      "combinedShort": "Tỷ lệ thắng"
+    },
+    "equip": "Trang bị",
+    "equipSlots": {
+      "setDefault": "Đặt làm mặc định",
+      "onBoard": "Huy hiệu mặc định sẽ hiển thị trên bảng xếp hạng"
+    },
+    "levelShort": {
+      "novice": "Tập sự",
+      "junior": "Sơ cấp",
+      "elite": "Tinh anh",
+      "senior": "Cao cấp",
+      "chief": "Thủ lĩnh",
+      "legend": "Huyền thoại"
+    },
+    "stage": {
+      "swipeHint": "Vuốt để xoay",
+      "gyroEnable": "Bật hiệu ứng phản chiếu khi nghiêng",
+      "collected": "Đã sưu tầm",
+      "noEquip": "Chưa trang bị huy hiệu nào",
+      "noEquipHint": "Chọn một huy hiệu từ kho bên dưới - nó sẽ hiển thị ở đây và trên bảng xếp hạng"
+    }
+  },
+  "leaderboard": {
+    "title": "Bảng xếp hạng",
+    "boards": {
+      "return_pct": "Bảng lợi nhuận"
+    },
+    "periods": {
+      "week": "Tuần"
+    },
+    "youTag": "Bạn",
+    "rankLabel": "Hạng {{n}}"
+  },
+  "competition": {
+    "title": "Cuộc thi",
+    "cd": {
+      "toStart": "Bắt đầu sau",
+      "dh": "{{d}} ngày {{h}} giờ"
+    },
+    "prizeLabel": "Giải thưởng",
+    "enterArena": "Vào đấu trường",
+    "ticker": {
+      "participants": "{{n}} tài khoản đã tham gia",
+      "live": "Trực tiếp"
+    },
+    "status": {
+      "regOpen": "Đang mở đăng ký"
+    }
+  },
+  "netSignal": {
+    "title": "Kết nối",
+    "connecting": "Đang kết nối",
+    "offline": "Mất kết nối",
+    "good": "Tốt",
+    "fair": "Trung bình",
+    "poor": "Kém",
+    "latency": "Độ trễ",
+    "jitter": "Dao động",
+    "lastData": "Dữ liệu gần nhất",
+    "secondsAgo": "{{n}} giây trước",
+    "reconnects": "Số lần kết nối lại",
+    "hint": "Thời gian khứ hồi từ thiết bị này đến máy chủ PRISMX. Dưới {{good}}ms là tốt; trên {{fair}}ms giá và lệnh có thể trễ rõ rệt.",
+    "language": "Ngôn ngữ / Language"
+  },
+  "festival": {
+    "greeting": {
+      "spring": "Chúc mừng năm mới",
+      "midautumn": "Trung thu vui vẻ",
+      "halloween": "Halloween vui vẻ",
+      "christmas": "Giáng sinh an lành",
+      "newyear": "Chúc mừng năm mới"
+    },
+    "newYearSub": "Chào đón {{year}}",
+    "empty": {
+      "spring": "Chưa có tín hiệu mới. Đèn lồng vẫn đang canh chừng.",
+      "midautumn": "Chưa có tín hiệu mới. Cùng ngắm trăng thôi.",
+      "halloween": "Chưa có tín hiệu mới. Bí ngô vẫn đang canh chừng.",
+      "christmas": "Chưa có tín hiệu mới. Tuyết vẫn đang rơi.",
+      "newyear": "Chưa có tín hiệu mới. Năm mới chỉ vừa bắt đầu."
+    },
+    "greetHintA": "Bạn có thể tắt trang trí lễ hội trong ",
+    "greetHintLink": "cài đặt tài khoản",
+    "greetHintB": ".",
+    "close": "Đóng lời chúc lễ hội"
+  }
+}

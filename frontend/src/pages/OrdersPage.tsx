@@ -30,6 +30,7 @@ import { useLive, usePositions } from '../store/live'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
 import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
+import { LOCALE_TAG, currentLang } from '../i18n'
 import type { ClosedTrade, Order, OrderStatus, Position } from '../api/types'
 import Toast from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
@@ -383,7 +384,7 @@ export default function OrdersPage() {
     const now = new Date()
     const todayKey = dayKeyOf(now)
     const yesterdayKey = dayKeyOf(new Date(now.getTime() - 86_400_000))
-    const locale = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-GB'
+    const locale = LOCALE_TAG[currentLang()]
     const groups: { key: string; label: string; sub: string; items: Order[] }[] = []
     for (const o of visibleOrders) {
       const d = parseIso(o.createdAt)

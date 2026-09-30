@@ -139,7 +139,7 @@ export default function BindPage() {
   // The ideographic comma is only right in Chinese; English lists take ", ".
   const revokedLogins = revokedAccounts
     .map((a) => a.login)
-    .join(i18n.language?.startsWith('zh') ? '、' : ', ')
+    .join(/^(zh|ja)/.test(i18n.language || '') ? '、' : ', ')
 
   const hasMessages = !!gwError || revokedAccounts.length > 0 || !!gwResult
 

@@ -27,6 +27,12 @@ import zhCore from './zh.json'
 import zhMore from './zh.more.json'
 import enCore from './en.json'
 import enMore from './en.more.json'
+import jaCore from './ja.json'
+import jaMore from './ja.more.json'
+import thCore from './th.json'
+import thMore from './th.more.json'
+import viCore from './vi.json'
+import viMore from './vi.more.json'
 
 function flat(o: object, p = '', out: Record<string, unknown> = {}): Record<string, unknown> {
   for (const [k, v] of Object.entries(o)) {
@@ -227,6 +233,40 @@ describe('locale core + on-demand split', () => {
         if (!zhBase.has(strip(k)) || !enBase.has(strip(k))) bad.push(`${page} -> ${k}`)
       }
     }
+    expect(bad).toEqual([])
+  })
+})
+
+// ja / th / vi 只覆盖界面：公开页的法务长文（legal.*，公开页只有中英两套 URL）与管理后台
+// （admin.*，只给运营用）刻意不翻，缺的键按 fallbackLng 落到英文（见 i18n/index.ts）。
+// 其余每个英文键都要有译文，且落在与英文相同的那一半里——以后加新键时这里会提醒补上三种译文。
+// ja / th / vi cover the app UI only: legal.* (public pages exist only as zh / en URLs) and
+// admin.* (operator-only) are deliberately left to the English fallback. Every other English
+// key must be translated, in the same half as English — this flags new keys that still need
+// the three translations.
+const EXTRA: [string, object, object][] = [
+  ['ja', jaCore, jaMore],
+  ['th', thCore, thMore],
+  ['vi', viCore, viMore],
+]
+const untranslated = (k: string) => k.startsWith('legal.') || k.startsWith('admin.')
+
+describe.each(EXTRA)('%s locale', (_lang, core, more) => {
+  const c = flat(core)
+  const m = flat(more)
+  it('has no keys English lacks, in the same half as English', () => {
+    expect(Object.keys(c).filter((k) => !(k in ec))).toEqual([])
+    expect(Object.keys(m).filter((k) => !(k in em))).toEqual([])
+  })
+  it('translates every English key outside legal / admin', () => {
+    expect(Object.keys(ec).filter((k) => !untranslated(k) && !(k in c))).toEqual([])
+    expect(Object.keys(em).filter((k) => !untranslated(k) && !(k in m))).toEqual([])
+  })
+  it('keeps every {{placeholder}}', () => {
+    const ph = (v: unknown) => (String(v).match(/{{[^}]+}}/g) ?? []).sort().join('|')
+    const bad = [...Object.entries(c), ...Object.entries(m)]
+      .filter(([k, v]) => ph(v) !== ph(ec[k] ?? em[k]))
+      .map(([k]) => k)
     expect(bad).toEqual([])
   })
 })
