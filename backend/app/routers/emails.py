@@ -20,23 +20,29 @@ import html as html_lib
 import json
 import logging
 from datetime import timedelta
+from typing import Literal
 from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.models import EmailCampaign, EmailDelivery, User
+from app.models import EmailCampaign, EmailDelivery, MT5Account, User
 from app.schemas import (
+    EMAIL_LIST_MAX,
     EmailAudienceOut,
     EmailAudienceQueryIn,
     EmailCampaignIn,
     EmailCampaignListOut,
     EmailCampaignOut,
     EmailContentIn,
+    EmailPickerIdsOut,
+    EmailPickerListOut,
+    EmailPickerUserOut,
     EmailPreviewOut,
     EmailStatusOut,
 )
@@ -108,6 +114,78 @@ def email_status(db: Session = Depends(get_db)):
 def email_audience(body: EmailAudienceQueryIn, db: Session = Depends(get_db)):
     """按条件数人数（并给几个样例邮箱抽查），不发任何东西。"""
     return EmailAudienceOut(**eb.audience_summary(db, body.kind, body.audience))
+
+
+_PlanFilter = Literal["all", "FREE", "PRO", "TRIAL", "PAID"]
+_SortKey = Literal["created", "active"]
+
+
+@admin_router.get("/users", response_model=EmailPickerListOut)
+def picker_users(
+    q: str | None = Query(default=None, max_length=128),
+    plan: _PlanFilter = Query(default="all"),
+    active_within_days: int | None = Query(default=None, alias="activeWithinDays", ge=1, le=3650),
+    inactive_for_days: int | None = Query(default=None, alias="inactiveForDays", ge=1, le=3650),
+    sort: _SortKey = Query(default="created"),
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """「指定用户」的选人列表：带详情分页返回，停用 / 退订的人也列出来但标明状态。"""
+    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, sort)
+    total = query.count()
+    rows = query.offset(offset).limit(limit).all()
+    ids = [u.id for u in rows]
+    counts = dict(
+        db.query(MT5Account.user_id, func.count(MT5Account.id))
+        .filter(MT5Account.user_id.in_(ids))
+        .group_by(MT5Account.user_id)
+        .all()
+    ) if ids else {}
+    opted = eb.opted_out_ids(db, ids)
+    return EmailPickerListOut(
+        users=[
+            EmailPickerUserOut(
+                id=u.id,
+                email=u.email,
+                nickname=u.nickname,
+                phone=u.phone,
+                plan=u.plan,
+                planIsTrial=bool(u.plan_is_trial),
+                planExpiresAt=u.plan_expires_at,
+                createdAt=u.created_at,
+                lastActiveAt=u.last_active_at,
+                mt5AccountCount=counts.get(u.id, 0),
+                inviteCode=u.invite_code,
+                disabled=u.disabled_at is not None,
+                optedOut=u.id in opted,
+            )
+            for u in rows
+        ],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@admin_router.get("/users/all", response_model=EmailPickerIdsOut)
+def picker_select_all(
+    kind: Literal["marketing", "notice"] = Query(default="marketing"),
+    q: str | None = Query(default=None, max_length=128),
+    plan: _PlanFilter = Query(default="all"),
+    active_within_days: int | None = Query(default=None, alias="activeWithinDays", ge=1, le=3650),
+    inactive_for_days: int | None = Query(default=None, alias="inactiveForDays", ge=1, le=3650),
+    db: Session = Depends(get_db),
+):
+    """「选中全部搜索结果」：只返回按这次邮件类型真正收得到的人，最多 EMAIL_LIST_MAX 个。"""
+    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days).filter(User.disabled_at.is_(None))
+    if kind != eb.KIND_NOTICE:
+        query = query.filter(~eb._opted_out_clause())
+    rows = query.with_entities(User.id, User.email).limit(EMAIL_LIST_MAX + 1).all()
+    return EmailPickerIdsOut(
+        users=[{"id": uid, "email": email} for uid, email in rows[:EMAIL_LIST_MAX]],
+        truncated=len(rows) > EMAIL_LIST_MAX,
+    )
 
 
 @admin_router.post("/preview", response_model=EmailPreviewOut)

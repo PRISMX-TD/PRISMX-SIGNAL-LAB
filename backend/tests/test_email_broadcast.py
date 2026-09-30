@@ -352,3 +352,50 @@ def test_forged_token_is_rejected(db_session, configured):
     res = asyncio.run(emails_router.unsubscribe(_request(body=f"t={u.id}.deadbeef".encode()), db=db_session))
     assert res.status_code == 400
     assert db_session.get(EmailOptOut, u.id) is None
+
+
+# ---------- 选人列表 / recipient picker ----------
+
+def test_picker_lists_everyone_with_status_flags(db_session):
+    _user(db_session, "ok@t.co", nickname="Alice")
+    _user(db_session, "banned@t.co", disabled_at=_now())
+    out = _user(db_session, "out@t.co")
+    db_session.add(EmailOptOut(user_id=out.id))
+    db_session.commit()
+
+    res = emails_router.picker_users(
+        q=None, plan="all", active_within_days=None, inactive_for_days=None,
+        sort="created", limit=20, offset=0, db=db_session,
+    )
+    assert res.total == 3
+    flags = {u.email: (u.disabled, u.optedOut) for u in res.users}
+    assert flags == {"ok@t.co": (False, False), "banned@t.co": (True, False), "out@t.co": (False, True)}
+
+    # 按昵称搜；LIKE 通配符不放大命中
+    res = emails_router.picker_users(
+        q="ali", plan="all", active_within_days=None, inactive_for_days=None,
+        sort="created", limit=20, offset=0, db=db_session,
+    )
+    assert [u.email for u in res.users] == ["ok@t.co"]
+    res = emails_router.picker_users(
+        q="%", plan="all", active_within_days=None, inactive_for_days=None,
+        sort="created", limit=20, offset=0, db=db_session,
+    )
+    assert res.total == 0
+
+
+def test_picker_select_all_returns_only_reachable_people(db_session):
+    _user(db_session, "ok@t.co")
+    _user(db_session, "banned@t.co", disabled_at=_now())
+    out = _user(db_session, "out@t.co")
+    db_session.add(EmailOptOut(user_id=out.id))
+    db_session.commit()
+
+    def pick(kind):
+        res = emails_router.picker_select_all(
+            kind=kind, q=None, plan="all", active_within_days=None, inactive_for_days=None, db=db_session,
+        )
+        return sorted(u["email"] for u in res.users)
+
+    assert pick("marketing") == ["ok@t.co"]
+    assert pick("notice") == ["ok@t.co", "out@t.co"]     # 通知不看退订，停用的仍排除

@@ -2077,6 +2077,39 @@ class EmailCampaignListOut(BaseModel):
     campaigns: list[EmailCampaignOut]
 
 
+class EmailPickerUserOut(BaseModel):
+    """「指定用户」选人列表的一行。disabled / optedOut 决定这一行能不能勾选。"""
+
+    id: str
+    email: str
+    nickname: str | None = None
+    phone: str | None = None
+    plan: str
+    planIsTrial: bool = False
+    planExpiresAt: datetime | None = None
+    createdAt: datetime | None = None
+    lastActiveAt: datetime | None = None
+    mt5AccountCount: int = 0
+    inviteCode: str | None = None
+    disabled: bool = False
+    optedOut: bool = False
+
+
+class EmailPickerListOut(BaseModel):
+    users: list[EmailPickerUserOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class EmailPickerIdsOut(BaseModel):
+    """「选中全部搜索结果」：符合条件、且按这次邮件类型能收到的人。"""
+
+    users: list[dict]      # [{id, email}]
+    # 结果超过 EMAIL_LIST_MAX 被截断了 / capped at EMAIL_LIST_MAX
+    truncated: bool = False
+
+
 class EmailStatusOut(BaseModel):
     configured: bool
     fromAddress: str

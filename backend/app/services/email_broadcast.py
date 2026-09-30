@@ -360,6 +360,63 @@ def audience_summary(db: Session, kind: str, audience, sample_size: int = 5) -> 
     }
 
 
+def _like_escape(value: str) -> str:
+    # 与 routers/admin._like_escape 同理：% 和 _ 不转义会悄悄放大命中范围。
+    # Same reason as routers/admin._like_escape: unescaped % and _ widen the match.
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+PICKER_SORTS = ("created", "active")
+
+
+def picker_query(db: Session, q: str | None, plan: str, active_within_days: int | None,
+                 inactive_for_days: int | None, sort: str = "created"):
+    """「指定用户」选人列表的查询：搜索（邮箱 / 昵称 / 手机号）+ 等级 + 活跃度。
+
+    **不**在这里排除停用和退订的人——选人列表要让管理员看得见他们（标出状态、
+    不给勾），否则「我明明搜得到这个人，为什么列表里没有」没法解释。真正发送时
+    eligible_query 照样会把他们排除。
+
+    Query behind the "specific users" picker. Disabled / unsubscribed users are
+    deliberately kept (shown with a status, not selectable) so the admin can see
+    why someone is missing; eligible_query still excludes them at send time.
+    """
+    query = db.query(User).filter(User.email.contains("@"))
+    if q and q.strip():
+        like = f"%{_like_escape(q.strip())}%"
+        query = query.filter(or_(
+            User.email.ilike(like, escape="\\"),
+            User.nickname.ilike(like, escape="\\"),
+            User.phone.ilike(like, escape="\\"),
+        ))
+    now = _utcnow()
+    if plan == "FREE":
+        query = query.filter(User.plan == "FREE")
+    elif plan == "PRO":
+        query = query.filter(User.plan == "PRO")
+    elif plan == "TRIAL":
+        query = query.filter(User.plan == "PRO", User.plan_is_trial.is_(True))
+    elif plan == "PAID":
+        query = query.filter(User.plan == "PRO", or_(User.plan_is_trial.is_(False), User.plan_is_trial.is_(None)))
+    if active_within_days:
+        query = query.filter(User.last_active_at >= now - timedelta(days=active_within_days))
+    if inactive_for_days:
+        cutoff = now - timedelta(days=inactive_for_days)
+        query = query.filter(or_(User.last_active_at < cutoff, User.last_active_at.is_(None)))
+    if sort == "active":
+        # 从没活跃过的排最后 / never-active users go last
+        query = query.order_by(User.last_active_at.is_(None), User.last_active_at.desc(), User.created_at.desc())
+    else:
+        query = query.order_by(User.created_at.desc())
+    return query
+
+
+def opted_out_ids(db: Session, user_ids: list[str]) -> set[str]:
+    if not user_ids:
+        return set()
+    return {uid for (uid,) in db.query(EmailOptOut.user_id).filter(EmailOptOut.user_id.in_(user_ids))}
+
+
 def audience_snapshot(audience) -> dict:
     """存进 email_campaigns.audience 的快照。list 模式只留人数——几千个 id 没人会去看。"""
     if audience.mode == "list":
