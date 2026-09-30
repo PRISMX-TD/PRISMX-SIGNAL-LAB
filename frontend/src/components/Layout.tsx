@@ -982,7 +982,7 @@ export default function Layout() {
               </div>
               <div className="mt-3 flex items-center justify-between px-1 text-sm text-neutral-300">
                 <span>{t('netSignal.language')}</span>
-                <LanguageToggle />
+                <LanguageToggle placement="up" />
               </div>
               <button type="button" className="lg-sheet-logout" onClick={() => setConfirmLogout(true)}>
                 {t('nav.logout')}
