@@ -1533,7 +1533,7 @@
       "bodyZh": "Chinese body",
       "subjectEn": "English subject (optional)",
       "bodyEn": "English body (optional)",
-      "formatHint": "Format: blank line = new paragraph; **text** = bold; [text](https://link) = link, and pasted URLs become links too. With both languages filled in, Chinese comes first and English below it, in one email.",
+      "formatHint": "Format: blank line = new paragraph; **text** = bold; [text](https://link) = link, and pasted URLs become links too; ![caption](https://image-url) = image (\"Insert image\" uploads and fills it in for you), and [![caption](https://image-url)](https://link) makes a clickable banner. With both languages filled in, Chinese comes first and English below it, in one email. Some mail apps hide images by default, so keep key information in text too.",
       "halfFilled": "Subject and body go together: complete or clear the language that has only one of them.",
       "preview": "Preview",
       "showHtml": "HTML version",
@@ -1594,7 +1594,9 @@
       "expires": "Expires {{date}}",
       "optedOut": "Unsubscribed",
       "optedOutHint": "Unsubscribed from marketing: marketing mail skips them, service notices still reach them",
-      "pasteToggle": "Or paste a list of addresses"
+      "pasteToggle": "Or paste a list of addresses",
+      "insertImage": "Insert image",
+      "imageUploading": "Uploading…"
     }
   },
   "simulator": {

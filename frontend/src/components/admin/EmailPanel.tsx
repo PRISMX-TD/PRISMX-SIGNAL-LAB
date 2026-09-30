@@ -17,6 +17,7 @@ import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import EmailRecipientPicker, { type Picked } from './EmailRecipientPicker'
+import { shrinkImage } from './shrinkImage'
 import type {
   EmailAudienceInput,
   EmailAudiencePlan,
@@ -52,6 +53,91 @@ function useDebounced<T>(value: T, ms: number): T {
     return () => window.clearTimeout(id)
   }, [value, ms])
   return v
+}
+
+// 正文输入框 + 「插入图片」：选图 → 压缩（与公告配图同一套 shrinkImage）→ 上传到图片存储
+// → 在光标处插入 ![](地址)。图片单独占一段，前后补空行，免得和文字挤在同一行。
+// Body textarea with "insert image": pick → shrink (same shrinkImage as announcement
+// images) → upload → insert ![](url) at the cursor as its own paragraph.
+function EmailBodyField({
+  label,
+  value,
+  onChange,
+  onError,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  onError: (text: string) => void
+}) {
+  const { t } = useTranslation()
+  const areaRef = useRef<HTMLTextAreaElement | null>(null)
+  const fileRef = useRef<HTMLInputElement | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  const insert = (url: string) => {
+    const el = areaRef.current
+    const at = el ? el.selectionStart : value.length
+    const before = value.slice(0, at).replace(/\s*$/, '')
+    const after = value.slice(at).replace(/^\s*/, '')
+    const snippet = `![](${url})`
+    const next = [before, snippet, after].filter(Boolean).join('\n\n')
+    onChange(next)
+    // 光标放到图片那一行后面，接着打字就是下一段 / caret after the image, ready for the next paragraph
+    const caret = (before ? before.length + 2 : 0) + snippet.length
+    window.requestAnimationFrame(() => {
+      el?.focus()
+      el?.setSelectionRange(caret, caret)
+    })
+  }
+
+  const upload = async (file: File) => {
+    setUploading(true)
+    try {
+      const res = await adminApi.uploadImage(await shrinkImage(file))
+      insert(res.url)
+    } catch (err) {
+      onError(localizeApiError(err instanceof Error ? err.message : String(err)))
+    } finally {
+      setUploading(false)
+      // 清空：否则再选同一个文件不触发 change / reset so re-picking the same file fires change
+      if (fileRef.current) fileRef.current.value = ''
+    }
+  }
+
+  return (
+    <div className="block">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="flex-1 text-xs text-neutral-400">{label}</span>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void upload(f)
+          }}
+        />
+        <button
+          type="button"
+          className="btn-ghost px-2.5 py-0.5 text-xs disabled:opacity-40"
+          disabled={uploading}
+          onClick={() => fileRef.current?.click()}
+        >
+          {uploading ? t('admin.email.imageUploading') : t('admin.email.insertImage')}
+        </button>
+      </div>
+      <textarea
+        ref={areaRef}
+        aria-label={label}
+        className="input min-h-[160px] w-full rounded-xl py-2 text-sm leading-relaxed"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        maxLength={20000}
+      />
+    </div>
+  )
 }
 
 export default function EmailPanel({
@@ -255,15 +341,7 @@ export default function EmailPanel({
     </label>
   )
   const area = (label: string, value: string, onChange: (v: string) => void) => (
-    <label className="block">
-      <span className="mb-1 block text-xs text-neutral-400">{label}</span>
-      <textarea
-        className="input min-h-[160px] w-full rounded-xl py-2 text-sm leading-relaxed"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        maxLength={20000}
-      />
-    </label>
+    <EmailBodyField label={label} value={value} onChange={onChange} onError={(text) => showToast('err', text)} />
   )
 
   const statusText = (c: EmailCampaign) => {
