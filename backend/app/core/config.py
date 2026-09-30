@@ -404,15 +404,18 @@ class Settings(BaseSettings):
     PUBLIC_API_URL: str = "https://api.prismxsignallab.com"
 
     # 群发每天（UTC 日）最多发多少封；0 = 不限。到了上限当天暂停、第二天自动接着发。
-    # 默认 80 是照 Resend 免费版「每天 100 封」留出 20 封给找回密码——群发把额度
-    # 用光的那天，忘了密码的人就收不到重置邮件。升级套餐后在 .env 里调大。
+    # 2026-10-01 起账号是 Resend Pro：每月 5 万封、不限每天。1500 × 30 = 4.5 万，
+    # 每月留出约 5000 封给找回密码——群发把月额度用光，忘了密码的人就收不到重置邮件。
+    # 换套餐时按「月额度 ÷ 30 再留一成」重算。
     # Daily (UTC) cap on broadcast sends; 0 = unlimited. Hitting it pauses until the
-    # next day. 80 leaves 20 of Resend's free 100/day for password resets —
-    # raise it in .env after upgrading the plan.
-    BROADCAST_EMAIL_DAILY_CAP: int = 80
-    # 两封群发之间的间隔（秒）。Resend 默认限速每秒 2 次请求，0.6 秒留一点余量。
-    # Gap between two broadcast sends; Resend's default limit is 2 req/s.
-    BROADCAST_EMAIL_INTERVAL_SECONDS: float = 0.6
+    # next day. On Resend Pro (50k/month, no daily limit) since 2026-10-01: 1500 × 30
+    # = 45k, leaving ~5k a month for password resets.
+    BROADCAST_EMAIL_DAILY_CAP: int = 1500
+    # 两封群发之间的间隔（秒）。Resend 默认限速每个团队每秒 10 次请求，且与找回密码
+    # 共用；0.25 秒 = 每秒 4 次，给找回密码留足余量。1500 封约 6 分钟发完。
+    # Gap between two broadcast sends. Resend allows 10 req/s per team, shared with
+    # password resets; 0.25s (4/s) leaves them plenty of headroom.
+    BROADCAST_EMAIL_INTERVAL_SECONDS: float = 0.25
 
     # 跨域 / CORS（本地开发 + 生产前端域名 / local dev + production frontend origins）
     CORS_ORIGINS: list[str] = [
