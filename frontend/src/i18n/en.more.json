@@ -1517,6 +1517,8 @@
         "sending": "Sending",
         "paused": "Paused",
         "pausedProvider": "Paused: the provider rejected it ({{code}}). Check the mail settings, then press Resume",
+        "pausedQuotaDaily": "Paused: today's sending quota is used up; resumes automatically after 08:00 UTC+8",
+        "pausedQuotaMonthly": "Paused: this month's sending quota is used up; press Resume after topping up or next month",
         "done": "Done",
         "cancelled": "Cancelled"
       },

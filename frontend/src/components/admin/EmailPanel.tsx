@@ -347,6 +347,10 @@ export default function EmailPanel({
   const statusText = (c: EmailCampaign) => {
     if (c.status === 'paused' && c.lastError?.startsWith('provider_rejected_'))
       return t('admin.email.status.pausedProvider', { code: c.lastError.slice('provider_rejected_'.length) })
+    // 额度用完的两种暂停：每日的过了 UTC 零点自动恢复，每月的要手动「继续」
+    // Quota pauses: the daily one resumes itself after UTC midnight, the monthly one needs "Resume"
+    if (c.status === 'paused' && c.lastError?.startsWith('quota_daily')) return t('admin.email.status.pausedQuotaDaily')
+    if (c.status === 'paused' && c.lastError === 'quota_monthly') return t('admin.email.status.pausedQuotaMonthly')
     return t(`admin.email.status.${c.status}`)
   }
 

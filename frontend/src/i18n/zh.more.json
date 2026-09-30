@@ -1515,6 +1515,8 @@
         "sending": "发送中",
         "paused": "已暂停",
         "pausedProvider": "已暂停：发信商拒绝（{{code}}），请检查发信配置后点「继续」",
+        "pausedQuotaDaily": "已暂停：今日发信额度已用完，北京时间早 8 点后自动继续",
+        "pausedQuotaMonthly": "已暂停：本月发信额度已用完，续费或下个月后点「继续」",
         "done": "已完成",
         "cancelled": "已取消"
       },

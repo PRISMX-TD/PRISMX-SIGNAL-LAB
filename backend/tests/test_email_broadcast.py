@@ -442,3 +442,80 @@ def test_a_pasted_image_address_on_its_own_line_becomes_an_image():
     assert "<img" not in eb.render_body_html("https://prismxsignallab.com/promo")
     assert "<img" not in eb.render_body_html(f"详情见 {u}")
     assert "[图片 / Image] " + u in eb.render_body_text(f"({u})")
+
+
+# ---------- 额度用完 / quota exceeded ----------
+
+def _fake_resend(monkeypatch, status, body):
+    """让 mailer.deliver 收到指定的 Resend 响应，不发任何真实请求。"""
+    import httpx
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, **k):
+            if isinstance(body, dict):
+                return httpx.Response(status, json=body)
+            return httpx.Response(status, text=body)
+
+    monkeypatch.setattr(mailer.httpx, "Client", _Client)
+
+
+@pytest.mark.parametrize("name,quota,retryable", [
+    ("daily_quota_exceeded", "daily", False),
+    ("monthly_quota_exceeded", "monthly", False),
+    ("rate_limit_exceeded", None, True),     # 普通限流照旧重试
+])
+def test_resend_429_is_split_by_error_name(monkeypatch, configured, name, quota, retryable):
+    _fake_resend(monkeypatch, 429, {"statusCode": 429, "name": name, "message": "x"})
+    r = mailer.deliver("a@t.co", "s", "<p>h</p>", "t")
+    assert (r.ok, r.quota, r.retryable, r.config_error) == (False, quota, retryable, False)
+
+
+def test_unreadable_429_body_counts_as_plain_rate_limit(monkeypatch, configured):
+    _fake_resend(monkeypatch, 429, "Too Many Requests")
+    r = mailer.deliver("a@t.co", "s", "<p>h</p>", "t")
+    assert r.quota is None and r.retryable is True
+
+
+def test_daily_quota_pauses_every_campaign_and_resumes_next_utc_day(db_session, configured):
+    admin = _user(db_session, "admin@t.co", role="admin")
+    _user(db_session, "u@t.co")
+    _campaign(db_session, admin, subjectZh="第一场")
+    _campaign(db_session, admin, subjectZh="第二场")
+    job = eb.claim_next(db_session)
+    eb.record_result(db_session, job, mailer.SendResult(ok=False, status=429, quota="daily"))
+
+    campaigns = db_session.query(EmailCampaign).all()
+    today = eb._utcnow().date().isoformat()
+    assert {(c.status, c.last_error) for c in campaigns} == {("paused", f"quota_daily:{today}")}
+    row = db_session.get(EmailDelivery, job.delivery_id)
+    assert (row.status, row.attempts) == ("pending", 0)          # 不是收件人的错：不扣次数
+    assert not db_session.query(EmailDelivery).filter(EmailDelivery.status == "failed").count()
+    assert eb.claim_next(db_session) == eb.IDLE                   # 当天不再发
+
+    # 模拟过了 UTC 零点：暂停记的是昨天
+    for c in campaigns:
+        c.last_error = "quota_daily:2000-01-01"
+    db_session.commit()
+    assert isinstance(eb.claim_next(db_session), eb.Job)
+    assert {c.status for c in db_session.query(EmailCampaign)} == {"sending"}
+
+
+def test_monthly_quota_waits_for_the_admin(db_session, configured):
+    admin = _user(db_session, "admin@t.co", role="admin")
+    out = _campaign(db_session, admin)
+    job = eb.claim_next(db_session)
+    eb.record_result(db_session, job, mailer.SendResult(ok=False, status=429, quota="monthly"))
+    c = db_session.query(EmailCampaign).one()
+    assert (c.status, c.last_error) == ("paused", "quota_monthly")
+    assert eb.claim_next(db_session) == eb.IDLE                   # 不会自己恢复
+    emails_router.resume_campaign(out.id, db=db_session, admin=admin)
+    assert isinstance(eb.claim_next(db_session), eb.Job)

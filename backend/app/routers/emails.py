@@ -206,6 +206,13 @@ def email_test(request: Request, body: EmailContentIn, admin: User = Depends(req
     msg = eb.build_message(_content(body), unsub)
     result = mailer.deliver(admin.email, f"[测试 / Test] {msg.subject}", msg.html, msg.text, msg.headers)
     if not result.ok:
+        if result.quota:
+            which = "今日" if result.quota == "daily" else "本月"
+            which_en = "daily" if result.quota == "daily" else "monthly"
+            raise HTTPException(
+                status_code=502,
+                detail=f"{which}发信额度已用完 / The {which_en} sending quota is used up",
+            )
         if result.status is None:
             raise HTTPException(status_code=502, detail="连不上发信商，请稍后再试 / Could not reach the email provider, try again shortly")
         code = result.status

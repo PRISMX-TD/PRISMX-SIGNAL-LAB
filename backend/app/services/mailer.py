@@ -46,17 +46,37 @@ class SendResult:
     - config_error：发信商拒绝的是**我们的配置**（401 / 403：密钥无效、发信域名
       没验证）。这种错每封信都会一样错，群发应当整体暂停，而不是把全部收件人
       一个个标成失败。
+    - quota：发信额度用完了——`"daily"` / `"monthly"`，否则 None。Resend 对额度
+      用完和普通限流都回 429，只能靠响应体里的 `name`（`daily_quota_exceeded` /
+      `monthly_quota_exceeded` / `rate_limit_exceeded`）分开。额度用完时**不算可
+      重试**：原样重发只会再被拒，群发应当整体暂停等额度恢复。
 
     Outcome of one send. Bulk sending must tell "this message is bad" apart
-    from "not now, retry later" and from "our provider config is broken" (401 /
-    403), which fails identically for every recipient and should pause the whole
-    run instead of burning through the list.
+    from "not now, retry later", from "our provider config is broken" (401 /
+    403), and from "the sending quota is used up" (a 429 whose body names
+    daily_ / monthly_quota_exceeded) — the last two fail identically for every
+    recipient and should pause the whole run instead of burning through the list.
     """
 
     ok: bool
     status: int | None = None
     retryable: bool = False
     config_error: bool = False
+    quota: str | None = None
+
+
+# Resend 429 响应体里的 name → 额度种类 / 429 body name → quota kind
+_QUOTA_ERRORS = {"daily_quota_exceeded": "daily", "monthly_quota_exceeded": "monthly"}
+
+
+def _quota_kind(resp: httpx.Response) -> str | None:
+    """429 是不是「额度用完」。响应体读不出来就当普通限流（照旧可重试）。"""
+    try:
+        body = resp.json()
+    except Exception:  # noqa: BLE001 —— 响应体不是 JSON 就不是额度错误
+        return None
+    name = body.get("name") if isinstance(body, dict) else None
+    return _QUOTA_ERRORS.get(name) if isinstance(name, str) else None
 
 
 def deliver(
@@ -95,13 +115,16 @@ def deliver(
             )
         status = resp.status_code
         if status >= 400:
+            quota = _quota_kind(resp) if status == 429 else None
             # 只记域名，不记完整地址 —— 见模块说明。
-            logger.error("mailer: 发信失败 domain=%s status=%s", domain, status)
+            logger.error("mailer: 发信失败 domain=%s status=%s%s", domain, status,
+                         f" quota={quota}" if quota else "")
             return SendResult(
                 ok=False,
                 status=status,
-                retryable=status == 429 or status >= 500,
+                retryable=(status == 429 and quota is None) or status >= 500,
                 config_error=status in (401, 403),
+                quota=quota,
             )
         return SendResult(ok=True, status=status)
     except Exception as exc:  # noqa: BLE001 —— 故意兜住一切，见模块说明

@@ -548,6 +548,34 @@ def _fail_stale_claims(db: Session) -> None:
         logger.warning("email_broadcast: %d 封信在发送中途被中断，记为失败 / interrupted sends marked failed", n)
 
 
+# 额度用完时写进 email_campaigns.last_error 的两种原因 / last_error codes for a quota pause
+QUOTA_DAILY_PREFIX = "quota_daily:"      # 后接暂停那天的 UTC 日期 / followed by the UTC date
+QUOTA_MONTHLY = "quota_monthly"
+
+
+def resume_after_daily_quota(db: Session) -> int:
+    """过了 UTC 零点，把因每日额度暂停的群发恢复成发送中。调用方 commit。
+
+    Resend 的每日额度按 UTC 日重置；暂停时记的是 UTC 日期，今天比它新就恢复。
+    恢复后若额度其实还没回来，下一封会再被拒、再暂停一次——只多一个请求，无害。
+    Resume campaigns paused by the daily quota once the UTC day has rolled over.
+    """
+    today = _utcnow().date().isoformat()
+    n = 0
+    for c in (
+        db.query(EmailCampaign)
+        .filter(EmailCampaign.status == "paused", EmailCampaign.last_error.like(f"{QUOTA_DAILY_PREFIX}%"))
+        .all()
+    ):
+        if (c.last_error or "")[len(QUOTA_DAILY_PREFIX):] < today:
+            c.status = "sending"
+            c.last_error = None
+            n += 1
+    if n:
+        logger.info("email_broadcast: 新的一天，%d 场因每日额度暂停的群发已恢复 / resumed", n)
+    return n
+
+
 def finish_drained_campaigns(db: Session) -> None:
     """把已经没有待发 / 在发行的「发送中」群发标成 done。调用方 commit。
 
@@ -577,6 +605,7 @@ def claim_next(db: Session) -> Job | str:
     if not mailer.mail_configured():
         return IDLE
     _fail_stale_claims(db)
+    resume_after_daily_quota(db)
     finish_drained_campaigns(db)
     db.commit()
 
@@ -632,7 +661,8 @@ def claim_next(db: Session) -> Job | str:
 
 
 def record_result(db: Session, job: Job, result: mailer.SendResult) -> None:
-    """落结果。可重试的失败没到次数上限就放回 pending；配置类错误整场暂停。"""
+    """落结果。可重试的失败没到次数上限就放回 pending；配置类错误整场暂停；
+    额度用完暂停全部发送中的群发。"""
     q = db.query(EmailDelivery).filter(EmailDelivery.id == job.delivery_id)
     row = q.first()
     if row is None:
@@ -644,6 +674,25 @@ def record_result(db: Session, job: Job, result: mailer.SendResult) -> None:
     elif campaign is not None and campaign.status == "cancelled":
         # 发的途中被取消了：失败的这封不再排队 / cancelled mid-send: don't requeue
         q.update({"status": "skipped", "error": "cancelled"}, synchronize_session=False)
+    elif result.quota:
+        # 发信额度用完：同样不是这位收件人的错，放回 pending、次数退回。暂停的是**所有**
+        # 发送中的群发——额度是整个账号的，别的群发下一封也会被拒。每日额度用完记下日期，
+        # 过了 UTC 零点由 claim_next 自动恢复；月额度要等管理员续费或下个月点「继续」。
+        # Quota used up: also not the recipient's fault — requeue with the attempt
+        # refunded, and pause every sending campaign, since the quota is account-wide.
+        # A daily pause records its UTC date and resumes itself the next day; a
+        # monthly one waits for the admin.
+        q.update(
+            {"status": "pending", "attempts": max(0, (row.attempts or 1) - 1), "error": None},
+            synchronize_session=False,
+        )
+        reason = (
+            f"{QUOTA_DAILY_PREFIX}{_utcnow().date().isoformat()}" if result.quota == "daily" else QUOTA_MONTHLY
+        )
+        for c in db.query(EmailCampaign).filter(EmailCampaign.status == "sending").all():
+            c.status = "paused"
+            c.last_error = reason
+        logger.warning("email_broadcast: 发信额度用完（%s），群发已暂停 / quota exceeded, paused", result.quota)
     elif result.config_error:
         # 不是这位收件人的错：放回 pending、次数退回，整场暂停等管理员修配置。
         # Not this recipient's fault: back to pending, attempt refunded, campaign paused.
@@ -691,7 +740,7 @@ async def drain_once() -> float:
             mailer.deliver, job.email, job.message.subject, job.message.html, job.message.text, job.message.headers
         )
         await run_in_threadpool(_record_sync, job, result)
-        if not result.ok and (result.retryable or result.config_error):
+        if not result.ok and (result.retryable or result.config_error or result.quota):
             return RETRY_BACKOFF_SECONDS
         await asyncio.sleep(max(0.0, settings.BROADCAST_EMAIL_INTERVAL_SECONDS))
     return 0.1
