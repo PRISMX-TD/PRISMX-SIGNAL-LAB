@@ -30,6 +30,16 @@ Myfxbook's (buy%/long%), and arguably more representative of overall market
 sentiment than a single broker. Confirmed via capturing the page's own live
 network traffic that this is the real endpoint it uses (not guessed); a plain
 `requests` call reliably returns 200 with full data, no spoofing needed.
+
+多 worker：抓取循环和其它后台循环一样只在领导 worker 上跑（services/background.py），
+所以抓到的结果除了留在本进程，还要写进 shared_state，其它 worker 的 /sentiment 从那里
+读——否则请求落到非领导 worker 上拿到的永远是空表，页面上的"市场情绪"就只剩占位。
+
+Multiple workers: like every background loop, the fetch loop runs on the leader
+worker only (services/background.py), so each result is also published to
+shared_state and the other workers' /sentiment reads it from there — otherwise a
+request landing on a non-leader worker always got an empty table and the
+dashboard's sentiment rule showed only placeholders.
 """
 import asyncio
 import logging
@@ -38,11 +48,21 @@ import time
 
 import requests
 
+from app.services import shared_cache, shared_state
+
 logger = logging.getLogger("prismx.sentiment")
 
 CURRENT_RATIOS_URL = "https://fxssi.com/api/current-ratios"
 REFRESH_INTERVAL_SECONDS = 5 * 60  # 与前端原轮询周期一致 / matches the old frontend poll cadence
 FETCH_TIMEOUT_SECONDS = 15
+# 共享快照的寿命，从最后一次成功抓取算起：一直抓不到时旧数据最多再展示这么久（带
+# stale=true），过期后前端回到占位，而不是无限期把几天前的比例当成当前情绪。
+# Lifetime of the shared snapshot, counted from the last successful fetch: while
+# fetches keep failing, the old data is served (stale=true) for at most this long,
+# then the frontend falls back to its placeholder instead of showing days-old
+# ratios as current sentiment.
+SNAPSHOT_TTL_SECONDS = 24 * 3600
+SNAPSHOT_KEY = "sentiment:snapshot"
 
 # 关注的品种：与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵对齐。
 # FXSSI 不一定对每个品种都有数据（尤其 WTI/BTCUSD 这类非主流外汇对）——
@@ -94,31 +114,68 @@ def _fetch_once() -> dict[str, dict[str, int]]:
 
 
 def refresh() -> bool:
-    """抓取一次并在成功时更新缓存；失败只记录错误，缓存保持上次的值。
+    """抓取一次并在成功时更新缓存；失败只记录错误，缓存保持上次的值。两种结果都会
+    发布到 shared_state（见 _publish）。
     Fetch once and update the cache on success; on failure, just log — the
-    cache keeps its last value. 返回是否成功 / returns whether it succeeded."""
+    cache keeps its last value. Either outcome is published to shared_state
+    (see _publish). 返回是否成功 / returns whether it succeeded."""
     global _cache, _updated_at, _last_error
     try:
         parsed = _fetch_once()
         _cache = parsed
         _updated_at = time.time()
         _last_error = None
-        return True
+        ok = True
     except Exception as e:  # noqa: BLE001 — 抓取失败是预期路径，不应中断后台循环
         _last_error = str(e)
         logger.warning("sentiment refresh failed: %s", e)
-        return False
+        ok = False
+    _publish()
+    return ok
 
 
-def get_sentiment() -> dict:
-    """返回当前缓存的情绪数据（可能是陈旧值），供路由直接读取，不触发抓取。
-    Return the currently cached sentiment (possibly stale) for the router to
-    read directly; never triggers a fetch itself."""
+def _local_snapshot() -> dict:
     return {
         "sentiment": _cache,
         "updatedAt": _updated_at,
         "stale": _last_error is not None,
     }
+
+
+def _publish() -> None:
+    """把本进程的结果写进 shared_state 给其它 worker 读（shared_cache 不抛 Redis 异常）。
+
+    本进程还没成功过（刚接任的领导首轮就失败）时什么都不写：共享里上一任留下的好
+    数据按自己剩下的寿命留着，不能拿一张空表把它盖掉。TTL 按最后一次成功的时刻算，
+    所以连续失败只会刷新 stale 标记，不会给旧数据续命。
+
+    Publish this process's result for the other workers (shared_cache never
+    raises Redis errors). Nothing is written until this process has succeeded
+    once — a freshly elected leader whose first fetch fails must not overwrite
+    the previous leader's good data with an empty table. The TTL counts from the
+    last success, so repeated failures refresh the stale flag without extending
+    the old data's life."""
+    if _updated_at is None:
+        return
+    remaining = int(SNAPSHOT_TTL_SECONDS - (time.time() - _updated_at))
+    if remaining < 1:
+        return
+    shared_cache.set_json(SNAPSHOT_KEY, _local_snapshot(), remaining)
+
+
+def get_sentiment() -> dict:
+    """返回当前缓存的情绪数据（可能是陈旧值），供路由直接读取，不触发抓取。
+    配了 Redis 时读领导 worker 发布的共享快照；读不到（未命中 / Redis 出错）退回本进程
+    的那份——领导自己手里就有，非领导则和从前一样是空表。
+    Return the currently cached sentiment (possibly stale) for the router to
+    read directly; never triggers a fetch itself. With Redis, read the snapshot
+    the leader published; on a miss or Redis error fall back to this process's
+    copy (the leader has it; a follower gets the empty table, as before)."""
+    if shared_state.enabled():
+        snap = shared_cache.get_json(SNAPSHOT_KEY)
+        if isinstance(snap, dict) and snap.get("sentiment"):
+            return snap
+    return _local_snapshot()
 
 
 async def sentiment_loop() -> None:
