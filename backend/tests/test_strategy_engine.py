@@ -430,7 +430,11 @@ def _strategy(db, u, rules, **kw):
 def test_cooldown_and_daily_cap(db_session):
     u = _user(db_session)
     s = _strategy(db_session, u, _rules("ma.rising"), cooldown_minutes=30, daily_signal_cap=2)
-    now = datetime.now(timezone.utc)
+    # 钉在 UTC+8 的中午：「每日上限」按 UTC+8 自然日数，用真实时钟的话北京时间
+    # 0:00–0:10 跑时 now-10min 落在昨天，用例必红（2026-09-30 就这样挡住了一次部署）。
+    # Pinned to noon UTC+8: the cap counts per UTC+8 day, and with the wall clock
+    # this case failed whenever it ran within ten minutes after local midnight.
+    now = datetime(2026, 9, 16, 4, 0, tzinfo=timezone.utc)
     assert not live.cooldown_blocks(db_session, s, now)
     db_session.add(StrategySignal(strategy_id=s.id, user_id=u.id, symbol="XAUUSD", interval="60",
                                   side="BUY", entry=1, stop_loss=0.9, take_profit=1.2, bar_t=1,
@@ -443,6 +447,25 @@ def test_cooldown_and_daily_cap(db_session):
                                   side="BUY", entry=1, stop_loss=0.9, take_profit=1.2, bar_t=2,
                                   created_at=(now - timedelta(minutes=5)).replace(tzinfo=None)))
     db_session.commit()
+    assert live.daily_cap_reached(db_session, s, now)
+
+
+def test_daily_cap_resets_at_local_midnight_not_utc(db_session):
+    """上限按 UTC+8 自然日重置：昨晚 23:55 的信号不占今天 00:03 的名额，今天 00:01 的占。"""
+    u = _user(db_session)
+    s = _strategy(db_session, u, _rules("ma.rising"), daily_signal_cap=1)
+    # 00:03 UTC+8 = 前一天 16:03 UTC / 00:03 local
+    now = datetime(2026, 9, 30, 16, 3, tzinfo=timezone.utc)
+
+    def add(minutes_ago, bar_t):
+        db_session.add(StrategySignal(strategy_id=s.id, user_id=u.id, symbol="XAUUSD", interval="60",
+                                      side="BUY", entry=1, stop_loss=0.9, take_profit=1.2, bar_t=bar_t,
+                                      created_at=(now - timedelta(minutes=minutes_ago)).replace(tzinfo=None)))
+        db_session.commit()
+
+    add(8, 1)            # 23:55 昨天（本地）
+    assert not live.daily_cap_reached(db_session, s, now)
+    add(2, 2)            # 00:01 今天（本地）
     assert live.daily_cap_reached(db_session, s, now)
 
 
