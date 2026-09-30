@@ -398,13 +398,18 @@ def test_overview_is_scoped_to_this_links_users(db_session):
     _visit(db_session, theirs, today)
     assert other is not None
 
-    out = agent_overview(db_session, agent, mine.id, resolve_range("month", None, None, today))
+    # 显式取最近 7 天，而不是「本月」：每月 1、2 号时两天前那次访问落在上个月，
+    # 用例就会在月初固定失败（2026-10-01 就这样挡住了一次后端部署）。
+    # An explicit last-7-days range rather than "this month": on the 1st and 2nd the
+    # visit two days back falls in the previous month and the case fails every month
+    # (it blocked a backend deploy on 2026-10-01).
+    out = agent_overview(db_session, agent, mine.id, resolve_range(None, today - timedelta(days=6), today, today))
     assert out.headline.totalUsers == 2          # 别人链接带来的那个不算
     assert out.headline.activeToday == 1
     assert out.headline.activeWeek == 2
     assert sum(d.active for d in out.activity) == 2
     assert sum(d.signups for d in out.activity) == 2
-    assert out.range.start == today.replace(day=1).isoformat()
+    assert out.range.start == (today - timedelta(days=6)).isoformat()
 
 
 def test_overview_of_unowned_link_is_404(db_session):
