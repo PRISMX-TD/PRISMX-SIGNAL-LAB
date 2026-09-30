@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { fitSize } from './shrinkImage'
+import { EMAIL_MAX_EDGE, fitSize } from './shrinkImage'
 
 describe('fitSize', () => {
   it('leaves images within the cap alone', () => {
@@ -12,5 +12,13 @@ describe('fitSize', () => {
   })
   it('never returns a zero side', () => {
     expect(fitSize(100000, 1).height).toBe(1)
+  })
+})
+
+describe('fitSize for email images', () => {
+  it('caps the longest side at the email limit', () => {
+    expect(EMAIL_MAX_EDGE).toBe(1200)
+    expect(fitSize(2508, 2508, EMAIL_MAX_EDGE)).toEqual({ width: 1200, height: 1200 })
+    expect(fitSize(1000, 400, EMAIL_MAX_EDGE)).toEqual({ width: 1000, height: 400 })
   })
 })

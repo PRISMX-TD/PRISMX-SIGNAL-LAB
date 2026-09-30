@@ -84,3 +84,53 @@ export async function shrinkImage(file: File): Promise<File> {
     return file
   }
 }
+
+// 邮件插图专用：不出 WebP。Outlook 桌面版和一些老邮件客户端不认 WebP，图会直接空着。
+//   · PNG 源图仍出 PNG（保留透明），JPEG / WebP 源图出 JPEG（WebP 的透明区垫白底，否则会变黑）；
+//   · 最长边压到 1200：信里按 512 宽显示，高清屏两倍也只要 1024；
+//   · WebP 源图必须转，哪怕转完更大；其余「没变小就传原文件」；GIF 不动（可能是动图）。
+// For email images: never WebP — desktop Outlook and some older clients show nothing
+// for it. PNG stays PNG (transparency), JPEG / WebP become JPEG on a white background,
+// longest side capped at 1200 (shown at 512, so 2x is covered). WebP is always
+// converted even if larger; otherwise a result that isn't smaller keeps the original.
+export const EMAIL_MAX_EDGE = 1200
+
+export async function shrinkImageForEmail(file: File): Promise<File> {
+  try {
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return file
+    if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return file
+
+    const bitmap = await createImageBitmap(file)
+    const { width, height } = fitSize(bitmap.width, bitmap.height, EMAIL_MAX_EDGE)
+    const resized = width !== bitmap.width || height !== bitmap.height
+    const isWebp = file.type === 'image/webp'
+    if (!resized && !isWebp) {
+      bitmap.close?.()
+      return file
+    }
+
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) {
+      bitmap.close?.()
+      return file
+    }
+    const type = file.type === 'image/png' ? 'image/png' : 'image/jpeg'
+    if (type === 'image/jpeg') {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, width, height)
+    }
+    ctx.drawImage(bitmap, 0, 0, width, height)
+    bitmap.close?.()
+
+    const blob = await toBlob(canvas, type, 0.85)
+    if (!blob || blob.type !== type) return file
+    if (!isWebp && blob.size >= file.size) return file
+    const base = file.name.replace(/\.[^.]+$/, '') || 'image'
+    return new File([blob], `${base}.${EXT[type]}`, { type })
+  } catch {
+    return file
+  }
+}

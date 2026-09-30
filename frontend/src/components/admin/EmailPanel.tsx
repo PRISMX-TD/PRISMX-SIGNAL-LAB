@@ -17,7 +17,7 @@ import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import EmailRecipientPicker, { type Picked } from './EmailRecipientPicker'
-import { shrinkImage } from './shrinkImage'
+import { shrinkImageForEmail } from './shrinkImage'
 import type {
   EmailAudienceInput,
   EmailAudiencePlan,
@@ -55,10 +55,10 @@ function useDebounced<T>(value: T, ms: number): T {
   return v
 }
 
-// 正文输入框 + 「插入图片」：选图 → 压缩（与公告配图同一套 shrinkImage）→ 上传到图片存储
+// 正文输入框 + 「插入图片」：选图 → 转成邮件兼容的 JPEG / PNG（shrinkImageForEmail）→ 上传到图片存储
 // → 在光标处插入 ![](地址)。图片单独占一段，前后补空行，免得和文字挤在同一行。
-// Body textarea with "insert image": pick → shrink (same shrinkImage as announcement
-// images) → upload → insert ![](url) at the cursor as its own paragraph.
+// Body textarea with "insert image": pick → convert to mail-safe JPEG / PNG
+// (shrinkImageForEmail) → upload → insert ![](url) at the cursor as its own paragraph.
 function EmailBodyField({
   label,
   value,
@@ -94,7 +94,7 @@ function EmailBodyField({
   const upload = async (file: File) => {
     setUploading(true)
     try {
-      const res = await adminApi.uploadImage(await shrinkImage(file))
+      const res = await adminApi.uploadImage(await shrinkImageForEmail(file))
       insert(res.url)
     } catch (err) {
       onError(localizeApiError(err instanceof Error ? err.message : String(err)))

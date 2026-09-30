@@ -431,3 +431,14 @@ def test_images_in_plain_text_version():
     text = eb.render_body_text("![横幅](https://cdn.example.com/b.png)\n\n[![](https://cdn.example.com/c.png)](https://x.com/go)")
     assert "[图片 / Image: 横幅] https://cdn.example.com/b.png" in text
     assert "[图片 / Image] https://x.com/go" in text
+
+
+def test_a_pasted_image_address_on_its_own_line_becomes_an_image():
+    u = "https://x.supabase.co/storage/v1/object/public/strategy-images/abc.webp#w=1254&h=1254"
+    for line in (u, f"({u})", f"  {u}  "):
+        html = eb.render_body_html(f"看图\n\n{line}\n\n结尾")
+        assert f'<img src="{u.replace("&", "&amp;")}"' in html, line
+    # 普通网页链接、句子里的图片链接不受影响
+    assert "<img" not in eb.render_body_html("https://prismxsignallab.com/promo")
+    assert "<img" not in eb.render_body_html(f"详情见 {u}")
+    assert "[图片 / Image] " + u in eb.render_body_text(f"({u})")

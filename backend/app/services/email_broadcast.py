@@ -40,6 +40,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from sqlalchemy import exists, func, or_
 from sqlalchemy.orm import Session
@@ -124,7 +125,28 @@ def _img_html(src: str, alt: str) -> str:
     )
 
 
+# 一整行只有一个 https 图片地址（可带一对括号）时，直接当图片：管理员常常是把图床
+# 链接直接粘进来，不会记得写 ![]()。只认图片扩展名，普通网页链接照旧是链接。
+# A line holding nothing but an https image address (optionally in parentheses)
+# is treated as an image: admins paste bucket links without the ![]() wrapper.
+# Only image extensions qualify, so ordinary page links stay links.
+_BARE_IMG_LINE_RE = re.compile(r"^\(?\s*(https://" + _URL_CHARS + r")\s*\)?$")
+_IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+
+
+def _bare_image_line(line: str) -> str | None:
+    m = _BARE_IMG_LINE_RE.match(line.strip())
+    if not m:
+        return None
+    url = m.group(1)
+    path = urlsplit(url).path.lower()
+    return url if path.endswith(_IMG_EXTS) else None
+
+
 def _line_html(line: str) -> str:
+    src = _bare_image_line(line)
+    if src:
+        return _img_html(src, "")
     out: list[str] = []
     pos = 0
     for m in _TOKEN_RE.finditer(line):
@@ -172,8 +194,11 @@ def render_body_text(body: str) -> str:
             return m.group("bare")
         return f"{m.group('label')} ({m.group('href')})"
 
-    text = _TOKEN_RE.sub(_token, body.replace("\r\n", "\n").strip())
-    text = _BOLD_RE.sub(r"\1", text)
+    lines = []
+    for line in body.replace("\r\n", "\n").strip().split("\n"):
+        src = _bare_image_line(line)
+        lines.append(f"[图片 / Image] {src}" if src else _TOKEN_RE.sub(_token, line))
+    text = _BOLD_RE.sub(r"\1", "\n".join(lines))
     return "\n\n".join(_paragraphs(text))
 
 
