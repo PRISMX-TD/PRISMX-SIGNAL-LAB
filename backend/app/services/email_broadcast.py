@@ -80,18 +80,36 @@ def _utcnow() -> datetime:
 # 渲染 / rendering
 # ---------------------------------------------------------------------------
 
-# [文字](https://链接) 或裸链接。链接只收 URL 里合法的 ASCII 字符：中文紧跟在
-# 链接后面（「看 https://a.com/x。还有」）时不会被吞进去；引号、尖括号、空白也
-# 就进不了 href 属性。
-# A markdown link or a bare URL, limited to ASCII URL characters so adjacent CJK
-# text is not swallowed and quotes / angle brackets never reach the href.
+# 正文里认四种行内标记，按优先级：
+#   [![说明](https://图片)](https://链接)   可点的图片（横幅）
+#   ![说明](https://图片)                   图片
+#   [文字](https://链接)                    链接
+#   https://...                             裸链接
+# 地址只收 URL 里合法的 ASCII 字符：中文紧跟在链接后面（「看 https://a.com/x。还有」）
+# 时不会被吞进去；引号、尖括号、空白也就进不了 href / src 属性。图片只收 https——
+# 邮件客户端对 http 图片会提示「不安全内容」或直接不显示。
+# Four inline forms, in priority order: linked image, image, link, bare URL.
+# Addresses are limited to ASCII URL characters so adjacent CJK text is not
+# swallowed and quotes / angle brackets never reach href / src. Images must be
+# https: mail clients warn about or drop plain-http images.
 _URL_CHARS = r"[A-Za-z0-9\-._~:/?#@!$&*+,;=%]+"
-_LINK_RE = re.compile(r"\[([^\]\n]{1,200})\]\((https?://" + _URL_CHARS + r")\)|(https?://" + _URL_CHARS + ")")
+_TOKEN_RE = re.compile(
+    r"(?P<limg>\[!\[(?P<la>[^\]\n]{0,200})\]\((?P<lsrc>https://" + _URL_CHARS + r")\)\]\((?P<lhref>https?://" + _URL_CHARS + r")\))"
+    r"|(?P<img>!\[(?P<ia>[^\]\n]{0,200})\]\((?P<isrc>https://" + _URL_CHARS + r")\))"
+    r"|(?P<link>\[(?P<label>[^\]\n]{1,200})\]\((?P<href>https?://" + _URL_CHARS + r")\))"
+    r"|(?P<bare>https?://" + _URL_CHARS + ")"
+)
 _BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
 # 裸链接末尾的标点多半是句子的，不是链接的 / trailing punctuation belongs to the sentence
 _TRAILING_PUNCT = ".,;:!?)）。，；：！？、"
 
 _LINK_STYLE = "color:#4f46e5;text-decoration:underline"
+# 固定 512 宽（信件内容区 560 减去两侧留白）：Outlook 桌面版不认 max-width，不给
+# width 属性的大图会把整封信撑破；其余客户端按 max-width:100% 在手机上自动缩小。
+# A fixed 512px width (the 560px body minus padding): desktop Outlook ignores
+# max-width and a large image without a width attribute blows the layout apart;
+# everything else scales it down on phones via max-width:100%.
+_IMG_STYLE = "display:block;width:100%;max-width:512px;height:auto;border:0;border-radius:8px;margin:8px 0"
 
 
 def _inline_html(segment: str) -> str:
@@ -99,19 +117,32 @@ def _inline_html(segment: str) -> str:
     return _BOLD_RE.sub(r'<strong>\1</strong>', html_lib.escape(segment, quote=False))
 
 
+def _img_html(src: str, alt: str) -> str:
+    return (
+        f'<img src="{html_lib.escape(src, quote=True)}" alt="{html_lib.escape(alt, quote=True)}" '
+        f'width="512" style="{_IMG_STYLE}">'
+    )
+
+
 def _line_html(line: str) -> str:
     out: list[str] = []
     pos = 0
-    for m in _LINK_RE.finditer(line):
-        label, url, bare = m.group(1), m.group(2), m.group(3)
+    for m in _TOKEN_RE.finditer(line):
         end = m.end()
-        if bare:
-            trimmed = bare.rstrip(_TRAILING_PUNCT)
-            end = m.start() + len(trimmed)
-            url, label = trimmed, trimmed
+        if m.group("limg"):
+            href = html_lib.escape(m.group("lhref"), quote=True)
+            piece = f'<a href="{href}">{_img_html(m.group("lsrc"), m.group("la"))}</a>'
+        elif m.group("img"):
+            piece = _img_html(m.group("isrc"), m.group("ia"))
+        else:
+            if m.group("bare"):
+                url = label = m.group("bare").rstrip(_TRAILING_PUNCT)
+                end = m.start() + len(url)
+            else:
+                url, label = m.group("href"), m.group("label")
+            piece = f'<a href="{html_lib.escape(url, quote=True)}" style="{_LINK_STYLE}">{_inline_html(label)}</a>'
         out.append(_inline_html(line[pos:m.start()]))
-        href = html_lib.escape(url, quote=True)
-        out.append(f'<a href="{href}" style="{_LINK_STYLE}">{_inline_html(label)}</a>')
+        out.append(piece)
         pos = end
     out.append(_inline_html(line[pos:]))
     return "".join(out)
@@ -131,13 +162,17 @@ def render_body_html(body: str) -> str:
 
 
 def render_body_text(body: str) -> str:
-    """纯文本版：链接写成「文字 (地址)」，去掉加粗记号。"""
-    def _link(m: re.Match) -> str:
-        if m.group(3):
-            return m.group(3)
-        return f"{m.group(1)} ({m.group(2)})"
+    """纯文本版：链接写成「文字 (地址)」，图片写成「[图片：说明] 地址」，去掉加粗记号。"""
+    def _token(m: re.Match) -> str:
+        if m.group("limg"):
+            return f"[图片 / Image{': ' + m.group('la') if m.group('la') else ''}] {m.group('lhref')}"
+        if m.group("img"):
+            return f"[图片 / Image{': ' + m.group('ia') if m.group('ia') else ''}] {m.group('isrc')}"
+        if m.group("bare"):
+            return m.group("bare")
+        return f"{m.group('label')} ({m.group('href')})"
 
-    text = _LINK_RE.sub(_link, body.replace("\r\n", "\n").strip())
+    text = _TOKEN_RE.sub(_token, body.replace("\r\n", "\n").strip())
     text = _BOLD_RE.sub(r"\1", text)
     return "\n\n".join(_paragraphs(text))
 

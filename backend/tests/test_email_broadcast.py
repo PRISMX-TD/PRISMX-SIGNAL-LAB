@@ -399,3 +399,35 @@ def test_picker_select_all_returns_only_reachable_people(db_session):
 
     assert pick("marketing") == ["ok@t.co"]
     assert pick("notice") == ["ok@t.co", "out@t.co"]     # 通知不看退订，停用的仍排除
+
+
+# ---------- 图片 / images ----------
+
+def test_images_render_with_fixed_width_and_escaped_attributes():
+    html = eb.render_body_html('看图：\n![十月"活动"](https://cdn.example.com/a.png)')
+    assert '<img src="https://cdn.example.com/a.png"' in html
+    assert 'alt="十月&quot;活动&quot;"' in html        # 说明里的引号不能跳出属性
+    assert 'width="512"' in html and "max-width:512px" in html
+
+
+def test_linked_image_becomes_a_clickable_banner():
+    html = eb.render_body_html("[![横幅](https://cdn.example.com/b.png)](https://prismxsignallab.com/promo)")
+    assert html.count("<a ") == 1
+    assert '<a href="https://prismxsignallab.com/promo"><img src="https://cdn.example.com/b.png"' in html
+
+
+def test_only_https_images_and_no_attribute_breakout():
+    # http 图片不渲染成 <img>，退化成普通文本 + 裸链接
+    html = eb.render_body_html("![x](http://insecure.example.com/a.png)")
+    assert "<img" not in html
+    # 地址里塞引号 / 尖括号跳不出 src
+    import re as _re
+    html = eb.render_body_html('![x](https://a.com/p.png" onerror="alert(1))')
+    # 剩下的 onerror=… 只能是可见文字，不能出现在任何标签里
+    assert not _re.search(r"<[^>]*onerror", html)
+
+
+def test_images_in_plain_text_version():
+    text = eb.render_body_text("![横幅](https://cdn.example.com/b.png)\n\n[![](https://cdn.example.com/c.png)](https://x.com/go)")
+    assert "[图片 / Image: 横幅] https://cdn.example.com/b.png" in text
+    assert "[图片 / Image] https://x.com/go" in text
