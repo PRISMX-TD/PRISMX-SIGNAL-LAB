@@ -117,3 +117,32 @@ def test_single_worker_without_redis(redis_off, monkeypatch):
     sentiment_store.refresh()
     got = sentiment_store.get_sentiment()
     assert got["sentiment"] == DATA and got["stale"] is False
+
+
+class _Resp:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return self._payload
+
+
+def test_fetch_maps_fxssi_names_to_platform_symbols(monkeypatch):
+    # FXSSI 把 WTI 原油叫 XTIUSD；平台（EA 推送、仪表盘）用 WTI。
+    # FXSSI calls WTI crude XTIUSD; the platform (EA feed, dashboard) calls it WTI.
+    payload = {"pairs": {
+        "XTIUSD": {"amarkets": "73.16", "average": "62.12"},
+        "XAUUSD": {"average": "66.12"},
+        "BTCUSD": {"average": "43.76"},
+        "AUDUSD": {"average": "40.00"},               # 不在关注列表 / not watched
+    }}
+    monkeypatch.setattr(sentiment_store.requests, "get", lambda *a, **k: _Resp(payload))
+    got = sentiment_store._fetch_once()
+    assert got == {
+        "WTI": {"longPct": 62, "shortPct": 38},
+        "XAUUSD": {"longPct": 66, "shortPct": 34},
+        "BTCUSD": {"longPct": 44, "shortPct": 56},
+    }

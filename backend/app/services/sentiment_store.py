@@ -65,16 +65,23 @@ SNAPSHOT_TTL_SECONDS = 24 * 3600
 SNAPSHOT_KEY = "sentiment:snapshot"
 
 # 关注的品种：与 EA（ea/PRISMX_MarketFeed.mq5）默认推送的品种矩阵对齐。
-# FXSSI 不一定对每个品种都有数据（尤其 WTI/BTCUSD 这类非主流外汇对）——
-# _fetch_once() 已经按 "average is None 就跳过" 处理，抓不到的品种自然不
-# 出现在结果里，前端相应显示占位，不会报错。
+# FXSSI 不保证每个品种都有数据（2026-09-30 实测 7 个都有，WTI 在那边叫 XTIUSD，
+# 见 _FXSSI_NAMES）——_fetch_once() 已经按 "average is None 就跳过" 处理，抓不到
+# 的品种自然不出现在结果里，前端相应显示占位，不会报错。
 # Symbols we care about: aligned with the EA's (ea/PRISMX_MarketFeed.mq5)
-# default push matrix. FXSSI won't necessarily have data for every one of
-# these (especially WTI/BTCUSD, which aren't mainstream FX pairs) —
+# default push matrix. FXSSI doesn't guarantee data for every one of these (all
+# 7 were present as of 2026-09-30; WTI is XTIUSD there, see _FXSSI_NAMES) —
 # _fetch_once() already skips a symbol when "average is None", so anything
 # unavailable simply doesn't appear in the result and the frontend shows its
 # placeholder instead of erroring.
 WATCH_SYMBOLS = {"XAUUSD", "XAGUSD", "WTI", "EURUSD", "GBPUSD", "USDJPY", "BTCUSD"}
+
+# 平台品种名 → FXSSI 的叫法（只列两边不一样的）。结果仍按平台名作键，仪表盘拿 EA
+# 推送的品种名直接查。FXSSI 把 WTI 原油叫 XTIUSD——以前直接查 "WTI" 永远查不到。
+# Platform symbol → FXSSI's name, only where they differ. Results stay keyed by the
+# platform name, which the dashboard looks up with the EA's symbol as-is. FXSSI
+# calls WTI crude XTIUSD, so looking up "WTI" directly never matched.
+_FXSSI_NAMES = {"WTI": "XTIUSD"}
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -103,7 +110,7 @@ def _fetch_once() -> dict[str, dict[str, int]]:
     pairs = data.get("pairs", {})
     result: dict[str, dict[str, int]] = {}
     for sym in WATCH_SYMBOLS:
-        avg = pairs.get(sym, {}).get("average")
+        avg = pairs.get(_FXSSI_NAMES.get(sym, sym), {}).get("average")
         if avg is None:
             continue
         long_pct = round(float(avg))
