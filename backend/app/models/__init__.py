@@ -1595,3 +1595,99 @@ class PasswordResetToken(Base):
     # 申请来源 IP，仅用于事后排查滥用；不参与任何判定。
     # Requesting IP, for abuse forensics only; never part of any decision.
     requested_ip = Column(String, nullable=True)
+
+
+class EmailCampaign(Base):
+    """管理员发起的一次群发邮件。
+
+    正文按「中文 / 英文」各存一份：后端不知道用户用哪种语言（users 没有这一列），
+    所以和找回密码的信一样，两种语言写进同一封信；英文可以不填。
+
+    `audience` 存的是**发起时的筛选条件快照**（JSON），只用于在历史里回答「这次
+    发给了谁」。真正的收件人名单在发起那一刻就展开成 email_deliveries 的行，之后
+    新注册的人不会被补发，条件也不会被重新求值。
+
+    `kind`：marketing（推广，带退订链接，已退订的人收不到）/ notice（服务通知，
+    不看退订——用于维护停机这类必须送达的消息，谨慎使用）。
+
+    An admin-initiated broadcast. Bodies are stored per language because the
+    backend has no per-user language; both go into one message, English
+    optional. `audience` is a snapshot of the filter for the history view only —
+    recipients are expanded into email_deliveries rows at creation and never
+    re-evaluated. `kind` marketing honours opt-outs and carries an unsubscribe
+    link; notice ignores opt-outs and is meant for must-deliver service notices.
+    """
+
+    __tablename__ = "email_campaigns"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=_now, index=True)
+    kind = Column(String, nullable=False, default="marketing")
+    subject_zh = Column(String, nullable=True)
+    body_zh = Column(Text, nullable=True)
+    subject_en = Column(String, nullable=True)
+    body_en = Column(Text, nullable=True)
+    audience = Column(Text, nullable=True)
+    # sending / paused / done / cancelled
+    status = Column(String, nullable=False, default="sending")
+    # 暂停原因（发信商拒绝了我们的配置之类），给管理员看 / why it paused, for the admin
+    last_error = Column(String, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class EmailDelivery(Base):
+    """群发里的一位收件人。
+
+    **不存邮箱地址**，发送那一刻再从 users 取：用户在排队期间改了邮箱、被停用、
+    点了退订，都以发送时为准。这张表同时承担三件事：
+    ① 去重——(campaign_id, user_id) 唯一，同一封群发不会给同一个人发两次；
+    ② 断点续发——进程重启后后台循环从 pending 的行接着发；
+    ③ 事后核对——每一行都有终态（sent / failed / skipped）与错误码。
+
+    status：pending → sending（已认领、正在发）→ sent / failed / skipped。
+    认领是一条带 `WHERE status='pending'` 的 UPDATE，受影响行数为 1 才算抢到，
+    领导权切换的瞬间两个进程同时跑也不会重复发。
+
+    One recipient of a broadcast. The address is deliberately not stored — it is
+    read from users at send time, so an address change, a ban or an unsubscribe
+    while queued all take effect. The unique (campaign_id, user_id) pair dedupes,
+    pending rows make the run resumable across restarts, and every row ends in a
+    terminal state with an error code. Claiming is a conditional UPDATE, so even
+    two processes overlapping during a leader hand-over cannot double-send.
+    """
+
+    __tablename__ = "email_deliveries"
+    __table_args__ = (
+        UniqueConstraint("campaign_id", "user_id", name="uq_email_delivery_campaign_user"),
+        Index("idx_email_deliveries_status_campaign", "status", "campaign_id"),
+        # 每日上限按 sent_at 数当天已发 / the daily cap counts today's sends by sent_at
+        Index("idx_email_deliveries_sent_at", "sent_at"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    campaign_id = Column(String, ForeignKey("email_campaigns.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    # 失败 / 跳过的原因：http_422、opted_out、disabled、cancelled…… / reason code
+    error = Column(String, nullable=True)
+    claimed_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+
+
+class EmailOptOut(Base):
+    """退订了推广邮件的用户。一行 = 一个人退订了。
+
+    单独一张表而不是 users 上加一列：users 是全库读得最频繁的表，为一个只有群发
+    才关心的开关去改它不值得；这里只有群发和退订页两处读写。
+
+    Users who unsubscribed from marketing email. A separate table rather than a
+    users column: users is the hottest table in the schema, and only the
+    broadcaster and the unsubscribe page care about this flag.
+    """
+
+    __tablename__ = "email_opt_outs"
+
+    user_id = Column(String, ForeignKey("users.id"), primary_key=True)
+    created_at = Column(DateTime, default=_now)

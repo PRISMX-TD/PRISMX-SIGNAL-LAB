@@ -19,6 +19,7 @@ the deploy flow is git pull + restart, and the API is a single POST. Recipient
 addresses are never logged; a list of who requested a reset is itself sensitive.
 """
 import logging
+from dataclasses import dataclass
 
 import httpx
 
@@ -35,23 +36,55 @@ def mail_configured() -> bool:
     return bool(settings.RESEND_API_KEY and settings.MAIL_FROM)
 
 
-def send_email(to: str, subject: str, html: str, text: str) -> bool:
-    """发一封信。成功返回 True；任何失败都返回 False 且不抛异常。
+@dataclass(frozen=True)
+class SendResult:
+    """一次发信的结果。群发要分得清「这封信本身不行」与「现在发不了、待会再试」。
 
-    同时带 html 与 text 两份正文不是可有可无：只发 HTML 的信在多数反垃圾评分
-    里会被扣分，而国内邮箱服务商对境外发信源本来就严，能少扣一分是一分。
+    - ok：发信商已接收。
+    - status：发信商回的 HTTP 状态码；网络异常 / 没配置时为 None。
+    - retryable：值得原样重发——限流（429）、发信商 5xx、网络超时。
+    - config_error：发信商拒绝的是**我们的配置**（401 / 403：密钥无效、发信域名
+      没验证）。这种错每封信都会一样错，群发应当整体暂停，而不是把全部收件人
+      一个个标成失败。
+
+    Outcome of one send. Bulk sending must tell "this message is bad" apart
+    from "not now, retry later" and from "our provider config is broken" (401 /
+    403), which fails identically for every recipient and should pause the whole
+    run instead of burning through the list.
+    """
+
+    ok: bool
+    status: int | None = None
+    retryable: bool = False
+    config_error: bool = False
+
+
+def deliver(
+    to: str,
+    subject: str,
+    html: str,
+    text: str,
+    headers: dict[str, str] | None = None,
+) -> SendResult:
+    """发一封信并返回细分结果。与 send_email 同样**绝不抛异常**。
+
+    headers 用于群发的 List-Unsubscribe 之类邮件头；找回密码不需要。
+    Send one message and report a detailed result; never raises. `headers` carries
+    extras such as List-Unsubscribe for broadcasts.
     """
     if not mail_configured():
         logger.warning("mailer: RESEND_API_KEY 未配置，跳过发信 / not configured, skipping")
-        return False
+        return SendResult(ok=False)
 
-    payload = {
+    payload: dict = {
         "from": f"{settings.MAIL_FROM_NAME} <{settings.MAIL_FROM}>",
         "to": [to],
         "subject": subject,
         "html": html,
         "text": text,
     }
+    if headers:
+        payload["headers"] = headers
     domain = to.rpartition("@")[2] or "?"
     try:
         with httpx.Client(timeout=_TIMEOUT) as client:
@@ -60,11 +93,26 @@ def send_email(to: str, subject: str, html: str, text: str) -> bool:
                 headers={"Authorization": f"Bearer {settings.RESEND_API_KEY}"},
                 json=payload,
             )
-        if resp.status_code >= 400:
+        status = resp.status_code
+        if status >= 400:
             # 只记域名，不记完整地址 —— 见模块说明。
-            logger.error("mailer: 发信失败 domain=%s status=%s", domain, resp.status_code)
-            return False
-        return True
+            logger.error("mailer: 发信失败 domain=%s status=%s", domain, status)
+            return SendResult(
+                ok=False,
+                status=status,
+                retryable=status == 429 or status >= 500,
+                config_error=status in (401, 403),
+            )
+        return SendResult(ok=True, status=status)
     except Exception as exc:  # noqa: BLE001 —— 故意兜住一切，见模块说明
         logger.error("mailer: 发信异常 domain=%s err=%s", domain, type(exc).__name__)
-        return False
+        return SendResult(ok=False, retryable=True)
+
+
+def send_email(to: str, subject: str, html: str, text: str) -> bool:
+    """发一封信。成功返回 True；任何失败都返回 False 且不抛异常。
+
+    同时带 html 与 text 两份正文不是可有可无：只发 HTML 的信在多数反垃圾评分
+    里会被扣分，而国内邮箱服务商对境外发信源本来就严，能少扣一分是一分。
+    """
+    return deliver(to, subject, html, text).ok

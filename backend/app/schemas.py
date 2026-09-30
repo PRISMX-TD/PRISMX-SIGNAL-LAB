@@ -1945,3 +1945,140 @@ class AgentPlanUpdate(BaseModel):
     # Hard cap of 60 days per call (product decision). A year takes six clicks;
     # the friction is the point — it stops a single click reaching year 2099.
     days: int | None = Field(default=None, ge=1, le=60)
+
+
+# ---------- 管理后台群发邮件 / admin email broadcast ----------
+
+EMAIL_SUBJECT_MAX = 150
+EMAIL_BODY_MAX = 20000
+# 「指定用户」一次最多多少人。再多就该用条件筛选，而不是把几千个 id 塞进请求体。
+# Cap on an explicit recipient list; beyond this, use a filter instead.
+EMAIL_LIST_MAX = 2000
+
+
+class EmailContentIn(BaseModel):
+    """一封信的内容：中英各一份，至少要有一种语言的标题和正文都填了。
+
+    正文是纯文本加三种轻量标记（空行分段、**加粗**、[文字](https://链接)，裸链接
+    自动可点），由后端统一渲染成 HTML——不接受管理员直接写 HTML：邮件客户端对
+    HTML 的容忍度参差不齐，写错一个标签整封信就可能在某个客户端里排版崩掉。
+
+    Subject + body in zh and en; at least one language must be complete. The body
+    is plain text with light markup rendered server-side, never raw HTML.
+    """
+
+    kind: Literal["marketing", "notice"] = "marketing"
+    subjectZh: str = Field(default="", max_length=EMAIL_SUBJECT_MAX)
+    bodyZh: str = Field(default="", max_length=EMAIL_BODY_MAX)
+    subjectEn: str = Field(default="", max_length=EMAIL_SUBJECT_MAX)
+    bodyEn: str = Field(default="", max_length=EMAIL_BODY_MAX)
+
+    @field_validator("subjectZh", "subjectEn")
+    @classmethod
+    def _one_line_subject(cls, v: str) -> str:
+        # 标题里的换行会被部分发信链路当成邮件头注入 / newlines in a subject are header injection
+        return " ".join((v or "").split())
+
+    @field_validator("bodyZh", "bodyEn")
+    @classmethod
+    def _strip_body(cls, v: str) -> str:
+        return (v or "").strip()
+
+    @model_validator(mode="after")
+    def _one_language_complete(self):
+        zh = bool(self.subjectZh and self.bodyZh)
+        en = bool(self.subjectEn and self.bodyEn)
+        if not (zh or en):
+            raise ValueError("至少填完一种语言的标题和正文 / fill in the subject and body for at least one language")
+        # 填了一半的那种语言是笔误，不是「不要这种语言」——静默丢掉会让管理员以为发出去了。
+        # A half-filled language is a slip, not an opt-out; dropping it silently would mislead.
+        if bool(self.subjectZh) != bool(self.bodyZh) or bool(self.subjectEn) != bool(self.bodyEn):
+            raise ValueError("标题和正文要成对填写 / subject and body must be filled in together")
+        return self
+
+
+class EmailAudienceIn(BaseModel):
+    """收件人筛选。
+
+    mode=filter：按会员等级 + 活跃度筛；mode=list：指定的用户（后台勾选的 id，
+    或粘贴的邮箱——只匹配已注册用户，不认识的地址直接忽略，这里不是给任意地址
+    发信的通道）。两种模式都会自动排除已停用的账号；推广邮件还会排除已退订的人。
+
+    mode=filter narrows by plan and activity; mode=list targets given user ids or
+    pasted addresses (registered users only — this is not a send-to-anyone tool).
+    Disabled accounts are always excluded; marketing also excludes opt-outs.
+    """
+
+    mode: Literal["filter", "list"] = "filter"
+    # all / FREE / PRO / TRIAL（PRO 试用中）/ PAID（PRO 且非试用）
+    plan: Literal["all", "FREE", "PRO", "TRIAL", "PAID"] = "all"
+    activeWithinDays: int | None = Field(default=None, ge=1, le=3650)
+    inactiveForDays: int | None = Field(default=None, ge=1, le=3650)
+    userIds: list[str] = Field(default_factory=list, max_length=EMAIL_LIST_MAX)
+    emails: list[str] = Field(default_factory=list, max_length=EMAIL_LIST_MAX)
+
+    @field_validator("emails")
+    @classmethod
+    def _norm_emails(cls, v: list[str]) -> list[str]:
+        return sorted({e.strip().lower() for e in v if e and "@" in e})
+
+    @model_validator(mode="after")
+    def _list_needs_someone(self):
+        if self.mode == "list" and not (self.userIds or self.emails):
+            raise ValueError("指定用户模式下至少要有一位收件人 / pick at least one recipient")
+        return self
+
+
+class EmailAudienceQueryIn(BaseModel):
+    kind: Literal["marketing", "notice"] = "marketing"
+    audience: EmailAudienceIn
+
+
+class EmailAudienceOut(BaseModel):
+    count: int
+    # 被自动排除的人数，给管理员一个交代 / how many were excluded automatically
+    excludedDisabled: int = 0
+    excludedOptedOut: int = 0
+    # 只在 list 模式下有意义：粘贴的邮箱里有几个不是注册用户 / pasted addresses that matched no user
+    unmatchedEmails: int = 0
+    sample: list[str] = Field(default_factory=list)
+
+
+class EmailPreviewOut(BaseModel):
+    subject: str
+    html: str
+    text: str
+
+
+class EmailCampaignIn(BaseModel):
+    content: EmailContentIn
+    audience: EmailAudienceIn
+
+
+class EmailCampaignOut(BaseModel):
+    id: str
+    kind: str
+    subject: str
+    status: str
+    lastError: str | None = None
+    createdAt: datetime | None = None
+    finishedAt: datetime | None = None
+    createdByEmail: str | None = None
+    # 发起时的筛选条件快照（EmailAudienceIn 的形状，list 模式只留人数）/ filter snapshot
+    audience: dict | None = None
+    total: int = 0
+    pending: int = 0
+    sent: int = 0
+    failed: int = 0
+    skipped: int = 0
+
+
+class EmailCampaignListOut(BaseModel):
+    campaigns: list[EmailCampaignOut]
+
+
+class EmailStatusOut(BaseModel):
+    configured: bool
+    fromAddress: str
+    dailyCap: int
+    sentToday: int

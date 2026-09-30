@@ -186,7 +186,10 @@ def _hash_legacy_api_tokens() -> None:
 #          删冗余索引单独走：Postgres 上用自动提交连接执行 DROP INDEX CONCURRENTLY，
 #          不拿 ACCESS EXCLUSIVE、不挡 K 线写入；失败只记警告不中断启动（冗余索引多留
 #          一阵无害），见 _drop_redundant_candle_index。
-CURRENT_SCHEMA_REV = 29
+# rev 30 — 管理后台群发邮件：新表 email_campaigns、email_deliveries、email_opt_outs。
+#          同 rev 20 / 21：全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为让
+#          老库启动时走一次完整迁移而不是快速通道。
+CURRENT_SCHEMA_REV = 30
 
 _SCHEMA_REV_KEY = "schema_rev"
 

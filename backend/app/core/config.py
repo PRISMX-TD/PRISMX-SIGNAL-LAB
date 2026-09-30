@@ -398,6 +398,22 @@ class Settings(BaseSettings):
     # isn't enough, long enough to switch from phone to desktop and click it.
     PASSWORD_RESET_TTL_MINUTES: int = 30
 
+    # 群发邮件里退订链接指向的 API 地址（退订页由后端直接出 HTML，不经过前端）。
+    # The API origin used for unsubscribe links in broadcasts; the unsubscribe
+    # page is plain HTML served by the backend, not a frontend route.
+    PUBLIC_API_URL: str = "https://api.prismxsignallab.com"
+
+    # 群发每天（UTC 日）最多发多少封；0 = 不限。到了上限当天暂停、第二天自动接着发。
+    # 默认 80 是照 Resend 免费版「每天 100 封」留出 20 封给找回密码——群发把额度
+    # 用光的那天，忘了密码的人就收不到重置邮件。升级套餐后在 .env 里调大。
+    # Daily (UTC) cap on broadcast sends; 0 = unlimited. Hitting it pauses until the
+    # next day. 80 leaves 20 of Resend's free 100/day for password resets —
+    # raise it in .env after upgrading the plan.
+    BROADCAST_EMAIL_DAILY_CAP: int = 80
+    # 两封群发之间的间隔（秒）。Resend 默认限速每秒 2 次请求，0.6 秒留一点余量。
+    # Gap between two broadcast sends; Resend's default limit is 2 req/s.
+    BROADCAST_EMAIL_INTERVAL_SECONDS: float = 0.6
+
     # 跨域 / CORS（本地开发 + 生产前端域名 / local dev + production frontend origins）
     CORS_ORIGINS: list[str] = [
         "http://localhost:5173",

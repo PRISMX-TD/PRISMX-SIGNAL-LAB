@@ -436,7 +436,7 @@ def test_rev29_adds_signal_indexes_and_drops_duplicate_candle_index(rev28_engine
 
     import app.core.database as db_mod
 
-    assert db_mod.CURRENT_SCHEMA_REV == 29
+    assert db_mod.CURRENT_SCHEMA_REV >= 29
     db_mod._migrate_columns()
 
     sig = {i["name"]: i["column_names"] for i in inspect(rev28_engine).get_indexes("signals")}
@@ -444,12 +444,12 @@ def test_rev29_adds_signal_indexes_and_drops_duplicate_candle_index(rev28_engine
     assert sig["idx_signals_source_created"] == ["source", "created_at"]
     candle = {i["name"] for i in inspect(rev28_engine).get_indexes("candles")}
     assert "idx_candle_symbol_interval_t" not in candle
-    assert db_mod._read_schema_rev() == 29
+    assert db_mod._read_schema_rev() == db_mod.CURRENT_SCHEMA_REV
 
     # 强制重跑：幂等 / forced re-run stays idempotent
     db_mod._write_schema_rev(28)
     db_mod._migrate_columns()
-    assert db_mod._read_schema_rev() == 29
+    assert db_mod._read_schema_rev() == db_mod.CURRENT_SCHEMA_REV
 
 
 def test_rev29_candle_drop_failure_does_not_abort_startup(rev28_engine, monkeypatch):

@@ -19,13 +19,14 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, site, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, sentiment, signals, site, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
 from app.services.gamification.loop import board_loop, competition_loop, gamification_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
+from app.services.email_broadcast import email_broadcast_loop
 from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
@@ -222,6 +223,8 @@ async def lifespan(app: FastAPI):
         "sentiment": sentiment_loop,
         # 会员到期自动降级 / membership expiry downgrade
         "plan_expiry": plan_expiry_sweep_loop,
+        # 管理后台群发邮件：逐封发送、限速、每日上限 / admin email broadcasts
+        "email_broadcast": email_broadcast_loop,
         # 游戏化每小时循环（startup_delay 25s，与 K 线 30s 错开）/ gamification hourly pass
         "gamification": gamification_loop,
         # 比赛榜快循环（60 秒）/ fast competition-board loop
@@ -413,6 +416,8 @@ app.include_router(competitions.router, prefix=settings.API_PREFIX)
 app.include_router(competitions.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(announcements.router, prefix=settings.API_PREFIX)
 app.include_router(announcements.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
+app.include_router(emails.router, prefix=settings.API_PREFIX)
+app.include_router(emails.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 
