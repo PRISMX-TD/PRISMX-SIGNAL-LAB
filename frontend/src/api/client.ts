@@ -1,7 +1,7 @@
 // REST 客户端封装 / REST client wrapper
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
-import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPreview, EmailStatus } from './types'
+import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 import { API_BASE, API_CANDIDATES, reportApiFailure } from './apiBase'
@@ -1189,6 +1189,15 @@ function statsRangeQs(range: StatsRangeQuery): string {
   return `?${qs.toString()}`
 }
 
+function pickerQs(query: EmailPickerQuery, extra: Record<string, string>): string {
+  const qs = new URLSearchParams(extra)
+  if (query.q.trim()) qs.set('q', query.q.trim())
+  if (query.plan !== 'all') qs.set('plan', query.plan)
+  if (query.activeWithinDays) qs.set('activeWithinDays', String(query.activeWithinDays))
+  if (query.inactiveForDays) qs.set('inactiveForDays', String(query.inactiveForDays))
+  return qs.toString()
+}
+
 // 管理后台 / Admin
 export const adminApi = {
   // 群发邮件。「发送」只把名单入队就返回，真正发信在后台循环里，进度靠 listEmails 轮询。
@@ -1196,6 +1205,17 @@ export const adminApi = {
   emailStatus: () => request<EmailStatus>('/admin/emails/status'),
   emailAudience: (kind: EmailKind, audience: EmailAudienceInput, signal?: AbortSignal) =>
     request<EmailAudienceSummary>('/admin/emails/audience', { method: 'POST', body: JSON.stringify({ kind, audience }), signal }),
+  // 选人列表：分页带详情；selectAll 只回按邮件类型真正收得到的人（最多 2000）
+  // Picker: paged with details; selectAll returns only reachable people (max 2000)
+  emailPickerUsers: (query: EmailPickerQuery, limit: number, offset: number, signal?: AbortSignal) =>
+    request<{ users: EmailPickerUser[]; total: number; limit: number; offset: number }>(
+      `/admin/emails/users?${pickerQs(query, { limit: String(limit), offset: String(offset), sort: query.sort })}`,
+      { signal },
+    ),
+  emailPickerSelectAll: (kind: EmailKind, query: EmailPickerQuery) =>
+    request<{ users: Array<{ id: string; email: string }>; truncated: boolean }>(
+      `/admin/emails/users/all?${pickerQs(query, { kind })}`,
+    ),
   emailPreview: (content: EmailContentInput, signal?: AbortSignal) =>
     request<EmailPreview>('/admin/emails/preview', { method: 'POST', body: JSON.stringify(content), signal }),
   sendTestEmail: (content: EmailContentInput) =>

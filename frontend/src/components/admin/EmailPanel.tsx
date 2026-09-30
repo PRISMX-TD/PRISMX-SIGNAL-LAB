@@ -16,6 +16,7 @@ import { fmtTime, localizeApiError } from '../../api/utils'
 import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
+import EmailRecipientPicker, { type Picked } from './EmailRecipientPicker'
 import type {
   EmailAudienceInput,
   EmailAudiencePlan,
@@ -72,7 +73,14 @@ export default function EmailPanel({
   const [mode, setMode] = useState<'filter' | 'list'>(presetUserIds?.length ? 'list' : 'filter')
   const [plan, setPlan] = useState<EmailAudiencePlan>('all')
   const [activity, setActivity] = useState<Activity>('')
-  const [userIds, setUserIds] = useState<string[]>(presetUserIds ?? [])
+  // 「指定用户」勾选的人：id → 邮箱（用户管理带来的只有 id）/ picked users: id → email
+  const [picked, setPicked] = useState<Picked>(() => Object.fromEntries((presetUserIds ?? []).map((id) => [id, ''])))
+  const userIds = useMemo(() => Object.keys(picked), [picked])
+  // 从用户管理带来的那批被清空之后，别在下次进页签时又带回来
+  // once the carried-over batch is emptied, don't bring it back on the next visit
+  useEffect(() => {
+    if (userIds.length === 0 && presetUserIds?.length) onPresetCleared?.()
+  }, [userIds.length])
   const [emailsText, setEmailsText] = useState('')
   const [summary, setSummary] = useState<EmailAudienceSummary | null>(null)
   const [summaryErr, setSummaryErr] = useState(false)
@@ -186,6 +194,11 @@ export default function EmailPanel({
       showToast('ok', t('admin.email.queued', { n: c.total }))
       setConfirmSend(false)
       setContent(EMPTY_CONTENT)
+      // 名单也清掉：同一批人紧接着再点一次「发送」多半是误操作
+      // clear the list too: sending to the same people again right away is usually a slip
+      setPicked({})
+      setEmailsText('')
+      onPresetCleared?.()
       setCampaigns((prev) => [c, ...(prev ?? [])])
       refresh()
     } catch (err) {
@@ -245,7 +258,7 @@ export default function EmailPanel({
     <label className="block">
       <span className="mb-1 block text-xs text-neutral-400">{label}</span>
       <textarea
-        className="input min-h-[160px] w-full py-2 text-sm leading-relaxed"
+        className="input min-h-[160px] w-full rounded-xl py-2 text-sm leading-relaxed"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         maxLength={20000}
@@ -384,30 +397,27 @@ export default function EmailPanel({
           </div>
         ) : (
           <div className="space-y-3">
-            {userIds.length > 0 && (
-              <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-300">
-                {t('admin.email.presetUsers', { n: userIds.length })}
-                <button
-                  type="button"
-                  className="btn-ghost px-3 py-1 text-xs"
-                  onClick={() => {
-                    setUserIds([])
-                    onPresetCleared?.()
-                  }}
-                >
-                  {t('admin.bulkClear')}
-                </button>
-              </div>
-            )}
-            <label className="block">
-              <span className="mb-1 block text-xs text-neutral-400">{t('admin.email.pasteEmails')}</span>
-              <textarea
-                className="input min-h-[80px] w-full py-2 text-sm"
-                value={emailsText}
-                onChange={(e) => setEmailsText(e.target.value)}
-                placeholder="a@example.com, b@example.com"
-              />
-            </label>
+            <EmailRecipientPicker
+              kind={content.kind}
+              picked={picked}
+              onChange={setPicked}
+              onError={(text) => showToast('err', text)}
+            />
+            {/* 粘贴邮箱留作补充：手里已经有一份名单时比逐个勾快 / pasting stays as a shortcut for a ready-made list */}
+            <details className="group" open={!!emailsText}>
+              <summary className="cursor-pointer select-none text-xs text-neutral-400 hover:text-neutral-200">
+                {t('admin.email.pasteToggle')}
+              </summary>
+              <label className="mt-2 block">
+                <span className="mb-1 block text-xs text-neutral-400">{t('admin.email.pasteEmails')}</span>
+                <textarea
+                  className="input min-h-[80px] w-full rounded-xl py-2 text-sm"
+                  value={emailsText}
+                  onChange={(e) => setEmailsText(e.target.value)}
+                  placeholder="a@example.com, b@example.com"
+                />
+              </label>
+            </details>
           </div>
         )}
 

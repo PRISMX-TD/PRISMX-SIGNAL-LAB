@@ -1550,7 +1550,6 @@
         "inactive30": "超过 30 天未活跃",
         "inactive90": "超过 90 天未活跃"
       },
-      "presetUsers": "已从用户管理带入 {{n}} 位用户",
       "pasteEmails": "粘贴邮箱（逗号、空格或换行分隔；只会发给已注册的用户）",
       "pickSomeone": "请至少选择一位收件人。",
       "willReceive": "将发送给 {{n}} 人",
@@ -1575,7 +1574,25 @@
       "cancel": "取消发送",
       "keepSending": "不取消",
       "cancelTitle": "取消这次群发？",
-      "cancelBody": "还没发出的 {{n}} 封将不再发送。已经发出去的收不回来。"
+      "cancelBody": "还没发出的 {{n}} 封将不再发送。已经发出去的收不回来。",
+      "pickerSearch": "搜索邮箱、昵称或手机号",
+      "sort": "排序",
+      "sortCreated": "按注册时间",
+      "sortActive": "按最近活跃",
+      "pickedCount": "已选 {{n}} 人",
+      "pickedFromUsers": "从用户管理带入",
+      "pickedMore": "…还有 {{n}} 人",
+      "pickAllResults": "选中全部 {{n}} 个结果",
+      "pickClear": "清空已选",
+      "pickPage": "选中 / 取消本页",
+      "pickMax": "一次最多指定 {{n}} 人，更多请改用「按条件筛选」。",
+      "colUser": "用户",
+      "colRegistered": "注册时间",
+      "planTrialShort": "PRO 试用",
+      "expires": "{{date}} 到期",
+      "optedOut": "已退订",
+      "optedOutHint": "已退订推广邮件：推广邮件不会发给他，服务通知仍会",
+      "pasteToggle": "或者直接粘贴邮箱名单"
     }
   },
   "simulator": {

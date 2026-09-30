@@ -2061,6 +2061,32 @@ export interface EmailCampaign {
   skipped: number
 }
 
+// 「指定用户」选人列表的一行；disabled / optedOut 决定能不能勾
+// One row of the "specific users" picker; disabled / optedOut decide selectability
+export interface EmailPickerUser {
+  id: string
+  email: string
+  nickname: string | null
+  phone: string | null
+  plan: UserPlan
+  planIsTrial: boolean
+  planExpiresAt: string | null
+  createdAt: string | null
+  lastActiveAt: string | null
+  mt5AccountCount: number
+  inviteCode: string | null
+  disabled: boolean
+  optedOut: boolean
+}
+
+export interface EmailPickerQuery {
+  q: string
+  plan: EmailAudiencePlan
+  activeWithinDays: number | null
+  inactiveForDays: number | null
+  sort: 'created' | 'active'
+}
+
 export interface EmailStatus {
   configured: boolean
   fromAddress: string

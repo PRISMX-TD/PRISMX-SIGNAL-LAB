@@ -1552,7 +1552,6 @@
         "inactive30": "Inactive for 30+ days",
         "inactive90": "Inactive for 90+ days"
       },
-      "presetUsers": "{{n}} users carried over from Users",
       "pasteEmails": "Paste addresses (comma, space or newline separated; only registered users receive it)",
       "pickSomeone": "Pick at least one recipient.",
       "willReceive": "{{n}} recipients",
@@ -1577,7 +1576,25 @@
       "cancel": "Cancel",
       "keepSending": "Keep sending",
       "cancelTitle": "Cancel this broadcast?",
-      "cancelBody": "The {{n}} emails not yet sent will be dropped. Emails already sent cannot be recalled."
+      "cancelBody": "The {{n}} emails not yet sent will be dropped. Emails already sent cannot be recalled.",
+      "pickerSearch": "Search email, nickname or phone",
+      "sort": "Sort",
+      "sortCreated": "Newest sign-ups",
+      "sortActive": "Recently active",
+      "pickedCount": "{{n}} selected",
+      "pickedFromUsers": "From Users tab",
+      "pickedMore": "…and {{n}} more",
+      "pickAllResults": "Select all {{n}} results",
+      "pickClear": "Clear selection",
+      "pickPage": "Select / unselect this page",
+      "pickMax": "Up to {{n}} people per list; use Filter for more.",
+      "colUser": "User",
+      "colRegistered": "Signed up",
+      "planTrialShort": "PRO trial",
+      "expires": "Expires {{date}}",
+      "optedOut": "Unsubscribed",
+      "optedOutHint": "Unsubscribed from marketing: marketing mail skips them, service notices still reach them",
+      "pasteToggle": "Or paste a list of addresses"
     }
   },
   "simulator": {
