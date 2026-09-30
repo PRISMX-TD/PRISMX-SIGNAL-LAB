@@ -23,6 +23,7 @@ import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
+import EmailPanel from '../components/admin/EmailPanel'
 import type { AdminUser, InviteLink, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -87,8 +88,10 @@ const DEFAULT_PAGE_SIZE = 20
 // winrate sits right after data: both are "look at numbers", but the
 // strategy x session matrix has its own range picker and a wide table, and
 // folding it into data would bury the operating metrics and page stats.
-type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'tickets' | 'gamification' | 'competitions'
-const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'tickets', 'gamification', 'competitions']
+// email 紧跟 announcements：两者都是「对用户说话」，公告在站内，邮件在站外。
+// email sits next to announcements: both talk to users, one in-app, one by mail.
+type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'gamification' | 'competitions'
+const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'gamification', 'competitions']
 
 interface Draft {
   role: UserRole
@@ -449,6 +452,9 @@ export default function AdminPage() {
   // 批量选择与批量修改：勾选后统一改角色/等级，空字符串代表"不修改该字段"
   // bulk selection & bulk edit: '' means "leave this field unchanged"
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  // 批量条上「发邮件」带到邮件页签的那批用户；邮件面板挂载时读一次。
+  // Users handed to the email tab by the bulk bar's "email" button; read once on mount.
+  const [emailPreset, setEmailPreset] = useState<string[]>([])
   const [bulkRole, setBulkRole] = useState('')
   const [bulkPlan, setBulkPlan] = useState('')
   // 到期时间需要单独一个"是否要改"开关：日期本身留空是合法值（永不到期），
@@ -850,6 +856,8 @@ export default function AdminPage() {
 
       {tab === 'announcements' && <AnnouncementsPanel />}
 
+      {tab === 'email' && <EmailPanel presetUserIds={emailPreset} onPresetCleared={() => setEmailPreset([])} />}
+
       {/* 传已保存值、不传 trial 表单草稿：见上面 savedTrialEnabled 的定义与注释。
           Pass the persisted value, not the trial form draft — see
           savedTrialEnabled's definition and comment above. */}
@@ -961,6 +969,15 @@ export default function AdminPage() {
             onClick={() => setBulkConfirm(true)}
           >
             {bulkSaving ? t('common.loading') : t('admin.bulkApply')}
+          </button>
+          <button
+            className="btn-ghost px-4 py-1.5 text-xs"
+            onClick={() => {
+              setEmailPreset(Array.from(selectedIds))
+              setTab('email')
+            }}
+          >
+            {t('admin.bulkEmail')}
           </button>
           <button className="btn-ghost px-4 py-1.5 text-xs" onClick={() => setSelectedIds(new Set())}>
             {t('admin.bulkClear')}

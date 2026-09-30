@@ -1996,3 +1996,74 @@ export interface CompetitionSettleResult {
   badges: Array<{ userId: string; badgeId: string }>
   badgeErrors: Array<{ userId: string; badgeId: string; error: string }>
 }
+
+// ---- 管理后台群发邮件 / admin email broadcast ----
+// marketing：推广，带退订、已退订的人收不到；notice：服务通知，不看退订。
+// marketing honours opt-outs and carries an unsubscribe link; notice ignores opt-outs.
+export type EmailKind = 'marketing' | 'notice'
+
+export interface EmailContentInput {
+  kind: EmailKind
+  subjectZh: string
+  bodyZh: string
+  subjectEn: string
+  bodyEn: string
+}
+
+export type EmailAudiencePlan = 'all' | 'FREE' | 'PRO' | 'TRIAL' | 'PAID'
+
+export interface EmailAudienceInput {
+  mode: 'filter' | 'list'
+  plan: EmailAudiencePlan
+  activeWithinDays: number | null
+  inactiveForDays: number | null
+  userIds: string[]
+  emails: string[]
+}
+
+export interface EmailAudienceSummary {
+  count: number
+  excludedDisabled: number
+  excludedOptedOut: number
+  unmatchedEmails: number
+  sample: string[]
+}
+
+export interface EmailPreview {
+  subject: string
+  html: string
+  text: string
+}
+
+export type EmailCampaignStatus = 'sending' | 'paused' | 'done' | 'cancelled'
+
+export interface EmailCampaign {
+  id: string
+  kind: EmailKind
+  subject: string
+  status: EmailCampaignStatus
+  lastError: string | null
+  createdAt: string | null
+  finishedAt: string | null
+  createdByEmail: string | null
+  // 发起时的筛选条件快照；list 模式只有 listSize / filter snapshot at creation
+  audience: {
+    mode: 'filter' | 'list'
+    plan?: EmailAudiencePlan
+    activeWithinDays?: number | null
+    inactiveForDays?: number | null
+    listSize?: number
+  } | null
+  total: number
+  pending: number
+  sent: number
+  failed: number
+  skipped: number
+}
+
+export interface EmailStatus {
+  configured: boolean
+  fromAddress: string
+  dailyCap: number
+  sentToday: number
+}

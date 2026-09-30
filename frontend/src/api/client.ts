@@ -1,6 +1,7 @@
 // REST 客户端封装 / REST client wrapper
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
+import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPreview, EmailStatus } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 import { API_BASE, API_CANDIDATES, reportApiFailure } from './apiBase'
@@ -1190,6 +1191,22 @@ function statsRangeQs(range: StatsRangeQuery): string {
 
 // 管理后台 / Admin
 export const adminApi = {
+  // 群发邮件。「发送」只把名单入队就返回，真正发信在后台循环里，进度靠 listEmails 轮询。
+  // Broadcasts: sending only enqueues; the background loop delivers, poll listEmails for progress.
+  emailStatus: () => request<EmailStatus>('/admin/emails/status'),
+  emailAudience: (kind: EmailKind, audience: EmailAudienceInput, signal?: AbortSignal) =>
+    request<EmailAudienceSummary>('/admin/emails/audience', { method: 'POST', body: JSON.stringify({ kind, audience }), signal }),
+  emailPreview: (content: EmailContentInput, signal?: AbortSignal) =>
+    request<EmailPreview>('/admin/emails/preview', { method: 'POST', body: JSON.stringify(content), signal }),
+  sendTestEmail: (content: EmailContentInput) =>
+    request<{ ok: boolean; to: string }>('/admin/emails/test', { method: 'POST', body: JSON.stringify(content) }),
+  createEmailCampaign: (content: EmailContentInput, audience: EmailAudienceInput) =>
+    request<EmailCampaign>('/admin/emails', { method: 'POST', body: JSON.stringify({ content, audience }) }),
+  listEmails: () => request<{ campaigns: EmailCampaign[] }>('/admin/emails'),
+  cancelEmailCampaign: (id: string) =>
+    request<EmailCampaign>(`/admin/emails/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+  resumeEmailCampaign: (id: string) =>
+    request<EmailCampaign>(`/admin/emails/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
   listAnnouncements: () => request<AnnouncementList>('/admin/announcements'),
   createAnnouncement: (payload: AnnouncementInput) =>
     request<Announcement>('/admin/announcements', { method: 'POST', body: JSON.stringify(payload) }),
