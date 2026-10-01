@@ -252,6 +252,12 @@ class Settings(BaseSettings):
     # Competition registration: a write endpoint, same order of magnitude as
     # the other write endpoints (strategy/password).
     RATE_LIMIT_COMPETITION: str = "30/minute"
+    # 工单图片上传：按用户。任何注册用户都能调这个端点往存储桶里写文件，日上限是为了
+    # 别让一个账号把桶当网盘；正常提工单一天传不到十几张。
+    # Ticket image uploads, per user. Any registered user can write to the bucket
+    # through this endpoint; the daily cap keeps one account from treating it as free
+    # file storage. Real tickets need a dozen images a day at most.
+    RATE_LIMIT_TICKET_UPLOAD: str = "10/minute;60/day"
     # 单次回测的成本上限：bars 数 × 规则条件数。纯速率限制无法阻止"一次请求就
     # 占满 CPU 很久"，这一层直接把单次请求的工作量封顶。默认 60000 = 5000 根 ×
     # 12 条，恰好容纳滥用上限下的最坏合法情况。
@@ -684,6 +690,22 @@ class Settings(BaseSettings):
     # originals, and the backend buffers the whole file in memory before
     # forwarding — a high cap would let concurrent uploads eat RAM.
     UPLOAD_MAX_BYTES: int = 4 * 1024 * 1024
+    # 工单图片的存储桶：**私有**桶，与上面的公开插图桶分开。用户截图里常有账号、余额、
+    # 付款凭证，公开桶靠「URL 猜不到」挡人不够——链接一旦外流谁都能打开。私有桶里的图
+    # 只能凭后端签发、会过期的签名链接看，而签名只发给工单本人和管理员。
+    # 桶不存在时后端第一次上传会自动建（private），不用去控制台手动建。
+    # Bucket for ticket images: **private**, separate from the public illustration
+    # bucket above. User screenshots often show account numbers, balances and payment
+    # receipts, and "the URL can't be guessed" is not enough once a link leaks. Images
+    # here are viewable only through expiring signed URLs the backend issues to the
+    # ticket owner and admins. The backend creates the bucket (private) on first upload.
+    TICKET_IMAGE_BUCKET: str = "ticket-images"
+    # 签名链接有效期（秒）。进程内缓存到剩一半时长再重签，所以发出去的链接至少还有
+    # 一半寿命——够把一条工单从头看到尾，又不会让外流的链接长期可用。
+    # Signed URL lifetime in seconds. URLs are cached per process until half of it is
+    # left, so any URL handed out still has at least half its life — enough to read a
+    # thread end to end without a leaked link staying usable for long.
+    TICKET_IMAGE_URL_TTL_SECONDS: int = 6 * 3600
 
     # ---- 公告一键翻译 / Announcement one-click translation ----
     # 只给管理员后台用：把中文公告译成英文（或反向）。TRANSLATE_PROVIDER 是逗号分隔

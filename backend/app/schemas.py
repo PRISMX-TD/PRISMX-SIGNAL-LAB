@@ -1656,17 +1656,40 @@ class CloseAllOut(BaseModel):
 
 # ---------- 工单系统 / Ticket System ----------
 
-class TicketCreate(BaseModel):
+class _TicketMessage(BaseModel):
+    """一条工单消息的正文 + 附图：两者至少有一样（只发一张截图也是一条完整的消息）。
+    images 是 POST /tickets/upload-image 返回的对象键，属主校验在路由里做（要知道作者是谁）。
+    A ticket message's text plus images; at least one of the two (a lone screenshot is a
+    complete message). images are keys returned by POST /tickets/upload-image; the
+    ownership check lives in the router, which knows the author.
+    每条最多 6 张，前端 TicketImages.tsx 的 MAX_TICKET_IMAGES 与此一致。
+    Up to 6 per message, mirrored by MAX_TICKET_IMAGES in the frontend's TicketImages.tsx."""
+    body: str = Field(default="", max_length=5000)
+    images: list[str] = Field(default_factory=list, max_length=6)
+
+    @field_validator("images")
+    @classmethod
+    def _images_shape(cls, v: list[str]) -> list[str]:
+        if any(len(k) > 200 for k in v):
+            raise ValueError("图片键过长 / image key too long")
+        return list(dict.fromkeys(v))
+
+    @model_validator(mode="after")
+    def _needs_content(self):
+        if not self.body.strip() and not self.images:
+            raise ValueError("请填写内容或添加图片 / write something or attach an image")
+        return self
+
+
+class TicketCreate(_TicketMessage):
     """用户提交新工单 / submit a new ticket."""
     title: str = Field(min_length=1, max_length=200)
     category: Literal["account", "payment", "technical", "feature"]
     priority: Literal["low", "normal", "urgent"] = "normal"
-    body: str = Field(min_length=1, max_length=5000)
 
 
-class TicketReplyCreate(BaseModel):
+class TicketReplyCreate(_TicketMessage):
     """追加回复 / add a reply."""
-    body: str = Field(min_length=1, max_length=5000)
     reopen: bool = False  # closed 工单重开 / reopen a closed ticket
 
 
@@ -1677,6 +1700,11 @@ class TicketReplyOut(BaseModel):
     authorEmail: str
     authorRole: str  # "user" | "admin"
     body: str
+    # 附图的签名 URL（会过期，别存）。列表预览不签，只给 imageCount。
+    # Signed image URLs (they expire; don't persist). List previews skip signing and
+    # carry only imageCount.
+    images: list[str] = []
+    imageCount: int = 0
     createdAt: datetime
 
 

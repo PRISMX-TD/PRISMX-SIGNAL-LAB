@@ -13,13 +13,18 @@ transaction as the write that produced them: a tray push can simply not happen
 (no subscription, blocked network, no keys), which leaves the bell entry as the
 one trace guaranteed to survive.
 """
+import json
 import logging
+import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.orm import Session, selectinload
+from starlette.concurrency import run_in_threadpool
 
+from app.core.config import settings
 from app.core.database import get_db
+from app.core.strategy_limits import user_limiter
 from app.models import Ticket, TicketReply, User
 from app.schemas import (
     AdminTicketReplyCreate,
@@ -30,7 +35,13 @@ from app.schemas import (
     TicketReplyCreate,
     TicketReplyOut,
 )
-from app.services.deps import get_current_user, require_admin
+from app.services.deps import get_current_user, get_current_user_id_light, require_admin
+from app.services.image_upload import (
+    UploadError,
+    is_private_configured,
+    signed_image_urls,
+    upload_private_image,
+)
 from app.services.notification_feed import (
     KIND_TICKET_NEW,
     KIND_TICKET_REPLY,
@@ -71,20 +82,57 @@ def _author_email(author: User, viewer_is_admin: bool) -> str:
     return author.email
 
 
-def _reply_out(r: TicketReply, viewer_is_admin: bool) -> TicketReplyOut:
+# 附图对象键只认 upload_private_image 产出的形状：<作者 id>/<32 位 hex>.<扩展名>，可带尺寸片段。
+# 于是消息里塞不进外链（追踪像素会把看工单的管理员的 IP 送出去），也引用不了别人目录下的图——
+# 目录名必须等于这条消息的作者。
+# Image keys must have exactly the shape upload_private_image produces: <author id>/<32 hex>.<ext>,
+# optional size fragment. So no external URL can be smuggled in (a tracking pixel would leak the
+# viewing admin's IP), and no one else's upload can be referenced — the folder must be the author.
+_IMAGE_KEY_RE = re.compile(r"^(?P<owner>[^/#]{1,64})/[0-9a-f]{32}\.(?:png|jpg|gif|webp)(?:#w=\d{1,5}&h=\d{1,5})?$")
+
+
+def _checked_images(keys: list[str], author_id: str) -> str | None:
+    """校验附图键并序列化成写库的 JSON；不合规回 400，没有图回 None。
+    Validate image keys and serialise them for storage; 400 when invalid, None when empty."""
+    for key in keys:
+        m = _IMAGE_KEY_RE.match(key)
+        if not m or m.group("owner") != author_id:
+            raise HTTPException(status_code=400, detail="图片无效，请重新上传 / Invalid image, please upload it again")
+    return json.dumps(keys) if keys else None
+
+
+def _image_keys(r: TicketReply) -> list[str]:
+    if not r.images:
+        return []
+    try:
+        keys = json.loads(r.images)
+    except ValueError:
+        return []
+    return [k for k in keys if isinstance(k, str)] if isinstance(keys, list) else []
+
+
+def _reply_out(r: TicketReply, viewer_is_admin: bool, urls: dict[str, str] | None = None) -> TicketReplyOut:
+    """urls 为 None 时不给图（列表预览），只给张数；签不出来的图同样只计数，前端显示占位。
+    With urls None (list previews) only the count is given; images that couldn't be signed
+    are likewise only counted and the UI shows a placeholder."""
+    keys = _image_keys(r)
     return TicketReplyOut(
         id=r.id,
         authorId=r.author_id,
         authorEmail=_author_email(r.author, viewer_is_admin),
         authorRole=r.author.role,
         body=r.body,
+        images=[urls[k] for k in keys if k in urls] if urls else [],
+        imageCount=len(keys),
         createdAt=r.created_at,
     )
 
 
 def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: bool) -> TicketOut:
-    """把 ORM 对象转成 TicketOut / convert ORM objects to TicketOut."""
+    """把 ORM 对象转成 TicketOut；整条工单的附图一次签完。
+    Convert ORM objects to TicketOut, signing the whole thread's images in one call."""
     user: User = ticket.user  # relationship backref
+    urls = signed_image_urls([k for r in replies for k in _image_keys(r)])
     return TicketOut(
         id=ticket.id,
         userId=ticket.user_id,
@@ -95,7 +143,7 @@ def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: boo
         status=ticket.status,
         createdAt=ticket.created_at,
         updatedAt=ticket.updated_at,
-        replies=[_reply_out(r, viewer_is_admin) for r in replies],
+        replies=[_reply_out(r, viewer_is_admin, urls) for r in replies],
     )
 
 
@@ -184,6 +232,46 @@ def _latest_reply(ticket: Ticket, viewer_is_admin: bool) -> TicketReplyOut | Non
 
 # ---- 用户端 / user endpoints ----
 
+@router.post("/upload-image", response_model=dict)
+@user_limiter.limit(settings.RATE_LIMIT_TICKET_UPLOAD)
+async def upload_ticket_image(
+    request: Request,
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id_light),
+):
+    """上传一张工单截图，返回对象键（发消息时放进 images）。用户与管理员共用。
+
+    鉴权走只读缓存的轻量依赖：get_current_user 会拿一个数据库连接并一直占到响应结束，
+    而上传要等文件推到 Supabase，慢网下几十秒——为一张截图占住连接池里的一个连接不值得。
+    两道大小判断的道理同 admin.upload_admin_image（声明值只配快速拒绝，读到的字节数才算数）。
+
+    Upload one ticket screenshot and return its object key (sent back in `images`). Shared by
+    users and admins. Auth uses the cache-only dependency: get_current_user checks out a DB
+    connection and holds it until the response, and an upload waits on Supabase for up to tens
+    of seconds on a slow link — not worth a pooled connection per screenshot. The two size
+    checks follow admin.upload_admin_image (declared size for fast rejection only).
+    """
+    if not is_private_configured():
+        raise HTTPException(status_code=503, detail="后台未配置图片存储 / Image storage isn't configured")
+    declared = file.size
+    if declared is None:
+        try:
+            declared = int(request.headers.get("content-length") or 0) or None
+        except ValueError:
+            declared = None
+    if declared is not None and declared > settings.UPLOAD_MAX_BYTES:
+        mb = settings.UPLOAD_MAX_BYTES / (1024 * 1024)
+        raise HTTPException(status_code=413, detail=f"图片超过 {mb:.0f}MB 上限 / the image exceeds the {mb:.0f}MB limit")
+    data = await file.read()
+    try:
+        # 同步 httpx 挪进线程池，别卡事件循环（见 admin.upload_admin_image 的说明）
+        # The sync httpx call goes to the threadpool, off the event loop (see admin.upload_admin_image)
+        key = await run_in_threadpool(upload_private_image, data, user_id)
+    except UploadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"key": key}
+
+
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
 def create_ticket(
     body: TicketCreate,
@@ -192,6 +280,7 @@ def create_ticket(
 ):
     """提交新工单。同时写入 tickets 和第一条 ticket_replies。
     Submit a new ticket; writes the ticket and its first reply in one step."""
+    images = _checked_images(body.images, user.id)
     ticket = Ticket(
         user_id=user.id,
         title=body.title.strip(),
@@ -205,6 +294,7 @@ def create_ticket(
         ticket_id=ticket.id,
         author_id=user.id,
         body=body.body.strip(),
+        images=images,
     )
     db.add(reply)
     admin_ids = _notify_admins_new_ticket(db, ticket, user)
@@ -288,6 +378,7 @@ def reply_to_ticket(
     # endpoint exactly what the other just stopped leaking.
     if not ticket or ticket.user_id != user.id:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
+    images = _checked_images(body.images, user.id)
     if ticket.status == "closed" and not body.reopen:
         raise HTTPException(
             status_code=400,
@@ -299,6 +390,7 @@ def reply_to_ticket(
         ticket_id=ticket.id,
         author_id=user.id,
         body=body.body.strip(),
+        images=images,
     )
     db.add(reply)
     # updated_at 无条件更新，不再只在 reopen 时更新：两端的列表都按它倒序排，
@@ -397,6 +489,7 @@ def admin_reply_to_ticket(
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
+    images = _checked_images(body.images, admin.id)
     if body.status:
         ticket.status = body.status
     if body.priority:
@@ -406,6 +499,7 @@ def admin_reply_to_ticket(
         ticket_id=ticket.id,
         author_id=admin.id,
         body=body.body.strip(),
+        images=images,
     )
     db.add(reply)
     # 站内通知与这次回复同一个事务：系统通知栏那条（下面的 dispatch_ticket_reply）

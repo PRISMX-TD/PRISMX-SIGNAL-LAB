@@ -1,4 +1,7 @@
 """图片上传到 Supabase Storage（仅管理员，经后端代理）。
+工单截图是例外：普通用户也能传，但进的是私有桶、凭签名链接看，见文件末尾。
+Ticket screenshots are the exception: any user may upload them, into a private bucket
+viewed through signed URLs — see the end of this file.
 
 为什么走后端代理而不是前端直传：直传要把能写存储桶的密钥交给浏览器。Supabase
 的 anon key 配合 RLS 理论上可以做直传，但那要额外维护一套存储策略，而这里唯一
@@ -33,6 +36,8 @@ file would amount to running an open file host).
 """
 import logging
 import struct
+import threading
+import time
 import uuid
 
 import httpx
@@ -189,3 +194,207 @@ def upload_image(data: bytes) -> str:
     if size:
         url += f"#w={size[0]}&h={size[1]}"
     return url
+
+
+# ---------- 私有图片（工单截图）/ private images (ticket screenshots) ----------
+# 与上面的公开插图分开存：工单截图常带账号、余额、付款凭证，放进公开桶就只剩「URL 猜不到」
+# 一道防线，链接一外流（转发、截图里带出地址栏）谁都能打开。私有桶里的对象没有公开地址，
+# 只能凭后端签发、会过期的签名链接看，而签名只在工单接口里发给本人和管理员。
+# 库里存的是对象键（不是 URL）：签名会过期，存 URL 等于存一个注定失效的东西。
+# Kept apart from the public illustrations above: ticket screenshots often show account
+# numbers, balances and payment receipts, and in a public bucket "the URL can't be guessed"
+# would be the only defence once a link leaks. Private objects have no public address and
+# are viewable only through expiring signed URLs, which the ticket endpoints issue to the
+# owner and admins. The database stores object keys, not URLs — a stored signed URL would
+# be a thing guaranteed to expire.
+
+_ALLOWED_MIME = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+# 签名缓存：对象路径 → (签名 URL, 过期的 monotonic 时刻)。每个 worker 各一份，丢了只是多签一次。
+# Signature cache: object path -> (signed URL, monotonic expiry). Per worker; losing it costs a re-sign.
+_sign_lock = threading.Lock()
+_sign_cache: dict[str, tuple[str, float]] = {}
+_SIGN_CACHE_MAX = 5000
+
+
+def is_private_configured() -> bool:
+    """私有图片只要 Supabase 地址、密钥和工单桶名 / private images need the URL, key and ticket bucket."""
+    return bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY and settings.TICKET_IMAGE_BUCKET)
+
+
+def _auth_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}"}
+
+
+def _bucket_missing(resp: httpx.Response) -> bool:
+    # storage-api 对不存在的桶有的版本回 404、有的回 400 + body 里 statusCode "404"，按文案认。
+    # storage-api answers a missing bucket with 404 on some versions and 400 + statusCode
+    # "404" in the body on others, so match on the message.
+    text = resp.text.lower()
+    return "bucket not found" in text or "nosuchbucket" in text
+
+
+def _create_private_bucket(base: str, bucket: str) -> None:
+    """建私有桶；已经存在也算成功。第一次有人传工单图时由后端自己建，不用去控制台。
+    Create the private bucket; "already exists" counts as success. Done by the backend on
+    the first ticket upload, so nobody has to visit the dashboard."""
+    resp = httpx.post(
+        f"{base}/storage/v1/bucket",
+        json={
+            "id": bucket,
+            "name": bucket,
+            "public": False,
+            "file_size_limit": settings.UPLOAD_MAX_BYTES,
+            "allowed_mime_types": _ALLOWED_MIME,
+        },
+        headers=_auth_headers(),
+        timeout=10.0,
+    )
+    if resp.status_code < 400 or resp.status_code == 409 or "already exists" in resp.text.lower():
+        logger.info("ticket image bucket ready: %s", bucket)
+        return
+    logger.warning("creating ticket image bucket failed: %s %s", resp.status_code, resp.text[:300])
+    raise UploadError("存储服务拒绝了上传，请检查存储桶配置 / storage rejected the upload, check the bucket configuration")
+
+
+def upload_private_image(data: bytes, folder: str) -> str:
+    """把一张图传进私有工单桶，返回对象键（`<folder>/<uuid>.<ext>`，读得出尺寸时带 `#w=&h=`）。
+
+    folder 由调用方给（工单用上传者的用户 id），引用时据此校验「只能用自己传的图」。
+    尺寸片段跟着键一起存：签名 URL 每次都是新算的，片段由 signed_image_urls 接回去。
+
+    Upload one image into the private ticket bucket and return its object key
+    (`<folder>/<uuid>.<ext>`, plus `#w=&h=` when the size is readable). The caller picks
+    the folder (tickets use the uploader's user id) and later checks it so a message can
+    only reference its author's own uploads. The size fragment is stored with the key and
+    re-attached to each freshly signed URL by signed_image_urls.
+    """
+    if not is_private_configured():
+        raise UploadError("后台未配置图片存储 / Image storage isn't configured")
+    if not data:
+        raise UploadError("文件为空 / the file is empty")
+    if len(data) > settings.UPLOAD_MAX_BYTES:
+        mb = settings.UPLOAD_MAX_BYTES / (1024 * 1024)
+        raise UploadError(f"图片超过 {mb:.0f}MB 上限 / the image exceeds the {mb:.0f}MB limit")
+
+    ext, content_type = _sniff(data)
+    key = f"{folder}/{uuid.uuid4().hex}.{ext}"
+    base = settings.SUPABASE_URL.rstrip("/")
+    bucket = settings.TICKET_IMAGE_BUCKET
+
+    def _put() -> httpx.Response:
+        return httpx.post(
+            f"{base}/storage/v1/object/{bucket}/{key}",
+            content=data,
+            headers={
+                **_auth_headers(),
+                "Content-Type": content_type,
+                "x-upsert": "false",
+                # 同公开插图：键是随机 UUID、禁止覆盖，内容不会变 / immutable, same as above
+                "Cache-Control": "max-age=31536000, immutable",
+            },
+            timeout=30.0,
+        )
+
+    try:
+        resp = _put()
+        if resp.status_code >= 400 and _bucket_missing(resp):
+            _create_private_bucket(base, bucket)
+            resp = _put()
+    except httpx.HTTPError as exc:
+        logger.warning("supabase storage private upload failed: %s", exc)
+        raise UploadError("上传失败，请稍后重试 / upload failed, please retry") from exc
+
+    if resp.status_code >= 400:
+        logger.warning("supabase storage rejected private upload: %s %s", resp.status_code, resp.text[:300])
+        raise UploadError("存储服务拒绝了上传，请检查存储桶配置 / storage rejected the upload, check the bucket configuration")
+
+    size = _image_size(data, ext)
+    if size:
+        key += f"#w={size[0]}&h={size[1]}"
+    return key
+
+
+def _split_key(key: str) -> tuple[str, str]:
+    """对象键拆成 (路径, '#片段' 或 '') / split a stored key into (path, '#fragment' or '')."""
+    path, sep, frag = key.partition("#")
+    return path, (sep + frag if sep else "")
+
+
+def signed_image_urls(keys: list[str]) -> dict[str, str]:
+    """把一批对象键换成可直接放进 <img src> 的签名 URL（尺寸片段原样接回），一次请求签完。
+
+    签不出来的键（存储没配、Supabase 超时、对象被删）不出现在结果里：调用方照常返回工单，
+    前端把缺的那张显示成「图片暂时无法显示」——看不到图不该连文字回复都看不到。
+    超时只给 5 秒，理由同上：这是打开工单详情的同步路径。
+
+    Exchange a batch of stored keys for signed URLs usable in <img src> (size fragment
+    re-attached), in one request. Keys that can't be signed (storage unconfigured, Supabase
+    timing out, object deleted) are simply absent: the caller still returns the ticket and
+    the UI shows that picture as unavailable — a missing image must not hide the text
+    replies. The 5 s timeout follows from that: this sits on the ticket-detail path.
+    """
+    if not keys or not is_private_configured():
+        return {}
+    ttl = settings.TICKET_IMAGE_URL_TTL_SECONDS
+    now = time.monotonic()
+    out: dict[str, str] = {}
+    pending: list[str] = []
+    with _sign_lock:
+        for key in dict.fromkeys(keys):
+            path, frag = _split_key(key)
+            hit = _sign_cache.get(path)
+            # 剩余寿命不到一半就重签，保证发出去的链接至少还能用 ttl/2
+            # Re-sign below half life, so any URL handed out lasts at least ttl/2
+            if hit and hit[1] - now > ttl / 2:
+                out[key] = hit[0] + frag
+            else:
+                pending.append(key)
+    if not pending:
+        return out
+
+    base = settings.SUPABASE_URL.rstrip("/")
+    bucket = settings.TICKET_IMAGE_BUCKET
+    paths = list(dict.fromkeys(_split_key(k)[0] for k in pending))
+    try:
+        resp = httpx.post(
+            f"{base}/storage/v1/object/sign/{bucket}",
+            json={"expiresIn": ttl, "paths": paths},
+            headers=_auth_headers(),
+            timeout=5.0,
+        )
+        items = resp.json() if resp.status_code < 400 else None
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("signing ticket images failed: %s", exc)
+        return out
+    if not isinstance(items, list):
+        logger.warning("signing ticket images rejected: %s %s", resp.status_code, resp.text[:300])
+        return out
+
+    signed: dict[str, str] = {}
+    for item in items:
+        if not isinstance(item, dict) or item.get("error"):
+            continue
+        rel = item.get("signedURL") or item.get("signedUrl")
+        path = item.get("path")
+        if not rel or not path:
+            continue
+        # storage-api 回的是相对 /storage/v1 的路径（supabase-js 也是这样拼）；万一是绝对地址就原样用
+        # storage-api returns a path relative to /storage/v1 (supabase-js joins it the same way);
+        # an absolute URL is used as is
+        signed[path] = rel if rel.startswith("http") else f"{base}/storage/v1{rel}"
+
+    expires = time.monotonic() + ttl
+    with _sign_lock:
+        if len(_sign_cache) >= _SIGN_CACHE_MAX:
+            for p in [p for p, (_, exp) in _sign_cache.items() if exp - now <= ttl / 2]:
+                del _sign_cache[p]
+            if len(_sign_cache) >= _SIGN_CACHE_MAX:
+                _sign_cache.clear()
+        for path, url in signed.items():
+            _sign_cache[path] = (url, expires)
+    for key in pending:
+        path, frag = _split_key(key)
+        if path in signed:
+            out[key] = signed[path] + frag
+    return out

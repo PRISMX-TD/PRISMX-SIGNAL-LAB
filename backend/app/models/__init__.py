@@ -1218,7 +1218,14 @@ class TicketReply(Base):
     id = Column(String, primary_key=True, default=_uuid)
     ticket_id = Column(String, ForeignKey("tickets.id"), nullable=False, index=True)
     author_id = Column(String, ForeignKey("users.id"), nullable=False)
+    # 纯图片消息的 body 是空串，不是 NULL / an images-only message has body "", not NULL
     body = Column(Text, nullable=False)
+    # 附图：私有桶对象键的 JSON 数组（`<作者 id>/<uuid>.<ext>#w=&h=`），NULL = 没有图。
+    # 存键不存 URL——看图用的签名链接会过期，每次返回工单时现签（services/image_upload）。
+    # Attached images: JSON array of private-bucket object keys, NULL = none. Keys rather
+    # than URLs, because the signed URLs used for viewing expire; they are minted per
+    # response (services/image_upload).
+    images = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now)
 
     author = relationship("User", backref="ticket_replies")

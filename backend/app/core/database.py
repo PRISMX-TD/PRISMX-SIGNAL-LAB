@@ -189,7 +189,9 @@ def _hash_legacy_api_tokens() -> None:
 # rev 30 — 管理后台群发邮件：新表 email_campaigns、email_deliveries、email_opt_outs。
 #          同 rev 20 / 21：全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为让
 #          老库启动时走一次完整迁移而不是快速通道。
-CURRENT_SCHEMA_REV = 30
+# rev 31 — ticket_replies.images（工单消息附图：私有桶对象键的 JSON 数组）。可空、**不回填**：
+#          NULL 就是「这条没有图」。纯 ADD COLUMN，不重写表，不产生可感知的停机。
+CURRENT_SCHEMA_REV = 31
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1175,6 +1177,16 @@ def _migrate_columns() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE announcement_reads ADD COLUMN source VARCHAR"))
                 conn.execute(text("UPDATE announcement_reads SET source = 'open' WHERE source IS NULL"))
+
+    # rev 31：工单消息附图。可空、不回填——NULL 就是「这条没有图」，正是存量每一行该有的
+    # 状态。纯 ADD COLUMN，不重写表。
+    # rev 31: ticket message images. Nullable, no backfill — NULL means "no images",
+    # exactly right for every existing row. A plain ADD COLUMN, no table rewrite.
+    if "ticket_replies" in inspector.get_table_names():
+        reply_cols = {c["name"] for c in inspector.get_columns("ticket_replies")}
+        if "images" not in reply_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE ticket_replies ADD COLUMN images TEXT"))
 
     # rev 16：勋章改制。user_badges 加 tier；旧 id 按 badges.LEGACY_BADGE_MAP 并成
     # "新 id + 档位"（同一人同一新 id 只留最高档，先删输家再改赢家——唯一约束
