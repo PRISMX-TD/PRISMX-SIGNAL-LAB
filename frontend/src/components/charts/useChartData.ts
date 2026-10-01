@@ -247,7 +247,9 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         if (!alive) return
         // 最新一根用券商 bid 做收盘价，免得每 2 秒被 K 线库的收盘价拽回去。
         // The newest bar takes the broker bid as close so the poll doesn't yank it back.
-        const bars = r.bars.map((b, i) => (i === r.bars.length - 1 ? withLiveClose(b, liveBidRef?.current) : b))
+        // 本地已按报价开了新 bar 时，响应里的上一根别再被钉上当前 bid。
+        // Once a tick has opened the next bar locally, don't stamp the current bid onto the previous one.
+        const bars = r.bars.map((b, i) => (i === r.bars.length - 1 && b.t >= lastTimeRef.current ? withLiveClose(b, liveBidRef?.current) : b))
         for (const b of bars) applyBar(b)
         for (const b of bars) mergeCandle(b)
         // 追加新出现的 bar 时间，保持 barTimesRef 与图表同步 / keep bar times in sync

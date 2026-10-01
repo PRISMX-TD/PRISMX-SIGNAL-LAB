@@ -62,7 +62,7 @@ import type { Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
-  priceDigits, resolvePriceDigits, toLwPoint, type IndicatorFlags,
+  priceDigits, resolvePriceDigits, toLwPoint, intervalSeconds, MAX_CLIENT_BARS, type IndicatorFlags,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
@@ -143,8 +143,14 @@ function LiveSymbolHeader(props: Omit<ComponentProps<typeof SymbolHeader>, 'bid'
 }
 
 // 实时 K 线收盘：券商 bid 一跳，最新一根的 close 立刻跟着动，并把 bid 留给轮询用。
+// 跨过 K 线边界后的第一跳直接在本地开新 bar（o=h=l=c=bid），不再等开盘后 ~3.3 秒的边界补拉
+// 才"卡一下"冒出来；零额外请求，随后的轮询按同一时间戳覆盖校正 O/H/L。只对按 epoch 对齐的
+// 周期（intervalSeconds）做，4H / 日线边界取决于券商时区，仍靠轮询。
 // Live bar close: each broker bid tick moves the forming bar's close and is kept for the poll.
-function LiveBarSync({ symbol, engine, liveBidRef }: { symbol: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null } }) {
+// The first tick past a bar boundary opens the new bar locally (o=h=l=c=bid) instead of waiting
+// ~3.3s for the boundary poll (the visible "hitch"); no extra requests, and the next poll
+// overwrites it by timestamp. Epoch-aligned intervals only; 4H / daily still rely on the poll.
+function LiveBarSync({ symbol, interval, engine, liveBidRef }: { symbol: string; interval: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null } }) {
   const bid = useGlobalQuote(symbol)?.bid ?? null
   useEffect(() => { liveBidRef.current = null }, [symbol, liveBidRef])
   useEffect(() => {
@@ -154,11 +160,29 @@ function LiveBarSync({ symbol, engine, liveBidRef }: { symbol: string; engine: R
     if (bid == null || !series || arr.length === 0) return
     const last = arr[arr.length - 1]
     if (last.t !== engine.lastTimeRef.current) return
+    const iv = intervalSeconds(interval)
+    if (iv != null) {
+      const openT = Math.floor(Date.now() / 1000 / iv) * iv
+      // 只开紧挨着的下一根：差太多说明数据断档 / 休市，交给轮询。
+      // Only the immediately next bar; a bigger gap means a data hole / closed market — leave it to the poll.
+      if (openT === last.t + iv) {
+        const bar = { t: openT, o: bid, h: bid, l: bid, c: bid, v: 0 } as typeof last
+        try { series.update(toLwPoint(bar)) } catch { return }
+        arr.push(bar)
+        if (arr.length > MAX_CLIENT_BARS) arr.shift()
+        const times = engine.barTimesRef.current
+        if (!times.length || times[times.length - 1] < openT) times.push(openT)
+        engine.lastTimeRef.current = openT
+        engine.recomputeIndicators()
+        if (engine.isFollowingLiveRef.current) engine.chartRef.current?.timeScale().scrollToRealTime()
+        return
+      }
+    }
     const next = withLiveClose(last, bid)
     if (next.c === last.c && next.h === last.h && next.l === last.l) return
     arr[arr.length - 1] = next
     try { series.update(toLwPoint(next)) } catch { /* series 正在切换 / series switching */ }
-  }, [bid, engine, liveBidRef])
+  }, [bid, interval, engine, liveBidRef])
   return null
 }
 
@@ -487,7 +511,7 @@ export default function ChartsPage() {
 
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
-        <LiveBarSync symbol={symbol} engine={engine} liveBidRef={liveBidRef} />
+        <LiveBarSync symbol={symbol} interval={interval} engine={engine} liveBidRef={liveBidRef} />
         {!isFullscreen && (
           <LiveSymbolHeader
             symbol={symbol}
