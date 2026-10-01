@@ -153,7 +153,7 @@ export function useChartEngine(
             api.setData(toHistPoints(times, values, UP_COLOR, DOWN_COLOR))
           }
         } else {
-          (h.api as LineApi).setData(toLinePoints(times, values))
+          (h.api as LineApi).setData(toLinePoints(times, values, h.spec.gaps))
         }
         row[h.spec.key] = values[values.length - 1] ?? null
       }

@@ -10,17 +10,18 @@
 // math in utils/indicators.ts and the i18n strings, nothing else.
 import type { Candle } from '../../api/types'
 import {
-  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR,
+  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand,
 } from '../../utils/indicators'
 import type { IndicatorSettings, LineStyleCfg, PaneSize } from './indicatorSettings'
 
 export type IndicatorId = keyof IndicatorSettings
-export type IndicatorGroup = 'trend' | 'momentum' | 'volatility' | 'volume'
+// custom = 用户共享的公式，面板里单独成组并带免责提示 / user-shared formulas, own group with a disclaimer
+export type IndicatorGroup = 'trend' | 'momentum' | 'volatility' | 'volume' | 'custom'
 
 // 目录顺序 = 面板里的展示顺序；副图的创建顺序也按这里（上到下）。
 // Catalog order = display order in the panel; sub-panes are created in this order too.
-export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv']
-export const GROUPS: IndicatorGroup[] = ['trend', 'momentum', 'volatility', 'volume']
+export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab']
+export const GROUPS: IndicatorGroup[] = ['trend', 'momentum', 'volatility', 'volume', 'custom']
 
 export interface IndicatorMeta {
   abbr: string
@@ -43,6 +44,7 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
   atr: { abbr: 'ATR', group: 'volatility', pane: 'sub' },
   volume: { abbr: 'VOL', group: 'volume', pane: 'sub' },
   obv: { abbr: 'OBV', group: 'volume', pane: 'sub' },
+  xmab: { abbr: 'XMA', group: 'custom', pane: 'main' },
 }
 export const MAIN_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'main')
 export const SUB_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'sub')
@@ -87,6 +89,8 @@ export const INDICATOR_FORM: Record<IndicatorId, IndicatorForm> = {
   atr: { params: [P('period', 'period', 2, 200), C('color', 'color')], lineStyle: true },
   volume: { params: [C('upColor', 'upColor'), C('downColor', 'downColor')], lineStyle: false },
   obv: { params: [C('color', 'color')], lineStyle: true },
+  xmab: { params: [P('period', 'period', 4, 200), P('p1', 'upperMult', 0, 5, { isFloat: true }), P('p2', 'lowerMult', 0, 5, { isFloat: true }),
+    C('upColor', 'bandColor'), C('downColor', 'downColor'), C('midColor', 'midColor'), C('obColor', 'overbought'), C('osColor', 'oversold')], lineStyle: true },
 }
 
 // ── 参数之间的相对约束 / relative constraints between parameters ──
@@ -146,6 +150,8 @@ export interface SeriesSpec {
   dashed?: boolean
   // 柱的着色：按符号（MACD 柱）或按 K 线涨跌（成交量）/ histogram coloring rule
   histColor?: 'sign' | 'candle'
+  // 中间的 null 断开而不是连线（分段着色线），图例里也不单列 / break at interior nulls; omitted from legends
+  gaps?: boolean
   // 图例里的短标签；空字符串表示只显示指标缩写 / short legend label ('' = abbreviation only)
   label: string
 }
@@ -197,6 +203,16 @@ export function seriesSpecs(id: IndicatorId, s: IndicatorSettings): SeriesSpec[]
     case 'atr': return [{ key: 'v', kind: 'line', color: s.atr.color, label: String(s.atr.period) }]
     case 'volume': return [{ key: 'v', kind: 'hist', color: s.volume.upColor, histColor: 'candle', label: '' }]
     case 'obv': return [{ key: 'v', kind: 'line', color: s.obv.color, label: '' }]
+    // 原公式：上下轨常蓝，下跌段再叠一层绿；中轨 / 超买超卖为虚线 / blue bands, green overlay on down legs
+    case 'xmab': return [
+      { key: 'upper', kind: 'line', color: s.xmab.upColor, label: 'U' },
+      { key: 'lower', kind: 'line', color: s.xmab.upColor, label: 'L' },
+      { key: 'upperDn', kind: 'line', color: s.xmab.downColor, gaps: true, label: '' },
+      { key: 'lowerDn', kind: 'line', color: s.xmab.downColor, gaps: true, label: '' },
+      { key: 'mid', kind: 'line', color: s.xmab.midColor, dashed: true, label: 'M' },
+      { key: 'ob', kind: 'line', color: s.xmab.obColor, dashed: true, label: 'OB' },
+      { key: 'os', kind: 'line', color: s.xmab.osColor, dashed: true, label: 'OS' },
+    ]
   }
 }
 
@@ -231,6 +247,7 @@ export function computeIndicator(id: IndicatorId, bars: Candle[], s: IndicatorSe
     case 'atr': return { v: atr(bars, s.atr.period) }
     case 'volume': return { v: bars.map((b) => b.v) }
     case 'obv': return { v: obv(bars) }
+    case 'xmab': { const r = xmaBand(bars, s.xmab.period, s.xmab.p1, s.xmab.p2); return { ...r } }
   }
 }
 
@@ -252,6 +269,7 @@ export function summaryOf(id: IndicatorId, s: IndicatorSettings): string {
     case 'atr': return String(s.atr.period)
     case 'volume': return ''
     case 'obv': return ''
+    case 'xmab': return `${s.xmab.period} · ${s.xmab.p1} / ${s.xmab.p2}`
   }
 }
 

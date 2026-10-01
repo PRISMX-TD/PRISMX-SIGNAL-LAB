@@ -342,6 +342,7 @@ export default function IndicatorSettingsModal({ indicators, onToggle, onSetIndi
               return (
                 <div key={g}>
                   <div className="ind-grp"><b>{t(`charts.indicators.group.${g}`)}</b><span>{on ? `${on} / ` : ''}{ids.length}</span></div>
+                  {g === 'custom' && <p className="ind-disc">{t('charts.indicators.customDisclaimer')}</p>}
                   {ids.map((id) => (
                     <div
                       key={id}
@@ -378,6 +379,7 @@ export default function IndicatorSettingsModal({ indicators, onToggle, onSetIndi
             </div>
             <Switch checked={indicators[sel]} onChange={() => onToggle(sel)} aria-label={name(sel)} />
           </div>
+          {meta.group === 'custom' && <p className="ind-disc ed" role="note">{t('charts.indicators.customDisclaimer')}</p>}
           <Preview id={sel} settings={settings} getCandles={getCandles} />
           <div className="ind-body no-sb">
             <div className="ind-sec">

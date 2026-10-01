@@ -21,14 +21,20 @@ export function fmtChartTime(time: UTCTimestamp): string {
 // 画一条假的归零线。
 // Indicator series with nulls (warm-up) → line points, dropping the nulls rather
 // than substituting 0, which would draw a false line down to zero.
+// gaps=true 时，首个有效值之后的 null 写成空白点（只有 time），线会在那里断开而不是
+// 把两段连起来——给"只在某些区间有值"的分段线用（如 XMA 波段的下跌段绿线）。
+// gaps=true turns interior nulls into whitespace points so the line breaks there
+// instead of bridging segments (segmented lines such as the XMA band's down legs).
 export function toLinePoints(
   times: UTCTimestamp[],
   values: (number | null)[],
-): { time: UTCTimestamp; value: number }[] {
-  const out: { time: UTCTimestamp; value: number }[] = []
+  gaps = false,
+): { time: UTCTimestamp; value?: number }[] {
+  const out: { time: UTCTimestamp; value?: number }[] = []
   for (let i = 0; i < values.length; i++) {
     const v = values[i]
     if (v != null) out.push({ time: times[i], value: v })
+    else if (gaps && out.length) out.push({ time: times[i] })
   }
   return out
 }

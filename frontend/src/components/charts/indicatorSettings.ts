@@ -42,6 +42,7 @@ export interface IndicatorSettings {
   cci: { period: number; color: string } & LineStyleCfg & SubPaneCfg
   wr: { period: number; color: string } & LineStyleCfg & SubPaneCfg
   atr: { period: number; color: string } & LineStyleCfg & SubPaneCfg
+  xmab: { period: number; p1: number; p2: number; upColor: string; downColor: string; midColor: string; obColor: string; osColor: string } & LineStyleCfg
 }
 
 // 颜色预设：不给原生 RGB 取色器，只给一小把跟站内配色协调的备选色，点选即可。
@@ -85,6 +86,8 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   cci: { period: 20, color: '#ffa85c', ...LINE, ...SUB },
   wr: { period: 14, color: '#22d3ee', ...LINE, ...SUB },
   atr: { period: 14, color: '#94a3b8', ...LINE, ...SUB },
+  // 默认值照搬用户共享的原公式（N1=38, P1=P2=1.08）/ defaults copied from the shared formula
+  xmab: { period: 38, p1: 1.08, p2: 1.08, upColor: '#38bdf8', downColor: '#2ee07e', midColor: '#94a3b8', obColor: '#facc15', osColor: '#f472b6', ...LINE },
 }
 
 // 加一条均线：周期取最后一条 +10（凑个还算合理的默认值），颜色从预设色板

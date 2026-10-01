@@ -408,3 +408,61 @@ export function obv(bars: Candle[]): (number | null)[] {
   }
   return out
 }
+
+// 通达信 XMA：以当根为中心、前后各 floor(n/2) 根的算术平均，两端不够时按可用根数
+// 缩短窗口。**用到了未来的 K 线**——最右边 n/2 根会随新 K 线到来而改变（重绘），
+// 只用于"自定义指标"里照搬用户公式，不能拿来做信号。前缀和 O(n)。
+// TDX-style XMA: centred mean over floor(n/2) bars either side, window shrunk at
+// the edges. It LOOKS AHEAD — the rightmost n/2 values repaint as bars arrive;
+// only for the user-shared custom indicator, never for signals. O(n) via prefix sums.
+export function xma(values: number[], n: number): number[] {
+  const half = Math.floor(n / 2)
+  const pre = new Array<number>(values.length + 1)
+  pre[0] = 0
+  for (let i = 0; i < values.length; i++) pre[i + 1] = pre[i] + values[i]
+  return values.map((_, i) => {
+    const a = Math.max(0, i - half)
+    const b = Math.min(values.length, i + half + 1)
+    return (pre[b] - pre[a]) / (b - a)
+  })
+}
+
+export interface XmaBandResult {
+  upper: (number | null)[]
+  lower: (number | null)[]
+  // 下跌段（上下轨都不高于上一根）才有值，叠在蓝线上画成绿色 / non-null only on down bars
+  upperDn: (number | null)[]
+  lowerDn: (number | null)[]
+  mid: (number | null)[]
+  ob: (number | null)[]
+  os: (number | null)[]
+}
+
+// 用户共享的「XMA 波段通道」：H/L 各做两次 XMA(n)，用两者差 GD 外扩出上下轨与超买超卖线。
+// User-shared "XMA band": double XMA of highs/lows, widened by their gap GD.
+export function xmaBand(bars: Candle[], n = 38, p1 = 1.08, p2 = 1.08, ext = 1.2): XmaBandResult {
+  const hh = xma(xma(bars.map((b) => b.h), n), n)
+  const ll = xma(xma(bars.map((b) => b.l), n), n)
+  const len = bars.length
+  const r: XmaBandResult = {
+    upper: new Array(len).fill(null), lower: new Array(len).fill(null),
+    upperDn: new Array(len).fill(null), lowerDn: new Array(len).fill(null),
+    mid: new Array(len).fill(null), ob: new Array(len).fill(null), os: new Array(len).fill(null),
+  }
+  for (let i = 0; i < len; i++) {
+    const gd = hh[i] - ll[i]
+    const up = hh[i] + gd * p1
+    const lo = ll[i] - gd * p2
+    r.upper[i] = up
+    r.lower[i] = lo
+    r.mid[i] = (up + lo) / 2
+    r.ob[i] = hh[i] + gd * (p1 + ext)
+    r.os[i] = ll[i] - gd * (p2 + ext)
+    if (i > 0 && up <= (r.upper[i - 1] as number) && lo <= (r.lower[i - 1] as number)) {
+      // 前一根也补上，绿线段才能从转向那根连起来 / back-fill the prior bar so the green segment connects
+      r.upperDn[i - 1] ??= r.upper[i - 1]; r.lowerDn[i - 1] ??= r.lower[i - 1]
+      r.upperDn[i] = up; r.lowerDn[i] = lo
+    }
+  }
+  return r
+}

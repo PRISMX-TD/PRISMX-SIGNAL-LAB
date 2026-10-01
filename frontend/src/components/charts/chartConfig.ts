@@ -203,6 +203,7 @@ export const DEFAULT_INDICATORS: IndicatorFlags = {
   rsi: false, macd: false, kdj: false, cci: false, wr: false, atr: false,
   volume: true, // 默认开：这一整轮 EA/后端改造就是为了喂出 volume，默认可见让效果立刻看得见
   obv: false,
+  xmab: false,
 }
 // 十字准线/触摸拖动悬停时展示的各指标"当前值"（按指标 → series key），不悬停时
 // 回退到最新一根的值（见 recomputeIndicators 与 subscribeCrosshairMove 的说明）。

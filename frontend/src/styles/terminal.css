@@ -1402,6 +1402,8 @@
 }
 .ind-add:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
 .ind-add:disabled { opacity: 0.3; cursor: not-allowed; }
+.ind-disc { margin: 0 14px 6px; padding: 6px 9px; border-radius: 6px; font-size: 10.5px; line-height: 1.5; color: var(--text-3); background: color-mix(in srgb, #facc15 7%, transparent); border: 1px solid color-mix(in srgb, #facc15 22%, transparent); }
+.ind-disc.ed { margin: 12px 22px 0; font-size: 11px; }
 .ind-hint { margin: 16px 0 0; max-width: 60ch; font-size: 11.5px; line-height: 1.55; color: var(--text-3); }
 .ind-ft { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 14px 22px 18px; border-top: 1px solid var(--line); }
 .ind-btn {

@@ -326,7 +326,8 @@
         "wr": "Vị trí giá đóng cửa trong biên độ N nến",
         "atr": "Biên độ dao động thực trung bình, dùng để đặt khoảng cách SL",
         "volume": "Cột khối lượng theo từng nến",
-        "obv": "Khối lượng tích lũy theo nến đóng tăng / giảm"
+        "obv": "Khối lượng tích lũy theo nến đóng tăng / giảm",
+        "xmab": "Người dùng chia sẻ · kênh mở rộng từ XMA kép của đỉnh/đáy"
       },
       "hint": {
         "ma": "Các đường MA xếp theo thứ tự từ ngắn đến dài là dấu hiệu xu hướng tăng; nhịp hồi giữ được MA trung hạn là điểm vào tiếp diễn phổ biến.",
@@ -343,13 +344,15 @@
         "wr": "Là hình ảnh phản chiếu của giá trị K trong KDJ; -20 / -80 là ngưỡng thường dùng.",
         "atr": "Đặt SL cách 1,5 đến 2 ATR để tránh nhiễu thông thường; đây cũng là cơ sở tính khối lượng theo % rủi ro khi đặt lệnh.",
         "volume": "Khối lượng xác nhận giá: phá vỡ kèm khối lượng lớn đáng tin, đỉnh mới với khối lượng thấp cần nghi ngờ.",
-        "obv": "OBV lập đỉnh mới trước giá là dấu hiệu dòng tiền đang vào sớm."
+        "obv": "OBV lập đỉnh mới trước giá là dấu hiệu dòng tiền đang vào sớm.",
+        "xmab": "Công thức chỉ báo do người dùng cung cấp: giá cao và thấp mỗi bên áp XMA(N) hai lần; khoảng chênh mở rộng dải (×P1/P2) và đường quá mua/quá bán (thêm +1.2). Dải chuyển xanh lá khi cả hai cùng đi xuống."
       },
       "group": {
         "trend": "Xu hướng",
         "momentum": "Động lượng",
         "volatility": "Biến động",
-        "volume": "Khối lượng"
+        "volume": "Khối lượng",
+        "custom": "Chỉ báo tùy chỉnh"
       },
       "tpl": {
         "ma": "Hệ MA",
@@ -381,7 +384,13 @@
       "dSmooth": "Làm mượt D",
       "kLine": "K",
       "dLine": "D",
-      "jLine": "J"
+      "jLine": "J",
+      "xmab": "Kênh dải XMA",
+      "customDisclaimer": "Chỉ báo này do người dùng cung cấp, không đại diện cho quan điểm của chúng tôi.",
+      "upperMult": "Hệ số trên P1",
+      "lowerMult": "Hệ số dưới P2",
+      "bandColor": "Màu dải",
+      "midColor": "Màu đường giữa"
     },
     "draw": {
       "tools": "Công cụ vẽ",

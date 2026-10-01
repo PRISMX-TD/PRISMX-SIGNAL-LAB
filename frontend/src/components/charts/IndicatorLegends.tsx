@@ -19,6 +19,7 @@ export default function IndicatorLegends({ indicators, indicatorSettings, legend
     const digits = legendDigits(id, decimals)
     const row = legend[id] ?? {}
     return seriesSpecs(id, indicatorSettings)
+      .filter((sp) => !sp.gaps)
       // 超级趋势两条线互斥，只显示当前有值的那条 / SuperTrend: show whichever segment has a value
       .filter((sp) => !(id === 'st' && row[sp.key] == null && Object.values(row).some((v) => v != null)))
       .map((sp) => {

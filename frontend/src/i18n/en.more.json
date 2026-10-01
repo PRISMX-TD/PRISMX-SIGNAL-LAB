@@ -326,7 +326,8 @@
         "wr": "Where the close sits inside the N-bar range",
         "atr": "Average true range for stop distances",
         "volume": "Volume bars per candle",
-        "obv": "Volume accumulated by up / down closes"
+        "obv": "Volume accumulated by up / down closes",
+        "xmab": "User-shared · band channel widened from double-XMA highs/lows"
       },
       "hint": {
         "ma": "Averages stacked in order from short to long mark a bullish alignment; a pullback that holds the mid-term average is a common continuation entry.",
@@ -343,13 +344,15 @@
         "wr": "Mirror image of the KDJ K value; -20 / -80 are the usual thresholds.",
         "atr": "Stops 1.5 to 2 ATR away clear normal noise; it also underpins the ticket's risk-percent sizing.",
         "volume": "Volume confirms price: breakouts on volume are credible, new highs on thin volume are suspect.",
-        "obv": "OBV making a new high before price signals money moving in early."
+        "obv": "OBV making a new high before price signals money moving in early.",
+        "xmab": "A user-provided indicator formula: highs and lows each get a double XMA(N); their gap widens the bands (×P1/P2) and the overbought/oversold lines (+1.2 more). Bands turn green when both step down."
       },
       "group": {
         "trend": "Trend",
         "momentum": "Momentum",
         "volatility": "Volatility",
-        "volume": "Volume"
+        "volume": "Volume",
+        "custom": "Custom indicators"
       },
       "tpl": {
         "ma": "MA stack",
@@ -381,7 +384,13 @@
       "dSmooth": "D smoothing",
       "kLine": "K",
       "dLine": "D",
-      "jLine": "J"
+      "jLine": "J",
+      "xmab": "XMA Band Channel",
+      "customDisclaimer": "This indicator was provided by a user and does not represent our views.",
+      "upperMult": "Upper mult P1",
+      "lowerMult": "Lower mult P2",
+      "bandColor": "Band color",
+      "midColor": "Mid line color"
     },
     "draw": {
       "tools": "Drawing tools",
