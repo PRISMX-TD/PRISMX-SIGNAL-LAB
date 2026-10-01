@@ -150,14 +150,19 @@ function LiveSymbolHeader(props: Omit<ComponentProps<typeof SymbolHeader>, 'bid'
 // The first tick past a bar boundary opens the new bar locally (o=h=l=c=bid) instead of waiting
 // ~3.3s for the boundary poll (the visible "hitch"); no extra requests, and the next poll
 // overwrites it by timestamp. Epoch-aligned intervals only; 4H / daily still rely on the poll.
-function LiveBarSync({ symbol, interval, engine, liveBidRef }: { symbol: string; interval: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null } }) {
+// dataKeyRef：图表里现有 K 线属于哪个「品种|周期」（useChartData 写）。切品种时本组件（子）的
+// effect 先于页面清空旧数据执行，不比对的话新品种的 bid 会被钉到旧品种最后一根上，拉出一根巨柱。
+// dataKeyRef: which "symbol|interval" the loaded candles belong to (written by useChartData). On a
+// symbol switch this child's effect runs before the page clears the old data; without the check the
+// new symbol's bid was stamped onto the old symbol's last bar, drawing one giant candle.
+function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { symbol: string; interval: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null }; dataKeyRef: { current: string } }) {
   const bid = useGlobalQuote(symbol)?.bid ?? null
   useEffect(() => { liveBidRef.current = null }, [symbol, liveBidRef])
   useEffect(() => {
     liveBidRef.current = bid
     const arr = engine.candlesRef.current
     const series = engine.seriesRef.current
-    if (bid == null || !series || arr.length === 0) return
+    if (bid == null || !series || arr.length === 0 || dataKeyRef.current !== `${symbol}|${interval}`) return
     const last = arr[arr.length - 1]
     if (last.t !== engine.lastTimeRef.current) return
     const iv = intervalSeconds(interval)
@@ -188,7 +193,7 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef }: { symbol: string;
     if (next.c === last.c && next.h === last.h && next.l === last.l) return
     arr[arr.length - 1] = next
     try { series.update(toLwPoint(next)) } catch { /* series 正在切换 / series switching */ }
-  }, [bid, interval, engine, liveBidRef])
+  }, [bid, symbol, interval, engine, liveBidRef, dataKeyRef])
   return null
 }
 
@@ -453,7 +458,8 @@ export default function ChartsPage() {
   const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen)
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
   const liveBidRef = useRef<number | null>(null)
-  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef)
+  const dataKeyRef = useRef('')
+  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
 
   const openTrade = useCallback((side: Side) => { setTradeSide(side); setSheet('trade') }, [])
   const openWatchlistSheet = useCallback(() => setSheet('watchlist'), [])
@@ -517,7 +523,7 @@ export default function ChartsPage() {
 
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
-        <LiveBarSync symbol={symbol} interval={interval} engine={engine} liveBidRef={liveBidRef} />
+        <LiveBarSync symbol={symbol} interval={interval} engine={engine} liveBidRef={liveBidRef} dataKeyRef={dataKeyRef} />
         {!isFullscreen && (
           <LiveSymbolHeader
             symbol={symbol}

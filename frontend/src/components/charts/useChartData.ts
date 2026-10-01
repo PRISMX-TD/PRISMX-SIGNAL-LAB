@@ -36,7 +36,7 @@ export function withLiveClose(b: Candle, bid: number | null | undefined): Candle
   return { ...b, c: bid, h: Math.max(b.h, bid), l: Math.min(b.l, bid) }
 }
 
-export function useChartData(symbol: string, interval: string, digits: number, engine: ChartEngine, liveBidRef?: { current: number | null }) {
+export function useChartData(symbol: string, interval: string, digits: number, engine: ChartEngine, liveBidRef?: { current: number | null }, dataKeyRef?: { current: string }) {
   const {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef, recomputeIndicators,
@@ -82,6 +82,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     if (!series || !symbol) return // symbol 为空说明 activeSymbols 还没校正出有效值，等下一轮
                                     // empty symbol means activeSymbols hasn't resolved a valid value yet
     let alive = true
+    if (dataKeyRef) dataKeyRef.current = ''
     setHasData(false)
     setStale(false)
     setLastPrice(0)
@@ -149,6 +150,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       if (!alive) return
       if (r.bars.length > 0) {
         series.setData(r.bars.map(toLwPoint))
+        if (dataKeyRef) dataKeyRef.current = `${symbol}|${interval}`
         lastTimeRef.current = r.bars[r.bars.length - 1].t
         setLastPrice(r.bars[r.bars.length - 1].c)
         barTimesRef.current = r.bars.map((b) => b.t)
@@ -159,6 +161,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         chartRef.current?.timeScale().fitContent()
         setHasData(true)
       } else {
+        // 空历史：图上不再是旧品种的 K 线，标成本品种，让首跳报价之后的轮询冷启动。
+        // Empty history: mark as this symbol so later data belongs to it.
+        series.setData([])
+        if (dataKeyRef) dataKeyRef.current = `${symbol}|${interval}`
         hasMoreHistoryRef.current = false
         setHasData(false)
       }
