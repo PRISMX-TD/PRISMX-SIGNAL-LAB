@@ -1199,7 +1199,7 @@ class Ticket(Base):
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     title = Column(String, nullable=False)
-    category = Column(String, nullable=False)  # account / payment / technical / feature
+    category = Column(String, nullable=False)  # account / payment / claim（申领）/ technical / feature
     priority = Column(String, nullable=False, default="normal")  # low / normal / urgent
     status = Column(String, nullable=False, default="open")  # open / in_progress / closed
     created_at = Column(DateTime, default=_now)

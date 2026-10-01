@@ -1950,6 +1950,7 @@
     "category": {
       "account": "账户问题",
       "payment": "支付/账单",
+      "claim": "申领",
       "technical": "技术故障",
       "feature": "功能建议"
     },

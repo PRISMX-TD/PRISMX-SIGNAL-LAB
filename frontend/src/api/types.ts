@@ -1377,7 +1377,7 @@ export interface NotificationFeed {
 }
 
 // 工单系统 / ticket system
-export type TicketCategory = 'account' | 'payment' | 'technical' | 'feature'
+export type TicketCategory = 'account' | 'payment' | 'claim' | 'technical' | 'feature'
 export type TicketPriority = 'low' | 'normal' | 'urgent'
 export type TicketStatus = 'open' | 'in_progress' | 'closed'
 

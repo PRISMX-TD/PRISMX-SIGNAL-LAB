@@ -1314,6 +1314,7 @@
     "category": {
       "account": "アカウント",
       "payment": "請求・お支払い",
+      "claim": "受け取り申請",
       "technical": "技術的な問題",
       "feature": "機能のご要望"
     },

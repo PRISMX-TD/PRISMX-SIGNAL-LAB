@@ -1684,7 +1684,7 @@ class _TicketMessage(BaseModel):
 class TicketCreate(_TicketMessage):
     """用户提交新工单 / submit a new ticket."""
     title: str = Field(min_length=1, max_length=200)
-    category: Literal["account", "payment", "technical", "feature"]
+    category: Literal["account", "payment", "claim", "technical", "feature"]
     priority: Literal["low", "normal", "urgent"] = "normal"
 
 

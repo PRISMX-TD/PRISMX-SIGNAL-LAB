@@ -346,7 +346,7 @@ function AdminTicketsPanel() {
             <select className="input w-auto py-1 text-sm" value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}>
               <option value="">{t('tickets.admin.all')}</option>
-              {(['account', 'payment', 'technical', 'feature'] as TicketCategory[]).map((c) => (
+              {(['account', 'payment', 'claim', 'technical', 'feature'] as TicketCategory[]).map((c) => (
                 <option key={c} value={c}>{t(`tickets.category.${c}`)}</option>
               ))}
             </select>

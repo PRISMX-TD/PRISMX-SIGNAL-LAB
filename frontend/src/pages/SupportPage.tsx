@@ -23,7 +23,7 @@ import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStat
 
 type View = 'list' | 'form' | { ticket: Ticket }
 
-const CATEGORY_OPTIONS: TicketCategory[] = ['account', 'payment', 'technical', 'feature']
+const CATEGORY_OPTIONS: TicketCategory[] = ['account', 'payment', 'claim', 'technical', 'feature']
 
 // 更新日期：列表里只要「几号」，同一年内省掉年份。改走 api/utils 的 fmtDayShort，
 // 不再本地实现——原来那份用 toLocaleDateString(undefined, …)，渲染在**浏览器本地

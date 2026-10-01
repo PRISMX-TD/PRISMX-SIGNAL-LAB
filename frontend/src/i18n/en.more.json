@@ -1952,6 +1952,7 @@
     "category": {
       "account": "Account",
       "payment": "Billing / Payment",
+      "claim": "Claim Request",
       "technical": "Technical Issue",
       "feature": "Feature Request"
     },
