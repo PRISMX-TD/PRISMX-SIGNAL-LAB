@@ -131,7 +131,7 @@ export default function create(env: CardEnv): CardTemplate {
     const hy = 176
     const inner = brand(s.key) +
       `<div class="ti-a ti-lbl ti-e" style="left:24px;top:${hy - 34}px">${t.symbol}<em>${t.sideTxt}</em></div>` +
-      `<div class="ti-a" style="left:24px;top:${hy}px">${hero(s.key, v, main, s.privacy ? '%' : 'USD', fs, { stretch: s.privacy ? 100 : 92 })}</div>` +
+      `<div class="ti-a" data-fit="left" style="left:24px;top:${hy}px">${hero(s.key, v, main, s.privacy ? '%' : 'USD', fs, { stretch: s.privacy ? 100 : 92 })}</div>` +
       `<div class="ti-a ti-facts ti-e" style="left:24px;top:${hy + Math.round(fs * 0.86) + 22}px;align-items:center">${t.pips == null ? '' : `<span>${nb(D().fmt(t.pips, 1))} ${D().L.pips}</span>`}<span>${D().L.hold} ${t.hold.replace(/(\d+)/g, '<b>$1</b>')}</span></div>` +
       (win ? '' : `<div class="ti-a ti-tag ti-e" style="left:24px;top:${hy + Math.round(fs * 0.86) + 54}px"><i></i>${t.exit}</div>`) +
       foot(D().L.ctaJoin)
@@ -196,7 +196,7 @@ export default function create(env: CardEnv): CardTemplate {
       `<circle cx="${end[0]}" cy="${f1(+end[1] - 1.2)}" r="5.5" fill="#000000" fill-opacity=".6"/><circle cx="${end[0]}" cy="${end[1]}" r="5.5" fill="url(#${s.key}-dg)"/></svg>`
     const inner = brand(s.key) +
       `<div class="ti-a ti-lbl ti-e" style="left:24px;top:${hy - 34}px">${D().L.monthLabel}</div>` +
-      `<div class="ti-a" style="left:24px;top:${hy}px">${hero(s.key, v, main, s.privacy ? '%' : 'USD', fs, { stretch: s.privacy ? 100 : 92 })}</div>` +
+      `<div class="ti-a" data-fit="left" style="left:24px;top:${hy}px">${hero(s.key, v, main, s.privacy ? '%' : 'USD', fs, { stretch: s.privacy ? 100 : 92 })}</div>` +
       `<div class="ti-a ti-facts ti-e" style="left:24px;top:${hy + Math.round(fs * 0.86) + 22}px"><span>${D().L.winRate} ${nb(mo.winRate.toFixed(1) + '%')}</span><span>${nb(mo.trades)} ${D().L.tradesUnit}</span></div>` +
       line + foot(D().L.ctaJoin)
     return card('C', s, inner)

@@ -88,7 +88,7 @@ export default function create(env: CardEnv): CardTemplate {
     const ht = s.privacy ? 236 : 246, hh = Math.round((s.privacy ? 72 : 64) * .76)
     const facts = `<div class="e-facts" style="top:${ht + hh + 20}px">${t.pips == null ? '' : `<span><b>${D().fmt(t.pips, 1)}</b> ${D().L.pips}</span>`}<span>${D().L.hold} <b>${t.hold}</b></span>${win ? '' : '<span class="e-tag" style="margin-top:-6px">${D().L.stopTag}</span>'}</div>`
     return card('A', brand() + head(t.elNum, `${t.symbol} ${t.sideTxt}`, s.key, t.elSym, 112) +
-      `<div class="e-a" style="left:22px;top:${ht}px">${heroNum(s.key, txt, s.privacy, win)}</div>` + facts + foot(D().L.ctaJoin))
+      `<div class="e-a" data-fit="left" style="left:22px;top:${ht}px">${heroNum(s.key, txt, s.privacy, win)}</div>` + facts + foot(D().L.ctaJoin))
   }
 
   /* B 勋章奖状：符号作一枚大号同色调底纹，勋章压在上面做主角 */
@@ -135,7 +135,7 @@ export default function create(env: CardEnv): CardTemplate {
     const facts = `<div class="e-facts" style="top:${ht + hh + 20}px"><span>${D().L.winRate} <b>${mo.winRate}%</b></span><span><b>${mo.trades}</b> ${D().L.tradesUnit}</span></div>`
     return card('C', brand() + head(String(mo.month).padStart(2, '0'), D().L.monthLabel, s.key, mo.abbr, 100) +
       `<div class="e-a" style="right:28px;top:128px">${strip}</div>` +
-      `<div class="e-a" style="left:22px;top:${ht}px">${heroNum(s.key, txt, s.privacy, win)}</div>` + facts + foot(D().L.ctaJoin))
+      `<div class="e-a" data-fit="left" style="left:22px;top:${ht}px">${heroNum(s.key, txt, s.privacy, win)}</div>` + facts + foot(D().L.ctaJoin))
   }
 
   /* D 比赛名次：名次 2 本身就是元素 */

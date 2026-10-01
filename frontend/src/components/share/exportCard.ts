@@ -7,6 +7,7 @@
 // SVG loaded as an image can't fetch external resources), then it's drawn onto a canvas. The
 // templates only use CSS this path can render (backdrop-filter etc. were ruled out in design).
 import { createCard } from './templates'
+import { fitHero } from './fitHero'
 import type { CardStyle, CardType, CardState } from './cardEnv'
 
 export const CARD_W = 360
@@ -56,6 +57,19 @@ export async function exportCardPng(css: string, html: string, scale = 3): Promi
   const card = document.createElement('div')
   card.innerHTML = html.split('/logo-256.png').join(logo)
   host.appendChild(card)
+  // 先挂到屏幕外量一次大数字，超宽就缩小（与预览同一个 fitHero），再序列化。
+  // Mount off-screen so fitHero can measure and shrink an over-wide hero (same as the preview), then serialize.
+  const stage = document.createElement('div')
+  stage.style.cssText = 'position:fixed;left:-10000px;top:0;pointer-events:none;opacity:0'
+  const shadow = stage.attachShadow({ mode: 'open' })
+  shadow.appendChild(host)
+  document.body.appendChild(stage)
+  try {
+    await document.fonts?.ready
+    fitHero(card.querySelector('.sl-card'))
+  } finally {
+    stage.remove()
+  }
   // XMLSerializer 输出合法 XHTML（<img> 自闭合、带命名空间），foreignObject 才解析得了。
   // XMLSerializer emits valid XHTML (self-closed <img>, namespaced), which foreignObject requires.
   const xhtml = new XMLSerializer().serializeToString(host)

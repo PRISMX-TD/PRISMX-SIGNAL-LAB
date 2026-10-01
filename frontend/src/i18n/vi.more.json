@@ -1843,6 +1843,7 @@
       "legend": "Huyền thoại",
       "limited": "Phiên bản giới hạn",
       "special": "Đặc biệt"
-    }
+    },
+    "appHint": "Ứng dụng chưa lưu ảnh trực tiếp được. Hãy chụp màn hình, hoặc mở trang web trên trình duyệt điện thoại để lưu."
   }
 }

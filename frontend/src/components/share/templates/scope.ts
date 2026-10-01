@@ -114,7 +114,7 @@ window.SL = window.SL || {};
       `<div class="scope-bg" style="background:radial-gradient(240px 170px at ${f1(end[0])}px ${f1(end[1])}px, rgba(90,34,238,.26), rgba(90,34,238,0) 70%)"></div>` +
       brand() +
       `<div class="scope-meta" style="top:100px"><span class="scope-ins">${numSpan(t.symbol)} ${t.sideTxt}</span>${loss ? `<span class="scope-tag"><i></i>${t.exit}</span>` : ''}</div>` +
-      `<div class="scope-num" style="top:124px">${hero(k, t.pnl, { fs, main, tail, fs2: s.privacy ? Math.round(fs * 0.5) : 15, gap: s.privacy ? 2 : 8, tailFill: s.privacy ? `url(#${k}-hg)` : null })}</div>` +
+      `<div class="scope-num" data-fit="left" style="top:124px">${hero(k, t.pnl, { fs, main, tail, fs2: s.privacy ? Math.round(fs * 0.5) : 15, gap: s.privacy ? 2 : 8, tailFill: s.privacy ? `url(#${k}-hg)` : null })}</div>` +
       fact(t.pips == null ? '' : `${numSpan(D().fmt(t.pips, 1))} ${D().L.pips}`, `${D().L.hold} ${t.hold.replace(/(\d+)/g, '<span class="scope-n">$1</span>')}`).replace('class="scope-facts"', 'class="scope-facts" style="top:' + Math.round(124 + fs * 0.86 + 20) + 'px"') +
       `<svg class="scope-sig" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${sig.defs}</defs>${sig.body}</svg>` +
       footer(D().L.ctaJoin)
@@ -138,7 +138,7 @@ window.SL = window.SL || {};
       `<div class="scope-bg" style="background:radial-gradient(240px 170px at ${f1(end[0])}px ${f1(end[1])}px, rgba(90,34,238,.26), rgba(90,34,238,0) 70%)"></div>` +
       brand() +
       `<div class="scope-meta" style="top:100px"><span class="scope-ins">${D().L.monthLabel}</span></div>` +
-      `<div class="scope-num" style="top:124px">${hero(k, v, { fs, main, tail: s.privacy ? '%' : 'USD', fs2: s.privacy ? 40 : 15, gap: s.privacy ? 2 : 8, tailFill: s.privacy ? `url(#${k}-hg)` : null })}</div>` +
+      `<div class="scope-num" data-fit="left" style="top:124px">${hero(k, v, { fs, main, tail: s.privacy ? '%' : 'USD', fs2: s.privacy ? 40 : 15, gap: s.privacy ? 2 : 8, tailFill: s.privacy ? `url(#${k}-hg)` : null })}</div>` +
       fact(`${D().L.winRate} ${numSpan(m.winRate.toFixed(1) + '%')}`, `${numSpan(m.trades)} ${D().L.tradesUnit}`).replace('class="scope-facts"', 'class="scope-facts" style="top:' + Math.round(124 + fs * 0.86 + 20) + 'px"') +
       `<svg class="scope-sig" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs>${sig.defs}</defs>${sig.body}</svg>` +
       footer(D().L.ctaJoin)

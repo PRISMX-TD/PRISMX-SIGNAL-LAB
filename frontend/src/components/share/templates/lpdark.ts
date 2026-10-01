@@ -106,7 +106,7 @@ export default function create(env: CardEnv): CardTemplate {
     const top = Math.round(208 - blk / 2), base = top + 13 + 34 + capH, facts = base + 30
     const at = `x="${W / 2}" y="${base}" text-anchor="middle" ${num(size, 87, 700)}`
     const svg = `<defs>${paper(k, P)}${foilDef(k + '-f', P.foil)}${win ? '' : inkDef(k + '-i', LOSSINK)}</defs>${paperRects(k, P)}` +
-      foilText(at, body, win ? `url(#${k}-f)` : `url(#${k}-i)`, P, 1.2) +
+      `<g data-fit="center" data-ox="${W / 2}" data-oy="${base}">${foilText(at, body, win ? `url(#${k}-f)` : `url(#${k}-i)`, P, 1.2)}</g>` +
       (win ? '' : tag(k, P, W / 2, facts + 47))
     const html = brand(P) +
       `<div class="lp-c lp-line" style="top:${top}px;color:${P.ink}">${t.symbol} ${t.sideTxt}</div>` +
@@ -171,7 +171,7 @@ export default function create(env: CardEnv): CardTemplate {
       else dots += `<circle cx="${x}" cy="${y}" r="${r - .3}" fill="${P.face}"/>` + (v < 0 ? `<circle cx="${x}" cy="${y}" r="${r - 1.5}" fill="none" stroke="${ROSE}" stroke-width="1.1"/>` : '')
     })
     const svg = `<defs>${paper(k, P)}${foilDef(k + '-f', P.foil)}<linearGradient id="${k}-d" x1="0" y1="0" x2=".8" y2="1"><stop offset="0" stop-color="${P.foil[3]}"/><stop offset=".5" stop-color="${P.foil[1]}"/><stop offset="1" stop-color="${P.foil[4]}"/></linearGradient>${win ? '' : inkDef(k + '-i', LOSSINK)}</defs>${paperRects(k, P)}` +
-      foilText(at, body, win ? `url(#${k}-f)` : `url(#${k}-i)`, P, 1.2) + `<g>${dots}</g>`
+      `<g data-fit="center" data-ox="${W / 2}" data-oy="${s.privacy ? 183 : 178}">${foilText(at, body, win ? `url(#${k}-f)` : `url(#${k}-i)`, P, 1.2)}</g>` + `<g>${dots}</g>`
     const html = brand(P) +
       `<div class="lp-c lp-line" style="top:96px;color:${P.ink}">${D().L.monthLabel}</div>` +
       `<div class="lp-c lp-facts" style="top:322px;color:${P.sub}">${D().L.winRate} <b style="color:${P.ink}">${mo.winRate}%</b><s></s><b style="color:${P.ink}">${mo.trades}</b> ${D().L.tradesUnit}</div>` +

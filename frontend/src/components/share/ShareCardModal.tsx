@@ -13,6 +13,7 @@ import { useDialogA11y } from '../../utils/useDialogA11y'
 import { userApi } from '../../api/client'
 import { CARD_STYLES, DEFAULT_STYLE, buildEnvData, type CardInput, type CardStyle, type CardType } from './cardEnv'
 import { BASE_CSS, CARD_H, CARD_W, exportCardPng, renderCardHtml } from './exportCard'
+import { fitHero } from './fitHero'
 
 export interface ShareVariant { key: string; label: string; input: CardInput }
 
@@ -47,6 +48,12 @@ function CardPreview({ css, html, scale }: { css: string; html: string; scale: n
     if (!el) return
     const root = el.shadowRoot ?? el.attachShadow({ mode: 'open' })
     root.innerHTML = `<style>${BASE_CSS}${css}</style>${html}`
+    // 字体就绪后再量，免得按回退字体的宽度缩放 / measure once fonts are ready, not against fallback metrics
+    let live = true
+    const fit = () => { if (live) fitHero(root.querySelector('.sl-card')) }
+    fit()
+    document.fonts?.ready.then(fit)
+    return () => { live = false }
   }, [css, html])
   return (
     <div style={{ width: CARD_W * scale, height: CARD_H * scale }} className="mx-auto">
@@ -78,6 +85,8 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(false)
   const [result, setResult] = useState<{ url: string; blob: Blob } | null>(null)
+  // 生成好的图是否替换预览显示（点了保存之后才显示，便于长按保存）/ show the PNG in place of the preview after Save
+  const [showImage, setShowImage] = useState(false)
 
   useEffect(() => { loadNickname().then(setNickname) }, [])
   const variant = variants.find((v) => v.key === variantKey) ?? variants[0]
@@ -103,8 +112,20 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
     })
   }, [input, t, nickname, style, type, value, privacy, privacyAvailable, keyId])
 
-  // 换了任何东西，之前生成的图就作废 / any change invalidates the exported image
-  useEffect(() => { setResult(null); setError(false) }, [card])
+  // 换了任何东西，之前生成的图就作废；随后在后台提前生成新图。iOS 的分享 / 下载要求「刚点过」的用户手势，
+  // 点按钮时再花一秒生成，手势就过期了、按钮看起来没反应——所以预览一稳定就先生成好。
+  // Any change invalidates the PNG, then a fresh one is pre-generated in the background: iOS share/download
+  // need a fresh user gesture, and spending a second exporting after the tap expired it (the "nothing happens" bug).
+  useEffect(() => {
+    setResult(null); setError(false); setShowImage(false)
+    let live = true
+    const id = setTimeout(() => {
+      exportCardPng(card.css, card.html)
+        .then((blob) => { if (live) setResult({ url: URL.createObjectURL(blob), blob }) })
+        .catch((e) => { console.error('share card pre-export failed', e) })
+    }, 350)
+    return () => { live = false; clearTimeout(id) }
+  }, [card])
 
   const pickStyle = (s: CardStyle) => {
     setStyle(s)
@@ -130,14 +151,26 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
   const canShareFiles = typeof navigator !== 'undefined' && !!navigator.canShare &&
     (() => { try { return navigator.canShare({ files: [new File([], 'x.png', { type: 'image/png' })] }) } catch { return false } })()
 
+  // App 外壳（Capacitor WebView）没有下载与系统分享能力，需要原生插件，要等新安装包；这里先给出明确提示。
+  // iOS 主屏幕 PWA 不支持 <a download>，保存走系统分享面板（面板里有「存储图像」），并把图显示出来可长按保存。
+  // The App shell (Capacitor WebView) has neither downloads nor Web Share — that needs a native plugin and a new
+  // APK; show a clear hint meanwhile. iOS home-screen PWAs ignore <a download>, so Save goes through the share
+  // sheet (which offers "Save Image") and the PNG is shown so it can be long-pressed.
+  const isNativeApp = !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+  const isIos = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  const shareFile = async (r: { blob: Blob }) => {
+    try { await navigator.share({ files: [file(r.blob)] }); return true } catch (e) { return (e as DOMException)?.name === 'AbortError' }
+  }
   const onShare = async () => {
     const r = await generate()
-    if (!r) return
-    try { await navigator.share({ files: [file(r.blob)] }) } catch { /* 用户取消 / user cancelled */ }
+    if (r) await shareFile(r)
   }
   const onSave = async () => {
     const r = await generate()
     if (!r) return
+    setShowImage(true)
+    if (isNativeApp) return
+    if (canShareFiles && isIos) { await shareFile(r); return }
     const a = document.createElement('a')
     a.href = r.url
     a.download = fileName
@@ -180,11 +213,11 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
         )}
 
         <div className="relative">
-          {result
+          {result && showImage
             ? <img src={result.url} alt={t(`share.title.${type}`)} className="mx-auto block rounded-[22px]" style={{ width: CARD_W * scale, height: CARD_H * scale }} />
             : <CardPreview css={card.css} html={card.html} scale={scale} />}
         </div>
-        {result && <p className="mt-2 text-center text-xs text-neutral-400">{t('share.longPress')}</p>}
+        {result && showImage && <p className="mt-2 text-center text-xs text-neutral-400">{t(isNativeApp ? 'share.appHint' : 'share.longPress')}</p>}
 
         <div className="mt-4">
           <div className="mb-2 text-xs text-neutral-400">{t('share.style')}</div>
