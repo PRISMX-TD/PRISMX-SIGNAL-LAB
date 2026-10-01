@@ -2481,7 +2481,6 @@
       "legend": "Legendary",
       "limited": "Limited edition",
       "special": "Special"
-    },
-    "appHint": "The app can't save images yet. Take a screenshot, or open the website in your phone browser to save it."
+    }
   }
 }

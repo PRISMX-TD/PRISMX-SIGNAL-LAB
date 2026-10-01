@@ -10,7 +10,8 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useDialogA11y } from '../../utils/useDialogA11y'
-import { userApi } from '../../api/client'
+import { shareApi, userApi } from '../../api/client'
+import { API_BASE } from '../../api/apiBase'
 import { CARD_STYLES, DEFAULT_STYLE, buildEnvData, type CardInput, type CardStyle, type CardType } from './cardEnv'
 import { BASE_CSS, CARD_H, CARD_W, exportCardPng, renderCardHtml } from './exportCard'
 import { fitHero } from './fitHero'
@@ -71,7 +72,7 @@ const SaveIcon = () => <svg {...ico}><path d="M12 3v12" /><path d="M7 10l5 5 5-5
 const Spinner = () => <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
 
 export default function ShareCardModal({ type, variants, enhance, onClose }: Props) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const sheetRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const keyId = useId().replace(/[^a-zA-Z0-9]/g, '')
@@ -157,19 +158,45 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
   // APK; show a clear hint meanwhile. iOS home-screen PWAs ignore <a download>, so Save goes through the share
   // sheet (which offers "Save Image") and the PNG is shown so it can be long-pressed.
   const isNativeApp = !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.()
+  // App 里两个按钮都走保存页（那里能下载也能分享）/ in the App both buttons go to the save page
+  const showShare = canShareFiles || isNativeApp
   const isIos = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   const shareFile = async (r: { blob: Blob }) => {
     try { await navigator.share({ files: [file(r.blob)] }); return true } catch (e) { return (e as DOMException)?.name === 'AbortError' }
   }
+  // App 里：图传到后端，换一个保存 / 分享页，用系统浏览器（Capacitor Browser，Chrome Custom Tab）打开，
+  // 那里能直接下载到手机，也能调起系统分享。同一张图只传一次。
+  // In the App: upload the PNG, get a save/share page and open it in the system browser (Capacitor Browser =
+  // Chrome Custom Tab), which can download to the phone and open the system share sheet. One upload per image.
+  const relayRef = useRef<{ blob: Blob; url: string } | null>(null)
+  const openInBrowser = async (r: { blob: Blob }) => {
+    setBusy(true); setError(false)
+    try {
+      if (relayRef.current?.blob !== r.blob) {
+        const { path } = await shareApi.uploadImage(r.blob)
+        const lang = (i18n.language || 'zh').slice(0, 2)
+        relayRef.current = { blob: r.blob, url: `${API_BASE}${path}?lang=${['zh', 'en', 'ja', 'th', 'vi'].includes(lang) ? lang : 'en'}` }
+      }
+      const url = relayRef.current.url
+      const cap = (window as unknown as { Capacitor?: { Plugins?: { Browser?: { open(o: { url: string }): Promise<void> } } } }).Capacitor
+      if (cap?.Plugins?.Browser) await cap.Plugins.Browser.open({ url })
+      else window.open(url, '_blank')
+    } catch (e) {
+      console.error('share relay failed', e)
+      setError(true)
+    } finally { setBusy(false) }
+  }
   const onShare = async () => {
     const r = await generate()
-    if (r) await shareFile(r)
+    if (!r) return
+    if (isNativeApp) { await openInBrowser(r); return }
+    await shareFile(r)
   }
   const onSave = async () => {
     const r = await generate()
     if (!r) return
+    if (isNativeApp) { await openInBrowser(r); return }
     setShowImage(true)
-    if (isNativeApp) return
     if (canShareFiles && isIos) { await shareFile(r); return }
     const a = document.createElement('a')
     a.href = r.url
@@ -217,7 +244,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
             ? <img src={result.url} alt={t(`share.title.${type}`)} className="mx-auto block rounded-[22px]" style={{ width: CARD_W * scale, height: CARD_H * scale }} />
             : <CardPreview css={card.css} html={card.html} scale={scale} />}
         </div>
-        {result && showImage && <p className="mt-2 text-center text-xs text-neutral-400">{t(isNativeApp ? 'share.appHint' : 'share.longPress')}</p>}
+        {result && showImage && <p className="mt-2 text-center text-xs text-neutral-400">{t('share.longPress')}</p>}
 
         <div className="mt-4">
           <div className="mb-2 text-xs text-neutral-400">{t('share.style')}</div>
@@ -244,16 +271,16 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
             不能分享（桌面、部分 WebView）时只剩「保存」，升为主按钮。生成中按钮内转圈，按下有回弹。
             Actions: two equal-height pills. With system share available, Share is primary (solid violet)
             and Save is an outlined secondary; without it Save alone becomes primary. */}
-        <div className="mt-5 grid gap-3" style={{ gridTemplateColumns: canShareFiles ? '1fr 1fr' : '1fr' }}>
-          {canShareFiles && (
+        <div className="mt-5 grid gap-3" style={{ gridTemplateColumns: showShare ? '1fr 1fr' : '1fr' }}>
+          {showShare && (
             <button type="button" onClick={onShare} disabled={busy} className={`${BTN} ${PRIMARY}`}>
               {busy ? <Spinner /> : <ShareIcon />}
               {busy ? t('share.generating') : t('share.share')}
             </button>
           )}
-          <button type="button" onClick={onSave} disabled={busy} className={`${BTN} ${canShareFiles ? SECONDARY : PRIMARY}`}>
-            {busy && !canShareFiles ? <Spinner /> : <SaveIcon />}
-            {busy && !canShareFiles ? t('share.generating') : t('share.save')}
+          <button type="button" onClick={onSave} disabled={busy} className={`${BTN} ${showShare ? SECONDARY : PRIMARY}`}>
+            {busy && !showShare ? <Spinner /> : <SaveIcon />}
+            {busy && !showShare ? t('share.generating') : t('share.save')}
           </button>
         </div>
 

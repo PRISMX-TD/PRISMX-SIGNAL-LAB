@@ -1184,6 +1184,16 @@ export const ticketApi = {
   },
 }
 
+// 分享卡图片中转：App（WebView）里存不了图，传上去换一个 24 小时有效的保存页，交给系统浏览器打开。
+// Share-card relay: the App (WebView) can't save images, so upload and get a 24-hour save page for the system browser.
+export const shareApi = {
+  uploadImage: (blob: Blob) => {
+    const form = new FormData()
+    form.append('file', new File([blob], 'signal-lab.png', { type: 'image/png' }))
+    return request<{ path: string }>('/share/image', { method: 'POST', body: form, requestTimeoutMs: 120_000 })
+  },
+}
+
 // 公告（用户端）/ announcements, user side
 export const announcementApi = {
   list: () => request<AnnouncementList>('/announcements'),
