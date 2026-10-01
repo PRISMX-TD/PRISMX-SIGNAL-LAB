@@ -175,7 +175,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
       if (relayRef.current?.blob !== r.blob) {
         const { path } = await shareApi.uploadImage(r.blob)
         const lang = (i18n.language || 'zh').slice(0, 2)
-        relayRef.current = { blob: r.blob, url: `${API_BASE}${path}?lang=${['zh', 'en', 'ja', 'th', 'vi'].includes(lang) ? lang : 'en'}` }
+        relayRef.current = { blob: r.blob, url: `${API_BASE || location.origin}/api${path}?lang=${['zh', 'en', 'ja', 'th', 'vi'].includes(lang) ? lang : 'en'}` }
       }
       const url = relayRef.current.url
       const cap = (window as unknown as { Capacitor?: { Plugins?: { Browser?: { open(o: { url: string }): Promise<void> } } } }).Capacitor
