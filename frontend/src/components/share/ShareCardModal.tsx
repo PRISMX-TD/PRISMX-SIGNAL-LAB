@@ -194,16 +194,42 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
       setError(true)
     } finally { setBusy(false) }
   }
+  // 新安装包自带原生 SignalImage 插件（APP Pack native/imageShare.ts）：直接存进相册 / 调起系统分享，
+  // 不跳出 App。旧安装包没有这个插件，Android 9 及以下 save 会 reject UNSUPPORTED，都退回浏览器那条路。
+  // New APKs ship the native SignalImage plugin: save straight to the gallery / open the system share sheet
+  // without leaving the App. Older APKs lack it, and Android 9- rejects save with UNSUPPORTED; both fall back.
+  type NativeImage = { save(o: { base64: string; fileName?: string }): Promise<unknown>; share(o: { base64: string; fileName?: string }): Promise<unknown> }
+  const nativeImage = (window as unknown as { Capacitor?: { Plugins?: { SignalImage?: NativeImage } } }).Capacitor?.Plugins?.SignalImage
+  const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => { if (!notice) return; const id = setTimeout(() => setNotice(null), 2500); return () => clearTimeout(id) }, [notice])
+  const toBase64 = (b: Blob) => new Promise<string>((res, rej) => {
+    const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = () => rej(fr.error); fr.readAsDataURL(b)
+  })
+  const nativeDo = async (r: { blob: Blob }, op: 'save' | 'share'): Promise<boolean> => {
+    if (!nativeImage) return false
+    setBusy(true); setError(false)
+    try {
+      const base64 = await toBase64(r.blob)
+      await nativeImage[op]({ base64, fileName: fileName.replace(/.png$/, '') })
+      if (op === 'save') setNotice(t('share.saved'))
+      return true
+    } catch (e) {
+      const code = (e as { code?: string })?.code
+      if (code === 'UNSUPPORTED') return false
+      console.error('native image op failed', e)
+      return false
+    } finally { setBusy(false) }
+  }
   const onShare = async () => {
     const r = await generate()
     if (!r) return
-    if (isNativeApp) { await openInBrowser(r, 'share'); return }
+    if (isNativeApp) { if (!(await nativeDo(r, 'share'))) await openInBrowser(r, 'share'); return }
     await shareFile(r)
   }
   const onSave = async () => {
     const r = await generate()
     if (!r) return
-    if (isNativeApp) { await openInBrowser(r, 'save'); return }
+    if (isNativeApp) { if (!(await nativeDo(r, 'save'))) await openInBrowser(r, 'save'); return }
     setShowImage(true)
     if (canShareFiles && isIos) { await shareFile(r); return }
     const a = document.createElement('a')
@@ -274,6 +300,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
         )}
 
         {error && <p className="mt-3 text-sm text-down" role="alert">{t('share.failed')}</p>}
+        {notice && <p className="mt-3 text-center text-sm text-up" role="status">{notice}</p>}
 
         {/* 操作区：两个等高胶囊按钮。能系统分享时「分享」是主按钮（品牌紫实底），「保存」是描边次按钮；
             不能分享（桌面、部分 WebView）时只剩「保存」，升为主按钮。生成中按钮内转圈，按下有回弹。
