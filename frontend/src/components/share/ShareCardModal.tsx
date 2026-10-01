@@ -55,6 +55,14 @@ function CardPreview({ css, html, scale }: { css: string; html: string; scale: n
   )
 }
 
+const BTN = 'inline-flex h-12 items-center justify-center gap-2 rounded-full px-5 text-[15px] font-semibold tracking-wide transition active:scale-[0.97] disabled:cursor-wait disabled:opacity-70'
+const PRIMARY = 'bg-prism-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.18)] hover:bg-prism-500'
+const SECONDARY = 'border border-white/15 bg-white/[0.04] text-neutral-100 hover:border-white/25 hover:bg-white/[0.08]'
+const ico = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
+const ShareIcon = () => <svg {...ico}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
+const SaveIcon = () => <svg {...ico}><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>
+const Spinner = () => <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
+
 export default function ShareCardModal({ type, variants, enhance, onClose }: Props) {
   const { t } = useTranslation()
   const sheetRef = useRef<HTMLDivElement>(null)
@@ -138,7 +146,9 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
     a.remove()
   }
 
-  const scale = Math.min(1, (Math.min(window.innerWidth, 480) - 64) / CARD_W)
+  // 挂载瞬间 innerWidth 可能读到 0（WebView 冷启动、隐藏标签），夹在 0.6 到 1 之间，免得算出负缩放。
+  // innerWidth can read 0 at mount (WebView cold start, hidden tab); clamp so the scale never goes negative.
+  const scale = Math.max(0.6, Math.min(1, (Math.min(window.innerWidth || 480, 480) - 64) / CARD_W))
 
   return createPortal(
     <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
@@ -197,16 +207,23 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
 
         {error && <p className="mt-3 text-sm text-down" role="alert">{t('share.failed')}</p>}
 
-        <div className="mt-5 flex gap-3">
+        {/* 操作区：两个等高胶囊按钮。能系统分享时「分享」是主按钮（品牌紫实底），「保存」是描边次按钮；
+            不能分享（桌面、部分 WebView）时只剩「保存」，升为主按钮。生成中按钮内转圈，按下有回弹。
+            Actions: two equal-height pills. With system share available, Share is primary (solid violet)
+            and Save is an outlined secondary; without it Save alone becomes primary. */}
+        <div className="mt-5 grid gap-3" style={{ gridTemplateColumns: canShareFiles ? '1fr 1fr' : '1fr' }}>
           {canShareFiles && (
-            <button type="button" onClick={onShare} disabled={busy} className="btn-primary flex-1 disabled:opacity-60">
+            <button type="button" onClick={onShare} disabled={busy} className={`${BTN} ${PRIMARY}`}>
+              {busy ? <Spinner /> : <ShareIcon />}
               {busy ? t('share.generating') : t('share.share')}
             </button>
           )}
-          <button type="button" onClick={onSave} disabled={busy} className={`${canShareFiles ? 'btn-ghost' : 'btn-primary'} flex-1 disabled:opacity-60`}>
+          <button type="button" onClick={onSave} disabled={busy} className={`${BTN} ${canShareFiles ? SECONDARY : PRIMARY}`}>
+            {busy && !canShareFiles ? <Spinner /> : <SaveIcon />}
             {busy && !canShareFiles ? t('share.generating') : t('share.save')}
           </button>
         </div>
+
       </div>
     </div>,
     document.body,
