@@ -1,8 +1,15 @@
 // 分享卡上每个数字的算法：用手算好的样例钉住，改动适配器时这里会先红。
 // Pins every number on the share cards against hand-computed examples.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { TFunction } from 'i18next'
-import { badgeCard, compCard, monthCard, tradeCard } from './cardData'
+import { badgeCard, compCard, loadMonthOfficial, loadTradeReturn, monthCard, tradeCard } from './cardData'
+
+// 后端分享接口的替身：返回收益榜口径的值 / stand-in for the backend share endpoints
+const api = vi.hoisted(() => ({
+  shareTrade: vi.fn(async () => ({ returnPct: 12.3456 })),
+  shareMonth: vi.fn(async () => ({ returnPct: 1186.123, total: 5000, trades: 17, wins: 10 })),
+}))
+vi.mock('../../api/client', () => ({ gamificationApi: api }))
 
 // 测试里的 t 原样回 key（带参数时拼出来），只看数字不看文案。
 // The test t returns the key (with params appended) so only numbers are asserted.
@@ -14,26 +21,30 @@ describe('tradeCard', () => {
     // 不带时区 = UTC（与后端一致）/ naive = UTC, like the backend
     openTime: '2026-09-30T10:35:00', closeTime: '2026-09-30T13:47:00', net: 1284,
   }
-  it('pips, return and holding time', () => {
-    const c = tradeCard(t, row, 38784)
+  it('pips and holding time; return is never estimated client-side', () => {
+    const c = tradeCard(t, row)
     expect(c.pips).toBe(256.8)                 // (4038.03 - 4012.35) / 0.1
-    expect(c.pct).toBe(3.42)                   // 1284 / (38784 - 1284) = 3.424%
+    expect(c.pct).toBeNull()
     expect(c.hold).toBe('share.card.durH:{"h":3,"m":12}')
     expect(c.pnl).toBe(1284)
   })
-  it('losing short: pips negative, return negative', () => {
-    const c = tradeCard(t, { ...row, side: 'SELL', openPrice: 4026.1, closePrice: 4034.35, net: -412.5, openTime: '2026-09-29T14:21:00Z', closeTime: '2026-09-29T15:08:00Z' }, 37087.5)
+  it('losing short: pips negative', () => {
+    const c = tradeCard(t, { ...row, side: 'SELL', openPrice: 4026.1, closePrice: 4034.35, net: -412.5, openTime: '2026-09-29T14:21:00Z', closeTime: '2026-09-29T15:08:00Z' })
     expect(c.pips).toBe(-82.5)                 // price rose 8.25 against a short
-    expect(c.pct).toBe(-1.1)                   // -412.5 / 37500
     expect(c.hold).toBe('share.card.durM:{"m":47}')
   })
-  it('no balance -> no return (privacy unavailable); unknown symbol -> no pips', () => {
-    expect(tradeCard(t, row, null).pct).toBeNull()
-    expect(tradeCard(t, { ...row, symbol: 'FOOBAR' }, 1000).pips).toBeNull()
+  it('unknown symbol -> no pips', () => {
+    expect(tradeCard(t, { ...row, symbol: 'FOOBAR' }).pips).toBeNull()
+  })
+  it('official return comes from the backend, sent as UTC ISO', async () => {
+    expect(await loadTradeReturn('602907', row)).toBe(12.35)
+    expect(api.shareTrade).toHaveBeenCalledWith('602907', '2026-09-30T10:35:00.000Z', '2026-09-30T13:47:00.000Z', 1284)
+    expect(await loadTradeReturn('602907', { ...row, openTime: null })).toBeNull()   // legacy row
+    expect(await loadTradeReturn(undefined, row)).toBeNull()
   })
   it('naive and Z timestamps give the same holding time', () => {
-    const a = tradeCard(t, row, null).hold
-    const b = tradeCard(t, { ...row, openTime: row.openTime + 'Z', closeTime: row.closeTime + 'Z' }, null).hold
+    const a = tradeCard(t, row).hold
+    const b = tradeCard(t, { ...row, openTime: row.openTime + 'Z', closeTime: row.closeTime + 'Z' }).hold
     expect(a).toBe(b)
   })
 })
@@ -47,19 +58,27 @@ describe('monthCard', () => {
     { profit: 200, closedAt: '2026-09-10T03:00:00', mt5Login: '1', positionTicket: 13 },
     { profit: 999, closedAt: '2026-08-31T03:00:00', mt5Login: '1', positionTicket: 9 }, // other month
   ]
-  it('totals, per-position count and win rate', () => {
-    const m = monthCard(trades, 2026, 9, 10320)!
+  it('totals, per-position count and win rate (UTC month)', () => {
+    const m = monthCard(trades, 2026, 9)!
     expect(m.total).toBe(320)
     expect(m.trades).toBe(3)                   // positions 11, 12, 13
     expect(m.winRate).toBe(66.7)               // 2 of 3
-    expect(m.pct).toBe(3.2)                    // 320 / (10320 - 320)
+    expect(m.pct).toBeNull()                   // never estimated client-side
     expect(m.days.length).toBe(30)
     expect(m.bestDay).toBe(10)
     expect(m.days.reduce((a, b) => a + b, 0)).toBe(320)
     expect(m.firstWeekday).toBe(2)             // 2026-09-01 is a Tuesday
   })
   it('empty month -> null', () => {
-    expect(monthCard(trades, 2026, 7, 1000)).toBeNull()
+    expect(monthCard(trades, 2026, 7)).toBeNull()
+  })
+  it('UTC boundary: 2026-09-30T23:30Z belongs to September even in UTC+8', () => {
+    expect(monthCard([{ profit: 5, closedAt: '2026-09-30T23:30:00Z' }], 2026, 9)!.days[29]).toBe(5)
+  })
+  it('official month numbers replace the client ones', async () => {
+    const m = await loadMonthOfficial('602907', monthCard(trades, 2026, 9)!)
+    expect(api.shareMonth).toHaveBeenCalledWith('602907', '2026-09')
+    expect([m.pct, m.total, m.trades, m.winRate]).toEqual([1186.1, 5000, 17, 58.8])
   })
 })
 

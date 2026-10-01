@@ -1116,6 +1116,14 @@ export const gamificationApi = {
   // separate from me(), 60s server-side cached — safe to poll alongside the
   // existing 45s win-rate cadence without re-triggering a full recompute.
   winrateSummary: () => request<GamificationWinRateSummary>('/gamification/winrate-summary'),
+  // 分享卡收益率：与收益榜同一口径（期初本金 + 出入金，不含已实现盈亏）。returnPct 为 null = 没有基线或本金低于入榜门槛。
+  // Share-card returns on the return board's definition; returnPct null = no baseline or capital under the floor.
+  shareMonth: (login: string, month: string) =>
+    request<{ returnPct: number | null; total: number | null; trades: number | null; wins: number | null }>(
+      `/gamification/share/month?login=${encodeURIComponent(login)}&month=${encodeURIComponent(month)}`),
+  shareTrade: (login: string, openedAt: string, closedAt: string, profit: number) =>
+    request<{ returnPct: number | null }>(
+      `/gamification/share/trade?login=${encodeURIComponent(login)}&opened_at=${encodeURIComponent(openedAt)}&closed_at=${encodeURIComponent(closedAt)}&profit=${profit}`),
   // 排行榜（设计 §4.3）：period 既接受 "week"/"month"（当前进行中周期），也
   // 接受显式周期 key（如 "2026-W36"）访问已封存的历史周期。403 = 内测未开放
   // （见 gamification.admin.leaderboardSwitch）。

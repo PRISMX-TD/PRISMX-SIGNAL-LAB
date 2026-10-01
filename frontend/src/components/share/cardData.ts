@@ -64,16 +64,15 @@ export interface TradeRowLike {
   openPrice: number | null; closePrice: number | null; openTime: string | null; closeTime: string | null; net: number
 }
 
-export function tradeCard(t: TFunction, row: TradeRowLike, balance: number | null | undefined, path?: number[]): TradeCard {
+export function tradeCard(t: TFunction, row: TradeRowLike, path?: number[]): TradeCard {
   const open = row.openPrice ?? row.closePrice ?? 0
   const close = row.closePrice ?? open
   const dir = row.side === 'BUY' ? 1 : -1
   const rawPips = row.openPrice != null && row.closePrice != null ? toPips(row.symbol, row.closePrice - row.openPrice) : null
   const pips = rawPips == null ? null : Math.round(rawPips * 10) / 10 * Math.sign((close - open) * dir || row.net || 1)
-  // 收益率按「平仓前余额」估算（当前余额减去这笔盈亏），拿不到余额就不给，隐私模式随之关闭。
-  // Return is estimated against the pre-trade balance (current balance minus this P&L); without it, privacy mode is off.
-  const base = balance != null && balance > 0 ? balance - row.net : 0
-  const pct = base > 0 ? Math.round((row.net / base) * 10000) / 100 : null
+  // 收益率不在前端估算：由 loadTradeReturn 向后端取收益榜同口径的值后补上，取不到就不显示（隐私模式也随之关闭）。
+  // Return isn't estimated here: loadTradeReturn fetches the board-definition value; without it no % is shown.
+  const pct: number | null = null
   const held = ms(row.closeTime) - ms(row.openTime)
   const [elSym, elNum] = elementOf(row.symbol)
   return {
@@ -89,17 +88,17 @@ export function tradeCard(t: TFunction, row: TradeRowLike, balance: number | nul
 
 export interface ClosedLike { profit: number; closedAt: string | null; mt5Login?: string; positionTicket?: number }
 
-// 按本地时区把平仓记录归到自然月，逐日汇总净盈亏。
-// Bucket closed trades into a calendar month (local time) and sum net P&L per day.
-export function monthCard(trades: ClosedLike[], year: number, month: number, balance: number | null | undefined): MonthCard | null {
+// 按 UTC 自然月归期、逐日汇总净盈亏——与收益榜月榜（9/1 - 9/30 UTC）同一个周期边界。
+// Bucket by UTC calendar month and day, the same period boundary as the monthly return board.
+export function monthCard(trades: ClosedLike[], year: number, month: number): MonthCard | null {
   const inMonth = trades.filter((tr) => {
     const d = parseTime(tr.closedAt)
-    return !!d && d.getFullYear() === year && d.getMonth() + 1 === month
+    return !!d && d.getUTCFullYear() === year && d.getUTCMonth() + 1 === month
   })
   if (!inMonth.length) return null
-  const nDays = new Date(year, month, 0).getDate()
+  const nDays = new Date(Date.UTC(year, month, 0)).getUTCDate()
   const days = Array.from({ length: nDays }, () => 0)
-  for (const tr of inMonth) days[parseTime(tr.closedAt)!.getDate() - 1] += tr.profit
+  for (const tr of inMonth) days[parseTime(tr.closedAt)!.getUTCDate() - 1] += tr.profit
   const r2 = (v: number) => Math.round(v * 100) / 100
   for (let i = 0; i < nDays; i++) days[i] = r2(days[i])
   const total = r2(inMonth.reduce((s, tr) => s + tr.profit, 0))
@@ -114,14 +113,13 @@ export function monthCard(trades: ClosedLike[], year: number, month: number, bal
   const wins = [...byPos.values()].filter((v) => v > 0).length
   let best = 0
   days.forEach((v, i) => { if (v > days[best]) best = i })
-  const dow = new Date(year, month - 1, 1).getDay()
-  const base = balance != null && balance > 0 ? balance - total : 0
+  const dow = new Date(Date.UTC(year, month - 1, 1)).getUTCDay()
   return {
     year, month,
     abbr: new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(year, month - 1, 1)),
     firstWeekday: dow === 0 ? 7 : dow,
     days, total,
-    pct: base > 0 ? Math.round((total / base) * 1000) / 10 : null,
+    pct: null,
     winRate: Math.round((wins / nTrades) * 1000) / 10,
     trades: nTrades, bestDay: best + 1, bestPnl: days[best],
   }
@@ -173,4 +171,32 @@ export async function loadTradePath(row: TradeRowLike): Promise<number[] | null>
   const closes = r.bars.filter((b) => sec(b.t) >= t0 - step * 60 && sec(b.t) <= t1).map((b) => b.c)
   if (closes.length < 3) return null
   return [row.openPrice, ...closes.slice(1, -1), row.closePrice]
+}
+
+// ── 官方收益率（收益榜口径）/ official returns on the board definition ──
+
+// 单笔：openTime 缺失（2026-09-07 前的旧记录）就没法取「开仓时本金」，不显示百分比。
+// Single trade: rows without openTime (pre-2026-09-07) can't resolve capital-at-open, so no %.
+export async function loadTradeReturn(login: string | undefined, row: TradeRowLike): Promise<number | null> {
+  if (!login || !row.openTime || !row.closeTime) return null
+  const { gamificationApi } = await import('../../api/client')
+  const iso = (v: string) => parseTime(v)!.toISOString()
+  const r = await gamificationApi.shareTrade(login, iso(row.openTime), iso(row.closeTime), row.net)
+  return r.returnPct == null ? null : Math.round(r.returnPct * 100) / 100
+}
+
+// 月度：收益率、盈亏、笔数、胜率全部换成收益榜同一次计算的结果，日历仍用前端逐日汇总画。
+// Month: return, total, count and win rate all come from the board's computation; the calendar stays client-side.
+export async function loadMonthOfficial(login: string | undefined, m: MonthCard): Promise<MonthCard> {
+  if (!login) return m
+  const { gamificationApi } = await import('../../api/client')
+  const r = await gamificationApi.shareMonth(login, `${m.year}-${String(m.month).padStart(2, '0')}`)
+  if (r.returnPct == null || !r.trades) return m
+  return {
+    ...m,
+    pct: Math.round(r.returnPct * 10) / 10,
+    total: Math.round((r.total ?? m.total) * 100) / 100,
+    trades: r.trades,
+    winRate: Math.round(((r.wins ?? 0) / r.trades) * 1000) / 10,
+  }
 }

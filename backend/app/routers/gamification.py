@@ -23,7 +23,8 @@ from app.services.gamification import (
 from app.services.gamification import identity, periods
 from app.services.gamification.badge_progress import badge_progress
 from app.services.gamification.stats import compute_account_lifetime_stats, load_trade_data
-from app.services.gamification.boards import _resolved_in_period, board_gates, leaderboard_cache_key
+from app.services.gamification.boards import (_resolved_in_period, board_gates, leaderboard_cache_key,
+                                              position_denominator, return_score)
 from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
@@ -633,6 +634,73 @@ def gamification_leaderboard(request: Request, board: str, period: str,
                               db: Session = Depends(get_db),
                               user: User = Depends(require_leaderboard_visible)):
     return build_leaderboard_payload(db, user, board, period)
+
+
+# ---- 分享卡收益率 / share-card returns ----
+# 分享卡上的收益率必须和收益榜同一个数（2026-10-01 用户定的口径）：分母是收益榜的
+# 「当时本金」——期初基线 + 截至当时的出入金，不含已实现盈亏——而不是前端拿当前余额
+# 倒推的估算。这里只读当前用户自己的基线，复用 boards 的同一组函数，不另起一套算法。
+# 没有基线（该账户这个月没拍照）或本金低于入榜门槛时返回 null，前端就不显示百分比。
+# Share-card returns must equal the return board's number (product call, 2026-10-01):
+# the denominator is the board's capital-at-time (period baseline + flows so far, excluding
+# realized P&L), not a frontend estimate from today's balance. Reads only the caller's own
+# baselines and reuses the boards functions. null when there's no baseline or the capital
+# is under the board floor, and the frontend then shows no percentage.
+_MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+
+def _parse_iso_utc(v: str) -> datetime:
+    try:
+        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=422, detail="bad datetime")
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _share_baseline(db: Session, user: User, login: str, period_key: str):
+    return db.query(PeriodBaseline).filter(
+        PeriodBaseline.user_id == user.id, PeriodBaseline.mt5_login == login,
+        PeriodBaseline.period_key == period_key).first()
+
+
+@router.get("/share/month")
+@limiter.limit(settings.RATE_LIMIT_GAMIFICATION)
+def gamification_share_month(request: Request, login: str, month: str,
+                              db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """月度成绩单：与月榜同口径的收益率 + 归期内的整仓盈亏、笔数、胜数。
+    Monthly card: the month board's return plus the period's resolved P&L, count and wins."""
+    if not _MONTH_RE.match(month):
+        raise HTTPException(status_code=422, detail="bad month")
+    b = _share_baseline(db, user, login, month)
+    if b is None:
+        return {"returnPct": None, "total": None, "trades": None, "wins": None}
+    resolved = _resolved_in_period(db, user.id, {login}, month, {login: b.taken_at}).get(login, [])
+    gates = board_gates(get_gamification_settings(db))
+    scored = return_score(b, resolved, gates["min_baseline_usd"]) if resolved else None
+    profits = [p for _o, _c, p in resolved]
+    return {
+        "returnPct": scored[0] * 100 if scored else None,
+        "total": sum(profits),
+        "trades": len(profits),
+        "wins": sum(1 for p in profits if p > 0),
+    }
+
+
+@router.get("/share/trade")
+@limiter.limit(settings.RATE_LIMIT_GAMIFICATION)
+def gamification_share_trade(request: Request, login: str, opened_at: str, closed_at: str, profit: float,
+                              db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """单笔战报：这笔盈亏 ÷ 收益榜对这笔仓位用的本金（开/平仓时刻本金取较大者）。
+    Single trade: profit over the capital the return board uses for this position."""
+    opened, closed = _parse_iso_utc(opened_at), _parse_iso_utc(closed_at)
+    b = _share_baseline(db, user, login, periods.month_key(closed))
+    if b is None:
+        return {"returnPct": None}
+    gates = board_gates(get_gamification_settings(db))
+    denom = position_denominator(b, opened, closed)
+    if denom <= 0 or denom < gates["min_baseline_usd"]:
+        return {"returnPct": None}
+    return {"returnPct": profit / denom * 100}
 
 
 # ---- 公开主页 / public profile（设计与取舍见 .trae 文档：产品文档 §5.6）----
