@@ -169,7 +169,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
   // In the App: upload the PNG, get a save/share page and open it in the system browser (Capacitor Browser =
   // Chrome Custom Tab), which can download to the phone and open the system share sheet. One upload per image.
   const relayRef = useRef<{ blob: Blob; url: string } | null>(null)
-  const openInBrowser = async (r: { blob: Blob }) => {
+  const openInBrowser = async (r: { blob: Blob }, mode: 'save' | 'share') => {
     setBusy(true); setError(false)
     try {
       if (relayRef.current?.blob !== r.blob) {
@@ -177,10 +177,18 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
         const lang = (i18n.language || 'zh').slice(0, 2)
         relayRef.current = { blob: r.blob, url: `${API_BASE || location.origin}/api${path}?lang=${['zh', 'en', 'ja', 'th', 'vi'].includes(lang) ? lang : 'en'}` }
       }
-      const url = relayRef.current.url
-      const cap = (window as unknown as { Capacitor?: { Plugins?: { Browser?: { open(o: { url: string }): Promise<void> } } } }).Capacitor
-      if (cap?.Plugins?.Browser) await cap.Plugins.Browser.open({ url })
-      else window.open(url, '_blank')
+      // 保存：直接打开图片附件地址，系统浏览器交给下载管理器存到手机，随后把这个空白标签关掉；
+      // 分享：打开保存页（Web Share 需要一个页面）。
+      // Save: open the image's attachment URL so the system browser hands it to the download manager, then close
+      // the blank tab. Share: open the page (Web Share needs one).
+      const page = relayRef.current.url
+      const url = mode === 'save' ? page.replace(/\?lang=.*$/, '') + '.png?dl=1' : page
+      const cap = (window as unknown as { Capacitor?: { Plugins?: { Browser?: { open(o: { url: string }): Promise<void>; close(): Promise<void> } } } }).Capacitor
+      const browser = cap?.Plugins?.Browser
+      if (browser) {
+        await browser.open({ url })
+        if (mode === 'save') setTimeout(() => { browser.close().catch(() => {}) }, 2500)
+      } else window.open(url, '_blank')
     } catch (e) {
       console.error('share relay failed', e)
       setError(true)
@@ -189,13 +197,13 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
   const onShare = async () => {
     const r = await generate()
     if (!r) return
-    if (isNativeApp) { await openInBrowser(r); return }
+    if (isNativeApp) { await openInBrowser(r, 'share'); return }
     await shareFile(r)
   }
   const onSave = async () => {
     const r = await generate()
     if (!r) return
-    if (isNativeApp) { await openInBrowser(r); return }
+    if (isNativeApp) { await openInBrowser(r, 'save'); return }
     setShowImage(true)
     if (canShareFiles && isIos) { await shareFile(r); return }
     const a = document.createElement('a')

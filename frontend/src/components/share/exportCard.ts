@@ -52,7 +52,9 @@ export async function exportCardPng(css: string, html: string, scale = 3): Promi
   const host = document.createElement('div')
   host.style.cssText = `width:${CARD_W}px;height:${CARD_H}px`
   const st = document.createElement('style')
-  st.textContent = fonts + BASE_CSS + css
+  // 导出图不要圆角：圆角外的四角是透明像素，相册和聊天软件会把它显示成白边。直角让卡片底色铺满整张图。
+  // No rounded corners in the export: the transparent corner pixels show up as white in galleries and chats.
+  st.textContent = fonts + BASE_CSS + css + '.sl-card{border-radius:0!important}'
   host.appendChild(st)
   const card = document.createElement('div')
   card.innerHTML = html.split('/logo-256.png').join(logo)
