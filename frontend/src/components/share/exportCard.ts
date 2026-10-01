@@ -74,9 +74,15 @@ export async function exportCardPng(css: string, html: string, scale = 3): Promi
   }
   // XMLSerializer 输出合法 XHTML（<img> 自闭合、带命名空间），foreignObject 才解析得了。
   // XMLSerializer emits valid XHTML (self-closed <img>, namespaced), which foreignObject requires.
+  host.style.transform = `scale(${scale})`
+  host.style.transformOrigin = '0 0'
   const xhtml = new XMLSerializer().serializeToString(host)
   const W = CARD_W * scale, H = CARD_H * scale
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${CARD_W} ${CARD_H}"><foreignObject x="0" y="0" width="${CARD_W}" height="${CARD_H}">${xhtml}</foreignObject></svg>`
+  // 放大用 foreignObject 里的 CSS transform，不用 viewBox：iOS Safari 不按 viewBox 缩放 foreignObject 的
+  // 网页内容，只按原尺寸画在左上角（导出图只有左上 1/3 是卡片，其余透明显示成白）。CSS transform 两边一致。
+  // Upscale with a CSS transform inside the foreignObject, not the viewBox: iOS Safari ignores viewBox scaling
+  // for foreignObject HTML and paints it unscaled in the top-left third. A CSS transform behaves the same everywhere.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><foreignObject x="0" y="0" width="${W}" height="${H}">${xhtml}</foreignObject></svg>`
   const img = new Image()
   img.decoding = 'sync'
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
