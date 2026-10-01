@@ -1387,6 +1387,12 @@ export interface TicketReply {
   authorEmail: string
   authorRole: 'user' | 'admin'
   body: string
+  // 附图的签名 URL（几小时后过期，别存）；签不出来的那几张只算进 imageCount。
+  // 列表预览里 images 恒为空，只有 imageCount。
+  // Signed image URLs (expire after a few hours; don't persist). Images that couldn't be
+  // signed only count towards imageCount. List previews carry imageCount alone.
+  images?: string[]
+  imageCount?: number
   createdAt: string
 }
 

@@ -1349,6 +1349,21 @@
     "notification": {
       "newReply": "新しい返信",
       "body": "{{email}}がチケットに返信しました"
+    },
+    "images": {
+      "add": "画像を追加",
+      "hint": "最大 {{max}} 枚。PC ではスクリーンショットを直接貼り付けできます",
+      "uploading": "アップロード中…",
+      "remove": "画像を削除",
+      "view": "拡大表示",
+      "unavailable": "画像を表示できません",
+      "preview": "[画像]",
+      "limit": "1 件につき画像は最大 {{max}} 枚です",
+      "failed": "画像のアップロードに失敗しました。もう一度お試しください",
+      "badType": "PNG・JPEG・GIF・WebP 形式の画像のみ対応しています",
+      "tooBig": "画像が大きすぎます（1 枚 4MB まで）",
+      "rateLimited": "アップロードが多すぎます。しばらくしてからお試しください",
+      "noStorage": "現在、画像をアップロードできません。文章でご説明ください"
     }
   },
   "dashboard": {

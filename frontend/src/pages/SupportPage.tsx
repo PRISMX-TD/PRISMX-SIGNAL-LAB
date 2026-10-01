@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
+import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../components/TicketImages'
 import { fmtDayShort, parseTime } from '../api/utils'
 import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
@@ -76,10 +77,12 @@ function MetaChips({ category, priority, t }: { category: TicketCategory; priori
   )
 }
 
-function Message({ authorEmail, authorRole, body, createdAt, index, t }: {
+function Message({ authorEmail, authorRole, body, images, imageCount, createdAt, index, t }: {
   authorEmail: string
   authorRole: string
   body: string
+  images?: string[]
+  imageCount?: number
   createdAt: string
   index: number
   t: ReturnType<typeof useTranslation>['t']
@@ -97,7 +100,8 @@ function Message({ authorEmail, authorRole, body, createdAt, index, t }: {
           {isAdmin && authorEmail && <span className="staff">{t('admin.staff')}</span>}
           <span className="time num">{fmtStamp(createdAt)}</span>
         </div>
-        <p className="sup-msg-body">{body}</p>
+        {body && <p className="sup-msg-body">{body}</p>}
+        <TicketImageGrid urls={images} count={imageCount} />
       </div>
     </div>
   )
@@ -120,6 +124,10 @@ export default function SupportPage() {
 
   const [error, setError] = useState('')
   const showError = (msg: string) => { setError(msg); setTimeout(() => setError(''), 4000) }
+
+  // 新建表单与回复框各一组附图，互不串 / one set of pending images per composer
+  const formImages = useTicketImages(showError)
+  const replyImages = useTicketImages(showError)
 
   const loadTickets = async () => {
     try {
@@ -159,14 +167,16 @@ export default function SupportPage() {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-    if (!title.trim() || !body.trim()) return
+    if (!title.trim() || (!body.trim() && !formImages.keys.length) || formImages.uploading) return
     setSubmitting(true)
     try {
       const ticket = await ticketApi.create({
         title: title.trim(),
         category,
         body: body.trim(),
+        images: formImages.keys,
       })
+      formImages.clear()
       setView({ ticket })
       loadTickets()
     } catch {
@@ -176,13 +186,16 @@ export default function SupportPage() {
     }
   }
 
+  const canSendReply = (!!replyText.trim() || replyImages.keys.length > 0) && !replyImages.uploading
+
   const handleReply = async (ticketId: string, reopen = false) => {
-    if (!replyText.trim()) return
+    if (!canSendReply) return
     setReplying(true)
     try {
-      const ticket = await ticketApi.reply(ticketId, replyText.trim(), reopen)
+      const ticket = await ticketApi.reply(ticketId, replyText.trim(), reopen, replyImages.keys)
       setView({ ticket })
       setReplyText('')
+      replyImages.clear()
     } catch {
       showError(t('common.error'))
     } finally {
@@ -191,12 +204,13 @@ export default function SupportPage() {
   }
 
   const handleReopen = async (ticketId: string) => {
-    if (!replyText.trim()) return
+    if (!canSendReply) return
     setReopening(true)
     try {
-      const ticket = await ticketApi.reply(ticketId, replyText.trim(), true)
+      const ticket = await ticketApi.reply(ticketId, replyText.trim(), true, replyImages.keys)
       setView({ ticket })
       setReplyText('')
+      replyImages.clear()
     } catch {
       showError(t('common.error'))
     } finally {
@@ -205,7 +219,9 @@ export default function SupportPage() {
   }
 
   const errorBanner = error ? <div className="sup-msg err" role="alert">{error}</div> : null
-  const backToList = { label: t('tickets.backToList'), onClick: () => { setView('list'); loadTickets() } }
+  // 退回列表时丢掉回复框里没发的图，免得点进另一条工单时被一起发过去。
+  // Leaving the thread drops unsent reply images, so they can't ride along into another ticket.
+  const backToList = { label: t('tickets.backToList'), onClick: () => { replyImages.clear(); setView('list'); loadTickets() } }
 
   // Form view
   if (view === 'form') {
@@ -213,7 +229,7 @@ export default function SupportPage() {
       <div className="sup-wrap">
         {errorBanner}
         <PageHead as="h1" title={t('tickets.newTicket')} subtitle={t('tickets.form.intro')} back={{ label: t('tickets.backToList'), onClick: () => setView('list') }} />
-        <div className="card glass sup-form-card">
+        <div className="card glass sup-form-card" {...formImages.dropProps}>
           <ul className="sup-tips">
             <li>{t('tickets.form.tip1')}</li>
             <li>{t('tickets.form.tip2')}</li>
@@ -241,12 +257,16 @@ export default function SupportPage() {
             </div>
             <div className="sup-field">
               <label htmlFor="ticket-body">{t('tickets.form.content')}</label>
+              {/* 不再 required：只交一张截图也算写了内容（handleSubmit 里查「文字或图片至少一样」）。
+                  No longer required: a lone screenshot counts as content (handleSubmit checks text or images). */}
               <textarea id="ticket-body" className="input sup-textarea" value={body}
-                onChange={(e) => setBody(e.target.value)}
-                placeholder={t('tickets.form.contentPlaceholder')} maxLength={5000} required />
+                onChange={(e) => setBody(e.target.value)} onPaste={formImages.onPaste}
+                placeholder={t('tickets.form.contentPlaceholder')} maxLength={5000} />
+              <TicketImagePicker state={formImages} disabled={submitting} />
             </div>
-            <button type="submit" className="btn btn-primary sup-submit" disabled={submitting}>
-              {submitting ? t('tickets.form.submitting') : t('tickets.form.submit')}
+            <button type="submit" className="btn btn-primary sup-submit"
+              disabled={submitting || formImages.uploading || (!body.trim() && !formImages.keys.length)}>
+              {submitting ? t('tickets.form.submitting') : formImages.uploading ? t('tickets.images.uploading') : t('tickets.form.submit')}
             </button>
           </form>
         </div>
@@ -281,24 +301,26 @@ export default function SupportPage() {
               <p className="sup-thread-empty">{t('tickets.empty')}</p>
             ) : (
               ticket.replies.map((r, i) => (
-                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body} createdAt={r.createdAt} t={t} />
+                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body}
+                  images={r.images} imageCount={r.imageCount} createdAt={r.createdAt} t={t} />
               ))
             )}
           </section>
 
-          <section className="card glass sup-compose">
+          <section className="card glass sup-compose" {...replyImages.dropProps}>
             <textarea className="input sup-textarea" value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
+              onChange={(e) => setReplyText(e.target.value)} onPaste={replyImages.onPaste}
               placeholder={t('tickets.replyPlaceholder')} maxLength={5000} aria-label={t('tickets.reply')} />
+            <TicketImagePicker state={replyImages} disabled={busy} />
             <div className="sup-compose-foot">
               {closed && <p>{t('tickets.closedWarning')}</p>}
               <button
                 type="button"
                 onClick={() => (closed ? handleReopen(ticket.id) : handleReply(ticket.id))}
                 className="btn btn-primary"
-                disabled={busy || !replyText.trim()}
+                disabled={busy || !canSendReply}
               >
-                {busy ? '…' : closed ? t('tickets.reopen') : t('tickets.reply')}
+                {busy ? '…' : replyImages.uploading ? t('tickets.images.uploading') : closed ? t('tickets.reopen') : t('tickets.reply')}
               </button>
             </div>
           </section>
@@ -366,7 +388,7 @@ export default function SupportPage() {
                   <span className="sup-last">
                     <span className="who">{ticket.latestReply.authorRole === 'admin' ? t('admin.staff') : t('tickets.me')}</span>
                     {' · '}
-                    {ticket.latestReply.body}
+                    {ticket.latestReply.body || t('tickets.images.preview')}
                   </span>
                 )}
               </span>

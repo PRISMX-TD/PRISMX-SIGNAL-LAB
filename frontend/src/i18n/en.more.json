@@ -1987,6 +1987,21 @@
     "notification": {
       "newReply": "New reply",
       "body": "{{email}} replied to your ticket"
+    },
+    "images": {
+      "add": "Add images",
+      "hint": "Up to {{max}}; on a computer you can paste a screenshot",
+      "uploading": "Uploading…",
+      "remove": "Remove image",
+      "view": "View full size",
+      "unavailable": "Image unavailable",
+      "preview": "[Image]",
+      "limit": "Up to {{max}} images per message",
+      "failed": "Image upload failed, please try again",
+      "badType": "Only PNG, JPEG, GIF and WebP images are supported",
+      "tooBig": "Image too large (4 MB max)",
+      "rateLimited": "Too many uploads, please try again later",
+      "noStorage": "Image upload is unavailable right now; please describe it in text"
     }
   },
   "dashboard": {

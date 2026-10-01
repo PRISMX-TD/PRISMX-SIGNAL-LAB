@@ -1152,13 +1152,28 @@ export const ticketApi = {
   get: (id: string) => request<Ticket>(`/tickets/${encodeURIComponent(id)}`),
   // 用户不设优先级：后端默认 normal，之后由管理员在后台判定。
   // Users don't set priority: the backend defaults to normal and admins triage it later.
-  create: (payload: { title: string; category: TicketCategory; body: string }) =>
+  // images 是 uploadImage 返回的对象键；正文与图片至少有一样。
+  // images are keys from uploadImage; a message needs text, images, or both.
+  create: (payload: { title: string; category: TicketCategory; body: string; images?: string[] }) =>
     request<Ticket>('/tickets', { method: 'POST', body: JSON.stringify(payload) }),
-  reply: (id: string, body: string, reopen = false) =>
+  reply: (id: string, body: string, reopen = false, images: string[] = []) =>
     request<Ticket>(`/tickets/${encodeURIComponent(id)}/reply`, {
       method: 'POST',
-      body: JSON.stringify({ body, reopen }),
+      body: JSON.stringify({ body, reopen, images }),
     }),
+  // 上传一张工单截图（进私有桶），返回对象键。用户和管理员共用。超时 2 分钟，理由同
+  // adminApi.uploadImage：上传要等整个文件推上去才有响应头。
+  // Upload one ticket screenshot (private bucket) and get its object key. Shared by users
+  // and admins. Two-minute timeout for the same reason as adminApi.uploadImage.
+  uploadImage: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<{ key: string }>('/tickets/upload-image', {
+      method: 'POST',
+      body: form,
+      requestTimeoutMs: 120_000,
+    })
+  },
 }
 
 // 公告（用户端）/ announcements, user side
@@ -1451,7 +1466,7 @@ export const adminApi = {
       return request<TicketListItem[]>(`/admin/tickets${suffix}`, { signal })
     },
     getTicket: (id: string) => request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`),
-    replyTicket: (id: string, body: string, opts?: { status?: TicketStatus; priority?: TicketPriority }) =>
+    replyTicket: (id: string, body: string, opts?: { status?: TicketStatus; priority?: TicketPriority; images?: string[] }) =>
       request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}/reply`, {
         method: 'POST',
         body: JSON.stringify({ body, ...opts }),

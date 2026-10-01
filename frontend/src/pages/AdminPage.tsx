@@ -16,6 +16,7 @@ import DisableUserModal from '../components/admin/DisableUserModal'
 import { isUserDisabled } from '../components/admin/userStatus'
 import Pager from '../components/Pager'
 import { SkeletonLine } from '../components/Skeleton'
+import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../components/TicketImages'
 import OverviewPanel from '../components/admin/overview/OverviewPanel'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
@@ -129,6 +130,7 @@ function AdminTicketsPanel() {
   const [replyPriority, setReplyPriority] = useState<TicketPriority | ''>('')
   const [sending, setSending] = useState(false)
   const { toast, showToast } = useToast()
+  const replyImages = useTicketImages((msg) => showToast('err', msg))
 
   // 每次加载中止上一次：两个筛选下拉是最容易连点的地方，先发的响应后到就会把
   // 当前筛选的结果覆盖掉，表格与筛选条对不上且没有任何提示。中止之后 fetch 会以
@@ -193,21 +195,26 @@ function AdminTicketsPanel() {
       setReplyText('')
       setReplyStatus('')
       setReplyPriority('')
+      replyImages.clear()
     } catch (err) {
       showToast('err', err instanceof Error ? err.message : 'Load failed')
     }
   }
 
+  const canSend = (!!replyText.trim() || replyImages.keys.length > 0) && !replyImages.uploading
+
   const sendReply = async () => {
-    if (!replyText.trim() || !detail) return
+    if (!canSend || !detail) return
     setSending(true)
     try {
       const updated = await adminApi.replyTicket(detail.id, replyText.trim(), {
         ...(replyStatus ? { status: replyStatus as TicketStatus } : {}),
         ...(replyPriority ? { priority: replyPriority as TicketPriority } : {}),
+        images: replyImages.keys,
       })
       setDetail(updated)
       setReplyText('')
+      replyImages.clear()
       setReplyStatus('')
       setReplyPriority('')
       showToast('ok', t('tickets.admin.replySent'))
@@ -253,7 +260,7 @@ function AdminTicketsPanel() {
 
       {detail ? (
         <div>
-          <button onClick={() => setDetail(null)} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
+          <button onClick={() => { replyImages.clear(); setDetail(null) }} className="btn-ghost mb-4 px-3 py-1.5 text-sm">
             &larr; {t('tickets.backToList')}
           </button>
           <div className="glass mb-4 p-5">
@@ -292,13 +299,14 @@ function AdminTicketsPanel() {
                         (see api/utils' header). */}
                     <span>{fmtDate(r.createdAt)}</span>
                   </div>
-                  <p className="whitespace-pre-wrap text-sm text-neutral-200">{r.body}</p>
+                  {r.body && <p className="whitespace-pre-wrap text-sm text-neutral-200">{r.body}</p>}
+                  <TicketImageGrid urls={r.images} count={r.imageCount} />
                 </div>
               </div>
             ))}
           </div>
 
-          <div className="glass p-4 space-y-3">
+          <div className="glass p-4 space-y-3" {...replyImages.dropProps}>
             <div className="flex gap-3">
               <select className="input w-auto py-1 text-xs" value={replyStatus}
                 onChange={(e) => setReplyStatus(e.target.value as TicketStatus | '')}>
@@ -316,11 +324,12 @@ function AdminTicketsPanel() {
               </select>
             </div>
             <textarea className="input min-h-[80px] w-full resize-y" value={replyText}
-              onChange={(e) => setReplyText(e.target.value)}
+              onChange={(e) => setReplyText(e.target.value)} onPaste={replyImages.onPaste}
               placeholder={t('tickets.replyPlaceholder')} maxLength={5000} />
+            <TicketImagePicker state={replyImages} disabled={sending} />
             <button onClick={sendReply}
-              className="btn-primary px-5 py-2 text-sm disabled:opacity-40" disabled={sending || !replyText.trim()}>
-              {sending ? '...' : t('tickets.reply')}
+              className="btn-primary px-5 py-2 text-sm disabled:opacity-40" disabled={sending || !canSend}>
+              {sending ? '...' : replyImages.uploading ? t('tickets.images.uploading') : t('tickets.reply')}
             </button>
           </div>
         </div>
@@ -372,7 +381,7 @@ function AdminTicketsPanel() {
                         <div className="max-w-[220px] truncate text-neutral-200">{ticket.title}</div>
                         {ticket.latestReply && (
                           <div className="mt-0.5 max-w-[220px] truncate text-[11px] text-neutral-500">
-                            {ticket.latestReply.authorEmail}: {ticket.latestReply.body}
+                            {ticket.latestReply.authorEmail}: {ticket.latestReply.body || t('tickets.images.preview')}
                           </div>
                         )}
                       </td>

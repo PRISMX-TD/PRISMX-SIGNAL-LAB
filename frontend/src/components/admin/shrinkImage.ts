@@ -38,13 +38,16 @@ function toBlob(canvas: HTMLCanvasElement, type: string, quality?: number): Prom
   })
 }
 
-export async function shrinkImage(file: File): Promise<File> {
+// maxEdge：工单截图传 TICKET_MAX_EDGE——截图里是文字，1600 会把手机长截图压到看不清。
+// maxEdge: ticket screenshots pass TICKET_MAX_EDGE — they are text, and 1600 would blur a
+// tall phone screenshot past legibility.
+export async function shrinkImage(file: File, maxEdge = MAX_EDGE): Promise<File> {
   try {
     if (!/^image\/(png|jpeg|webp)$/.test(file.type)) return file
     if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return file
 
     const bitmap = await createImageBitmap(file)
-    const { width, height } = fitSize(bitmap.width, bitmap.height)
+    const { width, height } = fitSize(bitmap.width, bitmap.height, maxEdge)
     const resized = width !== bitmap.width || height !== bitmap.height
     // 已经是 WebP 且不用缩：可能是动图，别碰 / a WebP that needs no resize may be animated: leave it
     if (file.type === 'image/webp' && !resized) {

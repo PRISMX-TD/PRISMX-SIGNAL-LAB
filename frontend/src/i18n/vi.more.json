@@ -1349,6 +1349,21 @@
     "notification": {
       "newReply": "Phản hồi mới",
       "body": "{{email}} đã phản hồi phiếu hỗ trợ của bạn"
+    },
+    "images": {
+      "add": "Thêm ảnh",
+      "hint": "Tối đa {{max}} ảnh; trên máy tính có thể dán trực tiếp ảnh chụp màn hình",
+      "uploading": "Đang tải lên…",
+      "remove": "Xóa ảnh",
+      "view": "Xem ảnh lớn",
+      "unavailable": "Không thể hiển thị ảnh",
+      "preview": "[Hình ảnh]",
+      "limit": "Mỗi tin nhắn tối đa {{max}} ảnh",
+      "failed": "Tải ảnh lên thất bại, vui lòng thử lại",
+      "badType": "Chỉ hỗ trợ ảnh PNG, JPEG, GIF và WebP",
+      "tooBig": "Ảnh quá lớn (tối đa 4MB mỗi ảnh)",
+      "rateLimited": "Tải lên quá nhiều, vui lòng thử lại sau",
+      "noStorage": "Hiện không thể tải ảnh lên, vui lòng mô tả bằng văn bản"
     }
   },
   "dashboard": {

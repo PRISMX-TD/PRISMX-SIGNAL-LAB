@@ -1985,6 +1985,21 @@
     "notification": {
       "newReply": "有新回复",
       "body": "{{email}} 回复了你的工单"
+    },
+    "images": {
+      "add": "添加图片",
+      "hint": "最多 {{max}} 张，电脑上可直接粘贴截图",
+      "uploading": "上传中…",
+      "remove": "移除图片",
+      "view": "查看大图",
+      "unavailable": "图片暂时无法显示",
+      "preview": "[图片]",
+      "limit": "每条最多 {{max}} 张图片",
+      "failed": "图片上传失败，请重试",
+      "badType": "只支持 PNG、JPEG、GIF、WebP 图片",
+      "tooBig": "图片太大，单张上限 4MB",
+      "rateLimited": "上传太频繁，请稍后再试",
+      "noStorage": "暂时无法上传图片，请改用文字描述"
     }
   },
   "dashboard": {
