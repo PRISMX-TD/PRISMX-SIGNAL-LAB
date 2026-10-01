@@ -28,6 +28,8 @@ import { SkeletonPage } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
+import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
+import { compCard } from '../components/share/cardData'
 import type {
   CompetitionDetail,
   CompetitionTrack,
@@ -630,6 +632,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const [registering, setRegistering] = useState(false)
   const [registerError, setRegisterError] = useState<string | null>(null)
   const [registerMsg, setRegisterMsg] = useState<string | null>(null)
+  const [share, setShare] = useState<ShareSpec | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -772,6 +775,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
 
   return (
     <div className="cmp-detail">
+      <ShareSheet spec={share} onClose={() => setShare(null)} />
       <button type="button" onClick={onBack} className="cmp-back">
         ← {t('competition.backToList')}
       </button>
@@ -830,6 +834,16 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
                       </small>
                     </span>
                     {row && <ScoreText score={row.score} className="cmp-mine-score" />}
+                    {/* 结算后的收益赛名次可以分享成卡片 / settled return-competition ranks can be shared as a card */}
+                    {entry.finalRank != null && !entry.disqualified && detail.metric === 'return_pct' && (
+                      <button type="button"
+                        onClick={() => setShare({ type: 'D', variants: [{ key: entry.login, label: '', input: { comp: compCard(
+                          detail.name, entry.finalRank!, (entry.finalScore ?? row?.score ?? 0) * 100,
+                          detail.participants ?? detail.board.rows.length) } }] })}
+                        className="ml-2 shrink-0 rounded-full bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
+                        {t('share.button')}
+                      </button>
+                    )}
                   </div>
                 )
               })}

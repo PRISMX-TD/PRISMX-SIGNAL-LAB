@@ -2426,5 +2426,59 @@
       "toggle": "显示节日装饰",
       "toggleDesc": "关闭后所有节日都不再出现。涨跌色和按钮任何时候都不受影响。"
     }
+  },
+  "share": {
+    "button": "分享",
+    "monthButton": "月度成绩单",
+    "title": {
+      "A": "分享单笔战报",
+      "B": "分享勋章",
+      "C": "分享月度成绩单",
+      "D": "分享比赛名次"
+    },
+    "style": "风格",
+    "styles": {
+      "scope": "信号",
+      "eldark": "元素",
+      "tidark": "钛金",
+      "lpdark": "凸版"
+    },
+    "privacy": "隐藏金额",
+    "save": "保存图片",
+    "share": "分享图片",
+    "generating": "正在生成…",
+    "longPress": "长按图片可保存到相册",
+    "failed": "生成图片失败，请重试",
+    "close": "关闭",
+    "thisMonth": "本月",
+    "lastMonth": "上月",
+    "card": {
+      "locale": "zh-CN",
+      "ctaJoin": "扫码加入",
+      "ctaComp": "扫码一起参赛",
+      "pips": "点",
+      "hold": "持仓",
+      "long": "做多",
+      "short": "做空",
+      "stopTag": "按计划止损",
+      "winRate": "胜率",
+      "tradesUnit": "笔",
+      "ret": "收益率",
+      "participantsUnit": "人参赛",
+      "rareBefore": "全站仅 ",
+      "commonBefore": "全站 ",
+      "rarityAfter": " 获得",
+      "durD": "{{d}}天{{h}}小时",
+      "durH": "{{h}}小时{{m}}分",
+      "durM": "{{m}}分",
+      "tier": {
+        "1": "铜章",
+        "2": "银章",
+        "3": "金章"
+      },
+      "legend": "传奇勋章",
+      "limited": "绝版勋章",
+      "special": "特殊勋章"
+    }
   }
 }

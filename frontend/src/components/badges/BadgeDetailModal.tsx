@@ -12,7 +12,7 @@
 // condition, its current holder count, and which tier you are on.
 // Portal-to-body + centered glass card + Escape/backdrop close, following
 // ConfirmModal's precedent.
-import { useId, useRef } from 'react'
+import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import BadgeIcon from './BadgeIcon'
@@ -23,6 +23,8 @@ import { FAMILY_OF, materialOf } from './medal'
 import { fmtDate, fmtOwnerPct } from '../../api/utils'
 import { useDialogA11y } from '../../utils/useDialogA11y'
 import type { GamificationBadge } from '../../api/types'
+import ShareSheet, { type ShareSpec } from '../share/ShareSheet'
+import { badgeCard } from '../share/cardData'
 
 interface Props {
   badge: GamificationBadge
@@ -45,6 +47,7 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
   const material = materialOf(badge.id, badge.tier)
   const pct = fmtOwnerPct(badge.owners, population)
   const tiered = badge.maxTier > 0
+  const [share, setShare] = useState<ShareSpec | null>(null)
 
   return createPortal(
     <div
@@ -123,7 +126,14 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
           <div>{t('gamification.detail.owners', { n: badge.owners, pct })}</div>
           <div>{t('gamification.detail.wearHint')}</div>
         </div>
+        {badge.earned && (
+          <button type="button" className="btn-primary mt-4 w-full"
+            onClick={() => setShare({ type: 'B', variants: [{ key: badge.id, label: '', input: { badge: badgeCard(t, badge, population) } }] })}>
+            {t('share.button')}
+          </button>
+        )}
       </div>
+      <ShareSheet spec={share} onClose={() => setShare(null)} />
     </div>,
     document.body,
   )

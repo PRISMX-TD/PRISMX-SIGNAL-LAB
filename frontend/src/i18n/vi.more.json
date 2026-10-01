@@ -1790,5 +1790,59 @@
       "toggle": "Hiển thị trang trí dịp lễ",
       "toggleDesc": "Khi tắt, sẽ không hiện trang trí lễ nào. Màu thị trường và các nút không bao giờ bị ảnh hưởng."
     }
+  },
+  "share": {
+    "button": "Chia sẻ",
+    "monthButton": "Báo cáo tháng",
+    "title": {
+      "A": "Chia sẻ lệnh này",
+      "B": "Chia sẻ huy hiệu",
+      "C": "Chia sẻ báo cáo tháng",
+      "D": "Chia sẻ kết quả giải đấu"
+    },
+    "style": "Phong cách",
+    "styles": {
+      "scope": "Tín hiệu",
+      "eldark": "Nguyên tố",
+      "tidark": "Titan",
+      "lpdark": "In nổi"
+    },
+    "privacy": "Ẩn số tiền",
+    "save": "Lưu ảnh",
+    "share": "Chia sẻ ảnh",
+    "generating": "Đang tạo…",
+    "longPress": "Nhấn giữ ảnh để lưu",
+    "failed": "Không tạo được ảnh, vui lòng thử lại.",
+    "close": "Đóng",
+    "thisMonth": "Tháng này",
+    "lastMonth": "Tháng trước",
+    "card": {
+      "locale": "vi-VN",
+      "ctaJoin": "Quét để tham gia",
+      "ctaComp": "Quét để cùng thi đấu",
+      "pips": "pip",
+      "hold": "Giữ",
+      "long": "Buy",
+      "short": "Sell",
+      "stopTag": "Cắt lỗ theo kế hoạch",
+      "winRate": "Tỷ lệ thắng",
+      "tradesUnit": "lệnh",
+      "ret": "Lợi nhuận",
+      "participantsUnit": "người tham gia",
+      "rareBefore": "Chỉ ",
+      "commonBefore": "",
+      "rarityAfter": " nhà giao dịch đạt được",
+      "durD": "{{d}} ngày {{h}} giờ",
+      "durH": "{{h}} giờ {{m}} phút",
+      "durM": "{{m}} phút",
+      "tier": {
+        "1": "Đồng",
+        "2": "Bạc",
+        "3": "Vàng"
+      },
+      "legend": "Huyền thoại",
+      "limited": "Phiên bản giới hạn",
+      "special": "Đặc biệt"
+    }
   }
 }

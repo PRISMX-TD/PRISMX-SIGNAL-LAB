@@ -25,11 +25,13 @@ const PAGE_SIZE = 10
 
 interface Props {
   trades: ClosedTrade[] | null // null = 加载中 / loading
+  // 点「分享」时回调这一仓位（不传就不显示按钮）/ called with the position when Share is tapped (no button if omitted)
+  onShare?: (row: PositionRow) => void
 }
 
 /** 一个仓位 = 同一账号同一仓位号下的全部平仓腿（最新在前）。
  *  One position = every closing leg sharing (login, positionTicket), newest first. */
-interface PositionRow {
+export interface PositionRow {
   key: string
   legs: ClosedTrade[]
   symbol: string
@@ -132,7 +134,7 @@ const money = (n: number | null | undefined): string => (n == null ? DASH : `${n
 const price = (n: number | null | undefined): string => (n == null ? DASH : String(n))
 const pnlClass = (n: number | null | undefined): string => (n == null ? 'text-neutral-500' : n >= 0 ? 'text-up' : 'text-down')
 
-export default function ClosedTradesList({ trades }: Props) {
+export default function ClosedTradesList({ trades, onShare }: Props) {
   const { t } = useTranslation()
   const [page, setPage] = useState(0)
   const [open, setOpen] = useState<string | null>(null)
@@ -162,6 +164,13 @@ export default function ClosedTradesList({ trades }: Props) {
         <span>{t('orders.closed.reasonLabel')} <b className="text-neutral-200">{reasonLabel(row.reason)}</b></span>
         <span>{t('orders.closed.comment')} <b className="font-mono text-neutral-200">{row.comment ?? DASH}</b></span>
         {!row.detailed && <span className="text-amber-400/80">{t('orders.closed.legacy')}</span>}
+        {onShare && (
+          <button type="button" onClick={(e) => { e.stopPropagation(); onShare(row) }}
+            className="ml-auto inline-flex items-center gap-1 rounded-full bg-prism-600/20 px-2.5 py-0.5 font-semibold text-prism-300 transition hover:bg-prism-600/30">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
+            {t('share.button')}
+          </button>
+        )}
       </div>
       <div className="mt-2 space-y-1">
         {row.legs.length > 1 && <div className="text-neutral-500">{t('orders.closed.legs', { n: row.legs.length })}</div>}

@@ -2428,5 +2428,59 @@
       "toggle": "Show festival decorations",
       "toggleDesc": "When off, no festival appears. Market colours and buttons are never affected."
     }
+  },
+  "share": {
+    "button": "Share",
+    "monthButton": "Monthly report",
+    "title": {
+      "A": "Share this trade",
+      "B": "Share badge",
+      "C": "Share monthly report",
+      "D": "Share competition result"
+    },
+    "style": "Style",
+    "styles": {
+      "scope": "Signal",
+      "eldark": "Element",
+      "tidark": "Titanium",
+      "lpdark": "Letterpress"
+    },
+    "privacy": "Hide amounts",
+    "save": "Save image",
+    "share": "Share image",
+    "generating": "Generating…",
+    "longPress": "Long-press the image to save it",
+    "failed": "Couldn't create the image. Please try again.",
+    "close": "Close",
+    "thisMonth": "This month",
+    "lastMonth": "Last month",
+    "card": {
+      "locale": "en-US",
+      "ctaJoin": "Scan to join",
+      "ctaComp": "Scan to compete",
+      "pips": "pips",
+      "hold": "Held",
+      "long": "Buy",
+      "short": "Sell",
+      "stopTag": "Stopped out as planned",
+      "winRate": "Win rate",
+      "tradesUnit": "trades",
+      "ret": "Return",
+      "participantsUnit": "entrants",
+      "rareBefore": "Only ",
+      "commonBefore": "",
+      "rarityAfter": " of traders earned it",
+      "durD": "{{d}}d {{h}}h",
+      "durH": "{{h}}h {{m}}m",
+      "durM": "{{m}}m",
+      "tier": {
+        "1": "Bronze",
+        "2": "Silver",
+        "3": "Gold"
+      },
+      "legend": "Legendary",
+      "limited": "Limited edition",
+      "special": "Special"
+    }
   }
 }

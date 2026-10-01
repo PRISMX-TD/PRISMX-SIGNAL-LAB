@@ -1790,5 +1790,59 @@
       "toggle": "季節のデコレーションを表示",
       "toggleDesc": "オフにすると季節の演出は表示されません。相場の配色やボタンには影響しません。"
     }
+  },
+  "share": {
+    "button": "シェア",
+    "monthButton": "月間成績",
+    "title": {
+      "A": "このトレードをシェア",
+      "B": "バッジをシェア",
+      "C": "月間成績をシェア",
+      "D": "大会結果をシェア"
+    },
+    "style": "スタイル",
+    "styles": {
+      "scope": "シグナル",
+      "eldark": "エレメント",
+      "tidark": "チタン",
+      "lpdark": "活版"
+    },
+    "privacy": "金額を隠す",
+    "save": "画像を保存",
+    "share": "画像をシェア",
+    "generating": "生成中…",
+    "longPress": "画像を長押しして保存できます",
+    "failed": "画像を作成できませんでした。もう一度お試しください。",
+    "close": "閉じる",
+    "thisMonth": "今月",
+    "lastMonth": "先月",
+    "card": {
+      "locale": "ja-JP",
+      "ctaJoin": "スキャンして参加",
+      "ctaComp": "スキャンして参戦",
+      "pips": "pips",
+      "hold": "保有",
+      "long": "Buy",
+      "short": "Sell",
+      "stopTag": "計画通りの損切り",
+      "winRate": "勝率",
+      "tradesUnit": "回",
+      "ret": "リターン",
+      "participantsUnit": "人参加",
+      "rareBefore": "わずか ",
+      "commonBefore": "",
+      "rarityAfter": " のトレーダーが獲得",
+      "durD": "{{d}}日{{h}}時間",
+      "durH": "{{h}}時間{{m}}分",
+      "durM": "{{m}}分",
+      "tier": {
+        "1": "ブロンズ",
+        "2": "シルバー",
+        "3": "ゴールド"
+      },
+      "legend": "レジェンド",
+      "limited": "限定",
+      "special": "スペシャル"
+    }
   }
 }

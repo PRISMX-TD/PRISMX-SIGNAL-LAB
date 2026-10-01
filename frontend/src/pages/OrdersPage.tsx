@@ -37,6 +37,9 @@ import ConfirmModal from '../components/ConfirmModal'
 import PositionCard from '../components/PositionCard'
 import PerformanceSummary from '../components/PerformanceSummary'
 import ClosedTradesList from '../components/ClosedTradesList'
+import type { PositionRow } from '../components/ClosedTradesList'
+import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
+import { loadTradePath, monthCard, tradeCard } from '../components/share/cardData'
 import AutoManageCard from '../components/AutoManageCard'
 import OnboardingCard from '../components/OnboardingCard'
 import PageHead from '../components/PageHead'
@@ -289,6 +292,29 @@ export default function OrdersPage() {
     if (!trades) return trades
     return selectedLogin ? trades.filter((tr) => tr.mt5Login === selectedLogin) : trades
   }, [trades, selectedLogin])
+
+  // 分享卡：单笔战报（平仓明细里点分享）与月度成绩单（本月 / 上月）。收益率按选中账号的余额估算。
+  // Share cards: single trade (Share in the closed list) and monthly report (this / last month).
+  // Return % is estimated against the selected account's balance.
+  const [share, setShare] = useState<ShareSpec | null>(null)
+  const shareBalance = selectedLogin ? activeAccount?.balance ?? null : null
+  const shareTrade = (row: PositionRow) => setShare({
+    type: 'A',
+    variants: [{ key: row.key, label: '', input: { trade: tradeCard(t, row, shareBalance) } }],
+    enhance: async (inp) => {
+      const path = await loadTradePath(row)
+      return path && inp.trade ? { trade: { ...inp.trade, path } } : inp
+    },
+  })
+  const monthVariants = useMemo(() => {
+    if (!visibleTrades?.length) return []
+    const now = new Date()
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    return [
+      { key: 'this', label: t('share.thisMonth'), m: monthCard(visibleTrades, now.getFullYear(), now.getMonth() + 1, shareBalance) },
+      { key: 'last', label: t('share.lastMonth'), m: monthCard(visibleTrades, prev.getFullYear(), prev.getMonth() + 1, shareBalance) },
+    ].filter((v) => v.m).map((v) => ({ key: v.key, label: v.label, input: { month: v.m! } }))
+  }, [visibleTrades, shareBalance, t])
 
   // 持仓也跟着页头的账号走。position.login 可能缺失（旧记录），此时不显示在
   // 单账号视角下，避免把别的账号的仓位算进汇总。
@@ -822,7 +848,17 @@ export default function OrdersPage() {
       {tab === 'performance' && (
         <>
           <PerformanceSummary login={selectedLogin ?? undefined} accountLabel={accountLabel} />
-          <ClosedTradesList trades={visibleTrades} />
+          {monthVariants.length > 0 && (
+            <div className="mt-3 flex justify-end">
+              <button type="button" onClick={() => setShare({ type: 'C', variants: monthVariants })}
+                className="inline-flex items-center gap-1.5 rounded-full bg-prism-600/20 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
+                {t('share.monthButton')}
+              </button>
+            </div>
+          )}
+          <ClosedTradesList trades={visibleTrades} onShare={shareTrade} />
+          <ShareSheet spec={share} onClose={() => setShare(null)} />
         </>
       )}
 
