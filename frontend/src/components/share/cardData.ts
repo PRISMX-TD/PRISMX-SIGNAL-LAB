@@ -4,7 +4,7 @@
 // can import it statically; rendering lives in cardEnv.ts.
 import type { TFunction } from 'i18next'
 import { materialOf } from '../badges/medal'
-import { baseSymbol, displaySymbol, toPips } from '../../api/utils'
+import { baseSymbol, displaySymbol, parseTime, toPips } from '../../api/utils'
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 
@@ -36,6 +36,10 @@ export interface CardInput {
 }
 
 // ── 适配器 / adapters ──
+
+// 后端的时间可能是不带时区的 UTC 字符串，必须走 parseTime（补 Z），直接 new Date 会按本地时间解析。
+// Backend timestamps may be naive UTC; always go through parseTime (appends Z) instead of new Date.
+const ms = (iso: string | null | undefined) => parseTime(iso)?.getTime() ?? NaN
 
 export function fmtDuration(t: TFunction, ms: number): string {
   const min = Math.max(1, Math.round(ms / 60000))
@@ -70,37 +74,44 @@ export function tradeCard(t: TFunction, row: TradeRowLike, balance: number | nul
   // Return is estimated against the pre-trade balance (current balance minus this P&L); without it, privacy mode is off.
   const base = balance != null && balance > 0 ? balance - row.net : 0
   const pct = base > 0 ? Math.round((row.net / base) * 10000) / 100 : null
-  const ms = row.openTime && row.closeTime ? Date.parse(row.closeTime) - Date.parse(row.openTime) : NaN
+  const held = ms(row.closeTime) - ms(row.openTime)
   const [elSym, elNum] = elementOf(row.symbol)
   return {
     symbol: esc(displaySymbol(row.symbol)), side: row.side,
     sideTxt: t(row.side === 'BUY' ? 'share.card.long' : 'share.card.short'),
     open, close, lots: row.volume, pnl: row.net, pct, pips,
-    hold: Number.isFinite(ms) && ms > 0 ? fmtDuration(t, ms) : '',
+    hold: Number.isFinite(held) && held > 0 ? fmtDuration(t, held) : '',
     exit: t('share.card.stopTag'),
     path: path && path.length >= 2 ? path : [open, (open + close) / 2, close],
     elSym, elNum,
   }
 }
 
-export interface ClosedLike { profit: number; closedAt: string | null }
+export interface ClosedLike { profit: number; closedAt: string | null; mt5Login?: string; positionTicket?: number }
 
 // 按本地时区把平仓记录归到自然月，逐日汇总净盈亏。
 // Bucket closed trades into a calendar month (local time) and sum net P&L per day.
 export function monthCard(trades: ClosedLike[], year: number, month: number, balance: number | null | undefined): MonthCard | null {
   const inMonth = trades.filter((tr) => {
-    if (!tr.closedAt) return false
-    const d = new Date(tr.closedAt)
-    return d.getFullYear() === year && d.getMonth() + 1 === month
+    const d = parseTime(tr.closedAt)
+    return !!d && d.getFullYear() === year && d.getMonth() + 1 === month
   })
   if (!inMonth.length) return null
   const nDays = new Date(year, month, 0).getDate()
   const days = Array.from({ length: nDays }, () => 0)
-  for (const tr of inMonth) days[new Date(tr.closedAt!).getDate() - 1] += tr.profit
+  for (const tr of inMonth) days[parseTime(tr.closedAt)!.getDate() - 1] += tr.profit
   const r2 = (v: number) => Math.round(v * 100) / 100
   for (let i = 0; i < nDays; i++) days[i] = r2(days[i])
   const total = r2(inMonth.reduce((s, tr) => s + tr.profit, 0))
-  const wins = inMonth.filter((tr) => tr.profit > 0).length
+  // 笔数与胜率按「仓位」算：一笔分批平仓的多条腿合成一笔，和平仓明细、胜率卡的口径一致。
+  // Count and win rate are per position: partial-close legs merge into one trade, matching the closed list.
+  const byPos = new Map<string, number>()
+  inMonth.forEach((tr, i) => {
+    const k = tr.positionTicket != null ? `${tr.mt5Login ?? ''}:${tr.positionTicket}` : `leg${i}`
+    byPos.set(k, (byPos.get(k) ?? 0) + tr.profit)
+  })
+  const nTrades = byPos.size
+  const wins = [...byPos.values()].filter((v) => v > 0).length
   let best = 0
   days.forEach((v, i) => { if (v > days[best]) best = i })
   const dow = new Date(year, month - 1, 1).getDay()
@@ -111,8 +122,8 @@ export function monthCard(trades: ClosedLike[], year: number, month: number, bal
     firstWeekday: dow === 0 ? 7 : dow,
     days, total,
     pct: base > 0 ? Math.round((total / base) * 1000) / 10 : null,
-    winRate: Math.round((wins / inMonth.length) * 1000) / 10,
-    trades: inMonth.length, bestDay: best + 1, bestPnl: days[best],
+    winRate: Math.round((wins / nTrades) * 1000) / 10,
+    trades: nTrades, bestDay: best + 1, bestPnl: days[best],
   }
 }
 
@@ -125,7 +136,9 @@ export function badgeCard(t: TFunction, b: { id: string; tier: number; maxTier: 
   const tierTxt = tiered
     ? `${t(`share.card.tier.${b.tier}`)} ${ROMAN[b.tier] ?? ''}`.trim()
     : t(mat === 'legend' ? 'share.card.legend' : mat === 'limited' ? 'share.card.limited' : 'share.card.special')
-  const owners = tiered && b.tierOwners[b.tier - 1] != null ? b.tierOwners[b.tier - 1] : b.owners
+  // tierOwners 是各档「当前」持有人数（升档后只算在新档），「获得过本档」= 本档及以上之和。
+  // tierOwners counts current holders per tier; "earned this tier" = this tier and above.
+  const owners = tiered && b.tierOwners.length ? b.tierOwners.slice(b.tier - 1).reduce((a, n) => a + (n ?? 0), 0) : b.owners
   const rarity = population > 0 ? Math.max(0.1, Math.round((owners / population) * 1000) / 10) : 0
   return { id: b.id, tier: tiered ? b.tier : 0, name: t(`gamification.badges.${b.id}.name`), tierTxt, material, rarity }
 }
@@ -149,7 +162,7 @@ export function compCard(name: string, rank: number, ret: number, participants: 
 const STEPS = [1, 5, 15, 60, 240]
 export async function loadTradePath(row: TradeRowLike): Promise<number[] | null> {
   if (!row.openTime || !row.closeTime || row.openPrice == null || row.closePrice == null) return null
-  const t0 = Date.parse(row.openTime) / 1000, t1 = Date.parse(row.closeTime) / 1000
+  const t0 = ms(row.openTime) / 1000, t1 = ms(row.closeTime) / 1000
   if (!(t1 > t0)) return null
   const holdMin = (t1 - t0) / 60
   const step = STEPS.find((m) => holdMin / m <= 40) ?? 240
