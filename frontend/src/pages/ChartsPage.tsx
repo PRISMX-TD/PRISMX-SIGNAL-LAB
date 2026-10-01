@@ -166,7 +166,13 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef }: { symbol: string;
       // 只开紧挨着的下一根：差太多说明数据断档 / 休市，交给轮询。
       // Only the immediately next bar; a bigger gap means a data hole / closed market — leave it to the poll.
       if (openT === last.t + iv) {
-        const bar = { t: openT, o: bid, h: bid, l: bid, c: bid, v: 0 } as typeof last
+        // 开盘价取上一根的收盘（边界前最后一跳），而不是边界后这一跳：报价是连续的，真实开盘价
+        // 几乎就是它；用 bid 做 o=h=l=c 会画出一条悬空的横线，等轮询回来再"跳"成正常蜡烛。
+        // Open at the previous close (the last tick before the boundary), not this tick: quotes
+        // are continuous, so that is ~the real open. o=h=l=c=bid drew a floating dash that then
+        // "jumped" into a normal candle when the poll landed.
+        const o = last.c
+        const bar = { t: openT, o, h: Math.max(o, bid), l: Math.min(o, bid), c: bid, v: 0 }
         try { series.update(toLwPoint(bar)) } catch { return }
         arr.push(bar)
         if (arr.length > MAX_CLIENT_BARS) arr.shift()
