@@ -661,8 +661,12 @@ def chart_history(
 async def chart_latest(
     symbol: str = Query(max_length=32),
     interval: str = Query(),
+    # 首屏那次多要几根：库里已收盘 bar 落后时，用缓存尾部补上历史与形成中那根之间的缺口。
+    # The first-screen call asks for a few more, bridging any gap between the DB's closed
+    # bars and the forming bar from the cache tail. Polls keep the default 2.
+    n: int = Query(default=2, ge=1, le=20),
     user_id: str = Depends(get_current_user_id_light),
 ):
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")
-    return await chart_store.get_latest_async(symbol.upper(), interval)
+    return await chart_store.get_latest_async(symbol.upper(), interval, n)

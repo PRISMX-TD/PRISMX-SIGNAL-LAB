@@ -36,6 +36,22 @@ export function withLiveClose(b: Candle, bid: number | null | undefined): Candle
   return { ...b, c: bid, h: Math.max(b.h, bid), l: Math.min(b.l, bid) }
 }
 
+// 每个「品种|周期」最近一次看到的尾部 K 线（含形成中那根），进程内常驻。
+// 再次打开图表 / 切回刚看过的品种时先用它秒出画面，历史与最新价并行回来后无缝替换，
+// 不再出现「空白 → 旧 K 线 → 几秒后才补上最新一根」的卡顿。
+// The last tail of bars (forming bar included) seen per "symbol|interval", kept in memory.
+// Reopening the chart or returning to a recent symbol paints from it instantly; history and
+// latest (fetched in parallel) then replace it seamlessly — no blank → stale → late-bar stutter.
+const SNAPSHOT_BARS = HISTORY_FIRST_PAGE + 10
+const SNAPSHOT_KEYS = 16
+const snapshotCache = new Map<string, Candle[]>()
+function saveSnapshot(key: string, bars: Candle[]) {
+  if (bars.length === 0) return
+  snapshotCache.delete(key)
+  snapshotCache.set(key, bars.slice(-SNAPSHOT_BARS))
+  while (snapshotCache.size > SNAPSHOT_KEYS) snapshotCache.delete(snapshotCache.keys().next().value as string)
+}
+
 export function useChartData(symbol: string, interval: string, digits: number, engine: ChartEngine, liveBidRef?: { current: number | null }, dataKeyRef?: { current: string }) {
   const {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef,
@@ -146,8 +162,32 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       arr.unshift(b)
     }
 
+    const snapKey = `${symbol}|${interval}`
+    // 历史库不含形成中那根，最新价若等轮询首拍（3–10 秒）才到，最右侧就会空等。
+    // 这里与历史并行立即请求，历史一落地就接上。
+    // History excludes the forming bar; waiting for the poll's first tick (3–10s) left the right
+    // edge stale. Request latest in parallel right away and join it as soon as history lands.
+    let historyApplied = false
+    let pendingLatest: Awaited<ReturnType<typeof chartApi.latest>> | null = null
+
+    // 秒开：有快照先画出来。/ Instant paint from the snapshot when we have one.
+    const snap = snapshotCache.get(snapKey)
+    if (snap && snap.length > 0) {
+      series.setData(snap.map(toLwPoint))
+      if (dataKeyRef) dataKeyRef.current = snapKey
+      lastTimeRef.current = snap[snap.length - 1].t
+      barTimesRef.current = snap.map((b) => b.t)
+      candlesRef.current = snap.slice()
+      setLastPrice(snap[snap.length - 1].c)
+      recomputeIndicators()
+      setDayStats(computeDayStats(candlesRef.current))
+      chartRef.current?.timeScale().fitContent()
+      setHasData(true)
+    }
+
     chartApi.history(symbol, interval, HISTORY_FIRST_PAGE).then((r) => {
       if (!alive) return
+      historyApplied = true
       if (r.bars.length > 0) {
         series.setData(r.bars.map(toLwPoint))
         if (dataKeyRef) dataKeyRef.current = `${symbol}|${interval}`
@@ -158,8 +198,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         hasMoreHistoryRef.current = r.hasMore
         recomputeIndicators()
         setDayStats(computeDayStats(candlesRef.current))
-        chartRef.current?.timeScale().fitContent()
+        // 快照已画过就不再 fitContent，免得视窗跳一下。/ Skip refit if the snapshot already framed it.
+        if (!snap) chartRef.current?.timeScale().fitContent()
         setHasData(true)
+        saveSnapshot(snapKey, candlesRef.current)
       } else {
         // 空历史：图上不再是旧品种的 K 线，标成本品种，让首跳报价之后的轮询冷启动。
         // Empty history: mark as this symbol so later data belongs to it.
@@ -168,8 +210,12 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         hasMoreHistoryRef.current = false
         setHasData(false)
       }
+      if (pendingLatest) handleLatest(pendingLatest)
     }).catch(() => {
-      if (alive) setHasData(false)
+      if (!alive) return
+      historyApplied = true
+      if (!snap) setHasData(false)
+      if (pendingLatest) handleLatest(pendingLatest)
     })
 
     // 往左拖到接近最早一根时，用 before 游标向数据库要更早的一页。
@@ -248,9 +294,12 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)
 
-    const poll = (): Promise<void> => {
-      return chartApi.latest(symbol, interval).then((r) => {
+    const handleLatest = (r: Awaited<ReturnType<typeof chartApi.latest>>) => {
         if (!alive) return
+        // 历史还没回来：先记下，历史 setData 之后再接上（否则会被整段覆盖掉）。
+        // History not back yet: stash it and join after history's setData (which would wipe it).
+        pendingLatest = r
+        if (!historyApplied) return
         // 最新一根用券商 bid 做收盘价，免得每 2 秒被 K 线库的收盘价拽回去。
         // The newest bar takes the broker bid as close so the poll doesn't yank it back.
         // 本地已按报价开了新 bar 时，响应里的上一根别再被钉上当前 bid。
@@ -278,8 +327,11 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         }
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
-      }).catch(() => {})
     }
+    const poll = (): Promise<void> => chartApi.latest(symbol, interval).then(handleLatest).catch(() => {})
+    // 首拍多要 10 根：库里已收盘 bar 落后一两根时，用缓存尾部把缺口补齐。
+    // First call asks for 10 bars so a DB lagging a bar or two behind has its gap filled.
+    void chartApi.latest(symbol, interval, 10).then(handleLatest).catch(() => {})
 
     // 页面在后台时不轮询。这是全站频率最高的一个轮询（每 2 秒），而站内其它所有
     // 轮询——个人胜率卡、纪律分卡、订单页已平仓明细、策略页信号、live.tsx 里的
@@ -344,6 +396,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
 
     return () => {
       alive = false
+      if (historyApplied || snap) saveSnapshot(snapKey, candlesRef.current)
       stopPolling()
       if (boundaryTimer !== undefined) window.clearTimeout(boundaryTimer)
       chartRef.current?.timeScale().unsubscribeVisibleLogicalRangeChange(onRangeChange)

@@ -585,9 +585,10 @@ export const chartApi = {
       `/chart/history?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}` +
         (before !== undefined ? `&before=${before}` : '')
     ),
-  latest: (symbol: string, interval: string) =>
+  latest: (symbol: string, interval: string, n?: number) =>
     request<{ bars: Candle[]; updatedAt: number | null }>(
-      `/chart/latest?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`
+      `/chart/latest?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}` +
+        (n !== undefined ? `&n=${n}` : '')
     ),
 }
 
