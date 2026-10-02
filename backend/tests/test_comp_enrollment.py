@@ -132,6 +132,21 @@ def test_register_rejects_unsynced_balance(db_session):
     assert "余额未同步" in exc.value.detail
 
 
+def test_register_rejects_balance_below_competition_minimum(db_session):
+    """最低参赛金额在报名时就挡，不再放进来再在计分时静默滤掉。"""
+    comp = _comp(db_session)
+    comp.min_baseline_usd = 1000.0; db_session.commit()
+    u = _user(db_session, "minbal1@t.co"); _acct(db_session, u, "A", balance=999.0)
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "最低参赛金额" in exc.value.detail
+    assert db_session.query(CompetitionParticipant).count() == 0
+
+    u2 = _user(db_session, "minbal2@t.co"); _acct(db_session, u2, "B", balance=1000.0)
+    assert register_participant(db_session, comp, u2, "B", IN_WINDOW).mt5_login == "B"
+
+
 def test_register_success_writes_participant_and_baseline_scoring_from_start(db_session):
     """开赛前报名：scoring_from = comp.starts_at（max(starts_at, now) = starts_at）。"""
     comp = _comp(db_session)

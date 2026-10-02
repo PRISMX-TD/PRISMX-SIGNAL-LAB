@@ -53,18 +53,20 @@ const METRICS: CompetitionMetric[] = ['return_pct', 'win_rate']
 const ENROLLMENTS: CompetitionEnrollment[] = ['signup', 'auto']
 
 // 状态只进不退：draft→upcoming→running→ended，与后端 _ADVANCE 逐字对应；
-// ended 之后走 settle 端点，这里没有它的下一步。
+// ended 之后走 settle 端点，这里没有它的下一步。upcoming→running 不给按钮：
+// 到了 startsAt 后端循环自动开赛（advance_competition_statuses），手动点只会
+// 让状态与真正的计分起点（仍是 startsAt）对不上。
 // Status only advances: draft→upcoming→running→ended, mirroring the
 // backend's _ADVANCE verbatim; ended's next step is the settle endpoint, not
-// represented here.
+// represented here. No button for upcoming→running: the backend loop starts the
+// competition at startsAt, and a manual click would only desync the status from
+// the real scoring start (still startsAt).
 const NEXT_STATUS: Partial<Record<CompetitionStatus, CompetitionStatus>> = {
   draft: 'upcoming',
-  upcoming: 'running',
   running: 'ended',
 }
 const ADVANCE_LABEL_KEY: Partial<Record<CompetitionStatus, string>> = {
   draft: 'toUpcoming',
-  upcoming: 'toRunning',
   running: 'toEnded',
 }
 // admin 端的 status 字面量是 ended（内部状态名），i18n competition.status 只有
@@ -616,23 +618,18 @@ export default function CompetitionsPanel() {
                               </span>
                             )
                           })()}
-                          {/* 删除：只有草稿 / 未开始可删。开赛之后后端一律 400，按钮干脆
-                              不画——running/ended 删掉等于抹掉正在争的名次；settled 删掉
-                              勋章收不回且会改变卫冕王判定。
-                              Delete: draft / upcoming only. Once started the backend refuses,
-                              so the button isn't rendered — deleting running/ended wipes
-                              ranks being competed for; deleting settled can't revoke badges
-                              and shifts the back-to-back judgement. */}
-                          {(c.status === 'draft' || c.status === 'upcoming') && (
-                            <button
-                              type="button"
-                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-down disabled:opacity-40"
-                              disabled={deletingId === c.id}
-                              onClick={() => setPendingAction({ kind: 'delete', comp: c })}
-                            >
-                              {deletingId === c.id ? t('common.loading') : t('competition.admin.delete')}
-                            </button>
-                          )}
+                          {/* 删除：任何状态都可删（运营决定，2026-10-02）。已结算的比赛删掉后
+                              已发的勋章不会收回，确认弹窗里写明了参赛人数。
+                              Delete: any status (ops decision, 2026-10-02). Badges already
+                              awarded by a settled competition are not revoked. */}
+                          <button
+                            type="button"
+                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-down disabled:opacity-40"
+                            disabled={deletingId === c.id}
+                            onClick={() => setPendingAction({ kind: 'delete', comp: c })}
+                          >
+                            {deletingId === c.id ? t('common.loading') : t('competition.admin.delete')}
+                          </button>
                         </div>
                       </td>
                     </tr>

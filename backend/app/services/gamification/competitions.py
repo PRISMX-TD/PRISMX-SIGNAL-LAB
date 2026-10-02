@@ -399,6 +399,19 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
         raise HTTPException(status_code=400,
                             detail="账户余额未同步，请先连接账户 / Account balance not synced yet")
 
+    # 最低本金门槛在报名时就挡：以前只在计分时过滤，低于门槛的账户能报上名，
+    # 却永远上不了榜，用户不知道为什么。与计分用同一个 comp_gates，两边不分叉。
+    # Enforce the minimum balance at signup. It used to be applied only when
+    # scoring, so an under-funded account could enter and then silently never
+    # appear on the board. Same comp_gates as scoring, so the two can't diverge.
+    from app.services.settings_store import get_gamification_settings
+    min_baseline = comp_gates(comp, get_gamification_settings(db))["min_baseline_usd"]
+    if min_baseline and float(acct.balance) < float(min_baseline):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"账户余额低于本场最低参赛金额 {min_baseline:g} USD / "
+                    f"Account balance is below this competition's minimum of {min_baseline:g} USD"))
+
     # 每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——
     # 重复报同一个账户是幂等路径（下面撞唯一约束后原样返回已有条目），不该被
     # 上限误伤。被取消资格的条目照数：取消资格不退还名额，否则「报满 → 故意

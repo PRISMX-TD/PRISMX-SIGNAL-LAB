@@ -567,21 +567,18 @@ def test_delete_competition_removes_participants_baselines_snapshots(db_session)
 
 
 @pytest.mark.parametrize("status", ["running", "ended", "settled"])
-def test_delete_refused_once_started(db_session, status):
-    """开赛之后不可删：running/ended 删掉等于抹掉正在争的名次；settled 删掉勋章收不回
-    （user_badges 没有"哪场比赛发的"这一列）且会改变卫冕王判定。内测期曾放开到任何
-    状态，上线前收回。"""
+def test_delete_allowed_in_any_status(db_session, status):
+    """2026-10-02 起任何状态都可删（运营要求），参赛行一并清掉。"""
     from app.routers.competitions import admin_delete_competition
     comp = _comp(db_session, status=status)
     u = _user(db_session, f"del_{status}@t.co")
     _participant(db_session, comp, u, "A")
 
-    with pytest.raises(HTTPException) as exc:
-        admin_delete_competition(comp.id, db=db_session)
-    assert exc.value.status_code == 400
-    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is not None
+    out = admin_delete_competition(comp.id, db=db_session)
+    assert out["participants"] == 1
+    assert db_session.query(Competition).filter(Competition.id == comp.id).first() is None
     assert db_session.query(CompetitionParticipant).filter(
-        CompetitionParticipant.competition_id == comp.id).count() == 1
+        CompetitionParticipant.competition_id == comp.id).count() == 0
 
 
 def test_delete_draft_allowed(db_session):

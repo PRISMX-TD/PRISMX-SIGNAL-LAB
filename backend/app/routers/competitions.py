@@ -447,33 +447,15 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
     return out
 
 
-# 可删除的比赛状态：还没开赛、没有任何成绩与勋章产生的两档。
-# 内测期曾放开到任何状态（2026-09-04），上线前收回（2026-09-05）：
-#   · running/ended 删掉等于把参赛者正在争的名次抹掉；
-#   · settled 删掉之后勋章收不回（user_badges 没有"哪场比赛发的"这一列），且卫冕王
-#     看的是相邻两届，少一届会改变后续判定——删了就是一笔说不清的糊涂账。
-# Deletable statuses: the two before anything has been scored or awarded. Was
-# opened to every status for testing (2026-09-04) and closed again before launch:
-# deleting a running/ended competition wipes ranks people are competing for, and
-# deleting a settled one cannot revoke badges (no "which competition" column) and
-# shifts the back-to-back judgement.
-DELETABLE_STATUSES = frozenset({"draft", "upcoming"})
-MSG_DELETE_LOCKED = (
-    "只有草稿或未开始的比赛可以删除；已开赛的比赛请让它走完流程 / "
-    "Only draft or upcoming competitions can be deleted; a started competition must run its course"
-)
-
-
 @admin_router.delete("/{comp_id}")
 def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
-    """删除一场**尚未开赛**的比赛，连同它的参赛行、基线、榜单快照一起清掉。
-    running / ended / settled 一律 400（见 DELETABLE_STATUSES 的说明）。
-    Deletes a competition that has not started, with its participants, baselines
-    and board snapshots. Started or settled competitions are refused (400).
+    """删除一场比赛（任何状态），连同它的参赛行、基线、榜单快照一起清掉。
+    曾只允许 draft/upcoming；2026-10-02 运营要求放开到全部状态。已结算比赛发出的
+    勋章不会收回（user_badges 没有来源比赛这一列）。
+    Deletes a competition in any status, with its participants, baselines and
+    board snapshots. Badges a settled competition already awarded stay awarded.
     """
     comp = _get_comp_or_404(db, comp_id)
-    if comp.status not in DELETABLE_STATUSES:
-        raise HTTPException(400, MSG_DELETE_LOCKED)
     key = comp_period_key(comp.id)
     participants = (db.query(CompetitionParticipant)
                       .filter(CompetitionParticipant.competition_id == comp.id).delete())
