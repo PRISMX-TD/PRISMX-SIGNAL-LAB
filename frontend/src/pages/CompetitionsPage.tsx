@@ -427,26 +427,30 @@ function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
 // 参赛账户选择弹窗：复用 SlideOrderModal/ConfirmModal 的 portal-to-body + 玻璃卡
 // 居中弹窗模式（原因同 ConfirmModal 顶部注释——本页调用点本身就在 .glass 卡片
 // 内部，不 portal 会被 backdrop-filter 截断）。列表来自 useLive().accounts（见
-// DetailView 的说明），调用方（DetailView）已经用 isRealAccount 过滤过，这里
-// 收到的都是实盘账户；后端仍会独立复核一遍并在选错时用 400 拒绝，前端过滤只是
-// 少让用户走一趟弯路，不是唯一防线。
+// DetailView 的说明），调用方（DetailView）已经按本场赛道（matchesTrack）过滤过：
+// 实盘赛只收到实盘账户、模拟赛只收到模拟账户，副标题也按 track 说清楚是哪一种；
+// 后端仍会独立复核一遍并在选错时用 400 拒绝，前端过滤只是少让用户走一趟弯路，
+// 不是唯一防线。
 // Entry-account picker: reuses the SlideOrderModal/ConfirmModal
 // portal-to-body + centered glass-card modal pattern (same reason as
 // ConfirmModal's top comment — this page's call site sits inside a .glass
 // card, and skipping the portal would get clipped by its backdrop-filter).
 // The list comes from useLive().accounts (see DetailView's comment); the
-// caller (DetailView) has already filtered it with isRealAccount, so
-// everything here is a real account. The backend still validates
+// caller (DetailView) has already filtered it by this competition's track
+// (matchesTrack): real accounts for a live competition, demo accounts for a demo
+// one, and the subtitle names which. The backend still validates
 // independently and rejects an ineligible pick with a 400 — this client-side
 // filter just saves the user a wasted round trip, it isn't the only guard.
 function AccountPickerModal({
   accounts,
+  track,
   busy,
   onCancel,
   onConfirm,
   t,
 }: {
   accounts: MT5Account[]
+  track: CompetitionTrack
   busy: boolean
   onCancel: () => void
   onConfirm: (login: string) => void
@@ -521,7 +525,7 @@ function AccountPickerModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 id={titleId} className="text-lg font-bold text-white">{t('competition.pickAccount')}</h3>
-        <p className="mt-2 text-xs text-neutral-500">{t('competition.pickAccountHint')}</p>
+        <p className="mt-2 text-xs text-neutral-500">{t(track === 'demo' ? 'competition.pickAccountHintDemo' : 'competition.pickAccountHint')}</p>
         <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
           {accounts.map((a) => (
             <button
@@ -642,18 +646,19 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   // 已经在 LiveProvider（Layout 挂的）里全站共享、随桥接心跳保持新鲜，
   // SlideOrderModal 的账户选择器就是这么拿的——同一个先例，这里不重新造。
   // GET /bridge/accounts 的响应（MT5AccountOut）现在带 tradeMode 字段，下面
-  // 用 isRealAccount 在本地把非实盘账户过滤掉；后端仍然独立复核（见
-  // AccountPickerModal 的说明），前端过滤只是不再把模拟/竞赛账户列出来让用户
-  // 白选一次。
+  // 用 matchesTrack 按本场赛道在本地过滤（实盘赛只列实盘、模拟赛只列模拟/竞赛
+  // 账户）；后端仍然独立复核（见 AccountPickerModal 的说明），前端过滤只是不把
+  // 赛道不符的账户列出来让用户白选一次。
   // Accounts come from useLive().accounts rather than a second
   // accountApi.list() call: that state is already shared app-wide via
   // LiveProvider (mounted by Layout) and kept fresh by the bridge heartbeat —
   // SlideOrderModal's own account switcher sources it the same way, so this
   // follows the same precedent rather than reinventing it. GET
   // /bridge/accounts's response (MT5AccountOut) now carries a tradeMode
-  // field, filtered locally below via isRealAccount. The backend still
-  // validates independently (see AccountPickerModal's comment) — the
-  // client-side filter just keeps demo/contest accounts from being listed as
+  // field, filtered locally below via matchesTrack by this competition's track
+  // (real accounts for a live competition, demo/contest ones for a demo one). The
+  // backend still validates independently (see AccountPickerModal's comment) —
+  // the client-side filter just keeps off-track accounts from being listed as
   // pickable in the first place.
   const { accounts } = useLive()
   const nowMs = useNowTicker()
@@ -937,7 +942,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
                         ? t('competition.noAccounts')
                         : accounts.some((a) => a.tradeMode == null)
                           ? t('competition.pendingAccountType')
-                          : t('competition.noRealAccounts')}
+                          : t(detail.track === 'demo' ? 'competition.noDemoAccounts' : 'competition.noRealAccounts')}
                     </p>
                     <Link to="/bind" className="mt-1 inline-block text-xs text-prism-300 transition hover:text-prism-200">
                       {t('nav.bind')}
@@ -974,6 +979,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
       {pickerOpen && (
         <AccountPickerModal
           accounts={availableAccounts}
+          track={detail.track}
           busy={registering}
           onCancel={() => setPickerOpen(false)}
           onConfirm={handleRegister}
