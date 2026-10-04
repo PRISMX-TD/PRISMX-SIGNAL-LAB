@@ -1012,6 +1012,14 @@ async def trade_modify(
     return _trade_rsp(data)
 
 
+async def request_reconnect() -> dict:
+    """管理后台「重连 MT5」：让网关断开并立刻重连券商，进程不重启。
+    返回网关原文 {ok, accepted}；accepted=False 表示本来就没连上、重连已在进行。
+    旧网关没有这个接口（404）或网关不可达时 ok=False。
+    Admin "reconnect MT5": the gateway drops and re-establishes the broker link."""
+    return await _post("/admin/reconnect", {}, timeout=10)
+
+
 async def health_check() -> dict:
     """探活。"""
     try:

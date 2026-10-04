@@ -424,6 +424,30 @@ export interface AdminSystemStatus {
   loops: HealthLoopRow[]
 }
 
+// 看门狗运维接口（ops/watchdog/sg/prismx_ops.py，GET {API_BASE}/ops/status）。
+// 不经过后端：后端挂了也能用。/ The watchdog ops endpoint; works with the backend down.
+export interface OpsHistoryItem {
+  at: number
+  action: string
+  operator: string
+  result: string
+  source: 'manual' | 'auto'
+}
+
+export interface OpsBudget {
+  restartsUsed: number
+  restartsMax: number
+  cooldownSec: number
+}
+
+export interface OpsStatus {
+  backend: OpsBudget
+  // VPS 看门狗连不上时只有 error/message
+  gateway: Partial<OpsBudget> & { taskState?: string; history?: OpsHistoryItem[]; error?: string; message?: string }
+  operators: number
+  history: OpsHistoryItem[]
+}
+
 // 管理后台连接质量（GET /admin/net-quality）/ admin connection quality
 export interface AdminNetQuality {
   thresholds: { good: number; fair: number }

@@ -38,6 +38,22 @@ STOP_WAIT_SECONDS = 5.0
 
 LoopFactory = Callable[[], Awaitable[None]]
 
+# 管理后台「重新启动这个任务」：请求可能落在任何一个 worker 上，而循环只在领导 worker
+# 上跑，所以请求只往 shared_state 里登记一个名字，由各 worker 的 control 协程每
+# CONTROL_POLL_SECONDS 秒看一眼，**只有领导**去执行。登记 5 分钟过期：换主期间没人
+# 处理的请求不会在很久以后突然生效。
+# Admin "restart this loop": any worker may get the request but only the leader
+# runs loops, so the request is registered in shared_state and the leader's
+# control coroutine picks it up. Registrations expire after 5 minutes.
+RESTART_REQUEST_KEY = "loopctl:restart"
+RESTART_REQUEST_TTL = 300
+CONTROL_POLL_SECONDS = 5
+
+
+def request_restart(name: str) -> None:
+    """登记一次重启请求（同步，可能是一次 Redis 往返）。/ Register a restart request (blocking)."""
+    shared_state.set_add(RESTART_REQUEST_KEY, name, RESTART_REQUEST_TTL)
+
 
 def _note_exit(name: str, task: asyncio.Task) -> None:
     """循环任务结束时的回调：被取消（换主、关停）是正常的；其余都是不该发生的退出——
@@ -69,16 +85,57 @@ class BackgroundLoops:
         # Lock owner: this process by default; tests pass distinct values to simulate workers.
         self._owner = owner or shared_state.WORKER_ID
         self.is_leader = False
+        self._control: asyncio.Task | None = None
 
     # ---- 直接起 / plain start（单 worker）----
+    def _start(self, name: str) -> None:
+        loop_health.clear_crash(name)
+        task = asyncio.create_task(self._factories[name](), name=f"{loop_health.TASK_PREFIX}{name}")
+        task.add_done_callback(lambda t, n=name: _note_exit(n, t))
+        self._tasks[name] = task
+
     def start_all(self) -> None:
-        for name, factory in self._factories.items():
+        for name in self._factories:
             if name not in self._tasks:
-                loop_health.clear_crash(name)
-                task = asyncio.create_task(factory(), name=f"{loop_health.TASK_PREFIX}{name}")
-                task.add_done_callback(lambda t, n=name: _note_exit(n, t))
-                self._tasks[name] = task
+                self._start(name)
         self.is_leader = True
+
+    def restart(self, name: str) -> bool:
+        """取消并重新创建一条循环（领导 worker 上调用）。不是本 worker 在跑的返回 False。
+        Cancel and recreate one loop; False when this worker isn't running loops."""
+        if not self.is_leader or name not in self._factories:
+            return False
+        old = self._tasks.pop(name, None)
+        if old is not None and not old.done():
+            old.cancel()
+            self._stopping.add(old)
+        logger.warning("管理后台请求重启后台循环 %s / restarting loop on admin request", name)
+        self._start(name)
+        return True
+
+    async def _apply_restart_requests(self) -> None:
+        from app.services.connection_manager import run_blocking
+
+        names = await run_blocking(shared_state.set_members, RESTART_REQUEST_KEY)
+        for name in names:
+            if self.restart(name):
+                await run_blocking(shared_state.set_remove, RESTART_REQUEST_KEY, name)
+            elif name not in self._factories:
+                # 不认识的名字（换过版本、手误）直接丢掉，别让它一直挂着。
+                await run_blocking(shared_state.set_remove, RESTART_REQUEST_KEY, name)
+
+    async def control(self) -> None:
+        """各 worker 一条：领导者处理「重启某条循环」的请求。/ Leader handles restart requests."""
+        while True:
+            await asyncio.sleep(CONTROL_POLL_SECONDS)
+            if not self.is_leader:
+                continue
+            try:
+                await self._apply_restart_requests()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("处理循环重启请求失败 / restart-request pass failed", exc_info=True)
 
     @property
     def names(self) -> list[str]:
@@ -142,11 +199,15 @@ class BackgroundLoops:
             self._supervisor = asyncio.create_task(self.supervise(), name="loop:supervisor")
         else:
             self.start_all()
+        self._control = asyncio.create_task(self.control(), name="loop-control")
 
     def shutdown(self) -> None:
         if self._supervisor is not None:
             self._supervisor.cancel()
             self._supervisor = None
+        if self._control is not None:
+            self._control.cancel()
+            self._control = None
         if self.is_leader:
             try:
                 shared_state.release_lock(LOCK_NAME, owner=self._owner)

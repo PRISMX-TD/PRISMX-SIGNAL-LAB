@@ -5,14 +5,25 @@
 // 后端挂了这一页照样打得开（前端托管在 Vercel），所以「读不到后端」本身就是一条结论：
 // 显示看门狗会自动重启、等几分钟、超过 5 分钟找人。
 //
+// 修复按钮：三个「轻」的（重启某个后台任务、刷新比赛排行、让 gateway 重连 MT5）走后端，
+// 所有管理员都能按；两个「重」的（重启 gateway、重启后端）走看门狗的运维接口（opsApi），
+// 后端挂了也能按，但要输运维口令，与看门狗自动重启共用每小时的次数上限。
+//
 // System status for non-technical admins: one light per component with what to
 // do next, plus a runbook. The page is served by Vercel, so it still loads when
 // the backend is down — and "can't reach the backend" is itself the verdict.
-import { useCallback, useEffect, useRef, useState } from 'react'
+// Fix buttons: three light ones via the backend; the two restarts via the
+// watchdog's ops endpoint (work with the backend down, need an ops password).
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { adminApi, ApiHttpError } from '../../api/client'
-import type { AdminSystemStatus, HealthComponent, HealthLevel, HealthLoopRow } from '../../api/types'
+import { adminApi, ApiHttpError, opsApi } from '../../api/client'
+import type {
+  AdminSystemStatus, HealthComponent, HealthLevel, HealthLoopRow, OpsBudget, OpsHistoryItem, OpsStatus,
+} from '../../api/types'
+import { useDialogA11y } from '../../utils/useDialogA11y'
+import ConfirmModal from '../ConfirmModal'
 import { SkeletonLine } from '../Skeleton'
 
 const REFRESH_MS = 15_000
@@ -138,11 +149,11 @@ function Light({ level }: { level: HealthLevel }) {
   )
 }
 
-function ComponentCard({ k, c }: { k: ComponentKey; c: HealthComponent }) {
+function ComponentCard({ k, c, children }: { k: ComponentKey; c: HealthComponent; children?: ReactNode }) {
   const { t } = useTranslation()
   const facts = factsLine(t, k, c)
   return (
-    <div className={`rounded-inner border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
+    <div className={`flex flex-col rounded-inner border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
       <div className="flex items-center gap-2">
         <Light level={c.level} />
         <span className="text-sm font-semibold text-white">{t(`admin.health.comp.${k}.name`)}</span>
@@ -152,23 +163,175 @@ function ComponentCard({ k, c }: { k: ComponentKey; c: HealthComponent }) {
       <p className={`mt-2 text-xs leading-relaxed ${c.level === 'down' ? 'text-neutral-100' : 'text-neutral-400'}`}>
         {hintFor(t, k, c.level)}
       </p>
+      {children && <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">{children}</div>}
     </div>
   )
 }
 
-function LoopTable({ rows }: { rows: HealthLoopRow[] }) {
+function ActionButton({ onClick, disabled, danger, title, children }: {
+  onClick: () => void; disabled?: boolean; danger?: boolean; title?: string; children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={`rounded-lg border px-2.5 py-1 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${
+        danger
+          ? 'border-down/40 bg-down/10 text-down hover:bg-down/20'
+          : 'border-white/15 bg-white/5 text-neutral-200 hover:bg-white/10'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+type HeavyKind = 'backend' | 'gateway'
+
+/** 重按钮能不能按、为什么不能按。/ Whether a restart button is usable, and why not. */
+function heavyBlock(t: TFunction, budget: Partial<OpsBudget> | undefined, opsError: string | null): string | null {
+  if (opsError !== null) return t('admin.health.actions.opsUnavailable', { msg: opsError })
+  if (!budget || budget.restartsMax == null) return t('admin.health.actions.opsUnavailable', { msg: t('admin.health.unknown') })
+  if ((budget.restartsUsed ?? 0) >= budget.restartsMax) return t('admin.health.actions.budgetFull', { max: budget.restartsMax })
+  if ((budget.cooldownSec ?? 0) > 0) return t('admin.health.actions.cooldown', { sec: budget.cooldownSec })
+  return null
+}
+
+function HeavyButton({ kind, budget, opsError, onOpen }: {
+  kind: HeavyKind; budget: Partial<OpsBudget> | undefined; opsError: string | null; onOpen: (k: HeavyKind) => void
+}) {
+  const { t } = useTranslation()
+  const blocked = heavyBlock(t, budget, opsError)
+  return (
+    <ActionButton danger disabled={blocked !== null} title={blocked ?? undefined} onClick={() => onOpen(kind)}>
+      {t(kind === 'backend' ? 'admin.health.actions.restartBackend' : 'admin.health.actions.restartGateway')}
+    </ActionButton>
+  )
+}
+
+/** 重启确认框：说清影响、显示本小时已用次数、输运维口令。/ Restart dialog with the ops password. */
+function RestartModal({ kind, budget, onClose, onDone }: {
+  kind: HeavyKind; budget: Partial<OpsBudget> | undefined; onClose: () => void; onDone: (msg: string) => void
+}) {
+  const { t } = useTranslation()
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const sheetRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(sheetRef, () => { if (!busy) onClose() })
+
+  const submit = async () => {
+    if (!password || busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const rsp = await (kind === 'backend' ? opsApi.restartBackend(password) : opsApi.restartGateway(password))
+      onDone(rsp.message)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm" onClick={() => { if (!busy) onClose() }}>
+      <div ref={sheetRef} className="glass-card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+        <h3 id={titleId} className="text-lg font-bold text-white">{t(`admin.health.actions.${kind}Title`)}</h3>
+        <p className="mt-3 text-sm leading-relaxed text-neutral-300">{t(`admin.health.actions.${kind}Message`)}</p>
+        {budget?.restartsMax != null && (
+          <p className="mt-2 text-xs text-neutral-500">
+            {t('admin.health.actions.budget', { used: budget.restartsUsed ?? 0, max: budget.restartsMax })}
+          </p>
+        )}
+        <form onSubmit={(e) => { e.preventDefault(); void submit() }} className="mt-4">
+          <label className="text-xs text-neutral-400" htmlFor={`${titleId}-pw`}>{t('admin.health.actions.passwordLabel')}</label>
+          <input
+            id={`${titleId}-pw`}
+            type="password"
+            autoComplete="off"
+            autoFocus
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder={t('admin.health.actions.passwordPlaceholder')}
+            className="input mt-1 w-full"
+          />
+          <p className="mt-1 text-[11px] text-neutral-500">{t('admin.health.actions.passwordHint')}</p>
+          {error && <p className="mt-2 text-xs text-down" role="alert">{error}</p>}
+          <div className="mt-5 flex gap-3">
+            <button type="button" onClick={onClose} disabled={busy} className="btn-ghost flex-1 py-2 text-sm">
+              {t('common.cancel')}
+            </button>
+            <button type="submit" disabled={busy || !password}
+              className="flex-1 rounded-xl border border-down/40 bg-down/15 py-2 text-sm font-semibold text-down transition hover:bg-down/25 disabled:opacity-50">
+              {busy ? t('admin.health.loading') : t('admin.health.actions.confirmRestart')}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function OpsHistoryList({ ops }: { ops: OpsStatus | null }) {
+  const { t } = useTranslation()
+  if (!ops) return null
+  // SG 的记录里有：手动/自动重启后端、手动重启 gateway；VPS 自己的自动重启只在 VPS 那边，补进来。
+  const items: OpsHistoryItem[] = [
+    ...ops.history,
+    ...(ops.gateway.history ?? []).filter((h) => h.source === 'auto'),
+  ].sort((a, b) => b.at - a.at).slice(0, 15)
+  const resultText = (r: string) => {
+    const key = `admin.health.history.result.${r.split(':')[0]}`
+    const label = t(key)
+    return label === key ? r : label
+  }
+  return (
+    <div className="glass mb-5 p-5">
+      <h3 className="mb-3 text-sm font-semibold text-white">{t('admin.health.history.title')}</h3>
+      {items.length === 0 ? (
+        <p className="text-xs text-neutral-500">{t('admin.health.history.empty')}</p>
+      ) : (
+        <ul className="divide-y divide-white/5 text-xs">
+          {items.map((h, i) => (
+            <li key={`${h.at}-${i}`} className="flex flex-wrap gap-x-3 gap-y-0.5 py-2">
+              <span className="num text-neutral-500">{new Date(h.at * 1000).toLocaleString()}</span>
+              <span className="text-neutral-200">{h.source === 'auto' ? t('admin.health.history.auto') : h.operator}</span>
+              <span className="text-neutral-300">{t(`admin.health.history.action.${h.action}`)}</span>
+              <span className={h.result === 'ok' || h.result === 'started' ? 'text-up' : 'text-amber-300'}>{resultText(h.result)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function LoopTable({ rows, onRestart, onRefreshCompetitions, busy }: {
+  rows: HealthLoopRow[]; onRestart: (name: string) => void; onRefreshCompetitions: () => void; busy: boolean
+}) {
   const { t } = useTranslation()
   if (rows.length === 0) return null
   return (
     <div className="glass mb-5 overflow-x-auto p-5">
-      <h3 className="mb-3 text-sm font-semibold text-white">{t('admin.health.loopTable.title')}</h3>
-      <table className="w-full min-w-[520px] text-left text-xs">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-white">{t('admin.health.loopTable.title')}</h3>
+        <span className="ml-auto">
+          <ActionButton onClick={onRefreshCompetitions} disabled={busy}>{t('admin.health.actions.refreshCompetitions')}</ActionButton>
+        </span>
+      </div>
+      <table className="w-full min-w-[600px] text-left text-xs">
         <thead className="text-neutral-500">
           <tr>
             <th className="pb-2 font-medium">{t('admin.health.loopTable.name')}</th>
             <th className="pb-2 font-medium">{t('admin.health.loopTable.status')}</th>
             <th className="pb-2 font-medium">{t('admin.health.loopTable.lastRun')}</th>
             <th className="pb-2 font-medium">{t('admin.health.loopTable.lastError')}</th>
+            <th className="pb-2 font-medium" />
           </tr>
         </thead>
         <tbody className="divide-y divide-white/5">
@@ -202,6 +365,12 @@ function LoopTable({ rows }: { rows: HealthLoopRow[] }) {
                     </>
                   ) : (
                     t('admin.health.loopTable.none')
+                  )}
+                </td>
+                <td className="py-2 pl-2 text-right">
+                  {/* 只有红的（停了、崩了）才给按钮：黄的只是报过错，任务还在跑 */}
+                  {r.level === 'down' && (
+                    <ActionButton onClick={() => onRestart(r.name)} disabled={busy}>{t('admin.health.actions.restartLoop')}</ActionButton>
                   )}
                 </td>
               </tr>
@@ -242,10 +411,28 @@ export default function SystemStatusPanel() {
   const [unreachable, setUnreachable] = useState<string | null>(null)
   const [otherError, setOtherError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [ops, setOps] = useState<OpsStatus | null>(null)
+  const [opsError, setOpsError] = useState<string | null>(null)
+  const [confirm, setConfirm] = useState<{ title: string; message: string; run: () => Promise<string> } | null>(null)
+  const [actionBusy, setActionBusy] = useState(false)
+  const [heavy, setHeavy] = useState<HeavyKind | null>(null)
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const alive = useRef(true)
+
+  const loadOps = useCallback(() => {
+    opsApi.status().then(
+      (d) => { if (alive.current) { setOps(d); setOpsError(null) } },
+      (err: unknown) => {
+        if (!alive.current) return
+        // 404 = nginx 还没配 /ops/ 转发；502 = 看门狗没在跑；401 = 登录过期
+        setOpsError(err instanceof Error ? err.message : String(err))
+      },
+    )
+  }, [])
 
   const load = useCallback(() => {
     setLoading(true)
+    loadOps()
     adminApi.systemStatus().then(
       (d) => {
         if (!alive.current) return
@@ -260,7 +447,51 @@ export default function SystemStatusPanel() {
         else setOtherError(msg)
       },
     ).finally(() => { if (alive.current) setLoading(false) })
-  }, [])
+  }, [loadOps])
+
+  // 轻按钮：先确认，再调后端，结果显示在页面顶部。/ Light buttons: confirm, call, report.
+  const runConfirmed = async () => {
+    if (!confirm) return
+    setActionBusy(true)
+    setNotice(null)   // 别让上一次的结果挂着，看起来像是这一次的
+    try {
+      const text = await confirm.run()
+      setNotice({ ok: true, text })
+    } catch (err) {
+      setNotice({ ok: false, text: t('admin.health.actions.failed', { msg: err instanceof Error ? err.message : String(err) }) })
+    } finally {
+      setActionBusy(false)
+      setConfirm(null)
+      window.setTimeout(load, 3000)
+    }
+  }
+
+  const loopLabel = (name: string) => {
+    const key = `admin.health.loopName.${name}`
+    const label = t(key)
+    return label === key ? name : label
+  }
+  const askRestartLoop = (name: string) => setConfirm({
+    title: t('admin.health.actions.restartLoopTitle', { name: loopLabel(name) }),
+    message: t('admin.health.actions.restartLoopMessage'),
+    run: async () => { await adminApi.restartLoop(name); return t('admin.health.actions.restartLoopDone', { name: loopLabel(name) }) },
+  })
+  const askRefreshCompetitions = () => setConfirm({
+    title: t('admin.health.actions.refreshCompetitionsTitle'),
+    message: t('admin.health.actions.refreshCompetitionsMessage'),
+    run: async () => {
+      const r = await adminApi.refreshCompetitions()
+      return t('admin.health.actions.refreshCompetitionsDone', { refreshed: r.refreshed, running: r.running })
+    },
+  })
+  const askReconnect = () => setConfirm({
+    title: t('admin.health.actions.reconnectTitle'),
+    message: t('admin.health.actions.reconnectMessage'),
+    run: async () => {
+      const r = await adminApi.reconnectGateway()
+      return t(r.accepted ? 'admin.health.actions.reconnectDone' : 'admin.health.actions.reconnectAlready')
+    },
+  })
 
   // 标签页在后台时不刷新：有人把这页开着一整天也不会一直查后端；切回来立刻补一次，
   // 不让人看着一份过时的数据等满 15 秒。
@@ -310,6 +541,14 @@ export default function SystemStatusPanel() {
         </div>
       </div>
 
+      {notice && (
+        <div className={`mb-5 flex items-start gap-3 rounded-inner border p-3 text-sm ${
+          notice.ok ? 'border-up/40 bg-up/10 text-up' : 'border-down/40 bg-down/10 text-down'}`} role="status">
+          <span className="flex-1">{notice.text}</span>
+          <button type="button" onClick={() => setNotice(null)} className="text-xs text-neutral-400 hover:text-neutral-200">✕</button>
+        </div>
+      )}
+
       {unreachable !== null && (
         <div className="mb-5 rounded-inner border border-down/50 bg-down/10 p-4" role="alert">
           <div className="flex items-center gap-2">
@@ -318,6 +557,10 @@ export default function SystemStatusPanel() {
           </div>
           <p className="mt-2 text-sm leading-relaxed text-neutral-100">{t('admin.health.unreachable.body')}</p>
           {unreachable && <p className="mt-1 text-xs text-neutral-500">{t('admin.health.unreachable.detail', { msg: unreachable })}</p>}
+          {/* 后端挂了这里还能按：走看门狗，不经过后端 */}
+          <div className="mt-3">
+            <HeavyButton kind="backend" budget={ops?.backend} opsError={opsError} onOpen={setHeavy} />
+          </div>
         </div>
       )}
 
@@ -332,13 +575,46 @@ export default function SystemStatusPanel() {
       {data && (
         <div className={unreachable !== null || otherError !== null ? 'opacity-50' : undefined}>
           <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            {COMPONENT_ORDER.map((k) => data.components[k] && <ComponentCard key={k} k={k} c={data.components[k]} />)}
+            {COMPONENT_ORDER.map((k) => data.components[k] && (
+              <ComponentCard key={k} k={k} c={data.components[k]}>
+                {k === 'backend' && <HeavyButton kind="backend" budget={ops?.backend} opsError={opsError} onOpen={setHeavy} />}
+                {k === 'gateway' && (
+                  <>
+                    <ActionButton onClick={askReconnect} disabled={actionBusy}>{t('admin.health.actions.reconnectGateway')}</ActionButton>
+                    <HeavyButton kind="gateway" budget={ops?.gateway} opsError={opsError ?? (ops?.gateway.error ? ops.gateway.message ?? ops.gateway.error : null)} onOpen={setHeavy} />
+                  </>
+                )}
+              </ComponentCard>
+            ))}
           </div>
-          <LoopTable rows={data.loops} />
+          <LoopTable rows={data.loops} onRestart={askRestartLoop} onRefreshCompetitions={askRefreshCompetitions} busy={actionBusy} />
         </div>
       )}
 
+      {ops && (
+        <p className="mb-3 text-xs text-neutral-500">
+          {t('admin.health.actions.budgetLine', {
+            bu: ops.backend.restartsUsed, bm: ops.backend.restartsMax,
+            gu: ops.gateway.restartsUsed ?? '—', gm: ops.gateway.restartsMax ?? '—',
+          })}
+        </p>
+      )}
+      <OpsHistoryList ops={ops} />
+
       <Runbook />
+
+      {confirm && (
+        <ConfirmModal center title={confirm.title} message={confirm.message} busy={actionBusy}
+          onConfirm={() => { void runConfirmed() }} onCancel={() => { if (!actionBusy) setConfirm(null) }} />
+      )}
+      {heavy && (
+        <RestartModal
+          kind={heavy}
+          budget={heavy === 'backend' ? ops?.backend : ops?.gateway}
+          onClose={() => setHeavy(null)}
+          onDone={(msg) => { setHeavy(null); setNotice({ ok: true, text: msg }); loadOps(); window.setTimeout(load, 15_000) }}
+        />
+      )}
     </div>
   )
 }

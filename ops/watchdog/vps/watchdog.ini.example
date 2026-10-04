@@ -44,3 +44,13 @@ MailFrom=noreply@prismxsignallab.com
 TelegramEnabled=false
 TelegramBotToken=
 TelegramChatIds=
+
+# ---- 运维接口(管理后台的「重启 gateway」按钮)----
+# 只听 WireGuard 隧道地址;只接受 SG 看门狗签过名的请求。install-watchdog.ps1 会加防火墙规则。
+OpsListen=http://10.66.0.2:8791/
+# 与 SG 服务器 /etc/prismx-watchdog.env 里的 OPS_SHARED_SECRET 必须一样。留空 = 不开接口
+OpsSharedSecret=
+# 只接受这些来源(SG 的隧道地址)
+OpsAllowedIps=10.66.0.1
+# 手动重启后多少秒内不能再按
+OpsCooldownSec=300

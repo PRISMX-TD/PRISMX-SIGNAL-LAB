@@ -1194,6 +1194,52 @@
             "a": "绝对不要再重启：这种情况下多重启一次可能会丢数据。马上联系 Rex。"
           }
         }
+      },
+      "actions": {
+        "restartBackend": "重启后端",
+        "restartGateway": "重启 gateway",
+        "reconnectGateway": "重连 MT5",
+        "restartLoop": "重新启动",
+        "refreshCompetitions": "立刻刷新比赛排行",
+        "restartLoopTitle": "重新启动「{{name}}」？",
+        "restartLoopMessage": "只重新启动这一个后台任务，后端不重启，用户没有感觉。5 秒内生效。",
+        "restartLoopDone": "已安排重新启动「{{name}}」，5 秒内生效。半分钟后看这一行有没有变绿。",
+        "refreshCompetitionsTitle": "立刻刷新比赛排行？",
+        "refreshCompetitionsMessage": "马上把所有进行中比赛的排行重算一遍，不用等下一轮。不影响用户。",
+        "refreshCompetitionsDone": "已刷新 {{refreshed}}/{{running}} 场进行中的比赛。",
+        "reconnectTitle": "让 gateway 重连 MT5？",
+        "reconnectMessage": "gateway 进程不重启，只把和券商的连接断开重连。直连账户几秒内下不了单（会提示「重连中」，单子不会发出去）。",
+        "reconnectDone": "已让 gateway 重连 MT5。十几秒后看 Gateway 那盏灯。",
+        "reconnectAlready": "gateway 本来就在重连中，不用再按。",
+        "backendTitle": "重启后端",
+        "backendMessage": "全站会中断几秒，正在下的单可能显示「结果未知」。先确认上面的灯确实指向后端的问题；后端卡死时看门狗本来就会在约 2 分钟内自动重启。",
+        "gatewayTitle": "重启 gateway",
+        "gatewayMessage": "直连账户 10~30 秒下不了单。先试过「重连 MT5」没用再按。",
+        "passwordLabel": "运维口令",
+        "passwordPlaceholder": "输入你的运维口令",
+        "passwordHint": "口令找 Rex 要，每人一个。输错 5 次锁 15 分钟。",
+        "confirmRestart": "确认重启",
+        "budget": "本小时已重启 {{used}}/{{max}} 次（含看门狗自动重启）",
+        "budgetLine": "本小时重启次数（含看门狗自动重启）：后端 {{bu}}/{{bm}} · gateway {{gu}}/{{gm}}",
+        "budgetFull": "1 小时内已重启 {{max}} 次，别再按了，联系 Rex",
+        "cooldown": "刚有人按过，{{sec}} 秒后才能再按",
+        "opsUnavailable": "重启按钮暂不可用：{{msg}}",
+        "failed": "操作失败：{{msg}}"
+      },
+      "history": {
+        "title": "最近的操作记录",
+        "empty": "还没有操作记录。",
+        "auto": "看门狗（自动）",
+        "action": {
+          "restart-backend": "重启后端",
+          "restart-gateway": "重启 gateway"
+        },
+        "result": {
+          "ok": "成功",
+          "started": "已开始",
+          "refused": "被拒绝",
+          "failed": "失败"
+        }
       }
     },
     "winrate": {

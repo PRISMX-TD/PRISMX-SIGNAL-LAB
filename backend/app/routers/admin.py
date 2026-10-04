@@ -22,10 +22,14 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.database import get_db
 from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
-from app.models import AdminAuditLog, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
+from app.models import AdminAuditLog, Competition, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
 from app.services import net_quality
 from app.services import system_status as system_status_service
+from app.services import gateway_client, shared_state
+from app.services.background import request_restart as request_loop_restart
+from app.services.gamification.competitions import refresh_comp_board
+from app.core.database import SessionLocal
 from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
@@ -642,6 +646,82 @@ async def system_status(
     每一项都有超时、不抛异常——部件坏了这一页也要能打开。口径在 services/system_status.py。
     System-status page: one light per component; every probe bounded and non-raising."""
     return await system_status_service.collect(request.app)
+
+
+# ---- 系统状态页上的修复按钮 / fix buttons on the status page ----
+# 三个「轻」按钮走后端（后端活着时才有意义）；重启 gateway / 重启后端走看门狗
+# （ops/watchdog），后端挂了也能按。每个按钮 5 分钟内只能按一次（所有管理员共用），
+# 每次都写审计日志。
+# The three light buttons go through the backend; the two restarts go through the
+# watchdogs. Each button has a shared 5-minute cooldown and is audited.
+OPS_COOLDOWN_SECONDS = 300
+
+
+def _ops_cooldown_or_429(action: str) -> None:
+    """同一个按钮 5 分钟内第二次按：429。计数先加，失败的那次也占冷却——防的就是连按。"""
+    n = shared_state.incr_with_ttl(f"opscd:{action}", OPS_COOLDOWN_SECONDS)
+    if n > 1:
+        raise HTTPException(status_code=429, detail="这个按钮 5 分钟内已经有人按过，请稍后再试")
+
+
+def _ops_audit(db: Session, admin: User, action: str, result: str) -> None:
+    # 没有目标用户的操作沿用惯例：目标记成操作者自己，field 写 domain:action。
+    log_change(db, admin.id, admin.id, f"ops:{action}", None, result)
+    db.commit()
+
+
+@router.post("/system-status/actions/restart-loop", response_model=dict)
+def ops_restart_loop(
+    request: Request,
+    body: dict,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """重新启动一条后台循环（不重启后端）。由领导 worker 在 5 秒内执行。"""
+    name = str(body.get("name") or "")
+    loops = getattr(request.app.state, "background_loops", None)
+    if loops is None or name not in loops.names:
+        raise HTTPException(status_code=404, detail="没有这个后台任务")
+    _ops_cooldown_or_429(f"restart-loop:{name}")
+    request_loop_restart(name)
+    _ops_audit(db, admin, f"restart-loop:{name}", "scheduled")
+    return {"scheduled": True}
+
+
+@router.post("/system-status/actions/refresh-competitions", response_model=dict)
+def ops_refresh_competitions(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """把所有进行中比赛的排行立刻重算一遍（与比赛页的「立即刷新」同一个函数，逐场）。"""
+    _ops_cooldown_or_429("refresh-competitions")
+    comps = db.query(Competition).filter(Competition.status == "running").all()
+    refreshed = sum(1 for c in comps if refresh_comp_board(db, c, force=True))
+    _ops_audit(db, admin, "refresh-competitions", f"{refreshed}/{len(comps)}")
+    return {"running": len(comps), "refreshed": refreshed}
+
+
+@router.post("/system-status/actions/reconnect-gateway", response_model=dict)
+async def ops_reconnect_gateway(
+    admin: User = Depends(require_admin),
+):
+    """让 gateway 断开并立刻重连券商（进程不重启，直连账户几秒内下不了单）。"""
+    await run_in_threadpool(_ops_cooldown_or_429, "reconnect-gateway")
+    rsp = await gateway_client.request_reconnect()
+    ok = bool(rsp.get("ok"))
+    result = ("accepted" if rsp.get("accepted") else "already-reconnecting") if ok else f"failed: {rsp.get('error') or rsp}"
+
+    def _audit() -> None:
+        db = SessionLocal()
+        try:
+            _ops_audit(db, admin, "reconnect-gateway", str(result)[:200])
+        finally:
+            db.close()
+
+    await run_in_threadpool(_audit)
+    if not ok:
+        raise HTTPException(status_code=502, detail="gateway 没有响应重连请求（可能连不上，或 gateway 还是旧版本）")
+    return {"accepted": bool(rsp.get("accepted"))}
 
 
 @router.get("/potential-customers", response_model=AdminPotentialCustomersOut)

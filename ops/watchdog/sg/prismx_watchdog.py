@@ -31,6 +31,11 @@ Resend and/or Telegram, both off by default) on everything else.
     python3 prismx_watchdog.py --config /etc/prismx-watchdog.env            常驻
     python3 prismx_watchdog.py --config /etc/prismx-watchdog.env --once     查一轮，只打印不动手
     python3 prismx_watchdog.py --config /etc/prismx-watchdog.env --test-alert  发一条测试通知
+    python3 prismx_watchdog.py --add-operator 名字      给一个人生成运维口令（打印一次，之后只存哈希）
+    python3 prismx_watchdog.py --remove-operator 名字   删掉这个人的口令
+    python3 prismx_watchdog.py --list-operators          列出有口令的人
+
+运维接口（管理后台的「重启后端」「重启 gateway」按钮）见同目录 prismx_ops.py。
 """
 
 import argparse
@@ -40,6 +45,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -78,6 +84,18 @@ DEFAULTS = {
     "TELEGRAM_ENABLED": "false",
     "TELEGRAM_BOT_TOKEN": "",
     "TELEGRAM_CHAT_IDS": "",
+    # ---- 运维接口（prismx_ops.py）----
+    # 留空 = 不开接口。只听本机，由 nginx 的 /ops/ 转进来。
+    "OPS_LISTEN": "127.0.0.1:8790",
+    "OPS_OPERATORS_FILE": "/etc/prismx-watchdog.operators",
+    "OPS_HISTORY_FILE": "/var/log/prismx-watchdog/ops-history.jsonl",
+    "OPS_COOLDOWN": "300",
+    "OPS_LOCK_FAILS": "5",
+    "OPS_LOCK_SEC": "900",
+    "OPS_CORS_ORIGINS": "",
+    # 与 VPS 看门狗共用的签名密钥；两边必须一样。留空 = 「重启 gateway」不可用。
+    "OPS_SHARED_SECRET": "",
+    "VPS_OPS_URL": "http://10.66.0.2:8791",
 }
 
 
@@ -124,6 +142,9 @@ def load_config(path):
         if gw:
             cfg["GATEWAY_HEALTH_URL"] = gw.rstrip("/") + "/health"
     cfg["REDIS_URL"] = backend_env.get("REDIS_URL", "")
+    # 运维接口验浏览器带来的登录 token，用后端同一把密钥（只验签名与过期，不查库）。
+    if not cfg.get("JWT_SECRET"):
+        cfg["JWT_SECRET"] = backend_env.get("JWT_SECRET", "")
     return cfg
 
 
@@ -147,26 +168,41 @@ def log(msg):
 # ---------------------------------------------------------------- 纯逻辑 / pure logic
 
 class RestartBudget:
-    """滑动 1 小时内最多 N 次。/ At most N restarts in any rolling hour."""
+    """滑动 1 小时内最多 N 次。/ At most N restarts in any rolling hour.
+
+    自动重启（主循环）与管理后台手动重启（运维接口线程）共用这一份额度，所以加锁。"""
 
     def __init__(self, per_hour):
         self.per_hour = per_hour
         self.stamps = []
+        self._lock = threading.Lock()
 
     def _trim(self, now):
         self.stamps = [t for t in self.stamps if now - t < 3600]
 
     def allow(self, now):
-        self._trim(now)
-        return len(self.stamps) < self.per_hour
+        with self._lock:
+            self._trim(now)
+            return len(self.stamps) < self.per_hour
 
     def record(self, now):
-        self._trim(now)
-        self.stamps.append(now)
+        with self._lock:
+            self._trim(now)
+            self.stamps.append(now)
+
+    def try_take(self, now):
+        """有名额就占一个并返回 True。检查与占用一步完成，两个线程不会都拿到最后一个名额。"""
+        with self._lock:
+            self._trim(now)
+            if len(self.stamps) >= self.per_hour:
+                return False
+            self.stamps.append(now)
+            return True
 
     def used(self, now):
-        self._trim(now)
-        return len(self.stamps)
+        with self._lock:
+            self._trim(now)
+            return len(self.stamps)
 
 
 class DownTracker:
@@ -221,9 +257,8 @@ class BackendGuard:
         self.streak += 1
         if self.streak < self.fail_limit:
             return "failing"
-        if not self.budget.allow(now):
+        if not self.budget.try_take(now):
             return "exhausted"
-        self.budget.record(now)
         self.streak = 0
         return "restart"
 
@@ -450,6 +485,29 @@ class Watchdog:
         self.redis = DownTracker(int(cfg["REDIS_DOWN_ALERT_SEC"]))
         self.last_n_restarts = None
         self.last_state = None
+        self.history = None      # 运维接口开着时由 main 挂上 prismx_ops.History
+
+    # ---- 给运维接口用 / used by the ops endpoint ----
+    def log_line(self, msg):
+        log(msg)
+
+    def try_manual_restart_slot(self):
+        return self.budget.try_take(time.monotonic())
+
+    def manual_restart_backend(self, operator):
+        """管理后台手动重启后端（在运维接口的后台线程里跑；名额已经占好了）。"""
+        cfg = self.cfg
+        path = save_snapshot(cfg, "manual")
+        log("管理员 %s 手动重启后端" % operator)
+        ok, detail = restart_service(cfg["SERVICE"])
+        self.guard.streak = 0
+        if self.history is not None:
+            self.history.add("restart-backend", operator, "ok" if ok else "failed: " + detail)
+        self.notifier.send(
+            "管理员 %s 手动重启了后端" % operator if ok else "管理员 %s 手动重启后端失败" % operator,
+            "通过管理后台的「重启后端」按钮。%s\n重启前的日志存在：%s\n1 小时内已重启 %d 次（含自动，上限 %s 次）。"
+            % ("" if ok else "失败原因：" + detail, path or "（保存失败）",
+               self.budget.used(time.monotonic()), cfg["MAX_RESTARTS_PER_HOUR"]))
 
     def tick(self):
         now = time.monotonic()
@@ -557,6 +615,8 @@ class Watchdog:
         path = self._snapshot("hung")
         log("后端连续不响应，执行重启（最后错误：%s）" % err)
         ok, detail = restart_service(cfg["SERVICE"])
+        if self.history is not None:
+            self.history.add("restart-backend", "看门狗", "ok" if ok else "failed: " + detail, source="auto")
         self.notifier.send(
             "后端卡死，已自动重启" if ok else "后端卡死，自动重启失败",
             "后端连续 %s 轮不响应（%s），看门狗%s。\n重启前的日志存在：%s\n"
@@ -570,9 +630,30 @@ def main(argv=None):
     ap.add_argument("--config", default="/etc/prismx-watchdog.env")
     ap.add_argument("--once", action="store_true", help="只查一轮、打印结果，不重启不发通知")
     ap.add_argument("--test-alert", action="store_true", help="通过已启用的渠道发一条测试通知")
+    ap.add_argument("--add-operator", metavar="NAME", help="给这个人生成（或重置）运维口令")
+    ap.add_argument("--remove-operator", metavar="NAME", help="删掉这个人的运维口令")
+    ap.add_argument("--list-operators", action="store_true", help="列出有运维口令的人")
+    ap.add_argument("--gen-shared-secret", action="store_true", help="生成一把 SG/VPS 共用的签名密钥")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
+
+    if args.gen_shared_secret:
+        import secrets
+        print(secrets.token_hex(32))
+        return 0
+    if args.add_operator or args.remove_operator or args.list_operators:
+        import prismx_ops
+        store = prismx_ops.OperatorStore(cfg["OPS_OPERATORS_FILE"])
+        if args.add_operator:
+            pw = store.add(args.add_operator)
+            print("已为「%s」生成运维口令（只显示这一次，请私下交给本人）：\n\n    %s\n" % (args.add_operator, pw))
+        elif args.remove_operator:
+            print("已删除" if store.remove(args.remove_operator) else "没有这个人")
+        else:
+            names = store.names()
+            print("\n".join(names) if names else "（还没有人有运维口令）")
+        return 0
 
     if args.test_alert:
         n = Notifier(cfg)
@@ -592,6 +673,19 @@ def main(argv=None):
     wd = Watchdog(cfg)
     log("看门狗启动：服务 %s，每 %s 秒查一次，通知渠道：%s"
         % (cfg["SERVICE"], cfg["CHECK_EVERY"], ", ".join(wd.notifier.enabled_channels()) or "未启用"))
+    if cfg.get("OPS_LISTEN"):
+        try:
+            import prismx_ops
+            wd.history = prismx_ops.History(cfg["OPS_HISTORY_FILE"])
+            ctx = prismx_ops.OpsContext(cfg, wd, prismx_ops.OperatorStore(cfg["OPS_OPERATORS_FILE"]), wd.history)
+            prismx_ops.start(ctx, cfg["OPS_LISTEN"])
+            log("运维接口已开：%s（有口令的人 %d 个；重启 gateway %s）"
+                % (cfg["OPS_LISTEN"], len(ctx.operators.names()),
+                   "可用" if cfg.get("OPS_SHARED_SECRET") else "不可用：没配 OPS_SHARED_SECRET"))
+            if not cfg.get("JWT_SECRET"):
+                log("警告：读不到 JWT_SECRET（后端 .env），运维接口会拒绝所有请求")
+        except Exception as e:  # 接口起不来不能拖垮看门狗本身
+            log("运维接口启动失败（看门狗照常工作）：%s: %s" % (type(e).__name__, e))
     every = int(cfg["CHECK_EVERY"])
     while True:
         started = time.monotonic()

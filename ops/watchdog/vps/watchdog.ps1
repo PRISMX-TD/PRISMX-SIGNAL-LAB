@@ -19,6 +19,11 @@
 
     通知渠道:邮件(Resend)和 Telegram,默认都关着,在 watchdog.ini 里打开。
 
+    运维接口(管理后台的「重启 gateway」按钮):只听 WireGuard 隧道地址(OpsListen),只接受
+    SG 看门狗用共享密钥 OpsSharedSecret 签过名的请求(60 秒内、随机数没见过)。按钮本身的
+    鉴权(登录 token + 运维口令)在 SG 那边做,这里只认签名。手动重启与自动重启共用每小时
+    MaxRestartsPerHour 次的额度,另有 OpsCooldownSec 秒冷却。没配 OpsSharedSecret 就不开。
+
     用法:
         .\watchdog.ps1              常驻(计划任务就是这样跑的)
         .\watchdog.ps1 -Once        查一轮,只打印,不重启、不发通知
@@ -29,6 +34,7 @@
 param(
     [switch]$Once,
     [switch]$TestAlert,
+    [switch]$SelfTestSignature,
     [string]$Config = ""
 )
 
@@ -65,6 +71,10 @@ $Cfg = [ordered]@{
     TelegramEnabled      = "false"
     TelegramBotToken     = ""
     TelegramChatIds      = ""
+    OpsListen            = "http://10.66.0.2:8791/"
+    OpsSharedSecret      = ""
+    OpsAllowedIps        = "10.66.0.1"
+    OpsCooldownSec       = 300
 }
 
 if (Test-Path $Config) {
@@ -82,7 +92,7 @@ if (Test-Path $Config) {
 
 foreach ($k in @("CheckEverySec", "HealthTimeoutSec", "FailLimit", "StartupGraceSec", "MaxRestartsPerHour",
                  "ProcessMissingSec", "TaskDisabledAlertSec", "Mt5DownAlertSec", "DealerDownAlertSec",
-                 "MaintenanceQuietSec", "RepeatAlertSec")) {
+                 "MaintenanceQuietSec", "RepeatAlertSec", "OpsCooldownSec")) {
     $Cfg[$k] = [int]$Cfg[$k]
 }
 
@@ -437,7 +447,161 @@ function Invoke-Tick {
     return $r
 }
 
+# ---------------------------------------------------------------- 运维接口(SG 看门狗转来的按钮)
+
+$script:OpsNonces = @{}
+$script:OpsLastRestartAt = -100000
+$script:OpsHistory = New-Object System.Collections.ArrayList
+$OpsHistoryFile = Join-Path $LogDir "ops-history.jsonl"
+if (Test-Path $OpsHistoryFile) {
+    try {
+        foreach ($line in (Get-Content $OpsHistoryFile -Tail 50 -Encoding UTF8)) {
+            try { [void]$script:OpsHistory.Add(($line | ConvertFrom-Json)) } catch { }
+        }
+    } catch { }
+}
+
+function Add-OpsHistory($action, $operator, $result, $source = "manual") {
+    $item = [ordered]@{ at = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); action = $action; operator = $operator; result = $result; source = $source }
+    [void]$script:OpsHistory.Add([pscustomobject]$item)
+    while ($script:OpsHistory.Count -gt 50) { $script:OpsHistory.RemoveAt(0) }
+    try { [IO.File]::AppendAllText($OpsHistoryFile, (($item | ConvertTo-Json -Compress) + "`n"), (New-Object Text.UTF8Encoding($false))) } catch { }
+}
+
+# 与 SG 端 prismx_ops.sign_request 完全相同的签名:方法、路径、时间戳、随机数、请求体,
+# 以换行连接后做 HMAC-SHA256(十六进制小写)。
+function Get-OpsSignature($secret, $method, $path, $ts, $nonce, $body) {
+    $h = New-Object Security.Cryptography.HMACSHA256 (, [Text.Encoding]::UTF8.GetBytes($secret))
+    try {
+        $msg = [Text.Encoding]::UTF8.GetBytes(($method.ToUpperInvariant(), $path, $ts, $nonce, $body) -join "`n")
+        return (($h.ComputeHash($msg) | ForEach-Object { $_.ToString("x2") }) -join "")
+    } finally { $h.Dispose() }
+}
+
+# 定长比较,不在第一个不同字符处提前返回。
+function Test-SameString($a, $b) {
+    if ($null -eq $a -or $null -eq $b -or $a.Length -ne $b.Length) { return $false }
+    $diff = 0
+    for ($i = 0; $i -lt $a.Length; $i++) { $diff = $diff -bor ([int][char]$a[$i] -bxor [int][char]$b[$i]) }
+    return $diff -eq 0
+}
+
+function Test-OpsRequest($req, $path, $body) {
+    $ts = $req.Headers["X-Ops-Ts"]; $nonce = $req.Headers["X-Ops-Nonce"]; $sig = $req.Headers["X-Ops-Sig"]
+    if (-not $ts -or -not $nonce -or -not $sig) { return "缺少签名" }
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $tsNum = 0L
+    if (-not [long]::TryParse($ts, [ref]$tsNum) -or [Math]::Abs($now - $tsNum) -gt 60) { return "签名时间不对(时钟偏差超过 60 秒)" }
+    foreach ($k in @($script:OpsNonces.Keys)) { if ($now - $script:OpsNonces[$k] -gt 300) { $script:OpsNonces.Remove($k) } }
+    if ($script:OpsNonces.ContainsKey($nonce)) { return "重放的请求" }
+    $expected = Get-OpsSignature $Cfg.OpsSharedSecret $req.HttpMethod $path $ts $nonce $body
+    if (-not (Test-SameString $expected ([string]$sig).ToLowerInvariant())) { return "签名不对" }
+    $script:OpsNonces[$nonce] = $now
+    return $null
+}
+
+function Send-OpsJson($ctx, $status, $obj) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($obj | ConvertTo-Json -Compress -Depth 5))
+    $resp = $ctx.Response
+    $resp.StatusCode = $status
+    $resp.ContentType = "application/json; charset=utf-8"
+    $resp.ContentLength64 = $bytes.Length
+    try { $resp.OutputStream.Write($bytes, 0, $bytes.Length) } finally { $resp.Close() }
+}
+
+function Invoke-OpsRequest($ctx) {
+    $req = $ctx.Request
+    $path = $req.Url.AbsolutePath.TrimEnd("/")
+    $ip = [string]$req.RemoteEndPoint.Address
+    $allowed = As-List $Cfg.OpsAllowedIps
+    if ($allowed.Count -gt 0 -and -not ($allowed -contains $ip)) {
+        Write-WdLog "运维接口拒绝来源 $ip"
+        return Send-OpsJson $ctx 403 @{ ok = $false; error = "forbidden"; message = "来源地址不被允许" }
+    }
+    if ($req.ContentLength64 -gt 4096) { return Send-OpsJson $ctx 413 @{ ok = $false; error = "too_large" } }
+    $body = ""
+    if ($req.HasEntityBody) {
+        $sr = New-Object IO.StreamReader($req.InputStream, [Text.Encoding]::UTF8)
+        try { $body = $sr.ReadToEnd() } finally { $sr.Close() }
+    }
+    $bad = Test-OpsRequest $req $path $body
+    if ($bad) {
+        Write-WdLog "运维接口拒绝 $($req.HttpMethod) $path(来自 $ip):$bad"
+        return Send-OpsJson $ctx 401 @{ ok = $false; error = "bad_signature"; message = $bad }
+    }
+
+    $now = $script:Clock.Elapsed.TotalSeconds
+    $cooldown = [int][Math]::Max(0, $Cfg.OpsCooldownSec - ($now - $script:OpsLastRestartAt))
+    if ($path -eq "/ops/status" -and $req.HttpMethod -eq "GET") {
+        $recent = @($script:OpsHistory | Select-Object -Last 10)
+        [array]::Reverse($recent)
+        return Send-OpsJson $ctx 200 ([ordered]@{
+            restartsUsed = (Get-RestartsUsed $now); restartsMax = $Cfg.MaxRestartsPerHour; cooldownSec = $cooldown
+            taskState = (Get-TaskState); history = $recent
+        })
+    }
+    if ($path -ne "/ops/restart-gateway" -or $req.HttpMethod -ne "POST") {
+        return Send-OpsJson $ctx 404 @{ ok = $false; error = "not_found" }
+    }
+
+    $operator = "?"
+    try { $operator = [string](($body | ConvertFrom-Json).operator) } catch { }
+    if ($cooldown -gt 0) {
+        Add-OpsHistory "restart-gateway" $operator "refused: cooldown"
+        return Send-OpsJson $ctx 429 @{ ok = $false; error = "cooldown"; message = "5 分钟内已经重启过 gateway,$cooldown 秒后才能再按"; retryAfter = $cooldown }
+    }
+    if ((Get-RestartsUsed $now) -ge $Cfg.MaxRestartsPerHour) {
+        Add-OpsHistory "restart-gateway" $operator "refused: budget"
+        return Send-OpsJson $ctx 429 @{ ok = $false; error = "budget"; message = "gateway 1 小时内已经重启过 $($Cfg.MaxRestartsPerHour) 次,不要再重启了,联系 Rex" }
+    }
+    $state = Get-TaskState
+    if ($state -eq "Disabled" -or $state -eq "Missing" -or (Test-Maintenance)) {
+        Add-OpsHistory "restart-gateway" $operator "refused: maintenance"
+        return Send-OpsJson $ctx 409 @{ ok = $false; error = "maintenance"; message = "gateway 正在维护(计划任务被禁用或正在编译重启),先不要按,联系 Rex" }
+    }
+
+    [void]$script:RestartStamps.Add($now)
+    $script:OpsLastRestartAt = $now
+    Write-WdLog "管理员 $operator 通过管理后台重启 gateway"
+    try {
+        Restart-GatewayTask
+        $script:ExpectNewProcess = $true
+        $script:FailStreak = 0
+        Add-OpsHistory "restart-gateway" $operator "ok"
+        Send-Alert "管理员 $operator 手动重启了 gateway" ("通过管理后台的「重启 gateway」按钮。直连账户 10~30 秒内下不了单。`n" +
+            "1 小时内已重启 $(Get-RestartsUsed $now) 次(含自动,上限 $($Cfg.MaxRestartsPerHour) 次)。") | Out-Null
+        return Send-OpsJson $ctx 202 @{ ok = $true; result = "ok"; message = "已开始重启 gateway,10~30 秒后恢复" }
+    } catch {
+        $msg = $_.Exception.Message
+        Add-OpsHistory "restart-gateway" $operator "failed: $msg"
+        Send-Alert "管理员 $operator 手动重启 gateway 失败" "失败原因:$msg" | Out-Null
+        return Send-OpsJson $ctx 500 @{ ok = $false; error = "restart_failed"; message = "重启 gateway 失败:$msg" }
+    }
+}
+
+function Start-OpsListener {
+    if (-not $Cfg.OpsListen -or -not $Cfg.OpsSharedSecret) { return $null }
+    try {
+        $l = New-Object Net.HttpListener
+        $l.Prefixes.Add($Cfg.OpsListen)
+        $l.Start()
+        Write-WdLog "运维接口已开:$($Cfg.OpsListen)"
+        return $l
+    } catch {
+        # 开机时 WireGuard 可能还没起来、隧道地址还不存在;主循环过一分钟再试。
+        Write-WdLog "运维接口暂时开不了(1 分钟后重试):$($_.Exception.Message)"
+        return $null
+    }
+}
+
 # ---------------------------------------------------------------- 入口
+
+if ($SelfTestSignature) {
+    # 固定向量,必须与 SG 端 prismx_ops.sign_request("shh", "post", "/ops/restart-gateway",
+    # '{"operator":"alice"}', ts=1700000000, nonce="abc") 一致(见 sg/test_prismx_ops.py)。
+    Get-OpsSignature "shh" "post" "/ops/restart-gateway" "1700000000" "abc" '{"operator":"alice"}'
+    exit 0
+}
 
 if ($TestAlert) {
     $script:DryRun = $false
@@ -462,13 +626,45 @@ if (-not $mutex.WaitOne(0)) { exit 0 }
 
 $channels = Get-Channels
 Write-WdLog ("看门狗启动:健康检查 $HealthUrl,每 $($Cfg.CheckEverySec) 秒一次,通知渠道:" + $(if ($channels.Count) { $channels -join ", " } else { "未启用" }))
+if (-not $Cfg.OpsSharedSecret) { Write-WdLog "运维接口没开:watchdog.ini 里没有 OpsSharedSecret(管理后台的「重启 gateway」按钮不可用)" }
+
+# 主循环:每半秒看一眼有没有运维请求,每 CheckEverySec 秒做一轮健康检查。
+# Main loop: poll for ops requests every 0.5s, run a health tick every CheckEverySec.
 $lastCleanup = -100000
+$nextTick = 0
+$listener = $null
+$listenerRetryAt = 0
+$pending = $null
 while ($true) {
-    $t0 = $script:Clock.Elapsed.TotalSeconds
-    try { Invoke-Tick | Out-Null }
-    catch { Write-WdLog "本轮检查出错(继续):$($_.Exception.Message)" }
-    if ($t0 - $lastCleanup -gt 86400) { Remove-OldLogs; $lastCleanup = $t0 }
-    $wait = $Cfg.CheckEverySec - ($script:Clock.Elapsed.TotalSeconds - $t0)
-    if ($wait -lt 1) { $wait = 1 }
-    Start-Sleep -Milliseconds ([int]($wait * 1000))
+    $now = $script:Clock.Elapsed.TotalSeconds
+    if ($now -ge $nextTick) {
+        try { Invoke-Tick | Out-Null }
+        catch { Write-WdLog "本轮检查出错(继续):$($_.Exception.Message)" }
+        if ($now - $lastCleanup -gt 86400) { Remove-OldLogs; $lastCleanup = $now }
+        $nextTick = $now + $Cfg.CheckEverySec
+    }
+    if ($null -eq $listener -and $Cfg.OpsSharedSecret -and $now -ge $listenerRetryAt) {
+        $listener = Start-OpsListener
+        $listenerRetryAt = $now + 60
+    }
+    if ($null -ne $listener) {
+        try {
+            if ($null -eq $pending) { $pending = $listener.GetContextAsync() }
+            if ($pending.Wait(500)) {
+                $ctx = $pending.Result
+                $pending = $null
+                try { Invoke-OpsRequest $ctx }
+                catch {
+                    Write-WdLog "运维接口出错:$($_.Exception.Message)"
+                    try { Send-OpsJson $ctx 500 @{ ok = $false; error = "internal" } } catch { }
+                }
+            }
+        } catch {
+            Write-WdLog "运维接口异常,重新打开:$($_.Exception.Message)"
+            try { $listener.Close() } catch { }
+            $listener = $null; $pending = $null
+        }
+    } else {
+        Start-Sleep -Milliseconds 500
+    }
 }

@@ -23,6 +23,19 @@ $TaskName = "PRISMX-Watchdog"
 $here = $PSScriptRoot
 $Script = Join-Path $here "watchdog.ps1"
 $Ini = Join-Path $here "watchdog.ini"
+$FirewallRule = "PRISMX-Watchdog-Ops"
+
+# 读 watchdog.ini 里的一个值(没有就返回默认值),规则与 watchdog.ps1 一致。
+function Get-IniValue($key, $default) {
+    if (-not (Test-Path $Ini)) { return $default }
+    foreach ($line in [IO.File]::ReadAllLines($Ini, [Text.Encoding]::UTF8)) {
+        $t = $line.Trim()
+        if ($t.StartsWith("#") -or $t.StartsWith(";")) { continue }
+        $i = $t.IndexOf("=")
+        if ($i -gt 0 -and $t.Substring(0, $i).Trim() -eq $key) { return $t.Substring($i + 1).Trim() }
+    }
+    return $default
+}
 
 function Write-Step($msg) { Write-Host "`n>> $msg" -ForegroundColor Cyan }
 function Write-Ok($msg)   { Write-Host "   [OK] $msg" -ForegroundColor Green }
@@ -66,6 +79,7 @@ if ($Uninstall) {
     Write-Step "卸载看门狗"
     Stop-Watchdog
     Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+    Remove-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue
     Write-Ok "已卸载。gateway 本身不受影响;watchdog.ini 与 logs\ 保留在原处。"
     exit 0
 }
@@ -95,6 +109,27 @@ if (Test-Path $Ini) {
 & icacls.exe $Ini /inheritance:r /grant:r "SYSTEM:(F)" "Administrators:(F)" | Out-Null
 if ($LASTEXITCODE -eq 0) { Write-Ok "已收紧 watchdog.ini 权限(仅 SYSTEM / Administrators)" }
 else { Write-Bad "icacls 返回 $LASTEXITCODE,请手工核对 watchdog.ini 的权限" }
+
+Write-Step "运维接口(管理后台「重启 gateway」按钮)"
+$opsListen = Get-IniValue "OpsListen" "http://10.66.0.2:8791/"
+$opsAllowed = Get-IniValue "OpsAllowedIps" "10.66.0.1"
+if (-not (Get-IniValue "OpsSharedSecret" "")) {
+    Write-Bad "watchdog.ini 里还没有 OpsSharedSecret:按钮暂不可用"
+    Write-Note "  在 SG 服务器上执行:sudo grep OPS_SHARED_SECRET /etc/prismx-watchdog.env"
+    Write-Note "  把等号后面那一串填到这里 watchdog.ini 的 OpsSharedSecret=,再执行 .\install-watchdog.ps1 -Restart"
+}
+# 只放行 SG 的隧道地址访问运维端口。接口本身还要验签名,这一层只是不让别人连得上。
+if ($opsListen -match ':(\d+)/?$') {
+    $port = $matches[1]
+    Remove-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue
+    $remote = @(($opsAllowed -split '[,;]') | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    if ($remote.Count -eq 0) { $remote = @("10.66.0.1") }
+    New-NetFirewallRule -DisplayName $FirewallRule -Direction Inbound -Protocol TCP -LocalPort $port `
+        -RemoteAddress $remote -Action Allow -Profile Any | Out-Null
+    Write-Ok "防火墙:只允许 $($remote -join ', ') 访问 TCP $port"
+} else {
+    Write-Bad "看不懂 OpsListen=$opsListen,没有加防火墙规则"
+}
 
 Write-Step "试查一轮(只打印,不重启、不发通知)"
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $Script -Once

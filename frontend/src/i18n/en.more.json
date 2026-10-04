@@ -1194,6 +1194,52 @@
             "a": "Do not restart it again: another restart here can lose data. Contact Rex immediately."
           }
         }
+      },
+      "actions": {
+        "restartBackend": "Restart backend",
+        "restartGateway": "Restart gateway",
+        "reconnectGateway": "Reconnect MT5",
+        "restartLoop": "Restart",
+        "refreshCompetitions": "Refresh competition rankings now",
+        "restartLoopTitle": "Restart \"{{name}}\"?",
+        "restartLoopMessage": "Restarts only this background job; the backend keeps running and users won't notice. Takes effect within 5 seconds.",
+        "restartLoopDone": "Restart of \"{{name}}\" scheduled; it takes effect within 5 seconds. Check whether the row turns green in half a minute.",
+        "refreshCompetitionsTitle": "Refresh competition rankings now?",
+        "refreshCompetitionsMessage": "Recomputes the rankings of every running competition right away instead of waiting for the next pass. No impact on users.",
+        "refreshCompetitionsDone": "Refreshed {{refreshed}}/{{running}} running competitions.",
+        "reconnectTitle": "Have the gateway reconnect to MT5?",
+        "reconnectMessage": "The gateway process keeps running; only its broker connection is dropped and re-established. Direct-connect accounts can't trade for a few seconds (orders are refused with \"reconnecting\", nothing is sent).",
+        "reconnectDone": "The gateway is reconnecting to MT5. Check the Gateway light in a few seconds.",
+        "reconnectAlready": "The gateway is already reconnecting; no need to press again.",
+        "backendTitle": "Restart backend",
+        "backendMessage": "The whole site drops for a few seconds and orders in flight may show \"outcome unknown\". Make sure the lights above really point at the backend; when it hangs the watchdog restarts it within about 2 minutes anyway.",
+        "gatewayTitle": "Restart gateway",
+        "gatewayMessage": "Direct-connect accounts can't trade for 10–30 seconds. Try \"Reconnect MT5\" first and only press this if that didn't help.",
+        "passwordLabel": "Ops password",
+        "passwordPlaceholder": "Enter your ops password",
+        "passwordHint": "Get one from Rex; each person has their own. 5 wrong attempts lock it for 15 minutes.",
+        "confirmRestart": "Restart",
+        "budget": "Restarted {{used}}/{{max}} times this hour (including watchdog restarts)",
+        "budgetLine": "Restarts this hour (including watchdog restarts): backend {{bu}}/{{bm}} · gateway {{gu}}/{{gm}}",
+        "budgetFull": "Already restarted {{max}} times this hour. Don't press again; contact Rex",
+        "cooldown": "Someone just pressed this; available again in {{sec}}s",
+        "opsUnavailable": "Restart buttons unavailable: {{msg}}",
+        "failed": "Action failed: {{msg}}"
+      },
+      "history": {
+        "title": "Recent actions",
+        "empty": "No actions yet.",
+        "auto": "Watchdog (automatic)",
+        "action": {
+          "restart-backend": "Restart backend",
+          "restart-gateway": "Restart gateway"
+        },
+        "result": {
+          "ok": "Succeeded",
+          "started": "Started",
+          "refused": "Refused",
+          "failed": "Failed"
+        }
       }
     },
     "winrate": {

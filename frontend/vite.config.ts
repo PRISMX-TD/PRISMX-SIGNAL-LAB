@@ -9,6 +9,8 @@ export default defineConfig({
       // 开发期代理后端 REST 与 WebSocket
       '/api': { target: 'http://localhost:8000', changeOrigin: true },
       '/ws': { target: 'ws://localhost:8000', ws: true },
+      // 看门狗运维接口（本地开发时跑 ops/watchdog/sg/prismx_watchdog.py 才有）
+      '/ops': { target: 'http://localhost:8790', changeOrigin: true },
     },
   },
   build: {

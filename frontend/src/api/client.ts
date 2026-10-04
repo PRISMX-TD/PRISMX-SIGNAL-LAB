@@ -1,4 +1,5 @@
 // REST 客户端封装 / REST client wrapper
+import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
@@ -1276,6 +1277,14 @@ export const adminApi = {
   overview: (range: StatsRangeQuery) => request<AdminOverview>(`/admin/overview${statsRangeQs(range)}`),
   netQuality: () => request<AdminNetQuality>('/admin/net-quality'),
   systemStatus: () => request<AdminSystemStatus>('/admin/system-status'),
+  // 系统状态页的三个「轻」按钮（重启 gateway / 重启后端走下面的 opsApi）。
+  // The three light fix buttons; the two restarts go through opsApi below.
+  restartLoop: (name: string) =>
+    request<{ scheduled: boolean }>('/admin/system-status/actions/restart-loop', { method: 'POST', body: JSON.stringify({ name }) }),
+  refreshCompetitions: () =>
+    request<{ running: number; refreshed: number }>('/admin/system-status/actions/refresh-competitions', { method: 'POST' }),
+  reconnectGateway: () =>
+    request<{ accepted: boolean }>('/admin/system-status/actions/reconnect-gateway', { method: 'POST', requestTimeoutMs: 20_000 }),
   // 潜在转化客户名单。**不带范围参数**：口径固定是"本周（周一起）到今天"，
   // 与看板顶部的时间范围无关（历史区间里的冷线索没有联系价值）。
   // Warm-lead list; deliberately range-free — always this week up to today.
@@ -1746,4 +1755,40 @@ export const agentApi = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+}
+
+// ---- 看门狗运维接口 / watchdog ops endpoint ----
+// 「重启后端」「重启 gateway」不经过后端：nginx 把 {API_BASE}/ops/ 直接转给 SG 上的看门狗
+// （ops/watchdog/sg/prismx_ops.py），所以后端挂了也能按。看门狗用后端同一把密钥验登录
+// token 的签名，再验运维口令。不走 request()：那里的 401 会把人登出、失败会切换入口，
+// 而这里的 401/403 只是「口令不对 / 要重新登录」，不该有那些副作用。
+// The restart buttons bypass the backend (nginx forwards /ops/ to the watchdog), so
+// they work when it is down. Not routed through request(): its 401 logs the user out
+// and its failures switch entry points, neither of which fits here.
+async function opsRequest<T>(path: string, init: RequestInit = {}, timeoutMs = 20_000): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const token = getToken()
+    const res = await fetch(`${API_BASE}/ops${path}`, {
+      ...init,
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    })
+    let data: Record<string, unknown> = {}
+    try { data = await res.json() } catch { /* nginx 的 502 页面不是 JSON */ }
+    if (!res.ok) throw new ApiHttpError(typeof data.message === 'string' ? data.message : `HTTP ${res.status}`, res.status)
+    return data as T
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export const opsApi = {
+  status: () => opsRequest<OpsStatus>('/status', {}, 8_000),
+  restartBackend: (password: string) =>
+    opsRequest<{ ok: boolean; message: string }>('/restart-backend', { method: 'POST', body: JSON.stringify({ password }) }),
+  restartGateway: (password: string) =>
+    opsRequest<{ ok: boolean; message: string }>('/restart-gateway', { method: 'POST', body: JSON.stringify({ password }) }),
 }

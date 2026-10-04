@@ -246,3 +246,127 @@ def test_endpoint_requires_admin():
 
     route = next(r for r in admin.router.routes if r.path.endswith("/system-status"))
     assert require_admin in {d.call for d in route.dependant.dependencies}
+
+
+# ---------------------------------------------------------------- 修复按钮 / fix buttons
+
+
+def test_loop_restart_request_is_applied_by_the_leader_only():
+    started = []
+
+    async def forever(tag):
+        started.append(tag)
+        while True:
+            await asyncio.sleep(1)
+
+    async def main():
+        loops = background.BackgroundLoops({"boards": lambda: forever("boards")}, owner="t")
+        loops.start_all()
+        await asyncio.sleep(0)
+        first = loops._tasks["boards"]
+        background.request_restart("boards")
+        background.request_restart("no_such_loop")
+        await loops._apply_restart_requests()
+        await asyncio.sleep(0)
+        second = loops._tasks["boards"]
+        left = shared_state.set_members(background.RESTART_REQUEST_KEY)
+
+        # 不是领导：不动，也不清掉请求（留给真正的领导）
+        loops.is_leader = False
+        background.request_restart("boards")
+        await loops._apply_restart_requests()
+        kept = shared_state.set_members(background.RESTART_REQUEST_KEY)
+        loops.is_leader = True
+        await loops.aclose()
+        return first, second, left, kept
+
+    first, second, left, kept = asyncio.run(main())
+    assert first is not second and first.cancelled()
+    assert started == ["boards", "boards"]
+    assert left == []
+    assert kept == ["boards"]
+
+
+def _admin_user(db):
+    from app.models import User
+
+    u = User(id="adm", email="adm@x.com", password_hash="x", api_token="tok-adm", role="admin")
+    db.add(u)
+    db.commit()
+    return u
+
+
+def test_restart_loop_endpoint_validates_cools_down_and_audits(db_session):
+    from fastapi import HTTPException
+
+    from app.models import AdminAuditLog
+    from app.routers import admin as admin_router
+
+    admin = _admin_user(db_session)
+    req = SimpleNamespace(app=_app_with_loops("boards"))
+
+    with pytest.raises(HTTPException) as e:
+        admin_router.ops_restart_loop(req, {"name": "nope"}, db_session, admin)
+    assert e.value.status_code == 404
+
+    assert admin_router.ops_restart_loop(req, {"name": "boards"}, db_session, admin) == {"scheduled": True}
+    assert shared_state.set_members(background.RESTART_REQUEST_KEY) == ["boards"]
+    with pytest.raises(HTTPException) as e:
+        admin_router.ops_restart_loop(req, {"name": "boards"}, db_session, admin)
+    assert e.value.status_code == 429
+
+    rows = db_session.query(AdminAuditLog).all()
+    assert [(r.field, r.new_value) for r in rows] == [("ops:restart-loop:boards", "scheduled")]
+
+
+def test_refresh_competitions_endpoint(db_session, monkeypatch):
+    from app.models import Competition
+    from app.routers import admin as admin_router
+
+    admin = _admin_user(db_session)
+    now = datetime.now(timezone.utc)
+    for i, st in enumerate(("running", "running", "upcoming")):
+        db_session.add(Competition(id=f"c{i}", name=f"c{i}", status=st,
+                                   starts_at=now - timedelta(days=1), ends_at=now + timedelta(days=1)))
+    db_session.commit()
+    seen = []
+    monkeypatch.setattr(admin_router, "refresh_comp_board",
+                        lambda db, comp, force=False: seen.append((comp.id, force)) or True)
+    out = admin_router.ops_refresh_competitions(db_session, admin)
+    assert out == {"running": 2, "refreshed": 2}
+    assert sorted(seen) == [("c0", True), ("c1", True)]
+
+
+def test_reconnect_gateway_endpoint(db_session, monkeypatch):
+    from fastapi import HTTPException
+
+    from app.models import AdminAuditLog
+    from app.routers import admin as admin_router
+
+    admin = _admin_user(db_session)
+    engine = db_session.get_bind()
+    monkeypatch.setattr(admin_router, "SessionLocal", lambda: type(db_session)(bind=engine))
+    monkeypatch.setattr(admin_router, "run_in_threadpool", _run_inline)
+
+    async def ok():
+        return {"ok": True, "accepted": True}
+
+    monkeypatch.setattr(gateway_client, "request_reconnect", ok)
+    assert asyncio.run(admin_router.ops_reconnect_gateway(admin)) == {"accepted": True}
+
+    shared_state.reset_for_tests()          # 清冷却，测失败路径
+
+    async def down():
+        return {"ok": False, "error": "connect refused"}
+
+    monkeypatch.setattr(gateway_client, "request_reconnect", down)
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(admin_router.ops_reconnect_gateway(admin))
+    assert e.value.status_code == 502
+    # 审计行的 id 是随机串，不能按 id 排先后；排序后比内容。
+    results = sorted(r.new_value for r in db_session.query(AdminAuditLog).all())
+    assert results[0] == "accepted" and results[1].startswith("failed")
+
+
+async def _run_inline(fn, *args):
+    return fn(*args)
