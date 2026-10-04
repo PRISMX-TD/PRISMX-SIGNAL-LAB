@@ -1,0 +1,46 @@
+# PRISMX gateway 看门狗配置。复制成同目录的 watchdog.ini 再改(install-watchdog.ps1 会自动复制)。
+# 改完执行(管理员 PowerShell): .\install-watchdog.ps1 -Restart
+# 没写的项用脚本里的默认值,下面列的就是默认值。
+
+# 通知里显示的机器名
+MachineLabel=VPS gateway
+
+# ---- gateway 在哪 ----
+GatewayDir=C:\Users\Administrator\Desktop\gateway
+TaskName=PRISMX-Gateway
+ProcessName=mt5gateway
+# 留空 = 按 gateway.ini 的 listen 自动推出(WireGuard 地址也能认)
+HealthUrl=
+
+# ---- 自动处理 ----
+# 每隔多少秒查一次;/health 连续多少轮不响应就重启(30 秒 × 3 轮 ≈ 1.5 分钟)
+CheckEverySec=30
+FailLimit=3
+HealthTimeoutSec=5
+# gateway 刚启动不到这么多秒时不判断
+StartupGraceSec=120
+# 进程消失多少秒、计划任务还没拉起来,看门狗就自己启动它
+ProcessMissingSec=240
+# 1 小时内最多自动处理几次,用完就停手并报警
+MaxRestartsPerHour=3
+# 维护(重启脚本、编译)结束后多少秒内,gateway 进程换了也不报"自己重启过"
+MaintenanceQuietSec=600
+
+# ---- 只报警 ----
+TaskDisabledAlertSec=600
+Mt5DownAlertSec=300
+DealerDownAlertSec=300
+# 同一条持续性警报多久重复提醒一次
+RepeatAlertSec=1800
+
+# ---- 通知(默认都关着)----
+# 邮件:走 Resend,密钥和后端 .env 里的 RESEND_API_KEY 用同一个
+EmailEnabled=false
+EmailTo=rexleekang16@gmail.com
+ResendApiKey=
+MailFrom=noreply@prismxsignallab.com
+
+# Telegram:先找 @BotFather 建机器人拿 token;chat id 用逗号分隔,可以填多个(群 id 是负数)
+TelegramEnabled=false
+TelegramBotToken=
+TelegramChatIds=

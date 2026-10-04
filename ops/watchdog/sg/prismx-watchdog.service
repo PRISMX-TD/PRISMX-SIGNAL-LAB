@@ -1,0 +1,16 @@
+[Unit]
+Description=PRISMX backend watchdog (restarts a hung backend, alerts on other faults)
+After=network-online.target prismx.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 要能 systemctl restart prismx、读 journal，所以是 root。脚本放在 /opt 下、属主 root，
+# 不直接跑仓库里那份——仓库目录属 ubuntu，root 服务执行它可写的文件等于提权口子。
+ExecStart=/usr/bin/python3 /opt/prismx-watchdog/prismx_watchdog.py --config /etc/prismx-watchdog.env
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1 PYTHONUTF8=1
+
+[Install]
+WantedBy=multi-user.target
