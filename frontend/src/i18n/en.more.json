@@ -1059,7 +1059,7 @@
           "unreachableFacts": "Backend can't reach the gateway",
           "hint": {
             "ok": "Direct-connect accounts can trade normally.",
-            "warn": "Working, with a minor issue (one failed check, or not all query channels connected, so queries slow down at peak). Tell Rex if it lasts over 10 minutes.",
+            "warn": "Working, with a minor issue: one failed check, or not all query channels connected (queries slow down at peak). This also shows for a few seconds right after \"Reconnect MT5\". Tell Rex if it lasts over 10 minutes.",
             "down": "Direct-connect accounts can't trade right now. The VPS watchdog acts within about 90 seconds, and the gateway reconnects to the broker on its own, restarting itself within 15 minutes at most. Still red after 10 minutes usually means a broker-side problem: don't keep restarting, contact Rex.",
             "idle": "The backend just started and hasn't checked the gateway yet. Wait a few seconds."
           }
