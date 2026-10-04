@@ -989,7 +989,212 @@
       "email": "Email",
       "tickets": "Tickets",
       "gamification": "Gamification",
-      "competitions": "Competitions"
+      "competitions": "Competitions",
+      "health": "System status"
+    },
+    "health": {
+      "title": "System status",
+      "subtitle": "Refreshes every 15 seconds. Green = fine, yellow = keep an eye on it, red = problem, grey = no data. Each light says what to do.",
+      "updated": "Updated {{time}}",
+      "refresh": "Refresh now",
+      "loading": "Loading…",
+      "stale": "Showing the last data received; it may be out of date.",
+      "overall": {
+        "ok": "All systems normal",
+        "warn": "Something needs attention",
+        "down": "A component has a problem",
+        "idle": "No data yet"
+      },
+      "level": {
+        "ok": "OK",
+        "warn": "Watch",
+        "down": "Down",
+        "idle": "No data"
+      },
+      "unit": {
+        "s": "{{n}}s",
+        "m": "{{n}} min",
+        "h": "{{n}} h",
+        "d": "{{n}} d"
+      },
+      "ago": "{{t}} ago",
+      "yes": "OK",
+      "no": "down",
+      "unknown": "unknown",
+      "unreachable": {
+        "title": "Backend unreachable",
+        "body": "The admin console can't reach the backend, so users probably can't load the site either. The backend watchdog restarts it automatically within about 2 minutes: wait a few minutes, then refresh this page. If it hasn't recovered after 5 minutes, contact Rex.",
+        "detail": "Error: {{msg}}"
+      },
+      "comp": {
+        "backend": {
+          "name": "Backend",
+          "facts": "Up {{uptime}} · {{workers}} worker(s)",
+          "hint": {
+            "ok": "If this page loads, the backend is alive. If it hangs, the watchdog restarts it within about 2 minutes."
+          }
+        },
+        "database": {
+          "name": "Database",
+          "facts": "Query time {{ms}} ms",
+          "hint": {
+            "ok": "Fine.",
+            "warn": "The database is slow, so pages feel sluggish. Usually peak load; contact Rex if it lasts over 30 minutes.",
+            "down": "The database is unreachable and the whole site will error. Restarting the backend won't help; don't keep restarting it. Contact Rex."
+          }
+        },
+        "redis": {
+          "name": "Redis shared cache",
+          "facts": "Response {{ms}} ms",
+          "hint": {
+            "ok": "Fine.",
+            "warn": "Responding slowly; just keep an eye on it.",
+            "idle": "Not enabled (single-process mode). No impact.",
+            "down": "Redis isn't responding, which causes odd symptoms like \"close all\" finding no positions or sentiment showing \"-\". The watchdog notifies Rex; contact Rex."
+          }
+        },
+        "gateway": {
+          "name": "Gateway (direct trading)",
+          "facts": "MT5 {{mt5}} · order channel {{dealer}} · query channels {{rc}}/{{r}}",
+          "unreachableFacts": "Backend can't reach the gateway",
+          "hint": {
+            "ok": "Direct-connect accounts can trade normally.",
+            "warn": "Working, with a minor issue (one failed check, or not all query channels connected, so queries slow down at peak). Tell Rex if it lasts over 10 minutes.",
+            "down": "Direct-connect accounts can't trade right now. The VPS watchdog acts within about 90 seconds, and the gateway reconnects to the broker on its own, restarting itself within 15 minutes at most. Still red after 10 minutes usually means a broker-side problem: don't keep restarting, contact Rex.",
+            "idle": "The backend just started and hasn't checked the gateway yet. Wait a few seconds."
+          }
+        },
+        "feed": {
+          "name": "Market feed",
+          "facts": "Latest quote {{ago}} · {{active}} symbols streaming ({{closed}} closed)",
+          "hint": {
+            "ok": "Charts and quotes are updating.",
+            "warn": "The feed is lagging; check whether charts are still moving.",
+            "down": "The feed has stopped and everyone's charts are frozen. On the market-feed PC check: (1) the MT5 terminal is open and logged in; (2) the feed EA is still attached to its chart (smiley in the chart's top-right corner); (3) the \"Algo Trading\" toolbar button is on. This light turns green within a minute once fixed. If unsure, contact Rex.",
+            "idle": "The backend hasn't received a quote yet. Normal right after a restart; wait a minute."
+          }
+        },
+        "signals": {
+          "name": "Platform signals",
+          "facts": "Latest signal: {{ago}}",
+          "hint": {
+            "ok": "Signals are market-driven, so a quiet spell isn't necessarily a fault. If there are none for more than half a trading day, check that the 5 signal-EA charts on the market-feed PC are still open.",
+            "warn": "Can't read signal records, most likely a database problem; see the database light.",
+            "idle": "No platform signals recorded yet."
+          }
+        },
+        "loops": {
+          "name": "Background jobs",
+          "facts": "{{total}} jobs · {{down}} stopped · {{warn}} need attention",
+          "hint": {
+            "ok": "Settlement, competition rankings, email broadcasts and other background jobs are running normally.",
+            "warn": "A job reported an error recently (yellow below). Once in a while is fine; if it keeps erroring, send Rex a screenshot.",
+            "down": "A background job has stopped (red below), so its feature no longer updates automatically. Send Rex a screenshot; don't restart anything yourself yet.",
+            "idle": "The backend just started; jobs haven't run yet."
+          }
+        },
+        "online": {
+          "name": "Online",
+          "facts": "Users online {{users}} · Bridges online {{bridges}} · direct accounts {{gw}}",
+          "hint": {
+            "ok": "For reference only."
+          }
+        }
+      },
+      "loopTable": {
+        "title": "Background job details",
+        "name": "Job",
+        "status": "Status",
+        "lastRun": "Last run",
+        "lastError": "Last error",
+        "never": "Not run yet",
+        "crashed": "Crashed: {{msg}}",
+        "none": "—"
+      },
+      "loopName": {
+        "offline_monitor": "Account online check",
+        "stale_orders": "Stale order cleanup",
+        "signal_expiry": "Signal expiry",
+        "stale_signals": "Stale signal sweep",
+        "stale_strategy_signals": "Strategy signal sweep",
+        "sentiment": "Community sentiment",
+        "plan_expiry": "Membership expiry",
+        "email_broadcast": "Email broadcast",
+        "gamification": "Achievements & badges",
+        "competitions": "Competition rankings",
+        "boards": "Period leaderboards",
+        "candle_retention": "Candle cleanup",
+        "gateway_positions": "Direct-account positions",
+        "signal_engine": "Mock signal engine"
+      },
+      "runbook": {
+        "title": "What to do when something breaks",
+        "intro": "Check the lights above first, then find the matching case below. Don't act on anything marked \"Contact Rex\".",
+        "tag": {
+          "wait": "Just wait",
+          "admin": "You can handle it",
+          "rex": "Contact Rex",
+          "stop": "Hands off, contact Rex now"
+        },
+        "items": {
+          "siteDown": {
+            "q": "The whole site won't load, or says \"cannot connect to server\"",
+            "a": "The backend watchdog restarts the backend within about 2 minutes. Try again after 5 minutes; if it still fails, contact Rex."
+          },
+          "after502": {
+            "q": "Pages show 502 and recover a few seconds later",
+            "a": "Normal while the backend restarts. Only a 502 lasting over a minute is a problem."
+          },
+          "chartsFrozen": {
+            "q": "Everyone's charts have stopped moving",
+            "a": "Check the \"Market feed\" light above. If it's red, follow the steps next to it on the market-feed PC."
+          },
+          "noSignals": {
+            "q": "No new signals for a long time",
+            "a": "Signals are market-driven and naturally sparse in quiet markets. If none for more than half a trading day, check that the 5 signal-EA charts are still open."
+          },
+          "gatewayDown": {
+            "q": "Direct-connect accounts all show \"not connected\", or orders fail",
+            "a": "Check the \"Gateway\" light above. The watchdog handles it automatically; contact Rex if it's still red after 10 minutes."
+          },
+          "reconnecting": {
+            "q": "Orders say \"trading link reconnecting, please retry\"",
+            "a": "The gateway is reconnecting to the broker and that order was never sent. Retry in a few seconds."
+          },
+          "unknownOutcome": {
+            "q": "After a restart some orders show \"outcome unknown\"",
+            "a": "Tell the user to check their positions in MT5 first to see whether the order actually opened, before placing it again, to avoid a duplicate position."
+          },
+          "appFrozen": {
+            "q": "The app shows no signals or frozen quotes, but the website is fine",
+            "a": "Have the user fully close the app and reopen it, twice if needed."
+          },
+          "bridgeOffline": {
+            "q": "A user's Bridge is offline, or says \"no running MT5 terminal detected\"",
+            "a": "Have the user open MT5 and log in first, then restart the Bridge, and accept any update prompt."
+          },
+          "bridge500": {
+            "q": "Bridge says \"backend rejected HTTP 500 (check token)\"",
+            "a": "This is a server problem, not a bad token. Don't have the user reset the token. Send Rex a screenshot."
+          },
+          "emailStuck": {
+            "q": "An email broadcast is stuck on \"sending\"",
+            "a": "When the daily quota runs out it resumes automatically at 08:00 Beijing time; the Email tab also has a \"Resume\" button. Otherwise contact Rex."
+          },
+          "mainland": {
+            "q": "All mainland China users can't connect, overseas users are fine",
+            "a": "The Hong Kong edge node is down or expired. Admins can't fix this; contact Rex."
+          },
+          "readOnly": {
+            "q": "The whole site is read-only, or shows 402",
+            "a": "A database quota or billing problem. Contact Rex."
+          },
+          "backendBroken": {
+            "q": "The backend won't start, keeps restarting, or shows a database / migration error",
+            "a": "Do not restart it again: another restart here can lose data. Contact Rex immediately."
+          }
+        }
+      }
     },
     "winrate": {
       "verdict": {

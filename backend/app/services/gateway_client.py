@@ -1135,6 +1135,21 @@ def _record_probe(ok: bool, now: float, detail: str = "") -> bool:
     return online
 
 
+# 最近一次后台探活的原样结果，给管理后台「系统状态」页看「为什么离线」——_health_cache
+# 只留了在线/离线，原因只在状态翻转那一刻写进日志。每个 worker 各一份，都是 5 秒内的。
+# The last background probe verbatim, for the admin status page; _health_cache keeps
+# only the verdict. Per worker, at most 5s old.
+_last_probe: dict = {"at": 0.0, "ok": False, "body": None, "detail": ""}
+
+
+def last_probe() -> dict:
+    """{at（epoch 秒，0 = 还没探过）, ok, body（网关 /health 原文）, detail（失败原因）, online}。"""
+    out = dict(_last_probe)
+    out["online"] = bool(_health_cache["online"])
+    out["monitorRunning"] = _health_monitor_running
+    return out
+
+
 def _describe_probe(rsp: dict) -> str:
     """探活失败时说明是哪一项不满足，写进状态翻转日志。/ Which condition failed."""
     if not rsp.get("ok"):
@@ -1160,6 +1175,8 @@ async def gateway_health_monitor_loop() -> None:
                 rsp = await health_check()
                 ok = _probe_ok(rsp)
                 _record_probe(ok, time.monotonic(), "" if ok else _describe_probe(rsp))
+                _last_probe.update(at=time.time(), ok=ok, body=rsp,
+                                   detail="" if ok else _describe_probe(rsp))
                 note_batch_capability(rsp)
             except asyncio.CancelledError:
                 raise

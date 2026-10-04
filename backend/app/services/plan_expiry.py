@@ -125,7 +125,11 @@ async def plan_expiry_sweep_loop() -> None:
     synchronous DB work and runs in the thread pool — on the event loop it would
     stall WS pushes, bridge polling and the gateway event pump every 15 minutes
     once there are enough paid users. Same pattern as the other loops."""
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("plan_expiry")
         try:
             await run_in_threadpool(sweep_expired_plans)
         except Exception:

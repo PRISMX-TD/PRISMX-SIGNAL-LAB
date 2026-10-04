@@ -218,7 +218,11 @@ async def stale_signal_sweep_loop() -> None:
         finally:
             db.close()
 
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("stale_signals")
         await asyncio.sleep(STALE_SWEEP_INTERVAL_SECONDS)
         try:
             count = await run_in_threadpool(_sweep)

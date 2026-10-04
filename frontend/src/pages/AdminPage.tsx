@@ -18,6 +18,7 @@ import Pager from '../components/Pager'
 import { SkeletonLine } from '../components/Skeleton'
 import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../components/TicketImages'
 import OverviewPanel from '../components/admin/overview/OverviewPanel'
+import SystemStatusPanel from '../components/admin/SystemStatusPanel'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
@@ -91,8 +92,12 @@ const DEFAULT_PAGE_SIZE = 20
 // folding it into data would bury the operating metrics and page stats.
 // email 紧跟 announcements：两者都是「对用户说话」，公告在站内，邮件在站外。
 // email sits next to announcements: both talk to users, one in-app, one by mail.
-type AdminTab = 'data' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'gamification' | 'competitions'
-const ADMIN_TABS: AdminTab[] = ['data', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'gamification', 'competitions']
+// health（系统状态）紧跟 data：出问题时管理员第一个要找的就是它，不能藏在最后。key 不叫
+// system——那个已经是「系统参数」。
+// health (system status) sits right after data: it's the first thing an admin
+// looks for when something breaks. Not `system`, which is already the settings tab.
+type AdminTab = 'data' | 'health' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'gamification' | 'competitions'
+const ADMIN_TABS: AdminTab[] = ['data', 'health', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'gamification', 'competitions']
 
 interface Draft {
   role: UserRole
@@ -854,6 +859,8 @@ export default function AdminPage() {
       </div>
 
       {tab === 'data' && <OverviewPanel />}
+
+      {tab === 'health' && <SystemStatusPanel />}
 
       {tab === 'ops' && <OpsSettingsPanel onTrialSaved={setSavedTrialEnabled} />}
 

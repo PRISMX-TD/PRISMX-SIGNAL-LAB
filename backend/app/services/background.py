@@ -23,7 +23,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
-from app.services import shared_state
+from app.services import loop_health, shared_state
 
 logger = logging.getLogger("prismx.background")
 
@@ -37,6 +37,22 @@ POLL_SECONDS = 15
 STOP_WAIT_SECONDS = 5.0
 
 LoopFactory = Callable[[], Awaitable[None]]
+
+
+def _note_exit(name: str, task: asyncio.Task) -> None:
+    """循环任务结束时的回调：被取消（换主、关停）是正常的；其余都是不该发生的退出——
+    循环都是 while True，自己返回或抛到顶都意味着它从此不再干活，直到下次重启。
+    Done-callback: cancellation is normal; any other exit means the loop is gone
+    until the next restart, so record it for the status page."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("后台循环 %s 崩溃退出 / loop crashed: %r", name, exc)
+        loop_health.record_crash(name, "%s: %s" % (type(exc).__name__, exc))
+    else:
+        logger.error("后台循环 %s 意外返回 / loop returned unexpectedly", name)
+        loop_health.record_crash(name, "循环意外结束（没有异常）")
 
 
 class BackgroundLoops:
@@ -58,8 +74,16 @@ class BackgroundLoops:
     def start_all(self) -> None:
         for name, factory in self._factories.items():
             if name not in self._tasks:
-                self._tasks[name] = asyncio.create_task(factory(), name=f"loop:{name}")
+                loop_health.clear_crash(name)
+                task = asyncio.create_task(factory(), name=f"{loop_health.TASK_PREFIX}{name}")
+                task.add_done_callback(lambda t, n=name: _note_exit(n, t))
+                self._tasks[name] = task
         self.is_leader = True
+
+    @property
+    def names(self) -> list[str]:
+        """登记过的全部循环名（不论本 worker 是否在跑）。/ Every registered loop name."""
+        return sorted(self._factories)
 
     def cancel_all(self) -> None:
         # 换主时也会走到这里；早已退出的任务不必留着等。/ drop tasks that already finished

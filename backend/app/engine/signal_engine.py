@@ -195,7 +195,11 @@ async def signal_expiry_loop() -> None:
     """
     from starlette.concurrency import run_in_threadpool
 
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("signal_expiry")
         await asyncio.sleep(5)
         try:
             expired_payloads = await run_in_threadpool(_expire_stale_signals)
@@ -221,7 +225,11 @@ async def signal_loop() -> None:
         for _ in range(40):
             _next_price(sym)
 
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("signal_engine")
         await asyncio.sleep(settings.SIGNAL_INTERVAL_SECONDS)
         try:
             # 过期扫描由独立的 signal_expiry_loop 负责，这里只管生成新信号。

@@ -755,7 +755,11 @@ async def email_broadcast_loop() -> None:
     gap between sends is awaited on the event loop.
     """
     await asyncio.sleep(STARTUP_DELAY_SECONDS)
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("email_broadcast")
         try:
             delay = await drain_once()
         except asyncio.CancelledError:

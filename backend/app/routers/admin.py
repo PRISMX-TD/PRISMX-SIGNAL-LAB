@@ -25,6 +25,7 @@ from app.services.image_upload import UploadError, is_configured as is_upload_co
 from app.models import AdminAuditLog, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
 from app.services import net_quality
+from app.services import system_status as system_status_service
 from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
@@ -630,6 +631,17 @@ def net_quality_stats(
     for w in data["worst"]:
         w["email"] = emails.get(w["userId"])
     return data
+
+
+@router.get("/system-status", response_model=dict)
+async def system_status(
+    request: Request,
+    _admin: User = Depends(require_admin),
+):
+    """「系统状态」页：后端、数据库、Redis、gateway、行情、信号、后台任务、在线情况各一盏灯。
+    每一项都有超时、不抛异常——部件坏了这一页也要能打开。口径在 services/system_status.py。
+    System-status page: one light per component; every probe bounded and non-raising."""
+    return await system_status_service.collect(request.app)
 
 
 @router.get("/potential-customers", response_model=AdminPotentialCustomersOut)

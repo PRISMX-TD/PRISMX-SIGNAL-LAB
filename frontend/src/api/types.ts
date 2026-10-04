@@ -395,6 +395,35 @@ export interface AdminTradingDay {
   fills: number
 }
 
+// 管理后台系统状态（GET /admin/system-status）/ admin system status
+// 每个部件一盏灯；除 level 外的字段都可能缺（探测失败时只有 level + error）。口径见
+// backend services/system_status.py。/ One light per component; see services/system_status.py.
+export type HealthLevel = 'ok' | 'warn' | 'down' | 'idle'
+
+export interface HealthComponent {
+  level: HealthLevel
+  error?: string
+  [fact: string]: unknown
+}
+
+export interface HealthLoopRow {
+  name: string
+  level: HealthLevel
+  intervalSec: number
+  beatAgoSec: number | null
+  errorAgoSec: number | null
+  errorMessage: string | null
+  crashAgoSec: number | null
+  crashMessage: string | null
+}
+
+export interface AdminSystemStatus {
+  generatedAt: number
+  overall: HealthLevel
+  components: Record<'backend' | 'database' | 'redis' | 'gateway' | 'feed' | 'signals' | 'loops' | 'online', HealthComponent>
+  loops: HealthLoopRow[]
+}
+
 // 管理后台连接质量（GET /admin/net-quality）/ admin connection quality
 export interface AdminNetQuality {
   thresholds: { good: number; fair: number }

@@ -193,6 +193,18 @@ async def get_all_async() -> list[dict]:
     return out
 
 
+def get_feed_state() -> list[tuple[str, float, bool]]:
+    """每个品种 (symbol, 最近一次收到报价的 epoch 秒, 是否休市)，给管理后台「系统状态」页
+    判断行情 EA 还在不在推。**配了 Redis 时是阻塞调用**。
+    Per symbol (symbol, last update epoch, closed) for the admin status page.
+    Blocking with Redis on."""
+    if shared_state.enabled():
+        order, quotes, updated = _all_redis()
+    else:
+        order, quotes, updated = list(_quotes), _quotes, _updated_at
+    return [(s, float(updated.get(s, 0.0)), bool((quotes.get(s) or {}).get("closed"))) for s in order]
+
+
 def get_digits(symbol: str) -> int | None:
     """该品种最近一次上报的价格小数位数（EA `FeedQuote.digits`），从未收到过
     这个品种的报价则返回 None。

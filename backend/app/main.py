@@ -31,6 +31,7 @@ from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 from app.services.background import BackgroundLoops
+from app.services import loop_health
 from app.services.connection_manager import manager
 
 
@@ -208,6 +209,9 @@ async def lifespan(app: FastAPI):
     # Background loops go through BackgroundLoops: started directly on a single
     # worker (as before); with REDIS_URL each worker runs one supervisor and only
     # the lock holder runs the loops (see services/background.py).
+    # 把后台循环里打出的 ERROR 日志记成该循环的「最近报错」，给管理后台系统状态页看
+    # （services/loop_health.py）。/ Record loop ERROR logs for the admin status page.
+    loop_health.install_error_handler()
     loops = BackgroundLoops({
         # 模拟信号引擎（本地开发用）/ mock signal engine (local development only)
         **({"signal_engine": signal_loop} if settings.ENABLE_MOCK_SIGNAL_ENGINE else {}),

@@ -190,7 +190,11 @@ async def sentiment_loop() -> None:
     Fetch once immediately at startup, then refresh every REFRESH_INTERVAL_SECONDS."""
     from starlette.concurrency import run_in_threadpool
 
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("sentiment")
         try:
             ok = await run_in_threadpool(refresh)
             if ok:

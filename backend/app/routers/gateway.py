@@ -2263,7 +2263,11 @@ async def gateway_positions_loop() -> None:
     # 资金刷新、平仓明细落库这些周期性工作。
     async def _positions_loop() -> None:
         """慢拍：周期性刷新浮盈、资金、平仓明细。"""
+        # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+        from app.services import loop_health
+
         while True:
+            loop_health.beat("gateway_positions")
             try:
                 # 没有任何前端连着时，先跳过这一拍——连查一次 mt5_accounts 都省掉。
                 # 慢拍的产出（浮盈/资金/平仓明细）全部要推给正在看的前端；没人看

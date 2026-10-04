@@ -1271,7 +1271,11 @@ async def stale_order_monitor_loop() -> None:
         finally:
             db.close()
 
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("stale_orders")
         await asyncio.sleep(10)
         try:
             # DB 扫描放线程池，避免阻塞事件循环 / DB sweep off the event loop

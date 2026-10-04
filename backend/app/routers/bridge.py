@@ -1705,7 +1705,11 @@ async def offline_monitor_loop() -> None:
         finally:
             db.close()
 
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("offline_monitor")
         await asyncio.sleep(2)
         try:
             # 没有活跃 WebSocket 连接时休眠 30 秒，避免无谓的数据库查询。

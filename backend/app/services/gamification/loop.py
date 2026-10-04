@@ -402,7 +402,11 @@ async def board_loop(startup_delay: float = 40.0):
     """周期榜循环（默认 5 分钟）/ period-board loop (5 minutes by default)."""
     await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
     from starlette.concurrency import run_in_threadpool
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("boards")
         try:
             t0 = time.monotonic()
             result = await run_in_threadpool(run_board_pass)
@@ -421,7 +425,11 @@ async def competition_loop(startup_delay: float = 35.0):
     snapshots and their reconcile run (the hourly pass no longer does)."""
     await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
     from starlette.concurrency import run_in_threadpool
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("competitions")
         try:
             t0 = time.monotonic()
             result = await run_in_threadpool(run_competition_pass)
@@ -441,7 +449,11 @@ async def competition_loop(startup_delay: float = 35.0):
 async def gamification_loop(startup_delay: float = 25.0):
     await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
     from starlette.concurrency import run_in_threadpool
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("gamification")
         try:
             t0 = time.monotonic()
             result = await run_in_threadpool(run_gamification_pass)

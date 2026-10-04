@@ -1493,7 +1493,11 @@ async def candle_retention_sweep_loop(
     """
     if startup_delay:
         await asyncio.sleep(startup_delay)
+    # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
+    from app.services import loop_health
+
     while True:
+        loop_health.beat("candle_retention")
         try:
             await run_in_threadpool(_run_retention_sweep)
         except Exception:
