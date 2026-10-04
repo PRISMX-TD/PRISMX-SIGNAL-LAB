@@ -779,12 +779,12 @@ export default function Layout() {
                   match={['/achievements', '/leaderboard', '/competitions']}
                 />
               )}
-              {/* 有比赛进行中时的「LIVE」徽标（自带显隐判断，仅 xl 以上）。
-                  "LIVE" badge while a competition runs (self-gating, xl and up). */}
-              <CompetitionNavBadge />
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
+              {/* 比赛进行中「LIVE」/ 报名中「JOIN」徽标（自带显隐判断，仅 xl 以上）。
+                  "LIVE" / "JOIN" competition badge (self-gating, xl and up). */}
+              <CompetitionNavBadge />
               <SignalIndicator />
               <EAStatusBadge />
               <NotificationBell />

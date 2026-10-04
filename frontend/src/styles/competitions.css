@@ -229,35 +229,47 @@
   .seg-tabs button:active { transform: none; }
 }
 
-/* 顶栏「比赛直播」徽标（components/CompetitionNavBadge.tsx）：双行，上行大号斜体 LIVE
-   用品牌紫的金属渐变 + 一道定时扫光，下行是绿色小字。高度控制在 40px 内，和导航项
-   同一条基线居中，不把顶栏撑高。
-   Top-bar live-competition badge: two lines — a large italic LIVE in a brand-purple
-   metallic gradient with a periodic shimmer, over a small green line. Kept under
-   40px tall and centred with the nav items so the bar doesn't grow. */
+/* 顶栏比赛徽标（components/CompetitionNavBadge.tsx）：双行，上行大号斜体字用金属渐变 +
+   一道定时扫光，下行是小字。两种状态各一套色：进行中 is-live 品牌紫 + 绿，报名中
+   is-join 香槟金。金色这里用字面值而不是 --gold——那个令牌是终端里的告警/过期色，
+   语义不同。高度控制在约 40px，和右侧图标区同一行居中，不把顶栏撑高。
+   Top-bar competition badge: two lines — a large italic word in a metallic gradient
+   with a periodic shimmer, over a small line. One palette per state: is-live brand
+   purple + green, is-join champagne gold. Gold is literal here rather than --gold,
+   which is the terminal's warn/stale tone. About 40px tall, centred with the
+   right-hand icon row so the bar doesn't grow. */
 .cmp-navlive {
+  --nl-glow: var(--purple-rgb);
+  --nl-edge: var(--purple-hi-rgb);
+  --nl-ramp: linear-gradient(180deg, #ffffff 0%, #d8d2ff 38%, var(--purple-hi) 62%, #6d3df5 100%);
+  --nl-accent: var(--up);
   position: relative;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
-  margin-left: 6px;
   padding: 3px 13px 4px;
-  border: 1px solid rgb(var(--purple-hi-rgb) / 0.35);
+  border: 1px solid rgb(var(--nl-edge) / 0.35);
   border-radius: 10px;
   background:
-    radial-gradient(120% 90% at 50% 0%, rgb(var(--purple-rgb) / 0.35), transparent 70%),
+    radial-gradient(120% 90% at 50% 0%, rgb(var(--nl-glow) / 0.35), transparent 70%),
     rgba(255, 255, 255, 0.02);
   line-height: 1;
   white-space: nowrap;
   transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
 }
+.cmp-navlive.is-join {
+  --nl-glow: 214 160 60;
+  --nl-edge: 240 200 120;
+  --nl-ramp: linear-gradient(180deg, #fffaf0 0%, #ffe7b0 36%, #f2c063 62%, #b97a1e 100%);
+  --nl-accent: #f5c66b;
+}
 .cmp-navlive:hover {
-  border-color: rgb(var(--purple-hi-rgb) / 0.7);
-  box-shadow: 0 0 18px rgb(var(--purple-rgb) / 0.45);
+  border-color: rgb(var(--nl-edge) / 0.7);
+  box-shadow: 0 0 18px rgb(var(--nl-glow) / 0.45);
   transform: translateY(-1px);
 }
-.cmp-navlive:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 2px; }
+.cmp-navlive:focus-visible { outline: 2px solid rgb(var(--nl-edge)); outline-offset: 2px; }
 .cmp-navlive-top { display: inline-flex; align-items: center; gap: 6px; }
 .cmp-navlive-top b {
   font-family: var(--font-display, 'Archivo'), sans-serif;
@@ -266,16 +278,15 @@
   font-style: italic;
   font-variation-settings: 'wdth' 118;
   letter-spacing: -0.01em;
-  /* 金属感：白 → 浅紫 → 品牌紫的竖向渐变，叠一条斜向高光做扫光。
-     Metallic: a vertical white → light purple → brand purple ramp, under a
-     diagonal highlight that sweeps across. */
+  /* 金属感：竖向明暗渐变，叠一条斜向高光做扫光。
+     Metallic: a vertical light-to-dark ramp under a diagonal highlight that sweeps. */
   background:
     linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.95) 50%, transparent 65%) -150% 0 / 200% 100% no-repeat,
-    linear-gradient(180deg, #ffffff 0%, #d8d2ff 38%, var(--purple-hi) 62%, #6d3df5 100%);
+    var(--nl-ramp);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 6px rgb(var(--purple-rgb) / 0.55));
+  filter: drop-shadow(0 0 6px rgb(var(--nl-glow) / 0.55));
   padding-right: 2px; /* 斜体最后一个字母右侧被裁 / italic tail would clip */
   animation: cmp-navlive-shine 3.6s var(--ease-out, ease-out) infinite;
 }
@@ -284,15 +295,15 @@
   width: 7px;
   height: 7px;
   border-radius: 999px;
-  background: var(--up);
-  box-shadow: 0 0 6px var(--up);
+  background: var(--nl-accent);
+  box-shadow: 0 0 6px var(--nl-accent);
 }
 .cmp-navlive-dot::after {
   content: "";
   position: absolute;
   inset: -4px;
   border-radius: inherit;
-  border: 1px solid var(--up);
+  border: 1px solid var(--nl-accent);
   opacity: 0;
   animation: cmp-navlive-ping 2.4s var(--ease-out, ease-out) infinite;
 }
@@ -300,7 +311,7 @@
   font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: var(--up);
+  color: var(--nl-accent);
 }
 @keyframes cmp-navlive-shine {
   0%, 55% { background-position: -150% 0, 0 0; }
