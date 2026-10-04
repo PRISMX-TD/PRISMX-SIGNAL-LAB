@@ -519,30 +519,36 @@
   }
 }
 
-/* ── 比赛走马灯 / competition marquee ──
-   转播字幕条，沿用比赛页的「赛事直播」语言：展示字体赛名、胶囊倒计时、状态用字色
-   而不是色块。和卡片同一套面：无描边、--surface 底、24px 圆角；紫色只出现在
-   hover 的字色上，不铺底色、不发光。只有内容放不下时才滚动（见组件）。
-   A broadcast-style strip in the competitions page's "live event" language:
-   display-face names, pill countdowns, state carried by text colour rather than
-   blocks. Same surface as the cards: no outline, --surface fill, 24px radius;
-   violet only appears as a hover text colour, never a fill or a glow. It only
-   scrolls when the content overflows (see the component). */
-.dash-cmq {
+/* ── 赛事跑马灯 / competition ticker ──
+   比赛页头版跑马灯（.cmp-ticker）的仪表盘版：左边固定「交易比赛」入口（有比赛进行
+   时亮直播灯），中间每场一段滚动——状态芯片、展示字体赛名，进行中时接前三名
+   （名次用展示字体，第一名金色，成绩按正负绿红，变了就闪），右边箭头进比赛页。
+   面与卡片一致（--surface、无描边），只加一束极淡的白色聚光；段与段之间一枚小菱形。
+   The dashboard edition of the competitions page's front-page ticker
+   (.cmp-ticker): a fixed "Competitions" entry on the left (with a live light while
+   anything runs), one scrolling segment per competition in the middle (status
+   chip, name in the display face, then the top three while running: ranks in the
+   display face, #1 in gold, scores green/red by sign and flashing on change), an
+   arrow to the competitions page on the right. Same surface as the cards
+   (--surface, no outline) plus one faint white spotlight; a small diamond between
+   segments. */
+.dash-tk {
   display: flex;
   align-items: stretch;
   height: 52px;
   margin-bottom: 20px;
   border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background:
+    radial-gradient(50% 240% at 0% 0%, rgba(255, 255, 255, 0.05), transparent 60%),
+    var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
   overflow: hidden;
 }
-.dash-cmq-label {
+.dash-tk-label {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   padding: 0 18px 0 22px;
   border-right: 1px solid var(--line);
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
@@ -551,142 +557,134 @@
   letter-spacing: -0.01em;
   color: #f4f4f5;
   white-space: nowrap;
-  transition: background var(--dur-base, 0.2s) var(--ease-out, ease);
+  transition: background var(--dur-base, 0.24s) var(--ease-out, ease-out);
 }
-.dash-cmq-label:hover {
-  background: var(--surface-2);
-}
-.dash-cmq-live {
+.dash-tk-label:hover { background: var(--surface-2); }
+.dash-tk-live {
   position: relative;
   width: 7px;
   height: 7px;
   border-radius: 999px;
   background: var(--up);
 }
-.dash-cmq-live::after {
+.dash-tk-live::after {
   content: "";
   position: absolute;
   inset: -4px;
   border-radius: inherit;
   border: 1px solid var(--up);
   opacity: 0;
-  animation: dash-cmq-ping 2.4s var(--ease-out, ease-out) infinite;
+  animation: dash-tk-ping 2.4s var(--ease-out, ease-out) infinite;
 }
-.dash-cmq-count {
-  min-width: 20px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.07);
-  font-family: var(--font-body, inherit);
-  font-size: 11px;
-  font-weight: 600;
-  text-align: center;
-  color: var(--text-2);
-}
-.dash-cmq-track {
+.dash-tk-track {
   flex: 1;
   min-width: 0;
   overflow: hidden;
 }
-.dash-cmq-track.is-loop {
-  mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+.dash-tk-track.is-loop {
+  mask-image: linear-gradient(90deg, transparent, #000 28px, #000 calc(100% - 28px), transparent);
 }
-.dash-cmq-run {
+.dash-tk-run {
   display: flex;
   width: max-content;
   height: 100%;
 }
-.dash-cmq-track.is-loop .dash-cmq-run {
-  animation: dash-cmq-tick 40s linear infinite;
+.dash-tk-track.is-loop .dash-tk-run {
+  animation: dash-tk-tick 40s linear infinite;
 }
-.dash-cmq:hover .dash-cmq-run,
-.dash-cmq-run:focus-within {
+.dash-tk-track:hover .dash-tk-run,
+.dash-tk-run:focus-within {
   animation-play-state: paused;
 }
-.dash-cmq-copy {
+.dash-tk-copy {
   display: flex;
   flex-shrink: 0;
   align-items: center;
   height: 100%;
 }
-.dash-cmq-item {
+.dash-tk-seg {
   position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 14px;
+  gap: 18px;
   height: 100%;
-  padding: 0 28px 0 22px;
+  padding: 0 30px 0 20px;
   font-size: 12.5px;
   color: var(--text-3);
   white-space: nowrap;
 }
-/* 项与项之间一根短竖线，比大间距更像字幕条的分节。/ A short hairline between items. */
-.dash-cmq-item::after {
+/* 段与段之间一枚小菱形。/ A small diamond between segments. */
+.dash-tk-seg::after {
   content: "";
   position: absolute;
-  right: 0;
+  right: -2px;
   top: 50%;
-  height: 18px;
-  margin-top: -9px;
-  border-right: 1px solid var(--line-hi);
+  width: 4px;
+  height: 4px;
+  margin-top: -2px;
+  background: var(--text-3);
+  opacity: 0.5;
+  transform: rotate(45deg);
 }
-.dash-cmq-status {
-  font-size: 11.5px;
+/* 静止时最后一段后面没有下一段，不要菱形；滚动时它隔开两份内容，要留着。
+   Static: nothing follows the last segment, so no diamond; when looping it
+   separates the two copies and stays. */
+.dash-tk-track:not(.is-loop) .dash-tk-seg:last-child::after { display: none; }
+.dash-tk-tag {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.02em;
-  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-2);
 }
-.dash-cmq-item.is-running .dash-cmq-status { color: var(--up); }
-.dash-cmq-item.is-regOpen .dash-cmq-status { color: var(--purple-hi); }
-.dash-cmq-name {
+.dash-tk-seg.is-running .dash-tk-tag { background: var(--up-bg); color: var(--up); }
+.dash-tk-seg.is-regOpen .dash-tk-tag { background: rgb(var(--purple-hi-rgb) / 0.16); color: var(--purple-hi); }
+.dash-tk-name {
+  margin-left: -6px;
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 15px;
+  font-size: 14.5px;
   font-weight: 800;
   letter-spacing: -0.015em;
   color: #f4f4f5;
-  transition: color var(--dur-base, 0.2s) var(--ease-out, ease);
+  transition: color var(--dur-base, 0.24s) var(--ease-out, ease-out);
 }
-.dash-cmq-item:hover .dash-cmq-name {
-  color: var(--purple-hi);
+.dash-tk-seg:hover .dash-tk-name { color: var(--purple-hi); }
+.dash-tk-seg:focus-visible {
+  outline: 2px solid var(--purple-hi);
+  outline-offset: -6px;
+  border-radius: 12px;
 }
-.dash-cmq-meta b {
+.dash-tk-rank {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.dash-tk-rank > i {
+  font-family: var(--font-display, 'Archivo'), sans-serif;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+.dash-tk-rank.is-first > i { color: #c9a24a; }
+.dash-tk-rank > span { color: var(--text-2); }
+.dash-tk-rank > b {
+  padding: 1px 5px;
+  margin: 0 -5px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  animation: dash-tk-flash 1.6s var(--ease-out, ease-out);
+}
+.dash-tk-rank > b.is-up { color: var(--up); --tk-flash: rgb(var(--up-rgb) / 0.22); }
+.dash-tk-rank > b.is-down { color: var(--down); --tk-flash: rgb(var(--down-rgb) / 0.22); }
+.dash-tk-meta b {
   font-weight: 600;
   color: var(--text-2);
 }
-.dash-cmq-meta b.num {
-  font-variant-numeric: tabular-nums;
-}
-.dash-cmq-meta b.text-up { color: var(--up); }
-.dash-cmq-meta b.text-down { color: var(--down); }
-/* 胶囊倒计时：比赛页角标（.cmp-bug）的缩小版。/ A pocket version of the page's broadcast bug. */
-.dash-cmq-cd {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 3px 3px 12px;
-  border: 1px solid var(--line-hi);
-  border-radius: 999px;
-}
-.dash-cmq-cd small {
-  font-size: 11px;
-  color: var(--text-3);
-}
-.dash-cmq-cd b {
-  padding: 3px 10px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: #f4f4f5;
-  font-variant-numeric: tabular-nums;
-}
-.dash-cmq-item:focus-visible {
-  outline: 2px solid var(--purple-hi);
-  outline-offset: -4px;
-  border-radius: 12px;
-}
-.dash-cmq-more {
+.dash-tk-more {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
@@ -694,37 +692,32 @@
   width: 52px;
   border-left: 1px solid var(--line);
   color: var(--text-3);
-  transition: color var(--dur-base, 0.2s) var(--ease-out, ease), background var(--dur-base, 0.2s) var(--ease-out, ease);
+  transition: color var(--dur-base, 0.24s) var(--ease-out, ease-out), background var(--dur-base, 0.24s) var(--ease-out, ease-out);
 }
-.dash-cmq-more:hover {
-  background: var(--surface-2);
-  color: #f4f4f5;
-}
-.dash-cmq-more svg {
-  transition: transform var(--dur-base, 0.2s) var(--ease-out, ease);
-}
-.dash-cmq-more:hover svg {
-  transform: translateX(2px);
-}
-@keyframes dash-cmq-tick {
+.dash-tk-more:hover { background: var(--surface-2); color: #f4f4f5; }
+.dash-tk-more svg { transition: transform var(--dur-base, 0.24s) var(--ease-out, ease-out); }
+.dash-tk-more:hover svg { transform: translateX(2px); }
+@keyframes dash-tk-tick {
   to { transform: translateX(-50%); }
 }
-@keyframes dash-cmq-ping {
+@keyframes dash-tk-ping {
   0% { transform: scale(0.6); opacity: 0.8; }
   80%, 100% { transform: scale(1.4); opacity: 0; }
 }
+@keyframes dash-tk-flash {
+  from { background: var(--tk-flash, transparent); }
+  to { background: transparent; }
+}
 @media (max-width: 767px) {
-  .dash-cmq { height: 46px; margin-bottom: 16px; }
-  .dash-cmq-label { padding: 0 12px 0 16px; gap: 8px; }
-  .dash-cmq-label > span:not(.dash-cmq-live):not(.dash-cmq-count) { display: none; }
-  .dash-cmq-item { gap: 10px; padding: 0 20px 0 16px; }
-  .dash-cmq-name { font-size: 14px; }
-  .dash-cmq-meta.is-extra { display: none; }
-  .dash-cmq-more { display: none; }
+  .dash-tk { height: 46px; margin-bottom: 16px; }
+  .dash-tk-label { padding: 0 12px 0 16px; font-size: 12.5px; }
+  .dash-tk-seg { gap: 14px; padding: 0 24px 0 16px; }
+  .dash-tk-name { font-size: 14px; }
+  .dash-tk-more { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dash-cmq-live::after { animation: none; }
-  .dash-cmq-track.is-loop { overflow-x: auto; mask-image: none; }
-  .dash-cmq-track.is-loop .dash-cmq-run { animation: none; }
-  .dash-cmq-copy[aria-hidden] { display: none; }
+  .dash-tk-live::after, .dash-tk-rank > b { animation: none; }
+  .dash-tk-track.is-loop { overflow-x: auto; mask-image: none; }
+  .dash-tk-track.is-loop .dash-tk-run { animation: none; }
+  .dash-tk-copy[aria-hidden] { display: none; }
 }

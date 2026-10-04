@@ -2258,8 +2258,7 @@
     },
     "marquee": {
       "regCloses": "Registration closes in",
-      "regOpens": "Registration opens in",
-      "leader": "Leading"
+      "regOpens": "Registration opens in"
     },
     "myLiveRank": "Currently #{{n}}",
     "myPending": "Score pending - you enter the board once the trade gate is met",

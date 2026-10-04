@@ -1620,8 +1620,7 @@
     },
     "marquee": {
       "regCloses": "Đóng đăng ký sau",
-      "regOpens": "Mở đăng ký sau",
-      "leader": "Dẫn đầu"
+      "regOpens": "Mở đăng ký sau"
     },
     "myLiveRank": "Hiện hạng #{{n}}",
     "myPending": "Chưa có điểm - bạn sẽ lên bảng khi đạt đủ số lệnh yêu cầu",
