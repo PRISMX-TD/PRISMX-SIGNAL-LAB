@@ -26,6 +26,7 @@ import AnnouncementPopup from './AnnouncementPopup'
 import { useBackToClose } from '../utils/useBackToClose'
 import { reportPageView } from '../utils/pageTracking'
 import { onForeground } from '../utils/appVisibility'
+import CompetitionNavBadge from './CompetitionNavBadge'
 
 // 桌面主导航项。选中态此前是一条「紫 → 青」的渐变下划线：那条青色是全站唯一
 // 出现青的地方，一个孤立的第二品牌色，而两点渐变在 2px 高、几十像素宽的横条上
@@ -778,6 +779,9 @@ export default function Layout() {
                   match={['/achievements', '/leaderboard', '/competitions']}
                 />
               )}
+              {/* 有比赛进行中时的「LIVE」徽标（自带显隐判断，仅 xl 以上）。
+                  "LIVE" badge while a competition runs (self-gating, xl and up). */}
+              <CompetitionNavBadge />
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">

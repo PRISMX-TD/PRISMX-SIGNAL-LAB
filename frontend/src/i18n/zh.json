@@ -717,7 +717,11 @@
     },
     "status": {
       "regOpen": "报名中"
-    }
+    },
+    "navLive": "比赛进行中",
+    "navLiveCount": "{{n}} 场比赛进行中",
+    "navLiveOne": "比赛进行中：{{name}}",
+    "navLiveMany": "{{n}} 场比赛进行中，查看比赛"
   },
   "netSignal": {
     "title": "连接信号",

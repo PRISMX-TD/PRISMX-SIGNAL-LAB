@@ -717,7 +717,11 @@
     },
     "status": {
       "regOpen": "Registration open"
-    }
+    },
+    "navLive": "Contest live",
+    "navLiveCount": "{{n}} contests live",
+    "navLiveOne": "Contest live: {{name}}",
+    "navLiveMany": "{{n}} contests live — view competitions"
   },
   "netSignal": {
     "title": "Connection",

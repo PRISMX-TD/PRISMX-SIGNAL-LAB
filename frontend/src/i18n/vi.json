@@ -488,7 +488,11 @@
     },
     "status": {
       "regOpen": "Đang mở đăng ký"
-    }
+    },
+    "navLive": "Đang thi đấu",
+    "navLiveCount": "{{n}} cuộc thi đang diễn ra",
+    "navLiveOne": "Đang thi đấu: {{name}}",
+    "navLiveMany": "{{n}} cuộc thi đang diễn ra — xem cuộc thi"
   },
   "netSignal": {
     "title": "Kết nối",
