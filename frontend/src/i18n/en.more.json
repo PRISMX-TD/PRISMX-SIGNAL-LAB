@@ -994,7 +994,7 @@
     },
     "health": {
       "title": "System status",
-      "subtitle": "Refreshes every 15 seconds. Green = fine, yellow = keep an eye on it, red = problem, grey = no data. Each light says what to do.",
+      "subtitle": "Refreshes every 15 seconds (paused while this tab is in the background). Green = fine, yellow = keep an eye on it, red = problem, grey = no data. Each light says what to do.",
       "updated": "Updated {{time}}",
       "refresh": "Refresh now",
       "loading": "Loading…",

@@ -262,11 +262,20 @@ export default function SystemStatusPanel() {
     ).finally(() => { if (alive.current) setLoading(false) })
   }, [])
 
+  // 标签页在后台时不刷新：有人把这页开着一整天也不会一直查后端；切回来立刻补一次，
+  // 不让人看着一份过时的数据等满 15 秒。
+  // Pause while the tab is hidden; refresh at once when it comes back.
   useEffect(() => {
     alive.current = true
     load()
-    const id = window.setInterval(load, REFRESH_MS)
-    return () => { alive.current = false; window.clearInterval(id) }
+    const id = window.setInterval(() => { if (!document.hidden) load() }, REFRESH_MS)
+    const onVisible = () => { if (!document.hidden) load() }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      alive.current = false
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [load])
 
   // 读不到后端时，整体结论就是「异常」，不管上一份数据怎么说。
