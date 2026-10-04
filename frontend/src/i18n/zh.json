@@ -718,12 +718,8 @@
     "status": {
       "regOpen": "报名中"
     },
-    "navLive": "比赛进行中",
-    "navLiveCount": "{{n}} 场比赛进行中",
     "navLiveOne": "比赛进行中：{{name}}",
     "navLiveMany": "{{n}} 场比赛进行中，查看比赛",
-    "navJoin": "比赛报名中",
-    "navJoinCount": "{{n}} 场比赛报名中",
     "navJoinOne": "比赛报名中：{{name}}",
     "navJoinMany": "{{n}} 场比赛报名中，查看比赛"
   },

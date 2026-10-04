@@ -489,12 +489,8 @@
     "status": {
       "regOpen": "Đang mở đăng ký"
     },
-    "navLive": "Đang thi đấu",
-    "navLiveCount": "{{n}} cuộc thi đang diễn ra",
     "navLiveOne": "Đang thi đấu: {{name}}",
     "navLiveMany": "{{n}} cuộc thi đang diễn ra — xem cuộc thi",
-    "navJoin": "Đang mở đăng ký",
-    "navJoinCount": "{{n}} cuộc thi mở đăng ký",
     "navJoinOne": "Đang mở đăng ký: {{name}}",
     "navJoinMany": "{{n}} cuộc thi đang mở đăng ký — xem cuộc thi"
   },
