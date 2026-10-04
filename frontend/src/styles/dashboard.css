@@ -518,3 +518,125 @@
     padding: 16px 20px 20px;
   }
 }
+
+/* ── 比赛走马灯 / competition marquee ──
+   仪表盘最上方一条：左边固定的「交易比赛」入口，右边每场比赛一项横向滚动。
+   悬停或键盘聚焦时停住，方便点；减少动态时不滚，改为可横向滑动。
+   A strip at the top of the dashboard: a fixed "Competitions" entry on the left,
+   one scrolling item per competition on the right. Pauses on hover or keyboard
+   focus so items are clickable; with reduced motion it stops and scrolls by hand. */
+.dash-cmq {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 44px;
+  margin-bottom: 16px;
+  padding: 0 4px 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.22);
+  background: linear-gradient(90deg, rgb(var(--purple-rgb) / 0.16), rgb(var(--purple-rgb) / 0.04) 40%, var(--surface));
+}
+.dash-cmq-label {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding-right: 14px;
+  border-right: 1px solid var(--line-hi);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--purple-hi);
+  white-space: nowrap;
+}
+.dash-cmq-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: dash-cmq-breathe 2s ease-in-out infinite;
+}
+.dash-cmq-track {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.dash-cmq-run {
+  display: flex;
+  width: max-content;
+  height: 100%;
+  animation: dash-cmq-tick 30s linear infinite;
+}
+.dash-cmq:hover .dash-cmq-run,
+.dash-cmq-run:focus-within {
+  animation-play-state: paused;
+}
+.dash-cmq-copy {
+  display: flex;
+  align-items: center;
+  gap: 36px;
+  padding-right: 36px;
+}
+.dash-cmq-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  height: 100%;
+  font-size: 12.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: color var(--dur-base, 0.2s) ease;
+}
+.dash-cmq-item b {
+  font-weight: 600;
+  color: #f4f4f5;
+}
+.dash-cmq-item:hover b {
+  color: var(--purple-hi);
+}
+.dash-cmq-item:focus-visible {
+  outline: 2px solid var(--purple-hi);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.dash-cmq-cd .num {
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.dash-cmq-prize {
+  color: var(--text-2);
+}
+.dash-cmq-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgb(var(--text-3-rgb) / 0.15);
+  color: var(--text-3);
+}
+.dash-cmq-tag.is-running {
+  background: var(--up-bg);
+  color: var(--up);
+}
+.dash-cmq-tag.is-regOpen {
+  background: rgb(var(--purple-hi-rgb) / 0.18);
+  color: var(--purple-hi);
+}
+@keyframes dash-cmq-tick {
+  to { transform: translateX(-50%); }
+}
+@keyframes dash-cmq-breathe {
+  50% { opacity: 0.35; }
+}
+@media (max-width: 767px) {
+  .dash-cmq { height: 40px; gap: 10px; padding-left: 12px; }
+  .dash-cmq-label { padding-right: 10px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash-cmq-dot, .dash-cmq-run { animation: none; }
+  .dash-cmq-track { overflow-x: auto; mask-image: none; }
+  .dash-cmq-copy[aria-hidden] { display: none; }
+}

@@ -7,6 +7,7 @@ import { useLive } from '../store/live'
 import { useSentiment } from '../api/useSentiment'
 import NotifDeviceBanner from '../components/NotifDeviceBanner'
 import OnboardingCard from '../components/OnboardingCard'
+import CompetitionMarquee from '../components/CompetitionMarquee'
 import { SkeletonPage } from '../components/Skeleton'
 import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
@@ -142,6 +143,10 @@ export default function DashboardPage() {
           scrolling past a screen of empty cards. It disappears once an account is
           bound. */}
       <OnboardingCard />
+      {/* 比赛走马灯：有比赛在报名 / 即将开赛 / 进行中时才出现，否则不占空间。
+          Competition marquee: only shows while a competition is open for
+          registration, upcoming or running; otherwise takes no space. */}
+      <CompetitionMarquee />
       {!loaded ? (
         <SkeletonPage cards={3} />
       ) : (
