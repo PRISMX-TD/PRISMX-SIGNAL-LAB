@@ -110,11 +110,15 @@ $action = New-ScheduledTaskAction -Execute "powershell.exe" `
     -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$Script`"" `
     -WorkingDirectory $here
 # 开机启动 + 每 5 分钟兜底触发一次(已在跑就忽略),看门狗自己挂了也会被拉起来。
-# 重复时长必须显式给"无限",原因见 gateway 的 install-service.ps1。
+# 重复时长必须显式给,不给时不同 Windows 版本的默认值不一致(见 gateway 的 install-service.ps1)。
+# 但不能用 [TimeSpan]::MaxValue:它序列化成 P99999999DT23H59M59S,这台 VPS 的任务计划程序
+# 直接拒收("任务 XML 包含格式不正确或超出范围的值")。给 10 年,实际等于永远,并且每台都认。
+# Not [TimeSpan]::MaxValue: it serialises to P99999999DT23H59M59S, which Task
+# Scheduler on the VPS rejects as out of range. Ten years is forever in practice.
 $trigAtStartup = New-ScheduledTaskTrigger -AtStartup
 $trigRepeat = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
     -RepetitionInterval (New-TimeSpan -Minutes 5) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)
+    -RepetitionDuration (New-TimeSpan -Days 3650)
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
@@ -125,9 +129,21 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
-Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($trigAtStartup, $trigRepeat) `
-    -Principal $principal -Settings $settings `
-    -Description "PRISMX gateway 看门狗:gateway 卡死/没起来时自动处理,其他异常发通知" | Out-Null
+# Register-ScheduledTask 失败时抛的是非终止错误,$ErrorActionPreference 拦不住,
+# 以前会照样打出"已创建"。显式 -ErrorAction Stop,并回读一次确认任务真的在。
+try {
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger @($trigAtStartup, $trigRepeat) `
+        -Principal $principal -Settings $settings `
+        -Description "PRISMX gateway 看门狗:gateway 卡死/没起来时自动处理,其他异常发通知" `
+        -ErrorAction Stop | Out-Null
+} catch {
+    Write-Bad "创建计划任务失败:$($_.Exception.Message)"
+    exit 1
+}
+if (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
+    Write-Bad "创建计划任务后读不到它,安装没有完成"
+    exit 1
+}
 Write-Ok "计划任务已创建"
 
 Start-ScheduledTask -TaskName $TaskName
