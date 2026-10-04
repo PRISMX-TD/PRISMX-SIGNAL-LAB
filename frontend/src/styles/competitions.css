@@ -95,7 +95,12 @@
 .cmp-back:hover { color: #e4e4e7; }
 .cmp-split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 48px; align-items: start; }
 .cmp-side { padding-right: 40px; border-right: 1px solid rgba(255, 255, 255, 0.08); }
-.cmp-desc { margin: 14px 0 0; font-size: 13px; line-height: 1.7; color: #a1a1aa; }
+/* 保留后台填写时的换行和空行 */
+.cmp-desc { margin: 14px 0 0; font-size: 13px; line-height: 1.7; color: #a1a1aa; white-space: pre-line; overflow-wrap: anywhere; }
+.cmp-desc.is-clamped { max-height: 15em; overflow: hidden; }
+.cmp-desc.is-overflowing { -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+.cmp-desc-more { margin-top: 6px; font-size: 12px; font-weight: 600; color: #a78bfa; transition: color var(--dur-base) var(--ease-out); }
+.cmp-desc-more:hover { color: #c4b5fd; }
 .cmp-clock { display: flex; gap: 14px; margin-top: 26px; }
 .cmp-clock > div { flex: 1; padding: 14px 0 12px; border-top: 2px solid #f4f4f5; }
 .cmp-clock > div.is-wide { flex: none; width: 100%; }

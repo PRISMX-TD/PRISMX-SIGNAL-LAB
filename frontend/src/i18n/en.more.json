@@ -2520,6 +2520,8 @@
   "competition": {
     "empty": "No competitions yet",
     "backToList": "Back to competitions",
+    "readMore": "Read more",
+    "descClose": "Close",
     "cd": {
       "toEnd": "Ends in",
       "hm": "{{h}}h {{m}}m",

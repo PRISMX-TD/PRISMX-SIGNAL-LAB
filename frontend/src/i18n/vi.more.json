@@ -1607,6 +1607,8 @@
   "competition": {
     "empty": "Chưa có cuộc thi nào",
     "backToList": "Về danh sách cuộc thi",
+    "readMore": "Xem thêm",
+    "descClose": "Đóng",
     "cd": {
       "toEnd": "Kết thúc sau",
       "hm": "{{h}} giờ {{m}} phút",

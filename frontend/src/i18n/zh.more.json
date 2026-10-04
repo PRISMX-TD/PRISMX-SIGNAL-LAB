@@ -2518,6 +2518,8 @@
   "competition": {
     "empty": "暂无比赛",
     "backToList": "返回比赛列表",
+    "readMore": "查看更多",
+    "descClose": "关闭",
     "cd": {
       "toEnd": "距结束",
       "hm": "{{h}} 小时 {{m}} 分",

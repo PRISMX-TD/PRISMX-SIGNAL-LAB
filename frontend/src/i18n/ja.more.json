@@ -1607,6 +1607,8 @@
   "competition": {
     "empty": "大会はまだありません",
     "backToList": "大会一覧に戻る",
+    "readMore": "もっと見る",
+    "descClose": "閉じる",
     "cd": {
       "toEnd": "終了まで",
       "hm": "{{h}}時間{{m}}分",

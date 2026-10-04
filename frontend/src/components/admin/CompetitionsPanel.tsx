@@ -673,7 +673,7 @@ export default function CompetitionsPanel() {
           <div>
             <label className="label">{t('competition.admin.fields.description')}</label>
             <textarea
-              className="input min-h-[70px] w-full resize-y"
+              className="input min-h-[160px] w-full resize-y"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               maxLength={2000}
