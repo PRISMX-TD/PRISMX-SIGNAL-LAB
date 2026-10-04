@@ -618,7 +618,7 @@ function CompetitionDescModal({ title, text, onClose, t }: { title: string; text
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="glass-card relative flex max-h-[85vh] w-full max-w-2xl flex-col p-6 outline-none"
+        className="glass-card relative flex max-h-[85vh] w-full max-w-2xl flex-col p-5 outline-none supports-[height:100dvh]:max-h-[85dvh] sm:p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <button

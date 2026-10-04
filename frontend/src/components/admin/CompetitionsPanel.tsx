@@ -111,6 +111,10 @@ function localInputToIso(value: string): string | null {
   return d.toISOString()
 }
 
+// 简介字数上限（后端 Text 列不限长，这只是防手滑的软上限）。
+// Description length cap (the backend Text column is unbounded; this is a soft guard).
+const DESC_MAX = 20000
+
 interface FormDraft {
   name: string
   description: string
@@ -672,12 +676,24 @@ export default function CompetitionsPanel() {
 
           <div>
             <label className="label">{t('competition.admin.fields.description')}</label>
+            {/* 上限原来是 2000：完整赛规一粘贴，超出部分被浏览器静默丢掉，前台弹窗看着像
+                「被截断」。后端这一列是 Text，不限长；这里放宽到 DESC_MAX 并显示字数，
+                贴满了一眼能看出来。rounded-2xl 盖掉 .input 的胶囊圆角——多行文本框用
+                胶囊形，四角会被切掉一大块。
+                The cap used to be 2000: pasting full rules silently dropped the overflow,
+                which read as a "truncated" dialog on the page. The column is Text (no
+                length limit); widen to DESC_MAX and show a counter so a full box is
+                obvious. rounded-2xl overrides .input's pill radius, which clips the
+                corners of a multi-line box. */}
             <textarea
-              className="input min-h-[160px] w-full resize-y"
+              className="input min-h-[160px] w-full resize-y rounded-2xl"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
-              maxLength={2000}
+              maxLength={DESC_MAX}
             />
+            <p className={`mt-1 text-right text-[11px] num ${form.description.length >= DESC_MAX ? 'text-red-400' : 'text-neutral-500'}`}>
+              {form.description.length} / {DESC_MAX}
+            </p>
           </div>
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
