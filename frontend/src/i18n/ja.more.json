@@ -1620,7 +1620,8 @@
     },
     "marquee": {
       "regCloses": "受付締切まで",
-      "regOpens": "受付開始まで"
+      "regOpens": "受付開始まで",
+      "leader": "首位"
     },
     "myLiveRank": "現在{{n}}位",
     "myPending": "スコア集計待ち。取引数の条件を満たすとボードに表示されます",

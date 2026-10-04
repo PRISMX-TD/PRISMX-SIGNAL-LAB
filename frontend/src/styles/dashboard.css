@@ -520,54 +520,84 @@
 }
 
 /* ── 比赛走马灯 / competition marquee ──
-   仪表盘最上方一条：左边固定的「交易比赛」入口，右边每场比赛一项横向滚动。
-   悬停或键盘聚焦时停住，方便点；减少动态时不滚，改为可横向滑动。
-   A strip at the top of the dashboard: a fixed "Competitions" entry on the left,
-   one scrolling item per competition on the right. Pauses on hover or keyboard
-   focus so items are clickable; with reduced motion it stops and scrolls by hand. */
+   转播字幕条，沿用比赛页的「赛事直播」语言：展示字体赛名、胶囊倒计时、状态用字色
+   而不是色块。和卡片同一套面：无描边、--surface 底、24px 圆角；紫色只出现在
+   hover 的字色上，不铺底色、不发光。只有内容放不下时才滚动（见组件）。
+   A broadcast-style strip in the competitions page's "live event" language:
+   display-face names, pill countdowns, state carried by text colour rather than
+   blocks. Same surface as the cards: no outline, --surface fill, 24px radius;
+   violet only appears as a hover text colour, never a fill or a glow. It only
+   scrolls when the content overflows (see the component). */
 .dash-cmq {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  height: 44px;
-  margin-bottom: 16px;
-  padding: 0 4px 0 14px;
-  border-radius: 12px;
-  border: 1px solid rgb(var(--purple-hi-rgb) / 0.22);
-  background: linear-gradient(90deg, rgb(var(--purple-rgb) / 0.16), rgb(var(--purple-rgb) / 0.04) 40%, var(--surface));
+  align-items: stretch;
+  height: 52px;
+  margin-bottom: 20px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
 }
 .dash-cmq-label {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
-  gap: 8px;
-  padding-right: 14px;
-  border-right: 1px solid var(--line-hi);
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--purple-hi);
+  gap: 10px;
+  padding: 0 18px 0 22px;
+  border-right: 1px solid var(--line);
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #f4f4f5;
   white-space: nowrap;
+  transition: background var(--dur-base, 0.2s) var(--ease-out, ease);
 }
-.dash-cmq-dot {
-  width: 6px;
-  height: 6px;
+.dash-cmq-label:hover {
+  background: var(--surface-2);
+}
+.dash-cmq-live {
+  position: relative;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
-  background: currentColor;
-  animation: dash-cmq-breathe 2s ease-in-out infinite;
+  background: var(--up);
+}
+.dash-cmq-live::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: inherit;
+  border: 1px solid var(--up);
+  opacity: 0;
+  animation: dash-cmq-ping 2.4s var(--ease-out, ease-out) infinite;
+}
+.dash-cmq-count {
+  min-width: 20px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  font-family: var(--font-body, inherit);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+  color: var(--text-2);
 }
 .dash-cmq-track {
   flex: 1;
   min-width: 0;
-  height: 100%;
   overflow: hidden;
-  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.dash-cmq-track.is-loop {
+  mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 32px), transparent);
 }
 .dash-cmq-run {
   display: flex;
   width: max-content;
   height: 100%;
-  animation: dash-cmq-tick 30s linear infinite;
+}
+.dash-cmq-track.is-loop .dash-cmq-run {
+  animation: dash-cmq-tick 40s linear infinite;
 }
 .dash-cmq:hover .dash-cmq-run,
 .dash-cmq-run:focus-within {
@@ -575,68 +605,126 @@
 }
 .dash-cmq-copy {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
-  gap: 36px;
-  padding-right: 36px;
+  height: 100%;
 }
 .dash-cmq-item {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 14px;
   height: 100%;
+  padding: 0 28px 0 22px;
   font-size: 12.5px;
   color: var(--text-3);
   white-space: nowrap;
-  transition: color var(--dur-base, 0.2s) ease;
 }
-.dash-cmq-item b {
-  font-weight: 600;
+/* 项与项之间一根短竖线，比大间距更像字幕条的分节。/ A short hairline between items. */
+.dash-cmq-item::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  height: 18px;
+  margin-top: -9px;
+  border-right: 1px solid var(--line-hi);
+}
+.dash-cmq-status {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+}
+.dash-cmq-item.is-running .dash-cmq-status { color: var(--up); }
+.dash-cmq-item.is-regOpen .dash-cmq-status { color: var(--purple-hi); }
+.dash-cmq-name {
+  font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
   color: #f4f4f5;
+  transition: color var(--dur-base, 0.2s) var(--ease-out, ease);
 }
-.dash-cmq-item:hover b {
+.dash-cmq-item:hover .dash-cmq-name {
   color: var(--purple-hi);
+}
+.dash-cmq-meta b {
+  font-weight: 600;
+  color: var(--text-2);
+}
+.dash-cmq-meta b.num {
+  font-variant-numeric: tabular-nums;
+}
+.dash-cmq-meta b.text-up { color: var(--up); }
+.dash-cmq-meta b.text-down { color: var(--down); }
+/* 胶囊倒计时：比赛页角标（.cmp-bug）的缩小版。/ A pocket version of the page's broadcast bug. */
+.dash-cmq-cd {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 3px 3px 12px;
+  border: 1px solid var(--line-hi);
+  border-radius: 999px;
+}
+.dash-cmq-cd small {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.dash-cmq-cd b {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #f4f4f5;
+  font-variant-numeric: tabular-nums;
 }
 .dash-cmq-item:focus-visible {
   outline: 2px solid var(--purple-hi);
-  outline-offset: 2px;
-  border-radius: 4px;
+  outline-offset: -4px;
+  border-radius: 12px;
 }
-.dash-cmq-cd .num {
-  font-weight: 600;
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-.dash-cmq-prize {
-  color: var(--text-2);
-}
-.dash-cmq-tag {
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 600;
-  background: rgb(var(--text-3-rgb) / 0.15);
+.dash-cmq-more {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  border-left: 1px solid var(--line);
   color: var(--text-3);
+  transition: color var(--dur-base, 0.2s) var(--ease-out, ease), background var(--dur-base, 0.2s) var(--ease-out, ease);
 }
-.dash-cmq-tag.is-running {
-  background: var(--up-bg);
-  color: var(--up);
+.dash-cmq-more:hover {
+  background: var(--surface-2);
+  color: #f4f4f5;
 }
-.dash-cmq-tag.is-regOpen {
-  background: rgb(var(--purple-hi-rgb) / 0.18);
-  color: var(--purple-hi);
+.dash-cmq-more svg {
+  transition: transform var(--dur-base, 0.2s) var(--ease-out, ease);
+}
+.dash-cmq-more:hover svg {
+  transform: translateX(2px);
 }
 @keyframes dash-cmq-tick {
   to { transform: translateX(-50%); }
 }
-@keyframes dash-cmq-breathe {
-  50% { opacity: 0.35; }
+@keyframes dash-cmq-ping {
+  0% { transform: scale(0.6); opacity: 0.8; }
+  80%, 100% { transform: scale(1.4); opacity: 0; }
 }
 @media (max-width: 767px) {
-  .dash-cmq { height: 40px; gap: 10px; padding-left: 12px; }
-  .dash-cmq-label { padding-right: 10px; }
+  .dash-cmq { height: 46px; margin-bottom: 16px; }
+  .dash-cmq-label { padding: 0 12px 0 16px; gap: 8px; }
+  .dash-cmq-label > span:not(.dash-cmq-live):not(.dash-cmq-count) { display: none; }
+  .dash-cmq-item { gap: 10px; padding: 0 20px 0 16px; }
+  .dash-cmq-name { font-size: 14px; }
+  .dash-cmq-meta.is-extra { display: none; }
+  .dash-cmq-more { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .dash-cmq-dot, .dash-cmq-run { animation: none; }
-  .dash-cmq-track { overflow-x: auto; mask-image: none; }
+  .dash-cmq-live::after { animation: none; }
+  .dash-cmq-track.is-loop { overflow-x: auto; mask-image: none; }
+  .dash-cmq-track.is-loop .dash-cmq-run { animation: none; }
   .dash-cmq-copy[aria-hidden] { display: none; }
 }

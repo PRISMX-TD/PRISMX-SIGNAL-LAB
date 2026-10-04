@@ -1,36 +1,56 @@
-// 仪表盘顶部的比赛走马灯：有比赛在报名 / 即将开赛 / 进行中时滚一条横幅，每场一项
-//（状态芯片 + 赛名 + 倒计时 + 奖品），点哪一项直接打开那场比赛的详情。没有这类
-// 比赛、比赛入口未对该用户开放、或接口失败时整条不渲染，不占任何空间。
+// 仪表盘顶部的比赛走马灯：有比赛在报名 / 即将开赛 / 进行中时出现一条转播式字幕条，
+// 视觉语言沿用比赛页的「赛事直播」（展示字体赛名、胶囊倒计时）。每场一项，按状态给
+// 最有用的那句话：进行中报领跑者与成绩，报名中报奖品与已报名数，即将开始报奖品；
+// 末尾是胶囊倒计时。点哪一项直接打开那场比赛的详情。
 //
-// 入口门控与侧栏一致：只认 competitionsVisible——关着时后端对普通用户回 403，
-// 根本不去请求。列表变化很慢（管理员手动建赛、状态按天推进），5 分钟轮询足够，
-// 只在前台轮询，回前台补一次（见 usePollWhileVisible）。
+// 只有内容放不下时才滚动：一两场比赛能完整摆下就静止展示，不为动而动。滚动速度按
+// 像素恒定（不随场数忽快忽慢），悬停 / 键盘聚焦时停住。
+//
+// 没有这类比赛、比赛入口未对该用户开放（competitionsVisible，关着时后端对普通用户
+// 回 403，所以根本不请求）、或接口失败时整条不渲染。列表变化很慢，前台 5 分钟轮询，
+// 回前台补一次（见 usePollWhileVisible）。
 //
 // The dashboard's competition marquee: while any competition is open for
-// registration, about to start or running, a strip scrolls one item per
-// competition (status pill + name + countdown + prize); clicking an item opens
-// that competition's detail. With no such competition, the entry gated off for
-// this user, or a failed request, nothing renders and no space is taken.
+// registration, upcoming or running, a broadcast-style strip appears, borrowing
+// the competitions page's "live event" language (display-face names, pill
+// countdowns). One item per competition, each with its most useful line: the
+// leader and score while running, prize and sign-ups while registration is open,
+// the prize when upcoming; a pill countdown closes each item. Clicking an item
+// opens that competition's detail.
 //
-// Gated like the sidebar entry, on competitionsVisible alone: when it's off the
-// backend answers 403 for regular users, so we don't even ask. The list changes
-// slowly (admins create competitions by hand, states advance by the day), so a
-// 5-minute poll is plenty — foreground only, with a refetch on return (see
-// usePollWhileVisible).
-import { useState, type ReactNode } from 'react'
+// It only scrolls when the content doesn't fit: one or two competitions that fit
+// sit still rather than moving for the sake of it. Scroll speed is constant in
+// pixels (not faster or slower with the item count) and pauses on hover or
+// keyboard focus.
+//
+// Nothing renders with no such competition, the entry gated off for this user
+// (competitionsVisible: the backend answers 403 for regular users when it's off,
+// so we don't ask), or a failed request. The list changes slowly: a 5-minute
+// foreground poll with a refetch on return (see usePollWhileVisible).
+import { useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 import type { TFunction } from 'i18next'
 import { competitionApi } from '../api/client'
-import { parseTime } from '../api/utils'
+import { fmtScorePct, parseTime } from '../api/utils'
 import type { CompetitionSummary } from '../api/types'
 import { useAuth } from '../store/auth'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { fmtCountdown, regState, useNowTicker } from '../utils/competitionTime'
 
 const POLL_MS = 5 * 60_000
+// 滚动速度（像素 / 秒）：慢到能读完一句赛名，又不至于等半天才轮到下一场。
+// Scroll speed (px/s): slow enough to read a name, quick enough to reach the next one.
+const SPEED_PX_S = 42
 
 type Tag = 'running' | 'regOpen' | 'upcoming'
+
+interface Item {
+  c: CompetitionSummary
+  tag: Tag
+  cdLabel: string
+  cdValue: string
+}
 
 // 每项的状态与倒计时：进行中数到结束；报名中数到报名截止（这是用户该行动的时刻，
 // 比"距开赛"更有用）；报名还没开数到开放报名；其余（自动参赛、报名已截止）数到开赛。
@@ -38,21 +58,53 @@ type Tag = 'running' | 'regOpen' | 'upcoming'
 // counts to its close (the moment the user must act by, more useful than "starts
 // in"); registration not yet open counts to its opening; everything else
 // (auto-enrolment, registration closed) counts to the start.
-function itemOf(c: CompetitionSummary, nowMs: number, t: TFunction): { tag: Tag; label: string; value: string } {
+function itemOf(c: CompetitionSummary, nowMs: number, t: TFunction): Item {
   const until = (iso: string | null) => {
     const at = parseTime(iso)?.getTime()
     return at != null ? fmtCountdown(at - nowMs, t) : ''
   }
-  if (c.status === 'running') return { tag: 'running', label: t('competition.cd.toEnd'), value: until(c.endsAt) }
+  if (c.status === 'running') return { c, tag: 'running', cdLabel: t('competition.cd.toEnd'), cdValue: until(c.endsAt) }
   const reg = regState(c, nowMs)
-  if (reg === 'open') return { tag: 'regOpen', label: t('competition.marquee.regCloses'), value: until(c.regClosesAt) }
-  if (reg === 'notOpen') return { tag: 'upcoming', label: t('competition.marquee.regOpens'), value: until(c.regOpensAt) }
-  return { tag: 'upcoming', label: t('competition.cd.toStart'), value: until(c.startsAt) }
+  if (reg === 'open') return { c, tag: 'regOpen', cdLabel: t('competition.marquee.regCloses'), cdValue: until(c.regClosesAt) }
+  if (reg === 'notOpen') return { c, tag: 'upcoming', cdLabel: t('competition.marquee.regOpens'), cdValue: until(c.regOpensAt) }
+  return { c, tag: 'upcoming', cdLabel: t('competition.cd.toStart'), cdValue: until(c.startsAt) }
 }
 
 // 进行中排最前，其次报名中（可以立刻行动），最后其余即将开始的。
 // Running first, then registration open (actionable now), then the rest upcoming.
 const TAG_ORDER: Record<Tag, number> = { running: 0, regOpen: 1, upcoming: 2 }
+
+// 一场比赛的中段信息：进行中给领跑者（还没人上榜就给参赛数）；报名中 / 即将开始给
+// 奖品，报名中再加已报名数（有人报了才显示，"参赛 0 账户"只会劝退）。
+// The middle of an item: the leader while running (participant count if nobody has
+// ranked yet); the prize for registration-open / upcoming, plus the sign-up count
+// while registration is open (only once someone has signed up: "0 accounts" deters).
+function Details({ c, tag, t }: { c: CompetitionSummary; tag: Tag; t: TFunction }) {
+  const leader = c.top?.[0]
+  const n = c.participants ?? 0
+  if (tag === 'running') {
+    return leader ? (
+      <span className="dash-cmq-meta">
+        {t('competition.marquee.leader')} <b>{leader.displayName}</b>{' '}
+        <b className={`num ${leader.score < 0 ? 'text-down' : 'text-up'}`}>{fmtScorePct(leader.score)}</b>
+      </span>
+    ) : n > 0 ? (
+      <span className="dash-cmq-meta">{t('competition.ticker.participants', { n })}</span>
+    ) : null
+  }
+  return (
+    <>
+      {c.prizeNote && (
+        <span className="dash-cmq-meta">
+          {t('competition.prizeLabel')} <b>{c.prizeNote}</b>
+        </span>
+      )}
+      {tag === 'regOpen' && n > 0 && (
+        <span className="dash-cmq-meta is-extra">{t('competition.ticker.participants', { n })}</span>
+      )}
+    </>
+  )
+}
 
 export default function CompetitionMarquee() {
   const { t } = useTranslation()
@@ -61,6 +113,12 @@ export default function CompetitionMarquee() {
   const visible = !!user?.competitionsVisible
   const [list, setList] = useState<CompetitionSummary[]>([])
   const now = useNowTicker()
+  const trackRef = useRef<HTMLDivElement>(null)
+  const copyRef = useRef<HTMLDivElement>(null)
+  // loop=null：还没量过（先按静止排版量一次，避免首帧先滚再停的闪动）。
+  // loop=null: not measured yet (measure the static layout first so the first frame
+  // never starts scrolling and then stops).
+  const [loop, setLoop] = useState<{ secs: number } | null | false>(null)
 
   usePollWhileVisible(
     (isCurrent) => {
@@ -76,37 +134,59 @@ export default function CompetitionMarquee() {
     { enabled: visible },
   )
 
-  if (!visible || list.length === 0) return null
+  const hasItems = visible && list.length > 0
+
+  // 量一份内容的宽度，放不下才滚；轨道或内容尺寸变化（旋转屏幕、换语言、倒计时变长）
+  // 时重算。滚动时长 = 一份的宽度 / 速度，所以速度恒定。
+  // Measure one copy: scroll only if it doesn't fit; re-measure when the track or the
+  // content resizes (rotation, language switch, a longer countdown). Duration = copy
+  // width / speed, so the speed stays constant.
+  useLayoutEffect(() => {
+    const track = trackRef.current
+    const copy = copyRef.current
+    if (!hasItems || !track || !copy) return
+    const measure = () => {
+      const w = copy.getBoundingClientRect().width
+      const next = w > track.clientWidth + 1 ? { secs: Math.round(w / SPEED_PX_S) } : false
+      setLoop((prev) => (prev && next && prev.secs === next.secs) || prev === next ? prev : next)
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(track)
+    ro.observe(copy)
+    return () => ro.disconnect()
+  }, [hasItems])
+
+  if (!hasItems) return null
 
   const items = list
-    .map((c) => ({ c, ...itemOf(c, now, t) }))
+    .map((c) => itemOf(c, now, t))
     .sort((a, b) => TAG_ORDER[a.tag] - TAG_ORDER[b.tag])
+  const anyRunning = items.some((i) => i.tag === 'running')
 
-  // 跑马灯内容复制两份首尾相接，动画走满一份的宽度就无缝回到起点；第二份只是
-  // 视觉延续，对读屏和 Tab 键隐藏，避免每场比赛被读两遍、聚焦两次。
-  // The content is duplicated end to end so the animation loops seamlessly over
-  // one copy's width; the second copy is visual only, hidden from screen readers
-  // and the Tab order so each competition isn't read or focused twice.
-  const renderCopy = (copy: number): ReactNode => (
-    <div className="dash-cmq-copy" aria-hidden={copy === 1 || undefined}>
-      {items.map(({ c, tag, label, value }) => (
+  // 滚动时内容复制两份首尾相接，动画走满一份的宽度就无缝回到起点；第二份只是视觉
+  // 延续，对读屏和 Tab 键隐藏，避免每场比赛被读两遍、聚焦两次。
+  // When scrolling, the content is duplicated end to end so the animation loops
+  // seamlessly over one copy's width; the second copy is visual only, hidden from
+  // screen readers and the Tab order so nothing is read or focused twice.
+  const renderCopy = (dup: boolean) => (
+    <div className="dash-cmq-copy" ref={dup ? undefined : copyRef} aria-hidden={dup || undefined}>
+      {items.map(({ c, tag, cdLabel, cdValue }) => (
         <button
           key={c.id}
           type="button"
-          tabIndex={copy === 1 ? -1 : undefined}
-          className="dash-cmq-item"
+          tabIndex={dup ? -1 : undefined}
+          className={`dash-cmq-item is-${tag}`}
           onClick={() => navigate(`/competitions?c=${encodeURIComponent(c.id)}`)}
         >
-          <span className={`dash-cmq-tag is-${tag}`}>{t(`competition.status.${tag}`)}</span>
-          <b>{c.name}</b>
-          {value && (
+          <span className="dash-cmq-status">{t(`competition.status.${tag}`)}</span>
+          <span className="dash-cmq-name">{c.name}</span>
+          <Details c={c} tag={tag} t={t} />
+          {cdValue && (
             <span className="dash-cmq-cd">
-              {label} <span className="num">{value}</span>
-            </span>
-          )}
-          {c.prizeNote && (
-            <span className="dash-cmq-prize">
-              {t('competition.prizeLabel')} · {c.prizeNote}
+              <small>{cdLabel}</small>
+              <b className="num">{cdValue}</b>
             </span>
           )}
         </button>
@@ -114,23 +194,25 @@ export default function CompetitionMarquee() {
     </div>
   )
 
-  // 速度跟内容长度走：每场大约 14 秒滚过，至少 24 秒一圈，一场时也不会快到看不清。
-  // Speed follows content length: about 14s per competition, at least 24s per
-  // loop, so a single item never whizzes past.
-  const duration = `${Math.max(24, items.length * 14)}s`
-
   return (
-    <section className="dash-cmq" aria-label={t('competition.title')}>
+    <section className="dash-cmq content-fade" aria-label={t('competition.title')}>
       <Link to="/competitions" className="dash-cmq-label">
-        <span className="dash-cmq-dot" aria-hidden />
-        {t('competition.title')}
+        {/* 有比赛正在进行时才亮直播灯：它表达的是真实状态，不是装饰。
+            The live light only shows while a competition is running: it states a
+            real condition, it isn't decoration. */}
+        {anyRunning && <span className="dash-cmq-live" aria-hidden />}
+        <span>{t('competition.title')}</span>
+        <span className="dash-cmq-count num">{items.length}</span>
       </Link>
-      <div className="dash-cmq-track">
-        <div className="dash-cmq-run" style={{ animationDuration: duration }}>
-          {renderCopy(0)}
-          {renderCopy(1)}
+      <div ref={trackRef} className={`dash-cmq-track${loop ? ' is-loop' : ''}`}>
+        <div className="dash-cmq-run" style={loop ? { animationDuration: `${loop.secs}s` } : undefined}>
+          {renderCopy(false)}
+          {loop && renderCopy(true)}
         </div>
       </div>
+      <Link to="/competitions" className="dash-cmq-more" aria-label={t('competition.title')}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 6l6 6-6 6" /></svg>
+      </Link>
     </section>
   )
 }
