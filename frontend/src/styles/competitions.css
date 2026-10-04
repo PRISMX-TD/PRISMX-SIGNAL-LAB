@@ -229,54 +229,55 @@
   .seg-tabs button:active { transform: none; }
 }
 
-/* 顶栏比赛徽标（components/CompetitionNavBadge.tsx）：单行胶囊，尺寸对齐右边的「14ms」
-   「已连接」胶囊——8px 圆角、1px 边框、6px 上下内边距、20px 行高，合计 34px 高。
-   里面只有呼吸灯 + 一个金属渐变的斜体词（带定时扫光）。两种状态各一套色：进行中
-   is-live 品牌紫 + 绿灯，报名中 is-join 香槟金。金色这里用字面值而不是 --gold——那个
-   令牌是终端里的告警/过期色，语义不同。后面的 .cmp-navlive-sep 是一条 20px 高的细
-   分隔线，把它和右边的系统状态分成两组。
-   Top-bar competition badge: a single-row pill sized to the "14ms" / "connected"
-   pills beside it — 8px radius, 1px border, 6px vertical padding, 20px line height,
-   34px in all — holding a breathing dot and one metallic italic word with a periodic
-   shimmer. One palette per state: is-live brand purple with a green dot, is-join
-   champagne gold. Gold is literal rather than --gold, the terminal's warn/stale tone.
-   .cmp-navlive-sep is a 20px hairline that splits it from the system-status group. */
+/* 顶栏比赛徽标（components/CompetitionNavBadge.tsx）：双行，上行大号斜体字用金属渐变 +
+   一道定时扫光，下行是小字。两种状态各一套色：进行中 is-live 品牌紫 + 绿，报名中
+   is-join 香槟金。金色这里用字面值而不是 --gold——那个令牌是终端里的告警/过期色，
+   语义不同。高度控制在约 40px，和右侧图标区同一行居中，不把顶栏撑高。
+   Top-bar competition badge: two lines — a large italic word in a metallic gradient
+   with a periodic shimmer, over a small line. One palette per state: is-live brand
+   purple + green, is-join champagne gold. Gold is literal here rather than --gold,
+   which is the terminal's warn/stale tone. About 40px tall, centred with the
+   right-hand icon row so the bar doesn't grow. */
 .cmp-navlive {
   --nl-glow: var(--purple-rgb);
   --nl-edge: var(--purple-hi-rgb);
-  --nl-ramp: linear-gradient(180deg, #ffffff 0%, #d8d2ff 40%, var(--purple-hi) 70%, #7a4cf7 100%);
+  --nl-ramp: linear-gradient(180deg, #ffffff 0%, #d8d2ff 38%, var(--purple-hi) 62%, #6d3df5 100%);
   --nl-accent: var(--up);
-  display: inline-flex;
+  position: relative;
+  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid rgb(var(--nl-edge) / 0.4);
-  border-radius: 8px;
+  justify-content: center;
+  gap: 2px;
+  padding: 3px 13px 4px;
+  border: 1px solid rgb(var(--nl-edge) / 0.35);
+  border-radius: 10px;
   background:
-    radial-gradient(90% 120% at 30% 0%, rgb(var(--nl-glow) / 0.32), transparent 75%),
-    rgb(var(--nl-glow) / 0.08);
-  line-height: 20px;
+    radial-gradient(120% 90% at 50% 0%, rgb(var(--nl-glow) / 0.35), transparent 70%),
+    rgba(255, 255, 255, 0.02);
+  line-height: 1;
   white-space: nowrap;
-  transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+  transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
 }
 .cmp-navlive.is-join {
   --nl-glow: 214 160 60;
   --nl-edge: 240 200 120;
-  --nl-ramp: linear-gradient(180deg, #fffaf0 0%, #ffe7b0 40%, #f2c063 70%, #c98a2a 100%);
+  --nl-ramp: linear-gradient(180deg, #fffaf0 0%, #ffe7b0 36%, #f2c063 62%, #b97a1e 100%);
   --nl-accent: #f5c66b;
 }
 .cmp-navlive:hover {
-  border-color: rgb(var(--nl-edge) / 0.75);
-  box-shadow: 0 0 14px rgb(var(--nl-glow) / 0.4);
+  border-color: rgb(var(--nl-edge) / 0.7);
+  box-shadow: 0 0 18px rgb(var(--nl-glow) / 0.45);
+  transform: translateY(-1px);
 }
 .cmp-navlive:focus-visible { outline: 2px solid rgb(var(--nl-edge)); outline-offset: 2px; }
-.cmp-navlive b {
+.cmp-navlive-top { display: inline-flex; align-items: center; gap: 6px; }
+.cmp-navlive-top b {
   font-family: var(--font-display, 'Archivo'), sans-serif;
-  font-size: 15px;
+  font-size: 20px;
   font-weight: 900;
   font-style: italic;
-  font-variation-settings: 'wdth' 112;
-  letter-spacing: 0.01em;
+  font-variation-settings: 'wdth' 118;
+  letter-spacing: -0.01em;
   /* 金属感：竖向明暗渐变，叠一条斜向高光做扫光。
      Metallic: a vertical light-to-dark ramp under a diagonal highlight that sweeps. */
   background:
@@ -285,13 +286,12 @@
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  filter: drop-shadow(0 0 5px rgb(var(--nl-glow) / 0.5));
+  filter: drop-shadow(0 0 6px rgb(var(--nl-glow) / 0.55));
   padding-right: 2px; /* 斜体最后一个字母右侧被裁 / italic tail would clip */
   animation: cmp-navlive-shine 3.6s var(--ease-out, ease-out) infinite;
 }
 .cmp-navlive-dot {
   position: relative;
-  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 999px;
@@ -307,8 +307,12 @@
   opacity: 0;
   animation: cmp-navlive-ping 2.4s var(--ease-out, ease-out) infinite;
 }
-.cmp-navlive-n { font-size: 11px; color: #a1a1aa; }
-.cmp-navlive-sep { width: 1px; height: 20px; background: rgba(255, 255, 255, 0.1); }
+.cmp-navlive-sub {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--nl-accent);
+}
 @keyframes cmp-navlive-shine {
   0%, 55% { background-position: -150% 0, 0 0; }
   100% { background-position: 150% 0, 0 0; }
@@ -318,5 +322,42 @@
   100% { opacity: 0; transform: scale(1.6); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .cmp-navlive b, .cmp-navlive-dot::after { animation: none; }
+  .cmp-navlive-top b, .cmp-navlive-dot::after { animation: none; }
+  .cmp-navlive:hover { transform: none; }
+}
+
+/* 手机顶栏（< lg）的迷你版：同一套两行结构缩小到约 50px 宽——手机顶栏左边 Logo
+   约 145px、右边信号 / 连接 / 铃铛约 136px，375px 宽的屏只剩这么多。上行小号金属字
+   LIVE / JOIN（沿用 .cmp-navlive 的配色变量与扫光），下行一个极短的中文状态词，
+   不只写英文。没有呼吸灯：放不下，金属字和颜色已经足够醒目。
+   Phone header (< lg) mini variant: the same two-line build shrunk to ~50px wide —
+   on a 375px screen the logo takes ~145px and signal / connection / bell ~136px,
+   which leaves about that much. A small metallic LIVE / JOIN on top (same palette
+   variables and shimmer as .cmp-navlive) over a very short status word, so it never
+   reads as bare English. No dot: there's no room, and the metal and colour carry it. */
+.cmp-navlive.is-mini {
+  gap: 1px;
+  padding: 4px;
+  border-radius: 8px;
+}
+.cmp-navlive.is-mini .cmp-navlive-top b {
+  font-size: 12px;
+  font-variation-settings: 'wdth' 100;
+  padding-right: 1px;
+}
+.cmp-navlive.is-mini .cmp-navlive-sub {
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+.cmp-navlive.is-mini:hover { transform: none; }
+/* 极窄屏兜底：< 375px 时（典型是 360px 的安卓机）迷你徽标 + 信号 + 多账户「已连接 ×N」
+   + 铃铛会把左边的「Signal Lab / BY PRISMX」挤到换行，这时把字标收起来，只留 Logo 图标。
+   只在徽标出现时生效；单账户用户的连接徽标窄 20 多 px，360 也放得下，但为一条规则区分
+   账户数不值得。:has() 要 Chrome 105+；更旧的内核不认这条，字标就照旧换行，不会更糟。
+   Very narrow fallback: below 375px (typically 360px Android), mini badge + signal +
+   multi-account "connected ×N" + bell wrap the "Signal Lab / BY PRISMX" wordmark, so it
+   folds away and only the logo mark stays. Only while the badge shows. :has() needs
+   Chrome 105+; older engines ignore the rule and the wordmark wraps as before. */
+@media (max-width: 374px) {
+  header:has(.cmp-navlive.is-mini) .hdr-wordmark { display: none; }
 }

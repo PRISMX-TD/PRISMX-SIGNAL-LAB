@@ -721,7 +721,13 @@
     "navLiveOne": "Contest live: {{name}}",
     "navLiveMany": "{{n}} contests live — view competitions",
     "navJoinOne": "Signup open: {{name}}",
-    "navJoinMany": "{{n}} contests open for signup — view competitions"
+    "navJoinMany": "{{n}} contests open for signup — view competitions",
+    "navLive": "Contest live",
+    "navLiveCount": "{{n}} contests live",
+    "navJoin": "Signup open",
+    "navJoinCount": "{{n}} contests open",
+    "navLiveShort": "On now",
+    "navJoinShort": "Open"
   },
   "netSignal": {
     "title": "Connection",

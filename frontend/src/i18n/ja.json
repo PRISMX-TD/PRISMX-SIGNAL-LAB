@@ -492,7 +492,13 @@
     "navLiveOne": "大会開催中：{{name}}",
     "navLiveMany": "{{n}} 件の大会が開催中 — 大会を見る",
     "navJoinOne": "エントリー受付中：{{name}}",
-    "navJoinMany": "{{n}} 件の大会がエントリー受付中 — 大会を見る"
+    "navJoinMany": "{{n}} 件の大会がエントリー受付中 — 大会を見る",
+    "navLive": "大会開催中",
+    "navLiveCount": "{{n}} 大会開催中",
+    "navJoin": "エントリー受付中",
+    "navJoinCount": "{{n}} 大会受付中",
+    "navLiveShort": "開催中",
+    "navJoinShort": "受付中"
   },
   "netSignal": {
     "title": "接続状態",

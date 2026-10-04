@@ -728,7 +728,10 @@ export default function Layout() {
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={40} />
-              <div className="leading-tight">
+              {/* hdr-wordmark：极窄屏（< 375px）有比赛迷你徽标时由 competitions.css 隐藏，见那里。
+                  hdr-wordmark: hidden by competitions.css on very narrow screens (< 375px)
+                  while the mini competition badge shows; see there. */}
+              <div className="hdr-wordmark leading-tight">
                 {/* 字距从 +0.06em 改为负值：Archivo 在 17px 加粗时字面已经足够开，
                     正字距会把「Signal Lab」两个词拆散成一串独立字母，读起来像
                     logotype 而不是产品名。
@@ -781,9 +784,15 @@ export default function Layout() {
               )}
             </nav>
 
-            <div className="ml-auto flex items-center gap-2 sm:gap-3">
-              {/* 比赛进行中「LIVE」/ 报名中「JOIN」徽标（自带显隐判断，仅 xl 以上）。
-                  "LIVE" / "JOIN" competition badge (self-gating, xl and up). */}
+            {/* 手机上图标间距 6px（原 8px）：有比赛时最前面多一枚迷你徽标，360px 宽的屏
+                按 8px 排会把左边「Signal Lab」挤到换行。
+                6px gaps on phones (was 8px): with the mini competition badge in front,
+                8px gaps wrap the "Signal Lab" wordmark on a 360px screen. */}
+            <div className="ml-auto flex items-center gap-1.5 sm:gap-3">
+              {/* 比赛进行中「LIVE」/ 报名中「JOIN」徽标：电脑 xl+ 两行大版、手机迷你版
+                  （自带显隐判断）。
+                  "LIVE" / "JOIN" competition badge: full two-line on desktop xl+, mini
+                  on phones (self-gating). */}
               <CompetitionNavBadge />
               <SignalIndicator />
               <EAStatusBadge />

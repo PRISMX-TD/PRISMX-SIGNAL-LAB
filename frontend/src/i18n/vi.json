@@ -492,7 +492,13 @@
     "navLiveOne": "Đang thi đấu: {{name}}",
     "navLiveMany": "{{n}} cuộc thi đang diễn ra — xem cuộc thi",
     "navJoinOne": "Đang mở đăng ký: {{name}}",
-    "navJoinMany": "{{n}} cuộc thi đang mở đăng ký — xem cuộc thi"
+    "navJoinMany": "{{n}} cuộc thi đang mở đăng ký — xem cuộc thi",
+    "navLive": "Đang thi đấu",
+    "navLiveCount": "{{n}} cuộc thi đang diễn ra",
+    "navJoin": "Đang mở đăng ký",
+    "navJoinCount": "{{n}} cuộc thi mở đăng ký",
+    "navLiveShort": "Đang thi",
+    "navJoinShort": "Đăng ký"
   },
   "netSignal": {
     "title": "Kết nối",

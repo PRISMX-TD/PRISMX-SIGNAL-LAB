@@ -721,7 +721,13 @@
     "navLiveOne": "比赛进行中：{{name}}",
     "navLiveMany": "{{n}} 场比赛进行中，查看比赛",
     "navJoinOne": "比赛报名中：{{name}}",
-    "navJoinMany": "{{n}} 场比赛报名中，查看比赛"
+    "navJoinMany": "{{n}} 场比赛报名中，查看比赛",
+    "navLive": "比赛进行中",
+    "navLiveCount": "{{n}} 场比赛进行中",
+    "navJoin": "比赛报名中",
+    "navJoinCount": "{{n}} 场比赛报名中",
+    "navLiveShort": "进行中",
+    "navJoinShort": "报名中"
   },
   "netSignal": {
     "title": "连接信号",
