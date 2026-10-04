@@ -5,10 +5,12 @@ from app.models import (
     Competition, CompetitionParticipant, LeaderboardSnapshot,
 )
 from app.services.gamification.competitions import (
-    comp_period_key, compute_comp_rows, snapshot_competitions,
+    comp_gates, comp_period_key, compute_comp_rows, snapshot_competitions,
 )
 from app.services.gamification.boards import reconcile_deposits
-from app.services.settings_store import save_gamification_settings, invalidate_gamification_cache
+from app.services.settings_store import (
+    get_gamification_settings, invalidate_gamification_cache, save_gamification_settings,
+)
 
 UTC = timezone.utc
 T0 = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
@@ -156,6 +158,40 @@ def test_return_board_min_baseline_floor_gate(db_session):
     logins = {r["login"] for r in rows}
     assert "A" not in logins
     assert "B" in logins
+
+
+def test_return_board_max_baseline_ceiling_gate(db_session):
+    """本场设了本金上限：本金（基线 + 报名后入金）高于上限的不入榜——报名时卡住了，
+    报名后再入金超过上限同样不算；刚好等于上限、以及浮点尾差内的照常上榜。"""
+    comp = _comp(db_session)
+    comp.min_baseline_usd, comp.max_baseline_usd = 1000.0, 1000.0; db_session.commit()
+
+    u_ok = _user(db_session, "ceil_ok@t.co"); _acct(db_session, u_ok, "A", balance=1000.0)
+    _baseline(db_session, comp, u_ok, "A", balance=1000.0)
+    _participant(db_session, comp, u_ok, "A")
+    _mk(db_session, u_ok, "A", 5, 0)
+
+    u_noise = _user(db_session, "ceil_noise@t.co"); _acct(db_session, u_noise, "B", balance=1000.0)
+    _baseline(db_session, comp, u_noise, "B", balance=1000.0000000001)   # 浮点尾差
+    _participant(db_session, comp, u_noise, "B")
+    _mk(db_session, u_noise, "B", 5, 0)
+
+    u_dep = _user(db_session, "ceil_dep@t.co"); _acct(db_session, u_dep, "C", balance=1000.0)
+    _baseline(db_session, comp, u_dep, "C", balance=1000.0)
+    b = db_session.query(PeriodBaseline).filter_by(mt5_login="C").one()
+    b.adjust = 4000.0; db_session.commit()                                # 报名后入金 4000
+    _participant(db_session, comp, u_dep, "C")
+    _mk(db_session, u_dep, "C", 5, 0)
+
+    logins = {r["login"] for r in compute_comp_rows(db_session, comp)}
+    assert logins == {"A", "B"}
+
+
+def test_comp_gates_carries_max_baseline(db_session):
+    comp = _comp(db_session)
+    assert comp_gates(comp, get_gamification_settings(db_session))["max_baseline_usd"] is None
+    comp.max_baseline_usd = 3000; db_session.commit()
+    assert comp_gates(comp, get_gamification_settings(db_session))["max_baseline_usd"] == 3000.0
 
 
 def test_win_rate_net_losing_excluded_despite_high_win_rate(db_session):

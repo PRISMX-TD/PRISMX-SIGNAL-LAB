@@ -231,6 +231,8 @@ MSG_UNKNOWN_METRIC = "未知计分指标 / Unknown metric"
 MSG_UNKNOWN_ENROLLMENT = "未知参赛方式 / Unknown enrollment mode"
 MSG_UNKNOWN_TRACK = "未知参赛账户类型 / Unknown account track"
 MSG_BAD_MIN_BASELINE = "最低本金需大于 0 / Minimum baseline must be > 0"
+MSG_BAD_MAX_BASELINE = "最高本金需大于 0 / Maximum baseline must be > 0"
+MSG_BASELINE_RANGE = "最低本金不能高于最高本金 / Minimum baseline cannot exceed the maximum"
 MSG_BAD_MIN_TRADES = "最低笔数需至少为 1 / Minimum trade count must be at least 1"
 MSG_NON_DRAFT_FIELDS = "比赛开始后仅可修改文案与报名窗口 / Only copy and registration window are editable after draft"
 MSG_STATUS_SEQUENCE = "状态只能按顺序推进 / Status can only advance sequentially"
@@ -248,16 +250,22 @@ def _validate_core(metric: str, enrollment: str,
 
 
 def _validate_options(track: str | None, min_baseline: float | None,
-                       min_trades: int | None) -> None:
-    """赛道白名单 + 两个门槛的下限。三者都允许为 None（跟随默认/全局），只有
-    给了值才校验——空值和坏值是两回事，不能一起拒。
-    Track whitelist plus the floors for the two gates. All three may be None
-    (follow the default / the global settings); only a supplied value is checked,
-    since "absent" and "invalid" are different things."""
+                       min_trades: int | None, max_baseline: float | None = None) -> None:
+    """赛道白名单 + 门槛的下限。都允许为 None（跟随默认/全局、不设上限），只有
+    给了值才校验——空值和坏值是两回事，不能一起拒。上下限都给了时要求
+    min ≤ max；相等是合法的，意思是「只收这一个金额」。
+    Track whitelist plus the floors for the gates. All may be None (follow the
+    default / the global settings, no ceiling); only a supplied value is checked,
+    since "absent" and "invalid" are different things. With both bounds given,
+    min ≤ max; equal is valid and means "this exact amount only"."""
     if track is not None and track not in TRACKS:
         raise HTTPException(400, MSG_UNKNOWN_TRACK)
     if min_baseline is not None and min_baseline <= 0:
         raise HTTPException(400, MSG_BAD_MIN_BASELINE)
+    if max_baseline is not None and max_baseline <= 0:
+        raise HTTPException(400, MSG_BAD_MAX_BASELINE)
+    if min_baseline is not None and max_baseline is not None and min_baseline > max_baseline:
+        raise HTTPException(400, MSG_BASELINE_RANGE)
     if min_trades is not None and min_trades < 1:
         raise HTTPException(400, MSG_BAD_MIN_TRADES)
 
@@ -293,6 +301,9 @@ def _comp_out(comp: Competition, participant_count: int) -> dict:
         # Both gates: null means "follow the global settings", which the frontend shows
         # as such rather than inventing a number.
         "minBaselineUsd": comp.min_baseline_usd,
+        # 本金上限：null = 不设上限（全局没有上限这一说，所以不是"跟随全局"）。
+        # Capital ceiling: null = none (there is no global ceiling to follow).
+        "maxBaselineUsd": comp.max_baseline_usd,
         "minTrades": comp.min_trades,
         "regOpensAt": comp.reg_opens_at.isoformat() if comp.reg_opens_at else None,
         "regClosesAt": comp.reg_closes_at.isoformat() if comp.reg_closes_at else None,
@@ -347,14 +358,15 @@ def admin_list_competitions(db: Session = Depends(get_db)):
 def admin_create_competition(body: CompetitionCreateIn, db: Session = Depends(get_db)):
     _validate_core(body.metric, body.enrollment, body.startsAt, body.endsAt)
     _validate_reg_window(body.enrollment, body.regOpensAt, body.regClosesAt)
-    _validate_options(body.track, body.minBaselineUsd, body.minTrades)
+    _validate_options(body.track, body.minBaselineUsd, body.minTrades, body.maxBaselineUsd)
     comp = Competition(
         name=body.name, description=body.description, metric=body.metric,
         enrollment=body.enrollment, reg_opens_at=body.regOpensAt,
         reg_closes_at=body.regClosesAt, starts_at=body.startsAt, ends_at=body.endsAt,
         prize_note=body.prizeNote, status="draft",
         track=body.track or "real",
-        min_baseline_usd=body.minBaselineUsd, min_trades=body.minTrades,
+        min_baseline_usd=body.minBaselineUsd, max_baseline_usd=body.maxBaselineUsd,
+        min_trades=body.minTrades,
     )
     db.add(comp)
     db.commit()
@@ -380,9 +392,13 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         reg_closes_at = body.regClosesAt if "regClosesAt" in sent else comp.reg_closes_at
         _validate_core(metric, enrollment, starts_at, ends_at)
         _validate_reg_window(enrollment, reg_opens_at, reg_closes_at)
+        # 上下限的先后关系要拿「改后的两个值」比：只改其中一个时，另一个取库里现值。
+        # The min ≤ max check compares the post-patch pair: when only one side is
+        # sent, the other comes from the stored row.
         _validate_options(body.track if "track" in sent else None,
-                          body.minBaselineUsd if "minBaselineUsd" in sent else None,
-                          body.minTrades if "minTrades" in sent else None)
+                          body.minBaselineUsd if "minBaselineUsd" in sent else comp.min_baseline_usd,
+                          body.minTrades if "minTrades" in sent else None,
+                          body.maxBaselineUsd if "maxBaselineUsd" in sent else comp.max_baseline_usd)
 
         if "name" in sent:
             comp.name = body.name
@@ -411,6 +427,8 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         # distinguished via model_fields_set, matching ProfilePatchIn.
         if "minBaselineUsd" in sent:
             comp.min_baseline_usd = body.minBaselineUsd
+        if "maxBaselineUsd" in sent:
+            comp.max_baseline_usd = body.maxBaselineUsd
         if "minTrades" in sent:
             comp.min_trades = body.minTrades
     else:

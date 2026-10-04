@@ -366,6 +366,7 @@ class CompetitionCreateIn(BaseModel):
     # metric/enrollment; this only declares the field shapes.
     track: str | None = None
     minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    maxBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTrades: int | None = None
 
 
@@ -390,6 +391,7 @@ class CompetitionPatchIn(BaseModel):
     # Same meaning as on create; all three are draft-only (see _NON_DRAFT_ALLOWED).
     track: str | None = None
     minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    maxBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTrades: int | None = None
 
 

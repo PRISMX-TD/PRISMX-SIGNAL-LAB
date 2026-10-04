@@ -18,7 +18,7 @@ from app.models import (
 from .badges import award_badge
 from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, _aware, _resolved_in_period, board_gates, reconcile_deposits, replace_snapshot_rows, return_score
+from .boards import REAL, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows, return_score
 
 
 TRACKS = ("real", "demo")
@@ -80,6 +80,10 @@ def comp_gates(comp: Competition, gset: dict) -> dict:
     gates = dict(board_gates(gset))
     if comp.min_baseline_usd is not None:
         gates["min_baseline_usd"] = float(comp.min_baseline_usd)
+    # 本金上限只有比赛有（周期榜没有这一说），None = 不设上限。
+    # Only competitions have a capital ceiling (standing boards don't); None = none.
+    gates["max_baseline_usd"] = (float(comp.max_baseline_usd)
+                                 if comp.max_baseline_usd is not None else None)
     if comp.min_trades is not None:
         n = max(1, int(comp.min_trades))
         gates["min_trades_return"] = n
@@ -109,6 +113,7 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     # this competition's own overrides on top when it has any.
     gates = comp_gates(comp, gset)
     min_baseline = gates["min_baseline_usd"]
+    max_baseline = gates["max_baseline_usd"]
     min_trades_return = gates["min_trades_return"]
     min_trades_winrate = gates["min_trades_winrate"]
     wr_require_profit = gates["winrate_require_profit"]
@@ -162,7 +167,7 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
             if comp.metric == "return_pct":
                 # 逐仓按当时本金计分，与周期榜同一个 return_score（出入金口径不分叉）。
                 # Per-position capital, same return_score as the standing board.
-                scored = return_score(b, resolved, min_baseline)
+                scored = return_score(b, resolved, min_baseline, max_baseline)
                 if sample >= min_trades_return and scored is not None:
                     rows.append({"userId": uid, "login": lg,
                                 "score": scored[0], "sample": sample})
@@ -404,13 +409,30 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
     # Enforce the minimum balance at signup. It used to be applied only when
     # scoring, so an under-funded account could enter and then silently never
     # appear on the board. Same comp_gates as scoring, so the two can't diverge.
+    # 上限同理：两者相等时就是「只收这一个金额」，提示也换成那句话，别让用户
+    # 看到"高于上限 1000、低于下限 1000"这种绕口的组合。
+    # The ceiling works the same way; when both are equal it means "this exact
+    # amount only", and the message says so instead of a confusing floor/ceiling pair.
     from app.services.settings_store import get_gamification_settings
-    min_baseline = comp_gates(comp, get_gamification_settings(db))["min_baseline_usd"]
-    if min_baseline and float(acct.balance) < float(min_baseline):
+    gates = comp_gates(comp, get_gamification_settings(db))
+    min_baseline, max_baseline = gates["min_baseline_usd"], gates["max_baseline_usd"]
+    balance = float(acct.balance)
+    if max_baseline is not None and min_baseline == max_baseline and not baseline_in_range(
+            balance, min_baseline, max_baseline):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"本场只接受资金正好 {max_baseline:g} USD 的账户 / "
+                    f"This competition only accepts accounts with exactly {max_baseline:g} USD"))
+    if min_baseline and not baseline_in_range(balance, min_baseline, None):
         raise HTTPException(
             status_code=400,
             detail=(f"账户余额低于本场最低参赛金额 {min_baseline:g} USD / "
                     f"Account balance is below this competition's minimum of {min_baseline:g} USD"))
+    if max_baseline is not None and not baseline_in_range(balance, 0.0, max_baseline):
+        raise HTTPException(
+            status_code=400,
+            detail=(f"账户余额高于本场最高参赛金额 {max_baseline:g} USD / "
+                    f"Account balance is above this competition's maximum of {max_baseline:g} USD"))
 
     # 每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——
     # 重复报同一个账户是幂等路径（下面撞唯一约束后原样返回已有条目），不该被

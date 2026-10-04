@@ -133,13 +133,36 @@ def position_denominator(b, opened_at: datetime, closed_at: datetime) -> float:
     return max(capital_at(b, opened_at), capital_at(b, closed_at))
 
 
-def return_score(b, resolved, min_baseline: float):
+# 本金门槛比较的容差。比赛可以把上下限设成同一个数（「只收 1000 USD 的账户」），
+# 这时本金必须"等于"它——而本金是基线加一串浮点流水算出来的，1000 可能变成
+# 999.9999999999 或 1000.0000000001。差这一点就整行掉榜显然不对；0.005 是半美分，
+# 余额本身只精确到分，所以不会放进任何真正超限的账户。
+# Tolerance for the capital gates. A competition may set floor == ceiling ("1000
+# USD accounts only"), and capital is a baseline plus float flows, so 1000 can come
+# out as 999.9999999999. Half a cent: balances are only exact to the cent, so this
+# never admits a genuinely out-of-range account.
+BASELINE_EPS = 0.005
+
+
+def baseline_in_range(capital: float, min_baseline: float, max_baseline: float | None) -> bool:
+    """本金是否落在 [min, max]（max 为 None = 不设上限），两端各带 BASELINE_EPS 容差。
+    报名闸与计分闸共用这一个函数，两边的口径不会分叉。
+    Whether capital lies in [min, max] (max None = no ceiling), with BASELINE_EPS
+    slack at both ends. Shared by the signup gate and scoring so they can't diverge."""
+    if capital < min_baseline - BASELINE_EPS:
+        return False
+    return max_baseline is None or capital <= max_baseline + BASELINE_EPS
+
+
+def return_score(b, resolved, min_baseline: float, max_baseline: float | None = None):
     """收益榜一行的分数：resolved = [(opened_at, closed_at, profit), ...]。
     返回 (score, sample)；任一笔仓位的本金低于门槛或 ≤ 0 → None（整行不入榜，
     与原来「分母 ≥ min_baseline」的闸同一语义：本金不够时的交易不排名）。
+    比赛设了本金上限时同理：任一笔仓位的本金高于上限（报名后入金超过上限）→ None。
     Score for one return_pct row. None when any position's capital is below the
     floor or non-positive — the whole row stays off the board, same semantics as
-    the old denominator gate.
+    the old denominator gate. Likewise above a competition's ceiling (deposited
+    past it after signing up).
     """
     # 先按本金分组再各除一次，而不是逐笔相除再相加：没有出入金时结果与原来的
     # total / denom 逐位相同（逐笔相除会多出浮点尾差，让本该打平的两行分不出胜负）。
@@ -149,7 +172,7 @@ def return_score(b, resolved, min_baseline: float):
     by_denom: dict[float, float] = defaultdict(float)
     for opened_at, closed_at, profit in resolved:
         denom = position_denominator(b, opened_at, closed_at)
-        if denom <= 0 or denom < min_baseline:
+        if denom <= 0 or not baseline_in_range(denom, min_baseline, max_baseline):
             return None
         by_denom[denom] += profit
     return sum(total / d for d, total in by_denom.items()), len(resolved)

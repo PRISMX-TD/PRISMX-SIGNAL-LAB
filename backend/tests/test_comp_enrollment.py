@@ -147,6 +147,37 @@ def test_register_rejects_balance_below_competition_minimum(db_session):
     assert register_participant(db_session, comp, u2, "B", IN_WINDOW).mt5_login == "B"
 
 
+def test_register_rejects_balance_above_competition_maximum(db_session):
+    """只设上限：高于上限挡在报名，等于上限放行。"""
+    comp = _comp(db_session)
+    comp.min_baseline_usd = None
+    comp.max_baseline_usd = 5000.0; db_session.commit()
+    u = _user(db_session, "maxbal1@t.co"); _acct(db_session, u, "A", balance=5000.01)
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "最高参赛金额" in exc.value.detail
+    assert db_session.query(CompetitionParticipant).count() == 0
+
+    u2 = _user(db_session, "maxbal2@t.co"); _acct(db_session, u2, "B", balance=5000.0)
+    assert register_participant(db_session, comp, u2, "B", IN_WINDOW).mt5_login == "B"
+
+
+def test_register_exact_amount_when_min_equals_max(db_session):
+    """上下限相等 = 只收这一个金额；提示换成「正好 X USD」，不是上下限两句。"""
+    comp = _comp(db_session)
+    comp.min_baseline_usd = 1000.0
+    comp.max_baseline_usd = 1000.0; db_session.commit()
+    for i, bal in enumerate((999.0, 1000.5)):
+        u = _user(db_session, f"exact{i}@t.co"); _acct(db_session, u, "X", balance=bal)
+        with pytest.raises(HTTPException) as exc:
+            register_participant(db_session, comp, u, "X", IN_WINDOW)
+        assert "正好 1000 USD" in exc.value.detail
+
+    u = _user(db_session, "exact-ok@t.co"); _acct(db_session, u, "OK", balance=1000.0)
+    assert register_participant(db_session, comp, u, "OK", IN_WINDOW).mt5_login == "OK"
+
+
 def test_register_success_writes_participant_and_baseline_scoring_from_start(db_session):
     """开赛前报名：scoring_from = comp.starts_at（max(starts_at, now) = starts_at）。"""
     comp = _comp(db_session)

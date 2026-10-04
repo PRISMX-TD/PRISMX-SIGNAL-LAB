@@ -1769,6 +1769,9 @@ export interface LeaderboardGates {
   minTradesReturn: number
   minTradesWinrate: number
   minBaselineUsd: number
+  // 本金上限：只有比赛（且本场设了上限）才有值，周期榜恒为 null。
+  // Capital ceiling: set only by a competition that has one; standing boards send null.
+  maxBaselineUsd?: number | null
   // 胜率榜是否要求本期盈亏为正（管理端可配，默认关）。为 false 时不渲染那条榜规芯片。
   // Whether the win-rate board requires positive period P&L (admin-configurable,
   // default off). When false, that gate chip isn't rendered.
@@ -1980,6 +1983,9 @@ export interface CompetitionAdminRow extends CompetitionSummary {
   // This competition's own gates; null = follow the global settings on the admin
   // Gamification tab.
   minBaselineUsd: number | null
+  // 本金上限；null = 不设上限。与下限相等 = 只收这一个金额。
+  // Capital ceiling; null = none. Equal to the floor = that exact amount only.
+  maxBaselineUsd: number | null
   minTrades: number | null
   createdAt: string | null
   participantCount: number
@@ -2004,6 +2010,7 @@ export interface CompetitionCreate {
   // Omitted = follow the global settings; an explicit null (PATCH only) = go back
   // to following them.
   minBaselineUsd?: number | null
+  maxBaselineUsd?: number | null
   minTrades?: number | null
 }
 
@@ -2028,6 +2035,7 @@ export interface CompetitionPatch {
   status?: CompetitionStatus
   track?: CompetitionTrack
   minBaselineUsd?: number | null
+  maxBaselineUsd?: number | null
   minTrades?: number | null
 }
 

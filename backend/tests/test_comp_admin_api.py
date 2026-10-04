@@ -611,6 +611,33 @@ def test_create_rejects_bad_track_and_gates(db_session):
             admin_create_competition(_create_body(**bad), db=db_session)
 
 
+def test_create_with_max_baseline_and_range_check(db_session):
+    """上限单独设、上下限相等都合法；下限高于上限、上限 ≤ 0 拒绝。"""
+    only_max = admin_create_competition(_create_body(maxBaselineUsd=5000.0), db=db_session)
+    assert only_max["maxBaselineUsd"] == 5000.0 and only_max["minBaselineUsd"] is None
+    exact = admin_create_competition(
+        _create_body(name="Exact", minBaselineUsd=1000.0, maxBaselineUsd=1000.0), db=db_session)
+    assert exact["minBaselineUsd"] == exact["maxBaselineUsd"] == 1000.0
+    for bad in (dict(minBaselineUsd=2000.0, maxBaselineUsd=1000.0), dict(maxBaselineUsd=0)):
+        with pytest.raises(HTTPException) as exc:
+            admin_create_competition(_create_body(**bad), db=db_session)
+        assert exc.value.status_code == 400
+
+
+def test_patch_max_baseline_checks_against_stored_min(db_session):
+    """只改上限时，拿库里现有的下限比；传 null = 去掉上限。"""
+    comp = _comp(db_session, status="draft")
+    comp.min_baseline_usd = 1000.0; db_session.commit()
+    with pytest.raises(HTTPException):
+        admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=500.0), db=db_session)
+    admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=1500.0), db=db_session)
+    db_session.refresh(comp)
+    assert comp.max_baseline_usd == 1500.0
+    admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=None), db=db_session)
+    db_session.refresh(comp)
+    assert comp.max_baseline_usd is None
+
+
 def test_patch_gates_null_means_follow_global(db_session):
     """显式传 null = 改回跟随全局，与没传（不动）语义不同。"""
     comp = _comp(db_session, status="draft")

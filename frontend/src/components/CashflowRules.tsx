@@ -36,9 +36,14 @@ const CASES = [1, 2, 3, 4] as const
 
 export default function CashflowRules({
   minBaselineUsd,
+  maxBaselineUsd = null,
   variant,
 }: {
   minBaselineUsd: number
+  // 本金上限：只有设了上限的比赛传进来。与下限相等时两条说明合成一句「只收正好 X」。
+  // Capital ceiling: passed only by a competition that has one. Equal to the floor,
+  // the two notes collapse into one "exactly X only" line.
+  maxBaselineUsd?: number | null
   // variant 管两件事：
   //  ① 封存那一条的说法——周期榜是"周期结束即封存"，比赛是"以终审结果为准"；
   //  ② 外观档位。排行榜上下都是卡片，这里也做成卡片才不突兀；比赛详情的右栏是
@@ -91,7 +96,14 @@ export default function CashflowRules({
 
         <ul className="cf-notes">
           <li>{t('cashflowRules.noteSmall')}</li>
-          <li>{t('cashflowRules.noteFloor', { usd: fmtUsd(minBaselineUsd) })}</li>
+          {maxBaselineUsd != null && maxBaselineUsd === minBaselineUsd ? (
+            <li>{t('cashflowRules.noteExact', { usd: fmtUsd(maxBaselineUsd) })}</li>
+          ) : (
+            <>
+              <li>{t('cashflowRules.noteFloor', { usd: fmtUsd(minBaselineUsd) })}</li>
+              {maxBaselineUsd != null && <li>{t('cashflowRules.noteCeiling', { usd: fmtUsd(maxBaselineUsd) })}</li>}
+            </>
+          )}
           <li>{t('cashflowRules.noteWinRate')}</li>
           <li>{t(variant === 'competition' ? 'cashflowRules.noteSealedComp' : 'cashflowRules.noteSealedBoard')}</li>
           <li>{t('cashflowRules.noteNoFlow')}</li>

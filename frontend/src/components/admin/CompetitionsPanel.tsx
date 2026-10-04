@@ -132,6 +132,9 @@ interface FormDraft {
   // only become numbers/null on submit: a cleared number input is '', not 0, and
   // the two mean entirely different things.
   minBaselineUsd: string
+  // 本金上限：空串 = 不设上限（全局没有上限，所以不是「跟随全局」）。
+  // Capital ceiling: empty = none (there is no global ceiling to follow).
+  maxBaselineUsd: string
   minTrades: string
 }
 
@@ -147,6 +150,7 @@ const EMPTY_DRAFT: FormDraft = {
   prizeNote: '',
   track: 'real',
   minBaselineUsd: '',
+  maxBaselineUsd: '',
   minTrades: '',
 }
 
@@ -163,6 +167,7 @@ function toFormDraft(c: CompetitionAdminRow): FormDraft {
     prizeNote: c.prizeNote ?? '',
     track: c.track,
     minBaselineUsd: c.minBaselineUsd == null ? '' : String(c.minBaselineUsd),
+    maxBaselineUsd: c.maxBaselineUsd == null ? '' : String(c.maxBaselineUsd),
     minTrades: c.minTrades == null ? '' : String(c.minTrades),
   }
 }
@@ -173,6 +178,27 @@ function toFormDraft(c: CompetitionAdminRow): FormDraft {
 function gateValue(raw: string): number | null {
   const v = raw.trim()
   return v === '' ? null : Number(v)
+}
+
+// 上下限组合的含义，给表单下方那行实时说明用；min > max 时返回 invalid，提交前拦下。
+// 只填下限时不出说明——那就是原来的「最低本金」，旁边的提示已经讲清楚了。
+// What the floor/ceiling pair means, for the live line under the fields; 'invalid'
+// when min > max, which also blocks submit. A floor alone gets no line — that's the
+// old minimum, already explained by the hint.
+type BaselineRange =
+  | { kind: 'none' }
+  | { kind: 'invalid' }
+  | { kind: 'exact'; usd: number }
+  | { kind: 'between'; min: number; max: number }
+  | { kind: 'maxOnly'; max: number }
+
+function baselineRange(minRaw: string, maxRaw: string): BaselineRange {
+  const min = gateValue(minRaw)
+  const max = gateValue(maxRaw)
+  if (max == null || !Number.isFinite(max)) return { kind: 'none' }
+  if (min == null || !Number.isFinite(min)) return { kind: 'maxOnly', max }
+  if (min > max) return { kind: 'invalid' }
+  return min === max ? { kind: 'exact', usd: max } : { kind: 'between', min, max }
 }
 
 export default function CompetitionsPanel() {
@@ -277,6 +303,10 @@ export default function CompetitionsPanel() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!form.name.trim()) return
+    if (baselineRange(form.minBaselineUsd, form.maxBaselineUsd).kind === 'invalid') {
+      setFormError(t('competition.admin.fields.rangeInvalid'))
+      return
+    }
     setSaving(true)
     setFormError(null)
     try {
@@ -299,6 +329,7 @@ export default function CompetitionsPanel() {
           prizeNote: form.prizeNote.trim() || null,
           track: form.track,
           minBaselineUsd: gateValue(form.minBaselineUsd),
+          maxBaselineUsd: gateValue(form.maxBaselineUsd),
           minTrades: gateValue(form.minTrades),
         })
         setComps((prev) => [created, ...prev])
@@ -325,6 +356,7 @@ export default function CompetitionsPanel() {
             prizeNote: form.prizeNote.trim() || null,
             track: form.track,
             minBaselineUsd: gateValue(form.minBaselineUsd),
+            maxBaselineUsd: gateValue(form.maxBaselineUsd),
             minTrades: gateValue(form.minTrades),
           }
         } else {
@@ -730,7 +762,7 @@ export default function CompetitionsPanel() {
               Track and this competition's gates belong to the same "frozen after
               draft" group as metric/enrollment: when locked they render read-only
               and never enter the patch (see the file header). */}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <div>
               <label className="label">{t('competition.admin.fields.track')}</label>
               {fieldsLocked ? (
@@ -759,6 +791,19 @@ export default function CompetitionsPanel() {
               />
             </div>
             <div>
+              <label className="label">{t('competition.admin.fields.maxBaselineUsd')}</label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                className="input disabled:opacity-50"
+                placeholder={t('competition.admin.fields.gateNoCeiling')}
+                value={form.maxBaselineUsd}
+                onChange={(e) => setForm({ ...form, maxBaselineUsd: e.target.value })}
+                disabled={fieldsLocked}
+              />
+            </div>
+            <div>
               <label className="label">{t('competition.admin.fields.minTrades')}</label>
               <input
                 type="number"
@@ -771,7 +816,8 @@ export default function CompetitionsPanel() {
                 disabled={fieldsLocked}
               />
             </div>
-            <p className="text-xs text-neutral-500 md:col-span-3">
+            <BaselineRangeLine range={baselineRange(form.minBaselineUsd, form.maxBaselineUsd)} />
+            <p className="text-xs text-neutral-500 md:col-span-2 xl:col-span-4">
               {t('competition.admin.fields.gateHint')}
             </p>
           </div>
@@ -1011,5 +1057,20 @@ export default function CompetitionsPanel() {
         />
       )}
     </div>
+  )
+}
+
+function BaselineRangeLine({ range }: { range: BaselineRange }) {
+  const { t } = useTranslation()
+  if (range.kind === 'none') return null
+  const text =
+    range.kind === 'invalid' ? t('competition.admin.fields.rangeInvalid')
+      : range.kind === 'exact' ? t('competition.admin.fields.rangeExact', { usd: range.usd })
+        : range.kind === 'between' ? t('competition.admin.fields.rangeBetween', { min: range.min, max: range.max })
+          : t('competition.admin.fields.rangeMaxOnly', { max: range.max })
+  return (
+    <p className={`text-xs font-medium md:col-span-2 xl:col-span-4 ${range.kind === 'invalid' ? 'text-red-400' : 'text-prism-300'}`}>
+      {text}
+    </p>
   )
 }

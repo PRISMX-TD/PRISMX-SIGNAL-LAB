@@ -1544,6 +1544,10 @@ class Competition(Base):
     # on the admin Gamification tab). One min_trades covers either metric, since a
     # competition only ever uses one of them.
     min_baseline_usd = Column(Float, nullable=True)
+    # 本金上限（rev 33），与 min_baseline_usd 配对：留空 = 不设上限；两者相等 = 只收这一个金额。
+    # Capital ceiling (rev 33), paired with min_baseline_usd: NULL = no ceiling;
+    # equal to the floor = that exact amount only.
+    max_baseline_usd = Column(Float, nullable=True)
     min_trades = Column(Integer, nullable=True)
     metric = Column(String, nullable=False, default="return_pct")  # return_pct / win_rate
     enrollment = Column(String, nullable=False, default="signup")  # signup / auto

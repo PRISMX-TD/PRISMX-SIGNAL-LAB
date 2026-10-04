@@ -322,6 +322,9 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             "minTradesReturn": gates["min_trades_return"],
             "minTradesWinrate": gates["min_trades_winrate"],
             "minBaselineUsd": gates["min_baseline_usd"],
+            # 只有比赛的 comp_gates 带上限；周期榜没有这个键，下发 null。
+            # Only a competition's comp_gates carries a ceiling; standing boards send null.
+            "maxBaselineUsd": gates.get("max_baseline_usd"),
             "winrateRequireProfit": gates["winrate_require_profit"],
         },
     }

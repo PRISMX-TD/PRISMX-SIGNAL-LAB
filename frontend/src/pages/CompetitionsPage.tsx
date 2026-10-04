@@ -967,7 +967,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
               Same collapsed explainer as the leaderboard; the capital floor comes from
               this competition's own board gates, since a competition may override the
               global setting. */}
-          <CashflowRules minBaselineUsd={detail.board.gates.minBaselineUsd} variant="competition" />
+          <CashflowRules minBaselineUsd={detail.board.gates.minBaselineUsd} maxBaselineUsd={detail.board.gates.maxBaselineUsd} variant="competition" />
         </main>
       </div>
 
