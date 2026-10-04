@@ -13,6 +13,8 @@ import TokenRevealModal from '../components/TokenRevealModal'
 import { useBackToClose } from '../utils/useBackToClose'
 import type { MT5Account } from '../api/types'
 import Toast from '../components/Toast'
+import { EmailVerifyInline } from '../components/EmailVerifyNotice'
+import { useAuth } from '../store/auth'
 
 export default function BridgePage() {
   const { t } = useTranslation()
@@ -24,6 +26,9 @@ export default function BridgePage() {
   // "reset" framing's danger confirmation doesn't apply — for this user,
   // getting their first token should read as "generate".
   const neverConnected = accounts.length === 0
+  // 生成 Token 要求邮箱已验证（后端 /ea/token/reset 会 403）/ token needs a verified email
+  const { user } = useAuth()
+  const emailUnverified = user?.emailVerified === false
 
   const [apiToken, setApiToken] = useState<string | null>(null)
   const [revealToken, setRevealToken] = useState<string | null>(null)
@@ -231,7 +236,9 @@ export default function BridgePage() {
           {apiToken && (
             <p className="mb-3 text-xs leading-relaxed text-amber-400/90">{t('bind.tokenJustOnce')}</p>
           )}
-          {!apiToken && neverConnected ? (
+          {emailUnverified ? (
+            <EmailVerifyInline reason="bind" />
+          ) : !apiToken && neverConnected ? (
             <button
               onClick={resetToken}
               disabled={resetting}

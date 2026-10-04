@@ -181,6 +181,16 @@ class User(Base):
     # which is exactly the "can't use Google login after setting a password"
     # bug reported 2026-07.
     google_linked_at = Column(DateTime, nullable=True)
+    # 邮箱验证通过的时间；NULL = 还没验证。软拦截：没验证照样能登录、能看，只是
+    # 绑定 MT5 与领 PRO 试用要先验证（见 services/deps.require_verified_email）。
+    # 迁移时存量用户一律回填为已验证（rev 32），Google 注册的账号创建即验证；
+    # 只有上线之后用邮箱密码注册的新账号会是 NULL。
+    # When the email address was verified; NULL = not yet. A soft gate: unverified
+    # users can still sign in and browse, but binding MT5 and claiming a PRO trial
+    # require it (see services/deps.require_verified_email). Every pre-existing
+    # row is backfilled as verified (rev 32) and Google sign-ups are verified at
+    # creation, so only password sign-ups after launch start out NULL.
+    email_verified_at = Column(DateTime, nullable=True)
     nickname = Column(String, nullable=True)            # 2-20 字，榜单/主页原样展示；保留词校验在写入端
     # 重名判定用的归一形式（NFKC + 去空白 + 小写，见 gamification.nickname_key），
     # 唯一索引建在它上面而不是 nickname：显示要保留用户敲的原样大小写与空格，
@@ -1602,6 +1612,31 @@ class PasswordResetToken(Base):
     # 申请来源 IP，仅用于事后排查滥用；不参与任何判定。
     # Requesting IP, for abuse forensics only; never part of any decision.
     requested_ip = Column(String, nullable=True)
+
+
+class EmailVerificationToken(Base):
+    """注册邮箱验证的令牌。与 PasswordResetToken 同样只存哈希。
+
+    与找回密码令牌的区别是**用过之后再点仍算成功**：验证是幂等的（已验证的人
+    再验证一次什么都不改变），而邮件网关预抓取、React 开发模式下的双发、用户
+    手快点两下都会让同一个链接被请求不止一次——第二次报「链接已失效」只会让
+    人以为没验证成功。`used_at` 只作记录。
+
+    Sign-up email verification tokens; hash-only like PasswordResetToken. Unlike
+    reset tokens, a used token still answers success: verification is
+    idempotent, and gateway prefetch or a double click would otherwise show a
+    real user "link expired" right after it worked. `used_at` is bookkeeping.
+    """
+
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    # 明文令牌的 SHA-256 / SHA-256 of the plaintext token
+    token_hash = Column(String, unique=True, nullable=False, index=True)
+    expires_at = Column(DateTime, nullable=False)
+    used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now)
 
 
 class EmailCampaign(Base):

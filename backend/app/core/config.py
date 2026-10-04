@@ -211,6 +211,12 @@ class Settings(BaseSettings):
     # sends mail to a third party, so a loose limit turns the platform into a
     # free mail bomber aimed at whoever actually owns that address.
     RATE_LIMIT_PASSWORD_RESET: str = "3/minute"
+    # 点验证链接：匿名端点，但令牌 256 位熵、猜不中，限流只为挡脚本刷库。比找回
+    # 密码宽，因为邮件网关预抓取 + 用户再点一次就是两次请求。
+    # Clicking the verification link: anonymous, but the token is unguessable;
+    # the limit only stops scripted hammering. Looser than reset because a mail
+    # gateway's prefetch plus the user's own click is already two requests.
+    RATE_LIMIT_VERIFY_EMAIL: str = "10/minute"
     # 创建支付订单限流：每次都会真实调用一次 NOWPayments 接口并插一条 Payment
     # 记录，不限流则登录用户可反复刷、把第三方调用成本与数据库写入转嫁给我们。
     # 正常用户一分钟内不会创建很多支付单，设得足够宽。按客户端 IP 计。
@@ -403,6 +409,15 @@ class Settings(BaseSettings):
     # Reset-link lifetime: short enough that a brief peek at someone's inbox
     # isn't enough, long enough to switch from phone to desktop and click it.
     PASSWORD_RESET_TTL_MINUTES: int = 30
+
+    # 注册验证邮件链接的有效期。比找回密码长得多：这个链接只证明「这个邮箱收得到
+    # 信」，被别人点了也只是替你把邮箱验证掉，拿不到账号；而国内邮箱对境外发信
+    # 常延迟、进垃圾箱，用户隔天才翻到很正常。过期了登录后点「重新发送」即可。
+    # Lifetime of the sign-up verification link. Much longer than a reset link:
+    # this one only proves the mailbox receives mail — someone else clicking it
+    # merely verifies your address for you and grants no access — and mail from
+    # overseas often lands late or in spam at Chinese providers.
+    EMAIL_VERIFY_TTL_HOURS: int = 48
 
     # 群发邮件里退订链接指向的 API 地址（退订页由后端直接出 HTML，不经过前端）。
     # The API origin used for unsubscribe links in broadcasts; the unsubscribe

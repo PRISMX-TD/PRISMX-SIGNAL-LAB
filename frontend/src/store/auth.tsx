@@ -279,6 +279,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsNickname: me.needsNickname,
           // 代理入口开关，搭同一趟车（见 User.isAgent）/ agent entry flag, same trip
           isAgent: me.isAgent,
+          // 邮箱验证状态：在别的设备 / 标签页点完验证链接后，这一趟把提示条撤掉。
+          // Email verification: clears the banner after verifying elsewhere.
+          emailVerified: me.emailVerified,
         }
       })
       const cached = readCachedUser()
@@ -295,6 +298,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           gamificationTitle: me.gamificationTitle,
           needsNickname: me.needsNickname,
           isAgent: me.isAgent,
+          emailVerified: me.emailVerified,
         })
       }
     } catch {

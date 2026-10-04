@@ -99,6 +99,7 @@ const Layout = lazyPage(() => import('./components/Layout'), 'Layout', { core: t
 const LandingPage = lazyPage(() => import('./pages/LandingPage'), 'LandingPage', { core: true })
 const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage', { core: true })
 const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage', { core: true })
+const VerifyEmailPage = lazyPage(() => import('./pages/VerifyEmailPage'), 'VerifyEmailPage', { core: true })
 const SignalsPage = lazyPage(() => import('./pages/SignalsPage'), 'SignalsPage')
 const DashboardPage = lazyPage(() => import('./pages/DashboardPage'), 'DashboardPage')
 const ChartsPage = lazyPage(() => import('./pages/ChartsPage'), 'ChartsPage')
@@ -380,6 +381,10 @@ export default function App() {
                 who cannot sign in. */}
             <Route path="/forgot-password" element={<ResetPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
+            {/* 邮箱验证落地页：同样在 Protected 之外——邮件常在没登录的手机上点开。
+                Email verification landing: outside Protected too — the mail is
+                often opened on a phone that isn't signed in. */}
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
             <Route path="/complete-profile" element={<CompleteProfilePage />} />
             {/* 法务文本：必须放在 Protected 之外，公开可访问。
                 ① 访客要能在注册前读到条款，否则「注册即视为同意」不成立；

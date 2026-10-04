@@ -18,7 +18,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.models import AdminAuditLog, Payment, User
-from app.services.deps import get_current_user
+from app.services.deps import get_current_user, require_verified_email
 from app.services.nowpayments import (
     create_payment as np_create,
     get_currencies as np_currencies,
@@ -199,12 +199,17 @@ def get_trial_status(
         "days": int(trial["trial_days"]),
         "eligible": eligible,
         "usedAt": user.trial_used_at.isoformat() if user.trial_used_at else None,
+        # 有资格但还没验证邮箱：前端把「领取」换成「先验证邮箱」的引导。
+        # Eligible but unverified: the frontend swaps "claim" for a verify prompt.
+        "needsEmailVerification": user.email_verified_at is None,
     }
 
 
 @router.post("/trial/claim")
 def claim_trial(
-    user: User = Depends(get_current_user),
+    # 领试用要求邮箱已验证（软拦截，见 User.email_verified_at）。
+    # Claiming the trial requires a verified email (soft gate).
+    user: User = Depends(require_verified_email),
     db: Session = Depends(get_db),
 ):
     """领取免费试用：立即升级为 PRO，到期由既有的会员到期机制自动降回 FREE。

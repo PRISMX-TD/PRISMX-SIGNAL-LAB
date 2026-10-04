@@ -219,7 +219,7 @@
     "phone": "手机号码",
     "phonePlaceholder": "手机号码（不含区号）",
     "phoneHint": "请选择所在地区并填写手机号码，用于账户安全与重要通知",
-    "inviteTrialBanner": "通过此链接注册，立得 {{days}} 天 PRO 会员"
+    "inviteTrialBanner": "通过此链接注册并验证邮箱，即得 {{days}} 天 PRO 会员"
   },
   "order": {
     "slideToConfirm": "滑动确认下单"
@@ -754,5 +754,24 @@
     "greetHintLink": "账户设置",
     "greetHintB": "里关闭",
     "close": "关闭节日问候"
+  },
+  "emailVerify": {
+    "bannerTitle": "请验证邮箱",
+    "bannerBody": "验证邮件已发到 {{email}}，点开邮件里的链接即可（也看看垃圾邮件箱）。验证后才能绑定 MT5、领取 PRO 试用。",
+    "resend": "重新发送",
+    "resendIn": "{{s}} 秒后可重发",
+    "sending": "发送中…",
+    "sent": "已重新发送，请查收",
+    "sendFailed": "发送失败，请稍后再试",
+    "inlineBind": "验证邮箱后才能绑定 MT5 账号",
+    "inlineTrial": "验证邮箱后即可领取试用",
+    "inlineBody": "点开发到 {{email}} 的验证邮件里的链接即可。没收到的话看看垃圾邮件箱，或重新发送一封。",
+    "pageVerifying": "正在验证邮箱…",
+    "pageDoneTitle": "邮箱已验证",
+    "pageDoneBody": "现在可以绑定 MT5 账号、领取 PRO 试用了。",
+    "pageFailTitle": "验证没有成功",
+    "pageFailBody": "这个链接无效或已过期。登录后点顶部提示条里的「重新发送」，再收一封新的即可。",
+    "goBind": "去绑定 MT5",
+    "backToApp": "返回应用"
   }
 }

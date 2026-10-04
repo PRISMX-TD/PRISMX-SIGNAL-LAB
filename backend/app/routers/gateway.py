@@ -25,7 +25,7 @@ from app.models import ClosedTrade, MT5Account, Order, User
 from app.schemas import LOGIN_PATTERN
 from app.services.account_type import SOURCE_GROUP, classify_group
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
-from app.services.deps import get_current_user
+from app.services.deps import get_current_user, require_verified_email
 from app.services.gateway_binding import (
     enforce, gateway_accounts_version, invalidate_gateway_accounts, is_removed, is_revoked,
     mark_removed, not_removed,
@@ -223,7 +223,9 @@ def _verify_failure(rsp) -> HTTPException:
 def gateway_verify(
     request: Request,
     req: GatewayVerifyRequest,
-    user: User = Depends(get_current_user),
+    # 绑定 MT5 要求邮箱已验证（软拦截，见 User.email_verified_at）。
+    # Binding MT5 requires a verified email (soft gate, see User.email_verified_at).
+    user: User = Depends(require_verified_email),
     db: Session = Depends(get_db),
 ):
     """验证 MT5 账号密码，成功后自动绑定到当前用户。

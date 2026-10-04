@@ -310,6 +310,23 @@ def _touch_last_active(db: Session, user: User) -> None:
     db.commit()
 
 
+# 前端靠这个前缀认出「要先验证邮箱」并换成引导，别改措辞。
+# The frontend recognises this prefix to show the verify prompt; keep the wording.
+EMAIL_NOT_VERIFIED_DETAIL = "请先验证邮箱 / Please verify your email first"
+
+
+def require_verified_email(user: User = Depends(get_current_user)) -> User:
+    """要求当前用户已验证邮箱：绑定 MT5、领 PRO 试用这两处用（软拦截，见
+    User.email_verified_at）。403 而非 401，理由同停用账号——401 会被前端当成
+    掉线、清 token 踢回登录页。
+    Require a verified email; used by MT5 binding and the trial claim. 403, not
+    401, for the same reason as disabled accounts: the frontend treats 401 as a
+    lost session and bounces to the login page."""
+    if user.email_verified_at is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=EMAIL_NOT_VERIFIED_DETAIL)
+    return user
+
+
 def require_admin(user: User = Depends(get_current_user)) -> User:
     """要求当前用户具备管理员权限（role == "admin"）。
     Require the current user to hold admin rights (role == "admin")."""

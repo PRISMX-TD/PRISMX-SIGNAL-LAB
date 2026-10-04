@@ -489,6 +489,17 @@ export const authApi = {
       method: 'POST',
       body: JSON.stringify({ token, password }),
     }),
+  // 点验证邮件里的链接。不需要登录、也不签发会话；同一个链接点两次都成功。
+  // Clicking the verification link: no session needed or issued; idempotent.
+  verifyEmail: (token: string) =>
+    request<{ message: string }>('/auth/verify-email', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+  // 给自己的注册邮箱再发一封验证信（需登录，每小时有上限，超限回 429）。
+  // Resend the verification mail to the caller's own address (hourly cap → 429).
+  resendVerification: () =>
+    request<{ message: string }>('/auth/verify-email/resend', { method: 'POST' }),
   login: (email: string, password: string) =>
     request<{ token: string; user: User }>('/auth/login', {
       method: 'POST',
@@ -998,6 +1009,9 @@ export const userApi = {
       // badge renders off these two fields with no extra gamificationApi.me() call.
       gamificationLevel: number | null
       gamificationTitle: string | null
+      // 邮箱是否已验证：别的设备上点完链接后，refreshUser() 靠它撤掉提示条。
+      // Whether the email is verified; lets refreshUser() clear the banner.
+      emailVerified: boolean
       // 公开主页（2026-09-07）：publicId 拼「查看我的公开主页」链接；statsPublic 是交易画像开关。
       // Public profile: publicId builds the "view my public profile" link; statsPublic is the stats switch.
       publicId: string | null
@@ -1370,6 +1384,12 @@ export const adminApi = {
     }),
   enableUser: (userId: string) =>
     request<AdminUser | null>(`/admin/users/${encodeURIComponent(userId)}/enable`, {
+      method: 'POST',
+    }),
+  // 手动标记邮箱已验证（收不到验证信的用户找客服时用）；返回整行用户。
+  // Manually mark an email verified (for users whose mail never arrives).
+  markEmailVerified: (userId: string) =>
+    request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}/verify-email`, {
       method: 'POST',
     }),
   // 邀请链接 / invite links

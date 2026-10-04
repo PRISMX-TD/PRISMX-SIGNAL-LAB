@@ -191,7 +191,10 @@ def _hash_legacy_api_tokens() -> None:
 #          老库启动时走一次完整迁移而不是快速通道。
 # rev 31 — ticket_replies.images（工单消息附图：私有桶对象键的 JSON 数组）。可空、**不回填**：
 #          NULL 就是「这条没有图」。纯 ADD COLUMN，不重写表，不产生可感知的停机。
-CURRENT_SCHEMA_REV = 31
+# rev 32 — 注册邮箱验证：users.email_verified_at + 新表 email_verification_tokens（create_all
+#          建）。**刚加列时回填一次**：存量用户全部视为已验证（时间取 created_at），新规则
+#          只管上线之后用邮箱密码注册的账号——与 google_linked_at / phone_required 同一种取舍。
+CURRENT_SCHEMA_REV = 32
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -787,6 +790,8 @@ def _migrate_columns() -> None:
             # every existing row.
             "disabled_at": datetime_type,
             "disabled_reason": "VARCHAR",
+            # rev 32：邮箱验证时间，回填见下方 / email verification, backfill below
+            "email_verified_at": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -853,6 +858,19 @@ def _migrate_columns() -> None:
             # haven't filled their phone in yet, silently disabling the whole rule.
             if "phone_required" not in user_cols:
                 conn.execute(text("UPDATE users SET phone_required = FALSE"))
+            # email_verified_at 回填（rev 32）：同上一种取舍——邮箱验证只要求本次上线
+            # 之后新注册的密码账号，此刻库里的每一行一律算已验证。同样必须只在刚加列
+            # 时跑一次：无条件 UPDATE 会在每次完整迁移时把上线后还没验证的新用户
+            # 悄悄放行，整条规则失效。
+            # email_verified_at backfill (rev 32): same tradeoff — verification is
+            # only required of password sign-ups after this ships, so every row
+            # present now counts as verified. Guarded to run once: an
+            # unconditional UPDATE would quietly verify every post-launch
+            # unverified user on the next full migration.
+            if "email_verified_at" not in user_cols:
+                conn.execute(text(
+                    "UPDATE users SET email_verified_at = COALESCE(created_at, CURRENT_TIMESTAMP)"
+                ))
             # 旧行补默认值：新列刚加时为 NULL，但 role/plan 声明为 NOT NULL。
             # Backfill existing rows: a freshly added column is NULL, but
             # role/plan are declared NOT NULL.

@@ -32,7 +32,7 @@ from app.core.security import generate_api_token, hash_api_token
 from app.models import MT5Account, User
 from app.routers.bridge import invalidate_auth_cache_for_hash
 from app.schemas import EATokenOut
-from app.services.deps import get_current_user
+from app.services.deps import get_current_user, require_verified_email
 
 router = APIRouter(prefix="/ea", tags=["ea"])
 
@@ -68,7 +68,12 @@ def get_token(user: User = Depends(get_current_user), db: Session = Depends(get_
 @limiter.limit("5/minute")
 def reset_token(
     request: Request,
-    user: User = Depends(get_current_user),
+    # 桥接程序靠这个 Token 绑定 MT5：生成它要求邮箱已验证。注册时落库的那个随机
+    # Token 用户从没见过，所以挡住这里就挡住了桥接这条绑定路。
+    # The bridge binds MT5 with this token, so generating it requires a verified
+    # email. The random token stored at sign-up is never shown to the user, so
+    # gating here closes the bridge binding path.
+    user: User = Depends(require_verified_email),
     db: Session = Depends(get_db),
 ):
     """重置 API Token（旧 Token 立即失效）。明文仅在本响应中出现一次，

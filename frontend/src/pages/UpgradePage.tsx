@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import PartnerBrokerCard from "../components/PartnerBrokerCard";
+import { EmailVerifyInline } from "../components/EmailVerifyNotice";
 import { useAuth } from "../store/auth";
 import { paymentApi, userApi } from "../api/client";
 import { useDocumentTitle } from "../utils/useDocumentTitle";
@@ -499,17 +500,27 @@ export default function UpgradePage() {
             {trialClaimError && (
               <p className="mt-3 text-xs text-down">{trialClaimError}</p>
             )}
-            <button
-              onClick={handleClaimTrial}
-              disabled={claimingTrial}
-              className="btn-primary mt-4 w-full py-2.5 disabled:opacity-60"
-            >
-              {claimingTrial ? (
-                <span className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-              ) : (
-                t("upgrade.trialCta")
-              )}
-            </button>
+            {/* 没验证邮箱：领取按钮换成验证引导（后端 /payments/trial/claim 会 403）。
+                trialStatus 只在进页时拉一次；之后在别的标签页验证完，refreshUser 会把
+                user.emailVerified 刷成 true，那时不用刷新页面就放出领取按钮。
+                Unverified: swap the claim button for the verify prompt. trialStatus
+                is fetched once on entry; once refreshUser reports verified the
+                button comes back without a reload. */}
+            {trialStatus.needsEmailVerification && user?.emailVerified !== true ? (
+              <EmailVerifyInline reason="trial" className="mt-4 text-left" />
+            ) : (
+              <button
+                onClick={handleClaimTrial}
+                disabled={claimingTrial}
+                className="btn-primary mt-4 w-full py-2.5 disabled:opacity-60"
+              >
+                {claimingTrial ? (
+                  <span className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                ) : (
+                  t("upgrade.trialCta")
+                )}
+              </button>
+            )}
           </div>
         )}
         {trialClaimedUntil && (

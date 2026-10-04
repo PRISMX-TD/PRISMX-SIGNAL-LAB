@@ -14,6 +14,7 @@ import FestivalGreeting from '../festival/FestivalGreeting'
 import { FestivalAmbient, FestivalGarland, FestivalGround, FestivalTopper } from '../festival/FestivalDecor'
 import SocialLinks from './SocialLinks'
 import PlanExpiryBanner from './PlanExpiryBanner'
+import { EmailVerifyBanner } from './EmailVerifyNotice'
 import LanguageToggle from './LanguageToggle'
 import EAStatusBadge from './EAStatusBadge'
 import SignalIndicator from './SignalIndicator'
@@ -818,6 +819,9 @@ export default function Layout() {
             decides for itself whether to render and takes up no layout space when
             it shouldn't. */}
         <PlanExpiryBanner />
+        {/* 邮箱验证提示：同理跟着用户走每一页，验证完自己消失（见组件说明）。
+            Email verification prompt: follows the user to every page until done. */}
+        <EmailVerifyBanner />
 
         {/* 行情终端走满屏容器，其余页面走内容栅栏。
             交易终端和内容页对宽度的诉求是相反的：内容页需要 max-w-7xl 把行长控制在

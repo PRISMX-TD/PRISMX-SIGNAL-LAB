@@ -114,6 +114,11 @@
   font-size: 15px;
   font-weight: 700;
 }
+/* 未验证邮箱的提示与提交按钮同宽，横跨两列 / the unverified-email notice spans both columns */
+.bind-verify {
+  grid-column: 1 / -1;
+}
+
 .bind-msgs {
   grid-column: 1 / -1;
   display: flex;

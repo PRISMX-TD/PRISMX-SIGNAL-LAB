@@ -135,6 +135,14 @@ class ResetPasswordRequest(BaseModel):
         return _validate_password_bytes(v)
 
 
+class VerifyEmailRequest(BaseModel):
+    """点验证邮件里的链接。只要令牌——不要求登录，用户常在手机上点开，而登录态
+    在电脑上。/ Clicking the verification link: token only, no session required —
+    people often open the mail on their phone while signed in on a desktop."""
+
+    token: str = Field(min_length=16, max_length=256)
+
+
 class MessageOut(BaseModel):
     """只带一句话的响应。用于那些**刻意不透露结果**的端点。"""
 
@@ -209,6 +217,11 @@ class UserOut(BaseModel):
     # Computed here rather than as `!nickname` on the client so the rule lives
     # in exactly one place.
     needsNickname: bool = False
+    # 邮箱是否已验证。软拦截：false 时前端挂提示条，绑定 MT5 / 领试用处换成引导
+    # （后端守门见 services/deps.require_verified_email）。
+    # Whether the email is verified. Soft gate: when false the frontend shows a
+    # banner and swaps MT5 binding / trial claiming for a prompt.
+    emailVerified: bool = True
 
 
 class AuthResponse(BaseModel):
@@ -253,6 +266,12 @@ class AdminUserOut(BaseModel):
     # on the user row would drift. The frontend already fetches the link list for
     # its dropdown and maps code to name there.
     inviteCode: str | None = None
+    # 邮箱验证时间；null = 还没验证（只可能是上线后用邮箱密码注册的新账号）。
+    # 收不到验证信的用户找客服时，管理员据此判断并可手动标记（见
+    # admin.mark_email_verified）。
+    # When the email was verified; null = not yet (only post-launch password
+    # sign-ups). Lets support spot users whose mail never arrives and mark them.
+    emailVerifiedAt: datetime | None = None
 
 
 class AdminUserDisableIn(BaseModel):

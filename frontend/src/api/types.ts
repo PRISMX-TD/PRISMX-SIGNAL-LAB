@@ -59,6 +59,13 @@ export interface User {
   // Whether a nickname is still owed. Read by the same guard as needsPhone.
   // Optional because users cached before the rollout lack the key; refreshUser fills it in.
   needsNickname?: boolean
+  // 邮箱是否已验证（软拦截：没验证照样能用，只是绑定 MT5 / 领试用要先验证）。
+  // 只有 === false 才算「没验证」——强制上线前缓存的 user 没有这个键，undefined
+  // 不能被当成没验证而挂上提示条；refreshUser() 会补上真实值。
+  // Whether the email is verified (soft gate: binding MT5 and claiming a trial
+  // need it). Only `=== false` means unverified — users cached before the
+  // rollout lack the key, and refreshUser() fills in the real value.
+  emailVerified?: boolean
   // 当前 PRO 是否为免费试用；登录/注册响应不带这个字段（未知），
   // 只有 refreshUser()（调 GET /auth/me）之后才会补上。
   // Whether the current PRO is a free trial; absent (unknown) on the
@@ -163,6 +170,11 @@ export interface AdminUser {
   // link's label, since the code means nothing to a human. Optional for the same
   // reason as the two fields above.
   inviteCode?: string | null
+  // 邮箱验证时间；null = 还没验证。只有 === null 才算未验证——后端没上线时键不存在
+  // （undefined），不能把全员都显示成「未验证」。
+  // When the email was verified; null = not yet. Only `=== null` means
+  // unverified: before the backend ships the key is absent (undefined).
+  emailVerifiedAt?: string | null
 }
 
 // 邀请链接（管理后台）。registrations 按隐藏归因码统计，与备注文本解耦。
@@ -684,6 +696,8 @@ export interface TrialStatus {
   days: number
   eligible: boolean
   usedAt: string | null
+  // 有资格但邮箱还没验证：领取按钮换成验证引导 / eligible but unverified
+  needsEmailVerification?: boolean
 }
 
 // 信号客观胜负：与 status（能否下单）完全独立的第二条状态线，见后端

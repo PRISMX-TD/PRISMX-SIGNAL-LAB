@@ -81,6 +81,11 @@ class AccountInfoOut(BaseModel):
     # the InviteLinkAgent model). Rides the same /auth/me trip as the visibility
     # switches above; the frontend shows the /agent entry off it. Not a role.
     isAgent: bool = False
+    # 邮箱是否已验证（软拦截，见 User.email_verified_at）。登录响应里也有；这里
+    # 再下发一次，是为了在别的设备 / 标签页点完验证链接后，refreshUser() 能把
+    # 提示条撤掉。Whether the email is verified; repeated here so refreshUser()
+    # clears the banner after the link was clicked on another device or tab.
+    emailVerified: bool = True
     class Config:
         from_attributes = True
 
@@ -155,6 +160,7 @@ def get_account(
         publicId=current_user.public_id,
         statsPublic=bool(current_user.stats_public),
         isAgent=is_agent(db, current_user.id),
+        emailVerified=current_user.email_verified_at is not None,
     )
 
 
@@ -322,6 +328,7 @@ def set_phone(
         phone=current_user.phone,
         needsPhone=False,
         needsNickname=not (current_user.nickname or "").strip(),
+        emailVerified=current_user.email_verified_at is not None,
     )
 
 

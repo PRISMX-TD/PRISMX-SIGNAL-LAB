@@ -30,6 +30,8 @@ import { BRIDGE_DOWNLOAD_URL, BRIDGE_FILENAME } from '../api/bridgeDownload'
 import { useLive } from '../store/live'
 import { localizeApiError } from '../api/utils'
 import PartnerBrokerCard, { usePartnerBroker } from '../components/PartnerBrokerCard'
+import { EmailVerifyInline } from '../components/EmailVerifyNotice'
+import { useAuth } from '../store/auth'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/bind.css'
 
@@ -53,6 +55,12 @@ const money2 = (n: number | null | undefined): string =>
 export default function BindPage() {
   const { t, i18n } = useTranslation()
   const { accounts, refreshAll } = useLive()
+  // 没验证邮箱的新账号不能绑定（后端 /gateway/verify 也会 403）：表单旁直接说明，
+  // 而不是让人填完账号密码再撞一句错误。
+  // Unverified accounts can't bind (the backend 403s too); say so up front
+  // instead of letting someone fill in credentials and hit an error.
+  const { user } = useAuth()
+  const emailUnverified = user?.emailVerified === false
   const { name: brokerName } = usePartnerBroker()
 
   // 桥接程序版本徽标：后端抓 GitHub releases/latest 的 tag（10 分钟缓存），拿不到
@@ -194,9 +202,10 @@ export default function BindPage() {
                 onChange={(e) => { setGwPassword(e.target.value); setGwError(''); setGwResult(null) }}
               />
             </div>
+            {emailUnverified && <EmailVerifyInline reason="bind" className="bind-verify" />}
             <button
               type="submit"
-              disabled={gwVerifying || !gwLogin || !gwPassword}
+              disabled={emailUnverified || gwVerifying || !gwLogin || !gwPassword}
               className="btn btn-primary bind-submit"
             >
               {gwVerifying ? t('bind.gw.verifying') : t('bind.gw.verify')}

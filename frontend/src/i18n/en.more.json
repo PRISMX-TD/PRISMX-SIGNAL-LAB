@@ -1883,7 +1883,13 @@
       "pasteToggle": "Or paste a list of addresses",
       "insertImage": "Insert image",
       "imageUploading": "Uploading…"
-    }
+    },
+    "emailUnverified": "Email unverified",
+    "markVerified": "Mark verified",
+    "verifyEmailTitle": "Mark email as verified",
+    "verifyEmailBody": "Mark {{email}} as verified? They'll be able to bind MT5 and claim a trial, and any trial held back from their invite link is granted now. This can't be undone — make sure they really own this mailbox first.",
+    "verifyEmailConfirm": "Mark verified",
+    "verifyEmailOk": "Marked as verified"
   },
   "simulator": {
     "title": "Signal History Replay",

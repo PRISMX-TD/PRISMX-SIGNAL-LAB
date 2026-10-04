@@ -199,9 +199,13 @@ def test_snapshot_contains_no_bare_tld():
 
 from app.routers.auth import register as _register_decorated  # noqa: E402
 from app.schemas import RegisterRequest  # noqa: E402
-from fastapi import HTTPException  # noqa: E402
+from fastapi import BackgroundTasks, HTTPException  # noqa: E402
 
-_register = _register_decorated.__wrapped__
+
+def _register(**kw):
+    # 注册会把验证邮件丢进 BackgroundTasks；这里给一个不执行的空队列，不真发信。
+    # Register queues the verification mail; an unexecuted queue sends nothing.
+    return _register_decorated.__wrapped__(background=BackgroundTasks(), **kw)
 
 
 def _req(email: str) -> RegisterRequest:

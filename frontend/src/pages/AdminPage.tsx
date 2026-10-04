@@ -760,6 +760,32 @@ export default function AdminPage() {
   const [enableTarget, setEnableTarget] = useState<AdminUser | null>(null)
   const [statusSavingId, setStatusSavingId] = useState<string | null>(null)
 
+  // ---- 手动标记邮箱已验证 ----
+  // 给收不到验证信的用户兜底。只有「标记」没有「撤销」（见后端
+  // admin.mark_email_verified 的说明），所以先确认一次。
+  // Fallback for users whose verification mail never arrives. One-way (no
+  // "unverify", see the backend docstring), hence the confirmation.
+  const [verifyTarget, setVerifyTarget] = useState<AdminUser | null>(null)
+  const [verifySavingId, setVerifySavingId] = useState<string | null>(null)
+  const applyVerified = async (u: AdminUser) => {
+    setVerifySavingId(u.id)
+    try {
+      const updated = await adminApi.markEmailVerified(u.id)
+      if (updated?.id === u.id) {
+        setUsers((prev) => prev.map((x) => (x.id === u.id ? updated : x)))
+        setDrafts((prev) => ({ ...prev, [u.id]: toDraft(updated) }))
+      } else {
+        void load()
+      }
+      showToast('ok', t('admin.verifyEmailOk'))
+      setVerifyTarget(null)
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setVerifySavingId(null)
+    }
+  }
+
   // reason 为 null 表示"恢复"，非 null 表示"停用并附上这个原因"。合成一个函数
   // 是因为两条路除了调用哪个端点之外，成功/失败后的处理完全一样。
   // A null reason means restore, a non-null one means disable with that reason.
@@ -1125,6 +1151,23 @@ export default function AdminPage() {
                           "disabled" answers only whether, not the when and why
                           support will actually be asked. The reason can run long,
                           so it is clamped with the full text in the title. */}
+                      {/* 邮箱未验证：跟在状态开关下面，带一个手动标记的入口。只认
+                          === null（见 AdminUser.emailVerifiedAt 的说明）。
+                          Unverified email, with a manual mark action. Only
+                          === null counts (see AdminUser.emailVerifiedAt). */}
+                      {u.emailVerifiedAt === null && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          <span className="whitespace-nowrap text-[11px] text-amber-400">{t('admin.emailUnverified')}</span>
+                          <button
+                            type="button"
+                            onClick={() => setVerifyTarget(u)}
+                            disabled={verifySavingId === u.id}
+                            className="whitespace-nowrap rounded-md bg-amber-400/15 px-1.5 py-0.5 text-[11px] font-semibold text-amber-200 transition hover:bg-amber-400/25 disabled:opacity-50"
+                          >
+                            {t('admin.markVerified')}
+                          </button>
+                        </div>
+                      )}
                       {disabled && (
                         <div className="mt-1.5 max-w-[200px] space-y-0.5">
                           <div className="text-[11px] text-neutral-500">{fmtTime(u.disabledAt)}</div>
@@ -1299,6 +1342,17 @@ export default function AdminPage() {
           Restore confirmation: plain ConfirmModal and not danger — handing access
           back is not destructive. The copy carries the original reason so nobody
           has to go looking elsewhere for why it was disabled before undoing it. */}
+      {verifyTarget && (
+        <ConfirmModal
+          center
+          busy={verifySavingId === verifyTarget.id}
+          title={t('admin.verifyEmailTitle')}
+          message={t('admin.verifyEmailBody', { email: verifyTarget.email })}
+          confirmLabel={t('admin.verifyEmailConfirm')}
+          onConfirm={() => void applyVerified(verifyTarget)}
+          onCancel={() => setVerifyTarget(null)}
+        />
+      )}
       {enableTarget && (
         <ConfirmModal
           center

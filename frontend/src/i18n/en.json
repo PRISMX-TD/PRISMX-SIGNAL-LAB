@@ -219,7 +219,7 @@
     "phone": "Phone number",
     "phonePlaceholder": "Phone number (without dial code)",
     "phoneHint": "Select your region and enter your phone number — used for account security and important notices",
-    "inviteTrialBanner": "Sign up through this link and get {{days}} days of PRO"
+    "inviteTrialBanner": "Sign up through this link and verify your email to get {{days}} days of PRO"
   },
   "order": {
     "slideToConfirm": "Slide to confirm"
@@ -754,5 +754,24 @@
     "greetHintLink": "account settings",
     "greetHintB": ".",
     "close": "Dismiss festival greeting"
+  },
+  "emailVerify": {
+    "bannerTitle": "Please verify your email",
+    "bannerBody": "We sent a verification link to {{email}} — open it to finish (check your spam folder too). You'll need it to bind MT5 and claim your PRO trial.",
+    "resend": "Resend",
+    "resendIn": "Resend in {{s}}s",
+    "sending": "Sending…",
+    "sent": "Sent again — check your inbox",
+    "sendFailed": "Couldn't send, please try again later",
+    "inlineBind": "Verify your email to bind an MT5 account",
+    "inlineTrial": "Verify your email to claim the trial",
+    "inlineBody": "Open the link in the verification email sent to {{email}}. Can't find it? Check your spam folder or send a new one.",
+    "pageVerifying": "Verifying your email…",
+    "pageDoneTitle": "Email verified",
+    "pageDoneBody": "You can now bind your MT5 account and claim your PRO trial.",
+    "pageFailTitle": "That didn't work",
+    "pageFailBody": "This link is invalid or has expired. Sign in and tap \"Resend\" in the banner at the top to get a new one.",
+    "goBind": "Bind MT5",
+    "backToApp": "Back to the app"
   }
 }

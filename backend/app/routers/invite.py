@@ -211,9 +211,18 @@ def _trial_grant_days(db: Session, link: InviteLink) -> int | None:
     return trial_grant_days(db)
 
 
-def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
+def apply_invite(
+    db: Session, user: User, ref: str | None, *, grant_trial: bool = True
+) -> int | None:
     """注册归因与自动试用发放：ref 命中开了送试用的活跃链接时，注册即开通
     PRO 试用；否则仅写入备注快照与归因码。
+
+    grant_trial=False 只归因、不发试用：邮箱密码注册走这条——试用要等邮箱验证
+    通过后由 grant_deferred_invite_trial 补发（见那个函数）。Google 注册的邮箱
+    创建即验证，仍走默认的当场发放。
+    grant_trial=False attributes without granting: password sign-ups take this
+    path and get the trial from grant_deferred_invite_trial once the address is
+    verified. Google sign-ups are verified at creation and keep the default.
 
     返回实际发放的试用天数，未发放为 None。Task 3 的 auth.py 靠这个返回值
     决定是否写审计行。
@@ -243,6 +252,8 @@ def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
     user.plan_note = link.label
     user.invite_code = link.code
 
+    if not grant_trial:
+        return None
     days = _trial_grant_days(db, link)
     if days is None:
         return None
@@ -269,6 +280,58 @@ def apply_invite(db: Session, user: User, ref: str | None) -> int | None:
     user.plan_expires_at = now + timedelta(days=days)
     user.trial_used_at = now
     user.plan_is_trial = True
+    return days
+
+
+def grant_deferred_invite_trial(db: Session, user: User) -> int | None:
+    """邮箱验证通过时，补发注册那一刻因为「还没验证」而扣下的邀请试用。
+
+    判定在**验证这一刻**重新做：链接得还是活跃的、还开着送试用、全局总闸也开着
+    （_trial_grant_days，与注册当场发放同一处判定）。注册后链接被停用或关了送
+    试用，那就不发——落地页承诺的是「此刻注册送」，不是一张永久兑换券。
+
+    用条件原子 UPDATE 抢占资格（同 payments.claim_trial）：用户可能在两台设备上
+    同时点开验证链接，也可能先自己去领了试用，两条路都不能发出第二份。只改库、
+    写审计，不 commit——调用方（验证 / 重置密码）在同一个事务里提交。
+
+    Grants the invite trial a password sign-up was denied at registration for
+    being unverified. Re-evaluated now via _trial_grant_days, the same decision
+    the at-signup grant uses: a link disabled or switched off since then grants
+    nothing. A conditional atomic UPDATE (as in payments.claim_trial) keeps two
+    simultaneous clicks, or a self-claim that got there first, from granting
+    twice. Does not commit; the caller does, in the same transaction.
+    """
+    if not user.invite_code:
+        return None
+    link = _active_link(db, user.invite_code)
+    if link is None:
+        return None
+    days = _trial_grant_days(db, link)
+    if days is None:
+        return None
+    now = datetime.now(timezone.utc)
+    claimed = (
+        db.query(User)
+        .filter(User.id == user.id, User.trial_used_at.is_(None), User.plan == "FREE")
+        .update(
+            {
+                "plan": "PRO",
+                "plan_expires_at": now + timedelta(days=days),
+                "trial_used_at": now,
+                "plan_is_trial": True,
+            },
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        return None
+    db.add(AdminAuditLog(
+        admin_user_id=user.id,
+        target_user_id=user.id,
+        field="plan:invite_trial",
+        old_value="FREE",
+        new_value=f"PRO({days}d)",
+    ))
     return days
 
 

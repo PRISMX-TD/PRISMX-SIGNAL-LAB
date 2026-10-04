@@ -1881,7 +1881,13 @@
       "pasteToggle": "或者直接粘贴邮箱名单",
       "insertImage": "插入图片",
       "imageUploading": "上传中…"
-    }
+    },
+    "emailUnverified": "邮箱未验证",
+    "markVerified": "标记已验证",
+    "verifyEmailTitle": "标记邮箱已验证",
+    "verifyEmailBody": "把 {{email}} 标记为邮箱已验证？之后该用户即可绑定 MT5、领取试用；通过邀请链接注册的，扣下的试用会同时发放。此操作不可撤销，请先确认对方确实是这个邮箱的主人。",
+    "verifyEmailConfirm": "确认标记",
+    "verifyEmailOk": "已标记为邮箱已验证"
   },
   "simulator": {
     "title": "历史信号回放",

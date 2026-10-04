@@ -219,7 +219,7 @@
     "phone": "Số điện thoại",
     "phonePlaceholder": "Số điện thoại (không kèm mã quốc gia)",
     "phoneHint": "Chọn khu vực và nhập số điện thoại — dùng cho bảo mật tài khoản và thông báo quan trọng",
-    "inviteTrialBanner": "Đăng ký qua liên kết này để nhận {{days}} ngày PRO"
+    "inviteTrialBanner": "Đăng ký qua liên kết này và xác minh email để nhận {{days}} ngày PRO"
   },
   "order": {
     "slideToConfirm": "Trượt để xác nhận"
@@ -525,5 +525,24 @@
     "greetHintLink": "cài đặt tài khoản",
     "greetHintB": ".",
     "close": "Đóng lời chúc lễ hội"
+  },
+  "emailVerify": {
+    "bannerTitle": "Vui lòng xác minh email",
+    "bannerBody": "Chúng tôi đã gửi liên kết xác minh tới {{email}} — mở liên kết trong email để hoàn tất (hãy kiểm tra cả thư mục spam). Cần xác minh để liên kết MT5 và nhận dùng thử PRO.",
+    "resend": "Gửi lại",
+    "resendIn": "Gửi lại sau {{s}} giây",
+    "sending": "Đang gửi…",
+    "sent": "Đã gửi lại — hãy kiểm tra hộp thư",
+    "sendFailed": "Không gửi được, vui lòng thử lại sau",
+    "inlineBind": "Xác minh email để liên kết tài khoản MT5",
+    "inlineTrial": "Xác minh email để nhận dùng thử",
+    "inlineBody": "Mở liên kết trong email xác minh đã gửi tới {{email}}. Không thấy? Hãy kiểm tra thư mục spam hoặc gửi lại.",
+    "pageVerifying": "Đang xác minh email…",
+    "pageDoneTitle": "Đã xác minh email",
+    "pageDoneBody": "Giờ bạn có thể liên kết tài khoản MT5 và nhận dùng thử PRO.",
+    "pageFailTitle": "Xác minh không thành công",
+    "pageFailBody": "Liên kết này không hợp lệ hoặc đã hết hạn. Đăng nhập rồi bấm \"Gửi lại\" trên thanh thông báo phía trên để nhận email mới.",
+    "goBind": "Liên kết MT5",
+    "backToApp": "Quay lại ứng dụng"
   }
 }

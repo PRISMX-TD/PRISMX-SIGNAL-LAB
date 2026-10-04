@@ -125,6 +125,7 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
         disabledAt=u.disabled_at,
         disabledReason=u.disabled_reason,
         inviteCode=u.invite_code,
+        emailVerifiedAt=u.email_verified_at,
     )
 
 
@@ -530,6 +531,42 @@ def enable_user(
     # Likewise, so cached "disabled" instances don't keep refusing until the TTL.
     BRIDGE_AUTH_VERSION.bump()
     db.refresh(target)
+
+    account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
+    return _user_out(target, account_count)
+
+
+@router.post("/users/{user_id}/verify-email", response_model=AdminUserOut)
+def mark_email_verified(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """管理员手动把某账号标成「邮箱已验证」。
+
+    给收不到验证信的用户兜底：国内邮箱对境外发信源常拦截或延迟，用户联系客服、
+    确认身份后由管理员放行。与用户自己点链接走同一个 mark_verified——注册时扣下
+    的邀请试用也会照样补发，两条路结果一致。已验证则原样返回，不报错、不写审计。
+
+    只有「标记」没有「撤销」：撤销没有真实用途（验证只是证明邮箱收得到信），反而
+    会把一个已经绑了 MT5 的人弄进一个半拦截的怪状态。
+
+    Manually mark an account's email as verified — the fallback for users whose
+    verification mail never arrives. Goes through the same mark_verified as the
+    link, so a held-back invite trial is granted here too. Idempotent. There is
+    deliberately no "unverify": it has no real use and would strand an account
+    that has already bound MT5 in a half-gated state.
+    """
+    from app.services.email_verification import mark_verified
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    if target.email_verified_at is None:
+        mark_verified(db, target)
+        _log_change(db, admin.id, target.id, "account:verify_email", "unverified", "verified")
+        db.commit()
+        db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
     return _user_out(target, account_count)

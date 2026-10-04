@@ -33,7 +33,10 @@ from app.schemas import (
     RegisterRequest,
     ResetPasswordRequest,
     UserOut,
+    VerifyEmailRequest,
 )
+from app.services import email_verification
+from app.services.deps import get_current_user
 from app.services.email_domains import is_disposable_email
 from app.services.password_reset import (
     consume_token,
@@ -59,13 +62,20 @@ def _user_out(user: User) -> UserOut:
         # already filled it in would be gated again on every login.
         needsPhone=bool(user.phone_required) and not user.phone,
         needsNickname=not (user.nickname or "").strip(),
+        emailVerified=user.email_verified_at is not None,
     )
 
 
 @router.post("/register", response_model=AuthResponse)
 @limiter.limit(settings.RATE_LIMIT_REGISTER)
-def register(request: Request, req: RegisterRequest, db: Session = Depends(get_db)):
-    """注册新用户 / Register a new user."""
+def register(
+    request: Request,
+    req: RegisterRequest,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """注册新用户，并发一封邮箱验证信 / Register a new user and send the
+    verification email."""
     email = req.email.lower()
 
     # 先校验手机号再查邮箱：号码不合法是用户当场能改的输入错误，应该明确
@@ -117,34 +127,29 @@ def register(request: Request, req: RegisterRequest, db: Session = Depends(get_d
         # only; the user generates a visible token on the Bind page
         api_token=hash_api_token(generate_api_token()),
     )
-    # 邀请链接归因：只对新建用户生效，乱填/停用的 ref 静默忽略。链接开了「送
-    # 试用」且全局试用总闸也开着时，apply_invite 会顺手把 PRO 试用发掉并返回
-    # 天数（见 invite.py 的 _trial_grant_days）。
-    # Invite attribution: new users only; bad/disabled refs are ignored. When
-    # the link grants a trial and the global gate is open, apply_invite also
-    # grants PRO and returns the day count.
-    granted_days = apply_invite(db, user, req.ref)
+    # 邀请链接归因：只对新建用户生效，乱填/停用的 ref 静默忽略。**这里只归因、
+    # 不发试用**：邮箱还没验证，链接送的 PRO 试用等用户点了验证链接再补发（见
+    # invite.grant_deferred_invite_trial）——否则随手填个不存在的邮箱就能白领试用。
+    # Invite attribution only; bad/disabled refs are ignored. The link's PRO
+    # trial is held back until the address is verified (see
+    # invite.grant_deferred_invite_trial) — otherwise any made-up address would
+    # collect a free trial.
+    apply_invite(db, user, req.ref, grant_trial=False)
     db.add(user)
-    if granted_days:
-        # 必须先 flush：User.id 是 flush 时才生成的 Python 侧默认值，而
-        # AdminAuditLog.target_user_id 是指向 users.id 的 NOT NULL 外键——在
-        # flush 之前拿 user.id 会写出一条 null 外键，Postgres 上直接违约、注册
-        # 请求 500。flush 不结束事务，下面仍是同一次 commit。
-        # Flush first: User.id is a Python-side default generated at flush, and
-        # target_user_id is a NOT NULL FK to users.id — taken any earlier it is
-        # null, which violates the constraint on Postgres and 500s the whole
-        # registration. flush does not end the transaction; the commit below is
-        # still the same one.
-        db.flush()
-        db.add(AdminAuditLog(
-            admin_user_id=user.id,
-            target_user_id=user.id,
-            field="plan:invite_trial",
-            old_value="FREE",
-            new_value=f"PRO({granted_days}d)",
-        ))
+    # flush 拿到 user.id 再签验证令牌（令牌行有指向 users.id 的外键）；仍是同一次
+    # commit。/ Flush for user.id before issuing the token (FK); same commit.
+    db.flush()
+    raw = email_verification.issue_token(db, user)
+    # 注册那封也计入每小时上限，免得注册完立刻连点「重新发送」多出一封。
+    # The sign-up mail counts toward the hourly cap too.
+    email_verification.too_many_recent_sends(user.id)
     db.commit()
     db.refresh(user)
+    # 后台发信：发信商往返几百毫秒，不该让注册按钮转着等；发失败也只是"没收到"，
+    # 用户登录后能在提示条里重新发送。明文令牌只交给发信函数。
+    # Sent in the background so the sign-up button doesn't wait on the provider;
+    # a failure only means "no mail yet" and the banner offers a resend.
+    background.add_task(email_verification.send_verification_email, user.email, raw)
 
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user))
@@ -180,6 +185,8 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
             password_hash=None,
             api_token=hash_api_token(generate_api_token()),
             google_linked_at=datetime.now(timezone.utc),
+            # Google 已经替我们验证过这个邮箱 / Google already verified the address
+            email_verified_at=datetime.now(timezone.utc),
         )
         # 邀请链接归因：仅创建分支。对已存在用户应用会覆盖管理员手写备注、
         # 伪造注册来源——老用户带着 localStorage 里的 ref 来登录是常态。
@@ -189,16 +196,16 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         granted_days = apply_invite(db, user, req.ref)
         db.add(user)
         if granted_days:
-            # 这个 flush 不是多余的：道理和上面 register() 里那段完整注释一样——
-            # User.id 要 flush 才生成，AdminAuditLog.target_user_id 是 NOT NULL
-            # 外键，提前拿会写出 null 外键，Postgres 上违约、整个注册 500。别看
-            # 它紧挨着下面的 commit() 就当成重复删掉。
-            # This flush is load-bearing for the same reason as the full comment
-            # in register() above: User.id is only generated at flush, and
-            # target_user_id is a NOT NULL FK — taken early it is null and
-            # violates the constraint on Postgres, 500ing the whole registration.
-            # Don't read it as redundant with the commit() two lines down and
-            # delete it.
+            # 这个 flush 不是多余的：User.id 是 flush 时才生成的 Python 侧默认值，
+            # 而 AdminAuditLog.target_user_id 是指向 users.id 的 NOT NULL 外键——
+            # 提前拿会写出 null 外键，Postgres 上违约、整个注册 500。flush 不结束
+            # 事务，下面仍是同一次 commit。别看它紧挨着 commit() 就当成重复删掉。
+            # This flush is load-bearing: User.id is a Python-side default only
+            # generated at flush, and target_user_id is a NOT NULL FK to users.id
+            # — taken early it is null and violates the constraint on Postgres,
+            # 500ing the whole registration. flush doesn't end the transaction;
+            # the commit below is still the same one. Don't read it as redundant
+            # with the commit() two lines down and delete it.
             db.flush()
             db.add(AdminAuditLog(
                 admin_user_id=user.id,
@@ -377,6 +384,10 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
 
     user.password_hash = hash_password(req.password)
     user.token_version = (user.token_version or 0) + 1
+    # 用重置邮件里的链接改了密码，等于证明了这个邮箱归他——顺手算作验证通过，
+    # 省得他再去点一封验证信。/ Completing a reset proves mailbox ownership, so
+    # it counts as verification too.
+    email_verification.mark_verified(db, user)
     db.commit()
     # 只清「这个账号 + 发起重置的这个来源」那一条计数：锁定本来就是按来源分开算
     # 的，被锁住的正是用户此刻所在的这个来源（他就是在这里试错才被锁的），清它
@@ -387,3 +398,55 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
     # another network leaves that network alone, where nothing is locked either.
     clear_failed_logins(user.email, login_source(request))
     return MessageOut(message="密码已重置，请用新密码登录 / Password updated — please sign in with it")
+
+
+# ---------- 邮箱验证 / email verification ----------
+
+
+@router.post("/verify-email", response_model=MessageOut)
+@limiter.limit(settings.RATE_LIMIT_VERIFY_EMAIL)
+def verify_email(request: Request, req: VerifyEmailRequest, db: Session = Depends(get_db)):
+    """点验证邮件里的链接。不要求登录、也不登录——理由同 reset_password：链接会
+    被转发、被邮件网关预抓取，凭它签发会话等于「点开链接」=「拿到账号」。
+
+    幂等：同一个链接点两次都返回成功（见 email_verification.consume_token）。
+    Clicking the verification link. Neither requires nor creates a session, for
+    the same reason as reset_password. Idempotent.
+    """
+    user = email_verification.consume_token(db, req.token)
+    if user is None:
+        raise HTTPException(
+            status_code=400,
+            detail="验证链接无效或已过期，请登录后重新发送 / This verification link is invalid or has expired — sign in and resend it",
+        )
+    db.commit()
+    return MessageOut(message="邮箱已验证 / Email verified")
+
+
+@router.post("/verify-email/resend", response_model=MessageOut)
+@limiter.limit(settings.RATE_LIMIT_PASSWORD_RESET)
+def resend_verification(
+    request: Request,
+    background: BackgroundTasks,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """重新发送验证邮件（需登录，只发给自己的注册邮箱）。
+
+    与找回密码不同，这里是登录态、收件人就是调用者自己，不存在邮箱枚举问题，所以
+    超限可以明确回 429 告诉用户等一等。
+    Resend the verification mail to the caller's own address. Unlike the reset
+    endpoint this is authenticated and self-addressed, so there is no
+    enumeration concern and over-limit can honestly answer 429.
+    """
+    if user.email_verified_at is not None:
+        return MessageOut(message="邮箱已验证 / Email already verified")
+    if email_verification.too_many_recent_sends(user.id):
+        raise HTTPException(
+            status_code=429,
+            detail="发送太频繁了，请稍后再试（也看看垃圾邮件箱） / Too many emails sent — try again later (and check your spam folder)",
+        )
+    raw = email_verification.issue_token(db, user)
+    db.commit()
+    background.add_task(email_verification.send_verification_email, user.email, raw)
+    return MessageOut(message="验证邮件已发送 / Verification email sent")
