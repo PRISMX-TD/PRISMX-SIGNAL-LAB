@@ -450,6 +450,7 @@ function Invoke-Tick {
 # ---------------------------------------------------------------- 运维接口(SG 看门狗转来的按钮)
 
 $script:OpsNonces = @{}
+$script:LastTickAt = $null
 $script:OpsLastRestartAt = -100000
 $script:OpsHistory = New-Object System.Collections.ArrayList
 $OpsHistoryFile = Join-Path $LogDir "ops-history.jsonl"
@@ -537,6 +538,7 @@ function Invoke-OpsRequest($ctx) {
         [array]::Reverse($recent)
         return Send-OpsJson $ctx 200 ([ordered]@{
             restartsUsed = (Get-RestartsUsed $now); restartsMax = $Cfg.MaxRestartsPerHour; cooldownSec = $cooldown
+            lastTickAgoSec = $(if ($null -ne $script:LastTickAt) { [int]($now - $script:LastTickAt) } else { $null })
             taskState = (Get-TaskState); history = $recent
         })
     }
@@ -640,6 +642,7 @@ while ($true) {
     if ($now -ge $nextTick) {
         try { Invoke-Tick | Out-Null }
         catch { Write-WdLog "本轮检查出错(继续):$($_.Exception.Message)" }
+        $script:LastTickAt = $now
         if ($now - $lastCleanup -gt 86400) { Remove-OldLogs; $lastCleanup = $now }
         $nextTick = $now + $Cfg.CheckEverySec
     }

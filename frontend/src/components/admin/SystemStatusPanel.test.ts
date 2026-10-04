@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { TFunction } from 'i18next'
 import { ApiHttpError } from '../../api/client'
-import { fmtDuration, isUnreachable } from './SystemStatusPanel'
+import type { OpsStatus } from '../../api/types'
+import { fmtDuration, isUnreachable, watchdogComponent, WATCHDOG_STALE_SEC } from './SystemStatusPanel'
 
 // 只看取了哪个 key、带了什么数：/ echo the key and count back
 const t = ((key: string, opts?: { n?: number }) => (opts?.n == null ? key : `${key}:${opts.n}`)) as unknown as TFunction
@@ -36,5 +37,59 @@ describe('fmtDuration', () => {
   it('没有数据时说「未知」/ unknown when missing', () => {
     expect(fmtDuration(t, null)).toBe('admin.health.unknown')
     expect(fmtDuration(t, undefined)).toBe('admin.health.unknown')
+  })
+})
+
+describe('watchdogComponent', () => {
+  const ops = (over: Partial<OpsStatus> = {}): OpsStatus => ({
+    backend: { restartsUsed: 0, restartsMax: 3, cooldownSec: 0, lastTickAgoSec: 5 },
+    gateway: { restartsUsed: 0, restartsMax: 3, cooldownSec: 0, lastTickAgoSec: 10 },
+    operators: 2,
+    history: [],
+    ...over,
+  })
+
+  it('还没读到时是灰灯 / idle before the first answer', () => {
+    expect(watchdogComponent(null, null).level).toBe('idle')
+  })
+
+  it('两边都在、额度没满是绿灯 / both online', () => {
+    const c = watchdogComponent(ops(), null)
+    expect(c.level).toBe('ok')
+    expect(c.sg).toBe('ok')
+    expect(c.vps).toBe('ok')
+  })
+
+  it('SG 看门狗连不上是红灯 / SG unreachable is down', () => {
+    const c = watchdogComponent(null, 'HTTP 502')
+    expect(c.level).toBe('down')
+    expect(c.reasons).toEqual(['sgDown'])
+  })
+
+  it('主循环卡住（接口还活着）也是红灯 / stuck main loop is down', () => {
+    const o = ops()
+    o.backend.lastTickAgoSec = WATCHDOG_STALE_SEC + 1
+    expect(watchdogComponent(o, null).reasons).toContain('sgStale')
+    expect(watchdogComponent(o, null).level).toBe('down')
+  })
+
+  it('VPS 看门狗连不上是黄灯 / VPS unreachable is warn', () => {
+    const c = watchdogComponent(ops({ gateway: { error: 'unreachable' } }), null)
+    expect(c.level).toBe('warn')
+    expect(c.reasons).toEqual(['vpsDown'])
+  })
+
+  it('额度用完是红灯，没人有口令是黄灯 / budget exhausted is down, no operators is warn', () => {
+    const full = ops()
+    full.backend.restartsUsed = 3
+    expect(watchdogComponent(full, null).level).toBe('down')
+    expect(watchdogComponent(ops({ operators: 0 }), null).level).toBe('warn')
+  })
+
+  it('旧版看门狗没有 lastTickAgoSec 时不判卡住 / old watchdogs without the field are not flagged', () => {
+    const o = ops()
+    delete o.backend.lastTickAgoSec
+    delete o.gateway.lastTickAgoSec
+    expect(watchdogComponent(o, null).level).toBe('ok')
   })
 })

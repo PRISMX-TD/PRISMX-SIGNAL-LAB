@@ -486,6 +486,7 @@ class Watchdog:
         self.last_n_restarts = None
         self.last_state = None
         self.history = None      # 运维接口开着时由 main 挂上 prismx_ops.History
+        self.last_tick_at = None
 
     # ---- 给运维接口用 / used by the ops endpoint ----
     def log_line(self, msg):
@@ -511,6 +512,9 @@ class Watchdog:
 
     def tick(self):
         now = time.monotonic()
+        # 给状态页的「看门狗」灯看：主循环还在一轮轮地查。运维接口在另一个线程，
+        # 接口能回话不代表主循环没卡住。/ Main-loop liveness for the status page.
+        self.last_tick_at = now
         cfg = self.cfg
         service = cfg["SERVICE"]
         unit = unit_state(service)

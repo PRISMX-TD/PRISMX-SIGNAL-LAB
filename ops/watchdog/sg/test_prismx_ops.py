@@ -136,7 +136,9 @@ class HandleTest(Base):
     def test_status(self):
         status, body = self.call("/ops/status", method="GET")
         self.assertEqual(status, 200)
-        self.assertEqual(body["backend"], {"restartsUsed": 0, "restartsMax": 3, "cooldownSec": 0})
+        self.assertEqual(body["backend"], {"restartsUsed": 0, "restartsMax": 3, "cooldownSec": 0, "lastTickAgoSec": None})
+        self.watchdog.last_tick_at = time.monotonic() - 12
+        self.assertGreaterEqual(self.call("/ops/status", method="GET")[1]["backend"]["lastTickAgoSec"], 12)
         self.assertEqual(body["gateway"]["restartsMax"], 3)
         self.assertEqual(body["operators"], 1)
 

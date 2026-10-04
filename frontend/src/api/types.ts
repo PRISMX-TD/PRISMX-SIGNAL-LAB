@@ -438,6 +438,8 @@ export interface OpsBudget {
   restartsUsed: number
   restartsMax: number
   cooldownSec: number
+  // 看门狗主循环上一轮距今几秒；旧版看门狗没有这个字段
+  lastTickAgoSec?: number | null
 }
 
 export interface OpsStatus {

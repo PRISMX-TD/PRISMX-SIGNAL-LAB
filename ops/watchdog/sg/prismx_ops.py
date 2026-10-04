@@ -349,6 +349,10 @@ def handle(ctx, method, path, headers, body_bytes, client_ip):
     return restart_gateway(ctx, operator)
 
 
+def _ago(mono, now):
+    return None if mono is None else max(0, int(now - mono))
+
+
 def status_payload(ctx):
     wd = ctx.watchdog
     now = time.monotonic()
@@ -360,6 +364,8 @@ def status_payload(ctx):
             "restartsUsed": wd.budget.used(now),
             "restartsMax": wd.budget.per_hour,
             "cooldownSec": ctx.cooldown.remaining("restart-backend"),
+            # 主循环上一轮距今几秒；超过两三轮没动就是卡住了（接口线程还活着也一样）。
+            "lastTickAgoSec": _ago(getattr(wd, "last_tick_at", None), now),
         },
         "gateway": gateway,
         "operators": len(ctx.operators.names()),

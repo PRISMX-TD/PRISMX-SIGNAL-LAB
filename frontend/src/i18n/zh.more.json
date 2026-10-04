@@ -1099,6 +1099,31 @@
           "hint": {
             "ok": "仅供参考。"
           }
+        },
+        "watchdog": {
+          "name": "看门狗",
+          "facts": "SG 看门狗 {{sg}} · VPS 看门狗 {{vps}} · 本小时重启：后端 {{bu}}/{{bm}}，gateway {{gu}}/{{gm}}",
+          "state": {
+            "ok": "在线",
+            "down": "连不上",
+            "stale": "卡住了",
+            "unknown": "未知"
+          },
+          "reason": {
+            "sgDown": "SG 看门狗连不上",
+            "sgStale": "SG 看门狗的检查停了",
+            "vpsDown": "VPS 看门狗连不上（隧道断了或没在运行）",
+            "vpsStale": "VPS 看门狗的检查停了",
+            "budgetBackend": "后端这小时已重启满次数，自动重启停手了",
+            "budgetGateway": "gateway 这小时已重启满次数，自动重启停手了",
+            "noOperators": "还没有人有运维口令"
+          },
+          "hint": {
+            "ok": "后端和 gateway 卡死时，看门狗会自动重启（每小时最多 3 次）。上面两个重启按钮也靠它。",
+            "warn": "看门狗有一部分不正常（原因见上一行），对应的自动重启和重启按钮可能用不了。联系 Rex。",
+            "down": "看门狗连不上、卡住了或已经停手：卡死时不会再自动重启，重启按钮也可能用不了。别反复按，联系 Rex。",
+            "idle": "正在读取看门狗状态…"
+          }
         }
       },
       "loopTable": {
@@ -1220,7 +1245,6 @@
         "passwordHint": "口令找 Rex 要，每人一个。输错 5 次锁 15 分钟。",
         "confirmRestart": "确认重启",
         "budget": "本小时已重启 {{used}}/{{max}} 次（含看门狗自动重启）",
-        "budgetLine": "本小时重启次数（含看门狗自动重启）：后端 {{bu}}/{{bm}} · gateway {{gu}}/{{gm}}",
         "budgetFull": "1 小时内已重启 {{max}} 次，别再按了，联系 Rex",
         "cooldown": "刚有人按过，{{sec}} 秒后才能再按",
         "opsUnavailable": "重启按钮暂不可用：{{msg}}",

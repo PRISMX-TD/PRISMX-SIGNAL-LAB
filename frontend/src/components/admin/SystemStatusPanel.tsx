@@ -29,7 +29,47 @@ import { SkeletonLine } from '../Skeleton'
 const REFRESH_MS = 15_000
 
 const COMPONENT_ORDER = ['backend', 'database', 'redis', 'gateway', 'feed', 'signals', 'loops', 'online'] as const
-type ComponentKey = (typeof COMPONENT_ORDER)[number]
+// 'watchdog' 不是后端给的：前端按看门狗运维接口的回应自己算（见 watchdogComponent）。
+// 'watchdog' isn't from the backend; the page derives it from the ops endpoint.
+type ComponentKey = (typeof COMPONENT_ORDER)[number] | 'watchdog'
+
+const LEVEL_RANK: Record<HealthLevel, number> = { idle: 0, ok: 1, warn: 2, down: 3 }
+
+/** 主循环多少秒没动算卡住：看门狗 30 秒一轮，给足 5 轮。/ Main loop considered stuck after this. */
+export const WATCHDOG_STALE_SEC = 150
+
+type WdState = 'ok' | 'down' | 'stale' | 'unknown'
+
+/** 「看门狗」这盏灯：SG 看门狗回不回话、主循环在不在转、VPS 看门狗回不回话、额度用完没有、
+ *  有没有人有运维口令。lastTickAgoSec 是新字段，旧看门狗没有就不判这一项。
+ *  The watchdog light, derived from the ops endpoint's answer. */
+export function watchdogComponent(ops: OpsStatus | null, opsError: string | null): HealthComponent {
+  if (!ops && opsError === null) return { level: 'idle' }
+  const stale = (ago: number | null | undefined) => ago != null && ago > WATCHDOG_STALE_SEC
+  const sg: WdState = opsError !== null ? 'down' : !ops ? 'unknown' : stale(ops.backend.lastTickAgoSec) ? 'stale' : 'ok'
+  const gw = ops?.gateway
+  const vps: WdState = !ops ? 'unknown' : gw?.error ? 'down' : stale(gw?.lastTickAgoSec) ? 'stale' : 'ok'
+  const reasons: string[] = []
+  let level: HealthLevel = 'ok'
+  const raise = (lv: HealthLevel, reason: string) => {
+    reasons.push(reason)
+    if (LEVEL_RANK[lv] > LEVEL_RANK[level]) level = lv
+  }
+  if (sg === 'down') raise('down', 'sgDown')
+  if (sg === 'stale') raise('down', 'sgStale')
+  if (ops) {
+    if (vps === 'down') raise('warn', 'vpsDown')
+    if (vps === 'stale') raise('warn', 'vpsStale')
+    if (ops.backend.restartsUsed >= ops.backend.restartsMax) raise('down', 'budgetBackend')
+    if (gw?.restartsMax != null && (gw.restartsUsed ?? 0) >= gw.restartsMax) raise('down', 'budgetGateway')
+    if (ops.operators === 0) raise('warn', 'noOperators')
+  }
+  return {
+    level, sg, vps, reasons, error: opsError ?? undefined,
+    bu: ops?.backend.restartsUsed, bm: ops?.backend.restartsMax,
+    gu: gw?.restartsUsed, gm: gw?.restartsMax,
+  }
+}
 
 const DOT: Record<HealthLevel, string> = {
   ok: 'bg-up',
@@ -91,7 +131,7 @@ function num(v: unknown): number | null {
 
 /** 每盏灯下面那一行「依据」。探测失败时只有 error。/ The facts line under each light. */
 function factsLine(t: TFunction, key: ComponentKey, c: HealthComponent): string {
-  if (c.error) return c.error
+  if (c.error && key !== 'watchdog') return c.error
   const ago = (s: unknown) => t('admin.health.ago', { t: fmtDuration(t, num(s)) })
   const flag = (v: unknown) =>
     v === true ? t('admin.health.yes') : v === false ? t('admin.health.no') : t('admin.health.unknown')
@@ -117,6 +157,15 @@ function factsLine(t: TFunction, key: ComponentKey, c: HealthComponent): string 
       return c.lastAgoSec == null ? '' : t('admin.health.comp.signals.facts', { ago: ago(c.lastAgoSec) })
     case 'loops':
       return t('admin.health.comp.loops.facts', { total: num(c.total) ?? 0, down: num(c.down) ?? 0, warn: num(c.warn) ?? 0 })
+    case 'watchdog': {
+      if (c.level === 'idle') return ''
+      const st = (v: unknown) => t(`admin.health.comp.watchdog.state.${String(v)}`)
+      const line = t('admin.health.comp.watchdog.facts', {
+        sg: st(c.sg), vps: st(c.vps), bu: c.bu ?? '—', bm: c.bm ?? '—', gu: c.gu ?? '—', gm: c.gm ?? '—',
+      })
+      const why = ((c.reasons as string[] | undefined) ?? []).map((r) => t(`admin.health.comp.watchdog.reason.${r}`))
+      return [line, ...why].join('；')
+    }
     case 'online':
       return t('admin.health.comp.online.facts', {
         users: num(c.users) ?? '—', bridges: num(c.bridges) ?? '—', gw: num(c.gatewayAccounts) ?? '—',
@@ -509,8 +558,11 @@ export default function SystemStatusPanel() {
     }
   }, [load])
 
-  // 读不到后端时，整体结论就是「异常」，不管上一份数据怎么说。
-  const overall: HealthLevel | null = unreachable !== null ? 'down' : data?.overall ?? null
+  const watchdog = watchdogComponent(ops, opsError)
+  // 读不到后端时，整体结论就是「异常」，不管上一份数据怎么说；看门狗那盏灯也算进整体结论。
+  const backendOverall: HealthLevel | null = unreachable !== null ? 'down' : data?.overall ?? null
+  const overall: HealthLevel | null = backendOverall === null ? null
+    : LEVEL_RANK[watchdog.level] > LEVEL_RANK[backendOverall] ? watchdog.level : backendOverall
   const updated = data ? new Date(data.generatedAt * 1000).toLocaleTimeString() : null
 
   return (
@@ -586,18 +638,17 @@ export default function SystemStatusPanel() {
                 )}
               </ComponentCard>
             ))}
+            <ComponentCard k="watchdog" c={watchdog} />
           </div>
           <LoopTable rows={data.loops} onRestart={askRestartLoop} onRefreshCompetitions={askRefreshCompetitions} busy={actionBusy} />
         </div>
       )}
 
-      {ops && (
-        <p className="mb-3 text-xs text-neutral-500">
-          {t('admin.health.actions.budgetLine', {
-            bu: ops.backend.restartsUsed, bm: ops.backend.restartsMax,
-            gu: ops.gateway.restartsUsed ?? '—', gm: ops.gateway.restartsMax ?? '—',
-          })}
-        </p>
+      {/* 后端连不上时上面那排灯不显示，看门狗这盏单独留着：它正是此刻要看的 */}
+      {!data && watchdog.level !== 'idle' && (
+        <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <ComponentCard k="watchdog" c={watchdog} />
+        </div>
       )}
       <OpsHistoryList ops={ops} />
 

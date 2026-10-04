@@ -1099,6 +1099,31 @@
           "hint": {
             "ok": "For reference only."
           }
+        },
+        "watchdog": {
+          "name": "Watchdogs",
+          "facts": "SG watchdog {{sg}} · VPS watchdog {{vps}} · restarts this hour: backend {{bu}}/{{bm}}, gateway {{gu}}/{{gm}}",
+          "state": {
+            "ok": "online",
+            "down": "unreachable",
+            "stale": "stuck",
+            "unknown": "unknown"
+          },
+          "reason": {
+            "sgDown": "SG watchdog unreachable",
+            "sgStale": "SG watchdog checks have stopped",
+            "vpsDown": "VPS watchdog unreachable (tunnel down or not running)",
+            "vpsStale": "VPS watchdog checks have stopped",
+            "budgetBackend": "backend hit this hour's restart limit; automatic restarts paused",
+            "budgetGateway": "gateway hit this hour's restart limit; automatic restarts paused",
+            "noOperators": "nobody has an ops password yet"
+          },
+          "hint": {
+            "ok": "When the backend or gateway hangs, the watchdogs restart it automatically (at most 3 times an hour). The two restart buttons above rely on them too.",
+            "warn": "Part of the watchdog setup isn't working (reason above); the matching automatic restarts and restart buttons may be unavailable. Contact Rex.",
+            "down": "A watchdog is unreachable, stuck or has paused: hangs won't be fixed automatically and the restart buttons may not work. Don't keep pressing; contact Rex.",
+            "idle": "Reading watchdog status…"
+          }
         }
       },
       "loopTable": {
@@ -1220,7 +1245,6 @@
         "passwordHint": "Get one from Rex; each person has their own. 5 wrong attempts lock it for 15 minutes.",
         "confirmRestart": "Restart",
         "budget": "Restarted {{used}}/{{max}} times this hour (including watchdog restarts)",
-        "budgetLine": "Restarts this hour (including watchdog restarts): backend {{bu}}/{{bm}} · gateway {{gu}}/{{gm}}",
         "budgetFull": "Already restarted {{max}} times this hour. Don't press again; contact Rex",
         "cooldown": "Someone just pressed this; available again in {{sec}}s",
         "opsUnavailable": "Restart buttons unavailable: {{msg}}",
