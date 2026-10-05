@@ -2658,6 +2658,7 @@
       "restore": "Restore",
       "disqualifyReason": "Disqualification reason",
       "settle": "Settle",
+      "endConfirm": "End \"{{name}}\"? This can't be undone from the admin panel — the competition stops scoring.",
       "settleConfirm": "Settlement is permanent — final ranks lock in and prizes are awarded automatically. Confirm?",
       "refresh": "Refresh now",
       "refreshed": "Board recomputed",

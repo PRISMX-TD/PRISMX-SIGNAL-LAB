@@ -204,9 +204,11 @@ function baselineRange(minRaw: string, maxRaw: string): BaselineRange {
 export default function CompetitionsPanel() {
   const { t } = useTranslation()
   const { toast, showToast } = useToast()
-  // 待确认的破坏性动作（删除 / 终审），用站内 ConfirmModal 而不是 window.confirm。
-  // Pending destructive action (delete / settle), confirmed via ConfirmModal.
-  const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'settle'; comp: CompetitionAdminRow } | null>(null)
+  // 待确认的破坏性动作（删除 / 终审 / 结束比赛），用站内 ConfirmModal 而不是 window.confirm。
+  // 结束比赛也要确认：状态只进不退，误按后台无法撤回（2026-10-05 出过一次）。
+  // Pending destructive action (delete / settle / end), confirmed via ConfirmModal.
+  // Ending needs a confirm too: status never goes back, so a misclick can't be undone.
+  const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'settle' | 'end'; comp: CompetitionAdminRow } | null>(null)
 
   // ---- ① 比赛列表 / competition list ----
   const [comps, setComps] = useState<CompetitionAdminRow[]>([])
@@ -605,7 +607,7 @@ export default function CompetitionsPanel() {
                               type="button"
                               className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
                               disabled={advancingId === c.id}
-                              onClick={() => advance(c)}
+                              onClick={() => (c.status === 'running' ? setPendingAction({ kind: 'end', comp: c }) : advance(c))}
                             >
                               {advancingId === c.id
                                 ? t('common.loading')
@@ -1040,18 +1042,27 @@ export default function CompetitionsPanel() {
       {pendingAction && (
         <ConfirmModal
           center
-          title={pendingAction.kind === 'delete' ? t('competition.admin.delete') : t('competition.admin.settle')}
+          title={
+            pendingAction.kind === 'delete'
+              ? t('competition.admin.delete')
+              : pendingAction.kind === 'end'
+                ? t('competition.admin.advance.toEnded')
+                : t('competition.admin.settle')
+          }
           message={
             pendingAction.kind === 'delete'
               ? t('competition.admin.deleteConfirm', { name: pendingAction.comp.name, n: pendingAction.comp.participantCount })
-              : t('competition.admin.settleConfirm')
+              : pendingAction.kind === 'end'
+                ? t('competition.admin.endConfirm', { name: pendingAction.comp.name })
+                : t('competition.admin.settleConfirm')
           }
-          danger={pendingAction.kind === 'delete'}
+          danger={pendingAction.kind !== 'settle'}
           onCancel={() => setPendingAction(null)}
           onConfirm={() => {
             const action = pendingAction
             setPendingAction(null)
             if (action.kind === 'delete') void remove(action.comp)
+            else if (action.kind === 'end') void advance(action.comp)
             else void settle(action.comp)
           }}
         />

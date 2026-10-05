@@ -2656,6 +2656,7 @@
       "restore": "恢复资格",
       "disqualifyReason": "取消资格原因",
       "settle": "终审",
+      "endConfirm": "确定结束「{{name}}」？结束后无法在后台恢复为进行中，比赛将停止计分。",
       "settleConfirm": "终审后名次永久定格并自动发奖，确认？",
       "refresh": "立即刷新",
       "refreshed": "榜单已重算",

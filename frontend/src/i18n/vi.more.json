@@ -1739,6 +1739,7 @@
       "restore": "Khôi phục",
       "disqualifyReason": "Lý do loại",
       "settle": "Tổng kết",
+      "endConfirm": "Kết thúc \"{{name}}\"? Không thể khôi phục về đang diễn ra từ trang quản trị — cuộc thi sẽ ngừng tính điểm.",
       "settleConfirm": "Tổng kết là vĩnh viễn — hạng chung cuộc được chốt và giải thưởng tự động trao. Xác nhận?",
       "refresh": "Cập nhật ngay",
       "refreshed": "Đã tính lại bảng",
