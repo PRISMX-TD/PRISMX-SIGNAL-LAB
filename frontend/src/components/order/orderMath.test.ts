@@ -239,3 +239,13 @@ describe('checkPendingPrice', () => {
     expect(checkPendingPrice('STOP', false, 3290, null, null)).toBeNull()
   })
 })
+
+describe('slTooClose', () => {
+  it('flags a stop within 0.05% of price (100405 case)', async () => {
+    const { slTooClose } = await import('./orderMath')
+    expect(slTooClose(4168.02, 4168.17)).toBe(true)
+    expect(slTooClose(4162.0, 4168.17)).toBe(false)
+    expect(slTooClose(null, 4168.17)).toBe(false)
+    expect(slTooClose(4168.02, null)).toBe(false)
+  })
+})

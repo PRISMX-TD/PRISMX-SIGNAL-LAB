@@ -146,6 +146,7 @@
     "riskNeedsSl": "先设置止损才能按风险百分比计算手数",
     "riskUnsupportedPair": "该品种暂不支持按风险百分比估算手数，请手动填写手数",
     "slWrongSide": "止损价与现价方向不对",
+    "slTooClose": "止损离现价太近（至少 0.05%），已禁止下单",
     "tpWrongSide": "止盈价与现价方向不对",
     "signalExpiresIn": "信号剩余",
     "signalExpiredInModal": "该信号刚刚过期，无法再下单",

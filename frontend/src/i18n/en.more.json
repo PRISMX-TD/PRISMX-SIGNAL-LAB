@@ -146,6 +146,7 @@
     "riskNeedsSl": "Set a stop loss to size by risk %",
     "riskUnsupportedPair": "Risk-based sizing isn't supported for this pair yet — enter the volume manually",
     "slWrongSide": "Stop loss is on the wrong side of the current price",
+    "slTooClose": "Stop loss is too close to the price (min 0.05%)",
     "tpWrongSide": "Take profit is on the wrong side of the current price",
     "signalExpiresIn": "Signal expires in",
     "signalExpiredInModal": "This signal just expired and can no longer be traded",

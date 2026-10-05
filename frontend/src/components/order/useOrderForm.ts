@@ -32,7 +32,7 @@ import {
   parseOptionalNumber,
   previewRisk,
   stepVolume,
-  suggestVolumeForRisk,
+  slTooClose, suggestVolumeForRisk,
 } from './orderMath'
 
 export type Side = 'BUY' | 'SELL'
@@ -108,6 +108,8 @@ export interface OrderForm {
   slNum: number | null
   tpNum: number | null
   slInvalid: boolean
+  /** 止损离现价太近（slInvalid 的子集）/ SL too close (subset of slInvalid) */
+  slTooClose: boolean
   tpInvalid: boolean
   slTpInvalid: boolean
   estMargin: number | null
@@ -236,7 +238,12 @@ export function useOrderForm({
   const [tp, setTp] = useState(() => (initialTakeProfit != null ? String(initialTakeProfit) : ''))
   const slNum = parseOptionalNumber(sl)
   const tpNum = parseOptionalNumber(tp)
-  const { slInvalid, tpInvalid } = checkSlTp(isBuy, slNum, tpNum, entryRef)
+  const sideCheck = checkSlTp(isBuy, slNum, tpNum, entryRef)
+  // 止损太近同样拦下单：按风险算手数时距离越小手数越大，且 MT5 会拒收这种止损。
+  // A too-close SL blocks submit too: it inflates risk-sized lots and MT5 rejects it.
+  const slClose = !sideCheck.slInvalid && slTooClose(slNum, entryRef)
+  const slInvalid = sideCheck.slInvalid || slClose
+  const tpInvalid = sideCheck.tpInvalid
 
   // 按风险百分比建议手数：净值 × 风险% ÷ 每手止损亏损，随 SL / 净值 / 风险% / 报价
   // （含券商规格）变化重算。选中账户的报价自带该券商的合约规格（桥接 ≥ 1.3.23），
@@ -293,7 +300,7 @@ export function useOrderForm({
     entryType, setEntryType, price, setPrice, priceNum, priceError, pendingType,
     volume, setVolume, typeVolume, blurVolume, stepLot, parsedVolume,
     sizeMode, setSizeMode, riskPct, setRiskPct, riskNeedsSl, riskUnsupported,
-    sl, tp, setSl, setTp, slNum, tpNum, slInvalid, tpInvalid, slTpInvalid: slInvalid || tpInvalid,
+    sl, tp, setSl, setTp, slNum, tpNum, slInvalid, slTooClose: slClose, tpInvalid, slTpInvalid: slInvalid || tpInvalid,
     estMargin, riskPreview,
     orderId, rotateOrderId,
   }

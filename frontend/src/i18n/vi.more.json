@@ -146,6 +146,7 @@
     "riskNeedsSl": "Hãy đặt Stop Loss để tính khối lượng theo % rủi ro",
     "riskUnsupportedPair": "Cặp này chưa hỗ trợ tính khối lượng theo rủi ro — vui lòng nhập khối lượng thủ công",
     "slWrongSide": "Stop Loss nằm sai phía so với giá hiện tại",
+    "slTooClose": "Stop Loss quá gần giá hiện tại (tối thiểu 0.05%)",
     "tpWrongSide": "Take Profit nằm sai phía so với giá hiện tại",
     "signalExpiresIn": "Tín hiệu hết hạn sau",
     "signalExpiredInModal": "Tín hiệu này vừa hết hạn, không thể giao dịch nữa",

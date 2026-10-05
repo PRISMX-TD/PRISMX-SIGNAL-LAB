@@ -171,6 +171,17 @@ export function checkPendingPrice(
  * Even with no reference price, a filled pair must satisfy SL < TP (BUY) or
  * SL > TP (SELL), catching a swapped SL/TP before MT5 has to reject it.
  */
+/** 止损离参考价的最小距离（占价格比例）。0.05% ≈ 黄金 4000 时 2 美元。
+ *  2026-10-01 100405：止损离成交价仅 0.15，按风险算出 9.75 手，MT5 拒收止损后裸开亏 6035。
+ *  Minimum SL distance as a fraction of price; a hair-thin stop explodes risk-sized lots. */
+export const MIN_SL_DIST_PCT = 0.0005
+
+/** 止损是否离参考价太近（方向错误另由 checkSlTp 判）。/ Whether the SL sits too close to the reference. */
+export function slTooClose(slNum: number | null, entryRef: number | null): boolean {
+  if (slNum == null || Number.isNaN(slNum) || entryRef == null || entryRef <= 0) return false
+  return Math.abs(entryRef - slNum) < entryRef * MIN_SL_DIST_PCT
+}
+
 export function checkSlTp(isBuy: boolean, slNum: number | null, tpNum: number | null, entryRef: number | null): SlTpCheck {
   // 「填了但读不出来」必须判非法，不能当成「没填」。
   //

@@ -146,6 +146,7 @@
     "riskNeedsSl": "リスク%で数量を決めるには損切りを設定してください",
     "riskUnsupportedPair": "この通貨ペアはリスク%での数量計算に未対応です。数量を手動で入力してください",
     "slWrongSide": "損切り価格が現在値に対して逆側です",
+    "slTooClose": "損切りが現在値に近すぎます（最低0.05%）",
     "tpWrongSide": "利確価格が現在値に対して逆側です",
     "signalExpiresIn": "シグナル有効期限まで",
     "signalExpiredInModal": "このシグナルは期限切れのため取引できません",

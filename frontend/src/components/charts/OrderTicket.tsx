@@ -314,7 +314,7 @@ function OrderTicket({
           <span className="term-fh">{tpPts != null && <><span className="up">+{tpPts} {t('charts.ticket.points')}</span>{rMult != null && ` · ${rMult.toFixed(1)} R`}</>}</span>
         </label>
       </div>
-      {form.slTpInvalid && <p className="term-warn">{t('charts.ticket.slTpWrong')}</p>}
+      {form.slTpInvalid && <p className="term-warn">{form.slTooClose ? t('order.slTooClose') : t('charts.ticket.slTpWrong')}</p>}
 
       {/* 风险账本 / risk ledger */}
       <div className="term-led">

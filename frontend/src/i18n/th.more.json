@@ -146,6 +146,7 @@
     "riskNeedsSl": "ตั้ง Stop Loss ก่อนจึงจะกำหนดขนาดตาม % ความเสี่ยงได้",
     "riskUnsupportedPair": "คู่เงินนี้ยังไม่รองรับการกำหนดขนาดตามความเสี่ยง โปรดกรอกปริมาณเอง",
     "slWrongSide": "Stop Loss อยู่ผิดฝั่งของราคาปัจจุบัน",
+    "slTooClose": "Stop Loss ใกล้ราคาเกินไป (อย่างน้อย 0.05%)",
     "tpWrongSide": "Take Profit อยู่ผิดฝั่งของราคาปัจจุบัน",
     "signalExpiresIn": "สัญญาณหมดอายุใน",
     "signalExpiredInModal": "สัญญาณนี้เพิ่งหมดอายุและไม่สามารถเทรดได้แล้ว",

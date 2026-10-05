@@ -328,7 +328,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           {form.slTpInvalid && (
             <div className="slide-row">
               <span className="k" />
-              <span className="text-xs text-down">{form.slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}</span>
+              <span className="text-xs text-down">{form.slTooClose ? t('order.slTooClose') : form.slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}</span>
             </div>
           )}
           {form.estMargin != null && (

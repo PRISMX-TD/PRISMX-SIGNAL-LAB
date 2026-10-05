@@ -150,7 +150,12 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
         if rsp.position:
             order.mt5_position = rsp.position
         order.filled_price = rsp.price or None
-        order.message = ""
+        # 成交了但补设 SL/TP 失败时，网关把原因放在 message 里——必须留下，否则
+        # 仓位裸奔却毫无记录（2026-10-01 100405）。其它成功回执的 message 是券商的
+        # ResultComment 噪音，照旧清空。
+        # Keep the gateway's "filled but SL/TP failed" note; other success comments
+        # are broker noise and stay cleared.
+        order.message = rsp.message if "SL/TP 设置失败" in (rsp.message or "") else ""
     elif rsp.retcode == PLACED_UNCONFIRMED:
         # 网关判定「服务器收下了但没成交」。这既不是成交也不是拒绝：订单确实建立了，
         # 可能还挂在券商队列里，而且会挡住对同一仓位的后续平仓。落 FAILED 而不是
