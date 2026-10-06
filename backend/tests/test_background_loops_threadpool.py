@@ -135,7 +135,10 @@ def _run_gamification_style_loop(monkeypatch, loop_coro, target):
     monkeypatch.setattr(gl.asyncio, "sleep", fake_sleep)
     with pytest.raises(_Stop):
         asyncio.run(loop_coro(startup_delay=0))
-    assert seen == [target]
+    # 主体那一趟必须走线程池；比赛循环之后还会再进一次线程池（结束持仓快照查库），
+    # 所以只钉第一个。/ The pass itself must go through the pool first; the
+    # competition loop makes a further pooled call (end-position capture lookup).
+    assert seen and seen[0] is target
 
 
 def test_gamification_loop_uses_threadpool(monkeypatch):

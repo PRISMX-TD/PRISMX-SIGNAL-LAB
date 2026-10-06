@@ -1745,11 +1745,12 @@
         "unbound": "Đã hủy liên kết",
         "status": {
           "sample": "Tính {{n}} lệnh / tối thiểu {{min}}",
-          "capital_out_of_range": "Vốn không khớp (có nạp/rút)",
+          "capital_out_of_range": "Vốn đăng ký không hợp lệ",
           "min_trades": "Chưa đủ số lệnh",
           "no_baseline": "Chưa có mốc vốn",
           "not_started": "Chưa bắt đầu",
-          "pending": "Chờ lần cập nhật tới"
+          "pending": "Chờ lần cập nhật tới",
+          "review": "Nạp/rút lớn — cần xem xét"
         }
       },
       "disqualify": "Loại",
@@ -1783,6 +1784,18 @@
     "viewMine": "Xem hồ sơ công khai của tôi"
   },
   "cashflowRules": {
+    "comp": {
+      "title": "Cách tính thành tích",
+      "hint": "Chỉ tính lệnh qua nền tảng, mẫu số cố định theo vốn lúc đăng ký",
+      "lead": "Lợi nhuận = tổng lãi/lỗ của các lệnh đặt qua nền tảng này trong thời gian thi đấu ÷ số dư tài khoản lúc đăng ký.",
+      "platformOnly": "Chỉ tính lệnh đặt qua nền tảng này; lệnh bạn tự đặt trực tiếp trong MT5 không được tính.",
+      "fixedBase": "Mẫu số cố định theo số dư lúc đăng ký: nạp hay rút tiền trong thời gian thi đấu không làm thay đổi mẫu số và không khiến bạn bị loại khỏi bảng.",
+      "openAtEnd": "Lệnh đặt qua nền tảng còn mở khi cuộc thi kết thúc sẽ được tính theo lãi/lỗ thả nổi tại thời điểm đó — giữ lệnh lỗ không đóng cũng không tránh được việc tính điểm.",
+      "review": "Tài khoản có nạp/rút hoặc giao dịch ngoài nền tảng lớn sẽ được quản trị viên xem xét; vi phạm có thể bị hủy tư cách.",
+      "entryExact": "Số dư lúc đăng ký phải đúng {{usd}} USD.",
+      "entryFloor": "Số dư lúc đăng ký phải tối thiểu {{usd}} USD.",
+      "entryCeiling": "Số dư lúc đăng ký phải tối đa {{usd}} USD."
+    },
     "title": "Cách tính nạp và rút tiền",
     "hint": "Rút tiền không xóa lợi nhuận bạn đã kiếm; nạp tiền không thể thổi phồng thứ hạng",
     "lead": "Tỷ suất lợi nhuận = lợi nhuận ÷ số tiền trong tài khoản tại thời điểm đó. Mỗi lệnh được tính riêng, dựa trên vốn trong tài khoản khi lệnh đó đang mở — không phải số dư đầu kỳ hay cuối kỳ.",

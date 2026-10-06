@@ -29,6 +29,14 @@
 // Native <details> rather than useState, same reasoning as BindPage's bridge
 // disclosure: the browser already gives the keyboard affordance and the
 // click-the-heading-to-expand semantics.
+//
+// 2026-10-06 起比赛换了口径（后端 competitions.comp_return_score）：只算平台单、分母
+// 固定为报名本金、出入金不影响成绩、结束时没平的平台单按当时浮盈计入。所以比赛这一档
+// 不再讲「当时本金」那四个例子，改成一份自己的说明；排行榜那档照旧。
+// Since 2026-10-06 competitions score differently (platform trades only, fixed
+// signup-capital denominator, cash flow ignored, open platform trades valued at
+// the end), so the competition variant has its own body; the board variant is
+// unchanged.
 import { useTranslation } from 'react-i18next'
 import { fmtUsd } from '../api/utils'
 
@@ -65,8 +73,8 @@ export default function CashflowRules({
     <details className={plain ? 'cf-rules is-plain' : 'card glass cf-rules'}>
       <summary>
         <span className="min-w-0">
-          <span className="t">{t('cashflowRules.title')}</span>
-          <span className="h">{t('cashflowRules.hint')}</span>
+          <span className="t">{t(plain ? 'cashflowRules.comp.title' : 'cashflowRules.title')}</span>
+          <span className="h">{t(plain ? 'cashflowRules.comp.hint' : 'cashflowRules.hint')}</span>
         </span>
         <span className="chev" aria-hidden="true">
           <svg width={plain ? 14 : 16} height={plain ? 14 : 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -75,6 +83,29 @@ export default function CashflowRules({
         </span>
       </summary>
 
+      {plain ? (
+        <div className="cf-body">
+          <p className="cf-lead">{t('cashflowRules.comp.lead')}</p>
+          <ul className="cf-notes">
+            <li>{t('cashflowRules.comp.platformOnly')}</li>
+            <li>{t('cashflowRules.comp.fixedBase')}</li>
+            <li>{t('cashflowRules.comp.openAtEnd')}</li>
+            <li>{t('cashflowRules.comp.review')}</li>
+            {maxBaselineUsd != null && maxBaselineUsd === minBaselineUsd ? (
+              <li>{t('cashflowRules.comp.entryExact', { usd: fmtUsd(maxBaselineUsd) })}</li>
+            ) : (
+              <>
+                <li>{t('cashflowRules.comp.entryFloor', { usd: fmtUsd(minBaselineUsd) })}</li>
+                {maxBaselineUsd != null && (
+                  <li>{t('cashflowRules.comp.entryCeiling', { usd: fmtUsd(maxBaselineUsd) })}</li>
+                )}
+              </>
+            )}
+            <li>{t('cashflowRules.noteWinRate')}</li>
+            <li>{t('cashflowRules.noteSealedComp')}</li>
+          </ul>
+        </div>
+      ) : (
       <div className="cf-body">
         <p className="cf-lead">{t('cashflowRules.lead')}</p>
         <p className="cf-formula">{t('cashflowRules.formula')}</p>
@@ -105,10 +136,11 @@ export default function CashflowRules({
             </>
           )}
           <li>{t('cashflowRules.noteWinRate')}</li>
-          <li>{t(variant === 'competition' ? 'cashflowRules.noteSealedComp' : 'cashflowRules.noteSealedBoard')}</li>
+          <li>{t('cashflowRules.noteSealedBoard')}</li>
           <li>{t('cashflowRules.noteNoFlow')}</li>
         </ul>
       </div>
+      )}
     </details>
   )
 }

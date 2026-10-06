@@ -427,12 +427,22 @@ async def competition_loop(startup_delay: float = 35.0):
     from starlette.concurrency import run_in_threadpool
     # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
     from app.services import loop_health
+    from .competitions import capture_end_positions
 
     while True:
         loop_health.beat("competitions")
         try:
             t0 = time.monotonic()
             result = await run_in_threadpool(run_competition_pass)
+            # 刚结束的比赛拍结束持仓快照（结束时还开着的平台单按它计入，见
+            # competitions.capture_end_positions）。失败只记日志，下一轮重试。
+            # Snapshot open positions of just-ended competitions; retried next tick.
+            try:
+                captured = await capture_end_positions()
+                if captured:
+                    result = {**result, "endCaptured": captured}
+            except Exception:
+                log.exception("competition end-position capture failed")
             dur = time.monotonic() - t0
             # 空转（没有进行中的比赛）不打日志，否则一分钟一行把日志刷满。
             # Idle ticks (no live competition) aren't logged, or this would fill the

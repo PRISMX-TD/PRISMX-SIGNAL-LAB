@@ -356,6 +356,11 @@ def test_list_participants_details(db_session):
     assert a["balanceAtSignup"] == 10000.0
     assert a["balanceAtScoringStart"] == 10165.0      # 开赛前那笔 +165 算进起点
     assert a["balance"] == 10215.0 and a["netCashflow"] == 0.0
+    assert a["cashflowFlagged"] is False and a["endCaptured"] is False
+    b = db_session.query(PeriodBaseline).filter_by(mt5_login="A").one()
+    b.adjust = -600.0; db_session.commit()                 # 6% 资金进出 -> 标黄复核，但仍计分
+    a = {r["login"]: r for r in admin_list_participants(comp.id, db=db_session)}["A"]
+    assert a["cashflowFlagged"] is True and a["status"] == "min_trades"
     assert a["status"] == "min_trades" and a["minTrades"] == 5
     assert rows["B"]["status"] == "no_baseline" and rows["B"]["balanceAtSignup"] is None
 

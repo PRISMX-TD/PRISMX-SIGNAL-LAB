@@ -1576,6 +1576,11 @@ class CompetitionParticipant(Base):
     final_rank = Column(Integer, nullable=True)
     disqualified = Column(Boolean, nullable=False, default=False)
     disqualify_reason = Column(String, nullable=True)
+    # 比赛结束时的持仓快照（rev 34）：{"at": ISO, "pnl": {仓位号: 浮动盈亏}}。结束那一刻
+    # 还开着的平台单按它计入成绩（competitions._end_valuation）；NULL = 还没拍到。
+    # Open positions at the end (rev 34): platform positions still open then are
+    # scored at this floating P/L; NULL = not captured yet.
+    end_positions = Column(Text, nullable=True)
 
 
 class PasswordResetToken(Base):

@@ -2664,11 +2664,12 @@
         "unbound": "Unbound",
         "status": {
           "sample": "{{n}} scored / min {{min}}",
-          "capital_out_of_range": "Capital mismatch (cash flow)",
+          "capital_out_of_range": "Signup capital off-limit",
           "min_trades": "Too few trades",
           "no_baseline": "No baseline",
           "not_started": "Not started",
-          "pending": "Next snapshot"
+          "pending": "Next snapshot",
+          "review": "Large cash flow — review"
         }
       },
       "disqualify": "Disqualify",
@@ -2702,6 +2703,18 @@
     "viewMine": "View my public profile"
   },
   "cashflowRules": {
+    "comp": {
+      "title": "How scoring works",
+      "hint": "Platform trades only, fixed to your signup capital",
+      "lead": "Return = total P/L of trades placed through this platform during the competition ÷ your account balance at signup.",
+      "platformOnly": "Only trades placed through this platform count; orders you place directly in MT5 are not scored.",
+      "fixedBase": "The denominator is fixed at your signup balance: deposits and withdrawals during the competition don't change it and won't take you off the board.",
+      "openAtEnd": "Platform trades still open when the competition ends are scored at their floating P/L at that moment — holding a losing trade open doesn't keep it off your score.",
+      "review": "Accounts with large deposits, withdrawals or off-platform trading are reviewed by an admin and may be disqualified for rule breaches.",
+      "entryExact": "Your balance at signup must be exactly {{usd}} USD.",
+      "entryFloor": "Your balance at signup must be at least {{usd}} USD.",
+      "entryCeiling": "Your balance at signup must be at most {{usd}} USD."
+    },
     "title": "How deposits and withdrawals count",
     "hint": "Withdrawing never erases what you earned; depositing can't inflate your rank",
     "lead": "Return = profit ÷ how much was in the account at the time. Every trade is scored on its own, against the capital in the account while that trade was open — not the balance at the start or end of the period.",

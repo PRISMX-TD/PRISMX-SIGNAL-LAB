@@ -196,7 +196,9 @@ def _hash_legacy_api_tokens() -> None:
 #          只管上线之后用邮箱密码注册的账号——与 google_linked_at / phone_required 同一种取舍。
 # rev 33 — competitions.max_baseline_usd（每场比赛的本金上限，与 min_baseline_usd 配对；可空、
 #          不回填，NULL = 不设上限；两者相等 = 只收这一个金额）。纯 ADD COLUMN。
-CURRENT_SCHEMA_REV = 33
+# rev 34 — competition_participants.end_positions（比赛结束时的持仓快照 JSON，结束那一刻
+#          还开着的平台单按它计入成绩）。可空、不回填：NULL = 还没拍到。纯 ADD COLUMN。
+CURRENT_SCHEMA_REV = 34
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -570,6 +572,13 @@ def _migrate_columns() -> None:
             # rev 33：本金上限，可空不回填（NULL = 不设上限）/ capital ceiling, nullable, no backfill
             if "max_baseline_usd" not in comp_cols:
                 conn.execute(text("ALTER TABLE competitions ADD COLUMN max_baseline_usd FLOAT"))
+
+    # rev 34：结束时持仓快照，可空不回填 / end-of-competition position snapshot, nullable
+    if "competition_participants" in inspector.get_table_names():
+        cp_cols = {c["name"] for c in inspector.get_columns("competition_participants")}
+        if "end_positions" not in cp_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE competition_participants ADD COLUMN end_positions TEXT"))
 
     if "mt5_accounts" in inspector.get_table_names():
         acc_cols = {c["name"] for c in inspector.get_columns("mt5_accounts")}

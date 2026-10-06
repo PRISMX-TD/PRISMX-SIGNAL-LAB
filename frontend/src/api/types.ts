@@ -2063,6 +2063,12 @@ export interface ParticipantAdminRow {
   accountOnline?: boolean | null
   accountRevoked?: boolean
   netCashflow?: number | null
+  // 资金进出超过报名本金 5%：后台标黄人工复核（比赛分母固定为报名本金，不再因此出榜）。
+  // Cash flow beyond 5% of signup capital: flagged for review (no longer drops the row).
+  cashflowFlagged?: boolean
+  // 比赛结束持仓快照是否已拍到（结束时还开着的平台单按它计入）。
+  // Whether the end-of-competition position snapshot has been captured.
+  endCaptured?: boolean
   sample?: number | null
   minTrades?: number
   liveRank?: number | null

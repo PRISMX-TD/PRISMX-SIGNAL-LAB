@@ -6,6 +6,7 @@
 (comp.starts_at, comp.ends_at)，因为比赛 key（`comp:<id>`）不是 `period_bounds`
 能解析的自然周/月格式。
 """
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -18,7 +19,7 @@ from app.models import (
 from .badges import award_badge
 from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows, return_score
+from .boards import REAL, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows
 
 
 TRACKS = ("real", "demo")
@@ -95,6 +96,85 @@ def comp_period_key(comp_id: str) -> str:
     return f"comp:{comp_id}"
 
 
+# 资金进出超过报名本金的这个比例，后台参赛名单标黄、等管理员人工复核（不自动出榜）。
+# Net cash flow beyond this share of the signup capital is flagged for admin review
+# in the participant list (it no longer drops the row by itself).
+CASHFLOW_FLAG_FRAC = 0.05
+
+
+def comp_return_score(b, resolved, min_baseline: float, max_baseline: float | None):
+    """比赛收益率：平台单盈亏合计 ÷ **报名时的本金**（基线），比赛期间的入金、出金、
+    平台外交易一律不改分母（2026-10-06 起，方案 3）。报名本金不在本场门槛内 → None。
+
+    与周期榜的 return_score（逐仓按当时本金）刻意分开：比赛要的是「人人同一个起点、
+    规则一句话说得清」，以前按当时本金算时，余额与平仓行错拍、手续费零头、MT5 里自己
+    下的单都会让限额比赛整行掉榜。出入金不再影响成绩，改由后台标黄人工复核
+    （CASHFLOW_FLAG_FRAC）。
+    Competition return: platform P/L / the signup capital (baseline); deposits,
+    withdrawals and off-platform trading never move the denominator. Kept apart
+    from the standing boards' per-position capital on purpose: one starting line
+    for everyone and a one-sentence rule. Cash flow is flagged for admin review."""
+    base = float(b.baseline or 0.0)
+    if base <= 0 or not baseline_in_range(base, min_baseline, max_baseline):
+        return None
+    return sum(pr for _o, _c, pr in resolved) / base, len(resolved)
+
+
+def _load_end_positions(p) -> tuple[datetime, dict[str, float]] | None:
+    """参赛条目的结束持仓快照：(拍照时刻, {仓位号: 浮动盈亏})；没拍到 / 坏数据 -> None。"""
+    raw = getattr(p, "end_positions", None)
+    if not raw:
+        return None
+    try:
+        snap = json.loads(raw)
+        at = _aware(datetime.fromisoformat(snap["at"]))
+        pnl = {str(k): float(v) for k, v in (snap.get("pnl") or {}).items()}
+    except (ValueError, TypeError, KeyError):
+        return None
+    return at, pnl
+
+
+def _end_valuation(db, comp: Competition, p, modes) -> list[tuple]:
+    """比赛结束时还没平完的平台单，按结束快照计入：返回 [(开仓时刻, ends_at, 盈亏)]。
+
+    盈亏 = 结束前已平掉的部分 + 结束到拍照之间平掉的部分 + 拍照时的浮动盈亏。结束前
+    已整仓平掉的仓位不在这里（_resolved_in_period 已经算过）；拍照时不在持仓里、结束后
+    也没有平仓腿的（没触发的挂单等）跳过。没有快照 -> 空（还没拍到，下一轮再来）。
+
+    这条补的是两个洞：① 亏损单拖着不平就永远不计入；② 结束时还开着、之后才平的单
+    以前整笔丢失（只认最后一腿落在 ends_at 之前）。
+    Platform positions still open at the end, valued from the end snapshot:
+    realised parts + floating P/L at capture. Closes two holes: holding a loser open
+    to keep it off the score, and positions open at the end being dropped forever.
+    """
+    from app.services.trade_performance import position_id_of
+    from .stats import _VOL_EPS, _filled_orders, _legs_by_position
+    snap = _load_end_positions(p)
+    if snap is None:
+        return []
+    capture_at, floating = snap
+    ends_at = _aware(comp.ends_at)
+    by_pid = {}
+    for o in _filled_orders(db, p.user_id, logins={p.mt5_login}, modes=modes, before=ends_at):
+        pid = position_id_of(o)
+        if pid and pid not in by_pid:
+            by_pid[pid] = o
+    legs_map = _legs_by_position(db, p.user_id, {(p.mt5_login, pid) for pid in by_pid})
+    out = []
+    for pid, o in by_pid.items():
+        legs = legs_map.get((p.mt5_login, pid), [])
+        before = [l for l in legs if _aware(l.closed_at) < ends_at]
+        if before and sum(l.close_volume or 0 for l in before) + _VOL_EPS >= (o.volume or 0):
+            continue                                # 结束前已整仓平掉 / fully closed in time
+        late = [l for l in legs if ends_at <= _aware(l.closed_at) <= capture_at]
+        fl = floating.get(str(pid))
+        if fl is None and not late:
+            continue                                # 结束时并不持有 / not held at the end
+        value = sum(l.profit or 0 for l in before + late) + (fl or 0.0)
+        out.append((_aware(o.created_at) if o.created_at else ends_at, ends_at, value))
+    return out
+
+
 def compute_comp_rows(db, comp: Competition) -> list[dict]:
     """比赛未取消资格的参赛条目 + `period_baselines(comp:<id>)`：按 `boards.
     _resolved_in_period` 的语义计算——有效下界 = max(比赛开赛, 基线 taken_at,
@@ -133,12 +213,14 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     by_user = defaultdict(list)
     for p in participants:
         by_user[p.user_id].append(p)
+    modes = track_modes(comp.track)
 
     rows = []
     for uid, plist in by_user.items():
         logins = set()
         taken = {}
         baseline_by_login = {}
+        part_by_login = {}
         for p in plist:
             b = baselines.get((uid, p.mt5_login))
             if b is None:
@@ -147,6 +229,7 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
                         *([_aware(p.scoring_from)] if p.scoring_from is not None else []))
             taken[p.mt5_login] = lower
             baseline_by_login[p.mt5_login] = b
+            part_by_login[p.mt5_login] = p
             logins.add(p.mt5_login)
         if not logins:
             continue
@@ -157,17 +240,19 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
         # defaults to real-only and a demo competition's fills all get filtered out.
         profits_by_login = _resolved_in_period(db, uid, logins, period_key, taken,
                                                 bounds=(starts_at, ends_at),
-                                                modes=track_modes(comp.track))
+                                                modes=modes)
         for lg in logins:
             b = baseline_by_login[lg]
-            resolved = profits_by_login.get(lg, [])
+            # 结束快照里还开着的平台单（只有比赛结束、拍到快照后才有）。
+            # Platform positions open at the end (only once ended and captured).
+            resolved = profits_by_login.get(lg, []) + _end_valuation(db, comp, part_by_login[lg], modes)
             profits = [pr for _o, _c, pr in resolved]
             sample = len(profits)
             total = sum(profits)
             if comp.metric == "return_pct":
-                # 逐仓按当时本金计分，与周期榜同一个 return_score（出入金口径不分叉）。
-                # Per-position capital, same return_score as the standing board.
-                scored = return_score(b, resolved, min_baseline, max_baseline)
+                # 分母固定为报名本金，出入金不影响（见 comp_return_score）。
+                # Fixed signup-capital denominator (see comp_return_score).
+                scored = comp_return_score(b, resolved, min_baseline, max_baseline)
                 if sample >= min_trades_return and scored is not None:
                     rows.append({"userId": uid, "login": lg,
                                 "score": scored[0], "sample": sample})
@@ -236,6 +321,12 @@ def participant_details(db, comp: Competition, participants: list) -> dict[str, 
             "accountOnline": bool(acct.online) if acct is not None else None,
             "accountRevoked": bool(acct is None or acct.revoked_at is not None),
             "netCashflow": float(b.adjust or 0.0) if b is not None else None,
+            # 资金进出（含平台外交易）超过报名本金的 CASHFLOW_FLAG_FRAC：标黄人工复核。
+            # Cash flow (incl. off-platform trading) beyond the flag share: review.
+            "cashflowFlagged": bool(b is not None and float(b.baseline or 0) > 0
+                                    and abs(float(b.adjust or 0.0))
+                                    >= CASHFLOW_FLAG_FRAC * float(b.baseline)),
+            "endCaptured": p.end_positions is not None,
             "sample": None,
             "minTrades": min_trades,
             "liveRank": snap.rank if snap is not None else None,
@@ -259,15 +350,17 @@ def participant_details(db, comp: Competition, participants: list) -> dict[str, 
         if now < starts_at:
             d["status"] = "not_started"
             continue
-        resolved = _resolved_in_period(db, p.user_id, {p.mt5_login}, period_key,
-                                       {p.mt5_login: lower}, bounds=(starts_at, ends_at),
-                                       modes=track_modes(comp.track)).get(p.mt5_login, [])
+        modes = track_modes(comp.track)
+        resolved = (_resolved_in_period(db, p.user_id, {p.mt5_login}, period_key,
+                                        {p.mt5_login: lower}, bounds=(starts_at, ends_at),
+                                        modes=modes).get(p.mt5_login, [])
+                    + _end_valuation(db, comp, p, modes))
         d["sample"] = len(resolved)
         if snap is not None:
             d["status"] = "ranked"
-        elif (comp.metric == "return_pct" and resolved
-              and return_score(b, resolved, min_baseline, max_baseline) is None):
-            d["status"] = "capital_out_of_range"
+        elif (comp.metric == "return_pct"
+              and comp_return_score(b, resolved, min_baseline, max_baseline) is None):
+            d["status"] = "capital_out_of_range"    # 报名本金本身不在门槛内 / signup capital off-gate
         elif len(resolved) < min_trades:
             d["status"] = "min_trades"
         else:
@@ -630,8 +723,8 @@ def settle_competition(db, comp: Competition, admin_id: str,
     一切以 status 为闸。
 
     §5.3：比赛结束（`ends_at`，计分上界）后 24 小时内不可终审——留出宽限期让
-    迟到的平仓（比如比赛结束时仍持仓、随后才平的单）能被 `_resolved_in_period`
-    收进最后一次快照。宽限期从 `ends_at` 起算，不是从 status 被人工推到
+    迟到入库的平仓行与结束持仓快照（capture_end_positions，结束时还开着的平台单
+    按当时浮动盈亏计入，见 _end_valuation）都收进最后一次快照。宽限期从 `ends_at` 起算，不是从 status 被人工推到
     "ended" 那一刻起算：管理端状态推进是人工操作，可能早于/晚于 ends_at，
     只有 ends_at 才是 §5.3 里定义的计分截止点。
     Grace period counts from `ends_at` (the scoring upper bound per §5.3), not
@@ -778,3 +871,81 @@ def settle_competition(db, comp: Competition, admin_id: str,
             _award(w_cur, "comp_back_to_back")
 
     return {"ranked": ranked, "badges": badges, "badgeErrors": badge_errors}
+
+
+def _end_capture_todo() -> list[tuple[str, str, str, str | None, bool]]:
+    """已结束（未终审）比赛里还没拍结束持仓快照的参赛条目：
+    [(participant_id, user_id, login, 账户来源, 账户可读)]。"""
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        rows = (db.query(CompetitionParticipant, MT5Account.source, MT5Account.revoked_at)
+                  .join(Competition, Competition.id == CompetitionParticipant.competition_id)
+                  .outerjoin(MT5Account, (MT5Account.user_id == CompetitionParticipant.user_id)
+                             & (MT5Account.login == CompetitionParticipant.mt5_login))
+                  .filter(Competition.status == "ended",
+                          CompetitionParticipant.disqualified.is_(False),
+                          CompetitionParticipant.end_positions.is_(None)).all())
+        return [(p.id, p.user_id, p.mt5_login, source,
+                 source is not None and revoked_at is None)
+                for p, source, revoked_at in rows]
+    finally:
+        db.close()
+
+
+def _save_end_captures(snaps: dict[str, str]) -> None:
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        for pid, raw in snaps.items():
+            p = db.get(CompetitionParticipant, pid)
+            if p is not None and p.end_positions is None:
+                p.end_positions = raw
+        db.commit()
+    finally:
+        db.close()
+
+
+async def capture_end_positions(now: datetime | None = None) -> int:
+    """比赛一进入 ended，就给每个参赛账户拍一张结束持仓快照（仓位号 -> 浮动盈亏），
+    供 _end_valuation 把结束时还开着的平台单计入成绩。比赛循环每轮调用，只处理还没
+    拍到的条目，所以读失败的下一轮（60 秒后）自动重试。
+
+    gateway 账户直接向网关读（离线用户也读得到）；桥接账户只能用桥接最近推上来的
+    持仓缓存。账户已解绑 / 不在、或桥接没有缓存的，记一张空快照（不再重试）：读不到
+    就无从估值，按「结束时没有持仓」处理。
+    As soon as a competition is ended, snapshot each entry's open positions
+    (position id -> floating P/L) for _end_valuation. Runs every competition-loop
+    tick and only touches entries not yet captured, so a failed read retries on the
+    next tick. Gateway accounts are read from the gateway (works for offline users);
+    bridge accounts can only use the bridge's latest pushed snapshot. Unbound
+    accounts, or bridge accounts with no snapshot, get an empty one (no retry).
+    """
+    from starlette.concurrency import run_in_threadpool
+    todo = await run_in_threadpool(_end_capture_todo)
+    if not todo:
+        return 0
+    from app.services import gateway_client as gw
+    from app.services.connection_manager import manager
+    at = (now or datetime.now(timezone.utc)).isoformat()
+    snaps: dict[str, str] = {}
+    for pid, uid, login, source, readable in todo:
+        pnl = None
+        if not readable:
+            pnl = {}
+        elif source == "gateway":
+            try:
+                rows, err = await gw.get_positions(int(login))
+            except Exception:
+                rows, err = [], "exception"
+            if not err:
+                pnl = {str(r.ticket): float(r.profit or 0.0) for r in rows}
+        else:
+            rows = await manager.get_positions_shared_async(uid)
+            pnl = {str(r.get("ticket")): float(r.get("profit") or 0.0)
+                   for r in (rows or []) if str(r.get("login")) == str(login)}
+        if pnl is not None:
+            snaps[pid] = json.dumps({"at": at, "pnl": pnl})
+    if snaps:
+        await run_in_threadpool(_save_end_captures, snaps)
+    return len(snaps)

@@ -161,8 +161,9 @@ def test_return_board_min_baseline_floor_gate(db_session):
 
 
 def test_return_board_max_baseline_ceiling_gate(db_session):
-    """本场设了本金上限：本金（基线 + 报名后入金）高于上限的不入榜——报名时卡住了，
-    报名后再入金超过上限同样不算；刚好等于上限、以及浮点尾差内的照常上榜。"""
+    """本场设了本金上限：门槛只看报名本金（基线）。刚好等于上限、浮点尾差内的照常上榜；
+    报名后的入金不再让人出榜（2026-10-06 方案 3：分母固定为报名本金，出入金改为后台
+    标黄人工复核），报名本金本身就超限的才不算。"""
     comp = _comp(db_session)
     comp.min_baseline_usd, comp.max_baseline_usd = 1000.0, 1000.0; db_session.commit()
 
@@ -183,8 +184,14 @@ def test_return_board_max_baseline_ceiling_gate(db_session):
     _participant(db_session, comp, u_dep, "C")
     _mk(db_session, u_dep, "C", 5, 0)
 
-    logins = {r["login"] for r in compute_comp_rows(db_session, comp)}
-    assert logins == {"A", "B"}
+    u_big = _user(db_session, "ceil_big@t.co"); _acct(db_session, u_big, "D", balance=5000.0)
+    _baseline(db_session, comp, u_big, "D", balance=5000.0)            # 报名本金就超限
+    _participant(db_session, comp, u_big, "D")
+    _mk(db_session, u_big, "D", 5, 0)
+
+    rows = {r["login"]: r for r in compute_comp_rows(db_session, comp)}
+    assert set(rows) == {"A", "B", "C"}
+    assert rows["C"]["score"] == rows["A"]["score"]                     # 入金不改分母
 
 
 def test_comp_gates_carries_max_baseline(db_session):
@@ -291,8 +298,8 @@ def test_snapshot_running_reconciles_and_writes_rows(db_session):
     row = (db_session.query(LeaderboardSnapshot)
            .filter_by(board="return_pct", period_key=comp_period_key(comp.id)).first())
     assert row is not None and row.mt5_login == "A" and row.rank == 1
-    # 对账已把 200 入金并入分母：denom = 2000 + 200 = 2200
-    assert abs(row.score - 35.0 / 2200.0) < 1e-9
+    # 对账照样记下 200 入金（后台标黄用），但比赛分母固定为报名本金 2000（方案 3）
+    assert abs(row.score - 35.0 / 2000.0) < 1e-9
     baseline_row = db_session.query(PeriodBaseline).filter_by(
         period_key=comp_period_key(comp.id)).first()
     assert abs(baseline_row.adjust - 200.0) < 1e-6
@@ -678,3 +685,99 @@ def test_demo_track_scores_demo_account_fills(db_session):
     comp.track = "real"                                       # 同一批数据换成实盘赛
     db_session.commit()
     assert compute_comp_rows(db_session, comp) == []          # 模拟单不该进实盘赛
+
+
+# ---- 结束时还开着的平台单（方案 3 补丁 1）/ positions still open at the end ----
+
+def _open_order(db, u, login, ticket, created_at, vol=0.1, action="ORDER", status="FILLED"):
+    db.add(Order(user_id=u.id, client_order_id=f"o{login}{ticket}", symbol="X", side="BUY",
+                 volume=vol, status=status, action=action, mt5_login=login, mt5_ticket=ticket,
+                 trade_mode=2, created_at=created_at))
+    db.commit()
+
+
+def _leg(db, u, login, ticket, profit, closed_at, vol=0.1, deal=None):
+    db.add(ClosedTrade(user_id=u.id, mt5_login=login, symbol="X", side="BUY",
+                       close_volume=vol, close_price=1, profit=profit, position_ticket=ticket,
+                       deal_ticket=deal or ticket * 10, closed_at=closed_at, verified=True))
+    db.commit()
+
+
+def test_open_positions_at_end_scored_from_end_snapshot(db_session):
+    """结束快照里还开着的平台单按当时浮动盈亏计入；部分平仓的 = 已平部分 + 浮盈；
+    结束后、拍照前才平掉的按平仓盈亏算；没触发的挂单不算。没有快照时照旧只算已平仓。"""
+    import json
+    comp = _comp(db_session, status="ended")
+    comp.min_trades = 1; db_session.commit()
+    u = _user(db_session, "end1@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    _baseline(db_session, comp, u, "A", balance=2000.0)
+    _participant(db_session, comp, u, "A")
+    _mk(db_session, u, "A", 4, 0)                                   # 已平 4 笔 × +10
+    opened = ENDS - timedelta(hours=3)
+    _open_order(db_session, u, "A", 100, opened)                    # 结束时浮盈 +30
+    _open_order(db_session, u, "A", 101, opened, vol=0.2)           # 结束前平一半 +5，余下浮亏 -20
+    _leg(db_session, u, "A", 101, 5.0, ENDS - timedelta(hours=1))
+    _open_order(db_session, u, "A", 102, opened, action="PENDING", status="PLACED")  # 没触发
+    _open_order(db_session, u, "A", 103, opened)                    # 结束后 30 秒平掉 -7
+    _leg(db_session, u, "A", 103, -7.0, ENDS + timedelta(seconds=30))
+
+    before = {r["login"]: r for r in compute_comp_rows(db_session, comp)}
+    assert before["A"]["sample"] == 4 and abs(before["A"]["score"] - 40 / 2000) < 1e-12
+
+    p = db_session.query(CompetitionParticipant).filter_by(mt5_login="A").one()
+    p.end_positions = json.dumps({"at": (ENDS + timedelta(seconds=60)).isoformat(),
+                                  "pnl": {"100": 30.0, "101": -20.0}})
+    db_session.commit()
+    after = {r["login"]: r for r in compute_comp_rows(db_session, comp)}
+    assert after["A"]["sample"] == 7
+    assert abs(after["A"]["score"] - (40 + 30 + 5 - 20 - 7) / 2000) < 1e-12
+
+
+def test_capture_end_positions_reads_gateway_and_skips_unbound(db_session, monkeypatch):
+    """比赛进入 ended：gateway 账户向网关读持仓拍快照；读失败的不落库（下一轮重试）；
+    账户已解绑的记空快照；进行中比赛的条目不碰。"""
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+    import app.core.database as dbmod
+    from app.core.database import Base
+    from app.services import gateway_client
+    from app.services.gamification.competitions import capture_end_positions
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False},
+                           poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+    monkeypatch.setattr(dbmod, "SessionLocal", Session)
+    db = Session()
+    ended = _comp(db, status="ended", name="ended")
+    running = _comp(db, status="running", name="running")
+    users = {}
+    for login, comp in (("9001", ended), ("9002", ended), ("9003", ended), ("9004", running)):
+        u = _user(db, f"cap{login}@t.co"); users[login] = u
+        db.add(MT5Account(user_id=u.id, login=login, server="s", balance=1000.0, trade_mode=2,
+                          source="gateway"))
+        db.commit()
+        _participant(db, comp, u, login)
+    db.query(MT5Account).filter_by(login="9003").one().revoked_at = ENDS
+    db.commit()
+
+    async def positions(login, timeout=None):
+        if str(login) == "9002":
+            return [], "read_busy"
+        return [SimpleNamespace(ticket=555, profit=12.5)], ""
+
+    monkeypatch.setattr(gateway_client, "get_positions", positions)
+    n = asyncio.run(capture_end_positions(now=ENDS + timedelta(minutes=1)))
+    db.expire_all()
+    snaps = {p.mt5_login: p.end_positions for p in db.query(CompetitionParticipant)}
+    assert n == 2
+    assert json.loads(snaps["9001"])["pnl"] == {"555": 12.5}
+    assert snaps["9002"] is None                                       # 读失败，下一轮再来
+    assert json.loads(snaps["9003"])["pnl"] == {}                      # 已解绑：空快照
+    assert snaps["9004"] is None                                       # 比赛还在进行
+    db.close()
+    engine.dispose()

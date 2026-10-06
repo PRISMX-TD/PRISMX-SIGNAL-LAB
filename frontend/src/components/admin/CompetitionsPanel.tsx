@@ -964,7 +964,7 @@ export default function CompetitionsPanel() {
                       </td>
                       <td
                         className={`num py-1.5 pr-4 ${
-                          p.netCashflow != null && Math.abs(p.netCashflow) >= 0.01 ? 'text-amber-400' : 'text-neutral-500'
+                          p.cashflowFlagged ? 'text-amber-400' : 'text-neutral-500'
                         }`}
                       >
                         {p.netCashflow == null
@@ -1140,6 +1140,11 @@ function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
         {t(`${k}.sample`, { n: p.sample, min: p.minTrades ?? '—' })}
       </div>
     ) : null
+  // 资金进出超标：不影响计分（分母固定为报名本金），只提示管理员人工复核。
+  // Cash flow over the flag line: doesn't affect scoring, just asks for a review.
+  const review = p.cashflowFlagged ? (
+    <div className="text-[11px] text-amber-400">{t(`${k}.review`)}</div>
+  ) : null
   switch (p.status) {
     case 'ranked':
       return (
@@ -1148,6 +1153,7 @@ function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
             #{p.liveRank} · {p.liveScore != null ? fmtScorePct(p.liveScore) : '—'}
           </div>
           {sample}
+          {review}
         </>
       )
     case 'capital_out_of_range':
@@ -1157,6 +1163,7 @@ function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
         <>
           <div className="text-amber-400">{t(`${k}.${p.status}`)}</div>
           {sample}
+          {review}
         </>
       )
     case 'not_started':
