@@ -223,8 +223,18 @@ def test_offline_user_close_refreshes_balance(harness, monkeypatch):
     async def only_fast_connected():
         return [FAST_USER]                      # SLOW_USER 离线 / offline
 
+    saved = {"n": 0}
+
+    def upsert(*a, **k):
+        saved["n"] += 1
+        return "inserted"
+
     async def account(login, timeout=None):
-        if str(login) != SLOW_LOGIN:
+        # 平仓入库之后才给新余额：离线兜底刷新（开机即跑一趟）读到的还是旧值，
+        # 所以这里只有「平仓即刷新」那条路径能把 7000 写进去。
+        # New balance only after a close is saved, so only the close-path refresh
+        # (not the offline sweep that runs at startup) can write 7000.
+        if str(login) != SLOW_LOGIN or not saved["n"]:
             return None
         return SimpleNamespace(balance=7000.0, equity=7000.0, margin=0.0, leverage=100,
                                name="", group="", last_pass_change=0)
@@ -238,9 +248,9 @@ def test_offline_user_close_refreshes_balance(harness, monkeypatch):
     monkeypatch.setattr(gw, "gw_get_deals", deals)
     monkeypatch.setattr(gw, "observe_server_offset", lambda *a, **k: None)
     monkeypatch.setattr(gw, "build_closed_trade_legs", lambda *a, **k: [{"leg": 1}])
-    monkeypatch.setattr(gw, "upsert_leg", lambda *a, **k: "inserted")
+    monkeypatch.setattr(gw, "upsert_leg", upsert)
 
-    _run_loop_for(0.6)
+    _run_loop_for(1.5)
 
     db = gw.SessionLocal()
     try:
@@ -267,7 +277,7 @@ def test_offline_user_balance_swept_without_any_close(harness, monkeypatch):
     monkeypatch.setattr(gw, "gw_get_account", account)
     monkeypatch.setattr(gw, "gw_batch_available", lambda: False)
 
-    _run_loop_for(0.4)
+    _run_loop_for(1.0)
 
     db = gw.SessionLocal()
     try:
