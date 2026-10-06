@@ -218,6 +218,7 @@
     "autoTitle": "Auto position management",
     "autoHint": "Rules are set in R units (R = the stop distance at open). E.g. move the stop to entry once the trade is up 1R. Applies only to positions opened through PRISMX — manual trades are never touched; positions opened without a stop have no defined R and are skipped. Every automated command shows up on the Orders page, fully traceable.",
     "autoUpgradeRequired": "Auto position management is a PRO feature — upgrade to unlock",
+    "autoPausedNotPro": "Your auto position management is paused: without PRO, stops are not moved and no partial profits are taken — manage your positions' SL/TP yourself. Upgrade to PRO and it resumes with your saved settings.",
     "autoEnable": "Enable auto position management",
     "autoBe": "Auto break-even",
     "autoTrail": "Trailing stop",

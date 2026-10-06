@@ -81,8 +81,14 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
     setLoadFailed(false)
     automationApi.getSettings().then(setAutoCfg).catch(() => setLoadFailed(true))
   }, [])
+  // 非 PRO 也读一次：PRO 到期 / 试用结束的用户总开关可能还存着「开」，后端却已不再
+  // 执行，只给一句通用的「升级解锁」会让他以为止损还在被自动管理。读失败就退回通用提示。
+  // Non-PRO reads too: a user whose PRO lapsed may still have the switch saved on
+  // while the backend no longer acts on it; the generic upsell would leave them
+  // believing their stops are still managed. A failed read falls back to the upsell.
   useEffect(() => {
     if (isPro) load()
+    else automationApi.getSettings().then(setAutoCfg).catch(() => {})
   }, [isPro, load])
 
   async function saveAutoCfg() {
@@ -128,8 +134,12 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
 
       <div className="ord-lrow-bd">
         {!isPro ? (
-          <p className="ord-rule-up">
-            {t('account.autoUpgradeRequired')}{' '}
+          <p className="ord-rule-up" role={autoCfg?.enabled ? 'status' : undefined}>
+            {autoCfg?.enabled ? (
+              <span className="text-amber-400">{t('account.autoPausedNotPro')}</span>
+            ) : (
+              t('account.autoUpgradeRequired')
+            )}{' '}
             <Link to="/upgrade" className="text-prism-400 underline hover:text-prism-300">
               {t('nav.upgrade')}
             </Link>
