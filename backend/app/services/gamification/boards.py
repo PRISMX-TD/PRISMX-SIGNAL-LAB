@@ -270,6 +270,42 @@ def _deposit_at(row, prev_check: datetime | None, now: datetime) -> datetime:
     return min(at, now)
 
 
+def _reverse_deposits(row, amount: float) -> float:
+    """从最近的入金流水往前冲减，合计最多 `amount`，返回实际冲减额（adjust 同步减）。
+    冲减是改原流水金额（不另记一条负流水）：那笔「入金」本来就不存在，入金时刻到
+    现在之间的仓位本金也要一起恢复，否则限额比赛里这些仓位照样超限掉榜。
+
+    成因：余额先于平仓记录到达——这一轮余额已含盈利、closed_trades 还没那一行，
+    差额被记成入金；下一轮平仓行补上后差额变负，但通常够不到出金门槛，以前就永远
+    冲不掉（2026-10-06，账户 100461 因 +101.9 的假入金掉出 10000 USD 限额比赛榜）。
+    只在净 adjust > 0 时调用，冲减额封顶 adjust，所以不会把本金冲到基线以下。
+    Unwinds the most recent deposit flows, up to `amount` in total; returns what
+    was unwound (adjust follows). Edits the flows in place rather than appending a
+    negative one: the deposit never happened, so positions between it and now get
+    their capital back too. Cause: a balance that already includes a close arrives
+    before that close's closed_trades row, so the gap is booked as a deposit; once
+    the row lands the gap turns negative but under the withdrawal threshold, and
+    used to stay forever. Only called with net adjust > 0 and capped at it, so
+    capital never drops below the baseline."""
+    flows = _flows(row)
+    left = amount
+    for i in range(len(flows) - 1, -1, -1):
+        if left <= RECONCILE_TOLERANCE:
+            break
+        at, a = flows[i]
+        if a <= 0:
+            continue
+        take = min(a, left)
+        flows[i] = (at, a - take)
+        left -= take
+    done = amount - left
+    if done <= 0:
+        return 0.0
+    row.flows = json.dumps([[t.isoformat(), a] for t, a in flows if abs(a) > RECONCILE_TOLERANCE])
+    row.adjust -= done
+    return done
+
+
 def reconcile_deposits(db, period_key: str, now: datetime = None,
                         bounds: tuple[datetime, datetime] | None = None) -> int:
     """对每条基线，若账号行仍在且 balance 非 NULL：
@@ -277,7 +313,8 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
     delta > RECONCILE_TOLERANCE → 入金：adjust += delta，记一条流水；
     −delta ≥ max(WITHDRAWAL_MIN_ABS, WITHDRAWAL_MIN_FRAC × 当前本金) → 出金：
     adjust += delta（负数），记一条流水；够不到门槛的小额负差（手续费、隔夜利息）
-    忽略；账号行已不在（解绑）→ 冻结不动，不报错。
+    忽略——除非此前记过净入金，此时先按 _reverse_deposits 冲回（封顶 adjust）；
+    账号行已不在（解绑）→ 冻结不动，不报错。
     流水带时间，计分时按每笔仓位开/平仓时刻各取本金（见 capital_at）。桥接晚报的
     平仓单会先被看成一笔出金、下一轮余额对上后再记一笔等额入金，两条流水相抵，
     在此之前平掉的仓位本金不受影响（取的是它平仓时刻的本金）。
@@ -321,6 +358,11 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
             row.adjust += delta                          # 出金：此后仓位的本金减少
             _append_flow(row, now, delta)
             adjusted += 1
+        elif delta < -RECONCILE_TOLERANCE and row.adjust > RECONCILE_TOLERANCE:
+            # 够不到出金门槛的负差，但此前记过净入金：先冲回入金（见 _reverse_deposits）。
+            # A sub-threshold drop after a recorded net deposit: unwind the deposit first.
+            if _reverse_deposits(row, min(-delta, row.adjust)) > 0:
+                adjusted += 1
     if adjusted:
         db.commit()
     _mark_reconciled(period_key, now)

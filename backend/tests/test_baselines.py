@@ -106,6 +106,47 @@ def test_late_reported_close_nets_out_across_two_rounds(db_session):
     assert capital_at(row, t2) == 1000.0
 
 
+def test_balance_ahead_of_close_row_deposit_is_reversed(db_session):
+    """余额先于平仓记录到达：第一轮被记成入金；下一轮平仓行补上后差额变负、够不到出金
+    门槛——也要把那笔假入金冲掉（改原流水，期间仓位本金一并恢复），否则限额比赛永久掉榜。"""
+    u = _user(db_session, email="b4d@t.co")
+    _acct(db_session, u, "R1", 1000.0)
+    ensure_baselines(db_session, PK, NOW)
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 1060.0                       # 赚了 60，但平仓行还没到
+    db_session.commit()
+    t1 = NOW + timedelta(hours=1)
+    assert reconcile_deposits(db_session, PK, now=t1) == 1        # 被看成入金 60
+    db_session.add(ClosedTrade(user_id=u.id, mt5_login="R1", symbol="X", side="BUY",
+                               close_volume=0.1, close_price=1, profit=60.0,
+                               position_ticket=1, deal_ticket=10,
+                               closed_at=NOW + timedelta(minutes=30), verified=True))
+    acct.balance = 1059.0                       # 另有 1 块手续费
+    db_session.commit()
+    t2 = NOW + timedelta(hours=2)
+    assert reconcile_deposits(db_session, PK, now=t2) == 1        # 冲回 60（封顶 adjust）
+    row = db_session.query(PeriodBaseline).first()
+    assert abs(row.adjust) < 1e-6
+    assert capital_at(row, NOW + timedelta(minutes=90)) == 1000.0  # 两轮之间也恢复
+    assert capital_at(row, t2) == 1000.0
+    assert reconcile_deposits(db_session, PK, now=t2 + timedelta(hours=1)) == 0   # 手续费照旧忽略
+
+
+def test_small_drop_never_reverses_below_baseline(db_session):
+    """冲减封顶净 adjust：入金 + 等额出金相抵（adjust≈0）后的小额负差不碰本金。"""
+    u = _user(db_session, email="b4e@t.co")
+    _acct(db_session, u, "R1", 1000.0)
+    ensure_baselines(db_session, PK, NOW)
+    row = db_session.query(PeriodBaseline).first()
+    row.adjust = 0.0
+    row.flows = '[["2026-09-02T12:10:00+00:00", -569.0], ["2026-09-02T12:10:00+00:00", 569.0]]'
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 990.0
+    db_session.commit()
+    assert reconcile_deposits(db_session, PK, now=NOW + timedelta(hours=1)) == 0
+    assert db_session.query(PeriodBaseline).first().adjust == 0.0
+
+
 def test_capital_at_legacy_adjust_without_flows_applies_whole_period(db_session):
     """rev 15 之前的行：只有 adjust 没流水，按全程生效（任何时刻都是基线 + adjust）。"""
     u = _user(db_session, email="b4d@t.co")
