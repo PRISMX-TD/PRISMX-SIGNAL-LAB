@@ -26,8 +26,8 @@ from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
 from app.services.gamification.badges import equipped_badge_tiers
 from app.services.gamification.competitions import (
-    TRACKS, auto_enroll, comp_gates, comp_period_key, refresh_comp_board,
-    register_participant, settle_competition)
+    TRACKS, auto_enroll, comp_gates, comp_period_key, participant_details,
+    refresh_comp_board, register_participant, settle_competition)
 from app.services.settings_store import get_gamification_settings
 from app.utils.timeutil import aware as _aware
 
@@ -325,11 +325,13 @@ def _participant_counts(db: Session, comp_ids: list[str]) -> dict[str, int]:
     return {cid: cnt for cid, cnt in rows}
 
 
-def _participant_out(p: CompetitionParticipant, email: str | None) -> dict:
+def _participant_out(p: CompetitionParticipant, email: str | None,
+                     nickname: str | None = None, details: dict | None = None) -> dict:
     return {
         "id": p.id,
         "userId": p.user_id,
         "email": email,
+        "nickname": nickname,
         "login": p.mt5_login,
         "registeredAt": p.registered_at.isoformat() if p.registered_at else None,
         "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,
@@ -337,6 +339,9 @@ def _participant_out(p: CompetitionParticipant, email: str | None) -> dict:
         "finalRank": p.final_rank,
         "disqualified": p.disqualified,
         "disqualifyReason": p.disqualify_reason,
+        # 管理端名单才有的明细（见 participant_details）；PATCH 的回包不带。
+        # Admin-list-only detail (see participant_details); absent from PATCH replies.
+        **(details or {}),
     }
 
 
@@ -486,12 +491,14 @@ def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
 
 @admin_router.get("/{comp_id}/participants")
 def admin_list_participants(comp_id: str, db: Session = Depends(get_db)):
-    _get_comp_or_404(db, comp_id)
-    rows = (db.query(CompetitionParticipant, User.email)
+    comp = _get_comp_or_404(db, comp_id)
+    rows = (db.query(CompetitionParticipant, User.email, User.nickname)
               .join(User, User.id == CompetitionParticipant.user_id)
               .filter(CompetitionParticipant.competition_id == comp_id)
               .order_by(CompetitionParticipant.registered_at.asc()).all())
-    return [_participant_out(p, email) for p, email in rows]
+    details = participant_details(db, comp, [p for p, _e, _n in rows])
+    return [_participant_out(p, email, nickname, details.get(p.id))
+            for p, email, nickname in rows]
 
 
 @admin_router.patch("/{comp_id}/participants/{participant_id}")

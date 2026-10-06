@@ -32,7 +32,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
-import { fmtDate, localizeApiError, fmtScorePct } from '../../api/utils'
+import { fmtDate, fmtMoney, localizeApiError, fmtScorePct } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import Select from '../Select'
 import ConfirmModal from '../ConfirmModal'
@@ -512,7 +512,7 @@ export default function CompetitionsPanel() {
         disqualified: true,
         disqualifyReason: reason,
       })
-      setParticipants((prev) => prev.map((x) => (x.id === p.id ? updated : x)))
+      setParticipants((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...updated } : x)))
       setReasonDrafts((prev) => ({ ...prev, [p.id]: '' }))
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
@@ -526,7 +526,7 @@ export default function CompetitionsPanel() {
     setSavingParticipantId(p.id)
     try {
       const updated = await adminApi.updateParticipant(selectedId, p.id, { disqualified: false })
-      setParticipants((prev) => prev.map((x) => (x.id === p.id ? updated : x)))
+      setParticipants((prev) => prev.map((x) => (x.id === p.id ? { ...x, ...updated } : x)))
     } catch (err) {
       showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
     } finally {
@@ -912,12 +912,15 @@ export default function CompetitionsPanel() {
               <table className="w-full text-left text-xs">
                 <thead>
                   <tr className="text-neutral-500">
-                    <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colEmail')}</th>
+                    <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colUser')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colLogin')}</th>
                     <th className="py-1.5 pr-4 font-medium">
                       {t('competition.admin.participants.colRegisteredAt')}
                     </th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colScoringFrom')}</th>
+                    <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colBalance')}</th>
+                    <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colCashflow')}</th>
+                    <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colLive')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colFinalScore')}</th>
                     <th className="py-1.5 pr-4 font-medium">{t('competition.admin.participants.colFinalRank')}</th>
                     <th className="py-1.5 pr-4 font-medium">
@@ -929,15 +932,49 @@ export default function CompetitionsPanel() {
                 <tbody>
                   {participants.map((p) => (
                     <tr key={p.id} className="border-t border-white/5">
-                      <td className="max-w-[180px] truncate py-1.5 pr-4 font-mono text-neutral-300">
-                        {p.email ?? '—'}
+                      <td className="max-w-[180px] py-1.5 pr-4">
+                        <div className="truncate text-neutral-100">{p.nickname || '—'}</div>
+                        <div className="truncate font-mono text-[11px] text-neutral-500">{p.email ?? '—'}</div>
                       </td>
-                      <td className="num py-1.5 pr-4 text-neutral-300">{p.login}</td>
-                      <td className="num py-1.5 pr-4 text-neutral-400">
-                        {p.registeredAt ? fmtDate(p.registeredAt) : '—'}
+                      <td className="py-1.5 pr-4">
+                        <div className="num text-neutral-300">{p.login}</div>
+                        <div className="text-[10px]">
+                          {p.accountRevoked ? (
+                            <span className="text-down">{t('competition.admin.participants.unbound')}</span>
+                          ) : p.accountOnline ? (
+                            <span className="text-up">{t('competition.admin.participants.online')}</span>
+                          ) : (
+                            <span className="text-neutral-500">{t('competition.admin.participants.offline')}</span>
+                          )}
+                        </div>
                       </td>
-                      <td className="num py-1.5 pr-4 text-neutral-400">
-                        {p.scoringFrom ? fmtDate(p.scoringFrom) : '—'}
+                      <td className="py-1.5 pr-4">
+                        <div className="num text-neutral-400">{p.registeredAt ? fmtDate(p.registeredAt) : '—'}</div>
+                        <div className="num text-neutral-200">{fmtBal(p.balanceAtSignup)}</div>
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        <div className="num text-neutral-400">{p.scoringFrom ? fmtDate(p.scoringFrom) : '—'}</div>
+                        <div className="num text-neutral-200">{fmtBal(p.balanceAtScoringStart)}</div>
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        <div className="num text-neutral-200">{fmtBal(p.balance)}</div>
+                        <div className="num text-[11px] text-neutral-500">
+                          {t('competition.admin.participants.equity')} {fmtBal(p.equity)}
+                        </div>
+                      </td>
+                      <td
+                        className={`num py-1.5 pr-4 ${
+                          p.netCashflow != null && Math.abs(p.netCashflow) >= 0.01 ? 'text-amber-400' : 'text-neutral-500'
+                        }`}
+                      >
+                        {p.netCashflow == null
+                          ? '—'
+                          : Math.abs(p.netCashflow) < 0.01
+                            ? '0'
+                            : `${p.netCashflow > 0 ? '+' : ''}${fmtMoney(p.netCashflow)}`}
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        <ParticipantLive p={p} />
                       </td>
                       <td className="num py-1.5 pr-4 text-neutral-400">
                         {p.finalScore != null ? fmtScorePct(p.finalScore) : '—'}
@@ -1084,4 +1121,48 @@ function BaselineRangeLine({ range }: { range: BaselineRange }) {
       {text}
     </p>
   )
+}
+
+
+function fmtBal(v: number | null | undefined): string {
+  return v == null ? '—' : fmtMoney(v)
+}
+
+// 参赛名单「计分情况」一格：上榜显示实时名次与收益，没上榜显示卡在哪一条。
+// The participant row's live-scoring cell: rank + score when on the board, else the
+// gate that keeps it off.
+function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
+  const { t } = useTranslation()
+  const k = 'competition.admin.participants.status'
+  const sample =
+    p.sample != null ? (
+      <div className="num text-[11px] text-neutral-500">
+        {t(`${k}.sample`, { n: p.sample, min: p.minTrades ?? '—' })}
+      </div>
+    ) : null
+  switch (p.status) {
+    case 'ranked':
+      return (
+        <>
+          <div className="num text-neutral-100">
+            #{p.liveRank} · {p.liveScore != null ? fmtScorePct(p.liveScore) : '—'}
+          </div>
+          {sample}
+        </>
+      )
+    case 'capital_out_of_range':
+    case 'min_trades':
+    case 'no_baseline':
+      return (
+        <>
+          <div className="text-amber-400">{t(`${k}.${p.status}`)}</div>
+          {sample}
+        </>
+      )
+    case 'not_started':
+    case 'pending':
+      return <div className="text-neutral-400">{t(`${k}.${p.status}`)}</div>
+    default:
+      return <span className="text-neutral-500">—</span>
+  }
 }

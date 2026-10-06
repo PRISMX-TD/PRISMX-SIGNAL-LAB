@@ -2053,7 +2053,31 @@ export interface ParticipantAdminRow {
   finalRank: number | null
   disqualified: boolean
   disqualifyReason: string | null
+  // 以下只在 GET 名单里有（PATCH 回包不带，前端合并时保留旧值）。
+  // Below: GET list only (absent from PATCH replies; the panel merges to keep them).
+  nickname?: string | null
+  balanceAtSignup?: number | null
+  balanceAtScoringStart?: number | null
+  balance?: number | null
+  equity?: number | null
+  accountOnline?: boolean | null
+  accountRevoked?: boolean
+  netCashflow?: number | null
+  sample?: number | null
+  minTrades?: number
+  liveRank?: number | null
+  liveScore?: number | null
+  status?: ParticipantStatus | null
 }
+
+export type ParticipantStatus =
+  | 'ranked'
+  | 'disqualified'
+  | 'no_baseline'
+  | 'not_started'
+  | 'capital_out_of_range'
+  | 'min_trades'
+  | 'pending'
 
 // PATCH /admin/competitions/{id}/participants/{pid} 请求体：取消/恢复资格。
 // disqualifyReason 仅在 disqualified=true 时落库，恢复资格（false）时后端

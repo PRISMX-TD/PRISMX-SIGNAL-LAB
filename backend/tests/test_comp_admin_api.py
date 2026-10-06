@@ -328,6 +328,38 @@ def test_list_participants_includes_email(db_session):
     assert rows[0]["disqualified"] is False
 
 
+def test_list_participants_details(db_session):
+    """名单明细：昵称、报名时 / 计分起点余额（报名到开赛之间平掉的盈亏要算进起点）、
+    当前余额与资金进出、没上榜的原因；没拍基线的条目单独标出来。"""
+    from app.models import ClosedTrade, PeriodBaseline
+    comp = _comp(db_session, status="running")
+    comp.min_trades = 5
+    u = _user(db_session, "part2@t.co")
+    u.nickname = "陈总"
+    _acct(db_session, u, "A", balance=10215.0)
+    _participant(db_session, comp, u, "A")
+    db_session.add(PeriodBaseline(user_id=u.id, mt5_login="A", period_key=comp_period_key(comp.id),
+                                  baseline=10000.0, taken_at=T0 - timedelta(hours=4), adjust=0.0))
+    for i, (at, pr) in enumerate([(T0 - timedelta(hours=1), 165.0), (T0 + timedelta(hours=1), 50.0)]):
+        db_session.add(ClosedTrade(user_id=u.id, mt5_login="A", symbol="X", side="BUY",
+                                   close_volume=0.1, close_price=1, profit=pr,
+                                   position_ticket=i + 1, deal_ticket=10 + i,
+                                   closed_at=at, verified=True))
+    v = _user(db_session, "part3@t.co")
+    _participant(db_session, comp, v, "B")
+    db_session.commit()
+
+    rows = {r["login"]: r for r in admin_list_participants(comp.id, db=db_session)}
+
+    a = rows["A"]
+    assert a["nickname"] == "陈总"
+    assert a["balanceAtSignup"] == 10000.0
+    assert a["balanceAtScoringStart"] == 10165.0      # 开赛前那笔 +165 算进起点
+    assert a["balance"] == 10215.0 and a["netCashflow"] == 0.0
+    assert a["status"] == "min_trades" and a["minTrades"] == 5
+    assert rows["B"]["status"] == "no_baseline" and rows["B"]["balanceAtSignup"] is None
+
+
 def test_list_participants_404_when_comp_missing(db_session):
     with pytest.raises(HTTPException) as exc:
         admin_list_participants("nope", db=db_session)

@@ -182,6 +182,99 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     return rows
 
 
+def participant_details(db, comp: Competition, participants: list) -> dict[str, dict]:
+    """管理端参赛名单的逐行明细：participant.id -> {报名时余额、计分起点余额、当前余额 /
+    净值、资金进出、计分笔数、实时名次 / 收益、没上榜的原因}。
+
+    与 compute_comp_rows 同一套口径（同一个 _resolved_in_period / return_score /
+    门槛），所以这里说的「为什么没上榜」就是计分时真正卡住的那一条。只读，不写库。
+    Per-row detail for the admin participant table, computed with exactly the
+    scoring path's functions and gates, so the stated reason for being off the
+    board is the one that actually applies. Read-only.
+
+    status：ranked | disqualified | no_baseline | not_started | capital_out_of_range
+            | min_trades | pending（够格了，等下一轮快照）
+    """
+    from app.models import ClosedTrade
+    from app.services.settings_store import get_gamification_settings
+    if not participants:
+        return {}
+    gates = comp_gates(comp, get_gamification_settings(db))
+    min_baseline, max_baseline = gates["min_baseline_usd"], gates["max_baseline_usd"]
+    min_trades = (gates["min_trades_return"] if comp.metric == "return_pct"
+                  else gates["min_trades_winrate"])
+    period_key = comp_period_key(comp.id)
+    starts_at, ends_at = _aware(comp.starts_at), _aware(comp.ends_at)
+    now = datetime.now(timezone.utc)
+
+    uids = {p.user_id for p in participants}
+    logins = {p.mt5_login for p in participants}
+    baselines = {(b.user_id, b.mt5_login): b for b in
+                 db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key)}
+    accounts = {(a.user_id, a.login): a for a in
+                db.query(MT5Account).filter(MT5Account.user_id.in_(uids),
+                                            MT5Account.login.in_(logins))}
+    board = {r.mt5_login: r for r in
+             db.query(LeaderboardSnapshot).filter(LeaderboardSnapshot.period_key == period_key)}
+    closes = defaultdict(list)                     # (uid, login) -> [(closed_at, profit)]
+    for uid, lg, closed_at, profit in (
+            db.query(ClosedTrade.user_id, ClosedTrade.mt5_login, ClosedTrade.closed_at,
+                     ClosedTrade.profit)
+              .filter(ClosedTrade.user_id.in_(uids), ClosedTrade.mt5_login.in_(logins))):
+        closes[(uid, lg)].append((_aware(closed_at), float(profit or 0.0)))
+
+    from .boards import capital_at
+    out: dict[str, dict] = {}
+    for p in participants:
+        key = (p.user_id, p.mt5_login)
+        b, acct, snap = baselines.get(key), accounts.get(key), board.get(p.mt5_login)
+        d = {
+            "balanceAtSignup": float(b.baseline) if b is not None else None,
+            "balanceAtScoringStart": None,
+            "balance": acct.balance if acct is not None else None,
+            "equity": acct.equity if acct is not None else None,
+            "accountOnline": bool(acct.online) if acct is not None else None,
+            "accountRevoked": bool(acct is None or acct.revoked_at is not None),
+            "netCashflow": float(b.adjust or 0.0) if b is not None else None,
+            "sample": None,
+            "minTrades": min_trades,
+            "liveRank": snap.rank if snap is not None else None,
+            "liveScore": snap.score if snap is not None else None,
+            "status": None,
+        }
+        out[p.id] = d
+        if p.disqualified:
+            d["status"] = "disqualified"
+            continue
+        if b is None:
+            d["status"] = "no_baseline"
+            continue
+        lower = max(starts_at, _aware(b.taken_at),
+                    *([_aware(p.scoring_from)] if p.scoring_from is not None else []))
+        if now >= lower:
+            # 计分起点余额 = 那一刻的本金 + 报名到起点之间已平仓的盈亏。
+            # Balance at the scoring start = capital then + P/L closed between signup and it.
+            pre = sum(pr for at, pr in closes[key] if _aware(b.taken_at) <= at < lower)
+            d["balanceAtScoringStart"] = round(capital_at(b, lower) + pre, 2)
+        if now < starts_at:
+            d["status"] = "not_started"
+            continue
+        resolved = _resolved_in_period(db, p.user_id, {p.mt5_login}, period_key,
+                                       {p.mt5_login: lower}, bounds=(starts_at, ends_at),
+                                       modes=track_modes(comp.track)).get(p.mt5_login, [])
+        d["sample"] = len(resolved)
+        if snap is not None:
+            d["status"] = "ranked"
+        elif (comp.metric == "return_pct" and resolved
+              and return_score(b, resolved, min_baseline, max_baseline) is None):
+            d["status"] = "capital_out_of_range"
+        elif len(resolved) < min_trades:
+            d["status"] = "min_trades"
+        else:
+            d["status"] = "pending"                 # 下一轮快照才会出现 / next snapshot
+    return out
+
+
 def _snapshot_one_comp(db, comp: Competition, force: bool = False) -> list[dict]:
     """单场比赛的算行 + 排名 + 快照原子替换（delete-then-insert），不 commit——
     commit 时机由调用方决定：`snapshot_competitions` 每场比赛提交一次；
