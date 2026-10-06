@@ -72,18 +72,32 @@ def _login_detail(db, uid, login, start, end, taken_at, modes=(REAL,)):
             "unverified_legs": unverified, "lower": lower}
 
 
+_STATUS_ZH = {
+    "ranked": "上榜",
+    "disqualified": "已取消资格",
+    "no_baseline": "没有基线（报名时没拍到本金）",
+    "not_started": "比赛未开始",
+    "capital_out_of_range": "报名本金不在本场门槛内",
+    "min_trades": "平仓笔数不足",
+    "pending": "已够格，等下一轮快照",
+}
+
+
 def _diagnose_comp(ident: str, verbose: bool) -> int:
-    """比赛版漏斗：参赛行 → 有基线 → 分母达标 → 本场整仓笔数 → 上榜。
-    与周期榜的区别都在这里显式打印：赛道（决定哪些账户与哪些成交单参与）、
-    本场门槛（可覆盖全局）、计分窗口（开赛 / 报名 / 拍基线三者取晚）。
-    Competition funnel: participants → baseline → denominator → resolved trades →
-    on board. The competition-specific parts are printed explicitly: the track
-    (which accounts and which fills count), this competition's gates (may override
-    the global ones), and the scoring window (latest of start / registration /
-    baseline)."""
+    """比赛版诊断：逐个参赛账户说清「上没上榜、为什么」。
+
+    判定直接调 `competitions.participant_details`——后台参赛名单用的就是它，它又与
+    计分（compute_comp_rows）同一套函数与门槛（2026-10-06 方案 3：分母 = 报名本金，
+    出入金只标黄复核，结束时未平的平台单按结束快照浮盈计入）。脚本不再自己算分母，
+    以前它按「基线 + 入金调整」算、不看本金上限也不看结束快照，跟真榜对不上。
+    没上榜的再用 `_login_detail` 拆仓位漏斗，解释笔数差在哪一级。
+    Competition diagnosis per entry. The verdict comes from participant_details — the
+    same function the admin participant list uses, itself built on the scoring path —
+    so the script can't drift from the real board again. Entries off the board get the
+    per-position funnel from _login_detail to show where their trades fell out."""
     from app.models import Competition, CompetitionParticipant
     from app.services.gamification.competitions import (
-        comp_gates, comp_period_key, track_modes)
+        CASHFLOW_FLAG_FRAC, comp_gates, comp_period_key, participant_details, track_modes)
 
     db = SessionLocal()
     try:
@@ -94,67 +108,104 @@ def _diagnose_comp(ident: str, verbose: bool) -> int:
             return 1
         gates = comp_gates(comp, get_gamification_settings(db))
         modes = track_modes(comp.track)
-        min_trades = (gates["min_trades_return"] if comp.metric == "return_pct"
-                      else gates["min_trades_winrate"])
-        key = comp_period_key(comp.id)
+        lo, hi = gates["min_baseline_usd"], gates["max_baseline_usd"]
+        if hi is not None and hi == lo:
+            cap_desc = f"报名本金须正好 {lo:g} USD"
+        else:
+            cap_desc = f"报名本金 ≥{lo:g}" + (f" 且 ≤{hi:g}" if hi is not None else "") + " USD"
         start, end = _aware(comp.starts_at), _aware(comp.ends_at)
         print(f"比赛「{comp.name}」 {comp.id}")
         print(f"  状态 {comp.status} · 指标 {comp.metric} · 赛道 {comp.track}"
-              f"（计分只认 trade_mode ∈ {modes} 的成交单）")
+              f"（计分只认 trade_mode ∈ {modes} 的平台单）")
         print(f"  窗口 {_fmt(start)} → {_fmt(end)}")
-        print(f"  门槛：≥{min_trades} 笔 · 分母 ≥{gates['min_baseline_usd']:g} USD"
-              f"（{'本场自定义' if comp.min_trades is not None or comp.min_baseline_usd is not None else '跟随全局'}）")
+        min_trades = (gates["min_trades_return"] if comp.metric == "return_pct"
+                      else gates["min_trades_winrate"])
+        print(f"  门槛：≥{min_trades} 笔 · {cap_desc}")
+        print(f"  口径：平台单盈亏 ÷ 报名本金；资金进出 ≥ 报名本金 {CASHFLOW_FLAG_FRAC:.0%} 只标黄复核，"
+              f"不影响计分；结束时未平的平台单按结束快照浮盈计入")
         print()
 
         parts = (db.query(CompetitionParticipant)
-                   .filter(CompetitionParticipant.competition_id == comp.id).all())
-        live = [p for p in parts if not p.disqualified]
+                   .filter(CompetitionParticipant.competition_id == comp.id)
+                   .order_by(CompetitionParticipant.registered_at.asc()).all())
+        details = participant_details(db, comp, parts)
         baselines = {(b.user_id, b.mt5_login): b for b in
-                     db.query(PeriodBaseline).filter(PeriodBaseline.period_key == key)}
-        with_base = [p for p in live if (p.user_id, p.mt5_login) in baselines]
-        print("── 参赛漏斗 ──")
-        print(f"  参赛行                            {len(parts):>4}"
-              f"   （被取消资格 {len(parts) - len(live)}）")
-        print(f"  └ 有基线                          {len(with_base):>4}"
-              f"   （无基线 {len(live) - len(with_base)}）")
+                     db.query(PeriodBaseline).filter(
+                         PeriodBaseline.period_key == comp_period_key(comp.id))}
+
+        counts = defaultdict(int)
+        for p in parts:
+            counts[details[p.id]["status"]] += 1
+        print("── 汇总 ──")
+        print(f"  参赛行 {len(parts)}")
+        for st in ("ranked", "pending", "min_trades", "capital_out_of_range",
+                   "no_baseline", "not_started", "disqualified"):
+            if counts.get(st):
+                print(f"  · {_STATUS_ZH[st]:<24} {counts[st]:>4}")
+        flagged = [p for p in parts if details[p.id].get("cashflowFlagged")]
+        if flagged:
+            print(f"  · 资金进出需复核（不影响计分）     {len(flagged):>4}")
+        if comp.status in ("ended", "settled"):
+            missing = [p for p in parts if not p.disqualified and not details[p.id].get("endCaptured")]
+            print(f"  · 结束持仓快照未拍到              {len(missing):>4}"
+                  + ("   ← 比赛循环每分钟重试；一直不动查网关" if missing else ""))
         print()
 
-        on_board, dropped = [], []
-        for p in with_base:
-            b = baselines[(p.user_id, p.mt5_login)]
-            lower = max(start, _aware(b.taken_at),
-                        *([_aware(p.scoring_from)] if p.scoring_from else []))
-            d = _login_detail(db, p.user_id, p.mt5_login, lower, end, b.taken_at, modes)
-            denom = b.baseline + b.adjust
-            row = {"p": p, "b": b, "denom": denom, "d": d, "lower": lower}
-            (on_board if len(d["in_window"]) >= min_trades and denom >= gates["min_baseline_usd"]
-             and denom > 0 else dropped).append(row)
-        print(f"── 结果 ──  上榜 {len(on_board)} · 未上榜 {len(dropped)}")
+        def _line(p, d):
+            bal = lambda v: "—" if v is None else f"{v:.2f}"
+            flow = d.get("netCashflow")
+            flow_s = "—" if flow is None else f"{flow:+.2f}" + ("（需复核）" if d.get("cashflowFlagged") else "")
+            return (f"报名本金 {bal(d.get('balanceAtSignup'))} · 计分起点余额 "
+                    f"{bal(d.get('balanceAtScoringStart'))} · 当前余额 {bal(d.get('balance'))}"
+                    f" · 资金进出 {flow_s}")
+
+        print("── 没上榜的 ──")
+        for p in parts:
+            d = details[p.id]
+            if d["status"] == "ranked":
+                continue
+            print(f"  {p.mt5_login}  {_STATUS_ZH.get(d['status'], d['status'])}"
+                  + (f" · 计分 {d['sample']} 笔（需 {d['minTrades']}）" if d.get("sample") is not None else ""))
+            print(f"      {_line(p, d)}")
+            if p.disqualified and p.disqualify_reason:
+                print(f"      取消原因：{p.disqualify_reason}")
+            b = baselines.get((p.user_id, p.mt5_login))
+            if d["status"] in ("min_trades", "pending") and b is not None:
+                lower = max(start, _aware(b.taken_at),
+                            *([_aware(p.scoring_from)] if p.scoring_from else []))
+                f = _login_detail(db, p.user_id, p.mt5_login, lower, end, b.taken_at, modes)
+                why = []
+                if f["orders"] == 0:
+                    why.append(f"名下没有该赛道（trade_mode ∈ {modes}）的平台单")
+                else:
+                    if f["with_legs"] < f["orders"]:
+                        why.append(f"{f['orders'] - f['with_legs']} 单还没有已核验的平仓腿（未平或挂单未触发）")
+                    if f["resolved"] < f["with_legs"]:
+                        why.append(f"{f['with_legs'] - f['resolved']} 单只平了一部分")
+                    if f["before_lower"]:
+                        why.append(f"{f['before_lower']} 笔平在计分起点 {_fmt(lower)} 之前")
+                    if f["after_end"]:
+                        why.append(f"{f['after_end']} 笔平在比赛结束之后（结束快照拍到才计入）")
+                if f["unverified_legs"]:
+                    why.append(f"{f['unverified_legs']} 条平仓腿未核验（仓位号对不上，多半是 MT5 里自己下的单）")
+                if why:
+                    print(f"      → {'；'.join(why)}")
         print()
-        for row in dropped:
-            p, d = row["p"], row["d"]
-            reason = []
-            if d["orders"] == 0:
-                reason.append(f"名下没有该赛道（trade_mode ∈ {modes}）的成交单")
-            else:
-                if d["with_legs"] < d["orders"]:
-                    reason.append(f"{d['orders'] - d['with_legs']} 单没有已核验的平仓腿")
-                if d["resolved"] < d["with_legs"]:
-                    reason.append(f"{d['with_legs'] - d['resolved']} 单未整仓平掉")
-                if d["before_lower"]:
-                    reason.append(f"{d['before_lower']} 笔平在计分起点之前")
-                if d["after_end"]:
-                    reason.append(f"{d['after_end']} 笔平在比赛结束之后")
-            if row["denom"] < gates["min_baseline_usd"]:
-                reason.append(f"分母 {row['denom']:.2f} 不足 {gates['min_baseline_usd']:g}")
-            print(f"  {p.mt5_login}  本场 {len(d['in_window'])} 笔（需 {min_trades}）"
-                  f" · 分母 {row['denom']:.2f} · 计分起点 {_fmt(row['lower'])}")
-            print(f"      → {'；'.join(reason) if reason else '无明显原因，需人工细查'}")
-        if verbose:
-            for row in on_board:
-                p, d = row["p"], row["d"]
-                print(f"  [上榜] {p.mt5_login}  {len(d['in_window'])} 笔 · 盈亏 "
-                      f"{sum(d['in_window']):+.2f} · 分母 {row['denom']:.2f}")
+
+        ranked = sorted((p for p in parts if details[p.id]["status"] == "ranked"),
+                        key=lambda p: details[p.id]["liveRank"] or 0)
+        print(f"── 上榜 {len(ranked)} ──")
+        for p in ranked:
+            d = details[p.id]
+            if not (verbose or d.get("cashflowFlagged")):
+                continue
+            score = d.get("liveScore")
+            score_s = "—" if score is None else (f"{score * 100:+.2f}%" if comp.metric == "return_pct"
+                                                  else f"{score * 100:.1f}%")
+            print(f"  #{d['liveRank']} {p.mt5_login}  {score_s} · {d['sample']} 笔")
+            print(f"      {_line(p, d)}")
+        if not verbose:
+            print("  （只列出资金进出需复核的；--verbose 列出全部）")
         return 0
     finally:
         db.close()
