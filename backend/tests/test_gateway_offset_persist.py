@@ -170,3 +170,22 @@ def test_rev13_adds_offset_column_null_for_existing_rows(legacy_engine):
 
 def test_revision_was_bumped():
     assert db_mod.CURRENT_SCHEMA_REV >= 13
+
+
+def test_platform_positions_keeps_pending_fills_out_of_offset_samples(db_session):
+    """挂单成交的仓位要认得出（归属），但不能当偏移样本：created_at 是挂出时刻，不是成交时刻。
+    Pending fills count for attribution but never as offset samples."""
+    from app.models import Order
+
+    _user(db_session, "u1")
+    db_session.add_all([
+        Order(user_id="u1", client_order_id="co_m", action="ORDER", status="FILLED",
+              symbol="XAUUSD", side="BUY", volume=0.1, mt5_login="100486", mt5_position=111),
+        Order(user_id="u1", client_order_id="co_p", action="PENDING", status="PLACED",
+              symbol="XAUUSD", side="SELL", volume=3, mt5_login="100486", mt5_position=222),
+    ])
+    db_session.commit()
+
+    known, opened_at = gw.platform_positions(db_session, "u1", "100486")
+    assert known == {111, 222}
+    assert set(opened_at) == {111}

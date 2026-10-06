@@ -966,6 +966,12 @@ def gateway_deal_reason(code) -> str | None:
 # 0 when never observed (old behaviour: don't guess).
 _OFFSET_MAX_SECONDS = 14.5 * 3600       # 超出这个就不是时区 / beyond a timezone
 _OFFSET_ROUND_SECONDS = 30 * 60         # 时区偏移都是半小时的整数倍 / zones are half-hour multiples
+# 样本离最近的半小时超过这个就不是"时区 + 执行延迟"，丢弃。市价单的延迟是秒级，
+# 5 分钟足够宽；挂单那种"挂出去几十分钟后才成交"的样本会落在两档中间被挡掉。
+# A sample further than this from the nearest half hour isn't "zone + latency":
+# market fills lag by seconds, while a pending order filled tens of minutes after
+# placement lands between two half hours and is dropped.
+_OFFSET_TOLERANCE_SECONDS = 5 * 60
 # 进程内缓存，真身在 mt5_accounts.server_utc_offset。以前只有这个 dict：重启就忘，
 # 要等该账号再有一笔本平台开仓才学得回来，学不回来就按 0 入库——而 closed_trades
 # 按 deal_ticket 去重，错的时间永远不会自愈（scripts/shift_closed_at.py 就是为此
@@ -1048,13 +1054,38 @@ def observe_server_offset(deals: list, opened_at_by_position: dict[int, datetime
         if opened.tzinfo is None:
             opened = opened.replace(tzinfo=timezone.utc)
         delta = float(d.time) - opened.timestamp()
-        if abs(delta) <= _OFFSET_MAX_SECONDS:
+        nearest = round(delta / _OFFSET_ROUND_SECONDS) * _OFFSET_ROUND_SECONDS
+        if abs(delta) <= _OFFSET_MAX_SECONDS and abs(delta - nearest) <= _OFFSET_TOLERANCE_SECONDS:
             samples.append(delta)
     if not samples:
         return None
     samples.sort()
     median = samples[len(samples) // 2]
     return round(median / _OFFSET_ROUND_SECONDS) * _OFFSET_ROUND_SECONDS
+
+
+def platform_positions(db: Session, user_id: str, login: str) -> tuple[set[int], dict[int, datetime]]:
+    """本平台在该账号开过的仓位号，以及可用来观测时区偏移的「仓位号 → 下单时刻」。
+
+    仓位号集合含挂单成交的仓位（归属判定要认出它们）；偏移样本只要市价单：挂单的
+    created_at 是挂出去的时刻，成交可能在几十分钟后，相减得到的是「时区 + 等待
+    时长」。2026-10-06 100486 全用挂单，偏移被学成 +4h / +3.5h，平仓时间整体提前
+    一小时 / 半小时，三笔止损落到了报名时刻之前，被对账记成 −2172 的出金。
+
+    Platform position ids for this login, plus position -> order time for offset
+    observation. Ids include pending-order fills (attribution needs them); offset
+    samples use market orders only, because a pending order's created_at is when it
+    was placed and the fill can come much later, so the difference is zone + wait.
+    """
+    rows = db.query(Order.mt5_position, Order.created_at, Order.action).filter(
+        Order.user_id == user_id,
+        Order.mt5_login == login,
+        OPENED_POSITION,
+        Order.mt5_position.isnot(None),
+    ).all()
+    known = {int(t) for (t, _, _) in rows}
+    opened_at = {int(t): c for (t, c, action) in rows if action == "ORDER"}
+    return known, opened_at
 
 # MT5 成交类型/进出方向常量（对应 SDK 的 EnDealAction / EnDealEntry）
 _DEAL_ACTION_BUY = 0
@@ -1495,19 +1526,11 @@ async def gateway_positions_loop() -> None:
             # Match on mt5_position (the real position id). mt5_ticket holds an
             # order or deal ticket — a different numbering space from a closing
             # deal's position_id, so comparing against it never matches.
-            # created_at 一并取出：开仓腿的服务器时间与它相减就是服务器时区偏移
-            #（见 observe_server_offset）。
-            # created_at comes along: the IN leg's server time minus it is the
-            # server's zone offset (see observe_server_offset).
-            opened_at = {
-                int(t): c for (t, c) in db.query(Order.mt5_position, Order.created_at).filter(
-                    Order.user_id == user_id,
-                    Order.mt5_login == login,
-                    OPENED_POSITION,
-                    Order.mt5_position.isnot(None),
-                ).all()
-            }
-            known = set(opened_at)
+            # 市价单的 created_at 一并取出：开仓腿的服务器时间与它相减就是服务器
+            # 时区偏移（见 observe_server_offset / platform_positions）。
+            # Market orders' created_at comes along: the IN leg's server time minus
+            # it is the server's zone offset (see platform_positions).
+            known, opened_at = platform_positions(db, user_id, login)
 
             offset = observe_server_offset(deals, opened_at)
             if offset is not None:

@@ -196,3 +196,14 @@ def test_closed_at_shifted_back_to_true_utc():
     # 默认 0 偏移 = 旧行为（仍然领先 3 小时）
     legacy = build_closed_trade_legs(deals, PREFIX, {7})[0]["closedAt"]
     assert (legacy - closed).total_seconds() == _SERVER_AHEAD
+
+
+def test_offset_drops_samples_that_are_not_zone_plus_latency():
+    # 2026-10-06 100486：挂单 10:44 挂出、11:30 才成交，"服务器时间 − 下单时刻" = 3h46m，
+    # 以前四舍五入成 +4h，平仓时间整体提前一小时。离半小时档位 5 分钟以外的样本不是时区。
+    # A pending order placed 46 min before its fill gives 3h46m: not a zone, dropped.
+    waited = _in_out(4, _OPENED, _SERVER_AHEAD + 46 * 60)
+    assert observe_server_offset(waited, {4: _OPENED}) is None
+    # 混着一条正常市价样本时，只剩正常的那条说了算
+    mixed = waited + _in_out(5, _OPENED, _SERVER_AHEAD)
+    assert observe_server_offset(mixed, {4: _OPENED, 5: _OPENED}) == _SERVER_AHEAD
