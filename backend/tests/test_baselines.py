@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from app.models import User, MT5Account, ClosedTrade, PeriodBaseline
 from app.services.gamification.boards import capital_at, ensure_baselines, reconcile_deposits
@@ -130,6 +131,47 @@ def test_balance_ahead_of_close_row_deposit_is_reversed(db_session):
     assert capital_at(row, NOW + timedelta(minutes=90)) == 1000.0  # 两轮之间也恢复
     assert capital_at(row, t2) == 1000.0
     assert reconcile_deposits(db_session, PK, now=t2 + timedelta(hours=1)) == 0   # 手续费照旧忽略
+
+
+def test_stale_balance_fake_deposit_cancelled_in_place(db_session):
+    """离线用户：亏损平仓行先入库、余额几小时后才刷新——第一轮被记成入金；余额刷新后
+    差额回负且超过出金门槛，也要原地冲掉那笔入金，而不是另记出金留下一段本金偏高的窗口。"""
+    u = _user(db_session, email="b4f@t.co")
+    _acct(db_session, u, "R1", 10000.0)
+    ensure_baselines(db_session, PK, NOW)
+    db_session.add(ClosedTrade(user_id=u.id, mt5_login="R1", symbol="X", side="BUY",
+                               close_volume=1, close_price=1, profit=-3000.0,
+                               position_ticket=1, deal_ticket=10,
+                               closed_at=NOW + timedelta(minutes=30), verified=True))
+    db_session.commit()                         # 余额还停在 10000
+    t1 = NOW + timedelta(hours=1)
+    assert reconcile_deposits(db_session, PK, now=t1) == 1        # 被看成入金 3000
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 7000.0                       # 用户上线，余额刷新
+    db_session.commit()
+    t2 = NOW + timedelta(hours=6)
+    assert reconcile_deposits(db_session, PK, now=t2) == 1
+    row = db_session.query(PeriodBaseline).first()
+    assert abs(row.adjust) < 1e-6 and json.loads(row.flows) == []
+    for h in (1, 3, 6):                         # 中间任何时刻本金都是基线
+        assert capital_at(row, NOW + timedelta(hours=h)) == 10000.0
+
+
+def test_real_deposit_then_real_withdrawal_above_net_still_recorded(db_session):
+    """冲回封顶净 adjust：入金 200 后出金 500 → 冲掉 200、余下 300 照常记出金。"""
+    u = _user(db_session, email="b4g@t.co")
+    _acct(db_session, u, "R1", 1000.0)
+    ensure_baselines(db_session, PK, NOW)
+    acct = db_session.query(MT5Account).first()
+    acct.balance = 1200.0
+    db_session.commit()
+    reconcile_deposits(db_session, PK, now=NOW + timedelta(hours=1))
+    acct.balance = 700.0
+    db_session.commit()
+    assert reconcile_deposits(db_session, PK, now=NOW + timedelta(hours=2)) == 1
+    row = db_session.query(PeriodBaseline).first()
+    assert abs(row.adjust + 300.0) < 1e-6
+    assert capital_at(row, NOW + timedelta(hours=2)) == 700.0
 
 
 def test_small_drop_never_reverses_below_baseline(db_session):

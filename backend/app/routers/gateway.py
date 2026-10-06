@@ -1754,6 +1754,25 @@ async def gateway_positions_loop() -> None:
                     logger.info(
                         "Gateway 平仓明细入库 login=%s 新增=%d", login, n
                     )
+                    # 平仓行入库的同时把余额也刷一次。成交事件不管用户在不在线都扫，
+                    # 资金刷新却只跑在线 / 自动仓管用户：离线用户的平仓行进了库、余额
+                    # 还停在旧值，榜单对账就把这笔盈亏的差额记成入金 / 出金，用户回来
+                    # 余额一刷又记一笔反向的——限额比赛（本金必须正好 N）因此整行掉榜。
+                    # Refresh funds together with the new close rows. Deal events are
+                    # scanned for offline users too, but the funds refresh only runs for
+                    # watched users, so the board reconcile used to see fresh closes
+                    # against a stale balance and book the P/L as a deposit/withdrawal.
+                    try:
+                        acc_rsp = await gw_get_account(int(login))
+                        if acc_rsp is not None:
+                            last_account_refresh[login] = time.monotonic()
+                            bal = await run_in_threadpool(
+                                _save_account_funds, user_id, login, acc_rsp
+                            )
+                            if bal is not None:
+                                known_balances[login] = bal
+                    except Exception:
+                        logger.exception("gateway 平仓后余额刷新失败 login=%s", login)
                     # 立刻通知前端重拉，别等它自己的 45 秒轮询
                     await manager.push_to_client(
                         user_id, {"type": "CLOSED_TRADE_NEW"}

@@ -205,3 +205,46 @@ def test_flat_account_is_rechecked_even_while_subscribed(harness, monkeypatch):
     # 再也不读），也不是每拍都读（那就失去了跳过空仓的意义）。
     reads = harness["reads"][FAST_LOGIN]
     assert 2 <= reads <= 8
+
+
+def test_offline_user_close_refreshes_balance(harness, monkeypatch):
+    """离线用户的平仓行由成交事件即时入库，余额也要跟着刷新——否则榜单对账拿新平仓
+    对旧余额，把这笔盈亏记成入金 / 出金（2026-10-06 限额比赛掉榜）。
+    An offline user's close rows land via the deal event; the balance must be
+    refreshed with them, or the board reconcile books the P/L as a cash flow."""
+    from types import SimpleNamespace
+
+    drained = {"n": 0}
+
+    async def deal_drain():
+        drained["n"] += 1
+        return ([int(SLOW_LOGIN)] if drained["n"] == 1 else []), True
+
+    async def only_fast_connected():
+        return [FAST_USER]                      # SLOW_USER 离线 / offline
+
+    async def account(login, timeout=None):
+        if str(login) != SLOW_LOGIN:
+            return None
+        return SimpleNamespace(balance=7000.0, equity=7000.0, margin=0.0, leverage=100,
+                               name="", group="", last_pass_change=0)
+
+    monkeypatch.setattr(gc, "drain_deal_events", deal_drain)
+    monkeypatch.setattr(manager, "connected_user_ids_async", only_fast_connected)
+    monkeypatch.setattr(gw, "gw_get_account", account)
+    async def deals(login, from_unix, to_unix, timeout=None):
+        return [SimpleNamespace(login=int(login))], ""
+
+    monkeypatch.setattr(gw, "gw_get_deals", deals)
+    monkeypatch.setattr(gw, "observe_server_offset", lambda *a, **k: None)
+    monkeypatch.setattr(gw, "build_closed_trade_legs", lambda *a, **k: [{"leg": 1}])
+    monkeypatch.setattr(gw, "upsert_leg", lambda *a, **k: "inserted")
+
+    _run_loop_for(0.6)
+
+    db = gw.SessionLocal()
+    try:
+        row = db.query(MT5Account).filter(MT5Account.login == SLOW_LOGIN).one()
+        assert row.balance == 7000.0
+    finally:
+        db.close()
