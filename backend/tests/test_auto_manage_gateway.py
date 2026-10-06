@@ -435,3 +435,30 @@ def test_bridge_never_reaches_the_gateway(db_session, gateway_http):
     assert gateway_http.calls == []
     cmd = db_session.query(Order).filter(Order.action == "MODIFY").one()
     assert cmd.status == "PENDING"
+
+
+def test_auto_manage_user_ids_lists_enabled_pro_users(db_session):
+    """gateway 慢拍靠这份名单在前端离线时继续驱动自动仓管：
+    只含开着总开关的 PRO 用户，开关切换后立即反映（不等 TTL）。"""
+    on = _setup(db_session, login="700001", source="gateway", mt5_ticket=1, mt5_position=1)
+    off = _setup(db_session, login="700002", source="gateway", mt5_ticket=2, mt5_position=2,
+                 enabled=False)
+    free = _setup(db_session, login="700003", source="gateway", mt5_ticket=3, mt5_position=3)
+    db_session.query(User).filter(User.id == free).update({"plan": "FREE"})
+    db_session.commit()
+    invalidate_eligibility(free)
+    auto_manage._active_users_cache = None
+
+    ids = auto_manage.auto_manage_user_ids(db_session)
+    assert on in ids
+    assert off not in ids
+    assert free not in ids
+
+    db_session.query(AutoManageSettings).filter(AutoManageSettings.user_id == on).update(
+        {"enabled": False})
+    db_session.commit()
+    invalidate_eligibility(on)
+    # 没有 Redis 时共享版本号为 None，只能靠清缓存模拟；有版本号时 invalidate 即可生效
+    if auto_manage._eligible_version.current() is None:
+        auto_manage._active_users_cache = None
+    assert on not in auto_manage.auto_manage_user_ids(db_session)

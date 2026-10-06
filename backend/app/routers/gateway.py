@@ -1326,7 +1326,7 @@ async def gateway_positions_loop() -> None:
 
     from starlette.concurrency import run_in_threadpool
 
-    from app.services.auto_manage import evaluate_positions
+    from app.services.auto_manage import auto_manage_user_ids, evaluate_positions
     from app.services.connection_manager import manager
     from app.services.trade_performance import mark_positions_seen
     from app.services.gateway_client import drain_deal_events, drain_position_events
@@ -1659,6 +1659,14 @@ async def gateway_positions_loop() -> None:
         db = SessionLocal()
         try:
             mark_positions_seen(db, user_id, data)
+        finally:
+            db.close()
+
+    def _auto_manage_users() -> frozenset[str]:
+        """开着自动仓管的 PRO 用户（带缓存，见 auto_manage_user_ids）。"""
+        db = SessionLocal()
+        try:
+            return auto_manage_user_ids(db)
         finally:
             db.close()
 
@@ -2280,14 +2288,28 @@ async def gateway_positions_loop() -> None:
                 # pushed to a watching frontend; with nobody watching, the query
                 # (a round trip to remote Supabase) is pure waste. A connecting
                 # client is picked up on the next tick, behavior unchanged.
+                #
+                # 例外是开着自动仓管的用户：gateway 账号没有桥接上报，自动仓管只靠这条
+                # 慢拍驱动。以前这里只看在线名单，用户一关网页 / App 退后台，保本与追踪
+                # 止损就整个停摆，开着页面时又恢复——「时灵时不灵」就是这么来的。
+                # Except users with auto-management on: gateway accounts have no bridge
+                # reports, so this tick is the only thing driving their rules. Polling
+                # only connected users made auto-management stop whenever the page was
+                # closed or the app backgrounded, and resume when reopened.
                 connected = set(await manager.connected_user_ids_async())
-                if not connected:
+                try:
+                    managed = await run_in_threadpool(_auto_manage_users)
+                except Exception:
+                    logger.exception("gateway: auto-manage user list failed")
+                    managed = frozenset()
+                watched = connected | managed
+                if not watched:
                     await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)
                     continue
 
                 pairs = await run_in_threadpool(_gateway_accounts)
                 by_user = _accounts_by_user(pairs)
-                targets = [(uid, lg) for uid, lg in by_user.items() if uid in connected]
+                targets = [(uid, lg) for uid, lg in by_user.items() if uid in watched]
 
                 if targets:
                     # 每个用户一个任务，并发度由 sem 限制。上一轮还没做完的用户这一轮

@@ -177,6 +177,54 @@ def _is_eligible(db: Session, user_id: str) -> tuple[bool, AutoManageSettings | 
     return eligible, settings_row if eligible else None
 
 
+# 「开着自动仓管的 PRO 用户」名单的缓存秒数。gateway 慢拍每 2 秒要一次，
+# 用它把这些用户纳入轮询——哪怕他们没开着网页 / App。
+# Cache TTL for the "PRO users with auto-management on" list. The gateway slow
+# tick asks every 2s to keep polling these users even with no client connected.
+_ACTIVE_USERS_TTL_SECONDS = 15
+# (写入时刻, 写入时的共享版本号, 名单) / (stored at, shared version, ids)
+_active_users_cache: tuple[float, str | None, frozenset[str]] | None = None
+
+
+def auto_manage_user_ids(db: Session) -> frozenset[str]:
+    """开着自动仓管总开关的 PRO 用户。
+
+    gateway 的持仓慢拍原本只轮询「前端在线」的用户，而 gateway 账号没有桥接上报，
+    评估只能靠这条慢拍驱动——结果用户一关网页、App 一退后台（WebSocket 断开），
+    自动仓管就整个停摆，开着页面时又恢复，表现为「时灵时不灵」。慢拍用这份名单
+    把这些用户一并纳入。设置变更走 invalidate_eligibility 换掉的同一个共享版本号，
+    开关切换约 1 秒内生效；套餐到期之类靠 TTL，evaluate_positions 自己还会复核资格。
+
+    PRO users with the master switch on. The gateway slow tick used to poll only
+    users with a connected client, and gateway accounts have no bridge reports, so
+    auto-management silently stopped whenever the web page closed or the app went to
+    the background. The tick now also polls these users. Invalidated by the same
+    shared version as invalidate_eligibility; plan changes ride the TTL, and
+    evaluate_positions re-checks eligibility anyway.
+    """
+    global _active_users_cache
+    now = time.time()
+    ver = _eligible_version.current()
+    with _cache_lock:
+        hit = _active_users_cache
+        if (
+            hit is not None
+            and now - hit[0] < _ACTIVE_USERS_TTL_SECONDS
+            and not (ver is not None and hit[1] is not None and ver != hit[1])
+        ):
+            return hit[2]
+    ids = frozenset(
+        uid for uid, plan in db.query(AutoManageSettings.user_id, User.plan)
+        .join(User, User.id == AutoManageSettings.user_id)
+        .filter(AutoManageSettings.enabled.is_(True))
+        .all()
+        if can_auto_manage(plan)
+    )
+    with _cache_lock:
+        _active_users_cache = (now, ver, ids)
+    return ids
+
+
 def _client_order_id(kind: str, ticket: int) -> str:
     return f"{AUTO_PREFIX}{kind}_{ticket}_{uuid.uuid4().hex[:8]}"
 
