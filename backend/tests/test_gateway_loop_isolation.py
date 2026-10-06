@@ -248,3 +248,30 @@ def test_offline_user_close_refreshes_balance(harness, monkeypatch):
         assert row.balance == 7000.0
     finally:
         db.close()
+
+
+def test_offline_user_balance_swept_without_any_close(harness, monkeypatch):
+    """离线用户没有新平仓也要定期刷新余额：错拍发生在部署前、或平仓后那次刷新失败的
+    账号，靠这条兜底追平；没有任何人在线时也照跑。
+    Offline balances are swept periodically even with no new close and nobody online."""
+    from types import SimpleNamespace
+
+    async def nobody_connected():
+        return []
+
+    async def account(login, timeout=None):
+        return SimpleNamespace(balance=6447.41, equity=6447.41, margin=0.0, leverage=100,
+                               name="", group="", last_pass_change=0)
+
+    monkeypatch.setattr(manager, "connected_user_ids_async", nobody_connected)
+    monkeypatch.setattr(gw, "gw_get_account", account)
+    monkeypatch.setattr(gw, "gw_batch_available", lambda: False)
+
+    _run_loop_for(0.4)
+
+    db = gw.SessionLocal()
+    try:
+        rows = db.query(MT5Account).all()
+        assert {r.balance for r in rows} == {6447.41}
+    finally:
+        db.close()

@@ -746,6 +746,16 @@ class EventQueueLease:
 # API round-trip, so throttle per account instead of hitting it every 2s.
 GATEWAY_ACCOUNT_REFRESH_INTERVAL = 15.0
 
+# 离线账号的资金兜底刷新间隔。慢拍只刷在线 / 自动仓管用户的资金，离线用户的余额会一直
+# 停在旧值，而他的平仓行照样由成交事件入库——榜单对账拿新平仓对旧余额，就把盈亏记成
+# 入金 / 出金（2026-10-06 限额比赛掉榜）。平仓入库时虽然也会顺手刷新，但那之前已经错拍
+# 的账号、以及刷新失败的，要靠这条兜底追平。5 分钟一次：对账本身就是 5 分钟一趟。
+# Fallback funds refresh for offline accounts. The slow tick only refreshes watched users,
+# so an offline user's balance went stale while their close rows kept landing, and the
+# board reconcile booked the P/L as cash flow. Closes now refresh funds too; this sweep
+# catches anything already out of step or whose refresh failed. Matches the 5-min reconcile.
+GATEWAY_OFFLINE_FUNDS_INTERVAL = 300.0
+
 # 批量预取总开关。为 True 且网关 /health 声明 batchSupported 时，慢拍开头把本拍要读的
 # 持仓 / 资金 / 常规窗口成交各用一次批量调用取回，放进临时缓存；随后每个用户的处理逻辑
 # 一字不改，只是「读」先看缓存、缓存没有（批量不可用、失败、该账号没命中）就照旧逐人读。
@@ -1652,6 +1662,52 @@ async def gateway_positions_loop() -> None:
         task.add_done_callback(side_tasks.discard)
         return task
 
+    offline_sweep = {"at": float("-inf"), "task": None}
+
+    async def _sweep_offline_funds(pairs: list[tuple[str, str]], watched: set[str]) -> None:
+        """离线账号资金兜底刷新（见 GATEWAY_OFFLINE_FUNDS_INTERVAL）。网关支持批量就一次
+        取回，否则逐个读；单个失败只记日志。/ Offline funds sweep: one batch call when
+        the gateway supports it, else per login; a failure only logs."""
+        todo = [(uid, lg) for uid, lg in pairs if uid not in watched]
+        if not todo:
+            return
+        got: dict[str, object] = {}
+        if GATEWAY_BATCH_ENABLED and gw_batch_available():
+            try:
+                res = await gw_get_accounts_batch(sorted({int(lg) for _u, lg in todo}))
+                for lg_int, acc in (res or {}).items():
+                    if acc is not None:
+                        got[str(lg_int)] = acc
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("gateway 离线资金批量刷新失败，退回逐个读取")
+        for uid, lg in todo:
+            try:
+                acc = got.get(lg)
+                if acc is None:
+                    acc = await gw_get_account(int(lg))
+                if acc is None:
+                    continue
+                bal = await run_in_threadpool(_save_account_funds, uid, lg, acc)
+                if bal is not None:
+                    known_balances[lg] = bal
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("gateway 离线资金刷新失败 login=%s", lg)
+
+    def _maybe_sweep_offline(pairs: list[tuple[str, str]], watched: set[str]) -> None:
+        """到点且上一趟已结束才派一趟，在后台跑、不占慢拍。"""
+        now = time.monotonic()
+        task = offline_sweep["task"]
+        if task is not None and not task.done():
+            return
+        if now - offline_sweep["at"] < GATEWAY_OFFLINE_FUNDS_INTERVAL:
+            return
+        offline_sweep["at"] = now
+        offline_sweep["task"] = _spawn(_sweep_offline_funds(pairs, set(watched)))
+
     def _reconcile_sync(user_id: str, data: list[dict]) -> None:
         """胜率对账。会话在工作线程里自己开关：外层任务被取消时线程仍会跑完，
         会话不能由外层先关掉。/ Owns its session inside the worker thread, so a
@@ -2322,6 +2378,13 @@ async def gateway_positions_loop() -> None:
                     logger.exception("gateway: auto-manage user list failed")
                     managed = frozenset()
                 watched = connected | managed
+                # 离线资金兜底：没人在线时也要跑，放在下面的跳过之前。
+                # Offline funds sweep runs even when nobody is watching.
+                if time.monotonic() - offline_sweep["at"] >= GATEWAY_OFFLINE_FUNDS_INTERVAL:
+                    try:
+                        _maybe_sweep_offline(await run_in_threadpool(_gateway_accounts), watched)
+                    except Exception:
+                        logger.exception("gateway: offline funds sweep failed to start")
                 if not watched:
                     await asyncio.sleep(GATEWAY_POSITIONS_INTERVAL)
                     continue
