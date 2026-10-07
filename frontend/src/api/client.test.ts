@@ -182,3 +182,113 @@ describe('request(): network layer', () => {
     expect(api.hasHttpResponse(new TypeError('x'))).toBe(false)
   })
 })
+
+// 续期头 / 401 只作用于「发请求时的那个 token 仍是当前 token」的会话：慢请求在登出、换号
+// 之后才回来，不能把旧 token 写回去，也不能把新会话清掉。
+// The renewal header / 401 only act on the session that still holds the token the request was
+// sent with: a slow response landing after logout or an account switch must neither write the
+// old token back nor wipe the new session.
+describe('request(): token renewal / 401 follow the sending session', () => {
+  // safeStorage 读的是 window.localStorage：load() 桩出的 window 不带它，这里补上。
+  // safeStorage reads window.localStorage, which load()'s stubbed window lacks; add it.
+  async function loadWithStorage() {
+    const mods = await load()
+    vi.stubGlobal('window', {
+      setTimeout: (...a: Parameters<typeof setTimeout>) => setTimeout(...a),
+      clearTimeout: (id: Parameters<typeof clearTimeout>[0]) => clearTimeout(id),
+      localStorage: globalThis.localStorage,
+    })
+    return mods
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  // fetch 挂起，直到测试手动放行 / fetch hangs until the test releases it
+  function deferredFetch() {
+    let release: (r: Response) => void = () => {}
+    const headers: Record<string, string>[] = []
+    vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => {
+      headers.push((init?.headers ?? {}) as Record<string, string>)
+      return new Promise<Response>((res) => { release = res })
+    }))
+    return { release: (r: Response) => release(r), headers }
+  }
+
+  it('同一会话：接受 X-Refreshed-Token / same session accepts the renewal', async () => {
+    const { api } = await loadWithStorage()
+    api.setToken('A')
+    const f = deferredFetch()
+    const p = api.signalApi.list()
+    await Promise.resolve()
+    f.release(new Response(JSON.stringify({ signals: [] }), { status: 200, headers: { 'X-Refreshed-Token': 'A2' } }))
+    await p
+    expect(api.getToken()).toBe('A2')
+  })
+
+  it('请求在途时换了号：不把旧会话的续期 token 写回 / renewal ignored after an account switch', async () => {
+    const { api } = await loadWithStorage()
+    api.setToken('A')
+    const f = deferredFetch()
+    const p = api.signalApi.list()
+    await Promise.resolve()
+    api.setToken('B')
+    f.release(new Response(JSON.stringify({ signals: [] }), { status: 200, headers: { 'X-Refreshed-Token': 'A2' } }))
+    await p
+    expect(api.getToken()).toBe('B')
+  })
+
+  it('请求在途时登出：续期不会「重新登录」/ renewal ignored after logout', async () => {
+    const { api } = await loadWithStorage()
+    api.setToken('A')
+    const f = deferredFetch()
+    const p = api.signalApi.list()
+    await Promise.resolve()
+    api.clearToken()
+    f.release(new Response(JSON.stringify({ signals: [] }), { status: 200, headers: { 'X-Refreshed-Token': 'A2' } }))
+    await p
+    expect(api.getToken()).toBeNull()
+  })
+
+  it('旧会话的 401 不清新会话 / a stale 401 leaves the new session alone', async () => {
+    const { api } = await loadWithStorage()
+    const onUnauthorized = vi.fn()
+    api.setUnauthorizedHandler(onUnauthorized)
+    api.setToken('A')
+    const f = deferredFetch()
+    const p = api.signalApi.list().catch((e: unknown) => e)
+    await Promise.resolve()
+    api.setToken('B')
+    f.release(json({ detail: 'expired' }, 401))
+    await p
+    expect(api.getToken()).toBe('B')
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+
+  it('当前会话的 401 照常清登录态 / a current-session 401 still clears', async () => {
+    const { api } = await loadWithStorage()
+    const onUnauthorized = vi.fn()
+    api.setUnauthorizedHandler(onUnauthorized)
+    api.setToken('A')
+    vi.stubGlobal('fetch', vi.fn(async () => json({ detail: 'expired' }, 401)))
+    await api.signalApi.list().catch(() => {})
+    expect(api.getToken()).toBeNull()
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+  })
+
+  it('pushApi.unsubscribe 可用登出前的 token，401 不触发登出回调 / explicit token, no logout callback', async () => {
+    const { api } = await loadWithStorage()
+    const onUnauthorized = vi.fn()
+    api.setUnauthorizedHandler(onUnauthorized)
+    const seen: Record<string, string>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      seen.push((init?.headers ?? {}) as Record<string, string>)
+      return json({ detail: 'expired' }, 401)
+    }))
+    await api.pushApi.unsubscribe('https://push.example/x', { p256dh: 'p', auth: 'a' }, 'OLD').catch(() => {})
+    expect(seen[0].Authorization).toBe('Bearer OLD')
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+})

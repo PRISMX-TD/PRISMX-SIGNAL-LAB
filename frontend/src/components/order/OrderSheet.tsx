@@ -146,11 +146,15 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   }, [])
 
   const { isBuy, selected, accounts } = form
-  const canSubmit = form.hasAccounts && !blocked && !form.slTpInvalid
+  // 风险模式算不出合法手数时不能提交：手数框里留着的是上一次的值，提交就是按一个
+  // 用户没选的风险下单。/ When risk sizing can't produce a legal lot, block submit — the
+  // volume box still holds a previous value, i.e. a risk the user never chose.
+  const canSubmit = form.hasAccounts && !blocked && !form.slTpInvalid && !form.riskBelowMinLot
 
   const handleSubmit = async () => {
     if (blocked) { setError(blocked.error); return }
     if (form.slTpInvalid) { setError(t('order.slTpInvalid')); return }
+    if (form.riskBelowMinLot) { setError(t('order.riskBelowMinLot')); return }
     const vol = form.parsedVolume
     if (vol == null) { setError(t('order.volume')); return }
     setReceipt('waiting')
@@ -309,6 +313,12 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
             <div className="slide-row">
               <span className="k" />
               <span className="text-xs text-amber-400/90">{t('order.riskUnsupportedPair')}</span>
+            </div>
+          )}
+          {form.riskBelowMinLot && (
+            <div className="slide-row">
+              <span className="k" />
+              <span className="text-xs text-amber-400/90">{t('order.riskBelowMinLot')}</span>
             </div>
           )}
           <div className="slide-row">

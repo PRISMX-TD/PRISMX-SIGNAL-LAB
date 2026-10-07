@@ -10,7 +10,7 @@
 // copy of these formulas; merged 2026-09-06 so a rule change lands everywhere at
 // once. No React here — state orchestration lives in useOrderForm.ts.
 import type { OrderEntryType, PendingType, Quote } from '../../api/types'
-import { contractSize, lotStep, minLot, roundLots, suggestVolumeByRisk, usdMarginBasis } from '../../api/utils'
+import { contractSize, isBelowMinLot, lotStep, minLot, rawVolumeByRisk, roundLots, suggestVolumeByRisk, usdMarginBasis } from '../../api/utils'
 
 const QUICK_LOTS_BASE = [0.01, 0.1, 0.5, 1.0]
 export const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
@@ -318,11 +318,35 @@ export function suggestVolumeForRisk(symbol: string, equity: number | null | und
   const distance = Math.abs(entryRef - slNum)
   const pct = parseFloat(riskPctRaw) || 0
   if (hasTickSpec(spec)) {
-    if (!equity || equity <= 0 || distance <= 0 || pct <= 0) return null
-    return clampLots((equity * pct / 100) / lossPerLot(distance, spec), symbol).toFixed(lotDigits(symbol))
+    const raw = rawLotsForRisk(symbol, equity, riskPctRaw, slNum, entryRef, spec)
+    // 低于最小手数不建议（clampLots 会静默抬到最小手数，实际风险远超所选 %），见 riskBelowMinLot。
+    // Below the minimum lot: no suggestion (clampLots would silently raise it, risking far more
+    // than the chosen %) — see riskBelowMinLot.
+    if (raw == null || isBelowMinLot(raw, symbol)) return null
+    return clampLots(raw, symbol).toFixed(lotDigits(symbol))
   }
   const suggested = suggestVolumeByRisk(symbol, equity, pct, distance, entryRef, specContractSize(spec))
   return suggested != null ? clampLots(suggested, symbol).toFixed(lotDigits(symbol)) : null
+}
+
+/** 按风险% 算出的未吸附手数（规则同 suggestVolumeForRisk）；算不出为 null。
+ *  The un-snapped risk-% volume (same rules as suggestVolumeForRisk); null when it can't be sized. */
+function rawLotsForRisk(symbol: string, equity: number | null | undefined, riskPctRaw: string, slNum: number | null, entryRef: number | null, spec?: SymbolSpec): number | null {
+  if (slNum == null || Number.isNaN(slNum) || entryRef == null) return null
+  const distance = Math.abs(entryRef - slNum)
+  const pct = parseFloat(riskPctRaw) || 0
+  if (hasTickSpec(spec)) {
+    if (!equity || equity <= 0 || distance <= 0 || pct <= 0) return null
+    return (equity * pct / 100) / lossPerLot(distance, spec)
+  }
+  return rawVolumeByRisk(symbol, equity, pct, distance, entryRef, specContractSize(spec))
+}
+
+/** 按所选风险% 算出的手数低于品种最小手数：此时不给建议手数，界面提示用户（最小手数的
+ *  实际风险会高于所选 %）。 / The risk-% volume is below the symbol's minimum lot: no
+ *  suggestion is made and the UI warns (the minimum lot would risk more than the chosen %). */
+export function riskBelowMinLot(symbol: string, equity: number | null | undefined, riskPctRaw: string, slNum: number | null, entryRef: number | null, spec?: SymbolSpec): boolean {
+  return isBelowMinLot(rawLotsForRisk(symbol, equity, riskPctRaw, slNum, entryRef, spec), symbol)
 }
 
 export function formatMoney(n?: number | null, dash = '-'): string {

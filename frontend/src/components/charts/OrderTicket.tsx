@@ -111,7 +111,10 @@ function OrderTicket({
   const elapsedMs = useElapsedMs(sentAt)
   const [receipt, setReceipt] = useState<Receipt | null>(null)
 
+  // 风险模式算不出合法手数时不能提交（见 OrderSheet 同名判断）
+  // Block submit when risk sizing can't produce a legal lot (same rule as OrderSheet)
   const canSubmit = form.hasAccounts && !form.slTpInvalid && form.priceError == null && !submitting
+    && !form.riskBelowMinLot
   const ccy = selected?.accountCurrency ?? ''
 
   const submit = async () => {
@@ -300,6 +303,9 @@ function OrderTicket({
           sizing neither resizes nor warns, so the user believes they sized by 1%
           risk while the previous lot size is what actually goes out. */}
       {form.riskUnsupported && <p className="term-warn">{t('order.riskUnsupportedPair')}</p>}
+      {/* 按风险% 算出的手数低于最小手数：不建议手数，提示用户（最小手数的风险高于所选 %）。
+          Risk-% volume below the minimum lot: no suggestion, warn instead. */}
+      {form.riskBelowMinLot && <p className="term-warn">{t('order.riskBelowMinLot')}</p>}
 
       {/* 止损 / 止盈，下面直接给点数与 R / SL & TP with points and R underneath */}
       <div className="term-two">

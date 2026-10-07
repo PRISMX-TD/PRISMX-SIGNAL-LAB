@@ -32,6 +32,7 @@ import {
   parseOptionalNumber,
   previewRisk,
   stepVolume,
+  riskBelowMinLot as calcRiskBelowMinLot,
   slTooClose, suggestVolumeForRisk,
 } from './orderMath'
 
@@ -101,6 +102,9 @@ export interface OrderForm {
   riskNeedsSl: boolean
   /** 风险模式但品种无法换算成美元 / risk mode on a symbol with no USD basis */
   riskUnsupported: boolean
+  /** 风险模式算出的手数低于最小手数（不给建议，避免静默放大风险）
+   *  / risk mode sized below the minimum lot (no suggestion, so risk isn't silently inflated) */
+  riskBelowMinLot: boolean
   sl: string
   tp: string
   setSl: (v: string) => void
@@ -266,6 +270,8 @@ export function useOrderForm({
 
   const riskNeedsSl = sizeMode === 'risk' && slNum == null
   const riskUnsupported = sizeMode === 'risk' && slNum != null && !canSizeByRisk(symbol, quote)
+  const riskBelowMinLot = sizeMode === 'risk' && !riskUnsupported
+    && calcRiskBelowMinLot(symbol, selected?.equity, riskPct, slNum, entryRef, quote)
 
   // ---- 估算 / estimates -------------------------------------------------------
   const estMargin = useMemo(
@@ -299,7 +305,7 @@ export function useOrderForm({
     quote, bid, ask, entryRef,
     entryType, setEntryType, price, setPrice, priceNum, priceError, pendingType,
     volume, setVolume, typeVolume, blurVolume, stepLot, parsedVolume,
-    sizeMode, setSizeMode, riskPct, setRiskPct, riskNeedsSl, riskUnsupported,
+    sizeMode, setSizeMode, riskPct, setRiskPct, riskNeedsSl, riskUnsupported, riskBelowMinLot,
     sl, tp, setSl, setTp, slNum, tpNum, slInvalid, slTooClose: slClose, tpInvalid, slTpInvalid: slInvalid || tpInvalid,
     estMargin, riskPreview,
     orderId, rotateOrderId,

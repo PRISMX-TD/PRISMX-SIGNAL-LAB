@@ -145,6 +145,7 @@
     "riskPct": "Rủi ro",
     "riskNeedsSl": "Hãy đặt Stop Loss để tính khối lượng theo % rủi ro",
     "riskUnsupportedPair": "Cặp này chưa hỗ trợ tính khối lượng theo rủi ro — vui lòng nhập khối lượng thủ công",
+    "riskBelowMinLot": "Với mức rủi ro % đã chọn, khối lượng thấp hơn lot tối thiểu của mã này — lot tối thiểu sẽ rủi ro cao hơn. Hãy tăng % rủi ro, đặt cắt lỗ gần hơn hoặc nhập khối lượng thủ công",
     "slWrongSide": "Stop Loss nằm sai phía so với giá hiện tại",
     "slTooClose": "Stop Loss quá gần giá hiện tại (tối thiểu 0.05%)",
     "tpWrongSide": "Take Profit nằm sai phía so với giá hiện tại",
@@ -660,10 +661,14 @@
     "action": {
       "ORDER": "Mở",
       "CLOSE": "Đóng",
-      "MODIFY": "Sửa"
+      "MODIFY": "Sửa",
+      "PENDING": "Lệnh chờ",
+      "MODIFY_PENDING": "Sửa lệnh chờ",
+      "CANCEL_PENDING": "Hủy lệnh chờ"
     },
     "status": {
       "PENDING": "Đang chờ",
+      "PLACED": "Đã đặt lệnh",
       "FILLED": "Đã khớp",
       "REJECTED": "Bị từ chối",
       "FAILED": "Thất bại",
@@ -874,6 +879,7 @@
     "pollingHint": "Đang chờ xác nhận… hãy giữ trang này mở, việc nâng cấp là tự động",
     "paymentExpired": "Thanh toán đã hết hạn hoặc thất bại. Vui lòng thử lại.",
     "paymentMismatch": "Đã nhận thanh toán nhưng số tiền hoặc loại tiền không khớp với đơn, cần kiểm tra thủ công. Vui lòng liên hệ hỗ trợ kèm mã đơn hàng.",
+    "paymentRefunded": "Đơn hàng này đã được hoàn tiền và không kích hoạt thành viên. Nếu có thắc mắc, vui lòng liên hệ hỗ trợ kèm mã đơn hàng.",
     "successTitle": "Nâng cấp thành công!",
     "successDesc": "Bạn đã là thành viên PRO — mọi tính năng đã được mở khóa.",
     "goDashboard": "Về Bảng điều khiển",

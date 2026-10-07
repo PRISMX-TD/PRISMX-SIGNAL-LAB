@@ -33,6 +33,7 @@ import thCore from './th.json'
 import thMore from './th.more.json'
 import viCore from './vi.json'
 import viMore from './vi.more.json'
+import type { OrderAction, OrderStatus } from '../api/types'
 
 function flat(o: object, p = '', out: Record<string, unknown> = {}): Record<string, unknown> {
   for (const [k, v] of Object.entries(o)) {
@@ -269,4 +270,20 @@ describe.each(EXTRA)('%s locale', (_lang, core, more) => {
       .map(([k]) => k)
     expect(bad).toEqual([])
   })
+})
+
+// OrdersPage 用模板串拼 orders.status.* / orders.action.*，静态扫描查不到缺键。
+// Record<联合类型, true> 保证类型里加了新值时这里编译不过，逼着补译文。
+// OrdersPage builds orders.status.* / orders.action.* from template strings, which the
+// static scan can't check. Record<Union, true> fails to compile when a value is added.
+describe('order status / action labels', () => {
+  const statuses: Record<OrderStatus, true> = { PENDING: true, PLACED: true, FILLED: true, REJECTED: true, FAILED: true, CANCELLED: true }
+  const actions: Record<OrderAction, true> = { ORDER: true, CLOSE: true, MODIFY: true, PENDING: true, MODIFY_PENDING: true, CANCEL_PENDING: true }
+  const want = [...Object.keys(statuses).map((s) => `orders.status.${s}`), ...Object.keys(actions).map((a) => `orders.action.${a}`)]
+  for (const [lang, core, more] of [['zh', zhCore, zhMore], ['en', enCore, enMore], ['ja', jaCore, jaMore], ['th', thCore, thMore], ['vi', viCore, viMore]] as const) {
+    it(`${lang} has every key`, () => {
+      const keys = { ...flat(core), ...flat(more) }
+      expect(want.filter((k) => !keys[k])).toEqual([])
+    })
+  }
 })

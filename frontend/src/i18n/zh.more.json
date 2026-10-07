@@ -145,6 +145,7 @@
     "riskPct": "风险",
     "riskNeedsSl": "先设置止损才能按风险百分比计算手数",
     "riskUnsupportedPair": "该品种暂不支持按风险百分比估算手数，请手动填写手数",
+    "riskBelowMinLot": "按所选风险%算出的手数低于该品种最小手数，用最小手数实际风险会更高——请放宽风险%、收紧止损或手动填写手数",
     "slWrongSide": "止损价与现价方向不对",
     "slTooClose": "止损离现价太近（至少 0.05%），已禁止下单",
     "tpWrongSide": "止盈价与现价方向不对",
@@ -660,10 +661,14 @@
     "action": {
       "ORDER": "开仓",
       "CLOSE": "平仓",
-      "MODIFY": "改单"
+      "MODIFY": "改单",
+      "PENDING": "挂单",
+      "MODIFY_PENDING": "改挂单",
+      "CANCEL_PENDING": "撤挂单"
     },
     "status": {
       "PENDING": "待执行",
+      "PLACED": "已挂出",
       "FILLED": "已成交",
       "REJECTED": "已拒绝",
       "FAILED": "失败",
@@ -874,6 +879,7 @@
     "pollingHint": "支付确认中…到账后自动升级，页面保持打开",
     "paymentExpired": "支付已过期或失败，请重试",
     "paymentMismatch": "款项已收到，但金额或币种与订单不一致，需要人工核对。请联系客服并提供订单号，我们会尽快处理。",
+    "paymentRefunded": "该订单已退款，未开通会员。如有疑问请联系客服并提供订单号。",
     "successTitle": "升级成功！",
     "successDesc": "你现在是 PRO 用户了，所有功能已解锁。",
     "goDashboard": "前往仪表盘",

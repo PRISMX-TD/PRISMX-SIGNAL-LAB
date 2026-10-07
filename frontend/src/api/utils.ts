@@ -335,9 +335,55 @@ export function usdMarginBasis(symbol: string): 'quote' | 'base' | null {
 // Returns null (no wrong number) when the symbol's basis is unknown (cross
 // pairs), the SL distance is 0, equity is missing, or ('base' symbols) the
 // current price is missing.
+// 算出的手数低于该品种最小手数时同样返回 null：最小手数的实际风险会远超所选百分比
+// （如净值 100、风险 1%、止损很宽），静默抬到最小手数等于替用户把风险放大数倍。
+// 调用方用 isBelowMinLot(rawVolumeByRisk(...)) 区分这种情况并给出提示。
 // contractSizeOverride：券商上报的真实每手规模（有则优先于兜底表）。
+// Also null when the computed volume is below the symbol's minimum lot: the minimum lot would
+// risk far more than the chosen percentage (e.g. equity 100, 1% risk, a wide SL), and silently
+// raising it to the minimum multiplies the user's risk behind their back. Callers tell this case
+// apart with isBelowMinLot(rawVolumeByRisk(...)) and show a hint.
 // contractSizeOverride: the broker-reported units per lot, preferred over the table.
 export function suggestVolumeByRisk(
+  symbol: string,
+  equity: number | null | undefined,
+  riskPct: number,
+  slPriceDistance: number,
+  refPrice?: number | null,
+  contractSizeOverride?: number | null,
+): number | null {
+  const raw = rawVolumeByRisk(symbol, equity, riskPct, slPriceDistance, refPrice, contractSizeOverride)
+  if (raw == null || isBelowMinLot(raw, symbol)) return null
+  // 吸附到该品种的步长，而不是写死的 0.01 粒度。
+  //
+  // 原来是 Math.floor(raw * 100) / 100，对 WTI（步长 0.1，见下方 LOT_STEP）会算出
+  // 0.23 这种离步长的手数——而离步长的手数**不会被 MT5 拒绝**，它会变成一张永远不
+  // 成交、并且卡住该持仓后续所有平仓操作的单子。目前线上没事，是因为唯一的调用方
+  // （components/order/orderMath 的 suggestVolumeForRisk）后面又过了一道 clampLots；
+  // 但这是个导出的公共函数，下一个直接用它的人就会踩。步长知识收在这里，别留在调用方。
+  //
+  // Snap to the symbol's lot step instead of a hard-coded 0.01 grid. The old
+  // Math.floor(raw * 100) / 100 produced values like 0.23 for WTI (step 0.1, see
+  // LOT_STEP below) — and an off-step volume is not rejected by MT5: it becomes an
+  // order that can never fill and then blocks every later close on that position.
+  // Nothing breaks today only because the sole caller
+  // (components/order/orderMath's suggestVolumeForRisk) runs the result through
+  // clampLots afterwards. This is an exported helper, so the next caller to use it
+  // directly would step straight into it. Step knowledge belongs here, not at the
+  // call site.
+  return Math.min(10, snapLot(raw, symbol))
+}
+
+/** 原始（未吸附步长）手数是否低于该品种最小手数。容差同 snapLot（步长的百万分之一）。
+ *  Whether a raw (un-snapped) volume is below the symbol's minimum lot; same tolerance as snapLot. */
+export function isBelowMinLot(raw: number | null | undefined, symbol?: string | null): boolean {
+  if (raw == null || !Number.isFinite(raw)) return false
+  return raw / minLot(symbol) < 1 - 1e-6
+}
+
+/** suggestVolumeByRisk 的未吸附原始手数；算不出时为 null（条件同上）。
+ *  The un-snapped volume behind suggestVolumeByRisk; null when it can't be sized (same rules). */
+export function rawVolumeByRisk(
   symbol: string,
   equity: number | null | undefined,
   riskPct: number,
@@ -357,24 +403,7 @@ export function suggestVolumeByRisk(
     if (!refPrice || refPrice <= 0) return null
     raw = (riskAmount * refPrice) / (slPriceDistance * size)
   }
-  // 吸附到该品种的步长，而不是写死的 0.01 粒度。
-  //
-  // 原来是 Math.floor(raw * 100) / 100，对 WTI（步长 0.1，见下方 LOT_STEP）会算出
-  // 0.23 这种离步长的手数——而离步长的手数**不会被 MT5 拒绝**，它会变成一张永远不
-  // 成交、并且卡住该持仓后续所有平仓操作的单子。目前线上没事，是因为唯一的调用方
-  // （components/order/orderMath 的 suggestVolumeForRisk）后面又过了一道 clampLots；
-  // 但这是个导出的公共函数，下一个直接用它的人就会踩。步长知识收在这里，别留在调用方。
-  //
-  // Snap to the symbol's lot step instead of a hard-coded 0.01 grid. The old
-  // Math.floor(raw * 100) / 100 produced values like 0.23 for WTI (step 0.1, see
-  // LOT_STEP below) — and an off-step volume is not rejected by MT5: it becomes an
-  // order that can never fill and then blocks every later close on that position.
-  // Nothing breaks today only because the sole caller
-  // (components/order/orderMath's suggestVolumeForRisk) runs the result through
-  // clampLots afterwards. This is an exported helper, so the next caller to use it
-  // directly would step straight into it. Step knowledge belongs here, not at the
-  // call site.
-  return Math.min(10, snapLot(raw, symbol))
+  return raw
 }
 
 // 价差换算为点数；未知品种返回 null / price distance to pips; null if unknown symbol

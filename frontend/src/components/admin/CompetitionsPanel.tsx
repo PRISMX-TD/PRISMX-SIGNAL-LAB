@@ -32,7 +32,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
-import { fmtDate, fmtMoney, localizeApiError, fmtScorePct } from '../../api/utils'
+import { fmtDate, fmtMoney, localizeApiError, fmtScorePct, parseTime } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import Select from '../Select'
 import ConfirmModal from '../ConfirmModal'
@@ -96,15 +96,19 @@ const STATUS_TAG_CLASS: Record<CompetitionStatus, string> = {
 // local-time string the input wants; writing parses that local-time string
 // back through Date into a UTC ISO string for the API. The local timezone
 // cancels out on both ends.
-function isoToLocalInput(iso: string | null): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ''
+// 后端给的是不带时区后缀的 naive UTC（如 2026-10-07T12:00:00），必须走 parseTime
+// 补 Z；裸 new Date 会按本地时间解析，每编辑保存一次就平移一个 UTC 偏移量。
+// The backend sends naive UTC without a zone suffix; parseTime appends Z. A bare
+// new Date would read it as local time and every edit+save would shift the
+// instant by the admin's UTC offset.
+export function isoToLocalInput(iso: string | null): string {
+  const d = parseTime(iso)
+  if (!d || Number.isNaN(d.getTime())) return ''
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-function localInputToIso(value: string): string | null {
+export function localInputToIso(value: string): string | null {
   if (!value) return null
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return null
@@ -634,7 +638,7 @@ export default function CompetitionsPanel() {
                             // avoids a click that's guaranteed to 400. If settleOpensAt can't
                             // be computed, don't block; the backend still enforces it.
                             const settleOpensAt = c.endsAt
-                              ? new Date(c.endsAt).getTime() + 24 * 60 * 60 * 1000
+                              ? (parseTime(c.endsAt)?.getTime() ?? NaN) + 24 * 60 * 60 * 1000
                               : null
                             const waiting = settleOpensAt != null && now < settleOpensAt
                             return (

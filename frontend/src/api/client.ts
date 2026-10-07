@@ -235,6 +235,10 @@ export interface ApiRequestInit extends RequestInit {
    *  后端按 clientOrderId 去重。 / Idempotent write (carries clientOrderId): safe to resend once
    *  after a connection-level failure. */
   idempotent?: boolean
+  /** 显式指定本次请求用的 token（不读当前登录态）。登出时用旧 token 通知后端删推送订阅：
+   *  那时本地 token 已清。 / Use this token instead of the current session's — logout uses it to
+   *  tell the backend to drop the push subscription after the local token is already gone. */
+  authToken?: string
 }
 
 // GET/HEAD 响应头 8 秒没到就并行探测备用入口（主域名被封时不必等满 30 秒超时）。
@@ -274,7 +278,7 @@ function withTimeout(external: AbortSignal | null | undefined, timeoutMs: number
 }
 
 async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T> {
-  const { requestTimeoutMs, signal: callerSignal, idempotent, ...init } = options
+  const { requestTimeoutMs, signal: callerSignal, idempotent, authToken, ...init } = options
   const method = (init.method ?? 'GET').toUpperCase()
   const isRead = method === 'GET' || method === 'HEAD'
   const headers: Record<string, string> = {
@@ -287,7 +291,12 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   // the multipart boundary, and a hand-written 'multipart/form-data' lacks it,
   // which makes server-side parsing fail outright.
   if (options.body instanceof FormData) delete headers['Content-Type']
-  const token = getToken()
+  // 记下发请求时用的 token：响应回来时登录态可能已变（登出 / 换号 / 别的请求已续期），
+  // 续期与 401 清登录态只对「仍是这个 token」的会话生效，见下方。
+  // Record the token this request was sent with: by the time the response lands the session may
+  // have changed (logout / account switch / another call already renewed it), and renewal and the
+  // 401 clear only apply while the session still holds this token — see below.
+  const token = authToken ?? getToken()
   if (token) headers.Authorization = `Bearer ${token}`
 
   // 8 秒门槛切换入口后，被我们 abort 掉的那条挂着的 fetch 会以 AbortError 结束；
@@ -379,12 +388,20 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   // private mode or on a full quota would turn a successful request into a
   // rejection — "it worked but reported an error". A failed renewal costs at
   // worst one extra login later and must not affect this call.
+  // 只在当前 token 仍是发请求时那个时才接受续期 / 处理 401：否则一个在登出、换号或
+  // 另一次续期之前发出的慢请求，回来会把旧会话的 token 写回去（登出后又「登录」了），
+  // 或把刚登录的新会话清掉。
+  // Only accept the renewal / act on a 401 while the current token is still the one this request
+  // was sent with: otherwise a slow request issued before a logout, account switch or another
+  // renewal would write the old session's token back (logged in again after logging out) or wipe
+  // the session that just started.
+  const sameSession = getToken() === token
   const refreshed = res.headers.get('X-Refreshed-Token')
-  if (refreshed) setToken(refreshed)
+  if (refreshed && sameSession) setToken(refreshed)
   if (!res.ok) {
     // 凭证失效：清除登录态并通知上层跳转登录页。
     // Token expired/invalid: clear auth state and notify the app to redirect.
-    if (res.status === 401) {
+    if (res.status === 401 && sameSession) {
       clearToken()
       onUnauthorized?.()
     }
@@ -1729,10 +1746,14 @@ export const pushApi = {
       method: 'POST',
       body: JSON.stringify({ endpoint, keys }),
     }),
-  unsubscribe: (endpoint: string, keys: { p256dh: string; auth: string }) =>
+  // authToken：登出时本地 token 已清，用登出前那个 token 删本账号名下的订阅。
+  // authToken: on logout the local token is already gone; the pre-logout token deletes the
+  // subscription under that account.
+  unsubscribe: (endpoint: string, keys: { p256dh: string; auth: string }, authToken?: string) =>
     request<{ ok: boolean }>('/notifications/push/unsubscribe', {
       method: 'POST',
       body: JSON.stringify({ endpoint, keys }),
+      ...(authToken ? { authToken } : {}),
     }),
   // 诊断用：后端记录了几个订阅、其中是否包含本设备当前的 endpoint。
   // "浏览器里有订阅"与"后端收到了订阅"是两件事，分开查才能定位上报环节的问题。

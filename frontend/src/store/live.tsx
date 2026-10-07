@@ -230,6 +230,13 @@ const QUOTES_FALLBACK_MS = 3000
 // A reconnect-triggered resync waits a random moment first, spreading the surge of requests
 // when every client reconnects together after a backend restart.
 const RECONNECT_RESYNC_JITTER_MS = 4000
+// refreshAll 里 /signals 或 /accounts 失败时（失败保留旧数据），按此退避自动补拉：5s、10s、20s…封顶 60s，
+// 任一次两条都成功即停止并复位。不补的话，重连那一轮恰好失败，信号列表会一直停在断线那一刻。
+// When /signals or /accounts fails inside refreshAll (the old data is kept), retry with this
+// backoff: 5s, 10s, 20s… capped at 60s; stops and resets once both succeed. Without it a resync
+// that happens to fail leaves the signal list frozen at the moment the socket died.
+const CRITICAL_RETRY_BASE_MS = 5_000
+const CRITICAL_RETRY_MAX_MS = 60_000
 // 切回前台时，隐藏了至少这么久才整份重拉。短暂切走（回条消息、看一眼通知）连接
 // 多半还活着、什么都没漏，不值得七个请求；隐藏够久则一切都可能变了：后台期间
 // WS 被系统掐断而 onclose 没来（见 useClientSocket 的心跳说明）、套餐到期被降级、
@@ -311,6 +318,22 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const refreshNotifications = useCallback(() => {
     setAnnouncementTick((n) => n + 1)
     setNotificationTick((n) => n + 1)
+  }, [])
+
+  // 关键请求失败后的补拉计时器 / 退避次数；refreshAll 依赖为空，自调用走 ref。
+  // Retry timer / backoff count after a failed critical call; refreshAll has empty deps, so it
+  // calls itself through a ref.
+  const criticalRetryTimer = useRef<number | undefined>(undefined)
+  const criticalRetryAttempt = useRef(0)
+  const unmounted = useRef(false)
+  const refreshAllRef = useRef<((opts?: RefreshOptions) => Promise<void>) | null>(null)
+  useEffect(() => {
+    unmounted.current = false
+    return () => {
+      unmounted.current = true
+      window.clearTimeout(criticalRetryTimer.current)
+      criticalRetryTimer.current = undefined
+    }
   }, [])
 
   const refreshAll = useCallback(async (opts?: RefreshOptions) => {
@@ -404,16 +427,42 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     // to login.
     setBackendUnreachable(!sig.ok && !acc.ok)
 
-    setSignals((prev) => keepIfEqual(prev, capExpired(sig.value.signals)))
-    setAccounts((prev) => keepIfEqual(prev, acc.value.accounts))
-    setAccountLimit(acc.value.accountLimit)
-    setBrokerLock((prev) => keepIfEqual(prev, acc.value.brokerLock))
+    // 失败的那条保留现有数据，不再用 [] / null 回落值覆盖——重连 / 回前台的整份重拉
+    // 遇上一次网络抖动，不该把已有信号、账号、账号上限与券商锁定清空。
+    // A failed call keeps the existing data instead of overwriting it with the []/null
+    // fallback — one blip during a reconnect / resume resync must not wipe signals, accounts,
+    // the account limit or the broker lock.
+    if (sig.ok) setSignals((prev) => keepIfEqual(prev, capExpired(sig.value.signals)))
+    if (acc.ok) {
+      setAccounts((prev) => keepIfEqual(prev, acc.value.accounts))
+      setAccountLimit(acc.value.accountLimit)
+      setBrokerLock((prev) => keepIfEqual(prev, acc.value.brokerLock))
+    }
     setLoaded(true)
+
+    // 关键请求失败则退避后补拉（不拉报价 / 品种，见 RefreshOptions）；成功即复位。
+    // A failed critical call schedules a backed-off retry (no quotes / symbols, see
+    // RefreshOptions); success resets the backoff.
+    window.clearTimeout(criticalRetryTimer.current)
+    criticalRetryTimer.current = undefined
+    if (sig.ok && acc.ok) {
+      criticalRetryAttempt.current = 0
+    } else if (!unmounted.current) {
+      const delay = Math.min(CRITICAL_RETRY_MAX_MS, CRITICAL_RETRY_BASE_MS * 2 ** criticalRetryAttempt.current)
+      criticalRetryAttempt.current += 1
+      criticalRetryTimer.current = window.setTimeout(() => {
+        criticalRetryTimer.current = undefined
+        void refreshAllRef.current?.({ quotes: false, symbols: false })
+      }, delay)
+    }
 
     // 保住「返回即全部完成」：refreshAll 的调用方 await 它。
     // Keep "returns once everything is done": callers await refreshAll.
     await Promise.all(rest)
   }, [])
+  useEffect(() => {
+    refreshAllRef.current = refreshAll
+  }, [refreshAll])
 
   // 首屏不拉 /quotes（WS 鉴权后补推），/symbols 照拉——它的顺序是 EA 的 InpSymbols 顺序，
   // 而 GLOBAL_QUOTES 分支补进来的是字母序，首屏别让品种顺序跳。

@@ -5,11 +5,28 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useAuth } from './auth'
 import { userApi } from '../api/client'
-import i18n, { isAppLang } from '../i18n'
+import i18n, { isAppLang, setLanguage } from '../i18n'
 import { langFromPath } from '../seo/meta'
-import { readJson, writeJson, writeStorage } from '../utils/safeStorage'
+import { readJson, writeJson } from '../utils/safeStorage'
 
 const PREFS_CACHE_KEY = 'prismx_prefs'
+
+// 云端偏好里的界面语言落到本机：首屏加载与其它设备经 WS 推来时共用这一条。
+// 走 setLanguage（写 prismx_lang + 更新 <html lang>，且「最后一次要的语言」生效），
+// 不再直接 i18n.changeLanguage——那样 <html lang> 会停在旧语言。
+// 公开页（含 /en 前缀）语言由 URL 决定，云端偏好不得反向覆盖，否则已登录用户打开
+// /en/faq 会在偏好到达的瞬间被切回中文。
+// Apply the cloud prefs' UI language locally; shared by the initial load and WS pushes from
+// other devices. Goes through setLanguage (writes prismx_lang, updates <html lang>, last request
+// wins) instead of a bare i18n.changeLanguage, which left <html lang> on the old language.
+// Public pages (incl. the /en prefix) are URL-driven and cloud prefs must not override them,
+// or a signed-in user opening /en/faq flips back to Chinese the moment prefs arrive.
+function applyCloudLanguage(doc: Record<string, unknown>, pathname: string): void {
+  const cloudLang = doc?.lang as Record<string, unknown> | undefined
+  const lang = cloudLang?.lang as string | undefined
+  if (langFromPath(pathname) !== null) return
+  if (isAppLang(lang) && lang !== i18n.language) setLanguage(lang)
+}
 
 interface PrefsContextValue {
   /** 原始偏好文档 / raw prefs document */
@@ -76,17 +93,9 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
         }
         lastSavedByNs.current = nextLastSaved
         writeJson(PREFS_CACHE_KEY, data)
-        // 同步云端语言偏好 / sync cloud language preference
-        // 公开页（含 /en 前缀）语言由 URL 决定，云端偏好不得在这里反向覆盖，
-        // 否则已登录用户打开 /en/faq 会在偏好加载完成的瞬间被切回中文。
-        // Public pages are URL-driven; cloud prefs must not override them here.
-        const cloudLang = (data as Record<string, unknown>)?.lang as Record<string, unknown> | undefined
-        const lang = cloudLang?.lang as string | undefined
-        const onPublicPage = langFromPath(window.location.pathname) !== null
-        if (!onPublicPage && isAppLang(lang) && lang !== i18n.language) {
-          i18n.changeLanguage(lang)
-          writeStorage('prismx_lang', lang)
-        }
+        // 同步云端语言偏好（公开页除外，见 applyCloudLanguage）
+        // Sync the cloud language preference (not on public pages, see applyCloudLanguage)
+        applyCloudLanguage(data, window.location.pathname)
       })
       .catch(() => {
         // 云端加载失败, 继续用 localStorage 缓存 / fallback to cached localStorage
@@ -178,13 +187,9 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     for (const [ns, nsData] of Object.entries(doc)) {
       lastSavedByNs.current[ns] = JSON.stringify(nsData)
     }
-    // 同步云端语言偏好(与初始加载一致)/ sync cloud language preference like initial load
-    const cloudLang = (doc as Record<string, unknown>)?.lang as Record<string, unknown> | undefined
-    const lang = cloudLang?.lang as string | undefined
-    if (isAppLang(lang) && lang !== i18n.language) {
-      i18n.changeLanguage(lang)
-      writeStorage('prismx_lang', lang)
-    }
+    // 同步云端语言偏好，规则与初始加载一致（公开页不覆盖）
+    // Sync the cloud language preference, same rules as the initial load (public pages excluded)
+    applyCloudLanguage(doc, window.location.pathname)
   }, [])
 
   // 如果已登录但偏好未加载完, 子组件用 localStorage 缓存值先行渲染, 加载完成后自动覆盖。

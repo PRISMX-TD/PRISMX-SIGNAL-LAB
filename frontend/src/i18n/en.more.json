@@ -145,6 +145,7 @@
     "riskPct": "Risk",
     "riskNeedsSl": "Set a stop loss to size by risk %",
     "riskUnsupportedPair": "Risk-based sizing isn't supported for this pair yet — enter the volume manually",
+    "riskBelowMinLot": "At this risk %, the size is below the symbol’s minimum lot — the minimum lot would risk more. Raise the risk %, tighten the stop, or enter the volume manually",
     "slWrongSide": "Stop loss is on the wrong side of the current price",
     "slTooClose": "Stop loss is too close to the price (min 0.05%)",
     "tpWrongSide": "Take profit is on the wrong side of the current price",
@@ -660,10 +661,14 @@
     "action": {
       "ORDER": "Open",
       "CLOSE": "Close",
-      "MODIFY": "Modify"
+      "MODIFY": "Modify",
+      "PENDING": "Pending",
+      "MODIFY_PENDING": "Modify pending",
+      "CANCEL_PENDING": "Cancel pending"
     },
     "status": {
       "PENDING": "Pending",
+      "PLACED": "Placed",
       "FILLED": "Filled",
       "REJECTED": "Rejected",
       "FAILED": "Failed",
@@ -874,6 +879,7 @@
     "pollingHint": "Waiting for confirmation… keep this page open, upgrade is automatic",
     "paymentExpired": "Payment expired or failed. Please try again.",
     "paymentMismatch": "Payment received, but the amount or currency does not match the order and needs manual review. Please contact support with your order ID.",
+    "paymentRefunded": "This order was refunded and no membership was granted. Contact support with your order ID if you have questions.",
     "successTitle": "Upgrade complete!",
     "successDesc": "You are now a PRO member — all features are unlocked.",
     "goDashboard": "Go to Dashboard",

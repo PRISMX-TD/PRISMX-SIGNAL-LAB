@@ -1,8 +1,9 @@
 // 认证状态 / Auth context
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { User } from '../api/types'
-import { authApi, clearToken, getToken, setAccountDisabledHandler, setToken, setUnauthorizedHandler, userApi } from '../api/client'
+import { authApi, clearToken, getToken, pushApi, setAccountDisabledHandler, setToken, setUnauthorizedHandler, userApi } from '../api/client'
 import { readJson, writeJson } from '../utils/safeStorage'
+import { getSWReg, pushSupported } from '../utils/push'
 
 interface AuthContextValue {
   user: User | null
@@ -94,6 +95,47 @@ function clearUserScopedStorage() {
   }
 }
 
+// 登出 / 换号时把本设备的推送订阅从旧账号名下摘掉。后端按 (user_id, endpoint) 存订阅，
+// 同一 endpoint 可以挂在多个账号下：不摘的话，共享设备上登出（或换号）之后，上一个人的
+// 信号 / 订单通知还会推到这台设备上。
+//   · token：登出前的 token。本地 token 此时已清，用它调后端删订阅；没有就跳过这步。
+//   · local：再在本地退订（Web Push；安卓 App 里是 APP Pack 推送桥摆出的同一套 API，
+//     底下 FCM 注销）。后端那步失败也能兜住——失效的 endpoint 下次推送时被后端清掉。
+//     换号时不做：新账号会复用并重新上报同一个订阅（Layout 的 ensurePushSubscription）。
+// 全程 fire-and-forget、吞掉一切错误，绝不阻塞登出。
+// On logout / account switch, detach this device's push subscription from the old account. The
+// backend stores subscriptions by (user_id, endpoint) and one endpoint can sit under several
+// accounts: without this, the previous person's signal / order notifications keep reaching a
+// shared device after they log out (or someone else logs in).
+//   · token: the pre-logout token. The local token is already cleared, so it is used to delete
+//     the subscription server-side; skipped when absent.
+//   · local: also unsubscribe locally (Web Push; in the Android app the APP Pack push bridge
+//     exposes the same API over FCM). Covers a failed backend call too — the dead endpoint is
+//     pruned on the next send. Not done on an account switch: the new account reuses and
+//     re-reports the same subscription (Layout's ensurePushSubscription).
+// Fire-and-forget, every error swallowed; never blocks logout.
+async function detachPushSubscription(token: string | null, local: boolean): Promise<void> {
+  try {
+    if (!pushSupported()) return
+    const reg = await getSWReg()
+    const sub = await reg?.pushManager?.getSubscription()
+    if (!sub) return
+    if (token) {
+      const json = sub.toJSON() as { endpoint?: string; keys?: { p256dh: string; auth: string } }
+      if (json.endpoint && json.keys) {
+        await pushApi.unsubscribe(json.endpoint, json.keys, token).catch(() => {})
+      }
+    }
+    // 这期间已有人重新登录：订阅可能已被新账号上报，不能再在本地退订。
+    // Someone logged in meanwhile: the new account may already have reported this
+    // subscription, so it must not be unsubscribed locally.
+    if (!local || getToken()) return
+    await sub.unsubscribe()
+  } catch {
+    // 推送清理失败不影响登出 / a failed push cleanup never affects logout
+  }
+}
+
 // 缓存用户的读写收口在这两个帮手上，全文件不再出现裸 JSON.parse / setItem。
 // 读走 readJson：解析失败会把那份脏缓存删掉并返回 null，于是按"未登录"处理。
 // 这一点是关键——AuthProvider 位于 ErrorBoundary **外层**（App.tsx 的
@@ -148,6 +190,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     //
     // Register 401 handler: clear user on expired token; the route guard redirects to login.
     setUnauthorizedHandler(() => {
+      // token 已失效（client.ts 已清），删不了后端那条，只在本地退订。
+      // The token is already invalid (cleared by client.ts): only the local unsubscribe applies.
+      void detachPushSubscription(null, true)
       clearUserScopedStorage()
       setUser(null)
     })
@@ -173,6 +218,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const persist = useCallback((u: User, token: string) => {
+    // 换号（本地已有另一个会话）：先用旧 token 把本设备订阅从旧账号名下删掉。
+    // Account switch (another session is present): drop this device's subscription from the
+    // old account using the old token first.
+    const prev = getToken()
+    if (prev && prev !== token) void detachPushSubscription(prev, false)
     setToken(token)
     writeCachedUser(u)
     setUser(u)
@@ -219,6 +269,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [persist])
 
   const logout = useCallback(() => {
+    // 先取 token 再清：后端删订阅要用登出前的这个 token（异步进行，不等它）。
+    // Grab the token before clearing it: the backend unsubscribe needs it (async, not awaited).
+    void detachPushSubscription(getToken(), true)
     clearToken()
     clearUserScopedStorage()
     setUser(null)

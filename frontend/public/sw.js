@@ -64,10 +64,31 @@ const SHELL = [OFFLINE_URL, "/icons/icon-192.png"]
 function cacheAppShell() {
   return fetch(APP_SHELL_URL, { cache: "no-cache" })
     .then((res) => {
-      if (!res || !res.ok) return
+      // 重定向（如公共 WiFi 认证页）或非 HTML 的响应不能当壳缓存
+      // A redirected (e.g. captive portal) or non-HTML response must not become the shell
+      if (!res || !res.ok || res.redirected) return
+      if (!(res.headers.get("content-type") || "").includes("text/html")) return
       return caches.open(CACHE).then((c) => c.put(APP_SHELL_URL, res))
     })
     .catch(() => {})
+}
+
+// 壳只在 activate 时拉一次的话，部署了新版本而 sw.js 没变时 SW 不会重新激活，缓存里那份
+// 壳会一直引用已被删掉的旧 hash 资源，离线兜底打开就是白屏。所以每次导航成功（说明在线）
+// 后在后台顺手刷新一次壳，跟上部署；按时间节流，避免每次整页导航都多一个请求。
+// SW 被回收后节流计时归零，只会多刷一次，无害。
+// Fetching the shell only on activate goes stale: a deploy that leaves sw.js unchanged never
+// re-activates the worker, so the cached shell keeps pointing at deleted hashed chunks and the
+// offline fallback opens blank. So after each successful (hence online) navigation the shell is
+// refreshed in the background to track deploys, throttled so not every full navigation costs an
+// extra request. The throttle resets if the worker is recycled — just one extra refresh.
+const SHELL_REFRESH_MIN_MS = 5 * 60 * 1000
+let _shellRefreshedAt = 0
+function maybeRefreshAppShell() {
+  const now = Date.now()
+  if (now - _shellRefreshedAt < SHELL_REFRESH_MIN_MS) return Promise.resolve()
+  _shellRefreshedAt = now
+  return cacheAppShell()
 }
 
 self.addEventListener("install", (event) => {
@@ -108,7 +129,10 @@ self.addEventListener("activate", (event) => {
       .then(() => self.clients.claim())
       // claim 之后再去拉壳：不拖慢接管；waitUntil 保证 SW 不会在它完成前被回收。
       // Shell fetch after claim so takeover isn't delayed; waitUntil keeps the worker alive.
-      .then(() => cacheAppShell())
+      .then(() => {
+        _shellRefreshedAt = Date.now()
+        return cacheAppShell()
+      })
   )
 })
 
@@ -128,6 +152,16 @@ self.addEventListener("fetch", (event) => {
     // Still network-first: a failed preload falls back to the offline page like fetch.
     Promise.resolve(event.preloadResponse)
       .then((pre) => pre || fetch(req))
+      .then((res) => {
+        // 在线导航成功：后台刷新缓存的壳（不阻塞本次响应）。
+        // Online navigation succeeded: refresh the cached shell in the background.
+        // waitUntil 在 respondWith 的 promise 解决前调用，事件仍处于活跃期；保险起见仍包 try。
+        // Called before respondWith's promise settles, so the event is still active; try anyway.
+        if (res && res.ok) {
+          try { event.waitUntil(maybeRefreshAppShell()) } catch (e) { /* ignore */ }
+        }
+        return res
+      })
       .catch(() =>
         // 缓存的 SPA 壳 → 离线页 → 纯文本 503 / cached SPA shell → offline page → plain 503
         caches

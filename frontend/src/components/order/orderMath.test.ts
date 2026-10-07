@@ -19,7 +19,8 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { checkPendingPrice, checkSlTp, clampLots, normalizeVolume, parseOptionalNumber, pendingTypeOf, sanitizeDecimal } from './orderMath'
+import { checkPendingPrice, checkSlTp, clampLots, normalizeVolume, parseOptionalNumber, pendingTypeOf, riskBelowMinLot, sanitizeDecimal, suggestVolumeForRisk } from './orderMath'
+import { isBelowMinLot, rawVolumeByRisk, suggestVolumeByRisk } from '../../api/utils'
 
 // ---------------------------------------------------------------------------
 // 输入清洗 / input sanitising
@@ -247,5 +248,40 @@ describe('slTooClose', () => {
     expect(slTooClose(4162.0, 4168.17)).toBe(false)
     expect(slTooClose(null, 4168.17)).toBe(false)
     expect(slTooClose(4168.02, null)).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 按风险% 算出的手数低于最小手数 / risk-% volume below the minimum lot
+// ---------------------------------------------------------------------------
+
+describe('risk sizing below the minimum lot', () => {
+  it('suggestVolumeByRisk：低于最小手数返回 null，不静默抬到 0.01 / null instead of a silent 0.01', () => {
+    // 净值 100、风险 1% = 1 美元；XAUUSD 止损 10 美元 × 100 盎司 → 0.001 手
+    // equity 100, 1% = $1; XAUUSD SL $10 × 100 oz → 0.001 lots
+    expect(rawVolumeByRisk('XAUUSD', 100, 1, 10)).toBeCloseTo(0.001)
+    expect(suggestVolumeByRisk('XAUUSD', 100, 1, 10)).toBeNull()
+    expect(isBelowMinLot(rawVolumeByRisk('XAUUSD', 100, 1, 10), 'XAUUSD')).toBe(true)
+  })
+
+  it('够最小手数时照常建议 / sizes normally at or above the minimum', () => {
+    // 净值 1000、1% = 10 美元；止损 10 美元 → 0.01 手（恰好最小手数）
+    // equity 1000, 1% = $10; SL $10 → exactly 0.01 lots
+    expect(suggestVolumeByRisk('XAUUSD', 1000, 1, 10)).toBe(0.01)
+    expect(isBelowMinLot(0.01, 'XAUUSD')).toBe(false)
+  })
+
+  it('suggestVolumeForRisk / riskBelowMinLot：兜底表与券商规格两条路径 / both table and broker-spec paths', () => {
+    expect(suggestVolumeForRisk('XAUUSD', 100, '1', 3290, 3300)).toBeNull()
+    expect(riskBelowMinLot('XAUUSD', 100, '1', 3290, 3300)).toBe(true)
+    const spec = { tickSize: 0.01, tickValue: 1, contractSize: 100 }
+    expect(suggestVolumeForRisk('XAUUSD', 100, '1', 3290, 3300, spec)).toBeNull()
+    expect(riskBelowMinLot('XAUUSD', 100, '1', 3290, 3300, spec)).toBe(true)
+    expect(suggestVolumeForRisk('XAUUSD', 10000, '1', 3290, 3300, spec)).toBe('0.10')
+    expect(riskBelowMinLot('XAUUSD', 10000, '1', 3290, 3300, spec)).toBe(false)
+  })
+
+  it('算不出（无止损）不算「低于最小手数」/ unsizable is not "below min"', () => {
+    expect(riskBelowMinLot('XAUUSD', 100, '1', null, 3300)).toBe(false)
   })
 })

@@ -262,6 +262,14 @@ export default function UpgradePage() {
             partialAmount: s.actually_paid ?? undefined,
             payCurrency: s.pay_currency,
           });
+        } else if (s.status === "REFUNDED" || s.status === "REFUNDED_UNCREDITED") {
+          // 已退款是终局：停止轮询，别让页面一直转圈；措辞也不能叫人「重试」再付一次。
+          // Refunded is terminal: stop polling instead of spinning, and don't tell
+          // the user to "try again" (i.e. pay a second time).
+          if (pollRef.current) clearInterval(pollRef.current);
+          if (clockRef.current) clearInterval(clockRef.current);
+          clearPendingPayment();
+          setState({ step: "error", msg: t("upgrade.paymentRefunded") });
         } else if (s.status === "EXPIRED" || s.status === "FAILED") {
           if (pollRef.current) clearInterval(pollRef.current);
           if (clockRef.current) clearInterval(clockRef.current);

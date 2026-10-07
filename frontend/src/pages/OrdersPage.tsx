@@ -528,7 +528,10 @@ export default function OrdersPage() {
     const meta = symbolMeta(baseSymbol(o.symbol))
     const shown = displaySymbol(o.symbol)
     const zhName = t(`signals.symbolNames.${baseSymbol(o.symbol)}`, { defaultValue: '' })
-    const statusLabel = t(`orders.status.${o.status}`)
+    // 后端将来若加了新状态，前端没跟上时显示原始状态码，而不是把 i18n 键名打出来。
+    // If the backend adds a status the frontend hasn't caught up with, show the raw
+    // code rather than printing the i18n key path.
+    const statusLabel = t(`orders.status.${o.status}`, { defaultValue: o.status })
     const bad = o.status === 'REJECTED' || o.status === 'FAILED'
     const msg = o.message ? localizeApiError(o.message) : o.status === 'PENDING' ? t('orders.awaitingReceipt') : null
     const price = o.filledPrice != null ? priceParts(o.filledPrice) : null
