@@ -701,7 +701,7 @@ AGENT_MAX_EXTEND_DAYS_PER_WINDOW = 90
 _AGENT_EXTEND_AUDIT_SUFFIX = ":extend_days"
 
 
-def _agent_target(db: Session, link: InviteLink, email: str) -> User:
+def _agent_target(db: Session, link: InviteLink, email: str, agent: User | None = None) -> User:
     """按 (链接, 邮箱) 找人。不是这条链接带来的、或者压根不存在，都是同一个 404。
 
     邮箱大小写不敏感：名单上显示什么，前端就回传什么，但库里存的是注册时那一份，
@@ -720,6 +720,15 @@ def _agent_target(db: Session, link: InviteLink, email: str) -> User:
         # 管理员即使真是这条链接注册的也不给动——代理不该有任何触碰管理员账号的路径。
         # Admins are untouchable here even if they did sign up through the link.
         raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    if agent is not None and target.id == agent.id:
+        # 代理自己也可能挂在自己的链接下（invite_code 等于自己链接的码）：不许给自己
+        # 续 PRO / 改等级，否则代理页就成了一个免费给自己开会员的入口。
+        # An agent may themself carry their own link's invite_code; they must not
+        # be able to extend or change their own plan through the agent page.
+        raise HTTPException(
+            status_code=403,
+            detail="不能修改自己的会员 / You cannot change your own plan",
+        )
     return target
 
 
@@ -854,7 +863,7 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     gets its own prefixed audit row, and every write notifies the admins.
     """
     link = _owned_link(db, agent, link_id)
-    target = _agent_target(db, link, body.email)
+    target = _agent_target(db, link, body.email, agent)
 
     if target.plan == "PRO" and target.plan_expires_at is None:
         raise HTTPException(

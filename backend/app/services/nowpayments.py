@@ -105,4 +105,12 @@ def verify_ipn_signature(body_json: str, signature: str) -> bool:
         hashlib.sha512,
     ).hexdigest()
 
-    return hmac.compare_digest(digest, signature)
+    # 按 UTF-8 字节比较：请求头里带非 ASCII 字符时，str 版 compare_digest 会抛
+    # TypeError 变成 500；这里任何编码/类型问题都只是「签名无效」→ 401。同 webhook.py。
+    # Compare as UTF-8 bytes: a non-ASCII header value makes the str form of
+    # compare_digest raise TypeError (a 500). Any encoding/type problem here is
+    # simply an invalid signature → 401. Same as webhook.py.
+    try:
+        return hmac.compare_digest(digest.encode("utf-8"), signature.encode("utf-8"))
+    except (TypeError, AttributeError, UnicodeError):
+        return False

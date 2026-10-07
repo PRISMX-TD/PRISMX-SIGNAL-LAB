@@ -332,7 +332,17 @@ def read_unsubscribe_token(token: str | None) -> str | None:
         user_id = base64.urlsafe_b64decode(uid_b64 + "=" * (-len(uid_b64) % 4)).decode()
     except Exception:  # noqa: BLE001 —— 任何解码失败都只是「无效令牌」
         return None
-    if not user_id or not hmac.compare_digest(sig, _unsub_sig(user_id)):
+    if not user_id:
+        return None
+    # 按字节比较：签名段里带非 ASCII 字符时 str 版 compare_digest 会抛 TypeError
+    # （变成 500），这里一律当作无效令牌。
+    # Compare as bytes: a non-ASCII signature segment makes the str form of
+    # compare_digest raise TypeError (a 500); treat it as an invalid token.
+    try:
+        ok = hmac.compare_digest(sig.encode("utf-8"), _unsub_sig(user_id).encode("utf-8"))
+    except (TypeError, UnicodeError):
+        return None
+    if not ok:
         return None
     return user_id
 

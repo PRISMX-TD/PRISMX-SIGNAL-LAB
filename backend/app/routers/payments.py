@@ -537,7 +537,12 @@ async def ipn_webhook(request: Request, db: Session = Depends(get_db)):
     """
     # 读原始 body
     body_bytes = await request.body()
-    body_str = body_bytes.decode("utf-8")
+    # 非 UTF-8 的 body 不可能是合法回调：给 400，而不是让 UnicodeDecodeError 冒成 500。
+    # A non-UTF-8 body can't be a genuine callback: 400, not an uncaught 500.
+    try:
+        body_str = body_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid body encoding")
 
     # 验证签名 / verify signature
     sig = request.headers.get("x-nowpayments-sig", "")
@@ -649,9 +654,40 @@ def _webhook_sync_work(
 # an open-payment slot or running it through crediting a second time.
 STATUS_FINISHED_MISMATCH = "FINISHED_MISMATCH"
 STATUS_REFUNDED = "REFUNDED"
+# 入账之前就被退款：钱回到了用户手里、我们一天都没给过。不能落 FAILED——FAILED 仍可
+# 被之后的 finished 抢占入账（钱真到了照样该给），退过款的单再来一条迟到/重放的
+# finished 就等于白送会员。它和 REFUNDED 一样是终态、一样挡住入账，区别只在于没有
+# 权益可收回。
+# Refunded before we ever credited it: the money went back and we never gave a
+# day. It must not land in FAILED — FAILED stays claimable by a later finished
+# (money that really arrives still gets credited), so a late/replayed finished on
+# a refunded order would hand out membership for free. Terminal and
+# credit-blocking just like REFUNDED; the only difference is there's nothing to
+# claw back.
+STATUS_REFUNDED_UNCREDITED = "REFUNDED_UNCREDITED"
 _TERMINAL_STATUSES = frozenset(
-    {"FINISHED", "EXPIRED", "FAILED", STATUS_FINISHED_MISMATCH, STATUS_REFUNDED}
+    {
+        "FINISHED",
+        "EXPIRED",
+        "FAILED",
+        STATUS_FINISHED_MISMATCH,
+        STATUS_REFUNDED,
+        STATUS_REFUNDED_UNCREDITED,
+    }
 )
+
+# 一条 finished 回调**不能**从这些状态出发去抢占入账（也不能改记成 FINISHED_MISMATCH）：
+# FINISHED 已经入过账；REFUNDED 是入过账又按退款收回了，迟到/重放的 finished 再走
+# 一遍入账就是把退掉的钱又兑现一次。其余终态有意留在可抢占之列：FINISHED_MISMATCH
+# 要能在后续对上账时接手（见上文），EXPIRED/FAILED 之后钱真到了也照旧该入账——这是
+# 既有行为，这里不改。
+# Statuses a "finished" callback must NOT claim from (nor relabel as
+# FINISHED_MISMATCH): FINISHED was already credited; REFUNDED was credited and
+# then clawed back, so a late/replayed finished would cash refunded money a second
+# time. The other terminal states stay claimable on purpose: FINISHED_MISMATCH
+# must be able to reconcile later (see above), and money that genuinely arrives
+# after EXPIRED/FAILED is still credited — existing behaviour, unchanged here.
+_CREDIT_BLOCKING_STATUSES = ("FINISHED", STATUS_REFUNDED, STATUS_REFUNDED_UNCREDITED)
 
 # 站内通知的类别名。前端按 `notifFeed.<kind>` 取标题文案，本次没有改 frontend/，
 # 所以铃铛面板里这条的标题会先渲染成裸 key——与 notification_feed.py 里
@@ -1015,6 +1051,43 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
         _revoke_refunded_entitlement(db, record)
         return
 
+    # 还没入账就退款 → REFUNDED_UNCREDITED（见常量处的说明）。条件 UPDATE 从任何
+    # 「没给过权益」的状态出发，包括 EXPIRED/FAILED/FINISHED_MISMATCH：这些状态下面
+    # 那段「终态不回退」的分支不会动，而它们仍可被 finished 抢占。抢不到说明库里已经
+    # 是 FINISHED（手里的 record 是旧快照，IPN 刚入过账）或已是退款终态：前者照样
+    # 收回权益，后者什么都不做。
+    # Refunded before crediting → REFUNDED_UNCREDITED (see the constant). The
+    # conditional UPDATE starts from any never-credited status, EXPIRED/FAILED/
+    # FINISHED_MISMATCH included: the "terminal never regresses" branch below
+    # won't touch those, yet they stay claimable by a finished. Losing the claim
+    # means the row is already FINISHED (our record is a stale snapshot and an IPN
+    # just credited it) or already a refund end state: revoke in the former case,
+    # do nothing in the latter.
+    if np_status_val == "refunded":
+        flipped = (
+            db.query(Payment)
+            .filter(
+                Payment.id == record.id,
+                Payment.status.notin_(_CREDIT_BLOCKING_STATUSES),
+            )
+            .update(
+                {"status": STATUS_REFUNDED_UNCREDITED, "actually_paid": record.actually_paid},
+                synchronize_session=False,
+            )
+        )
+        db.commit()
+        db.refresh(record)
+        if flipped:
+            logger.warning(
+                "支付在入账前被退款，标记为 REFUNDED_UNCREDITED: payment=%s user=%s / "
+                "refunded before crediting",
+                record.nowpayments_payment_id,
+                record.user_id,
+            )
+        elif record.status == "FINISHED":
+            _revoke_refunded_entitlement(db, record)
+        return
+
     if new_status == "FINISHED":
         now = datetime.now(timezone.utc)
         # 入账前先对账。对不上就落 FINISHED_MISMATCH 并**不给时长**：钱的事宁可
@@ -1035,7 +1108,9 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
                 db.query(Payment)
                 .filter(
                     Payment.id == record.id,
-                    Payment.status.notin_(("FINISHED", STATUS_FINISHED_MISMATCH)),
+                    Payment.status.notin_(
+                        (*_CREDIT_BLOCKING_STATUSES, STATUS_FINISHED_MISMATCH)
+                    ),
                 )
                 .update(
                     {"status": STATUS_FINISHED_MISMATCH, "finished_at": now},
@@ -1050,11 +1125,17 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
             db.refresh(record)
             return
 
-        # 原子抢占：只有把状态从非 FINISHED 改成 FINISHED 的这一方负责加时长
-        # Atomic claim: only the session that flips status to FINISHED credits time
+        # 原子抢占：只有把状态从非 FINISHED 改成 FINISHED 的这一方负责加时长。
+        # REFUNDED 同样不可抢占：退款之后迟到/重放的 finished 不能再入账一次。
+        # Atomic claim: only the session that flips status to FINISHED credits
+        # time. REFUNDED is excluded too: a late/replayed finished after a refund
+        # must not credit the payment a second time.
         claimed = (
             db.query(Payment)
-            .filter(Payment.id == record.id, Payment.status != "FINISHED")
+            .filter(
+                Payment.id == record.id,
+                Payment.status.notin_(_CREDIT_BLOCKING_STATUSES),
+            )
             .update({"status": "FINISHED", "finished_at": now}, synchronize_session=False)
         )
         if claimed:
@@ -1135,8 +1216,25 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
         # Terminal states never regress (see _TERMINAL_STATUSES): a late callback
         # can neither un-finish a payment nor revive an EXPIRED/FAILED one into
         # PROCESSING, where it would permanently occupy an open-payment slot.
-        record.status = new_status
+        #
+        # 上面的判断用的是内存里的 record.status，它可能已经陈旧：/status 轮询在
+        # 读行与这里之间 await 过一次 NOWPayments，期间 IPN 可能已把它抢占成
+        # FINISHED 并入账。直接 `record.status = new_status` 会把 FINISHED 覆写回
+        # PROCESSING，下一拍 finished 又能抢占成功 → 同一笔入账两次。所以真正的
+        # 写入是带条件的 UPDATE（只在库里仍非终态时生效），写完再按库里的值刷新。
+        # The check above reads the in-memory status, which may be stale: the
+        # /status poll awaits NOWPayments between loading the row and getting
+        # here, and an IPN may have claimed FINISHED and credited meanwhile. A plain
+        # assignment would overwrite FINISHED with PROCESSING and let the next
+        # finished claim it again — a double credit. So the write is a conditional
+        # UPDATE that only lands while the stored row is still non-terminal, then
+        # the record is reloaded from the database.
+        db.query(Payment).filter(
+            Payment.id == record.id,
+            Payment.status.notin_(tuple(_TERMINAL_STATUSES)),
+        ).update({"status": new_status}, synchronize_session=False)
         db.commit()
+        db.refresh(record)
     elif actually_paid_changed:
         # 状态本身没变化（如仍是 PROCESSING），但到账金额有新数据——单独提交，
         # 否则用户少转后再多补一笔，这次追加的金额永远不会落库。

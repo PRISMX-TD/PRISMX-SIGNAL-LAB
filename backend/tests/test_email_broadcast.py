@@ -122,6 +122,12 @@ def test_unsubscribe_token_roundtrip_and_tamper():
     assert eb.read_unsubscribe_token(None) is None
 
 
+def test_unsubscribe_token_with_non_ascii_signature_is_invalid_not_a_crash():
+    """签名段带非 ASCII 字符：str 版 compare_digest 会抛 TypeError → 500，必须只是无效。"""
+    uid = eb.make_unsubscribe_token("user-123").partition(".")[0]
+    assert eb.read_unsubscribe_token(uid + ".签名" + "0" * 30) is None
+
+
 # ---------- 收件人 / audience ----------
 
 def test_marketing_excludes_disabled_and_opted_out_notice_ignores_opt_out(db_session):

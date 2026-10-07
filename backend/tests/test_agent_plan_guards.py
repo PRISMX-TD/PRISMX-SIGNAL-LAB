@@ -245,3 +245,19 @@ def test_a_rejected_write_notifies_nobody(db_session):
         == 0
     )
     assert target.plan == "PRO"
+
+
+# ---------- 不许给自己续期 / no self-targeting ----------
+
+
+def test_agent_cannot_change_their_own_plan(db_session):
+    """代理自己挂在自己的链接下时，也不能经代理页给自己续 PRO。"""
+    _admin, agent, link, _target = _setup(db_session)
+    agent.invite_code = link.code
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        _extend(db_session, agent, link, 30, email="AGENT@x.io")
+    assert exc.value.status_code == 403
+    db_session.refresh(agent)
+    assert agent.plan == "FREE" and agent.plan_expires_at is None

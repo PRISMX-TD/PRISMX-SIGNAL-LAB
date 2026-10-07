@@ -17,6 +17,7 @@ from app.routers.payments import (
     NOTIFY_KIND_PLAN_REFUND,
     STATUS_FINISHED_MISMATCH,
     STATUS_REFUNDED,
+    STATUS_REFUNDED_UNCREDITED,
     _sync_payment_status,
     claim_trial,
     create_payment_order,
@@ -196,12 +197,50 @@ def test_non_terminal_states_still_advance(db_session):
     assert rec.status == "PROCESSING"
 
 
-def test_refund_before_finished_is_just_a_failure(db_session):
+def test_refund_before_finished_is_terminal_refunded_uncredited(db_session):
     user = _mk_user(db_session)
     rec = _mk_payment(db_session, user, status="PROCESSING")
     _sync_payment_status(db_session, rec, "refunded", _np(status="refunded"))
     db_session.refresh(rec)
-    assert rec.status == "FAILED"
+    assert rec.status == STATUS_REFUNDED_UNCREDITED
+
+
+@pytest.mark.parametrize("start", ["PENDING", "PROCESSING", "EXPIRED", "FAILED", "FINISHED_MISMATCH"])
+def test_finished_after_refund_before_credit_never_credits(db_session, start):
+    """入账前退款 → 迟到/重放的 finished（含金额对不上的）都不能再入账或改状态。"""
+    user = _mk_user(db_session)
+    rec = _mk_payment(db_session, user, status=start)
+    _sync_payment_status(db_session, rec, "refunded", _np(status="refunded"))
+    _sync_payment_status(db_session, rec, "finished", _np())
+    _sync_payment_status(db_session, rec, "finished", _np(actually_paid=3.0))
+    _sync_payment_status(db_session, rec, "waiting", _np(status="waiting"))
+    db_session.refresh(user)
+    db_session.refresh(rec)
+    assert rec.status == STATUS_REFUNDED_UNCREDITED
+    assert user.plan == "FREE" and user.plan_expires_at is None
+    assert _audit(db_session, "plan:payment") == []
+
+
+def test_refund_with_stale_snapshot_still_revokes_a_concurrent_credit(db_session):
+    """手里的快照还是 PENDING，但并发的 IPN 刚把它入账成 FINISHED：refunded 必须照样收回。"""
+    from sqlalchemy.orm import sessionmaker
+
+    user = _mk_user(db_session)
+    stale = _mk_payment(db_session, user)
+    other = sessionmaker(bind=db_session.get_bind(), autoflush=False)()
+    try:
+        _sync_payment_status(
+            other, other.query(Payment).filter(Payment.id == stale.id).one(), "finished", _np()
+        )
+    finally:
+        other.close()
+    assert stale.status == "PENDING"
+
+    _sync_payment_status(db_session, stale, "refunded", _np(status="refunded"))
+    db_session.refresh(user)
+    db_session.refresh(stale)
+    assert stale.status == STATUS_REFUNDED
+    assert user.plan == "FREE"
 
 
 def test_actually_paid_is_persisted_even_when_the_status_cannot_move(db_session):
@@ -616,3 +655,108 @@ def test_refund_revocation_accepts_naive_timestamps():
     )
     assert skip is None and plan == "PRO"
     assert abs((expiry - (now + timedelta(days=10))).total_seconds()) < 1
+
+
+# ---------- 退款后重放 finished / replayed finished after a refund ----------
+
+
+def test_finished_replayed_after_refund_does_not_credit_again(db_session):
+    """finished → refunded → finished（迟到/重放）：第二条 finished 必须是空操作。"""
+    user = _mk_user(db_session)
+    rec = _mk_payment(db_session, user)
+    _sync_payment_status(db_session, rec, "finished", _np())
+    _refund(db_session, rec)
+    db_session.refresh(user)
+    db_session.refresh(rec)
+    assert rec.status == STATUS_REFUNDED and user.plan == "FREE"
+
+    _sync_payment_status(db_session, rec, "finished", _np())
+    # 金额对不上的重放也不能把 REFUNDED 改记成 FINISHED_MISMATCH
+    _sync_payment_status(db_session, rec, "finished", _np(actually_paid=3.0))
+    db_session.refresh(user)
+    db_session.refresh(rec)
+    assert rec.status == STATUS_REFUNDED
+    assert user.plan == "FREE" and user.plan_expires_at is None
+    assert len(_audit(db_session, "plan:payment")) == 1, "只允许入账一次"
+
+
+# ---------- 陈旧快照不能把 FINISHED 写回 / stale snapshot cannot regress FINISHED ----------
+
+
+def test_stale_poll_snapshot_cannot_regress_finished(db_session):
+    """/status 轮询读行后 await NOWPayments，期间 IPN 把它抢占成 FINISHED 并入账；
+    轮询回来手里还是 PENDING 的旧快照，带着 confirming 去同步——不能把 FINISHED 覆写成
+    PROCESSING，否则下一拍 finished 会再入账一次。"""
+    from sqlalchemy.orm import sessionmaker
+
+    user = _mk_user(db_session)
+    stale = _mk_payment(db_session, user)
+    assert stale.status == "PENDING"  # 轮询这一侧已经把行读进内存
+
+    # 并发的 IPN：另一个会话，同一个库 / the concurrent IPN in another session
+    ipn_db = sessionmaker(bind=db_session.get_bind(), autoflush=False)()
+    try:
+        ipn_rec = ipn_db.query(Payment).filter(Payment.id == stale.id).one()
+        _sync_payment_status(ipn_db, ipn_rec, "finished", _np())
+    finally:
+        ipn_db.close()
+
+    assert stale.status == "PENDING", "前提：轮询手里的快照是陈旧的"
+    _sync_payment_status(db_session, stale, "confirming", _np(status="confirming"))
+    assert stale.status == "FINISHED"
+
+    # 下一拍轮询 / 重放的 finished 也不会再入账
+    _sync_payment_status(db_session, stale, "finished", _np())
+    db_session.refresh(stale)
+    assert stale.status == "FINISHED"
+    assert len(_audit(db_session, "plan:payment")) == 1, "同一笔只能入账一次"
+
+
+# ---------- IPN 入口的畸形输入 / malformed IPN input ----------
+
+
+def _ipn_request(body: bytes, sig: bytes):
+    from starlette.requests import Request
+
+    sent = {"done": False}
+
+    async def receive():
+        if sent["done"]:
+            return {"type": "http.disconnect"}
+        sent["done"] = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/payments/webhook",
+        "headers": [(b"x-nowpayments-sig", sig)],
+        "query_string": b"",
+    }
+    return Request(scope, receive)
+
+
+def test_ipn_non_ascii_signature_is_401_not_500(db_session, monkeypatch):
+    import asyncio
+
+    from app.core.config import settings
+    from app.routers.payments import ipn_webhook
+    from app.services.nowpayments import verify_ipn_signature
+
+    monkeypatch.setattr(settings, "NOWPAYMENTS_IPN_SECRET", "secret")
+    assert verify_ipn_signature('{"a":1}', "签名") is False
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ipn_webhook(_ipn_request(b'{"payment_id":"1"}', "é".encode("latin-1")), db_session))
+    assert exc.value.status_code == 401
+
+
+def test_ipn_non_utf8_body_is_400_not_500(db_session, monkeypatch):
+    import asyncio
+
+    from app.core.config import settings
+    from app.routers.payments import ipn_webhook
+
+    monkeypatch.setattr(settings, "NOWPAYMENTS_IPN_SECRET", "secret")
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(ipn_webhook(_ipn_request(b"\xff\xfe\x00", b"abc"), db_session))
+    assert exc.value.status_code == 400
