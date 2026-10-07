@@ -16,6 +16,7 @@ import logging
 import math
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 
 # 复用 bridge_app.py 里已经配置好 handler 的同名 logger，直接写进
 # ~/.prismx_bridge.log，不需要重新配置。
@@ -498,8 +499,75 @@ def _normalize_volume(symbol: str, volume: float) -> float:
     if v > vmax:
         v = vmax
     # 按步长小数位规整，避免浮点误差 / round to step precision to avoid float noise
-    decimals = max(0, len(str(step).split(".")[-1])) if "." in str(step) else 0
-    return round(v, decimals)
+    return round(v, _step_decimals(step))
+
+
+def _step_decimals(step: float) -> int:
+    """步长的小数位数。不能用 `str(step)` 去数：1e-05 的 str 是 "1e-05"，里面没有小数点，
+    以前就算出 0 位，于是 0.00003 手被 round 成 0。走 Decimal 就不受科学计数法影响。
+    Decimal places of a step. Counting digits in str(step) broke on 1e-05 (str gives
+    "1e-05", no dot → 0 decimals → the volume rounded to 0); Decimal handles exponents."""
+    try:
+        exp = Decimal(repr(float(step))).normalize().as_tuple().exponent
+    except (InvalidOperation, TypeError, ValueError):
+        return 8
+    if not isinstance(exp, int):
+        return 8
+    return max(0, -exp)
+
+
+def _price_digits(info) -> int:
+    """品种的价格小数位。`info.digits or 5` 会把真实的 0 位（指数、部分加密/日元合约）当成
+    5 位；只有拿不到 info / 字段时才退回 5。
+    The symbol's price digits. `info.digits or 5` treated a genuine 0 as 5; fall back
+    only when the info or the field is missing."""
+    d = getattr(info, "digits", None) if info is not None else None
+    if isinstance(d, bool) or not isinstance(d, (int, float)) or d < 0:
+        return 5
+    return int(d)
+
+
+def _snap_price(value: float, info, direction: int = 0) -> float:
+    """把价格对齐到品种的最小变动价位（trade_tick_size），再按小数位取整。
+    direction：0 = 就近，-1 = 向下，+1 = 向上。tick_size 拿不到（<=0）时只按小数位取整。
+    只按 digits 取整不够：有的品种 tick_size 比 point 大（比如 0.25、5），不对齐的价格
+    会被券商拒成 Invalid price / Invalid stops。
+    Snap a price onto the symbol's tick grid, then round to its digits. direction:
+    0 nearest, -1 down, +1 up. Rounding to digits alone is not enough where the tick
+    size is coarser than a point (0.25, 5…): off-grid prices are rejected by the broker."""
+    if not value or value <= 0:
+        return 0.0
+    digits = _price_digits(info)
+    try:
+        tick_size = float(getattr(info, "trade_tick_size", 0) or 0) if info is not None else 0.0
+    except (TypeError, ValueError):
+        tick_size = 0.0
+    if tick_size > 0:
+        q = value / tick_size
+        if direction < 0:
+            n = math.floor(q + 1e-9)
+        elif direction > 0:
+            n = math.ceil(q - 1e-9)
+        else:
+            n = math.floor(q + 0.5)
+        value = n * tick_size
+    return round(value, digits)
+
+
+def _snap_level(value: float, ref: float, min_dist: float, info) -> float:
+    """对齐一个止损/止盈价，且对齐后仍离参照价（市价或挂单触发价）至少 min_dist。
+    先就近对齐；就近那一格若跨进了最小距离，就改朝远离参照价的方向对齐。
+    Snap an SL/TP level and keep it at least min_dist from the reference price: nearest
+    first, and if that lands inside the minimum distance, snap away from the reference."""
+    if not value or value <= 0:
+        return 0.0
+    v = _snap_price(value, info)
+    eps = 1e-9 * max(1.0, abs(ref))
+    if value < ref and ref - v < min_dist - eps:
+        v = _snap_price(value, info, -1)
+    elif value > ref and v - ref < min_dist - eps:
+        v = _snap_price(value, info, +1)
+    return v
 
 
 def _compute_stops(symbol: str, side: str, entry: float, sig_sl: float, sig_tp: float):
@@ -527,7 +595,6 @@ def _compute_stops(symbol: str, side: str, entry: float, sig_sl: float, sig_tp: 
     if info is None or tick is None:
         return out_sl, out_tp
     point = info.point or 0.0
-    digits = info.digits or 5
     price = tick.ask if side == "BUY" else tick.bid
     if price <= 0:
         return out_sl, out_tp
@@ -557,11 +624,9 @@ def _compute_stops(symbol: str, side: str, entry: float, sig_sl: float, sig_tp: 
         if out_tp > 0 and price - out_tp < min_dist:
             out_tp = price - min_dist
 
-    if out_sl > 0:
-        out_sl = round(out_sl, digits)
-    if out_tp > 0:
-        out_tp = round(out_tp, digits)
-    return out_sl, out_tp
+    # 对齐到 tick_size（不只是按 digits 取整），且对齐后不跨进最小止损距离。
+    # Snap onto the tick grid (not just digits) without crossing the minimum distance.
+    return _snap_level(out_sl, price, min_dist, info), _snap_level(out_tp, price, min_dist, info)
 
 
 def _account_payload(suffix: str) -> dict | None:
@@ -1069,6 +1134,19 @@ def _position_facts(pos_id: int, pos_deals, login: str) -> dict:
     return facts
 
 
+def _scan_skipped(deep_backfill: bool, why: str) -> list:
+    """平仓扫描没能真正扫成时的返回。常规扫描照旧返回空表（下一拍再来）；后端点名的
+    一次性深度回扫则抛异常，让调用方拿到 error、**不把这个账号记成已回扫**——否则
+    一次失败的回扫在本进程里再也不会重试。
+    Return for a scan that could not actually run. The regular scan returns [] as
+    before (next tick retries); the backend-requested deep rescan raises instead, so
+    the caller sees an error and does not mark the account as backfilled — otherwise a
+    failed rescan would never be retried in this process."""
+    if deep_backfill:
+        raise RuntimeError(f"deep backfill scan failed: {why}")
+    return []
+
+
 def _closed_trades_payload(deep_backfill: bool = False) -> list:
     """检测该终端账号最近的平仓成交，且仅限本平台开的仓位（个人胜率用）。
 
@@ -1147,14 +1225,14 @@ def _closed_trades_payload(deep_backfill: bool = False) -> list:
     login = _current_login()
     if not login:
         logger.warning("平仓检测：_current_login() 拿不到账号，本轮跳过 / no login, skipping this round")
-        return []
+        return _scan_skipped(deep_backfill, "no login")
 
     # 必须用服务器时间，不能用本地电脑时间——见 _server_now() 的详细说明。
     # Must use server time, not the local machine's clock — see _server_now()'s comment.
     now = _server_now(login)
     if now is None:
         logger.warning("平仓检测：拿不到服务器时间（没有持仓也探测不到品种报价），本轮跳过 / can't determine server time, skipping this round")
-        return []
+        return _scan_skipped(deep_backfill, "server time unavailable")
 
     last = _last_scan_at.get(login)
     since, catching_up = _scan_window(now, last)
@@ -1175,12 +1253,12 @@ def _closed_trades_payload(deep_backfill: bool = False) -> list:
         deals = mt5.history_deals_get(since, now)
     except Exception as e:
         logger.warning("平仓检测：history_deals_get(%s, %s) 抛异常 / threw: %s", since, now, e)
-        return []
+        return _scan_skipped(deep_backfill, f"history_deals_get threw: {e}")
     if deals is None:
         # MT5 查询本身失败（区别于"查到了但确实没有成交"），可用 mt5.last_error() 看原因。
         # The MT5 call itself failed (distinct from "queried fine, just empty"); mt5.last_error() has the reason.
         logger.warning("平仓检测：history_deals_get(%s, %s) 返回 None，mt5.last_error()=%s", since, now, mt5.last_error())
-        return []
+        return _scan_skipped(deep_backfill, "history_deals_get returned None")
 
     if deals:
         logger.info("平仓检测：窗口 [%s, %s] 内查到 %d 条原始成交 / %d raw deal(s) in window", since, now, len(deals), len(deals))
@@ -1778,7 +1856,7 @@ def _modify_position(cmd: dict) -> dict:
                 "message": "Not a PRISMX-managed position"}
     symbol = pos.symbol
     info = mt5.symbol_info(symbol)
-    digits = info.digits if info else 5
+    digits = _price_digits(info)
     # 指令里没带的那一侧，保留仓位上的现值，**不要**当成 0 发出去。
     #
     # TRADE_ACTION_SLTP 是"把这个仓位的 sl/tp 设成这两个值"，而 0 的语义是清除。
@@ -1803,8 +1881,8 @@ def _modify_position(cmd: dict) -> dict:
     def _side(key: str, current) -> float:
         raw = cmd.get(key)
         if raw is None:
-            return round(float(current or 0.0), digits)
-        return round(float(raw or 0.0), digits)
+            return _snap_price(float(current or 0.0), info)
+        return _snap_price(float(raw or 0.0), info)
 
     sl = _side("stopLoss", getattr(pos, "sl", 0.0))
     tp = _side("takeProfit", getattr(pos, "tp", 0.0))
@@ -1966,7 +2044,6 @@ def _clamp_pending_stops(symbol: str, side: str, price: float, sl: float, tp: fl
     if info is None or price <= 0:
         return sl, tp
     point = info.point or 0.0
-    digits = info.digits or 5
     stops_level = getattr(info, "trade_stops_level", 0) or 0
     min_dist = (stops_level if stops_level > 0 else 10) * point
 
@@ -1981,8 +2058,8 @@ def _clamp_pending_stops(symbol: str, side: str, price: float, sl: float, tp: fl
         if tp > 0 and price - tp < min_dist:
             tp = price - min_dist
 
-    return (round(sl, digits) if sl > 0 else 0.0,
-            round(tp, digits) if tp > 0 else 0.0)
+    # 对齐到 tick_size，理由同 _compute_stops / snapped to the tick grid, as in _compute_stops
+    return _snap_level(sl, price, min_dist, info), _snap_level(tp, price, min_dist, info)
 
 
 def _confirm_pending_placed(ticket: int) -> bool:
@@ -2015,6 +2092,31 @@ def _confirm_pending_placed(ticket: int) -> bool:
     return False
 
 
+def _confirm_pending_removed(ticket: int) -> bool:
+    """回读挂单表，确认这张挂单**确实已经不在了**。
+
+    与 `_confirm_pending_placed` 不是简单取反：orders_get 返回 None 是「查询失败」，
+    不是「没有」。只有一次成功的查询返回空（`()`）才算撤掉；整个窗口都查不了就返回
+    False，调用方落 FAILED（不知道），而不是 FILLED。
+    Confirm the pending order is really gone. Not the negation of
+    _confirm_pending_placed: None from orders_get means the query failed, not
+    "absent". Only a successful empty answer counts; if the whole window yields no
+    answer this returns False and the caller reports FAILED (unknown), never FILLED.
+    """
+    if mt5 is None or not ticket:
+        return False
+    deadline = time.time() + _CONFIRM_TOTAL_SECONDS
+    while time.time() < deadline:
+        try:
+            found = mt5.orders_get(ticket=ticket)
+        except Exception:
+            found = None
+        if found is not None and len(found) == 0:
+            return True
+        time.sleep(_CONFIRM_INTERVAL_SECONDS)
+    return False
+
+
 def _place_pending(cmd: dict, suffix: str = "") -> dict:
     """执行一条挂单指令 / place one pending order."""
     client_order_id = cmd["clientOrderId"]
@@ -2033,8 +2135,8 @@ def _place_pending(cmd: dict, suffix: str = "") -> dict:
 
     volume = _normalize_volume(symbol, float(cmd.get("volume", 0.0) or 0.0))
     info = mt5.symbol_info(symbol)
-    digits = info.digits if info else 5
-    price = round(float(cmd.get("price", 0.0) or 0.0), digits)
+    # 触发价也对齐到 tick_size / the trigger price is snapped to the tick grid too
+    price = _snap_price(float(cmd.get("price", 0.0) or 0.0), info)
     if price <= 0:
         return {"clientOrderId": client_order_id, "success": False,
                 "message": "Pending order needs a trigger price"}
@@ -2144,9 +2246,14 @@ def _cancel_pending(cmd: dict) -> dict:
     if result.retcode == mt5.TRADE_RETCODE_DONE:
         status, success = "FILLED", True
     elif result.retcode == mt5.TRADE_RETCODE_PLACED:
-        # 撤单的确认与挂单相反：单**不在**挂单表里才算撤掉了。
-        # The confirmation is the mirror image: it worked when the order is gone.
-        status, success = ("FILLED", True) if not _confirm_pending_placed(ticket) else ("FAILED", False)
+        # 撤单的确认与挂单相反：单**不在**挂单表里才算撤掉了。而且必须是「查到了、
+        # 确实没有」——以前用 `not _confirm_pending_placed(ticket)`，orders_get 整段时间
+        # 都返回 None（查询失败）也会被当成「已撤」。查不了 = 不知道 = FAILED。
+        # The confirmation is the mirror image: it worked when the order is gone — and
+        # "gone" must be a successful query that came back empty. `not
+        # _confirm_pending_placed(...)` also counted a query that failed (None) for the
+        # whole window as cancelled; an unanswerable check is unknown, i.e. FAILED.
+        status, success = ("FILLED", True) if _confirm_pending_removed(ticket) else ("FAILED", False)
     else:
         status, success = "REJECTED", False
 
@@ -2200,13 +2307,13 @@ def _modify_pending(cmd: dict) -> dict:
 
     symbol = order.symbol
     info = mt5.symbol_info(symbol)
-    digits = info.digits if info else 5
+    digits = _price_digits(info)
 
     def _keep(key: str, current) -> float:
         raw = cmd.get(key)
         if raw is None:
-            return round(float(current or 0.0), digits)
-        return round(float(raw or 0.0), digits)
+            return _snap_price(float(current or 0.0), info)
+        return _snap_price(float(raw or 0.0), info)
 
     price = _keep("price", getattr(order, "price_open", 0.0))
     if price <= 0:
@@ -2404,6 +2511,33 @@ def _dispatch_command(cmd: dict, suffix: str = "") -> dict:
             "status": "REJECTED",
             "message": f"Invalid command: {err}",
         }
+    # 发单前最后确认：终端此刻登录的正是指令要的那个账号。
+    #
+    # 路由（bridge_app 的 login→终端映射）来自状态循环上一拍的快照，而用户随时可以在
+    # MT5 里切换账号；不查的话，单子会下到另一个账户上。平仓更糟：在错的账户里
+    # positions_get(ticket) 查不到那张仓，会被回报成「Position already closed」FILLED，
+    # 而真正的仓位还开着。这里在 MT5 锁内、order_send 之前比对，不一致就 REJECTED
+    # （一个字节都没发给券商，可以安全重下）。指令没带 login（老后端）时不查。
+    # Last check before sending: the terminal must still be logged into the commanded
+    # account. Routing comes from the status loop's last snapshot and the user can
+    # switch accounts in MT5 at any time; unchecked, the order lands on another account.
+    # A close is worse: positions_get(ticket) finds nothing on the wrong account and it
+    # would be reported "Position already closed" / FILLED while the real position stays
+    # open. Compared under the MT5 lock right before dispatch; on mismatch → REJECTED
+    # (nothing was sent). Commands without a login (old backend) are not checked.
+    wanted = cmd.get("login")
+    if wanted not in (None, ""):
+        current = _current_login()
+        if current != str(wanted):
+            return {
+                "clientOrderId": cmd.get("clientOrderId", ""),
+                "success": False,
+                "status": "REJECTED",
+                "message": (
+                    f"终端当前登录的账号({current or '未知'})不是目标账号({wanted})，未执行 / "
+                    f"Terminal is logged into account {current or 'unknown'}, not {wanted}; not executed"
+                ),
+            }
     action = (cmd.get("action") or "ORDER").upper()
     try:
         if action == "CLOSE":
@@ -2461,6 +2595,7 @@ def poll_terminal(
     deep_backfill: bool = False,
     read_state: bool = True,
     scan_closed: bool = True,
+    should_stop=None,
 ) -> dict:
     """连接一个终端，读取账号/持仓，并执行传入的下单指令。
     Attach to one terminal, read account/positions, execute given orders.
@@ -2477,6 +2612,14 @@ def poll_terminal(
     read_state=False executes commands only: no account / positions / quotes / closed
     trade scan. The command loop uses it so an order goes out immediately instead of
     after a full terminal read that contributed nothing to the order itself.
+
+    should_stop：可选的无参回调，每条指令执行**前**问一次，返回真就不再开始后面的
+    指令（桥接被停掉 / 一键更新时，已领到但还没开始的指令留给后端重发，不在一个
+    正在退出的引擎里开新单）。被跳过的指令不产生回执。
+    should_stop: optional no-arg callable asked before *each* command; once it returns
+    true no further command is started (the bridge is stopping or updating — commands
+    received but not yet begun are left for the backend to re-deliver rather than
+    started by an engine on its way out). Skipped commands produce no result.
 
     返回 / returns:
       {
@@ -2512,6 +2655,9 @@ def poll_terminal(
             out["pendingOrders"] = _pending_orders_payload()
             out["quotes"] = _quotes_payload(QUOTE_SYMBOLS, suffix)
         for cmd in orders or []:
+            if should_stop is not None and should_stop():
+                logger.warning("桥接正在停止，余下指令不再执行 / bridge stopping, remaining command(s) not started")
+                break
             out["results"].append(_dispatch_command(cmd, suffix))
     except Exception as e:
         out["error"] = str(e)

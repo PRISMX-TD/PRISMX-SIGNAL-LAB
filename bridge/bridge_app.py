@@ -127,7 +127,21 @@ except Exception:
 # failure); both loops back off exponentially with jitter while the backend is down; the
 # command long-poll HTTP timeout drops 15 -> 9 s; order results are reported by their own
 # thread so the command thread reports positions first. Result semantics are unchanged.
-APP_VERSION = "1.4.7"
+#
+# 1.4.8（2026-10-08）：下单安全。① 断开重连 / 一键更新 / 退出时等进行中的指令做完并写进
+# 已执行缓存再交接，缓存与 MT5 锁全进程共用、写盘合并，后端重发的同一张单只执行一次；
+# ② 发单前核对终端当前登录的账号与指令一致，不一致直接拒绝（不会下到别的账户，也不会把
+# 错账户上的平仓报成成交）；③ 断开不再卡界面；④ 手数步长 1e-05 等科学计数法、0 位小数
+# 品种、按最小变动价位对齐止损止盈；⑤ 撤挂单查不到结果不再算成功；⑥ 深度回扫失败会重试。
+#
+# 1.4.8 (2026-10-08): order safety. Disconnect/reconnect, self-update and exit wait for
+# the in-flight command to finish and be recorded before handing over; the executed
+# cache and MT5 lock are process-wide and saves merge, so a re-sent order runs once.
+# Orders are rejected when the terminal's logged-in account differs from the command's.
+# Disconnect no longer freezes the UI; lot steps like 1e-05, 0-digit symbols and tick-size
+# aligned SL/TP; an unconfirmable pending cancel no longer counts as done; a failed deep
+# rescan is retried.
+APP_VERSION = "1.4.8"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
@@ -524,6 +538,51 @@ def set_autostart_enabled(enabled: bool) -> bool:
         return False
 
 
+# ---------- 进程级共享状态 / process-wide shared state ----------
+# MetaTrader5 包附着的是**进程级**单连接；以前每个 BridgeEngine 各有一把 _mt5_lock，
+# 断开重连 / 一键更新时新旧两个引擎的线程短暂并存，拿着两把不同的锁同时切终端，
+# 单子就可能下到另一个账户上。锁必须和它保护的东西一样是进程级的。
+# The MetaTrader5 package is one process-wide attachment. Each BridgeEngine used to own
+# its own _mt5_lock, so during a reconnect / self-update the old and new engines'
+# threads could switch terminals concurrently under two different locks — and an order
+# could land on the wrong account. The lock must be as process-wide as what it guards.
+_MT5_LOCK = threading.Lock()
+# 「查幂等缓存 → 执行 → 写缓存」整段的进程级互斥。新引擎的指令线程会在这里等旧引擎
+# 手上那条还没写进缓存的指令做完，并在锁内重查缓存——于是后端重发的同一条指令只会
+# 命中缓存，不会在新旧引擎里各执行一次。旧引擎在锁内看到 stop 标志就不再开始新指令。
+# Process-wide mutex over "check the executed cache → execute → record". A new engine's
+# command thread waits here for an old engine's in-flight command to be recorded and
+# re-checks the cache inside the lock, so a re-delivered command hits the cache instead
+# of executing once per engine. An old engine sees its stop flag inside the lock and
+# starts nothing new.
+_EXEC_LOCK = threading.Lock()
+# 已执行缓存的内存副本也是进程级共享的（按缓存文件路径区分，测试会换路径）。以前每个
+# 引擎各加载一份、各自整表写盘，新引擎一写就能把旧引擎刚记下的条目冲掉 → 后端重发
+# → 重复下单。
+# The in-memory executed cache is shared process-wide too (keyed by file path, which
+# tests swap). Each engine used to load its own copy and rewrite the whole file, so a
+# new engine's save could wipe an entry the old one had just recorded → the backend
+# re-sends → a duplicate order.
+_EXECUTED_LOCK = threading.RLock()
+_executed_store: dict = {"path": None, "results": None, "stamps": None}
+# 停止 / 更新 / 退出时，最多等多久让进行中的指令做完并落盘（秒）。下单 + 确认最长
+# 也就几秒，30 秒是宽裕的上限；超时照样继续，只记一条日志，不让程序卡死在退出上。
+# How long stop / update / exit waits for an in-flight command to finish and persist.
+# An order plus its confirmation takes seconds; 30 s is a generous bound, after which
+# we proceed anyway (logged) rather than hang the exit.
+ENGINE_DRAIN_TIMEOUT = 30.0
+
+
+def _shared_executed_cache() -> tuple[dict[str, dict], dict[str, float]]:
+    """进程内所有引擎共用的已执行缓存（首次使用时从磁盘加载）。
+    The executed cache shared by every engine in this process (loaded on first use)."""
+    with _EXECUTED_LOCK:
+        if _executed_store["path"] != EXECUTED_CACHE_PATH or _executed_store["results"] is None:
+            results, stamps = _load_executed_cache()
+            _executed_store.update(path=EXECUTED_CACHE_PATH, results=results, stamps=stamps)
+        return _executed_store["results"], _executed_store["stamps"]
+
+
 def _load_executed_cache() -> tuple[dict[str, dict], dict[str, float]]:
     """读取已执行结果缓存，过滤超龄条目 / load the executed cache, drop stale entries.
 
@@ -549,14 +608,44 @@ def _load_executed_cache() -> tuple[dict[str, dict], dict[str, float]]:
 
 
 def _save_executed_cache(results: dict[str, dict], stamps: dict[str, float]) -> None:
-    """把已执行结果缓存写盘；失败不影响运行 / persist the cache; never fatal."""
+    """把已执行结果缓存写盘；失败不影响运行 / persist the cache; never fatal.
+
+    写盘是**合并**而不是整表覆盖：先把盘上已有、内存里没有的未超龄条目并进来（同时并进
+    传入的 dict，让本进程之后也认得它们），再整体写。一键更新时新旧两个进程会短暂
+    并存，各写各的整表会互相冲掉对方刚记下的条目。写临时文件再 os.replace，避免半截文件。
+    Saving merges rather than overwrites: fresh entries on disk that are missing from
+    memory are folded in (into the passed dicts too, so this process honours them),
+    then the whole map is written. During a self-update the old and new processes
+    briefly coexist, and whole-file rewrites would wipe each other's new entries. Write
+    to a temp file and os.replace so a reader never sees half a file.
+    """
     try:
+        on_disk, disk_stamps = _load_executed_cache()
+        for coid, r in on_disk.items():
+            if coid not in results:
+                results[coid] = r
+                stamps[coid] = disk_stamps.get(coid, time.time())
         payload = {
             coid: {"ts": stamps.get(coid, time.time()), "result": r}
             for coid, r in results.items()
         }
-        with open(EXECUTED_CACHE_PATH, "w", encoding="utf-8") as f:
+        # 临时文件带 pid：一键更新时新旧两个进程可能同时写盘，共用一个 .tmp 会互相截断。
+        # Windows 上目标文件正被另一个进程读着时 os.replace 会抛 PermissionError，短暂重试。
+        # The temp name carries the pid: old and new processes may save at the same time
+        # during a self-update and must not truncate each other's temp file. On Windows
+        # os.replace raises PermissionError while another process is reading the target,
+        # so retry briefly.
+        tmp = f"{EXECUTED_CACHE_PATH}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f)
+        for attempt in range(4):
+            try:
+                os.replace(tmp, EXECUTED_CACHE_PATH)
+                break
+            except PermissionError:
+                if attempt == 3:
+                    raise
+                time.sleep(0.05)
     except Exception:
         # 「不致命」只对本次进程成立：这份缓存是重启后「重发的指令绝不重新执行」的
         # 唯一依据，写不进去 = 下次启动可能重复下单。网关侧同一场景会 Log.Error
@@ -759,6 +848,15 @@ class BackendClient:
         return out
 
 
+def _close_quietly(client) -> None:
+    """线程退出时关自己的连接；关失败不该让线程带着异常退出。
+    Close a thread's own client on exit; a failed close must not escape the thread."""
+    try:
+        client.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 class _HeartbeatSkipped(Exception):
     """本拍跳过心跳 /poll（内部控制流）/ this tick skips the heartbeat poll (control flow)."""
 
@@ -787,7 +885,9 @@ class BridgeEngine:
         # re-delivers the same command after an ack timeout, we DON'T place the
         # order again — we just re-report the cached result (idempotency guard).
         # Persisted to a local file so it survives restarts.
-        self._executed, self._executed_at = _load_executed_cache()
+        # 进程内所有引擎共用同一份（见 _shared_executed_cache）/ shared by every engine in
+        # this process (see _shared_executed_cache).
+        self._executed, self._executed_at = _shared_executed_cache()
         if self._executed:
             logger.info("已加载幂等缓存 / loaded executed cache: %d entrie(s)", len(self._executed))
         # 尚未成功回报后端的结果，下一轮重试；持久化到本地，重启不丢。
@@ -839,10 +939,15 @@ class BridgeEngine:
         # Who sent quotes last tick (True = quote thread); only for logging hand-overs.
         self._quotes_via_thread: bool | None = None
         self._fallback_quotes_at = float("-inf")
-        # MetaTrader5 包附着的是进程级单连接，两条循环不能同时碰它。
-        # The MetaTrader5 module is one process-wide attachment; the two loops
-        # must not touch it concurrently.
-        self._mt5_lock = threading.Lock()
+        # MetaTrader5 包附着的是进程级单连接，两条循环不能同时碰它——新旧两个引擎
+        # 也不能，所以用进程级的那把锁（见 _MT5_LOCK）。
+        # The MetaTrader5 module is one process-wide attachment; neither the two loops
+        # nor an old and a new engine may touch it concurrently, hence the process-wide
+        # lock (see _MT5_LOCK).
+        self._mt5_lock = _MT5_LOCK
+        # 「查缓存 → 执行 → 记缓存」的进程级互斥，见 _EXEC_LOCK。
+        # Process-wide mutex over check-cache → execute → record; see _EXEC_LOCK.
+        self._exec_lock = _EXEC_LOCK
         # 状态循环每拍留下的快照，指令循环拿来发 poll、路由指令、合并持仓上报。
         # Snapshots the status loop leaves for the command loop.
         self._accounts_snapshot: list = []
@@ -895,15 +1000,44 @@ class BridgeEngine:
         self._report_thread.start()
 
     def stop(self):
+        """只发停止信号，立即返回（在界面线程里调）。
+        Signal the threads to stop and return at once (called on the UI thread).
+
+        各线程的连接都由线程自己在退出时关（_loop / _command_loop / _quote_loop /
+        _report_loop 的 finally）：在这里 close 会卡在 BackendClient 的锁上——指令线程
+        正挂着长轮询时最长要等十几秒，界面就冻住了。
+        Every thread closes its own connection on exit (the finally blocks of _loop /
+        _command_loop / _quote_loop / _report_loop): closing them here would block on
+        BackendClient's lock, up to ~18 s behind a held long poll, freezing the UI.
+
+        stop() 之后指令线程不会再开始新指令（_execute_commands 在 _exec_lock 内检查
+        停止标志）；已经在执行的那一条会做完并写进幂等缓存。要确认它做完了（进程即将
+        退出时），在**后台线程**里调 wait_idle()。
+        After stop() the command thread starts no new command (checked inside _exec_lock);
+        one already executing finishes and is recorded. To be sure it has (before the
+        process exits), call wait_idle() from a background thread.
+        """
         self._stop.set()
         self._report_wake.set()
-        self._http.close()
-        self._cmd_http.close()
-        # 报价线程的连接由它自己在退出时关（见 _quote_loop 的 finally）：这里去 close
-        # 会在它正发着请求时卡在 BackendClient 的锁上，而 stop() 是在界面线程里调的。
-        # The quote thread closes its own connection on exit (see _quote_loop's
-        # finally): closing it here would block on BackendClient's lock mid-request,
-        # and stop() runs on the UI thread.
+
+    def wait_idle(self, timeout: float = ENGINE_DRAIN_TIMEOUT) -> bool:
+        """等进行中的指令执行完并写进幂等缓存，再把没发出去的回执落盘。会阻塞，别在界面
+        线程里调。返回 False = 超时（仍有指令没做完）。
+        Wait for an in-flight command to finish and be recorded, then persist any
+        unsent results. Blocks — never call on the UI thread. False means it timed out.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        if not self._exec_lock.acquire(timeout=max(0.0, timeout)):
+            logger.warning("等待进行中的指令超时 / timed out waiting for an in-flight command")
+            return False
+        self._exec_lock.release()
+        t = self._report_thread
+        if t is not None and t is not threading.current_thread():
+            t.join(max(0.0, deadline - time.monotonic()))
+        # 报告线程退出后才入队的回执（执行线程最后那一条）由这里转进持久化重试队列。
+        # Results queued after the reporter's final drain go to the persisted retry list.
+        self._drain_reports(final=True)
+        return True
 
     # ---------- 指令循环 / command loop ----------
     def _command_loop(self):
@@ -918,6 +1052,13 @@ class BridgeEngine:
         request never delays status reports and execution never queues behind a full
         terminal read. Falls back to the 1.5s cadence against an old backend.
         """
+        try:
+            self._command_loop_body()
+        finally:
+            # 连接由本线程自己关，见 stop() / this thread closes its own client, see stop()
+            _close_quietly(self._cmd_http)
+
+    def _command_loop_body(self):
         while not self._stop.is_set():
             with self._state_lock:
                 accounts = self._accounts_snapshot
@@ -1123,44 +1264,83 @@ class BridgeEngine:
             else:
                 logger.warning("指令目标账号不在本机 / command for a login not attached here: %s", cmd.get("login"))
         for path, cmds in by_path.items():
-            with self._mt5_lock:
-                res = poll_terminal(path, orders=cmds, read_state=False)
+            # 「重查缓存 → 执行 → 记缓存」整段在进程级 _exec_lock 里（见 _EXEC_LOCK）：
+            # ① 停掉的引擎在这里看到 stop 标志就不再开始新指令；② 断开重连 / 一键更新时
+            # 新引擎会在这里等旧引擎手上那条做完、记进缓存，再在锁内重查缓存，后端重发的
+            # 同一条指令就只会命中缓存，不会执行两次。
+            # Re-check cache → execute → record, all under the process-wide _exec_lock:
+            # (1) a stopped engine sees its flag here and starts nothing new; (2) during a
+            # reconnect / self-update the new engine waits here for the old one's in-flight
+            # command to be recorded, then re-checks the cache inside the lock, so a
+            # re-delivered command hits the cache instead of executing twice.
+            hits: list = []
+            with self._exec_lock:
+                if self._stop.is_set():
+                    logger.warning(
+                        "桥接已停止，%d 条已领取的指令不再执行（留给后端重发）/ bridge stopped, "
+                        "%d received command(s) left for re-delivery", len(cmds), len(cmds))
+                    break
+                todo = []
+                for cmd in cmds:
+                    coid = str(cmd.get("clientOrderId"))
+                    cached = self._executed.get(coid)
+                    if cached is not None:
+                        hits.append((coid, cached, cmd))
+                    else:
+                        todo.append(cmd)
+                res: dict = {"results": [], "error": None}
+                if todo:
+                    with self._mt5_lock:
+                        res = poll_terminal(path, orders=todo, read_state=False,
+                                            should_stop=self._stop.is_set)
+                for r in res.get("results", []):
+                    coid = str(r.get("clientOrderId"))
+                    if coid:
+                        # 缓存并落盘，以备幂等重报（重启后仍有效）
+                        # cache & persist for idempotent retry (survives restarts)
+                        #
+                        # status=FAILED（「不知道成没成」，见 mt5_worker._result_from_retcode）
+                        # 同样进缓存，这是**刻意**的：后端重发同一 clientOrderId 时，
+                        # 重报一次 FAILED 是安全的，而重新执行可能开出第二笔仓位——
+                        # 在两者之间只能选前者。
+                        #
+                        # 缓存 FAILED 曾经的代价是「那张单后来其实成交了，却在后端永远
+                        # 停在 FAILED」——后端把 FAILED 当非终态、允许被更正，但更正永远
+                        # 不会来。**这条代价已经消掉了**：后端重发同一 clientOrderId 时，
+                        # `_reconfirm_cached` 会拿这条记录里的订单号**只重跑确认、不重跑
+                        # 执行**，查到成交就把缓存条目就地升级成 FILLED 再回报。
+                        # 仍然确认不了的那部分（没有订单号、平仓/改单、账号已不在本机）
+                        # 照旧重报 FAILED，判据与取舍见 _reconfirm_cached 的注释。
+                        #
+                        # FAILED ("outcome unknown") is cached deliberately. When the
+                        # backend re-delivers the same clientOrderId, re-reporting FAILED
+                        # is safe while re-executing could open a second position, and
+                        # that is the whole choice.
+                        #
+                        # Caching FAILED used to cost this: an order that did fill stayed
+                        # FAILED in the backend forever (FAILED is non-terminal there and
+                        # may be corrected, but the correction never arrived). That cost is
+                        # gone — on a re-delivery of the same clientOrderId,
+                        # _reconfirm_cached re-runs only the *confirmation*, never the
+                        # execution, and upgrades the cached entry to FILLED when the order
+                        # turns out to have filled. What still cannot be confirmed (no order
+                        # ticket, closes/modifies, account no longer attached here) is
+                        # re-reported as FAILED exactly as before.
+                        #
+                        # 放锁之前就记缓存：锁一放，别的引擎就可能拿着同一条重发进来。
+                        # Recorded before the lock is released: once it is, another
+                        # engine may arrive with the same re-delivered command.
+                        self._remember_executed(coid, r)
+            for coid, cached, cmd in hits:
+                # 等锁期间别的引擎已经执行并记下了：只重报，不执行。
+                # Executed and recorded by another engine while we waited: re-report only.
+                self._report_result(self._reconfirm_cached(coid, cached, cmd), http)
+            if not todo:
+                continue
             if res.get("error"):
                 logger.warning("poll_terminal(%s) 执行指令报错 / error: %s", path, res["error"])
             for r in res.get("results", []):
                 coid = str(r.get("clientOrderId"))
-                if coid:
-                    # 缓存并落盘，以备幂等重报（重启后仍有效）
-                    # cache & persist for idempotent retry (survives restarts)
-                    #
-                    # status=FAILED（「不知道成没成」，见 mt5_worker._result_from_retcode）
-                    # 同样进缓存，这是**刻意**的：后端重发同一 clientOrderId 时，
-                    # 重报一次 FAILED 是安全的，而重新执行可能开出第二笔仓位——
-                    # 在两者之间只能选前者。
-                    #
-                    # 缓存 FAILED 曾经的代价是「那张单后来其实成交了，却在后端永远
-                    # 停在 FAILED」——后端把 FAILED 当非终态、允许被更正，但更正永远
-                    # 不会来。**这条代价已经消掉了**：后端重发同一 clientOrderId 时，
-                    # `_reconfirm_cached` 会拿这条记录里的订单号**只重跑确认、不重跑
-                    # 执行**，查到成交就把缓存条目就地升级成 FILLED 再回报。
-                    # 仍然确认不了的那部分（没有订单号、平仓/改单、账号已不在本机）
-                    # 照旧重报 FAILED，判据与取舍见 _reconfirm_cached 的注释。
-                    #
-                    # FAILED ("outcome unknown") is cached deliberately. When the
-                    # backend re-delivers the same clientOrderId, re-reporting FAILED
-                    # is safe while re-executing could open a second position, and
-                    # that is the whole choice.
-                    #
-                    # Caching FAILED used to cost this: an order that did fill stayed
-                    # FAILED in the backend forever (FAILED is non-terminal there and
-                    # may be corrected, but the correction never arrived). That cost is
-                    # gone — on a re-delivery of the same clientOrderId,
-                    # _reconfirm_cached re-runs only the *confirmation*, never the
-                    # execution, and upgrades the cached entry to FILLED when the order
-                    # turns out to have filled. What still cannot be confirmed (no order
-                    # ticket, closes/modifies, account no longer attached here) is
-                    # re-reported as FAILED exactly as before.
-                    self._remember_executed(coid, r)
                 logger.info(
                     "下单结果 / order result: coid=%s success=%s ticket=%s price=%s msg=%s",
                     coid, r.get("success"), r.get("mt5Ticket"),
@@ -1328,18 +1508,22 @@ class BridgeEngine:
         return upgraded
 
     def _loop(self):
-        while not self._stop.is_set():
-            try:
-                self._tick()
-            except Exception as e:
-                self.last_error = str(e)
-                self.on_status([], self.last_error)
-            # 可被 stop 提前唤醒的等待；后端不可用时指数退避 + 抖动。
-            # Interruptible wait; exponential backoff + jitter while the backend is down.
-            if self._status_fail_n > 0:
-                self._stop.wait(_backoff_delay(self._status_fail_n, STATUS_BACKOFF_CAP))
-            else:
-                self._stop.wait(POLL_INTERVAL)
+        try:
+            while not self._stop.is_set():
+                try:
+                    self._tick()
+                except Exception as e:
+                    self.last_error = str(e)
+                    self.on_status([], self.last_error)
+                # 可被 stop 提前唤醒的等待；后端不可用时指数退避 + 抖动。
+                # Interruptible wait; exponential backoff + jitter while the backend is down.
+                if self._status_fail_n > 0:
+                    self._stop.wait(_backoff_delay(self._status_fail_n, STATUS_BACKOFF_CAP))
+                else:
+                    self._stop.wait(POLL_INTERVAL)
+        finally:
+            # 连接由本线程自己关，见 stop() / this thread closes its own client, see stop()
+            _close_quietly(self._http)
 
     @staticmethod
     def _positions_digest(positions: list, pending_orders: list) -> str:
@@ -1368,8 +1552,11 @@ class BridgeEngine:
         for path in paths:
             login_hint = _path_login.get(path)
             deep = login_hint is not None and login_hint in _backfill_requested and login_hint not in _backfill_done
-            if deep:
-                _backfill_done.add(login_hint)
+            # 不在这里就记「已回扫」：回扫失败（读不到账号、history_deals_get 失败……）
+            # 的话，本进程就再也不会重试了。等下面第 ② 段扫成功了再记。
+            # Not marked done here: if the rescan failed (no account, history query
+            # failed…) it would never be retried in this process. Marked after segment
+            # (2) below succeeds.
             # 分两段拿 MT5 锁：① 账号 / 持仓 / 挂单 / 报价；② 平仓明细扫描（下面，账号
             # 读到了才做）。以前一整段攥着锁，扫描最慢的那一截也挡在下单指令前面；现在
             # 段间释放，指令线程可以插进来。第 ② 段会重新确认附着的是这台终端——段间
@@ -1414,6 +1601,10 @@ class BridgeEngine:
                 if scan.get("error"):
                     worker_errors.append(scan["error"])
                     logger.warning("scan_closed_trades(%s) 报错 / error: %s", path, scan["error"])
+                elif deep and acc["login"] == login_hint:
+                    # 扫成了（且扫的确实是被点名的那个账号）才记已回扫。
+                    # Only a successful scan of the flagged account counts as done.
+                    _backfill_done.add(login_hint)
                 closed_trades.extend(scan.get("closedTrades", []))
 
         if not accounts:
@@ -1629,7 +1820,8 @@ class BridgeEngine:
         """记录一条已执行结果并落盘，同时清理超龄条目。两条循环都会调，加锁。
         Record one executed result, persist to disk and prune stale entries."""
         now = time.time()
-        with self._state_lock:
+        # 缓存是进程级共享的，用进程级的锁 / the cache is process-wide, so is its lock
+        with _EXECUTED_LOCK:
             self._executed[coid] = result
             self._executed_at[coid] = now
             stale = [k for k, ts in self._executed_at.items() if now - ts > EXECUTED_CACHE_TTL]
@@ -2541,9 +2733,51 @@ class BridgeGUI:
         """
         self.update_var.set("下载完成，正在重启到新版本…  /  Restarting into the new version…")
         self.root.update_idletasks()
-        if self.engine:
-            self.engine.stop()
-            self.engine = None
+        # 先等旧引擎手上的指令做完、写进幂等缓存，再拉起新版本、退出进程。以前 stop()
+        # 只发信号、400ms 后就 os._exit：一张单若正卡在 order_send 与写缓存之间，进程就
+        # 被杀了，后端重发 → 新版本缓存里没有 → 再下一次。等待放在后台线程，界面不卡。
+        # Wait for the old engine's in-flight command to finish and be recorded before
+        # launching the new build and exiting. stop() only signals, and the process used
+        # to os._exit 400 ms later — an order caught between order_send and the cache
+        # write was lost, the backend re-sent it, and the new build executed it again.
+        # The wait runs off the UI thread.
+        self._stop_engine_then(lambda: self._launch_new_build(new_exe))
+
+    def _stop_engine_then(self, then) -> None:
+        """停引擎（立即返回），在后台线程里等进行中的指令做完并落盘（有上限），再回到
+        界面线程执行 then。没有引擎就直接执行。
+        Stop the engine (returns at once), wait off the UI thread — bounded — for any
+        in-flight command to finish and persist, then run `then` on the UI thread. With
+        no engine, `then` runs right away."""
+        # 进入收尾：等待期间（最长 ENGINE_DRAIN_TIMEOUT）界面上的「连接」和再次「退出」
+        # 都不能再起作用——否则会起一个没人等的新引擎，随后进程直接退出。
+        # Entering shutdown: during the (bounded) wait neither Connect nor a second Exit
+        # may act — otherwise a fresh engine starts that nobody waits for, and then the
+        # process exits underneath it.
+        self._closing = True
+        engine = self.engine
+        self.engine = None
+        if engine is None:
+            then()
+            return
+        engine.stop()
+
+        def drain():
+            try:
+                if not engine.wait_idle(ENGINE_DRAIN_TIMEOUT):
+                    logger.warning("进行中的指令未在 %.0fs 内结束，照常继续 / in-flight command "
+                                   "did not finish within %.0fs, proceeding", ENGINE_DRAIN_TIMEOUT,
+                                   ENGINE_DRAIN_TIMEOUT)
+            except Exception:  # noqa: BLE001 - 等待失败也要继续退出 / proceed even if waiting fails
+                logger.exception("等待引擎收尾失败 / waiting for the engine to drain failed")
+            try:
+                self.root.after(0, then)
+            except Exception:  # noqa: BLE001 - 窗口已被销毁 / the window is already gone
+                pass
+
+        threading.Thread(target=drain, daemon=True, name="bridge-drain").start()
+
+    def _launch_new_build(self, new_exe: str):
         if self.tray_icon is not None:
             try:
                 self.tray_icon.stop()
@@ -2607,6 +2841,8 @@ class BridgeGUI:
             )
 
     def _on_connect(self):
+        if getattr(self, "_closing", False):
+            return  # 正在退出 / 重启到新版本 / shutting down or restarting into a new build
         token = self.token_var.get().strip()
         # 后端地址固定为线上地址，不再从用户输入或旧配置读取。
         # Backend is fixed to production; never read from user input or stale config.
@@ -2637,6 +2873,13 @@ class BridgeGUI:
         self.status_var.set("已连接，正在扫描 MT5… / Connected, scanning MT5…")
 
     def _on_disconnect(self):
+        # stop() 只发信号、不阻塞界面。旧引擎手上那条指令会做完并写进**进程级**幂等缓存；
+        # 紧接着「连接」起来的新引擎与它共用 MT5 锁和 _exec_lock，执行前会在锁内等它做完
+        # 并重查缓存，所以不会重复下单，也不会两个引擎同时切终端。
+        # stop() only signals and never blocks the UI. The old engine finishes any
+        # in-flight command and records it in the process-wide cache; a new engine
+        # started by Connect shares the MT5 lock and _exec_lock, waits inside them and
+        # re-checks the cache before executing — no duplicate, no concurrent attach.
         if self.engine:
             self.engine.stop()
             self.engine = None
@@ -2753,6 +2996,8 @@ class BridgeGUI:
         # Exiting from the tray leaves the window hidden; askyesno still shows
         # up fine, but un-hiding first is safer so the dialog isn't hidden
         # behind/lost relative to its (invisible) parent.
+        if getattr(self, "_closing", False):
+            return  # 已经在收尾，等它走完 / already shutting down; let it finish
         if self.root.state() == "withdrawn":
             self.root.deiconify()
         if self.engine is not None:
@@ -2765,7 +3010,12 @@ class BridgeGUI:
             )
             if not ok:
                 return
-            self.engine.stop()
+        # 同 _restart_into：等进行中的指令做完、落盘再关窗口（后台等，界面不卡）。
+        # As in _restart_into: let an in-flight command finish and persist before the
+        # window closes (waited for off the UI thread).
+        self._stop_engine_then(self._finish_exit)
+
+    def _finish_exit(self):
         logger.info("应用退出 / app closed")
         if self.tray_icon is not None:
             self.tray_icon.stop()
