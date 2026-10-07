@@ -133,6 +133,42 @@ def test_release_is_atomic_on_redis_too():
         assert shared_state.try_lock("L", 60, owner="C")
 
 
+def test_renewal_is_one_atomic_compare_and_expire_on_redis():
+    """续期走 Lua（比对 + 续期一步完成），不再是 GET 再 EXPIRE：两步之间换主会把
+    **新主**的锁续上、自己还以为是领导者。/ Renewal is a single Lua compare-and-expire,
+    never GET then EXPIRE, which could extend the new owner's lock across a handover."""
+
+    class Spy(FakeRedis):
+        def get(self, key):
+            raise AssertionError("续期不得单独 GET / renewal must not GET separately")
+
+        def expire(self, key, seconds):
+            self.expired = getattr(self, "expired", 0) + 1
+            return super().expire(key, seconds)
+
+    fake = Spy()
+    with pytest.MonkeyPatch().context() as mp:
+        mp.setattr(settings, "REDIS_URL", "redis://fake")
+        shared_state.reset_for_tests(fake)
+        assert shared_state.try_lock("L", 60, owner="A")
+        key = shared_state._k("lock:L")
+        fake.exp[key] = time.time() + 1                    # 快过期了 / about to expire
+        assert shared_state.try_lock("L", 60, owner="A")   # 自己续期 / own renewal
+        assert fake.exp[key] > time.time() + 50
+        assert not shared_state.try_lock("L", 60, owner="B")
+        assert fake.kv[key] == "A"
+        assert fake.expired == 1                            # B 没有续到 A 的锁上
+
+
+def test_renewal_extends_ttl_in_memory(monkeypatch):
+    real = time.time
+    assert shared_state.try_lock("R", 10, owner="A")
+    monkeypatch.setattr(time, "time", lambda: real() + 8)
+    assert shared_state.try_lock("R", 10, owner="A")       # 续期 / renew
+    monkeypatch.setattr(time, "time", lambda: real() + 15)
+    assert not shared_state.try_lock("R", 10, owner="B")   # 续过期了，还是 A 的
+
+
 # ---------- 内存后端的过期回收 / expiry reclamation ----------
 
 def test_expired_keys_are_reclaimed_without_anyone_reading_them():

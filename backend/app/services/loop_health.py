@@ -23,6 +23,7 @@ import asyncio
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 from app.services import shared_state
 
@@ -53,40 +54,101 @@ def _throttled(key: str, gap: float) -> bool:
         return False
 
 
-def beat(name: str) -> None:
-    """记一次心跳。永不抛异常：记录失败不能影响循环本身。/ Never raises."""
-    if _throttled(KEY_BEAT + name, HEARTBEAT_MIN_GAP):
-        return
+# 写记录不能卡事件循环。beat / record_error / record_crash / clear_crash 都是在事件
+# 循环线程上被调的（循环开头、日志 Handler、任务 done 回调、_start），而配了 Redis 时
+# 每次写都是一次同步往返——Redis 一慢就在事件循环上卡满 socket 超时（2 秒），所有
+# WS 推送、请求跟着停。所以在事件循环上、且后端是 Redis 时，写交给一条专用线程**发出
+# 即忘**：单线程保证先后顺序（clear_crash 之后的 record_crash 不会被反过来）；积压超过
+# _MAX_PENDING 条就丢——健康记录本来就是尽力而为，宁丢一条也不能越堆越多。
+# 不在事件循环上（线程池、脚本），或用的是进程内后端（纯内存、不阻塞）时照旧同步写。
+# Writes must not block the event loop. These are called on the loop thread (loop
+# heads, the log handler, done callbacks, _start), and with Redis each is a blocking
+# round trip that can stall for the 2s socket timeout. On the loop with Redis they are
+# handed to one dedicated thread, fire-and-forget: a single thread keeps their order,
+# and anything beyond _MAX_PENDING is dropped (health records are best-effort).
+# Off the loop, or with the in-memory backend, writes stay synchronous.
+_MAX_PENDING = 256
+_executor: ThreadPoolExecutor | None = None
+_pending = 0
+
+
+def _call(fn, *args, **kwargs) -> None:
     try:
-        shared_state.kv_set_json(KEY_BEAT + name, {"at": time.time()}, ttl=RECORD_TTL)
+        fn(*args, **kwargs)
     except Exception:
         pass
+
+
+def _offloaded(fn, *args, **kwargs) -> None:
+    global _pending
+    try:
+        _call(fn, *args, **kwargs)
+    finally:
+        with _lock:
+            _pending -= 1
+
+
+def shutdown() -> None:
+    """关停时丢掉尚未执行的健康记录写入，别让 Redis 卡住时拖慢进程退出。
+    Drop queued health writes at shutdown so a stalled Redis can't delay exit."""
+    global _executor, _pending
+    with _lock:
+        executor, _executor = _executor, None
+        _pending = 0
+    if executor is not None:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _write(fn, *args, **kwargs) -> None:
+    """执行一次记录写入；永不抛异常。在事件循环上且后端是 Redis 时发出即忘（见上）。
+    Run one record write, never raising; fire-and-forget on the loop with Redis."""
+    global _executor, _pending
+    try:
+        asyncio.get_running_loop()
+        on_loop = True
+    except RuntimeError:
+        on_loop = False
+    if not (on_loop and shared_state.enabled()):
+        _call(fn, *args, **kwargs)
+        return
+    with _lock:
+        if _pending >= _MAX_PENDING:
+            return
+        if _executor is None:
+            _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="loop-health")
+        _pending += 1
+        executor = _executor
+    try:
+        executor.submit(_offloaded, fn, *args, **kwargs)
+    except Exception:  # 解释器关停中 / interpreter shutting down
+        with _lock:
+            _pending -= 1
+
+
+def beat(name: str) -> None:
+    """记一次心跳。永不抛异常、不阻塞事件循环：记录失败不能影响循环本身。/ Never raises or blocks."""
+    if _throttled(KEY_BEAT + name, HEARTBEAT_MIN_GAP):
+        return
+    _write(shared_state.kv_set_json, KEY_BEAT + name, {"at": time.time()}, ttl=RECORD_TTL)
 
 
 def record_error(name: str, message: str) -> None:
     if _throttled(KEY_ERROR + name, ERROR_MIN_GAP):
         return
-    try:
-        shared_state.kv_set_json(
-            KEY_ERROR + name, {"at": time.time(), "message": message[:MESSAGE_MAX]}, ttl=RECORD_TTL)
-    except Exception:
-        pass
+    _write(
+        shared_state.kv_set_json,
+        KEY_ERROR + name, {"at": time.time(), "message": message[:MESSAGE_MAX]}, ttl=RECORD_TTL)
 
 
 def record_crash(name: str, message: str) -> None:
-    try:
-        shared_state.kv_set_json(
-            KEY_CRASH + name, {"at": time.time(), "message": message[:MESSAGE_MAX]}, ttl=RECORD_TTL)
-    except Exception:
-        pass
+    _write(
+        shared_state.kv_set_json,
+        KEY_CRASH + name, {"at": time.time(), "message": message[:MESSAGE_MAX]}, ttl=RECORD_TTL)
 
 
 def clear_crash(name: str) -> None:
     """循环重新启动（换主、重启）时清掉旧的崩溃记录。"""
-    try:
-        shared_state.kv_delete(KEY_CRASH + name)
-    except Exception:
-        pass
+    _write(shared_state.kv_delete, KEY_CRASH + name)
 
 
 def snapshot(names: list[str]) -> dict[str, dict]:

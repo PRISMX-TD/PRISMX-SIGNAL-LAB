@@ -136,6 +136,16 @@ class _MemoryBackend:
             self._kv.pop(key, None)
             return True
 
+    def expire_if(self, key: str, value: str, seconds: int) -> bool:
+        """值相符才续期（对应 Redis 侧的续期 Lua 脚本），在同一把锁里完成。
+        Renew only if the value matches (memory twin of the renew Lua script)."""
+        with self._lock:
+            hit = self._kv.get(key)
+            if hit is None or not self._alive(hit[1]) or hit[0] != value:
+                return False
+            self._kv[key] = (hit[0], time.time() + seconds)
+            return True
+
     def incr(self, key: str, by: int = 1) -> int:
         with self._lock:
             hit = self._kv.get(key)
@@ -354,16 +364,25 @@ def try_lock(name: str, ttl: int, owner: str = WORKER_ID) -> bool:
         r = _redis()
         if r.set(key, owner, ex=ttl, nx=True):
             return True
-        if r.get(key) == owner:
-            r.expire(key, ttl)
-            return True
-        return False
+        # 续期必须「是我的才续」一步完成（见 _RENEW_LOCK_LUA）。
+        # Renewal is an atomic compare-and-expire (see _RENEW_LOCK_LUA).
+        return bool(r.eval(_RENEW_LOCK_LUA, 1, key, owner, int(ttl)))
     if _memory.set(key, owner, ex=ttl, nx=True):
         return True
-    if _memory.get(key) == owner:
-        _memory.expire(key, ttl)
-        return True
-    return False
+    return _memory.expire_if(key, owner, ttl)
+
+
+# 续期与释放同理，「是我持有的才续」必须不可分割。分成 GET + EXPIRE 两步时，GET 之后
+# 锁恰好过期、被另一个 worker 抢走，EXPIRE 就续到了**新主**的锁上，而本 worker 还以为
+# 自己是领导者——同一时刻两个领导者。/ Like release, "renew only if I still hold it"
+# must be indivisible: with GET then EXPIRE, a handover between the two steps would
+# extend the *new* owner's lock while this worker still believes it leads.
+_RENEW_LOCK_LUA = """
+if redis.call('get', KEYS[1]) == ARGV[1] then
+    return redis.call('expire', KEYS[1], tonumber(ARGV[2]))
+end
+return 0
+"""
 
 
 # "是我持有的才删"必须是一个不可分割的动作。分成 GET + DELETE 两步时，持有者卡顿

@@ -270,3 +270,57 @@ def test_offline_monitor_reads_roster_async_and_passes_it_in(_isolate, monkeypat
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(bridge.offline_monitor_loop())
     assert seen == [({"u-online"}, {"u-watching"})]
+
+
+# --- 非领导 worker 的状态清理与过期 gateway 余额（2026-10-07）---
+# Idle-state pruning on every worker, and stale gateway balances.
+
+@pytest.fixture()
+def _clock(monkeypatch):
+    """可控的 monotonic 时钟 + 干净的新增状态。/ Controllable clock, clean new state."""
+    now = {"t": 10_000.0}
+    monkeypatch.setattr(bridge.time, "monotonic", lambda: now["t"])
+    monkeypatch.setattr(bridge, "_push_state_touched", {})
+    monkeypatch.setattr(bridge, "_gateway_balance_seen", {})
+    monkeypatch.setattr(bridge, "_push_state_pruned_at", {"at": 0.0})
+    return now
+
+
+def test_idle_push_state_is_pruned_without_the_leader_loop(_isolate, _clock):
+    """_forget_idle_users 只在领导 worker 上跑；其它 worker 靠写入时顺带按空闲时长清理，
+    条目不能只增不减。/ Non-leader workers prune idle users as they write."""
+    _push("u1", {"100"}, {"100": 500.0})
+    _clock["t"] += bridge.PUSH_STATE_IDLE_TTL + 1
+    _push("u2", {"200"}, {"200": 900.0})        # 任意一次写入触发清理
+
+    assert "u1" not in bridge._last_pushed_online
+    assert "u1" not in bridge._last_pushed_balances
+    assert "u2" in bridge._last_pushed_online
+
+
+def test_active_user_is_not_pruned(_isolate, _clock):
+    _push("u1", {"100"}, {"100": 500.0})
+    for _ in range(5):
+        _clock["t"] += bridge.PUSH_STATE_IDLE_TTL / 3
+        _push("u1", {"100"}, {"100": 500.0})
+    assert bridge._last_pushed_balances["u1"] == {"100": 500.0}
+
+
+def test_stale_gateway_balance_not_merged_into_bridge_push(_isolate, _clock):
+    """本 worker 曾是领导时写下的 gateway 余额，失去领导权后不再刷新；之后 bridge_poll
+    推送时不能再把这份旧余额带出去。/ A gateway balance this worker stopped refreshing
+    (leadership moved) must not ride along on later bridge pushes."""
+    _push_bal("u1", {"900": 300.0})
+    _push("u1", {"100"}, {"100": 500.0})
+    assert _isolate[-1][1]["data"]["balances"] == {"900": 300.0, "100": 500.0}
+
+    _clock["t"] += bridge.GATEWAY_BALANCE_STALE_SECONDS + 1
+    _push("u1", {"100"}, {"100": 510.0})
+    assert _isolate[-1][1]["data"]["balances"] == {"100": 510.0}
+
+
+def test_fresh_gateway_balance_still_merged(_isolate, _clock):
+    _push_bal("u1", {"900": 300.0})
+    _clock["t"] += bridge.GATEWAY_BALANCE_STALE_SECONDS / 2
+    _push("u1", {"100"}, {"100": 500.0})
+    assert _isolate[-1][1]["data"]["balances"] == {"900": 300.0, "100": 500.0}

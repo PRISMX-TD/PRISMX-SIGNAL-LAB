@@ -71,6 +71,72 @@ _last_pushed_online: dict[str, set[str]] = {}
 # frontend-side.
 _last_pushed_balances: dict[str, dict[str, float]] = {}
 
+# 上面两份去重状态的「最近一次被用到」时刻（monotonic），按用户记。
+# _forget_idle_users 只在领导 worker 的 offline_monitor_loop 里跑；其余 worker 只经
+# bridge_poll 写入、从不清理——条目只增不减，换主后还会拿着很久以前的旧状态。所以每个
+# worker 在写入时顺带按空闲时长清一次（PUSH_STATE_IDLE_TTL，最多每 PUSH_STATE_PRUNE_EVERY
+# 秒一趟）。被清掉的用户再出现就当首次观测，照常推一次完整状态，与 _forget_idle_users 同理。
+# Last-use time per user for the two de-dup maps. _forget_idle_users runs only on
+# the leader, so on every other worker (written via bridge_poll) the maps only grew
+# and kept stale state across leader changes. Each worker now prunes idle users as
+# it writes; a pruned user that reappears gets a full first-observation push.
+_push_state_touched: dict[str, float] = {}
+_push_state_pruned_at = {"at": 0.0}
+PUSH_STATE_IDLE_TTL = 30 * 60
+PUSH_STATE_PRUNE_EVERY = 60.0
+
+# user_id -> {login: 最近一次由 gateway 慢拍报来该余额的时刻}。gateway 余额只由领导
+# worker 写进 _last_pushed_balances；本 worker 失去领导权（或那个账号不再被轮询）后，
+# 这份余额就不再更新，可 bridge_poll 每次合并时还会把它带上推给前端——换主后推出去的
+# 就是几分钟、几小时前的旧余额。超过 GATEWAY_BALANCE_STALE_SECONDS 没被刷新的 gateway
+# 余额不再参与合并。gateway 慢拍 2 秒一拍、每拍都会报一次在看用户的全部余额。
+# user_id -> {login: when the gateway tick last reported it}. Gateway balances are
+# written only by the leader; after losing leadership they freeze, yet bridge_poll
+# kept merging them into pushes. Gateway balances not refreshed within
+# GATEWAY_BALANCE_STALE_SECONDS are left out of the merge.
+_gateway_balance_seen: dict[str, dict[str, float]] = {}
+GATEWAY_BALANCE_STALE_SECONDS = 120.0
+
+
+def _touch_push_state(user_id: str) -> None:
+    """记一次使用，并按需清理空闲用户的去重状态（每个 worker 都跑）。
+    Record a use and, at most once a minute, prune idle users (on every worker)."""
+    now = time.monotonic()
+    _push_state_touched[user_id] = now
+    if now - _push_state_pruned_at["at"] < PUSH_STATE_PRUNE_EVERY:
+        return
+    _push_state_pruned_at["at"] = now
+    for uid in set(_push_state_touched) | set(_last_pushed_online) | set(_last_pushed_balances):
+        touched = _push_state_touched.get(uid)
+        if touched is None:
+            # 没有使用记录的旧条目（升级前写入）：从现在起计时。/ start the clock now
+            _push_state_touched[uid] = now
+            continue
+        if now - touched >= PUSH_STATE_IDLE_TTL:
+            _push_state_touched.pop(uid, None)
+            _last_pushed_online.pop(uid, None)
+            _last_pushed_balances.pop(uid, None)
+            _gateway_balance_seen.pop(uid, None)
+
+
+def _drop_stale_gateway_balances(user_id: str, balances: dict[str, float] | None) -> dict[str, float]:
+    """去掉本 worker 上已过期的 gateway 余额（见 _gateway_balance_seen）。
+    Remove gateway balances this worker hasn't seen refreshed recently."""
+    if not balances:
+        return {}
+    seen = _gateway_balance_seen.get(user_id)
+    if not seen:
+        return dict(balances)
+    now = time.monotonic()
+    stale = {lg for lg, at in seen.items() if now - at > GATEWAY_BALANCE_STALE_SECONDS}
+    if not stale:
+        return dict(balances)
+    for lg in stale:
+        seen.pop(lg, None)
+    if not seen:
+        _gateway_balance_seen.pop(user_id, None)
+    return {lg: v for lg, v in balances.items() if lg not in stale}
+
 
 def _forget_idle_users(online_users: set[str], connected_users: set[str]) -> None:
     """丢弃既无在线账号、又无 WS 连接的用户的推送去重状态。
@@ -107,6 +173,8 @@ def _forget_idle_users(online_users: set[str], connected_users: set[str]) -> Non
         if uid not in online_users and uid not in connected_users:
             _last_pushed_online.pop(uid, None)
             _last_pushed_balances.pop(uid, None)
+            _push_state_touched.pop(uid, None)
+            _gateway_balance_seen.pop(uid, None)
 
 
 async def push_balances_if_changed(user_id: str, balances: dict[str, float]) -> None:
@@ -125,12 +193,17 @@ async def push_balances_if_changed(user_id: str, balances: dict[str, float]) -> 
     make bridge accounts flap every two seconds. The online set is echoed back
     unchanged; only balances are compared.
     """
+    _touch_push_state(user_id)
+    now = time.monotonic()
+    seen = _gateway_balance_seen.setdefault(user_id, {})
+    for lg in balances:
+        seen[lg] = now
     previous = _last_pushed_balances.get(user_id)
     # 合并而非替换：一个用户可能同时有 bridge 和 gateway 账号，各自只知道自己
     # 那部分余额，直接覆盖会把对方的抹掉。
     # Merge rather than replace: a user may have both bridge and gateway accounts,
     # and each side only knows its own balances.
-    merged = {**(previous or {}), **balances}
+    merged = {**_drop_stale_gateway_balances(user_id, previous), **balances}
     if previous == merged:
         return
     _last_pushed_balances[user_id] = merged
@@ -165,8 +238,11 @@ async def _push_accounts_status_if_changed(
     # 直接覆盖会把它们抹掉，前端那些账号的余额就会跳回旧值。
     # Merge rather than replace: this user's gateway balances are written by
     # push_balances_if_changed, and overwriting would wipe them.
+    _touch_push_state(user_id)
     previous_balances = _last_pushed_balances.get(user_id)
-    balances = {**(previous_balances or {}), **(balances or {})}
+    # 本 worker 上已过期的 gateway 余额不参与合并（见 _gateway_balance_seen）。
+    # Stale gateway balances on this worker are left out (see _gateway_balance_seen).
+    balances = {**_drop_stale_gateway_balances(user_id, previous_balances), **(balances or {})}
     balance_changed = previous_balances != balances
     if previous == online and not balance_changed:
         return

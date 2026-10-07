@@ -68,7 +68,7 @@ class FakeRedis:
         script runs with Redis's semantics; an unknown one raises, so adding a
         second script makes the tests speak up instead of silently passing.
         """
-        from app.services.shared_state import _RELEASE_LOCK_LUA
+        from app.services.shared_state import _RELEASE_LOCK_LUA, _RENEW_LOCK_LUA
 
         keys, argv = list(args[:numkeys]), list(args[numkeys:])
         if " ".join(script.split()) == " ".join(_RELEASE_LOCK_LUA.split()):
@@ -76,6 +76,12 @@ class FakeRedis:
             self._gc(key)
             if self.kv.get(key) == argv[0]:
                 return self.delete(key)
+            return 0
+        if " ".join(script.split()) == " ".join(_RENEW_LOCK_LUA.split()):
+            key = keys[0]
+            self._gc(key)
+            if self.kv.get(key) == argv[0]:
+                return self.expire(key, int(argv[1]))
             return 0
         raise NotImplementedError(f"FakeRedis 未实现这条 Lua 脚本 / unsupported Lua script: {script!r}")
 

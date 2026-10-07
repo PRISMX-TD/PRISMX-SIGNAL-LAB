@@ -370,3 +370,52 @@ def test_reconnect_gateway_endpoint(db_session, monkeypatch):
 
 async def _run_inline(fn, *args):
     return fn(*args)
+
+
+def test_health_writes_do_not_block_the_event_loop_with_redis(monkeypatch):
+    """配了 Redis 时，事件循环上的 beat / record_error / clear_crash / record_crash 不能
+    同步等那次往返（Redis 慢时会卡满 2 秒 socket 超时）；写照样落地，先后顺序不乱。
+    With Redis, health writes on the loop must not wait for the round trip; they
+    still land, in order."""
+    import threading
+
+    from tests.fake_redis import FakeRedis
+
+    shared_state.reset_for_tests(FakeRedis())
+    monkeypatch.setattr(shared_state, "enabled", lambda: True)
+    real_set, real_del = shared_state.kv_set_json, shared_state.kv_delete
+    loop_threads: set[int] = set()
+    write_threads: set[int] = set()
+
+    def slow_set(*a, **k):
+        write_threads.add(threading.get_ident())
+        time.sleep(0.3)
+        real_set(*a, **k)
+
+    def slow_del(*a, **k):
+        write_threads.add(threading.get_ident())
+        time.sleep(0.3)
+        real_del(*a, **k)
+
+    monkeypatch.setattr(shared_state, "kv_set_json", slow_set)
+    monkeypatch.setattr(shared_state, "kv_delete", slow_del)
+
+    async def main():
+        loop_threads.add(threading.get_ident())
+        t0 = time.monotonic()
+        loop_health.beat("boards")
+        loop_health.record_error("boards", "x")
+        loop_health.record_crash("boards", "kaput")
+        loop_health.clear_crash("boards")
+        return time.monotonic() - t0
+
+    elapsed = asyncio.run(main())
+    assert elapsed < 0.2
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and loop_health._pending:
+        time.sleep(0.05)
+    assert loop_health._pending == 0
+    assert not (write_threads & loop_threads)
+    snap = loop_health.snapshot(["boards"])["boards"]
+    assert snap["beatAt"] is not None and snap["errorMessage"] == "x"
+    assert snap["crashAt"] is None          # clear 在 record 之后执行 / order kept

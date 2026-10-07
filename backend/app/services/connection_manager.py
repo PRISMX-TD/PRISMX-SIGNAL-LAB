@@ -113,6 +113,9 @@ _SNAPSHOT_KEYS = {
 # retires the whole set.
 QUOTES_KEY = "uquotes:{user}"
 QUOTES_TTL_SECONDS = 3600
+# 本进程快照兜底的回收节奏（秒），见 ConnectionManager._maybe_prune_local。
+# How often local fallback snapshots are swept; see _maybe_prune_local.
+LOCAL_PRUNE_EVERY = 60.0
 # 参与「报价变没变」判断的字段 / fields that count toward "quote changed"
 _QUOTE_WATCHED = ("bid", "ask", "contractSize", "tickSize", "tickValue")
 
@@ -484,22 +487,109 @@ class ConnectionManager:
         # 最近一次成功读到的全站报价，Redis 抖动时建连补推退回这一份。
         # The last site-wide quotes read successfully; connect catch-up falls back to it.
         self._last_global_quotes: list = []
+        # 本进程快照的写入时刻（monotonic）：user_id -> {(kind, source): t}，报价按用户一份。
+        # 本进程这份只是 Redis 的兜底，而它以前只在用户最后一条 WS 断开时才清——只走桥接
+        # 上报、从不开页面的用户永远不清；Redis 里的键过期之后，补缺时还会把很久以前的
+        # 持仓当成当前的用上。所以兜底只采信不比 Redis TTL 更老的那份（见 _fresh_local），
+        # 写入时顺带按同样的年龄回收没有连接的用户（见 _maybe_prune_local）。
+        # Write time of each local slice: user_id -> {(kind, source): t}; quotes per
+        # user. The local copy is Redis's fallback, yet it was only released when the
+        # user's last WS left — bridge-only users never — and once the Redis keys
+        # expired, stale local positions were served as current. Fallback now only
+        # trusts slices no older than the Redis TTL, and idle users are reclaimed.
+        self._local_at: dict[str, dict[tuple[str, str], float]] = {}
+        self._quotes_at: dict[str, float] = {}
+        self._pruned_at: float = time.monotonic()
         self._lock = asyncio.Lock()
 
     # ---------- 持仓 / 挂单快照 / Positions & pending-orders snapshots ----------
     def _local(self, kind: str) -> dict[str, dict[str, list]]:
         return self._positions if kind == "positions" else self._pending_orders
 
+    def _fresh_local(self, kind: str, user_id: str) -> dict[str, list]:
+        """本进程该用户各来源的快照，只留不比 SNAPSHOT_TTL_SECONDS 更老的（与 Redis 键同寿）。
+        没有写入时刻记录的（直接塞进来的旧条目）当作新鲜。
+        This process's per-source slices no older than the Redis TTL; a slice
+        without a recorded write time counts as fresh."""
+        local = self._local(kind).get(user_id) or {}
+        if not local:
+            return {}
+        stamps = self._local_at.get(user_id) or {}
+        now = time.monotonic()
+        return {
+            src: rows for src, rows in local.items()
+            if now - stamps.get((kind, src), now) <= SNAPSHOT_TTL_SECONDS
+        }
+
+    def _stamp_local(self, kind: str, user_id: str, source: str) -> None:
+        self._local_at.setdefault(user_id, {})[(kind, source)] = time.monotonic()
+        self._maybe_prune_local()
+
+    def _local_quotes_fresh(self, user_id: str) -> bool:
+        at = self._quotes_at.get(user_id)
+        return at is None or time.monotonic() - at <= QUOTES_TTL_SECONDS
+
+    def _maybe_prune_local(self, force: bool = False) -> None:
+        """回收本进程里过期的快照与没有连接用户的去重状态（最多每 LOCAL_PRUNE_EVERY 秒一趟）。
+        Reclaim stale local slices and idle users' de-dup state, at most every
+        LOCAL_PRUNE_EVERY seconds."""
+        now = time.monotonic()
+        if not force and now - self._pruned_at < LOCAL_PRUNE_EVERY:
+            return
+        self._pruned_at = now
+        users = (
+            set(self._positions) | set(self._pending_orders) | set(self._quotes)
+            | set(self._last_positions_push) | set(self._last_pending_push)
+            | set(self._mirrored) | set(self._local_at) | set(self._quotes_at)
+        )
+        for uid in users:
+            stamps = self._local_at.get(uid) or {}
+            for kind in ("positions", "pending"):
+                slices = self._local(kind).get(uid)
+                if not slices:
+                    continue
+                for src in list(slices):
+                    at = stamps.get((kind, src))
+                    if at is None:
+                        # 没有记录的旧条目：从现在起计时 / start the clock now
+                        stamps[(kind, src)] = now
+                        self._local_at[uid] = stamps
+                    elif now - at > SNAPSHOT_TTL_SECONDS:
+                        slices.pop(src, None)
+                        stamps.pop((kind, src), None)
+                if not slices:
+                    self._local(kind).pop(uid, None)
+            if uid in self._quotes:
+                at = self._quotes_at.get(uid)
+                if at is None:
+                    self._quotes_at[uid] = now
+                elif now - at > QUOTES_TTL_SECONDS:
+                    self._quotes.pop(uid, None)
+                    self._quotes_at.pop(uid, None)
+            if uid in self._clients:
+                continue
+            # 没有连接、本进程也没有任何还新鲜的快照：去重摘要与写入记录一并丢掉。
+            # 再出现时当首次观测处理（多推一帧 / 多写一次），不会漏推。
+            # No connection and nothing fresh left: drop the digests and stamps too;
+            # a returning user is a first observation (one extra frame, never a miss).
+            if uid not in self._positions and uid not in self._pending_orders:
+                self._last_positions_push.pop(uid, None)
+                self._last_pending_push.pop(uid, None)
+                self._mirrored.pop(uid, None)
+                self._local_at.pop(uid, None)
+            if uid not in self._quotes:
+                self._quotes_at.pop(uid, None)
+
     def get_positions(self, user_id: str) -> list:
         """**本进程**收到的持仓，全部来源合并。跨 worker 的读取用 get_positions_shared。
         Positions this process received, merged across sources. For the
         cross-worker view use get_positions_shared."""
-        return _merge_sources(self._positions.get(user_id) or {})
+        return _merge_sources(self._fresh_local("positions", user_id))
 
     def get_pending_orders(self, user_id: str) -> list:
         """**本进程**收到的挂单，全部来源合并。跨 worker 的读取用 get_pending_orders_shared_async。
         Pending orders this process received, merged across sources."""
-        return _merge_sources(self._pending_orders.get(user_id) or {})
+        return _merge_sources(self._fresh_local("pending", user_id))
 
     def _shared_by_source(
         self, kind: str, user_id: str, skip: str | None = None
@@ -513,7 +603,7 @@ class ConnectionManager:
         (synchronous; blocks). Without Redis it is just the local copy. `skip`
         names a source the caller already holds fresh, so it isn't re-read.
         """
-        local = dict(self._local(kind).get(user_id) or {})
+        local = self._fresh_local(kind, user_id)
         if not shared_state.enabled():
             return local
         shared: dict[str, list] = {}
@@ -592,8 +682,9 @@ class ConnectionManager:
         """
         local = self._local(kind)
         local.setdefault(user_id, {})[source] = rows
+        self._stamp_local(kind, user_id, source)
         if not shared_state.enabled():
-            return _merge_sources(local[user_id])
+            return _merge_sources(self._fresh_local(kind, user_id))
         own_text = json.dumps(rows, ensure_ascii=False, default=str)
         digest = hashlib.blake2b(own_text.encode(), digest_size=16).digest()
         mirrored = self._mirrored.setdefault(user_id, {})
@@ -607,7 +698,7 @@ class ConnectionManager:
         except Exception as e:
             logger.warning("写/读共享快照失败，退回本进程快照 / shared %s mirror failed, using local: %s", kind, e)
             mirrored.pop((kind, source), None)
-            return _merge_sources(local[user_id])
+            return _merge_sources(self._fresh_local(kind, user_id))
         mirrored[(kind, source)] = digest
         # 与 _shared_by_source 同一套规则：其它来源以 Redis 为准，Redis 没有的用本进程那份补，
         # 最后本来源覆盖成刚收到的 rows。
@@ -619,7 +710,7 @@ class ConnectionManager:
             decoded = _decode_rows(raw)
             if decoded is not None:
                 by_source[other] = decoded
-        for src, src_rows in dict(local.get(user_id) or {}).items():
+        for src, src_rows in self._fresh_local(kind, user_id).items():
             by_source.setdefault(src, src_rows)
         by_source[source] = rows
         return _merge_sources(by_source)
@@ -750,6 +841,9 @@ class ConnectionManager:
             return changed
 
     def _update_local_quotes(self, user_id: str, quotes: list) -> list:
+        if quotes:
+            self._quotes_at[user_id] = time.monotonic()
+            self._maybe_prune_local()
         prev = self._quotes.setdefault(user_id, {})
         changed: list = []
         for q in quotes:
@@ -805,6 +899,8 @@ class ConnectionManager:
             except Exception as e:
                 logger.warning("读取共享报价失败，退回本进程快照 / shared quotes read failed: %s", e)
         out: list = []
+        if not self._local_quotes_fresh(user_id):
+            return out
         for by_symbol in self._quotes.get(user_id, {}).values():
             out.extend(by_symbol.values())
         return out
@@ -862,6 +958,8 @@ class ConnectionManager:
 
     def _local_account_quotes(self, user_id: str) -> list:
         out: list = []
+        if not self._local_quotes_fresh(user_id):
+            return out
         for by_symbol in self._quotes.get(user_id, {}).values():
             out.extend(by_symbol.values())
         return out
@@ -901,7 +999,7 @@ class ConnectionManager:
                     decoded = _decode_rows(results[idx * n + j])
                     if decoded is not None:
                         by_source[src] = decoded
-                for src, rows in dict(self._local(kind).get(user_id) or {}).items():
+                for src, rows in self._fresh_local(kind, user_id).items():
                     by_source.setdefault(src, rows)
                 out[name] = _merge_sources(by_source)
             out["quotes"] = _decode_account_quotes(results[2 * n])
@@ -1022,6 +1120,8 @@ class ConnectionManager:
                     self._positions.pop(user_id, None)
                     self._pending_orders.pop(user_id, None)
                     self._quotes.pop(user_id, None)
+                    self._quotes_at.pop(user_id, None)
+                    self._local_at.pop(user_id, None)
         # 最后一条连接走了：立刻把「本 worker|该用户」从在线名单摘掉（放锁外、失败只记日志），
         # 名单即时准确——以前要等上一次续期起 60~90 秒才掉，网关循环这期间继续为已经走掉的人去券商
         # 拉持仓。

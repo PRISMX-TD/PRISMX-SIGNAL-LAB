@@ -269,6 +269,8 @@ async def lifespan(app: FastAPI):
     
     # 关闭 gateway 客户端连接池
     await close_client()
+    # 丢掉排队中的健康记录写入，Redis 卡住时不拖慢退出 / drop queued health writes
+    loop_health.shutdown()
 
 
 app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)

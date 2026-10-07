@@ -891,6 +891,29 @@ GATEWAY_DEALS_CATCHUP_SECONDS = 7 * 24 * 60 * 60
 # columns, the first scan of the process looks back a year instead of a week.
 GATEWAY_DEALS_DEEP_BACKFILL_SECONDS = 365 * 24 * 60 * 60
 
+# 常规扫描的回看窗口按「距上次成功扫描多久」放宽时额外留的余量（秒）。
+# 15 分钟的固定窗口只在扫描连续不断时才够：用户离线、没人在线时事件泵不拉、事件因队列
+# 溢出被丢、或读取连续失败，下一次扫描离上一次成功可能已过去几小时，固定窗口会把这段
+# 时间里的平仓整段漏掉——而离线资金兜底照样把余额刷成新值，榜单对账就把这笔盈亏记成
+# 入金 / 出金。所以非首扫的窗口取 max(15 分钟, 距上次成功 + 余量)，上限为 7 天补扫窗口。
+# Extra margin when the regular window widens to cover the gap since the last
+# successful scan. A fixed 15-min window only holds while scans are continuous; after
+# an offline stretch, dropped events or failed reads, the closes in between were lost
+# while the offline funds sweep still moved the balance — booked as a cash flow. The
+# non-first window is max(15 min, gap + margin), capped at the 7-day catch-up window.
+GATEWAY_DEALS_GAP_MARGIN = 120
+
+# 宽窗口（超过 15 分钟常规窗口）重扫的最小间隔。读取失败时 last_deals_ok 不前进，窗口会
+# 一直按「距上次成功」放宽；若不限频，持续出错的账号会每 3 秒打一次最长 7 天的读取，
+# 网关回 read_busy 卸载负载时反而收到更多更重的请求。没扫到的那段不会丢：成功前
+# last_deals_ok 不动，下一次宽扫照样从那里接上。
+# Minimum spacing between wide (> the 15-min regular window) rescans. On failed reads
+# last_deals_ok doesn't advance, so the window keeps widening; unthrottled, a failing
+# account would fire up-to-7-day reads every 3 s, and a gateway shedding load with
+# read_busy would get more, heavier reads. Nothing is lost by waiting: last_deals_ok
+# stays put until a success, so the next wide scan still starts from there.
+GATEWAY_WIDE_SCAN_MIN_INTERVAL = 60.0
+
 
 def _needs_deep_backfill(user_id: str, login: str) -> bool:
     """该账号是否还有缺明细列的平仓腿，需要一次回看一年的深扫。
@@ -1510,6 +1533,25 @@ async def gateway_positions_loop() -> None:
                 # dispatcher is fine here.
                 _notify_revoked(user_id, login)
 
+    def _stored_balance(user_id: str, login: str) -> float | None:
+        """库里该账号的当前余额（离线兜底判断余额是否变化用）。/ Persisted balance."""
+        db = SessionLocal()
+        try:
+            row = (
+                db.query(MT5Account.balance)
+                .filter(
+                    MT5Account.user_id == user_id,
+                    MT5Account.login == login,
+                    MT5Account.source == "gateway",
+                )
+                .first()
+            )
+            if row is None or row[0] is None:
+                return None
+            return float(row[0])
+        finally:
+            db.close()
+
     def _save_closed_trades(user_id: str, login: str, deals: list) -> int:
         """把平仓成交写进 ClosedTrade，与 POST /bridge/trade-history 同一套语义。
 
@@ -1592,9 +1634,24 @@ async def gateway_positions_loop() -> None:
             db.close()
         return inserted
 
-    # login -> 上次刷新/扫描的 monotonic 时间戳
-    last_account_refresh: dict[str, float] = {}
-    last_deals_scan: dict[str, float] = {}
+    # (user_id, login) -> 上次刷新/扫描的 monotonic 时间戳。
+    # 必须按 (用户, 账号) 计，不能只按 login：同一个 MT5 账号可以绑在多个用户名下，
+    # 资金写进各自的 mt5_accounts 行、平仓按 user_id 落库。只按 login 计时，A 刚扫过，
+    # B 这一拍就被节流 / 在飞判断挡掉，B 的平仓明细与余额永远不更新。
+    # (user_id, login) -> monotonic stamp. Keyed per user, not per login: one MT5
+    # account can be bound to several users, each with its own mt5_accounts row and
+    # ClosedTrade rows. Login-only keys let A's scan throttle B's forever.
+    last_account_refresh: dict[tuple[str, str], float] = {}
+    last_deals_scan: dict[tuple[str, str], float] = {}
+    # (user_id, login) -> 上次**成功**扫描的窗口终点（墙钟秒）。决定下一次常规扫描要回看
+    # 多久，见 GATEWAY_DEALS_GAP_MARGIN。没有记录 = 从未成功过，按 7 天补扫。
+    # (user_id, login) -> wall-clock time the last *successful* scan covered up to;
+    # sizes the next regular window (see GATEWAY_DEALS_GAP_MARGIN). Missing = never
+    # succeeded, so the 7-day catch-up applies.
+    last_deals_ok: dict[tuple[str, str], float] = {}
+    # (user_id, login) -> 上次发起宽窗口重扫的 monotonic 时刻，见 GATEWAY_WIDE_SCAN_MIN_INTERVAL。
+    # (user_id, login) -> monotonic time of the last wide rescan attempt.
+    last_wide_scan: dict[tuple[str, str], float] = {}
     # 挂单扫描按 **user_id** 计时，不是按 login：PENDING_ORDERS 是整表替换，
     # 一帧必须包含该用户全部 gateway 账号的挂单。按 login 各自计时的话，某一拍
     # 只轮到其中一个账号，推出去的就是残缺快照，其它账号的挂单会闪掉。
@@ -1608,8 +1665,8 @@ async def gateway_positions_loop() -> None:
     # every tick, so balances must persist across ticks; using only this tick's
     # refreshed values would make un-refreshed accounts drop out.
     known_balances: dict[str, float] = {}
-    # 本进程内已做过首次补扫的账号 / logins whose catch-up scan already ran
-    scanned_once: set[str] = set()
+    # 本进程内已做过首次补扫的 (user_id, login) / pairs whose catch-up scan already ran
+    scanned_once: set[tuple[str, str]] = set()
 
     # 已确认空仓的账号。只有真的轮询到空列表才会加进来，收到 ADD 事件就移除。
     # 慢拍靠它跳过没有持仓的账号——大多数账号大多数时候都是空仓的，这能省掉
@@ -1635,7 +1692,9 @@ async def gateway_positions_loop() -> None:
     # 多打一次 Manager API 往返。
     # Logins with a closed-trade scan in flight, so the 0.25s pump and the 2s tick
     # don't scan the same account twice.
-    deals_in_flight: set[str] = set()
+    # 按 (user_id, login) 记：同一 login 绑给多个用户时，各自的扫描互不挡。
+    # Keyed by (user_id, login) so users sharing a login never block each other.
+    deals_in_flight: set[tuple[str, str]] = set()
 
     # 慢拍开头批量预取的结果：kind -> {login: (取回时刻, 值)}。见 GATEWAY_BATCH_ENABLED。
     # 取用即删；超过 GATEWAY_PREFETCH_MAX_AGE 的当作没有。
@@ -1712,6 +1771,27 @@ async def gateway_positions_loop() -> None:
                     acc = await gw_get_account(int(lg))
                 if acc is None:
                     continue
+                # 余额变了就先把这段时间的平仓扫进库，再写余额：余额变化几乎总是平仓
+                # 造成的，而离线时事件泵可能没拉到 / 事件被丢 / 成交订阅不可用。只刷余额
+                # 不补平仓，榜单对账就把这笔盈亏记成入金 / 出金。先扫后写，对账永远不会
+                # 看到「新余额 + 缺平仓」的中间态。扫描窗口按距上次成功扫描放宽（见
+                # GATEWAY_DEALS_GAP_MARGIN）。
+                # Balance moved: scan the closes first, then write the balance. A move
+                # is almost always a close, and offline the pump may not have drained it,
+                # the event may be dropped, or the deal subscription may be down. Writing
+                # the balance alone made the reconcile book the P/L as a cash flow;
+                # scanning first means it never sees new balance without the close.
+                # 比较基准取**该用户自己那一行**的余额，不用按 login 记的 known_balances：
+                # 同一账号绑给多个用户时，同一轮里先处理的用户已把 known_balances 刷成新值，
+                # 后面的用户就会被判成「余额没变」而跳过补扫平仓。
+                # Compare against this user's own row, not the login-keyed known_balances:
+                # with one login bound to several users, the first user handled this round
+                # already refreshed known_balances, and the next would be judged "unchanged"
+                # and skip the close scan.
+                prev = await run_in_threadpool(_stored_balance, uid, lg)
+                new_bal = getattr(acc, "balance", None)
+                if prev is None or new_bal is None or abs(float(new_bal) - float(prev)) > 1e-6:
+                    await _scan_deals(uid, lg)
                 bal = await run_in_threadpool(_save_account_funds, uid, lg, acc)
                 if bal is not None:
                     known_balances[lg] = bal
@@ -1771,6 +1851,17 @@ async def gateway_positions_loop() -> None:
         except Exception:
             logger.exception("gateway auto_manage task failed (user=%s)", user_id)
 
+    def _deals_lookback(key: tuple[str, str], first_scan: bool, now_wall: float) -> int:
+        """本次扫描回看多少秒（深回扫另判）。首扫或从未成功过 → 7 天补扫；否则取
+        max(15 分钟, 距上次成功 + 余量)，上限 7 天。见 GATEWAY_DEALS_GAP_MARGIN。
+        Seconds to look back (deep backfill decided separately): 7-day catch-up on the
+        first scan or with no prior success, else max(15 min, gap + margin) capped at 7 days."""
+        last_ok = last_deals_ok.get(key)
+        if first_scan or last_ok is None:
+            return GATEWAY_DEALS_CATCHUP_SECONDS
+        gap = int(now_wall - last_ok) + GATEWAY_DEALS_GAP_MARGIN
+        return min(GATEWAY_DEALS_CATCHUP_SECONDS, max(GATEWAY_DEALS_LOOKBACK_SECONDS, gap))
+
     async def _scan_deals(user_id: str, login: str, use_prefetch: bool = False) -> None:
         """拉取并入库一个账号的平仓明细。
 
@@ -1790,13 +1881,24 @@ async def gateway_positions_loop() -> None:
         unique constraint dedupes) but a wasted round trip, and cutting round trips
         is half the point of this change.
         """
-        if login in deals_in_flight:
+        key = (user_id, login)
+        if key in deals_in_flight:
             return
-        deals_in_flight.add(login)
+        deals_in_flight.add(key)
         try:
-            last_deals_scan[login] = time.monotonic()
-            first_scan = login not in scanned_once
-            scanned_once.add(login)
+            last_deals_scan[key] = time.monotonic()
+            first_scan = key not in scanned_once
+            scanned_once.add(key)
+            # 本次窗口的终点（墙钟）。成功才记进 last_deals_ok，下一次从这里接着回看。
+            # Wall-clock end of this window; recorded in last_deals_ok only on success.
+            started = time.time()
+            lookback = _deals_lookback(key, first_scan, started)
+            if not first_scan and lookback > GATEWAY_DEALS_LOOKBACK_SECONDS:
+                now_mono = time.monotonic()
+                prev_wide = last_wide_scan.get(key)
+                if prev_wide is not None and now_mono - prev_wide < GATEWAY_WIDE_SCAN_MIN_INTERVAL:
+                    return
+                last_wide_scan[key] = now_mono
             # to 往后留一天余量：MT5 服务器时区常领先 UTC，按
             # 「现在」截断会把刚成交的记录切掉。
             # Pad `to` by a day: MT5 server time often runs ahead
@@ -1810,11 +1912,19 @@ async def gateway_positions_loop() -> None:
             # 事件触发的扫描要的是刚发生的那一笔，不能吃几秒前的预取结果。
             # Only the timed fallback scan of a non-first scan uses the tick's batch result;
             # event-triggered scans want the deal that just happened, not a seconds-old fetch.
-            pre_deals = _take_prefetch("deals", login) if (use_prefetch and not first_scan) else None
+            # 预取用的是 15 分钟常规窗口；需要更宽的窗口（离上次成功扫描太久）就不能吃它。
+            # The prefetch used the 15-min window; a wider gap must not consume it.
+            pre_deals = (
+                _take_prefetch("deals", login)
+                if (use_prefetch and not first_scan and lookback <= GATEWAY_DEALS_LOOKBACK_SECONDS)
+                else None
+            )
             if pre_deals is not None:
                 deals, derr = pre_deals
+                # 预取是这一拍开头取的，窗口终点往前让出它的最大年龄。
+                # The prefetch ran at the start of the tick; back the end off by its max age.
+                started -= GATEWAY_PREFETCH_MAX_AGE
             else:
-                lookback = GATEWAY_DEALS_CATCHUP_SECONDS if first_scan else GATEWAY_DEALS_LOOKBACK_SECONDS
                 if first_scan and await run_in_threadpool(_needs_deep_backfill, user_id, login):
                     lookback = GATEWAY_DEALS_DEEP_BACKFILL_SECONDS
                     logger.info("Gateway 平仓明细一次性回扫近一年补齐 MT5 字段 login=%s", login)
@@ -1844,7 +1954,7 @@ async def gateway_positions_loop() -> None:
                     try:
                         acc_rsp = await gw_get_account(int(login))
                         if acc_rsp is not None:
-                            last_account_refresh[login] = time.monotonic()
+                            last_account_refresh[key] = time.monotonic()
                             bal = await run_in_threadpool(
                                 _save_account_funds, user_id, login, acc_rsp
                             )
@@ -1865,10 +1975,14 @@ async def gateway_positions_loop() -> None:
                         "Gateway 成交 %d 条但无新增平仓明细 login=%s"
                         "（已去重或归属不匹配）", len(deals), login,
                     )
+            # 读取成功且入库没抛：这段窗口已覆盖，下一次从这里接着回看。
+            # Read succeeded and the save didn't raise: the window is covered.
+            if not derr:
+                last_deals_ok[key] = max(last_deals_ok.get(key, 0.0), started)
         except Exception:
             logger.exception("gateway closed-trade scan failed (login=%s)", login)
         finally:
-            deals_in_flight.discard(login)
+            deals_in_flight.discard(key)
 
     async def _push_user_snapshot(user_id: str, logins: list[str]) -> None:
         """读该用户全部 gateway 账号的持仓并推一次完整快照。
@@ -1933,27 +2047,37 @@ async def gateway_positions_loop() -> None:
             prefetch[kind].clear()
 
         logins: list[str] = []
-        for _uid, lgs in pairs:
+        keys: list[tuple[str, str]] = []
+        for uid, lgs in pairs:
             for lg in lgs:
+                keys.append((uid, lg))
                 if lg not in logins:
                     logins.append(lg)
 
-        pos_logins = [lg for lg in logins if not _skips_flat(lg, now)]
-        acc_logins = [
-            lg for lg in logins
-            if now - last_account_refresh.get(lg, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL
-        ]
         scan_interval = (
             GATEWAY_DEALS_SCAN_INTERVAL_SUBSCRIBED
             if deal_subscription_state["alive"]
             else GATEWAY_DEALS_SCAN_INTERVAL
         )
-        deal_logins = [
-            lg for lg in logins
-            if lg in scanned_once
-            and lg not in deals_in_flight
-            and now - last_deals_scan.get(lg, 0.0) >= scan_interval
-        ]
+        wall = time.time()
+        pos_logins = [lg for lg in logins if not _skips_flat(lg, now)]
+        # 节流按 (用户, 账号) 计；同一 login 只要有一个绑定用户到点就预取一次。
+        # Throttles are per (user, login); a login is prefetched if any bound user is due.
+        acc_set: set[str] = set()
+        deal_set: set[str] = set()
+        for key in keys:
+            lg = key[1]
+            if now - last_account_refresh.get(key, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
+                acc_set.add(lg)
+            if (
+                key in scanned_once
+                and key not in deals_in_flight
+                and now - last_deals_scan.get(key, 0.0) >= scan_interval
+                and _deals_lookback(key, False, wall) <= GATEWAY_DEALS_LOOKBACK_SECONDS
+            ):
+                deal_set.add(lg)
+        acc_logins = [lg for lg in logins if lg in acc_set]
+        deal_logins = [lg for lg in logins if lg in deal_set]
 
         async def _safe(coro):
             try:
@@ -2031,8 +2155,8 @@ async def gateway_positions_loop() -> None:
             failed = False
             for login in logins:
                 # --- 账号资金刷新（低频）---
-                if now - last_account_refresh.get(login, 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
-                    last_account_refresh[login] = now
+                if now - last_account_refresh.get((user_id, login), 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
+                    last_account_refresh[(user_id, login)] = now
                     try:
                         acc_rsp = _take_prefetch("acc", login)
                         if acc_rsp is None:
@@ -2060,7 +2184,7 @@ async def gateway_positions_loop() -> None:
                     if deal_subscription_state["alive"]
                     else GATEWAY_DEALS_SCAN_INTERVAL
                 )
-                if now - last_deals_scan.get(login, 0.0) >= scan_interval:
+                if now - last_deals_scan.get((user_id, login), 0.0) >= scan_interval:
                     await _scan_deals(user_id, login, use_prefetch=True)
 
                 # 已确认空仓的账号跳过：没有持仓就没有浮盈要刷，这一次 MT5 往返
@@ -2225,19 +2349,28 @@ async def gateway_positions_loop() -> None:
                 # gateway queue (oldest dropped when full), which is harmless:
                 # they're just triggers to re-read positions, and the snapshot
                 # pushed on reconnect is complete regardless.
+                #
+                # 但成交队列照拉：平仓明细不管用户在不在线都要落库（见下面的成交事件
+                # 处理），而离线资金兜底照样每 5 分钟刷余额。以前没人在线时两个队列都不拉，
+                # 积压的成交事件要等有人连上才处理，那时常规窗口只回看 15 分钟、队列满了
+                # 还丢最老的——离线期间的平仓漏掉，余额却已刷新，对账就记成入金 / 出金。
+                # The deal queue is still drained: closed trades are persisted whether
+                # or not anyone is online, while the offline funds sweep keeps moving
+                # balances. Skipping it left offline closes to a 15-min window (or a
+                # dropped event) once someone reconnected — booked as cash flows.
                 if not await manager.connected_user_ids_async():
-                    await asyncio.sleep(GATEWAY_EVENT_POLL_INTERVAL)
-                    continue
-
-                # 两个队列并发取：两次 GET 互不依赖（各自吞掉自己的异常、返回空），
-                # 结果都拿到之后才开始处理，处理顺序（先持仓事件、后成交）与串行时
-                # 完全相同——并发的只是两次网络往返，每拍省下一个 RTT。
-                # Drain both queues concurrently: the two GETs are independent (each
-                # swallows its own errors) and nothing is processed until both are
-                # back, so handling order is exactly as before — only the two round
-                # trips overlap, saving one RTT per tick.
-                (events, subscribed), (deal_logins, deal_subscribed) = await asyncio.gather(
-                    drain_position_events(), drain_deal_events())
+                    events, subscribed = [], subscription_state["alive"]
+                    deal_logins, deal_subscribed = await drain_deal_events()
+                else:
+                    # 两个队列并发取：两次 GET 互不依赖（各自吞掉自己的异常、返回空），
+                    # 结果都拿到之后才开始处理，处理顺序（先持仓事件、后成交）与串行时
+                    # 完全相同——并发的只是两次网络往返，每拍省下一个 RTT。
+                    # Drain both queues concurrently: the two GETs are independent (each
+                    # swallows its own errors) and nothing is processed until both are
+                    # back, so handling order is exactly as before — only the two round
+                    # trips overlap, saving one RTT per tick.
+                    (events, subscribed), (deal_logins, deal_subscribed) = await asyncio.gather(
+                        drain_position_events(), drain_deal_events())
 
                 if deal_subscribed != deal_subscription_state["alive"]:
                     deal_subscription_state["alive"] = deal_subscribed

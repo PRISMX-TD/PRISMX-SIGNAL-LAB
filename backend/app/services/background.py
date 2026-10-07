@@ -89,6 +89,8 @@ class BackgroundLoops:
 
     # ---- 直接起 / plain start（单 worker）----
     def _start(self, name: str) -> None:
+        # 在事件循环上调用：clear_crash 配 Redis 时发出即忘，不在这里等那次往返
+        # （见 loop_health._write）。/ Fire-and-forget on the loop with Redis.
         loop_health.clear_crash(name)
         task = asyncio.create_task(self._factories[name](), name=f"{loop_health.TASK_PREFIX}{name}")
         task.add_done_callback(lambda t, n=name: _note_exit(n, t))

@@ -219,3 +219,81 @@ def test_broadcast_does_not_serialise_users(monkeypatch):
 def test_the_timeout_is_short_enough_to_matter():
     """超时必须短于持仓推送的节拍（1.5~2 秒），否则慢连接仍会跨拍堆积。"""
     assert 0 < SEND_TIMEOUT_SECONDS <= 2
+
+
+# ---------- 本进程兜底快照的过期与回收（2026-10-07）----------
+# Local fallback snapshots: age limit and reclamation.
+
+def _later(monkeypatch, seconds: float) -> None:
+    """把 monotonic 往后拨 seconds 秒（保持递增，事件循环照常）。"""
+    import time as _time
+
+    import app.services.connection_manager as cm
+    real = _time.monotonic
+    monkeypatch.setattr(cm.time, "monotonic", lambda: real() + seconds)
+
+
+def test_bridge_only_user_local_snapshot_expires_and_is_released(monkeypatch):
+    """只走桥接上报、从不开页面的用户没有 WS 断开这一步，本进程的快照以前永远不清；
+    超过 Redis 键的寿命后也不能再当成当前持仓用。/ A bridge-only user never disconnects,
+    so the local copy was never released, and outlived the Redis keys it backs up."""
+    import app.services.connection_manager as cm
+    from app.services import shared_state
+
+    monkeypatch.setattr(shared_state, "enabled", lambda: False)
+    mgr = ConnectionManager()
+    asyncio.run(mgr.push_positions("u1", [{"login": "100", "profit": 1.0}]))
+    mgr.update_quotes("u1", [{"symbol": "XAUUSD", "login": "100", "bid": 1.0, "ask": 1.1}])
+    assert mgr.get_positions("u1") and mgr.get_quotes("u1")
+
+    _later(monkeypatch, cm.SNAPSHOT_TTL_SECONDS + 1)
+    assert mgr.get_positions("u1") == []           # 过期的不再当成当前持仓
+    assert mgr.get_positions_shared("u1") == []
+    mgr._maybe_prune_local(force=True)
+    assert mgr._positions == {} and mgr._last_positions_push == {}
+    assert mgr._quotes                              # 报价寿命更长（QUOTES_TTL_SECONDS）
+
+    _later(monkeypatch, cm.QUOTES_TTL_SECONDS + 1)
+    assert mgr.get_quotes("u1") == []
+    mgr._maybe_prune_local(force=True)
+    assert mgr._quotes == {} and mgr._local_at == {} and mgr._quotes_at == {}
+
+
+def test_stale_local_slice_does_not_fill_a_redis_gap(monkeypatch):
+    """Redis 里该来源的键已过期：本进程那份同样过期，就不能拿来补缺。
+    Once the Redis key has expired, an equally old local slice must not fill the gap."""
+    import app.services.connection_manager as cm
+    from app.core.config import settings
+    from app.services import shared_state
+    from tests.fake_redis import FakeRedis
+
+    monkeypatch.setattr(settings, "REDIS_URL", "redis://fake")
+    shared_state.reset_for_tests(FakeRedis())
+    cm._install_async_redis(None)
+    try:
+        mgr = ConnectionManager()
+        mgr._positions["u1"] = {"gateway": [{"login": "1", "ticket": 1}]}
+        mgr._local_at["u1"] = {("positions", "gateway"): 0.0}
+        _later(monkeypatch, cm.SNAPSHOT_TTL_SECONDS + 1)
+        assert mgr.get_positions_shared("u1") == []
+        snap = asyncio.run(mgr.connect_snapshot_async("u1"))
+        assert snap["positions"] == []
+    finally:
+        shared_state.reset_for_tests()
+
+
+def test_connected_user_keeps_fresh_state_through_prune(monkeypatch):
+    from app.services import shared_state
+
+    monkeypatch.setattr(shared_state, "enabled", lambda: False)
+
+    async def scenario():
+        mgr = ConnectionManager()
+        ws = FakeWS()
+        await mgr.register_client("u1", ws)
+        await mgr.push_positions("u1", [{"login": "100", "profit": 1.0}])
+        mgr._maybe_prune_local(force=True)
+        return mgr
+
+    mgr = asyncio.run(scenario())
+    assert mgr.get_positions("u1") and "u1" in mgr._last_positions_push

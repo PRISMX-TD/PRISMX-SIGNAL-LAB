@@ -13,6 +13,7 @@ routers/bridge.py, stored on User.bridge_version); this module only handles
 check_latest_release() so we don't hit the GitHub API on every request.
 """
 import logging
+import threading
 import time
 
 import requests
@@ -30,8 +31,19 @@ BRIDGE_ASSET_FILENAME = "PRISMX-Bridge-Setup.exe"
 _CACHE_TTL_SECONDS = 600
 _FETCH_TIMEOUT_SECONDS = 6
 
+# 抓取失败后的退避（秒）。以前失败不记时间：GitHub 不通（或限流）期间每个请求都
+# 再打一次、每次最多等 6 秒并占一条线程池线程。失败后这段时间内直接返回旧缓存。
+# Backoff after a failed fetch. Failures used to leave no timestamp, so while
+# GitHub was down or rate-limiting every request retried — up to 6s and a thread
+# each. Within this window the previous cache is returned as-is.
+_FAILURE_BACKOFF_SECONDS = 120
+
 _cache: dict | None = None
 _cached_at: float = 0.0
+_failed_at: float = 0.0
+# 单飞：同一时刻只有一个线程在抓，其余直接拿旧缓存，不排队等。
+# Single-flight: one thread fetches; the rest return the old cache without waiting.
+_fetch_lock = threading.Lock()
 
 
 def _fetch_latest() -> dict | None:
@@ -64,14 +76,27 @@ def get_latest(force: bool = False) -> dict | None:
     cache is stale (or force=True). On fetch failure, returns whatever was
     last cached successfully (possibly None) — never raises.
     """
-    global _cache, _cached_at
-    if not force and _cache is not None and time.time() - _cached_at < _CACHE_TTL_SECONDS:
+    global _cache, _cached_at, _failed_at
+    now = time.time()
+    if not force:
+        if _cache is not None and now - _cached_at < _CACHE_TTL_SECONDS:
+            return _cache
+        if now - _failed_at < _FAILURE_BACKOFF_SECONDS:
+            return _cache
+    if not _fetch_lock.acquire(blocking=False):
+        # 别的线程正在抓：不叠第二次请求、也不等它。/ another thread is fetching
         return _cache
     try:
         fresh = _fetch_latest()
         if fresh is not None:
             _cache = fresh
             _cached_at = time.time()
+            _failed_at = 0.0
+        else:
+            _failed_at = time.time()
     except Exception as e:  # noqa: BLE001 — GitHub 抓取失败是预期路径，保留旧缓存即可
+        _failed_at = time.time()
         logger.warning("bridge latest-version fetch failed: %s", e)
+    finally:
+        _fetch_lock.release()
     return _cache

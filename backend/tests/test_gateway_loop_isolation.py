@@ -239,6 +239,7 @@ def test_offline_user_close_refreshes_balance(harness, monkeypatch):
         return SimpleNamespace(balance=7000.0, equity=7000.0, margin=0.0, leverage=100,
                                name="", group="", last_pass_change=0)
 
+    _serialize_sessions(monkeypatch)
     monkeypatch.setattr(gc, "drain_deal_events", deal_drain)
     monkeypatch.setattr(manager, "connected_user_ids_async", only_fast_connected)
     monkeypatch.setattr(gw, "gw_get_account", account)
@@ -285,3 +286,218 @@ def test_offline_user_balance_swept_without_any_close(harness, monkeypatch):
         assert {r.balance for r in rows} == {6447.41}
     finally:
         db.close()
+
+
+# ---------------------------------------------------------------------------
+# 同一 MT5 账号绑给多个用户 / 离线期间的平仓（2026-10-07）
+# Shared logins and closes that happen while offline.
+# ---------------------------------------------------------------------------
+
+SHARED_USER = "u-shared"
+
+
+def _acc(balance: float):
+    from types import SimpleNamespace
+    return SimpleNamespace(balance=balance, equity=balance, margin=0.0, leverage=100,
+                           name="", group="", last_pass_change=0)
+
+
+def _serialize_sessions(monkeypatch) -> None:
+    """内存 SQLite 的 StaticPool 只有一条连接，多个工作线程并发开会话会互相干扰（一边提交
+    另一边读不到行）。会写库的用例把会话串行化：开会话时拿锁、关会话时放。
+    The StaticPool shares one connection, so concurrent thread sessions trample each
+    other. Tests that write serialize sessions: lock on open, release on close."""
+    lock = threading.RLock()
+    factory = gw.SessionLocal
+
+    def opener():
+        lock.acquire()
+        db = factory()
+        real_close = db.close
+
+        def close():
+            try:
+                real_close()
+            finally:
+                lock.release()
+
+        db.close = close
+        return db
+
+    monkeypatch.setattr(gw, "SessionLocal", opener)
+
+
+def _stub_close_path(monkeypatch, upserts: list, read_balance: bool = False) -> None:
+    """成交读回一条、归属判为一条腿，upsert_leg 记下 (user_id, login, 当时库里的余额)。
+    只在单线程顺序执行的场景读余额：内存 SQLite 的 StaticPool 是一条连接，多个工作线程
+    并发开会话时互相干扰。/ The balance is read only where writes are sequential: the
+    StaticPool shares one connection, and concurrent thread sessions interfere."""
+    from types import SimpleNamespace
+
+    async def deals(login, from_unix, to_unix, timeout=None):
+        return [SimpleNamespace(login=int(login))], ""
+
+    def upsert(db, user_id, login, leg, verified):
+        bal = None
+        if read_balance:
+            row = db.query(MT5Account).filter(
+                MT5Account.user_id == user_id, MT5Account.login == login).one()
+            bal = row.balance
+        upserts.append((user_id, login, bal))
+        return "inserted"
+
+    monkeypatch.setattr(gw, "gw_get_deals", deals)
+    monkeypatch.setattr(gw, "observe_server_offset", lambda *a, **k: None)
+    monkeypatch.setattr(gw, "build_closed_trade_legs", lambda *a, **k: [{"leg": 1}])
+    monkeypatch.setattr(gw, "upsert_leg", upsert)
+
+
+def test_shared_login_scans_and_refreshes_every_bound_user(harness, monkeypatch):
+    """同一个 login 绑在两个用户名下：两人的平仓明细与余额都要更新。以前在飞 / 节流 /
+    首扫标记只按 login 记，A 扫过 B 就被挡掉，B 的 ClosedTrade 与余额永远不动。
+    One login bound to two users: both get close rows and a fresh balance."""
+    db = gw.SessionLocal()
+    db.add(MT5Account(user_id=SHARED_USER, login=SLOW_LOGIN, server="", source="gateway"))
+    db.commit()
+    db.close()
+
+    async def connected():
+        return [SLOW_USER, FAST_USER, SHARED_USER]
+
+    async def push_positions(user_id, data, source="gateway"):
+        return None
+
+    async def account(login, timeout=None):
+        return _acc(5000.0)
+
+    upserts: list = []
+    _serialize_sessions(monkeypatch)
+    _stub_close_path(monkeypatch, upserts)
+    monkeypatch.setattr(manager, "connected_user_ids_async", connected)
+    monkeypatch.setattr(manager, "push_positions", push_positions)
+    monkeypatch.setattr(gw, "gw_get_account", account)
+    monkeypatch.setattr(gw, "gw_batch_available", lambda: False)
+
+    _run_loop_for(1.0)
+
+    users = {u for u, lg, _b in upserts if lg == SLOW_LOGIN}
+    assert users == {SLOW_USER, SHARED_USER}
+    db = gw.SessionLocal()
+    try:
+        rows = db.query(MT5Account).filter(MT5Account.login == SLOW_LOGIN).all()
+        assert {r.user_id: r.balance for r in rows} == {SLOW_USER: 5000.0, SHARED_USER: 5000.0}
+    finally:
+        db.close()
+
+
+def test_deal_events_drained_while_nobody_online(harness, monkeypatch):
+    """没有任何人在线时成交队列也要拉：离线用户的平仓即时落库，不等有人连上。
+    The deal queue is drained even with nobody online."""
+    drained = {"n": 0}
+
+    async def nobody():
+        return []
+
+    async def deal_drain():
+        drained["n"] += 1
+        return ([int(SLOW_LOGIN)] if drained["n"] == 1 else []), True
+
+    upserts: list = []
+    _serialize_sessions(monkeypatch)
+    _stub_close_path(monkeypatch, upserts)
+    monkeypatch.setattr(manager, "connected_user_ids_async", nobody)
+    monkeypatch.setattr(gc, "drain_deal_events", deal_drain)
+    # 离线资金兜底推迟到测试之外，确保落库来自事件。/ keep the sweep out of the way
+    monkeypatch.setattr(gw, "GATEWAY_OFFLINE_FUNDS_INTERVAL", 3600.0)
+
+    _run_loop_for(0.8)
+
+    assert drained["n"] >= 2
+    assert (SLOW_USER, SLOW_LOGIN) in {(u, lg) for u, lg, _b in upserts}
+
+
+def test_offline_sweep_scans_closes_before_writing_new_balance(harness, monkeypatch):
+    """离线兜底读到余额变了（事件被丢 / 成交订阅不可用）：先把平仓扫进库，再写余额。
+    对账永远不会看到「新余额 + 缺平仓」。/ A moved balance in the offline sweep scans
+    closes first, so the reconcile never sees the new balance without the close."""
+
+    async def nobody():
+        return []
+
+    async def account(login, timeout=None):
+        return _acc(7000.0)
+
+    upserts: list = []
+    _serialize_sessions(monkeypatch)
+    _stub_close_path(monkeypatch, upserts, read_balance=True)
+    monkeypatch.setattr(manager, "connected_user_ids_async", nobody)
+    monkeypatch.setattr(gw, "gw_get_account", account)
+    monkeypatch.setattr(gw, "gw_batch_available", lambda: False)
+
+    _run_loop_for(0.8)
+
+    seen = {(u, lg): b for u, lg, b in upserts}
+    # 两个离线账号都扫到了平仓，且扫描时库里的余额还是旧值
+    assert set(seen) == {(SLOW_USER, SLOW_LOGIN), (FAST_USER, FAST_LOGIN)}
+    assert all(b != 7000.0 for b in seen.values())
+    db = gw.SessionLocal()
+    try:
+        assert {r.balance for r in db.query(MT5Account).all()} == {7000.0}
+    finally:
+        db.close()
+
+
+def test_regular_window_covers_gap_since_last_success(harness, monkeypatch):
+    """常规扫描窗口从上次成功扫描处接着回看：首扫失败后下一次仍是 7 天补扫（以前首扫
+    标记先加，失败就只剩 15 分钟）；成功之后按 max(常规窗口, 距上次成功 + 余量)。
+    The window resumes from the last success: a failed first scan is retried with
+    the catch-up window, later ones cover max(regular, gap + margin)."""
+    windows: list[tuple[int, int]] = []
+    calls = {"n": 0}
+
+    async def deals(login, from_unix, to_unix, timeout=None):
+        if str(login) != FAST_LOGIN:
+            return [], ""
+        calls["n"] += 1
+        windows.append((int(time.time()), from_unix))
+        return ([], "boom") if calls["n"] == 1 else ([], "")
+
+    monkeypatch.setattr(gw, "gw_get_deals", deals)
+    monkeypatch.setattr(gw, "GATEWAY_DEALS_SCAN_INTERVAL", 0.05)
+    monkeypatch.setattr(gw, "GATEWAY_DEALS_LOOKBACK_SECONDS", 10)
+    monkeypatch.setattr(gw, "GATEWAY_DEALS_GAP_MARGIN", 500)
+    monkeypatch.setattr(gw, "GATEWAY_WIDE_SCAN_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr(gw, "gw_batch_available", lambda: False)
+
+    _run_loop_for(0.8)
+
+    assert len(windows) >= 3
+    spans = [now - frm for now, frm in windows]
+    week = gw.GATEWAY_DEALS_CATCHUP_SECONDS
+    assert spans[0] >= week and spans[1] >= week          # 失败后重试仍是补扫
+    assert all(500 <= s < week for s in spans[2:])         # 之后按间隔 + 余量
+
+
+def test_failing_reads_do_not_hammer_wide_rescans(harness, monkeypatch):
+    """读取一直失败（含网关 read_busy 卸载负载）时，宽窗口重扫按
+    GATEWAY_WIDE_SCAN_MIN_INTERVAL 限频，不会每拍都打一次 7 天读取。
+    With reads failing (read_busy included), wide rescans are throttled instead of
+    firing a 7-day read every tick."""
+    calls = {"n": 0}
+
+    async def deals(login, from_unix, to_unix, timeout=None):
+        if str(login) != FAST_LOGIN:
+            return [], ""
+        calls["n"] += 1
+        return [], "read_busy"
+
+    monkeypatch.setattr(gw, "gw_get_deals", deals)
+    monkeypatch.setattr(gw, "GATEWAY_DEALS_SCAN_INTERVAL", 0.05)
+    monkeypatch.setattr(gw, "GATEWAY_WIDE_SCAN_MIN_INTERVAL", 60.0)
+    monkeypatch.setattr(gw, "gw_batch_available", lambda: False)
+
+    _run_loop_for(0.8)
+
+    # 首扫一次 + 限频窗口内最多一次宽重扫 / the first scan plus at most one wide retry
+    assert 1 <= calls["n"] <= 2
+
