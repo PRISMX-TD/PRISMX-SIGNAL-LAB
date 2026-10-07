@@ -100,6 +100,14 @@ def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str
     else:
         if not _PERIOD_KEY_RE.match(period or ""):
             raise HTTPException(400, "周期格式错误 / Invalid period")
+        # 正则只校验形状：2026-13、2026-00、2026-W60 形状合法但不是真实周期，
+        # 下游 period_bounds 会抛 ValueError（→500），这里提前转成 400。
+        # The regex only checks shape: 2026-13 / 2026-00 / 2026-W60 pass it but
+        # are not real periods and period_bounds would raise ValueError (→500).
+        try:
+            periods.period_bounds(period)
+        except (ValueError, TypeError):
+            raise HTTPException(400, "周期不存在 / Invalid period") from None
         period_key = period
     return build_board_rows_payload(db, viewer, board, period_key, reveal=reveal)
 

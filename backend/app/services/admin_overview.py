@@ -19,6 +19,7 @@ from sqlalchemy.orm import Query, Session
 
 from app.models import MT5Account, Order, PageVisitorDay, User, UserStrategy
 from app.services.account_type import REAL as TRADE_MODE_REAL
+from app.services.order_payload import OPENED_POSITION
 from app.schemas import (
     ActivityDayOut, AdminOverviewOut, AdminPotentialCustomersOut, CompareOut, FunnelOut,
     FunnelStepsOut, FunnelWeekOut, OverviewHeadlineOut, OverviewRangeOut, PotentialCustomerOut,
@@ -209,7 +210,11 @@ def _step_user_ids(db: Session, today: date) -> dict[str, set[str]]:
             db.query(MT5Account.user_id).join(User, User.id == MT5Account.user_id)
             .filter(NOT_ADMIN, or_(MT5Account.trade_mode.is_(None), MT5Account.trade_mode != TRADE_MODE_REAL)).distinct()
         ),
-        "traded": ids(db.query(Order.user_id).join(User, User.id == Order.user_id).filter(NOT_ADMIN, Order.status == "FILLED").distinct()),
+        # 只认开仓单（order_payload.OPENED_POSITION，与榜单/胜率同一判据）：网关的平仓、
+        # 改单回执也是 FILLED，只按 status 数会把"只平过仓/只改过单"的人也算成已交易。
+        # Opening orders only (OPENED_POSITION, same rule as boards/win-rate): gateway
+        # CLOSE/MODIFY acks are FILLED too, so status alone over-counts.
+        "traded": ids(db.query(Order.user_id).join(User, User.id == Order.user_id).filter(NOT_ADMIN, OPENED_POSITION).distinct()),
         "potential": _potential_ids(db, today, bound)[0],
     }
 
@@ -420,7 +425,9 @@ def trading(db: Session, spec: RangeSpec) -> TradingOut:
         .join(User, User.id == Order.user_id)
         .filter(
             NOT_ADMIN,
-            Order.status == "FILLED",
+            # 成交笔数只数开仓单——平仓/改单也会被标 FILLED，见 _step_user_ids。
+            # Count opening orders only — CLOSE/MODIFY are FILLED too (see _step_user_ids).
+            OPENED_POSITION,
             Order.created_at >= day_start_utc(spec.compare_start),
             Order.created_at < day_start_utc(spec.end + timedelta(days=1)),
         )

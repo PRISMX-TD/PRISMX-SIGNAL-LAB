@@ -280,10 +280,18 @@ def create_ticket(
 ):
     """提交新工单。同时写入 tickets 和第一条 ticket_replies。
     Submit a new ticket; writes the ticket and its first reply in one step."""
+    # 标题先去空白再判空：schema 的 min_length 在 strip 之前校验，纯空格标题会漏过去，
+    # 落库成空标题。strip 只会变短，max_length 那条不受影响。
+    # Strip first, then require non-empty: the schema's min_length runs before the
+    # strip, so a whitespace-only title would slip through and be stored empty.
+    # Stripping only shortens, so max_length still holds.
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="请填写标题 / Title is required")
     images = _checked_images(body.images, user.id)
     ticket = Ticket(
         user_id=user.id,
-        title=body.title.strip(),
+        title=title,
         category=body.category,
         priority=body.priority,
         status="open",

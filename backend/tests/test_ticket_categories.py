@@ -31,3 +31,19 @@ def test_claim_tickets_can_be_filtered_in_admin_list(db_session, monkeypatch):
     rows = list_all_tickets(None, "claim", 50, 0, db_session, admin)
     assert [r.title for r in rows] == ["申领试用"]
     assert rows[0].category == "claim"
+
+
+def test_whitespace_only_title_is_rejected(db_session, monkeypatch):
+    """标题先 strip 再判空：纯空格标题拒收，不落库。
+    Title is stripped before the emptiness check: whitespace-only is rejected, nothing stored."""
+    from fastapi import HTTPException
+    from app.models import Ticket
+    monkeypatch.setattr(tk, "notify_ws", lambda *a, **k: None)
+    owner = User(email="w@x.com", api_token="tok_w")
+    db_session.add(owner); db_session.commit()
+    with pytest.raises(HTTPException) as e:
+        create_ticket(TicketCreate(title="   \t ", category="technical", body="x"), db_session, owner)
+    assert e.value.status_code == 422
+    assert db_session.query(Ticket).count() == 0
+    out = create_ticket(TicketCreate(title="  有标题  ", category="technical", body="x"), db_session, owner)
+    assert out.title == "有标题"

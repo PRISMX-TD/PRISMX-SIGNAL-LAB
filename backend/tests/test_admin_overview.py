@@ -479,3 +479,20 @@ def test_page_stats_excludes_bucket_that_falls_on_next_stats_tz_day(db_session):
     db_session.commit()
     body = _client(db_session, adm).get("/admin/page-stats?from=2026-09-16&to=2026-09-16").json()
     assert body["pages"] == []
+
+
+def test_close_and_modify_fills_are_not_trades(db_session):
+    """网关的 CLOSE/MODIFY 回执也是 FILLED：漏斗"已交易"和成交笔数只数开仓单
+    （OPENED_POSITION）。Gateway CLOSE/MODIFY acks are FILLED too; the funnel's
+    traded step and the fill count only include opening orders."""
+    a = _user(db_session, "a@t.co"); b = _user(db_session, "b@t.co")
+    _fill(db_session, a, date(2026, 9, 2))
+    for i, act in enumerate(("CLOSE", "MODIFY")):
+        for u in (a, b):
+            db_session.add(Order(user_id=u.id, client_order_id=f"x-{u.id}-{act}", symbol="XAUUSD",
+                                 side="BUY", volume=0.1, status="FILLED", action=act,
+                                 created_at=_at(date(2026, 9, 2), hour=5 + i)))
+    db_session.commit()
+    assert ov.funnel(db_session, TODAY).overall.traded == 1
+    t = ov.trading(db_session, SPEC)
+    assert (t.traders.current, t.fills.current) == (1, 1)

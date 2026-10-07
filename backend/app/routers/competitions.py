@@ -458,6 +458,20 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         if _ADVANCE.get(comp.status) != new_status:
             raise HTTPException(400, MSG_STATUS_SEQUENCE)
         comp.status = new_status
+        # 提前手动结束：结束持仓快照（capture_end_positions）在下一轮循环就拍，
+        # 而计分窗口与 _end_valuation 都以 ends_at 为上界——两者不一致会漏掉快照后、
+        # 原 ends_at 前新开的单，并把这段时间里的部分平仓重复计入。所以把 ends_at
+        # 收到实际结束时刻，让窗口与快照对齐（不早于 starts_at，避免窗口倒置）。
+        # Ended early by hand: the end-position snapshot is taken on the next loop
+        # tick, but the scoring window and _end_valuation are bounded by ends_at —
+        # left as is, trades opened between snapshot and the old ends_at are missed
+        # and partial closes in that gap are double counted. Pull ends_at in to the
+        # actual end so window and snapshot agree (never before starts_at).
+        if new_status == "ended":
+            now = datetime.now(timezone.utc)
+            if comp.ends_at is None or now < _aware(comp.ends_at):
+                start = _aware(comp.starts_at)
+                comp.ends_at = max(now, start) if start is not None else now
         if new_status == "running" and comp.enrollment == "auto":
             auto_enrolled = auto_enroll(db, comp, datetime.now(timezone.utc))
 

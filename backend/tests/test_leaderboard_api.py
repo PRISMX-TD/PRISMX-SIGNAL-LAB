@@ -100,6 +100,16 @@ def test_invalid_board_and_period(db_session):
         build_leaderboard_payload(db_session, u, "return_pct", "bogus")
 
 
+@pytest.mark.parametrize("bad", ["2026-13", "2026-00", "2026-W60", "2026-W00", "2025-W53"])
+def test_shape_valid_but_nonexistent_period_is_400(db_session, bad):
+    """形状过正则但不是真实周期（月 13/00、周 60/00、2025 无第 53 周）→ 400 而非 500。
+    Shape-valid but nonexistent periods → 400, not a ValueError 500."""
+    u = _user(db_session, f"v2{bad}@t.co")
+    with pytest.raises(HTTPException) as e:
+        build_leaderboard_payload(db_session, u, "return_pct", bad)
+    assert e.value.status_code == 400
+
+
 def test_payload_gates_reflect_admin_settings(db_session):
     """gates 必须读的是当下生效的设置，不是硬编码的 5/20/500——改了设置后
     同一个 payload 构造函数要立刻返回新值（同 test_board_rows.py 的覆盖/复位

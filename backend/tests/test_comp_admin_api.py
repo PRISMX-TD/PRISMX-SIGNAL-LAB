@@ -682,3 +682,25 @@ def test_patch_gates_null_means_follow_global(db_session):
     admin_patch_competition(comp.id, CompetitionPatchIn(minTrades=None), db=db_session)
     db_session.refresh(comp)
     assert comp.min_trades is None
+
+
+def test_patch_manual_early_end_pulls_ends_at_to_now(db_session):
+    """提前手动结束：ends_at 收到实际结束时刻，与随后拍的结束持仓快照对齐。
+    Ending early by hand pulls ends_at in to the actual end so the scoring window
+    agrees with the end-position snapshot taken right after."""
+    now = datetime.now(UTC)
+    comp = _comp(db_session, status="running", starts_at=now - timedelta(days=1),
+                 ends_at=now + timedelta(days=5))
+    admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session)
+    db_session.refresh(comp)
+    ends = comp.ends_at if comp.ends_at.tzinfo else comp.ends_at.replace(tzinfo=UTC)
+    assert now <= ends <= datetime.now(UTC)
+
+
+def test_patch_end_after_ends_at_keeps_ends_at(db_session):
+    """已过 ends_at 再推到 ended：ends_at 不动。Past ends_at → left unchanged."""
+    comp = _comp(db_session, status="running")
+    admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session)
+    db_session.refresh(comp)
+    ends = comp.ends_at if comp.ends_at.tzinfo else comp.ends_at.replace(tzinfo=UTC)
+    assert ends == ENDS
