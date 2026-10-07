@@ -189,6 +189,44 @@ export function isUnreachable(err: unknown): boolean {
   return !(err instanceof ApiHttpError) || err.status >= 500
 }
 
+export type LoopErrorKind =
+  'stopped' | 'redis' | 'dbBusy' | 'db' | 'gateway' | 'rateLimit' | 'timeout' | 'network' | 'other'
+
+// 按顺序匹配，先到先得：数据库超时（statement timeout、连接池排满）要排在「连不上数据库」前面，
+// 「连不上数据库」要排在通用的超时 / 网络前面（psycopg2 的连不上也带 timeout、Connection refused）。
+// gateway 只认 gateway_client 自己打的那几句，不能只看有没有 "gateway"——gateway_positions
+// 循环的报错前缀里就带这个词。
+// Matched in order, first hit wins; see the comments for why the order matters.
+const LOOP_ERROR_RULES: [LoopErrorKind, RegExp][] = [
+  ['stopped', /循环意外结束/],
+  ['redis', /redis|:6379\b/i],
+  ['dbBusy', /statement timeout|canceling statement|QueuePool limit|deadlock detected|lock timeout|too many clients|remaining connection slots|max client conn/i],
+  ['db', /psycopg|OperationalError|InterfaceError|sqlalchemy|pooler\.supabase|connection to server at|server closed the connection|SSL connection has been closed/i],
+  ['gateway', /Gateway (连不上|超时|HTTP \d)/],
+  ['rateLimit', /\b429\b|rate.?limit|too many requests/i],
+  ['timeout', /timeout|timed out/i],
+  ['network', /ConnectError|ConnectionError|Connection refused|connection reset|Name or service not known|getaddrinfo|Network is unreachable/i],
+]
+
+/** 把后台任务的报错原文归成一类，界面上显示一句大白话。/ Classify a raw loop error for a plain-language label. */
+export function loopErrorKind(message: string): LoopErrorKind {
+  for (const [kind, re] of LOOP_ERROR_RULES) if (re.test(message)) return kind
+  return 'other'
+}
+
+/** 报错的大白话；点开看原文（手机上没有悬停，所以不用 title）。/ Plain label, tap to reveal the raw text. */
+function LoopError({ message, className }: { message: string; className: string }) {
+  const { t } = useTranslation()
+  return (
+    <details className="mt-0.5">
+      <summary className={`cursor-pointer list-none hover:underline [&::-webkit-details-marker]:hidden ${className}`}>
+        {t(`admin.health.loopTable.errorKind.${loopErrorKind(message)}`)}
+      </summary>
+      <div className="mt-1 break-all text-[10px] leading-snug text-neutral-600">{message}</div>
+    </details>
+  )
+}
+
 function Light({ level }: { level: HealthLevel }) {
   return (
     <span className="relative flex h-3 w-3 shrink-0">
@@ -393,24 +431,27 @@ function LoopTable({ rows, onRestart, onRefreshCompetitions, busy }: {
                   {label === nameKey ? r.name : label}
                   <div className="text-[10px] text-neutral-600">{r.name}</div>
                 </td>
-                <td className="py-2 pr-3">
+                <td className="whitespace-nowrap py-2 pr-3">
                   <span className="flex items-center gap-1.5">
                     <Light level={r.level} />
                     <span className={TEXT[r.level]}>{t(`admin.health.level.${r.level}`)}</span>
                   </span>
                 </td>
-                <td className="num py-2 pr-3 text-neutral-300">
+                <td className="num whitespace-nowrap py-2 pr-3 text-neutral-300">
                   {r.beatAgoSec == null
                     ? t('admin.health.loopTable.never')
                     : t('admin.health.ago', { t: fmtDuration(t, r.beatAgoSec) })}
                 </td>
                 <td className="py-2 text-neutral-400">
                   {r.crashMessage ? (
-                    <span className="text-down">{t('admin.health.loopTable.crashed', { msg: r.crashMessage })}</span>
+                    <>
+                      <span className="text-down">{t('admin.health.loopTable.crashed')}</span>
+                      <LoopError message={r.crashMessage} className="text-down" />
+                    </>
                   ) : r.errorMessage ? (
                     <>
                       <span className="num text-neutral-300">{t('admin.health.ago', { t: fmtDuration(t, r.errorAgoSec) })}</span>
-                      <div className="mt-0.5 line-clamp-2 break-all text-neutral-500" title={r.errorMessage}>{r.errorMessage}</div>
+                      <LoopError message={r.errorMessage} className="text-neutral-400" />
                     </>
                   ) : (
                     t('admin.health.loopTable.none')
@@ -427,6 +468,7 @@ function LoopTable({ rows, onRestart, onRefreshCompetitions, busy }: {
           })}
         </tbody>
       </table>
+      <p className="mt-3 text-[11px] text-neutral-500">{t('admin.health.loopTable.errorHint')}</p>
     </div>
   )
 }

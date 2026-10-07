@@ -1135,8 +1135,20 @@
         "lastRun": "最近一次运行",
         "lastError": "最近报错",
         "never": "还没跑过",
-        "crashed": "已崩溃：{{msg}}",
-        "none": "—"
+        "crashed": "已崩溃",
+        "none": "—",
+        "errorKind": {
+          "stopped": "任务自己停了",
+          "redis": "连不上 Redis（缓存）",
+          "dbBusy": "数据库太忙，查询超时",
+          "db": "连不上数据库",
+          "gateway": "gateway 没响应",
+          "rateLimit": "对方接口限流了",
+          "timeout": "网络超时",
+          "network": "连不上外部服务",
+          "other": "程序出错"
+        },
+        "errorHint": "报错多是临时的，任务会自己重试；状态是绿灯就不用管。点报错能看原文，转给 Rex 用。"
       },
       "loopName": {
         "offline_monitor": "账户在线检测",

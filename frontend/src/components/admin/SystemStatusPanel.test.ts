@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import type { TFunction } from 'i18next'
 import { ApiHttpError } from '../../api/client'
 import type { OpsStatus } from '../../api/types'
-import { fmtDuration, isUnreachable, watchdogComponent, WATCHDOG_STALE_SEC } from './SystemStatusPanel'
+import { fmtDuration, isUnreachable, loopErrorKind, watchdogComponent, WATCHDOG_STALE_SEC } from './SystemStatusPanel'
 
 // 只看取了哪个 key、带了什么数：/ echo the key and count back
 const t = ((key: string, opts?: { n?: number }) => (opts?.n == null ? key : `${key}:${opts.n}`)) as unknown as TFunction
@@ -37,6 +37,42 @@ describe('fmtDuration', () => {
   it('没有数据时说「未知」/ unknown when missing', () => {
     expect(fmtDuration(t, null)).toBe('admin.health.unknown')
     expect(fmtDuration(t, undefined)).toBe('admin.health.unknown')
+  })
+})
+
+describe('loopErrorKind', () => {
+  it('Supabase pooler 连不上算数据库 / pooler refusals are db', () => {
+    expect(loopErrorKind(
+      'competition loop failed: OperationalError: (psycopg2.OperationalError) connection to server at '
+      + '"aws-0-ap-southeast-1.pooler.supabase.com" (54.255.219.82), port 5432 failed: FATAL: Failed to connect '
+      + 'to database: {:error, :econnrefused} (Background on this error at: https://sqlalche.me/e/20/e3q8)',
+    )).toBe('db')
+    // 前缀带 gateway、正文带 Connection refused，也还是数据库
+    expect(loopErrorKind(
+      'gateway_positions_loop 异常: OperationalError: (psycopg2.OperationalError) connection to server at '
+      + '"aws-0-ap-southeast-1.pooler.supabase.com" (52.74.252.201), port 5432 failed: Connection refused',
+    )).toBe('db')
+  })
+
+  it('数据库超时、连接池排满算「太忙」/ statement timeout and pool exhaustion are dbBusy', () => {
+    expect(loopErrorKind('x: OperationalError: (psycopg2.errors.QueryCanceled) canceling statement due to statement timeout')).toBe('dbBusy')
+    expect(loopErrorKind('x: TimeoutError: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00')).toBe('dbBusy')
+  })
+
+  it('只认 gateway_client 自己的报错 / gateway only from the client\'s own lines', () => {
+    expect(loopErrorKind('Gateway 连不上，请求未发出 (3001.2ms): http://10.0.0.2/positions ...')).toBe('gateway')
+    expect(loopErrorKind('Gateway 超时 (8000.0ms): http://10.0.0.2/positions')).toBe('gateway')
+    expect(loopErrorKind('Gateway HTTP 500: http://10.0.0.2/positions boom')).toBe('gateway')
+    expect(loopErrorKind("gateway_positions_loop 异常: KeyError: 'login'")).toBe('other')
+  })
+
+  it('其余几类 / the rest', () => {
+    expect(loopErrorKind('x: ConnectionError: Error 111 connecting to localhost:6379. Connection refused.')).toBe('redis')
+    expect(loopErrorKind('sentiment_loop error: HTTPStatusError: Client error \'429 Too Many Requests\'')).toBe('rateLimit')
+    expect(loopErrorKind('sentiment_loop error: ReadTimeout: timed out')).toBe('timeout')
+    expect(loopErrorKind('sentiment_loop error: ConnectError: [Errno -2] Name or service not known')).toBe('network')
+    expect(loopErrorKind('循环意外结束（没有异常）')).toBe('stopped')
+    expect(loopErrorKind("signal_loop error: ZeroDivisionError: division by zero")).toBe('other')
   })
 })
 

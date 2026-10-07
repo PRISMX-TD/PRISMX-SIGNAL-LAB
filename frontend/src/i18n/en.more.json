@@ -1135,8 +1135,20 @@
         "lastRun": "Last run",
         "lastError": "Last error",
         "never": "Not run yet",
-        "crashed": "Crashed: {{msg}}",
-        "none": "—"
+        "crashed": "Crashed",
+        "none": "—",
+        "errorKind": {
+          "stopped": "Job stopped on its own",
+          "redis": "Can't reach Redis (cache)",
+          "dbBusy": "Database busy, query timed out",
+          "db": "Can't reach the database",
+          "gateway": "Gateway not responding",
+          "rateLimit": "Rate-limited by the other side",
+          "timeout": "Network timeout",
+          "network": "Can't reach an external service",
+          "other": "Program error"
+        },
+        "errorHint": "Errors are usually temporary and the job retries by itself; a green light means nothing to do. Tap an error to see the raw text for Rex."
       },
       "loopName": {
         "offline_monitor": "Account online check",
