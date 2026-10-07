@@ -110,6 +110,43 @@ def test_position_already_being_closed_is_skipped(db_session):
     assert skipped == 1
 
 
+def test_same_ticket_on_two_accounts_both_close(db_session):
+    """票号只在单个账号内唯一：两个账号撞上同一个票号时两张都要平，不能撞唯一约束 500。"""
+    _user(db_session, gateway=True)
+    _, created, skipped = close_all.queue(
+        db_session, "u1", "co_dup", None, [_pos(5555), _pos(5555, login=GW_LOGIN)],
+    )
+    assert skipped == 0
+    assert {(o.mt5_login, o.ticket) for o in created} == {(BRIDGE_LOGIN, 5555), (GW_LOGIN, 5555)}
+    assert len({o.client_order_id for o in created}) == 2
+
+
+def test_close_on_another_account_does_not_block_same_ticket(db_session):
+    """另一个账号上同号仓位的在途平仓不该挡住这一个。"""
+    _user(db_session, gateway=True)
+    db_session.add(Order(
+        user_id="u1", client_order_id="co_other", action="CLOSE", symbol="XAUUSD",
+        side="BUY", volume=0.0, ticket=5555, mt5_login=GW_LOGIN, status="PENDING",
+    ))
+    db_session.commit()
+    _, created, skipped = close_all.queue(db_session, "u1", "co_x", None, [_pos(5555)])
+    assert [(o.mt5_login, o.ticket) for o in created] == [(BRIDGE_LOGIN, 5555)]
+    assert skipped == 0
+
+
+def test_inflight_partial_close_does_not_block_closing_the_remainder(db_session):
+    """在途的是**部分**平仓时，一键平仓仍要排一条全平，否则剩下的仓位没人管。"""
+    _user(db_session)
+    db_session.add(Order(
+        user_id="u1", client_order_id="co_partial", action="CLOSE", symbol="XAUUSD",
+        side="BUY", volume=0.05, ticket=1001, mt5_login=BRIDGE_LOGIN, status="PENDING",
+    ))
+    db_session.commit()
+    _, created, skipped = close_all.queue(db_session, "u1", "co_rest", None, [_pos(1001)])
+    assert [(o.ticket, o.volume) for o in created] == [(1001, 0.0)]
+    assert skipped == 0
+
+
 def test_replaying_the_same_client_id_queues_nothing(db_session):
     """同一个 clientOrderId 补发一次（网络抖动的自动重试）不能平两遍。"""
     _user(db_session)
@@ -130,11 +167,14 @@ def test_replaying_the_same_client_id_queues_nothing(db_session):
 
 def test_batch_id_round_trip():
     batch = close_all.batch_id("co_m9x_ab12")
-    child = close_all.child_order_id(batch, 36109204)
-    assert close_all.is_close_all(child)
-    assert close_all.batch_of(child) == batch
-    # 子指令 id 必须落得进 64 字符的列 / must fit the client_order_id column
-    assert len(close_all.child_order_id(close_all.batch_id("x" * 40), 2**63 - 1)) <= 64
+    for child in (close_all.child_order_id(batch, 36109204),
+                  close_all.child_order_id(batch, 36109204, BRIDGE_LOGIN)):
+        assert close_all.is_close_all(child)
+        assert close_all.batch_of(child) == batch
+    # 带账号的子指令 id 仍在网关幂等查询的 128 字符上限内（client_order_id 列本身不限长）
+    # Still within the gateway's 128-char idempotency lookup limit (the column is unbounded)
+    worst = close_all.child_order_id(close_all.batch_id("x" * 40), 2**63 - 1, str(2**64 - 1))
+    assert len(worst) <= 128
 
 
 def test_non_batch_ids_are_not_mistaken_for_children():

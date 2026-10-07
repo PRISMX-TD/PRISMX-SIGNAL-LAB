@@ -11,7 +11,8 @@
     空条件全 False；两侧同时成立取多头；memo 只算一次；穿越只在越过那根触发。
   · backtest：出场价各方法；同根双触按止损；超时不抢真实出场；零成本时净值
     等于旧公式；含成本更差；一次一单不重叠；样本不足不判过拟合。
-  · resolution：首次观测只记基线；此后只认新极值；双触按止损。
+  · resolution：apply_baseline（平台信号）首次观测只记基线、此后只认新极值；
+    策略信号从入场下一根起逐根判定，与回测同口径；双触按止损。
   · live：时段过滤（UTC+8、跨零点、脏数据放行）；冷却与日上限；一根 K 线收盘
     真的落一条信号且同根不重复。
 
@@ -496,7 +497,7 @@ def test_live_evaluation_emits_signal_once_and_resolves(monkeypatch, db_session)
     db_session.expire_all()
     assert db_session.query(StrategySignal).count() == 1
 
-    # 下一根：先记基线（首次观测），再下一根冲过止盈 → HIT_TP
+    # 下一根完整发生在信号之后，照常判定（未触及 → 仍 PENDING），再下一根冲过止盈 → HIT_TP
     sig = db_session.query(StrategySignal).one()
     last_t = bars[-1]["t"]
     db_session.add(Candle(symbol="XAUUSD", interval="60", t=last_t + 3600, o=110, h=110.5, l=109.5, c=110, v=1))
@@ -504,7 +505,7 @@ def test_live_evaluation_emits_signal_once_and_resolves(monkeypatch, db_session)
     live._evaluate_sync("XAUUSD", "60")
     db_session.expire_all()
     sig = db_session.query(StrategySignal).one()
-    assert sig.result == "PENDING" and sig.baseline_high == 110.5
+    assert sig.result == "PENDING" and sig.bars_held == 1
     db_session.add(Candle(symbol="XAUUSD", interval="60", t=last_t + 7200, o=110, h=sig.take_profit + 1, l=109.5, c=111, v=1))
     db_session.commit()
     live._evaluate_sync("XAUUSD", "60")
@@ -531,7 +532,7 @@ def test_batch_backfill_resolves_every_new_bar(monkeypatch, db_session):
                                   side="BUY", entry=100, stop_loss=90, take_profit=105, bar_t=base))
     db_session.commit()
 
-    live._evaluate_sync("XAUUSD", "60", [base + 4 * 3600])   # 首次观测只记基线
+    live._evaluate_sync("XAUUSD", "60", [base + 4 * 3600])   # 入场后第 1 根，未触及
     db_session.expire_all()
     assert db_session.query(StrategySignal).one().result == "PENDING"
 
@@ -547,7 +548,7 @@ def test_batch_backfill_resolves_every_new_bar(monkeypatch, db_session):
     db_session.expire_all()
     got = db_session.query(StrategySignal).one()
     assert got.result == "HIT_TP"   # 只判最后一根的话这里会停在 PENDING
-    assert got.bars_held == 3       # 首次观测 1 根 + 本批走到命中那根为止 2 根
+    assert got.bars_held == 3       # 先前 1 根 + 本批走到命中那根为止 2 根
 
 
 def test_batch_backfill_of_old_bars_does_not_open_new_positions(monkeypatch, db_session):
@@ -578,14 +579,92 @@ def test_batch_backfill_of_old_bars_does_not_open_new_positions(monkeypatch, db_
     assert len(live._evaluate_sync("XAUUSD", "60", [bars[-1]["t"]])) == 1
 
 
-def test_resolve_strategy_signals_timeout_needs_a_prior_observation(db_session):
+def test_resolve_strategy_signals_timeout_counts_from_first_bar_after_entry(db_session):
     u = _user(db_session)
     s = _strategy(db_session, u, _rules("ma.rising"), exit_timeout_bars=2)
     sig = StrategySignal(strategy_id=s.id, user_id=u.id, symbol="XAUUSD", interval="60",
                          side="BUY", entry=100, stop_loss=90, take_profit=120, bar_t=1)
     db_session.add(sig); db_session.commit()
     quiet = {"l": 99.0, "h": 101.0, "c": 100.0}
-    assert resolve_strategy_signals(db_session, "XAUUSD", "60", quiet) == []    # 首次观测只记基线，不判超时
+    assert resolve_strategy_signals(db_session, "XAUUSD", "60", quiet) == []    # 第 1 根：bars_held=1 < 2
     got = resolve_strategy_signals(db_session, "XAUUSD", "60", quiet)          # 第 2 根：bars_held=2 ≥ 2
     assert [g.result for g in got] == ["TIMEOUT"]
     assert resolve_strategy_signals(db_session, "XAUUSD", "60", {"l": 200, "h": 100, "c": 1}) == []  # low>high 跳过
+
+
+def test_strategy_signal_first_bar_after_entry_is_judged(db_session):
+    """策略信号在收盘时产生，入场后第一根完整发生在信号之后：触及止盈就是止盈。
+    触发那根本身（及更早的补洞 bar）不参与判定，也不计 bars_held。
+    回归：以前第一根只记基线，真实命中被吞掉。"""
+    u = _user(db_session)
+    s = _strategy(db_session, u, _rules("ma.rising"))
+    sig = StrategySignal(strategy_id=s.id, user_id=u.id, symbol="XAUUSD", interval="60",
+                         side="BUY", entry=100, stop_loss=90, take_profit=105, bar_t=3600)
+    db_session.add(sig); db_session.commit()
+    assert resolve_strategy_signals(db_session, "XAUUSD", "60", _b(3600, 100, 106, 99, 100)) == []
+    assert resolve_strategy_signals(db_session, "XAUUSD", "60", _b(0, 100, 106, 99, 100)) == []
+    assert sig.bars_held in (None, 0)
+    got = resolve_strategy_signals(db_session, "XAUUSD", "60", _b(7200, 100, 106, 99, 104))
+    assert [g.result for g in got] == ["HIT_TP"] and sig.bars_held == 1
+
+
+@pytest.mark.parametrize("side,sl,tp,timeout,future", [
+    ("BUY", 95, 105, None, [(101, 99), (106, 99.5)]),           # 第 2 根止盈
+    ("BUY", 95, 105, None, [(106, 99.5), (101, 99)]),           # 入场后第 1 根止盈
+    ("BUY", 95, 105, None, [(110, 90)]),                        # 同根双触 → 止损
+    ("SELL", 105, 95, None, [(100.5, 94)]),                     # 空单第 1 根止盈
+    ("BUY", 95, 105, 2, [(101, 99), (101, 99), (106, 99)]),     # 超时先于后面的止盈
+    ("SELL", 105, 95, 3, [(106, 99), (101, 99)]),               # 空单第 1 根止损
+])
+def test_live_resolution_agrees_with_backtest(db_session, side, sl, tp, timeout, future):
+    """同一组 K 线上，实盘逐根判定与回测 resolve_trade 必须给出相同的结果和出场根。"""
+    bars = [_b(0, 100, 100.5, 99.5, 100)] + [
+        _b((k + 1) * 3600, 100, h, l, 100) for k, (h, l) in enumerate(future)
+    ]
+    want, want_j = bt.resolve_trade(bars, 0, side, sl, tp, timeout)
+
+    u = _user(db_session)
+    s = _strategy(db_session, u, _rules("ma.rising"), exit_timeout_bars=timeout)
+    sig = StrategySignal(strategy_id=s.id, user_id=u.id, symbol="XAUUSD", interval="60",
+                         side=side, entry=100, stop_loss=sl, take_profit=tp, bar_t=bars[0]["t"])
+    db_session.add(sig); db_session.commit()
+    got, got_j = None, None
+    for j in range(1, len(bars)):
+        done = resolve_strategy_signals(db_session, "XAUUSD", "60", bars[j])
+        db_session.flush()
+        if done:
+            got, got_j = done[0].result, j
+            break
+    assert (got, got_j) == (want, want_j)
+    assert want is not None
+
+
+def test_default_costs_scale_with_price_and_explicit_config_wins(db_session):
+    """未配置品种的默认点差/滑点按价格比例取值：EURUSD 不再被 0.2 的绝对点差拉偏
+    1500 pip。管理员在 per_symbol 里显式配的值仍按价格单位原样生效。回测与实盘都走
+    entry_fill，口径一致。"""
+    from app.services import settings_store
+
+    settings_store.invalidate_strategy_costs_cache()
+    eur = ct.symbol_costs(db_session, "EURUSD")
+    fill = ct.entry_fill("BUY", 1.16, eur)
+    assert 0 < fill - 1.16 < 0.0003                    # ≈ 0.8 pip，而不是 0.15
+    gold = ct.symbol_costs(db_session, "XAUUSD")
+    assert ct.entry_fill("BUY", 4000.0, gold) - 4000.0 == pytest.approx(0.28)
+    assert ct.exit_fill("SELL", 1.20, eur, is_stop=True) - 1.20 == pytest.approx(1.20 * 0.00002)
+    # run_backtest 未传成本时的回落值与 symbol_costs 的未配置口径一致
+    assert ct.DEFAULT_COSTS.spread_frac == eur.spread_frac
+    assert ct.DEFAULT_COSTS.slippage_frac == eur.slippage_frac
+
+    settings_store.save_strategy_costs(db_session, {
+        "per_symbol": {"XAUUSD": {"spread": 0.3, "commissionPerLot": 0.0, "slippage": 0.1}},
+    })
+    db_session.commit()
+    settings_store.invalidate_strategy_costs_cache()
+    try:
+        g = ct.symbol_costs(db_session, "XAUUSD")
+        assert (g.spread, g.slippage, g.spread_frac, g.slippage_frac) == (0.3, 0.1, 0.0, 0.0)
+        assert ct.entry_fill("BUY", 4000.0, g) == pytest.approx(4000.25)
+        assert ct.symbol_costs(db_session, "EURUSD").spread_frac == pytest.approx(0.0001)
+    finally:
+        settings_store.invalidate_strategy_costs_cache()

@@ -1,18 +1,22 @@
 """交易成本模型：点差、手续费、滑点，以及品种的价格量纲工具。
 
 回测与实盘共用本模块，使「两边成本口径一致」成为结构保证而不是人工约定。
-成本量纲：点差与滑点是价格单位；手续费是「一手往返合计、折算到价格单位」。
+成本量纲：显式配置（per_symbol）的点差与滑点是价格单位；未配置的品种按价格的
+固定比例（基点）取默认值——一个绝对价差没法同时适用于 4000 的黄金和 1.1 的欧美。
+手续费是「一手往返合计、折算到价格单位」。
 回测在价格空间结算，不引入合约规模/点值假设——把手续费也放进价格量纲，是
 让它能与盈亏进同一个减法的前提，代价是配置时需要管理员按品种折算一次。
 
 Trading-cost model: spread, commission, slippage, plus a symbol's price-unit
 helpers. Shared by the backtest and the live evaluator, so "both sides use the
 same cost basis" is structural rather than a convention someone has to
-remember. Units: spread and slippage are price units; commission is "per lot,
-round trip, expressed in price units". The backtest settles in price space and
-assumes no contract size or point value — putting commission in price units is
-what lets it enter the same subtraction as P&L, at the cost of the admin
-converting once per symbol when configuring it.
+remember. Units: explicitly configured (per_symbol) spread and slippage are
+price units; unconfigured symbols default to a fixed fraction of price (basis
+points) — no single absolute spread fits both gold at 4000 and EURUSD at 1.1.
+Commission is "per lot, round trip, expressed in price units". The backtest
+settles in price space and assumes no contract size or point value — putting
+commission in price units is what lets it enter the same subtraction as P&L,
+at the cost of the admin converting once per symbol when configuring it.
 """
 import hashlib
 import json
@@ -24,28 +28,77 @@ from app.services.settings_store import get_strategy_costs
 
 @dataclass(frozen=True)
 class SymbolCosts:
-    """某个品种的一套成本参数 / one symbol's cost parameters."""
+    """某个品种的一套成本参数 / one symbol's cost parameters.
+
+    spread / slippage 是价格单位的绝对值；spread_frac / slippage_frac 是按成交价
+    比例计的部分（0.0001 = 1 基点），两者相加。比例部分只给未配置的品种用：它让
+    默认成本随品种的价格量级自动缩放，而且回测与实盘都在 entry_fill / exit_fill
+    里按当根成交价现算，口径天然一致。
+    spread / slippage are absolute price units; spread_frac / slippage_frac are a
+    fraction of the fill price (0.0001 = 1 bp), and the two add up. The fractional
+    part serves unconfigured symbols only: it scales the default with the
+    instrument's price, and since both the backtest and live evaluation compute it
+    at the fill price inside entry_fill / exit_fill, both share one basis.
+    """
 
     spread: float
     commission_per_lot: float
     slippage: float
+    spread_frac: float = 0.0
+    slippage_frac: float = 0.0
+
+    def spread_at(self, price: float) -> float:
+        """该价位下的点差（价格单位）/ spread at this price, in price units."""
+        return self.spread + self.spread_frac * abs(price)
+
+    def slippage_at(self, price: float) -> float:
+        """该价位下的滑点（价格单位）/ slippage at this price, in price units."""
+        return self.slippage + self.slippage_frac * abs(price)
 
 
-# 未配置品种的回落值：点差 0.2、滑点 0.05（价格单位），手续费 0。
+# 未配置品种的回落值：点差 1 基点、滑点 0.2 基点（按成交价比例），手续费 0。
+# 以前是绝对的 0.2 / 0.05 价格单位——对 4000 的黄金合理，套到 1.16 的 EURUSD 上
+# 入场价就偏了 0.15，即 1500 pip，回测与实盘信号全部失真。按比例取值后：黄金
+# 4000 → 点差 0.4、滑点 0.08；EURUSD 1.16 → 约 1.2 / 0.2 pip；BTC 100000 → 10 / 2。
 # 手续费默认 0 而非猜一个数——猜出来的手续费会让回测结果看起来"已计成本"
 # 却与用户的真实账户无关，比明确的 0 更有害。
-# Fallback for unconfigured symbols: 0.2 spread, 0.05 slippage (price units),
-# zero commission. Commission defaults to 0 rather than a guess — a guessed
+# Fallback for unconfigured symbols: 1 bp spread, 0.2 bp slippage (fractions of
+# the fill price), zero commission. It used to be an absolute 0.2 / 0.05 in price
+# units — sane for gold at 4000, but on EURUSD at 1.16 it moved the entry by
+# 0.15, i.e. 1500 pips, skewing every backtest and live signal. Proportional:
+# gold 4000 → 0.4 spread / 0.08 slippage; EURUSD 1.16 → ~1.2 / 0.2 pip; BTC
+# 100000 → 10 / 2. Commission defaults to 0 rather than a guess — a guessed
 # commission makes a backtest look "cost-adjusted" while having nothing to do
 # with the user's real account, which is worse than an explicit zero.
-DEFAULT_COSTS = SymbolCosts(spread=0.2, commission_per_lot=0.0, slippage=0.05)
+DEFAULT_COSTS = SymbolCosts(
+    spread=0.0, commission_per_lot=0.0, slippage=0.0,
+    spread_frac=0.0001, slippage_frac=0.00002,
+)
 
 
 def symbol_costs(db, symbol: str) -> SymbolCosts:
-    """取某品种的成本参数，逐字段回落到默认值。
-    A symbol's costs, falling back to the defaults field by field."""
+    """取某品种的成本参数。
+
+    管理员在 per_symbol 里显式配置过的品种：按配置（价格单位），缺的字段逐项回落到
+    default_*。没配置过的品种：点差/滑点按成交价比例（default_*_frac），不再拿一个
+    绝对的价格单位默认值去套所有品种。
+
+    A symbol's costs. A symbol the admin configured under per_symbol uses that
+    config (price units), each missing field falling back to default_*. An
+    unconfigured symbol gets spread/slippage as a fraction of the fill price
+    (default_*_frac) instead of one absolute price-unit default for every
+    instrument.
+    """
     cfg = get_strategy_costs(db)
-    entry = (cfg.get("per_symbol") or {}).get(symbol.upper()) or {}
+    entry = (cfg.get("per_symbol") or {}).get(symbol.upper())
+    if not entry:
+        return SymbolCosts(
+            spread=0.0,
+            commission_per_lot=float(cfg["default_commission_per_lot"]),
+            slippage=0.0,
+            spread_frac=float(cfg.get("default_spread_frac", DEFAULT_COSTS.spread_frac)),
+            slippage_frac=float(cfg.get("default_slippage_frac", DEFAULT_COSTS.slippage_frac)),
+        )
     return SymbolCosts(
         spread=float(entry.get("spread", cfg["default_spread"])),
         commission_per_lot=float(entry.get("commissionPerLot", cfg["default_commission_per_lot"])),
@@ -67,7 +120,7 @@ def entry_fill(side: str, close: float, c: SymbolCosts) -> float:
     """入场成交价：买在卖价一侧、卖在买价一侧，各自再吃一个滑点。
     Entry fill: buy on the ask side, sell on the bid side, each paying one
     slippage on top."""
-    edge = c.spread / 2.0 + c.slippage
+    edge = c.spread_at(close) / 2.0 + c.slippage_at(close)
     return close + edge if side == "BUY" else close - edge
 
 
@@ -85,7 +138,8 @@ def exit_fill(side: str, level: float, c: SymbolCosts, is_stop: bool) -> float:
     """
     if not is_stop:
         return level
-    return level - c.slippage if side == "BUY" else level + c.slippage
+    slip = c.slippage_at(level)
+    return level - slip if side == "BUY" else level + slip
 
 
 def commission_cost(c: SymbolCosts, lots: float = 1.0) -> float:

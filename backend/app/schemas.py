@@ -937,10 +937,14 @@ class AdminStrategyCostEntry(BaseModel):
 
 class AdminStrategyCosts(BaseModel):
     """策略回测/实盘的交易成本配置。点差与滑点为价格单位；手续费为一手往返
-    合计、折算到价格单位（见 services/strategy/costs.py）。
+    合计、折算到价格单位（见 services/strategy/costs.py）。defaultSpread /
+    defaultSlippage 只用来补 perSymbol 条目里缺的字段；没配置的品种按价格比例
+    的默认值（settings_store 的 default_*_frac）计成本。
     Trading-cost config for strategy backtests and live evaluation. Spread and
     slippage are price units; commission is per lot, round trip, in price units
-    (see services/strategy/costs.py)."""
+    (see services/strategy/costs.py). defaultSpread / defaultSlippage only fill
+    fields missing from a perSymbol entry; unconfigured symbols use the
+    price-proportional defaults (default_*_frac in settings_store)."""
 
     defaultSpread: float = Field(default=0.2, ge=0, le=10_000)
     defaultCommissionPerLot: float = Field(default=0.0, ge=0, le=10_000)

@@ -157,3 +157,39 @@ def test_open_tag_reflects_order_source():
     assert order_source_tag(Order(signal_id="s1", source="STRATEGY")) == "SIG"
     assert order_source_tag(Order(source="STRATEGY")) == "STRAT"
     assert order_source_tag(Order()) == "CHART"
+
+
+def test_cancel_while_gateway_executes_is_refused_and_fill_stands(stub, db_session):
+    """网关单在等 dealer 回执期间不可撤销：以前它一直是「PENDING、未下发」，撤销成功
+    显示「已撤销」，结果回来又被覆写成 FILLED。现在派发前即打上 delivered，撤单 409。
+
+    A gateway order awaiting the dealer must not be cancellable: it used to sit
+    "PENDING, undelivered", so a cancel succeeded and the result then overwrote it to
+    FILLED. It is now marked delivered before dispatch and cancel returns 409.
+    """
+    from fastapi import HTTPException
+    from sqlalchemy.orm import sessionmaker
+
+    from app.routers.orders import cancel_order
+
+    o = _order(db_session)
+    user = db_session.get(User, "u1")
+    other = sessionmaker(bind=db_session.get_bind())()   # 另一个请求 / a separate request
+    seen: dict = {}
+
+    async def post(path, body, timeout=None):
+        try:
+            cancel_order.__wrapped__(request=None, order_id=o.id, user=user, db=other)
+            seen["cancel"] = "ok"
+        except HTTPException as e:
+            seen["cancel"] = e.status_code
+        return dict(OK)
+
+    gateway_client._post = post   # monkeypatch fixture restores it / 由 stub 夹具还原
+    gx.try_gateway_execute(db_session, o)
+    other.close()
+
+    assert seen["cancel"] == 409
+    assert o.delivered is True and o.delivered_at is not None
+    db_session.expire_all()
+    assert db_session.get(Order, o.id).status == "FILLED"

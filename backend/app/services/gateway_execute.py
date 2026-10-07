@@ -9,6 +9,7 @@ Executes one order command over the gateway HTTP API. Moved out of
 routers/orders.py so services (auto-manage) stop importing a router module.
 """
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
@@ -390,6 +391,21 @@ def try_gateway_execute(
     # this one commit so the fields read below stay loaded. The order row is
     # already committed by the caller; any other pending change would have been
     # committed by this function's final commit anyway.
+    #
+    # 同一次提交顺手把订单标成「已下发」。撤单接口只认 delivered 拦截在途指令，而这个
+    # 标记原先只有桥接轮询会打：网关单在等 dealer 回执的整整几十秒里一直是「PENDING、
+    # 未下发」，用户此刻点撤销会成功显示「已撤销」，几秒后下面的结果写入又按 id 把它
+    # 覆写成 FILLED——与 2026-09-19 修掉的桥接那个窗口一模一样。打上标记后撤单返回 409；
+    # 超时作废仍由 is_stale_pending（按 created_at）兜底，网关最长等待 140 秒远小于它。
+    # The same commit marks the order delivered. Cancel only blocks in-flight commands
+    # via `delivered`, which used to be set by the bridge poll alone: for the tens of
+    # seconds a gateway order waits on the dealer it sat "PENDING, undelivered", so a
+    # cancel succeeded with "cancelled" and the result write below then overwrote it
+    # by id to FILLED — the very window fixed for the bridge on 2026-09-19. Now cancel
+    # returns 409; the stale void still applies via is_stale_pending (created_at), far
+    # beyond the gateway's 140s worst case.
+    order.delivered = True
+    order.delivered_at = datetime.now(timezone.utc)
     prev_expire = db.expire_on_commit
     db.expire_on_commit = False
     try:
@@ -474,6 +490,19 @@ def try_gateway_execute(
             db.refresh(order)
             return order_update_payload(order)
 
+        # 撤单已被上面的 delivered 标记拦住；万一库里的状态还是在等待期间被别处改掉了
+        # （超时作废、人工改库），仍然写入真实结果——券商那边确实执行了，账面必须跟着
+        # 成交走——但留一条告警，不让「已撤销→已成交」悄无声息地发生。
+        # Cancels are blocked by the delivered flag above. Should the row still have
+        # been changed while we waited (stale void, manual edit), the real result is
+        # written anyway — the broker did execute, so the books must follow — but with
+        # a warning, so a "cancelled → filled" flip is never silent.
+        db_status = db.query(Order.status).filter(Order.id == order.id).scalar()
+        if db_status is not None and db_status != "PENDING":
+            logger.warning(
+                "Gateway 结果到达时订单已是 %s，按真实执行结果覆写: %s %s mt5=%s",
+                db_status, order.action, order.client_order_id, order.mt5_login,
+            )
         apply_trade_result(order, rsp)
         # 打 trade_mode 章：直接用上面已经加载的账号行，不再单独查一次 mt5_accounts
         # （规则同 gamification.stamp.stamp_order_trade_mode）。

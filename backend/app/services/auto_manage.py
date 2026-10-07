@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AutoManagedPosition, AutoManageSettings, MT5Account, Order, User
 from app.services import shared_state
+from app.services.order_payload import OPENED_POSITION
 from app.services.plans import can_auto_manage
 from app.services.push_dispatch import EVENT_AUTO_MANAGE, dispatch_event_push
 from app.services.shared_cache import SharedVersion
@@ -319,13 +320,22 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     # position ticket would mark a position we never opened as ours, and this
     # function feeds automatic SL moves and partial closes — the cost of a false
     # positive is touching a position the user opened by hand.
+    #
+    # 「本平台开的仓」用 order_payload.OPENED_POSITION，与平仓归属、胜率同一判据：
+    # 以前只认 (ORDER, FILLED)，挂单触发出来的仓位（PENDING, PLACED——MT5 里该仓位
+    # 号就是挂单票号）永远不被自动仓管，保本/追踪/分批止盈对它全部静默失效。从未
+    # 触发的挂单不会出现在持仓上报里，下面 `in reported` 自然把它滤掉。
+    # "Opened by this platform" uses order_payload.OPENED_POSITION, the same rule as
+    # close attribution and win-rate. Matching only (ORDER, FILLED) meant positions
+    # opened by a triggered pending order (PENDING, PLACED — in MT5 the position id
+    # is the pending ticket) were never managed. An untriggered pending order is
+    # never reported as a position, so `in reported` below drops it.
     platform_tickets = {
         pos_id
         for ticket, position in db.query(Order.mt5_ticket, Order.mt5_position)
         .filter(
             Order.user_id == user_id,
-            Order.action == "ORDER",
-            Order.status == "FILLED",
+            OPENED_POSITION,
             or_(Order.mt5_ticket.in_(tickets), Order.mt5_position.in_(tickets)),
         )
         .all()

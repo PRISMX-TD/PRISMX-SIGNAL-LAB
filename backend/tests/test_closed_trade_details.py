@@ -90,6 +90,35 @@ def test_platform_order_fills_open_facts_and_latest_modify(db_session, user):
     assert row.tp == 2030.0, "改单没动止盈就沿用开仓单 / untouched TP stays"
 
 
+def test_bridge_market_order_matches_on_mt5_ticket(db_session, user):
+    """桥接市价单只写 mt5_ticket（MT5 里即仓位号），也必须能兜底开仓事实。
+    回归：以前只比 mt5_position，桥接账号的开仓价/时间/止损止盈永远是空的。"""
+    db_session.add(Order(
+        user_id=user.id, client_order_id="c-b", action="ORDER", symbol="XAUUSD", side="BUY",
+        volume=1.0, status="FILLED", mt5_login=LOGIN, mt5_ticket=777, mt5_position=None,
+        filled_price=2003.0, sl=1985.0, tp=2025.0,
+    ))
+    db_session.commit()
+    upsert_leg(db_session, user.id, LOGIN, _leg(), True)
+    row = db_session.query(ClosedTrade).one()
+    assert (row.open_price, row.sl, row.tp) == (2003.0, 1985.0, 2025.0)
+    assert row.open_time is not None
+
+
+def test_gateway_ticket_never_matches_when_position_is_known(db_session, user):
+    """网关单的 mt5_ticket 是订单号/成交号，与仓位号不同编号：有 mt5_position 时不得
+    拿 mt5_ticket 去撞，否则别的仓位的开仓事实会安到这笔平仓上。"""
+    db_session.add(Order(
+        user_id=user.id, client_order_id="c-g", action="ORDER", symbol="XAUUSD", side="BUY",
+        volume=1.0, status="FILLED", mt5_login=LOGIN, mt5_ticket=777, mt5_position=555,
+        filled_price=1900.0, sl=1890.0,
+    ))
+    db_session.commit()
+    upsert_leg(db_session, user.id, LOGIN, _leg(), True)
+    row = db_session.query(ClosedTrade).one()
+    assert row.open_price is None and row.sl is None
+
+
 def test_channel_values_beat_platform_fallback(db_session, user):
     db_session.add(Order(
         user_id=user.id, client_order_id="c-3", action="ORDER", symbol="XAUUSD", side="BUY",

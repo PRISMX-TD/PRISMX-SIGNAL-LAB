@@ -1,16 +1,20 @@
-"""信号结果判定：baseline 核心对 Signal 与 StrategySignal 两表通用。
+"""信号结果判定：baseline 核心（apply_baseline）供平台 webhook 信号（Signal 表）使用；
+策略信号（StrategySignal）在 K 线收盘时产生，按其后每根完整 K 线判定。
 
-共用而非各写一份，是为了让"策略胜率"与"平台胜率"口径一致、可直接对比——这
-正是策略卡片并排展示两个数字的前提。旧策略侧实现直接取整根 K 线高低点判定，
-在一根 4H K 线中途触发时会把该 K 线此前数小时的波动计入命中，系统性高估胜率。
+平台 webhook 信号会落在一根仍在形成的 K 线中途：取整根高低点判定会把该 K 线
+此前数小时的波动计入命中，系统性高估胜率，所以首次观测只记基线。策略信号则
+不同——它在收盘时产生，之后的每根 K 线完全发生在信号之后，必须与回测
+（backtest.resolve_trade，从入场下一根开始）同一口径逐根判定，否则同一组 K 线
+上实盘与回测给出不同结果。
 
-Signal-result resolution; the baseline core is shared by the Signal and
-StrategySignal tables. Sharing (rather than two copies) is what makes "strategy
-win rate" and "platform win rate" the same measurement and therefore
-comparable — the premise of showing both side by side on a strategy card. The
-old strategy-side code resolved against a whole bar's high/low, so a signal
-firing partway through a 4H bar counted the preceding hours of movement as a
-hit, systematically overstating win rates.
+Signal-result resolution. The baseline core (apply_baseline) serves platform
+webhook signals (the Signal table), which land mid-way through a still-forming
+bar: judging that bar's full high/low would count the preceding hours as a hit,
+so the first observation only records a baseline. Strategy signals
+(StrategySignal) differ — they fire at a bar's close, so every later bar lies
+entirely after the signal and must be judged bar by bar exactly like the
+backtest (backtest.resolve_trade, from the bar after entry); otherwise live and
+backtest disagree on identical bars.
 """
 import asyncio
 import logging
@@ -130,24 +134,44 @@ def resolve_strategy_signals(db: Session, symbol: str, interval: str, bar: dict)
 
     now = datetime.now(timezone.utc)
     resolved: list[StrategySignal] = []
+    bar_t = bar.get("t")
     for sig in pending:
-        first_observation = sig.baseline_high is None or sig.baseline_low is None
-        outcome = apply_baseline(sig, low, high)
-        # bars_held 从"信号存在期间经过的收盘 K 线"开始计数，首次观测那根也算：
-        # 它确实已经收盘，只是其高低点不可信（可能早于信号创建就在形成），
-        # 而"过了几根"这件事与价格是否可信无关。
-        # bars_held counts closed bars elapsed while the signal existed,
-        # including the first observation: that bar really did close; only its
-        # high/low are untrustworthy (it may predate the signal), and "how many
-        # bars have passed" doesn't depend on that.
+        # 策略信号只在 K 线**收盘**时由 live.evaluate_new_candle 产生（bar_t = 触发
+        # 那根的开盘时间），而且本函数在同一次评估里先于开仓运行——所以信号之后的
+        # 每一根 K 线都完整地发生在信号之后，按整根高低点直接判定即可，与回测
+        # backtest.resolve_trade 从 entry_i+1 开始逐根判定同一口径。
+        # 以前这里也套用了 apply_baseline 的「首次观测只记基线」：那是为平台
+        # webhook 信号（Signal 表）设计的——它们会落在一根仍在形成的 K 线中途。
+        # 套到策略信号上，等于把入场后的第一根整根作废：那根里真实发生的止盈/止损
+        # 被吞掉、超时也晚一根，实盘与回测在同一组 K 线上给出不同结果。
+        # 平台信号仍走 apply_baseline（signal_resolution.py），不受影响。
+        #
+        # Strategy signals are only produced at a bar's **close** by
+        # live.evaluate_new_candle (bar_t = the triggering bar's open time), and
+        # this function runs before entries within the same evaluation — so every
+        # later bar happens entirely after the signal and is judged on its full
+        # high/low, the same basis as backtest.resolve_trade scanning from
+        # entry_i+1. This used to borrow apply_baseline's "first observation only
+        # records a baseline", which exists for platform webhook signals (the
+        # Signal table) that land mid-way through a still-forming bar. Applied
+        # here it voided the whole first bar after entry: a real TP/SL there was
+        # swallowed and timeouts ran one bar late, so live and backtest disagreed
+        # on identical bars. Platform signals still use apply_baseline
+        # (signal_resolution.py), unchanged.
+        if bar_t is not None and sig.bar_t is not None and bar_t <= sig.bar_t:
+            # 触发那根本身或更早的 bar（补空洞的批次会带来）：不属于持仓期，跳过。
+            # The trigger bar itself or an older one (a gap-filling batch brings
+            # these): not part of the holding period, skip.
+            continue
         sig.bars_held = (sig.bars_held or 0) + 1
+        outcome = _judge_bar(sig, low, high)
         if outcome is not None:
             sig.result = outcome
             sig.resolved_at = now
             resolved.append(sig)
             continue
         limit = timeouts.get(sig.strategy_id)
-        if limit is not None and not first_observation and sig.bars_held >= limit:
+        if limit is not None and sig.bars_held >= limit:
             # 超时平仓：按当根收盘价平仓，记 TIMEOUT。计入绩效（是一个真实
             # 出场），与 STALE（数据源中断，不计入）区分。
             # Timeout exit at this bar's close, recorded as TIMEOUT. Counts
@@ -160,6 +184,26 @@ def resolve_strategy_signals(db: Session, symbol: str, interval: str, bar: dict)
                 sig.id, sig.bars_held, close,
             )
     return resolved
+
+
+def _judge_bar(sig, low: float, high: float) -> str | None:
+    """用一根完整发生在信号之后的 K 线判定，规则与 backtest.resolve_trade 逐字一致：
+    同根双触按止损。
+    Judge one bar lying entirely after the signal, with exactly
+    backtest.resolve_trade's rule: a double touch counts as a stop."""
+    if sig.stop_loss is None or sig.take_profit is None:
+        return None
+    if sig.side == "BUY":
+        hit_sl = low <= sig.stop_loss
+        hit_tp = high >= sig.take_profit
+    else:
+        hit_sl = high >= sig.stop_loss
+        hit_tp = low <= sig.take_profit
+    if hit_sl:
+        return "HIT_SL"
+    if hit_tp:
+        return "HIT_TP"
+    return None
 
 
 def sweep_stale_strategy_signals(db: Session) -> list[StrategySignal]:

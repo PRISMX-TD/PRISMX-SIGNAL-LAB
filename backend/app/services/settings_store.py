@@ -427,11 +427,20 @@ def save_strategy_settings(db, data: dict) -> None:
     set_setting(db, "strategy", merged)
 
 
-# 交易成本默认值。点差/滑点为价格单位；手续费为「一手往返合计、折算到价格
+# 交易成本默认值。default_spread/default_slippage 为价格单位，只用来补 per_symbol
+# 里某个品种缺的字段；**没配置的品种**按 default_*_frac（成交价的比例，0.0001 =
+# 1 基点）计点差/滑点——绝对的价格单位默认值套到不同量级的品种上会离谱（0.2 对
+# 黄金合理，对 EURUSD 是 2000 pip），见 strategy/costs.py。
+# 点差/滑点为价格单位；手续费为「一手往返合计、折算到价格
 # 单位」——回测在价格空间结算（见 strategy/backtest.py），不引入合约规模与
 # 点值假设，故手续费必须与价格同量纲。per_symbol 为 品种 -> 覆盖项 的映射，
 # 缺失的字段逐项回落到 default_*。
-# Trading-cost defaults. Spread/slippage are in price units; commission is
+# Trading-cost defaults. default_spread/default_slippage are price units and only
+# fill fields missing from a per_symbol entry; **unconfigured symbols** use
+# default_*_frac (a fraction of the fill price, 0.0001 = 1 bp) — one absolute
+# price-unit default is absurd across magnitudes (0.2 is fine for gold, 2000
+# pips on EURUSD); see strategy/costs.py.
+# Spread/slippage are in price units; commission is
 # "per lot, round trip, expressed in price units" — the backtest settles in
 # price space (see strategy/backtest.py) and deliberately assumes no contract
 # size or point value, so commission has to share the price unit. per_symbol
@@ -440,6 +449,8 @@ STRATEGY_COST_DEFAULTS: dict = {
     "default_spread": 0.2,
     "default_commission_per_lot": 0.0,
     "default_slippage": 0.05,
+    "default_spread_frac": 0.0001,
+    "default_slippage_frac": 0.00002,
     "per_symbol": {},
 }
 

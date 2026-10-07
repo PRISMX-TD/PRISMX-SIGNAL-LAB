@@ -21,7 +21,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import or_
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -68,12 +68,27 @@ def platform_position_facts(db: Session, user_id: str, login: str, position_tick
     time and SL/TP, overlaid with the latest successful MODIFY for it.
     """
     same_login = or_(Order.mt5_login == login, Order.mt5_login.is_(None))
+    pos = int(position_ticket)
+    # 仓位号按 trade_performance.position_id_of 的单值规则取：有 mt5_position 就只认
+    # 它，没有才回落到 mt5_ticket。以前只比 mt5_position，而桥接的市价单只写
+    # mt5_ticket（MT5 里市价单的订单号即仓位号），于是桥接账号的开仓价/时间/止损止盈
+    # 永远兜底不上。回落只在 mt5_position 为空时生效：网关单的 mt5_ticket 是订单号或
+    # 成交号、与仓位号不同编号，拿它去撞会把别的仓位的事实安到这笔平仓上。
+    # Position id per trade_performance.position_id_of's single-value rule:
+    # mt5_position when present, else mt5_ticket. Matching mt5_position alone
+    # left bridge accounts blank, since bridge market orders only set mt5_ticket
+    # (in MT5 a market order's ticket is the position id). The fallback applies
+    # only when mt5_position is null: a gateway mt5_ticket is an order/deal number
+    # in a different numbering space and would attach another position's facts.
     opening = (
         db.query(Order)
         .filter(
             Order.user_id == user_id,
             OPENED_POSITION,
-            Order.mt5_position == int(position_ticket),
+            or_(
+                Order.mt5_position == pos,
+                and_(Order.mt5_position.is_(None), Order.mt5_ticket == pos),
+            ),
             same_login,
         )
         .order_by(Order.created_at.desc())
@@ -93,7 +108,7 @@ def platform_position_facts(db: Session, user_id: str, login: str, position_tick
             Order.user_id == user_id,
             Order.action == "MODIFY",
             Order.status == "FILLED",
-            Order.ticket == int(position_ticket),
+            Order.ticket == pos,
             same_login,
         )
         .order_by(Order.created_at.desc())

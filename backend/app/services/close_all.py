@@ -12,7 +12,9 @@
    没人管，而用户以为"全部平仓"已经做完。落库是一次事务，桥接或网关照单执行。
 
 批次的编号规则：客户端送一个普通的 clientOrderId（与别处同一个生成器），服务端
-拼成 `ca_<cid>#<ticket>` 作为每条子指令的 clientOrderId。这样
+拼成 `ca_<cid>#<login>#<ticket>`（仓位没带账号时是 `ca_<cid>#<ticket>`）作为每条
+子指令的 clientOrderId。账号必须进 id：票号只在一个 MT5 账号内唯一，用户两个账号
+（尤其不同券商）撞上同一个票号时，不带账号的两条子指令会撞唯一约束、整批 500。这样
   · 同一批里每条子指令各有唯一 id，(user_id, client_order_id) 唯一约束照旧生效；
   · 整批的 id 有共同前缀 `ca_<cid>#`，回执阶段能反查"这一批还有没有没回来的"；
   · 客户端重试（网络抖动补发同一个请求）不会重复下指令——唯一约束挡住。
@@ -22,13 +24,18 @@ frontend loop over /orders/close, because that loop shares one per-IP bucket
 with opens and modifies (and with everyone behind the same egress IP), so a
 large batch can end up half-closed on a 429 — worse than no button at all. It
 would also fire one Web Push per position, and abandon the rest if the page
-went away mid-loop. Child commands are keyed `ca_<cid>#<ticket>` so each is
-unique, the batch is greppable at ack time, and a client retry is idempotent.
+went away mid-loop. Child commands are keyed `ca_<cid>#<login>#<ticket>`
+(`ca_<cid>#<ticket>` for a login-less position) so each is unique — the login is
+needed because a ticket is only unique within one MT5 account, and two of a
+user's accounts sharing a ticket number used to collide on the unique constraint
+and 500 the whole batch — the batch is greppable at ack time, and a client retry
+is idempotent.
 """
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import MT5Account, Order
@@ -59,7 +66,13 @@ def batch_id(client_order_id: str) -> str:
     return f"{CLOSE_ALL_PREFIX}{client_order_id}"
 
 
-def child_order_id(batch: str, ticket: int) -> str:
+def child_order_id(batch: str, ticket: int, login: str | None = None) -> str:
+    """子指令 id。带上账号：票号只在单个账号内唯一（见模块说明）。批次 id 仍是
+    第一个 `#` 之前的部分，batch_of 不受影响。
+    Child id. Carries the login since a ticket is only unique per account (see the
+    module docstring); the batch is still everything before the first `#`."""
+    if login:
+        return f"{batch}{_SEP}{login}{_SEP}{ticket}"
     return f"{batch}{_SEP}{ticket}"
 
 
@@ -150,14 +163,33 @@ def queue(
         return batch, [], 0
 
     tickets = [t for t, _, _ in wanted]
-    busy = {
-        row[0]
-        for row in db.query(Order.ticket)
+    # 「忙」按 (账号, 票号) 认，而且只认**全平**指令（volume 为 0，一键平仓的子指令
+    # 也是全平）。
+    #   · 账号：票号只在单个账号内唯一，另一个账号上同号仓位的平仓不该挡住这一个。
+    #   · 只认全平：在途的是部分平仓（volume > 0）时，以前同样被当成「已有人在平」
+    #     跳过，部分平仓执行完剩下的仓位就没人管了，而用户按的是「全部平仓」。现在照
+    #     样排一条全平——两条先后执行，最坏是后到的那条因仓位已不在而被拒，无害。
+    #   · 在途指令没记账号（旧记录）时按「可能是这个仓位」处理，宁可少发一条。
+    # "Busy" is keyed on (login, ticket) and only counts **full** closes (volume 0,
+    # which close-all children are too).
+    #   · Login: a ticket is only unique per account; a close on another account's
+    #     same-numbered position must not block this one.
+    #   · Full closes only: an in-flight partial close (volume > 0) used to count as
+    #     "already being closed", so the remainder stayed open after the partial
+    #     filled although the user pressed "close all". A full close is now queued
+    #     anyway; at worst the later of the two is rejected because the position is
+    #     gone, which is harmless.
+    #   · An in-flight command without a login (legacy rows) is treated as possibly
+    #     this position — better one close too few than a double.
+    busy_rows = {
+        (row[0], row[1])
+        for row in db.query(Order.mt5_login, Order.ticket)
         .filter(
             Order.user_id == user_id,
             Order.status == "PENDING",
             Order.action == "CLOSE",
             Order.ticket.in_(tickets),
+            or_(Order.volume.is_(None), Order.volume <= 0),
         )
         .all()
     }
@@ -167,18 +199,31 @@ def queue(
     # Replay of the same clientOrderId must not re-queue. The PENDING gate covers
     # an in-flight batch; matching the batch itself also covers a finished one,
     # which would otherwise fail the whole commit on the unique constraint.
-    busy |= {o.ticket for o in batch_orders(db, user_id, batch) if o.ticket is not None}
+    busy_rows |= {
+        (o.mt5_login, o.ticket) for o in batch_orders(db, user_id, batch) if o.ticket is not None
+    }
+
+    def _busy(ticket: int, login: str | None) -> bool:
+        if (None, ticket) in busy_rows:
+            return True
+        if login is None:
+            return any(t == ticket for _, t in busy_rows)
+        return (login, ticket) in busy_rows
 
     created: list[Order] = []
     skipped = 0
+    seen: set[tuple[str | None, int]] = set()
     for ticket, p, login in wanted:
-        if ticket in busy:
+        # 同一请求里重复上报的同一仓位也只排一条（否则同一 id 撞唯一约束）。
+        # A position listed twice in one request is queued once (same id otherwise).
+        if _busy(ticket, login) or (login, ticket) in seen:
             skipped += 1
             continue
+        seen.add((login, ticket))
         created.append(
             Order(
                 user_id=user_id,
-                client_order_id=child_order_id(batch, ticket),
+                client_order_id=child_order_id(batch, ticket, login),
                 action="CLOSE",
                 symbol=p.get("symbol") or "",
                 side=p.get("side") or "BUY",

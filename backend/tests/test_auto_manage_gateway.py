@@ -48,7 +48,7 @@ def _position(ticket: int, login: str, take_profit: float = 0.0) -> dict:
 
 
 def _setup(db, *, login: str, source: str, mt5_ticket: int, mt5_position: int | None,
-           **settings_kw):
+           action: str = "ORDER", status: str = "FILLED", **settings_kw):
     """建一个开着保本的 PRO 用户 + 一笔本平台开出的已成交订单。
 
     settings_kw 覆盖自动仓管设置的默认值（默认只开保本）。
@@ -63,7 +63,7 @@ def _setup(db, *, login: str, source: str, mt5_ticket: int, mt5_position: int | 
     db.add(AutoManageSettings(user_id=user.id, **cfg))
     db.add(Order(
         user_id=user.id, client_order_id=f"open-{login}",
-        action="ORDER", status="FILLED",
+        action=action, status=status,
         symbol="XAUUSD.s", side="BUY", volume=1.0,
         mt5_login=login, mt5_ticket=mt5_ticket, mt5_position=mt5_position,
     ))
@@ -171,6 +171,34 @@ def test_bridge_command_stays_pending_for_the_bridge_to_fetch(db_session, execut
     assert executed == []
     cmd = db_session.query(Order).filter(Order.action == "MODIFY").one()
     assert cmd.status == "PENDING"
+
+
+@pytest.mark.parametrize("source,login", [("gateway", GATEWAY_LOGIN), ("bridge", BRIDGE_LOGIN)])
+def test_position_from_triggered_pending_order_is_managed(db_session, executed, source, login):
+    """挂单触发出来的仓位（PENDING, PLACED）同样是本平台开的仓，必须被自动仓管。
+
+    回归：以前只认 (ORDER, FILLED)，挂单开出的仓位保本/追踪/分批止盈全部静默失效。
+    判据与 order_payload.OPENED_POSITION 一致；MT5 里该仓位号就是挂单票号。
+    """
+    uid = _setup(db_session, login=login, source=source,
+                 mt5_ticket=GATEWAY_POSITION, mt5_position=GATEWAY_POSITION,
+                 action="PENDING", status="PLACED")
+
+    created = evaluate_positions(db_session, uid, [_position(GATEWAY_POSITION, login)])
+
+    assert created == 1
+    cmd = db_session.query(Order).filter(Order.action == "MODIFY").one()
+    assert cmd.ticket == GATEWAY_POSITION and cmd.sl == pytest.approx(ENTRY)
+
+
+def test_cancelled_pending_order_does_not_claim_a_position(db_session, executed):
+    """撤掉的挂单（不在 OPENED_POSITION 里）不能把同号仓位认成本平台的。"""
+    uid = _setup(db_session, login=GATEWAY_LOGIN, source="gateway",
+                 mt5_ticket=GATEWAY_POSITION, mt5_position=GATEWAY_POSITION,
+                 action="PENDING", status="CANCELLED")
+
+    assert evaluate_positions(db_session, uid, [_position(GATEWAY_POSITION, GATEWAY_LOGIN)]) == 0
+    assert executed == []
 
 
 def test_position_not_opened_by_platform_is_ignored(db_session, executed):
