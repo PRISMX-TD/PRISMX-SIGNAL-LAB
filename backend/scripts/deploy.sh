@@ -4,9 +4,15 @@
 # 正常由 GitHub Actions（.github/workflows/deploy-backend.yml）通过 SSH 触发；
 # 也可以登上 VPS 手动跑：  su - ubuntu -c 'bash ~/PRISMX-SIGNAL-LAB/backend/scripts/deploy.sh'
 #
+# 用法：deploy.sh [<commit sha>]
+#   带参数（Actions 传 github.sha）：只部署**这个**跑过测试的 commit，而不是 fetch 那一刻
+#     origin/main 恰好指着的东西——测试期间又有人推了新 commit 时，后者从没跑过测试。
+#     要求它在 origin/main 上（是 origin/main 本身或其祖先），否则拒绝。
+#   不带参数（手动）：部署 origin/main 最新，与以前一样。
+#
 # 流程：fetch → 只允许 fast-forward 合并（本地有改动会直接失败，不会悄悄覆盖）
 #       → requirements.txt 变了才 pip install → systemctl restart prismx
-#       → 轮询健康检查；超时则回滚到上一个 commit 并再重启。
+#       → 轮询健康检查；超时则回滚到上一次健康上线的 commit（last-good-commit）并再重启。
 #
 # 依赖 VPS 上两处一次性配置（见运维手册 2.2）：
 #   1) ubuntu 对下面两条命令免密 sudo：
@@ -22,6 +28,8 @@
 #      commit、服务还跑着旧代码」的状态下退出，下一次重跑时 HEAD 已经等于
 #      origin/main，于是打印「已是最新，无需部署」并 exit 0——服务里跑的仍是
 #      旧代码，脚本和 Actions 却都报绿。只有这个文件能区分「装好了」和「ff 过了」。
+#      它同时是**回滚目标**和「要不要 pip install」的比较基准：重跑中断过的部署时
+#      HEAD 已经是新 commit，拿 HEAD 当回滚目标只会把同一份坏代码再起一遍。
 #
 #   2) failed-commits —— 部署失败并已回滚的 commit。
 #      回滚只动 VPS 的工作区，origin/main 仍指着那个坏 commit；下一次触发
@@ -38,6 +46,7 @@
 #   PRISMX_ALLOW_SCHEMA_ROLLBACK=1
 #                              允许在 schema_rev 已经变化的情况下自动回滚代码
 #   PRISMX_SKIP_DB_SNAPSHOT=1  跳过 pg_dump 快照
+#   PRISMX_DB_SNAPSHOT_TIMEOUT pg_dump 最长跑多少秒（默认 300），超时当作没有快照、继续部署
 #   PRISMX_FORCE=1             无视 failed-commits 的记忆，强行重试同一个 commit
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -99,7 +108,8 @@ read_schema_rev() {
   url=$(find_database_url) || return 1
   case "$url" in postgres*) ;; *) return 1 ;; esac
   command -v psql >/dev/null 2>&1 || return 1
-  raw=$(psql "$(pg_url "$url")" -At -w \
+  # PGCONNECT_TIMEOUT：库连不上时别把部署挂住（psql 默认会一直等）
+  raw=$(PGCONNECT_TIMEOUT=10 psql "$(pg_url "$url")" -At -w \
         -c "SELECT value FROM platform_settings WHERE key = 'schema_rev'" 2>/dev/null) || return 1
   [ -n "$raw" ] || return 1
   printf '%s' "$raw" | tr -d '"'
@@ -120,7 +130,11 @@ snapshot_db() {
   mkdir -p "$SNAPSHOT_DIR"
   out="$SNAPSHOT_DIR/pre-${new:0:7}-$(date +%Y%m%d-%H%M%S).dump"
 
-  if pg_dump -Fc -f "$out" "$(pg_url "$url")" 2>/dev/null; then
+  # 加超时：库卡住时 pg_dump 会一直挂着，整个部署（和 Actions 的 10 分钟上限）跟着卡死，
+  # 而这时还没重启任何东西。没有 timeout 命令就照旧直接跑。
+  local tmo=()
+  command -v timeout >/dev/null 2>&1 && tmo=(timeout "${PRISMX_DB_SNAPSHOT_TIMEOUT:-300}")
+  if PGCONNECT_TIMEOUT=10 ${tmo[@]+"${tmo[@]}"} pg_dump -Fc -f "$out" "$(pg_url "$url")" 2>/dev/null; then
     DB_SNAPSHOT="$out"
     log "数据库快照：$out"
     # 只留最近 5 份，别把磁盘吃满
@@ -136,8 +150,55 @@ cd "$REPO"
 git fetch -q origin "$BRANCH"
 
 old=$(git rev-parse HEAD)
-new=$(git rev-parse "origin/$BRANCH")
-last_good=$(cat "$LAST_GOOD_FILE" 2>/dev/null || true)
+last_good=$(tr -d '[:space:]' 2>/dev/null < "$LAST_GOOD_FILE" || true)
+target="${1:-}"
+
+if [ -n "$target" ]; then
+  # Actions 传进来的、跑过测试的 commit。只认 sha，且必须在 origin/$BRANCH 上——
+  # 不在上面说明被 force-push 掉了或传错了，部署一个分支上不存在的 commit 不对。
+  case "$target" in
+    *[!0-9a-fA-F]*) die "参数必须是 commit sha，收到：$target" ;;
+  esac
+  [ "${#target}" -ge 7 ] || die "commit sha 太短：$target"
+  new=$(git rev-parse -q --verify "${target}^{commit}") \
+    || die "fetch 之后仍找不到 commit $target（不在 origin/$BRANCH 上？）"
+  git merge-base --is-ancestor "$new" "origin/$BRANCH" \
+    || die "commit ${new:0:7} 不在 origin/$BRANCH 上（被 force-push 掉了？），拒绝部署"
+  # 工作区已经比它新（排队的旧 run 在新 run 之后才轮到 / 重跑了旧 run）：不往回退。
+  if [ "$new" != "$old" ] && git merge-base --is-ancestor "$new" "$old"; then
+    if [ "$last_good" = "$old" ]; then
+      log "工作区已在更新且部署健康的 ${old:0:7}（已包含 ${new:0:7}），跳过这次较旧的部署"
+      exit 0
+    fi
+    die "工作区在更新的 ${old:0:7}（已包含 ${new:0:7}），但它没有部署成功的记录；不往回退。请登上 VPS 不带参数跑一次 deploy.sh。"
+  fi
+else
+  # 手动跑、不带参数：与以前一样，部署 origin/$BRANCH 最新。
+  new=$(git rev-parse "origin/$BRANCH")
+fi
+
+# 回滚目标：平时就是开跑时工作区所在的 $old（正在线上跑的那份）。只有重跑一次中断过的
+# 部署时（ff 已完成、没重启，$old 已经等于 $new），拿 $old 当目标 = 回滚后重启的还是同一份
+# 坏代码，这时才改用上一次**健康检查真的通过**的 commit。不无条件优先 last-good：有人绕过
+# 本脚本手工上过线时它是旧值，会一下子越过好几个 commit 退回去。
+# Rollback target: normally $old, what is live right now. Only when re-running an
+# interrupted deploy ($old already equals $new) would that restart the same broken code,
+# so then fall back to the last commit that really passed the health check. last-good is
+# not preferred unconditionally: after a manual out-of-band deploy it is stale and would
+# jump back several commits.
+rollback_to=""
+if [ "$old" = "$new" ]; then
+  candidates=("$last_good" "$old")
+else
+  candidates=("$old" "$last_good")
+fi
+for c in "${candidates[@]}"; do
+  [ -n "$c" ] || continue
+  c=$(git rev-parse -q --verify "${c}^{commit}" 2>/dev/null) || continue
+  [ "$c" != "$new" ] || continue
+  rollback_to="$c"
+  break
+done
 
 # 这个 commit 上次部署失败过并被回滚：再来一遍只会得到同样的结果，外加两次
 # systemctl restart（= 两次下单中断）。拦在这里，逼人推一个新 commit。
@@ -162,7 +223,7 @@ else
   log "更新 ${old:0:7} → ${new:0:7}"
   git log --oneline --no-decorate "$old..$new" | sed 's/^/    /'
 
-  if ! git merge -q --ff-only "origin/$BRANCH"; then
+  if ! git merge -q --ff-only "$new"; then
     die "无法 fast-forward：VPS 本地有未提交改动或分叉。登上 VPS 检查 'git status'，处理后再推。"
   fi
 fi
@@ -199,11 +260,21 @@ restart_service() {
 # ---------- 装依赖 ----------
 # 装依赖失败绝不能就这么退出：工作区已经 ff 到新代码了，下次重跑会被当成
 # 「已是最新」。把工作区退回旧 commit，让状态和"服务里跑的东西"重新对上。
-if requirements_changed "$old" "$new"; then
+#
+# 要不要装：venv 里装的是哪一版依赖，git 答不了。重跑中断过的部署时 $old 已经等于
+# $new，只拿 $old 比会得出「没变」而跳过 pip——新依赖从没装上。所以同时跟健康记录
+# （回滚目标）比；两者都没有（第一次部署、又没有记录）就装一遍，pip 对已装好的是空操作。
+deps_need_install() {
+  requirements_changed "$old" "$new" && return 0
+  [ -n "$rollback_to" ] || return 0
+  requirements_changed "$rollback_to" "$new"
+}
+reset_to="${rollback_to:-$old}"
+if deps_need_install; then
   if ! install_deps; then
-    log "装依赖失败，把工作区退回 ${old:0:7}，保持与正在运行的服务一致"
-    git reset -q --hard "$old" || log "⚠ 回退工作区也失败了，请手工检查 git status"
-    die "pip install 失败，本次没有上线任何东西（服务仍在 ${old:0:7}）。修好后重推。"
+    log "装依赖失败，把工作区退回 ${reset_to:0:7}，保持与正在运行的服务一致"
+    git reset -q --hard "$reset_to" || log "⚠ 回退工作区也失败了，请手工检查 git status"
+    die "pip install 失败，本次没有上线任何东西（服务仍在 ${reset_to:0:7}）。修好后重推。"
   fi
 fi
 
@@ -227,6 +298,13 @@ sudo -n /usr/bin/journalctl -u "$SERVICE" -n 60 --no-pager 2>/dev/null | sed 's/
 # 这个 commit 从此进黑名单，下次触发直接被拦下（见文件头第 2 条）。
 printf '%s\n' "$new" >> "$FAILED_FILE"
 
+# 没有可回滚的 commit（没有健康记录，且工作区开跑时就已经在 $new）：再 reset + 重启
+# 只会把同一份坏代码再起一遍、多一次下单中断，不做。
+if [ -z "$rollback_to" ]; then
+  die "新版本 ${new:0:7} 启动失败，且没有可回滚的 commit（$LAST_GOOD_FILE 没有健康记录）。
+请登上 VPS 手工处理：journalctl -u $SERVICE -f；git -C $REPO log 找一个可用的 commit 后 reset --hard 并重启。"
+fi
+
 schema_after=$(read_schema_rev || true)
 log "schema_rev：部署前 ${schema_before:-未知} → 现在 ${schema_after:-未知}"
 
@@ -245,8 +323,10 @@ if [ -n "$schema_before" ] && [ -n "$schema_after" ] && [ "$schema_before" != "$
       log "   恢复库：pg_restore --clean --if-exists -d \"\$DATABASE_URL\" '$DB_SNAPSHOT'"
     fi
     log ""
-    log "   确认旧代码能在新 schema 上跑（或已经恢复了库）之后，执行："
-    log "     PRISMX_ALLOW_SCHEMA_ROLLBACK=1 bash $REPO/backend/scripts/deploy.sh"
+    log "   确认旧代码能在新 schema 上跑（或已经恢复了库）之后，手工回滚到上次健康的 ${rollback_to:0:7}："
+    log "     cd $REPO && git reset --hard $rollback_to && $PIP install -q -r backend/requirements.txt && sudo systemctl restart $SERVICE"
+    log "   （不要直接重跑 deploy.sh：${new:0:7} 已记入失败名单，重跑会被拒绝；PRISMX_FORCE=1 则会再部署一次坏版本。"
+    log "    PRISMX_ALLOW_SCHEMA_ROLLBACK=1 只对部署当次生效，表示 schema 变了也照样自动回滚。）"
     log "   要先把服务弄起来看日志：sudo systemctl restart $SERVICE；journalctl -u $SERVICE -f"
     die "新版本 ${new:0:7} 启动失败，且 schema 已变化（$schema_before → $schema_after），已停在此处等人工确认"
   fi
@@ -256,19 +336,19 @@ elif [ -z "$schema_before" ] || [ -z "$schema_after" ]; then
   log "  无法判断这次是否动过 schema。仍然继续回滚以尽快恢复服务，但请自行核对。"
 fi
 
-log "回滚到 ${old:0:7}"
-git reset -q --hard "$old"
+log "回滚到 ${rollback_to:0:7}（上次健康上线的版本）"
+git reset -q --hard "$rollback_to"
 
 # 回滚路径里装依赖失败不能中断回滚：这里本来就是在救火，一次 pip 网络抖动
 # 不该把服务永久留在不健康的新版本上。restart 必须执行。
-if requirements_changed "$old" "$new"; then
+if requirements_changed "$rollback_to" "$new"; then
   install_deps || log "⚠ 回滚时装依赖失败，仍继续重启（依赖可能仍是新版的，注意核对）"
 fi
 
 restart_service
 
 if wait_healthy; then
-  die "新版本 ${new:0:7} 启动失败，已回滚到 ${old:0:7}（服务恢复）。请看上面的日志修复后再推。
+  die "新版本 ${new:0:7} 启动失败，已回滚到 ${rollback_to:0:7}（服务恢复）。请看上面的日志修复后再推。
 该 commit 已记入 $FAILED_FILE，再次推同一个 commit 会被直接拒绝。"
 else
   die "回滚后服务仍不健康！请立刻登上 VPS：journalctl -u $SERVICE -f"

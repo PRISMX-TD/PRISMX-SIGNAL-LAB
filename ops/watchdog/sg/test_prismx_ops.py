@@ -54,7 +54,14 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = ops.OperatorStore(os.path.join(self.tmp.name, "ops.json"))
         self.pw = self.store.add("alice")
-        self.cfg = dict(wd.DEFAULTS, JWT_SECRET=SECRET, OPS_SHARED_SECRET="shh", OPS_LOCK_FAILS="3")
+        self.cfg = dict(wd.DEFAULTS, JWT_SECRET=SECRET, OPS_SHARED_SECRET="shh", OPS_LOCK_FAILS="3",
+                        OPS_ADMIN_CACHE_FILE=os.path.join(self.tmp.name, "admins.json"))
+        # 后端的管理员接口：按用户 id 回状态码（默认都是管理员 200）；0 = 后端连不上。
+        self.backend = {}
+        self.backend_default = 200
+        self.admin_calls = []
+        self._orig_check_admin = ops.check_admin_remote
+        ops.check_admin_remote = self._fake_check_admin
         self.watchdog = FakeWatchdog()
         self.history = ops.History(os.path.join(self.tmp.name, "h.jsonl"))
         self.ctx = ops.OpsContext(self.cfg, self.watchdog, self.store, self.history)
@@ -65,7 +72,13 @@ class Base(unittest.TestCase):
 
     def tearDown(self):
         ops.call_vps = self._orig_call_vps
+        ops.check_admin_remote = self._orig_check_admin
         self.tmp.cleanup()
+
+    def _fake_check_admin(self, url, token, timeout=4.0):
+        sub = (ops.verify_jwt(token, SECRET) or {}).get("sub")
+        self.admin_calls.append(sub)
+        return self.backend.get(sub, self.backend_default)
 
     def _fake_vps(self, cfg, method, path, payload=None, timeout=8.0):
         self.vps_calls.append((method, path, payload))
@@ -73,8 +86,8 @@ class Base(unittest.TestCase):
             return 200, {"restartsUsed": 0, "restartsMax": 3, "cooldownSec": 0}
         return self.vps_reply
 
-    def call(self, path, body=None, token=None, method="POST", ip="1.2.3.4"):
-        token = make_jwt({"sub": "u1", "exp": time.time() + 600}) if token is None else token
+    def call(self, path, body=None, token=None, method="POST", ip="1.2.3.4", sub="u1", tv=0):
+        token = make_jwt({"sub": sub, "exp": time.time() + 600, "tv": tv}) if token is None else token
         headers = {"Authorization": "Bearer " + token} if token else {}
         raw = json.dumps(body or {}).encode()
         try:
@@ -142,13 +155,76 @@ class HandleTest(Base):
         self.assertEqual(body["gateway"]["restartsMax"], 3)
         self.assertEqual(body["operators"], 1)
 
-    def test_wrong_password_locks_out_that_ip(self):
+    def test_wrong_password_locks_out_that_account_and_ip(self):
         for _ in range(3):
             self.assertEqual(self.call("/ops/restart-backend", {"password": "x"})[0], 403)
         # 锁住之后连对的口令也不行
         self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw})[0], 423)
-        # 别的 IP 不受影响
-        self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw}, ip="5.6.7.8")[0], 202)
+        # 同一账号换 IP 也不行（按账号计数，换 IP 猜没用）
+        self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw}, ip="5.6.7.8")[0], 423)
+        # 同一 IP 上的别的管理员也被这个 IP 的计数挡住
+        self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw}, sub="u2")[0], 423)
+        # 别的管理员、别的 IP 不受影响（没有全局总闸）
+        self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw}, ip="5.6.7.8", sub="u2")[0], 202)
+
+    def test_non_admin_is_rejected_everywhere(self):
+        self.backend["user9"] = 403
+        status, body = self.call("/ops/status", method="GET", sub="user9")
+        self.assertEqual((status, body["error"]), (403, "admin_required"))
+        status, body = self.call("/ops/restart-backend", {"password": self.pw}, sub="user9")
+        self.assertEqual((status, body["error"]), (403, "admin_required"))
+        self.assertEqual(self.watchdog.restarted, [])
+
+    def test_non_admin_cannot_lock_out_admins(self):
+        # 普通用户乱输口令 50 次（换着 IP）：一次都不计数，管理员照样能用。
+        self.backend["user9"] = 403
+        for i in range(50):
+            self.assertEqual(self.call("/ops/restart-backend", {"password": "x"}, sub="user9",
+                                       ip="9.9.9.%d" % i)[0], 403)
+        self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw}, ip="9.9.9.1")[0], 202)
+
+    def test_revoked_session_is_login_required(self):
+        self.backend["u1"] = 401
+        status, body = self.call("/ops/status", method="GET")
+        self.assertEqual((status, body["error"]), (401, "login_required"))
+
+    def test_backend_down_falls_back_to_confirmed_admins_only(self):
+        self.assertEqual(self.call("/ops/status", method="GET")[0], 200)     # 后端在线时确认过 u1
+        self.backend_default = 0                                              # 后端挂了
+        # 重新加载（模拟看门狗重启）：确认记录在磁盘上
+        self.ctx = ops.OpsContext(self.cfg, self.watchdog, self.store, self.history)
+        self.assertEqual(self.call("/ops/restart-backend", {"password": self.pw})[0], 202)
+        # 从没确认过的账号、或会话版本对不上的 token：拒绝
+        status, body = self.call("/ops/status", method="GET", sub="u2")
+        self.assertEqual((status, body["error"]), (503, "admin_unverified"))
+        self.assertEqual(self.call("/ops/status", method="GET", tv=1)[0], 503)
+
+    def test_offline_cache_expires(self):
+        self.assertEqual(self.call("/ops/status", method="GET")[0], 200)
+        self.backend_default = 500
+        verifier = ops.AdminVerifier(dict(self.cfg, OPS_ADMIN_CACHE_SEC="100"))
+        payload = {"sub": "u1", "tv": 0}
+        self.assertIsNone(verifier.check("t", payload, now=time.time() + 50))
+        self.assertEqual(verifier.check("t", payload, now=time.time() + 500).code, "admin_unverified")
+
+    def test_stale_token_cannot_evict_admin_but_demotion_does(self):
+        self.assertEqual(self.call("/ops/status", method="GET", tv=2)[0], 200)
+        self.backend["u1"] = 401                                       # 一张改密前的旧 token
+        self.assertEqual(self.call("/ops/status", method="GET", tv=1)[0], 401)
+        self.backend["u1"] = 0
+        self.ctx = ops.OpsContext(self.cfg, self.watchdog, self.store, self.history)
+        self.assertEqual(self.call("/ops/status", method="GET", tv=2)[0], 200)   # 离线资格还在
+        self.backend["u1"] = 403                                       # 被取消管理员
+        self.ctx = ops.OpsContext(self.cfg, self.watchdog, self.store, self.history)
+        self.assertEqual(self.call("/ops/status", method="GET", tv=2)[0], 403)
+        self.backend["u1"] = 0
+        self.ctx = ops.OpsContext(self.cfg, self.watchdog, self.store, self.history)
+        self.assertEqual(self.call("/ops/status", method="GET", tv=2)[0], 503)
+
+    def test_admin_result_is_memoised_briefly(self):
+        for _ in range(5):
+            self.assertEqual(self.call("/ops/status", method="GET")[0], 200)
+        self.assertEqual(self.admin_calls, ["u1"])
 
     def test_restart_backend_cooldown_and_history(self):
         status, body = self.call("/ops/restart-backend", {"password": self.pw})

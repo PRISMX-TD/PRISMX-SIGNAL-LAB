@@ -93,6 +93,12 @@ DEFAULTS = {
     "OPS_LOCK_FAILS": "5",
     "OPS_LOCK_SEC": "900",
     "OPS_CORS_ORIGINS": "",
+    # 管理员校验：拿浏览器的 token 问后端这个 require_admin 接口（留空 = BACKEND_URL + api/admin/trial）；
+    # 确认过的管理员记在 OPS_ADMIN_CACHE_FILE，后端挂了时 OPS_ADMIN_CACHE_SEC 秒内仍认。
+    "OPS_ADMIN_CHECK_URL": "",
+    "OPS_ADMIN_CACHE_FILE": "/var/lib/prismx-watchdog/ops-admins.json",
+    "OPS_ADMIN_CACHE_SEC": "604800",
+    "OPS_ADMIN_RECHECK_SEC": "60",
     # 与 VPS 看门狗共用的签名密钥；两边必须一样。留空 = 「重启 gateway」不可用。
     "OPS_SHARED_SECRET": "",
     "VPS_OPS_URL": "http://10.66.0.2:8791",
@@ -355,9 +361,12 @@ def unit_state(service):
 
 
 def deploy_running():
-    """自动部署（backend/scripts/deploy.sh）在跑时它自己会重启服务，看门狗让路。"""
+    """自动部署（backend/scripts/deploy.sh）在跑时它自己会重启服务，看门狗让路。
+    GitHub Actions 那条路径会把脚本先落成 ~/.prismx-deploy.sh 再执行，命令行里没有
+    "scripts/deploy.sh"，所以两种名字都要认。/ Match both the repo path and the copy
+    the deploy workflow runs (~/.prismx-deploy.sh)."""
     try:
-        return subprocess.run(["pgrep", "-f", "scripts/deploy.sh"],
+        return subprocess.run(["pgrep", "-f", r"scripts/deploy\.sh|\.prismx-deploy\.sh"],
                               capture_output=True, timeout=10).returncode == 0
     except Exception:
         return False

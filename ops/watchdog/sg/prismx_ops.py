@@ -7,11 +7,17 @@
                                         └─ 重启 gateway：签名后经 WireGuard 隧道转给 VPS 看门狗
 
 两道门：
-  1. 登录 token：浏览器带着平时登录拿到的 JWT，这里用后端同一把 JWT_SECRET 验签名和过期时间
-     （后端挂了也能验，不查库）。挡住「随便哪个路人对着接口猜口令」。
+  1. 管理员登录 token：浏览器带着平时登录拿到的 JWT，这里用后端同一把 JWT_SECRET 验签名和
+     过期时间，再确认它属于**管理员**且会话版本（tv）没作废——JWT 里没有角色，所以拿这个
+     token 去问后端一个只有管理员能看的接口（OPS_ADMIN_CHECK_URL）。问过的结果按
+     「用户 id + tv」记在本地（OPS_ADMIN_CACHE_FILE）：后端挂了的时候，最近
+     OPS_ADMIN_CACHE_SEC 秒内在这里确认过的管理员、拿同一 tv 的 token 仍能按按钮。
+     普通用户的 token 一律挡在这里，连 /ops/status 也看不到。
   2. 运维口令：每个人一个，只能在服务器上用命令生成（--add-operator），这里只存加盐的
      PBKDF2 哈希。口令认出是谁按的；有人离职删掉他那条即可。输错 OPS_LOCK_FAILS 次锁
-     OPS_LOCK_SEC 秒（按来源 IP），全局再有一道总闸。
+     OPS_LOCK_SEC 秒，按「登录账号」和「来源 IP」各记一份；只有过了第 1 道门的人输错才计数，
+     普通用户没法靠乱输口令把管理员锁在外面（旧实现有一道全局总闸：任何登录用户乱输
+     20 次就能把所有人锁 15 分钟）。
 
 再加两道闸：同一个按钮 OPS_COOLDOWN 秒内只能按一次；重启后端与看门狗自动重启共用
 「每小时 N 次」的额度，用完就拒绝。每次操作都记进历史（ops-history.jsonl）并发通知。
@@ -20,9 +26,11 @@ SG ↔ VPS 两个看门狗之间：请求体 + 时间戳 + 随机数用共享密
 HMAC-SHA256 签名，VPS 只认 60 秒内、没见过的随机数，防冒充、防重放。
 
 The watchdog's ops endpoint: the two restart buttons work even when the backend
-is down. Two gates (a valid login JWT, verified locally with the backend's
-secret, plus a per-person ops password stored as a salted PBKDF2 hash), lockout
-on failures, a per-button cooldown and the shared hourly restart budget.
+is down. Two gates (an admin's login JWT -- signature checked locally with the
+backend's secret, admin role + session version confirmed with the backend and
+cached per user for when the backend is down -- plus a per-person ops password
+stored as a salted PBKDF2 hash), per-account / per-IP lockout counted only for
+admins, a per-button cooldown and the shared hourly restart budget.
 SG -> VPS calls are HMAC-signed with a shared secret, timestamp and nonce.
 
 只用标准库。/ Standard library only.
@@ -190,37 +198,43 @@ def call_vps(cfg, method, path, payload=None, timeout=8.0):
 
 
 class Lockout:
-    """按来源 IP 记失败次数；窗口内到上限就锁。另有一道全局总闸，防换 IP 猜。"""
+    """按 key 记失败次数（调用方传「账号」「来源 IP」两个 key），窗口内任一 key 到上限就锁。
 
-    def __init__(self, fails, window, global_fails=20):
-        self.fails, self.window, self.global_fails = fails, window, global_fails
+    没有全局总闸：只有过了管理员校验的请求才会走到这里，换 IP 猜口令会被按账号的计数挡住；
+    全局总闸则让任何一个人（旧实现里甚至是任何注册用户）能把所有管理员一起锁在外面。
+    Failure counts per key (the caller passes the account and the source IP); locked
+    when any key hits the limit. No global breaker: only admin-verified requests get
+    here, and a global one let a single caller lock every admin out.
+    """
+
+    def __init__(self, fails, window):
+        self.fails, self.window = fails, window
         self._lock = threading.Lock()
-        self._per_ip = collections.defaultdict(list)
-        self._all = []
+        self._hits = collections.defaultdict(list)
 
     def _trim(self, now):
         cutoff = now - self.window
-        self._all = [t for t in self._all if t > cutoff]
-        for ip in list(self._per_ip):
-            self._per_ip[ip] = [t for t in self._per_ip[ip] if t > cutoff]
-            if not self._per_ip[ip]:
-                del self._per_ip[ip]
+        for k in list(self._hits):
+            self._hits[k] = [t for t in self._hits[k] if t > cutoff]
+            if not self._hits[k]:
+                del self._hits[k]
 
-    def locked(self, ip, now=None):
+    def locked(self, *keys, now=None):
         now = now or time.time()
         with self._lock:
             self._trim(now)
-            return len(self._per_ip.get(ip, [])) >= self.fails or len(self._all) >= self.global_fails
+            return any(len(self._hits.get(k, [])) >= self.fails for k in keys)
 
-    def fail(self, ip, now=None):
+    def fail(self, *keys, now=None):
         now = now or time.time()
         with self._lock:
-            self._per_ip[ip].append(now)
-            self._all.append(now)
+            for k in keys:
+                self._hits[k].append(now)
 
-    def clear(self, ip):
+    def clear(self, *keys):
         with self._lock:
-            self._per_ip.pop(ip, None)
+            for k in keys:
+                self._hits.pop(k, None)
 
 
 class Cooldown:
@@ -303,6 +317,7 @@ class OpsContext:
         self.operators = operators
         self.history = history
         self.lockout = Lockout(int(cfg.get("OPS_LOCK_FAILS", 5)), int(cfg.get("OPS_LOCK_SEC", 900)))
+        self.admins = AdminVerifier(cfg)
         self.cooldown = Cooldown(int(cfg.get("OPS_COOLDOWN", 300)))
         self.cors = {o.strip() for o in str(cfg.get("OPS_CORS_ORIGINS") or DEFAULT_CORS).split(",") if o.strip()}
 
@@ -313,6 +328,115 @@ class OpsError(Exception):
         self.status, self.code, self.message, self.extra = status, code, message, extra
 
 
+# ---------------------------------------------------------------- 管理员校验 / admin check
+
+
+def check_admin_remote(url, token, timeout=4.0):
+    """拿浏览器的 token 去问后端一个 require_admin 的接口，返回 HTTP 状态码；连不上返回 0。
+    后端那边会把签名、会话版本（tv）、是否停用、是否管理员全部验一遍。
+    Ask an admin-only backend endpoint with the browser's token; returns the HTTP
+    status, or 0 when the backend can't be reached."""
+    req = urllib.request.Request(url, method="GET", headers={
+        "Authorization": "Bearer " + token, "User-Agent": "prismx-watchdog"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read(1024)
+            return resp.status
+    except urllib.error.HTTPError as e:
+        e.close()
+        return e.code
+    except Exception:  # 连不上、超时
+        return 0
+
+
+class AdminVerifier:
+    """第 1 道门的后半段：token 必须属于管理员、且会话版本没作废。
+
+    后端在线：以后端的回答为准（200 = 是管理员；401 = 会话已作废；403 = 不是管理员 / 已停用），
+    确认过的「用户 id → tv、确认时间」写进本地文件。
+    后端不在线（连不上 / 5xx / 其它）：这个账号最近 cache_sec 秒内在这里确认过、且 token 的 tv
+    与当时一致，才放行——这正是「后端挂了也能按重启」要的；从没确认过的账号一律拒绝。
+    同一 (用户, tv) 的结论在内存里记 recheck_sec 秒，状态页轮询不必每次都去问后端。
+
+    Backend up: its answer wins and confirmed admins are cached (user id -> tv,
+    time) on disk. Backend down: only an account confirmed here within cache_sec
+    whose token carries the same tv gets through. Results are memoised per
+    (user, tv) for recheck_sec so status polling doesn't hit the backend each time.
+    """
+
+    def __init__(self, cfg):
+        base = str(cfg.get("BACKEND_URL") or "http://127.0.0.1:8000/").rstrip("/")
+        self.url = cfg.get("OPS_ADMIN_CHECK_URL") or base + "/api/admin/trial"
+        self.path = cfg.get("OPS_ADMIN_CACHE_FILE") or ""
+        self.cache_sec = int(cfg.get("OPS_ADMIN_CACHE_SEC") or 7 * 86400)
+        self.recheck_sec = int(cfg.get("OPS_ADMIN_RECHECK_SEC") or 60)
+        self.timeout = float(cfg.get("HTTP_TIMEOUT") or 5)
+        self._lock = threading.Lock()
+        self._recent = {}          # (sub, tv) -> (是否管理员, 时间) / memo
+        self._admins = self._load()
+
+    def _load(self):
+        if not self.path:
+            return {}
+        try:
+            with open(self.path, encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _save(self):
+        if not self.path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(self._admins, f)
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def check(self, token, payload, now=None):
+        """放行返回 None，否则返回一个 OpsError（由调用方 raise）。"""
+        now = now or time.time()
+        sub = str(payload.get("sub") or "")
+        tv = payload.get("tv") if isinstance(payload.get("tv"), int) else 0
+        if not sub:
+            return OpsError(401, "login_required", "登录已失效，请重新登录管理后台")
+        with self._lock:
+            hit = self._recent.get((sub, tv))
+        if hit and now - hit[1] < self.recheck_sec:
+            return None if hit[0] else OpsError(403, "admin_required", "只有管理员能用运维接口")
+
+        status = check_admin_remote(self.url, token, self.timeout)
+        with self._lock:
+            known = self._admins.get(sub)
+            if status == 200:
+                self._admins[sub] = {"tv": tv, "at": now}
+                self._recent[(sub, tv)] = (True, now)
+                self._save()
+                return None
+            if status in (401, 403):
+                # 403 = 不是管理员 / 已停用：这个账号的离线资格一并作废。
+                # 401 只在 tv 与记录一致时才作废（会话被撤销）；拿一张旧 token 来的人
+                # 不该能把管理员的离线资格顶掉。
+                if known and (status == 403 or known.get("tv") == tv):
+                    self._admins.pop(sub, None)
+                    self._save()
+                if status == 401:
+                    return OpsError(401, "login_required", "登录已失效，请重新登录管理后台")
+                self._recent[(sub, tv)] = (False, now)
+                return OpsError(403, "admin_required", "只有管理员能用运维接口")
+            # 后端不在线 / 回了别的：用本地确认记录兜底 / offline fallback
+            if known and known.get("tv") == tv and now - float(known.get("at", 0)) <= self.cache_sec:
+                return None
+        return OpsError(503, "admin_unverified",
+                        "后端暂时无法确认管理员身份（%s），且这个账号最近没有在这里确认过，联系 Rex"
+                        % ("HTTP %d" % status if status else "连不上后端"))
+
+
 def handle(ctx, method, path, headers, body_bytes, client_ip):
     """纯函数式的路由：返回 (状态码, dict)。HTTP 外壳只负责收发。便于单测。"""
     if path not in ("/ops/status", "/ops/restart-backend", "/ops/restart-gateway"):
@@ -320,8 +444,14 @@ def handle(ctx, method, path, headers, body_bytes, client_ip):
 
     auth = headers.get("Authorization", "")
     token = auth[7:] if auth.startswith("Bearer ") else ""
-    if verify_jwt(token, ctx.cfg.get("JWT_SECRET", "")) is None:
+    payload = verify_jwt(token, ctx.cfg.get("JWT_SECRET", ""))
+    if payload is None:
         raise OpsError(401, "login_required", "登录已失效，请重新登录管理后台")
+    # 只验签名 = 任何注册用户都过得了第 1 道门；还得是管理员、会话没作废（含 /ops/status）。
+    # A valid signature alone admits any registered user: require admin + live session.
+    denied = ctx.admins.check(token, payload)
+    if denied is not None:
+        raise denied
 
     if path == "/ops/status":
         if method != "GET":
@@ -336,13 +466,15 @@ def handle(ctx, method, path, headers, body_bytes, client_ip):
         raise OpsError(400, "bad_json", "请求格式不对")
     password = str(body.get("password") or "")
 
-    if ctx.lockout.locked(client_ip):
+    # 按账号 + 来源 IP 各记一份；能走到这里的都已确认是管理员。/ per account + per IP
+    keys = ("user:" + str(payload.get("sub")), "ip:" + str(client_ip))
+    if ctx.lockout.locked(*keys):
         raise OpsError(423, "locked", "口令输错太多次，已锁定 %d 分钟" % (ctx.lockout.window // 60))
     operator = ctx.operators.verify(password) if password else None
     if operator is None:
-        ctx.lockout.fail(client_ip)
+        ctx.lockout.fail(*keys)
         raise OpsError(403, "bad_password", "运维口令不对")
-    ctx.lockout.clear(client_ip)
+    ctx.lockout.clear(*keys)
 
     if path == "/ops/restart-backend":
         return restart_backend(ctx, operator)
