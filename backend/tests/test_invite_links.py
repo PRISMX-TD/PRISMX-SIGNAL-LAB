@@ -203,7 +203,9 @@ def test_create_invite_link_audit_records_active_not_null(db_session):
         .filter(AdminAuditLog.field == f"invite:{created.code}")
         .one()
     )
-    assert json.loads(row.new_value) == {"label": "渠道甲", "isActive": True, "grantsTrial": False}
+    assert json.loads(row.new_value) == {
+        "label": "渠道甲", "isActive": True, "grantsTrial": False, "competitionId": None, "channel": None,
+    }
 
 
 # ---------- 迁移：旧库补列 + 建索引 ----------

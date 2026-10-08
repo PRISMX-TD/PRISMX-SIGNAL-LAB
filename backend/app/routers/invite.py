@@ -1103,12 +1103,21 @@ def _agent_user_out(db: Session, u: User) -> AgentLinkUserOut:
     )
 
 
+def _clean_channel(raw: str | None) -> str | None:
+    """渠道标签去首尾空白，空白存 NULL——统计按渠道汇总时不会多出一个「空」渠道。
+    Trim the channel tag; blank stores NULL so per-channel stats get no "empty" bucket."""
+    ch = (raw or "").strip()
+    return ch or None
+
+
 def _audit_value(link: InviteLink) -> str:
     return json.dumps(
         {
             "label": link.label,
             "isActive": link.is_active,
             "grantsTrial": bool(link.grants_trial),
+            "competitionId": link.competition_id,
+            "channel": link.channel,
         },
         ensure_ascii=False,
     )
@@ -1199,6 +1208,21 @@ def create_invite_link(
         raise HTTPException(
             status_code=422, detail="标记名不能为空 / Label must not be empty"
         )
+    # 比赛推广链接：比赛得存在且没终审（终审后再拉人报名没有意义）。草稿也允许——
+    # 管理员常在比赛编辑页先把推广链接备好。比赛 id 写入后不可改。
+    # Competition promo link: the competition must exist and not be settled.
+    # Drafts are allowed (links are often prepared on the edit page first).
+    competition_id = None
+    if body.competitionId:
+        comp = db.get(Competition, body.competitionId)
+        if comp is None:
+            raise HTTPException(status_code=404, detail="比赛不存在 / Competition not found")
+        if comp.status == "settled":
+            raise HTTPException(
+                status_code=400,
+                detail="比赛已终审，不能再新建推广链接 / Competition is settled; promo links can no longer be created",
+            )
+        competition_id = comp.id
     # is_active 与 grants_trial 都显式传，不吃模型上的 Column(default=...) ：
     # 那是**写库时**才应用的 Python 侧默认值，而 SessionLocal 是 autoflush=False，
     # 下一行 _audit_value(link) 读到的还是 None——审计行会记成 {"isActive": null,
@@ -1211,12 +1235,19 @@ def create_invite_link(
     # and record null fields — a freshly created link logged in an unknown state.
     # Preferred over a db.flush() here: it doesn't emit the INSERT early and
     # doesn't depend on flush timing.
-    link = InviteLink(code=new_unique_code(db), label=label, is_active=True, grants_trial=False)
+    link = InviteLink(
+        code=new_unique_code(db),
+        label=label,
+        is_active=True,
+        grants_trial=False,
+        competition_id=competition_id,
+        channel=_clean_channel(body.channel),
+    )
     db.add(link)
     _log_change(db, admin.id, admin.id, f"invite:{link.code}", None, _audit_value(link))
     db.commit()
     db.refresh(link)
-    return _link_out(link, 0)
+    return _link_out_full(db, link)
 
 
 @admin_router.patch("/{link_id}", response_model=InviteLinkOut)
@@ -1242,6 +1273,8 @@ def update_invite_link(
         link.is_active = data["isActive"]
     if data.get("grantsTrial") is not None:
         link.grants_trial = data["grantsTrial"]
+    if "channel" in data:
+        link.channel = _clean_channel(data["channel"])
     _log_change(db, admin.id, admin.id, f"invite:{link.code}", old, _audit_value(link))
     db.commit()
     db.refresh(link)

@@ -1804,6 +1804,11 @@ class InviteClickRequest(BaseModel):
 
 class InviteLinkCreate(BaseModel):
     label: str = Field(min_length=1, max_length=64)
+    # 渠道标签（自由文本，管理端给建议值）；空白当未填。/ Free-text channel tag; blank = none.
+    channel: str | None = Field(default=None, max_length=32)
+    # 关联比赛即为比赛推广链接（设计 §1.1）；创建后不可改，InviteLinkUpdate 里没有它。
+    # Set = competition promo link (spec §1.1); immutable, so absent from InviteLinkUpdate.
+    competitionId: str | None = Field(default=None, max_length=64)
 
 
 class InviteLinkUpdate(BaseModel):
@@ -1812,6 +1817,8 @@ class InviteLinkUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=64)
     isActive: bool | None = None
     grantsTrial: bool | None = None
+    # 传 null 或空白即清除渠道。/ null or blank clears the channel.
+    channel: str | None = Field(default=None, max_length=32)
 
 
 class InviteLinkOut(BaseModel):

@@ -276,3 +276,100 @@ def test_list_filters_by_kind_competition_and_channel(db_session):
     assert set(_list(db_session, admin, competitionId=comp.id)) == {"comp2345"}
     assert set(_list(db_session, admin, channel=" 线下 ")) == {"plat2345"}
     assert set(_list(db_session, admin, kind="competition", channel="抖音")) == {"comp6789"}
+
+
+# ---------- B4: 新建/修改的渠道与比赛 ----------
+
+def test_create_competition_link_with_channel(db_session):
+    from app.routers.invite import create_invite_link
+    from app.schemas import InviteLinkCreate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    comp = _mk_comp(db_session, name="秋季模拟赛")
+    out = create_invite_link(
+        InviteLinkCreate(label="FB广告", channel="  FB广告 ", competitionId=comp.id), db=db_session, admin=admin
+    )
+    assert out.kind == "competition"
+    assert out.competitionId == comp.id
+    assert out.competitionName == "秋季模拟赛"
+    assert out.channel == "FB广告"
+    row = db_session.query(AdminAuditLog).filter(AdminAuditLog.field == f"invite:{out.code}").one()
+    assert json.loads(row.new_value) == {
+        "label": "FB广告", "isActive": True, "grantsTrial": False, "competitionId": comp.id, "channel": "FB广告",
+    }
+
+
+def test_create_link_blank_channel_stored_as_null(db_session):
+    from app.routers.invite import create_invite_link
+    from app.schemas import InviteLinkCreate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    out = create_invite_link(InviteLinkCreate(label="渠道甲", channel="   "), db=db_session, admin=admin)
+    assert out.channel is None
+    assert out.kind == "platform"
+
+
+@pytest.mark.parametrize("status", ["draft", "upcoming", "running", "ended"])
+def test_create_competition_link_allowed_until_settled(db_session, status):
+    from app.routers.invite import create_invite_link
+    from app.schemas import InviteLinkCreate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    comp = _mk_comp(db_session, status=status)
+    out = create_invite_link(InviteLinkCreate(label="标记", competitionId=comp.id), db=db_session, admin=admin)
+    assert out.kind == "competition"
+
+
+def test_create_competition_link_unknown_comp_is_404(db_session):
+    from app.routers.invite import create_invite_link
+    from app.schemas import InviteLinkCreate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    with pytest.raises(HTTPException) as exc:
+        create_invite_link(InviteLinkCreate(label="标记", competitionId="nope"), db=db_session, admin=admin)
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "比赛不存在 / Competition not found"
+    assert db_session.query(InviteLink).count() == 0
+
+
+def test_create_competition_link_settled_comp_is_400(db_session):
+    from app.routers.invite import create_invite_link
+    from app.schemas import InviteLinkCreate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    comp = _mk_comp(db_session, status="settled")
+    with pytest.raises(HTTPException) as exc:
+        create_invite_link(InviteLinkCreate(label="标记", competitionId=comp.id), db=db_session, admin=admin)
+    assert exc.value.status_code == 400
+    assert db_session.query(InviteLink).count() == 0
+
+
+def test_update_channel_set_keep_and_clear(db_session):
+    from app.routers.invite import update_invite_link
+    from app.schemas import InviteLinkUpdate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    link = _mk_link(db_session, code="plat2345")
+    out = update_invite_link(link.id, InviteLinkUpdate(channel=" 微信群 "), db=db_session, admin=admin)
+    assert out.channel == "微信群"
+    out = update_invite_link(link.id, InviteLinkUpdate(label="改名"), db=db_session, admin=admin)
+    assert out.channel == "微信群"   # 没传就不动 / omitted = unchanged
+    out = update_invite_link(link.id, InviteLinkUpdate(channel=None), db=db_session, admin=admin)
+    assert out.channel is None       # 显式 null 清除 / explicit null clears
+
+
+def test_update_cannot_change_competition(db_session):
+    from app.routers.invite import update_invite_link
+    from app.schemas import InviteLinkUpdate
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    comp = _mk_comp(db_session)
+    other = _mk_comp(db_session, name="另一场")
+    link = _mk_link(db_session, code="comp2345", competition_id=comp.id)
+    assert "competitionId" not in InviteLinkUpdate.model_fields
+    out = update_invite_link(
+        link.id, InviteLinkUpdate.model_validate({"competitionId": other.id, "label": "新标记"}),
+        db=db_session, admin=admin,
+    )
+    assert out.competitionId == comp.id
+    assert out.label == "新标记"
