@@ -45,11 +45,12 @@ from app.services.password_reset import (
     too_many_recent_requests,
 )
 from app.services.phone import compose_phone
+from app.services.pending_competition import pending_competition
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-def _user_out(user: User) -> UserOut:
+def _user_out(user: User, db: Session | None = None) -> UserOut:
     return UserOut(
         id=user.id,
         email=user.email,
@@ -63,6 +64,8 @@ def _user_out(user: User) -> UserOut:
         needsPhone=bool(user.phone_required) and not user.phone,
         needsNickname=not (user.nickname or "").strip(),
         emailVerified=user.email_verified_at is not None,
+        # 要 db 才查；不带 db 的旧调用拿到 null。/ Needs db; legacy callers get null.
+        pendingCompetition=pending_competition(db, user) if db is not None else None,
     )
 
 
@@ -155,7 +158,7 @@ def register(
     background.add_task(email_verification.send_verification_email, user.email, raw)
 
     token = create_access_token(user.id, user.token_version)
-    return AuthResponse(token=token, user=_user_out(user))
+    return AuthResponse(token=token, user=_user_out(user, db))
 
 
 @router.post("/google", response_model=AuthResponse)
@@ -252,7 +255,7 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         )
 
     token = create_access_token(user.id, user.token_version)
-    return AuthResponse(token=token, user=_user_out(user))
+    return AuthResponse(token=token, user=_user_out(user, db))
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -281,7 +284,7 @@ def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     # and nothing an attacker does elsewhere can touch it.
     remember_login_source(email, source)
     token = create_access_token(user.id, user.token_version)
-    return AuthResponse(token=token, user=_user_out(user))
+    return AuthResponse(token=token, user=_user_out(user, db))
 
 
 # ---------- 找回密码 / password reset ----------

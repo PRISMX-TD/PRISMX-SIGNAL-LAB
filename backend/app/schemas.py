@@ -211,6 +211,13 @@ class GoogleAuthRequest(BaseModel):
     refs: list[RefCode] | None = Field(default=None, max_length=5)
 
 
+class PendingCompetitionOut(BaseModel):
+    """经比赛推广链接注册、仍待报名的比赛（见 services/pending_competition）。"""
+
+    id: str
+    name: str
+
+
 class UserOut(BaseModel):
     id: str
     email: str
@@ -237,6 +244,11 @@ class UserOut(BaseModel):
     # Whether the email is verified. Soft gate: when false the frontend shows a
     # banner and swaps MT5 binding / trial claiming for a prompt.
     emailVerified: bool = True
+    # 经比赛推广链接注册、仍可报名的那场比赛；前端没有本地报名意图时靠它把人带回
+    # 比赛页（resumeCompIntent）。没有则 null。
+    # The competition this user signed up for via a promo link and can still
+    # enter; resumeCompIntent falls back to it when no local intent exists.
+    pendingCompetition: PendingCompetitionOut | None = None
 
 
 class AuthResponse(BaseModel):

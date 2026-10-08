@@ -401,3 +401,85 @@ def test_assign_endpoint_rejects_competition_link(db_session):
     with pytest.raises(HTTPException) as exc:
         assign_invite_agent(link.id, InviteLinkAssignAgent(userId=agent.id), db=db_session, admin=admin)
     assert exc.value.status_code == 400
+
+
+# ---------- B6: pendingCompetition ----------
+
+def _pending(db, user):
+    from app.services.pending_competition import pending_competition
+
+    return pending_competition(db, user)
+
+
+def _comp_user(db, **comp_kw):
+    comp = _mk_comp(db, **comp_kw)
+    _mk_link(db, code="comp2345", label="FB广告", competition_id=comp.id)
+    user = _mk_user(db, "p@x.io", invite_code="comp2345")
+    return comp, user
+
+
+def test_pending_competition_for_competition_link_signup(db_session):
+    comp, user = _comp_user(db_session, name="秋季模拟赛")
+    assert _pending(db_session, user) == {"id": comp.id, "name": "秋季模拟赛"}
+
+
+def test_pending_competition_while_running(db_session):
+    comp, user = _comp_user(db_session, status="running")
+    assert _pending(db_session, user) == {"id": comp.id, "name": comp.name}
+
+
+def test_pending_competition_none_without_competition_attribution(db_session):
+    assert _pending(db_session, _mk_user(db_session, "plain@x.io")) is None
+    _mk_link(db_session, code="plat2345")
+    assert _pending(db_session, _mk_user(db_session, "pl@x.io", invite_code="plat2345")) is None
+    # 链接的比赛行不在（软引用）/ dangling soft reference
+    _mk_link(db_session, code="gone2345", competition_id="00000000-0000-0000-0000-000000000000")
+    assert _pending(db_session, _mk_user(db_session, "g@x.io", invite_code="gone2345")) is None
+
+
+@pytest.mark.parametrize("kw", [
+    {"status": "draft"}, {"status": "ended"}, {"status": "settled"},
+    {"enrollment": "auto"}, {"reg_open": False},
+])
+def test_pending_competition_none_when_not_enterable(db_session, kw):
+    _, user = _comp_user(db_session, **kw)
+    assert _pending(db_session, user) is None
+
+
+def test_pending_competition_none_once_entered(db_session):
+    comp, user = _comp_user(db_session)
+    _enter(db_session, comp, user, "1001", disqualified=True)   # 被取消资格也算报过 / still counts as entered
+    assert _pending(db_session, user) is None
+
+
+def test_auth_me_carries_pending_competition(db_session):
+    from app.routers.account import get_account
+
+    comp, user = _comp_user(db_session, name="秋季模拟赛")
+    out = get_account(db=db_session, current_user=user)
+    assert out.pendingCompetition.model_dump() == {"id": comp.id, "name": "秋季模拟赛"}
+    plain = _mk_user(db_session, "plain@x.io")
+    assert get_account(db=db_session, current_user=plain).pendingCompetition is None
+
+
+def test_login_and_register_responses_carry_pending_competition(db_session):
+    from app.routers.auth import _user_out, register
+
+    comp, user = _comp_user(db_session)
+    assert _user_out(user, db_session).pendingCompetition.id == comp.id
+    assert _user_out(user).pendingCompetition is None   # 不带 db 的旧调用照旧 / legacy call unchanged
+    out = register.__wrapped__(
+        request=None, req=RegisterRequest(**_SIGNUP, refs=["comp2345"]), background=_Background(), db=db_session
+    )
+    assert out.user.pendingCompetition.id == comp.id
+
+
+def test_set_phone_response_carries_pending_competition(db_session):
+    from app.routers.account import set_phone
+    from app.schemas import PhoneRequest
+
+    comp, user = _comp_user(db_session)
+    out = set_phone.__wrapped__(
+        request=None, req=PhoneRequest(phoneCountry="60", phone="123456789"), db=db_session, current_user=user
+    )
+    assert out.pendingCompetition.id == comp.id

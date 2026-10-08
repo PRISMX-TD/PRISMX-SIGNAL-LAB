@@ -18,13 +18,14 @@ from app.models import MT5Account, User, UserPref, UserTask
 # Deliberately importing schemas' module-private validator: the 72-byte bcrypt
 # rule must exist exactly once. Re-implementing it here to avoid touching an
 # underscore name is how the three set-password entry points drift apart.
-from app.schemas import PhoneRequest, ProfilePatchIn, UserOut, _validate_password_bytes
+from app.schemas import PendingCompetitionOut, PhoneRequest, ProfilePatchIn, UserOut, _validate_password_bytes
 from app.services.gamification.conditions import LEVEL_TITLES, level_of
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
 from app.services.agents import is_agent
 from app.services.deps import get_current_user
 from app.services.settings_store import get_gamification_settings
+from app.services.pending_competition import pending_competition
 
 router = APIRouter(prefix="/auth", tags=["account"])
 
@@ -86,6 +87,10 @@ class AccountInfoOut(BaseModel):
     # 提示条撤掉。Whether the email is verified; repeated here so refreshUser()
     # clears the banner after the link was clicked on another device or tab.
     emailVerified: bool = True
+    # 经比赛推广链接注册、仍可报名的比赛（见 services/pending_competition）；登录
+    # 响应里也有，这里随 refreshUser() 刷新——报完名就变回 null。
+    # Also on the login response; refreshed here so it turns null once entered.
+    pendingCompetition: PendingCompetitionOut | None = None
     class Config:
         from_attributes = True
 
@@ -161,6 +166,7 @@ def get_account(
         statsPublic=bool(current_user.stats_public),
         isAgent=is_agent(db, current_user.id),
         emailVerified=current_user.email_verified_at is not None,
+        pendingCompetition=pending_competition(db, current_user),
     )
 
 
@@ -329,6 +335,7 @@ def set_phone(
         needsPhone=False,
         needsNickname=not (current_user.nickname or "").strip(),
         emailVerified=current_user.email_verified_at is not None,
+        pendingCompetition=pending_competition(db, current_user),
     )
 
 
