@@ -19,9 +19,10 @@ the acting admin stands in and the "invite:" field prefix disambiguates.
 import json
 import secrets
 from datetime import date, datetime, timedelta, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -402,8 +403,21 @@ def grant_deferred_invite_trial(db: Session, user: User) -> int | None:
     return days
 
 
+def _link_kind(link: InviteLink, agents: list[InviteLinkAgentOut] | None) -> str:
+    """链接分类（设计 §1.1），全部由数据推导。比赛链接不能有代理（见 assign_agent），
+    所以先看 competition_id。/ Derived kind; competition links can't have agents."""
+    if link.competition_id:
+        return "competition"
+    return "agent" if agents else "platform"
+
+
 def _link_out(
-    link: InviteLink, registrations: int, agents: list[InviteLinkAgentOut] | None = None
+    link: InviteLink,
+    registrations: int,
+    agents: list[InviteLinkAgentOut] | None = None,
+    *,
+    competition_name: str | None = None,
+    entries: int = 0,
 ) -> InviteLinkOut:
     return InviteLinkOut(
         id=link.id,
@@ -415,6 +429,11 @@ def _link_out(
         grantsTrial=bool(link.grants_trial),
         createdAt=link.created_at,
         agents=agents or [],
+        competitionId=link.competition_id,
+        competitionName=competition_name,
+        channel=link.channel,
+        kind=_link_kind(link, agents),
+        entries=entries,
     )
 
 
@@ -458,6 +477,54 @@ def _registrations(db: Session, codes: list[str]) -> dict[str, int]:
         .group_by(User.invite_code)
         .all()
     )
+
+
+def _competition_names(db: Session, comp_ids: list[str]) -> dict[str, str]:
+    if not comp_ids:
+        return {}
+    return dict(db.query(Competition.id, Competition.name).filter(Competition.id.in_(comp_ids)).all())
+
+
+def _entries(db: Session, links: list[InviteLink]) -> dict[str, int]:
+    """比赛链接的报名数，键是 link.id。一条 join + GROUP BY 查完整批：参赛条目按
+    (competition_id, 属主 invite_code) 分组，再按链接自己的 (competition_id, code) 取。
+    Entry counts for competition links, keyed by link.id: one join + GROUP BY over
+    (competition_id, owner's invite_code), then looked up per link."""
+    comp_links = [l for l in links if l.competition_id]
+    if not comp_links:
+        return {}
+    rows = (
+        db.query(CompetitionParticipant.competition_id, User.invite_code, func.count(CompetitionParticipant.id))
+        .join(User, User.id == CompetitionParticipant.user_id)
+        .filter(
+            CompetitionParticipant.competition_id.in_({l.competition_id for l in comp_links}),
+            User.invite_code.in_({l.code for l in comp_links}),
+            CompetitionParticipant.disqualified.is_(False),
+        )
+        .group_by(CompetitionParticipant.competition_id, User.invite_code)
+        .all()
+    )
+    counts = {(comp_id, code): n for comp_id, code, n in rows}
+    return {l.id: counts.get((l.competition_id, l.code), 0) for l in comp_links}
+
+
+def _link_outs(db: Session, links: list[InviteLink]) -> list[InviteLinkOut]:
+    """一批链接的完整输出：注册数、代理、比赛名、报名数各一条批量查询，没有 N+1。
+    Full output for a batch: one query each for signups, agents, names, entries."""
+    counts = _registrations(db, [l.code for l in links])
+    agents = _agents_by_link(db, [l.id for l in links])
+    names = _competition_names(db, list({l.competition_id for l in links if l.competition_id}))
+    entries = _entries(db, links)
+    return [
+        _link_out(
+            l,
+            counts.get(l.code, 0),
+            agents.get(l.id),
+            competition_name=names.get(l.competition_id) if l.competition_id else None,
+            entries=entries.get(l.id, 0),
+        )
+        for l in links
+    ]
 
 
 # 代理页「活跃」的窗口：近 7 天（含今天）。管理看板用的是可选时间范围，代理页
@@ -1094,25 +1161,31 @@ def offer(
 
 @admin_router.get("", response_model=dict)
 def list_invite_links(
+    kind: Literal["competition", "agent", "platform"] | None = Query(default=None),
+    competitionId: str | None = Query(default=None, max_length=64),
+    channel: str | None = Query(default=None, max_length=32),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    # 注册人数一条 GROUP BY 全查出来，避免每行一个 COUNT 的 N+1。
-    # One GROUP BY for all registration counts — no per-row COUNT N+1.
-    counts = dict(
-        db.query(User.invite_code, func.count(User.id))
-        .filter(User.invite_code.isnot(None))
-        .group_by(User.invite_code)
-        .all()
-    )
-    links = db.query(InviteLink).order_by(InviteLink.created_at.desc()).all()
-    agents = _agents_by_link(db, [l.id for l in links])
-    return {
-        "links": [
-            _link_out(l, counts.get(l.code, 0), agents.get(l.id)).model_dump(mode="json")
-            for l in links
-        ]
-    }
+    # 分类筛选与 _link_kind 同一口径，在 SQL 里做：competition = 关联了比赛；agent /
+    # platform 都要求没关联比赛，再看 invite_link_agents 里有没有行。各项计数在
+    # _link_outs 里各一条批量查询。
+    # Kind filter mirrors _link_kind, done in SQL. Counts are batched in _link_outs.
+    q = db.query(InviteLink)
+    has_agents = InviteLink.id.in_(select(InviteLinkAgent.link_id))
+    if kind == "competition":
+        q = q.filter(InviteLink.competition_id.isnot(None))
+    elif kind == "agent":
+        q = q.filter(InviteLink.competition_id.is_(None), has_agents)
+    elif kind == "platform":
+        q = q.filter(InviteLink.competition_id.is_(None), ~has_agents)
+    if competitionId:
+        q = q.filter(InviteLink.competition_id == competitionId)
+    ch = (channel or "").strip()
+    if ch:
+        q = q.filter(InviteLink.channel == ch)
+    links = q.order_by(InviteLink.created_at.desc()).all()
+    return {"links": [o.model_dump(mode="json") for o in _link_outs(db, links)]}
 
 
 @admin_router.post("", response_model=InviteLinkOut)
@@ -1183,10 +1256,7 @@ def _admin_link(db: Session, link_id: str) -> InviteLink:
 
 
 def _link_out_full(db: Session, link: InviteLink) -> InviteLinkOut:
-    registrations = (
-        db.query(func.count(User.id)).filter(User.invite_code == link.code).scalar() or 0
-    )
-    return _link_out(link, registrations, _agents_by_link(db, [link.id]).get(link.id))
+    return _link_outs(db, [link])[0]
 
 
 @admin_router.post("/{link_id}/agents", response_model=InviteLinkOut)

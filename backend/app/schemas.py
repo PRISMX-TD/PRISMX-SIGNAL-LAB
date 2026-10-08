@@ -1835,6 +1835,22 @@ class InviteLinkOut(BaseModel):
     # 被指派为这条链接「代理」的用户（见 InviteLinkAgent 模型注释）。
     # Users assigned as this link's agents (see the InviteLinkAgent model).
     agents: list["InviteLinkAgentOut"] = []
+    # 比赛推广链接（设计 §1.1）：competitionId 非空即是，创建后不可改。competitionName
+    # 顺带给出，列表不必再拉比赛表（比赛行不在时为 null）。channel 是自由文本渠道标签。
+    # Competition promo link (spec §1.1): set iff competitionId is non-null,
+    # immutable after creation. competitionName rides along so the list needn't
+    # fetch competitions (null if the row is gone). channel is a free-text tag.
+    competitionId: str | None = None
+    competitionName: str | None = None
+    channel: str | None = None
+    # 分类由数据推导、不落库：competition（关联了比赛）/ agent（有代理）/ platform（其余）。
+    # Derived, never stored: competition / agent (has agents) / platform (neither).
+    kind: Literal["competition", "agent", "platform"] = "platform"
+    # 比赛链接的报名数：该场比赛里、经本链接注册（users.invite_code）且未取消资格的
+    # 参赛条目数（按条目，一人两个账户算两条）；非比赛链接恒为 0。
+    # Competition links only: live (not disqualified) entries in that competition
+    # by users attributed to this link — counted per entry; 0 for other kinds.
+    entries: int = 0
 
 
 class InviteLinkAgentOut(BaseModel):

@@ -213,3 +213,66 @@ def test_apply_invite_competition_link_missing_comp_falls_back_to_label(db_sessi
     user = _mk_user(db_session)
     apply_invite(db_session, user, "comp2345")
     assert user.plan_note == "FB广告"
+
+
+# ---------- B3: 输出字段、报名数、列表筛选 ----------
+
+def _list(db, admin, **kw):
+    from app.routers.invite import list_invite_links
+
+    args = {"kind": None, "competitionId": None, "channel": None, **kw}
+    return {l["code"]: l for l in list_invite_links(**args, db=db, _admin=admin)["links"]}
+
+
+def _three_kinds(db):
+    admin = _mk_user(db, "admin@x.io", role="admin")
+    comp = _mk_comp(db, name="秋季模拟赛")
+    _mk_link(db, code="comp2345", label="FB广告", competition_id=comp.id, channel="FB广告")
+    _agent_link(db, "agnt2345")
+    _mk_link(db, code="plat2345", channel="线下")
+    return admin, comp
+
+
+def test_list_derives_kind_and_competition_fields(db_session):
+    admin, comp = _three_kinds(db_session)
+    rows = _list(db_session, admin)
+    assert rows["comp2345"]["kind"] == "competition"
+    assert rows["comp2345"]["competitionId"] == comp.id
+    assert rows["comp2345"]["competitionName"] == "秋季模拟赛"
+    assert rows["comp2345"]["channel"] == "FB广告"
+    assert rows["agnt2345"]["kind"] == "agent"
+    assert rows["agnt2345"]["competitionId"] is None
+    assert rows["agnt2345"]["competitionName"] is None
+    assert rows["plat2345"]["kind"] == "platform"
+    assert rows["plat2345"]["channel"] == "线下"
+    assert rows["agnt2345"]["entries"] == 0 and rows["plat2345"]["entries"] == 0
+
+
+def test_competition_link_entries_count_attributed_live_entries_only(db_session):
+    admin, comp = _three_kinds(db_session)
+    other = _mk_comp(db_session, name="另一场")
+    u1 = _mk_user(db_session, "u1@x.io", invite_code="comp2345")
+    u2 = _mk_user(db_session, "u2@x.io", invite_code="comp2345")
+    u3 = _mk_user(db_session, "u3@x.io", invite_code="plat2345")
+    u4 = _mk_user(db_session, "u4@x.io", invite_code="comp2345")
+    _enter(db_session, comp, u1, "1001")
+    _enter(db_session, comp, u1, "1002")                      # 一人两个账户 = 两个条目
+    _enter(db_session, comp, u2, "2001", disqualified=True)   # 取消资格不算
+    _enter(db_session, comp, u3, "3001")                      # 别的链接来的人不算
+    _enter(db_session, other, u4, "4001")                     # 报的是别的比赛不算
+    rows = _list(db_session, admin)
+    assert rows["comp2345"]["entries"] == 2
+    assert rows["comp2345"]["registrations"] == 3
+
+
+def test_list_filters_by_kind_competition_and_channel(db_session):
+    admin, comp = _three_kinds(db_session)
+    other = _mk_comp(db_session, name="另一场")
+    _mk_link(db_session, code="comp6789", label="抖音", competition_id=other.id, channel="抖音")
+    assert set(_list(db_session, admin)) == {"comp2345", "comp6789", "agnt2345", "plat2345"}
+    assert set(_list(db_session, admin, kind="competition")) == {"comp2345", "comp6789"}
+    assert set(_list(db_session, admin, kind="agent")) == {"agnt2345"}
+    assert set(_list(db_session, admin, kind="platform")) == {"plat2345"}
+    assert set(_list(db_session, admin, competitionId=comp.id)) == {"comp2345"}
+    assert set(_list(db_session, admin, channel=" 线下 ")) == {"plat2345"}
+    assert set(_list(db_session, admin, kind="competition", channel="抖音")) == {"comp6789"}
