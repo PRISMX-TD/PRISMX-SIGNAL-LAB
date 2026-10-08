@@ -1818,6 +1818,16 @@ class InviteClickRequest(BaseModel):
     code: str = Field(min_length=1, max_length=32)
 
 
+class PublicCompEventIn(BaseModel):
+    """公开比赛页漏斗打点（设计 §3.1）。字段只限长度不限取值：坏 compId / step 在服务层
+    静默丢弃，接口永远 204，不给探测口。
+    Funnel event from the public competition page. Only lengths are bounded; bad
+    values are dropped silently in the service so the endpoint is always 204."""
+    compId: str = Field(max_length=64)
+    step: str = Field(max_length=16)
+    ref: str | None = Field(default=None, max_length=64)
+
+
 class InviteLinkCreate(BaseModel):
     label: str = Field(min_length=1, max_length=64)
     # 渠道标签（自由文本，管理端给建议值）；空白当未填。/ Free-text channel tag; blank = none.
