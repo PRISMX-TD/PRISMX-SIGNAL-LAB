@@ -29,7 +29,7 @@ import { useAuth } from '../store/auth'
 import Switch from '../components/Switch'
 import PrepChecklist from '../components/competition/PrepChecklist'
 import { safeHttpUrl } from '../utils/safeUrl'
-import { clearCompIntent, readCompIntent } from '../utils/compIntent'
+import { clearCompIntent, clearCompIntentFor, readCompIntent } from '../utils/compIntent'
 import {
   bindHint, classifyDetailError, gatesOfDetail, prepState, registerErrorKey, shouldClearIntent,
   type DetailLoadError,
@@ -415,7 +415,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const nowMs = useNowTicker()
   const [detail, setDetail] = useState<CompetitionDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const { user } = useAuth()
+  const { user, refreshUser } = useAuth()
   const [loadError, setLoadError] = useState<DetailLoadError | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [nameBusy, setNameBusy] = useState<string | null>(null)
@@ -441,7 +441,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
         setLoadError(kind)
         // 不存在 / 已下线的比赛：作废指向它的报名意图（Part D 约定）。
         // Gone competition: drop a sign-up intent pointing at it (Part D contract).
-        if (kind === 'notFound' && readCompIntent() === id.toLowerCase()) clearCompIntent()
+        if (kind === 'notFound') clearCompIntentFor(id)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -532,7 +532,14 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
     try {
       await competitionApi.register(id, login)
       setPickerOpen(false)
-      clearCompIntent()
+      // 只清指向本场的意图（报 A 不该清掉想报 B 的意图）；再刷新 user，让
+      // pendingCompetition 跟上——否则 BindPage 的 resumeCompIntent 这一整个会话里
+      // 每绑一个账户都会把人送回本场。
+      // Clear only an intent for this competition, then refresh the user so
+      // pendingCompetition is current — otherwise BindPage's resumeCompIntent keeps
+      // sending the user back here for the rest of the session.
+      clearCompIntentFor(id)
+      void refreshUser()
       setRegisterMsg(t('competition.registerSuccess'))
       await refreshDetail()
     } catch (err) {

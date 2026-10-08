@@ -9,6 +9,7 @@ import {
   COMP_INTENT_KEY,
   COMP_INTENT_TTL_MS,
   clearCompIntent,
+  clearCompIntentFor,
   compIntentTarget,
   isCompId,
   postAuthDestination,
@@ -138,6 +139,15 @@ describe('storeCompIntent / readCompIntent', () => {
     storeCompIntent(ID)
     clearCompIntent()
     expect(readCompIntent()).toBeNull()
+  })
+
+  it('clearCompIntentFor only clears an intent for that competition (any case)', () => {
+    storeCompIntent(ID2)
+    expect(clearCompIntentFor(ID)).toBe(false)
+    expect(readCompIntent()).toBe(ID2)
+    expect(clearCompIntentFor(ID2.toUpperCase())).toBe(true)
+    expect(readCompIntent()).toBeNull()
+    expect(clearCompIntentFor(ID2)).toBe(false)
   })
 
   it('never throws when storage is unavailable', () => {

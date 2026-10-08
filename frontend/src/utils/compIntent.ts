@@ -64,6 +64,16 @@ export function clearCompIntent(): void {
   removeStorage(COMP_INTENT_KEY)
 }
 
+/** 只在当前意图指向这场比赛时才清（大小写不敏感），返回是否清了。报名成功时用：
+ *  报的是 A 场，不能顺手把指向 B 场的意图也清掉。
+ *  Clears the intent only when it points at this competition (case-insensitive);
+ *  returns whether it did. Entering competition A must not drop an intent for B. */
+export function clearCompIntentFor(compId: string): boolean {
+  if (readCompIntent() !== compId.toLowerCase()) return false
+  clearCompIntent()
+  return true
+}
+
 export type CompIntentUser = Pick<User, 'pendingCompetition'> | null | undefined
 
 /** 有意图时返回站内比赛页地址，否则 null。本地意图优先，其次服务端 pendingCompetition。
