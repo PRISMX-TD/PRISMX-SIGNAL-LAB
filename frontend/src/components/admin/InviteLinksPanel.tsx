@@ -1,55 +1,82 @@
 // 邀请链接面板：生成带标记名的推广链接，看点击/注册统计，改名与停用/启用。
 // 通过链接注册的用户，备注栏写入注册当时的标记名（快照，改名不追溯）；注册
-// 人数按隐藏归因码统计，管理员手改备注不影响数字。链接拼 ORIGIN 而不是
-// window.location.origin——在 Vercel 预览域名上操作后台时复制出去的必须仍是
-// 正式域名（裸域名还会 308）。
+// 人数按隐藏归因码统计，管理员手改备注不影响数字。链接一律由 utils/promoLinkUrl
+// 拼 ORIGIN 而不是 window.location.origin——在 Vercel 预览域名上操作后台时复制出去的
+// 必须仍是正式域名（裸域名还会 308）。
+// 2026-10-08 重做（设计 §5）：原来是一张 9 列、最小宽 1240px 的横向滚动大表，每行内联
+// 改名框与一排开关。现在：顶部统计条 → 工具栏（分类分段 / 渠道 / 搜索 / 显示已停用 /
+// 新建）→ 桌面 6 列紧凑表、手机卡片 → 点行或「编辑」开抽屉，改名、渠道、二维码、试用、
+// 启停、代理都在抽屉里。三类链接（代理 / 平台 / 比赛推广）由后端推导，见 inviteLinkLogic。
 // Invite-links panel: create labeled promo links, watch click/registration
 // stats, rename, toggle. Labels are snapshotted into the user note at
 // registration (renames don't backfill); counts group by the hidden
-// attribution code. Links are built from ORIGIN, not window.location.origin —
-// copied URLs must stay canonical even when the admin works on a preview host.
-import { useEffect, useState, type FormEvent } from 'react'
-import { createPortal } from 'react-dom'
+// attribution code. URLs come from utils/promoLinkUrl (ORIGIN, not
+// window.location.origin) so copies stay canonical on preview hosts.
+// Redesigned 2026-10-08 (design §5): the 9-column, 1240px-wide scrolling table with
+// inline rename boxes became a stats strip, a toolbar (kind segments / channel / search /
+// show disabled / new), a compact 6-column table (cards on phones) and an edit drawer.
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { fmtTime, localizeApiError } from '../../api/utils'
+import { segBtn } from '../../utils/segBtn'
 import ConfirmModal from '../ConfirmModal'
+import Select from '../Select'
+import Switch from '../Switch'
 import { SkeletonLine } from '../Skeleton'
-import { ORIGIN } from '../../seo/meta'
-import { useBackToClose } from '../../utils/useBackToClose'
-import type { AdminUser, InviteLink } from '../../api/types'
-
-const linkUrl = (code: string) => `${ORIGIN}/?ref=${code}`
+import CopyLinkButton from './invite/CopyLinkButton'
+import InviteLinkCreateDrawer from './invite/InviteLinkCreateDrawer'
+import InviteLinkEditDrawer from './invite/InviteLinkEditDrawer'
+import ToastBar from './invite/ToastBar'
+import {
+  ALL_CHANNELS,
+  DEFAULT_FILTER,
+  KIND_FILTERS,
+  NO_CHANNEL,
+  channelOptions,
+  filterLinks,
+  hasUnchanneled,
+  kindBadgeClass,
+  kindCounts,
+  linkKind,
+  secondaryLine,
+  summarize,
+  type LinkFilter,
+} from './invite/inviteLinkLogic'
+import type { InviteLink, InviteLinkCreate, InviteLinkPatch } from '../../api/types'
 
 export default function InviteLinksPanel({ globalTrialEnabled = false }: { globalTrialEnabled?: boolean }) {
   const { t } = useTranslation()
   const [links, setLinks] = useState<InviteLink[]>([])
   const [loading, setLoading] = useState(true)
-  const [newLabel, setNewLabel] = useState('')
   // 'create' 或正在保存的链接 id；同一时刻只放行一个写操作，避免连点。
-  // 'create' or the id being saved; one in-flight write at a time.
+  // 所有写操作按钮（表格、抽屉、确认框）一律按 busyId !== null 禁用，而不是只禁用
+  // "自己那一行"：runWrite 只要 busyId 有值就直接返回。只禁自己那行的话，A 行保存期间
+  // 点 B 行的启停、或点新建，按钮看着能按、点下去却什么都不发生，也没有任何提示，
+  // 管理员只会以为后台坏了。禁用状态必须如实反映处理函数的行为。
+  // 'create' or the id being saved; one in-flight write at a time. Every write button
+  // (table, drawers, confirm) disables on busyId !== null, not just its own row:
+  // runWrite bails whenever busyId is set, so a per-row disable would leave buttons that
+  // look clickable but silently do nothing. The disabled state must reflect the handlers.
   const [busyId, setBusyId] = useState<string | null>(null)
-  const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({})
-  const [copiedId, setCopiedId] = useState<string | null>(null)
-  // 正在为哪条链接指派代理（弹窗打开态）/ which link the assign sheet is open for
-  const [assignFor, setAssignFor] = useState<InviteLink | null>(null)
+  const [filter, setFilter] = useState<LinkFilter>(DEFAULT_FILTER)
+  // 抽屉记 id 而不是对象：写操作替换 links 里那一行后，抽屉自动拿到新值。
+  // The drawer keeps an id, not the object, so it re-reads the row after each write.
+  const [editId, setEditId] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
   // 待确认的「移除代理」。移除入口是代理标签上那枚 × ——一个极小的点击目标，
   // 误触就撤销了该用户的 /agent 入口（他下次刷新就看不到代理页，归因数据与 KPI
   // 也会短暂对不上）。动作本身可逆（重新指派即可），所以用普通确认框而不是危险态。
+  // 用非 center 版：它要压在编辑抽屉（z-80 的 slide-overlay）上面，见 AdminSheet 注释。
   // The pending "remove agent". The entry point is the × on an agent chip — a
-  // very small target whose mis-tap revokes that user's /agent access (the page
-  // disappears on their next refresh and attribution/KPI briefly disagree). The
-  // action is reversible by re-assigning, so this is a plain confirmation rather
-  // than a danger-styled one.
+  // very small target whose mis-tap revokes that user's /agent access. Reversible by
+  // re-assigning, so a plain confirmation rather than a danger-styled one. Non-centered
+  // so it stacks above the drawer (see AdminSheet).
   const [unassignTarget, setUnassignTarget] = useState<{ link: InviteLink; userId: string } | null>(null)
 
-  // 名字从链接自己的 agents 列表里取，而不是在每个入口各传一份：移除入口有两处
-  // （表格里的 × 和指派弹窗里的那一份），传参就要两处保持一致。
-  // The display name is looked up from the link's own agents list rather than
-  // threaded through each entry point: removal is reachable from two places (the
-  // × in the table and the one inside the assign sheet), and passing it along
-  // would mean keeping two call sites in agreement.
+  // 名字从链接自己的 agents 列表里取，而不是在入口处传一份。
+  // The display name is looked up from the link's own agents list.
   const unassignName = (target: { link: InviteLink; userId: string }) => {
     const a = (target.link.agents ?? []).find((x) => x.userId === target.userId)
     return a?.nickname || a?.email || target.userId
@@ -66,344 +93,284 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
       .then((res) => setLinks(res.links))
       .catch((err) => showErr(err, 'admin.loadError'))
       .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const create = async (e: FormEvent) => {
-    e.preventDefault()
-    const label = newLabel.trim()
-    if (!label || busyId) return
-    setBusyId('create')
+  // 所有写操作的唯一入口：单飞闸 + 整行替换（后端每个写接口都回整条链接，含最新
+  // agents / kind）。新建的链接插到最前。
+  // The one entry for writes: single-flight gate + whole-row swap (every write endpoint
+  // returns the full link, fresh agents/kind included). New links go first.
+  const runWrite = async (key: string, fn: () => Promise<InviteLink>): Promise<InviteLink | null> => {
+    if (busyId) return null
+    setBusyId(key)
     try {
-      const link = await adminApi.createInviteLink({ label })
-      setLinks((prev) => [link, ...prev])
-      setNewLabel('')
+      const updated = await fn()
+      setLinks((prev) =>
+        prev.some((x) => x.id === updated.id) ? prev.map((x) => (x.id === updated.id ? updated : x)) : [updated, ...prev],
+      )
       showToast('ok', t('admin.saved'))
+      return updated
     } catch (err) {
       showErr(err, 'admin.saveError')
+      return null
     } finally {
       setBusyId(null)
     }
   }
 
-  const saveLabel = async (l: InviteLink) => {
-    const draft = (labelDrafts[l.id] ?? l.label).trim()
-    if (!draft || draft === l.label || busyId) return
-    setBusyId(l.id)
-    try {
-      const updated = await adminApi.updateInviteLink(l.id, { label: draft })
-      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
-      setLabelDrafts((prev) => {
-        const next = { ...prev }
-        delete next[l.id]
-        return next
-      })
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showErr(err, 'admin.saveError')
-    } finally {
-      setBusyId(null)
-    }
+  // 新建成功直接打开它的编辑抽屉：管理员下一步几乎总是复制链接或下载二维码。
+  // After creating, open its drawer: the next step is almost always copy or QR.
+  const create = async (body: InviteLinkCreate) => {
+    const link = await runWrite('create', () => adminApi.createInviteLink(body))
+    if (!link) return false
+    setCreating(false)
+    setEditId(link.id)
+    return true
   }
 
-  const toggle = async (l: InviteLink) => {
-    if (busyId) return
-    setBusyId(l.id)
-    try {
-      const updated = await adminApi.updateInviteLink(l.id, { isActive: !l.isActive })
-      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showErr(err, 'admin.saveError')
-    } finally {
-      setBusyId(null)
-    }
-  }
+  const save = async (l: InviteLink, patch: InviteLinkPatch) =>
+    (await runWrite(l.id, () => adminApi.updateInviteLink(l.id, patch))) != null
 
-  const toggleGrantsTrial = async (l: InviteLink) => {
-    if (busyId) return
-    setBusyId(l.id)
-    try {
-      const updated = await adminApi.updateInviteLink(l.id, { grantsTrial: !l.grantsTrial })
-      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showErr(err, 'admin.saveError')
-    } finally {
-      setBusyId(null)
-    }
-  }
+  const toggleActive = (l: InviteLink) => void runWrite(l.id, () => adminApi.updateInviteLink(l.id, { isActive: !l.isActive }))
 
-  // 指派 / 移除代理：后端两边都回整条链接（含最新 agents），直接替换那一行。
-  // Assign / remove an agent: both return the full link, so the row is swapped whole.
-  const assignAgent = async (l: InviteLink, userId: string) => {
-    if (busyId) return
-    setBusyId(l.id)
-    try {
-      const updated = await adminApi.assignInviteAgent(l.id, userId)
-      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
-      setAssignFor(updated)
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showErr(err, 'admin.saveError')
-    } finally {
-      setBusyId(null)
-    }
-  }
+  const toggleTrial = (l: InviteLink) =>
+    void runWrite(l.id, () => adminApi.updateInviteLink(l.id, { grantsTrial: !l.grantsTrial }))
 
-  const unassignAgent = async (l: InviteLink, userId: string) => {
+  const assignAgent = (l: InviteLink, userId: string) => void runWrite(l.id, () => adminApi.assignInviteAgent(l.id, userId))
+
+  const unassignAgent = (l: InviteLink, userId: string) => {
     if (busyId) return
     setUnassignTarget(null)
-    setBusyId(l.id)
-    try {
-      const updated = await adminApi.unassignInviteAgent(l.id, userId)
-      setLinks((prev) => prev.map((x) => (x.id === l.id ? updated : x)))
-      setAssignFor((cur) => (cur && cur.id === l.id ? updated : cur))
-      showToast('ok', t('admin.saved'))
-    } catch (err) {
-      showErr(err, 'admin.saveError')
-    } finally {
-      setBusyId(null)
-    }
+    void runWrite(l.id, () => adminApi.unassignInviteAgent(l.id, userId))
   }
 
-  const copy = async (l: InviteLink) => {
-    try {
-      // navigator.clipboard 在非安全上下文整体不存在（同步抛 TypeError 而不是
-      // 返回被拒绝的 promise），所以整段包在 try 里（照 UpgradePage 的处理）。
-      // navigator.clipboard is absent entirely outside secure contexts and
-      // throws synchronously — hence the whole call sits inside the try.
-      await navigator.clipboard.writeText(linkUrl(l.code))
-      setCopiedId(l.id)
-      setTimeout(() => setCopiedId(null), 2000)
-    } catch {
-      showToast('err', t('admin.invite.copyFailed'))
-    }
-  }
+  const copyFailed = () => showToast('err', t('admin.invite.copyFailed'))
+
+  const summary = useMemo(() => summarize(links), [links])
+  const counts = useMemo(() => kindCounts(links, filter.showInactive), [links, filter.showInactive])
+  const channels = useMemo(() => channelOptions(links), [links])
+  const visible = useMemo(() => filterLinks(links, filter), [links, filter])
+  const editing = editId ? (links.find((l) => l.id === editId) ?? null) : null
+
+  const channelSelectOptions = [
+    { value: ALL_CHANNELS, label: t('admin.invite.channelAll') },
+    ...channels.map((c) => ({ value: c, label: c })),
+    ...(hasUnchanneled(links) ? [{ value: NO_CHANNEL, label: t('admin.invite.channelNone') }] : []),
+  ]
+
+  const stats = [
+    { key: 'links', label: t('admin.invite.statLinks'), value: `${summary.active} / ${summary.total}` },
+    { key: 'clicks', label: t('admin.invite.statClicks'), value: String(summary.clicks) },
+    { key: 'regs', label: t('admin.invite.statRegistrations'), value: String(summary.registrations) },
+    {
+      key: 'month',
+      label: t('admin.invite.statMonth'),
+      value: summary.registrationsMonth == null ? '—' : String(summary.registrationsMonth),
+    },
+  ]
 
   return (
     <div>
-      {toast && (
-        <div
-          className={`mb-4 rounded-lg border px-4 py-2.5 text-sm ${
-            toast.kind === 'err'
-              ? 'border-down/40 bg-down/15 text-down'
-              : 'border-up/40 bg-up/15 text-up'
-          }`}
-        >
-          {toast.text}
-        </div>
-      )}
+      <ToastBar toast={toast} className="mb-4" />
 
       <p className="mb-4 text-sm text-neutral-400">{t('admin.invite.hint')}</p>
 
-      {/* 创建行 / create row */}
-      {/* 下面所有写操作按钮一律按 busyId !== null 禁用，而不是只禁用"自己那一行"
-          （busyId === l.id）：create / saveLabel / toggle 三个处理函数都是只要
-          busyId 有值就直接 return。只禁自己那行的话，A 行保存期间点 B 行的保存或
-          停用、或点创建，按钮看着能按、点下去却什么都不发生，也没有任何提示，
-          管理员只会以为后台坏了。禁用状态必须如实反映处理函数的行为。
-          Every write button is disabled on busyId !== null, not just on its own
-          row (busyId === l.id): create / saveLabel / toggle all bail out when
-          busyId is truthy. Disabling per-row only means that while row A saves,
-          Save or Disable on row B — or Create — looks clickable but does
-          nothing at all, with no feedback, which reads as a broken admin panel.
-          The disabled state must reflect what the handlers actually do. */}
-      <form onSubmit={create} className="glass mb-4 flex flex-wrap items-center gap-3 p-4">
-        <input
-          className="input flex-1 sm:max-w-xs"
-          placeholder={t('admin.invite.labelPlaceholder')}
-          value={newLabel}
-          maxLength={64}
-          onChange={(e) => setNewLabel(e.target.value)}
-        />
-        <button
-          type="submit"
-          className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"
-          disabled={!newLabel.trim() || busyId !== null}
-        >
-          {t('admin.invite.create')}
-        </button>
-      </form>
+      {/* ① 统计条：全量，不随筛选变 / stats strip: every link, unaffected by filters */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {stats.map((s) => (
+          <div key={s.key} className="glass p-4">
+            <p className="text-[11px] uppercase tracking-wide text-neutral-500">{s.label}</p>
+            <p className="num mt-1 text-2xl text-neutral-100">{loading ? '—' : s.value}</p>
+          </div>
+        ))}
+      </div>
 
-      {/* 链接表 / links table */}
-      <div className="glass overflow-x-auto p-0">
-        {loading ? (
-          <div className="space-y-2 p-4">
-            {/* SkeletonLine 用 width/height props 定尺寸，不是 className——组件把
-                宽高当内联样式写，className 里的 h-4/w-2/3 会被内联样式盖掉，
-                照用户表（AdminPage.tsx）的调用方式改。
-                SkeletonLine sizes via width/height props, not className — the
-                component applies width/height as inline styles, which silently
-                win over Tailwind classes. Follows the users-table call convention. */}
-            <SkeletonLine height={16} />
-            <SkeletonLine width="66%" height={16} />
-          </div>
-        ) : links.length === 0 ? (
-          <div className="p-8 text-center text-sm text-neutral-500">
-            {t('admin.invite.empty')}
-          </div>
-        ) : (
-          <table className="w-full min-w-[1240px] text-left text-sm">
-            <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colLabel')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colLink')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colClicks')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colRegistrations')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colStatus')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colGrantsTrial')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colAgents')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.invite.colCreated')}</th>
-                <th className="px-4 py-3 font-medium">{t('admin.colAction')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {links.map((l) => {
-                const draft = labelDrafts[l.id] ?? l.label
-                const dirty = draft.trim() !== '' && draft.trim() !== l.label
-                return (
-                  <tr key={l.id} className="border-b border-white/5 align-top last:border-0">
+      {/* ② 工具栏 / toolbar */}
+      <div className="glass mb-4 flex flex-wrap items-center gap-3 p-4">
+        <div className="flex flex-wrap gap-1.5" role="group">
+          {KIND_FILTERS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              className={segBtn(filter.kind === k)}
+              aria-pressed={filter.kind === k}
+              onClick={() => setFilter((f) => ({ ...f, kind: k }))}
+            >
+              {t(`admin.invite.kind.${k}`)} <span className="num opacity-60">{counts[k]}</span>
+            </button>
+          ))}
+        </div>
+        <Select
+          className="w-full sm:w-44"
+          value={filter.channel}
+          ariaLabel={t('admin.invite.channelFilter')}
+          onChange={(v) => setFilter((f) => ({ ...f, channel: v }))}
+          options={channelSelectOptions}
+        />
+        <input
+          className="input w-full sm:w-56"
+          type="search"
+          placeholder={t('admin.invite.searchPlaceholder')}
+          value={filter.q}
+          onChange={(e) => setFilter((f) => ({ ...f, q: e.target.value }))}
+        />
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-neutral-400">
+          <Switch checked={filter.showInactive} onChange={(v) => setFilter((f) => ({ ...f, showInactive: v }))} />
+          {t('admin.invite.showInactive')}
+        </label>
+        <button
+          type="button"
+          className="btn-primary ml-auto px-4 py-1.5 text-xs disabled:opacity-40"
+          disabled={busyId !== null}
+          onClick={() => setCreating(true)}
+        >
+          + {t('admin.invite.newLink')}
+        </button>
+      </div>
+
+      {/* ③ 列表 / list */}
+      {loading ? (
+        <div className="glass space-y-2 p-4">
+          {/* SkeletonLine 用 width/height props 定尺寸，不是 className——组件把宽高当内联
+              样式写，className 里的 h-4/w-2/3 会被内联样式盖掉。
+              SkeletonLine sizes via width/height props, not className (inline styles win). */}
+          <SkeletonLine height={16} />
+          <SkeletonLine width="66%" height={16} />
+        </div>
+      ) : links.length === 0 ? (
+        <div className="glass p-8 text-center text-sm text-neutral-500">{t('admin.invite.empty')}</div>
+      ) : visible.length === 0 ? (
+        <div className="glass p-8 text-center text-sm text-neutral-500">{t('admin.invite.noMatch')}</div>
+      ) : (
+        <>
+          {/* 桌面：6 列紧凑表。外层不加 overflow-x-auto——复制菜单是绝对定位的，会被裁掉；
+              table-fixed + 定宽列保证 md 宽度下放得下。
+              Desktop: compact 6-column table. No overflow-x-auto on the wrapper (it would
+              clip the copy menu); table-fixed with fixed columns fits from md up. */}
+          <div className="glass hidden p-0 md:block">
+            <table className="w-full table-fixed text-left text-sm">
+              <colgroup>
+                <col />
+                <col className="w-20" />
+                <col className="w-28" />
+                <col className="w-36" />
+                <col className="w-36" />
+                <col className="w-44" />
+              </colgroup>
+              <thead>
+                <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
+                  <th className="px-4 py-3 font-medium">{t('admin.invite.colLink')}</th>
+                  <th className="px-4 py-3 font-medium">{t('admin.invite.colClicks')}</th>
+                  <th className="px-4 py-3 font-medium">{t('admin.invite.colRegistrations')}</th>
+                  <th className="px-4 py-3 font-medium">{t('admin.invite.colStatus')}</th>
+                  <th className="px-4 py-3 font-medium">{t('admin.invite.colCreated')}</th>
+                  <th className="px-4 py-3 font-medium">{t('admin.colAction')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visible.map((l) => (
+                  <tr
+                    key={l.id}
+                    onClick={() => setEditId(l.id)}
+                    className="cursor-pointer border-b border-white/5 align-top transition last:border-0 hover:bg-white/[0.03]"
+                  >
                     <td className="px-4 py-3">
-                      <input
-                        type="text"
-                        className="input w-40 py-1 text-xs"
-                        value={draft}
-                        maxLength={64}
-                        onChange={(e) =>
-                          setLabelDrafts((prev) => ({ ...prev, [l.id]: e.target.value }))
-                        }
-                      />
+                      <LinkTitle l={l} />
                     </td>
+                    <td className="num px-4 py-3 text-neutral-200">{l.clicks}</td>
                     <td className="px-4 py-3">
-                      <span className="num text-xs text-neutral-300">{linkUrl(l.code)}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="num">{l.clicks}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="num">{l.registrations}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs ${
-                          l.isActive ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
-                        }`}
-                      >
-                        {l.isActive ? t('admin.invite.active') : t('admin.invite.inactive')}
-                      </span>
-                    </td>
-                    {/* 全局免费试用关闭时整列置灰并给出原因。没有这句提示，
-                        管理员打开了开关却一个试用都没发出去，而页面上没有任何
-                        线索指向真正的原因（运营设置里的那个总闸），只能怀疑
-                        后台坏了。开关本身仍可点——记录意图是有意义的，全局一开
-                        它立刻生效。
-                        The whole column greys out with a reason when the global
-                        trial is off. Without the hint an admin flips this on,
-                        sees zero trials granted, and has nothing pointing at the
-                        actual cause (the master gate in operations settings).
-                        The toggle still works — recording intent is useful, and
-                        it takes effect the moment the global switch opens. */}
-                    <td className="px-4 py-3">
-                      <button
-                        className={`rounded-full px-2 py-0.5 text-xs disabled:opacity-40 ${
-                          l.grantsTrial ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-                        } ${globalTrialEnabled ? '' : 'opacity-50'}`}
-                        disabled={busyId !== null}
-                        title={globalTrialEnabled ? undefined : t('admin.invite.grantsTrialBlocked')}
-                        onClick={() => void toggleGrantsTrial(l)}
-                      >
-                        {l.grantsTrial ? t('admin.invite.grantsTrialOn') : t('admin.invite.grantsTrialOff')}
-                      </button>
-                      {l.grantsTrial && !globalTrialEnabled && (
-                        <p className="mt-1 max-w-[14rem] text-[11px] leading-snug text-neutral-500">
-                          {t('admin.invite.grantsTrialBlocked')}
-                        </p>
+                      <span className="num text-neutral-200">{l.registrations}</span>
+                      {linkKind(l) === 'competition' && (
+                        <div className="text-[11px] text-neutral-500">{t('admin.invite.entriesN', { n: l.entries })}</div>
                       )}
                     </td>
-                    {/* 代理：一人一枚小标签（昵称优先，没有就邮箱），× 移除；「指派」开搜索弹窗。
-                        代理不是角色，这里不动 role——见后端 InviteLinkAgent 模型注释。
-                        Agents: one chip per user (nickname, else email) with × to remove;
-                        Assign opens the search sheet. Not a role — see the model's comment. */}
                     <td className="px-4 py-3">
-                      <div className="flex max-w-[16rem] flex-wrap items-center gap-1.5">
-                        {(l.agents ?? []).map((a) => (
-                          <span
-                            key={a.userId}
-                            className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-xs text-neutral-200"
-                            title={a.email}
-                          >
-                            {a.nickname || a.email}
-                            <button
-                              type="button"
-                              className="text-neutral-500 hover:text-down disabled:opacity-40"
-                              aria-label={t('admin.invite.unassign')}
-                              disabled={busyId !== null}
-                              onClick={() => setUnassignTarget({ link: l, userId: a.userId })}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        ))}
-                        <button
-                          type="button"
-                          className="btn-ghost px-2 py-0.5 text-xs disabled:opacity-40"
-                          disabled={busyId !== null}
-                          onClick={() => setAssignFor(l)}
-                        >
-                          + {t('admin.invite.assign')}
-                        </button>
-                      </div>
+                      <StatusCell l={l} globalTrialEnabled={globalTrialEnabled} />
                     </td>
                     <td className="px-4 py-3 text-xs text-neutral-400">{fmtTime(l.createdAt)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex flex-wrap gap-2">
-                        <button className="btn-ghost px-3 py-1.5 text-xs" onClick={() => void copy(l)}>
-                          {copiedId === l.id ? t('admin.invite.copied') : t('admin.invite.copy')}
-                        </button>
-                        {dirty && (
-                          <button
-                            className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40"
-                            disabled={busyId !== null}
-                            onClick={() => void saveLabel(l)}
-                          >
-                            {t('admin.invite.save')}
-                          </button>
-                        )}
-                        <button
-                          className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
-                          disabled={busyId !== null}
-                          onClick={() => void toggle(l)}
-                        >
-                          {l.isActive ? t('admin.invite.disable') : t('admin.invite.enable')}
+                        <CopyLinkButton link={l} onFail={copyFailed} />
+                        <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={() => setEditId(l.id)}>
+                          {t('admin.invite.edit')}
                         </button>
                       </div>
                     </td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
-      {assignFor && (
-        <AssignAgentSheet
-          link={assignFor}
+          {/* 手机：卡片 / phones: cards */}
+          <div className="space-y-3 md:hidden">
+            {visible.map((l) => (
+              <div key={l.id} className="glass min-w-0 p-4" onClick={() => setEditId(l.id)}>
+                <LinkTitle l={l} />
+                <div className="mt-3 grid grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-[11px] text-neutral-500">{t('admin.invite.colClicks')}</p>
+                    <p className="num text-lg text-neutral-100">{l.clicks}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-neutral-500">{t('admin.invite.colRegistrations')}</p>
+                    <p className="num text-lg text-neutral-100">{l.registrations}</p>
+                  </div>
+                  {linkKind(l) === 'competition' && (
+                    <div>
+                      <p className="text-[11px] text-neutral-500">{t('admin.competitionPromo.step.entries')}</p>
+                      <p className="num text-lg text-neutral-100">{l.entries}</p>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <StatusCell l={l} globalTrialEnabled={globalTrialEnabled} />
+                  <span className="text-[11px] text-neutral-500">{fmtTime(l.createdAt)}</span>
+                </div>
+                <div className="mt-3 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                  <CopyLinkButton link={l} onFail={copyFailed} />
+                  <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={() => setEditId(l.id)}>
+                    {t('admin.invite.edit')}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {creating && (
+        <InviteLinkCreateDrawer
           busy={busyId !== null}
-          onAssign={(userId) => void assignAgent(assignFor, userId)}
-          onUnassign={(userId) => setUnassignTarget({ link: assignFor, userId })}
-          onClose={() => setAssignFor(null)}
+          toast={toast}
+          onCreate={create}
+          onClose={() => setCreating(false)}
+        />
+      )}
+
+      {editing && (
+        <InviteLinkEditDrawer
+          link={editing}
+          busy={busyId !== null}
+          globalTrialEnabled={globalTrialEnabled}
+          toast={toast}
+          onSave={(patch) => save(editing, patch)}
+          onToggleActive={() => toggleActive(editing)}
+          onToggleTrial={() => toggleTrial(editing)}
+          onAssign={(userId) => assignAgent(editing, userId)}
+          onRequestUnassign={(userId) => setUnassignTarget({ link: editing, userId })}
+          onCopyFail={copyFailed}
+          onClose={() => setEditId(null)}
         />
       )}
 
       {unassignTarget && (
         <ConfirmModal
-          center
           busy={busyId !== null}
           title={t('admin.invite.unassignConfirmTitle')}
           message={t('admin.invite.unassignConfirmBody', { name: unassignName(unassignTarget) })}
           confirmLabel={t('admin.invite.unassign')}
-          onConfirm={() => void unassignAgent(unassignTarget.link, unassignTarget.userId)}
+          onConfirm={() => unassignAgent(unassignTarget.link, unassignTarget.userId)}
           onCancel={() => setUnassignTarget(null)}
         />
       )}
@@ -411,140 +378,48 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   )
 }
 
-// 指派代理的搜索弹窗：复用管理员用户搜索接口（邮箱 / 手机号模糊），点一行即指派。
-// portal 到 body（.glass 卡片会成为 fixed 的包含块，见 ConfirmModal 的注释）；接住
-// 手机返回手势（useBackToClose）。300ms 防抖，空查询不打接口。
-// Agent-assignment sheet: reuses the admin user search (email / phone fuzzy); one
-// click on a row assigns. Portaled to body (see ConfirmModal's containing-block
-// note) and claims the phone back gesture. 300ms debounce; empty query = no request.
-function AssignAgentSheet({
-  link,
-  busy,
-  onAssign,
-  onUnassign,
-  onClose,
-}: {
-  link: InviteLink
-  busy: boolean
-  onAssign: (userId: string) => void
-  onUnassign: (userId: string) => void
-  onClose: () => void
-}) {
+// 链接列：标记（粗体）+ 类型徽标 + 渠道小标签；第二行灰字是比赛名 / 代理名，平台链接显示码。
+// Link cell: bold label + kind badge + channel chip; grey second line is the competition
+// or agent names (the code for platform links).
+function LinkTitle({ l }: { l: InviteLink }) {
   const { t } = useTranslation()
-  const [q, setQ] = useState('')
-  const [results, setResults] = useState<AdminUser[] | null>(null)
-  const [searching, setSearching] = useState(false)
-  useBackToClose(true, onClose)
-
-  useEffect(() => {
-    const term = q.trim()
-    if (!term) {
-      setResults(null)
-      return
-    }
-    let alive = true
-    const timer = window.setTimeout(() => {
-      setSearching(true)
-      adminApi
-        .listUsers({ q: term, limit: 20 })
-        .then((res) => {
-          if (alive) setResults(res.users)
-        })
-        .catch(() => {
-          if (alive) setResults([])
-        })
-        .finally(() => {
-          if (alive) setSearching(false)
-        })
-    }, 300)
-    return () => {
-      alive = false
-      window.clearTimeout(timer)
-    }
-  }, [q])
-
-  const assigned = new Set((link.agents ?? []).map((a) => a.userId))
-
-  return createPortal(
-    <div className="slide-overlay" onClick={onClose}>
-      <div className="slide-sheet sm:w-[420px]" onClick={(e) => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-white">{t('admin.invite.assignTitle')}</h3>
-        <p className="mt-1 text-xs text-neutral-400">{link.label}</p>
-        <p className="mt-3 text-xs leading-relaxed text-neutral-500">{t('admin.invite.assignHint')}</p>
-
-        {(link.agents ?? []).length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-1.5">
-            {(link.agents ?? []).map((a) => (
-              <span
-                key={a.userId}
-                className="inline-flex items-center gap-1 rounded-full bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
-                title={a.email}
-              >
-                {a.nickname || a.email}
-                <button
-                  type="button"
-                  className="text-prism-300/70 hover:text-down disabled:opacity-40"
-                  aria-label={t('admin.invite.unassign')}
-                  disabled={busy}
-                  onClick={() => onUnassign(a.userId)}
-                >
-                  ×
-                </button>
-              </span>
-            ))}
-          </div>
+  const kind = linkKind(l)
+  const sub = secondaryLine(l)
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="truncate font-semibold text-neutral-100">{l.label}</span>
+        <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${kindBadgeClass(kind)}`}>
+          {t(`admin.invite.kind.${kind}`)}
+        </span>
+        {l.channel && (
+          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-400">{l.channel}</span>
         )}
-
-        <input
-          className="input mt-4 w-full"
-          autoFocus
-          placeholder={t('admin.invite.assignSearch')}
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-        />
-
-        <div className="mt-3 max-h-64 overflow-y-auto">
-          {searching && results == null ? (
-            <div className="space-y-2 p-1">
-              <SkeletonLine height={14} />
-              <SkeletonLine width="70%" height={14} />
-            </div>
-          ) : results && results.length === 0 ? (
-            <p className="p-2 text-sm text-neutral-500">{t('admin.invite.assignNoResult')}</p>
-          ) : (
-            <ul className="divide-y divide-white/5">
-              {(results ?? []).map((u) => {
-                const done = assigned.has(u.id)
-                return (
-                  <li key={u.id}>
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left text-sm transition hover:bg-white/5 disabled:opacity-50 disabled:hover:bg-transparent"
-                      disabled={busy || done}
-                      onClick={() => onAssign(u.id)}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-neutral-100">{u.email}</span>
-                        {u.phone && <span className="num block text-xs text-neutral-500">{u.phone}</span>}
-                      </span>
-                      <span className="shrink-0 text-xs text-neutral-500">
-                        {done ? t('admin.invite.assignAlready') : `${u.role} · ${u.plan}`}
-                      </span>
-                    </button>
-                  </li>
-                )
-              })}
-            </ul>
-          )}
-        </div>
-
-        <div className="mt-5 flex">
-          <button type="button" onClick={onClose} className="btn-ghost flex-1 py-2 text-sm">
-            {t('common.close')}
-          </button>
-        </div>
       </div>
-    </div>,
-    document.body,
+      <div className="mt-0.5 truncate text-xs text-neutral-500">{sub || <span className="num">{l.code}</span>}</div>
+    </div>
+  )
+}
+
+// 状态：圆点 + 启用 / 停用；送试用时加小标，全局试用关闭时小标置灰并给出原因（title）。
+// Status: dot + active/disabled, plus a trial chip that greys out with a reason when the
+// global trial is off.
+function StatusCell({ l, globalTrialEnabled }: { l: InviteLink; globalTrialEnabled: boolean }) {
+  const { t } = useTranslation()
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 text-xs">
+      <span className={`inline-block h-2 w-2 rounded-full ${l.isActive ? 'bg-up' : 'bg-neutral-600'}`} aria-hidden />
+      <span className={l.isActive ? 'text-neutral-200' : 'text-neutral-500'}>
+        {l.isActive ? t('admin.invite.active') : t('admin.invite.inactive')}
+      </span>
+      {l.grantsTrial && (
+        <span
+          className={`rounded-full bg-prism-500/20 px-1.5 py-0.5 text-[10px] text-prism-200 ${globalTrialEnabled ? '' : 'opacity-50'}`}
+          title={globalTrialEnabled ? undefined : t('admin.invite.grantsTrialBlocked')}
+        >
+          {t('admin.invite.trialTag')}
+        </span>
+      )}
+    </div>
   )
 }
