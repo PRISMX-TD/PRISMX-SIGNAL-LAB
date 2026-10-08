@@ -28,7 +28,17 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.routers.admin import _like_escape
-from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, Payment, User
+from app.models import (
+    AdminAuditLog,
+    Competition,
+    CompetitionParticipant,
+    InviteLink,
+    InviteLinkAgent,
+    MT5Account,
+    PageVisitorDay,
+    Payment,
+    User,
+)
 from app.schemas import (
     AgentLinkOut,
     AgentLinkUserOut,
@@ -255,6 +265,19 @@ def _trial_grant_days(db: Session, link: InviteLink) -> int | None:
     return trial_grant_days(db)
 
 
+def _plan_note(db: Session, link: InviteLink) -> str:
+    """注册时快照进 users.plan_note 的备注。比赛推广链接写成「比赛名·标记」，用户
+    列表里一眼看出是哪场比赛拉来的；比赛是软引用（无外键），找不到就退回标记。
+    The note snapshotted at signup. Competition links read "competition·label"
+    so the admin user list shows which competition brought the user in; the
+    competition is a soft reference (no FK), so a missing row falls back to the label."""
+    if link.competition_id:
+        comp = db.get(Competition, link.competition_id)
+        if comp is not None:
+            return f"{comp.name}·{link.label}"
+    return link.label
+
+
 def apply_invite(
     db: Session, user: User, ref: str | None, *, grant_trial: bool = True
 ) -> int | None:
@@ -293,7 +316,7 @@ def apply_invite(
     link = _active_link(db, ref)
     if link is None:
         return None  # 乱填/停用的 code 静默忽略，注册照常 / bad codes never block signup
-    user.plan_note = link.label
+    user.plan_note = _plan_note(db, link)
     user.invite_code = link.code
 
     if not grant_trial:

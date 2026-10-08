@@ -191,3 +191,25 @@ def test_google_signup_uses_refs(db_session, monkeypatch):
     )
     user = db_session.query(User).filter(User.email == "g@gmail.com").one()
     assert user.invite_code == "agnt2345"
+
+
+# ---------- B2: 比赛链接的注册备注 ----------
+
+def test_apply_invite_competition_link_note_is_comp_and_label(db_session):
+    from app.routers.invite import apply_invite
+
+    comp = _mk_comp(db_session, name="秋季模拟赛")
+    link = _mk_link(db_session, code="comp2345", label="FB广告", competition_id=comp.id)
+    user = _mk_user(db_session)
+    apply_invite(db_session, user, link.code)
+    assert user.plan_note == "秋季模拟赛·FB广告"
+    assert user.invite_code == "comp2345"
+
+
+def test_apply_invite_competition_link_missing_comp_falls_back_to_label(db_session):
+    from app.routers.invite import apply_invite
+
+    _mk_link(db_session, code="comp2345", label="FB广告", competition_id="00000000-0000-0000-0000-000000000000")
+    user = _mk_user(db_session)
+    apply_invite(db_session, user, "comp2345")
+    assert user.plan_note == "FB广告"
