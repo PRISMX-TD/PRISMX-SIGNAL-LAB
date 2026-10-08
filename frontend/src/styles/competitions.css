@@ -361,3 +361,23 @@
 @media (max-width: 374px) {
   header:has(.cmp-navlive.is-mini) .hdr-wordmark { display: none; }
 }
+
+/* ── 公开比赛页 / public competition page (pages/PublicCompetitionPage.tsx) ──
+   页面骨架复用 .cmp-detail/.cmp-split/.cmp-side；这里只补公开页独有的几块。
+   「模拟·虚拟资金」标与内置浏览器提示用琥珀色：它们是风险/限制说明，不是品牌强调。
+   Reuses the in-app detail skeleton; adds only the public-only pieces. The demo badge and
+   in-app-browser hint are amber: they are caveats, not brand emphasis. */
+.pcp-badge { display: inline-flex; margin-bottom: 12px; padding: 4px 10px; border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 999px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+.pcp-meta { margin-top: 14px; font-size: 13px; color: #a1a1aa; }
+.pcp-stale { margin-top: 12px; font-size: 12px; color: #fcd34d; }
+.pcp-snap { margin-top: 10px; font-size: 11px; color: #71717a; }
+.pcp-rules { margin-top: 24px; }
+.pcp-rules h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #f4f4f5; }
+.pcp-risk { margin-top: 18px; font-size: 12px; line-height: 1.6; color: #71717a; }
+.pcp-steps-h { font-weight: 700; color: #f4f4f5; }
+.pcp-steps { display: grid; gap: 4px; margin: 0; padding-left: 1.2em; list-style: decimal; color: #d4d4d8; }
+.pcp-cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
+.pcp-hint { font-size: 11px; color: #71717a; }
+.pcp-link { font-size: 12px; color: #c4b5fd; }
+.pcp-link:hover { color: #ddd6fe; }
+.pcp-inapp { margin-bottom: 16px; padding: 10px 14px; border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 10px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 12px; line-height: 1.6; }

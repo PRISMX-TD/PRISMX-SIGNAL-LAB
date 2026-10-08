@@ -296,9 +296,18 @@ export function persistLanguageIfUnset(at: number = Date.now()): boolean {
 
 // 同步界面语言但不写偏好：公开页按 URL 被动同步时用——访客点开 /en 不该
 // 悄悄覆盖他 localStorage 里的语言偏好；主动点语言切换才走 setLanguage。
-export function syncLanguage(lang: AppLang) {
-  if (i18n.language !== lang) i18n.changeLanguage(lang)
+// 返回切换完成的 Promise（语言包到位之后才 resolve），公开比赛页的 bootPreload 要等它，
+// 避免首帧先闪一下中文。既有调用点忽略返回值，行为不变。
+// Sync the UI language without saving a preference. Returns a promise that resolves once
+// the switch (bundle load included) is done; the public competition page's bootPreload
+// awaits it so the first frame isn't Chinese. Existing callers ignore it.
+export function syncLanguage(lang: AppLang): Promise<void> {
   applyHtmlLang(lang)
+  if (i18n.language === lang) return Promise.resolve()
+  return i18n.changeLanguage(lang).then(
+    () => undefined,
+    () => undefined,
+  )
 }
 
 export default i18n

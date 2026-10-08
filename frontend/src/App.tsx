@@ -2,8 +2,9 @@ import { Suspense, useEffect, useState, type ComponentType, type ReactNode } fro
 import { lazyRetry } from './utils/lazyRetry'
 import { onIdle, shouldSkipPrefetch } from './utils/idle'
 import { getToken } from './api/client'
-import { ensureMoreLocale, storedLang, syncLanguage } from './i18n'
+import { ensureMoreLocale, i18nReady, storedLang, syncLanguage } from './i18n'
 import { langFromPath, pageFromPath, type PageId } from './seo/meta'
+import { browserLangs, isPublicCompPath, pickPublicLang } from './utils/publicLang'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
@@ -126,6 +127,13 @@ const AnnouncementsPage = lazyPage(() => import('./pages/AnnouncementsPage'), 'A
 const AnnouncementPage = lazyPage(() => import('./pages/AnnouncementPage'), 'AnnouncementPage')
 const CompleteProfilePage = lazyPage(() => import('./pages/CompleteProfilePage'), 'CompleteProfilePage')
 const AgentPage = lazyPage(() => import('./pages/AgentPage'), 'AgentPage')
+// 公开比赛页：按需包页面（不写 core）。理由见 docs 计划 Part E / E7：它复用的 competition.*、
+// leaderboard.* 键都在 *.more.json，标 core 会把它们全塞进入口包；/c 没有预渲染，晚到的按需包
+// 不会清空任何内容，lazyPage 也是与页面 chunk 并行拉取。
+// Public competition page: an on-demand page (no core flag) — the competition.* / leaderboard.*
+// keys it reuses live in *.more.json; /c isn't prerendered and lazyPage fetches the bundle in
+// parallel with the chunk.
+const PublicCompetitionPage = lazyPage(() => import('./pages/PublicCompetitionPage'), 'PublicCompetitionPage')
 
 // ── 启动预加载与登录后预取 / boot preload and post-login prefetch ──
 type HasPreload = { preload: () => Promise<void> }
@@ -174,6 +182,22 @@ const PREFETCH_AFTER_LOGIN: HasPreload[] = [Layout, DashboardPage, SignalsPage, 
 export function bootPreload(pathname: string): Promise<void> {
   const authed = !!getToken()
   const pub = pageFromPath(pathname)
+  // 公开比赛页（/c、/c/:id）：没有预渲染内容要保护。未登录：并行预热页面 chunk + 按需语言包，
+  // 只等语言切到 ?lang= / 浏览器语言（否则 en/ja/… 访客首帧会先闪中文）。已登录：页面会立刻
+  // 跳去 /competitions，预热站内外壳与比赛页。
+  // Public competition page: nothing prerendered to protect. Logged out: warm the chunk +
+  // on-demand locale in parallel and wait only for the language switch (else the first
+  // frame flashes Chinese). Logged in: it redirects to /competitions, so warm those.
+  if (isPublicCompPath(pathname)) {
+    if (authed) {
+      void Layout.preload().catch(() => {})
+      void CompetitionsPage.preload().catch(() => {})
+      return Promise.resolve()
+    }
+    void PublicCompetitionPage.preload().catch(() => {})
+    const lang = pickPublicLang(typeof window !== 'undefined' ? window.location.search : '', browserLangs())
+    return i18nReady.then(() => syncLanguage(lang)).catch(() => {})
+  }
   // 已登录用户打开首页只是个跳板（Home 立刻重定向 /dashboard），不必等落地页。
   // For a signed-in user the home page is only a redirect to /dashboard.
   if (pub && !(pub.page.id === 'home' && authed)) {
@@ -317,10 +341,12 @@ function RouteErrorBoundary({ children }: { children: ReactNode }) {
 // saving a preference; entering the app from one must restore the user's own choice.
 // Nothing did: an iOS PWA launched at a landing URL, or an expired session detouring
 // via the home page, stayed in the URL's language until cloud prefs (if any) changed it.
+// 公开比赛页的语言由 ?lang= / 浏览器决定（页面自己同步），这里不能用存储的语言覆盖它。
+// The public competition page picks its own language (?lang= / browser); don't override it with the stored one.
 function LangRouteSync() {
   const { pathname } = useLocation()
   useEffect(() => {
-    if (langFromPath(pathname) !== null) return
+    if (langFromPath(pathname) !== null || isPublicCompPath(pathname)) return
     const lang = storedLang()
     if (lang) syncLanguage(lang)
   }, [pathname])
@@ -435,6 +461,12 @@ export default function App() {
             <Route path="/en/risk" element={<PublicShell lang="en" page="risk"><LegalPage doc="risk" /></PublicShell>} />
             <Route path="/faq" element={<PublicShell lang="zh" page="faq"><FaqPage /></PublicShell>} />
             <Route path="/en/faq" element={<PublicShell lang="en" page="faq"><FaqPage /></PublicShell>} />
+            {/* 公开比赛页（设计 2026-10-08 §4）：Protected 之外，不套 Layout（不需要 LiveProvider）；
+                已登录访客由页面自己跳去 /competitions?c=<id>。
+                Public competition page: outside Protected and Layout; signed-in visitors are
+                redirected by the page itself. */}
+            <Route path="/c" element={<PublicCompetitionPage />} />
+            <Route path="/c/:compId" element={<PublicCompetitionPage />} />
             <Route
               element={
                 <Protected>
