@@ -29,6 +29,7 @@ import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
 import PhoneField, { dialCodeOf, type PhoneValue } from '../components/PhoneField'
 import { DEFAULT_DIAL_ISO } from '../data/dialCodes'
+import { postAuthDestination, resumeCompIntent } from '../utils/compIntent'
 
 export default function CompleteProfilePage() {
   const { t } = useTranslation()
@@ -46,7 +47,10 @@ export default function CompleteProfilePage() {
   if (!user) return <Navigate to="/login" replace />
   const needsPhone = !!user.needsPhone
   const needsNickname = !!user.needsNickname
-  if (!needsPhone && !needsNickname) return <Navigate to="/dashboard" replace />
+  // 与提交成功后的 navigate() 同一判据（v7_startTransition 下两者谁后提交谁赢，见 LoginPage）。
+  // Same rule as the post-submit navigate() (under v7_startTransition the last commit wins;
+  // see LoginPage).
+  if (!needsPhone && !needsNickname) return <Navigate to={postAuthDestination(user)} replace />
 
   const subtitle = needsPhone && needsNickname
     ? t('auth.completeSubtitleBoth')
@@ -69,7 +73,7 @@ export default function CompleteProfilePage() {
       // redraws asking only for the nickname, with nothing to re-type.
       if (needsPhone) await submitPhone(dialCodeOf(phone.iso), phone.national)
       if (needsNickname) await submitNickname(nickname.trim())
-      navigate('/dashboard', { replace: true })
+      if (!resumeCompIntent(navigate, user)) navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? localizeApiError(err.message) : t('auth.errorFailed'))
     } finally {

@@ -23,7 +23,7 @@
 // gets a 32px round chevron. Data flow, validation and error handling unchanged.
 import { useEffect, useState, type FormEvent } from 'react'
 import PageHead from '../components/PageHead'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { bridgeVersionApi, gatewayApi } from '../api/client'
 import { BRIDGE_DOWNLOAD_URL, BRIDGE_FILENAME } from '../api/bridgeDownload'
@@ -32,6 +32,7 @@ import { localizeApiError } from '../api/utils'
 import PartnerBrokerCard, { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { EmailVerifyInline } from '../components/EmailVerifyNotice'
 import { useAuth } from '../store/auth'
+import { readCompIntent, resumeCompIntent } from '../utils/compIntent'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/bind.css'
 
@@ -62,6 +63,16 @@ export default function BindPage() {
   const { user } = useAuth()
   const emailUnverified = user?.emailVerified === false
   const { name: brokerName } = usePartnerBroker()
+  const navigate = useNavigate()
+  // 带着比赛报名意图来的人（推广链接 / 服务端 pendingCompetition）要开的是本场比赛指定的
+  // 模拟户（比赛页给本场开户链接）；合作券商真实户的开户福利卡在这里是岔路，藏起来。
+  // 本地意图读一次即可（本页不会写它）。
+  // Visitors with a competition intent (promo link / server pendingCompetition) need the
+  // competition's own demo account (the competition page links it); the partner live-account
+  // offer card is a detour here, so hide it. The local intent is read once (this page never
+  // writes it).
+  const [hasLocalCompIntent] = useState(() => readCompIntent() !== null)
+  const competing = hasLocalCompIntent || !!user?.pendingCompetition
 
   // 桥接程序版本徽标：后端抓 GitHub releases/latest 的 tag（10 分钟缓存），拿不到
   // 就不显示，宁缺毋错——见 DownloadPage 里同一段说明。
@@ -100,6 +111,9 @@ export default function BindPage() {
       if (res.valid) {
         setGwPassword('') // 验证通过后清空密码
         refreshAll()
+        // 为比赛而来的：绑定成功就回比赛页继续报名；没有意图则留在本页（与之前一致）。
+        // Came for a competition: go back to it to finish entering; otherwise stay (as before).
+        resumeCompIntent(navigate, user)
       }
     } catch (e) {
       setGwError(e instanceof Error ? localizeApiError(e.message) : t('bind.gw.errFailed'))
@@ -161,7 +175,7 @@ export default function BindPage() {
             Bonus offer, shown only while no direct-connect account exists. Someone
             already connected doesn't need to be pitched an account again — the
             card would just take up space. */}
-        {gatewayAccounts.length === 0 && (
+        {gatewayAccounts.length === 0 && !competing && (
           <PartnerBrokerCard variant="compact" />
         )}
 
