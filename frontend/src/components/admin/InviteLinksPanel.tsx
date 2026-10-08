@@ -244,10 +244,11 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
       ) : (
         <>
           {/* 桌面：6 列紧凑表。外层不加 overflow-x-auto——复制菜单是绝对定位的，会被裁掉；
-              table-fixed + 定宽列保证 md 宽度下放得下。
+              table-fixed + 定宽列；lg 起才用表（md 宽度下 6 列太挤），以下用卡片。
               Desktop: compact 6-column table. No overflow-x-auto on the wrapper (it would
-              clip the copy menu); table-fixed with fixed columns fits from md up. */}
-          <div className="glass hidden p-0 md:block">
+              clip the copy menu); table-fixed with fixed columns, used from lg up (six columns
+              are too cramped at md); cards below. */}
+          <div className="glass hidden p-0 lg:block">
             <table className="w-full table-fixed text-left text-sm">
               <colgroup>
                 <col />
@@ -302,8 +303,8 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
             </table>
           </div>
 
-          {/* 手机：卡片 / phones: cards */}
-          <div className="space-y-3 md:hidden">
+          {/* 手机 / 平板：卡片 / phones and tablets: cards */}
+          <div className="space-y-3 lg:hidden">
             {visible.map((l) => (
               <div key={l.id} className="glass min-w-0 p-4" onClick={() => setEditId(l.id)}>
                 <LinkTitle l={l} />

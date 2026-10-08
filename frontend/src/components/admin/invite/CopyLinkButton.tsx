@@ -62,7 +62,9 @@ export default function CopyLinkButton({ link, onFail }: { link: InviteLink; onF
         className="btn-ghost whitespace-nowrap px-3 py-1.5 text-xs"
         aria-haspopup={isAgent ? 'menu' : undefined}
         aria-expanded={isAgent ? open : undefined}
-        aria-label={isAgent ? t('admin.invite.copyMenu') : undefined}
+        // 复制成功后去掉 aria-label，读屏才念得到按钮上的「已复制」。
+        // Drop aria-label once copied so screen readers announce the 'copied' text.
+        aria-label={isAgent && !copied ? t('admin.invite.copyMenu') : undefined}
         onClick={() => (isAgent ? setOpen((v) => !v) : void doCopy(promoLinkUrl(link)))}
       >
         {copied ? t('admin.invite.copied') : t('admin.invite.copy')}

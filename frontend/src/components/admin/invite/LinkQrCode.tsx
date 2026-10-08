@@ -4,6 +4,10 @@
 // QR + download. Display is SVG; the PNG comes from a hidden 1024px canvas instead of
 // rasterising the SVG — older Safari taints a canvas that has an SVG image drawn on it.
 // Black on white with a quiet zone: theme colours don't scan once printed.
+// 下载的 SVG 与 PNG 用同样的 4 模块留白（扫码规范的 quiet zone）：屏幕上显示的那张外面
+// 还包着一圈白底所以只留 2，下载用的是另一张隐藏的 marginSize=4 的 SVG。
+// The downloaded SVG uses the same 4-module quiet zone as the PNG; the on-screen one
+// sits in a white frame and keeps 2, so the download comes from a hidden copy.
 import { useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { QRCodeCanvas, QRCodeSVG } from 'qrcode.react'
@@ -28,6 +32,8 @@ export default function LinkQrCode({ url, filename }: { url: string; filename: s
     const el = svgRef.current
     if (!el) return
     const clone = el.cloneNode(true) as SVGSVGElement
+    clone.removeAttribute('class')
+    clone.removeAttribute('aria-hidden')
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     clone.setAttribute('width', String(EXPORT_PX))
     clone.setAttribute('height', String(EXPORT_PX))
@@ -51,8 +57,19 @@ export default function LinkQrCode({ url, filename }: { url: string; filename: s
   return (
     <div className="flex items-center gap-4">
       <div className="shrink-0 rounded-xl bg-white p-1.5">
-        <QRCodeSVG ref={svgRef} value={url} size={128} level="M" marginSize={2} bgColor="#ffffff" fgColor="#000000" />
+        <QRCodeSVG value={url} size={128} level="M" marginSize={2} bgColor="#ffffff" fgColor="#000000" />
       </div>
+      <QRCodeSVG
+        ref={svgRef}
+        value={url}
+        size={EXPORT_PX}
+        level="M"
+        marginSize={4}
+        bgColor="#ffffff"
+        fgColor="#000000"
+        className="hidden"
+        aria-hidden
+      />
       <QRCodeCanvas
         ref={canvasRef}
         value={url}
