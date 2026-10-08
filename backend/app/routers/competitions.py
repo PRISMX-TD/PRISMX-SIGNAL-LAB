@@ -23,7 +23,7 @@ from app.services.audit import log_change as _log_change
 from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
     CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn,
-    CompetitionRegisterIn, CompetitionSettleIn)
+    CompetitionPublicNameIn, CompetitionRegisterIn, CompetitionSettleIn)
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
 from app.services.gamification.badges import equipped_badge_tiers
@@ -31,7 +31,7 @@ from app.services.gamification.competitions import (
     TRACKS, auto_enroll, comp_gates, comp_period_key, competition_integrity,
     participant_details, refresh_comp_board, register_participant, settle_competition)
 from app.services.gamification.public_board import (
-    build_funnel, build_public_payload, public_cache_key)
+    build_funnel, build_public_payload, is_publicly_viewable, public_cache_key)
 from app.services.notification_feed import (
     KIND_COMP_PUBLIC_NAME, create_notification, notify_ws)
 from app.services.settings_store import get_gamification_settings
@@ -41,6 +41,7 @@ from app.utils.timeutil import aware as _aware
 router = APIRouter(prefix="/competitions", tags=["competitions"])
 
 MSG_COMP_NOT_FOUND = "比赛不存在 / Competition not found"
+MSG_ENTRY_NOT_FOUND = "参赛条目不存在 / Entry not found"
 
 
 def _check_competitions_visible(db: Session, user: User) -> None:
@@ -189,14 +190,32 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
                  .filter(CompetitionParticipant.competition_id == comp.id,
                          CompetitionParticipant.user_id == user.id)
                  .order_by(CompetitionParticipant.registered_at.asc()).all())
-    out = _summary_out(comp)
+    # 本人各条目的已判定笔数（报名后引导「已平仓 x / N」用），取同一份快照；没上榜为 None。
+    # Resolved-trade count per own entry (for the "closed x / N" guide), from the
+    # same snapshot; None when the entry isn't on the board.
+    samples = dict(db.query(LeaderboardSnapshot.mt5_login, LeaderboardSnapshot.sample)
+                     .filter(LeaderboardSnapshot.board == comp.metric,
+                             LeaderboardSnapshot.period_key == comp_period_key(comp.id),
+                             LeaderboardSnapshot.user_id == user.id).all())
+    # 参赛数与列表页同一个分组查询；以前这里漏传，详情页永远显示 0。
+    # Same grouped count as the list; it used to be omitted here, so detail showed 0.
+    counts = _participant_counts(db, [comp.id])
+    out = _summary_out(comp, participants=counts.get(comp.id, 0))
     out["board"] = board
+    # 本场此刻是否有公开页（分享卡二维码指向 /c/<id> 用，设计 §4）。
+    # Whether this competition has a public page right now (share-card QR, §4).
+    out["publicView"] = is_publicly_viewable(db, comp)
+    # 站内准备清单的「开户」一步用本场开户链接（设计 §4）。
+    # The in-app checklist's open-account step uses this competition's URL (§4).
+    out["openAccountUrl"] = comp.open_account_url
     out["myEntries"] = [{
         "login": p.mt5_login,
         "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,
         "finalRank": p.final_rank,
         "finalScore": p.final_score,
         "disqualified": p.disqualified,
+        "sample": samples.get(p.mt5_login),
+        "publicName": p.public_name,
     } for p in my_rows]
     out["pendingSettle"] = comp.status == "ended"
     return out
@@ -213,6 +232,29 @@ def register_for_competition(request: Request, comp_id: str, body: CompetitionRe
         "login": participant.mt5_login,
         "scoringFrom": participant.scoring_from.isoformat() if participant.scoring_from else None,
     }
+
+
+@router.patch("/{comp_id}/entries/{login}/public-name")
+@limiter.limit(settings.RATE_LIMIT_COMPETITION)
+def set_entry_public_name(request: Request, comp_id: str, login: str,
+                          body: CompetitionPublicNameIn, db: Session = Depends(get_db),
+                          user: User = Depends(require_competitions_visible)):
+    """本人切换某个参赛条目在公开榜上是否显示昵称（设计 §1.8）。只认自己的条目，
+    别人的与不存在的一律 404（不区分）。管理员的 name_hidden 仍然优先。
+    Toggle whether one's own entry shows the nickname on the public board. Only
+    one's own entries; anything else is the same 404. The admin's name_hidden
+    still wins."""
+    comp = _get_public_comp_or_404(db, comp_id)
+    p = (db.query(CompetitionParticipant)
+           .filter(CompetitionParticipant.competition_id == comp.id,
+                   CompetitionParticipant.mt5_login == login,
+                   CompetitionParticipant.user_id == user.id).first())
+    if p is None:
+        raise HTTPException(404, MSG_ENTRY_NOT_FOUND)
+    p.public_name = bool(body.show)
+    db.commit()
+    shared_cache.delete(public_cache_key(comp.id))
+    return {"login": p.mt5_login, "publicName": p.public_name}
 
 
 # ---- 管理员端 / admin endpoints ----

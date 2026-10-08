@@ -456,6 +456,13 @@ class CompetitionRegisterIn(BaseModel):
     mt5Login: str = Field(pattern=LOGIN_PATTERN)
 
 
+class CompetitionPublicNameIn(BaseModel):
+    """本人切换「在公开页显示我的昵称」（设计 §1.8/§3.3）。
+    The entrant's own "show my nickname on the public page" switch."""
+
+    show: bool
+
+
 class CompetitionSettleIn(BaseModel):
     """终审（管理端）。acknowledgeFlags=True：前 10 名有完整性标记也照常终审（写审计）。
     整个请求体可省略，等同 acknowledgeFlags=False。"""

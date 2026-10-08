@@ -8,9 +8,11 @@ from app.models import Competition, CompetitionParticipant, LeaderboardSnapshot,
 from app.routers.account import get_account
 from app.routers.competitions import (
     _check_competitions_visible, get_competition, list_competitions,
-    register_for_competition,
+    register_for_competition, set_entry_public_name,
 )
-from app.schemas import CompetitionRegisterIn
+from app.schemas import CompetitionPublicNameIn, CompetitionRegisterIn
+from app.services import shared_cache
+from app.services.gamification.public_board import public_cache_key
 from app.services.gamification.competitions import comp_period_key
 from app.services.gamification.conditions import GROUPS
 from app.services.settings_store import invalidate_gamification_cache, save_gamification_settings
@@ -299,8 +301,10 @@ def test_detail_myentries_shape_and_pending_settle(db_session):
     assert out["pendingSettle"] is True
     assert out["myEntries"] == [{
         "login": "A", "scoringFrom": p.scoring_from.isoformat(), "finalRank": 2,
-        "finalScore": 0.15, "disqualified": False,
+        "finalScore": 0.15, "disqualified": False, "sample": None, "publicName": None,
     }]
+    assert out["participants"] == 1
+    assert out["publicView"] is False
 
 
 def test_detail_settled_board_matches_final_ranks(db_session):
@@ -451,3 +455,65 @@ def test_account_me_exposes_gamification_level(db_session):
     finally:
         save_gamification_settings(db_session, {"user_visible": False})
         db_session.commit(); invalidate_gamification_cache()
+
+
+def test_detail_entries_carry_sample_and_public_name(db_session):
+    _make_visible(db_session)
+    # ended：running 的详情会先重算快照，把手写的快照行冲掉。
+    # ended: a running detail recomputes the snapshot first, wiping the hand-written row.
+    comp = _comp(db_session, status="ended")
+    u = _user(db_session, "smp@t.co")
+    other = _user(db_session, "smp2@t.co")
+    db_session.add_all([
+        CompetitionParticipant(competition_id=comp.id, user_id=u.id, mt5_login="501",
+                               public_name=True),
+        CompetitionParticipant(competition_id=comp.id, user_id=u.id, mt5_login="502"),
+        CompetitionParticipant(competition_id=comp.id, user_id=other.id, mt5_login="503"),
+        LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),
+                            user_id=u.id, mt5_login="501", rank=1, score=0.2, sample=6),
+    ])
+    db_session.commit()
+    out = get_competition(request=None, comp_id=comp.id, db=db_session, user=u)
+    by_login = {e["login"]: e for e in out["myEntries"]}
+    assert by_login["501"]["sample"] == 6 and by_login["501"]["publicName"] is True
+    assert by_login["502"]["sample"] is None and by_login["502"]["publicName"] is None
+    assert out["participants"] == 3
+
+
+def test_toggle_own_public_name_and_drop_cache(db_session):
+    _make_visible(db_session)
+    comp = _comp(db_session, status="running")
+    u = _user(db_session, "pn@t.co")
+    stranger = _user(db_session, "pn2@t.co")
+    db_session.add(CompetitionParticipant(competition_id=comp.id, user_id=u.id, mt5_login="601"))
+    db_session.commit()
+    shared_cache.set_json(public_cache_key(comp.id), {"x": 1}, ttl=60)
+
+    out = set_entry_public_name(request=None, comp_id=comp.id, login="601",
+                                body=CompetitionPublicNameIn(show=True), db=db_session, user=u)
+    assert out == {"login": "601", "publicName": True}
+    assert shared_cache.get_json(public_cache_key(comp.id)) is None
+    out = set_entry_public_name(request=None, comp_id=comp.id, login="601",
+                                body=CompetitionPublicNameIn(show=False), db=db_session, user=u)
+    assert out["publicName"] is False
+
+    for who, login in ((stranger, "601"), (u, "999")):
+        with pytest.raises(HTTPException) as e:
+            set_entry_public_name(request=None, comp_id=comp.id, login=login,
+                                  body=CompetitionPublicNameIn(show=True), db=db_session, user=who)
+        assert e.value.status_code == 404
+
+
+def test_detail_reports_public_view(db_session):
+    save_gamification_settings(db_session, {"competitions_visible": True,
+                                            "competitions_public_enabled": True})
+    db_session.commit(); invalidate_gamification_cache()
+    comp = Competition(name="Pub", metric="return_pct", enrollment="signup", track="demo",
+                       status="running", starts_at=T0, ends_at=ENDS, reg_opens_at=REG_OPENS,
+                       reg_closes_at=REG_CLOSES, public_view=True,
+                       open_account_url="https://broker.example/open")
+    db_session.add(comp); db_session.commit()
+    u = _user(db_session, "pv@t.co")
+    out = get_competition(request=None, comp_id=comp.id, db=db_session, user=u)
+    assert out["publicView"] is True
+    assert out["openAccountUrl"] == "https://broker.example/open"

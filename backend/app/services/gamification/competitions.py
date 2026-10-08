@@ -906,8 +906,15 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
 
     key = comp_period_key(comp.id)
     scoring_from = max(_aware(comp.starts_at), now)
+    # 公开比赛报名即同意公开昵称（报名弹窗写明，设计 §1.8）；其余比赛不表态（NULL = 匿名）。
+    # 局部 import：public_board 反过来依赖本模块。
+    # Entering a public competition consents to the nickname being shown (the dialog
+    # says so, §1.8); otherwise undecided (NULL = anonymous). Local import:
+    # public_board depends on this module.
+    from .public_board import initial_public_name
+    public_name = initial_public_name(db, comp)
     db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id, mt5_login=mt5_login,
-                                  scoring_from=scoring_from))
+                                  scoring_from=scoring_from, public_name=public_name))
     db.add(PeriodBaseline(user_id=user.id, mt5_login=mt5_login, period_key=key,
                           baseline=balance, taken_at=now))
     try:
@@ -927,7 +934,8 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
         # 某次写入只落了基线没落参赛行，成因不追究，防御性兜底）：基线已在，
         # 复用它（不重拍 taken_at），只补插参赛行。
         db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id,
-                                      mt5_login=mt5_login, scoring_from=scoring_from))
+                                      mt5_login=mt5_login, scoring_from=scoring_from,
+                                      public_name=public_name))
         try:
             db.commit()
         except IntegrityError:
