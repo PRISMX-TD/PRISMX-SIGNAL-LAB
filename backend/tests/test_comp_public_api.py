@@ -39,7 +39,9 @@ def _user(db, email, role="user"):
 
 
 def _acct(db, u, login, balance=2000.0, tm=2):
-    a = MT5Account(user_id=u.id, login=login, server="s", balance=balance, trade_mode=tm)
+    # 报名只收直连账户（2026-10-08 §1.11）/ registration accepts gateway accounts only
+    a = MT5Account(user_id=u.id, login=login, server="s", balance=balance, trade_mode=tm,
+                   source="gateway")
     db.add(a); db.commit(); return a
 
 

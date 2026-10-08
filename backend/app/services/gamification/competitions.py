@@ -39,20 +39,25 @@ _TRACK_MODES = {"real": (REAL,), "demo": (DEMO, CONTEST)}
 # 却能稳定拿到榜首，奖金场就是被这么套的。
 #
 # 两个赛道给不同的值，因为成本不同：模拟账户可以零成本无限开，所以 demo 赛道
-# 只认一个条目，对冲刷榜在这一侧直接不成立；实盘每开一个账户都要真金白银入金，
-# 对冲的代价是真实的点差与手续费，所以留 3 个——足够覆盖「一个人确实同时在
-# 几家/几个账户上跑不同策略」这类正当用法，又把批量对冲的成本抬到不划算。
+# 每人只认一个条目——这只挡住「一个人自己多开账户互相对冲」。两个人串通、各报一个
+# 账户反向下单照样能做（对一方必赚），这道闸管不到；那一类靠管理端完整性报告里的
+# 对冲嫌疑配对（competition_integrity / hedge_pairs）加终审闸门由人来把关。实盘每开
+# 一个账户都要真金白银入金，对冲的代价是真实的点差与手续费，所以留 3 个——足够覆盖
+# 「一个人确实同时在几家/几个账户上跑不同策略」这类正当用法，又把批量对冲的成本抬到
+# 不划算。
 #
 # How many entries one user may have in one competition (the anti-gaming gate
 # from §1.7). Ranks are per entry (login), not per person, so one user entering N
 # accounts and hedging them against each other is guaranteed to leave one account
 # at the top of the board — a zero-expectation trick that reliably wins prizes.
-# The two tracks get different caps because their cost differs: demo accounts are
-# free and unlimited, so the demo track allows exactly one entry and the hedge
-# stops being possible at all; a real account costs real money to fund and the
-# hedge pays real spread and commission, so three entries are allowed — enough
-# for the legitimate "I really do run a few accounts" case while keeping bulk
-# hedging uneconomical.
+# The demo track allows one entry per user because demo accounts are free. That
+# stops a single user hedging their own accounts, but NOT two colluding users who
+# each enter one account and trade opposite sides; that case is surfaced by the
+# admin integrity report's hedge pairs (competition_integrity / hedge_pairs) and
+# the settle gate, and decided by a human. A real account costs real money and
+# the hedge pays real spread and commission, so three entries are allowed —
+# enough for the legitimate "I really do run a few accounts" case while keeping
+# bulk hedging uneconomical.
 MAX_ENTRIES_DEMO = 1
 MAX_ENTRIES_REAL = 3
 _TRACK_MAX_ENTRIES = {"real": MAX_ENTRIES_REAL, "demo": MAX_ENTRIES_DEMO}
@@ -581,13 +586,31 @@ def snapshot_competitions(db, now: datetime) -> dict:
     return {"comps": len(comps), "rows": total_rows}
 
 
+MSG_GATEWAY_ONLY = ("比赛仅接受直连（账号密码绑定）的账户，请先在绑定页直连该账户 / "
+                    "Competitions only accept direct-connect accounts; "
+                    "bind this account with its password first")
+MSG_BRIDGE_DUPLICATE = ("该账户同时通过桥接程序连接，请先在账户页删除桥接连接再报名 / "
+                        "This account is also connected through the bridge app; "
+                        "remove that connection before entering")
+MSG_ACCOUNT_REVOKED = ("账户授权已失效，请重新验证后再报名 / "
+                       "This account's authorization has lapsed; re-verify it before entering")
+MSG_ENTRY_TAKEN = ("该账户已被其他用户报名，请联系客服 / "
+                   "This account has already been entered by another user, please contact support")
+
+
 def register_participant(db, comp: Competition, user: User, mt5_login: str,
                           now: datetime) -> CompetitionParticipant:
-    """报名参赛（设计 §1.7/§1.8）：仅 `enrollment=="signup"` 的比赛可报名，报名窗口内
-    （`reg_opens_at <= now < reg_closes_at`；任一边未配置视为窗口未开放），账户须是
-    本人名下、类型与比赛赛道相符（real 收实盘 / demo 收模拟）且余额已同步。参赛行 + `period_baselines
-    (comp:<id>)` 基线在同一事务内一并插入、一次 commit——中途崩溃不会留下有参赛行
-    却没基线的半截状态。撞唯一约束（并发重复报名）→ 回滚、原样返回已有条目（幂等）。
+    """报名参赛（设计 §1.7/§1.8；2026-10-08 §1.11–§1.13）：仅 `enrollment=="signup"` 的比赛
+    可报名，报名窗口内（`reg_opens_at <= now < reg_closes_at`；任一边未配置视为窗口未开放）。
+
+    账户闸（§1.11）：必须是本人名下、`source='gateway'`、`revoked_at IS NULL`、未软删，且本人
+    没有同 login 的未删除桥接行——桥接行的成交与资金都是用户自己电脑上报的，比赛只认
+    服务端从券商直接读到的那条通道。类型须与赛道相符（real 收实盘 / demo 收模拟）且余额已同步。
+
+    撞号（§1.13）：同一场里这个 login 已被别人报名 → 409；是本人的 → 原样返回（幂等）。
+
+    参赛行 + `period_baselines(comp:<id>)` 基线在同一事务内一并插入、一次 commit——中途崩溃
+    不会留下有参赛行却没基线的半截状态。撞唯一约束（并发重复报名）→ 回滚后按上面的撞号规则处理。
     """
     if comp.enrollment != "signup":
         raise HTTPException(status_code=400, detail="本比赛为自动参赛 / This competition auto-enrolls")
@@ -601,26 +624,55 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
         raise HTTPException(status_code=400, detail="不在报名窗口内 / Registration window closed")
 
     from app.services.gateway_binding import not_removed
-    acct = (db.query(MT5Account)
+    track_detail = ("仅实盘账户可参赛 / Only real accounts may enter" if comp.track == "real"
+                    else "仅模拟账户可参赛 / Only demo accounts may enter")
+    rows = (db.query(MT5Account)
               .filter(MT5Account.user_id == user.id, MT5Account.login == mt5_login,
-                      not_removed()).first())
-    if acct is None or acct.trade_mode not in track_modes(comp.track):
-        detail = ("仅实盘账户可参赛 / Only real accounts may enter" if comp.track == "real"
-                  else "仅模拟账户可参赛 / Only demo accounts may enter")
-        raise HTTPException(status_code=400, detail=detail)
+                      not_removed()).all())
+    if not rows:
+        raise HTTPException(status_code=400, detail=track_detail)
+    acct = next((r for r in rows if r.source == "gateway"), None)
+    if acct is None:
+        raise HTTPException(status_code=400, detail=MSG_GATEWAY_ONLY)
+    if any(r.source != "gateway" for r in rows):
+        raise HTTPException(status_code=400, detail=MSG_BRIDGE_DUPLICATE)
+    if acct.revoked_at is not None:
+        raise HTTPException(status_code=400, detail=MSG_ACCOUNT_REVOKED)
+    if acct.trade_mode not in track_modes(comp.track):
+        raise HTTPException(status_code=400, detail=track_detail)
     if acct.balance is None:
         raise HTTPException(status_code=400,
                             detail="账户余额未同步，请先连接账户 / Account balance not synced yet")
 
-    # 最低本金门槛在报名时就挡：以前只在计分时过滤，低于门槛的账户能报上名，
-    # 却永远上不了榜，用户不知道为什么。与计分用同一个 comp_gates，两边不分叉。
-    # Enforce the minimum balance at signup. It used to be applied only when
-    # scoring, so an under-funded account could enter and then silently never
-    # appear on the board. Same comp_gates as scoring, so the two can't diverge.
-    # 上限同理：两者相等时就是「只收这一个金额」，提示也换成那句话，别让用户
-    # 看到"高于上限 1000、低于下限 1000"这种绕口的组合。
-    # The ceiling works the same way; when both are equal it means "this exact
-    # amount only", and the message says so instead of a confusing floor/ceiling pair.
+    # 撞号 / 幂等：先查已有条目，免得为一个早已报上的账户再去网关读一次资金。
+    # Taken / idempotent: check before any gateway read.
+    existing = (db.query(CompetitionParticipant)
+                  .filter(CompetitionParticipant.competition_id == comp.id,
+                          CompetitionParticipant.mt5_login == mt5_login).first())
+    if existing is not None:
+        if existing.user_id != user.id:
+            raise HTTPException(status_code=409, detail=MSG_ENTRY_TAKEN)
+        return existing
+
+    # 每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——
+    # 重复报同一个账户是上面的幂等路径。被取消资格的条目照数：取消资格不退还名额，
+    # 否则「报满 → 故意违规 → 腾出名额再报」就成了绕过这道闸的后门。
+    # Per-user entry cap (see _TRACK_MAX_ENTRIES). Only *other* logins are counted;
+    # disqualified entries still count so a disqualification never frees a slot.
+    cap = max_entries_per_user(comp.track)
+    existing_entries = (db.query(CompetitionParticipant)
+                          .filter(CompetitionParticipant.competition_id == comp.id,
+                                  CompetitionParticipant.user_id == user.id,
+                                  CompetitionParticipant.mt5_login != mt5_login).count())
+    if existing_entries >= cap:
+        raise HTTPException(
+            status_code=400,
+            detail=(f"每人每场最多报名 {cap} 个账户 / "
+                    f"At most {cap} account(s) per person per competition"))
+
+    # 本金门槛在报名时就挡（与计分同一个 comp_gates，两边不分叉）。上下限相等 = 只收
+    # 这一个金额，提示也换成那句话。
+    # Capital gates at signup, same comp_gates as scoring; equal bounds = exact amount.
     from app.services.settings_store import get_gamification_settings
     gates = comp_gates(comp, get_gamification_settings(db))
     min_baseline, max_baseline = gates["min_baseline_usd"], gates["max_baseline_usd"]
@@ -642,32 +694,12 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
             detail=(f"账户余额高于本场最高参赛金额 {max_baseline:g} USD / "
                     f"Account balance is above this competition's maximum of {max_baseline:g} USD"))
 
-    # 每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——
-    # 重复报同一个账户是幂等路径（下面撞唯一约束后原样返回已有条目），不该被
-    # 上限误伤。被取消资格的条目照数：取消资格不退还名额，否则「报满 → 故意
-    # 违规 → 腾出名额再报」就成了绕过这道闸的后门。
-    # Per-user entry cap (see _TRACK_MAX_ENTRIES). Only *other* logins are
-    # counted: re-registering the same account is the idempotent path below and
-    # must not trip the cap. Disqualified entries still count — a disqualification
-    # does not return a slot, or "fill up, get disqualified on purpose, re-enter"
-    # would walk straight around this gate.
-    cap = max_entries_per_user(comp.track)
-    existing_entries = (db.query(CompetitionParticipant)
-                          .filter(CompetitionParticipant.competition_id == comp.id,
-                                  CompetitionParticipant.user_id == user.id,
-                                  CompetitionParticipant.mt5_login != mt5_login).count())
-    if existing_entries >= cap:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"每人每场最多报名 {cap} 个账户 / "
-                    f"At most {cap} account(s) per person per competition"))
-
     key = comp_period_key(comp.id)
     scoring_from = max(_aware(comp.starts_at), now)
     db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id, mt5_login=mt5_login,
                                   scoring_from=scoring_from))
     db.add(PeriodBaseline(user_id=user.id, mt5_login=mt5_login, period_key=key,
-                          baseline=acct.balance, taken_at=now))
+                          baseline=balance, taken_at=now))
     try:
         db.commit()
     except IntegrityError:
@@ -676,6 +708,10 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
                       .filter(CompetitionParticipant.competition_id == comp.id,
                               CompetitionParticipant.mt5_login == mt5_login).first())
         if existing is not None:
+            # 并发撞号：别人抢先报上了同一个 login → 409；是本人的 → 幂等返回。
+            # Concurrent collision: someone else's entry → 409; our own → idempotent.
+            if existing.user_id != user.id:
+                raise HTTPException(status_code=409, detail=MSG_ENTRY_TAKEN)
             return existing
         # 撞的不是参赛行的唯一约束，而是 period_baselines 的——孤儿基线（此前
         # 某次写入只落了基线没落参赛行，成因不追究，防御性兜底）：基线已在，
