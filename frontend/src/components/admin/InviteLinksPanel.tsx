@@ -74,7 +74,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
     if (!label || busyId) return
     setBusyId('create')
     try {
-      const link = await adminApi.createInviteLink(label)
+      const link = await adminApi.createInviteLink({ label })
       setLinks((prev) => [link, ...prev])
       setNewLabel('')
       showToast('ok', t('admin.saved'))

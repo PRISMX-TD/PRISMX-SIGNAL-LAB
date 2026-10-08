@@ -195,6 +195,11 @@ export interface AdminUser {
 
 // 邀请链接（管理后台）。registrations 按隐藏归因码统计，与备注文本解耦。
 // Admin invite link; registrations count by the hidden attribution code.
+// 三类链接不落库，全部由后端从数据推导（设计 §1.1）：competitionId 非空 = 比赛推广链接
+// （平台自有、不能指派代理）；否则有代理 = 代理链接；都不是 = 平台链接。
+// The three kinds are derived server-side, not stored (design §1.1).
+export type InviteLinkKind = 'competition' | 'agent' | 'platform'
+
 export interface InviteLink {
   id: string
   code: string
@@ -211,6 +216,39 @@ export interface InviteLink {
   createdAt: string | null
   // 被指派为这条链接「代理」的用户 / users assigned as this link's agents
   agents: InviteLinkAgent[]
+  // 比赛推广链接关联的比赛（软引用，创建后不可改）/ the linked competition (soft ref, immutable)
+  competitionId: string | null
+  competitionName: string | null
+  // 渠道标签（自由文本 ≤32）/ free-text channel tag (≤32)
+  channel: string | null
+  kind: InviteLinkKind
+  // 经此链接注册后报名比赛的人数（只对比赛链接有意义）/ registrants who then entered (competition links)
+  entries: number
+  // 本月注册数（北京时间切月）。后端可选字段：没有时统计条显示「—」。
+  // Sign-ups this month (Beijing calendar). Optional backend field; the stats strip shows "—" without it.
+  registrationsMonth?: number
+}
+
+export interface InviteLinkCreate {
+  label: string
+  channel?: string | null
+  // 只在创建时可设；选了即为比赛推广链接 / settable at creation only
+  competitionId?: string | null
+}
+
+// PATCH 体：只送改了的字段；不含 competitionId（创建后不可改）。
+// PATCH body: send only changed fields; no competitionId (immutable).
+export interface InviteLinkPatch {
+  label?: string
+  channel?: string | null
+  isActive?: boolean
+  grantsTrial?: boolean
+}
+
+export interface InviteLinkListParams {
+  kind?: InviteLinkKind
+  competitionId?: string
+  channel?: string
 }
 
 export interface InviteLinkAgent {
@@ -1862,6 +1900,12 @@ export interface GamificationSettings {
   // Win-rate profit gate: a principle by design (a high win rate isn't profit);
   // made configurable on 2026-09-04, default off.
   winrateRequireProfit: boolean
+  // 公开比赛页总开关（设计 §1.7）：关掉时所有 /c 页 404，出问题先关这里。默认 false。
+  // Kill switch for public competition pages (design §1.7); off = every /c page 404s.
+  competitionsPublicEnabled: boolean
+  // 主推比赛（§1.3）：null = 自动取最近一场可公开的 running/upcoming。
+  // Featured competition (§1.3); null = auto-pick the nearest public running/upcoming one.
+  featuredCompetitionId: string | null
 }
 
 // PATCH /admin/gamification/settings 请求体：全部可选，只改传了的字段。
@@ -1875,6 +1919,8 @@ export interface GamificationSettingsPatch {
   minTradesReturn?: number
   minTradesWinrate?: number
   winrateRequireProfit?: boolean
+  competitionsPublicEnabled?: boolean
+  featuredCompetitionId?: string | null
 }
 
 // 交易比赛（设计 §1.7/§1.8/§1.9，Phase 3）/ Trading competitions
@@ -2050,6 +2096,12 @@ export interface CompetitionAdminRow extends CompetitionSummary {
   minTrades: number | null
   createdAt: string | null
   participantCount: number
+  // 公开比赛页（§1.7）：只允许模拟赛 + 报名制 + https 开户链接，后端校验。
+  // 与文案、报名窗口一样在非 draft 白名单里——开赛后仍可改。
+  // Public page (§1.7): demo + signup + https account link only (validated server-side).
+  // On the non-draft allow-list like copy and the registration window.
+  publicView: boolean
+  openAccountUrl: string | null
   autoEnrolled?: number
 }
 
@@ -2073,6 +2125,8 @@ export interface CompetitionCreate {
   minBaselineUsd?: number | null
   maxBaselineUsd?: number | null
   minTrades?: number | null
+  publicView?: boolean
+  openAccountUrl?: string | null
 }
 
 // PATCH /admin/competitions/{id} 请求体：全部可选，只改传了的字段——draft 状态
@@ -2098,6 +2152,8 @@ export interface CompetitionPatch {
   minBaselineUsd?: number | null
   maxBaselineUsd?: number | null
   minTrades?: number | null
+  publicView?: boolean
+  openAccountUrl?: string | null
 }
 
 // GET /admin/competitions/{id}/participants 的一行、PATCH 参赛条目的响应。
@@ -2135,6 +2191,10 @@ export interface ParticipantAdminRow {
   liveRank?: number | null
   liveScore?: number | null
   status?: ParticipantStatus | null
+  // 管理员隐藏名字（公开榜单一律显示「匿名选手」）/ admin-hidden name (anonymous on the public board)
+  nameHidden?: boolean
+  // 本人是否同意在公开页显示昵称；null = 未表态（匿名）/ consent to show the nickname publicly
+  publicName?: boolean | null
 }
 
 export type ParticipantStatus =
@@ -2146,16 +2206,16 @@ export type ParticipantStatus =
   | 'min_trades'
   | 'pending'
 
-// PATCH /admin/competitions/{id}/participants/{pid} 请求体：取消/恢复资格。
-// disqualifyReason 仅在 disqualified=true 时落库，恢复资格（false）时后端
-// 自动清空，不必显式传 null。
-// PATCH /admin/competitions/{id}/participants/{pid} request body:
-// disqualify/restore. disqualifyReason is only stored when disqualified is
-// true; restoring (false) clears it server-side automatically, no need to
-// pass null explicitly.
+// PATCH /admin/competitions/{id}/participants/{pid} 请求体：取消/恢复资格，或隐藏名字。
+// 全部可选，只送要改的——隐藏名字的请求不带 disqualified，不会顺手恢复资格。
+// disqualifyReason 仅在 disqualified=true 时落库，恢复资格（false）时后端自动清空。
+// PATCH body: disqualify/restore, or hide the name. All optional, send only what
+// changes — a name-hide request carries no disqualified key. disqualifyReason is only
+// stored when disqualified is true; restoring clears it server-side.
 export interface ParticipantPatch {
-  disqualified: boolean
+  disqualified?: boolean
   disqualifyReason?: string | null
+  nameHidden?: boolean
 }
 
 // POST /admin/competitions/{id}/settle 的响应。badgeErrors 非空不代表终审本身
@@ -2266,4 +2326,64 @@ export interface EmailStatus {
   fromAddress: string
   dailyCap: number
   sentToday: number
+}
+
+// ---- 公开比赛页 / 推广（设计 2026-10-08）/ public competition page & promotion ----
+// 公开载荷类型由 Part E（Task E4）在本文件定义为 PublicCompetition / PublicCompetitionRow；
+// 管理端预览与之同形状，这里只起别名，不再重复定义。
+// Part E (E4) already defines PublicCompetition / PublicCompetitionRow in this file;
+// the admin preview has the same shape, so alias instead of redefining.
+export type PublicCompetitionPayload = PublicCompetition
+
+// GET /admin/competitions/{id}/funnel：每条本场推广链接一行 + 无来源访问。
+// Funnel: one row per promo link of this competition + visits without a ref.
+export interface CompetitionFunnelRow {
+  code: string
+  label: string
+  channel: string | null
+  clicks: number
+  views: number
+  ctas: number
+  openAccounts: number
+  registrations: number
+  verified: number
+  bound: number
+  entries: number
+}
+
+export interface CompetitionFunnel {
+  links: CompetitionFunnelRow[]
+  noRef: { views: number; ctas: number; openAccounts: number }
+}
+
+// GET /admin/competitions/{id}/integrity（§1.14）。kinds 的取值见 admin.competitionPromo.flagKind.*，
+// 未知值原样显示。/ kinds map to admin.competitionPromo.flagKind.*; unknown ones show raw.
+export interface CompetitionIntegrityFlag {
+  participantId: string
+  login: string
+  displayName: string | null
+  kinds: string[]
+  // Part A: {balanceAtSignup, netCashflow, sources, revokedReason, hedgePairs}
+  detail: Record<string, unknown> | null
+}
+
+export interface CompetitionIntegritySide {
+  participantId: string
+  login: string
+  side: string
+  displayName: string | null
+}
+
+export interface CompetitionIntegrityPair {
+  a: CompetitionIntegritySide
+  b: CompetitionIntegritySide
+  symbol: string
+  at: string | null
+  count: number
+  sameUser: boolean
+}
+
+export interface CompetitionIntegrity {
+  flags: CompetitionIntegrityFlag[]
+  pairs: CompetitionIntegrityPair[]
 }

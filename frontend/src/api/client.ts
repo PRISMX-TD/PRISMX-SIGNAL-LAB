@@ -1,6 +1,6 @@
 // REST 客户端封装 / REST client wrapper
 import type { OpsStatus } from './types'
-import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
+import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { PendingCompetition } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
@@ -1486,13 +1486,25 @@ export const adminApi = {
       method: 'POST',
     }),
   // 邀请链接 / invite links
-  listInviteLinks: () => request<{ links: InviteLink[] }>('/admin/invite-links'),
-  createInviteLink: (label: string) =>
+  // 过滤参数后端都支持；邀请链接页签自己全量拉一次再在本地筛（统计条要全量），
+  // 比赛编辑页按 competitionId 只拉本场的。
+  // The server supports all three filters; the invite tab loads everything once and
+  // filters locally (the stats strip needs the full set), the competition editor
+  // asks for its own competitionId only.
+  listInviteLinks: (params: InviteLinkListParams = {}) => {
+    const qs = new URLSearchParams()
+    if (params.kind) qs.set('kind', params.kind)
+    if (params.competitionId) qs.set('competitionId', params.competitionId)
+    if (params.channel) qs.set('channel', params.channel)
+    const q = qs.toString()
+    return request<{ links: InviteLink[] }>(`/admin/invite-links${q ? `?${q}` : ''}`)
+  },
+  createInviteLink: (body: InviteLinkCreate) =>
     request<InviteLink>('/admin/invite-links', {
       method: 'POST',
-      body: JSON.stringify({ label }),
+      body: JSON.stringify(body),
     }),
-  updateInviteLink: (id: string, payload: Partial<{ label: string; isActive: boolean; grantsTrial: boolean }>) =>
+  updateInviteLink: (id: string, payload: InviteLinkPatch) =>
     request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
@@ -1659,11 +1671,12 @@ export const adminApi = {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
-    // draft 状态下全字段可改；非 draft 状态仅文案 + 报名窗口可改，其余字段一律
-    // 400（后端强制）；status 只能按 draft→upcoming→running→ended 相邻推进。
-    // In draft, every field is editable; once non-draft only copy + the
-    // registration window remain editable (anything else 400s server-side);
-    // status only advances one adjacent step at a time.
+    // draft 状态下全字段可改；非 draft 状态仅文案 + 报名窗口 + 公开推广两项（publicView /
+    // openAccountUrl）可改，其余字段一律 400（后端强制）；status 只能按
+    // draft→upcoming→running→ended 相邻推进。
+    // In draft, every field is editable; once non-draft only copy, the registration
+    // window and the two promotion fields (publicView / openAccountUrl) remain editable
+    // (anything else 400s server-side); status only advances one adjacent step at a time.
     updateCompetition: (id: string, patch: CompetitionPatch) =>
       request<CompetitionAdminRow>(`/admin/competitions/${encodeURIComponent(id)}`, {
         method: 'PATCH',
@@ -1706,11 +1719,23 @@ export const adminApi = {
     // force=true 已移除。
     // All three gates are server-side: must be ended, the 24h grace period must have
     // passed, not re-runnable. The beta-era force=true is gone.
-    settleCompetition: (id: string) =>
+    // acknowledgeFlags（§1.14）：前 10 名有完整性标记时后端 400，除非带 true（会写审计）。
+    // 前端只在管理员勾了确认框时才送 true。
+    // acknowledgeFlags (§1.14): the server 400s when a top-10 entry is flagged unless
+    // this is true (audited). The UI sends true only when the admin ticks the box.
+    settleCompetition: (id: string, opts: { acknowledgeFlags?: boolean } = {}) =>
       request<CompetitionSettleResult>(
         `/admin/competitions/${encodeURIComponent(id)}/settle`,
-        { method: 'POST' },
+        { method: 'POST', body: JSON.stringify({ acknowledgeFlags: !!opts.acknowledgeFlags }) },
       ),
+    // 公开页预览：与公开接口同一份载荷，但忽略总开关 / public_view、不走缓存。
+    // Public-page preview: same payload as the public endpoint, ignoring both switches, uncached.
+    competitionPublicPreview: (id: string) =>
+      request<PublicCompetitionPayload>(`/admin/competitions/${encodeURIComponent(id)}/public-preview`),
+    competitionFunnel: (id: string) =>
+      request<CompetitionFunnel>(`/admin/competitions/${encodeURIComponent(id)}/funnel`),
+    competitionIntegrity: (id: string) =>
+      request<CompetitionIntegrity>(`/admin/competitions/${encodeURIComponent(id)}/integrity`),
     // 实时榜预览：以请求管理员为 viewer，形状与用户端 LeaderboardPayload 一致。
     // Live board preview: the requesting admin is the viewer; same shape as the user-facing LeaderboardPayload.
     competitionBoard: (id: string) =>
