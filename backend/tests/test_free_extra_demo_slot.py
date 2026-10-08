@@ -137,3 +137,36 @@ def test_bridge_new_account_blocked_beside_gateway_real(db_session, monkeypatch)
     _row(db_session, u, "900001", "gateway", 2)
     online, _bal, _sfx, rejected, _broker, _gw = _bridge_report(monkeypatch, db_session, u, "100001")
     assert "100001" not in online and rejected == ["100001"]
+
+
+# ---- /bridge/accounts 名额展示 / quota shown by /bridge/accounts --------------
+
+def _list(monkeypatch, db, user):
+    import app.routers.bridge as bridge_mod
+    monkeypatch.setattr(bridge_mod, "get_broker_settings", lambda db: {})
+    out = bridge_mod.list_accounts(user=user, db=db)
+    return len(out["accounts"]), out["accountLimit"]
+
+
+def test_account_limit_counts_the_extra_demo_slot_in_use(db_session, monkeypatch):
+    """FREE 绑了实盘 + 直连模拟：显示 2/2，而不是「2/1 已超额」。"""
+    u = _user(db_session, "q1@t.co")
+    _row(db_session, u, "100001", "bridge", 2)
+    _row(db_session, u, "900001", "gateway", 0)
+    assert _list(monkeypatch, db_session, u) == (2, 2)
+
+
+def test_account_limit_with_only_the_gateway_demo_leaves_a_regular_slot(db_session, monkeypatch):
+    u = _user(db_session, "q2@t.co")
+    _row(db_session, u, "900001", "gateway", 0)
+    assert _list(monkeypatch, db_session, u) == (1, 2)
+
+
+def test_account_limit_plain_cases_unchanged(db_session, monkeypatch):
+    u = _user(db_session, "q3@t.co")
+    assert _list(monkeypatch, db_session, u) == (0, 1)
+    _row(db_session, u, "100001", "bridge", 0)                 # 桥接自报模拟不吃额外名额
+    assert _list(monkeypatch, db_session, u) == (1, 1)
+    pro = _user(db_session, "q4@t.co", plan="PRO")
+    _row(db_session, pro, "900009", "gateway", 0)
+    assert _list(monkeypatch, db_session, pro) == (1, None)

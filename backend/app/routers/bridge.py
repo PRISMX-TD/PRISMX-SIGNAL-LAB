@@ -26,7 +26,7 @@ from app.services.connection_manager import manager
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current_user, is_account_online
 from app.services.gateway_binding import is_removed, is_revoked, mark_removed, not_removed, restore_removed
-from app.services.plans import max_mt5_accounts, plan_slot_rows
+from app.services.plans import max_mt5_accounts, plan_slot_rows, shown_account_limit
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
     EVENT_ORDER_FILLED,
@@ -1722,14 +1722,16 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
         )
         for r in rows
     ]
-    # accountLimit：当前订阅等级最多可连接的账户数，null 表示不限。
+    # accountLimit：当前订阅等级最多可连接的账户数（含正被占用的 FREE 额外直连模拟名额，
+    # 见 plans.shown_account_limit），null 表示不限。
     # brokerLock：合作券商限制的展示信息，供绑定页提示"仅支持 XX 账户"。
-    # accountLimit: max accounts allowed by the current plan; null means unlimited.
+    # accountLimit: max accounts for the current plan, including FREE's extra
+    # demo slot while it is in use; null means unlimited.
     # brokerLock: partner-broker lock display info for the Bind page notice.
     broker = get_broker_settings(db)
     return {
         "accounts": [a.model_dump(mode="json") for a in accounts],
-        "accountLimit": max_mt5_accounts(user.plan),
+        "accountLimit": shown_account_limit(user.plan, rows),
         "brokerLock": {
             "enabled": bool(broker.get("broker_lock_enabled")),
             "displayName": broker.get("broker_display_name") or "",

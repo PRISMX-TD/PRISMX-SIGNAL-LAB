@@ -259,6 +259,19 @@ def plan_slot_rows(plan: str | None, rows: list) -> list:
     return out
 
 
+def shown_account_limit(plan: str | None, rows: list) -> int | None:
+    """展示给用户的账户上限（/bridge/accounts 的 accountLimit）：常规上限 + 正被占用的额外
+    直连模拟名额。前端拿全部有效账户数与它比，FREE 绑了实盘 + 直连模拟显示 2/2，而不是
+    「2/1 已超额」；只绑了直连模拟显示 1/2，正好提示还能再绑一个。None = 不限。
+    The limit shown to the user: the regular limit plus the extra demo slots
+    currently in use, so the frontend's count of all live rows compares
+    consistently (FREE with real + direct demo reads 2/2, not "2/1 over")."""
+    base = max_mt5_accounts(plan)
+    if base is None:
+        return None
+    return base + (len(rows) - len(plan_slot_rows(plan, rows)))
+
+
 def can_use_push(plan: str | None) -> bool:
     """该等级是否可以开启 Web Push 通知（FREE 之外全部可用）。
     Whether this plan may enable Web Push notifications (everyone except FREE)."""
