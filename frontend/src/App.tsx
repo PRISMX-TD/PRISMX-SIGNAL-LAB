@@ -12,6 +12,7 @@ import PwaBackGuard from './components/PwaBackGuard'
 import ErrorBoundary from './components/ErrorBoundary'
 import MetaPixel from './components/MetaPixel'
 import RefCapture from './components/RefCapture'
+import CompIntentCapture from './components/CompIntentCapture'
 import AccountDisabledGate from './components/AccountDisabledGate'
 import PublicShell from './seo/PublicShell'
 // 「成长」外壳不走 lazy：几十行的壳，三条路由共用，拆 chunk 只多一次往返。
@@ -374,6 +375,11 @@ export default function App() {
               invite copy on first-visit landings only — exactly the case a
               manual second-visit test would miss. */}
           <RefCapture />
+          {/* 比赛推广链接 /c/:compId 的报名意图：与 RefCapture 同层、同理（覆盖全部路由、
+              排在 Routes 之前）。见 components/CompIntentCapture.tsx。
+              Competition intent from /c/:compId: same placement and rationale as
+              RefCapture. See components/CompIntentCapture.tsx. */}
+          <CompIntentCapture />
           {/* 账号被停用时接管整屏。挂在 <Routes> 之外、与 MetaPixel/RefCapture 同层：
               停用是账号级状态，和当前停在哪个路由无关——挂进某条路由就会变成"只有
               那一页会提示"，而他正好可能停在别的页面上。它自己在未停用时返回 null，
