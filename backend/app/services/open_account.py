@@ -38,12 +38,15 @@ _NETLOC_RE = re.compile(r"^([a-z0-9.-]+)(:[0-9]{1,5})?$")
 
 
 def _has_unsafe_chars(url: str) -> bool:
-    """反斜杠（浏览器当 / 处理，urlsplit 不会——于是 urlsplit 看到的主机与浏览器真正去的
-    不是同一个）、百分号（编码过的同类把戏）、空白、控制字符、非 ASCII 一律不收。
-    Backslash (browsers treat it as "/", urlsplit doesn't, so the parsed host differs
-    from where the browser goes), "%", whitespace, control and non-ASCII characters."""
+    """整串里反斜杠（浏览器当 / 处理，urlsplit 不会——于是 urlsplit 看到的主机与浏览器真正
+    去的不是同一个）、空白、控制字符、非 ASCII 一律不收。百分号只在 scheme+主机段禁止（由
+    _NETLOC_RE 挡住，例如 %5c）；路径 / 查询 / 片段里允许——真实 IB 链接的查询值会带百分号编码。
+    Anywhere in the URL: backslash (browsers treat it as "/", urlsplit doesn't, so the
+    parsed host differs from where the browser goes), whitespace, control and non-ASCII
+    characters. "%" is refused only in the authority (_NETLOC_RE blocks e.g. %5c); it is
+    allowed in path/query/fragment because real IB links percent-encode query values."""
     return any(
-        ch in "\\%" or ch.isspace() or ord(ch) < 0x20 or ord(ch) >= 0x7F for ch in url
+        ch == "\\" or ch.isspace() or ord(ch) < 0x20 or ord(ch) >= 0x7F for ch in url
     )
 
 

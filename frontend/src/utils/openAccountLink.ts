@@ -10,12 +10,14 @@
 export const ALLOWED_OPEN_ACCOUNT_HOSTS = ['makecapital.com'] as const
 const MAX_LEN = 500
 
-// 与后端同一套字符规则：反斜杠（浏览器当 / 处理，于是解析出的主机与真正去的不一样）、
-// 百分号、空白、控制字符、非 ASCII 一律不收；netloc 必须恰好是「主机」或「主机:端口」。
+// 与后端同一套字符规则：整串里反斜杠（浏览器当 / 处理，于是解析出的主机与真正去的不一样）、
+// 空白、控制字符、非 ASCII 一律不收；netloc 必须恰好是「主机」或「主机:端口」（因此主机段里
+// 的 % 也过不了）。路径 / 查询 / 片段里允许百分号编码——真实 IB 链接的查询值会带。
 // Same rules as the backend: backslash (browsers treat it as "/", so the parsed host differs
-// from the real one), "%", whitespace, control and non-ASCII chars are refused, and the
-// authority must be exactly host or host:port.
-const UNSAFE_CHARS = /[\\%\s\u0000-\u001f\u007f-\uffff]/
+// from the real one), whitespace, control and non-ASCII chars are refused anywhere; the
+// authority must be exactly host or host:port (so "%" there fails too). Percent-encoding is
+// allowed in path/query/fragment, since real IB links carry it.
+const UNSAFE_CHARS = /[\\\s\u0000-\u001f\u007f-\uffff]/
 const AUTHORITY_RE = /^([a-z0-9.-]+)(:[0-9]{1,5})?$/
 
 export function isAgentOpenUrl(raw: string): boolean {

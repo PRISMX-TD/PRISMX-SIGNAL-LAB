@@ -81,6 +81,9 @@ def test_allowed_hosts_constant():
     ("https://my.makecapital.com/r?ib=1", "https://my.makecapital.com/r?ib=1"),
     ("https://MY.MakeCapital.com/x", "https://MY.MakeCapital.com/x"),
     ("https://makecapital.com:443/open", "https://makecapital.com:443/open"),
+    # 路径 / 查询 / 片段里的百分号编码允许（真实 IB 链接会带）/ % allowed after the authority
+    ("https://portal.makecapital.com/register?x=a%20b", "https://portal.makecapital.com/register?x=a%20b"),
+    ("https://makecapital.com/p%C3%A9#f%20g", "https://makecapital.com/p%C3%A9#f%20g"),
 ])
 def test_normalize_accepts(raw, expected):
     assert normalize_agent_open_url(raw) == expected
@@ -101,7 +104,8 @@ def test_normalize_accepts(raw, expected):
     "https://makecapital.com/" + "a" * 480,   # > 500
     "https://evil.io\\.makecapital.com/",    # 浏览器把反斜杠当 /，真实主机是 evil.io
     "https://evil.io%5c.makecapital.com/",    # 编码过的反斜杠
-    "https://makecapital.com/?q=%41",         # 任何 % 都不收
+    "https://evil.io%2fx.makecapital.com/",   # 主机段里的 % 一律不收
+    "https://makecapital.com/x\\y?a=%20",     # 路径里的反斜杠照样不收
     "https://mäkecapital.com/",               # 非 ASCII 主机
     "https://xn--mkecapital-x5a.com.evil.io/",
     "https://makecapital.com/\tx",           # 制表符
