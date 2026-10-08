@@ -883,6 +883,8 @@ _SETTINGS_KEY_MAP = {
     "min_trades_return": "minTradesReturn",
     "min_trades_winrate": "minTradesWinrate",
     "winrate_require_profit": "winrateRequireProfit",
+    "competitions_public_enabled": "competitionsPublicEnabled",
+    "featured_competition_id": "featuredCompetitionId",
 }
 
 
@@ -928,6 +930,18 @@ def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depend
         patch["min_trades_winrate"] = int(body.minTradesWinrate)
     if "winrateRequireProfit" in sent:
         patch["winrate_require_profit"] = bool(body.winrateRequireProfit)
+    if "competitionsPublicEnabled" in sent:
+        patch["competitions_public_enabled"] = bool(body.competitionsPublicEnabled)
+    if "featuredCompetitionId" in sent:
+        fid = (body.featuredCompetitionId or "").strip() or None
+        # 只校验「存在」，不校验「此刻可公开」：管理员可以先指好下一场再打开它的公开开关；
+        # 不可公开时 featured_competition_id() 自动退回自动挑选。
+        # Only existence is checked, not public-ness: an admin may pin the next
+        # competition before switching it public; featured_competition_id() falls
+        # back to automatic selection meanwhile.
+        if fid is not None and db.get(Competition, fid) is None:
+            raise HTTPException(400, "主推比赛不存在 / Featured competition not found")
+        patch["featured_competition_id"] = fid
     if patch:
         save_gamification_settings(db, patch)
         db.commit()

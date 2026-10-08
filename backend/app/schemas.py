@@ -371,6 +371,10 @@ class GamificationSettingsPatchIn(BaseModel):
     minTradesReturn: int | None = None
     minTradesWinrate: int | None = None
     winrateRequireProfit: bool | None = None
+    # 公开比赛（设计 §1.3/§1.7）：总开关与主推比赛 id（传 null 清空 = 自动挑选）。
+    # Public competitions: master switch and featured id (null clears = automatic).
+    competitionsPublicEnabled: bool | None = None
+    featuredCompetitionId: str | None = Field(default=None, max_length=64)
 
 
 class CompetitionCreateIn(BaseModel):

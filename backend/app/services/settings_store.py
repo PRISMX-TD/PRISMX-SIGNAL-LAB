@@ -837,6 +837,15 @@ GAMIFICATION_DEFAULTS: dict = {
     # be configurable; default off. Turn it back on from the admin Gamification tab
     # before going public — no code change needed.
     "winrate_require_profit": False,
+    # 公开比赛页总开关（设计 §1.7）：关着时所有 /public/competitions/* 一律 404，
+    # 默认关，上线顺序见设计 §6。
+    # Master switch for public competition pages (design §1.7): off means every
+    # /public/competitions/* is a 404. Off by default; rollout order in §6.
+    "competitions_public_enabled": False,
+    # 主推比赛（设计 §1.3）：指向一场可公开的比赛时用它，否则自动挑；None = 自动。
+    # Featured competition (design §1.3): used when it points at a publicly
+    # viewable competition, otherwise one is picked automatically; None = auto.
+    "featured_competition_id": None,
 }
 
 _gamification_cache = _TtlCache()
@@ -899,6 +908,12 @@ def _load_gamification_from_db(db) -> dict:
                                 data[k] = float(stored[k])
                             except (TypeError, ValueError):
                                 data[k] = default   # 坏值回退默认，宁缺勿错
+                    elif default is None:
+                        # 可空字符串键（目前只有 featured_competition_id）：只认字符串或 null，
+                        # 其余坏值回落 None，同上「宁缺勿错」。
+                        # Nullable string keys: only a string or null is accepted.
+                        v = stored[k]
+                        data[k] = v if (v is None or isinstance(v, str)) else None
         except (ValueError, TypeError):
             logger.warning("platform_settings: invalid JSON for gamification, using defaults")
     return data

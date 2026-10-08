@@ -258,6 +258,15 @@ class Settings(BaseSettings):
     # Competition registration: a write endpoint, same order of magnitude as
     # the other write endpoints (strategy/password).
     RATE_LIMIT_COMPETITION: str = "30/minute"
+    # 公开比赛页（未登录可读，设计 §3.1）：featured 与详情两个 GET 共用一个按 IP 的
+    # 计数（shared_limit scope="comp-public"）。详情有 20 秒共享缓存，这个数字只挡
+    # 病态刷量；放宽到 300 是因为广告落地时同一出口 IP（公司网、运营商 NAT）后面可能
+    # 有很多真人。
+    # Public competition pages (readable without login, design §3.1): featured and
+    # detail share one per-IP counter (shared_limit scope="comp-public"). Detail is
+    # cached for 20s, so this only stops pathological hammering; 300 because an ad
+    # landing can put many real people behind one egress IP (office, carrier NAT).
+    RATE_LIMIT_COMPETITION_PUBLIC: str = "300/minute"
     # 工单图片上传：按用户。任何注册用户都能调这个端点往存储桶里写文件，日上限是为了
     # 别让一个账号把桶当网盘；正常提工单一天传不到十几张。
     # Ticket image uploads, per user. Any registered user can write to the bucket
