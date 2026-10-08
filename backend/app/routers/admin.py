@@ -231,7 +231,7 @@ def _resolve_invite_code(db: Session, raw: str | None) -> str | None:
     全小写，而人从后台复制粘贴时常常带上空格或大小写（invite.py 的
     _normalize_code 出于同样理由存在）。
 
-    码在 invite_links 里不存在就 400。这一条是整个功能里最要紧的校验：写进一个
+    码在 invite_links 里不存在（或已软删）就 400。这一条是整个功能里最要紧的校验：写进一个
     不存在的码不会报任何错，只会让这批人从此不属于任何代理，而代理页只会表现为
     "人数莫名其妙少了"，没有任何地方会提示。
 
@@ -241,7 +241,7 @@ def _resolve_invite_code(db: Session, raw: str | None) -> str | None:
     a code pasted out of the console often carries whitespace or case (the same
     reason _normalize_code exists in invite.py).
 
-    An unknown code 400s. This is the check that matters most here: writing one
+    An unknown (or soft-deleted) code 400s. This is the check that matters most here: writing one
     raises nothing and simply orphans everyone in the batch, and the agent page
     would just show inexplicably fewer people.
     """
@@ -250,7 +250,15 @@ def _resolve_invite_code(db: Session, raw: str | None) -> str | None:
     code = raw.strip().lower()
     if not code:
         return None
-    if db.query(InviteLink.id).filter(InviteLink.code == code).first() is None:
+    # 已软删的链接与不存在同一个 400：不能再把人挂到一条删掉的链接上（见 InviteLink 模型注释）。
+    # A soft-deleted link answers the same 400 as an unknown code: nobody may be newly
+    # attributed to a deleted link (see the InviteLink model).
+    if (
+        db.query(InviteLink.id)
+        .filter(InviteLink.code == code, InviteLink.deleted_at.is_(None))
+        .first()
+        is None
+    ):
         raise HTTPException(
             status_code=400,
             detail=f"邀请码不存在：{code} / No invite link with code {code}",

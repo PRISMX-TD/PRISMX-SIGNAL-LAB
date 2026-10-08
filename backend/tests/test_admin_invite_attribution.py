@@ -219,3 +219,45 @@ def test_single_patch_rejects_unknown_code(db_session):
             admin=admin,
         )
     assert e.value.status_code == 400
+
+
+# ---------- 已软删的链接不能再被指为归因 / soft-deleted links can't be assigned ----------
+
+def _soft_deleted_link(db, code="gone2345"):
+    from datetime import datetime, timezone
+
+    link = InviteLink(code=code, label="旧渠道", is_active=False,
+                      deleted_at=datetime.now(timezone.utc))
+    db.add(link); db.commit(); return link
+
+
+def test_bulk_rejects_soft_deleted_code_like_unknown(db_session):
+    admin = _admin(db_session)
+    _soft_deleted_link(db_session)
+    a = _user(db_session, "a@t.co", invite_code="zzzz9876")
+    with pytest.raises(HTTPException) as e:
+        bulk_update_users(
+            body=AdminBulkUserUpdate(userIds=[a.id], inviteCode="GONE2345 "),
+            db=db_session,
+            admin=admin,
+        )
+    assert e.value.status_code == 400
+    assert e.value.detail == "邀请码不存在：gone2345 / No invite link with code gone2345"
+    db_session.rollback()
+    db_session.refresh(a)
+    assert a.invite_code == "zzzz9876"
+
+
+def test_single_patch_rejects_soft_deleted_code_like_unknown(db_session):
+    admin = _admin(db_session)
+    _soft_deleted_link(db_session)
+    a = _user(db_session, "a@t.co")
+    with pytest.raises(HTTPException) as e:
+        update_user(
+            user_id=a.id,
+            body=AdminUserUpdate(inviteCode="gone2345"),
+            db=db_session,
+            admin=admin,
+        )
+    assert e.value.status_code == 400
+    assert e.value.detail == "邀请码不存在：gone2345 / No invite link with code gone2345"
