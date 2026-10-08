@@ -381,3 +381,19 @@
 .pcp-link { font-size: 12px; color: #c4b5fd; }
 .pcp-link:hover { color: #ddd6fe; }
 .pcp-inapp { margin-bottom: 16px; padding: 10px 14px; border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 10px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 12px; line-height: 1.6; }
+
+/* ── 站内：参赛准备清单 / 报名后引导 / 公开昵称开关 ──
+   In-app: entry checklist, post-entry guidance, public-name toggle. */
+.cmp-prep { width: 100%; margin-top: 4px; }
+.cmp-prep h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: 0.1em; color: #b9a6ff; }
+.cmp-prep ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.cmp-prep li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
+.cmp-prep-mark { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 999px; font-size: 11px; color: #a1a1aa; }
+.cmp-prep li.is-done .cmp-prep-mark { border-color: transparent; background: rgba(110, 66, 255, 0.35); color: #ede9fe; }
+.cmp-prep-label { display: block; color: #e4e4e7; }
+.cmp-prep li.is-done .cmp-prep-label { color: #71717a; }
+.cmp-prep-sub { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: #a1a1aa; }
+.cmp-prep-act { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: #c4b5fd; }
+.cmp-prep-act:hover { color: #ddd6fe; }
+.cmp-next { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: #a1a1aa; }
+.cmp-pubname { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #d4d4d8; }

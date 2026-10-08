@@ -25,6 +25,15 @@ import { competitionApi } from '../api/client'
 import { fmtDate, fmtDay, localizeApiError } from '../api/utils'
 import { regState, useNowTicker } from '../utils/competitionTime'
 import { useLive } from '../store/live'
+import { useAuth } from '../store/auth'
+import Switch from '../components/Switch'
+import PrepChecklist from '../components/competition/PrepChecklist'
+import { safeHttpUrl } from '../utils/safeUrl'
+import { clearCompIntent, readCompIntent } from '../utils/compIntent'
+import {
+  bindHint, classifyDetailError, gatesOfDetail, prepState, registerErrorKey, shouldClearIntent,
+  type DetailLoadError,
+} from '../utils/compPrep'
 import { SkeletonPage } from '../components/Skeleton'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
@@ -45,22 +54,6 @@ import type {
   LeaderboardPayload,
   MT5Account,
 } from '../api/types'
-
-// tradeMode: 0=模拟, 1=竞赛, 2=实盘, null/undefined=尚未判定（见后端
-// services/account_type.py）。报名只认实盘，未判定的一律当"非实盘"处理，
-// 不能默认放行。
-// tradeMode: 0=demo, 1=contest, 2=real, null/undefined=not yet determined
-// (see backend services/account_type.py). Registration only accepts real
-// accounts; an undetermined value is treated as "not real", never
-// default-allowed.
-const isRealAccount = (a: MT5Account): boolean => a.tradeMode === 2
-// 账户是否符合这场比赛的赛道：实盘赛只收 tradeMode===2，模拟赛只收 0/1
-//（模拟与赛区）。未判定（null/undefined）两个赛道都不收——后端同样拒绝。
-// Whether an account matches this competition's track: a live competition takes
-// tradeMode===2 only, a demo one takes 0/1 (demo and contest). Unclassified
-// (null/undefined) matches neither, and the backend refuses it too.
-const matchesTrack = (a: MT5Account, track: CompetitionTrack): boolean =>
-  track === 'demo' ? a.tradeMode === 0 || a.tradeMode === 1 : isRealAccount(a)
 
 const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['running', 'upcoming', 'finished']
 
@@ -265,6 +258,7 @@ function AccountPickerModal({
   busy,
   onCancel,
   onConfirm,
+  publicNotice,
   t,
 }: {
   accounts: MT5Account[]
@@ -272,6 +266,7 @@ function AccountPickerModal({
   busy: boolean
   onCancel: () => void
   onConfirm: (login: string) => void
+  publicNotice: boolean
   t: TFunction
 }) {
   const [login, setLogin] = useState<string | null>(accounts[0]?.login ?? null)
@@ -344,6 +339,7 @@ function AccountPickerModal({
       >
         <h3 id={titleId} className="text-lg font-bold text-white">{t('competition.pickAccount')}</h3>
         <p className="mt-2 text-xs text-neutral-500">{t(track === 'demo' ? 'competition.pickAccountHintDemo' : 'competition.pickAccountHint')}</p>
+        {publicNotice && <p className="mt-2 text-xs leading-relaxed text-amber-300">{t('competition.publicNotice')}</p>}
         <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
           {accounts.map((a) => (
             <button
@@ -419,7 +415,11 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const nowMs = useNowTicker()
   const [detail, setDetail] = useState<CompetitionDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const [forbidden, setForbidden] = useState(false)
+  const { user } = useAuth()
+  const [loadError, setLoadError] = useState<DetailLoadError | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [nameBusy, setNameBusy] = useState<string | null>(null)
+  const [nameError, setNameError] = useState<string | null>(null)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [registering, setRegistering] = useState(false)
   const [registerError, setRegisterError] = useState<string | null>(null)
@@ -429,14 +429,19 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    setForbidden(false)
+    setLoadError(null)
     competitionApi
       .detail(id)
       .then((res) => {
         if (!cancelled) setDetail(res)
       })
-      .catch(() => {
-        if (!cancelled) setForbidden(true)
+      .catch((err) => {
+        if (cancelled) return
+        const kind = classifyDetailError(err)
+        setLoadError(kind)
+        // 不存在 / 已下线的比赛：作废指向它的报名意图（Part D 约定）。
+        // Gone competition: drop a sign-up intent pointing at it (Part D contract).
+        if (kind === 'notFound' && readCompIntent() === id.toLowerCase()) clearCompIntent()
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -444,7 +449,15 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [id, attempt])
+
+  // 已报名 / 报名已截止 / 比赛已结束时作废指向本场的报名意图，免得之后每次登录都被带回来。
+  // Drop the intent for this competition once entered / closed / over, so later sign-ins
+  // don't keep landing here.
+  useEffect(() => {
+    if (!detail || readCompIntent() !== detail.id.toLowerCase()) return
+    if (shouldClearIntent(detail, Date.now())) clearCompIntent()
+  }, [detail])
 
   /* 「实时榜」要真的会动。
      详情页的榜单标题在比赛进行中写的是 competition.liveBoard（实时榜），但此前
@@ -519,12 +532,32 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
     try {
       await competitionApi.register(id, login)
       setPickerOpen(false)
+      clearCompIntent()
       setRegisterMsg(t('competition.registerSuccess'))
       await refreshDetail()
     } catch (err) {
-      setRegisterError(err instanceof Error ? localizeApiError(err.message) : t('common.error'))
+      const key = registerErrorKey(err)
+      setRegisterError(key ? t(key) : err instanceof Error ? localizeApiError(err.message) : t('common.error'))
     } finally {
       setRegistering(false)
+    }
+  }
+
+  // 乐观切换，失败回滚并提示。/ Optimistic toggle; roll back with a message on failure.
+  async function togglePublicName(login: string, show: boolean) {
+    const prev = detail?.myEntries.find((e) => e.login === login)?.publicName ?? null
+    const patch = (value: boolean | null) =>
+      setDetail((d) => d && { ...d, myEntries: d.myEntries.map((e) => (e.login === login ? { ...e, publicName: value } : e)) })
+    setNameBusy(login)
+    setNameError(null)
+    patch(show)
+    try {
+      await competitionApi.setPublicName(id, login, show)
+    } catch {
+      patch(prev)
+      setNameError(t('competition.publicNameFailed'))
+    } finally {
+      setNameBusy(null)
     }
   }
 
@@ -532,12 +565,25 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
     return <SkeletonPage cards={2} />
   }
 
-  if (forbidden || !detail) {
+  if (loadError || !detail) {
+    const kind = loadError ?? 'retry'
     return (
-      <div className="flex min-h-[40vh] items-center justify-center">
+      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
         <p className="card glass p-6 text-center text-sm text-neutral-400">
-          {t('gamification.admin.visibleOff')}
+          {kind === 'forbidden'
+            ? t('gamification.admin.visibleOff')
+            : kind === 'notFound'
+              ? t('competition.err.notFound')
+              : t('competition.err.retry')}
         </p>
+        {kind === 'notFound' && (
+          <button type="button" onClick={onBack} className="cmp-back">← {t('competition.backToList')}</button>
+        )}
+        {kind === 'retry' && (
+          <button type="button" onClick={() => setAttempt((n) => n + 1)} className="cmp-btn-ghost">
+            {t('competition.err.retryBtn')}
+          </button>
+        )}
       </div>
     )
   }
@@ -546,16 +592,26 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const tagKey = statusTagKey(detail, now)
   const rState = regState(detail, now)
   const enteredLogins = new Set(detail.myEntries.map((e) => e.login))
-  // 只列本人已连接、符合本场赛道、且这场比赛还没报过的账户——报过的再选一遍，
-  // 后端会幂等返回原条目而不是报错，但前端不必让用户白走一趟；赛道不符的账户
-  // 报名注定被后端拒绝，同样不必列出来。
-  // Only accounts that are connected, match this competition's track, and aren't
-  // entered yet: re-picking an entered one would just get the same row back
-  // idempotently from the backend, and an off-track account would be rejected by
-  // the backend anyway — neither is worth listing.
-  const availableAccounts = accounts.filter(
-    (a) => matchesTrack(a, detail.track) && !enteredLogins.has(a.login))
+  const gates = gatesOfDetail(detail)
+  const openAccountUrl = safeHttpUrl(detail.openAccountUrl)
+  // 可报名账户：本人、直连、赛道相符、未撤销、本场还没报过（设计 §1.11；后端仍独立复核）。
+  // Eligible: own, direct-connected, on-track, not revoked, not yet entered (spec §1.11; backend re-checks).
+  const prep = prepState({
+    emailVerified: user?.emailVerified !== false,
+    accounts,
+    track: detail.track,
+    gates,
+    enteredLogins,
+    hasOpenAccountUrl: openAccountUrl !== '',
+  })
+  const availableAccounts = prep.eligible
+  const isOver = detail.status === 'ended' || detail.status === 'settled'
   const canShowRegisterAction = detail.enrollment === 'signup'
+  const showPrep = canShowRegisterAction && enteredLogins.size === 0 && rState !== 'closed' && !isOver
+  const openPicker = () => {
+    setPickerOpen(true)
+    setRegisterError(null)
+  }
   // 榜上属于我的行按账户号索引（后端已标 isSelf；一人可带多个账户参赛，各占
   // 一行）——「你的名次」逐账户取实时名次与分数。
   // My rows on the board keyed by login (the backend flags isSelf; one person can
@@ -624,6 +680,49 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
             </div>
           )}
 
+          {/* 报名后的下一步（设计 §1.15）：进行中给「去下第一单」，未开赛提醒开赛后再下单；
+              每个参赛账户显示「已平仓 x / N 笔」（N = 本场笔数门槛）。
+              After entering (spec §1.15): running → "place your first order"; before the start →
+              trade after the start; each entry shows "closed x / N" (N = this competition's gate). */}
+          {detail.myEntries.length > 0 && !isOver && (
+            <div className="cmp-next">
+              {detail.myEntries.filter((e) => !e.disqualified).map((e) => (
+                <span key={e.login} className="num">
+                  {e.login} · {t('competition.closedCount', { x: e.sample ?? 0, n: gates.minTrades })}
+                </span>
+              ))}
+              {detail.status === 'running' ? (
+                detail.myEntries.every((e) => !e.sample) && (
+                  <Link to="/app" className="cmp-prep-act">{t('competition.firstOrder')} →</Link>
+                )
+              ) : (
+                <span>{t('competition.firstOrderWait')}</span>
+              )}
+            </div>
+          )}
+
+          {/* 公开页昵称开关（设计 §1.8）：仅当本场公开时出现。/ Public-page nickname toggle, only when public. */}
+          {detail.publicView === true && detail.myEntries.length > 0 && (
+            <div className="cmp-next">
+              {detail.myEntries.map((e) => (
+                <label key={e.login} className="cmp-pubname">
+                  <span className="min-w-0">
+                    {t('competition.publicName')}
+                    {detail.myEntries.length > 1 && <span className="num"> · {e.login}</span>}
+                    <small className="cmp-prep-sub">{t('competition.publicNameHint')}</small>
+                  </span>
+                  <Switch
+                    checked={e.publicName === true}
+                    busy={nameBusy === e.login}
+                    onChange={(v) => void togglePublicName(e.login, v)}
+                    aria-label={t('competition.publicName')}
+                  />
+                </label>
+              ))}
+              {nameError && <span className="text-down">{nameError}</span>}
+            </div>
+          )}
+
           <CompFacts c={detail} t={t} />
 
           {/* 报名动作：仅 signup 赛。窗口内三态互斥（有可报账户 → 按钮，已报完 →
@@ -637,32 +736,22 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
             <div className="cmp-enroll">
               {rState === 'notOpen' && <p>{t('competition.regNotOpen')}</p>}
               {rState === 'closed' && enteredLogins.size === 0 && <p>{t('competition.regClosed')}</p>}
-              {rState === 'open' &&
-                (availableAccounts.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPickerOpen(true)
-                      setRegisterError(null)
-                    }}
-                    className={enteredLogins.size > 0 ? 'cmp-btn-ghost' : 'cmp-btn'}
-                  >
-                    {t(enteredLogins.size > 0 ? 'competition.registerMore' : 'competition.register')}
-                  </button>
-                ) : enteredLogins.size > 0 ? null : (
-                  <div>
-                    <p>
-                      {accounts.length === 0
-                        ? t('competition.noAccounts')
-                        : accounts.some((a) => a.tradeMode == null)
-                          ? t('competition.pendingAccountType')
-                          : t(detail.track === 'demo' ? 'competition.noDemoAccounts' : 'competition.noRealAccounts')}
-                    </p>
-                    <Link to="/bind" className="mt-1 inline-block text-xs text-prism-300 transition hover:text-prism-200">
-                      {t('nav.bind')}
-                    </Link>
-                  </div>
-                ))}
+              {showPrep && (
+                <PrepChecklist
+                  prep={prep}
+                  gates={gates}
+                  openAccountUrl={openAccountUrl}
+                  hint={availableAccounts.length > 0 ? null : bindHint(accounts, detail.track)}
+                  canRegister={rState === 'open' && availableAccounts.length > 0}
+                  onRegister={openPicker}
+                  t={t}
+                />
+              )}
+              {rState === 'open' && enteredLogins.size > 0 && availableAccounts.length > 0 && (
+                <button type="button" onClick={openPicker} className="cmp-btn-ghost">
+                  {t('competition.registerMore')}
+                </button>
+              )}
               {registerMsg && <p className="text-up">{registerMsg}</p>}
               {registerError && <p className="text-down">{registerError}</p>}
             </div>
@@ -697,6 +786,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
           busy={registering}
           onCancel={() => setPickerOpen(false)}
           onConfirm={handleRegister}
+          publicNotice={detail.publicView === true}
           t={t}
         />
       )}
@@ -742,17 +832,20 @@ export default function CompetitionsPage() {
   const backToList = () => setParams({})
   const [listData, setListData] = useState<CompetitionListGrouped | null>(null)
   const [listLoading, setListLoading] = useState(true)
-  const [listForbidden, setListForbidden] = useState(false)
+  const [listError, setListError] = useState<DetailLoadError | null>(null)
+  const [listAttempt, setListAttempt] = useState(0)
 
   useEffect(() => {
     let cancelled = false
+    setListLoading(true)
+    setListError(null)
     competitionApi
       .list()
       .then((res) => {
         if (!cancelled) setListData(res)
       })
-      .catch(() => {
-        if (!cancelled) setListForbidden(true)
+      .catch((err) => {
+        if (!cancelled) setListError(classifyDetailError(err))
       })
       .finally(() => {
         if (!cancelled) setListLoading(false)
@@ -760,7 +853,7 @@ export default function CompetitionsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [listAttempt])
 
   if (typeof view === 'object') {
     return (
@@ -774,11 +867,16 @@ export default function CompetitionsPage() {
     <div className="space-y-6 pb-10">
       {listLoading ? (
         <SkeletonPage cards={3} />
-      ) : listForbidden || !listData ? (
-        <div className="flex min-h-[40vh] items-center justify-center">
+      ) : listError || !listData ? (
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
           <p className="card glass p-6 text-center text-sm text-neutral-400">
-            {t('gamification.admin.visibleOff')}
+            {listError === 'forbidden' ? t('gamification.admin.visibleOff') : t('competition.err.retry')}
           </p>
+          {listError !== 'forbidden' && (
+            <button type="button" onClick={() => setListAttempt((n) => n + 1)} className="cmp-btn-ghost">
+              {t('competition.err.retryBtn')}
+            </button>
+          )}
         </div>
       ) : (
         <ListView data={listData} onOpen={openDetail} t={t} />

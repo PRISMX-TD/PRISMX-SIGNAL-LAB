@@ -1963,6 +1963,12 @@ export interface CompetitionEntry {
   finalRank: number | null
   finalScore: number | null
   disqualified: boolean
+  // 计分起点之后已平仓的笔数（与榜单 sample 同口径）；旧后端没有该键。
+  // Closed positions since scoringFrom (same definition as the board's sample); absent on older backends.
+  sample?: number | null
+  // 公开页是否显示我的昵称：true 显示 / false 匿名 / null 未表态（匿名）。
+  // Public-page nickname: true shown / false anonymous / null undecided (anonymous).
+  publicName?: boolean | null
 }
 
 // GET /competitions/{id} 的完整响应：概览 + 实时榜（LeaderboardPayload 同一套
@@ -1976,6 +1982,11 @@ export interface CompetitionDetail extends CompetitionSummary {
   board: LeaderboardPayload
   myEntries: CompetitionEntry[]
   pendingSettle: boolean
+  // 本场是否在公开页可见（总开关 + public_view + 模拟/报名制/开户链接，后端判定）。
+  // Whether this competition is publicly visible (master switch + public_view + demo/signup/link; backend-decided).
+  publicView?: boolean
+  // 本场开户链接（报名准备清单「去开户」用）。/ This competition's account-opening link.
+  openAccountUrl?: string | null
 }
 
 // POST /competitions/{id}/register 的响应。 / response of POST /competitions/{id}/register

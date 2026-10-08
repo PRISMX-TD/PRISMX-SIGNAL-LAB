@@ -1252,6 +1252,15 @@ export const competitionApi = {
       method: 'POST',
       body: JSON.stringify({ mt5Login }),
     }),
+  // 本人在公开比赛页上是否显示昵称（设计 §1.8）：报名公开比赛时默认 true；公开开关打开前就
+  // 报名的人为 null（匿名），可在这里自己打开。
+  // Whether my nickname shows on the public page (spec §1.8): true by default when entering
+  // a public competition; null for entries made before the page went public.
+  setPublicName: (id: string, login: string, show: boolean) =>
+    request<unknown>(`/competitions/${encodeURIComponent(id)}/entries/${encodeURIComponent(login)}/public-name`, {
+      method: 'PATCH',
+      body: JSON.stringify({ show }),
+    }),
 }
 
 // 工单 / Tickets
