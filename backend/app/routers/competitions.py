@@ -32,6 +32,7 @@ from app.services.gamification.competitions import (
     participant_details, refresh_comp_board, register_participant, settle_competition)
 from app.services.gamification.public_board import (
     build_funnel, build_public_payload, is_publicly_viewable, public_cache_key)
+from app.services.open_account import resolve_open_account_url
 from app.services.notification_feed import (
     KIND_COMP_PUBLIC_NAME, create_notification, notify_ws)
 from app.services.settings_store import get_gamification_settings
@@ -205,9 +206,12 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
     # 本场此刻是否有公开页（分享卡二维码指向 /c/<id> 用，设计 §4）。
     # Whether this competition has a public page right now (share-card QR, §4).
     out["publicView"] = is_publicly_viewable(db, comp)
-    # 站内准备清单的「开户」一步用本场开户链接（设计 §4）。
-    # The in-app checklist's open-account step uses this competition's URL (§4).
-    out["openAccountUrl"] = comp.open_account_url
+    # 站内准备清单的「开户」一步用本场开户链接（设计 §4）；用户是经代理链接注册的、
+    # 且代理填了自己的开户链接，就换成代理的（services/open_account）。
+    # The in-app checklist's open-account step uses this competition's URL (§4), or
+    # the agent's own when the user signed up through an agent link that has one.
+    out["openAccountUrl"] = resolve_open_account_url(
+        db, comp, [user.invite_code] if user.invite_code else [])
     out["myEntries"] = [{
         "login": p.mt5_login,
         "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,

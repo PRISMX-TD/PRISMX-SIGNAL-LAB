@@ -1864,6 +1864,11 @@ class InviteLinkUpdate(BaseModel):
     grantsTrial: bool | None = None
     # 传 null 或空白即清除渠道。/ null or blank clears the channel.
     channel: str | None = Field(default=None, max_length=32)
+    # 代理专属开户链接（只给非比赛链接）；null 或空白清除。上限放宽到 2048 只为挡超大包，
+    # 真正的 500 字符上限与域名规则在 services/open_account.py，超了回 400 而不是 422。
+    # Agent open-account URL (non-competition links only); null/blank clears. 2048 only
+    # bounds the payload — the real 500-char/host rules live in services/open_account.py.
+    openAccountUrl: str | None = Field(default=None, max_length=2048)
 
 
 class InviteLinkOut(BaseModel):
@@ -1906,6 +1911,8 @@ class InviteLinkOut(BaseModel):
     # 本运营月（stats 时区）1 日 00:00 起经本链接注册的人数，统计条「本月注册」用。
     # Signups through this link since the 1st of the current ops-timezone month.
     registrationsMonth: int = 0
+    # 代理专属开户链接（rev 36）；null = 访客用比赛默认的。/ Agent open-account URL; null = comp default.
+    openAccountUrl: str | None = None
 
 
 class InviteLinkAgentOut(BaseModel):
@@ -1948,6 +1955,14 @@ class AgentLinkOut(BaseModel):
     mt5Users: int = 0
     isActive: bool
     createdAt: datetime | None = None
+    # 代理自己设的开户链接（rev 36），代理页可改。/ The agent's own open-account URL, editable.
+    openAccountUrl: str | None = None
+
+
+class AgentOpenAccountUrlUpdate(BaseModel):
+    """代理设置自己链接的开户链接；null 或空白清除。规则见 services/open_account.py。
+    The agent sets their link's open-account URL; null/blank clears."""
+    url: str | None = Field(default=None, max_length=2048)
 
 
 class AgentMT5AccountOut(BaseModel):

@@ -63,7 +63,8 @@ def _cols(eng, table):
 
 
 def test_schema_rev_bumped_to_35():
-    assert db_mod.CURRENT_SCHEMA_REV == 35
+    # rev 36 起只要求不低于 35 / later revisions only need to be >= 35
+    assert db_mod.CURRENT_SCHEMA_REV >= 35
 
 
 def test_rev35_adds_columns_backfills_and_indexes(legacy_engine):

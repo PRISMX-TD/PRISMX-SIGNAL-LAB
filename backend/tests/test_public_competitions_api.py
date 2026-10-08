@@ -156,6 +156,7 @@ def test_public_endpoints_are_rate_limited():
     assert limits.get("app.routers.public_competitions.get_featured")
     assert limits.get("app.routers.public_competitions.get_public_competition")
     assert limits.get("app.routers.public_competitions.post_event")
+    assert limits.get("app.routers.public_competitions.open_account_redirect")
 
 
 def test_mounted_under_api_without_user_dependencies():
@@ -164,6 +165,7 @@ def test_mounted_under_api_without_user_dependencies():
               if isinstance(r, APIRoute) and r.path.startswith("/api/public/competitions")]
     assert {r.path for r in routes} == {"/api/public/competitions/featured",
                                         "/api/public/competitions/{comp_id}",
+                                        "/api/public/competitions/{comp_id}/open-account",
                                         "/api/public/competitions/event"}
     for r in routes:
         calls = {d.call for d in r.dependant.dependencies}

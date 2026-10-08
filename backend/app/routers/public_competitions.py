@@ -15,7 +15,10 @@ under /api with no user dependency. One identical 404 for every hidden case
 sentinel for misses, global switches checked outside it; the event endpoint
 is always 204.
 """
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from urllib.parse import urlsplit
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -27,6 +30,7 @@ from app.services.deps import get_db
 from app.services.gamification.public_board import (
     UUID_RE, build_public_payload, comp_public_eligible, featured_competition_id,
     normalize_comp_id, public_cache_key, public_switches_on, record_funnel_event)
+from app.services.open_account import resolve_open_account
 from app.services.settings_store import get_gamification_settings
 
 router = APIRouter(prefix="/public/competitions", tags=["public-competitions"])
@@ -66,6 +70,66 @@ def get_public_competition(request: Request, comp_id: str, db: Session = Depends
     if out.get("nf"):
         raise _not_found()
     return out
+
+
+_MAX_REFS = 5
+_MAX_REF_LEN = 32
+
+
+def _parse_refs(raw: str | None) -> list[str]:
+    """逗号分隔的最近几个 ref（最新在前）：去空白、丢空项与超长项，最多取 5 个。宽松
+    处理而不是 422——这是访客点按钮后的跳转，坏一个码不该让人开不了户。
+    Comma-separated recent refs, newest first: trimmed, blanks and over-long items
+    dropped, at most five. Lenient rather than 422: a bad code must not stop a
+    visitor from reaching the open-account page."""
+    out: list[str] = []
+    for item in (raw or "").split(","):
+        item = item.strip()
+        if item and len(item) <= _MAX_REF_LEN:
+            out.append(item)
+    return out[:_MAX_REFS]
+
+
+def _is_http_url(url: str | None) -> bool:
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
+
+
+@router.get("/{comp_id}/open-account")
+@limiter.shared_limit(settings.RATE_LIMIT_COMPETITION_PUBLIC, scope="comp-public")
+def open_account_redirect(
+    request: Request,
+    comp_id: str,
+    refs: str | None = Query(default=None, max_length=(_MAX_REF_LEN + 1) * _MAX_REFS),
+    db: Session = Depends(get_db),
+):
+    """公开页「开模拟账户」：按访客最近的 ref 选开户链接（代理优先，见
+    services/open_account.resolve_open_account），302 过去，并在服务端记漏斗 open_account。
+    可见性与公开详情同一个 404；选中哪个码只会体现在 Location 本身，不另外回显。不走
+    共享缓存：每个访客的 refs 不同，按主键读一行比赛很便宜。
+
+    Public "open demo account": picks the URL from the visitor's recent refs (agent
+    first), 302s there and records the open_account funnel step server-side. Same
+    404 as the public detail; the chosen code is never echoed except via Location.
+    Uncached: refs differ per visitor and one primary-key read is cheap."""
+    comp_id = normalize_comp_id(comp_id)
+    if not UUID_RE.match(comp_id):
+        raise _not_found()
+    if not public_switches_on(get_gamification_settings(db)):
+        raise _not_found()
+    comp = db.get(Competition, comp_id)
+    if comp is None or not comp_public_eligible(comp):
+        raise _not_found()
+    chosen, url = resolve_open_account(db, comp, _parse_refs(refs))
+    # 存进库之前已校验过，这里出网前再兜一次：只往 http(s) 跳。
+    # Validated on write already; checked again on the way out — http(s) only.
+    if not _is_http_url(url):
+        raise _not_found()
+    record_funnel_event(db, comp.id, "open_account", chosen or "")
+    return RedirectResponse(url, status_code=302)
 
 
 @router.post("/event", status_code=204)

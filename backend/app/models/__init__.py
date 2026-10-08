@@ -1424,6 +1424,12 @@ class InviteLink(Base):
     # 渠道标签（自由文本 ≤32，如「FB广告」「微信群」），统计可按它汇总。
     # Channel tag (free text ≤32, e.g. "FB ads"); stats can group by it.
     channel = Column(String, nullable=True)
+    # rev 36：代理专属开户链接（Make Capital 的 https 地址，见 services/open_account.py）。
+    # 只给非比赛链接用；这条链接带来的访客在比赛页点「开户」时跳这里，否则用比赛自己的。
+    # rev 36: the agent's own open-account URL (an https Make Capital link, see
+    # services/open_account.py). Non-competition links only; visitors attributed to
+    # this link are sent here from a competition's open-account button.
+    open_account_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 

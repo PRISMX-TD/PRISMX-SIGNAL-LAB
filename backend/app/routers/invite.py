@@ -45,6 +45,7 @@ from app.schemas import (
     AgentLinkUserOut,
     AgentLinkUsersOut,
     AgentMT5AccountOut,
+    AgentOpenAccountUrlUpdate,
     AgentOverviewOut,
     AgentPlanUpdate,
     OverviewRangeOut,
@@ -66,6 +67,7 @@ from app.services.audit import log_change as _log_change
 from app.services.deps import get_current_user, require_admin
 from app.services.gamification import mask_account
 from app.services.gateway_binding import is_revoked, not_removed
+from app.services.open_account import MSG_COMP_LINK_OPEN_URL, normalize_agent_open_url
 from app.services.notification_feed import (
     KIND_AGENT_PLAN_CHANGE,
     create_notification,
@@ -434,6 +436,7 @@ def _link_out(
         competitionId=link.competition_id,
         competitionName=competition_name,
         channel=link.channel,
+        openAccountUrl=link.open_account_url,
         kind=_link_kind(link, agents),
         entries=entries,
         registrationsMonth=registrations_month,
@@ -717,6 +720,10 @@ def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
         .order_by(InviteLink.created_at.desc())
         .all()
     )
+    return _agent_link_outs(db, links)
+
+
+def _agent_link_outs(db: Session, links: list[InviteLink]) -> list[AgentLinkOut]:
     codes = [l.code for l in links]
     counts = _registrations(db, codes)
     active = _active_users(db, codes)
@@ -732,6 +739,7 @@ def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
             mt5Users=connected.get(l.code, 0),
             isActive=l.is_active,
             createdAt=l.created_at,
+            openAccountUrl=l.open_account_url,
         )
         for l in links
     ]
@@ -1136,6 +1144,18 @@ def _clean_channel(raw: str | None) -> str | None:
     return ch or None
 
 
+def _set_open_account_url(link: InviteLink, raw: str | None) -> None:
+    """管理端与代理自助共用：校验后写入，空则清除。比赛推广链接不许设（它们用比赛自己的
+    开户链接），但清空对它们是无害的 no-op，照放行。两边谁后写谁算。
+    Shared by admin and agent self-service: validate, then store (blank clears).
+    Competition promo links can't carry one (they use the competition's), though
+    clearing is a harmless no-op. Last write wins between the two callers."""
+    url = normalize_agent_open_url(raw)
+    if url is not None and link.competition_id:
+        raise HTTPException(status_code=400, detail=MSG_COMP_LINK_OPEN_URL)
+    link.open_account_url = url
+
+
 def _audit_value(link: InviteLink) -> str:
     return json.dumps(
         {
@@ -1144,6 +1164,7 @@ def _audit_value(link: InviteLink) -> str:
             "grantsTrial": bool(link.grants_trial),
             "competitionId": link.competition_id,
             "channel": link.channel,
+            "openAccountUrl": link.open_account_url,
         },
         ensure_ascii=False,
     )
@@ -1288,6 +1309,10 @@ def update_invite_link(
         raise HTTPException(status_code=404, detail="链接不存在 / Link not found")
     data = body.model_dump(exclude_unset=True)
     old = _audit_value(link)
+    # 先做会 400 的那一项，校验不过时别的字段还没动过。
+    # The field that can 400 goes first, so nothing else is touched when it fails.
+    if "openAccountUrl" in data:
+        _set_open_account_url(link, data["openAccountUrl"])
     if data.get("label") is not None:
         label = data["label"].strip()
         if not label:
@@ -1388,15 +1413,39 @@ def my_agent_set_user_plan(
 ):
     """代理调整自己名下客户的会员：延长 PRO（一次最多 60 天）或降回 FREE。
 
-    **这是 /agent/* 唯一的写端点**（2026-09-19 之前这条路径上一个都没有）。边界与
-    审计见 agent_set_plan；限流挂在这里而不是别处：其余代理端点都是只读，只有它
-    能改别人的权益，被脚本连点会把一整批人开成 PRO。
+    /agent/* 下改**别人**权益的唯一写端点（另一个写端点只改代理自己链接的开户链接）。
+    边界与审计见 agent_set_plan；限流挂在这里：它能改别人的权益，被脚本连点会把一整批
+    人开成 PRO。
 
-    The only write endpoint under /agent/*. Boundaries and audit live in
-    agent_set_plan; the rate limit sits here because this is the one call that
-    changes someone else's entitlement.
+    The only /agent/* write that touches someone else's entitlement (the other
+    write only edits the agent's own link's open-account URL). Boundaries and audit
+    live in agent_set_plan; rate-limited because a script could mint PRO in bulk.
     """
     return agent_set_plan(db, user, link_id, body)
+
+
+@agent_router.patch("/links/{link_id}/open-account-url", response_model=AgentLinkOut)
+@limiter.limit("30/minute")
+def my_agent_set_open_account_url(
+    request: Request,
+    link_id: str,
+    body: AgentOpenAccountUrlUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """代理设置 / 清除自己链接的开户链接：经这条链接进比赛页的访客点「开户」时跳这里。
+    不是自己的链接 404（_owned_link）；校验与管理端同一个口（_set_open_account_url）；
+    审计行照 invite:{code} 惯例，操作者就是代理本人。与管理端谁后写谁算。
+    Agent sets/clears their own link's open-account URL. Not-yours is 404; same
+    validation as the admin path; audited under invite:{code} with the agent as
+    the actor. Last write wins against the admin."""
+    link = _owned_link(db, user, link_id)
+    old = _audit_value(link)
+    _set_open_account_url(link, body.url)
+    _log_change(db, user.id, user.id, f"invite:{link.code}", old, _audit_value(link))
+    db.commit()
+    db.refresh(link)
+    return _agent_link_outs(db, [link])[0]
 
 
 @agent_router.get("/links/{link_id}/users", response_model=AgentLinkUsersOut)

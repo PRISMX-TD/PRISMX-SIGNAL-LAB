@@ -296,6 +296,7 @@ def test_create_competition_link_with_channel(db_session):
     row = db_session.query(AdminAuditLog).filter(AdminAuditLog.field == f"invite:{out.code}").one()
     assert json.loads(row.new_value) == {
         "label": "FB广告", "isActive": True, "grantsTrial": False, "competitionId": comp.id, "channel": "FB广告",
+        "openAccountUrl": None,
     }
 
 

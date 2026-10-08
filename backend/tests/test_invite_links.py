@@ -205,6 +205,7 @@ def test_create_invite_link_audit_records_active_not_null(db_session):
     )
     assert json.loads(row.new_value) == {
         "label": "渠道甲", "isActive": True, "grantsTrial": False, "competitionId": None, "channel": None,
+        "openAccountUrl": None,
     }
 
 
