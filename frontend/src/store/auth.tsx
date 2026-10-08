@@ -71,7 +71,12 @@ const LOGOUT_KEEP_KEYS = new Set([
   // expiry takes this path too.
   'prismx_lang_at',
   'prismx.ref',
+  'prismx.refs',
   'prismx.ref.clicked',
+  // 注意：prismx.compIntent（比赛报名意图）刻意**不**在这里——登出即清，共享设备上
+  // 下一个人不该被带去上一个人想报的比赛。
+  // Note: prismx.compIntent is deliberately NOT kept — logging out drops it, so the next
+  // person on a shared device isn't steered into the previous person's competition.
   'prismx_bridge_update_dismissed_version',
   // 节日装饰的开关与「已关闭问候」记录：设备偏好，与账号无关。
   // Festival decoration switch and greeting dismissal: device preferences.

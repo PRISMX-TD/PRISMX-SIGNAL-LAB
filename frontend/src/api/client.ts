@@ -29,28 +29,86 @@ export function clearToken() {
 
 // ---- 邀请链接归因 / invite-link attribution ----
 // RefCapture 在任意入口页捕获 ?ref= 后写入；注册请求读取携带，成功后清除。
-// 30 天有效、后点覆盖先点。老用户带着残留 ref 登录不会被污染——后端只在
-// 新建用户时应用（见 backend routers/invite.py 的 apply_invite）。
-// Written by RefCapture on any entry URL; read and attached by the register
-// calls, cleared on success. 30-day TTL, last click wins. Returning users
-// carrying a stale ref are safe: the backend applies it to new users only.
+// 保存最近 5 个不同的码（各带时间、30 天过期、新的在前、重复点击挪到最前）：注册 /
+// Google 时全部上报，由后端按「30 天内代理优先」挑一个（backend routers/invite.py 的
+// pick_ref）；不回传挑了谁。老键 prismx.ref 仍同步写最新一个：readRef() 的调用方
+// （落地页 / 登录页的试用横幅）与老 App 包只认它。老用户带着残留 ref 登录不会被污染——
+// 后端只在新建用户时应用（apply_invite）。
+// Written by RefCapture on any entry URL; attached by the register calls, cleared on success.
+// Keeps the 5 most recent distinct codes (each stamped, 30-day TTL, newest first, a repeat
+// click moves to the front). All are sent at signup and the backend picks one ("agent wins
+// within 30 days", pick_ref in backend routers/invite.py) without echoing its choice. The
+// legacy prismx.ref key still mirrors the newest code for readRef() callers and older app
+// bundles. Returning users are safe: the backend applies refs to new users only.
 const REF_KEY = 'prismx.ref'
+const REFS_KEY = 'prismx.refs'
+const REFS_MAX = 5
+const REF_MAX_LEN = 32
 const REF_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-export function storeRef(code: string) {
-  writeJson(REF_KEY, { code, ts: Date.now() })
+interface RefEntry {
+  code: string
+  ts: number
 }
 
+function liveRefEntry(v: unknown, now: number): RefEntry | null {
+  if (!v || typeof v !== 'object') return null
+  const { code, ts } = v as { code?: unknown; ts?: unknown }
+  if (typeof code !== 'string' || !code || code.length > REF_MAX_LEN) return null
+  if (typeof ts !== 'number' || !Number.isFinite(ts)) return null
+  if (now - ts > REF_TTL_MS) return null
+  return { code, ts }
+}
+
+function readRefEntries(): RefEntry[] {
+  const now = Date.now()
+  const raw = readJson<unknown>(REFS_KEY, null)
+  const candidates: unknown[] = Array.isArray(raw) ? [...raw] : []
+  // 升级前只有单个 prismx.ref：并进来，升级前刚点过链接的人不丢归因。
+  // Older builds only wrote prismx.ref: fold it in so a pre-upgrade click is not lost.
+  candidates.push(readJson<unknown>(REF_KEY, null))
+  const out: RefEntry[] = []
+  for (const c of candidates) {
+    const e = liveRefEntry(c, now)
+    if (!e) continue
+    const dup = out.findIndex((x) => x.code === e.code)
+    if (dup === -1) out.push(e)
+    else if (e.ts > out[dup].ts) out[dup] = e
+  }
+  out.sort((a, b) => b.ts - a.ts)
+  return out.slice(0, REFS_MAX)
+}
+
+export function storeRef(code: string) {
+  if (!code || code.length > REF_MAX_LEN) return
+  const ts = Date.now()
+  const next = [{ code, ts }, ...readRefEntries().filter((e) => e.code !== code)].slice(0, REFS_MAX)
+  writeJson(REFS_KEY, next)
+  writeJson(REF_KEY, { code, ts })
+}
+
+/** 仍有效的码，新的在前，最多 5 个 / live codes, newest first, at most 5 */
+export function readRefs(): string[] {
+  return readRefEntries().map((e) => e.code)
+}
+
+/** 最新的那个码 / the newest live code */
 export function readRef(): string | null {
-  const parsed = readJson<{ code?: unknown; ts?: unknown } | null>(REF_KEY, null)
-  if (!parsed) return null
-  if (typeof parsed.code !== 'string' || typeof parsed.ts !== 'number') return null
-  if (Date.now() - parsed.ts > REF_TTL_MS) return null
-  return parsed.code
+  return readRefs()[0] ?? null
 }
 
 export function clearRef() {
   removeStorage(REF_KEY)
+  removeStorage(REFS_KEY)
+}
+
+// 注册 / Google 请求体里的归因字段：ref 给老后端（只认单个），refs 给新后端挑。
+// 没有任何有效码时两个都不带，请求体与改动前逐字节一致。
+// Attribution fields for the register / Google bodies: ref for older backends (single code),
+// refs for the new picker. Both omitted when nothing is live — the body is then unchanged.
+function refPayload(): { ref?: string; refs?: string[] } {
+  const refs = readRefs()
+  return refs.length ? { ref: refs[0], refs } : {}
 }
 
 // 未授权（401）回调：登录态过期时由 AuthProvider 注册，用于清状态并跳登录页。
@@ -399,9 +457,14 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   const refreshed = res.headers.get('X-Refreshed-Token')
   if (refreshed && sameSession) setToken(refreshed)
   if (!res.ok) {
-    // 凭证失效：清除登录态并通知上层跳转登录页。
-    // Token expired/invalid: clear auth state and notify the app to redirect.
-    if (res.status === 401 && sameSession) {
+    // 凭证失效：清除登录态并通知上层跳转登录页。只对**带了 token** 的请求生效：
+    // 没登录时的 401（登录密码错、登录页上切语言触发的 PUT /prefs）与会话无关，
+    // 此前却同样触发登出清理，把注册前采集的比赛意图（prismx.compIntent）一起清掉。
+    // Token expired/invalid: clear auth state and notify the app to redirect — only for a
+    // request that actually carried a token. A 401 while logged out (wrong password, a
+    // PUT /prefs from the login page's language toggle) says nothing about a session, yet
+    // used to run the logout teardown and wipe the pre-signup competition intent.
+    if (res.status === 401 && token && sameSession) {
       clearToken()
       onUnauthorized?.()
     }
@@ -477,7 +540,7 @@ export const authApi = {
   register: (email: string, password: string, phoneCountry: string, phone: string) =>
     request<{ token: string; user: User }>('/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ email, password, phoneCountry, phone, ref: readRef() ?? undefined }),
+      body: JSON.stringify({ email, password, phoneCountry, phone, ...refPayload() }),
     }).then((res) => {
       clearRef()
       return res
@@ -525,7 +588,7 @@ export const authApi = {
   google: (credential: string) =>
     request<{ token: string; user: User }>('/auth/google', {
       method: 'POST',
-      body: JSON.stringify({ credential, ref: readRef() ?? undefined }),
+      body: JSON.stringify({ credential, ...refPayload() }),
     }).then((res) => {
       // 登录也清：ref 已被消费或不再相关（是否真的归因由后端创建分支决定）。
       // Cleared on login too: consumed or no longer relevant; whether it was

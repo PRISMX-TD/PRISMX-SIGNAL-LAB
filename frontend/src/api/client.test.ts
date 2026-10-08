@@ -291,4 +291,155 @@ describe('request(): token renewal / 401 follow the sending session', () => {
     expect(seen[0].Authorization).toBe('Bearer OLD')
     expect(onUnauthorized).not.toHaveBeenCalled()
   })
+  it('没带 token 的 401（如登录密码错）不触发登出回调 / a 401 on a token-less request never fires onUnauthorized', async () => {
+    const { api } = await loadWithStorage()
+    const onUnauthorized = vi.fn()
+    api.setUnauthorizedHandler(onUnauthorized)
+    const seen: Record<string, string>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      seen.push((init?.headers ?? {}) as Record<string, string>)
+      return json({ detail: 'bad credentials' }, 401)
+    }))
+    await expect(api.authApi.login('a@b.c', 'wrong')).rejects.toThrow('bad credentials')
+    expect(seen[0].Authorization).toBeUndefined()
+    expect(onUnauthorized).not.toHaveBeenCalled()
+  })
+})
+
+// 邀请归因的 ref 历史：最多 5 个、新的在前、去重、30 天过期；注册 / Google 同时发 ref 与 refs。
+// Invite-attribution ref history: ≤5, newest first, deduped, 30-day TTL; register / Google
+// send both ref and refs.
+describe('invite ref history', () => {
+  const T0 = new Date('2026-10-08T00:00:00Z').getTime()
+  const DAY = 24 * 60 * 60 * 1000
+
+  async function loadWithStorage() {
+    const mods = await load()
+    vi.stubGlobal('window', {
+      setTimeout: (...a: Parameters<typeof setTimeout>) => setTimeout(...a),
+      clearTimeout: (id: Parameters<typeof clearTimeout>[0]) => clearTimeout(id),
+      localStorage: globalThis.localStorage,
+    })
+    return mods
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(T0)
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  const authOk = () => json({ token: 'T', user: { id: 'u1', email: 'a@b.c', role: 'user', plan: 'FREE' } })
+
+  function captureBodies() {
+    const bodies: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')))
+      return authOk()
+    }))
+    return bodies
+  }
+
+  it('keeps at most 5 distinct codes, newest first', async () => {
+    const { api } = await loadWithStorage()
+    ;['a', 'b', 'c', 'd', 'e', 'f'].forEach((c, i) => {
+      vi.setSystemTime(T0 + i * 1000)
+      api.storeRef(c)
+    })
+    expect(api.readRefs()).toEqual(['f', 'e', 'd', 'c', 'b'])
+    expect(api.readRef()).toBe('f')
+  })
+
+  it('clicking a code again moves it to the front without duplicating it', async () => {
+    const { api } = await loadWithStorage()
+    api.storeRef('a')
+    vi.setSystemTime(T0 + 1000)
+    api.storeRef('b')
+    vi.setSystemTime(T0 + 2000)
+    api.storeRef('a')
+    expect(api.readRefs()).toEqual(['a', 'b'])
+  })
+
+  it('drops entries older than 30 days', async () => {
+    const { api } = await loadWithStorage()
+    api.storeRef('old')
+    vi.setSystemTime(T0 + 20 * DAY)
+    api.storeRef('new')
+    vi.setSystemTime(T0 + 31 * DAY)
+    expect(api.readRefs()).toEqual(['new'])
+    vi.setSystemTime(T0 + 51 * DAY)
+    expect(api.readRefs()).toEqual([])
+    expect(api.readRef()).toBeNull()
+  })
+
+  it('folds in a legacy single prismx.ref written by an older build', async () => {
+    const { api } = await loadWithStorage()
+    globalThis.localStorage.setItem('prismx.ref', JSON.stringify({ code: 'legacy', ts: T0 }))
+    expect(api.readRefs()).toEqual(['legacy'])
+    vi.setSystemTime(T0 + 1000)
+    api.storeRef('x')
+    expect(api.readRefs()).toEqual(['x', 'legacy'])
+    // 老键始终镜像最新一个 / the legacy key mirrors the newest code
+    expect(JSON.parse(globalThis.localStorage.getItem('prismx.ref') ?? 'null')).toEqual({ code: 'x', ts: T0 + 1000 })
+  })
+
+  it('ignores malformed entries and corrupt JSON', async () => {
+    const { api } = await loadWithStorage()
+    globalThis.localStorage.setItem('prismx.refs', JSON.stringify([
+      { code: 5, ts: T0 }, null, 'x', { code: 'y'.repeat(33), ts: T0 }, { code: '', ts: T0 }, { code: 'nots' }, { code: 'ok', ts: T0 },
+    ]))
+    expect(api.readRefs()).toEqual(['ok'])
+    globalThis.localStorage.setItem('prismx.refs', '{not json')
+    expect(api.readRefs()).toEqual([])
+  })
+
+  it('refuses empty or over-long codes', async () => {
+    const { api } = await loadWithStorage()
+    api.storeRef('')
+    api.storeRef('z'.repeat(33))
+    expect(api.readRefs()).toEqual([])
+  })
+
+  it('clearRef wipes both keys', async () => {
+    const { api } = await loadWithStorage()
+    api.storeRef('a')
+    api.clearRef()
+    expect(globalThis.localStorage.getItem('prismx.ref')).toBeNull()
+    expect(globalThis.localStorage.getItem('prismx.refs')).toBeNull()
+    expect(api.readRefs()).toEqual([])
+  })
+
+  it('register sends ref (newest) + refs, then clears them', async () => {
+    const { api } = await loadWithStorage()
+    api.storeRef('agent1')
+    vi.setSystemTime(T0 + 1000)
+    api.storeRef('comp1')
+    const bodies = captureBodies()
+    await api.authApi.register('a@b.c', 'password1', '+86', '13800000000')
+    expect(bodies[0].ref).toBe('comp1')
+    expect(bodies[0].refs).toEqual(['comp1', 'agent1'])
+    expect(api.readRefs()).toEqual([])
+  })
+
+  it('google sends ref + refs, then clears them', async () => {
+    const { api } = await loadWithStorage()
+    api.storeRef('agent1')
+    const bodies = captureBodies()
+    await api.authApi.google('cred')
+    expect(bodies[0]).toEqual({ credential: 'cred', ref: 'agent1', refs: ['agent1'] })
+    expect(api.readRefs()).toEqual([])
+  })
+
+  it('without any ref the body carries neither field (unchanged wire format)', async () => {
+    const { api } = await loadWithStorage()
+    const bodies = captureBodies()
+    await api.authApi.register('a@b.c', 'password1', '+86', '13800000000')
+    expect('ref' in bodies[0]).toBe(false)
+    expect('refs' in bodies[0]).toBe(false)
+  })
 })
