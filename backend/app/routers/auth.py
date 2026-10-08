@@ -23,7 +23,7 @@ from app.core.security import (
     verify_password,
 )
 from app.models import AdminAuditLog, User
-from app.routers.invite import apply_invite
+from app.routers.invite import apply_invite, pick_ref
 from app.schemas import (
     AuthRequest,
     AuthResponse,
@@ -134,7 +134,10 @@ def register(
     # trial is held back until the address is verified (see
     # invite.grant_deferred_invite_trial) — otherwise any made-up address would
     # collect a free trial.
-    apply_invite(db, user, req.ref, grant_trial=False)
+    # 新前端上报最近几个 ref（refs），老 App 包只有 ref；pick_ref 按「30 天内代理
+    # 优先」选一个，选了谁不回传。/ New clients send recent refs, old app builds
+    # only `ref`; pick_ref applies agent-first and the choice is never echoed.
+    apply_invite(db, user, pick_ref(db, req.refs or ([req.ref] if req.ref else [])), grant_trial=False)
     db.add(user)
     # flush 拿到 user.id 再签验证令牌（令牌行有指向 users.id 的外键）；仍是同一次
     # commit。/ Flush for user.id before issuing the token (FK); same commit.
@@ -193,7 +196,7 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
         # Invite attribution on the create branch ONLY. Applying it to an
         # existing user would clobber the admin's note and fabricate
         # attribution — returning users often still carry a stored ref.
-        granted_days = apply_invite(db, user, req.ref)
+        granted_days = apply_invite(db, user, pick_ref(db, req.refs or ([req.ref] if req.ref else [])))
         db.add(user)
         if granted_days:
             # 这个 flush 不是多余的：User.id 是 flush 时才生成的 Python 侧默认值，

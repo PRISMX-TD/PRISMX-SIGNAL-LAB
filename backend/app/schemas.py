@@ -1,7 +1,7 @@
 """Pydantic 请求/响应模型 / Pydantic request & response schemas."""
 import re
 from datetime import date, datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
@@ -69,6 +69,10 @@ def _normalize_symbol(v: str) -> str:
 
 
 # ---------- 认证 / Auth ----------
+# 一个 ref 码，与单个 ref 字段同一上限。/ One ref code, same bound as the single `ref` field.
+RefCode = Annotated[str, Field(min_length=1, max_length=32)]
+
+
 class AuthRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
@@ -93,6 +97,14 @@ class RegisterRequest(AuthRequest):
     # Optional invite-link code captured from ?ref=; unknown or disabled codes
     # are silently ignored and never block registration (see apply_invite).
     ref: str | None = Field(default=None, max_length=32)
+
+    # 浏览器保存的最近几个 ref（最新在前，各 30 天，最多 5 个）。服务端用
+    # invite.pick_ref 按「30 天内代理优先」选一个再交给 apply_invite；老 App 包只发
+    # 上面的 ref，两个字段并存。
+    # Recent refs kept by the browser (newest first, 30 days each, at most 5). The
+    # server picks one with invite.pick_ref (agent links win) before apply_invite;
+    # old app builds send only `ref`, so both fields coexist.
+    refs: list[RefCode] | None = Field(default=None, max_length=5)
 
     # 注册是"设置密码"的入口之一，按字节卡上限（见 MAX_PASSWORD_BYTES）。
     # Registration is one of the set-a-password entry points; capped by bytes.
@@ -194,6 +206,9 @@ class GoogleAuthRequest(BaseModel):
     # Same as RegisterRequest.ref; this endpoint is find-or-create, and the
     # field is applied only when this call actually creates the user.
     ref: str | None = Field(default=None, max_length=32)
+
+    # 同 RegisterRequest.refs，也只在创建分支生效。/ Same as RegisterRequest.refs; create branch only.
+    refs: list[RefCode] | None = Field(default=None, max_length=5)
 
 
 class UserOut(BaseModel):

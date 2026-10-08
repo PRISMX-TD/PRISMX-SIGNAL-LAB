@@ -168,6 +168,50 @@ def _active_link(db: Session, code: str) -> InviteLink | None:
     )
 
 
+def pick_ref(db: Session, refs: list[str] | None) -> str | None:
+    """从浏览器上报的最近几个 ref 里选出归因码（设计 §1.5「30 天内代理优先」）。
+
+    refs 最新在前。只看其中仍活跃的链接（与 _active_link 同口径，批量查一次而
+    不是逐个调它）：有代理的链接里取最新的一个；一个代理链接都没有就取最新的
+    活跃链接；全不可用返回 None。返回库里的规范码，交给 apply_invite 照常归因。
+    选中哪一个**不回传**给客户端——否则注册接口会变成批量探测「码是否存活 / 是不是
+    代理链接」的口子，与 /invite/click 一律 204 同一个原则。
+
+    Picks the attribution code from the browser's recent refs (newest first).
+    Only still-active links count (same rule as _active_link, one batched query):
+    the newest link with agents wins; with no agent link, the newest active
+    link; None if nothing is usable. Returns the canonical code for apply_invite.
+    The choice is never echoed back — signup must not become a batch
+    liveness / agent-link oracle (same principle as click's always-204).
+    """
+    codes: list[str] = []
+    for raw in (refs or [])[:5]:
+        code = _normalize_code(raw or "")
+        if code and code not in codes:
+            codes.append(code)
+    if not codes:
+        return None
+    active = {
+        code
+        for (code,) in db.query(InviteLink.code).filter(
+            InviteLink.code.in_(codes), InviteLink.is_active.is_(True)
+        )
+    }
+    if not active:
+        return None
+    with_agents = {
+        code
+        for (code,) in db.query(InviteLink.code)
+        .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
+        .filter(InviteLink.code.in_(active))
+        .distinct()
+    }
+    for code in codes:
+        if code in with_agents:
+            return code
+    return next(c for c in codes if c in active)
+
+
 def offer_days(db: Session, code: str) -> int | None:
     """这个 ref 码此刻能带来几天试用；不带返回 None。
 
