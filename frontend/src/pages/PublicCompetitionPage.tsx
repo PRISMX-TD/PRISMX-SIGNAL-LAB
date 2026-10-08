@@ -75,7 +75,9 @@ function usePublicCompLang(enabled: boolean): [AppLang, (l: AppLang) => void] {
 }
 
 export default function PublicCompetitionPage() {
-  const { compId } = useParams<{ compId?: string }>()
+  // 手改的链接可能是大写 UUID：统一小写再取数 / 打点 / 记意图（库里与缓存键都是小写）。
+  // Hand-edited links may carry an uppercase UUID: lowercase before fetching / events / intent.
+  const compId = useParams<{ compId?: string }>().compId?.toLowerCase()
   const { isAuthed } = useAuth()
   const [lang, chooseLang] = usePublicCompLang(!isAuthed)
   if (isAuthed) {
@@ -259,7 +261,11 @@ function CompetitionView({ compId }: { compId: string }) {
     if (shouldSendView(compId)) void publicCompetitionApi.event({ compId, step: 'view', ref: refOrUndef() })
   }, [data, compId])
 
-  useDocumentTitle(data ? t('competition.pub.docTitle', { name: data.name }) : 'Signal Lab')
+  useDocumentTitle(data ? t('competition.pub.docTitle', { name: data.name }) : 'Signal Lab', {
+    // 卸载时还原（→ /login 等自己不设标题的页面不再挂着比赛名）。
+    // Restore on unmount so /login etc. don't keep the competition name.
+    restoreOnUnmount: true,
+  })
 
   if (error === 'notFound') {
     return (
