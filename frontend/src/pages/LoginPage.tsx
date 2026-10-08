@@ -5,6 +5,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { localizeApiError } from '../api/utils'
 import { inviteApi, readRef } from '../api/client'
+import { postAuthDestination, resumeCompIntent } from '../utils/compIntent'
+import { isInAppBrowser } from '../utils/inAppBrowser'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
@@ -14,7 +16,7 @@ import { DEFAULT_DIAL_ISO } from '../data/dialCodes'
 
 export default function LoginPage() {
   const { t } = useTranslation()
-  const { login, register, loginWithGoogle, isAuthed } = useAuth()
+  const { login, register, loginWithGoogle, isAuthed, user } = useAuth()
   const navigate = useNavigate()
   const [params] = useSearchParams()
 
@@ -54,17 +56,35 @@ export default function LoginPage() {
     }
   }, [mode])
 
+  // 社交 App 内置浏览器里 Google 会拒绝登录：藏掉按钮，提示去浏览器打开。只判一次。
+  // Google refuses sign-in inside social in-app browsers: hide the button and point to a real
+  // browser. Decided once per mount.
+  const [inAppBrowser] = useState(isInAppBrowser)
+
   // 已登录直接重定向；渲染期间调用 navigate 是反模式 / declarative redirect
-  if (isAuthed) return <Navigate to="/dashboard" replace />
+  // 目的地必须与下面提交成功后的 navigate() 完全一致（postAuthDestination）：登录成功时
+  // persist() → setUser 触发的重渲染会走到这里，而 BrowserRouter 开了 v7_startTransition，
+  // 这里的声明式跳转与 onSubmit 里的命令式跳转都包在 startTransition 里，谁后提交谁赢。
+  // 两边目的地不同（一边比赛页、一边 /dashboard）就会随机落错页。没有意图时恒为 /dashboard。
+  // The destination must equal the post-submit navigate() below (postAuthDestination): the
+  // re-render from persist() → setUser lands here, and with v7_startTransition both this
+  // declarative redirect and the imperative one in onSubmit run inside startTransition — the
+  // last to commit wins. Different targets would land users on a random page. With no intent
+  // this is exactly /dashboard.
+  if (isAuthed) return <Navigate to={postAuthDestination(user)} replace />
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      if (mode === 'login') await login(email, password)
-      else await register(email, password, dialCodeOf(phone.iso), phone.national)
-      navigate('/dashboard', { replace: true })
+      const u = mode === 'login'
+        ? await login(email, password)
+        : await register(email, password, dialCodeOf(phone.iso), phone.national)
+      // 有比赛报名意图就回比赛页，否则照旧去仪表盘（与上面的声明式跳转同一判据）。
+      // Back to the competition when there is an intent, else the dashboard as before
+      // (same rule as the declarative redirect above).
+      if (!resumeCompIntent(navigate, u)) navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? localizeApiError(err.message) : t('auth.errorFailed'))
     } finally {
@@ -76,8 +96,8 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await loginWithGoogle(credential)
-      navigate('/dashboard', { replace: true })
+      const u = await loginWithGoogle(credential)
+      if (!resumeCompIntent(navigate, u)) navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? localizeApiError(err.message) : t('auth.googleError'))
     } finally {
@@ -249,13 +269,26 @@ export default function LoginPage() {
               )}
             </form>
 
-            <div className="my-5 flex items-center gap-3">
-              <span className="h-px flex-1 bg-white/10" />
-              <span className="text-xs uppercase tracking-widest text-neutral-500">{t('auth.or')}</span>
-              <span className="h-px flex-1 bg-white/10" />
-            </div>
+            {inAppBrowser ? (
+              // 内置浏览器：不渲染 GoogleLoginButton（连 GIS 脚本都不加载），只给一句去浏览器打开的提示。
+              // In-app browser: no GoogleLoginButton (the GIS script never loads), just the hint.
+              <p
+                role="note"
+                className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-[13px] leading-relaxed text-neutral-300"
+              >
+                {t('auth.inAppBrowserHint')}
+              </p>
+            ) : (
+              <>
+                <div className="my-5 flex items-center gap-3">
+                  <span className="h-px flex-1 bg-white/10" />
+                  <span className="text-xs uppercase tracking-widest text-neutral-500">{t('auth.or')}</span>
+                  <span className="h-px flex-1 bg-white/10" />
+                </div>
 
-            <GoogleLoginButton onCredential={onGoogleCredential} onError={setError} />
+                <GoogleLoginButton onCredential={onGoogleCredential} onError={setError} />
+              </>
+            )}
           </div>
         </div>
       </div>

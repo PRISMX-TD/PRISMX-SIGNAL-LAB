@@ -219,7 +219,8 @@
     "phone": "Phone number",
     "phonePlaceholder": "Phone number (without dial code)",
     "phoneHint": "Select your region and enter your phone number — used for account security and important notices",
-    "inviteTrialBanner": "Sign up through this link and verify your email to get {{days}} days of PRO"
+    "inviteTrialBanner": "Sign up through this link and verify your email to get {{days}} days of PRO",
+    "inAppBrowserHint": "You're in an in-app browser, where Google sign-in doesn't work. Tap the ··· menu and choose “Open in browser”, or sign up with your email."
   },
   "order": {
     "slideToConfirm": "Slide to confirm"

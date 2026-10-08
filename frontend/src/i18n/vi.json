@@ -219,7 +219,8 @@
     "phone": "Số điện thoại",
     "phonePlaceholder": "Số điện thoại (không kèm mã quốc gia)",
     "phoneHint": "Chọn khu vực và nhập số điện thoại — dùng cho bảo mật tài khoản và thông báo quan trọng",
-    "inviteTrialBanner": "Đăng ký qua liên kết này và xác minh email để nhận {{days}} ngày PRO"
+    "inviteTrialBanner": "Đăng ký qua liên kết này và xác minh email để nhận {{days}} ngày PRO",
+    "inAppBrowserHint": "Bạn đang dùng trình duyệt trong ứng dụng, nơi không thể đăng nhập bằng Google. Nhấn menu ··· và chọn “Mở trong trình duyệt”, hoặc đăng ký bằng email."
   },
   "order": {
     "slideToConfirm": "Trượt để xác nhận"
