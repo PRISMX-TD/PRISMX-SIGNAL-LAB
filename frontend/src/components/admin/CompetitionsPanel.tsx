@@ -29,14 +29,27 @@
 //   patch object at all, rather than sending-but-disabling them.
 // - The advance action's request carries only { status }, never bundled with
 //   the copy/time-field edit.
+//
+// 公开推广（2026-10-08 设计 §4）：publicView / openAccountUrl 也在后端非 draft 白名单里，
+// 所以锁定状态下照样可改、照样进 patch。推广链接 / 漏斗 / 预览 / 完整性报告在
+// competition/CompetitionPromoSection；终审前的完整性确认在 competition/SettleModal；
+// 主推比赛（★）写游戏化设置 featuredCompetitionId。
+// Public promotion (design §4): publicView / openAccountUrl are on the server's non-draft
+// allow-list too, so they stay editable and go into the patch when locked. Links / funnel
+// / preview / integrity live in competition/CompetitionPromoSection, the pre-settle check
+// in competition/SettleModal; the featured star writes gamification featuredCompetitionId.
 import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { fmtDate, fmtMoney, localizeApiError, fmtScorePct, parseTime } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import Select from '../Select'
+import Switch from '../Switch'
 import ConfirmModal from '../ConfirmModal'
 import { useToast } from '../../utils/useToast'
+import CompetitionPromoSection from './competition/CompetitionPromoSection'
+import SettleModal from './competition/SettleModal'
+import { formPromoIssues, openAccountUrlValue } from './competition/promoLogic'
 import type {
   CompetitionAdminRow,
   CompetitionEnrollment,
@@ -44,6 +57,7 @@ import type {
   CompetitionPatch,
   CompetitionStatus,
   CompetitionTrack,
+  GamificationSettings,
   LeaderboardPayload,
   ParticipantAdminRow,
 } from '../../api/types'
@@ -140,6 +154,9 @@ interface FormDraft {
   // Capital ceiling: empty = none (there is no global ceiling to follow).
   maxBaselineUsd: string
   minTrades: string
+  // 公开推广：开赛后仍可改 / public promotion: editable after draft
+  publicView: boolean
+  openAccountUrl: string
 }
 
 const EMPTY_DRAFT: FormDraft = {
@@ -156,6 +173,8 @@ const EMPTY_DRAFT: FormDraft = {
   minBaselineUsd: '',
   maxBaselineUsd: '',
   minTrades: '',
+  publicView: false,
+  openAccountUrl: '',
 }
 
 function toFormDraft(c: CompetitionAdminRow): FormDraft {
@@ -173,6 +192,8 @@ function toFormDraft(c: CompetitionAdminRow): FormDraft {
     minBaselineUsd: c.minBaselineUsd == null ? '' : String(c.minBaselineUsd),
     maxBaselineUsd: c.maxBaselineUsd == null ? '' : String(c.maxBaselineUsd),
     minTrades: c.minTrades == null ? '' : String(c.minTrades),
+    publicView: !!c.publicView,
+    openAccountUrl: c.openAccountUrl ?? '',
   }
 }
 
@@ -213,6 +234,35 @@ export default function CompetitionsPanel() {
   // Pending destructive action (delete / settle / end), confirmed via ConfirmModal.
   // Ending needs a confirm too: status never goes back, so a misclick can't be undone.
   const [pendingAction, setPendingAction] = useState<{ kind: 'delete' | 'settle' | 'end'; comp: CompetitionAdminRow } | null>(null)
+
+  // 游戏化设置：主推比赛（★）与公开比赛页总开关提示都从这里读。拉不到就不显示 ★ 与提示，
+  // 不影响比赛本身的增删改。
+  // Gamification settings feed the featured star and the global-switch hint. On failure
+  // both are hidden; competition CRUD is unaffected.
+  const [gSettings, setGSettings] = useState<GamificationSettings | null>(null)
+  const [savingFeatured, setSavingFeatured] = useState(false)
+  useEffect(() => {
+    adminApi
+      .gamificationSettings()
+      .then(setGSettings)
+      .catch(() => setGSettings(null))
+  }, [])
+
+  // ★ 只在已开公开页的比赛上可设（§1.3：主推只有指向可公开的比赛才生效）；再点一次取消。
+  // Featuring requires the public page on (§1.3); clicking the active star unsets it.
+  async function toggleFeatured(c: CompetitionAdminRow) {
+    if (!gSettings || savingFeatured) return
+    const next = gSettings.featuredCompetitionId === c.id ? null : c.id
+    setSavingFeatured(true)
+    try {
+      setGSettings(await adminApi.updateGamificationSettings({ featuredCompetitionId: next }))
+      showToast('ok', t('admin.saved'))
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingFeatured(false)
+    }
+  }
 
   // ---- ① 比赛列表 / competition list ----
   const [comps, setComps] = useState<CompetitionAdminRow[]>([])
@@ -270,6 +320,9 @@ export default function CompetitionsPanel() {
   // rather than as live form controls, matching the file-header note that
   // "send but disable" isn't the right model here.
   const fieldsLocked = mode === 'edit' && editingComp != null && editingComp.status !== 'draft'
+  // 锁定时 form.track / form.enrollment 就是这场比赛的原值，校验口径不变。
+  // When locked, form.track / enrollment hold the competition's own values.
+  const publicIssues = formPromoIssues(form)
 
   function startCreate() {
     setMode('create')
@@ -313,6 +366,10 @@ export default function CompetitionsPanel() {
       setFormError(t('competition.admin.fields.rangeInvalid'))
       return
     }
+    if (publicIssues.length > 0) {
+      setFormError(publicIssues.map((i) => t(`admin.competitionPromo.issue.${i}`)).join('；'))
+      return
+    }
     setSaving(true)
     setFormError(null)
     try {
@@ -337,6 +394,8 @@ export default function CompetitionsPanel() {
           minBaselineUsd: gateValue(form.minBaselineUsd),
           maxBaselineUsd: gateValue(form.maxBaselineUsd),
           minTrades: gateValue(form.minTrades),
+          publicView: form.publicView,
+          openAccountUrl: openAccountUrlValue(form.openAccountUrl),
         })
         setComps((prev) => [created, ...prev])
         showToast('ok', t('admin.saved'))
@@ -364,17 +423,23 @@ export default function CompetitionsPanel() {
             minBaselineUsd: gateValue(form.minBaselineUsd),
             maxBaselineUsd: gateValue(form.maxBaselineUsd),
             minTrades: gateValue(form.minTrades),
+            publicView: form.publicView,
+            openAccountUrl: openAccountUrlValue(form.openAccountUrl),
           }
         } else {
           // 非 draft：patch 对象里绝不出现 metric/enrollment/startsAt/endsAt 的
-          // 键，哪怕值没变——后端按键存在与否判 400，见文件头注释。
+          // 键，哪怕值没变——后端按键存在与否判 400，见文件头注释。publicView /
+          // openAccountUrl 在白名单里，照常带上。
           // Non-draft: the patch object never carries the
           // metric/enrollment/startsAt/endsAt keys at all, even unchanged —
-          // the backend 400s on key presence, see the file header.
+          // the backend 400s on key presence, see the file header. publicView /
+          // openAccountUrl are allow-listed and always sent.
           patch = {
             name: form.name.trim(),
             description: form.description.trim() || null,
             prizeNote: form.prizeNote.trim() || null,
+            publicView: form.publicView,
+            openAccountUrl: openAccountUrlValue(form.openAccountUrl),
             ...(editingComp.enrollment === 'signup'
               ? {
                   regOpensAt: localInputToIso(form.regOpensAt),
@@ -434,7 +499,7 @@ export default function CompetitionsPanel() {
     }
   }
 
-  async function settle(comp: CompetitionAdminRow) {
+  async function settle(comp: CompetitionAdminRow, acknowledgeFlags: boolean) {
     // 只有一种终审：ended 且过了 24 小时宽限期。内测期的"强制终审"（跳过状态与
     // 宽限期）已随后端一起移除——早于实际结束终审会漏掉尚未平仓和迟到的单，而名次
     // 一旦定格就是永久的。
@@ -443,7 +508,9 @@ export default function CompetitionsPanel() {
     // still-open and late closes, and ranks are permanent once locked.
     setSettlingId(comp.id)
     try {
-      const result = await adminApi.settleCompetition(comp.id)
+      // acknowledgeFlags 只在管理员于 SettleModal 勾了「已核查」时为 true（§1.14）。
+      // true only when the admin ticked the acknowledgement in SettleModal (§1.14).
+      const result = await adminApi.settleCompetition(comp.id, { acknowledgeFlags })
       setComps((prev) => prev.map((c) => (c.id === comp.id ? { ...c, status: 'settled' } : c)))
       showToast('ok', t('competition.admin.settleResult', { n: result.ranked }))
       if (selectedId === comp.id) {
@@ -538,6 +605,26 @@ export default function CompetitionsPanel() {
     }
   }
 
+  // 管理员隐藏名字（§1.8）：公开榜单把这个人显示成「匿名选手」，站内不受影响。
+  // PATCH 回包可能不带 nameHidden，合并时以请求值兜底。
+  // Admin name hide (§1.8): the public board shows them as anonymous; in-app is untouched.
+  // The PATCH reply may omit nameHidden, so the requested value backs the merge.
+  async function toggleNameHidden(p: ParticipantAdminRow) {
+    if (!selectedId) return
+    const next = !p.nameHidden
+    setSavingParticipantId(p.id)
+    try {
+      const updated = await adminApi.updateParticipant(selectedId, p.id, { nameHidden: next })
+      setParticipants((prev) =>
+        prev.map((x) => (x.id === p.id ? { ...x, ...updated, nameHidden: updated.nameHidden ?? next } : x)),
+      )
+    } catch (err) {
+      showToast('err', err instanceof Error ? localizeApiError(err.message) : t('admin.saveError'))
+    } finally {
+      setSavingParticipantId(null)
+    }
+  }
+
   return (
     <div className="space-y-5">
       {toast && (
@@ -559,6 +646,7 @@ export default function CompetitionsPanel() {
           </button>
         </div>
         {listError && <p className="mt-2 text-sm text-down">{listError}</p>}
+        {gSettings && <p className="mt-1 text-xs text-neutral-500">{t('admin.competitionPromo.featuredHint')}</p>}
         {listLoading ? (
           <div className="mt-3 space-y-2">
             <SkeletonLine width="100%" />
@@ -592,7 +680,45 @@ export default function CompetitionsPanel() {
                         selectedId === c.id ? 'bg-prism-600/[0.06]' : ''
                       }`}
                     >
-                      <td className="py-1.5 pr-4 text-neutral-200">{c.name}</td>
+                      <td className="py-1.5 pr-4 text-neutral-200">
+                        <span className="inline-flex flex-wrap items-center gap-1.5">
+                          {gSettings &&
+                            (() => {
+                              const featured = gSettings.featuredCompetitionId === c.id
+                              const blocked = !featured && !c.publicView
+                              return (
+                                <button
+                                  type="button"
+                                  className={`text-sm leading-none transition disabled:opacity-30 ${
+                                    featured ? 'text-amber-300' : 'text-neutral-600 hover:text-amber-300'
+                                  }`}
+                                  disabled={savingFeatured || blocked}
+                                  title={
+                                    blocked
+                                      ? t('admin.competitionPromo.featuredNeedsPublic')
+                                      : featured
+                                        ? t('admin.competitionPromo.unsetFeatured')
+                                        : t('admin.competitionPromo.setFeatured')
+                                  }
+                                  aria-label={featured ? t('admin.competitionPromo.unsetFeatured') : t('admin.competitionPromo.setFeatured')}
+                                  aria-pressed={featured}
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    void toggleFeatured(c)
+                                  }}
+                                >
+                                  {featured ? '★' : '☆'}
+                                </button>
+                              )
+                            })()}
+                          {c.name}
+                          {c.publicView && (
+                            <span className="tag bg-prism-500/15 text-[10px] text-prism-200">
+                              {t('admin.competitionPromo.publicTag')}
+                            </span>
+                          )}
+                        </span>
+                      </td>
                       <td className="py-1.5 pr-4">
                         <span className={`tag text-[10px] ${STATUS_TAG_CLASS[c.status]}`}>
                           {t(`competition.status.${STATUS_LABEL_KEY[c.status]}`)}
@@ -878,6 +1004,48 @@ export default function CompetitionsPanel() {
             </div>
           )}
 
+          {/* 公开推广（§1.7）：开关 + 开户链接，随「保存」提交；开赛后仍可改。
+              总开关没开时提示一句——否则管理员开了这里却看到 404，只会以为坏了。
+              Public promotion (§1.7): saved with the form, editable after draft. The
+              global-switch hint saves an admin from reading a 404 as a bug. */}
+          <fieldset className="space-y-3 rounded-2xl border border-white/10 p-4">
+            <legend className="px-1 text-sm font-semibold text-neutral-200">{t('admin.competitionPromo.title')}</legend>
+            {gSettings && !gSettings.competitionsPublicEnabled && (
+              <p className="text-xs text-amber-400">{t('admin.competitionPromo.globalOff')}</p>
+            )}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-sm text-neutral-200">{t('admin.competitionPromo.publicView')}</p>
+                <p className="mt-0.5 text-xs leading-relaxed text-neutral-500">{t('admin.competitionPromo.publicViewHint')}</p>
+              </div>
+              <Switch
+                checked={form.publicView}
+                onChange={(v) => setForm({ ...form, publicView: v })}
+                aria-label={t('admin.competitionPromo.publicView')}
+              />
+            </div>
+            <div>
+              <label className="label">{t('admin.competitionPromo.openAccountUrl')}</label>
+              <input
+                className="input"
+                inputMode="url"
+                placeholder="https://"
+                value={form.openAccountUrl}
+                maxLength={500}
+                onChange={(e) => setForm({ ...form, openAccountUrl: e.target.value })}
+              />
+              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.competitionPromo.openAccountUrlHint')}</p>
+            </div>
+            {publicIssues.length > 0 && (
+              <ul className="space-y-0.5 text-xs text-red-400">
+                {publicIssues.map((i) => (
+                  <li key={i}>{t(`admin.competitionPromo.issue.${i}`)}</li>
+                ))}
+              </ul>
+            )}
+            {fieldsLocked && <p className="text-[11px] text-neutral-500">{t('admin.competitionPromo.editableHint')}</p>}
+          </fieldset>
+
           {formError && <p className="text-sm text-down">{formError}</p>}
 
           <div className="flex items-center gap-2">
@@ -896,6 +1064,12 @@ export default function CompetitionsPanel() {
           </div>
         </form>
       </div>
+
+      {/* ②b 公开推广下半区：只在编辑一场已存在的比赛时出现；key 保证换比赛时整块重建。
+          Promotion section, edit mode only; keyed so switching competitions rebuilds it. */}
+      {mode === 'edit' && editingComp && (
+        <CompetitionPromoSection key={editingComp.id} comp={editingComp} onToast={showToast} />
+      )}
 
       {/* ③ 选中比赛：参赛者表 + 实时榜预览 / selected: participants + board preview */}
       {selectedId && selectedComp && (
@@ -938,6 +1112,11 @@ export default function CompetitionsPanel() {
                     <tr key={p.id} className="border-t border-white/5">
                       <td className="max-w-[180px] py-1.5 pr-4">
                         <div className="truncate text-neutral-100">{p.nickname || '—'}</div>
+                        {p.nameHidden && (
+                          <span className="tag bg-white/5 text-[10px] text-neutral-400">
+                            {t('admin.competitionPromo.nameHiddenTag')}
+                          </span>
+                        )}
                         <div className="truncate font-mono text-[11px] text-neutral-500">{p.email ?? '—'}</div>
                       </td>
                       <td className="py-1.5 pr-4">
@@ -997,37 +1176,47 @@ export default function CompetitionsPanel() {
                         )}
                       </td>
                       <td className="py-1.5">
-                        {p.disqualified ? (
-                          <button
-                            type="button"
-                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
-                            disabled={savingParticipantId === p.id}
-                            onClick={() => restore(p)}
-                          >
-                            {savingParticipantId === p.id ? t('common.loading') : t('competition.admin.restore')}
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              className="input w-32 py-1 text-[11px]"
-                              placeholder={t('competition.admin.disqualifyReason')}
-                              value={reasonDrafts[p.id] ?? ''}
-                              onChange={(e) =>
-                                setReasonDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
-                              }
-                            />
+                        <div className="flex flex-col items-start gap-1.5">
+                          {p.disqualified ? (
                             <button
                               type="button"
                               className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
                               disabled={savingParticipantId === p.id}
-                              onClick={() => disqualify(p)}
+                              onClick={() => restore(p)}
                             >
-                              {savingParticipantId === p.id
-                                ? t('common.loading')
-                                : t('competition.admin.disqualify')}
+                              {savingParticipantId === p.id ? t('common.loading') : t('competition.admin.restore')}
                             </button>
-                          </div>
-                        )}
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <input
+                                className="input w-32 py-1 text-[11px]"
+                                placeholder={t('competition.admin.disqualifyReason')}
+                                value={reasonDrafts[p.id] ?? ''}
+                                onChange={(e) =>
+                                  setReasonDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                                disabled={savingParticipantId === p.id}
+                                onClick={() => disqualify(p)}
+                              >
+                                {savingParticipantId === p.id
+                                  ? t('common.loading')
+                                  : t('competition.admin.disqualify')}
+                              </button>
+                            </div>
+                          )}
+                          <button
+                            type="button"
+                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                            disabled={savingParticipantId === p.id}
+                            onClick={() => toggleNameHidden(p)}
+                          >
+                            {p.nameHidden ? t('admin.competitionPromo.unhideName') : t('admin.competitionPromo.hideName')}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1080,31 +1269,35 @@ export default function CompetitionsPanel() {
         </div>
       )}
 
-      {pendingAction && (
+      {pendingAction && pendingAction.kind !== 'settle' && (
         <ConfirmModal
           center
-          title={
-            pendingAction.kind === 'delete'
-              ? t('competition.admin.delete')
-              : pendingAction.kind === 'end'
-                ? t('competition.admin.advance.toEnded')
-                : t('competition.admin.settle')
-          }
+          title={pendingAction.kind === 'delete' ? t('competition.admin.delete') : t('competition.admin.advance.toEnded')}
           message={
             pendingAction.kind === 'delete'
               ? t('competition.admin.deleteConfirm', { name: pendingAction.comp.name, n: pendingAction.comp.participantCount })
-              : pendingAction.kind === 'end'
-                ? t('competition.admin.endConfirm', { name: pendingAction.comp.name })
-                : t('competition.admin.settleConfirm')
+              : t('competition.admin.endConfirm', { name: pendingAction.comp.name })
           }
-          danger={pendingAction.kind !== 'settle'}
+          danger
           onCancel={() => setPendingAction(null)}
           onConfirm={() => {
             const action = pendingAction
             setPendingAction(null)
             if (action.kind === 'delete') void remove(action.comp)
-            else if (action.kind === 'end') void advance(action.comp)
-            else void settle(action.comp)
+            else void advance(action.comp)
+          }}
+        />
+      )}
+
+      {/* 终审：先过完整性检查（§1.14），见 SettleModal。/ Settle goes through the integrity check. */}
+      {pendingAction && pendingAction.kind === 'settle' && (
+        <SettleModal
+          comp={pendingAction.comp}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={(ack) => {
+            const comp = pendingAction.comp
+            setPendingAction(null)
+            void settle(comp, ack)
           }}
         />
       )}
