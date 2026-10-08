@@ -15,8 +15,6 @@ under /api with no user dependency. One identical 404 for every hidden case
 sentinel for misses, global switches checked outside it; the event endpoint
 is always 204.
 """
-from urllib.parse import urlsplit
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -30,7 +28,7 @@ from app.services.deps import get_db
 from app.services.gamification.public_board import (
     UUID_RE, build_public_payload, comp_public_eligible, featured_competition_id,
     normalize_comp_id, public_cache_key, public_switches_on, record_funnel_event)
-from app.services.open_account import resolve_open_account
+from app.services.open_account import is_http_url, resolve_open_account
 from app.services.settings_store import get_gamification_settings
 
 router = APIRouter(prefix="/public/competitions", tags=["public-competitions"])
@@ -90,14 +88,6 @@ def _parse_refs(raw: str | None) -> list[str]:
     return out[:_MAX_REFS]
 
 
-def _is_http_url(url: str | None) -> bool:
-    try:
-        parts = urlsplit(url or "")
-    except ValueError:
-        return False
-    return parts.scheme in ("http", "https") and bool(parts.netloc)
-
-
 @router.get("/{comp_id}/open-account")
 @limiter.shared_limit(settings.RATE_LIMIT_COMPETITION_PUBLIC, scope="comp-public")
 def open_account_redirect(
@@ -126,7 +116,7 @@ def open_account_redirect(
     chosen, url = resolve_open_account(db, comp, _parse_refs(refs))
     # 存进库之前已校验过，这里出网前再兜一次：只往 http(s) 跳。
     # Validated on write already; checked again on the way out — http(s) only.
-    if not _is_http_url(url):
+    if not is_http_url(url):
         raise _not_found()
     record_funnel_event(db, comp.id, "open_account", chosen or "")
     return RedirectResponse(url, status_code=302)

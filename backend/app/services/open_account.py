@@ -14,6 +14,7 @@ Agent-specific open-account links: the single validation gate (https Make Capita
 hosts only — the public page 302s to this, so any other host would be an open
 redirect) and the resolution, which reuses signup attribution's pick_ref.
 """
+import re
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
@@ -31,6 +32,30 @@ MSG_COMP_LINK_OPEN_URL = (
 )
 
 
+# netloc 必须恰好是「主机」或「主机:端口」，主机只许小写 ASCII 字母数字、点与连字符。
+# The netloc must be exactly host or host:port, host limited to [a-z0-9.-].
+_NETLOC_RE = re.compile(r"^([a-z0-9.-]+)(:[0-9]{1,5})?$")
+
+
+def _has_unsafe_chars(url: str) -> bool:
+    """反斜杠（浏览器当 / 处理，urlsplit 不会——于是 urlsplit 看到的主机与浏览器真正去的
+    不是同一个）、百分号（编码过的同类把戏）、空白、控制字符、非 ASCII 一律不收。
+    Backslash (browsers treat it as "/", urlsplit doesn't, so the parsed host differs
+    from where the browser goes), "%", whitespace, control and non-ASCII characters."""
+    return any(
+        ch in "\\%" or ch.isspace() or ord(ch) < 0x20 or ord(ch) >= 0x7F for ch in url
+    )
+
+
+def is_http_url(url: str | None) -> bool:
+    """出网前的兜底：只往带主机的 http(s) 地址跳。/ Last check before redirecting: http(s) with a host."""
+    try:
+        parts = urlsplit(url or "")
+    except ValueError:
+        return False
+    return parts.scheme in ("http", "https") and bool(parts.netloc)
+
+
 def _host_allowed(host: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in ALLOWED_OPEN_ACCOUNT_HOSTS)
 
@@ -44,14 +69,16 @@ def normalize_agent_open_url(raw: str | None) -> str | None:
     if not url:
         return None
     bad = HTTPException(status_code=400, detail=MSG_BAD_AGENT_OPEN_URL)
-    if len(url) > OPEN_ACCOUNT_URL_MAX or any(ch.isspace() for ch in url):
+    if len(url) > OPEN_ACCOUNT_URL_MAX or _has_unsafe_chars(url):
         raise bad
     try:
         parts = urlsplit(url)
-        host = (parts.hostname or "").lower()
     except ValueError:
         raise bad
-    if parts.scheme.lower() != "https" or "@" in parts.netloc or not _host_allowed(host):
+    # userinfo（含 @）自然过不了 _NETLOC_RE；主机按 netloc 原文判，不信 urlsplit 的 hostname。
+    # Userinfo ("@") can't match _NETLOC_RE; the host is taken from the raw netloc, not .hostname.
+    m = _NETLOC_RE.match(parts.netloc.lower())
+    if parts.scheme.lower() != "https" or m is None or not _host_allowed(m.group(1)):
         raise bad
     return url
 

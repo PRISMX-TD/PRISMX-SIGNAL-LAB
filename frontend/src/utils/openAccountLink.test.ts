@@ -8,6 +8,7 @@ describe('isAgentOpenUrl', () => {
     expect(isAgentOpenUrl('https://makecapital.com/open')).toBe(true)
     expect(isAgentOpenUrl('  https://my.makecapital.com/r?ib=1 ')).toBe(true)
     expect(isAgentOpenUrl('https://MY.MakeCapital.com/x')).toBe(true)
+    expect(isAgentOpenUrl('https://makecapital.com:443/open')).toBe(true)
   })
   it('其余一律不收 / rejects everything else', () => {
     for (const bad of [
@@ -23,6 +24,14 @@ describe('isAgentOpenUrl', () => {
       'javascript:alert(1)',
       'https://makecapital.com/a b',
       'https://makecapital.com/' + 'a'.repeat(480),
+      'https://evil.io\\.makecapital.com/',
+      'https://evil.io%5c.makecapital.com/',
+      'https://makecapital.com/?q=%41',
+      'https://mäkecapital.com/',
+      'https://makecapital.com/\tx',
+      'https://makecapital.com/\u0001',
+      'https://makecapital.com:99999999/',
+      'https://@makecapital.com/',
     ]) {
       expect(isAgentOpenUrl(bad), bad).toBe(false)
     }

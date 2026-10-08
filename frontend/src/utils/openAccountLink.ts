@@ -10,21 +10,24 @@
 export const ALLOWED_OPEN_ACCOUNT_HOSTS = ['makecapital.com'] as const
 const MAX_LEN = 500
 
+// 与后端同一套字符规则：反斜杠（浏览器当 / 处理，于是解析出的主机与真正去的不一样）、
+// 百分号、空白、控制字符、非 ASCII 一律不收；netloc 必须恰好是「主机」或「主机:端口」。
+// Same rules as the backend: backslash (browsers treat it as "/", so the parsed host differs
+// from the real one), "%", whitespace, control and non-ASCII chars are refused, and the
+// authority must be exactly host or host:port.
+const UNSAFE_CHARS = /[\\%\s\u0000-\u001f\u007f-\uffff]/
+const AUTHORITY_RE = /^([a-z0-9.-]+)(:[0-9]{1,5})?$/
+
 export function isAgentOpenUrl(raw: string): boolean {
   const url = raw.trim()
-  if (!url || url.length > MAX_LEN || /\s/.test(url)) return false
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    return false
-  }
-  if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return false
-  // URL 会把 user@ 之前的部分拆进 username；空 userinfo（`https://@host`）也算可疑，按原串再查一次。
-  // `https://@host` leaves username empty, so also check the authority in the raw string.
-  const authority = url.slice('https://'.length).split(/[/?#]/)[0]
-  if (authority.includes('@')) return false
-  const host = parsed.hostname.toLowerCase()
+  if (!url || url.length > MAX_LEN || UNSAFE_CHARS.test(url)) return false
+  // 不用 new URL()：它会把反斜杠、百分号编码等「修正」掉，正好掩盖要挡的东西。按原串切。
+  // Not new URL(): it normalises backslashes and encodings away — the very things to catch.
+  const m = /^https:\/\/([^/?#]*)/i.exec(url)
+  if (!m) return false
+  const auth = AUTHORITY_RE.exec(m[1].toLowerCase())
+  if (!auth) return false
+  const host = auth[1]
   return ALLOWED_OPEN_ACCOUNT_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))
 }
 

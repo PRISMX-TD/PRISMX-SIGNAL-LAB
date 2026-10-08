@@ -1,7 +1,8 @@
 // 代理页（/agent）：管理员把邀请链接指派给某个用户后，该用户在这里看到名下每条
 // 链接的点击数、注册人数、近 7 日活跃人数、已连 MT5 人数与状态，以及经它注册的
-// 用户名单（含各人的最近活跃日与 MT5 绑定）。全程只读——后端 /agent/* 没有任何
-// 写端点，名单里也没有手机号与用户 id（见后端 AgentLinkUserOut）。
+// 用户名单（含各人的最近活跃日与 MT5 绑定）。写操作只有两个：调整名下客户的会员
+// （PlanDialog）与设置自己链接的开户链接（OpenAccountLinkEditor）；名单里没有手机号与
+// 用户 id（见后端 AgentLinkUserOut）。
 // 两条口径不在这里算，全部由后端给：活跃 = page_visitor_days 里有行（到天为止，
 // 没有时刻也没有时长），MT5 账户号是后端打好码的。前端只负责显示，别在这里补
 // 任何"推算"——一推算就会和管理看板的数字对不上。
@@ -12,8 +13,9 @@
 // 没有主推比赛时这个按钮不出现）。
 // Agent view (/agent): after an admin assigns invite links to a user, they see
 // each link's clicks, signups and status here, plus the list of users who
-// registered through it. Read-only end to end — /agent/* has no write endpoint
-// and the list carries no phone or user id (see AgentLinkUserOut).
+// registered through it. The only writes are a client's membership (PlanDialog) and
+// the agent's own open-account URL (OpenAccountLinkEditor); the list carries no phone
+// or user id (see AgentLinkUserOut).
 // "Agent" is not a role: the entry is derived from /auth/me's isAgent; role and
 // entitlements are untouched. URLs come from utils/promoLinkUrl. Two copy buttons per
 // link (design §1.2): invite /?ref=code and competition /c?ref=code (fixed; resolves to

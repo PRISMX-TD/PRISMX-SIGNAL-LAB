@@ -80,6 +80,7 @@ def test_allowed_hosts_constant():
     ("  https://makecapital.com/open  ", "https://makecapital.com/open"),
     ("https://my.makecapital.com/r?ib=1", "https://my.makecapital.com/r?ib=1"),
     ("https://MY.MakeCapital.com/x", "https://MY.MakeCapital.com/x"),
+    ("https://makecapital.com:443/open", "https://makecapital.com:443/open"),
 ])
 def test_normalize_accepts(raw, expected):
     assert normalize_agent_open_url(raw) == expected
@@ -98,6 +99,15 @@ def test_normalize_accepts(raw, expected):
     "https://makecapital.com/a b",
     "https://[::1/",                          # urlsplit 抛 ValueError
     "https://makecapital.com/" + "a" * 480,   # > 500
+    "https://evil.io\\.makecapital.com/",    # 浏览器把反斜杠当 /，真实主机是 evil.io
+    "https://evil.io%5c.makecapital.com/",    # 编码过的反斜杠
+    "https://makecapital.com/?q=%41",         # 任何 % 都不收
+    "https://mäkecapital.com/",               # 非 ASCII 主机
+    "https://xn--mkecapital-x5a.com.evil.io/",
+    "https://makecapital.com/\tx",           # 制表符
+    "https://makecapital.com/\x01",        # 控制字符
+    "https://makecapital.com:99999999/",      # 端口超长
+    "https://@makecapital.com/",              # 空 userinfo
 ])
 def test_normalize_rejects(raw):
     with pytest.raises(HTTPException) as exc:
@@ -352,6 +362,14 @@ def test_redirect_endpoint_is_rate_limited():
 
     assert public_competitions.limiter._route_limits.get(
         "app.routers.public_competitions.open_account_redirect")
+
+
+def test_is_http_url():
+    from app.services.open_account import is_http_url
+
+    assert is_http_url("https://broker.example/open") and is_http_url("http://a.b/")
+    for bad in (None, "", "javascript:alert(1)", "https://", "ftp://a.b/", "https://[::1/"):
+        assert not is_http_url(bad), bad
 
 
 def test_parse_refs_bounds():
