@@ -411,7 +411,11 @@ def _pending(db, user):
     return pending_competition(db, user)
 
 
-def _comp_user(db, **comp_kw):
+def _comp_user(db, visible=True, **comp_kw):
+    from app.services.settings_store import invalidate_gamification_cache, save_gamification_settings
+
+    save_gamification_settings(db, {"competitions_visible": visible})
+    db.commit(); invalidate_gamification_cache()
     comp = _mk_comp(db, **comp_kw)
     _mk_link(db, code="comp2345", label="FB广告", competition_id=comp.id)
     user = _mk_user(db, "p@x.io", invite_code="comp2345")
@@ -443,6 +447,12 @@ def test_pending_competition_none_without_competition_attribution(db_session):
 ])
 def test_pending_competition_none_when_not_enterable(db_session, kw):
     _, user = _comp_user(db_session, **kw)
+    assert _pending(db_session, user) is None
+
+
+def test_pending_competition_none_when_competitions_hidden(db_session):
+    """站内比赛开关关着：/competitions 是 403，不能每次登录都被带过去。"""
+    _, user = _comp_user(db_session, visible=False)
     assert _pending(db_session, user) is None
 
 

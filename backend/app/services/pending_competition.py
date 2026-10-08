@@ -14,16 +14,23 @@ device or after the local intent was cleared: invite_code → link.competition_i
 enrollment, registration not closed, not yet entered — disqualified rows count
 as entered). Zero queries without an invite_code, else at most three indexed
 point lookups. Lives in services because both auth and account routers use it.
+Nothing is offered while the in-app competitions switch (competitions_visible)
+is off: /competitions would answer 403 on every sign-in.
 """
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app.models import Competition, CompetitionParticipant, InviteLink, User
+from app.services.settings_store import get_gamification_settings
 
 
 def pending_competition(db: Session, user: User, now: datetime | None = None) -> dict | None:
     if not user.invite_code:
+        return None
+    # 站内比赛开关关着时 /competitions 是 403，不能每次登录都把人带过去。
+    # With the in-app switch off /competitions is 403: don't send people there.
+    if not get_gamification_settings(db).get("competitions_visible"):
         return None
     row = db.query(InviteLink.competition_id).filter(InviteLink.code == user.invite_code).first()
     if row is None or not row[0]:
