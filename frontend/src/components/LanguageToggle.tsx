@@ -39,8 +39,12 @@ export default function LanguageToggle({ placement = 'down' }: { placement?: 'do
   const choose = (next: AppLang) => {
     setOpen(false)
     if (next === lang) return
-    setLanguage(next)
+    // 时间戳与语言一起进云端：别的设备 / 下次冷启动据此判断谁更新
+    // The timestamp goes up with the language so other devices / the next cold start can tell which is newer
+    const at = Date.now()
+    setLanguage(next, at)
     setPref('lang', 'lang', next)
+    setPref('lang', 'at', at)
   }
 
   return (

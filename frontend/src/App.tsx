@@ -2,8 +2,8 @@ import { Suspense, useEffect, useState, type ComponentType, type ReactNode } fro
 import { lazyRetry } from './utils/lazyRetry'
 import { onIdle, shouldSkipPrefetch } from './utils/idle'
 import { getToken } from './api/client'
-import { ensureMoreLocale } from './i18n'
-import { pageFromPath, type PageId } from './seo/meta'
+import { ensureMoreLocale, storedLang, syncLanguage } from './i18n'
+import { langFromPath, pageFromPath, type PageId } from './seo/meta'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
@@ -308,6 +308,24 @@ function RouteErrorBoundary({ children }: { children: ReactNode }) {
   return <ErrorBoundary resetKey={pathname}>{children}</ErrorBoundary>
 }
 
+// 公开页的语言由 URL 决定（/ 中文、/en 英文），只改界面不写偏好；离开公开页进入
+// 应用页面时要换回用户自己选的语言。此前没有这一步：iOS PWA 若从落地页 URL 启动、
+// 或登录态过期绕经首页再登录，界面会停在 URL 那门语言，直到（也许永远不会）有云端
+// 偏好把它改回来。
+// Public pages are URL-driven (/ Chinese, /en English) and only switch the UI without
+// saving a preference; entering the app from one must restore the user's own choice.
+// Nothing did: an iOS PWA launched at a landing URL, or an expired session detouring
+// via the home page, stayed in the URL's language until cloud prefs (if any) changed it.
+function LangRouteSync() {
+  const { pathname } = useLocation()
+  useEffect(() => {
+    if (langFromPath(pathname) !== null) return
+    const lang = storedLang()
+    if (lang) syncLanguage(lang)
+  }, [pathname])
+  return null
+}
+
 export default function App() {
   // 根组件的首次提交 = React 首屏已渲染（子树可能还挂在 Suspense 占位上，但壳已经在屏幕上了）。
   // The root's first commit = React's first screen (the subtree may still be on a
@@ -337,6 +355,7 @@ export default function App() {
               BrowserRouter (needs useLocation), outside Routes (must cover every
               route, including the ones outside Layout). */}
           <MetaPixel />
+          <LangRouteSync />
           {/* 邀请链接归因：捕获任意入口 URL 的 ?ref= 并打点。挂载位置与 MetaPixel
               同理——必须覆盖全部路由。见 components/RefCapture.tsx 的说明。
               Invite-link attribution: captures ?ref= on any entry URL. Same

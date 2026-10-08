@@ -5,7 +5,8 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef, type ReactNode } from 'react'
 import { useAuth } from './auth'
 import { userApi } from '../api/client'
-import i18n, { isAppLang, setLanguage } from '../i18n'
+import { setLanguage, storedLang, storedLangAt } from '../i18n'
+import { cloudLangWins, localLangNewer, readCloudLang } from './cloudLang'
 import { langFromPath } from '../seo/meta'
 import { readJson, writeJson } from '../utils/safeStorage'
 
@@ -22,10 +23,11 @@ const PREFS_CACHE_KEY = 'prismx_prefs'
 // Public pages (incl. the /en prefix) are URL-driven and cloud prefs must not override them,
 // or a signed-in user opening /en/faq flips back to Chinese the moment prefs arrive.
 function applyCloudLanguage(doc: Record<string, unknown>, pathname: string): void {
-  const cloudLang = doc?.lang as Record<string, unknown> | undefined
-  const lang = cloudLang?.lang as string | undefined
   if (langFromPath(pathname) !== null) return
-  if (isAppLang(lang) && lang !== i18n.language) setLanguage(lang)
+  // 只有云端那份比本机新才覆盖（规则见 store/cloudLang.ts）
+  // Only a newer cloud value overrides the device (rule in store/cloudLang.ts)
+  const cloud = readCloudLang(doc)
+  if (cloud && cloudLangWins(cloud, storedLang(), storedLangAt())) setLanguage(cloud.lang, cloud.at)
 }
 
 interface PrefsContextValue {
@@ -63,6 +65,9 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   // namespace A never touches namespace B's save state.
   const saveTimers = useRef<Record<string, number>>({})
   const lastSavedByNs = useRef<Record<string, string>>({})
+  // 还在防抖里没发出去的数据，退到后台时立即发（见下方 flushPending）
+  // Data still waiting out its debounce; sent at once when the app is backgrounded
+  const pendingByNs = useRef<Record<string, Record<string, unknown>>>({})
 
   // 登录后从云端加载偏好 / load prefs from cloud after login
   useEffect(() => {
@@ -113,24 +118,49 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   // Debounced per-namespace PUT: only this namespace's data is sent; the
   // server merges it into the stored document instead of overwriting the
   // whole thing — see client.ts / the backend's account.py.
+  const sendNow = useCallback((ns: string) => {
+    const timers = saveTimers.current
+    if (timers[ns]) window.clearTimeout(timers[ns])
+    delete timers[ns]
+    const nsData = pendingByNs.current[ns]
+    delete pendingByNs.current[ns]
+    if (!nsData) return
+    const json = JSON.stringify(nsData)
+    userApi.putPrefs(ns, nsData)
+      .then(() => { lastSavedByNs.current[ns] = json })
+      .catch(() => { /* 静默失败, 下次改动时重试 / silent fail, retry next change */ })
+  }, [])
+
   const saveToCloud = useCallback((ns: string, nsData: Record<string, unknown>) => {
     const json = JSON.stringify(nsData)
     if (json === lastSavedByNs.current[ns]) return
     const timers = saveTimers.current
     if (timers[ns]) window.clearTimeout(timers[ns])
-    timers[ns] = window.setTimeout(() => {
-      userApi.putPrefs(ns, nsData)
-        .then(() => { lastSavedByNs.current[ns] = json })
-        .catch(() => { /* 静默失败, 下次改动时重试 / silent fail, retry next change */ })
-    }, 500)
-  }, [])
+    pendingByNs.current[ns] = nsData
+    timers[ns] = window.setTimeout(() => sendNow(ns), 500)
+  }, [sendNow])
 
-  // 清理所有命名空间的防抖定时器 / clear every namespace's debounce timer on unmount
+  // 退到后台 / 页面要被收走时，把还在防抖里的保存立刻发出去。iOS PWA 切到后台后
+  // 很快就被冻结或杀掉，500ms 的定时器根本等不到——切完语言马上上划退出，云端就
+  // 留着旧值。
+  // Send any debounced saves right away when the app is backgrounded or the page is
+  // going away. An iOS PWA is frozen or killed soon after backgrounding and a 500ms
+  // timer never gets to fire — switch language, swipe out, and the cloud keeps the
+  // old value.
   useEffect(() => {
+    const flushPending = () => {
+      for (const ns of Object.keys(pendingByNs.current)) sendNow(ns)
+    }
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushPending() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pagehide', flushPending)
     return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pagehide', flushPending)
+      // 清理所有命名空间的防抖定时器 / clear every namespace's debounce timer on unmount
       for (const id of Object.values(saveTimers.current)) window.clearTimeout(id)
     }
-  }, [])
+  }, [sendNow])
 
   const getPref = useCallback(<T,>(ns: string, key: string, fallback: T): T => {
     const nsData = prefs[ns] as Record<string, unknown> | undefined
@@ -170,6 +200,20 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     writeJson(PREFS_CACHE_KEY, next)
     saveToCloud(ns, nextNs)
   }, [saveToCloud])
+
+  // 云端加载完后，本机语言选择若比云端那份新（上次切完语言没来得及/没能存上云端，
+  // 或在公开页上切的），把它补存上去——否则别的设备、以及本机清缓存后，还会拿到旧值。
+  // Once cloud prefs are in, if the device's language choice is newer than the cloud's
+  // (the last save never made it, or it was made on a public page), push it up —
+  // otherwise other devices, and this one after a cache clear, still get the old value.
+  useEffect(() => {
+    if (!isAuthed || !loaded) return
+    const local = storedLang()
+    const localAt = storedLangAt()
+    if (local === null || !localLangNewer(readCloudLang(prefsRef.current), local, localAt)) return
+    setPref('lang', 'lang', local)
+    setPref('lang', 'at', localAt)
+  }, [isAuthed, loaded, setPref])
 
   // 应用其它设备经 WebSocket 推来的最新偏好（PREFS_UPDATE）：后端现在推送的
   // 是合并后的完整文档，直接整份替换本地状态即可，其它设备的改动不会丢。

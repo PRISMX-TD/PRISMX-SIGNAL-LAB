@@ -63,7 +63,7 @@ export const LOCALE_TAG: Record<AppLang, string> = {
   zh: 'zh-CN', en: 'en-GB', ja: 'ja-JP', th: 'th-TH', vi: 'vi-VN',
 }
 
-const stored = canUseDom ? readStorage('prismx_lang') : null
+const stored = canUseDom ? readStorage('prismx_lang') : null // = LANG_KEY
 const saved: AppLang = urlLang || (isAppLang(stored) ? stored : 'zh')
 
 // <html lang> 必须跟着界面语言走，而不是一直停在 index.html 里写死的初值。
@@ -240,10 +240,36 @@ applyHtmlLang(saved)
 // User-initiated switch: load the bundle first, then changeLanguage. The last
 // requested language wins, so a late en bundle can't flip the UI back after the
 // user already toggled to zh again.
+//
+// at = 这次选择发生的时间，和语言一起存（prismx_lang_at）并随云端偏好同步。云端偏好
+// 只有比本机更新时才覆盖本机（见 store/prefs.tsx 的 applyCloudLanguage）。此前云端
+// 无条件覆盖：iOS PWA 切完语言立刻退到后台/被杀，500ms 防抖的云端保存没发出去（或
+// 发失败后不再重试），之后每次冷启动云端那份旧语言都把界面翻回去。
+// at = when this choice was made, stored with the language (prismx_lang_at) and
+// synced with the cloud prefs. Cloud prefs only override the device when newer (see
+// applyCloudLanguage in store/prefs.tsx). They used to override unconditionally: an
+// iOS PWA backgrounded/killed right after switching never sent the debounced save
+// (or it failed and was never retried), and every cold start flipped back.
+const LANG_KEY = 'prismx_lang'
+const LANG_AT_KEY = 'prismx_lang_at'
+
+/** 本机存的界面语言；没有或读不到为 null / the device's stored UI language */
+export function storedLang(): AppLang | null {
+  const s = readStorage(LANG_KEY)
+  return isAppLang(s) ? s : null
+}
+
+/** 本机语言选择的时间戳；旧版本存的没有时间戳，记 0 / when it was chosen, 0 if unknown */
+export function storedLangAt(): number {
+  const n = Number(readStorage(LANG_AT_KEY))
+  return Number.isFinite(n) && n > 0 ? n : 0
+}
+
 let wantedLang: AppLang | null = null
-export function setLanguage(lang: AppLang) {
+export function setLanguage(lang: AppLang, at: number = Date.now()) {
   wantedLang = lang
-  writeStorage('prismx_lang', lang)
+  writeStorage(LANG_KEY, lang)
+  writeStorage(LANG_AT_KEY, String(at))
   void i18n.loadLanguages(lang).then(() => {
     if (wantedLang !== lang) return
     void i18n.changeLanguage(lang)
