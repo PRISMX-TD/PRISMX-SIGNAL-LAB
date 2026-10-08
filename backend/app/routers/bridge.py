@@ -1518,20 +1518,49 @@ class BridgeClosedTradesRequest(BaseModel):
 _known_position_ids = known_position_ids
 
 
+def _live_bridge_logins(db: Session, user_id: str, logins: set[str]) -> set[str]:
+    """本用户名下仍挂着（未软删）桥接行的 login。桥接上报的平仓腿只收这些账号的。
+    Logins this user still has a live (not removed) bridge row for."""
+    if not logins:
+        return set()
+    rows = (
+        db.query(MT5Account.login)
+        .filter(
+            MT5Account.user_id == user_id,
+            MT5Account.source == "bridge",
+            MT5Account.login.in_(list(logins)),
+            not_removed(),
+        )
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
 def _trade_history_db_work(
     db: Session, user_id: str, legs: list["BridgeClosedTrade"]
-) -> tuple[int, int]:
-    """核验 + 落库，返回 (新插入条数, 未通过核验条数)。
+) -> tuple[int, int, int]:
+    """核验 + 落库，返回 (新插入条数, 未通过核验条数, 被拒条数)。
+
+    被拒：这条腿的账号不是本人仍挂着的桥接账号（只经 gateway 绑定、已删除、或根本不是
+    本人的）。这类腿没有任何正当理由走桥接通道上来——而 known_position_ids 会认 gateway
+    订单的仓位号，不挡的话，拿自己的 API Token 就能给直连账户的真实仓位伪造一条
+    verified 的高盈利平仓腿进比赛成绩；还会抢先占住 deal_ticket，让网关稍后写入的真腿
+    只能补空列、永远继承伪造腿的结论。所以直接丢弃，不入库。
 
     与 `_result_db_work` 同样的理由抽成模块级函数：端点把它丢进线程池执行，
     留在闭包里就没法单独测——而这里的判定逻辑正是最需要测的部分。
-    Module-level for the same reason as _result_db_work: the endpoint hands it
-    to a threadpool, and a closure can't be tested on its own.
+    Returns (inserted, unverified, rejected). Legs for logins without a live bridge
+    row are dropped: known_position_ids also matches gateway orders, so they would
+    otherwise let a user forge verified profits onto a direct-connect account and
+    squat the deal_ticket the gateway later writes.
     """
-    known = _known_position_ids(db, user_id, {leg.login for leg in legs})
+    bridged = _live_bridge_logins(db, user_id, {leg.login for leg in legs})
+    accepted = [leg for leg in legs if leg.login in bridged]
+    rejected = len(legs) - len(accepted)
+    known = _known_position_ids(db, user_id, {leg.login for leg in accepted})
     inserted = 0
     unverified = 0
-    for leg in legs:
+    for leg in accepted:
         is_ours = (leg.login, leg.positionTicket) in known
         if not is_ours:
             unverified += 1
@@ -1544,8 +1573,8 @@ def _trade_history_db_work(
     if inserted:
         # 新平仓落库 / 补列：胜率与已平仓明细的 60 秒缓存立刻作废。
         # New / enriched legs: drop the 60s win-rate and closed-trades caches.
-        invalidate_trade_caches(user_id, {leg.login for leg in legs})
-    return inserted, unverified
+        invalidate_trade_caches(user_id, {leg.login for leg in accepted})
+    return inserted, unverified, rejected
 
 
 @router.post("/trade-history")
@@ -1582,9 +1611,16 @@ async def bridge_trade_history(
     if not req.data:
         return {"ok": True, "inserted": 0}
 
-    inserted, unverified = await run_in_threadpool(
+    inserted, unverified, rejected = await run_in_threadpool(
         _trade_history_db_work, db, user.id, req.data
     )
+
+    if rejected:
+        logger.warning(
+            "平仓明细被拒：用户 %s 本次 %d 条中有 %d 条的账号没有本人的桥接绑定 / "
+            "%d of %d reported legs had no live bridge binding",
+            user.id, len(req.data), rejected, rejected, len(req.data),
+        )
 
     # 核不过的记录留一条日志：正式启用"只认 verified"之前，先靠它观察真实世界里
     # 有多少**正当**记录会被误判（回执丢失、历史遗留），避免日后一刀切误伤。
@@ -1604,7 +1640,7 @@ async def bridge_trade_history(
     if inserted:
         await manager.push_to_client(user.id, {"type": "CLOSED_TRADE_NEW"})
 
-    return {"ok": True, "inserted": inserted}
+    return {"ok": True, "inserted": inserted, "rejected": rejected}
 
 
 # ---------- 用户面向：Bridge 版本状态 / user-facing: Bridge version status ----------

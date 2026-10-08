@@ -18,11 +18,17 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.models import ClosedTrade, Order, User
+from app.models import ClosedTrade, MT5Account, Order, User
 from app.routers.bridge import BridgeClosedTrade, _trade_history_db_work
+from app.services.gateway_binding import REASON_USER_REMOVED
 
 
 LOGIN = "500123"
+
+
+def _bridge_row(db, user_id, login=LOGIN, **kw):
+    db.add(MT5Account(user_id=user_id, login=login, server="s", source="bridge", **kw))
+    db.commit()
 
 
 @pytest.fixture()
@@ -31,6 +37,8 @@ def user(db_session):
     db_session.add(u)
     db_session.commit()
     db_session.refresh(u)
+    # 桥接平仓明细只收本人仍挂着桥接行的账号（见 test_leg_for_gateway_only_login_is_rejected）
+    _bridge_row(db_session, u.id)
     return u
 
 
@@ -66,8 +74,8 @@ def _leg(*, position_ticket, deal, profit=100.0, login=LOGIN):
 
 
 def _post(db, user, legs):
-    inserted, unverified = _trade_history_db_work(db, user.id, legs)
-    return {"inserted": inserted, "unverified": unverified}
+    inserted, unverified, rejected = _trade_history_db_work(db, user.id, legs)
+    return {"inserted": inserted, "unverified": unverified, "rejected": rejected}
 
 
 def test_leg_matching_a_platform_order_is_verified(db_session, user):
@@ -106,6 +114,7 @@ def test_gateway_position_id_is_recognised(db_session, user):
 
 def test_other_account_position_is_not_verified(db_session, user):
     """仓位号对得上，但账号对不上——不能算核验通过。"""
+    _bridge_row(db_session, user.id, login="700999")
     _order(db_session, user.id, ticket=77772, login=LOGIN)
 
     _post(db_session, user, [_leg(position_ticket=77772, deal=9004, login="700999")])
@@ -155,3 +164,56 @@ def test_repeat_report_is_still_deduped(db_session, user):
 def test_empty_payload_is_a_noop(db_session, user):
     assert _post(db_session, user, [])["inserted"] == 0
     assert db_session.query(ClosedTrade).count() == 0
+
+
+# ---- 只收本人仍挂着桥接行的账号 / only logins with a live bridge row ---------------
+
+def test_leg_for_gateway_only_login_is_rejected(db_session, user):
+    """账号只经 gateway 绑定：桥接通道报上来的平仓腿一律不收。
+
+    否则拿自己的 API Token 就能给直连账户的真实仓位号伪造一条带任意盈利的平仓腿，
+    而 known_position_ids 认 gateway 订单的 mt5_position，这条腿会被记成 verified，
+    直接进比赛成绩。
+    """
+    db_session.add(MT5Account(user_id=user.id, login="600111", server="", source="gateway"))
+    db_session.commit()
+    _order(db_session, user.id, ticket=1, position=99991, login="600111")
+
+    res = _post(db_session, user, [_leg(position_ticket=99991, deal=9101, login="600111",
+                                        profit=99999.0)])
+
+    assert res == {"inserted": 0, "unverified": 0, "rejected": 1}
+    assert db_session.query(ClosedTrade).count() == 0
+
+
+def test_leg_for_removed_bridge_login_is_rejected(db_session, user):
+    _bridge_row(db_session, user.id, login="700777", revoked_reason=REASON_USER_REMOVED)
+    _order(db_session, user.id, ticket=7001, login="700777")
+
+    res = _post(db_session, user, [_leg(position_ticket=7001, deal=9102, login="700777")])
+
+    assert res["rejected"] == 1 and res["inserted"] == 0
+    assert db_session.query(ClosedTrade).count() == 0
+
+
+def test_other_users_bridge_row_does_not_count(db_session, user):
+    other = User(email="o@example.com", api_token="tok-2")
+    db_session.add(other); db_session.commit()
+    _bridge_row(db_session, other.id, login="700888")
+
+    res = _post(db_session, user, [_leg(position_ticket=1, deal=9103, login="700888")])
+
+    assert res["rejected"] == 1
+    assert db_session.query(ClosedTrade).count() == 0
+
+
+def test_mixed_batch_keeps_bridge_legs_and_drops_others(db_session, user):
+    _order(db_session, user.id, ticket=77779)
+
+    res = _post(db_session, user, [
+        _leg(position_ticket=77779, deal=9104),                    # 桥接账号，真单
+        _leg(position_ticket=77779, deal=9105, login="600222"),    # 没有桥接行
+    ])
+
+    assert res == {"inserted": 1, "unverified": 0, "rejected": 1}
+    assert {r.deal_ticket for r in db_session.query(ClosedTrade).all()} == {9104}
