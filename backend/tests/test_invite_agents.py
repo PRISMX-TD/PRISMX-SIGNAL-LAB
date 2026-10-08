@@ -269,7 +269,7 @@ def test_user_row_carries_last_active_day_and_masked_mt5(db_session):
 
     row = agent_link_users(db_session, agent, link.id).users[0]
     assert row.lastActiveDay == today - timedelta(days=1)
-    assert [a.login for a in row.mt5Accounts] == ["123**678", "777**777"]
+    assert [a.login for a in row.mt5Accounts] == ["*****678", "*****777"]
     first = row.mt5Accounts[0]
     assert first.server == "B-Real 3"
     assert first.accountType == "real"

@@ -1920,7 +1920,7 @@ class AgentLinkOut(BaseModel):
 class AgentMT5AccountOut(BaseModel):
     """代理名单里的一个 MT5 绑定：打码账号号、服务器、实盘/模拟、还连不连得上。
 
-    账号号打码（`identity.mask_account`，123**678）与排行榜同一口径：代理需要能对
+    账号号打码（`identity.mask_account`，*****678）与排行榜同一口径：代理需要能对
     上"这个人到底绑没绑、绑的是不是实盘"，不需要能原样抄走别人的交易账户号。
 
     **资金一概不下发**——余额、净值、杠杆、保证金都不在这里。用户绑定 MT5 是为了

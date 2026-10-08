@@ -113,11 +113,11 @@ def test_profile_shape_masking_and_stats_hidden_by_default(db_session, monkeypat
     assert [e["rank"] for e in week_return["entries"]] == [2, 7]
     # 访客看别人的主页：账户号全部打码，与榜单行同一个口径（identity.mask_account）。
     # A visitor sees every account number masked, exactly as on a board row.
-    assert [e["login"] for e in week_return["entries"]] == ["50**23", "50**99"]
+    assert [e["login"] for e in week_return["entries"]] == ["***123", "***999"]
     month_win = next(b for b in p["boards"] if b["board"] == "win_rate" and b["period"] == "month")
-    assert month_win["entries"] == [{"login": "50**23", "rank": 1, "score": 0.66}]
+    assert month_win["entries"] == [{"login": "***123", "rank": 1, "score": 0.66}]
     assert len(p["boards"]) == 4
-    assert p["competitions"] == [{"id": comp.id, "name": "九月杯", "login": "50**23",
+    assert p["competitions"] == [{"id": comp.id, "name": "九月杯", "login": "***123",
                                   "finalRank": 3, "finalScore": 0.09}]
     assert p["stats"] is None and p["statsPublic"] is False
 

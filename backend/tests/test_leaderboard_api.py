@@ -75,13 +75,13 @@ def test_payload_masking_isself_and_me(db_session):
     assert p["periodKey"] == "2026-W36" and len(p["rows"]) == 4
     r1, r2, _r3, r4 = p["rows"]
     # 昵称原样（开关关着也一样），账户号打码
-    assert r1["displayName"] == "Trader" and r1["login"] == "50**23"
+    assert r1["displayName"] == "Trader" and r1["login"] == "***123"
     assert r1["equippedBadge"] == "midas_touch" and r1["isSelf"] is False
     # 观众自己那行：名字回落打码邮箱前缀，账户号给真号（自己的号自己当然能看）
     assert r2["displayName"] == "s***d" and r2["login"] == "600001" and r2["isSelf"] is True
     assert "userId" not in r1
     # nickname_public 开着也只是原样展示，与上面那行没有区别
-    assert r4["displayName"] == "Falcon" and r4["login"] == "70**01" and r4["isSelf"] is False
+    assert r4["displayName"] == "Falcon" and r4["login"] == "***001" and r4["isSelf"] is False
     assert p["me"] == {"rank": 2, "score": 0.10, "sample": 8, "login": "600001"}
     # a 的 me 取最好名次
     pa = build_leaderboard_payload(db_session, a, "return_pct", "2026-W36")

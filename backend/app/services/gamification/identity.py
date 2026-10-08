@@ -15,32 +15,26 @@ def mask_name(name: str) -> str:
 
 
 def mask_account(login) -> str:
-    """交易账户号的展示口径：中间两位换成 `**`，其余原样（12345678 → 123**678）。
+    """交易账户号的展示口径：只露后 3 位，其余换成 `*`（12345678 → *****678）。
 
-    榜单（常设榜与比赛榜）上昵称照常展示，被藏起来的是账户号这一列——别人
-    的账户号是交易身份，没必要摊开。打码落在后端：payload 里的 login 就是
-    这个值，真实账户号只在「这行就是观众自己」或管理端 reveal 两种情况下
-    才出现。星号固定两个、位置固定取中，不随长度变化——长度本身不是要藏的
-    信息，藏的是中间那两位，`mask_name` 那种「固定 3 星不泄露长度」的做法在
-    这里反而会把「账户号有几位」这个用户自己一眼能核对的信息也抹掉。
+    榜单（常设榜与比赛榜）、公开主页、代理名单上别人的账户号都走这里；真实账户号
+    只在「这行就是观众自己」或管理端 reveal 两种情况下出现。2026-10-08 由「中间两位
+    打码」收紧为只露后 3 位（设计 §1.9）。长度不藏——用户能一眼核对自己的号有几位；
+    短号至少盖住 2 位，露出位数随之减少。
 
-    Display form for a trading account number: the middle two characters become
-    `**`, everything else stays (12345678 → 123**678). Boards (standing and
-    competition) keep showing the nickname; what gets hidden is the account
-    column. The masking lives in the backend — the payload's login carries this
-    value and the real number appears only for the viewer's own row or on the
-    admin reveal path. Exactly two stars, always in the middle — unlike
-    mask_name, the length here is not what's being hidden.
+    Display form for a trading account number: only the last three characters
+    stay, the rest become `*` (12345678 → *****678). Used for other people's
+    numbers on boards, public profiles and agent lists; the real number appears
+    only for the viewer's own row or on the admin reveal path. Tightened from
+    "middle two masked" on 2026-10-08 (design §1.9). Length is not hidden; short
+    numbers still hide at least two characters.
     """
     s = str(login or "").strip()
     n = len(s)
     if n <= 2:
         return "**"
-    # 3 位时中间只有一位，往右吃一位保证始终盖住两个字符。
-    # At 3 characters the middle is a single character; take one more to the
-    # right so exactly two are always covered.
-    start = max(1, (n - 2) // 2)
-    return s[:start] + "**" + s[start + 2:]
+    shown = min(3, n - 2)
+    return "*" * (n - shown) + s[-shown:]
 
 
 def display_name(nickname, email) -> str:

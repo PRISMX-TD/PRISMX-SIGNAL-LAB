@@ -25,17 +25,17 @@ def test_reserved_words():
         assert not nickname_reserved(ok), ok
 
 
-def test_mask_account_covers_exactly_two_middle_chars():
-    """榜单账户号列的口径：中间两位换成 **，长度与首尾保持原样（用户能一眼
-    认出自己的号）。短号也必须盖住两位，绝不能出现「打了码还是全须全尾」。
-    The board's account column: exactly two middle characters become **, the
-    length and the ends stay. Short numbers must still lose two characters."""
-    assert mask_account("12345678") == "123**678"
-    assert mask_account("600402") == "60**02"
-    assert mask_account("7001234") == "70**234"
-    assert mask_account("1234") == "1**4"
-    assert mask_account("123") == "1**"
+def test_mask_account_shows_only_last_three():
+    """站内他人账户号只露后 3 位（设计 §1.9，2026-10-08 收紧）：前面全换成 *，长度不变
+    （长度不是要藏的信息）。短号至少盖住 2 位，绝不能出现「打了码还是全须全尾」。
+    Another entrant's account shows only its last three characters; short numbers
+    still hide at least two."""
+    assert mask_account("12345678") == "*****678"
+    assert mask_account("600402") == "***402"
+    assert mask_account("7001234") == "****234"
+    assert mask_account("1234") == "**34"
+    assert mask_account("123") == "**3"
     assert mask_account("12") == "**"
     assert mask_account("") == "**"
     assert mask_account(None) == "**"
-    assert mask_account(500123) == "50**23"        # 非字符串也得能打码
+    assert mask_account(500123) == "***123"        # 非字符串也得能打码

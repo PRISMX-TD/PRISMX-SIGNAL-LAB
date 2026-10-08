@@ -208,7 +208,7 @@ def test_detail_board_rows_no_user_id_and_isself(db_session):
     # The viewer's own row keeps the real number, another entrant's is masked —
     # competition boards follow the standing ones.
     assert by_rank[1]["isSelf"] is True and by_rank[1]["login"] == "800001"
-    assert by_rank[2]["isSelf"] is False and by_rank[2]["login"] == "80**02"
+    assert by_rank[2]["isSelf"] is False and by_rank[2]["login"] == "***002"
     assert out["board"]["me"]["rank"] == 1
     assert out["board"]["me"]["login"] == "800001"
     # comp:<id> 不是 period_bounds 能解析的自然周/月格式——periodStart/End/
