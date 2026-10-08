@@ -25,6 +25,15 @@ def _disable_rate_limiter(monkeypatch):
     settings.RATE_LIMIT_COMPETITION）。"""
     monkeypatch.setattr(rate_limit.limiter, "enabled", False)
 
+
+@pytest.fixture(autouse=True)
+def _fake_live_funds(monkeypatch):
+    """报名会经网关实时核资（2026-10-08 §1.12）；本文件不测网关，桩成库里的余额 / 净值。
+    Registration reads live funds from the gateway; stub it with the stored values."""
+    import app.services.gamification.competitions as comp_mod
+    monkeypatch.setattr(comp_mod, "read_live_funds", lambda acct: (
+        float(acct.balance), float(acct.equity if acct.equity is not None else acct.balance)))
+
 UTC = timezone.utc
 T0 = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
 ENDS = T0 + timedelta(days=7)

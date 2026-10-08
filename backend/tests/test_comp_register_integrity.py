@@ -127,3 +127,111 @@ def test_same_user_reentry_returns_existing(db_session):
     b = db_session.query(PeriodBaseline).filter_by(
         period_key=comp_period_key(comp.id), user_id=u.id, mt5_login="A").one()
     assert b.baseline == 1500.0
+
+
+# ---- 实时核资（A4）/ live funds check -----------------------------------------
+
+# 在 autouse 桩替换之前就把真函数绑定到本地名字上（from-import 在模块导入时求值）。
+# Bind the real function before the autouse stub replaces the module attribute.
+from app.services.gamification.competitions import read_live_funds as _real_read_live_funds  # noqa: E402
+
+
+def _exact_comp(db, amount=1000.0):
+    c = _comp(db)
+    c.min_baseline_usd = amount
+    c.max_baseline_usd = amount
+    db.commit()
+    return c
+
+
+def test_read_live_funds_reads_gateway(monkeypatch):
+    from app.services import gateway_client as gw
+    from app.services.gateway_client import AccountRsp
+
+    async def fake_get_account(login, timeout=gw.READ_TIMEOUT):
+        assert login == 600123
+        return AccountRsp(ok=True, login=login, name="N", group="g", leverage=100,
+                          balance=1234.5, equity=1230.25, margin=0.0, margin_free=1230.25)
+
+    monkeypatch.setattr(gw, "_main_loop", None)            # 单测里退回 asyncio.run
+    monkeypatch.setattr(gw, "get_account", fake_get_account)
+    assert _real_read_live_funds(MT5Account(login="600123")) == (1234.5, 1230.25)
+
+
+@pytest.mark.parametrize("behaviour", ["none", "raise"])
+def test_read_live_funds_unreachable_is_503(monkeypatch, behaviour):
+    from app.services import gateway_client as gw
+
+    async def fake_get_account(login, timeout=gw.READ_TIMEOUT):
+        if behaviour == "raise":
+            raise RuntimeError("gateway down")
+        return None
+
+    monkeypatch.setattr(gw, "_main_loop", None)
+    monkeypatch.setattr(gw, "get_account", fake_get_account)
+    with pytest.raises(HTTPException) as exc:
+        _real_read_live_funds(MT5Account(login="600123"))
+    assert exc.value.status_code == 503
+    assert "暂时无法核对账户资金" in exc.value.detail
+
+
+def test_register_503_when_live_read_fails(db_session, live_funds):
+    comp = _comp(db_session)
+    u = _user(db_session, "f503@t.co"); _acct(db_session, u, "A")
+    live_funds["A"] = HTTPException(503, comp_mod.MSG_FUNDS_UNAVAILABLE)
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert exc.value.status_code == 503
+    assert db_session.query(CompetitionParticipant).count() == 0
+    assert db_session.query(PeriodBaseline).count() == 0
+
+
+def test_baseline_uses_live_balance_not_stored(db_session, live_funds):
+    comp = _comp(db_session)
+    u = _user(db_session, "lb@t.co"); _acct(db_session, u, "A", balance=1500.0)
+    live_funds["A"] = (1490.0, 1490.0)
+    register_participant(db_session, comp, u, "A", IN_WINDOW)
+    b = db_session.query(PeriodBaseline).filter_by(
+        period_key=comp_period_key(comp.id), user_id=u.id, mt5_login="A").one()
+    assert b.baseline == 1490.0
+
+
+def test_range_gate_uses_live_balance(db_session, live_funds):
+    comp = _comp(db_session)
+    comp.min_baseline_usd = 1000.0; db_session.commit()
+    u = _user(db_session, "rg@t.co"); _acct(db_session, u, "A", balance=1200.0)  # 库里够
+    live_funds["A"] = (900.0, 900.0)                                              # 实时不够
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "最低参赛金额" in exc.value.detail
+
+
+def test_exact_amount_uses_live_balance(db_session, live_funds):
+    comp = _exact_comp(db_session)
+    u = _user(db_session, "ex@t.co"); _acct(db_session, u, "A", balance=1000.0)   # 库里正好
+    live_funds["A"] = (999.0, 999.0)                                              # 实时不对
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert "正好 1000 USD" in exc.value.detail
+
+
+def test_exact_amount_requires_no_open_positions(db_session, live_funds):
+    comp = _exact_comp(db_session)
+    u = _user(db_session, "fl@t.co"); _acct(db_session, u, "A", balance=1000.0)
+    live_funds["A"] = (1000.0, 1012.3)                    # 有持仓：净值 ≠ 余额
+    with pytest.raises(HTTPException) as exc:
+        register_participant(db_session, comp, u, "A", IN_WINDOW)
+    assert exc.value.status_code == 400
+    assert "无持仓" in exc.value.detail
+
+    live_funds["A"] = (1000.004, 1000.0)                  # 容差内 / within tolerance
+    assert register_participant(db_session, comp, u, "A", IN_WINDOW).mt5_login == "A"
+
+
+def test_reentry_does_not_hit_gateway(db_session, live_funds):
+    comp = _comp(db_session)
+    u = _user(db_session, "rh@t.co"); _acct(db_session, u, "A")
+    p1 = register_participant(db_session, comp, u, "A", IN_WINDOW)
+    live_funds["A"] = HTTPException(503, "should not be called")
+    assert register_participant(db_session, comp, u, "A", IN_WINDOW).id == p1.id

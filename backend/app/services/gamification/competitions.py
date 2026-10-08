@@ -19,7 +19,7 @@ from app.models import (
 from .badges import award_badge
 from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows
+from .boards import REAL, BASELINE_EPS, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows
 
 
 TRACKS = ("real", "demo")
@@ -586,6 +586,31 @@ def snapshot_competitions(db, now: datetime) -> dict:
     return {"comps": len(comps), "rows": total_rows}
 
 
+# 报名时经网关实时读一次资金（设计 2026-10-08 §1.12）。库里的 balance 是轮询写的，
+# 最长有一个轮询周期的陈旧——精确金额赛差一分钱就是门槛内外之别，所以报名这一下
+# 必须读实时值；读不到宁可 503 让用户重试，也绝不回落到旧值。
+# Live funds read at signup (§1.12): the stored balance lags by up to a poll, which
+# matters for exact-amount competitions. Unreachable → 503, never the stale value.
+LIVE_FUNDS_TIMEOUT = 20.0
+MSG_FUNDS_UNAVAILABLE = ("暂时无法核对账户资金，请稍后再试 / "
+                         "Unable to verify account funds right now, please try again later")
+
+
+def read_live_funds(acct) -> tuple[float, float]:
+    """经网关实时读 (balance, equity)。register 端点是同步 def（跑在线程池里），所以走
+    run_on_main_loop 把协程排进主循环——与 routers/gateway.refresh_gateway_account 同一种调法。
+    Reads (balance, equity) live from the gateway via run_on_main_loop, since the
+    register endpoint is a sync def running in the threadpool."""
+    from app.services import gateway_client as gw
+    try:
+        rsp = gw.run_on_main_loop(gw.get_account(int(acct.login)), timeout=LIVE_FUNDS_TIMEOUT)
+    except Exception:  # noqa: BLE001 — 超时 / 连接错误一律当「读不到」/ any failure = unreadable
+        rsp = None
+    if rsp is None:
+        raise HTTPException(status_code=503, detail=MSG_FUNDS_UNAVAILABLE)
+    return float(rsp.balance or 0.0), float(rsp.equity or 0.0)
+
+
 MSG_GATEWAY_ONLY = ("比赛仅接受直连（账号密码绑定）的账户，请先在绑定页直连该账户 / "
                     "Competitions only accept direct-connect accounts; "
                     "bind this account with its password first")
@@ -670,19 +695,27 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
             detail=(f"每人每场最多报名 {cap} 个账户 / "
                     f"At most {cap} account(s) per person per competition"))
 
-    # 本金门槛在报名时就挡（与计分同一个 comp_gates，两边不分叉）。上下限相等 = 只收
-    # 这一个金额，提示也换成那句话。
-    # Capital gates at signup, same comp_gates as scoring; equal bounds = exact amount.
+    # 本金门槛在报名时就挡（与计分同一个 comp_gates，两边不分叉），用的是网关实时读到的
+    # 资金。上下限相等 = 只收这一个金额，且要求无持仓（净值与余额差在 BASELINE_EPS 内）——
+    # 否则带着浮盈 / 浮亏报名，报名本金（余额）就不是这个人真实的起点。
+    # Capital gates at signup on the live funds, same comp_gates as scoring. Equal
+    # bounds = that exact amount *and* flat (equity within BASELINE_EPS of balance).
     from app.services.settings_store import get_gamification_settings
     gates = comp_gates(comp, get_gamification_settings(db))
     min_baseline, max_baseline = gates["min_baseline_usd"], gates["max_baseline_usd"]
-    balance = float(acct.balance)
-    if max_baseline is not None and min_baseline == max_baseline and not baseline_in_range(
-            balance, min_baseline, max_baseline):
-        raise HTTPException(
-            status_code=400,
-            detail=(f"本场只接受资金正好 {max_baseline:g} USD 的账户 / "
-                    f"This competition only accepts accounts with exactly {max_baseline:g} USD"))
+    balance, equity = read_live_funds(acct)
+    if max_baseline is not None and min_baseline == max_baseline:
+        if not baseline_in_range(balance, min_baseline, max_baseline):
+            raise HTTPException(
+                status_code=400,
+                detail=(f"本场只接受资金正好 {max_baseline:g} USD 的账户 / "
+                        f"This competition only accepts accounts with exactly {max_baseline:g} USD"))
+        if abs(equity - balance) > BASELINE_EPS:
+            raise HTTPException(
+                status_code=400,
+                detail=(f"本场要求报名时无持仓且资金正好 {max_baseline:g} USD，请先平仓 / "
+                        f"This competition requires exactly {max_baseline:g} USD and no open "
+                        f"positions at signup; close all positions first"))
     if min_baseline and not baseline_in_range(balance, min_baseline, None):
         raise HTTPException(
             status_code=400,
