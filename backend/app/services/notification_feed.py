@@ -33,6 +33,13 @@ KIND_TICKET_NEW = "ticket_new"
 # An agent changed a customer's plan; admins only. The title lives in the frontend's
 # `notifFeed.agent_plan_change`; the text body carries who/whom/what.
 KIND_AGENT_PLAN_CHANGE = "agent_plan_change"
+# 一场已有报名的比赛首次打开公开页（设计 §1.8）：公开前报名的人 public_name 为 NULL，
+# 在公开榜上是匿名的；通知他们可以去站内比赛页选择「在公开页显示我的昵称」。
+# 标题文案在前端 i18n 的 `notifFeed.comp_public_name`（5 语）。
+# A competition with entrants went public (design §1.8): people who entered
+# earlier are anonymous there; tell them they can opt in from the competition
+# page. Title copy: frontend `notifFeed.comp_public_name`.
+KIND_COMP_PUBLIC_NAME = "comp_public_name"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再
 # 兜一道，避免将来别的来源塞进超长字符串。

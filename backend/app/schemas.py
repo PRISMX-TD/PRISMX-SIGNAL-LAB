@@ -402,6 +402,10 @@ class CompetitionCreateIn(BaseModel):
     minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     maxBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTrades: int | None = None
+    # 公开推广（设计 §1.7）：语义校验（仅模拟赛 + 报名制 + https 开户链接）在路由层。
+    # Public promotion (design §1.7); semantic checks live in the router.
+    publicView: bool | None = None
+    openAccountUrl: str | None = Field(default=None, max_length=500)
 
 
 class CompetitionPatchIn(BaseModel):
@@ -427,14 +431,22 @@ class CompetitionPatchIn(BaseModel):
     minBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     maxBaselineUsd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     minTrades: int | None = None
+    # 公开推广（设计 §1.7）：语义校验（仅模拟赛 + 报名制 + https 开户链接）在路由层。
+    # Public promotion (design §1.7); semantic checks live in the router.
+    publicView: bool | None = None
+    openAccountUrl: str | None = Field(default=None, max_length=500)
 
 
 class CompetitionParticipantPatchIn(BaseModel):
-    """取消/恢复参赛资格（管理端）。disqualifyReason 仅在 disqualified=True 时
-    落库，恢复资格时路由层清空，不靠前端主动传 null。"""
+    """参赛者管理（管理端）：取消/恢复资格，或隐藏其在公开榜上的名字。两者都可选、
+    只改传了的（model_fields_set）。disqualifyReason 仅在 disqualified=True 时落库，
+    恢复资格时路由层清空，不靠前端主动传 null。
+    Participant admin: disqualify/requalify and/or hide the name on the public
+    board; only sent fields change."""
 
-    disqualified: bool
+    disqualified: bool | None = None
     disqualifyReason: str | None = None
+    nameHidden: bool | None = None
 
 
 class CompetitionRegisterIn(BaseModel):

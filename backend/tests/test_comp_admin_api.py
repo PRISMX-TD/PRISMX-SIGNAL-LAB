@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -19,6 +20,8 @@ T0 = datetime(2026, 9, 1, 0, 0, tzinfo=UTC)
 ENDS = T0 + timedelta(days=7)
 REG_OPENS = T0 - timedelta(days=3)
 REG_CLOSES = T0 - timedelta(hours=1)
+# 审计需要操作者 id；不需要真的建一行用户（SQLite 测试库不强制外键）。
+ADMIN = SimpleNamespace(id="admin-under-test")
 
 
 def _admin(db, email="admin@t.co"):
@@ -88,7 +91,7 @@ def test_list_returns_all_statuses_newest_first_with_participant_count(db_sessio
 # ---- POST "" ------------------------------------------------------------------
 
 def test_create_success_defaults_to_draft(db_session):
-    out = admin_create_competition(_create_body(), db=db_session)
+    out = admin_create_competition(_create_body(), db=db_session, admin=ADMIN)
     assert out["status"] == "draft"
     assert out["name"] == "New Comp"
     assert out["participantCount"] == 0
@@ -96,19 +99,19 @@ def test_create_success_defaults_to_draft(db_session):
 
 def test_create_rejects_unknown_metric(db_session):
     with pytest.raises(HTTPException) as exc:
-        admin_create_competition(_create_body(metric="bogus"), db=db_session)
+        admin_create_competition(_create_body(metric="bogus"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
 
 def test_create_rejects_unknown_enrollment(db_session):
     with pytest.raises(HTTPException) as exc:
-        admin_create_competition(_create_body(enrollment="bogus"), db=db_session)
+        admin_create_competition(_create_body(enrollment="bogus"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
 
 def test_create_rejects_start_after_end(db_session):
     with pytest.raises(HTTPException) as exc:
-        admin_create_competition(_create_body(startsAt=ENDS, endsAt=T0), db=db_session)
+        admin_create_competition(_create_body(startsAt=ENDS, endsAt=T0), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert "开赛时间需早于结束时间" in exc.value.detail
 
@@ -116,19 +119,19 @@ def test_create_rejects_start_after_end(db_session):
 def test_create_signup_requires_registration_window(db_session):
     with pytest.raises(HTTPException) as exc:
         admin_create_competition(
-            _create_body(enrollment="signup", regOpensAt=None, regClosesAt=None), db=db_session)
+            _create_body(enrollment="signup", regOpensAt=None, regClosesAt=None), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert "报名窗口" in exc.value.detail
 
     with pytest.raises(HTTPException):
         admin_create_competition(
             _create_body(enrollment="signup", regOpensAt=REG_CLOSES, regClosesAt=REG_OPENS),
-            db=db_session)
+            db=db_session, admin=ADMIN)
 
 
 def test_create_auto_enrollment_does_not_require_window(db_session):
     out = admin_create_competition(
-        _create_body(enrollment="auto", regOpensAt=None, regClosesAt=None), db=db_session)
+        _create_body(enrollment="auto", regOpensAt=None, regClosesAt=None), db=db_session, admin=ADMIN)
     assert out["enrollment"] == "auto"
 
 
@@ -137,7 +140,7 @@ def test_create_auto_enrollment_does_not_require_window(db_session):
 def test_patch_draft_can_edit_all_fields(db_session):
     comp = _comp(db_session, status="draft")
     out = admin_patch_competition(
-        comp.id, CompetitionPatchIn(name="Renamed", metric="win_rate"), db=db_session)
+        comp.id, CompetitionPatchIn(name="Renamed", metric="win_rate"), db=db_session, admin=ADMIN)
     assert out["name"] == "Renamed"
     assert out["metric"] == "win_rate"
 
@@ -145,7 +148,7 @@ def test_patch_draft_can_edit_all_fields(db_session):
 def test_patch_draft_reruns_creation_style_validation(db_session):
     comp = _comp(db_session, status="draft")
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition(comp.id, CompetitionPatchIn(metric="bogus"), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(metric="bogus"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
 
@@ -153,7 +156,7 @@ def test_patch_draft_signup_window_violation_rejected(db_session):
     comp = _comp(db_session, status="draft", enrollment="signup")
     with pytest.raises(HTTPException) as exc:
         admin_patch_competition(
-            comp.id, CompetitionPatchIn(regOpensAt=None, regClosesAt=None), db=db_session)
+            comp.id, CompetitionPatchIn(regOpensAt=None, regClosesAt=None), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert "报名窗口" in exc.value.detail
 
@@ -163,7 +166,7 @@ def test_patch_draft_signup_window_violation_rejected(db_session):
 def test_patch_non_draft_allows_copy_and_window_fields(db_session):
     comp = _comp(db_session, status="upcoming")
     out = admin_patch_competition(
-        comp.id, CompetitionPatchIn(description="new desc", prizeNote="$100"), db=db_session)
+        comp.id, CompetitionPatchIn(description="new desc", prizeNote="$100"), db=db_session, admin=ADMIN)
     assert out["description"] == "new desc"
     assert out["prizeNote"] == "$100"
 
@@ -171,7 +174,7 @@ def test_patch_non_draft_allows_copy_and_window_fields(db_session):
 def test_patch_non_draft_rejects_metric_change(db_session):
     comp = _comp(db_session, status="upcoming")
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition(comp.id, CompetitionPatchIn(metric="win_rate"), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(metric="win_rate"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert "仅可修改文案与报名窗口" in exc.value.detail
 
@@ -183,7 +186,7 @@ def test_patch_non_draft_window_invalid_order_rejected(db_session):
     with pytest.raises(HTTPException) as exc:
         admin_patch_competition(
             comp.id, CompetitionPatchIn(regOpensAt=REG_CLOSES, regClosesAt=REG_OPENS),
-            db=db_session)
+            db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert "报名窗口" in exc.value.detail
 
@@ -192,7 +195,7 @@ def test_patch_non_draft_rejects_starts_ends_change(db_session):
     comp = _comp(db_session, status="running")
     with pytest.raises(HTTPException) as exc:
         admin_patch_competition(
-            comp.id, CompetitionPatchIn(startsAt=T0 + timedelta(days=1)), db=db_session)
+            comp.id, CompetitionPatchIn(startsAt=T0 + timedelta(days=1)), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
 
@@ -200,18 +203,18 @@ def test_patch_non_draft_rejects_starts_ends_change(db_session):
 
 def test_patch_status_advances_one_step_at_a_time(db_session):
     comp = _comp(db_session, status="draft")
-    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="upcoming"), db=db_session)
+    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="upcoming"), db=db_session, admin=ADMIN)
     assert out["status"] == "upcoming"
-    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session)
+    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session, admin=ADMIN)
     assert out["status"] == "running"
-    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session)
+    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session, admin=ADMIN)
     assert out["status"] == "ended"
 
 
 def test_patch_status_rejects_skip(db_session):
     comp = _comp(db_session, status="draft")
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert "状态只能按顺序推进" in exc.value.detail
     assert comp.status == "draft"
@@ -220,14 +223,14 @@ def test_patch_status_rejects_skip(db_session):
 def test_patch_status_rejects_backward(db_session):
     comp = _comp(db_session, status="running")
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition(comp.id, CompetitionPatchIn(status="upcoming"), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(status="upcoming"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
 
 def test_patch_status_rejects_direct_settled(db_session):
     comp = _comp(db_session, status="ended")
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition(comp.id, CompetitionPatchIn(status="settled"), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(status="settled"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
     assert comp.status == "ended"
 
@@ -235,7 +238,7 @@ def test_patch_status_rejects_direct_settled(db_session):
 def test_patch_status_rejects_same_status_noop(db_session):
     comp = _comp(db_session, status="draft")
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition(comp.id, CompetitionPatchIn(status="draft"), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(status="draft"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
 
@@ -246,7 +249,7 @@ def test_patch_advance_to_running_auto_enrollment_triggers_auto_enroll(db_sessio
     u1 = _user(db_session, "ae1@t.co"); _acct(db_session, u1, "A", balance=2000.0)
     u2 = _user(db_session, "ae2@t.co"); _acct(db_session, u2, "B", balance=3000.0)
 
-    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session)
+    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session, admin=ADMIN)
 
     assert out["status"] == "running"
     assert out["autoEnrolled"] == 2
@@ -256,7 +259,7 @@ def test_patch_advance_to_running_auto_enrollment_triggers_auto_enroll(db_sessio
 
 def test_patch_advance_to_running_signup_competition_no_auto_enroll_key(db_session):
     comp = _comp(db_session, status="upcoming", enrollment="signup")
-    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session)
+    out = admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session, admin=ADMIN)
     assert out["status"] == "running"
     assert "autoEnrolled" not in out
 
@@ -266,13 +269,13 @@ def test_patch_advance_to_running_is_not_refired_on_later_patches(db_session):
     后续的文案 PATCH 不该再次批量拉入参赛。"""
     comp = _comp(db_session, status="upcoming", enrollment="auto")
     u1 = _user(db_session, "ae3@t.co"); _acct(db_session, u1, "A", balance=1000.0)
-    admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session)
+    admin_patch_competition(comp.id, CompetitionPatchIn(status="running"), db=db_session, admin=ADMIN)
     assert db_session.query(CompetitionParticipant).filter_by(
         competition_id=comp.id).count() == 1
 
     u2 = _user(db_session, "ae4@t.co"); _acct(db_session, u2, "B", balance=1000.0)
     out = admin_patch_competition(
-        comp.id, CompetitionPatchIn(description="tweak"), db=db_session)
+        comp.id, CompetitionPatchIn(description="tweak"), db=db_session, admin=ADMIN)
 
     assert "autoEnrolled" not in out
     # 新账户没被本次文案 PATCH 拉入
@@ -285,7 +288,7 @@ def test_patch_combined_status_and_allowed_field_both_applied(db_session):
     prizeNote 在非 draft 白名单内——两处改动都该生效。"""
     comp = _comp(db_session, status="upcoming", enrollment="signup")
     out = admin_patch_competition(
-        comp.id, CompetitionPatchIn(status="running", prizeNote="x"), db=db_session)
+        comp.id, CompetitionPatchIn(status="running", prizeNote="x"), db=db_session, admin=ADMIN)
     assert out["status"] == "running"
     assert out["prizeNote"] == "x"
     db_session.refresh(comp)
@@ -298,7 +301,7 @@ def test_patch_combined_status_and_disallowed_field_rejects_without_mutating(db_
     comp = _comp(db_session, status="upcoming", enrollment="signup")
     with pytest.raises(HTTPException) as exc:
         admin_patch_competition(
-            comp.id, CompetitionPatchIn(status="running", metric="win_rate"), db=db_session)
+            comp.id, CompetitionPatchIn(status="running", metric="win_rate"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 400
 
     db_session.expire(comp)
@@ -309,7 +312,7 @@ def test_patch_combined_status_and_disallowed_field_rejects_without_mutating(db_
 
 def test_patch_404_when_missing(db_session):
     with pytest.raises(HTTPException) as exc:
-        admin_patch_competition("nope", CompetitionPatchIn(name="x"), db=db_session)
+        admin_patch_competition("nope", CompetitionPatchIn(name="x"), db=db_session, admin=ADMIN)
     assert exc.value.status_code == 404
 
 
@@ -592,7 +595,7 @@ def test_delete_competition_removes_participants_baselines_snapshots(db_session)
                                        mt5_login="A", rank=1, score=0.1, sample=5))
     db_session.commit()
 
-    out = admin_delete_competition(comp.id, db=db_session)
+    out = admin_delete_competition(comp.id, db=db_session, admin=ADMIN)
     assert out["deleted"] == comp.id and out["participants"] == 1
     assert db_session.query(Competition).filter(Competition.id == comp.id).first() is None
     assert db_session.query(CompetitionParticipant).filter(
@@ -611,7 +614,7 @@ def test_delete_allowed_in_any_status(db_session, status):
     u = _user(db_session, f"del_{status}@t.co")
     _participant(db_session, comp, u, "A")
 
-    out = admin_delete_competition(comp.id, db=db_session)
+    out = admin_delete_competition(comp.id, db=db_session, admin=ADMIN)
     assert out["participants"] == 1
     assert db_session.query(Competition).filter(Competition.id == comp.id).first() is None
     assert db_session.query(CompetitionParticipant).filter(
@@ -621,7 +624,7 @@ def test_delete_allowed_in_any_status(db_session, status):
 def test_delete_draft_allowed(db_session):
     from app.routers.competitions import admin_delete_competition
     comp = _comp(db_session, status="draft")
-    out = admin_delete_competition(comp.id, db=db_session)
+    out = admin_delete_competition(comp.id, db=db_session, admin=ADMIN)
     assert out == {"deleted": comp.id, "participants": 0}
 
 
@@ -636,28 +639,28 @@ def test_create_with_track_and_gates(db_session):
     """新建时可指定赛道与本场门槛；不传时赛道默认 real、门槛留空（跟随全局）。"""
     out = admin_create_competition(
         _create_body(track="demo", minBaselineUsd=100.0, minTrades=3),
-        db=db_session)
+        db=db_session, admin=ADMIN)
     assert out["track"] == "demo" and out["minBaselineUsd"] == 100.0 and out["minTrades"] == 3
-    plain = admin_create_competition(_create_body(name="Plain"), db=db_session)
+    plain = admin_create_competition(_create_body(name="Plain"), db=db_session, admin=ADMIN)
     assert plain["track"] == "real" and plain["minBaselineUsd"] is None and plain["minTrades"] is None
 
 
 def test_create_rejects_bad_track_and_gates(db_session):
     for bad in (dict(track="paper"), dict(minBaselineUsd=0), dict(minTrades=0)):
         with pytest.raises(HTTPException):
-            admin_create_competition(_create_body(**bad), db=db_session)
+            admin_create_competition(_create_body(**bad), db=db_session, admin=ADMIN)
 
 
 def test_create_with_max_baseline_and_range_check(db_session):
     """上限单独设、上下限相等都合法；下限高于上限、上限 ≤ 0 拒绝。"""
-    only_max = admin_create_competition(_create_body(maxBaselineUsd=5000.0), db=db_session)
+    only_max = admin_create_competition(_create_body(maxBaselineUsd=5000.0), db=db_session, admin=ADMIN)
     assert only_max["maxBaselineUsd"] == 5000.0 and only_max["minBaselineUsd"] is None
     exact = admin_create_competition(
-        _create_body(name="Exact", minBaselineUsd=1000.0, maxBaselineUsd=1000.0), db=db_session)
+        _create_body(name="Exact", minBaselineUsd=1000.0, maxBaselineUsd=1000.0), db=db_session, admin=ADMIN)
     assert exact["minBaselineUsd"] == exact["maxBaselineUsd"] == 1000.0
     for bad in (dict(minBaselineUsd=2000.0, maxBaselineUsd=1000.0), dict(maxBaselineUsd=0)):
         with pytest.raises(HTTPException) as exc:
-            admin_create_competition(_create_body(**bad), db=db_session)
+            admin_create_competition(_create_body(**bad), db=db_session, admin=ADMIN)
         assert exc.value.status_code == 400
 
 
@@ -666,11 +669,11 @@ def test_patch_max_baseline_checks_against_stored_min(db_session):
     comp = _comp(db_session, status="draft")
     comp.min_baseline_usd = 1000.0; db_session.commit()
     with pytest.raises(HTTPException):
-        admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=500.0), db=db_session)
-    admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=1500.0), db=db_session)
+        admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=500.0), db=db_session, admin=ADMIN)
+    admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=1500.0), db=db_session, admin=ADMIN)
     db_session.refresh(comp)
     assert comp.max_baseline_usd == 1500.0
-    admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=None), db=db_session)
+    admin_patch_competition(comp.id, CompetitionPatchIn(maxBaselineUsd=None), db=db_session, admin=ADMIN)
     db_session.refresh(comp)
     assert comp.max_baseline_usd is None
 
@@ -679,7 +682,7 @@ def test_patch_gates_null_means_follow_global(db_session):
     """显式传 null = 改回跟随全局，与没传（不动）语义不同。"""
     comp = _comp(db_session, status="draft")
     comp.min_trades = 7; db_session.commit()
-    admin_patch_competition(comp.id, CompetitionPatchIn(minTrades=None), db=db_session)
+    admin_patch_competition(comp.id, CompetitionPatchIn(minTrades=None), db=db_session, admin=ADMIN)
     db_session.refresh(comp)
     assert comp.min_trades is None
 
@@ -691,7 +694,7 @@ def test_patch_manual_early_end_pulls_ends_at_to_now(db_session):
     now = datetime.now(UTC)
     comp = _comp(db_session, status="running", starts_at=now - timedelta(days=1),
                  ends_at=now + timedelta(days=5))
-    admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session)
+    admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session, admin=ADMIN)
     db_session.refresh(comp)
     ends = comp.ends_at if comp.ends_at.tzinfo else comp.ends_at.replace(tzinfo=UTC)
     assert now <= ends <= datetime.now(UTC)
@@ -700,7 +703,7 @@ def test_patch_manual_early_end_pulls_ends_at_to_now(db_session):
 def test_patch_end_after_ends_at_keeps_ends_at(db_session):
     """已过 ends_at 再推到 ended：ends_at 不动。Past ends_at → left unchanged."""
     comp = _comp(db_session, status="running")
-    admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session)
+    admin_patch_competition(comp.id, CompetitionPatchIn(status="ended"), db=db_session, admin=ADMIN)
     db_session.refresh(comp)
     ends = comp.ends_at if comp.ends_at.tzinfo else comp.ends_at.replace(tzinfo=UTC)
     assert ends == ENDS

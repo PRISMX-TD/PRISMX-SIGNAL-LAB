@@ -16,7 +16,9 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.models import (
-    Competition, CompetitionParticipant, LeaderboardSnapshot, PeriodBaseline, User)
+    Competition, CompetitionParticipant, LeaderboardSnapshot, PeriodBaseline, User,
+    UserNotification)
+from app.services import shared_cache
 from app.services.audit import log_change as _log_change
 from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
@@ -28,6 +30,9 @@ from app.services.gamification.badges import equipped_badge_tiers
 from app.services.gamification.competitions import (
     TRACKS, auto_enroll, comp_gates, comp_period_key, competition_integrity,
     participant_details, refresh_comp_board, register_participant, settle_competition)
+from app.services.gamification.public_board import public_cache_key
+from app.services.notification_feed import (
+    KIND_COMP_PUBLIC_NAME, create_notification, notify_ws)
 from app.services.settings_store import get_gamification_settings
 from app.utils.timeutil import aware as _aware
 
@@ -223,7 +228,8 @@ _ENROLLMENTS = ("signup", "auto")
 _ADVANCE = {"draft": "upcoming", "upcoming": "running", "running": "ended"}
 # 非 draft 状态下 PATCH 仅允许改这些「文案 + 报名窗口」字段；其余出现在
 # model_fields_set 里一律 400。
-_NON_DRAFT_ALLOWED = {"name", "description", "prizeNote", "regOpensAt", "regClosesAt"}
+_NON_DRAFT_ALLOWED = {"name", "description", "prizeNote", "regOpensAt", "regClosesAt",
+                      "publicView", "openAccountUrl"}
 
 MSG_START_BEFORE_END = "开赛时间需早于结束时间 / Start must precede end"
 MSG_SIGNUP_WINDOW = "报名制比赛需设置报名窗口 / Signup competitions require a registration window"
@@ -237,6 +243,10 @@ MSG_BAD_MIN_TRADES = "最低笔数需至少为 1 / Minimum trade count must be a
 MSG_NON_DRAFT_FIELDS = "比赛开始后仅可修改文案与报名窗口 / Only copy and registration window are editable after draft"
 MSG_STATUS_SEQUENCE = "状态只能按顺序推进 / Status can only advance sequentially"
 MSG_SETTLED_FROZEN = "已终审的比赛不可再改参赛状态 / Settled competitions are frozen"
+MSG_PUBLIC_DEMO_SIGNUP = "仅模拟赛且报名制的比赛可公开 / Only demo, sign-up competitions can be public"
+MSG_PUBLIC_NEEDS_URL = "公开比赛需填写本场开户链接 / A public competition needs an open-account URL"
+MSG_BAD_OPEN_URL = "开户链接需为 https 地址 / Open-account URL must start with https://"
+MSG_PARTICIPANT_NOT_FOUND = "参赛条目不存在 / Participant not found"
 
 
 def _validate_core(metric: str, enrollment: str,
@@ -281,6 +291,77 @@ def _validate_reg_window(enrollment: str, reg_opens_at: datetime | None,
         raise HTTPException(400, MSG_SIGNUP_WINDOW)
 
 
+def _normalize_open_url(url: str | None) -> str | None:
+    """开户链接：去首尾空白，空串当 None；只收 https、不许含空白。
+    Open-account URL: trimmed, empty means None; https only, no whitespace."""
+    url = (url or "").strip()
+    if not url:
+        return None
+    if not url.lower().startswith("https://") or any(ch.isspace() for ch in url):
+        raise HTTPException(400, MSG_BAD_OPEN_URL)
+    return url
+
+
+def _validate_public(public_view: bool, track: str | None, enrollment: str | None,
+                     open_url: str | None) -> None:
+    """§1.7：公开页只允许「模拟赛 + 报名制」，且必须填了本场 https 开户链接。
+    §1.7: only demo, sign-up competitions with an https open-account URL go public."""
+    if not public_view:
+        return
+    if track != "demo" or enrollment != "signup":
+        raise HTTPException(400, MSG_PUBLIC_DEMO_SIGNUP)
+    if not open_url:
+        raise HTTPException(400, MSG_PUBLIC_NEEDS_URL)
+
+
+# 审计用的 API 字段 <-> 模型属性；patch 前后各取一份，逐项 log_change（值没变自动跳过）。
+# API field <-> model attribute for the audit; snapshot before and after a patch and
+# log each (log_change skips unchanged values).
+_AUDIT_FIELDS = (
+    ("name", "name"), ("description", "description"), ("metric", "metric"),
+    ("enrollment", "enrollment"), ("track", "track"), ("status", "status"),
+    ("regOpensAt", "reg_opens_at"), ("regClosesAt", "reg_closes_at"),
+    ("startsAt", "starts_at"), ("endsAt", "ends_at"), ("prizeNote", "prize_note"),
+    ("minBaselineUsd", "min_baseline_usd"), ("maxBaselineUsd", "max_baseline_usd"),
+    ("minTrades", "min_trades"), ("publicView", "public_view"),
+    ("openAccountUrl", "open_account_url"),
+)
+
+
+def _audit_state(comp: Competition) -> dict:
+    state = {field: getattr(comp, attr) for field, attr in _AUDIT_FIELDS}
+    state["publicView"] = bool(state["publicView"])   # NULL 与 False 同义 / NULL means False
+    return state
+
+
+def _notify_public_flip(db: Session, comp: Competition) -> list[str]:
+    """比赛 public_view 由关变开：给尚未表态（public_name 为 NULL）的参赛者各发一条站内通知，
+    同一场比赛每人只发一次（按 kind + ref_id 去重），所以反复开关不会刷屏。只 add，不提交。
+    public_view went off->on: notify each undecided entrant (public_name NULL) once
+    per competition (deduped on kind + ref_id), so toggling doesn't spam. No commit."""
+    user_ids = {uid for (uid,) in (db.query(CompetitionParticipant.user_id)
+                                     .filter(CompetitionParticipant.competition_id == comp.id,
+                                             CompetitionParticipant.public_name.is_(None))
+                                     .distinct().all())}
+    if not user_ids:
+        return []
+    already = {uid for (uid,) in (db.query(UserNotification.user_id)
+                                    .filter(UserNotification.kind == KIND_COMP_PUBLIC_NAME,
+                                            UserNotification.ref_id == comp.id,
+                                            UserNotification.user_id.in_(user_ids)).all())}
+    targets = sorted(user_ids - already)
+    for uid in targets:
+        create_notification(
+            db, uid, KIND_COMP_PUBLIC_NAME,
+            text=(f"「{comp.name}」的榜单将公开展示，你目前以匿名显示，可在比赛页选择显示昵称 / "
+                  f"The {comp.name} board is going public; you appear anonymously unless "
+                  f"you choose to show your nickname"),
+            link=f"/competitions?c={comp.id}",
+            ref_id=comp.id,
+        )
+    return targets
+
+
 def _comp_gates(db: Session, comp: Competition) -> dict:
     """本场比赛实际生效的门槛（比赛自己的值优先，否则全局），下发给前端回显。
     The gates actually in force for this competition (its own values first,
@@ -312,6 +393,10 @@ def _comp_out(comp: Competition, participant_count: int) -> dict:
         "prizeNote": comp.prize_note,
         "createdAt": comp.created_at.isoformat() if comp.created_at else None,
         "participantCount": participant_count,
+        # 公开推广（设计 §1.7）；public_view 是可空列，读取一律 bool()。
+        # Public promotion (design §1.7); public_view is nullable, always bool() it.
+        "publicView": bool(comp.public_view),
+        "openAccountUrl": comp.open_account_url,
     }
 
 
@@ -339,6 +424,12 @@ def _participant_out(p: CompetitionParticipant, email: str | None,
         "finalRank": p.final_rank,
         "disqualified": p.disqualified,
         "disqualifyReason": p.disqualify_reason,
+        # 公开榜上的名字（设计 §1.8）：publicName 是本人的选择（null = 未表态），
+        # nameHidden 是管理员的强制隐藏。
+        # Public-board name: publicName is the entrant's choice (null = undecided),
+        # nameHidden the admin override.
+        "publicName": p.public_name,
+        "nameHidden": bool(p.name_hidden),
         # 管理端名单才有的明细（见 participant_details）；PATCH 的回包不带。
         # Admin-list-only detail (see participant_details); absent from PATCH replies.
         **(details or {}),
@@ -360,10 +451,13 @@ def admin_list_competitions(db: Session = Depends(get_db)):
 
 
 @admin_router.post("")
-def admin_create_competition(body: CompetitionCreateIn, db: Session = Depends(get_db)):
+def admin_create_competition(body: CompetitionCreateIn, db: Session = Depends(get_db),
+                             admin: User = Depends(get_current_user)):
     _validate_core(body.metric, body.enrollment, body.startsAt, body.endsAt)
     _validate_reg_window(body.enrollment, body.regOpensAt, body.regClosesAt)
     _validate_options(body.track, body.minBaselineUsd, body.minTrades, body.maxBaselineUsd)
+    open_url = _normalize_open_url(body.openAccountUrl)
+    _validate_public(bool(body.publicView), body.track or "real", body.enrollment, open_url)
     comp = Competition(
         name=body.name, description=body.description, metric=body.metric,
         enrollment=body.enrollment, reg_opens_at=body.regOpensAt,
@@ -372,21 +466,39 @@ def admin_create_competition(body: CompetitionCreateIn, db: Session = Depends(ge
         track=body.track or "real",
         min_baseline_usd=body.minBaselineUsd, max_baseline_usd=body.maxBaselineUsd,
         min_trades=body.minTrades,
+        public_view=bool(body.publicView), open_account_url=open_url,
     )
     db.add(comp)
+    db.flush()          # 拿到 id 再写审计 / need the id for the audit row
+    _log_change(db, admin.id, admin.id, f"competition:{comp.id}:create", None, comp.name)
     db.commit()
     db.refresh(comp)
     return _comp_out(comp, 0)
 
 
 @admin_router.patch("/{comp_id}")
-def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session = Depends(get_db)):
+def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session = Depends(get_db),
+                            admin: User = Depends(get_current_user)):
     comp = _get_comp_or_404(db, comp_id)
     sent = body.model_fields_set
     field_sent = sent - {"status"}
 
     if comp.status != "draft" and (field_sent - _NON_DRAFT_ALLOWED):
         raise HTTPException(400, MSG_NON_DRAFT_FIELDS)
+
+    # 公开推广按「改后的值」整体校验：只改赛道/参赛方式也可能让一场已公开的比赛不合规。
+    # The public pair is validated on post-patch values: changing only the track or
+    # enrollment can make an already-public competition non-compliant too.
+    open_url = (_normalize_open_url(body.openAccountUrl) if "openAccountUrl" in sent
+                else comp.open_account_url)
+    public_view = bool(body.publicView) if "publicView" in sent else bool(comp.public_view)
+    _validate_public(
+        public_view,
+        body.track if ("track" in sent and body.track is not None) else comp.track,
+        body.enrollment if "enrollment" in sent else comp.enrollment,
+        open_url)
+    before = _audit_state(comp)
+    was_public = bool(comp.public_view)
 
     if comp.status == "draft":
         metric = body.metric if "metric" in sent else comp.metric
@@ -452,6 +564,11 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         if "regClosesAt" in sent:
             comp.reg_closes_at = body.regClosesAt
 
+    if "publicView" in sent:
+        comp.public_view = public_view
+    if "openAccountUrl" in sent:
+        comp.open_account_url = open_url
+
     auto_enrolled = None
     if "status" in sent:
         new_status = body.status
@@ -475,7 +592,13 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
         if new_status == "running" and comp.enrollment == "auto":
             auto_enrolled = auto_enroll(db, comp, datetime.now(timezone.utc))
 
+    for field, value in _audit_state(comp).items():
+        _log_change(db, admin.id, admin.id, f"competition:{comp.id}:{field}", before[field], value)
+    notified = _notify_public_flip(db, comp) if (not was_public and comp.public_view) else []
     db.commit()
+    shared_cache.delete(public_cache_key(comp.id))
+    for uid in notified:
+        notify_ws(uid)
     db.refresh(comp)
     counts = _participant_counts(db, [comp.id])
     out = _comp_out(comp, counts.get(comp.id, 0))
@@ -485,12 +608,15 @@ def admin_patch_competition(comp_id: str, body: CompetitionPatchIn, db: Session 
 
 
 @admin_router.delete("/{comp_id}")
-def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
+def admin_delete_competition(comp_id: str, db: Session = Depends(get_db),
+                             admin: User = Depends(get_current_user)):
     """删除一场比赛（任何状态），连同它的参赛行、基线、榜单快照一起清掉。
     曾只允许 draft/upcoming；2026-10-02 运营要求放开到全部状态。已结算比赛发出的
     勋章不会收回（user_badges 没有来源比赛这一列）。
     Deletes a competition in any status, with its participants, baselines and
     board snapshots. Badges a settled competition already awarded stay awarded.
+    Its promo links (invite_links.competition_id) are left untouched: invite links
+    are never deleted, so old users keep their attribution.
     """
     comp = _get_comp_or_404(db, comp_id)
     key = comp_period_key(comp.id)
@@ -498,8 +624,10 @@ def admin_delete_competition(comp_id: str, db: Session = Depends(get_db)):
                       .filter(CompetitionParticipant.competition_id == comp.id).delete())
     db.query(PeriodBaseline).filter(PeriodBaseline.period_key == key).delete()
     db.query(LeaderboardSnapshot).filter(LeaderboardSnapshot.period_key == key).delete()
+    _log_change(db, admin.id, admin.id, f"competition:{comp.id}:delete", comp.name, "deleted")
     db.delete(comp)
     db.commit()
+    shared_cache.delete(public_cache_key(comp_id))
     return {"deleted": comp_id, "participants": participants}
 
 
@@ -521,33 +649,47 @@ def admin_patch_participant(comp_id: str, participant_id: str,
                              db: Session = Depends(get_db),
                              admin: User = Depends(get_current_user)):
     comp = _get_comp_or_404(db, comp_id)
-    if comp.status == "settled":
+    sent = body.model_fields_set
+    dq_sent = "disqualified" in sent and body.disqualified is not None
+    # 终审冻结的是成绩相关的资格状态；公开榜上隐藏名字是隐私操作，终审后照样能做。
+    # Settlement freezes eligibility; hiding a name on the public board is a privacy
+    # action and stays possible after settlement.
+    if comp.status == "settled" and dq_sent:
         raise HTTPException(400, MSG_SETTLED_FROZEN)
     participant = (db.query(CompetitionParticipant)
                      .filter(CompetitionParticipant.id == participant_id,
                              CompetitionParticipant.competition_id == comp_id).first())
     if participant is None:
-        raise HTTPException(404, "参赛条目不存在 / Participant not found")
+        raise HTTPException(404, MSG_PARTICIPANT_NOT_FOUND)
 
-    # 审计的 old/new 把 disqualified 和 reason 拼进同一个字符串一起比较——
-    # `_log_change` 在 old==new 时静默跳过写入，如果只传 disqualified 会漏掉
-    # "已取消资格，仅改理由" 这种重新 PATCH（disqualified 前后都是 True，
-    # reason 变了）：那种情况理应留痕，不能因为 disqualified 本身没变就被吞掉。
-    #
-    # The audit old/new packs disqualified and reason into one comparable
-    # string. `_log_change` no-ops when old==new; comparing only `disqualified`
-    # would silently drop a re-PATCH that only changes the reason on an
-    # already-disqualified participant (disqualified stays True, reason
-    # changes) — that should still leave an audit trail.
-    old_state = f"{participant.disqualified}:{participant.disqualify_reason}"
-    new_reason = body.disqualifyReason if body.disqualified else None
-    new_state = f"{body.disqualified}:{new_reason}"
-    participant.disqualified = body.disqualified
-    participant.disqualify_reason = new_reason
-    _log_change(db, admin.id, participant.user_id,
-                f"competition:participant:{participant.id}:disqualified",
-                old_state, new_state)
+    if dq_sent:
+        # 审计的 old/new 把 disqualified 和 reason 拼进同一个字符串一起比较——
+        # `_log_change` 在 old==new 时静默跳过写入，如果只传 disqualified 会漏掉
+        # "已取消资格，仅改理由" 这种重新 PATCH（disqualified 前后都是 True，
+        # reason 变了）：那种情况理应留痕，不能因为 disqualified 本身没变就被吞掉。
+        #
+        # The audit old/new packs disqualified and reason into one comparable
+        # string. `_log_change` no-ops when old==new; comparing only `disqualified`
+        # would silently drop a re-PATCH that only changes the reason on an
+        # already-disqualified participant (disqualified stays True, reason
+        # changes) — that should still leave an audit trail.
+        old_state = f"{participant.disqualified}:{participant.disqualify_reason}"
+        new_reason = body.disqualifyReason if body.disqualified else None
+        new_state = f"{body.disqualified}:{new_reason}"
+        participant.disqualified = body.disqualified
+        participant.disqualify_reason = new_reason
+        _log_change(db, admin.id, participant.user_id,
+                    f"competition:participant:{participant.id}:disqualified",
+                    old_state, new_state)
+    if "nameHidden" in sent and body.nameHidden is not None:
+        _log_change(db, admin.id, participant.user_id,
+                    f"competition:participant:{participant.id}:nameHidden",
+                    bool(participant.name_hidden), bool(body.nameHidden))
+        participant.name_hidden = bool(body.nameHidden)
     db.commit()
+    # 取消/恢复资格、隐藏名字都会改公开榜内容：丢掉缓存，下个请求按新数据重建。
+    # Disqualifying, requalifying and hiding a name all change the public board.
+    shared_cache.delete(public_cache_key(comp.id))
     db.refresh(participant)
     email = db.query(User.email).filter(User.id == participant.user_id).scalar()
     return _participant_out(participant, email)
