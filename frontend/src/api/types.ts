@@ -1984,6 +1984,40 @@ export interface CompetitionRegisterResult {
   scoringFrom: string | null
 }
 
+// 公开比赛页载荷（GET /public/competitions/{id}，设计 §3.1）——字段白名单，没有 login/profileId/userId
+// Public payload, whitelisted fields only (no login/profileId/userId).
+export interface PublicCompetitionRow {
+  rank: number
+  displayName: string | null
+  score: number
+  sample: number
+  equippedBadge: string | null
+  equippedBadgeTier: number
+}
+export interface PublicCompetitionGates { minBaselineUsd: number; maxBaselineUsd: number | null; minTrades: number }
+export interface PublicCompetition {
+  id: string
+  name: string
+  description: string | null
+  prizeNote: string | null
+  metric: CompetitionMetric
+  track: CompetitionTrack
+  enrollment: CompetitionEnrollment
+  status: Exclude<CompetitionStatus, 'draft'>
+  regOpensAt: string | null
+  regClosesAt: string | null
+  startsAt: string | null
+  endsAt: string | null
+  participants: number
+  gates: PublicCompetitionGates
+  openAccountUrl: string | null
+  snapshotAt: string | null
+  rows: PublicCompetitionRow[]
+  nextCompetitionId: string | null
+}
+export type PublicCompetitionStep = 'view' | 'cta' | 'open_account'
+export interface PublicCompetitionEvent { compId: string; step: PublicCompetitionStep; ref?: string }
+
 // 管理端比赛行（GET/POST /admin/competitions、PATCH /admin/competitions/{id}
 // 的响应）：概览字段之上多带 track（Phase 4 预留，恒为 "real"）、createdAt、
 // participantCount。autoEnrolled 只在这次 PATCH 把状态推进到 running 且
