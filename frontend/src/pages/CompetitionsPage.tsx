@@ -22,16 +22,21 @@ import { useTranslation } from 'react-i18next'
 import ProfileLink from '../components/ProfileLink'
 import type { TFunction } from 'i18next'
 import { competitionApi } from '../api/client'
-import { fmtDate, fmtDay, localizeApiError, parseTime, fmtScorePct } from '../api/utils'
-import { fmtCountdown, regState, useNowTicker } from '../utils/competitionTime'
+import { fmtDate, fmtDay, localizeApiError } from '../api/utils'
+import { regState, useNowTicker } from '../utils/competitionTime'
 import { useLive } from '../store/live'
-import { useDialogA11y } from '../utils/useDialogA11y'
 import { SkeletonPage } from '../components/Skeleton'
-import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
 import { compCard } from '../components/share/cardData'
+import { bugReadout, clockOf, countdownOf, fmtRange, statusTagKey } from '../components/competition/compClock'
+import StatusLine, { STATUS_TAG_CLASS } from '../components/competition/StatusLine'
+import { ScoreText, badgeOf } from '../components/competition/ScoreText'
+import Ladder, { type LadderRowView } from '../components/competition/Ladder'
+import CompClock from '../components/competition/CompClockView'
+import CompFacts from '../components/competition/CompFacts'
+import CompetitionDesc from '../components/competition/CompetitionDesc'
 import type {
   CompetitionDetail,
   CompetitionTrack,
@@ -58,151 +63,6 @@ const matchesTrack = (a: MT5Account, track: CompetitionTrack): boolean =>
   track === 'demo' ? a.tradeMode === 0 || a.tradeMode === 1 : isRealAccount(a)
 
 const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['running', 'upcoming', 'finished']
-
-// 详情页的钟表：把倒计时拆成 天 / 小时 / 分 三格大数字（不足一天只给两格），
-// 到点返回 parts=null 让页面写"即将"。与列表卡的一句话倒计时同一套时刻判定。
-// The detail page clock: the countdown split into day / hour / minute cells of
-// large numerals (two cells under a day); parts=null at zero so the page can say
-// "any moment". Same target-instant rule as the one-line countdown on list cards.
-type ClockUnit = 'd' | 'h' | 'm'
-function clockOf(c: CompetitionSummary, nowMs: number, t: TFunction):
-    { label: string; parts: Array<{ unit: ClockUnit; value: number }> | null } | null {
-  // 已结束 / 已终审（可能是提前强制终审）没有什么可倒数的，哪怕 endsAt 还在未来。
-  // Ended / settled (possibly force-settled early) has nothing left to count down,
-  // even when endsAt is still in the future.
-  if (c.status === 'ended' || c.status === 'settled') return null
-  const starts = parseTime(c.startsAt)?.getTime() ?? null
-  const ends = parseTime(c.endsAt)?.getTime() ?? null
-  const target = starts != null && nowMs < starts
-    ? { label: t('competition.cd.toStart'), at: starts }
-    : ends != null && nowMs < ends
-      ? { label: t('competition.cd.toEnd'), at: ends }
-      : null
-  if (!target) return null
-  const mins = Math.floor((target.at - nowMs) / 60_000)
-  if (mins <= 0) return { label: target.label, parts: null }
-  const d = Math.floor(mins / 1440)
-  const h = Math.floor((mins % 1440) / 60)
-  const m = mins % 60
-  const parts: Array<{ unit: ClockUnit; value: number }> = d > 0
-    ? [{ unit: 'd', value: d }, { unit: 'h', value: h }, { unit: 'm', value: m }]
-    : [{ unit: 'h', value: h }, { unit: 'm', value: m }]
-  return { label: target.label, parts }
-}
-
-// 倒计时指向哪个时刻：未开赛看开赛，进行中看结束，已结束不再倒计时。
-// Which instant the countdown targets: start before it begins, end while running,
-// nothing once it's over.
-function countdownOf(c: CompetitionSummary, nowMs: number, t: TFunction):
-    { label: string; value: string } | null {
-  if (c.status === 'ended' || c.status === 'settled') return null
-  // parseTime 返回 Date，倒计时要的是毫秒差，先取时间戳。
-  // parseTime returns a Date; the countdown needs a millisecond delta, so take the stamp.
-  const starts = parseTime(c.startsAt)?.getTime() ?? null
-  const ends = parseTime(c.endsAt)?.getTime() ?? null
-  if (starts != null && nowMs < starts) {
-    return { label: t('competition.cd.toStart'), value: fmtCountdown(starts - nowMs, t) }
-  }
-  if (ends != null && nowMs < ends) {
-    return { label: t('competition.cd.toEnd'), value: fmtCountdown(ends - nowMs, t) }
-  }
-  return null
-}
-
-// 状态 tag 的取值集合与 i18n competition.status 的键一一对应：upcoming/running/
-// settled 直接照抄 comp.status；仅两处不直接照抄——comp.status=="ended" 对应
-// i18n 键是 "finished"（用户端措辞，不是内部状态名）；comp.status=="upcoming"
-// 且报名制、当前恰好在报名窗口内时，细分成 "regOpen"，比笼统的"即将开始"更
-// 有信息量（该干嘛写在 tag 上，用户不用点进详情才知道能不能报名）。
-//
-// The status-tag value set maps 1:1 onto the i18n competition.status keys:
-// upcoming/running/settled are copied straight from comp.status. Two are not:
-// comp.status=="ended" maps to the i18n key "finished" (user-facing wording,
-// not the internal state name); and comp.status=="upcoming" with signup
-// enrollment currently inside its registration window is narrowed to
-// "regOpen" — more informative than a blanket "upcoming" tag, since it tells
-// the user whether they can register without opening the detail view.
-function statusTagKey(c: CompetitionSummary, nowMs: number): string {
-  if (c.status === 'upcoming' && regState(c, nowMs) === 'open') return 'regOpen'
-  if (c.status === 'ended') return 'finished'
-  return c.status
-}
-
-const STATUS_TAG_CLASS: Record<string, string> = {
-  upcoming: 'bg-neutral-500/15 text-neutral-400',
-  regOpen: 'bg-prism-600/20 text-prism-300',
-  running: 'bg-up/15 text-up',
-  finished: 'bg-neutral-500/15 text-neutral-400',
-  // 结算态此前用 Tailwind 原生 blue-*，是全站状态色里唯一一个外来色相——设计
-  // 令牌写明「紫是整页唯一的彩度」，neon.cyan 等旧键也早已去霓虹化。结算是
-  // 「已封存、不再变动」，语义上就是中性档，与 finished 同族但更亮一级以示区分。
-  // The settled tag used stock Tailwind blue-*, the only foreign hue among the
-  // status colours, against a token set that states violet is the page's only
-  // chroma. Settled means sealed and final, which is semantically the neutral
-  // band — same family as finished, one step brighter to stay distinguishable.
-  settled: 'bg-neutral-300/15 text-neutral-300',
-}
-
-// 状态行：状态芯片 + 计分口径 / 赛道 / 参赛方式，发丝线隔开。列表与详情共用。
-// The status line: status pill plus metric / track / enrollment, hairline-separated.
-// Shared by the list and the detail.
-function StatusLine({ c, tagKey, t }: { c: CompetitionSummary; tagKey: string; t: TFunction }) {
-  const live = tagKey === 'running' || tagKey === 'regOpen'
-  return (
-    <div className="cmp-kicker">
-      <span className={`cmp-status-tag ${STATUS_TAG_CLASS[tagKey] ?? ''}`}>
-        {live && <i className="cmp-live-dot" aria-hidden />}
-        {t(`competition.status.${tagKey}`)}
-      </span>
-      <span>{t(`leaderboard.boards.${c.metric}`)}</span>
-      <span>{t(`competition.track.${c.track}`)}</span>
-      <span>{t(`competition.enrollment.${c.enrollment}`)}</span>
-    </div>
-  )
-}
-
-// 列表上的时间窗口只到日：两端各带时分和时区的一串在手机上要折两行，而列表
-// 只需要知道"哪几天"，精确到分钟的时刻详情页才需要。fmtDay 本身现在住在
-// api/utils.ts（勋章详情/成就页的绝版截止日也要用同一个格式化）。
-// Time windows on the list stop at the day: two full timestamps with zone wrap onto
-// two lines on a phone, and the list only needs "which days"; minute precision
-// belongs to the detail page. fmtDay itself now lives in api/utils.ts (the
-// limited-badge closing date on the achievements/detail pages needs the same format).
-// 带上时区后缀。fmtDay 走的是 Asia/Shanghai（UTC+8），而同一个「成长」壳下的
-// 排行榜页按 UTC 显示周期区间——两个页签的日期本来就会差一天，此前**两边都没有
-// 标注**，看到的人无从分辨是口径不同还是数据不对。api/utils 的 fmtDate/fmtTime
-// 都已经带 "UTC+8" 后缀，唯独 fmtDay 没有；fmtDay 是共享工具（勋章绝版日等也在
-// 用），不在本次改动范围内，所以后缀加在这个调用点上。
-// Tag the zone. fmtDay renders in Asia/Shanghai (UTC+8) while the leaderboard tab
-// under the same Growth shell shows its period range in UTC, so the two tabs can
-// legitimately differ by a day — and neither was labelled, leaving no way to tell
-// a zone difference from bad data. fmtDate/fmtTime in api/utils already carry a
-// "UTC+8" suffix; fmtDay alone does not, and being a shared helper (limited-badge
-// closing dates use it too) it is out of scope here, so the suffix goes on this
-// call site.
-const fmtRange = (c: CompetitionSummary) =>
-  `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'} UTC+8`
-
-// 转播角标的读数：固定 DD:HH:MM，不足一天也补 00，读数的位置和宽度永远不变。
-// The broadcast bug's readout: always DD:HH:MM, zero-padded under a day, so the
-// readout never changes place or width.
-function bugReadout(parts: Array<{ unit: ClockUnit; value: number }>): string {
-  const v: Record<ClockUnit, number> = { d: 0, h: 0, m: 0 }
-  for (const p of parts) v[p.unit] = p.value
-  return [v.d, v.h, v.m].map((n) => String(n).padStart(2, '0')).join(':')
-}
-
-// 分数按正负上色：收益率会为负，胜率恒为正，同一条规则两边都对。
-// Score coloured by sign: a return can be negative, a win rate never is, and one
-// rule covers both.
-function ScoreText({ score, className = '' }: { score: number; className?: string }) {
-  return (
-    <b className={`num ${score < 0 ? 'text-down' : 'text-up'} ${className}`}>{fmtScorePct(score)}</b>
-  )
-}
-
-const badgeOf = (id: string | null | undefined, tier?: number | null) =>
-  id ? <BadgeIcon id={id} tier={tier ?? 0} earned size={18} /> : null
 
 // ── 列表：头版（进行中）──
 // 把比赛当成一场正在直播的赛事：赛名 76px 压住整个头版，右上角是转播里的角标
@@ -382,48 +242,6 @@ function ListView({
   )
 }
 
-// ── 详情：名次梯 ──
-// 名次是 54px 的描边巨型数字，只有第一名填成金色；每行一根按分数比例的细线
-// （负数红色），分数 24px 在最右。表格把冠军和第八名画得一样重，这个不会。
-// The ladder: ranks as 54px outlined giants, only #1 filled gold; a thin bar per row
-// proportional to the score (red when negative), the score at 24px on the right. A
-// table draws the champion and the eighth place with equal weight; this doesn't.
-function Ladder({ board, t }: { board: LeaderboardPayload; t: TFunction }) {
-  if (board.rows.length === 0) {
-    return (
-      <div className="cmp-empty">
-        <p>{t('leaderboard.empty')}</p>
-      </div>
-    )
-  }
-  const maxAbs = Math.max(...board.rows.map((r) => Math.abs(r.score)), 1e-9)
-  return (
-    <ol className="cmp-ladder">
-      {board.rows.map((row) => (
-        <li key={`${row.rank}-${row.login}`} className={row.isSelf ? 'is-self' : ''}>
-          <span className="cmp-ladder-rank">{String(row.rank).padStart(2, '0')}</span>
-          <div className="cmp-ladder-who">
-            <b>
-              {badgeOf(row.equippedBadge, row.equippedBadgeTier)}
-              <ProfileLink profileId={row.profileId} className="truncate">{row.displayName}</ProfileLink>
-              {row.isSelf && <span className="cmp-you">{t('leaderboard.youTag')}</span>}
-            </b>
-            {/* 账户号由后端打码（自己那行才是全的）。
-                The account number is masked server-side (full only on your own row). */}
-            <span className="num">{row.login}</span>
-          </div>
-          <i
-            className={`cmp-ladder-bar ${row.score < 0 ? 'is-neg' : ''}`}
-            style={{ width: `${Math.max(2, (Math.abs(row.score) / maxAbs) * 100)}%` }}
-            aria-hidden
-          />
-          <ScoreText score={row.score} className="cmp-ladder-score" />
-        </li>
-      ))}
-    </ol>
-  )
-}
-
 // 参赛账户选择弹窗：复用 SlideOrderModal/ConfirmModal 的 portal-to-body + 玻璃卡
 // 居中弹窗模式（原因同 ConfirmModal 顶部注释——本页调用点本身就在 .glass 卡片
 // 内部，不 portal 会被 backdrop-filter 截断）。列表来自 useLive().accounts（见
@@ -562,83 +380,20 @@ function AccountPickerModal({
   )
 }
 
-// 比赛简介：按后台填写的换行/空行原样显示；超过限高就折叠，底部渐隐 +「查看更多」，
-// 点开弹窗看全文。是否溢出靠实测 scrollHeight，而不是数字数——空行多的短文同样会超高。
-// Competition blurb: newlines/blank lines render as typed in admin; past the max
-// height it clamps with a fade and a "Read more" that opens the full text in a
-// dialog. Overflow is measured (scrollHeight), not counted in characters — a
-// short text with many blank lines can still overflow.
-function CompetitionDesc({ title, text, t }: { title: string; text: string; t: TFunction }) {
-  const boxRef = useRef<HTMLParagraphElement>(null)
-  const [overflows, setOverflows] = useState(false)
-  const [open, setOpen] = useState(false)
-
-  useEffect(() => {
-    const el = boxRef.current
-    if (!el) return
-    const measure = () => setOverflows(el.scrollHeight > el.clientHeight + 1)
-    measure()
-    const ro = new ResizeObserver(measure)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [text])
-
-  return (
-    <>
-      <p ref={boxRef} className={`cmp-desc is-clamped${overflows ? ' is-overflowing' : ''}`}>{text}</p>
-      {overflows && (
-        <button type="button" className="cmp-desc-more" onClick={() => setOpen(true)}>
-          {t('competition.readMore')} →
-        </button>
-      )}
-      {open && <CompetitionDescModal title={title} text={text} onClose={() => setOpen(false)} t={t} />}
-    </>
-  )
-}
-
-function CompetitionDescModal({ title, text, onClose, t }: { title: string; text: string; onClose: () => void; t: TFunction }) {
-  const panel = useRef<HTMLDivElement>(null)
-  const titleId = useId()
-  useDialogA11y(panel, onClose)
-
-  // 弹窗开着时锁住背后页面滚动，免得滚到底把整页带着走。
-  // Lock the page behind while open so scrolling past the end doesn't drag it.
-  useEffect(() => {
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = prev
-    }
-  }, [])
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm sm:p-6"
-      onClick={onClose}
-    >
-      <div
-        ref={panel}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        tabIndex={-1}
-        className="glass-card relative flex max-h-[85vh] w-full max-w-2xl flex-col p-5 outline-none supports-[height:100dvh]:max-h-[85dvh] sm:p-6"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t('competition.descClose')}
-          className="absolute right-4 top-4 text-2xl leading-none text-neutral-400 transition hover:text-neutral-200"
-        >
-          ×
-        </button>
-        <h3 id={titleId} className="pr-8 text-lg font-bold text-white">{title}</h3>
-        <p className="cmp-desc mt-4 min-h-0 flex-1 overflow-y-auto pr-1">{text}</p>
-      </div>
-    </div>,
-    document.body
-  )
+// 站内榜单行 → 名次梯视图：名字可点进公开主页，灰字是后端打码的账户号（自己那行是全的）。
+// In-app board rows → ladder view: names link to the public profile; the grey line is the
+// server-masked login (full on your own row).
+function boardLadderRows(board: LeaderboardPayload): LadderRowView[] {
+  return board.rows.map((row) => ({
+    key: `${row.rank}-${row.login}`,
+    rank: row.rank,
+    name: <ProfileLink profileId={row.profileId} className="truncate">{row.displayName}</ProfileLink>,
+    sub: row.login,
+    score: row.score,
+    isSelf: row.isSelf,
+    badgeId: row.equippedBadge,
+    badgeTier: row.equippedBadgeTier,
+  }))
 }
 
 function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFunction }) {
@@ -801,7 +556,6 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const availableAccounts = accounts.filter(
     (a) => matchesTrack(a, detail.track) && !enteredLogins.has(a.login))
   const canShowRegisterAction = detail.enrollment === 'signup'
-  const clock = clockOf(detail, now, t)
   // 榜上属于我的行按账户号索引（后端已标 isSelf；一人可带多个账户参赛，各占
   // 一行）——「你的名次」逐账户取实时名次与分数。
   // My rows on the board keyed by login (the backend flags isSelf; one person can
@@ -828,24 +582,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
           <h2 className="cmp-hero-name is-detail">{detail.name}</h2>
           {detail.description && <CompetitionDesc title={detail.name} text={detail.description} t={t} />}
 
-          <div className="cmp-clock">
-            {clock?.parts ? (
-              ['d', 'h', 'm'].map((u) => {
-                const part = clock.parts!.find((x) => x.unit === u)
-                return (
-                  <div key={u}>
-                    <b className="num">{String(part?.value ?? 0).padStart(2, '0')}</b>
-                    <span>{t(`competition.cd.units.${u}`)}</span>
-                  </div>
-                )
-              })
-            ) : (
-              <div className="is-wide">
-                <b className="num is-text">{clock ? t('competition.cd.soon') : detail.endsAt ? fmtDate(detail.endsAt) : '—'}</b>
-                <span>{clock ? clock.label : t('competition.ends')}</span>
-              </div>
-            )}
-          </div>
+          <CompClock c={detail} nowMs={now} t={t} />
 
           {detail.myEntries.length > 0 && (
             <div className="cmp-mine">
@@ -887,30 +624,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
             </div>
           )}
 
-          <dl className="cmp-facts">
-            {detail.prizeNote && (
-              <div>
-                <dt>{t('competition.prizeLabel')}</dt>
-                <dd className="is-prize">{detail.prizeNote}</dd>
-              </div>
-            )}
-            <div>
-              <dt>{t('competition.starts')}</dt>
-              <dd className="num">{detail.startsAt ? fmtDate(detail.startsAt) : '—'}</dd>
-            </div>
-            <div>
-              <dt>{t('competition.ends')}</dt>
-              <dd className="num">{detail.endsAt ? fmtDate(detail.endsAt) : '—'}</dd>
-            </div>
-            {detail.enrollment === 'signup' && (
-              <div>
-                <dt>{t('competition.regWindow')}</dt>
-                <dd className="num">
-                  {detail.regOpensAt ? fmtDay(detail.regOpensAt) : '—'} – {detail.regClosesAt ? fmtDay(detail.regClosesAt) : '—'}
-                </dd>
-              </div>
-            )}
-          </dl>
+          <CompFacts c={detail} t={t} />
 
           {/* 报名动作：仅 signup 赛。窗口内三态互斥（有可报账户 → 按钮，已报完 →
               什么都不显示，"你的名次"已经说明了；一个账户都没有 → 指向绑定页）。
@@ -961,7 +675,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
             {detail.pendingSettle && <span className="text-amber-300">{t('competition.pendingSettle')}</span>}
             <span className="num">{detail.board.rows.length}</span>
           </div>
-          <Ladder board={detail.board} t={t} />
+          <Ladder rows={boardLadderRows(detail.board)} emptyText={t('leaderboard.empty')} youTag={t('leaderboard.youTag')} />
           <ul className="cmp-rules">
             <li>{t('competition.rules.scoringFrom')}</li>
             <li>{t('competition.rules.minSamples')}</li>
