@@ -652,6 +652,14 @@ def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> In
     这是 invite:* 审计里唯一能填真目标的地方（链接本身不是 users 行）。
     Assign a link to a user; 409 if already assigned. The audit target is the
     assigned user — the one invite:* audit row that can carry a real target."""
+    # 比赛推广链接是平台自有的投放链接（设计 §1.1）：代理只有一个自己的码，比赛
+    # 链接一旦带上代理，「30 天内代理优先」与报名归因就会把平台投放算给代理。
+    # Competition links are platform-owned ad links (spec §1.1); an agent on one
+    # would let agent-first attribution credit platform ad spend to the agent.
+    if link.competition_id:
+        raise HTTPException(
+            status_code=400, detail="比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+        )
     exists = (
         db.query(InviteLinkAgent.id)
         .filter(InviteLinkAgent.link_id == link.id, InviteLinkAgent.user_id == target.id)

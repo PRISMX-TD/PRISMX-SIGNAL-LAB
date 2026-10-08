@@ -373,3 +373,31 @@ def test_update_cannot_change_competition(db_session):
     )
     assert out.competitionId == comp.id
     assert out.label == "新标记"
+
+
+# ---------- B5: 比赛链接不能指派代理 ----------
+
+def test_competition_link_cannot_get_agents(db_session):
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    comp = _mk_comp(db_session)
+    link = _mk_link(db_session, code="comp2345", competition_id=comp.id)
+    with pytest.raises(HTTPException) as exc:
+        assign_agent(db_session, admin, link, agent)
+    assert exc.value.status_code == 400
+    assert exc.value.detail == "比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+    assert db_session.query(InviteLinkAgent).count() == 0
+    assert db_session.query(AdminAuditLog).filter(AdminAuditLog.field == "invite:comp2345:agent").count() == 0
+
+
+def test_assign_endpoint_rejects_competition_link(db_session):
+    from app.routers.invite import assign_invite_agent
+    from app.schemas import InviteLinkAssignAgent
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    agent = _mk_user(db_session, "agent@x.io")
+    comp = _mk_comp(db_session)
+    link = _mk_link(db_session, code="comp2345", competition_id=comp.id)
+    with pytest.raises(HTTPException) as exc:
+        assign_invite_agent(link.id, InviteLinkAssignAgent(userId=agent.id), db=db_session, admin=admin)
+    assert exc.value.status_code == 400
