@@ -31,9 +31,17 @@ from app.utils.timeutil import aware as _aware
 from .badges import equipped_badge_tiers
 from .competitions import comp_gates, comp_period_key, track_modes
 
-UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+# 大小写都认；调用方先 normalize_comp_id() 转小写再查库 / 拼缓存键（库里存小写）。
+# Case-insensitive; callers lowercase via normalize_comp_id() before lookups.
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
 FUNNEL_STEPS = ("view", "cta", "open_account")
 PUBLIC_ROWS = 50
+
+
+def normalize_comp_id(comp_id: str | None) -> str:
+    """手改的 /c/<ID> 链接可能是大写 UUID；库里与缓存键一律小写。
+    Hand-edited links may carry an uppercase UUID; ids are stored lowercase."""
+    return (comp_id or "").strip().lower()
 
 
 def public_cache_key(comp_id: str) -> str:
@@ -132,8 +140,13 @@ def build_public_payload(db, comp: Competition) -> dict:
     tiers = equipped_badge_tiers(db, users.values())
     rows = []
     for r in snaps:
+        p = parts.get(r.mt5_login)
+        # 刚被取消资格的人在下一轮快照前还留在快照里；公开页不等，直接跳过。
+        # A just-disqualified entrant stays in the snapshot until the next tick.
+        if p is not None and p.disqualified is True:
+            continue
         u = users.get(r.user_id)
-        name = _shown_name(parts.get(r.mt5_login), u)
+        name = _shown_name(p, u)
         rows.append({
             "rank": r.rank,
             "displayName": name,
@@ -195,7 +208,8 @@ def record_funnel_event(db, comp_id: str, step: str, ref: str | None,
     arbitrary strings can't mint rows. A concurrent insert of the same key hits
     the unique constraint inside a SAVEPOINT and falls back to the atomic +1.
     """
-    if step not in FUNNEL_STEPS or not UUID_RE.match(comp_id or ""):
+    comp_id = normalize_comp_id(comp_id)
+    if step not in FUNNEL_STEPS or not UUID_RE.match(comp_id):
         return False
     comp = db.get(Competition, comp_id)
     if not is_publicly_viewable(db, comp):

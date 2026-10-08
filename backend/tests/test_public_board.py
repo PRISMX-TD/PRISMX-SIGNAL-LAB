@@ -136,6 +136,21 @@ def test_payload_shape_and_name_rules(db_session):
         assert leak not in flat, leak
 
 
+def test_payload_skips_disqualified_rows_still_in_snapshot(db_session):
+    """取消资格后快照要到下一轮 snapshot 才去掉这行；公开载荷不能等，直接跳过。"""
+    _flags(db_session)
+    comp = _comp(db_session)
+    _entry(db_session, comp, _user(db_session, "a@t.co", "Alpha"), "1001", rank=1, score=0.3)
+    _entry(db_session, comp, _user(db_session, "b@t.co", "Bravo"), "1002", rank=2, score=0.2,
+           disqualified=True)
+    _entry(db_session, comp, _user(db_session, "c@t.co", "Charlie"), "1003", rank=3, score=0.1)
+
+    out = build_public_payload(db_session, comp)
+
+    assert [r["displayName"] for r in out["rows"]] == ["Alpha", "Charlie"]
+    assert "Bravo" not in repr(out)
+
+
 def test_payload_rows_capped_at_fifty(db_session):
     _flags(db_session)
     comp = _comp(db_session)

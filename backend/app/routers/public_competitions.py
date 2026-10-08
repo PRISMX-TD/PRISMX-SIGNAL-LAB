@@ -26,7 +26,7 @@ from app.services import shared_cache
 from app.services.deps import get_db
 from app.services.gamification.public_board import (
     UUID_RE, build_public_payload, comp_public_eligible, featured_competition_id,
-    public_cache_key, public_switches_on, record_funnel_event)
+    normalize_comp_id, public_cache_key, public_switches_on, record_funnel_event)
 from app.services.settings_store import get_gamification_settings
 
 router = APIRouter(prefix="/public/competitions", tags=["public-competitions"])
@@ -50,7 +50,8 @@ def get_featured(request: Request, db: Session = Depends(get_db)):
 @router.get("/{comp_id}")
 @limiter.shared_limit(settings.RATE_LIMIT_COMPETITION_PUBLIC, scope="comp-public")
 def get_public_competition(request: Request, comp_id: str, db: Session = Depends(get_db)):
-    if not UUID_RE.match(comp_id or ""):
+    comp_id = normalize_comp_id(comp_id)
+    if not UUID_RE.match(comp_id):
         raise _not_found()
     if not public_switches_on(get_gamification_settings(db)):
         raise _not_found()

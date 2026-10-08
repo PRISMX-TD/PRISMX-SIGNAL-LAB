@@ -88,6 +88,17 @@ def test_every_hidden_case_is_the_same_404(db_session, case):
     assert res.json() == NOT_FOUND
 
 
+def test_uppercase_id_resolves_to_the_same_competition(db_session):
+    """手改的链接把 UUID 写成大写：按小写查，且与小写 id 共用同一个缓存键。"""
+    _flags(db_session)
+    comp = _comp(db_session)
+    _ranked(db_session, comp, "a@t.co", "Alpha", "1001", 1)
+    res = _client(db_session).get(f"/api/public/competitions/{comp.id.upper()}")
+    assert res.status_code == 200, res.text
+    assert res.json()["id"] == comp.id
+    assert shared_cache.cached_json(public_cache_key(comp.id), 20, lambda: {"miss": 1})["id"] == comp.id
+
+
 def test_featured_endpoint(db_session):
     _flags(db_session)
     comp = _comp(db_session)
