@@ -5,10 +5,17 @@ import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { isAnyModalOpen } from '../utils/useBackToClose'
+import { useAuth } from '../store/auth'
+import { isNativeApp } from '../utils/inAppBrowser'
 
 export default function PwaBackGuard({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const guardRef = useRef(false)
+  // 用 ref 读登录态：popstate 监听只注册一次，不随登录态重绑。
+  // Read auth through a ref: the popstate listener is registered once, not rebound per change.
+  const { isAuthed } = useAuth()
+  const authedRef = useRef(isAuthed)
+  authedRef.current = isAuthed
 
   useEffect(() => {
     // 注入一条守卫 history，确保回退不会直接退出 PWA
@@ -45,6 +52,13 @@ export default function PwaBackGuard({ children }: { children: ReactNode }) {
       // 如果用户回退到了守卫条目，回推守卫并导航到应用首页
       // If user reaches the guard entry, push it back and navigate to app home
       if (window.history.state?.__pwaGuard) {
+        // 未登录的网页访客（公开比赛页、落地页、登录页）按返回是想离开：拽去 /app 只会被
+        // Protected 再弹到登录页——推广落地页上最糟的体验。App 壳（Capacitor）没有「上
+        // 一页」可回，仍保留守卫。
+        // A logged-out web visitor (public competition page, landing, login) pressing back
+        // wants to leave; dragging them to /app just bounces off Protected to /login — the
+        // worst experience on a promo landing. The Capacitor shell keeps the guard.
+        if (!authedRef.current && !isNativeApp()) return
         window.history.pushState({ __pwaGuard: true }, '', window.location.href)
         navigate('/app', { replace: true })
       }
