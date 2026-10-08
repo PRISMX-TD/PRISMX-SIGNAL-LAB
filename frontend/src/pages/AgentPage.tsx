@@ -18,12 +18,17 @@
 // entitlements are untouched. URLs come from utils/promoLinkUrl. Two copy buttons per
 // link (design §1.2): invite /?ref=code and competition /c?ref=code (fixed; resolves to
 // the featured competition, hidden when there is none).
+// 每张卡底部还有「我的开户链接」（components/agent/OpenAccountLinkEditor）：代理自己填
+// Make Capital 开户链接，经他链接进比赛页的访客点「开户」时跳那里。
+// Each card also carries "My open-account link" (OpenAccountLinkEditor): the agent's own
+// Make Capital link, used when their visitors tap "Open account" on a competition page.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHead from '../components/PageHead'
 import { SkeletonLine } from '../components/Skeleton'
 import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
 import PlanDialog from '../components/agent/PlanDialog'
+import OpenAccountLinkEditor from '../components/agent/OpenAccountLinkEditor'
 import { API_BASE, agentApi } from '../api/client'
 import { fmtDate, localizeApiError } from '../api/utils'
 import { agentCompetitionUrl, inviteUrl } from '../utils/promoLinkUrl'
@@ -398,6 +403,12 @@ export default function AgentPage() {
                     </button>
                   )}
                 </div>
+                <OpenAccountLinkEditor
+                  link={l}
+                  onSaved={(updated) =>
+                    setLinks((cur) => (cur ? cur.map((x) => (x.id === updated.id ? updated : x)) : cur))
+                  }
+                />
               </div>
             )
           })}

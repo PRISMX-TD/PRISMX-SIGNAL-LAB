@@ -1,4 +1,4 @@
-// 邀请链接编辑抽屉（设计 §5.4）：标记、渠道、链接与二维码、送试用、启停、代理管理、
+// 邀请链接编辑抽屉（设计 §5.4）：标记、渠道、代理开户链接（非比赛链接）、链接与二维码、送试用、启停、代理管理、
 // 创建时间、只读的关联比赛。所有写操作都交给面板（单一 busyId 闸门在面板里），
 // 这里的按钮一律按 busy 禁用——理由见 InviteLinksPanel 里那段「禁用必须如实反映处理
 // 函数行为」的注释。
@@ -11,6 +11,7 @@ import AdminSheet from '../AdminSheet'
 import Switch from '../../Switch'
 import { fmtTime } from '../../../api/utils'
 import { promoLinkUrl } from '../../../utils/promoLinkUrl'
+import { isAgentOpenUrl } from '../../../utils/openAccountLink'
 import type { Toast } from '../../../utils/useToast'
 import type { InviteLink, InviteLinkPatch } from '../../../api/types'
 import AgentPicker from './AgentPicker'
@@ -48,18 +49,24 @@ export default function InviteLinkEditDrawer({
   const { t } = useTranslation()
   const [label, setLabel] = useState(link.label)
   const [channel, setChannel] = useState(link.channel ?? '')
+  const [openUrl, setOpenUrl] = useState(link.openAccountUrl ?? '')
 
-  // 保存成功后后端回来的新值同步回草稿；只在这三个值变化时重置——开关 / 代理的写操作
+  // 保存成功后后端回来的新值同步回草稿；只在这几个值变化时重置——开关 / 代理的写操作
   // 也会换掉 link 对象，但不该冲掉正在输入的标记。
-  // Sync drafts to saved values; keyed on these three only, so a toggle or agent write
+  // Sync drafts to saved values; keyed on these values only, so a toggle or agent write
   // (which also replaces the link object) doesn't wipe a label being typed.
   useEffect(() => {
     setLabel(link.label)
     setChannel(link.channel ?? '')
-  }, [link.id, link.label, link.channel])
+    setOpenUrl(link.openAccountUrl ?? '')
+  }, [link.id, link.label, link.channel, link.openAccountUrl])
 
   const kind = linkKind(link)
-  const patch = labelPatch(link, { label, channel })
+  // 比赛推广链接用比赛自己的开户链接，这一栏不出现，也不进 PATCH。
+  // Competition promo links use the competition's URL: no field, never in the PATCH.
+  const hasOpenUrl = kind !== 'competition'
+  const openUrlInvalid = hasOpenUrl && openUrl.trim() !== '' && !isAgentOpenUrl(openUrl)
+  const patch = labelPatch(link, hasOpenUrl ? { label, channel, openAccountUrl: openUrl } : { label, channel })
   const url = promoLinkUrl(link)
   const agents = link.agents ?? []
 
@@ -90,6 +97,25 @@ export default function InviteLinkEditDrawer({
           <label className="label">{t('admin.invite.fieldChannel')}</label>
           <ChannelField value={channel} onChange={setChannel} disabled={busy} />
         </div>
+        {hasOpenUrl && (
+          <div>
+            <label className="label" htmlFor="invite-open-url">{t('admin.invite.fieldOpenAccountUrl')}</label>
+            <input
+              id="invite-open-url"
+              className="input w-full"
+              type="url"
+              inputMode="url"
+              value={openUrl}
+              maxLength={500}
+              placeholder="https://…makecapital.com/…"
+              aria-invalid={openUrlInvalid || undefined}
+              onChange={(e) => setOpenUrl(e.target.value)}
+            />
+            <p className={`mt-1 text-[11px] leading-snug ${openUrlInvalid ? 'text-down' : 'text-neutral-500'}`}>
+              {t(openUrlInvalid ? 'admin.invite.openAccountUrlInvalid' : 'admin.invite.openAccountUrlHint')}
+            </p>
+          </div>
+        )}
         <button type="submit" className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40" disabled={!patch || busy}>
           {t('admin.invite.save')}
         </button>

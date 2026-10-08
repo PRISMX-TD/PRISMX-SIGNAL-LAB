@@ -227,6 +227,9 @@ export interface InviteLink {
   // 本月注册数（北京时间切月）。后端可选字段：没有时统计条显示「—」。
   // Sign-ups this month (Beijing calendar). Optional backend field; the stats strip shows "—" without it.
   registrationsMonth?: number
+  // 代理专属开户链接（只给非比赛链接）；null = 访客用比赛默认的。代理也能在代理页自己改。
+  // Agent open-account URL (non-competition links); null = the competition's default.
+  openAccountUrl?: string | null
 }
 
 export interface InviteLinkCreate {
@@ -243,6 +246,8 @@ export interface InviteLinkPatch {
   channel?: string | null
   isActive?: boolean
   grantsTrial?: boolean
+  // null 清除 / null clears
+  openAccountUrl?: string | null
 }
 
 export interface InviteLinkListParams {
@@ -274,6 +279,8 @@ export interface AgentLink {
   mt5Users: number
   isActive: boolean
   createdAt: string | null
+  // 代理自己设的开户链接；null = 访客用平台默认的。/ The agent's own open-account URL.
+  openAccountUrl?: string | null
 }
 
 // 代理名单里的一个 MT5 绑定。login 是**后端打过码的**（123**678，与排行榜同一

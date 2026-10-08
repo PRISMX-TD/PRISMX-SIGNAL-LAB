@@ -164,4 +164,16 @@ describe('labelPatch', () => {
   it('原来没渠道、草稿也空 → 不算改动', () => {
     expect(labelPatch({ label: 'a', channel: null }, { label: 'a', channel: '  ' })).toBeNull()
   })
+  it('代理开户链接：设、清、不变、无效不保存 / agent open-account URL', () => {
+    const l = { label: 'a', channel: null, openAccountUrl: null as string | null }
+    const u = 'https://my.makecapital.com/r?ib=1'
+    expect(labelPatch(l, { label: 'a', channel: '', openAccountUrl: ` ${u} ` })).toEqual({ openAccountUrl: u })
+    expect(labelPatch({ ...l, openAccountUrl: u }, { label: 'a', channel: '', openAccountUrl: u })).toBeNull()
+    expect(labelPatch({ ...l, openAccountUrl: u }, { label: 'a', channel: '', openAccountUrl: '  ' })).toEqual({
+      openAccountUrl: null,
+    })
+    expect(labelPatch(l, { label: 'a', channel: '', openAccountUrl: 'https://evil.io/x' })).toBeNull()
+    // 不传草稿（比赛链接）= 不碰这个字段 / no draft (competition link) = untouched
+    expect(labelPatch({ ...l, openAccountUrl: u }, { label: 'b', channel: '' })).toEqual({ label: 'b' })
+  })
 })

@@ -1292,7 +1292,19 @@
     "totalUnit": "人",
     "copyInvite": "招待リンクをコピー",
     "copyCompetition": "大会リンクをコピー",
-    "competitionLinkNote": "大会リンクは固定です。開くと現在おすすめの大会が表示され、そこからの登録もあなたの紹介として記録されます。"
+    "competitionLinkNote": "大会リンクは固定です。開くと現在おすすめの大会が表示され、そこからの登録もあなたの紹介として記録されます。",
+    "openAccount": {
+      "title": "私の口座開設リンク",
+      "explain": "あなたのリンクから大会ページに来た訪問者が「口座開設」を押すと、このリンクに移動し、口座はあなたの紹介として記録されます。",
+      "unset": "未設定（訪問者はプラットフォームの既定リンクを使用）",
+      "placeholder": "https://…makecapital.com/…",
+      "save": "保存",
+      "clear": "クリア",
+      "saving": "保存中…",
+      "saved": "保存しました",
+      "cleared": "クリアしました",
+      "invalid": "Make Capital の https リンクを入力してください"
+    }
   },
   "announcements": {
     "countUnit": "件",

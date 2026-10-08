@@ -3,6 +3,7 @@
 // Pure logic for the invite-links tab: kind, filters, search, the stats strip, badges
 // and the edit drawer's dirty check. Components only render.
 import type { InviteLink, InviteLinkKind, InviteLinkPatch } from '../../../api/types'
+import { isAgentOpenUrl } from '../../../utils/openAccountLink'
 
 export type KindFilter = 'all' | InviteLinkKind
 export const KIND_FILTERS: KindFilter[] = ['all', 'agent', 'platform', 'competition']
@@ -144,11 +145,14 @@ export function secondaryLine(l: InviteLink): string | null {
   return null
 }
 
-// 编辑抽屉「保存」要送的 PATCH：只放改了的字段；标记被清空时返回 null（不许存空标记）。
-// The drawer's PATCH: only changed fields; null when nothing changed or the label is blank.
+// 编辑抽屉「保存」要送的 PATCH：只放改了的字段；标记被清空、或代理开户链接填了但不合规时
+// 返回 null（不许存）。openAccountUrl 草稿不传 = 不碰这个字段（比赛链接没有这一栏）。
+// The drawer's PATCH: only changed fields; null when nothing changed, the label is blank or
+// the agent open-account URL is filled but invalid. No openAccountUrl draft = field untouched
+// (competition links don't have it).
 export function labelPatch(
-  link: Pick<InviteLink, 'label' | 'channel'>,
-  draft: { label: string; channel: string },
+  link: Pick<InviteLink, 'label' | 'channel'> & { openAccountUrl?: string | null },
+  draft: { label: string; channel: string; openAccountUrl?: string },
 ): InviteLinkPatch | null {
   const label = draft.label.trim()
   if (!label) return null
@@ -156,5 +160,10 @@ export function labelPatch(
   if (label !== link.label) patch.label = label
   const channel = normalizeChannel(draft.channel)
   if (channel !== (link.channel ?? null)) patch.channel = channel
+  if (draft.openAccountUrl !== undefined) {
+    const url = draft.openAccountUrl.trim() || null
+    if (url !== null && !isAgentOpenUrl(url)) return null
+    if (url !== (link.openAccountUrl ?? null)) patch.openAccountUrl = url
+  }
   return Object.keys(patch).length > 0 ? patch : null
 }

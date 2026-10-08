@@ -22,7 +22,7 @@ import type { TFunction } from 'i18next'
 import { useAuth } from '../store/auth'
 import { syncLanguage, type AppLang } from '../i18n'
 import { localePath } from '../seo/meta'
-import { readRef } from '../api/client'
+import { API_BASE, readRef, readRefs } from '../api/client'
 import { publicCompetitionApi } from '../api/publicCompetition'
 import type { PublicCompetition } from '../api/types'
 import { fmtDate, fmtUsd } from '../api/utils'
@@ -31,6 +31,7 @@ import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import { safeHttpUrl } from '../utils/safeUrl'
 import { storeCompIntent } from '../utils/compIntent'
+import { publicOpenAccountHref } from '../utils/openAccountLink'
 import { isInAppBrowser } from '../utils/inAppBrowser'
 import { browserLangs, legalLang, pickPublicLang } from '../utils/publicLang'
 import { classifyPublicError, publicCta, publicLadderRows, shouldSendView, type PublicLoadError } from '../utils/publicCompetition'
@@ -341,21 +342,25 @@ function PublicRules({ c, t }: { c: PublicCompetition; t: TFunction }) {
 // CTA 状态机（utils/publicCompetition.publicCta）：
 // join / notOpen → 四步说明 + 「注册并参赛」+（有本场开户链接时）「开模拟账户」新窗口；
 // closed → 截止/已结束 +「下一场」或「注册 Signal Lab」。
+// 「开模拟账户」不直接指向 openAccountUrl，而是后端跳转口：服务端按访客最近的 ref（代理
+// 优先）选代理自己的开户链接或本场默认的，并顺手记 open_account 漏斗（所以这里不再打点）。
+// 是否显示按钮仍只看载荷里的 openAccountUrl。
 // CTA state machine: join / notOpen → four steps + sign-up + (with a link) open-account in a
-// new tab; closed → closed/ended + next competition or a plain sign-up.
+// new tab; closed → closed/ended + next competition or a plain sign-up. The open-account
+// button points at the backend redirect, which picks the agent's or the competition's URL
+// from the visitor's recent refs and records the funnel step itself (no client ping).
 function PublicCta({ c, nowMs, t }: { c: PublicCompetition; nowMs: number; t: TFunction }) {
   const [params] = useSearchParams()
   const cta = publicCta(c, nowMs)
   const openUrl = safeHttpUrl(c.openAccountUrl)
   const langQs = params.get('lang') ? `?lang=${encodeURIComponent(params.get('lang')!)}` : ''
-  const ping = (step: 'cta' | 'open_account') => void publicCompetitionApi.event({ compId: c.id, step, ref: refOrUndef() })
+  const ping = (step: 'cta') => void publicCompetitionApi.event({ compId: c.id, step, ref: refOrUndef() })
   const onJoin = () => {
     storeCompIntent(c.id)
     ping('cta')
   }
   const onOpenAccount = () => {
     storeCompIntent(c.id)
-    ping('open_account')
   }
 
   if (cta.kind === 'closed') {
@@ -384,7 +389,13 @@ function PublicCta({ c, nowMs, t }: { c: PublicCompetition; nowMs: number; t: TF
       <div className="pcp-cta-row">
         <Link to="/login?mode=register" className="cmp-btn" onClick={onJoin}>{t('competition.pub.ctaJoin')}</Link>
         {openUrl && (
-          <a href={openUrl} target="_blank" rel="noopener noreferrer" className="cmp-btn-ghost" onClick={onOpenAccount}>
+          <a
+            href={publicOpenAccountHref(API_BASE, c.id, readRefs())}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="cmp-btn-ghost"
+            onClick={onOpenAccount}
+          >
             {t('competition.pub.ctaOpenAccount')} ↗
           </a>
         )}

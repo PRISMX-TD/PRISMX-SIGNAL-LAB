@@ -1874,9 +1874,10 @@ export const pushApi = {
     }),
 }
 
-// 代理页（/agent）：只读。链接列表 + 某条链接的注册用户名单（分页）。
-// 不是代理的人拿到空列表；不属于自己的链接一律 404。
-// Agent view (/agent), read-only: my links + one link's paginated signup list.
+// 代理页（/agent）：链接列表 + 某条链接的注册用户名单（分页）；写操作只有调整客户会员
+// 与设置自己链接的开户链接。不是代理的人拿到空列表；不属于自己的链接一律 404。
+// Agent view (/agent): my links + one link's paginated signup list; the only writes are
+// client membership changes and my link's open-account URL.
 // Non-agents get an empty list; links that aren't mine answer 404.
 export const agentApi = {
   links: () => request<{ links: AgentLink[] }>('/agent/links'),
@@ -1896,6 +1897,13 @@ export const agentApi = {
     request<AgentLinkUser>(`/agent/links/${encodeURIComponent(id)}/users/plan`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  // 代理设置 / 清除（null）自己链接的开户链接，回整条链接。
+  // Set / clear (null) my link's open-account URL; returns the updated link.
+  setOpenAccountUrl: (id: string, url: string | null) =>
+    request<AgentLink>(`/agent/links/${encodeURIComponent(id)}/open-account-url`, {
+      method: 'PATCH',
+      body: JSON.stringify({ url }),
     }),
 }
 

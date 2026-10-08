@@ -1292,7 +1292,19 @@
     "totalUnit": "người dùng",
     "copyInvite": "Sao chép link mời",
     "copyCompetition": "Sao chép link giải đấu",
-    "competitionLinkNote": "Link giải đấu cố định: khi mở sẽ hiển thị giải đấu đang được nền tảng giới thiệu, người đăng ký qua link này vẫn được tính là khách của bạn."
+    "competitionLinkNote": "Link giải đấu cố định: khi mở sẽ hiển thị giải đấu đang được nền tảng giới thiệu, người đăng ký qua link này vẫn được tính là khách của bạn.",
+    "openAccount": {
+      "title": "Link mở tài khoản của tôi",
+      "explain": "Khi khách vào trang giải đấu qua link của bạn và bấm “Mở tài khoản”, họ sẽ được chuyển tới link này và tài khoản được tính cho bạn.",
+      "unset": "Chưa đặt (khách sẽ dùng link mở tài khoản mặc định của nền tảng)",
+      "placeholder": "https://…makecapital.com/…",
+      "save": "Lưu",
+      "clear": "Xóa",
+      "saving": "Đang lưu…",
+      "saved": "Đã lưu",
+      "cleared": "Đã xóa",
+      "invalid": "Phải là link https của Make Capital"
+    }
   },
   "announcements": {
     "countUnit": "bài",

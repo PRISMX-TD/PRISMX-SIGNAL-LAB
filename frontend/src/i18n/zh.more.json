@@ -1415,6 +1415,9 @@
       "createTitle": "新建链接",
       "fieldLabel": "标记名",
       "fieldChannel": "渠道",
+      "fieldOpenAccountUrl": "代理开户链接",
+      "openAccountUrlHint": "该链接带来的访客在比赛页点「开户」时跳到这里；留空则用比赛默认开户链接。代理也可以在代理页自己修改。",
+      "openAccountUrlInvalid": "需为 Make Capital 的 https 链接",
       "fieldCompetition": "关联比赛",
       "fieldCompetitionOptional": "关联比赛（可选）",
       "competitionNone": "不关联（普通链接）",
@@ -2354,7 +2357,19 @@
     "totalUnit": "人",
     "copyInvite": "复制邀请链接",
     "copyCompetition": "复制比赛链接",
-    "competitionLinkNote": "比赛链接固定不变：别人打开时看到的是平台当前主推的比赛，经它注册的客户同样记在你名下。"
+    "competitionLinkNote": "比赛链接固定不变：别人打开时看到的是平台当前主推的比赛，经它注册的客户同样记在你名下。",
+    "openAccount": {
+      "title": "我的开户链接",
+      "explain": "访客通过你的链接进入比赛页并点『开户』时，会跳到这个链接，开户归属你。",
+      "unset": "未设置（访客会用平台默认开户链接）",
+      "placeholder": "https://…makecapital.com/…",
+      "save": "保存",
+      "clear": "清除",
+      "saving": "保存中…",
+      "saved": "已保存",
+      "cleared": "已清除",
+      "invalid": "需为 Make Capital 的 https 链接"
+    }
   },
   "announcements": {
     "countUnit": "条",

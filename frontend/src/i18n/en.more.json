@@ -1415,6 +1415,9 @@
       "createTitle": "New link",
       "fieldLabel": "Label",
       "fieldChannel": "Channel",
+      "fieldOpenAccountUrl": "Agent open-account link",
+      "openAccountUrlHint": "Visitors from this link go here when they tap “Open account” on a competition page; leave blank to use the competition's default. The agent can also change it on the agent page.",
+      "openAccountUrlInvalid": "Must be an https Make Capital link",
       "fieldCompetition": "Competition",
       "fieldCompetitionOptional": "Competition (optional)",
       "competitionNone": "None (regular link)",
@@ -2356,7 +2359,19 @@
     "totalUnit": "users",
     "copyInvite": "Copy invite link",
     "copyCompetition": "Copy competition link",
-    "competitionLinkNote": "The competition link never changes: it always opens the competition we're currently featuring, and sign-ups through it still count as yours."
+    "competitionLinkNote": "The competition link never changes: it always opens the competition we're currently featuring, and sign-ups through it still count as yours.",
+    "openAccount": {
+      "title": "My open-account link",
+      "explain": "When visitors arrive through your link and tap “Open account” on a competition page, they go to this link — the account is attributed to you.",
+      "unset": "Not set (visitors use the platform's default open-account link)",
+      "placeholder": "https://…makecapital.com/…",
+      "save": "Save",
+      "clear": "Clear",
+      "saving": "Saving…",
+      "saved": "Saved",
+      "cleared": "Cleared",
+      "invalid": "Must be an https Make Capital link"
+    }
   },
   "announcements": {
     "countUnit": "posts",
