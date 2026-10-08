@@ -272,6 +272,9 @@ function CompetitionView({ compId }: { compId: string }) {
     return (
       <Notice text={t('competition.pub.notFound')}>
         <Link to="/" className="cmp-btn-ghost">{t('competition.pub.notFoundHome')}</Link>
+        {/* 未公开的比赛站内仍可看：给登录入口（登录后报名意图会送回这场）。
+            A non-public competition is still visible in-app: offer login. */}
+        <Link to="/login" className="cmp-btn-ghost">{t('competition.pub.ctaHaveAccount')}</Link>
       </Notice>
     )
   }

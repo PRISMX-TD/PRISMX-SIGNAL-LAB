@@ -6,6 +6,7 @@ import { ensureMoreLocale, i18nReady, storedLang, syncLanguage } from './i18n'
 import { langFromPath, pageFromPath, type PageId } from './seo/meta'
 import { browserLangs, isPublicCompPath, pickPublicLang } from './utils/publicLang'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { loggedOutRedirect } from './utils/loggedOutRedirect'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
 import { FestivalProvider, FESTIVAL_DEMO } from './festival/FestivalProvider'
@@ -264,7 +265,10 @@ function announceMounted() {
 
 function Protected({ children }: { children: ReactNode }) {
   const { isAuthed, user } = useAuth()
-  if (!isAuthed) return <Navigate to="/login" replace />
+  const { pathname, search } = useLocation()
+  // 站内比赛页地址被转发给未登录的人时，送去公开比赛页而不是登录页（见 loggedOutRedirect）。
+  // A shared in-app competition URL opens the public page for logged-out visitors.
+  if (!isAuthed) return <Navigate to={loggedOutRedirect(pathname, search)} replace />
   // 还欠手机号或昵称的账号一律先去补全（手机号目前只有 Google 注册的新用户会
   // 命中；昵称是全员必填，存量用户没设过的也会被拦一次）。放在这一层而不是各
   // 页面自己判断：漏一个页面就等于开了个后门，而这里是所有登录后页面的唯一入口。

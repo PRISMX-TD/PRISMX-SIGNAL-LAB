@@ -29,7 +29,11 @@ export default function CopyLinkButton({ link, onFail }: { link: InviteLink; onF
   const [copied, setCopied] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const timer = useRef<number | undefined>(undefined)
-  const isAgent = linkKind(link) === 'agent'
+  // 非比赛推广链接（代理 / 平台）都给两种：邀请链接打开首页，比赛链接打开当前主推比赛；
+  // 比赛推广链接本身就指向那场比赛，直接复制。
+  // Agent and platform links get both URLs (home / current featured competition);
+  // a competition promo link already points at its competition and copies directly.
+  const hasMenu = linkKind(link) !== 'competition'
 
   useEffect(() => () => window.clearTimeout(timer.current), [])
 
@@ -60,15 +64,15 @@ export default function CopyLinkButton({ link, onFail }: { link: InviteLink; onF
       <button
         type="button"
         className="btn-ghost whitespace-nowrap px-3 py-1.5 text-xs"
-        aria-haspopup={isAgent ? 'menu' : undefined}
-        aria-expanded={isAgent ? open : undefined}
+        aria-haspopup={hasMenu ? 'menu' : undefined}
+        aria-expanded={hasMenu ? open : undefined}
         // 复制成功后去掉 aria-label，读屏才念得到按钮上的「已复制」。
         // Drop aria-label once copied so screen readers announce the 'copied' text.
-        aria-label={isAgent && !copied ? t('admin.invite.copyMenu') : undefined}
-        onClick={() => (isAgent ? setOpen((v) => !v) : void doCopy(promoLinkUrl(link)))}
+        aria-label={hasMenu && !copied ? t('admin.invite.copyMenu') : undefined}
+        onClick={() => (hasMenu ? setOpen((v) => !v) : void doCopy(promoLinkUrl(link)))}
       >
         {copied ? t('admin.invite.copied') : t('admin.invite.copy')}
-        {isAgent && !copied && <span aria-hidden> ▾</span>}
+        {hasMenu && !copied && <span aria-hidden> ▾</span>}
       </button>
       {open && (
         <div
