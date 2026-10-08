@@ -57,7 +57,7 @@ export function buildEnvData(input: CardInput, t: TFunction, nickname: string) {
   const medals: Record<string, BadgeCard> = {}
   if (input.badge) medals[input.badge.id] = input.badge
   return {
-    user: { name: esc(nickname), code: '', link: SHARE_LINK },
+    user: { name: esc(nickname), code: '', link: input.comp?.link ?? SHARE_LINK },
     trades: one(input.trade),
     month: () => input.month,
     medals, materials: MATERIALS, comp, fmt, price, L,

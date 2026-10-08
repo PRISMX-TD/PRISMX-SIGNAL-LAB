@@ -38,7 +38,7 @@ import { SkeletonPage } from '../components/Skeleton'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
-import { compCard } from '../components/share/cardData'
+import { compCard, compPublicLink } from '../components/share/cardData'
 import { bugReadout, clockOf, countdownOf, fmtRange, statusTagKey } from '../components/competition/compClock'
 import StatusLine, { STATUS_TAG_CLASS } from '../components/competition/StatusLine'
 import { ScoreText, badgeOf } from '../components/competition/ScoreText'
@@ -669,7 +669,8 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
                       <button type="button"
                         onClick={() => setShare({ type: 'D', variants: [{ key: entry.login, label: '', input: { comp: compCard(
                           detail.name, entry.finalRank!, (entry.finalScore ?? row?.score ?? 0) * 100,
-                          detail.participants ?? detail.board.rows.length) } }] })}
+                          detail.participants ?? detail.board.rows.length,
+                          detail.publicView ? compPublicLink(detail.id) : undefined) } }] })}
                         className="ml-2 shrink-0 rounded-full bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
                         {t('share.button')}
                       </button>

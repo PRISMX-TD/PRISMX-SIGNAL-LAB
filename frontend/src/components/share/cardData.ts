@@ -4,6 +4,7 @@
 // can import it statically; rendering lives in cardEnv.ts.
 import type { TFunction } from 'i18next'
 import { materialOf } from '../badges/medal'
+import { ORIGIN } from '../../seo/meta'
 import { baseSymbol, displaySymbol, parseTime, toPips } from '../../api/utils'
 
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
@@ -26,7 +27,7 @@ export interface MonthCard {
   total: number; pct: number | null; winRate: number; trades: number; bestDay: number; bestPnl: number
 }
 export interface BadgeCard { id: string; tier: number; name: string; tierTxt: string; material: string; rarity: number }
-export interface CompCard { name: string; rank: number; rankSuffix: string; ret: number; participants: number; medal: { id: string; tier: number } }
+export interface CompCard { name: string; rank: number; rankSuffix: string; ret: number; participants: number; medal: { id: string; tier: number }; link?: string }
 
 export interface CardInput {
   trade?: TradeCard
@@ -146,12 +147,19 @@ const ordinal = (n: number) => {
   if (v >= 11 && v <= 13) return 'th'
   return ['th', 'st', 'nd', 'rd'][n % 10] ?? 'th'
 }
-export function compCard(name: string, rank: number, ret: number, participants: number): CompCard {
+// link：比赛可公开时传 compPublicLink(id)，卡片二维码就指向公开比赛页（设计 §4）；不传则仍是首页。
+// link: pass compPublicLink(id) when the competition is public so the QR opens the public page.
+export function compCard(name: string, rank: number, ret: number, participants: number, link?: string): CompCard {
   return {
     name, rank, rankSuffix: ordinal(rank), ret, participants,
     // 赛场勋章：冠军金、前三银、其余铜 / arena medal: gold for 1st, silver for top 3, bronze otherwise
     medal: { id: 'arena', tier: rank === 1 ? 3 : rank <= 3 ? 2 : 1 },
+    ...(link ? { link } : {}),
   }
+}
+
+export function compPublicLink(compId: string): string {
+  return `${ORIGIN}/c/${encodeURIComponent(compId)}`
 }
 
 // 单笔战报的信号曲线：取持仓期间的真实 K 线收盘价（约 30 根），拿不到就返回 null，模板退回开平仓两点。

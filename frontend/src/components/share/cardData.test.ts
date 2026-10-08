@@ -2,7 +2,7 @@
 // Pins every number on the share cards against hand-computed examples.
 import { describe, expect, it, vi } from 'vitest'
 import type { TFunction } from 'i18next'
-import { badgeCard, compCard, loadMonthOfficial, loadTradeReturn, monthCard, tradeCard } from './cardData'
+import { badgeCard, compCard, compPublicLink, loadMonthOfficial, loadTradeReturn, monthCard, tradeCard } from './cardData'
 
 // 后端分享接口的替身：返回收益榜口径的值 / stand-in for the backend share endpoints
 const api = vi.hoisted(() => ({
@@ -103,5 +103,15 @@ describe('compCard', () => {
     expect(compCard('x', 1, 10, 9).medal.tier).toBe(3)
     expect(compCard('x', 3, 10, 9).medal.tier).toBe(2)
     expect(compCard('x', 4, 10, 9).medal.tier).toBe(1)
+  })
+})
+
+describe('compCard link', () => {
+  it('carries the public page link only when given', () => {
+    expect(compCard('x', 1, 10, 9).link).toBeUndefined()
+    expect(compCard('x', 1, 10, 9, compPublicLink('abc')).link).toBe('https://www.prismxsignallab.com/c/abc')
+  })
+  it('encodes the id', () => {
+    expect(compPublicLink('a/b')).toBe('https://www.prismxsignallab.com/c/a%2Fb')
   })
 })
