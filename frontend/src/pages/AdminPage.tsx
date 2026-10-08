@@ -26,6 +26,7 @@ import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
 import EmailPanel from '../components/admin/EmailPanel'
+import { attributionOptions } from '../components/admin/invite/inviteLinkLogic'
 import type { AdminUser, InviteLink, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
@@ -541,7 +542,10 @@ export default function AdminPage() {
         // assign box. A failure is not fatal: the column falls back to the raw
         // code — still correct, just unreadable — and the two dropdowns are left
         // with their fixed options. allSettled keeps it from taking the table down.
-        adminApi.listInviteLinks(),
+        // includeDeleted：已删除（软删）的链接仍有人归因在上面，归因列与筛选器要能显示它的名字。
+        // includeDeleted: soft-deleted links still have users attributed to them; the column
+        // and filter need their labels.
+        adminApi.listInviteLinks({ includeDeleted: true }),
       ])
       // 这一批已经被后来的一次 load 取代：getTrial 没有 signal、照样会成功返回，若继续
       // 往下走就会用上一次的数据把新的一次盖掉——正是这里要防的那件事。
@@ -933,7 +937,7 @@ export default function AdminPage() {
           options={[
             { value: '', label: t('signals.all') },
             { value: NO_INVITE, label: t('admin.inviteNone') },
-            ...inviteLinks.map((l) => ({ value: l.code, label: l.label })),
+            ...attributionOptions(inviteLinks, t('admin.inviteDeletedTag')),
           ]}
         />
         <button type="submit" className="btn-primary px-5 py-2 text-sm">{t('admin.search')}</button>
@@ -1002,7 +1006,8 @@ export default function AdminPage() {
             options={[
               { value: '', label: t('admin.bulkNoChange') },
               { value: BULK_CLEAR_INVITE, label: t('admin.inviteClear') },
-              ...inviteLinks.map((l) => ({ value: l.code, label: l.label })),
+              // 批量指派不给已删除的链接 / no assigning to deleted links
+              ...attributionOptions(inviteLinks, '', false),
             ]}
           />
           <button

@@ -1496,9 +1496,16 @@ export const adminApi = {
     if (params.kind) qs.set('kind', params.kind)
     if (params.competitionId) qs.set('competitionId', params.competitionId)
     if (params.channel) qs.set('channel', params.channel)
+    if (params.includeDeleted) qs.set('includeDeleted', '1')
     const q = qs.toString()
     return request<{ links: InviteLink[] }>(`/admin/invite-links${q ? `?${q}` : ''}`)
   },
+  // 删除：没人经它注册是硬删，否则软删（归因保留）；见后端 InviteLink 模型注释。
+  // Delete: hard when nobody registered through it, soft otherwise (attribution kept).
+  deleteInviteLink: (id: string) =>
+    request<{ mode: 'hard' | 'soft' }>(`/admin/invite-links/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    }),
   createInviteLink: (body: InviteLinkCreate) =>
     request<InviteLink>('/admin/invite-links', {
       method: 'POST',

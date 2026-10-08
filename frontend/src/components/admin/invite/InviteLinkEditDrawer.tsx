@@ -31,6 +31,7 @@ export default function InviteLinkEditDrawer({
   onToggleTrial,
   onAssign,
   onRequestUnassign,
+  onRequestDelete,
   onCopyFail,
   onClose,
 }: {
@@ -43,6 +44,7 @@ export default function InviteLinkEditDrawer({
   onToggleTrial: () => void
   onAssign: (userId: string) => void
   onRequestUnassign: (userId: string) => void
+  onRequestDelete: () => void
   onCopyFail: () => void
   onClose: () => void
 }) {
@@ -219,6 +221,20 @@ export default function InviteLinkEditDrawer({
       <p className="mt-3 text-xs text-neutral-500">
         {t('admin.invite.fieldCreated')} · {fmtTime(link.createdAt)}
       </p>
+
+      {/* 危险操作放最底下、与其它写操作隔开；真正的删除在面板的确认框里（文案按注册数分两种）。
+          The danger action sits last, apart from the other writes; the panel's confirm
+          dialog does the actual delete (wording depends on registrations). */}
+      <div className="mt-5 border-t border-white/5 pt-4">
+        <button
+          type="button"
+          className="rounded-lg border border-down/40 px-4 py-1.5 text-xs text-down transition hover:bg-down/10 disabled:opacity-40"
+          disabled={busy}
+          onClick={onRequestDelete}
+        >
+          {t('admin.invite.delete')}
+        </button>
+      </div>
     </AdminSheet>
   )
 }

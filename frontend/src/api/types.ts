@@ -230,6 +230,9 @@ export interface InviteLink {
   // 代理专属开户链接（只给非比赛链接）；null = 访客用比赛默认的。代理也能在代理页自己改。
   // Agent open-account URL (non-competition links); null = the competition's default.
   openAccountUrl?: string | null
+  // 软删时间；只有 includeDeleted 列表里才会非空（用户表靠它显示已删链接的名字）。
+  // Soft-delete time; only non-null in an includeDeleted listing (users-table labels).
+  deletedAt?: string | null
 }
 
 export interface InviteLinkCreate {
@@ -254,6 +257,8 @@ export interface InviteLinkListParams {
   kind?: InviteLinkKind
   competitionId?: string
   channel?: string
+  // 连已软删的一起要 / include soft-deleted links
+  includeDeleted?: boolean
 }
 
 export interface InviteLinkAgent {

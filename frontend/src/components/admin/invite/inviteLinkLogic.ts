@@ -167,3 +167,27 @@ export function labelPatch(
   }
   return Object.keys(patch).length > 0 ? patch : null
 }
+
+// 删除确认框的正文：没人经它注册 → 硬删、不可恢复；有人注册 → 软删，归因保留（后端规则见
+// InviteLink 模型注释）。返回 i18n 键与参数，组件只管 t()。
+// Delete-confirm body: nobody registered → hard delete, irreversible; otherwise a soft
+// delete that keeps attribution (see the backend InviteLink model). Returns key + params.
+export function deleteConfirmMessage(registrations: number): { key: string; params?: { n: number } } {
+  return registrations > 0
+    ? { key: 'admin.invite.deleteConfirmUsed', params: { n: registrations } }
+    : { key: 'admin.invite.deleteConfirmEmpty' }
+}
+
+// 用户表归因下拉的选项：已软删的链接仍要能选（筛出挂在它上面的老用户），名字后面加标记；
+// 批量指派传 includeDeleted=false——不该把人指到一条已删除的链接上。
+// Users-table attribution options: soft-deleted links stay selectable (to find users still
+// attributed to them) with a tag appended; bulk assign passes includeDeleted=false.
+export function attributionOptions(
+  links: Pick<InviteLink, 'code' | 'label' | 'deletedAt'>[],
+  deletedTag: string,
+  includeDeleted = true,
+): { value: string; label: string }[] {
+  return links
+    .filter((l) => includeDeleted || !l.deletedAt)
+    .map((l) => ({ value: l.code, label: l.deletedAt ? `${l.label}${deletedTag}` : l.label }))
+}

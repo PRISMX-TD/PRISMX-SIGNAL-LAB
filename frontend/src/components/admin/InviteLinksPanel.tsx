@@ -35,6 +35,7 @@ import {
   KIND_FILTERS,
   NO_CHANNEL,
   channelOptions,
+  deleteConfirmMessage,
   filterLinks,
   hasUnchanneled,
   kindBadgeClass,
@@ -74,6 +75,9 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   // re-assigning, so a plain confirmation rather than a danger-styled one. Non-centered
   // so it stacks above the drawer (see AdminSheet).
   const [unassignTarget, setUnassignTarget] = useState<{ link: InviteLink; userId: string } | null>(null)
+  // 待确认的「删除链接」。危险态确认框，同样用非 center 版压在抽屉上面。
+  // The pending "delete link": a danger-styled, non-centered confirm above the drawer.
+  const [deleteTarget, setDeleteTarget] = useState<InviteLink | null>(null)
 
   // 名字从链接自己的 agents 列表里取，而不是在入口处传一份。
   // The display name is looked up from the link's own agents list.
@@ -142,6 +146,24 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
     if (busyId) return
     setUnassignTarget(null)
     void runWrite(l.id, () => adminApi.unassignInviteAgent(l.id, userId))
+  }
+
+  // 删除不走 runWrite：它不回整条链接，成功后是把这一行从列表里拿掉。单飞闸照样遵守。
+  // Delete bypasses runWrite (no row comes back — the row is removed) but keeps the gate.
+  const deleteLink = async (l: InviteLink) => {
+    if (busyId) return
+    setBusyId(l.id)
+    try {
+      await adminApi.deleteInviteLink(l.id)
+      setLinks((prev) => prev.filter((x) => x.id !== l.id))
+      setDeleteTarget(null)
+      setEditId((cur) => (cur === l.id ? null : cur))
+      showToast('ok', t('admin.invite.deleted'))
+    } catch (err) {
+      showErr(err, 'admin.saveError')
+    } finally {
+      setBusyId(null)
+    }
   }
 
   const copyFailed = () => showToast('err', t('admin.invite.copyFailed'))
@@ -360,6 +382,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           onToggleTrial={() => toggleTrial(editing)}
           onAssign={(userId) => assignAgent(editing, userId)}
           onRequestUnassign={(userId) => setUnassignTarget({ link: editing, userId })}
+          onRequestDelete={() => setDeleteTarget(editing)}
           onCopyFail={copyFailed}
           onClose={() => setEditId(null)}
         />
@@ -373,6 +396,21 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           confirmLabel={t('admin.invite.unassign')}
           onConfirm={() => unassignAgent(unassignTarget.link, unassignTarget.userId)}
           onCancel={() => setUnassignTarget(null)}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmModal
+          danger
+          busy={busyId !== null}
+          title={t('admin.invite.deleteConfirmTitle', { label: deleteTarget.label })}
+          message={(() => {
+            const m = deleteConfirmMessage(deleteTarget.registrations)
+            return t(m.key, m.params)
+          })()}
+          confirmLabel={t('admin.invite.delete')}
+          onConfirm={() => void deleteLink(deleteTarget)}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
     </div>

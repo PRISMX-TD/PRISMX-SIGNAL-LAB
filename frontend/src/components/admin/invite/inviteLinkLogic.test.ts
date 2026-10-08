@@ -4,6 +4,8 @@ import {
   ALL_CHANNELS,
   CHANNEL_MAX,
   DEFAULT_FILTER,
+  attributionOptions,
+  deleteConfirmMessage,
   NO_CHANNEL,
   channelOptions,
   filterLinks,
@@ -175,5 +177,31 @@ describe('labelPatch', () => {
     expect(labelPatch(l, { label: 'a', channel: '', openAccountUrl: 'https://evil.io/x' })).toBeNull()
     // 不传草稿（比赛链接）= 不碰这个字段 / no draft (competition link) = untouched
     expect(labelPatch({ ...l, openAccountUrl: u }, { label: 'b', channel: '' })).toEqual({ label: 'b' })
+  })
+})
+
+describe('deleteConfirmMessage', () => {
+  it('没人注册：不可恢复的提示 / nobody registered: the irreversible warning', () => {
+    expect(deleteConfirmMessage(0)).toEqual({ key: 'admin.invite.deleteConfirmEmpty' })
+  })
+  it('有人注册：带人数的软删提示 / with signups: the soft-delete warning with N', () => {
+    expect(deleteConfirmMessage(1)).toEqual({ key: 'admin.invite.deleteConfirmUsed', params: { n: 1 } })
+    expect(deleteConfirmMessage(37)).toEqual({ key: 'admin.invite.deleteConfirmUsed', params: { n: 37 } })
+  })
+})
+
+describe('attributionOptions', () => {
+  it('已删除的链接带标记，未删除的原样 / deleted links get the tag', () => {
+    const live = mk({ code: 'live', label: '活' })
+    const gone = mk({ code: 'gone', label: '旧', deletedAt: '2026-10-09T00:00:00Z' })
+    expect(attributionOptions([live, gone], '（已删除）')).toEqual([
+      { value: 'live', label: '活' },
+      { value: 'gone', label: '旧（已删除）' },
+    ])
+  })
+  it('includeDeleted=false 时去掉已删除的（批量指派不该指到已删链接）/ drops deleted when asked', () => {
+    const live = mk({ code: 'live', label: '活' })
+    const gone = mk({ code: 'gone', label: '旧', deletedAt: '2026-10-09T00:00:00Z' })
+    expect(attributionOptions([live, gone], '（已删除）', false)).toEqual([{ value: 'live', label: '活' }])
   })
 })
