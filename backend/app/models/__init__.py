@@ -1414,6 +1414,16 @@ class InviteLink(Base):
     # so NOT NULL would contradict the actual database state. The migration
     # backfills them to False and every read wraps in bool().
     grants_trial = Column(Boolean, default=False, nullable=True)
+    # rev 35：比赛推广链接。非空 = 这条链接属于某场比赛（软引用，不建外键——与生产
+    # ALTER 路径一致；创建后不可改）。索引 idx_invite_links_competition 只在
+    # database._migrate_columns 的统一索引块里建，这里刻意不写 index=True。
+    # rev 35: competition promo link. Non-null = belongs to a competition (soft
+    # reference, no FK, immutable after creation). Its index lives only in the
+    # unified index block of _migrate_columns, hence no index=True here.
+    competition_id = Column(String, nullable=True)
+    # 渠道标签（自由文本 ≤32，如「FB广告」「微信群」），统计可按它汇总。
+    # Channel tag (free text ≤32, e.g. "FB ads"); stats can group by it.
+    channel = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 
@@ -1557,6 +1567,12 @@ class Competition(Base):
     ends_at = Column(DateTime, nullable=False)
     status = Column(String, nullable=False, default="draft")    # draft→upcoming→running→ended→settled 只进不退
     prize_note = Column(Text, nullable=True)
+    # rev 35：公开比赛页开关（读取一律 bool()；迁移把存量行回填 False）与本场开户链接
+    # （https，公开页「去开户」按钮用）。
+    # rev 35: public page switch (always read via bool(); existing rows backfilled
+    # False) and this competition's open-account URL (https).
+    public_view = Column(Boolean, nullable=True, default=False)
+    open_account_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 
@@ -1581,6 +1597,36 @@ class CompetitionParticipant(Base):
     # Open positions at the end (rev 34): platform positions still open then are
     # scored at this floating P/L; NULL = not captured yet.
     end_positions = Column(Text, nullable=True)
+    # rev 35：公开页是否显示昵称。NULL = 未表态（公开页按匿名处理）；报名公开比赛即写 True。
+    # rev 35: show nickname on the public page. NULL = undecided (anonymous).
+    public_name = Column(Boolean, nullable=True)
+    # rev 35：管理员隐藏名字（迁移回填 False，读取一律 bool()）。
+    # rev 35: admin-hidden name (backfilled False, always read via bool()).
+    name_hidden = Column(Boolean, nullable=True, default=False)
+
+
+class PromoFunnelDaily(Base):
+    """比赛推广漏斗的按天计数（rev 35）：公开比赛页的 view / cta / open_account 三步，
+    按 (天, 比赛, 邀请码, 步骤) 累加，不记录是谁——同 PageViewStat 的「无身份」取舍。
+    没带 ref 的访问 code 记 ''（不是 NULL：NULL 不参与唯一约束，累加会插出重复行）。
+    Daily promo-funnel counters for public competition pages, keyed by
+    (day, competition, code, step) with no user identity. No-ref visits use
+    code='' rather than NULL, since NULLs escape the unique constraint.
+    """
+    __tablename__ = "promo_funnel_daily"
+    __table_args__ = (
+        UniqueConstraint("day", "competition_id", "code", "step",
+                         name="uq_promo_funnel_day_comp_code_step"),
+        # 漏斗表按比赛取数 / the funnel query filters by competition
+        Index("idx_promo_funnel_comp", "competition_id"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    day = Column(String, nullable=False)              # 'YYYY-MM-DD'（UTC）
+    competition_id = Column(String, nullable=False)   # 软引用，无外键 / soft reference
+    code = Column(String, nullable=False, default="")
+    step = Column(String, nullable=False)             # view / cta / open_account
+    count = Column(Integer, nullable=False, default=0)
 
 
 class PasswordResetToken(Base):

@@ -198,7 +198,12 @@ def _hash_legacy_api_tokens() -> None:
 #          不回填，NULL = 不设上限；两者相等 = 只收这一个金额）。纯 ADD COLUMN。
 # rev 34 — competition_participants.end_positions（比赛结束时的持仓快照 JSON，结束那一刻
 #          还开着的平台单按它计入成绩）。可空、不回填：NULL = 还没拍到。纯 ADD COLUMN。
-CURRENT_SCHEMA_REV = 34
+# rev 35 — 比赛推广链接 + 公开比赛页（设计 2026-10-08 §2）：invite_links.competition_id /
+#          channel、competitions.open_account_url、competition_participants.public_name
+#          可空不回填；competitions.public_view 与 competition_participants.name_hidden
+#          **刚加列时回填 FALSE**（读取处仍一律 bool()）。新表 promo_funnel_daily 由
+#          create_all 建；idx_invite_links_competition 放在统一索引块。全部纯 ADD COLUMN。
+CURRENT_SCHEMA_REV = 35
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -572,13 +577,35 @@ def _migrate_columns() -> None:
             # rev 33：本金上限，可空不回填（NULL = 不设上限）/ capital ceiling, nullable, no backfill
             if "max_baseline_usd" not in comp_cols:
                 conn.execute(text("ALTER TABLE competitions ADD COLUMN max_baseline_usd FLOAT"))
+            # rev 35：公开页开关是新行为的入口，存量比赛一律回填 FALSE（不公开）；
+            # 本场开户链接可空不回填。
+            # rev 35: the public switch gates new behaviour, so existing rows are
+            # backfilled FALSE (private); the open-account URL is nullable, no backfill.
+            if "public_view" not in comp_cols:
+                conn.execute(text("ALTER TABLE competitions ADD COLUMN public_view BOOLEAN"))
+                conn.execute(text(
+                    "UPDATE competitions SET public_view = FALSE WHERE public_view IS NULL"))
+            if "open_account_url" not in comp_cols:
+                conn.execute(text("ALTER TABLE competitions ADD COLUMN open_account_url VARCHAR"))
 
     # rev 34：结束时持仓快照，可空不回填 / end-of-competition position snapshot, nullable
+    # rev 35：public_name 可空不回填（NULL = 未表态、公开页匿名）；name_hidden 回填 FALSE。
+    # rev 35: public_name nullable, no backfill (NULL = undecided, anonymous on the
+    # public page); name_hidden backfilled FALSE.
     if "competition_participants" in inspector.get_table_names():
         cp_cols = {c["name"] for c in inspector.get_columns("competition_participants")}
-        if "end_positions" not in cp_cols:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "end_positions" not in cp_cols:
                 conn.execute(text("ALTER TABLE competition_participants ADD COLUMN end_positions TEXT"))
+            if "public_name" not in cp_cols:
+                conn.execute(text(
+                    "ALTER TABLE competition_participants ADD COLUMN public_name BOOLEAN"))
+            if "name_hidden" not in cp_cols:
+                conn.execute(text(
+                    "ALTER TABLE competition_participants ADD COLUMN name_hidden BOOLEAN"))
+                conn.execute(text(
+                    "UPDATE competition_participants SET name_hidden = FALSE "
+                    "WHERE name_hidden IS NULL"))
 
     if "mt5_accounts" in inspector.get_table_names():
         acc_cols = {c["name"] for c in inspector.get_columns("mt5_accounts")}
@@ -1173,12 +1200,20 @@ def _migrate_columns() -> None:
     # in fact perfectly definite.
     if "invite_links" in inspector.get_table_names():
         invite_cols = {c["name"] for c in inspector.get_columns("invite_links")}
-        if "grants_trial" not in invite_cols:
-            with engine.begin() as conn:
+        with engine.begin() as conn:
+            if "grants_trial" not in invite_cols:
                 conn.execute(text("ALTER TABLE invite_links ADD COLUMN grants_trial BOOLEAN"))
                 conn.execute(text(
                     "UPDATE invite_links SET grants_trial = FALSE WHERE grants_trial IS NULL"
                 ))
+            # rev 35：比赛推广链接（软引用，无外键）与渠道标签，都可空不回填——存量链接
+            # 本来就不属于任何比赛、也没有渠道。索引见统一索引块。
+            # rev 35: competition link (soft ref, no FK) and channel tag, nullable with
+            # no backfill. The index is in the unified index block.
+            if "competition_id" not in invite_cols:
+                conn.execute(text("ALTER TABLE invite_links ADD COLUMN competition_id VARCHAR"))
+            if "channel" not in invite_cols:
+                conn.execute(text("ALTER TABLE invite_links ADD COLUMN channel VARCHAR"))
 
     # rev 22：公告的「弹窗展示」开关。存量公告一律不弹——这一列是新行为的入口，
     # 回填成 TRUE 等于给所有历史公告追发一轮弹窗。两张配套新表（user_notifications、
@@ -1470,6 +1505,14 @@ def _migrate_columns() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_signals_source_created "
             "ON signals(source, created_at)"
+        ))
+        # rev 35：管理端按比赛查推广链接（比赛页「本场推广链接」、漏斗表）。列由本函数
+        # 补出，所以同样必须留在这个块里。
+        # rev 35: admin looks up promo links by competition; the column is added by
+        # this function, so the index belongs in this block.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_invite_links_competition "
+            "ON invite_links(competition_id)"
         ))
 
     _drop_redundant_candle_index(is_postgres)

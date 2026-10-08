@@ -35,6 +35,8 @@ _INDEXED_MIGRATED_COLUMNS = [
     ("strategy_signals", "result", "idx_strategy_signals_strategy_result",
      ["strategy_id", "result"]),
     ("signals", "result", "idx_signals_symbol_result", ["symbol", "result"]),
+    # rev 35：比赛推广链接 / competition promo links
+    ("invite_links", "competition_id", "idx_invite_links_competition", ["competition_id"]),
 ]
 
 
