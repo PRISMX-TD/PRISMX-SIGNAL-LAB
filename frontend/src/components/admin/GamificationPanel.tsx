@@ -167,6 +167,7 @@ export default function GamificationPanel() {
   const [savingUserVisible, setSavingUserVisible] = useState(false)
   const [savingLeaderboardVisible, setSavingLeaderboardVisible] = useState(false)
   const [savingCompetitionsVisible, setSavingCompetitionsVisible] = useState(false)
+  const [savingPublicEnabled, setSavingPublicEnabled] = useState(false)
   const [baselineDraft, setBaselineDraft] = useState('')
   const [savingBaseline, setSavingBaseline] = useState(false)
   const [minTradesReturnDraft, setMinTradesReturnDraft] = useState('')
@@ -206,7 +207,7 @@ export default function GamificationPanel() {
   // the file header for the "up only, never revoked" framing.
   // 翻开哪一个开关正等着确认（站内 ConfirmModal，不再用 window.confirm）。
   // Which switch is waiting for its open-confirmation.
-  const [pendingOpen, setPendingOpen] = useState<null | 'user' | 'board' | 'comps'>(null)
+  const [pendingOpen, setPendingOpen] = useState<null | 'user' | 'board' | 'comps' | 'public'>(null)
 
   const applyUserVisible = async (next: boolean) => {
     setSavingUserVisible(true)
@@ -244,11 +245,28 @@ export default function GamificationPanel() {
     }
   }
 
+  // 公开比赛页总开关（设计 §1.7）：应急闸，打开要确认、关闭立即生效且随时可关——
+  // 与上面「只升不降」的三个开关不同，出问题时第一步就是关它（§6 回滚）。
+  // Public competition pages kill switch (§1.7): confirm to open, close instantly and at
+  // any time — unlike the up-only switches above, closing it is the first rollback step.
+  const applyPublicEnabled = async (next: boolean) => {
+    setSavingPublicEnabled(true)
+    setSettingsError(null)
+    try {
+      setSettings(await adminApi.updateGamificationSettings({ competitionsPublicEnabled: next }))
+    } catch (err) {
+      setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
+    } finally {
+      setSavingPublicEnabled(false)
+    }
+  }
+
   // 翻开 → 先弹确认；翻回关 → 直接生效（与任务书口径一致：不设二次确认）。
   // Opening asks first; closing applies immediately.
   const toggleUserVisible = (next: boolean) => (next ? setPendingOpen('user') : void applyUserVisible(false))
   const toggleLeaderboardVisible = (next: boolean) => (next ? setPendingOpen('board') : void applyLeaderboardVisible(false))
   const toggleCompetitionsVisible = (next: boolean) => (next ? setPendingOpen('comps') : void applyCompetitionsVisible(false))
+  const togglePublicEnabled = (next: boolean) => (next ? setPendingOpen('public') : void applyPublicEnabled(false))
 
   // 下限输入框自己的保存按钮，只在数值合法且与当前设置不同时才可点——两个开关
   // 各自单字段 PATCH 已经天然「只送变更字段」，这里的 dirty 判断是同一条铁律
@@ -456,6 +474,15 @@ export default function GamificationPanel() {
               offLabel={t('gamification.admin.visibleOff')}
               onChange={toggleCompetitionsVisible}
             />
+            <SettingsToggleRow
+              label={t('admin.competitionPromo.publicSwitch')}
+              checked={!!settings?.competitionsPublicEnabled}
+              saving={savingPublicEnabled}
+              onLabel={t('gamification.admin.visibleOn')}
+              offLabel={t('gamification.admin.visibleOff')}
+              onChange={togglePublicEnabled}
+            />
+            <p className="-mt-1 text-[11px] text-neutral-500">{t('admin.competitionPromo.publicSwitchHint')}</p>
             {pendingOpen && (
               <ConfirmModal
                 center
@@ -464,14 +491,18 @@ export default function GamificationPanel() {
                     ? t('gamification.admin.visibility')
                     : pendingOpen === 'board'
                       ? t('leaderboard.admin.leaderboardSwitch')
-                      : t('leaderboard.admin.competitionsSwitch')
+                      : pendingOpen === 'comps'
+                        ? t('leaderboard.admin.competitionsSwitch')
+                        : t('admin.competitionPromo.publicSwitch')
                 }
                 message={
                   pendingOpen === 'user'
                     ? t('gamification.admin.confirmOpen')
                     : pendingOpen === 'board'
                       ? t('leaderboard.admin.confirmOpenBoard')
-                      : t('leaderboard.admin.confirmOpenCompetitions')
+                      : pendingOpen === 'comps'
+                        ? t('leaderboard.admin.confirmOpenCompetitions')
+                        : t('admin.competitionPromo.confirmPublic')
                 }
                 onCancel={() => setPendingOpen(null)}
                 onConfirm={() => {
@@ -479,7 +510,8 @@ export default function GamificationPanel() {
                   setPendingOpen(null)
                   if (k === 'user') void applyUserVisible(true)
                   else if (k === 'board') void applyLeaderboardVisible(true)
-                  else void applyCompetitionsVisible(true)
+                  else if (k === 'comps') void applyCompetitionsVisible(true)
+                  else void applyPublicEnabled(true)
                 }}
               />
             )}
