@@ -68,6 +68,17 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   // 还在防抖里没发出去的数据，退到后台时立即发（见下方 flushPending）
   // Data still waiting out its debounce; sent at once when the app is backgrounded
   const pendingByNs = useRef<Record<string, Record<string, unknown>>>({})
+  // 未登录不上云：登录页 / 公开页上的 LanguageToggle 也会 setPref，而这时没有 token，
+  // PUT /prefs 必然 401——白发一次请求，且旧版 client.ts 会因此跑一遍登出清理，把注册前
+  // 采集的比赛意图一起清掉。本地状态与缓存照写；登录后云端那份到达时整份替换。
+  // 用 ref：saveToCloud / sendNow 是稳定的 useCallback，不随登录态换身份。
+  // No cloud saves while logged out: the LanguageToggle on login / public pages calls setPref
+  // with no token, so PUT /prefs can only 401 — a wasted request that, in the old client.ts,
+  // also ran the logout teardown and wiped the pre-signup competition intent. Local state and
+  // cache are still written; the cloud copy replaces them after sign-in. A ref keeps
+  // saveToCloud / sendNow stable.
+  const isAuthedRef = useRef(isAuthed)
+  isAuthedRef.current = isAuthed
 
   // 登录后从云端加载偏好 / load prefs from cloud after login
   useEffect(() => {
@@ -75,6 +86,11 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
       setPrefsState({})
       setLoaded(false)
       lastSavedByNs.current = {}
+      // 登出时丢掉还在防抖里的保存：它们属于上一个会话，此刻已无 token 可用。
+      // Drop debounced saves on logout: they belong to the previous session and have no token.
+      for (const id of Object.values(saveTimers.current)) window.clearTimeout(id)
+      saveTimers.current = {}
+      pendingByNs.current = {}
       return
     }
     setLoaded(false)
@@ -124,7 +140,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
     delete timers[ns]
     const nsData = pendingByNs.current[ns]
     delete pendingByNs.current[ns]
-    if (!nsData) return
+    if (!nsData || !isAuthedRef.current) return
     const json = JSON.stringify(nsData)
     userApi.putPrefs(ns, nsData)
       .then(() => { lastSavedByNs.current[ns] = json })
@@ -132,6 +148,7 @@ export function PrefsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const saveToCloud = useCallback((ns: string, nsData: Record<string, unknown>) => {
+    if (!isAuthedRef.current) return
     const json = JSON.stringify(nsData)
     if (json === lastSavedByNs.current[ns]) return
     const timers = saveTimers.current
