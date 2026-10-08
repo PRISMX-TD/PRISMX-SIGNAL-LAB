@@ -4,7 +4,7 @@
 不给外界任何探测 code 存活状态的信号。计数是一条条件原子 UPDATE（照
 payments.py 试用抢占的写法），同时消掉读改写竞态和停用判断的时间差。
 
-链接行永不删除（见 InviteLink 模型注释）；审计日志照平台设置的惯例写——
+链接删除分硬删 / 软删（见 InviteLink 模型注释与 delete_invite_link）；审计日志照平台设置的惯例写——
 AdminAuditLog.target_user_id 是指向 users.id 的非空外键，拿链接当目标在
 Postgres 会外键违约，所以用操作者自身占位、field 加 "invite:" 前缀区分。
 
@@ -15,6 +15,8 @@ conditional atomic UPDATE (the payments.py trial-claim shape), which removes
 both the lost-update race and the is_active TOCTOU. Audit rows follow the
 platform-settings convention: target_user_id is a NOT NULL FK to users, so
 the acting admin stands in and the "invite:" field prefix disambiguates.
+Deletion is hard or soft depending on attribution (see the InviteLink model and
+delete_invite_link).
 """
 import json
 import secrets
@@ -156,7 +158,9 @@ def _normalize_code(code: str) -> str:
 def record_click(db: Session, code: str) -> None:
     """点击计数：条件原子 UPDATE；未命中（不存在/已停用）静默不计。"""
     db.query(InviteLink).filter(
-        InviteLink.code == _normalize_code(code), InviteLink.is_active.is_(True)
+        InviteLink.code == _normalize_code(code),
+        InviteLink.is_active.is_(True),
+        InviteLink.deleted_at.is_(None),
     ).update({InviteLink.clicks: InviteLink.clicks + 1}, synchronize_session=False)
     db.commit()
 
@@ -177,7 +181,13 @@ def _active_link(db: Session, code: str) -> InviteLink | None:
     """
     return (
         db.query(InviteLink)
-        .filter(InviteLink.code == _normalize_code(code), InviteLink.is_active.is_(True))
+        .filter(
+            InviteLink.code == _normalize_code(code),
+            InviteLink.is_active.is_(True),
+            # 软删会同时置 is_active=False；这里再挡一次，防止有人把停用开关拨回来。
+            # Soft delete also clears is_active; filtered again in case it is flipped back.
+            InviteLink.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -208,7 +218,9 @@ def pick_ref(db: Session, refs: list[str] | None) -> str | None:
     active = {
         code
         for (code,) in db.query(InviteLink.code).filter(
-            InviteLink.code.in_(codes), InviteLink.is_active.is_(True)
+            InviteLink.code.in_(codes),
+            InviteLink.is_active.is_(True),
+            InviteLink.deleted_at.is_(None),
         )
     }
     if not active:
@@ -437,6 +449,7 @@ def _link_out(
         competitionName=competition_name,
         channel=link.channel,
         openAccountUrl=link.open_account_url,
+        deletedAt=link.deleted_at,
         kind=_link_kind(link, agents),
         entries=entries,
         registrationsMonth=registrations_month,
@@ -716,7 +729,7 @@ def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
     links = (
         db.query(InviteLink)
         .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
-        .filter(InviteLinkAgent.user_id == user.id)
+        .filter(InviteLinkAgent.user_id == user.id, InviteLink.deleted_at.is_(None))
         .order_by(InviteLink.created_at.desc())
         .all()
     )
@@ -749,7 +762,11 @@ def _owned_link(db: Session, user: User, link_id: str) -> InviteLink:
     link = (
         db.query(InviteLink)
         .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
-        .filter(InviteLink.id == link_id, InviteLinkAgent.user_id == user.id)
+        .filter(
+            InviteLink.id == link_id,
+            InviteLinkAgent.user_id == user.id,
+            InviteLink.deleted_at.is_(None),
+        )
         .first()
     )
     if link is None:
@@ -1220,6 +1237,11 @@ def list_invite_links(
     kind: Literal["competition", "agent", "platform"] | None = Query(default=None),
     competitionId: str | None = Query(default=None, max_length=64),
     channel: str | None = Query(default=None, max_length=32),
+    # 普通默认值而不是 Query(default=False)：服务级测试直接调用本函数时不传它，
+    # Query 对象本身是真值，会把已删除的链接悄悄带出来。
+    # A plain default, not Query(default=False): service-level callers omit it, and a
+    # Query object is truthy — it would silently include deleted links.
+    includeDeleted: bool = False,
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
@@ -1228,6 +1250,10 @@ def list_invite_links(
     # _link_outs 里各一条批量查询。
     # Kind filter mirrors _link_kind, done in SQL. Counts are batched in _link_outs.
     q = db.query(InviteLink)
+    # 软删的链接默认不出现；用户表的归因列 / 筛选器带 includeDeleted 拉，好显示它们的名字。
+    # Soft-deleted links are hidden unless includeDeleted (the users table needs labels).
+    if not includeDeleted:
+        q = q.filter(InviteLink.deleted_at.is_(None))
     has_agents = InviteLink.id.in_(select(InviteLinkAgent.link_id))
     if kind == "competition":
         q = q.filter(InviteLink.competition_id.isnot(None))
@@ -1304,9 +1330,7 @@ def update_invite_link(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    link = db.query(InviteLink).filter(InviteLink.id == link_id).first()
-    if link is None:
-        raise HTTPException(status_code=404, detail="链接不存在 / Link not found")
+    link = _admin_link(db, link_id)
     data = body.model_dump(exclude_unset=True)
     old = _audit_value(link)
     # 先做会 400 的那一项，校验不过时别的字段还没动过。
@@ -1333,7 +1357,13 @@ def update_invite_link(
 
 
 def _admin_link(db: Session, link_id: str) -> InviteLink:
-    link = db.query(InviteLink).filter(InviteLink.id == link_id).first()
+    """管理端按 id 取一条未删除的链接；不存在或已软删一律 404。
+    Fetch a non-deleted link for admin writes; unknown or soft-deleted is 404."""
+    link = (
+        db.query(InviteLink)
+        .filter(InviteLink.id == link_id, InviteLink.deleted_at.is_(None))
+        .first()
+    )
     if link is None:
         raise HTTPException(status_code=404, detail="链接不存在 / Link not found")
     return link
@@ -1341,6 +1371,45 @@ def _admin_link(db: Session, link_id: str) -> InviteLink:
 
 def _link_out_full(db: Session, link: InviteLink) -> InviteLinkOut:
     return _link_outs(db, [link])[0]
+
+
+@admin_router.delete("/{link_id}", response_model=dict)
+def delete_invite_link(
+    link_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """删除邀请链接（规则见 InviteLink 模型注释）。
+
+    没有任何用户归因到这个码 → 硬删：代理行与链接行一起删，码释放（没人挂在它上面，
+    重新生成也不会错归因）。promo_funnel_daily 里按文本记的这个码不动——漏斗历史是
+    软指标，留着。
+    有人归因 → 软删：写 deleted_at、停用、删代理行（代理随即失去这条链接）；链接行
+    保留，new_unique_code 仍把码视为已占用。用户的 invite_code / plan_note 一律不动。
+    不存在或已软删 → 404。两种都写一条 invite:{code} 审计。
+
+    Delete an invite link. HARD (row + agent rows) when no user carries the code,
+    SOFT (deleted_at, inactive, agent rows removed, row kept so the code is never
+    reissued) otherwise. Users' attribution is never touched. Unknown or already
+    soft-deleted ids are 404. Both modes are audited under invite:{code}.
+    """
+    link = _admin_link(db, link_id)
+    attributed = db.query(User.id).filter(User.invite_code == link.code).first() is not None
+    mode = "soft" if attributed else "hard"
+    old = _audit_value(link)
+    db.query(InviteLinkAgent).filter(InviteLinkAgent.link_id == link.id).delete(
+        synchronize_session=False
+    )
+    if attributed:
+        link.deleted_at = datetime.now(timezone.utc)
+        link.is_active = False
+    else:
+        db.delete(link)
+    _log_change(
+        db, admin.id, admin.id, f"invite:{link.code}", old, json.dumps({"deleted": mode})
+    )
+    db.commit()
+    return {"mode": mode}
 
 
 @admin_router.post("/{link_id}/agents", response_model=InviteLinkOut)

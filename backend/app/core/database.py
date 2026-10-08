@@ -205,7 +205,9 @@ def _hash_legacy_api_tokens() -> None:
 #          create_all 建；idx_invite_links_competition 放在统一索引块。全部纯 ADD COLUMN。
 # rev 36 — invite_links.open_account_url（代理专属开户链接，见 services/open_account.py）。
 #          可空、不回填：NULL = 用比赛默认开户链接。纯 ADD COLUMN。
-CURRENT_SCHEMA_REV = 36
+# rev 37 — invite_links.deleted_at（邀请链接软删，见 InviteLink 模型注释）。可空、不回填：
+#          NULL = 未删除。纯 ADD COLUMN。
+CURRENT_SCHEMA_REV = 37
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1220,6 +1222,10 @@ def _migrate_columns() -> None:
             # rev 36: agent open-account URL, nullable, no backfill (NULL = comp default).
             if "open_account_url" not in invite_cols:
                 conn.execute(text("ALTER TABLE invite_links ADD COLUMN open_account_url VARCHAR"))
+            # rev 37：软删时间，可空不回填——存量链接都没删。
+            # rev 37: soft-delete timestamp, nullable, no backfill (nothing is deleted yet).
+            if "deleted_at" not in invite_cols:
+                conn.execute(text(f"ALTER TABLE invite_links ADD COLUMN deleted_at {datetime_type}"))
 
     # rev 22：公告的「弹窗展示」开关。存量公告一律不弹——这一列是新行为的入口，
     # 回填成 TRUE 等于给所有历史公告追发一轮弹窗。两张配套新表（user_notifications、

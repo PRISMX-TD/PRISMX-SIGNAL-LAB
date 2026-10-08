@@ -1381,13 +1381,27 @@ class UserNotification(Base):
 class InviteLink(Base):
     """邀请链接：管理员生成的带标记推广链接。code 进 URL（?ref=code），label 是
     管理员起的标记名；用户经链接注册时 label 快照进 users.plan_note、code 写进
-    users.invite_code 做永久归因。行永不删除——删除会释放唯一 code，将来重新生成
-    同码会把老用户错误归因；下线合作用 is_active 停用。
+    users.invite_code 做永久归因。临时下线合作用 is_active 停用。
+
+    删除（DELETE /admin/invite-links/{id}，rev 37）分两种，取决于有没有人归因到它：
+    - 没有任何用户 invite_code == code → 硬删：行与 invite_link_agents 行一起删。码被释放、
+      将来可能重新生成——安全，因为没有人挂在这个码上（promo_funnel_daily 只按文本记码，
+      作为软指标历史保留）。
+    - 有人归因 → 软删：写 deleted_at、置 is_active=False、删掉代理行；行本身保留，所以
+      new_unique_code 仍视此码为已占用，老用户永远不会被错误归因到一条新链接上。用户的
+      invite_code / plan_note 不动。软删后的链接不出现在默认列表、不能再改/指派、
+      点击不计、注册不归因；管理端带 includeDeleted 才会返回（用户表的归因列靠它显示名字）。
     Admin-generated promo link. `code` goes into the URL (?ref=code); at
     registration the label is snapshotted into users.plan_note and the code
-    into users.invite_code for permanent attribution. Rows are never deleted —
-    that would free the unique code for regeneration and misattribute old
-    users; retire a link by flipping is_active instead.
+    into users.invite_code for permanent attribution. Retire temporarily by
+    flipping is_active. Deleting (rev 37) is HARD when no user carries the code
+    (row + agent rows removed; the code may be regenerated, which is safe since
+    nobody is attributed to it) and SOFT otherwise: deleted_at is set,
+    is_active cleared and agent rows removed, but the row stays so the code is
+    never reissued and old users are never misattributed. Users' invite_code /
+    plan_note are untouched. Soft-deleted links are hidden from the default list,
+    reject edits/assignments, count no clicks and attribute no signups; the admin
+    list returns them only with includeDeleted (for the users table's labels).
     """
     __tablename__ = "invite_links"
 
@@ -1430,6 +1444,9 @@ class InviteLink(Base):
     # services/open_account.py). Non-competition links only; visitors attributed to
     # this link are sent here from a competition's open-account button.
     open_account_url = Column(String, nullable=True)
+    # rev 37：软删时间（见类注释）。NULL = 未删除。
+    # rev 37: soft-delete timestamp (see the class docstring). NULL = not deleted.
+    deleted_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 
@@ -1441,7 +1458,7 @@ class InviteLinkAgent(Base):
     这个人的行」派生（见 routers/invite.py 的 is_agent）。这样后端所有 require_admin
     判定与前端所有 role === 'admin' 判定都不必碰，也不会出现代理被误当成半个
     管理员的可能。一条链接可指派给多人，一个人也可持有多条链接；取消指派删本表
-    的行即可，invite_links 那边「行永不删除」的规则不受影响。
+    的行即可，不碰 invite_links。删除链接（硬删或软删）时本表该链接的行一并删除。
 
     An invite link's "agent" assignment: an admin assigns a link to a user, who
     can then see that link's clicks, signups and the (read-only) list of users
@@ -1449,8 +1466,8 @@ class InviteLinkAgent(Base):
     untouched and entitlements are unchanged — agent-ness is derived purely from
     having a row here (see is_agent in routers/invite.py), so no require_admin
     or role === 'admin' check anywhere needs to know about it. Many agents per
-    link, many links per agent; unassigning deletes the row here and leaves the
-    never-delete rule on invite_links intact.
+    link, many links per agent; unassigning deletes the row here and leaves
+    invite_links alone. Deleting a link (hard or soft) removes its rows here too.
     """
     __tablename__ = "invite_link_agents"
     __table_args__ = (UniqueConstraint("link_id", "user_id", name="uq_invite_link_agent"),)

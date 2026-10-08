@@ -1913,6 +1913,9 @@ class InviteLinkOut(BaseModel):
     registrationsMonth: int = 0
     # 代理专属开户链接（rev 36）；null = 访客用比赛默认的。/ Agent open-account URL; null = comp default.
     openAccountUrl: str | None = None
+    # 软删时间（rev 37）；只有 includeDeleted 列表里才会非空。/ Soft-delete time; only
+    # ever non-null in an includeDeleted listing.
+    deletedAt: datetime | None = None
 
 
 class InviteLinkAgentOut(BaseModel):
