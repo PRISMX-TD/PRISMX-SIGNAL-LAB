@@ -6,29 +6,31 @@
 // 没有时刻也没有时长），MT5 账户号是后端打好码的。前端只负责显示，别在这里补
 // 任何"推算"——一推算就会和管理看板的数字对不上。
 // 「代理」不是角色：入口由 /auth/me 的 isAgent 派生（至少持有一条被指派的链接），
-// role 与权益都不动。链接 URL 拼 ORIGIN 而不是 window.location.origin，理由同
-// 管理面板（预览域名上复制出去的仍要是正式域名）。
+// role 与权益都不动。链接 URL 由 utils/promoLinkUrl 统一拼（ORIGIN，不是
+// window.location.origin，理由同管理面板）。每条链接两个复制按钮（设计 §1.2）：
+// 邀请链接 /?ref=码、比赛链接 /c?ref=码（固定链接，打开时显示当前主推比赛；
+// 没有主推比赛时这个按钮不出现）。
 // Agent view (/agent): after an admin assigns invite links to a user, they see
 // each link's clicks, signups and status here, plus the list of users who
 // registered through it. Read-only end to end — /agent/* has no write endpoint
 // and the list carries no phone or user id (see AgentLinkUserOut).
 // "Agent" is not a role: the entry is derived from /auth/me's isAgent; role and
-// entitlements are untouched. URLs are built from ORIGIN for the same reason as
-// the admin panel.
+// entitlements are untouched. URLs come from utils/promoLinkUrl. Two copy buttons per
+// link (design §1.2): invite /?ref=code and competition /c?ref=code (fixed; resolves to
+// the featured competition, hidden when there is none).
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import PageHead from '../components/PageHead'
 import { SkeletonLine } from '../components/Skeleton'
 import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
 import PlanDialog from '../components/agent/PlanDialog'
-import { agentApi } from '../api/client'
+import { API_BASE, agentApi } from '../api/client'
 import { fmtDate, localizeApiError } from '../api/utils'
-import { ORIGIN } from '../seo/meta'
+import { agentCompetitionUrl, inviteUrl } from '../utils/promoLinkUrl'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentMT5Account } from '../api/types'
 
 const PAGE_SIZE = 50
-const linkUrl = (code: string) => `${ORIGIN}/?ref=${code}`
 
 // 「近 7 日」的分界日。后端给的 lastActiveDay 是北京时间的日历日字符串
 // （YYYY-MM-DD），所以这里也按北京时间取当天，再直接比字符串——ISO 日期按
@@ -165,6 +167,11 @@ export default function AgentPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  // 主推比赛 id（§1.3）。为 null 时不显示「复制比赛链接」——/c 没有可去的比赛时，
+  // 发出去的链接只会落到一个空页。
+  // Featured competition id (§1.3). null hides "Copy competition link": with nothing
+  // featured, /c has nowhere to go.
+  const [featuredId, setFeaturedId] = useState<string | null>(null)
 
   // 名单按链接 + 页码拉取；切链接回到第一页。
   // The list is fetched per link + page; switching links resets to page one.
@@ -205,6 +212,25 @@ export default function AgentPage() {
     }
   }, [])
 
+  // 裸 fetch 公开接口，不走 request()：这是锦上添花的信息，失败就当没有主推比赛；
+  // request() 的入口切换、401 登出等副作用不该由它触发。
+  // Bare fetch of the public endpoint, not request(): this is optional decoration —
+  // failure just means "no featured competition"; request()'s entry-point switching and
+  // 401 logout side effects must not be triggered by it.
+  useEffect(() => {
+    let alive = true
+    fetch(`${API_BASE}/api/public/competitions/featured`, { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: unknown) => {
+        const id = data && typeof data === 'object' ? (data as { id?: unknown }).id : null
+        if (alive) setFeaturedId(typeof id === 'string' && id ? id : null)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [])
+
   useEffect(() => {
     if (!selectedId) return
     let alive = true
@@ -236,17 +262,27 @@ export default function AgentPage() {
     setEditing(null)
   }
 
-  const copy = async (l: AgentLink) => {
+  // 两个按钮各自显示「已复制 / 复制失败」，键是 `${which}:${id}`。
+  // Each button shows its own copied/failed state, keyed `${which}:${id}`.
+  const copy = async (l: AgentLink, which: 'invite' | 'comp') => {
+    const key = `${which}:${l.id}`
     try {
       // navigator.clipboard 在非安全上下文整体不存在（同步抛），整段包在 try 里。
       // navigator.clipboard is absent outside secure contexts and throws synchronously.
-      await navigator.clipboard.writeText(linkUrl(l.code))
-      setCopiedId(l.id)
+      await navigator.clipboard.writeText(which === 'invite' ? inviteUrl(l.code) : agentCompetitionUrl(l.code))
+      setCopiedId(key)
       setTimeout(() => setCopiedId(null), 2000)
     } catch {
-      setCopiedId(`err:${l.id}`)
+      setCopiedId(`err:${key}`)
       setTimeout(() => setCopiedId(null), 2500)
     }
+  }
+
+  const copyLabel = (l: AgentLink, which: 'invite' | 'comp') => {
+    const key = `${which}:${l.id}`
+    if (copiedId === key) return t('agent.copied')
+    if (copiedId === `err:${key}`) return t('agent.copyFailed')
+    return which === 'invite' ? t('agent.copyInvite') : t('agent.copyCompetition')
   }
 
   const selected = links?.find((l) => l.id === selectedId) ?? null
@@ -311,7 +347,7 @@ export default function AgentPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="truncate font-display text-base text-neutral-100">{l.label}</p>
-                    <p className="num mt-1 truncate text-xs text-neutral-400">{linkUrl(l.code)}</p>
+                    <p className="num mt-1 truncate text-xs text-neutral-400">{inviteUrl(l.code)}</p>
                   </div>
                   <span
                     className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
@@ -338,21 +374,29 @@ export default function AgentPage() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-3 flex justify-end">
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
                     className="btn-ghost px-3 py-1.5 text-xs"
                     onClick={(e) => {
                       e.stopPropagation()
-                      void copy(l)
+                      void copy(l, 'invite')
                     }}
                   >
-                    {copiedId === l.id
-                      ? t('agent.copied')
-                      : copiedId === `err:${l.id}`
-                        ? t('agent.copyFailed')
-                        : t('agent.copy')}
+                    {copyLabel(l, 'invite')}
                   </button>
+                  {featuredId && (
+                    <button
+                      type="button"
+                      className="btn-ghost px-3 py-1.5 text-xs"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        void copy(l, 'comp')
+                      }}
+                    >
+                      {copyLabel(l, 'comp')}
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -365,6 +409,7 @@ export default function AgentPage() {
           <p>{t('agent.clicksNote')}</p>
           <p>{t('agent.statsNote')}</p>
           <p>{t('agent.mt5Note')}</p>
+          {featuredId && <p>{t('agent.competitionLinkNote')}</p>}
         </div>
       )}
 
