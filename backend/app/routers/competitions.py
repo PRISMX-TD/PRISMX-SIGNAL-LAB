@@ -30,7 +30,8 @@ from app.services.gamification.badges import equipped_badge_tiers
 from app.services.gamification.competitions import (
     TRACKS, auto_enroll, comp_gates, comp_period_key, competition_integrity,
     participant_details, refresh_comp_board, register_participant, settle_competition)
-from app.services.gamification.public_board import public_cache_key
+from app.services.gamification.public_board import (
+    build_funnel, build_public_payload, public_cache_key)
 from app.services.notification_feed import (
     KIND_COMP_PUBLIC_NAME, create_notification, notify_ws)
 from app.services.settings_store import get_gamification_settings
@@ -758,3 +759,19 @@ def admin_competition_board(comp_id: str, db: Session = Depends(get_db),
     refresh_comp_board(db, comp)
     return build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id),
                                      reveal=True, gates_override=_comp_gates(db, comp))
+
+
+@admin_router.get("/{comp_id}/public-preview")
+def admin_public_preview(comp_id: str, db: Session = Depends(get_db)):
+    """公开页预览（设计 §3.2）：与访客看到的载荷同一个 build_public_payload，但不缓存、
+    不看任何开关（草稿、未公开、总开关关着都能预览）——上线前就靠它验收。
+    Public-page preview: the same payload visitors get, uncached and ignoring
+    every switch, so admins can check it before going live."""
+    return build_public_payload(db, _get_comp_or_404(db, comp_id))
+
+
+@admin_router.get("/{comp_id}/funnel")
+def admin_competition_funnel(comp_id: str, db: Session = Depends(get_db)):
+    """本场推广漏斗（设计 §3.2）：每条本场推广链接一行，外加无码访客 noRef。
+    Per-link promo funnel for this competition, plus visitors without a code."""
+    return build_funnel(db, _get_comp_or_404(db, comp_id))

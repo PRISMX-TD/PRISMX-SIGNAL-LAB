@@ -5,11 +5,14 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi import HTTPException
 
-from app.models import AdminAuditLog, Competition, CompetitionParticipant, User, UserNotification
+from app.models import (
+    AdminAuditLog, Competition, CompetitionParticipant, InviteLink, LeaderboardSnapshot,
+    MT5Account, PromoFunnelDaily, User, UserNotification)
 from app.routers import competitions as comp_router
 from app.routers.competitions import (
-    admin_create_competition, admin_delete_competition, admin_patch_competition,
-    admin_patch_participant)
+    admin_competition_funnel, admin_create_competition, admin_delete_competition,
+    admin_patch_competition, admin_patch_participant, admin_public_preview)
+from app.services.gamification.competitions import comp_period_key
 from app.schemas import CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn
 from app.services import shared_cache
 from app.services.gamification.public_board import public_cache_key
@@ -185,3 +188,74 @@ def test_disqualify_and_requalify_drop_public_cache(db_session):
             CompetitionParticipantPatchIn(disqualified=flag, disqualifyReason="x" if flag else None),
             db=db_session, admin=admin)
         assert shared_cache.get_json(public_cache_key(comp.id)) is None, flag
+
+
+def test_public_preview_ignores_switches_and_draft(db_session):
+    comp = _comp(db_session, status="draft")          # 开关全关、草稿、未公开
+    u = User(email="pv@t.co", api_token="tok_pv", nickname="Viewer"); db_session.add(u)
+    db_session.commit()
+    db_session.add(CompetitionParticipant(competition_id=comp.id, user_id=u.id, mt5_login="77",
+                                          public_name=True))
+    db_session.add(LeaderboardSnapshot(board=comp.metric, period_key=comp_period_key(comp.id),
+                                       user_id=u.id, mt5_login="77", rank=1, score=0.2, sample=3))
+    db_session.commit()
+    out = admin_public_preview(comp.id, db=db_session)
+    assert out["id"] == comp.id and out["rows"][0]["displayName"] == "Viewer"
+    assert "login" not in out["rows"][0]
+    with pytest.raises(HTTPException) as e:
+        admin_public_preview("nope", db=db_session)
+    assert e.value.status_code == 404
+
+
+def test_funnel_counts_per_link(db_session):
+    comp = _comp(db_session, status="running", public_view=True, open_account_url=URL)
+    other = _comp(db_session, name="Other")
+    db_session.add_all([
+        InviteLink(code="fb0001", label="FB 广告", channel="FB广告", clicks=40,
+                   competition_id=comp.id),
+        InviteLink(code="tg0001", label="TG 群", channel="Telegram", clicks=5,
+                   competition_id=comp.id),
+        InviteLink(code="else01", label="别的比赛", competition_id=other.id),
+    ])
+    for step, code, n in (("view", "fb0001", 30), ("cta", "fb0001", 9),
+                          ("open_account", "fb0001", 4), ("view", "", 11), ("cta", "", 2)):
+        db_session.add(PromoFunnelDaily(day="2026-10-08", competition_id=comp.id, code=code,
+                                        step=step, count=n))
+    db_session.add(PromoFunnelDaily(day="2026-10-09", competition_id=comp.id, code="fb0001",
+                                    step="view", count=5))
+    now = datetime.now(UTC)
+    users = []
+    for i, verified in enumerate((True, True, False)):
+        u = User(email=f"r{i}@t.co", api_token=f"tok_r{i}", invite_code="fb0001",
+                 email_verified_at=now if verified else None)
+        db_session.add(u); db_session.commit(); users.append(u)
+    db_session.add_all([
+        MT5Account(user_id=users[0].id, login="501", source="gateway", trade_mode=0),
+        MT5Account(user_id=users[1].id, login="502", source="bridge", trade_mode=0),
+        MT5Account(user_id=users[2].id, login="503", source="gateway", trade_mode=0,
+                   revoked_at=now),
+        CompetitionParticipant(competition_id=comp.id, user_id=users[0].id, mt5_login="501"),
+        CompetitionParticipant(competition_id=comp.id, user_id=users[1].id, mt5_login="502",
+                               disqualified=True),
+    ])
+    db_session.commit()
+
+    out = admin_competition_funnel(comp.id, db=db_session)
+
+    assert out["noRef"] == {"views": 11, "ctas": 2, "openAccounts": 0}
+    by_code = {r["code"]: r for r in out["links"]}
+    assert set(by_code) == {"fb0001", "tg0001"}
+    assert by_code["fb0001"] == {"code": "fb0001", "label": "FB 广告", "channel": "FB广告",
+                                 "clicks": 40, "views": 35, "ctas": 9, "openAccounts": 4,
+                                 "registrations": 3, "verified": 2, "bound": 1, "entries": 1}
+    assert by_code["tg0001"]["registrations"] == 0 and by_code["tg0001"]["views"] == 0
+
+
+def test_delete_competition_keeps_its_promo_links(db_session):
+    admin = _admin(db_session)
+    comp = _comp(db_session)
+    db_session.add(InviteLink(code="keep01", label="FB", channel="FB广告", competition_id=comp.id))
+    db_session.commit()
+    admin_delete_competition(comp.id, db=db_session, admin=admin)
+    link = db_session.query(InviteLink).filter(InviteLink.code == "keep01").one()
+    assert link.competition_id == comp.id and link.channel == "FB广告"
