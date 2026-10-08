@@ -9,6 +9,7 @@
 import json
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -766,9 +767,12 @@ def snapshot_competitions(db, now: datetime) -> dict:
 # 报名时经网关实时读一次资金（设计 2026-10-08 §1.12）。库里的 balance 是轮询写的，
 # 最长有一个轮询周期的陈旧——精确金额赛差一分钱就是门槛内外之别，所以报名这一下
 # 必须读实时值；读不到宁可 503 让用户重试，也绝不回落到旧值。
+# 超时 8 秒：读之前会话已释放连接（见 register_participant），但用户在等、广告高峰时
+# 网关一抖，太长的超时只会把线程池也拖住。
 # Live funds read at signup (§1.12): the stored balance lags by up to a poll, which
 # matters for exact-amount competitions. Unreachable → 503, never the stale value.
-LIVE_FUNDS_TIMEOUT = 20.0
+# 8 s timeout: the user is waiting, and a long one ties up the threadpool.
+LIVE_FUNDS_TIMEOUT = 8.0
 MSG_FUNDS_UNAVAILABLE = ("暂时无法核对账户资金，请稍后再试 / "
                          "Unable to verify account funds right now, please try again later")
 
@@ -776,8 +780,10 @@ MSG_FUNDS_UNAVAILABLE = ("暂时无法核对账户资金，请稍后再试 / "
 def read_live_funds(acct) -> tuple[float, float]:
     """经网关实时读 (balance, equity)。register 端点是同步 def（跑在线程池里），所以走
     run_on_main_loop 把协程排进主循环——与 routers/gateway.refresh_gateway_account 同一种调法。
+    acct 只用 .login（报名时传的是纯值快照，不是 ORM 行）。
     Reads (balance, equity) live from the gateway via run_on_main_loop, since the
-    register endpoint is a sync def running in the threadpool."""
+    register endpoint is a sync def running in the threadpool. Only acct.login is
+    used (signup passes a plain-value snapshot, not an ORM row)."""
     from app.services import gateway_client as gw
     try:
         rsp = gw.run_on_main_loop(gw.get_account(int(acct.login)), timeout=LIVE_FUNDS_TIMEOUT)
@@ -880,7 +886,17 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
     from app.services.settings_store import get_gamification_settings
     gates = comp_gates(comp, get_gamification_settings(db))
     min_baseline, max_baseline = gates["min_baseline_usd"], gates["max_baseline_usd"]
-    balance, equity = read_live_funds(acct)
+    # 网关读之前把连接还回池子（每 worker 只有 8+4）：到这里只做过查询、没有待写的改动，
+    # 结束事务不丢任何东西。rollback 会让 ORM 对象过期，读的过程中再碰 acct 就会重新取
+    # 连接——所以交给它的是一份纯值快照。读完后续代码再碰 comp / user 时按需重新加载。
+    # Release the connection before the gateway read (pool is 8+4 per worker). Only
+    # queries ran so far, so ending the transaction loses nothing. rollback expires
+    # ORM objects and touching acct during the read would check a connection out
+    # again, so the read gets a plain-value snapshot.
+    funds_src = SimpleNamespace(login=acct.login, balance=acct.balance, equity=acct.equity)
+    if not (db.new or db.dirty or db.deleted):
+        db.rollback()
+    balance, equity = read_live_funds(funds_src)
     if max_baseline is not None and min_baseline == max_baseline:
         if not baseline_in_range(balance, min_baseline, max_baseline):
             raise HTTPException(

@@ -235,3 +235,25 @@ def test_reentry_does_not_hit_gateway(db_session, live_funds):
     p1 = register_participant(db_session, comp, u, "A", IN_WINDOW)
     live_funds["A"] = HTTPException(503, "should not be called")
     assert register_participant(db_session, comp, u, "A", IN_WINDOW).id == p1.id
+
+
+def test_live_read_runs_without_holding_a_db_connection(db_session, monkeypatch):
+    """网关读最长 LIVE_FUNDS_TIMEOUT 秒：读之前把事务结束、连接还回池子，读的过程中
+    不得再碰会话（否则重新取连接、一直占到读完）。连接池每 worker 只有 8+4。
+    The gateway read may take up to LIVE_FUNDS_TIMEOUT: the session must have
+    released its connection before it and must not be touched during it."""
+    comp = _comp(db_session)
+    u = _user(db_session, "conn@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    seen = {}
+
+    def fake(acct):
+        seen["login"] = acct.login
+        seen["in_tx"] = db_session.in_transaction()
+        return (2000.0, 2000.0)
+
+    monkeypatch.setattr(comp_mod, "read_live_funds", fake)
+    register_participant(db_session, comp, u, "A", IN_WINDOW)
+
+    assert seen == {"login": "A", "in_tx": False}
+    assert db_session.query(CompetitionParticipant).filter_by(mt5_login="A").count() == 1
+    assert comp_mod.LIVE_FUNDS_TIMEOUT == 8.0
