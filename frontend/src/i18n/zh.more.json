@@ -256,7 +256,7 @@
     "profileDesc": "昵称是你在 PRISMX 的显示名，全站唯一，会原样出现在排行榜、比赛榜与公开主页上；同行的交易账户号只显示打码后的形式。",
     "profileDescBasic": "昵称是你在 PRISMX 的显示名，全站唯一。",
     "nicknameHelp": "2–20 个字符，全站唯一",
-    "leaderboardOptOutDesc": "你的账户不再出现在任何排行榜上",
+    "leaderboardOptOutDesc": "你的账户不再出现在任何排行榜上；已报名的比赛不受影响",
     "securityTitle": "安全",
     "securityDesc": "修改密码后，其它设备上的登录会立即失效，需要重新登录。",
     "pwStrengthLabel": "强度",

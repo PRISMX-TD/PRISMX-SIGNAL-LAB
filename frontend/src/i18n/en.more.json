@@ -256,7 +256,7 @@
     "profileDesc": "Your nickname is your display name on PRISMX, unique across the platform, and appears as typed on leaderboards, competition boards and your public profile; the trading account number next to it is shown masked.",
     "profileDescBasic": "Your nickname is your display name on PRISMX, unique across the platform.",
     "nicknameHelp": "2–20 characters, unique across PRISMX",
-    "leaderboardOptOutDesc": "Your accounts stop appearing on every leaderboard",
+    "leaderboardOptOutDesc": "Your accounts stop appearing on every leaderboard; competitions you've already entered are not affected",
     "securityTitle": "Security",
     "securityDesc": "Changing the password signs out every other device immediately; they will need to sign in again.",
     "pwStrengthLabel": "Strength",

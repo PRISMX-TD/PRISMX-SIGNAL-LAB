@@ -256,7 +256,7 @@
     "profileDesc": "Biệt danh là tên hiển thị của bạn trên PRISMX, không trùng trên toàn nền tảng, và xuất hiện đúng như bạn nhập trên bảng xếp hạng, bảng thi đấu và hồ sơ công khai; số tài khoản giao dịch bên cạnh sẽ được ẩn bớt.",
     "profileDescBasic": "Biệt danh là tên hiển thị của bạn trên PRISMX, không trùng trên toàn nền tảng.",
     "nicknameHelp": "2–20 ký tự, không trùng trên toàn PRISMX",
-    "leaderboardOptOutDesc": "Tài khoản của bạn sẽ không còn xuất hiện trên mọi bảng xếp hạng",
+    "leaderboardOptOutDesc": "Tài khoản của bạn sẽ không còn xuất hiện trên mọi bảng xếp hạng; các cuộc thi bạn đã đăng ký không bị ảnh hưởng",
     "securityTitle": "Bảo mật",
     "securityDesc": "Đổi mật khẩu sẽ đăng xuất ngay mọi thiết bị khác; các thiết bị đó cần đăng nhập lại.",
     "pwStrengthLabel": "Độ mạnh",

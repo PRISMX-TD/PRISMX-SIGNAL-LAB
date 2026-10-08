@@ -466,6 +466,7 @@
           "p": [
             "We do not sell your personal data.",
             "To operate, necessary data reaches these providers: Google (only if you use Google sign-in, to verify your identity), the partner broker's direct gateway (only in direct mode, to verify bindings and route trade instructions), NOWPayments (payment processing), browser vendors' push services such as Google / Apple / Mozilla (only when notifications are on, to deliver them), and the cloud and database providers named above.",
+            "Public competition boards: if a competition you enter is shown publicly, its public page (viewable without signing in) shows participants' nicknames, ranks and competition results (such as return), never email addresses or trading account numbers. You can choose not to show your nickname on the public page from the in-app competition page, in which case you appear as \"Anonymous trader\".",
             "Advertising measurement: this site loads the Meta Pixel (Facebook advertising pixel). It stores cookies such as `_fbp` in your browser and reports which pages of this site you visited back to Meta, so we can measure ad performance and show retargeted ads. It cannot read your MT5 account, positions, trade history or payment details. You can limit this tracking through your browser's cookie settings, an ad blocker, or the Ad Preferences section of your Meta account.",
             "We may disclose information where legally required, or where necessary to protect the Service and its users' legitimate interests."
           ]
