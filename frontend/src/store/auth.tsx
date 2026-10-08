@@ -64,6 +64,12 @@ const USER_KEY = 'prismx_user'
 // machine, not about the account).
 const LOGOUT_KEEP_KEYS = new Set([
   'prismx_lang',
+  // 语言选择的时间戳必须和语言一起留：清掉它，下次登录时云端那份旧语言就会
+  // 被当成更新的而覆盖本机（见 store/cloudLang.ts）。会话过期也走这里。
+  // The language choice's timestamp must stay with it: without it, a stale cloud
+  // language looks newer at the next sign-in and overrides the device. Session
+  // expiry takes this path too.
+  'prismx_lang_at',
   'prismx.ref',
   'prismx.ref.clicked',
   'prismx_bridge_update_dismissed_version',
