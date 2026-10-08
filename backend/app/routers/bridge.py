@@ -26,7 +26,7 @@ from app.services.connection_manager import manager
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current_user, is_account_online
 from app.services.gateway_binding import is_removed, is_revoked, mark_removed, not_removed, restore_removed
-from app.services.plans import max_mt5_accounts
+from app.services.plans import max_mt5_accounts, plan_slot_rows
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
     EVENT_ORDER_FILLED,
@@ -636,7 +636,12 @@ def _report_accounts_db_work(
     known_rows: dict[tuple[str, str | None], MT5Account] = {}
     for r in all_rows:
         known_rows.setdefault((r.login, r.server or None), r)
-    bound_logins_ordered = sorted(r.login for r in all_rows if not is_removed(r))
+    # FREE 的额外直连模拟名额只给 gateway 行（plans.plan_slot_rows）：占着那个名额的网关
+    # 模拟户不算进桥接这边的配额，桥接 / 自报的模拟户永远不享受它。
+    # FREE's extra direct-connect demo slot belongs to a gateway row only: a gateway
+    # demo account sitting in it doesn't count toward the bridge quota.
+    slot_rows = plan_slot_rows(user.plan, [r for r in all_rows if not is_removed(r)])
+    bound_logins_ordered = sorted(r.login for r in slot_rows)
     gateway_logins: set[str] = {r.login for r in all_rows if r.source == "gateway"}
     existing_count = len(bound_logins_ordered)
     bound_set = set(bound_logins_ordered)

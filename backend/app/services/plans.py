@@ -218,6 +218,46 @@ def max_mt5_accounts(plan: str | None) -> int | None:
     back to the FREE limit."""
     return ACCOUNT_LIMITS.get(plan or "FREE", ACCOUNT_LIMITS["FREE"])
 
+# FREE 额外的「直连模拟」名额（设计 2026-10-08 §1.10）：FREE 可绑 1 个任意账户 + 额外 1 个
+# 直连（gateway）且经券商组判定为 DEMO/CONTEST 的账户——让免费用户能拿模拟户参加模拟赛，
+# 又不必先删掉自己的实盘。只认 gateway：组名来自券商、用户碰不到；桥接的 trade_mode 是
+# 自报的，给它额外名额等于让任何人自称模拟就多绑一个。报名发生在绑定之后，绑定时
+# 不知道会不会报名，所以不加「已报名比赛」条件。
+# FREE's extra direct-connect demo slot (§1.10): one gateway account whose
+# broker group classifies as DEMO/CONTEST doesn't count against the limit.
+# Gateway only — the bridge's trade_mode is self-reported.
+EXTRA_DEMO_SLOTS: dict[str, int] = {
+    "FREE": 1,
+    "PRO": 0,
+}
+
+
+def extra_demo_slots(plan: str | None) -> int:
+    """该等级额外的直连模拟名额数；未知等级按 FREE。"""
+    return EXTRA_DEMO_SLOTS.get(plan or "FREE", EXTRA_DEMO_SLOTS["FREE"])
+
+
+def is_extra_demo_eligible(row) -> bool:
+    """这一行能不能占额外名额：gateway 来源 + 组名判为模拟 / 竞赛。"""
+    from app.services.account_type import CONTEST, DEMO
+    return (getattr(row, "source", None) == "gateway"
+            and getattr(row, "trade_mode", None) in (DEMO, CONTEST))
+
+
+def plan_slot_rows(plan: str | None, rows: list) -> list:
+    """rows（当前有效账户行，可含一个待新增的候选）里占用常规名额的那些：额外名额先
+    吸收符合条件的行。调用方拿 len(结果) 与 max_mt5_accounts 比。
+    The rows that occupy regular slots once the extra demo slot(s) absorb eligible
+    ones; compare len(result) with max_mt5_accounts."""
+    extra = extra_demo_slots(plan)
+    out = []
+    for r in rows:
+        if extra > 0 and is_extra_demo_eligible(r):
+            extra -= 1
+            continue
+        out.append(r)
+    return out
+
 
 def can_use_push(plan: str | None) -> bool:
     """该等级是否可以开启 Web Push 通知（FREE 之外全部可用）。

@@ -6,6 +6,7 @@ gateway HTTP 操作 MT5 Manager API。
 import asyncio
 import logging
 import time
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
@@ -43,7 +44,7 @@ from app.services.gateway_client import (
 )
 from app.services.order_payload import OPENED_POSITION
 from app.services.pending_orders import push_gateway_pending_orders
-from app.services.plans import max_mt5_accounts
+from app.services.plans import max_mt5_accounts, plan_slot_rows
 from app.services.settings_store import get_account_type_settings
 from app.services import shared_state
 # 余额推送与 bridge 共用同一份去重状态（_last_pushed_balances），所以直接复用
@@ -301,13 +302,22 @@ def gateway_verify(
     account_limit = max_mt5_accounts(user.plan)
     # 软删过的行按"新绑定"算：受账户数上限约束，放行则复活。
     # A soft-removed row re-verifying counts as a new binding for the plan limit.
+    #
+    # FREE 的额外直连模拟名额（plans.plan_slot_rows）：把这次要新增 / 复活的账户当成候选
+    # 一起算——它的类型就是下面第 3 步要写进去的那个 classify_group 结果。
+    # FREE's extra direct-connect demo slot: the candidate row is counted with the
+    # same classify_group verdict step 3 will store.
     if (existing is None or is_removed(existing)) and rsp.valid and account_limit is not None:
-        existing_count = (
+        live_rows = (
             db.query(MT5Account)
             .filter(MT5Account.user_id == user.id, not_removed())
-            .count()
+            .all()
         )
-        if existing_count >= account_limit:
+        candidate = SimpleNamespace(
+            source="gateway",
+            trade_mode=classify_group(rsp.group, get_account_type_settings(db)),
+        )
+        if len(plan_slot_rows(user.plan, live_rows + [candidate])) > account_limit:
             raise HTTPException(
                 status_code=403,
                 detail=f"已达到账户数上限（{account_limit}），请升级或删除旧账号",
