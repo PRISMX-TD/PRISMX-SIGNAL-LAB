@@ -15,6 +15,7 @@
   "notifFeed": {
     "ticket_reply": "Có phản hồi mới cho yêu cầu hỗ trợ của bạn",
     "ticket_new": "Có yêu cầu hỗ trợ mới cần xử lý",
+    "comp_public_name": "Bảng xếp hạng công khai",
     "plan_refund": "Đơn hàng đã được hoàn tiền — số ngày thành viên tương ứng đã bị thu hồi. Liên hệ hỗ trợ nếu bạn có thắc mắc.",
     "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng"
   },

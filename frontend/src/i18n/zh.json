@@ -15,6 +15,7 @@
   "notifFeed": {
     "ticket_reply": "工单有新回复",
     "ticket_new": "有新工单待处理",
+    "comp_public_name": "比赛公开榜单",
     "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服",
     "agent_plan_change": "代理修改了客户会员"
   },

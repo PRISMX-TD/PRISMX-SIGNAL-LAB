@@ -1443,7 +1443,7 @@ export interface WSMessage {
 // In-app notifications (the bell panel's "messages" section). No title in the
 // data: it comes from `kind` via i18n. The backend deliberately stores no copy,
 // otherwise switching language would only affect newly created rows.
-export type NotificationKind = 'ticket_reply' | 'ticket_new'
+export type NotificationKind = 'ticket_reply' | 'ticket_new' | 'comp_public_name'
 
 export interface NotificationFeedItem {
   id: string
