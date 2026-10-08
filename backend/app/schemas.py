@@ -1870,6 +1870,9 @@ class InviteLinkOut(BaseModel):
     # Competition links only: live (not disqualified) entries in that competition
     # by users attributed to this link — counted per entry; 0 for other kinds.
     entries: int = 0
+    # 本运营月（stats 时区）1 日 00:00 起经本链接注册的人数，统计条「本月注册」用。
+    # Signups through this link since the 1st of the current ops-timezone month.
+    registrationsMonth: int = 0
 
 
 class InviteLinkAgentOut(BaseModel):

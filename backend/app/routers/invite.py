@@ -78,6 +78,7 @@ from app.services.pagination import (
 )
 from app.services.plans import PLAN_DAYS, trial_grant_days
 from app.services.stats_time import RangeSpec
+from app.services.stats_time import day_start_utc
 from app.services.stats_time import today as stats_today
 
 router = APIRouter(prefix="/invite", tags=["invite"])
@@ -418,6 +419,7 @@ def _link_out(
     *,
     competition_name: str | None = None,
     entries: int = 0,
+    registrations_month: int = 0,
 ) -> InviteLinkOut:
     return InviteLinkOut(
         id=link.id,
@@ -434,6 +436,7 @@ def _link_out(
         channel=link.channel,
         kind=_link_kind(link, agents),
         entries=entries,
+        registrationsMonth=registrations_month,
     )
 
 
@@ -446,6 +449,19 @@ def _link_out(
 # is_agent now lives in services/agents.py and is re-exported here: this file is
 # where the agent concept is documented, and existing callers (tests included)
 # shouldn't have to move for an internal relocation.
+
+def _registrations_since(db: Session, codes: list[str], since: datetime) -> dict[str, int]:
+    """since 之后（含）的注册人数，按 invite_code 一条 GROUP BY。
+    Signups at/after `since`, one GROUP BY by invite_code."""
+    if not codes:
+        return {}
+    return dict(
+        db.query(User.invite_code, func.count(User.id))
+        .filter(User.invite_code.in_(codes), User.created_at >= since)
+        .group_by(User.invite_code)
+        .all()
+    )
+
 
 def _agents_by_link(db: Session, link_ids: list[str]) -> dict[str, list[InviteLinkAgentOut]]:
     """一次 join 取出这批链接各自的代理，避免每行一查。One join for all links, no N+1."""
@@ -512,6 +528,7 @@ def _link_outs(db: Session, links: list[InviteLink]) -> list[InviteLinkOut]:
     """一批链接的完整输出：注册数、代理、比赛名、报名数各一条批量查询，没有 N+1。
     Full output for a batch: one query each for signups, agents, names, entries."""
     counts = _registrations(db, [l.code for l in links])
+    month = _registrations_since(db, [l.code for l in links], day_start_utc(stats_today().replace(day=1)))
     agents = _agents_by_link(db, [l.id for l in links])
     names = _competition_names(db, list({l.competition_id for l in links if l.competition_id}))
     entries = _entries(db, links)
@@ -522,6 +539,7 @@ def _link_outs(db: Session, links: list[InviteLink]) -> list[InviteLinkOut]:
             agents.get(l.id),
             competition_name=names.get(l.competition_id) if l.competition_id else None,
             entries=entries.get(l.id, 0),
+            registrations_month=month.get(l.code, 0),
         )
         for l in links
     ]

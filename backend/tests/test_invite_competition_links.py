@@ -483,3 +483,23 @@ def test_set_phone_response_carries_pending_competition(db_session):
         request=None, req=PhoneRequest(phoneCountry="60", phone="123456789"), db=db_session, current_user=user
     )
     assert out.pendingCompetition.id == comp.id
+
+
+# ---------- B7: 本月注册 ----------
+
+def test_list_reports_registrations_this_month(db_session, monkeypatch):
+    from datetime import date, datetime, timezone
+    import app.routers.invite as inv
+
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    _mk_link(db_session, code="plat2345")
+    monkeypatch.setattr(inv, "stats_today", lambda: date(2026, 10, 8))
+    month_start = inv.day_start_utc(date(2026, 10, 1))
+    old = _mk_user(db_session, "old@x.io", invite_code="plat2345")
+    old.created_at = month_start.replace(tzinfo=timezone.utc) - __import__("datetime").timedelta(seconds=1)
+    new = _mk_user(db_session, "new@x.io", invite_code="plat2345")
+    new.created_at = month_start.replace(tzinfo=timezone.utc)
+    db_session.commit()
+    rows = _list(db_session, admin)
+    assert rows["plat2345"]["registrations"] == 2
+    assert rows["plat2345"]["registrationsMonth"] == 1
