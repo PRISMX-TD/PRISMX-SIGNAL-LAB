@@ -134,6 +134,8 @@ export interface AdminUser {
   // 存量用户为空（强制记录上线前注册的一律豁免），不是数据缺失
   // Empty for accounts grandfathered before the mandatory-phone rule shipped
   phone?: string | null
+  // 用户自己设的昵称；没设过为空 / user-chosen nickname, empty if never set
+  nickname?: string | null
   role: UserRole
   plan: UserPlan
   planExpiresAt: string | null

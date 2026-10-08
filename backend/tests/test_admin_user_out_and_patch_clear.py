@@ -22,6 +22,7 @@ def _mk_user(**kw) -> User:
         id="u1",
         email="a@b.com",
         phone="+60123456789",
+        nickname="Laura",
         role="user",
         plan="PRO",
         plan_note="备注",

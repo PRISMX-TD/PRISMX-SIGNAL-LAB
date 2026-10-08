@@ -304,6 +304,17 @@ def test_phone_suffix_search_still_works(db_session):
     assert {u["email"] for u in out["users"]} == {"p@x.io"}
 
 
+def test_nickname_is_searchable_and_returned(db_session):
+    """客服常常只知道榜单/群里的昵称：搜昵称要能找到人，且载荷里带上昵称。"""
+    from app.routers.admin import list_users
+
+    admin = _mk_user(db_session, "a@x.io", role="admin")
+    _mk_user(db_session, "n@x.io", nickname="Laura交易员")
+    _mk_user(db_session, "m@x.io")
+    out = list_users(q="laura", plan=None, role=None, invite_code=None, limit=50, offset=0, db=db_session, _admin=admin)
+    assert [(u["email"], u["nickname"]) for u in out["users"]] == [("n@x.io", "Laura交易员")]
+
+
 # ---------- F-08 平台设置审计记旧值 ----------
 
 

@@ -1674,7 +1674,7 @@
         "/agent": "代理页面"
       }
     },
-    "searchPlaceholder": "按邮箱或手机号搜索…",
+    "searchPlaceholder": "按昵称、邮箱或手机号搜索…",
     "search": "搜索",
     "totalCount": "共 {{n}} 位用户",
     "noUsers": "没有找到用户",
@@ -1685,6 +1685,7 @@
     "noteHint": "内部备注（用户不可见）",
     "notePlaceholder": "内部备注",
     "colEmail": "邮箱",
+    "colNickname": "昵称",
     "colRole": "角色",
     "colPlan": "等级",
     "colExpiresAt": "到期时间",

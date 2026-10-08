@@ -1061,7 +1061,7 @@ export default function AdminPage() {
                     search box already matches both, so they belong together. The
                     header says "Email / Phone" so the missing column doesn't read
                     as the field being gone. */}
-                <th className="px-3 py-3 font-medium">{t('admin.colEmail')} / {t('admin.colPhone')}</th>
+                <th className="px-3 py-3 font-medium">{t('admin.colNickname')} / {t('admin.colEmail')} / {t('admin.colPhone')}</th>
                 {/* 状态列紧跟邮箱：停用是这张表上唯一"人还在不在"的信息，排在角色/
                     等级后面就会被一排下拉框淹没。同一格既是指示灯也是开关。
                     The status column sits right after the email: it is the only
@@ -1113,6 +1113,13 @@ export default function AdminPage() {
                       />
                     </td>
                     <td className="px-3 py-3">
+                      {/* 昵称：没设过就不占行，免得多一排「—」把邮箱挤下去。
+                          Nickname: omitted when unset rather than an extra em-dash row. */}
+                      {u.nickname && (
+                        <div className="mb-0.5 max-w-[220px] truncate text-xs font-semibold text-prism-300" title={u.nickname}>
+                          {u.nickname}
+                        </div>
+                      )}
                       <div className="max-w-[220px] truncate font-mono text-xs text-neutral-200">{u.email}</div>
                       {/* 手机号：存量用户为空。用「—」而不是留白，否则看起来像渲染坏了。
                           Empty for grandfathered users; an em dash rather than blank

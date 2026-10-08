@@ -1674,7 +1674,7 @@
         "/agent": "Agent view"
       }
     },
-    "searchPlaceholder": "Search by email or phone…",
+    "searchPlaceholder": "Search by nickname, email or phone…",
     "search": "Search",
     "totalCount": "{{n}} users total",
     "noUsers": "No users found",
@@ -1685,6 +1685,7 @@
     "noteHint": "Internal note (not shown to the user)",
     "notePlaceholder": "Internal note",
     "colEmail": "Email",
+    "colNickname": "Nickname",
     "colRole": "Role",
     "colPlan": "Plan",
     "colExpiresAt": "Expires",

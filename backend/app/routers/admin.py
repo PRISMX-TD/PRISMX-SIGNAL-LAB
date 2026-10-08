@@ -115,6 +115,7 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
         id=u.id,
         email=u.email,
         phone=u.phone,
+        nickname=u.nickname,
         role=u.role,
         plan=u.plan,
         planExpiresAt=u.plan_expires_at,
@@ -131,7 +132,7 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
 
 @router.get("/users", response_model=dict)
 def list_users(
-    q: str | None = Query(default=None, max_length=128, description="按邮箱或手机号模糊搜索 / fuzzy search by email or phone"),
+    q: str | None = Query(default=None, max_length=128, description="按昵称、邮箱或手机号模糊搜索 / fuzzy search by nickname, email or phone"),
     plan: str | None = Query(default=None),
     role: str | None = Query(default=None),
     invite_code: str | None = Query(
@@ -167,7 +168,12 @@ def list_users(
         # wrongness nobody notices by eye. The escape character itself goes first,
         # or a trailing backslash becomes a syntax error.
         like = f"%{_like_escape(q)}%"
-        conds = [User.email.ilike(like, escape="\\"), User.phone.ilike(like, escape="\\")]
+        conds = [
+            User.email.ilike(like, escape="\\"),
+            User.phone.ilike(like, escape="\\"),
+            # 客服常常只知道用户在榜单/群里的昵称 / support often only knows the nickname
+            User.nickname.ilike(like, escape="\\"),
+        ]
         digits = "".join(ch for ch in q if ch.isdigit()).lstrip("0")
         # 去掉前导 0 之后可能什么都不剩（q="000"）。那时这个后缀条件会退化成
         # `phone LIKE '%'`，把所有填了手机号的用户都捞出来——搜索框里打三个零，

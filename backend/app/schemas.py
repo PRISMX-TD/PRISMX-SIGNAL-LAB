@@ -236,6 +236,9 @@ class AdminUserOut(BaseModel):
     # 存量用户为空（上线前注册的一律豁免），不是数据缺失
     # Empty for grandfathered accounts registered before this shipped — not missing data
     phone: str | None = None
+    # 用户自己设的昵称（榜单/主页展示名），没设过为空
+    # User-chosen display nickname; empty if never set
+    nickname: str | None = None
     role: str
     plan: str
     planExpiresAt: datetime | None = None
