@@ -1,6 +1,7 @@
 from .stamp import stamp_order_trade_mode, lookup_trade_mode  # noqa: F401
 from .identity import (  # noqa: F401
-    mask_name, mask_account, display_name, nickname_reserved, nickname_key,
+    mask_name, mask_account, display_name, nickname_forbidden, nickname_reserved,
+    nickname_key, strip_invisible,
 )
 from .stats import compute_comprehensive_stats, compute_account_lifetime_stats, GAMIFICATION_WINDOW_DAYS  # noqa: F401
 from .conditions import (  # noqa: F401

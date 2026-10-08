@@ -1,5 +1,6 @@
 from app.services.gamification.identity import (
-    mask_name, mask_account, display_name, nickname_reserved)
+    mask_name, mask_account, display_name, nickname_forbidden, nickname_key,
+    nickname_reserved, strip_invisible)
 
 
 def test_mask_rules():
@@ -39,3 +40,23 @@ def test_mask_account_shows_only_last_three():
     assert mask_account("") == "**"
     assert mask_account(None) == "**"
     assert mask_account(500123) == "***123"        # 非字符串也得能打码
+
+
+def test_reserved_words_cover_brand_and_staff_terms():
+    """§1.17：品牌与「官方身份」字样一律保留，零宽字符插在中间也躲不过。"""
+    for bad in ("SignalLab冠军", "MakeCapital", "运营小王", "客服01", "管理员", "pri​smx"):
+        assert nickname_reserved(bad), bad
+
+
+def test_nickname_key_drops_invisible_and_bidi_controls():
+    assert nickname_key("Tra​der") == "trader"
+    assert nickname_key("‮Trader⁦") == "trader"
+    assert strip_invisible("A‍BC") == "ABC"
+
+
+def test_nickname_forbidden_urls_handles_and_digit_runs():
+    for bad in ("www.abc.com", "加我t.me/abc", "http://x", "HTTPS:x", "go88.vip", "@trader",
+                "Joe123456", "Ｊｏｅ１２３４５６"):
+        assert nickname_forbidden(bad), bad
+    for ok in ("Trader12345", "J.Cole", "张三丰", "金牌操盘手"):
+        assert not nickname_forbidden(ok), ok

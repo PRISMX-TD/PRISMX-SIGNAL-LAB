@@ -192,16 +192,24 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
     """
     from app.models import UserBadge
     from app.services.gamification import (
-        EQUIP_SLOTS, nickname_key, nickname_reserved, set_equipped_list,
+        EQUIP_SLOTS, nickname_forbidden, nickname_key, nickname_reserved,
+        set_equipped_list, strip_invisible,
     )
 
     sent = body.model_fields_set
     if "nickname" in sent:
-        nick = (body.nickname or "").strip()
+        # 先剥掉看不见的控制/格式字符再量长度：零宽字符不该替人凑够 2 个字（§1.17）。
+        # Strip invisible control/format characters before measuring, so zero-width
+        # characters can't pad a nickname to the minimum length (§1.17).
+        nick = strip_invisible(body.nickname or "").strip()
         if not (2 <= len(nick) <= 20):
             raise HTTPException(400, "昵称需 2-20 个字符 / Nickname must be 2-20 characters")
         if nickname_reserved(nick):
             raise HTTPException(400, "昵称包含保留词 / Nickname contains a reserved word")
+        if nickname_forbidden(nick):
+            raise HTTPException(
+                400, "昵称不能包含网址、@账号或连续 6 位以上数字 / "
+                     "Nickname cannot contain URLs, @handles or 6+ consecutive digits")
         # 重名检查按归一后的 key（大小写、空格、全半角都算同一个名字），排除
         # 自己那一行——否则原样重新提交一次自己的昵称会被判成撞名。数据库上还有
         # uq_users_nickname_key 兜底：这里查完到 commit 之间存在竞态窗口，两个

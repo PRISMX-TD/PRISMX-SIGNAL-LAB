@@ -136,3 +136,21 @@ def test_unset_nicknames_do_not_collide(db_session):
     a = _user(db_session)
     b = User(email="pp3@t.co", api_token="tok_pp3"); db_session.add(b); db_session.commit()
     assert a.nickname_key is None and b.nickname_key is None
+
+
+def test_nickname_rejects_urls_handles_digits_and_new_reserved(db_session):
+    u = _user(db_session)
+    for bad in ("www.abc.com", "@trader", "Joe123456", "SignalLab官方", "运营小王"):
+        with pytest.raises(HTTPException) as e:
+            _apply_profile_patch(db_session, u, ProfilePatchIn(nickname=bad))
+        assert e.value.status_code == 400, bad
+    _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="Trader12345"))
+    assert u.nickname == "Trader12345"
+
+
+def test_nickname_invisible_chars_are_stripped_before_length_check(db_session):
+    u = _user(db_session)
+    _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="‮Trader​"))
+    assert u.nickname == "Trader" and u.nickname_key == "trader"
+    with pytest.raises(HTTPException):
+        _apply_profile_patch(db_session, u, ProfilePatchIn(nickname="​​A"))   # 剥完只剩 1 字

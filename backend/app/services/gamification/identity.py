@@ -1,10 +1,21 @@
 """榜单/成就展示身份：打码与保留词（设计 §4.3）。前端不做打码，全部后端算好下发。"""
+import re
 import unicodedata
 
 RESERVED_WORDS = (
-    "prismx", "官方", "客服", "管理员", "admin", "administrator",
-    "staff", "support", "official", "系统",
+    "prismx", "signallab", "makecapital", "官方", "客服", "运营", "管理员", "admin",
+    "administrator", "staff", "support", "official", "系统",
 )
+
+# 昵称里不许出现的「引流」形态（§1.17）：网址、@账号、6 位以上连续数字（QQ/手机号/MT5 号）。
+# 都在 nickname_key 归一之后匹配，所以全角、大小写、插空格都绕不过去。
+# Promo-style content barred from nicknames (§1.17): URLs, @handles and 6+ digit
+# runs (QQ / phone / MT5 numbers). Matched on the nickname_key form, so
+# full-width, case and inserted spaces don't get around it.
+_URL_RE = re.compile(
+    r"https?:|www\.|t\.me/|[a-z0-9-]+\.(com|net|org|io|cc|cn|top|xyz|vip|link|ly)\b")
+_HANDLE_RE = re.compile(r"@\w")
+_DIGIT_RUN_RE = re.compile(r"\d{6,}")
 
 
 def mask_name(name: str) -> str:
@@ -57,20 +68,34 @@ def display_name(nickname, email) -> str:
     return mask_name(local)             # 邮箱是登录凭据的一半：永远打码
 
 
+def strip_invisible(nick: str) -> str:
+    """去掉 Unicode 控制符（Cc）与格式符（Cf，含零宽字符和双向覆盖 U+202A–202E /
+    U+2066–2069）。这些字符看不见，却能把「prismx」拆开躲过保留词、或把榜单行的
+    文字方向倒过来。Drops Cc/Cf characters (zero-width and bidi overrides
+    included): invisible, yet they split reserved words or flip a row's text."""
+    return "".join(ch for ch in (nick or "") if unicodedata.category(ch) not in ("Cc", "Cf"))
+
+
 def nickname_key(nick: str) -> str:
-    """昵称的重名比较口径：NFKC 归一 + 去掉所有空白 + 转小写。
+    """昵称的重名比较口径：去不可见字符 + NFKC 归一 + 去掉所有空白 + 转小写。
 
     存进 users.nickname_key 并加唯一索引，展示仍用用户原样输入的 nickname。
-    与保留词检查共用同一套归一，免得出现「同一个名字在保留词那关算撞、在重名
+    与保留词 / 引流检查共用同一套归一，免得出现「同一个名字在保留词那关算撞、在重名
     这关算不撞」的两套口径——归一分叉是这类校验最典型的裂缝。
 
-    Comparison form for nickname uniqueness: NFKC, whitespace stripped,
-    lowercased. Stored in users.nickname_key under a unique index while the
-    display value stays exactly as the user typed it. Shared with the reserved
-    word check so the two never normalize differently.
+    Comparison form for nickname uniqueness: invisible characters dropped, NFKC,
+    whitespace stripped, lowercased. Stored in users.nickname_key under a unique
+    index while the display value stays exactly as the user typed it. Shared with
+    the reserved-word and promo checks so they never normalize differently.
     """
-    return "".join(unicodedata.normalize("NFKC", nick or "").lower().split())
+    return "".join(unicodedata.normalize("NFKC", strip_invisible(nick)).lower().split())
 
 
 def nickname_reserved(nick: str) -> bool:
     return any(w in nickname_key(nick) for w in RESERVED_WORDS)
+
+
+def nickname_forbidden(nick: str) -> bool:
+    """网址、@账号、≥6 位连续数字（§1.17）。Promo content: URL, @handle, 6+ digits."""
+    key = nickname_key(nick)
+    return bool(_URL_RE.search(key) or _HANDLE_RE.search(key) or _DIGIT_RUN_RE.search(key))
