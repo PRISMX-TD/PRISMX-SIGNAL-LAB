@@ -175,6 +175,24 @@ def _end_valuation(db, comp: Competition, p, modes) -> list[tuple]:
     return out
 
 
+def _opened_since(resolved: list[tuple], lower: datetime) -> list[tuple]:
+    """比赛只算计分起点之后**下单**的仓位：resolved 里 (开仓时刻, 平仓时刻, 盈亏) 按开仓时刻
+    过滤，开仓时刻 = 平台订单的下单时间（挂单按挂出时间，赛前挂好、赛中才触发的也不算）。
+
+    以前只看平仓时刻落在比赛期内、开仓多早都行：赛前开好单等浮盈，再报名（报名本金只看
+    余额、不含浮盈），赛中一平，赛前赚的那段整笔算进成绩；亏的单则报名前平掉。比赛有奖，
+    这个口子必须堵。周期榜不受影响（只有比赛调用这里）。
+    Competitions only score positions *ordered* at or after the scoring start: the
+    (opened, closed, profit) tuples are filtered on the open instant, which is the platform
+    order's creation time (a pending order counts from when it was placed, so one placed
+    before the start and triggered later does not count). Previously only the close had to
+    fall inside the window, so a player could open before signing up, let it run (the signup
+    capital is balance and excludes floating P/L), sign up and close it, banking pre-contest
+    gains — and close losers before signing up. The standing boards are unaffected.
+    """
+    return [r for r in resolved if r[0] is not None and _aware(r[0]) >= lower]
+
+
 def compute_comp_rows(db, comp: Competition) -> list[dict]:
     """比赛未取消资格的参赛条目 + `period_baselines(comp:<id>)`：按 `boards.
     _resolved_in_period` 的语义计算——有效下界 = max(比赛开赛, 基线 taken_at,
@@ -245,7 +263,9 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
             b = baseline_by_login[lg]
             # 结束快照里还开着的平台单（只有比赛结束、拍到快照后才有）。
             # Platform positions open at the end (only once ended and captured).
-            resolved = profits_by_login.get(lg, []) + _end_valuation(db, comp, part_by_login[lg], modes)
+            resolved = _opened_since(
+                profits_by_login.get(lg, []) + _end_valuation(db, comp, part_by_login[lg], modes),
+                taken[lg])
             profits = [pr for _o, _c, pr in resolved]
             sample = len(profits)
             total = sum(profits)
@@ -351,10 +371,12 @@ def participant_details(db, comp: Competition, participants: list) -> dict[str, 
             d["status"] = "not_started"
             continue
         modes = track_modes(comp.track)
-        resolved = (_resolved_in_period(db, p.user_id, {p.mt5_login}, period_key,
-                                        {p.mt5_login: lower}, bounds=(starts_at, ends_at),
-                                        modes=modes).get(p.mt5_login, [])
-                    + _end_valuation(db, comp, p, modes))
+        resolved = _opened_since(
+            _resolved_in_period(db, p.user_id, {p.mt5_login}, period_key,
+                                {p.mt5_login: lower}, bounds=(starts_at, ends_at),
+                                modes=modes).get(p.mt5_login, [])
+            + _end_valuation(db, comp, p, modes),
+            lower)
         d["sample"] = len(resolved)
         if snap is not None:
             d["status"] = "ranked"

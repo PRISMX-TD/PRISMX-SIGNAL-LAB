@@ -2615,7 +2615,7 @@
     "regNotOpen": "Registration hasn't opened yet",
     "regClosed": "Registration is closed",
     "rules": {
-      "scoringFrom": "Only results after registration count — registering before the start scores from the start, registering after the start scores from the moment you register",
+      "scoringFrom": "Only results after registration count — registering before the start scores from the start, registering after the start scores from the moment you register. Only orders placed after your scoring start count: positions already open before it (including pending orders placed earlier and triggered later) are excluded, win or lose",
       "minSamples": "Ranking requires clearing the sample-size threshold for the chosen metric, same as the standing leaderboard",
       "final": "The live board is for reference only — final rank and prizes follow the settled result"
     },

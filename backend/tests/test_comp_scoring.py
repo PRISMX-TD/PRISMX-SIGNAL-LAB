@@ -781,3 +781,51 @@ def test_capture_end_positions_reads_gateway_and_skips_unbound(db_session, monke
     assert snaps["9004"] is None                                       # 比赛还在进行
     db.close()
     engine.dispose()
+
+
+def _pos_opened(db, u, login, ticket, profit, opened_at, closed_at, vol=0.1):
+    """同 _pos，但显式给下单时刻 / like _pos with an explicit order time."""
+    db.add(Order(user_id=u.id, client_order_id=f"c{login}{ticket}", symbol="X",
+                 side="BUY", volume=vol, status="FILLED", mt5_login=login,
+                 mt5_ticket=ticket, trade_mode=2, created_at=opened_at))
+    db.add(ClosedTrade(user_id=u.id, mt5_login=login, symbol="X", side="BUY",
+                       close_volume=vol, close_price=1, profit=profit,
+                       position_ticket=ticket, deal_ticket=ticket * 10,
+                       closed_at=closed_at, verified=True))
+    db.commit()
+
+
+def test_position_opened_before_start_is_not_scored_even_if_closed_inside(db_session):
+    """赛前开好、赛中平掉的单不计入（不论盈亏）：堵「赛前攒浮盈、报名后再平」。
+    A position opened before the start and closed inside the window is not scored."""
+    comp = _comp(db_session)
+    u = _user(db_session, "pre@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    _baseline(db_session, comp, u, "A", balance=2000.0, taken_at=T0)
+    _participant(db_session, comp, u, "A")
+
+    _pos_opened(db_session, u, "A", 1, 500.0, T0 - timedelta(hours=3), IN_WINDOW)  # 赛前开 / opened before
+    _pos_opened(db_session, u, "A", 2, -80.0, T0 - timedelta(hours=1), IN_WINDOW)  # 赛前开的亏损单也不算
+    for t in range(3, 9):
+        _pos(db_session, u, "A", t, 10.0, IN_WINDOW)                               # 6 笔赛中开 / 6 inside
+
+    row = {r["login"]: r for r in compute_comp_rows(db_session, comp)}["A"]
+    assert row["sample"] == 6
+    assert abs(row["score"] - 60.0 / 2000.0) < 1e-9
+
+
+def test_late_signup_excludes_positions_opened_before_signing_up(db_session):
+    """开赛后才报名：报名前（虽已开赛）下的单不计入，计分起点是报名时刻。
+    Signing up mid-competition: orders placed before signing up don't count."""
+    comp = _comp(db_session)
+    u = _user(db_session, "late@t.co"); _acct(db_session, u, "A", balance=2000.0)
+    signup = T0 + timedelta(days=1)
+    _baseline(db_session, comp, u, "A", balance=2000.0, taken_at=signup)
+    _participant(db_session, comp, u, "A", scoring_from=signup)
+
+    _pos_opened(db_session, u, "A", 1, 300.0, signup - timedelta(hours=2), IN_WINDOW)
+    for t in range(2, 8):
+        _pos(db_session, u, "A", t, 10.0, IN_WINDOW)
+
+    row = {r["login"]: r for r in compute_comp_rows(db_session, comp)}["A"]
+    assert row["sample"] == 6
+    assert abs(row["score"] - 60.0 / 2000.0) < 1e-9

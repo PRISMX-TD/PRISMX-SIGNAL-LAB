@@ -1684,7 +1684,7 @@
     "regNotOpen": "Chưa mở đăng ký",
     "regClosed": "Đã đóng đăng ký",
     "rules": {
-      "scoringFrom": "Chỉ tính kết quả sau khi đăng ký — đăng ký trước giờ bắt đầu thì tính từ lúc bắt đầu, đăng ký sau thì tính từ lúc bạn đăng ký",
+      "scoringFrom": "Chỉ tính kết quả sau khi đăng ký — đăng ký trước giờ bắt đầu thì tính từ lúc bắt đầu, đăng ký sau thì tính từ lúc bạn đăng ký. Chỉ tính các lệnh đặt sau mốc bắt đầu tính điểm: vị thế đã mở từ trước (kể cả lệnh chờ đặt sẵn từ trước rồi mới khớp) không được tính, dù lãi hay lỗ",
       "minSamples": "Để được xếp hạng cần vượt ngưỡng số lệnh của chỉ số đã chọn, giống như bảng xếp hạng thường",
       "final": "Bảng trực tiếp chỉ để tham khảo — hạng chung cuộc và giải thưởng theo kết quả tổng kết"
     },
