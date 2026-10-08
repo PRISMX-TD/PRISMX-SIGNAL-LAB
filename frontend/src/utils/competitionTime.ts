@@ -47,7 +47,10 @@ export function fmtCountdown(ms: number, t: TFunction): string {
 // competition's window is enforced non-null at creation server-side (see
 // routers/competitions.py's _validate_reg_window); null is still handled
 // defensively here.
-export function regState(c: CompetitionSummary, nowMs: number): 'notOpen' | 'open' | 'closed' | null {
+export function regState(
+  c: Pick<CompetitionSummary, 'enrollment' | 'regOpensAt' | 'regClosesAt'>,
+  nowMs: number,
+): 'notOpen' | 'open' | 'closed' | null {
   if (c.enrollment !== 'signup') return null
   const opens = c.regOpensAt ? parseTime(c.regOpensAt)?.getTime() : null
   const closes = c.regClosesAt ? parseTime(c.regClosesAt)?.getTime() : null
