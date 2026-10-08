@@ -1289,7 +1289,10 @@
     "prev": "前へ",
     "next": "次へ",
     "pageOf": "{{page}} / {{pages}}ページ",
-    "totalUnit": "人"
+    "totalUnit": "人",
+    "copyInvite": "招待リンクをコピー",
+    "copyCompetition": "大会リンクをコピー",
+    "competitionLinkNote": "大会リンクは固定です。開くと現在おすすめの大会が表示され、そこからの登録もあなたの紹介として記録されます。"
   },
   "announcements": {
     "countUnit": "件",

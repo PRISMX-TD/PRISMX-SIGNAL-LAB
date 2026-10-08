@@ -1289,7 +1289,10 @@
     "prev": "Trước",
     "next": "Sau",
     "pageOf": "Trang {{page}}/{{pages}}",
-    "totalUnit": "người dùng"
+    "totalUnit": "người dùng",
+    "copyInvite": "Sao chép link mời",
+    "copyCompetition": "Sao chép link giải đấu",
+    "competitionLinkNote": "Link giải đấu cố định: khi mở sẽ hiển thị giải đấu đang được nền tảng giới thiệu, người đăng ký qua link này vẫn được tính là khách của bạn."
   },
   "announcements": {
     "countUnit": "bài",
