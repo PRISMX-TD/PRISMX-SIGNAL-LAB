@@ -1,6 +1,7 @@
 // REST 客户端封装 / REST client wrapper
 import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
+import type { PendingCompetition } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
@@ -1098,6 +1099,9 @@ export const userApi = {
       statsPublic: boolean
       // 邀请链接「代理」入口开关（见 User.isAgent）/ invite-link agent entry flag
       isAgent: boolean
+      // 待报名的推广比赛（见 types.ts PendingCompetition）；老后端没有这个键。
+      // Pending promo competition (see PendingCompetition); absent on older backends.
+      pendingCompetition?: PendingCompetition | null
     }>('/auth/me'),
   // 游戏化资料局部更新：昵称/榜单展示/退出排行榜/佩戴勋章，只改传了的字段。
   // Partial update of the gamification profile: nickname / leaderboard display /

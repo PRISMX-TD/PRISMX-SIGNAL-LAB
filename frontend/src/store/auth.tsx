@@ -19,13 +19,18 @@ interface AuthContextValue {
   // must vanish the moment the account is restored, whereas a cached copy leaves
   // one device insisting on a ban that has already been lifted.
   disabledNotice: string | null
-  login: (email: string, password: string) => Promise<void>
-  register: (email: string, password: string, phoneCountry: string, phone: string) => Promise<void>
+  // 三个登录入口都返回刚落地的 user：调用方 await 之后闭包里的 useAuth().user 还是旧值
+  // （null），要据此决定跳转目标（比赛意图）就只能用返回值。
+  // All three sign-in entry points resolve with the user just persisted: after the await the
+  // caller's closed-over useAuth().user is still the old value (null), so destination logic
+  // (competition intent) must use the return value.
+  login: (email: string, password: string) => Promise<User>
+  register: (email: string, password: string, phoneCountry: string, phone: string) => Promise<User>
   // 补录手机号成功后就地更新登录态，让路由守卫立刻放行（不必重新登录）
   // Updates auth state in place so the route guard releases immediately
   submitPhone: (phoneCountry: string, phone: string) => Promise<void>
   submitNickname: (nickname: string) => Promise<void>
-  loginWithGoogle: (credential: string) => Promise<void>
+  loginWithGoogle: (credential: string) => Promise<User>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -242,11 +247,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const res = await authApi.login(email, password)
     persist(res.user, res.token)
+    return res.user
   }, [persist])
 
   const register = useCallback(async (email: string, password: string, phoneCountry: string, phone: string) => {
     const res = await authApi.register(email, password, phoneCountry, phone)
     persist(res.user, res.token)
+    return res.user
   }, [persist])
 
   const submitPhone = useCallback(async (phoneCountry: string, phone: string) => {
@@ -277,6 +284,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGoogle = useCallback(async (credential: string) => {
     const res = await authApi.google(credential)
     persist(res.user, res.token)
+    return res.user
   }, [persist])
 
   const logout = useCallback(() => {
@@ -346,6 +354,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // 邮箱验证状态：在别的设备 / 标签页点完验证链接后，这一趟把提示条撤掉。
           // Email verification: clears the banner after verifying elsewhere.
           emailVerified: me.emailVerified,
+          // 待报名的推广比赛：登录响应里可能没有，这一趟补上（老后端没有这个键 → null）。
+          // Pending promo competition: may be missing from the login response; filled here
+          // (older backends lack the key → null).
+          pendingCompetition: me.pendingCompetition ?? null,
         }
       })
       const cached = readCachedUser()
@@ -363,6 +375,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           needsNickname: me.needsNickname,
           isAgent: me.isAgent,
           emailVerified: me.emailVerified,
+          pendingCompetition: me.pendingCompetition ?? null,
         })
       }
     } catch {

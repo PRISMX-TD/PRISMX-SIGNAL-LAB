@@ -44,6 +44,15 @@ export interface AutoManageSettings {
   ptpFraction: number
 }
 
+// 通过比赛推广链接注册、还没报名的那场比赛（由 /auth/me 推出：invite_code → 链接的
+// competition_id → 比赛仍可报名且本人未报名）。前端只拿它决定登录后去哪儿，不做任何判断。
+// The competition a user signed up for through a promo link and has not entered yet
+// (derived by /auth/me). The frontend only uses it to decide where to land after sign-in.
+export interface PendingCompetition {
+  id: string
+  name: string
+}
+
 export interface User {
   id: string
   email: string
@@ -125,6 +134,11 @@ export interface User {
   // Not a role, no entitlement change — only gates the /agent entry. Likewise
   // filled in by refreshUser() only; same precedent as the flags above.
   isAgent?: boolean
+  // 待报名的推广比赛（见 PendingCompetition）。undefined = 还不知道（登录响应可能不带，
+  // refreshUser 之后才有）；null = 没有。
+  // Pending promo competition. undefined = not known yet (the login response may lack it;
+  // refreshUser fills it in); null = none.
+  pendingCompetition?: PendingCompetition | null
 }
 
 // 管理后台：用户列表条目 / admin: one row in the user list
