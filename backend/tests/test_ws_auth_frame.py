@@ -248,6 +248,22 @@ def test_catch_up_frames_come_from_one_snapshot_call_in_order(monkeypatch):
     assert fake.snapshot_calls == 1
 
 
+def test_known_empty_snapshot_is_pushed_but_unknown_is_not(monkeypatch):
+    """Redis 里确有快照、只是空（positions_known / pending_known）：照推 []，前端才会把重连前
+    已平掉的单清掉（2026-10-08 100502）。不知道（没有快照）时仍不推，免得误清空。"""
+    fake = _authed(monkeypatch)
+    fake.snapshot = {"positions": [], "positions_known": True, "pending": [], "pending_known": True}
+    ws = _ScriptedWS([])
+    _run(ws)
+    assert [f["type"] for f in ws.sent] == ["AUTH_OK", "POSITIONS", "PENDING_ORDERS"]
+    assert ws.sent[1]["data"] == [] and ws.sent[2]["data"] == []
+
+    fake.snapshot = {"positions": [], "pending": []}
+    ws = _ScriptedWS([])
+    _run(ws)
+    assert [f["type"] for f in ws.sent] == ["AUTH_OK"]
+
+
 def test_a_failing_catch_up_fetch_keeps_the_connection(monkeypatch):
     """Redis 抖动时取数失败：只跳过补推，连接留着、PING 照回 PONG——不能「鉴权成功 -> 异常关闭 ->
     300ms 后重连」形成重连风暴。"""

@@ -116,6 +116,19 @@ QUOTES_TTL_SECONDS = 3600
 # 本进程快照兜底的回收节奏（秒），见 ConnectionManager._maybe_prune_local。
 # How often local fallback snapshots are swept; see _maybe_prune_local.
 LOCAL_PRUNE_EVERY = 60.0
+# 持仓 / 挂单快照内容没变时，最多隔这么久也要重推一次（秒）。去重摘要只活在发起推送的那个
+# worker（gateway 慢拍只在 leader 上跑）；客户端重连落到另一个 worker 时，register_client 清的是
+# 那边的摘要，leader 上的旧摘要会把「内容没变」的快照一直挡住。最典型的是空仓：最后一张单平掉时
+# 推出去的 [] 发给了已经死掉的旧连接，新连接的建连补推又不发空快照，App 就一直挂着那张早已平掉
+# 的单（2026-10-08 100502「止损高开没打掉」）。定期重推给它一个最长等待时间；空仓用户一帧几十字节。
+# Re-push an unchanged positions / pending snapshot at least this often (seconds). The dedup
+# digest lives only on the pushing worker (the gateway slow tick runs on the leader), so a client
+# reconnecting to another worker clears the wrong digest and the leader keeps suppressing the
+# "unchanged" snapshot — classically the empty one: the [] pushed when the last position closed
+# went to a dead socket, the new socket's catch-up skips empty snapshots, and the app kept showing
+# a long-closed position (2026-10-08, login 100502). This bounds the wait; a flat user's frame is
+# a few dozen bytes.
+SNAPSHOT_REPUSH_SECONDS = 15.0
 # 参与「报价变没变」判断的字段 / fields that count toward "quote changed"
 _QUOTE_WATCHED = ("bid", "ask", "contractSize", "tickSize", "tickValue")
 
@@ -459,12 +472,12 @@ class ConnectionManager:
         self._pending_orders: dict[str, dict[str, list]] = {}
         # user_id -> 上一次 POSITIONS 推送内容的摘要，用于跳过重复推送
         # user_id -> digest of the last POSITIONS payload, to skip repeat pushes
-        self._last_positions_push: dict[str, bytes] = {}
+        self._last_positions_push: dict[str, tuple[bytes, float]] = {}
         # 同上，PENDING_ORDERS 那一路。挂单在休市/无操作时长时间一动不动，
         # 重复帧比持仓还多，去重的收益更大。
         # Same for PENDING_ORDERS. Pending orders sit unchanged for long stretches,
         # so this skips even more repeat frames than the positions one.
-        self._last_pending_push: dict[str, bytes] = {}
+        self._last_pending_push: dict[str, tuple[bytes, float]] = {}
         # user_id -> {(kind, source): 上次写进 Redis 的那份快照的摘要}。内容没变就不再 SET，只续期。
         # user_id -> {(kind, source): digest of the slice last written to Redis}; unchanged
         # content is refreshed with EXPIRE instead of rewritten.
@@ -1002,6 +1015,9 @@ class ConnectionManager:
                 for src, rows in self._fresh_local(kind, user_id).items():
                     by_source.setdefault(src, rows)
                 out[name] = _merge_sources(by_source)
+                # 至少一个来源真有快照（哪怕是 []）：空列表就是「确实没有」，而不是「还不知道」。
+                # At least one source holds a snapshot (even []): empty then means "none", not "unknown".
+                out[f"{name}_known"] = bool(by_source)
             out["quotes"] = _decode_account_quotes(results[2 * n])
             out["global_quotes"] = _decode_global_quotes(results[2 * n + 1], results[2 * n + 2])
             self._last_global_quotes = out["global_quotes"]
@@ -1301,6 +1317,18 @@ class ConnectionManager:
         await asyncio.sleep(0)
         await asyncio.sleep(0)
 
+    @staticmethod
+    def _is_repeat_push(last: dict[str, tuple[bytes, float]], user_id: str, digest: bytes) -> bool:
+        """与上次推送内容相同、且还没到 SNAPSHOT_REPUSH_SECONDS：跳过。否则记下这次并放行。
+        Same content as the last push and the re-push interval not yet due: skip. Otherwise
+        record this push and let it through."""
+        now = time.monotonic()
+        prev = last.get(user_id)
+        if prev is not None and prev[0] == digest and now - prev[1] < SNAPSHOT_REPUSH_SECONDS:
+            return True
+        last[user_id] = (digest, now)
+        return False
+
     async def push_positions(
         self, user_id: str, positions: list, source: str = "bridge"
     ) -> None:
@@ -1343,9 +1371,8 @@ class ConnectionManager:
         # tens of KB for users with many positions.
         text = _dumps(message)
         digest = hashlib.blake2b(text.encode(), digest_size=16).digest()
-        if self._last_positions_push.get(user_id) == digest:
+        if self._is_repeat_push(self._last_positions_push, user_id, digest):
             return
-        self._last_positions_push[user_id] = digest
         await self.push_text_to_client(user_id, text)
 
     async def push_pending_orders(
@@ -1364,9 +1391,8 @@ class ConnectionManager:
         merged = await self._store_and_merge("pending", user_id, source, orders or [])
         text = _dumps({"type": "PENDING_ORDERS", "data": merged})
         digest = hashlib.blake2b(text.encode(), digest_size=16).digest()
-        if self._last_pending_push.get(user_id) == digest:
+        if self._is_repeat_push(self._last_pending_push, user_id, digest):
             return
-        self._last_pending_push[user_id] = digest
         await self.push_text_to_client(user_id, text)
 
     async def broadcast_to_clients(self, message: dict) -> None:

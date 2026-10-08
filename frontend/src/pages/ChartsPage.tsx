@@ -188,6 +188,12 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { sym
         if (engine.isFollowingLiveRef.current) engine.chartRef.current?.timeScale().scrollToRealTime()
         return
       }
+      // 最后一根已经是好几根之前的了（App 冻在后台刚回来）：别把现价钉到它身上——那会把一根旧蜡烛
+      // 拉成一根几十点的大阳线，看着像跳空（2026-10-08 100502 截图）。等轮询发现缺口、重拉尾部历史。
+      // The last bar is several bars old (the app just came back from being frozen): don't pin the
+      // live bid onto it — that stretched an old candle into a tall bar that looked like a gap
+      // (2026-10-08, login 100502). The poll spots the hole and refills the tail.
+      if (openT > last.t + iv) return
     }
     const next = withLiveClose(last, bid)
     if (next.c === last.c && next.h === last.h && next.l === last.l) return

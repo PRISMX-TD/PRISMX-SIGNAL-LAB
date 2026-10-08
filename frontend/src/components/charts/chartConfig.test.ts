@@ -2,7 +2,7 @@
 // Boundary catch-up timing: only epoch-aligned 1/5/15/60-minute intervals; wait for the EA push
 // after the boundary before polling.
 import { describe, expect, it } from 'vitest'
-import { BOUNDARY_SETTLE_MS, POLL_MS, POLL_SLOW_MS, intervalSeconds, nextBoundaryPollDelayMs } from './chartConfig'
+import { BOUNDARY_SETTLE_MS, POLL_MS, POLL_SLOW_MS, barSpacingSeconds, intervalSeconds, nextBoundaryPollDelayMs } from './chartConfig'
 
 describe('chart poll cadence', () => {
   it('慢档比快档慢、快档对齐 EA 的 3 秒 / slow > fast, fast aligned to the EA 3s', () => {
@@ -33,5 +33,15 @@ describe('chart poll cadence', () => {
   it('不支持的周期返回 null（靠慢轮询发现新 bar）', () => {
     expect(nextBoundaryPollDelayMs('240', Date.now())).toBeNull()
     expect(nextBoundaryPollDelayMs('D', Date.now())).toBeNull()
+  })
+})
+
+describe('barSpacingSeconds', () => {
+  it('4H / 日线也有间距（只用于找缺口），分钟线与 intervalSeconds 一致', () => {
+    expect(barSpacingSeconds('5')).toBe(300)
+    expect(barSpacingSeconds('60')).toBe(3600)
+    expect(barSpacingSeconds('240')).toBe(14400)
+    expect(barSpacingSeconds('D')).toBe(86400)
+    expect(barSpacingSeconds('W')).toBeNull()
   })
 })

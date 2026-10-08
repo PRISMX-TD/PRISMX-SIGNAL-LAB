@@ -10,7 +10,7 @@ import type { DayStats } from './SymbolHeader'
 import {
   FOLLOW_LIVE_SLACK_BARS,
   HISTORY_FIRST_PAGE, HISTORY_PAGE_SIZE, HISTORY_PREFETCH_BARS, MAX_CLIENT_BARS, POLL_MS, POLL_SLOW_MS, STALE_MS, WS_FRESH_MS,
-  BOUNDARY_RETRIES, BOUNDARY_RETRY_MS, nextBoundaryPollDelayMs,
+  BOUNDARY_RETRIES, BOUNDARY_RETRY_MS, nextBoundaryPollDelayMs, TAIL_REFILL_MIN_GAP_MS, barSpacingSeconds,
   computeDayStats, toLwPoint,
 } from './chartConfig'
 import type { ChartEngine } from './useChartEngine'
@@ -294,12 +294,56 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)
 
+    // 尾部重拉：App 在后台被冻住（安卓 WebView 停 JS）几十分钟后回来，轮询只拿最新两根，
+    // 而 applyBar 只能往后追加，中间缺的 bar 永远补不上，图上就是一段「跳空」（2026-10-08
+    // 100502 截图）。发现缺口就重拉最近一页历史、整段 setData，再补拉最新价接上形成中那根。
+    // Tail refill: after the app sat frozen in the background (Android WebView pauses JS) for tens
+    // of minutes, the poll only fetches the newest two bars and applyBar can only append, so the
+    // bars in between never arrive and the chart shows a fake gap (2026-10-08, login 100502). On a
+    // hole, refetch the newest history page, setData the whole series, then fetch latest again to
+    // join the forming bar.
+    let refilling = false
+    let lastRefillAt = -Infinity
+    const refillTail = (): boolean => {
+      if (refilling || Date.now() - lastRefillAt < TAIL_REFILL_MIN_GAP_MS) return false
+      refilling = true
+      lastRefillAt = Date.now()
+      chartApi.history(symbol, interval, HISTORY_FIRST_PAGE).then((r) => {
+        if (!alive || r.bars.length === 0) return
+        const firstT = r.bars[0].t
+        // 比这页更早的本地 bar 保留（用户可能往左翻过很多页）；这页之后的本地 bar 丢掉，
+        // 由下面的 latest 补回。/ Keep local bars older than this page (the user may have paged
+        // far left); drop newer local ones — the latest call below brings them back.
+        const merged = [...candlesRef.current.filter((b) => b.t < firstT), ...r.bars].slice(-MAX_CLIENT_BARS)
+        const range = chartRef.current?.timeScale().getVisibleLogicalRange()
+        candlesRef.current = merged
+        barTimesRef.current = merged.map((b) => b.t)
+        lastTimeRef.current = merged[merged.length - 1].t
+        series.setData(merged.map(toLwPoint))
+        recomputeIndicators()
+        setDayStats((prev) => keepIfEqual(prev, computeDayStats(candlesRef.current)))
+        if (isFollowingLiveRef.current) chartRef.current?.timeScale().scrollToRealTime()
+        else if (range) chartRef.current?.timeScale().setVisibleLogicalRange(range)
+        saveSnapshot(snapKey, candlesRef.current)
+        void chartApi.latest(symbol, interval, 10).then(handleLatest).catch(() => {})
+      }).catch(() => {}).finally(() => {
+        refilling = false
+      })
+      return true
+    }
+
     const handleLatest = (r: Awaited<ReturnType<typeof chartApi.latest>>) => {
         if (!alive) return
         // 历史还没回来：先记下，历史 setData 之后再接上（否则会被整段覆盖掉）。
         // History not back yet: stash it and join after history's setData (which would wipe it).
         pendingLatest = r
         if (!historyApplied) return
+        // 响应里最早那根与本地最后一根之间隔着整根以上的 bar：中间有洞，重拉尾部。
+        // A whole bar or more between our last bar and the response's first: a hole — refill.
+        const spacing = barSpacingSeconds(interval)
+        if (spacing != null && lastTimeRef.current > 0 && r.bars.length > 0 && r.bars[0].t > lastTimeRef.current + spacing) {
+          if (refillTail()) return
+        }
         // 最新一根用券商 bid 做收盘价，免得每 2 秒被 K 线库的收盘价拽回去。
         // The newest bar takes the broker bid as close so the poll doesn't yank it back.
         // 本地已按报价开了新 bar 时，响应里的上一根别再被钉上当前 bid。

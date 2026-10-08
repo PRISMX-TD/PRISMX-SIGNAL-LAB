@@ -218,3 +218,30 @@ def test_concurrent_pushes_do_not_duplicate():
         return ws
 
     assert len(asyncio.run(scenario()).sent) == 1
+
+
+def test_unchanged_snapshot_is_repushed_after_interval(monkeypatch):
+    """内容不变也要隔 SNAPSHOT_REPUSH_SECONDS 重推一次：去重摘要只在推送方 worker 上，客户端重连到
+    另一个 worker 时清不掉它，不重推的话空仓那帧 [] 会被一直挡住（2026-10-08 100502）。"""
+    import app.services.connection_manager as cm
+    clock = [1000.0]
+    monkeypatch.setattr(cm.time, "monotonic", lambda: clock[0])
+
+    async def scenario():
+        m = ConnectionManager()
+        ws = FakeWS()
+        await m.register_client("u1", ws)
+        await m.push_positions("u1", [])
+        await m.push_positions("u1", [])            # 去重 / deduped
+        clock[0] += cm.SNAPSHOT_REPUSH_SECONDS - 1
+        await m.push_positions("u1", [])            # 还没到 / not yet due
+        clock[0] += 2
+        await m.push_positions("u1", [])            # 到期重推 / re-pushed
+        await m.push_pending_orders("u1", [])
+        await m.push_pending_orders("u1", [])
+        clock[0] += cm.SNAPSHOT_REPUSH_SECONDS
+        await m.push_pending_orders("u1", [])
+        return ws
+
+    sent = asyncio.run(scenario()).sent
+    assert [f["type"] for f in sent] == ["POSITIONS", "POSITIONS", "PENDING_ORDERS", "PENDING_ORDERS"]

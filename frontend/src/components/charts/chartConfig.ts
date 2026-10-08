@@ -123,6 +123,20 @@ export function intervalSeconds(code: string): number | null {
   }
 }
 
+// 相邻两根 bar 的间距（秒），4H / 日线也算——只用来判断「中间缺了 bar」，不涉及边界对齐。
+// Spacing between consecutive bars (seconds), 4H / daily included — only used to spot missing
+// bars in between, never for boundary alignment.
+export function barSpacingSeconds(code: string): number | null {
+  if (code === '240') return 14400
+  if (code === 'D') return 86400
+  return intervalSeconds(code)
+}
+
+// 发现 K 线中间有洞（App 冻在后台、回前台只拿到最新两根）时重拉尾部历史的最短间隔，防止反复重拉。
+// Minimum spacing between tail refills when a hole is found (the app froze in the background and
+// came back to only the latest two bars), so a persistent hole can't trigger a refill loop.
+export const TAIL_REFILL_MIN_GAP_MS = 15_000
+
 // 距下一根 bar 开盘后 BOUNDARY_SETTLE_MS 还要多久（毫秒）；周期不支持则 null。
 // ms until BOUNDARY_SETTLE_MS after the next bar opens; null for unsupported intervals.
 export function nextBoundaryPollDelayMs(code: string, nowMs: number): number | null {

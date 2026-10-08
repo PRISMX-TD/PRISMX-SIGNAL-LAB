@@ -220,7 +220,14 @@ async def ws_client(websocket: WebSocket):
                            user_id, exc_info=True)
             snapshot = {}
         cached = snapshot.get("positions")
-        if cached:
+        # 空快照也要推，只要 Redis 里确实有这份快照（positions_known）：重连前最后一张单平掉的那帧
+        # 很可能发给了已经死掉的旧连接，不推 [] 的话前端会一直显示那张早已平掉的单。Redis 里没有
+        # 快照（刚重启 / 过期）时仍不推，免得把前端的表误清空。
+        # Push an empty snapshot too, as long as Redis really holds one (positions_known): the frame
+        # for the last close may have gone to the dead socket before this reconnect, and without []
+        # the frontend keeps showing a long-closed position. With no snapshot in Redis (just
+        # restarted / expired) still push nothing, so the table isn't blanked by mistake.
+        if cached or snapshot.get("positions_known"):
             # 带上 funds，否则刷新后账户卡片要等下一拍推送才能拿到实时浮盈，
             # 中间那一两秒会退回"净值-余额"的旧口径，数字会跳一下。
             # Include funds, otherwise the account card would fall back to the old
@@ -233,7 +240,7 @@ async def ws_client(websocket: WebSocket):
         # 挂单不带 funds——浮盈是持仓的概念，挂单还没有仓位。
         # No funds ride along with pending orders: floating P/L belongs to positions.
         cached_pending = snapshot.get("pending")
-        if cached_pending:
+        if cached_pending or snapshot.get("pending_known"):
             await websocket.send_json({"type": "PENDING_ORDERS", "data": cached_pending})
         # 按交易商账户区分的报价（下单确认页用）/ per-account quotes (order-confirm page)
         cached_quotes = snapshot.get("quotes")
