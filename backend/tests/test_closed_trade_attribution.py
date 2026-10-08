@@ -217,3 +217,45 @@ def test_mixed_batch_keeps_bridge_legs_and_drops_others(db_session, user):
 
     assert res == {"inserted": 1, "unverified": 0, "rejected": 1}
     assert {r.deal_ticket for r in db_session.query(ClosedTrade).all()} == {9104}
+
+
+def test_temporary_bridge_row_cannot_forge_legs_for_a_gateway_login(db_session, user):
+    """用户已经用 gateway 直连绑了 L，再用不同的服务器名给 L 建一条桥接行，
+    借这条临时桥接行上报伪造腿、事后删掉桥接行抹痕迹——腿必须一开始就被拒。
+
+    A live gateway row for L makes L gateway-owned: a second bridge row under a
+    different server name must not open the bridge channel for L.
+    """
+    db_session.add(MT5Account(user_id=user.id, login="600333", server="Broker-Live",
+                              source="gateway"))
+    db_session.commit()
+    _bridge_row(db_session, user.id, login="600333")   # server="s"，不同服务器名
+    _order(db_session, user.id, ticket=3, position=99993, login="600333")
+
+    res = _post(db_session, user, [_leg(position_ticket=99993, deal=9201, login="600333",
+                                        profit=99999.0)])
+
+    assert res == {"inserted": 0, "unverified": 0, "rejected": 1}
+    # 删掉临时桥接行之后也不留下任何伪造腿
+    bridge = (db_session.query(MT5Account)
+              .filter_by(user_id=user.id, login="600333", source="bridge").one())
+    bridge.revoked_reason = REASON_USER_REMOVED
+    db_session.commit()
+    assert db_session.query(ClosedTrade).filter_by(mt5_login="600333").count() == 0
+
+
+def test_removed_or_revoked_gateway_row_does_not_block_bridge_legs(db_session, user):
+    """只有仍有效（未软删、未撤销）的 gateway 行才接管该账号；
+    已删除 / 已撤销的 gateway 行不挡这个账号的桥接腿。"""
+    db_session.add(MT5Account(user_id=user.id, login=LOGIN, server="g1", source="gateway",
+                              revoked_reason=REASON_USER_REMOVED,
+                              revoked_at=datetime.now(timezone.utc)))
+    db_session.add(MT5Account(user_id=user.id, login=LOGIN, server="g2", source="gateway",
+                              revoked_reason="password_changed",
+                              revoked_at=datetime.now(timezone.utc)))
+    db_session.commit()
+    _order(db_session, user.id, ticket=77780)
+
+    res = _post(db_session, user, [_leg(position_ticket=77780, deal=9202)])
+
+    assert res == {"inserted": 1, "unverified": 0, "rejected": 0}

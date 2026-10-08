@@ -1536,13 +1536,35 @@ def _live_bridge_logins(db: Session, user_id: str, logins: set[str]) -> set[str]
     return {r[0] for r in rows}
 
 
+def _live_gateway_logins(db: Session, user_id: str, logins: set[str]) -> set[str]:
+    """本用户名下有仍有效（未软删、未撤销）gateway 行的 login。这些账号的平仓历史由
+    网关自己写，桥接通道一律不收——哪怕用户另用别的服务器名给同一 login 建了桥接行。
+    Logins this user has a live (not removed, not revoked) gateway row for. The
+    gateway owns their history, so bridge legs are refused even when a second
+    bridge row exists for the same login under another server name."""
+    if not logins:
+        return set()
+    rows = (
+        db.query(MT5Account.login)
+        .filter(
+            MT5Account.user_id == user_id,
+            MT5Account.source == "gateway",
+            MT5Account.login.in_(list(logins)),
+            MT5Account.revoked_at.is_(None),
+            not_removed(),
+        )
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
 def _trade_history_db_work(
     db: Session, user_id: str, legs: list["BridgeClosedTrade"]
 ) -> tuple[int, int, int]:
     """核验 + 落库，返回 (新插入条数, 未通过核验条数, 被拒条数)。
 
     被拒：这条腿的账号不是本人仍挂着的桥接账号（只经 gateway 绑定、已删除、或根本不是
-    本人的）。这类腿没有任何正当理由走桥接通道上来——而 known_position_ids 会认 gateway
+    本人的），或者本人对这个账号还有一条有效的 gateway 行（不管有没有桥接行）。这类腿没有任何正当理由走桥接通道上来——而 known_position_ids 会认 gateway
     订单的仓位号，不挡的话，拿自己的 API Token 就能给直连账户的真实仓位伪造一条
     verified 的高盈利平仓腿进比赛成绩；还会抢先占住 deal_ticket，让网关稍后写入的真腿
     只能补空列、永远继承伪造腿的结论。所以直接丢弃，不入库。
@@ -1554,7 +1576,13 @@ def _trade_history_db_work(
     otherwise let a user forge verified profits onto a direct-connect account and
     squat the deal_ticket the gateway later writes.
     """
-    bridged = _live_bridge_logins(db, user_id, {leg.login for leg in legs})
+    leg_logins = {leg.login for leg in legs}
+    # 有效 gateway 行优先：_upsert_account 按 (login, server) 建行，换个服务器名就能给
+    # 直连账号临时挂一条桥接行，报完伪造腿再删掉、连 nonGateway 标记一起抹掉。
+    # A live gateway row wins: _upsert_account keys rows by (login, server), so a
+    # throwaway bridge row under another server name must not open this channel.
+    bridged = _live_bridge_logins(db, user_id, leg_logins) - _live_gateway_logins(
+        db, user_id, leg_logins)
     accepted = [leg for leg in legs if leg.login in bridged]
     rejected = len(legs) - len(accepted)
     known = _known_position_ids(db, user_id, {leg.login for leg in accepted})
