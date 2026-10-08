@@ -348,9 +348,7 @@ def participant_details(db, comp: Competition, participants: list) -> dict[str, 
             "netCashflow": float(b.adjust or 0.0) if b is not None else None,
             # 资金进出（含平台外交易）超过报名本金的 CASHFLOW_FLAG_FRAC：标黄人工复核。
             # Cash flow (incl. off-platform trading) beyond the flag share: review.
-            "cashflowFlagged": bool(b is not None and float(b.baseline or 0) > 0
-                                    and abs(float(b.adjust or 0.0))
-                                    >= CASHFLOW_FLAG_FRAC * float(b.baseline)),
+            "cashflowFlagged": _cashflow_flagged(b),
             "endCaptured": p.end_positions is not None,
             "sample": None,
             "minTrades": min_trades,
@@ -393,6 +391,174 @@ def participant_details(db, comp: Competition, participants: list) -> dict[str, 
         else:
             d["status"] = "pending"                 # 下一轮快照才会出现 / next snapshot
     return out
+
+
+# ---- 完整性检查（设计 2026-10-08 §1.14）/ integrity checks ----------------------
+# 对冲嫌疑：同一场里两个不同条目，在各自计分起点之后、60 秒内对同一品种下了方向相反
+# 的平台单。两人串通各报一个账户互相对冲时，一方必赚——条目上限挡不住这一类（见
+# MAX_ENTRIES_DEMO 的说明），只能报出来交给人判断。同一个人的两个条目也算（实盘赛
+# 每人可报 3 个）。
+# Hedge suspicion: two different entries in one competition placing opposite-side
+# platform orders on the same symbol within 60s, after their scoring starts.
+HEDGE_WINDOW_SECONDS = 60
+# 终审闸门只看前 N 名：奖金与勋章都在头部，尾部的标记不挡终审。
+# The settle gate only looks at the top N, where prizes and badges are.
+SETTLE_FLAG_TOP_N = 10
+
+
+def _cashflow_flagged(b) -> bool:
+    """资金进出（含平台外交易）超过报名本金的 CASHFLOW_FLAG_FRAC → 标黄人工复核。
+    participant_details 与完整性报告共用，口径只此一份。"""
+    if b is None:
+        return False
+    base = float(b.baseline or 0.0)
+    return base > 0 and abs(float(b.adjust or 0.0)) >= CASHFLOW_FLAG_FRAC * base
+
+
+def _direction(side) -> int:
+    """BUY / BUY_LIMIT / BUY_STOP… → +1；SELL… → -1；其它 0（不参与配对）。"""
+    s = (side or "").upper()
+    if s.startswith("BUY"):
+        return 1
+    if s.startswith("SELL"):
+        return -1
+    return 0
+
+
+def entry_flags(db, comp: Competition, participants: list) -> dict[str, dict]:
+    """逐条目标记：participant.id -> {"kinds": [...], "detail": {...}}（每个条目都有，kinds 可空）。
+
+    cashflowFlagged：同 participant_details。
+    accountRevoked：没有未软删的账户行，或主账户行（有 gateway 行取它）已撤销。
+    nonGateway：没有未软删的 gateway 行，或同 login 还挂着未软删的非 gateway 行
+                （报名闸 §1.11 之前报上的老条目、或报名后又接了桥接）。
+    Per-entry flags; every participant gets an entry, kinds may be empty."""
+    from app.services.gateway_binding import not_removed
+    if not participants:
+        return {}
+    uids = {p.user_id for p in participants}
+    logins = {p.mt5_login for p in participants}
+    accts: dict[tuple[str, str], list] = defaultdict(list)
+    for a in (db.query(MT5Account)
+                .filter(MT5Account.user_id.in_(list(uids)), MT5Account.login.in_(list(logins)),
+                        not_removed())):
+        accts[(a.user_id, a.login)].append(a)
+    baselines = {(b.user_id, b.mt5_login): b for b in
+                 db.query(PeriodBaseline).filter(
+                     PeriodBaseline.period_key == comp_period_key(comp.id))}
+    out: dict[str, dict] = {}
+    for p in participants:
+        key = (p.user_id, p.mt5_login)
+        rows = accts.get(key, [])
+        gw = next((a for a in rows if a.source == "gateway"), None)
+        primary = gw if gw is not None else (rows[0] if rows else None)
+        b = baselines.get(key)
+        kinds: list[str] = []
+        if _cashflow_flagged(b):
+            kinds.append("cashflowFlagged")
+        if primary is None or primary.revoked_at is not None:
+            kinds.append("accountRevoked")
+        if gw is None or any(a.source != "gateway" for a in rows):
+            kinds.append("nonGateway")
+        out[p.id] = {"kinds": kinds, "detail": {
+            "balanceAtSignup": float(b.baseline) if b is not None else None,
+            "netCashflow": float(b.adjust or 0.0) if b is not None else None,
+            "sources": sorted({a.source or "" for a in rows}),
+            "revokedReason": primary.revoked_reason if primary is not None else None,
+            "hedgePairs": 0,
+        }}
+    return out
+
+
+def hedge_pairs(db, comp: Competition, participants: list) -> list[dict]:
+    """对冲嫌疑配对（见 HEDGE_WINDOW_SECONDS 的说明）。只看平台单（OPENED_POSITION：成交的
+    市价单 + 已挂出的挂单），每条订单只认它自己条目的计分起点之后、比赛结束之前的部分。
+    同一对条目、同一品种多次撞上只报一行，count 计次数，at 取第一次。
+    Hedge-suspect pairs; one row per (entry pair, symbol), counting occurrences."""
+    from app.models import Order
+    from app.services.order_payload import OPENED_POSITION
+    if len(participants) < 2:
+        return []
+    by_key = {(p.user_id, p.mt5_login): p for p in participants}
+    starts_at, ends_at = _aware(comp.starts_at), _aware(comp.ends_at)
+    lower = {k: (max(starts_at, _aware(p.scoring_from)) if p.scoring_from is not None
+                 else starts_at)
+             for k, p in by_key.items()}
+    q = (db.query(Order.user_id, Order.mt5_login, Order.symbol, Order.side, Order.created_at)
+           .filter(OPENED_POSITION,
+                   Order.user_id.in_(list({k[0] for k in by_key})),
+                   Order.mt5_login.in_(list({k[1] for k in by_key})),
+                   Order.created_at.isnot(None),
+                   Order.created_at >= min(lower.values())))
+    if ends_at is not None:
+        q = q.filter(Order.created_at <= ends_at)
+    events = []
+    for uid, login, symbol, side, created_at in q:
+        key = (uid, login)
+        p = by_key.get(key)
+        at = _aware(created_at)
+        d = _direction(side)
+        if p is None or d == 0 or at < lower[key] or (ends_at is not None and at > ends_at):
+            continue
+        events.append((at, p, (symbol or "").upper(), d, (side or "").upper()))
+    events.sort(key=lambda e: e[0])
+    window = timedelta(seconds=HEDGE_WINDOW_SECONDS)
+    found: dict[tuple, dict] = {}
+    for i, (t1, p1, s1, d1, side1) in enumerate(events):
+        for t2, p2, s2, d2, side2 in events[i + 1:]:
+            if t2 - t1 > window:
+                break
+            if p2.id == p1.id or s2 != s1 or d2 != -d1:
+                continue
+            key = (min(p1.id, p2.id), max(p1.id, p2.id), s1)
+            hit = found.get(key)
+            if hit is None:
+                hit = found[key] = {
+                    "a": {"participantId": p1.id, "login": p1.mt5_login, "side": side1},
+                    "b": {"participantId": p2.id, "login": p2.mt5_login, "side": side2},
+                    "symbol": s1, "at": t1.isoformat(), "count": 0,
+                    "sameUser": p1.user_id == p2.user_id,
+                }
+            hit["count"] += 1
+    return sorted(found.values(), key=lambda h: h["at"])
+
+
+def competition_integrity(db, comp: Competition) -> dict:
+    """管理端完整性报告：{flags: [{participantId, login, displayName, kinds, detail}],
+    pairs: [{a, b, symbol, at, count, sameUser}]}。只看未取消资格的条目；只读。
+    出现在配对里的条目额外带 hedgePair 标记。
+    Admin integrity report over non-disqualified entries; read-only."""
+    from . import identity
+    participants = (db.query(CompetitionParticipant)
+                      .filter(CompetitionParticipant.competition_id == comp.id,
+                              CompetitionParticipant.disqualified.is_(False))
+                      .order_by(CompetitionParticipant.registered_at.asc()).all())
+    if not participants:
+        return {"flags": [], "pairs": []}
+    flags = entry_flags(db, comp, participants)
+    pairs = hedge_pairs(db, comp, participants)
+    users = {u.id: u for u in
+             db.query(User).filter(User.id.in_(list({p.user_id for p in participants})))}
+
+    def _name(uid: str) -> str:
+        u = users.get(uid)
+        return identity.display_name(u.nickname if u else None, u.email if u else None)
+
+    by_id = {p.id: p for p in participants}
+    for h in pairs:
+        for side in ("a", "b"):
+            pid = h[side]["participantId"]
+            h[side]["displayName"] = _name(by_id[pid].user_id)
+            f = flags[pid]
+            if "hedgePair" not in f["kinds"]:
+                f["kinds"].append("hedgePair")
+            f["detail"]["hedgePairs"] += 1
+    return {
+        "flags": [{"participantId": p.id, "login": p.mt5_login, "displayName": _name(p.user_id),
+                   "kinds": flags[p.id]["kinds"], "detail": flags[p.id]["detail"]}
+                  for p in participants if flags[p.id]["kinds"]],
+        "pairs": pairs,
+    }
 
 
 def _snapshot_one_comp(db, comp: Competition, force: bool = False) -> list[dict]:

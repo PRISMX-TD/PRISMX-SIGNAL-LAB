@@ -26,8 +26,8 @@ from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
 from app.services.gamification.badges import equipped_badge_tiers
 from app.services.gamification.competitions import (
-    TRACKS, auto_enroll, comp_gates, comp_period_key, participant_details,
-    refresh_comp_board, register_participant, settle_competition)
+    TRACKS, auto_enroll, comp_gates, comp_period_key, competition_integrity,
+    participant_details, refresh_comp_board, register_participant, settle_competition)
 from app.services.settings_store import get_gamification_settings
 from app.utils.timeutil import aware as _aware
 
@@ -580,6 +580,15 @@ def admin_settle_competition(comp_id: str,
     permanent once locked."""
     comp = _get_comp_or_404(db, comp_id)
     return settle_competition(db, comp, admin.id)
+
+
+@admin_router.get("/{comp_id}/integrity")
+def admin_competition_integrity(comp_id: str, db: Session = Depends(get_db)):
+    """完整性报告（设计 2026-10-08 §1.14）：对冲嫌疑配对 + 出入金 / 账户已撤销 / 非直连
+    标记。只读；终审闸门用的是同一份报告（settle_competition → top_entry_flags）。
+    Integrity report; read-only. The settle gate reads the same report."""
+    comp = _get_comp_or_404(db, comp_id)
+    return competition_integrity(db, comp)
 
 
 @admin_router.get("/{comp_id}/board")
