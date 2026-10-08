@@ -21,7 +21,7 @@ from app.services.audit import log_change as _log_change
 from app.routers.gamification import build_board_rows_payload
 from app.schemas import (
     CompetitionCreateIn, CompetitionParticipantPatchIn, CompetitionPatchIn,
-    CompetitionRegisterIn)
+    CompetitionRegisterIn, CompetitionSettleIn)
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
 from app.services.gamification.badges import equipped_badge_tiers
@@ -567,19 +567,21 @@ def admin_refresh_competition(comp_id: str, db: Session = Depends(get_db)):
 
 @admin_router.post("/{comp_id}/settle")
 def admin_settle_competition(comp_id: str,
+                              body: CompetitionSettleIn | None = None,
                               db: Session = Depends(get_db),
                               admin: User = Depends(get_current_user)):
-    """终审。三道闸全部由 settle_competition 把守：状态必须是 ended、必须过了
-    §5.3 的 24 小时宽限期、已终审的不能再跑。内测期曾有 `force=true` 跳过全部前置
-    （2026-09-04），上线前已移除（2026-09-05）——早于实际结束时间终审会漏掉尚未
-    平仓和迟到的单，名次一旦定格就是永久的，没有任何运营场景值得拿这个换。
-    Settlement. All three gates live in settle_competition: status must be ended,
-    the 24h grace period must have passed, and a settled competition cannot be
-    re-run. A `force=true` bypass existed during the closed beta and was removed
-    before launch: settling early drops still-open and late closes, and ranks are
-    permanent once locked."""
+    """终审。闸门全部由 settle_competition 把守：状态必须是 ended、必须过了 §5.3 的 24 小时
+    宽限期、已终审的不能再跑，以及完整性闸门（前 10 名有标记 → 400，除非请求体带
+    acknowledgeFlags=true，写审计）。内测期曾有 `force=true` 跳过全部前置（2026-09-04），
+    上线前已移除（2026-09-05）——早于实际结束时间终审会漏掉尚未平仓和迟到的单，名次
+    一旦定格就是永久的，没有任何运营场景值得拿这个换。
+    Settlement. All gates live in settle_competition: status must be ended, the 24h
+    grace period must have passed, a settled competition cannot be re-run, and the
+    integrity gate (flagged top-10 entry -> 400 unless acknowledgeFlags, audited).
+    The beta-era `force=true` bypass was removed before launch."""
     comp = _get_comp_or_404(db, comp_id)
-    return settle_competition(db, comp, admin.id)
+    return settle_competition(db, comp, admin.id,
+                              acknowledge_flags=bool(body and body.acknowledgeFlags))
 
 
 @admin_router.get("/{comp_id}/integrity")

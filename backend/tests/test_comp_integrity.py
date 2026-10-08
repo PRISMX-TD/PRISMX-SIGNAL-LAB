@@ -144,3 +144,94 @@ def test_admin_integrity_endpoint(db_session):
     with pytest.raises(HTTPException) as exc:
         admin_competition_integrity("nope", db=db_session)
     assert exc.value.status_code == 404
+
+
+# ---- 终审闸门（A7）/ settle gate ------------------------------------------------
+
+from app.models import AdminAuditLog  # noqa: E402
+from app.services.gamification.competitions import settle_competition  # noqa: E402
+
+PAST_T0 = datetime(2020, 1, 1, tzinfo=UTC)       # 远在过去：真实时钟下宽限期早已过
+PAST_ENDS = PAST_T0 + timedelta(days=7)
+
+
+def _ended_comp(db):
+    c = Competition(name="Ended", metric="return_pct", enrollment="signup", status="ended",
+                    track="real", starts_at=PAST_T0, ends_at=PAST_ENDS)
+    db.add(c); db.commit(); return c
+
+
+def _admin(db):
+    a = User(email="adm@t.co", api_token="tok_adm", role="admin")
+    db.add(a); db.commit(); return a
+
+
+def _stub_rows(monkeypatch, comp, rows):
+    """同 test_comp_settle._stub_compute_rows：钉死本场 compute_comp_rows 的返回。"""
+    import app.services.gamification.competitions as comp_mod
+    real = comp_mod.compute_comp_rows
+    monkeypatch.setattr(comp_mod, "compute_comp_rows",
+                        lambda db, c: list(rows) if c.id == comp.id else real(db, c))
+
+
+def test_settle_blocked_when_top10_entry_is_flagged(db_session, monkeypatch):
+    admin = _admin(db_session)
+    comp = _ended_comp(db_session)
+    u_ok, _ = _entry(db_session, comp, "t1@t.co", "OK", scoring_from=PAST_T0)
+    u_br, _ = _entry(db_session, comp, "t2@t.co", "BR", source="bridge", scoring_from=PAST_T0)
+    _stub_rows(monkeypatch, comp, [
+        {"userId": u_br.id, "login": "BR", "score": 0.9, "sample": 10},
+        {"userId": u_ok.id, "login": "OK", "score": 0.5, "sample": 10},
+    ])
+
+    with pytest.raises(HTTPException) as exc:
+        settle_competition(db_session, comp, admin.id)
+    assert exc.value.status_code == 400
+    assert "完整性" in exc.value.detail and "BR" in exc.value.detail
+    db_session.refresh(comp)
+    assert comp.status == "ended"                                   # 什么都没落盘
+    assert db_session.query(CompetitionParticipant).filter(
+        CompetitionParticipant.final_rank.isnot(None)).count() == 0
+
+    out = settle_competition(db_session, comp, admin.id, acknowledge_flags=True)
+    assert out["ranked"] == 2
+    db_session.refresh(comp)
+    assert comp.status == "settled"
+    audit = db_session.query(AdminAuditLog).filter_by(
+        field=f"competition:{comp.id}:acknowledgeFlags").one()
+    assert audit.new_value == "BR"
+
+
+def test_flag_outside_top10_does_not_block(db_session, monkeypatch):
+    admin = _admin(db_session)
+    comp = _ended_comp(db_session)
+    rows = []
+    for i in range(10):
+        u, _ = _entry(db_session, comp, f"c{i}@t.co", f"G{i}", scoring_from=PAST_T0)
+        rows.append({"userId": u.id, "login": f"G{i}", "score": 1.0 - i * 0.01, "sample": 10})
+    u_br, _ = _entry(db_session, comp, "late@t.co", "BR", source="bridge", scoring_from=PAST_T0)
+    rows.append({"userId": u_br.id, "login": "BR", "score": 0.01, "sample": 10})   # 第 11 名
+    _stub_rows(monkeypatch, comp, rows)
+
+    out = settle_competition(db_session, comp, admin.id)
+    assert out["ranked"] == 11
+    assert db_session.query(AdminAuditLog).filter_by(
+        field=f"competition:{comp.id}:acknowledgeFlags").count() == 0
+
+
+def test_settle_endpoint_passes_acknowledge_flags(db_session, monkeypatch):
+    from app.routers.competitions import admin_settle_competition
+    from app.schemas import CompetitionSettleIn
+
+    admin = _admin(db_session)
+    comp = _ended_comp(db_session)
+    u_br, _ = _entry(db_session, comp, "ep@t.co", "BR", source="bridge", scoring_from=PAST_T0)
+    _stub_rows(monkeypatch, comp, [{"userId": u_br.id, "login": "BR", "score": 0.3, "sample": 5}])
+
+    with pytest.raises(HTTPException) as exc:
+        admin_settle_competition(comp.id, db=db_session, admin=admin)
+    assert exc.value.status_code == 400
+
+    out = admin_settle_competition(comp.id, body=CompetitionSettleIn(acknowledgeFlags=True),
+                                   db=db_session, admin=admin)
+    assert out["ranked"] == 1

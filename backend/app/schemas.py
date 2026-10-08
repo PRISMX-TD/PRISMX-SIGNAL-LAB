@@ -413,6 +413,13 @@ class CompetitionRegisterIn(BaseModel):
     mt5Login: str = Field(pattern=LOGIN_PATTERN)
 
 
+class CompetitionSettleIn(BaseModel):
+    """终审（管理端）。acknowledgeFlags=True：前 10 名有完整性标记也照常终审（写审计）。
+    整个请求体可省略，等同 acknowledgeFlags=False。"""
+
+    acknowledgeFlags: bool = False
+
+
 class AdminBulkUserUpdate(AdminUserUpdate):
     # 目标用户 id 列表；其余字段语义与 AdminUserUpdate 完全一致（仅传要改的字段）。
     # Target user ids; remaining fields behave exactly like AdminUserUpdate

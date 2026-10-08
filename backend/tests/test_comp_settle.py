@@ -9,6 +9,16 @@ from app.models import (
 )
 from app.services.gamification.competitions import comp_period_key, settle_competition
 
+
+@pytest.fixture(autouse=True)
+def _no_integrity_gate(monkeypatch):
+    """终审闸门（前 10 名有完整性标记 → 400）由 test_comp_integrity.py 专门覆盖；本文件只测
+    终审本身，参赛条目大多没有直连账户行，不桩掉会全部被闸门挡下。
+    The settle gate is covered in test_comp_integrity.py; entries here mostly have no
+    gateway account rows, so the gate is stubbed out."""
+    import app.services.gamification.competitions as comp_mod
+    monkeypatch.setattr(comp_mod, "top_entry_flags", lambda db, comp, rows, top_n=10: [])
+
 UTC = timezone.utc
 # 远早于任何测试运行时的真实 now——settle_competition 现在（§5.3）要求
 # now >= ends_at + 24h 才放行终审，大多数用例走默认 now（真实时钟），必须

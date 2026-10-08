@@ -561,6 +561,17 @@ def competition_integrity(db, comp: Competition) -> dict:
     }
 
 
+def top_entry_flags(db, comp: Competition, rows: list[dict],
+                    top_n: int = SETTLE_FLAG_TOP_N) -> list[dict]:
+    """终审闸门用：已排名 rows（带 rank）里前 top_n 名中带完整性标记的条目
+    （competition_integrity 的 flags 子集）。
+    For the settle gate: flagged entries among the top_n ranked rows."""
+    top = {r["login"] for r in rows if r.get("rank") is not None and r["rank"] <= top_n}
+    if not top:
+        return []
+    return [f for f in competition_integrity(db, comp)["flags"] if f["login"] in top]
+
+
 def _snapshot_one_comp(db, comp: Competition, force: bool = False) -> list[dict]:
     """单场比赛的算行 + 排名 + 快照原子替换（delete-then-insert），不 commit——
     commit 时机由调用方决定：`snapshot_competitions` 每场比赛提交一次；
@@ -975,7 +986,7 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
 
 
 def settle_competition(db, comp: Competition, admin_id: str,
-                        now: datetime | None = None) -> dict:
+                        now: datetime | None = None, acknowledge_flags: bool = False) -> dict:
     """终审（设计 §1.7/§1.9，Phase 3 Task 4；§5.3 宽限期，Task F）：不可重跑，
     一切以 status 为闸。
 
@@ -1004,6 +1015,13 @@ def settle_competition(db, comp: Competition, admin_id: str,
     漏发一枚勋章（可人工补发，幂等），绝不会传导回去把已经写死的名次或 status
     撤回——所以失败被捕获进返回值的 badgeErrors，而不是抛出让调用方以为终审
     本身失败了。
+
+    完整性闸门（2026-10-08 §1.14）：刷新后的前 SETTLE_FLAG_TOP_N 名里任一条目带完整性标记
+    （对冲嫌疑 / 出入金 / 账户已撤销 / 非直连，见 competition_integrity）→ 回滚刷新、400，
+    除非 acknowledge_flags=True——那样照常终审，并把被放行的 login 写进审计
+    （competition:<id>:acknowledgeFlags）。
+    Integrity gate: any flagged entry in the refreshed top N → roll back and 400,
+    unless acknowledge_flags=True, which settles and audits the waived logins.
     """
     # 内测期这里有过 force=True 跳过全部前置条件的分支（2026-09-04 为测试放开），
     # 上线前移除（2026-09-05）：早于实际结束时间终审会漏掉尚未平仓和迟到的单，
@@ -1026,6 +1044,19 @@ def settle_competition(db, comp: Competition, admin_id: str,
                     "so late closes are counted")
 
     rows = _snapshot_one_comp(db, comp, force=True)   # 先落定最新名次，再读——见上方 docstring
+    # 完整性闸门：读的是刚刷新的名次（rows 已带 rank）。挡下时回滚，连刷新一起撤掉——
+    # 名次只能在真正终审时落盘。
+    # Integrity gate on the freshly ranked rows; on refusal roll back the refresh too.
+    flagged = top_entry_flags(db, comp, rows)
+    if flagged and not acknowledge_flags:
+        db.rollback()
+        logins = "、".join(f["login"] for f in flagged)
+        raise HTTPException(
+            status_code=400,
+            detail=(f"前 {SETTLE_FLAG_TOP_N} 名中有 {len(flagged)} 个条目带完整性标记（{logins}），"
+                    f"请先查看完整性报告；核实后确认知悉再终审 / "
+                    f"{len(flagged)} top-{SETTLE_FLAG_TOP_N} entries carry integrity flags "
+                    f"({logins}); review the integrity report, then settle with acknowledgeFlags"))
     by_login = {p.mt5_login: p for p in
                 db.query(CompetitionParticipant).filter(
                     CompetitionParticipant.competition_id == comp.id)}
@@ -1058,6 +1089,10 @@ def settle_competition(db, comp: Competition, admin_id: str,
     # alias of it); the service layer never imports a router.
     from app.services.audit import log_change as _log_change
     _log_change(db, admin_id, admin_id, f"competition:settle:{comp.id}", "ended", "settled")
+    if flagged:
+        # 管理员确认知悉后放行：被放行的条目留痕 / waived flagged entries are audited
+        _log_change(db, admin_id, admin_id, f"competition:{comp.id}:acknowledgeFlags",
+                    "", ",".join(sorted(f["login"] for f in flagged)))
 
     db.commit()   # 名次 + status + 审计：终局状态到此为止，下面发奖失败不会回退到这里
 
