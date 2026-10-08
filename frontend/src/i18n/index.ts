@@ -277,6 +277,23 @@ export function setLanguage(lang: AppLang, at: number = Date.now()) {
   })
 }
 
+// 本机还没存过界面语言时，把当前界面语言存下来（注册 / Google 登录成功后由 store/auth.tsx 调）。
+// 公开比赛页按 ?lang= / 浏览器语言用 syncLanguage 临时切换、不落盘；访客注册后若不存，
+// 进入应用后 LangRouteSync 找不到已存语言，下次冷启动就回到中文。已存过的绝不覆盖。
+// at 传 0 = 「弱」记录：云端已有带时间戳的语言时由云端覆盖（Google 登录可能是老用户），
+// 也不会被当成「本机更新」推上云端（见 store/cloudLang.ts）。
+// Persist the current UI language when the device has none stored (called by store/auth.tsx
+// after register / Google sign-in). The public competition page switches via syncLanguage
+// without persisting; without this, LangRouteSync finds nothing stored and the next cold start
+// reverts to Chinese. Never overwrites a stored choice. at = 0 is a weak write: a stamped cloud
+// language still wins (a Google sign-in may be a returning user) and it is not pushed up as
+// "newer" (see store/cloudLang.ts). Returns whether anything was written.
+export function persistLanguageIfUnset(at: number = Date.now()): boolean {
+  if (storedLang() !== null) return false
+  setLanguage(currentLang(), at)
+  return true
+}
+
 // 同步界面语言但不写偏好：公开页按 URL 被动同步时用——访客点开 /en 不该
 // 悄悄覆盖他 localStorage 里的语言偏好；主动点语言切换才走 setLanguage。
 export function syncLanguage(lang: AppLang) {

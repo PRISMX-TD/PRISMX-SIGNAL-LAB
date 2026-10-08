@@ -4,6 +4,7 @@ import type { User } from '../api/types'
 import { authApi, clearToken, getToken, pushApi, setAccountDisabledHandler, setToken, setUnauthorizedHandler, userApi } from '../api/client'
 import { readJson, writeJson } from '../utils/safeStorage'
 import { getSWReg, pushSupported } from '../utils/push'
+import { persistLanguageIfUnset } from '../i18n'
 
 interface AuthContextValue {
   user: User | null
@@ -253,6 +254,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const register = useCallback(async (email: string, password: string, phoneCountry: string, phone: string) => {
     const res = await authApi.register(email, password, phoneCountry, phone)
     persist(res.user, res.token)
+    // 新账号：把访客此刻看的语言存下来（带时间戳，会随偏好上云）。
+    // New account: keep the language the visitor is looking at (stamped, synced to the cloud).
+    persistLanguageIfUnset()
     return res.user
   }, [persist])
 
@@ -284,6 +288,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginWithGoogle = useCallback(async (credential: string) => {
     const res = await authApi.google(credential)
     persist(res.user, res.token)
+    // Google 分不出新老用户：弱记录（at=0），云端已有语言的老用户仍以云端为准。
+    // Google can't tell new from returning users: a weak write (at=0), so a returning user's
+    // cloud language still wins.
+    persistLanguageIfUnset(0)
     return res.user
   }, [persist])
 
