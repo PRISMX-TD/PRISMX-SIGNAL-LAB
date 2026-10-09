@@ -64,7 +64,7 @@ const POLL_MS = 2 * 60_000
 const CACHE_KEY = 'cmp-navbadge'
 const CACHE_TTL_MS = 30 * 60_000
 
-type BadgeData = Pick<CompetitionListGrouped, 'running' | 'upcoming'>
+export type BadgeData = Pick<CompetitionListGrouped, 'running' | 'upcoming'>
 
 function readCache(): BadgeData | null {
   const c = readJson<{ at: number; data: BadgeData } | null>(CACHE_KEY, null)
@@ -88,11 +88,14 @@ function signupOpen(c: CompetitionSummary, nowMs: number): boolean {
   return opens != null && closes != null && opens <= nowMs && nowMs < closes
 }
 
-export default function CompetitionNavBadge() {
+// preset：游客预览直接给（公开比赛数据），不轮询、不读写缓存。
+// preset: handed in by the guest preview (public competition data); no polling, no cache.
+export default function CompetitionNavBadge({ preset }: { preset?: BadgeData | null } = {}) {
   const { t } = useTranslation()
   const { user } = useAuth()
-  const visible = !!user?.competitionsVisible
-  const [data, setData] = useState<BadgeData | null>(readCache)
+  const visible = preset !== undefined || !!user?.competitionsVisible
+  const [polled, setData] = useState<BadgeData | null>(() => (preset !== undefined ? null : readCache()))
+  const data = preset !== undefined ? preset : polled
 
   usePollWhileVisible(
     (isCurrent) => {
@@ -107,7 +110,7 @@ export default function CompetitionNavBadge() {
     },
     POLL_MS,
     [visible],
-    { enabled: visible },
+    { enabled: visible && preset === undefined },
   )
 
   if (!visible || !data) return null

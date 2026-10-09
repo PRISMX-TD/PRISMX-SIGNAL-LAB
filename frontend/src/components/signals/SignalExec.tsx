@@ -30,6 +30,7 @@ import { calcRiskReward, displaySymbol } from '../../api/utils'
 import { fmtIssueClock, fmtPx, priceDecimals, riskFraction, rrTone } from './SignalView'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { ClockTtlRing } from './TtlRing'
+import LockedPx, { LockIcon } from './LockedPx'
 
 interface Props {
   signal: Signal | null
@@ -38,12 +39,16 @@ interface Props {
 
 const SignalExec: FC<Props> = ({ signal, onTrade }) => {
   const { t } = useTranslation()
-  const rr = signal ? calcRiskReward(signal.symbol, signal.entry, signal.stopLoss, signal.takeProfit) : null
+  // 游客预览的锁定信号没有价位，盈亏比与尺的比例由服务端直接给（见 Signal.locked）。
+  // A locked guest-preview signal has no prices; R:R and the rule split come from the server.
+  const locked = signal?.locked
+  const rr = signal && !locked ? calcRiskReward(signal.symbol, signal.entry, signal.stopLoss, signal.takeProfit) : null
+  const rrVal = locked ? locked.rr : rr?.rr ?? null
   const isBuy = signal?.side === 'BUY'
   const sideTag = isBuy ? t('common.buy') : t('common.sell')
   const indicatorLabel = signal ? signal.indicator ?? t('signals.indicatorNone') : t('signals.focus.noExecutable')
   const decimals = signal ? priceDecimals(signal.entry, signal.stopLoss, signal.takeProfit) : 0
-  const riskFrac = rr ? riskFraction(rr.riskPrice, rr.rewardPrice) : null
+  const riskFrac = locked ? locked.riskFrac : rr ? riskFraction(rr.riskPrice, rr.rewardPrice) : null
   const meta = signal ? symbolMeta(signal.symbol) : null
 
   return (
@@ -89,7 +94,7 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
           take-profit value below it. */}
       <div className="dh-entry">
         <span className="dh-cap">{t('signals.colEntry')}</span>
-        <b className="num">{signal ? fmtPx(signal.entry, decimals) : '-'}</b>
+        <b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:e`} /> : fmtPx(signal.entry, decimals)) : '-'}</b>
       </div>
 
       {/* 止损｜盈亏比｜止盈 + 风险｜回报尺。盈亏比放正中间：它正下方那根尺画的就是这个数。
@@ -97,12 +102,12 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
           right below it is that number drawn to scale. */}
       <div className="dh-ladder">
         <div className="row">
-          <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{signal ? fmtPx(signal.stopLoss, decimals) : '-'}</b></div>
+          <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:sl`} /> : fmtPx(signal.stopLoss, decimals)) : '-'}</b></div>
           <div className="lv rr">
             <span className="dh-cap">{t('signals.focus.rrLabel')}</span>
-            <b className={`num ${rrTone(rr?.rr ?? null)}`}>{rr?.rr != null ? `1:${rr.rr.toFixed(2)}` : '-'}</b>
+            <b className={`num ${rrTone(rrVal)}`}>{rrVal != null ? `1:${rrVal.toFixed(2)}` : '-'}</b>
           </div>
-          <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{signal ? fmtPx(signal.takeProfit, decimals) : '-'}</b></div>
+          <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:tp`} /> : fmtPx(signal.takeProfit, decimals)) : '-'}</b></div>
         </div>
         <div
           className={`sig-ladder-bar${riskFrac == null ? ' none' : ''}`}
@@ -115,15 +120,22 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
         </div>
       </div>
 
+      {/* data-signal-id：游客预览按它把这次点击变成「解锁这条信号」的弹窗。
+          data-signal-id lets the guest preview turn this click into "unlock this signal". */}
       <button
         onClick={() => signal && onTrade(signal)}
         disabled={!signal}
         className="btn btn-primary dh-exec-cta"
+        data-signal-id={signal?.id}
       >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
-        </svg>
-        {t('signals.trade')}
+        {locked ? (
+          <LockIcon size={16} />
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="12" height="12" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+          </svg>
+        )}
+        {locked ? t('guest.unlockTrade') : t('signals.trade')}
       </button>
     </section>
   )

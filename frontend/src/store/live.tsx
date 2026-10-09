@@ -905,6 +905,51 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   )
 }
 
+// 游客预览用的只读数据源：同一组 Context，但数据由调用方给（公开预览接口），不连 WS、
+// 不发任何需要登录的请求。仪表盘的卡片组件因此原样复用，不必为游客另写一套。
+// 账户 / 订单 / 持仓一律为空，动作函数全是空操作——游客页的点击在上层就被拦成注册弹窗。
+// Read-only data source for the guest preview: the same contexts, fed by the caller (the
+// public preview endpoint) with no WS and no authed requests, so the dashboard cards are
+// reused as-is. Accounts / orders / positions are empty and every action is a no-op — guest
+// clicks are intercepted into the sign-up modal one level up.
+const noop = () => {}
+const noopAsync = async () => {}
+export function StaticLiveProvider({
+  signals,
+  trends,
+  activeSymbols,
+  quotes,
+  children,
+}: {
+  signals: Signal[]
+  trends: Record<string, Trend>
+  activeSymbols: string[]
+  quotes: Record<string, Quote>
+  children: ReactNode
+}) {
+  const value = useMemo<LiveContextValue>(
+    () => ({
+      signals, strategySignals: [], orders: [], trends, activeSymbols, accounts: [], accountLimit: null,
+      brokerLock: null, loaded: true, anyOnline: true, onlineAccounts: [], refreshAll: noopAsync,
+      upsertOrder: noop, refreshOrders: noopAsync, positionsLoaded: true, wsConnected: true,
+      wsDisconnected: false, backendUnreachable: false, closedTradeTick: 0, announcementTick: 0,
+      notificationTick: 0, refreshNotifications: noop,
+    }),
+    [signals, trends, activeSymbols],
+  )
+  const [store] = useState(() => createSnapshotStore<Record<string, Quote>>(quotes))
+  useLayoutEffect(() => {
+    store.set(quotes)
+  }, [quotes, store])
+  return (
+    <LiveContext.Provider value={value}>
+      <GlobalQuotesContext.Provider value={quotes}>
+        <GlobalQuotesStoreContext.Provider value={store}>{children}</GlobalQuotesStoreContext.Provider>
+      </GlobalQuotesContext.Provider>
+    </LiveContext.Provider>
+  )
+}
+
 export function useLive() {
   const ctx = useContext(LiveContext)
   if (!ctx) throw new Error('useLive must be used within LiveProvider')

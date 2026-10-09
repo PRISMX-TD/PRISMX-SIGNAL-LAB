@@ -26,7 +26,9 @@ export class PublicHttpError extends Error {
 
 const TIMEOUT_MS = 15_000
 
-async function getJson<T>(path: string): Promise<T> {
+// 导出给其它公开接口复用（游客预览、站点配置）：同样不带身份、不碰登录态。
+// Exported for the other public endpoints (guest preview, site config): same identity-free fetch.
+export async function publicGetJson<T>(path: string): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
   let res: Response
@@ -49,8 +51,8 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const publicCompetitionApi = {
-  featured: () => getJson<{ id: string | null }>('/public/competitions/featured'),
-  detail: (id: string) => getJson<PublicCompetition>(`/public/competitions/${encodeURIComponent(id)}`),
+  featured: () => publicGetJson<{ id: string | null }>('/public/competitions/featured'),
+  detail: (id: string) => publicGetJson<PublicCompetition>(`/public/competitions/${encodeURIComponent(id)}`),
   // 漏斗打点：后端永远 204。keepalive 让点击 CTA 后立刻跳页时请求也能发出去；
   // 任何失败都吞掉——打点绝不能挡住访客。
   // Funnel ping: always 204 server-side. keepalive lets it survive the navigation that

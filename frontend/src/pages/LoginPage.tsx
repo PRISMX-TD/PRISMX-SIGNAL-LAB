@@ -13,6 +13,7 @@ import AuroraBackground from '../components/AuroraBackground'
 import GoogleLoginButton from '../components/GoogleLoginButton'
 import PhoneField, { dialCodeOf, type PhoneValue } from '../components/PhoneField'
 import { DEFAULT_DIAL_ISO } from '../data/dialCodes'
+import { trackSignupFromHome } from '../guest/homeMode'
 
 export default function LoginPage() {
   const { t } = useTranslation()
@@ -81,6 +82,9 @@ export default function LoginPage() {
       const u = mode === 'login'
         ? await login(email, password)
         : await register(email, password, dialCodeOf(phone.iso), phone.national)
+      // 首页漏斗：注册成功记到「最近一次从首页进来时的模式」上（见 guest/homeMode.ts）。
+      // Home funnel: a sign-up counts toward the mode of the latest home visit.
+      if (mode === 'register') trackSignupFromHome()
       // 有比赛报名意图就回比赛页，否则照旧去仪表盘（与上面的声明式跳转同一判据）。
       // Back to the competition when there is an intent, else the dashboard as before
       // (same rule as the declarative redirect above).
@@ -97,6 +101,9 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const u = await loginWithGoogle(credential)
+      // Google 新号一定还欠手机号（Google 不给），据此认定这次是注册。
+      // A new Google account always still owes a phone number, which marks this as a sign-up.
+      if (u.needsPhone) trackSignupFromHome()
       if (!resumeCompIntent(navigate, u)) navigate('/dashboard', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? localizeApiError(err.message) : t('auth.googleError'))

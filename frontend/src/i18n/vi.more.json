@@ -1996,5 +1996,117 @@
       "special": "Đặc biệt"
     },
     "saved": "Đã lưu vào thư viện ảnh"
+  },
+  "guest": {
+    "lockedPrice": "Hiển thị sau khi đăng ký",
+    "unlockTrade": "Mở khóa & đặt lệnh",
+    "unlockShort": "Mở khóa",
+    "header": {
+      "login": "Đăng nhập",
+      "register": "Đăng ký miễn phí"
+    },
+    "banner": {
+      "tag": "Xem trước",
+      "text": "Đây là bảng tín hiệu trực tiếp của Signal Lab — giá tín hiệu đang được ẩn",
+      "textShort": "Bảng trực tiếp · đã ẩn giá",
+      "issued24h": "{{n}} tín hiệu trong 24 giờ qua",
+      "cta": "Đăng ký miễn phí để xem đầy đủ tín hiệu"
+    },
+    "sticky": {
+      "live": "{{n}} tín hiệu đang chạy",
+      "next": "nữa là hết hạn",
+      "cta": "Đăng ký miễn phí"
+    },
+    "newSignal": {
+      "title": "Tín hiệu mới · {{symbol}} {{side}}",
+      "sub": "Vừa phát · chạm để mở khóa giá"
+    },
+    "nudge": {
+      "title": "Đã thấy tín hiệu bạn quan tâm chưa?",
+      "text": "Đăng ký để nhận tín hiệu mới ngay trên điện thoại, không cần dán mắt vào màn hình.",
+      "cta": "Đăng ký miễn phí"
+    },
+    "recent": {
+      "title": "Tín hiệu vừa tất toán",
+      "viewAll": "Toàn bộ lịch sử",
+      "stats": "{{h}} giờ qua",
+      "tp": "TP {{n}}",
+      "sl": "SL {{n}}",
+      "pending": "Đang theo dõi",
+      "minAgo": "{{n}} phút trước",
+      "hourAgo": "{{n}} giờ trước",
+      "foot": "Đăng ký và kết nối MT5 để xem hiệu suất giao dịch của chính bạn tại đây"
+    },
+    "gate": {
+      "close": "Đóng",
+      "trade": {
+        "title": "Mở khóa tín hiệu {{symbol}} này",
+        "subPro": "Điểm vào, cắt lỗ và chốt lời đã được tính sẵn. Đăng ký nhận {{days}} ngày dùng thử PRO miễn phí để xem ngay và đặt lệnh một chạm qua MT5.",
+        "subFree": "Tín hiệu thời gian thực là tính năng PRO. Đăng ký miễn phí để xem đầy đủ giá và kết quả sau khi tín hiệu hết hạn, nâng cấp bất cứ lúc nào.",
+        "expires": "nữa là hết hạn",
+        "fomo": "Hết hạn rồi thì chỉ còn xem kết quả"
+      },
+      "nav": {
+        "signals": {
+          "title": "Đăng ký để mở khóa bảng tín hiệu",
+          "sub": "Mọi tín hiệu đang chạy và kết quả trước đây trên một màn hình, lọc theo mã và chiến lược."
+        },
+        "charts": {
+          "title": "Đăng ký để mở khóa biểu đồ",
+          "sub": "Nến và công cụ vẽ chuyên nghiệp, đặt lệnh ngay trên biểu đồ."
+        },
+        "orders": {
+          "title": "Đăng ký để mở khóa biên nhận lệnh",
+          "sub": "Kết nối MT5 để đồng bộ vị thế, lệnh chờ và lệnh khớp theo thời gian thực."
+        },
+        "growth": {
+          "title": "Đăng ký để mở khóa hệ thống phát triển",
+          "sub": "Hạng, huy hiệu, bảng xếp hạng và giải đấu — mọi lệnh thật đều được ghi nhận."
+        },
+        "analysis": {
+          "title": "Đăng ký để xem phân tích chiến lược đầy đủ",
+          "sub": "Tỷ lệ thắng thực của mọi chiến lược theo từng phiên và từng mã, công khai toàn bộ."
+        }
+      },
+      "comp": {
+        "title": "Tham gia “{{name}}”",
+        "titleNone": "Tham gia giải đấu giao dịch",
+        "sub": "{{n}} tài khoản đang thi đấu, thứ hạng cập nhật trực tiếp. Đăng ký là có thể tham gia.",
+        "subNone": "Đăng ký để tham gia giải đấu, thứ hạng cập nhật trực tiếp.",
+        "view": "Xem bảng xếp hạng trước"
+      },
+      "personal": {
+        "title": "Đăng ký để bắt đầu ghi lại hiệu suất giao dịch",
+        "sub": "Kết nối MT5 để tự động thống kê tỷ lệ thắng, lãi lỗ và vị thế, so sánh song song với tín hiệu của nền tảng."
+      },
+      "history": {
+        "title": "Đăng ký để xem toàn bộ lịch sử tín hiệu",
+        "sub": "Điểm vào, cắt lỗ, chốt lời và kết quả cuối cùng của mọi tín hiệu."
+      },
+      "exit": {
+        "title": "Khoan đã — hiện có {{n}} tín hiệu đang chạy",
+        "sub": "Đăng ký chỉ mất 30 giây. Đừng để tín hiệu tiếp theo vuột mất.",
+        "next": "nữa là tín hiệu gần nhất hết hạn"
+      },
+      "generic": {
+        "title": "Đăng ký để mở khóa mọi tính năng",
+        "sub": "Đây là bảng trực tiếp thật. Đăng ký xong, mọi nút ở đây đều dùng được."
+      },
+      "perkPro1": "Tín hiệu thời gian thực: đầy đủ điểm vào / cắt lỗ / chốt lời",
+      "perkPro2": "Kết nối MT5, vuốt xác nhận đặt lệnh một chạm",
+      "perkPro3": "Thông báo tín hiệu mới tức thì, không cần canh màn hình",
+      "perkFree1": "Tín hiệu trễ: xem đầy đủ giá và kết quả sau khi hết hạn",
+      "perkFree2": "Biểu đồ, đặt lệnh thủ công cho 1 tài khoản MT5",
+      "perkFree3": "Tham gia hạng, huy hiệu, bảng xếp hạng và giải đấu",
+      "offerTrial": "Đăng ký ngay, dùng PRO miễn phí {{days}} ngày",
+      "offerInvite": "Đăng ký qua liên kết này để mở PRO {{days}} ngày",
+      "offerNote": "Kích hoạt sau khi xác minh email, không cần thanh toán",
+      "cta": "Đăng ký miễn phí",
+      "ctaPro": "Đăng ký miễn phí & dùng thử PRO",
+      "ctaNote": "Không cần thẻ tín dụng · Đăng ký trong 30 giây",
+      "login": "Đã có tài khoản? Đăng nhập",
+      "learnMore": "Về Signal Lab",
+      "social": "{{n}} tài khoản đang thi đấu tại “{{name}}”"
+    }
   }
 }

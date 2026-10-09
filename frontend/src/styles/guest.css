@@ -1,0 +1,513 @@
+/* ═════════════ 游客预览 / guest preview ═════════════
+   只在游客预览这个懒加载块里引入，登录后的页面不加载这份样式。
+   Imported only by the lazy guest-preview chunk; signed-in pages never load it. */
+
+/* ── 锁住的价位：磨砂数字 + 小锁 / locked price: frosted digits + lock ── */
+.px-locked {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28em;
+  cursor: help;
+}
+.px-locked-blur {
+  filter: blur(0.32em);
+  opacity: 0.85;
+  user-select: none;
+  pointer-events: none;
+}
+.px-locked-ico {
+  width: 0.62em;
+  min-width: 10px;
+  height: auto;
+  flex: none;
+  color: var(--text-3);
+}
+.dh-entry .px-locked-ico { width: 0.42em; }
+
+/* ── 顶栏 / header ── */
+.gst-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.gst-nav-lock {
+  width: 11px;
+  height: 11px;
+  opacity: 0.45;
+}
+.gst-nav-item:hover .gst-nav-lock { opacity: 0.8; }
+.gst-hdr-cta {
+  height: 36px;
+  padding: 0 16px;
+  font-weight: 700;
+}
+@media (max-width: 380px) {
+  .gst-hdr-cta { padding: 0 12px; font-size: 12px; }
+}
+
+/* ── 预览条 / preview strip ── */
+.gst-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 14px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgb(var(--purple-hi-rgb) / 0.18);
+  background: linear-gradient(90deg, rgb(var(--purple-rgb) / 0.08), rgb(var(--purple-rgb) / 0.16), rgb(var(--purple-rgb) / 0.08));
+  font-size: 13px;
+  color: var(--text-2);
+}
+.gst-banner-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: rgb(var(--purple-hi-rgb) / 0.16);
+  color: var(--purple-hi);
+  font-size: 12px;
+  font-weight: 700;
+}
+.gst-banner-tag i,
+.gst-sticky-info i,
+.gst-gate-social i {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+}
+.gst-banner-stat {
+  color: var(--text-3);
+}
+.gst-banner-cta {
+  font-weight: 700;
+  color: #fff;
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--purple-hi-rgb) / 0.6);
+  text-underline-offset: 3px;
+}
+.gst-banner-cta:hover { color: var(--purple-hi); }
+
+/* ── 最近结算 / recently settled ── */
+.gst-recent {
+  padding: 18px;
+}
+@media (min-width: 640px) {
+  .gst-recent { padding: 24px; }
+}
+.gst-recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.gst-recent-head h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.gst-recent-stats {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.gst-recent-stats b { font-size: 12px; font-weight: 700; }
+.gst-recent-list {
+  margin-top: 12px;
+}
+.gst-recent-list li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+.gst-recent-sym {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gst-recent-sym b { font-size: 14px; color: #fff; }
+.gst-recent-sym .chip { transform: scale(0.9); transform-origin: left center; }
+.gst-recent-ago {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.gst-recent-px {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-2);
+}
+.gst-result {
+  flex: none;
+  min-width: 52px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+.gst-result.is-tp { background: var(--up-bg); color: var(--up); }
+.gst-result.is-sl { background: var(--down-bg); color: var(--down); }
+.gst-result.is-pending { background: var(--nest); color: var(--text-3); }
+.gst-recent-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  margin-top: 6px;
+  padding: 12px;
+  border-radius: var(--r-md);
+  border: 1px dashed rgb(var(--purple-hi-rgb) / 0.35);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--purple-hi);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.gst-recent-foot:hover { background: rgb(var(--purple-rgb) / 0.1); }
+
+/* ── 手机吸底条 / mobile sticky bar ── */
+.gst-sticky {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 16px;
+  border-radius: 18px;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.25);
+  background: rgba(20, 20, 26, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+.gst-sticky-info {
+  min-width: 0;
+  flex: 1;
+}
+.gst-sticky-info b {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: #fff;
+}
+.gst-sticky-next .sig-ttl {
+  margin-top: 2px;
+  transform: scale(0.88);
+  transform-origin: left center;
+}
+.gst-sticky .btn {
+  height: 42px;
+  padding: 0 18px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+/* ── 新信号提示 / new-signal toast ── */
+.gst-toast {
+  position: fixed;
+  top: calc(76px + env(safe-area-inset-top));
+  right: 16px;
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 16px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.4);
+  background: rgba(27, 27, 33, 0.97);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
+  text-align: left;
+  animation: gst-drop 0.4s var(--ease-out);
+}
+.gst-toast b { display: block; font-size: 14px; color: #fff; }
+.gst-toast small { display: block; margin-top: 2px; font-size: 12px; color: var(--purple-hi); }
+.gst-toast-bolt {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgb(var(--purple-rgb) / 0.25);
+}
+@keyframes gst-drop {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── 停留提示 / dwell nudge ── */
+.gst-nudge {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: var(--z-sticky);
+  width: 300px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.3);
+  background: rgba(27, 27, 33, 0.97);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+  animation: gst-rise 0.45s var(--ease-out);
+}
+.gst-nudge b { display: block; padding-right: 20px; font-size: 15px; color: #fff; }
+.gst-nudge p { margin-top: 6px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
+.gst-nudge .btn { width: 100%; margin-top: 14px; height: 40px; font-weight: 700; }
+.gst-nudge-x {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-3);
+}
+@media (max-width: 1023px) {
+  .gst-nudge {
+    left: 10px;
+    right: 10px;
+    width: auto;
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+}
+@keyframes gst-rise {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── 注册弹窗 / sign-up modal ── */
+.gst-gate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgba(5, 5, 8, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  animation: gst-fade 0.2s var(--ease-out);
+}
+@media (min-width: 640px) {
+  .gst-gate-overlay { align-items: center; padding: 24px; }
+}
+.gst-gate {
+  position: relative;
+  width: 100%;
+  max-width: 440px;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  padding: 28px 24px calc(22px + env(safe-area-inset-bottom));
+  border-radius: 24px 24px 0 0;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.22);
+  background:
+    radial-gradient(120% 60% at 50% 0%, rgb(var(--purple-rgb) / 0.22), transparent 60%),
+    var(--surface);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+  text-align: center;
+  animation: gst-rise 0.32s var(--ease-out);
+}
+@media (min-width: 640px) {
+  .gst-gate { border-radius: 24px; padding-bottom: 24px; }
+}
+.gst-gate:focus { outline: none; }
+.gst-gate-x {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--text-3);
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.gst-gate-x:hover { background: var(--nest); color: #fff; }
+.gst-gate-mark {
+  display: flex;
+  justify-content: center;
+}
+.gst-gate-title {
+  margin-top: 10px;
+  font-size: 21px;
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.gst-gate-sub {
+  margin: 8px auto 0;
+  max-width: 360px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+
+.gst-ticket {
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line-hi);
+  background: var(--nest);
+  text-align: left;
+}
+.gst-ticket-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gst-ticket-top b { font-size: 16px; color: #fff; }
+.gst-ticket-rr {
+  margin-left: auto;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--up);
+}
+.gst-ticket-px {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+}
+.gst-ticket-px > div {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+.gst-ticket-px > div > span:first-child {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.gst-ticket-px > div:first-child .px-locked { color: var(--down); }
+.gst-ticket-px > div:last-child .px-locked { color: var(--up); }
+.gst-ticket-ttl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--gold);
+}
+.gst-ticket-exit {
+  display: flex;
+  justify-content: center;
+}
+
+.gst-gate-perks {
+  display: grid;
+  gap: 9px;
+  margin: 18px auto 0;
+  max-width: 340px;
+  text-align: left;
+}
+.gst-gate-perks li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text);
+}
+.gst-gate-perks svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--up);
+}
+.gst-gate-offer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgb(var(--gold-rgb) / 0.35);
+  background: linear-gradient(100deg, rgb(var(--gold-rgb) / 0.14), rgb(var(--gold-rgb) / 0.04));
+  color: var(--gold);
+  text-align: left;
+}
+.gst-gate-offer svg { flex: none; }
+.gst-gate-offer b { display: block; font-size: 14px; color: #fff; }
+.gst-gate-offer span { display: block; margin-top: 2px; font-size: 12px; color: var(--text-2); }
+.gst-gate-cta {
+  width: 100%;
+  height: 50px;
+  margin-top: 18px;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: 14px;
+}
+.gst-gate-note {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.gst-gate-alt {
+  width: 100%;
+  margin-top: 10px;
+}
+.gst-gate-links {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.gst-gate-links button {
+  color: var(--text-2);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.gst-gate-links button:hover { color: #fff; }
+.gst-gate-social {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-3);
+}
+@keyframes gst-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 这份样式不在 Tailwind 的层里，会压过 lg:hidden，所以显隐在这里自己写。
+   This file sits outside Tailwind's layers and would beat lg:hidden, so visibility is set here. */
+@media (min-width: 1024px) {
+  .gst-sticky { display: none; }
+}
+
+/* 手机上主体要让出吸底条 / clear the sticky bar on phones */
+@media (max-width: 1023px) {
+  .gst-main { padding-bottom: 96px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gst-toast, .gst-nudge, .gst-gate, .gst-gate-overlay { animation: none; }
+}

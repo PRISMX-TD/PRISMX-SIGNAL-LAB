@@ -1,9 +1,12 @@
-import { Suspense, useEffect, useState, type ComponentType, type ReactNode } from 'react'
+import { Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { lazyRetry } from './utils/lazyRetry'
 import { onIdle, shouldSkipPrefetch } from './utils/idle'
 import { getToken } from './api/client'
 import { ensureMoreLocale, i18nReady, storedLang, syncLanguage } from './i18n'
-import { langFromPath, pageFromPath, type PageId } from './seo/meta'
+import { isHomeRoot, langFromPath, pageFromPath, type PageId } from './seo/meta'
+import {
+  decidedHomeMode, demoteToLanding, markHomeView, releaseHomeHold, resolveHomeMode, type HomeMode,
+} from './guest/homeMode'
 import { browserLangs, isPublicCompPath, pickPublicLang } from './utils/publicLang'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { loggedOutRedirect } from './utils/loggedOutRedirect'
@@ -100,6 +103,9 @@ function lazyPage<P extends object>(
 // in parallel rather than one after the other.
 const Layout = lazyPage(() => import('./components/Layout'), 'Layout', { core: true })
 const LandingPage = lazyPage(() => import('./pages/LandingPage'), 'LandingPage', { core: true })
+// 游客预览：不是 core——它复用仪表盘卡片，要连同 more 半边的文案一起加载。
+// Guest preview: not core — it reuses dashboard cards, so the "more" locale half loads with it.
+const GuestPreview = lazyPage(() => import('./guest/GuestPreview'), 'GuestPreview')
 const LoginPage = lazyPage(() => import('./pages/LoginPage'), 'LoginPage', { core: true })
 const ResetPasswordPage = lazyPage(() => import('./pages/ResetPasswordPage'), 'ResetPasswordPage', { core: true })
 const VerifyEmailPage = lazyPage(() => import('./pages/VerifyEmailPage'), 'VerifyEmailPage', { core: true })
@@ -198,6 +204,19 @@ export function bootPreload(pathname: string): Promise<void> {
     void PublicCompetitionPage.preload().catch(() => {})
     const lang = pickPublicLang(typeof window !== 'undefined' ? window.location.search : '', browserLangs())
     return i18nReady.then(() => syncLanguage(lang)).catch(() => {})
+  }
+  // 未登录打开首页（/、/en）：先判定首页模式（有本地缓存立即出结果），再只等那一页的 chunk。
+  // 落地页模式立刻放开 index.html 那层遮挡，让预渲染内容马上露出来。
+  // Logged out on the home root: decide the home mode first (instant with a cached answer),
+  // then wait only for that page's chunk. In landing mode lift index.html's hold right away so
+  // the prerendered content shows at once.
+  if (!authed && isHomeRoot(pathname)) {
+    return resolveHomeMode()
+      .then((m) => {
+        if (m === 'landing') releaseHomeHold()
+        return m === 'preview' ? GuestPreview.preload() : LandingPage.preload()
+      })
+      .catch(() => {})
   }
   // 已登录用户打开首页只是个跳板（Home 立刻重定向 /dashboard），不必等落地页。
   // For a signed-in user the home page is only a redirect to /dashboard.
@@ -302,11 +321,30 @@ function AgentOnly({ children }: { children: ReactNode }) {
   return user?.isAgent ? <>{children}</> : <Navigate to="/dashboard" replace />
 }
 
-// 未登录访问根路径展示主页，已登录则进入仪表盘
-// Show landing at root when logged out; go to dashboard when authed.
+// 已登录 → 仪表盘。未登录访客的首页由后台「游客预览」开关决定：开 = 带锁的仪表盘，关 = 落地页（落地页另有
+// /intro 这个固定地址）。模式通常在 bootPreload 里就已判定好，这里直接拿；站内跳回首页时
+// 若还没判定，先渲染空，判定后再出页面（见 guest/homeMode.ts）。
+// Signed in → dashboard. A logged-out visitor's home follows the admin guest-preview switch: on = the locked
+// dashboard, off = the landing page (also always at /intro). bootPreload has usually decided
+// already; on an in-app navigation back home before that, render nothing until it has.
 function Home() {
   const { isAuthed } = useAuth()
-  return isAuthed ? <Navigate to="/dashboard" replace /> : <LandingPage />
+  const [mode, setMode] = useState<HomeMode | null>(decidedHomeMode)
+  useEffect(() => {
+    if (isAuthed || mode) return
+    let alive = true
+    void resolveHomeMode().then((m) => { if (alive) setMode(m) })
+    return () => { alive = false }
+  }, [isAuthed, mode])
+  useEffect(() => {
+    // 游客预览自己会在挂载后放开 / the guest preview lifts the hold itself once mounted
+    if (isAuthed || mode === 'landing') releaseHomeHold()
+    if (!isAuthed && mode === 'landing') markHomeView('landing')
+  }, [isAuthed, mode])
+  const fallBack = useCallback(() => { demoteToLanding(); setMode('landing') }, [])
+  if (isAuthed) return <Navigate to="/dashboard" replace />
+  if (!mode) return null
+  return mode === 'preview' ? <GuestPreview onUnavailable={fallBack} /> : <LandingPage />
 }
 
 // 懒加载页面切换时的占位（样式与页面 loading 一致）/ suspense fallback
@@ -428,6 +466,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<PublicShell lang="zh" page="home"><Home /></PublicShell>} />
             <Route path="/en" element={<PublicShell lang="en" page="home"><Home /></PublicShell>} />
+            <Route path="/intro" element={<PublicShell lang="zh" page="home"><LandingPage /></PublicShell>} />
+            <Route path="/en/intro" element={<PublicShell lang="en" page="home"><LandingPage /></PublicShell>} />
             <Route path="/login" element={<LoginPage />} />
             {/* 找回密码：两条路径同一个组件，按 ?token= 切换阶段（见该页顶部说明）。
                 必须在 Protected 之外——来这里的人正是登不进去的那批。

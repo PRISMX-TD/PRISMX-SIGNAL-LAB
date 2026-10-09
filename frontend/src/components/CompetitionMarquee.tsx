@@ -81,12 +81,16 @@ function segOf(c: CompetitionSummary, nowMs: number, t: TFunction): Seg {
   return { c, tag: 'upcoming', cdLabel: t('competition.cd.toStart'), cdValue: until(c.startsAt) }
 }
 
-export default function CompetitionMarquee() {
+// items：游客预览直接给（公开比赛数据），不轮询、不看 competitionsVisible。
+// items: handed in by the guest preview (public competition data) — no polling, no
+// competitionsVisible check.
+export default function CompetitionMarquee({ items }: { items?: CompetitionSummary[] } = {}) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { user } = useAuth()
-  const visible = !!user?.competitionsVisible
-  const [list, setList] = useState<CompetitionSummary[]>([])
+  const visible = items !== undefined || !!user?.competitionsVisible
+  const [polled, setList] = useState<CompetitionSummary[]>([])
+  const list = items ?? polled
   const now = useNowTicker()
   const trackRef = useRef<HTMLDivElement>(null)
   const copyRef = useRef<HTMLDivElement>(null)
@@ -110,7 +114,7 @@ export default function CompetitionMarquee() {
     // without re-running the effect.
     () => (anyRunning ? LIVE_POLL_MS : IDLE_POLL_MS),
     [visible],
-    { enabled: visible },
+    { enabled: visible && items === undefined },
   )
 
   const hasItems = visible && list.length > 0

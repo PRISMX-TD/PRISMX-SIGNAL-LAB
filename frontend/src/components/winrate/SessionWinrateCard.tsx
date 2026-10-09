@@ -98,10 +98,16 @@ function pickSession(sessions: SessionWindow[], now: Date): { key: string; minut
   return { key: top.s.key, minutesLeft: top.st.state === 'active' ? top.st.minutesToEnd : undefined }
 }
 
-const SessionWinrateCard: FC = () => {
+// preset：游客预览直接给数据（公开预览接口里那份），不再自己请求——这个接口要登录。
+// presetLoading：那份数据还在路上（显示「加载中」而不是空态）。
+// preset: the guest preview hands the data in (from the public preview endpoint) instead of
+// fetching, since the endpoint needs a session; presetLoading shows "loading" meanwhile.
+const SessionWinrateCard: FC<{ preset?: AdminStrategyWinRate | null; presetLoading?: boolean }> = ({ preset, presetLoading }) => {
   const { t } = useTranslation()
-  const [data, setData] = useState<AdminStrategyWinRate | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [fetched, setData] = useState<AdminStrategyWinRate | null>(null)
+  const [fetching, setLoading] = useState(preset === undefined)
+  const data = preset !== undefined ? preset : fetched
+  const loading = preset !== undefined ? !!presetLoading : fetching
   const [now, setNow] = useState(() => new Date())
   const { pick, row, symbolRow, chooseStrategy, chooseSymbol } = useWinratePick(data)
 
@@ -111,6 +117,7 @@ const SessionWinrateCard: FC = () => {
   }, [])
 
   useEffect(() => {
+    if (preset !== undefined) return
     let mounted = true
     signalApi
       .strategyAnalysis()
@@ -118,7 +125,7 @@ const SessionWinrateCard: FC = () => {
       .catch(() => {})
       .finally(() => { if (mounted) setLoading(false) })
     return () => { mounted = false }
-  }, [])
+  }, [preset !== undefined]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const picked = data ? pickSession(data.sessions, now) : null
 

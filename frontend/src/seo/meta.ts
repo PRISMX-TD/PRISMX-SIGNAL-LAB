@@ -75,8 +75,24 @@ export function pageById(id: PageId): PageDef {
 
 const stripSlash = (p: string) => (p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p)
 
+// 落地页的第二个地址：游客预览开着时首页换成带锁的仪表盘，落地页挪到这里（见
+// guest/homeMode.ts）。语言判定与中英互跳把它当作首页处理；它不进 PUBLIC_PAGES——不预渲染、
+// 不进站点地图，搜索引擎认的仍是首页那份预渲染的落地页。
+// The landing page's second address: with the guest preview on, the home page becomes the
+// locked dashboard and the landing page moves here (see guest/homeMode.ts). Language detection
+// and the zh/en switch treat it as home; it stays out of PUBLIC_PAGES — no prerender, no
+// sitemap — so search engines keep indexing the prerendered landing page at the root.
+export const LANDING_ALIAS: Record<PublicLang, string> = { zh: '/intro', en: '/en/intro' }
+
+export function isHomeRoot(pathname: string): boolean {
+  const p = stripSlash(pathname)
+  return p === '/' || p === '/en'
+}
+
 export function pageFromPath(pathname: string): { page: PageDef; lang: PublicLang } | null {
   const p = stripSlash(pathname)
+  if (p === LANDING_ALIAS.zh) return { page: pageById('home'), lang: 'zh' }
+  if (p === LANDING_ALIAS.en) return { page: pageById('home'), lang: 'en' }
   for (const page of PUBLIC_PAGES) {
     if (page.path.zh === p) return { page, lang: 'zh' }
     if (page.path.en === p) return { page, lang: 'en' }
@@ -90,6 +106,8 @@ export function langFromPath(pathname: string): PublicLang | null {
 
 // 当前路径在另一种语言下的对应地址；非公开页原样返回（调用方不会遇到，兜底而已）。
 export function counterpartPath(pathname: string, lang: PublicLang): string {
+  const p = stripSlash(pathname)
+  if (p === LANDING_ALIAS.zh || p === LANDING_ALIAS.en) return LANDING_ALIAS[lang]
   const hit = pageFromPath(pathname)
   return hit ? hit.page.path[lang] : pathname
 }

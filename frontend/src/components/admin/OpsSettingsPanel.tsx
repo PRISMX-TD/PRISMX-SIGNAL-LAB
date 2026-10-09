@@ -13,11 +13,12 @@
 // ten tabs were already Panels), contributing five unrelated `xxx / savingXxx` state
 // pairs to a 1288-line component with 48 useStates. Split out on 2026-09-21; the only
 // thing reported back is the persisted trial flag (the invites tab needs it).
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import Switch from '../Switch'
+import GuestPreviewSection from './GuestPreviewSection'
 import { SkeletonLine } from '../Skeleton'
 import { useToast } from '../../utils/useToast'
 import type {
@@ -88,6 +89,7 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
   // 官方社交主页 / official social links
   const [social, setSocial] = useState<AdminSocialSettings | null>(null)
   const [savingSocial, setSavingSocial] = useState(false)
+  const onSectionError = useCallback((msg: string) => showToast('err', msg), [showToast])
 
   useEffect(() => {
     let alive = true
@@ -259,6 +261,9 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
           <SkeletonLine width="70%" />
         </div>
       )}
+      {/* 游客预览：放最上面——它决定所有未登录访客看到的首页。
+          Guest preview first: it decides the home page every logged-out visitor sees. */}
+      <GuestPreviewSection onError={onSectionError} />
       {/* 合作券商锁设置 / partner-broker lock settings */}
       {brokerSettings && (
         <div className="glass mb-5 p-5">

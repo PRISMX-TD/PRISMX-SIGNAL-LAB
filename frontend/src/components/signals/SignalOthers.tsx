@@ -15,6 +15,7 @@ import { calcRiskReward, displaySymbol } from '../../api/utils'
 import { fmtPx, priceDecimals, riskFraction, rrTone, type FocusState } from './SignalView'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { ClockTtlRing } from './TtlRing'
+import LockedPx, { LockIcon } from './LockedPx'
 
 interface OtherEntry {
   symbol: string
@@ -52,12 +53,18 @@ const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
           </div>
         )}
         {visible.map(({ symbol, signal: sig, idx }) => {
-          const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
+          // 游客预览的锁定信号：价位换成磨砂锁，盈亏比与尺的比例取服务端给的（见 Signal.locked）。
+          // Locked guest-preview signal: frosted prices, R:R and rule split from the server.
+          const locked = sig.locked
+          const oRr = locked ? null : calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
+          const rrVal = locked ? locked.rr : oRr?.rr ?? null
           const isBuy = sig.side === 'BUY'
           const sideTag = isBuy ? t('common.buy') : t('common.sell')
           const meta = symbolMeta(symbol)
           const decimals = priceDecimals(sig.entry, sig.stopLoss, sig.takeProfit)
-          const riskFrac = oRr ? riskFraction(oRr.riskPrice, oRr.rewardPrice) : null
+          const riskFrac = locked ? locked.riskFrac : oRr ? riskFraction(oRr.riskPrice, oRr.rewardPrice) : null
+          const px = (v: number | null, k: string) =>
+            locked ? <LockedPx symbol={sig.symbol} seed={`${sig.id}:${k}`} /> : fmtPx(v, decimals)
 
           return (
             <div
@@ -73,16 +80,16 @@ const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
                 </div>
                 <span className={`chip shrink-0 ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>
                 <div className="rr">
-                  <b className={`num ${rrTone(oRr?.rr ?? null)}`}>{oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}</b>
+                  <b className={`num ${rrTone(rrVal)}`}>{rrVal != null ? `1:${rrVal.toFixed(2)}` : '-'}</b>
                   <span>{t('signals.focus.rrLabel')}</span>
                 </div>
               </div>
 
               <div className="dh-ladder">
                 <div className="row">
-                  <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{fmtPx(sig.stopLoss, decimals)}</b></div>
-                  <div className="lv en"><span className="dh-cap">{t('signals.colEntry')}</span><b className="num">{fmtPx(sig.entry, decimals)}</b></div>
-                  <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{fmtPx(sig.takeProfit, decimals)}</b></div>
+                  <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{px(sig.stopLoss, 'sl')}</b></div>
+                  <div className="lv en"><span className="dh-cap">{t('signals.colEntry')}</span><b className="num">{px(sig.entry, 'e')}</b></div>
+                  <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{px(sig.takeProfit, 'tp')}</b></div>
                 </div>
                 <div
                   className={`sig-ladder-bar${riskFrac == null ? ' none' : ''}`}
@@ -100,8 +107,10 @@ const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
                 <button
                   onClick={(e) => { e.stopPropagation(); onTrade(sig) }}
                   className="btn btn-primary dh-mini-cta"
+                  data-signal-id={sig.id}
                 >
-                  {t('signals.trade')}
+                  {locked && <LockIcon size={13} />}
+                  {locked ? t('guest.unlockShort') : t('signals.trade')}
                 </button>
               </div>
             </div>

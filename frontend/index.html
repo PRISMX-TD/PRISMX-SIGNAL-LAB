@@ -2,6 +2,21 @@
 <html lang="zh">
   <head>
     <meta charset="UTF-8" />
+    <!-- 游客预览（src/guest/homeMode.ts）：首页在 JS 判定「游客预览 / 落地页」之前，先把预渲染的
+         落地页藏起来，免得预览模式下先闪一屏落地页再变成仪表盘。上次判定是落地页就不藏；最多
+         藏 5 秒，JS 出问题也不会一直空着。只改可见性，HTML 原样留给爬虫与分享卡片。
+         Guest preview (src/guest/homeMode.ts): on the home root, hide the prerendered landing page
+         until JS decides between the guest preview and the landing page, so preview mode doesn't
+         flash the landing page first. Skipped when the last answer was landing; capped at 5s so a
+         JS failure never leaves the page blank. Visibility only — crawlers still get the HTML. -->
+    <style>html[data-home-hold] #root{visibility:hidden}</style>
+    <script>
+      (function(){try{var p=location.pathname.replace(/\/+$/,'')||'/';
+      if(p!=='/'&&p!=='/en')return;
+      if(localStorage.getItem('prismx_home_mode')==='landing')return;
+      var h=document.documentElement;h.setAttribute('data-home-hold','');
+      setTimeout(function(){h.removeAttribute('data-home-hold')},5000)}catch(e){}})();
+    </script>
     <!-- 声明深色配色，让 Google 登录（GSI/FedCM）个性化按钮渲染为深色而非白底 / dark scheme so the GSI personalized button renders dark, not white -->
     <meta name="color-scheme" content="dark" />
     <!-- 产品决定：全平台（安卓/iOS，浏览器标签页/主屏幕 PWA）禁止双指与双击缩放，

@@ -739,6 +739,13 @@ export interface AdminEmailGateSettings {
   extraAllowedDomains: string[]
 }
 
+// 游客预览（管理端）：开关 + 近 30 天首页漏斗（按天、模式、步骤）。
+// Guest preview (admin): the switch plus 30 days of home-funnel counters.
+export interface AdminGuestPreview {
+  enabled: boolean
+  funnel: { day: string; mode: 'preview' | 'landing'; step: 'view' | 'gate' | 'cta' | 'signup'; count: number }[]
+}
+
 export interface AdminSocialSettings {
   facebookUrl: string
   instagramUrl: string
@@ -787,6 +794,17 @@ export interface Signal {
   expireAt: string | null
   result: SignalResult
   resolvedAt: string | null
+  // 游客预览里的活跃信号：价位由服务端整个抹掉（entry/stopLoss/takeProfit 为 null），
+  // 只留盈亏比与风险｜回报尺的比例——这两个数不泄露任何价位。登录后的信号永远没有这个字段。
+  // Active signals in the guest preview: prices are stripped server-side (entry/stopLoss/
+  // takeProfit are null), leaving only the R:R and the risk|reward split, which reveal no
+  // price level. Signals for signed-in users never carry this field.
+  locked?: SignalLock
+}
+
+export interface SignalLock {
+  rr: number | null
+  riskFrac: number | null
 }
 
 // 近 N 天每日信号发出量统计 / daily signal count for the last N days

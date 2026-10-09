@@ -2848,6 +2848,24 @@
       "publicSwitch": "Public competition pages (signed-out)",
       "publicSwitchHint": "Kill switch: when off every public competition page 404s. Turn this off first if anything goes wrong.",
       "confirmPublic": "Once on, every competition with its public page enabled becomes visible to signed-out visitors (nicknames and scores) and promo links go live. You can switch it off anytime; public pages then 404 immediately."
+    },
+    "guestPreview": {
+      "title": "Guest preview",
+      "on": "On",
+      "off": "Off",
+      "desc": "When on, logged-out visitors land on a locked dashboard: live signal prices are hidden server-side and every action opens a sign-up prompt; the landing page moves to /intro. Turning it off sends the home page back to the landing page at once. Applies immediately — no save needed.",
+      "funnelTitle": "Home conversion by mode",
+      "days": "Last {{n}} days",
+      "modePreview": "Guest preview",
+      "modeLanding": "Landing page",
+      "step": {
+        "view": "Home visits",
+        "gate": "Clicked a locked feature",
+        "cta": "Clicked “Sign up free”",
+        "signup": "Signed up"
+      },
+      "rate": "Visit → sign-up rate",
+      "note": "Visits count once per browser session; a sign-up is credited to the mode of the latest home visit in the same browser within 7 days. UTC days. Landing mode has no sign-up prompt, so the middle two steps aren't counted."
     }
   },
   "simulator": {
@@ -3866,5 +3884,117 @@
       "special": "Special"
     },
     "saved": "Saved to your gallery"
+  },
+  "guest": {
+    "lockedPrice": "Visible after sign-up",
+    "unlockTrade": "Unlock & trade",
+    "unlockShort": "Unlock",
+    "header": {
+      "login": "Log in",
+      "register": "Sign up free"
+    },
+    "banner": {
+      "tag": "Preview",
+      "text": "This is the live Signal Lab board — signal prices are hidden",
+      "textShort": "Live board · prices hidden",
+      "cta": "Sign up free to unlock full signals",
+      "issued24h": "{{n}} signals in the last 24h"
+    },
+    "sticky": {
+      "live": "{{n}} signals live",
+      "next": "left",
+      "cta": "Sign up free"
+    },
+    "newSignal": {
+      "title": "New signal · {{symbol}} {{side}}",
+      "sub": "Just issued · tap to unlock prices"
+    },
+    "nudge": {
+      "title": "Spotted a signal you like?",
+      "text": "Sign up and new signals reach your phone the moment they fire — no screen-watching.",
+      "cta": "Sign up free"
+    },
+    "recent": {
+      "title": "Recently settled signals",
+      "viewAll": "Full history",
+      "stats": "Last {{h}}h",
+      "tp": "TP {{n}}",
+      "sl": "SL {{n}}",
+      "pending": "Tracking",
+      "minAgo": "{{n}}m ago",
+      "hourAgo": "{{n}}h ago",
+      "foot": "Sign up and connect MT5 to see your own performance here"
+    },
+    "gate": {
+      "close": "Close",
+      "trade": {
+        "title": "Unlock this {{symbol}} signal",
+        "subPro": "Entry, stop loss and take profit are ready. Sign up for a free {{days}}-day PRO trial to see them now and trade in one tap via MT5.",
+        "subFree": "Live signals are a PRO feature. Sign up free to see full prices and outcomes once signals expire, and upgrade any time for live access.",
+        "expires": "left",
+        "fomo": "After it expires, only the result is left"
+      },
+      "nav": {
+        "signals": {
+          "title": "Sign up to unlock the signal board",
+          "sub": "Every live signal and past verdict on one screen, filtered by symbol and strategy."
+        },
+        "charts": {
+          "title": "Sign up to unlock the charts",
+          "sub": "Pro candlesticks and drawing tools — trade straight from the chart."
+        },
+        "orders": {
+          "title": "Sign up to unlock order receipts",
+          "sub": "Connect your MT5 and see positions, pending orders and fills in real time."
+        },
+        "growth": {
+          "title": "Sign up to unlock Growth",
+          "sub": "Ranks, badges, leaderboards and competitions — every live trade counts."
+        },
+        "analysis": {
+          "title": "Sign up for the full strategy analysis",
+          "sub": "Real win rates for every strategy, session and symbol, all public."
+        }
+      },
+      "comp": {
+        "title": "Join “{{name}}”",
+        "titleNone": "Join the trading competition",
+        "sub": "{{n}} accounts are competing, with live rankings. Sign up to enter.",
+        "subNone": "Sign up to enter — rankings update live.",
+        "view": "See the leaderboard first"
+      },
+      "personal": {
+        "title": "Sign up and start tracking your trading",
+        "sub": "Connect MT5 and your win rate, P/L and positions are tracked automatically, side by side with platform signals."
+      },
+      "history": {
+        "title": "Sign up for the full signal history",
+        "sub": "Entry, stop loss, take profit and final verdict for every signal."
+      },
+      "exit": {
+        "title": "Before you go — {{n}} signals are live right now",
+        "sub": "Signing up takes 30 seconds. Don't let the next one slip by.",
+        "next": "until the next one expires"
+      },
+      "generic": {
+        "title": "Sign up to unlock everything",
+        "sub": "This is the real live board. Sign up and every button here works."
+      },
+      "perkPro1": "Live signals: entry / SL / TP in full",
+      "perkPro2": "Connect MT5, swipe to place in one tap",
+      "perkPro3": "Instant alerts on new signals",
+      "perkFree1": "Delayed signals: full prices and results after expiry",
+      "perkFree2": "Charts, with manual trading on 1 MT5 account",
+      "perkFree3": "Ranks, badges, leaderboards and competitions",
+      "offerTrial": "Sign up now and use PRO free for {{days}} days",
+      "offerInvite": "Sign up via this link for {{days}} days of PRO",
+      "offerNote": "Activate after verifying your email — no payment",
+      "cta": "Sign up free",
+      "ctaPro": "Sign up free & start PRO trial",
+      "ctaNote": "No credit card · 30-second sign-up",
+      "login": "Have an account? Log in",
+      "learnMore": "About Signal Lab",
+      "social": "{{n}} accounts are competing in “{{name}}”"
+    }
   }
 }
