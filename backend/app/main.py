@@ -19,7 +19,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, public_competitions, sentiment, share, signals, site, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, public_competitions, sentiment, share, signals, site, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -388,6 +388,9 @@ app.include_router(webhook.router, prefix=settings.API_PREFIX)
 app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)
 app.include_router(admin.router, prefix=settings.API_PREFIX)
+# 操作日志（只读）：router 自带 require_admin，挂载处再挂一层，与其它管理 router 同一规矩。
+# Activity log (read-only): guarded on the router and again at the mount.
+app.include_router(admin_activity.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(automation.router, prefix=settings.API_PREFIX)
 app.include_router(sentiment.router, prefix=settings.API_PREFIX)
 app.include_router(site.router, prefix=settings.API_PREFIX)

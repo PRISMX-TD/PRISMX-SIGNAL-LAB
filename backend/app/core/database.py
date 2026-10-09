@@ -2,6 +2,7 @@
 import json
 import logging
 import uuid
+from contextlib import contextmanager
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
@@ -64,13 +65,128 @@ def init_db() -> None:
     Runs synchronously inside the lifespan and uvicorn won't bind the port until it
     returns, so every step here has to stay fast (measured at 0.7s in production).
     Watch out for lengthening startup when adding migration logic.
+
+    生产是 uvicorn --workers 2，两个 worker 都会走到这里：整段放在 _migration_lock 里串行跑
+    （Postgres 咨询锁），后到的那个等先到的跑完，再进去时 _migrate_columns 读到的已是新版本号，
+    直接走快速通道。见 _migration_lock。
+    Production runs uvicorn --workers 2 and both workers get here; the whole thing
+    is serialised by _migration_lock (a Postgres advisory lock), so the second one
+    waits for the first and then takes _migrate_columns' fast path on the freshly
+    written revision. See _migration_lock.
     """
     # 导入模型以注册到 Base / import models so they register on Base
     from app import models  # noqa: F401
 
-    Base.metadata.create_all(bind=engine)
-    _migrate_columns()
-    _hash_legacy_api_tokens()
+    with _migration_lock():
+        Base.metadata.create_all(bind=engine)
+        _migrate_columns()
+        _hash_legacy_api_tokens()
+
+
+# 迁移互斥锁（Postgres 事务级咨询锁）的键：任意一个固定的 bigint，只要不和别处的咨询锁撞
+# （全库目前只有这一处用）。0x50524D58494E4954 = "PRMXINIT"。
+# Key of the migration advisory lock: any fixed bigint not used by another advisory
+# lock (this is the only one in the codebase). 0x50524D58494E4954 = "PRMXINIT".
+_MIGRATION_LOCK_KEY = 0x50524D58494E4954
+# 后到的 worker 最多等多久。正常迁移一秒以内；等满了说明出了怪事（比如锁被一条卡死的会话
+# 占着），这时宁可不加锁照旧往下跑（退回加锁以前的行为：所有语句幂等，最坏是这个 worker
+# 撞上并发 DDL 报错退出、被 uvicorn 拉起重来），也不能让启动无限期卡住。
+# How long the second worker waits. A normal migration takes under a second; a full
+# wait means something odd (say, a stuck session holding the lock), and then it
+# carries on unlocked — the pre-lock behaviour: every statement is idempotent and the
+# worst case is this worker failing on a concurrent DDL and being respawned by
+# uvicorn — rather than hanging startup indefinitely.
+_MIGRATION_LOCK_TIMEOUT = "60s"
+
+
+@contextmanager
+def _migration_lock():
+    """让多个 worker 的建表 + 迁移串行跑（只在 Postgres 上；SQLite 只有测试 / 本地单进程用）。
+
+    为什么要锁：两个 worker 同时启动，都读到旧的 schema_rev、都去跑慢通道，DDL 会互撞——
+    create_all 两边都看到新表不存在、都去建，输家撞 pg_type 唯一索引；ADD COLUMN 是按先前
+    inspect 的快照决定的，输家等到锁之后报「列已存在」；CREATE INDEX IF NOT EXISTS 在并发下
+    同样不保险。输家的 lifespan 抛异常、worker 退出，uvicorn 会把它拉起来，业务数据不受影响，
+    但每次改 schema 的部署都会在日志里留一段吓人的 traceback。
+
+    做法：单独开一条连接，在它的事务里 `SELECT pg_advisory_xact_lock(<键>)`，整段跑完再
+    rollback 这条连接——事务一结束锁就放了。用**事务级**而不是会话级的锁：进程中途被杀时，
+    连接断开、事务被数据库回滚，锁一定跟着放掉；会话级锁则要靠连接池在归还连接时清理，
+    万一池子没清，下一次启动就会一直等。这条连接上只有这一个事务、什么表都不碰，与迁移里
+    的 DDL 互不相干。等锁上限见 _MIGRATION_LOCK_TIMEOUT；拿锁这一步出任何错都只告警、
+    不加锁照旧往下跑。日常重启也会过一遍这把锁：后到的 worker 多等先到的那 1 秒以内
+    （create_all + 快速通道），先到的照常就绪，端口不会因此多一秒没人接。
+
+    Serialise create_all + the migration across workers (Postgres only; SQLite is
+    single-process tests / local runs).
+
+    Why: two workers starting together both read the old schema_rev and both take
+    the slow path, and their DDL collides — both see a new table missing and the
+    loser of CREATE TABLE trips pg_type's unique index; ADD COLUMN is decided from an
+    earlier inspect snapshot, so the loser gets "column already exists" once it has
+    the lock; CREATE INDEX IF NOT EXISTS is not concurrency-safe either. The loser's
+    lifespan raises and the worker exits; uvicorn respawns it and no data is
+    harmed, but every schema-changing deploy leaves a scary traceback.
+
+    How: a dedicated connection runs `SELECT pg_advisory_xact_lock(<key>)` in its
+    transaction and is rolled back once everything has run, which releases the
+    lock. A transaction-level lock rather than a session-level one: if the process
+    is killed midway, the connection drops, the database rolls the transaction back
+    and the lock is guaranteed to go with it, whereas a session lock relies on the
+    pooler cleaning up a returned connection — miss that once and the next boot
+    waits forever. That connection holds just this transaction and touches no
+    table, so it never interferes with the DDL. The wait is capped by
+    _MIGRATION_LOCK_TIMEOUT; any failure taking the lock only warns and carries on
+    unlocked. Ordinary restarts pass through it too: the second worker waits under
+    a second for the first's create_all + fast path, while the first comes up as
+    before, so the port is never left unserved any longer.
+    """
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    conn = None
+    try:
+        conn = engine.connect()
+        # SET LOCAL 只作用于这条连接的这个事务，不会漏给连接池里的其它连接。
+        # SET LOCAL only affects this connection's transaction, never the pool.
+        conn.execute(text(f"SET LOCAL lock_timeout = '{_MIGRATION_LOCK_TIMEOUT}'"))
+        # 角色 / 库级若配了 statement_timeout 或 idle_in_transaction_session_timeout，前者会
+        # 抢在 lock_timeout 之前掐掉等锁，后者会在迁移中途把这条「空闲事务」连接杀掉、锁悄悄
+        # 丢失。只在这个事务里关掉二者，让 lock_timeout 说了算。
+        # A role- or database-level statement_timeout would cut the wait short of
+        # lock_timeout, and an idle_in_transaction_session_timeout would kill this
+        # idle-in-transaction connection mid-migration and silently drop the lock.
+        # Turn both off for this transaction only so lock_timeout stays in charge.
+        conn.execute(text("SET LOCAL statement_timeout = 0"))
+        conn.execute(text("SET LOCAL idle_in_transaction_session_timeout = 0"))
+        conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": _MIGRATION_LOCK_KEY})
+    except Exception:
+        logger.warning(
+            "迁移锁没拿到，不加锁继续（另一个 worker 若同时在迁移，本 worker 可能报错退出后被"
+            "拉起重来）/ migration lock not acquired, carrying on unlocked",
+            exc_info=True,
+        )
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+        conn = None
+    try:
+        yield
+    finally:
+        if conn is not None:
+            # rollback 结束事务 = 放锁；close 把连接还回池里。
+            # Ending the transaction releases the lock; close returns the connection.
+            try:
+                conn.rollback()
+            except Exception:  # noqa: BLE001
+                logger.warning("迁移锁释放失败（连接关闭时数据库会回滚并放锁）", exc_info=True)
+            finally:
+                try:
+                    conn.close()
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def _hash_legacy_api_tokens() -> None:
@@ -207,7 +323,15 @@ def _hash_legacy_api_tokens() -> None:
 #          可空、不回填：NULL = 用比赛默认开户链接。纯 ADD COLUMN。
 # rev 37 — invite_links.deleted_at（邀请链接软删，见 InviteLink 模型注释）。可空、不回填：
 #          NULL = 未删除。纯 ADD COLUMN。
-CURRENT_SCHEMA_REV = 37
+# rev 38 — 管理后台「操作日志」（设计 2026-10-09）：新表 activity_events（create_all 建表建
+#          索引）；orders.prev_sl / prev_tp / pos_volume 与 admin_audit_logs.op_id 四列可空、
+#          不回填、纯 ADD COLUMN；统一索引块加 orders / closed_trades / admin_audit_logs 的
+#          (created_at, id) 三条（都在不可变列上，不碍 orders 的 HOT 更新）。补录三类历史事件
+#          （一键平仓批次、已解绑账号的最后一次解绑、当前的授权失效），确定性 dedupe_key +
+#          ON CONFLICT DO NOTHING，重跑不重复；补录失败只告警、不挡启动（见
+#          _backfill_activity_events）。同一版起 init_db 整段放进 Postgres 咨询锁
+#          （_migration_lock），两个 worker 不再同时跑 DDL 互撞（这类竞争以前每次改 schema 都有）。
+CURRENT_SCHEMA_REV = 38
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -491,6 +615,13 @@ def _migrate_columns() -> None:
             # 下单来源（STRATEGY / NULL）。不回填：旧单按 signal_id 判 SIG / CHART。
             # order source (STRATEGY / NULL); not backfilled.
             "source": "VARCHAR",
+            # rev 38：下指令那一刻的原止损 / 原止盈 / 仓位手数（操作日志用）。不回填——
+            # NULL 就是「不知道」，旧行确实不知道。
+            # rev 38: the position's SL / TP / volume when the command was issued (for
+            # the activity log). Not backfilled: NULL means "unknown", which old rows are.
+            "prev_sl": "FLOAT",
+            "prev_tp": "FLOAT",
+            "pos_volume": "FLOAT",
         }
         with engine.begin() as conn:
             for name, col_type in order_new.items():
@@ -1267,6 +1398,17 @@ def _migrate_columns() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE ticket_replies ADD COLUMN images TEXT"))
 
+    # rev 38：审计行的「同一次操作」编号。可空、不回填——旧行本来就分不出哪几行是同一次，
+    # 读取端对 NULL 按「同操作人 + 同字段族 + 2 秒内」兜底合并。这张表此前从没补过列。
+    # rev 38: the "same operation" id on audit rows. Nullable, not backfilled — old rows
+    # genuinely can't be grouped, and the reader falls back to actor + field family +
+    # 2 seconds for NULLs. First column ever added to this table.
+    if "admin_audit_logs" in inspector.get_table_names():
+        audit_cols = {c["name"] for c in inspector.get_columns("admin_audit_logs")}
+        if "op_id" not in audit_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE admin_audit_logs ADD COLUMN op_id VARCHAR"))
+
     # rev 16：勋章改制。user_badges 加 tier；旧 id 按 badges.LEGACY_BADGE_MAP 并成
     # "新 id + 档位"（同一人同一新 id 只留最高档，先删输家再改赢家——唯一约束
     # (user, badge) 在 UPDATE 时就会撞）；纪律类三枚整行删；users 的佩戴列表同步改写。
@@ -1526,8 +1668,33 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_invite_links_competition "
             "ON invite_links(competition_id)"
         ))
+        # rev 38：管理后台「操作日志」按 (created_at, id) 倒序游标翻页，三张源表各一条
+        # （没有它们就是全表扫描 + 排序）。created_at 写入后不再变，不影响 orders 那 99%
+        # 的 HOT 更新。三张表都不大（约 1.2 万 / 6.5 千 / 1 千行），普通 CREATE INDEX 亚秒级，
+        # 理由同 rev 29 不用 CONCURRENTLY。
+        # rev 38: the admin activity log pages each source newest-first by
+        # (created_at, id); without these it is a full scan + sort. created_at never
+        # changes after insert, so orders keeps its ~99% HOT updates. All three tables
+        # are small (~12k / 6.5k / 1k rows): a plain CREATE INDEX is sub-second, and
+        # CONCURRENTLY is skipped for the same reasons as rev 29.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_orders_created_id ON orders(created_at, id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_closed_trades_created_id "
+            "ON closed_trades(created_at, id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created_id "
+            "ON admin_audit_logs(created_at, id)"
+        ))
 
     _drop_redundant_candle_index(is_postgres)
+
+    # rev 38：操作日志的历史补录。放在所有补列之后（它读 mt5_accounts 的撤销列与 orders）。
+    # rev 38: activity-log backfill; after every column-add since it reads the
+    # mt5_accounts revocation columns and orders.
+    _backfill_activity_events()
 
     # 全部步骤跑完才记版本号：中途抛异常就不写，下次启动会重跑（所有步骤幂等）。
     # Only recorded after every step succeeded: an exception midway leaves the marker
@@ -1567,6 +1734,38 @@ def _drop_redundant_candle_index(is_postgres: bool) -> None:
         logger.warning(
             "rev 29：删除冗余索引 idx_candle_symbol_interval_t 失败（不影响启动，可稍后手工执行 "
             "DROP INDEX CONCURRENTLY IF EXISTS idx_candle_symbol_interval_t）",
+            exc_info=True,
+        )
+
+
+def _backfill_activity_events() -> None:
+    """rev 38：给操作日志补三类历史事件（设计 §3.5）。幂等、可重跑。
+
+    具体补什么、去重键怎么拼都在 services/activity_log.backfill_activity_events——键必须与
+    运行时埋点逐字相同，放在一处才不会两边各改各的。这里只负责「失败不挡启动」：补录
+    只是让日志页在上线当天就有历史可看，没补上不影响任何业务；而迁移跑在 uvicorn bind
+    端口之前，为它让服务起不来不值得。失败时 schema_rev 照样写成 38、之后不会自动重试；
+    需要时把库里的 schema_rev 调回 37 重启即可重跑（全部 ON CONFLICT DO NOTHING）。
+
+    rev 38: backfill three kinds of historical activity-log events (design §3.5).
+    Idempotent and re-runnable. What gets backfilled and how the dedupe keys are
+    built live in services/activity_log.backfill_activity_events, because the keys
+    must match the runtime hooks character for character. This wrapper only makes a
+    failure non-fatal: the backfill merely gives the log page some history on day
+    one, while the migration runs before uvicorn binds its port. On failure
+    schema_rev is still recorded and the backfill is not retried automatically;
+    set schema_rev back to 37 and restart to re-run it (everything is ON CONFLICT
+    DO NOTHING).
+    """
+    try:
+        from app.services.activity_log import backfill_activity_events
+
+        counts = backfill_activity_events(engine)
+        if any(counts.values()):
+            logger.info("rev 38：操作日志补录 %s", counts)
+    except Exception:
+        logger.warning(
+            "rev 38：操作日志历史补录失败（不影响启动；需要时把 schema_rev 调回 37 重启重跑）",
             exc_info=True,
         )
 

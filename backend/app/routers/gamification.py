@@ -1,4 +1,5 @@
 """等级/勋章用户端 + 管理端（设计 §6、§11 发布策略）。"""
+import json
 import logging
 import time
 
@@ -14,6 +15,7 @@ from app.core.rate_limit import limiter
 from app.models import (Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account,
                         PeriodBaseline, User, UserBadge, UserTask)
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
+from app.services.audit import log_change
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import (
     BADGES, GROUPS, LEVEL_TITLES, compute_comprehensive_stats, condition_states,
@@ -864,9 +866,44 @@ def admin_get_visibility(db: Session = Depends(get_db)):
     return {"userVisible": bool(get_gamification_settings(db).get("user_visible"))}
 
 
+def _audit_settings_patch(db: Session, admin, old: dict, patch: dict) -> None:
+    """管理员改游戏化设置的审计：逐键一行 `gamification:<存储键>`，只写真的变了的键
+    （log_change 自己跳过没变的）。值走 json.dumps，与 admin._log_settings_diff 同一口径——
+    True 与 "true"、1 与 1.0 不会被 str() 的差异误判成变化。随调用方的 commit 提交。
+
+    这两个 PATCH 以前完全不留痕：「谁把比赛公开总开关打开了」「主推比赛是谁换的」都查不到。
+    拿不到管理员身份（脚本 / 测试直接调路由函数、没走 FastAPI 注入）就不写：审计行的
+    admin_user_id 是非空外键，硬写只会让保存本身失败。
+
+    Per-key audit for the gamification settings, one `gamification:<store key>`
+    row per key that actually changed (log_change skips the rest). Values go
+    through json.dumps like admin._log_settings_diff, so True vs "true" or 1 vs 1.0
+    don't read as changes. Rides the caller's commit. These two PATCHes used to
+    leave no trace at all — "who switched competitions public" had no answer.
+    Without an admin identity (a direct call that bypassed FastAPI injection) it
+    writes nothing: admin_user_id is a NOT NULL FK, and forcing a row would only
+    make the save itself fail.
+    """
+    if not isinstance(admin, User):
+        return
+    for key, new_value in patch.items():
+        log_change(
+            db, admin.id, admin.id, f"gamification:{key}",
+            json.dumps(old.get(key), ensure_ascii=False),
+            json.dumps(new_value, ensure_ascii=False),
+        )
+
+
 @admin_router.patch("/visibility")
-def admin_set_visibility(body: VisibilityPatchIn, db: Session = Depends(get_db)):
-    save_gamification_settings(db, {"user_visible": bool(body.userVisible)})
+def admin_set_visibility(body: VisibilityPatchIn, db: Session = Depends(get_db),
+                         admin: User = Depends(require_admin)):
+    # 守卫已在 admin_router 上，这里再声明一次只为拿到是谁（FastAPI 同一请求内只算一次）。
+    # The router already guards this; declared again only to learn who it is
+    # (FastAPI evaluates it once per request).
+    old = get_gamification_settings(db)
+    patch = {"user_visible": bool(body.userVisible)}
+    save_gamification_settings(db, patch)
+    _audit_settings_patch(db, admin, old, patch)
     db.commit()
     invalidate_gamification_cache()
     return {"userVisible": bool(body.userVisible)}
@@ -898,7 +935,8 @@ def admin_get_settings(db: Session = Depends(get_db)):
 
 
 @admin_router.patch("/settings")
-def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depends(get_db)):
+def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depends(get_db),
+                         admin: User = Depends(require_admin)):
     """设置组局部更新：全字段可选，只改 model_fields_set 里出现过的那些——
     与 `/visibility` PATCH 共用同一份 settings_store 记录，靠
     `save_gamification_settings` 的读-合并-写语义组合，互不清空对方的键。
@@ -943,7 +981,9 @@ def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depend
             raise HTTPException(400, "主推比赛不存在 / Featured competition not found")
         patch["featured_competition_id"] = fid
     if patch:
+        old = get_gamification_settings(db)
         save_gamification_settings(db, patch)
+        _audit_settings_patch(db, admin, old, patch)
         db.commit()
         invalidate_gamification_cache()
     return _settings_to_camel(get_gamification_settings(db))

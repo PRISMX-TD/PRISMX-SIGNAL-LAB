@@ -336,17 +336,29 @@ def is_known_login_source(email: str, source: str) -> bool:
         return False
 
 
-def remember_login_source(email: str, source: str) -> None:
+def remember_login_source(email: str, source: str) -> bool:
     """登录成功后把来源记进该账号的常用名单（超上限淘汰最旧的）。
-    Record the source on success, evicting the oldest past the cap."""
+
+    返回这次是不是**新加**了一个来源（名单里原来没有它）——操作日志的 user.login 用它标
+    「新来源」。答案就是上面本来就要读的那份名单，不多一次 Redis 往返。Redis 出错时
+    返回 False：说不准是不是新的，就别标。
+
+    Record the source on success, evicting the oldest past the cap. Returns
+    whether this *added* a source the list didn't hold — the activity log's
+    user.login marks "new source" with it. The answer comes from the member list
+    read anyway, so no extra Redis round trip. False on a Redis error: when we
+    can't tell, don't flag it."""
     try:
         members = shared_state.set_members(_known_sources_key(email))
-        if source not in members and len(members) >= KNOWN_SOURCES_PER_ACCOUNT:
+        is_new = source not in members
+        if is_new and len(members) >= KNOWN_SOURCES_PER_ACCOUNT:
             for stale in members[: len(members) - KNOWN_SOURCES_PER_ACCOUNT + 1]:
                 shared_state.set_remove(_known_sources_key(email), stale)
         shared_state.set_add(_known_sources_key(email), source, KNOWN_SOURCE_TTL_SECONDS)
+        return is_new
     except Exception:  # noqa: BLE001
         logger.warning("常用来源写入失败，忽略 / known-source write failed, ignored", exc_info=True)
+        return False
 
 
 def is_login_locked(email: str, source: str) -> bool:

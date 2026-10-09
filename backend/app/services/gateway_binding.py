@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from sqlalchemy import or_
 
 from app.models import MT5Account
+from app.services import activity_log
 from app.services.shared_cache import SharedVersion
 
 logger = logging.getLogger("prismx.gateway.binding")
@@ -112,6 +113,77 @@ def restore_removed(row) -> bool:
     return True
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 操作日志（services/activity_log）里绑定 / 解绑两条事件的 data。两条通道（routers/gateway、
+# routers/bridge）都从这里取，免得两边的键名各写各的、读接口拼不出同一句话。
+# The data of the bind / unbind activity events, shared by both channels so the two
+# routers can't drift apart on key names.
+# ─────────────────────────────────────────────────────────────────────────────
+def bind_event_data(row, *, revived: bool) -> dict:
+    """mt5.bind 的 data：{ch, revived, name, demo, bal, server}。row 的字段必须已经是这次
+    绑定写进去的值（名字、余额、类型）。直连行的 server 存的是空串，写成 None。
+    The mt5.bind data, read off a row already carrying this bind's values; a
+    gateway row's empty server becomes None."""
+    return {
+        "ch": row.source or "bridge",
+        "revived": bool(revived),
+        "name": row.account_name or None,
+        "demo": activity_log.demo_of(row.trade_mode),
+        "bal": row.balance,
+        "server": row.server or None,
+    }
+
+
+def log_unbind(db, row, user_id: str) -> None:
+    """用户在界面上解绑：记一条 mt5.unbind。**在 mark_removed 之前调**——它只 db.add，
+    随 mark_removed 自己的那次提交一起落库；解绑被拒（不存在、在线 409）的路径根本走不到
+    这里，所以什么都不写。组装出错只告警，解绑照常进行。
+    The user unbound the account from the UI. Call it right before mark_removed: it
+    only adds the row, which mark_removed's own commit persists. Refused unbinds
+    never get here. A composition error only warns; the unbind goes ahead."""
+    try:
+        data = {"ch": row.source or "bridge", "name": row.account_name or None, "bal": row.balance}
+        activity_log.log_event(
+            db, activity_log.MT5_UNBIND,
+            user_id=user_id, mt5_login=row.login, actor_id=user_id, ref_id=row.id, data=data,
+        )
+    except Exception:
+        logger.warning("解绑操作日志组装失败，已跳过 / unbind activity skipped: login=%s",
+                       getattr(row, "login", None), exc_info=True)
+
+
+def _log_revoked(db, row, reason: str) -> None:
+    """授权失效：记一条系统事件 mt5.revoked，带去重键。
+
+    两个 worker 可能在同一拍各自读到改密时间变了、各自撤销同一行（revoke 的
+    「已撤销就不写」挡不住两边同时读到未撤销）。去重键用撤销**之前**的 pass_change_at：
+    撤销不改它、重新验证才换新值，所以同一次失效两边算出同一个键，只留一行；下一次失效
+    是另一个键。rev 38 的补录也用同一个键，上线时已经补过的不会再记一遍。
+
+    键拼不出来就跳过（只告警）；log_event 里那次 flush 抛的是业务自己的异常，照常上抛。
+
+    A system mt5.revoked with a dedupe key. Two workers can both see the changed
+    password time on the same tick and both revoke the row; keying on the
+    pre-revocation pass_change_at (untouched by revocation, replaced by
+    re-verification) gives both the same key, so one row survives, and the next
+    episode gets a new key. The rev 38 backfill uses the same key. A key that
+    can't be built is skipped with a warning; the flush inside log_event raises
+    the business's own errors as usual.
+    """
+    try:
+        key = activity_log.revoke_key(row.id, row.pass_change_at)
+    except Exception:
+        logger.warning("撤销操作日志组装失败，已跳过 / revoke activity skipped: login=%s",
+                       getattr(row, "login", None), exc_info=True)
+        return
+    activity_log.log_event(
+        db, activity_log.MT5_REVOKED,
+        user_id=row.user_id, mt5_login=row.login,
+        actor_type=activity_log.ACTOR_SYSTEM, ref_id=row.id,
+        data={"reason": reason}, dedupe_key=key,
+    )
+
+
 def is_revoked(row) -> bool:
     """这条绑定是否已被撤销。
 
@@ -157,6 +229,9 @@ def revoke(db, row, reason: str) -> bool:
         return False
     row.revoked_at = datetime.now(timezone.utc)
     row.revoked_reason = reason
+    # 操作日志：搭这次提交，带去重键，必须是提交前最后一步（见 _log_revoked）。
+    # Activity log: rides this commit with a dedupe key, as the last step before it.
+    _log_revoked(db, row, reason)
     db.commit()
     invalidate_gateway_accounts()
     logger.warning(

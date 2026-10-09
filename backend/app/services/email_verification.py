@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import EmailVerificationToken, User
+from app.services import activity_log
 from app.services.mailer import send_email
 from app.services.password_reset import _aware, hash_token
 
@@ -94,13 +95,38 @@ def issue_token(db: Session, user: User) -> str:
     return raw
 
 
-def mark_verified(db: Session, user: User) -> None:
+# mark_verified 的 method：用户自己证明了邮箱归他的两条路。
+# How the user proved the mailbox is theirs (mark_verified's method).
+METHOD_LINK = "link"    # 点了验证信里的链接 / clicked the verification link
+METHOD_RESET = "reset"  # 用找回密码邮件改了密码 / completed a password reset from the mail
+
+
+def mark_verified(db: Session, user: User, *, method: str | None = None) -> None:
     """把这个账号标成已验证，并补发注册时扣下的邀请试用。已验证则什么都不做。
 
     「证明了这个邮箱归他」的路径都该调这里，不只是点验证链接：用找回密码邮件
     改密码同样证明了邮箱所有权（见 auth.reset_password）。不 commit。
+
+    method（METHOD_LINK / METHOD_RESET）：用户自己验证的路径传它，在真正从「未验证」
+    切到「已验证」的这一刻往操作日志记一条 user.email_verified，随调用方的 commit 一起
+    提交。下面那个早返回挡掉了先后到达的重复点击和邮件网关预抓取；同一封验证信被两个请求
+    **同时**点开，由 consume_token 读用户时的 FOR UPDATE 排成先后，同样只记一次。剩下的
+    极端情况——点验证链接与用重置邮件改密码恰好同时发生——仍可能两条各记一行（一条 link、
+    一条 reset），概率极低，不为它多加语句。
+    管理员手动标记（admin.mark_email_verified）**不传**：那里已经写了一条审计
+    account:verify_email，再记一条就是同一件事在页面上出现两行。
+
     Every path that proves mailbox ownership calls this, including a completed
-    password reset. Does not commit.
+    password reset. Does not commit. Self-service paths pass method (METHOD_LINK /
+    METHOD_RESET) and get one user.email_verified activity row at the real
+    unverified → verified switch, committed with the caller. The early return
+    below absorbs sequential repeat clicks and mail-gateway prefetches; two
+    *concurrent* opens of one verification link are serialised by consume_token's
+    FOR UPDATE on the user row, so they log once too. The remaining corner — a
+    link click and a password-reset completion at the very same moment — can still
+    log one row each (link + reset); rare enough not to spend a statement on. The
+    admin's manual mark passes nothing: it already writes the account:verify_email
+    audit row, and a second row would show the same event twice on the page.
     """
     if user.email_verified_at is not None:
         return
@@ -112,6 +138,11 @@ def mark_verified(db: Session, user: User) -> None:
 
     user.email_verified_at = _now()
     grant_deferred_invite_trial(db, user)
+    if method is not None:
+        activity_log.log_event(
+            db, activity_log.USER_EMAIL_VERIFIED,
+            user_id=user.id, actor_id=user.id, data={"method": method},
+        )
 
 
 def consume_token(db: Session, raw: str) -> User | None:
@@ -128,7 +159,21 @@ def consume_token(db: Session, raw: str) -> User | None:
     ).first()
     if row is None:
         return None
-    user = db.query(User).filter(User.id == row.user_id).first()
+    # FOR UPDATE + populate_existing：同一封信被两个请求同时点开（两台设备、邮件网关预抓取
+    # 撞上本人点击）时，后到的那个等先到的提交，再看到的已是「已验证」，走下面的早返回，
+    # 不会再记第二条 user.email_verified。同一条语句，不加往返；锁持有到调用方的 commit。
+    # FOR UPDATE + populate_existing: when one link is opened by two requests at once
+    # (two devices, a mail-gateway prefetch racing the real click), the second waits
+    # for the first's commit and then sees the account verified, taking the early
+    # return below instead of logging a second user.email_verified. Same statement,
+    # no extra round trip; held until the caller commits.
+    user = (
+        db.query(User)
+        .filter(User.id == row.user_id)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
     if user is None:
         return None
     if user.email_verified_at is not None:
@@ -137,7 +182,7 @@ def consume_token(db: Session, raw: str) -> User | None:
     if expires is None or expires <= _now():
         return None
     row.used_at = _now()
-    mark_verified(db, user)
+    mark_verified(db, user, method=METHOD_LINK)
     return user
 
 

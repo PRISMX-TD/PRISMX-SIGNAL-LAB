@@ -1,4 +1,5 @@
 """认证路由：注册与登录 / Auth router: register & login."""
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
@@ -35,7 +36,7 @@ from app.schemas import (
     UserOut,
     VerifyEmailRequest,
 )
-from app.services import email_verification
+from app.services import activity_log, email_verification
 from app.services.deps import get_current_user
 from app.services.email_domains import is_disposable_email
 from app.services.password_reset import (
@@ -47,7 +48,69 @@ from app.services.password_reset import (
 from app.services.phone import compose_phone
 from app.services.pending_competition import pending_competition
 
+logger = logging.getLogger("prismx.auth")
+
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _queue_login_event(
+    background: BackgroundTasks | None,
+    db: Session,
+    user_id: str,
+    method: str,
+    new_source: bool | None,
+) -> None:
+    """登录成功后排一条操作日志 user.login，**响应发出去之后**才写（设计 §4.2）。
+
+    登录本来一条写库语句都没有，不能为了记日志让它多一次提交、多等一次 Redis：限流计数
+    （每人每小时最多 LOGIN_EVENTS_PER_HOUR 条）和那条 INSERT 都放进 BackgroundTasks，由
+    _record_login_event 在自己的短事务里做。这里只取请求会话绑的那个引擎——后台任务跑的
+    时候请求会话不保证还开着（get_db 的收尾可能已经关了它），引擎一直在；生产上它就是
+    database.engine，测试里是那个一次性的库。
+    background 为 None（脚本 / 测试直接调用路由函数）就不记。只在成功分支调用：失败的
+    登录一律不记（老板 10-09 定的，也免得撞库时把它变成一个写放大器）。
+
+    Queue one user.login activity row, written only after the response is sent
+    (design §4.2). Login issues no DB writes today and must not gain a commit or
+    a Redis wait for the sake of the log, so both the hourly quota check and the
+    INSERT run in a background task (_record_login_event) on its own short
+    transaction. Only the request session's engine is captured — the session may
+    already be closed by get_db's teardown when the task runs, the engine never
+    is; in production it is database.engine, in tests the throwaway one. No background (a script or test
+    calling the route function directly) means no row. Called on success only:
+    failed logins are never logged (owner's call, 10-09, and it keeps credential
+    stuffing from turning into write amplification).
+    """
+    if background is None:
+        return
+    try:
+        bind = db.get_bind()
+    except Exception:  # noqa: BLE001
+        logger.warning("登录日志取不到数据库连接，本次不记 / login event skipped: no bind", exc_info=True)
+        return
+    background.add_task(_record_login_event, bind, user_id, method, new_source)
+
+
+def _record_login_event(bind, user_id: str, method: str, new_source: bool | None) -> None:
+    """后台任务：过了每小时上限才写那一行（activity_log.record_after_commit，自己一个短事务）。
+    两个调用都自己吞异常，外面这层 try 是兜底——后台任务抛出来会在服务端日志里刷一条 ERROR。
+    Background task: write the row if the hourly quota allows it, via
+    record_after_commit's own short transaction. Both calls swallow their errors;
+    the outer try is a backstop, since an exception escaping a background task
+    logs an ERROR server-side."""
+    try:
+        if not activity_log.login_event_allowed(user_id):
+            return
+        activity_log.record_after_commit(
+            activity_log.USER_LOGIN,
+            user_id=user_id,
+            actor_type=activity_log.ACTOR_USER,
+            actor_id=user_id,
+            data={"method": method, "new_source": new_source},
+            bind=bind,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("登录日志写入失败，已跳过 / login event failed", exc_info=True)
 
 
 def _user_out(user: User, db: Session | None = None) -> UserOut:
@@ -163,7 +226,14 @@ def register(
 
 @router.post("/google", response_model=AuthResponse)
 @limiter.limit(settings.RATE_LIMIT_GOOGLE)
-def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends(get_db)):
+def google_login(
+    request: Request,
+    req: GoogleAuthRequest,
+    # 默认 None 只为直接调用路由函数的测试 / 脚本；FastAPI 照样注入（按类型认）。
+    # The None default only serves direct calls; FastAPI injects it by type.
+    background: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+):
     """Google 登录：校验 ID Token，按邮箱找到或创建用户后签发 JWT。
     Google sign-in: verify ID token, find-or-create user by email, then issue a JWT.
     """
@@ -176,6 +246,12 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
 
     email = info["email"].lower()
     user = db.query(User).filter(User.email == email).first()
+    # 这次是不是新建的账号：新建 = 注册（操作日志从 users.created_at 读出「注册」），不再
+    # 另记一条「登录」，否则每个 Google 新用户在页面上都是「注册 + 登录」两行。
+    # Whether this call created the account: a sign-up is read from users.created_at
+    # by the activity log, so it is not also logged as a login (two lines per new
+    # Google user otherwise).
+    created = user is None
     if user is None:
         # 首次用 Google 登录：创建无密码用户，同时记下这个邮箱的 Google 身份
         # 已在此刻验证过——后面即便这个用户自己在账户设置里加了密码，这个
@@ -254,13 +330,25 @@ def google_login(request: Request, req: GoogleAuthRequest, db: Session = Depends
             ),
         )
 
+    if not created:
+        # Google 这条路不维护「常用来源」名单（那是密码登录的锁定用的），说不出是不是新
+        # 来源，new_source 记 None 而不是猜一个 False。
+        # The Google path keeps no familiar-source list (that serves the password
+        # lockout), so new_source is None — unknown — rather than a guessed False.
+        _queue_login_event(background, db, user.id, "google", None)
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user, db))
 
 
 @router.post("/login", response_model=AuthResponse)
 @limiter.limit(settings.RATE_LIMIT_LOGIN)
-def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
+def login(
+    request: Request,
+    req: AuthRequest,
+    # 默认 None 的理由同 google_login / None default for direct calls, as in google_login
+    background: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+):
     """用户登录 / User login."""
     email = req.email.lower()
     # 锁定按「账号 + 来源」算，不是只按账号——只按账号的话，知道你邮箱的人从他
@@ -282,7 +370,10 @@ def login(request: Request, req: AuthRequest, db: Session = Depends(get_db)):
     # 攻击者从别处怎么试都动不到它。/ A successful login marks this source as
     # familiar, so the owner's later attempts from here ride the loose threshold
     # and nothing an attacker does elsewhere can touch it.
-    remember_login_source(email, source)
+    new_source = remember_login_source(email, source)
+    # 操作日志：响应发出之后才写，这次请求本身不多一条语句（见 _queue_login_event）。
+    # Activity log, written after the response; this request gains no statement.
+    _queue_login_event(background, db, user.id, "password", new_source)
     token = create_access_token(user.id, user.token_version)
     return AuthResponse(token=token, user=_user_out(user, db))
 
@@ -352,7 +443,49 @@ def forgot_password(
         db.commit()
         # 明文令牌只传给发信函数，不进日志、不进响应。
         background.add_task(send_reset_email, user.email, raw)
+        # 操作日志只在「邮箱存在、真发了信」这一支记，而且放进后台任务、**响应发出去之后**
+        # 才写（同 user.login）：要是搭上面那次 commit，这一支就比「邮箱不存在」那一支多一条
+        # INSERT 往返，两边的响应时间差跟着变大——这个端点的安全性恰恰建立在两边耗时一样上。
+        # 现在请求本身两支都一条语句不多。不记 IP（令牌行上已有）。
+        # Logged only on the "address exists, mail sent" branch, and from a background
+        # task after the response (like user.login): riding the commit above would give
+        # this branch one more INSERT round trip than the unknown-address branch and
+        # widen the timing gap this endpoint's safety rests on. The request itself now
+        # gains no statement on either branch. No IP (the token row already holds it).
+        _queue_reset_requested(background, db, user.id)
     return MessageOut(message=_FORGOT_REPLY)
+
+
+def _queue_reset_requested(background: BackgroundTasks, db: Session, user_id: str) -> None:
+    """排一条 user.password_reset_requested，响应之后由 _record_reset_requested 写。只取请求
+    会话绑的引擎（理由同 _queue_login_event）。
+    Queue user.password_reset_requested for after the response; only the request
+    session's engine is captured (see _queue_login_event)."""
+    try:
+        bind = db.get_bind()
+    except Exception:  # noqa: BLE001
+        logger.warning("找回密码日志取不到数据库连接，本次不记 / reset-request event skipped: no bind",
+                       exc_info=True)
+        return
+    background.add_task(_record_reset_requested, bind, user_id)
+
+
+def _record_reset_requested(bind, user_id: str) -> None:
+    """后台任务：record_after_commit 自己一个短事务写那一行。actor_type 要显式给 user——
+    record_after_commit 默认是 system。外面这层 try 是兜底（它本身不抛）。
+    Background task: one row in record_after_commit's own short transaction.
+    actor_type must be passed as user (record_after_commit defaults to system); the
+    outer try is a backstop, it never raises itself."""
+    try:
+        activity_log.record_after_commit(
+            activity_log.USER_PASSWORD_RESET_REQUESTED,
+            user_id=user_id,
+            actor_type=activity_log.ACTOR_USER,
+            actor_id=user_id,
+            bind=bind,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("找回密码日志写入失败，已跳过 / reset-request event failed", exc_info=True)
 
 
 @router.post("/reset-password", response_model=MessageOut)
@@ -390,10 +523,15 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
 
     user.password_hash = hash_password(req.password)
     user.token_version = (user.token_version or 0) + 1
+    # 操作日志，随下面这次 commit 一起提交；令牌无效的那一支（上面 400）不记。
+    # Activity row, committed below; the invalid-token branch (400 above) logs nothing.
+    activity_log.log_event(db, activity_log.USER_PASSWORD_RESET, user_id=user.id, actor_id=user.id)
     # 用重置邮件里的链接改了密码，等于证明了这个邮箱归他——顺手算作验证通过，
     # 省得他再去点一封验证信。/ Completing a reset proves mailbox ownership, so
-    # it counts as verification too.
-    email_verification.mark_verified(db, user)
+    # it counts as verification too. method='reset' 让它在操作日志里记成「重置密码时
+    # 顺带验证」；本来已验证的不会再记（mark_verified 早返回）。/ Logged as verified
+    # via reset; an already-verified account logs nothing (early return).
+    email_verification.mark_verified(db, user, method=email_verification.METHOD_RESET)
     db.commit()
     # 只清「这个账号 + 发起重置的这个来源」那一条计数：锁定本来就是按来源分开算
     # 的，被锁住的正是用户此刻所在的这个来源（他就是在这里试错才被锁的），清它

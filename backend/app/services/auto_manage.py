@@ -67,6 +67,24 @@ STATE_RETENTION_DAYS = 7
 # page; the dedup query filters on it too).
 AUTO_PREFIX = "auto_"
 
+# 自动指令号的格式是 auto_<动作>_<仓位号>_<8 位随机>。动作段说明这条指令为什么发出，操作
+# 日志据此写「保本 / 追踪止损 / 补回止损 / 分批止盈」，不另占任何存储。所有消费方（routers/
+# bridge.py 的 30 秒超时作废与回执推送去重、下面的 pending_auto_tickets）只认 AUTO_PREFIX，
+# 动作段叫什么不影响它们。改止损单原先一律是 sl，rev 38 起拆成 be / trail / restore；旧的
+# auto_sl_ 只会出现在历史数据里，日志按中性写法显示。
+# Auto command ids look like auto_<kind>_<ticket>_<8 random hex>. The kind says why
+# the command was issued so the activity log can say "break-even / trailing / stop
+# restored / partial take-profit" at no storage cost. Every consumer (routers/bridge.py's
+# 30s auto void and receipt-push skip, pending_auto_tickets below) looks only at
+# AUTO_PREFIX, so the kind segment is free to change. SL moves used to be a single
+# "sl"; from rev 38 they split into be / trail / restore, and auto_sl_ survives only in
+# old rows, which the log renders neutrally.
+AUTO_KIND_BE = "be"            # 止损移到入场价（保本）/ stop moved to entry
+AUTO_KIND_TRAIL = "trail"      # 追踪止损 / trailing stop
+AUTO_KIND_RESTORE = "restore"  # 止损被手动清掉后补回 / stop restored after a manual clear
+AUTO_KIND_PARTIAL_TP = "tp"    # 分批止盈（CLOSE）/ partial take-profit (CLOSE)
+AUTO_KIND_LEGACY_SL = "sl"     # rev 38 之前的改止损单 / pre-rev-38 SL move
+
 # "该用户是否需要评估"的短 TTL 缓存：绝大多数用户没开自动管理，
 # 让每 1.5 秒一次的持仓上报在他们身上零数据库开销。
 # Short-TTL cache of "does this user need evaluation at all" — most users
@@ -228,6 +246,31 @@ def auto_manage_user_ids(db: Session) -> frozenset[str]:
 
 def _client_order_id(kind: str, ticket: int) -> str:
     return f"{AUTO_PREFIX}{kind}_{ticket}_{uuid.uuid4().hex[:8]}"
+
+
+def auto_command_kind(client_order_id: str | None) -> str | None:
+    """自动指令号里的动作段（AUTO_KIND_*，含旧的 sl）；不是自动指令返回 None。
+    The kind segment of an auto command id (AUTO_KIND_*, legacy sl included), or
+    None for any other id."""
+    if not client_order_id or not client_order_id.startswith(AUTO_PREFIX):
+        return None
+    kind, sep, _ = client_order_id[len(AUTO_PREFIX):].partition("_")
+    return kind if sep and kind else None
+
+
+def _sl_kind(desired: float, entry: float, current_sl: float) -> str:
+    """改止损单的动作段。目标正好是入场价就是保本；否则当前没有止损（被手动清掉）是补回；
+    其余是追踪。保本排在补回前面：止损被清掉后补回到入场价时记成保本，而「原来没有止损」
+    这件事 prev_sl=0 已经记下了，两样信息都不丢；反过来记成补回，「补在入场价」就丢了。
+    Kind for an SL move: exactly the entry is break-even; otherwise no current stop (a
+    manual clear) is a restore; anything else trails. Break-even wins over restore
+    because prev_sl=0 already records "there was no stop", so nothing is lost; the
+    other order would lose "restored at entry"."""
+    if desired == entry:
+        return AUTO_KIND_BE
+    if current_sl <= 0:
+        return AUTO_KIND_RESTORE
+    return AUTO_KIND_TRAIL
 
 
 def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
@@ -460,7 +503,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             if should_move:
                 cmd = Order(
                     user_id=user_id,
-                    client_order_id=_client_order_id("sl", ticket),
+                    client_order_id=_client_order_id(_sl_kind(desired, entry, current_sl), ticket),
                     action="MODIFY",
                     symbol=symbol,
                     side=side,
@@ -469,6 +512,13 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                     sl=desired,
                     tp=current_tp,  # 保留现有止盈，0 会被桥接理解为清除 / keep TP; 0 would clear it
                     mt5_login=login,
+                    # 操作日志的「原止损 / 原止盈 / 仓位手数」：就是这一轮评估手里的这份持仓，
+                    # 不额外读任何东西（0 = 原来没有；手数缺失记 NULL 而不是 0）。
+                    # The activity log's previous SL / TP / volume: the very position this
+                    # pass is evaluating, no extra reads (0 = none; a missing volume is NULL).
+                    prev_sl=current_sl,
+                    prev_tp=current_tp,
+                    pos_volume=volume or None,
                     status="PENDING",
                 )
                 db.add(cmd)
@@ -504,13 +554,16 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             if close_vol >= min_v and volume - close_vol >= min_v - 1e-9:
                 cmd = Order(
                     user_id=user_id,
-                    client_order_id=_client_order_id("tp", ticket),
+                    client_order_id=_client_order_id(AUTO_KIND_PARTIAL_TP, ticket),
                     action="CLOSE",
                     symbol=symbol,
                     side=side,
                     volume=close_vol,
                     ticket=ticket,
                     mt5_login=login,
+                    # 平之前的仓位手数，操作日志据此写「平 0.5 手，剩 0.5 手」（拆仓条件已保证 > 0）。
+                    # Volume before the close, for "closed 0.5, 0.5 left" (> 0 by the split check).
+                    pos_volume=volume,
                     status="PENDING",
                 )
                 db.add(cmd)

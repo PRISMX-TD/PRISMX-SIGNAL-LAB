@@ -5,6 +5,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import threading
 import time
 
 import anyio.to_thread
@@ -131,6 +132,102 @@ LOCAL_PRUNE_EVERY = 60.0
 SNAPSHOT_REPUSH_SECONDS = 15.0
 # 参与「报价变没变」判断的字段 / fields that count toward "quote changed"
 _QUOTE_WATCHED = ("bid", "ask", "contractSize", "tickSize", "tickValue")
+
+# find_position_shared（操作日志的「原止损 / 原手数」）用的 Redis：独立的短超时客户端、不重试，
+# 外加进程内熔断。它挡在手动改单 / 平仓下单的路上，读不到只是日志里少一个「原值」，所以宁可
+# 立刻放弃也不能让下单多等——共享客户端是 2 秒超时 + 1 次重试，Redis 一抖就是几秒。
+# 熔断：出过一次错，之后 30 秒内直接跳过 Redis，不在每一单上重复撞同一个超时。
+# Redis for find_position_shared (the activity log's "previous SL / volume"): its
+# own short-timeout, no-retry client plus an in-process breaker. It sits in front of
+# manual modify / close orders, and a miss only costs the log one "previous value",
+# so giving up at once beats delaying the order — the shared client waits 2s and
+# retries once. After any error the next 30s skip Redis instead of re-hitting the
+# same timeout on every order.
+POSITION_LOOKUP_TIMEOUT_SECONDS = 0.3
+POSITION_LOOKUP_BREAKER_SECONDS = 30.0
+_POSITION_LOOKUP_MAX_CONNECTIONS = 16
+_position_lookup_client = None
+_position_lookup_lock = threading.Lock()
+# monotonic 时刻；在它之前熔断打开 / breaker is open until this monotonic time
+_position_lookup_open_until = 0.0
+
+
+def _position_lookup_redis():
+    """惰性建 find_position_shared 专用的同步客户端（0.3 秒超时、零重试、池满等 0.3 秒）。
+    Lazily build find_position_shared's own sync client (0.3s timeouts, zero
+    retries, 0.3s wait for a pooled connection)."""
+    global _position_lookup_client
+    if _position_lookup_client is not None:
+        return _position_lookup_client
+    with _position_lookup_lock:
+        if _position_lookup_client is None:
+            import redis
+            from redis.backoff import NoBackoff
+            from redis.retry import Retry
+
+            pool = redis.BlockingConnectionPool.from_url(
+                shared_state.redis_url(),
+                decode_responses=True,
+                socket_timeout=POSITION_LOOKUP_TIMEOUT_SECONDS,
+                socket_connect_timeout=POSITION_LOOKUP_TIMEOUT_SECONDS,
+                max_connections=_POSITION_LOOKUP_MAX_CONNECTIONS,
+                timeout=POSITION_LOOKUP_TIMEOUT_SECONDS,
+                retry=Retry(NoBackoff(), 0),
+                health_check_interval=shared_state.REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
+            )
+            _position_lookup_client = redis.Redis(connection_pool=pool)
+    return _position_lookup_client
+
+
+def reset_position_lookup_for_tests(client=None) -> None:
+    """测试用：换掉专用客户端、合上熔断。/ Tests: swap the client and close the breaker."""
+    global _position_lookup_client, _position_lookup_open_until
+    _position_lookup_client = client
+    _position_lookup_open_until = 0.0
+
+
+def _num(value) -> float | None:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f == f and f not in (float("inf"), float("-inf")) else None
+
+
+def _pick_position(rows: list, login, ticket: int) -> dict | None:
+    """在合并后的持仓行里按 (账号, 票号) 找一笔，返回 {'sl', 'tp', 'volume'}。两路上报的字段名
+    一致（ticket / login / stopLoss / takeProfit / volume，见 gateway._position_rows 与桥接
+    mt5_worker）。止损 / 止盈为空按 0（没设）；行里压根没有这个键按 None（不知道）。
+    Find one position by (login, ticket) among merged rows and return
+    {'sl', 'tp', 'volume'}. Both reporters use the same field names. An empty SL / TP
+    reads as 0 (none set); a missing key reads as None (unknown)."""
+    want = str(login) if login not in (None, "") else None
+    exact: list[dict] = []
+    loose: list[dict] = []
+    for p in rows:
+        if not isinstance(p, dict):
+            continue
+        try:
+            if int(p.get("ticket") or 0) != ticket:
+                continue
+        except (TypeError, ValueError):
+            continue
+        have = p.get("login")
+        have = str(have) if have not in (None, "") else None
+        if want and have:
+            if have == want:
+                exact.append(p)
+            continue
+        loose.append(p)
+    found = exact or loose
+    if not found or len({str(p.get("login")) for p in found}) > 1:
+        return None
+    p = found[0]
+    return {
+        "sl": _num(p.get("stopLoss") or 0.0) if "stopLoss" in p else None,
+        "tp": _num(p.get("takeProfit") or 0.0) if "takeProfit" in p else None,
+        "volume": _num(p.get("volume")),
+    }
 
 
 def _snapshot_key(kind: str, user_id: str, source: str) -> str:
@@ -752,6 +849,66 @@ class ConnectionManager:
         return await _offload(
             lambda: _merge_sources(self._shared_by_source("pending", user_id))
         )
+
+    def find_position_shared(self, user_id: str, login, ticket) -> dict | None:
+        """找一笔持仓此刻的止损 / 止盈 / 手数，给操作日志记「原值」（orders.prev_sl / prev_tp /
+        pos_volume）。返回 {'sl', 'tp', 'volume'}（sl / tp 为 0 = 没设；某项读不出来是 None），
+        找不到或出任何错返回 None。**同步、绝不抛异常、绝不挡单**——手动改单 / 平仓是同步端点，
+        直接在线程里调。
+
+        与 get_positions_shared 读同一组快照键，但一次 MGET 取完两个来源（那边是两次顺序 GET），
+        走专用的 0.3 秒、不重试客户端，并带 30 秒熔断（见 _position_lookup_redis 上面的说明）。
+        Redis 里缺某个来源的键时用本进程那份补，规则与 _shared_by_source 相同；没配 Redis 时
+        直接查本进程快照。
+
+        匹配：票号相同，且账号相同（任一方没带账号时不比账号）。票号只在单个账号内唯一，所以
+        没给账号、又在两个账号上撞号时宁可返回 None，也不猜。
+
+        Look up a position's current SL / TP / volume so the activity log can record
+        the "previous" values (orders.prev_sl / prev_tp / pos_volume). Returns
+        {'sl', 'tp', 'volume'} (0 for sl / tp = none set; None for a field that can't be
+        read) or None when not found or on any error. Synchronous, never raises, never
+        blocks an order — the manual modify / close endpoints are sync and call it
+        directly. Reads the same snapshot keys as get_positions_shared but in one MGET
+        (that one issues two sequential GETs), through the dedicated 0.3s no-retry
+        client behind a 30s breaker. Sources missing from Redis are filled from this
+        process's copy as in _shared_by_source; without Redis it reads the local
+        snapshot. Matching is by ticket and login (login ignored when either side lacks
+        it); an ambiguous ticket across two accounts returns None rather than a guess.
+        """
+        global _position_lookup_open_until
+        try:
+            tk = int(ticket)
+        except (TypeError, ValueError):
+            return None
+        if tk <= 0:
+            return None
+        try:
+            by_source: dict[str, list] = {}
+            if shared_state.enabled():
+                if time.monotonic() < _position_lookup_open_until:
+                    return None
+                keys = [shared_state._k(_snapshot_key("positions", user_id, src))
+                        for src in SNAPSHOT_SOURCES]
+                try:
+                    raws = _position_lookup_redis().mget(keys)
+                except Exception as e:
+                    _position_lookup_open_until = time.monotonic() + POSITION_LOOKUP_BREAKER_SECONDS
+                    logger.warning(
+                        "持仓快照查询失败，%d 秒内跳过 / position lookup failed, breaker open %ds: %s",
+                        int(POSITION_LOOKUP_BREAKER_SECONDS), int(POSITION_LOOKUP_BREAKER_SECONDS), e,
+                    )
+                    return None
+                for src, raw in zip(SNAPSHOT_SOURCES, raws or []):
+                    rows = _decode_rows(raw)
+                    if rows is not None:
+                        by_source[src] = rows
+            for src, rows in self._fresh_local("positions", user_id).items():
+                by_source.setdefault(src, rows)
+            return _pick_position(_merge_sources(by_source), login, tk)
+        except Exception:
+            logger.warning("find_position_shared 出错，按找不到处理 / lookup error", exc_info=True)
+            return None
 
     # ---------- 账号浮动盈亏缓存 / Per-account floating P/L cache ----------
     #

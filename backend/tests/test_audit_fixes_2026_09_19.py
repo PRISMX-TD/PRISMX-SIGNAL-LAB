@@ -201,7 +201,8 @@ def test_over_limit_forgot_password_is_indistinguishable(db_session):
             bg = _Bg()
             replies.append(forgot(request=_Req(), req=ForgotPasswordRequest(email=user.email),
                                   background=bg, db=db_session).message)
-            sends += len(bg.tasks)
+            # 只数发信任务（另有一个响应之后写操作日志的任务）/ mail tasks only
+            sends += len([t for t in bg.tasks if t[0].__name__ == "send_reset_email"])
         assert len(set(replies)) == 1                 # 每次都是同一句话
         assert sends == RESET_MAX_PER_HOUR           # 但只真的发了 3 封
     finally:

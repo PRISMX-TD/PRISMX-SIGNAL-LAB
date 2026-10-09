@@ -839,6 +839,31 @@ def _validate_pending_levels(
             )
 
 
+def _position_before(user_id: str, login: str | None, ticket: int) -> dict | None:
+    """发 MODIFY / CLOSE 之前这笔仓位此刻的止损 / 止盈 / 手数，给操作日志记「原值」
+    （orders.prev_sl / prev_tp / pos_volume，只在 INSERT 时写这一次）。返回
+    {'sl', 'tp', 'volume'}，读不到返回 None，对应列留空。
+
+    取自持仓快照（connection_manager.find_position_shared）：一次 Redis MGET，0.3 秒超时
+    加 30 秒熔断，不碰数据库。它本身已保证不抛异常；这里再兜一层，是因为它挡在手动平仓
+    的路上——哪天被改出一个漏网的异常，代价应该是日志里少一个原值，而不是用户平不了仓。
+
+    The position's SL / TP / volume just before a MODIFY / CLOSE is issued, for the
+    activity log's "previous" values (orders.prev_sl / prev_tp / pos_volume, written
+    once at INSERT). Returns {'sl', 'tp', 'volume'}, or None when unreadable, which
+    leaves the columns NULL. Read from the positions snapshot: one Redis MGET behind a
+    0.3s timeout and a 30s breaker, no database. find_position_shared already never
+    raises; the extra guard is because this sits in front of a manual close — a stray
+    exception there must cost the log a value, never the user their close.
+    """
+    try:
+        return manager.find_position_shared(user_id, login, ticket)
+    except Exception:  # noqa: BLE001 —— 只是少记一个原值 / only a log value is lost
+        logger.warning("读持仓原值失败，留空 / position lookup failed, leaving prev values empty",
+                       exc_info=True)
+        return None
+
+
 def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:
     """校验目标账号归属当前用户（指定 mt5Login 时）。
     Verify the target account belongs to the current user (when mt5Login given).
@@ -900,6 +925,13 @@ def close_position(
     if existing:
         return _serialize(existing)
 
+    mt5_login = _require_close_login(db, user.id, req.mt5Login)
+    # 平仓前的仓位手数：操作日志判断「全平还是部分平」只能靠它（桥接回执会把 volume
+    # 改写成实际成交手数）。放在幂等早返回之后，重放不读快照；读不到留空，不挡单。
+    # The position's volume before the close — the only reliable "full or partial"
+    # signal for the activity log (a bridge receipt rewrites volume). After the
+    # idempotent return so replays skip the lookup; a miss leaves it NULL.
+    before = _position_before(user.id, mt5_login, req.ticket)
     order = Order(
         user_id=user.id,
         client_order_id=req.clientOrderId,
@@ -908,7 +940,8 @@ def close_position(
         side=req.side,
         volume=req.volume or 0.0,
         ticket=req.ticket,
-        mt5_login=_require_close_login(db, user.id, req.mt5Login),
+        mt5_login=mt5_login,
+        pos_volume=before.get("volume") if before else None,
         status="PENDING",
     )
     result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
@@ -1189,6 +1222,14 @@ def modify_position(
     if existing:
         return _serialize(existing)
 
+    mt5_login = _require_close_login(db, user.id, req.mt5Login)
+    # 改单前的止损 / 止盈（0 = 原来没有），操作日志据此把「止损改为 X」说成「设置 / 移动 /
+    # 移除止损」；顺带记下仓位手数。放在幂等早返回之后，重放不读快照；读不到留空，不挡单。
+    # The SL / TP before this modify (0 = none), letting the activity log say "set /
+    # moved / removed the stop" rather than "stop changed to X"; the position's volume
+    # rides along. After the idempotent return so replays skip the lookup; a miss
+    # leaves them NULL.
+    before = _position_before(user.id, mt5_login, req.ticket)
     order = Order(
         user_id=user.id,
         client_order_id=req.clientOrderId,
@@ -1199,7 +1240,10 @@ def modify_position(
         ticket=req.ticket,
         sl=req.stopLoss,
         tp=req.takeProfit,
-        mt5_login=_require_close_login(db, user.id, req.mt5Login),
+        mt5_login=mt5_login,
+        prev_sl=before.get("sl") if before else None,
+        prev_tp=before.get("tp") if before else None,
+        pos_volume=before.get("volume") if before else None,
         status="PENDING",
     )
     result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)

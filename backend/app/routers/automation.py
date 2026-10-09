@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import AutoManageSettings, User
+from app.services import activity_log
 from app.services.auto_manage import invalidate_eligibility
 from app.services.deps import get_current_user
 from app.services.plans import can_auto_manage
@@ -117,6 +118,17 @@ def put_settings(
             detail="自动仓位管理为 PRO 专属功能，请升级解锁 / Auto position management is PRO-only; upgrade to unlock",
         )
     row = _get_or_create(db, user.id)
+    # 操作日志要的是「改了哪几项、从多少改成多少」：赋值前按出参的样子拍一份快照，赋值后
+    # 再拍一份，逐项比较。字段名用 API 的 camelCase（前端设置页认的就是这套名字）。刚建的
+    # 行在 _get_or_create 里 flush 过，列默认值已经填上，所以「第一次保存」的旧值就是出厂
+    # 默认——和 GET 在没有行时答给用户看的那份一致。
+    # The activity log wants "which settings changed, from what to what": snapshot in
+    # the response shape before and after assigning, then compare field by field.
+    # Field names are the API's camelCase, the names the settings page knows. A row
+    # just created was flushed in _get_or_create, so its column defaults are filled
+    # in and a first save diffs against the factory defaults — the same values GET
+    # shows when there is no row.
+    before = _serialize(row).model_dump()
     row.enabled = body.enabled
     row.be_enabled = body.beEnabled
     row.be_trigger_r = body.beTriggerR
@@ -126,6 +138,18 @@ def put_settings(
     row.ptp_enabled = body.ptpEnabled
     row.ptp_trigger_r = body.ptpTriggerR
     row.ptp_fraction = body.ptpFraction
+    changes = [
+        {"field": field, "old": before.get(field), "new": new}
+        for field, new in _serialize(row).model_dump().items()
+        if before.get(field) != new
+    ]
+    if changes:
+        # 原样再存一遍（什么都没改）不记。随下面的 commit 提交。
+        # Re-saving unchanged settings logs nothing. Committed below.
+        activity_log.log_event(
+            db, activity_log.AUTO_SETTINGS, user_id=user.id, actor_id=user.id,
+            data={"changes": changes},
+        )
     db.commit()
     invalidate_eligibility(user.id)
     return _serialize(row)

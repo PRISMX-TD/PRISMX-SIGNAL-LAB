@@ -35,6 +35,7 @@ from app.schemas import (
     TicketReplyCreate,
     TicketReplyOut,
 )
+from app.services.audit import log_change
 from app.services.deps import get_current_user, get_current_user_id_light, require_admin
 from app.services.image_upload import (
     UploadError,
@@ -427,6 +428,51 @@ def reply_to_ticket(
 
 admin_router = APIRouter(prefix="/admin/tickets", tags=["admin-tickets"])
 
+# 审计行里管理员回复只留开头这么多字：操作日志一句话说清「回了什么」就够，全文在
+# ticket_replies 里，不必在审计表再存一份。
+# How much of an admin reply the audit row keeps: enough for the activity log to
+# say what was answered; the full text already lives in ticket_replies.
+_AUDIT_REPLY_CHARS = 60
+
+
+def _reply_excerpt(reply: TicketReply) -> str:
+    text = (reply.body or "").strip()
+    if text:
+        return text if len(text) <= _AUDIT_REPLY_CHARS else text[:_AUDIT_REPLY_CHARS] + "…"
+    # 只发了截图的回复也是一条回复，不能因为正文为空被 log_change 当成「没变」跳过。
+    # An image-only reply is still a reply; an empty value would make log_change
+    # treat it as "unchanged" and skip it.
+    n = len(_image_keys(reply))
+    return f"[图片 ×{n} / {n} image(s)]"
+
+
+def _audit_ticket_change(
+    db: Session,
+    admin_id: str,
+    ticket: Ticket,
+    old_status: str | None,
+    old_priority: str | None,
+    reply: TicketReply | None = None,
+) -> None:
+    """管理员动工单的审计（以前只有回复正文留在 ticket_replies，状态 / 优先级怎么变的
+    无从查起）：`ticket:<id>:status`、`ticket:<id>:priority` 各一行（没变的 log_change
+    自己跳过），有回复再加 `ticket:<id>:reply`（只存开头 60 字）。目标用户记工单提交者，
+    操作日志按用户筛选时能看到「管理员处理了他的工单」。随调用方的 commit 提交；同一请求
+    的几行共用一个 op_id，页面上合成一行。
+
+    Audit for admin ticket handling — previously only reply bodies survived (in
+    ticket_replies) and status / priority history was lost. One row each for
+    `ticket:<id>:status` and `ticket:<id>:priority` (log_change skips unchanged
+    ones), plus `ticket:<id>:reply` holding the first 60 characters. The target is
+    the ticket's submitter, so filtering the activity log by user shows staff
+    handling their ticket. Rides the caller's commit; rows from one request share
+    an op_id and fold into one line on the page.
+    """
+    log_change(db, admin_id, ticket.user_id, f"ticket:{ticket.id}:status", old_status, ticket.status)
+    log_change(db, admin_id, ticket.user_id, f"ticket:{ticket.id}:priority", old_priority, ticket.priority)
+    if reply is not None:
+        log_change(db, admin_id, ticket.user_id, f"ticket:{ticket.id}:reply", None, _reply_excerpt(reply))
+
 
 @admin_router.get("", response_model=list[TicketListItem])
 def list_all_tickets(
@@ -498,6 +544,7 @@ def admin_reply_to_ticket(
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
     images = _checked_images(body.images, admin.id)
+    old_status, old_priority = ticket.status, ticket.priority
     if body.status:
         ticket.status = body.status
     if body.priority:
@@ -510,6 +557,7 @@ def admin_reply_to_ticket(
         images=images,
     )
     db.add(reply)
+    _audit_ticket_change(db, admin.id, ticket, old_status, old_priority, reply)
     # 站内通知与这次回复同一个事务：系统通知栏那条（下面的 dispatch_ticket_reply）
     # 可能因为没订阅、被墙、密钥没配而根本发不出去，铃铛里这一条是用户唯一一定
     # 看得到的痕迹，不能跟着推送一起失败。管理员回自己提的工单不通知自己。
@@ -565,16 +613,18 @@ def admin_update_ticket(
     ticket_id: str,
     body: AdminTicketUpdate,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     """仅修改 status / priority（不回复）。/ Change status/priority only, no reply."""
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
+    old_status, old_priority = ticket.status, ticket.priority
     if body.status:
         ticket.status = body.status
     if body.priority:
         ticket.priority = body.priority
+    _audit_ticket_change(db, admin.id, ticket, old_status, old_priority)
     db.commit()
     db.refresh(ticket)
     replies = (

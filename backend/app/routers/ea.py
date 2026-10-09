@@ -32,6 +32,7 @@ from app.core.security import generate_api_token, hash_api_token
 from app.models import MT5Account, User
 from app.routers.bridge import invalidate_auth_cache_for_hash
 from app.schemas import EATokenOut
+from app.services import activity_log
 from app.services.deps import get_current_user, require_verified_email
 
 router = APIRouter(prefix="/ea", tags=["ea"])
@@ -89,6 +90,10 @@ def reset_token(
     old_hash = user.api_token
     raw = generate_api_token()
     user.api_token = hash_api_token(raw)
+    # 操作日志只记「重置过」这件事：明文和哈希都不进日志（data 留空）。随下面的 commit 提交。
+    # The activity log records only that a reset happened — neither the token nor
+    # its hash goes in (no data). Committed below.
+    activity_log.log_event(db, activity_log.USER_API_TOKEN_RESET, user_id=user.id, actor_id=user.id)
     db.commit()
     invalidate_auth_cache_for_hash(old_hash)
     return EATokenOut(apiToken=raw, boundAccount=_primary_login(db, user.id))

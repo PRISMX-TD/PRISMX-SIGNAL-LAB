@@ -692,6 +692,15 @@ class Settings(BaseSettings):
     # price after the bridge comes back online much later.
     ORDER_PENDING_TIMEOUT_SECONDS: int = 300
 
+    # 操作日志 activity_events 表的保留天数（管理后台「操作日志」页的绑定、登录、密码等
+    # 事件）。每天 K 线清扫时顺带按 created_at 分批删掉更早的行。一天几十行，两年约 10 MB，
+    # 留得长一点方便事后追查；0 或负数 = 不清理。
+    # Retention of activity_events (bind / login / password … rows behind the admin
+    # activity log). The daily candle sweep deletes older rows in batches by
+    # created_at. A few dozen rows a day is ~10 MB over two years, so keep it long
+    # for after-the-fact investigations; 0 or negative disables the cleanup.
+    ACTIVITY_RETENTION_DAYS: int = 730
+
     # ---- 图片上传 / Image uploads（Supabase Storage）----
     # 只用于管理员上传策略介绍配图，走后端代理：浏览器只把文件交给自家后端，
     # service_role key 永不下发到前端。三项留空 = 上传功能关闭（端点返回 503），

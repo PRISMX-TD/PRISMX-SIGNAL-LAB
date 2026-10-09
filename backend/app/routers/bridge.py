@@ -25,7 +25,9 @@ from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current_user, is_account_online
-from app.services.gateway_binding import is_removed, is_revoked, mark_removed, not_removed, restore_removed
+from app.services.gateway_binding import (
+    bind_event_data, is_removed, is_revoked, log_unbind, mark_removed, not_removed, restore_removed,
+)
 from app.services.plans import max_mt5_accounts, plan_slot_rows, shown_account_limit
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
@@ -33,8 +35,14 @@ from app.services.push_dispatch import (
     EVENT_ORDER_REJECTED,
     dispatch_event_push_async,
 )
-from app.services import bridge_version_check, bridge_wake, close_all, shared_state
+from app.services import activity_log, bridge_version_check, bridge_wake, close_all, shared_state
 from app.services.account_type import SOURCE_SELF, apply_self_reported, classify_account_with_source
+from app.services.gateway_execute import (
+    CORRECTABLE_STATUSES,
+    correction_note,
+    correction_snapshot,
+    record_correction,
+)
 from app.services.settings_store import (
     get_account_type_settings,
     get_broker_settings,
@@ -597,6 +605,55 @@ def _upsert_account(
     return row, created
 
 
+def _log_bridge_binds(
+    db: Session, user_id: str, binds: list[tuple[MT5Account, bool, datetime | None]]
+) -> None:
+    """这一拍新建 / 复活的账号各记一条 mt5.bind（操作日志，设计 §4.2）。必须是提交前最后一步。
+
+    只有真正建出新行或把删过的行复活时才会走到这里，每拍都有的稳态上报（刷心跳）一条
+    语句都不加。带去重键，因为桥接 1.4 起有两条循环（状态上报 + 领指令）都会上报账号，
+    同一个新账号可能被两个请求同时建出来（server 为空时唯一约束挡不住，NULL 互不相等）：
+      · 新建：'mt5bind:<user_id>:<login>:<server>:new' —— 按账号身份拼，两边算出同一个键；
+      · 复活：'mt5bind:<账号行 id>:<复活前的 revoked_at>' —— 同一次复活一个键，下次删了
+        再绑回来 revoked_at 不同，是另一个键。
+    先 flush 拿到新行的 id（ref_id 要用）；这次 flush 抛的是业务自己的异常（commit 本来也会
+    抛），不接。按 login 排序后用 activity_log.log_events 一次写（一个 SAVEPOINT 里一条多行
+    INSERT，不随账号数增加语句），两个事务不会以相反顺序去抢同一组唯一键。
+    组装出错的那一条只告警跳过。
+
+    One mt5.bind per account created or revived on this report, as the last step
+    before the commit. The steady per-poll path never gets here. Keyed for dedupe
+    because bridge 1.4 reports accounts from two loops, so one new account can be
+    created by two requests at once (a NULL server escapes the unique constraint):
+    new rows key on the account identity, revivals on the row id plus the
+    pre-revival revoked_at. The flush gives new rows their ids for ref_id; its
+    errors are the business's own and propagate. Written in login order through
+    activity_log.log_events (one multi-row INSERT in one SAVEPOINT, however many
+    accounts) so two transactions never take the same keys in opposite orders.
+    """
+    db.flush()
+    events: list[dict] = []
+    for row, revived, prior_revoked_at in sorted(
+        binds, key=lambda b: (str(b[0].login), b[0].server or "")
+    ):
+        try:
+            if revived:
+                key = activity_log.bridge_bind_revived_key(row.id, prior_revoked_at)
+            else:
+                key = activity_log.bridge_bind_new_key(user_id, row.login, row.server)
+            data = bind_event_data(row, revived=revived)
+        except Exception:
+            logger.warning("桥接绑定操作日志组装失败，已跳过 / bridge bind activity skipped: login=%s",
+                           getattr(row, "login", None), exc_info=True)
+            continue
+        events.append({
+            "kind": activity_log.MT5_BIND, "user_id": user_id, "mt5_login": row.login,
+            "actor_id": user_id, "ref_id": row.id, "data": data, "dedupe_key": key,
+        })
+    if events:
+        activity_log.log_events(db, events)
+
+
 def _report_accounts_db_work(
     db: Session, user: User, req: BridgePollRequest
 ) -> tuple[set[str], dict[str, float], dict[str, str], list[str], list[str], set[str]]:
@@ -668,6 +725,9 @@ def _report_accounts_db_work(
     balances: dict[str, float] = {}
     rejected_logins: list[str] = []
     broker_rejected: list[str] = []
+    # 这一拍新建 / 复活的账号：(行, 是否复活, 复活前的 revoked_at)，提交前记操作日志。
+    # Accounts created / revived on this report, logged right before the commit.
+    new_binds: list[tuple[MT5Account, bool, datetime | None]] = []
     for acc in req.accounts:
         if broker_lock and not server_matches_broker(acc.server, broker_patterns):
             broker_rejected.append(acc.login)
@@ -680,6 +740,13 @@ def _report_accounts_db_work(
         if allowed_bound is not None and acc.login in bound_set and acc.login not in allowed_bound:
             rejected_logins.append(acc.login)
             continue
+        # 复活前先记下这行原来是不是用户删掉的、哪一刻删的：_upsert_account 里的
+        # restore_removed 会把这两样清掉，而复活的去重键要用删除时间。纯内存读。
+        # Note whether the row was user-removed, and when, before restore_removed in
+        # _upsert_account clears both; the revival's dedupe key needs that time.
+        prior = known_rows.get((acc.login, acc.server or None))
+        prior_removed = prior is not None and is_removed(prior)
+        prior_revoked_at = prior.revoked_at if prior_removed else None
         row, created = _upsert_account(
             db, user.id, acc, existing_count, account_limit, known_rows=known_rows
         )
@@ -688,6 +755,7 @@ def _report_accounts_db_work(
             continue
         if created:
             existing_count += 1
+            new_binds.append((row, prior_removed, prior_revoked_at))
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
         # 取 row 而非 acc 的余额：被接受的账号才在这里，且 row 上的值已经过
@@ -709,6 +777,10 @@ def _report_accounts_db_work(
             {"bridge_version": req.bridgeVersion}, synchronize_session=False
         )
         user.bridge_version = req.bridgeVersion  # 同步缓存实例，避免下拍重复 UPDATE / keep the cached instance in sync
+    if new_binds:
+        # 用 user.id 而不是 user 实例：它可能是鉴权缓存里的游离实例（见上）。
+        # user.id, not the instance: it may be a detached one from the auth cache (above).
+        _log_bridge_binds(db, user.id, new_binds)
     db.commit()
     return online_logins, balances, suffix_by_login, rejected_logins, broker_rejected, gateway_logins
 
@@ -1243,6 +1315,27 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
         if tm is not None:
             values["trade_mode"] = tm
 
+    # 操作日志「结果更正」（设计 §4.2 trade.corrected）要的原状态与订单字段，**必须在下面的
+    # UPDATE 之前**从内存里取：会话 expire_on_commit=True，提交后再读 order.status 拿到的
+    # 已经是新值（而且会为此多发一条 SELECT）。只在原状态可能被更正时才拍快照；纯内存读，
+    # 不发语句。
+    # The activity log's trade.corrected needs the prior status and the order's
+    # fields, read from memory *before* the UPDATE: with expire_on_commit=True a read
+    # after the commit returns the new value (and costs a SELECT). Snapshotted only
+    # when the prior status is correctable; memory only, no statement.
+    # note：原来那条 FAILED 是不是桥接超时作废（当时告诉用户「已自动取消，请重新下单」），
+    # 同样趁 message 还没被下面的 UPDATE 覆写时取（见 correction_note）。
+    # note: whether that FAILED was the bridge's timeout void (the user was told
+    # "cancelled, re-place it"), read before the UPDATE below overwrites message.
+    prev_status = order.status
+    correction = (
+        correction_snapshot(
+            order, mt5_login=login, vol=values.get("volume", order.volume), px=req.filledPrice,
+            note=correction_note(order.message),
+        )
+        if prev_status in CORRECTABLE_STATUSES else None
+    )
+
     # 真实回执覆盖状态（包括迟到回执纠正已超时作废的 FAILED——实际执行结果为准），
     # 但已是终态的不覆盖：这正是幂等判重，现在由 WHERE 条件表达。
     # The genuine result wins, including a late result correcting a timed-out
@@ -1256,6 +1349,16 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     db.commit()
     if not claimed:
         return order, True
+
+    # 抢占成功、原来是失败 / 已撤回、这次真成交了：记一条「结果更正」。业务已经提交，
+    # 日志自己开一个短事务；会话的连接刚在 commit 时还回池里，下面 refresh 才再取，
+    # 所以前后不会同时占两条连接。从不抛异常。
+    # Claimed, previously failed / cancelled, now actually filled: record a
+    # correction. The business has committed, so the log takes its own short
+    # transaction; the session handed its connection back at the commit and only
+    # takes one again for the refresh below, so two are never held at once. Never raises.
+    if correction is not None:
+        record_correction(correction, was=prev_status, now=final_status, bind=db)
 
     db.refresh(order)
     return order, False
@@ -1757,6 +1860,11 @@ def delete_account(
     delete: the row stays so the user's history keeps its owner; it just leaves
     the list. Refuses while online: the bridge's next poll would revive it.
     """
+    # FOR UPDATE：两个同时到的删除（两个标签页）不会都记一条 mt5.unbind——后到的等先到的
+    # 提交后按新行重判 not_removed()，拿到 None 走 404。同一条语句，不加往返（同直连解绑）。
+    # FOR UPDATE: of two concurrent deletes (two tabs) only one logs mt5.unbind; the
+    # second waits, re-checks not_removed() on the committed row and gets the 404.
+    # Same statement, no extra round trip (as in the gateway unbind).
     row = (
         db.query(MT5Account)
         .filter(
@@ -1765,6 +1873,7 @@ def delete_account(
             MT5Account.server == (server or None),
             not_removed(),
         )
+        .with_for_update()
         .first()
     )
     if not row:
@@ -1774,6 +1883,9 @@ def delete_account(
             status_code=409,
             detail="账号仍在线，请先断开桥接程序再删除 / Account is online; disconnect the bridge before deleting",
         )
+    # 操作日志 mt5.unbind，随 mark_removed 的提交一起落库；上面 404 / 409 的路径不写。
+    # Activity log, riding mark_removed's commit; the 404 / 409 paths above write nothing.
+    log_unbind(db, row, user.id)
     mark_removed(db, row)
     # 绑定集合变了：胜率/已平仓明细的按用户缓存立刻作废。
     # The bound set changed: drop the per-user win-rate / closed-trades caches.

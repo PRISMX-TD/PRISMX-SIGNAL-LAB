@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models import MT5Account, Order
+from app.services import activity_log
 from app.services.gateway_binding import is_revoked
 from app.services.gateway_client import (
     TradeRsp,
@@ -26,7 +27,12 @@ from app.services.gateway_client import (
     trade_open as gw_open,
     trade_pending as gw_pending,
 )
-from app.services.order_payload import order_source_tag, order_update_payload
+from app.services.order_payload import (
+    GATEWAY_STALE_ORDER_MESSAGE,
+    STALE_ORDER_MESSAGE,
+    order_source_tag,
+    order_update_payload,
+)
 from app.services.symbol_aliases import broker_symbol
 
 # 日志名沿用 prismx.orders：运维按它 grep 网关执行日志，搬文件不该改日志面貌。
@@ -98,6 +104,117 @@ _NOT_SENT_ERRORS = frozenset({"connect_failed"})
 # build predates this endpoint. The gateway is deployed by hand (copy the .cs, rebuild)
 # rather than riding main, so a window where the backend is ahead of it is expected.
 _GATEWAY_UNKNOWN_ENDPOINT = "not_found"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 操作日志「结果更正」trade.corrected（设计 §4.2）。订单状态是就地覆写的：一条先被记成
+# FAILED（结果未知，超时作废）或 CANCELLED（平台侧撤回）的指令，真实回执迟到后会被改成
+# 成交，orders 里从此只剩成交，「它曾经被告诉用户失败过」这件事就没了。这条日志把它留下来。
+# 网关（本模块 try_gateway_execute）和桥接（routers/bridge._result_db_work）两条回执路径
+# 共用下面三样；都在业务提交**之后**用 activity_log.record_after_commit 写，带
+# corrected_key 去重——一条指令最多被更正成成交一次，几条路径重叠时也只记一条。
+#
+# Activity log "result correction". Order status is overwritten in place, so an
+# order once reported FAILED (unknown, voided on timeout) or CANCELLED and later
+# confirmed filled keeps no trace of having been reported failed; this event keeps
+# it. Shared by the gateway (try_gateway_execute) and bridge (_result_db_work)
+# result paths; written after the business commit via record_after_commit, deduped
+# on corrected_key since an order flips to filled at most once.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 可以被「更正」的原状态 / prior statuses a late result can correct
+CORRECTABLE_STATUSES = frozenset({"FAILED", "CANCELLED"})
+# 只记更正成「成功」的：页面那句话是「原记为失败 / 已撤回，实际已成交」（设计 §8）。
+# FAILED → REJECTED 之类只是把「不知道」落实成「没成」，订单行自己就显示得清楚，不算更正。
+# Only corrections to success are recorded — the page says "reported failed /
+# cancelled, actually filled" (design §8). FAILED → REJECTED merely settles an
+# unknown as "not executed", which the order row already shows.
+_CORRECTED_TO = frozenset({"FILLED", "PLACED"})
+
+
+def correction_note(prior_message: str | None) -> str | None:
+    """被更正之前那条 FAILED 是哪一种超时作废，按作废时写进 orders.message 的固定文案判：
+    'timeout' = 桥接超时，用户当时被告知「已自动取消，请重新下单」（STALE_ORDER_MESSAGE）；
+    'timeout_unknown' = 直连超时，告知的是「结果未知，先核对持仓」（GATEWAY_STALE_ORDER_MESSAGE）；
+    其余 None。页面靠它说出用户当时看到的是什么——「原记为已自动取消」和「原记为结果未知」
+    对查重复仓位的管理员是两回事。传进来的必须是**这次回执覆写之前**的 message。
+    Which kind of timeout void the corrected FAILED was, from the fixed text the void
+    wrote into orders.message: 'timeout' (bridge; the user was told "cancelled,
+    re-place it"), 'timeout_unknown' (gateway; "outcome unknown, check first"), else
+    None. Lets the page say what the user was actually told. Pass the message from
+    *before* this result overwrote it."""
+    if prior_message == STALE_ORDER_MESSAGE:
+        return "timeout"
+    if prior_message == GATEWAY_STALE_ORDER_MESSAGE:
+        return "timeout_unknown"
+    return None
+
+
+def correction_snapshot(order: Order, **overrides) -> dict | None:
+    """趁字段还在内存里，拍下 trade.corrected 要用的订单字段；overrides 覆盖这次回执改掉的
+    值（mt5_login / vol / px）以及 note（correction_note 的结果——order.message 可能已被这次
+    回执覆写，所以由调用方用覆写之前的 message 算好传进来，不传就是 None）。纯内存读，不发
+    语句；出任何错返回 None（只告警）。
+    Snapshot the order fields trade.corrected needs while they are loaded;
+    overrides replace what this result changes (mt5_login / vol / px) and supply
+    note (correction_note of the pre-result message — order.message may already be
+    overwritten, so callers compute it; None when omitted). Memory only; any error
+    returns None with a warning."""
+    try:
+        snap = {
+            "id": order.id,
+            "user_id": order.user_id,
+            "mt5_login": order.mt5_login,
+            "action": order.action,
+            "sym": order.symbol,
+            "side": order.side,
+            "vol": order.volume,
+            "px": order.filled_price,
+            "created_at": order.created_at,
+            "note": None,
+        }
+        snap.update(overrides)
+        return snap
+    except Exception:
+        logger.warning("结果更正快照失败，已跳过 / correction snapshot skipped", exc_info=True)
+        return None
+
+
+def record_correction(snap: dict | None, *, was: str | None, now: str | None, bind) -> None:
+    """原状态 was ∈ CORRECTABLE_STATUSES、新状态 now 是成功时，在业务提交之后记一条
+    trade.corrected（系统事件，自己的短事务）。其余情况什么都不做。**绝不抛异常**：调用点
+    在网关执行的 try 里，一旦抛出会落进异常分支，把刚提交的成交覆写成 FAILED。
+    Record trade.corrected (a system event in its own short transaction) after the
+    business commit when was is correctable and now is a success; otherwise do
+    nothing. Never raises: the gateway call site sits inside try_gateway_execute's
+    try, whose except branch would overwrite the fill it just committed with FAILED."""
+    try:
+        if snap is None or was not in CORRECTABLE_STATUSES or now not in _CORRECTED_TO:
+            return
+        activity_log.record_after_commit(
+            activity_log.TRADE_CORRECTED,
+            user_id=snap["user_id"],
+            mt5_login=snap["mt5_login"],
+            ref_id=snap["id"],
+            data={
+                "was": was,
+                # 'timeout' / 'timeout_unknown' / None，见 correction_note
+                # 'timeout' / 'timeout_unknown' / None, see correction_note
+                "note": snap.get("note"),
+                "action": snap["action"],
+                "sym": snap["sym"],
+                "side": snap["side"],
+                "vol": snap["vol"],
+                "px": snap["px"],
+                # 原指令的下单时间；本行 created_at 是更正发生的时间。
+                # When the command was placed; the row's own created_at is the correction.
+                "at": activity_log.iso_utc(snap["created_at"]),
+            },
+            dedupe_key=activity_log.corrected_key(snap["id"]),
+            bind=bind,
+        )
+    except Exception:
+        logger.warning("结果更正操作日志失败，已跳过 / correction activity skipped", exc_info=True)
 
 
 def _failure_message(rsp: TradeRsp) -> str:
@@ -497,7 +614,13 @@ def try_gateway_execute(
         # been changed while we waited (stale void, manual edit), the real result is
         # written anyway — the broker did execute, so the books must follow — but with
         # a warning, so a "cancelled → filled" flip is never silent.
-        db_status = db.query(Order.status).filter(Order.id == order.id).scalar()
+        # 同一条 SELECT 顺带取 message：作废时写的是哪句文案，操作日志「结果更正」要用（见
+        # correction_note）；下面 apply_trade_result 会覆写内存里的 message。不加语句。
+        # The same SELECT also fetches message — which void wording was written, for
+        # the activity log's correction (see correction_note); apply_trade_result
+        # overwrites the in-memory one below. No extra statement.
+        db_row = db.query(Order.status, Order.message).filter(Order.id == order.id).first()
+        db_status, db_message = (db_row[0], db_row[1]) if db_row is not None else (None, None)
         if db_status is not None and db_status != "PENDING":
             logger.warning(
                 "Gateway 结果到达时订单已是 %s，按真实执行结果覆写: %s %s mt5=%s",
@@ -516,6 +639,20 @@ def try_gateway_execute(
         ):
             order.trade_mode = account.trade_mode
         _commit_keep_loaded(db, order)
+        # 等待期间被作废 / 撤回、结果却是成交：记一条「结果更正」。db_status 是上面那次读到的
+        # 原状态；字段都还在内存里（_commit_keep_loaded 不作废），会话的连接已在提交时归还，
+        # 日志的短事务不会与它同时占两条连接。record_correction 从不抛异常——这里抛出就会
+        # 落进下面的异常分支，把刚提交的成交覆写成 FAILED。
+        # Voided / cancelled while we waited but actually filled: record a correction.
+        # db_status is the prior status read above; fields are still loaded and the
+        # session already returned its connection, so the log's short transaction
+        # never holds a second one. record_correction never raises — raising here
+        # would land in the except branch and overwrite the committed fill with FAILED.
+        if db_status in CORRECTABLE_STATUSES:
+            record_correction(
+                correction_snapshot(order, note=correction_note(db_message)),
+                was=db_status, now=order.status, bind=db,
+            )
 
         # 网关耗时并排打出来（gateway_ms 是网关侧总耗时，dealer_ms 是其中等券商回执
         # 的部分）：用户说"下单慢"时，这一行就能分出是网关内部慢还是券商 dealer 慢。

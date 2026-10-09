@@ -30,7 +30,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
@@ -47,25 +49,84 @@ logger = logging.getLogger(__name__)
 SWEEP_INTERVAL_SECONDS = 15 * 60
 
 
-def downgrade_if_expired(db: Session, user: User) -> bool:
-    """付费等级已到期则就地降级为 FREE、写审计日志并清空到期时间，返回是否发生降级。
-    只改动 session 中的对象与新增审计行，**由调用方负责 commit**。
+def downgrade_if_expired(db: Session, user: User, now: datetime | None = None) -> bool:
+    """付费等级已到期则降级为 FREE、写审计日志并清空到期时间，返回**本次调用**是否真的
+    降了级。降级本身已作为一条 UPDATE 发出，审计行只 add；**由调用方负责 commit**
+    （返回 True 时调用方提交，返回 False 时没有要提交的东西）。
 
     清空 plan_expires_at 是有意为之：避免管理员之后重新升级却忘了更新到期时间时，
     过去的到期时间立刻把用户再次判为过期。降级发生的时刻由审计日志记录。
 
-    Downgrade an expired paid plan to FREE in place (write an audit row and
-    clear the expiry), returning whether a downgrade happened. Only mutates the
-    session object and adds an audit row — **the caller must commit**.
+    **为什么是条件 UPDATE**（rev 38 操作日志顺带修）：两条入口会撞——请求路径
+    （deps.get_current_user，任意 worker）和领导 worker 的后台扫描。以前两边都是「内存里看
+    到过期 → 改对象 + 写一行审计」，同一次到期在生产里写出过 15 对重复的 plan:auto_expire。
+    现在降级是一条 `UPDATE … WHERE plan != 'FREE' AND plan_expires_at < now`，只有真正改到
+    那一行的一方（rowcount = 1）写审计；Postgres 上后到的那条 UPDATE 会等先到的提交、再按
+    新值重判 WHERE，于是改到 0 行。条件里同时看到期时间，也让「管理员刚续了期」不会被一份
+    旧内存降回去。
+
+    没改到行时把这三列从库里刷新回内存：这次请求后面的判断看到的是库里的真实等级
+    （别人已降成 FREE，或者刚被续期），而不是这份过期的旧值。
+
+    Downgrade an expired paid plan to FREE (clearing the expiry and writing an
+    audit row) and return whether *this call* actually downgraded. The downgrade is
+    already sent as an UPDATE and the audit row is only added — **the caller must
+    commit** (when True; on False there is nothing to commit).
 
     Clearing plan_expires_at is deliberate: it prevents a stale past expiry from
     immediately re-expiring the user if an admin later re-upgrades them without
     setting a fresh expiry. When the downgrade happened is recorded in the audit
     log.
+
+    Why a conditional UPDATE (fixed alongside the rev 38 activity log): the two
+    entry points race — the request path (deps.get_current_user, any worker) and the
+    leader's sweep. Both used to "see expiry in memory → mutate + audit", and
+    production holds 15 duplicate plan:auto_expire pairs. Now the downgrade is
+    `UPDATE … WHERE plan != 'FREE' AND plan_expires_at < now` and only the caller
+    whose UPDATE hit the row (rowcount 1) writes the audit row; on Postgres the
+    later UPDATE waits for the first to commit, re-evaluates WHERE on the new row
+    and matches nothing. Checking the expiry in WHERE also stops a stale in-memory
+    copy from undoing an admin's fresh renewal. When nothing was hit, the three
+    columns are refreshed from the database so the rest of the request sees the
+    real plan rather than the stale one.
     """
-    if not is_plan_expired(user.plan, user.plan_expires_at):
+    now = now or datetime.now(timezone.utc)
+    if not is_plan_expired(user.plan, user.plan_expires_at, now):
         return False
     old_plan = user.plan
+    # 库里存的是不带时区的 UTC，比较值也给不带时区的，避免 Postgres 上 timestamp 与
+    # timestamptz 混比时按会话时区换算。
+    # The column holds naive UTC; compare against naive UTC so Postgres never casts
+    # through the session time zone.
+    cutoff = now.astimezone(timezone.utc).replace(tzinfo=None) if now.tzinfo else now
+    hit = db.execute(
+        update(User)
+        .where(
+            User.id == user.id,
+            User.plan != "FREE",
+            User.plan_expires_at.isnot(None),
+            User.plan_expires_at < cutoff,
+        )
+        # 试用与付费到期共用这条路径，无条件清理是安全的（非试用用户本就是 False）。
+        # Trial and paid expiry share this path; clearing unconditionally is safe
+        # (non-trial users are already False).
+        .values(plan="FREE", plan_expires_at=None, plan_is_trial=False)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if hit != 1:
+        try:
+            db.refresh(user, attribute_names=["plan", "plan_expires_at", "plan_is_trial"])
+        except Exception:
+            # 只是为了让内存值跟上库；刷不回来也不该让这次请求失败。
+            # Only keeps memory in step with the row; never worth failing the request.
+            logger.warning("downgrade_if_expired: refresh after a lost race failed", exc_info=True)
+        return False
+    # 库里已经改了：内存对象按「已同步」写入新值，不再标脏，提交时不会再发一遍 UPDATE。
+    # The row is already updated: set the new values as committed state so the
+    # object isn't dirty and no second UPDATE is flushed.
+    set_committed_value(user, "plan", "FREE")
+    set_committed_value(user, "plan_expires_at", None)
+    set_committed_value(user, "plan_is_trial", False)
     db.add(
         AdminAuditLog(
             admin_user_id=user.id,
@@ -75,12 +136,6 @@ def downgrade_if_expired(db: Session, user: User) -> bool:
             new_value="FREE",
         )
     )
-    user.plan = "FREE"
-    user.plan_expires_at = None
-    # 试用与付费到期共用这条路径，无条件清理是安全的（非试用用户本就是 False）。
-    # Trial and paid expiry share this path; clearing unconditionally is safe
-    # (non-trial users are already False).
-    user.plan_is_trial = False
     return True
 
 
@@ -105,7 +160,7 @@ def sweep_expired_plans(now: datetime | None = None) -> int:
         )
         count = 0
         for user in rows:
-            if is_plan_expired(user.plan, user.plan_expires_at, now) and downgrade_if_expired(db, user):
+            if is_plan_expired(user.plan, user.plan_expires_at, now) and downgrade_if_expired(db, user, now):
                 count += 1
         if count:
             db.commit()

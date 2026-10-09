@@ -41,7 +41,7 @@ def _cols(eng, table):
 
 
 def test_schema_rev_bumped_to_37():
-    assert db_mod.CURRENT_SCHEMA_REV == 37
+    assert db_mod.CURRENT_SCHEMA_REV >= 37
 
 
 def test_rev37_adds_deleted_at_without_backfill(legacy_engine):

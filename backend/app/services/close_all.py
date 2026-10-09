@@ -39,6 +39,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models import MT5Account, Order
+from app.services import activity_log
 from app.services.gateway_binding import not_removed
 
 logger = logging.getLogger("prismx.close_all")
@@ -115,6 +116,55 @@ def batch_orders(db: Session, user_id: str, batch: str) -> list[Order]:
         .order_by(Order.created_at.asc())
         .all()
     )
+
+
+def _log_batch(db: Session, user_id: str, batch: str, created: list[Order], skipped: int) -> None:
+    """一键平仓记操作日志 trade.close_all（设计 §4.2）：这一批涉及几个账号就记几行，每行
+    data {count: 这个账号排下去的子单数, skipped: 整批跳过的仓位数}，ref_id = 批次号。
+
+    每账号一行是因为页面按 MT5 账号筛选、按账号显示；子单的成交与否不在这里记——读接口
+    按批次号去 orders 里实时数（close_all.batch_orders）。
+
+    带去重键 'ca:<user>:<批次>:<login>'（与 rev 38 补录同格式）：同一个 clientOrderId 的
+    并发重放，输家在 flush 时就撞上子单的唯一约束（业务自己的异常，照常上抛，与原来在
+    commit 时抛出一样），万一赢了的那批又补排了几笔，也不会再多出一行。按 login 排序写（多行
+    INSERT 里 Postgres 也按这个顺序逐行取键），两个事务不会以相反顺序去抢同一组键。组装出错
+    只告警跳过。
+
+    One trade.close_all row per account in the batch, data {count, skipped},
+    ref_id = the batch id. Per account because the page filters and displays by
+    MT5 login; fills are not recorded here — the reader counts the batch's children
+    live. Keyed 'ca:<user>:<batch>:<login>' (the rev 38 backfill's format): a
+    concurrent replay of the same clientOrderId loses on the children's unique
+    constraint at flush (the business's own error, raised as it used to be at
+    commit), and a later top-up of the same batch adds no second row. Written in
+    login order so two transactions never take the keys in opposite orders.
+    Composition errors only warn.
+
+    几个账号一次写完（activity_log.log_events）：一次 flush + 一个 SAVEPOINT 里一条多行
+    INSERT，共 3 条语句，不随账号数增加——它们都排在放出平仓指令的那次 commit 前面。
+    All accounts in one go (activity_log.log_events): one flush and one multi-row
+    INSERT in one SAVEPOINT, 3 statements whatever the account count — they all sit
+    ahead of the commit that releases the closes.
+    """
+    try:
+        counts: dict[str | None, int] = {}
+        for o in created:
+            counts[o.mt5_login] = counts.get(o.mt5_login, 0) + 1
+        events = [
+            {
+                "kind": activity_log.TRADE_CLOSE_ALL,
+                "user_id": user_id, "mt5_login": login, "actor_id": user_id, "ref_id": batch,
+                "data": {"count": n, "skipped": skipped},
+                "dedupe_key": activity_log.close_all_key(user_id, batch, login),
+            }
+            for login, n in sorted(counts.items(), key=lambda kv: kv[0] or "")
+        ]
+    except Exception:
+        logger.warning("一键平仓操作日志组装失败，已跳过 / close-all activity skipped: batch=%s",
+                       batch, exc_info=True)
+        return
+    activity_log.log_events(db, events)
 
 
 def queue(
@@ -241,6 +291,11 @@ def queue(
         return batch, [], skipped
 
     db.add_all(created)
+    # 操作日志：搭这次提交，必须是提交前最后一步（带去重键，见 _log_batch）。一笔都没排下去
+    # （包括同一个 clientOrderId 的重放）在上面就返回了，不写。
+    # Activity log, riding this commit as its last step (dedupe-keyed, see
+    # _log_batch). Nothing queued — a replay included — returned above and logs nothing.
+    _log_batch(db, user_id, batch, created, skipped)
     db.commit()
     for o in created:
         db.refresh(o)

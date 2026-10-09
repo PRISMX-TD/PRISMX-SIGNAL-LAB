@@ -27,8 +27,10 @@ from app.schemas import LOGIN_PATTERN
 from app.services.account_type import SOURCE_GROUP, classify_group
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import get_current_user, require_verified_email
+from app.services import activity_log
 from app.services.gateway_binding import (
-    enforce, gateway_accounts_version, invalidate_gateway_accounts, is_removed, is_revoked,
+    REASON_PASSWORD_CHANGED, REASON_USER_REMOVED, bind_event_data, enforce,
+    gateway_accounts_version, invalidate_gateway_accounts, is_removed, is_revoked, log_unbind,
     mark_removed, not_removed,
 )
 from app.services.gateway_client import (
@@ -216,6 +218,44 @@ def _verify_failure(rsp) -> HTTPException:
     )
 
 
+def _log_verify_event(db: Session, user_id: str, row: MT5Account, *, is_new: bool,
+                      prev_reason: str | None) -> None:
+    """验证通过后记操作日志（设计 §4.2），随 gateway_verify 的那次提交一起落库或作废。
+
+    这个端点同时是「首次绑定」「把删过的账号绑回来」「改密失效后重新验证」「好好的绑定
+    再验一次」四件事，日志只记前三件：
+      · 新建行，或这行原来是用户删掉的（user_removed）→ mt5.bind（revived 区分两者）；
+      · 原来是改密失效（password_changed）→ mt5.reverify；
+      · 原本就有效 → 不记，什么都没变。
+    prev_reason 必须在清撤销标记**之前**取。只 db.add、不带去重键：同一用户并发绑同一账号，
+    输家撞唯一约束走 409 回滚，日志随之作废。组装出错只告警，绑定照常提交。
+
+    Record the activity for a successful verify, committed or discarded with the
+    endpoint's own commit. The endpoint is a first bind, a re-bind of a removed
+    account, a re-verify after a password-change revocation, or a no-op re-verify
+    of a healthy binding; only the first three are logged. prev_reason must be read
+    before the revocation markers are cleared. A plain add without a dedupe key: a
+    concurrent duplicate loses on the unique constraint (409) and its row goes with
+    the rollback. Composition errors only warn; the bind still commits.
+    """
+    try:
+        if is_new or prev_reason == REASON_USER_REMOVED:
+            kind = activity_log.MT5_BIND
+            data = bind_event_data(row, revived=not is_new)
+        elif prev_reason == REASON_PASSWORD_CHANGED:
+            kind = activity_log.MT5_REVERIFY
+            data = {"ch": "gateway"}
+        else:
+            return
+        activity_log.log_event(
+            db, kind, user_id=user_id, mt5_login=row.login, actor_id=user_id,
+            ref_id=row.id, data=data,
+        )
+    except Exception:
+        logger.warning("Gateway 绑定操作日志组装失败，已跳过 / verify activity skipped: login=%s",
+                       getattr(row, "login", None), exc_info=True)
+
+
 # ---------- 端点 ----------
 
 
@@ -274,15 +314,24 @@ def gateway_verify(
         raise _verify_failure(rsp)
 
     login_str = str(req.login)
-    existing = (
-        db.query(MT5Account)
-        .filter(
-            MT5Account.user_id == user.id,
-            MT5Account.login == login_str,
-            MT5Account.source == "gateway",
-        )
-        .first()
+    existing_q = db.query(MT5Account).filter(
+        MT5Account.user_id == user.id,
+        MT5Account.login == login_str,
+        MT5Account.source == "gateway",
     )
+    if rsp.valid:
+        # 验证通过、要写这一行时才 FOR UPDATE（网关那一跳已经结束，锁只持有到下面的提交，
+        # 中间没有网络调用）：同一账号两个并发的重新验证不会都读到「改密失效 / 已删」、各记
+        # 一条 mt5.reverify / mt5.bind——后到的等先到的提交，拿到的已是恢复好的行，什么都
+        # 不记。populate_existing 保证读到的是锁住之后的那一版。同一条语句，不加往返。
+        # FOR UPDATE only when the verify passed and this row will be written (the
+        # gateway hop is over; held until the commit below, no network call in
+        # between): two concurrent re-verifies of one account can't both read
+        # "revoked / removed" and each log an event — the second waits and sees the
+        # restored row, logging nothing. populate_existing makes sure it is the
+        # post-lock version. Same statement, no extra round trip.
+        existing_q = existing_q.with_for_update().populate_existing()
+    existing = existing_q.first()
 
     # 2) 检查账户数上限。**只在真要新增一行时才查**：这个账号已经绑过的话，
     #    这次调用不会让账号数增加，拿上限挡它没有任何道理。
@@ -326,6 +375,9 @@ def gateway_verify(
     # 3) 验证通过则创建/更新 MT5Account
     if rsp.valid:
         clear_failed_mt5_verify(req.login)
+        # 操作日志要分清新建 / 复活 / 重新验证，见 _log_verify_event。
+        # The activity log tells new / revived / re-verified apart; see _log_verify_event.
+        is_new = existing is None
         if existing is None:
             existing = MT5Account(
                 user_id=user.id,
@@ -363,10 +415,20 @@ def gateway_verify(
         # back. This is the only recovery path, and it is the same code as a
         # first-time bind.
         was_revoked = existing.revoked_at is not None
+        prev_reason = existing.revoked_reason
         existing.revoked_at = None
         existing.revoked_reason = None
 
         try:
+            # 新建行的 id 要到 flush 才有，日志的 ref_id 要用它。这次 flush 就是 commit 本来
+            # 要发的那条 INSERT，只是提前；撞唯一约束的 IntegrityError 也随之提前到这里，
+            # 所以放在同一个 try 里，照旧走 409。
+            # A new row only gets its id at flush, and the log's ref_id needs it. The
+            # flush is the INSERT the commit would send anyway, just earlier — and so is
+            # the unique-constraint IntegrityError, hence the same try and the same 409.
+            if is_new:
+                db.flush()
+            _log_verify_event(db, user.id, existing, is_new=is_new, prev_reason=prev_reason)
             db.commit()
         except IntegrityError:
             db.rollback()
@@ -532,6 +594,14 @@ def unbind_gateway_account(
     行留着，订单与平仓明细的归属不丢；轮询、下单、榜单、列表全部不再看到它；
     重新验证即复活。Soft delete: the row stays so history keeps its owner; the
     account leaves polling, orders, boards and lists; re-verifying revives it."""
+    # FOR UPDATE：双击「解绑」会同时到两个请求。不锁的话两边都读到「还没删」、各记一条
+    # mt5.unbind；锁住之后后到的那个等先到的提交，Postgres 按提交后的行重判 not_removed()，
+    # 拿到 None 走下面的 404。同一条语句，不加往返；锁只持有到 mark_removed 的提交。
+    # FOR UPDATE: a double-click sends two requests at once; unlocked, both read "not
+    # removed yet" and each logs an mt5.unbind. Locked, the second waits for the
+    # first's commit, Postgres re-checks not_removed() against the committed row and
+    # returns None → the 404 below. Same statement, no extra round trip; held only
+    # until mark_removed commits.
     row = (
         db.query(MT5Account)
         .filter(
@@ -540,11 +610,14 @@ def unbind_gateway_account(
             MT5Account.source == "gateway",
             not_removed(),
         )
+        .with_for_update()
         .first()
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Gateway 账号不存在")
 
+    # 操作日志 mt5.unbind，随 mark_removed 的提交一起落库 / rides mark_removed's commit
+    log_unbind(db, row, user.id)
     mark_removed(db, row)
     from app.services.trade_performance import invalidate_trade_caches
     invalidate_trade_caches(user.id, [login])  # 绑定集合变了 / the bound set changed

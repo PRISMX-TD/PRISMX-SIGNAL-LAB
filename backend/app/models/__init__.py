@@ -524,6 +524,30 @@ class Order(Base):
     # recently and without a complete close record is treated as closed
     # elsewhere and dropped from the open count (see trade_performance.py).
     position_last_seen_open = Column(DateTime, nullable=True)
+    # 下指令那一刻这笔仓位的原止损 / 原止盈（只 MODIFY 写）：0 = 原来没有，NULL = 不知道
+    # （持仓快照读不到、或 rev 38 之前的旧行）。操作日志靠它把「止损改为 X」说成「设置 /
+    # 移动 / 移除止损」。只在 INSERT 时写一次，之后不改——所以不碍 orders 的 HOT 更新。
+    # 手动改单取自持仓快照（connection_manager.find_position_shared），自动仓管取自它
+    # 评估时手里那份持仓（services/auto_manage.py）。
+    # The position's SL / TP at the moment the command was issued (MODIFY only):
+    # 0 = there was none, NULL = unknown (snapshot unreadable, or a pre-rev-38 row).
+    # The activity log uses it to say "set / moved / removed the stop" instead of
+    # just "stop changed to X". Written once at INSERT and never updated, so it
+    # costs orders' HOT updates nothing. Manual modifies read it from the positions
+    # snapshot (connection_manager.find_position_shared); auto-manage from the
+    # position it is already evaluating (services/auto_manage.py).
+    prev_sl = Column(Float, nullable=True)
+    prev_tp = Column(Float, nullable=True)
+    # 发 CLOSE / MODIFY 那一刻这笔仓位的手数，NULL = 不知道。判断「全平还是部分平」
+    # 必须用它而不是 volume：桥接回执会把 volume 改写成实际成交手数，全平和部分平在
+    # volume 上看起来一样。MODIFY 行也顺手写上（值本来就在手里），操作日志的改止损句子
+    # 用它显示仓位手数。来源与 prev_sl 相同。
+    # The position's volume when the CLOSE / MODIFY was issued, NULL = unknown.
+    # "Full or partial close" must be judged from this, not volume: a bridge receipt
+    # overwrites volume with the executed lots, which makes the two look alike.
+    # MODIFY rows carry it too (the value is already in hand) for the SL/TP
+    # sentence's position size.
+    pos_volume = Column(Float, nullable=True)
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
@@ -1080,6 +1104,70 @@ class AdminAuditLog(Base):
     old_value = Column(String, nullable=True)
     new_value = Column(String, nullable=True)
     created_at = Column(DateTime, default=_now)
+    # 同一次操作的编号（rev 38）：services/audit.log_change 在同一个会话里写的多行共用一个，
+    # 操作日志据此把「一次改了会员 + 到期 + 备注」或「批量改 30 个人」合成一行。直接
+    # `AdminAuditLog(...)` 的系统行（自动降级、试用、付款）留 NULL；rev 38 之前的旧行也是
+    # NULL，读取端按「同操作人 + 同字段族 + 2 秒内」兜底合并。不回填、不建索引。
+    # One id per operation (rev 38): every row services/audit.log_change writes within
+    # one session shares it, so the activity log can fold "plan + expiry + note" or a
+    # 30-user bulk edit into one line. System rows written as a direct
+    # `AdminAuditLog(...)` (auto-expire, trials, payments) stay NULL, as do pre-rev-38
+    # rows, which the reader groups by actor + field family + 2 seconds instead.
+    # Not backfilled, not indexed.
+    op_id = Column(String, nullable=True)
+
+
+class ActivityEvent(Base):
+    """操作日志里「别处没有记录」的那部分事件：绑定 / 解绑 MT5、授权失效、登录、密码、
+    邮箱验证、昵称、手机号、API Token、一键平仓、结果更正、自动仓管设置（kind 清单与每种
+    的 data 键见 services/activity_log.py）。交易指令、平仓成交、管理员改动各有自己的表，
+    管理后台的「操作日志」页读的时候把这几张表按时间合并，不往这里重复写。
+
+    刻意**不加外键**、String 不限长：这张表只追加、只给人看，任何一列都不该有机会让
+    业务提交失败——它的行搭在业务原有的那次提交里（db.add 在 commit 之前），带 dedupe_key
+    的写入一律 `INSERT … ON CONFLICT (dedupe_key) DO NOTHING`。user_id 不带外键也让日志在
+    用户行将来被删时仍然留得住。保留 ACTIVITY_RETENTION_DAYS 天（K 线每日清扫里顺带分批删）。
+
+    The part of the activity log nothing else records: MT5 bind / unbind, revoked
+    bindings, logins, passwords, email verification, nickname, phone, API-token
+    resets, close-all, result corrections and auto-manage settings (kinds and each
+    one's data keys: services/activity_log.py). Orders, closing deals and admin
+    edits have their own tables; the admin "activity log" page merges those by time
+    at read time rather than duplicating them here.
+
+    Deliberately no foreign keys and unbounded strings: the table is append-only and
+    human-facing, and no column should ever be able to fail a business commit —
+    rows ride the business's own commit (db.add before it), and writes carrying a
+    dedupe_key are always `INSERT … ON CONFLICT (dedupe_key) DO NOTHING`. No FK on
+    user_id also keeps the history if a user row is ever deleted. Kept for
+    ACTIVITY_RETENTION_DAYS days (batched delete in the daily candle sweep).
+    """
+    __tablename__ = "activity_events"
+    __table_args__ = (
+        # 全站按时间倒序的游标翻页 / global newest-first keyset paging
+        Index("idx_activity_events_created", "created_at", "id"),
+        # 按用户筛选 / per-user filter
+        Index("idx_activity_events_user", "user_id", "created_at"),
+        # 有并发抢跑的路径（桥接两条轮询、撤销、一键平仓）靠它只记一次；NULL 不参与唯一性。
+        # Racy writers (two bridge loops, revoke, close-all) record once through this;
+        # NULLs don't take part in uniqueness.
+        Index("uq_activity_events_dedupe", "dedupe_key", unique=True),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    # UTC（不带时区）/ naive UTC
+    created_at = Column(DateTime, nullable=False, default=_now)
+    kind = Column(String, nullable=False)
+    # 'user' / 'system' / 'admin'
+    actor_type = Column(String, nullable=False)
+    actor_id = Column(String, nullable=True)
+    user_id = Column(String, nullable=True)
+    mt5_login = Column(String, nullable=True)
+    # 一键平仓批次号、mt5_accounts.id、订单 id 等 / close-all batch, account id, order id…
+    ref_id = Column(String, nullable=True)
+    # 紧凑 JSON（ensure_ascii=False），不超过 1000 字 / compact JSON, at most 1000 chars
+    data = Column(Text, nullable=True)
+    dedupe_key = Column(String, nullable=True)
 
 
 class PageViewStat(Base):

@@ -23,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import SessionLocal
 from app.models import Candle
 from app.services import shared_cache, shared_state
+from app.services.activity_log import prune_expired as prune_expired_activity
 from app.services.page_stats import prune_visitor_days, purge_admin_visitors
 from app.services.settings_store import get_candle_settings
 
@@ -1467,6 +1468,18 @@ def _run_retention_sweep() -> None:
         purged = purge_admin_visitors(db)
         if purged:
             logger.info("candle_retention_sweep_loop: purged %d admin visitor marker(s)", purged)
+        # 操作日志（activity_events）过了保留期的行，同样搭这趟每日清扫（理由同上）。放在
+        # 最后并单独兜住：它出错不该连累上面的 K 线与统计清理，也不该让这一轮整体报错。
+        # Expired activity-log rows ride the same daily sweep (same reasoning). Last
+        # and separately guarded, so a failure here neither undoes the candle / stats
+        # cleanup above nor fails the whole pass.
+        try:
+            pruned_events = prune_expired_activity(db)
+            if pruned_events:
+                logger.info("candle_retention_sweep_loop: pruned %d expired activity event(s)", pruned_events)
+        except Exception:
+            db.rollback()
+            logger.warning("candle_retention_sweep_loop: activity_events 清理失败", exc_info=True)
     finally:
         db.close()
 

@@ -86,6 +86,13 @@ class _Background:
     def add_task(self, fn, *args, **kwargs):
         self.tasks.append((fn, args, kwargs))
 
+    @property
+    def mails(self):
+        """只看发信任务——找回密码还会排一个写操作日志的后台任务（响应之后才写，见
+        auth._queue_reset_requested）。/ Only the mail tasks; forgot-password also queues
+        an activity-log task after the response."""
+        return [t for t in self.tasks if t[0].__name__ == "send_reset_email"]
+
 
 def _mk_user(db, email="u@example.com", password="original-password"):
     u = User(
@@ -207,7 +214,7 @@ def test_forgot_password_only_queues_mail_for_a_real_user(db_session):
     bg_hit, bg_miss = _Background(), _Background()
     _forgot(request=_Req(), req=ForgotPasswordRequest(email="real@example.com"), background=bg_hit, db=db_session)
     _forgot(request=_Req(), req=ForgotPasswordRequest(email="nobody@example.com"), background=bg_miss, db=db_session)
-    assert len(bg_hit.tasks) == 1
+    assert len(bg_hit.mails) == 1
     assert bg_miss.tasks == []
 
 
@@ -216,14 +223,14 @@ def test_forgot_password_is_case_insensitive_on_the_email(db_session):
     _mk_user(db_session, email="real@example.com")
     bg = _Background()
     _forgot(request=_Req(), req=ForgotPasswordRequest(email="ReAl@Example.COM"), background=bg, db=db_session)
-    assert len(bg.tasks) == 1
+    assert len(bg.mails) == 1
 
 
 def test_forgot_password_never_puts_the_plaintext_token_in_the_response(db_session):
     user = _mk_user(db_session, email="real@example.com")
     bg = _Background()
     out = _forgot(request=_Req(), req=ForgotPasswordRequest(email="real@example.com"), background=bg, db=db_session)
-    raw = bg.tasks[0][1][1]
+    raw = bg.mails[0][1][1]
     assert raw not in out.message
     assert consume_token(db_session, raw).id == user.id
 

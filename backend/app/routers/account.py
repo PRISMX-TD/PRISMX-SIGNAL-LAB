@@ -22,6 +22,7 @@ from app.schemas import PendingCompetitionOut, PhoneRequest, ProfilePatchIn, Use
 from app.services.gamification.conditions import LEVEL_TITLES, level_of
 from app.services.phone import compose_phone
 from app.services.connection_manager import manager
+from app.services import activity_log
 from app.services.agents import is_agent
 from app.services.deps import get_current_user
 from app.services.settings_store import get_gamification_settings
@@ -225,6 +226,18 @@ def _apply_profile_patch(db: Session, user: User, body: ProfilePatchIn) -> User:
             User.nickname_key == key, User.id != user.id).first()
         if taken:
             raise HTTPException(400, "该昵称已被使用 / Nickname already taken")
+        if nick != user.nickname:
+            # 操作日志：只记真改了的（原样重交自己的昵称不算），旧值第一次设时为 None。
+            # 只是 db.add，随下面那次 commit 提交；撞唯一索引走 rollback 时一起作废，
+            # 后面勋章校验 400 时请求不提交，同样不留。
+            # Activity row only for a real change (re-submitting one's own nickname
+            # isn't one); old is None on first set. A plain db.add riding the commit
+            # below: the unique-collision rollback discards it, and so does a later
+            # 400 from the badge checks, since nothing is committed then.
+            activity_log.log_event(
+                db, activity_log.USER_NICKNAME, user_id=user.id, actor_id=user.id,
+                data={"old": user.nickname or None, "new": nick},
+            )
         user.nickname = nick
         user.nickname_key = key
     if "nicknamePublic" in sent and body.nicknamePublic is not None:
@@ -331,6 +344,10 @@ def set_phone(
         )
 
     current_user.phone = phone
+    # 操作日志只记「补录了手机号」这件事，号码本身不进日志（详情页按 users.phone 现查）。
+    # The log records that a phone was set, never the number (the detail view reads
+    # users.phone live).
+    activity_log.log_event(db, activity_log.USER_PHONE_SET, user_id=current_user.id, actor_id=current_user.id)
     db.commit()
     db.refresh(current_user)
 
@@ -398,6 +415,15 @@ def change_password(
             raise HTTPException(status_code=400, detail="需提供旧密码 / old password is required")
         if not verify_password(body.old_password, current_user.password_hash):
             raise HTTPException(status_code=403, detail="旧密码错误 / old password is wrong")
+    # 操作日志：first_set = 原来没有密码（Google 注册的人第一次设），与上面「要不要校验旧
+    # 密码」用同一个判断。必须在下一行覆盖 password_hash 之前取。随下面的 commit 提交。
+    # Activity row: first_set = there was no password before (a Google sign-up
+    # setting one), the same test that decides whether the old password is checked
+    # above. Taken before the next line overwrites password_hash; committed below.
+    activity_log.log_event(
+        db, activity_log.USER_PASSWORD_CHANGED, user_id=current_user.id, actor_id=current_user.id,
+        data={"first_set": not current_user.password_hash},
+    )
     # 设置/修改密码 / set or change password
     current_user.password_hash = hash_password(body.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
