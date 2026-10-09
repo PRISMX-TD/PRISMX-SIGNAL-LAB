@@ -942,3 +942,44 @@ def test_statement_counts_when_page_tail_groups_are_huge(db):
             assert len(scans) == 1 + _EXTEND_FETCHES, (name, table, len(scans))
     print("\nSTATEMENTS_WORST", json.dumps(report))
     assert report["all"] <= _PAGE_SOURCES + 2 * _EXTEND_FETCHES + _PAGE_LOOKUPS
+
+
+def test_unlinked_gateway_account_is_not_tagged_as_auth_lost(db):
+    """用户自己解绑的直连账户只算「已解绑」，不能再挂「授权失效」；真改了密码的才挂。
+
+    mark_removed 也写 revoked_at，gateway_binding.is_revoked 对它同样返回 True——上线首日
+    MT5 绑定页签里 36 条补录解绑全被误标成授权失效（2026-10-09）。列表与详情两处都要对。
+    A user-unlinked gateway account is 已解绑 only; 授权失效 is for a broker-side
+    password change. mark_removed sets revoked_at too, so is_revoked alone mis-tagged
+    every backfilled unlink on launch day. Both the list and the detail must agree.
+    """
+    admin = _user(db, "admin@t.co", role="admin")
+    u = _user(db, "trader@t.co")
+    gone = _acc(db, u, "100552", trade_mode=0, revoked_at=T0 - timedelta(hours=2),
+                revoked_reason="user_removed")
+    lost = _acc(db, u, "100553", trade_mode=0, revoked_at=T0 - timedelta(hours=1),
+                revoked_reason="password_changed", pass_change_at=123)
+    live = _acc(db, u, "100554", trade_mode=0)
+    _event(db, al.MT5_UNBIND, u, at=T0 - timedelta(hours=2), login="100552",
+           data={"ch": "gateway", "name": "x", "bf": 1}, ref=gone.id)
+    _event(db, al.MT5_REVOKED, u, at=T0 - timedelta(hours=1), login="100553",
+           data={"reason": "password_changed"}, actor_type="system", ref=lost.id)
+    _event(db, al.MT5_BIND, u, at=T0, login="100554",
+           data={"ch": "gateway", "revived": False, "name": "x", "demo": True, "bal": 1.0, "server": ""},
+           ref=live.id)
+
+    c = _client(db)
+    r = c.get("/api/admin/activity", params={"cat": "mt5"}, headers=_auth(admin))
+    assert r.status_code == 200
+    by_login = {it["login"]: it for it in r.json()["items"]}
+    assert by_login["100552"]["account"]["removed"] is True
+    assert by_login["100552"]["account"]["revoked"] is False
+    assert by_login["100553"]["account"]["removed"] is False
+    assert by_login["100553"]["account"]["revoked"] is True
+    assert by_login["100554"]["account"]["removed"] is False
+    assert by_login["100554"]["account"]["revoked"] is False
+
+    d = c.get("/api/admin/activity/item", params={"key": by_login["100552"]["key"]}, headers=_auth(admin))
+    assert d.status_code == 200
+    assert d.json()["account"]["removed"] is True
+    assert d.json()["account"]["revoked"] is False

@@ -2492,6 +2492,20 @@ def _finalize(p: _Proto, ctx: _Ctx, *, child: bool = False) -> dict | None:
     return _item(p, ctx, None)
 
 
+def _auth_lost(acc) -> bool:
+    """账户列「授权失效」标签：券商侧改了密码、平台暂停用它下单（gateway 撤销且不是用户自己解绑）。
+
+    gateway_binding.is_revoked 对「用户解绑」的直连行同样返回 True（mark_removed 也写
+    revoked_at），它回答的是「这条绑定还能不能下单」。日志里两件事要分开说：解绑的显示
+    「已解绑」，只有真的授权失效才显示「授权失效」——否则每个解绑过的直连账户都会被误标。
+    The account cell's 授权失效 tag: a gateway binding revoked because the broker-side
+    password changed. is_revoked is also True for user-removed gateway rows (mark_removed
+    sets revoked_at too) — it answers "can this binding trade" — so on its own it would
+    tag every unlinked gateway account as revoked.
+    """
+    return is_revoked(acc) and not is_removed(acc)
+
+
 def _item(p: _Proto, ctx: _Ctx, children: list | None) -> dict:
     actor_type = p.actor_type
     if actor_type == "role":
@@ -2511,7 +2525,7 @@ def _item(p: _Proto, ctx: _Ctx, children: list | None) -> dict:
                 "channel": acc.source if acc.source in ("gateway", "bridge") else None,
                 "demo": al.demo_of(acc.trade_mode),
                 "removed": is_removed(acc),
-                "revoked": is_revoked(acc),
+                "revoked": _auth_lost(acc),
             }
     params = {k: v for k, v in p.params.items() if not k.startswith("_")}
     return {
@@ -3022,7 +3036,7 @@ def get_item(
                 "channel": acc.source if acc.source in ("gateway", "bridge") else None,
                 "demo": al.demo_of(acc.trade_mode),
                 "removed": is_removed(acc),
-                "revoked": is_revoked(acc),
+                "revoked": _auth_lost(acc),
                 "online": bool(is_account_online(acc)),
                 "server": acc.server or None,
                 "name": acc.account_name or None,
