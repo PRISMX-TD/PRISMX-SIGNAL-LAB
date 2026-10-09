@@ -3929,7 +3929,7 @@
       "close": "Close",
       "trade": {
         "title": "Unlock this {{symbol}} signal",
-        "subPro": "Entry, stop loss and take profit are ready. Sign up for a free {{days}}-day PRO trial to see them now and trade in one tap via MT5.",
+        "subPro": "Entry, stop loss and take profit are ready. Sign up to unlock PRO instantly — see them now and trade in one tap via MT5.",
         "subFree": "Live signals are a PRO feature. Sign up free to see full prices and outcomes once signals expire, and upgrade any time for live access.",
         "expires": "left",
         "fomo": "After it expires, only the result is left"
@@ -3990,7 +3990,7 @@
       "offerInvite": "Sign up via this link for {{days}} days of PRO",
       "offerNote": "Eligible users keep it free, permanently",
       "cta": "Sign up free",
-      "ctaPro": "Sign up free & start PRO trial",
+      "ctaPro": "Sign up free & unlock PRO",
       "ctaNote": "No credit card · 30-second sign-up",
       "login": "Have an account? Log in",
       "learnMore": "About Signal Lab",

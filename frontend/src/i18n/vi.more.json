@@ -2041,7 +2041,7 @@
       "close": "Đóng",
       "trade": {
         "title": "Mở khóa tín hiệu {{symbol}} này",
-        "subPro": "Điểm vào, cắt lỗ và chốt lời đã được tính sẵn. Đăng ký nhận {{days}} ngày dùng thử PRO miễn phí để xem ngay và đặt lệnh một chạm qua MT5.",
+        "subPro": "Điểm vào, cắt lỗ và chốt lời đã được tính sẵn. Đăng ký để mở khóa quyền PRO ngay, xem liền và đặt lệnh một chạm qua MT5.",
         "subFree": "Tín hiệu thời gian thực là tính năng PRO. Đăng ký miễn phí để xem đầy đủ giá và kết quả sau khi tín hiệu hết hạn, nâng cấp bất cứ lúc nào.",
         "expires": "nữa là hết hạn",
         "fomo": "Hết hạn rồi thì chỉ còn xem kết quả"
@@ -2102,7 +2102,7 @@
       "offerInvite": "Đăng ký qua liên kết này để mở PRO {{days}} ngày",
       "offerNote": "Đủ điều kiện là được dùng miễn phí vĩnh viễn",
       "cta": "Đăng ký miễn phí",
-      "ctaPro": "Đăng ký miễn phí & dùng thử PRO",
+      "ctaPro": "Đăng ký miễn phí & mở khóa PRO",
       "ctaNote": "Không cần thẻ tín dụng · Đăng ký trong 30 giây",
       "login": "Đã có tài khoản? Đăng nhập",
       "learnMore": "Về Signal Lab",
