@@ -30,8 +30,9 @@ from app.services import gateway_client, shared_state
 from app.services.background import request_restart as request_loop_restart
 from app.services.gamification.competitions import refresh_comp_board
 from app.core.database import SessionLocal
-from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminGuestPreviewIn, AdminGuestPreviewOut, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
+from app.services.guest_preview import funnel_rows as guest_preview_funnel_rows
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
 from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.services.admin_overview import build_overview, potential_customers as build_potential_customers
@@ -42,6 +43,7 @@ from app.services.settings_store import (
     get_broker_settings,
     get_candle_settings,
     get_email_gate_settings,
+    get_guest_preview_settings,
     get_platform_strategies,
     get_pricing_settings,
     get_social_settings,
@@ -51,6 +53,7 @@ from app.services.settings_store import (
     get_winrate_settings,
     invalidate_candle_cache,
     invalidate_email_gate_cache,
+    invalidate_guest_preview_cache,
     invalidate_platform_strategies_cache,
     invalidate_pricing_cache,
     invalidate_settings_cache,
@@ -61,6 +64,7 @@ from app.services.settings_store import (
     invalidate_winrate_settings_cache,
     save_candle_settings,
     save_email_gate_settings,
+    save_guest_preview_settings,
     save_platform_strategies,
     save_pricing_settings,
     save_social_settings,
@@ -1283,6 +1287,39 @@ def put_social(
     db.commit()
     invalidate_social_cache()
     return get_social(db, admin)
+
+
+# ---------- 游客预览 / guest preview ----------
+
+@router.get("/guest-preview", response_model=AdminGuestPreviewOut)
+def get_guest_preview(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """游客预览开关 + 近 30 天首页漏斗（两种模式各自的访问 / 弹窗 / 点注册 / 注册成功）。
+    The guest-preview switch plus 30 days of home-page funnel counters for both modes."""
+    return AdminGuestPreviewOut(
+        enabled=get_guest_preview_settings(db)["enabled"],
+        funnel=guest_preview_funnel_rows(db),
+    )
+
+
+@router.put("/guest-preview", response_model=AdminGuestPreviewOut)
+def put_guest_preview(
+    body: AdminGuestPreviewIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """打开 / 关闭游客预览。关掉后首页立即回到落地页，预览接口随之 404。
+    Turn the guest preview on / off. Off sends the home page back to the landing page at
+    once and the preview endpoints start returning 404."""
+    old = get_guest_preview_settings(db)
+    data = {"enabled": body.enabled}
+    save_guest_preview_settings(db, data)
+    _log_settings_diff(db, admin.id, "guest_preview", old, data)
+    db.commit()
+    invalidate_guest_preview_cache()
+    return get_guest_preview(db, admin)
 
 
 # ---------- K 线历史保留策略设置 / candle-history retention settings ----------

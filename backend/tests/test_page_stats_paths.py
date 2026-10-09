@@ -63,6 +63,8 @@ UNTRACKED_ROUTES = {
     # 这套机制根本记不了。要统计落地页得另做一套匿名埋点，是另一件事。
     "/": "落地页，未登录可访问",
     "/en": "落地页英文版，未登录可访问",
+    "/intro": "落地页的固定地址（游客预览开着时首页换成带锁的仪表盘），未登录可访问；首页两种模式的匿名漏斗由 /api/public/preview/event 统计 (guest_preview_funnel_daily)",
+    "/en/intro": "同 /intro，英文版",
     "/login": "登录页，未登录",
     "/terms": "法务页，未登录可访问",
     "/privacy": "法务页，未登录可访问",

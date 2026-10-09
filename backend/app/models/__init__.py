@@ -1740,6 +1740,27 @@ class PromoFunnelDaily(Base):
     count = Column(Integer, nullable=False, default=0)
 
 
+class GuestPreviewFunnelDaily(Base):
+    """游客预览漏斗的按天计数（rev 39）：首页两种模式（preview = 带锁的仪表盘，landing =
+    原落地页）各自的 view / gate / cta / signup，按 (天, 模式, 步骤) 累加，不记录是谁——
+    同 PromoFunnelDaily 的「无身份」取舍。模式与步骤都走白名单，任意字符串造不出行。
+    Daily guest-preview funnel counters (rev 39): view / gate / cta / signup for each home
+    mode (preview = the locked dashboard, landing = the old landing page), keyed by
+    (day, mode, step) with no identity — same trade-off as PromoFunnelDaily. Both mode and
+    step are allow-listed, so arbitrary strings can't mint rows.
+    """
+    __tablename__ = "guest_preview_funnel_daily"
+    __table_args__ = (
+        UniqueConstraint("day", "mode", "step", name="uq_guest_preview_funnel_day_mode_step"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    day = Column(String, nullable=False)    # 'YYYY-MM-DD'（UTC）
+    mode = Column(String, nullable=False)   # preview / landing
+    step = Column(String, nullable=False)   # view / gate / cta / signup
+    count = Column(Integer, nullable=False, default=0)
+
+
 class PasswordResetToken(Base):
     """找回密码的一次性令牌。
 

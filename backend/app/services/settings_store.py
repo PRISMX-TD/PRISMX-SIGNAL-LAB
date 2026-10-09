@@ -632,6 +632,54 @@ def save_social_settings(db, data: dict) -> None:
     set_setting(db, "social", merged)
 
 
+# 游客预览（2026-10-09）：开着时，未登录访客打开首页看到的是带锁的仪表盘（价位抹除、
+# 点任何操作弹注册），落地页挪到 /intro；关着就是原来的落地页。默认关，上线后由管理员
+# 在「运营设置」里打开——部署本身不改变任何访客看到的东西。
+# Guest preview (2026-10-09): on, a logged-out visitor's home page is the locked dashboard
+# (prices stripped, every action opens sign-up) and the landing page moves to /intro; off,
+# the old landing page. Off by default and flipped by an admin in Ops settings — deploying
+# changes nothing any visitor sees.
+GUEST_PREVIEW_DEFAULTS: dict = {
+    "enabled": False,
+}
+
+_guest_preview_cache = _TtlCache()
+
+
+def invalidate_guest_preview_cache() -> None:
+    _guest_preview_cache.invalidate()
+
+
+def _load_guest_preview_from_db(db) -> dict:
+    """读游客预览设置；enabled 只认真正的 JSON 布尔，坏值回落默认（关）。
+    Read the guest-preview settings; enabled must be a real JSON boolean, anything else
+    falls back to the default (off)."""
+    data = dict(GUEST_PREVIEW_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "guest_preview").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict) and isinstance(stored.get("enabled"), bool):
+                data["enabled"] = stored["enabled"]
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for guest_preview, using defaults")
+    return data
+
+
+def get_guest_preview_settings(db) -> dict:
+    """读取游客预览设置（独立缓存）。/ Read the guest-preview settings (own cache)."""
+    data = _guest_preview_cache.get(db, _load_guest_preview_from_db)
+    return dict(data)
+
+
+def save_guest_preview_settings(db, data: dict) -> None:
+    """写入游客预览设置（不提交，调用方 commit 后 invalidate）。
+    Write the guest-preview settings (no commit; caller commits then invalidates)."""
+    merged = _load_guest_preview_from_db(db)
+    merged.update(data)
+    set_setting(db, "guest_preview", merged)
+
+
 def server_matches_broker(server: str | None, patterns: list) -> bool:
     """MT5 服务器名是否命中任一关键字（大小写不敏感的包含匹配）。
     服务器名缺失一律视为不匹配——无法验证来源就不放行。

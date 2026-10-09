@@ -19,7 +19,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, public_competitions, sentiment, share, signals, site, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -428,6 +428,7 @@ app.include_router(competitions.admin_router, prefix=settings.API_PREFIX, depend
 # Public competition pages: readable without login (design §3.1), deliberately no
 # user dependency; the router enforces visibility itself.
 app.include_router(public_competitions.router, prefix=settings.API_PREFIX)
+app.include_router(public_preview.router, prefix=settings.API_PREFIX)
 app.include_router(announcements.router, prefix=settings.API_PREFIX)
 app.include_router(announcements.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(emails.router, prefix=settings.API_PREFIX)

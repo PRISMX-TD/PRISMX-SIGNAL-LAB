@@ -267,6 +267,13 @@ class Settings(BaseSettings):
     # cached for 20s, so this only stops pathological hammering; 300 because an ad
     # landing can put many real people behind one egress IP (office, carrier NAT).
     RATE_LIMIT_COMPETITION_PUBLIC: str = "300/minute"
+    # 游客预览（未登录首页的带锁仪表盘）：两个 GET 共用一个按 IP 的计数。页面每 4 秒轮询
+    # 一次（每人约 15 次 / 分钟），快照有 3 秒共享缓存，回源量与访客数无关；600 留给同一
+    # 出口 IP 后面的几十个真人（广告落地、公司网、运营商 NAT）。
+    # Guest preview (the locked logged-out dashboard): both GETs share one per-IP counter.
+    # The page polls every 4s (~15/min per visitor) against a 3s shared cache, so origin load
+    # doesn't grow with visitors; 600 leaves room for dozens of people behind one egress IP.
+    RATE_LIMIT_GUEST_PREVIEW: str = "600/minute"
     # 工单图片上传：按用户。任何注册用户都能调这个端点往存储桶里写文件，日上限是为了
     # 别让一个账号把桶当网盘；正常提工单一天传不到十几张。
     # Ticket image uploads, per user. Any registered user can write to the bucket

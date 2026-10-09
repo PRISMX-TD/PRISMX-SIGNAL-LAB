@@ -331,7 +331,10 @@ def _hash_legacy_api_tokens() -> None:
 #          ON CONFLICT DO NOTHING，重跑不重复；补录失败只告警、不挡启动（见
 #          _backfill_activity_events）。同一版起 init_db 整段放进 Postgres 咨询锁
 #          （_migration_lock），两个 worker 不再同时跑 DDL 互撞（这类竞争以前每次改 schema 都有）。
-CURRENT_SCHEMA_REV = 38
+# rev 39 — 游客预览（2026-10-09）：新表 guest_preview_funnel_daily（首页两种模式的按天漏斗
+#          计数）。同 rev 20 / 21：全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为
+#          让老库启动时走一次完整迁移而不是快速通道。
+CURRENT_SCHEMA_REV = 39
 
 _SCHEMA_REV_KEY = "schema_rev"
 

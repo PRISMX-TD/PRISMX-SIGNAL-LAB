@@ -1847,6 +1847,32 @@ class PublicCompEventIn(BaseModel):
     ref: str | None = Field(default=None, max_length=64)
 
 
+class GuestPreviewEventIn(BaseModel):
+    """游客预览漏斗打点。同 PublicCompEventIn：只限长度，坏值在服务层静默丢弃，接口永远 204。
+    Guest-preview funnel event. Like PublicCompEventIn: lengths only, bad values are
+    dropped in the service and the endpoint is always 204."""
+    mode: str = Field(max_length=16)
+    step: str = Field(max_length=16)
+
+
+class GuestPreviewFunnelRow(BaseModel):
+    day: str
+    mode: str
+    step: str
+    count: int
+
+
+class AdminGuestPreviewOut(BaseModel):
+    """管理端「游客预览」：开关 + 近 30 天漏斗计数（按天、模式、步骤）。
+    Admin guest preview: the switch plus 30 days of funnel counters."""
+    enabled: bool
+    funnel: list[GuestPreviewFunnelRow]
+
+
+class AdminGuestPreviewIn(BaseModel):
+    enabled: bool
+
+
 class InviteLinkCreate(BaseModel):
     label: str = Field(min_length=1, max_length=64)
     # 渠道标签（自由文本，管理端给建议值）；空白当未填。/ Free-text channel tag; blank = none.

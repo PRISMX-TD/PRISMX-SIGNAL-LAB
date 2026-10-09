@@ -122,8 +122,10 @@ def _events(eng):
     return [dict(r) for r in rows]
 
 
-def test_schema_rev_is_38():
-    assert db_mod.CURRENT_SCHEMA_REV == 38
+def test_schema_rev_is_at_least_38():
+    # 后续版本只会往上加（rev 39 游客预览漏斗表）；这里守的是「操作日志那一版已在」。
+    # Later revs only add on top (rev 39: guest-preview funnel table).
+    assert db_mod.CURRENT_SCHEMA_REV >= 38
 
 
 def test_fresh_database_gets_table_columns_and_indexes(monkeypatch, tmp_path):
@@ -145,7 +147,7 @@ def test_fresh_database_gets_table_columns_and_indexes(monkeypatch, tmp_path):
     assert ev_idx["uq_activity_events_dedupe"] == (["dedupe_key"], True)
     for table, (name, cols) in _NEW_INDEXES.items():
         assert _indexes(eng, table)[name] == (cols, False)
-    assert db_mod._read_schema_rev() == 38
+    assert db_mod._read_schema_rev() == db_mod.CURRENT_SCHEMA_REV
     assert _events(eng) == []          # 空库没什么可补 / nothing to backfill
     eng.dispose()
 
@@ -165,7 +167,7 @@ def test_rev37_database_is_upgraded_and_backfilled(legacy_engine):
         assert conn.execute(text(
             "SELECT COUNT(*) FROM orders WHERE prev_sl IS NOT NULL OR prev_tp IS NOT NULL "
             "OR pos_volume IS NOT NULL")).scalar_one() == 0
-    assert db_mod._read_schema_rev() == 38
+    assert db_mod._read_schema_rev() == db_mod.CURRENT_SCHEMA_REV
 
     evs = {e["dedupe_key"]: e for e in _events(eng)}
     assert set(evs) == {
@@ -207,7 +209,7 @@ def test_backfill_is_idempotent(legacy_engine):
     assert al.backfill_activity_events(legacy_engine) == {"close_all": 0, "unbind": 0, "revoked": 0}
     after = _events(legacy_engine)
     assert [e["dedupe_key"] for e in after] == [e["dedupe_key"] for e in before]
-    assert db_mod._read_schema_rev() == 38
+    assert db_mod._read_schema_rev() == db_mod.CURRENT_SCHEMA_REV
 
 
 def test_backfill_matches_runtime_keys_and_skips_known_accounts(legacy_engine):
@@ -254,5 +256,5 @@ def test_backfill_failure_does_not_block_startup(legacy_engine, monkeypatch, cap
     monkeypatch.setattr(al, "backfill_activity_events", boom)
     with caplog.at_level(logging.WARNING, logger="prismx.database"):
         db_mod.init_db()                      # 不抛 / no raise
-    assert db_mod._read_schema_rev() == 38
+    assert db_mod._read_schema_rev() == db_mod.CURRENT_SCHEMA_REV
     assert "操作日志历史补录失败" in caplog.text

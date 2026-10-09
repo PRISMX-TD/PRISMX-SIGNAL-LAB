@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.services.settings_store import get_social_settings
+from app.services.settings_store import get_guest_preview_settings, get_social_settings
 
 router = APIRouter(prefix="/site", tags=["site"])
 
@@ -44,3 +44,15 @@ def get_social_links(db: Session = Depends(get_db)):
         "telegram": s["telegram_url"],
     }
     return {k: v for k, v in mapping.items() if v}
+
+
+@router.get("/config", response_model=dict)
+def get_site_config(db: Session = Depends(get_db)):
+    """首页该给未登录访客看什么：guestPreview 为真 = 带锁的仪表盘，否则落地页。
+    前端把上一次的结果存在本地，下一次打开首页立即按它渲染、后台再刷新，所以这条请求
+    不在首屏的关键路径上。
+    What the home page shows a logged-out visitor: guestPreview true = the locked dashboard,
+    otherwise the landing page. The client caches the last answer and renders from it at
+    once while refreshing in the background, keeping this off the first paint's path.
+    """
+    return {"guestPreview": bool(get_guest_preview_settings(db)["enabled"])}
