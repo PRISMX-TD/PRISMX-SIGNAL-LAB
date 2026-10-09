@@ -2399,3 +2399,134 @@ export interface CompetitionIntegrity {
   flags: CompetitionIntegrityFlag[]
   pairs: CompetitionIntegrityPair[]
 }
+
+// ---- 管理后台「操作日志」（设计 2026-10-09 §5–6）/ admin activity log ----
+// 形状的唯一事实来源是契约文档 docs/superpowers/specs/2026-10-09-admin-activity-log-contract.md
+// （后端 services/activity_feed.py 生成）。键名是后端原样的 snake_case——这两个端点回的是
+// dict，不走任何 camelCase 转换。kind 在这里只写 string：53 种 kind 的清单和逐个拼句放在
+// components/admin/activity/renderEvent.ts，那里用 Record<ActivityKind, …> 保证一个不漏；
+// 写进本文件会把 'admin.email' 这类字面量带进入口包的模块闭包（i18n.test 会把它当成在引用
+// admin.email.* 那批按需键）。
+// The single source of truth for these shapes is the contract doc (generated from the
+// backend's services/activity_feed.py). Keys stay snake_case exactly as the backend sends
+// them — both endpoints return plain dicts with no camelCase conversion. `kind` is a plain
+// string here; the 53-kind list and the per-kind sentences live in
+// components/admin/activity/renderEvent.ts, whose Record<ActivityKind, …> keeps the list
+// exhaustive. Putting the literals here would drag strings like 'admin.email' into the
+// entry bundle's module closure, where i18n.test reads them as references to the
+// on-demand admin.email.* keys.
+export type ActivityCat = 'account' | 'mt5' | 'trade' | 'admin'
+export type ActivityCatFilter = 'all' | ActivityCat
+export type ActivitySub = 'all' | 'open_close' | 'sltp'
+export type ActivityStatus = 'ok' | 'fail' | 'unknown' | 'pending' | 'cancelled'
+export type ActivityTag =
+  'unprotected' | 'stopout' | 'revoked' | 'late' | 'backfill' | 'shared_login' | 'partial' | 'gone' | 'auto'
+export type ActivityActorType = 'self' | 'system' | 'auto' | 'broker' | 'admin' | 'agent'
+
+export interface ActivityPerson {
+  id: string
+  nickname: string | null
+  // 只有用户行被删掉这种极端情况才会是 null / null only when the user row itself is gone
+  email: string | null
+}
+
+export interface ActivityActor {
+  type: ActivityActorType
+  // 只有 admin / agent 带 id、name（昵称，可能为 null）、email；其余恒 null
+  // Only admin / agent carry id, name (nickname, may be null) and email
+  id: string | null
+  name: string | null
+  email: string | null
+}
+
+export interface ActivityAccountState {
+  channel: 'gateway' | 'bridge' | null
+  // true 模拟·比赛 / false 实盘 / null 未判定 / true demo or contest, false live, null unknown
+  demo: boolean | null
+  removed: boolean
+  revoked: boolean
+}
+
+export interface ActivityItem {
+  // u: / e: / o: / t: / d: / s: / a: / g: 前缀，也是 /item 的参数 / prefixed key, also the /item argument
+  key: string
+  // 记录时间（排序键），UTC，恒为 YYYY-MM-DDTHH:MM:SS.ffffffZ / record time (sort key), UTC
+  ts: string
+  // 只有 deal.* 有：MT5 成交时间 / deal.* only: the MT5 fill time
+  at: string | null
+  cat: ActivityCat
+  kind: string
+  // 每个 kind 一组固定的键，值已解析；缺的键一律按 null 处理（契约 §2.1「容错」）
+  // A fixed key set per kind, already parsed; a missing key reads as null (contract §2.1)
+  params: Record<string, unknown>
+  status: ActivityStatus
+  tags: ActivityTag[]
+  abnormal: boolean
+  actor: ActivityActor
+  user: ActivityPerson | null
+  // 只有 admin.bulk_edit 有值 / only admin.bulk_edit carries a count
+  users_count: number | null
+  login: string | null
+  account: ActivityAccountState | null
+  children: ActivityItem[] | null
+}
+
+export interface ActivityPage {
+  items: ActivityItem[]
+  // null = 到底了。不返回总数 / null = no more pages; there is no total
+  next: string | null
+}
+
+export interface ActivityQuery {
+  cat?: ActivityCatFilter
+  sub?: ActivitySub
+  abnormal?: boolean
+  q?: string
+  userId?: string
+  login?: string
+  // UTC ISO，左闭右开 / UTC ISO, half-open [since, until)
+  since?: string
+  until?: string
+  cursor?: string
+  limit?: number
+}
+
+export interface ActivityDetailUser {
+  id: string
+  nickname: string | null
+  email: string | null
+  // 完整手机号只在详情里给 / the full phone number is only in the detail
+  phone: string | null
+  plan: string | null
+  plan_expires_at: string | null
+  role: string | null
+  created_at: string | null
+}
+
+export interface ActivityDetailAccount {
+  login: string
+  channel: 'gateway' | 'bridge' | null
+  demo: boolean | null
+  removed: boolean
+  revoked: boolean
+  online: boolean | null
+  server: string | null
+  name: string | null
+  holders: ActivityPerson[]
+}
+
+export interface ActivityPosition {
+  ticket: number
+  // 按发生时间正序 / oldest first
+  steps: ActivityItem[]
+  total_pnl: number | null
+}
+
+export interface ActivityDetail {
+  item: ActivityItem
+  user: ActivityDetailUser | null
+  account: ActivityDetailAccount | null
+  // 源行原始字段（契约 §5）/ the source row's raw fields (contract §5)
+  raw: Record<string, unknown>
+  position: ActivityPosition | null
+}

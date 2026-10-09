@@ -989,6 +989,7 @@
       "data": "Dashboard",
       "winrate": "Publication",
       "users": "Users",
+      "logs": "Activity log",
       "invites": "Invite Links",
       "ops": "Operations",
       "system": "System",
@@ -999,6 +1000,802 @@
       "gamification": "Gamification",
       "competitions": "Competitions",
       "health": "System status"
+    },
+    "log": {
+      "title": "Activity log",
+      "subtitle": "Sign-ups, MT5 links, trades, stops and targets, admin actions — one line each; open a row for details.",
+      "tz": "All times are Beijing time (UTC+8)",
+      "userRowBtn": "Log",
+      "userRowBtnHint": "Open this user's activity log",
+      "cat": {
+        "all": "All",
+        "account": "Account",
+        "mt5": "MT5 links",
+        "trade": "Trading",
+        "admin": "Admin"
+      },
+      "sub": {
+        "all": "All",
+        "open_close": "Open / close",
+        "sltp": "Stops & targets"
+      },
+      "abnormal": "Problems only",
+      "abnormalHint": "Failed or unknown outcomes, missing stops, stop-outs, revoked access, refunds, disabled accounts, corrections",
+      "date": {
+        "label": "Date",
+        "all": "Any date",
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "week": "Last 7 days",
+        "day": "Pick a day"
+      },
+      "search": "Email / nickname / phone / MT5 login",
+      "searchHint": "5–12 digits search MT5 logins first, then phone numbers when no account has that login",
+      "searchDigits": "Digits search MT5 logins first, then phone numbers when no account has that login; for a phone number the “+” and country code are most precise, e.g. +60123456789",
+      "chip": {
+        "user": "User: {{name}}",
+        "login": "MT5: {{login}}",
+        "q": "Search: {{q}}",
+        "qLogin": "MT5 login / phone search: {{q}}",
+        "abnormal": "Problems only",
+        "remove": "Remove this filter",
+        "clearAll": "Clear all filters"
+      },
+      "refresh": "Refresh",
+      "refreshing": "Refreshing…",
+      "updated": "Updated {{time}}",
+      "autoRefresh": "Auto-refresh",
+      "autoRefreshHint": "Refreshes every 60 seconds. While the page is in the background, scrolled down or a detail is open, the list stays put and only shows “new records”.",
+      "newRecords": "New records ↑",
+      "filters": "Filters",
+      "filtersCount": "Filters · {{n}}",
+      "filtersDone": "Done",
+      "col": {
+        "time": "Time",
+        "user": "User",
+        "account": "MT5 account",
+        "actor": "By",
+        "what": "What happened"
+      },
+      "loadMore": "Load more",
+      "loadingMore": "Loading…",
+      "shown": "Showing {{n}}",
+      "end": "That's everything",
+      "empty": "No matching records",
+      "emptyHint": "Try another category or date, or clear the filters.",
+      "emptyLogin": "No records for MT5 login or phone number {{q}}",
+      "phoneHits": "These users' phone numbers match — tap one to see their log:",
+      "phoneTip": "To search a phone number, add the “+” and country code, e.g. +8613800138000 or +60123456789.",
+      "loadError": "Couldn't load the activity log",
+      "retry": "Retry",
+      "expand": "Show {{n}} ▾",
+      "collapse": "Hide ▴",
+      "day": {
+        "today": "Today",
+        "yesterday": "Yesterday",
+        "md": "{{wd}} {{d}} {{mon}}",
+        "ymd": "{{wd}} {{d}} {{mon}} {{y}}",
+        "weekday": {
+          "0": "Sun",
+          "1": "Mon",
+          "2": "Tue",
+          "3": "Wed",
+          "4": "Thu",
+          "5": "Fri",
+          "6": "Sat"
+        },
+        "month": {
+          "1": "Jan",
+          "2": "Feb",
+          "3": "Mar",
+          "4": "Apr",
+          "5": "May",
+          "6": "Jun",
+          "7": "Jul",
+          "8": "Aug",
+          "9": "Sep",
+          "10": "Oct",
+          "11": "Nov",
+          "12": "Dec"
+        }
+      },
+      "user": {
+        "platform": "— (platform setting)",
+        "count_one": "{{count}} user",
+        "count_other": "{{count}} users",
+        "noEmail": "(deleted user)",
+        "filterHint": "Only this user"
+      },
+      "acct": {
+        "gateway": "Direct",
+        "bridge": "Bridge",
+        "demo": "Demo",
+        "live": "Live",
+        "removed": "Unlinked",
+        "revoked": "Access revoked",
+        "filterHint": "Only this account"
+      },
+      "actor": {
+        "self": "User",
+        "system": "System",
+        "auto": "Auto-manage",
+        "broker": "Broker (MT5)",
+        "admin": "Admin {{name}}",
+        "agent": "Agent {{name}}",
+        "adminAnon": "Admin",
+        "agentAnon": "Agent"
+      },
+      "status": {
+        "ok": "Succeeded",
+        "fail": "Failed",
+        "unknown": "Outcome unknown",
+        "pending": "Pending",
+        "cancelled": "Withdrawn"
+      },
+      "tag": {
+        "unprotected": "No stop loss",
+        "stopout": "Stop-out",
+        "revoked": "Access revoked",
+        "late": "Recorded late",
+        "backfill": "Backfilled",
+        "shared_login": "Shared account",
+        "partial": "Partial close",
+        "gone": "Position gone",
+        "auto": "Auto"
+      },
+      "limits": {
+        "title": "What this page can't show",
+        "l1": "Trades opened, stops or targets changed, pending orders triggered, and deposits or withdrawals made directly in MT5 don't appear here. Closes made in MT5 do (including stop / target hits, stop-outs and mobile closes).",
+        "l2": "Link / unlink history starts on the release day; accounts unlinked before that only have their last unlink, marked “Backfilled”.",
+        "l3": "The “previous stop loss” comes from the platform's position snapshot 1–2 seconds earlier and may be off if the user just changed it in MT5; changes from before the release only say “stop loss changed to X”.",
+        "l4": "Close P/L waits for the fill to come back (usually 1–2 seconds, at worst a few days); until then it shows “P/L still syncing”.",
+        "l5": "Status is read live: an instruction first shown as “outcome unknown” and later confirmed filled simply turns filled, usually with a separate “correction” line (in rare cases confirmed during the timeout sweep, the line just turns filled with no correction).",
+        "l6": "Admin vs agent is decided by the operator's current role.",
+        "l7": "Amounts are in the account currency with no symbol; cent accounts show numbers 100× larger.",
+        "l8": "Sign-ins, password changes and email verifications from before the release have no history; IP addresses are not recorded."
+      },
+      "detail": {
+        "title": "Record details",
+        "loading": "Loading details…",
+        "loadError": "Couldn't load the details",
+        "basic": "Basics",
+        "kind": "Type",
+        "occurredAt": "Happened at",
+        "dealAt": "MT5 fill time",
+        "recordedAt": "Recorded at",
+        "user": "User",
+        "nickname": "Nickname",
+        "email": "Email",
+        "phone": "Phone",
+        "plan": "Plan",
+        "planUntil": "{{plan}}, until {{d}}",
+        "planDays": "{{plan}}, {{days}} days",
+        "role": "Role",
+        "registered": "Signed up",
+        "account": "MT5 account",
+        "channel": "Connection",
+        "accountType": "Account type",
+        "state": "State",
+        "normal": "Active",
+        "online": "Online",
+        "offline": "Offline",
+        "server": "Server",
+        "accName": "Account name",
+        "holders": "Linked to",
+        "actor": "By",
+        "source": "Source",
+        "src": {
+          "SIG": "From a signal",
+          "STRAT": "Personal strategy",
+          "CHART": "Chart / manual"
+        },
+        "result": "Result",
+        "brokerMsg": "Broker / gateway message",
+        "orderNo": "Order no.",
+        "positionNo": "Position no.",
+        "dealNo": "Deal no.",
+        "batch": "Close-all batch",
+        "currencyNote": "Amounts are in the account currency with no symbol; cent accounts show numbers 100× larger.",
+        "timeline": "This position, step by step",
+        "totalPnl": "Total P/L",
+        "changes": "Before / after",
+        "field": "Field",
+        "before": "Before",
+        "after": "After",
+        "target": "For",
+        "children": "Breakdown",
+        "raw": "Raw fields",
+        "onlyUser": "Only this user",
+        "onlyAccount": "Only this account",
+        "openUser": "Open user profile"
+      },
+      "sep": " — ",
+      "comma": ", ",
+      "semi": "; ",
+      "list": ", ",
+      "q": "“{{v}}”",
+      "x": {
+        "lots": "{{v}} lots",
+        "filled": "filled at {{px}}",
+        "sl": "stop loss {{v}}",
+        "tp": "take profit {{v}}",
+        "trigger": "trigger {{v}}",
+        "triggerTo": "trigger moved to {{v}}",
+        "pnl": "P/L",
+        "totalPnl": "total P/L",
+        "pnlPending": "P/L still syncing",
+        "somePnlPending": "some P/L still syncing",
+        "balance": "balance {{v}}",
+        "until": "until {{d}}",
+        "expiryChange": "expiry {{a}} → {{b}}",
+        "viaLink": "via invite link {{v}}",
+        "agentLink": "agent link {{v}}",
+        "gotTrial": "got a {{days}}-day {{plan}} trial",
+        "gotTrialNoDays": "got a {{plan}} trial",
+        "newSource": "from a new device or network",
+        "paren": " ({{v}})",
+        "note": {
+          "user_cancelled": " (withdrawn before it was sent)",
+          "timeout": " (timed out, cancelled automatically)",
+          "timeout_unknown": " (timed out — outcome unknown, check positions)"
+        },
+        "src": {
+          "SIG": " (from a signal)",
+          "STRAT": " (personal strategy)"
+        },
+        "sltpFailed": "but the stop loss / take profit was not set",
+        "ofRemain": " (of {{pos}}, {{remain}} left)",
+        "ofPos": " (of {{pos}})",
+        "was": " (was {{a}})",
+        "leg": " (close {{k}} of {{n}} for this position)",
+        "holders": "account also linked to {{names}}",
+        "change": "{{label}} {{a}} → {{b}}",
+        "changed": "{{label}} changed",
+        "setTo": "{{label}} → {{v}}",
+        "turnedOn": "turned on {{label}}",
+        "turnedOff": "turned off {{label}}",
+        "andMore_one": "… and {{count}} more",
+        "andMore_other": "… and {{count}} more",
+        "moreItems_one": "and {{count}} more",
+        "moreItems_other": "and {{count}} more",
+        "planChange": "plan {{a}} → {{b}}",
+        "noteCleared": "note cleared",
+        "noteSet": "note set to {{b}}",
+        "noteChange": "note {{a}} → {{b}}",
+        "roleChange": "role {{a}} → {{b}}",
+        "inviteChange": "attribution {{a}} → {{b}}",
+        "prevReason": " (it had been disabled for: {{r}})",
+        "channel": "channel {{v}}",
+        "renamed": "name {{a}} → {{b}}",
+        "ackFlags": ", flagged accounts acknowledged",
+        "reason": "reason: {{r}}",
+        "result": "result: {{r}}",
+        "replied": "replied {{text}}",
+        "featuredSet": "featured competition set",
+        "featuredChanged": "featured competition switched",
+        "featuredCleared": "featured competition cleared (back to automatic)",
+        "wholeGroup": "whole group saved"
+      },
+      "why": {
+        "noMoney": "not enough margin",
+        "closeExists": "a close order for this position is already in progress",
+        "noPrice": "no price for the symbol (wrong name or no quotes)",
+        "noQuotes": "no quotes at the moment",
+        "positionMissing": "position not found (probably already closed)",
+        "accountMissing": "account not found or unreadable",
+        "pendingMissing": "pending order not found (it may have filled, expired or been cancelled)",
+        "unconfirmed": "accepted by the broker but the fill was not confirmed, check positions",
+        "gwNoPending": "the gateway does not support pending orders yet",
+        "gwUnsupported": "the gateway does not support this operation yet",
+        "gwDown": "could not reach the gateway, nothing was sent",
+        "gatewayTimeout": "gateway timed out, it may have executed, check positions",
+        "gwNoReply": "the gateway did not answer in time",
+        "staleUnknown": "no result for a long time, check positions",
+        "invalidFill": "the broker does not accept this fill type",
+        "positionClosed": "the position is already closed",
+        "invalidStops": "invalid stop loss / take profit (too close to the price or on the wrong side)",
+        "invalidVolume": "invalid lot size",
+        "closeVolume": "close volume exceeds the position",
+        "invalidPrice": "invalid price",
+        "invalidExpiry": "invalid pending order expiry",
+        "invalidRequest": "invalid request",
+        "marketClosed": "market closed",
+        "tradeDisabled": "trading disabled (account or symbol restricted)",
+        "priceChanged": "the price moved",
+        "limitOrders": "pending order limit reached",
+        "limitPositions": "open position limit reached",
+        "limitVolume": "position / order volume limit reached",
+        "rejected": "rejected by the broker",
+        "brokerError": "broker processing error",
+        "cancelled": "the request was cancelled",
+        "timeout": "the broker did not answer in time",
+        "frozen": "the order is frozen (too close to the price)",
+        "locked": "request locked, the broker is still processing it",
+        "onlyReal": "live accounts only",
+        "noConnection": "lost connection to the broker's server",
+        "tooMany": "too many requests",
+        "noChanges": "nothing to change (same levels as before)",
+        "orderChanged": "the order changed in the meantime",
+        "atServer": "rejected by the broker (automated trading disabled on the server)",
+        "atClient": "rejected by the broker (automated trading disabled in the terminal)",
+        "longOnly": "only buys are allowed for this symbol",
+        "shortOnly": "only sells are allowed for this symbol",
+        "closeOnly": "only closing is allowed for this symbol",
+        "fifo": "positions must be closed oldest first",
+        "hedge": "hedging is not allowed on this account",
+        "permissions": "the gateway lacks permission",
+        "unknown": "outcome unknown, check positions"
+      },
+      "v": {
+        "none": "none",
+        "demo": "demo",
+        "live": "live",
+        "empty": "empty",
+        "on": "on",
+        "off": "off",
+        "yes": "yes",
+        "no": "no",
+        "complex": "(several values)",
+        "anId": "(a record)",
+        "noExpiry": "never expires",
+        "noInvite": "no attribution",
+        "untitled": "(untitled)",
+        "deletedComp": "(deleted competition)",
+        "actionFallback": "trade",
+        "side": {
+          "BUY": "buy",
+          "SELL": "sell"
+        },
+        "ptype": {
+          "BUY_LIMIT": "buy limit order",
+          "SELL_LIMIT": "sell limit order",
+          "BUY_STOP": "buy stop order",
+          "SELL_STOP": "sell stop order"
+        },
+        "ch": {
+          "gateway": "direct",
+          "bridge": "bridge"
+        },
+        "reason": {
+          "SL": "Stop loss hit",
+          "TP": "Take profit hit",
+          "SO": "Stopped out",
+          "MOBILE": "Closed in the MT5 mobile app",
+          "CLIENT": "Closed in MT5 desktop",
+          "WEB": "Closed in the MT5 web terminal",
+          "OTHER": "Closed on the MT5 side (broker or other)"
+        },
+        "role": {
+          "user": "user",
+          "admin": "admin"
+        },
+        "autoField": {
+          "enabled": "auto-manage",
+          "beenabled": "break-even",
+          "betriggerr": "break-even trigger",
+          "trailenabled": "trailing stop",
+          "trailtriggerr": "trailing trigger",
+          "traildistancer": "trailing distance",
+          "ptpenabled": "partial take-profit",
+          "ptptriggerr": "partial take-profit trigger",
+          "ptpfraction": "partial take-profit share"
+        },
+        "userField": {
+          "plan": "plan",
+          "plan_expires_at": "expiry",
+          "plan_note": "note",
+          "role": "role",
+          "invite_code": "attribution"
+        },
+        "setGroup": {
+          "broker": "Partner broker lock",
+          "pricing": "Pricing",
+          "trial": "Free trial",
+          "email_gate": "Sign-up email rules",
+          "social": "Social links",
+          "candle_history": "Candle retention",
+          "strategy": "Personal strategies",
+          "strategy_costs": "Trading costs",
+          "winrate": "Win-rate publication",
+          "platform_strategies": "Strategy guide"
+        },
+        "setKey": {
+          "broker_lock_enabled": "broker lock",
+          "broker_patterns": "server keywords",
+          "broker_display_name": "public name",
+          "broker_referral_url": "referral link",
+          "pro_monthly_price": "monthly price",
+          "pro_yearly_price": "yearly price",
+          "sale_enabled": "sale",
+          "sale_percent": "discount %",
+          "sale_badge": "sale badge",
+          "sale_end_at": "sale ends",
+          "trial_enabled": "free trial",
+          "trial_days": "trial days",
+          "disposable_block_enabled": "block disposable emails",
+          "extra_blocked_domains": "extra blocked domains",
+          "extra_allowed_domains": "extra allowed domains",
+          "facebook_url": "Facebook link",
+          "instagram_url": "Instagram link",
+          "x_url": "X link",
+          "discord_url": "Discord link",
+          "telegram_url": "Telegram link",
+          "m1_retention_days": "1-minute candle retention (days)",
+          "max_strategies_per_user": "strategies per user",
+          "pro_only": "PRO only",
+          "public_strategies": "published strategies",
+          "default_spread": "default spread",
+          "default_commission_per_lot": "default commission per lot",
+          "default_slippage": "default slippage",
+          "per_symbol": "per-symbol settings"
+        },
+        "gamKey": {
+          "user_visible": "gamification visible to users",
+          "leaderboard_visible": "leaderboard visible",
+          "competitions_visible": "competitions entry visible",
+          "min_baseline_usd": "minimum capital to rank (USD)",
+          "min_trades_return": "minimum trades for the return board",
+          "min_trades_winrate": "minimum trades for the win-rate board",
+          "winrate_require_profit": "win-rate board requires profit",
+          "competitions_public_enabled": "public competition pages",
+          "featured_competition_id": "featured competition"
+        },
+        "inviteField": {
+          "label": "name",
+          "isActive": "active",
+          "grantsTrial": "grants trial",
+          "competitionId": "competition",
+          "channel": "channel",
+          "openAccountUrl": "sign-up link"
+        },
+        "inviteOpt": {
+          "trial": "grants a trial",
+          "inactive": "inactive",
+          "activated": "activated",
+          "deactivated": "deactivated",
+          "competitionId": "linked to a competition",
+          "openAccountUrl": "with a sign-up link"
+        },
+        "inviteDel": {
+          "hard": " (nobody attributed — removed completely)",
+          "soft": " (has attributed users — marked deleted only)"
+        },
+        "compField": {
+          "status": "status",
+          "publicView": "public page",
+          "openAccountUrl": "sign-up link",
+          "acknowledgeFlags": "acknowledged flags"
+        },
+        "mailKind": {
+          "marketing": "marketing",
+          "notice": "service notice"
+        },
+        "opsResult": {
+          "scheduled": "scheduled",
+          "accepted": "accepted",
+          "already-reconnecting": "already reconnecting",
+          "failed": "failed",
+          "ratio": "{{a}}/{{b}} competitions"
+        },
+        "ticketField": {
+          "status": "status",
+          "priority": "priority",
+          "reply": "reply"
+        },
+        "field": {
+          "agent": "agent",
+          "extend_days": "days added",
+          "disabledAt": "disabled at",
+          "reason": "reason",
+          "id": "id",
+          "published": "published",
+          "kind": "type",
+          "recipients": "recipients",
+          "status": "status",
+          "disqualified": "disqualified",
+          "nameHidden": "name hidden",
+          "count": "count",
+          "ids": "ids"
+        }
+      },
+      "ev": {
+        "register": {
+          "email": "Signed up with email",
+          "google": "Signed up with Google"
+        },
+        "login": {
+          "password": "Signed in with password",
+          "google": "Signed in with Google"
+        },
+        "emailVerified": {
+          "link": "Verified email via the link",
+          "reset": "Email verified while resetting the password"
+        },
+        "pwResetRequested": "Requested a password reset",
+        "pwReset": "Set a new password via the reset email",
+        "pwChanged": {
+          "first": "Set a password for the first time",
+          "change": "Changed the password"
+        },
+        "nickname": {
+          "set": "Set nickname to {{b}}",
+          "change": "Changed nickname from {{a}} to {{b}}",
+          "cleared": "Cleared the nickname"
+        },
+        "phoneSet": "Set a phone number",
+        "trialClaim": "Claimed a {{days}}-day {{plan}} free trial",
+        "trialClaimNoDays": "Claimed a {{plan}} free trial",
+        "inviteTrial": "Got a {{days}}-day {{plan}} invite trial",
+        "inviteTrialNoDays": "Got a {{plan}} invite trial",
+        "payment": {
+          "renew": "Payment received: {{plan}} renewed",
+          "change": "Payment received: {{a}} → {{b}}"
+        },
+        "refund": {
+          "time": "Refund: membership time taken back",
+          "change": "Refund: {{a}} → {{b}}"
+        },
+        "payIssue": {
+          "finished_mismatch": "Underpaid: less was received than due",
+          "refund_after_finished": "A completed payment was refunded",
+          "refund_skipped": "Refund received, but there was no membership time to take back",
+          "other": "Payment record flagged (raw details in the drawer)"
+        },
+        "autoExpire": "Membership expired: {{a}} → {{b}}",
+        "bind": {
+          "new": "Linked an MT5 account",
+          "revived": "Re-linked a previously removed MT5 account"
+        },
+        "reverify": "Re-verified the master password; direct access restored",
+        "unbind": "Removed (unlinked) an MT5 account",
+        "revoked": {
+          "password": "MT5 password changed; direct access revoked until re-verified",
+          "other": "Direct access revoked"
+        },
+        "tokenReset": "Reset the bridge API token",
+        "open": "Open",
+        "pending": {
+          "place": "Place pending order",
+          "placeTyped": "Place a {{ptype}}",
+          "modify": "Modify pending order",
+          "cancel": "Cancel pending order",
+          "cancelTyped": "Cancel the {{ptype}}"
+        },
+        "close": {
+          "full": "Close",
+          "partial": "Partial close {{v}} lots",
+          "partialNoVol": "Partial close",
+          "gone": "Close skipped: the position was already gone (probably stopped out or closed elsewhere)"
+        },
+        "ptp": {
+          "full": "Auto take-profit: close",
+          "partial": "Auto partial take-profit: close {{v}} lots",
+          "partialNoVol": "Auto partial take-profit",
+          "gone": "Auto partial take-profit skipped: the position was already gone"
+        },
+        "sltp": {
+          "none": "Modify sent with no change to stop loss or take profit",
+          "set_sl": "set stop loss {{v}}",
+          "set_tp": "set take profit {{v}}",
+          "move_sl": "move stop loss {{a}} → {{b}}",
+          "move_tp": "move take profit {{a}} → {{b}}",
+          "remove_sl": "remove stop loss (was {{a}})",
+          "remove_tp": "remove take profit (was {{a}})",
+          "removeNoPrev_sl": "remove stop loss",
+          "removeNoPrev_tp": "remove take profit",
+          "same_sl": "stop loss unchanged",
+          "same_tp": "take profit unchanged",
+          "changed_sl": "stop loss changed to {{v}}",
+          "changed_tp": "take profit changed to {{v}}",
+          "cleared_sl": "stop loss cleared",
+          "cleared_tp": "take profit cleared"
+        },
+        "autosl": {
+          "unknown": "Auto-manage adjusted the stop loss",
+          "trailN": "Auto trailing stop, {{n}} moves: {{a}} → {{b}}",
+          "trailNTo": "Auto trailing stop, {{n}} moves, now {{b}}",
+          "multi": "Auto-manage moved the stop loss {{n}} times: {{a}} → {{b}}",
+          "multiTo": "Auto-manage moved the stop loss {{n}} times, now {{b}}",
+          "be": "Auto break-even: stop loss moved to entry {{v}}",
+          "restore": "Auto restored the stop loss at {{v}} after it was cleared",
+          "trail": "Auto trailing stop {{a}} → {{b}}",
+          "trailTo": "Auto trailing stop, moved to {{b}}",
+          "move": "Auto-manage moved the stop loss {{a}} → {{b}}",
+          "set": "Auto-manage set the stop loss to {{b}}"
+        },
+        "otherTrade": "Other trade instruction",
+        "closeAll_one": "Close all: {{count}} position",
+        "closeAll_other": "Close all: {{count}} positions",
+        "closeAllNoCount": "Close all",
+        "closeAllPart": {
+          "filled": "{{count}} filled",
+          "failed": "{{count}} failed",
+          "unknown": "{{count}} outcome unknown",
+          "pending": "{{count}} pending",
+          "cancelled": "{{count}} withdrawn",
+          "skipped": "{{count}} skipped"
+        },
+        "corrected": "Correction: the {{action}} instruction from {{time}}, recorded as {{was}}, was actually filled",
+        "correctedWasTimeout": "auto-cancelled after a timeout",
+        "stopoutGroup_one": "Stopped out: {{count}} position closed at once",
+        "stopoutGroup_other": "Stopped out: {{count}} positions closed at once",
+        "autoSettings": {
+          "head": "Changed auto-manage settings: ",
+          "none": "Saved auto-manage settings (no change)"
+        },
+        "userPlan": {
+          "head": "Changed membership: ",
+          "none": "Saved membership (no change)"
+        },
+        "userRole": "Changed role from {{a}} to {{b}}",
+        "attribution": {
+          "set": "Set attribution to {{b}}",
+          "change": "Changed attribution from {{a}} to {{b}}",
+          "clear": "Cleared attribution (was {{a}})",
+          "clearNoPrev": "Cleared attribution"
+        },
+        "userEdit": {
+          "head": "Edited user: ",
+          "none": "Saved the user (no change)"
+        },
+        "disable": {
+          "new": "Disabled the account — reason: {{r}}",
+          "newNoReason": "Disabled the account",
+          "reason": "Changed the disable reason: {{r}}",
+          "reasonNone": "Changed the disable reason"
+        },
+        "enable": "Restored the account",
+        "verifyEmail": "Manually marked the email as verified",
+        "bulkEdit": {
+          "head_one": "Bulk edit, {{count}} user: ",
+          "head_other": "Bulk edit, {{count}} users: ",
+          "none_one": "Bulk-edited {{count}} user",
+          "none_other": "Bulk-edited {{count}} users"
+        },
+        "setting": {
+          "head": "Changed platform settings · {{group}}: ",
+          "headMulti": "Changed platform settings: ",
+          "platformStrategies": "Changed the strategy guide list"
+        },
+        "gamification": {
+          "head": "Changed gamification settings: "
+        },
+        "invite": {
+          "create": "Created invite link {{name}}",
+          "delete": "Deleted invite link {{name}}",
+          "update": "Edited invite link {{name}}: ",
+          "updateNone": "Saved invite link {{name}} (no change)",
+          "other": "Changed invite link {{name}}"
+        },
+        "agentAssign": {
+          "assign": "Assigned invite link {{name}} to agent {{b}}",
+          "unassign": "Unassigned agent {{a}} from invite link {{name}}",
+          "change": "Reassigned invite link {{name}} from agent {{a}} to {{b}}",
+          "other": "Changed the agent of invite link {{name}}"
+        },
+        "agentPlan": {
+          "extend": "Extended the client's {{plan}} by {{days}} days",
+          "downgrade": "Downgraded the client to FREE",
+          "change": "Changed the client's plan: {{a}} → {{b}}"
+        },
+        "competition": {
+          "create": "Created competition {{name}}",
+          "delete": "Deleted competition {{name}}",
+          "settle": "Settled competition {{name}}",
+          "update": "Edited competition {{name}}: ",
+          "updateNone": "Saved competition {{name}} (no change)"
+        },
+        "participant": {
+          "disqualify": "Disqualified the entrant in {{name}}",
+          "requalify": "Reinstated the entrant in {{name}}",
+          "hide_name": "Hid the entrant's public name in {{name}}",
+          "show_name": "Showed the entrant's public name again in {{name}}",
+          "update": "Edited the entry in {{name}}"
+        },
+        "announcement": {
+          "publish": "Published announcement {{title}}",
+          "draft": "Created draft announcement {{title}}",
+          "delete": "Deleted announcement {{title}}",
+          "unpublish": "Unpublished announcement {{title}}",
+          "update": "Edited announcement {{title}}"
+        },
+        "email": {
+          "send": "Sent bulk email {{subject}}",
+          "sendTo_one": "Sent bulk email {{subject}} to {{count}} person",
+          "sendTo_other": "Sent bulk email {{subject}} to {{count}} people",
+          "cancel": "Cancelled bulk email {{subject}}",
+          "resume": "Resumed bulk email {{subject}}"
+        },
+        "ops": {
+          "restartLoop": "Restarted background task {{name}}",
+          "refreshCompetitions": "Refreshed competition rankings",
+          "reconnectGateway": "Asked the gateway to reconnect to MT5",
+          "other": "Ran a fix from the system status page"
+        },
+        "ticket": {
+          "head": "Handled ticket {{subject}}: ",
+          "none": "Handled ticket {{subject}}"
+        },
+        "other": {
+          "head": "Changed: "
+        },
+        "unknown": "Unrecognised record (raw details in the drawer)"
+      },
+      "kindName": {
+        "user": {
+          "register": "Sign-up",
+          "login": "Sign-in",
+          "email_verified": "Email verification",
+          "password_reset_requested": "Password reset request",
+          "password_reset": "Password reset",
+          "password_changed": "Password change",
+          "nickname": "Nickname change",
+          "phone_set": "Phone number",
+          "api_token_reset": "API token reset"
+        },
+        "plan": {
+          "trial_claim": "Trial claim",
+          "invite_trial": "Invite trial",
+          "payment": "Payment",
+          "refund": "Refund",
+          "payment_issue": "Payment issue",
+          "auto_expire": "Membership expiry"
+        },
+        "mt5": {
+          "bind": "MT5 link",
+          "reverify": "Master password re-verification",
+          "unbind": "MT5 unlink",
+          "revoked": "Direct access revoked"
+        },
+        "trade": {
+          "open": "Open instruction",
+          "close": "Close instruction",
+          "other": "Other trade instruction",
+          "close_all": "Close all",
+          "corrected": "Correction"
+        },
+        "pending": {
+          "place": "Pending order",
+          "modify": "Pending order change",
+          "cancel": "Pending order cancel"
+        },
+        "auto": {
+          "partial_tp": "Auto partial take-profit",
+          "sl": "Auto stop move",
+          "settings": "Auto-manage settings"
+        },
+        "sltp": {
+          "modify": "Stop / target change"
+        },
+        "deal": {
+          "close": "MT5 close",
+          "stopout_group": "Stop-out"
+        },
+        "admin": {
+          "user_plan": "Membership change",
+          "user_role": "Role change",
+          "user_attribution": "Attribution change",
+          "user_edit": "User edit",
+          "user_disable": "Account disabled",
+          "user_enable": "Account restored",
+          "verify_email": "Manual email verification",
+          "bulk_edit": "Bulk user edit",
+          "setting": "Platform setting",
+          "gamification": "Gamification setting",
+          "invite_link": "Invite link",
+          "agent_assign": "Agent assignment",
+          "competition": "Competition",
+          "competition_participant": "Competition entrant",
+          "announcement": "Announcement",
+          "email": "Bulk email",
+          "ops": "Ops action",
+          "ticket": "Ticket",
+          "other": "Other admin change"
+        },
+        "agent": {
+          "plan": "Agent plan change"
+        }
+      }
     },
     "health": {
       "title": "System status",
@@ -1755,7 +2552,7 @@
     "bulkEmail": "Email",
     "bulkSaved": "Updated {{n}} user(s)",
     "bulkConfirmTitle": "Confirm bulk change",
-    "bulkConfirmBody": "This will apply to the {{n}} selected user(s): {{changes}}. It cannot be undone and leaves no audit trail.",
+    "bulkConfirmBody": "This will apply to the {{n}} selected user(s): {{changes}}. It cannot be undone; every change is recorded in the activity log.",
     "bulkConfirmAdminWarn": "This includes \"role → admin\": those accounts gain every admin permission, including changing other people’s roles.",
     "bulkConfirmInviteWarn": "Once assigned, these users’ email addresses appear on {{agent}}’s agent page. Undoing only stops future display — whoever has seen them has seen them.",
     "changeRole": "role → {{value}}",
@@ -1764,7 +2561,7 @@
     "changeInvite": "attribution → {{value}}",
     "neverExpires": "never expires",
     "promoteTitle": "Confirm admin promotion",
-    "promoteBody": "{{email}} will gain every admin permission, including changing other people’s roles and plans. Demotions are not audited, so undoing it leaves no trace.",
+    "promoteBody": "{{email}} will gain every admin permission, including changing other people’s roles and plans. Every change is recorded in the activity log.",
     "colStatus": "Status",
     "statusActive": "Active",
     "statusDisabled": "Disabled",

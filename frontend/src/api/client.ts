@@ -4,6 +4,7 @@ import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, T
 import type { PendingCompetition } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
+import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 import { API_BASE, API_CANDIDATES, reportApiFailure } from './apiBase'
@@ -1747,6 +1748,50 @@ export const adminApi = {
     // Live board preview: the requesting admin is the viewer; same shape as the user-facing LeaderboardPayload.
     competitionBoard: (id: string) =>
       request<LeaderboardPayload>(`/admin/competitions/${encodeURIComponent(id)}/board`),
+    // ---- 操作日志 / Activity log ----
+    // 游标翻页、不返回总数（契约 §1.1）。cursor 是上一页的 next 原样带回；换了任何筛选条件
+    // 就该丢掉它从头取。signal 透传：筛选连点、搜索防抖之后，先发的响应后到会把当前条件的
+    // 结果盖掉，调用方每次新查询都中止上一次。
+    // Keyset paged, no totals (contract §1.1). `cursor` is the previous page's `next`
+    // passed back verbatim and must be dropped whenever a filter changes. The signal is
+    // forwarded so the caller can abort the previous query on every new one — with
+    // rapid filter clicks an earlier response landing last would overwrite the current one.
+    activity: (params: ActivityQuery = {}, signal?: AbortSignal) => {
+      const qs = new URLSearchParams()
+      if (params.cat && params.cat !== 'all') qs.set('cat', params.cat)
+      // sub 只在 cat=trade 时有意义，其它分类后端会忽略；这里干脆不发
+      // sub only means something under cat=trade (ignored elsewhere), so it is not sent otherwise
+      if (params.cat === 'trade' && params.sub && params.sub !== 'all') qs.set('sub', params.sub)
+      if (params.abnormal) qs.set('abnormal', '1')
+      if (params.q) qs.set('q', params.q)
+      if (params.userId) qs.set('user_id', params.userId)
+      if (params.login) qs.set('login', params.login)
+      if (params.since) qs.set('since', params.since)
+      if (params.until) qs.set('until', params.until)
+      if (params.cursor) qs.set('cursor', params.cursor)
+      if (params.limit) qs.set('limit', String(params.limit))
+      const suffix = qs.toString() ? `?${qs.toString()}` : ''
+      return request<ActivityPage>(`/admin/activity${suffix}`, { signal })
+    },
+    // 详情抽屉打开时才调；key 用列表行（或 children 行）的 key。filters 带列表当时的筛选
+    // （分类 / 只看异常 / 搜索 / 用户）：合并行（审计组 g:、追踪止损 t:）后端按它还原成列表上
+    // 那一组，抽屉与被点的那一行一致；其它 key 后端不看。默认值不发，与列表同口径。
+    // Called only when the detail drawer opens; `key` is a list row's (or child row's) key.
+    // `filters` carries the list's filters (category / problems only / search / user) so the
+    // backend rebuilds merged rows (g: audit groups, t: trailing runs) exactly as listed;
+    // other keys ignore them. Defaults are omitted, as for the list.
+    activityItem: (
+      key: string,
+      filters: Pick<ActivityQuery, 'cat' | 'abnormal' | 'q' | 'userId'> = {},
+      signal?: AbortSignal,
+    ) => {
+      const qs = new URLSearchParams({ key })
+      if (filters.cat && filters.cat !== 'all') qs.set('cat', filters.cat)
+      if (filters.abnormal) qs.set('abnormal', '1')
+      if (filters.q) qs.set('q', filters.q)
+      if (filters.userId) qs.set('user_id', filters.userId)
+      return request<ActivityDetail>(`/admin/activity/item?${qs.toString()}`, { signal })
+    },
   }
 
 // 自动仓位管理（PRO）/ auto position management (PRO)

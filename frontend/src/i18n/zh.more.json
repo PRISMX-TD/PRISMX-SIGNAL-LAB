@@ -989,6 +989,7 @@
       "data": "数据看板",
       "winrate": "策略公开",
       "users": "用户管理",
+      "logs": "操作日志",
       "invites": "邀请链接",
       "ops": "运营设置",
       "system": "系统参数",
@@ -999,6 +1000,794 @@
       "gamification": "游戏化",
       "competitions": "比赛",
       "health": "系统状态"
+    },
+    "log": {
+      "title": "操作日志",
+      "subtitle": "注册、绑定 MT5、交易、止盈止损、管理员操作……每件事一行，点开看详情。",
+      "tz": "时间均为北京时间（UTC+8）",
+      "userRowBtn": "日志",
+      "userRowBtnHint": "看这位用户的操作日志",
+      "cat": {
+        "all": "全部",
+        "account": "账户",
+        "mt5": "MT5 绑定",
+        "trade": "交易",
+        "admin": "管理员"
+      },
+      "sub": {
+        "all": "全部",
+        "open_close": "开平仓",
+        "sltp": "止盈止损"
+      },
+      "abnormal": "只看异常",
+      "abnormalHint": "失败、结果未知、止损没设上、爆仓、授权失效、退款、停用账号、结果更正",
+      "date": {
+        "label": "日期",
+        "all": "不限日期",
+        "today": "今天",
+        "yesterday": "昨天",
+        "week": "最近 7 天",
+        "day": "指定日期"
+      },
+      "search": "邮箱 / 昵称 / 手机号 / MT5 账号",
+      "searchHint": "5–12 位纯数字先按 MT5 账号查，没有这个账号就按手机号查",
+      "searchDigits": "纯数字先按 MT5 账号查，没有这个账号就按手机号查；查手机号带上「+」和区号最准，例如 +8613800138000",
+      "chip": {
+        "user": "用户：{{name}}",
+        "login": "MT5 账户：{{login}}",
+        "q": "搜索：{{q}}",
+        "qLogin": "按 MT5 账号 / 手机号搜：{{q}}",
+        "abnormal": "只看异常",
+        "remove": "去掉这个筛选",
+        "clearAll": "清除全部筛选"
+      },
+      "refresh": "刷新",
+      "refreshing": "刷新中…",
+      "updated": "更新于 {{time}}",
+      "autoRefresh": "自动刷新",
+      "autoRefreshHint": "每 60 秒刷新一次。页面在后台、列表没在顶部或详情开着时不动列表，只提示「有新记录」。",
+      "newRecords": "有新记录 ↑",
+      "filters": "筛选",
+      "filtersCount": "筛选 · {{n}}",
+      "filtersDone": "完成",
+      "col": {
+        "time": "时间",
+        "user": "用户",
+        "account": "MT5 账户",
+        "actor": "谁操作",
+        "what": "发生了什么"
+      },
+      "loadMore": "加载更多",
+      "loadingMore": "加载中…",
+      "shown": "已显示 {{n}} 条",
+      "end": "已经到底了",
+      "empty": "没有符合条件的记录",
+      "emptyHint": "换个分类或日期试试，或者清除筛选。",
+      "emptyLogin": "没有 MT5 账号或手机号是 {{q}} 的记录",
+      "phoneHits": "这串数字和下面用户的手机号对得上，点一下看 TA 的日志：",
+      "phoneTip": "要查手机号，请带上「+」和区号再搜，例如 +8613800138000、+60123456789。",
+      "loadError": "操作日志没有加载出来",
+      "retry": "重试",
+      "expand": "展开 {{n}} 条 ▾",
+      "collapse": "收起 ▴",
+      "day": {
+        "today": "今天",
+        "yesterday": "昨天",
+        "md": "{{m}}月{{d}}日 {{wd}}",
+        "ymd": "{{y}}年{{m}}月{{d}}日 {{wd}}",
+        "weekday": {
+          "0": "周日",
+          "1": "周一",
+          "2": "周二",
+          "3": "周三",
+          "4": "周四",
+          "5": "周五",
+          "6": "周六"
+        },
+        "month": {
+          "1": "1月",
+          "2": "2月",
+          "3": "3月",
+          "4": "4月",
+          "5": "5月",
+          "6": "6月",
+          "7": "7月",
+          "8": "8月",
+          "9": "9月",
+          "10": "10月",
+          "11": "11月",
+          "12": "12月"
+        }
+      },
+      "user": {
+        "platform": "—（平台设置）",
+        "count_other": "{{count}} 位用户",
+        "noEmail": "（用户已删除）",
+        "filterHint": "只看这位用户"
+      },
+      "acct": {
+        "gateway": "直连",
+        "bridge": "桥接",
+        "demo": "模拟",
+        "live": "实盘",
+        "removed": "已解绑",
+        "revoked": "授权失效",
+        "filterHint": "只看这个账户"
+      },
+      "actor": {
+        "self": "本人",
+        "system": "系统",
+        "auto": "自动仓管",
+        "broker": "券商（MT5）",
+        "admin": "管理员 {{name}}",
+        "agent": "代理 {{name}}",
+        "adminAnon": "管理员",
+        "agentAnon": "代理"
+      },
+      "status": {
+        "ok": "成功",
+        "fail": "失败",
+        "unknown": "结果未知",
+        "pending": "处理中",
+        "cancelled": "已撤回"
+      },
+      "tag": {
+        "unprotected": "无止损",
+        "stopout": "强平",
+        "revoked": "授权失效",
+        "late": "延迟入库",
+        "backfill": "补录",
+        "shared_login": "共享账号",
+        "partial": "部分平仓",
+        "gone": "仓位已不在",
+        "auto": "自动"
+      },
+      "limits": {
+        "title": "这一页看不到的",
+        "l1": "用户在 MT5 软件里直接开仓、改止损止盈、挂单在券商那边被触发、出入金：这里看不到。MT5 里的平仓能看到（包括止损止盈触发、爆仓、手机端平仓）。",
+        "l2": "绑定 / 解绑记录从上线当天开始；之前已经解绑的账户只补了最后一次，标「补录」。",
+        "l3": "「原止损」取自平台 1–2 秒前的持仓快照，用户刚在 MT5 里改过可能不准；上线前的改单只能写「止损改为 X」。",
+        "l4": "平仓盈亏要等成交回传（通常 1–2 秒，最晚几天），没到时显示「盈亏同步中」。",
+        "l5": "状态是实时读的：先「结果未知」、后来确认成交的指令，原来那一行直接变成成交，通常另有一条「更正」（极少数情况下超时清扫时才确认的，只有原来那一行变成成交，没有「更正」）。",
+        "l6": "管理员 / 代理按操作人现在的角色判断。",
+        "l7": "金额按账户货币，不带货币符号；美分账户的数字会大 100 倍。",
+        "l8": "上线前的登录、改密码、邮箱验证没有历史；不记录 IP。"
+      },
+      "detail": {
+        "title": "记录详情",
+        "loading": "正在读取详情…",
+        "loadError": "详情没有加载出来",
+        "basic": "基本信息",
+        "kind": "类型",
+        "occurredAt": "发生时间",
+        "dealAt": "MT5 成交时间",
+        "recordedAt": "记录时间",
+        "user": "用户",
+        "nickname": "昵称",
+        "email": "邮箱",
+        "phone": "手机号",
+        "plan": "会员",
+        "planUntil": "{{plan}}，到期 {{d}}",
+        "planDays": "{{plan}}，{{days}} 天",
+        "role": "角色",
+        "registered": "注册时间",
+        "account": "MT5 账户",
+        "channel": "连接方式",
+        "accountType": "账户类型",
+        "state": "状态",
+        "normal": "正常",
+        "online": "在线",
+        "offline": "离线",
+        "server": "服务器",
+        "accName": "账户名",
+        "holders": "绑定给",
+        "actor": "谁操作",
+        "source": "来源",
+        "src": {
+          "SIG": "跟信号",
+          "STRAT": "个人策略",
+          "CHART": "图表 / 手动下单"
+        },
+        "result": "结果",
+        "brokerMsg": "券商 / 网关原话",
+        "orderNo": "订单号",
+        "positionNo": "仓位号",
+        "dealNo": "成交号",
+        "batch": "一键平仓批次",
+        "currencyNote": "金额按账户货币，不带货币符号；美分账户的数字会大 100 倍。",
+        "timeline": "这笔仓位的完整经过",
+        "totalPnl": "合计盈亏",
+        "changes": "修改前 / 修改后",
+        "field": "项目",
+        "before": "修改前",
+        "after": "修改后",
+        "target": "对象",
+        "children": "明细",
+        "raw": "原始字段",
+        "onlyUser": "只看此用户",
+        "onlyAccount": "只看此账户",
+        "openUser": "打开用户资料"
+      },
+      "sep": " —— ",
+      "comma": "，",
+      "semi": "；",
+      "list": "、",
+      "q": "「{{v}}」",
+      "x": {
+        "lots": "{{v}} 手",
+        "filled": "成交价 {{px}}",
+        "sl": "止损 {{v}}",
+        "tp": "止盈 {{v}}",
+        "trigger": "触发价 {{v}}",
+        "triggerTo": "触发价改为 {{v}}",
+        "pnl": "盈亏",
+        "totalPnl": "合计盈亏",
+        "pnlPending": "盈亏同步中",
+        "somePnlPending": "还有盈亏在同步中",
+        "balance": "余额 {{v}}",
+        "until": "到期 {{d}}",
+        "expiryChange": "到期 {{a}} → {{b}}",
+        "viaLink": "来自邀请链接{{v}}",
+        "agentLink": "代理链接{{v}}",
+        "gotTrial": "获赠 {{days}} 天 {{plan}} 试用",
+        "gotTrialNoDays": "获赠 {{plan}} 试用",
+        "newSource": "新设备或新网络",
+        "paren": "（{{v}}）",
+        "note": {
+          "user_cancelled": "（发出前已撤回）",
+          "timeout": "（超时未执行，已自动取消）",
+          "timeout_unknown": "（超时，结果未知，请核对持仓）"
+        },
+        "src": {
+          "SIG": "（跟信号）",
+          "STRAT": "（个人策略）"
+        },
+        "sltpFailed": "但止损止盈没设上",
+        "ofRemain": "（共 {{pos}} 手，剩 {{remain}} 手）",
+        "ofPos": "（共 {{pos}} 手）",
+        "was": "（原 {{a}}）",
+        "leg": "（这笔仓位第 {{k}} 次平仓，共 {{n}} 次）",
+        "holders": "这个账号同时绑定给：{{names}}",
+        "change": "{{label}} {{a}} → {{b}}",
+        "changed": "{{label}}已修改",
+        "setTo": "{{label}} → {{v}}",
+        "turnedOn": "开启{{label}}",
+        "turnedOff": "关闭{{label}}",
+        "andMore_other": "…另有 {{count}} 项",
+        "moreItems_other": "另有 {{count}} 项",
+        "planChange": "等级 {{a}} → {{b}}",
+        "noteCleared": "清空备注",
+        "noteSet": "备注设为{{b}}",
+        "noteChange": "备注{{a}} → {{b}}",
+        "roleChange": "角色 {{a}} → {{b}}",
+        "inviteChange": "归因 {{a}} → {{b}}",
+        "prevReason": "（之前停用的原因：{{r}}）",
+        "channel": "渠道 {{v}}",
+        "renamed": "名字 {{a}} → {{b}}",
+        "ackFlags": "，放行了被标记的账号",
+        "reason": "原因：{{r}}",
+        "result": "结果：{{r}}",
+        "replied": "回复{{text}}",
+        "featuredSet": "设置了推荐比赛",
+        "featuredChanged": "更换了推荐比赛",
+        "featuredCleared": "取消了推荐比赛（改回自动挑选）",
+        "wholeGroup": "整组保存"
+      },
+      "why": {
+        "noMoney": "保证金不足",
+        "closeExists": "这笔仓位已有平仓单在处理中",
+        "noPrice": "取不到行情价（品种名不对或没有行情）",
+        "noQuotes": "暂时没有报价",
+        "positionMissing": "找不到这笔仓位（可能已平仓）",
+        "accountMissing": "账户不存在或读不到",
+        "pendingMissing": "找不到这张挂单（可能已成交、过期或已撤销）",
+        "unconfirmed": "券商已接受但未确认成交，请核对持仓",
+        "gwNoPending": "网关暂不支持挂单",
+        "gwUnsupported": "网关暂不支持这个操作",
+        "gwDown": "网关连不上，指令没发出",
+        "gatewayTimeout": "网关超时，可能已执行，请核对持仓",
+        "gwNoReply": "网关响应超时",
+        "staleUnknown": "长时间没收到结果，请核对持仓",
+        "invalidFill": "券商不支持这种成交方式",
+        "positionClosed": "仓位已经平掉",
+        "invalidStops": "止损 / 止盈价位无效（离现价太近或方向不对）",
+        "invalidVolume": "手数不对",
+        "closeVolume": "平仓手数超过持仓",
+        "invalidPrice": "价格无效",
+        "invalidExpiry": "挂单的到期时间无效",
+        "invalidRequest": "请求参数不对",
+        "marketClosed": "休市",
+        "tradeDisabled": "禁止交易（账户或品种受限）",
+        "priceChanged": "价格变动",
+        "limitOrders": "挂单数已达上限",
+        "limitPositions": "持仓数已达上限",
+        "limitVolume": "持仓或挂单量已达上限",
+        "rejected": "券商拒绝",
+        "brokerError": "券商处理出错",
+        "cancelled": "请求被取消",
+        "timeout": "券商超时未答复",
+        "frozen": "订单已冻结（离现价太近）",
+        "locked": "请求被锁定，券商还在处理",
+        "onlyReal": "仅限实盘账户",
+        "noConnection": "和券商服务器断开了",
+        "tooMany": "请求太频繁",
+        "noChanges": "没有改动（价位和原来一样）",
+        "orderChanged": "订单状态已变",
+        "atServer": "券商拒绝（服务器禁用了自动交易）",
+        "atClient": "券商拒绝（终端禁用了自动交易）",
+        "longOnly": "该品种只允许做多",
+        "shortOnly": "该品种只允许做空",
+        "closeOnly": "该品种只允许平仓",
+        "fifo": "须按先开先平的顺序平仓",
+        "hedge": "账户不允许对冲（反向开仓）",
+        "permissions": "网关权限不足",
+        "unknown": "结果未知，请核对持仓"
+      },
+      "v": {
+        "none": "无",
+        "demo": "模拟",
+        "live": "实盘",
+        "empty": "空",
+        "on": "开",
+        "off": "关",
+        "yes": "是",
+        "no": "否",
+        "complex": "（多项）",
+        "anId": "（某条记录）",
+        "noExpiry": "不过期",
+        "noInvite": "无归因",
+        "untitled": "（无标题）",
+        "deletedComp": "（已删除的比赛）",
+        "actionFallback": "交易",
+        "side": {
+          "BUY": "买单",
+          "SELL": "卖单"
+        },
+        "ptype": {
+          "BUY_LIMIT": "限价买单",
+          "SELL_LIMIT": "限价卖单",
+          "BUY_STOP": "突破买单",
+          "SELL_STOP": "突破卖单"
+        },
+        "ch": {
+          "gateway": "直连",
+          "bridge": "桥接"
+        },
+        "reason": {
+          "SL": "止损触发平仓",
+          "TP": "止盈触发平仓",
+          "SO": "爆仓强平",
+          "MOBILE": "在 MT5 手机端平仓",
+          "CLIENT": "在 MT5 电脑端平仓",
+          "WEB": "在 MT5 网页端平仓",
+          "OTHER": "在 MT5 那边平仓（券商或其它方式）"
+        },
+        "role": {
+          "user": "普通用户",
+          "admin": "管理员"
+        },
+        "autoField": {
+          "enabled": "自动仓管",
+          "beenabled": "自动保本",
+          "betriggerr": "保本触发",
+          "trailenabled": "追踪止损",
+          "trailtriggerr": "追踪触发",
+          "traildistancer": "追踪距离",
+          "ptpenabled": "分批止盈",
+          "ptptriggerr": "分批止盈触发",
+          "ptpfraction": "分批止盈比例"
+        },
+        "userField": {
+          "plan": "等级",
+          "plan_expires_at": "到期时间",
+          "plan_note": "备注",
+          "role": "角色",
+          "invite_code": "归因"
+        },
+        "setGroup": {
+          "broker": "合作券商限制",
+          "pricing": "订阅定价",
+          "trial": "免费试用",
+          "email_gate": "注册邮箱限制",
+          "social": "社交链接",
+          "candle_history": "K 线保留",
+          "strategy": "个人策略",
+          "strategy_costs": "交易成本",
+          "winrate": "策略胜率公开",
+          "platform_strategies": "策略介绍"
+        },
+        "setKey": {
+          "broker_lock_enabled": "启用券商限制",
+          "broker_patterns": "服务器匹配关键字",
+          "broker_display_name": "对外显示名称",
+          "broker_referral_url": "开户链接",
+          "pro_monthly_price": "月付价格",
+          "pro_yearly_price": "年付价格",
+          "sale_enabled": "促销",
+          "sale_percent": "折扣百分比",
+          "sale_badge": "促销角标",
+          "sale_end_at": "促销截止",
+          "trial_enabled": "免费试用",
+          "trial_days": "试用天数",
+          "disposable_block_enabled": "拦截临时邮箱",
+          "extra_blocked_domains": "额外拦截的域名",
+          "extra_allowed_domains": "额外放行的域名",
+          "facebook_url": "Facebook 链接",
+          "instagram_url": "Instagram 链接",
+          "x_url": "X 链接",
+          "discord_url": "Discord 链接",
+          "telegram_url": "Telegram 链接",
+          "m1_retention_days": "1 分钟 K 线保留天数",
+          "max_strategies_per_user": "每人策略上限",
+          "pro_only": "仅限 PRO",
+          "public_strategies": "公开的策略",
+          "default_spread": "默认点差",
+          "default_commission_per_lot": "默认每手佣金",
+          "default_slippage": "默认滑点",
+          "per_symbol": "分品种设置"
+        },
+        "gamKey": {
+          "user_visible": "游戏化对用户可见",
+          "leaderboard_visible": "排行榜可见",
+          "competitions_visible": "比赛入口可见",
+          "min_baseline_usd": "上榜最低本金（USD）",
+          "min_trades_return": "收益榜最少交易笔数",
+          "min_trades_winrate": "胜率榜最少交易笔数",
+          "winrate_require_profit": "胜率榜要求盈利",
+          "competitions_public_enabled": "公开比赛页",
+          "featured_competition_id": "推荐比赛"
+        },
+        "inviteField": {
+          "label": "名字",
+          "isActive": "启用",
+          "grantsTrial": "送试用",
+          "competitionId": "关联比赛",
+          "channel": "渠道",
+          "openAccountUrl": "开户链接"
+        },
+        "inviteOpt": {
+          "trial": "送试用",
+          "inactive": "未启用",
+          "activated": "启用",
+          "deactivated": "停用",
+          "competitionId": "关联比赛",
+          "openAccountUrl": "带开户链接"
+        },
+        "inviteDel": {
+          "hard": "（没人归因，已彻底删除）",
+          "soft": "（有人归因，只标记为已删除）"
+        },
+        "compField": {
+          "status": "状态",
+          "publicView": "公开页",
+          "openAccountUrl": "开户链接",
+          "acknowledgeFlags": "放行被标记账号"
+        },
+        "mailKind": {
+          "marketing": "推广",
+          "notice": "服务通知"
+        },
+        "opsResult": {
+          "scheduled": "已安排",
+          "accepted": "已受理",
+          "already-reconnecting": "已经在重连中",
+          "failed": "失败",
+          "ratio": "{{a}}/{{b}} 场"
+        },
+        "ticketField": {
+          "status": "状态",
+          "priority": "优先级",
+          "reply": "回复"
+        },
+        "field": {
+          "agent": "代理",
+          "extend_days": "延长天数",
+          "disabledAt": "停用时间",
+          "reason": "原因",
+          "id": "编号",
+          "published": "已发布",
+          "kind": "类型",
+          "recipients": "收件人数",
+          "status": "状态",
+          "disqualified": "取消资格",
+          "nameHidden": "隐藏名字",
+          "count": "数量",
+          "ids": "编号清单"
+        }
+      },
+      "ev": {
+        "register": {
+          "email": "用邮箱注册了账号",
+          "google": "用 Google 注册了账号"
+        },
+        "login": {
+          "password": "用密码登录",
+          "google": "用 Google 登录"
+        },
+        "emailVerified": {
+          "link": "点了验证链接，邮箱验证通过",
+          "reset": "重置密码时顺带验证了邮箱"
+        },
+        "pwResetRequested": "申请找回密码",
+        "pwReset": "通过找回密码邮件设了新密码",
+        "pwChanged": {
+          "first": "第一次设置了登录密码",
+          "change": "修改了登录密码"
+        },
+        "nickname": {
+          "set": "把昵称设为{{b}}",
+          "change": "把昵称从{{a}}改成{{b}}",
+          "cleared": "清空了昵称"
+        },
+        "phoneSet": "设置了手机号",
+        "trialClaim": "领取了 {{days}} 天 {{plan}} 免费试用",
+        "trialClaimNoDays": "领取了 {{plan}} 免费试用",
+        "inviteTrial": "获赠 {{days}} 天 {{plan}} 邀请试用",
+        "inviteTrialNoDays": "获赠 {{plan}} 邀请试用",
+        "payment": {
+          "renew": "付款续费 {{plan}}",
+          "change": "付款成功，会员 {{a}} → {{b}}"
+        },
+        "refund": {
+          "time": "退款，收回了部分会员时长",
+          "change": "退款，会员 {{a}} → {{b}}"
+        },
+        "payIssue": {
+          "finished_mismatch": "付款金额不足：实付少于应付",
+          "refund_after_finished": "已完成的付款又被退款",
+          "refund_skipped": "收到退款，但没有可收回的会员时长",
+          "other": "付款记录有异常（原始信息见详情）"
+        },
+        "autoExpire": "会员到期，自动从 {{a}} 降为 {{b}}",
+        "bind": {
+          "new": "绑定了 MT5 账户",
+          "revived": "重新绑定了之前删除过的 MT5 账户"
+        },
+        "reverify": "重新验证了主密码，直连授权已恢复",
+        "unbind": "删除（解绑）了 MT5 账户",
+        "revoked": {
+          "password": "在 MT5 改了密码，直连授权失效，需要重新验证",
+          "other": "直连授权已失效"
+        },
+        "tokenReset": "重置了桥接程序的 API Token",
+        "open": "开仓",
+        "pending": {
+          "place": "挂单",
+          "placeTyped": "挂{{ptype}}",
+          "modify": "修改挂单",
+          "cancel": "撤销挂单",
+          "cancelTyped": "撤销{{ptype}}"
+        },
+        "close": {
+          "full": "平仓",
+          "partial": "部分平仓 {{v}} 手",
+          "partialNoVol": "部分平仓",
+          "gone": "平仓时仓位已经不在了（可能已被止损或在别处平掉）"
+        },
+        "ptp": {
+          "full": "自动止盈平仓",
+          "partial": "自动分批止盈：平掉 {{v}} 手",
+          "partialNoVol": "自动分批止盈",
+          "gone": "自动分批止盈时仓位已经不在了"
+        },
+        "sltp": {
+          "none": "提交改单，止损止盈都没变",
+          "set_sl": "设置止损 {{v}}",
+          "set_tp": "设置止盈 {{v}}",
+          "move_sl": "移动止损 {{a}} → {{b}}",
+          "move_tp": "移动止盈 {{a}} → {{b}}",
+          "remove_sl": "移除止损（原 {{a}}）",
+          "remove_tp": "移除止盈（原 {{a}}）",
+          "removeNoPrev_sl": "移除止损",
+          "removeNoPrev_tp": "移除止盈",
+          "same_sl": "止损不变",
+          "same_tp": "止盈不变",
+          "changed_sl": "止损改为 {{v}}",
+          "changed_tp": "止盈改为 {{v}}",
+          "cleared_sl": "取消止损",
+          "cleared_tp": "取消止盈"
+        },
+        "autosl": {
+          "unknown": "自动仓管调整了止损",
+          "trailN": "自动追踪止损 {{n}} 次：{{a}} → {{b}}",
+          "trailNTo": "自动追踪止损 {{n}} 次，移到 {{b}}",
+          "multi": "自动仓管移动止损 {{n}} 次：{{a}} → {{b}}",
+          "multiTo": "自动仓管移动止损 {{n}} 次，移到 {{b}}",
+          "be": "自动保本：止损移到开仓价 {{v}}",
+          "restore": "止损被清掉后，自动补回止损 {{v}}",
+          "trail": "自动追踪止损 {{a}} → {{b}}",
+          "trailTo": "自动追踪止损，移到 {{b}}",
+          "move": "自动仓管移动止损 {{a}} → {{b}}",
+          "set": "自动仓管把止损设为 {{b}}"
+        },
+        "otherTrade": "其它类型的交易指令",
+        "closeAll_other": "一键平仓 {{count}} 笔",
+        "closeAllNoCount": "一键平仓",
+        "closeAllPart": {
+          "filled": "成交 {{count}} 笔",
+          "failed": "失败 {{count}} 笔",
+          "unknown": "结果未知 {{count}} 笔",
+          "pending": "处理中 {{count}} 笔",
+          "cancelled": "已撤回 {{count}} 笔",
+          "skipped": "跳过 {{count}} 笔"
+        },
+        "corrected": "更正：{{time}} 那条{{action}}指令原记为{{was}}，其实已经成交",
+        "correctedWasTimeout": "超时已自动取消",
+        "stopoutGroup_other": "爆仓强平，一次平掉 {{count}} 笔",
+        "autoSettings": {
+          "head": "修改自动仓管设置：",
+          "none": "保存了自动仓管设置（没有变化）"
+        },
+        "userPlan": {
+          "head": "修改会员：",
+          "none": "保存了会员设置（没有变化）"
+        },
+        "userRole": "把角色从{{a}}改成{{b}}",
+        "attribution": {
+          "set": "把注册归因设为{{b}}",
+          "change": "把注册归因从{{a}}改成{{b}}",
+          "clear": "清除了注册归因（原{{a}}）",
+          "clearNoPrev": "清除了注册归因"
+        },
+        "userEdit": {
+          "head": "修改用户：",
+          "none": "保存了用户设置（没有变化）"
+        },
+        "disable": {
+          "new": "停用了账号，原因：{{r}}",
+          "newNoReason": "停用了账号",
+          "reason": "修改了停用原因：{{r}}",
+          "reasonNone": "修改了停用原因"
+        },
+        "enable": "恢复了账号",
+        "verifyEmail": "手动把邮箱标记为已验证",
+        "bulkEdit": {
+          "head_other": "批量修改 {{count}} 位用户：",
+          "none_other": "批量修改了 {{count}} 位用户"
+        },
+        "setting": {
+          "head": "修改平台设置 · {{group}}：",
+          "headMulti": "修改平台设置：",
+          "platformStrategies": "调整了策略介绍页的策略列表"
+        },
+        "gamification": {
+          "head": "修改游戏化设置："
+        },
+        "invite": {
+          "create": "新建邀请链接{{name}}",
+          "delete": "删除邀请链接{{name}}",
+          "update": "修改邀请链接{{name}}：",
+          "updateNone": "保存了邀请链接{{name}}（没有变化）",
+          "other": "改动了邀请链接{{name}}"
+        },
+        "agentAssign": {
+          "assign": "把邀请链接{{name}}指派给代理 {{b}}",
+          "unassign": "取消了代理 {{a}} 对邀请链接{{name}}的指派",
+          "change": "把邀请链接{{name}}从代理 {{a}} 改派给 {{b}}",
+          "other": "调整了邀请链接{{name}}的代理"
+        },
+        "agentPlan": {
+          "extend": "给客户延长 {{days}} 天 {{plan}}",
+          "downgrade": "把客户降为 FREE",
+          "change": "调整客户会员：{{a}} → {{b}}"
+        },
+        "competition": {
+          "create": "新建比赛{{name}}",
+          "delete": "删除比赛{{name}}",
+          "settle": "终审比赛{{name}}",
+          "update": "修改比赛{{name}}：",
+          "updateNone": "保存了比赛{{name}}（没有变化）"
+        },
+        "participant": {
+          "disqualify": "在比赛{{name}}中取消了这位参赛者的资格",
+          "requalify": "在比赛{{name}}中恢复了这位参赛者的资格",
+          "hide_name": "在比赛{{name}}中隐藏了参赛者的公开名字",
+          "show_name": "在比赛{{name}}中重新显示参赛者的公开名字",
+          "update": "修改了比赛{{name}}的参赛信息"
+        },
+        "announcement": {
+          "publish": "发布了公告{{title}}",
+          "draft": "新建公告草稿{{title}}",
+          "delete": "删除了公告{{title}}",
+          "unpublish": "撤下了公告{{title}}",
+          "update": "修改了公告{{title}}"
+        },
+        "email": {
+          "send": "群发邮件{{subject}}",
+          "sendTo_other": "群发邮件{{subject}}给 {{count}} 人",
+          "cancel": "取消了群发邮件{{subject}}",
+          "resume": "继续发送群发邮件{{subject}}"
+        },
+        "ops": {
+          "restartLoop": "重启后台任务{{name}}",
+          "refreshCompetitions": "刷新比赛排行",
+          "reconnectGateway": "让 gateway 重新连接 MT5",
+          "other": "在系统状态页执行了一个修复操作"
+        },
+        "ticket": {
+          "head": "处理工单{{subject}}：",
+          "none": "处理了工单{{subject}}"
+        },
+        "other": {
+          "head": "修改了："
+        },
+        "unknown": "一条暂时认不出的记录（原始信息见详情）"
+      },
+      "kindName": {
+        "user": {
+          "register": "注册",
+          "login": "登录",
+          "email_verified": "邮箱验证",
+          "password_reset_requested": "申请找回密码",
+          "password_reset": "找回密码",
+          "password_changed": "修改密码",
+          "nickname": "修改昵称",
+          "phone_set": "设置手机号",
+          "api_token_reset": "重置 API Token"
+        },
+        "plan": {
+          "trial_claim": "领取试用",
+          "invite_trial": "邀请试用",
+          "payment": "付款",
+          "refund": "退款",
+          "payment_issue": "支付异常",
+          "auto_expire": "会员到期降级"
+        },
+        "mt5": {
+          "bind": "绑定 MT5",
+          "reverify": "重新验证主密码",
+          "unbind": "解绑 MT5",
+          "revoked": "直连授权失效"
+        },
+        "trade": {
+          "open": "开仓指令",
+          "close": "平仓指令",
+          "other": "其它交易指令",
+          "close_all": "一键平仓",
+          "corrected": "结果更正"
+        },
+        "pending": {
+          "place": "挂单",
+          "modify": "修改挂单",
+          "cancel": "撤销挂单"
+        },
+        "auto": {
+          "partial_tp": "自动分批止盈",
+          "sl": "自动移动止损",
+          "settings": "自动仓管设置"
+        },
+        "sltp": {
+          "modify": "修改止盈止损"
+        },
+        "deal": {
+          "close": "MT5 平仓成交",
+          "stopout_group": "爆仓强平"
+        },
+        "admin": {
+          "user_plan": "修改会员",
+          "user_role": "修改角色",
+          "user_attribution": "修改归因",
+          "user_edit": "修改用户",
+          "user_disable": "停用账号",
+          "user_enable": "恢复账号",
+          "verify_email": "手动验证邮箱",
+          "bulk_edit": "批量修改用户",
+          "setting": "平台设置",
+          "gamification": "游戏化设置",
+          "invite_link": "邀请链接",
+          "agent_assign": "指派代理",
+          "competition": "比赛",
+          "competition_participant": "参赛者",
+          "announcement": "公告",
+          "email": "群发邮件",
+          "ops": "运维操作",
+          "ticket": "工单",
+          "other": "其它管理操作"
+        },
+        "agent": {
+          "plan": "代理调整会员"
+        }
+      }
     },
     "health": {
       "title": "系统状态",
@@ -1755,7 +2544,7 @@
     "bulkEmail": "发邮件",
     "bulkSaved": "已批量更新 {{n}} 位用户",
     "bulkConfirmTitle": "确认批量修改",
-    "bulkConfirmBody": "将对已选中的 {{n}} 位用户执行：{{changes}}。改完不可撤销，也没有操作记录可回溯。",
+    "bulkConfirmBody": "将对已选中的 {{n}} 位用户执行：{{changes}}。改完不可撤销；所有修改都会记录在操作日志里。",
     "bulkConfirmAdminWarn": "其中包含「角色 → admin」：这些账号将拿到后台的全部权限，包括改别人的角色。",
     "bulkConfirmInviteWarn": "指派后，这些用户的邮箱会立刻出现在「{{agent}}」的代理页名单里。撤销只能停止继续显示，看过的人已经看过了。",
     "changeRole": "角色 → {{value}}",
@@ -1764,7 +2553,7 @@
     "changeInvite": "归因 → {{value}}",
     "neverExpires": "永不过期",
     "promoteTitle": "确认提升为管理员",
-    "promoteBody": "{{email}} 将拿到后台的全部权限，包括改别人的角色与套餐。后台没有降权审计，改回去不会留痕。",
+    "promoteBody": "{{email}} 将拿到后台的全部权限，包括改别人的角色与套餐。所有修改都会记录在操作日志里。",
     "colStatus": "状态",
     "statusActive": "正常",
     "statusDisabled": "已停用",

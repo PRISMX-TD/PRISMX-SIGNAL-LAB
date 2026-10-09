@@ -26,6 +26,7 @@ import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
 import EmailPanel from '../components/admin/EmailPanel'
+import ActivityLogPanel, { type LogsPreset } from '../components/admin/ActivityLogPanel'
 import { attributionOptions } from '../components/admin/invite/inviteLinkLogic'
 import type { AdminUser, InviteLink, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
@@ -97,8 +98,12 @@ const DEFAULT_PAGE_SIZE = 20
 // system——那个已经是「系统参数」。
 // health (system status) sits right after data: it's the first thing an admin
 // looks for when something breaks. Not `system`, which is already the settings tab.
-type AdminTab = 'data' | 'health' | 'winrate' | 'users' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'gamification' | 'competitions'
-const ADMIN_TABS: AdminTab[] = ['data', 'health', 'winrate', 'users', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'gamification', 'competitions']
+// logs（操作日志）紧跟 users：查「这个人做了什么、谁动过他」是从用户表出发的，用户表每行的
+// 「日志」按钮直接跳过来（见 logsPreset）。
+// logs (activity log) sits right after users: "what did this person do, who touched them"
+// starts from the user table, whose per-row Log button jumps here (see logsPreset).
+type AdminTab = 'data' | 'health' | 'winrate' | 'users' | 'logs' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'gamification' | 'competitions'
+const ADMIN_TABS: AdminTab[] = ['data', 'health', 'winrate', 'users', 'logs', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'gamification', 'competitions']
 
 interface Draft {
   role: UserRole
@@ -431,11 +436,34 @@ export default function AdminPage() {
   // land straight on the tickets tab; tabs are state rather than routes, so it is
   // read once on mount and never written back — writing it would add a history
   // entry per tab click and turn "back" into tab-hopping.
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [tab, setTab] = useState<AdminTab>(() => {
     const wanted = searchParams.get('tab')
     return (ADMIN_TABS as string[]).includes(wanted ?? '') ? (wanted as AdminTab) : 'data'
   })
+  // 操作日志带进去的筛选：用户表每行的「日志」按钮（照 emailPreset 的写法），或深链
+  // ?tab=logs&user=<id>&login=<login>。深链参数和 ?tab= 一样只在首次挂载时读一次，读完就从
+  // 地址栏抹掉（同工单深链的做法）：留着的话，管理员在页内去掉了这个筛选，一刷新又被带回来。
+  // 日志面板发现筛选已经不是带进来的那个时会回调清掉它，下次进页签不再带回来。
+  // Filters carried into the activity log: the user table's per-row Log button (same
+  // pattern as emailPreset) or the deep link ?tab=logs&user=<id>&login=<login>. Like ?tab=
+  // the link is read once on mount and then removed from the address bar (as the ticket
+  // deep link does) — left there, a filter removed in-page would come back on refresh. The
+  // panel calls back to drop the preset once its filter has moved on.
+  const [logsPreset, setLogsPreset] = useState<LogsPreset | null>(() => {
+    if (searchParams.get('tab') !== 'logs') return null
+    const userId = searchParams.get('user')
+    const login = searchParams.get('login')
+    return userId || login ? { userId, login } : null
+  })
+  useEffect(() => {
+    if (!searchParams.has('user') && !searchParams.has('login')) return
+    const next = new URLSearchParams(searchParams)
+    next.delete('user')
+    next.delete('login')
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
   const [planFilter, setPlanFilter] = useState('')
@@ -692,15 +720,18 @@ export default function AdminPage() {
   }
 
   // 二次确认：一次点击原本就能把最多一整页的账号 role 批量改成 admin，或者把
-  // 套餐整批降级 / 清掉到期日——没有确认、没有撤销、后端也没有降权审计。同一份
-  // 代码库里危险操作一律走 ConfirmModal（公告、比赛、游戏化、邀请链接、代理端
-  // 的会员调整都有），唯独权限最大的这一处没有。
+  // 套餐整批降级 / 清掉到期日——没有确认、也没有撤销。同一份代码库里危险操作
+  // 一律走 ConfirmModal（公告、比赛、游戏化、邀请链接、代理端的会员调整都有），
+  // 唯独权限最大的这一处没有。改完查得到（所有修改都会记录在「操作日志」页签里，
+  // 一次批量是一行、展开看每个人），但查得到不等于撤得回，所以确认照旧。
   // Second confirmation: one click could bulk-set up to a whole page of accounts
   // to role=admin, or downgrade plans and wipe expiry dates — with no
-  // confirmation, no undo, and no demotion audit on the backend. Every other
-  // dangerous action in this codebase goes through ConfirmModal (announcements,
-  // competitions, gamification, invite links, the agent-side plan change); the
-  // one with the largest blast radius was the exception.
+  // confirmation and no undo. Every other dangerous action in this codebase goes
+  // through ConfirmModal (announcements, competitions, gamification, invite
+  // links, the agent-side plan change); the one with the largest blast radius was
+  // the exception. Every change is now recorded in the activity log tab (one row
+  // per bulk edit, expandable per user), but traceable is not reversible, so the
+  // confirmation stays.
   const [bulkConfirm, setBulkConfirm] = useState(false)
 
   const applyBulk = async () => {
@@ -733,13 +764,16 @@ export default function AdminPage() {
     setDrafts((prev) => ({ ...prev, [u.id]: toDraft(u) }))
   }
 
-  // 单条保存里唯一需要拦一道的是提权：user → admin 是本页最不可逆的动作（后端
-  // 没有降权审计），而下拉框选错一行 + 点保存就生效。其余字段（等级、到期日、
-  // 备注）改错了当场改回来即可，不值得为它们多一次点击。
+  // 单条保存里唯一需要拦一道的是提权：user → admin 是本页最不可逆的动作（新管理员
+  // 立刻拿到全部后台权限，降回去之前他做过的事已经做了——操作日志事后查得到每一项，
+  // 但挡不住），而下拉框选错一行 + 点保存就生效。其余字段（等级、到期日、备注）改错
+  // 了当场改回来即可，不值得为它们多一次点击。
   // The one single-row change worth interrupting is a promotion: user → admin is
-  // the least reversible action here (the backend keeps no demotion audit) and
-  // it takes one mis-picked dropdown plus Save. The other fields (plan, expiry,
-  // note) can be corrected on the spot and don't deserve an extra click.
+  // the least reversible action here (the new admin has every permission at once,
+  // and whatever they do before a demotion is done — the activity log records it
+  // afterwards but cannot prevent it), and it takes one mis-picked dropdown plus
+  // Save. The other fields (plan, expiry, note) can be corrected on the spot and
+  // don't deserve an extra click.
   const [promoteTarget, setPromoteTarget] = useState<AdminUser | null>(null)
 
   // ---- 停用 / 恢复 ----
@@ -832,6 +866,20 @@ export default function AdminPage() {
     void save(u)
   }
 
+  // 日志详情里的「打开用户资料」：回到用户管理并按邮箱搜出这个人。其它筛选一并清掉——
+  // 留着等级 / 归因筛选的话，搜出来可能是空表，看起来像这个人不存在。
+  // "Open user profile" from the activity drawer: back to Users, searched by email. The
+  // other filters are cleared too — a lingering plan / attribution filter could turn the
+  // search into an empty table that reads as "this user doesn't exist".
+  const openUserInUsersTab = (email: string) => {
+    setQuery(email)
+    setPlanFilter('')
+    setInviteFilter('')
+    setSelectedIds(new Set())
+    setTab('users')
+    void load({ q: email, plan: '', invite: '', page: 0 })
+  }
+
   const save = async (u: AdminUser) => {
     const d = drafts[u.id]
     if (!d) return
@@ -903,6 +951,10 @@ export default function AdminPage() {
       {tab === 'announcements' && <AnnouncementsPanel />}
 
       {tab === 'email' && <EmailPanel presetUserIds={emailPreset} onPresetCleared={() => setEmailPreset([])} />}
+
+      {tab === 'logs' && (
+        <ActivityLogPanel preset={logsPreset} onPresetCleared={() => setLogsPreset(null)} onOpenUser={openUserInUsersTab} />
+      )}
 
       {/* 传已保存值、不传 trial 表单草稿：见上面 savedTrialEnabled 的定义与注释。
           Pass the persisted value, not the trial form draft — see
@@ -1254,6 +1306,20 @@ export default function AdminPage() {
                             {t('common.reset')}
                           </button>
                         )}
+                        {/* 跳到「操作日志」并只看这个人（照批量条「发邮件」带人去邮件页签的写法）。
+                            Jump to the activity log filtered to this user (same pattern as the
+                            bulk bar's Email button carrying people to the email tab). */}
+                        <button
+                          type="button"
+                          className="btn-ghost whitespace-nowrap px-3 py-1.5 text-xs"
+                          title={t('admin.log.userRowBtnHint')}
+                          onClick={() => {
+                            setLogsPreset({ userId: u.id, userLabel: u.nickname || u.email })
+                            setTab('logs')
+                          }}
+                        >
+                          {t('admin.log.userRowBtn')}
+                        </button>
                       </div>
                     </td>
                   </tr>
