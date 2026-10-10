@@ -62,7 +62,7 @@ pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 > 只会让「一键更新」悄悄退回手动下载。
 
 ## 发布新版本
-1. 改 `bridge_app.py` 里的 `APP_VERSION`（当前 `1.4.8`，2026-10-08 已发 GitHub Release `v1.4.8`（`--latest`），三件套下载回来逐字节比对一致，exe 的 SHA-256 `9d90c18118a8880e854e304c53f65dfc1308a928d0e5b6ff66d4508b4b3f415a`；版本号的**唯一来源**；**改了回执协议的字段必须升版本**，见常量旁的注释），并在常量上方补一段该版本的变更说明；
+1. 改 `bridge_app.py` 里的 `APP_VERSION`（当前 `1.4.9`，2026-10-10 已发 GitHub Release `v1.4.9`（`--latest`，第一版带已签名 `version=` 行的清单），三件套下载回来逐字节比对一致，exe 的 SHA-256 `4e19e640e94cf2f62ef19be7810614560d6baefa34ea4c8dde726867c0b7e8a1`；并用 1.4.8 的旧验签逻辑与 1.4.9 的新逻辑分别对线上资产实测通过（存量 1.4.8 可一键升级）。上一版 `v1.4.8`（2026-10-08）exe SHA-256 `9d90c181…415a`；版本号的**唯一来源**；**改了回执协议的字段必须升版本**，见常量旁的注释），并在常量上方补一段该版本的变更说明；
 2. 按上面命令重新打包；
 3. **签名**：`python release_sign.py`（见下一节），得到 `dist/SHA256SUMS` 与 `dist/SHA256SUMS.sig`；
 4. 用 GitHub CLI 发 Release，上传**三个**资产，名字一个都不能改：
