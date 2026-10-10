@@ -358,3 +358,26 @@ def test_ping_bg_flag_marks_and_clears_background(monkeypatch):
     _run(ws)
     assert fake.bg_calls == [True, False, False, False]
     assert ws.sent[1:] == [{"type": "PONG"}] * 4
+
+
+def test_ping_flood_still_gets_pongs_but_samples_are_throttled(monkeypatch):
+    """PING 刷帧（2026-10-10 审计）：每帧照回 PONG（前端靠它认僵尸），但连接质量样本（一次
+    Redis 写）按 PING_SAMPLE_MIN_INTERVAL_SECONDS 节流，一连串密集 PING 只记一个样本。
+    A PING flood still gets every PONG, but only one quality sample (Redis write) per interval."""
+    _authed(monkeypatch)
+    samples = []
+    monkeypatch.setattr(ws_mod.net_quality, "record_sample", lambda *a: samples.append(a))
+    monkeypatch.setattr(ws_mod.net_quality, "record_connect", lambda *a: None)
+    monkeypatch.setattr(ws_mod.net_quality, "record_disconnect", lambda *a: None)
+    ws = _ScriptedWS(['{"type":"PING","rtt":12}'] * 20)
+    _run(ws)
+    assert ws.sent[1:] == [{"type": "PONG"}] * 20
+    assert len(samples) == 1 and samples[0][2] == 12
+
+
+def test_ping_rtt_out_of_range_is_dropped():
+    """客户端自报的 rtt 夹在 0~60000 毫秒，越界当没有，不进统计。"""
+    from app.services import net_quality
+    assert net_quality.parse_ping({"type": "PING", "rtt": 10**9})[0] is None
+    assert net_quality.parse_ping({"type": "PING", "rtt": -5})[0] is None
+    assert net_quality.parse_ping({"type": "PING", "rtt": 250})[0] == 250

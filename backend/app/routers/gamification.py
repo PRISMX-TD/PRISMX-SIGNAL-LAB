@@ -1,6 +1,7 @@
 """等级/勋章用户端 + 管理端（设计 §6、§11 发布策略）。"""
 import json
 import logging
+import math
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,8 +13,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
-from app.models import (Competition, CompetitionParticipant, LeaderboardSnapshot, MT5Account,
-                        PeriodBaseline, User, UserBadge, UserTask)
+from app.models import (ClosedTrade, Competition, CompetitionParticipant, LeaderboardSnapshot,
+                        MT5Account, PeriodBaseline, User, UserBadge, UserTask)
 from app.schemas import GamificationSettingsPatchIn, VisibilityPatchIn
 from app.services.audit import log_change
 from app.services.deps import get_current_user, get_db, require_admin
@@ -701,11 +702,41 @@ def gamification_share_month(request: Request, login: str, month: str,
 
 @router.get("/share/trade")
 @limiter.limit(settings.RATE_LIMIT_GAMIFICATION)
-def gamification_share_trade(request: Request, login: str, opened_at: str, closed_at: str, profit: float,
+def gamification_share_trade(request: Request, login: str, position: int | None = None,
+                              opened_at: str | None = None, closed_at: str | None = None,
+                              profit: float | None = None,
                               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """单笔战报：这笔盈亏 ÷ 收益榜对这笔仓位用的本金（开/平仓时刻本金取较大者）。
-    Single trade: profit over the capital the return board uses for this position."""
-    opened, closed = _parse_iso_utc(opened_at), _parse_iso_utc(closed_at)
+
+    盈亏、开 / 平仓时刻一律取服务端存的**本人**这笔仓位（login + 仓位号）的平仓腿，只认
+    verified（与收益榜同口径）；不再信客户端传来的 profit——以前随便填个盈利就能拿到
+    一张「官方口径」的高收益率战报。找不到这笔仓位（不存在 / 不是本人的）→ 404。
+    opened_at / closed_at / profit 是旧版前端的参数，保留只为不 422，一律忽略；不带
+    position 的旧请求返回 null（前端就不显示百分比）。
+    Single trade: profit over the capital the return board uses for this position. The
+    P&L and open/close instants come from the caller's own stored verified legs for
+    (login, position); the client-supplied profit is ignored. Unknown / not owned → 404.
+    Legacy params are accepted but ignored; a request without `position` gets null."""
+    if position is None:
+        return {"returnPct": None}
+    legs = (
+        db.query(ClosedTrade)
+        .filter(ClosedTrade.user_id == user.id, ClosedTrade.mt5_login == login,
+                ClosedTrade.position_ticket == position)
+        .all()
+    )
+    if not legs:
+        raise HTTPException(status_code=404, detail="trade not found")
+    legs = [l for l in legs if l.verified is True and l.profit is not None and math.isfinite(l.profit)]
+    open_times = [l.open_time for l in legs if l.open_time is not None]
+    if not legs or not open_times:
+        # 没有核验过的腿，或旧记录缺开仓时间（取不到「开仓时本金」）：不给百分比。
+        # No verified legs, or a legacy row without open time: no percentage.
+        return {"returnPct": None}
+    aware = lambda dt: dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)  # noqa: E731
+    opened = aware(min(open_times))
+    closed = aware(max(l.closed_at for l in legs))
+    profit = sum(l.profit for l in legs)
     b = _share_baseline(db, user, login, periods.month_key(closed))
     if b is None:
         return {"returnPct": None}

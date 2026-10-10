@@ -2,10 +2,18 @@
 /chart/history reads six columns and is cached briefly; the first page is dropped when
 a new closed bar lands."""
 from sqlalchemy import event
+from starlette.requests import Request
 
 from app.models import Candle, User
 from app.routers import chart
 from app.services import shared_cache
+
+
+def _request(token: str = "") -> Request:
+    headers = [(b"authorization", f"Bearer {token}".encode())] if token else []
+    return Request({"type": "http", "method": "GET", "path": "/chart/history", "headers": headers,
+                    "client": ("127.0.0.1", 1), "query_string": b"", "server": ("t", 80),
+                    "scheme": "http"})
 
 
 def _add(db, t, sym="BTCUSD", iv="60"):
@@ -35,7 +43,7 @@ def _selects(db):
 def _hist(db, u, **kw):
     kw.setdefault("limit", 50)
     kw.setdefault("before", None)
-    return chart.chart_history(symbol="btcusd", interval="60", db=db, user=u, **kw)
+    return chart.chart_history(_request(), symbol="btcusd", interval="60", db=db, user=u, **kw)
 
 
 def test_first_page_selects_six_columns_and_is_cached(db_session):
@@ -73,3 +81,47 @@ def test_before_page_cached_and_other_first_page_limits_not(db_session):
 def test_history_still_a_sync_endpoint():
     import inspect
     assert not inspect.iscoroutinefunction(chart.chart_history)
+
+
+def test_off_grid_before_is_served_but_not_cached(db_session):
+    """不在时间网格上的 before 照常返回同样的结果，但不进缓存：逐秒换 before 不能无限造键。
+    An off-grid `before` returns the same bars but is never cached (no unbounded keys)."""
+    u = _user(db_session)
+    for i in range(10):
+        _add(db_session, 3600 * (i + 1))
+    n = _selects(db_session)
+    on = _hist(db_session, u, limit=3, before=3600 * 8)
+    off = _hist(db_session, u, limit=3, before=3600 * 7 + 7)       # (7h, 8h) 之间：结果相同
+    assert off["bars"] == on["bars"]
+    _hist(db_session, u, limit=3, before=3600 * 7 + 7)
+    _hist(db_session, u, limit=3, before=3600 * 7 + 8)
+    assert n["n"] == 4                                            # 网格上的 1 次 + 不在网格上的 3 次
+
+
+def test_history_is_rate_limited_per_user(db_session):
+    """按用户限流：同一个 token 超过额度返回 429。/ Per-user limit: 429 past the quota."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+    from app.core.security import create_access_token
+    from app.core.strategy_limits import user_limiter
+    from app.services import deps
+
+    u = _user(db_session)
+    _add(db_session, 3600)
+    user_limiter.reset()
+    db_session.connection()
+    app = FastAPI()
+    app.state.limiter = user_limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.include_router(chart.router)
+    app.dependency_overrides[deps.get_db] = lambda: db_session
+    app.dependency_overrides[deps.get_current_user] = lambda: u
+    c = TestClient(app)
+    token = create_access_token(u.id)
+    h = {"Authorization": f"Bearer {token}"}
+    codes = [c.get("/chart/history?symbol=BTCUSD&interval=60&limit=7", headers=h).status_code
+             for _ in range(130)]                                  # 额度 120/分钟
+    assert codes[0] == 200 and 429 in codes
+    user_limiter.reset()

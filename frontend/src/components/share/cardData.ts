@@ -183,13 +183,14 @@ export async function loadTradePath(row: TradeRowLike): Promise<number[] | null>
 
 // ── 官方收益率（收益榜口径）/ official returns on the board definition ──
 
-// 单笔：openTime 缺失（2026-09-07 前的旧记录）就没法取「开仓时本金」，不显示百分比。
-// Single trade: rows without openTime (pre-2026-09-07) can't resolve capital-at-open, so no %.
-export async function loadTradeReturn(login: string | undefined, row: TradeRowLike): Promise<number | null> {
-  if (!login || !row.openTime || !row.closeTime) return null
+// 单笔：只把 (login, 仓位号) 交给后端，盈亏和开 / 平仓时刻由后端取本人已核验的平仓腿，
+// 前端的盈亏不再上送。openTime 缺失（2026-09-07 前的旧记录）就没法取「开仓时本金」，不显示百分比。
+// Single trade: only (login, position ticket) is sent; the backend reads P&L and open/close
+// times from the caller's own verified legs. Rows without openTime (pre-2026-09-07) get no %.
+export async function loadTradeReturn(login: string | undefined, row: TradeRowLike & { positionTicket?: number | null }): Promise<number | null> {
+  if (!login || row.positionTicket == null || !row.openTime || !row.closeTime) return null
   const { gamificationApi } = await import('../../api/client')
-  const iso = (v: string) => parseTime(v)!.toISOString()
-  const r = await gamificationApi.shareTrade(login, iso(row.openTime), iso(row.closeTime), row.net)
+  const r = await gamificationApi.shareTrade(login, row.positionTicket)
   return r.returnPct == null ? null : Math.round(r.returnPct * 100) / 100
 }
 

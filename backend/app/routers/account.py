@@ -1,7 +1,7 @@
 """账户路由：查询个人信息、修改密码、用户偏好 / Account router: profile, password & prefs."""
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,7 +10,13 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.rate_limit import limiter
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.security import (
+    create_access_token,
+    hash_password,
+    invalidate_bridge_token_cache,
+    rotate_api_token,
+    verify_password,
+)
 from app.models import MT5Account, User, UserPref, UserTask
 # _validate_password_bytes 是 schemas 的模块私有名，这里刻意跨模块引用它：这条
 # 规则（bcrypt 的 72 字节上限）在全站只能有一份实现，为了"不引用私有名"而在这里
@@ -27,6 +33,8 @@ from app.services.agents import is_agent
 from app.services.deps import get_current_user
 from app.services.settings_store import get_gamification_settings
 from app.services.pending_competition import pending_competition
+from app.services.password_reset import issue_token as issue_reset_token
+from app.services.password_reset import send_reset_email, too_many_recent_requests
 
 router = APIRouter(prefix="/auth", tags=["account"])
 
@@ -378,12 +386,18 @@ class ChangePasswordRequest(BaseModel):
     # rejected here. max_length stays as a cheap first pass — the real cap is the
     # byte check below, because bcrypt reads only the first 72 bytes and silently
     # drops the rest (a 30-character CJK password is really its first 24).
-    new_password: str = Field(..., min_length=8, max_length=128)
+    #
+    # 可空：没有密码的 Google 账号不再在这里直接设密码（见 change_password），前端那一支
+    # 不用填。有密码的账号改密码时仍然必填，路由里查。
+    # Optional: a Google-only account no longer sets a password here directly (see
+    # change_password), so that branch sends none. Still required for a real
+    # change; enforced in the route.
+    new_password: str | None = Field(None, min_length=8, max_length=128)
 
     @field_validator("new_password")
     @classmethod
-    def _password_within_bcrypt_limit(cls, v: str) -> str:
-        return _validate_password_bytes(v)
+    def _password_within_bcrypt_limit(cls, v: str | None) -> str | None:
+        return _validate_password_bytes(v) if v is not None else v
 
 
 @router.post("/password")
@@ -391,45 +405,105 @@ class ChangePasswordRequest(BaseModel):
 def change_password(
     request: Request,
     body: ChangePasswordRequest,
+    # 默认 None 只为直接调用路由函数的测试 / 脚本；FastAPI 照样按类型注入。
+    # The None default only serves direct calls; FastAPI injects it by type.
+    background: BackgroundTasks = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """修改密码；Google 用户首次调用时为设置密码。
+    """修改密码；没有密码的 Google 账号改为发一封「设置密码」邮件。
 
     会话版本号（token_version）自增一次，使改密前签发的所有旧 token（包括
     已经泄露、仍在别处被使用的）立即失效——仅清客户端本地 token 做不到这点。
     本次请求自己带的 token 也会随之失效，因此响应里附带一个已盖新版本号的
-    新 token，前端据此原地替换，不会把用户反手登出。
+    新 token，前端据此原地替换，不会把用户反手登出。桥接 API Token 同时换掉。
 
-    Increments the session version (token_version) once, instantly
-    invalidating every token issued before this change — including one
-    that's leaked and still being used elsewhere; merely clearing the
-    client's local token can't do that. This request's own token is
-    invalidated by the same bump, so the response carries a freshly stamped
-    token for the frontend to swap in, so changing your own password never
-    logs you out.
+    **Google 账号第一次设密码不再当场生效。** 原来这一支什么凭据都不要：谁拿到一个
+    JWT（XSS、借来的手机、泄露的日志）就能给这个账号加上一条攻击者知道的密码登录，
+    之后 JWT 失效也赶不走他。现在改成往账号邮箱发标准的找回密码邮件（同一套令牌、
+    同一个每小时上限），能收到这封信才证明是本人；响应里 emailSent=true，不发新 token、
+    不动 token_version。
+
+    Change the password; a Google-only account gets a "set your password" email
+    instead. A real change bumps token_version (killing every older token,
+    including leaked ones), returns a freshly stamped token for this session, and
+    rotates the bridge API token. A first password on a Google-only account is no
+    longer set directly: that branch needed no proof at all, so a stolen JWT could
+    add an attacker-known password login that outlives the JWT. It now sends the
+    standard reset email (same tokens, same hourly cap) and answers emailSent=true.
     """
-    if current_user.password_hash:
-        # 已有密码 → 须校验旧密码 / existing password → verify old
-        if not body.old_password:
-            raise HTTPException(status_code=400, detail="需提供旧密码 / old password is required")
-        if not verify_password(body.old_password, current_user.password_hash):
-            raise HTTPException(status_code=403, detail="旧密码错误 / old password is wrong")
-    # 操作日志：first_set = 原来没有密码（Google 注册的人第一次设），与上面「要不要校验旧
-    # 密码」用同一个判断。必须在下一行覆盖 password_hash 之前取。随下面的 commit 提交。
-    # Activity row: first_set = there was no password before (a Google sign-up
-    # setting one), the same test that decides whether the old password is checked
-    # above. Taken before the next line overwrites password_hash; committed below.
+    if not current_user.password_hash:
+        # 与找回密码共用按邮箱的每小时上限。这里是登录态、收件人就是本人，不存在枚举问题，
+        # 超限可以明说 429。/ Shares forgot-password's per-address hourly cap. This is
+        # authenticated and self-addressed, so over the cap can honestly be a 429.
+        if too_many_recent_requests(current_user.email):
+            raise HTTPException(
+                status_code=429,
+                detail="发送太频繁了，请稍后再试（也看看垃圾邮件箱） / Too many emails sent — try again later (and check your spam folder)",
+            )
+        client = getattr(request, "client", None)
+        raw = issue_reset_token(db, current_user, requested_ip=client.host if client else None)
+        activity_log.log_event(
+            db, activity_log.USER_PASSWORD_RESET_REQUESTED, user_id=current_user.id, actor_id=current_user.id,
+        )
+        to_email = current_user.email
+        db.commit()
+        # 明文令牌只交给发信函数；发信放后台，不让按钮转着等发信商。
+        # The plaintext only goes to the mailer, sent in the background.
+        if background is not None:
+            background.add_task(send_reset_email, to_email, raw)
+        else:
+            send_reset_email(to_email, raw)
+        return {"ok": True, "emailSent": True}
+
+    # 已有密码 → 须校验旧密码 / existing password → verify old
+    if not body.old_password:
+        raise HTTPException(status_code=400, detail="需提供旧密码 / old password is required")
+    if not body.new_password:
+        raise HTTPException(status_code=400, detail="需提供新密码 / new password is required")
+    if not verify_password(body.old_password, current_user.password_hash):
+        raise HTTPException(status_code=403, detail="旧密码错误 / old password is wrong")
+    # 操作日志：走到这里一定是已有密码的账号，first_set 恒为 False（Google 账号第一次设密码
+    # 走上面的邮件那一支，完成于 reset_password）。随下面的 commit 提交。
+    # Activity row: only accounts that already had a password reach here, so
+    # first_set is always False (a Google account's first password goes through
+    # the email branch above and lands in reset_password). Committed below.
     activity_log.log_event(
         db, activity_log.USER_PASSWORD_CHANGED, user_id=current_user.id, actor_id=current_user.id,
-        data={"first_set": not current_user.password_hash},
+        data={"first_set": False},
     )
-    # 设置/修改密码 / set or change password
     current_user.password_hash = hash_password(body.new_password)
     current_user.token_version = (current_user.token_version or 0) + 1
+    # 桥接 API Token 一起换（同 /ea/token/reset、reset_password）；旧哈希 commit 后清缓存。
+    # Rotate the bridge API token too; the old hash leaves the cache after commit.
+    old_api_hash = rotate_api_token(current_user)
     db.commit()
+    invalidate_bridge_token_cache(old_api_hash)
     new_token = create_access_token(current_user.id, current_user.token_version)
     return {"ok": True, "token": new_token}
+
+
+@router.post("/logout-all")
+@limiter.limit(settings.RATE_LIMIT_PASSWORD)
+def logout_all(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """退出所有设备：token_version 自增一次，此前签发的所有 JWT（包括本次请求这个）立即作废。
+
+    轻量鉴权缓存（auth:tv:<id>）不用手动清：deps.py 挂在 User 上的 ORM 事件在 commit 之后
+    自动失效它，与改密码同一条路。不回新 token——前端随后在本地登出。桥接 API Token 不动：
+    它是用户自己电脑上那台 Bridge 的凭据，要换去绑定页点「重置 Token」。
+    Log out everywhere: bump token_version so every JWT issued so far (this one
+    included) dies at once. The auth-state cache is invalidated after the commit
+    by the ORM events in deps.py, the same path a password change takes. No new
+    token is returned — the frontend then logs out locally. The bridge API token
+    is left alone (it's the credential of the user's own Bridge; reset it from
+    the Bind page)."""
+    current_user.token_version = (current_user.token_version or 0) + 1
+    db.commit()
+    return {"ok": True}
 
 
 # ---- 用户偏好（跨设备同步）/ User prefs (cross-device sync) ----

@@ -89,7 +89,9 @@ export default function BindPage() {
   const [gwLogin, setGwLogin] = useState('')
   const [gwPassword, setGwPassword] = useState('')
   const [gwVerifying, setGwVerifying] = useState(false)
-  const [gwResult, setGwResult] = useState<{ valid: boolean; name: string; balance: number; retcode: string } | null>(null)
+  // 失败时只给固定的「账号或密码不正确」：后端不再回 MT5 返回码（恒为空串，只记服务端日志）。
+  // A failure shows one fixed message: the backend no longer returns the MT5 retcode (always "").
+  const [gwResult, setGwResult] = useState<{ valid: boolean; name: string; balance: number } | null>(null)
   const [gwError, setGwError] = useState('')
 
   const handleGatewayVerify = async () => {
@@ -107,7 +109,7 @@ export default function BindPage() {
     setGwResult(null)
     try {
       const res = await gatewayApi.verify(loginNum, gwPassword)
-      setGwResult({ valid: res.valid, name: res.name, balance: res.balance, retcode: res.retcode })
+      setGwResult({ valid: res.valid, name: res.name, balance: res.balance })
       if (res.valid) {
         setGwPassword('') // 验证通过后清空密码
         refreshAll()
@@ -235,7 +237,7 @@ export default function BindPage() {
                   <p className={`bind-msg ${gwResult.valid ? 'ok' : 'warn'}`}>
                     {gwResult.valid
                       ? t('bind.gw.verified', { name: gwResult.name, balance: gwResult.balance.toFixed(2) })
-                      : t('bind.gw.verifyFailed', { code: gwResult.retcode })}
+                      : t('bind.gw.verifyFailed')}
                   </p>
                 )}
               </div>

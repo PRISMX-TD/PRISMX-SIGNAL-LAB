@@ -1,5 +1,6 @@
 """综合数据统计源（设计 §2.4）：按人全量、近 365 天、实盘 + verified、整仓判定。
 不动 compute_personal_winrate（仪表盘旧口径）——这是并行的新路径。"""
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -125,10 +126,21 @@ def _legs_by_position(db, user_id, keys):
                       ClosedTrade.verified.is_(True),
                       ClosedTrade.position_ticket.in_(tickets)).all())
     for leg in legs:
+        # 防御：库里若已有非有限的盈亏 / 手数（schema 加固前写入的 NaN / Infinity），整条
+        # 跳过——一个 NaN 会让求和、排序、胜率全部失真，榜单页直接 500。
+        # Defensive: skip legs with a non-finite profit / volume already in the DB; one
+        # NaN poisons every sum and sort downstream.
+        if not (_finite(leg.profit) and _finite(leg.close_volume)):
+            continue
         k = (leg.mt5_login, leg.position_ticket)
         if k in keys:
             out[k].append(leg)
     return out
+
+
+def _finite(v) -> bool:
+    """None 视为可用（下游按 0 处理）；非有限浮点不可用。/ None is fine (treated as 0); NaN/inf is not."""
+    return v is None or math.isfinite(v)
 
 
 def _resolve(orders, legs_map):

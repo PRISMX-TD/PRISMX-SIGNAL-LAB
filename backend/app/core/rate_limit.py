@@ -2,7 +2,10 @@
 Rate limiter: slowapi-based, keyed by client IP.
 """
 import hashlib
+import ipaddress
 import logging
+import threading
+import time
 
 from slowapi import Limiter
 from slowapi.util import get_remote_address
@@ -66,8 +69,37 @@ def limiter_options() -> dict:
     return opts
 
 
+def bucket_ip(ip: str) -> str:
+    """把 IP 折算成限流 / 锁定用的桶：IPv4 原样；IPv6 取所在的 /64 网段。
+
+    一台 IPv6 主机通常拿到整整一个 /64（2^64 个地址），按单个地址计数的话，换个后缀
+    就是一个全新的计数器，按 IP 的限流与撒网计数对它形同虚设。/64 是运营商分给一个
+    用户 / 一条线路的最小单位，按它分桶不会把不相干的人并到一起。IPv4 映射地址
+    （::ffff:1.2.3.4）还原成 IPv4。解析不了的原样返回。
+    Bucket an IP for rate limiting / lockouts: IPv4 as is, IPv6 by its /64. One
+    IPv6 host typically owns a whole /64, so per-address counting hands it 2^64
+    fresh counters; /64 is the smallest unit an ISP assigns to one subscriber, so
+    unrelated users aren't merged. IPv4-mapped addresses fold back to IPv4;
+    anything unparseable is returned unchanged."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return ip
+    if addr.version == 6:
+        if addr.ipv4_mapped is not None:
+            return str(addr.ipv4_mapped)
+        return str(ipaddress.IPv6Network((addr, 64), strict=False))
+    return ip
+
+
+def client_ip_key(request) -> str:
+    """slowapi 的 key_func：get_remote_address（ProxyHeadersMiddleware 还原后的真实 IP）再按
+    bucket_ip 分桶。/ slowapi key_func: the real client IP, bucketed by bucket_ip."""
+    return bucket_ip(get_remote_address(request) or "")
+
+
 limiter = Limiter(
-    key_func=get_remote_address,
+    key_func=client_ip_key,
     storage_uri=shared_state.redis_url() or None,
     **limiter_options(),
 )
@@ -131,32 +163,103 @@ _POLICIES: dict[str, tuple[int, int]] = {
     # broker. Real users don't mistype five times, and a 15-minute lockout makes
     # sweeping the broker's login range impractical.
     "mt5_verify": (5, 900),
+    # 绑定 MT5 失败的按用户总数（2026-10-10）：mt5_verify 那条现在按 (用户, 账号) 计，挡住的是
+    # 「盯着一个账号猜」；这条挡「一个平台用户轮着试很多账号」。20 次足够真人把自己几个账号
+    # 都输错几遍，扫号段则每 15 分钟只有 20 次。
+    # Per-user total of failed MT5 binds (2026-10-10): mt5_verify is now keyed (user, login) and
+    # stops guessing one account; this stops one platform user sweeping many logins. 20 leaves
+    # a real person room to fumble several of their own accounts.
+    "mt5_verify_user": (20, 900),
+    # 按 MT5 账号的全局总数（跨所有平台用户）：攻击者注册一批平台账号、每个都对同一个 MT5
+    # 账号吃满 5 次，这条把总数封在 50 次 / 15 分钟。阈值是 (用户, 账号) 的 10 倍，单个陌生人
+    # 远够不着，真正的主人不会被一两个捣乱的人锁在门外；代价是十几个号联手确实能锁住它一阵。
+    # Global per-MT5-login total across all users: an attacker registering many platform
+    # accounts, each spending its 5 on one login, is capped at 50 per 15 min overall. 10x the
+    # per-pair threshold, so one stranger can't lock the owner out; a coordinated group of a
+    # dozen accounts still could, for a while — the accepted trade-off.
+    "mt5_verify_login": (50, 900),
 }
 
 def _lock_key(namespace: str, key: str) -> str:
     return f"lockout:{namespace}:{key}"
 
 
+# ---- Redis 故障时的进程内兜底计数 / in-process fallback while Redis is failing ----
+# 以前 Redis 一出错，读失败按「没有计数」放行、写失败直接忽略——Redis 挂着的那段时间里
+# 对单个账号的爆破完全没有上限。现在写 Redis 失败就记进这份进程内计数，读的时候取
+# 「Redis 的值」与「本进程的值」中较大的那个。只在本 worker 内有效（多 worker 时阈值被
+# worker 数稀释），但有上限总比没有强。条目带同样的滑动过期；总量设上限，免得故障期间
+# 被海量不同的键撑爆内存。
+# Previously a Redis error read as "no count" and a failed write was dropped, so
+# while Redis was down per-account brute force had no ceiling. A failed write
+# now lands in this per-process counter, and reads take the larger of the Redis
+# and local values. Per worker only (the threshold is diluted by the worker
+# count), but bounded beats unbounded. Same sliding expiry; capped in size so an
+# outage can't be used to exhaust memory with distinct keys.
+_LOCAL_MAX_KEYS = 50_000
+_local_lock = threading.Lock()
+_local_counts: dict[str, tuple[int, float]] = {}
+
+
+def _local_read(full_key: str) -> int | None:
+    with _local_lock:
+        entry = _local_counts.get(full_key)
+        if entry is None:
+            return None
+        count, expires = entry
+        if expires <= time.monotonic():
+            _local_counts.pop(full_key, None)
+            return None
+        return count
+
+
+def _local_incr(full_key: str, ttl: int) -> None:
+    now = time.monotonic()
+    with _local_lock:
+        entry = _local_counts.pop(full_key, None)
+        count = entry[0] + 1 if entry is not None and entry[1] > now else 1
+        if len(_local_counts) >= _LOCAL_MAX_KEYS:
+            for k in [k for k, (_c, exp) in _local_counts.items() if exp <= now]:
+                del _local_counts[k]
+            while len(_local_counts) >= _LOCAL_MAX_KEYS:
+                # 最早插入的先走（dict 保序）/ evict the oldest insertion
+                del _local_counts[next(iter(_local_counts))]
+        _local_counts[full_key] = (count, now + ttl)
+
+
+def _local_clear(full_key: str | None = None) -> None:
+    with _local_lock:
+        if full_key is None:
+            _local_counts.clear()
+        else:
+            _local_counts.pop(full_key, None)
+
+
 def _read(namespace: str, key: str) -> int | None:
-    """当前失败计数；键不存在或已过期返回 None。Redis 出错也返回 None（放行）。
-    The current failure count; None when the entry is absent or expired — and when
-    Redis errors (fail open, see _guard)."""
+    """当前失败计数；键不存在或已过期返回 None。取 Redis 与进程内兜底计数中较大的那个；
+    Redis 出错时只看兜底计数（不再整个放行）。
+    The current failure count, None when absent or expired: the larger of the
+    Redis value and the in-process fallback; on a Redis error only the fallback
+    (no longer failing fully open)."""
+    full_key = _lock_key(namespace, key)
+    local = _local_read(full_key)
     try:
-        raw = shared_state.kv_get(_lock_key(namespace, key))
+        raw = shared_state.kv_get(full_key)
     except Exception:  # noqa: BLE001
-        logger.warning("失败锁定计数读取失败，放行 / lockout read failed, failing open", exc_info=True)
-        return None
+        logger.warning("失败锁定计数读取失败，改用进程内计数 / lockout read failed, using local count", exc_info=True)
+        return local
     if raw is None:
-        return None
+        return local
     try:
-        return int(raw)
+        shared = int(raw)
     except (TypeError, ValueError):
         # 升级前留在 Redis 里的旧格式（[count, 时间戳] 的 JSON）。当作"没有计数"，
         # 下一次失败会用新格式重建——这些键最长只活一个锁定窗口，不值得为它写
         # 兼容读取路径。/ Pre-upgrade entries used a [count, ts] JSON list. Treat
         # them as absent; the next failure rebuilds the key in the new format, and
         # they live at most one lockout window anyway.
-        return None
+        return local
+    return shared if local is None else max(shared, local)
 
 
 def _is_locked(namespace: str, key: str) -> bool:
@@ -189,13 +292,18 @@ def _record_failure(namespace: str, key: str) -> None:
     # refresh=True keeps the original "expires one window after the *last*
     # failure" semantics; without it the expiry is pinned to the first failure and
     # an attacker could ride the window boundary to reset the count.
+    full_key = _lock_key(namespace, key)
     try:
-        shared_state.incr_with_ttl(_lock_key(namespace, key), lockout_seconds + 1, refresh=True)
+        shared_state.incr_with_ttl(full_key, lockout_seconds + 1, refresh=True)
     except Exception:  # noqa: BLE001
-        logger.warning("失败锁定计数写入失败，忽略 / lockout write failed, ignored", exc_info=True)
+        # 不能丢：记进进程内兜底计数，Redis 挂着时锁定照样生效（见 _local_counts）。
+        # Not dropped: counted in-process so the lockout still holds while Redis is down.
+        logger.warning("失败锁定计数写入失败，改记进程内 / lockout write failed, counting locally", exc_info=True)
+        _local_incr(full_key, lockout_seconds + 1)
 
 
 def _clear_failures(namespace: str, key: str) -> None:
+    _local_clear(_lock_key(namespace, key))
     try:
         shared_state.kv_delete(_lock_key(namespace, key))
     except Exception:  # noqa: BLE001
@@ -208,6 +316,7 @@ class _FailuresCompat:
 
     def clear(self) -> None:
         shared_state.reset_for_tests()
+        _local_clear()
 
 
 _failures = _FailuresCompat()
@@ -301,7 +410,9 @@ def login_source(request) -> str:
     """
     ip = ""
     try:
-        ip = get_remote_address(request) or ""
+        # IPv6 按 /64 分桶（见 bucket_ip），与 IP 级限流同一口径。
+        # IPv6 bucketed by /64 (see bucket_ip), same as the per-IP limiter.
+        ip = bucket_ip(get_remote_address(request) or "")
     except Exception:  # pragma: no cover - request 没有 client 的极端情况
         ip = ""
     if not ip:
@@ -412,3 +523,23 @@ def record_failed_mt5_verify(login: int | str) -> None:
 
 def clear_failed_mt5_verify(login: int | str) -> None:
     _clear_failures("mt5_verify", str(login))
+
+
+def is_mt5_verify_user_locked(user_id: str) -> bool:
+    """该平台用户绑定 MT5 的失败总数是否已达上限（mt5_verify_user）。
+    Whether this platform user has hit the per-user failed-bind cap."""
+    return _is_locked("mt5_verify_user", str(user_id))
+
+
+def record_failed_mt5_verify_user(user_id: str) -> None:
+    _record_failure("mt5_verify_user", str(user_id))
+
+
+def is_mt5_verify_login_locked(login: int | str) -> bool:
+    """该 MT5 账号跨所有用户的失败总数是否已达上限（mt5_verify_login）。
+    Whether this MT5 login has hit the global (all users) failed-bind cap."""
+    return _is_locked("mt5_verify_login", str(login))
+
+
+def record_failed_mt5_verify_login(login: int | str) -> None:
+    _record_failure("mt5_verify_login", str(login))

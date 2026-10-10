@@ -171,6 +171,33 @@ describe('useClientSocket', () => {
     stop()
   })
 
+  it('关闭码 4008（被顶掉）：不探测、不按退避重连，网络恢复也不连，回前台才重连', async () => {
+    const { stop } = await start()
+    const ws = FakeWS.instances[0]
+    ws.open()
+    ws.msg({ type: 'AUTH_OK' })
+    ws.msg({ type: 'PONG' })
+    doc.hidden = true
+    ws.drop(4008)
+    expect(reportApiFailure).not.toHaveBeenCalled()
+    // 退避封顶 10 秒，等 60 秒仍没有新连接 / backoff caps at 10s; still nothing after 60s
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(FakeWS.instances).toHaveLength(1)
+    ;(window as unknown as EventTarget).dispatchEvent(new Event('online'))
+    expect(FakeWS.instances).toHaveLength(1)
+    // 切回前台 → 立刻重连 / back to the foreground → reconnect at once
+    doc.hidden = false
+    doc.dispatchEvent(new Event('visibilitychange'))
+    expect(FakeWS.instances).toHaveLength(2)
+    // 新连接再被普通断线：恢复正常退避重连 / a later ordinary drop backs off as usual again
+    FakeWS.instances[1].open()
+    FakeWS.instances[1].msg({ type: 'AUTH_OK' })
+    FakeWS.instances[1].drop(1006)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(FakeWS.instances).toHaveLength(3)
+    stop()
+  })
+
   it('App 在后台：心跳降到 60 秒一帧，且 PING 不带 rtt/jit', async () => {
     const { stop } = await start()
     const ws = FakeWS.instances[0]

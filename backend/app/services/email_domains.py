@@ -186,3 +186,82 @@ def is_disposable_email(db, email: str) -> bool:
 
     # 3. 打包快照
     return _matches(domain, _load_blocklist())
+
+
+# ---------------------------------------------------------------------------
+# 规范邮箱（防别名白嫖试用）/ canonical email (alias abuse)
+# ---------------------------------------------------------------------------
+# 同一个收件箱可以有无数个写法：Gmail 忽略本地部分的点（a.b@gmail.com 与
+# ab@gmail.com 是同一个箱子），几乎所有主流邮箱都支持 "+标签"（ab+1@x.com 投进
+# ab@x.com）。注册按 users.email 精确去重，于是一个 Gmail 能注册出几十个账号、
+# 每个各领一次试用。规范邮箱把这些写法折叠成同一个值：
+#   · 全部小写；
+#   · 所有域名都去掉本地部分 "+" 及其后的内容；
+#   · gmail.com / googlemail.com 额外去掉本地部分的点，googlemail.com 记作 gmail.com。
+# 只用来**判重**（users.email_canonical，有索引、**不唯一**——线上可能已有别名重复），
+# 登录、发信、展示一律还用原样的 users.email。
+# One mailbox has endless spellings: Gmail ignores dots in the local part, and
+# nearly every provider delivers "+tag" to the base address. Registration
+# de-duplicated on the exact email only, so one Gmail could open dozens of
+# accounts, each claiming a trial. The canonical form folds those spellings into
+# one value. Used only for duplicate detection (users.email_canonical, indexed,
+# NOT unique — production may already hold alias duplicates); login, mail and
+# display keep using users.email as typed.
+_GMAIL_DOMAINS = frozenset({"gmail.com", "googlemail.com"})
+
+
+def canonical_email(email: str | None) -> str:
+    """把邮箱折叠成规范形式 / fold an address into its canonical form.
+
+    切不出 "@" 的输入原样小写返回（EmailStr 在外层保证合法，这里不报错）。
+    Input without an "@" is returned lowercased (EmailStr validates upstream)."""
+    raw = (email or "").strip().lower()
+    local, at, domain = raw.rpartition("@")
+    if not at:
+        return raw
+    local = local.split("+", 1)[0]
+    if domain in _GMAIL_DOMAINS:
+        local = local.replace(".", "")
+        domain = "gmail.com"
+    return f"{local}@{domain}"
+
+
+def canonical_email_taken(db, email: str, *, exclude_user_id: str | None = None) -> bool:
+    """库里是否已有别的账号与这个邮箱规范形式相同 / another account shares this canonical email."""
+    from app.models import User
+
+    q = db.query(User.id).filter(User.email_canonical == canonical_email(email))
+    if exclude_user_id:
+        q = q.filter(User.id != exclude_user_id)
+    return q.first() is not None
+
+
+def alias_trial_used(db, email: str, *, exclude_user_id: str | None = None) -> bool:
+    """同一规范邮箱下的**其它**账号是否已经吃过试用、或者是 / 曾经是付费 PRO。
+
+    任何一条成立就不再给这个别名账号发试用：
+      · trial_used_at 非空——那个箱子已经领过一次；
+      · plan 不是 FREE——当前就是 PRO（付费、赠送、试用中都算）；
+      · 有一笔 FINISHED 的支付——付过钱，后来到期降回 FREE 也算。
+    试用是「每个人一次」，不是「每个账号一次」。
+    Whether any OTHER account with the same canonical email has used a trial or
+    is/was a paying PRO: trial_used_at set, plan not FREE, or a FINISHED payment.
+    The trial is once per person, not once per account."""
+    from app.models import Payment, User
+
+    canon = canonical_email(email)
+    q = db.query(User.id, User.trial_used_at, User.plan).filter(User.email_canonical == canon)
+    if exclude_user_id:
+        q = q.filter(User.id != exclude_user_id)
+    others = q.all()
+    if not others:
+        return False
+    if any(t is not None or (plan or "FREE") != "FREE" for _id, t, plan in others):
+        return True
+    ids = [row[0] for row in others]
+    return (
+        db.query(Payment.id)
+        .filter(Payment.user_id.in_(ids), Payment.status == "FINISHED")
+        .first()
+        is not None
+    )

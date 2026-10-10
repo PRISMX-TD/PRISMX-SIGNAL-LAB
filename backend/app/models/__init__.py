@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from app.core.database import Base
 
@@ -229,6 +229,25 @@ class User(Base):
     # off by default. Migration rev 18 backfills public_id for existing users.
     public_id = Column(String(16), unique=True, nullable=True, default=new_public_id)
     stats_public = Column(Boolean, nullable=False, default=False)
+    # 规范邮箱（rev 40，见 services/email_domains.canonical_email）：小写、去 "+标签"、
+    # Gmail 再去点。只用于判「是不是同一个收件箱」——注册查重、试用防别名白嫖。
+    # 有索引但**不唯一**：上线前线上可能已经有别名重复的账号，加唯一约束会让迁移
+    # 直接失败。不需要任何调用点手写：下面的 validates 在每次给 email 赋值时（含
+    # 构造函数）同步算好，新的建号路径不会漏。
+    # Canonical email (rev 40): lowercase, "+tag" stripped, Gmail dots removed.
+    # Only answers "same mailbox?" — the registration duplicate check and the
+    # trial alias guard. Indexed but NOT unique: production may already hold alias
+    # duplicates and a unique constraint would fail the migration. No call site
+    # sets it by hand: the validator below fills it on every email assignment
+    # (constructor included), so a new creation path can't forget it.
+    email_canonical = Column(String, nullable=True, index=True)
+
+    @validates("email")
+    def _sync_email_canonical(self, _key, value):
+        from app.services.email_domains import canonical_email
+
+        self.email_canonical = canonical_email(value) if value else None
+        return value
 
 
 # 说明：旧的 EABinding（ea_bindings 表，EA 单账号绑定）已随 EA 接入方式移除。

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAgentOpenUrl, publicOpenAccountHref } from './openAccountLink'
+import { competitionOpenAccountUrl, isAgentOpenUrl, publicOpenAccountHref, safeOpenAccountUrl } from './openAccountLink'
 
 const COMP = '0b6f3c1e-1111-4222-8333-444455556666'
 
@@ -57,5 +57,29 @@ describe('publicOpenAccountHref', () => {
   })
   it('id 被转义 / id is encoded', () => {
     expect(publicOpenAccountHref('', 'a/b', ['x'])).toBe('/api/public/competitions/a%2Fb/open-account?refs=x')
+  })
+})
+
+describe('safeOpenAccountUrl', () => {
+  it('白名单内原样（去空白）返回 / allowlisted URLs pass through, trimmed', () => {
+    expect(safeOpenAccountUrl(' https://portal.makecapital.com/register?ib=1 ')).toBe('https://portal.makecapital.com/register?ib=1')
+  })
+  it('白名单外一律空串（不渲染）/ anything else is empty (not rendered)', () => {
+    for (const bad of [null, undefined, '', 'https://evil.io/open', 'http://makecapital.com/', 'https://makecapital.com@evil.io/', 'javascript:alert(1)']) {
+      expect(safeOpenAccountUrl(bad)).toBe('')
+    }
+  })
+})
+
+describe('competitionOpenAccountUrl', () => {
+  it('比赛自己的（管理员填的）可以是任意 https 券商 / the competition own URL may be any https broker', () => {
+    expect(competitionOpenAccountUrl('https://broker.example.com/open?ib=9')).toBe('https://broker.example.com/open?ib=9')
+    expect(competitionOpenAccountUrl(' https://portal.makecapital.com/r ')).toBe('https://portal.makecapital.com/r')
+    expect(competitionOpenAccountUrl('javascript:alert(1)')).toBe('')
+    expect(competitionOpenAccountUrl(null)).toBe('')
+  })
+  it('代理的只放行 Make Capital 白名单 / an agent URL must pass the allowlist', () => {
+    expect(competitionOpenAccountUrl('https://broker.example.com/open?ib=9', true)).toBe('')
+    expect(competitionOpenAccountUrl('https://portal.makecapital.com/r?ib=1', true)).toBe('https://portal.makecapital.com/r?ib=1')
   })
 })

@@ -11,7 +11,7 @@ import AdminSheet from '../AdminSheet'
 import { SkeletonLine } from '../../Skeleton'
 import { adminApi } from '../../../api/client'
 import { fmtDate, fmtTime, localizeApiError } from '../../../api/utils'
-import { safeHttpUrl } from '../../../utils/safeUrl'
+import { competitionOpenAccountUrl } from '../../../utils/openAccountLink'
 import Ladder from '../../competition/Ladder'
 import { publicLadderRows } from '../../../utils/publicCompetition'
 import type { PublicCompetitionPayload } from '../../../api/types'
@@ -36,7 +36,9 @@ export default function PublicPreviewModal({ compId, onClose }: { compId: string
     }
   }, [compId])
 
-  const href = data?.openAccountUrl ? safeHttpUrl(data.openAccountUrl) : ''
+  // 与公开页同一口径（比赛自己的开户链接，只挡非 http(s)），预览才与真实页面一致。
+  // Same check as the public page (the competition's own URL, safeHttpUrl), so the preview matches.
+  const href = competitionOpenAccountUrl(data?.openAccountUrl)
 
   return (
     <AdminSheet title={t('admin.competitionPromo.previewTitle')} onClose={onClose} widthClass="sm:w-[640px]">

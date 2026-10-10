@@ -4,7 +4,7 @@
 // account info live on the /bind page.
 import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { Link, useLocation } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 import { useTranslation } from "react-i18next"
 import { userApi, notificationApi, setToken } from "../api/client"
 import type { ProfilePatch } from "../api/types"
@@ -17,6 +17,9 @@ import BadgeIcon from "../components/badges/BadgeIcon"
 import Switch from "../components/Switch"
 import PageHead from "../components/PageHead"
 import FestivalSetting from "../festival/FestivalSetting"
+import ConfirmModal from "../components/ConfirmModal"
+import { useAuth } from "../store/auth"
+import { useBackToClose } from "../utils/useBackToClose"
 import {
   ALL_SENTINEL,
   EVENT_STRATEGY_SIGNAL,
@@ -37,6 +40,15 @@ export default function AccountPage() {
   const [oldPw, setOldPw] = useState("")
   const [newPw, setNewPw] = useState("")
   const [pwMsg, setPwMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null)
+  const [pwBusy, setPwBusy] = useState(false)
+
+  // 退出所有设备 / log out of all devices
+  const { logout } = useAuth()
+  const navigate = useNavigate()
+  const [confirmLogoutAll, setConfirmLogoutAll] = useState(false)
+  const [logoutAllBusy, setLogoutAllBusy] = useState(false)
+  const [logoutAllErr, setLogoutAllErr] = useState<string | null>(null)
+  useBackToClose(confirmLogoutAll, () => setConfirmLogoutAll(false))
 
   // 游戏化个人资料：昵称 + 退榜开关（设计 §6/§11）。草稿值只在
   // load() 成功、以及保存成功后从服务端回填，不在本地做长度等预校验——后端
@@ -201,6 +213,25 @@ export default function AccountPage() {
   }
 
   async function handlePassword() {
+    // 没有密码的 Google 账号：不在这里设密码，后端往账号邮箱发「设置密码」链接
+    // （证明能收这个邮箱才算本人，见 account.py 的 change_password）。
+    // Google-only account: no password is set here; the backend emails a
+    // set-password link (owning the mailbox is the proof — see change_password).
+    if (info && !info.hasPassword) {
+      setPwBusy(true)
+      try {
+        await userApi.changePassword(null, null)
+        setPwMsg({ kind: "ok", text: t("account.pwEmailSent") })
+      } catch (err: unknown) {
+        setPwMsg({
+          kind: "err",
+          text: err instanceof Error ? localizeApiError(err.message) : t("account.pwError"),
+        })
+      } finally {
+        setPwBusy(false)
+      }
+      return
+    }
     if (!newPw || newPw.length < 8) {
       setPwMsg({ kind: "err", text: t("account.pwTooShort") })
       return
@@ -221,6 +252,26 @@ export default function AccountPage() {
         kind: "err",
         text: err instanceof Error ? localizeApiError(err.message) : t("account.pwError"),
       })
+    }
+  }
+
+  // 退出所有设备：后端让所有已签发的 token 失效（含本机），随后本地登出回首页，
+  // 与顶栏「退出登录」走同一条清理路径。
+  // Log out everywhere: the backend kills every issued token (this one too), then
+  // we log out locally and go home — the same cleanup as the header's logout.
+  async function handleLogoutAll() {
+    setLogoutAllBusy(true)
+    setLogoutAllErr(null)
+    try {
+      await userApi.logoutAll()
+      setConfirmLogoutAll(false)
+      logout()
+      navigate("/", { replace: true })
+    } catch (err: unknown) {
+      setLogoutAllErr(err instanceof Error ? localizeApiError(err.message) : t("account.logoutAllError"))
+      setConfirmLogoutAll(false)
+    } finally {
+      setLogoutAllBusy(false)
     }
   }
 
@@ -725,6 +776,8 @@ export default function AccountPage() {
                 />
               </div>
             )}
+            {!info.hasPassword && <p className="acct-row-p">{t("account.setPasswordHint")}</p>}
+            {info.hasPassword && (
             <div className="acct-field">
               <label htmlFor="pw-new" className="acct-field-l">{t("account.newPassword")}</label>
               <input
@@ -744,14 +797,40 @@ export default function AccountPage() {
                 <b>{strength === 0 ? "—" : t(`account.pwStrength.${strength}`)}</b>
               </div>
             </div>
+            )}
             <div className="acct-actions">
-              <button onClick={handlePassword} className="btn btn-primary">
-                {info.hasPassword ? t("account.changePassword") : t("account.setPassword")}
+              <button onClick={handlePassword} className="btn btn-primary" disabled={pwBusy}>
+                {info.hasPassword ? t("account.changePassword") : t("account.setPasswordByEmail")}
               </button>
               {pwMsg && <p className={`acct-msg ${pwMsg.kind}`}>{pwMsg.text}</p>}
             </div>
+            <div className="acct-field">
+              <p className="acct-row-p">{t("account.logoutAllDesc")}</p>
+              <div className="acct-actions">
+                <button
+                  type="button"
+                  onClick={() => setConfirmLogoutAll(true)}
+                  className="btn btn-ghost text-down"
+                  disabled={logoutAllBusy}
+                >
+                  {t("account.logoutAll")}
+                </button>
+                {logoutAllErr && <p className="acct-msg err">{logoutAllErr}</p>}
+              </div>
+            </div>
           </div>
         </section>
+        {confirmLogoutAll && (
+          <ConfirmModal
+            title={t("account.logoutAll")}
+            message={t("account.logoutAllConfirm")}
+            confirmLabel={t("account.logoutAll")}
+            danger
+            busy={logoutAllBusy}
+            onConfirm={handleLogoutAll}
+            onCancel={() => setConfirmLogoutAll(false)}
+          />
+        )}
 
         {/* 通知设置 / Notifications */}
         <section

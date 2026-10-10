@@ -56,6 +56,10 @@ gateway/gateway.ini
 # MT5 SDK runtime DLLs: copied by build.ps1, not committed
 gateway/*.dll
 
+# 网关运行时状态（幂等缓存 idempotency.jsonl：账号号码、clientOrderId、交易结果），不入库
+# Gateway runtime state (idempotency cache: logins, clientOrderIds, trade results)
+gateway/state/
+
 # MT5 Manager API SDK 本体（约 110 MB，MetaQuotes 官方分发，不入库）
 #
 # ⚠️ 它不是可有可无的参考资料：build.ps1 从 MetaTrader5SDK/Libs 引用并复制 5 个

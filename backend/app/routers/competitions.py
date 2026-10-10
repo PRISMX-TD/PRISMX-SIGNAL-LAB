@@ -32,7 +32,7 @@ from app.services.gamification.competitions import (
     participant_details, refresh_comp_board, register_participant, settle_competition)
 from app.services.gamification.public_board import (
     build_funnel, build_public_payload, is_publicly_viewable, public_cache_key)
-from app.services.open_account import resolve_open_account_url
+from app.services.open_account import resolve_open_account
 from app.services.notification_feed import (
     KIND_COMP_PUBLIC_NAME, create_notification, notify_ws)
 from app.services.settings_store import get_gamification_settings
@@ -210,8 +210,15 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
     # 且代理填了自己的开户链接，就换成代理的（services/open_account）。
     # The in-app checklist's open-account step uses this competition's URL (§4), or
     # the agent's own when the user signed up through an agent link that has one.
-    out["openAccountUrl"] = resolve_open_account_url(
+    _chosen, open_url = resolve_open_account(
         db, comp, [user.invite_code] if user.invite_code else [])
+    out["openAccountUrl"] = open_url
+    # 换成了代理的链接时标出来：前端对代理链接按 Make Capital 白名单再验一道，比赛自己的
+    # （管理员填的，后端只要求 https）照常显示。与比赛的相同就当比赛的。
+    # Flag an agent-supplied URL: the frontend re-checks agent links against the Make
+    # Capital allowlist, while the competition's own (admin-set, https-only server-side)
+    # shows as before. Identical to the competition's counts as the competition's.
+    out["openAccountFromAgent"] = bool(open_url) and open_url != comp.open_account_url
     out["myEntries"] = [{
         "login": p.mt5_login,
         "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,

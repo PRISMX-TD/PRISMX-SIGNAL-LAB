@@ -1119,11 +1119,21 @@ export const userApi = {
   // account.py's docstring) and returns a freshly stamped one in the
   // response — callers must swap it into local storage, or even this
   // request's own (now-invalidated) token will 401 on the very next call.
-  changePassword: (oldPassword: string | null, newPassword: string) =>
-    request<{ ok: boolean; token: string }>('/auth/password', {
+  //
+  // 没有密码的 Google 账号不会当场设上密码：后端改为往账号邮箱发一封「设置密码」邮件，
+  // 回 emailSent=true、不带 token（本地 token 仍然有效，什么都不用换）。
+  // A Google-only account doesn't get a password set here: the backend emails a
+  // "set your password" link instead and answers emailSent=true with no token
+  // (the local token stays valid; nothing to swap).
+  changePassword: (oldPassword: string | null, newPassword: string | null) =>
+    request<{ ok: boolean; token?: string; emailSent?: boolean }>('/auth/password', {
       method: 'POST',
       body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }),
     }),
+  // 退出所有设备：后端把会话版本号加一，所有已签发的 token（含本机这个）当场失效；
+  // 调用方随后在本地登出。/ Log out everywhere: the backend bumps the session version
+  // so every issued token (this one included) dies; the caller then logs out locally.
+  logoutAll: () => request<{ ok: boolean }>('/auth/logout-all', { method: 'POST' }),
   // 跨设备同步的界面偏好 / cross-device UI prefs
   getPrefs: () => request<{ data: Record<string, unknown> }>('/auth/prefs'),
   // 只传发生变化的那一个命名空间，服务端合并进已存文档（不再整份覆盖），
@@ -1222,9 +1232,11 @@ export const gamificationApi = {
   shareMonth: (login: string, month: string) =>
     request<{ returnPct: number | null; total: number | null; trades: number | null; wins: number | null }>(
       `/gamification/share/month?login=${encodeURIComponent(login)}&month=${encodeURIComponent(month)}`),
-  shareTrade: (login: string, openedAt: string, closedAt: string, profit: number) =>
+  // 单笔：只传 (login, 仓位号)，盈亏 / 时刻由后端取本人已核验的平仓腿；不是本人的仓位 → 404。
+  // Single trade: only (login, position); the backend reads the caller's own verified legs. Not owned → 404.
+  shareTrade: (login: string, position: number) =>
     request<{ returnPct: number | null }>(
-      `/gamification/share/trade?login=${encodeURIComponent(login)}&opened_at=${encodeURIComponent(openedAt)}&closed_at=${encodeURIComponent(closedAt)}&profit=${profit}`),
+      `/gamification/share/trade?login=${encodeURIComponent(login)}&position=${encodeURIComponent(String(position))}`),
   // 排行榜（设计 §4.3）：period 既接受 "week"/"month"（当前进行中周期），也
   // 接受显式周期 key（如 "2026-W36"）访问已封存的历史周期。403 = 内测未开放
   // （见 gamification.admin.leaderboardSwitch）。

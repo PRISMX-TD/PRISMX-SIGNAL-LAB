@@ -9,6 +9,7 @@ MT5 execution goes exclusively through the PRISMX Bridge HTTP polling
 import asyncio
 import json
 import logging
+import time
 import uuid
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -33,6 +34,15 @@ router = APIRouter()
 # at volume. The real frontend sends the frame from onopen
 # (store/useClientSocket.ts), so five seconds is ample on any real network.
 AUTH_FRAME_TIMEOUT_SECONDS = 5
+
+# 同一条连接上两次「记连接质量样本」（一次 Redis pipeline）之间的最短间隔（2026-10-10 审计）。
+# 前端每 5 秒一拍 PING，取 4 秒给网络抖动留余量，正常心跳一个样本都不丢；更密的 PING（恶意
+# 刷帧、切前台时的探测）照回 PONG、照改后台标记——那两样都是纯内存——只是不再写 Redis。
+# Minimum gap between two connection-quality samples (one Redis pipeline each) on one
+# socket (2026-10-10 audit). The frontend pings every 5s; 4s leaves room for jitter so no
+# real heartbeat sample is lost. Faster PINGs (flooding, visibility probes) still get their
+# PONG and background flag — both in-memory — but skip the Redis write.
+PING_SAMPLE_MIN_INTERVAL_SECONDS = 4.0
 
 
 def _authenticate(token: str) -> str | None:
@@ -179,6 +189,7 @@ async def ws_client(websocket: WebSocket):
     # started after AUTH_OK (reference held against GC), off the connect critical path. finally
     # waits for it before record_disconnect so a connect-then-drop leaves no ghost entry.
     netq_task: asyncio.Task | None = None
+    last_sample_at = float("-inf")
     # register 之后的一切都必须在 try 里。
     #
     # 下面这几帧补推原来在 try 之外：客户端在鉴权成功后立刻断开（移动端切后台、
@@ -281,7 +292,14 @@ async def ws_client(websocket: WebSocket):
                 # bg:true = page in background, quote frames skipped; absent/false clears it.
                 manager.set_background(websocket, ping.get("bg") is True)
                 await websocket.send_json({"type": "PONG"})
-                await _netq(net_quality.record_sample, conn_id, user_id, *net_quality.parse_ping(ping))
+                # 样本节流：太密的 PING 不写 Redis（见 PING_SAMPLE_MIN_INTERVAL_SECONDS）。rtt / jit
+                # 由 net_quality.parse_ping 夹在 0~60000 毫秒，越界当没有。
+                # Sample throttle (see PING_SAMPLE_MIN_INTERVAL_SECONDS). rtt / jit are bounded
+                # to 0-60000 ms by net_quality.parse_ping; out-of-range reads as absent.
+                now = time.monotonic()
+                if now - last_sample_at >= PING_SAMPLE_MIN_INTERVAL_SECONDS:
+                    last_sample_at = now
+                    await _netq(net_quality.record_sample, conn_id, user_id, *net_quality.parse_ping(ping))
     except WebSocketDisconnect:
         pass
     except Exception:

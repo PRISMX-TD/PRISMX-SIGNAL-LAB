@@ -19,6 +19,7 @@ from app.core.database import get_db
 from app.core.rate_limit import limiter
 from app.models import AdminAuditLog, Payment, User
 from app.services.deps import get_current_user, require_verified_email
+from app.services.email_domains import alias_trial_used
 from app.services.nowpayments import (
     create_payment as np_create,
     get_currencies as np_currencies,
@@ -54,6 +55,46 @@ _CURRENCY_CACHE_TTL_SECONDS = 300
 _currency_cache: tuple[float, list[str]] | None = None
 
 
+def _sale_end(raw) -> datetime | None:
+    """把 sale_end_at 解析成 aware UTC 时间。空 = 不设截止（返回 None）。
+
+    只给日期（"2026-10-15"）按**那一天结束**算（次日 0 点 UTC 截止）——升级页把它显示成
+    「截止：2026-10-15」，用户理解的就是当天还有效。不带时区的时间按 UTC。解析不了的
+    值抛 ValueError，由调用方按「促销已失效」处理。
+    Parse sale_end_at to an aware UTC datetime; empty means no end (None). A bare
+    date ends at the close of that day (the upgrade page shows "ends 2026-10-15");
+    a naive time is UTC. Unparseable raises ValueError for the caller."""
+    text_value = str(raw or "").strip()
+    if not text_value:
+        return None
+    if len(text_value) == 10:
+        day = datetime.strptime(text_value, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return day + timedelta(days=1)
+    dt = datetime.fromisoformat(text_value.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _sale_active(p: dict, now: datetime | None = None) -> bool:
+    """促销此刻是否生效：开关开着、折扣大于 0、且（没有截止时间或还没到截止时间）。
+
+    以前 sale_end_at 只在升级页上显示、从不参与计价——到点之后页面还写着「已截止」，
+    下单照样按折扣价收钱。截止时间写坏了（解析不了）一律当作已截止：拿不准的折扣宁可
+    不给，记一条警告让运营去修。
+    Whether the sale applies right now: switched on, percent > 0, and no end or
+    not yet past it. sale_end_at used to be display-only, so orders kept getting
+    the discount after the advertised end. An unparseable end counts as ended."""
+    if not (p.get("sale_enabled") and p.get("sale_percent", 0) > 0):
+        return False
+    try:
+        end = _sale_end(p.get("sale_end_at"))
+    except (TypeError, ValueError):
+        logger.warning("sale_end_at 无法解析，促销按已截止处理 / unparseable sale_end_at: %r", p.get("sale_end_at"))
+        return False
+    if end is None:
+        return True
+    return (now or datetime.now(timezone.utc)) < end
+
+
 def _resolve_pricing(db: Session) -> dict:
     """读取数据库定价（带缓存），计算实际支付价格（含促销折扣）。
 
@@ -64,7 +105,7 @@ def _resolve_pricing(db: Session) -> dict:
     monthly = float(p["pro_monthly_price"])
     yearly = float(p["pro_yearly_price"])
     sale = None
-    if p.get("sale_enabled") and p.get("sale_percent", 0) > 0:
+    if _sale_active(p):
         pct = int(p["sale_percent"])
         sale = {
             "percent": pct,
@@ -193,7 +234,12 @@ def get_trial_status(
     """
     trial = get_trial_settings(db)
     enabled = bool(trial["trial_enabled"])
-    eligible = enabled and user.trial_used_at is None and user.plan == "FREE"
+    eligible = (
+        enabled and user.trial_used_at is None and user.plan == "FREE"
+        # 同一收件箱（规范邮箱）下别的账号用过试用 / 付过费：这个别名账号不再有资格。
+        # Another account on the same mailbox used a trial or paid: not eligible.
+        and not alias_trial_used(db, user.email, exclude_user_id=user.id)
+    )
     return {
         "enabled": enabled,
         "days": int(trial["trial_days"]),
@@ -234,6 +280,15 @@ def claim_trial(
     days = trial_grant_days(db)
     if days is None:
         raise HTTPException(status_code=400, detail="试用功能未开放 / Free trial is not available")
+
+    # 试用是「每个收件箱一次」，不是「每个账号一次」：a.b@gmail.com、ab+1@gmail.com 与
+    # ab@gmail.com 是同一个箱子，其中任何一个领过试用或付过费，别的都不再发
+    # （见 email_domains.alias_trial_used）。下面那条条件 UPDATE 仍然是本账号自己的原子闸。
+    # One trial per mailbox, not per account: if any alias of this address
+    # (canonical email) used a trial or paid, refuse. The conditional UPDATE below
+    # remains this account's own atomic guard.
+    if alias_trial_used(db, user.email, exclude_user_id=user.id):
+        raise HTTPException(status_code=409, detail="试用已被使用 / Trial already used")
 
     now = datetime.now(timezone.utc)
     expires = now + timedelta(days=days)

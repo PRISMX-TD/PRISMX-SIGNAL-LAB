@@ -13,21 +13,24 @@
 // gateway prefetch can't turn into "link expired". Works signed in or out (the
 // mail is often opened on a phone); verifying never signs anyone in.
 import { useEffect, useRef, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { authApi } from '../api/client'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
+import { useUrlToken } from '../utils/urlToken'
 
 type Phase = 'verifying' | 'done' | 'failed'
 
 export default function VerifyEmailPage() {
   const { t } = useTranslation()
   const { isAuthed, refreshUser } = useAuth()
-  const [params] = useSearchParams()
-  const token = params.get('token') || ''
+  // 令牌读一次就从地址栏抹掉，刷新靠本标签页的 sessionStorage 副本，验证成功后清掉
+  // （见 utils/urlToken.ts）。/ Read once, removed from the URL; reload uses this tab's
+  // sessionStorage copy, cleared on success.
+  const [token, clearToken] = useUrlToken('prismx.verifyEmailToken')
   const [phase, setPhase] = useState<Phase>(token ? 'verifying' : 'failed')
   // 每个令牌只提交一次（StrictMode 下 effect 会跑两遍；后端虽幂等，也没必要多打）。
   // One submit per token (StrictMode runs effects twice; harmless, but pointless).
@@ -39,6 +42,7 @@ export default function VerifyEmailPage() {
     authApi
       .verifyEmail(token)
       .then(() => {
+        clearToken()
         setPhase('done')
         // 已登录：刷新登录态，提示条与各处的「先验证」引导随之撤掉。
         if (isAuthed) refreshUser()

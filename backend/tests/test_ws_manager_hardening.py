@@ -297,3 +297,42 @@ def test_connected_user_keeps_fresh_state_through_prune(monkeypatch):
 
     mgr = asyncio.run(scenario())
     assert mgr.get_positions("u1") and "u1" in mgr._last_positions_push
+
+
+# ---------- 每用户连接数上限 / per-user connection cap ----------
+
+def test_per_user_cap_closes_the_oldest_and_keeps_the_new_one():
+    """超出 MAX_CLIENTS_PER_USER 时关最旧的一条（优先后台页），新来的那条永远保留。
+    Past the cap the oldest connection (background pages first) is closed; the new one stays."""
+    from app.services import connection_manager as cm
+
+    class ClosableWS(FakeWS):
+        def __init__(self):
+            super().__init__()
+            self.closed_with = None
+
+        async def close(self, code=1000):
+            self.closed_with = code
+
+    async def scenario():
+        mgr = ConnectionManager()
+        tabs = [ClosableWS() for _ in range(cm.MAX_CLIENTS_PER_USER)]
+        for t in tabs:
+            await mgr.register_client("u1", t)
+        mgr.set_background(tabs[3], True)              # 后台页先被挑中 / background first
+        newest = ClosableWS()
+        await mgr.register_client("u1", newest)
+        await asyncio.sleep(0)                          # 让后台关闭任务跑完 / let the close task run
+        first_round = (set(mgr._clients["u1"]), tabs[3].closed_with)
+        newer = ClosableWS()
+        await mgr.register_client("u1", newer)
+        await asyncio.sleep(0)
+        return mgr, tabs, newest, newer, first_round
+
+    mgr, tabs, newest, newer, (after_first, bg_code) = asyncio.run(scenario())
+    assert len(after_first) == cm.MAX_CLIENTS_PER_USER and tabs[3] not in after_first
+    assert newest in after_first and bg_code == cm.CLOSE_CODE_SUPERSEDED
+    live = mgr._clients["u1"]
+    assert len(live) == cm.MAX_CLIENTS_PER_USER
+    assert tabs[0] not in live and tabs[0].closed_with == cm.CLOSE_CODE_SUPERSEDED   # 其次是最旧的
+    assert newest in live and newer in live

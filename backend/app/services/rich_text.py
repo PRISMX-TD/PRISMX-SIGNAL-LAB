@@ -90,6 +90,8 @@ DROP_TREE = frozenset({
     "noscript", "link", "meta", "base", "head", "title", "form", "input",
     "button", "select", "option", "textarea", "audio", "video", "source",
     "track", "canvas", "applet", "frame", "frameset", "map", "area", "portal",
+    # 浏览器按原始文本解析的几个（内容不是正文）/ raw-text elements in browsers
+    "noembed", "noframes", "xmp", "plaintext", "param",
 })
 
 # HTML 规范里的空元素：解析时不能把它们压进栈，否则后面的内容会全被当成它的孩子。

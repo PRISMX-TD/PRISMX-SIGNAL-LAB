@@ -59,6 +59,45 @@ class UploadError(Exception):
     Upload failure; message is a bilingual explanation for the admin."""
 
 
+def _too_large():
+    from fastapi import HTTPException  # 只在路由调用时用到 / only used from routes
+
+    mb = settings.UPLOAD_MAX_BYTES / (1024 * 1024)
+    return HTTPException(status_code=413, detail=f"图片超过 {mb:.0f}MB 上限 / the image exceeds the {mb:.0f}MB limit")
+
+
+async def read_upload_capped(file, request) -> bytes:
+    """读上传文件，最多读 UPLOAD_MAX_BYTES+1 字节；超限直接 413。所有上传路由共用。
+
+    两道判断，道理同 admin.upload_admin_image：先看声明的大小（`file.size`，回落到
+    Content-Length）做快速拒绝；再**有界**地读——只读上限加一个字节，多出来就拒。
+    声明值由客户端提供、可以谎报（或干脆不给，比如分块传输），所以绝不能在它之后
+    `await file.read()` 整段读进内存：那样一个谎报大小的请求就能让服务端把几百 MB
+    装进内存。上传服务里那道 len(data) 检查仍在，这里只是保证永远读不到那么多。
+
+    Read an upload, at most UPLOAD_MAX_BYTES+1 bytes; anything larger is a 413. Shared
+    by every upload route. The declared size (`file.size`, else Content-Length) gives a
+    fast rejection; the read itself is bounded — one byte past the cap is enough to know
+    it's too big. The declared size is client-supplied (or absent, e.g. chunked), so an
+    unbounded `await file.read()` after it would let a lying request pull hundreds of MB
+    into memory. The len(data) check in the upload functions stays; this only ensures
+    the bytes read can never get that large.
+    """
+    limit = settings.UPLOAD_MAX_BYTES
+    declared = getattr(file, "size", None)
+    if declared is None:
+        try:
+            declared = int(request.headers.get("content-length") or 0) or None
+        except ValueError:
+            declared = None
+    if declared is not None and declared > limit:
+        raise _too_large()
+    data = await file.read(limit + 1)
+    if len(data) > limit:
+        raise _too_large()
+    return data
+
+
 def is_configured() -> bool:
     """三项配置齐全才算启用上传 / uploads are on only when all three are set."""
     return bool(settings.SUPABASE_URL and settings.SUPABASE_SERVICE_KEY and settings.SUPABASE_STORAGE_BUCKET)

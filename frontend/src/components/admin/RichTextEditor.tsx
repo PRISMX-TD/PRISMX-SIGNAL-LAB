@@ -4,7 +4,8 @@
 // 在一个框里打字，顺手调字号、加粗、空一行、插张图。分块模型当初是为了让渲染侧
 // 不解析任何标记（见 StrategyBlocksEditor 顶部那段说明）——那条约束没有放弃，只是
 // 挪到了两端：入库前后端按白名单重建 HTML（services/rich_text.py），渲染时前端按
-// 同一份白名单解析成 React 节点（components/RichText.tsx）。全程没有 innerHTML。
+// 同一份白名单解析成 React 节点（components/RichText.tsx）。编辑框本身写 innerHTML
+// 之前也先过同一份白名单（见 editorSeedHtml）。
 //
 // 实现上刻意不引编辑器库：整个前端只有 gsap / lightweight-charts 两个体积项，为了
 // 一个后台页面再加 100KB+ 的 ProseMirror 不划算。contenteditable + execCommand 是
@@ -22,7 +23,8 @@
 // markup (see the note atop StrategyBlocksEditor) — is not abandoned, only moved
 // to both ends: the backend rebuilds the HTML against a whitelist before storing
 // it (services/rich_text.py) and the client parses it into React nodes against the
-// same whitelist (components/RichText.tsx). innerHTML appears nowhere.
+// same whitelist (components/RichText.tsx). The editor itself whitelists before
+// writing innerHTML (see editorSeedHtml).
 //
 // No editor library on purpose: the whole frontend carries only gsap and
 // lightweight-charts as heavy dependencies, and 100KB+ of ProseMirror for one
@@ -42,6 +44,7 @@ import {
   RICH_ALIGN_CLASSES,
   RICH_COLORS,
   RICH_FONT_SIZE_STEPS,
+  canParseRichHtml,
   normalizeRichHtml,
   plainToRichHtml,
   safeRichHref,
@@ -83,6 +86,24 @@ const PATHS = {
   clear: 'M6 6l12 12M18 6L6 18',
 }
 
+const EMPTY_DOC = '<p><br></p>'
+
+/** 写进可编辑框之前的那份 HTML：先在惰性文档里按白名单重建（normalizeRichHtml 走
+ *  DOMParser，脚本不跑、图片不加载），再交给活的 contentEditable。直接把 value 赋给
+ *  innerHTML 的话，库里或接口里混进来的 `<img src=x onerror=…>` 会在管理员的页面上
+ *  立刻执行——后端清洗兜得住入库，兜不住一个绕过它的值（旧数据、被改过的响应）。
+ *  解析器不可用时宁可给空文档也不回落到原串（normalizeRichHtml 那时会原样返回）。
+ *  The HTML written into the editable box: rebuilt against the whitelist in an inert
+ *  document first (normalizeRichHtml goes through DOMParser — no scripts, no image
+ *  loads), only then handed to the live contentEditable. Assigning `value` to
+ *  innerHTML directly would run an `<img src=x onerror=…>` that reached the value
+ *  (legacy rows, a tampered response) on the admin's page at once. Without a parser
+ *  it fails closed to an empty document rather than the raw string. */
+export function editorSeedHtml(value: string): string {
+  if (!value || !canParseRichHtml) return EMPTY_DOC
+  return normalizeRichHtml(value) || EMPTY_DOC
+}
+
 export default function RichTextEditor({
   value,
   docKey,
@@ -119,7 +140,8 @@ export default function RichTextEditor({
     // leaves a bare text node rather than a paragraph, and the controls that act per
     // block (align, clear formatting) then find nothing to act on and do nothing when
     // pressed. Seeding one paragraph puts the first line inside a block.
-    el.innerHTML = value || '<p><br></p>'
+    // 只写清洗过的版本，见 editorSeedHtml / only the whitelisted rebuild, see editorSeedHtml
+    el.innerHTML = editorSeedHtml(value)
     emitted.current = value || ''
     setEmpty(!el.textContent?.trim() && !el.querySelector('img,hr'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,7 +212,7 @@ export default function RichTextEditor({
   const ensureBlocks = () => {
     const el = ref.current
     if (!el) return
-    if (!el.firstChild) { el.innerHTML = '<p><br></p>'; return }
+    if (!el.firstChild) { el.innerHTML = EMPTY_DOC; return }
     const bare = Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.nodeValue || '').trim())
     if (bare) {
       focusBack()

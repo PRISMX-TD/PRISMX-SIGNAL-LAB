@@ -63,7 +63,10 @@
       h1 { margin: 0 0 12px; font-size: 20px; font-weight: 700; letter-spacing: 0.01em; color: #EDEDF0; }
       p { margin: 0 0 8px; font-size: 15px; line-height: 1.6; color: #B4B4BC; }
       p.en { color: #9C9CA6; font-size: 13px; }
-      button {
+      /* 重新加载用链接（href="" = 当前地址）而不是 onclick：CSP 不允许内联事件处理器。
+         Reload is a link (href="" = the current URL), not onclick: CSP blocks inline handlers. */
+      .reload {
+        display: inline-block; text-decoration: none;
         margin-top: 24px; padding: 10px 24px;
         border: 1px solid rgba(255, 255, 255, 0.12);
         border-radius: 8px;
@@ -73,7 +76,7 @@
         font-family: inherit;
         cursor: pointer;
       }
-      button:active { background: #4a1bc4; }
+      .reload:active { background: #4a1bc4; }
     </style>
   </head>
   <body>
@@ -82,7 +85,7 @@
       <h1>当前处于离线状态</h1>
       <p>网络连接断开了，暂时无法加载 Signal Lab。恢复网络后点下面的按钮重试。</p>
       <p class="en">You're offline. Reconnect and try again.</p>
-      <button onclick="location.reload()">重新加载 · Reload</button>
+      <a class="reload" href="">重新加载 · Reload</a>
     </div>
   </body>
 </html>

@@ -258,10 +258,41 @@ def auth_state_key(user_id: str) -> str:
     return AUTH_STATE_KEY.format(user_id=user_id)
 
 
+# 失效代号：每次失效换一个随机值。光「commit 之后删键」不够——一个**未命中**的读者可能在
+# commit 之前查到旧 tv、在删键之后才把它写回去，旧 token 于是又能用满 300 秒 TTL（改密 /
+# 停用形同没生效）。所以失效方先换代号再删键，读者在查库前、写回后各读一次代号（见
+# deps.get_auth_state）：
+#   · 读者查到的是旧值 ⇒ 提交晚于它开始查库 ⇒ 换代号晚于它第一次读代号；
+#   · 换代号早于读者第二次读 ⇒ 读者看到代号变了，删掉自己写的；
+#   · 换代号晚于读者第二次读 ⇒ 失效方的删键更晚，删掉的正是读者写的那份。
+# 两种交错都不会留下旧值。代号带 TTL 只为不在 Redis 里堆键；过期读作 None，最多多一次未命中。
+# 换代号放在本模块的 invalidate_auth_state 里（以前在 deps 里），任何直接调用方都同样安全。
+# Invalidation generation, a fresh random value per invalidation. Deleting the
+# key after commit isn't enough: a cache-miss reader can read the old tv before
+# the commit and write it back after the delete, reviving the old tokens for a
+# full TTL. Invalidators bump the generation and then delete; readers read it
+# before the query and after the write-back. If the reader saw old data, the
+# bump happened after its first read: either before its second read (it sees the
+# change and deletes its own write) or after it (then the invalidator's delete
+# comes later still and removes the stale write). No interleaving leaves a stale
+# entry. The TTL only keeps keys from piling up; an expired one reads as None.
+# The bump lives here (it used to be in deps) so every direct caller is safe too.
+AUTH_GEN_KEY = "auth:gen:{user_id}"
+AUTH_GEN_TTL_SECONDS = 3600
+
+
+def auth_gen_key(user_id: str) -> str:
+    return AUTH_GEN_KEY.format(user_id=user_id)
+
+
 def invalidate_auth_state(*user_ids: str) -> None:
     """让这些用户的 {tv, d} 缓存立即对所有 worker 失效（改密 / 停用 / 恢复 / 重置密码之后调）。
+    先换失效代号、再删键，顺序不能反（见 AUTH_GEN_KEY）。
     Drop these users' cached {tv, d} on every worker (after a password change / disable / enable /
-    password reset)."""
-    keys = [auth_state_key(u) for u in user_ids if u]
+    password reset). Bumps the generation first, then deletes; the order matters (see AUTH_GEN_KEY)."""
+    ids = [u for u in user_ids if u]
+    for uid in ids:
+        set_json(auth_gen_key(uid), uuid.uuid4().hex, ttl=AUTH_GEN_TTL_SECONDS)
+    keys = [auth_state_key(u) for u in ids]
     if keys:
         delete(*keys)

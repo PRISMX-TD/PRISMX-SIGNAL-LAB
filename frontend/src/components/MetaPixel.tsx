@@ -21,6 +21,7 @@
 // all the app's own telemetry covers.
 import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
+import { isPixelBlocked } from '../utils/pixelPrivacy'
 
 declare global {
   interface Window {
@@ -47,6 +48,13 @@ export default function MetaPixel() {
     // code's stub queues calls, but under a blocker even the stub is gone — guard
     // or every navigation throws.
     if (typeof window.fbq !== 'function') return
+    // 敏感页（重置 / 验证令牌、后台、工单……）不发：fbevents 会把含查询串的完整地址
+    // 一起发给 Meta。清单见 utils/pixelPrivacy.ts（index.html 的基础代码用同一份）。
+    // 这里从不显式传 URL；fbevents 自带的 pushState 自动上报已在 index.html 里关掉。
+    // Sensitive pages are skipped: fbevents sends the full URL, query string included.
+    // We never pass a URL explicitly; fbevents' own pushState tracking is disabled in
+    // index.html so this is the only SPA PageView source.
+    if (isPixelBlocked(pathname, search)) return
     window.fbq('track', 'PageView')
   }, [pathname, search])
 

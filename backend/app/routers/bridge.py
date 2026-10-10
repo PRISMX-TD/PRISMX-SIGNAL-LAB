@@ -11,6 +11,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import inspect as sa_inspect
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -23,7 +24,7 @@ from app.services.order_payload import is_stale_pending, order_source_tag, order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
-from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
+from app.services.closed_trade_store import leg_profit_plausible, logins_needing_backfill, upsert_leg
 from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current_user, is_account_online
 from app.services.gateway_binding import (
     bind_event_data, is_removed, is_revoked, log_unbind, mark_removed, not_removed, restore_removed,
@@ -445,13 +446,15 @@ class BridgeAccount(BaseModel):
     server: str | None = Field(default=None, max_length=64)
     accountName: str | None = Field(default=None, max_length=128)
     accountCurrency: str | None = Field(default=None, max_length=16)
-    balance: float | None = None
-    equity: float | None = None
+    # 资金字段拒 NaN / ±Infinity：它们会进账户卡片、竞赛对账与兜底合理性核对。
+    # Funds reject NaN / ±Infinity: they feed the account card, comp reconciliation and checks.
+    balance: float | None = Field(default=None, allow_inf_nan=False)
+    equity: float | None = Field(default=None, allow_inf_nan=False)
     # 已用保证金（MT5 的 account_info().margin）。桥接 1.4.1 起上报，旧版不带这个
     # 字段 → None，服务端不覆盖已有值（也就不会把「未知」写成 0）。
     # Margin in use; reported by bridge >= 1.4.1. Absent on older builds, in which
     # case the server keeps whatever it had rather than writing a fake 0.
-    margin: float | None = Field(default=None, ge=0)
+    margin: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     leverage: int | None = Field(default=None, ge=0, le=100000)
     company: str | None = Field(default=None, max_length=128)
     detectedSuffix: str | None = Field(default=None, pattern=SUFFIX_PATTERN)
@@ -514,9 +517,17 @@ def _upsert_account(
     without inserting — the caller records this login as rejected.
     """
     key = (acc.login, acc.server or None)
+    # 只认桥接自己的行，绝不碰 gateway 行：gateway 行建行时 server=""，而桥接不报 server
+    # 时 key 也是 (login, None)，两者会撞上。撞上就意味着桥接（用户侧程序、无需 MT5 密码）
+    # 能给 gateway 行刷心跳、改资金，甚至把用户删除 / 改密撤销的绑定复活——复活后订单
+    # 就直接经 gateway 下到券商。gateway 绑定只能由 /gateway/verify（重新输入密码）恢复。
+    # Bridge rows only, never a gateway row: gateway rows carry server="", so a bridge
+    # report without a server keys onto them. That would let the (password-less) bridge
+    # heartbeat, overwrite, or revive a removed / revoked gateway binding, after which
+    # orders route straight through the gateway. Only /gateway/verify may revive one.
     if known_rows is not None:
-        # 调用方已一次取全该用户的账号行（含软删），这里不再逐账号 SELECT。
-        # Caller preloaded all of this user's rows (soft-removed included): no per-account SELECT.
+        # 调用方已一次取全该用户的非 gateway 账号行（含软删），这里不再逐账号 SELECT。
+        # Caller preloaded this user's non-gateway rows (soft-removed included): no per-account SELECT.
         row = known_rows.get(key)
     else:
         row = (
@@ -525,9 +536,12 @@ def _upsert_account(
                 MT5Account.user_id == user_id,
                 MT5Account.login == acc.login,
                 MT5Account.server == (acc.server or None),
+                or_(MT5Account.source.is_(None), MT5Account.source != "gateway"),
             )
             .first()
         )
+    if row is not None and row.source == "gateway":  # 兜底：调用方传进来的查找表混了 gateway 行
+        return None, False
     created = False
     # 用户删过、桥接又报上来了：按"新账号"对待——受账户数上限约束，放行则复活。
     # A soft-removed row the bridge reports again counts as new: subject to the
@@ -540,7 +554,9 @@ def _upsert_account(
     if row is None:
         if account_limit is not None and existing_count >= account_limit:
             return None, False
-        row = MT5Account(user_id=user_id, login=acc.login, server=acc.server, source="bridge")
+        # server 为空串时落 NULL：空串会和同 login 的 gateway 行（server=""）撞唯一约束。
+        # An empty server is stored as NULL: "" would collide with the gateway row's unique key.
+        row = MT5Account(user_id=user_id, login=acc.login, server=acc.server or None, source="bridge")
         db.add(row)
         created = True
         if known_rows is not None:
@@ -690,9 +706,13 @@ def _report_accounts_db_work(
     # the per-account upsert lookup and the gateway list are all grouped in Python
     # (used to be 3+N queries).
     all_rows = db.query(MT5Account).filter(MT5Account.user_id == user.id).all()
+    # 查找表不收 gateway 行（见 _upsert_account）：桥接上报永远匹配不到、复活不了 gateway 绑定。
+    # The lookup excludes gateway rows (see _upsert_account): a bridge report never
+    # matches or revives a gateway binding.
     known_rows: dict[tuple[str, str | None], MT5Account] = {}
     for r in all_rows:
-        known_rows.setdefault((r.login, r.server or None), r)
+        if r.source != "gateway":
+            known_rows.setdefault((r.login, r.server or None), r)
     # FREE 的额外直连模拟名额只给 gateway 行（plans.plan_slot_rows）：占着那个名额的网关
     # 模拟户不算进桥接这边的配额，桥接 / 自报的模拟户永远不享受它。
     # FREE's extra direct-connect demo slot belongs to a gateway row only: a gateway
@@ -739,6 +759,14 @@ def _report_accounts_db_work(
         # handled inside _upsert_account (its existing_count check).
         if allowed_bound is not None and acc.login in bound_set and acc.login not in allowed_bound:
             rejected_logins.append(acc.login)
+            continue
+        # 不带 server 的上报撞上同 login 的 gateway 绑定（含已撤销 / 已删除的）：整条忽略。
+        # 正常桥接总会报 server（MT5 的 account_info().server），不带的只可能是旧版或伪造；
+        # 既不碰 gateway 行，也不另建一条同 login 的桥接行去占配额。
+        # A server-less report for a login that has a gateway binding (live, revoked or
+        # removed) is ignored: a real bridge always reports the server, so this is an old
+        # build or a forgery. Neither touch the gateway row nor add a twin bridge row.
+        if not acc.server and acc.login in gateway_logins:
             continue
         # 复活前先记下这行原来是不是用户删掉的、哪一刻删的：_upsert_account 里的
         # restore_removed 会把这两样清掉，而复活的去重键要用删除时间。纯内存读。
@@ -1577,6 +1605,12 @@ async def bridge_quotes(
 
 
 # ---------- 真实平仓明细上报（个人胜率用）/ closed-trade reporting (for personal win-rate) ----------
+# 平仓腿数值的绝对上限：价格（BTC 十万量级，留足余量）与金额（单腿盈亏 / 费用，账户币种，
+# 美分账户也够）。只挡垃圾值。/ Absolute bounds for leg prices and money amounts; garbage only.
+TRADE_PRICE_MAX = 1e8
+TRADE_MONEY_MAX = 1e9
+
+
 class BridgeClosedTrade(BaseModel):
     """桥接程序上报的一笔 MT5 平仓成交（可能是部分平仓）。
     One MT5 closing deal reported by the bridge (may be a partial close)."""
@@ -1584,9 +1618,15 @@ class BridgeClosedTrade(BaseModel):
     login: str = Field(pattern=LOGIN_PATTERN)
     symbol: str = Field(max_length=32)
     side: str = Field(pattern=r"^(BUY|SELL)$")
-    closeVolume: float = Field(gt=0, le=10000)
-    closePrice: float = Field(ge=0)
-    profit: float
+    # 数值字段一律拒 NaN / ±Infinity 并给绝对上下限：这些值直接进胜率 / 榜单 / 勋章的求和与
+    # 排序，一个 NaN 就能让整页统计 500 或把排序搅乱（JSON 里 NaN / Infinity 字面量 Python
+    # 是能解析的）。上限按"任何真实单腿都到不了"取，只挡垃圾值，不替代下面的合理性核对。
+    # Every number rejects NaN / ±Infinity and has absolute bounds: these feed win-rate,
+    # board and badge sums and sorts, where one NaN 500s or scrambles the page. The
+    # bounds only stop garbage; the plausibility check below does the real screening.
+    closeVolume: float = Field(gt=0, le=10000, allow_inf_nan=False)
+    closePrice: float = Field(ge=0, le=TRADE_PRICE_MAX, allow_inf_nan=False)
+    profit: float = Field(ge=-TRADE_MONEY_MAX, le=TRADE_MONEY_MAX, allow_inf_nan=False)
     positionTicket: int = Field(gt=0)
     dealTicket: int = Field(gt=0)
     closedAt: datetime
@@ -1596,12 +1636,15 @@ class BridgeClosedTrade(BaseModel):
     # The rest of MT5's positions-view fields (bridge >= 1.3.23), all optional so
     # older bridges keep working. Fees / gross are this leg's allocated share.
     openTime: datetime | None = None
-    openPrice: float | None = Field(default=None, ge=0)
-    grossProfit: float | None = None
-    commission: float | None = None
-    swap: float | None = None
-    sl: float | None = Field(default=None, ge=0)
-    tp: float | None = Field(default=None, ge=0)
+    openPrice: float | None = Field(default=None, ge=0, le=TRADE_PRICE_MAX, allow_inf_nan=False)
+    grossProfit: float | None = Field(
+        default=None, ge=-TRADE_MONEY_MAX, le=TRADE_MONEY_MAX, allow_inf_nan=False)
+    commission: float | None = Field(
+        default=None, ge=-TRADE_MONEY_MAX, le=TRADE_MONEY_MAX, allow_inf_nan=False)
+    swap: float | None = Field(
+        default=None, ge=-TRADE_MONEY_MAX, le=TRADE_MONEY_MAX, allow_inf_nan=False)
+    sl: float | None = Field(default=None, ge=0, le=TRADE_PRICE_MAX, allow_inf_nan=False)
+    tp: float | None = Field(default=None, ge=0, le=TRADE_PRICE_MAX, allow_inf_nan=False)
     reason: str | None = Field(default=None, max_length=16)
     comment: str | None = Field(default=None, max_length=64)
     # 费用分摊算法版本：2 = 只看成交记录的稳定算法（桥接 v1.3.24 起），后端据此允许
@@ -1688,18 +1731,76 @@ def _trade_history_db_work(
         db, user_id, leg_logins)
     accepted = [leg for leg in legs if leg.login in bridged]
     rejected = len(legs) - len(accepted)
-    known = _known_position_ids(db, user_id, {leg.login for leg in accepted})
+    accepted_logins = {leg.login for leg in accepted}
+    known = _known_position_ids(db, user_id, accepted_logins)
+    # 盈亏合理性核对要用的账号信息（币种 / 后缀 / 自报余额），与已入库的成交号（重发的腿
+    # 结论早已定下，不再查行情）。各一次查询。
+    # Account facts for the plausibility check, and the deal tickets already stored
+    # (a re-sent leg's verdict is settled, so it skips the candle query). One query each.
+    acct_by_login: dict[str, MT5Account] = {}
+    stored_deals: set[tuple[str, int]] = set()
+    if accepted_logins:
+        for r in (
+            db.query(MT5Account)
+            .filter(
+                MT5Account.user_id == user_id,
+                MT5Account.source == "bridge",
+                MT5Account.login.in_(list(accepted_logins)),
+                not_removed(),
+            )
+            .all()
+        ):
+            acct_by_login.setdefault(r.login, r)
+        # 分块查：回扫一批可能上千条，别把 IN 列表撑过驱动的参数上限。
+        # Chunked: a rescan batch can run into the thousands of tickets.
+        deal_tickets = sorted({leg.dealTicket for leg in accepted})
+        for i in range(0, len(deal_tickets), 500):
+            stored_deals.update(
+                (row[0], int(row[1]))
+                for row in db.query(ClosedTrade.mt5_login, ClosedTrade.deal_ticket)
+                .filter(
+                    ClosedTrade.user_id == user_id,
+                    ClosedTrade.mt5_login.in_(list(accepted_logins)),
+                    ClosedTrade.deal_ticket.in_(deal_tickets[i:i + 500]),
+                )
+                .all()
+            )
     inserted = 0
     unverified = 0
+    implausible = 0
     for leg in accepted:
         is_ours = (leg.login, leg.positionTicket) in known
+        payload = leg.model_dump()
+        # 归属对得上、且是新腿：再拿服务端行情核一遍盈亏。超出物理上限的照常入库但标
+        # verified=False——所有公开统计只认 True，于是它不计分（2026-10-10 产品决定）。
+        # Attributed new legs also get the P&L plausibility check; implausible ones are
+        # stored with verified=False, which every public statistic excludes.
+        if is_ours and (leg.login, leg.dealTicket) not in stored_deals:
+            acct = acct_by_login.get(leg.login)
+            ok, basis = leg_profit_plausible(
+                db, payload,
+                account_currency=getattr(acct, "account_currency", None),
+                symbol_suffix=getattr(acct, "symbol_suffix", None),
+                balance=getattr(acct, "balance", None),
+                equity=getattr(acct, "equity", None),
+            )
+            if not ok:
+                is_ours = False
+                implausible += 1
+                logger.warning(
+                    "平仓腿盈亏超出行情上限，标未核验 / implausible leg profit: user=%s login=%s "
+                    "deal=%s symbol=%s volume=%s profit=%s basis=%s",
+                    user_id, leg.login, leg.dealTicket, leg.symbol, leg.closeVolume, leg.profit, basis,
+                )
         if not is_ours:
             unverified += 1
         # 撞去重键不再丢弃，只补空列（一次性回扫补齐旧记录），见 closed_trade_store。
         # "inserted" 计数把补齐也算进去：都是新落地的数据，都该推 CLOSED_TRADE_NEW。
+        # 桥接是不可信通道（trusted=False）：已 verified 的腿重发不能改盈亏。
         # Duplicate keys back-fill null columns instead of being dropped (deep
-        # rescans enrich old rows); enrichment counts as inserted for the push.
-        if upsert_leg(db, user_id, leg.login, leg.model_dump(), is_ours) in ("inserted", "enriched"):
+        # rescans enrich old rows); enrichment counts as inserted for the push. The
+        # bridge is untrusted: a re-send can't rewrite a verified leg's P&L.
+        if upsert_leg(db, user_id, leg.login, payload, is_ours, trusted=False) in ("inserted", "enriched"):
             inserted += 1
     if inserted:
         # 新平仓落库 / 补列：胜率与已平仓明细的 60 秒缓存立刻作废。

@@ -81,6 +81,15 @@ const CONNECTING_STUCK_MS = 3_000
 // Window after a server-restart close (1012 / 1001): reconnect at restart pace and don't treat a
 // failed handshake as a blocked entry point. 1006 is deliberately NOT treated as a restart.
 export const RESTART_WINDOW_MS = 30_000
+// 服务端「同一用户在本 worker 上连接过多、顶掉最旧那条」用的关闭码（backend
+// services/connection_manager.CLOSE_CODE_SUPERSEDED）。被顶掉的页面不能立刻重连：它一连上
+// 又会把别的标签页顶掉，几个标签页就这样互踢成一个死循环。所以挂起，等用户把这个页面切回
+// 前台（visibilitychange / apppack:foreground）再连——那时它就是用户眼前的那个，顶掉别人才合理。
+// Close code the server uses when a user has too many sockets on one worker and the oldest is
+// dropped (backend services/connection_manager.CLOSE_CODE_SUPERSEDED). A superseded page must
+// not reconnect at once — it would kick another tab, which kicks back, in a loop. It parks until
+// the page comes back to the foreground, when it is the one the user is looking at.
+export const WS_CLOSE_SUPERSEDED = 4008
 // 返回当前 WebSocket 连接状态，供上层在断线时提示"数据可能已过时"。
 // Returns the current WebSocket connection state, so callers can warn that
 // quotes/positions may be stale while disconnected.
@@ -116,6 +125,9 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     let connectStartedAt = 0
     // 服务端重启窗口的截止时刻（performance.now()）/ end of the server-restart window
     let restartUntil = 0
+    // 被服务端以 4008 顶掉后挂起：不按退避重连、不响应 online，只等回前台。
+    // Parked after a 4008 close: no backoff reconnect, no online-triggered one; only foreground.
+    let superseded = false
     const inRestartWindow = () => performance.now() < restartUntil
     const clearHandshake = () => {
       if (handshakeTimer !== undefined) window.clearTimeout(handshakeTimer)
@@ -142,7 +154,7 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
     // visibilitychange listeners below reconnect the instant the network
     // returns or the user comes back, without waiting out the timer.
     const scheduleReconnect = () => {
-      if (closed) return
+      if (closed || superseded) return
       if (reconnectTimer) window.clearTimeout(reconnectTimer)
       const delay = reconnectDelay(attempt, Math.random(), inRestartWindow() ? 'restart' : 'normal')
       attempt += 1
@@ -485,6 +497,14 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
         // 1012 Service Restart / 1001 Going Away：服务端在重启。（1006 不算——它更可能是
         // 网络断了或被封。）/ server restarting (1006 does not count: more likely a network drop)
         if (ev && (ev.code === 1012 || ev.code === 1001)) restartUntil = performance.now() + RESTART_WINDOW_MS
+        // 被顶掉：入口没问题（不探测），也不排重连——挂起等回前台（见 WS_CLOSE_SUPERSEDED）。
+        // Superseded: the entry point is fine (no probe) and nothing is scheduled — park until foreground.
+        if (ev && ev.code === WS_CLOSE_SUPERSEDED) {
+          superseded = true
+          if (reconnectTimer) window.clearTimeout(reconnectTimer)
+          reconnectTimer = undefined
+          return
+        }
         // 重启期间的握手失败是「后端还没起来」，不是入口被封：不探测、不烧掉探测冷却。
         // A handshake failing during a restart means "backend not up yet", not a blocked entry
         // point: no probe, and don't burn the probe cooldown.
@@ -493,12 +513,20 @@ export function useClientSocket(onMessage: (msg: WSMessage) => void): boolean {
       }
     }
 
-    const handleOnline = () => reconnectNow()
+    // 被顶掉后网络恢复也不连：此刻这个页面未必是用户眼前的那个。
+    // Network back doesn't wake a superseded page: it may not be the one in front of the user.
+    const handleOnline = () => {
+      if (!superseded) reconnectNow()
+    }
     window.addEventListener('online', handleOnline)
     // 回前台：visibilitychange 与 App 壳的 apppack:foreground 合并、按 2 秒去重（不含 focus，
-    // 与原来一致）。/ Back to foreground: visibilitychange + the shell's apppack:foreground,
-    // de-duplicated over 2s (focus deliberately excluded, as before).
-    const offForeground = onForeground(reconnectNow, undefined, { focus: false })
+    // 与原来一致）。被顶掉而挂起的页面也只在这里解除挂起。
+    // Back to foreground: visibilitychange + the shell's apppack:foreground, de-duplicated over
+    // 2s (focus deliberately excluded, as before). This is also the only way out of "superseded".
+    const offForeground = onForeground(() => {
+      superseded = false
+      reconnectNow()
+    }, undefined, { focus: false })
 
     connect()
 

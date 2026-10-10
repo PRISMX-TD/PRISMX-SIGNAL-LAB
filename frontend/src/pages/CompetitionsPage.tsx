@@ -28,7 +28,7 @@ import { useLive } from '../store/live'
 import { useAuth } from '../store/auth'
 import Switch from '../components/Switch'
 import PrepChecklist from '../components/competition/PrepChecklist'
-import { safeHttpUrl } from '../utils/safeUrl'
+import { competitionOpenAccountUrl } from '../utils/openAccountLink'
 import { clearCompIntent, clearCompIntentFor, readCompIntent } from '../utils/compIntent'
 import {
   bindHint, classifyDetailError, gatesOfDetail, prepState, registerErrorKey, shouldClearIntent,
@@ -600,7 +600,9 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
   const rState = regState(detail, now)
   const enteredLogins = new Set(detail.myEntries.map((e) => e.login))
   const gates = gatesOfDetail(detail)
-  const openAccountUrl = safeHttpUrl(detail.openAccountUrl)
+  // 代理的开户链接只放行 Make Capital 白名单；比赛自己的（管理员填的）只挡非 http(s)。
+  // An agent's link must pass the Make Capital allowlist; the competition's own (admin-set) only safeHttpUrl.
+  const openAccountUrl = competitionOpenAccountUrl(detail.openAccountUrl, detail.openAccountFromAgent === true)
   // 可报名账户：本人、直连、赛道相符、未撤销、本场还没报过（设计 §1.11；后端仍独立复核）。
   // Eligible: own, direct-connected, on-track, not revoked, not yet entered (spec §1.11; backend re-checks).
   const prep = prepState({

@@ -76,17 +76,162 @@ def test_signed_manifest_and_matching_digest_are_accepted(signer, tmp_path):
     assert os.path.exists(dest)
 
 
-def test_fetch_expected_sha256_walks_the_whole_path(signer, monkeypatch):
-    """清单与签名都从 Release 资产取回，验签后吐出应有的哈希。
-    End-to-end over the two release assets, with the network stubbed out."""
-    digest = "a" * 64
-    sums = f"{digest} *{bridge_app.BRIDGE_ASSET_FILENAME}\n".encode()   # 二进制模式的 "*" 前缀
+def _newer_version() -> str:
+    """比当前 APP_VERSION 新一个补丁号 / one patch above the running version."""
+    parts = list(bridge_app._parse_version(bridge_app.APP_VERSION)) + [0, 0, 0]
+    return f"{parts[0]}.{parts[1]}.{parts[2] + 1}"
+
+
+def _stub_release(signer, monkeypatch, sums: bytes, tag: str) -> dict:
+    """把清单签好、网络打桩，返回一个指向它们的 release dict。"""
     sig = _b64(signer.sign(sums)).encode()
     fetched = {"https://github.com/sums": sums, "https://github.com/sig": sig}
     monkeypatch.setattr(bridge_app, "_http_get_bytes", lambda url, **kw: fetched[url])
+    return {"tag": tag, "sums_url": "https://github.com/sums", "sums_sig_url": "https://github.com/sig"}
 
-    release = {"sums_url": "https://github.com/sums", "sums_sig_url": "https://github.com/sig"}
+
+def test_fetch_expected_sha256_walks_the_whole_path(signer, monkeypatch):
+    """清单与签名都从 Release 资产取回，验签、核对已签名的版本号后吐出应有的哈希。
+    End-to-end over the two release assets, with the network stubbed out."""
+    digest = "a" * 64
+    ver = _newer_version()
+    sums = f"version={ver}\n{digest} *{bridge_app.BRIDGE_ASSET_FILENAME}\n".encode()   # "*" 前缀
+    release = _stub_release(signer, monkeypatch, sums, f"v{ver}")
     assert bridge_app.fetch_expected_sha256(release) == digest
+
+
+# ---------- 防降级：已签名的版本号 / anti-downgrade: signed version ----------
+
+def test_manifest_without_signed_version_is_refused(signer, monkeypatch):
+    """旧格式清单（没有 version= 行）签名再合法也要拒绝：否则旧包可以被当成新版重放。
+    An old-format manifest is refused even with a valid signature (replay of old builds)."""
+    sums = f"{'a' * 64}  {bridge_app.BRIDGE_ASSET_FILENAME}\n".encode()
+    release = _stub_release(signer, monkeypatch, sums, f"v{_newer_version()}")
+    with pytest.raises(bridge_app.UpdateVerificationError):
+        bridge_app.fetch_expected_sha256(release)
+
+
+def test_signed_version_not_matching_tag_is_refused(signer, monkeypatch):
+    """tag 来自未签名的 API：tag 说是新版、签名清单说是旧版 → 拒绝。
+    The unsigned tag claims a newer version than the signed one: refuse."""
+    old = bridge_app.APP_VERSION
+    sums = f"version={old}\n{'a' * 64}  {bridge_app.BRIDGE_ASSET_FILENAME}\n".encode()
+    release = _stub_release(signer, monkeypatch, sums, f"v{_newer_version()}")
+    with pytest.raises(bridge_app.UpdateVerificationError):
+        bridge_app.fetch_expected_sha256(release)
+
+
+@pytest.mark.parametrize("delta", ["same", "older"])
+def test_signed_version_not_newer_is_refused(signer, monkeypatch, delta):
+    """签名合法、tag 也对得上，但版本不比当前新 → 拒绝（降级 / 原地重装）。
+    Signed and consistent but not strictly newer: refuse (downgrade / reinstall)."""
+    cur = bridge_app._parse_version(bridge_app.APP_VERSION)
+    ver = bridge_app.APP_VERSION if delta == "same" else "0.0.1"
+    assert bridge_app._parse_version(ver) <= cur
+    sums = f"version={ver}\n{'a' * 64}  {bridge_app.BRIDGE_ASSET_FILENAME}\n".encode()
+    release = _stub_release(signer, monkeypatch, sums, f"v{ver}")
+    with pytest.raises(bridge_app.UpdateVerificationError):
+        bridge_app.fetch_expected_sha256(release)
+
+
+def test_malformed_or_conflicting_signed_version_is_refused():
+    name = bridge_app.BRIDGE_ASSET_FILENAME
+    for text in (
+        f"version=1.x.9\n{'a' * 64}  {name}\n",
+        f"version=\n{'a' * 64}  {name}\n",
+        f"version=9.9.9\nversion=9.9.8\n{'a' * 64}  {name}\n",
+    ):
+        with pytest.raises(bridge_app.UpdateVerificationError):
+            bridge_app.signed_version_from_sums(text)
+
+
+def test_check_signed_version_accepts_valid():
+    ver = _newer_version()
+    text = f"version={ver}\n{'a' * 64}  {bridge_app.BRIDGE_ASSET_FILENAME}\n"
+    assert bridge_app.check_signed_version(text, f"v{ver}", bridge_app.APP_VERSION) == ver
+    assert bridge_app.check_signed_version(text, ver, bridge_app.APP_VERSION) == ver   # 无 v 前缀
+
+
+def test_release_sign_manifest_round_trips_and_stays_backward_parseable(signer):
+    """release_sign.build_manifest 出的字节：新桥接能读出版本与哈希；version= 行不会干扰
+    旧版桥接的「哈希  文件名」解析（expected_sha256_from_sums 至今没改过，即旧逻辑）。
+    The manifest release_sign.py writes parses in new bridges, and the version line is
+    skipped by the (unchanged) digest parser that older bridges also use."""
+    import release_sign
+    ver = _newer_version()
+    digest = "e" * 64
+    sums = release_sign.build_manifest(ver, digest)
+    assert release_sign.ASSET == bridge_app.BRIDGE_ASSET_FILENAME
+    bridge_app.verify_sums_signature(sums, _b64(signer.sign(sums)))
+    text = sums.decode()
+    assert bridge_app.check_signed_version(text, f"v{ver}", bridge_app.APP_VERSION) == ver
+    assert bridge_app.expected_sha256_from_sums(text, bridge_app.BRIDGE_ASSET_FILENAME) == digest
+
+
+# ---------- 手动下载的回退地址 / manual-download fallback URL ----------
+
+def test_safe_update_page_url_only_allows_pinned_https_hosts():
+    ok = f"https://github.com/owner/repo/releases/download/v1/{bridge_app.BRIDGE_ASSET_FILENAME}"
+    assert bridge_app.safe_update_page_url(ok) == ok
+    for bad in (
+        "https://evil.example.com/PRISMX-Bridge-Setup.exe",
+        "http://github.com/owner/repo/releases",            # 非 https
+        "https://github.com.evil.example/x",
+        "file:///C:/Windows/System32/calc.exe",
+        "",
+        None,
+    ):
+        assert bridge_app.safe_update_page_url(bad) == bridge_app.RELEASES_PAGE
+
+
+def test_open_update_page_never_opens_unpinned_hosts(monkeypatch):
+    opened = []
+    monkeypatch.setattr(bridge_app.webbrowser, "open", lambda url: opened.append(url))
+
+    class _Fake:
+        _update_url = "https://evil.example.com/PRISMX-Bridge-Setup.exe"
+
+    bridge_app.BridgeGUI._open_update_page(_Fake())
+    assert opened == [bridge_app.RELEASES_PAGE]
+
+
+def test_verification_failure_falls_back_to_releases_page(monkeypatch):
+    """校验没过时，提示条说「前往官方发布页」，点击就必须真的打开发布页，而不是
+    刚刚校验失败的那个直链。On verification failure the banner must open the releases
+    page, not the direct link to the file that just failed verification."""
+    direct = f"https://github.com/owner/repo/releases/download/v9/{bridge_app.BRIDGE_ASSET_FILENAME}"
+    opened = []
+    monkeypatch.setattr(bridge_app.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(bridge_app, "frozen_exe_path", lambda: r"C:\nowhere\PRISMX-Bridge-Setup.exe")
+
+    def _bad_manifest(release, filename=bridge_app.BRIDGE_ASSET_FILENAME):
+        raise bridge_app.UpdateVerificationError("bad")
+    monkeypatch.setattr(bridge_app, "fetch_expected_sha256", _bad_manifest)
+
+    class _Var:
+        def set(self, v):
+            self.v = v
+
+    class _Root:
+        def after(self, _ms, fn):
+            fn()
+
+    class _Fake:
+        root = _Root()
+        update_var = _Var()
+        _update_url = direct
+        _updating = True
+        _update_failed = False
+        _update_release = {"tag": "v9.9.9", "download_url": direct}
+        _open_update_page = bridge_app.BridgeGUI._open_update_page
+        _on_update_click = bridge_app.BridgeGUI._on_update_click
+
+    fake = _Fake()
+    bridge_app.BridgeGUI._self_update_worker(fake, fake._update_release)
+    assert fake._update_failed is True and fake._updating is False
+    assert fake._update_url == bridge_app.RELEASES_PAGE
+    fake._on_update_click()
+    assert opened == [bridge_app.RELEASES_PAGE]
 
 
 def test_release_without_signature_assets_is_refused(signer):

@@ -7,6 +7,7 @@
 能解析的自然周/月格式。
 """
 import json
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -140,6 +141,21 @@ def _load_end_positions(p) -> tuple[datetime, dict[str, float]] | None:
     return at, pnl
 
 
+def _load_end_account_floating(p) -> float | None:
+    """结束快照里的账户级浮动盈亏兜底（只在账户读不到、也没有最近持仓缓存时记，且只记
+    浮亏）；没有 -> None。/ The account-level floating-loss fallback stored with an end
+    snapshot taken while the account was unreadable; None when absent."""
+    raw = getattr(p, "end_positions", None)
+    if not raw:
+        return None
+    try:
+        v = json.loads(raw).get("acctFloating")
+        v = float(v) if v is not None else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return v if v is not None and math.isfinite(v) and v < 0 else None
+
+
 def _end_valuation(db, comp: Competition, p, modes) -> list[tuple]:
     """比赛结束时还没平完的平台单，按结束快照计入：返回 [(开仓时刻, ends_at, 盈亏)]。
 
@@ -159,6 +175,7 @@ def _end_valuation(db, comp: Competition, p, modes) -> list[tuple]:
     if snap is None:
         return []
     capture_at, floating = snap
+    acct_floating = _load_end_account_floating(p)
     ends_at = _aware(comp.ends_at)
     by_pid = {}
     for o in _filled_orders(db, p.user_id, logins={p.mt5_login}, modes=modes, before=ends_at):
@@ -167,6 +184,7 @@ def _end_valuation(db, comp: Competition, p, modes) -> list[tuple]:
             by_pid[pid] = o
     legs_map = _legs_by_position(db, p.user_id, {(p.mt5_login, pid) for pid in by_pid})
     out = []
+    unvalued = []                                   # 没平完、快照里也没有的 / open, not in the snapshot
     for pid, o in by_pid.items():
         legs = legs_map.get((p.mt5_login, pid), [])
         before = [l for l in legs if _aware(l.closed_at) < ends_at]
@@ -175,9 +193,23 @@ def _end_valuation(db, comp: Competition, p, modes) -> list[tuple]:
         late = [l for l in legs if ends_at <= _aware(l.closed_at) <= capture_at]
         fl = floating.get(str(pid))
         if fl is None and not late:
+            unvalued.append((o, before))
             continue                                # 结束时并不持有 / not held at the end
         value = sum(l.profit or 0 for l in before + late) + (fl or 0.0)
         out.append((_aware(o.created_at) if o.created_at else ends_at, ends_at, value))
+    # 账户在结束时读不到（解绑 / 撤销）且没有最近持仓缓存：拍照时按账户最后已知的
+    # 净值 - 余额记了一笔浮亏。没平完的平台单平摊这笔浮亏计入——以前它们直接按
+    # 「结束时没持仓」丢掉，解绑就能把拖着不平的亏损单甩出成绩。只记浮亏，不记浮盈
+    # （账户级数字含平台外持仓，不能拿它加分）。
+    # Unreadable at the end with no cached positions: the capture stored the account's
+    # last known floating loss (equity - balance). Open platform positions share it
+    # instead of being dropped as "not held" — unbinding used to shed held losers.
+    # Losses only: the account-level figure includes off-platform positions.
+    if acct_floating is not None and unvalued:
+        share = acct_floating / len(unvalued)
+        for o, before in unvalued:
+            value = sum(l.profit or 0 for l in before) + share
+            out.append((_aware(o.created_at) if o.created_at else ends_at, ends_at, value))
     return out
 
 
@@ -1189,13 +1221,14 @@ def settle_competition(db, comp: Competition, admin_id: str,
     return {"ranked": ranked, "badges": badges, "badgeErrors": badge_errors}
 
 
-def _end_capture_todo() -> list[tuple[str, str, str, str | None, bool]]:
+def _end_capture_todo() -> list[tuple]:
     """已结束（未终审）比赛里还没拍结束持仓快照的参赛条目：
-    [(participant_id, user_id, login, 账户来源, 账户可读)]。"""
+    [(participant_id, user_id, login, 账户来源, 账户可读, 最后已知余额, 最后已知净值)]。"""
     from app.core.database import SessionLocal
     db = SessionLocal()
     try:
-        rows = (db.query(CompetitionParticipant, MT5Account.source, MT5Account.revoked_at)
+        rows = (db.query(CompetitionParticipant, MT5Account.source, MT5Account.revoked_at,
+                         MT5Account.balance, MT5Account.equity)
                   .join(Competition, Competition.id == CompetitionParticipant.competition_id)
                   .outerjoin(MT5Account, (MT5Account.user_id == CompetitionParticipant.user_id)
                              & (MT5Account.login == CompetitionParticipant.mt5_login))
@@ -1203,8 +1236,8 @@ def _end_capture_todo() -> list[tuple[str, str, str, str | None, bool]]:
                           CompetitionParticipant.disqualified.is_(False),
                           CompetitionParticipant.end_positions.is_(None)).all())
         return [(p.id, p.user_id, p.mt5_login, source,
-                 source is not None and revoked_at is None)
-                for p, source, revoked_at in rows]
+                 source is not None and revoked_at is None, balance, equity)
+                for p, source, revoked_at, balance, equity in rows]
     finally:
         db.close()
 
@@ -1228,8 +1261,10 @@ async def capture_end_positions(now: datetime | None = None) -> int:
     拍到的条目，所以读失败的下一轮（60 秒后）自动重试。
 
     gateway 账户直接向网关读（离线用户也读得到）；桥接账户只能用桥接最近推上来的
-    持仓缓存。账户已解绑 / 不在、或桥接没有缓存的，记一张空快照（不再重试）：读不到
-    就无从估值，按「结束时没有持仓」处理。
+    持仓缓存。账户已解绑 / 撤销 / 不在的，退回该用户最近一次推上来的持仓缓存（最后
+    已知的逐仓浮动盈亏）；缓存里也没有，就按账户行最后已知的 净值 - 余额 记一笔账户级
+    浮亏（acctFloating，只记亏损），由 _end_valuation 平摊给没平完的平台单——以前这里记
+    空快照，结束前解绑就能把拖着不平的亏损单整笔甩掉。快照带 lastKnown 标记，不再重试。
     As soon as a competition is ended, snapshot each entry's open positions
     (position id -> floating P/L) for _end_valuation. Runs every competition-loop
     tick and only touches entries not yet captured, so a failed read retries on the
@@ -1245,10 +1280,29 @@ async def capture_end_positions(now: datetime | None = None) -> int:
     from app.services.connection_manager import manager
     at = (now or datetime.now(timezone.utc)).isoformat()
     snaps: dict[str, str] = {}
-    for pid, uid, login, source, readable in todo:
+    extras: dict[str, dict] = {}
+
+    async def _last_known(uid, login, balance, equity) -> tuple[dict, dict]:
+        """读不到账户时的兜底：最后已知的持仓缓存；再没有就记账户级浮亏（见上）。
+        Fallback for an unreadable account: last known cached positions, else the
+        account-level floating loss."""
+        try:
+            cached = await manager.get_positions_shared_async(uid)
+        except Exception:  # noqa: BLE001 — 缓存读不到就走账户级兜底 / fall through
+            cached = []
+        got = {str(r.get("ticket")): float(r.get("profit") or 0.0)
+               for r in (cached or []) if str(r.get("login")) == str(login)}
+        extra = {"lastKnown": True}
+        if not got and isinstance(balance, (int, float)) and isinstance(equity, (int, float)):
+            floating = float(equity) - float(balance)
+            if math.isfinite(floating) and floating < 0:
+                extra["acctFloating"] = round(floating, 2)
+        return got, extra
+
+    for pid, uid, login, source, readable, balance, equity in todo:
         pnl = None
         if not readable:
-            pnl = {}
+            pnl, extras[pid] = await _last_known(uid, login, balance, equity)
         elif source == "gateway":
             try:
                 rows, err = await gw.get_positions(int(login))
@@ -1256,12 +1310,26 @@ async def capture_end_positions(now: datetime | None = None) -> int:
                 rows, err = [], "exception"
             if not err:
                 pnl = {str(r.ticket): float(r.profit or 0.0) for r in rows}
+                if not pnl:
+                    # 空列表不一定是空仓：网关对「组未开放」的账号同样回 ok + 空列表（/account
+                    # 则回 404）。拿 /account 复核——读不到，或净值与余额对不上（还有浮动盈亏）
+                    # 的，按读不到处理，走最后已知数据，免得结束时的亏损单被当成「没有持仓」。
+                    # An empty list isn't proof of flat: the gateway answers ok + [] for a
+                    # login whose group isn't enabled (and 404 on /account). Cross-check
+                    # /account; unreadable or still carrying floating P/L → last known data.
+                    try:
+                        acc = await gw.get_account(int(login))
+                    except Exception:  # noqa: BLE001
+                        acc = None
+                    fl_now = (float(acc.equity) - float(acc.balance)) if acc is not None else None
+                    if fl_now is None or not math.isfinite(fl_now) or abs(fl_now) > 0.005:
+                        pnl, extras[pid] = await _last_known(uid, login, balance, equity)
         else:
             rows = await manager.get_positions_shared_async(uid)
             pnl = {str(r.get("ticket")): float(r.get("profit") or 0.0)
                    for r in (rows or []) if str(r.get("login")) == str(login)}
         if pnl is not None:
-            snaps[pid] = json.dumps({"at": at, "pnl": pnl})
+            snaps[pid] = json.dumps({"at": at, "pnl": pnl, **extras.get(pid, {})})
     if snaps:
         await run_in_threadpool(_save_end_captures, snaps)
     return len(snaps)

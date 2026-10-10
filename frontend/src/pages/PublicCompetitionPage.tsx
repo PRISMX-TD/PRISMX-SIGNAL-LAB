@@ -29,9 +29,8 @@ import { fmtDate, fmtUsd } from '../api/utils'
 import { useNowTicker } from '../utils/competitionTime'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
-import { safeHttpUrl } from '../utils/safeUrl'
 import { storeCompIntent } from '../utils/compIntent'
-import { publicOpenAccountHref } from '../utils/openAccountLink'
+import { competitionOpenAccountUrl, publicOpenAccountHref } from '../utils/openAccountLink'
 import { isInAppBrowser } from '../utils/inAppBrowser'
 import { browserLangs, legalLang, pickPublicLang } from '../utils/publicLang'
 import { classifyPublicError, publicCta, publicLadderRows, shouldSendView, type PublicLoadError } from '../utils/publicCompetition'
@@ -355,7 +354,10 @@ function PublicRules({ c, t }: { c: PublicCompetition; t: TFunction }) {
 function PublicCta({ c, nowMs, t }: { c: PublicCompetition; nowMs: number; t: TFunction }) {
   const [params] = useSearchParams()
   const cta = publicCta(c, nowMs)
-  const openUrl = safeHttpUrl(c.openAccountUrl)
+  // 载荷里的是比赛自己的开户链接（管理员填的，可信）：只挡非 http(s)。代理链接不经这里，
+  // 由后端跳转口按 refs 挑选并按白名单校验。/ The payload carries the competition's own (admin-set)
+  // URL: safeHttpUrl only. Agent links never pass here; the backend redirect picks and validates them.
+  const openUrl = competitionOpenAccountUrl(c.openAccountUrl)
   const langQs = params.get('lang') ? `?lang=${encodeURIComponent(params.get('lang')!)}` : ''
   const ping = (step: 'cta') => void publicCompetitionApi.event({ compId: c.id, step, ref: refOrUndef() })
   const onJoin = () => {

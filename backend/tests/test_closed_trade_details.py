@@ -215,10 +215,13 @@ def test_stable_fee_report_overwrites_the_old_allocation(db_session, user):
     legacy_report = _leg(openPrice=1.16108, grossProfit=21.25, commission=-9.0, swap=0.0, profit=12.25)
     assert upsert_leg(db_session, user.id, LOGIN, legacy_report, True) == "unchanged"
     fixed = _leg(openPrice=1.16108, grossProfit=21.25, commission=-7.5, swap=0.0, profit=13.75, feeAlloc=2)
-    assert upsert_leg(db_session, user.id, LOGIN, fixed, True) == "enriched"
+    # 桥接（不可信通道）重发不能改已核验腿的盈亏（2026-10-10）；网关（trusted）照旧覆盖补正。
+    # An untrusted (bridge) re-send can't rewrite a verified leg; the gateway (trusted) still can.
+    assert upsert_leg(db_session, user.id, LOGIN, fixed, True) == "unchanged"
+    assert upsert_leg(db_session, user.id, LOGIN, fixed, True, trusted=True) == "enriched"
     row = db_session.query(ClosedTrade).one()
     assert (row.commission, row.profit) == (-7.5, 13.75)
-    assert upsert_leg(db_session, user.id, LOGIN, fixed, True) == "unchanged"
+    assert upsert_leg(db_session, user.id, LOGIN, fixed, True, trusted=True) == "unchanged"
 
 
 def test_gateway_legs_without_opening_leg_leave_open_facts_empty():

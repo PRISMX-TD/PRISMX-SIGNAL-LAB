@@ -21,7 +21,9 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.services.image_upload import UploadError, is_configured as is_upload_configured, upload_image
+from app.services.image_upload import (
+    UploadError, is_configured as is_upload_configured, read_upload_capped, upload_image,
+)
 from app.models import AdminAuditLog, Competition, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
 from app.services.audit import log_change
 from app.services import net_quality
@@ -312,6 +314,50 @@ def _apply_user_fields(db: Session, admin: User, target: User, fields: dict) -> 
         target.invite_code = fields["inviteCode"]
 
 
+def _guard_admin_demotion(db: Session, admin: User, targets: list[User], fields: dict) -> None:
+    """降权前的两道闸：① 不能把自己降成普通用户；② 不能把最后一个在用的管理员降掉。
+
+    停用那一侧（_require_disable_target）的"不能停用管理员"只有在降权本身守得住时才
+    有意义：否则"先降权、再停用"两步就能把最后一个管理员（包括自己）关在门外，而
+    这张表没有后台之外的恢复入口。降其他管理员仍然允许（审计照写 role 一行），只是
+    不能降到一个都不剩。批量与单个共用；批量时整批先算再动，不留半截状态。
+
+    "在用"的管理员 = role=admin 且未停用。计数时对这些行 FOR UPDATE：两个管理员同时
+    互相降权时，后到的那个会等前一个提交后重读，看到对方已不是管理员而被拒——否则
+    两边各自看到"还剩一个"，一起提交后一个管理员都不剩（SQLite 忽略该子句，无碍）。
+
+    Two gates before a demotion: you can't demote yourself, and you can't demote the
+    last active admin. The disable-side "admins can't be disabled" rule only holds if
+    demotion is guarded too — otherwise demote-then-disable locks out the last admin
+    (yourself included), with no recovery outside the database. Demoting other admins
+    stays allowed (the role audit row records it). The admin rows are locked FOR UPDATE
+    while counting so two admins demoting each other concurrently can't both pass.
+    """
+    new_role = fields.get("role")
+    if new_role is None or new_role == "admin":
+        return
+    demoted = {t.id for t in targets if t.role == "admin"}
+    if not demoted:
+        return
+    if admin.id in demoted:
+        raise HTTPException(
+            status_code=400,
+            detail="不能取消自己的管理员权限 / You cannot remove your own admin role",
+        )
+    active_admins = {
+        row.id
+        for row in db.query(User.id)
+        .filter(User.role == "admin", User.disabled_at.is_(None))
+        .with_for_update()
+        .all()
+    }
+    if not (active_admins - demoted):
+        raise HTTPException(
+            status_code=400,
+            detail="至少要保留一个管理员 / At least one active admin must remain",
+        )
+
+
 def _log_settings_diff(db: Session, admin_id: str, prefix: str, old: dict, new: dict) -> None:
     """平台设置的审计：逐键比较，只给**真的变了**的键各写一条带旧值的行。
 
@@ -376,6 +422,7 @@ def bulk_update_users(
         fields["inviteCode"] = _resolve_invite_code(db, fields["inviteCode"])
 
     targets = db.query(User).filter(User.id.in_(body.userIds)).all()
+    _guard_admin_demotion(db, admin, targets, fields)
     for target in targets:
         _apply_user_fields(db, admin, target, fields)
     db.commit()
@@ -400,6 +447,7 @@ def update_user(
     if "inviteCode" in fields:
         fields["inviteCode"] = _resolve_invite_code(db, fields["inviteCode"])
 
+    _guard_admin_demotion(db, admin, [target], fields)
     _apply_user_fields(db, admin, target, fields)
 
     db.commit()
@@ -1456,8 +1504,11 @@ async def upload_admin_image(
     ① **先看声明的大小**（starlette 从 multipart 分片算出的 `file.size`，回落到
        请求头 Content-Length）。这一道纯粹是为了别把几百 MB 先 spool 到临时文件
        再整段读进内存——传错文件的人不该顺手把服务端的内存吃掉。
-    ② **再看真正读到的字节数**（upload_image 内部那道）。声明值由客户端提供，
-       可以随便写，所以它只配当快速拒绝的依据，永远不是最终裁决。
+    ② **再看真正读到的字节数**：有界读取，最多读上限 + 1 字节（read_upload_capped，
+       share / tickets 共用），upload_image 内部那道 len 检查也还在。声明值由客户端
+       提供，可以随便写（或干脆不给，比如分块传输），所以它只配当快速拒绝的依据，
+       永远不是最终裁决——以前这里在①之后是不限长的 `await file.read()`，谎报大小
+       就能让服务端把整段请求体读进内存。
 
     删掉①会回到"先读完再说"，删掉②会让一个谎报 Content-Length 的请求直接绕过
     上限——两道各防一件事，别合并成一道。
@@ -1469,26 +1520,18 @@ async def upload_admin_image(
     first, purely to avoid spooling hundreds of megabytes to a temp file and
     reading them into memory before finding out. It is client-supplied, so it can
     only ever justify a fast rejection — the authoritative check stays on the
-    bytes actually read (inside upload_image). Neither replaces the other.
+    bytes actually read, and the read itself is bounded at cap+1 bytes
+    (read_upload_capped, shared with share / tickets; this used to be an unbounded
+    `await file.read()`). Neither replaces the other.
     """
     if not is_upload_configured():
         raise HTTPException(
             status_code=503,
             detail="后台未配置图片存储，请改用外链图片地址 / Image storage isn't configured; use an external image URL instead",
         )
-    declared = file.size
-    if declared is None:
-        try:
-            declared = int(request.headers.get("content-length") or 0) or None
-        except ValueError:
-            declared = None
-    if declared is not None and declared > settings.UPLOAD_MAX_BYTES:
-        mb = settings.UPLOAD_MAX_BYTES / (1024 * 1024)
-        raise HTTPException(
-            status_code=413,
-            detail=f"图片超过 {mb:.0f}MB 上限 / the image exceeds the {mb:.0f}MB limit",
-        )
-    data = await file.read()
+    # 声明大小快速拒绝 + 有界读取（最多读上限+1 字节），见 read_upload_capped
+    # Declared-size fast rejection + a bounded read (cap+1 bytes), see read_upload_capped
+    data = await read_upload_capped(file, request)
     try:
         # upload_image 内部是**同步** httpx.post 直连 Supabase Storage，而那个
         # timeout=30.0 是 httpx 简写，展开后 connect/read/write/pool 各 30 秒

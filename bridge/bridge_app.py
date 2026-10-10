@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import random
+import re
 import subprocess
 import sys
 import tempfile
@@ -181,6 +182,18 @@ UPDATE_CHECK_INTERVAL = 600
 # failure aborts the swap and degrades to a manual download.
 UPDATE_SUMS_ASSET = "SHA256SUMS"
 UPDATE_SUMS_SIG_ASSET = "SHA256SUMS.sig"
+# 防降级（1.4.9 起）：Release 的 tag 来自未签名的 GitHub API，不可信。清单里必须带一行
+# 已签名的 "version=<x.y.z>"，且它必须 ① 存在 ② 与 tag 一致 ③ 严格大于当前 APP_VERSION，
+# 否则拒绝安装。没有这一行的旧格式清单（1.4.8 及更早用旧 release_sign.py 签的）一律拒绝——
+# 这是有意的：否则攻击者可以把一份旧的、带已知漏洞的、但签名合法的安装包当成「新版」推下来。
+# 旧版桥接解析清单时会跳过这一行（它不含空白，切不出「哈希 + 文件名」两段），所以新格式向后兼容。
+# Anti-downgrade (from 1.4.9): the tag comes from the unsigned GitHub API. The signed
+# manifest must carry "version=<x.y.z>" that exists, equals the tag and is strictly
+# newer than APP_VERSION. Old-format manifests are refused on purpose — otherwise an
+# old, validly-signed but vulnerable build could be replayed as an "update". Older
+# bridges skip this line (no whitespace ⇒ not a "<digest>  <name>" pair).
+UPDATE_SUMS_VERSION_PREFIX = "version="
+_SIGNED_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 # 发布公钥（2026-09-20 生成并启用）。Ed25519 公钥的 32 字节原始值的 base64，44 个字符。
 #
@@ -2061,6 +2074,21 @@ def _ensure_allowed_host(url: str) -> None:
         )
 
 
+def safe_update_page_url(url: str | None) -> str:
+    """要交给浏览器打开的更新地址：必须是 https 且主机在 UPDATE_ALLOWED_HOSTS 里，
+    否则一律换成官方发布页。Release JSON 未签名，不能让它把用户带到任意网站。
+    The URL handed to the browser must be https on a pinned host; anything else
+    becomes the official releases page (the release JSON is unsigned)."""
+    try:
+        parsed = urlparse(url or "")
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme == "https" and host in UPDATE_ALLOWED_HOSTS:
+            return url
+    except Exception:  # noqa: BLE001
+        pass
+    return RELEASES_PAGE
+
+
 def _load_update_public_key():
     """取回硬编码的发布公钥；没配置好就抛异常（调用方据此关闭自更新）。
     Return the pinned release public key; raise when it isn't usable."""
@@ -2146,6 +2174,47 @@ def expected_sha256_from_sums(sums_text: str, filename: str) -> str:
     return found
 
 
+def signed_version_from_sums(sums_text: str) -> str:
+    """从**已验签**的清单里取出 "version=<x.y.z>" 那一行的版本号。缺失、格式不对、
+    出现多条都抛异常。只能在 verify_sums_signature() 通过之后调用。
+    Pull the signed "version=<x.y.z>" out of an already-verified manifest; missing,
+    malformed or duplicated ⇒ raise."""
+    found = None
+    for line in sums_text.splitlines():
+        line = line.strip()
+        if not line.startswith(UPDATE_SUMS_VERSION_PREFIX):
+            continue
+        value = line[len(UPDATE_SUMS_VERSION_PREFIX):].strip()
+        if not _SIGNED_VERSION_RE.match(value):
+            raise UpdateVerificationError(f"清单里的版本号格式不对 / malformed signed version: {value!r}")
+        if found is not None and found != value:
+            raise UpdateVerificationError("清单里有互相冲突的版本号 / conflicting signed versions")
+        found = value
+    if found is None:
+        raise UpdateVerificationError(
+            "清单里没有已签名的版本号（旧格式清单，无法防降级）/ manifest has no signed version line"
+        )
+    return found
+
+
+def check_signed_version(sums_text: str, tag: str, current: str = APP_VERSION) -> str:
+    """防降级：已签名的版本号必须存在、与 Release tag 一致、且严格新于当前版本。
+    Anti-downgrade: the signed version must exist, equal the tag and be strictly newer."""
+    signed = signed_version_from_sums(sums_text)
+    tag_norm = (tag or "").strip()
+    if tag_norm[:1] in ("v", "V"):
+        tag_norm = tag_norm[1:]
+    if tag_norm != signed:
+        raise UpdateVerificationError(
+            f"已签名的版本号 {signed} 与 Release tag {tag!r} 不一致 / signed version does not match tag"
+        )
+    if not (_parse_version(signed) > _parse_version(current)):
+        raise UpdateVerificationError(
+            f"已签名的版本号 {signed} 不比当前 {current} 新，拒绝降级 / not newer than current, refusing downgrade"
+        )
+    return signed
+
+
 def sha256_file(path: str) -> str:
     """分块算文件的 SHA-256（安装包 30 MB 上下，不要整包读进内存）。
     Chunked SHA-256 of a file; the installer is ~30 MB."""
@@ -2193,8 +2262,12 @@ def fetch_expected_sha256(release: dict, filename: str = BRIDGE_ASSET_FILENAME) 
         # 走到这里说明签名验过了但内容不是文本，属于发布流程出错。
         # Signature verified but the content isn't text: a broken release.
         raise UpdateVerificationError("哈希清单不是 UTF-8 文本 / manifest is not UTF-8") from e
+    # tag 来自未签名的 API 响应；版本号必须以清单里已签名的那一行为准（防降级/重放旧包）。
+    # The tag is unsigned; trust only the signed version line (anti-downgrade/replay).
+    signed_version = check_signed_version(sums_text, release.get("tag", ""), APP_VERSION)
     digest = expected_sha256_from_sums(sums_text, filename)
-    logger.info("哈希清单验签通过 / manifest signature ok: %s = %s", filename, digest)
+    logger.info("哈希清单验签通过 / manifest signature ok: %s = %s (version %s)",
+                filename, digest, signed_version)
     return digest
 
 
@@ -2624,7 +2697,13 @@ class BridgeGUI:
         # every future version to the manual path.
         if (self._update_release or {}).get("tag") != latest:
             self._update_failed = False
-        self._update_url = release.get("download_url") or RELEASES_PAGE
+        # 同一版本上次已失败（可能是校验没过）就别再指回那个直链；直链也必须在白名单内。
+        # Same tag already failed (maybe verification) ⇒ keep the releases page; the
+        # direct link must be on a pinned host either way.
+        self._update_url = (
+            RELEASES_PAGE if self._update_failed
+            else safe_update_page_url(release.get("download_url") or RELEASES_PAGE)
+        )
         self._update_release = release
         # 一键自更新的三个前提缺一不可：打包态、有安装包直链、**公钥已配置**。
         # 公钥还是占位符时这里就是 False，界面只会引导手动下载——不校验就换 exe
@@ -2709,6 +2788,12 @@ class BridgeGUI:
             def failed():
                 self._updating = False
                 self._update_failed = True
+                if verification_failed:
+                    # 校验没过的正是 download_url 指向的那个文件——绝不能再把用户送去下载它；
+                    # 只给官方发布页（提示文字也是这么说的）。
+                    # The file that failed verification is exactly what download_url
+                    # points at: send the user to the official releases page instead.
+                    self._update_url = RELEASES_PAGE
                 self.update_var.set(
                     "更新包来源校验未通过，已阻止自动更新；点击前往官方发布页手动下载  /  "
                     "Update blocked: signature/checksum check failed — click to download "
@@ -2811,8 +2896,10 @@ class BridgeGUI:
         Open the installer's direct link (triggers an immediate browser
         download); falls back to the releases page if no direct link exists.
         """
+        # 只打开 https + 白名单域名的地址，其余一律换成官方发布页。
+        # Only https URLs on UPDATE_ALLOWED_HOSTS; anything else → releases page.
         try:
-            webbrowser.open(self._update_url)
+            webbrowser.open(safe_update_page_url(self._update_url))
         except Exception:
             pass
 

@@ -5,6 +5,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { SHELL_PRELOAD_SCRIPT, shellPreloadDataTag } from './inline-scripts.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const dist = join(root, 'dist')
@@ -109,8 +110,13 @@ const shellMoreEn = shellJs(['src/i18n/en.more.json'])
 const shellHints = [
   '<link rel="preconnect" href="https://api.prismxsignallab.com" crossorigin />',
   '<link rel="dns-prefetch" href="https://api.pmxsl.com" />',
+  // 文件清单进不执行的 JSON 数据块，执行的脚本文本固定不变——CSP 按 sha256 放行内联脚本，
+  // 文本随构建变就会被拦（见 scripts/inline-scripts.mjs）。
+  // File lists go in a non-executing JSON block so the executing script's text never
+  // changes; CSP allows inline scripts by sha256 (see scripts/inline-scripts.mjs).
   shellPreloadFiles.length
-    ? `<script>try{if(localStorage.getItem('prismx_token')){var f=${JSON.stringify(shellPreloadFiles)}.concat(localStorage.getItem('prismx_lang')==='en'?${JSON.stringify(shellMoreEn)}:${JSON.stringify(shellMoreZh)});f.forEach(function(h){var l=document.createElement('link');l.rel='modulepreload';l.crossOrigin='';l.href=h;document.head.appendChild(l)})}}catch(e){}</script>`
+    ? `${shellPreloadDataTag({ base: shellPreloadFiles, en: shellMoreEn, zh: shellMoreZh })}
+    <script>${SHELL_PRELOAD_SCRIPT}</script>`
     : '',
 ]
   .filter(Boolean)

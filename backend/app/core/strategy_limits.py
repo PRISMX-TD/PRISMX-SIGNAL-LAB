@@ -20,10 +20,9 @@ import uuid
 from contextlib import contextmanager
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.core.config import settings
-from app.core.rate_limit import limiter_options
+from app.core.rate_limit import client_ip_key, limiter_options
 from app.core.security import decode_access_token
 from app.services import shared_state
 
@@ -40,6 +39,11 @@ def user_rate_key(request) -> str:
     injection — "not logged in" and "invalid token" are indistinguishable here,
     and real auth still returns 401 from the endpoint's dependency. The prefixes
     keep the two namespaces from colliding.
+
+    回落的 IP 与 rate_limit.limiter 同一口径（client_ip_key：IPv6 按 /64 分桶），否则一台
+    IPv6 主机换个地址后缀就是一个全新的计数器。
+    The IP fallback uses rate_limit's client_ip_key (IPv6 bucketed by /64); otherwise one
+    IPv6 host gets a fresh counter per address suffix.
     """
     auth = request.headers.get("Authorization") or ""
     parts = auth.split(None, 1)
@@ -47,7 +51,7 @@ def user_rate_key(request) -> str:
         user_id = decode_access_token(parts[1].strip())
         if user_id:
             return f"user:{user_id}"
-    return f"ip:{get_remote_address(request)}"
+    return f"ip:{client_ip_key(request)}"
 
 
 # 独立的 Limiter 实例：与 rate_limit.limiter 的 key_func 不同，不能共用。

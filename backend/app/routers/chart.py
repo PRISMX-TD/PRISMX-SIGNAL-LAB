@@ -15,7 +15,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.strategy_limits import user_limiter
 from app.models import Candle, User
 from app.services import candle_store, chart_store, quotes_store, shared_cache
 from app.services.connection_manager import manager
@@ -62,6 +63,11 @@ CHART_HISTORY_MAX_LIMIT = 1000
 CHART_HISTORY_FIRST_PAGE = 50
 _HISTORY_FIRST_TTL = 15      # 秒 / seconds
 _HISTORY_BEFORE_TTL = 120
+# 按用户限流（2026-10-10 审计）：每次未命中缓存都是一次最多 1000 行的远端查库。正常看图
+# 是首屏一次 + 左拖翻页，一分钟远到不了这个数。
+# Per-user limit: every cache miss is a remote query of up to 1000 rows. Normal charting is
+# one first page plus drag-paging, nowhere near this per minute.
+CHART_HISTORY_RATE_LIMIT = "120/minute"
 
 
 def _history_first_key(symbol: str, interval: str) -> str:
@@ -563,11 +569,14 @@ async def list_active_symbols(user_id: str = Depends(get_current_user_id_light))
 
 # ---------- 前端读取 / frontend read ----------
 @router.get("/chart/history")
+@user_limiter.limit(CHART_HISTORY_RATE_LIMIT)
 def chart_history(
+    request: Request,
     symbol: str = Query(max_length=32),
     interval: str = Query(),
     limit: int = Query(default=1000, ge=1, le=CHART_HISTORY_MAX_LIMIT),
-    before: int | None = Query(default=None, description="只返回 t < before 的 bar / only bars with t < before"),
+    before: int | None = Query(default=None, ge=0, le=2**40,
+                               description="只返回 t < before 的 bar / only bars with t < before"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -650,10 +659,23 @@ def chart_history(
     # are not cached.
     if before is None and limit == CHART_HISTORY_FIRST_PAGE:
         return shared_cache.cached_json(_history_first_key(sym, interval), _HISTORY_FIRST_TTL, _load)
+    # 翻页只在 `before` 落在该周期的时间网格上时才进缓存（2026-10-10 审计）：以前任意
+    # before 都建一个键，逐秒换 before 就能无限造缓存键、每次都打穿到库。库里的 bar 时间戳
+    # 一律在网格上（candle_store._grid_seconds，写入时把关），前端翻页传的又是自己最早那根
+    # 的 t，所以正常翻页总能命中；不在网格上的 before 照常查库、只是不缓存——不去对齐它，
+    # 因为向下对齐会少一根、向上对齐对历史上的错位 bar 不保证结果不变。
+    # Backward pages are cached only when `before` sits on the interval's time grid (2026-10-10
+    # audit): any `before` used to mint its own key, so stepping it by one second created
+    # unbounded keys and hit the DB every time. Stored bars are on the grid and the frontend
+    # pages with its earliest bar's t, so real paging still hits; an off-grid `before` is
+    # served uncached rather than realigned (rounding down drops a bar, rounding up isn't
+    # result-preserving for legacy off-grid rows).
     if before is not None:
-        return shared_cache.cached_json(
-            f"chart:history:{sym}:{interval}:{limit}:{before}", _HISTORY_BEFORE_TTL, _load
-        )
+        grid = candle_store._grid_seconds(candle_store.INTERVAL_SECONDS[interval])
+        if before % grid == 0:
+            return shared_cache.cached_json(
+                f"chart:history:{sym}:{interval}:{limit}:{before}", _HISTORY_BEFORE_TTL, _load
+            )
     return _load()
 
 

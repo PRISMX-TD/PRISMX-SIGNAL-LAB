@@ -78,20 +78,43 @@ class _Req:
 
 
 class _Background:
-    """BackgroundTasks 的替身：记下要发的信，不真发。"""
+    """BackgroundTasks 的替身：记下任务，不真跑、不真发信。
+
+    找回密码把查库、签令牌、发信整个放进了一个后台任务（_process_forgot_request），
+    所以 `mails` 会把排队的任务当场跑掉（模拟「响应之后」），并把 auth 模块里的
+    send_reset_email 换成记录器：返回 [(send_reset_email, (收件人, 明文令牌), {})]。
+    Records tasks without running them. Forgot-password now does lookup, token and
+    mail in one background task, so `mails` runs the queued tasks ("after the
+    response") with auth.send_reset_email swapped for a recorder."""
 
     def __init__(self):
         self.tasks = []
+        self._mails = None
 
     def add_task(self, fn, *args, **kwargs):
         self.tasks.append((fn, args, kwargs))
 
     @property
     def mails(self):
-        """只看发信任务——找回密码还会排一个写操作日志的后台任务（响应之后才写，见
-        auth._queue_reset_requested）。/ Only the mail tasks; forgot-password also queues
-        an activity-log task after the response."""
-        return [t for t in self.tasks if t[0].__name__ == "send_reset_email"]
+        if self._mails is None:
+            import app.routers.auth as auth_mod
+
+            real = auth_mod.send_reset_email
+            sent = []
+
+            def _record(to_email, raw):
+                sent.append((real, (to_email, raw), {}))
+                return True
+
+            auth_mod.send_reset_email = _record
+            try:
+                for fn, args, kwargs in self.tasks:
+                    if fn.__name__ == "_process_forgot_request":
+                        fn(*args, **kwargs)
+            finally:
+                auth_mod.send_reset_email = real
+            self._mails = sent
+        return self._mails
 
 
 def _mk_user(db, email="u@example.com", password="original-password"):
@@ -215,7 +238,38 @@ def test_forgot_password_only_queues_mail_for_a_real_user(db_session):
     _forgot(request=_Req(), req=ForgotPasswordRequest(email="real@example.com"), background=bg_hit, db=db_session)
     _forgot(request=_Req(), req=ForgotPasswordRequest(email="nobody@example.com"), background=bg_miss, db=db_session)
     assert len(bg_hit.mails) == 1
-    assert bg_miss.tasks == []
+    assert bg_miss.mails == []
+    assert db_session.query(PasswordResetToken).count() == 1
+
+
+def test_forgot_password_request_does_identical_work_for_known_and_unknown(db_session):
+    """存在 / 不存在两支在请求里做的事必须一模一样：同样一个后台任务、请求期间一条 SQL 都
+    不发。以前查库 + 删旧令牌 + 插新令牌 + commit 都在请求里，存在的那一支多好几次数据库
+    往返，响应时间就把答案说出去了。
+    Both branches must do the same work inside the request: one identical
+    background task and zero SQL statements. The lookup and the token
+    DELETE/INSERT/commit used to run in the request, so the known address paid
+    extra round trips — a latency oracle."""
+    from sqlalchemy import event
+
+    _mk_user(db_session, email="real@example.com")
+    engine = db_session.get_bind()
+    stmts: list[str] = []
+
+    def _before(conn, cursor, statement, *a):
+        stmts.append(statement)
+
+    bg_hit, bg_miss = _Background(), _Background()
+    event.listen(engine, "before_cursor_execute", _before)
+    try:
+        _forgot(request=_Req(), req=ForgotPasswordRequest(email="real@example.com"), background=bg_hit, db=db_session)
+        _forgot(request=_Req(), req=ForgotPasswordRequest(email="nobody@example.com"), background=bg_miss, db=db_session)
+    finally:
+        event.remove(engine, "before_cursor_execute", _before)
+    assert stmts == []
+    assert [t[0].__name__ for t in bg_hit.tasks] == [t[0].__name__ for t in bg_miss.tasks] == [
+        "_process_forgot_request"
+    ]
 
 
 def test_forgot_password_is_case_insensitive_on_the_email(db_session):

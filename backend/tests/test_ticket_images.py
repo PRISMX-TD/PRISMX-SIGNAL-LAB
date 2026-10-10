@@ -26,6 +26,19 @@ from app.schemas import AdminTicketReplyCreate, TicketCreate, TicketReplyCreate
 from app.services import image_upload as iu
 from app.services.deps import get_current_user_id_light
 
+
+@pytest.fixture(autouse=True)
+def _no_user_rate_limit(monkeypatch):
+    """建工单 / 用户回复挂了按用户限流（@user_limiter.limit），这里直接调函数、没有
+    Request，request 位传 None，并关掉 user_limiter。
+    Ticket create / reply carry @user_limiter.limit; these tests call the functions
+    directly with request=None, so the user limiter is switched off."""
+    # 取 tickets 模块手里那个实例：别的测试会 reload strategy_limits，换掉模块上的对象
+    # Use the instance tickets captured: other tests reload strategy_limits
+    from app.routers import tickets
+
+    monkeypatch.setattr(tickets.user_limiter, "enabled", False)
+
 HEX = "0123456789abcdef" * 2
 
 
@@ -171,7 +184,7 @@ def _key(user, n=0, frag="#w=800&h=600"):
 def test_image_only_ticket_is_accepted_and_signed(db_session, signer):
     owner = _user(db_session, "o@x.com")
     k = _key(owner)
-    out = create_ticket(TicketCreate(title="截图", category="technical", images=[k]), db_session, owner)
+    out = create_ticket(None, TicketCreate(title="截图", category="technical", images=[k]), db_session, owner)
     assert out.replies[0].body == ""
     assert out.replies[0].images == [f"https://signed/{k}"]
     assert out.replies[0].imageCount == 1
@@ -202,7 +215,7 @@ def test_at_most_six_images_per_message():
 def test_foreign_or_malformed_keys_are_rejected(db_session, signer, bad):
     owner = _user(db_session, "o@x.com")
     with pytest.raises(HTTPException) as exc:
-        create_ticket(
+        create_ticket(None,
             TicketCreate(title="t", category="technical", body="hi", images=[bad.format(uid=owner.id)]),
             db_session, owner,
         )
@@ -213,16 +226,16 @@ def test_foreign_or_malformed_keys_are_rejected(db_session, signer, bad):
 def test_user_cannot_attach_someone_elses_upload(db_session, signer):
     owner = _user(db_session, "o@x.com")
     other = _user(db_session, "p@x.com")
-    t = create_ticket(TicketCreate(title="t", category="technical", body="hi"), db_session, owner)
+    t = create_ticket(None, TicketCreate(title="t", category="technical", body="hi"), db_session, owner)
     with pytest.raises(HTTPException) as exc:
-        reply_to_ticket(t.id, TicketReplyCreate(images=[_key(other)]), db_session, owner)
+        reply_to_ticket(None, t.id, TicketReplyCreate(images=[_key(other)]), db_session, owner)
     assert exc.value.status_code == 400
 
 
 def test_admin_reply_with_own_images_and_thread_signed_in_one_batch(db_session, signer):
     owner = _user(db_session, "o@x.com")
     admin = _user(db_session, "boss@x.com", role="admin")
-    t = create_ticket(TicketCreate(title="t", category="technical", body="hi", images=[_key(owner, 1)]), db_session, owner)
+    t = create_ticket(None, TicketCreate(title="t", category="technical", body="hi", images=[_key(owner, 1)]), db_session, owner)
     out = admin_reply_to_ticket(t.id, AdminTicketReplyCreate(body="看这里", images=[_key(admin, 2)]), db_session, admin)
     assert [r.imageCount for r in out.replies] == [1, 1]
     signer["calls"].clear()
@@ -235,7 +248,7 @@ def test_admin_reply_with_own_images_and_thread_signed_in_one_batch(db_session, 
 def test_list_previews_carry_count_but_no_urls(db_session, signer):
     owner = _user(db_session, "o@x.com")
     admin = _user(db_session, "boss@x.com", role="admin")
-    create_ticket(TicketCreate(title="t", category="technical", images=[_key(owner), _key(owner, 1)]), db_session, owner)
+    create_ticket(None, TicketCreate(title="t", category="technical", images=[_key(owner), _key(owner, 1)]), db_session, owner)
     signer["calls"].clear()
     mine = list_my_tickets(db_session, owner)
     assert mine[0].latestReply.imageCount == 2 and mine[0].latestReply.images == []
@@ -246,7 +259,7 @@ def test_list_previews_carry_count_but_no_urls(db_session, signer):
 
 def test_unsignable_images_keep_their_count_and_text_still_returns(db_session, signer):
     owner = _user(db_session, "o@x.com")
-    t = create_ticket(TicketCreate(title="t", category="technical", body="文字还在", images=[_key(owner)]), db_session, owner)
+    t = create_ticket(None, TicketCreate(title="t", category="technical", body="文字还在", images=[_key(owner)]), db_session, owner)
     signer["fail"] = True
     detail = get_ticket(t.id, db_session, owner)
     assert detail.replies[0].body == "文字还在"
@@ -295,3 +308,47 @@ def test_upload_endpoint_400_on_upload_error(monkeypatch):
     client, _ = _upload_client(monkeypatch, error="只支持 PNG / Only PNG")
     res = client.post("/tickets/upload-image", files={"file": ("a.txt", b"hello", "text/plain")})
     assert res.status_code == 400 and "PNG" in res.json()["detail"]
+
+
+# ---------- 发工单 / 回复限流 / create & reply rate limits ----------
+
+def test_create_and_reply_carry_per_user_rate_limits():
+    """建工单与用户回复都要挂按用户的限流（会写库并通知全体管理员，没上限就能刷）。
+    Creating and replying are user-rate-limited (both write rows and notify every admin)."""
+    user_limiter = tk.user_limiter
+
+    for name in ("create_ticket", "reply_to_ticket"):
+        limits = user_limiter._route_limits.get(f"app.routers.tickets.{name}")
+        assert limits, name
+
+
+def test_ticket_create_is_rejected_past_the_minute_limit(monkeypatch):
+    """经由真实路由连发，超过每分钟上限后回 429。标题全空白：限流计数在函数体之前，
+    函数体随即 422 返回，不落库也不发通知（TestClient 在别的线程，碰不到测试库）。
+    Through the real route, creates past the per-minute limit get a 429. A blank title
+    makes the body 422 right after the limiter counted it, so nothing touches the DB."""
+    from slowapi import _rate_limit_exceeded_handler
+    from slowapi.errors import RateLimitExceeded
+
+    from app.core.database import get_db
+    from app.services.deps import get_current_user
+
+    user_limiter = tk.user_limiter
+    monkeypatch.setattr(user_limiter, "enabled", True)
+    user_limiter.reset()
+    owner = User(id="rl-user", email="rl@x.com", password_hash="x", api_token="tok-rl")
+    app = FastAPI()
+    app.state.limiter = user_limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.include_router(tk.router)
+    app.dependency_overrides[get_db] = lambda: None
+    app.dependency_overrides[get_current_user] = lambda: owner
+    client = TestClient(app)
+    per_minute = int(tk.RATE_LIMIT_TICKET_CREATE.split("/")[0])
+    codes = [
+        client.post("/tickets", json={"title": "   ", "category": "technical", "body": "hi"}).status_code
+        for _ in range(per_minute + 1)
+    ]
+    user_limiter.reset()
+    assert codes[:per_minute] == [422] * per_minute
+    assert codes[-1] == 429

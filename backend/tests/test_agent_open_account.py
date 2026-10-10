@@ -398,5 +398,10 @@ def test_in_app_detail_resolves_by_users_invite_code(db_session, monkeypatch):
     _agent_link(db_session, "agnt2345", url=AGENT_URL)
     attributed = _mk_user(db_session, "a@t.co", invite_code="agnt2345")
     plain = _mk_user(db_session, "p@t.co")
-    assert get_competition(request=None, comp_id=comp.id, db=db_session, user=attributed)["openAccountUrl"] == AGENT_URL
-    assert get_competition(request=None, comp_id=comp.id, db=db_session, user=plain)["openAccountUrl"] == COMP_URL
+    mine = get_competition(request=None, comp_id=comp.id, db=db_session, user=attributed)
+    assert mine["openAccountUrl"] == AGENT_URL
+    # 代理的链接要标出来，前端按白名单再验 / agent links are flagged for the frontend allowlist
+    assert mine["openAccountFromAgent"] is True
+    theirs = get_competition(request=None, comp_id=comp.id, db=db_session, user=plain)
+    assert theirs["openAccountUrl"] == COMP_URL
+    assert theirs["openAccountFromAgent"] is False

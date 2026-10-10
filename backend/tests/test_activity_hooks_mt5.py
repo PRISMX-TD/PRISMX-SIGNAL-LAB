@@ -218,10 +218,10 @@ def test_gateway_not_found_and_refusal_write_nothing(monkeypatch, db, engine):
     u = _user(db)
     out = _verify(monkeypatch, db, u, "900007", ok=False, valid=False, status=404, error="not_found")
     assert out.valid is False
-    with pytest.raises(HTTPException) as exc:
-        _verify(monkeypatch, db, u, "900008", ok=False, valid=False, status=403,
-                error="group_not_allowed")
-    assert exc.value.status_code == 403
+    # 「组未开放」不再单独回 403，并进 valid=False（2026-10-10）/ folded into valid=False
+    out = _verify(monkeypatch, db, u, "900008", ok=False, valid=False, status=403,
+                  error="group_not_allowed")
+    assert out.valid is False
     assert _events(engine) == []
 
 

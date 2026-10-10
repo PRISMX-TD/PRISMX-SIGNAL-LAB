@@ -20,6 +20,7 @@ delete_invite_link).
 """
 import json
 import secrets
+from urllib.parse import quote
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
@@ -66,6 +67,7 @@ from app.services.admin_overview import activity_daily, headline
 # second, and importing across routers would tie them together (see their docs).
 from app.services.agents import is_agent
 from app.services.audit import log_change as _log_change
+from app.services.email_domains import alias_trial_used
 from app.services.deps import get_current_user, require_admin
 from app.services.gamification import mask_account
 from app.services.gateway_binding import is_revoked, not_removed
@@ -340,6 +342,12 @@ def apply_invite(
     days = _trial_grant_days(db, link)
     if days is None:
         return None
+    # 同一收件箱（规范邮箱）下别的账号用过试用 / 付过费：只归因、不发试用。这条路是 Google
+    # 新建账号，user 还没 INSERT，排除自己不需要 id。
+    # Another account on the same mailbox used a trial or paid: attribute only.
+    # The user isn't inserted yet, so there is nothing of its own to exclude.
+    if alias_trial_used(db, user.email, exclude_user_id=user.id):
+        return None
 
     # 注册即开通：直接写在**尚未 INSERT** 的 user 对象上。
     #
@@ -391,6 +399,10 @@ def grant_deferred_invite_trial(db: Session, user: User) -> int | None:
         return None
     days = _trial_grant_days(db, link)
     if days is None:
+        return None
+    # 试用每个收件箱一次（同 payments.claim_trial，见 email_domains.alias_trial_used）。
+    # One trial per mailbox, as in payments.claim_trial.
+    if alias_trial_used(db, user.email, exclude_user_id=user.id):
         return None
     now = datetime.now(timezone.utc)
     claimed = (
@@ -1011,7 +1023,10 @@ def _notify_admins_agent_write(db: Session, agent: User, target: User, summary: 
             admin_id,
             KIND_AGENT_PLAN_CHANGE,
             text=summary,
-            link=f"/admin?tab=users&q={target.email}",
+            # 邮箱进 URL 必须编码：本地部分可以合法地带 "+"、"&"、"#"，原样拼进去会把查询串截断
+            # 或改写（"+" 被读成空格）。/ Encode: a local part may legally hold "+", "&"
+            # or "#", which would otherwise truncate or rewrite the query string.
+            link=f"/admin?tab=users&q={quote(target.email, safe='')}",
             ref_id=target.id,
         )
     return admin_ids

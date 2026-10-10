@@ -132,8 +132,11 @@ def _fail(**kw):
     return gc.VerifyRsp(ok=False, valid=False, retcode="", **kw)
 
 
+# 「组未开放」不再有专属的 403：端点在调 _verify_failure 之前就把它并进 valid=False
+# （见 tests/test_trading_security_2026_10_10.py），这里不再列它。
+# "Group not enabled" has no dedicated 403 any more: the endpoint folds it into
+# valid=False before _verify_failure is reached.
 @pytest.mark.parametrize("rsp,expected", [
-    (_fail(error="group_not_allowed", status=403), 403),
     (_fail(error="timeout", status=0), 504),
     (_fail(error="request_failed", status=0), 502),
     (_fail(error="connect_failed", status=0), 502),

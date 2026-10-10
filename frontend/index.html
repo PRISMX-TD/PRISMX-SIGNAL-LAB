@@ -81,13 +81,29 @@
       // is black-holed from mainland China and holding up window load); (2) fbevents.js
       // is injected on idle after load — init / PageView still enter the fbq queue here
       // and are flushed once the script lands. MetaPixel.tsx checks fbq before firing.
+      // ③ 2026-10-10：敏感页（重置密码 / 邮箱验证令牌、后台、工单……）连像素都不装——
+      //    fbevents 会把含查询串的完整地址发给 Meta。清单与 src/utils/pixelPrivacy.ts 的
+      //    PIXEL_BLOCKED_PATHS 一致（scripts/csp-hashes.test.mjs 校验）。disablePushState
+      //    关掉 fbevents 自带的 pushState 自动 PageView，路由补发只走 MetaPixel.tsx（它会跳过
+      //    这些页面）。
+      // ⚠️ 改动这段内联脚本的任何字符（含注释）都会改变它的 sha256，必须重算 vercel.json
+      //    的 CSP：node scripts/check-csp-hashes.mjs --write，否则线上整段脚本被 CSP 拦掉。
+      // (3) Since 2026-10-10 sensitive pages (reset / verify tokens, admin, tickets…) get no
+      // pixel at all, since fbevents sends the full URL incl. query string. The list mirrors
+      // PIXEL_BLOCKED_PATHS in src/utils/pixelPrivacy.ts (checked by scripts/csp-hashes.test.mjs).
+      // disablePushState turns off fbevents' own pushState PageViews so SPA PageViews come
+      // only from MetaPixel.tsx, which skips these pages. Any edit to this inline script
+      // (comments included) changes its sha256: run node scripts/check-csp-hashes.mjs --write.
       !function(f,b,e,v,n,t,s)
       {if(f.fbq)return;var h=location.hostname;
       if(!/(^|\.)prismxsignallab\.com$/.test(h)||h==='localhost'||f.Capacitor)return;
+      var p=location.pathname.toLowerCase().replace(/\/+$/,''),d=/*PIXEL_BLOCKED_PATHS*/['/reset-password','/forgot-password','/verify-email','/complete-profile','/unsubscribe','/admin','/agent','/simulator','/support','/account'];
+      for(var i=0;i<d.length;i++)if(p===d[i]||p.indexOf(d[i]+'/')===0)return;
+      if(/[?&]token=/i.test(location.search))return;
       n=f.fbq=function(){n.callMethod?
       n.callMethod.apply(n,arguments):n.queue.push(arguments)};
       if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
-      n.queue=[];
+      n.queue=[];n.disablePushState=!0;
       n('init', '1386130166986351');
       n('track', 'PageView');
       var inject=function(){t=b.createElement(e);t.async=!0;

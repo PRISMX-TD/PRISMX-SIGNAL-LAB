@@ -36,7 +36,7 @@ RepeatAlertSec=1800
 # ---- 通知(默认都关着)----
 # 邮件:走 Resend,密钥和后端 .env 里的 RESEND_API_KEY 用同一个
 EmailEnabled=false
-EmailTo=rexleekang16@gmail.com
+EmailTo=you@example.com
 ResendApiKey=
 MailFrom=noreply@prismxsignallab.com
 

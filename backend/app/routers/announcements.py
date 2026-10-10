@@ -239,9 +239,13 @@ def snooze_popup(
     exactly what makes a popup obnoxious. Pressing it again just pushes the
     expiry out."""
     a = db.query(Announcement).filter(Announcement.id == announcement_id).first()
-    if not a:
+    # 只认已发布的公告：草稿对普通用户等同不存在（与 get_announcement 同一口径），
+    # 否则这个端点就能用来探测草稿 id 是否存在，并给还没发布的公告预先写行。
+    # Published only: drafts don't exist for users (same rule as get_announcement);
+    # otherwise this endpoint would confirm draft ids and pre-seed rows for them.
+    if not a or not a.published:
         raise HTTPException(status_code=404, detail="公告不存在 / announcement not found")
-    until = datetime.now(timezone.utc) + timedelta(days=POPUP_SNOOZE_DAYS)
+    until =datetime.now(timezone.utc) + timedelta(days=POPUP_SNOOZE_DAYS)
     row = (
         db.query(AnnouncementPopupSnooze)
         .filter(

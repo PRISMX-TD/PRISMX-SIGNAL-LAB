@@ -337,7 +337,7 @@ def _stub_close_path(monkeypatch, upserts: list, read_balance: bool = False) -> 
     async def deals(login, from_unix, to_unix, timeout=None):
         return [SimpleNamespace(login=int(login))], ""
 
-    def upsert(db, user_id, login, leg, verified):
+    def upsert(db, user_id, login, leg, verified, trusted=False):
         bal = None
         if read_balance:
             row = db.query(MT5Account).filter(

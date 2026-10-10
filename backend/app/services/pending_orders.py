@@ -76,12 +76,18 @@ async def read_gateway_pending_orders(login: str) -> tuple[list[dict], bool]:
 
 
 def gateway_logins(db: Session, user_id: str) -> list[str]:
-    """该用户名下未被移除的 gateway 账号 login 列表。"""
+    """该用户名下未被移除、也未被撤销（改密）的 gateway 账号 login 列表。
+
+    撤销的绑定已失去代客读写的授权，挂单也不能再替它读——与 gateway 轮询循环的口径一致。
+    Live gateway logins only: a revoked (password-changed) binding has lost its
+    authorisation, so its pending orders must not be read either.
+    """
     return [
         row[0]
         for row in db.query(MT5Account.login).filter(
             MT5Account.user_id == user_id,
             MT5Account.source == "gateway",
+            MT5Account.revoked_at.is_(None),
             not_removed(),
         ).all()
     ]

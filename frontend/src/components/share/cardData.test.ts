@@ -36,11 +36,18 @@ describe('tradeCard', () => {
   it('unknown symbol -> no pips', () => {
     expect(tradeCard(t, { ...row, symbol: 'FOOBAR' }).pips).toBeNull()
   })
-  it('official return comes from the backend, sent as UTC ISO', async () => {
-    expect(await loadTradeReturn('602907', row)).toBe(12.35)
-    expect(api.shareTrade).toHaveBeenCalledWith('602907', '2026-09-30T10:35:00.000Z', '2026-09-30T13:47:00.000Z', 1284)
-    expect(await loadTradeReturn('602907', { ...row, openTime: null })).toBeNull()   // legacy row
-    expect(await loadTradeReturn(undefined, row)).toBeNull()
+  it('official return comes from the backend, keyed by position only (no client profit)', async () => {
+    api.shareTrade.mockClear()
+    expect(await loadTradeReturn('602907', { ...row, positionTicket: 4455 })).toBe(12.35)
+    expect(api.shareTrade).toHaveBeenCalledWith('602907', 4455)
+    // 仓位号 0 也是合法值 / ticket 0 is still a value
+    await loadTradeReturn('602907', { ...row, positionTicket: 0 })
+    expect(api.shareTrade).toHaveBeenLastCalledWith('602907', 0)
+    api.shareTrade.mockClear()
+    expect(await loadTradeReturn('602907', { ...row, positionTicket: 4455, openTime: null })).toBeNull()   // legacy row
+    expect(await loadTradeReturn('602907', row)).toBeNull()                                                // no position
+    expect(await loadTradeReturn(undefined, { ...row, positionTicket: 4455 })).toBeNull()
+    expect(api.shareTrade).not.toHaveBeenCalled()
   })
   it('naive and Z timestamps give the same holding time', () => {
     const a = tradeCard(t, row).hold

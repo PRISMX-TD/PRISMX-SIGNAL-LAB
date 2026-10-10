@@ -1,6 +1,7 @@
 """榜单计算（设计 §1.5/§1.6/§4）：按账户拍基线、对账出入金、逐仓按当时本金计分、快照排名。"""
 import json
 import logging
+import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -172,10 +173,15 @@ def return_score(b, resolved, min_baseline: float, max_baseline: float | None = 
     by_denom: dict[float, float] = defaultdict(float)
     for opened_at, closed_at, profit in resolved:
         denom = position_denominator(b, opened_at, closed_at)
-        if denom <= 0 or not baseline_in_range(denom, min_baseline, max_baseline):
+        # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不入榜：NaN 过得了下面的区间判断。
+        # A non-finite capital (a stale NaN balance) is off the board like <= 0; NaN would pass the range check.
+        if not math.isfinite(denom) or denom <= 0 or not baseline_in_range(denom, min_baseline, max_baseline):
             return None
         by_denom[denom] += profit
-    return sum(total / d for d, total in by_denom.items()), len(resolved)
+    score = sum(total / d for d, total in by_denom.items())
+    if not math.isfinite(score):
+        return None
+    return score, len(resolved)
 
 
 def _realized_since_bulk(db, baselines, until) -> dict:
@@ -183,20 +189,32 @@ def _realized_since_bulk(db, baselines, until) -> dict:
     每条基线各查一次（N+1）改成一条 `user_id IN (...) AND closed_at >= min(taken_at)`
     只取 4 列，再在 Python 里按各基线自己的 taken_at 求和（平仓时间 >= taken_at）。
     没用 tuple IN：SQLite 测试库兼容，且 idx_closed_trades_position 的 (user_id,
-    mt5_login) 前缀已能服务这个过滤。口径同原来逐条查询：不过滤 verified——对账针对的
-    是余额变动，任何已报告的平仓（无论能否被服务端核对）都会真实地改变 MT5 账户余额。
+    mt5_login) 前缀已能服务这个过滤。
+
+    **只认 verified=True 的腿（2026-10-10 审计）。** 这里不是计分，是对账：余额里减掉
+    「平台内交易」的已实现盈亏，剩下的差额记成资金进出（cashflowFlagged 据此标黄）。
+    以前不过滤 verified，于是用户在 MT5 客户端手动下的单——只要注释带平台前缀，网关就
+    把它的平仓腿收进来（verified=False）——其盈亏被当成平台内交易抵掉，平台外交易从
+    资金进出里消失，人工复核的标黄也就看不见它。只认 verified 后，未核验腿的盈亏落进
+    差额：盈利记入金（摊薄本金），亏损够门槛记出金，与真实的出入金同等对待、同样可见。
+    计分路径（_resolved_in_period → stats._legs_by_position）本来就只认 verified，两边
+    现在同一口径：被计分的交易才从余额差里扣掉。
     Realized profit for a whole batch of baselines in one query instead of one per
     baseline: one `user_id IN (...) AND closed_at >= min(taken_at)` read of four
     columns, summed in Python against each baseline's own taken_at. No tuple IN
     (SQLite test DB); the (user_id, mt5_login) prefix of an existing index serves it.
-    Same semantics as before: verified is not filtered — any reported close moves
-    the MT5 balance.
+    Verified legs only (2026-10-10 audit): this is reconciliation, not scoring. Counting
+    unverified legs (manual MT5 trades carrying the platform comment prefix) let
+    off-platform trading hide inside "realized" and never surface as cash flow; now
+    their P&L lands in the delta like any other flow, matching the scoring path,
+    which already counts verified legs only.
     """
     if not baselines:
         return {}
     taken = {(b.user_id, b.mt5_login): _aware(b.taken_at) for b in baselines}
     q = (db.query(ClosedTrade.user_id, ClosedTrade.mt5_login, ClosedTrade.closed_at, ClosedTrade.profit)
            .filter(ClosedTrade.user_id.in_({u for u, _l in taken}),
+                   ClosedTrade.verified.is_(True),
                    ClosedTrade.closed_at >= min(taken.values())))
     if until is not None:
         q = q.filter(ClosedTrade.closed_at < until)
@@ -204,7 +222,7 @@ def _realized_since_bulk(db, baselines, until) -> dict:
     for uid, login, closed_at, profit in q.all():
         k = (uid, login)
         since = taken.get(k)
-        if since is not None and _aware(closed_at) >= since:
+        if since is not None and _aware(closed_at) >= since and math.isfinite(profit or 0.0):
             out[k] += profit or 0.0
     return out
 
@@ -349,8 +367,11 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
     now = now if now is not None else datetime.now(timezone.utc)
     if now >= end:
         return 0    # 已结束周期：期后交易会污染对账，冻结不动（重算窗内也不对账）
+    # 非有限的余额（NaN / Infinity）当作读不到，冻结不动，免得 NaN 写进 adjust / 流水。
+    # A non-finite balance counts as unreadable (frozen), keeping NaN out of adjust / flows.
     acct_map = {(a.user_id, a.login): a.balance
-                for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))}
+                for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))
+                if math.isfinite(a.balance)}
     prev_check = _last_reconciled_at(period_key)
     adjusted = 0
     baseline_rows = [r for r in db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key)

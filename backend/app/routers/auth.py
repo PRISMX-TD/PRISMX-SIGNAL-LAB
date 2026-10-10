@@ -20,6 +20,8 @@ from app.core.security import (
     generate_api_token,
     hash_api_token,
     hash_password,
+    invalidate_bridge_token_cache,
+    rotate_api_token,
     verify_google_id_token,
     verify_password,
 )
@@ -38,7 +40,7 @@ from app.schemas import (
 )
 from app.services import activity_log, email_verification
 from app.services.deps import get_current_user
-from app.services.email_domains import is_disposable_email
+from app.services.email_domains import canonical_email_taken, is_disposable_email
 from app.services.password_reset import (
     consume_token,
     issue_token,
@@ -51,6 +53,15 @@ from app.services.pending_competition import pending_competition
 logger = logging.getLogger("prismx.auth")
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# 登录时邮箱不存在（或是没有密码的 Google 账号）也照样跑一次 bcrypt：否则「查无此人」
+# 立刻返回、「密码错」要多等一次 bcrypt（约 200ms），光看响应时间就能枚举出哪些邮箱
+# 注册过。启动时算一次，用一个谁也不知道的随机串，永远不会校验通过。
+# When the account doesn't exist (or is a password-less Google account) login
+# still runs one bcrypt check, or "no such user" returns instantly while "wrong
+# password" pays ~200ms of bcrypt — an enumeration oracle by latency alone.
+# Computed once at import from a random secret nobody knows; it never matches.
+_DUMMY_PASSWORD_HASH = hash_password(generate_api_token())
 
 
 def _queue_login_event(
@@ -181,7 +192,15 @@ def register(
             detail="请使用常用邮箱注册，暂不支持一次性邮箱 / Disposable email addresses aren't supported — please use a regular mailbox",
         )
     existing = db.query(User).filter(User.email == email).first()
-    if existing:
+    # 规范邮箱撞上已有账号（a.b@gmail.com ≈ ab+x@gmail.com）同样拒绝，并且回**同一句话**：
+    # 别名注册不出第二个账号，也就白嫖不到第二次试用（见 email_domains.canonical_email）。
+    # 这条路本身由 RATE_LIMIT_REGISTER 按 IP 限流——「已注册」的回答是产品要的，但不能
+    # 被当成不限次的枚举器。
+    # A canonical-email collision (a.b@gmail.com ≈ ab+x@gmail.com) is refused with
+    # the SAME message, so aliases can't open a second account (or a second trial).
+    # The endpoint is IP-rate-limited by RATE_LIMIT_REGISTER, so this answer can't
+    # be farmed as an unlimited enumeration oracle.
+    if existing or canonical_email_taken(db, email):
         # 统一非区分性错误，避免邮箱枚举 / generic error to avoid email enumeration
         raise HTTPException(status_code=400, detail="无法完成注册 / Unable to register")
 
@@ -361,7 +380,15 @@ def login(
         raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试 / Too many login attempts, please try again later")
 
     user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(req.password, user.password_hash):
+    if user is None or not user.password_hash:
+        # 没这个人 / 没密码：对着假哈希白跑一次 bcrypt，让耗时与「密码错」一致。
+        # No such user / no password: burn one bcrypt on the dummy hash so the
+        # timing matches a wrong password.
+        verify_password(req.password, _DUMMY_PASSWORD_HASH)
+        ok = False
+    else:
+        ok = verify_password(req.password, user.password_hash)
+    if not ok:
         record_failed_login(email, source)
         raise HTTPException(status_code=401, detail="邮箱或密码错误 / Invalid email or password")
 
@@ -437,37 +464,58 @@ def forgot_password(
     # back an existence oracle through the counter's behaviour. The count is
     # taken before the lookup so both cases take the identical path.
     over_limit = too_many_recent_requests(email)
-    user = db.query(User).filter(User.email == email).first()
-    if user is not None and not over_limit:
-        raw = issue_token(db, user, requested_ip=request.client.host if request.client else None)
-        db.commit()
-        # 明文令牌只传给发信函数，不进日志、不进响应。
-        background.add_task(send_reset_email, user.email, raw)
-        # 操作日志只在「邮箱存在、真发了信」这一支记，而且放进后台任务、**响应发出去之后**
-        # 才写（同 user.login）：要是搭上面那次 commit，这一支就比「邮箱不存在」那一支多一条
-        # INSERT 往返，两边的响应时间差跟着变大——这个端点的安全性恰恰建立在两边耗时一样上。
-        # 现在请求本身两支都一条语句不多。不记 IP（令牌行上已有）。
-        # Logged only on the "address exists, mail sent" branch, and from a background
-        # task after the response (like user.login): riding the commit above would give
-        # this branch one more INSERT round trip than the unknown-address branch and
-        # widen the timing gap this endpoint's safety rests on. The request itself now
-        # gains no statement on either branch. No IP (the token row already holds it).
-        _queue_reset_requested(background, db, user.id)
+    if not over_limit:
+        # 查库、签令牌、提交、发信、记操作日志**全部**挪进后台任务（响应发出之后才跑）：
+        # 请求本身对存在 / 不存在的邮箱执行完全相同的语句（一条都没有），耗时不再带出
+        # 答案。以前查库 + DELETE/INSERT + commit 留在请求里，存在的那一支多好几次数据库
+        # 往返，响应时间本身就是一个存在性探针。只取请求会话绑的引擎（理由同
+        # _queue_login_event）。
+        # Lookup, token issue, commit, mail and activity row all run in the
+        # background task after the response, so the request itself does exactly
+        # the same (no) DB work for known and unknown addresses. The lookup and the
+        # DELETE/INSERT/commit used to sit in the request, giving the known branch
+        # several extra round trips — a latency oracle. Only the session's engine
+        # is captured (see _queue_login_event).
+        try:
+            bind = db.get_bind()
+        except Exception:  # noqa: BLE001
+            logger.warning("找回密码取不到数据库连接 / forgot-password: no bind", exc_info=True)
+            bind = None
+        if bind is not None:
+            background.add_task(
+                _process_forgot_request, bind, email,
+                request.client.host if request.client else None,
+            )
     return MessageOut(message=_FORGOT_REPLY)
 
 
-def _queue_reset_requested(background: BackgroundTasks, db: Session, user_id: str) -> None:
-    """排一条 user.password_reset_requested，响应之后由 _record_reset_requested 写。只取请求
-    会话绑的引擎（理由同 _queue_login_event）。
-    Queue user.password_reset_requested for after the response; only the request
-    session's engine is captured (see _queue_login_event)."""
+def _process_forgot_request(bind, email: str, requested_ip: str | None) -> None:
+    """后台任务：查这个邮箱 → 签令牌并提交 → 发信 → 记 user.password_reset_requested。
+
+    自己开一个短会话（请求会话此时可能已关）。邮箱不存在就什么都不做。每一步都自己吞
+    异常——后台任务抛出来只会在服务端日志里刷一条 ERROR，用户那边早就拿到了统一回复。
+    send_reset_email 按本模块的名字取（测试会替换它）。
+    Background task: look the address up, issue + commit a token, send the mail,
+    then log user.password_reset_requested. Uses its own short session (the
+    request's may be closed by now); an unknown address does nothing. Errors are
+    swallowed — the caller already got the uniform reply."""
     try:
-        bind = db.get_bind()
+        with Session(bind=bind) as db:
+            user = db.query(User).filter(User.email == email).first()
+            if user is None:
+                return
+            user_id, to_email = user.id, user.email
+            raw = issue_token(db, user, requested_ip=requested_ip)
+            db.commit()
     except Exception:  # noqa: BLE001
-        logger.warning("找回密码日志取不到数据库连接，本次不记 / reset-request event skipped: no bind",
-                       exc_info=True)
+        logger.warning("找回密码签发令牌失败 / forgot-password token issue failed", exc_info=True)
         return
-    background.add_task(_record_reset_requested, bind, user_id)
+    # 明文令牌只传给发信函数，不进日志。/ The plaintext only goes to the mailer.
+    try:
+        send_reset_email(to_email, raw)
+    except Exception:  # noqa: BLE001
+        logger.warning("找回密码发信失败 / forgot-password mail failed", exc_info=True)
+    _record_reset_requested(bind, user_id)
 
 
 def _record_reset_requested(bind, user_id: str) -> None:
@@ -523,6 +571,14 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
 
     user.password_hash = hash_password(req.password)
     user.token_version = (user.token_version or 0) + 1
+    # 桥接 API Token 一起换掉（同 /ea/token/reset）：找回密码的前提是「账号可能被人拿着」，
+    # 只废 JWT 不换 Token，拿着 Token 的人照样能经 Bridge 下单。新 Token 用户之后到绑定页
+    # 重新生成。旧哈希在 commit 之后清出桥接鉴权缓存。
+    # Rotate the bridge API token too (as /ea/token/reset does): a reset assumes
+    # someone else may hold the account, and the token is a second key that can
+    # trade. The user generates a new one from the Bind page; the old hash is
+    # dropped from the bridge auth cache after the commit.
+    old_api_hash = rotate_api_token(user)
     # 操作日志，随下面这次 commit 一起提交；令牌无效的那一支（上面 400）不记。
     # Activity row, committed below; the invalid-token branch (400 above) logs nothing.
     activity_log.log_event(db, activity_log.USER_PASSWORD_RESET, user_id=user.id, actor_id=user.id)
@@ -533,6 +589,7 @@ def reset_password(request: Request, req: ResetPasswordRequest, db: Session = De
     # via reset; an already-verified account logs nothing (early return).
     email_verification.mark_verified(db, user, method=email_verification.METHOD_RESET)
     db.commit()
+    invalidate_bridge_token_cache(old_api_hash)
     # 只清「这个账号 + 发起重置的这个来源」那一条计数：锁定本来就是按来源分开算
     # 的，被锁住的正是用户此刻所在的这个来源（他就是在这里试错才被锁的），清它
     # 就够。从别的网络重置则不影响那边——那边也没有人被锁。

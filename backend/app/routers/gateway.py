@@ -19,8 +19,12 @@ from app.core.database import SessionLocal, get_db
 from app.core.rate_limit import (
     clear_failed_mt5_verify,
     is_mt5_verify_locked,
+    is_mt5_verify_login_locked,
+    is_mt5_verify_user_locked,
     limiter,
     record_failed_mt5_verify,
+    record_failed_mt5_verify_login,
+    record_failed_mt5_verify_user,
 )
 from app.models import ClosedTrade, MT5Account, Order, User
 from app.schemas import LOGIN_PATTERN
@@ -186,14 +190,11 @@ def _verify_failure(rsp) -> HTTPException:
     non-whitelisted groups clearly separate, which is where the UX lesson above
     actually applies.
     """
-    if rsp.error == "group_not_allowed":
-        return HTTPException(
-            status_code=403,
-            detail=(
-                "该 MT5 账号所属的组尚未开放接入，请联系客服 / "
-                "This MT5 account's group is not enabled for linking yet — please contact support"
-            ),
-        )
+    # 「组未开放」不再在这里单独回 403：调用方已把它并进「账号或密码不正确」（2026-10-10
+    # 审计）——403 只在密码正确时才会出现，等于告诉调用者「这个账号存在、密码也对」，
+    # 是一个密码校验的旁路神谕。
+    # "Group not enabled" is no longer a distinct 403 here: the caller folds it into the
+    # invalid answer, since a 403 only ever followed a correct password and so confirmed it.
 
     if rsp.error == "timeout":
         return HTTPException(
@@ -256,6 +257,31 @@ def _log_verify_event(db: Session, user_id: str, row: MT5Account, *, is_new: boo
                        getattr(row, "login", None), exc_info=True)
 
 
+# ---------- 验证失败锁定 / verify lockout ----------
+# 三道计数，各用 core/rate_limit 里自己的策略（都是 15 分钟窗口）：
+#   · (用户, 账号)      mt5_verify        5 次——盯着一个账号猜；
+#   · 按用户            mt5_verify_user   20 次——一个平台用户轮着试很多账号；
+#   · 按 MT5 账号全局   mt5_verify_login  50 次——多个平台账号合伙猜同一个 MT5 账号。
+# Three counters, each with its own core/rate_limit policy (15-minute windows): the
+# (user, login) pair at 5, per user at 20, and per MT5 login across all users at 50.
+
+
+def _verify_pair_key(user_id: str, login: int | str) -> str:
+    return f"u:{user_id}:{login}"
+
+
+def _verify_locked(user_id: str, login: int | str) -> bool:
+    return (is_mt5_verify_locked(_verify_pair_key(user_id, login))
+            or is_mt5_verify_user_locked(user_id)
+            or is_mt5_verify_login_locked(login))
+
+
+def _record_verify_failure(user_id: str, login: int | str) -> None:
+    record_failed_mt5_verify(_verify_pair_key(user_id, login))
+    record_failed_mt5_verify_user(user_id)
+    record_failed_mt5_verify_login(login)
+
+
 # ---------- 端点 ----------
 
 
@@ -282,7 +308,19 @@ def gateway_verify(
     #    egress IPs hammering one account, and every call here is a real
     #    credential check at the broker; both dimensions must be closed so the
     #    platform can't serve as a brute-force proxy against it.
-    if is_mt5_verify_locked(req.login):
+    #
+    #    计数键是 (用户, 账号) 外加按用户的总数（2026-10-10 审计）。以前只按 MT5 账号计，
+    #    任何登录用户对别人的账号故意输错 5 次，就能把真正的主人锁在门外 15 分钟、循环
+    #    着做就是永久的。现在别人的失败只锁他自己；按用户的总数另外挡住「一个用户轮着
+    #    试很多账号」。代价：攻击者注册多个平台账号能多拿几轮尝试——每个都要验证邮箱。
+    #    Keyed on (user, login) plus a per-user total (2026-10-10 audit). The old
+    #    per-login key let anyone lock the real owner out by failing 5 times against
+    #    their login. A stranger's failures now lock only the stranger; the per-user
+    #    total stops one user sweeping many logins. Trade-off: several platform
+    #    accounts buy several rounds, each behind email verification.
+    #    这几轮再由按 MT5 账号的全局总数（跨所有用户，50 次 / 15 分钟）封顶，见 _verify_locked。
+    #    Those rounds are capped by a global per-login total (all users, 50 / 15 min).
+    if _verify_locked(user.id, req.login):
         logger.warning("Gateway 验证已锁定: user=%s login=%s", user.id, req.login)
         raise HTTPException(
             status_code=429,
@@ -308,8 +346,14 @@ def gateway_verify(
         # password incorrect", which reveals nothing about whether the account
         # exists at the broker. It counts toward the lockout too — enumeration is
         # precisely the act of asking this repeatedly.
-        if rsp.status == 404:
-            record_failed_mt5_verify(req.login)
+        #
+        # 「组未开放」同样并进来（旧网关回 403 group_not_allowed，新网关回 404）：它只在
+        # 密码正确时出现，单独回一个 403 就是在告诉调用者「密码对了」。计入失败锁定。
+        # "Group not enabled" folds in too (403 group_not_allowed from older gateways,
+        # 404 from newer ones): it only followed a correct password, so a distinct 403
+        # confirmed the guess. Counts toward the lockout.
+        if rsp.status == 404 or rsp.error == "group_not_allowed":
+            _record_verify_failure(user.id, req.login)
             return GatewayVerifyResponse(ok=True, valid=False, login=req.login)
         raise _verify_failure(rsp)
 
@@ -374,7 +418,12 @@ def gateway_verify(
 
     # 3) 验证通过则创建/更新 MT5Account
     if rsp.valid:
-        clear_failed_mt5_verify(req.login)
+        # 只清 (用户, 账号) 这一对；按用户的总数不清——否则绑一个自己的模拟户就能把
+        # 「轮着试别人账号」的计数归零。按账号的全局计数也不清：攻击者里有一个猜中了，
+        # 不该顺手把同伙们攒下的计数抹掉。/ Only the pair is cleared; the per-user total is
+        # not, or binding one's own demo account would reset a sweep of other logins. The
+        # global per-login count isn't either: one success shouldn't wipe a group's tally.
+        clear_failed_mt5_verify(_verify_pair_key(user.id, req.login))
         # 操作日志要分清新建 / 复活 / 重新验证，见 _log_verify_event。
         # The activity log tells new / revived / re-verified apart; see _log_verify_event.
         is_new = existing is None
@@ -466,13 +515,17 @@ def gateway_verify(
                 login_str, rsp.group,
             )
     else:
-        record_failed_mt5_verify(req.login)
+        _record_verify_failure(user.id, req.login)
         logger.info("Gateway 验证失败: user=%s login=%s retcode=%s", user.id, req.login, rsp.retcode)
 
+    # retcode 只记日志、不回给客户端：MT5 的返回码能区分「密码错」与「账号被禁用 / 只读」
+    # 等，回给调用者就是一个账号状态探针。字段保留（恒为空串），旧前端不至于读到 undefined。
+    # The MT5 retcode is logged, never returned: it tells "wrong password" apart from
+    # disabled / read-only states, i.e. an account-state probe. The field stays, always "".
     return GatewayVerifyResponse(
         ok=True,
         valid=rsp.valid,
-        retcode=rsp.retcode,
+        retcode="",
         login=rsp.login,
         name=rsp.name,
         group=rsp.group,
@@ -1706,7 +1759,7 @@ async def gateway_positions_loop() -> None:
                 # matches count as verified, aligning with the bridge channel, which
                 # has always accepted known position ids only.
                 verified = bool(leg.get("attributedByTicket"))
-                if upsert_leg(db, user_id, login, leg, verified) in ("inserted", "enriched"):
+                if upsert_leg(db, user_id, login, leg, verified, trusted=True) in ("inserted", "enriched"):
                     inserted += 1
             if inserted:
                 # 新平仓落库：胜率 / 已平仓明细的 60 秒缓存作废 / drop the 60s caches

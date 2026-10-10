@@ -33,7 +33,12 @@ from fastapi.responses import HTMLResponse, Response
 from app.core.config import settings
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user_id_light
-from app.services.image_upload import UploadError, is_private_configured, upload_private_image
+from app.services.image_upload import (
+    UploadError,
+    is_private_configured,
+    read_upload_capped,
+    upload_private_image,
+)
 
 router = APIRouter(prefix="/share", tags=["share"])
 
@@ -85,7 +90,9 @@ async def upload_share_image(request: Request, file: UploadFile = File(...),
     Upload one share-card PNG; returns the save page's path (the frontend prefixes API_BASE)."""
     if not is_private_configured():
         raise HTTPException(status_code=503, detail="后台未配置图片存储 / Image storage isn't configured")
-    data = await file.read()
+    # 先看声明大小、再有界读取：超大请求体永远不会整段读进内存（见 read_upload_capped）
+    # Declared-size check then a bounded read: a huge body is never loaded whole
+    data = await read_upload_capped(file, request)
     try:
         key = await run_in_threadpool(upload_private_image, data, f"share/{user_id}")
     except UploadError as exc:

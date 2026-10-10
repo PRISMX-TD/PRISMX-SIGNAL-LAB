@@ -346,9 +346,20 @@ def _forgot_call(db, email, *, run=True):
     bg = _Background()
     _forgot(request=_Req(), req=ForgotPasswordRequest(email=email), background=bg, db=db)
     if run:
-        bg.tasks = [t for t in bg.tasks if t[0] is not auth_mod.send_reset_email]
-        bg.run()
+        _run_without_mail(bg)
     return bg
+
+
+def _run_without_mail(bg):
+    """跑掉后台任务，但把 auth 里的发信换成空操作（查库 / 签令牌 / 记日志都在同一个任务里）。
+    Run the queued tasks with auth's mailer stubbed out (lookup, token and log
+    share one task now)."""
+    real = auth_mod.send_reset_email
+    auth_mod.send_reset_email = lambda *a, **k: True
+    try:
+        bg.run()
+    finally:
+        auth_mod.send_reset_email = real
 
 
 def test_reset_request_is_logged_only_for_a_known_address(db, engine):
@@ -377,15 +388,15 @@ def test_reset_request_row_is_written_after_the_response(db, engine):
     try:
         known = _forgot_call(db, "u@example.com", run=False)
         unknown = _forgot_call(db, "nobody@example.com", run=False)
-        assert [s for s in stmts if "activity_events" in s] == []   # 请求本身 / the requests
-        del stmts[:]
-        # 不存在的邮箱：一个后台任务都没有 / unknown address: no task at all
-        assert unknown.tasks == []
+        # 请求本身一条 SQL 都不发（查库也挪进了后台任务）/ the requests issue no SQL at all
+        assert stmts == []
+        # 两支排的后台任务一模一样 / both branches queue the identical task
         names = [fn.__name__ for fn, _a, _k in known.tasks]
-        assert names == ["send_reset_email", "_record_reset_requested"]
+        assert names == [fn.__name__ for fn, _a, _k in unknown.tasks] == ["_process_forgot_request"]
 
-        known.tasks = [t for t in known.tasks if t[0] is not auth_mod.send_reset_email]
-        known.run()                                             # 「响应之后」/ after the response
+        _run_without_mail(unknown)                               # 不存在：什么都不写 / writes nothing
+        assert [s for s in stmts if "activity_events" in s] == []
+        _run_without_mail(known)                                # 「响应之后」/ after the response
         assert [s.lstrip().split(None, 1)[0].upper() for s in stmts if "activity_events" in s] == ["INSERT"]
     finally:
         event.remove(engine, "before_cursor_execute", _before)
@@ -544,21 +555,35 @@ def test_mark_verified_row_rolls_back_with_the_caller(db, engine):
 
 # ── user.password_changed ──────────────────────────────────────────────────────
 
-def _change(db, user, old, new):
+def _change(db, user, old, new, background=None):
     from app.routers.account import ChangePasswordRequest, change_password
 
     return change_password.__wrapped__(
         request=None, body=ChangePasswordRequest(old_password=old, new_password=new),
-        db=db, current_user=user,
+        background=background or _Background(), db=db, current_user=user,
     )
 
 
 def test_password_change_records_first_set_then_change(db, engine):
+    """Google 账号第一次设密码不再当场生效：只记一条「申请重置」并发信（设置密码那一步在
+    reset_password 里完成）；已有密码的账号改密码记 first_set=False。
+    A Google account's first password is no longer set here: only a reset-request
+    row plus the mail. A real change logs first_set=False."""
     u = _user(db, password=None)                     # Google 注册，没有密码
-    _change(db, u, None, "first-password-1")
+    bg = _Background()
+    out = _change(db, u, None, "first-password-1", background=bg)
+    assert out == {"ok": True, "emailSent": True}
+    db.refresh(u)
+    assert u.password_hash is None
+    assert [fn.__name__ for fn, _a, _k in bg.tasks] == ["send_reset_email"]
+    [req_ev] = _events(engine, al.USER_PASSWORD_RESET_REQUESTED)
+    _assert_self(req_ev, u)
+
+    u.password_hash = hash_password("first-password-1")
+    db.commit()
     _change(db, u, "first-password-1", "second-password-2")
     rows = _events(engine, al.USER_PASSWORD_CHANGED)
-    assert [e["data"] for e in rows] == [{"first_set": True}, {"first_set": False}]
+    assert [e["data"] for e in rows] == [{"first_set": False}]
     for ev in rows:
         _assert_self(ev, u)
     # 密码哈希不进日志 / the hash never reaches the log

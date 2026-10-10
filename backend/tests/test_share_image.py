@@ -64,3 +64,48 @@ def test_png_attachment_and_page(monkeypatch):
     assert page.headers["cache-control"] == "no-store"
     assert c.get("/api/share/i/bad-token").status_code == 404
     assert c.get("/api/share/i/bad-token.png").status_code == 404
+
+
+def test_upload_over_cap_is_413_and_never_reaches_storage(monkeypatch):
+    """超过 UPLOAD_MAX_BYTES 的上传：413，且根本不会交给存储层。
+    An upload over UPLOAD_MAX_BYTES is a 413 and never reaches storage."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "UPLOAD_MAX_BYTES", 16)
+    monkeypatch.setattr(share, "is_private_configured", lambda: True)
+    called = []
+    monkeypatch.setattr(share, "upload_private_image", lambda data, folder: called.append(data))
+    r = _client(monkeypatch).post("/api/share/image", files={"file": ("c.png", b"\x89PNG" + b"x" * 64, "image/png")})
+    assert r.status_code == 413
+    assert called == []
+
+
+def test_capped_read_is_bounded_even_without_a_declared_size():
+    """声明大小缺失（分块传输）或谎报时，也最多只读上限+1 字节就拒绝——不整段读进内存。
+    With no (or a lying) declared size, at most cap+1 bytes are read before rejecting."""
+    import asyncio
+
+    from app.core.config import settings
+    from app.services.image_upload import read_upload_capped
+
+    class _File:
+        size = None
+
+        def __init__(self, n):
+            self.n, self.asked = n, []
+
+        async def read(self, size=-1):
+            self.asked.append(size)
+            return b"x" * (self.n if size < 0 else min(size, self.n))
+
+    class _Req:
+        headers = {}
+
+    cap = settings.UPLOAD_MAX_BYTES
+    big = _File(cap * 10)
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(read_upload_capped(big, _Req()))
+    assert e.value.status_code == 413
+    assert big.asked == [cap + 1]                       # 有界读取 / bounded read
+    ok = _File(10)
+    assert asyncio.run(read_upload_capped(ok, _Req())) == b"x" * 10

@@ -57,11 +57,13 @@ SERVICE="${PRISMX_SERVICE:-prismx}"
 HEALTH_URL="${PRISMX_HEALTH_URL:-http://127.0.0.1:8000/}"
 HEALTH_TIMEOUT="${PRISMX_HEALTH_TIMEOUT:-60}"   # 秒；服务启动约 1-2 秒，留足余量
 PIP="$REPO/backend/.venv/bin/pip"
+PY="$REPO/backend/.venv/bin/python"
 
 STATE_DIR="${PRISMX_DEPLOY_STATE:-$HOME/.prismx-deploy}"
 LAST_GOOD_FILE="$STATE_DIR/last-good-commit"
 FAILED_FILE="$STATE_DIR/failed-commits"
 SNAPSHOT_DIR="$STATE_DIR/db-snapshots"
+FAIL_LOG_DIR="$STATE_DIR/fail-logs"
 DB_SNAPSHOT=""
 
 log() { printf '[deploy %s] %s\n' "$(date +%H:%M:%S)" "$*"; }
@@ -71,7 +73,12 @@ die() { log "❌ $*"; exit 1; }
 [ -d "$REPO/.git" ] || die "找不到仓库：$REPO"
 [ -x "$PIP" ] || die "找不到 venv：$PIP"
 
+# 状态目录里有数据库快照（全库数据）与失败时的服务日志（含用户数据），只给本用户。
+# 只收紧这一个目录，不全局 umask 077：git 检出的代码文件权限保持原样。
+# The state dir holds full DB dumps and failure logs; owner-only. No global
+# umask 077, so files git checks out keep their usual modes.
 mkdir -p "$STATE_DIR"
+chmod 700 "$STATE_DIR"
 
 # ---------- 数据库相关的只读辅助 ----------
 # 都是「尽力而为」：读不到就降级并说清楚，绝不因为读不到数据库信息而中断部署。
@@ -101,6 +108,40 @@ pg_url() {
   printf '%s' "$1" | sed -E 's#^postgres(ql)?\+[A-Za-z0-9_]+://#postgresql://#'
 }
 
+# 跑一条 libpq 命令（psql / pg_dump），连接 URL 作为最后一个参数追加。
+# 密码从 URL 里拆出来放进 PGPASSWORD：命令行参数对机器上所有用户可见（ps、/proc/*/cmdline），
+# 进程环境只有本用户和 root 读得到。URL 交给 python 拆（经环境变量传，不上命令行），
+# 处理 %xx 转义；拆不了就返回非零，调用方按"读不到数据库"降级——绝不退回把密码放命令行。
+# Run a libpq command with the URL appended as its last argument. The password moves
+# from the URL into PGPASSWORD: argv is world-readable (ps, /proc/*/cmdline), a
+# process's environment is not. python parses the URL (passed via env, not argv,
+# %xx-decoded); if that is impossible, fail rather than fall back to argv.
+pg_run() {
+  local py split bare pw
+  py="$PY"
+  [ -x "$py" ] || py=$(command -v python3) || return 1
+  split=$(PRISMX_PG_URL="$(pg_url "$1")" "$py" -c '
+import os, sys
+from urllib.parse import urlsplit, urlunsplit, unquote
+u = urlsplit(os.environ["PRISMX_PG_URL"])
+netloc, pw = u.netloc, u.password
+if pw is not None:
+    userinfo, _, hostport = netloc.rpartition("@")
+    netloc = userinfo.split(":", 1)[0] + "@" + hostport
+sys.stdout.write(urlunsplit((u.scheme, netloc, u.path, u.query, u.fragment)) + "\n" + unquote(pw or ""))
+') || return 1
+  shift
+  # 没有密码时 $(...) 会吃掉结尾的换行，split 里就只剩 URL
+  bare=${split%%$'\n'*}
+  pw=""
+  [ "$bare" = "$split" ] || pw=${split#*$'\n'}
+  if [ -n "$pw" ]; then
+    PGCONNECT_TIMEOUT=10 PGPASSWORD="$pw" "$@" "$bare"
+  else
+    PGCONNECT_TIMEOUT=10 "$@" "$bare"
+  fi
+}
+
 # 读库里记的迁移版本号（backend/app/core/database.py 的 schema_rev）。
 # 读不到就回非零，调用方按"未知"处理。
 read_schema_rev() {
@@ -109,7 +150,7 @@ read_schema_rev() {
   case "$url" in postgres*) ;; *) return 1 ;; esac
   command -v psql >/dev/null 2>&1 || return 1
   # PGCONNECT_TIMEOUT：库连不上时别把部署挂住（psql 默认会一直等）
-  raw=$(PGCONNECT_TIMEOUT=10 psql "$(pg_url "$url")" -At -w \
+  raw=$(pg_run "$url" psql -At -w \
         -c "SELECT value FROM platform_settings WHERE key = 'schema_rev'" 2>/dev/null) || return 1
   [ -n "$raw" ] || return 1
   printf '%s' "$raw" | tr -d '"'
@@ -128,13 +169,16 @@ snapshot_db() {
   command -v pg_dump >/dev/null 2>&1 || { log "⚠ 没装 pg_dump，本次没有数据库快照"; return 0; }
 
   mkdir -p "$SNAPSHOT_DIR"
+  chmod 700 "$SNAPSHOT_DIR"
   out="$SNAPSHOT_DIR/pre-${new:0:7}-$(date +%Y%m%d-%H%M%S).dump"
 
   # 加超时：库卡住时 pg_dump 会一直挂着，整个部署（和 Actions 的 10 分钟上限）跟着卡死，
   # 而这时还没重启任何东西。没有 timeout 命令就照旧直接跑。
   local tmo=()
   command -v timeout >/dev/null 2>&1 && tmo=(timeout "${PRISMX_DB_SNAPSHOT_TIMEOUT:-300}")
-  if PGCONNECT_TIMEOUT=10 ${tmo[@]+"${tmo[@]}"} pg_dump -Fc -f "$out" "$(pg_url "$url")" 2>/dev/null; then
+  # umask 077 放在子 shell 里：快照一创建就是 0600（全库数据，含用户资料），
+  # 不影响脚本其余部分（git 检出）的文件权限。
+  if ( umask 077; pg_run "$url" ${tmo[@]+"${tmo[@]}"} pg_dump -Fc -f "$out" ) 2>/dev/null; then
     DB_SNAPSHOT="$out"
     log "数据库快照：$out"
     # 只留最近 5 份，别把磁盘吃满
@@ -292,8 +336,21 @@ if wait_healthy; then
 fi
 
 # ---------- 健康检查失败：回滚 ----------
-log "健康检查 ${HEALTH_TIMEOUT}s 内未通过，最近日志："
-sudo -n /usr/bin/journalctl -u "$SERVICE" -n 60 --no-pager 2>/dev/null | sed 's/^/    /' || true
+# 服务日志不能打到这里：本脚本的输出会进 GitHub Actions 日志，而仓库是公开的——
+# 日志里有用户邮箱、MT5 账号、请求内容乃至异常里带出的连接串。写到 VPS 上只有本用户
+# 可读的文件里，Actions 里只给路径。
+# Service logs must not be printed: this output lands in public GitHub Actions logs
+# (emails, MT5 logins, request data, connection strings in tracebacks). Write them to
+# an owner-only file on the VPS and print only its path.
+fail_log="$FAIL_LOG_DIR/fail-${new:0:7}-$(date +%Y%m%d-%H%M%S).log"
+if ( umask 077; mkdir -p "$FAIL_LOG_DIR" && chmod 700 "$FAIL_LOG_DIR" \
+     && sudo -n /usr/bin/journalctl -u "$SERVICE" -n 60 --no-pager > "$fail_log" 2>/dev/null ); then
+  log "健康检查 ${HEALTH_TIMEOUT}s 内未通过；最近 60 行服务日志已写入 VPS：$fail_log（仅本用户可读）"
+else
+  log "健康检查 ${HEALTH_TIMEOUT}s 内未通过；读取服务日志失败，请登上 VPS：journalctl -u $SERVICE -n 60"
+fi
+# 失败日志只留最近 20 份
+ls -1t "$FAIL_LOG_DIR"/fail-*.log 2>/dev/null | tail -n +21 | xargs -r rm -f || true
 
 # 这个 commit 从此进黑名单，下次触发直接被拦下（见文件头第 2 条）。
 printf '%s\n' "$new" >> "$FAILED_FILE"
@@ -348,7 +405,7 @@ fi
 restart_service
 
 if wait_healthy; then
-  die "新版本 ${new:0:7} 启动失败，已回滚到 ${rollback_to:0:7}（服务恢复）。请看上面的日志修复后再推。
+  die "新版本 ${new:0:7} 启动失败，已回滚到 ${rollback_to:0:7}（服务恢复）。请登上 VPS 看 $fail_log 修复后再推。
 该 commit 已记入 $FAILED_FILE，再次推同一个 commit 会被直接拒绝。"
 else
   die "回滚后服务仍不健康！请立刻登上 VPS：journalctl -u $SERVICE -f"

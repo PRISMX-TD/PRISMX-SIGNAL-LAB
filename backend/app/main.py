@@ -273,7 +273,19 @@ async def lifespan(app: FastAPI):
     loop_health.shutdown()
 
 
-app = FastAPI(title=settings.APP_NAME, lifespan=lifespan)
+# 接口文档（/docs、/redoc、/openapi.json）只在非生产环境开放：生产上它们等于把全部
+# 端点、参数与管理接口的形状公开给任何人，对用户没有用处，只给探测省事。
+# API docs (/docs, /redoc, /openapi.json) are served outside production only: in
+# production they publish every endpoint's shape — admin ones included — to anyone,
+# helping nobody but a prober.
+_API_DOCS_ENABLED = settings.ENV.lower() != "production"
+app = FastAPI(
+    title=settings.APP_NAME,
+    lifespan=lifespan,
+    docs_url="/docs" if _API_DOCS_ENABLED else None,
+    redoc_url="/redoc" if _API_DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if _API_DOCS_ENABLED else None,
+)
 
 # 限流：注册 limiter、超限处理器与中间件 / rate limiting: limiter, handler, middleware
 app.state.limiter = limiter
@@ -387,7 +399,12 @@ app.include_router(chart.router, prefix=settings.API_PREFIX)
 app.include_router(webhook.router, prefix=settings.API_PREFIX)
 app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)
-app.include_router(admin.router, prefix=settings.API_PREFIX)
+# 管理 router：每个端点各自 Depends(require_admin)，挂载处再兜一层，与其它管理 router 同一规矩——
+# 将来新加的端点忘了写依赖，也不会因此对普通用户开放。同一依赖单次请求只求值一次。
+# Admin router: every endpoint declares Depends(require_admin); the mount adds the
+# backstop like the other admin routers, so a future endpoint that forgets its
+# dependency isn't open to ordinary users. FastAPI evaluates it once per request.
+app.include_router(admin.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 # 操作日志（只读）：router 自带 require_admin，挂载处再挂一层，与其它管理 router 同一规矩。
 # Activity log (read-only): guarded on the router and again at the mount.
 app.include_router(admin_activity.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])

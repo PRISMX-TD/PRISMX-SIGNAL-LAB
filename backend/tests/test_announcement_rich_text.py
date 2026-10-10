@@ -216,3 +216,79 @@ def test_legacy_blocks_pass_through_untouched() -> None:
         blocks=[AnnouncementBlock(kind="paragraph", textZh="a < b", textEn="")],
     )
     assert body.blocks[0].textZh == "a < b"
+
+
+# ---------- 混淆写法 / obfuscated payloads ----------
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "&#106;avascript:alert(1)",                 # 十进制实体 / decimal entity
+        "&#x6A;&#x61;vascript:alert(1)",            # 十六进制实体 / hex entity
+        "javascript&colon;alert(1)",                # 命名实体 / named entity
+        "java\tscript:alert(1)",                    # 制表符 / tab
+        "java&#10;script:alert(1)",                 # 编码换行 / encoded newline
+        "\x01javascript:alert(1)",                  # 控制字符前缀 / control-char prefix
+        "  javascript:alert(1)",                    # 前导空白 / leading space
+        "jav&#x09;ascript:alert(1)",
+        "vbscript:msgbox(1)",
+        "VBScript:msgbox(1)",
+        "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+        "&#100;ata:text/html,x",
+        "https:javascript:alert(1)",                # 没有 // 的 https: / https: without //
+    ],
+)
+def test_obfuscated_dangerous_links_die(href: str) -> None:
+    out = sanitize_rich_html(f'<a href="{href}">x</a>')
+    assert "href" not in out, out
+
+
+@pytest.mark.parametrize(
+    "src",
+    ["&#106;avascript:alert(1)", "java\tscript:alert(1)", "data:image/png;base64,AAAA", "  data:image/png,x", "//evil/x.png"],
+)
+def test_obfuscated_dangerous_image_sources_drop_the_image(src: str) -> None:
+    assert sanitize_rich_html(f'<img src="{src}">') == ""
+
+
+@pytest.mark.parametrize(
+    "style",
+    [
+        "background:url(javascript:alert(1))",
+        "background-image:url('https://evil/track.png')",
+        "width:expression(alert(1))",
+        "behavior:url(x.htc)",
+    ],
+)
+def test_style_with_url_or_expression_never_survives(style: str) -> None:
+    out = sanitize_rich_html(f'<p style="{style}">x</p><span style="{style}">y</span>')
+    assert "style" not in out and "url(" not in out and "expression" not in out
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '<math><mi xlink:href="javascript:alert(1)">x</mi></math>',
+        '<embed src="https://evil/x.swf">',
+        '<SVG ONLOAD=alert(1)>',
+        '<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>',
+        '<details open ontoggle=alert(1)>x</details>',
+        '<noscript><p title="</noscript><img src=x onerror=alert(1)>"></noscript>',
+        '<xmp><img src=x onerror=alert(1)></xmp>',
+        '<!--<img src=x onerror=alert(1)>-->',
+        '<a href="https://ok" onfocus=alert(1) autofocus>x</a>',
+        '<p><img src="https://ok/a.png" onload=alert(1) srcset="javascript:x"></p>',
+        '<form><button formaction="javascript:alert(1)">x</button></form>',
+        '<base href="javascript:/">',
+    ],
+)
+def test_more_vectors_never_carry_handlers_or_dangerous_tags(raw: str) -> None:
+    out = sanitize_rich_html(raw)
+    lowered = out.lower()
+    for bad in ("<svg", "<math", "<embed", "<form", "<button", "<base", "<noscript", "<xmp",
+                "javascript", "srcset", "formaction", "xlink"):
+        assert bad not in lowered, f"{bad!r} survived in {out!r}"
+    probe = _AttrProbe()
+    probe.feed(out)
+    for tag, attrs in probe.seen:
+        assert not any(a.startswith("on") for a in attrs), (tag, attrs, out)

@@ -777,10 +777,13 @@ settings = Settings()
 
 # 安全校验：生产环境（ENV=production）必须配置自定义强随机 JWT_SECRET，
 # 否则用默认弱密钥签发的 token 可被任意伪造（等同认证绕过）。
-# 不再以数据库类型推断是否为生产，避免「生产仍用 SQLite」时漏判。
+# ENV=production 是主开关（「生产仍用 SQLite」也能覆盖到）；连 Postgres 的部署无论 ENV
+# 写了什么也一并硬拒（见 jwt_secret_enforced）。
 # Safety check: in production (ENV=production) a custom strong JWT_SECRET is
 # mandatory; otherwise tokens signed with the default weak key are forgeable
-# (equivalent to auth bypass). We no longer infer "production" from the DB type.
+# (equivalent to auth bypass). ENV=production is the main switch (it also covers
+# a production still on SQLite); a Postgres DATABASE_URL triggers it regardless
+# of ENV (see jwt_secret_enforced).
 _DEFAULT_JWT_SECRET = "prismx-dev-secret-change-in-production"
 # HS256 的安全性完全取决于这一个字符串的熵。只比对"是不是那个默认字面量"挡不住
 # `JWT_SECRET=secret` 这类自己换过、但短到能离线爆破的值——签名一旦被还原，任何
@@ -792,19 +795,39 @@ _DEFAULT_JWT_SECRET = "prismx-dev-secret-change-in-production"
 # token for any sub (auth bypass). 32 chars is a floor, not a recommendation:
 # `secrets.token_urlsafe(32)` yields 43, so following the docs never hits this.
 _MIN_JWT_SECRET_LENGTH = 32
-if settings.ENV.lower() == "production" and settings.JWT_SECRET == _DEFAULT_JWT_SECRET:
+
+
+def jwt_secret_enforced(env: str, database_url: str) -> bool:
+    """要不要对 JWT_SECRET 做强度硬拒。
+
+    ENV=production 一定要；另外**只要连的是 Postgres**也要，不管 ENV 写的是什么：
+    真实部署全是 Postgres，而 ENV 是一行最容易漏配的 .env——漏了它，默认密钥就会悄悄
+    带上线，任何人都能签出任意用户的 token。本地开发与测试用 SQLite，不受影响。
+    Whether the JWT_SECRET strength checks apply: always with ENV=production, and
+    also whenever DATABASE_URL points at Postgres regardless of ENV — every real
+    deployment runs Postgres, while ENV is the easiest .env line to forget, and
+    forgetting it would ship the default secret (anyone could mint any user's
+    token). Local dev and the test suite run on SQLite and are unaffected."""
+    return env.lower() == "production" or (database_url or "").lower().startswith("postgres")
+
+
+_JWT_ENFORCED = jwt_secret_enforced(settings.ENV, settings.DATABASE_URL)
+
+if _JWT_ENFORCED and settings.JWT_SECRET == _DEFAULT_JWT_SECRET:
     raise RuntimeError(
-        "JWT_SECRET 仍为默认值，生产环境（ENV=production）必须在 .env 中设置强随机密钥。"
-        " / JWT_SECRET is still the default; set a strong random secret in .env when ENV=production."
+        "JWT_SECRET 仍为默认值，生产环境（ENV=production 或 DATABASE_URL 为 Postgres）必须在 .env 中"
+        "设置强随机密钥。"
+        " / JWT_SECRET is still the default; set a strong random secret in .env when ENV=production"
+        " or DATABASE_URL is Postgres."
     )
 
-if settings.ENV.lower() == "production" and len(settings.JWT_SECRET) < _MIN_JWT_SECRET_LENGTH:
+if _JWT_ENFORCED and len(settings.JWT_SECRET) < _MIN_JWT_SECRET_LENGTH:
     raise RuntimeError(
-        f"JWT_SECRET 过短（{len(settings.JWT_SECRET)} 字符），生产环境（ENV=production）至少需要 "
-        f"{_MIN_JWT_SECRET_LENGTH} 字符的强随机密钥；建议用 `python -c \"import secrets;"
+        f"JWT_SECRET 过短（{len(settings.JWT_SECRET)} 字符），生产环境（ENV=production 或 Postgres）"
+        f"至少需要 {_MIN_JWT_SECRET_LENGTH} 字符的强随机密钥；建议用 `python -c \"import secrets;"
         " print(secrets.token_urlsafe(32))\"` 生成。"
-        f" / JWT_SECRET is too short ({len(settings.JWT_SECRET)} chars); ENV=production requires at"
-        f" least {_MIN_JWT_SECRET_LENGTH}. Generate one with"
+        f" / JWT_SECRET is too short ({len(settings.JWT_SECRET)} chars); ENV=production or a Postgres"
+        f" DATABASE_URL requires at least {_MIN_JWT_SECRET_LENGTH}. Generate one with"
         " `python -c \"import secrets; print(secrets.token_urlsafe(32))\"`."
     )
 

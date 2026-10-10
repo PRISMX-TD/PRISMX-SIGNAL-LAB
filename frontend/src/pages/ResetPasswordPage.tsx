@@ -12,7 +12,7 @@
 // branded shell, and splitting them would mean either duplicating that shell or
 // extracting another layout component for what is really two steps of one flow.
 import { useState, type FormEvent } from 'react'
-import { Link, Navigate, useSearchParams } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/auth'
 import { authApi } from '../api/client'
@@ -20,12 +20,16 @@ import { localizeApiError } from '../api/utils'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
+import { useUrlToken } from '../utils/urlToken'
 
 export default function ResetPasswordPage() {
   const { t } = useTranslation()
   const { isAuthed } = useAuth()
-  const [params] = useSearchParams()
-  const token = params.get('token') || ''
+  // 令牌读一次就从地址栏抹掉（防止随页面地址泄露给第三方脚本等），刷新靠本标签页的
+  // sessionStorage 副本，改密成功后清掉。见 utils/urlToken.ts。
+  // The token is read once and removed from the address bar; a reload uses this tab's
+  // sessionStorage copy, cleared on success. See utils/urlToken.ts.
+  const [token, clearToken] = useUrlToken('prismx.resetToken')
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -69,6 +73,7 @@ export default function ResetPasswordPage() {
     setLoading(true)
     try {
       await authApi.resetPassword(token, password)
+      clearToken()
       setDone(true)
     } catch (err) {
       setError(err instanceof Error ? localizeApiError(err.message) : t('auth.resetError'))

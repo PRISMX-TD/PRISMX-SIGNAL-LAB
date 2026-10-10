@@ -9,7 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "build": "npm run check:sw && npm run test && tsc -b && vite build && npm run prerender",
-    "postbuild": "node scripts/verify-seo.mjs",
+    "postbuild": "node scripts/verify-seo.mjs && node scripts/check-csp-hashes.mjs --dist dist",
     "prerender": "vite build --ssr src/seo/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs",
     "preview": "vite preview"
   },

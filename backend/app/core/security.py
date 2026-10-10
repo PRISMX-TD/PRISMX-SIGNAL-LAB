@@ -87,6 +87,42 @@ def hash_api_token(raw: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def rotate_api_token(user) -> str | None:
+    """给用户换一个全新的桥接 API Token（只落哈希，明文当场丢弃），返回**旧的哈希**。
+
+    改密码 / 重置密码时调用：这两件事的前提都是「账号可能落到了别人
+    手里」，而桥接 Token 是另一把能下单的钥匙——只让 JWT 失效、不换它，拿到 Token 的
+    人照样能通过 Bridge 操作账户。明文不返回：用户之后在绑定页点「重置 Token」拿一个
+    新的即可（同 /ea/token/reset）。调用方 commit 之后必须拿返回的旧哈希调用
+    routers.bridge.invalidate_auth_cache_for_hash，否则旧 Token 还能在桥接鉴权缓存里
+    活到 TTL。旧值为空也安全（invalidate 对 None 直接返回）。
+    Rotate the bridge API token (hash stored, plaintext discarded) and return the
+    OLD hash. Used on password change / reset: each assumes
+    the account may be in someone else's hands, and the bridge token is a second
+    key that can trade. The user gets a fresh visible token later from the Bind
+    page. After committing, callers must pass the old hash to
+    routers.bridge.invalidate_auth_cache_for_hash; a None old value is harmless."""
+    old_hash = user.api_token
+    user.api_token = hash_api_token(generate_api_token())
+    return old_hash
+
+
+def invalidate_bridge_token_cache(old_hash: str | None) -> None:
+    """commit 之后清掉旧 Token 在桥接鉴权缓存里的条目（并让所有 worker 换版本号）。
+    懒导入：core 不在模块级依赖 routers。失败只记警告——缓存 TTL 约 10 秒，最坏晚这么久。
+    After the commit, drop the old token from the bridge auth cache on every
+    worker. Lazy import (core must not depend on routers at import time); a
+    failure only logs — the cache TTL is ~10s."""
+    if not old_hash:
+        return
+    try:
+        from app.routers.bridge import invalidate_auth_cache_for_hash
+
+        invalidate_auth_cache_for_hash(old_hash)
+    except Exception:  # noqa: BLE001
+        logger.warning("桥接鉴权缓存失效失败 / bridge auth cache invalidation failed", exc_info=True)
+
+
 def verify_google_id_token(credential: str) -> dict | None:
     """校验 Google ID Token，返回其载荷（含 email、sub 等）/ Verify a Google ID token.
 

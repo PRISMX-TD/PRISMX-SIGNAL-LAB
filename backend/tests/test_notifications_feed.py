@@ -17,6 +17,7 @@ failing with the tray push.
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from app.models import (
     Announcement,
@@ -32,6 +33,19 @@ from app.routers.announcements import (
 from app.routers.notifications import mark_all_read, mark_notification_read, notification_feed
 from app.routers.tickets import admin_reply_to_ticket, create_ticket
 from app.schemas import AdminTicketReplyCreate, AnnouncementIn, TicketCreate
+
+
+@pytest.fixture(autouse=True)
+def _no_user_rate_limit(monkeypatch):
+    """建工单 / 用户回复挂了按用户限流（@user_limiter.limit），这里直接调函数、没有
+    Request，request 位传 None，并关掉 user_limiter。
+    Ticket create / reply carry @user_limiter.limit; these tests call the functions
+    directly with request=None, so the user limiter is switched off."""
+    # 取 tickets 模块手里那个实例：别的测试会 reload strategy_limits，换掉模块上的对象
+    # Use the instance tickets captured: other tests reload strategy_limits
+    from app.routers import tickets
+
+    monkeypatch.setattr(tickets.user_limiter, "enabled", False)
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +153,7 @@ def test_new_ticket_notifies_every_admin(db_session):
     a1 = _user(db_session, "a1@x.com", role="admin")
     a2 = _user(db_session, "a2@x.com", role="admin")
 
-    out = create_ticket(
+    out = create_ticket(None,
         TicketCreate(title="出金没到账", category="payment", body="三天了"),
         db_session,
         submitter,
@@ -157,7 +171,7 @@ def test_new_ticket_does_not_notify_the_submitter(db_session):
     submitter = _user(db_session, "u@x.com")
     _user(db_session, "a@x.com", role="admin")
 
-    create_ticket(TicketCreate(title="x", category="technical", body="y"), db_session, submitter)
+    create_ticket(None, TicketCreate(title="x", category="technical", body="y"), db_session, submitter)
 
     assert db_session.query(UserNotification).filter(
         UserNotification.user_id == submitter.id
@@ -169,7 +183,7 @@ def test_admin_submitting_a_ticket_is_not_notified_of_it(db_session):
     admin_submitter = _user(db_session, "a1@x.com", role="admin")
     other_admin = _user(db_session, "a2@x.com", role="admin")
 
-    create_ticket(TicketCreate(title="x", category="technical", body="y"), db_session, admin_submitter)
+    create_ticket(None, TicketCreate(title="x", category="technical", body="y"), db_session, admin_submitter)
 
     rows = db_session.query(UserNotification).all()
     assert [r.user_id for r in rows] == [other_admin.id]
@@ -179,7 +193,7 @@ def test_new_ticket_works_with_no_admins_at_all(db_session):
     """全新部署还没设管理员时，提工单不该炸。"""
     submitter = _user(db_session, "u@x.com")
 
-    create_ticket(TicketCreate(title="x", category="technical", body="y"), db_session, submitter)
+    create_ticket(None, TicketCreate(title="x", category="technical", body="y"), db_session, submitter)
 
     assert db_session.query(UserNotification).count() == 0
     assert db_session.query(Ticket).count() == 1
@@ -430,6 +444,22 @@ def test_snooze_twice_pushes_the_expiry_out_without_a_second_row(db_session):
     rows = db_session.query(AnnouncementPopupSnooze).all()
     assert len(rows) == 1
     assert rows[0].snooze_until.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc) + timedelta(days=6)
+
+
+def test_snooze_rejects_drafts_with_the_same_404(db_session):
+    """草稿对普通用户等同不存在：免打扰也不能拿草稿 id 探测或预先写行。
+    Drafts don't exist for users: snoozing a draft id is the same 404 as a missing one."""
+    u = _user(db_session)
+    draft = _ann(db_session, published=False, popup=True)
+
+    details = []
+    for ann_id in (draft.id, "no-such-id"):
+        with pytest.raises(HTTPException) as exc:
+            snooze_popup(ann_id, db_session, u)
+        assert exc.value.status_code == 404
+        details.append(exc.value.detail)
+    assert details[0] == details[1]
+    assert db_session.query(AnnouncementPopupSnooze).count() == 0
 
 
 def test_popup_without_cover_is_normalised_at_the_schema():

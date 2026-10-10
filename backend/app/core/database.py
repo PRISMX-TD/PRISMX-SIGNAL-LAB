@@ -334,7 +334,11 @@ def _hash_legacy_api_tokens() -> None:
 # rev 39 — 游客预览（2026-10-09）：新表 guest_preview_funnel_daily（首页两种模式的按天漏斗
 #          计数）。同 rev 20 / 21：全靠 create_all 建表建索引，无 ADD COLUMN、无回填；+1 只为
 #          让老库启动时走一次完整迁移而不是快速通道。
-CURRENT_SCHEMA_REV = 39
+# rev 40 — 规范邮箱（防别名白嫖试用，services/email_domains.canonical_email）：users.email_canonical
+#          可空、**加列后回填**（规范化规则 SQL 写不出来，在 Python 里逐行算，只挑 NULL 的行，
+#          重跑幂等）；索引 ix_users_email_canonical 放在统一索引块，**不唯一**——线上可能已有
+#          别名重复的账号，唯一约束会让迁移失败。纯 ADD COLUMN + 一次小表 UPDATE。
+CURRENT_SCHEMA_REV = 40
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -971,6 +975,8 @@ def _migrate_columns() -> None:
             "disabled_reason": "VARCHAR",
             # rev 32：邮箱验证时间，回填见下方 / email verification, backfill below
             "email_verified_at": datetime_type,
+            # rev 40：规范邮箱，回填见下方 _backfill_email_canonical / canonical email
+            "email_canonical": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -1634,6 +1640,13 @@ def _migrate_columns() -> None:
         conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_users_invite_code ON users(invite_code)"
         ))
+        # rev 40：注册查重 / 试用防别名按规范邮箱查。名字与模型 index=True 生成的一致，
+        # 新库 create_all 建过的这里 IF NOT EXISTS 跳过。**不唯一**（见 CURRENT_SCHEMA_REV）。
+        # rev 40: canonical-email lookups; same name create_all uses for index=True,
+        # so a fresh database skips it. Not unique (see CURRENT_SCHEMA_REV).
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_users_email_canonical ON users(email_canonical)"
+        ))
         # rev 10 游戏化索引：胜率/连续活跃统计按 (user_id, closed_at) 与
         # (mt5_login, closed_at) 扫 closed_trades；升级条件之一按
         # (user_id, status, created_at) 扫 orders。
@@ -1694,6 +1707,9 @@ def _migrate_columns() -> None:
 
     _drop_redundant_candle_index(is_postgres)
 
+    # rev 40：规范邮箱回填（列在上面的 users 段补出）。/ canonical-email backfill.
+    _backfill_email_canonical()
+
     # rev 38：操作日志的历史补录。放在所有补列之后（它读 mt5_accounts 的撤销列与 orders）。
     # rev 38: activity-log backfill; after every column-add since it reads the
     # mt5_accounts revocation columns and orders.
@@ -1739,6 +1755,30 @@ def _drop_redundant_candle_index(is_postgres: bool) -> None:
             "DROP INDEX CONCURRENTLY IF EXISTS idx_candle_symbol_interval_t）",
             exc_info=True,
         )
+
+
+def _backfill_email_canonical() -> None:
+    """rev 40：给 email_canonical 为 NULL 的存量用户算好规范邮箱。幂等、可重跑。
+
+    规范化规则（去 "+标签"、Gmail 去点）用 SQL 写不出可移植的版本，所以在 Python 里
+    逐行算，只挑 NULL 的行（新建的行由 User 模型的 validates 当场填好，不会是 NULL）。
+    users 表是几千行的量级，一次 SELECT + 一批 executemany UPDATE，亚秒级。
+    rev 40: fill email_canonical for existing rows that lack it. Idempotent. The
+    normalisation isn't portable SQL, so it runs in Python over the NULL rows only
+    (new rows are filled by the User model's validator)."""
+    from app.services.email_domains import canonical_email
+
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            "SELECT id, email FROM users WHERE email_canonical IS NULL AND email IS NOT NULL"
+        )).fetchall()
+        if not rows:
+            return
+        conn.execute(
+            text("UPDATE users SET email_canonical = :c WHERE id = :id"),
+            [{"c": canonical_email(email), "id": uid} for uid, email in rows],
+        )
+    logger.info("rev 40：规范邮箱回填 %d 行", len(rows))
 
 
 def _backfill_activity_events() -> None:

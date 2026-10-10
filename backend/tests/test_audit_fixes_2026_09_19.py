@@ -23,6 +23,19 @@ from app.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_user_rate_limit(monkeypatch):
+    """建工单 / 用户回复挂了按用户限流（@user_limiter.limit），这里直接调函数、没有
+    Request，request 位传 None，并关掉 user_limiter。
+    Ticket create / reply carry @user_limiter.limit; these tests call the functions
+    directly with request=None, so the user limiter is switched off."""
+    # 取 tickets 模块手里那个实例：别的测试会 reload strategy_limits，换掉模块上的对象
+    # Use the instance tickets captured: other tests reload strategy_limits
+    from app.routers import tickets
+
+    monkeypatch.setattr(tickets.user_limiter, "enabled", False)
+
+
 def _mk_user(db, email="u@x.io", **kw):
     u = User(email=email, password_hash="x", api_token=f"tok-{email}", **kw)
     db.add(u)
@@ -37,7 +50,7 @@ def _mk_ticket(db, owner, title="连不上 MT5"):
     from app.routers.tickets import create_ticket
     from app.schemas import TicketCreate
 
-    return create_ticket(
+    return create_ticket(None,
         TicketCreate(title=title, category="account", priority="normal", body="帮我看看"),
         db=db,
         user=owner,
@@ -62,7 +75,7 @@ def test_user_reply_bumps_updated_at_and_notifies_admins(db_session):
     db_session.query(UserNotification).delete()   # 只看这次回复产生的通知
     db_session.commit()
 
-    reply_to_ticket(ticket.id, TicketReplyCreate(body="还是不行"), db=db_session, user=owner)
+    reply_to_ticket(None, ticket.id, TicketReplyCreate(body="还是不行"), db=db_session, user=owner)
     db_session.refresh(ticket)
     assert ticket.updated_at > stale
 
@@ -81,7 +94,7 @@ def test_user_reply_does_not_notify_an_admin_replying_to_their_own_ticket(db_ses
     db_session.query(UserNotification).delete()
     db_session.commit()
 
-    reply_to_ticket(out.id, TicketReplyCreate(body="自问自答"), db=db_session, user=admin)
+    reply_to_ticket(None, out.id, TicketReplyCreate(body="自问自答"), db=db_session, user=admin)
     assert db_session.query(UserNotification).count() == 0
 
 
@@ -99,7 +112,7 @@ def test_someone_elses_ticket_is_404_not_403(db_session):
 
     for call in (
         lambda: get_ticket(out.id, db=db_session, user=stranger),
-        lambda: reply_to_ticket(
+        lambda: reply_to_ticket(None,
             out.id, TicketReplyCreate(body="插一嘴"), db=db_session, user=stranger
         ),
     ):
@@ -201,8 +214,9 @@ def test_over_limit_forgot_password_is_indistinguishable(db_session):
             bg = _Bg()
             replies.append(forgot(request=_Req(), req=ForgotPasswordRequest(email=user.email),
                                   background=bg, db=db_session).message)
-            # 只数发信任务（另有一个响应之后写操作日志的任务）/ mail tasks only
-            sends += len([t for t in bg.tasks if t[0].__name__ == "send_reset_email"])
+            # 发信连同查库都在后台任务 _process_forgot_request 里；超限时一个都不排。
+            # Lookup + mail live in the _process_forgot_request task; none when over the cap.
+            sends += len([t for t in bg.tasks if t[0].__name__ == "_process_forgot_request"])
         assert len(set(replies)) == 1                 # 每次都是同一句话
         assert sends == RESET_MAX_PER_HOUR           # 但只真的发了 3 封
     finally:

@@ -2063,6 +2063,9 @@ export interface CompetitionDetail extends CompetitionSummary {
   publicView?: boolean
   // 本场开户链接（报名准备清单「去开户」用）。/ This competition's account-opening link.
   openAccountUrl?: string | null
+  // openAccountUrl 是不是换成了用户所属代理的链接（是则前端按 Make Capital 白名单再验）。
+  // Whether openAccountUrl is the user's agent's link (then re-checked against the allowlist).
+  openAccountFromAgent?: boolean
 }
 
 // POST /competitions/{id}/register 的响应。 / response of POST /competitions/{id}/register

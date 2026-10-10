@@ -130,6 +130,17 @@ LOCAL_PRUNE_EVERY = 60.0
 # a long-closed position (2026-10-08, login 100502). This bounds the wait; a flat user's frame is
 # a few dozen bytes.
 SNAPSHOT_REPUSH_SECONDS = 15.0
+# 每个用户在**本 worker** 上同时保持的前端连接上限（2026-10-10 审计）。每条连接各占一个写协程、
+# 一份队列与建连补推的一次 Redis 往返，不设上限的话一个账号就能开几百条把进程耗尽。超出时
+# 关掉最旧的那条（优先挑页面在后台的），而不是拒绝新来的：新开的标签页正是用户眼前的那个。
+# 8 条足够手机 + 电脑 + 几个标签页同时在线。
+# Per-user cap on concurrent client sockets on this worker (2026-10-10 audit). Each one holds a
+# writer task, a queue and a connect-time Redis round-trip; uncapped, one account could open
+# hundreds. Past the cap the oldest connection is closed (background pages first) rather than
+# refusing the new one, which is the tab the user is looking at.
+MAX_CLIENTS_PER_USER = 8
+# 被顶掉的连接用的关闭码（应用自定义段 4000-4999）/ close code for a superseded connection
+CLOSE_CODE_SUPERSEDED = 4008
 # 参与「报价变没变」判断的字段 / fields that count toward "quote changed"
 _QUOTE_WATCHED = ("bid", "ask", "contractSize", "tickSize", "tickValue")
 
@@ -539,6 +550,12 @@ class ConnectionManager:
         self._background: set[WebSocket] = set()
         # user_id -> 前端连接集合 / set of client connections per user
         self._clients: dict[str, set[WebSocket]] = {}
+        # 连接 -> 建连序号（单调递增；不用时钟，Windows 上 monotonic 的分辨率让同一拍建的连接
+        # 分不出先后），超出 MAX_CLIENTS_PER_USER 时挑最旧的那条。
+        # Connection -> connect sequence number (not a clock: monotonic's resolution can tie
+        # connections made in the same tick), to pick the oldest past MAX_CLIENTS_PER_USER.
+        self._connected_at: dict[WebSocket, int] = {}
+        self._connect_seq = 0
         # user_id -> source -> 最近一次持仓快照。
         #
         # 必须按来源分区：一个用户可以同时绑 bridge 账号和 gateway 账号，两条
@@ -1215,7 +1232,7 @@ class ConnectionManager:
                 await self._drop_dead(user_id, ws)
                 return
 
-    async def _drop_dead(self, user_id: str, ws: WebSocket) -> None:
+    async def _drop_dead(self, user_id: str, ws: WebSocket, code: int = 1013) -> None:
         """把死连接摘出名单，并在后台关掉它，让前端重连、拿一份完整快照。
 
         只摘不关的话，这条连接的读循环还活着、心跳照常回 PONG，客户端以为一切正常，却再也收不到
@@ -1233,7 +1250,7 @@ class ConnectionManager:
 
         async def _close() -> None:
             try:
-                await asyncio.wait_for(close(code=1013), 1.0)
+                await asyncio.wait_for(close(code=code), 1.0)
             except Exception:  # noqa: BLE001 —— 已经死了，关不掉也无所谓 / already dead
                 pass
 
@@ -1242,8 +1259,20 @@ class ConnectionManager:
         task.add_done_callback(self._reap_tasks.discard)
 
     async def register_client(self, user_id: str, ws: WebSocket) -> None:
+        evicted: list[WebSocket] = []
         async with self._lock:
-            self._clients.setdefault(user_id, set()).add(ws)
+            conns = self._clients.setdefault(user_id, set())
+            conns.add(ws)
+            self._connect_seq += 1
+            self._connected_at[ws] = self._connect_seq
+            # 超出每用户上限：先挑页面在后台的，再按建连时刻从旧到新，新来的这条永远不动。
+            # Over the per-user cap: background pages first, then oldest first; never the new one.
+            if len(conns) > MAX_CLIENTS_PER_USER:
+                others = sorted(
+                    (c for c in conns if c is not ws),
+                    key=lambda c: (c not in self._background, self._connected_at.get(c, 0)),
+                )
+                evicted = others[: len(conns) - MAX_CLIENTS_PER_USER]
             self._outbox_for(ws, user_id)
             # 让持仓去重失效：新连接（多开一个标签页也算）还没收到过任何快照，
             # 若沿用旧摘要，内容不变时下一拍会被跳过，新页面就只能干等到持仓
@@ -1253,6 +1282,10 @@ class ConnectionManager:
             # would skip the next unchanged tick and leave the new page waiting
             # until positions actually change.
             self._last_positions_push.pop(user_id, None)
+        for old in evicted:
+            logger.info("每用户连接数超上限，关闭最旧的一条 / per-user socket cap, closing oldest (user_id=%s)",
+                        user_id)
+            await self._drop_dead(user_id, old, code=CLOSE_CODE_SUPERSEDED)
         # 在线名单登记放到锁外、并丢给线程：它是一次同步 Redis 往返（见
         # _mark_present），在事件循环里直接调会把整个进程卡住最多一个 socket 超时。
         # Presence registration happens outside the lock and off the event loop:
@@ -1269,6 +1302,7 @@ class ConnectionManager:
 
     async def unregister_client(self, user_id: str, ws: WebSocket) -> None:
         self._background.discard(ws)
+        self._connected_at.pop(ws, None)
         last_gone = False
         box = self._outboxes.pop(ws, None)
         if box is not None and box.task is not asyncio.current_task():

@@ -40,6 +40,7 @@ from app.services.deps import get_current_user, get_current_user_id_light, requi
 from app.services.image_upload import (
     UploadError,
     is_private_configured,
+    read_upload_capped,
     signed_image_urls,
     upload_private_image,
 )
@@ -254,16 +255,9 @@ async def upload_ticket_image(
     """
     if not is_private_configured():
         raise HTTPException(status_code=503, detail="后台未配置图片存储 / Image storage isn't configured")
-    declared = file.size
-    if declared is None:
-        try:
-            declared = int(request.headers.get("content-length") or 0) or None
-        except ValueError:
-            declared = None
-    if declared is not None and declared > settings.UPLOAD_MAX_BYTES:
-        mb = settings.UPLOAD_MAX_BYTES / (1024 * 1024)
-        raise HTTPException(status_code=413, detail=f"图片超过 {mb:.0f}MB 上限 / the image exceeds the {mb:.0f}MB limit")
-    data = await file.read()
+    # 声明大小快速拒绝 + 有界读取（最多读上限+1 字节），见 read_upload_capped
+    # Declared-size fast rejection + a bounded read (cap+1 bytes), see read_upload_capped
+    data = await read_upload_capped(file, request)
     try:
         # 同步 httpx 挪进线程池，别卡事件循环（见 admin.upload_admin_image 的说明）
         # The sync httpx call goes to the threadpool, off the event loop (see admin.upload_admin_image)
@@ -273,8 +267,20 @@ async def upload_ticket_image(
     return {"key": key}
 
 
+# 发工单 / 回复的按用户限流：两者都会写库、给全体管理员发通知（站内 + WS），没有上限
+# 就是一个登录用户能刷满管理员收件箱与 tickets 表的口子。数值远高于正常使用
+# （真人一小时提不了十个工单），只拦脚本。
+# Per-user limits on creating and replying: both write rows and notify every admin
+# (feed + WS), so without a cap one account could flood the admins' inbox and the
+# tickets table. Well above real use — only scripts hit these.
+RATE_LIMIT_TICKET_CREATE = "3/minute;10/hour"
+RATE_LIMIT_TICKET_REPLY = "6/minute;30/hour"
+
+
 @router.post("", response_model=TicketOut, status_code=status.HTTP_201_CREATED)
+@user_limiter.limit(RATE_LIMIT_TICKET_CREATE)
 def create_ticket(
+    request: Request,
     body: TicketCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -372,7 +378,9 @@ def get_ticket(
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketOut)
+@user_limiter.limit(RATE_LIMIT_TICKET_REPLY)
 def reply_to_ticket(
+    request: Request,
     ticket_id: str,
     body: TicketReplyCreate,
     db: Session = Depends(get_db),
