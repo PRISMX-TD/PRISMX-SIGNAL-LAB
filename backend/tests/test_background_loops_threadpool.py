@@ -119,6 +119,10 @@ def _run_gamification_style_loop(monkeypatch, loop_coro, target):
 
     async def fake_threadpool(fn, *a, **k):
         seen.append(fn)
+        # 勋章循环开头先进一次线程池问「离下一趟还多久」（读 Redis 水位）：回 0 = 立即跑。
+        # The gamification loop first asks (in the pool) how long until the next pass: 0 = now.
+        if fn is getattr(gl, "_seconds_until_due", None):
+            return 0.0
         return {}
 
     class _Stop(Exception):
@@ -135,10 +139,13 @@ def _run_gamification_style_loop(monkeypatch, loop_coro, target):
     monkeypatch.setattr(gl.asyncio, "sleep", fake_sleep)
     with pytest.raises(_Stop):
         asyncio.run(loop_coro(startup_delay=0))
-    # 主体那一趟必须走线程池；比赛循环之后还会再进一次线程池（结束持仓快照查库），
-    # 所以只钉第一个。/ The pass itself must go through the pool first; the
-    # competition loop makes a further pooled call (end-position capture lookup).
-    assert seen and seen[0] is target
+    # 主体那一趟必须走线程池；勋章循环之前还会先进一次（读水位），比赛循环之后还会再进一次
+    # （结束持仓快照查库），所以只钉「主体在里面、且在水位之后的第一个」。
+    # The pass itself must go through the pool; the gamification loop first makes a pooled
+    # watermark read and the competition loop a later end-position lookup, so pin "the pass
+    # is the first pooled call after the watermark read".
+    calls = [fn for fn in seen if fn is not getattr(gl, "_seconds_until_due", None)]
+    assert calls and calls[0] is target
 
 
 def test_gamification_loop_uses_threadpool(monkeypatch):

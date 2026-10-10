@@ -1015,7 +1015,9 @@ def test_engine_kwargs_carry_pool_timeout_and_lifo_for_real_pools_only():
     assert settings.DB_POOL_TIMEOUT == 8
     pg = database._make_engine_kwargs(False)
     assert pg["pool_timeout"] == settings.DB_POOL_TIMEOUT and pg["pool_use_lifo"] is True
-    assert pg["pool_pre_ping"] is True
+    # 2026-10-10 起探活按空闲时长做（database._ping_if_idle）；DB_PING_IDLE_SECONDS=0 才回到每次都探。
+    # Since 2026-10-10 the ping is idle-based (database._ping_if_idle); 0 restores ping-every-checkout.
+    assert pg["pool_pre_ping"] is (settings.DB_PING_IDLE_SECONDS <= 0)
     sqlite = database._make_engine_kwargs(True)
     assert "pool_timeout" not in sqlite and "pool_use_lifo" not in sqlite   # SQLite 不用 QueuePool
 

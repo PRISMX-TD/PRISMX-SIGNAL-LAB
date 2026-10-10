@@ -11,6 +11,9 @@ routers/orders.py so services (auto-manage) stop importing a router module.
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -410,6 +413,67 @@ def call_gateway_idempotent(order: Order, make_call) -> TradeRsp:
     return again
 
 
+# 券商回了结果、写库却失败：重试，而不是落进下面的异常分支把订单记成 FAILED。那一刻券商
+# 已经执行，结果是确定的——丢掉它，订单页就显示「失败」、成交号也没了，用户很可能重下一笔
+# （2026-10-10 压测：250 笔以上同时下单时，46 笔已成交的单被这样记成失败）。值得重试的两类：
+# 连接池排不上（每次最多 DB_POOL_TIMEOUT 8 秒），以及连接在半路被数据库端掐断（SQLAlchemy
+# 已作废连接池，下一次就是新连接）。重写同一组值是幂等的。次数不多：入口排队
+# （core/admission.py）已经把同时在途的下单数压住，而且前端整笔交易的等待上限是 160 秒
+# （client.ts 的 TRADE_TIMEOUT_MS，按网关最坏 140 秒定的），这里不能把总时长拖过它。
+# The broker answered but the write-back failed: retry rather than fall into the except
+# branch below, which records FAILED. The outcome is known at that point; dropping it shows
+# "failed" with no ticket and invites a duplicate re-order (2026-10-10 load test: 46 filled
+# orders recorded as failed at 250+ concurrent). Two failures are worth retrying: no pooled
+# connection (up to DB_POOL_TIMEOUT, 8s, each) and a connection killed server-side mid-way
+# (SQLAlchemy has dropped the pool; the next try gets a fresh one). Rewriting the same values
+# is idempotent. Few attempts: admission (core/admission.py) bounds in-flight orders, and the
+# frontend gives a whole trade 160s (TRADE_TIMEOUT_MS, sized for the gateway's 140s worst).
+RESULT_WRITE_ATTEMPTS = 2
+
+
+def _retryable_write_error(e: Exception) -> bool:
+    if isinstance(e, PoolTimeoutError):
+        return True
+    return isinstance(e, DBAPIError) and bool(getattr(e, "connection_invalidated", False))
+
+
+def _write_with_retry(db: Session, ident: tuple, write) -> None:
+    """跑 write()，遇到可重试的写库错误（见 _retryable_write_error）就回滚重来，次数用完原样抛出。
+    ident 是事先取好的 (action, clientOrderId, mt5_login)——回滚会让 order 的属性过期，日志里
+    再读它们又要查库。
+    Run write(), rolling back and retrying on a retryable write error; re-raise when out of
+    attempts. ident is captured up front: the rollback expires the order's attributes."""
+    for attempt in range(1, RESULT_WRITE_ATTEMPTS + 1):
+        try:
+            write()
+            return
+        except Exception as e:
+            if not _retryable_write_error(e):
+                raise
+            db.rollback()
+            if attempt == RESULT_WRITE_ATTEMPTS:
+                raise
+            logger.warning(
+                "Gateway 结果写回失败（%s），第 %d 次重试（券商已执行，结果不能丢）: %s %s mt5=%s",
+                type(e).__name__, attempt, *ident,
+            )
+
+
+def _column_snapshot(order: Order) -> dict:
+    """订单当前已加载的列值，纯内存读、不碰数据库。回滚会让属性过期，兜底时用它原样放回去。
+    The order's currently loaded column values, read from memory only; restored after a
+    rollback expires them."""
+    state = sa_inspect(order)
+    return {a.key: state.dict[a.key] for a in state.mapper.column_attrs if a.key in state.dict}
+
+
+def _restore_columns(order: Order, values: dict) -> None:
+    """把列值当作「库里已有的值」放回实例：之后读属性不会再查库，也不算未提交的改动。
+    Put column values back as committed state: later reads don't query, nothing is dirty."""
+    for key, value in values.items():
+        set_committed_value(order, key, value)
+
+
 def _commit_keep_loaded(db: Session, order: Order) -> None:
     """提交并保持订单字段已加载，省掉紧跟着的 db.refresh 那次 SELECT。
 
@@ -530,6 +594,29 @@ def try_gateway_execute(
     finally:
         db.expire_on_commit = prev_expire
 
+    # 调网关前（字段都在内存里）先记下写回兜底要用的东西：日志标识、订单列值、账号的 trade_mode。
+    # 写回失败回滚之后它们都会过期，账号行甚至可能在等券商的这段时间被删掉。
+    # Before the gateway call (fields still in memory), keep what the write-back fallback
+    # needs: the log identity, the order's columns, the account's trade_mode. A rollback
+    # expires them all, and the account row may even be deleted while we wait.
+    ident = (order.action, order.client_order_id, order.mt5_login)
+    snapshot = _column_snapshot(order)
+    account_trade_mode = account.trade_mode
+    rsp: TradeRsp | None = None
+
+    def _stamp_trade_mode() -> None:
+        # 打 trade_mode 章：用上面记下的账号值，不再单独查一次 mt5_accounts
+        # （规则同 gamification.stamp.stamp_order_trade_mode）。
+        # Stamp trade_mode from the value kept above instead of another mt5_accounts query
+        # (same rule as gamification.stamp.stamp_order_trade_mode).
+        from app.services.gamification.stamp import is_stampable
+        if (
+            is_stampable(order.status, order.action)
+            and order.trade_mode is None
+            and account_trade_mode is not None
+        ):
+            order.trade_mode = account_trade_mode
+
     try:
         if order.action == "ORDER":
             # 发给 gateway 的是券商基础名：order.symbol 存的是信号侧写法
@@ -619,40 +706,33 @@ def try_gateway_execute(
         # The same SELECT also fetches message — which void wording was written, for
         # the activity log's correction (see correction_note); apply_trade_result
         # overwrites the in-memory one below. No extra statement.
-        db_row = db.query(Order.status, Order.message).filter(Order.id == order.id).first()
-        db_status, db_message = (db_row[0], db_row[1]) if db_row is not None else (None, None)
-        if db_status is not None and db_status != "PENDING":
-            logger.warning(
-                "Gateway 结果到达时订单已是 %s，按真实执行结果覆写: %s %s mt5=%s",
-                db_status, order.action, order.client_order_id, order.mt5_login,
-            )
-        apply_trade_result(order, rsp)
-        # 打 trade_mode 章：直接用上面已经加载的账号行，不再单独查一次 mt5_accounts
-        # （规则同 gamification.stamp.stamp_order_trade_mode）。
-        # Stamp trade_mode from the already-loaded account row instead of another
-        # mt5_accounts query (same rule as gamification.stamp.stamp_order_trade_mode).
-        from app.services.gamification.stamp import is_stampable
-        if (
-            is_stampable(order.status, order.action)
-            and order.trade_mode is None
-            and account.trade_mode is not None
-        ):
-            order.trade_mode = account.trade_mode
-        _commit_keep_loaded(db, order)
-        # 等待期间被作废 / 撤回、结果却是成交：记一条「结果更正」。db_status 是上面那次读到的
-        # 原状态；字段都还在内存里（_commit_keep_loaded 不作废），会话的连接已在提交时归还，
-        # 日志的短事务不会与它同时占两条连接。record_correction 从不抛异常——这里抛出就会
-        # 落进下面的异常分支，把刚提交的成交覆写成 FAILED。
-        # Voided / cancelled while we waited but actually filled: record a correction.
-        # db_status is the prior status read above; fields are still loaded and the
-        # session already returned its connection, so the log's short transaction
-        # never holds a second one. record_correction never raises — raising here
-        # would land in the except branch and overwrite the committed fill with FAILED.
-        if db_status in CORRECTABLE_STATUSES:
-            record_correction(
-                correction_snapshot(order, note=correction_note(db_message)),
-                was=db_status, now=order.status, bind=db,
-            )
+        def _write_back() -> None:
+            db_row = db.query(Order.status, Order.message).filter(Order.id == order.id).first()
+            db_status, db_message = (db_row[0], db_row[1]) if db_row is not None else (None, None)
+            if db_status is not None and db_status != "PENDING":
+                logger.warning(
+                    "Gateway 结果到达时订单已是 %s，按真实执行结果覆写: %s %s mt5=%s",
+                    db_status, order.action, order.client_order_id, order.mt5_login,
+                )
+            apply_trade_result(order, rsp)
+            _stamp_trade_mode()
+            _commit_keep_loaded(db, order)
+            # 等待期间被作废 / 撤回、结果却是成交：记一条「结果更正」。db_status 是上面那次读到的
+            # 原状态；字段都还在内存里（_commit_keep_loaded 不作废），会话的连接已在提交时归还，
+            # 日志的短事务不会与它同时占两条连接。record_correction 从不抛异常——这里抛出就会
+            # 落进下面的异常分支，把刚提交的成交覆写成 FAILED。
+            # Voided / cancelled while we waited but actually filled: record a correction.
+            # db_status is the prior status read above; fields are still loaded and the
+            # session already returned its connection, so the log's short transaction
+            # never holds a second one. record_correction never raises — raising here
+            # would land in the except branch and overwrite the committed fill with FAILED.
+            if db_status in CORRECTABLE_STATUSES:
+                record_correction(
+                    correction_snapshot(order, note=correction_note(db_message)),
+                    was=db_status, now=order.status, bind=db,
+                )
+
+        _write_with_retry(db, ident, _write_back)
 
         # 网关耗时并排打出来（gateway_ms 是网关侧总耗时，dealer_ms 是其中等券商回执
         # 的部分）：用户说"下单慢"时，这一行就能分出是网关内部慢还是券商 dealer 慢。
@@ -667,7 +747,45 @@ def try_gateway_execute(
         return order_update_payload(order)
 
     except Exception as e:
-        logger.error("Gateway 执行异常: %s %s", order.client_order_id, e)
+        logger.error("Gateway 执行异常: %s %s", ident[1], e)
+        if rsp is not None and _retryable_write_error(e):
+            # 重试用尽仍写不进去，但券商的回话就在手里：最后再试一次写真实结果，绝不写 FAILED。
+            # 回滚让订单字段过期了，先把调网关前记下的列值原样放回（不查库），再套上券商结果。
+            # 还写不进去：成交号打进 CRITICAL 日志供人工对账，内存里按快照回一帧 FAILED
+            # （界面语义「先核对持仓」）并带成交号——调用方随后 _serialize(order) 读的都是内存，
+            # 不会再去碰数据库、变成一个让人重下单的「服务繁忙」。
+            # Out of retries, but the broker's answer is in hand: one last attempt to record the
+            # real outcome, never FAILED. The rollback expired the order, so the columns kept
+            # before the gateway call are put back (no query) and the broker result applied. If
+            # that fails too, log the tickets at CRITICAL for manual reconciliation and answer
+            # FAILED ("check your positions") with the deal number, all from memory — callers
+            # then _serialize(order) without touching the database, instead of a "busy" error
+            # that invites a re-order.
+            try:
+                db.rollback()
+                _restore_columns(order, snapshot)
+                apply_trade_result(order, rsp)
+                _stamp_trade_mode()
+                _commit_keep_loaded(db, order)
+                return order_update_payload(order)
+            except Exception as inner:
+                db.rollback()
+                logger.critical(
+                    "Gateway 已执行但结果写不进数据库，请人工对账: %s %s mt5=%s ok=%s deal=%s order=%s "
+                    "position=%s: %s",
+                    *ident, rsp.ok, rsp.deal, rsp.order, rsp.position, inner,
+                )
+                deal = rsp.deal or rsp.order or "-"
+                _restore_columns(order, {
+                    **snapshot,
+                    "status": "FAILED",
+                    "message": (
+                        f"券商已回执（成交号 {deal}），但平台记录暂时写入失败，请先核对持仓，不要重复下单 / "
+                        f"the broker answered (deal {deal}) but the platform could not record it yet; "
+                        "check your positions before placing again"
+                    ),
+                })
+                return order_update_payload(order)
         # 先回滚再写。异常很可能就是上面那次 commit 抛的（约束冲突、连接断、
         # 数值越界……），此时事务已经作废，不回滚就直接 commit 会抛
         # PendingRollbackError，把一个"落 FAILED"的补救动作变成 500——订单留在

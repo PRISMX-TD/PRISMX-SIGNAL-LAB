@@ -13,6 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import TimeoutError as SQLAlchemyPoolTimeoutError
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
+from app.core.admission import AdmissionMiddleware
 from app.core.config import settings, _WORKER_COUNT
 from app.core.database import init_db
 from app.core.rate_limit import limiter
@@ -335,6 +336,11 @@ async def _db_pool_timeout_handler(request: Request, exc: SQLAlchemyPoolTimeoutE
 # and a memory stream per request.) CORS sits further out: it answers preflights
 # itself (tiny, never compressed) and adds its headers after compression; each
 # appends its own Vary.
+# 入口排队（core/admission.py）：最先添加 = 最内层，排在 GZip / CORS 里面——它回的
+# 503 照样带上跨域头，前端读得到状态码，而不是一个看不懂的网络错误。
+# Front-door admission (core/admission.py): added first = innermost, inside GZip and
+# CORS, so its 503s still carry the CORS headers and the frontend sees a real status.
+app.add_middleware(AdmissionMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 app.add_middleware(

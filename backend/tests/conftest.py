@@ -118,6 +118,18 @@ def _fresh_shared_read_cache():
     _clear_reconcile_marks()
 
 
+@pytest.fixture(autouse=True)
+def _fresh_bridge_status_cache():
+    """桥接状态上报快路径的进程内缓存（routers/bridge._status_cache）按 user_id 记，各用例
+    反复用同一批 id：不清的话，上一条用例的完整上报会让下一条用例的第一拍直接走快路径。
+    The bridge status fast-path cache is keyed by user_id and test ids recur; clear it
+    so one test's full report can't fast-path the next test's first beat."""
+    from app.routers import bridge
+    bridge._status_cache.clear()
+    yield
+    bridge._status_cache.clear()
+
+
 def _clear_reconcile_marks():
     """对账的「上一次对账时刻」也落在 shared_state 内存后端（boards._reconcile_mark_key），
     同一个 period key 在不同用例里反复用，不清会把上一条用例的时刻带进下一条。

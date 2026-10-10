@@ -1,10 +1,12 @@
 """数据库连接与会话管理 / Database engine and session management."""
 import json
 import logging
+import time
 import uuid
 from contextlib import contextmanager
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import exc as sa_exc
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.core.config import settings
@@ -27,7 +29,9 @@ def _make_engine_kwargs(is_sqlite: bool) -> dict:
             pool_size=settings.DB_POOL_SIZE,
             max_overflow=settings.DB_MAX_OVERFLOW,
             pool_recycle=settings.DB_POOL_RECYCLE,
-            pool_pre_ping=True,
+            # DB_PING_IDLE_SECONDS > 0 时由下面的 _ping_if_idle 按空闲时长探活，内置的每次探活关掉。
+            # With DB_PING_IDLE_SECONDS > 0, _ping_if_idle below pings by idle time instead.
+            pool_pre_ping=settings.DB_PING_IDLE_SECONDS <= 0,
             # 取连接超时：过载时快速失败（main.py 转 503），而不是 30 秒后与前端超时一起崩。
             # Fail fast under overload (main.py maps it to 503) instead of expiring with the
             # client's 30s timeout.
@@ -45,6 +49,51 @@ _engine_kwargs: dict = _make_engine_kwargs(_is_sqlite)
 
 engine = create_engine(settings.DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# 按空闲时长探活（见 config.DB_PING_IDLE_SECONDS）。连接记录的 info 跟着 DBAPI 连接走：
+# 新建时记一次、每次还回来记一次；取出时空闲不到阈值就直接用，超过才 SELECT 1。探活失败
+# 抛 DisconnectionError，连接池会丢掉这条、换一条新的再试（SQLAlchemy 的标准做法）。
+# Ping by idle time (see config.DB_PING_IDLE_SECONDS). The record's info travels with the
+# DBAPI connection: stamped on connect and on every checkin; a checkout within the
+# threshold is used as is, an older one gets SELECT 1 first. A failed ping raises
+# InvalidatePoolError, so the pool drops its connections and retries with a fresh one.
+# 代价：数据库端在 10 秒内掐断的「刚用过」的连接不会被探到，那一次查询会报断连
+# （SQLAlchemy 随即作废整个池）——下单写回对这种错误会重试（gateway_execute）。
+# The trade-off: a connection used within the threshold and killed server-side is not
+# caught, and that one query fails as a disconnect (SQLAlchemy then drops the pool); the
+# order write-back retries that case (gateway_execute).
+_LAST_USED = "prismx_last_used"
+
+
+def _stamp(dbapi_connection, connection_record) -> None:
+    connection_record.info[_LAST_USED] = time.monotonic()
+
+
+def _ping_if_idle(dbapi_connection, connection_record, connection_proxy) -> None:
+    last = connection_record.info.get(_LAST_USED)
+    if last is not None and time.monotonic() - last < settings.DB_PING_IDLE_SECONDS:
+        return
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute("SELECT 1")
+    except Exception as e:  # noqa: BLE001 —— 任何失败都当断连 / any failure means "disconnected"
+        # InvalidatePoolError 而不只是 DisconnectionError：一条死了多半是整批都死了（Pooler 重启、
+        # 网络抖动），与内置 pre_ping 一样把整个池作废，其余连接下次取用时重连，而不是一条条撞上。
+        # InvalidatePoolError, not plain DisconnectionError: one dead connection usually means
+        # the whole batch is (pooler restart, network blip). Like the built-in pre_ping, drop
+        # the whole pool so the rest reconnect instead of each failing in turn.
+        raise sa_exc.InvalidatePoolError(f"idle connection failed its ping: {e}") from e
+    finally:
+        try:
+            cursor.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+if not _is_sqlite and settings.DB_PING_IDLE_SECONDS > 0:
+    event.listen(engine, "connect", _stamp)
+    event.listen(engine, "checkin", _stamp)
+    event.listen(engine, "checkout", _ping_if_idle)
 Base = declarative_base()
 
 

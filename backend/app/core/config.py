@@ -342,6 +342,43 @@ class Settings(BaseSettings):
     # the TimeoutError to 503 + Retry-After) sheds load early. Not lower: a cross-region
     # Supabase pre_ping reconnect can itself take 1-2s.
     DB_POOL_TIMEOUT: int = 8
+    # 取连接前的探活（SELECT 1）只对空闲超过这么多秒的连接做（core/database.py 的
+    # _ping_if_idle）。以前每次取连接都探一次：生产库在 3.7 ms 之外，等于每个请求多一个往返、
+    # 多占一会儿连接，Supabase 那边多一条查询；忙的时候连接刚还回来就又被取走，探了也白探。
+    # 闲置的连接照旧先探活再用（Pooler 断掉的空闲连接靠的就是这一步）。0 = 每次都探（旧行为）。
+    # Ping (SELECT 1) only connections idle longer than this before handing them out
+    # (core/database.py _ping_if_idle). Pinging on every checkout cost every request an extra
+    # round trip to a database 3.7 ms away; a connection checked in a moment ago is alive.
+    # Idle connections are still pinged first. 0 = ping on every checkout (old behaviour).
+    DB_PING_IDLE_SECONDS: float = 10.0
+
+    # 入口排队（core/admission.py）：每个 worker 同时在处理的 HTTP 请求数上限，超出的在
+    # 门口排队——排队不占线程、不占数据库连接。2026-10-10 压测：过载时几百个请求同时挤进
+    # 线程池去抢 12 条连接，等满 DB_POOL_TIMEOUT 一片 503，负载撤掉后后端还卡了一分多钟、
+    # 最后被看门狗重启。在门口排，里面的请求就始终够快，排太久的直接回 503，不会堆积。
+    # 正常负载下永远排不满，用户无感。ADMISSION_ENABLED=false 整个关掉（与改动前完全一致）。
+    # Front-door admission (core/admission.py): per-worker cap on HTTP requests in flight;
+    # the rest wait at the door, holding no thread and no DB connection. In the 2026-10-10
+    # load test hundreds of requests piled into the thread pool for 12 connections, timed
+    # out in a wave of 503s, and the backend stayed wedged for a minute after the load
+    # stopped until the watchdog restarted it. Never reached at normal load.
+    ADMISSION_ENABLED: bool = True
+    HTTP_MAX_INFLIGHT: int = 96
+    # 普通请求在门口最多等多久（秒），到点回 503 + Retry-After。前端请求超时是 30 秒。
+    # How long an ordinary request may wait at the door before a 503 (the frontend times out at 30s).
+    HTTP_QUEUE_TIMEOUT: float = 8.0
+    # 交易指令单独一条道：同时最多这么多笔在处理（一笔约 0.2 秒，其中大半在等券商，所以
+    # 48 笔的吞吐远高于 CPU 能处理的量），排不上的最多等 ORDER_QUEUE_TIMEOUT 秒，到点回
+    # 503「指令未发出」——此时什么都没执行，用户可以放心重下。时限取得短：前端整笔交易只等
+    # 160 秒（client.ts 的 TRADE_TIMEOUT_MS，按网关最坏 140 秒定的），排队不能把它吃掉；
+    # 而且行情快的时候，早点告诉用户「没发出去」比让他干等更有用。
+    # Trading commands get their own lane: at most this many in flight (each ~0.2s, mostly
+    # waiting on the broker, so 48 far exceeds what the CPU can feed). A command that cannot
+    # get a slot within ORDER_QUEUE_TIMEOUT gets a 503 "not sent" — nothing ran, safe to retry.
+    # Kept short: the frontend waits 160s for a whole trade (TRADE_TIMEOUT_MS, sized for the
+    # gateway's 140s worst case), and in a fast market "not sent" early beats a long wait.
+    ORDER_MAX_INFLIGHT: int = 48
+    ORDER_QUEUE_TIMEOUT: float = 6.0
 
     # MT5 Gateway（C# 程序，直接通过 Manager API 操作 MT5，不需要 bridge 轮询）。
     # Make Capital 用户的订单会走这条通道。

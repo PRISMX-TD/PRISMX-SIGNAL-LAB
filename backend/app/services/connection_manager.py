@@ -1442,13 +1442,55 @@ class ConnectionManager:
     async def _deliver_many_local(self, user_ids, text: str) -> None:
         """把同一段文本投给本进程上的这批用户（不在本进程的直接跳过）。
         Deliver one text to whichever of these users are connected to this process."""
-        local = [u for u in user_ids if u in self._clients]
-        if not local:
-            return
-        await asyncio.gather(
-            *(self._deliver_local_text(u, text) for u in local),
-            return_exceptions=True,
-        )
+        await self._deliver_batch_local([u for u in user_ids if u in self._clients], text)
+
+    async def _deliver_batch_local(self, user_ids, text: str) -> None:
+        """把同一段文本投进这批用户每条连接的发件队列，最后统一让一次事件循环。
+
+        以前是每个用户一个协程（asyncio.gather），每个协程各让两拍：在线 750 人时，一条行情
+        广播就要建 750 个协程、转 1500 拍事件循环，行情每秒推两次（2026-10-10 压测里这是 WS
+        扇出的大头）。投递本身是 put_nowait、不会挂起，没必要分协程；慢连接照样只堵它自己的
+        队列（写协程各自独立），满了照样判死。
+        Drop one text into every connection's outbox for these users, then yield once for the
+        whole batch. This used to be one coroutine per user (asyncio.gather), each yielding
+        twice: 750 users online meant 750 coroutines and 1500 loop turns per quote broadcast,
+        twice a second. Enqueueing is put_nowait and never suspends, so per-user coroutines buy
+        nothing; a slow connection still only fills its own queue and is still dropped when full.
+        """
+        dead: list[tuple[str, WebSocket]] = []
+        for user_id in user_ids:
+            try:
+                for ws in self._enqueue_local(user_id, text):
+                    dead.append((user_id, ws))
+            except Exception:  # noqa: BLE001 —— 一个人出错不影响后面的人 / one user never stops the rest
+                logger.debug("enqueue failed for %s", user_id, exc_info=True)
+        for user_id, ws in dead:
+            try:
+                await self._drop_dead(user_id, ws)
+            except Exception:  # noqa: BLE001 —— 一条连接清理失败不影响其它人 / one failure never stops the rest
+                logger.debug("drop dead ws failed for %s", user_id, exc_info=True)
+        # 同 _deliver_local_text：让空闲的写协程当场发完 / let idle writers flush right away
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    def _enqueue_local(self, user_id: str, text: str) -> list[WebSocket]:
+        """把文本放进该用户在本进程每条连接的发件队列，返回队列已满（判死）的连接。
+        Put the text in each of this user's local outboxes; returns connections whose queue
+        is full (to be dropped as dead)."""
+        conns = self._clients.get(user_id)
+        if not conns:
+            return []
+        bg = self._background
+        quote = bool(bg) and text.startswith(_QUOTE_FRAME_PREFIXES)
+        dead: list[WebSocket] = []
+        for ws in list(conns):
+            if quote and ws in bg:
+                continue
+            try:
+                self._outbox_for(ws, user_id).queue.put_nowait(text)
+            except asyncio.QueueFull:
+                dead.append(ws)
+        return dead
 
     async def _deliver_local_text(self, user_id: str, text: str) -> None:
         """向连在**本进程**的该用户连接推送，并顺带清掉发不出去的连接。
@@ -1479,20 +1521,9 @@ class ConnectionManager:
         Takes pre-serialized text: every connection used to send_json on its own,
         re-serializing one broadcast N times. Now it is serialized once upstream.
         """
-        conns = list(self._clients.get(user_id, set()))
-        if not conns:
+        if not self._clients.get(user_id):
             return
-        bg = self._background
-        if bg and text.startswith(_QUOTE_FRAME_PREFIXES):
-            conns = [ws for ws in conns if ws not in bg]
-            if not conns:
-                return
-        dead: list[WebSocket] = []
-        for ws in conns:
-            try:
-                self._outbox_for(ws, user_id).queue.put_nowait(text)
-            except asyncio.QueueFull:
-                dead.append(ws)
+        dead = self._enqueue_local(user_id, text)
         for ws in dead:
             # 队列满 = 这条连接已经落后十几帧：判死清理（复用 unregister_client，保证
             # 「最后一个连接走了就删掉 user_id 这一项」的清理逻辑只有一份）。
@@ -1604,19 +1635,15 @@ class ConnectionManager:
         await self._broadcast_local_text(_dumps(message))
 
     async def _broadcast_local_text(self, text: str) -> None:
-        # 用户之间也并发：串行时每个用户最坏要等一个发送超时，在线用户一多，
-        # 一条广播的总耗时就是"用户数 × 超时"。序列化只在上游做一次，这里每条
-        # 连接只是 send_text 同一段文本。
-        # Users run concurrently too: serially each one can cost a full send
-        # timeout, making a broadcast take users x timeout in the worst case. The
-        # text is serialized once upstream; every connection just sends it.
+        # 只是把同一段文本放进每条连接的发件队列（不等发送）：真正的发送由各连接自己的写协程
+        # 并发完成，一个慢客户端拖不住别人。序列化只在上游做一次。
+        # Only enqueues the same text on every connection (never waits on a send): each
+        # connection's own writer sends concurrently, so one slow client holds nobody up.
+        # The text is serialized once upstream.
         user_ids = list(self._clients.keys())
         if not user_ids:
             return
-        await asyncio.gather(
-            *(self._deliver_local_text(user_id, text) for user_id in user_ids),
-            return_exceptions=True,
-        )
+        await self._deliver_batch_local(user_ids, text)
 
     async def connected_user_ids_async(self) -> list[str]:
         """协程里读在线名单：把同步 Redis 调用挪到线程池。

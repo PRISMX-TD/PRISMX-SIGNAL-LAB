@@ -2,6 +2,7 @@
 Bridge router: the Python desktop app reports multiple MT5 accounts and
 executes order commands via REST + API token.
 """
+import hashlib
 import logging
 import time
 from datetime import datetime, timedelta, timezone
@@ -501,6 +502,82 @@ class BridgePollRequest(BaseModel):
 HEARTBEAT_WRITE_MIN_INTERVAL = 2.5
 
 
+# ---------- 状态上报快路径 / status-report fast path ----------
+# 桥接每 1.5 秒报一次到，绝大多数时候和上一次一模一样；可完整的一拍要查该用户全部账号行、
+# 逐个比对、提交一次事务（2026-10-10 压测：单这一项就是后端 CPU 的最大头，一个桥接用户的
+# 服务端开销约是纯网页用户的 9 倍）。这里按用户记住上一次完整上报的结果：内容没变、且心跳
+# 写入还不到 HEARTBEAT_WRITE_MIN_INTERVAL，就直接沿用上次的结果，不碰数据库——完整那一拍
+# 这时本来也不会写心跳（见 _upsert_account 的节流），省下的纯粹是重复劳动。
+#
+# 「内容」不含 equity / margin：持仓时浮动盈亏每拍都变，算进去快路径就形同虚设；而这两项
+# 网页只经 /bridge/accounts 每分钟读一次，库里晚两三秒没有人看得出来，下一次完整上报
+# （最多 HEARTBEAT_WRITE_MIN_INTERVAL + 一拍后）就写进去了。余额、账号、版本、套餐有任何
+# 变化都走完整路径，在线判定（ONLINE_WINDOW = 10 秒）不受影响：心跳最长约 4 秒写一次。
+#
+# 每个 worker 各一份，不跨进程共享：同一个桥接的请求落到另一个 worker，只是那边多走一次
+# 完整路径。快路径不写库、也不推 ACCOUNTS_STATUS（从桥接的角度什么都没变），所以缓存
+# 晚几秒不会把删掉的账号「推回来」；同进程里的删除 / 改后缀会立即作废缓存。
+#
+# The bridge reports every 1.5s, almost always identical to the previous report, yet a
+# full pass loads all the user's account rows, compares them and commits (2026-10-10:
+# the single largest backend CPU item; a bridge user cost ~9x a web-only user). Remember
+# each user's last full result: if the content is unchanged and the heartbeat was written
+# less than HEARTBEAT_WRITE_MIN_INTERVAL ago, reuse it without touching the DB — the full
+# pass would not have written the heartbeat then anyway (see _upsert_account's throttle).
+# "Content" excludes equity/margin: with open positions they change every beat, which
+# would defeat the fast path, and the web reads them only via /bridge/accounts once a
+# minute; the next full pass writes them. Any change to balance, accounts, version or
+# plan takes the full path, and liveness (ONLINE_WINDOW = 10s) is unaffected: the
+# heartbeat is still written at least every ~4s. Per worker, not shared: a request on
+# another worker just runs one full pass there. The fast path neither writes nor pushes
+# ACCOUNTS_STATUS (nothing changed from the bridge's point of view), so a few seconds of
+# staleness cannot resurrect a deleted account; same-process deletes / suffix changes
+# invalidate immediately.
+STATUS_FAST_MAX_AGE = HEARTBEAT_WRITE_MIN_INTERVAL
+# user_id -> (心跳写入时刻 epoch, 指纹, 上报结果) / (heartbeat epoch, fingerprint, result)
+_status_cache: dict[str, tuple[float, bytes, tuple]] = {}
+_STATUS_CACHE_MAX = 20000
+
+
+def _status_fingerprint(user: User, req: BridgePollRequest) -> bytes:
+    parts = [user.plan or "", user.bridge_version or "", req.bridgeVersion or ""]
+    for a in sorted(req.accounts, key=lambda a: (a.login, a.server or "")):
+        parts.append(repr((
+            a.login, a.server, a.accountName, a.accountCurrency, a.balance, a.leverage,
+            a.company, a.detectedSuffix, a.tradeMode,
+        )))
+    return hashlib.blake2b("\x1f".join(parts).encode("utf-8"), digest_size=16).digest()
+
+
+def _status_fast_hit(user_id: str, fingerprint: bytes) -> tuple | None:
+    hit = _status_cache.get(user_id)
+    if hit is None or hit[1] != fingerprint or time.time() - hit[0] >= STATUS_FAST_MAX_AGE:
+        return None
+    return hit[2]
+
+
+def _remember_status(user_id: str, heartbeat_epoch: float, fingerprint: bytes, result: tuple) -> None:
+    if len(_status_cache) >= _STATUS_CACHE_MAX:
+        cutoff = time.time() - 60.0
+        for uid, entry in list(_status_cache.items()):
+            if entry[0] < cutoff:
+                _status_cache.pop(uid, None)
+    _status_cache[user_id] = (heartbeat_epoch, fingerprint, result)
+
+
+def invalidate_status_cache(user_id: str) -> None:
+    """账号被删 / 改后缀之后调用：下一次上报走完整路径。/ Force the next report down the full path."""
+    _status_cache.pop(user_id, None)
+
+
+def _epoch(dt: datetime | None) -> float:
+    if dt is None:
+        return 0.0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
 def _upsert_account(
     db: Session,
     user_id: str,
@@ -748,6 +825,7 @@ def _report_accounts_db_work(
     # 这一拍新建 / 复活的账号：(行, 是否复活, 复活前的 revoked_at)，提交前记操作日志。
     # Accounts created / revived on this report, logged right before the commit.
     new_binds: list[tuple[MT5Account, bool, datetime | None]] = []
+    oldest_hb = float("inf")
     for acc in req.accounts:
         if broker_lock and not server_matches_broker(acc.server, broker_patterns):
             broker_rejected.append(acc.login)
@@ -786,6 +864,8 @@ def _report_accounts_db_work(
             new_binds.append((row, prior_removed, prior_revoked_at))
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
+        # 快路径要知道「最旧的那条心跳」是什么时候写的 / the fast path keys on the stalest heartbeat
+        oldest_hb = min(oldest_hb, _epoch(row.last_heartbeat))
         # 取 row 而非 acc 的余额：被接受的账号才在这里，且 row 上的值已经过
         # _upsert_account 的"None 不覆盖"处理，与 /bridge/accounts 返回的完全一致。
         # Read balance off row, not acc: only accepted accounts reach here, and
@@ -810,7 +890,12 @@ def _report_accounts_db_work(
         # user.id, not the instance: it may be a detached one from the auth cache (above).
         _log_bridge_binds(db, user.id, new_binds)
     db.commit()
-    return online_logins, balances, suffix_by_login, rejected_logins, broker_rejected, gateway_logins
+    result = (online_logins, balances, suffix_by_login, rejected_logins, broker_rejected, gateway_logins)
+    # 一个账号都没被接受（全被拒 / 没上报）就不进快路径：没有心跳可依凭，照旧每拍完整走。
+    # Nothing accepted (all rejected / none reported): no heartbeat to key on, stay on the full path.
+    if online_logins and oldest_hb != float("inf"):
+        _remember_status(user.id, oldest_hb, _status_fingerprint(user, req), result)
+    return result
 
 
 def _fetch_commands_db_work(
@@ -1074,12 +1159,27 @@ async def bridge_poll(
     if long_poll:
         bridge_wake.arm(user.id)
 
-    (
-        commands, voided_payloads, online_logins, balances,
-        rejected_logins, broker_rejected, suffix_by_login, gateway_logins,
-    ) = await run_in_threadpool(
-        _poll_first_pass, db, user, req
-    )
+    # 快路径：内容没变、心跳还新（见 STATUS_FAST_MAX_AGE）——不重跑账号上报。只报状态的那一拍
+    # 连线程池都不进；领指令的那一拍只跑取指令那一段。
+    # Fast path: unchanged content, fresh heartbeat (see STATUS_FAST_MAX_AGE) — skip the
+    # account report. A status-only beat never even enters the thread pool; a command
+    # beat runs only the fetch stage.
+    cached = _status_fast_hit(user.id, _status_fingerprint(user, req))
+    if cached is not None:
+        online_logins, balances, suffix_by_login, rejected_logins, broker_rejected, gateway_logins = cached
+        if req.fetchCommands:
+            commands, voided_payloads = await run_in_threadpool(
+                _fetch_commands_db_work, db, user, online_logins, suffix_by_login, gateway_logins,
+            )
+        else:
+            commands, voided_payloads = [], []
+    else:
+        (
+            commands, voided_payloads, online_logins, balances,
+            rejected_logins, broker_rejected, suffix_by_login, gateway_logins,
+        ) = await run_in_threadpool(
+            _poll_first_pass, db, user, req
+        )
 
     if long_poll and not commands:
         db.close()
@@ -1108,8 +1208,11 @@ async def bridge_poll(
             [(p.get("data") or {}).get("clientOrderId") for p in voided_payloads],
         )
 
-    # 账号在线状态：仅变化时推送 / account status: push only on change
-    await _push_accounts_status_if_changed(user.id, online_logins, balances)
+    # 账号在线状态：仅变化时推送。快路径的结果与上一次完整上报相同，不必再比。
+    # Account status: push only on change. A fast-path result equals the last full
+    # report, so there is nothing to compare.
+    if cached is None:
+        await _push_accounts_status_if_changed(user.id, online_logins, balances)
 
     # accountLimitExceeded：超出当前订阅等级账户上限、未被接受的 login 列表。
     # brokerRejected：MT5 服务器名不匹配合作券商、未被接受的 login 列表。
@@ -1122,9 +1225,13 @@ async def bridge_poll(
     # 每个账号做一次近一年的回扫补齐（桥接进程内只做一次，见 bridge_app）。
     # tradeHistoryBackfill: accounts whose closed legs from the last year still
     # lack the detail columns; the bridge rescans a year once per process.
-    backfill = await run_in_threadpool(
-        _backfill_logins_cached, db, user.id, [a.login for a in req.accounts]
-    )
+    hit = _backfill_cache.get(user.id)
+    if hit is not None and time.monotonic() - hit[0] < _BACKFILL_CACHE_TTL:
+        backfill = hit[1]  # 缓存命中不必进线程池 / a cache hit needs no thread hop
+    else:
+        backfill = await run_in_threadpool(
+            _backfill_logins_cached, db, user.id, [a.login for a in req.accounts]
+        )
 
     return {
         "commands": commands,
@@ -1991,6 +2098,7 @@ def delete_account(
     # 绑定集合变了：胜率/已平仓明细的按用户缓存立刻作废。
     # The bound set changed: drop the per-user win-rate / closed-trades caches.
     invalidate_trade_caches(user.id, [login])
+    invalidate_status_cache(user.id)
     return {"ok": True}
 
 
@@ -2010,6 +2118,8 @@ def set_account_suffix(
         raise HTTPException(status_code=404, detail="账号不存在 / Account not found")
     row.symbol_suffix = (req.symbolSuffix or "").strip()
     db.commit()
+    # 快路径缓存里存着旧后缀，领指令那一拍会用它拼品种名 / the fast-path cache holds the old suffix
+    invalidate_status_cache(user.id)
     return {"ok": True, "login": req.login, "symbolSuffix": row.symbol_suffix}
 
 

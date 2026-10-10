@@ -456,11 +456,43 @@ async def competition_loop(startup_delay: float = 35.0):
         await asyncio.sleep(COMP_LOOP_INTERVAL_SECONDS)
 
 
+def _seconds_until_due(now: datetime | None = None) -> float:
+    """上一趟（同一套判定规则下，见 _wm_key）离现在不到一小时：还要等多久才轮到下一趟。
+    没有水位（规则改了、或没配 Redis 重启后）返回 0，照旧立即跑。
+    How long until the next hourly pass is due, given the last pass under the same rules
+    (see _wm_key). No watermark (rules changed, or a restart without Redis) → 0."""
+    last_at, _ = _load_watermarks()
+    if last_at is None:
+        return 0.0
+    elapsed = ((now or datetime.now(timezone.utc)) - last_at).total_seconds()
+    # 夹在 [0, 一个周期]：服务器时钟往回拨时 elapsed 为负，不能等出比一个周期还长的时间。
+    # Clamp to [0, one interval]: a clock stepped backwards makes elapsed negative.
+    return min(LOOP_INTERVAL_SECONDS, max(0.0, LOOP_INTERVAL_SECONDS - elapsed))
+
+
 async def gamification_loop(startup_delay: float = 25.0):
     await asyncio.sleep(startup_delay)      # 首个 await 前零阻塞（main.py:61-70 约束）
     from starlette.concurrency import run_in_threadpool
     # 系统状态页的心跳：每轮开头记一次（内部限频）/ status-page heartbeat
     from app.services import loop_health
+
+    # 重启后不急着补一趟：上一趟不到一小时就接着原来的节奏等。2026-10-10 压测里，重启后
+    # 25 秒那趟 pass 正撞上用户重连的高峰，一起抢连接池——而看门狗重启恰恰发生在过载时。
+    # 判定规则改了（PASS_LOGIC_REV / schema 换了水位键）照旧立即跑。
+    # Don't rush a pass after a restart: if the last one ran under an hour ago, keep the
+    # hourly rhythm. In the 2026-10-10 load test the pass 25s after a restart landed on
+    # the reconnect surge and fought it for the pool — and watchdog restarts happen
+    # precisely under overload. Changed rules (new watermark keys) still run at once.
+    try:
+        wait = await run_in_threadpool(_seconds_until_due)
+    except Exception:  # noqa: BLE001 —— 读不到水位就照旧立即跑 / unreadable: run now as before
+        wait = 0.0
+    if wait > 0:
+        log.info("gamification: last pass %.0fs ago, next in %.0fs", LOOP_INTERVAL_SECONDS - wait, wait)
+        # 先报一次心跳：等的这段（不到一个周期）系统状态页不会把它当成卡住。
+        # Beat first so the status page doesn't read the wait (under one interval) as stuck.
+        loop_health.beat("gamification")
+        await asyncio.sleep(wait)
 
     while True:
         loop_health.beat("gamification")
