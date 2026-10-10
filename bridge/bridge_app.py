@@ -142,7 +142,19 @@ except Exception:
 # Disconnect no longer freezes the UI; lot steps like 1e-05, 0-digit symbols and tick-size
 # aligned SL/TP; an unconfirmable pending cancel no longer counts as done; a failed deep
 # rescan is retried.
-APP_VERSION = "1.4.8"
+#
+# 1.4.9（2026-10-10）：更新链路安全。① 签名清单多一行已签名的 version=，必须等于 Release tag
+# 且严格新于本机版本，否则拒绝一键更新（防把旧的、签名合法的安装包当新版重放）；② 验签失败
+# 只打开官方 Releases 页面，不再把刚被拦下的那个文件链接交给浏览器；打开的网址一律核对主机
+# 白名单；③ 依赖锁定版本。从这一版起，每个版本都必须用新的 release_sign.py 签。
+#
+# 1.4.9 (2026-10-10): update-path hardening. The signed manifest carries a version= line that
+# must equal the release tag and be strictly newer than this build, or the one-click update is
+# refused (no replaying an old, validly signed installer). A failed verification only opens
+# the official Releases page, never the asset that was just rejected, and every opened URL is
+# host-checked. Dependencies are pinned. Every release from here on must be signed with the
+# new release_sign.py.
+APP_VERSION = "1.4.9"
 
 # ---------- 更新检测 / Update check ----------
 # 通过 GitHub Releases 检查是否有更新的安装包版本。
