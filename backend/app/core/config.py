@@ -742,10 +742,14 @@ class Settings(BaseSettings):
     TICKET_IMAGE_BUCKET: str = "ticket-images"
     # 签名链接有效期（秒）。进程内缓存到剩一半时长再重签，所以发出去的链接至少还有
     # 一半寿命——够把一条工单从头看到尾，又不会让外流的链接长期可用。
+    # 2026-10-10 安全审计：6 小时 → 1 小时（发出去的链接 30–60 分钟有效），缩短外流窗口；
+    # 页面开太久图片过期时重新打开工单即可重签。
     # Signed URL lifetime in seconds. URLs are cached per process until half of it is
     # left, so any URL handed out still has at least half its life — enough to read a
-    # thread end to end without a leaked link staying usable for long.
-    TICKET_IMAGE_URL_TTL_SECONDS: int = 6 * 3600
+    # thread end to end without a leaked link staying usable for long. Cut from 6 h to
+    # 1 h in the 2026-10-10 security audit (handed-out URLs live 30–60 min); reopening
+    # the ticket re-signs if a long-open page outlives them.
+    TICKET_IMAGE_URL_TTL_SECONDS: int = 3600
 
     # ---- 公告一键翻译 / Announcement one-click translation ----
     # 只给管理员后台用：把中文公告译成英文（或反向）。TRANSLATE_PROVIDER 是逗号分隔
