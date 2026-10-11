@@ -8,6 +8,7 @@ import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 import { API_BASE, API_CANDIDATES, reportApiFailure } from './apiBase'
+import { beginPrefetch, takePrefetched } from './prefetch'
 
 export { API_BASE }
 
@@ -341,6 +342,12 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   const { requestTimeoutMs, signal: callerSignal, idempotent, authToken, ...init } = options
   const method = (init.method ?? 'GET').toUpperCase()
   const isRead = method === 'GET' || method === 'HEAD'
+  // 首屏预取（prefetch.ts）：这几个 GET 若已随 /bootstrap?extras=1 一起拿到，直接用，不再发请求。
+  // First-screen prefetch (prefetch.ts): if this GET came along with /bootstrap?extras=1, use it.
+  if (method === 'GET' && !authToken && !callerSignal?.aborted) {
+    const hit = await takePrefetched(path, getToken())
+    if (hit) return hit.data as T
+  }
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string>),
@@ -652,9 +659,30 @@ export interface BootstrapResponse {
   quotes: { quotes: Quote[] } | null
   symbols: { symbols: string[] } | null
   failed?: string[]
+  // 只在 ?extras=1 时有：{前端请求路径: 响应}，交给 prefetch.ts。/ Only with ?extras=1; fed to prefetch.ts.
+  extras?: Record<string, unknown>
 }
+// 首次进入的那一次 bootstrap（带 extras）按 token 记住几秒：开发模式 StrictMode 会把渲染阶段的
+// 初始化跑两遍，不记的话就发两次。/ Remember the first-load bootstrap per token for a few seconds:
+// StrictMode runs render-phase initializers twice in development.
+let firstLoad: { token: string | null; at: number; p: Promise<BootstrapResponse> } | null = null
+const FIRST_LOAD_REUSE_MS = 10_000
 export const bootstrapApi = {
   get: () => request<BootstrapResponse>('/bootstrap'),
+  // 首屏：同一个请求顺带拿回其它组件的首屏数据，登记成预取（见 prefetch.ts）。必须在渲染阶段
+  // 调用（早于子组件的 effect），见 store/live.tsx。
+  // First screen: the same request also brings back the other components' first-screen data,
+  // registered as prefetch (see prefetch.ts). Must run during render, before child effects.
+  firstLoad: (): Promise<BootstrapResponse> => {
+    const token = getToken()
+    if (firstLoad && firstLoad.token === token && Date.now() - firstLoad.at < FIRST_LOAD_REUSE_MS) {
+      return firstLoad.p
+    }
+    const p = request<BootstrapResponse>('/bootstrap?extras=1')
+    beginPrefetch(p.then((b) => b?.extras ?? null), token)
+    firstLoad = { token, at: Date.now(), p }
+    return p
+  },
 }
 
 // 当前活跃品种：EA 的 InpSymbols 实际在推什么，就返回什么，不是写死的列表。

@@ -443,3 +443,80 @@ describe('invite ref history', () => {
     expect('refs' in bodies[0]).toBe(false)
   })
 })
+
+// 首屏预取（prefetch.ts）接在 request() 上：首屏那一次 bootstrap 带回的 GET 不再发网络请求，
+// 用过一次之后照常走网络；换号后的同路径请求不吃上一位的预取。
+// The first-screen prefetch through request(): GETs that came with the first bootstrap don't
+// hit the network; after one use they do; another session never gets the previous one's data.
+
+// 预取按 token 绑定，测试里 safeStorage 要能真读写（load() 的 window 桩没有 localStorage）。
+// The prefetch is token-bound, so safeStorage must really read/write (load()'s window stub has none).
+function stubWindowStorage() {
+  const store = new Map<string, string>()
+  vi.stubGlobal('window', {
+    setTimeout: (...a: Parameters<typeof setTimeout>) => setTimeout(...a),
+    clearTimeout: (id: Parameters<typeof clearTimeout>[0]) => clearTimeout(id),
+    localStorage: {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    },
+  })
+}
+
+describe('request(): first-screen prefetch', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('serves component GETs from the first-load bootstrap, once', async () => {
+    const { api } = await load()
+    const { clearPrefetch } = await import('./prefetch')
+    clearPrefetch()
+    stubWindowStorage()
+    api.setToken('tok-a')
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      calls.push(url)
+      if (url.endsWith('/api/bootstrap?extras=1')) {
+        return Promise.resolve(json({
+          signals: null, accounts: null, trends: null, quotes: null, symbols: null, failed: [],
+          extras: { '/orders': { orders: [], total: 0 }, '/signals/winrate': { winRate: 0.6 } },
+        }))
+      }
+      return Promise.resolve(json({ orders: [{ id: 'net' }], total: 1 }))
+    }))
+    const boot = api.bootstrapApi.firstLoad()
+    // 组件在 bootstrap 回来之前就发起请求：要等它，而不是另发一个
+    // A component asks before the bootstrap lands: it waits instead of firing its own request
+    const orders = api.orderApi.list()
+    await boot
+    await expect(orders).resolves.toEqual({ orders: [], total: 0 })
+    await expect(api.signalApi.winrate()).resolves.toEqual({ winRate: 0.6 })
+    expect(calls).toEqual([`${MAIN}/api/bootstrap?extras=1`])
+    // 第二次（轮询）照常走网络 / the next poll goes to the network
+    await expect(api.orderApi.list()).resolves.toEqual({ orders: [{ id: 'net' }], total: 1 })
+    expect(calls).toEqual([`${MAIN}/api/bootstrap?extras=1`, `${MAIN}/api/orders`])
+  })
+
+  it('a prefetch fetched for one session is never served to another', async () => {
+    const { api } = await load()
+    const { clearPrefetch } = await import('./prefetch')
+    clearPrefetch()
+    stubWindowStorage()
+    api.setToken('tok-a')
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      calls.push(url)
+      if (url.includes('/api/bootstrap')) {
+        return Promise.resolve(json({ failed: [], extras: { '/auth/me': { email: 'a@x' } } }))
+      }
+      return Promise.resolve(json({ email: 'b@x' }))
+    }))
+    await api.bootstrapApi.firstLoad()
+    api.setToken('tok-b')
+    await expect(api.userApi.me()).resolves.toEqual({ email: 'b@x' })
+    expect(calls.some((u) => u.endsWith('/api/auth/me'))).toBe(true)
+  })
+})

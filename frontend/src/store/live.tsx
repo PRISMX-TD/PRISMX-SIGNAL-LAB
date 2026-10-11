@@ -3,7 +3,7 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { BootstrapResponse } from '../api/client'
 import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
-import { accountApi, bootstrapApi, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
+import { accountApi, bootstrapApi, getToken, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { applyAccountsStatus } from './accountsStatus'
 import { keepIfEqual } from './keepIfEqual'
@@ -336,6 +336,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  // 首屏 bootstrap 在**渲染阶段**就发出（useState 的初始化函数）：React 先跑子组件的 effect、
+  // 后跑这里的，若等到下面的挂载 effect 再发，子组件（订单、胜率卡、公告弹窗、通知铃、到期横幅的
+  // /auth/me……）早已各自把请求发出去了，预取就白做了。firstLoad 同步登记预取，子组件的 GET
+  // 会先等它回来（api/prefetch.ts）。
+  // The first-screen bootstrap starts during render (useState initializer): React runs child
+  // effects before this component's, so waiting for the mount effect below would let the
+  // children (orders, win-rate card, popup, bell, the expiry banner's /auth/me…) fire their own
+  // requests first. firstLoad registers the prefetch synchronously; their GETs wait for it.
+  const [initialBoot] = useState(() => (getToken() ? bootstrapApi.firstLoad() : null))
+  const firstBootRef = useRef<Promise<BootstrapResponse> | null>(initialBoot)
+
   const refreshAll = useCallback(async (opts?: RefreshOptions) => {
     // 关键请求单独包一层，除了拿数据还要拿到「这条到底成没成」。其余请求
     // （策略信号、趋势、报价、品种）继续静默吞掉：它们各自失败都属于局部
@@ -362,8 +373,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
     // bootstrap 失败（含 404 旧后端）只是回退逐个请求，绝不算「后端不可达」。
     // A failed bootstrap (incl. 404 on an old backend) just falls back; never "unreachable".
+    // 首屏那一次用渲染阶段就发出去的 firstLoad（带 extras，见下面 firstBootRef），只用一次。
+    // The first-screen call reuses the firstLoad started during render (with extras), once.
+    const firstBoot = opts?.bootstrap === true ? firstBootRef.current : null
+    if (firstBoot) firstBootRef.current = null
     const bootP: Promise<BootstrapResponse | null> = opts?.bootstrap === true
-      ? bootstrapApi.get().then((b) => (b && typeof b === 'object' ? b : null)).catch(() => null)
+      ? (firstBoot ?? bootstrapApi.get()).then((b) => (b && typeof b === 'object' ? b : null)).catch(() => null)
       : Promise.resolve(null)
     const sect = <K extends 'signals' | 'accounts' | 'trends' | 'quotes' | 'symbols'>(key: K) =>
       bootP.then((b) => (b ? pickBootstrapSection(b, key) : null))
