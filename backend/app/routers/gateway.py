@@ -1801,6 +1801,16 @@ async def gateway_positions_loop() -> None:
     # every tick, so balances must persist across ticks; using only this tick's
     # refreshed values would make un-refreshed accounts drop out.
     known_balances: dict[str, float] = {}
+    # login -> 最近一次资金刷新时的 {balance, equity, margin, adj}。adj = 净值 − 余额 − 同一拍
+    # 持仓浮盈之和，即隔夜利息、信用额度这类不在持仓 profit 里的部分，变化很慢。前端用
+    # 「余额 + 实时浮盈 + adj」算净值：持仓每 2 秒一推，净值跟着走，三个数永远对得上；
+    # 而库里的 equity 15 秒才刷一次、前端还要 60 秒才拉一次，以前能落后一分多钟。
+    # login -> {balance, equity, margin, adj} from the last funds refresh. adj = equity −
+    # balance − this tick's summed position profit: swap, credit and the like, which the
+    # position rows don't carry and which move slowly. The frontend renders equity as
+    # balance + live floating + adj, so it moves with the 2-second positions push and the
+    # three figures always add up; the stored equity used to lag by over a minute.
+    known_funds: dict[str, dict[str, float]] = {}
     # 本进程内已做过首次补扫的 (user_id, login) / pairs whose catch-up scan already ran
     scanned_once: set[tuple[str, str]] = set()
 
@@ -2120,6 +2130,22 @@ async def gateway_positions_loop() -> None:
         finally:
             deals_in_flight.discard(key)
 
+    def _note_funds(login: str, rsp, rows: list[dict]) -> None:
+        """记下本拍的资金与 adj（见 known_funds）。/ Record this tick's funds and adj."""
+        floating = 0.0
+        for r in rows:
+            v = r.get("profit")
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                floating += float(v)
+        balance = float(rsp.balance or 0.0)
+        equity = float(rsp.equity or 0.0)
+        known_funds[login] = {
+            "balance": round(balance, 2),
+            "equity": round(equity, 2),
+            "margin": round(float(rsp.margin or 0.0), 2),
+            "adj": round(equity - balance - floating, 2),
+        }
+
     async def _push_user_snapshot(user_id: str, logins: list[str]) -> None:
         """读该用户全部 gateway 账号的持仓并推一次完整快照。
 
@@ -2289,6 +2315,9 @@ async def gateway_positions_loop() -> None:
             now = time.monotonic()
             data: list[dict] = []
             failed = False
+            # 本拍刷到资金的账号 -> 读回的资金，等这一拍的持仓读完再算 adj。
+            # Logins whose funds were refreshed this tick; adj is computed once positions are read.
+            fresh_acc: dict[str, object] = {}
             for login in logins:
                 # --- 账号资金刷新（低频）---
                 if now - last_account_refresh.get((user_id, login), 0.0) >= GATEWAY_ACCOUNT_REFRESH_INTERVAL:
@@ -2303,6 +2332,7 @@ async def gateway_positions_loop() -> None:
                             )
                             if bal is not None:
                                 known_balances[login] = bal
+                                fresh_acc[login] = acc_rsp
                         else:
                             logger.warning("Gateway 账号资金读取失败 login=%s", login)
                     except Exception:
@@ -2340,6 +2370,8 @@ async def gateway_positions_loop() -> None:
                 # Except for the periodic recheck: ADD events can be lost, and one lost
                 # event must not hide the account forever.
                 if _skips_flat(login, now):
+                    if login in fresh_acc:
+                        _note_funds(login, fresh_acc[login], [])
                     continue
 
                 last_positions_read[login] = now
@@ -2367,6 +2399,9 @@ async def gateway_positions_loop() -> None:
                     known_flat.discard(login)
                 else:
                     known_flat.add(login)
+
+                if login in fresh_acc:
+                    _note_funds(login, fresh_acc[login], rows)
 
                 data.extend(rows)
 
@@ -2406,6 +2441,15 @@ async def gateway_positions_loop() -> None:
             mine = {lg: known_balances[lg] for lg in logins if lg in known_balances}
             if mine:
                 await push_balances_if_changed(user_id, mine)
+
+            # 资金一刷新就推 ACCOUNT_FUNDS（约 15 秒一次，开平仓后下一拍提前刷）。不去重：
+            # 新连上的页面最多等一个刷新周期就能拿到 adj。
+            # Push ACCOUNT_FUNDS whenever funds were refreshed (~15s, sooner after an open or
+            # close). Not de-duplicated, so a freshly connected page gets adj within one cycle.
+            if fresh_acc:
+                funds = {lg: known_funds[lg] for lg in logins if lg in known_funds}
+                if funds:
+                    await manager.push_to_client(user_id, {"type": "ACCOUNT_FUNDS", "data": funds})
 
             # 与 /bridge/positions 保持一致：驱动胜率对账与自动仓管。
             # 任一步失败都不影响持仓推送本身。
@@ -2570,6 +2614,13 @@ async def gateway_positions_loop() -> None:
                         # 免得慢拍在下一次读取前一直跳过它。
                         if e.action == "add":
                             known_flat.discard(login)
+                        # 开仓 / 平仓改变了余额与已用保证金：让下一拍慢拍（≤2 秒）就刷资金，
+                        # 别等满 15 秒——不然保证金比例和净值的修正项会落后一截。
+                        # An open or close moves balance and margin: refresh funds on the
+                        # next slow tick (≤2s) rather than waiting out the 15s throttle.
+                        if e.action in ("add", "delete"):
+                            for uid in uids:
+                                last_account_refresh.pop((uid, login), None)
                         # 绑了这个 login 的每个在线用户都要收到快照，不能只推一个。
                         # Every online user bound to this login gets the snapshot.
                         affected.update(uid for uid in uids if uid in connected)

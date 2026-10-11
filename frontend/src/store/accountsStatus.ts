@@ -29,3 +29,46 @@ export function applyAccountsStatus(
     return next
   })
 }
+
+// ACCOUNT_FUNDS（gateway 账号每次刷新资金时推）：login -> {balance, equity, margin, adj}。
+// adj = 净值 − 余额 − 同一拍持仓浮盈之和（隔夜利息、信用额度等），前端据此用
+// 「余额 + 实时浮盈 + adj」算净值，见 liveEquity。
+// ACCOUNT_FUNDS (pushed on every gateway funds refresh): login -> {balance, equity,
+// margin, adj}, where adj = equity − balance − that tick's summed position profit
+// (swap, credit…). The frontend renders equity as balance + live floating + adj.
+export interface AccountFundsPush {
+  balance: number
+  equity: number
+  margin: number
+  adj: number
+}
+
+export function applyAccountFunds(
+  accounts: MT5Account[],
+  funds: Record<string, AccountFundsPush> | undefined,
+): MT5Account[] {
+  if (!funds) return accounts
+  return accounts.map((a) => {
+    const f = funds[a.login]
+    if (!f) return a
+    return { ...a, balance: f.balance, equity: f.equity, margin: f.margin }
+  })
+}
+
+// 页面上显示的净值。有 adj（gateway 账号）就用「余额 + 实时浮盈 + adj」：随持仓每拍
+// 一起动，和旁边的余额、浮动盈亏三个数永远对得上。没有 adj（桥接账号、或推送还没到）
+// 退回库里的净值。
+// Equity as displayed. With adj (gateway accounts) it is balance + live floating + adj,
+// moving with every positions tick and always adding up with the balance and floating
+// P/L shown beside it. Without adj (bridge accounts, or before the first push) fall back
+// to the stored equity.
+export function liveEquity(
+  account: Pick<MT5Account, 'balance' | 'equity'>,
+  floating: number,
+  adj: number | undefined,
+): number | null {
+  if (adj !== undefined && account.balance != null) {
+    return Math.round((account.balance + floating + adj) * 100) / 100
+  }
+  return account.equity ?? null
+}

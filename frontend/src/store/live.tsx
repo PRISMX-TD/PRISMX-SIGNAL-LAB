@@ -5,7 +5,8 @@ import type { BootstrapResponse } from '../api/client'
 import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
 import { accountApi, bootstrapApi, getToken, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
-import { applyAccountsStatus } from './accountsStatus'
+import { applyAccountsStatus, applyAccountFunds } from './accountsStatus'
+import type { AccountFundsPush } from './accountsStatus'
 import { keepIfEqual } from './keepIfEqual'
 import { usePrefs } from './prefs'
 import { useAuth } from './auth'
@@ -149,6 +150,12 @@ const PendingOrdersContext = createContext<PendingOrder[]>([])
 // updates as often as positions do. A missing login means no open positions, so
 // floating P/L is zero -- not unknown.
 const AccountFundsContext = createContext<Record<string, number>>({})
+
+// gateway 账号的净值修正项 login -> adj（净值 − 余额 − 持仓浮盈，隔夜利息 / 信用额度等），
+// 随 ACCOUNT_FUNDS 约 15 秒一推。净值显示用 liveEquity(余额, 实时浮盈, adj)。
+// Per-login equity adjustment for gateway accounts (equity − balance − floating: swap,
+// credit…), pushed with ACCOUNT_FUNDS about every 15s. Displayed equity is liveEquity().
+const AccountAdjContext = createContext<Record<string, number>>({})
 
 // 全站报价的「外部 store」视图：同一份 globalQuotes，但消费方可以只订阅某一个品种
 // （useGlobalQuote）或某个派生出的原始值（useGlobalQuotesSelect）。Context 做不到
@@ -303,6 +310,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([])
   const [positionsLoaded, setPositionsLoaded] = useState(false)
   const [accountFunds, setAccountFunds] = useState<Record<string, number>>({})
+  const [accountAdj, setAccountAdj] = useState<Record<string, number>>({})
   const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
   const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
   const [trends, setTrends] = useState<Record<string, Trend>>({})
@@ -744,6 +752,23 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // message carries no payload — it just nudges subscribers to refetch.
         setClosedTradeTick((n) => n + 1)
         break
+      case 'ACCOUNT_FUNDS': {
+        // gateway 资金刷新：就地更新余额 / 净值 / 保证金，并记下 adj（见 AccountAdjContext）。
+        // 以前净值只靠 60 秒一次的 /bridge/accounts 轮询，比持仓浮盈落后一分多钟。
+        // Gateway funds refresh: update balance / equity / margin in place and keep adj.
+        // Equity used to come only from the 60s /bridge/accounts poll, a minute behind.
+        const data = msg.data as Record<string, AccountFundsPush> | undefined
+        if (!data) break
+        setAccounts((prev) => keepIfEqual(prev, applyAccountFunds(prev, data)))
+        setAccountAdj((prev) => {
+          const next = { ...prev }
+          for (const [login, f] of Object.entries(data)) {
+            if (typeof f?.adj === 'number') next[login] = f.adj
+          }
+          return keepIfEqual(prev, next)
+        })
+        break
+      }
       case 'ACCOUNTS_STATUS': {
         // 账号在线状态或余额发生变化。两者都直接就地更新：
         // 余额随消息带过来，不必为了拿它再请求一次 /bridge/accounts。
@@ -906,6 +931,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       <PositionsContext.Provider value={positions}>
         <PendingOrdersContext.Provider value={pendingOrders}>
           <AccountFundsContext.Provider value={accountFunds}>
+          <AccountAdjContext.Provider value={accountAdj}>
             <QuotesContext.Provider value={quotes}>
               <GlobalQuotesContext.Provider value={globalQuotes}>
                 <GlobalQuotesStoreContext.Provider value={globalQuotesStore}>
@@ -913,6 +939,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
                 </GlobalQuotesStoreContext.Provider>
               </GlobalQuotesContext.Provider>
             </QuotesContext.Provider>
+          </AccountAdjContext.Provider>
           </AccountFundsContext.Provider>
         </PendingOrdersContext.Provider>
       </PositionsContext.Provider>
@@ -1031,4 +1058,9 @@ export function usePendingOrders() {
 // A login absent from the map has no open positions, so its P/L is zero.
 export function useAccountFunds() {
   return useContext(AccountFundsContext)
+}
+
+// 只订阅 gateway 账号的净值修正项（见 AccountAdjContext）。/ Subscribe to per-login equity adj.
+export function useAccountAdj() {
+  return useContext(AccountAdjContext)
 }

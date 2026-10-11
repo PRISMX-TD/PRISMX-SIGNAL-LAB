@@ -15,7 +15,7 @@
 // comment at `floating` below.
 import { useTranslation } from 'react-i18next'
 import type { MT5Account } from '../../api/types'
-import { useAccountFunds } from '../../store/live'
+import { useAccountAdj, useAccountFunds } from '../../store/live'
 
 interface Props {
   account: MT5Account | null
@@ -30,6 +30,7 @@ function money(v: number | null | undefined): string {
 export default function AccountSummary({ account, className = '' }: Props) {
   const { t } = useTranslation()
   const funds = useAccountFunds()
+  const adjMap = useAccountAdj()
   const ccy = account?.accountCurrency || 'USD'
   const balance = account?.balance ?? null
 
@@ -57,8 +58,11 @@ export default function AccountSummary({ account, className = '' }: Props) {
   // 净值 = 余额 + 浮动盈亏。余额只在出入金/平仓结算时变（低频，库里的值足够新），
   // 实时性由浮盈提供。/ Equity = balance + floating P/L; liveness comes from the
   // floating part, balance moves rarely enough for the stored value to be fresh.
+  // gateway 账号再加上 adj（隔夜利息、信用额度等不在持仓 profit 里的部分，见 liveEquity），
+  // 与订单页同一口径。/ Gateway accounts add adj (swap, credit…), same basis as the Orders page.
+  const adj = account ? adjMap[account.login] ?? 0 : 0
   const equity =
-    balance != null && floating != null ? balance + floating : account?.equity ?? null
+    balance != null && floating != null ? balance + floating + adj : account?.equity ?? null
 
   return (
     <div className={`term-ac ${className}`}>

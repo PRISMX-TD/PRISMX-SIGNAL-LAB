@@ -26,12 +26,13 @@ import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
 import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
-import { useLive, usePositions } from '../store/live'
+import { useLive, usePositions, useAccountFunds, useAccountAdj } from '../store/live'
+import { liveEquity } from '../store/accountsStatus'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
 import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
 import { LOCALE_TAG, currentLang } from '../i18n'
-import type { ClosedTrade, Order, OrderStatus, Position } from '../api/types'
+import type { ClosedTrade, MT5Account, Order, OrderStatus, Position } from '../api/types'
 import Toast from '../components/Toast'
 import ConfirmModal from '../components/ConfirmModal'
 import PositionCard from '../components/PositionCard'
@@ -120,6 +121,15 @@ export default function OrdersPage() {
   // the partner broker name, matching the bind page.
   const { name: brokerName } = usePartnerBroker()
   const positions = usePositions()
+  // 净值 = 余额 + 实时浮盈 + adj（gateway 账号），随持仓每拍一起动，见 liveEquity。
+  // 以前直接显示库里的净值：15 秒才刷一次、页面 60 秒才拉一次，和旁边每 2 秒一推的
+  // 浮盈对不上（用户截图：余额 21,555.92 + 浮盈 756 ≠ 净值 20,283.92）。
+  // Equity = balance + live floating + adj (gateway accounts), moving with every positions
+  // tick. The stored equity refreshed every 15s and was fetched every 60s, so it disagreed
+  // with the 2-second floating P/L beside it.
+  const accountFunds = useAccountFunds()
+  const accountAdj = useAccountAdj()
+  const equityOf = (a: MT5Account) => liveEquity(a, accountFunds[a.login] ?? 0, accountAdj[a.login])
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   const [cancellingId, setCancellingId] = useState<string | null>(null)
@@ -649,6 +659,7 @@ export default function OrdersPage() {
           active={activeAccount}
           onChoose={chooseLogin}
           floating={posSummary.pnl}
+          equityOf={equityOf}
           brokerName={brokerName}
         />
       )}
@@ -717,7 +728,7 @@ export default function OrdersPage() {
               <div className="ord-cell">
                 <div className="ord-k">{t('account.equity')}</div>
                 <div className="ord-v">
-                  {money2(activeAccount.equity)}
+                  {money2(equityOf(activeAccount))}
                   {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
                 </div>
               </div>
@@ -736,7 +747,7 @@ export default function OrdersPage() {
                   not yet refreshed. */}
               <div className="ord-cell">
                 <div className="ord-k">{t('account.marginLevel')}</div>
-                <div className="ord-v">{formatMarginLevel(activeAccount.equity, activeAccount.margin)}</div>
+                <div className="ord-v">{formatMarginLevel(equityOf(activeAccount), activeAccount.margin)}</div>
               </div>
             </div>
           )}

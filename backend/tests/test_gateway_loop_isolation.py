@@ -501,3 +501,32 @@ def test_failing_reads_do_not_hammer_wide_rescans(harness, monkeypatch):
     # 首扫一次 + 限频窗口内最多一次宽重扫 / the first scan plus at most one wide retry
     assert 1 <= calls["n"] <= 2
 
+
+
+def test_account_funds_push_carries_equity_adjustment(harness, monkeypatch):
+    """资金刷新时推 ACCOUNT_FUNDS：adj = 净值 − 余额 − 同一拍持仓浮盈之和。前端用
+    「余额 + 实时浮盈 + adj」算净值，这样净值随持仓每拍一起动、与余额和浮盈对得上
+    （用户截图：余额 21,555.92 + 浮盈 756 ≠ 当时显示的净值 20,283.92）。
+    ACCOUNT_FUNDS carries adj = equity − balance − that tick's floating P/L, so the
+    frontend can render equity as balance + live floating + adj."""
+    from app.services.gateway_client import AccountRsp
+
+    sent: list[tuple[str, dict]] = []
+
+    async def capture(user_id, message):
+        sent.append((user_id, message))
+
+    async def account(login, timeout=None):
+        # 持仓浮盈 1.0（见 _position），另有 -0.5 的隔夜利息只体现在净值里。
+        # Position profit is 1.0 (see _position); a -0.5 swap shows only in equity.
+        return AccountRsp(ok=True, login=int(login), name="n", group="demo-g", leverage=100,
+                          balance=1000.0, equity=1000.5, margin=40.0, margin_free=960.5)
+
+    monkeypatch.setattr(manager, "push_to_client", capture)
+    monkeypatch.setattr(gw, "gw_get_account", account)
+
+    _run_loop_for(0.6)
+
+    funds = [m["data"] for uid, m in sent if uid == FAST_USER and m.get("type") == "ACCOUNT_FUNDS"]
+    assert funds, "资金刷新后应推 ACCOUNT_FUNDS / ACCOUNT_FUNDS expected after a funds refresh"
+    assert funds[0][FAST_LOGIN] == {"balance": 1000.0, "equity": 1000.5, "margin": 40.0, "adj": -0.5}

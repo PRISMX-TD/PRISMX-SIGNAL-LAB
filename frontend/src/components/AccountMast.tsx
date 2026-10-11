@@ -33,6 +33,9 @@ interface Props {
   floating: number
   // gateway 账号不落库券商名，回落到合作券商名。/ Gateway rows carry no company; fall back to the partner broker.
   brokerName: string
+  // 显示用净值（余额 + 实时浮盈 + adj），见 store/accountsStatus 的 liveEquity。
+  // Displayed equity (balance + live floating + adj); see liveEquity.
+  equityOf: (a: MT5Account) => number | null
 }
 
 const money2 = (n: number | null | undefined): string =>
@@ -44,13 +47,14 @@ function Chevron() {
   )
 }
 
-export default function AccountMast({ accounts, active, onChoose, floating, brokerName }: Props) {
+export default function AccountMast({ accounts, active, onChoose, floating, brokerName, equityOf }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const switchable = accounts.length > 1
   const broker = active.company || (active.source === 'gateway' ? brokerName : '')
   const up = floating >= 0
   const ccy = active.accountCurrency
+  const equity = equityOf(active)
 
   return (
     <section className="ord-mast" aria-label={t('orders.acct.section')}>
@@ -83,7 +87,7 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
               <span className={`ord-mast-dot ${a.online ? 'on' : ''}`} />
               <span className="ord-mast-opt-login">{a.login}</span>
               <span className="ord-mast-opt-name">{a.accountName || a.company || a.server || ''}</span>
-              <span className="ord-mast-opt-eq">{money2(a.equity)}</span>
+              <span className="ord-mast-opt-eq">{money2(equityOf(a))}</span>
             </button>
           ))}
         </div>
@@ -92,7 +96,7 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
       <div className="ord-mast-eq">
         <span className="ord-k">{t('account.equity')}</span>
         <b>
-          {money2(active.equity)}
+          {money2(equity)}
           {ccy && <small>{ccy}</small>}
         </b>
       </div>
@@ -115,7 +119,7 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
             Margin level; account-wide, unlike the platform-only floating P&L beside it. */}
         <span>
           <span className="ord-k">{t('account.marginLevel')}</span>
-          <b>{formatMarginLevel(active.equity, active.margin)}</b>
+          <b>{formatMarginLevel(equity, active.margin)}</b>
         </span>
       </div>
 
