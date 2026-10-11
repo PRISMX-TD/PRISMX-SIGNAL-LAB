@@ -128,9 +128,20 @@
       "empty": {
         "title": "公開戦略のデータはまだありません",
         "body": "各戦略の確定結果を蓄積中です。公開後は、どの時間帯・どの銘柄で成績が良いかをここで確認できます。"
+      },
+      "trades": "{{n}} 件",
+      "hours": {
+        "title": "時間帯別の勝率",
+        "best": "勝率が高い時間帯 トップ3",
+        "worst": "勝率が低い時間帯 ワースト3",
+        "hint": "直近 {{days}} 日",
+        "none": "直近 {{days}} 日に結果が出たシグナルはありません"
       }
     },
-    "noneForSymbol": "{{symbol}}の最近のシグナルはありません"
+    "filterStrategy": "戦略",
+    "filterActive": "銘柄 / 戦略で絞り込み中、一部のシグナルのみ表示",
+    "clearFilters": "絞り込みを解除",
+    "noneForFilter": "現在の条件に合う最近のシグナルはありません"
   },
   "order": {
     "volume": "数量（ロット）",
@@ -172,7 +183,12 @@
         "BUY_STOP": "Buy Stop",
         "SELL_STOP": "Sell Stop"
       }
-    }
+    },
+    "direction": "注文方向",
+    "forwardSignal": "順方向",
+    "reverseSignal": "逆方向",
+    "reverseNote": "逆方向：シグナルと反対の売買、利確と損切りを入れ替え済み",
+    "reverseLevelsStale": "価格が動いたため、入れ替えた損切り/利確が無効です。手動で調整してください"
   },
   "account": {
     "title": "アカウント",
@@ -574,7 +590,18 @@
       "cancelPendingTitle": "注文の取消",
       "cancelPendingMsg": "{{symbol}} {{type}} {{volume}} ロット @ {{price}} を取消しますか？この操作は元に戻せません。"
     },
-    "autoOpenAfterPlace": "発注後に開く"
+    "autoOpenAfterPlace": "発注後に開く",
+    "settings": {
+      "title": "チャート設定",
+      "countdown": "ローソク足カウントダウン",
+      "countdownHint": "現在の足が確定するまでの残り時間を価格軸に表示",
+      "candleColors": "ローソク足の色",
+      "greenUp": "緑高・赤安",
+      "redUp": "赤高・緑安",
+      "upColor": "陽線",
+      "downColor": "陰線",
+      "custom": "カスタム"
+    }
   },
   "winrate": {
     "strategyTitle": "シグナル勝率",

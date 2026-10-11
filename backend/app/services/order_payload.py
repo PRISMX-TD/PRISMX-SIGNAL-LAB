@@ -133,6 +133,17 @@ SOURCE_TAG_CHART = "CHART"
 # 个人策略信号（订单 source=STRATEGY）/ personal strategy signals
 SOURCE_TAG_STRATEGY = "STRAT"
 
+# 订单 source 列的取值：反向跟单（带 signal_id，方向与信号相反、止盈止损对调）。
+# 券商备注仍是 PRISMX-SIG——它也是跟着信号下的单，备注标签不细分，免得老桥接不认识。
+# Order.source value for a reverse copy (has a signal_id, opposite side, SL/TP swapped).
+# The broker comment stays PRISMX-SIG: it is still a signal-driven order, and older
+# bridges shouldn't see a tag they don't know.
+ORDER_SOURCE_REVERSE = "REVERSE"
+
+
+def is_reverse_order(o) -> bool:
+    return getattr(o, "source", None) == ORDER_SOURCE_REVERSE
+
 
 def order_source_tag(o) -> str:
     if getattr(o, "signal_id", None):

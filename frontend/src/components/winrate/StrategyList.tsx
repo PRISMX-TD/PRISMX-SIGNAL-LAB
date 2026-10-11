@@ -35,7 +35,7 @@ import type { AdminStrategyWinRate, StrategyWinRate } from '../../api/types'
 import RateChip from './RateChip'
 import Select from '../Select'
 import StrategyDetail from './StrategyDetail'
-import { fmtClock, fmtDurationText, rankHours } from './shared'
+import { bestWorstHours, fmtDurationText, fmtHourRange } from './shared'
 import { resolveCardSymbol, useCardSymbol } from './useWinratePick'
 
 const TOP_PER_CARD = 3
@@ -61,13 +61,12 @@ function ChipGroup({ label, chips, empty }: {
   )
 }
 
-function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardSymbol, onSymbol }: {
+function StrategyCard({ row, index, open, onToggle, data, now, cardSymbol, onSymbol }: {
   row: StrategyWinRate
   index: number
   open: boolean
   onToggle: () => void
   data: AdminStrategyWinRate
-  activeKeys: string[]
   // 透传给钟点格做本地时区换算 / forwarded to the hour cells for zone conversion
   now: Date
   // 全部卡片共用的品种选择（见 useCardSymbol）；这张卡没交易过它就自行退回。
@@ -99,7 +98,10 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
   // red says so.
   const symbol = resolveCardSymbol(row, cardSymbol)
   const symbolRow = symbol ? row.symbols.find((x) => x.symbol === symbol) : undefined
-  const bestHours = rankHours(symbolRow?.total.hourly ?? null, now, { limit: TOP_PER_CARD })
+  // 2026-10-11 起最高 / 最低各三个小时，规则同顶部那一层（shared.bestWorstHours，
+  // 不设样本门槛，带笔数）。/ Since 2026-10-11: three best and three worst hours, same
+  // rule as the top layer (no sample floor, with counts).
+  const { best: bestHours, worst: worstHours } = bestWorstHours(symbolRow?.total.hourly ?? null, now, TOP_PER_CARD)
 
   return (
     <article
@@ -174,11 +176,20 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
           </span>
 
           <ChipGroup
-            label={t('admin.winrate.strategies.bestHours')}
+            label={t('signals.analysis.hours.best')}
             empty={bestHours.length === 0}
             chips={bestHours.map((h) => (
               <RateChip key={h.localMinutes} size="sm" kind={h.kind}
-                        name={fmtClock(h.localMinutes)} rate={h.rate} />
+                        name={fmtHourRange(h.localMinutes)} rate={h.rate} count={h.n} />
+            ))}
+          />
+
+          <ChipGroup
+            label={t('signals.analysis.hours.worst')}
+            empty={worstHours.length === 0}
+            chips={worstHours.map((h) => (
+              <RateChip key={h.localMinutes} size="sm" kind={h.kind}
+                        name={fmtHourRange(h.localMinutes)} rate={h.rate} count={h.n} />
             ))}
           />
 
@@ -214,19 +225,17 @@ function StrategyCard({ row, index, open, onToggle, data, activeKeys, now, cardS
               点开却是黄金，两处自相矛盾。
               The detail's symbol tab defaults to the one picked on the card, or
               the collapsed row would say WTI while the expanded view showed gold. */}
-          {mounted && <StrategyDetail row={row} sessions={data.sessions} activeKeys={activeKeys}
-                                      days={data.days} now={now} defaultSymbol={symbol ?? undefined} />}
+          {mounted && <StrategyDetail row={row} days={data.days} now={now} defaultSymbol={symbol ?? undefined} />}
         </div>
       </div>
     </article>
   )
 }
 
-export default function StrategyList({ data, selected, onSelect, activeKeys, now }: {
+export default function StrategyList({ data, selected, onSelect, now }: {
   data: AdminStrategyWinRate
   selected: string | null
   onSelect: (name: string | null) => void
-  activeKeys: string[]
   now: Date
 }) {
   // 一份品种选择管全部卡片（见 useCardSymbol 的说明）。
@@ -242,7 +251,6 @@ export default function StrategyList({ data, selected, onSelect, activeKeys, now
           open={selected === row.strategy}
           onToggle={() => onSelect(selected === row.strategy ? null : row.strategy)}
           data={data}
-          activeKeys={activeKeys}
           now={now}
           cardSymbol={cardSymbol}
           onSymbol={onSymbol}

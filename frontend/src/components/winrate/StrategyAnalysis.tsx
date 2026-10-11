@@ -1,10 +1,10 @@
 // 「策略分析」：信号面板的第三个页签，FREE 与 PRO 同样可见、不延迟。
 //
 // 两段，自上而下，全部默认展开：
-//   ①「现在该盯什么」——现在是哪个盘、还剩多久、这个盘里胜率最高的几个钟点、
-//      可以留意的品种、下一个盘还有多久开
-//   ②「每个策略」——一张卡给出该策略胜率最高的钟点与品种；点开看
-//      时段 / 做多做空 / 一天里哪个小时
+//   ①「按时段看胜率」——选一路（策略 × 品种），列出一天里胜率最高的三个小时和
+//      最低的三个小时（2026-10-11 起取代原来按亚 / 欧 / 美盘的展示）
+//   ②「每个策略」——一张卡给出该策略最高 / 最低的三个小时；点开看
+//      做多做空 / 一天里每个小时
 //
 // 原来第三段「每个品种」（跨策略合并的品种榜）已按产品要求删掉：品种信息在上面
 // 两段里都已经给过——顶层有「可以留意」，每张策略卡有「胜率最高的品种」——再来
@@ -34,7 +34,6 @@ import { signalApi } from '../../api/client'
 import { SkeletonBlock, SkeletonLine } from '../Skeleton'
 import PageHead from '../PageHead'
 import type { AdminStrategyWinRate } from '../../api/types'
-import { sessionStatus } from './shared'
 import WatchNow from './WatchNow'
 import StrategyList from './StrategyList'
 
@@ -146,10 +145,6 @@ export default function StrategyAnalysis() {
     }
   }, [attempt])
 
-  // 当前进行中的时段，喂给展开层给时段行打「进行中」标记。
-  // Sessions currently open, feeding the detail rows' "open now" tag.
-  const activeKeys =
-    data?.sessions.filter((s) => sessionStatus(s, now).state === 'active').map((s) => s.key) ?? []
   const empty = data !== null && data.overall.total.samples === 0
 
   return (
@@ -182,8 +177,7 @@ export default function StrategyAnalysis() {
               <h3 className="font-display">{t('admin.winrate.strategies.title')}</h3>
               <p>{t('admin.winrate.strategies.caption')}</p>
             </header>
-            <StrategyList data={data} selected={selected} onSelect={setSelected}
-                          activeKeys={activeKeys} now={now} />
+            <StrategyList data={data} selected={selected} onSelect={setSelected} now={now} />
           </section>
         </>
       ) : null}

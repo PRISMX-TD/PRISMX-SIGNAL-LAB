@@ -41,6 +41,18 @@
   opacity: 0.8;
 }
 
+/* 最高 / 最低时段榜的标题小点：绿 = 最高、红 = 最低。/ best (green) / worst (red) marker. */
+.wr-tone {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 8px;
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+.wr-tone.best { background: var(--up); }
+.wr-tone.worst { background: var(--down); }
+
 /* ── 现在该盯什么 / what to watch now ── */
 .wr-now {
   padding: 28px;
@@ -142,6 +154,12 @@
 .rate-chip .r {
   font-size: 17px;
   font-weight: 700;
+}
+/* 笔数：小一号、灰色，排在胜率后面。/ trade count: smaller, grey, after the rate. */
+.rate-chip .c {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
 }
 .rate-chip.sm {
   gap: 6px;

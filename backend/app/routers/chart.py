@@ -13,6 +13,7 @@ ChartsPage's other endpoints.
 import asyncio
 import logging
 import secrets
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -691,4 +692,9 @@ async def chart_latest(
 ):
     if interval not in ALLOWED_INTERVALS:
         raise HTTPException(status_code=400, detail="bad interval")
-    return await chart_store.get_latest_async(symbol.upper(), interval, n)
+    out = await chart_store.get_latest_async(symbol.upper(), interval, n)
+    # now：服务器当前时间（epoch 秒）。图表的 K 线收线倒计时拿它校准本机时钟——手机时间
+    # 不准时，倒计时会和真实收线差出几秒甚至几分钟。新建一份 dict，不改缓存里的对象。
+    # now: server epoch seconds, used by the chart's bar-close countdown to calibrate a
+    # skewed device clock. A fresh dict, so the cached object is never mutated.
+    return {**out, "now": time.time()}

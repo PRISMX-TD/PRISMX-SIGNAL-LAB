@@ -4,11 +4,11 @@ import { type CSSProperties, type FC, memo, useState, useEffect, useMemo } from 
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
-import Select from '../Select'
+import MultiSelect from '../MultiSelect'
 import PageHead from '../PageHead'
 import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, displaySymbol, parseTime } from '../../api/utils'
-import { effectiveStatus, fmtIssueClock, fmtPx, priceDecimals, resultLabel, resultTone, riskFraction, rrTone } from './SignalView'
+import { effectiveStatus, fmtIssueClock, fmtPx, priceDecimals, resultLabel, resultTone, riskFraction, rrTone, type DisplaySignal } from './SignalView'
 import TtlRing from './TtlRing'
 import { useClock, useNewSignalIds } from './hooks'
 import { symbolMeta } from '../../utils/symbolMeta'
@@ -39,9 +39,27 @@ const Countdown: FC<{ expireAt: string | null; label: string }> = memo(({ expire
   return <TtlRing expireAt={expireAt} now={now} label={label} />
 })
 
+// 策略筛选的键：平台信号用策略名（indicator），个人策略信号统一归到「我的策略」一项
+// （它们的 indicator 只是一个显示用的徽标文案，随语言变，不能当键）。
+// Strategy filter key: platform signals use the strategy name (indicator); personal
+// strategy signals all fold into one "my strategies" entry (their indicator is just a
+// localized badge, unusable as a key).
+export const MY_STRATEGY_KEY = '__mine__'
+const NO_STRATEGY_KEY = '__none__'
+export function strategyKeyOf(sig: Signal): string {
+  if ((sig as DisplaySignal).strategySignal) return MY_STRATEGY_KEY
+  return sig.indicator || NO_STRATEGY_KEY
+}
+
+// 云端读回来的多选值：只认字符串数组，其它一律当「全部」。
+// Multi-select values from the cloud: string arrays only, anything else means "all".
+function asStringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
 const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) => {
   const { t } = useTranslation()
-  const { getPref, setPref } = usePrefs()
+  const { getPref, setPref, loaded } = usePrefs()
 
   // 品种筛选（2026-08-26 顶掉原来的方向筛选）。存进 usePrefs 的 signals 命名空间，
   // 和 sortF 同一套：那是**云端按用户落库**的偏好，还会通过 WS 推到该用户的其它
@@ -50,14 +68,37 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
   // same `signals` namespace of usePrefs as sortF: a cloud-persisted, per-user
   // preference that is also pushed to that user's other devices over WS — unlike
   // localStorage, which knows browsers rather than people.
-  const [symbolF, setSymbolF] = useState<string>(
-    () => getPref<string>('signals', 'symbolF', 'ALL')
+  //
+  // 2026-10-11 品种改成多选（signals.symbolsF，空数组 = 全部），并新增策略多选
+  // （signals.strategiesF）。老用户的单选值 symbolF 第一次读时折成一个元素的数组。
+  // 2026-10-11: symbols became multi-select (signals.symbolsF, empty = all) and a
+  // strategy multi-select was added (signals.strategiesF). A legacy single symbolF
+  // is folded into a one-element list on first read.
+  const [symbolsF, setSymbolsF] = useState<string[]>(() => {
+    const saved = getPref<unknown>('signals', 'symbolsF', null)
+    if (saved != null) return asStringList(saved)
+    const legacy = getPref<string>('signals', 'symbolF', 'ALL')
+    return legacy && legacy !== 'ALL' ? [legacy] : []
+  })
+  const [strategiesF, setStrategiesF] = useState<string[]>(
+    () => asStringList(getPref<unknown>('signals', 'strategiesF', []))
   )
   const [sortF, setSortF] = useState<'latest' | 'expiry'>(
     () => (getPref<string>('signals', 'sortF', 'latest')) as 'latest' | 'expiry'
   )
 
-  useEffect(() => { setPref('signals', 'symbolF', symbolF) }, [symbolF, setPref])
+  // 云端偏好晚于首屏到达时（本机没有缓存，比如新设备），用云端那份覆盖初值。
+  // When cloud prefs arrive after first render (no local cache, e.g. a new device), take them.
+  useEffect(() => {
+    if (!loaded) return
+    const cloudSymbols = getPref<unknown>('signals', 'symbolsF', null)
+    if (cloudSymbols != null) setSymbolsF(asStringList(cloudSymbols))
+    const cloudStrategies = getPref<unknown>('signals', 'strategiesF', null)
+    if (cloudStrategies != null) setStrategiesF(asStringList(cloudStrategies))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- only when cloud prefs finish loading
+  }, [loaded])
+  useEffect(() => { setPref('signals', 'symbolsF', symbolsF) }, [symbolsF, setPref])
+  useEffect(() => { setPref('signals', 'strategiesF', strategiesF) }, [strategiesF, setPref])
   useEffect(() => { setPref('signals', 'sortF', sortF) }, [sortF, setPref])
 
   // 手机端：点击循环切换筛选值，无需列出全部选项 / mobile: tap to cycle filter value
@@ -141,22 +182,45 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
       if (!isFree && effectiveStatus(sig, evalNow) === 'EXPIRED') continue
       seen.add(displaySymbol(sig.symbol))
     }
-    const rows = [...seen].sort().map((name) => ({ value: name, label: name }))
-    // 「全部」留着，而且是默认值：这是个**筛选器**，没有全部就没法看回完整列表。
-    // （仪表盘那张卡刻意没有「全部」，因为那里是「选一路来分析」，不是筛选。）
-    // "All" stays, and is the default: this is a *filter*, and without it there is
-    // no way back to the full board. (The dashboard card deliberately omits "all"
-    // because there you are choosing one line to analyse, not filtering a list.)
-    return [{ value: 'ALL', label: t('signals.all') }, ...rows]
-  }, [signals, activeSymbols, isFree, t])
+    // 「全部」不在这份清单里：MultiSelect 自己在菜单顶上放一项「全部」（= 清空选择），
+    // 这是个**筛选器**，没有全部就没法看回完整列表。
+    // "All" isn't in this list: MultiSelect puts its own "All" row (= clear) on top —
+    // this is a *filter*, and without it there is no way back to the full board.
+    return [...seen].sort().map((name) => ({ value: name, label: name }))
+  }, [signals, activeSymbols, isFree])
 
-  // 存下来的品种可能已经不在这批信号里了（那个品种最近没发信号，或者换了套餐后
-  // 可见范围变了）。这时候退回「全部」——否则用户打开就是一张空网格，而下拉里
-  // 根本没有那个选项可以让他看出是怎么回事。
-  // The stored symbol may be absent from this batch (it stopped firing, or the
-  // visible set changed with the plan). Fall back to ALL — otherwise the user
-  // lands on an empty grid with no option in the dropdown explaining why.
-  const effectiveSymbol = symbolOptions.some((o) => o.value === symbolF) ? symbolF : 'ALL'
+  // 存下来的品种可能已经不在清单里了（那个品种下架了）。只留还在的；一个都不剩就是
+  // 「全部」——否则用户打开就是一张空网格，而下拉里根本没有那个选项可以让他看出是怎么回事。
+  // Stored symbols may have left the list (delisted). Keep only those still offered;
+  // none left means "all" — otherwise the user lands on an empty grid with no option
+  // in the dropdown explaining why.
+  const effectiveSymbols = useMemo(
+    () => symbolsF.filter((v) => symbolOptions.some((o) => o.value === v)),
+    [symbolsF, symbolOptions],
+  )
+
+  // 策略选项：这批信号里出现过的策略 + 用户已经选中的（某个策略此刻恰好没信号，它的
+  // 勾也不该凭空消失，否则筛选会悄悄变成「全部」）。个人策略统一成「我的策略」一项。
+  // Strategy options: those present in this batch plus whatever the user already
+  // picked (a strategy that happens to be quiet right now shouldn't silently lose its
+  // tick and turn the filter into "all"). Personal strategies fold into one entry.
+  const strategyOptions = useMemo(() => {
+    const evalNow = Date.now()
+    const keys = new Set<string>(strategiesF)
+    for (const sig of signals) {
+      if (!isFree && effectiveStatus(sig, evalNow) === 'EXPIRED') continue
+      keys.add(strategyKeyOf(sig))
+    }
+    const label = (k: string) =>
+      k === MY_STRATEGY_KEY ? String(t('strategy.myStrategyBadge')) : k === NO_STRATEGY_KEY ? String(t('signals.indicatorNone')) : k
+    const rows = [...keys].map((k) => ({ value: k, label: label(k) }))
+    // 平台策略按名字排，「我的策略」垫底 / platform strategies by name, "mine" last
+    rows.sort((a, b) => (a.value === MY_STRATEGY_KEY ? 1 : b.value === MY_STRATEGY_KEY ? -1 : a.label.localeCompare(b.label)))
+    return rows
+  }, [signals, strategiesF, isFree, t])
+
+  const filterCount = effectiveSymbols.length + strategiesF.length
+  const clearFilters = () => { setSymbolsF([]); setStrategiesF([]) }
 
   const filtered = useMemo(() => {
     // 到期判定只在信号数组变化时求值（新信号 / WS 置为 EXPIRED 都会触发重算），
@@ -176,7 +240,8 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
         // The same yardstick as symbolOptions: options are built from display
         // names, so the comparison must use one too, or picking "BTCUSDT" would
         // miss every row whose raw symbol is BTCUSD.
-        if (effectiveSymbol !== 'ALL' && displaySymbol(s.symbol) !== effectiveSymbol) return false
+        if (effectiveSymbols.length > 0 && !effectiveSymbols.includes(displaySymbol(s.symbol))) return false
+        if (strategiesF.length > 0 && !strategiesF.includes(strategyKeyOf(s))) return false
         return true
       })
     if (sortF === 'expiry') {
@@ -186,7 +251,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     }
     return list
-  }, [signals, effectiveSymbol, sortF, isFree])
+  }, [signals, effectiveSymbols, strategiesF, sortF, isFree])
 
   return (
     <div>
@@ -220,12 +285,25 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
                 深色主题下压不住样式，实测是一片白底黑字。
                 The shared custom Select: a native popup list is rendered by the
                 browser/OS and will not take dark-theme styling — a slab of white. */}
-            <Select
-              className={`sig-symbol-select${effectiveSymbol !== 'ALL' ? ' on' : ''}`}
+            <MultiSelect
+              className={`sig-symbol-select${effectiveSymbols.length > 0 ? ' on' : ''}`}
               ariaLabel={t('signals.filterSymbol')}
-              value={effectiveSymbol}
+              allLabel={t('signals.all')}
+              values={effectiveSymbols}
               options={symbolOptions}
-              onChange={setSymbolF}
+              onChange={setSymbolsF}
+            />
+          </div>
+          <span className="fsep hidden sm:block" />
+          <div className="fgroup">
+            <span className="fk">{t('signals.filterStrategy')}</span>
+            <MultiSelect
+              className={`sig-symbol-select${strategiesF.length > 0 ? ' on' : ''}`}
+              ariaLabel={t('signals.filterStrategy')}
+              allLabel={t('signals.all')}
+              values={strategiesF}
+              options={strategyOptions}
+              onChange={setStrategiesF}
             />
           </div>
           <span className="fsep hidden sm:block" />
@@ -255,6 +333,18 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
         </div>
       )}
 
+      {/* 筛选生效提示：多选之后很容易忘了自己筛过，以为信号变少了。一键清空。
+          Active-filter notice: with multi-select it's easy to forget a filter is on
+          and conclude signals dried up. One tap clears it. */}
+      {filterCount > 0 && (
+        <div className="sig-filter-note">
+          <span>
+            {t('signals.filterActive')}
+          </span>
+          <button type="button" onClick={clearFilters}>{t('signals.clearFilters')}</button>
+        </div>
+      )}
+
       {/* Signal grid */}
       <div className="sig-grid">
         {filtered.length === 0 && (
@@ -264,12 +354,12 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           // say which symbol has nothing right now, or the reader concludes the
           // filter is broken.
           <div className="sig-empty">
-            {effectiveSymbol === 'ALL' ? (
+            {filterCount === 0 ? (
               // 整个面板为空时，节日期间换成节日插画；原句保留在插画下方。
               // An empty panel shows festival art in season; the original line stays below it.
               <FestivalEmpty fallback={t('signals.focus.noExecutable')} />
             ) : (
-              t('signals.noneForSymbol', { symbol: effectiveSymbol })
+              t('signals.noneForFilter')
             )}
           </div>
         )}

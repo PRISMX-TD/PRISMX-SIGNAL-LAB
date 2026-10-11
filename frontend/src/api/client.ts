@@ -7,6 +7,7 @@ import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailCont
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
+import { recordServerTime } from '../utils/serverClock'
 import { API_BASE, API_CANDIDATES, reportApiFailure } from './apiBase'
 import { beginPrefetch, takePrefetched } from './prefetch'
 
@@ -707,11 +708,18 @@ export const chartApi = {
       `/chart/history?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}` +
         (before !== undefined ? `&before=${before}` : '')
     ),
-  latest: (symbol: string, interval: string, n?: number) =>
-    request<{ bars: Candle[]; updatedAt: number | null }>(
+  // 顺手用响应里的 now 校准本机时钟（K 线收线倒计时用，见 utils/serverClock）。
+  // Also calibrates the device clock from the response's `now` (see utils/serverClock).
+  latest: (symbol: string, interval: string, n?: number) => {
+    const sentAt = Date.now()
+    return request<{ bars: Candle[]; updatedAt: number | null; now?: number }>(
       `/chart/latest?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}` +
         (n !== undefined ? `&n=${n}` : '')
-    ),
+    ).then((r) => {
+      recordServerTime(r?.now, sentAt, Date.now())
+      return r
+    })
+  },
 }
 
 // 下单 / Orders
@@ -772,6 +780,9 @@ export const orderApi = {
     // 下单来源：个人策略信号传 'STRATEGY'，后端写进券商备注（PRISMX-STRAT）。
     // Order source: 'STRATEGY' for personal strategy signals (broker comment PRISMX-STRAT).
     source?: 'STRATEGY' | null
+    // 反向跟单：按信号反方向下单、止盈止损对调（后端按信号自己算对调值）。
+    // Reverse copy: opposite side, SL/TP swapped (the backend derives the swap from the signal).
+    reverse?: boolean
   }) =>
     request<Order>('/orders', {
       method: 'POST',

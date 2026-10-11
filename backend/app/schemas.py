@@ -1587,6 +1587,12 @@ class OrderRequest(BaseModel):
     # Order source: STRATEGY for personal strategy signals (comment PRISMX-STRAT);
     # omitted means SIG / CHART decided by signalId.
     source: Literal["STRATEGY"] | None = None
+    # 反向跟单（2026-10-11）：按信号的**反方向**下单，止盈止损对调。只能和 signalId 一起用；
+    # 方向必须正好是信号的反方向，后端按信号自己算出对调后的止损止盈（见 orders.place_order）。
+    # Reverse copy (2026-10-11): trade *against* the signal with SL and TP swapped. Only
+    # valid with a signalId; side must be the signal's opposite, and the backend derives
+    # the swapped SL/TP from the signal itself (see orders.place_order).
+    reverse: bool = False
     # 挂单的触发价（orderType != MARKET 时必填）/ trigger price, required unless MARKET
     price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 

@@ -54,6 +54,8 @@ import PositionMarkerToggle from '../components/charts/PositionMarkerToggle'
 import IntervalSeg from '../components/charts/IntervalSeg'
 import IndicatorLegends from '../components/charts/IndicatorLegends'
 import FullscreenToolbar from '../components/charts/FullscreenToolbar'
+import BarCountdown from '../components/charts/BarCountdown'
+import ChartSettingsMenu from '../components/charts/ChartSettingsMenu'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
 import { useChartEngine } from '../components/charts/useChartEngine'
 import { useChartData, withLiveClose } from '../components/charts/useChartData'
@@ -63,6 +65,7 @@ import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
   priceDigits, resolvePriceDigits, toLwPoint, intervalSeconds, MAX_CLIENT_BARS, type IndicatorFlags,
+  normalizeCandleColors, type CandleColors,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
@@ -267,6 +270,15 @@ export default function ChartsPage() {
   const [afterPlaceOpen, setAfterPlaceOpen] = useState<boolean>(
     () => getPref<boolean>('charts', 'afterPlaceShowPositions', true)
   )
+  // K 线收线倒计时开关（默认开）与 K 线涨跌色，都在工具条齿轮菜单里改，云端同步。
+  // Bar-close countdown switch (on by default) and candle colors, set from the
+  // toolbar's gear menu and cloud synced.
+  const [showCountdown, setShowCountdown] = useState<boolean>(
+    () => getPref<boolean>('charts', 'showCountdown', true)
+  )
+  const [candleColors, setCandleColorsState] = useState<CandleColors>(
+    () => normalizeCandleColors(getPref<unknown>('charts', 'candleColors', null))
+  )
 
   // 手机端抽屉：自选 / 下单票 / 持仓，一次只开一个；tradeSide 记住从交易条的哪一侧
   // 点进来。桌面（lg+）三栏常驻，抽屉不渲染（CSS 里 ≥1024 直接 display:none）。
@@ -396,6 +408,10 @@ export default function ChartsPage() {
     if (cloudSettings) setIndicatorSettingsState(mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, cloudSettings))
     const cloudShowPos = getPref<boolean | null>('charts', 'showPositions', null)
     if (cloudShowPos != null) setShowPositions(cloudShowPos)
+    const cloudCountdown = getPref<boolean | null>('charts', 'showCountdown', null)
+    if (cloudCountdown != null) setShowCountdown(cloudCountdown)
+    const cloudCandle = getPref<unknown>('charts', 'candleColors', null)
+    if (cloudCandle) setCandleColorsState(normalizeCandleColors(cloudCandle))
   // eslint-disable-next-line react-hooks/exhaustive-deps -- only run when cloud prefs finish loading
   }, [loaded])
 
@@ -452,6 +468,24 @@ export default function ChartsPage() {
     setPref('charts', 'afterPlaceShowPositions', afterPlaceOpen)
   }, [afterPlaceOpen, setPref])
 
+  useEffect(() => {
+    setPref('charts', 'showCountdown', showCountdown)
+  }, [showCountdown, setPref])
+
+  useEffect(() => {
+    setPref('charts', 'candleColors', candleColors)
+  }, [candleColors, setPref])
+
+  // 换 K 线颜色时成交量柱一起换：成交量的涨跌色本来是指标设置里单独一项，不同步的话
+  // 换成红涨绿跌后量柱还是绿涨红跌，上下两块颜色意思相反。之后想单独改量柱仍可去指标面板。
+  // Volume bars follow a candle color change: their colors are a separate indicator
+  // setting, and leaving them would show volume in the opposite scheme to the candles.
+  // They can still be tuned separately in the indicator panel afterwards.
+  const changeCandleColors = useCallback((c: CandleColors) => {
+    setCandleColorsState(c)
+    setIndicatorSettingsState((prev) => ({ ...prev, volume: { ...prev.volume, upColor: c.up, downColor: c.down } }))
+  }, [])
+
   const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
@@ -461,7 +495,7 @@ export default function ChartsPage() {
   // Chart instance / indicator series / legend / panes → useChartEngine; history /
   // paging / polling → useChartData. The chart is never hidden any more, so the
   // refit key only changes on entering/leaving fullscreen (a real resize).
-  const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen)
+  const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen, candleColors)
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
   const liveBidRef = useRef<number | null>(null)
   const dataKeyRef = useRef('')
@@ -571,6 +605,12 @@ export default function ChartsPage() {
                   </button>
                 )}
                 <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
+                <ChartSettingsMenu
+                  showCountdown={showCountdown}
+                  onShowCountdown={setShowCountdown}
+                  candleColors={candleColors}
+                  onCandleColors={changeCandleColors}
+                />
                 <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
                   {t('charts.indicators.button')}
                 </button>
@@ -627,6 +667,16 @@ export default function ChartsPage() {
                 refPrice={lastPrice}
                 visible={showPositions}
                 onToast={showToast}
+              />
+            )}
+            {showCountdown && hasData && drawReady && chartRef.current && seriesRef.current && (
+              <BarCountdown
+                chart={chartRef.current}
+                series={seriesRef.current}
+                interval={interval}
+                candlesRef={engine.candlesRef}
+                colors={candleColors}
+                stale={stale}
               />
             )}
             {drawReady && chartRef.current && seriesRef.current && containerRef.current && (

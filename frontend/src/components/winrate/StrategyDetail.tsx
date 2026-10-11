@@ -18,11 +18,11 @@
 // weekday cannot answer; the time-to-resolution block is gone entirely.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { HourOutcome, SessionWindow, StrategyWinRate, SymbolWinRate, WinRateBucket } from '../../api/types'
+import type { HourOutcome, StrategyWinRate, SymbolWinRate, WinRateBucket } from '../../api/types'
 import TugBar from './TugBar'
 import {
-  SESSION_COLORS, SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,
-  fmtClock, fmtPct, isRated, rateFromCounts, verdictOf,
+  SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,
+  bandOf, fmtClock, fmtPct, isRated, verdictOf,
 } from './shared'
 
 function Block({ title, hint, children, className = '' }: {
@@ -98,14 +98,13 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
   return (
     <div className="wr-hours">
       {slots.map((s) => {
-        const rate = rateFromCounts(s.tp, s.sl)
-        // 格子窄，百分比取整（下面的 fmtPct(..., 0)）——判定也要按整数切，
-        // 否则 50.5% 会显示成「51%」却上橙色，和读者看到的数字对不上。
-        // The cells are narrow so the percentage is rounded to an integer below;
-        // the verdict must round the same way, or 50.5% shows as "51%" in amber.
-        const kind = verdictOf(rate, 0)
+        // 不设样本门槛（2026-10-11，与「最高 / 最低时段」同口径）：有一笔已判定就给
+        // 百分比——否则榜单里写着 100% 的那个小时，在这里却是「—」。
+        // No sample floor (2026-10-11, same rule as the best/worst lists): one resolved
+        // trade earns a percentage, or a list's 100% hour would read "—" here.
+        const n = s.tp + s.sl
         const label = fmtClock(s.localMinutes)
-        if (!isRated(kind)) {
+        if (n === 0) {
           return (
             <span key={s.localMinutes} className="wr-hour off">
               <span className="h num">{label}</span>
@@ -113,6 +112,12 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
             </span>
           )
         }
+        const winRate = s.tp / n
+        // 格子窄，百分比取整（下面的 fmtPct(..., 0)）——判定也要按整数切，
+        // 否则 50.5% 会显示成「51%」却上橙色，和读者看到的数字对不上。
+        // The cells are narrow so the percentage is rounded to an integer below;
+        // the verdict must round the same way, or 50.5% shows as "51%" in amber.
+        const kind = bandOf(winRate, 0)
         return (
           <span key={s.localMinutes} className="wr-hour"
                 style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}>
@@ -128,7 +133,7 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
                 "can't tell") not at all. The sr-only line below therefore stays: it
                 is the only place a screen reader can get the verdict. */}
             <span className="sr-only">{t(`admin.winrate.verdict.${kind}`)}</span>
-            <span className="p num">{fmtPct(rate.winRate!, 0)}</span>
+            <span className="p num">{fmtPct(winRate, 0)}</span>
           </span>
         )
       })}
@@ -166,13 +171,11 @@ const preferredTab = (row: StrategyWinRate, wanted?: string): string =>
   (wanted && row.symbols.some((s) => s.symbol === wanted) && wanted)
   || (row.symbols.some((s) => s.symbol === DEFAULT_SYMBOL) ? DEFAULT_SYMBOL : 'all')
 
-export default function StrategyDetail({ row, sessions, activeKeys, days, now, defaultSymbol }: {
+export default function StrategyDetail({ row, days, now, defaultSymbol }: {
   row: StrategyWinRate
   // 卡片收起时选中的品种，展开后默认停在它上面。
   // The symbol picked on the collapsed card; the expanded view opens on it.
   defaultSymbol?: string
-  sessions: SessionWindow[]
-  activeKeys: string[]
   days: number
   // 只用来把 UTC 钟点格旋转成浏览者本地钟点。面板持有唯一的每分钟计时器，
   // 组件一律接收 now，不自己 new Date()。
@@ -205,15 +208,10 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now, d
     effectiveTab === 'all' ? row : row.symbols.find((s) => s.symbol === effectiveTab)!
   // 钟点格跟着选中的品种走：后端从 2026-08-26 起在品种层的 total 上也下发 hourly，
   // 所以「这个策略在这个品种上，一天里哪个小时更准」是能直接读出来的。
-  // 品种切片下每格样本会薄很多，不足门槛的格子照常显示「—」——这是 verdictOf
-  // 本来就管的事，不需要在这里另外设限。
   // The hour grid follows the selected symbol: since 2026-08-26 the backend also
   // ships `hourly` on each symbol's total, so "which hour is this strategy best
-  // at on this symbol" reads straight off the payload. A symbol slice thins each
-  // cell considerably and sub-threshold cells render as "—" as always, which is
-  // verdictOf's job and needs no extra gate here.
+  // at on this symbol" reads straight off the payload.
   const hourly = target.total.hourly
-  const sessionKeys = [...sessions.map((s) => s.key), 'outside']
 
   // 品种页签用全站的 .seg-pill（信号板筛选器同一套药丸），不再自带一套半透明紫。
   // Symbol tabs use the site-wide .seg-pill (the board's filter pills), not a
@@ -238,46 +236,19 @@ export default function StrategyDetail({ row, sessions, activeKeys, days, now, d
         )}
       </div>
 
-      {/* 三块平铺在同一个网格里，**DOM 顺序 = 手机端顺序**：时段 → 钟点 → 方向。
-          桌面端靠显式行列定位摆回原来的两列（左：时段 / 方向，右：钟点跨两行）。
-
-          原来是「左列一个 div 装两块 + 右列一块」，那种嵌套下手机端的顺序被写死成
-          时段 → 方向 → 钟点，而 CSS 的 order 只能在同一个 flex/grid 容器的直接子项
-          之间排序，跨不过那层 div。所以要调换手机端的顺序，只能先把嵌套拆平——
-          这也是为什么这里用 col-start / row-start 而不是更简单的 order：拆平之后
-          需要显式定位才能让桌面端保持原样。
-
-          Three blocks flattened into one grid, with **DOM order = the mobile
-          order**: session -> hours -> direction. Desktop restores the original two
-          columns via explicit placement (left: session / direction, right: hours
-          spanning both rows).
-
-          It used to be "a div holding two blocks in the left column, one block in
-          the right", which hard-wired the mobile order to session -> direction ->
-          hours: CSS `order` only sorts direct children of one flex/grid container
-          and cannot reach across that div. Swapping the mobile order therefore
-          required flattening first — which is also why this uses col-start /
-          row-start rather than a simpler `order`: once flat, explicit placement is
-          what keeps the desktop layout unchanged. */}
+      {/* 两块：钟点 → 方向。原来最前面还有一块「按亚 / 欧 / 美盘」，2026-10-11 按产品
+          要求去掉——时段一律按小时看。
+          Two blocks: hours -> direction. A leading Asia / Europe / New York block was
+          removed on 2026-10-11 at the product owner's request; time of day is read
+          by the hour only. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Block className="lg:col-start-1 lg:row-start-1"
-               title={t('admin.winrate.detail.bySession')} hint={t('admin.winrate.detail.bySessionHint')}>
-          {sessionKeys.map((k) => target.sessions[k] && (
-            <RateRow key={k} label={t(`admin.winrate.session.${k}`)} dotColor={SESSION_COLORS[k] ?? SESSION_COLORS.outside}
-                     bucket={target.sessions[k]}
-                     tag={activeKeys.includes(k) ? t('admin.winrate.timeline.openNow') : undefined} />
-          ))}
-        </Block>
-
         {hourly && (
-          <Block className="lg:col-start-2 lg:row-start-1 lg:row-span-2"
-                 title={t('admin.winrate.detail.byHour')} hint={t('admin.winrate.detail.byHourHint', { days })}>
+          <Block title={t('admin.winrate.detail.byHour')} hint={t('admin.winrate.detail.byHourHint', { days })}>
             <HourGrid hourly={hourly} now={now} />
           </Block>
         )}
 
-        <Block className="lg:col-start-1 lg:row-start-2"
-               title={t('admin.winrate.detail.bySide')} hint={t('admin.winrate.detail.bySideHint')}>
+        <Block title={t('admin.winrate.detail.bySide')} hint={t('admin.winrate.detail.bySideHint')}>
           {(['BUY', 'SELL'] as const).map((k) => target.sides[k] && (
             <RateRow key={k} label={t(`admin.winrate.side.${k}`)} dotColor={SIDE_COLORS[k]} bucket={target.sides[k]} />
           ))}

@@ -86,7 +86,7 @@ export default function SignalsPage() {
     if (placed) navigate('/orders', { state: { tab: 'positions' } })
   }
 
-  const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
+  const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string, reverse = false) => {
     // 抛错而不是 return：OrderSheet 的契约是「Promise 正常 resolve = 已提交」，它会
     // 据此渲染「已提交」回执卡。提前 return 也算正常 resolve，于是一单都没发出去、
     // 界面却给了确认——这是假回执。弹窗打开时 activeSignal 不会为空，但契约上的这个
@@ -111,9 +111,9 @@ export default function SignalsPage() {
     // signalId-less manual path so they never pollute the platform win-rate
     // stats; platform signals still go through placeOrder as before.
     if (sig.strategySignal) {
-      await placeStrategyOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+      await placeStrategyOrder(sig.symbol, reverse ? (sig.side === 'BUY' ? 'SELL' : 'BUY') : sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     } else {
-      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId, reverse)
     }
     // 走到这里说明指令已经被后端受理（失败会抛，OrderSheet 靠这个 promise 判成败）。
     // 打上标记，等弹窗自己收起来时带用户去看这一单。

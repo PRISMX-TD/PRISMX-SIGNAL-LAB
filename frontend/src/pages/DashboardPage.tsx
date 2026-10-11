@@ -110,7 +110,7 @@ export default function DashboardPage() {
   }
   const goSignals = useCallback(() => navigate('/app'), [navigate])
 
-  const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string) => {
+  const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string, reverse = false) => {
     if (!activeSignal) return
     const sig = activeSignal
     // 不在这里关弹窗，理由见 SignalsPage.tsx 同名函数的注释。
@@ -122,9 +122,9 @@ export default function DashboardPage() {
     // signalId-less manual path so they never pollute the platform win-rate
     // stats; platform signals still go through placeOrder as before.
     if (sig.strategySignal) {
-      await placeStrategyOrder(sig.symbol, sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+      await placeStrategyOrder(sig.symbol, reverse ? (sig.side === 'BUY' ? 'SELL' : 'BUY') : sig.side, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
     } else {
-      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId)
+      await placeOrder(sig, volume, mt5Login, stopLoss, takeProfit, clientOrderId, reverse)
     }
     // 走到这里说明指令已经被后端受理（失败会抛，OrderSheet 靠这个 promise 判成败）。
     // 打上标记，等弹窗自己收起来时带用户去看这一单。

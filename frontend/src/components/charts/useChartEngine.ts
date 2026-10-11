@@ -33,7 +33,7 @@ import {
   type IndicatorId, type SeriesSpec,
 } from './indicatorCatalog'
 import { markChartDisposed } from './chartLifecycle'
-import { DOWN_COLOR, EMPTY_LEGEND, UP_COLOR, toHistPoints, type IndicatorFlags, type LegendValues } from './chartConfig'
+import { EMPTY_LEGEND, toHistPoints, type CandleColors, type IndicatorFlags, type LegendValues } from './chartConfig'
 
 type LineApi = ISeriesApi<'Line'>
 type HistApi = ISeriesApi<'Histogram'>
@@ -62,6 +62,7 @@ export function useChartEngine(
   indicators: IndicatorFlags,
   indicatorSettings: IndicatorSettings,
   refitKey: unknown,
+  candleColors: CandleColors,
 ) {
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -123,6 +124,9 @@ export function useChartEngine(
   useEffect(() => {
     indicatorSettingsRef.current = indicatorSettings
   }, [indicatorSettings])
+  // K 线涨跌色（用户可改）：建图时用初值，之后由下方 effect applyOptions；MACD 柱也跟它走。
+  // User-configurable candle colors: initial value at build, then applyOptions below; MACD bars follow too.
+  const candleColorsRef = useRef(candleColors)
 
   // 按当前 candlesRef 重算全部有 series 的指标并写回，同时刷新"最新值"图例缓存。
   // 空依赖保持函数引用稳定（只读 ref），从任何 effect / 定时器闭包调用都不会陈旧。
@@ -146,11 +150,11 @@ export function useChartEngine(
         if (h.spec.kind === 'hist') {
           const api = h.api as HistApi
           if (h.spec.histColor === 'candle') {
-            const up = (s[id] as { upColor?: string }).upColor ?? UP_COLOR
-            const down = (s[id] as { downColor?: string }).downColor ?? DOWN_COLOR
+            const up = (s[id] as { upColor?: string }).upColor ?? candleColorsRef.current.up
+            const down = (s[id] as { downColor?: string }).downColor ?? candleColorsRef.current.down
             api.setData(bars.map((b, i) => ({ time: times[i], value: values[i] ?? 0, color: b.c >= b.o ? up : down })))
           } else {
-            api.setData(toHistPoints(times, values, UP_COLOR, DOWN_COLOR))
+            api.setData(toHistPoints(times, values, candleColorsRef.current.up, candleColorsRef.current.down))
           }
         } else {
           (h.api as LineApi).setData(toLinePoints(times, values, h.spec.gaps))
@@ -245,11 +249,12 @@ export function useChartEngine(
       width: el.clientWidth,
       height: el.clientHeight,
     })
+    const cc = candleColorsRef.current
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: UP_COLOR,
-      downColor: DOWN_COLOR,
-      wickUpColor: UP_COLOR,
-      wickDownColor: DOWN_COLOR,
+      upColor: cc.up,
+      downColor: cc.down,
+      wickUpColor: cc.up,
+      wickDownColor: cc.down,
       borderVisible: false,
     })
     chartRef.current = chart
@@ -400,6 +405,21 @@ export function useChartEngine(
     applyPaneHeights()
     recomputeIndicators()
   }, [indicatorSettings, applyPaneHeights, recomputeIndicators])
+
+  // 换 K 线颜色：只改蜡烛选项并重算指标（MACD 柱的正负色跟着换），不重建图表。
+  // Candle color change: applyOptions on the candles and recompute (MACD bars follow); no rebuild.
+  useEffect(() => {
+    const prev = candleColorsRef.current
+    candleColorsRef.current = candleColors
+    if (prev.up === candleColors.up && prev.down === candleColors.down) return
+    seriesRef.current?.applyOptions({
+      upColor: candleColors.up,
+      downColor: candleColors.down,
+      wickUpColor: candleColors.up,
+      wickDownColor: candleColors.down,
+    })
+    recomputeIndicators()
+  }, [candleColors, recomputeIndicators])
 
   // refitKey 变化（进出全屏）时补一次 resize，确保图表填满、不残留默认位图。
   // On refitKey change (fullscreen in/out) resize once so the chart fills.

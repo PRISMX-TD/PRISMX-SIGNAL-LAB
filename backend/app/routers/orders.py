@@ -47,6 +47,7 @@ from app.services.gateway_client import (
     run_on_main_loop,
 )
 from app.services.order_payload import (
+    ORDER_SOURCE_REVERSE,
     is_stale_pending,
     order_update_payload,
     serialize_order as _serialize,
@@ -145,8 +146,15 @@ def place_order(
     # 3) 取信号的入场价与止损止盈（若提供 signalId）/ fetch entry, SL & TP from signal
     stop_loss = 0.0
     take_profit = 0.0
+    # 反向跟单必须挂在一条真实存在的信号上：方向与止盈止损都要从信号推出来，
+    # 没有信号就无从「反向」。/ A reverse copy needs a real signal to reverse.
+    reverse = bool(req.reverse)
+    if reverse and not req.signalId:
+        raise HTTPException(status_code=400, detail="反向下单需要信号 / reverse order requires a signal")
     if req.signalId:
         sig = db.query(Signal).filter(Signal.id == req.signalId).first()
+        if reverse and sig is None:
+            raise HTTPException(status_code=404, detail="信号不存在 / Signal not found")
         if sig:
             # 拒绝按已过期信号下单，防止按过时价格成交。
             # Reject orders on an expired signal to avoid trading on stale prices.
@@ -200,13 +208,27 @@ def place_order(
                     status_code=400,
                     detail="信号与下单品种不一致 / signal and order symbol do not match",
                 )
-            if sig.side and req.side.upper() != sig.side.upper():
+            # 反向跟单：方向必须正好是信号的反方向，止盈止损对调（信号的止盈当止损、
+            # 止损当止盈）。对调由后端按信号自己算，不靠前端传——前端改过的止盈止损
+            # 仍按下面「用户自定义覆盖」那条生效，与正向跟单一致。
+            # Reverse copy: side must be exactly the signal's opposite and SL/TP swap
+            # (the signal's TP becomes the stop, its SL the target), derived here from
+            # the signal rather than trusted from the client. Values the user edited
+            # still override below, exactly as for a forward copy.
+            expected_side = (sig.side or "").upper()
+            if reverse and expected_side:
+                expected_side = "SELL" if expected_side == "BUY" else "BUY"
+            if expected_side and req.side.upper() != expected_side:
                 raise HTTPException(
                     status_code=400,
                     detail="信号与下单方向不一致 / signal and order side do not match",
                 )
-            stop_loss = sig.stop_loss or 0.0
-            take_profit = sig.take_profit or 0.0
+            if reverse:
+                stop_loss = sig.take_profit or 0.0
+                take_profit = sig.stop_loss or 0.0
+            else:
+                stop_loss = sig.stop_loss or 0.0
+                take_profit = sig.take_profit or 0.0
 
     # 用户自定义 SL/TP 覆盖信号默认值 / user's custom SL·TP overrides signal defaults
     if req.stopLoss is not None:
@@ -242,8 +264,9 @@ def place_order(
     order = Order(
         user_id=user.id,
         signal_id=req.signalId,
-        # 带 signalId 的一律算跟单，不接受 STRATEGY 标记 / a signalId always wins
-        source=(req.source if not req.signalId else None),
+        # 带 signalId 的一律算跟单，不接受 STRATEGY 标记；反向跟单记 REVERSE。
+        # A signalId always wins over STRATEGY; a reverse copy is recorded as REVERSE.
+        source=(req.source if not req.signalId else (ORDER_SOURCE_REVERSE if reverse else None)),
         client_order_id=req.clientOrderId,
         action="ORDER" if req.orderType == "MARKET" else "PENDING",
         pending_type=pending_type,

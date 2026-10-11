@@ -124,10 +124,18 @@ export function verdictOf(b: RateLike, digits = PCT_DIGITS): VerdictKind {
   if (b.samples === 0) return 'none'
   if (b.resolved === 0) return (b.pending ?? 0) > 0 ? 'waiting' : 'broken'
   if (b.winRate === null || b.resolved < MIN_SAMPLES) return 'thin'
-  // 先四舍五入到显示精度再比，读者看到几就按几判——颜色永远说得通。
-  // Round to the displayed precision first, so the colour always matches the
-  // number the reader is looking at.
-  const shown = Number((b.winRate * 100).toFixed(digits))
+  return bandOf(b.winRate, digits)
+}
+
+/** 只按胜率分三档，不看笔数。verdictOf 去掉样本门槛之后剩下的那一半；
+ *  「最高 / 最低时段」榜按产品要求不设样本门槛（2026-10-11），用的就是它。
+ *  先四舍五入到显示精度再比，读者看到几就按几判——颜色永远说得通。
+ *  The three bands by rate alone, ignoring sample size — verdictOf minus its
+ *  floor. The best/worst hour lists carry no sample floor (product decision,
+ *  2026-10-11) and use this. Rounds to the displayed precision first so the
+ *  colour always matches the number shown. */
+export function bandOf(winRate: number, digits = PCT_DIGITS): 'strong' | 'mid' | 'weak' {
+  const shown = Number((winRate * 100).toFixed(digits))
   if (shown >= GREEN_FROM_PCT) return 'strong'
   if (shown >= AMBER_FROM_PCT) return 'mid'
   return 'weak'
@@ -197,6 +205,58 @@ export function rankHours(
   })
   candidates.sort((a, b) => b.low - a.low)
   return candidates.slice(0, opts.limit).sort((a, b) => b.rate - a.rate)
+}
+
+// ── 最高 / 最低时段 / best and worst hours ──────────────────────────────
+//
+// 2026-10-11 产品要求：策略分析不再按亚 / 欧 / 美盘展示，改成「胜率最高的三个时段 +
+// 胜率最低的三个时段」，时段 = 一天中的一个小时（浏览者本地钟点）。**不设样本门槛**
+// （产品决定）：只要这个小时有已判定的信号就参与排名，所以每项都带上笔数，让读者
+// 自己看出 1 笔的 100% 和 30 笔的 70% 不是一回事。
+// 排序：胜率高低为主，同胜率时笔数多的在前（更可信的排前面）。最低榜不会和最高榜
+// 重复：可排名的小时不足六个时，先满足最高榜，剩下的才进最低榜。
+//
+// Product request (2026-10-11): the analysis drops the Asia/Europe/New York
+// sessions in favour of "the three best hours + the three worst hours", an hour
+// being one hour of the viewer's local day. **No sample floor** (product call):
+// any hour with a resolved signal is ranked, so every entry carries its trade
+// count and the reader can tell 100% of 1 from 70% of 30. Order: by rate, then by
+// count (the better-supported first). The worst list never repeats the best: with
+// fewer than six ranked hours the best list fills first.
+
+export type HourStat = { localMinutes: number; rate: number; n: number; kind: VerdictKind }
+
+export function bestWorstHours(
+  hourly: HourOutcome[] | null,
+  now: Date,
+  limit = 3,
+): { best: HourStat[]; worst: HourStat[] } {
+  if (!hourly) return { best: [], worst: [] }
+  const viewerOffset = -now.getTimezoneOffset()
+  const all: HourStat[] = []
+  hourly.forEach((h, utcHour) => {
+    const n = h.tp + h.sl
+    if (n <= 0) return
+    const rate = h.tp / n
+    all.push({
+      localMinutes: (((utcHour * 60 + viewerOffset) % 1440) + 1440) % 1440,
+      rate,
+      n,
+      kind: bandOf(rate),
+    })
+  })
+  const best = [...all].sort((a, b) => b.rate - a.rate || b.n - a.n).slice(0, limit)
+  const taken = new Set(best.map((h) => h.localMinutes))
+  const worst = all
+    .filter((h) => !taken.has(h.localMinutes))
+    .sort((a, b) => a.rate - b.rate || b.n - a.n)
+    .slice(0, limit)
+  return { best, worst }
+}
+
+/** 「15:00–16:00」：一个小时时段的起止。/ an hour slot as "15:00–16:00". */
+export function fmtHourRange(localMinutes: number): string {
+  return `${fmtClock(localMinutes)}–${fmtClock(localMinutes + 60)}`
 }
 
 export function rateFromCounts(tp: number, sl: number): RateLike {

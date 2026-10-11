@@ -125,6 +125,7 @@ export function useOrderPlacement() {
       orderType?: OrderEntryType
       price?: number | null
       source?: 'STRATEGY' | null
+      reverse?: boolean
     }) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
@@ -182,17 +183,22 @@ export function useOrderPlacement() {
       mt5Login: string | null,
       stopLoss: number | null,
       takeProfit: number | null,
-      clientOrderId: string
+      clientOrderId: string,
+      // 反向跟单：方向取信号的反方向；止盈止损由弹窗按对调值预填，后端再按信号核一遍方向。
+      // Reverse copy: the opposite side; the modal prefills swapped SL/TP and the backend
+      // re-checks the side against the signal.
+      reverse = false
     ) =>
       submitOrder({
         signalId: signal.id,
         symbol: signal.symbol,
-        side: signal.side,
+        side: reverse ? (signal.side === 'BUY' ? 'SELL' : 'BUY') : signal.side,
         volume,
         mt5Login,
         stopLoss,
         takeProfit,
         clientOrderId,
+        ...(reverse ? { reverse: true } : {}),
       }),
     [submitOrder]
   )

@@ -128,9 +128,20 @@
       "empty": {
         "title": "No published strategy data yet",
         "body": "The platform is still accumulating resolved outcomes per strategy. Once published, you will see here when and on which symbols they do better."
+      },
+      "trades": "{{n}} trades",
+      "hours": {
+        "title": "Win rate by hour",
+        "best": "Top 3 hours",
+        "worst": "Bottom 3 hours",
+        "hint": "last {{days}} days",
+        "none": "No resolved signals in the last {{days}} days"
       }
     },
-    "noneForSymbol": "No recent signals for {{symbol}}"
+    "filterStrategy": "Strategy",
+    "filterActive": "Filtered by symbol / strategy — only some signals are shown",
+    "clearFilters": "Clear filters",
+    "noneForFilter": "No recent signals match the current filters"
   },
   "order": {
     "volume": "Volume (Lots)",
@@ -172,7 +183,12 @@
         "BUY_STOP": "Buy Stop",
         "SELL_STOP": "Sell Stop"
       }
-    }
+    },
+    "direction": "Order direction",
+    "forwardSignal": "Follow signal",
+    "reverseSignal": "Reverse signal",
+    "reverseNote": "Reverse: opposite side to the signal, TP and SL swapped",
+    "reverseLevelsStale": "Price has moved — the swapped SL/TP are no longer valid, please adjust them"
   },
   "account": {
     "title": "Account",
@@ -574,7 +590,18 @@
       "cancelPendingTitle": "Cancel pending order",
       "cancelPendingMsg": "Cancel {{symbol}} {{type}} {{volume}} lots @ {{price}}? This cannot be undone."
     },
-    "autoOpenAfterPlace": "Open after placing"
+    "autoOpenAfterPlace": "Open after placing",
+    "settings": {
+      "title": "Chart settings",
+      "countdown": "Candle countdown",
+      "countdownHint": "Shows time left until the current candle closes",
+      "candleColors": "Candle colors",
+      "greenUp": "Green up · Red down",
+      "redUp": "Red up · Green down",
+      "upColor": "Up",
+      "downColor": "Down",
+      "custom": "Custom"
+    }
   },
   "winrate": {
     "strategyTitle": "Signal Win Rate",

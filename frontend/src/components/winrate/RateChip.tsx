@@ -16,12 +16,15 @@
 import { useTranslation } from 'react-i18next'
 import { VERDICT_BG, VERDICT_COLOR, fmtPct, type VerdictKind } from './shared'
 
-export default function RateChip({ kind, name, rate, size = 'md', aria }: {
+export default function RateChip({ kind, name, rate, size = 'md', aria, count }: {
   kind: VerdictKind
   name: string
   rate: number
   size?: 'sm' | 'md'
   aria?: string
+  // 已判定笔数。最高 / 最低时段榜不设样本门槛，笔数就得摆出来（见 shared.bestWorstHours）。
+  // Resolved count; shown by the best/worst hour lists, which have no sample floor.
+  count?: number
 }) {
   const { t } = useTranslation()
   // 判定词并进无障碍名。芯片上判定**只剩颜色**，而颜色对读屏器根本不存在——
@@ -31,7 +34,8 @@ export default function RateChip({ kind, name, rate, size = 'md', aria }: {
   // by colour alone, and colour does not exist for a screen reader — without this
   // such a reader hears "22:00 67.7%" and never learns which band it is in. Costs
   // nothing visually: aria-label is not rendered.
-  const label = `${aria ?? `${name} ${fmtPct(rate)}`} · ${t(`admin.winrate.verdict.${kind}`)}`
+  const countText = count != null ? String(t('signals.analysis.trades', { n: count })) : ''
+  const label = `${aria ?? `${name} ${fmtPct(rate)}`}${countText ? ` · ${countText}` : ''} · ${t(`admin.winrate.verdict.${kind}`)}`
   return (
     <span
       className={`rate-chip${size === 'sm' ? ' sm' : ''}`}
@@ -40,6 +44,7 @@ export default function RateChip({ kind, name, rate, size = 'md', aria }: {
     >
       <span className="n num">{name}</span>
       <span className="r num">{fmtPct(rate)}</span>
+      {countText && <span className="c num">{countText}</span>}
     </span>
   )
 }

@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal, get_db
 from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
-from app.services.order_payload import is_stale_pending, order_source_tag, order_update_payload, void_stale_order
+from app.services.order_payload import is_reverse_order, is_stale_pending, order_source_tag, order_update_payload, void_stale_order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
@@ -1011,8 +1011,15 @@ def _fetch_commands_db_work(
             sig = signal_by_id.get(o.signal_id)
             if sig:
                 entry = sig.entry or 0.0
-                stop_loss = sig.stop_loss or 0.0
-                take_profit = sig.take_profit or 0.0
+                # 反向跟单的兜底止损止盈是信号的对调值（下单时已写进 o.sl / o.tp，
+                # 这里只在那两列为空时才用得上）。/ A reverse copy falls back to the
+                # signal's swapped levels (normally already stored in o.sl / o.tp).
+                if is_reverse_order(o):
+                    stop_loss = sig.take_profit or 0.0
+                    take_profit = sig.stop_loss or 0.0
+                else:
+                    stop_loss = sig.stop_loss or 0.0
+                    take_profit = sig.take_profit or 0.0
         # 订单自定义 SL/TP 优先于信号默认值 / order's custom SL·TP overrides signal defaults
         if o.sl is not None:
             stop_loss = o.sl

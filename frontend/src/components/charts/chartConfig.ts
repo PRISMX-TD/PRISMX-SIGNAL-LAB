@@ -201,11 +201,92 @@ export const HISTORY_PREFETCH_BARS = 200
 // subtracting an epoch timestamp from it can never be small.
 export const FOLLOW_LIVE_SLACK_BARS = 3
 
-// 涨跌配色（与 SignalView 的 FOCUS_DOT 一致，K 线本身固定用这套，不做客制化）
-// up/down colors (match SignalView's FOCUS_DOT; the candles themselves stay
-// fixed to this palette — only the sub-indicators are user-customizable)
+// 涨跌配色默认值（与 SignalView 的 FOCUS_DOT 一致）。2026-10-11 起 K 线颜色可由用户
+// 改（见 CandleColors），这两个常量只是「绿涨红跌」方案的取值与兜底。
+// Default up/down colors (match SignalView's FOCUS_DOT). Since 2026-10-11 the
+// candle colors are user-configurable (see CandleColors); these are the
+// green-up scheme's values and the fallback.
 export const UP_COLOR = '#2ee07e'
 export const DOWN_COLOR = '#ff4d67'
+
+// ---------- K 线配色 / candle colors ----------
+// 两套预设：绿涨红跌（国际习惯，默认）与红涨绿跌（国内习惯）；也可以自选涨色 / 跌色。
+// 存在云端偏好 charts.candleColors。只管 K 线实体 / 影线与成交量柱——图上持仓的止损线
+// 恒红、止盈线恒绿，那是「止损 / 止盈」的语义色，不跟涨跌方案走。
+// Two presets — green-up (international, default) and red-up (mainland habit) — or
+// a custom pair, stored in the charts.candleColors pref. Only candles and volume
+// bars follow it; the on-chart SL (red) / TP (green) lines carry stop/target
+// semantics and stay fixed.
+export interface CandleColors { up: string; down: string }
+export const CANDLE_SCHEMES = {
+  greenUp: { up: UP_COLOR, down: DOWN_COLOR },
+  redUp: { up: DOWN_COLOR, down: UP_COLOR },
+} as const satisfies Record<string, CandleColors>
+export type CandleScheme = keyof typeof CANDLE_SCHEMES
+export const DEFAULT_CANDLE_COLORS: CandleColors = CANDLE_SCHEMES.greenUp
+// 自选颜色的色板：几档绿、几档红，再加几个中性 / 冷色，给不想要红绿的人。
+// Custom palette: a few greens and reds plus some neutrals for people avoiding red/green.
+export const CANDLE_COLOR_PRESETS = [
+  '#2ee07e', '#22c55e', '#14b8a6',
+  '#ff4d67', '#ef4444', '#f97316',
+  '#38bdf8', '#a78bfa', '#f5c451',
+  '#e5e7eb', '#94a3b8', '#64748b',
+]
+
+const HEX_RE = /^#[0-9a-fA-F]{6}$/
+// 云端读回来的值逐项校验：坏了就退回默认，绝不把一个非颜色字符串交给图表库。
+// Validate what comes back from the cloud; anything malformed falls back to the default.
+export function normalizeCandleColors(raw: unknown): CandleColors {
+  const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<'up' | 'down', unknown>>
+  return {
+    up: typeof r.up === 'string' && HEX_RE.test(r.up) ? r.up : DEFAULT_CANDLE_COLORS.up,
+    down: typeof r.down === 'string' && HEX_RE.test(r.down) ? r.down : DEFAULT_CANDLE_COLORS.down,
+  }
+}
+
+// 当前颜色对应哪套预设；都不是就是自选 / which preset the pair matches, or 'custom'
+export function candleSchemeOf(c: CandleColors): CandleScheme | 'custom' {
+  for (const k of Object.keys(CANDLE_SCHEMES) as CandleScheme[]) {
+    const p = CANDLE_SCHEMES[k]
+    if (p.up.toLowerCase() === c.up.toLowerCase() && p.down.toLowerCase() === c.down.toLowerCase()) return k
+  }
+  return 'custom'
+}
+
+// ---------- K 线收线倒计时 / bar-close countdown ----------
+// 当前这根 K 线还有几秒收线；拿不准时返回 null（调用方就不显示）。
+// · 1/5/15/60 分钟按 epoch 对齐，直接算下一个整点边界，不依赖最后一根有没有到。
+// · 4H / 日线的边界取决于券商服务器时区，用「最后一根的开盘时间 + 周期」推：EA 推上来的
+//   时间已换算成真 UTC（见 ea/PRISMX_MarketFeed.mq5），所以开盘时间就在真实网格上。
+//   最后一根还没被新 bar 取代（刚跨边界、轮询还没拉到）时顺推一根；落后超过一根说明
+//   数据断档或休市，不猜。
+// Seconds until the current bar closes, or null when unsure (caller hides it).
+// · 1/5/15/60 min are epoch-aligned: next boundary straight from the clock.
+// · 4H / daily depend on the broker's timezone: last bar's open + spacing (the EA
+//   converts bar times to true UTC, so opens sit on the real grid). Roll forward one
+//   bar if the boundary just passed; more than one bar behind means a hole or a
+//   closed market — don't guess.
+export function barCloseCountdownSec(code: string, lastBarT: number | null, nowMs: number): number | null {
+  const nowSec = nowMs / 1000
+  const iv = intervalSeconds(code)
+  if (iv != null) return Math.max(0, Math.ceil((Math.floor(nowSec / iv) + 1) * iv - nowSec))
+  const spacing = barSpacingSeconds(code)
+  if (spacing == null || lastBarT == null || lastBarT <= 0) return null
+  let close = lastBarT + spacing
+  if (close <= nowSec) close += spacing
+  if (close <= nowSec || close - nowSec > spacing) return null
+  return Math.max(0, Math.ceil(close - nowSec))
+}
+
+// 08:42 / 1:08:42 / 23:59:59——超过一小时才带小时位。/ hours only when ≥ 1h
+export function fmtCountdown(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  const mm = String(m).padStart(2, '0')
+  const ss = String(s).padStart(2, '0')
+  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
+}
 
 // ---------- 指标开关 / indicator toggles ----------
 // 2026-09-08 起键集合来自 indicatorCatalog（14 个），这里只保留类型与默认值。

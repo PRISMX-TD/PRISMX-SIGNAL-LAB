@@ -128,9 +128,20 @@
       "empty": {
         "title": "还没有公开的策略数据",
         "body": "平台正在积累各策略的实盘判定结果，公开后你会在这里看到什么时候、在哪些品种上表现更好。"
+      },
+      "trades": "{{n}} 单",
+      "hours": {
+        "title": "按时段看胜率",
+        "best": "胜率最高的 3 个时段",
+        "worst": "胜率最低的 3 个时段",
+        "hint": "近 {{days}} 天",
+        "none": "近 {{days}} 天还没有已出结果的信号"
       }
     },
-    "noneForSymbol": "{{symbol}} 近期没有信号"
+    "filterStrategy": "策略",
+    "filterActive": "已按品种 / 策略筛选，只显示部分信号",
+    "clearFilters": "清除筛选",
+    "noneForFilter": "当前筛选下近期没有信号"
   },
   "order": {
     "volume": "手数（Lots）",
@@ -172,7 +183,12 @@
         "BUY_STOP": "买入止损",
         "SELL_STOP": "卖出止损"
       }
-    }
+    },
+    "direction": "下单方向",
+    "forwardSignal": "正向信号",
+    "reverseSignal": "反向信号",
+    "reverseNote": "反向：方向与信号相反，止盈止损已对调",
+    "reverseLevelsStale": "价格已变化，反向后的止损/止盈已失效，请手动调整"
   },
   "account": {
     "title": "账户详情",
@@ -574,7 +590,18 @@
       "cancelPendingTitle": "撤销挂单",
       "cancelPendingMsg": "确认撤销 {{symbol}} {{type}} {{volume}} 手 @ {{price}}？撤销后不可恢复。"
     },
-    "autoOpenAfterPlace": "下单后自动打开"
+    "autoOpenAfterPlace": "下单后自动打开",
+    "settings": {
+      "title": "图表设置",
+      "countdown": "K 线倒计时",
+      "countdownHint": "价格轴上显示当前 K 线还剩多久收线",
+      "candleColors": "K 线颜色",
+      "greenUp": "绿涨红跌",
+      "redUp": "红涨绿跌",
+      "upColor": "涨",
+      "downColor": "跌",
+      "custom": "自选配色"
+    }
   },
   "winrate": {
     "strategyTitle": "信号客观胜率",
