@@ -174,8 +174,9 @@ async def browse_vu(ctx, sess, user, on_chart):
         }
         if on_chart:
             # useChartData: 10 s while WS quotes are fresh (POLL_SLOW_MS), plus one boundary
-            # catch-up 3.3 s after each 1-minute bar opens (BOUNDARY_SETTLE_MS)
-            jobs["chart_latest"] = [10, f"/api/chart/latest?symbol={sym}&interval=1"]
+            # catch-up 3.3 s after each 1-minute bar opens (BOUNDARY_SETTLE_MS).
+            # --chart-poll 3 reproduces the 2026-10-10 production runs (heavier than reality).
+            jobs["chart_latest"] = [ctx.a.chart_poll, f"/api/chart/latest?symbol={sym}&interval=1"]
             jobs["chart_boundary"] = [60, f"/api/chart/latest?symbol={sym}&interval=1"]
         due = {k: now + random.uniform(0, v[0]) for k, v in jobs.items()}
         if on_chart:
@@ -272,17 +273,23 @@ async def worker_async(wid, a, users, target, stopflag, q, symbols):
     canary_task = asyncio.create_task(canary(ctx)) if wid == 0 else None
     spawn_gap = 0.0
     next_spawn = 0.0
+    ramp_target = -1
     while True:
         if stopflag.value:
             break
         want = min(target[wid], len(users))
-        # ramp: spread new VUs evenly over --ramp seconds
+        # ramp: spread new VUs evenly over --ramp seconds. The gap is fixed when the stage's
+        # ramp starts — recomputing it from "remaining" (and capping it, as the 2026-10-10 runs
+        # did) made every ramp a ~20-new-pages-per-second surge regardless of --ramp.
         if len(running) < want:
             now = time.monotonic()
+            if want != ramp_target:
+                ramp_target = want
+                spawn_gap = a.ramp / max(1, want - len(running))
+                next_spawn = now
             if now >= next_spawn:
-                gap = a.ramp / max(1, want - len(running))
                 running.append(asyncio.create_task(vu_main(ctx, users[len(running)], a.scenario)))
-                next_spawn = now + min(gap, 0.5)
+                next_spawn += spawn_gap
         elif len(running) > want:
             t = running.pop()
             t.cancel()
@@ -383,6 +390,7 @@ def main():
     ap.add_argument("--ramp", type=float, default=30)
     ap.add_argument("--procs", type=int, default=6)
     ap.add_argument("--chart-frac", type=float, default=0.5)
+    ap.add_argument("--chart-poll", type=float, default=10.0, help="seconds between /chart/latest polls")
     ap.add_argument("--bridge-frac", type=float, default=0.3)
     ap.add_argument("--max-err", type=float, default=0.01)
     ap.add_argument("--max-p95", type=float, default=2000)
