@@ -180,7 +180,7 @@ function StrategyCard({ row, index, open, onToggle, data, now, cardSymbol, onSym
             empty={bestHours.length === 0}
             chips={bestHours.map((h) => (
               <RateChip key={h.localMinutes} size="sm" kind={h.kind}
-                        name={fmtHourRange(h.localMinutes)} rate={h.rate} count={h.n} />
+                        name={fmtHourRange(h.localMinutes)} rate={h.rate} />
             ))}
           />
 
@@ -189,7 +189,7 @@ function StrategyCard({ row, index, open, onToggle, data, now, cardSymbol, onSym
             empty={worstHours.length === 0}
             chips={worstHours.map((h) => (
               <RateChip key={h.localMinutes} size="sm" kind={h.kind}
-                        name={fmtHourRange(h.localMinutes)} rate={h.rate} count={h.n} />
+                        name={fmtHourRange(h.localMinutes)} rate={h.rate} />
             ))}
           />
 

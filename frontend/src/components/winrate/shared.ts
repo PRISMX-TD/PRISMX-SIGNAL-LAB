@@ -80,8 +80,7 @@ export const isRated = (k: VerdictKind): boolean =>
  *  没说。产品的判断是：先看方向，笔数会随时间自己攒起来。
  *
  *  **代价要清楚**：绿色不等于"统计上站得住"，只等于"到目前为止 51% 以上"。
- *  3 笔里赢 2 笔（67%）和 300 笔里赢 200 笔（67%）是同一个绿，所以榜单上
- *  每项都带单数，让读者自己掂量。
+ *  3 笔里赢 2 笔（67%）和 300 笔里赢 200 笔（67%）是同一个绿。
  *
  *  The page's single verdict rule, in three bands: **green at 51% and above,
  *  amber from 40% to 50%, red below 40%**.
@@ -102,8 +101,7 @@ export const isRated = (k: VerdictKind): boolean =>
  *  always straddles 50%, and the whole grid came out grey, saying nothing.
  *
  *  **The cost is explicit**: green means "above 51% so far", not
- *  "statistically established". 2 of 3 and 200 of 300 are the same green,
- *  which is why the hour lists show each entry's trade count. */
+ *  "statistically established". 2 of 3 and 200 of 300 are the same green. */
 export function verdictOf(b: RateLike, digits = PCT_DIGITS): VerdictKind {
   if (b.samples === 0) return 'none'
   if (b.resolved === 0) return (b.pending ?? 0) > 0 ? 'waiting' : 'broken'
@@ -129,16 +127,16 @@ export function bandOf(winRate: number, digits = PCT_DIGITS): 'strong' | 'mid' |
 //
 // 2026-10-11 产品要求：策略分析不再按亚 / 欧 / 美盘展示，改成「胜率最高的三个时段 +
 // 胜率最低的三个时段」，时段 = 一天中的一个小时（浏览者本地钟点）。**不设样本门槛**
-// （产品决定）：只要这个小时有已判定的信号就参与排名，所以每项都带上笔数，让读者
-// 自己看出 1 笔的 100% 和 30 笔的 70% 不是一回事。
+// （产品决定）：只要这个小时有已判定的信号就参与排名。单数界面上不显示（产品要求，
+// 2026-10-12），`n` 只用来在同胜率时把笔数多的排前面。
 // 排序：胜率高低为主，同胜率时笔数多的在前（更可信的排前面）。最低榜不会和最高榜
 // 重复：可排名的小时不足六个时，先满足最高榜，剩下的才进最低榜。
 //
 // Product request (2026-10-11): the analysis drops the Asia/Europe/New York
 // sessions in favour of "the three best hours + the three worst hours", an hour
 // being one hour of the viewer's local day. **No sample floor** (product call):
-// any hour with a resolved signal is ranked, so every entry carries its trade
-// count and the reader can tell 100% of 1 from 70% of 30. Order: by rate, then by
+// any hour with a resolved signal is ranked. Trade counts are not displayed
+// (product request, 2026-10-12); `n` only breaks ties. Order: by rate, then by
 // count (the better-supported first). The worst list never repeats the best: with
 // fewer than six ranked hours the best list fills first.
 

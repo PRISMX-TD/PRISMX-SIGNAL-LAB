@@ -129,7 +129,6 @@
         "title": "Chưa có dữ liệu chiến lược đã công bố",
         "body": "Nền tảng vẫn đang tích lũy kết quả của từng chiến lược. Sau khi công bố, bạn sẽ thấy tại đây chiến lược hoạt động tốt hơn vào thời điểm nào và trên mã nào."
       },
-      "trades": "{{n}} lệnh",
       "hours": {
         "title": "Tỷ lệ thắng theo khung giờ",
         "best": "3 khung giờ thắng cao nhất",

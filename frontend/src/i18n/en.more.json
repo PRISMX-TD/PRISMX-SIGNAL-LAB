@@ -129,7 +129,6 @@
         "title": "No published strategy data yet",
         "body": "The platform is still accumulating resolved outcomes per strategy. Once published, you will see here when and on which symbols they do better."
       },
-      "trades": "{{n}} trades",
       "hours": {
         "title": "Win rate by hour",
         "best": "Top 3 hours",

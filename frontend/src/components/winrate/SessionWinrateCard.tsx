@@ -2,13 +2,13 @@
 //
 // 回答的是「我关心的这一路，一天里什么时候最该做、什么时候最该躲」：
 //   [响尾蛇 ▾] [XAUUSD ▾]
-//   胜率最高的 3 个时段   [21:00–22:00 67.7% 12 单] …
-//   胜率最低的 3 个时段   [03:00–04:00 25.0% 8 单] …
+//   胜率最高的 3 个时段   [21:00–22:00 67.7%] …
+//   胜率最低的 3 个时段   [03:00–04:00 25.0%] …
 //
 // 2026-10-11 按产品要求与「策略分析」页同步改版：原来以「现在：纽约盘 · 还剩 3h」
 // 为锚、下面一条三大盘色带、再列这个盘里最好的几个钟点；现在去掉盘的概念，
 // 只按小时看，规则与那一页同一个函数（shared.bestWorstHours，不设样本门槛，
-// 所以每项都带单数）。
+// 单数不显示）。
 //
 // 数据走 `/signals/strategy-analysis`（只含已公开策略，FREE 与 PRO 同样可见）。
 // 公开名单为空时——也就是这个功能的默认状态——整张卡显示空态。
@@ -28,7 +28,7 @@
 // out": a strategy and symbol picker, then that pair's three best and three worst
 // hours. Reworked 2026-10-11 alongside the analysis page: the open-session anchor
 // (Asia / Europe / New York) and its band strip are gone; hours are ranked by the
-// same shared.bestWorstHours (no sample floor, so each entry shows its count).
+// same shared.bestWorstHours (no sample floor; trade counts are not shown).
 // Data: `/signals/strategy-analysis` (published strategies only); an empty
 // whitelist — the default — shows the empty state. Only "view detail ›" is a link
 // (a dropdown inside an anchor would navigate as it opens). The dropdowns are the
@@ -43,7 +43,7 @@ import type { AdminStrategyWinRate } from '../../api/types'
 import { VERDICT_COLOR, bestWorstHours, fmtHourRange, fmtPct, type HourStat } from './shared'
 import { useWinratePick } from './useWinratePick'
 
-/** 一个榜：三行「钟点段 · 胜率 · 单数」，数字列对齐。卡片太窄（内宽约 290px），
+/** 一个榜：三行「钟点段 · 胜率」，胜率列右对齐。卡片太窄（内宽约 290px），
  *  策略分析页那种芯片一行只放得下一个，六个芯片会把卡撑高一倍；改成紧凑列表，
  *  颜色规则不变（VERDICT_COLOR，与芯片同一套判定）。
  *  One list: three rows of hour range · rate · count, numbers aligned. The card is
@@ -55,7 +55,6 @@ function HourRow({ tone, label, hours, empty }: {
   hours: HourStat[]
   empty: string
 }) {
-  const { t } = useTranslation()
   return (
     <div className="mt-4">
       <p className="wr-cap">
@@ -68,7 +67,6 @@ function HourRow({ tone, label, hours, empty }: {
             <li key={h.localMinutes}>
               <span className="h tabular-nums">{fmtHourRange(h.localMinutes)}</span>
               <span className="r tabular-nums" style={{ color: VERDICT_COLOR[h.kind] }}>{fmtPct(h.rate)}</span>
-              <span className="c tabular-nums">{t('signals.analysis.trades', { n: h.n })}</span>
             </li>
           ))}
         </ul>

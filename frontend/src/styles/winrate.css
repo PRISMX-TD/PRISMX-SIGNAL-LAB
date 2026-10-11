@@ -100,12 +100,6 @@
   font-size: 17px;
   font-weight: 700;
 }
-/* 笔数：小一号、灰色，排在胜率后面。/ trade count: smaller, grey, after the rate. */
-.rate-chip .c {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-3);
-}
 .rate-chip.sm {
   gap: 6px;
   padding: 5px 10px;

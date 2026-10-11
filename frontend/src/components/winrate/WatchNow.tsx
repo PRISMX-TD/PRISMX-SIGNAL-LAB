@@ -6,7 +6,7 @@
 // 直接回答两件事：一天里什么时候最该做、什么时候最该躲。
 //
 // 钟点数据来自 `symbolRow.total.hourly`（后端按 UTC 分 24 格，只含已判定信号），
-// 排名规则见 shared.bestWorstHours：**不设样本门槛**（产品决定），所以每项都带笔数。
+// 排名规则见 shared.bestWorstHours：**不设样本门槛**（产品决定）；单数不显示（产品要求）。
 //
 // 选择与仪表盘「当前时段胜率」卡**共用同一份偏好**（`useWinratePick`，云端按用户
 // 落库、跨设备）——那张卡的「查看详情 ›」就链到这一页，两处选中值不一致会让人以为
@@ -19,8 +19,8 @@
 // anchored on the open session (Asia / Europe / New York) with a session timeline
 // beside it; sessions are gone, and the layer now answers "when to trade, when to
 // stay out". Hours come from `symbolRow.total.hourly`, ranked by
-// shared.bestWorstHours with **no sample floor** (product call), so each entry
-// shows its trade count. The pick is shared with the dashboard card
+// shared.bestWorstHours with **no sample floor** (product call); trade counts are
+// not shown (product request). The pick is shared with the dashboard card
 // (`useWinratePick`), and there is deliberately no "all" option.
 import { useTranslation } from 'react-i18next'
 import type { AdminStrategyWinRate } from '../../api/types'
@@ -46,7 +46,7 @@ function HourList({ label, hint, hours, empty, tone }: {
       {hours.length > 0 ? (
         <div className="wr-chips">
           {hours.map((h) => (
-            <RateChip key={h.localMinutes} kind={h.kind} name={fmtHourRange(h.localMinutes)} rate={h.rate} count={h.n} />
+            <RateChip key={h.localMinutes} kind={h.kind} name={fmtHourRange(h.localMinutes)} rate={h.rate} />
           ))}
         </div>
       ) : (
