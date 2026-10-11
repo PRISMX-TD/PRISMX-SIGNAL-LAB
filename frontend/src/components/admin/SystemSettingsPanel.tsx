@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import Switch from '../Switch'
+import NumberInput from '../NumberInput'
 import { SkeletonLine } from '../Skeleton'
 import { useToast } from '../../utils/useToast'
 import type { AdminCandleSettings, AdminStrategySettings } from '../../api/types'
@@ -102,13 +103,12 @@ export default function SystemSettingsPanel() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <label className="label">{t('admin.candleM1Retention')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="365"
+              <NumberInput
+                integer
+                min={1}
+                max={365}
                 value={candleSettings.m1RetentionDays}
-                onChange={(e) => setCandleSettings({ m1RetentionDays: Math.min(365, Math.max(1, parseInt(e.target.value) || 1)) })}
+                onChange={(n) => setCandleSettings({ m1RetentionDays: n })}
               />
             </div>
           </div>
@@ -129,13 +129,12 @@ export default function SystemSettingsPanel() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <label className="label">{t('admin.strategyMaxPerUser')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="50"
+              <NumberInput
+                integer
+                min={1}
+                max={50}
                 value={strategySettings.maxStrategiesPerUser}
-                onChange={(e) => setStrategySettings({ ...strategySettings, maxStrategiesPerUser: Math.min(50, Math.max(1, parseInt(e.target.value) || 1)) })}
+                onChange={(n) => setStrategySettings({ ...strategySettings, maxStrategiesPerUser: n })}
               />
             </div>
             <div className="flex items-end pb-2">

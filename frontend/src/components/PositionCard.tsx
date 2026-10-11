@@ -27,6 +27,7 @@ import { useBackToClose } from '../utils/useBackToClose'
 import { createIdempotencyKeys } from '../utils/idempotencyKeys'
 import { useLive } from '../store/live'
 import { symbolMeta } from '../utils/symbolMeta'
+import { sanitizeDecimal } from './order/orderMath'
 
 interface Props {
   position: Position
@@ -287,10 +288,8 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         {t('positions.closeVolume')} (max {fmtLots(p.volume)})
       </label>
       <input
-        type="number"
-        step={step}
-        min={minVol}
-        max={roundLots(p.volume)}
+        type="text"
+        inputMode="decimal"
         className="input font-mono text-sm"
         value={closeVol}
         // 失焦就把手数吸附到该品种的步长上。只校验不吸附的话，用户得自己猜哪个
@@ -330,23 +329,23 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         <div>
           <label className="text-xs text-down">{t('positions.sl')}</label>
           <input
-            type="number"
-            step="0.00001"
+            type="text"
+            inputMode="decimal"
             className={`input font-mono text-sm ${slInvalid ? 'border-down' : ''}`}
             placeholder={t('positions.clearHint')}
             value={sl}
-            onChange={(e) => setSl(e.target.value)}
+            onChange={(e) => setSl(sanitizeDecimal(e.target.value))}
           />
         </div>
         <div>
           <label className="text-xs text-up">{t('positions.tp')}</label>
           <input
-            type="number"
-            step="0.00001"
+            type="text"
+            inputMode="decimal"
             className={`input font-mono text-sm ${tpInvalid ? 'border-down' : ''}`}
             placeholder={t('positions.clearHint')}
             value={tp}
-            onChange={(e) => setTp(e.target.value)}
+            onChange={(e) => setTp(sanitizeDecimal(e.target.value))}
           />
         </div>
       </div>

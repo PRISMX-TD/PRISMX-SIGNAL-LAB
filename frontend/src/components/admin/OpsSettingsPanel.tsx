@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import Switch from '../Switch'
+import NumberInput from '../NumberInput'
 import GuestPreviewSection from './GuestPreviewSection'
 import { SkeletonLine } from '../Skeleton'
 import { useToast } from '../../utils/useToast'
@@ -334,13 +335,10 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
               <label className="label">{t('admin.proMonthlyPrice')}</label>
               <div className="flex items-center gap-1">
                 <span className="text-neutral-400">$</span>
-                <input
-                  type="number"
-                  className="input"
-                  step="0.01"
-                  min="0"
+                <NumberInput
+                  min={0}
                   value={pricing.proMonthlyPrice}
-                  onChange={(e) => setPricing({ ...pricing, proMonthlyPrice: parseFloat(e.target.value) || 0 })}
+                  onChange={(n) => setPricing({ ...pricing, proMonthlyPrice: n })}
                 />
               </div>
               <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
@@ -349,13 +347,10 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
               <label className="label">{t('admin.proYearlyPrice')}</label>
               <div className="flex items-center gap-1">
                 <span className="text-neutral-400">$</span>
-                <input
-                  type="number"
-                  className="input"
-                  step="0.01"
-                  min="0"
+                <NumberInput
+                  min={0}
                   value={pricing.proYearlyPrice}
-                  onChange={(e) => setPricing({ ...pricing, proYearlyPrice: parseFloat(e.target.value) || 0 })}
+                  onChange={(n) => setPricing({ ...pricing, proYearlyPrice: n })}
                 />
               </div>
               <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
@@ -363,13 +358,12 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
             <div>
               <label className="label">{t('admin.salePercent')}</label>
               <div className="flex items-center gap-1">
-                <input
-                  type="number"
-                  className="input"
-                  min="0"
-                  max="100"
+                <NumberInput
+                  integer
+                  min={0}
+                  max={100}
                   value={pricing.salePercent}
-                  onChange={(e) => setPricing({ ...pricing, salePercent: Math.min(100, Math.max(0, parseInt(e.target.value) || 0)) })}
+                  onChange={(n) => setPricing({ ...pricing, salePercent: n })}
                   disabled={!pricing.saleEnabled}
                 />
                 <span className="text-neutral-400">%</span>
@@ -425,13 +419,12 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
               <label className="label">{t('admin.trialDays')}</label>
-              <input
-                type="number"
-                className="input"
-                min="1"
-                max="90"
+              <NumberInput
+                integer
+                min={1}
+                max={90}
                 value={trial.trialDays}
-                onChange={(e) => setTrial({ ...trial, trialDays: Math.min(90, Math.max(1, parseInt(e.target.value) || 1)) })}
+                onChange={(n) => setTrial({ ...trial, trialDays: n })}
                 disabled={!trial.trialEnabled}
               />
             </div>

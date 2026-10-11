@@ -30,6 +30,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import Switch from './Switch'
+import NumberInput from './NumberInput'
 import { SkeletonLine } from './Skeleton'
 import { automationApi } from '../api/client'
 import { localizeApiError } from '../api/utils'
@@ -109,15 +110,16 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
     }
   }
 
-  const num = (value: number, onChange: (n: number) => void, step: number, min: number, max: number) => (
-    <input
-      type="number"
-      step={step}
-      min={min}
-      max={max}
+  // 文本缓冲在 NumberInput 里：以前直接绑数字，手机上删空的那一拍就变成 0，删不掉。
+  // NumberInput keeps the text buffer; binding the number made the field un-clearable.
+  const num = (value: number, onChange: (n: number) => void, min: number, max: number, integer = false) => (
+    <NumberInput
       className="input ord-rule-in"
       value={value}
-      onChange={(e) => onChange(Number(e.target.value))}
+      onChange={onChange}
+      min={min}
+      max={max}
+      integer={integer}
     />
   )
 
@@ -174,7 +176,7 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
                 desc={
                   <>
                     {t('orders.am.be.pre')}
-                    {num(autoCfg.beTriggerR, (n) => setAutoCfg({ ...autoCfg, beTriggerR: n }), 0.1, 0.1, 10)}
+                    {num(autoCfg.beTriggerR, (n) => setAutoCfg({ ...autoCfg, beTriggerR: n }), 0.1, 10)}
                     {t('orders.am.be.post')}
                   </>
                 }
@@ -186,9 +188,9 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
                 desc={
                   <>
                     {t('orders.am.trail.pre')}
-                    {num(autoCfg.trailTriggerR, (n) => setAutoCfg({ ...autoCfg, trailTriggerR: n }), 0.1, 0.1, 10)}
+                    {num(autoCfg.trailTriggerR, (n) => setAutoCfg({ ...autoCfg, trailTriggerR: n }), 0.1, 10)}
                     {t('orders.am.trail.mid')}
-                    {num(autoCfg.trailDistanceR, (n) => setAutoCfg({ ...autoCfg, trailDistanceR: n }), 0.1, 0.1, 10)}
+                    {num(autoCfg.trailDistanceR, (n) => setAutoCfg({ ...autoCfg, trailDistanceR: n }), 0.1, 10)}
                     {t('orders.am.trail.post')}
                   </>
                 }
@@ -200,9 +202,9 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
                 desc={
                   <>
                     {t('orders.am.ptp.pre')}
-                    {num(autoCfg.ptpTriggerR, (n) => setAutoCfg({ ...autoCfg, ptpTriggerR: n }), 0.1, 0.1, 10)}
+                    {num(autoCfg.ptpTriggerR, (n) => setAutoCfg({ ...autoCfg, ptpTriggerR: n }), 0.1, 10)}
                     {t('orders.am.ptp.mid')}
-                    {num(Math.round(autoCfg.ptpFraction * 100), (n) => setAutoCfg({ ...autoCfg, ptpFraction: n / 100 }), 5, 10, 90)}
+                    {num(Math.round(autoCfg.ptpFraction * 100), (n) => setAutoCfg({ ...autoCfg, ptpFraction: n / 100 }), 10, 90, true)}
                     {t('orders.am.ptp.post')}
                   </>
                 }
