@@ -2080,6 +2080,61 @@
           "refused": "被拒绝",
           "failed": "失败"
         }
+      },
+      "capacity": {
+        "title": "容量与升级建议",
+        "subtitle": "按近 7 天的在线高峰判断：离上限还有多远、什么时候该升级、具体升级什么。每分钟记一次在线人数。",
+        "level": {
+          "ok": "容量充足",
+          "warn": "接近上限，开始准备升级",
+          "down": "该升级了",
+          "idle": "还没有数据"
+        },
+        "hint": {
+          "ok": "离上限还远，不用做任何事。",
+          "warn": "高峰已经接近现在这台服务器的舒适上限。现在不会出问题，但升级要排期、要挑没人在线的时候，建议这一两周内按下面的方法准备好。",
+          "down": "高峰已经到了现在这台服务器的上限附近，用户在高峰期会明显变慢，甚至看到「繁忙请重试」。请尽快按下面的方法升级。"
+        },
+        "metric": {
+          "webUsers": "网页 / App 在线用户",
+          "gatewayUsers": "直连账户在线用户",
+          "bridges": "Bridge 在线"
+        },
+        "meter": "现在 {{now}} · 今天高峰 {{today}} · 7 天高峰 {{week}}",
+        "limits": "黄线 {{warn}} · 红线 {{down}}",
+        "overload": {
+          "none": "近 7 天没有出现过「繁忙请重试」。",
+          "some": "近 7 天给用户回过 {{n}} 次「繁忙请重试」，最近一次在 {{ago}}。"
+        },
+        "reason": {
+          "webUsers": "网页 / App 在线用户高峰 {{value}} 人，已到 {{limit}}",
+          "gatewayUsers": "直连账户在线用户高峰 {{value}} 人，已到 {{limit}}",
+          "bridges": "Bridge 在线高峰 {{value}} 个，已到 {{limit}}",
+          "overload": "近 7 天出现过 {{value}} 次「繁忙请重试」"
+        },
+        "adviceTitle": "该升级什么",
+        "advice": {
+          "server": {
+            "title": "升级新加坡后端服务器（最主要的一项）",
+            "steps": "① 腾讯云控制台把这台 2 核 4G 升到 4 核 8G（升配要重启几分钟，挑没人在线的时候）；② 把 /etc/systemd/system/prismx.service.d/workers.conf 里的 --workers 2 改成 --workers 4；③ 在后端 .env 里加 DB_POOL_SIZE=5 和 DB_MAX_OVERFLOW=2（4 个 worker × 7 条 = 28 条连接，不超过 Supabase 连接池的 30 条，不改的话会连不上数据库）；④ 重启后端，到这一页看各项恢复绿灯。新加坡 nginx 已经是 worker_connections 8192，不用再改。"
+          },
+          "database": {
+            "title": "升级 Supabase 数据库规格",
+            "steps": "Supabase 控制台 → Project Settings → Compute and Disk，把计算规格从 Micro 升一档（会增加月费，数据库会重启一两分钟）。在线人数上来后，数据库常常和服务器一起吃紧；如果「数据库」那盏灯的响应时间经常超过几十毫秒，就该升了。"
+          },
+          "gatewayChannels": {
+            "title": "加网关查询通道（Windows VPS 上的网关）",
+            "steps": "在 Windows VPS 的 C:\\Users\\Administrator\\Desktop\\gateway\\gateway.ini 里，把 [mt5] read_channels 从 2 改成 4（最多 8），双击 Restart-Gateway.cmd 重启网关。改完看网关 /health 的 readBusyCount 是否不再持续上涨。这一项不花钱；换券商前要先确认券商允许同一个管理账号多处登录。"
+          },
+          "bridgeClient": {
+            "title": "或者：发一版更省资源的 Bridge（不花钱）",
+            "steps": "让开发发布「网页没开时放慢报到」的 Bridge 新版本，用户更新后每个 Bridge 的报到量约降到三分之一，服务器能多带一倍以上的 Bridge。缺点是要等大部分用户更新完才见效。"
+          },
+          "surge": {
+            "title": "先看是不是一大群人同时点进来",
+            "steps": "「繁忙请重试」多半出现在发信号或推送之后、很多人同一刻打开页面的时候，几秒到一两分钟就会自己恢复。偶尔一次可以不管；如果一周内反复出现，或者平时也出现，就按上面的方法升级服务器。"
+          }
+        }
       }
     },
     "winrate": {

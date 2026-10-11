@@ -32,7 +32,7 @@ from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 from app.services.background import BackgroundLoops
-from app.services import loop_health
+from app.services import capacity, loop_health
 from app.services.connection_manager import manager
 
 
@@ -240,6 +240,8 @@ async def lifespan(app: FastAPI):
         "candle_retention": candle_retention_sweep_loop,
         # Gateway 账号持仓轮询 / gateway position polling
         "gateway_positions": gateway_positions_loop,
+        # 在线峰值采样（每分钟），给系统状态页的「容量」灯 / per-minute peak sampling for the capacity light
+        "capacity": capacity.capacity_loop,
     })
     loops.launch()
     app.state.background_loops = loops
@@ -306,6 +308,8 @@ async def _db_pool_timeout_handler(request: Request, exc: SQLAlchemyPoolTimeoutE
     The pool ran out of connections within pool_timeout: answer 503 + Retry-After
     instead of a blanket 500, so clients back off rather than treating it as a bug."""
     logger.warning("DB 连接池等待超时 / DB pool timeout on %s %s: %s", request.method, request.url.path, exc)
+    # 系统状态页「容量」灯：用户又看到了一次「繁忙请重试」/ the capacity light counts every "busy, retry"
+    capacity.note_overload("db_pool")
     return JSONResponse(
         status_code=503,
         content={"detail": "服务繁忙，请稍后重试 / Service busy, please retry shortly"},

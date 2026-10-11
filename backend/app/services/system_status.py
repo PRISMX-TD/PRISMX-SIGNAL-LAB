@@ -54,6 +54,7 @@ LOOP_INTERVALS: dict[str, int] = {
     "candle_retention": 86400,
     "gateway_positions": 2,
     "signal_engine": 15,
+    "capacity": 60,
 }
 STALE_DEFAULT = 3600
 LOOP_ERROR_RECENT_SEC = 3600
@@ -268,6 +269,30 @@ def _loops(app: Any, now: float, uptime: int) -> list[dict]:
     return out
 
 
+def _capacity(user_ids: list[str] | None, now: float) -> dict:
+    """「容量」灯：当前在线 + 今天 / 近 7 天峰值 + 过载记录 → 该不该升级、升级什么（services/capacity.py）。
+    The capacity light: now + today's / 7-day peaks + overloads → whether and what to upgrade."""
+    from app.services import capacity
+
+    current: dict = {"users": len(user_ids) if user_ids is not None else None}
+    bridges, gateway_users = capacity.count_online(user_ids or [], SessionLocal)
+    current["bridges"] = bridges
+    current["gatewayUsers"] = gateway_users if user_ids is not None else None
+    history = capacity.read_history(now)
+    verdict = capacity.evaluate(current, history)
+    return {
+        "level": verdict["level"],
+        "current": current,
+        "peakToday": history["peakToday"],
+        "peak7d": history["peak7d"],
+        "overload7d": history["overload7d"],
+        "overloadLastAgoSec": history["overloadLastAgoSec"],
+        "thresholds": capacity.thresholds(),
+        "reasons": verdict["reasons"],
+        "advice": verdict["advice"],
+    }
+
+
 def _roll_up(levels: list[str]) -> str:
     if DOWN in levels:
         return DOWN
@@ -288,15 +313,19 @@ async def collect(app: Any) -> dict:
     if backend_err:
         backend = {"level": OK, "uptimeSec": int(now - _STARTED_AT), "error": backend_err}
 
-    async def _users() -> int | None:
+    async def _user_ids() -> list[str] | None:
         try:
-            return len(await asyncio.wait_for(manager.connected_user_ids_async(), 3.0))
+            return list(await asyncio.wait_for(manager.connected_user_ids_async(), 3.0))
         except Exception:  # noqa: BLE001
             return None
 
-    database, redis, feed, (counts, counts_err), online_users = await asyncio.gather(
-        _database(), _redis(), _feed(now), _bounded(_db_counts), _users(),
+    database, redis, feed, (counts, counts_err), user_ids = await asyncio.gather(
+        _database(), _redis(), _feed(now), _bounded(_db_counts), _user_ids(),
     )
+    online_users = len(user_ids) if user_ids is not None else None
+    cap, cap_err = await _bounded(lambda: _capacity(user_ids, now))
+    if cap_err:
+        cap = {"level": OK, "error": cap_err}
 
     if counts_err:
         signals = {"level": WARN, "error": counts_err}
@@ -333,10 +362,13 @@ async def collect(app: Any) -> dict:
         "signals": signals,
         "loops": loops_light,
         "online": online,
+        "capacity": cap,
     }
     return {
         "generatedAt": now,
-        "overall": _roll_up([c["level"] for c in components.values()]),
+        # 「容量」红灯的意思是「该排期升级了」，不是「现在坏了」：不进总灯，免得管理员当成故障去重启。
+        # A red capacity light means "plan an upgrade", not "broken now": kept out of the overall light.
+        "overall": _roll_up([c["level"] for k, c in components.items() if k != "capacity"]),
         "components": components,
         "loops": loop_rows,
     }

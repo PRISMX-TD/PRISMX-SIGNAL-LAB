@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import type { TFunction } from 'i18next'
 import { ApiHttpError } from '../../api/client'
-import type { OpsStatus } from '../../api/types'
-import { fmtDuration, isUnreachable, loopErrorKind, watchdogComponent, WATCHDOG_STALE_SEC } from './SystemStatusPanel'
+import type { CapacityInfo, OpsStatus } from '../../api/types'
+import { capacityMeter, fmtDuration, isUnreachable, loopErrorKind, watchdogComponent, WATCHDOG_STALE_SEC } from './SystemStatusPanel'
 
 // 只看取了哪个 key、带了什么数：/ echo the key and count back
 const t = ((key: string, opts?: { n?: number }) => (opts?.n == null ? key : `${key}:${opts.n}`)) as unknown as TFunction
@@ -127,5 +127,33 @@ describe('watchdogComponent', () => {
     delete o.backend.lastTickAgoSec
     delete o.gateway.lastTickAgoSec
     expect(watchdogComponent(o, null).level).toBe('ok')
+  })
+})
+
+// 「容量与升级建议」的读数：与后端 capacity.evaluate 同口径——现在与 7 天高峰取大；红线 = 进度条满格。
+// Capacity meter: judged like the backend (max of now and the 7-day peak); the red line is a full bar.
+describe('capacityMeter', () => {
+  const base: CapacityInfo = {
+    level: 'ok',
+    thresholds: { webUsers: [800, 1200], gatewayUsers: [500, 700], bridges: [300, 400] },
+  }
+
+  it('按现在与 7 天高峰里大的那个定级 / grades on max(now, week)', () => {
+    const c = { ...base, current: { users: 300 }, peakToday: { users: 500 }, peak7d: { users: 900 } }
+    const m = capacityMeter(c, 'webUsers')!
+    expect(m).toMatchObject({ now: 300, today: 500, week: 900, worst: 900, level: 'warn' })
+    expect(m.fillPct).toBe(75)
+    expect(m.warnPct).toBe(67)
+  })
+
+  it('到红线就是红灯、进度条不超过 100% / red at the red line, bar capped at 100%', () => {
+    const m = capacityMeter({ ...base, current: { bridges: 520 } }, 'bridges')!
+    expect(m.level).toBe('down')
+    expect(m.fillPct).toBe(100)
+  })
+
+  it('没有数据时是 idle；旧后端没有阈值时不画 / idle without data; nothing without thresholds', () => {
+    expect(capacityMeter(base, 'gatewayUsers')!.level).toBe('idle')
+    expect(capacityMeter({ level: 'ok' }, 'webUsers')).toBeNull()
   })
 })

@@ -209,7 +209,9 @@ def test_collect_whole_page(monkeypatch, tmp_path):
     out = asyncio.run(system_status.collect(app))
 
     c = out["components"]
-    assert set(c) == {"backend", "database", "redis", "gateway", "feed", "signals", "loops", "online"}
+    assert set(c) == {"backend", "database", "redis", "gateway", "feed", "signals", "loops", "online", "capacity"}
+    assert c["capacity"]["current"]["bridges"] == 1
+    assert c["capacity"]["thresholds"]["webUsers"] == [800, 1200]
     assert c["database"]["level"] == "ok"
     assert c["redis"]["level"] == "idle"          # 没配 Redis
     assert c["feed"]["level"] == "ok"

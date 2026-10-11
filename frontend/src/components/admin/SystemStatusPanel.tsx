@@ -20,7 +20,8 @@ import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { adminApi, ApiHttpError, opsApi } from '../../api/client'
 import type {
-  AdminSystemStatus, HealthComponent, HealthLevel, HealthLoopRow, OpsBudget, OpsHistoryItem, OpsStatus,
+  AdminSystemStatus, CapacityInfo, CapacityMetricKey, HealthComponent, HealthLevel, HealthLoopRow, OpsBudget,
+  OpsHistoryItem, OpsStatus,
 } from '../../api/types'
 import { useDialogA11y } from '../../utils/useDialogA11y'
 import ConfirmModal from '../ConfirmModal'
@@ -251,6 +252,133 @@ function ComponentCard({ k, c, children }: { k: ComponentKey; c: HealthComponent
         {hintFor(t, k, c.level)}
       </p>
       {children && <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">{children}</div>}
+    </div>
+  )
+}
+
+// ---------- 容量与升级建议 / capacity & upgrade advice ----------
+
+const CAPACITY_METRICS: { key: CapacityMetricKey; field: 'users' | 'gatewayUsers' | 'bridges' }[] = [
+  { key: 'webUsers', field: 'users' },
+  { key: 'gatewayUsers', field: 'gatewayUsers' },
+  { key: 'bridges', field: 'bridges' },
+]
+
+export interface CapacityMeter {
+  now: number | null
+  today: number | null
+  week: number | null
+  /** 判定用的值：现在与 7 天高峰里大的那个 / the value judged: max of now and the 7-day peak */
+  worst: number | null
+  warn: number
+  down: number
+  level: HealthLevel
+  /** 进度条长度，红线 = 100% / bar length, red line = 100% */
+  fillPct: number
+  /** 黄线在进度条上的位置 / where the yellow line sits */
+  warnPct: number
+}
+
+/** 一项容量指标的读数与定级（与后端 capacity.evaluate 同一口径：现在与 7 天高峰取大）。
+ *  One capacity metric's readings and grade, judged like the backend: max(now, 7-day peak). */
+export function capacityMeter(c: CapacityInfo, key: CapacityMetricKey): CapacityMeter | null {
+  const limits = c.thresholds?.[key]
+  if (!limits) return null
+  const field = CAPACITY_METRICS.find((m) => m.key === key)!.field
+  const pick = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const now = pick(c.current?.[field])
+  const today = pick(c.peakToday?.[field])
+  const week = pick(c.peak7d?.[field])
+  const vals = [now, week].filter((v): v is number => v !== null)
+  const worst = vals.length ? Math.max(...vals) : null
+  const [warn, down] = limits
+  const level: HealthLevel = worst === null ? 'idle' : worst >= down ? 'down' : worst >= warn ? 'warn' : 'ok'
+  return {
+    now, today, week, worst, warn, down, level,
+    fillPct: worst === null ? 0 : Math.min(100, Math.round((worst / down) * 100)),
+    warnPct: Math.round((warn / down) * 100),
+  }
+}
+
+const BAR: Record<HealthLevel, string> = { ok: 'bg-up', warn: 'bg-amber-300', down: 'bg-down', idle: 'bg-white/20' }
+
+function CapacityCard({ c }: { c: CapacityInfo }) {
+  const { t } = useTranslation()
+  const n = (v: number | null) => (v === null ? '—' : v.toLocaleString())
+  const reasons = c.reasons ?? []
+  const advice = (c.advice ?? []).filter((a) => ['server', 'database', 'gatewayChannels', 'bridgeClient', 'surge'].includes(a))
+  return (
+    <div className={`mb-5 rounded-inner border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <Light level={c.level} />
+        <span className="text-sm font-semibold text-white">{t('admin.health.capacity.title')}</span>
+        <span className={`ml-auto text-xs font-medium ${TEXT[c.level]}`}>{t(`admin.health.capacity.level.${c.level}`)}</span>
+      </div>
+      <p className="mt-1 text-[11px] text-neutral-500">{t('admin.health.capacity.subtitle')}</p>
+
+      <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+        {CAPACITY_METRICS.map(({ key }) => {
+          const m = capacityMeter(c, key)
+          if (!m) return null
+          return (
+            <div key={key} className="rounded-lg border border-white/5 bg-black/20 p-3">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-xs font-medium text-neutral-200">{t(`admin.health.capacity.metric.${key}`)}</span>
+                <span className={`text-sm font-semibold tabular-nums ${TEXT[m.level]}`}>{n(m.worst)}</span>
+              </div>
+              <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
+                <div className={`h-full ${BAR[m.level]}`} style={{ width: `${m.fillPct}%` }} />
+                <div className="absolute top-0 h-full w-px bg-amber-300/80" style={{ left: `${m.warnPct}%` }} />
+              </div>
+              <p className="mt-2 text-[11px] tabular-nums text-neutral-400">
+                {t('admin.health.capacity.meter', { now: n(m.now), today: n(m.today), week: n(m.week) })}
+              </p>
+              <p className="text-[11px] tabular-nums text-neutral-500">
+                {t('admin.health.capacity.limits', { warn: m.warn.toLocaleString(), down: m.down.toLocaleString() })}
+              </p>
+            </div>
+          )
+        })}
+      </div>
+
+      <p className="mt-3 text-xs text-neutral-400">
+        {c.overloadLastAgoSec != null && (c.overload7d ?? 0) > 0
+          ? t('admin.health.capacity.overload.some', {
+              n: c.overload7d, ago: t('admin.health.ago', { t: fmtDuration(t, c.overloadLastAgoSec) }),
+            })
+          : t('admin.health.capacity.overload.none')}
+      </p>
+
+      {reasons.length > 0 && (
+        <ul className="mt-2 space-y-0.5 text-xs">
+          {reasons.map((r) => (
+            <li key={r.code} className={TEXT[r.level]}>
+              · {t(`admin.health.capacity.reason.${r.code}`, {
+                value: r.value == null ? '—' : r.value.toLocaleString(),
+                limit: r.limit == null ? '—' : r.limit.toLocaleString(),
+              })}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <p className={`mt-3 text-xs leading-relaxed ${c.level === 'down' ? 'text-neutral-100' : 'text-neutral-400'}`}>
+        {t(`admin.health.capacity.hint.${c.level === 'idle' ? 'ok' : c.level}`)}
+      </p>
+
+      {advice.length > 0 && (
+        <div className="mt-3 border-t border-white/5 pt-3">
+          <p className="text-xs font-semibold text-white">{t('admin.health.capacity.adviceTitle')}</p>
+          <ol className="mt-2 space-y-2">
+            {advice.map((a, i) => (
+              <li key={a} className="text-xs leading-relaxed">
+                <span className="font-medium text-neutral-100">{i + 1}. {t(`admin.health.capacity.advice.${a}.title`)}</span>
+                <span className="mt-0.5 block break-words text-neutral-400">{t(`admin.health.capacity.advice.${a}.steps`)}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
     </div>
   )
 }
@@ -682,6 +810,9 @@ export default function SystemStatusPanel() {
             ))}
             <ComponentCard k="watchdog" c={watchdog} />
           </div>
+          {data.components.capacity && !data.components.capacity.error && (
+            <CapacityCard c={data.components.capacity} />
+          )}
           <LoopTable rows={data.loops} onRestart={askRestartLoop} onRefreshCompetitions={askRefreshCompetitions} busy={actionBusy} />
         </div>
       )}

@@ -85,6 +85,10 @@ class _Lane:
                 await asyncio.wait_for(sem.acquire(), self.timeout)
             except asyncio.TimeoutError:
                 self.rejected += 1
+                # 系统状态页「容量」灯用：只动内存，至多 30 秒在线程里刷一次（services/capacity.py）
+                # For the status page's capacity light: memory only, flushed off-loop (services/capacity.py)
+                from app.services import capacity
+                capacity.note_overload("admission:" + self.name)
                 now = time.monotonic()
                 if now - self._logged_at >= _LOG_EVERY:
                     self._logged_at = now

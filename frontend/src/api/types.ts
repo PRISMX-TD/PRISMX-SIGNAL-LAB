@@ -498,8 +498,38 @@ export interface HealthLoopRow {
 export interface AdminSystemStatus {
   generatedAt: number
   overall: HealthLevel
-  components: Record<'backend' | 'database' | 'redis' | 'gateway' | 'feed' | 'signals' | 'loops' | 'online', HealthComponent>
+  components: Record<'backend' | 'database' | 'redis' | 'gateway' | 'feed' | 'signals' | 'loops' | 'online', HealthComponent> & {
+    // 「容量与升级建议」（2026-10-11，后端 services/capacity.py）；旧后端没有。/ absent on older backends
+    capacity?: CapacityInfo
+  }
   loops: HealthLoopRow[]
+}
+
+// 容量三项：网页 / App 在线用户、直连账户在线用户、在线 Bridge。/ The three capacity metrics.
+export type CapacityMetricKey = 'webUsers' | 'gatewayUsers' | 'bridges'
+export interface CapacityCounts {
+  users?: number | null
+  gatewayUsers?: number | null
+  bridges?: number | null
+  usersAt?: number
+  gatewayUsersAt?: number
+  bridgesAt?: number
+}
+export interface CapacityReason {
+  code: CapacityMetricKey | 'overload'
+  level: HealthLevel
+  value: number | null
+  limit: number | null
+}
+export interface CapacityInfo extends HealthComponent {
+  current?: CapacityCounts
+  peakToday?: CapacityCounts
+  peak7d?: CapacityCounts
+  overload7d?: number
+  overloadLastAgoSec?: number | null
+  thresholds?: Record<CapacityMetricKey, [number, number]>
+  reasons?: CapacityReason[]
+  advice?: string[]
 }
 
 // 看门狗运维接口（ops/watchdog/sg/prismx_ops.py，GET {API_BASE}/ops/status）。

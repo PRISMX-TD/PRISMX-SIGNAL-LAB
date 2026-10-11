@@ -2088,6 +2088,61 @@
           "refused": "Refused",
           "failed": "Failed"
         }
+      },
+      "capacity": {
+        "title": "Capacity & upgrade advice",
+        "subtitle": "Judged on the last 7 days' online peaks: how far from the limit, when to upgrade and what exactly to upgrade. Online counts are sampled every minute.",
+        "level": {
+          "ok": "Plenty of headroom",
+          "warn": "Approaching the limit — start preparing",
+          "down": "Time to upgrade",
+          "idle": "No data yet"
+        },
+        "hint": {
+          "ok": "Far from the limit; nothing to do.",
+          "warn": "Peaks are close to this server's comfortable limit. Nothing breaks yet, but upgrades need scheduling and a quiet window — prepare within the next week or two using the steps below.",
+          "down": "Peaks are at this server's limit: users will feel slowness at peak times and may see \"busy, please retry\". Upgrade soon using the steps below."
+        },
+        "metric": {
+          "webUsers": "Web / App users online",
+          "gatewayUsers": "Direct-account users online",
+          "bridges": "Bridges online"
+        },
+        "meter": "Now {{now}} · today's peak {{today}} · 7-day peak {{week}}",
+        "limits": "Yellow {{warn}} · red {{down}}",
+        "overload": {
+          "none": "No \"busy, please retry\" answers in the last 7 days.",
+          "some": "Users got \"busy, please retry\" {{n}} times in the last 7 days, most recently {{ago}}."
+        },
+        "reason": {
+          "webUsers": "Web / App users online peaked at {{value}}, reaching {{limit}}",
+          "gatewayUsers": "Direct-account users online peaked at {{value}}, reaching {{limit}}",
+          "bridges": "Bridges online peaked at {{value}}, reaching {{limit}}",
+          "overload": "{{value}} \"busy, please retry\" answers in the last 7 days"
+        },
+        "adviceTitle": "What to upgrade",
+        "advice": {
+          "server": {
+            "title": "Upgrade the Singapore backend server (the main one)",
+            "steps": "1) In the Tencent Cloud console, upgrade this 2-core 4 GB box to 4 cores 8 GB (it reboots for a few minutes — pick a quiet time); 2) in /etc/systemd/system/prismx.service.d/workers.conf change --workers 2 to --workers 4; 3) add DB_POOL_SIZE=5 and DB_MAX_OVERFLOW=2 to the backend .env (4 workers × 7 = 28 connections, within Supabase's pool of 30 — without this the database refuses connections); 4) restart the backend and check this page turns green. Singapore nginx is already at worker_connections 8192."
+          },
+          "database": {
+            "title": "Upgrade the Supabase database compute",
+            "steps": "Supabase console → Project Settings → Compute and Disk: move up one size from Micro (adds a monthly cost; the database restarts for a minute or two). As users grow the database often strains together with the server; if the Database light's latency is regularly above a few dozen ms, upgrade it."
+          },
+          "gatewayChannels": {
+            "title": "Add gateway query channels (the gateway on the Windows VPS)",
+            "steps": "On the Windows VPS, in C:\\Users\\Administrator\\Desktop\\gateway\\gateway.ini set [mt5] read_channels from 2 to 4 (max 8) and double-click Restart-Gateway.cmd. Afterwards the gateway /health readBusyCount should stop climbing. Free; before switching brokers confirm the broker allows the same manager login in several places."
+          },
+          "bridgeClient": {
+            "title": "Or: release a lighter Bridge (free)",
+            "steps": "Ask development to ship the Bridge version that reports less often while the web page is closed; once users update, each Bridge sends about a third of the check-ins and the server carries more than twice as many. It only helps after most users update."
+          },
+          "surge": {
+            "title": "First check whether a crowd arrived at once",
+            "steps": "\"Busy, please retry\" mostly happens right after a signal or push, when many people open the page at the same moment; it recovers by itself within seconds to a couple of minutes. A one-off can be ignored; if it repeats within a week or happens at normal times, upgrade the server as above."
+          }
+        }
       }
     },
     "winrate": {
