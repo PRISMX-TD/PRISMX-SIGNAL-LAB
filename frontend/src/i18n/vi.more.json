@@ -1435,11 +1435,10 @@
   },
   "dashboard": {
     "sessionWinrate": {
-      "title": "Tỷ lệ thắng theo phiên",
-      "empty": "Chưa có dữ liệu chiến lược được công bố; sau khi công bố sẽ hiển thị hiệu suất của phiên hiện tại.",
+      "title": "Tỷ lệ thắng theo khung giờ",
+      "empty": "Chưa có dữ liệu chiến lược được công bố; sau khi công bố sẽ hiển thị tỷ lệ thắng theo từng khung giờ.",
       "pickStrategy": "Chọn chiến lược",
-      "pickSymbol": "Chọn mã giao dịch",
-      "noneForPair": "Không đủ dữ liệu cho cặp này trong phiên này suốt 30 ngày qua"
+      "pickSymbol": "Chọn mã giao dịch"
     }
   },
   "gamification": {

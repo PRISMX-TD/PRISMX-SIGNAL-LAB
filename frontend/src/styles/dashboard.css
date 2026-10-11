@@ -406,16 +406,7 @@
   background: linear-gradient(90deg, rgba(255, 255, 255, 0.035), transparent);
 }
 
-/* ── 当前时段胜率 / session win rate ── */
-.dh-session .wr-now-title {
-  margin-top: 16px;
-}
-.dh-session .wr-now-title .name {
-  font-size: 20px;
-}
-.dh-session .wr-now-title .left {
-  font-size: 13px;
-}
+/* ── 时段胜率 / win rate by hour ── */
 .dh-link {
   display: inline-flex;
   align-items: center;
@@ -430,11 +421,38 @@
 .dh-link:hover {
   color: #fff;
 }
-.dh-chips {
+/* 最高 / 最低时段：紧凑三行，钟点段 · 胜率 · 单数三列对齐。
+   Best / worst hours: three compact rows, hour range · rate · count in columns. */
+.dh-hours {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+}
+.dh-hours li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 4.5em;
+  align-items: baseline;
+  gap: 12px;
+  padding: 3px 10px;
+  line-height: 20px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.dh-hours .h {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+.dh-hours .r {
+  font-size: 14px;
+  font-weight: 700;
+  text-align: right;
+}
+.dh-hours .c {
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: right;
 }
 
 /* ── 我的交易表现 / my performance ── */

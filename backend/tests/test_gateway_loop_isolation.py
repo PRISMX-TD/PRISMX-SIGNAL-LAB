@@ -136,6 +136,25 @@ def _run_loop_for(seconds: float) -> None:
     asyncio.run(main())
 
 
+def _run_loop_until(done, timeout: float = 5.0) -> None:
+    """跑循环直到 done() 为真（每 20ms 查一次），最多 timeout 秒。比固定跑 N 秒稳：CI
+    机器忙时第一拍可能晚到，固定时长会偶发不够；条件一满足就停，也不白等。
+    Run the loop until done() holds (checked every 20 ms), at most `timeout` seconds.
+    Steadier than a fixed run: on a busy CI box the first tick can land late."""
+    async def main():
+        task = asyncio.create_task(gw.gateway_positions_loop())
+        deadline = time.monotonic() + timeout
+        while not done() and time.monotonic() < deadline:
+            await asyncio.sleep(0.02)
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    asyncio.run(main())
+
+
 def test_one_stuck_user_does_not_freeze_the_others(harness, monkeypatch):
     """慢用户的持仓读取永远不返回；快用户照样每拍刷新。
     旧实现里整轮都在等慢用户，快用户一秒钟里最多推一次。"""
@@ -524,9 +543,18 @@ def test_account_funds_push_carries_equity_adjustment(harness, monkeypatch):
 
     monkeypatch.setattr(manager, "push_to_client", capture)
     monkeypatch.setattr(gw, "gw_get_account", account)
+    # 资金刷新会在工作线程里写库，与持仓那一路并发：不串行化时共用的那条 SQLite 连接
+    # 偶发 InterfaceError，刷新失败、ACCOUNT_FUNDS 就推不出来（CI 2026-10-11 见过）。
+    # The funds refresh writes on a worker thread alongside the positions path; without
+    # serialization the shared SQLite connection sporadically raises InterfaceError and
+    # no ACCOUNT_FUNDS goes out (seen in CI 2026-10-11).
+    _serialize_sessions(monkeypatch)
 
-    _run_loop_for(0.6)
+    def funds():
+        return [m["data"] for uid, m in sent if uid == FAST_USER and m.get("type") == "ACCOUNT_FUNDS"]
 
-    funds = [m["data"] for uid, m in sent if uid == FAST_USER and m.get("type") == "ACCOUNT_FUNDS"]
+    _run_loop_until(lambda: bool(funds()))
+
+    funds = funds()
     assert funds, "资金刷新后应推 ACCOUNT_FUNDS / ACCOUNT_FUNDS expected after a funds refresh"
     assert funds[0][FAST_LOGIN] == {"balance": 1000.0, "equity": 1000.5, "margin": 40.0, "adj": -0.5}

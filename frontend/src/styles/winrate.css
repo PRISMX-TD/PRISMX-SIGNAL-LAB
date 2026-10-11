@@ -53,42 +53,9 @@
 .wr-tone.best { background: var(--up); }
 .wr-tone.worst { background: var(--down); }
 
-/* ── 现在该盯什么 / what to watch now ── */
+/* ── 按时段看胜率 / win rate by hour ── */
 .wr-now {
   padding: 28px;
-}
-.wr-now-grid {
-  display: grid;
-  gap: 32px;
-}
-.wr-now-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 16px;
-  margin-top: 12px;
-}
-.wr-now-title .name {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  font-size: 26px;
-  line-height: 1.1;
-  font-weight: 700;
-  color: #fff;
-}
-/* 时段身份点：进行中才呼吸，是真实状态。/ Session dot; breathes only while open. */
-.wr-now-title .name i {
-  width: 10px;
-  height: 10px;
-  flex: none;
-  border-radius: 50%;
-}
-.wr-now-title .left {
-  font-size: 15px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  color: var(--up);
 }
 .wr-pickers {
   display: flex;
@@ -112,28 +79,6 @@
   margin-top: 10px;
   font-size: 14px;
   color: var(--text-3);
-}
-.wr-next {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--line);
-  font-size: 14px;
-  color: var(--text-2);
-}
-.wr-next i {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  border-radius: 50%;
-}
-.wr-aside {
-  min-width: 0;
-}
-.wr-aside > .wr-cap {
-  margin-bottom: 14px;
 }
 
 /* 胜率芯片 / rate chip：钟点白、胜率着色，底色是判定的 13% 色。
@@ -170,50 +115,6 @@
 }
 .rate-chip.sm .r {
   font-size: 15px;
-}
-
-/* 时段一览 / session timeline */
-.wr-tl-rows {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.wr-tl-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 14px;
-}
-.wr-tl-row .nm {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-2);
-}
-.wr-tl-row.on .nm {
-  color: #fff;
-  font-weight: 500;
-}
-.wr-tl-row .nm i {
-  width: 8px;
-  height: 8px;
-  flex: none;
-  border-radius: 50%;
-}
-.wr-tl-row .win {
-  font-size: 13px;
-  color: var(--text-3);
-}
-.wr-tl-strip {
-  margin-top: 16px;
-}
-.wr-tl-ticks {
-  position: relative;
-  margin-top: 6px;
-  height: 16px;
-  font-size: 11px;
-  color: var(--text-3);
 }
 
 /* ── 每个策略 / each strategy ── */

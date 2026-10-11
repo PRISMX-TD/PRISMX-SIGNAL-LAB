@@ -2189,37 +2189,16 @@
         "holding": "outcome in {{time}} on average",
         "expand": "Details",
         "collapse": "Collapse",
-        "bestHours": "Best hours",
         "symbolLabel": "Symbol",
         "tooThin": "not enough trades yet"
       },
       "detail": {
         "intro": "How this strategy does under different conditions:",
         "allSymbols": "All symbols",
-        "bySession": "Which session works best?",
-        "bySessionHint": "Filed by the time a signal fired. The European and New York sessions overlap by about 4 hours a day and signals in the overlap count toward both.",
         "bySide": "Long or short?",
         "bySideHint": "Older signals with an unrecognized direction count toward neither side.",
         "byHour": "Which hour of the day works best?",
         "byHourHint": "The last {{days}} days grouped by hour of day, shown in your local time. Days around a DST changeover are off by an hour. Resolved signals only."
-      },
-      "timeline": {
-        "label": "24-hour session timeline",
-        "window": "{{name}} {{start}}–{{end}}",
-        "yourTime": "your time {{start}}–{{end}}",
-        "openNow": "open now",
-        "now": "now"
-      },
-      "watch": {
-        "title": "What to watch now",
-        "nowActive": "Now: {{name}}",
-        "nowLeft": "open · {{time}} left",
-        "nowOutside": "Outside the three sessions right now",
-        "next": "Next: {{name}} opens in {{time}}",
-        "timelineTitle": "Sessions · your time",
-        "hoursGood": "Best hours in this session",
-        "hoursHint": "last {{days}} days, in your local time",
-        "hoursNone": "Not enough data for this pair in this session over the last {{days}} days."
       },
       "aria": {
         "tug": "{{label}}: {{tp}} wins, {{sl}} losses, win rate {{rate}}"
@@ -2232,12 +2211,6 @@
       "side": {
         "BUY": "Long",
         "SELL": "Short"
-      },
-      "session": {
-        "asia": "Asian",
-        "europe": "European",
-        "newyork": "New York",
-        "outside": "Other hours"
       }
     },
     "invite": {
@@ -3378,11 +3351,10 @@
   },
   "dashboard": {
     "sessionWinrate": {
-      "title": "Session win rate",
-      "empty": "No published strategy data yet; this will show the current session's performance once published.",
+      "title": "Win rate by hour",
+      "empty": "No published strategy data yet; win rates by hour will show here once published.",
       "pickStrategy": "Choose a strategy",
-      "pickSymbol": "Choose a symbol",
-      "noneForPair": "Not enough data for this pair in this session over the last 30 days"
+      "pickSymbol": "Choose a symbol"
     }
   },
   "gamification": {

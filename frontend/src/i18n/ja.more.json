@@ -1436,10 +1436,9 @@
   "dashboard": {
     "sessionWinrate": {
       "title": "時間帯別勝率",
-      "empty": "公開された戦略データはまだありません。公開後、現在の時間帯の成績が表示されます。",
+      "empty": "公開された戦略データはまだありません。公開後、時間帯ごとの勝率が表示されます。",
       "pickStrategy": "戦略を選択",
-      "pickSymbol": "銘柄を選択",
-      "noneForPair": "過去30日間、この時間帯のこの銘柄のデータが不足しています"
+      "pickSymbol": "銘柄を選択"
     }
   },
   "gamification": {
