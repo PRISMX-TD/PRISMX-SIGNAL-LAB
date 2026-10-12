@@ -70,6 +70,7 @@ def serialize_order(o: Order) -> OrderOut:
         filledPrice=o.filled_price,
         price=o.price,
         pendingType=o.pending_type,
+        reverse=is_reverse_order(o),
         message=o.message,
         createdAt=o.created_at,
         updatedAt=o.updated_at,

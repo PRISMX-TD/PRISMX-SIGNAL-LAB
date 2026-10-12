@@ -757,7 +757,9 @@
       "performance": "绩效分析",
       "activity": "操作记录"
     },
-    "historyHint": "下单、平仓、改单、撤单的每一笔指令及其执行状态与回执。"
+    "historyHint": "下单、平仓、改单、撤单的每一笔指令及其执行状态与回执。",
+    "reverse": "反向",
+    "reverseHint": "反向信号单：方向与信号相反，止盈止损对调"
   },
   "positions": {
     "lots": "手",

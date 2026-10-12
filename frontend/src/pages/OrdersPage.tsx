@@ -565,6 +565,11 @@ export default function OrdersPage() {
             <span className={`tag ${o.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
               {o.side === 'BUY' ? t('common.buy') : t('common.sell')}
             </span>
+            {/* 反向信号单：与下单弹窗里「反向信号」同一个琥珀色。
+                Reverse-signal order, in the same amber as the order sheet's reverse option. */}
+            {o.reverse && (
+              <span className="tag ord-rev" title={t('orders.reverseHint')}>{t('orders.reverse')}</span>
+            )}
             <span className="ord-vol">{fmtLots(o.volume)}<small>{t('positions.lots')}</small></span>
           </div>
           {msg && <div className={`ord-msg ${bad ? 'bad' : ''}`}>{msg}</div>}

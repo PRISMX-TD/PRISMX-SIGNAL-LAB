@@ -1706,6 +1706,9 @@ class OrderOut(BaseModel):
     # 挂单类型 BUY_LIMIT / SELL_LIMIT / BUY_STOP / SELL_STOP（action=PENDING 才有）
     # The MT5 pending type (action=PENDING only)
     pendingType: str | None = None
+    # 反向信号单（下单时选了「反向信号」：方向与信号相反、止盈止损对调）。订单列表据此打标。
+    # A reverse-signal order (opposite side to the signal, TP/SL swapped); the order list tags it.
+    reverse: bool = False
     message: str | None = None
     createdAt: datetime
     updatedAt: datetime

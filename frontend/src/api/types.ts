@@ -983,6 +983,9 @@ export interface Order {
   // A pending order's trigger price; coexists with filledPrice and usually differs.
   price?: number | null
   pendingType?: PendingType | null
+  // 反向信号单：方向与信号相反、止盈止损对调（下单弹窗里选了「反向信号」）。
+  // Reverse-signal order: opposite side to the signal, TP/SL swapped.
+  reverse?: boolean
   message: string | null
   createdAt: string
   updatedAt: string

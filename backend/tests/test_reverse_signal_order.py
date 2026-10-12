@@ -49,8 +49,10 @@ def _req(**kw) -> OrderRequest:
 def test_reverse_flips_side_and_swaps_levels(db_session):
     user, _ = _setup(db_session, side="BUY")
 
-    _place(request=None, req=_req(reverse=True), user=user, db=db_session)
+    out = _place(request=None, req=_req(reverse=True), user=user, db=db_session)
 
+    # 下单回执与订单列表都带 reverse，前端据此打「反向」标 / the response carries the reverse flag
+    assert out.reverse is True
     o = db_session.query(Order).filter(Order.client_order_id == "c1").one()
     assert o.side == "SELL"
     # 信号的止盈 2420 变成止损、止损 2390 变成止盈 / TP becomes the stop, SL the target
@@ -98,6 +100,7 @@ def test_forward_copy_unchanged(db_session):
         _place(request=None, req=_req(side="SELL"), user=user, db=db_session)
     assert e.value.status_code == 400
 
-    _place(request=None, req=_req(side="BUY", clientOrderId="c3"), user=user, db=db_session)
+    out = _place(request=None, req=_req(side="BUY", clientOrderId="c3"), user=user, db=db_session)
+    assert out.reverse is False
     o = db_session.query(Order).filter(Order.client_order_id == "c3").one()
     assert (o.side, o.sl, o.tp, o.source) == ("BUY", 2390.0, 2420.0, None)

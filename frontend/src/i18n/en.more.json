@@ -757,7 +757,9 @@
       "performance": "Performance",
       "activity": "Activity Log"
     },
-    "historyHint": "Every order, close, modify and cancel command with its execution status and receipt."
+    "historyHint": "Every order, close, modify and cancel command with its execution status and receipt.",
+    "reverse": "Reverse",
+    "reverseHint": "Reverse-signal order: opposite side to the signal, TP and SL swapped"
   },
   "positions": {
     "lots": "lots",

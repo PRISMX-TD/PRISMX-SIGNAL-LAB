@@ -757,7 +757,9 @@
       "performance": "Hiệu suất",
       "activity": "Nhật ký hoạt động"
     },
-    "historyHint": "Mọi lệnh mở, đóng, sửa và hủy cùng trạng thái thực thi và phản hồi."
+    "historyHint": "Mọi lệnh mở, đóng, sửa và hủy cùng trạng thái thực thi và phản hồi.",
+    "reverse": "Ngược",
+    "reverseHint": "Lệnh ngược tín hiệu: ngược chiều tín hiệu, đã hoán đổi TP và SL"
   },
   "positions": {
     "lots": "lot",

@@ -275,6 +275,10 @@
   gap: 10px;
   min-width: 0;
 }
+.ord-rev {
+  background: rgba(245, 165, 36, 0.15);
+  color: #f5c451;
+}
 .ord-name {
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 14px;
