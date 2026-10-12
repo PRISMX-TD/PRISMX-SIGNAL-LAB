@@ -200,44 +200,52 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
     [symbolsF, symbolOptions],
   )
 
-  // 平台全部策略名（近 30 天发过信号的，后端 /signals/strategy-names）。2026-10-12 起
-  // 策略下拉列全部策略，不再只列此刻有信号的——和品种下拉同一个道理（见 symbolOptions）。
-  // 取不到就退回只用这批信号里的。
-  // Every platform strategy name (signals in the last 30 days, /signals/strategy-names).
-  // Since 2026-10-12 the dropdown lists them all, not just those live right now — the
-  // same reasoning as symbolOptions. On failure it falls back to this batch only.
-  const [allStrategyNames, setAllStrategyNames] = useState<string[]>([])
+  // 已公开的平台策略名（管理后台「策略公开」勾选的那份，后端 /signals/strategy-names）。
+  // 2026-10-12 起策略下拉只列这些：管理员没公开的策略不出现，此刻没信号的已公开策略
+  // 照样出现。null = 还没取到 / 取失败，这时退回「这批信号里出现过的」。
+  // Published platform strategy names (the admin's 策略公开 list, /signals/strategy-names).
+  // Since 2026-10-12 the dropdown lists exactly these: unpublished strategies are
+  // left out, quiet published ones stay. null = not loaded / failed, which falls
+  // back to the strategies present in this batch.
+  const [publishedNames, setPublishedNames] = useState<string[] | null>(null)
   useEffect(() => {
     let cancelled = false
     signalApi.strategyNames()
-      .then((res) => { if (!cancelled) setAllStrategyNames(asStringList(res.names)) })
+      .then((res) => { if (!cancelled) setPublishedNames(asStringList(res.names)) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
 
-  // 策略选项：平台全部策略 + 这批信号里出现过的（新策略刚上线、名单缓存还没刷新）
-  // + 用户已经选中的（勾不该凭空消失，否则筛选会悄悄变成「全部」）。个人策略统一成
-  // 「我的策略」一项。
-  // Strategy options: every platform strategy, plus those in this batch (a brand-new
-  // strategy before the name list refreshes), plus whatever the user already picked
-  // (a tick shouldn't silently vanish and turn the filter into "all"). Personal
-  // strategies fold into one entry.
+  // 策略选项：已公开的平台策略；用户自己的策略统一成「我的策略」一项（有这类信号或
+  // 已经选中时才出现）。名单还没到时用这批信号里出现过的 + 已选中的。
+  // Strategy options: the published platform strategies, plus one "my strategies"
+  // entry when such signals exist or it is already picked. Before the list arrives,
+  // the strategies in this batch plus whatever is picked.
   const strategyOptions = useMemo(() => {
     const evalNow = Date.now()
-    const keys = new Set<string>([...allStrategyNames, ...strategiesF])
+    const keys = new Set<string>(publishedNames ?? strategiesF)
     for (const sig of signals) {
       if (!isFree && effectiveStatus(sig, evalNow) === 'EXPIRED') continue
-      keys.add(strategyKeyOf(sig))
+      const k = strategyKeyOf(sig)
+      if (publishedNames == null || k === MY_STRATEGY_KEY) keys.add(k)
     }
+    if (strategiesF.includes(MY_STRATEGY_KEY)) keys.add(MY_STRATEGY_KEY)
     const label = (k: string) =>
       k === MY_STRATEGY_KEY ? String(t('strategy.myStrategyBadge')) : k === NO_STRATEGY_KEY ? String(t('signals.indicatorNone')) : k
     const rows = [...keys].map((k) => ({ value: k, label: label(k) }))
     // 平台策略按名字排，「我的策略」垫底 / platform strategies by name, "mine" last
     rows.sort((a, b) => (a.value === MY_STRATEGY_KEY ? 1 : b.value === MY_STRATEGY_KEY ? -1 : a.label.localeCompare(b.label)))
     return rows
-  }, [signals, strategiesF, allStrategyNames, isFree, t])
+  }, [signals, strategiesF, publishedNames, isFree, t])
 
-  const filterCount = effectiveSymbols.length + strategiesF.length
+  // 存下来的勾选里可能有已经取消公开的策略：只认还在清单里的（同 effectiveSymbols）。
+  // Stored picks may include a strategy since unpublished: keep only listed ones.
+  const effectiveStrategies = useMemo(
+    () => strategiesF.filter((v) => strategyOptions.some((o) => o.value === v)),
+    [strategiesF, strategyOptions],
+  )
+
+  const filterCount = effectiveSymbols.length + effectiveStrategies.length
   const clearFilters = () => { setSymbolsF([]); setStrategiesF([]) }
 
   const filtered = useMemo(() => {
@@ -259,7 +267,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
         // names, so the comparison must use one too, or picking "BTCUSDT" would
         // miss every row whose raw symbol is BTCUSD.
         if (effectiveSymbols.length > 0 && !effectiveSymbols.includes(displaySymbol(s.symbol))) return false
-        if (strategiesF.length > 0 && !strategiesF.includes(strategyKeyOf(s))) return false
+        if (effectiveStrategies.length > 0 && !effectiveStrategies.includes(strategyKeyOf(s))) return false
         return true
       })
     if (sortF === 'expiry') {
@@ -269,7 +277,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
       list.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     }
     return list
-  }, [signals, effectiveSymbols, strategiesF, sortF, isFree])
+  }, [signals, effectiveSymbols, effectiveStrategies, sortF, isFree])
 
   return (
     <div>
@@ -316,10 +324,10 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           <div className="fgroup">
             <span className="fk">{t('signals.filterStrategy')}</span>
             <MultiSelect
-              className={`sig-symbol-select${strategiesF.length > 0 ? ' on' : ''}`}
+              className={`sig-symbol-select${effectiveStrategies.length > 0 ? ' on' : ''}`}
               ariaLabel={t('signals.filterStrategy')}
               allLabel={t('signals.all')}
-              values={strategiesF}
+              values={effectiveStrategies}
               options={strategyOptions}
               onChange={setStrategiesF}
             />
