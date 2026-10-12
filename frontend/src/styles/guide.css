@@ -109,14 +109,36 @@
   color: inherit;
   text-decoration: none;
 }
+/* 配图（2026-10-12 改）：不再裁进 4:3 小框，整张按原比例贴着牌子左边缘铺满，
+   向右用渐变淡进牌面、接上策略名；上下边缘也淡一点，图比牌矮时不留硬边。
+   Row image (2026-10-12): no longer cropped into a 4:3 tile. The whole image keeps
+   its own ratio, sits flush against the card's left edge and fades to the right into
+   the card behind the name; top and bottom edges soften too, so a shorter image
+   leaves no hard edge. */
 .guide-row.has-img {
-  grid-template-columns: 200px minmax(0, 1fr) auto;
+  position: relative;
+  overflow: hidden;
+  grid-template-columns: 280px minmax(0, 1fr) auto;
 }
 .guide-row-img {
-  width: 200px;
-  aspect-ratio: 4 / 3;
-  object-fit: cover;
-  border-radius: var(--r-tile);
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  align-self: center;
+  width: calc(100% + 28px);
+  max-width: none;
+  height: auto;
+  /* 抵掉牌子 28px 内边距：图比文字高时上下左三边都贴边。
+     Cancel the card's 28px padding so a taller image meets top, bottom and left. */
+  margin: -28px 0 -28px -28px;
+  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent),
+    linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image: linear-gradient(to right, #000 55%, transparent),
+    linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
+  mask-composite: intersect;
+}
+.guide-row.has-img .guide-row-more {
+  grid-column: 2 / -1;
 }
 .guide-row-main {
   min-width: 0;
@@ -248,12 +270,11 @@
 .guide-hero-img {
   width: 100%;
   /* 图带 width/height 属性时（JSX 里读 URL # 片段），属性会变成展示提示把高度钉死，
-     这里显式 height:auto 让它仍由 aspect-ratio + max-height 决定，排版与没属性时一致。
+     这里显式 height:auto 让高度仍按图片原比例，排版与没属性时一致。
      When the img carries width/height attributes they become presentational hints and pin
-     the height; height:auto keeps the layout the same as without them. */
+     the height; height:auto keeps the image's own ratio. */
   height: auto;
-  max-height: 420px;
-  object-fit: cover;
+  /* 整张显示，不再按 420px 高裁切（2026-10-12）。/ Shown whole, no 420px crop. */
   border-radius: var(--r-tile);
   margin-bottom: 32px;
 }
@@ -388,9 +409,16 @@
     gap: 20px;
     padding: 20px;
   }
+  /* 窄屏：图铺满牌子顶部，向下淡进文字。/ Narrow: full-bleed on top, fading down. */
   .guide-row-img {
-    width: 100%;
-    aspect-ratio: 16 / 9;
+    grid-row: auto;
+    width: calc(100% + 40px);
+    margin: -20px -20px -32px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
+    mask-image: linear-gradient(to bottom, #000 60%, transparent);
+  }
+  .guide-row.has-img .guide-row-more {
+    grid-column: 1;
   }
   .guide-row-main h3 {
     font-size: 20px;
