@@ -109,33 +109,33 @@
   color: inherit;
   text-decoration: none;
 }
-/* 配图（2026-10-12 改）：不再裁进 4:3 小框，整张按原比例贴着牌子左边缘铺满，
-   向右用渐变淡进牌面、接上策略名；上下边缘也淡一点，图比牌矮时不留硬边。
+/* 配图（2026-10-12 改）：不再裁进 4:3 小框，整张按原比例贴着牌子左、上、下三边，
+   牌子高度跟着图走；向右用一段较长的渐变淡进牌面，并伸到策略名底下一点。
+   文字比图高的少数情况，图拉满整牌高度、靠左裁掉右侧多余部分（右侧本就淡出）。
    Row image (2026-10-12): no longer cropped into a 4:3 tile. The whole image keeps
-   its own ratio, sits flush against the card's left edge and fades to the right into
-   the card behind the name; top and bottom edges soften too, so a shorter image
-   leaves no hard edge. */
+   its ratio and meets the card's left, top and bottom edges, so the card takes the
+   image's height; a long fade on the right runs a little under the name. When the
+   text is taller, the image fills the height and trims its (already faded) right side. */
 .guide-row.has-img {
   position: relative;
   overflow: hidden;
-  grid-template-columns: 280px minmax(0, 1fr) auto;
+  grid-template-columns: 220px minmax(0, 1fr) auto;
+  column-gap: 24px;
 }
 .guide-row-img {
   grid-column: 1;
   grid-row: 1 / span 2;
-  align-self: center;
-  width: calc(100% + 28px);
+  align-self: stretch;
+  width: calc(100% + 28px + 72px);
   max-width: none;
-  height: auto;
-  /* 抵掉牌子 28px 内边距：图比文字高时上下左三边都贴边。
-     Cancel the card's 28px padding so a taller image meets top, bottom and left. */
-  margin: -28px 0 -28px -28px;
-  -webkit-mask-image: linear-gradient(to right, #000 55%, transparent),
-    linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
-  -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(to right, #000 55%, transparent),
-    linear-gradient(to bottom, transparent, #000 8%, #000 92%, transparent);
-  mask-composite: intersect;
+  height: calc(100% + 56px);
+  object-fit: cover;
+  object-position: left center;
+  /* 抵掉牌子 28px 内边距贴边，右侧多伸 72px 到文字底下。
+     Cancel the 28px padding to meet the edges; reach 72px under the text. */
+  margin: -28px -72px -28px -28px;
+  -webkit-mask-image: linear-gradient(to right, #000 45%, transparent);
+  mask-image: linear-gradient(to right, #000 45%, transparent);
 }
 .guide-row.has-img .guide-row-more {
   grid-column: 2 / -1;
@@ -418,6 +418,7 @@
   .guide-row-img {
     grid-row: auto;
     width: calc(100% + 40px);
+    height: auto;
     margin: -20px -20px -32px;
     -webkit-mask-image: linear-gradient(to bottom, #000 60%, transparent);
     mask-image: linear-gradient(to bottom, #000 60%, transparent);
