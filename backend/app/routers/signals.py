@@ -160,6 +160,34 @@ def strategy_analysis(
     )
 
 
+@router.get("/strategy-names", response_model=dict)
+def strategy_names(
+    _user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """近 ANALYSIS_DAYS 天里发过信号的全部策略名（信号的 indicator 字段，按名排序）。
+
+    给信号面板的策略多选用（2026-10-12）：原来下拉只列「此刻有信号的策略」，
+    某个策略这会儿没信号就整个消失，用户没法事先选好它。策略名本来就印在每张
+    信号牌上，不是需要藏的信息。
+    Every strategy name (the signal's indicator) seen in the last ANALYSIS_DAYS
+    days, sorted. Feeds the signal board's strategy multi-select (2026-10-12):
+    it used to list only strategies with a live signal, so a quiet strategy
+    vanished and couldn't be picked ahead of time. The names already appear on
+    every signal card, so nothing is exposed.
+    """
+    def _compute() -> dict:
+        since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=ANALYSIS_DAYS)
+        rows = (
+            db.query(Signal.indicator)
+            .filter(Signal.created_at >= since, Signal.indicator.isnot(None), Signal.indicator != "")
+            .distinct()
+            .all()
+        )
+        return {"names": sorted({r[0] for r in rows})}
+    return shared_cache.cached_json("signals:strategy-names", _ANALYSIS_CACHE_SECONDS, _compute)
+
+
 @router.get("/platform-strategies", response_model=PlatformStrategyListOut)
 def list_platform_strategies(
     _user: User = Depends(get_current_user),

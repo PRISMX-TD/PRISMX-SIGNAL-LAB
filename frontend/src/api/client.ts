@@ -625,6 +625,9 @@ export const signalApi = {
   // whitelist is empty. Same shape as adminApi.strategyWinrate — one shared
   // computation behind both.
   strategyAnalysis: () => request<AdminStrategyWinRate>('/signals/strategy-analysis'),
+  // 近 30 天发过信号的全部策略名，信号面板的策略多选用。
+  // Every strategy name with a signal in the last 30 days, for the board's strategy filter.
+  strategyNames: () => request<{ names: string[] }>('/signals/strategy-names'),
 }
 
 // 历史信号回放（模拟器）：**当前仅管理员可调**（后端 require_admin），

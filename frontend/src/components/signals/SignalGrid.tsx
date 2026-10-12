@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
 import MultiSelect from '../MultiSelect'
+import { signalApi } from '../../api/client'
 import PageHead from '../PageHead'
 import type { Signal, UserPlan } from '../../api/types'
 import { calcRiskReward, displaySymbol, parseTime } from '../../api/utils'
@@ -199,14 +200,31 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
     [symbolsF, symbolOptions],
   )
 
-  // 策略选项：这批信号里出现过的策略 + 用户已经选中的（某个策略此刻恰好没信号，它的
-  // 勾也不该凭空消失，否则筛选会悄悄变成「全部」）。个人策略统一成「我的策略」一项。
-  // Strategy options: those present in this batch plus whatever the user already
-  // picked (a strategy that happens to be quiet right now shouldn't silently lose its
-  // tick and turn the filter into "all"). Personal strategies fold into one entry.
+  // 平台全部策略名（近 30 天发过信号的，后端 /signals/strategy-names）。2026-10-12 起
+  // 策略下拉列全部策略，不再只列此刻有信号的——和品种下拉同一个道理（见 symbolOptions）。
+  // 取不到就退回只用这批信号里的。
+  // Every platform strategy name (signals in the last 30 days, /signals/strategy-names).
+  // Since 2026-10-12 the dropdown lists them all, not just those live right now — the
+  // same reasoning as symbolOptions. On failure it falls back to this batch only.
+  const [allStrategyNames, setAllStrategyNames] = useState<string[]>([])
+  useEffect(() => {
+    let cancelled = false
+    signalApi.strategyNames()
+      .then((res) => { if (!cancelled) setAllStrategyNames(asStringList(res.names)) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // 策略选项：平台全部策略 + 这批信号里出现过的（新策略刚上线、名单缓存还没刷新）
+  // + 用户已经选中的（勾不该凭空消失，否则筛选会悄悄变成「全部」）。个人策略统一成
+  // 「我的策略」一项。
+  // Strategy options: every platform strategy, plus those in this batch (a brand-new
+  // strategy before the name list refreshes), plus whatever the user already picked
+  // (a tick shouldn't silently vanish and turn the filter into "all"). Personal
+  // strategies fold into one entry.
   const strategyOptions = useMemo(() => {
     const evalNow = Date.now()
-    const keys = new Set<string>(strategiesF)
+    const keys = new Set<string>([...allStrategyNames, ...strategiesF])
     for (const sig of signals) {
       if (!isFree && effectiveStatus(sig, evalNow) === 'EXPIRED') continue
       keys.add(strategyKeyOf(sig))
@@ -217,7 +235,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
     // 平台策略按名字排，「我的策略」垫底 / platform strategies by name, "mine" last
     rows.sort((a, b) => (a.value === MY_STRATEGY_KEY ? 1 : b.value === MY_STRATEGY_KEY ? -1 : a.label.localeCompare(b.label)))
     return rows
-  }, [signals, strategiesF, isFree, t])
+  }, [signals, strategiesF, allStrategyNames, isFree, t])
 
   const filterCount = effectiveSymbols.length + strategiesF.length
   const clearFilters = () => { setSymbolsF([]); setStrategiesF([]) }
