@@ -274,9 +274,13 @@
      When the img carries width/height attributes they become presentational hints and pin
      the height; height:auto keeps the image's own ratio. */
   height: auto;
-  /* 整张显示，不再按 420px 高裁切（2026-10-12）。/ Shown whole, no 420px crop. */
-  border-radius: var(--r-tile);
-  margin-bottom: 32px;
+  /* 整张显示，不再按 420px 高裁切；下沿用渐变淡进正文，不留硬边（2026-10-12）。
+     Shown whole, no 420px crop; the bottom edge fades into the text below. */
+  display: block;
+  border-radius: var(--r-tile) var(--r-tile) 0 0;
+  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  margin-bottom: -8px;
 }
 .guide-h {
   margin-top: 40px;
@@ -307,7 +311,8 @@
   max-width: 68ch;
 }
 .guide-hero-img + .guide-rich {
-  margin-top: 24px;
+  position: relative;
+  margin-top: 0;
 }
 .guide-ul {
   display: flex;
