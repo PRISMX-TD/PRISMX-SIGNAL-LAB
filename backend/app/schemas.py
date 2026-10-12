@@ -1054,13 +1054,38 @@ class PlatformStrategyBlock(BaseModel):
       paragraph a body paragraph
       list      bullet points, one per line (the client splits on newlines)
       image     an optional caption; the image itself is in imageUrl
+
+    2026-10-12 起新内容改成第五种：kind == "rich"，整篇说明是一段受限 HTML，与公告
+    同一个富文本框、同一份白名单（services/rich_text）。管理员要的是「整段粘贴，
+    再选中改格式」，逐块点「+ 段落」太费事。前四种保留只为读：旧条目照常显示，
+    管理员在新编辑框里改一个字、保存，就并成一块 rich。
+
+    From 2026-10-12 new content takes a fifth kind, "rich": the whole write-up is
+    restricted HTML from the same rich-text box and whitelist as announcements
+    (services/rich_text). Admins wanted to paste a whole passage and restyle it,
+    not press "+ paragraph" per block. The four older kinds stay for reading; one
+    edit and save in the new box collapses an entry into a single rich block.
     """
 
-    kind: Literal["heading", "paragraph", "list", "image"] = "paragraph"
-    textZh: str = Field(default="", max_length=4_000)
-    textEn: str = Field(default="", max_length=4_000)
+    kind: Literal["heading", "paragraph", "list", "image", "rich"] = "paragraph"
+    # rich 块装整篇说明，上限随 MAX_RICH_LEN；旧块型实际远达不到。
+    # A rich block holds the whole write-up, so the cap follows MAX_RICH_LEN.
+    textZh: str = Field(default="", max_length=MAX_RICH_LEN)
+    textEn: str = Field(default="", max_length=MAX_RICH_LEN)
     # 仅 kind == "image" 使用 / used only when kind == "image"
     imageUrl: str = Field(default="", max_length=500)
+
+    # 富文本过白名单：入库前（PUT 的请求体）与出库时（读回来构造本模型）都会走到这里，
+    # 清洗是幂等的，重复一遍无害，库里任何来路的旧行也一并兜住。
+    # Whitelist rich text. Runs on the way in (the PUT body) and on the way out
+    # (rebuilding this model from storage); sanitising is idempotent, so the second
+    # pass is harmless and also covers rows that reached storage by another path.
+    @model_validator(mode="after")
+    def _clean_rich(self) -> "PlatformStrategyBlock":
+        if self.kind == "rich":
+            self.textZh = sanitize_rich_html(self.textZh)
+            self.textEn = sanitize_rich_html(self.textEn)
+        return self
 
 
 class PlatformStrategyOut(BaseModel):

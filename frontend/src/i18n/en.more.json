@@ -2400,22 +2400,10 @@
       "summaryZh": "One-line summary (Chinese)",
       "summaryEn": "One-line summary (English)",
       "blocks": "Full description",
-      "blocksHint": "Chinese left, English right; reorder with ↑↓",
-      "blocksEmpty": "No content yet. Use the buttons below to add a subheading, paragraph, bullet list or image.",
-      "blockKind": "Block type",
-      "kind": {
-        "heading": "Subheading",
-        "paragraph": "Paragraph",
-        "list": "Bullet list",
-        "image": "Image"
-      },
       "upload": "Upload image",
       "uploading": "Uploading…",
       "imageUrlOrUpload": "Image URL, or upload on the left",
-      "listPlaceholder": "One bullet per line",
-      "zhPlaceholder": "中文",
-      "enPlaceholder": "English",
-      "legacyDetailHint": "This is the older single-blob description. It still shows on the detail page when there are no content blocks above. Move the text into blocks above, then clear this.",
+      "legacyDetailHint": "This is the old single-block description; it still shows on the detail page when the description above is empty. Paste it into the description above, then clear this field.",
       "detailZh": "Full description (Chinese)",
       "detailEn": "Full description (English)",
       "marketRegimeZh": "Market regime (Chinese)",
@@ -2428,7 +2416,12 @@
       "imageUrl": "Illustration URL",
       "symbols": "Symbols (comma-separated)",
       "timeframes": "Timeframes (comma-separated)",
-      "indicators": "Indicators (comma-separated)"
+      "indicators": "Indicators (comma-separated)",
+      "bodyLanguage": "Description language",
+      "lang_zh": "中文",
+      "lang_en": "English",
+      "bodyHint": "Paste the whole text in, then select lines to make them headings, lists, bold or coloured; each language is written separately",
+      "bodyPlaceholder": "Paste the whole strategy description here; each line becomes a paragraph. Then select lines and use the buttons above to turn them into subheadings, bullet lists, bold or coloured text. Images can be inserted too."
     },
     "staff": "Staff",
     "overview": {

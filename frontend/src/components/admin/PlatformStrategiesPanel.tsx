@@ -38,7 +38,7 @@ import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import ConfirmModal from '../ConfirmModal'
 import ImageField from './ImageField'
-import StrategyBlocksEditor from './StrategyBlocksEditor'
+import StrategyBodyEditor from './StrategyBodyEditor'
 import type { PlatformStrategy } from '../../api/types'
 
 // catch 里拿到的是 unknown；localizeApiError 只处理"中文 / English"双语串，
@@ -315,15 +315,16 @@ export default function PlatformStrategiesPanel() {
                     />
                   </div>
 
-                  <StrategyBlocksEditor
+                  <StrategyBodyEditor
+                    strategyId={s.id}
                     blocks={s.blocks ?? []}
                     onChange={(blocks) => patch(s.id, { blocks })}
                   />
 
                   {/* 旧的单段说明字段。只在还有内容时显示，让管理员能把它搬进
-                      内容块后清空；不再作为新内容的录入口。
+                      上面的详细说明后清空；不再作为新内容的录入口。
                       The legacy single-blob field. Shown only while it still has
-                      content, so an admin can move it into blocks and clear it;
+                      content, so an admin can move it into the body and clear it;
                       it is no longer an entry point for new content. */}
                   {(s.detailZh || s.detailEn) && (
                     <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">

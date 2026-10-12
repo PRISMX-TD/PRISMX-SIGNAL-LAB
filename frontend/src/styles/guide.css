@@ -278,6 +278,16 @@
 .guide-legacy {
   white-space: pre-line;
 }
+/* 富文本说明（2026-10-12 起）：排版走公告正文那套 .ann-rich，这里只补与分块版
+   一致的行宽和配图后的间距。/ Rich write-ups (since 2026-10-12) take the
+   announcement body's .ann-rich typography; this only adds the block version's
+   measure and the gap below a hero image. */
+.guide-rich {
+  max-width: 68ch;
+}
+.guide-hero-img + .guide-rich {
+  margin-top: 24px;
+}
 .guide-ul {
   display: flex;
   flex-direction: column;

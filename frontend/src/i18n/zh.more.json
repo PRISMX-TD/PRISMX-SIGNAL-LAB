@@ -2392,22 +2392,10 @@
       "summaryZh": "一句话简介（中文）",
       "summaryEn": "一句话简介（英文）",
       "blocks": "详细说明",
-      "blocksHint": "左中文、右英文；用 ↑↓ 调整顺序",
-      "blocksEmpty": "还没有内容，用下面的按钮添加小标题、段落、要点或图片。",
-      "blockKind": "内容块类型",
-      "kind": {
-        "heading": "小标题",
-        "paragraph": "段落",
-        "list": "要点列表",
-        "image": "图片"
-      },
       "upload": "上传图片",
       "uploading": "上传中…",
       "imageUrlOrUpload": "图片地址，或点左侧上传",
-      "listPlaceholder": "每行一条要点",
-      "zhPlaceholder": "中文",
-      "enPlaceholder": "English",
-      "legacyDetailHint": "这是旧版的整段说明，仍会在详情页显示（当上面没有内容块时）。建议把内容搬进上面的内容块后清空这里。",
+      "legacyDetailHint": "这是旧版的整段说明，仍会在详情页显示（当上面的详细说明为空时）。建议把内容粘贴进上面的详细说明后清空这里。",
       "detailZh": "详细说明（中文）",
       "detailEn": "详细说明（英文）",
       "marketRegimeZh": "适用行情（中文）",
@@ -2420,7 +2408,12 @@
       "imageUrl": "示意图链接",
       "symbols": "适用品种（逗号分隔）",
       "timeframes": "适用周期（逗号分隔）",
-      "indicators": "所用指标（逗号分隔）"
+      "indicators": "所用指标（逗号分隔）",
+      "bodyLanguage": "说明语言",
+      "lang_zh": "中文",
+      "lang_en": "English",
+      "bodyHint": "整段粘贴进来，再选中文字改成标题、列表、加粗或换颜色；中英文分开填",
+      "bodyPlaceholder": "把策略说明整段粘贴到这里，每行会自动成为一段。然后选中某几行，用上面的按钮改成小标题、要点列表、加粗或换颜色；也可以插入图片。"
     },
     "staff": "客服",
     "overview": {

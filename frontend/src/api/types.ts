@@ -1118,7 +1118,10 @@ export interface AdminStrategySettings {
 // surface. Four known types mean rendering parses no markup.
 // `text` means: heading = subheading, paragraph = body, list = bullets (split on
 // newlines), image = optional caption (the image itself is in imageUrl).
-export type PlatformStrategyBlockKind = 'heading' | 'paragraph' | 'list' | 'image'
+// 'rich'：2026-10-12 起的新内容，整篇说明一段受限 HTML（与公告同一个富文本框）；前四种是旧的分块。
+// 'rich': new content since 2026-10-12, the whole write-up as restricted HTML (same
+// rich-text box as announcements); the other four are the legacy block kinds.
+export type PlatformStrategyBlockKind = 'heading' | 'paragraph' | 'list' | 'image' | 'rich'
 
 export interface PlatformStrategyBlock {
   kind: PlatformStrategyBlockKind

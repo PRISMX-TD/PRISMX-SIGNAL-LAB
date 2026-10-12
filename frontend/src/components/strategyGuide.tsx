@@ -4,6 +4,8 @@
 import type { CSSProperties } from 'react'
 import type { PlatformStrategy, PlatformStrategyBlock } from '../api/types'
 import { safeHttpUrl } from '../utils/safeUrl'
+import { announcementRichBody } from '../utils/richText'
+import RichText from './RichText'
 import { symbolMeta } from '../utils/symbolMeta'
 import { displaySymbol } from '../api/utils'
 
@@ -190,12 +192,21 @@ export function StrategyBlocks({ blocks, isZh }: { blocks: PlatformStrategyBlock
   )
 }
 
-// 详细说明的渲染入口。blocks 为空时回落到第一版的单段纯文本字段，避免早先录入的
-// 内容在升级后凭空消失。/ Entry point for the long description. Falls back to the
-// first version's single-blob fields when blocks is empty, so copy entered before
-// the upgrade doesn't silently vanish.
+// 详细说明的渲染入口。三种形态按新到旧：
+//   rich 块（2026-10-12 起）——后台富文本框的产物，交给 RichText 按白名单解成 React 节点，
+//     排版与公告正文同一套样式（.ann-rich）；只填了一种语言时回落到另一种；
+//   旧的四种内容块——仍按纯文本节点渲染，外观与以前一致；
+//   blocks 为空——回落到第一版的单段纯文本字段，避免早先录入的内容凭空消失。
+// Entry point for the long description, newest shape first: a rich block (since
+// 2026-10-12) goes through RichText against the whitelist, styled like an
+// announcement body (.ann-rich), falling back to the other language when only one
+// is filled; the four legacy kinds still render as plain text nodes, unchanged;
+// and with no blocks at all the first version's single-blob fields are the fallback.
 export function StrategyDetail({ strategy, isZh }: { strategy: PlatformStrategy; isZh: boolean }) {
   const blocks = strategy.blocks ?? []
+  if (blocks.some((b) => b.kind === 'rich')) {
+    return <RichText html={announcementRichBody(blocks, isZh ? 'zh' : 'en')} className="ann-rich guide-rich" />
+  }
   if (blocks.length > 0) return <StrategyBlocks blocks={blocks} isZh={isZh} />
 
   const legacy = pick(strategy.detailZh, strategy.detailEn, isZh)
