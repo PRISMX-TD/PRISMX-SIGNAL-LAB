@@ -353,7 +353,8 @@
         "volume": "Volume bars per candle",
         "obv": "Volume accumulated by up / down closes",
         "xmab": "User-shared · band channel widened from double-XMA highs/lows",
-        "macandle": "Partner author · MA red up / green down + turn buy/sell marks"
+        "macandle": "Partner author · MA red up / green down + turn buy/sell marks",
+        "kpsq": "Partner author · resistance/support walls + three MAs"
       },
       "hint": {
         "ma": "Averages stacked in order from short to long mark a bullish alignment; a pullback that holds the mid-term average is a common continuation entry.",
@@ -372,7 +373,8 @@
         "volume": "Volume confirms price: breakouts on volume are credible, new highs on thin volume are suspect.",
         "obv": "OBV making a new high before price signals money moving in early.",
         "xmab": "A user-provided indicator formula: highs and lows each get a double XMA(N); their gap widens the bands (×P1/P2) and the overbought/oversold lines (+1.2 more). Bands turn green when both step down.",
-        "macandle": "A partner-licensed MT4 indicator: SMA(N) is red while rising and green while falling. When the MA turns, the bar N later (signal delay) that opens and closes on the new side gets a buy/sell mark; repeated same-direction signals are skipped. Closed bars only, no repaint. Pro members only."
+        "macandle": "A partner-licensed MT4 indicator: SMA(N) is red while rising and green while falling. When the MA turns, the bar N later (signal delay) that opens and closes on the new side gets a buy/sell mark; repeated same-direction signals are skipped. Closed bars only, no repaint. Pro members only.",
+        "kpsq": "A partner-licensed MT4 indicator: ZigZag pivots that step up (highs) or down (lows) become resistance (green) and support (red) walls drawn from the pivot candle body to now; walls price has re-entered are dropped. Three adjustable MAs are overlaid (default 50 / 72 / 180). Closed bars only. Pro members only."
       },
       "group": {
         "trend": "Trend",
@@ -424,7 +426,16 @@
       "sellColor": "Sell color",
       "buyMark": "Buy",
       "sellMark": "Sell",
-      "proOnly": "This indicator is Pro-only. Upgrade to use it; it stops showing automatically when membership expires."
+      "proOnly": "This indicator is Pro-only. Upgrade to use it; it stops showing automatically when membership expires.",
+      "kpsq": "Market Scanner Pro",
+      "ma1": "MA 1",
+      "ma2": "MA 2",
+      "ma3": "MA 3",
+      "ma1Color": "MA 1 color",
+      "ma2Color": "MA 2 color",
+      "ma3Color": "MA 3 color",
+      "resColor": "Resistance color",
+      "supColor": "Support color"
     },
     "draw": {
       "tools": "Drawing tools",

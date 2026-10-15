@@ -10,7 +10,7 @@
 // math in utils/indicators.ts and the i18n strings, nothing else.
 import type { Candle } from '../../api/types'
 import {
-  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand, maCandle,
+  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand, maCandle, wallZones,
 } from '../../utils/indicators'
 import type { IndicatorSettings, LineStyleCfg, PaneSize } from './indicatorSettings'
 
@@ -20,7 +20,7 @@ export type IndicatorGroup = 'trend' | 'momentum' | 'volatility' | 'volume' | 'c
 
 // 目录顺序 = 面板里的展示顺序；副图的创建顺序也按这里（上到下）。
 // Catalog order = display order in the panel; sub-panes are created in this order too.
-export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab', 'macandle']
+export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab', 'macandle', 'kpsq']
 export const GROUPS: IndicatorGroup[] = ['trend', 'momentum', 'volatility', 'volume', 'custom']
 
 export interface IndicatorMeta {
@@ -46,10 +46,11 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
   obv: { abbr: 'OBV', group: 'volume', pane: 'sub' },
   xmab: { abbr: 'XMA', group: 'custom', pane: 'main' },
   macandle: { abbr: 'HY', group: 'custom', pane: 'main' },
+  kpsq: { abbr: 'KP', group: 'custom', pane: 'main' },
 }
 // 只对 Pro 会员开放的指标：非 Pro（含会员过期被降级）一律不画、开关锁住。
 // Pro-only indicators: never drawn and locked for non-Pro (incl. expired) users.
-export const PRO_ONLY: ReadonlySet<IndicatorId> = new Set<IndicatorId>(['macandle'])
+export const PRO_ONLY: ReadonlySet<IndicatorId> = new Set<IndicatorId>(['macandle', 'kpsq'])
 export const MAIN_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'main')
 export const SUB_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'sub')
 
@@ -97,6 +98,8 @@ export const INDICATOR_FORM: Record<IndicatorId, IndicatorForm> = {
     C('upColor', 'bandColor'), C('downColor', 'downColor'), C('midColor', 'midColor'), C('obColor', 'overbought'), C('osColor', 'oversold')], lineStyle: true },
   macandle: { params: [P('period', 'period', 1, 500), P('delay', 'signalDelay', 0, 10),
     C('upColor', 'upColor'), C('downColor', 'downColor'), C('buyColor', 'buyColor'), C('sellColor', 'sellColor')], lineStyle: true },
+  kpsq: { params: [P('ma1', 'ma1', 1, 1000), P('ma2', 'ma2', 1, 1000), P('ma3', 'ma3', 1, 1000),
+    C('c1', 'ma1Color'), C('c2', 'ma2Color'), C('c3', 'ma3Color'), C('resColor', 'resColor'), C('supColor', 'supColor')], lineStyle: true },
 }
 
 // ── 参数之间的相对约束 / relative constraints between parameters ──
@@ -221,6 +224,13 @@ export function seriesSpecs(id: IndicatorId, s: IndicatorSettings): SeriesSpec[]
     ]
     // 红涨绿跌两段粗线；做多/做空箭头由引擎从输出的 sig 画成 K 线标记
     // Two thick legs; the engine turns the `sig` output into candle markers.
+    // 三条均线；压力/支撑区域由引擎从 resTop/resBot/supTop/supBot 画成矩形
+    // Three MAs; the engine draws zones from resTop/resBot/supTop/supBot.
+    case 'kpsq': return [
+      { key: 'ma1', kind: 'line', color: s.kpsq.c1, label: String(s.kpsq.ma1) },
+      { key: 'ma2', kind: 'line', color: s.kpsq.c2, label: String(s.kpsq.ma2) },
+      { key: 'ma3', kind: 'line', color: s.kpsq.c3, label: String(s.kpsq.ma3) },
+    ]
     case 'macandle': return [
       { key: 'up', kind: 'line', color: s.macandle.upColor, gaps: true, label: '' },
       { key: 'dn', kind: 'line', color: s.macandle.downColor, gaps: true, label: '' },
@@ -260,6 +270,14 @@ export function computeIndicator(id: IndicatorId, bars: Candle[], s: IndicatorSe
     case 'volume': return { v: bars.map((b) => b.v) }
     case 'obv': return { v: obv(bars) }
     case 'xmab': { const r = xmaBand(bars, s.xmab.period, s.xmab.p1, s.xmab.p2); return { ...r } }
+    case 'kpsq': {
+      const len = bars.length
+      const z = { resTop: new Array<number | null>(len).fill(null), resBot: new Array<number | null>(len).fill(null), supTop: new Array<number | null>(len).fill(null), supBot: new Array<number | null>(len).fill(null) }
+      for (const w of wallZones(bars)) {
+        if (w.kind === 'res') { z.resTop[w.start] = w.top; z.resBot[w.start] = w.bottom } else { z.supTop[w.start] = w.top; z.supBot[w.start] = w.bottom }
+      }
+      return { ma1: sma(cl, s.kpsq.ma1), ma2: sma(cl, s.kpsq.ma2), ma3: sma(cl, s.kpsq.ma3), ...z }
+    }
     case 'macandle': { const r = maCandle(bars, s.macandle.period, s.macandle.delay); return { ...r } }
   }
 }
@@ -283,6 +301,7 @@ export function summaryOf(id: IndicatorId, s: IndicatorSettings): string {
     case 'volume': return ''
     case 'obv': return ''
     case 'xmab': return `${s.xmab.period} · ${s.xmab.p1} / ${s.xmab.p2}`
+    case 'kpsq': return `${s.kpsq.ma1} · ${s.kpsq.ma2} · ${s.kpsq.ma3}`
     case 'macandle': return `SMA ${s.macandle.period} · ${s.macandle.delay}`
   }
 }

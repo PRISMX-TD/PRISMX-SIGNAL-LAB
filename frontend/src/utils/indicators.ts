@@ -521,3 +521,131 @@ export function maCandle(bars: Candle[], n = 20, delay = 1): MaCandleResult {
   }
   return r
 }
+
+// 价格的小数位数（从 K 线数据里推断，最多 5 位），用来还原 MT4 的 Point。
+// Price decimals inferred from the bars (≤ 5), standing in for MT4's Point.
+export function inferPoint(bars: Candle[]): number {
+  let d = 0
+  for (let i = Math.max(0, bars.length - 200); i < bars.length; i++) {
+    for (const v of [bars[i].o, bars[i].h, bars[i].l, bars[i].c]) {
+      const s = String(v)
+      const k = s.indexOf('.')
+      if (k >= 0) d = Math.max(d, Math.min(5, s.length - k - 1))
+    }
+  }
+  return Math.pow(10, -d)
+}
+
+export interface WallZone {
+  // 区域起点 K 线下标（升序数组里），一直延伸到最新一根 / start bar index (ascending), extends to the latest bar
+  start: number
+  top: number
+  bottom: number
+  // res = 上方压力墙（来自高点），sup = 下方支撑墙（来自低点）/ resistance from a high, support from a low
+  kind: 'res' | 'sup'
+}
+
+// 「看盘神器」：MT4 PowerFX Wall 指标移植。ZigZag(depth, dev, backstep) 找高低点，
+// 只保留由近到远逐级抬高的高点、逐级降低的低点，再剔除被价格重新进入过的
+// （kill_retouch），每个点从它的 K 线实体画一块区域延伸到当前。只用已收盘 K 线
+// （原版也只在新 K 线开出时重算），盘中不闪。
+// "看盘神器": port of the MT4 PowerFX Wall indicator. ZigZag(depth, dev,
+// backstep) pivots; keep only highs that step up / lows that step down going
+// back in time, drop re-entered ones (kill_retouch), and draw a zone from each
+// pivot's candle body to now. Closed bars only (the original also only
+// recomputed on a new bar), so nothing flickers intrabar.
+export function wallZones(all: Candle[], depth = 13, dev = 8, backstep = 5, point = inferPoint(all)): WallZone[] {
+  const bars = all.slice(0, -1)
+  const n = bars.length
+  if (n <= depth + backstep + 2) return []
+  // 转成 MT4 的倒序（0 = 最近一根已收盘）/ MT4 series order (0 = newest closed)
+  const at = (i: number) => bars[n - 1 - i]
+  const H = (i: number) => (i >= 0 && i < n ? at(i).h : 0)
+  const L = (i: number) => (i >= 0 && i < n ? at(i).l : 0)
+  const bodyLo = (i: number) => Math.min(at(i).o, at(i).c)
+  const bodyHi = (i: number) => Math.max(at(i).o, at(i).c)
+  const lowest = (s: number) => { let v = Infinity; for (let k = s; k < s + depth && k < n; k++) v = Math.min(v, L(k)); return v }
+  const highest = (s: number) => { let v = -Infinity; for (let k = s; k < s + depth && k < n; k++) v = Math.max(v, H(k)); return v }
+  const lo = new Array<number>(n).fill(0) // 原版 BuferUp：低点 / lows
+  const hi = new Array<number>(n).fill(0) // 原版 BuferDn：高点 / highs
+  const count = n - depth
+  const devP = dev * point
+  let lastlow = 0
+  let lasthigh = 0
+  for (let s = count; s >= 0; s--) {
+    let val = lowest(s)
+    if (val === lastlow) val = 0
+    else {
+      lastlow = val
+      if (L(s) - val > devP) val = 0
+      else for (let b = 1; b <= backstep; b++) { const r = lo[s + b]; if (r !== 0 && r > val) lo[s + b] = 0 }
+    }
+    lo[s] = val
+    val = highest(s)
+    if (val === lasthigh) val = 0
+    else {
+      lasthigh = val
+      if (val - H(s) > devP) val = 0
+      else for (let b = 1; b <= backstep; b++) { const r = hi[s + b]; if (r !== 0 && r < val) hi[s + b] = 0 }
+    }
+    hi[s] = val
+  }
+  // final cutting
+  lasthigh = -1; lastlow = -1
+  let lasthighpos = -1
+  let lastlowpos = -1
+  for (let s = count; s >= 0; s--) {
+    const curlow = lo[s]
+    const curhigh = hi[s]
+    if (curlow === 0 && curhigh === 0) continue
+    if (curhigh !== 0) {
+      if (lasthigh > 0) { if (lasthigh < curhigh) hi[lasthighpos] = 0; else hi[s] = 0 }
+      if (lasthigh < curhigh || lasthigh < 0) { lasthigh = curhigh; lasthighpos = s }
+      lastlow = -1
+    }
+    if (curlow !== 0) {
+      if (lastlow > 0) { if (lastlow > curlow) lo[lastlowpos] = 0; else lo[s] = 0 }
+      if (curlow < lastlow || lastlow < 0) { lastlow = curlow; lastlowpos = s }
+      lasthigh = -1
+    }
+  }
+  for (let s = n - 1; s >= count; s--) lo[s] = 0
+
+  // GetValid：去掉更高的低点、更低的高点，再剔除重新进入过的区域
+  // GetValid: drop higher lows / lower highs, then re-entered zones
+  const upCur = lo.find((v) => v > 0) ?? 0
+  const dnCur = hi.find((v) => v > 0) ?? 0
+  let lastUp = upCur
+  let lastDn = dnCur
+  let upbar = 0
+  let dnbar = 0
+  for (let i = 0; i < n; i++) {
+    if (hi[i] >= lastDn) { lastDn = hi[i]; dnbar = i } else hi[i] = 0
+    if (hi[i] <= dnCur && lo[i] > 0) hi[i] = 0
+    if (lo[i] <= lastUp && lo[i] > 0) { lastUp = lo[i]; upbar = i } else lo[i] = 0
+    if (lo[i] > upCur) lo[i] = 0
+  }
+  let lowDn = bodyLo(dnbar)
+  let hiUp = bodyHi(upbar)
+  for (let i = Math.max(upbar, dnbar); i >= 0; i--) {
+    if (hi[i] > lowDn && hi[i] !== lastDn) hi[i] = 0
+    else if (hi[i] > 0) { lowDn = bodyLo(i); lastDn = hi[i] }
+    if (lo[i] <= hiUp && lo[i] > 0 && lo[i] !== lastUp) lo[i] = 0
+    else if (lo[i] > 0) { hiUp = bodyHi(i); lastUp = lo[i] }
+  }
+
+  const out: WallZone[] = []
+  for (let i = 0; i < n; i++) {
+    const start = n - 1 - i
+    if (hi[i] > 0) {
+      const p2 = Math.max(bodyLo(i), Math.max(L(i - 1), L(i + 1)))
+      out.push({ start, top: hi[i], bottom: p2, kind: 'res' })
+    }
+    if (lo[i] > 0) {
+      let p2 = bodyHi(i)
+      if (i > 0) p2 = Math.min(p2, Math.min(H(i + 1), H(i - 1)))
+      out.push({ start, top: p2, bottom: lo[i], kind: 'sup' })
+    }
+  }
+  return out.sort((a, b) => a.start - b.start)
+}

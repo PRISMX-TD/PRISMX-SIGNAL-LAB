@@ -37,6 +37,7 @@ import {
   type IndicatorId, type SeriesSpec,
 } from './indicatorCatalog'
 import { markChartDisposed } from './chartLifecycle'
+import { ZonePrimitive, type ZoneRect } from './zonePrimitive'
 import { EMPTY_LEGEND, toHistPoints, type CandleColors, type IndicatorFlags, type LegendValues } from './chartConfig'
 
 type LineApi = ISeriesApi<'Line'>
@@ -137,6 +138,8 @@ export function useChartEngine(
   // Indicator signals (e.g. MA candle buy/sell) as candle markers; toggles read from a ref.
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const indicatorsRef = useRef(indicators)
+  // 指标区域矩形（看盘神器）/ indicator zone rectangles
+  const zonesRef = useRef<ZonePrimitive | null>(null)
   indicatorsRef.current = indicators
   const markerTextRef = useRef(markerText)
   markerTextRef.current = markerText
@@ -156,9 +159,20 @@ export function useChartEngine(
     const s = indicatorSettingsRef.current
     const next: LegendValues = {}
     const marks: SeriesMarker<UTCTimestamp>[] = []
+    const zones: ZoneRect[] = []
+    const lastT = times[times.length - 1]
     const feed = (id: IndicatorId, handles: Handle[]) => {
       const out = computeIndicator(id, bars, s)
       const sig = out.sig
+      if (out.resTop && indicatorsRef.current[id]) {
+        const c = s[id] as { resColor?: string; supColor?: string }
+        const push = (topK: string, botK: string, color: string) => out[topK]?.forEach((top, i) => {
+          const bot = out[botK]?.[i]
+          if (top != null && bot != null) zones.push({ from: times[i], to: lastT, top, bottom: bot, color })
+        })
+        push('resTop', 'resBot', c.resColor ?? '#2ee07e')
+        push('supTop', 'supBot', c.supColor ?? '#ff4d67')
+      }
       if (sig && indicatorsRef.current[id]) {
         const c = s[id] as { buyColor?: string; sellColor?: string }
         const txt = markerTextRef.current
@@ -196,6 +210,7 @@ export function useChartEngine(
     }
     marks.sort((a, b) => a.time - b.time)
     markersRef.current?.setMarkers(marks)
+    zonesRef.current?.setZones(zones)
     latestLegendRef.current = next
     if (!hoveringRef.current) setLegend(next)
   }, [])
@@ -285,6 +300,9 @@ export function useChartEngine(
     chartRef.current = chart
     seriesRef.current = series
     markersRef.current = createSeriesMarkers(series, [])
+    const zp = new ZonePrimitive()
+    series.attachPrimitive(zp)
+    zonesRef.current = zp
     setDrawReady(true)
 
     // 十字准线/触摸拖动 → 图例：param.time 有值表示落在数据区内，用 seriesData 查各
@@ -337,6 +355,7 @@ export function useChartEngine(
       chartRef.current = null
       seriesRef.current = null
       markersRef.current = null
+      zonesRef.current = null
       mainRef.current = {}
       subRef.current = {}
       setDrawReady(false)

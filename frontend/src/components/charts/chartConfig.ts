@@ -300,6 +300,7 @@ export const DEFAULT_INDICATORS: IndicatorFlags = {
   obv: false,
   xmab: false,
   macandle: false,
+  kpsq: false,
 }
 // 十字准线/触摸拖动悬停时展示的各指标"当前值"（按指标 → series key），不悬停时
 // 回退到最新一根的值（见 recomputeIndicators 与 subscribeCrosshairMove 的说明）。

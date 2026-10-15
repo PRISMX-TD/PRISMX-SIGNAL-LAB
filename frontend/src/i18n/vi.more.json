@@ -353,7 +353,8 @@
         "volume": "Cột khối lượng theo từng nến",
         "obv": "Khối lượng tích lũy theo nến đóng tăng / giảm",
         "xmab": "Người dùng chia sẻ · kênh mở rộng từ XMA kép của đỉnh/đáy",
-        "macandle": "Tác giả đối tác · MA tăng đỏ / giảm xanh + dấu mua/bán khi đảo chiều"
+        "macandle": "Tác giả đối tác · MA tăng đỏ / giảm xanh + dấu mua/bán khi đảo chiều",
+        "kpsq": "Tác giả đối tác · tường kháng cự/hỗ trợ + ba đường MA"
       },
       "hint": {
         "ma": "Các đường MA xếp theo thứ tự từ ngắn đến dài là dấu hiệu xu hướng tăng; nhịp hồi giữ được MA trung hạn là điểm vào tiếp diễn phổ biến.",
@@ -372,7 +373,8 @@
         "volume": "Khối lượng xác nhận giá: phá vỡ kèm khối lượng lớn đáng tin, đỉnh mới với khối lượng thấp cần nghi ngờ.",
         "obv": "OBV lập đỉnh mới trước giá là dấu hiệu dòng tiền đang vào sớm.",
         "xmab": "Công thức chỉ báo do người dùng cung cấp: giá cao và thấp mỗi bên áp XMA(N) hai lần; khoảng chênh mở rộng dải (×P1/P2) và đường quá mua/quá bán (thêm +1.2). Dải chuyển xanh lá khi cả hai cùng đi xuống.",
-        "macandle": "Chỉ báo MT4 do tác giả đối tác cấp phép: SMA(N) màu đỏ khi đi lên, xanh khi đi xuống. Khi MA đảo chiều, nến thứ N sau đó (độ trễ tín hiệu) mở và đóng cửa ở phía mới sẽ có dấu mua/bán; tín hiệu cùng chiều lặp lại bị bỏ qua. Chỉ dùng nến đã đóng, không vẽ lại. Chỉ dành cho thành viên Pro."
+        "macandle": "Chỉ báo MT4 do tác giả đối tác cấp phép: SMA(N) màu đỏ khi đi lên, xanh khi đi xuống. Khi MA đảo chiều, nến thứ N sau đó (độ trễ tín hiệu) mở và đóng cửa ở phía mới sẽ có dấu mua/bán; tín hiệu cùng chiều lặp lại bị bỏ qua. Chỉ dùng nến đã đóng, không vẽ lại. Chỉ dành cho thành viên Pro.",
+        "kpsq": "Chỉ báo MT4 do tác giả đối tác cấp phép: dùng ZigZag tìm đỉnh nâng dần và đáy hạ dần, vẽ tường kháng cự (xanh) và hỗ trợ (đỏ) từ thân nến đó đến hiện tại; tường bị giá quay lại sẽ bị loại. Kèm ba đường MA điều chỉnh được (mặc định 50 / 72 / 180). Chỉ dùng nến đã đóng. Chỉ dành cho thành viên Pro."
       },
       "group": {
         "trend": "Xu hướng",
@@ -424,7 +426,16 @@
       "sellColor": "Màu bán",
       "buyMark": "Mua",
       "sellMark": "Bán",
-      "proOnly": "Chỉ báo này chỉ dành cho thành viên Pro. Nâng cấp để sử dụng; chỉ báo sẽ tự ẩn khi hết hạn thành viên."
+      "proOnly": "Chỉ báo này chỉ dành cho thành viên Pro. Nâng cấp để sử dụng; chỉ báo sẽ tự ẩn khi hết hạn thành viên.",
+      "kpsq": "Thần khí xem chart",
+      "ma1": "MA 1",
+      "ma2": "MA 2",
+      "ma3": "MA 3",
+      "ma1Color": "Màu MA 1",
+      "ma2Color": "Màu MA 2",
+      "ma3Color": "Màu MA 3",
+      "resColor": "Màu kháng cự",
+      "supColor": "Màu hỗ trợ"
     },
     "draw": {
       "tools": "Công cụ vẽ",
