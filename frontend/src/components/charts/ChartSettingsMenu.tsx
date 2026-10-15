@@ -29,14 +29,23 @@ export default function ChartSettingsMenu({ showCountdown, onShowCountdown, cand
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 })
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight?: number }>({ top: 0, left: 0 })
   useBackToClose(open, () => setOpen(false))
 
   useLayoutEffect(() => {
     if (!open || !btnRef.current) return
     const r = btnRef.current.getBoundingClientRect()
     const left = Math.max(8, Math.min(window.innerWidth - MENU_W - 8, r.right - MENU_W))
-    setPos({ top: r.bottom + 6, left })
+    // 手机上按钮在屏幕下半部，菜单往下开会被底部标签栏挡住：放不下就改往上开，
+    // 两边都放不下时限高滚动。底部标签栏高度由 Layout 写进 --app-tabbar。
+    // On phones the button sits low and a downward menu hides behind the tab
+    // bar: flip it above when it doesn't fit, and cap the height if neither does.
+    const tabbar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-tabbar')) || 0
+    const h = menuRef.current?.offsetHeight ?? 0
+    const below = window.innerHeight - tabbar - 8 - (r.bottom + 6)
+    const above = r.top - 6 - 8
+    if (h <= below || below >= above) setPos({ top: r.bottom + 6, left, maxHeight: below })
+    else setPos({ top: Math.max(8, r.top - 6 - Math.min(h, above)), left, maxHeight: above })
   }, [open])
 
   useEffect(() => {
@@ -80,7 +89,7 @@ export default function ChartSettingsMenu({ showCountdown, onShowCountdown, cand
         </svg>
       </button>
       {open && createPortal(
-        <div ref={menuRef} className="chart-set" role="dialog" aria-label={label} style={{ top: pos.top, left: pos.left, width: MENU_W }}>
+        <div ref={menuRef} className="chart-set" role="dialog" aria-label={label} style={{ top: pos.top, left: pos.left, width: MENU_W, maxHeight: pos.maxHeight, overflowY: 'auto' }}>
           <div className="chart-set-row">
             <span>
               <b>{t('charts.settings.countdown')}</b>
