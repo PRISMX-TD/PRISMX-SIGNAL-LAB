@@ -506,7 +506,9 @@ export default function ChartsPage() {
     PRO_ONLY.forEach((id) => { out[id] = false })
     return out
   }, [indicators, isPro])
-  const markerText = useMemo(() => ({ buy: String(t('charts.indicators.buyMark')), sell: String(t('charts.indicators.sellMark')) }), [t])
+  const markerText = useMemo(() => ({ buy: String(t('charts.indicators.buyMark')), sell: String(t('charts.indicators.sellMark')),
+    closeBuy: String(t('charts.indicators.closeBuyMark')), closeSell: String(t('charts.indicators.closeSellMark')),
+    slBuy: String(t('charts.indicators.slBuyMark')), slSell: String(t('charts.indicators.slSellMark')) }), [t])
 
   const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))

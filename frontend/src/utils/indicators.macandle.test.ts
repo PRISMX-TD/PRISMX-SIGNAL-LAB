@@ -11,6 +11,9 @@ describe('maCandle', () => {
     expect(r.up.slice(0, 4)).toEqual([1, 2, 3, 4])
     expect(r.dn.slice(3)).toEqual([4, 3, 2, 1])
     expect(r.up[5]).toBeNull()
+    // 每个点起始那段的方向：0→1→2→3 涨，3→4→5→6 跌 / direction of the segment starting at each point
+    expect(r.segDir).toEqual([1, 1, 1, -1, -1, -1, -1])
+    expect(r.ma).toEqual(closes)
   })
 
   it('fires a sell after the MA turns down and de-duplicates', () => {

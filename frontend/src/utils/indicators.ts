@@ -471,6 +471,13 @@ export interface MaCandleResult {
   // 均线向上段 / 向下段（端点重叠，各自断开成分段线）/ rising / falling legs (shared endpoints, gapped)
   up: (number | null)[]
   dn: (number | null)[]
+  // 整条均线 + 每个点起始那一段的方向（1 涨 / -1 跌）。图表按点着色画一条线：
+  // lightweight-charts 的空白点不会断线，分两条带空白的线会在另一色段上拉出直线。
+  // The whole MA plus the direction of the segment starting at each point.
+  // The chart draws ONE per-point-coloured line: whitespace doesn't break a
+  // lightweight-charts line, so two gapped series bridged across each other.
+  ma: (number | null)[]
+  segDir: (number | null)[]
   // 1 = 做多，-1 = 做空，null = 无 / 1 = buy, -1 = sell
   sig: (number | null)[]
 }
@@ -485,7 +492,7 @@ export interface MaCandleResult {
 export function maCandle(bars: Candle[], n = 20, delay = 1): MaCandleResult {
   const len = bars.length
   const ma = sma(bars.map((b) => b.c), n)
-  const r: MaCandleResult = { up: new Array(len).fill(null), dn: new Array(len).fill(null), sig: new Array(len).fill(null) }
+  const r: MaCandleResult = { up: new Array(len).fill(null), dn: new Array(len).fill(null), ma, segDir: new Array(len).fill(null), sig: new Array(len).fill(null) }
   // 第 k 根的方向：与上一根比，持平算向上（原版 maCur >= maPrev）/ direction at k; flat counts as up
   const dir = (k: number): number => {
     const a = ma[k]
@@ -499,7 +506,10 @@ export function maCandle(bars: Candle[], n = 20, delay = 1): MaCandleResult {
     const side = d > 0 ? r.up : r.dn
     side[k - 1] = ma[k - 1]
     side[k] = ma[k]
+    r.segDir[k - 1] = d
   }
+  // 最后一个点没有往后的线段，沿用自己的方向（图例颜色）/ last point keeps its own direction
+  if (len > 1) r.segDir[len - 1] = dir(len - 1) || null
   let last = 0
   for (let k = 0; k < len - 1; k++) {
     const j = k - delay
@@ -648,4 +658,96 @@ export function wallZones(all: Candle[], depth = 13, dev = 8, backstep = 5, poin
     }
   }
   return out.sort((a, b) => a.start - b.start)
+}
+
+export interface ShenlongResult {
+  // 主线：下轨 / 上轨（白）、空损线（红虚线）、多损线（绿虚线）、灰带上沿
+  lo: (number | null)[]
+  hi: (number | null)[]
+  slSellLine: (number | null)[]
+  slBuyLine: (number | null)[]
+  belt: (number | null)[]
+  // 每根 K 线的竖条：灰带（beltTop..beltBot）与趋势通道（chTop..chBot，chKind 1 涨 / -1 跌 / 0 盘整）
+  beltTop: (number | null)[]
+  beltBot: (number | null)[]
+  chTop: (number | null)[]
+  chBot: (number | null)[]
+  chKind: (number | null)[]
+  // 信号：1 多 / -1 空 / 2 平多 / -2 平空；slBuy / slSell 为该根的止损价
+  sig: (number | null)[]
+  slBuy: (number | null)[]
+  slSell: (number | null)[]
+}
+
+// 合作作者「汇盈神龙指标」（MT5 新版神龙指标）移植：
+// - 高低点各做两次居中 XMA(N)（L1 / H1），下轨 2L1−H1、上轨 2H1−L1，止损线外扩 3.9 倍；
+// - 灰带：高 / 低的 20 根线性加权均价再做 EMA(90)，带宽外扩 2 倍得多空分界；
+// - 上下轨相对分界线判定涨 / 跌 / 盘整通道，下轨上穿 K 线低点出「多」、K 线高点上穿上轨出「空」，
+//   不满足方向时改出「平空」/「平多」。
+// 注意：XMA 是居中均线，**最近 N/2 根会随新 K 线重绘**（原版即如此）。
+// Port of the partner's "汇盈神龙" (MT5 新版神龙指标): double centred XMA(N)
+// of lows/highs, rails 2L1−H1 / 2H1−L1, stop lines ±3.9×; a grey belt from
+// 20-bar LWMA highs/lows smoothed by EMA(90); channel up/down/sideways vs the
+// belt bounds; buy/sell/close marks on rail crosses. The centred XMA repaints
+// the latest N/2 bars, exactly like the original.
+export function shenlong(bars: Candle[], n = 25): ShenlongResult {
+  const len = bars.length
+  const nul = () => new Array<number | null>(len).fill(null)
+  const r: ShenlongResult = {
+    lo: nul(), hi: nul(), slSellLine: nul(), slBuyLine: nul(), belt: nul(),
+    beltTop: nul(), beltBot: nul(), chTop: nul(), chBot: nul(), chKind: nul(), sig: nul(), slBuy: nul(), slSell: nul(),
+  }
+  if (len < 25) return r
+  const L1 = xma(xma(bars.map((b) => b.l), n), n)
+  const H1 = xma(xma(bars.map((b) => b.h), n), n)
+  // 20 根线性加权（原版权重 20..2 对应 0..18 根前，第 20 根前权重 1，跳过第 19 根）
+  // 20-bar linear weights as in the original (20..2 for 0..18 bars back, 1 for 20 back)
+  const lw = (get: (k: number) => number, k: number): number => {
+    let s = 0
+    for (let j = 0; j <= 18; j++) s += (20 - j) * get(k - j)
+    return (s + get(k - 20)) / 210
+  }
+  const a = 2 / 91
+  let e2: number | null = null
+  let e3: number | null = null
+  for (let k = 20; k < len; k++) {
+    const b0 = lw((x) => bars[x].h, k)
+    const b1 = lw((x) => bars[x].l, k)
+    e2 = e2 == null ? b0 : a * b0 + (1 - a) * e2
+    e3 = e3 == null ? b1 : a * b1 + (1 - a) * e3
+    const w = e2 - e3
+    const sl0 = e2 + 2 * w
+    const sl8 = e3 - 2 * w
+    const lo = 2 * L1[k] - H1[k]
+    const hi = 2 * H1[k] - L1[k]
+    r.lo[k] = lo
+    r.hi[k] = hi
+    r.slSellLine[k] = 3.9 * (H1[k] - L1[k]) + H1[k]
+    r.slBuyLine[k] = L1[k] - 3.9 * (H1[k] - L1[k])
+    r.belt[k] = e2
+    r.beltTop[k] = Math.max(e2, e3)
+    r.beltBot[k] = Math.min(e2, e3)
+    const up = hi > sl0 && lo > sl8
+    const dn = hi < sl0 && lo < sl8
+    const side = hi < sl0 && lo > sl8
+    if (up || dn || side) {
+      r.chTop[k] = Math.max(lo, hi)
+      r.chBot[k] = Math.min(lo, hi)
+      r.chKind[k] = up ? 1 : dn ? -1 : 0
+    }
+    const pLo = r.lo[k - 1]
+    const pHi = r.hi[k - 1]
+    if (pLo == null || pHi == null) continue
+    const b = bars[k]
+    const p = bars[k - 1]
+    const crossUp = pLo < p.l && lo > b.l
+    const crossDn = p.h < pHi && b.h > hi
+    let buy = false
+    let sell = false
+    if (crossUp && (up || side)) { r.sig[k] = 1; r.slBuy[k] = r.slBuyLine[k]; buy = true }
+    if (crossDn && (dn || side)) { r.sig[k] = -1; r.slSell[k] = r.slSellLine[k]; sell = true }
+    if (crossUp && (dn || !side) && !buy) r.sig[k] = -2
+    if (crossDn && (up || !side) && !sell) r.sig[k] = 2
+  }
+  return r
 }

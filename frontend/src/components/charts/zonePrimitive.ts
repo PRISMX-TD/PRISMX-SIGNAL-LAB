@@ -7,6 +7,14 @@ import type {
   IChartApi, ISeriesApi, IPrimitivePaneRenderer, IPrimitivePaneView, SeriesAttachedParameter, SeriesType, Time, UTCTimestamp,
 } from 'lightweight-charts'
 
+// 每根 K 线上的竖条（神龙的灰带 / 通道）/ per-bar vertical strip
+export interface BarStrip {
+  time: UTCTimestamp
+  top: number
+  bottom: number
+  color: string
+}
+
 export interface ZoneRect {
   from: UTCTimestamp
   to: UTCTimestamp
@@ -26,6 +34,7 @@ function withAlpha(hex: string, a: number): string {
 
 export class ZonePrimitive {
   zones: ZoneRect[] = []
+  strips: BarStrip[] = []
   private chart: IChartApi | null = null
   private series: ISeriesApi<SeriesType> | null = null
   private ru: (() => void) | null = null
@@ -45,17 +54,29 @@ export class ZonePrimitive {
   paneViews(): readonly IPrimitivePaneView[] { return [this.view] }
   updateAllViews() { /* renderer reads live state */ }
 
-  setZones(z: ZoneRect[]) {
+  setZones(z: ZoneRect[], strips: BarStrip[] = []) {
     this.zones = z
+    this.strips = strips
     this.ru?.()
   }
 
   private draw(target: Target) {
     const chart = this.chart
     const series = this.series
-    if (!chart || !series || this.zones.length === 0) return
+    if (!chart || !series || (this.zones.length === 0 && this.strips.length === 0)) return
     const ts = chart.timeScale()
     target.useBitmapCoordinateSpace(({ context: ctx, horizontalPixelRatio: hr, verticalPixelRatio: vr, bitmapSize }) => {
+      // 竖条宽度跟随 K 线间距，最宽 8px（原版线宽 8）/ strip width follows bar spacing, max 8px
+      const sw = Math.max(1, Math.round(Math.min(8, ts.options().barSpacing * 0.8) * hr))
+      for (const st of this.strips) {
+        const x = ts.timeToCoordinate(st.time as Time)
+        const y1 = series.priceToCoordinate(st.top)
+        const y2 = series.priceToCoordinate(st.bottom)
+        if (x == null || y1 == null || y2 == null) continue
+        const top = Math.round(Math.min(y1, y2) * vr)
+        ctx.fillStyle = st.color
+        ctx.fillRect(Math.round(x * hr - sw / 2), top, sw, Math.max(1, Math.round(Math.abs(y2 - y1) * vr)))
+      }
       for (const z of this.zones) {
         const x1 = ts.timeToCoordinate(z.from as Time)
         const x2 = ts.timeToCoordinate(z.to as Time)

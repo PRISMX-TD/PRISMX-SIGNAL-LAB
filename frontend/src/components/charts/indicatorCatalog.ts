@@ -10,7 +10,7 @@
 // math in utils/indicators.ts and the i18n strings, nothing else.
 import type { Candle } from '../../api/types'
 import {
-  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand, maCandle, wallZones,
+  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand, maCandle, wallZones, shenlong,
 } from '../../utils/indicators'
 import type { IndicatorSettings, LineStyleCfg, PaneSize } from './indicatorSettings'
 
@@ -20,7 +20,7 @@ export type IndicatorGroup = 'trend' | 'momentum' | 'volatility' | 'volume' | 'c
 
 // 目录顺序 = 面板里的展示顺序；副图的创建顺序也按这里（上到下）。
 // Catalog order = display order in the panel; sub-panes are created in this order too.
-export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab', 'macandle', 'kpsq']
+export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab', 'macandle', 'shenlong', 'kpsq']
 export const GROUPS: IndicatorGroup[] = ['trend', 'momentum', 'volatility', 'volume', 'custom']
 
 export interface IndicatorMeta {
@@ -46,11 +46,12 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
   obv: { abbr: 'OBV', group: 'volume', pane: 'sub' },
   xmab: { abbr: 'XMA', group: 'custom', pane: 'main' },
   macandle: { abbr: 'HY', group: 'custom', pane: 'main' },
+  shenlong: { abbr: 'SL', group: 'custom', pane: 'main' },
   kpsq: { abbr: 'KP', group: 'custom', pane: 'main' },
 }
 // 只对 Pro 会员开放的指标：非 Pro（含会员过期被降级）一律不画、开关锁住。
 // Pro-only indicators: never drawn and locked for non-Pro (incl. expired) users.
-export const PRO_ONLY: ReadonlySet<IndicatorId> = new Set<IndicatorId>(['macandle', 'kpsq'])
+export const PRO_ONLY: ReadonlySet<IndicatorId> = new Set<IndicatorId>(['macandle', 'shenlong', 'kpsq'])
 export const MAIN_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'main')
 export const SUB_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'sub')
 
@@ -98,6 +99,8 @@ export const INDICATOR_FORM: Record<IndicatorId, IndicatorForm> = {
     C('upColor', 'bandColor'), C('downColor', 'downColor'), C('midColor', 'midColor'), C('obColor', 'overbought'), C('osColor', 'oversold')], lineStyle: true },
   macandle: { params: [P('period', 'period', 1, 500), P('delay', 'signalDelay', 0, 10),
     C('upColor', 'upColor'), C('downColor', 'downColor'), C('buyColor', 'buyColor'), C('sellColor', 'sellColor')], lineStyle: true },
+  shenlong: { params: [P('period', 'period', 5, 200), C('upColor', 'upChannel'), C('downColor', 'downChannel'), C('sideColor', 'sideChannel'),
+    C('buyColor', 'buyColor'), C('sellColor', 'sellColor')], lineStyle: true },
   kpsq: { params: [P('ma1', 'ma1', 1, 1000), P('ma2', 'ma2', 1, 1000), P('ma3', 'ma3', 1, 1000),
     C('c1', 'ma1Color'), C('c2', 'ma2Color'), C('c3', 'ma3Color'), C('resColor', 'resColor'), C('supColor', 'supColor')], lineStyle: true },
 }
@@ -161,6 +164,10 @@ export interface SeriesSpec {
   histColor?: 'sign' | 'candle'
   // 中间的 null 断开而不是连线（分段着色线），图例里也不单列 / break at interior nulls; omitted from legends
   gaps?: boolean
+  // 按点着色：dirKey 数组 > 0 用 color，< 0 用 downColor（该点起始的线段）
+  // per-point colouring: dirKey > 0 → color, < 0 → downColor (segment starting at that point)
+  dirKey?: string
+  downColor?: string
   // 图例里的短标签；空字符串表示只显示指标缩写 / short legend label ('' = abbreviation only)
   label: string
 }
@@ -226,14 +233,22 @@ export function seriesSpecs(id: IndicatorId, s: IndicatorSettings): SeriesSpec[]
     // Two thick legs; the engine turns the `sig` output into candle markers.
     // 三条均线；压力/支撑区域由引擎从 resTop/resBot/supTop/supBot 画成矩形
     // Three MAs; the engine draws zones from resTop/resBot/supTop/supBot.
+    // 上下轨白线、止损线虚线、灰带中线；每根 K 线的灰带 / 通道竖条与信号由引擎画
+    // Rails, dashed stop lines and the belt line; per-bar strips and marks come from the engine.
+    case 'shenlong': return [
+      { key: 'hi', kind: 'line', color: '#e5e7eb', label: 'U' },
+      { key: 'lo', kind: 'line', color: '#e5e7eb', label: 'L' },
+      { key: 'slSellLine', kind: 'line', color: '#ff4d67', dashed: true, label: '' },
+      { key: 'slBuyLine', kind: 'line', color: '#2ee07e', dashed: true, label: '' },
+      { key: 'belt', kind: 'line', color: '#94a3b8', label: '' },
+    ]
     case 'kpsq': return [
       { key: 'ma1', kind: 'line', color: s.kpsq.c1, label: String(s.kpsq.ma1) },
       { key: 'ma2', kind: 'line', color: s.kpsq.c2, label: String(s.kpsq.ma2) },
       { key: 'ma3', kind: 'line', color: s.kpsq.c3, label: String(s.kpsq.ma3) },
     ]
     case 'macandle': return [
-      { key: 'up', kind: 'line', color: s.macandle.upColor, gaps: true, label: '' },
-      { key: 'dn', kind: 'line', color: s.macandle.downColor, gaps: true, label: '' },
+      { key: 'ma', kind: 'line', color: s.macandle.upColor, dirKey: 'segDir', downColor: s.macandle.downColor, label: '' },
     ]
   }
 }
@@ -270,6 +285,7 @@ export function computeIndicator(id: IndicatorId, bars: Candle[], s: IndicatorSe
     case 'volume': return { v: bars.map((b) => b.v) }
     case 'obv': return { v: obv(bars) }
     case 'xmab': { const r = xmaBand(bars, s.xmab.period, s.xmab.p1, s.xmab.p2); return { ...r } }
+    case 'shenlong': { const r = shenlong(bars, s.shenlong.period); return { ...r } }
     case 'kpsq': {
       const len = bars.length
       const z = { resTop: new Array<number | null>(len).fill(null), resBot: new Array<number | null>(len).fill(null), supTop: new Array<number | null>(len).fill(null), supBot: new Array<number | null>(len).fill(null) }
@@ -301,6 +317,7 @@ export function summaryOf(id: IndicatorId, s: IndicatorSettings): string {
     case 'volume': return ''
     case 'obv': return ''
     case 'xmab': return `${s.xmab.period} · ${s.xmab.p1} / ${s.xmab.p2}`
+    case 'shenlong': return `XMA ${s.shenlong.period}`
     case 'kpsq': return `${s.kpsq.ma1} · ${s.kpsq.ma2} · ${s.kpsq.ma3}`
     case 'macandle': return `SMA ${s.macandle.period} · ${s.macandle.delay}`
   }

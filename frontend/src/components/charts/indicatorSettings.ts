@@ -44,6 +44,7 @@ export interface IndicatorSettings {
   atr: { period: number; color: string } & LineStyleCfg & SubPaneCfg
   xmab: { period: number; p1: number; p2: number; upColor: string; downColor: string; midColor: string; obColor: string; osColor: string } & LineStyleCfg
   macandle: { period: number; delay: number; upColor: string; downColor: string; buyColor: string; sellColor: string } & LineStyleCfg
+  shenlong: { period: number; upColor: string; downColor: string; sideColor: string; buyColor: string; sellColor: string } & LineStyleCfg
   kpsq: { ma1: number; ma2: number; ma3: number; c1: string; c2: string; c3: string; resColor: string; supColor: string } & LineStyleCfg
 }
 
@@ -93,6 +94,8 @@ export const DEFAULT_INDICATOR_SETTINGS: IndicatorSettings = {
   // 默认值照搬作者原版（SMA 20、变色后第 1 根提示、红涨绿跌、黄多品红空）/ author's defaults
   macandle: { period: 20, delay: 1, upColor: '#ff4d67', downColor: '#2ee07e', buyColor: '#facc15', sellColor: '#f472b6', ...LINE, width: 3 },
   // 看盘神器：三条均线 50/72/180 + 原版绿压力 / 红支撑区域 / three MAs + original green/red zones
+  // 汇盈神龙：原版 XMA 25，涨通道暗红 / 跌通道暗绿 / 盘整灰，多红空绿（深色背景下提亮）
+  shenlong: { period: 25, upColor: '#b91c1c', downColor: '#15803d', sideColor: '#6b7280', buyColor: '#ff4d67', sellColor: '#2ee07e', ...LINE },
   kpsq: { ma1: 50, ma2: 72, ma3: 180, c1: '#f5c451', c2: '#a78bfa', c3: '#22d3ee', resColor: '#2ee07e', supColor: '#ff4d67', ...LINE },
 }
 

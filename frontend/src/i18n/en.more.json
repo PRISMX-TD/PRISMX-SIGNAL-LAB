@@ -354,7 +354,8 @@
         "obv": "Volume accumulated by up / down closes",
         "xmab": "User-shared · band channel widened from double-XMA highs/lows",
         "macandle": "Partner author · MA red up / green down + turn buy/sell marks",
-        "kpsq": "Partner author · resistance/support walls + three MAs"
+        "kpsq": "Partner author · resistance/support walls + three MAs",
+        "shenlong": "Partner author · trend channel + buy/sell/close/stop marks"
       },
       "hint": {
         "ma": "Averages stacked in order from short to long mark a bullish alignment; a pullback that holds the mid-term average is a common continuation entry.",
@@ -374,7 +375,8 @@
         "obv": "OBV making a new high before price signals money moving in early.",
         "xmab": "A user-provided indicator formula: highs and lows each get a double XMA(N); their gap widens the bands (×P1/P2) and the overbought/oversold lines (+1.2 more). Bands turn green when both step down.",
         "macandle": "A partner-licensed MT4 indicator: SMA(N) is red while rising and green while falling. When the MA turns, the bar N later (signal delay) that opens and closes on the new side gets a buy/sell mark; repeated same-direction signals are skipped. Closed bars only, no repaint. Pro members only.",
-        "kpsq": "A partner-licensed MT4 indicator: ZigZag pivots that step up (highs) or down (lows) become resistance (green) and support (red) walls drawn from the pivot candle body to now; walls price has re-entered are dropped. Three adjustable MAs are overlaid (default 50 / 72 / 180). Closed bars only. Pro members only."
+        "kpsq": "A partner-licensed MT4 indicator: ZigZag pivots that step up (highs) or down (lows) become resistance (green) and support (red) walls drawn from the pivot candle body to now; walls price has re-entered are dropped. Three adjustable MAs are overlaid (default 50 / 72 / 180). Closed bars only. Pro members only.",
+        "shenlong": "A partner-licensed MT5 indicator: double XMA(N) of highs and lows form the rails; the grey belt is an EMA(90) of weighted highs/lows. Rails vs the belt bounds classify the channel as up (red), down (green) or sideways (grey). The lower rail crossing above a bar low marks Buy, a bar high crossing above the upper rail marks Sell, with stop prices; otherwise Close Sell / Close Buy. XMA is centred, so the latest N/2 bars change as new bars arrive (as in the original). Pro members only."
       },
       "group": {
         "trend": "Trend",
@@ -435,7 +437,15 @@
       "ma2Color": "MA 2 color",
       "ma3Color": "MA 3 color",
       "resColor": "Resistance color",
-      "supColor": "Support color"
+      "supColor": "Support color",
+      "shenlong": "Huiying Dragon",
+      "upChannel": "Up channel",
+      "downChannel": "Down channel",
+      "sideChannel": "Sideways channel",
+      "closeBuyMark": "Close Buy",
+      "closeSellMark": "Close Sell",
+      "slBuyMark": "SL Buy",
+      "slSellMark": "SL Sell"
     },
     "draw": {
       "tools": "Drawing tools",

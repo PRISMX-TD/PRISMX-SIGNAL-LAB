@@ -354,7 +354,8 @@
         "obv": "Khối lượng tích lũy theo nến đóng tăng / giảm",
         "xmab": "Người dùng chia sẻ · kênh mở rộng từ XMA kép của đỉnh/đáy",
         "macandle": "Tác giả đối tác · MA tăng đỏ / giảm xanh + dấu mua/bán khi đảo chiều",
-        "kpsq": "Tác giả đối tác · tường kháng cự/hỗ trợ + ba đường MA"
+        "kpsq": "Tác giả đối tác · tường kháng cự/hỗ trợ + ba đường MA",
+        "shenlong": "Tác giả đối tác · kênh xu hướng + dấu mua/bán/đóng/cắt lỗ"
       },
       "hint": {
         "ma": "Các đường MA xếp theo thứ tự từ ngắn đến dài là dấu hiệu xu hướng tăng; nhịp hồi giữ được MA trung hạn là điểm vào tiếp diễn phổ biến.",
@@ -374,7 +375,8 @@
         "obv": "OBV lập đỉnh mới trước giá là dấu hiệu dòng tiền đang vào sớm.",
         "xmab": "Công thức chỉ báo do người dùng cung cấp: giá cao và thấp mỗi bên áp XMA(N) hai lần; khoảng chênh mở rộng dải (×P1/P2) và đường quá mua/quá bán (thêm +1.2). Dải chuyển xanh lá khi cả hai cùng đi xuống.",
         "macandle": "Chỉ báo MT4 do tác giả đối tác cấp phép: SMA(N) màu đỏ khi đi lên, xanh khi đi xuống. Khi MA đảo chiều, nến thứ N sau đó (độ trễ tín hiệu) mở và đóng cửa ở phía mới sẽ có dấu mua/bán; tín hiệu cùng chiều lặp lại bị bỏ qua. Chỉ dùng nến đã đóng, không vẽ lại. Chỉ dành cho thành viên Pro.",
-        "kpsq": "Chỉ báo MT4 do tác giả đối tác cấp phép: dùng ZigZag tìm đỉnh nâng dần và đáy hạ dần, vẽ tường kháng cự (xanh) và hỗ trợ (đỏ) từ thân nến đó đến hiện tại; tường bị giá quay lại sẽ bị loại. Kèm ba đường MA điều chỉnh được (mặc định 50 / 72 / 180). Chỉ dùng nến đã đóng. Chỉ dành cho thành viên Pro."
+        "kpsq": "Chỉ báo MT4 do tác giả đối tác cấp phép: dùng ZigZag tìm đỉnh nâng dần và đáy hạ dần, vẽ tường kháng cự (xanh) và hỗ trợ (đỏ) từ thân nến đó đến hiện tại; tường bị giá quay lại sẽ bị loại. Kèm ba đường MA điều chỉnh được (mặc định 50 / 72 / 180). Chỉ dùng nến đã đóng. Chỉ dành cho thành viên Pro.",
+        "shenlong": "Chỉ báo MT5 do tác giả đối tác cấp phép: XMA(N) kép của giá cao và thấp tạo thành hai ray; dải xám là EMA(90) của giá cao/thấp có trọng số. So ray với biên dải để phân loại kênh tăng (đỏ) / giảm (xanh) / đi ngang (xám). Ray dưới cắt lên trên đáy nến cho tín hiệu Mua, đỉnh nến cắt lên trên ray trên cho tín hiệu Bán, kèm giá cắt lỗ; nếu không đúng hướng thì báo Đóng. XMA là trung bình trung tâm nên N/2 nến gần nhất thay đổi khi có nến mới (như bản gốc). Chỉ dành cho thành viên Pro."
       },
       "group": {
         "trend": "Xu hướng",
@@ -435,7 +437,15 @@
       "ma2Color": "Màu MA 2",
       "ma3Color": "Màu MA 3",
       "resColor": "Màu kháng cự",
-      "supColor": "Màu hỗ trợ"
+      "supColor": "Màu hỗ trợ",
+      "shenlong": "Chỉ báo Rồng Huiying",
+      "upChannel": "Kênh tăng",
+      "downChannel": "Kênh giảm",
+      "sideChannel": "Kênh đi ngang",
+      "closeBuyMark": "Đóng mua",
+      "closeSellMark": "Đóng bán",
+      "slBuyMark": "SL mua",
+      "slSellMark": "SL bán"
     },
     "draw": {
       "tools": "Công cụ vẽ",

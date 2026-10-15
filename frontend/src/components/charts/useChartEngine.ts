@@ -37,7 +37,7 @@ import {
   type IndicatorId, type SeriesSpec,
 } from './indicatorCatalog'
 import { markChartDisposed } from './chartLifecycle'
-import { ZonePrimitive, type ZoneRect } from './zonePrimitive'
+import { ZonePrimitive, type BarStrip, type ZoneRect } from './zonePrimitive'
 import { EMPTY_LEGEND, toHistPoints, type CandleColors, type IndicatorFlags, type LegendValues } from './chartConfig'
 
 type LineApi = ISeriesApi<'Line'>
@@ -69,7 +69,7 @@ export function useChartEngine(
   refitKey: unknown,
   candleColors: CandleColors,
   // 指标信号标记的文字（做多 / 做空），由页面按当前语言传入 / marker texts, localized by the page
-  markerText: { buy: string; sell: string } = { buy: 'BUY', sell: 'SELL' },
+  markerText: { buy: string; sell: string; closeBuy?: string; closeSell?: string; slBuy?: string; slSell?: string } = { buy: 'BUY', sell: 'SELL' },
 ) {
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -160,6 +160,7 @@ export function useChartEngine(
     const next: LegendValues = {}
     const marks: SeriesMarker<UTCTimestamp>[] = []
     const zones: ZoneRect[] = []
+    const strips: BarStrip[] = []
     const lastT = times[times.length - 1]
     const feed = (id: IndicatorId, handles: Handle[]) => {
       const out = computeIndicator(id, bars, s)
@@ -173,12 +174,31 @@ export function useChartEngine(
         push('resTop', 'resBot', c.resColor ?? '#2ee07e')
         push('supTop', 'supBot', c.supColor ?? '#ff4d67')
       }
+      if (out.chKind && indicatorsRef.current[id]) {
+        const c = s[id] as { upColor?: string; downColor?: string; sideColor?: string }
+        out.beltTop?.forEach((top, i) => {
+          const bot = out.beltBot?.[i]
+          if (top != null && bot != null) strips.push({ time: times[i], top, bottom: bot, color: '#555555' })
+        })
+        out.chKind.forEach((kind, i) => {
+          const top = out.chTop?.[i]
+          const bot = out.chBot?.[i]
+          if (kind == null || top == null || bot == null) return
+          strips.push({ time: times[i], top, bottom: bot, color: (kind > 0 ? c.upColor : kind < 0 ? c.downColor : c.sideColor) ?? '#6b7280' })
+        })
+      }
       if (sig && indicatorsRef.current[id]) {
         const c = s[id] as { buyColor?: string; sellColor?: string }
         const txt = markerTextRef.current
         sig.forEach((v, i) => {
           if (v === 1) marks.push({ time: times[i], position: 'belowBar', shape: 'arrowUp', color: c.buyColor ?? '#facc15', text: txt.buy })
           else if (v === -1) marks.push({ time: times[i], position: 'aboveBar', shape: 'arrowDown', color: c.sellColor ?? '#f472b6', text: txt.sell })
+          else if (v === 2) marks.push({ time: times[i], position: 'aboveBar', shape: 'circle', color: '#facc15', text: txt.closeBuy ?? '' })
+          else if (v === -2) marks.push({ time: times[i], position: 'belowBar', shape: 'circle', color: '#facc15', text: txt.closeSell ?? '' })
+          const slb = out.slBuy?.[i]
+          const sls = out.slSell?.[i]
+          if (slb != null) marks.push({ time: times[i], position: 'atPriceMiddle', price: slb, shape: 'square', color: c.buyColor ?? '#ff4d67', text: txt.slBuy ?? '' })
+          if (sls != null) marks.push({ time: times[i], position: 'atPriceMiddle', price: sls, shape: 'square', color: c.sellColor ?? '#2ee07e', text: txt.slSell ?? '' })
         })
       }
       const row: Record<string, number | null> = {}
@@ -194,7 +214,14 @@ export function useChartEngine(
             api.setData(toHistPoints(times, values, candleColorsRef.current.up, candleColorsRef.current.down))
           }
         } else {
-          (h.api as LineApi).setData(toLinePoints(times, values, h.spec.gaps))
+          const dirs = h.spec.dirKey ? out[h.spec.dirKey] : undefined
+          if (dirs) {
+            const up = h.spec.color
+            const dn = h.spec.downColor ?? up
+            const pts: { time: UTCTimestamp; value: number; color: string }[] = []
+            values.forEach((v, i) => { if (v != null) pts.push({ time: times[i], value: v, color: (dirs[i] ?? 1) < 0 ? dn : up }) })
+            ;(h.api as LineApi).setData(pts)
+          } else (h.api as LineApi).setData(toLinePoints(times, values, h.spec.gaps))
         }
         row[h.spec.key] = values[values.length - 1] ?? null
       }
@@ -210,7 +237,7 @@ export function useChartEngine(
     }
     marks.sort((a, b) => a.time - b.time)
     markersRef.current?.setMarkers(marks)
-    zonesRef.current?.setZones(zones)
+    zonesRef.current?.setZones(zones, strips)
     latestLegendRef.current = next
     if (!hoveringRef.current) setLegend(next)
   }, [])
@@ -470,7 +497,7 @@ export function useChartEngine(
   // 切换语言后重画信号标记的文字 / redraw marker texts after a language switch
   useEffect(() => {
     recomputeIndicators()
-  }, [markerText.buy, markerText.sell, recomputeIndicators])
+  }, [markerText.buy, markerText.sell, markerText.closeBuy, markerText.closeSell, markerText.slBuy, markerText.slSell, recomputeIndicators])
 
   // refitKey 变化（进出全屏）时补一次 resize，确保图表填满、不残留默认位图。
   // On refitKey change (fullscreen in/out) resize once so the chart fills.

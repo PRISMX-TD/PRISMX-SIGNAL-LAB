@@ -216,6 +216,21 @@ function Preview({ id, settings, getCandles }: { id: IndicatorId; settings: Indi
           if (sp.kind === 'points') {
             g.fillStyle = sp.color
             vals.forEach((v, i) => { if (v != null) { g.beginPath(); g.arc(x(i), y(v), 1.6, 0, Math.PI * 2); g.fill() } })
+          } else if (sp.dirKey) {
+            // 按点着色的线：拆成涨 / 跌两段各自断开画（预览画布在 null 处会断线）
+            // per-point coloured line: split into up/down runs (the preview canvas breaks at nulls)
+            const dirs = out[sp.dirKey] ?? []
+            const upV = vals.map(() => null as number | null)
+            const dnV = vals.map(() => null as number | null)
+            vals.forEach((v, i) => {
+              const nx = vals[i + 1]
+              if (v == null || nx == null) return
+              const side = (dirs[i] ?? 1) < 0 ? dnV : upV
+              side[i] = v
+              side[i + 1] = nx
+            })
+            line(upV, y, sp.color, width, dashed || !!sp.dashed)
+            line(dnV, y, sp.downColor ?? sp.color, width, dashed || !!sp.dashed)
           } else line(vals, y, sp.color, width, dashed || !!sp.dashed)
         }
         return
