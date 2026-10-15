@@ -45,7 +45,7 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
   volume: { abbr: 'VOL', group: 'volume', pane: 'sub' },
   obv: { abbr: 'OBV', group: 'volume', pane: 'sub' },
   xmab: { abbr: 'XMA', group: 'custom', pane: 'main' },
-  macandle: { abbr: 'MAC', group: 'custom', pane: 'main' },
+  macandle: { abbr: 'HY', group: 'custom', pane: 'main' },
 }
 // 只对 Pro 会员开放的指标：非 Pro（含会员过期被降级）一律不画、开关锁住。
 // Pro-only indicators: never drawn and locked for non-Pro (incl. expired) users.
