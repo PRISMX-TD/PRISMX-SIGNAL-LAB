@@ -30,6 +30,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps 
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
+import { useAuth } from '../store/auth'
+import { PRO_ONLY } from '../components/charts/indicatorCatalog'
 import { useLive } from '../store/live'
 import { useOrderPlacement } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -486,6 +488,26 @@ export default function ChartsPage() {
     setIndicatorSettingsState((prev) => ({ ...prev, volume: { ...prev.volume, upColor: c.up, downColor: c.down } }))
   }, [])
 
+  // Pro 专属指标（MA 趋势蜡烛）：保存的开关原样保留（续费后自动恢复），但只有当前是 Pro
+  // 才真正画出来。会员到期由后端降级 plan，这里进页面刷新一次、之后每 5 分钟刷新一次，
+  // 降级后自动隐藏。/ Pro-only indicators: the saved toggle is kept (restored on
+  // renewal) but only drawn while the user is Pro. Expiry downgrades `plan` server
+  // side; we refresh on entry and every 5 min so it hides automatically.
+  const { user, refreshUser } = useAuth()
+  const isPro = user?.plan === 'PRO'
+  useEffect(() => {
+    refreshUser()
+    const id = window.setInterval(() => refreshUser(), 5 * 60_000)
+    return () => window.clearInterval(id)
+  }, [refreshUser])
+  const shownIndicators = useMemo<IndicatorFlags>(() => {
+    if (isPro) return indicators
+    const out = { ...indicators }
+    PRO_ONLY.forEach((id) => { out[id] = false })
+    return out
+  }, [indicators, isPro])
+  const markerText = useMemo(() => ({ buy: String(t('charts.indicators.buyMark')), sell: String(t('charts.indicators.sellMark')) }), [t])
+
   const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
     setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
   }, [])
@@ -495,7 +517,7 @@ export default function ChartsPage() {
   // Chart instance / indicator series / legend / panes → useChartEngine; history /
   // paging / polling → useChartData. The chart is never hidden any more, so the
   // refit key only changes on entering/leaving fullscreen (a real resize).
-  const engine = useChartEngine(containerRef, indicators, indicatorSettings, isFullscreen, candleColors)
+  const engine = useChartEngine(containerRef, shownIndicators, indicatorSettings, isFullscreen, candleColors, markerText)
   const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
   const liveBidRef = useRef<number | null>(null)
   const dataKeyRef = useRef('')
@@ -694,7 +716,7 @@ export default function ChartsPage() {
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
 
             {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
-            <IndicatorLegends indicators={indicators} indicatorSettings={indicatorSettings} legend={legend} paneOffsets={paneOffsets} decimals={decimals} />
+            <IndicatorLegends indicators={shownIndicators} indicatorSettings={indicatorSettings} legend={legend} paneOffsets={paneOffsets} decimals={decimals} />
 
             {/* 全屏态悬浮画线工具栏（可拖移）*/}
             {isFullscreen && drawReady && (
@@ -803,7 +825,8 @@ export default function ChartsPage() {
 
       {settingsOpen && (
         <IndicatorSettingsModal
-          indicators={indicators}
+          indicators={shownIndicators}
+          isPro={isPro}
           onToggle={toggleIndicator}
           onSetIndicators={setIndicatorsState}
           getCandles={() => engine.candlesRef.current}

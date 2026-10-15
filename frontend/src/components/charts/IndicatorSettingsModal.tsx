@@ -21,14 +21,17 @@ import {
   type IndicatorSettings, type LineDash, type LineWidth, type LinesConfig, type PaneSize,
 } from './indicatorSettings'
 import {
-  GROUPS, INDICATOR_FORM, INDICATOR_IDS, INDICATOR_META, TEMPLATES, computeIndicator, enforceParamOrder,
+  GROUPS, INDICATOR_FORM, INDICATOR_IDS, INDICATOR_META, PRO_ONLY, TEMPLATES, computeIndicator, enforceParamOrder,
   refLines, seriesSpecs, summaryOf,
   type IndicatorId,
 } from './indicatorCatalog'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { useNavigate } from 'react-router-dom'
 
 interface Props {
   indicators: IndicatorFlags
+  // 非 Pro 时 PRO_ONLY 指标锁住，点开关去升级页 / non-Pro: PRO_ONLY toggles lead to /upgrade
+  isPro: boolean
   onToggle: (key: IndicatorId) => void
   onSetIndicators: (next: IndicatorFlags) => void
   getCandles: () => Candle[]
@@ -269,8 +272,14 @@ function Preview({ id, settings, getCandles }: { id: IndicatorId; settings: Indi
   )
 }
 
-export default function IndicatorSettingsModal({ indicators, onToggle, onSetIndicators, getCandles, settings, onChange, onClose }: Props) {
+export default function IndicatorSettingsModal({ indicators, isPro, onToggle: rawToggle, onSetIndicators, getCandles, settings, onChange, onClose }: Props) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
+  const locked = (id: IndicatorId) => !isPro && PRO_ONLY.has(id)
+  const onToggle = (id: IndicatorId) => {
+    if (locked(id)) { onClose(); navigate('/upgrade'); return }
+    rawToggle(id)
+  }
   const firstOn = INDICATOR_IDS.find((id) => indicators[id]) ?? 'ma'
   const [sel, setSel] = useState<IndicatorId>(firstOn)
   const [query, setQuery] = useState('')
@@ -356,7 +365,7 @@ export default function IndicatorSettingsModal({ indicators, onToggle, onSetIndi
                     >
                       <span className="ind-ab">{INDICATOR_META[id].abbr}</span>
                       <span className="ind-txt">
-                        <span className="nm">{name(id)}</span>
+                        <span className="nm">{name(id)}{PRO_ONLY.has(id) && <span className="ind-tag">PRO</span>}</span>
                         <span className="ds">{t(`charts.indicators.desc.${id}`)}</span>
                       </span>
                       <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
@@ -375,12 +384,13 @@ export default function IndicatorSettingsModal({ indicators, onToggle, onSetIndi
           <div className="ind-ed-hd">
             <span className="ind-ab lg">{meta.abbr}</span>
             <div className="ind-ed-t">
-              <h4>{name(sel)}<span className="ind-tag">{t(meta.pane === 'main' ? 'charts.indicators.mainPane' : 'charts.indicators.subPane')}</span></h4>
+              <h4>{name(sel)}{PRO_ONLY.has(sel) && <span className="ind-tag">PRO</span>}<span className="ind-tag">{t(meta.pane === 'main' ? 'charts.indicators.mainPane' : 'charts.indicators.subPane')}</span></h4>
               <p>{t(`charts.indicators.desc.${sel}`)}</p>
             </div>
             <Switch checked={indicators[sel]} onChange={() => onToggle(sel)} aria-label={name(sel)} />
           </div>
           {meta.group === 'custom' && <p className="ind-disc ed" role="note">{t('charts.indicators.customDisclaimer')}</p>}
+          {locked(sel) && <p className="ind-disc ed" role="note">{t('charts.indicators.proOnly')}</p>}
           <Preview id={sel} settings={settings} getCandles={getCandles} />
           <div className="ind-body no-sb">
             <div className="ind-sec">

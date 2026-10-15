@@ -352,7 +352,8 @@
         "atr": "Biên độ dao động thực trung bình, dùng để đặt khoảng cách SL",
         "volume": "Cột khối lượng theo từng nến",
         "obv": "Khối lượng tích lũy theo nến đóng tăng / giảm",
-        "xmab": "Người dùng chia sẻ · kênh mở rộng từ XMA kép của đỉnh/đáy"
+        "xmab": "Người dùng chia sẻ · kênh mở rộng từ XMA kép của đỉnh/đáy",
+        "macandle": "Tác giả đối tác · MA tăng đỏ / giảm xanh + dấu mua/bán khi đảo chiều"
       },
       "hint": {
         "ma": "Các đường MA xếp theo thứ tự từ ngắn đến dài là dấu hiệu xu hướng tăng; nhịp hồi giữ được MA trung hạn là điểm vào tiếp diễn phổ biến.",
@@ -370,7 +371,8 @@
         "atr": "Đặt SL cách 1,5 đến 2 ATR để tránh nhiễu thông thường; đây cũng là cơ sở tính khối lượng theo % rủi ro khi đặt lệnh.",
         "volume": "Khối lượng xác nhận giá: phá vỡ kèm khối lượng lớn đáng tin, đỉnh mới với khối lượng thấp cần nghi ngờ.",
         "obv": "OBV lập đỉnh mới trước giá là dấu hiệu dòng tiền đang vào sớm.",
-        "xmab": "Công thức chỉ báo do người dùng cung cấp: giá cao và thấp mỗi bên áp XMA(N) hai lần; khoảng chênh mở rộng dải (×P1/P2) và đường quá mua/quá bán (thêm +1.2). Dải chuyển xanh lá khi cả hai cùng đi xuống."
+        "xmab": "Công thức chỉ báo do người dùng cung cấp: giá cao và thấp mỗi bên áp XMA(N) hai lần; khoảng chênh mở rộng dải (×P1/P2) và đường quá mua/quá bán (thêm +1.2). Dải chuyển xanh lá khi cả hai cùng đi xuống.",
+        "macandle": "Chỉ báo MT4 do tác giả đối tác cấp phép: SMA(N) màu đỏ khi đi lên, xanh khi đi xuống. Khi MA đảo chiều, nến thứ N sau đó (độ trễ tín hiệu) mở và đóng cửa ở phía mới sẽ có dấu mua/bán; tín hiệu cùng chiều lặp lại bị bỏ qua. Chỉ dùng nến đã đóng, không vẽ lại. Chỉ dành cho thành viên Pro."
       },
       "group": {
         "trend": "Xu hướng",
@@ -415,7 +417,14 @@
       "upperMult": "Hệ số trên P1",
       "lowerMult": "Hệ số dưới P2",
       "bandColor": "Màu dải",
-      "midColor": "Màu đường giữa"
+      "midColor": "Màu đường giữa",
+      "macandle": "Nến xu hướng MA",
+      "signalDelay": "Độ trễ tín hiệu (nến)",
+      "buyColor": "Màu mua",
+      "sellColor": "Màu bán",
+      "buyMark": "Mua",
+      "sellMark": "Bán",
+      "proOnly": "Chỉ báo này chỉ dành cho thành viên Pro. Nâng cấp để sử dụng; chỉ báo sẽ tự ẩn khi hết hạn thành viên."
     },
     "draw": {
       "tools": "Công cụ vẽ",

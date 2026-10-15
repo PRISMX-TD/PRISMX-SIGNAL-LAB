@@ -466,3 +466,58 @@ export function xmaBand(bars: Candle[], n = 38, p1 = 1.08, p2 = 1.08, ext = 1.2)
   }
   return r
 }
+
+export interface MaCandleResult {
+  // 均线向上段 / 向下段（端点重叠，各自断开成分段线）/ rising / falling legs (shared endpoints, gapped)
+  up: (number | null)[]
+  dn: (number | null)[]
+  // 1 = 做多，-1 = 做空，null = 无 / 1 = buy, -1 = sell
+  sig: (number | null)[]
+}
+
+// 合作作者的「MA 趋势蜡烛」（MT4 MA_Candle_Trend v1.22）：SMA(n) 按方向分红绿两段；
+// 均线在第 k-delay 根拐头，且第 k 根的开收盘都站在均线同一侧时出信号，与上一个信号
+// 同向则跳过。只用已收盘的 K 线（最后一根不出信号），与原版一致、不重绘。
+// Partner author's "MA trend candle" (MT4 MA_Candle_Trend v1.22): SMA(n) split
+// into rising/falling legs; a signal fires when the MA turns at bar k-delay and
+// bar k opens and closes on the new side, de-duplicated against the previous
+// signal's direction. Closed bars only (never the last one), so no repaint.
+export function maCandle(bars: Candle[], n = 20, delay = 1): MaCandleResult {
+  const len = bars.length
+  const ma = sma(bars.map((b) => b.c), n)
+  const r: MaCandleResult = { up: new Array(len).fill(null), dn: new Array(len).fill(null), sig: new Array(len).fill(null) }
+  // 第 k 根的方向：与上一根比，持平算向上（原版 maCur >= maPrev）/ direction at k; flat counts as up
+  const dir = (k: number): number => {
+    const a = ma[k]
+    const b = ma[k - 1]
+    if (k < 1 || a == null || b == null) return 0
+    return a >= b ? 1 : -1
+  }
+  for (let k = 1; k < len; k++) {
+    const d = dir(k)
+    if (d === 0) continue
+    const side = d > 0 ? r.up : r.dn
+    side[k - 1] = ma[k - 1]
+    side[k] = ma[k]
+  }
+  let last = 0
+  for (let k = 0; k < len - 1; k++) {
+    const j = k - delay
+    if (j < 2) continue
+    const m0 = ma[j]
+    const m1 = ma[j - 1]
+    const m2 = ma[j - 2]
+    const mk = ma[k]
+    if (m0 == null || m1 == null || m2 == null || mk == null) continue
+    const upJ = m0 > m1
+    if (upJ === (m1 > m2)) continue
+    const b = bars[k]
+    let s = 0
+    if (upJ && b.o > mk && b.c > mk) s = 1
+    else if (!upJ && b.o < mk && b.c < mk) s = -1
+    if (s === 0 || s === last) continue
+    last = s
+    r.sig[k] = s
+  }
+  return r
+}

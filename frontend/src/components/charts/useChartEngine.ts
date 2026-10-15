@@ -19,6 +19,10 @@ import {
   CandlestickSeries,
   LineSeries,
   HistogramSeries,
+  createSeriesMarkers,
+  type ISeriesMarkersPluginApi,
+  type SeriesMarker,
+  type Time,
   type IChartApi,
   type ISeriesApi,
   type IPriceLine,
@@ -63,6 +67,8 @@ export function useChartEngine(
   indicatorSettings: IndicatorSettings,
   refitKey: unknown,
   candleColors: CandleColors,
+  // 指标信号标记的文字（做多 / 做空），由页面按当前语言传入 / marker texts, localized by the page
+  markerText: { buy: string; sell: string } = { buy: 'BUY', sell: 'SELL' },
 ) {
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<ISeriesApi<'Candlestick'> | null>(null)
@@ -127,6 +133,13 @@ export function useChartEngine(
   // K 线涨跌色（用户可改）：建图时用初值，之后由下方 effect applyOptions；MACD 柱也跟它走。
   // User-configurable candle colors: initial value at build, then applyOptions below; MACD bars follow too.
   const candleColorsRef = useRef(candleColors)
+  // 指标信号（如 MA 趋势蜡烛的做多/做空）画成 K 线上的标记；开关读 ref，避免 recompute 依赖变化
+  // Indicator signals (e.g. MA candle buy/sell) as candle markers; toggles read from a ref.
+  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
+  const indicatorsRef = useRef(indicators)
+  indicatorsRef.current = indicators
+  const markerTextRef = useRef(markerText)
+  markerTextRef.current = markerText
 
   // 按当前 candlesRef 重算全部有 series 的指标并写回，同时刷新"最新值"图例缓存。
   // 空依赖保持函数引用稳定（只读 ref），从任何 effect / 定时器闭包调用都不会陈旧。
@@ -142,8 +155,18 @@ export function useChartEngine(
     const times = bars.map((b) => b.t as UTCTimestamp)
     const s = indicatorSettingsRef.current
     const next: LegendValues = {}
+    const marks: SeriesMarker<UTCTimestamp>[] = []
     const feed = (id: IndicatorId, handles: Handle[]) => {
       const out = computeIndicator(id, bars, s)
+      const sig = out.sig
+      if (sig && indicatorsRef.current[id]) {
+        const c = s[id] as { buyColor?: string; sellColor?: string }
+        const txt = markerTextRef.current
+        sig.forEach((v, i) => {
+          if (v === 1) marks.push({ time: times[i], position: 'belowBar', shape: 'arrowUp', color: c.buyColor ?? '#facc15', text: txt.buy })
+          else if (v === -1) marks.push({ time: times[i], position: 'aboveBar', shape: 'arrowDown', color: c.sellColor ?? '#f472b6', text: txt.sell })
+        })
+      }
       const row: Record<string, number | null> = {}
       for (const h of handles) {
         const values = out[h.spec.key] ?? []
@@ -171,6 +194,8 @@ export function useChartEngine(
       const entry = subRef.current[id]
       if (entry) feed(id, entry.handles)
     }
+    marks.sort((a, b) => a.time - b.time)
+    markersRef.current?.setMarkers(marks)
     latestLegendRef.current = next
     if (!hoveringRef.current) setLegend(next)
   }, [])
@@ -259,6 +284,7 @@ export function useChartEngine(
     })
     chartRef.current = chart
     seriesRef.current = series
+    markersRef.current = createSeriesMarkers(series, [])
     setDrawReady(true)
 
     // 十字准线/触摸拖动 → 图例：param.time 有值表示落在数据区内，用 seriesData 查各
@@ -310,6 +336,7 @@ export function useChartEngine(
       markChartDisposed(chart)
       chartRef.current = null
       seriesRef.current = null
+      markersRef.current = null
       mainRef.current = {}
       subRef.current = {}
       setDrawReady(false)
@@ -420,6 +447,11 @@ export function useChartEngine(
     })
     recomputeIndicators()
   }, [candleColors, recomputeIndicators])
+
+  // 切换语言后重画信号标记的文字 / redraw marker texts after a language switch
+  useEffect(() => {
+    recomputeIndicators()
+  }, [markerText.buy, markerText.sell, recomputeIndicators])
 
   // refitKey 变化（进出全屏）时补一次 resize，确保图表填满、不残留默认位图。
   // On refitKey change (fullscreen in/out) resize once so the chart fills.

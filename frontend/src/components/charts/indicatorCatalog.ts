@@ -10,7 +10,7 @@
 // math in utils/indicators.ts and the i18n strings, nothing else.
 import type { Candle } from '../../api/types'
 import {
-  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand,
+  atr, bollinger, cci, closes, donchianHigh, donchianLow, ema, kdj, macd, obv, parabolicSar, rsi, sma, superTrend, vwap, williamsR, xmaBand, maCandle,
 } from '../../utils/indicators'
 import type { IndicatorSettings, LineStyleCfg, PaneSize } from './indicatorSettings'
 
@@ -20,7 +20,7 @@ export type IndicatorGroup = 'trend' | 'momentum' | 'volatility' | 'volume' | 'c
 
 // 目录顺序 = 面板里的展示顺序；副图的创建顺序也按这里（上到下）。
 // Catalog order = display order in the panel; sub-panes are created in this order too.
-export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab']
+export const INDICATOR_IDS: IndicatorId[] = ['ma', 'ema', 'boll', 'donch', 'vwap', 'st', 'sar', 'rsi', 'macd', 'kdj', 'cci', 'wr', 'atr', 'volume', 'obv', 'xmab', 'macandle']
 export const GROUPS: IndicatorGroup[] = ['trend', 'momentum', 'volatility', 'volume', 'custom']
 
 export interface IndicatorMeta {
@@ -45,7 +45,11 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
   volume: { abbr: 'VOL', group: 'volume', pane: 'sub' },
   obv: { abbr: 'OBV', group: 'volume', pane: 'sub' },
   xmab: { abbr: 'XMA', group: 'custom', pane: 'main' },
+  macandle: { abbr: 'MAC', group: 'custom', pane: 'main' },
 }
+// 只对 Pro 会员开放的指标：非 Pro（含会员过期被降级）一律不画、开关锁住。
+// Pro-only indicators: never drawn and locked for non-Pro (incl. expired) users.
+export const PRO_ONLY: ReadonlySet<IndicatorId> = new Set<IndicatorId>(['macandle'])
 export const MAIN_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'main')
 export const SUB_IDS = INDICATOR_IDS.filter((id) => INDICATOR_META[id].pane === 'sub')
 
@@ -91,6 +95,8 @@ export const INDICATOR_FORM: Record<IndicatorId, IndicatorForm> = {
   obv: { params: [C('color', 'color')], lineStyle: true },
   xmab: { params: [P('period', 'period', 4, 200), P('p1', 'upperMult', 0, 5, { isFloat: true }), P('p2', 'lowerMult', 0, 5, { isFloat: true }),
     C('upColor', 'bandColor'), C('downColor', 'downColor'), C('midColor', 'midColor'), C('obColor', 'overbought'), C('osColor', 'oversold')], lineStyle: true },
+  macandle: { params: [P('period', 'period', 1, 500), P('delay', 'signalDelay', 0, 10),
+    C('upColor', 'upColor'), C('downColor', 'downColor'), C('buyColor', 'buyColor'), C('sellColor', 'sellColor')], lineStyle: true },
 }
 
 // ── 参数之间的相对约束 / relative constraints between parameters ──
@@ -213,6 +219,12 @@ export function seriesSpecs(id: IndicatorId, s: IndicatorSettings): SeriesSpec[]
       { key: 'ob', kind: 'line', color: s.xmab.obColor, dashed: true, label: 'OB' },
       { key: 'os', kind: 'line', color: s.xmab.osColor, dashed: true, label: 'OS' },
     ]
+    // 红涨绿跌两段粗线；做多/做空箭头由引擎从输出的 sig 画成 K 线标记
+    // Two thick legs; the engine turns the `sig` output into candle markers.
+    case 'macandle': return [
+      { key: 'up', kind: 'line', color: s.macandle.upColor, gaps: true, label: '' },
+      { key: 'dn', kind: 'line', color: s.macandle.downColor, gaps: true, label: '' },
+    ]
   }
 }
 
@@ -248,6 +260,7 @@ export function computeIndicator(id: IndicatorId, bars: Candle[], s: IndicatorSe
     case 'volume': return { v: bars.map((b) => b.v) }
     case 'obv': return { v: obv(bars) }
     case 'xmab': { const r = xmaBand(bars, s.xmab.period, s.xmab.p1, s.xmab.p2); return { ...r } }
+    case 'macandle': { const r = maCandle(bars, s.macandle.period, s.macandle.delay); return { ...r } }
   }
 }
 
@@ -270,6 +283,7 @@ export function summaryOf(id: IndicatorId, s: IndicatorSettings): string {
     case 'volume': return ''
     case 'obv': return ''
     case 'xmab': return `${s.xmab.period} · ${s.xmab.p1} / ${s.xmab.p2}`
+    case 'macandle': return `SMA ${s.macandle.period} · ${s.macandle.delay}`
   }
 }
 
