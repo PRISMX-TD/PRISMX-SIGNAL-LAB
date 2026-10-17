@@ -215,6 +215,12 @@ describe('交易句子 / trading sentences', () => {
     expect(renderEvent(shared, zh).text).toContain('这个账号同时绑定给：美琳、lucas@x.com')
   })
 
+  it('删除工单：标题取自这一行的新值（工单已经查不到），说成「删除了工单」/ a deleted ticket reads as deleted, titled from the row itself', () => {
+    const del = item('admin.ticket', { ticket_id: 't1', subject: null, field: 'delete', old: null, new: 'MT5 连接不上', changes: [{ field: 'delete', old: null, new: 'MT5 连接不上' }] })
+    expect(renderEvent(del, zh).text).toBe('删除了工单「MT5 连接不上」')
+    expect(renderEvent(del, en).text).toMatch(/^Deleted ticket .*MT5 连接不上/)
+  })
+
   it('修改挂单只说动了的那几项：没传的不说成「不设止损」/ pending modify names only what changed, never "no stop loss" for an untouched side', () => {
     const pm = (over: Record<string, unknown>) =>
       item('pending.modify', { ticket: 880105, sym: 'XAUUSD', price: null, sl: null, tp: null, sl_op: 'keep', tp_op: 'keep', msg: null, note: null, ...over })

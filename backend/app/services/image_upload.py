@@ -354,6 +354,43 @@ def upload_private_image(data: bytes, folder: str) -> str:
     return key
 
 
+def delete_private_images(keys: list[str]) -> None:
+    """尽力删掉私有工单桶里的这些对象（删工单时用），同时清掉它们的签名缓存。
+
+    失败只记日志不抛：工单行已经删了，存储里剩几张没人能再引用的图不影响任何功能，
+    不该让删除请求因为存储抖动而报错。放在后台任务里跑，不占删除请求的时间。
+
+    Best-effort removal of these objects from the private ticket bucket (used when a
+    ticket is deleted), evicting their signed-URL cache entries too. Failures are logged,
+    never raised: the ticket rows are already gone, and a few unreferenced objects left in
+    storage break nothing, so a storage hiccup must not fail the delete. Runs as a
+    background task, off the request's clock.
+    """
+    if not keys:
+        return
+    paths = list(dict.fromkeys(_split_key(k)[0] for k in keys))
+    with _sign_lock:
+        for path in paths:
+            _sign_cache.pop(path, None)
+    if not is_private_configured():
+        return
+    base = settings.SUPABASE_URL.rstrip("/")
+    bucket = settings.TICKET_IMAGE_BUCKET
+    try:
+        resp = httpx.request(
+            "DELETE",
+            f"{base}/storage/v1/object/{bucket}",
+            json={"prefixes": paths},
+            headers=_auth_headers(),
+            timeout=10.0,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("deleting ticket images failed: %s", exc)
+        return
+    if resp.status_code >= 400:
+        logger.warning("deleting ticket images rejected: %s %s", resp.status_code, resp.text[:300])
+
+
 def _split_key(key: str) -> tuple[str, str]:
     """对象键拆成 (路径, '#片段' 或 '') / split a stored key into (path, '#fragment' or '')."""
     path, sep, frag = key.partition("#")

@@ -13,6 +13,7 @@ import { adminApi, adminSupportApi, isAbortError } from '../../api/client'
 import type { SupportMember } from '../../api/supportTypes'
 import { fmtDate, fmtDay } from '../../api/utils'
 import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus as TicketStatusValue } from '../../api/types'
+import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../TicketImages'
@@ -42,7 +43,12 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
   const [replyStatus, setReplyStatus] = useState<TicketStatusValue | ''>('')
   const [replyPriority, setReplyPriority] = useState<TicketPriority | ''>('')
   const [sending, setSending] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const replyImages = useTicketImages((msg) => onToast('err', msg))
+  // 当前打开的工单 id，给在途的删除请求回来时核对 / the open ticket's id, checked when a delete returns
+  const openId = useRef<string | null>(null)
+  useEffect(() => { openId.current = detail?.id ?? null }, [detail])
 
   // 每次加载中止上一次：两个筛选下拉是最容易连点的地方，先发的响应后到就会把
   // 当前筛选的结果覆盖掉，表格与筛选条对不上且没有任何提示。中止之后 fetch 会以
@@ -163,12 +169,39 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
     }
   }
 
+  // 删除：工单、回复、附图、相关通知一起删，回到列表 / delete the ticket with its replies, images and notifications, back to the list
+  const deleteTicket = async () => {
+    if (!detail) return
+    const id = detail.id
+    setDeleting(true)
+    try {
+      await adminApi.deleteTicket(id)
+      onToast('ok', t('admin.ticketDelete.done'))
+      // 只在打开的还是这张工单时才退回列表 / only leave the detail view if this ticket is still the open one
+      if (openId.current === id) {
+        replyImages.clear()
+        setDetail(null)
+      }
+      void load()
+    } catch (err) {
+      onToast('err', err instanceof Error ? err.message : 'Delete failed')
+    } finally {
+      setDeleting(false)
+      setDeleteConfirm(false)
+    }
+  }
+
   if (detail) {
     return (
       <div className="space-y-4">
-        <button type="button" onClick={() => { replyImages.clear(); setDetail(null) }} className="adm-btn is-quiet">
-          &larr; {t('tickets.backToList')}
-        </button>
+        <div className="flex items-center justify-between gap-3">
+          <button type="button" onClick={() => { replyImages.clear(); setDetail(null) }} className="adm-btn is-quiet">
+            &larr; {t('tickets.backToList')}
+          </button>
+          <button type="button" className="adm-btn is-danger" disabled={deleting} onClick={() => setDeleteConfirm(true)}>
+            {t('admin.ticketDelete.action')}
+          </button>
+        </div>
 
         <div className="adm-card overflow-hidden p-0">
           <header className="border-b border-[var(--line)] px-5 py-4 sm:px-6">
@@ -289,6 +322,20 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
             </div>
           </div>
         </div>
+
+        {deleteConfirm && (
+          <ConfirmModal
+            center
+            danger
+            busy={deleting}
+            title={t('admin.ticketDelete.title')}
+            message={t('admin.ticketDelete.body')}
+            confirmLabel={t('admin.ticketDelete.action')}
+            onConfirm={() => void deleteTicket()}
+            // 删除请求在途时不让点遮罩关掉，免得退回列表点开别的工单 / no backdrop dismiss while the delete is in flight
+            onCancel={() => { if (!deleting) setDeleteConfirm(false) }}
+          />
+        )}
       </div>
     )
   }

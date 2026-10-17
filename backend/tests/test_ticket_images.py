@@ -147,6 +147,34 @@ def test_signing_skips_items_storage_could_not_sign(storage):
     assert set(iu.signed_image_urls([ok, gone])) == {ok}
 
 
+def test_delete_private_images_is_one_batch_call_and_evicts_the_cache(storage, monkeypatch):
+    """删工单时的附图清理：一次 DELETE 带全部路径（去掉尺寸片段、去重），签名缓存一起清；
+    存储报错或连不上只记日志，不抛。
+    Ticket-delete image cleanup: one DELETE carrying every path (size fragment stripped,
+    deduplicated), signed-URL cache evicted too; a storage error or network failure is
+    logged, never raised."""
+    a, b = f"u/{HEX}.png", f"u/{HEX[::-1]}.jpg"
+    iu._sign_cache[a] = ("https://signed/a", 1e12)
+    calls = []
+
+    def _request(method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        return httpx.Response(200, json=[], request=httpx.Request(method, url))
+
+    monkeypatch.setattr(iu.httpx, "request", _request)
+    iu.delete_private_images([a + "#w=1&h=2", a, b])
+    assert calls == [("DELETE", "https://x.supabase.co/storage/v1/object/tix", {"prefixes": [a, b]})]
+    assert a not in iu._sign_cache
+
+    def _boom(method, url, **kwargs):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(iu.httpx, "request", _boom)
+    iu.delete_private_images([a])  # 不抛 / does not raise
+    monkeypatch.setattr(iu.httpx, "request", lambda m, u, **k: httpx.Response(500, text="no", request=httpx.Request(m, u)))
+    iu.delete_private_images([a])  # 不抛 / does not raise
+
+
 # ---------- 路由 / router ----------
 
 @pytest.fixture(autouse=True)

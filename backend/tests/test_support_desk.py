@@ -144,7 +144,10 @@ def _calls(router):
     return out
 
 
-STAFF_CALLS = _calls(support.router) + _calls(tickets.admin_router)
+# 删工单只有管理员能做，从「客服也能用」的清单里拿出来，放进只给管理员的那组
+# deleting a ticket is admin-only, so it moves from the staff list to the admin-only one
+ADMIN_ONLY_TICKET_CALLS = [("DELETE", "/api/admin/tickets/nope")]
+STAFF_CALLS = [c for c in _calls(support.router) + _calls(tickets.admin_router) if c not in ADMIN_ONLY_TICKET_CALLS]
 ADMIN_SUPPORT_CALLS = _calls(support.admin_router)
 
 
@@ -159,7 +162,7 @@ def test_staff_endpoints_user_403_support_and_admin_allowed(client, people, meth
             assert r.status_code == 403, (who, method, path, r.status_code)
 
 
-@pytest.mark.parametrize("method,path", ADMIN_SUPPORT_CALLS + [
+@pytest.mark.parametrize("method,path", ADMIN_SUPPORT_CALLS + ADMIN_ONLY_TICKET_CALLS + [
     ("GET", "/api/admin/users"), ("PATCH", "/api/admin/users/nope"), ("GET", "/api/admin/settings"),
     ("GET", "/api/admin/activity"),
 ])
@@ -1058,3 +1061,67 @@ def test_extend_by_days_leaves_follow_ups_without_a_deadline_alone(client, db, p
     assert r.json() == {"updated": 2}
     db.refresh(open_ended)
     assert open_ended.expires_at is not None
+
+
+def test_admin_deletes_ticket_with_replies_notifications_and_audit(client, db, people, monkeypatch):
+    """管理员删工单：工单、全部回复（含内部备注）、指向它的工单通知一起没；别的通知不动；
+    审计留一行 ticket:<id>:delete（值是标题）；附图交给后台删，别的工单也引用的图不删。
+    客服删不了。
+    An admin deleting a ticket removes it, every reply (internal notes included) and the
+    ticket notifications pointing at it; other notifications stay; one audit row
+    ticket:<id>:delete holds the title; images go to background deletion except ones
+    another ticket also references. Support agents cannot delete."""
+    from app.routers import tickets as tk
+
+    deleted_keys: list[list[str]] = []
+    monkeypatch.setattr(tk, "delete_private_images", lambda keys: deleted_keys.append(list(keys)))
+    c, admin, inn = people["customer"], people["admin"], people["internal"]
+    t = Ticket(user_id=c.id, title="入金没到账", category="payment")
+    other = Ticket(user_id=c.id, title="别的工单", category="account")
+    db.add_all([t, other])
+    db.commit()
+    own, shared = f"{c.id}/aa11.png#w=10&h=10", f"{c.id}/bb22.jpg"
+    db.add_all([
+        TicketReply(ticket_id=t.id, author_id=c.id, body="截图", images=json.dumps([own, shared])),
+        TicketReply(ticket_id=t.id, author_id=inn.id, body="内部", internal=True, author_role="support"),
+        TicketReply(ticket_id=other.id, author_id=c.id, body="同一张图", images=json.dumps([shared])),
+        UserNotification(user_id=admin.id, kind="ticket_new", ref_id=t.id, text=t.title, link="/admin"),
+        UserNotification(user_id=c.id, kind="ticket_reply", ref_id=t.id, text=t.title, link="/support"),
+        UserNotification(user_id=c.id, kind="ticket_reply", ref_id=other.id, text=other.title, link="/support"),
+    ])
+    db.commit()
+    tid = t.id
+
+    assert client.delete(f"/api/admin/tickets/{tid}", headers=_auth(inn)).status_code == 403
+    assert db.get(Ticket, tid) is not None
+
+    r = client.delete(f"/api/admin/tickets/{tid}", headers=_auth(admin))
+    assert r.status_code == 200 and r.json() == {"deleted": True}
+    db.expire_all()
+    assert db.get(Ticket, tid) is None
+    assert db.query(TicketReply).filter(TicketReply.ticket_id == tid).count() == 0
+    assert db.query(TicketReply).filter(TicketReply.ticket_id == other.id).count() == 1
+    assert [n.ref_id for n in db.query(UserNotification).all()] == [other.id]
+    audit = db.query(AdminAuditLog).filter(AdminAuditLog.field == f"ticket:{tid}:delete").one()
+    assert audit.admin_user_id == admin.id and audit.target_user_id == c.id and audit.new_value == "入金没到账"
+    assert deleted_keys == [[own]]
+    assert client.get(f"/api/admin/tickets/{tid}", headers=_auth(admin)).status_code == 404
+    assert client.delete(f"/api/admin/tickets/{tid}", headers=_auth(admin)).status_code == 404
+
+
+def test_deleting_an_untitled_ticket_still_leaves_an_audit_row(client, db, people, monkeypatch):
+    """标题为空（旧数据 / 客服发信 strip 后为空）的工单删掉也要留痕：log_change 遇到空值会当「没变」
+    跳过，所以值用工单号顶上。
+    Deleting a ticket with an empty title still writes the audit row (log_change skips
+    empty values as unchanged), using the ticket number instead."""
+    from app.routers import tickets as tk
+
+    monkeypatch.setattr(tk, "delete_private_images", lambda keys: None)
+    c, admin = people["customer"], people["admin"]
+    t = Ticket(user_id=c.id, title="  ", category="account")
+    db.add(t)
+    db.commit()
+    tid = t.id
+    assert client.delete(f"/api/admin/tickets/{tid}", headers=_auth(admin)).status_code == 200
+    audit = db.query(AdminAuditLog).filter(AdminAuditLog.field == f"ticket:{tid}:delete").one()
+    assert audit.new_value == f"#{tid[:8]}"

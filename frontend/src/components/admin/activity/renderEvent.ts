@@ -1081,6 +1081,12 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
     const subject = str(p.subject) ? q(t, clip(str(p.subject)!)) : t('admin.log.v.untitled')
     const changes = arr(p.changes).map(obj).filter((x): x is P => !!x)
     const rows = changes.length ? changes : str(p.field) ? [{ field: p.field, old: p.old, new: p.new } as P] : []
+    // 删除工单：工单已经没了查不到标题，标题记在这一行的新值里 / deleted ticket: the title lives in the row's new value
+    const del = rows.find((c) => str(c.field) === 'delete')
+    if (del) {
+      const title = str(del.new) ?? str(p.subject)
+      return [t('admin.log.ev.ticket.deleted', { subject: title ? q(t, clip(title)) : t('admin.log.v.untitled') })]
+    }
     const items = rows.map((c) => {
       const field = str(c.field) ?? ''
       if (field === 'reply') return t('admin.log.x.replied', { text: q(t, clip(str(c.new) ?? '', 40)) })

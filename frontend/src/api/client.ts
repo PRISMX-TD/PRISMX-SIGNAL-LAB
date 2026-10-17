@@ -1707,6 +1707,9 @@ export const adminApi = {
         method: 'PATCH',
         body: JSON.stringify(patch),
       }),
+    // 删除工单（只有管理员）：连同回复、附图和指向它的通知 / delete a ticket (admins only), with its replies, images and notifications
+    deleteTicket: (id: string) =>
+      request<{ deleted: boolean }>(`/admin/tickets/${encodeURIComponent(id)}`, { method: 'DELETE' }),
     // 指派（rev 41）：admin 指派给任一在岗工作人员或传 null 清空；客服只能认领给自己 / 放弃自己的。
     // Assign: admins pick any on-duty staff (null clears); agents claim for themselves / release.
     assignTicket: (id: string, assigneeId: string | null) =>

@@ -1596,7 +1596,8 @@
         "ticketField": {
           "status": "状态",
           "priority": "优先级",
-          "reply": "回复"
+          "reply": "回复",
+          "delete": "删除"
         },
         "field": {
           "agent": "代理",
@@ -1825,7 +1826,8 @@
         },
         "ticket": {
           "head": "处理工单{{subject}}：",
-          "none": "处理了工单{{subject}}"
+          "none": "处理了工单{{subject}}",
+          "deleted": "删除了工单{{subject}}"
         },
         "other": {
           "head": "修改了："
@@ -3256,6 +3258,12 @@
         "support_alert_views_per_hour": "每小时查看客户告警阈值",
         "support_alert_views_per_hour_hint": "超过会通知管理员"
       }
+    },
+    "ticketDelete": {
+      "action": "删除工单",
+      "title": "删除这张工单？",
+      "body": "工单连同全部回复、内部备注和附图会一起删除，无法恢复；用户那边也不再看得到这张工单。",
+      "done": "工单已删除"
     }
   },
   "simulator": {

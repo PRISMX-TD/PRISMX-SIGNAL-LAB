@@ -1599,7 +1599,8 @@
         "ticketField": {
           "status": "status",
           "priority": "priority",
-          "reply": "reply"
+          "reply": "reply",
+          "delete": "deletion"
         },
         "field": {
           "agent": "agent",
@@ -1833,7 +1834,8 @@
         },
         "ticket": {
           "head": "Handled ticket {{subject}}: ",
-          "none": "Handled ticket {{subject}}"
+          "none": "Handled ticket {{subject}}",
+          "deleted": "Deleted ticket {{subject}}"
         },
         "other": {
           "head": "Changed: "
@@ -3266,6 +3268,12 @@
         "support_alert_views_per_hour": "Customer views per hour alert threshold",
         "support_alert_views_per_hour_hint": "Admins are notified above this"
       }
+    },
+    "ticketDelete": {
+      "action": "Delete ticket",
+      "title": "Delete this ticket?",
+      "body": "The ticket and all its replies, internal notes and images will be deleted for good; the user will no longer see it either.",
+      "done": "Ticket deleted"
     }
   },
   "simulator": {

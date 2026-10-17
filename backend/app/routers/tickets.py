@@ -18,14 +18,14 @@ import logging
 import re
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 from sqlalchemy.orm import Session, selectinload
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.strategy_limits import user_limiter
-from app.models import Ticket, TicketReply, User
+from app.models import Ticket, TicketReply, User, UserNotification
 from app.schemas import (
     AdminTicketAssign,
     AdminTicketReplyCreate,
@@ -37,9 +37,10 @@ from app.schemas import (
     TicketReplyOut,
 )
 from app.services.audit import log_change
-from app.services.deps import STAFF_ROLES, StaffCtx, get_current_user, get_current_user_id_light, require_staff
+from app.services.deps import STAFF_ROLES, StaffCtx, get_current_user, get_current_user_id_light, require_admin, require_staff
 from app.services.image_upload import (
     UploadError,
+    delete_private_images,
     is_private_configured,
     read_upload_capped,
     signed_image_urls,
@@ -812,3 +813,55 @@ def admin_assign_ticket(
             notify_ws(uid)
     db.refresh(ticket)
     return _staff_ticket_out(db, ticket, ctx)
+
+
+# require_staff 跟这组其它路由一样挂在路由自己身上（单独挂载也有守卫），require_admin 再把客服挡掉
+# require_staff sits on the route like the rest of this router (guarded even if mounted alone); require_admin then shuts support out
+@admin_router.delete("/{ticket_id}", response_model=dict, dependencies=[Depends(require_staff)])
+def admin_delete_ticket(
+    ticket_id: str,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """删除工单（只有管理员；客服不能删）：连同全部回复（含内部备注）和指向它的站内通知一起删，
+    附图在后台从私有桶里删掉（别的工单也引用的图留着）。审计记一行 `ticket:<id>:delete`，
+    值是工单标题，目标用户是提交者——工单没了，操作日志里还查得到谁删了哪张。
+    Delete a ticket (admins only; support cannot): every reply (internal notes included) and
+    the in-app notifications pointing at it go too, and its images are removed from the
+    private bucket in the background (images another ticket also references stay). One audit
+    row `ticket:<id>:delete` holds the title with the submitter as target, so the activity
+    log still shows who deleted what after the ticket is gone."""
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
+    replies = db.query(TicketReply).filter(TicketReply.ticket_id == ticket.id).all()
+    keys = list(dict.fromkeys(k for r in replies for k in _image_keys(r)))
+    # 同一张图理论上能被别的工单再引用（键只校验作者），那种图不删
+    # an image key can in principle be reused by another ticket (keys only check the author); keep those
+    orphan = [
+        k for k in keys
+        if not db.query(TicketReply.id)
+        .filter(TicketReply.ticket_id != ticket.id, TicketReply.images.contains(k.partition("#")[0]))
+        .first()
+    ]
+    notes = db.query(UserNotification).filter(
+        UserNotification.ref_id == ticket.id,
+        UserNotification.kind.in_((KIND_TICKET_NEW, KIND_TICKET_REPLY)),
+    )
+    notified = {row[0] for row in notes.with_entities(UserNotification.user_id).distinct()}
+    # 标题为空时 log_change 会当成「没变」不写，用工单号顶上，保证删除一定留痕
+    # log_change skips an empty value as "unchanged"; fall back to the ticket number so a delete is always logged
+    title = (ticket.title or "").strip() or f"#{ticket.id[:8]}"
+    log_change(db, admin.id, ticket.user_id, f"ticket:{ticket.id}:delete", None, title)
+    notes.delete(synchronize_session=False)
+    for r in replies:
+        db.delete(r)
+    db.delete(ticket)
+    db.commit()
+    if orphan:
+        background.add_task(delete_private_images, orphan)
+    # 铃铛里那几条通知没了，让在线页面重拉一次 / their bell entries are gone; let open pages refetch
+    for uid in notified:
+        notify_ws(uid)
+    return {"deleted": True}

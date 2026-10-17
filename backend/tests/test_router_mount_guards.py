@@ -78,6 +78,11 @@ def test_admin_mounts_keep_their_guard():
             assert require_admin in _guards(r), f"{r.path} 丢了管理员守卫"
 
 
+# 客服共用的挂载下，只有这几条额外要求管理员（客服不能删工单）。
+# Under the shared staff mounts only these also require an admin (support cannot delete tickets).
+_ADMIN_ONLY_STAFF_ROUTES = {("/api/admin/tickets/{ticket_id}", frozenset({"DELETE"}))}
+
+
 def test_staff_mounts_carry_require_staff():
     """rev 41：/admin/tickets 与 /support 改为客服 + 管理员共用，挂载级兜底是 require_staff，
     且不能再带 require_admin（否则客服全被 403）。
@@ -88,4 +93,14 @@ def test_staff_mounts_carry_require_staff():
         assert routes, f"没找到 {fragment} 的路由"
         for r in routes:
             assert require_staff in _guards(r), f"{r.path} 丢了客服守卫"
-            assert require_admin not in _guards(r), f"{r.path} 被误挂成了管理员专属"
+            if (r.path, frozenset(r.methods)) in _ADMIN_ONLY_STAFF_ROUTES:
+                assert require_admin in _guards(r), f"{r.path} 应该只给管理员"
+            else:
+                assert require_admin not in _guards(r), f"{r.path} 被误挂成了管理员专属"
+
+
+def test_admin_only_staff_routes_still_exist():
+    """例外清单里的每一条都还在，免得改了路径后例外悄悄失效。
+    Every listed exception still exists, so a renamed path cannot silently drop out."""
+    mounted = {(r.path, frozenset(r.methods)) for r in _mounted_routes("/admin/tickets")}
+    assert _ADMIN_ONLY_STAFF_ROUTES <= mounted
