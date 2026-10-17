@@ -42,6 +42,9 @@ router = APIRouter(prefix="/auth", tags=["account"])
 class AccountInfoOut(BaseModel):
     id: str
     email: str
+    # 角色随刷新下发：后台把人改成客服后，前端不必重新登录就能拿到新角色。
+    # Role rides the refresh so a promotion (e.g. to support) shows without re-login.
+    role: str = "user"
     plan: str
     planExpiresAt: str | None
     # 当前 PRO 是否为免费试用（而非正式付费/管理员赠送）/ whether the current
@@ -136,6 +139,7 @@ def get_account(
     return AccountInfoOut(
         id=current_user.id,
         email=current_user.email,
+        role=current_user.role or "user",
         plan=current_user.plan,
         planExpiresAt=current_user.plan_expires_at.isoformat() if current_user.plan_expires_at else None,
         planIsTrial=bool(current_user.plan_is_trial),

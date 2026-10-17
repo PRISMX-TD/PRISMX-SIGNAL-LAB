@@ -1086,6 +1086,8 @@ export const userApi = {
     request<{
       id: string
       email: string
+      // 老后端没有这个键 / older backends omit it
+      role?: UserRole
       plan: UserPlan
       planExpiresAt: string | null
       // 当前 PRO 是否为免费试用（区别于正式付费/管理员赠送）

@@ -328,6 +328,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!prev) return null
         return {
           ...prev,
+          // 角色也搭这趟车：后台改成客服 / 撤销客服后，刷新即生效，不必重新登录。
+          // Role rides along too: promotion to / removal from support applies on refresh, no re-login.
+          role: me.role ?? prev.role,
           plan: me.plan,
           planIsTrial: me.planIsTrial,
           planExpiresAt: me.planExpiresAt,
@@ -372,6 +375,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cached) {
         writeCachedUser({
           ...cached,
+          role: me.role ?? cached.role,
           plan: me.plan,
           planIsTrial: me.planIsTrial,
           planExpiresAt: me.planExpiresAt,
