@@ -5,7 +5,7 @@ import type { PendingCompetition } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
-import type { AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
+import type { AdminFollowUpRecord, AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportProgress, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 import { recordServerTime } from '../utils/serverClock'
@@ -2131,12 +2131,26 @@ export const adminSupportApi = {
   checkAssign: (userIds: string[]) => post<{ items: AssignBlocker[] }>('/admin/support/follow-ups/check', { userIds }),
   assign: (input: AssignInput) =>
     post<{ created: FollowUp[]; skipped: { userId: string; reason: string }[] }>('/admin/support/follow-ups', input),
-  followUps: (params: { assigneeId?: string; status?: string; userId?: string; limit?: number; offset?: number } = {}) => {
+  followUps: (
+    params: {
+      assigneeId?: string
+      status?: string
+      userId?: string
+      q?: string
+      sort?: 'created' | 'activity'
+      stale?: boolean
+      limit?: number
+      offset?: number
+    } = {},
+    signal?: AbortSignal,
+  ) => {
     const qs = new URLSearchParams()
-    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') qs.set(k, String(v))
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '' && v !== false) qs.set(k, String(v))
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
-    return request<{ total: number; items: FollowUp[]; distribution: Record<string, number> }>(`/admin/support/follow-ups${suffix}`)
+    return request<{ total: number; items: FollowUp[]; distribution: Record<string, number> }>(`/admin/support/follow-ups${suffix}`, { signal })
   },
+  followUpRecord: (id: string) => request<AdminFollowUpRecord>(`/admin/support/follow-ups/${sid(id)}`),
+  progress: () => request<SupportProgress>('/admin/support/progress'),
   revoke: (ids: string[]) => post<{ updated: number }>('/admin/support/follow-ups/revoke', { ids }),
   reassign: (ids: string[], assigneeId: string) =>
     post<{ updated: number }>('/admin/support/follow-ups/reassign', { ids, assigneeId }),

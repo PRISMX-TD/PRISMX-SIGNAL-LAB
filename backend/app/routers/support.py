@@ -4,7 +4,7 @@
 - `router`（/support，require_staff）：客服与管理员共用的工作台——查找用户、客户卡片、查看完整电话、
   受限操作（重发验证 / 解绑 / 重置试用 / 补偿天数）、我的跟进、跟进记录、站内来信、申请、模板。
 - `admin_router`（/admin/support，require_admin）：客服管理——成员 / tier / 查看上限、跟进分配 /
-  收回 / 改派 / 延期、待审批、转化审核与补录、业绩看板、模板维护、客服台设置。
+  收回 / 改派 / 延期、跟进进度与完整记录、待审批、转化审核与补录、业绩看板、模板维护、客服台设置。
 
 权限全部在后端：客户信息只经 services/support_view.serialize_customer 输出；可见范围见
 _visible_user。所有查看敏感信息与写操作都进操作日志（actor_type=support，admin 记 admin）。
@@ -12,7 +12,8 @@ _visible_user。所有查看敏感信息与写操作都进操作日志（actor_t
 
 Support-desk routes. `router` (/support, require_staff) is the shared workbench;
 `admin_router` (/admin/support, require_admin) manages staff, assignments,
-approvals, stats, templates and settings. Every permission is enforced here:
+follow-up progress and records, approvals, stats, templates and settings.
+Every permission is enforced here:
 customer data only leaves through support_view.serialize_customer, visibility is
 _visible_user, and every sensitive view or write is logged. No exports, no bulk
 browsing, pages capped at 50.
@@ -26,12 +27,13 @@ from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import (
     FOLLOW_UP_ACTIVE_STATUSES,
+    ActivityEvent,
     Conversion,
     EmailOptOut,
     FollowUp,
@@ -74,6 +76,12 @@ PAGE_MAX = 50
 ASSIGN_MAX = 500
 
 _PRIORITY_RANK = {"high": 0, "normal": 1, "low": 2}
+# 进行中的跟进多少天没有新记录（没有记录则从分配起算）算「停滞」；已结束的跟进不算。
+# An active follow-up is stale after this many days without a note (counted from
+# assignment when there is none); closed follow-ups are never stale.
+STALE_DAYS = 3
+# admin 列表里「最近一条记录」摘要的长度 / length of the latest-note excerpt in admin lists
+NOTE_EXCERPT = 160
 
 GoalT = Literal["open_mt5", "open_signallab", "renew", "activate_trial", "revisit"]
 PriorityT = Literal["low", "normal", "high"]
@@ -685,7 +693,10 @@ def support_do_not_contact(user_id: str, db: Session = Depends(get_db), staff: S
     for fu in active:
         fu.status = "revoked"
         fu.closed_at = now
-    desk.log(db, ctx, activity_log.SUPPORT_ACTION, user_id=user.id, data={"action": "do_not_contact"})
+    # 记下关掉了哪几条跟进，后台的跟进记录按它归属，不靠时间猜
+    # record which follow-ups this closed, so the admin record attributes it exactly instead of by time
+    desk.log(db, ctx, activity_log.SUPPORT_ACTION, user_id=user.id,
+             data={"action": "do_not_contact", "fu": [fu.id for fu in active]})
     db.commit()
     return {"ok": True, "doNotContactAt": user.do_not_contact_at}
 
@@ -1098,43 +1109,240 @@ def admin_follow_up_assign(body: AssignIn, db: Session = Depends(get_db), admin:
     return {"created": [_follow_up_view(f) for f in created], "skipped": skipped}
 
 
+def _like_escape(value: str) -> str:
+    """把 LIKE 的元字符转义掉，供 `ilike(..., escape="\\\\")` 使用（同 admin 用户搜索）。
+    Escape LIKE metacharacters for `ilike(..., escape="\\\\")`, as the admin user search does."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _last_note_sq():
+    """每条跟进最近一条记录的时间（子查询：fu_id, last_at）。排序「按最近动态」与统计停滞共用。
+    Per follow-up latest note time (subquery fu_id, last_at), shared by the
+    activity sort and the stale counts."""
+    return (
+        select(FollowUpNote.follow_up_id.label("fu_id"), func.max(FollowUpNote.created_at).label("last_at"))
+        .group_by(FollowUpNote.follow_up_id)
+        .subquery()
+    )
+
+
+def _note_stats(db: Session, fu_ids) -> dict[str, dict]:
+    """一批跟进的记录统计：{fu_id: {"count", "lastAt", "note"(最近一条 FollowUpNote)}}。两条集合查询
+    （分组计数 / 取最新），不逐行查；同一时刻多条取 id 最大的那条，结果稳定。
+    Note stats for a batch of follow-ups, {fu_id: {count, lastAt, note}}, in two
+    set-based queries (grouped count, latest rows) — never per row. Ties on the
+    same timestamp keep the largest id so the pick is stable."""
+    ids = list({i for i in fu_ids if i})
+    if not ids:
+        return {}
+    out = {
+        fid: {"count": n or 0, "lastAt": last, "note": None}
+        for fid, n, last in (
+            db.query(FollowUpNote.follow_up_id, func.count(FollowUpNote.id), func.max(FollowUpNote.created_at))
+            .filter(FollowUpNote.follow_up_id.in_(ids))
+            .group_by(FollowUpNote.follow_up_id)
+            .all()
+        )
+    }
+    if not out:
+        return {}
+    latest = (
+        db.query(FollowUpNote.follow_up_id.label("fu_id"), func.max(FollowUpNote.created_at).label("last_at"))
+        .filter(FollowUpNote.follow_up_id.in_(list(out)))
+        .group_by(FollowUpNote.follow_up_id)
+        .subquery()
+    )
+    rows = (
+        db.query(FollowUpNote)
+        .join(latest, and_(FollowUpNote.follow_up_id == latest.c.fu_id, FollowUpNote.created_at == latest.c.last_at))
+        .all()
+    )
+    for n in rows:
+        slot = out.get(n.follow_up_id)
+        if slot is not None and (slot["note"] is None or n.id > slot["note"].id):
+            slot["note"] = n
+    return out
+
+
+def _is_stale(fu: FollowUp, last_note_at, cutoff: datetime) -> bool:
+    """进行中且「最近记录时间（没有则分配时间）」早于 cutoff / active and last touched before cutoff."""
+    if fu.status not in FOLLOW_UP_ACTIVE_STATUSES:
+        return False
+    ref = desk.naive(last_note_at) or desk.naive(fu.created_at)
+    return ref is not None and ref < cutoff
+
+
+def _note_excerpt(n: FollowUpNote | None, names: dict) -> dict | None:
+    if n is None:
+        return None
+    return {"content": (n.content or "")[:NOTE_EXCERPT], "channel": n.channel, "authorName": names.get(n.author_id)}
+
+
 @admin_router.get("/follow-ups", response_model=dict)
 def admin_follow_up_list(
     assigneeId: str | None = Query(default=None),
     status: str | None = Query(default=None, description="active | closed | <具体状态>"),
     userId: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200, description="客户邮箱 / 昵称包含 / email or nickname contains"),
+    sort: Literal["created", "activity"] = Query(default="created"),
+    stale: bool = Query(default=False, description="只看停滞的 / stale ones only"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    """跟进列表（admin）：按客服 / 状态（active、closed 或具体状态）/ 用户筛选，最新在前；附按状态
-    的分布计数。
-    Follow-up list for admins, filterable by assignee / status / user, newest
-    first, with a per-status distribution."""
-    q = db.query(FollowUp)
+    """跟进列表（admin）：按客服 / 状态（active、closed 或具体状态）/ 用户 / 客户邮箱或昵称（q，不分
+    大小写）筛选；stale=true 只留停滞的（进行中且 STALE_DAYS 天没有新记录）；sort=created（默认，
+    分配时间新→旧）或 activity（最近记录时间，没有记录用分配时间）。附按状态的分布计数（受客服 /
+    用户 / q 约束，不受 status / stale 约束）。每条另带记录数、最近一条记录（摘要）、是否停滞。
+    Follow-up list for admins, filterable by assignee / status / user / customer
+    email-or-nickname (q, case-insensitive); stale=true keeps only stale ones
+    (active, no note for STALE_DAYS days); sort=created (default, newest
+    assignment first) or activity (latest note, else assignment time). The
+    per-status distribution honours assignee / user / q but not status / stale.
+    Each item also carries its note count, latest note excerpt and a stale flag."""
+    qry = db.query(FollowUp)
     if assigneeId:
-        q = q.filter(FollowUp.assignee_id == assigneeId)
+        qry = qry.filter(FollowUp.assignee_id == assigneeId)
     if userId:
-        q = q.filter(FollowUp.user_id == userId)
-    dist_q = q
+        qry = qry.filter(FollowUp.user_id == userId)
+    term = (q or "").strip()
+    if term:
+        like = f"%{_like_escape(term)}%"
+        qry = qry.join(User, User.id == FollowUp.user_id).filter(
+            or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\"))
+        )
+    dist_q = qry
     if status == "active":
-        q = q.filter(FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES))
+        qry = qry.filter(FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES))
     elif status == "closed":
-        q = q.filter(FollowUp.status.notin_(FOLLOW_UP_ACTIVE_STATUSES))
+        qry = qry.filter(FollowUp.status.notin_(FOLLOW_UP_ACTIVE_STATUSES))
     elif status:
-        q = q.filter(FollowUp.status == status)
-    total = q.count()
-    rows = q.order_by(FollowUp.created_at.desc()).offset(offset).limit(limit).all()
+        qry = qry.filter(FollowUp.status == status)
+    cutoff = _now() - timedelta(days=STALE_DAYS)
+    # 停滞筛选与「按最近动态」共用一次外连接（子查询按跟进分组，一对一，不改变行数）
+    # The stale filter and the activity sort share one outer join (grouped per follow-up: 1:1, no extra rows)
+    touched = None
+    if stale or sort == "activity":
+        last = _last_note_sq()
+        qry = qry.outerjoin(last, last.c.fu_id == FollowUp.id)
+        touched = func.coalesce(last.c.last_at, FollowUp.created_at)
+    if stale:
+        qry = qry.filter(FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES), touched < cutoff)
+    total = qry.count()
+    if sort == "activity":
+        qry = qry.order_by(touched.desc(), FollowUp.id.desc())
+    else:
+        qry = qry.order_by(FollowUp.created_at.desc())
+    rows = qry.offset(offset).limit(limit).all()
     users = {u.id: u for u in db.query(User).filter(User.id.in_({f.user_id for f in rows}))} if rows else {}
-    names = _names(db, {f.assignee_id for f in rows})
+    stats = _note_stats(db, [f.id for f in rows])
+    names = _names(db, {f.assignee_id for f in rows}
+                   | {s["note"].author_id for s in stats.values() if s["note"] is not None})
     dist = dict(dist_q.with_entities(FollowUp.status, func.count(FollowUp.id)).group_by(FollowUp.status).all())
     items = []
     for f in rows:
         v = _follow_up_view(f, users.get(f.user_id), names)
         u = users.get(f.user_id)
         v["email"] = u.email if u else None
+        s = stats.get(f.id) or {"count": 0, "lastAt": None, "note": None}
+        v["notesCount"] = s["count"]
+        v["lastNoteAt"] = s["lastAt"]
+        v["lastNote"] = _note_excerpt(s["note"], names)
+        v["stale"] = _is_stale(f, s["lastAt"], cutoff)
         items.append(v)
     return {"total": total, "items": items, "distribution": dist}
+
+
+@admin_router.get("/follow-ups/{fu_id}", response_model=dict)
+def admin_follow_up_detail(fu_id: str, db: Session = Depends(get_db)):
+    """一条跟进的完整记录（admin 抽屉）：跟进本身、客户概要、全部跟进记录（新→旧）、操作时间线
+    （分配 / 改状态 / 改派 / 延期 / 收回 / 过期 / 站内来信 / 勿扰，新→旧，不含「写记录」——记录单列）、
+    相关转化。时间线只扫这个用户自跟进创建前 1 分钟起的日志。
+    One follow-up's full record for the admin drawer: the follow-up, a customer
+    summary, every note (newest first), the event timeline (assign / status /
+    reassign / extend / revoke / expiry / in-app letter / do-not-contact, newest
+    first, note events left out since notes are listed) and its conversions. The
+    timeline only scans this user's rows from a minute before the follow-up began."""
+    fu = db.get(FollowUp, fu_id)
+    if fu is None:
+        raise HTTPException(status_code=404, detail="跟进不存在 / Follow-up not found")
+    user = db.get(User, fu.user_id)
+    notes = (
+        db.query(FollowUpNote)
+        .filter(FollowUpNote.follow_up_id == fu.id)
+        .order_by(FollowUpNote.created_at.desc(), FollowUpNote.id.desc())
+        .all()
+    )
+    convs = (
+        db.query(Conversion)
+        .filter(Conversion.follow_up_id == fu.id)
+        .order_by(Conversion.created_at.desc(), Conversion.id.desc())
+        .all()
+    )
+    slack = timedelta(minutes=1)
+    started = desk.naive(fu.created_at)
+    closed = desk.naive(fu.closed_at)
+    ev_q = db.query(ActivityEvent).filter(
+        ActivityEvent.user_id == fu.user_id,
+        ActivityEvent.kind.in_((activity_log.SUPPORT_FOLLOW_UP, activity_log.SUPPORT_ACTION)),
+    )
+    if started is not None:
+        ev_q = ev_q.filter(ActivityEvent.created_at >= started - slack)
+    events = []
+    for e in ev_q.order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc()).all():
+        data = _loads(e.data)
+        action = data.get("action")
+        if e.kind == activity_log.SUPPORT_FOLLOW_UP:
+            # 站内来信的 ref_id 是工单号，跟进号在 data.fu / a letter's ref_id is the ticket, data.fu the follow-up
+            if (e.ref_id != fu.id and data.get("fu") != fu.id) or action == "note":
+                continue
+        else:
+            # 「勿扰」带 data.fu（关掉的跟进号列表）；老记录没有，只认紧贴结束时间（±1 分钟）的那条
+            # do-not-contact carries data.fu (the follow-ups it closed); old rows lack it, so they
+            # only count when they sit right at this follow-up's close (within a minute either way)
+            if action != "do_not_contact":
+                continue
+            closed_ids = data.get("fu")
+            if isinstance(closed_ids, list):
+                if fu.id not in closed_ids:
+                    continue
+            else:
+                e_at = desk.naive(e.created_at)
+                if closed is None or e_at is None or abs(e_at - closed) > slack:
+                    continue
+        events.append({
+            "id": e.id, "at": e.created_at, "action": action, "actorId": e.actor_id,
+            "actorType": e.actor_type, "actorName": None, "data": data,
+        })
+    # update 的 data.from 是旧状态，不是人；只有 assign / reassign / revoke 的 to / from 是用户 id
+    # update's data.from is the previous status; only assign / reassign / revoke carry user ids
+    people = {e["actorId"] for e in events}
+    for e in events:
+        if e["action"] in ("assign", "reassign", "revoke"):
+            people |= {e["data"].get("to"), e["data"].get("from")}
+    people |= {fu.assignee_id, fu.assigned_by} | {n.author_id for n in notes} | {c.credited_to for c in convs}
+    names = _names(db, {p for p in people if isinstance(p, str)})
+    for e in events:
+        e["actorName"] = names.get(e["actorId"])
+    last_at = notes[0].created_at if notes else None  # 已按新→旧排好 / already newest first
+    view = _follow_up_view(fu, user, names)
+    view["email"] = user.email if user else None
+    view["assignedByName"] = names.get(fu.assigned_by)
+    view["notesCount"] = len(notes)
+    view["lastNoteAt"] = last_at
+    view["stale"] = _is_stale(fu, last_at, _now() - timedelta(days=STALE_DAYS))
+    return {
+        "followUp": view,
+        "user": {
+            "id": user.id, "email": user.email, "nickname": user.nickname, "plan": user.plan,
+            "createdAt": user.created_at, "lastActiveAt": user.last_active_at,
+            "doNotContact": user.do_not_contact_at is not None,
+        } if user is not None else None,
+        "notes": [_note_view(n, names) for n in notes],
+        "events": events,
+        "names": names,
+        "conversions": [_conversion_view(c, None) for c in convs],
+    }
 
 
 def _active_follow_ups(db: Session, ids: list[str]) -> list[FollowUp]:
@@ -1181,13 +1389,17 @@ def admin_follow_up_reassign(body: ReassignIn, db: Session = Depends(get_db), ad
 
 @admin_router.post("/follow-ups/extend", response_model=dict)
 def admin_follow_up_extend(body: ExtendIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    """延期：给定新截止时间，或在 max(原截止, 现在) 上加 days 天。
-    Extend: set a new deadline, or add days to max(current deadline, now)."""
+    """延期：给定新截止时间，或在 max(原截止, 现在) 上加 days 天。按天数延期时跳过没有截止
+    时间的跟进——它们本来就不限期，加天数反而会让它们到期自动结束。
+    Extend: set a new deadline, or add days to max(current deadline, now). Extending by days
+    skips follow-ups without a deadline: they never expire, and adding days would make them."""
     if body.expiresAt is None and body.days is None:
         raise HTTPException(status_code=422, detail="请给出 expiresAt 或 days / expiresAt or days is required")
     ctx = _admin_ctx(admin)
     now = _now()
     rows = _active_follow_ups(db, body.ids)
+    if body.expiresAt is None:
+        rows = [fu for fu in rows if fu.expires_at is not None]
     for fu in rows:
         if body.expiresAt is not None:
             new = desk.naive(body.expiresAt)
@@ -1493,6 +1705,82 @@ def admin_support_stats(
         out.append(r)
     out.sort(key=lambda r: (-sum(r["conversions"].values()), -r["assigned"]))
     return {"start": start.isoformat(), "end": end.isoformat(), "items": out}
+
+
+@admin_router.get("/progress", response_model=dict)
+def admin_support_progress(db: Session = Depends(get_db)):
+    """跟进进度（按人）：每位客服（以及名下有进行中跟进的其他人，如管理员）当前进行中的跟进数与
+    状态分布、停滞数（STALE_DAYS 天没有新记录）、近 7 天自己写的记录数、最近一次写记录的时间；
+    外加全站合计。停用的客服只在仍有进行中跟进或近 7 天有记录时列出。全部是分组查询，不逐人查。
+    Follow-up progress per person: every support agent (plus anyone else, e.g. an
+    admin, holding active follow-ups) with active count and status distribution,
+    stale count (no note for STALE_DAYS days), notes they wrote in the last 7 days
+    and their latest note time, plus site-wide totals. Disabled agents appear only
+    while they still hold active follow-ups or wrote notes in 7 days. Grouped
+    queries only — no per-agent query loops."""
+    now = _now()
+    cutoff = now - timedelta(days=STALE_DAYS)
+    week_ago = now - timedelta(days=7)
+    is_active = FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES)
+    dist: dict[str, dict[str, int]] = {}
+    for assignee, st, n in (
+        db.query(FollowUp.assignee_id, FollowUp.status, func.count(FollowUp.id))
+        .filter(is_active)
+        .group_by(FollowUp.assignee_id, FollowUp.status)
+        .all()
+    ):
+        if n:
+            dist.setdefault(assignee, {})[st] = n
+    last = _last_note_sq()
+    stale = dict(
+        db.query(FollowUp.assignee_id, func.count(FollowUp.id))
+        .outerjoin(last, last.c.fu_id == FollowUp.id)
+        .filter(is_active, func.coalesce(last.c.last_at, FollowUp.created_at) < cutoff)
+        .group_by(FollowUp.assignee_id)
+        .all()
+    )
+    notes7 = dict(
+        db.query(FollowUpNote.author_id, func.count(FollowUpNote.id))
+        .filter(FollowUpNote.created_at >= week_ago)
+        .group_by(FollowUpNote.author_id)
+        .all()
+    )
+    # 行：全部客服 + 名下有进行中跟进的其他人 / rows: every agent plus other active assignees
+    people = {u.id: u for u in db.query(User).filter(User.role == "support").all()}
+    extra = set(dist) - set(people)
+    if extra:
+        people.update({u.id: u for u in db.query(User).filter(User.id.in_(extra)).all()})
+    last_note = dict(
+        db.query(FollowUpNote.author_id, func.max(FollowUpNote.created_at))
+        .filter(FollowUpNote.author_id.in_(list(people)))
+        .group_by(FollowUpNote.author_id)
+        .all()
+    ) if people else {}
+    items = []
+    for u in people.values():
+        d = dist.get(u.id, {})
+        active = sum(d.values())
+        disabled = u.disabled_at is not None
+        if u.role == "support" and disabled and not active and not notes7.get(u.id):
+            continue  # 停用且已无工作的客服不占行 / disabled agents with no work left are omitted
+        items.append({
+            "staffId": u.id, "nickname": u.nickname, "email": u.email, "role": u.role,
+            "tier": staff_ctx_for(u).tier, "disabled": disabled,
+            "active": active, "distribution": d, "stale": stale.get(u.id, 0),
+            "notes7d": notes7.get(u.id, 0), "lastNoteAt": last_note.get(u.id),
+        })
+    items.sort(key=lambda r: (r["disabled"], -r["active"], -r["notes7d"],
+                              (r["nickname"] or r["email"] or "").lower()))
+    return {
+        "staleDays": STALE_DAYS,
+        "totals": {
+            "active": sum(sum(d.values()) for d in dist.values()),
+            "stale": sum(stale.values()),
+            "notes7d": sum(notes7.values()),
+            "pending": sum(d.get("pending", 0) for d in dist.values()),
+        },
+        "items": items,
+    }
 
 
 @admin_router.get("/templates", response_model=dict)

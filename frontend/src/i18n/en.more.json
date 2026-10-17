@@ -1071,7 +1071,7 @@
         "users": "Accounts, roles and plans, with a record of every action.",
         "growth": "Promo links, trading competitions, levels and boards.",
         "content": "What users read: strategy guides, win-rate publication, announcements and email.",
-        "support": "Tickets, staff, follow-up assignment and approvals.",
+        "support": "Tickets, staff, follow-up assignment, progress and approvals.",
         "settings": "Commercial terms and backend parameters."
       },
       "section": {
@@ -1089,6 +1089,7 @@
         "tickets": "Tickets",
         "staff": "Agents",
         "assign": "Assign follow-ups",
+        "progress": "Progress",
         "approvals": "Approvals",
         "performance": "Performance",
         "templates": "Canned replies",
@@ -3070,7 +3071,6 @@
     },
     "support": {
       "bulkAssign": "Assign to support",
-      "openDesk": "Open support console",
       "sub": {
         "staff": "Agents",
         "assign": "Assign follow-ups",
@@ -3121,19 +3121,97 @@
       },
       "followUps": {
         "updated": "{{n}} updated",
-        "title": "Follow-ups ({{n}})",
         "allStaff": "All agents",
-        "allStatus": "All statuses",
-        "active": "Active",
-        "closed": "Closed",
         "reassign": "Reassign",
         "reassignTo": "Reassign to",
         "extendDays": "Extra days",
         "extend": "Extend",
         "revoke": "Revoke",
         "empty": "No matching follow-ups",
-        "colUser": "User",
         "revokeBody": "Revoke the {{n}} selected follow-ups? The agent will lose access to these users."
+      },
+      "progress": {
+        "kpiActive": "Active follow-ups",
+        "kpiPending": "Not contacted",
+        "kpiStale": "No note in {{n}}+ days",
+        "kpiNotes": "Notes in the last 7 days",
+        "agentsTitle": "Agents",
+        "activeLabel": "active",
+        "notes7d": "{{n}} notes in 7 days",
+        "lastNote": "last {{t}}",
+        "noNotesYet": "No notes yet",
+        "staleN": "{{n}} stale",
+        "disabled": "Disabled",
+        "clearAgent": "Show all agents",
+        "listTitle": "Follow-ups",
+        "searchPlaceholder": "Search customer email or nickname",
+        "staleOnly": "Stale only",
+        "allLabels": "All labels",
+        "scope": {
+          "active": "Active",
+          "closed": "Closed",
+          "all": "All"
+        },
+        "sort": {
+          "activity": "Latest activity",
+          "created": "Newest assigned"
+        },
+        "col": {
+          "customer": "Customer",
+          "agent": "Agent",
+          "goal": "Goal",
+          "label": "Label",
+          "latest": "Latest note",
+          "notes": "Notes",
+          "assigned": "Assigned"
+        },
+        "count": "{{n}} follow-ups",
+        "idleDays": "No note for {{n}} days",
+        "neverNoted": "No note since assignment",
+        "ago": {
+          "justNow": "just now",
+          "min": "{{n}} min ago",
+          "hour": "{{n}} h ago",
+          "day": "{{n}} d ago"
+        },
+        "recordTitle": "Follow-up record",
+        "openUser": "Open in user list",
+        "fact": {
+          "agent": "Agent",
+          "goal": "Goal",
+          "priority": "Priority",
+          "assignedBy": "Assigned by",
+          "assignedAt": "Assigned",
+          "firstContact": "First contact",
+          "expires": "Deadline",
+          "closedAt": "Closed",
+          "notContacted": "Not yet",
+          "noDeadline": "None"
+        },
+        "assignNote": "Assignment note",
+        "timeline": "Activity",
+        "timelineEmpty": "Nothing recorded yet",
+        "conversions": "Conversions",
+        "dnc": "Do not contact",
+        "system": "System",
+        "someone": "Someone",
+        "ev": {
+          "assign": "{{actor}} assigned to {{to}}",
+          "update": "{{actor}} set the label to “{{status}}”",
+          "updateFrom": " (was “{{from}}”)",
+          "next": "{{actor}} set the next contact time",
+          "reassign": "{{actor}} moved it from {{from}} to {{to}}",
+          "extend": "{{actor}} extended the deadline to {{to}}",
+          "revoke": "{{actor}} revoked the follow-up",
+          "revokeStaffRemoved": "{{from}} is no longer an agent; revoked automatically",
+          "expired": "Expired and closed automatically",
+          "message": "{{actor}} sent the user an in-app message",
+          "do_not_contact": "{{actor}} marked the user as do-not-contact",
+          "other": "{{actor}} · {{action}}"
+        },
+        "actionsTitle": "Adjust this follow-up",
+        "revokeOneBody": "Revoke this follow-up? The agent will lose access to this user.",
+        "closedHint": "This follow-up is closed; its record is read-only."
       },
       "approvals": {
         "approved": "Approved",

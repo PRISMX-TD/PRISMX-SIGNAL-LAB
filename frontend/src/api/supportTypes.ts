@@ -103,6 +103,12 @@ export interface FollowUp {
   overdue: boolean
   assigneeName?: string | null
   email?: string | null
+  // 管理员的跟进进度才带：记录条数、最近一条、是否停滞 / admin progress view only
+  notesCount?: number
+  lastNoteAt?: string | null
+  lastNote?: { content: string; channel: FollowUpChannel; authorName: string | null } | null
+  stale?: boolean
+  assignedByName?: string | null
 }
 
 export interface FollowUpNote {
@@ -229,4 +235,54 @@ export interface SupportStatsRow {
   conversions: Record<ConversionKind, number>
   conversionRate: number | null
   avgFirstContactHours: number | null
+}
+
+// 管理员「跟进进度」：每位客服手上的进行中跟进、标签分布、停滞数与近 7 天记录数。
+// Admin follow-up progress: each agent's active follow-ups, label mix, stale count and notes in 7 days.
+export interface SupportProgressRow {
+  staffId: string
+  nickname: string | null
+  email: string
+  role: string
+  tier: SupportTier
+  disabled: boolean
+  active: number
+  distribution: Partial<Record<FollowUpStatus, number>>
+  stale: number
+  notes7d: number
+  lastNoteAt: string | null
+}
+
+export interface SupportProgress {
+  staleDays: number
+  totals: { active: number; stale: number; notes7d: number; pending: number }
+  items: SupportProgressRow[]
+}
+
+export interface FollowUpEvent {
+  id: string
+  at: string
+  action: string
+  actorId: string | null
+  actorType: string
+  actorName: string | null
+  data: Record<string, unknown>
+}
+
+// 一条跟进的完整记录（管理员抽屉）/ one follow-up's full record (admin drawer)
+export interface AdminFollowUpRecord {
+  followUp: FollowUp
+  user: {
+    id: string
+    email: string | null
+    nickname: string | null
+    plan: string | null
+    createdAt: string | null
+    lastActiveAt: string | null
+    doNotContact: boolean
+  } | null
+  notes: FollowUpNote[]
+  events: FollowUpEvent[]
+  names: Record<string, string>
+  conversions: SupportConversion[]
 }

@@ -1071,7 +1071,7 @@
         "users": "账号、角色与订阅，以及每个人的操作记录。",
         "growth": "推广链接、交易比赛与等级榜单。",
         "content": "用户看到的内容：策略介绍、胜率公开、公告与邮件。",
-        "support": "工单、客服成员、跟进分配与审批。",
+        "support": "工单、客服成员、跟进分配、进度与审批。",
         "settings": "商业条款与后台计算参数。"
       },
       "section": {
@@ -1089,6 +1089,7 @@
         "tickets": "工单",
         "staff": "客服成员",
         "assign": "分配跟进",
+        "progress": "跟进进度",
         "approvals": "审批",
         "performance": "业绩",
         "templates": "快捷回复",
@@ -3060,7 +3061,6 @@
     },
     "support": {
       "bulkAssign": "分配给客服",
-      "openDesk": "打开客服后台",
       "sub": {
         "staff": "客服成员",
         "assign": "分配跟进",
@@ -3111,19 +3111,97 @@
       },
       "followUps": {
         "updated": "已更新 {{n}} 条",
-        "title": "跟进列表（{{n}}）",
         "allStaff": "全部客服",
-        "allStatus": "全部状态",
-        "active": "进行中",
-        "closed": "已结束",
         "reassign": "转给他人",
         "reassignTo": "转给",
         "extendDays": "延长天数",
         "extend": "延期",
         "revoke": "收回",
         "empty": "没有符合条件的跟进",
-        "colUser": "用户",
         "revokeBody": "收回选中的 {{n}} 条跟进？客服将不能再查看这些用户。"
+      },
+      "progress": {
+        "kpiActive": "进行中跟进",
+        "kpiPending": "待联系",
+        "kpiStale": "超过 {{n}} 天没有记录",
+        "kpiNotes": "近 7 天跟进记录",
+        "agentsTitle": "客服",
+        "activeLabel": "进行中",
+        "notes7d": "7 天 {{n}} 条记录",
+        "lastNote": "最近 {{t}}",
+        "noNotesYet": "还没有记录",
+        "staleN": "{{n}} 条停滞",
+        "disabled": "已停用",
+        "clearAgent": "看全部客服",
+        "listTitle": "跟进列表",
+        "searchPlaceholder": "搜索客户邮箱或昵称",
+        "staleOnly": "只看停滞",
+        "allLabels": "全部标签",
+        "scope": {
+          "active": "进行中",
+          "closed": "已结束",
+          "all": "全部"
+        },
+        "sort": {
+          "activity": "最近动态",
+          "created": "最新分配"
+        },
+        "col": {
+          "customer": "客户",
+          "agent": "客服",
+          "goal": "目标",
+          "label": "标签",
+          "latest": "最近记录",
+          "notes": "记录",
+          "assigned": "分配时间"
+        },
+        "count": "共 {{n}} 条",
+        "idleDays": "{{n}} 天没有记录",
+        "neverNoted": "分配后还没有记录",
+        "ago": {
+          "justNow": "刚刚",
+          "min": "{{n}} 分钟前",
+          "hour": "{{n}} 小时前",
+          "day": "{{n}} 天前"
+        },
+        "recordTitle": "跟进记录",
+        "openUser": "在用户列表中查看",
+        "fact": {
+          "agent": "客服",
+          "goal": "目标",
+          "priority": "优先级",
+          "assignedBy": "分配人",
+          "assignedAt": "分配时间",
+          "firstContact": "首次联系",
+          "expires": "截止",
+          "closedAt": "结束时间",
+          "notContacted": "还没联系",
+          "noDeadline": "不限"
+        },
+        "assignNote": "分配说明",
+        "timeline": "跟进动态",
+        "timelineEmpty": "还没有任何记录",
+        "conversions": "转化",
+        "dnc": "要求不再联系",
+        "system": "系统",
+        "someone": "有人",
+        "ev": {
+          "assign": "{{actor}} 分配给 {{to}}",
+          "update": "{{actor}} 把标签改为「{{status}}」",
+          "updateFrom": "（原「{{from}}」）",
+          "next": "{{actor}} 设置了下次联系时间",
+          "reassign": "{{actor}} 把跟进从 {{from}} 转给 {{to}}",
+          "extend": "{{actor}} 把截止时间延到 {{to}}",
+          "revoke": "{{actor}} 收回了跟进",
+          "revokeStaffRemoved": "{{from}} 不再是客服，跟进自动收回",
+          "expired": "到期，跟进自动结束",
+          "message": "{{actor}} 给用户发了站内信",
+          "do_not_contact": "{{actor}} 标记用户要求不再联系",
+          "other": "{{actor}} · {{action}}"
+        },
+        "actionsTitle": "调整这条跟进",
+        "revokeOneBody": "收回这条跟进？客服将不能再查看这位用户。",
+        "closedHint": "这条跟进已结束，只能查看记录。"
       },
       "approvals": {
         "approved": "已批准",

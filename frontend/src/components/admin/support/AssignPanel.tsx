@@ -1,30 +1,26 @@
-// 跟进分配（设计 §5.2 / §7.2）：上半部分选人（复用群发邮件的选人表：搜索 / 套餐 / 活跃度筛选、
-// 跨页保留勾选）+ 分配表单，分配前先预检，把「要求勿扰 / 已有进行中跟进 / 工作人员」（会被跳过）
-// 与「退订推广邮件」（默认跳过，可勾选仍分配）说清楚；下半部分是现有跟进的收回 / 改派 / 延期。
-// Follow-up assignment (design §5.2 / §7.2). Top: pick users (the email picker, reused: search /
-// plan / activity filters, selection survives paging) plus the assign form, with a pre-flight
-// that spells out who will be skipped (do-not-contact / active follow-up / staff) and who is
-// skipped by default (email opt-outs, includable). Bottom: revoke / reassign / extend.
-import { useCallback, useEffect, useState } from 'react'
+// 跟进分配（设计 §5.2 / §7.2）：选人（复用群发邮件的选人表：搜索 / 套餐 / 活跃度筛选、跨页保留勾选）
+// + 分配表单，分配前先预检，把「要求勿扰 / 已有进行中跟进 / 工作人员」（会被跳过）与「退订推广邮件」
+// （默认跳过，可勾选仍分配）说清楚。现有跟进的查看与收回 / 改派 / 延期在「跟进进度」（ProgressPanel）。
+// Follow-up assignment (design §5.2 / §7.2): pick users (the email picker, reused: search / plan /
+// activity filters, selection survives paging) plus the assign form, with a pre-flight that spells
+// out who will be skipped (do-not-contact / active follow-up / staff) and who is skipped by default
+// (email opt-outs, includable). Existing follow-ups — viewing, revoke / reassign / extend — live in
+// the progress section (ProgressPanel).
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminSupportApi } from '../../../api/client'
 import {
   FOLLOW_UP_GOALS,
   FOLLOW_UP_PRIORITIES,
   type AssignBlocker,
-  type FollowUp,
   type FollowUpGoal,
   type FollowUpPriority,
   type SupportMember,
 } from '../../../api/supportTypes'
 import ConfirmModal from '../../ConfirmModal'
 import Select from '../../Select'
-import { SkeletonLine } from '../../Skeleton'
 import EmailRecipientPicker, { type Picked } from '../EmailRecipientPicker'
-import { FU_PRIORITY_TONE, FU_STATUS_TONE, errText } from '../../support/supportUi'
-
-const LIST_PAGE = 50
-const STATUS_FILTERS = ['active', 'closed', 'pending', 'contacted', 'interested', 'converted', 'no_interest', 'unreachable', 'revoked', 'expired']
+import { errText } from '../../support/supportUi'
 
 export default function AssignPanel({
   presetUserIds,
@@ -46,19 +42,6 @@ export default function AssignPanel({
   const [blockers, setBlockers] = useState<AssignBlocker[] | null>(null)
   const [assigning, setAssigning] = useState(false)
   const [confirm, setConfirm] = useState(false)
-
-  // 现有跟进 / existing follow-ups
-  const [fuAssignee, setFuAssignee] = useState('')
-  const [fuStatus, setFuStatus] = useState('active')
-  const [fuPage, setFuPage] = useState(0)
-  const [fuRows, setFuRows] = useState<FollowUp[] | null>(null)
-  const [fuTotal, setFuTotal] = useState(0)
-  const [dist, setDist] = useState<Record<string, number>>({})
-  const [fuSel, setFuSel] = useState<Set<string>>(new Set())
-  const [reassignTo, setReassignTo] = useState('')
-  const [extendDays, setExtendDays] = useState('7')
-  const [bulkBusy, setBulkBusy] = useState(false)
-  const [revokeConfirm, setRevokeConfirm] = useState(false)
 
   useEffect(() => {
     if (presetUserIds.length) onPresetCleared()
@@ -99,26 +82,6 @@ export default function AssignPanel({
       }
     : null
 
-  const loadFollowUps = useCallback(async () => {
-    try {
-      const r = await adminSupportApi.followUps({
-        assigneeId: fuAssignee || undefined,
-        status: fuStatus || undefined,
-        limit: LIST_PAGE,
-        offset: fuPage * LIST_PAGE,
-      })
-      setFuRows(r.items)
-      setFuTotal(r.total)
-      setDist(r.distribution)
-      setFuSel(new Set())
-    } catch (err) {
-      onToast('err', errText(err, t('admin.loadError')))
-      setFuRows([])
-    }
-  }, [fuAssignee, fuStatus, fuPage, onToast, t])
-  useEffect(() => { void loadFollowUps() }, [loadFollowUps])
-  useEffect(() => setFuPage(0), [fuAssignee, fuStatus])
-
   const assign = async () => {
     setConfirm(false)
     setAssigning(true)
@@ -134,7 +97,6 @@ export default function AssignPanel({
       onToast('ok', t('admin.support.assign.done', { created: r.created.length, skipped: r.skipped.length }))
       setPicked({})
       setNote('')
-      void loadFollowUps()
     } catch (err) {
       onToast('err', errText(err, t('admin.saveError')))
     } finally {
@@ -142,24 +104,7 @@ export default function AssignPanel({
     }
   }
 
-  const bulk = async (fn: () => Promise<{ updated: number }>) => {
-    setBulkBusy(true)
-    try {
-      const r = await fn()
-      onToast('ok', t('admin.support.followUps.updated', { n: r.updated }))
-      await loadFollowUps()
-    } catch (err) {
-      onToast('err', errText(err, t('admin.saveError')))
-    } finally {
-      setBulkBusy(false)
-      setRevokeConfirm(false)
-    }
-  }
-
   const memberOptions = members.map((m) => ({ value: m.id, label: `${m.nickname || m.email} · ${t(`admin.support.tier.${m.effectiveTier}`)}` }))
-  const selIds = Array.from(fuSel)
-  const extendN = Number(extendDays)
-  const allOnPage = !!fuRows?.length && fuRows.filter((f) => f.active).every((f) => fuSel.has(f.id))
 
   return (
     <div className="space-y-5">
@@ -211,106 +156,6 @@ export default function AssignPanel({
         </button>
       </section>
 
-      <section className="space-y-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="mr-auto text-sm font-semibold text-neutral-200">{t('admin.support.followUps.title', { n: fuTotal })}</h3>
-          <Select value={fuAssignee} onChange={setFuAssignee} className="select-tight" ariaLabel={t('admin.support.assign.assignee')}
-            options={[{ value: '', label: t('admin.support.followUps.allStaff') }, ...memberOptions]} />
-          <Select value={fuStatus} onChange={setFuStatus} className="select-tight" ariaLabel={t('supportDesk.card.status')}
-            options={[{ value: '', label: t('admin.support.followUps.allStatus') }, ...STATUS_FILTERS.map((s) => ({
-              value: s,
-              label: s === 'active' || s === 'closed' ? t(`admin.support.followUps.${s}`) : t(`supportDesk.status.${s}`),
-            }))]} />
-        </div>
-        {Object.keys(dist).length > 0 && (
-          <div className="flex flex-wrap gap-1.5 text-[11px]">
-            {Object.entries(dist).map(([k, n]) => (
-              <span key={k} className={`tag ${FU_STATUS_TONE[k as keyof typeof FU_STATUS_TONE] ?? 'bg-white/5 text-neutral-400'}`}>
-                {t(`supportDesk.status.${k}`)} {n}
-              </span>
-            ))}
-          </div>
-        )}
-        {selIds.length > 0 && (
-          <div className="glass flex flex-wrap items-center gap-2 border-prism-600/40 p-3 text-xs">
-            <span className="font-medium text-prism-200">{t('admin.bulkSelected', { n: selIds.length })}</span>
-            <Select value={reassignTo} onChange={setReassignTo} className="select-tight" ariaLabel={t('admin.support.followUps.reassign')}
-              options={[{ value: '', label: t('admin.support.followUps.reassignTo') }, ...memberOptions]} />
-            <button type="button" className="btn-ghost px-3 py-1 disabled:opacity-40" disabled={!reassignTo || bulkBusy}
-              onClick={() => void bulk(() => adminSupportApi.reassign(selIds, reassignTo))}>
-              {t('admin.support.followUps.reassign')}
-            </button>
-            <input className="input w-16 py-1 text-xs" inputMode="numeric" value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
-              aria-label={t('admin.support.followUps.extendDays')} />
-            <button type="button" className="btn-ghost px-3 py-1 disabled:opacity-40"
-              disabled={!Number.isInteger(extendN) || extendN < 1 || extendN > 365 || bulkBusy}
-              onClick={() => void bulk(() => adminSupportApi.extend(selIds, extendN))}>
-              {t('admin.support.followUps.extend')}
-            </button>
-            <button type="button" className="rounded-lg border border-down/40 bg-down/15 px-3 py-1 text-down disabled:opacity-40" disabled={bulkBusy}
-              onClick={() => setRevokeConfirm(true)}>
-              {t('admin.support.followUps.revoke')}
-            </button>
-          </div>
-        )}
-        {!fuRows ? (
-          <div className="glass space-y-3 p-5"><SkeletonLine /><SkeletonLine width="70%" /></div>
-        ) : fuRows.length === 0 ? (
-          <div className="glass p-8 text-center text-sm text-neutral-500">{t('admin.support.followUps.empty')}</div>
-        ) : (
-          <div className="glass overflow-x-auto p-0">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
-                  <th className="px-3 py-3">
-                    <input type="checkbox" checked={allOnPage} aria-label={t('admin.bulkSelectAll')}
-                      className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500"
-                      onChange={() => setFuSel(allOnPage ? new Set() : new Set(fuRows.filter((f) => f.active).map((f) => f.id)))} />
-                  </th>
-                  <th className="px-3 py-3 font-medium">{t('admin.support.followUps.colUser')}</th>
-                  <th className="px-3 py-3 font-medium">{t('admin.support.assign.assignee')}</th>
-                  <th className="px-3 py-3 font-medium">{t('supportDesk.card.goal')}</th>
-                  <th className="px-3 py-3 font-medium">{t('supportDesk.card.status')}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {fuRows.map((f) => (
-                  <tr key={f.id} className="border-b border-white/5 last:border-0">
-                    <td className="px-3 py-2.5">
-                      <input type="checkbox" disabled={!f.active} checked={fuSel.has(f.id)} aria-label={f.email ?? f.userId}
-                        className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500 disabled:opacity-30"
-                        onChange={() => setFuSel((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(f.id)) next.delete(f.id)
-                          else next.add(f.id)
-                          return next
-                        })} />
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <div className="text-xs text-neutral-200">{f.nickname || '—'}</div>
-                      <div className="font-mono text-[11px] text-neutral-500">{f.email}</div>
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-neutral-300">{f.assigneeName || '—'}</td>
-                    <td className="px-3 py-2.5 text-xs">
-                      {t(`supportDesk.goal.${f.goal}`)}{' '}
-                      <span className={`tag ${FU_PRIORITY_TONE[f.priority]}`}>{t(`supportDesk.priority.${f.priority}`)}</span>
-                    </td>
-                    <td className="px-3 py-2.5"><span className={`tag ${FU_STATUS_TONE[f.status]}`}>{t(`supportDesk.status.${f.status}`)}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-        {fuTotal > LIST_PAGE && (
-          <div className="flex items-center justify-center gap-3 text-xs">
-            <button type="button" className="btn-ghost px-3 py-1.5 disabled:opacity-40" disabled={fuPage === 0} onClick={() => setFuPage(fuPage - 1)}>{t('common.prevPage')}</button>
-            <span className="num text-neutral-500">{fuPage + 1} / {Math.ceil(fuTotal / LIST_PAGE)}</span>
-            <button type="button" className="btn-ghost px-3 py-1.5 disabled:opacity-40" disabled={(fuPage + 1) * LIST_PAGE >= fuTotal} onClick={() => setFuPage(fuPage + 1)}>{t('common.nextPage')}</button>
-          </div>
-        )}
-      </section>
-
       {confirm && (
         <ConfirmModal
           center
@@ -323,17 +168,6 @@ export default function AssignPanel({
           })}
           onConfirm={() => void assign()}
           onCancel={() => setConfirm(false)}
-        />
-      )}
-      {revokeConfirm && (
-        <ConfirmModal
-          center
-          danger
-          busy={bulkBusy}
-          title={t('admin.support.followUps.revoke')}
-          message={t('admin.support.followUps.revokeBody', { n: selIds.length })}
-          onConfirm={() => void bulk(() => adminSupportApi.revoke(selIds))}
-          onCancel={() => setRevokeConfirm(false)}
         />
       )}
     </div>

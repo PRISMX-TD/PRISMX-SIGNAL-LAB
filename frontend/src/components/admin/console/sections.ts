@@ -31,6 +31,7 @@ export type AdminSection =
   | 'tickets'
   | 'staff'
   | 'assign'
+  | 'progress'
   | 'approvals'
   | 'performance'
   | 'templates'
@@ -45,7 +46,7 @@ export const ADMIN_GROUPS: { id: AdminGroup; sections: AdminSection[] }[] = [
   { id: 'users', sections: ['users', 'logs'] },
   { id: 'growth', sections: ['invites', 'competitions', 'gamification'] },
   { id: 'content', sections: ['guide', 'winrate', 'announcements', 'email'] },
-  { id: 'support', sections: ['tickets', 'staff', 'assign', 'approvals', 'performance', 'templates'] },
+  { id: 'support', sections: ['tickets', 'staff', 'assign', 'progress', 'approvals', 'performance', 'templates'] },
   { id: 'settings', sections: ['ops', 'system'] },
 ]
 
@@ -104,4 +105,28 @@ export function readLogsDeepLink(pathname: string, search: string): { userId: st
   const userId = params.get('user')
   const login = params.get('login')
   return userId || login ? { userId, login } : null
+}
+
+// 管理员不用客服后台（2026-10-17）：入口只给客服，管理员误进 /support-desk（旧书签、旧通知）时换到控制台里
+// 对应的地方——工单深链进工单分区并打开那张工单，跟进深链进跟进进度并打开那条记录，其余落到工单。
+// Admins don't use the support console (2026-10-17): its entry is for agents only, and an admin who
+// lands on /support-desk (an old bookmark or notification) goes to the matching console section — a
+// ticket link opens that ticket under tickets, a follow-up link opens that record under progress,
+// anything else lands on tickets.
+export function adminTargetForDesk(pathname: string, search: string): string {
+  const params = new URLSearchParams(search)
+  const inPath = pathname.match(/^\/support-desk\/tickets\/([^/]+)/)?.[1]
+  let ticket = params.get('ticket')
+  if (!ticket && inPath) {
+    try {
+      ticket = decodeURIComponent(inPath)
+    } catch {
+      ticket = inPath
+    }
+  }
+  if (ticket) return `/admin/tickets?ticket=${encodeURIComponent(ticket)}`
+  const followUp = params.get('followUp')
+  if (followUp) return `/admin/progress?followUp=${encodeURIComponent(followUp)}`
+  if (/^\/support-desk\/follow-ups(\/|$)/.test(pathname)) return '/admin/progress'
+  return '/admin/tickets'
 }

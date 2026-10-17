@@ -35,9 +35,10 @@ import OverviewPanel from '../components/admin/overview/OverviewPanel'
 import ApprovalsPanel from '../components/admin/support/ApprovalsPanel'
 import AssignPanel from '../components/admin/support/AssignPanel'
 import PerformancePanel from '../components/admin/support/PerformancePanel'
+import ProgressPanel from '../components/admin/support/ProgressPanel'
 import StaffPanel from '../components/admin/support/StaffPanel'
 import TemplatesPanel from '../components/admin/support/TemplatesPanel'
-import { GroupIcon, IconArrowUpRight, IconReplay } from '../components/admin/console/consoleIcons'
+import { GroupIcon, IconReplay } from '../components/admin/console/consoleIcons'
 import {
   ADMIN_GROUPS,
   groupOf,
@@ -218,6 +219,9 @@ function AdminConsole({ section }: { section: AdminSection }) {
     case 'assign':
       content = <AssignPanel presetUserIds={assignPreset} onPresetCleared={() => setAssignPreset([])} onToast={showToast} />
       break
+    case 'progress':
+      content = <ProgressPanel onToast={showToast} />
+      break
     case 'approvals':
       content = <ApprovalsPanel onToast={showToast} />
       break
@@ -298,12 +302,6 @@ function AdminConsole({ section }: { section: AdminSection }) {
                 <h1 className="adm-title">{t(`admin.console.group.${group}`)}</h1>
                 <p className="adm-desc">{t(`admin.console.groupDesc.${group}`)}</p>
               </div>
-              {group === 'support' && (
-                <Link to="/support-desk" className="adm-btn ml-auto gap-1.5">
-                  {t('admin.support.openDesk')}
-                  <IconArrowUpRight />
-                </Link>
-              )}
             </div>
             {sections.length > 1 && (
               <nav ref={tabsRef} className="adm-tabs no-scrollbar" aria-label={t(`admin.console.group.${group}`)}>

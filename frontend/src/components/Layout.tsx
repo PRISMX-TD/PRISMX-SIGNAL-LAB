@@ -358,8 +358,10 @@ export default function Layout() {
   }
 
   const isAdmin = user?.role === 'admin'
-  // 客服台入口：客服与管理员都有（设计 §9）/ support-desk entry for agents and admins
-  const isStaff = isAdmin || user?.role === 'support'
+  // 客服后台入口只给客服：管理员的工单与跟进进度都在管理控制台里（2026-10-17）。
+  // The support-console entry is for agents only: admins see tickets and follow-up progress in the
+  // admin console (2026-10-17).
+  const isSupport = user?.role === 'support'
 
   // 行情终端是全站唯一一个「满屏、不滚动、不要页脚」的页面。这个判断放在 Layout
   // 而不是让 ChartsPage 自己用负 margin 破框：破框的写法在有滚动条时会算错宽度，
@@ -496,7 +498,7 @@ export default function Layout() {
     // 代理页：按 /auth/me 下发的 isAgent 露入口（见 User.isAgent），入口判断先例同上。
     // Agent view: shown off the isAgent flag from /auth/me; same entry-hiding precedent.
     ...(user?.isAgent ? [{ to: '/agent', icon: 'agent', label: t('nav.agent') }] : []),
-    ...(isStaff ? [{ to: '/support-desk', icon: 'desk', label: t('nav.supportDesk') }] : []),
+    ...(isSupport ? [{ to: '/support-desk', icon: 'desk', label: t('nav.supportDesk') }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   // 前缀也算：客服后台、管理控制台的子页面都在各自路径之下 / prefix counts too: both consoles have sub-pages
@@ -833,7 +835,7 @@ export default function Layout() {
                   email={user?.email}
                   showUpgrade={user?.plan !== 'PRO'}
                   isAdmin={isAdmin}
-                  isStaff={isStaff}
+                  isSupport={isSupport}
                   isAgent={!!user?.isAgent}
                   gamificationVisible={!!user?.gamificationVisible}
                   gamificationLevel={user?.gamificationLevel}

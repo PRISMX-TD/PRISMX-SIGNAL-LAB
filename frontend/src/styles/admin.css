@@ -904,6 +904,191 @@
   line-height: 1.6;
 }
 
+/* ── 跟进进度 / follow-up progress ──
+   指标格可点：点「待联系」「停滞」直接筛下面的列表；选中时底边一条紫线。
+   客服卡：一张面上是人、进行中数、标签分布条、近况；选中 = 紫色描边，不加光晕。
+   动态时间线：左侧一条发丝线串起记录（头像）与事件（小点）。
+   KPI cells can be clicked to filter the list below; the selected one gets a violet bottom edge.
+   Agent cards: person, active count, label-mix bar and recent activity on one plane; selected =
+   violet outline, no glow. The activity timeline threads notes (avatars) and events (dots) on a
+   hairline. */
+.adm-kpi-btn {
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.adm-kpi-btn:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+.adm-kpi-btn.is-on {
+  background: var(--surface-2);
+  box-shadow: inset 0 -2px 0 var(--purple-hi);
+}
+.adm-kpi-btn:disabled {
+  cursor: default;
+}
+.adm-kpi-value.is-warn {
+  color: rgb(252 211 77);
+}
+
+.adm-agent {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid transparent;
+  background: var(--surface);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.adm-agent:hover {
+  background: var(--surface-2);
+}
+.adm-agent.is-on {
+  border-color: var(--purple-hi);
+  background: var(--surface-2);
+}
+.adm-agent.is-off {
+  opacity: 0.6;
+}
+
+/* 标签分布条：按数量分段，段间 2px 缝；没有进行中的跟进时是一条空轨 / label mix: segments by count with 2px gaps; an empty track when nothing is active */
+.adm-stack {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--nest);
+}
+.adm-stack > i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+}
+
+.adm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.adm-chip:hover {
+  border-color: var(--line-hi);
+  color: var(--text-2);
+}
+.adm-chip.is-on {
+  border-color: var(--line-hi);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.adm-chip .num {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.adm-btn.is-danger {
+  border-color: rgb(var(--down-rgb) / 0.4);
+  color: var(--down);
+}
+.adm-btn.is-danger:hover:not(:disabled) {
+  background: var(--down-bg);
+  color: var(--down);
+}
+
+.adm-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--line);
+}
+@media (min-width: 640px) {
+  .adm-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.adm-facts > div {
+  min-width: 0;
+  padding: 11px 14px;
+  background: var(--surface-2);
+}
+.adm-facts dt {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.adm-facts dd {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adm-tl {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.adm-tl::before {
+  content: '';
+  position: absolute;
+  left: 13.5px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--line-hi);
+}
+.adm-tl > li {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+}
+.adm-tl-dot {
+  display: flex;
+  width: 28px;
+  flex: none;
+  justify-content: center;
+  padding-top: 6px;
+}
+.adm-tl-dot > i {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--text-3);
+  box-shadow: 0 0 0 4px var(--surface);
+}
+.adm-tl-dot.is-brand > i {
+  background: var(--purple-hi);
+}
+.adm-tl-dot.is-warn > i {
+  background: rgb(251 191 36);
+}
+.adm-tl-dot.is-down > i {
+  background: var(--down);
+}
+.adm-tl-note {
+  min-width: 0;
+  flex: 1;
+  border-radius: 16px;
+  background: var(--surface-2);
+  padding: 11px 14px 12px;
+}
+
 @keyframes adm-rise {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }

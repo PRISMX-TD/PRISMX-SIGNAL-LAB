@@ -80,13 +80,6 @@ export function GroupIcon({ group, size }: { group: AdminGroup; size?: number })
   return <Svg size={size}>{GROUP_PATHS[group]}</Svg>
 }
 
-export const IconArrowUpRight = ({ size = 14 }: { size?: number }) => (
-  <Svg size={size}>
-    <path d="M8 16L16 8" />
-    <path d="M9.5 8H16v6.5" />
-  </Svg>
-)
-
 export const IconReplay = ({ size = 16 }: { size?: number }) => (
   <Svg size={size}>
     <path d="M4 12a8 8 0 1 0 2.4-5.7" />

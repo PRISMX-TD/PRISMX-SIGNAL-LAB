@@ -119,13 +119,18 @@
     white-space: nowrap;
     text-overflow: ellipsis;
   }
+  /* 菜单挂在 <body> 上，层级要高过所有会装下拉框的浮层（底部抽屉 / 确认框 80、图片灯箱 85），
+     否则在抽屉里点开就被抽屉盖住；仍低于全站 toast（90）。
+     The menu lives on <body>, so it has to sit above every overlay that can hold a dropdown
+     (sheets / confirms at 80, the lightbox at 85) or it opens behind the sheet; still below
+     the site-wide toast (90). */
   .select-backdrop {
     position: fixed;
     top: 0;
     right: 0;
     bottom: 0;
     left: 0;
-    z-index: 40;
+    z-index: 86;
   }
   /* portal 到 <body>，用 fixed 定位（left/top/width/bottom 由组件按触发器坐标
      内联注入），因此这里不再写死 top/left，避免被祖先 overflow 裁切。
@@ -134,7 +139,7 @@
      here — this is what escapes ancestor overflow clipping. */
   .select-menu {
     position: fixed;
-    z-index: 60;
+    z-index: 87;
     max-height: 240px;
     overflow-y: auto;
     background: #17171d;

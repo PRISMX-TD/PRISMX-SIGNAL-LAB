@@ -1,20 +1,22 @@
 // 管理控制台「客服 › 工单」：按状态 / 分类筛的工单列表 + 单条会话与回复。2026-10-17 从 AdminPage 拆出来，
-// 视觉改成客服后台的语言（一整块列表面、点 + 词的状态、左右气泡、底部回复框）。完整的多栏工作台在
-// 客服后台；这里留给管理员按分类翻一遍、顺手回一条。
+// 视觉改成客服后台的语言（一整块列表面、点 + 词的状态、左右气泡、底部回复框）。管理员不再进客服后台
+// （2026-10-17），所以把工单指派给某个客服、收回认领也在这里做。
 // The console's Support › Tickets: a list filtered by status / category plus one thread with a
 // reply box. Split out of AdminPage on 2026-10-17 and restyled in the support console's language
-// (one list plane, dot-and-word status, left / right bubbles, composer at the bottom). The full
-// multi-pane workspace is the support console; this is for paging through by category and
-// answering in passing.
+// (one list plane, dot-and-word status, left / right bubbles, composer at the bottom). Admins no
+// longer enter the support console (2026-10-17), so assigning a ticket to an agent or clearing a
+// claim happens here too.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
-import { adminApi, isAbortError } from '../../api/client'
+import { adminApi, adminSupportApi, isAbortError } from '../../api/client'
+import type { SupportMember } from '../../api/supportTypes'
 import { fmtDate, fmtDay } from '../../api/utils'
 import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus as TicketStatusValue } from '../../api/types'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../TicketImages'
+import { useAuth } from '../../store/auth'
 import { Avatar, TicketStatus } from '../support/supportUi'
 
 const STATUSES: TicketStatusValue[] = ['open', 'in_progress', 'closed']
@@ -29,7 +31,9 @@ const PRIORITY_PILL: Record<string, string> = {
 
 export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 'err', text: string) => void }) {
   const { t } = useTranslation()
+  const { user } = useAuth()
   const [tickets, setTickets] = useState<TicketListItem[]>([])
+  const [staff, setStaff] = useState<SupportMember[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -79,6 +83,9 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
 
   useEffect(() => { void load() }, [statusFilter, categoryFilter])
   useEffect(() => () => loadCtrl.current?.abort(), [])
+  useEffect(() => {
+    adminSupportApi.members().then((r) => setStaff(r.items.filter((m) => !m.disabled))).catch(() => {})
+  }, [])
 
   // 通知里的深链：?ticket=<id> 直接打开那条工单（新工单通知会带上）。参数打开后
   // 就抹掉，避免在页内退回列表后一刷新又被弹回详情。
@@ -144,6 +151,18 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
     }
   }
 
+  // 指派给某个客服 / 自己，或清空认领 / assign to an agent or yourself, or clear the claim
+  const assign = async (assigneeId: string | null) => {
+    if (!detail || (detail.assigneeId ?? null) === assigneeId) return
+    try {
+      setDetail(await adminApi.assignTicket(detail.id, assigneeId))
+      onToast('ok', t('supportDesk.thread.assigned'))
+      void load()
+    } catch (err) {
+      onToast('err', err instanceof Error ? err.message : 'Save failed')
+    }
+  }
+
   if (detail) {
     return (
       <div className="space-y-4">
@@ -160,12 +179,32 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
               <span className="adm-pill">{t(`tickets.category.${detail.category}`)}</span>
               <span className="ml-auto truncate font-mono text-xs text-neutral-500">{detail.userEmail}</span>
             </div>
-            <div className="adm-seg mt-4 w-max" role="group" aria-label={t('tickets.admin.colStatus')}>
-              {STATUSES.map((s) => (
-                <button key={s} type="button" aria-pressed={detail.status === s} className={detail.status === s ? 'is-on' : ''} onClick={() => void updateMeta({ status: s })}>
-                  {t(`tickets.status.${s}`)}
-                </button>
-              ))}
+            <div className="mt-4 flex flex-wrap items-center gap-3">
+              <div className="adm-seg w-max" role="group" aria-label={t('tickets.admin.colStatus')}>
+                {STATUSES.map((s) => (
+                  <button key={s} type="button" aria-pressed={detail.status === s} className={detail.status === s ? 'is-on' : ''} onClick={() => void updateMeta({ status: s })}>
+                    {t(`tickets.status.${s}`)}
+                  </button>
+                ))}
+              </div>
+              <div className="adm-filter">
+                <span>{t('supportDesk.thread.assignTo')}</span>
+                <Select
+                  value={detail.assigneeId ?? ''}
+                  onChange={(v) => void assign(v || null)}
+                  className="select-tight"
+                  ariaLabel={t('supportDesk.thread.assignTo')}
+                  options={[
+                    { value: '', label: t('supportDesk.thread.unassign') },
+                    ...(user ? [{ value: user.id, label: t('supportDesk.thread.me') }] : []),
+                    ...staff.filter((m) => m.id !== user?.id).map((m) => ({ value: m.id, label: m.nickname || m.email })),
+                    // 认领人已不在成员表里（停用等）时仍显示名字 / keep the name when the holder left the roster
+                    ...(detail.assigneeId && detail.assigneeId !== user?.id && !staff.some((m) => m.id === detail.assigneeId)
+                      ? [{ value: detail.assigneeId, label: detail.assigneeName || detail.assigneeId }]
+                      : []),
+                  ]}
+                />
+              </div>
             </div>
           </header>
 
@@ -318,6 +357,11 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                       <span className="adm-pill">{t(`tickets.category.${ticket.category}`)}</span>
                       <span className={`adm-pill ${PRIORITY_PILL[ticket.priority] ?? ''}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
                     </span>
+                    {ticket.assigneeName && (
+                      <span className="max-w-[160px] truncate text-[11px] text-neutral-500">
+                        {t('supportDesk.queue.assignedTo', { name: ticket.assigneeName })}
+                      </span>
+                    )}
                     {/* fmtDay 固定 UTC+8 / fmtDay pins UTC+8 */}
                     <span className="num text-[11px] text-neutral-500">{fmtDay(ticket.updatedAt)}</span>
                   </span>

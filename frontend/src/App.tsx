@@ -10,6 +10,7 @@ import {
 import { browserLangs, isPublicCompPath, pickPublicLang } from './utils/publicLang'
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { loggedOutRedirect } from './utils/loggedOutRedirect'
+import { adminTargetForDesk } from './components/admin/console/sections'
 import { AuthProvider, useAuth } from './store/auth'
 import { PrefsProvider } from './store/prefs'
 import { FestivalProvider, FESTIVAL_DEMO } from './festival/FestivalProvider'
@@ -312,12 +313,18 @@ function AdminOnly({ children }: { children: ReactNode }) {
   return user?.role === 'admin' ? <>{children}</> : <Navigate to="/dashboard" replace />
 }
 
-// 客服台路由：role 为 support 或 admin（设计 §9）。同 AdminOnly，真正的边界在后端 require_staff。
-// Support-desk route: role support or admin (design §9). As with AdminOnly, the real boundary
-// is the backend's require_staff.
-function StaffOnly({ children }: { children: ReactNode }) {
+// 客服后台路由：只给客服（2026-10-17 起管理员不用客服后台，跟进进度与工单都在管理控制台里看）。
+// 管理员误进来（旧书签 / 旧通知）换到控制台里对应的分区，见 adminTargetForDesk。同 AdminOnly，
+// 真正的边界在后端 require_staff。
+// Support-console route: agents only (since 2026-10-17 admins follow progress and tickets in the
+// admin console). An admin who lands here (old bookmark / notification) goes to the matching console
+// section, see adminTargetForDesk. As with AdminOnly, the real boundary is the backend's require_staff.
+function SupportOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth()
-  return user?.role === 'admin' || user?.role === 'support' ? <>{children}</> : <Navigate to="/dashboard" replace />
+  const location = useLocation()
+  if (user?.role === 'support') return <>{children}</>
+  if (user?.role === 'admin') return <Navigate to={adminTargetForDesk(location.pathname, location.search)} replace />
+  return <Navigate to="/dashboard" replace />
 }
 
 // 代理专属路由：要求 /auth/me 下发的 isAgent（至少持有一条被指派的邀请链接）。
@@ -614,9 +621,9 @@ export default function App() {
               <Route
                 path="/support-desk/*"
                 element={
-                  <StaffOnly>
+                  <SupportOnly>
                     <SupportDeskPage />
-                  </StaffOnly>
+                  </SupportOnly>
                 }
               />
               {/* 管理控制台的分区都在 /admin/ 之下（/admin/users、/admin/logs…），旧的 /admin?tab= 由页面自己换成分区地址。

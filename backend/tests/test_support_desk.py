@@ -7,6 +7,7 @@
 
 Support desk (rev 41) tests per design §11.
 """
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -25,6 +26,7 @@ from app.models import (
     Conversion,
     EmailOptOut,
     FollowUp,
+    FollowUpNote,
     MT5Account,
     SupportRequest,
     Ticket,
@@ -740,3 +742,319 @@ def test_awaiting_reply_tab_skips_closed(client, db, people):
     got = [x["id"] for x in client.get("/api/admin/tickets", params={"assignee": "none", "status": "active"},
                                        headers=_auth(people["internal"])).json()]
     assert got == [open_t.id]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# admin：跟进进度与完整记录 / admin: follow-up progress and records
+# ─────────────────────────────────────────────────────────────────────────────
+def _note(db, fu, author, at, content="记录", channel="phone") -> FollowUpNote:
+    n = FollowUpNote(follow_up_id=fu.id, author_id=author.id, channel=channel, content=content, created_at=at)
+    db.add(n)
+    db.commit()
+    return n
+
+
+def test_admin_follow_up_list_activity_sort_and_note_fields(client, db, people):
+    admin, staff = people["admin"], people["internal"]
+    c2, c3, c4 = _user(db, "c2@x.com"), _user(db, "c3@x.com"), _user(db, "c4@x.com")
+    now = _now()
+    old = _assign(db, admin, staff, people["customer"], created_at=now - timedelta(days=5))
+    new = _assign(db, admin, staff, c2, created_at=now - timedelta(days=1))
+    idle = _assign(db, admin, staff, c3, created_at=now - timedelta(days=4))
+    closed = _assign(db, admin, staff, c4, created_at=now - timedelta(days=10))
+    closed.status, closed.closed_at = "revoked", now
+    db.commit()
+    _note(db, old, staff, now - timedelta(days=2), content="first")
+    _note(db, old, staff, now - timedelta(hours=1), content="x" * 300, channel="email")
+    ha = _auth(admin)
+
+    by_created = client.get("/api/admin/support/follow-ups", headers=ha).json()
+    assert [x["id"] for x in by_created["items"]] == [new.id, idle.id, old.id, closed.id]
+    # 有新记录的旧跟进排到最前 / an old follow-up with a fresh note ranks first
+    by_activity = client.get("/api/admin/support/follow-ups", params={"sort": "activity"}, headers=ha).json()
+    assert [x["id"] for x in by_activity["items"]] == [old.id, new.id, idle.id, closed.id]
+    assert by_activity["total"] == 4 and by_activity["distribution"] == {"pending": 3, "revoked": 1}
+
+    items = {x["id"]: x for x in by_activity["items"]}
+    o = items[old.id]
+    assert o["notesCount"] == 2 and o["stale"] is False and o["lastNoteAt"] is not None
+    assert o["lastNote"] == {"content": "x" * 160, "channel": "email", "authorName": "Inn"}
+    assert o["email"] == "rexlee@gmail.com" and o["assigneeName"] == "Inn"
+    n = items[new.id]
+    assert n["notesCount"] == 0 and n["lastNote"] is None and n["lastNoteAt"] is None and n["stale"] is False
+    # 4 天没有任何记录 → 停滞；已结束的永远不算 / 4 days untouched is stale; closed never is
+    assert items[idle.id]["stale"] is True
+    assert items[closed.id]["stale"] is False
+    # 旧参数照常 / existing params unchanged
+    act = client.get("/api/admin/support/follow-ups", params={"status": "active", "sort": "activity"}, headers=ha).json()
+    assert [x["id"] for x in act["items"]] == [old.id, new.id, idle.id]
+    # stale=true 只留停滞的（管理员「停滞」指标点开的列表）；已结束的不算；分布不受它影响
+    # stale=true keeps only stale rows (the admin "stale" KPI list); closed never qualify; distribution ignores it
+    for params in ({"stale": "true"}, {"stale": "true", "status": "active", "sort": "activity"}):
+        st = client.get("/api/admin/support/follow-ups", params=params, headers=ha).json()
+        assert [x["id"] for x in st["items"]] == [idle.id] and st["total"] == 1, params
+        assert st["items"][0]["stale"] is True
+        assert st["distribution"] == {"pending": 3, "revoked": 1}
+    st = client.get("/api/admin/support/follow-ups", params={"stale": "true", "status": "closed"}, headers=ha).json()
+    assert st["total"] == 0 and st["items"] == []
+    assert client.get("/api/admin/support/follow-ups", params={"stale": "false"}, headers=ha).json()["total"] == 4
+
+
+def test_admin_follow_up_list_q_filter_and_distribution(client, db, people):
+    admin, staff = people["admin"], people["internal"]
+    by_nick = _user(db, "z1@x.com", nickname="ZedKing")
+    by_mail = _user(db, "hellozed@x.com")
+    fu_nick = _assign(db, admin, staff, by_nick)
+    fu_nick.status, fu_nick.closed_at = "revoked", _now()
+    db.commit()
+    fu_mail = _assign(db, admin, staff, by_mail)
+    _assign(db, admin, staff, people["customer"])
+    ha = _auth(admin)
+    url = "/api/admin/support/follow-ups"
+
+    r = client.get(url, params={"q": "  ZED "}, headers=ha).json()
+    assert r["total"] == 2 and {x["id"] for x in r["items"]} == {fu_nick.id, fu_mail.id}
+    assert r["distribution"] == {"pending": 1, "revoked": 1}
+    # 分布受 q 约束、不受 status 约束 / distribution honours q but not status
+    r = client.get(url, params={"q": "zed", "status": "active"}, headers=ha).json()
+    assert [x["id"] for x in r["items"]] == [fu_mail.id] and r["total"] == 1
+    assert r["distribution"] == {"pending": 1, "revoked": 1}
+    # 通配符按字面匹配 / wildcards match literally
+    r = client.get(url, params={"q": "%"}, headers=ha).json()
+    assert r["total"] == 0 and r["items"] == [] and r["distribution"] == {}
+    # 空白 q 不筛选 / a blank q does not filter
+    assert client.get(url, params={"q": "   "}, headers=ha).json()["total"] == 3
+    assert client.get(url, params={"sort": "bogus"}, headers=ha).status_code == 422
+
+
+def test_admin_support_progress_summary(client, db, people):
+    admin, inn, outy = people["admin"], people["internal"], people["outsourced"]
+    old_agent = _user(db, "old@x.com", role="support", support_tier="internal", nickname="Old", disabled_at=_now())
+    gone = _user(db, "gone@x.com", role="support", nickname="Gone", disabled_at=_now())
+    cs = [_user(db, f"p{i}@x.com") for i in range(4)]
+    now = _now()
+    fu1 = _assign(db, admin, inn, people["customer"], created_at=now - timedelta(days=10))
+    fu2 = _assign(db, admin, inn, cs[0], created_at=now - timedelta(days=8))
+    fu3 = _assign(db, admin, outy, cs[1], created_at=now - timedelta(days=20))
+    fu4 = _assign(db, admin, admin, cs[2], created_at=now - timedelta(hours=1))
+    _assign(db, admin, old_agent, cs[3])
+    fu1.status = "interested"
+    fu3.status, fu3.closed_at = "revoked", now - timedelta(days=1)
+    fu4.status = "contacted"
+    db.commit()
+    inn_last = now - timedelta(days=1)
+    _note(db, fu1, inn, inn_last)                       # 旧跟进有新记录 → 不停滞 / fresh note: not stale
+    _note(db, fu2, inn, now - timedelta(days=6))        # 6 天前 → 停滞 / 6 days old: stale
+    _note(db, fu3, outy, now - timedelta(days=2))       # 已结束的跟进 / on a closed follow-up
+    _note(db, fu3, outy, now - timedelta(days=10))      # 7 天外 / outside the 7-day window
+
+    r = client.get("/api/admin/support/progress", headers=_auth(admin))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["staleDays"] == support.STALE_DAYS == 3
+    assert body["totals"] == {"active": 4, "stale": 1, "notes7d": 3, "pending": 2}
+    # 停用排最后；没有工作的停用客服不出现；名下有跟进的管理员出现
+    # disabled last; an idle disabled agent is omitted; an admin assignee appears
+    assert [x["staffId"] for x in body["items"]] == [inn.id, admin.id, outy.id, old_agent.id]
+    assert gone.id not in {x["staffId"] for x in body["items"]}
+    rows = {x["staffId"]: x for x in body["items"]}
+    i = rows[inn.id]
+    assert (i["active"], i["distribution"], i["stale"], i["notes7d"]) == (2, {"interested": 1, "pending": 1}, 1, 2)
+    assert i["role"] == "support" and i["tier"] == "internal" and i["disabled"] is False
+    assert datetime.fromisoformat(i["lastNoteAt"]) == inn_last
+    a = rows[admin.id]
+    assert a["role"] == "admin" and a["tier"] == "internal" and a["nickname"] == "Boss"
+    assert (a["active"], a["distribution"], a["stale"], a["notes7d"], a["lastNoteAt"]) == (1, {"contacted": 1}, 0, 0, None)
+    o = rows[outy.id]
+    assert (o["active"], o["distribution"], o["stale"], o["notes7d"]) == (0, {}, 0, 1)
+    assert o["tier"] == "outsourced" and o["lastNoteAt"] is not None and o["email"] == "out@x.com"
+    d = rows[old_agent.id]
+    assert d["disabled"] is True and d["active"] == 1 and d["distribution"] == {"pending": 1}
+
+
+def test_admin_follow_up_detail_timeline(client, db, people):
+    admin, inn, outy, c = people["admin"], people["internal"], people["outsourced"], people["customer"]
+    ha, hi, ho = _auth(admin), _auth(inn), _auth(outy)
+    r = client.post("/api/admin/support/follow-ups", headers=ha,
+                    json={"userIds": [c.id], "assigneeId": inn.id, "goal": "open_mt5"})
+    fu_id = r.json()["created"][0]["id"]
+    # 另一个用户的跟进与日志不应混进来 / another user's follow-up and rows stay out
+    other = _user(db, "other@x.com")
+    client.post("/api/admin/support/follow-ups", headers=ha,
+                json={"userIds": [other.id], "assigneeId": inn.id, "goal": "revisit"})
+    assert client.post(f"/api/support/follow-ups/{fu_id}/notes", json={"channel": "phone", "content": "第一次电话"},
+                       headers=hi).status_code == 200
+    assert client.patch(f"/api/support/follow-ups/{fu_id}", json={"status": "interested"}, headers=hi).status_code == 200
+    r = client.post(f"/api/support/users/{c.id}/message", json={"title": "开户指引", "body": "您好"}, headers=hi)
+    ticket_id = r.json()["ticket"]["id"]
+    r = client.post("/api/admin/support/follow-ups/reassign", json={"ids": [fu_id], "assigneeId": outy.id}, headers=ha)
+    assert r.json() == {"updated": 1}
+    assert client.post(f"/api/support/follow-ups/{fu_id}/notes", json={"channel": "email", "content": "已发邮件"},
+                       headers=ho).status_code == 200
+    # 第一条记录挪早一点，「新→旧」顺序不依赖时钟精度 / pin the first note earlier so order is clock-independent
+    first = db.query(FollowUpNote).filter(FollowUpNote.content == "第一次电话").one()
+    first.created_at = _now() - timedelta(hours=2)
+    db.add(Conversion(user_id=c.id, kind="mt5_real", dedupe_key="999@MC-Live", follow_up_id=fu_id,
+                      credited_to=outy.id, status="confirmed"))
+    db.commit()
+    assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=ho).status_code == 200
+
+    r = client.get(f"/api/admin/support/follow-ups/{fu_id}", headers=ha)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    fu = body["followUp"]
+    assert fu["id"] == fu_id and fu["status"] == "revoked" and fu["active"] is False and fu["stale"] is False
+    assert fu["assigneeName"] == "Outy" and fu["assignedByName"] == "Boss" and fu["email"] == c.email
+    assert fu["notesCount"] == 2 and fu["lastNoteAt"] is not None
+    u = body["user"]
+    assert u["id"] == c.id and u["email"] == c.email and u["nickname"] == "Rex" and u["plan"] == "FREE"
+    assert u["doNotContact"] is True and "phone" not in u
+    assert [n["content"] for n in body["notes"]] == ["已发邮件", "第一次电话"]
+    assert body["notes"][0]["authorName"] == "Outy"
+
+    events = body["events"]
+    actions = [e["action"] for e in events]
+    assert sorted(actions) == sorted(["assign", "update", "message", "reassign", "do_not_contact"])
+    assert "note" not in actions
+    ats = [datetime.fromisoformat(e["at"]) for e in events]
+    assert ats == sorted(ats, reverse=True)
+    ev = {e["action"]: e for e in events}
+    assert ev["assign"]["actorName"] == "Boss" and ev["assign"]["actorType"] == "admin"
+    assert ev["assign"]["data"]["to"] == inn.id
+    assert ev["update"]["data"] == {"action": "update", "status": "interested", "from": "contacted"}
+    assert ev["update"]["actorName"] == "Inn" and ev["update"]["actorType"] == "support"
+    assert ev["reassign"]["data"]["from"] == inn.id and ev["reassign"]["data"]["to"] == outy.id
+    # 站内来信的 ref_id 是工单号，靠 data.fu 归到这条跟进 / the letter matches through data.fu
+    assert ev["message"]["data"]["fu"] == fu_id and ev["message"]["actorId"] == inn.id
+    assert ev["do_not_contact"]["actorName"] == "Outy"
+    names = body["names"]
+    assert names[admin.id] == "Boss" and names[inn.id] == "Inn" and names[outy.id] == "Outy"
+    assert "contacted" not in names and "interested" not in names and other.id not in names
+    assert ticket_id not in names
+
+    convs = body["conversions"]
+    assert len(convs) == 1 and convs[0]["kind"] == "mt5_real" and convs[0]["creditedTo"] == outy.id
+    assert convs[0]["followUpId"] == fu_id
+
+    nf = client.get("/api/admin/support/follow-ups/nope", headers=ha)
+    assert nf.status_code == 404 and "Follow-up not found" in nf.json()["detail"]
+
+
+def test_admin_follow_up_detail_keeps_follow_ups_of_one_user_apart(client, db, people):
+    """同一个客户先后两条跟进：各自的时间线只含自己的事件（按 ref_id / data.fu 归属），勿扰只算进
+    它关掉的那条；names 里的人可以只来自事件 data（改派的 from）。
+    Two successive follow-ups of one customer: each timeline holds only its own
+    events (by ref_id / data.fu), do-not-contact only lands on the one it closed,
+    and names resolve people who only appear inside event data (reassign's from)."""
+    admin, inn, outy, c = people["admin"], people["internal"], people["outsourced"], people["customer"]
+    ha, hi = _auth(admin), _auth(inn)
+    url = "/api/admin/support/follow-ups"
+    a_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": inn.id, "goal": "open_mt5"}).json()["created"][0]["id"]
+    assert client.post(f"/api/support/follow-ups/{a_id}/notes", json={"channel": "phone", "content": "A 记录"},
+                       headers=hi).status_code == 200
+    assert client.post(f"{url}/revoke", json={"ids": [a_id]}, headers=ha).json() == {"updated": 1}
+    a = db.get(FollowUp, a_id)
+    a.created_at, a.closed_at = _now() - timedelta(days=2), _now() - timedelta(days=1)
+    db.commit()
+
+    b_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": outy.id, "goal": "renew"}).json()["created"][0]["id"]
+    assert client.post(f"/api/support/users/{c.id}/message", json={"title": "续费", "body": "您好"}, headers=ha).status_code == 200
+    assert client.post(f"{url}/reassign", json={"ids": [b_id], "assigneeId": inn.id}, headers=ha).json() == {"updated": 1}
+    assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=hi).status_code == 200
+
+    ra = client.get(f"{url}/{a_id}", headers=ha).json()
+    assert sorted(e["action"] for e in ra["events"]) == ["assign", "revoke"]
+    assert {e["data"].get("to") for e in ra["events"] if e["action"] == "assign"} == {inn.id}
+    assert [n["content"] for n in ra["notes"]] == ["A 记录"]
+    assert outy.id not in ra["names"]
+
+    rb = client.get(f"{url}/{b_id}", headers=ha).json()
+    assert sorted(e["action"] for e in rb["events"]) == ["assign", "do_not_contact", "message", "reassign"]
+    assert rb["notes"] == [] and rb["followUp"]["status"] == "revoked" and rb["followUp"]["assigneeName"] == "Inn"
+    ev = {e["action"]: e for e in rb["events"]}
+    assert ev["message"]["data"]["fu"] == b_id and ev["message"]["actorType"] == "admin"
+    # Outy 只出现在 assign.to / reassign.from 里 / Outy only appears inside assign.to / reassign.from
+    assert rb["names"][outy.id] == "Outy" and ev["reassign"]["data"]["from"] == outy.id
+
+
+def test_admin_progress_endpoints_forbidden_for_support_and_post_routes_intact(client, db, people):
+    fu = _assign(db, people["admin"], people["internal"], people["customer"])
+    for who in ("internal", "outsourced"):
+        h = _auth(people[who])
+        for path in ("/api/admin/support/follow-ups", "/api/admin/support/progress",
+                     f"/api/admin/support/follow-ups/{fu.id}"):
+            assert client.get(path, headers=h).status_code == 403, (who, path)
+    # 新 GET /follow-ups/{id} 不吃掉同前缀的 POST 路由 / the new GET route doesn't shadow the POSTs
+    ha = _auth(people["admin"])
+    r = client.post("/api/admin/support/follow-ups/check", json={"userIds": [people["customer"].id]}, headers=ha)
+    assert r.status_code == 200 and r.json()["items"][0]["activeFollowUp"] is True
+    r = client.post("/api/admin/support/follow-ups/extend", json={"ids": [fu.id], "days": 3}, headers=ha)
+    assert r.json() == {"updated": 1}
+    r = client.post("/api/admin/support/follow-ups/reassign",
+                    json={"ids": [fu.id], "assigneeId": people["outsourced"].id}, headers=ha)
+    assert r.json() == {"updated": 1}
+    r = client.post("/api/admin/support/follow-ups/revoke", json={"ids": [fu.id]}, headers=ha)
+    assert r.json() == {"updated": 1}
+    assert client.get(f"/api/admin/support/follow-ups/{fu.id}", headers=ha).json()["followUp"]["status"] == "revoked"
+    # 参数化的 403 用例已自动覆盖新路由 / the parametrized 403 test already walks the new routes
+    assert ("GET", "/api/admin/support/follow-ups/nope") in ADMIN_SUPPORT_CALLS
+    assert ("GET", "/api/admin/support/progress") in ADMIN_SUPPORT_CALLS
+
+
+def test_do_not_contact_right_after_a_revoke_stays_on_the_follow_up_it_closed(client, db, people):
+    """收回 A 后马上给同一客户分配 B，半分钟内 B 的客服点「不再联系」：只记在 B 上，不会因为
+    时间挨着 A 的结束时间就挂到 A 的记录里。老的勿扰记录（没有 data.fu）仍按结束时间认领。
+    A revoked, B assigned right after, and B's agent marks do-not-contact within half a
+    minute: it lands on B only, not on A just because it sits next to A's close time. Old
+    do-not-contact rows (no data.fu) are still matched by close time."""
+    admin, inn, c = people["admin"], people["internal"], people["customer"]
+    ha, hi = _auth(admin), _auth(inn)
+    url = "/api/admin/support/follow-ups"
+    a_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": inn.id, "goal": "open_mt5"}).json()["created"][0]["id"]
+    assert client.post(f"{url}/revoke", json={"ids": [a_id]}, headers=ha).json() == {"updated": 1}
+    b_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": inn.id, "goal": "renew"}).json()["created"][0]["id"]
+    assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=hi).status_code == 200
+
+    dnc = db.query(ActivityEvent).filter(ActivityEvent.kind == "support.action").one()
+    assert json.loads(dnc.data)["fu"] == [b_id]
+    actions = lambda fid: sorted(e["action"] for e in client.get(f"{url}/{fid}", headers=ha).json()["events"])  # noqa: E731
+    assert actions(a_id) == ["assign", "revoke"]
+    assert actions(b_id) == ["assign", "do_not_contact"]
+
+    # 老记录：没有 data.fu，只认紧贴结束时间的 / legacy row without data.fu: matched by close time only
+    dnc.data = json.dumps({"action": "do_not_contact"})
+    db.commit()
+    assert "do_not_contact" in actions(b_id)
+    b = db.get(FollowUp, b_id)
+    b.closed_at = b.closed_at - timedelta(minutes=5)
+    db.commit()
+    assert "do_not_contact" not in actions(b_id)
+
+
+def test_extend_by_days_leaves_follow_ups_without_a_deadline_alone(client, db, people):
+    """按天数延期只动有截止时间的跟进；没有截止时间的保持不限期（不然到期会被自动结束）。
+    给定具体时间的延期两种都改。
+    Extending by days only touches follow-ups that have a deadline; ones without stay
+    unlimited (otherwise the sweep would expire them). An explicit date sets both."""
+    admin, inn = people["admin"], people["internal"]
+    ha = _auth(admin)
+    dated = _assign(db, admin, inn, people["customer"])
+    open_ended = _assign(db, admin, inn, _user(db, "nodeadline@x.com"))
+    open_ended.expires_at = None
+    db.commit()
+    before = dated.expires_at
+
+    r = client.post("/api/admin/support/follow-ups/extend", json={"ids": [dated.id, open_ended.id], "days": 7}, headers=ha)
+    assert r.json() == {"updated": 1}
+    db.refresh(dated)
+    db.refresh(open_ended)
+    assert open_ended.expires_at is None
+    assert dated.expires_at > before
+    assert db.query(ActivityEvent).filter(ActivityEvent.ref_id == open_ended.id,
+                                          ActivityEvent.kind == "support.follow_up").count() == 0
+
+    when = (_now() + timedelta(days=60)).isoformat()
+    r = client.post("/api/admin/support/follow-ups/extend", json={"ids": [dated.id, open_ended.id], "expiresAt": when}, headers=ha)
+    assert r.json() == {"updated": 2}
+    db.refresh(open_ended)
+    assert open_ended.expires_at is not None

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ADMIN_GROUPS, groupOf, isAdminSection, legacyAdminTarget, readLogsDeepLink, sectionsOf } from './sections'
+import { ADMIN_GROUPS, adminTargetForDesk, groupOf, isAdminSection, legacyAdminTarget, readLogsDeepLink, sectionsOf } from './sections'
 
 describe('admin console sections', () => {
   it('lists every section exactly once', () => {
@@ -38,5 +38,15 @@ describe('admin console sections', () => {
     expect(legacyAdminTarget('')).toBe('/admin/data')
     expect(legacyAdminTarget('?tab=nope')).toBe('/admin/data')
     expect(legacyAdminTarget('?range=month')).toBe('/admin/data?range=month')
+  })
+
+  it('sends an admin who opens the support console to the matching console section', () => {
+    expect(adminTargetForDesk('/support-desk', '?ticket=t1')).toBe('/admin/tickets?ticket=t1')
+    expect(adminTargetForDesk('/support-desk/tickets/t%2F2', '')).toBe('/admin/tickets?ticket=t%2F2')
+    expect(adminTargetForDesk('/support-desk', '?followUp=f1')).toBe('/admin/progress?followUp=f1')
+    expect(adminTargetForDesk('/support-desk/follow-ups/u1', '')).toBe('/admin/progress')
+    expect(adminTargetForDesk('/support-desk/follow-ups', '')).toBe('/admin/progress')
+    expect(adminTargetForDesk('/support-desk', '')).toBe('/admin/tickets')
+    expect(groupOf('progress')).toBe('support')
   })
 })
