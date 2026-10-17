@@ -22,7 +22,9 @@ export default function FollowUpList({
   onSelect,
   reloadKey,
   onError,
+  onCount,
 }: {
+  onCount?: (n: number) => void
   selectedUserId: string | null
   onSelect: (fu: FollowUp) => void
   reloadKey: number
@@ -40,65 +42,70 @@ export default function FollowUpList({
       const [fu, req] = await Promise.all([supportApi.followUps(), supportApi.myRequests()])
       setItems(fu.items)
       setTotal(fu.total)
+      onCount?.(fu.total)
       setRequests(req.items.slice(0, 10))
     } catch (err) {
       onError(errText(err, t('common.error')))
     } finally {
       setLoading(false)
     }
-  }, [onError, t])
+  }, [onError, onCount, t])
 
   useEffect(() => { void load() }, [load, reloadKey])
 
   if (loading && items.length === 0) {
     return (
-      <div className="glass space-y-3 p-4">
-        <SkeletonLine width="60%" height={14} />
-        <SkeletonLine />
-      </div>
+      <ul aria-busy="true" className="border-t border-white/[0.06]">
+        {[0, 1, 2, 3].map((i) => (
+          <li key={i} className="space-y-2 border-b border-white/[0.04] px-4 py-3">
+            <SkeletonLine width="50%" height={12} />
+            <SkeletonLine width="35%" height={10} />
+          </li>
+        ))}
+      </ul>
     )
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-xs text-neutral-500">{t('supportDesk.followUps.count', { n: total })}</p>
+    <div className="min-h-0 flex-1 overflow-y-auto border-t border-white/[0.06]">
+      <p className="px-4 pb-1 pt-2.5 text-[11px] text-neutral-500">{t('supportDesk.followUps.count', { n: total })}</p>
       {items.length === 0 ? (
-        <div className="glass p-6 text-center text-sm text-neutral-500">{t('supportDesk.followUps.empty')}</div>
+        <div className="px-6 py-12 text-center text-sm text-neutral-500">{t('supportDesk.followUps.empty')}</div>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {items.map((f) => (
-            <li key={f.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(f)}
-                aria-current={selectedUserId === f.userId}
-                className={`w-full rounded-xl border px-3.5 py-3 text-left transition ${
-                  selectedUserId === f.userId
-                    ? 'border-prism-500/50 bg-prism-600/10'
-                    : f.overdue
-                      ? 'border-down/30 bg-down/[0.06] hover:bg-down/10'
-                      : 'border-white/[0.06] bg-white/[0.03] hover:bg-white/[0.06]'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">
-                    {f.nickname || t('supportDesk.card.noNickname')}
-                  </span>
-                  <Tag tone={FU_PRIORITY_TONE[f.priority]}>{t(`supportDesk.priority.${f.priority}`)}</Tag>
-                </div>
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <Tag tone={FU_STATUS_TONE[f.status]}>{t(`supportDesk.status.${f.status}`)}</Tag>
-                  <Tag tone="bg-white/5 text-neutral-400">{t(`supportDesk.goal.${f.goal}`)}</Tag>
-                </div>
-              </button>
-            </li>
-          ))}
+        <ul>
+          {items.map((f) => {
+            const sel = selectedUserId === f.userId
+            return (
+              <li key={f.id} className="border-b border-white/[0.04]">
+                <button
+                  type="button"
+                  onClick={() => onSelect(f)}
+                  aria-current={sel}
+                  className={`relative w-full px-4 py-2.5 text-left transition ${
+                    sel ? 'bg-prism-600/[0.12]' : f.overdue ? 'bg-down/[0.05] hover:bg-down/10' : 'hover:bg-white/[0.04]'
+                  }`}
+                >
+                  {sel && <span className="absolute inset-y-0 left-0 w-0.5 bg-prism-400" aria-hidden="true" />}
+                  <div className="flex items-center gap-2">
+                    <span className={`min-w-0 flex-1 truncate text-[13px] ${sel ? 'font-semibold text-neutral-50' : 'font-medium text-neutral-100'}`}>
+                      {f.nickname || t('supportDesk.card.noNickname')}
+                    </span>
+                    <Tag tone={FU_PRIORITY_TONE[f.priority]}>{t(`supportDesk.priority.${f.priority}`)}</Tag>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <Tag tone={FU_STATUS_TONE[f.status]}>{t(`supportDesk.status.${f.status}`)}</Tag>
+                    <Tag tone="bg-white/5 text-neutral-400">{t(`supportDesk.goal.${f.goal}`)}</Tag>
+                  </div>
+                </button>
+              </li>
+            )
+          })}
         </ul>
       )}
 
       {requests.length > 0 && (
-        <div className="glass mt-2 p-4">
-          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">{t('supportDesk.requests.title')}</h3>
+        <div className="m-3 rounded-2xl border border-white/[0.06] bg-white/[0.02] p-3.5">
+          <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{t('supportDesk.requests.title')}</h3>
           <ul className="space-y-2">
             {requests.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center gap-2 text-xs">

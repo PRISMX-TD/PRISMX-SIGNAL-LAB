@@ -2181,7 +2181,7 @@
     }
   },
   "supportDesk": {
-    "title": "サポートデスク",
+    "title": "サポート管理",
     "retry": "再試行",
     "yes": "はい",
     "no": "いいえ",
@@ -2208,6 +2208,8 @@
       "admin": "管理者"
     },
     "queue": {
+      "emptyTitle": "チケットはありません",
+      "emptyHint": "新しいチケットは自動でここに表示されます",
       "scope": "チケット範囲",
       "status": "チケット状態",
       "me": "自分",
@@ -2231,6 +2233,7 @@
       "modeReply": "ユーザーに返信",
       "modeInternal": "社内メモ",
       "insertTemplate": "定型文を挿入",
+      "sendHint": "Ctrl + Enter で送信",
       "internalHint": "社内メモはサポートと管理者のみ閲覧でき、ユーザーには通知されません。",
       "internalPlaceholder": "同僚向けのメモ（ユーザーには非表示）",
       "saveNote": "メモを保存"
@@ -2300,6 +2303,9 @@
       "mine": "自分の実績"
     },
     "card": {
+      "groupContact": "連絡先",
+      "groupAccount": "アカウント",
+      "groupSource": "流入元",
       "noNickname": "（ニックネーム未設定）",
       "real": "リアル",
       "demo": "デモ",

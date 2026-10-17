@@ -3026,7 +3026,7 @@
     },
     "support": {
       "bulkAssign": "Assign to support",
-      "openDesk": "Open support desk",
+      "openDesk": "Open support console",
       "sub": {
         "staff": "Agents",
         "assign": "Assign follow-ups",
@@ -4278,7 +4278,7 @@
     }
   },
   "supportDesk": {
-    "title": "Support desk",
+    "title": "Support console",
     "retry": "Retry",
     "yes": "Yes",
     "no": "No",
@@ -4305,6 +4305,8 @@
       "admin": "Admin"
     },
     "queue": {
+      "emptyTitle": "No tickets",
+      "emptyHint": "New tickets show up here automatically",
       "scope": "Ticket scope",
       "status": "Ticket status",
       "me": "Mine",
@@ -4328,6 +4330,7 @@
       "modeReply": "Reply to user",
       "modeInternal": "Internal note",
       "insertTemplate": "Insert canned reply",
+      "sendHint": "Ctrl + Enter to send",
       "internalHint": "Internal notes are visible to support and admins only; the user is not notified.",
       "internalPlaceholder": "A note for colleagues (hidden from the user)",
       "saveNote": "Save note"
@@ -4397,6 +4400,9 @@
       "mine": "Credited to me"
     },
     "card": {
+      "groupContact": "Contact",
+      "groupAccount": "Account",
+      "groupSource": "Source",
       "noNickname": "(no nickname)",
       "real": "Real",
       "demo": "Demo",

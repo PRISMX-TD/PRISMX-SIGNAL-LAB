@@ -3016,7 +3016,7 @@
     },
     "support": {
       "bulkAssign": "分配给客服",
-      "openDesk": "打开客服台",
+      "openDesk": "打开客服后台",
       "sub": {
         "staff": "客服成员",
         "assign": "分配跟进",
@@ -4268,7 +4268,7 @@
     }
   },
   "supportDesk": {
-    "title": "客服台",
+    "title": "客服后台",
     "retry": "重试",
     "yes": "是",
     "no": "否",
@@ -4295,6 +4295,8 @@
       "admin": "管理员"
     },
     "queue": {
+      "emptyTitle": "暂无工单",
+      "emptyHint": "新工单会自动出现在这里",
       "scope": "工单范围",
       "status": "工单状态",
       "me": "我的",
@@ -4318,6 +4320,7 @@
       "modeReply": "回复用户",
       "modeInternal": "内部备注",
       "insertTemplate": "插入快捷回复",
+      "sendHint": "Ctrl + Enter 发送",
       "internalHint": "内部备注只有客服和管理员看得到，不会通知用户。",
       "internalPlaceholder": "写给同事的备注（用户看不到）",
       "saveNote": "保存备注"
@@ -4387,6 +4390,9 @@
       "mine": "我的业绩"
     },
     "card": {
+      "groupContact": "联系",
+      "groupAccount": "账户",
+      "groupSource": "来源",
       "noNickname": "（未设昵称）",
       "real": "真实",
       "demo": "模拟",

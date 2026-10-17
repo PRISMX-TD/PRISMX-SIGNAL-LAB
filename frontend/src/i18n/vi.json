@@ -19,7 +19,7 @@
     "plan_refund": "Đơn hàng đã được hoàn tiền — số ngày thành viên tương ứng đã bị thu hồi. Liên hệ hỗ trợ nếu bạn có thắc mắc.",
     "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng",
     "support_reminder": "Nhắc việc theo dõi",
-    "support_alert": "Bàn hỗ trợ cần xử lý"
+    "support_alert": "Trang quản trị hỗ trợ cần xử lý"
   },
   "nav": {
     "dashboard": "Tổng quan",
@@ -40,7 +40,7 @@
     "appDownload": "Tải ứng dụng",
     "announcements": "Thông báo chung",
     "agent": "Trang đại lý",
-    "supportDesk": "Bàn hỗ trợ"
+    "supportDesk": "Trang quản trị hỗ trợ"
   },
   "common": {
     "loading": "Đang tải…",

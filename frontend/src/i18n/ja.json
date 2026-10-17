@@ -19,7 +19,7 @@
     "plan_refund": "注文が返金されました。対象となっていた会員期間は取り消されています。ご不明な点はサポートまでお問い合わせください。",
     "agent_plan_change": "代理店が顧客のプランを変更しました",
     "support_reminder": "フォローのリマインダー",
-    "support_alert": "サポートデスクの要対応事項"
+    "support_alert": "サポート管理の要対応事項"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -40,7 +40,7 @@
     "appDownload": "アプリを入手",
     "announcements": "お知らせ",
     "agent": "代理店ビュー",
-    "supportDesk": "サポートデスク"
+    "supportDesk": "サポート管理"
   },
   "common": {
     "loading": "読み込み中…",

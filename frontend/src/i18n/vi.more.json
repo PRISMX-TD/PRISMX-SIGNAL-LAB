@@ -2181,7 +2181,7 @@
     }
   },
   "supportDesk": {
-    "title": "Bàn hỗ trợ",
+    "title": "Trang quản trị hỗ trợ",
     "retry": "Thử lại",
     "yes": "Có",
     "no": "Không",
@@ -2208,6 +2208,8 @@
       "admin": "Quản trị"
     },
     "queue": {
+      "emptyTitle": "Không có phiếu",
+      "emptyHint": "Phiếu mới sẽ tự hiện ở đây",
       "scope": "Phạm vi phiếu",
       "status": "Trạng thái phiếu",
       "me": "Của tôi",
@@ -2231,6 +2233,7 @@
       "modeReply": "Trả lời người dùng",
       "modeInternal": "Ghi chú nội bộ",
       "insertTemplate": "Chèn câu trả lời mẫu",
+      "sendHint": "Ctrl + Enter để gửi",
       "internalHint": "Ghi chú nội bộ chỉ hỗ trợ viên và quản trị thấy; người dùng không được thông báo.",
       "internalPlaceholder": "Ghi chú cho đồng nghiệp (người dùng không thấy)",
       "saveNote": "Lưu ghi chú"
@@ -2300,6 +2303,9 @@
       "mine": "Thành tích của tôi"
     },
     "card": {
+      "groupContact": "Liên hệ",
+      "groupAccount": "Tài khoản",
+      "groupSource": "Nguồn",
       "noNickname": "(chưa đặt biệt danh)",
       "real": "Thật",
       "demo": "Demo",

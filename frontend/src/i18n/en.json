@@ -19,7 +19,7 @@
     "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions.",
     "agent_plan_change": "An agent changed a customer's plan",
     "support_reminder": "Follow-up reminder",
-    "support_alert": "Support desk needs attention"
+    "support_alert": "Support console needs attention"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -40,7 +40,7 @@
     "appDownload": "Get the app",
     "announcements": "Announcements",
     "agent": "Agent view",
-    "supportDesk": "Support desk"
+    "supportDesk": "Support console"
   },
   "common": {
     "loading": "Loading…",

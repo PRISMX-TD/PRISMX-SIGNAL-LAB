@@ -28,18 +28,27 @@ import { FU_PRIORITY_TONE, FU_STATUS_TONE, TICKET_STATUS_TONE, Tag, errText } fr
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 border-b border-white/[0.05] py-2 text-sm last:border-0">
-      <span className="shrink-0 text-xs text-neutral-500">{label}</span>
-      <span className="min-w-0 text-right text-neutral-200">{children}</span>
+    <>
+      <dt className="text-neutral-500">{label}</dt>
+      <dd className="min-w-0 break-words text-neutral-200">{children}</dd>
+    </>
+  )
+}
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="mt-4">
+      <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{title}</h3>
+      <dl className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">{children}</dl>
     </div>
   )
 }
 
 function Section({ title, children, extra }: { title: string; children: ReactNode; extra?: ReactNode }) {
   return (
-    <section className="glass p-4">
-      <div className="mb-2 flex items-center gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{title}</h3>
+    <section className="glass rounded-2xl p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{title}</h3>
         {extra && <div className="ml-auto">{extra}</div>}
       </div>
       {children}
@@ -95,7 +104,7 @@ export default function CustomerCard({
 
   if (loadErr) {
     return (
-      <div className="glass p-6 text-center text-sm">
+      <div className="glass rounded-2xl p-6 text-center text-sm">
         <p className="text-down">{loadErr}</p>
         <button type="button" className="btn-ghost mt-3 px-4 py-1.5 text-xs" onClick={() => void load()}>
           {t('supportDesk.retry')}
@@ -105,7 +114,7 @@ export default function CustomerCard({
   }
   if (!card) {
     return (
-      <div className="glass space-y-3 p-5">
+      <div className="glass space-y-3 rounded-2xl p-5">
         <SkeletonLine width="45%" height={14} />
         <SkeletonLine />
         <SkeletonLine width="70%" />
@@ -186,36 +195,38 @@ export default function CustomerCard({
 
   return (
     <div className="flex flex-col gap-3">
-      {/* 合规提示：固定在卡片顶部，不可关闭（设计 §5.3）/ compliance banner, always shown (design §5.3) */}
-      <div role="note" className="rounded-xl border border-amber-400/30 bg-amber-400/10 px-3.5 py-2.5 text-xs leading-relaxed text-amber-100">
-        <b className="mr-1">{t('supportDesk.card.complianceTitle')}</b>
-        {t('supportDesk.card.compliance')}
+      {/* 合规提示：吸顶、不可关闭（设计 §5.3）/ compliance strip, sticky and never dismissible (design §5.3) */}
+      <div className="z-10 rounded-xl bg-ink-950 lg:sticky lg:top-0">
+        <div role="note" className="rounded-xl border border-amber-400/25 bg-amber-400/[0.08] px-3 py-2 text-[11px] leading-relaxed text-amber-100">
+          <b className="mr-1 font-semibold">{t('supportDesk.card.complianceTitle')}</b>
+          {t('supportDesk.card.compliance')}
+        </div>
       </div>
 
-      <section className="glass p-4">
+      <section className="glass rounded-2xl p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="min-w-0 truncate font-display text-lg font-bold text-neutral-100">{c.nickname || t('supportDesk.card.noNickname')}</h2>
+          <h2 className="min-w-0 truncate font-display text-lg font-semibold text-neutral-50">{c.nickname || t('supportDesk.card.noNickname')}</h2>
           <Tag tone={c.plan === 'PRO' ? 'bg-prism-600/20 text-prism-200' : 'bg-white/5 text-neutral-400'}>
             {c.plan}
             {c.planIsTrial ? ` · ${t('supportDesk.card.trial')}` : ''}
           </Tag>
+          <Tag tone={c.emailVerified ? 'bg-up/15 text-up' : 'bg-amber-400/15 text-amber-300'}>
+            {c.emailVerified ? t('supportDesk.card.verified') : t('supportDesk.card.unverified')}
+          </Tag>
           {c.disabled && <Tag tone="bg-down/15 text-down">{t('supportDesk.card.disabled')}</Tag>}
           {c.doNotContact && <Tag tone="bg-down/15 text-down">{t('supportDesk.card.dncTag')}</Tag>}
         </div>
-        <div className="mt-2">
+
+        <Group title={t('supportDesk.card.groupContact')}>
           <Row label={t('supportDesk.card.email')}>
-            <span className="break-all font-mono text-xs">{c.email || '—'}</span>
-            {' '}
-            <span className={c.emailVerified ? 'text-up' : 'text-amber-300'}>
-              {c.emailVerified ? t('supportDesk.card.verified') : t('supportDesk.card.unverified')}
-            </span>
+            <span className="break-all font-mono">{c.email || '-'}</span>
           </Row>
           <Row label={t('supportDesk.card.phone')}>
             {!c.hasPhone ? (
-              '—'
+              '-'
             ) : (
-              <span className="inline-flex flex-wrap items-center justify-end gap-2">
-                <span className="font-mono text-xs">{phone ?? c.phone}</span>
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <span className="font-mono">{phone ?? c.phone}</span>
                 {c.phoneMasked && !phone && (
                   <button
                     type="button"
@@ -226,18 +237,20 @@ export default function CustomerCard({
                     {revealing ? t('common.loading') : t('supportDesk.card.reveal')}
                   </button>
                 )}
+                {c.phoneMasked && !phone && revealLeft != null && (
+                  <span className="text-[11px] text-neutral-500">{t('supportDesk.card.revealLeft', { n: revealLeft })}</span>
+                )}
               </span>
             )}
           </Row>
-          {c.phoneMasked && revealLeft != null && (
-            <p className="-mt-1 mb-1 text-right text-[11px] text-neutral-500">{t('supportDesk.card.revealLeft', { n: revealLeft })}</p>
-          )}
-          <Row label={t('supportDesk.card.region')}>{c.region || '—'}</Row>
-          <Row label={t('supportDesk.card.registered')}>{fmtDay(c.createdAt, '—')}</Row>
-          <Row label={t('supportDesk.card.lastActive')}>{c.lastActiveAt ? fmtTime(c.lastActiveAt) : '—'}</Row>
-          <Row label={t('supportDesk.card.source')}>{c.inviteLabel || c.inviteCode || t('supportDesk.card.noSource')}</Row>
+          <Row label={t('supportDesk.card.region')}>{c.region || '-'}</Row>
+        </Group>
+
+        <Group title={t('supportDesk.card.groupAccount')}>
+          <Row label={t('supportDesk.card.registered')}>{fmtDay(c.createdAt, '-')}</Row>
+          <Row label={t('supportDesk.card.lastActive')}>{c.lastActiveAt ? fmtTime(c.lastActiveAt) : '-'}</Row>
           <Row label={t('supportDesk.card.planExpires')}>
-            {c.plan === 'PRO' ? (c.planExpiresAt ? fmtDay(c.planExpiresAt) : t('supportDesk.card.permanent')) : '—'}
+            {c.plan === 'PRO' ? (c.planExpiresAt ? fmtDay(c.planExpiresAt) : t('supportDesk.card.permanent')) : '-'}
           </Row>
           <Row label={t('supportDesk.card.trialUsed')}>{c.trialUsed ? t('supportDesk.yes') : t('supportDesk.no')}</Row>
           <Row label={t('supportDesk.card.online')}>
@@ -247,9 +260,14 @@ export default function CustomerCard({
             <Row label={t('supportDesk.card.competitions')}>{c.competitions.map((x) => x.name).join(' · ')}</Row>
           )}
           {c.paidTotalUsd != null && <Row label={t('supportDesk.card.paidTotal')}>{`$${c.paidTotalUsd.toFixed(2)}`}</Row>}
-        </div>
+        </Group>
+
+        <Group title={t('supportDesk.card.groupSource')}>
+          <Row label={t('supportDesk.card.source')}>{c.inviteLabel || c.inviteCode || t('supportDesk.card.noSource')}</Row>
+        </Group>
+
         {c.openAccountUrl && (
-          <button type="button" className="btn-primary mt-3 w-full px-4 py-2 text-sm sm:w-auto" onClick={() => void copyOpenAccount()}>
+          <button type="button" className="btn-primary mt-4 w-full px-4 py-2 text-sm" onClick={() => void copyOpenAccount()}>
             {t('supportDesk.card.copyOpenAccount')}
           </button>
         )}
@@ -259,23 +277,29 @@ export default function CustomerCard({
         {c.mt5Accounts.length === 0 ? (
           <p className="text-xs text-neutral-500">{t('supportDesk.card.noMt5')}</p>
         ) : (
-          <ul className="space-y-2">
+          <ul className="grid gap-2">
             {c.mt5Accounts.map((a) => (
-              <li key={a.id} className="rounded-lg bg-white/[0.03] px-3 py-2 text-xs">
+              <li key={a.id} className="rounded-xl border border-white/[0.06] bg-white/[0.02] px-3 py-2.5 text-xs">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="font-mono text-neutral-200">{a.login || t('supportDesk.card.bound')}</span>
+                  <span className="font-mono text-[13px] text-neutral-100">{a.login || t('supportDesk.card.bound')}</span>
                   {a.real != null && (
                     <Tag tone={a.real ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'}>
                       {a.real ? t('supportDesk.card.real') : t('supportDesk.card.demo')}
                     </Tag>
                   )}
-                  <span className={a.online ? 'text-up' : 'text-neutral-500'}>{a.online ? t('common.online') : t('common.offline')}</span>
+                  <span className={`ml-auto text-[11px] ${a.online ? 'text-up' : 'text-neutral-500'}`}>{a.online ? t('common.online') : t('common.offline')}</span>
                 </div>
-                <div className="mt-1 text-neutral-500">
+                <div className="mt-1 break-words text-neutral-500">
                   {[a.broker, a.server].filter(Boolean).join(' · ')}
-                  {a.balance != null && ` · ${t('supportDesk.card.balance')} ${a.balance.toFixed(2)}${a.currency ? ` ${a.currency}` : ''}`}
-                  {a.balanceRange && ` · ${t('supportDesk.card.balance')} ${a.balanceRange}`}
                 </div>
+                {(a.balance != null || a.balanceRange) && (
+                  <div className="mt-1 text-neutral-400">
+                    {t('supportDesk.card.balance')}{' '}
+                    <span className="num text-neutral-200">
+                      {a.balance != null ? `${a.balance.toFixed(2)}${a.currency ? ` ${a.currency}` : ''}` : a.balanceRange}
+                    </span>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
@@ -288,15 +312,17 @@ export default function CustomerCard({
           extra={<Tag tone={FU_PRIORITY_TONE[fu.priority]}>{t(`supportDesk.priority.${fu.priority}`)}</Tag>}
         >
           <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-neutral-500">{t('supportDesk.card.goal')}</span>
             <Tag tone="bg-white/5 text-neutral-300">{t(`supportDesk.goal.${fu.goal}`)}</Tag>
           </div>
-          {fu.note && <p className="mb-3 whitespace-pre-wrap rounded-lg bg-white/[0.03] px-3 py-2 text-xs text-neutral-300">{fu.note}</p>}
+          {fu.note && <p className="mb-3 whitespace-pre-wrap rounded-xl bg-white/[0.03] px-3 py-2 text-xs text-neutral-300">{fu.note}</p>}
           <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('supportDesk.card.status')}>
             {FOLLOW_UP_STAFF_STATUSES.map((s) => (
               <button
                 key={s}
                 type="button"
                 disabled={saving}
+                aria-pressed={fu.status === s}
                 onClick={() => s !== fu.status && void patchFollowUp({ status: s }, t('supportDesk.card.statusSaved'))}
                 className={`tag transition ${fu.status === s ? FU_STATUS_TONE[s] + ' ring-1 ring-current' : 'bg-white/5 text-neutral-500 hover:bg-white/10'}`}
               >
@@ -305,16 +331,16 @@ export default function CustomerCard({
             ))}
           </div>
 
-          <h4 className="mb-2 mt-4 text-xs font-semibold text-neutral-400">{t('supportDesk.card.notes')}</h4>
+          <h4 className="mb-2 mt-4 text-[11px] font-semibold text-neutral-400">{t('supportDesk.card.notes')}</h4>
           {card.notes.length === 0 ? (
             <p className="text-xs text-neutral-500">{t('supportDesk.card.noNotes')}</p>
           ) : (
             <ol className="space-y-2">
               {card.notes.map((n) => (
-                <li key={n.id} className="rounded-lg bg-white/[0.03] px-3 py-2 text-xs">
+                <li key={n.id} className="rounded-xl bg-white/[0.03] px-3 py-2 text-xs">
                   <div className="flex flex-wrap items-center gap-1.5 text-neutral-500">
-                    <span className="text-neutral-300">{n.authorName || '—'}</span>
-                    <span>· {t(`supportDesk.channel.${n.channel}`)}</span>
+                    <span className="text-neutral-300">{n.authorName || '-'}</span>
+                    <span>{t(`supportDesk.channel.${n.channel}`)}</span>
                     <span className="num ml-auto">{fmtDate(n.createdAt)}</span>
                   </div>
                   <p className="mt-1 whitespace-pre-wrap break-words text-neutral-200">{n.content}</p>
@@ -323,7 +349,7 @@ export default function CustomerCard({
               ))}
             </ol>
           )}
-          <div className="mt-3 space-y-2">
+          <div className="mt-3 space-y-2 rounded-xl border border-white/[0.06] p-2.5">
             <div className="flex flex-wrap gap-2">
               <Select
                 value={noteChannel}
@@ -347,10 +373,12 @@ export default function CustomerCard({
               value={noteText}
               onChange={(e) => setNoteText(e.target.value)}
             />
-            <p className="text-[11px] text-neutral-500">{t('supportDesk.card.appendOnly')}</p>
-            <button type="button" className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40" disabled={saving || !noteText.trim()} onClick={() => void addNote()}>
-              {t('supportDesk.card.addNote')}
-            </button>
+            <div className="flex items-center gap-2">
+              <p className="min-w-0 flex-1 text-[11px] text-neutral-500">{t('supportDesk.card.appendOnly')}</p>
+              <button type="button" className="btn-primary shrink-0 px-4 py-1.5 text-xs disabled:opacity-40" disabled={saving || !noteText.trim()} onClick={() => void addNote()}>
+                {t('supportDesk.card.addNote')}
+              </button>
+            </div>
           </div>
         </Section>
       )}
@@ -358,21 +386,23 @@ export default function CustomerCard({
       <Section title={t('supportDesk.card.actions')}>
         <ActionMenu card={card} me={me} onDone={() => { onChanged(); void load() }} onToast={onToast} />
         {!c.doNotContact && (
-          <button type="button" className="mt-3 text-xs text-down underline-offset-2 hover:underline" onClick={() => setDncConfirm(true)}>
-            {t('supportDesk.card.dnc')}
-          </button>
+          <div className="mt-3 border-t border-white/[0.06] pt-3">
+            <button
+              type="button"
+              className="w-full rounded-xl border border-down/30 px-3 py-1.5 text-xs text-down transition hover:bg-down/10"
+              onClick={() => setDncConfirm(true)}
+            >
+              {t('supportDesk.card.dnc')}
+            </button>
+          </div>
         )}
-      </Section>
-
-      <Section title={t('supportDesk.card.conversions')}>
-        <ConversionTimeline items={card.conversions} />
       </Section>
 
       <Section title={t('supportDesk.card.tickets')}>
         {card.tickets.length === 0 ? (
           <p className="text-xs text-neutral-500">{t('tickets.empty')}</p>
         ) : (
-          <ul className="space-y-1.5">
+          <ul className="-mx-2 space-y-0.5">
             {card.tickets.map((tk) => (
               <li key={tk.id}>
                 <button
@@ -389,6 +419,10 @@ export default function CustomerCard({
             ))}
           </ul>
         )}
+      </Section>
+
+      <Section title={t('supportDesk.card.conversions')}>
+        <ConversionTimeline items={card.conversions} />
       </Section>
 
       {dncConfirm && (
