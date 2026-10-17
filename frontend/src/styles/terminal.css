@@ -1011,7 +1011,9 @@
 .term-mbar, .term-sheet, .term-scrim { display: none; }
 @media (max-width: 1023px) {
   .term-qs { flex-wrap: wrap; }
-  .term-qs-id { flex: 1; min-width: 0; padding: 12px 16px 0; border-right: 0; cursor: pointer; }
+  .term-qs-id { flex: 1; min-width: 0; padding: 12px 0 0 16px; border-right: 0; cursor: pointer; }
+  .term-qs-id > div { min-width: 0; }
+  .term-qs-id p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .term-qs-id .sym-ava { display: none; }
   .term-qs-id h2 { display: flex; align-items: center; gap: 6px; }
   .term-qs-id h2 svg { color: var(--text-3); }
@@ -1020,21 +1022,44 @@
   .term-big .pip { font-size: 30px; }
   .term-big sup { font-size: 12px; }
   .term-chg { flex-direction: row; align-items: baseline; gap: 8px; }
-  /* 第二行：左边点差 / 日内高低，右边工具组。BID / ASK 在手机上不显示（底部交易条已有）。
-     Second row: spread / day high-low on the left, the tool group on the right. BID / ASK are
-     hidden on mobile (the bottom trade bar already shows them). */
-  .term-qs-st { width: 100%; justify-content: flex-start; gap: 12px; padding: 8px 10px 10px 16px; }
-  .term-st--desk { display: none; }
-  .term-qs-tools { display: flex; align-items: center; gap: 5px; margin-left: auto; flex-shrink: 0; }
-  .term-qs-tools .term-tool-btn { width: 28px; height: 28px; box-shadow: inset 0 0 0 1px var(--line-hi); }
-  .term-qs-tools .term-tool-btn.on { box-shadow: none; }
-  .term-qs-tools .term-tbr-btn { height: 28px; padding: 0 9px; }
+  /* 第一行：品种 · 点差 / 日内高低（竖排小字，像盘口角标）· 大价格。BID / ASK 在手机上不显示（底部交易条已有）。
+     Row 1: symbol · spread / day high-low (stacked, small, like a ticker footnote) · price.
+     BID / ASK are hidden on mobile (the bottom trade bar already shows them). */
+  .term-qs-id { order: 1; }
+  .term-qs-st {
+    order: 2; flex: none; flex-direction: column; align-items: stretch; justify-content: center;
+    gap: 3px; padding: 12px 0 0 10px; overflow: visible;
+  }
+  .term-qs-px { order: 3; }
+  .term-qs-st .term-st.term-st--desk { display: none; }
+  .term-qs-st .term-st { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  .term-qs-st .term-st .k { font-size: 9px; letter-spacing: 0.04em; }
+  .term-qs-st .term-st .v { margin-top: 0; font-size: 11px; }
+  /* 第二行：展开的工具条，等宽三格（画线 / 指标 / 设置），图标 + 文字，一眼看全不用猜图标。
+     Row 2: the expanded tool bar — three equal cells (draw / indicators / settings),
+     icon + label so nothing hides behind a guess-the-icon button. */
+  .term-qs-tools {
+    order: 4; width: calc(100% - 32px); display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+    margin: 10px 16px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line-hi); overflow: hidden;
+  }
+  .term-qs-tools > .term-tool-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: auto; height: 32px; min-width: 0; padding: 0 6px; border-radius: 0;
+    color: var(--text-2); font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap;
+  }
+  .term-qs-tools > .term-tool-btn + .term-tool-btn { box-shadow: inset 1px 0 0 var(--line-hi); }
+  .term-qs-tools > .term-tool-btn span { overflow: hidden; text-overflow: ellipsis; }
+  .term-qs-tools > .term-tool-btn:active { background: var(--surface-2); }
+  .term-qs-tools > .term-tool-btn.on { color: #fff; background: color-mix(in srgb, var(--purple) 28%, transparent); }
+  .term-qs-tools > .term-tool-btn.on svg { color: var(--purple-hi, #c4b5fd); }
 }
-/* 360 宽的安卓机：再收一点间距，英文「Indicators」+ 8 位价格也放得下。
-   360px Android phones: a little less spacing so English labels + 8-digit prices still fit. */
-@media (max-width: 370px) {
-  .term-qs-st { gap: 10px; }
-  .term-qs-tools { gap: 4px; }
+/* 320 宽的小屏（老 iPhone SE）：大价格收一号，品种名、统计、8 位价格才能同排放下。
+   320px phones (first-gen iPhone SE): one size down on the price so symbol, stats and an 8-digit price share the row. */
+@media (max-width: 340px) {
+  .term-qs-px { padding: 10px 12px 0 0; }
+  .term-qs-st { padding-left: 8px; padding-right: 8px; }
+  .term-big { font-size: 20px; }
+  .term-big .pip { font-size: 25px; }
 }
 @media (max-width: 1023px) {
   .term-st .k { font-size: 9px; }

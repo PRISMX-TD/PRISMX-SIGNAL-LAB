@@ -4,12 +4,14 @@
 // 买卖价来自全站统一报价（EA 推送，见 store/live 的 useGlobalQuotes），日内
 // 高低与涨跌幅由 ChartsPage 从已加载的 K 线窗口算出后传入（dayStats）。
 // 大价格用外汇的「大手 + 点位」写法：1.16 小 · 23 大 · 8 上标（见 splitPrice）。
-// 手机端压成两行：品种（可点，弹自选抽屉）+ 大价格一行，五个统计一行。
+// 手机端压成两行：第一行 品种（可点，弹自选抽屉）· 点差/日内高低（竖排小字）· 大价格；
+// 第二行是展开的工具条（画线 / 指标 / 设置），BID / ASK 交给底部交易条。
 // The strip docked above the chart: symbol + big price + bid/ask/spread/day
 // range + live state. Bid/ask come from the site-wide quote feed; day stats
 // are computed by ChartsPage from the loaded candle window. The big price uses
 // the FX big-figure/pip convention (see splitPrice). On mobile it folds to two
-// rows and the symbol becomes a button that opens the watchlist sheet.
+// rows — symbol · stacked spread/day range · price, then the expanded tool bar —
+// and the symbol becomes a button that opens the watchlist sheet.
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
@@ -28,8 +30,8 @@ export interface DayStats {
 interface Props {
   symbol: string
   interval: string
-  // 手机端第二行右侧的工具按钮（画笔 / 持仓标记 / 设置 / 指标）。桌面端不渲染，那里在图表工具条上。
-  // Tool buttons at the right of the mobile second row; not rendered on desktop (they live in the toolbar there).
+  // 手机端第二行的工具条（画线 / 指标 / 设置）。桌面端不渲染，那里在图表工具条上。
+  // The mobile second-row tool bar; not rendered on desktop (it lives in the chart toolbar there).
   tools?: ReactNode
   bid: number | null
   ask: number | null
@@ -139,8 +141,9 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
         <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
         <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
         <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
-        {tools && <div className="term-qs-tools lg:hidden">{tools}</div>}
       </div>
+
+      {tools && <div className="term-qs-tools lg:hidden">{tools}</div>}
 
       <div className={`term-qs-live ${stale ? 'stale' : ''}`}>
         <i />

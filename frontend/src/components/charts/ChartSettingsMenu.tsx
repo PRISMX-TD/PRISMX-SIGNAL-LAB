@@ -1,8 +1,10 @@
-// 图表设置小菜单（工具条上的齿轮）：K 线收线倒计时开关 + K 线涨跌颜色。
+// 图表设置小菜单（工具条上的齿轮）：K 线收线倒计时开关 + K 线涨跌颜色；
+// 手机端还多一个「显示持仓」开关（那里不再单放持仓标记按钮）。
 // 改动即时生效、云端同步（ChartsPage 落 charts.showCountdown / charts.candleColors）。
 // 菜单 portal 到 body、按按钮位置 fixed 定位：工具条所在的网格会裁掉溢出的内容。
 // Chart settings menu (gear on the toolbar): bar-close countdown switch + candle
-// colors. Applies instantly and syncs to the cloud (ChartsPage persists
+// colors, plus a "show positions" switch on mobile (which has no separate marker
+// button). Applies instantly and syncs to the cloud (ChartsPage persists
 // charts.showCountdown / charts.candleColors). Portalled to body and positioned
 // from the button's rect, because the toolbar's grid clips overflow.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -20,11 +22,18 @@ interface Props {
   onShowCountdown: (v: boolean) => void
   candleColors: CandleColors
   onCandleColors: (c: CandleColors) => void
+  // 传了才显示「显示持仓」开关 / the positions switch shows only when these are passed
+  showPositions?: boolean
+  onShowPositions?: (v: boolean) => void
+  // 按钮带文字（手机展开的工具条）/ text label beside the icon (mobile expanded tool bar)
+  withLabel?: boolean
 }
 
 const MENU_W = 280
 
-export default function ChartSettingsMenu({ showCountdown, onShowCountdown, candleColors, onCandleColors }: Props) {
+export default function ChartSettingsMenu({
+  showCountdown, onShowCountdown, candleColors, onCandleColors, showPositions, onShowPositions, withLabel,
+}: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const btnRef = useRef<HTMLButtonElement>(null)
@@ -87,9 +96,19 @@ export default function ChartSettingsMenu({ showCountdown, onShowCountdown, cand
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
+        {withLabel && <span>{t('charts.settings.short')}</span>}
       </button>
       {open && createPortal(
         <div ref={menuRef} className="chart-set" role="dialog" aria-label={label} style={{ top: pos.top, left: pos.left, width: MENU_W, maxHeight: pos.maxHeight, overflowY: 'auto' }}>
+          {onShowPositions && (
+            <div className="chart-set-row">
+              <span>
+                <b>{t('charts.settings.positions')}</b>
+                <small>{t('charts.settings.positionsHint')}</small>
+              </span>
+              <Switch checked={!!showPositions} onChange={onShowPositions} aria-label={String(t('charts.settings.positions'))} />
+            </div>
+          )}
           <div className="chart-set-row">
             <span>
               <b>{t('charts.settings.countdown')}</b>

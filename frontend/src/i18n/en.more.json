@@ -451,6 +451,7 @@
     "draw": {
       "tools": "Drawing tools",
       "button": "Draw tools",
+      "short": "Draw",
       "cursors": "Cursors",
       "cursor": "Dot cursor",
       "cross": "Crosshair",
@@ -625,6 +626,9 @@
       "title": "Chart settings",
       "countdown": "Candle countdown",
       "countdownHint": "Shows time left until the current candle closes",
+      "short": "Settings",
+      "positions": "Show positions",
+      "positionsHint": "Mark positions & pending orders on the chart; drag to edit SL/TP",
       "candleColors": "Candle colors",
       "greenUp": "Green up · Red down",
       "redUp": "Red up · Green down",
