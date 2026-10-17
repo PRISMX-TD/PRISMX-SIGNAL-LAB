@@ -333,20 +333,22 @@
 }
 .term-color-dot.on { box-shadow: 0 0 0 2px #fff; transform: scale(1.15); }
 .term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
-/* 手机端展开的画线行：换行铺满，按钮放大一档好点按。
-   Mobile expanded draw row: wraps to fill, larger buttons for thumbs. */
-.term-tools-wrap {
+/* 手机报价条第二行的画线横条：单行不换行，左右滑动；按钮放大一档好点按。
+   Mobile draw bar in the quote strip's second row: one line, swiped sideways; larger buttons for thumbs. */
+.term-tools-strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px 4px;
-  padding: 10px 12px 12px;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface);
+  gap: 2px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  -webkit-overflow-scrolling: touch;
 }
-.term-tools-wrap .term-tool-btn { width: 34px; height: 34px; }
-.term-tools-wrap .term-tool-btn:hover:not(:disabled) { background: var(--surface-2); }
-.term-tools-wrap .term-color-dot { width: 16px; height: 16px; margin: 0 4px; }
+.term-tools-strip .term-tool-btn { width: 32px; height: 32px; }
+.term-tools-strip .term-color-dot { width: 15px; height: 15px; margin: 0 4px; }
+.term-tools-strip .term-toolbar-divider { margin: 0 4px; }
+.term-tools-strip::after { content: ""; flex: 0 0 12px; }
 
 .term-tb {
   display: flex;
@@ -1025,33 +1027,37 @@
   /* 第一行：品种 · 点差 / 日内高低（竖排小字，像盘口角标）· 大价格。BID / ASK 在手机上不显示（底部交易条已有）。
      Row 1: symbol · spread / day high-low (stacked, small, like a ticker footnote) · price.
      BID / ASK are hidden on mobile (the bottom trade bar already shows them). */
-  .term-qs-id { order: 1; }
+  /* 两侧等分弹性、统计组在中间：品种与价格各占一半剩余空间，统计整体落在正中。
+     Both sides flex equally so the stats block sits centred between symbol and price. */
+  .term-qs-id { order: 1; flex: 1 1 0; }
+  .term-qs-px { flex: 1 1 0; }
   .term-qs-st {
     order: 2; flex: none; flex-direction: column; align-items: stretch; justify-content: center;
-    gap: 3px; padding: 12px 0 0 10px; overflow: visible;
+    gap: 3px; padding: 12px 10px 0; overflow: visible;
   }
   .term-qs-px { order: 3; }
   .term-qs-st .term-st.term-st--desk { display: none; }
   .term-qs-st .term-st { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .term-qs-st .term-st .k { font-size: 9px; letter-spacing: 0.04em; }
   .term-qs-st .term-st .v { margin-top: 0; font-size: 11px; }
-  /* 第二行：展开的工具条，等宽三格（画线 / 指标 / 设置），图标 + 文字，一眼看全不用猜图标。
-     Row 2: the expanded tool bar — three equal cells (draw / indicators / settings),
-     icon + label so nothing hides behind a guess-the-icon button. */
+  /* 第二行：左边约 2/3 是画线横条（右缘渐隐提示还能往左滑），右边「指标」+ 设置齿轮。
+     Row 2: the draw bar on the left ~2/3 (a right-edge fade hints it scrolls), Indicators + gear on the right. */
   .term-qs-tools {
-    order: 4; width: calc(100% - 32px); display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
-    margin: 10px 16px 10px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line-hi); overflow: hidden;
+    order: 4; width: 100%; display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px 8px 12px; border-top: 1px solid var(--line);
   }
-  .term-qs-tools > .term-tool-btn {
-    display: flex; align-items: center; justify-content: center; gap: 6px;
-    width: auto; height: 32px; min-width: 0; padding: 0 6px; border-radius: 0;
-    color: var(--text-2); font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap;
+  .term-qs-draw {
+    flex: 1 1 auto; min-width: 0;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+            mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
   }
-  .term-qs-tools > .term-tool-btn + .term-tool-btn { box-shadow: inset 1px 0 0 var(--line-hi); }
-  .term-qs-tools > .term-tool-btn span { overflow: hidden; text-overflow: ellipsis; }
-  .term-qs-tools > .term-tool-btn:active { background: var(--surface-2); }
-  .term-qs-tools > .term-tool-btn.on { color: #fff; background: color-mix(in srgb, var(--purple) 28%, transparent); }
-  .term-qs-tools > .term-tool-btn.on svg { color: var(--purple-hi, #c4b5fd); }
+  .term-qs-acts {
+    flex: none; display: flex; align-items: center; gap: 6px;
+    padding-left: 8px; border-left: 1px solid var(--line);
+  }
+  .term-qs-acts .term-tbr-btn { height: 30px; padding: 0 11px; gap: 5px; font-size: 12px; }
+  .term-qs-acts .term-tool-btn { width: 30px; height: 30px; box-shadow: inset 0 0 0 1px var(--line-hi); border-radius: 999px; }
+  .term-qs-acts .term-tool-btn.on { box-shadow: none; }
 }
 /* 320 宽的小屏（老 iPhone SE）：大价格收一号，品种名、统计、8 位价格才能同排放下。
    320px phones (first-gen iPhone SE): one size down on the price so symbol, stats and an 8-digit price share the row. */
@@ -1073,8 +1079,6 @@
   /* 8 个周期（含 30m / 1M）挤一行：收窄内边距，把右侧持仓 / 指标按钮多留在屏内。
      8 intervals (30m / 1M included) share the row: tighter padding keeps more of the right-hand buttons on screen. */
   .term-tf button { min-width: 30px; height: 26px; padding: 0 6px; }
-  .term-tools-slot { grid-row: 3; }
-  .term-tools-wrap { border-bottom: 0; border-top: 1px solid var(--line); }
   .term-dock { display: none; }
 
   /* 底部交易条：卖 | 点差 | 买。点开是下单票抽屉。

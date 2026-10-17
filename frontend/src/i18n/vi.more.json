@@ -451,7 +451,6 @@
     "draw": {
       "tools": "Công cụ vẽ",
       "button": "Công cụ vẽ",
-      "short": "Vẽ",
       "cursors": "Con trỏ",
       "cursor": "Con trỏ chấm",
       "cross": "Thập tự",
@@ -626,7 +625,6 @@
       "title": "Cài đặt biểu đồ",
       "countdown": "Đếm ngược nến",
       "countdownHint": "Hiển thị thời gian còn lại đến khi nến hiện tại đóng trên trục giá",
-      "short": "Cài đặt",
       "positions": "Hiện vị thế",
       "positionsHint": "Đánh dấu vị thế & lệnh chờ trên biểu đồ, kéo để sửa SL/TP",
       "candleColors": "Màu nến",

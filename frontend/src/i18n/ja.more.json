@@ -451,7 +451,6 @@
     "draw": {
       "tools": "描画ツール",
       "button": "描画ツール",
-      "short": "描画",
       "cursors": "カーソル",
       "cursor": "ドットカーソル",
       "cross": "十字カーソル",
@@ -626,7 +625,6 @@
       "title": "チャート設定",
       "countdown": "ローソク足カウントダウン",
       "countdownHint": "現在の足が確定するまでの残り時間を価格軸に表示",
-      "short": "設定",
       "positions": "ポジション表示",
       "positionsHint": "チャートにポジションと待機注文を表示、ドラッグで損切・利確を変更",
       "candleColors": "ローソク足の色",

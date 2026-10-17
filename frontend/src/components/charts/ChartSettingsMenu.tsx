@@ -25,14 +25,12 @@ interface Props {
   // 传了才显示「显示持仓」开关 / the positions switch shows only when these are passed
   showPositions?: boolean
   onShowPositions?: (v: boolean) => void
-  // 按钮带文字（手机展开的工具条）/ text label beside the icon (mobile expanded tool bar)
-  withLabel?: boolean
 }
 
 const MENU_W = 280
 
 export default function ChartSettingsMenu({
-  showCountdown, onShowCountdown, candleColors, onCandleColors, showPositions, onShowPositions, withLabel,
+  showCountdown, onShowCountdown, candleColors, onCandleColors, showPositions, onShowPositions,
 }: Props) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -96,7 +94,6 @@ export default function ChartSettingsMenu({
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
         </svg>
-        {withLabel && <span>{t('charts.settings.short')}</span>}
       </button>
       {open && createPortal(
         <div ref={menuRef} className="chart-set" role="dialog" aria-label={label} style={{ top: pos.top, left: pos.left, width: MENU_W, maxHeight: pos.maxHeight, overflowY: 'auto' }}>

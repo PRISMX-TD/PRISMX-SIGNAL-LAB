@@ -5,12 +5,13 @@
 // 高低与涨跌幅由 ChartsPage 从已加载的 K 线窗口算出后传入（dayStats）。
 // 大价格用外汇的「大手 + 点位」写法：1.16 小 · 23 大 · 8 上标（见 splitPrice）。
 // 手机端压成两行：第一行 品种（可点，弹自选抽屉）· 点差/日内高低（竖排小字）· 大价格；
-// 第二行是展开的工具条（画线 / 指标 / 设置），BID / ASK 交给底部交易条。
+// 第二行是可左右滑动的画线横条 + 指标 / 设置按钮，BID / ASK 交给底部交易条。
 // The strip docked above the chart: symbol + big price + bid/ask/spread/day
 // range + live state. Bid/ask come from the site-wide quote feed; day stats
 // are computed by ChartsPage from the loaded candle window. The big price uses
 // the FX big-figure/pip convention (see splitPrice). On mobile it folds to two
-// rows — symbol · stacked spread/day range · price, then the expanded tool bar —
+// rows — symbol · stacked spread/day range · price, then the swipeable draw bar +
+// indicators / settings —
 // and the symbol becomes a button that opens the watchlist sheet.
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -30,8 +31,8 @@ export interface DayStats {
 interface Props {
   symbol: string
   interval: string
-  // 手机端第二行的工具条（画线 / 指标 / 设置）。桌面端不渲染，那里在图表工具条上。
-  // The mobile second-row tool bar; not rendered on desktop (it lives in the chart toolbar there).
+  // 手机端第二行（画线横条 + 指标 / 设置）。桌面端不渲染，那里在图表工具条与左侧竖轨上。
+  // The mobile second row (draw bar + indicators / settings); not rendered on desktop (toolbar + rail there).
   tools?: ReactNode
   bid: number | null
   ask: number | null

@@ -50,7 +50,15 @@ export interface DrawLayerHandle {
 // ──── 常量 / constants ────
 interface Point { t: number; p: number }
 interface Drawing { id: string; type: DrawType; pts: Point[]; color: string; locked?: boolean; lineWidth?: number; lineStyle?: 'solid' | 'dashed' | 'dotted' }
-interface Props { chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; lastPrice: number; barTimes: () => number[]; digits?: number }
+interface Props {
+  chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; lastPrice: number; barTimes: () => number[]; digits?: number
+  // 句柄上的状态（当前工具 / 选中 / 数量…）提交后通知外部工具栏重渲染。外部点按钮时页面会先于
+  // 本组件重渲染、读到旧句柄，按下态就慢一拍；画完自动回到光标也不会反映到工具栏上。
+  // Fires after the handle's state (tool / selection / counts…) commits, so external toolbars
+  // re-render. A toolbar click re-renders the page before this layer, reading the stale handle —
+  // the pressed state lagged one click, and the auto-return to cursor after drawing never showed.
+  onStateChange?: () => void
+}
 
 const TOL_DESKTOP = 12
 const TOL_MOBILE = 24
@@ -441,7 +449,7 @@ class RendererImpl implements IPrimitivePaneRenderer {
 }
 
 // ──── 组件 / component ────
-function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateChange }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -635,6 +643,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2 }: Props,
     deleteSelected, clearAll, applyColor,
     toggleLock, lockAll, unlockAll, undo, redo,
   }), [tool, color, selectedId, drawCount, lockedCount, stayInDraw, visible, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo])
+  const onStateChangeRef = useRef(onStateChange)
+  onStateChangeRef.current = onStateChange
+  useEffect(() => { onStateChangeRef.current?.() }, [tool, color, selectedId, drawCount, lockedCount, stayInDraw, visible])
 
   // ──── 加载 / load ────
   useEffect(() => {

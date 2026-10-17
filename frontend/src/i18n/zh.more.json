@@ -451,7 +451,6 @@
     "draw": {
       "tools": "画图工具",
       "button": "画线工具",
-      "short": "画线",
       "cursors": "光标",
       "cursor": "圆点光标",
       "cross": "十字光标",
@@ -626,7 +625,6 @@
       "title": "图表设置",
       "countdown": "K 线倒计时",
       "countdownHint": "价格轴上显示当前 K 线还剩多久收线",
-      "short": "设置",
       "positions": "显示持仓",
       "positionsHint": "图上标出持仓与挂单价位，可拖动修改止损止盈",
       "candleColors": "K 线颜色",

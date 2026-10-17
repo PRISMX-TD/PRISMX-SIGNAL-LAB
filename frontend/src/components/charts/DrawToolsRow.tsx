@@ -1,9 +1,10 @@
 // 画线工具：图标 + 两种排布。rail = 桌面图表左侧的竖轨（2026-09-08 起，工具从
-// 顶部横条搬到这里，周期与指标入口独占上方一条）；wrap = 手机端点画笔后展开的
-// 换行行。两处共用同一份按钮，避免抄两遍。
+// 顶部横条搬到这里，周期与指标入口独占上方一条）；strip = 手机报价条第二行常驻的
+// 单行横条，左右滑动看全部工具。两处共用同一份按钮，避免抄两遍。
 // Draw tools: icons plus two layouts. rail = the vertical rail on the chart's
 // left (since 2026-09-08; tools moved out of the top bar so intervals and the
-// indicator entry own that row); wrap = the mobile row that expands on tap.
+// indicator entry own that row); strip = the always-on single-line mobile bar in
+// the quote strip's second row, swiped sideways to reach every tool.
 import { Fragment, type RefObject } from 'react'
 import type { DrawLayerHandle, Tool } from './DrawLayer'
 import { ToolList } from './chartConfig'
@@ -42,7 +43,7 @@ export default function DrawToolsRow({
   drawLayerRef: RefObject<DrawLayerHandle>
   bumpDraw: () => void
   t: (key: string) => unknown
-  variant?: 'rail' | 'wrap'
+  variant?: 'rail' | 'strip'
 }) {
   const rail = variant === 'rail'
   const Divider = () => (rail ? <hr /> : <span className="term-toolbar-divider" />)
@@ -52,7 +53,7 @@ export default function DrawToolsRow({
   const visible = dl?.visible ?? true
 
   return (
-    <div className={rail ? 'term-rail no-sb' : 'term-tools-wrap'} aria-label={String(t('charts.draw.tools'))}>
+    <div className={rail ? 'term-rail no-sb' : 'term-tools-strip no-sb'} aria-label={String(t('charts.draw.tools'))}>
       {(ToolList as Tool[]).map((toolName) => (
         <Fragment key={toolName}>
           <button

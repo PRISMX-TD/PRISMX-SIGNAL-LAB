@@ -304,7 +304,6 @@ export default function ChartsPage() {
   // 手机端画线工具是否展开：默认收起（只留周期 + 持仓 + 画笔 + 指标），点画笔才展开
   // 换行工具行，避免小屏被十几个小图标塞满。
   // Mobile draw tools start collapsed and expand into the wrapping row on tap.
-  const [mobileToolsOpen, setMobileToolsOpen] = useState(false)
 
   // 这些都是覆盖层，手机上划返回应该先关掉它们、而不是直接退出图表页
   // （见 useBackToClose 的说明）。/ All overlays: swiping back on mobile should
@@ -531,38 +530,30 @@ export default function ChartsPage() {
   const dataKeyRef = useRef('')
   const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
 
-  // 手机报价条第二行展开的工具条：画线（展开底部画线工具行）· 指标 · 设置（含显示持仓开关）。
-  // 放在价格下方而不是图表下方：高频操作离拇指与图表都近，底部工具条只留周期与持仓，一行放得下。
-  // The mobile quote strip's expanded second-row tool bar: draw (expands the draw-tools row) ·
-  // indicators · settings (which holds the show-positions switch). Above the chart rather than
-  // under it, so the bottom toolbar keeps only intervals + positions and fits one line.
+  // 手机报价条第二行：左边约 2/3 是常驻的画线工具横条（左右滑动看全部工具），
+  // 右边是「指标」和设置齿轮（设置里含显示持仓开关）。底部工具条只留周期与持仓，一行放得下。
+  // The mobile quote strip's second row: the left ~2/3 is the always-on draw-tools bar
+  // (swipe sideways for every tool); the right holds Indicators and the settings gear (which
+  // has the show-positions switch). The bottom toolbar keeps only intervals + positions.
   const mobileTools = (
     <>
-      {drawReady && (
-        <button
-          type="button"
-          onClick={() => setMobileToolsOpen((v) => !v)}
-          aria-label={String(t('charts.draw.button'))}
-          aria-pressed={mobileToolsOpen}
-          className={`term-tool-btn lg:hidden ${mobileToolsOpen ? 'on' : ''}`}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
-          <span>{t('charts.draw.short')}</span>
+      <div className="term-qs-draw">
+        {drawReady && <DrawToolsRow variant="strip" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />}
+      </div>
+      <div className="term-qs-acts">
+        <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn" aria-label={String(t('charts.indicators.button'))}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-6 4 4 8-9" /><path d="M3 21h18" /></svg>
+          {t('charts.indicators.short')}
         </button>
-      )}
-      <button type="button" onClick={() => setSettingsOpen(true)} className="term-tool-btn" aria-label={String(t('charts.indicators.button'))}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-6 4 4 8-9" /><path d="M3 21h18" /></svg>
-        <span>{t('charts.indicators.short')}</span>
-      </button>
-      <ChartSettingsMenu
-        showCountdown={showCountdown}
-        onShowCountdown={setShowCountdown}
-        candleColors={candleColors}
-        onCandleColors={changeCandleColors}
-        showPositions={showPositions}
-        onShowPositions={setShowPositions}
-        withLabel
-      />
+        <ChartSettingsMenu
+          showCountdown={showCountdown}
+          onShowCountdown={setShowCountdown}
+          candleColors={candleColors}
+          onCandleColors={changeCandleColors}
+          showPositions={showPositions}
+          onShowPositions={setShowPositions}
+        />
+      </div>
     </>
   )
 
@@ -749,6 +740,7 @@ export default function ChartsPage() {
                 lastPrice={lastPrice}
                 barTimes={getBarTimes}
                 digits={decimals}
+                onStateChange={bumpDraw}
               />
             )}
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
@@ -772,12 +764,6 @@ export default function ChartsPage() {
             )}
           </div>
 
-          {/* 手机端展开的画线行 / mobile expanded draw row */}
-          {!isFullscreen && drawReady && mobileToolsOpen && (
-            <div className="lg:hidden term-tools-slot">
-              <DrawToolsRow variant="wrap" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
-            </div>
-          )}
         </div>
 
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
