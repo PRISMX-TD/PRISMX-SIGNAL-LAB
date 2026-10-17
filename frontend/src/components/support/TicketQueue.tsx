@@ -10,6 +10,7 @@ import { useAuth } from '../../store/auth'
 import { adminApi, isAbortError } from '../../api/client'
 import { fmtDayShort } from '../../api/utils'
 import type { TicketListItem } from '../../api/types'
+import { segBtn } from '../../utils/segBtn'
 import { SkeletonLine } from '../Skeleton'
 import { TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, Tag, errText } from './supportUi'
 
@@ -19,6 +20,9 @@ const PAGE = 50
 // New tickets appear on their own: a silent refetch every 15s while visible (50 rows, one indexed
 // query — cheap), plus one on returning to the foreground. No polling in the background.
 const POLL_MS = 15_000
+// 一排简单筛选：全部 / 我的 / 待回复（还没人接的）。/ One simple row: all / mine / awaiting reply (unclaimed).
+type Scope = 'all' | 'me' | 'none'
+const SCOPES: Scope[] = ['all', 'me', 'none']
 
 export default function TicketQueue({
   selectedId,
@@ -34,6 +38,7 @@ export default function TicketQueue({
 }) {
   const { t } = useTranslation()
   const { user } = useAuth()
+  const [scope, setScope] = useState<Scope>('all')
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<TicketListItem[]>([])
   const [loading, setLoading] = useState(true)
@@ -48,7 +53,7 @@ export default function TicketQueue({
     if (!silent) setLoading(true)
     try {
       const list = await adminApi.listTickets(
-        { limit: PAGE, offset: page * PAGE },
+        { assignee: scope === 'all' ? undefined : scope, limit: PAGE, offset: page * PAGE },
         ctrl.signal,
       )
       setRows(list)
@@ -60,7 +65,7 @@ export default function TicketQueue({
         setLoading(false)
       }
     }
-  }, [page, onError, t])
+  }, [scope, page, onError, t])
 
   useEffect(() => { void load() }, [load, reloadKey])
   useEffect(() => () => ctrlRef.current?.abort(), [])
@@ -76,6 +81,14 @@ export default function TicketQueue({
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label={t('supportDesk.queue.scope')}>
+        {SCOPES.map((sc) => (
+          <button key={sc} type="button" className={`${segBtn(scope === sc)} shrink-0`} aria-pressed={scope === sc}
+            onClick={() => { setScope(sc); setPage(0) }}>
+            {sc === 'none' ? t('supportDesk.queue.unassignedTag') : t(`supportDesk.queue.${sc}`)}
+          </button>
+        ))}
+      </div>
       {loading ? (
         <div className="glass space-y-3 p-4">
           <SkeletonLine width="60%" height={14} />
