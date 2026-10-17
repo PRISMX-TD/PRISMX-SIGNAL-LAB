@@ -65,7 +65,7 @@ import { useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingO
 import type { Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
-  DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY,
+  DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
   priceDigits, resolvePriceDigits, toLwPoint, intervalSeconds, MAX_CLIENT_BARS, type IndicatorFlags,
   normalizeCandleColors, type CandleColors,
 } from '../components/charts/chartConfig'
@@ -233,9 +233,15 @@ export default function ChartsPage() {
     // the cloud prefs are this preference's real source. See utils/safeStorage.ts.
     () => getPref<string>('charts', 'symbol', '') || readStorage(SYMBOL_KEY) || ''
   )
-  const [interval, setIntervalCode] = useState<string>(
-    () => getPref<string>('charts', 'interval', '') || readStorage(INTERVAL_KEY) || '15'
-  )
+  // 存下来的周期先校验：周期表以后增删时，旧值不会把图表卡在一个后端不认的周期上。
+  // Stored intervals are validated, so a stale code never strands the chart on an
+  // interval nothing can serve.
+  const [interval, setIntervalCode] = useState<string>(() => {
+    const cloud = getPref<string>('charts', 'interval', '')
+    if (isKnownInterval(cloud)) return cloud
+    const local = readStorage(INTERVAL_KEY)
+    return isKnownInterval(local) ? local : '15'
+  })
   // 指标开关 + 参数：都跟随用户走，云端同步（见下方持久化 effect），与
   // 品种/周期无关。/ Indicator toggles + settings: follow the user, cloud
   // synced (see the persistence effects below); independent of symbol/interval.
@@ -403,7 +409,7 @@ export default function ChartsPage() {
     const cloudSym = getPref<string>('charts', 'symbol', '')
     if (cloudSym) setSymbol(cloudSym)
     const cloudInt = getPref<string>('charts', 'interval', '')
-    if (cloudInt) setIntervalCode(cloudInt)
+    if (isKnownInterval(cloudInt)) setIntervalCode(cloudInt)
     const cloudInd = getPref<Partial<IndicatorFlags> | null>('charts', 'indicators', null)
     if (cloudInd) setIndicatorsState({ ...DEFAULT_INDICATORS, ...cloudInd })
     const cloudSettings = getPref<Partial<IndicatorSettings> | null>('charts', 'indicatorSettings', null)

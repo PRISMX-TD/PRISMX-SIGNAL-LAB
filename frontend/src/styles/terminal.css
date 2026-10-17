@@ -1029,7 +1029,9 @@
   .term-chart { grid-row: 1; }
   .term-tb { grid-row: 2; border-bottom: 0; border-top: 1px solid var(--line); padding: 0 10px; overflow-x: auto; scrollbar-width: none; }
   .term-tb::-webkit-scrollbar { display: none; }
-  .term-tf button { min-width: 34px; height: 26px; padding: 0 8px; }
+  /* 8 个周期（含 30m / 1M）挤一行：收窄内边距，把右侧持仓 / 指标按钮多留在屏内。
+     8 intervals (30m / 1M included) share the row: tighter padding keeps more of the right-hand buttons on screen. */
+  .term-tf button { min-width: 30px; height: 26px; padding: 0 6px; }
   .term-tools-slot { grid-row: 3; }
   .term-tools-wrap { border-bottom: 0; border-top: 1px solid var(--line); }
   .term-dock { display: none; }

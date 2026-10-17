@@ -14,6 +14,8 @@ import {
   computeDayStats, toLwPoint,
 } from './chartConfig'
 import type { ChartEngine } from './useChartEngine'
+import { createChartFeed, fmtMonthTime } from './derivedIntervals'
+import { fmtChartTime } from '../../utils/chartSeries'
 import { keepIfEqual } from '../../store/keepIfEqual'
 import { netQuality } from '../../store/netQuality'
 import { isAppHidden } from '../../utils/appVisibility'
@@ -92,12 +94,26 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // once the engine has built the chart.
   }, [digits, drawReady, seriesRef])
 
+  // 时间标签跟周期走：月线显示「年-月」，其它周期沿用建图时的「日/月 时:分」。
+  // Time labels follow the interval: year-month on monthly, the engine's default otherwise.
+  useEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    const fmt = interval === 'M' ? fmtMonthTime : fmtChartTime
+    chart.applyOptions({ timeScale: { tickMarkFormatter: fmt }, localization: { timeFormatter: fmt } })
+  }, [interval, drawReady, chartRef])
+
   // 切品种/周期：拉历史快照 + 起轮询最新价 / on symbol or interval change: fetch history + poll latest
   useEffect(() => {
     const series = seriesRef.current
     if (!series || !symbol) return // symbol 为空说明 activeSymbols 还没校正出有效值，等下一轮
                                     // empty symbol means activeSymbols hasn't resolved a valid value yet
     let alive = true
+    // 数据源：基础周期直通 chartApi；M30 / 月线由源周期（M15 / 日线）现场合成，见 derivedIntervals。
+    // Data source: base intervals go straight to chartApi; M30 / monthly are built from
+    // their source interval (M15 / daily) — see derivedIntervals.
+    const feed = createChartFeed(symbol, interval)
+    const dayStatsNow = () => computeDayStats(feed.dayBars() ?? candlesRef.current)
     if (dataKeyRef) dataKeyRef.current = ''
     setHasData(false)
     setStale(false)
@@ -180,12 +196,12 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       candlesRef.current = snap.slice()
       setLastPrice(snap[snap.length - 1].c)
       recomputeIndicators()
-      setDayStats(computeDayStats(candlesRef.current))
+      setDayStats(dayStatsNow())
       chartRef.current?.timeScale().fitContent()
       setHasData(true)
     }
 
-    chartApi.history(symbol, interval, HISTORY_FIRST_PAGE).then((r) => {
+    feed.history(HISTORY_FIRST_PAGE).then((r) => {
       if (!alive) return
       historyApplied = true
       if (r.bars.length > 0) {
@@ -197,7 +213,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         candlesRef.current = r.bars.slice(-MAX_CLIENT_BARS)
         hasMoreHistoryRef.current = r.hasMore
         recomputeIndicators()
-        setDayStats(computeDayStats(candlesRef.current))
+        setDayStats(dayStatsNow())
         // 快照已画过就不再 fitContent，免得视窗跳一下。/ Skip refit if the snapshot already framed it.
         if (!snap) chartRef.current?.timeScale().fitContent()
         setHasData(true)
@@ -234,7 +250,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       if (arr.length === 0) return
       loadingOlderRef.current = true
       const before = arr[0].t
-      chartApi.history(symbol, interval, HISTORY_PAGE_SIZE, before).then((r) => {
+      feed.history(HISTORY_PAGE_SIZE, before).then((r) => {
         if (!alive) return
         hasMoreHistoryRef.current = r.hasMore
         if (r.bars.length === 0) return
@@ -308,7 +324,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       if (refilling || Date.now() - lastRefillAt < TAIL_REFILL_MIN_GAP_MS) return false
       refilling = true
       lastRefillAt = Date.now()
-      chartApi.history(symbol, interval, HISTORY_FIRST_PAGE).then((r) => {
+      feed.history(HISTORY_FIRST_PAGE).then((r) => {
         if (!alive || r.bars.length === 0) return
         const firstT = r.bars[0].t
         // 比这页更早的本地 bar 保留（用户可能往左翻过很多页）；这页之后的本地 bar 丢掉，
@@ -321,11 +337,11 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         lastTimeRef.current = merged[merged.length - 1].t
         series.setData(merged.map(toLwPoint))
         recomputeIndicators()
-        setDayStats((prev) => keepIfEqual(prev, computeDayStats(candlesRef.current)))
+        setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
         if (isFollowingLiveRef.current) chartRef.current?.timeScale().scrollToRealTime()
         else if (range) chartRef.current?.timeScale().setVisibleLogicalRange(range)
         saveSnapshot(snapKey, candlesRef.current)
-        void chartApi.latest(symbol, interval, 10).then(handleLatest).catch(() => {})
+        void feed.latest(10).then(handleLatest).catch(() => {})
       }).catch(() => {}).finally(() => {
         refilling = false
       })
@@ -362,7 +378,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
           recomputeIndicators()
           // 同值不换引用：每 2 秒一轮询，K 线没动时别让报价条与整页白白重渲染。
           // Keep the reference when unchanged, so a quiet 2s poll re-renders nothing.
-          setDayStats((prev) => keepIfEqual(prev, computeDayStats(candlesRef.current)))
+          setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
           // 自动跟踪最新 bar：仅在用户未手动离开实时位置时跟随滚动
           // Auto-follow the latest bar only when the user hasn't scrolled away
           if (isFollowingLiveRef.current) {
@@ -372,10 +388,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         const fresh = r.updatedAt != null && Date.now() / 1000 - r.updatedAt < STALE_MS / 1000
         setStale(r.updatedAt != null && !fresh)
     }
-    const poll = (): Promise<void> => chartApi.latest(symbol, interval).then(handleLatest).catch(() => {})
+    const poll = (): Promise<void> => feed.latest().then(handleLatest).catch(() => {})
     // 首拍多要 10 根：库里已收盘 bar 落后一两根时，用缓存尾部把缺口补齐。
     // First call asks for 10 bars so a DB lagging a bar or two behind has its gap filled.
-    void chartApi.latest(symbol, interval, 10).then(handleLatest).catch(() => {})
+    void feed.latest(10).then(handleLatest).catch(() => {})
 
     // 页面在后台时不轮询。这是全站频率最高的一个轮询（每 2 秒），而站内其它所有
     // 轮询——个人胜率卡、纪律分卡、订单页已平仓明细、策略页信号、live.tsx 里的

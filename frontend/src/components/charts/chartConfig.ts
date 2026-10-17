@@ -75,10 +75,21 @@ export const INTERVALS: { code: string; label: string }[] = [
   { code: '1', label: '1m' },
   { code: '5', label: '5m' },
   { code: '15', label: '15m' },
+  { code: '30', label: '30m' },
   { code: '60', label: '1H' },
   { code: '240', label: '4H' },
   { code: 'D', label: '1D' },
+  { code: 'M', label: '1M' },
 ]
+
+// 30m / 1M 是派生周期：库里不存，前端由 M15 / 日线现场合成（见 derivedIntervals.ts）。
+// 云端偏好或本地存储里的周期先过这一道：不认识的（例如以后下线的周期）回落到默认。
+// 30m / 1M are derived intervals, built client-side from M15 / daily (see
+// derivedIntervals.ts). Stored interval prefs pass through this first; unknown codes
+// (say, a retired interval) fall back to the default.
+export function isKnownInterval(code: string | null | undefined): code is string {
+  return !!code && INTERVALS.some((iv) => iv.code === code)
+}
 
 export const ToolList: Tool[] = ['cursor', 'cross', 'trend', 'hline', 'vline', 'ray', 'crossline', 'rect', 'fib']
 
@@ -108,24 +119,27 @@ export const BOUNDARY_SETTLE_MS = 3300
 export const BOUNDARY_RETRY_MS = 3000
 export const BOUNDARY_RETRIES = 2
 
-// 周期代码 → 秒。只认与时区无关、按 epoch 对齐的周期（1/5/15/60 分钟）；4H / 日线的边界取决于
-// 券商服务器时区，返回 null（不做边界补拉，靠慢轮询发现新 bar）。
-// Interval code → seconds. Only epoch-aligned, timezone-independent intervals (1/5/15/60 min);
-// 4H / daily boundaries depend on the broker's server timezone, so null (no boundary catch-up;
-// the slow poll finds the new bar).
+// 周期代码 → 秒。只认与时区无关、按 epoch 对齐的周期（1/5/15/30/60 分钟）；4H / 日线 / 月线的
+// 边界取决于券商服务器时区（月线还长短不一），返回 null（不做边界补拉，靠慢轮询发现新 bar）。
+// Interval code → seconds. Only epoch-aligned, timezone-independent intervals (1/5/15/30/60 min);
+// 4H / daily / monthly boundaries depend on the broker's server timezone (and months vary in
+// length), so null (no boundary catch-up; the slow poll finds the new bar).
 export function intervalSeconds(code: string): number | null {
   switch (code) {
     case '1': return 60
     case '5': return 300
     case '15': return 900
+    case '30': return 1800
     case '60': return 3600
     default: return null
   }
 }
 
 // 相邻两根 bar 的间距（秒），4H / 日线也算——只用来判断「中间缺了 bar」，不涉及边界对齐。
+// 月线长短不一，返回 null：既不做缺口判断（源日线的洞由 derivedIntervals 自己补），也不显示收线倒计时。
 // Spacing between consecutive bars (seconds), 4H / daily included — only used to spot missing
-// bars in between, never for boundary alignment.
+// bars in between, never for boundary alignment. Months vary in length, so null: no hole check
+// (derivedIntervals patches holes in the daily source itself) and no bar-close countdown.
 export function barSpacingSeconds(code: string): number | null {
   if (code === '240') return 14400
   if (code === 'D') return 86400
@@ -255,17 +269,17 @@ export function candleSchemeOf(c: CandleColors): CandleScheme | 'custom' {
 
 // ---------- K 线收线倒计时 / bar-close countdown ----------
 // 当前这根 K 线还有几秒收线；拿不准时返回 null（调用方就不显示）。
-// · 1/5/15/60 分钟按 epoch 对齐，直接算下一个整点边界，不依赖最后一根有没有到。
+// · 1/5/15/30/60 分钟按 epoch 对齐，直接算下一个整点边界，不依赖最后一根有没有到。
 // · 4H / 日线的边界取决于券商服务器时区，用「最后一根的开盘时间 + 周期」推：EA 推上来的
 //   时间已换算成真 UTC（见 ea/PRISMX_MarketFeed.mq5），所以开盘时间就在真实网格上。
 //   最后一根还没被新 bar 取代（刚跨边界、轮询还没拉到）时顺推一根；落后超过一根说明
-//   数据断档或休市，不猜。
+//   数据断档或休市，不猜。月线没有固定间距，不显示。
 // Seconds until the current bar closes, or null when unsure (caller hides it).
-// · 1/5/15/60 min are epoch-aligned: next boundary straight from the clock.
+// · 1/5/15/30/60 min are epoch-aligned: next boundary straight from the clock.
 // · 4H / daily depend on the broker's timezone: last bar's open + spacing (the EA
 //   converts bar times to true UTC, so opens sit on the real grid). Roll forward one
 //   bar if the boundary just passed; more than one bar behind means a hole or a
-//   closed market — don't guess.
+//   closed market — don't guess. Monthly has no fixed spacing: hidden.
 export function barCloseCountdownSec(code: string, lastBarT: number | null, nowMs: number): number | null {
   const nowSec = nowMs / 1000
   const iv = intervalSeconds(code)
