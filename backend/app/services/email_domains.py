@@ -265,3 +265,113 @@ def alias_trial_used(db, email: str, *, exclude_user_id: str | None = None) -> b
         .first()
         is not None
     )
+
+
+# ---------------------------------------------------------------------------
+# 域名拼错（gamil.com）/ misspelled mailbox domains
+# ---------------------------------------------------------------------------
+# 2026-10-17：有用户先用 xxx@gamil.com 注册（当时还没有邮箱验证），第二天才用对的
+# gmail 又注册一次，后台看着像「同一个邮箱注册了两次」。拼错域名的地址收不到任何信，
+# 这种账号注定是死号，所以注册时直接拒绝，并把对的写法告诉用户。
+#
+# 只认主流邮箱的「一键之差」，不做通用编辑距离：
+#   · 名字够长的（gmail / hotmail / outlook …）：漏打一个字母、相邻两个字母对调、
+#     某个字母多打一次、按到键盘上相邻的键；
+#   · 主流邮箱的后缀用同一套规则（.con / .cm / .co / .comm / .vom …）；
+#   · 名字和后缀各错一处（gamil.con）也算。
+# 一键之差会撞上真实存在的邮箱：mail.com 是 gmail 漏了 g，ymail.com 是雅虎，
+# cloud.com 是 icloud 漏了 i。所以判定前先放行 ALLOW_DOMAINS 和 _REAL_LOOKALIKES。
+# 前端 frontend/src/utils/emailTypo.ts 是同一套规则的镜像（即时提示 + 一键改正），
+# 改这里要同步改那边。
+#
+# 2026-10-17: a user first registered as xxx@gamil.com (before email verification
+# existed) and came back the next day with the right gmail address, which looked
+# like "one email, two accounts" in the admin list. A misspelled domain receives
+# no mail, so such an account is dead on arrival: refuse it at registration and
+# tell the user the corrected address. Only one-slip variants of mainstream
+# mailboxes count (dropped / swapped / doubled letter, neighbouring key), on the
+# name for long names and on the suffix for all; one slip in each also counts.
+# Real lookalikes (mail.com, ymail.com, cloud.com) are let through first. The
+# frontend's utils/emailTypo.ts mirrors these rules — keep the two in sync.
+
+# 名字够长、一键之差基本只可能是手误的主流邮箱 / long names: one slip is a typo
+_TYPO_NAME_TARGETS = (
+    "gmail.com", "googlemail.com", "hotmail.com", "outlook.com",
+    "yahoo.com", "icloud.com", "foxmail.com", "protonmail.com",
+)
+# 名字太短（qq、163）改一个字就是另一个真域名，只看后缀 / short names: suffix only
+_TYPO_SUFFIX_TARGETS = (
+    "qq.com", "163.com", "126.com", "139.com", "sina.com", "sohu.com",
+    "aliyun.com", "live.com", "msn.com", "aol.com", "yeah.net",
+)
+# 和主流邮箱一键之差、但确实有人在用的域名 / real domains one slip from a target
+_REAL_LOOKALIKES = frozenset({"mail.com", "cloud.com", "ymail.com"})
+
+_KEY_ROWS = ("1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm")
+
+
+def _key_neighbours() -> dict:
+    """QWERTY 上每个键周围的键：同一排左右，上一排同位和右一位，下一排左一位和同位。
+    Each key's neighbours on a staggered QWERTY layout."""
+    near: dict = {}
+    for r, row in enumerate(_KEY_ROWS):
+        for i, ch in enumerate(row):
+            keys = set()
+            for rr, cols in ((r, (i - 1, i + 1)), (r - 1, (i, i + 1)), (r + 1, (i - 1, i))):
+                if 0 <= rr < len(_KEY_ROWS):
+                    keys.update(_KEY_ROWS[rr][c] for c in cols if 0 <= c < len(_KEY_ROWS[rr]))
+            near[ch] = "".join(sorted(keys))
+    return near
+
+
+_NEIGHBOURS = _key_neighbours()
+
+
+def _one_slip(word: str) -> frozenset:
+    """word 手滑一下能变成的所有写法 / every spelling one slip away from word."""
+    out = set()
+    for i, ch in enumerate(word):
+        out.add(word[:i] + word[i + 1:])                       # 漏打 / dropped
+        out.add(word[:i] + ch + word[i:])                      # 多打 / doubled
+        for k in _NEIGHBOURS.get(ch, ""):
+            out.add(word[:i] + k + word[i + 1:])               # 按到旁边的键 / neighbour key
+        if i + 1 < len(word):
+            out.add(word[:i] + word[i + 1] + ch + word[i + 2:])  # 对调 / swapped
+    out.discard(word)
+    out.discard("")
+    return frozenset(out)
+
+
+def _typo_table() -> tuple:
+    """(目标域名, 名字, 后缀, 名字的手误写法, 后缀的手误写法)，进程内只算一次。"""
+    rows = []
+    for target in _TYPO_NAME_TARGETS + _TYPO_SUFFIX_TARGETS:
+        name, _, suffix = target.rpartition(".")
+        name_slips = _one_slip(name) if target in _TYPO_NAME_TARGETS else frozenset()
+        rows.append((target, name, suffix, name_slips, _one_slip(suffix)))
+    return tuple(rows)
+
+
+_TYPO_TABLE = _typo_table()
+_TYPO_TARGET_SET = frozenset(_TYPO_NAME_TARGETS + _TYPO_SUFFIX_TARGETS)
+
+
+def suggest_domain_fix(email: str | None) -> str | None:
+    """域名像是主流邮箱打错了，就返回改正后的完整邮箱，否则 None。
+    The corrected address when the domain looks like a mistyped mainstream
+    mailbox, else None."""
+    raw = (email or "").strip().lower()
+    local, at, domain = raw.rpartition("@")
+    if not at or not local:
+        return None
+    if domain in ALLOW_DOMAINS or domain in _REAL_LOOKALIKES or domain in _TYPO_TARGET_SET:
+        return None
+    name, dot, suffix = domain.rpartition(".")
+    # 只看「名字.后缀」两段：hotmail.co.uk、vip.qq.com 这类多段域名不在这条规则里。
+    # Two-label domains only: hotmail.co.uk / vip.qq.com are out of scope.
+    if not dot or not name or "." in name:
+        return None
+    for target, t_name, t_suffix, name_slips, suffix_slips in _TYPO_TABLE:
+        if (name == t_name or name in name_slips) and (suffix == t_suffix or suffix in suffix_slips):
+            return f"{local}@{target}"
+    return None

@@ -7,6 +7,7 @@ import { localizeApiError } from '../api/utils'
 import { inviteApi, readRef } from '../api/client'
 import { postAuthDestination, resumeCompIntent } from '../utils/compIntent'
 import { isInAppBrowser } from '../utils/inAppBrowser'
+import { suggestEmailFix } from '../utils/emailTypo'
 import Logo from '../components/Logo'
 import LanguageToggle from '../components/LanguageToggle'
 import AuroraBackground from '../components/AuroraBackground'
@@ -29,6 +30,9 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [phone, setPhone] = useState<PhoneValue>({ iso: DEFAULT_DIAL_ISO, national: '' })
   const [error, setError] = useState('')
+  // 注册邮箱域名拼错时改正后的写法（gamil.com → gmail.com），错误框里给一键改正。
+  // The corrected address for a misspelled sign-up domain; the error box offers a one-tap fix.
+  const [emailFix, setEmailFix] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
   // 邀请链接送的试用天数；null = 没有或查不到，一律不显示横幅。
@@ -77,6 +81,20 @@ export default function LoginPage() {
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault()
     setError('')
+    setEmailFix(null)
+    // 域名拼错直接拦下，不发请求：拼错的地址收不到验证信，注册了也是死号。后端同一套
+    // 规则兜底（老 App 包），这里只是能用界面语言说清楚、并给一键改正。
+    // A misspelled domain is stopped here without a request: it can never receive
+    // the verification mail. The backend enforces the same rule (old app bundles);
+    // this just says it in the UI language and offers a one-tap fix.
+    if (mode === 'register') {
+      const fix = suggestEmailFix(email)
+      if (fix) {
+        setEmailFix(fix)
+        setError(t('auth.emailTypo', { suggestion: fix }))
+        return
+      }
+    }
     setLoading(true)
     try {
       const u = mode === 'login'
@@ -202,7 +220,13 @@ export default function LoginPage() {
                   className="input"
                   placeholder={t('auth.emailPlaceholder')}
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  onChange={(e) => {
+                    setEmail(e.target.value)
+                    if (emailFix) {
+                      setEmailFix(null)
+                      setError('')
+                    }
+                  }}
                 />
               </div>
               <div>
@@ -254,6 +278,19 @@ export default function LoginPage() {
               {error && (
                 <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">
                   {error}
+                  {emailFix && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmail(emailFix)
+                        setEmailFix(null)
+                        setError('')
+                      }}
+                      className="mt-1.5 block break-all text-left font-semibold underline underline-offset-2 hover:opacity-80"
+                    >
+                      {t('auth.emailTypoFix', { suggestion: emailFix })}
+                    </button>
+                  )}
                 </div>
               )}
 

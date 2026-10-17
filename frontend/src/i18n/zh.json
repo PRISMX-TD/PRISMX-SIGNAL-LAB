@@ -221,6 +221,8 @@
     "phonePlaceholder": "手机号码（不含区号）",
     "phoneHint": "请选择所在地区并填写手机号码，用于账户安全与重要通知",
     "inviteTrialBanner": "通过此链接注册并验证邮箱，即得 {{days}} 天 PRO 会员",
+    "emailTypo": "邮箱好像打错了，您是不是想输入 {{suggestion}}？",
+    "emailTypoFix": "改用 {{suggestion}}",
     "inAppBrowserHint": "当前是 App 内置浏览器，无法使用 Google 登录。请点右上角「···」选择「在浏览器中打开」，或直接用邮箱注册。"
   },
   "order": {

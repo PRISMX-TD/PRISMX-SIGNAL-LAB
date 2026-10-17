@@ -40,7 +40,7 @@ from app.schemas import (
 )
 from app.services import activity_log, email_verification
 from app.services.deps import get_current_user
-from app.services.email_domains import canonical_email_taken, is_disposable_email
+from app.services.email_domains import canonical_email_taken, is_disposable_email, suggest_domain_fix
 from app.services.password_reset import (
     consume_token,
     issue_token,
@@ -186,6 +186,19 @@ def register(
     # grandfathering them needs no flag column and no migration. The Google path
     # is deliberately not gated: you can't create a Google account on a
     # disposable domain anyway, so a check there would only add false positives.
+    # 域名打错（gamil.com、qq.con）排在一次性邮箱前面：同样是当场能改的输入错误，
+    # 而且这句能直接告诉用户对的写法（拼错的域名也可能恰好在一次性黑名单里）。
+    # 拼错域名的地址收不到验证信，放进来只会多一个死号（见 suggest_domain_fix）。
+    # Misspelled domains (gamil.com, qq.con) go before the disposable check: also a
+    # fixable input error, and this message names the correct address (a typo
+    # domain may well sit on the disposable list too). Such an address can never
+    # receive the verification mail, so letting it in only creates a dead account.
+    fixed = suggest_domain_fix(email)
+    if fixed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"邮箱好像打错了，您是不是想输入 {fixed}？请改正后再注册 / This email looks mistyped — did you mean {fixed}? Please correct it and try again",
+        )
     if is_disposable_email(db, email):
         raise HTTPException(
             status_code=400,
