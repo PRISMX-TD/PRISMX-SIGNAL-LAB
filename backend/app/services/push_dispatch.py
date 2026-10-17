@@ -168,10 +168,13 @@ EVENT_BADGE_AWARDED = "badge_awarded"
 # Platform announcement. Rare, and each one opts into push on the admin side
 # (AnnouncementIn.notify); users receive it whenever notifications are on.
 EVENT_ANNOUNCEMENT = "announcement"
+# 客服台跟进提醒（rev 41）：到点 / 新分配 / 即将过期，只推给对应客服。
+# Support-desk follow-up reminders (rev 41), pushed to the assigned agent only.
+EVENT_SUPPORT_REMINDER = "support_reminder"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
-    EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT,
+    EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知

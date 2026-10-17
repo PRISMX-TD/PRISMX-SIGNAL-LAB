@@ -32,8 +32,8 @@ import type { ActivityItem, ActivityPerson, ActivityTag } from '../../../api/typ
 import { resolvePriceDigits } from '../../charts/chartConfig'
 import { bjDate, bjDateTime, bjDayKey, bjHm } from './time'
 
-// 与后端 activity_feed.KINDS 一致（契约 §6 机器可读清单，53 种）。
-// Mirrors the backend's activity_feed.KINDS (contract §6, 53 kinds).
+// 与后端 activity_feed.KINDS 一致（契约 §6 机器可读清单 53 种 + 客服台 rev 41 的 5 种 = 58 种）。
+// Mirrors the backend's activity_feed.KINDS (contract §6's 53 kinds + the 5 support-desk kinds of rev 41).
 export const ACTIVITY_KINDS = [
   'user.register', 'user.login', 'user.email_verified', 'user.password_reset_requested', 'user.password_reset',
   'user.password_changed', 'user.nickname', 'user.phone_set',
@@ -46,6 +46,7 @@ export const ACTIVITY_KINDS = [
   'admin.user_enable', 'admin.verify_email', 'admin.bulk_edit', 'admin.setting', 'admin.gamification',
   'admin.invite_link', 'admin.agent_assign', 'agent.plan', 'admin.competition', 'admin.competition_participant',
   'admin.announcement', 'admin.email', 'admin.ops', 'admin.ticket', 'admin.other',
+  'support.view_customer', 'support.reveal_phone', 'support.search', 'support.action', 'support.follow_up',
 ] as const
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number]
 
@@ -1099,6 +1100,84 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
     const items = rows.map((c) => changeText(t, str(c.field) ?? '?', c.old, c.new, 'yesno'))
     return [listed(t, 'admin.log.ev.other.head', capItems(t, items))]
   },
+  // ---- 客服台（rev 41，设计 2026-10-17 §8）/ support desk ----
+  'support.view_customer': ({ t }) => [t('admin.log.ev.support.view')],
+  'support.reveal_phone': ({ t }) => [t('admin.log.ev.support.reveal')],
+  'support.search': ({ t, p }) => {
+    const hits = num(p.hits)
+    return [hits != null ? t('admin.log.ev.support.searchHits', { n: hits }) : t('admin.log.ev.support.search')]
+  },
+  'support.action': ({ t, p }) => [supportActionText(t, p)],
+  'support.follow_up': ({ t, p }) => [followUpText(t, p)],
+}
+
+// 客服台 data.action 的人话；认不出的 action 退回该 kind 的通用说法（绝不拼出英文原值）。
+// Plain words for the support desk's data.action; an unknown action falls back to the kind's
+// generic name (the raw English value never reaches the sentence).
+const SUPPORT_ACTIONS = new Set([
+  'resend_verification', 'unbind', 'reset_trial', 'comp_days', 'comp_days_requested', 'do_not_contact', 'message',
+  'conversion_manual_requested', 'approve', 'reject', 'conversion_review', 'conversion_manual',
+])
+const FOLLOW_UP_ACTIONS = new Set(['assign', 'revoke', 'reassign', 'extend', 'update', 'note', 'request', 'message', 'expired'])
+const REQUEST_KINDS = new Set(['comp_days', 'follow_up', 'conversion_manual'])
+const FU_GOALS = new Set(['open_mt5', 'open_signallab', 'renew', 'activate_trial', 'revisit'])
+const FU_STATUSES = new Set(['pending', 'contacted', 'interested', 'converted', 'no_interest', 'unreachable', 'revoked', 'expired'])
+const FU_CHANNELS = new Set(['phone', 'email', 'in_app', 'other'])
+
+function supportActionText(t: TFunction, p: P): string {
+  const action = str(p.action)
+  const reason = str(p.reason)
+  const why = reason && action !== 'revoke' ? t('admin.log.ev.support.reason', { v: q(t, clip(reason)) }) : ''
+  if (!action || !SUPPORT_ACTIONS.has(action)) return t('admin.log.kindName.support.action')
+  const kind = str(p.kind)
+  const kindLabel = kind && REQUEST_KINDS.has(kind) ? t(`admin.log.ev.support.reqKind.${kind}`) : t('admin.log.ev.support.reqKind.other')
+  const days = num(p.days)
+  switch (action) {
+    case 'comp_days':
+    case 'comp_days_requested':
+      return t(`admin.log.ev.support.act.${action}`, { n: days ?? '?' }) + why
+    case 'approve':
+    case 'reject':
+      return t(`admin.log.ev.support.act.${action}`, { kind: kindLabel })
+    case 'conversion_review':
+      return t(p.approve === true ? 'admin.log.ev.support.act.conversionApproved' : 'admin.log.ev.support.act.conversionRejected')
+    default:
+      return t(`admin.log.ev.support.act.${action}`) + why
+  }
+}
+
+function followUpText(t: TFunction, p: P): string {
+  const action = str(p.action)
+  if (!action || !FOLLOW_UP_ACTIONS.has(action)) return t('admin.log.kindName.support.follow_up')
+  const goal = str(p.goal)
+  const goalText = goal && FU_GOALS.has(goal) ? t(`supportDesk.goal.${goal}`) : null
+  if (action === 'assign' || action === 'request') {
+    return goalText ? t(`admin.log.ev.support.fu.${action}Goal`, { goal: goalText }) : t(`admin.log.ev.support.fu.${action}`)
+  }
+  if (action === 'revoke' && str(p.reason) === 'staff_removed') return t('admin.log.ev.support.fu.revokeStaff')
+  if (action === 'extend') {
+    const to = str(p.to)
+    return to ? t('admin.log.ev.support.fu.extendTo', { v: bjDate(to) }) : t('admin.log.ev.support.fu.extend')
+  }
+  if (action === 'note') {
+    const ch = str(p.channel)
+    return ch && FU_CHANNELS.has(ch) ? t('admin.log.ev.support.fu.noteVia', { ch: t(`supportDesk.channel.${ch}`) }) : t('admin.log.ev.support.fu.note')
+  }
+  if (action === 'update') {
+    const items: string[] = []
+    const st = str(p.status)
+    const from = str(p.from)
+    if (st && FU_STATUSES.has(st)) {
+      const b = t(`supportDesk.status.${st}`)
+      items.push(from && FU_STATUSES.has(from) ? t('admin.log.ev.support.fu.statusChange', { a: t(`supportDesk.status.${from}`), b }) : t('admin.log.ev.support.fu.statusSet', { b }))
+    }
+    if ('next' in p) {
+      const next = str(p.next)
+      items.push(next ? t('admin.log.ev.support.fu.nextSet', { v: bjDateTime(next) }) : t('admin.log.ev.support.fu.nextCleared'))
+    }
+    return items.length ? listed(t, 'admin.log.ev.support.fu.updateHead', items) : t('admin.log.ev.support.fu.update')
+  }
+  return t(`admin.log.ev.support.fu.${action}`)
 }
 
 function isKind(k: string): k is ActivityKind {
@@ -1235,10 +1314,10 @@ export function chipsFor(item: ActivityItem, t: TFunction): Chip[] {
   return out
 }
 
-/** 「谁操作」栏：本人 / 系统 / 自动仓管 / 券商（MT5）/ 管理员 X / 代理 X。/ The actor column. */
+/** 「谁操作」栏：本人 / 系统 / 自动仓管 / 券商（MT5）/ 管理员 X / 代理 X / 客服 X。/ The actor column. */
 export function actorLabel(item: ActivityItem, t: TFunction): string {
   const a = item.actor
-  if (a.type === 'admin' || a.type === 'agent') {
+  if (a.type === 'admin' || a.type === 'agent' || a.type === 'support') {
     const name = str(a.name) ?? str(a.email)
     return name ? t(`admin.log.actor.${a.type}`, { name }) : t(`admin.log.actor.${a.type}Anon`)
   }

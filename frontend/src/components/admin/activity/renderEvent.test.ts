@@ -31,6 +31,8 @@ const CONTRACT_KINDS = [
   'plan.trial_claim', 'sltp.modify', 'trade.close', 'trade.close_all', 'trade.corrected', 'trade.open', 'trade.other',
   'user.api_token_reset', 'user.email_verified', 'user.login', 'user.nickname', 'user.password_changed',
   'user.password_reset', 'user.password_reset_requested', 'user.phone_set', 'user.register',
+  // 客服台（rev 41）/ support desk (rev 41)
+  'support.view_customer', 'support.reveal_phone', 'support.search', 'support.action', 'support.follow_up',
 ]
 
 // 句子里允许出现的大写词：品种、会员等级名、例子里用户自己起的名字（FB 投放、KOL 备注）。
@@ -61,9 +63,9 @@ function item(kind: string, params: Record<string, unknown>, extra: Partial<Acti
 const allWithChildren = (list: ActivityItem[]) => list.flatMap((i) => [i, ...(i.children ?? [])])
 
 describe('kind 清单 / kind list', () => {
-  it('前端认得契约里的全部 53 种，且一种不多 / the frontend knows exactly the contract’s 53 kinds', () => {
+  it('前端认得契约里的全部 58 种，且一种不多 / the frontend knows exactly the contract’s 58 kinds', () => {
     expect([...ACTIVITY_KINDS].sort()).toEqual([...CONTRACT_KINDS].sort())
-    expect(ACTIVITY_KINDS.length).toBe(53)
+    expect(ACTIVITY_KINDS.length).toBe(58)
   })
 
   it('例子覆盖每一种 kind / the examples cover every kind', () => {

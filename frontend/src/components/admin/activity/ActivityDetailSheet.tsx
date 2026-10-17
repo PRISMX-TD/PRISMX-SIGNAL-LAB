@@ -279,7 +279,7 @@ export default function ActivityDetailSheet({
                   <span className="font-mono text-xs">{user?.phone ?? '—'}</span>
                 </Field>
                 <Field label={t('admin.log.detail.plan')}>{plan ?? '—'}</Field>
-                <Field label={t('admin.log.detail.role')}>{user?.role ? t(`admin.log.v.role.${user.role === 'admin' ? 'admin' : 'user'}`) : '—'}</Field>
+                <Field label={t('admin.log.detail.role')}>{user?.role ? t(`admin.log.v.role.${user.role === 'admin' || user.role === 'support' ? user.role : 'user'}`) : '—'}</Field>
                 <Field label={t('admin.log.detail.registered')}>{bjFull(user?.created_at)}</Field>
               </>
             )}

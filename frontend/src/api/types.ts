@@ -11,7 +11,7 @@ import type {
   StrategyCondition,
 } from '../components/strategies/conditionTypes'
 
-export type UserRole = 'user' | 'admin'
+export type UserRole = 'user' | 'support' | 'admin'
 export type UserPlan = 'FREE' | 'PRO'
 
 // 合作券商锁的展示信息（绑定页提示用）/ partner-broker lock display info for the Bind page
@@ -191,6 +191,10 @@ export interface AdminUser {
   // When the email was verified; null = not yet. Only `=== null` means
   // unverified: before the backend ships the key is absent (undefined).
   emailVerifiedAt?: string | null
+  // 客服台（rev 41）：仅 role='support' 有意义；null tier 按外包处理。
+  // Support desk (rev 41): only meaningful for role='support'; a null tier means outsourced.
+  supportTier?: 'internal' | 'outsourced' | null
+  supportRevealLimit?: number | null
 }
 
 // 邀请链接（管理后台）。registrations 按隐藏归因码统计，与备注文本解耦。
@@ -1547,7 +1551,7 @@ export interface WSMessage {
 // In-app notifications (the bell panel's "messages" section). No title in the
 // data: it comes from `kind` via i18n. The backend deliberately stores no copy,
 // otherwise switching language would only affect newly created rows.
-export type NotificationKind = 'ticket_reply' | 'ticket_new' | 'comp_public_name'
+export type NotificationKind = 'ticket_reply' | 'ticket_new' | 'comp_public_name' | 'support_reminder' | 'support_alert'
 
 export interface NotificationFeedItem {
   id: string
@@ -1566,7 +1570,9 @@ export interface NotificationFeed {
 }
 
 // 工单系统 / ticket system
-export type TicketCategory = 'account' | 'payment' | 'claim' | 'technical' | 'feature'
+// follow_up = 客服主动来信（rev 41），用户提交表单不提供这一项。
+// follow_up = a letter opened by support staff (rev 41); never offered on the user form.
+export type TicketCategory = 'account' | 'payment' | 'claim' | 'technical' | 'feature' | 'follow_up'
 export type TicketPriority = 'low' | 'normal' | 'urgent'
 export type TicketStatus = 'open' | 'in_progress' | 'closed'
 
@@ -1574,7 +1580,12 @@ export interface TicketReply {
   id: string
   authorId: string
   authorEmail: string
-  authorRole: 'user' | 'admin'
+  authorRole: 'user' | 'support' | 'admin'
+  // 工作人员昵称（用户侧显示「Signal Lab 客服 · 昵称」）；用户本人的回复为 null。
+  // Staff nickname (users see "Signal Lab Support · nickname"); null on user replies.
+  authorName?: string | null
+  // 内部备注：只有工作人员视角会收到 / internal note: only ever sent to staff
+  internal?: boolean
   body: string
   // 附图的签名 URL（几小时后过期，别存）；签不出来的那几张只算进 imageCount。
   // 列表预览里 images 恒为空，只有 imageCount。
@@ -1596,6 +1607,9 @@ export interface Ticket {
   createdAt: string
   updatedAt: string
   replies: TicketReply[]
+  // 指派（rev 41）：只在工作人员视角下有值 / assignment, staff view only
+  assigneeId?: string | null
+  assigneeName?: string | null
 }
 
 export interface TicketListItem {
@@ -1607,6 +1621,9 @@ export interface TicketListItem {
   status: TicketStatus
   updatedAt: string
   latestReply: TicketReply | null
+  userId?: string | null
+  assigneeId?: string | null
+  assigneeName?: string | null
 }
 
 // 游戏化（设计 §6/§11）/ Gamification
@@ -2478,7 +2495,7 @@ export type ActivitySub = 'all' | 'open_close' | 'sltp'
 export type ActivityStatus = 'ok' | 'fail' | 'unknown' | 'pending' | 'cancelled'
 export type ActivityTag =
   'unprotected' | 'stopout' | 'revoked' | 'late' | 'backfill' | 'shared_login' | 'partial' | 'gone' | 'auto'
-export type ActivityActorType = 'self' | 'system' | 'auto' | 'broker' | 'admin' | 'agent'
+export type ActivityActorType = 'self' | 'system' | 'auto' | 'broker' | 'admin' | 'agent' | 'support'
 
 export interface ActivityPerson {
   id: string

@@ -743,6 +743,13 @@ def _log_bridge_binds(
             "kind": activity_log.MT5_BIND, "user_id": user_id, "mt5_login": row.login,
             "actor_id": user_id, "ref_id": row.id, "data": data, "dedupe_key": key,
         })
+    # 开户 / 转化识别（客服台 §6）：合作券商实盘才写，幂等。必须在 log_events 之前——那一步
+    # 要是提交前的最后一步。/ Conversion tracking (support desk §6), before log_events,
+    # which must stay the last step before the commit.
+    from app.services import conversions
+
+    for row, _revived, _prior in binds:
+        conversions.record_mt5_bind(db, user_id, row)
     if events:
         activity_log.log_events(db, events)
 

@@ -17,7 +17,9 @@
     "ticket_new": "有新工单待处理",
     "comp_public_name": "比赛公开榜单",
     "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服",
-    "agent_plan_change": "代理修改了客户会员"
+    "agent_plan_change": "代理修改了客户会员",
+    "support_reminder": "客服跟进提醒",
+    "support_alert": "客服台待处理"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -37,7 +39,8 @@
     "support": "联系客服",
     "appDownload": "下载 App",
     "announcements": "公告",
-    "agent": "代理页面"
+    "agent": "代理页面",
+    "supportDesk": "客服台"
   },
   "common": {
     "loading": "加载中…",

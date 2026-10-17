@@ -17,7 +17,9 @@
     "ticket_new": "Có yêu cầu hỗ trợ mới cần xử lý",
     "comp_public_name": "Bảng xếp hạng công khai",
     "plan_refund": "Đơn hàng đã được hoàn tiền — số ngày thành viên tương ứng đã bị thu hồi. Liên hệ hỗ trợ nếu bạn có thắc mắc.",
-    "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng"
+    "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng",
+    "support_reminder": "Nhắc việc theo dõi",
+    "support_alert": "Bàn hỗ trợ cần xử lý"
   },
   "nav": {
     "dashboard": "Tổng quan",
@@ -37,7 +39,8 @@
     "support": "Liên hệ hỗ trợ",
     "appDownload": "Tải ứng dụng",
     "announcements": "Thông báo chung",
-    "agent": "Trang đại lý"
+    "agent": "Trang đại lý",
+    "supportDesk": "Bàn hỗ trợ"
   },
   "common": {
     "loading": "Đang tải…",

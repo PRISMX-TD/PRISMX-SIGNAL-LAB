@@ -18,9 +18,9 @@ from app.core.config import settings, _WORKER_COUNT
 from app.core.database import init_db
 from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
-from app.services.deps import get_current_user, require_admin
+from app.services.deps import get_current_user, require_admin, require_staff
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, emails, gamification, gateway, invite, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -32,6 +32,7 @@ from app.services.sentiment_store import sentiment_loop
 from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 from app.services.background import BackgroundLoops
+from app.services.support_desk import support_desk_loop
 from app.services import capacity, loop_health
 from app.services.connection_manager import manager
 
@@ -242,6 +243,8 @@ async def lifespan(app: FastAPI):
         "gateway_positions": gateway_positions_loop,
         # 在线峰值采样（每分钟），给系统状态页的「容量」灯 / per-minute peak sampling for the capacity light
         "capacity": capacity.capacity_loop,
+        # 客服台跟进提醒 / 过期（5 分钟，rev 41）/ support-desk reminders and expiry
+        "support_desk": support_desk_loop,
     })
     loops.launch()
     app.state.background_loops = loops
@@ -426,7 +429,15 @@ app.include_router(strategies.router, prefix=settings.API_PREFIX)
 app.include_router(telemetry.router, prefix=settings.API_PREFIX)
 app.include_router(tickets.router, prefix=settings.API_PREFIX)
 app.include_router(share.router, prefix=settings.API_PREFIX)
-app.include_router(tickets.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
+# rev 41：/admin/tickets 改为客服与管理员共用（require_staff 长在 router 的每个端点上），
+# 挂载级兜底换成 require_staff——再挂 require_admin 客服就进不来了（设计 2026-10-17 §3）。
+# rev 41: /admin/tickets is shared by support and admins; the mount-level backstop
+# becomes require_staff, since require_admin would lock support out (design §3).
+app.include_router(tickets.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_staff)])
+# 客服台：/support（require_staff）与 /admin/support（router 自带 require_admin）。
+# Support desk: /support (require_staff) and /admin/support (require_admin on the router).
+app.include_router(support.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_staff)])
+app.include_router(support.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(invite.router, prefix=settings.API_PREFIX)
 app.include_router(invite.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 # 代理端点要求**登录**（不是管理员）：「是不是代理」由 invite_link_agents 里有没有

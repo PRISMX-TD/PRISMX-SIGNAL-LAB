@@ -224,7 +224,8 @@
       "bridge_offline": "PRISMX Bridge đã ngoại tuyến",
       "account_revoked": "Kết nối trực tiếp cần xác minh lại",
       "strategy_signal": "Tín hiệu từ chiến lược của tôi",
-      "badge_awarded": "Nhận huy hiệu mới"
+      "badge_awarded": "Nhận huy hiệu mới",
+      "support_reminder": "Nhắc việc theo dõi của hỗ trợ"
     },
     "notifWindowHeading": "Khung giờ nhận thông báo",
     "notifWindowEnable": "Chỉ gửi thông báo trong khung giờ này",
@@ -1416,7 +1417,8 @@
       "payment": "Thanh toán",
       "claim": "Đăng ký nhận",
       "technical": "Sự cố kỹ thuật",
-      "feature": "Đề xuất tính năng"
+      "feature": "Đề xuất tính năng",
+      "follow_up": "Thư từ bộ phận hỗ trợ"
     },
     "priority": {
       "low": "Thấp",
@@ -1465,7 +1467,9 @@
       "tooBig": "Ảnh quá lớn (tối đa 4MB mỗi ảnh)",
       "rateLimited": "Tải lên quá nhiều, vui lòng thử lại sau",
       "noStorage": "Hiện không thể tải ảnh lên, vui lòng mô tả bằng văn bản"
-    }
+    },
+    "staffLabel": "Hỗ trợ Signal Lab",
+    "staffName": "Hỗ trợ Signal Lab · {{name}}"
   },
   "dashboard": {
     "sessionWinrate": {
@@ -2174,6 +2178,221 @@
       "login": "Đã có tài khoản? Đăng nhập",
       "learnMore": "Về Signal Lab",
       "social": "{{n}} tài khoản đang thi đấu tại “{{name}}”"
+    }
+  },
+  "supportDesk": {
+    "title": "Bàn hỗ trợ",
+    "retry": "Thử lại",
+    "yes": "Có",
+    "no": "Không",
+    "pickSomething": "Chọn một phiếu hỗ trợ hoặc một khách cần theo dõi ở bên trái",
+    "pickCustomer": "Đang tải thông tin người gửi…",
+    "backToList": "Về danh sách",
+    "backToThread": "Về phiếu hỗ trợ",
+    "tab": {
+      "tickets": "Phiếu hỗ trợ",
+      "followUps": "Khách tôi theo dõi"
+    },
+    "search": {
+      "placeholder": "Tra cứu chính xác: email / ID người dùng / mã phiếu",
+      "go": "Tìm",
+      "none": "Không tìm thấy, hoặc bạn không có quyền xem người dùng này"
+    },
+    "tier": {
+      "internal": "Nhân viên nội bộ",
+      "outsourced": "Nhân viên thuê ngoài"
+    },
+    "role": {
+      "user": "Người dùng",
+      "support": "Hỗ trợ",
+      "admin": "Quản trị"
+    },
+    "queue": {
+      "scope": "Phạm vi phiếu",
+      "status": "Trạng thái phiếu",
+      "me": "Của tôi",
+      "none": "Chưa giao",
+      "all": "Tất cả",
+      "anyStatus": "Mọi trạng thái",
+      "empty": "Không có phiếu nào",
+      "assignedTo": "Người xử lý: {{name}}",
+      "unassignedTag": "Chưa giao"
+    },
+    "thread": {
+      "internalTag": "Ghi chú nội bộ",
+      "assigned": "Đã cập nhật người xử lý",
+      "noteSaved": "Đã lưu ghi chú nội bộ",
+      "customer": "Xem khách hàng",
+      "assignTo": "Giao cho",
+      "unassign": "Chưa giao",
+      "me": "Tôi",
+      "release": "Trả lại phiếu này",
+      "claim": "Nhận xử lý",
+      "modeReply": "Trả lời người dùng",
+      "modeInternal": "Ghi chú nội bộ",
+      "insertTemplate": "Chèn câu trả lời mẫu",
+      "internalHint": "Ghi chú nội bộ chỉ hỗ trợ viên và quản trị thấy; người dùng không được thông báo.",
+      "internalPlaceholder": "Ghi chú cho đồng nghiệp (người dùng không thấy)",
+      "saveNote": "Lưu ghi chú"
+    },
+    "followUps": {
+      "count": "Đang theo dõi {{n}} người",
+      "empty": "Chưa có khách nào được giao cho bạn",
+      "overdue": "Quá hạn:",
+      "next": "Liên hệ tiếp:",
+      "noNext": "Chưa đặt thời gian liên hệ tiếp"
+    },
+    "requests": {
+      "title": "Yêu cầu của tôi",
+      "status": {
+        "pending": "Chờ duyệt",
+        "approved": "Đã duyệt",
+        "rejected": "Bị từ chối"
+      },
+      "kind": {
+        "comp_days": "Bù ngày hội viên",
+        "follow_up": "Xin theo dõi",
+        "conversion_manual": "Báo mở tài khoản"
+      }
+    },
+    "priority": {
+      "low": "Thấp",
+      "normal": "Thường",
+      "high": "Cao"
+    },
+    "status": {
+      "pending": "Chưa liên hệ",
+      "contacted": "Đã liên hệ",
+      "interested": "Quan tâm",
+      "converted": "Đã chuyển đổi",
+      "no_interest": "Không quan tâm",
+      "unreachable": "Không liên lạc được",
+      "revoked": "Đã thu hồi",
+      "expired": "Hết hạn"
+    },
+    "goal": {
+      "open_mt5": "Mở tài khoản thật MC",
+      "open_signallab": "Tham gia Signal Lab",
+      "renew": "Gia hạn",
+      "activate_trial": "Kích hoạt dùng thử",
+      "revisit": "Hỏi thăm lại"
+    },
+    "channel": {
+      "phone": "Điện thoại",
+      "email": "Email",
+      "in_app": "Trong ứng dụng",
+      "other": "Khác"
+    },
+    "conversions": {
+      "empty": "Chưa có chuyển đổi nào",
+      "kind": {
+        "mt5_real": "Tài khoản thật MC",
+        "signallab_register": "Đăng ký",
+        "signallab_verified": "Xác minh email",
+        "signallab_paid": "Thanh toán lần đầu"
+      },
+      "status": {
+        "confirmed": "Đã xác nhận",
+        "pending_review": "Chờ xét duyệt",
+        "rejected": "Bị từ chối"
+      },
+      "manual": "Thủ công",
+      "mine": "Thành tích của tôi"
+    },
+    "card": {
+      "noNickname": "(chưa đặt biệt danh)",
+      "real": "Thật",
+      "demo": "Demo",
+      "bound": "Đã liên kết",
+      "mt5": "Tài khoản MT5",
+      "goal": "Mục tiêu",
+      "revealLimitHit": "Hôm nay bạn đã dùng hết lượt xem số đầy đủ",
+      "linkCopied": "Đã sao chép liên kết mở tài khoản",
+      "copyFailed": "Không sao chép được, vui lòng sao chép thủ công",
+      "noteAdded": "Đã thêm ghi chép",
+      "dncDone": "Đã đánh dấu không liên hệ, việc theo dõi đã đóng",
+      "complianceTitle": "Lưu ý tuân thủ:",
+      "compliance": "Không hứa hẹn lợi nhuận hay bảo toàn vốn; không hỏi mật khẩu hay mã xác minh; luôn liên hệ dưới danh nghĩa Signal Lab.",
+      "trial": "Dùng thử",
+      "disabled": "Đã khóa",
+      "dncTag": "Không liên hệ",
+      "email": "Email",
+      "verified": "Đã xác minh",
+      "unverified": "Chưa xác minh",
+      "phone": "Điện thoại",
+      "reveal": "Xem số đầy đủ",
+      "revealLeft": "Hôm nay còn {{n}} lượt xem",
+      "region": "Khu vực (mã quốc gia)",
+      "registered": "Ngày đăng ký",
+      "lastActive": "Hoạt động gần nhất",
+      "source": "Liên kết nguồn",
+      "noSource": "Tự nhiên",
+      "planExpires": "Hội viên hết hạn",
+      "permanent": "Vĩnh viễn",
+      "trialUsed": "Đã dùng thử",
+      "online": "Kết nối",
+      "gateway": "Kết nối trực tiếp",
+      "competitions": "Cuộc thi đã đăng ký",
+      "paidTotal": "Tổng đã thanh toán",
+      "copyOpenAccount": "Sao chép liên kết mở tài khoản",
+      "noMt5": "Chưa liên kết tài khoản MT5",
+      "balance": "Số dư",
+      "followUp": "Theo dõi của tôi",
+      "expires": "Hạn {{time}}",
+      "status": "Trạng thái theo dõi",
+      "statusSaved": "Đã cập nhật trạng thái",
+      "closingHint": "Chọn Đã chuyển đổi / Không quan tâm / Không liên lạc được sẽ đóng việc theo dõi.",
+      "nextContact": "Liên hệ tiếp (UTC+8)",
+      "nextSaved": "Đã cập nhật thời gian liên hệ tiếp",
+      "clearNext": "Xóa",
+      "notes": "Ghi chép theo dõi",
+      "noNotes": "Chưa có ghi chép",
+      "outcome": "Kết quả",
+      "channel": "Kênh liên hệ",
+      "outcomePlaceholder": "Kết quả (không bắt buộc, vd: hẹn nói tiếp thứ Sáu)",
+      "notePlaceholder": "Nội dung lần liên hệ này",
+      "appendOnly": "Ghi chép chỉ được thêm, không thể sửa hay xóa sau khi lưu.",
+      "addNote": "Thêm ghi chép",
+      "actions": "Thao tác",
+      "dnc": "Người dùng yêu cầu không liên hệ",
+      "conversions": "Dòng thời gian chuyển đổi",
+      "tickets": "Phiếu hỗ trợ",
+      "dncBody": "Xác nhận người dùng yêu cầu không liên hệ? Việc theo dõi hiện tại chuyển thành Không quan tâm và sẽ không được giao cho ai nữa."
+    },
+    "actions": {
+      "reason": "Lý do / ghi chú",
+      "optional": "(không bắt buộc)",
+      "resend": "Gửi lại email xác minh",
+      "resendOk": "Đã gửi email xác minh",
+      "alreadyVerified": "Người dùng này đã xác minh email",
+      "resendBody": "Gửi lại email xác minh tới địa chỉ đã đăng ký (giới hạn tần suất như khi người dùng tự gửi lại).",
+      "unbind": "Hủy liên kết MT5",
+      "unbindOk": "Đã hủy liên kết",
+      "unbindBody": "Người dùng sẽ phải liên kết lại tài khoản này. Tài khoản bridge đang trực tuyến không thể hủy liên kết.",
+      "resetTrial": "Đặt lại dùng thử",
+      "resetTrialOk": "Đã đặt lại quyền dùng thử",
+      "resetTrialBody": "Cho phép người dùng nhận dùng thử thêm một lần. Hỗ trợ viên chỉ đặt lại được một lần cho mỗi người dùng.",
+      "resetTrialBodyAdmin": "Cho phép người dùng nhận dùng thử thêm một lần. Quản trị đặt lại không giới hạn.",
+      "compDays": "Bù ngày hội viên",
+      "compDaysOk": "Đã bù {{n}} ngày",
+      "compDaysQueued": "Vượt mức, đã gửi quản trị duyệt",
+      "compDaysBody": "Mỗi lần tối đa {{n}} ngày có hiệu lực ngay; nhiều hơn cần quản trị duyệt.",
+      "compDaysBodyAdmin": "Quản trị bù ngày có hiệu lực ngay, không giới hạn số ngày.",
+      "days": "Số ngày",
+      "compDaysOverCap": "Vượt mức có hiệu lực ngay, sẽ cần duyệt.",
+      "message": "Gửi tin nhắn trong ứng dụng",
+      "send": "Gửi",
+      "messageOk": "Đã gửi, người dùng sẽ thấy dưới dạng phiếu hỗ trợ",
+      "messageBody": "Mở một phiếu mới gửi người dùng dưới danh nghĩa Hỗ trợ Signal Lab; người dùng sẽ nhận thông báo.",
+      "messageTitle": "Tiêu đề",
+      "messageText": "Nội dung",
+      "requestFollowUp": "Xin theo dõi",
+      "requestSent": "Đã gửi yêu cầu, chờ quản trị duyệt",
+      "requestFollowUpBody": "Thấy người dùng này tiềm năng? Gửi yêu cầu; khi quản trị duyệt, khách sẽ được giao cho bạn.",
+      "requestConversion": "Báo mở tài khoản",
+      "requestConversionBody": "Người dùng đã mở tài khoản thật MC nhưng hệ thống chưa nhận ra? Nhập máy chủ và số tài khoản; sẽ được tính sau khi quản trị duyệt.",
+      "server": "Máy chủ MT5",
+      "login": "Số tài khoản MT5"
     }
   }
 }

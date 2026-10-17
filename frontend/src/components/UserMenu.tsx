@@ -20,6 +20,7 @@ export default function UserMenu({
   email,
   showUpgrade,
   isAdmin,
+  isStaff = false,
   isAgent = false,
   gamificationVisible,
   gamificationLevel,
@@ -29,6 +30,8 @@ export default function UserMenu({
   email: string | undefined
   showUpgrade: boolean
   isAdmin: boolean
+  // 客服台入口（role support / admin）/ support-desk entry (role support / admin)
+  isStaff?: boolean
   // 邀请链接代理入口（见 User.isAgent）/ invite-link agent entry (see User.isAgent)
   isAgent?: boolean
   gamificationVisible: boolean
@@ -136,6 +139,11 @@ export default function UserMenu({
           {isAgent && (
             <Link to="/agent" onClick={() => setOpen(false)} className={linkClass}>
               {t("nav.agent")}
+            </Link>
+          )}
+          {isStaff && (
+            <Link to="/support-desk" onClick={() => setOpen(false)} className={linkClass}>
+              {t("nav.supportDesk")}
             </Link>
           )}
           {isAdmin && (

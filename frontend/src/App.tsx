@@ -119,6 +119,8 @@ const UpgradePage = lazyPage(() => import('./pages/UpgradePage'), 'UpgradePage')
 const DownloadPage = lazyPage(() => import('./pages/DownloadPage'), 'DownloadPage')
 const AccountPage = lazyPage(() => import('./pages/AccountPage'), 'AccountPage')
 const AdminPage = lazyPage(() => import('./pages/AdminPage'), 'AdminPage')
+// 客服台（设计 2026-10-17）/ support desk
+const SupportDeskPage = lazyPage(() => import('./components/support/SupportDeskPage'), 'SupportDeskPage')
 const SimulatorPage = lazyPage(() => import('./pages/SimulatorPage'), 'SimulatorPage')
 const StrategiesPage = lazyPage(() => import('./pages/StrategiesPage'), 'StrategiesPage')
 const AchievementsPage = lazyPage(() => import('./pages/AchievementsPage'), 'AchievementsPage')
@@ -308,6 +310,14 @@ function Protected({ children }: { children: ReactNode }) {
 function AdminOnly({ children }: { children: ReactNode }) {
   const { user } = useAuth()
   return user?.role === 'admin' ? <>{children}</> : <Navigate to="/dashboard" replace />
+}
+
+// 客服台路由：role 为 support 或 admin（设计 §9）。同 AdminOnly，真正的边界在后端 require_staff。
+// Support-desk route: role support or admin (design §9). As with AdminOnly, the real boundary
+// is the backend's require_staff.
+function StaffOnly({ children }: { children: ReactNode }) {
+  const { user } = useAuth()
+  return user?.role === 'admin' || user?.role === 'support' ? <>{children}</> : <Navigate to="/dashboard" replace />
 }
 
 // 代理专属路由：要求 /auth/me 下发的 isAgent（至少持有一条被指派的邀请链接）。
@@ -599,6 +609,14 @@ export default function App() {
                   <AgentOnly>
                     <AgentPage />
                   </AgentOnly>
+                }
+              />
+              <Route
+                path="/support-desk"
+                element={
+                  <StaffOnly>
+                    <SupportDeskPage />
+                  </StaffOnly>
                 }
               />
               <Route

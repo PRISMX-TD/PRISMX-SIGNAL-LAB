@@ -17,7 +17,9 @@
     "ticket_new": "New ticket to handle",
     "comp_public_name": "Public competition board",
     "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions.",
-    "agent_plan_change": "An agent changed a customer's plan"
+    "agent_plan_change": "An agent changed a customer's plan",
+    "support_reminder": "Follow-up reminder",
+    "support_alert": "Support desk needs attention"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -37,7 +39,8 @@
     "support": "Contact support",
     "appDownload": "Get the app",
     "announcements": "Announcements",
-    "agent": "Agent view"
+    "agent": "Agent view",
+    "supportDesk": "Support desk"
   },
   "common": {
     "loading": "Loading…",

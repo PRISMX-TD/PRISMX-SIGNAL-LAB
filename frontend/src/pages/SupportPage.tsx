@@ -77,9 +77,10 @@ function MetaChips({ category, priority, t }: { category: TicketCategory; priori
   )
 }
 
-function Message({ authorEmail, authorRole, body, images, imageCount, createdAt, index, t }: {
+function Message({ authorEmail, authorRole, authorName, body, images, imageCount, createdAt, index, t }: {
   authorEmail: string
   authorRole: string
+  authorName?: string | null
   body: string
   images?: string[]
   imageCount?: number
@@ -87,17 +88,23 @@ function Message({ authorEmail, authorRole, body, images, imageCount, createdAt,
   index: number
   t: ReturnType<typeof useTranslation>['t']
 }) {
-  const isAdmin = authorRole === 'admin'
-  // 后端不给普通用户下发管理员邮箱（空串），这时名字位置显示「客服」，标签就不重复了。
-  // Staff emails are withheld from users (empty string): show "Support" as the name instead.
-  const name = authorEmail || t('admin.staff')
+  // 客服与管理员的回复一律显示成「Signal Lab 客服 · 昵称」（rev 41）：用户不需要分辨谁是客服、
+  // 谁是管理员，后端也不给用户下发工作人员邮箱。没有昵称时只写「Signal Lab 客服」。
+  // Support and admin replies both read "Signal Lab Support · nickname" (rev 41): users needn't
+  // tell the two apart, and staff emails are never sent to users. Without a nickname it is just
+  // "Signal Lab Support".
+  const isAdmin = authorRole !== 'user'
+  const name = isAdmin
+    ? authorName
+      ? t('tickets.staffName', { name: authorName })
+      : t('tickets.staffLabel')
+    : authorEmail || t('tickets.me')
   return (
     <div className={`sup-msg-row${isAdmin ? ' staff' : ''}`} style={{ '--i': index } as React.CSSProperties}>
       <span className="sup-ava" aria-hidden="true">{initial(name)}</span>
       <div className="min-w-0">
         <div className="sup-msg-meta">
           <span className="name">{name}</span>
-          {isAdmin && authorEmail && <span className="staff">{t('admin.staff')}</span>}
           <span className="time num">{fmtStamp(createdAt)}</span>
         </div>
         {body && <p className="sup-msg-body">{body}</p>}
@@ -301,7 +308,7 @@ export default function SupportPage() {
               <p className="sup-thread-empty">{t('tickets.empty')}</p>
             ) : (
               ticket.replies.map((r, i) => (
-                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body}
+                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} authorName={r.authorName} body={r.body}
                   images={r.images} imageCount={r.imageCount} createdAt={r.createdAt} t={t} />
               ))
             )}
@@ -386,7 +393,7 @@ export default function SupportPage() {
                 <span className="sup-title">{ticket.title}</span>
                 {ticket.latestReply && (
                   <span className="sup-last">
-                    <span className="who">{ticket.latestReply.authorRole === 'admin' ? t('admin.staff') : t('tickets.me')}</span>
+                    <span className="who">{ticket.latestReply.authorRole !== 'user' ? t('tickets.staffLabel') : t('tickets.me')}</span>
                     {' · '}
                     {ticket.latestReply.body || t('tickets.images.preview')}
                   </span>

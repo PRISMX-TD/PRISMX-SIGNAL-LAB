@@ -14,7 +14,7 @@ from fastapi import Depends
 from fastapi.routing import APIRoute
 
 from app import main as app_main
-from app.services.deps import get_current_user, require_admin
+from app.services.deps import get_current_user, require_admin, require_staff
 
 
 def _mounted_routes(prefix_fragment: str) -> list[APIRoute]:
@@ -71,8 +71,21 @@ def test_a_new_agent_endpoint_without_its_own_dependency_is_still_guarded():
 def test_admin_mounts_keep_their_guard():
     """既有的管理挂载点不受影响（本次只给代理补了一条）。
     The existing admin mounts are untouched."""
-    for fragment in ("/admin/invite-links", "/admin/competitions", "/admin/tickets"):
+    for fragment in ("/admin/invite-links", "/admin/competitions", "/admin/support"):
         routes = _mounted_routes(fragment)
         assert routes, f"没找到 {fragment} 的路由"
         for r in routes:
             assert require_admin in _guards(r), f"{r.path} 丢了管理员守卫"
+
+
+def test_staff_mounts_carry_require_staff():
+    """rev 41：/admin/tickets 与 /support 改为客服 + 管理员共用，挂载级兜底是 require_staff，
+    且不能再带 require_admin（否则客服全被 403）。
+    rev 41: /admin/tickets and /support are shared by support and admins: the mount
+    backstop is require_staff and must not be require_admin."""
+    for fragment in ("/admin/tickets", "/api/support/"):
+        routes = _mounted_routes(fragment)
+        assert routes, f"没找到 {fragment} 的路由"
+        for r in routes:
+            assert require_staff in _guards(r), f"{r.path} 丢了客服守卫"
+            assert require_admin not in _guards(r), f"{r.path} 被误挂成了管理员专属"

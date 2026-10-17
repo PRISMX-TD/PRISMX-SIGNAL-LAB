@@ -224,7 +224,8 @@
       "bridge_offline": "PRISMX Bridge went offline",
       "account_revoked": "Direct connection needs re-verification",
       "strategy_signal": "My strategy signals",
-      "badge_awarded": "New badge earned"
+      "badge_awarded": "New badge earned",
+      "support_reminder": "Support follow-up reminders"
     },
     "notifWindowHeading": "Push hours",
     "notifWindowEnable": "Only push during these hours",
@@ -1067,7 +1068,8 @@
       "tickets": "Tickets",
       "gamification": "Gamification",
       "competitions": "Competitions",
-      "health": "System status"
+      "health": "System status",
+      "support": "Support"
     },
     "log": {
       "title": "Activity log",
@@ -1107,7 +1109,8 @@
         "qLogin": "MT5 login / phone search: {{q}}",
         "abnormal": "Problems only",
         "remove": "Remove this filter",
-        "clearAll": "Clear all filters"
+        "clearAll": "Clear all filters",
+        "staff": "Staff: {{name}}"
       },
       "refresh": "Refresh",
       "refreshing": "Refreshing…",
@@ -1191,7 +1194,9 @@
         "admin": "Admin {{name}}",
         "agent": "Agent {{name}}",
         "adminAnon": "Admin",
-        "agentAnon": "Agent"
+        "agentAnon": "Agent",
+        "support": "Support {{name}}",
+        "supportAnon": "Support"
       },
       "status": {
         "ok": "Succeeded",
@@ -1435,7 +1440,8 @@
         },
         "role": {
           "user": "user",
-          "admin": "admin"
+          "admin": "admin",
+          "support": "Support"
         },
         "autoField": {
           "enabled": "auto-manage",
@@ -1787,7 +1793,56 @@
         "other": {
           "head": "Changed: "
         },
-        "unknown": "Unrecognised record (raw details in the drawer)"
+        "unknown": "Unrecognised record (raw details in the drawer)",
+        "support": {
+          "view": "Viewed the customer's profile",
+          "reveal": "Viewed the full phone number",
+          "search": "Ran an exact lookup",
+          "searchHits": "Ran an exact lookup with {{n}} hits",
+          "reason": " (reason: {{v}})",
+          "reqKind": {
+            "comp_days": "a compensation request",
+            "follow_up": "a follow-up request",
+            "conversion_manual": "an account claim",
+            "other": "a request"
+          },
+          "act": {
+            "resend_verification": "Resent the verification email",
+            "unbind": "Unlinked an MT5 account",
+            "reset_trial": "Reset trial eligibility",
+            "comp_days": "Compensated {{n}} plan days",
+            "comp_days_requested": "Requested {{n}} compensation days",
+            "do_not_contact": "Marked as do-not-contact",
+            "message": "Sent an in-app message",
+            "conversion_manual_requested": "Submitted an account claim",
+            "approve": "Approved {{kind}}",
+            "reject": "Rejected {{kind}}",
+            "conversionApproved": "Confirmed a conversion",
+            "conversionRejected": "Rejected a conversion",
+            "conversion_manual": "Recorded a conversion by hand"
+          },
+          "fu": {
+            "assign": "Assigned a follow-up",
+            "assignGoal": "Assigned a follow-up, goal: {{goal}}",
+            "request": "Requested a follow-up",
+            "requestGoal": "Requested a follow-up, goal: {{goal}}",
+            "revoke": "Revoked a follow-up",
+            "revokeStaff": "Follow-up revoked because the agent was removed",
+            "reassign": "Reassigned a follow-up to another agent",
+            "extend": "Extended a follow-up",
+            "extendTo": "Extended a follow-up to {{v}}",
+            "note": "Added a follow-up note",
+            "noteVia": "Added a follow-up note ({{ch}})",
+            "update": "Updated a follow-up",
+            "updateHead": "Updated a follow-up:",
+            "statusChange": "status from {{a}} to {{b}}",
+            "statusSet": "status set to {{b}}",
+            "nextSet": "next contact {{v}}",
+            "nextCleared": "cleared the next contact time",
+            "message": "Sent a message from a follow-up",
+            "expired": "Follow-up expired"
+          }
+        }
       },
       "kindName": {
         "user": {
@@ -1862,8 +1917,18 @@
         },
         "agent": {
           "plan": "Agent plan change"
+        },
+        "support": {
+          "view_customer": "Viewed customer",
+          "reveal_phone": "Viewed full phone",
+          "search": "Support lookup",
+          "action": "Support action",
+          "follow_up": "Follow-up"
         }
-      }
+      },
+      "staffFilter": "By staff",
+      "staffAll": "Everyone",
+      "staffHint": "Filters only the loaded records"
     },
     "health": {
       "title": "System status",
@@ -2955,6 +3020,127 @@
       },
       "rate": "Visit → sign-up rate",
       "note": "Visits count once per browser session; a sign-up is credited to the mode of the latest home visit in the same browser within 7 days. UTC days. Landing mode has no sign-up prompt, so the middle two steps aren't counted."
+    },
+    "support": {
+      "bulkAssign": "Assign to support",
+      "openDesk": "Open support desk",
+      "sub": {
+        "staff": "Agents",
+        "assign": "Assign follow-ups",
+        "approvals": "Approvals",
+        "performance": "Performance",
+        "templates": "Canned replies",
+        "settings": "Settings"
+      },
+      "role": {
+        "user": "User",
+        "support": "Support",
+        "admin": "Admin"
+      },
+      "tier": {
+        "internal": "In-house",
+        "outsourced": "Outsourced"
+      },
+      "staff": {
+        "empty": "No agents yet. Change a user's role to Support under Users.",
+        "onDuty": "On duty",
+        "openTickets": "Open tickets",
+        "activeFollowUps": "Active follow-ups",
+        "revealsToday": "Phone views today",
+        "tier": "Type",
+        "tierUnset": "Not set",
+        "revealLimit": "Daily phone-view limit",
+        "revealLimitHint": "Leave empty for the default of {{n}}",
+        "lastActive": "Last active {{time}}"
+      },
+      "assign": {
+        "pickTitle": "Pick users to follow up",
+        "formTitle": "Assign {{n}} users",
+        "assignee": "Agent",
+        "chooseAssignee": "Choose an agent",
+        "priority": "Priority",
+        "expires": "Follow-up window (days)",
+        "notePlaceholder": "Notes for the agent (optional)",
+        "willAssign": "{{n}} will be assigned",
+        "skipDnc": "{{n}} asked not to be contacted; skipped",
+        "skipActive": "{{n}} already have an active follow-up; skipped",
+        "skipStaff": "{{n}} are staff; skipped",
+        "optedOut": "{{n}} turned off marketing messages",
+        "includeOptedOut": "Assign opted-out users anyway",
+        "submit": "Assign",
+        "done": "{{created}} assigned, {{skipped}} skipped",
+        "confirmTitle": "Confirm assignment",
+        "confirmBody": "Assign {{n}} users to {{name}} with the goal: {{goal}}?"
+      },
+      "followUps": {
+        "updated": "{{n}} updated",
+        "title": "Follow-ups ({{n}})",
+        "allStaff": "All agents",
+        "allStatus": "All statuses",
+        "active": "Active",
+        "closed": "Closed",
+        "reassign": "Reassign",
+        "reassignTo": "Reassign to",
+        "extendDays": "Extra days",
+        "extend": "Extend",
+        "revoke": "Revoke",
+        "empty": "No matching follow-ups",
+        "colUser": "User",
+        "revokeBody": "Revoke the {{n}} selected follow-ups? The agent will lose access to these users."
+      },
+      "approvals": {
+        "approved": "Approved",
+        "rejected": "Rejected",
+        "compDays": "Compensate {{n}} days: {{reason}}",
+        "followUp": "Follow-up request: {{goal}}",
+        "conversion": "Account claim: {{server}} / {{login}}",
+        "approve": "Approve",
+        "reject": "Reject",
+        "requests": "Agent requests ({{n}})",
+        "none": "Nothing waiting for approval",
+        "by": "Requested by {{name}}",
+        "conversions": "Conversions to review ({{n}})",
+        "credited": "Credited to {{name}}",
+        "approveBody": "Approve this?",
+        "rejectBody": "Reject this?",
+        "notePlaceholder": "Review note (optional)"
+      },
+      "perf": {
+        "start": "Start date",
+        "end": "End date",
+        "hint": "Counted in UTC+8; only confirmed conversions count.",
+        "empty": "No data for this period",
+        "staff": "Agent",
+        "assigned": "Assigned",
+        "contacted": "Contacted",
+        "interested": "Interested",
+        "converted": "Converted",
+        "rate": "Conversion rate",
+        "firstContact": "Time to first contact",
+        "hours": "{{n}} h"
+      },
+      "templates": {
+        "anyLang": "All languages",
+        "title": "Title",
+        "lang": "Language",
+        "body": "Text",
+        "add": "Add canned reply",
+        "empty": "No canned replies yet",
+        "edit": "Edit",
+        "deleteBody": "Delete the canned reply “{{title}}”?"
+      },
+      "settings": {
+        "support_comp_days_max": "Max compensation days per agent action",
+        "support_comp_days_max_hint": "More than this needs admin approval",
+        "support_follow_up_days": "Default follow-up window (days)",
+        "support_follow_up_days_hint": "Used when an assignment doesn't set one",
+        "support_outsourced_reveal_daily": "Outsourced daily phone-view limit",
+        "support_outsourced_reveal_daily_hint": "A per-agent limit takes priority",
+        "support_alert_reveal_per_hour": "Phone views per hour alert threshold",
+        "support_alert_reveal_per_hour_hint": "Admins are notified above this",
+        "support_alert_views_per_hour": "Customer views per hour alert threshold",
+        "support_alert_views_per_hour_hint": "Admins are notified above this"
+      }
     }
   },
   "simulator": {
@@ -3325,7 +3511,8 @@
       "payment": "Billing / Payment",
       "claim": "Claim Request",
       "technical": "Technical Issue",
-      "feature": "Feature Request"
+      "feature": "Feature Request",
+      "follow_up": "Message from support"
     },
     "priority": {
       "low": "Low",
@@ -3374,7 +3561,9 @@
       "tooBig": "Image too large (4 MB max)",
       "rateLimited": "Too many uploads, please try again later",
       "noStorage": "Image upload is unavailable right now; please describe it in text"
-    }
+    },
+    "staffLabel": "Signal Lab Support",
+    "staffName": "Signal Lab Support · {{name}}"
   },
   "dashboard": {
     "sessionWinrate": {
@@ -4083,6 +4272,221 @@
       "login": "Have an account? Log in",
       "learnMore": "About Signal Lab",
       "social": "{{n}} accounts are competing in “{{name}}”"
+    }
+  },
+  "supportDesk": {
+    "title": "Support desk",
+    "retry": "Retry",
+    "yes": "Yes",
+    "no": "No",
+    "pickSomething": "Pick a ticket or a follow-up on the left",
+    "pickCustomer": "Loading the submitter's profile…",
+    "backToList": "Back to list",
+    "backToThread": "Back to ticket",
+    "tab": {
+      "tickets": "Tickets",
+      "followUps": "My follow-ups"
+    },
+    "search": {
+      "placeholder": "Exact lookup: email / user ID / ticket ID",
+      "go": "Find",
+      "none": "Nothing found, or you can't view this user"
+    },
+    "tier": {
+      "internal": "In-house agent",
+      "outsourced": "Outsourced agent"
+    },
+    "role": {
+      "user": "User",
+      "support": "Support",
+      "admin": "Admin"
+    },
+    "queue": {
+      "scope": "Ticket scope",
+      "status": "Ticket status",
+      "me": "Mine",
+      "none": "Unassigned",
+      "all": "All",
+      "anyStatus": "Any status",
+      "empty": "No tickets here",
+      "assignedTo": "Handled by {{name}}",
+      "unassignedTag": "Unassigned"
+    },
+    "thread": {
+      "internalTag": "Internal note",
+      "assigned": "Assignment updated",
+      "noteSaved": "Internal note saved",
+      "customer": "View customer",
+      "assignTo": "Assign to",
+      "unassign": "Unassigned",
+      "me": "Me",
+      "release": "Release this ticket",
+      "claim": "Claim",
+      "modeReply": "Reply to user",
+      "modeInternal": "Internal note",
+      "insertTemplate": "Insert canned reply",
+      "internalHint": "Internal notes are visible to support and admins only; the user is not notified.",
+      "internalPlaceholder": "A note for colleagues (hidden from the user)",
+      "saveNote": "Save note"
+    },
+    "followUps": {
+      "count": "{{n}} active",
+      "empty": "No follow-ups assigned to you yet",
+      "overdue": "Overdue:",
+      "next": "Next contact:",
+      "noNext": "No next contact time set"
+    },
+    "requests": {
+      "title": "My requests",
+      "status": {
+        "pending": "Pending",
+        "approved": "Approved",
+        "rejected": "Rejected"
+      },
+      "kind": {
+        "comp_days": "Compensation days",
+        "follow_up": "Follow-up request",
+        "conversion_manual": "Account claim"
+      }
+    },
+    "priority": {
+      "low": "Low",
+      "normal": "Normal",
+      "high": "High"
+    },
+    "status": {
+      "pending": "To contact",
+      "contacted": "Contacted",
+      "interested": "Interested",
+      "converted": "Converted",
+      "no_interest": "Not interested",
+      "unreachable": "Unreachable",
+      "revoked": "Revoked",
+      "expired": "Expired"
+    },
+    "goal": {
+      "open_mt5": "Open a real trading account",
+      "open_signallab": "Join Signal Lab",
+      "renew": "Renew",
+      "activate_trial": "Activate trial",
+      "revisit": "Check in"
+    },
+    "channel": {
+      "phone": "Phone",
+      "email": "Email",
+      "in_app": "In-app",
+      "other": "Other"
+    },
+    "conversions": {
+      "empty": "No conversions yet",
+      "kind": {
+        "mt5_real": "MC real account",
+        "signallab_register": "Signed up",
+        "signallab_verified": "Email verified",
+        "signallab_paid": "First payment"
+      },
+      "status": {
+        "confirmed": "Confirmed",
+        "pending_review": "Pending review",
+        "rejected": "Rejected"
+      },
+      "manual": "Manual",
+      "mine": "Credited to me"
+    },
+    "card": {
+      "noNickname": "(no nickname)",
+      "real": "Real",
+      "demo": "Demo",
+      "bound": "Linked",
+      "mt5": "MT5 accounts",
+      "goal": "Goal",
+      "revealLimitHit": "You've used today's full-number views",
+      "linkCopied": "Open-account link copied",
+      "copyFailed": "Couldn't copy — copy it manually",
+      "noteAdded": "Note added",
+      "dncDone": "Marked as do-not-contact; the follow-up is closed",
+      "complianceTitle": "Compliance:",
+      "compliance": "Never promise returns or capital protection; never ask for passwords or verification codes; always speak on behalf of Signal Lab.",
+      "trial": "Trial",
+      "disabled": "Disabled",
+      "dncTag": "Do not contact",
+      "email": "Email",
+      "verified": "Verified",
+      "unverified": "Unverified",
+      "phone": "Phone",
+      "reveal": "Show full number",
+      "revealLeft": "{{n}} views left today",
+      "region": "Region (dial code)",
+      "registered": "Signed up",
+      "lastActive": "Last active",
+      "source": "Source link",
+      "noSource": "Organic",
+      "planExpires": "Plan expires",
+      "permanent": "Never",
+      "trialUsed": "Trial used",
+      "online": "Connections",
+      "gateway": "Direct",
+      "competitions": "Competitions",
+      "paidTotal": "Total paid",
+      "copyOpenAccount": "Copy open-account link",
+      "noMt5": "No MT5 account linked yet",
+      "balance": "Balance",
+      "followUp": "My follow-up",
+      "expires": "Due {{time}}",
+      "status": "Follow-up status",
+      "statusSaved": "Status updated",
+      "closingHint": "Converted / Not interested / Unreachable closes the follow-up.",
+      "nextContact": "Next contact (UTC+8)",
+      "nextSaved": "Next contact time updated",
+      "clearNext": "Clear",
+      "notes": "Notes",
+      "noNotes": "No notes yet",
+      "outcome": "Outcome",
+      "channel": "Channel",
+      "outcomePlaceholder": "Outcome (optional, e.g. call again Friday)",
+      "notePlaceholder": "What was discussed",
+      "appendOnly": "Notes are append-only: they can't be edited or deleted once saved.",
+      "addNote": "Add note",
+      "actions": "Actions",
+      "dnc": "User asked not to be contacted",
+      "conversions": "Conversion timeline",
+      "tickets": "Tickets",
+      "dncBody": "Confirm the user asked not to be contacted? The current follow-up becomes Not interested and they won't be assigned to anyone again."
+    },
+    "actions": {
+      "reason": "Reason / note",
+      "optional": "(optional)",
+      "resend": "Resend verification email",
+      "resendOk": "Verification email sent",
+      "alreadyVerified": "This user's email is already verified",
+      "resendBody": "Send another verification email to the user's address (rate-limited the same way as the user's own resend).",
+      "unbind": "Unlink MT5",
+      "unbindOk": "Unlinked",
+      "unbindBody": "The user will need to link this account again. A bridge account can't be unlinked while it is online.",
+      "resetTrial": "Reset trial",
+      "resetTrialOk": "Trial eligibility reset",
+      "resetTrialBody": "Lets the user claim the trial once more. Support can do this only once per user.",
+      "resetTrialBodyAdmin": "Lets the user claim the trial once more. Admin resets are unlimited.",
+      "compDays": "Compensate plan days",
+      "compDaysOk": "{{n}} days added",
+      "compDaysQueued": "Over the cap — sent to an admin for approval",
+      "compDaysBody": "Up to {{n}} days applies at once; more goes to an admin for approval.",
+      "compDaysBodyAdmin": "Admin compensation applies at once, with no cap.",
+      "days": "Days",
+      "compDaysOverCap": "Above the instant cap; this will need approval.",
+      "message": "Send in-app message",
+      "send": "Send",
+      "messageOk": "Message sent; the user will see it as a ticket",
+      "messageBody": "Opens a new ticket for the user from Signal Lab Support; they get a notification.",
+      "messageTitle": "Subject",
+      "messageText": "Message",
+      "requestFollowUp": "Request follow-up",
+      "requestSent": "Request sent for admin approval",
+      "requestFollowUpBody": "Think this user is a lead? Request it; once an admin approves, it's assigned to you.",
+      "requestConversion": "Claim account opening",
+      "requestConversionBody": "The user opened an MC real account but the system missed it? Enter the server and login; it counts once an admin approves.",
+      "server": "MT5 server",
+      "login": "MT5 login"
     }
   }
 }

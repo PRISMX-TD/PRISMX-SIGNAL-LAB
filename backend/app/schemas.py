@@ -302,6 +302,9 @@ class AdminUserOut(BaseModel):
     # When the email was verified; null = not yet (only post-launch password
     # sign-ups). Lets support spot users whose mail never arrives and mark them.
     emailVerifiedAt: datetime | None = None
+    # 客服台（rev 41）：仅 role='support' 有意义 / support desk, meaningful for role='support'
+    supportTier: str | None = None
+    supportRevealLimit: int | None = None
 
 
 class AdminUserDisableIn(BaseModel):
@@ -315,7 +318,12 @@ class AdminUserDisableIn(BaseModel):
 
 class AdminUserUpdate(BaseModel):
     # 仅传入要修改的字段；省略的字段保持不变 / only send fields to change; omitted ones are left alone
-    role: Literal["user", "admin"] | None = None
+    # rev 41 起多一个 support（客服），见设计 2026-10-17 §2。
+    # rev 41 adds support (the support-desk role), see the 2026-10-17 design §2.
+    role: Literal["user", "support", "admin"] | None = None
+    # 客服分级 internal / outsourced；显式 null = 清除（按外包处理）。
+    # Support tier; explicit null clears it (treated as outsourced).
+    supportTier: Literal["internal", "outsourced"] | None = None
     plan: Literal["FREE", "PRO"] | None = None
     # 显式传 null 表示清除到期时间（永久）；不传表示不修改。用 sentinel 区分二者较繁琐，
     # 这里采用「传字段就是要设置这个值，包括 None」的简单约定，交由前端保证语义。
@@ -1817,7 +1825,13 @@ class TicketReplyOut(BaseModel):
     id: str
     authorId: str
     authorEmail: str
-    authorRole: str  # "user" | "admin"
+    authorRole: str  # "user" | "support" | "admin"
+    # 工作人员回复的昵称（用户侧显示「Signal Lab 客服 · 昵称」）；用户本人的回复为 None。
+    # Staff nickname (users see "Signal Lab Support · nickname"); None on user replies.
+    authorName: str | None = None
+    # 内部备注（只有工作人员看得到；用户侧接口根本不返回这种行）。
+    # Internal note (staff only; user-facing endpoints never return such rows).
+    internal: bool = False
     body: str
     # 附图的签名 URL（会过期，别存）。列表预览不签，只给 imageCount。
     # Signed image URLs (they expire; don't persist). List previews skip signing and
@@ -1839,6 +1853,10 @@ class TicketOut(BaseModel):
     createdAt: datetime
     updatedAt: datetime
     replies: list[TicketReplyOut]
+    # 指派（rev 41）：只在工作人员视角下填，用户侧恒为 None。
+    # Assignment (rev 41): filled for staff viewers only; always None for users.
+    assigneeId: str | None = None
+    assigneeName: str | None = None
 
 
 class TicketListItem(BaseModel):
@@ -1851,6 +1869,9 @@ class TicketListItem(BaseModel):
     status: str
     updatedAt: datetime
     latestReply: TicketReplyOut | None = None
+    userId: str | None = None
+    assigneeId: str | None = None
+    assigneeName: str | None = None
 
 
 class AdminTicketUpdate(BaseModel):
@@ -1864,6 +1885,15 @@ class AdminTicketReplyCreate(TicketReplyCreate):
     with status/priority changes."""
     status: Literal["open", "in_progress", "closed"] | None = None
     priority: Literal["low", "normal", "urgent"] | None = None
+    # 内部备注（rev 41）：不通知用户、用户侧永不返回 / internal note: never shown to the user
+    internal: bool = False
+
+
+class AdminTicketAssign(BaseModel):
+    """工单指派（rev 41）：admin 可指派给任一在岗工作人员或清空；客服只能认领给自己 / 放弃自己的。
+    Ticket assignment: admins assign to any on-duty staff member (or clear);
+    support agents may only claim for themselves or release their own."""
+    assigneeId: str | None = None
 
 
 # ---------- 邀请链接 / Invite links ----------

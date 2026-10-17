@@ -193,7 +193,7 @@ CATS = ("all", "account", "mt5", "trade", "admin")
 SUBS = ("all", "open_close", "sltp")
 STATUSES = ("ok", "fail", "unknown", "pending", "cancelled")
 TAGS = ("unprotected", "stopout", "revoked", "late", "backfill", "shared_login", "partial", "gone", "auto")
-ACTOR_TYPES = ("self", "system", "auto", "broker", "admin", "agent")
+ACTOR_TYPES = ("self", "system", "auto", "broker", "admin", "agent", "support")
 
 # 源的归并顺序（同一时间戳时的先后）/ merge order of the sources on equal timestamps
 SOURCES = ("u", "e", "o", "c", "a")
@@ -257,7 +257,11 @@ _GONE_MARK = "position already closed"
 _AUTO_SL_MODES = (AUTO_KIND_BE, AUTO_KIND_TRAIL, AUTO_KIND_RESTORE)
 
 # 审计里「被管理员改的用户字段」/ user fields an admin edits
-_USER_FIELDS = ("role", "plan", "plan_expires_at", "plan_note", "invite_code")
+_USER_FIELDS = (
+    "role", "plan", "plan_expires_at", "plan_note", "invite_code",
+    # rev 41 客服台：设客服 tier / 查看上限、客服重置试用 / rev 41 support desk fields
+    "support_tier", "support_reveal_limit", "trial_used_at",
+)
 _PLAN_FIELDS = frozenset({"plan", "plan_expires_at", "plan_note"})
 # 账户分类里的系统 / 本人行（与 _account_field_cond 的 SQL 一一对应）
 # System / self rows that belong to the account category (mirrors _account_field_cond)
@@ -1237,6 +1241,8 @@ def _event_proto(e: ActivityEvent) -> _Proto:
         p.actor_type = "system"
     elif e.actor_type == al.ACTOR_ADMIN:
         p.actor_type, p.actor_id = "admin", e.actor_id
+    elif e.actor_type == al.ACTOR_SUPPORT:
+        p.actor_type, p.actor_id = "support", e.actor_id
     else:
         p.actor_type = "self"
     if data.get(al.BACKFILL_FLAG):
@@ -2511,7 +2517,13 @@ def _item(p: _Proto, ctx: _Ctx, children: list | None) -> dict:
     if actor_type == "role":
         u = ctx.users.get(p.actor_id)
         actor_type = "admin" if u is not None and u.role == "admin" else "agent"
-    if actor_type in ("admin", "agent") and p.actor_id:
+    if actor_type == "admin" and p.actor_id:
+        # 客服写的审计行（admin_user_id = 客服 id，设计 §4）按角色显示成「客服」。
+        # Audit rows written by support staff show as support (design §4).
+        u = ctx.users.get(p.actor_id)
+        if u is not None and u.role == "support":
+            actor_type = "support"
+    if actor_type in ("admin", "agent", "support") and p.actor_id:
         u = ctx.users.get(p.actor_id)
         actor = {"type": actor_type, "id": p.actor_id,
                  "name": u.nickname if u else None, "email": u.email if u else None}

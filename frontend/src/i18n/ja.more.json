@@ -224,7 +224,8 @@
       "bridge_offline": "PRISMX Bridgeのオフライン",
       "account_revoked": "直接連携の再認証が必要",
       "strategy_signal": "マイ戦略のシグナル",
-      "badge_awarded": "新しいバッジの獲得"
+      "badge_awarded": "新しいバッジの獲得",
+      "support_reminder": "サポートのフォローリマインダー"
     },
     "notifWindowHeading": "通知時間帯",
     "notifWindowEnable": "指定した時間帯のみ通知する",
@@ -1416,7 +1417,8 @@
       "payment": "請求・お支払い",
       "claim": "受け取り申請",
       "technical": "技術的な問題",
-      "feature": "機能のご要望"
+      "feature": "機能のご要望",
+      "follow_up": "サポートからのお知らせ"
     },
     "priority": {
       "low": "低",
@@ -1465,7 +1467,9 @@
       "tooBig": "画像が大きすぎます（1 枚 4MB まで）",
       "rateLimited": "アップロードが多すぎます。しばらくしてからお試しください",
       "noStorage": "現在、画像をアップロードできません。文章でご説明ください"
-    }
+    },
+    "staffLabel": "Signal Lab サポート",
+    "staffName": "Signal Lab サポート · {{name}}"
   },
   "dashboard": {
     "sessionWinrate": {
@@ -2174,6 +2178,221 @@
       "login": "アカウントをお持ちの方はログイン",
       "learnMore": "Signal Lab について",
       "social": "{{n}} 口座が「{{name}}」に参加中"
+    }
+  },
+  "supportDesk": {
+    "title": "サポートデスク",
+    "retry": "再試行",
+    "yes": "はい",
+    "no": "いいえ",
+    "pickSomething": "左からチケットまたはフォローアップを選択してください",
+    "pickCustomer": "提出者の情報を読み込み中…",
+    "backToList": "一覧に戻る",
+    "backToThread": "チケットに戻る",
+    "tab": {
+      "tickets": "チケット",
+      "followUps": "担当フォロー"
+    },
+    "search": {
+      "placeholder": "完全一致検索：メール / ユーザー ID / チケット番号",
+      "go": "検索",
+      "none": "見つからないか、閲覧権限がありません"
+    },
+    "tier": {
+      "internal": "社内サポート",
+      "outsourced": "外部委託サポート"
+    },
+    "role": {
+      "user": "ユーザー",
+      "support": "サポート",
+      "admin": "管理者"
+    },
+    "queue": {
+      "scope": "チケット範囲",
+      "status": "チケット状態",
+      "me": "自分",
+      "none": "未割り当て",
+      "all": "すべて",
+      "anyStatus": "すべての状態",
+      "empty": "チケットはありません",
+      "assignedTo": "担当：{{name}}",
+      "unassignedTag": "未割り当て"
+    },
+    "thread": {
+      "internalTag": "社内メモ",
+      "assigned": "担当を更新しました",
+      "noteSaved": "社内メモを保存しました",
+      "customer": "顧客を表示",
+      "assignTo": "担当者",
+      "unassign": "未割り当て",
+      "me": "自分",
+      "release": "このチケットを手放す",
+      "claim": "引き受ける",
+      "modeReply": "ユーザーに返信",
+      "modeInternal": "社内メモ",
+      "insertTemplate": "定型文を挿入",
+      "internalHint": "社内メモはサポートと管理者のみ閲覧でき、ユーザーには通知されません。",
+      "internalPlaceholder": "同僚向けのメモ（ユーザーには非表示）",
+      "saveNote": "メモを保存"
+    },
+    "followUps": {
+      "count": "対応中 {{n}} 件",
+      "empty": "割り当てられたフォローはまだありません",
+      "overdue": "期限超過：",
+      "next": "次回連絡：",
+      "noNext": "次回連絡日時は未設定"
+    },
+    "requests": {
+      "title": "自分の申請",
+      "status": {
+        "pending": "承認待ち",
+        "approved": "承認済み",
+        "rejected": "却下"
+      },
+      "kind": {
+        "comp_days": "補償日数",
+        "follow_up": "フォロー申請",
+        "conversion_manual": "口座開設の申告"
+      }
+    },
+    "priority": {
+      "low": "低",
+      "normal": "通常",
+      "high": "高"
+    },
+    "status": {
+      "pending": "未連絡",
+      "contacted": "連絡済み",
+      "interested": "興味あり",
+      "converted": "成約",
+      "no_interest": "興味なし",
+      "unreachable": "連絡不可",
+      "revoked": "回収済み",
+      "expired": "期限切れ"
+    },
+    "goal": {
+      "open_mt5": "MC リアル口座の開設",
+      "open_signallab": "Signal Lab への加入",
+      "renew": "更新",
+      "activate_trial": "トライアルの開始",
+      "revisit": "フォロー連絡"
+    },
+    "channel": {
+      "phone": "電話",
+      "email": "メール",
+      "in_app": "アプリ内",
+      "other": "その他"
+    },
+    "conversions": {
+      "empty": "コンバージョンはまだありません",
+      "kind": {
+        "mt5_real": "MC リアル口座",
+        "signallab_register": "登録",
+        "signallab_verified": "メール認証",
+        "signallab_paid": "初回決済"
+      },
+      "status": {
+        "confirmed": "確定",
+        "pending_review": "審査待ち",
+        "rejected": "却下"
+      },
+      "manual": "手動",
+      "mine": "自分の実績"
+    },
+    "card": {
+      "noNickname": "（ニックネーム未設定）",
+      "real": "リアル",
+      "demo": "デモ",
+      "bound": "連携済み",
+      "mt5": "MT5 口座",
+      "goal": "目標",
+      "revealLimitHit": "本日の電話番号表示回数を使い切りました",
+      "linkCopied": "口座開設リンクをコピーしました",
+      "copyFailed": "コピーできませんでした。手動でコピーしてください",
+      "noteAdded": "記録を追加しました",
+      "dncDone": "連絡不要として登録し、フォローを終了しました",
+      "complianceTitle": "コンプライアンス：",
+      "compliance": "利益や元本保証を約束しないこと。パスワードや認証コードを求めないこと。常に Signal Lab の名義で連絡すること。",
+      "trial": "トライアル",
+      "disabled": "停止中",
+      "dncTag": "連絡不要",
+      "email": "メール",
+      "verified": "認証済み",
+      "unverified": "未認証",
+      "phone": "電話",
+      "reveal": "番号をすべて表示",
+      "revealLeft": "本日あと {{n}} 回表示できます",
+      "region": "地域（国番号）",
+      "registered": "登録日",
+      "lastActive": "最終アクティブ",
+      "source": "流入リンク",
+      "noSource": "自然流入",
+      "planExpires": "会員期限",
+      "permanent": "無期限",
+      "trialUsed": "トライアル利用済み",
+      "online": "接続",
+      "gateway": "直接連携",
+      "competitions": "大会エントリー",
+      "paidTotal": "累計支払額",
+      "copyOpenAccount": "口座開設リンクをコピー",
+      "noMt5": "MT5 口座は未連携です",
+      "balance": "残高",
+      "followUp": "担当フォロー",
+      "expires": "期限 {{time}}",
+      "status": "フォロー状態",
+      "statusSaved": "状態を更新しました",
+      "closingHint": "「成約 / 興味なし / 連絡不可」を選ぶとフォローは終了します。",
+      "nextContact": "次回連絡（UTC+8）",
+      "nextSaved": "次回連絡日時を更新しました",
+      "clearNext": "クリア",
+      "notes": "フォロー記録",
+      "noNotes": "記録はまだありません",
+      "outcome": "結果",
+      "channel": "連絡手段",
+      "outcomePlaceholder": "結果（任意。例：金曜に再連絡）",
+      "notePlaceholder": "今回の連絡内容",
+      "appendOnly": "記録は追記のみで、保存後の編集・削除はできません。",
+      "addNote": "記録を追加",
+      "actions": "操作",
+      "dnc": "ユーザーが連絡不要を希望",
+      "conversions": "コンバージョン履歴",
+      "tickets": "チケット",
+      "dncBody": "ユーザーが連絡不要を希望していますか？現在のフォローは「興味なし」になり、今後誰にも割り当てられません。"
+    },
+    "actions": {
+      "reason": "理由 / メモ",
+      "optional": "（任意）",
+      "resend": "認証メールを再送",
+      "resendOk": "認証メールを送信しました",
+      "alreadyVerified": "このユーザーはメール認証済みです",
+      "resendBody": "登録メールアドレスに認証メールを再送します（ユーザー自身の再送と同じ回数制限があります）。",
+      "unbind": "MT5 の連携解除",
+      "unbindOk": "連携を解除しました",
+      "unbindBody": "解除後、ユーザーは再度連携が必要です。ブリッジ口座はオンライン中は解除できません。",
+      "resetTrial": "トライアルをリセット",
+      "resetTrialOk": "トライアル資格をリセットしました",
+      "resetTrialBody": "もう一度トライアルを受け取れるようにします。サポートによるリセットはユーザーごとに 1 回までです。",
+      "resetTrialBodyAdmin": "もう一度トライアルを受け取れるようにします。管理者のリセットに回数制限はありません。",
+      "compDays": "会員日数を補償",
+      "compDaysOk": "{{n}} 日を補償しました",
+      "compDaysQueued": "上限を超えたため、管理者の承認待ちです",
+      "compDaysBody": "1 回 {{n}} 日までは即時反映、超える場合は管理者の承認が必要です。",
+      "compDaysBodyAdmin": "管理者の補償は即時反映され、日数の上限はありません。",
+      "days": "日数",
+      "compDaysOverCap": "即時反映の上限を超えるため、承認が必要です。",
+      "message": "アプリ内メッセージを送る",
+      "send": "送信",
+      "messageOk": "送信しました。ユーザーはチケットとして確認できます",
+      "messageBody": "Signal Lab サポートとして新しいチケットを作成し、ユーザーに通知します。",
+      "messageTitle": "件名",
+      "messageText": "本文",
+      "requestFollowUp": "フォローを申請",
+      "requestSent": "申請しました。管理者の承認待ちです",
+      "requestFollowUpBody": "見込みのあるユーザーですか？申請が承認されるとあなたの担当になります。",
+      "requestConversion": "口座開設を申告",
+      "requestConversionBody": "MC でリアル口座を開設したのに検出されていない場合、サーバーと口座番号を入力してください。管理者の審査後に実績に反映されます。",
+      "server": "MT5 サーバー",
+      "login": "MT5 口座番号"
     }
   }
 }

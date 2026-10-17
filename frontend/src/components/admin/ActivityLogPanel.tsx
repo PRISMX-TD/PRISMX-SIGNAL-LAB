@@ -111,6 +111,11 @@ export default function ActivityLogPanel({
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [detail, setDetail] = useState<ActivityItem | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
+  // 按客服筛（rev 41）：读接口没有按操作人筛的参数，这里在已加载的行里筛（设计 §8）。
+  // 选项来自已加载行里做过客服台操作的人（客服本人，或在客服台操作的管理员）。
+  // Filter by staff (rev 41): the read API has no actor parameter, so this filters the loaded rows
+  // client-side (design §8). Options are the people seen doing support-desk work in those rows.
+  const [staffFilter, setStaffFilter] = useState('')
   // 纯数字搜不到时，手机号对得上的用户（见下方的 effect）/ users whose phone matches an empty digit search
   const [phoneHits, setPhoneHits] = useState<{ q: string; users: ActivityPerson[] } | null>(null)
 
@@ -347,6 +352,18 @@ export default function ActivityLogPanel({
     return hit?.nickname || hit?.email || `${userFilter.id.slice(0, 8)}…`
   }, [userFilter, items])
 
+  const staffOptions = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const i of items) {
+      const a = i.actor
+      if (!a.id || seen.has(a.id)) continue
+      if (a.type === 'support' || i.kind.startsWith('support.')) seen.set(a.id, a.name || a.email || `${a.id.slice(0, 8)}…`)
+    }
+    return [...seen].map(([value, label]) => ({ value, label }))
+  }, [items])
+  const shownItems = staffFilter ? items.filter((i) => i.actor.id === staffFilter) : items
+  const staffName = staffOptions.find((o) => o.value === staffFilter)?.label ?? ''
+
   const chips = [
     userFilter && { key: 'user', label: t('admin.log.chip.user', { name: userChipName }), clear: () => setUserFilter(null) },
     login && { key: 'login', label: t('admin.log.chip.login', { login }), clear: () => setLogin(null) },
@@ -358,6 +375,7 @@ export default function ActivityLogPanel({
       clear: () => setDatePreset('all'),
     },
     abnormal && { key: 'abnormal', label: t('admin.log.chip.abnormal'), clear: () => setAbnormal(false) },
+    staffFilter && { key: 'staff', label: t('admin.log.chip.staff', { name: staffName || '…' }), clear: () => setStaffFilter('') },
   ].filter((c): c is { key: string; label: string; clear: () => void } => !!c)
   const clearAll = () => {
     setUserFilter(null)
@@ -366,12 +384,13 @@ export default function ActivityLogPanel({
     setQ('')
     setDatePreset('all')
     setAbnormal(false)
+    setStaffFilter('')
   }
   // 手机上收进「筛选」面板的那几项，按钮上标个数 / phone: count of filters tucked into the sheet
   const sheetFilterCount = (datePreset !== 'all' ? 1 : 0) + (abnormal ? 1 : 0)
 
   const now = new Date()
-  const groups = groupByDay(items)
+  const groups = groupByDay(shownItems)
 
   // ---- 筛选控件 / filter controls ----
   const catButtons = (
@@ -465,6 +484,19 @@ export default function ActivityLogPanel({
         {catButtons}
         {subButtons}
 
+        {(staffOptions.length > 0 || staffFilter) && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-neutral-500">{t('admin.log.staffFilter')}</span>
+            <Select
+              value={staffFilter}
+              onChange={setStaffFilter}
+              ariaLabel={t('admin.log.staffFilter')}
+              options={[{ value: '', label: t('admin.log.staffAll') }, ...staffOptions]}
+            />
+            {staffFilter && <span className="text-[11px] text-neutral-500">{t('admin.log.staffHint')}</span>}
+          </div>
+        )}
+
         {isPhone ? (
           <div className="flex items-center gap-2">
             {searchBox}
@@ -542,7 +574,7 @@ export default function ActivityLogPanel({
             {t('admin.log.retry')}
           </button>
         </div>
-      ) : items.length === 0 ? (
+      ) : shownItems.length === 0 ? (
         <EmptyState
           loginQuery={isLoginQuery(q) ? queryDigits(q) : null}
           phoneUsers={phoneHits && phoneHits.q === queryDigits(q) ? phoneHits.users : null}

@@ -336,6 +336,12 @@ def _scenario(db, i: int, admin: User, agent: User, helper: User, comp: Competit
     _event(db, al.USER_API_TOKEN_RESET, u, at=m(12), data={})
     _event(db, al.AUTO_SETTINGS, u, at=m(13), data={"changes": [
         {"field": "enabled", "old": False, "new": True}, {"field": "trail_trigger_r", "old": 1.5, "new": 2.0}]})
+    # 客服台（rev 41）/ support desk (rev 41)
+    _event(db, al.SUPPORT_VIEW_CUSTOMER, u, at=m(14), actor_type="support", data={})
+    _event(db, al.SUPPORT_REVEAL_PHONE, u, at=m(14), actor_type="support", data={})
+    _event(db, al.SUPPORT_SEARCH, u, at=m(14), actor_type="support", data={"len": 12, "hits": 1})
+    _event(db, al.SUPPORT_ACTION, u, at=m(14), actor_type="support", data={"action": "reset_trial"})
+    _event(db, al.SUPPORT_FOLLOW_UP, u, at=m(14), actor_type="admin", data={"action": "assign", "goal": "open_mt5"})
     # 开仓 / opens
     pos = 880000 + i * 100
     _order(db, u, at=m(20), login=login, symbol="XAUUSD", side="BUY", volume=0.1, filled_price=2401.35,

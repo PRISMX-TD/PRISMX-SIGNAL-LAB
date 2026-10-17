@@ -1260,6 +1260,14 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
                         f"{old_plan}({old_expiry})",
                         f"{user.plan}({user.plan_expires_at})",
                     )
+                # 转化识别（客服台 §6）：首次付费开通，幂等（每人一次）。
+                # Conversion tracking (support desk §6): first paid plan, once per user.
+                from app.services import conversions
+
+                conversions.record(
+                    db, user.id, conversions.KIND_PAID,
+                    detail={"plan": record.plan, "paymentId": record.id},
+                )
         db.commit()
         # 让调用方拿到抢占后的最新字段（status/finished_at）
         # Reload so callers see the claimed values (status/finished_at)

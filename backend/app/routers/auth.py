@@ -38,7 +38,7 @@ from app.schemas import (
     UserOut,
     VerifyEmailRequest,
 )
-from app.services import activity_log, email_verification
+from app.services import activity_log, conversions, email_verification
 from app.services.deps import get_current_user
 from app.services.email_domains import canonical_email_taken, is_disposable_email, suggest_domain_fix
 from app.services.password_reset import (
@@ -240,6 +240,8 @@ def register(
     # flush 拿到 user.id 再签验证令牌（令牌行有指向 users.id 的外键）；仍是同一次
     # commit。/ Flush for user.id before issuing the token (FK); same commit.
     db.flush()
+    # 转化识别（客服台 §6）：注册，幂等 / conversion tracking: sign-up, idempotent
+    conversions.record(db, user.id, conversions.KIND_REGISTER)
     raw = email_verification.issue_token(db, user)
     # 注册那封也计入每小时上限，免得注册完立刻连点「重新发送」多出一封。
     # The sign-up mail counts toward the hourly cap too.
@@ -328,6 +330,10 @@ def google_login(
                 old_value="FREE",
                 new_value=f"PRO({granted_days}d)",
             ))
+        # 转化识别（客服台 §6）：Google 新建号 = 注册 + 邮箱已验证，幂等。
+        # Conversion tracking: a new Google account is both signed up and verified.
+        conversions.record(db, user.id, conversions.KIND_REGISTER)
+        conversions.record(db, user.id, conversions.KIND_VERIFIED)
         db.commit()
         db.refresh(user)
     elif user.password_hash is not None and user.google_linked_at is None:

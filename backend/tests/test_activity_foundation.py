@@ -382,7 +382,7 @@ def test_dedupe_key_formats_are_stable():
 
 
 def test_kinds_and_categories_cover_each_other():
-    assert len(al.KINDS) == 15
+    assert len(al.KINDS) == 20
     assert set(al.KIND_CATEGORY) == set(al.KINDS)
     assert al.ABNORMAL_KINDS <= al.KINDS and al.MT5_KINDS <= al.KINDS
 

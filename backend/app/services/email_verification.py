@@ -138,6 +138,10 @@ def mark_verified(db: Session, user: User, *, method: str | None = None) -> None
 
     user.email_verified_at = _now()
     grant_deferred_invite_trial(db, user)
+    # 转化识别（客服台 §6）：邮箱验证完成，幂等 / conversion tracking, idempotent
+    from app.services import conversions
+
+    conversions.record(db, user.id, conversions.KIND_VERIFIED)
     if method is not None:
         activity_log.log_event(
             db, activity_log.USER_EMAIL_VERIFIED,

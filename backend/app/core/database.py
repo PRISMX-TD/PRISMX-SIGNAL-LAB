@@ -387,7 +387,15 @@ def _hash_legacy_api_tokens() -> None:
 #          可空、**加列后回填**（规范化规则 SQL 写不出来，在 Python 里逐行算，只挑 NULL 的行，
 #          重跑幂等）；索引 ix_users_email_canonical 放在统一索引块，**不唯一**——线上可能已有
 #          别名重复的账号，唯一约束会让迁移失败。纯 ADD COLUMN + 一次小表 UPDATE。
-CURRENT_SCHEMA_REV = 40
+# rev 41 — 客服台（设计 2026-10-17）：新表 follow_ups / follow_up_notes / conversions /
+#          support_requests / support_reply_templates / support_actions（create_all 建表建索引，
+#          含 follow_ups 的部分唯一索引）；users.support_tier / support_reveal_limit /
+#          do_not_contact_at、tickets.assignee_id、ticket_replies.internal / author_role 守卫式
+#          ADD COLUMN。回填：ticket_replies.internal 置 false、author_role 按作者当前角色推断
+#          （历史上只有 user / admin 两种）；conversions 对存量用户回填 register / verified /
+#          paid / mt5_real（credited_to 为空，ON CONFLICT 幂等，失败只告警不挡启动）。统一索引块加
+#          tickets(assignee_id, status)。
+CURRENT_SCHEMA_REV = 41
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1026,6 +1034,11 @@ def _migrate_columns() -> None:
             "email_verified_at": datetime_type,
             # rev 40：规范邮箱，回填见下方 _backfill_email_canonical / canonical email
             "email_canonical": "VARCHAR",
+            # rev 41：客服台。全部可空、不回填——NULL 即「不是客服 / 用默认上限 / 没要求勿扰」。
+            # rev 41: support desk; nullable, not backfilled (NULL is the right default).
+            "support_tier": "VARCHAR",
+            "support_reveal_limit": "INTEGER",
+            "do_not_contact_at": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -1455,6 +1468,30 @@ def _migrate_columns() -> None:
         if "images" not in reply_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE ticket_replies ADD COLUMN images TEXT"))
+        # rev 41：内部备注与作者角色快照。internal 加列后把 NULL 回填成 false；author_role
+        # 按作者当前角色推断（rev 41 之前只有 user / admin 两种身份，推断是准的）。
+        # rev 41: internal-note flag (NULL backfilled to false) and the author-role
+        # snapshot, inferred from the author's current role (only user / admin existed).
+        with engine.begin() as conn:
+            if "internal" not in reply_cols:
+                conn.execute(text("ALTER TABLE ticket_replies ADD COLUMN internal BOOLEAN"))
+            if "author_role" not in reply_cols:
+                conn.execute(text("ALTER TABLE ticket_replies ADD COLUMN author_role VARCHAR"))
+            conn.execute(text("UPDATE ticket_replies SET internal = false WHERE internal IS NULL"))
+            conn.execute(text(
+                "UPDATE ticket_replies SET author_role = "
+                "(SELECT CASE WHEN users.role = 'admin' THEN 'admin' ELSE 'user' END "
+                "FROM users WHERE users.id = ticket_replies.author_id) "
+                "WHERE author_role IS NULL"
+            ))
+
+    # rev 41：工单指派。可空、不回填（NULL = 未分配）。
+    # rev 41: ticket assignee; nullable, not backfilled (NULL = unassigned).
+    if "tickets" in inspector.get_table_names():
+        ticket_cols = {c["name"] for c in inspector.get_columns("tickets")}
+        if "assignee_id" not in ticket_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE tickets ADD COLUMN assignee_id VARCHAR"))
 
     # rev 38：审计行的「同一次操作」编号。可空、不回填——旧行本来就分不出哪几行是同一次，
     # 读取端对 NULL 按「同操作人 + 同字段族 + 2 秒内」兜底合并。这张表此前从没补过列。
@@ -1753,11 +1790,21 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_admin_audit_logs_created_id "
             "ON admin_audit_logs(created_at, id)"
         ))
+        # rev 41：客服工单队列按 (assignee_id, status) 筛。列由本函数补出，所以留在这个块里。
+        # rev 41: the support queue filters tickets by (assignee_id, status); the
+        # column is added by this function, so the index lives in this block.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_tickets_assignee_status ON tickets(assignee_id, status)"
+        ))
 
     _drop_redundant_candle_index(is_postgres)
 
     # rev 40：规范邮箱回填（列在上面的 users 段补出）。/ canonical-email backfill.
     _backfill_email_canonical()
+
+    # rev 41：存量用户的转化回填（register / verified / paid / mt5_real）。失败只告警。
+    # rev 41: conversion backfill for existing users; failures only warn.
+    _backfill_conversions()
 
     # rev 38：操作日志的历史补录。放在所有补列之后（它读 mt5_accounts 的撤销列与 orders）。
     # rev 38: activity-log backfill; after every column-add since it reads the
@@ -1828,6 +1875,18 @@ def _backfill_email_canonical() -> None:
             [{"c": canonical_email(email), "id": uid} for uid, email in rows],
         )
     logger.info("rev 40：规范邮箱回填 %d 行", len(rows))
+
+
+def _backfill_conversions() -> None:
+    """rev 41：给存量用户补 conversions（credited_to 为空）。幂等，失败只告警、不挡启动。
+    rev 41: backfill conversions for existing users; idempotent, warns on failure."""
+    try:
+        from app.services.conversions import backfill_conversions
+
+        counts = backfill_conversions(engine)
+        logger.info("rev 41：转化回填 %s", counts)
+    except Exception:
+        logger.warning("rev 41：转化回填失败，已跳过 / conversion backfill failed", exc_info=True)
 
 
 def _backfill_activity_events() -> None:

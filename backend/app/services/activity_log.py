@@ -192,6 +192,16 @@ USER_PASSWORD_CHANGED = "user.password_changed"
 USER_NICKNAME = "user.nickname"
 USER_PHONE_SET = "user.phone_set"
 AUTO_SETTINGS = "auto.settings"
+# 客服台（rev 41，设计 2026-10-17 §8）。actor_type='support'（admin 在客服台的操作记 'admin'）。
+# data 原样给读接口拆 params：常见键 action / reason / days / status / goal / q / fu（跟进 id）。
+# Support desk (rev 41, design §8). actor_type='support' ('admin' when an admin acts
+# on the desk). data is passed through as params; common keys: action / reason /
+# days / status / goal / q / fu (follow-up id).
+SUPPORT_VIEW_CUSTOMER = "support.view_customer"
+SUPPORT_REVEAL_PHONE = "support.reveal_phone"
+SUPPORT_SEARCH = "support.search"
+SUPPORT_ACTION = "support.action"          # data.action = resend_verification / unbind / reset_trial / comp_days / ...
+SUPPORT_FOLLOW_UP = "support.follow_up"    # data.action = assign / revoke / reassign / extend / status / note / expired / ...
 
 # activity_events 里会出现的全部 kind。log_event 只收这里面的。
 # Every kind activity_events may hold; log_event rejects anything else.
@@ -203,6 +213,7 @@ KINDS: frozenset[str] = frozenset({
     USER_PASSWORD_RESET_REQUESTED, USER_PASSWORD_RESET, USER_PASSWORD_CHANGED,
     USER_NICKNAME, USER_PHONE_SET,
     AUTO_SETTINGS,
+    SUPPORT_VIEW_CUSTOMER, SUPPORT_REVEAL_PHONE, SUPPORT_SEARCH, SUPPORT_ACTION, SUPPORT_FOLLOW_UP,
 })
 
 MT5_KINDS: frozenset[str] = frozenset({MT5_BIND, MT5_REVERIFY, MT5_UNBIND, MT5_REVOKED})
@@ -227,7 +238,17 @@ KIND_CATEGORY: dict[str, str] = {
     TRADE_CLOSE_ALL: "trade",
     TRADE_CORRECTED: "trade",
     AUTO_SETTINGS: "trade",
+    # 客服动作归「管理」分类（都是工作人员的操作）/ staff actions go under "admin"
+    SUPPORT_VIEW_CUSTOMER: "admin",
+    SUPPORT_REVEAL_PHONE: "admin",
+    SUPPORT_SEARCH: "admin",
+    SUPPORT_ACTION: "admin",
+    SUPPORT_FOLLOW_UP: "admin",
 }
+
+SUPPORT_KINDS: frozenset[str] = frozenset({
+    SUPPORT_VIEW_CUSTOMER, SUPPORT_REVEAL_PHONE, SUPPORT_SEARCH, SUPPORT_ACTION, SUPPORT_FOLLOW_UP,
+})
 
 # 「只看异常」时这张表里算异常的 kind（设计 §5.5）/ kinds that count as abnormal (§5.5)
 ABNORMAL_KINDS: frozenset[str] = frozenset({MT5_REVOKED, TRADE_CORRECTED})
@@ -235,7 +256,9 @@ ABNORMAL_KINDS: frozenset[str] = frozenset({MT5_REVOKED, TRADE_CORRECTED})
 ACTOR_USER = "user"
 ACTOR_SYSTEM = "system"
 ACTOR_ADMIN = "admin"
-ACTOR_TYPES: frozenset[str] = frozenset({ACTOR_USER, ACTOR_SYSTEM, ACTOR_ADMIN})
+# 客服（rev 41）/ support agent (rev 41)
+ACTOR_SUPPORT = "support"
+ACTOR_TYPES: frozenset[str] = frozenset({ACTOR_USER, ACTOR_SYSTEM, ACTOR_ADMIN, ACTOR_SUPPORT})
 
 # data 里标记「补录」的键 / the data key that marks a backfilled row
 BACKFILL_FLAG = "bf"

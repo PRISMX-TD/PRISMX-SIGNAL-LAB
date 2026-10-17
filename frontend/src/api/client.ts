@@ -5,6 +5,7 @@ import type { PendingCompetition } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
+import type { AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
 import { recordServerTime } from '../utils/serverClock'
@@ -1492,7 +1493,7 @@ export const adminApi = {
   },
   updateUser: (
     userId: string,
-    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null }>
+    payload: Partial<{ role: UserRole; supportTier: 'internal' | 'outsourced' | null; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null }>
   ) =>
     request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
@@ -1676,19 +1677,22 @@ export const adminApi = {
     // selects quickly lets an earlier response land last and leaves the table
     // disagreeing with the filter bar.
     listTickets: (
-      params: { status?: string; category?: string; limit?: number; offset?: number } = {},
+      // assignee（rev 41）：me / none / <工作人员 id> / me, none or a staff id
+      params: { status?: string; category?: string; assignee?: string; limit?: number; offset?: number } = {},
       signal?: AbortSignal,
     ) => {
       const qs = new URLSearchParams()
       if (params.status) qs.set('status', params.status)
       if (params.category) qs.set('category', params.category)
+      if (params.assignee) qs.set('assignee', params.assignee)
       if (params.limit) qs.set('limit', String(params.limit))
       if (params.offset) qs.set('offset', String(params.offset))
       const suffix = qs.toString() ? `?${qs.toString()}` : ''
       return request<TicketListItem[]>(`/admin/tickets${suffix}`, { signal })
     },
     getTicket: (id: string) => request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`),
-    replyTicket: (id: string, body: string, opts?: { status?: TicketStatus; priority?: TicketPriority; images?: string[] }) =>
+    // internal=true：内部备注，用户永远看不到（rev 41）/ internal note, never shown to the user
+    replyTicket: (id: string, body: string, opts?: { status?: TicketStatus; priority?: TicketPriority; images?: string[]; internal?: boolean }) =>
       request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}/reply`, {
         method: 'POST',
         body: JSON.stringify({ body, ...opts }),
@@ -1697,6 +1701,13 @@ export const adminApi = {
       request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
+      }),
+    // 指派（rev 41）：admin 指派给任一在岗工作人员或传 null 清空；客服只能认领给自己 / 放弃自己的。
+    // Assign: admins pick any on-duty staff (null clears); agents claim for themselves / release.
+    assignTicket: (id: string, assigneeId: string | null) =>
+      request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}/assign`, {
+        method: 'POST',
+        body: JSON.stringify({ assigneeId }),
       }),
     // ---- 游戏化管理 / Gamification admin ----
     // 用户检查器：目标用户的完整游戏化面板（含 email），触发一次真实判定
@@ -2053,4 +2064,103 @@ export const opsApi = {
     opsRequest<{ ok: boolean; message: string }>('/restart-backend', { method: 'POST', body: JSON.stringify({ password }) }),
   restartGateway: (password: string) =>
     opsRequest<{ ok: boolean; message: string }>('/restart-gateway', { method: 'POST', body: JSON.stringify({ password }) }),
+}
+
+// ---- 客服台（设计 2026-10-17）/ support desk ----
+// 工单本身仍走 adminApi.listTickets / getTicket / replyTicket / assignTicket（/admin/tickets 对客服开放）。
+// Tickets themselves stay on adminApi's ticket calls (/admin/tickets is open to support).
+const sid = (id: string) => encodeURIComponent(id)
+const post = <T>(path: string, body?: unknown) =>
+  request<T>(path, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) })
+
+export const supportApi = {
+  me: () => request<SupportMe>('/support/me'),
+  // 只按精确邮箱 / 用户 ID / 工单号找 / exact email, user id or ticket id only
+  search: (q: string) => request<{ results: SupportCustomer[] }>(`/support/search?q=${encodeURIComponent(q)}`),
+  card: (userId: string) => request<SupportCard>(`/support/users/${sid(userId)}`),
+  // 外包超出每日上限时 429 / 429 once an outsourced agent is over the daily cap
+  revealPhone: (userId: string) =>
+    post<{ phone: string; revealsToday: number | null; revealLimit: number | null }>(`/support/users/${sid(userId)}/reveal-phone`),
+  resendVerification: (userId: string) =>
+    post<{ ok: boolean; alreadyVerified: boolean }>(`/support/users/${sid(userId)}/resend-verification`),
+  unbindMt5: (userId: string, accountId: string, reason: string) =>
+    post<{ ok: boolean }>(`/support/users/${sid(userId)}/mt5/${sid(accountId)}/unbind`, { reason }),
+  resetTrial: (userId: string, reason?: string) =>
+    post<{ ok: boolean }>(`/support/users/${sid(userId)}/reset-trial`, { reason: reason || null }),
+  // 超过上限 → applied=false + 审批单 / over the cap → applied=false plus an approval request
+  compDays: (userId: string, days: number, reason: string) =>
+    post<{ applied: boolean; request: SupportRequest | null; planExpiresAt: string | null }>(
+      `/support/users/${sid(userId)}/comp-days`,
+      { days, reason },
+    ),
+  doNotContact: (userId: string) =>
+    post<{ ok: boolean; doNotContactAt: string }>(`/support/users/${sid(userId)}/do-not-contact`),
+  message: (userId: string, title: string, body: string) =>
+    post<{ ticket: unknown }>(`/support/users/${sid(userId)}/message`, { title, body }),
+  requestFollowUp: (userId: string, goal: FollowUpGoal, note?: string) =>
+    post<{ request: SupportRequest }>(`/support/users/${sid(userId)}/follow-up-request`, { goal, note: note || null }),
+  requestConversion: (userId: string, server: string, login: string, note?: string) =>
+    post<{ request: SupportRequest }>(`/support/users/${sid(userId)}/conversion-request`, { server, login, note: note || null }),
+  myRequests: () => request<{ items: SupportRequest[] }>('/support/requests'),
+  followUps: (offset = 0) => request<{ total: number; items: FollowUp[] }>(`/support/follow-ups?limit=50&offset=${offset}`),
+  followUp: (id: string) => request<{ followUp: FollowUp; notes: FollowUpNote[] }>(`/support/follow-ups/${sid(id)}`),
+  // nextContactAt: 显式 null = 清除 / explicit null clears it
+  patchFollowUp: (id: string, patch: { status?: FollowUpStaffStatus; nextContactAt?: string | null }) =>
+    request<{ followUp: FollowUp }>(`/support/follow-ups/${sid(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  addNote: (id: string, note: { channel: FollowUpChannel; content: string; outcome?: string | null }) =>
+    post<{ note: FollowUpNote; followUp: FollowUp }>(`/support/follow-ups/${sid(id)}/notes`, note),
+  templates: (lang?: string) =>
+    request<{ items: SupportTemplate[] }>(`/support/templates${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`),
+}
+
+export const adminSupportApi = {
+  members: () => request<{ items: SupportMember[] }>('/admin/support/members'),
+  patchMember: (id: string, patch: { tier?: SupportTier; revealLimit?: number | null }) =>
+    request<{ id: string; tier: SupportTier | null; revealLimit: number | null }>(`/admin/support/members/${sid(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  settings: () => request<SupportSettings>('/admin/support/settings'),
+  saveSettings: (patch: Partial<SupportSettings>) =>
+    request<SupportSettings>('/admin/support/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  checkAssign: (userIds: string[]) => post<{ items: AssignBlocker[] }>('/admin/support/follow-ups/check', { userIds }),
+  assign: (input: AssignInput) =>
+    post<{ created: FollowUp[]; skipped: { userId: string; reason: string }[] }>('/admin/support/follow-ups', input),
+  followUps: (params: { assigneeId?: string; status?: string; userId?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') qs.set(k, String(v))
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ total: number; items: FollowUp[]; distribution: Record<string, number> }>(`/admin/support/follow-ups${suffix}`)
+  },
+  revoke: (ids: string[]) => post<{ updated: number }>('/admin/support/follow-ups/revoke', { ids }),
+  reassign: (ids: string[], assigneeId: string) =>
+    post<{ updated: number }>('/admin/support/follow-ups/reassign', { ids, assigneeId }),
+  extend: (ids: string[], days: number) => post<{ updated: number }>('/admin/support/follow-ups/extend', { ids, days }),
+  requests: (status = 'pending') =>
+    request<{ items: SupportRequest[] }>(`/admin/support/requests?status=${encodeURIComponent(status)}`),
+  approve: (id: string, note?: string) =>
+    post<{ request: SupportRequest; result: Record<string, unknown> }>(`/admin/support/requests/${sid(id)}/approve`, { note: note || null }),
+  reject: (id: string, note?: string) =>
+    post<{ request: SupportRequest }>(`/admin/support/requests/${sid(id)}/reject`, { note: note || null }),
+  conversions: (params: { status?: string; kind?: string; creditedTo?: string } = {}) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) if (v) qs.set(k, v)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ items: SupportConversion[] }>(`/admin/support/conversions${suffix}`)
+  },
+  reviewConversion: (id: string, approve: boolean, note?: string) =>
+    post<{ conversion: SupportConversion }>(`/admin/support/conversions/${sid(id)}/review`, { approve, note: note || null }),
+  stats: (start?: string, end?: string) => {
+    const qs = new URLSearchParams()
+    if (start) qs.set('start', start)
+    if (end) qs.set('end', end)
+    const suffix = qs.toString() ? `?${qs.toString()}` : ''
+    return request<{ start: string; end: string; items: SupportStatsRow[] }>(`/admin/support/stats${suffix}`)
+  },
+  templates: () => request<{ items: SupportTemplate[] }>('/admin/support/templates'),
+  createTemplate: (tpl: { title: string; body: string; lang: string | null }) =>
+    post<{ template: SupportTemplate }>('/admin/support/templates', tpl),
+  patchTemplate: (id: string, tpl: { title?: string; body?: string; lang?: string | null }) =>
+    request<{ template: SupportTemplate }>(`/admin/support/templates/${sid(id)}`, { method: 'PATCH', body: JSON.stringify(tpl) }),
+  deleteTemplate: (id: string) => request<{ ok: boolean }>(`/admin/support/templates/${sid(id)}`, { method: 'DELETE' }),
 }

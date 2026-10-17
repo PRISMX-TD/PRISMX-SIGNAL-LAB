@@ -185,6 +185,16 @@ function TabIcon({ name }: { name: string }) {
           <path d="M9.5 12l1.8 1.8L14.5 10" />
         </svg>
       )
+    case 'desk':
+      // 耳机：客服台 / headset: support desk
+      return (
+        <svg className={c} viewBox="0 0 24 24" {...p}>
+          <path d="M4 14v-2a8 8 0 0 1 16 0v2" />
+          <rect x="3" y="14" width="4" height="6" rx="1.5" />
+          <rect x="17" y="14" width="4" height="6" rx="1.5" />
+          <path d="M19 20a3 3 0 0 1-3 2h-3" />
+        </svg>
+      )
     case 'agent':
       // 两环相扣的链接图标 / interlocked-links icon
       return (
@@ -348,6 +358,8 @@ export default function Layout() {
   }
 
   const isAdmin = user?.role === 'admin'
+  // 客服台入口：客服与管理员都有（设计 §9）/ support-desk entry for agents and admins
+  const isStaff = isAdmin || user?.role === 'support'
 
   // 行情终端是全站唯一一个「满屏、不滚动、不要页脚」的页面。这个判断放在 Layout
   // 而不是让 ChartsPage 自己用负 margin 破框：破框的写法在有滚动条时会算错宽度，
@@ -476,6 +488,7 @@ export default function Layout() {
     // 代理页：按 /auth/me 下发的 isAgent 露入口（见 User.isAgent），入口判断先例同上。
     // Agent view: shown off the isAgent flag from /auth/me; same entry-hiding precedent.
     ...(user?.isAgent ? [{ to: '/agent', icon: 'agent', label: t('nav.agent') }] : []),
+    ...(isStaff ? [{ to: '/support-desk', icon: 'desk', label: t('nav.supportDesk') }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   const moreActive = moreItems.some((m) => location.pathname === m.to)
@@ -811,6 +824,7 @@ export default function Layout() {
                   email={user?.email}
                   showUpgrade={user?.plan !== 'PRO'}
                   isAdmin={isAdmin}
+                  isStaff={isStaff}
                   isAgent={!!user?.isAgent}
                   gamificationVisible={!!user?.gamificationVisible}
                   gamificationLevel={user?.gamificationLevel}

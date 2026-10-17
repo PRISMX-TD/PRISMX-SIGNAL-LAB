@@ -8,18 +8,18 @@ Admin routers must carry require_admin themselves, not only via main.py.
 """
 from fastapi import FastAPI
 
-from app.routers import competitions, gamification, invite, tickets
-from app.services.deps import require_admin
+from app.routers import competitions, gamification, invite, support, tickets
+from app.services.deps import require_admin, require_staff
 
 
-def _all_routes_guarded(router) -> bool:
+def _all_routes_guarded(router, guard=require_admin) -> bool:
     app = FastAPI()
     app.include_router(router)           # 刻意不传 dependencies：模拟"单独挂载"
     routes = [r for r in app.routes if getattr(r, "dependant", None) is not None]
     assert routes, "router 没有任何路由"
     for r in routes:
         calls = {d.call for d in r.dependant.dependencies}
-        if require_admin not in calls:
+        if guard not in calls:
             return False
     return True
 
@@ -30,5 +30,14 @@ def test_gamification_and_competition_admin_routers_guard_themselves():
 
 
 def test_ticket_and_invite_admin_routers_still_guarded():
-    assert _all_routes_guarded(tickets.admin_router)
+    # rev 41：工单管理端改为客服 + 管理员共用，守卫是 require_staff（设计 2026-10-17 §3）。
+    # rev 41: the ticket desk is shared by support and admins, guarded by require_staff.
+    assert _all_routes_guarded(tickets.admin_router, require_staff)
     assert _all_routes_guarded(invite.admin_router)
+
+
+def test_support_routers_guard_themselves():
+    """/support 每个端点 require_staff；/admin/support 整个 router 带 require_admin。
+    Every /support route needs require_staff; /admin/support carries require_admin."""
+    assert _all_routes_guarded(support.router, require_staff)
+    assert _all_routes_guarded(support.admin_router, require_admin)

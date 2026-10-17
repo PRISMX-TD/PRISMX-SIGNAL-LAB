@@ -3,7 +3,7 @@ import secrets
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, Column, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import relationship, validates
 
 from app.core.database import Base
@@ -241,6 +241,19 @@ class User(Base):
     # sets it by hand: the validator below fills it on every email assignment
     # (constructor included), so a new creation path can't forget it.
     email_canonical = Column(String, nullable=True, index=True)
+
+    # 客服台（rev 41，设计 2026-10-17 §2.1）：仅 role='support' 时有意义。
+    # support_tier：internal（内部）/ outsourced（外包）；NULL 按外包处理（最小权限）。
+    # support_reveal_limit：外包每日「查看完整电话」上限，NULL = 用全局设置
+    # support_outsourced_reveal_daily。
+    # Support desk (rev 41): meaningful only for role='support'. A NULL tier is
+    # treated as outsourced (least privilege); a NULL reveal limit uses the global
+    # support_outsourced_reveal_daily setting.
+    support_tier = Column(String, nullable=True)
+    support_reveal_limit = Column(Integer, nullable=True)
+    # 用户要求「不再联系」的时刻（rev 41）：之后的跟进分配一律拦截。
+    # When the user asked not to be contacted again; blocks future follow-up assignment.
+    do_not_contact_at = Column(DateTime, nullable=True)
 
     @validates("email")
     def _sync_email_canonical(self, _key, value):
@@ -1321,8 +1334,11 @@ class Ticket(Base):
     status = Column(String, nullable=False, default="open")  # open / in_progress / closed
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
+    # 指派给哪位客服 / 管理员（rev 41），NULL = 未分配。
+    # Assigned staff member (rev 41); NULL = unassigned.
+    assignee_id = Column(String, ForeignKey("users.id"), nullable=True)
 
-    user = relationship("User", backref="tickets")
+    user = relationship("User", backref="tickets", foreign_keys=[user_id])
     replies = relationship("TicketReply", backref="ticket", order_by="TicketReply.created_at")
 
 
@@ -1344,6 +1360,14 @@ class TicketReply(Base):
     # response (services/image_upload).
     images = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now)
+    # 内部备注（rev 41）：只给客服 / 管理员看，用户侧接口永不返回。
+    # Internal note (rev 41): staff-only, never returned by user-facing endpoints.
+    internal = Column(Boolean, nullable=False, default=False)
+    # 写这条时作者的角色 user / support / admin（rev 41）。存快照而不是每次读 author.role：
+    # 客服后来被降回 user，他当时以客服身份回的话仍应显示为客服。
+    # The author's role when written (rev 41). A snapshot, so a support agent later
+    # demoted to user still shows as staff on the replies they wrote as staff.
+    author_role = Column(String, nullable=True)
 
     author = relationship("User", backref="ticket_replies")
 
@@ -1938,4 +1962,142 @@ class EmailOptOut(Base):
     __tablename__ = "email_opt_outs"
 
     user_id = Column(String, ForeignKey("users.id"), primary_key=True)
+    created_at = Column(DateTime, default=_now)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 客服台（rev 41，设计 docs/superpowers/specs/2026-10-17-support-desk-design.md）
+# Support desk (rev 41; see the 2026-10-17 support-desk design).
+# 客户归平台，不归客服：这些表只记「谁在跟进」「谁促成了某次转化」。
+# Customers belong to the platform: these tables only record who is following up
+# and who was credited with a conversion.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 进行中的跟进状态 / follow-up statuses that count as active
+FOLLOW_UP_ACTIVE_STATUSES = ("pending", "contacted", "interested")
+
+
+class FollowUp(Base):
+    """跟进名单：admin 把一个用户分配给一位客服跟进（BD）。同一用户同时最多一条进行中。
+    A follow-up assignment of one user to one support agent; at most one active per user."""
+    __tablename__ = "follow_ups"
+    __table_args__ = (
+        Index("idx_follow_ups_assignee_status", "assignee_id", "status"),
+        # 部分唯一索引：同一用户同时只能有 1 条进行中的跟进。
+        # Partial unique index: one active follow-up per user.
+        Index(
+            "uq_follow_ups_active_user", "user_id", unique=True,
+            sqlite_where=text("status IN ('pending','contacted','interested')"),
+            postgresql_where=text("status IN ('pending','contacted','interested')"),
+        ),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    assignee_id = Column(String, ForeignKey("users.id"), nullable=False)
+    assigned_by = Column(String, ForeignKey("users.id"), nullable=True)
+    # open_mt5 / open_signallab / renew / activate_trial / revisit
+    goal = Column(String, nullable=False)
+    priority = Column(String, nullable=False, default="normal")  # low / normal / high
+    note = Column(Text, nullable=True)
+    # pending / contacted / interested / converted / no_interest / unreachable / revoked / expired
+    status = Column(String, nullable=False, default="pending")
+    next_contact_at = Column(DateTime, nullable=True)
+    expires_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now)
+    closed_at = Column(DateTime, nullable=True)
+    # 首次写跟进记录的时间（业绩看板「平均首次联系时长」）/ first note time, for the dashboard
+    first_contact_at = Column(DateTime, nullable=True)
+    # 提醒去重：最近一次「到点」提醒对应的 next_contact_at、是否已发「即将过期」、是否已发「新分配」。
+    # Reminder dedupe: the next_contact_at last reminded, and whether expiring / new-assignment pushes went out.
+    reminded_next_at = Column(DateTime, nullable=True)
+    expiring_notified = Column(Boolean, nullable=False, default=False)
+    assigned_notified = Column(Boolean, nullable=False, default=False)
+
+
+class FollowUpNote(Base):
+    """跟进记录：只追加、不可删改。/ Follow-up log entries; append-only."""
+    __tablename__ = "follow_up_notes"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    follow_up_id = Column(String, ForeignKey("follow_ups.id"), nullable=False, index=True)
+    author_id = Column(String, ForeignKey("users.id"), nullable=False)
+    channel = Column(String, nullable=False, default="other")  # phone / email / in_app / other
+    content = Column(Text, nullable=False)
+    outcome = Column(String, nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class Conversion(Base):
+    """开户 / 转化记录（设计 §6）。按 (user_id, kind, dedupe_key) 唯一，record() 幂等。
+    A conversion event; unique on (user_id, kind, dedupe_key) so record() is idempotent."""
+    __tablename__ = "conversions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "dedupe_key", name="uq_conversions_user_kind_key"),
+        Index("idx_conversions_credited_created", "credited_to", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    # mt5_real / signallab_register / signallab_verified / signallab_paid
+    kind = Column(String, nullable=False)
+    source = Column(String, nullable=False, default="auto")  # auto / manual
+    # 去重键：mt5_real = "<login>@<server>"，其余 kind 恒为 ""（每人一次）。
+    # Dedupe key: "<login>@<server>" for mt5_real, "" for the once-per-user kinds.
+    dedupe_key = Column(String, nullable=False, default="")
+    detail = Column(Text, nullable=True)  # JSON
+    follow_up_id = Column(String, ForeignKey("follow_ups.id"), nullable=True)
+    credited_to = Column(String, ForeignKey("users.id"), nullable=True)
+    status = Column(String, nullable=False, default="confirmed")  # confirmed / pending_review / rejected
+    reviewed_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class SupportRequest(Base):
+    """客服发起、admin 审批的申请：comp_days / follow_up / conversion_manual。
+    Staff-initiated requests awaiting admin review."""
+    __tablename__ = "support_requests"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    kind = Column(String, nullable=False)
+    requester_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    target_user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    payload = Column(Text, nullable=True)  # JSON
+    status = Column(String, nullable=False, default="pending")  # pending / approved / rejected
+    reviewer_id = Column(String, ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class SupportReplyTemplate(Base):
+    """快捷回复模板：admin 维护，客服只读使用。/ Canned replies; admin-maintained."""
+    __tablename__ = "support_reply_templates"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    title = Column(String, nullable=False)
+    body = Column(Text, nullable=False)
+    lang = Column(String, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class SupportAction(Base):
+    """客服动作流水：查重（重置试用终身一次）与计数（每日查看电话上限、每小时异常阈值）。
+    ActivityEvent 负责给人看，这张表负责给程序数——它有外键与按 (actor, kind, 时间) 的索引。
+    Support action ledger used for checks (reset-trial once per user) and counting
+    (daily reveal cap, hourly anomaly thresholds). ActivityEvent is for humans;
+    this one is for the code to count."""
+    __tablename__ = "support_actions"
+    __table_args__ = (
+        Index("idx_support_actions_actor_kind_created", "actor_id", "kind", "created_at"),
+        Index("idx_support_actions_target_kind", "target_user_id", "kind"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    actor_id = Column(String, ForeignKey("users.id"), nullable=False)
+    target_user_id = Column(String, ForeignKey("users.id"), nullable=True)
+    # view_customer / reveal_phone / search / reset_trial / comp_days / unbind / resend_verification ...
+    kind = Column(String, nullable=False)
+    data = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now)

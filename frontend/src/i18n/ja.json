@@ -17,7 +17,9 @@
     "ticket_new": "対応が必要な新しいお問い合わせがあります",
     "comp_public_name": "公開ランキング",
     "plan_refund": "注文が返金されました。対象となっていた会員期間は取り消されています。ご不明な点はサポートまでお問い合わせください。",
-    "agent_plan_change": "代理店が顧客のプランを変更しました"
+    "agent_plan_change": "代理店が顧客のプランを変更しました",
+    "support_reminder": "フォローのリマインダー",
+    "support_alert": "サポートデスクの要対応事項"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -37,7 +39,8 @@
     "support": "サポートに連絡",
     "appDownload": "アプリを入手",
     "announcements": "お知らせ",
-    "agent": "代理店ビュー"
+    "agent": "代理店ビュー",
+    "supportDesk": "サポートデスク"
   },
   "common": {
     "loading": "読み込み中…",

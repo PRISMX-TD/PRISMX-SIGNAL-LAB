@@ -478,6 +478,13 @@ def gateway_verify(
             if is_new:
                 db.flush()
             _log_verify_event(db, user.id, existing, is_new=is_new, prev_reason=prev_reason)
+            # 开户 / 转化识别（客服台 §6）：直连行都是合作券商，实盘即记，幂等。放在同一个 try
+            # 里：它开头那次 flush 撞唯一约束同样走 409。
+            # Conversion tracking (support desk §6); idempotent. Inside the same try: its
+            # leading flush can raise the same unique-constraint error -> 409.
+            from app.services import conversions
+
+            conversions.record_mt5_bind(db, user.id, existing)
             db.commit()
         except IntegrityError:
             db.rollback()

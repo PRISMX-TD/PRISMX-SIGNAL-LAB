@@ -1,5 +1,6 @@
 """认证依赖与风控 / Auth dependencies and risk control."""
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, Response, status
@@ -342,6 +343,47 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.role != "admin":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要管理员权限 / Admin privileges required")
     return user
+
+
+# 工作人员角色（rev 41 客服台）/ staff roles (rev 41 support desk)
+STAFF_ROLES = ("support", "admin")
+SUPPORT_TIER_INTERNAL = "internal"
+SUPPORT_TIER_OUTSOURCED = "outsourced"
+SUPPORT_TIERS = (SUPPORT_TIER_INTERNAL, SUPPORT_TIER_OUTSOURCED)
+
+
+@dataclass(frozen=True)
+class StaffCtx:
+    """客服台的调用者上下文。admin 视为 internal 且全权限；客服 tier 为空时按外包
+    （outsourced）处理——权限往小里取，漏配 tier 不会意外放出完整信息。
+    Caller context for the support desk. Admins count as internal with full rights;
+    a support agent with no tier is treated as outsourced — least privilege, so a
+    forgotten tier never leaks full data."""
+    user: User
+    is_admin: bool
+    tier: str
+
+    @property
+    def is_outsourced(self) -> bool:
+        return not self.is_admin and self.tier == SUPPORT_TIER_OUTSOURCED
+
+
+def staff_ctx_for(user: User) -> StaffCtx:
+    """由 User 构造 StaffCtx（调用方已确认是工作人员）/ build a StaffCtx for a staff user."""
+    if user.role == "admin":
+        return StaffCtx(user=user, is_admin=True, tier=SUPPORT_TIER_INTERNAL)
+    tier = user.support_tier if user.support_tier in SUPPORT_TIERS else SUPPORT_TIER_OUTSOURCED
+    return StaffCtx(user=user, is_admin=False, tier=tier)
+
+
+def require_staff(user: User = Depends(get_current_user)) -> StaffCtx:
+    """要求客服或管理员（role in support / admin），返回 StaffCtx。停用账号在
+    get_current_user 里已经 403。
+    Require a support agent or admin, returning a StaffCtx. Disabled accounts are
+    already refused by get_current_user."""
+    if user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要客服权限 / Support privileges required")
+    return staff_ctx_for(user)
 
 
 def validate_order(symbol: str, side: str, volume: float, equity: float | None = None) -> None:

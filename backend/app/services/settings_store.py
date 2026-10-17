@@ -1048,3 +1048,57 @@ def save_email_gate_settings(db, data: dict) -> None:
     merged = _load_email_gate_from_db(db)
     merged.update(data)
     set_setting(db, "email_gate", merged)
+
+
+# ---- 客服台设置（rev 41，设计 2026-10-17 §7.6）/ support-desk settings ----
+# support_comp_days_max：客服单次补偿天数上限，超过生成审批单。
+# support_follow_up_days：跟进默认有效天数。
+# support_outsourced_reveal_daily：外包每日查看完整电话的默认上限（成员可单独覆盖）。
+# support_alert_reveal_per_hour / support_alert_views_per_hour：单个客服 1 小时内查看完整电话 /
+# 查看卡片超过阈值 → 通知 admin。
+# Comp-days cap per action (above it → approval), default follow-up lifetime,
+# outsourced daily phone-reveal cap, and the hourly anomaly thresholds.
+SUPPORT_DEFAULTS: dict = {
+    "support_comp_days_max": 7,
+    "support_follow_up_days": 30,
+    "support_outsourced_reveal_daily": 30,
+    "support_alert_reveal_per_hour": 15,
+    "support_alert_views_per_hour": 100,
+}
+
+_support_cache = _TtlCache()
+
+
+def invalidate_support_cache() -> None:
+    _support_cache.invalidate()
+
+
+def _load_support_from_db(db) -> dict:
+    """从 DB 读客服台设置；只认非负整数，坏值回落默认。
+    Read the support-desk settings; only non-negative ints are accepted."""
+    data = dict(SUPPORT_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "support").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                for k in SUPPORT_DEFAULTS:
+                    v = stored.get(k)
+                    if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+                        data[k] = v
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for support, using defaults")
+    return data
+
+
+def get_support_settings(db) -> dict:
+    """读取客服台设置（独立缓存）。/ Read the support-desk settings (own cache)."""
+    return dict(_support_cache.get(db, _load_support_from_db))
+
+
+def save_support_settings(db, data: dict) -> None:
+    """写入客服台设置（不提交，调用方 commit 后 invalidate）。
+    Write the support-desk settings (no commit; caller commits then invalidates)."""
+    merged = _load_support_from_db(db)
+    merged.update({k: v for k, v in data.items() if k in SUPPORT_DEFAULTS})
+    set_setting(db, "support", merged)

@@ -27,6 +27,7 @@ from app.core.database import get_db
 from app.core.strategy_limits import user_limiter
 from app.models import Ticket, TicketReply, User
 from app.schemas import (
+    AdminTicketAssign,
     AdminTicketReplyCreate,
     AdminTicketUpdate,
     TicketCreate,
@@ -36,7 +37,7 @@ from app.schemas import (
     TicketReplyOut,
 )
 from app.services.audit import log_change
-from app.services.deps import get_current_user, get_current_user_id_light, require_admin
+from app.services.deps import STAFF_ROLES, StaffCtx, get_current_user, get_current_user_id_light, require_staff
 from app.services.image_upload import (
     UploadError,
     is_private_configured,
@@ -74,14 +75,25 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _author_email(author: User, viewer_is_admin: bool) -> str:
-    """回复作者在当前查看者眼里的邮箱：管理员的邮箱不给普通用户看，回空串，
-    前端据此显示「客服」。管理员查看时照常给全。
-    The reply author's email as the viewer may see it: staff emails are never
-    shown to regular users (empty string; the UI shows "Support" instead)."""
-    if author.role == "admin" and not viewer_is_admin:
+def _reply_role(r: TicketReply) -> str:
+    """回复作者的角色：优先用写入时的快照（rev 41 author_role），旧行回落作者当前角色。
+    The reply author's role: the rev 41 snapshot, else the author's current role."""
+    return r.author_role or (r.author.role if r.author is not None else "user")
+
+
+def _author_email(author: User, viewer_is_admin: bool, role: str | None = None) -> str:
+    """回复作者在当前查看者眼里的邮箱：工作人员（客服 / 管理员）的邮箱不给普通用户看，
+    回空串，前端据此显示「Signal Lab 客服」。工作人员查看时照常给全。
+    The reply author's email as the viewer may see it: staff (support / admin)
+    emails are never shown to regular users (empty string; the UI shows "Support")."""
+    role = role or author.role
+    if role in STAFF_ROLES and not viewer_is_admin:
         return ""
     return author.email
+
+
+def _is_staff(user: User) -> bool:
+    return user.role in STAFF_ROLES
 
 
 # 附图对象键只认 upload_private_image 产出的形状：<作者 id>/<32 位 hex>.<扩展名>，可带尺寸片段。
@@ -118,11 +130,14 @@ def _reply_out(r: TicketReply, viewer_is_admin: bool, urls: dict[str, str] | Non
     With urls None (list previews) only the count is given; images that couldn't be signed
     are likewise only counted and the UI shows a placeholder."""
     keys = _image_keys(r)
+    role = _reply_role(r)
     return TicketReplyOut(
         id=r.id,
         authorId=r.author_id,
-        authorEmail=_author_email(r.author, viewer_is_admin),
-        authorRole=r.author.role,
+        authorEmail=_author_email(r.author, viewer_is_admin, role),
+        authorRole=role,
+        authorName=r.author.nickname if role in STAFF_ROLES else None,
+        internal=bool(r.internal),
         body=r.body,
         images=[urls[k] for k in keys if k in urls] if urls else [],
         imageCount=len(keys),
@@ -130,10 +145,26 @@ def _reply_out(r: TicketReply, viewer_is_admin: bool, urls: dict[str, str] | Non
     )
 
 
-def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: bool) -> TicketOut:
-    """把 ORM 对象转成 TicketOut；整条工单的附图一次签完。
-    Convert ORM objects to TicketOut, signing the whole thread's images in one call."""
+def _visible(replies: list[TicketReply], viewer_is_admin: bool) -> list[TicketReply]:
+    """内部备注只给工作人员看 / internal notes are staff-only."""
+    return replies if viewer_is_admin else [r for r in replies if not r.internal]
+
+
+def _assignee_name(db: Session | None, ticket: Ticket) -> str | None:
+    if not ticket.assignee_id or db is None:
+        return None
+    u = db.get(User, ticket.assignee_id)
+    return (u.nickname or u.email) if u else None
+
+
+def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: bool, db: Session | None = None) -> TicketOut:
+    """把 ORM 对象转成 TicketOut；整条工单的附图一次签完。非工作人员视角下内部备注整行剔除。
+    viewer_is_admin 的意思是「查看者是工作人员（客服或管理员）」。
+    Convert ORM objects to TicketOut, signing the whole thread's images in one call.
+    Internal notes are dropped for non-staff viewers. viewer_is_admin means "the
+    viewer is staff (support or admin)"."""
     user: User = ticket.user  # relationship backref
+    replies = _visible(replies, viewer_is_admin)
     urls = signed_image_urls([k for r in replies for k in _image_keys(r)])
     return TicketOut(
         id=ticket.id,
@@ -146,7 +177,28 @@ def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: boo
         createdAt=ticket.created_at,
         updatedAt=ticket.updated_at,
         replies=[_reply_out(r, viewer_is_admin, urls) for r in replies],
+        assigneeId=ticket.assignee_id if viewer_is_admin else None,
+        assigneeName=_assignee_name(db, ticket) if viewer_is_admin else None,
     )
+
+
+def _staff_targets(db: Session, ticket: Ticket, exclude: str) -> list[tuple[str, str]]:
+    """工单通知的工作人员收件人 (id, role)：已指派 → 指派人 + 全体 admin；未指派 → admin + 全部
+    在岗客服（未停用）。
+    Staff recipients for ticket notifications: assignee + admins when assigned,
+    otherwise admins plus every on-duty (enabled) support agent."""
+    q = db.query(User.id, User.role).filter(User.disabled_at.is_(None))
+    if ticket.assignee_id:
+        rows = q.filter((User.role == "admin") | (User.id == ticket.assignee_id)).all()
+    else:
+        rows = q.filter(User.role.in_(STAFF_ROLES)).all()
+    return [(r[0], r[1]) for r in rows if r[0] != exclude]
+
+
+def _staff_link(role: str, ticket_id: str) -> str:
+    if role == "admin":
+        return f"/admin?tab=tickets&ticket={ticket_id}"
+    return f"/support-desk?ticket={ticket_id}"
 
 
 def _notify_admins_new_ticket(db: Session, ticket: Ticket, submitter: User) -> list[str]:
@@ -162,20 +214,19 @@ def _notify_admins_new_ticket(db: Session, ticket: Ticket, submitter: User) -> l
     routine work into noise — a bell entry is enough for people who keep the
     console open anyway. A submitter who is themselves an admin isn't notified.
     """
-    admin_ids = [
-        r[0] for r in db.query(User.id).filter(User.role == "admin").all()
-        if r[0] != submitter.id
-    ]
-    for admin_id in admin_ids:
+    # rev 41：收件人从「全体管理员」扩成「管理员 + 在岗客服」（已指派的只通知指派人 + 管理员）。
+    # rev 41: recipients widen from admins to admins + on-duty support (assignee + admins once assigned).
+    targets = _staff_targets(db, ticket, submitter.id)
+    for staff_id, role in targets:
         create_notification(
             db,
-            admin_id,
+            staff_id,
             KIND_TICKET_NEW,
             text=ticket.title,
-            link=f"/admin?tab=tickets&ticket={ticket.id}",
+            link=_staff_link(role, ticket.id),
             ref_id=ticket.id,
         )
-    return admin_ids
+    return [t[0] for t in targets]
 
 
 def _notify_admins_ticket_reply(db: Session, ticket: Ticket, author: User) -> list[str]:
@@ -200,20 +251,17 @@ def _notify_admins_ticket_reply(db: Session, ticket: Ticket, author: User) -> li
     reply stays invisible either way. Reuses KIND_TICKET_REPLY: to an admin this
     means exactly "the ticket has a new reply", same event, other direction.
     """
-    admin_ids = [
-        r[0] for r in db.query(User.id).filter(User.role == "admin").all()
-        if r[0] != author.id
-    ]
-    for admin_id in admin_ids:
+    targets = _staff_targets(db, ticket, author.id)
+    for staff_id, role in targets:
         create_notification(
             db,
-            admin_id,
+            staff_id,
             KIND_TICKET_REPLY,
             text=ticket.title,
-            link=f"/admin?tab=tickets&ticket={ticket.id}",
+            link=_staff_link(role, ticket.id),
             ref_id=ticket.id,
         )
-    return admin_ids
+    return [t[0] for t in targets]
 
 
 def _latest_reply(ticket: Ticket, viewer_is_admin: bool) -> TicketReplyOut | None:
@@ -224,11 +272,9 @@ def _latest_reply(ticket: Ticket, viewer_is_admin: bool) -> TicketReplyOut | Non
     # The relationship carries order_by="TicketReply.created_at" (see models), so
     # replies is already oldest-first and the last element is the newest. (This
     # comment used to claim "ordered by id by default"; that stopped being true.)
-    if ticket.replies:
-        r = ticket.replies[-1] if ticket.replies else None
-        if not r:
-            return None
-        return _reply_out(r, viewer_is_admin)
+    replies = _visible(list(ticket.replies or []), viewer_is_admin)
+    if replies:
+        return _reply_out(replies[-1], viewer_is_admin)
     return None
 
 
@@ -310,6 +356,7 @@ def create_ticket(
         author_id=user.id,
         body=body.body.strip(),
         images=images,
+        author_role="user",
     )
     db.add(reply)
     admin_ids = _notify_admins_new_ticket(db, ticket, user)
@@ -317,7 +364,8 @@ def create_ticket(
     db.refresh(ticket)
     for admin_id in admin_ids:
         notify_ws(admin_id)
-    return _ticket_out(ticket, [reply], user.role == "admin")
+    # 用户侧接口一律按用户视角返回（内部备注不出现）/ user endpoints always return the user view
+    return _ticket_out(ticket, [reply], False)
 
 
 @router.get("", response_model=list[TicketListItem])
@@ -343,7 +391,9 @@ def list_my_tickets(
             priority=t.priority,
             status=t.status,
             updatedAt=t.updated_at,
-            latestReply=_latest_reply(t, user.role == "admin"),
+            # 用户侧列表恒按用户视角：自己工单里的内部备注不给
+            # The user-side list is always the user view: no internal notes
+            latestReply=_latest_reply(t, False),
         )
         for t in tickets
     ]
@@ -366,7 +416,7 @@ def get_ticket(
     consistency work, not a hole being closed.
     """
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
-    if not ticket or (ticket.user_id != user.id and user.role != "admin"):
+    if not ticket or (ticket.user_id != user.id and not _is_staff(user)):
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
     replies = (
         db.query(TicketReply)
@@ -374,7 +424,9 @@ def get_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies, user.role == "admin")
+    # 自己的工单按用户视角（内部备注不出现）；工作人员看别人的工单按工作人员视角。
+    # Own ticket -> user view (no internal notes); staff viewing someone else's -> staff view.
+    return _ticket_out(ticket, replies, ticket.user_id != user.id and _is_staff(user), db)
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketOut)
@@ -408,6 +460,9 @@ def reply_to_ticket(
         author_id=user.id,
         body=body.body.strip(),
         images=images,
+        # 在自己的工单里回复，身份就是「用户」——哪怕他本人是客服。
+        # Replying on one's own ticket is a user reply, even for a staff member.
+        author_role="user",
     )
     db.add(reply)
     # updated_at 无条件更新，不再只在 reopen 时更新：两端的列表都按它倒序排，
@@ -429,7 +484,7 @@ def reply_to_ticket(
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    return _ticket_out(ticket, replies, user.role == "admin")
+    return _ticket_out(ticket, replies, False)
 
 
 # ---- 管理员端 / admin endpoints ----
@@ -482,6 +537,21 @@ def _audit_ticket_change(
         log_change(db, admin_id, ticket.user_id, f"ticket:{ticket.id}:reply", None, _reply_excerpt(reply))
 
 
+def _staff(ctx) -> StaffCtx:
+    """依赖注入给的是 StaffCtx；老测试直接调函数时传的是 User，这里统一成 StaffCtx。
+    The dependency yields a StaffCtx; direct calls (older tests) pass a User."""
+    if isinstance(ctx, StaffCtx):
+        return ctx
+    from app.services.deps import staff_ctx_for
+
+    return staff_ctx_for(ctx)
+
+
+# 客服的列表分页上限（设计 §8：客服接口不提供批量浏览，单页最多 50）；admin 仍可到 200。
+# Page cap for support agents (design §8: no bulk browsing, 50 per page); admins keep 200.
+SUPPORT_PAGE_MAX = 50
+
+
 @admin_router.get("", response_model=list[TicketListItem])
 def list_all_tickets(
     status_filter: str | None = Query(default=None, alias="status"),
@@ -489,15 +559,30 @@ def list_all_tickets(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    _admin: StaffCtx = Depends(require_staff),
+    assignee: str | None = Query(default=None),
 ):
-    """全部工单列表，支持按 status / category 筛选，分页。
-    All tickets, filterable by status/category, paginated."""
+    """全部工单列表，支持按 status / category / assignee（me / none / <用户 id>）筛选，分页。
+    客服与管理员都能看全部工单（处理工单需要，设计 §2.4）；客服单页最多 50。
+    All tickets, filterable by status / category / assignee (me / none / <user id>),
+    paginated. Support agents see every ticket too (design §2.4), 50 per page max."""
+    ctx = _staff(_admin)
+    if not ctx.is_admin:
+        limit = min(limit, SUPPORT_PAGE_MAX)
     query = db.query(Ticket)
     if status_filter:
         query = query.filter(Ticket.status == status_filter)
     if category:
         query = query.filter(Ticket.category == category)
+    # 直接调函数时没传 assignee 会拿到 Query(...) 对象本身，只认字符串。
+    # A direct call that omits assignee receives the Query(...) default itself; only strings count.
+    if isinstance(assignee, str) and assignee:
+        if assignee == "me":
+            query = query.filter(Ticket.assignee_id == ctx.user.id)
+        elif assignee == "none":
+            query = query.filter(Ticket.assignee_id.is_(None))
+        else:
+            query = query.filter(Ticket.assignee_id == assignee)
     tickets = (
         query.options(selectinload(Ticket.user), _LIST_EAGER_LOADS)
         .order_by(Ticket.updated_at.desc())
@@ -505,38 +590,68 @@ def list_all_tickets(
         .limit(limit)
         .all()
     )
+    assignee_ids = {t.assignee_id for t in tickets if t.assignee_id}
+    names = {
+        u.id: (u.nickname or u.email)
+        for u in (db.query(User).filter(User.id.in_(assignee_ids)).all() if assignee_ids else [])
+    }
     return [
         TicketListItem(
             id=t.id,
-            userEmail=t.user.email,
+            userId=t.user_id,
+            userEmail=_customer_email(t.user, ctx),
             title=t.title,
             category=t.category,
             priority=t.priority,
             status=t.status,
             updatedAt=t.updated_at,
             latestReply=_latest_reply(t, True),
+            assigneeId=t.assignee_id,
+            assigneeName=names.get(t.assignee_id) if t.assignee_id else None,
         )
         for t in tickets
     ]
+
+
+def _customer_email(user: User, ctx: StaffCtx) -> str:
+    """工单提交人的邮箱：外包客服看脱敏值（设计 §2.3），其余完整。
+    The submitter's email: masked for outsourced agents (design §2.3), full otherwise."""
+    if ctx.is_outsourced:
+        from app.services.support_view import mask_email
+
+        return mask_email(user.email) or ""
+    return user.email
+
+
+def _staff_ticket_out(db: Session, ticket: Ticket, ctx: StaffCtx) -> TicketOut:
+    replies = (
+        db.query(TicketReply)
+        .filter(TicketReply.ticket_id == ticket.id)
+        .order_by(TicketReply.created_at.asc())
+        .all()
+    )
+    out = _ticket_out(ticket, replies, True, db)
+    if ctx.is_outsourced:
+        from app.services.support_view import mask_email
+
+        out.userEmail = mask_email(out.userEmail) or ""
+        for r in out.replies:
+            if r.authorId == ticket.user_id:
+                r.authorEmail = mask_email(r.authorEmail) or ""
+    return out
 
 
 @admin_router.get("/{ticket_id}", response_model=TicketOut)
 def admin_get_ticket(
     ticket_id: str,
     db: Session = Depends(get_db),
-    _admin: User = Depends(require_admin),
+    _admin: StaffCtx = Depends(require_staff),
 ):
-    """管理员查看任意工单详情。/ Admin views any ticket detail."""
+    """工作人员查看任意工单详情（含内部备注）。/ Staff view any ticket detail, internal notes included."""
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
-    replies = (
-        db.query(TicketReply)
-        .filter(TicketReply.ticket_id == ticket_id)
-        .order_by(TicketReply.created_at.asc())
-        .all()
-    )
-    return _ticket_out(ticket, replies, True)
+    return _staff_ticket_out(db, ticket, _staff(_admin))
 
 
 @admin_router.post("/{ticket_id}/reply", response_model=TicketOut)
@@ -544,14 +659,18 @@ def admin_reply_to_ticket(
     ticket_id: str,
     body: AdminTicketReplyCreate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: StaffCtx = Depends(require_staff),
 ):
-    """管理员回复，可选同时修改 status / priority。
-    Admin reply; optionally change status/priority at the same time."""
+    """工作人员回复，可选同时修改 status / priority。internal=true 为内部备注：不通知用户、
+    不推送、用户侧接口永不返回。
+    Staff reply; optionally change status/priority at the same time. internal=true
+    makes it an internal note: no user notification, no push, never user-visible."""
+    ctx = _staff(admin)
+    staff = ctx.user
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
-    images = _checked_images(body.images, admin.id)
+    images = _checked_images(body.images, staff.id)
     old_status, old_priority = ticket.status, ticket.priority
     if body.status:
         ticket.status = body.status
@@ -560,21 +679,29 @@ def admin_reply_to_ticket(
     ticket.updated_at = _now()
     reply = TicketReply(
         ticket_id=ticket.id,
-        author_id=admin.id,
+        author_id=staff.id,
         body=body.body.strip(),
         images=images,
+        internal=bool(body.internal),
+        author_role=staff.role,
     )
     db.add(reply)
-    _audit_ticket_change(db, admin.id, ticket, old_status, old_priority, reply)
+    if body.internal:
+        # 内部备注单独记一个字段，免得日志里看成「回复了用户」。
+        # Internal notes get their own field so the log never reads as "replied to the user".
+        _audit_ticket_change(db, staff.id, ticket, old_status, old_priority)
+        log_change(db, staff.id, ticket.user_id, f"ticket:{ticket.id}:note", None, _reply_excerpt(reply))
+    else:
+        _audit_ticket_change(db, staff.id, ticket, old_status, old_priority, reply)
     # 站内通知与这次回复同一个事务：系统通知栏那条（下面的 dispatch_ticket_reply）
     # 可能因为没订阅、被墙、密钥没配而根本发不出去，铃铛里这一条是用户唯一一定
-    # 看得到的痕迹，不能跟着推送一起失败。管理员回自己提的工单不通知自己。
+    # 看得到的痕迹，不能跟着推送一起失败。工作人员回自己提的工单不通知自己；内部备注不通知用户。
     # The in-app row shares this transaction: the tray notification below can
     # simply not happen (no subscription, blocked network, no VAPID keys), which
     # makes the bell entry the one trace the user is guaranteed to see — it must
-    # not fail along with the push. An admin replying to their own ticket isn't
-    # notified.
-    notify_user_id = ticket.user_id if ticket.user_id != admin.id else None
+    # not fail along with the push. Staff replying to their own ticket aren't
+    # notified, and internal notes never notify the user.
+    notify_user_id = ticket.user_id if ticket.user_id != staff.id and not body.internal else None
     if notify_user_id:
         create_notification(
             db,
@@ -589,31 +716,25 @@ def admin_reply_to_ticket(
     if notify_user_id:
         notify_ws(notify_user_id)
 
-    # 推送通知给工单提交者 / notify the ticket submitter
-    try:
-        from app.services.push_dispatch import dispatch_ticket_reply
-        # 推送文案里不带管理员邮箱，与接口对用户隐藏邮箱一致（见 _author_email）。
-        # No staff email in the push text either, matching _author_email.
-        dispatch_ticket_reply(ticket.id, ticket.user_id)
-    except Exception:
-        # 行为不变（通知失败不影响回复成功），但要留痕：这个 except 连 import 失败
-        # 都一起吞，推送链路整体坏掉时表现为「用户再也收不到工单回复通知」，而服务端
-        # 完全没有迹象——静默失败的那种，只能靠用户来投诉才会发现。
-        # Behaviour unchanged (a failed notification must not fail the reply) but
-        # no longer traceless: this except swallows even an ImportError, so a
-        # broken push path shows up only as "users stopped getting ticket-reply
-        # notifications", with nothing server-side to notice it by.
-        logger.warning(
-            "工单回复推送失败: ticket=%s user=%s", ticket.id, ticket.user_id, exc_info=True
-        )
+        # 推送通知给工单提交者 / notify the ticket submitter
+        try:
+            from app.services.push_dispatch import dispatch_ticket_reply
+            # 推送文案里不带工作人员邮箱，与接口对用户隐藏邮箱一致（见 _author_email）。
+            # No staff email in the push text either, matching _author_email.
+            dispatch_ticket_reply(ticket.id, ticket.user_id)
+        except Exception:
+            # 行为不变（通知失败不影响回复成功），但要留痕：这个 except 连 import 失败
+            # 都一起吞，推送链路整体坏掉时表现为「用户再也收不到工单回复通知」，而服务端
+            # 完全没有迹象——静默失败的那种，只能靠用户来投诉才会发现。
+            # Behaviour unchanged (a failed notification must not fail the reply) but
+            # no longer traceless: this except swallows even an ImportError, so a
+            # broken push path shows up only as "users stopped getting ticket-reply
+            # notifications", with nothing server-side to notice it by.
+            logger.warning(
+                "工单回复推送失败: ticket=%s user=%s", ticket.id, ticket.user_id, exc_info=True
+            )
 
-    replies = (
-        db.query(TicketReply)
-        .filter(TicketReply.ticket_id == ticket_id)
-        .order_by(TicketReply.created_at.asc())
-        .all()
-    )
-    return _ticket_out(ticket, replies, True)
+    return _staff_ticket_out(db, ticket, ctx)
 
 
 @admin_router.patch("/{ticket_id}", response_model=TicketOut)
@@ -621,9 +742,10 @@ def admin_update_ticket(
     ticket_id: str,
     body: AdminTicketUpdate,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    admin: StaffCtx = Depends(require_staff),
 ):
     """仅修改 status / priority（不回复）。/ Change status/priority only, no reply."""
+    ctx = _staff(admin)
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
@@ -632,13 +754,52 @@ def admin_update_ticket(
         ticket.status = body.status
     if body.priority:
         ticket.priority = body.priority
-    _audit_ticket_change(db, admin.id, ticket, old_status, old_priority)
+    _audit_ticket_change(db, ctx.user.id, ticket, old_status, old_priority)
     db.commit()
     db.refresh(ticket)
-    replies = (
-        db.query(TicketReply)
-        .filter(TicketReply.ticket_id == ticket_id)
-        .order_by(TicketReply.created_at.asc())
-        .all()
-    )
-    return _ticket_out(ticket, replies, True)
+    return _staff_ticket_out(db, ticket, ctx)
+
+
+@admin_router.post("/{ticket_id}/assign", response_model=TicketOut)
+def admin_assign_ticket(
+    ticket_id: str,
+    body: AdminTicketAssign,
+    db: Session = Depends(get_db),
+    admin: StaffCtx = Depends(require_staff),
+):
+    """指派工单（rev 41）。admin：指派给任一在岗工作人员，或传 null 清空；客服：只能认领给自己，
+    或放弃自己名下的（传 null）。被指派人收到一条站内通知。
+    Assign a ticket. Admins assign to any on-duty staff member or clear it (null);
+    support agents may only claim it for themselves or release their own. The new
+    assignee gets an in-app notification."""
+    ctx = _staff(admin)
+    ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
+    target_id = body.assigneeId or None
+    if not ctx.is_admin:
+        if target_id is not None and target_id != ctx.user.id:
+            raise HTTPException(status_code=403, detail="客服只能认领给自己 / Support can only claim tickets for themselves")
+        if target_id is None and ticket.assignee_id not in (None, ctx.user.id):
+            raise HTTPException(status_code=403, detail="只能放弃自己名下的工单 / You can only release your own tickets")
+    target = None
+    if target_id is not None:
+        target = db.get(User, target_id)
+        if target is None or target.role not in STAFF_ROLES or target.disabled_at is not None:
+            raise HTTPException(status_code=400, detail="只能指派给在岗的客服或管理员 / Assignee must be active staff")
+    old = ticket.assignee_id
+    if old != target_id:
+        ticket.assignee_id = target_id
+        log_change(db, ctx.user.id, ticket.user_id, f"ticket:{ticket.id}:assignee", old, target_id)
+        notify_ids = []
+        if target is not None and target.id != ctx.user.id:
+            create_notification(
+                db, target.id, KIND_TICKET_NEW, text=ticket.title,
+                link=_staff_link(target.role, ticket.id), ref_id=ticket.id,
+            )
+            notify_ids.append(target.id)
+        db.commit()
+        for uid in notify_ids:
+            notify_ws(uid)
+    db.refresh(ticket)
+    return _staff_ticket_out(db, ticket, ctx)

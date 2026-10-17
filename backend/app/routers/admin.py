@@ -133,6 +133,8 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
         disabledReason=u.disabled_reason,
         inviteCode=u.invite_code,
         emailVerifiedAt=u.email_verified_at,
+        supportTier=u.support_tier,
+        supportRevealLimit=u.support_reveal_limit,
     )
 
 
@@ -292,7 +294,17 @@ def _apply_user_fields(db: Session, admin: User, target: User, fields: dict) -> 
     """
     if "role" in fields and fields["role"] is not None:
         _log_change(db, admin.id, target.id, "role", target.role, fields["role"])
+        # 客服被降为普通用户：名下进行中的跟进退回待分配池、工单解除指派（设计 §2.2）。
+        # A support agent demoted to user: active follow-ups return to the pool and
+        # ticket assignments are cleared (design §2.2).
+        if target.role == "support" and fields["role"] == "user":
+            from app.services.support_desk import release_staff_assignments
+
+            release_staff_assignments(db, target, admin.id)
         target.role = fields["role"]
+    if "supportTier" in fields:
+        _log_change(db, admin.id, target.id, "support_tier", target.support_tier, fields["supportTier"])
+        target.support_tier = fields["supportTier"]
     if "plan" in fields and fields["plan"] is not None:
         _log_change(db, admin.id, target.id, "plan", target.plan, fields["plan"])
         target.plan = fields["plan"]
@@ -547,6 +559,11 @@ def disable_user(
     target.disabled_reason = reason
     target.token_version = (target.token_version or 0) + 1
     _log_change(db, admin.id, target.id, "account:disable", before, _audit_disable_state(target))
+    # 停用的客服：跟进退回待分配池、工单解除指派（设计 §2.2）/ release a disabled agent's work
+    if target.role == "support":
+        from app.services.support_desk import release_staff_assignments
+
+        release_staff_assignments(db, target, admin.id)
     db.commit()
     # 桥接走 API Token 而不是 JWT，上面的 token_version 自增挡不住它；它的鉴权缓存里
     # 还放着停用前装载的 User。commit 之后换共享版本号，所有 worker 约 1 秒内回库

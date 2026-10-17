@@ -27,11 +27,14 @@ import GamificationPanel from '../components/admin/GamificationPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
 import EmailPanel from '../components/admin/EmailPanel'
 import ActivityLogPanel, { type LogsPreset } from '../components/admin/ActivityLogPanel'
+import SupportAdminPanel from '../components/admin/support/SupportAdminPanel'
 import { attributionOptions } from '../components/admin/invite/inviteLinkLogic'
 import type { AdminUser, InviteLink, UserPlan, UserRole, Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
-const ROLE_OPTIONS: UserRole[] = ['user', 'admin']
+// support = 客服（rev 41，设计 2026-10-17 §2）/ support = support-desk agent (rev 41)
+const ROLE_OPTIONS: UserRole[] = ['user', 'support', 'admin']
+type SupportTierDraft = '' | 'internal' | 'outsourced'
 
 // 归因筛选里「只看没有归因的人」的哨兵值，与后端 routers/admin.py 的 NO_INVITE
 // 是同一个字符串——真码是 8 位、字母表里没有 o，'none' 永远撞不上某条真链接。
@@ -102,11 +105,14 @@ const DEFAULT_PAGE_SIZE = 20
 // 「日志」按钮直接跳过来（见 logsPreset）。
 // logs (activity log) sits right after users: "what did this person do, who touched them"
 // starts from the user table, whose per-row Log button jumps here (see logsPreset).
-type AdminTab = 'data' | 'health' | 'winrate' | 'users' | 'logs' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'gamification' | 'competitions'
-const ADMIN_TABS: AdminTab[] = ['data', 'health', 'winrate', 'users', 'logs', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'gamification', 'competitions']
+// support（客服）紧跟 tickets：工单分派与客服管理是同一件事的两面。
+// support sits next to tickets: ticket routing and staff management are two sides of one job.
+type AdminTab = 'data' | 'health' | 'winrate' | 'users' | 'logs' | 'invites' | 'ops' | 'system' | 'guide' | 'announcements' | 'email' | 'tickets' | 'support' | 'gamification' | 'competitions'
+const ADMIN_TABS: AdminTab[] = ['data', 'health', 'winrate', 'users', 'logs', 'invites', 'ops', 'system', 'guide', 'announcements', 'email', 'tickets', 'support', 'gamification', 'competitions']
 
 interface Draft {
   role: UserRole
+  supportTier: SupportTierDraft
   plan: UserPlan
   planExpiresAt: string // yyyy-mm-dd，空字符串表示永不到期 / empty string = never expires
   planNote: string
@@ -115,6 +121,7 @@ interface Draft {
 function toDraft(u: AdminUser): Draft {
   return {
     role: u.role,
+    supportTier: u.supportTier ?? '',
     plan: u.plan,
     planExpiresAt: u.planExpiresAt ? u.planExpiresAt.slice(0, 10) : '',
     planNote: u.planNote ?? '',
@@ -124,7 +131,7 @@ function toDraft(u: AdminUser): Draft {
 function isDirty(u: AdminUser, d: Draft | undefined): boolean {
   if (!d) return false
   const origExpiry = u.planExpiresAt ? u.planExpiresAt.slice(0, 10) : ''
-  return d.role !== u.role || d.plan !== u.plan || d.planExpiresAt !== origExpiry || d.planNote !== (u.planNote ?? '')
+  return d.role !== u.role || (d.role === 'support' && d.supportTier !== (u.supportTier ?? '')) || d.plan !== u.plan || d.planExpiresAt !== origExpiry || d.planNote !== (u.planNote ?? '')
 }
 
 // ---- 工单管理面板 / Ticket Management Panel ----
@@ -296,11 +303,15 @@ function AdminTicketsPanel() {
 
           <div className="mb-4">
             {detail.replies.map((r) => (
-              <div key={r.id} className={`flex ${r.authorRole === 'admin' ? 'justify-start' : 'justify-end'} mb-3`}>
-                <div className={`max-w-[80%] rounded-xl px-4 py-3 ${r.authorRole === 'admin' ? 'bg-prism-600/10' : 'bg-white/5'}`}>
+              <div key={r.id} className={`flex ${r.authorRole !== 'user' ? 'justify-start' : 'justify-end'} mb-3`}>
+                {/* 内部备注（rev 41）琥珀色虚线框：用户永远看不到 / internal notes (rev 41): never user-visible */}
+                <div className={`max-w-[80%] rounded-xl px-4 py-3 ${
+                  r.internal ? 'border border-dashed border-amber-400/40 bg-amber-400/10' : r.authorRole !== 'user' ? 'bg-prism-600/10' : 'bg-white/5'
+                }`}>
                   <div className="mb-1 flex items-center gap-2 text-[11px] text-neutral-500">
-                    <span className="font-medium text-neutral-300">{r.authorEmail}</span>
-                    {r.authorRole === 'admin' && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{t('admin.staff')}</span>}
+                    <span className="font-medium text-neutral-300">{r.authorRole !== 'user' && r.authorName ? r.authorName : r.authorEmail}</span>
+                    {r.authorRole !== 'user' && <span className="rounded bg-prism-600/20 px-1.5 py-0.5 text-[10px] text-prism-300">{r.authorRole === 'support' ? t('supportDesk.role.support') : t('admin.staff')}</span>}
+                    {r.internal && <span className="rounded bg-amber-400/20 px-1.5 py-0.5 text-[10px] text-amber-200">{t('supportDesk.thread.internalTag')}</span>}
                     {/* 统一走 api/utils 的格式化：裸 toLocaleString 既不补 Z、也按
                         浏览器本地时区渲染，欧美时区的管理员看到的时刻整段偏移，
                         而且没有任何后缀说明这是哪个时区（见 api/utils 的头注）。
@@ -357,7 +368,7 @@ function AdminTicketsPanel() {
             <select className="input w-auto py-1 text-sm" value={categoryFilter}
               onChange={(e) => setCategoryFilter(e.target.value)}>
               <option value="">{t('tickets.admin.all')}</option>
-              {(['account', 'payment', 'claim', 'technical', 'feature'] as TicketCategory[]).map((c) => (
+              {(['account', 'payment', 'claim', 'technical', 'feature', 'follow_up'] as TicketCategory[]).map((c) => (
                 <option key={c} value={c}>{t(`tickets.category.${c}`)}</option>
               ))}
             </select>
@@ -498,6 +509,8 @@ export default function AdminPage() {
   // 批量条上「发邮件」带到邮件页签的那批用户；邮件面板挂载时读一次。
   // Users handed to the email tab by the bulk bar's "email" button; read once on mount.
   const [emailPreset, setEmailPreset] = useState<string[]>([])
+  // 批量条「分配跟进」带到客服页签的那批用户 / users handed to the support tab's assign page
+  const [assignPreset, setAssignPreset] = useState<string[]>([])
   const [bulkRole, setBulkRole] = useState('')
   const [bulkPlan, setBulkPlan] = useState('')
   // 到期时间需要单独一个"是否要改"开关：日期本身留空是合法值（永不到期），
@@ -888,6 +901,8 @@ export default function AdminPage() {
     try {
       const updated = await adminApi.updateUser(u.id, {
         role: d.role,
+        // 客服带 tier；未选 = 按外包处理（后端同口径）/ support carries a tier; unset reads as outsourced
+        ...(d.role === 'support' && d.supportTier !== (u.supportTier ?? '') ? { supportTier: d.supportTier || null } : {}),
         plan: d.plan,
         planExpiresAt: d.planExpiresAt ? new Date(`${d.planExpiresAt}T00:00:00Z`).toISOString() : null,
         planNote: d.planNote.trim() || null,
@@ -963,6 +978,8 @@ export default function AdminPage() {
 
       {tab === 'tickets' && <AdminTicketsPanel />}
 
+      {tab === 'support' && <SupportAdminPanel assignPreset={assignPreset} onAssignPresetCleared={() => setAssignPreset([])} />}
+
       {tab === 'gamification' && <GamificationPanel />}
 
       {tab === 'competitions' && <CompetitionsPanel />}
@@ -1019,7 +1036,7 @@ export default function AdminPage() {
             value={bulkRole}
             onChange={setBulkRole}
             openUpward
-            options={[{ value: '', label: t('admin.bulkNoChange') }, ...ROLE_OPTIONS.map((r) => ({ value: r, label: r }))]}
+            options={[{ value: '', label: t('admin.bulkNoChange') }, ...ROLE_OPTIONS.map((r) => ({ value: r, label: t(`admin.support.role.${r}`) }))]}
           />
           <span className="text-xs text-neutral-500">{t('admin.colPlan')}</span>
           <Select
@@ -1077,6 +1094,15 @@ export default function AdminPage() {
             }}
           >
             {t('admin.bulkEmail')}
+          </button>
+          <button
+            className="btn-ghost px-4 py-1.5 text-xs"
+            onClick={() => {
+              setAssignPreset(Array.from(selectedIds))
+              setTab('support')
+            }}
+          >
+            {t('admin.support.bulkAssign')}
           </button>
           <button className="btn-ghost px-4 py-1.5 text-xs" onClick={() => setSelectedIds(new Set())}>
             {t('admin.bulkClear')}
@@ -1248,8 +1274,23 @@ export default function AdminPage() {
                         value={d.role}
                         onChange={(v) => updateDraft(u.id, { role: v as UserRole })}
                         className="select-tight"
-                        options={ROLE_OPTIONS.map((r) => ({ value: r, label: r }))}
+                        options={ROLE_OPTIONS.map((r) => ({ value: r, label: t(`admin.support.role.${r}`) }))}
                       />
+                      {d.role === 'support' && (
+                        <div className="mt-1.5">
+                          <Select
+                            value={d.supportTier}
+                            onChange={(v) => updateDraft(u.id, { supportTier: v as SupportTierDraft })}
+                            className="select-tight"
+                            ariaLabel={t('admin.support.staff.tier')}
+                            options={[
+                              { value: '', label: t('admin.support.staff.tierUnset') },
+                              { value: 'internal', label: t('admin.support.tier.internal') },
+                              { value: 'outsourced', label: t('admin.support.tier.outsourced') },
+                            ]}
+                          />
+                        </div>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <Select

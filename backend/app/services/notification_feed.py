@@ -40,6 +40,13 @@ KIND_AGENT_PLAN_CHANGE = "agent_plan_change"
 # earlier are anonymous there; tell them they can opt in from the competition
 # page. Title copy: frontend `notifFeed.comp_public_name`.
 KIND_COMP_PUBLIC_NAME = "comp_public_name"
+# 客服台（rev 41）：给客服的跟进提醒（到点 / 新分配 / 即将过期 / 已过期），text 带用户昵称或
+# 编号；给 admin 的客服异常提醒（查看电话 / 卡片超阈值）与跟进过期汇总。前端需补
+# `notifFeed.support_reminder` / `notifFeed.support_alert`（5 语）。
+# Support desk (rev 41): follow-up reminders for staff and anomaly / expiry alerts
+# for admins. Frontend copy: notifFeed.support_reminder / notifFeed.support_alert.
+KIND_SUPPORT_REMINDER = "support_reminder"
+KIND_SUPPORT_ALERT = "support_alert"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再
 # 兜一道，避免将来别的来源塞进超长字符串。

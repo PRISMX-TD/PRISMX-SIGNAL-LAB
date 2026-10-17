@@ -25,6 +25,7 @@ export const PIXEL_BLOCKED_PATHS = [
   '/unsubscribe',
   '/admin',
   '/agent',
+  '/support-desk',
   '/simulator',
   '/support',
   '/account',

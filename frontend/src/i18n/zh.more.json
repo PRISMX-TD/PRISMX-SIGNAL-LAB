@@ -224,7 +224,8 @@
       "bridge_offline": "PRISMX Bridge 掉线",
       "account_revoked": "直连账号需重新验证",
       "strategy_signal": "我的策略信号",
-      "badge_awarded": "获得新勋章"
+      "badge_awarded": "获得新勋章",
+      "support_reminder": "客服跟进提醒"
     },
     "notifWindowHeading": "推送时段",
     "notifWindowEnable": "仅在指定时段推送",
@@ -1067,7 +1068,8 @@
       "tickets": "工单管理",
       "gamification": "游戏化",
       "competitions": "比赛",
-      "health": "系统状态"
+      "health": "系统状态",
+      "support": "客服"
     },
     "log": {
       "title": "操作日志",
@@ -1107,7 +1109,8 @@
         "qLogin": "按 MT5 账号 / 手机号搜：{{q}}",
         "abnormal": "只看异常",
         "remove": "去掉这个筛选",
-        "clearAll": "清除全部筛选"
+        "clearAll": "清除全部筛选",
+        "staff": "客服：{{name}}"
       },
       "refresh": "刷新",
       "refreshing": "刷新中…",
@@ -1190,7 +1193,9 @@
         "admin": "管理员 {{name}}",
         "agent": "代理 {{name}}",
         "adminAnon": "管理员",
-        "agentAnon": "代理"
+        "agentAnon": "代理",
+        "support": "客服 {{name}}",
+        "supportAnon": "客服"
       },
       "status": {
         "ok": "成功",
@@ -1432,7 +1437,8 @@
         },
         "role": {
           "user": "普通用户",
-          "admin": "管理员"
+          "admin": "管理员",
+          "support": "客服"
         },
         "autoField": {
           "enabled": "自动仓管",
@@ -1779,7 +1785,56 @@
         "other": {
           "head": "修改了："
         },
-        "unknown": "一条暂时认不出的记录（原始信息见详情）"
+        "unknown": "一条暂时认不出的记录（原始信息见详情）",
+        "support": {
+          "view": "查看了客户资料",
+          "reveal": "查看了完整电话",
+          "search": "做了一次精确查找",
+          "searchHits": "做了一次精确查找，命中 {{n}} 个",
+          "reason": "（原因：{{v}}）",
+          "reqKind": {
+            "comp_days": "补偿天数",
+            "follow_up": "跟进申请",
+            "conversion_manual": "开户标记",
+            "other": "申请"
+          },
+          "act": {
+            "resend_verification": "重发了验证邮件",
+            "unbind": "解绑了 MT5 账户",
+            "reset_trial": "重置了试用资格",
+            "comp_days": "补偿了 {{n}} 天会员",
+            "comp_days_requested": "申请补偿 {{n}} 天会员",
+            "do_not_contact": "标记为不再联系",
+            "message": "发了一条站内消息",
+            "conversion_manual_requested": "提交了开户标记",
+            "approve": "批准了{{kind}}",
+            "reject": "驳回了{{kind}}",
+            "conversionApproved": "确认了一条转化",
+            "conversionRejected": "驳回了一条转化",
+            "conversion_manual": "手动记录了一条转化"
+          },
+          "fu": {
+            "assign": "分配了跟进",
+            "assignGoal": "分配了跟进，目标：{{goal}}",
+            "request": "申请跟进",
+            "requestGoal": "申请跟进，目标：{{goal}}",
+            "revoke": "收回了跟进",
+            "revokeStaff": "客服被移除，跟进已收回",
+            "reassign": "把跟进转给了其他客服",
+            "extend": "延长了跟进期限",
+            "extendTo": "把跟进期限延长到 {{v}}",
+            "note": "添加了跟进记录",
+            "noteVia": "添加了跟进记录（{{ch}}）",
+            "update": "更新了跟进",
+            "updateHead": "更新了跟进：",
+            "statusChange": "状态从{{a}}改为{{b}}",
+            "statusSet": "状态设为{{b}}",
+            "nextSet": "下次跟进 {{v}}",
+            "nextCleared": "清除了下次跟进时间",
+            "message": "通过跟进发了消息",
+            "expired": "跟进到期自动结束"
+          }
+        }
       },
       "kindName": {
         "user": {
@@ -1854,8 +1909,18 @@
         },
         "agent": {
           "plan": "代理调整会员"
+        },
+        "support": {
+          "view_customer": "查看客户",
+          "reveal_phone": "查看完整电话",
+          "search": "客服查找",
+          "action": "客服操作",
+          "follow_up": "跟进"
         }
-      }
+      },
+      "staffFilter": "按客服",
+      "staffAll": "全部人员",
+      "staffHint": "只在已加载的记录里筛选"
     },
     "health": {
       "title": "系统状态",
@@ -2945,6 +3010,127 @@
       },
       "rate": "访问 → 注册转化率",
       "note": "访问按每个浏览器会话计一次；注册按同一浏览器 7 天内最近一次首页访问的模式归属。按 UTC 日期统计。落地页模式没有注册弹窗，不统计中间两步。"
+    },
+    "support": {
+      "bulkAssign": "分配给客服",
+      "openDesk": "打开客服台",
+      "sub": {
+        "staff": "客服成员",
+        "assign": "分配跟进",
+        "approvals": "审批",
+        "performance": "业绩",
+        "templates": "快捷回复",
+        "settings": "设置"
+      },
+      "role": {
+        "user": "普通用户",
+        "support": "客服",
+        "admin": "管理员"
+      },
+      "tier": {
+        "internal": "内部",
+        "outsourced": "外包"
+      },
+      "staff": {
+        "empty": "还没有客服。在「用户」里把角色改成客服即可。",
+        "onDuty": "在岗",
+        "openTickets": "处理中工单",
+        "activeFollowUps": "进行中跟进",
+        "revealsToday": "今日查看电话",
+        "tier": "类型",
+        "tierUnset": "未设置",
+        "revealLimit": "每日查看电话上限",
+        "revealLimitHint": "留空使用默认值 {{n}}",
+        "lastActive": "最后活跃 {{time}}"
+      },
+      "assign": {
+        "pickTitle": "选择要跟进的用户",
+        "formTitle": "分配 {{n}} 位用户",
+        "assignee": "客服",
+        "chooseAssignee": "选择客服",
+        "priority": "优先级",
+        "expires": "跟进期限（天）",
+        "notePlaceholder": "给客服的说明（可选）",
+        "willAssign": "将分配 {{n}} 位",
+        "skipDnc": "{{n}} 位要求不再联系，跳过",
+        "skipActive": "{{n}} 位已有进行中的跟进，跳过",
+        "skipStaff": "{{n}} 位是工作人员，跳过",
+        "optedOut": "{{n}} 位关闭了营销通知",
+        "includeOptedOut": "仍然分配关闭营销通知的用户",
+        "submit": "分配",
+        "done": "已分配 {{created}} 位，跳过 {{skipped}} 位",
+        "confirmTitle": "确认分配",
+        "confirmBody": "把 {{n}} 位用户分配给 {{name}}，目标：{{goal}}？"
+      },
+      "followUps": {
+        "updated": "已更新 {{n}} 条",
+        "title": "跟进列表（{{n}}）",
+        "allStaff": "全部客服",
+        "allStatus": "全部状态",
+        "active": "进行中",
+        "closed": "已结束",
+        "reassign": "转给他人",
+        "reassignTo": "转给",
+        "extendDays": "延长天数",
+        "extend": "延期",
+        "revoke": "收回",
+        "empty": "没有符合条件的跟进",
+        "colUser": "用户",
+        "revokeBody": "收回选中的 {{n}} 条跟进？客服将不能再查看这些用户。"
+      },
+      "approvals": {
+        "approved": "已批准",
+        "rejected": "已驳回",
+        "compDays": "补偿 {{n}} 天：{{reason}}",
+        "followUp": "申请跟进：{{goal}}",
+        "conversion": "开户标记：{{server}} / {{login}}",
+        "approve": "批准",
+        "reject": "驳回",
+        "requests": "客服申请（{{n}}）",
+        "none": "没有待审批的项目",
+        "by": "申请人：{{name}}",
+        "conversions": "待审核转化（{{n}}）",
+        "credited": "计入：{{name}}",
+        "approveBody": "确认批准？",
+        "rejectBody": "确认驳回？",
+        "notePlaceholder": "审批备注（可选）"
+      },
+      "perf": {
+        "start": "开始日期",
+        "end": "结束日期",
+        "hint": "按北京时间统计；转化只计确认过的。",
+        "empty": "这段时间没有数据",
+        "staff": "客服",
+        "assigned": "分配",
+        "contacted": "已联系",
+        "interested": "有意向",
+        "converted": "转化",
+        "rate": "转化率",
+        "firstContact": "首次联系用时",
+        "hours": "{{n}} 小时"
+      },
+      "templates": {
+        "anyLang": "所有语言",
+        "title": "标题",
+        "lang": "语言",
+        "body": "内容",
+        "add": "新增快捷回复",
+        "empty": "还没有快捷回复",
+        "edit": "编辑",
+        "deleteBody": "删除快捷回复「{{title}}」？"
+      },
+      "settings": {
+        "support_comp_days_max": "客服单次补偿天数上限",
+        "support_comp_days_max_hint": "超过要管理员审批",
+        "support_follow_up_days": "默认跟进期限（天）",
+        "support_follow_up_days_hint": "分配时未填写就用这个值",
+        "support_outsourced_reveal_daily": "外包客服每日查看电话上限",
+        "support_outsourced_reveal_daily_hint": "个人设置的上限优先",
+        "support_alert_reveal_per_hour": "每小时查看电话告警阈值",
+        "support_alert_reveal_per_hour_hint": "超过会通知管理员",
+        "support_alert_views_per_hour": "每小时查看客户告警阈值",
+        "support_alert_views_per_hour_hint": "超过会通知管理员"
+      }
     }
   },
   "simulator": {
@@ -3315,7 +3501,8 @@
       "payment": "支付/账单",
       "claim": "申领",
       "technical": "技术故障",
-      "feature": "功能建议"
+      "feature": "功能建议",
+      "follow_up": "客服来信"
     },
     "priority": {
       "low": "低",
@@ -3364,7 +3551,9 @@
       "tooBig": "图片太大，单张上限 4MB",
       "rateLimited": "上传太频繁，请稍后再试",
       "noStorage": "暂时无法上传图片，请改用文字描述"
-    }
+    },
+    "staffLabel": "Signal Lab 客服",
+    "staffName": "Signal Lab 客服 · {{name}}"
   },
   "dashboard": {
     "sessionWinrate": {
@@ -4073,6 +4262,221 @@
       "login": "已有账号？登录",
       "learnMore": "了解 Signal Lab",
       "social": "{{n}} 个账户正在参加「{{name}}」"
+    }
+  },
+  "supportDesk": {
+    "title": "客服台",
+    "retry": "重试",
+    "yes": "是",
+    "no": "否",
+    "pickSomething": "从左侧选一张工单或一位跟进用户",
+    "pickCustomer": "正在载入提交人资料…",
+    "backToList": "返回列表",
+    "backToThread": "返回工单",
+    "tab": {
+      "tickets": "工单",
+      "followUps": "我的跟进"
+    },
+    "search": {
+      "placeholder": "精确查找：邮箱 / 用户 ID / 工单号",
+      "go": "查找",
+      "none": "没有找到，或你无权查看这位用户"
+    },
+    "tier": {
+      "internal": "内部客服",
+      "outsourced": "外包客服"
+    },
+    "role": {
+      "user": "用户",
+      "support": "客服",
+      "admin": "管理员"
+    },
+    "queue": {
+      "scope": "工单范围",
+      "status": "工单状态",
+      "me": "我的",
+      "none": "未分配",
+      "all": "全部",
+      "anyStatus": "全部状态",
+      "empty": "这里没有工单",
+      "assignedTo": "处理人：{{name}}",
+      "unassignedTag": "未分配"
+    },
+    "thread": {
+      "internalTag": "内部备注",
+      "assigned": "指派已更新",
+      "noteSaved": "内部备注已保存",
+      "customer": "查看客户",
+      "assignTo": "指派给",
+      "unassign": "未分配",
+      "me": "我自己",
+      "release": "放弃这张工单",
+      "claim": "认领",
+      "modeReply": "回复用户",
+      "modeInternal": "内部备注",
+      "insertTemplate": "插入快捷回复",
+      "internalHint": "内部备注只有客服和管理员看得到，不会通知用户。",
+      "internalPlaceholder": "写给同事的备注（用户看不到）",
+      "saveNote": "保存备注"
+    },
+    "followUps": {
+      "count": "进行中 {{n}} 位",
+      "empty": "暂时没有分配给你的跟进",
+      "overdue": "已逾期：",
+      "next": "下次跟进：",
+      "noNext": "未设置下次跟进时间"
+    },
+    "requests": {
+      "title": "我提交的申请",
+      "status": {
+        "pending": "待审批",
+        "approved": "已批准",
+        "rejected": "已驳回"
+      },
+      "kind": {
+        "comp_days": "补偿天数",
+        "follow_up": "申请跟进",
+        "conversion_manual": "开户标记"
+      }
+    },
+    "priority": {
+      "low": "低",
+      "normal": "普通",
+      "high": "高"
+    },
+    "status": {
+      "pending": "待联系",
+      "contacted": "已联系",
+      "interested": "有意向",
+      "converted": "已转化",
+      "no_interest": "无意向",
+      "unreachable": "联系不上",
+      "revoked": "已收回",
+      "expired": "已过期"
+    },
+    "goal": {
+      "open_mt5": "开真实交易账户",
+      "open_signallab": "开通 Signal Lab",
+      "renew": "续费",
+      "activate_trial": "激活试用",
+      "revisit": "回访"
+    },
+    "channel": {
+      "phone": "电话",
+      "email": "邮件",
+      "in_app": "站内",
+      "other": "其他"
+    },
+    "conversions": {
+      "empty": "还没有转化记录",
+      "kind": {
+        "mt5_real": "MC 真实账户",
+        "signallab_register": "注册",
+        "signallab_verified": "邮箱验证",
+        "signallab_paid": "首次付费"
+      },
+      "status": {
+        "confirmed": "已确认",
+        "pending_review": "待审核",
+        "rejected": "已驳回"
+      },
+      "manual": "手动",
+      "mine": "我的业绩"
+    },
+    "card": {
+      "noNickname": "（未设昵称）",
+      "real": "真实",
+      "demo": "模拟",
+      "bound": "已绑定",
+      "mt5": "MT5 账户",
+      "goal": "跟进目标",
+      "revealLimitHit": "今日查看完整电话的次数已用完",
+      "linkCopied": "开户链接已复制",
+      "copyFailed": "复制失败，请手动复制",
+      "noteAdded": "跟进记录已添加",
+      "dncDone": "已标记为不再联系，当前跟进已关闭",
+      "complianceTitle": "合规提示：",
+      "compliance": "不得承诺收益或保本；不得索要密码、验证码；一律以 Signal Lab 名义沟通。",
+      "trial": "试用",
+      "disabled": "已停用",
+      "dncTag": "不再联系",
+      "email": "邮箱",
+      "verified": "已验证",
+      "unverified": "未验证",
+      "phone": "电话",
+      "reveal": "查看完整号码",
+      "revealLeft": "今日还可查看 {{n}} 次",
+      "region": "地区（区号）",
+      "registered": "注册时间",
+      "lastActive": "最后活跃",
+      "source": "来源链接",
+      "noSource": "自然注册",
+      "planExpires": "会员到期",
+      "permanent": "永久",
+      "trialUsed": "已用过试用",
+      "online": "在线连接",
+      "gateway": "直连",
+      "competitions": "比赛报名",
+      "paidTotal": "累计付费",
+      "copyOpenAccount": "复制开户链接",
+      "noMt5": "还没有绑定 MT5 账户",
+      "balance": "余额",
+      "followUp": "我的跟进",
+      "expires": "截止 {{time}}",
+      "status": "跟进状态",
+      "statusSaved": "跟进状态已更新",
+      "closingHint": "选「已转化 / 无意向 / 联系不上」会结束这条跟进。",
+      "nextContact": "下次跟进时间（UTC+8）",
+      "nextSaved": "下次跟进时间已更新",
+      "clearNext": "清除",
+      "notes": "跟进记录",
+      "noNotes": "还没有跟进记录",
+      "outcome": "结果",
+      "channel": "联系方式",
+      "outcomePlaceholder": "结果（可选，如：约好周五再聊）",
+      "notePlaceholder": "这次沟通的内容",
+      "appendOnly": "跟进记录只能追加，保存后不能修改或删除。",
+      "addNote": "添加记录",
+      "actions": "操作",
+      "dnc": "用户要求不再联系",
+      "conversions": "转化时间线",
+      "tickets": "工单",
+      "dncBody": "确认用户要求不再联系？当前跟进会转为「无意向」，以后也不会再分配给任何客服。"
+    },
+    "actions": {
+      "reason": "原因 / 备注",
+      "optional": "（可选）",
+      "resend": "重发验证邮件",
+      "resendOk": "验证邮件已发出",
+      "alreadyVerified": "该用户已经验证过邮箱",
+      "resendBody": "给用户的注册邮箱再发一封验证邮件（与用户自己点重发同样受频率限制）。",
+      "unbind": "解绑 MT5",
+      "unbindOk": "已解绑",
+      "unbindBody": "解绑后用户需要重新绑定这个账户。桥接账户在线时不能解绑。",
+      "resetTrial": "重置试用",
+      "resetTrialOk": "试用资格已重置",
+      "resetTrialBody": "让用户可以再领一次试用。每位用户只能由客服重置一次。",
+      "resetTrialBodyAdmin": "让用户可以再领一次试用。管理员重置不受次数限制。",
+      "compDays": "补偿会员天数",
+      "compDaysOk": "已补偿 {{n}} 天",
+      "compDaysQueued": "超过上限，已提交给管理员审批",
+      "compDaysBody": "单次不超过 {{n}} 天直接生效，超过会提交给管理员审批。",
+      "compDaysBodyAdmin": "管理员补偿直接生效，不受天数上限限制。",
+      "days": "天数",
+      "compDaysOverCap": "超过直接生效的上限，将提交审批。",
+      "message": "发站内消息",
+      "send": "发送",
+      "messageOk": "消息已发出，用户会在工单里看到",
+      "messageBody": "以 Signal Lab 客服的身份给用户开一张新工单，用户会收到通知。",
+      "messageTitle": "标题",
+      "messageText": "内容",
+      "requestFollowUp": "申请跟进",
+      "requestSent": "申请已提交，等待管理员审批",
+      "requestFollowUpBody": "觉得这位用户有潜力？提交申请，管理员批准后会分配给你跟进。",
+      "requestConversion": "标记开户",
+      "requestConversionBody": "用户已在 MC 开了真实账户但系统没识别到？填写服务器和账号，管理员审核后计入业绩。",
+      "server": "MT5 服务器",
+      "login": "MT5 账号"
     }
   }
 }
