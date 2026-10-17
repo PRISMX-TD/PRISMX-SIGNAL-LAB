@@ -198,11 +198,11 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
       <p className="mb-4 text-sm text-neutral-400">{t('admin.invite.hint')}</p>
 
       {/* ① 统计条：全量，不随筛选变 / stats strip: every link, unaffected by filters */}
-      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="adm-kpis is-quad mb-4">
         {stats.map((s) => (
-          <div key={s.key} className="glass p-4">
-            <p className="text-[11px] uppercase tracking-wide text-neutral-500">{s.label}</p>
-            <p className="num mt-1 text-2xl text-neutral-100">{loading ? '—' : s.value}</p>
+          <div key={s.key} className="adm-kpi">
+            <p className="adm-kpi-label">{s.label}</p>
+            <p className="adm-kpi-value num">{loading ? '—' : s.value}</p>
           </div>
         ))}
       </div>

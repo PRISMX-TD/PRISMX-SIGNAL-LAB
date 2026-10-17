@@ -1,5 +1,7 @@
-// 看板顶部五张指标卡。今日/周/月活跃永远"截至今天"，不跟范围走；新注册跟范围走并带对比。
-// Five headline tiles. Active counts are always "as of today"; signups follow the range.
+// 看板顶部的五个核心指标，排成一条指标带（样式在 admin.css）。今日/周/月活跃永远"截至今天"，
+// 不跟范围走；新注册跟范围走并带对比。
+// The five headline figures as one KPI strip (styles in admin.css). Active counts are always
+// "as of today"; signups follow the range.
 import { useTranslation } from 'react-i18next'
 import type { AdminOverviewHeadline, Compare } from '../../../api/types'
 
@@ -14,12 +16,17 @@ export function DeltaBadge({ current, previous }: Compare) {
   return <span className={`text-[11px] tabular-nums ${cls}`}>{t('admin.overview.delta.vsPrev', { pct: `${sign}${pct}%` })}</span>
 }
 
-function Tile({ label, value, accent, footer }: { label: string; value: number; accent?: string; footer?: React.ReactNode }) {
+// live：今日活跃前面亮一个小绿点，表示这个数是实时的，不跟上面选的范围。
+// live: a small green dot on "active today", the one figure that is real-time.
+function Kpi({ label, value, live, footer }: { label: string; value: number; live?: boolean; footer?: React.ReactNode }) {
   return (
-    <div className="glass px-4 py-4">
-      <div className="text-xs text-neutral-400">{label}</div>
-      <div className={`num mt-1 font-display text-2xl font-bold ${accent ?? 'text-neutral-50'}`}>{value}</div>
-      {footer && <div className="mt-1">{footer}</div>}
+    <div className="adm-kpi">
+      <div className="adm-kpi-label">
+        {live && <span className="adm-live-dot" aria-hidden />}
+        {label}
+      </div>
+      <div className="adm-kpi-value num">{value.toLocaleString()}</div>
+      {footer && <div className="adm-kpi-foot">{footer}</div>}
     </div>
   )
 }
@@ -27,12 +34,12 @@ function Tile({ label, value, accent, footer }: { label: string; value: number; 
 export default function HeadlineCards({ headline }: { headline: AdminOverviewHeadline }) {
   const { t } = useTranslation()
   return (
-    <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-      <Tile label={t('admin.totalUsers')} value={headline.totalUsers} />
-      <Tile label={t('admin.overview.headline.activeToday')} value={headline.activeToday} accent="text-up" />
-      <Tile label={t('admin.overview.headline.activeWeek')} value={headline.activeWeek} accent="text-prism-300" />
-      <Tile label={t('admin.overview.headline.activeMonth')} value={headline.activeMonth} accent="text-prism-300" />
-      <Tile label={t('admin.overview.headline.signups')} value={headline.signups.current} footer={<DeltaBadge {...headline.signups} />} />
+    <div className="adm-kpis mb-5">
+      <Kpi label={t('admin.totalUsers')} value={headline.totalUsers} />
+      <Kpi label={t('admin.overview.headline.activeToday')} value={headline.activeToday} live />
+      <Kpi label={t('admin.overview.headline.activeWeek')} value={headline.activeWeek} />
+      <Kpi label={t('admin.overview.headline.activeMonth')} value={headline.activeMonth} />
+      <Kpi label={t('admin.overview.headline.signups')} value={headline.signups.current} footer={<DeltaBadge {...headline.signups} />} />
     </div>
   )
 }

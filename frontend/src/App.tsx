@@ -619,8 +619,11 @@ export default function App() {
                   </StaffOnly>
                 }
               />
+              {/* 管理控制台的分区都在 /admin/ 之下（/admin/users、/admin/logs…），旧的 /admin?tab= 由页面自己换成分区地址。
+                  Console sections live under /admin/ (/admin/users, /admin/logs…); the page itself
+                  rewrites legacy /admin?tab= links to section URLs. */}
               <Route
-                path="/admin"
+                path="/admin/*"
                 element={
                   <AdminOnly>
                     <AdminPage />

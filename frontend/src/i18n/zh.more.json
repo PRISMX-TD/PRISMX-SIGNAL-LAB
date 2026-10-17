@@ -1052,6 +1052,50 @@
   "admin": {
     "title": "管理者页面",
     "subtitle": "用户等级、角色与基础运营指标",
+    "console": {
+      "title": "管理控制台",
+      "selectedPre": "已选",
+      "selectedPost": "位",
+      "ticketCount": "共 {{n}} 张工单",
+      "pendingApprovals": "{{n}} 项待审批",
+      "group": {
+        "overview": "总览",
+        "users": "用户",
+        "growth": "增长",
+        "content": "内容",
+        "support": "客服",
+        "settings": "设置"
+      },
+      "groupDesc": {
+        "overview": "平台的运营数据与系统健康状况。",
+        "users": "账号、角色与订阅，以及每个人的操作记录。",
+        "growth": "推广链接、交易比赛与等级榜单。",
+        "content": "用户看到的内容：策略介绍、胜率公开、公告与邮件。",
+        "support": "工单、客服成员、跟进分配与审批。",
+        "settings": "商业条款与后台计算参数。"
+      },
+      "section": {
+        "data": "数据看板",
+        "health": "系统状态",
+        "users": "用户列表",
+        "logs": "操作日志",
+        "invites": "邀请链接",
+        "competitions": "比赛",
+        "gamification": "游戏化",
+        "guide": "策略介绍",
+        "winrate": "策略公开",
+        "announcements": "公告",
+        "email": "邮件",
+        "tickets": "工单",
+        "staff": "客服成员",
+        "assign": "分配跟进",
+        "approvals": "审批",
+        "performance": "业绩",
+        "templates": "快捷回复",
+        "ops": "运营设置",
+        "system": "系统参数"
+      }
+    },
     "totalUsers": "总用户数",
     "planBreakdown": "订阅等级",
     "tab": {

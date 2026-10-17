@@ -163,7 +163,7 @@ export default function AssignPanel({
 
   return (
     <div className="space-y-5">
-      <section className="space-y-3">
+      <section className="glass space-y-3 p-4">
         <h3 className="text-sm font-semibold text-neutral-200">{t('admin.support.assign.pickTitle')}</h3>
         <EmailRecipientPicker kind="notice" picked={picked} onChange={setPicked} onError={(text) => onToast('err', text)} />
       </section>

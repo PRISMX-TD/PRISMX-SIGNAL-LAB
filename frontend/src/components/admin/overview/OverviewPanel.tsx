@@ -76,12 +76,12 @@ export default function OverviewPanel() {
 
   return (
     <>
-      <RangePicker value={range} onChange={setRange} />
-      {overview.data && (
-        <p className="-mt-3 mb-4 text-xs text-neutral-500">
-          {t('admin.overview.range.shown', { ...overview.data.range })}
-        </p>
-      )}
+      <RangePicker
+        value={range}
+        onChange={setRange}
+        look="seg"
+        trailing={overview.data && <span className="tabular-nums">{t('admin.overview.range.shown', { ...overview.data.range })}</span>}
+      />
 
       {overview.error ? (
         <FailedCard message={overview.error} onRetry={overview.reload} />

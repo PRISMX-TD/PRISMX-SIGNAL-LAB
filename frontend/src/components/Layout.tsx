@@ -373,7 +373,11 @@ export default function Layout() {
   // 客服后台是多栏工作台，不是阅读页：放宽到 1600px，让会话栏不被两侧挤窄（顶栏仍是 7xl）。
   // The support console is a multi-pane workspace, not a reading page: widen it to 1600px so the
   // conversation pane isn't squeezed by the side panes (the site header stays 7xl).
-  const isWorkspace = location.pathname === '/support-desk' || location.pathname.startsWith('/support-desk/')
+  const isSupportDesk = location.pathname === '/support-desk' || location.pathname.startsWith('/support-desk/')
+  // 管理控制台同理：左侧常驻导航 + 宽表格，也是工作台；分区都在 /admin/ 之下。
+  // The admin console likewise: a persistent rail plus wide tables; its sections live under /admin/.
+  const isAdminConsole = location.pathname === '/admin' || location.pathname.startsWith('/admin/')
+  const isWorkspace = isSupportDesk || isAdminConsole
   // 顶栏与手机底栏的真实占位、真实视口高度，写成 CSS 变量给行情图表页用（.term-shell 的
   // 高度 = 视口 − 顶栏 − 底栏）。此前顶栏按 65px、底栏按 92px 硬写、视口用 100dvh：全屏 / PWA
   // 下顶栏多出安全区（刘海机 44–59px），字体放大 / 中文行高又让底栏更高，部分安卓与内嵌浏览器
@@ -495,7 +499,8 @@ export default function Layout() {
     ...(isStaff ? [{ to: '/support-desk', icon: 'desk', label: t('nav.supportDesk') }] : []),
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
-  const moreActive = moreItems.some((m) => location.pathname === m.to)
+  // 前缀也算：客服后台、管理控制台的子页面都在各自路径之下 / prefix counts too: both consoles have sub-pages
+  const moreActive = moreItems.some((m) => location.pathname === m.to || location.pathname.startsWith(`${m.to}/`))
 
   // 「其他」面板打开时：返回手势关闭面板而非切换页面 / back gesture closes the sheet
   //
@@ -925,7 +930,7 @@ export default function Layout() {
                 切工单不该重挂载整页、重新请求身份、再淡入一次。
                 The console's sub-routes count as one page: switching tickets must not
                 remount it, refetch identity and replay the fade. */}
-            <div key={isWorkspace ? '/support-desk' : location.pathname} className="page-enter">
+            <div key={isSupportDesk ? '/support-desk' : isAdminConsole ? '/admin' : location.pathname} className="page-enter">
               <Outlet />
             </div>
           </Suspense>

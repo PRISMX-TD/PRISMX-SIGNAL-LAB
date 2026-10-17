@@ -1052,6 +1052,50 @@
   "admin": {
     "title": "Admin",
     "subtitle": "User roles, subscription plans and basic operating metrics",
+    "console": {
+      "title": "Admin console",
+      "selectedPre": "",
+      "selectedPost": "selected",
+      "ticketCount": "{{n}} tickets",
+      "pendingApprovals": "{{n}} awaiting approval",
+      "group": {
+        "overview": "Overview",
+        "users": "Users",
+        "growth": "Growth",
+        "content": "Content",
+        "support": "Support",
+        "settings": "Settings"
+      },
+      "groupDesc": {
+        "overview": "Operating numbers and system health.",
+        "users": "Accounts, roles and plans, with a record of every action.",
+        "growth": "Promo links, trading competitions, levels and boards.",
+        "content": "What users read: strategy guides, win-rate publication, announcements and email.",
+        "support": "Tickets, staff, follow-up assignment and approvals.",
+        "settings": "Commercial terms and backend parameters."
+      },
+      "section": {
+        "data": "Dashboard",
+        "health": "System status",
+        "users": "User list",
+        "logs": "Activity log",
+        "invites": "Invite links",
+        "competitions": "Competitions",
+        "gamification": "Gamification",
+        "guide": "Strategy guide",
+        "winrate": "Publication",
+        "announcements": "Announcements",
+        "email": "Email",
+        "tickets": "Tickets",
+        "staff": "Agents",
+        "assign": "Assign follow-ups",
+        "approvals": "Approvals",
+        "performance": "Performance",
+        "templates": "Canned replies",
+        "ops": "Operations",
+        "system": "System"
+      }
+    },
     "totalUsers": "Total users",
     "planBreakdown": "Subscription plan",
     "tab": {
