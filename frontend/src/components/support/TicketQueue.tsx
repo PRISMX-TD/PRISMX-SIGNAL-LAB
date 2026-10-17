@@ -1,20 +1,24 @@
-// 工单队列：按「我的 / 未分配 / 全部」+ 状态筛选，点一行打开右侧（手机上是下一屏）的会话。
-// 列表接口对客服单页最多 50（设计 §8），这里给翻页而不是一次拉完。
-// The ticket queue: filter by mine / unassigned / all plus status; a row opens the thread on the
-// right (the next screen on phones). Agents get at most 50 per page (design §8), hence paging.
+// 工单队列：默认列出全部工单，不做筛选。谁先回复用户工单就归谁（后端自动认领），
+// 每行标出「我的 / 某某跟进中 / 待回复」，其他客服一眼就知道有人在跟。
+// 点一行打开右侧（手机上是下一屏）的会话。客服单页最多 50（设计 §8），这里给翻页。
+// The ticket queue: all tickets, no filters. The first agent to reply owns the ticket (auto-claimed
+// server-side); each row says mine / <name> is on it / awaiting reply so others can see who's on it.
+// A row opens the thread on the right (the next screen on phones). Agents get at most 50 per page.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useAuth } from '../../store/auth'
 import { adminApi, isAbortError } from '../../api/client'
 import { fmtDayShort } from '../../api/utils'
-import type { TicketListItem, TicketStatus } from '../../api/types'
-import { segBtn } from '../../utils/segBtn'
+import type { TicketListItem } from '../../api/types'
 import { SkeletonLine } from '../Skeleton'
 import { TICKET_PRIORITY_TONE, TICKET_STATUS_TONE, Tag, errText } from './supportUi'
 
 const PAGE = 50
-type Scope = 'me' | 'none' | 'all'
-const SCOPES: Scope[] = ['me', 'none', 'all']
-const STATUSES: ('' | TicketStatus)[] = ['', 'open', 'in_progress', 'closed']
+// 新工单自动出现：页面在前台时每 15 秒静默拉一次（50 行、一条带索引的查询，很轻），
+// 切回前台立即补一次。后台不轮询。
+// New tickets appear on their own: a silent refetch every 15s while visible (50 rows, one indexed
+// query — cheap), plus one on returning to the foreground. No polling in the background.
+const POLL_MS = 15_000
 
 export default function TicketQueue({
   selectedId,
@@ -29,52 +33,49 @@ export default function TicketQueue({
   onError: (text: string) => void
 }) {
   const { t } = useTranslation()
-  const [scope, setScope] = useState<Scope>('me')
-  const [status, setStatus] = useState<'' | TicketStatus>('open')
+  const { user } = useAuth()
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<TicketListItem[]>([])
   const [loading, setLoading] = useState(true)
   const ctrlRef = useRef<AbortController | null>(null)
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (silent = false) => {
+    // 静默刷新不打断进行中的请求，也不闪骨架屏 / a silent refresh never aborts a pending load or flashes the skeleton
+    if (silent && ctrlRef.current) return
     ctrlRef.current?.abort()
     const ctrl = new AbortController()
     ctrlRef.current = ctrl
-    setLoading(true)
+    if (!silent) setLoading(true)
     try {
       const list = await adminApi.listTickets(
-        { assignee: scope === 'all' ? undefined : scope, status: status || undefined, limit: PAGE, offset: page * PAGE },
+        { limit: PAGE, offset: page * PAGE },
         ctrl.signal,
       )
       setRows(list)
     } catch (err) {
-      if (!isAbortError(err)) onError(errText(err, t('common.error')))
+      if (!isAbortError(err) && !silent) onError(errText(err, t('common.error')))
     } finally {
-      if (ctrlRef.current === ctrl) setLoading(false)
+      if (ctrlRef.current === ctrl) {
+        ctrlRef.current = null
+        setLoading(false)
+      }
     }
-  }, [scope, status, page, onError, t])
+  }, [page, onError, t])
 
   useEffect(() => { void load() }, [load, reloadKey])
   useEffect(() => () => ctrlRef.current?.abort(), [])
-  useEffect(() => setPage(0), [scope, status])
+  useEffect(() => {
+    const tick = () => { if (document.visibilityState === 'visible') void load(true) }
+    const id = window.setInterval(tick, POLL_MS)
+    document.addEventListener('visibilitychange', tick)
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', tick)
+    }
+  }, [load])
 
   return (
     <div className="flex min-h-0 flex-col gap-3">
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label={t('supportDesk.queue.scope')}>
-        {SCOPES.map((s) => (
-          <button key={s} type="button" className={`${segBtn(scope === s)} shrink-0`} aria-pressed={scope === s} onClick={() => setScope(s)}>
-            {t(`supportDesk.queue.${s}`)}
-          </button>
-        ))}
-      </div>
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar" role="group" aria-label={t('supportDesk.queue.status')}>
-        {STATUSES.map((s) => (
-          <button key={s || 'any'} type="button" className={`${segBtn(status === s)} shrink-0`} aria-pressed={status === s} onClick={() => setStatus(s)}>
-            {s ? t(`tickets.status.${s}`) : t('supportDesk.queue.anyStatus')}
-          </button>
-        ))}
-      </div>
-
       {loading ? (
         <div className="glass space-y-3 p-4">
           <SkeletonLine width="60%" height={14} />
@@ -115,9 +116,17 @@ export default function TicketQueue({
                   <Tag tone={TICKET_STATUS_TONE[r.status] ?? ''}>{t(`tickets.status.${r.status}`)}</Tag>
                   {r.priority !== 'normal' && <Tag tone={TICKET_PRIORITY_TONE[r.priority] ?? ''}>{t(`tickets.priority.${r.priority}`)}</Tag>}
                   <Tag tone="bg-white/5 text-neutral-400">{t(`tickets.category.${r.category}`)}</Tag>
-                  <span className="ml-auto truncate text-[11px] text-neutral-500">
-                    {r.assigneeName ? t('supportDesk.queue.assignedTo', { name: r.assigneeName }) : t('supportDesk.queue.unassignedTag')}
-                  </span>
+                  {r.assigneeId && r.assigneeId === user?.id ? (
+                    <span className="ml-auto shrink-0 rounded-md bg-prism-600/20 px-1.5 py-0.5 text-[11px] font-medium text-prism-200">
+                      {t('supportDesk.queue.me')}
+                    </span>
+                  ) : r.assigneeId ? (
+                    <span className="ml-auto truncate text-[11px] text-neutral-400">
+                      {t('supportDesk.queue.assignedTo', { name: r.assigneeName || '—' })}
+                    </span>
+                  ) : (
+                    <span className="ml-auto shrink-0 text-[11px] text-amber-300/80">{t('supportDesk.queue.unassignedTag')}</span>
+                  )}
                 </div>
               </button>
             </li>

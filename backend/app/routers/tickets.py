@@ -686,6 +686,12 @@ def admin_reply_to_ticket(
         author_role=staff.role,
     )
     db.add(reply)
+    # 谁先回复用户，工单就归谁：未分配的工单在首次（非内部）回复时自动认领给回复人，
+    # 其他客服在队列里就能看到「某某跟进中」，不必先手动认领。已有跟进人的不改。
+    # Whoever replies first owns it: an unassigned ticket is claimed by the replier on the
+    # first non-internal reply, so other agents see who is on it. Existing assignees are kept.
+    if not body.internal and ticket.assignee_id is None and ticket.user_id != staff.id:
+        ticket.assignee_id = staff.id
     if body.internal:
         # 内部备注单独记一个字段，免得日志里看成「回复了用户」。
         # Internal notes get their own field so the log never reads as "replied to the user".

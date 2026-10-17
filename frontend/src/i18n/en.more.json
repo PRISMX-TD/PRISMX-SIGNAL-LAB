@@ -4309,8 +4309,8 @@
       "all": "All",
       "anyStatus": "Any status",
       "empty": "No tickets here",
-      "assignedTo": "Handled by {{name}}",
-      "unassignedTag": "Unassigned"
+      "assignedTo": "{{name}} is on it",
+      "unassignedTag": "Awaiting reply"
     },
     "thread": {
       "internalTag": "Internal note",

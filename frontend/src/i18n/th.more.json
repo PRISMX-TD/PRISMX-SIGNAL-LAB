@@ -2215,8 +2215,8 @@
       "all": "ทั้งหมด",
       "anyStatus": "ทุกสถานะ",
       "empty": "ไม่มีตั๋ว",
-      "assignedTo": "ผู้รับผิดชอบ: {{name}}",
-      "unassignedTag": "ยังไม่มอบหมาย"
+      "assignedTo": "{{name}} กำลังดูแล",
+      "unassignedTag": "รอตอบกลับ"
     },
     "thread": {
       "internalTag": "บันทึกภายใน",

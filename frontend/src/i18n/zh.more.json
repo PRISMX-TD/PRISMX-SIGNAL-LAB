@@ -4299,8 +4299,8 @@
       "all": "全部",
       "anyStatus": "全部状态",
       "empty": "这里没有工单",
-      "assignedTo": "处理人：{{name}}",
-      "unassignedTag": "未分配"
+      "assignedTo": "{{name}} 跟进中",
+      "unassignedTag": "待回复"
     },
     "thread": {
       "internalTag": "内部备注",

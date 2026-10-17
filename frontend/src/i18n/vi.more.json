@@ -2215,8 +2215,8 @@
       "all": "Tất cả",
       "anyStatus": "Mọi trạng thái",
       "empty": "Không có phiếu nào",
-      "assignedTo": "Người xử lý: {{name}}",
-      "unassignedTag": "Chưa giao"
+      "assignedTo": "{{name}} đang xử lý",
+      "unassignedTag": "Chờ trả lời"
     },
     "thread": {
       "internalTag": "Ghi chú nội bộ",

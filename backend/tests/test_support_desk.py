@@ -337,6 +337,23 @@ def test_ticket_assign_rules_and_filters(client, db, people):
     assert got == {people["outsourced"].id, people["admin"].id}
 
 
+def test_first_reply_claims_unassigned_ticket(client, db, people):
+    c = people["customer"]
+    t = Ticket(user_id=c.id, title="help", category="account")
+    db.add(t)
+    db.commit()
+    hi, ho = _auth(people["internal"]), _auth(people["outsourced"])
+    # 内部备注不认领 / an internal note does not claim
+    r = client.post(f"/api/admin/tickets/{t.id}/reply", json={"body": "note", "internal": True}, headers=hi)
+    assert r.status_code == 200 and r.json()["assigneeId"] is None
+    # 首次回复用户 → 归回复人 / first user-facing reply claims it
+    r = client.post(f"/api/admin/tickets/{t.id}/reply", json={"body": "hi"}, headers=hi)
+    assert r.json()["assigneeId"] == people["internal"].id
+    # 别人再回复不抢走 / a later reply by someone else keeps the owner
+    r = client.post(f"/api/admin/tickets/{t.id}/reply", json={"body": "me too"}, headers=ho)
+    assert r.json()["assigneeId"] == people["internal"].id
+
+
 def test_new_ticket_notifies_admins_and_on_duty_support(client, db, people):
     from app.routers import tickets as tk
     tk.user_limiter.enabled = False

@@ -2215,8 +2215,8 @@
       "all": "すべて",
       "anyStatus": "すべての状態",
       "empty": "チケットはありません",
-      "assignedTo": "担当：{{name}}",
-      "unassignedTag": "未割り当て"
+      "assignedTo": "{{name}} が対応中",
+      "unassignedTag": "返信待ち"
     },
     "thread": {
       "internalTag": "社内メモ",
