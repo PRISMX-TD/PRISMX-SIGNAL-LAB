@@ -305,6 +305,7 @@
     "tools": "Công cụ vẽ",
     "indicators": {
       "button": "Thêm chỉ báo",
+      "short": "Chỉ báo",
       "ma": "MA",
       "ema": "EMA",
       "boll": "Bollinger Bands",

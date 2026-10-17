@@ -1020,7 +1020,23 @@
   .term-big .pip { font-size: 30px; }
   .term-big sup { font-size: 12px; }
   .term-chg { flex-direction: row; align-items: baseline; gap: 8px; }
-  .term-qs-st { width: 100%; justify-content: space-between; gap: 0; padding: 10px 16px 12px; }
+  /* 第二行：左边点差 / 日内高低，右边工具组。BID / ASK 在手机上不显示（底部交易条已有）。
+     Second row: spread / day high-low on the left, the tool group on the right. BID / ASK are
+     hidden on mobile (the bottom trade bar already shows them). */
+  .term-qs-st { width: 100%; justify-content: flex-start; gap: 12px; padding: 8px 10px 10px 16px; }
+  .term-st--desk { display: none; }
+  .term-qs-tools { display: flex; align-items: center; gap: 5px; margin-left: auto; flex-shrink: 0; }
+  .term-qs-tools .term-tool-btn { width: 28px; height: 28px; box-shadow: inset 0 0 0 1px var(--line-hi); }
+  .term-qs-tools .term-tool-btn.on { box-shadow: none; }
+  .term-qs-tools .term-tbr-btn { height: 28px; padding: 0 9px; }
+}
+/* 360 宽的安卓机：再收一点间距，英文「Indicators」+ 8 位价格也放得下。
+   360px Android phones: a little less spacing so English labels + 8-digit prices still fit. */
+@media (max-width: 370px) {
+  .term-qs-st { gap: 10px; }
+  .term-qs-tools { gap: 4px; }
+}
+@media (max-width: 1023px) {
   .term-st .k { font-size: 9px; }
   .term-st .v { margin-top: 4px; font-size: 12px; }
   .term-qs-live { display: none; }

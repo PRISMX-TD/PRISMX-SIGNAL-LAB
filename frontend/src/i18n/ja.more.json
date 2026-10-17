@@ -305,6 +305,7 @@
     "tools": "描画ツール",
     "indicators": {
       "button": "インジケーター追加",
+      "short": "指標",
       "ma": "MA",
       "ema": "EMA",
       "boll": "ボリンジャーバンド",

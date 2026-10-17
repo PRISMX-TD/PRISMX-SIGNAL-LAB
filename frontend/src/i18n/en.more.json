@@ -305,6 +305,7 @@
     "tools": "Drawing tools",
     "indicators": {
       "button": "Add Indicators",
+      "short": "Indicators",
       "ma": "MA",
       "ema": "EMA",
       "boll": "Bollinger Bands",

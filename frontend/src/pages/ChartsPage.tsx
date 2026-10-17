@@ -531,6 +531,37 @@ export default function ChartsPage() {
   const dataKeyRef = useRef('')
   const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
 
+  // 手机报价条第二行右侧的工具组：画笔（展开底部画线工具行）· 持仓标记 · 图表设置 · 指标。
+  // 放在价格旁边而不是图表下方：高频操作离拇指与图表都近，底部工具条只留周期与持仓，一行放得下。
+  // The mobile quote strip's right-hand tool group: pen (expands the draw-tools row) ·
+  // position markers · chart settings · indicators. Next to the price rather than under the
+  // chart, so the bottom toolbar keeps only intervals + positions and fits one line.
+  const mobileTools = (
+    <>
+      {drawReady && (
+        <button
+          type="button"
+          onClick={() => setMobileToolsOpen((v) => !v)}
+          aria-label={String(t('charts.draw.button'))}
+          aria-pressed={mobileToolsOpen}
+          className={`term-tool-btn lg:hidden ${mobileToolsOpen ? 'on' : ''}`}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+        </button>
+      )}
+      <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
+      <ChartSettingsMenu
+        showCountdown={showCountdown}
+        onShowCountdown={setShowCountdown}
+        candleColors={candleColors}
+        onCandleColors={changeCandleColors}
+      />
+      <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn" aria-label={String(t('charts.indicators.button'))}>
+        {t('charts.indicators.short')}
+      </button>
+    </>
+  )
+
   const openTrade = useCallback((side: Side) => { setTradeSide(side); setSheet('trade') }, [])
   const openWatchlistSheet = useCallback(() => setSheet('watchlist'), [])
   const pickFromSheet = useCallback((s: string) => { setSymbol(s); setSheet(null) }, [])
@@ -603,6 +634,7 @@ export default function ChartsPage() {
             fallbackPrice={lastPrice}
             stale={stale}
             onSymbolClick={openWatchlistSheet}
+            tools={mobileTools}
           />
         )}
 
@@ -623,27 +655,21 @@ export default function ChartsPage() {
                 <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => setSheet('positions')}>
                   {t('charts.openPositions')} <b><PositionsCount scopeLogin={scopeLogin} /></b>
                 </button>
-                {drawReady && (
-                  <button
-                    type="button"
-                    onClick={() => setMobileToolsOpen((v) => !v)}
-                    aria-label={String(t('charts.draw.button'))}
-                    aria-pressed={mobileToolsOpen}
-                    className={`term-tool-btn lg:hidden ${mobileToolsOpen ? 'on' : ''}`}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+                {/* 持仓标记 / 设置 / 指标：手机端搬到报价条第二行（mobileTools），这里只在桌面显示。
+                    Markers / settings / indicators: on mobile they move to the quote strip's second
+                    row (mobileTools); here they're desktop-only. */}
+                <div className="hidden lg:contents">
+                  <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
+                  <ChartSettingsMenu
+                    showCountdown={showCountdown}
+                    onShowCountdown={setShowCountdown}
+                    candleColors={candleColors}
+                    onCandleColors={changeCandleColors}
+                  />
+                  <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
+                    {t('charts.indicators.button')}
                   </button>
-                )}
-                <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
-                <ChartSettingsMenu
-                  showCountdown={showCountdown}
-                  onShowCountdown={setShowCountdown}
-                  candleColors={candleColors}
-                  onCandleColors={changeCandleColors}
-                />
-                <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
-                  {t('charts.indicators.button')}
-                </button>
+                </div>
               </div>
             </div>
           )}

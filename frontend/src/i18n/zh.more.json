@@ -305,6 +305,7 @@
     "tools": "画线工具",
     "indicators": {
       "button": "添加指标",
+      "short": "指标",
       "ma": "MA 均线",
       "ema": "EMA 指数均线",
       "boll": "布林带",

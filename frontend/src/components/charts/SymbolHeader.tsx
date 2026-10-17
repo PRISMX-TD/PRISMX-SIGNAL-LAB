@@ -10,6 +10,7 @@
 // are computed by ChartsPage from the loaded candle window. The big price uses
 // the FX big-figure/pip convention (see splitPrice). On mobile it folds to two
 // rows and the symbol becomes a button that opens the watchlist sheet.
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
@@ -27,6 +28,9 @@ export interface DayStats {
 interface Props {
   symbol: string
   interval: string
+  // 手机端第二行右侧的工具按钮（画笔 / 持仓标记 / 设置 / 指标）。桌面端不渲染，那里在图表工具条上。
+  // Tool buttons at the right of the mobile second row; not rendered on desktop (they live in the toolbar there).
+  tools?: ReactNode
   bid: number | null
   ask: number | null
   digits: number
@@ -67,7 +71,7 @@ function Clock() {
   return <>{new Date(now).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' })}</>
 }
 
-export default function SymbolHeader({ symbol, interval, bid, ask, digits, dayStats, fallbackPrice, stale, onSymbolClick }: Props) {
+export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits, dayStats, fallbackPrice, stale, onSymbolClick }: Props) {
   const { t } = useTranslation()
   // 点差按最小价位单位（point）计：(ask - bid) × 10^digits，四舍五入。
   // Spread in points: (ask - bid) × 10^digits, rounded.
@@ -128,11 +132,14 @@ export default function SymbolHeader({ symbol, interval, bid, ask, digits, daySt
             (ask) green. This strip was the only place with the inverse; the
             dashboard's quotes table already matched the ticket. The label wording
             is a separate, product-level question (audit T-52) and is untouched. */}
-        <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="down" />
-        <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="up" />
+        {/* 手机上底部交易条已经大字显示卖价 / 买价，这里的 BID / ASK 只在桌面显示。
+            On mobile the bottom trade bar already shows sell / buy, so BID / ASK are desktop-only. */}
+        <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="down" desktopOnly />
+        <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="up" desktopOnly />
         <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
         <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
         <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
+        {tools && <div className="term-qs-tools lg:hidden">{tools}</div>}
       </div>
 
       <div className={`term-qs-live ${stale ? 'stale' : ''}`}>
@@ -143,9 +150,9 @@ export default function SymbolHeader({ symbol, interval, bid, ask, digits, daySt
   )
 }
 
-function Stat({ k, v, tone }: { k: string; v: string; tone?: 'up' | 'down' }) {
+function Stat({ k, v, tone, desktopOnly }: { k: string; v: string; tone?: 'up' | 'down'; desktopOnly?: boolean }) {
   return (
-    <div className="term-st">
+    <div className={`term-st ${desktopOnly ? 'term-st--desk' : ''}`}>
       <div className="k">{k}</div>
       <div className={`v num ${tone ?? ''}`}>{v}</div>
     </div>

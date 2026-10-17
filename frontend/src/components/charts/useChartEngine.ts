@@ -311,8 +311,16 @@ export function useChartEngine(
       // Hover time and axis ticks must share one formatter or they disagree on timezone.
       localization: { timeFormatter: fmtChartTime },
       crosshair: { mode: 0 },
-      // 移动端纵向滑动穿透到页面滚动，保留横向拖动平移图表
-      handleScroll: { vertTouchDrag: false, horzTouchDrag: true, mouseWheel: true },
+      // 纵向触摸拖动交给图表（2026-10-17）：以前关掉它是想让页面能滚，可图表页本身是定高壳、
+      // 没有页面滚动可让；而 lightweight-charts 的价格轴也看这一项（关掉时把轴上的纵向拖动当成
+      // 页面滚动），手机上价格轴就拉不动了。打开后与桌面鼠标一致：拖价格轴伸缩、拖图表上下平移，
+      // 双击价格轴恢复自动缩放。
+      // Vertical touch drags go to the chart (2026-10-17). It was off so the page could scroll, but
+      // the charts page is a fixed-height shell with no page scroll to yield to, and lightweight-charts'
+      // price axis reads this option too (off = treat vertical axis drags as page scroll), which left
+      // the price axis undraggable on phones. On, touch matches the desktop mouse: drag the axis to
+      // stretch, drag the pane to pan vertically, double-tap the axis to restore auto-scale.
+      handleScroll: { vertTouchDrag: true, horzTouchDrag: true, mouseWheel: true },
       width: el.clientWidth,
       height: el.clientHeight,
     })
