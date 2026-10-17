@@ -80,7 +80,7 @@ UNTRACKED_ROUTES = {
     # 登录后但不该统计的
     "/complete-profile": "补全资料的守卫页，人人必过一次，统计它只会得到一个恒等于新用户数的数字",
     "/admin": "后台自己，统计它等于统计自己看统计的次数",
-    "/support-desk": "客服内部工作台，只有客服和管理员能进，不是用户页面 / internal support desk, staff only",
+    "/support-desk/*": "客服内部工作台，只有客服和管理员能进，不是用户页面 / internal support desk, staff only",
     "/c": "公开比赛页（未登录）；页面访问上报要登录，匿名漏斗由 /api/public/competitions/event 统计 (promo_funnel_daily) / logged-out public competition page; page-view telemetry needs login, anonymous funnel is counted by /api/public/competitions/event",
     "/c/:compId": "同 /c / same as /c",
     "*": "兜底重定向，不是页面",

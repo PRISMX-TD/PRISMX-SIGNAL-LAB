@@ -94,7 +94,7 @@ export default function ActionMenu({
     <>
       <div className="grid grid-cols-2 gap-2">
         {actions.filter((a) => a.show).map((a) => (
-          <button key={a.key} type="button" className="btn-ghost min-w-0 px-2.5 py-2 text-xs leading-snug" onClick={() => start(a.key)}>
+          <button key={a.key} type="button" className="sd-action min-w-0" onClick={() => start(a.key)}>
             {t(`supportDesk.actions.${a.key}`)}
           </button>
         ))}

@@ -4305,7 +4305,9 @@
       "anyStatus": "全部状态",
       "empty": "这里没有工单",
       "assignedTo": "{{name}} 跟进中",
-      "unassignedTag": "待回复"
+      "unassignedTag": "待回复",
+      "pickTitle": "选择一张工单",
+      "pickHint": "从左侧队列打开工单。第一个回复用户的客服，工单就归到他名下。"
     },
     "thread": {
       "internalTag": "内部备注",
@@ -4330,7 +4332,15 @@
       "empty": "暂时没有分配给你的跟进",
       "overdue": "已逾期：",
       "next": "下次跟进：",
-      "noNext": "未设置下次跟进时间"
+      "noNext": "未设置下次跟进时间",
+      "tabCustomers": "跟进客户",
+      "emptyHint": "管理员分配跟进客户后，会出现在这里。",
+      "noMatch": "这个标签下暂时没有客户",
+      "requestsEmpty": "还没有提交过申请",
+      "overviewTitle": "跟进概览",
+      "overviewLead": "{{n}} 位客户正在跟进",
+      "highCount": "其中 {{n}} 位高优先级",
+      "pickHint": "从左侧选择一位客户，查看资料、改跟进标签、写跟进记录。"
     },
     "requests": {
       "title": "我提交的申请",
@@ -4450,7 +4460,8 @@
       "dnc": "用户要求不再联系",
       "conversions": "转化时间线",
       "tickets": "工单",
-      "dncBody": "确认用户要求不再联系？当前跟进会转为「无意向」，以后也不会再分配给任何客服。"
+      "dncBody": "确认用户要求不再联系？当前跟进会结束，以后也不会再分配给任何客服。",
+      "assignNote": "分配备注"
     },
     "actions": {
       "reason": "原因 / 备注",
@@ -4486,6 +4497,13 @@
       "requestConversionBody": "用户已在 MC 开了真实账户但系统没识别到？填写服务器和账号，管理员审核后计入业绩。",
       "server": "MT5 服务器",
       "login": "MT5 账号"
+    },
+    "nav": {
+      "awaiting": "{{n}} 张工单待回复"
+    },
+    "railIdle": "打开一张工单，这里会显示提交人的资料",
+    "drawer": {
+      "title": "客户资料"
     }
   }
 }

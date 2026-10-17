@@ -612,7 +612,7 @@ export default function App() {
                 }
               />
               <Route
-                path="/support-desk"
+                path="/support-desk/*"
                 element={
                   <StaffOnly>
                     <SupportDeskPage />

@@ -2218,7 +2218,9 @@
       "anyStatus": "Mọi trạng thái",
       "empty": "Không có phiếu nào",
       "assignedTo": "{{name}} đang xử lý",
-      "unassignedTag": "Chờ trả lời"
+      "unassignedTag": "Chờ trả lời",
+      "pickTitle": "Chọn một phiếu",
+      "pickHint": "Mở phiếu từ hàng đợi bên trái. Nhân viên trả lời người dùng đầu tiên sẽ phụ trách phiếu đó."
     },
     "thread": {
       "internalTag": "Ghi chú nội bộ",
@@ -2243,7 +2245,15 @@
       "empty": "Chưa có khách nào được giao cho bạn",
       "overdue": "Quá hạn:",
       "next": "Liên hệ tiếp:",
-      "noNext": "Chưa đặt thời gian liên hệ tiếp"
+      "noNext": "Chưa đặt thời gian liên hệ tiếp",
+      "tabCustomers": "Khách hàng theo dõi",
+      "emptyHint": "Khách hàng sẽ xuất hiện ở đây khi quản trị viên phân công cho bạn.",
+      "noMatch": "Không có khách hàng với nhãn này",
+      "requestsEmpty": "Chưa gửi yêu cầu nào",
+      "overviewTitle": "Tổng quan theo dõi",
+      "overviewLead": "Đang theo dõi {{n}} khách hàng",
+      "highCount": "{{n}} ưu tiên cao",
+      "pickHint": "Chọn một khách hàng bên trái để xem hồ sơ, đổi nhãn và ghi chú theo dõi."
     },
     "requests": {
       "title": "Yêu cầu của tôi",
@@ -2363,7 +2373,8 @@
       "dnc": "Người dùng yêu cầu không liên hệ",
       "conversions": "Dòng thời gian chuyển đổi",
       "tickets": "Phiếu hỗ trợ",
-      "dncBody": "Xác nhận người dùng yêu cầu không liên hệ? Việc theo dõi hiện tại chuyển thành Không quan tâm và sẽ không được giao cho ai nữa."
+      "dncBody": "Xác nhận người dùng yêu cầu không liên hệ? Việc theo dõi hiện tại sẽ kết thúc và sẽ không được phân công cho nhân viên nào nữa.",
+      "assignNote": "Ghi chú phân công"
     },
     "actions": {
       "reason": "Lý do / ghi chú",
@@ -2399,6 +2410,13 @@
       "requestConversionBody": "Người dùng đã mở tài khoản thật MC nhưng hệ thống chưa nhận ra? Nhập máy chủ và số tài khoản; sẽ được tính sau khi quản trị duyệt.",
       "server": "Máy chủ MT5",
       "login": "Số tài khoản MT5"
+    },
+    "nav": {
+      "awaiting": "{{n}} phiếu đang chờ trả lời"
+    },
+    "railIdle": "Mở một phiếu để xem thông tin người gửi tại đây",
+    "drawer": {
+      "title": "Hồ sơ khách hàng"
     }
   }
 }

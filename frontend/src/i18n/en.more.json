@@ -4315,7 +4315,9 @@
       "anyStatus": "Any status",
       "empty": "No tickets here",
       "assignedTo": "{{name}} is on it",
-      "unassignedTag": "Awaiting reply"
+      "unassignedTag": "Awaiting reply",
+      "pickTitle": "Pick a ticket",
+      "pickHint": "Open a ticket from the queue. The first agent to reply to the user owns it."
     },
     "thread": {
       "internalTag": "Internal note",
@@ -4340,7 +4342,15 @@
       "empty": "No follow-ups assigned to you yet",
       "overdue": "Overdue:",
       "next": "Next contact:",
-      "noNext": "No next contact time set"
+      "noNext": "No next contact time set",
+      "tabCustomers": "Customers",
+      "emptyHint": "Customers appear here once an admin assigns them to you.",
+      "noMatch": "No customers with this label",
+      "requestsEmpty": "No requests submitted yet",
+      "overviewTitle": "Follow-up overview",
+      "overviewLead": "{{n}} customers in follow-up",
+      "highCount": "{{n}} high priority",
+      "pickHint": "Pick a customer on the left to see their profile, change the label and log notes."
     },
     "requests": {
       "title": "My requests",
@@ -4460,7 +4470,8 @@
       "dnc": "User asked not to be contacted",
       "conversions": "Conversion timeline",
       "tickets": "Tickets",
-      "dncBody": "Confirm the user asked not to be contacted? The current follow-up becomes Not interested and they won't be assigned to anyone again."
+      "dncBody": "Confirm the user asked not to be contacted? The current follow-up ends and they won't be assigned to any agent again.",
+      "assignNote": "Assignment note"
     },
     "actions": {
       "reason": "Reason / note",
@@ -4496,6 +4507,13 @@
       "requestConversionBody": "The user opened an MC real account but the system missed it? Enter the server and login; it counts once an admin approves.",
       "server": "MT5 server",
       "login": "MT5 login"
+    },
+    "nav": {
+      "awaiting": "{{n}} tickets awaiting reply"
+    },
+    "railIdle": "Open a ticket to see the submitter's profile here",
+    "drawer": {
+      "title": "Customer profile"
     }
   }
 }

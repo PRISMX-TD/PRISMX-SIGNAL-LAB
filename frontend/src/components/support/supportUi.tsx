@@ -1,10 +1,10 @@
 // 客服台共用的小件：状态 / 优先级的配色、UTC+8 的 datetime-local 换算、出错文案、弹窗外壳。
 // Small shared pieces for the support desk: status / priority tones, UTC+8 datetime-local
 // conversion, error text and a modal shell.
-import { useRef, type ReactNode } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
-import { localizeApiError } from '../../api/utils'
+import { fmtDayShort, localizeApiError, parseTime } from '../../api/utils'
 import { useDialogA11y } from '../../utils/useDialogA11y'
 import type { FollowUpPriority, FollowUpStatus } from '../../api/supportTypes'
 
@@ -61,6 +61,97 @@ export function bjInputToIso(v: string): string | null {
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
+// 工单状态：点 + 词（同用户端工单页 .sup-status 的语言）。待处理 = 橙、处理中 = 品牌紫（在手里）、已关闭 = 灰。
+// Ticket status as dot + word (the user-side .sup-status language): open orange, in progress violet, closed grey.
+const TICKET_DOT: Record<string, string> = {
+  open: 'bg-[var(--mid)]',
+  in_progress: 'bg-[var(--purple-hi)]',
+  closed: 'bg-neutral-500',
+}
+const TICKET_WORD: Record<string, string> = {
+  open: 'text-[var(--mid)]',
+  in_progress: 'text-[var(--purple-hi)]',
+  closed: 'text-neutral-500',
+}
+
+export function TicketStatus({ status, label }: { status: string; label: string }) {
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${TICKET_WORD[status] ?? 'text-neutral-500'}`}>
+      <i className={`h-1.5 w-1.5 rounded-full ${TICKET_DOT[status] ?? 'bg-neutral-500'}`} aria-hidden="true" />
+      {label}
+    </span>
+  )
+}
+
+/** 字母头像：客户中性灰，工作人员品牌紫实色，内部备注琥珀。/ Monogram: customers grey, staff violet, notes amber. */
+export function Avatar({ name, size = 32, tone = 'neutral' }: { name: string | null | undefined; size?: number; tone?: 'neutral' | 'staff' | 'note' }) {
+  const ch = Array.from((name || '').trim())[0]
+  const cls =
+    tone === 'staff' ? 'bg-[var(--purple)] text-white' : tone === 'note' ? 'bg-amber-400/20 text-amber-200' : 'bg-[var(--nest)] text-neutral-300'
+  return (
+    <span
+      aria-hidden="true"
+      className={`inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold leading-none ${cls}`}
+      style={{ width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.4)) }}
+    >
+      {ch ? ch.toUpperCase() : '?'}
+    </span>
+  )
+}
+
+// UTC+8 的日期键与钟点，供列表时间（今天显示时刻，其余显示日期）和会话的按天分隔用。
+// UTC+8 day keys and clock times for list times (today → time, else date) and the thread's day dividers.
+export function bjDayKey(iso: string | null | undefined): string {
+  const d = parseTime(iso)
+  return d && !Number.isNaN(d.getTime()) ? d.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }) : ''
+}
+
+export function fmtClock(iso: string | null | undefined): string {
+  const d = parseTime(iso)
+  return d && !Number.isNaN(d.getTime())
+    ? d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit' })
+    : ''
+}
+
+export function fmtListTime(iso: string | null | undefined): string {
+  if (!iso) return ''
+  return bjDayKey(iso) === bjDayKey(new Date().toISOString()) ? fmtClock(iso) : fmtDayShort(iso)
+}
+
+/**
+ * 工作台撑满一屏：高度 = 可视视口 − 元素在文档里的顶边 − 手机底栏 − 底部留白。实测而不是写死常量，
+ * 横幅、节日卡、页头折行都不会把它顶出屏幕；手机键盘弹出时可视视口变矮，回复框跟着留在键盘上方。
+ * Fits the workspace to one screen: visual viewport − the element's document top − the phone tab bar
+ * − a bottom gap. Measured rather than a constant, so banners or a wrapped header never push it off
+ * screen; when the phone keyboard opens the visual viewport shrinks and the composer stays above it.
+ */
+export function useFitHeight(ref: RefObject<HTMLElement | null>, deps: unknown[], gap = 16, floor = 520): CSSProperties {
+  const [h, setH] = useState<number | null>(null)
+  const calc = useCallback(() => {
+    const el = ref.current
+    if (!el) return
+    const top = el.getBoundingClientRect().top + window.scrollY
+    const vh = window.visualViewport?.height ?? window.innerHeight
+    const tabbar = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--app-tabbar')) || 0
+    setH(Math.max(floor, Math.round(vh - top - tabbar - gap)))
+  }, [ref, gap, floor])
+  useLayoutEffect(() => {
+    calc()
+    const vv = window.visualViewport
+    window.addEventListener('resize', calc)
+    vv?.addEventListener('resize', calc)
+    const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(calc) : null
+    ro?.observe(document.body)
+    return () => {
+      window.removeEventListener('resize', calc)
+      vv?.removeEventListener('resize', calc)
+      ro?.disconnect()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [calc, ...deps])
+  return h == null ? { height: 'calc(var(--app-vh, 100dvh) - 14rem)', minHeight: floor } : { height: h }
+}
+
 export function Tag({ tone, children }: { tone: string; children: ReactNode }) {
   return <span className={`tag whitespace-nowrap ${tone}`}>{children}</span>
 }
@@ -98,19 +189,19 @@ export function DeskModal({
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="glass max-h-[90vh] w-full overflow-y-auto rounded-b-none p-5 sm:max-w-md sm:rounded-b-[var(--r-lg)]"
+        className="glass max-h-[90vh] w-full overflow-y-auto rounded-b-none p-6 sm:max-w-md sm:rounded-b-[var(--r-lg)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-3 text-base font-semibold text-neutral-100">{title}</h3>
+        <h3 className="mb-4 font-display text-[17px] font-semibold text-neutral-50">{title}</h3>
         <div className="space-y-3 text-sm">{children}</div>
         <div className="mt-5 flex justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
-          <button type="button" className="btn-ghost px-4 py-2 text-sm" onClick={onClose}>
+          <button type="button" className="btn btn-ghost h-10 px-5 text-sm" onClick={onClose}>
             {t('common.cancel')}
           </button>
           <button
             type="button"
-            className={`rounded-xl px-4 py-2 text-sm font-semibold transition disabled:opacity-40 ${
-              danger ? 'border border-down/40 bg-down/15 text-down hover:bg-down/25' : 'btn-primary'
+            className={`btn h-10 px-5 text-sm font-semibold ${
+              danger ? 'border-[rgb(var(--down-rgb)/0.4)] bg-[var(--down-bg)] text-[var(--down)] hover:bg-[rgb(var(--down-rgb)/0.22)]' : 'btn-primary'
             }`}
             disabled={busy || disabled}
             onClick={onConfirm}

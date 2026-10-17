@@ -370,6 +370,10 @@ export default function Layout() {
   // scrollbar is present, and it would bury a layout decision inside a 2,200-line
   // page component where nobody would find it again.
   const isTerminal = location.pathname === '/charts'
+  // 客服后台是多栏工作台，不是阅读页：放宽到 1600px，让会话栏不被两侧挤窄（顶栏仍是 7xl）。
+  // The support console is a multi-pane workspace, not a reading page: widen it to 1600px so the
+  // conversation pane isn't squeezed by the side panes (the site header stays 7xl).
+  const isWorkspace = location.pathname === '/support-desk' || location.pathname.startsWith('/support-desk/')
   // 顶栏与手机底栏的真实占位、真实视口高度，写成 CSS 变量给行情图表页用（.term-shell 的
   // 高度 = 视口 − 顶栏 − 底栏）。此前顶栏按 65px、底栏按 92px 硬写、视口用 100dvh：全屏 / PWA
   // 下顶栏多出安全区（刘海机 44–59px），字体放大 / 中文行高又让底栏更高，部分安卓与内嵌浏览器
@@ -885,7 +889,7 @@ export default function Layout() {
               // is the kind of inconsistency that comes back on the next edit.
               // sm:pb-6 stays: above 640px the bar is well clear, and Tailwind's
               // utilities layer outranks .clears-tabbar in the components layer.
-              : 'mx-auto max-w-7xl px-4 pt-6 sm:px-6 clears-tabbar sm:pb-6'
+              : `mx-auto ${isWorkspace ? 'max-w-[1600px]' : 'max-w-7xl'} px-4 pt-6 sm:px-6 clears-tabbar sm:pb-6`
           }`}
         >
           {/* 节日问候卡：放在路由切换容器之外，换页不重播。行情终端全屏，不放。
@@ -917,7 +921,11 @@ export default function Layout() {
                 key=pathname remounts this wrapper on every navigation, replaying
                 the page-enter fade so switching pages no longer hard-pops. CSS
                 skips the animation under reduced-motion. */}
-            <div key={location.pathname} className="page-enter">
+            {/* 客服后台的子页面（工单 / 跟进、选中的工单）都在 /support-desk/ 之下，按一个页面算：
+                切工单不该重挂载整页、重新请求身份、再淡入一次。
+                The console's sub-routes count as one page: switching tickets must not
+                remount it, refetch identity and replay the fade. */}
+            <div key={isWorkspace ? '/support-desk' : location.pathname} className="page-enter">
               <Outlet />
             </div>
           </Suspense>

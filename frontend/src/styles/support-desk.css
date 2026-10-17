@@ -1,0 +1,329 @@
+/* ═════════════ 客服后台 / support console ═════════════
+   只随 components/support/SupportDeskPage 懒加载（见 index.css 文件头），选择器一律带 .sd- 前缀。
+   材质同全站：实色面、1px 发丝线、无模糊无光晕；紫只落在选中、我的、客服头像与主按钮上。
+   工作台是一整块面，三栏之间用发丝线分开，而不是三张浮起来的卡；会话区比两侧低一档（.sd-well），
+   读的地方安静、操作的地方在两边。
+   Loaded only with SupportDeskPage (see the index.css header); every selector is .sd- prefixed.
+   Same material as the rest of the app: opaque planes, 1px hairlines, no blur or halo; violet only
+   on selection, "mine", staff avatars and primary buttons. The workspace is one plane split by
+   hairlines rather than three floating cards; the conversation well sits one step lower. */
+
+.sd-frame {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+}
+
+.sd-well {
+  background: #141419;
+}
+
+.sd-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  overscroll-behavior: contain;
+}
+
+/* ── 页头：子页面切换（下划线标签）/ header sub-page tabs ── */
+.sd-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-3);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.sd-tab:hover {
+  color: var(--text-2);
+}
+.sd-tab.is-active {
+  color: var(--text);
+  font-weight: 600;
+}
+.sd-tab.is-active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--purple-hi);
+}
+
+/* ── 搜索框与弹出层 / search field and popover ── */
+.sd-search {
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.sd-search:focus-within {
+  border-color: var(--purple-hi);
+  background: var(--surface-2);
+}
+.sd-search input::-webkit-search-cancel-button {
+  filter: invert(0.6);
+}
+.sd-pop {
+  border-radius: 18px;
+  border: 1px solid var(--line-hi);
+  background: var(--surface-2);
+  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  animation: sd-fade-in var(--dur-fast) var(--ease-out) both;
+}
+
+/* ── 分段筛选（药丸轨道）/ segmented filter ── */
+.sd-seg {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--nest);
+}
+.sd-seg > button {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.sd-seg > button:hover {
+  color: var(--text-2);
+}
+.sd-seg > button.is-on {
+  background: var(--surface-2);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+}
+
+/* ── 列表行：选中 = 面提亮 + 左侧 2px 紫条 / list rows: selected = lifted plane + 2px violet bar ── */
+.sd-row {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.sd-row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+.sd-row.is-sel {
+  background: var(--surface-2);
+}
+.sd-row.is-sel::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--purple-hi);
+}
+
+/* 列表逐行淡入：只在首次出现时，表达「这批是新载入的」/ rows fade in once, saying "this batch just loaded" */
+.sd-rise {
+  animation: sd-rise 0.36s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 24ms);
+}
+
+.sd-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  border-radius: 999px;
+  color: var(--text-2);
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.sd-icon-btn:hover {
+  background: var(--nest);
+  color: var(--text);
+}
+
+/* ── 回复框：一块整面，顶上是「回复 / 内部备注」标签，底下是工具条 ──
+   composer: one plane, reply / internal tabs on top, toolbar at the bottom */
+.sd-composer {
+  border-radius: 18px;
+  border: 1px solid var(--line-hi);
+  background: var(--surface);
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.sd-composer:focus-within {
+  border-color: var(--purple-hi);
+}
+.sd-composer.is-note {
+  border-color: rgb(251 191 36 / 0.42);
+  background: rgb(251 191 36 / 0.045);
+}
+.sd-composer textarea {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  background: transparent;
+  padding: 12px 16px 6px;
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  outline: none;
+}
+.sd-composer textarea::placeholder {
+  color: var(--text-3);
+}
+/* 附图提示在回复框里太占地方，按钮上已有 n/上限 / the attach hint is too long here; the button shows n/max */
+.sd-composer .sup-attach-hint {
+  display: none;
+}
+.sd-mode {
+  position: relative;
+  padding: 10px 4px 9px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.sd-mode:hover {
+  color: var(--text-2);
+}
+.sd-mode.is-on {
+  color: var(--text);
+}
+.sd-mode.is-on::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--purple-hi);
+}
+.sd-mode.is-on.note {
+  color: rgb(253 230 138);
+}
+.sd-mode.is-on.note::after {
+  background: rgb(251 191 36);
+}
+
+/* ── 会话按天分隔 / day divider ── */
+.sd-day {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.sd-day::before,
+.sd-day::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+/* ── 客户资料里的小格子 / customer fact tiles ── */
+.sd-fact {
+  min-width: 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+}
+
+/* 宽版客户工作区的分块 / blocks in the wide customer workspace */
+.sd-block {
+  border-radius: 20px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  padding: 20px;
+}
+
+/* 跟进状态标签：可随时改，只是标签 / follow-up status labels: always changeable, labels only */
+.sd-label {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.sd-label:hover:not(:disabled) {
+  border-color: var(--line-hi);
+  color: var(--text-2);
+}
+.sd-label.is-on {
+  border-color: currentColor;
+}
+
+/* 操作格 / action tiles */
+.sd-action {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-2);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.sd-action:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--line-hi);
+  color: var(--text);
+}
+.sd-action:active {
+  transform: translateY(1px);
+}
+
+/* ── 客户资料抽屉 / customer drawer ── */
+.sd-scrim {
+  animation: sd-fade-in var(--dur-base) var(--ease-out) both;
+}
+.sd-drawer {
+  animation: sd-slide-in var(--dur-base) var(--ease-out) both;
+}
+
+.sd-toast {
+  animation: sd-rise var(--dur-base) var(--ease-out) both;
+}
+
+@keyframes sd-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sd-rise {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes sd-slide-in {
+  from { transform: translateX(28px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sd-rise,
+  .sd-pop,
+  .sd-scrim,
+  .sd-drawer,
+  .sd-toast {
+    animation: none;
+  }
+}
