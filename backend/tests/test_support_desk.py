@@ -407,7 +407,7 @@ def test_record_is_idempotent_and_credits_active_follow_up(db, people):
     assert db.query(Conversion).filter(Conversion.kind == "mt5_real").count() == 1
     assert first.credited_to == staff.id and first.follow_up_id == fu.id
     db.refresh(fu)
-    assert fu.status == "converted" and fu.closed_at is not None
+    assert fu.status == "converted" and fu.closed_at is None  # 标签，不结束 / label, stays open
 
 
 def test_goal_mismatch_credits_but_does_not_convert(db, people):
@@ -560,7 +560,7 @@ def test_do_not_contact_closes_and_blocks_assignment(client, db, people):
     fu = _assign(db, people["admin"], staff, c)
     assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=_auth(staff)).status_code == 200
     db.refresh(fu)
-    assert fu.status == "no_interest"
+    assert fu.status == "revoked"
     other = _user(db, "o@x.com")
     db.add(EmailOptOut(user_id=other.id))
     db.commit()
@@ -726,5 +726,6 @@ def test_unreachable_stays_active(client, db, people):
     fu = _assign(db, people["admin"], people["internal"], people["customer"])
     r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": "unreachable"}, headers=_auth(people["internal"]))
     assert r.status_code == 200 and r.json()["followUp"]["active"] is True
-    r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": "contacted"}, headers=_auth(people["internal"]))
-    assert r.status_code == 200
+    for st in ("no_interest", "converted", "contacted"):
+        r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": st}, headers=_auth(people["internal"]))
+        assert r.status_code == 200 and r.json()["followUp"]["active"] is True

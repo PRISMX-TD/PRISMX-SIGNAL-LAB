@@ -84,8 +84,8 @@ def apply_follow_up_conversion(fu: FollowUp | None, kind: str, status: str) -> b
         return False
     if kind not in GOAL_KINDS.get(fu.goal, frozenset()):
         return False
+    # 只改标签不结束：已转化的客户客服还可以继续维护 / label only, the agent keeps the customer
     fu.status = "converted"
-    fu.closed_at = _now()
     return True
 
 

@@ -304,7 +304,6 @@ export default function CustomerCard({
               </button>
             ))}
           </div>
-          <p className="mt-1.5 text-[11px] text-neutral-500">{t('supportDesk.card.closingHint')}</p>
 
           <h4 className="mb-2 mt-4 text-xs font-semibold text-neutral-400">{t('supportDesk.card.notes')}</h4>
           {card.notes.length === 0 ? (

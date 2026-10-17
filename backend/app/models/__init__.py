@@ -1973,9 +1973,11 @@ class EmailOptOut(Base):
 # and who was credited with a conversion.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# 进行中的跟进状态。「联系不上」也算进行中：客服还要继续打，不能一标就结束（rev 42）。
-# Follow-up statuses that count as active. "unreachable" stays active: the agent keeps trying (rev 42).
-FOLLOW_UP_ACTIVE_STATUSES = ("pending", "contacted", "interested", "unreachable")
+# 进行中的跟进状态。客服能选的状态都只是标签，选了不结束跟进（rev 43）；只有 admin 收回
+# （revoked，含「用户要求不再联系」）或到期（expired）才结束。
+# Active follow-up statuses. Every agent-settable status is just a label and never closes the
+# follow-up (rev 43); only revoked (incl. do-not-contact) or expired end it.
+FOLLOW_UP_ACTIVE_STATUSES = ("pending", "contacted", "interested", "converted", "no_interest", "unreachable")
 
 
 class FollowUp(Base):
@@ -1988,8 +1990,8 @@ class FollowUp(Base):
         # Partial unique index: one active follow-up per user.
         Index(
             "uq_follow_ups_active_user", "user_id", unique=True,
-            sqlite_where=text("status IN ('pending','contacted','interested','unreachable')"),
-            postgresql_where=text("status IN ('pending','contacted','interested','unreachable')"),
+            sqlite_where=text("status IN ('pending','contacted','interested','converted','no_interest','unreachable')"),
+            postgresql_where=text("status IN ('pending','contacted','interested','converted','no_interest','unreachable')"),
         ),
     )
 

@@ -681,8 +681,9 @@ def support_do_not_contact(user_id: str, db: Session = Depends(get_db), staff: S
         .filter(FollowUp.user_id == user.id, FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES))
         .all()
     )
+    # 状态都是标签了，结束跟进统一用 revoked / statuses are labels now, so closing uses revoked
     for fu in active:
-        fu.status = "no_interest"
+        fu.status = "revoked"
         fu.closed_at = now
     desk.log(db, ctx, activity_log.SUPPORT_ACTION, user_id=user.id, data={"action": "do_not_contact"})
     db.commit()
@@ -855,8 +856,8 @@ def support_follow_up_patch(
     db: Session = Depends(get_db),
     staff: StaffCtx = Depends(require_staff),
 ):
-    """切换跟进状态 / 设置下次跟进时间。转到 converted / no_interest 即关闭；unreachable 仍算进行中。
-    Change the status or next contact time; converted / no_interest close it, unreachable stays active."""
+    """切换跟进状态（纯标签，不结束跟进）/ 设置下次跟进时间。
+    Change the status (a label; never closes the follow-up) or the next contact time."""
     ctx = _ctx(staff)
     fu = _my_follow_up(db, ctx, fu_id)
     fields = body.model_dump(exclude_unset=True)

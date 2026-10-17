@@ -398,7 +398,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 42 — 跟进：「联系不上」改为仍算进行中，部分唯一索引 uq_follow_ups_active_user 按新状态集重建；
 #          此前被「联系不上」关掉的跟进恢复为进行中（同一用户已有进行中的则跳过）；进行中跟进的
 #          默认期限清空（不再自动到期）。小表，幂等。
-CURRENT_SCHEMA_REV = 42
+# rev 43 — 跟进：客服可选的状态全部只是标签（converted / no_interest 也算进行中），部分唯一索引
+#          按新状态集重建；此前被这两个状态关掉的跟进恢复（同一用户已有进行中、或用户要求勿扰的改成
+#          revoked）。小表，幂等。
+CURRENT_SCHEMA_REV = 43
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1808,6 +1811,8 @@ def _migrate_columns() -> None:
     # rev 42：跟进「联系不上」仍算进行中 + 重建部分唯一索引 + 清空默认期限。
     # rev 42: unreachable follow-ups stay active; rebuild the partial unique index; clear deadlines.
     _migrate_follow_ups_rev42()
+    # rev 43：converted / no_interest 也只是标签。/ rev 43: these are labels too.
+    _migrate_follow_ups_rev43()
 
     # rev 41：存量用户的转化回填（register / verified / paid / mt5_real）。失败只告警。
     # rev 41: conversion backfill for existing users; failures only warn.
@@ -1860,6 +1865,34 @@ def _migrate_follow_ups_rev42() -> None:
         ))
     if reopened:
         logger.info("rev 42：恢复「联系不上」跟进 %d 条 / reopened %d unreachable follow-ups", reopened, reopened)
+
+
+def _migrate_follow_ups_rev43() -> None:
+    """rev 43：converted / no_interest 改为进行中的标签。恢复被它们关掉的跟进（每个用户最多一条，
+    最新的优先；用户已要求勿扰或已有进行中跟进的改成 revoked），再按新状态集重建部分唯一索引。幂等。
+    rev 43: converted / no_interest become active labels. Reopen follow-ups they closed (one per
+    user, newest first; do-not-contact users or users with an active one get revoked), then
+    rebuild the partial unique index. Idempotent.
+    """
+    active = "('pending','contacted','interested','converted','no_interest','unreachable')"
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            "SELECT f.id, f.user_id, u.do_not_contact_at FROM follow_ups f JOIN users u ON u.id = f.user_id "
+            "WHERE f.status IN ('converted','no_interest') AND f.closed_at IS NOT NULL ORDER BY f.created_at DESC"
+        )).fetchall()
+        busy = {r[0] for r in conn.execute(text(
+            "SELECT user_id FROM follow_ups WHERE closed_at IS NULL AND status IN " + active
+        ))}
+        for fu_id, user_id, dnc in rows:
+            if dnc is not None or user_id in busy:
+                conn.execute(text("UPDATE follow_ups SET status = 'revoked' WHERE id = :id"), {"id": fu_id})
+                continue
+            conn.execute(text("UPDATE follow_ups SET closed_at = NULL WHERE id = :id"), {"id": fu_id})
+            busy.add(user_id)
+        conn.execute(text("DROP INDEX IF EXISTS uq_follow_ups_active_user"))
+        conn.execute(text(
+            "CREATE UNIQUE INDEX uq_follow_ups_active_user ON follow_ups(user_id) WHERE status IN " + active
+        ))
 
 
 def _drop_redundant_candle_index(is_postgres: bool) -> None:
