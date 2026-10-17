@@ -570,7 +570,10 @@ def list_all_tickets(
     if not ctx.is_admin:
         limit = min(limit, SUPPORT_PAGE_MAX)
     query = db.query(Ticket)
-    if status_filter:
+    # status=active = 未关闭（open + in_progress），客服台「待回复」用 / not closed, for the desk's awaiting-reply tab
+    if status_filter == "active":
+        query = query.filter(Ticket.status != "closed")
+    elif status_filter:
         query = query.filter(Ticket.status == status_filter)
     if category:
         query = query.filter(Ticket.category == category)

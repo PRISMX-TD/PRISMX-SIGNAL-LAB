@@ -53,7 +53,7 @@ export default function TicketQueue({
     if (!silent) setLoading(true)
     try {
       const list = await adminApi.listTickets(
-        { assignee: scope === 'all' ? undefined : scope, limit: PAGE, offset: page * PAGE },
+        { assignee: scope === 'all' ? undefined : scope, status: scope === 'none' ? 'active' : undefined, limit: PAGE, offset: page * PAGE },
         ctrl.signal,
       )
       setRows(list)

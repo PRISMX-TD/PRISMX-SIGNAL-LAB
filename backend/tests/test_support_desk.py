@@ -729,3 +729,14 @@ def test_unreachable_stays_active(client, db, people):
     for st in ("no_interest", "converted", "contacted"):
         r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": st}, headers=_auth(people["internal"]))
         assert r.status_code == 200 and r.json()["followUp"]["active"] is True
+
+
+def test_awaiting_reply_tab_skips_closed(client, db, people):
+    c = people["customer"]
+    open_t = Ticket(user_id=c.id, title="open", category="account")
+    closed_t = Ticket(user_id=c.id, title="closed", category="account", status="closed")
+    db.add_all([open_t, closed_t])
+    db.commit()
+    got = [x["id"] for x in client.get("/api/admin/tickets", params={"assignee": "none", "status": "active"},
+                                       headers=_auth(people["internal"])).json()]
+    assert got == [open_t.id]
