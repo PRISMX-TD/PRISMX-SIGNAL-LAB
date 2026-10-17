@@ -137,9 +137,10 @@ export default function TicketQueue({
                     <span className="ml-auto truncate text-[11px] text-neutral-400">
                       {t('supportDesk.queue.assignedTo', { name: r.assigneeName || '—' })}
                     </span>
-                  ) : (
+                  ) : r.status !== 'closed' ? (
+                    // 已关闭的不再标「待回复」/ closed tickets never read as awaiting reply
                     <span className="ml-auto shrink-0 text-[11px] text-amber-300/80">{t('supportDesk.queue.unassignedTag')}</span>
-                  )}
+                  ) : null}
                 </div>
               </button>
             </li>
