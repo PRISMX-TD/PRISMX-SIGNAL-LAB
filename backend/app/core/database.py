@@ -395,7 +395,10 @@ def _hash_legacy_api_tokens() -> None:
 #          （历史上只有 user / admin 两种）；conversions 对存量用户回填 register / verified /
 #          paid / mt5_real（credited_to 为空，ON CONFLICT 幂等，失败只告警不挡启动）。统一索引块加
 #          tickets(assignee_id, status)。
-CURRENT_SCHEMA_REV = 41
+# rev 42 — 跟进：「联系不上」改为仍算进行中，部分唯一索引 uq_follow_ups_active_user 按新状态集重建；
+#          此前被「联系不上」关掉的跟进恢复为进行中（同一用户已有进行中的则跳过）；进行中跟进的
+#          默认期限清空（不再自动到期）。小表，幂等。
+CURRENT_SCHEMA_REV = 42
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1802,6 +1805,10 @@ def _migrate_columns() -> None:
     # rev 40：规范邮箱回填（列在上面的 users 段补出）。/ canonical-email backfill.
     _backfill_email_canonical()
 
+    # rev 42：跟进「联系不上」仍算进行中 + 重建部分唯一索引 + 清空默认期限。
+    # rev 42: unreachable follow-ups stay active; rebuild the partial unique index; clear deadlines.
+    _migrate_follow_ups_rev42()
+
     # rev 41：存量用户的转化回填（register / verified / paid / mt5_real）。失败只告警。
     # rev 41: conversion backfill for existing users; failures only warn.
     _backfill_conversions()
@@ -1816,6 +1823,43 @@ def _migrate_columns() -> None:
     # untouched so the next boot retries (every step is idempotent).
     _write_schema_rev(CURRENT_SCHEMA_REV)
     logger.info("列迁移完成，schema_rev=%d", CURRENT_SCHEMA_REV)
+
+
+def _migrate_follow_ups_rev42() -> None:
+    """rev 42：「联系不上」的跟进恢复为进行中、清空进行中跟进的期限、按新状态集重建部分唯一索引。
+
+    先恢复再建索引：恢复时跳过同一用户已有进行中跟进的行（每个用户最多恢复最新一条），
+    保证新索引一定建得出来。幂等：重跑时已恢复的行 closed_at 为空，不会再挑中。
+    rev 42: reopen follow-ups closed as unreachable, clear deadlines on active ones,
+    and rebuild the partial unique index for the new active set. Rows are reopened
+    first, skipping users who already have an active one (newest wins), so the index
+    always builds. Idempotent.
+    """
+    active = "('pending','contacted','interested','unreachable')"
+    with engine.begin() as conn:
+        rows = conn.execute(text(
+            "SELECT id, user_id FROM follow_ups WHERE status = 'unreachable' AND closed_at IS NOT NULL "
+            "ORDER BY created_at DESC"
+        )).fetchall()
+        busy = {r[0] for r in conn.execute(text(
+            "SELECT user_id FROM follow_ups WHERE status IN ('pending','contacted','interested') "
+            "OR (status = 'unreachable' AND closed_at IS NULL)"
+        ))}
+        reopened = 0
+        for fu_id, user_id in rows:
+            if user_id in busy:
+                conn.execute(text("UPDATE follow_ups SET status = 'no_interest' WHERE id = :id"), {"id": fu_id})
+                continue
+            conn.execute(text("UPDATE follow_ups SET closed_at = NULL WHERE id = :id"), {"id": fu_id})
+            busy.add(user_id)
+            reopened += 1
+        conn.execute(text(f"UPDATE follow_ups SET expires_at = NULL WHERE status IN {active}"))
+        conn.execute(text("DROP INDEX IF EXISTS uq_follow_ups_active_user"))
+        conn.execute(text(
+            f"CREATE UNIQUE INDEX uq_follow_ups_active_user ON follow_ups(user_id) WHERE status IN {active}"
+        ))
+    if reopened:
+        logger.info("rev 42：恢复「联系不上」跟进 %d 条 / reopened %d unreachable follow-ups", reopened, reopened)
 
 
 def _drop_redundant_candle_index(is_postgres: bool) -> None:

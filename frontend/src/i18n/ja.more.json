@@ -2341,7 +2341,7 @@
       "expires": "期限 {{time}}",
       "status": "フォロー状態",
       "statusSaved": "状態を更新しました",
-      "closingHint": "「成約 / 興味なし / 連絡不可」を選ぶとフォローは終了します。",
+      "closingHint": "「成約 / 興味なし」を選ぶとフォローは終了します。「連絡不可」はリストに残ります。",
       "nextContact": "次回連絡（UTC+8）",
       "nextSaved": "次回連絡日時を更新しました",
       "clearNext": "クリア",

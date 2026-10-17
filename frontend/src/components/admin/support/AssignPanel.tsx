@@ -8,7 +8,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminSupportApi } from '../../../api/client'
-import { fmtDay, fmtTime } from '../../../api/utils'
 import {
   FOLLOW_UP_GOALS,
   FOLLOW_UP_PRIORITIES,
@@ -22,7 +21,7 @@ import ConfirmModal from '../../ConfirmModal'
 import Select from '../../Select'
 import { SkeletonLine } from '../../Skeleton'
 import EmailRecipientPicker, { type Picked } from '../EmailRecipientPicker'
-import { FU_PRIORITY_TONE, FU_STATUS_TONE, bjInputToIso, errText } from '../../support/supportUi'
+import { FU_PRIORITY_TONE, FU_STATUS_TONE, errText } from '../../support/supportUi'
 
 const LIST_PAGE = 50
 const STATUS_FILTERS = ['active', 'closed', 'pending', 'contacted', 'interested', 'converted', 'no_interest', 'unreachable', 'revoked', 'expired']
@@ -42,8 +41,6 @@ export default function AssignPanel({
   const [assigneeId, setAssigneeId] = useState('')
   const [goal, setGoal] = useState<FollowUpGoal>('open_mt5')
   const [priority, setPriority] = useState<FollowUpPriority>('normal')
-  const [expires, setExpires] = useState('')
-  const [nextContact, setNextContact] = useState('')
   const [note, setNote] = useState('')
   const [includeOptedOut, setIncludeOptedOut] = useState(false)
   const [blockers, setBlockers] = useState<AssignBlocker[] | null>(null)
@@ -131,8 +128,6 @@ export default function AssignPanel({
         assigneeId,
         goal,
         priority,
-        expiresAt: expires ? bjInputToIso(`${expires}T23:59`) : null,
-        nextContactAt: bjInputToIso(nextContact),
         note: note.trim() || null,
         includeOptedOut,
       })
@@ -191,16 +186,8 @@ export default function AssignPanel({
             <Select value={priority} onChange={(v) => setPriority(v as FollowUpPriority)} ariaLabel={t('admin.support.assign.priority')}
               options={FOLLOW_UP_PRIORITIES.map((p) => ({ value: p, label: t(`supportDesk.priority.${p}`) }))} />
           </label>
-          <label className="block text-xs text-neutral-400">
-            <span className="mb-1 block">{t('admin.support.assign.expires')}</span>
-            <input type="date" className="input w-full" value={expires} onChange={(e) => setExpires(e.target.value)} />
-          </label>
-          <label className="block text-xs text-neutral-400">
-            <span className="mb-1 block">{t('supportDesk.card.nextContact')}</span>
-            <input type="datetime-local" className="input w-full" value={nextContact} onChange={(e) => setNextContact(e.target.value)} />
-          </label>
         </div>
-        <textarea className="input min-h-[64px] w-full" maxLength={2000} placeholder={t('admin.support.assign.notePlaceholder')}
+        <textarea className="input min-h-[64px] w-full rounded-xl py-2 text-sm leading-relaxed" maxLength={2000} placeholder={t('admin.support.assign.notePlaceholder')}
           value={note} onChange={(e) => setNote(e.target.value)} />
         {counts && (
           <div className="flex flex-wrap gap-2 text-xs">
@@ -284,13 +271,11 @@ export default function AssignPanel({
                   <th className="px-3 py-3 font-medium">{t('admin.support.assign.assignee')}</th>
                   <th className="px-3 py-3 font-medium">{t('supportDesk.card.goal')}</th>
                   <th className="px-3 py-3 font-medium">{t('supportDesk.card.status')}</th>
-                  <th className="px-3 py-3 font-medium">{t('supportDesk.card.nextContact')}</th>
-                  <th className="px-3 py-3 font-medium">{t('admin.support.assign.expires')}</th>
                 </tr>
               </thead>
               <tbody>
                 {fuRows.map((f) => (
-                  <tr key={f.id} className={`border-b border-white/5 last:border-0 ${f.overdue ? 'bg-down/[0.06]' : ''}`}>
+                  <tr key={f.id} className="border-b border-white/5 last:border-0">
                     <td className="px-3 py-2.5">
                       <input type="checkbox" disabled={!f.active} checked={fuSel.has(f.id)} aria-label={f.email ?? f.userId}
                         className="h-4 w-4 rounded border-white/20 bg-white/5 accent-prism-500 disabled:opacity-30"
@@ -311,8 +296,6 @@ export default function AssignPanel({
                       <span className={`tag ${FU_PRIORITY_TONE[f.priority]}`}>{t(`supportDesk.priority.${f.priority}`)}</span>
                     </td>
                     <td className="px-3 py-2.5"><span className={`tag ${FU_STATUS_TONE[f.status]}`}>{t(`supportDesk.status.${f.status}`)}</span></td>
-                    <td className={`px-3 py-2.5 text-xs ${f.overdue ? 'text-down' : 'text-neutral-400'}`}>{f.nextContactAt ? fmtTime(f.nextContactAt) : '—'}</td>
-                    <td className="px-3 py-2.5 text-xs text-neutral-400">{fmtDay(f.expiresAt, '—')}</td>
                   </tr>
                 ))}
               </tbody>

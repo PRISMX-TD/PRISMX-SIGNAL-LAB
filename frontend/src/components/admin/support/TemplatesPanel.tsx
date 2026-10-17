@@ -79,7 +79,7 @@ export default function TemplatesPanel({ onToast }: { onToast: (kind: 'ok' | 'er
             <Select value={draft.lang} onChange={(v) => setDraft({ ...draft, lang: v })} ariaLabel={t('admin.support.templates.lang')}
               options={[{ value: '', label: t('admin.support.templates.anyLang') }, ...APP_LANGS.map((l) => ({ value: l.code, label: l.label }))]} />
           </div>
-          <textarea className="input min-h-[140px] w-full" maxLength={5000} placeholder={t('admin.support.templates.body')}
+          <textarea className="input min-h-[140px] w-full rounded-xl py-2 text-sm leading-relaxed" maxLength={5000} placeholder={t('admin.support.templates.body')}
             value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
           <div className="flex gap-2">
             <button type="button" className="btn-primary px-4 py-2 text-sm disabled:opacity-40" disabled={saving || !draft.title.trim() || !draft.body.trim()} onClick={() => void save()}>

@@ -2341,7 +2341,7 @@
       "expires": "Hạn {{time}}",
       "status": "Trạng thái theo dõi",
       "statusSaved": "Đã cập nhật trạng thái",
-      "closingHint": "Chọn Đã chuyển đổi / Không quan tâm / Không liên lạc được sẽ đóng việc theo dõi.",
+      "closingHint": "Chọn Đã chuyển đổi / Không quan tâm sẽ đóng việc theo dõi; Không liên lạc được vẫn giữ trong danh sách.",
       "nextContact": "Liên hệ tiếp (UTC+8)",
       "nextSaved": "Đã cập nhật thời gian liên hệ tiếp",
       "clearNext": "Xóa",

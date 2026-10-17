@@ -127,12 +127,13 @@ def picker_users(
     active_within_days: int | None = Query(default=None, alias="activeWithinDays", ge=1, le=3650),
     inactive_for_days: int | None = Query(default=None, alias="inactiveForDays", ge=1, le=3650),
     sort: _SortKey = Query(default="created"),
+    agent: str | None = Query(default=None, max_length=64),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     """「指定用户」的选人列表：带详情分页返回，停用 / 退订的人也列出来但标明状态。"""
-    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, sort)
+    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, sort, agent)
     total = query.count()
     rows = query.offset(offset).limit(limit).all()
     ids = [u.id for u in rows]
@@ -168,6 +169,20 @@ def picker_users(
     )
 
 
+@admin_router.get("/agents", response_model=dict)
+def picker_agents(db: Session = Depends(get_db)):
+    """选人列表的代理下拉：所有名下有邀请链接的代理。/ Agents for the picker's agent filter."""
+    from app.models import InviteLinkAgent
+    rows = (
+        db.query(User.id, User.nickname, User.email)
+        .join(InviteLinkAgent, InviteLinkAgent.user_id == User.id)
+        .distinct()
+        .order_by(User.nickname)
+        .all()
+    )
+    return {"agents": [{"id": i, "nickname": n, "email": e} for i, n, e in rows]}
+
+
 @admin_router.get("/users/all", response_model=EmailPickerIdsOut)
 def picker_select_all(
     kind: Literal["marketing", "notice"] = Query(default="marketing"),
@@ -175,10 +190,11 @@ def picker_select_all(
     plan: _PlanFilter = Query(default="all"),
     active_within_days: int | None = Query(default=None, alias="activeWithinDays", ge=1, le=3650),
     inactive_for_days: int | None = Query(default=None, alias="inactiveForDays", ge=1, le=3650),
+    agent: str | None = Query(default=None, max_length=64),
     db: Session = Depends(get_db),
 ):
     """「选中全部搜索结果」：只返回按这次邮件类型真正收得到的人，最多 EMAIL_LIST_MAX 个。"""
-    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days).filter(User.disabled_at.is_(None))
+    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, agent=agent).filter(User.disabled_at.is_(None))
     if kind != eb.KIND_NOTICE:
         query = query.filter(~eb._opted_out_clause())
     rows = query.with_entities(User.id, User.email).limit(EMAIL_LIST_MAX + 1).all()

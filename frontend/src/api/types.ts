@@ -2405,6 +2405,8 @@ export interface EmailPickerQuery {
   activeWithinDays: number | null
   inactiveForDays: number | null
   sort: 'created' | 'active'
+  // '' = 不限；'none' = 无代理；其余 = 代理的用户 id / '' any, 'none' no agent, else an agent's user id
+  agent?: string
 }
 
 export interface EmailStatus {

@@ -1395,6 +1395,7 @@ function pickerQs(query: EmailPickerQuery, extra: Record<string, string>): strin
   if (query.plan !== 'all') qs.set('plan', query.plan)
   if (query.activeWithinDays) qs.set('activeWithinDays', String(query.activeWithinDays))
   if (query.inactiveForDays) qs.set('inactiveForDays', String(query.inactiveForDays))
+  if (query.agent) qs.set('agent', query.agent)
   return qs.toString()
 }
 
@@ -1412,6 +1413,8 @@ export const adminApi = {
       `/admin/emails/users?${pickerQs(query, { limit: String(limit), offset: String(offset), sort: query.sort })}`,
       { signal },
     ),
+  emailPickerAgents: () =>
+    request<{ agents: Array<{ id: string; nickname: string | null; email: string }> }>('/admin/emails/agents'),
   emailPickerSelectAll: (kind: EmailKind, query: EmailPickerQuery) =>
     request<{ users: Array<{ id: string; email: string }>; truncated: boolean }>(
       `/admin/emails/users/all?${pickerQs(query, { kind })}`,

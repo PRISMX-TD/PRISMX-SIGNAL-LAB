@@ -703,3 +703,28 @@ def test_follow_up_request_approval_creates_follow_up(client, db, people):
     fu = db.get(FollowUp, r.json()["result"]["followUpId"])
     assert fu.assignee_id == people["outsourced"].id and fu.goal == "open_mt5"
     assert db.get(SupportRequest, req_id).status == "approved"
+
+
+def test_picker_agent_filter(client, db, people):
+    from app.models import InviteLink, InviteLinkAgent
+    agent = people["internal"]
+    link = InviteLink(code="AGT1", label="agent link")
+    db.add(link)
+    db.flush()
+    db.add(InviteLinkAgent(link_id=link.id, user_id=agent.id))
+    via = _user(db, "via@x.com", invite_code="AGT1")
+    db.commit()
+    ha = _auth(people["admin"])
+    assert [a["id"] for a in client.get("/api/admin/emails/agents", headers=ha).json()["agents"]] == [agent.id]
+    got = {u["id"] for u in client.get("/api/admin/emails/users", params={"agent": agent.id}, headers=ha).json()["users"]}
+    assert got == {via.id}
+    none = {u["id"] for u in client.get("/api/admin/emails/users", params={"agent": "none", "limit": 100}, headers=ha).json()["users"]}
+    assert via.id not in none and people["customer"].id in none
+
+
+def test_unreachable_stays_active(client, db, people):
+    fu = _assign(db, people["admin"], people["internal"], people["customer"])
+    r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": "unreachable"}, headers=_auth(people["internal"]))
+    assert r.status_code == 200 and r.json()["followUp"]["active"] is True
+    r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": "contacted"}, headers=_auth(people["internal"]))
+    assert r.status_code == 200

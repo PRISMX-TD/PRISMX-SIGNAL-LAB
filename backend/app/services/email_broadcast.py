@@ -48,7 +48,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import EmailCampaign, EmailDelivery, EmailOptOut, User
+from app.models import EmailCampaign, EmailDelivery, EmailOptOut, InviteLink, InviteLinkAgent, User
 from app.services import mailer
 
 logger = logging.getLogger("prismx.email_broadcast")
@@ -440,7 +440,7 @@ PICKER_SORTS = ("created", "active")
 
 
 def picker_query(db: Session, q: str | None, plan: str, active_within_days: int | None,
-                 inactive_for_days: int | None, sort: str = "created"):
+                 inactive_for_days: int | None, sort: str = "created", agent: str | None = None):
     """「指定用户」选人列表的查询：搜索（邮箱 / 昵称 / 手机号）+ 等级 + 活跃度。
 
     **不**在这里排除停用和退订的人——选人列表要让管理员看得见他们（标出状态、
@@ -473,6 +473,18 @@ def picker_query(db: Session, q: str | None, plan: str, active_within_days: int 
     if inactive_for_days:
         cutoff = now - timedelta(days=inactive_for_days)
         query = query.filter(or_(User.last_active_at < cutoff, User.last_active_at.is_(None)))
+    # 代理筛选：agent="none" = 不是经任何代理的链接注册的；其余值 = 某个代理的用户 id，
+    # 只要经他名下任一链接注册（users.invite_code == 链接 code）就算。
+    # Agent filter: "none" = not signed up via any agent's link; any other value is an
+    # agent's user id, matching users whose invite_code is one of that agent's links.
+    # 直接调用路由函数时（测试）这里会是 FastAPI 的 Query 默认对象，只认字符串。
+    # Called directly (tests) this is FastAPI's Query default, so only accept a string.
+    if isinstance(agent, str) and agent:
+        codes = db.query(InviteLink.code).join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
+        if agent == "none":
+            query = query.filter(or_(User.invite_code.is_(None), User.invite_code.notin_(codes)))
+        else:
+            query = query.filter(User.invite_code.in_(codes.filter(InviteLinkAgent.user_id == agent)))
     if sort == "active":
         # 从没活跃过的排最后 / never-active users go last
         query = query.order_by(User.last_active_at.is_(None), User.last_active_at.desc(), User.created_at.desc())

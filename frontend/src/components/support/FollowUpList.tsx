@@ -90,11 +90,6 @@ export default function FollowUpList({
                   <Tag tone={FU_STATUS_TONE[f.status]}>{t(`supportDesk.status.${f.status}`)}</Tag>
                   <Tag tone="bg-white/5 text-neutral-400">{t(`supportDesk.goal.${f.goal}`)}</Tag>
                 </div>
-                <div className={`mt-1.5 text-[11px] ${f.overdue ? 'font-semibold text-down' : 'text-neutral-500'}`}>
-                  {f.nextContactAt
-                    ? `${f.overdue ? t('supportDesk.followUps.overdue') : t('supportDesk.followUps.next')} ${fmtTime(f.nextContactAt)}`
-                    : t('supportDesk.followUps.noNext')}
-                </div>
               </button>
             </li>
           ))}

@@ -11,11 +11,10 @@ import ApprovalsPanel from './ApprovalsPanel'
 import AssignPanel from './AssignPanel'
 import PerformancePanel from './PerformancePanel'
 import StaffPanel from './StaffPanel'
-import SupportSettingsPanel from './SupportSettingsPanel'
 import TemplatesPanel from './TemplatesPanel'
 
-type Sub = 'staff' | 'assign' | 'approvals' | 'performance' | 'templates' | 'settings'
-const SUBS: Sub[] = ['staff', 'assign', 'approvals', 'performance', 'templates', 'settings']
+type Sub = 'staff' | 'assign' | 'approvals' | 'performance' | 'templates'
+const SUBS: Sub[] = ['staff', 'assign', 'approvals', 'performance', 'templates']
 
 export default function SupportAdminPanel({
   assignPreset,
@@ -49,7 +48,6 @@ export default function SupportAdminPanel({
       {sub === 'approvals' && <ApprovalsPanel onToast={showToast} />}
       {sub === 'performance' && <PerformancePanel onToast={showToast} />}
       {sub === 'templates' && <TemplatesPanel onToast={showToast} />}
-      {sub === 'settings' && <SupportSettingsPanel onToast={showToast} />}
     </div>
   )
 }

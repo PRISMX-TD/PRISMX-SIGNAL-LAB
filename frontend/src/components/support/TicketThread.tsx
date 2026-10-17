@@ -267,7 +267,7 @@ export default function TicketThread({
         </div>
         {internal && <p className="text-[11px] text-amber-300">{t('supportDesk.thread.internalHint')}</p>}
         <textarea
-          className="input min-h-[96px] w-full resize-y"
+          className="input min-h-[96px] w-full rounded-xl py-2 text-sm leading-relaxed resize-y"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onPaste={images.onPaste}

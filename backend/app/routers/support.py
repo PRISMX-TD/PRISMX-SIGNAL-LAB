@@ -855,8 +855,8 @@ def support_follow_up_patch(
     db: Session = Depends(get_db),
     staff: StaffCtx = Depends(require_staff),
 ):
-    """切换跟进状态 / 设置下次跟进时间。转到 converted / no_interest / unreachable 即关闭。
-    Change the status or next contact time; converted / no_interest / unreachable close it."""
+    """切换跟进状态 / 设置下次跟进时间。转到 converted / no_interest 即关闭；unreachable 仍算进行中。
+    Change the status or next contact time; converted / no_interest close it, unreachable stays active."""
     ctx = _ctx(staff)
     fu = _my_follow_up(db, ctx, fu_id)
     fields = body.model_dump(exclude_unset=True)
@@ -1067,8 +1067,9 @@ def admin_follow_up_assign(body: AssignIn, db: Session = Depends(get_db), admin:
     assignee = _active_staff(db, body.assigneeId)
     ids = list(dict.fromkeys(body.userIds))
     blockers = _assign_blockers(db, ids)
-    days = get_support_settings(db)["support_follow_up_days"]
-    expires = desk.naive(body.expiresAt) or (_now() + timedelta(days=days))
+    # 默认不设期限（用户 2026-10-17：不需要标记时间）；传了 expiresAt 才有。
+    # No deadline by default (owner, 2026-10-17); only set when expiresAt is given.
+    expires = desk.naive(body.expiresAt)
     created, skipped = [], []
     for uid in ids:
         b = blockers[uid]
@@ -1270,7 +1271,7 @@ def admin_support_request_approve(
             user_id=target.id, assignee_id=assignee.id, assigned_by=admin.id,
             goal=payload.get("goal") if payload.get("goal") in desk.FOLLOW_UP_GOALS else "revisit",
             priority="normal", note=payload.get("note"), status="pending",
-            expires_at=_now() + timedelta(days=get_support_settings(db)["support_follow_up_days"]),
+            expires_at=None,
         )
         db.add(fu)
         db.flush()

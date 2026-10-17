@@ -50,6 +50,8 @@ export default function EmailRecipientPicker({
   const [plan, setPlan] = useState<EmailAudiencePlan>('all')
   const [activity, setActivity] = useState<Activity>('')
   const [sort, setSort] = useState<'created' | 'active'>('created')
+  const [agent, setAgent] = useState('')
+  const [agents, setAgents] = useState<Array<{ id: string; nickname: string | null; email: string }>>([])
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<EmailPickerUser[]>([])
   const [total, setTotal] = useState(0)
@@ -61,9 +63,12 @@ export default function EmailRecipientPicker({
     const id = window.setTimeout(() => setQ(search), 300)
     return () => window.clearTimeout(id)
   }, [search])
-  useEffect(() => setPage(0), [q, plan, activity, sort])
+  useEffect(() => setPage(0), [q, plan, activity, sort, agent])
+  useEffect(() => {
+    adminApi.emailPickerAgents().then((r) => setAgents(r.agents)).catch(() => {})
+  }, [])
 
-  const query: EmailPickerQuery = { q, plan, sort, ...activityFields(activity) }
+  const query: EmailPickerQuery = { q, plan, sort, agent, ...activityFields(activity) }
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -81,7 +86,7 @@ export default function EmailRecipientPicker({
         if (!ctrl.signal.aborted) setLoading(false)
       })
     return () => ctrl.abort()
-  }, [q, plan, activity, sort, page])
+  }, [q, plan, activity, sort, agent, page])
 
   const selectable = (u: EmailPickerUser) => !u.disabled && !(kind === 'marketing' && u.optedOut)
   const pickedCount = Object.keys(picked).length
@@ -182,6 +187,16 @@ export default function EmailRecipientPicker({
           onChange={(v) => setActivity(v as Activity)}
           ariaLabel={t('admin.email.activity')}
           options={ACTIVITY_OPTIONS.map((a) => ({ value: a, label: t(`admin.email.activityOpt.${a || 'any'}`) }))}
+        />
+        <Select
+          value={agent}
+          onChange={(v) => setAgent(v)}
+          ariaLabel={t('admin.email.agent')}
+          options={[
+            { value: '', label: t('admin.email.agentAll') },
+            { value: 'none', label: t('admin.email.agentNone') },
+            ...agents.map((a) => ({ value: a.id, label: a.nickname || a.email })),
+          ]}
         />
         <Select
           value={sort}

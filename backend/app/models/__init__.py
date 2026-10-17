@@ -1973,8 +1973,9 @@ class EmailOptOut(Base):
 # and who was credited with a conversion.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# 进行中的跟进状态 / follow-up statuses that count as active
-FOLLOW_UP_ACTIVE_STATUSES = ("pending", "contacted", "interested")
+# 进行中的跟进状态。「联系不上」也算进行中：客服还要继续打，不能一标就结束（rev 42）。
+# Follow-up statuses that count as active. "unreachable" stays active: the agent keeps trying (rev 42).
+FOLLOW_UP_ACTIVE_STATUSES = ("pending", "contacted", "interested", "unreachable")
 
 
 class FollowUp(Base):
@@ -1987,8 +1988,8 @@ class FollowUp(Base):
         # Partial unique index: one active follow-up per user.
         Index(
             "uq_follow_ups_active_user", "user_id", unique=True,
-            sqlite_where=text("status IN ('pending','contacted','interested')"),
-            postgresql_where=text("status IN ('pending','contacted','interested')"),
+            sqlite_where=text("status IN ('pending','contacted','interested','unreachable')"),
+            postgresql_where=text("status IN ('pending','contacted','interested','unreachable')"),
         ),
     )
 

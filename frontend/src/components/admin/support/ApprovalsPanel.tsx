@@ -132,7 +132,7 @@ export default function ApprovalsPanel({ onToast }: { onToast: (kind: 'ok' | 'er
           onConfirm={() => void submit()}
         >
           <p className="text-neutral-300">{review.approve ? t('admin.support.approvals.approveBody') : t('admin.support.approvals.rejectBody')}</p>
-          <textarea className="input min-h-[64px] w-full" maxLength={1000} placeholder={t('admin.support.approvals.notePlaceholder')}
+          <textarea className="input min-h-[64px] w-full rounded-xl py-2 text-sm leading-relaxed" maxLength={1000} placeholder={t('admin.support.approvals.notePlaceholder')}
             value={note} onChange={(e) => setNote(e.target.value)} />
         </DeskModal>
       )}

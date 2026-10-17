@@ -24,7 +24,7 @@ import { SkeletonLine } from '../Skeleton'
 import { copyText } from '../admin/invite/CopyLinkButton'
 import ActionMenu from './ActionMenu'
 import ConversionTimeline from './ConversionTimeline'
-import { FU_PRIORITY_TONE, FU_STATUS_TONE, TICKET_STATUS_TONE, Tag, bjInputToIso, errText, isoToBjInput } from './supportUi'
+import { FU_PRIORITY_TONE, FU_STATUS_TONE, TICKET_STATUS_TONE, Tag, errText } from './supportUi'
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -69,7 +69,6 @@ export default function CustomerCard({
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [phone, setPhone] = useState<string | null>(null)
   const [revealing, setRevealing] = useState(false)
-  const [nextInput, setNextInput] = useState('')
   const [noteChannel, setNoteChannel] = useState<FollowUpChannel>('phone')
   const [noteText, setNoteText] = useState('')
   const [noteOutcome, setNoteOutcome] = useState('')
@@ -81,7 +80,6 @@ export default function CustomerCard({
     try {
       const c = await supportApi.card(userId)
       setCard(c)
-      setNextInput(isoToBjInput(c.followUp?.nextContactAt))
     } catch (err) {
       setLoadErr(errText(err, t('common.error')))
     }
@@ -291,7 +289,6 @@ export default function CustomerCard({
         >
           <div className="mb-2 flex flex-wrap items-center gap-1.5 text-xs">
             <Tag tone="bg-white/5 text-neutral-300">{t(`supportDesk.goal.${fu.goal}`)}</Tag>
-            {fu.expiresAt && <span className="text-neutral-500">{t('supportDesk.card.expires', { time: fmtDay(fu.expiresAt) })}</span>}
           </div>
           {fu.note && <p className="mb-3 whitespace-pre-wrap rounded-lg bg-white/[0.03] px-3 py-2 text-xs text-neutral-300">{fu.note}</p>}
           <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('supportDesk.card.status')}>
@@ -308,25 +305,6 @@ export default function CustomerCard({
             ))}
           </div>
           <p className="mt-1.5 text-[11px] text-neutral-500">{t('supportDesk.card.closingHint')}</p>
-          <div className="mt-3 flex flex-wrap items-end gap-2">
-            <label className="min-w-0 flex-1">
-              <span className="mb-1 block text-xs text-neutral-400">{t('supportDesk.card.nextContact')}</span>
-              <input type="datetime-local" className="input w-full" value={nextInput} onChange={(e) => setNextInput(e.target.value)} />
-            </label>
-            <button
-              type="button"
-              className="btn-primary px-3 py-2 text-xs disabled:opacity-40"
-              disabled={saving || nextInput === isoToBjInput(fu.nextContactAt)}
-              onClick={() => void patchFollowUp({ nextContactAt: bjInputToIso(nextInput) }, t('supportDesk.card.nextSaved'))}
-            >
-              {t('common.save')}
-            </button>
-            {fu.nextContactAt && (
-              <button type="button" className="btn-ghost px-3 py-2 text-xs" disabled={saving} onClick={() => void patchFollowUp({ nextContactAt: null }, t('supportDesk.card.nextSaved'))}>
-                {t('supportDesk.card.clearNext')}
-              </button>
-            )}
-          </div>
 
           <h4 className="mb-2 mt-4 text-xs font-semibold text-neutral-400">{t('supportDesk.card.notes')}</h4>
           {card.notes.length === 0 ? (
@@ -364,7 +342,7 @@ export default function CustomerCard({
               />
             </div>
             <textarea
-              className="input min-h-[72px] w-full"
+              className="input min-h-[72px] w-full rounded-xl py-2 text-sm leading-relaxed"
               placeholder={t('supportDesk.card.notePlaceholder')}
               maxLength={5000}
               value={noteText}

@@ -86,7 +86,7 @@ export default function ActionMenu({
         {t('supportDesk.actions.reason')}
         {!required && ` ${t('supportDesk.actions.optional')}`}
       </span>
-      <textarea className="input min-h-[64px] w-full" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+      <textarea className="input min-h-[64px] w-full rounded-xl py-2 text-sm leading-relaxed" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
     </label>
   )
 
@@ -201,7 +201,7 @@ export default function ActionMenu({
         >
           <p className="text-neutral-300">{t('supportDesk.actions.messageBody')}</p>
           <input className="input w-full" placeholder={t('supportDesk.actions.messageTitle')} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea className="input min-h-[120px] w-full" placeholder={t('supportDesk.actions.messageText')} maxLength={5000} value={body} onChange={(e) => setBody(e.target.value)} />
+          <textarea className="input min-h-[120px] w-full rounded-xl py-2 text-sm leading-relaxed" placeholder={t('supportDesk.actions.messageText')} maxLength={5000} value={body} onChange={(e) => setBody(e.target.value)} />
         </DeskModal>
       )}
 
