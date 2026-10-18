@@ -46,8 +46,8 @@ STATUS_REJECTED = "rejected"
 SOURCE_AUTO = "auto"
 SOURCE_MANUAL = "manual"
 
-# 跟进目标 → 哪些 kind 算「达成」。activate_trial / revisit 没有对应的转化 kind，由客服手动改状态。
-# Follow-up goal -> the conversion kinds that fulfil it. activate_trial / revisit have
+# 跟进目标 → 哪些 kind 算「达成」。activate_trial / revisit / other 没有对应的转化 kind，由客服手动改状态。
+# Follow-up goal -> the conversion kinds that fulfil it. activate_trial / revisit / other have
 # no conversion kind; staff close those by hand.
 GOAL_KINDS: dict[str, frozenset[str]] = {
     "open_mt5": frozenset({KIND_MT5_REAL}),
@@ -55,6 +55,7 @@ GOAL_KINDS: dict[str, frozenset[str]] = {
     "renew": frozenset({KIND_PAID}),
     "activate_trial": frozenset(),
     "revisit": frozenset(),
+    "other": frozenset(),
 }
 
 # MT5 的 ACCOUNT_TRADE_MODE：2 = 实盘 / MT5 trade mode 2 = real

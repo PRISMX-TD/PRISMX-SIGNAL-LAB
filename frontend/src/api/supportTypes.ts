@@ -5,7 +5,7 @@
 // caller may not see it.
 
 export type SupportTier = 'internal' | 'outsourced'
-export type FollowUpGoal = 'open_mt5' | 'open_signallab' | 'renew' | 'activate_trial' | 'revisit'
+export type FollowUpGoal = 'open_mt5' | 'open_signallab' | 'renew' | 'activate_trial' | 'revisit' | 'other'
 export type FollowUpPriority = 'low' | 'normal' | 'high'
 export type FollowUpStatus =
   | 'pending' | 'contacted' | 'interested' | 'converted' | 'no_interest' | 'unreachable' | 'revoked' | 'expired'
@@ -17,7 +17,10 @@ export type ConversionStatus = 'confirmed' | 'pending_review' | 'rejected'
 export type SupportRequestKind = 'comp_days' | 'follow_up' | 'conversion_manual'
 export type SupportRequestStatus = 'pending' | 'approved' | 'rejected'
 
-export const FOLLOW_UP_GOALS: FollowUpGoal[] = ['open_mt5', 'open_signallab', 'renew', 'activate_trial', 'revisit']
+// 可选的跟进目标（renew 续费 2026-10-18 起不再提供，只在旧记录里出现）/ goals on offer (renew only on old rows)
+export const FOLLOW_UP_GOALS: FollowUpGoal[] = ['open_mt5', 'open_signallab', 'activate_trial', 'revisit', 'other']
+// 显示 / 统计用的全集 / every goal a stored row may carry
+export const ALL_FOLLOW_UP_GOALS: FollowUpGoal[] = [...FOLLOW_UP_GOALS, 'renew']
 export const FOLLOW_UP_PRIORITIES: FollowUpPriority[] = ['low', 'normal', 'high']
 export const FOLLOW_UP_STAFF_STATUSES: FollowUpStaffStatus[] = [
   'pending', 'contacted', 'interested', 'converted', 'no_interest', 'unreachable',

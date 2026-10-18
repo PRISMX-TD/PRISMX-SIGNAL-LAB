@@ -2284,11 +2284,12 @@
       "expired": "หมดอายุ"
     },
     "goal": {
-      "open_mt5": "เปิดบัญชีจริง MC",
-      "open_signallab": "สมัคร Signal Lab",
-      "renew": "ต่ออายุ",
-      "activate_trial": "เริ่มทดลองใช้",
-      "revisit": "ติดตามผล"
+      "open_mt5": "แนะนำให้เชื่อมบัญชีจริง",
+      "open_signallab": "แนะนำให้สมัคร PRO",
+      "activate_trial": "กระตุ้นผู้ใช้ที่ไม่ได้ใช้งาน",
+      "revisit": "ติดต่อเพื่อตอบคำถาม",
+      "other": "อื่นๆ",
+      "renew": "ต่ออายุ"
     },
     "channel": {
       "phone": "โทรศัพท์",

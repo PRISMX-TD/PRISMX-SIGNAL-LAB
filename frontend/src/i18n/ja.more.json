@@ -2284,11 +2284,12 @@
       "expired": "期限切れ"
     },
     "goal": {
-      "open_mt5": "MC リアル口座の開設",
-      "open_signallab": "Signal Lab への加入",
-      "renew": "更新",
-      "activate_trial": "トライアルの開始",
-      "revisit": "フォロー連絡"
+      "open_mt5": "リアル口座の接続を案内",
+      "open_signallab": "PRO への加入を案内",
+      "activate_trial": "休眠ユーザーを呼び戻す",
+      "revisit": "連絡して質問に回答",
+      "other": "その他",
+      "renew": "更新"
     },
     "channel": {
       "phone": "電話",

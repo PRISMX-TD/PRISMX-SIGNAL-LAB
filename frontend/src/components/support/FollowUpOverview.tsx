@@ -4,7 +4,7 @@
 // tile per status (clicking filters the list), the goal mix and the high-priority count. Every
 // number comes from the roster already loaded; nothing is fetched here.
 import { useTranslation } from 'react-i18next'
-import { FOLLOW_UP_GOALS, FOLLOW_UP_STAFF_STATUSES, type FollowUp, type FollowUpStaffStatus } from '../../api/supportTypes'
+import { ALL_FOLLOW_UP_GOALS, FOLLOW_UP_STAFF_STATUSES, type FollowUp, type FollowUpStaffStatus } from '../../api/supportTypes'
 import { SkeletonLine } from '../Skeleton'
 import { IconUsers } from './deskIcons'
 
@@ -57,7 +57,7 @@ export default function FollowUpOverview({
   }
 
   const byStatus = FOLLOW_UP_STAFF_STATUSES.map((s) => ({ s, n: items.filter((f) => f.status === s).length }))
-  const byGoal = FOLLOW_UP_GOALS.map((g) => ({ g, n: items.filter((f) => f.goal === g).length })).filter((x) => x.n > 0)
+  const byGoal = ALL_FOLLOW_UP_GOALS.map((g) => ({ g, n: items.filter((f) => f.goal === g).length })).filter((x) => x.n > 0)
   const maxGoal = Math.max(1, ...byGoal.map((x) => x.n))
   const high = items.filter((f) => f.priority === 'high').length
 

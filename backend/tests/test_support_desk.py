@@ -960,7 +960,7 @@ def test_admin_follow_up_detail_keeps_follow_ups_of_one_user_apart(client, db, p
     a.created_at, a.closed_at = _now() - timedelta(days=2), _now() - timedelta(days=1)
     db.commit()
 
-    b_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": outy.id, "goal": "renew"}).json()["created"][0]["id"]
+    b_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": outy.id, "goal": "other"}).json()["created"][0]["id"]
     assert client.post(f"/api/support/users/{c.id}/message", json={"title": "续费", "body": "您好"}, headers=ha).status_code == 200
     assert client.post(f"{url}/reassign", json={"ids": [b_id], "assigneeId": inn.id}, headers=ha).json() == {"updated": 1}
     assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=hi).status_code == 200
@@ -1015,7 +1015,7 @@ def test_do_not_contact_right_after_a_revoke_stays_on_the_follow_up_it_closed(cl
     url = "/api/admin/support/follow-ups"
     a_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": inn.id, "goal": "open_mt5"}).json()["created"][0]["id"]
     assert client.post(f"{url}/revoke", json={"ids": [a_id]}, headers=ha).json() == {"updated": 1}
-    b_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": inn.id, "goal": "renew"}).json()["created"][0]["id"]
+    b_id = client.post(url, headers=ha, json={"userIds": [c.id], "assigneeId": inn.id, "goal": "other"}).json()["created"][0]["id"]
     assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=hi).status_code == 200
 
     dnc = db.query(ActivityEvent).filter(ActivityEvent.kind == "support.action").one()
@@ -1125,3 +1125,13 @@ def test_deleting_an_untitled_ticket_still_leaves_an_audit_row(client, db, peopl
     assert client.delete(f"/api/admin/tickets/{tid}", headers=_auth(admin)).status_code == 200
     audit = db.query(AdminAuditLog).filter(AdminAuditLog.field == f"ticket:{tid}:delete").one()
     assert audit.new_value == f"#{tid[:8]}"
+
+
+def test_renew_goal_is_no_longer_offered(client, people):
+    """2026-10-18 起跟进目标不再提供「续费」，新分配传 renew 被拒（旧记录里的 renew 照常显示）。
+    renew is no longer an offered goal: assigning with it is rejected."""
+    c, admin, inn = people["customer"], people["admin"], people["internal"]
+    url = "/api/admin/support/follow-ups"
+    assert client.post(url, headers=_auth(admin), json={"userIds": [c.id], "assigneeId": inn.id, "goal": "renew"}).status_code == 422
+    r = client.post(url, headers=_auth(admin), json={"userIds": [c.id], "assigneeId": inn.id, "goal": "other"})
+    assert r.status_code == 200 and r.json()["created"][0]["goal"] == "other"

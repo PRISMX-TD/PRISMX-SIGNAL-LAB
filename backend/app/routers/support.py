@@ -83,7 +83,10 @@ STALE_DAYS = 3
 # admin 列表里「最近一条记录」摘要的长度 / length of the latest-note excerpt in admin lists
 NOTE_EXCERPT = 160
 
-GoalT = Literal["open_mt5", "open_signallab", "renew", "activate_trial", "revisit"]
+# 代号沿用上线时的，界面文案 2026-10-18 改为：open_mt5 引导连接实盘、open_signallab 引导开通 PRO、activate_trial
+# 激活休眠用户、revisit 联系解答问题、other 其他；renew（续费）不再提供，只留给旧记录。
+# Codes kept from launch; labels renamed 2026-10-18 (see above). renew is no longer offered, kept for old rows.
+GoalT = Literal["open_mt5", "open_signallab", "activate_trial", "revisit", "other"]
 PriorityT = Literal["low", "normal", "high"]
 ChannelT = Literal["phone", "email", "in_app", "other"]
 StaffStatusT = Literal["pending", "contacted", "interested", "converted", "no_interest", "unreachable"]

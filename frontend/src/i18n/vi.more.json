@@ -2284,11 +2284,12 @@
       "expired": "Hết hạn"
     },
     "goal": {
-      "open_mt5": "Mở tài khoản thật MC",
-      "open_signallab": "Tham gia Signal Lab",
-      "renew": "Gia hạn",
-      "activate_trial": "Kích hoạt dùng thử",
-      "revisit": "Hỏi thăm lại"
+      "open_mt5": "Hướng dẫn kết nối tài khoản thật",
+      "open_signallab": "Hướng dẫn nâng cấp PRO",
+      "activate_trial": "Kích hoạt lại người dùng không hoạt động",
+      "revisit": "Liên hệ giải đáp thắc mắc",
+      "other": "Khác",
+      "renew": "Gia hạn"
     },
     "channel": {
       "phone": "Điện thoại",

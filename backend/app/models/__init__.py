@@ -1999,7 +1999,7 @@ class FollowUp(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     assignee_id = Column(String, ForeignKey("users.id"), nullable=False)
     assigned_by = Column(String, ForeignKey("users.id"), nullable=True)
-    # open_mt5 / open_signallab / renew / activate_trial / revisit
+    # open_mt5 / open_signallab / activate_trial / revisit / other（renew 只在旧记录里）
     goal = Column(String, nullable=False)
     priority = Column(String, nullable=False, default="normal")  # low / normal / high
     note = Column(Text, nullable=True)

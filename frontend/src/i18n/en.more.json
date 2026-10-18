@@ -4511,11 +4511,12 @@
       "expired": "Expired"
     },
     "goal": {
-      "open_mt5": "Open a real trading account",
-      "open_signallab": "Join Signal Lab",
-      "renew": "Renew",
-      "activate_trial": "Activate trial",
-      "revisit": "Check in"
+      "open_mt5": "Get them on a live account",
+      "open_signallab": "Get them on PRO",
+      "activate_trial": "Re-engage a dormant user",
+      "revisit": "Reach out to answer questions",
+      "other": "Other",
+      "renew": "Renew"
     },
     "channel": {
       "phone": "Phone",

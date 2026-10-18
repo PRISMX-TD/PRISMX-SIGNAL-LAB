@@ -1126,7 +1126,7 @@ const SUPPORT_ACTIONS = new Set([
 ])
 const FOLLOW_UP_ACTIONS = new Set(['assign', 'revoke', 'reassign', 'extend', 'update', 'note', 'request', 'message', 'expired'])
 const REQUEST_KINDS = new Set(['comp_days', 'follow_up', 'conversion_manual'])
-const FU_GOALS = new Set(['open_mt5', 'open_signallab', 'renew', 'activate_trial', 'revisit'])
+const FU_GOALS = new Set(['open_mt5', 'open_signallab', 'renew', 'activate_trial', 'revisit', 'other'])
 const FU_STATUSES = new Set(['pending', 'contacted', 'interested', 'converted', 'no_interest', 'unreachable', 'revoked', 'expired'])
 const FU_CHANNELS = new Set(['phone', 'email', 'in_app', 'other'])
 

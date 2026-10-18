@@ -36,7 +36,8 @@ SWEEP_INTERVAL_SECONDS = 5 * 60
 # 即将过期提前多久提醒 / how early the "expiring soon" reminder goes out
 EXPIRING_NOTICE = timedelta(days=3)
 
-FOLLOW_UP_GOALS = ("open_mt5", "open_signallab", "renew", "activate_trial", "revisit")
+# renew 不再提供，但旧跟进 / 旧申请里还有 / renew is no longer offered but old rows still carry it
+FOLLOW_UP_GOALS = ("open_mt5", "open_signallab", "renew", "activate_trial", "revisit", "other")
 FOLLOW_UP_PRIORITIES = ("low", "normal", "high")
 FOLLOW_UP_STATUSES = (
     "pending", "contacted", "interested", "converted", "no_interest", "unreachable", "revoked", "expired",

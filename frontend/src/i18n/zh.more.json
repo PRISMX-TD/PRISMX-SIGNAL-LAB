@@ -4501,11 +4501,12 @@
       "expired": "已过期"
     },
     "goal": {
-      "open_mt5": "开真实交易账户",
-      "open_signallab": "开通 Signal Lab",
-      "renew": "续费",
-      "activate_trial": "激活试用",
-      "revisit": "回访"
+      "open_mt5": "引导连接实盘",
+      "open_signallab": "引导开通 PRO",
+      "activate_trial": "激活休眠用户",
+      "revisit": "联系解答问题",
+      "other": "其他",
+      "renew": "续费"
     },
     "channel": {
       "phone": "电话",
