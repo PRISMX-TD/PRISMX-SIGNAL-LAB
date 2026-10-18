@@ -14,7 +14,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
 from starlette.concurrency import run_in_threadpool
@@ -1125,8 +1125,16 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str) -> None:
         # 双语标题与正文 / bilingual title and body
         title = "New ticket reply / 工单有新回复"
         body = "Support replied to your ticket / 客服回复了你的工单"
+        # 点开直达这条工单：客服页认 ?ticket=<id>（SupportPage 的深链）。url 必须放在
+        # 负载**顶层**——网页 sw.js 的 push 处理只读顶层 url（缺省 /app），App 的
+        # pushBridge 也是顶层优先。2026-10-18 以前只带 data.ticketId，点开落到 /app。
+        # Tapping lands on this ticket: SupportPage deep-links via ?ticket=<id>. The url
+        # must be top-level — sw.js only reads the top-level url (default /app) and the
+        # App's pushBridge prefers it. Before 2026-10-18 only data.ticketId was sent and
+        # taps landed on /app.
+        url = f"/support?ticket={quote(ticket_id, safe='')}"
         # 判定已经过了，WS 兜底先发（下面那句 `if not subs: return` 对大陆设备恒成立）。
-        _ws_fallback([recipient_id], title, body, url="/support")
+        _ws_fallback([recipient_id], title, body, url=url)
         if not subs:
             return
         vapid_claims = {"sub": settings.VAPID_SUBJECT}
@@ -1134,6 +1142,7 @@ def dispatch_ticket_reply(ticket_id: str, recipient_id: str) -> None:
             "title": title,
             "body": body,
             "icon": "/icons/icon-192.png",
+            "url": url,
             "data": {"ticketId": ticket_id},
         })
         push_headers = {"Urgency": "high", "TTL": str(3600)}
@@ -1249,6 +1258,10 @@ def dispatch_test_push(user_id: str) -> dict:
         "title": "测试通知 / Test notification",
         "body": "推送链路正常。/ Push delivery is working.",
         "icon": "/icons/icon-192.png",
+        # 顶层 url 才是网页 sw.js 认的（只读顶层，缺省 /app）；data.url 留给只认它的旧版 App 包。
+        # The top-level url is what sw.js reads (top-level only, default /app); data.url stays
+        # for older App bundles that only look there.
+        "url": "/account#notifications",
         "data": {"url": "/account#notifications"},
     })
     push_headers = {"Urgency": "high", "TTL": "60"}

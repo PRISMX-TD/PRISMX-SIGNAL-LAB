@@ -4,7 +4,7 @@
 // chartConfig / useChartEngine / useChartData / 若干小组件），内容逐行原样。
 // Constants, types and pure helpers for the charts page, moved out of
 // pages/ChartsPage.tsx on 2026-09-06 verbatim.
-import type { UTCTimestamp } from 'lightweight-charts'
+import type { HandleScrollOptions, UTCTimestamp } from 'lightweight-charts'
 import type { Candle, Quote } from '../../api/types'
 import type { Tool } from './DrawLayer'
 import type { DayStats } from './SymbolHeader'
@@ -391,3 +391,23 @@ export function computeDayStats(bars: { t: number; o: number; h: number; l: numb
 // "图表时间还是不对"的根因。函数本体在 utils/chartSeries.ts。
 // Axis ticks and crosshair hover must share one formatter or they disagree on
 // timezone (the original "chart time is still wrong" bug). See utils/chartSeries.ts.
+
+// 图上拖止盈 / 止损线时临时关掉图表自身的拖动平移，松手后**原样**恢复拖线前的设置。
+// 2026-10-18：以前松手时硬写 vertTouchDrag: false，把 useChartEngine 为手机价格轴打开的
+// vertTouchDrag: true 又关掉了——拖过一次线，价格轴就又拉不动（踩坑 #221 回归）。
+// 拿不到拖线前的值时退回与 useChartEngine 建图一致的「全开」。
+// While a TP/SL line is dragged the chart's own drag-pan is off; on release restore exactly
+// what was there before. 2026-10-18: release used to hard-code vertTouchDrag: false, undoing the
+// vertTouchDrag: true useChartEngine sets for the phone price axis (pitfall #221 regression).
+// Without a snapshot, fall back to everything on, matching useChartEngine's build.
+// 返回的总是新对象：chart.options() 给的是内部对象本身，会被之后的 applyOptions 就地改掉，
+// 记快照时也要过一遍这里拷贝。
+// Always returns a fresh object: chart.options() hands out the live internal object that later
+// applyOptions calls mutate in place, so snapshots go through here too.
+export const DRAG_LOCK_SCROLL: Partial<HandleScrollOptions> = { pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false }
+export const DEFAULT_SCROLL: HandleScrollOptions = { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true }
+
+export function scrollAfterDrag(before: HandleScrollOptions | boolean | null | undefined): HandleScrollOptions | boolean {
+  if (before == null) return { ...DEFAULT_SCROLL }
+  return typeof before === 'boolean' ? before : { ...before }
+}

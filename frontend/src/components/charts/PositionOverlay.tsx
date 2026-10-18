@@ -28,13 +28,14 @@ import { useTranslation } from 'react-i18next'
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type {
   IChartApi, ISeriesApi, IPrimitivePaneView, IPrimitivePaneRenderer,
-  AutoscaleInfo, Logical,
+  AutoscaleInfo, Logical, HandleScrollOptions,
 } from 'lightweight-charts'
 import type { PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
 import { checkPendingPrice, checkSlTp } from '../order/orderMath'
 import { isChartAlive } from './chartLifecycle'
+import { DRAG_LOCK_SCROLL, scrollAfterDrag } from './chartConfig'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
 const isTouchDevice = typeof window !== 'undefined'
@@ -414,6 +415,9 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   // The line being dragged plus its uncommitted price, and optimistic values
   // for modifies that are submitted but not yet reported back by the bridge.
   const dragRef = useRef<{ key: string; scope: LineScope; ticket: number; kind: LineKind; price: number } | null>(null)
+  // 拖线前图表的 handleScroll，松手（或拖到一半被隐藏）时原样还回去，见 scrollAfterDrag。
+  // The chart's handleScroll before the drag, restored verbatim on release (or hide mid-drag).
+  const scrollBeforeDragRef = useRef<HandleScrollOptions | boolean | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dragPrice, setDragPrice] = useState<number | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
@@ -684,11 +688,16 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   useEffect(() => {
     if (!visible) {
       setHovered(null)
+      // 拖到一半被隐藏：onUp 不会再来，这里把图表的拖动平移还回去，否则会一直关着。
+      // Hidden mid-drag: onUp won't fire, so give the chart its drag-pan back here.
+      const before = scrollBeforeDragRef.current
+      scrollBeforeDragRef.current = null
+      if (before != null && isChartAlive(chart)) chart.applyOptions({ handleScroll: scrollAfterDrag(before) })
       dragRef.current = null
       setDragKey(null)
       setDragPrice(null)
     }
-  }, [visible])
+  }, [chart, visible])
 
   // ──── 拖拽改单 / drag to modify ────
   const submitModify = useCallback(async (m: Marker, sl: number, tp: number) => {
@@ -770,8 +779,21 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     // 拖线期间关掉图表自身的拖动平移，否则同一次按压会连带把图表也拖走。
     // Disable the chart's own drag-pan while dragging a line, otherwise the
     // same press would pan the chart along with it.
-    chart.applyOptions({ handleScroll: { pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false } })
+    // 先记下原值，松手时原样还回去（不能写死：手机价格轴靠 vertTouchDrag: true，踩坑 #221）。
+    // Snapshot first and restore verbatim on release — never hard-code (phone price axis needs
+    // vertTouchDrag: true, pitfall #221).
+    // 必须拷贝：chart.options() 返回的是内部对象本身，下面的 applyOptions 会就地改掉它。
+    // Must copy: chart.options() returns the live internal object that applyOptions mutates below.
+    if (scrollBeforeDragRef.current == null) scrollBeforeDragRef.current = scrollAfterDrag(chart.options().handleScroll)
+    chart.applyOptions({ handleScroll: DRAG_LOCK_SCROLL })
   }, [chart, hitLine, series])
+
+  const restoreScroll = useCallback(() => {
+    const before = scrollBeforeDragRef.current
+    scrollBeforeDragRef.current = null
+    if (before == null || !isChartAlive(chart)) return
+    chart.applyOptions({ handleScroll: scrollAfterDrag(before) })
+  }, [chart])
 
   const onMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
@@ -791,7 +813,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     if (overlayRef.current?.hasPointerCapture?.(e.pointerId)) {
       overlayRef.current.releasePointerCapture(e.pointerId)
     }
-    chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false } })
+    restoreScroll()
     setDragKey(null)
     setDragPrice(null)
     if (!drag) return
@@ -901,7 +923,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
 
     // 弹出确认框而非直接发送 —— 避免误拖 / show confirm dialog instead of sending immediately
     setConfirmState({ key: drag.key, scope: 'pos', ticket: drag.ticket, kind: drag.kind, newPrice: next, marker: m })
-  }, [chart, exactDigits, refPrice, digits, onToast, t])
+  }, [restoreScroll, exactDigits, refPrice, digits, onToast, t])
 
   // 用户确认改单 / user confirms the modify
   const handleConfirm = useCallback(async () => {

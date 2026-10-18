@@ -3,7 +3,7 @@
 // after the boundary before polling.
 import { describe, expect, it } from 'vitest'
 import {
-  BOUNDARY_SETTLE_MS, CANDLE_SCHEMES, DEFAULT_CANDLE_COLORS, POLL_MS, POLL_SLOW_MS, barCloseCountdownSec, barSpacingSeconds,
+  BOUNDARY_SETTLE_MS, CANDLE_SCHEMES, DRAG_LOCK_SCROLL, scrollAfterDrag, DEFAULT_CANDLE_COLORS, POLL_MS, POLL_SLOW_MS, barCloseCountdownSec, barSpacingSeconds,
   candleSchemeOf, fmtCountdown, intervalSeconds, nextBoundaryPollDelayMs, normalizeCandleColors,
 } from './chartConfig'
 
@@ -82,5 +82,29 @@ describe('candle colors / K 线配色', () => {
     expect(candleSchemeOf(CANDLE_SCHEMES.redUp)).toBe('redUp')
     expect(candleSchemeOf({ up: '#2EE07E', down: '#FF4D67' })).toBe('greenUp')
     expect(candleSchemeOf({ up: '#38bdf8', down: '#ff4d67' })).toBe('custom')
+  })
+})
+
+describe('scrollAfterDrag（拖线后恢复图表拖动，踩坑 #221）', () => {
+  it('原样恢复拖线前的值，手机价格轴的 vertTouchDrag: true 不会被关掉', () => {
+    const before = { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true }
+    expect(scrollAfterDrag(before)).toEqual(before)
+  })
+
+  it('返回新对象：chart.options() 给的内部对象被锁定改掉后，快照不受影响', () => {
+    const live = { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true }
+    const snap = scrollAfterDrag(live)
+    Object.assign(live, DRAG_LOCK_SCROLL)
+    expect(snap).not.toBe(live)
+    expect(snap).toMatchObject({ vertTouchDrag: true, horzTouchDrag: true, pressedMouseMove: true })
+  })
+
+  it('布尔值原样返回，没有快照时退回全开', () => {
+    expect(scrollAfterDrag(false)).toBe(false)
+    expect(scrollAfterDrag(null)).toEqual({ mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true })
+  })
+
+  it('锁定期间三种拖动都关、不碰滚轮', () => {
+    expect(DRAG_LOCK_SCROLL).toEqual({ pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false })
   })
 })
