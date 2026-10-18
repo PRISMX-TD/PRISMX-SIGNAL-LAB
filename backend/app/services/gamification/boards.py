@@ -369,8 +369,11 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
         return 0    # 已结束周期：期后交易会污染对账，冻结不动（重算窗内也不对账）
     # 非有限的余额（NaN / Infinity）当作读不到，冻结不动，免得 NaN 写进 adjust / 流水。
     # A non-finite balance counts as unreadable (frozen), keeping NaN out of adjust / flows.
+    # 只取三列：整行（含 id / user_id 两个 UUID 文本）在这里一列都用不上，每分钟一趟
+    # 全表读整行是白白的 Egress。/ Three columns only — the full rows were pure egress.
     acct_map = {(a.user_id, a.login): a.balance
-                for a in db.query(MT5Account).filter(MT5Account.balance.isnot(None))
+                for a in db.query(MT5Account.user_id, MT5Account.login, MT5Account.balance)
+                .filter(MT5Account.balance.isnot(None))
                 if math.isfinite(a.balance)}
     prev_check = _last_reconciled_at(period_key)
     adjusted = 0
@@ -604,6 +607,23 @@ def replace_snapshot_rows(db, board: str, period_key: str, rows: list[dict], for
     return True
 
 
+def touch_snapshot_if_stale(db, board: str, period_key: str) -> None:
+    """名次没变时 replace_snapshot_rows 做的那一下 computed_at 刷新，单独拿出来给「输入
+    指纹没变、整轮跳过」的路径用（见 input_sig）：最新的 computed_at 超过
+    SNAPSHOT_TOUCH_SECONDS 才用一条 UPDATE 刷一次，不读回任何行。
+    The computed_at touch replace_snapshot_rows does on an unchanged ranking, for the
+    path that skips the recompute entirely (see input_sig): one UPDATE, only when the
+    newest computed_at is older than SNAPSHOT_TOUCH_SECONDS, no rows read back."""
+    from sqlalchemy import func
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cond = (LeaderboardSnapshot.board == board, LeaderboardSnapshot.period_key == period_key)
+    newest = (db.query(func.max(LeaderboardSnapshot.computed_at))
+                .filter(*cond).scalar_subquery())
+    db.query(LeaderboardSnapshot).filter(
+        *cond, newest < now - timedelta(seconds=SNAPSHOT_TOUCH_SECONDS)
+    ).update({LeaderboardSnapshot.computed_at: now}, synchronize_session=False)
+
+
 def leaderboard_cache_key(board: str, period_key: str) -> str:
     """榜单前 50 行在 shared_cache 里的键（读侧见 routers/gamification.build_board_rows_payload）。
     shared_cache key of a board's cached top 50 (read side: routers/gamification)."""
@@ -619,6 +639,8 @@ def snapshot_boards(db, now: datetime) -> dict:
     （`end > now`），也原样透传给 `reconcile_deposits`（它内部还有一层
     `now >= end` 的防御性兜底），确保「现在」在一次调用里只有一个含义。
     """
+    from app.services.settings_store import get_gamification_settings
+    from . import input_sig
     total_rows = 0
     keys = active_period_keys(now)
     for key in keys:
@@ -626,8 +648,22 @@ def snapshot_boards(db, now: datetime) -> dict:
         if end > now:                                # 进行中：拍基线 + 对账
             ensure_baselines(db, key, now)
             reconcile_deposits(db, key, now=now)
+        # 计分输入（含刚才的基线 / 对账改动）与上一轮完全相同 → 名次必然不变，跳过重算，
+        # 只照旧刷一下 computed_at（见 input_sig）。
+        # Scoring inputs (this pass's baseline / reconcile writes included) identical to
+        # the last recompute → the ranking can't have moved; skip it (see input_sig).
+        sig = input_sig.input_signature(db, "board", key, {"key": key},
+                                        get_gamification_settings(db))
+        same = input_sig.unchanged(db, "board", key, sig)
+        if same is not None:
+            for board in ("return_pct", "win_rate"):
+                touch_snapshot_if_stale(db, board, key)
+            db.commit()
+            total_rows += int(same.get("rows", 0))
+            continue
         rows_by_board = compute_board_rows(db, key)
         changed_boards: list[str] = []
+        key_rows = 0
         for board, rows in rows_by_board.items():
             # 排序键 = (分数降序, 笔数降序, 账户号升序)。
             # **没有并列名次的概念**：同分同笔数时按账户号字典序分先后，两行拿到的
@@ -649,8 +685,11 @@ def snapshot_boards(db, now: datetime) -> dict:
             rows.sort(key=lambda r: (-r["score"], -r["sample"], r["login"]))
             if replace_snapshot_rows(db, board, key, rows):
                 changed_boards.append(board)
-            total_rows += len(rows)
+            key_rows += len(rows)
+        total_rows += key_rows
+        snap_sig = input_sig.snapshot_signature(db, key)
         db.commit()
+        input_sig.remember("board", key, sig, snap_sig, {"rows": key_rows})
         # 新快照已提交：删掉**真的变了**的榜的前 50 缓存，所有 worker 下一次读取即看到新名次；
         # 没变的榜不击穿缓存。
         # New snapshot committed: drop the cached top 50 of boards that really changed;

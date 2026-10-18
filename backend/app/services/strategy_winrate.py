@@ -30,11 +30,13 @@ routers/webhook.py).
 from __future__ import annotations
 
 import math
+import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import EXTERNAL_SIGNAL_SOURCES, Signal
@@ -426,6 +428,103 @@ def _empty_payload(days: int, now: datetime) -> dict:
     }
 
 
+# ---- 窗口行的进程内缓存（2026-10-18，Supabase Egress）----------------------------
+# 用户端「策略分析」每分钟（共享缓存 60 秒一过）回源一次，每次把近 30 天外部信号整窗
+# 读回来——实测每次约 1.5 万行、每天约 4GB 出网，是当时 Egress 的头号来源。
+# 而这些行几乎不变：信号只会新增，或者在判定时把 result / resolved_at 一起改掉
+# （signal_resolution 的 resolve / stale 两处都同时写这两列，resolved_at = 当时墙钟）。
+# 所以缓存整窗的行，每次只增量拉「上次同步以来新建或刚判定」的行，按 id 合并；
+# 窗口左端滑出去的在内存里裁掉。结果与每次整窗重读逐行相同。
+#   · 增量条件用 created_at / resolved_at ≥ 上次同步 − _ROW_SYNC_OVERLAP：两列都是写入
+#     方取的墙钟，提交可能晚几秒，重叠 10 分钟足够兜住；
+#   · 每 _ROW_FULL_RELOAD_SECONDS 整窗重读一次兜底（手工改库、删行这类增量看不见的变化）；
+#   · 窗口超过 _ROW_CACHE_DAYS（只有管理端会传）时不走缓存，照旧整窗查。
+# In-process cache of the window rows (2026-10-18, Supabase egress). The user-facing
+# analysis tab re-read the whole 30-day window (~15k rows) every minute, about 4GB of
+# egress a day. Signals are only ever inserted, or resolved — and both resolution paths
+# write result and resolved_at (wall clock) together — so the rows are cached and each
+# refresh pulls only rows created or resolved since the last sync (minus an overlap
+# for late commits), merged by id; rows sliding out of the window are trimmed in
+# memory. A full reload every _ROW_FULL_RELOAD_SECONDS catches anything an increment
+# can't see (manual edits, deletes). Windows longer than _ROW_CACHE_DAYS bypass it.
+_ROW_CACHE_DAYS = 31
+_ROW_SYNC_OVERLAP = timedelta(minutes=10)
+_ROW_FULL_RELOAD_SECONDS = 3600.0
+# None = 自动（只在 Postgres 上启用）；测试可置 True 在 SQLite 上走缓存路径。
+# None = auto (Postgres only); tests may set True to exercise it on SQLite.
+_ROW_CACHE_ENABLED: bool | None = None
+_row_cache_lock = threading.Lock()
+_row_cache: dict = {"rows": None, "synced_at": None, "full_at": float("-inf"), "key": None}
+
+_ROW_COLUMNS = (Signal.id, Signal.indicator, Signal.symbol, Signal.side,
+                Signal.created_at, Signal.result, Signal.resolved_at)
+
+
+def reset_row_cache() -> None:
+    """清空窗口行缓存（测试用）。/ Drop the window-row cache (for tests)."""
+    with _row_cache_lock:
+        _row_cache.update(rows=None, synced_at=None, full_at=float("-inf"), key=None)
+
+
+def _row_cache_on(db: Session) -> bool:
+    if _ROW_CACHE_ENABLED is not None:
+        return _ROW_CACHE_ENABLED
+    try:
+        return db.get_bind().dialect.name == "postgresql"
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _window_rows(db: Session, cutoff_naive: datetime, days: int,
+                 only_strategies: list[str] | None) -> list[tuple]:
+    """窗口内的 (indicator, symbol, side, created_at, result, resolved_at) 行。
+    Rows (indicator, symbol, side, created_at, result, resolved_at) in the window."""
+    if days > _ROW_CACHE_DAYS - 1 or not _row_cache_on(db):
+        query = db.query(*_ROW_COLUMNS[1:]).filter(
+            Signal.source.in_(EXTERNAL_SIGNAL_SOURCES),
+            Signal.created_at >= cutoff_naive,
+        )
+        if only_strategies is not None:
+            query = query.filter(Signal.indicator.in_(only_strategies))
+        return query.all()
+
+    with _row_cache_lock:
+        # 同步时刻在查询**之前**取：查询期间新提交的行下次增量一定还在条件内。
+        # Stamp before querying, so rows committed during the query fall inside the
+        # next increment's condition.
+        sync_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        floor = sync_at - timedelta(days=_ROW_CACHE_DAYS)
+        rows: dict | None = _row_cache["rows"]
+        key = (id(db.get_bind()), tuple(EXTERNAL_SIGNAL_SOURCES))
+        base = db.query(*_ROW_COLUMNS).filter(
+            Signal.source.in_(EXTERNAL_SIGNAL_SOURCES),
+            Signal.created_at >= floor,
+        )
+        if (rows is None or _row_cache["key"] != key
+                or time.monotonic() - _row_cache["full_at"] > _ROW_FULL_RELOAD_SECONDS):
+            rows = {r[0]: tuple(r[1:]) for r in base.all()}
+            _row_cache.update(full_at=time.monotonic(), key=key)
+        else:
+            since = _row_cache["synced_at"] - _ROW_SYNC_OVERLAP
+            for r in base.filter(or_(Signal.created_at >= since,
+                                     Signal.resolved_at >= since)).all():
+                rows[r[0]] = tuple(r[1:])
+            for sid in [k for k, v in rows.items() if v[3] is None or v[3] < floor]:
+                del rows[sid]
+        _row_cache.update(rows=rows, synced_at=sync_at)
+        snapshot = list(rows.values())
+
+    wanted = set(only_strategies) if only_strategies is not None else None
+    out = [r for r in snapshot
+           if r[3] is not None and r[3] >= cutoff_naive
+           and (wanted is None or r[0] in wanted)]
+    # 次序与累加无关（输出各层都显式排序），按时间排只是让浮点求和次序稳定。
+    # Order doesn't matter (every output layer is sorted); sorting by time just keeps
+    # the float sums' order stable.
+    out.sort(key=lambda r: r[3])
+    return out
+
+
 def compute_strategy_session_winrate(
     db: Session, days: int = 7, only_strategies: list[str] | None = None
 ) -> dict:
@@ -457,13 +556,6 @@ def compute_strategy_session_winrate(
     # same reasoning as signal_resolution.py. symbol feeds the per-symbol
     # breakdown (Task 3).
     cutoff_naive = cutoff.replace(tzinfo=None)
-    query = db.query(
-        Signal.indicator, Signal.symbol, Signal.side, Signal.created_at,
-        Signal.result, Signal.resolved_at,
-    ).filter(
-        Signal.source.in_(EXTERNAL_SIGNAL_SOURCES),
-        Signal.created_at >= cutoff_naive,
-    )
     # 白名单过滤在**取数这一层**，不是在结果里删几行：用户端的时段胜率、品种胜率
     # 都要只用白名单内策略的信号算，分母跟着变。只公开 AIFT 时，"欧洲盘 56%"
     # 必须是 AIFT 在欧洲盘的胜率，而不是全平台的 56% 配一份只剩 AIFT 的策略列表——
@@ -486,11 +578,11 @@ def compute_strategy_session_winrate(
     # Hence `is not None` — writing `if only_strategies:` would treat the empty
     # list as "no filter" and turn "publish nothing by default" into "publish
     # everything" in one line.
-    if only_strategies is not None:
-        if not only_strategies:
-            return _empty_payload(days, now)
-        query = query.filter(Signal.indicator.in_(only_strategies))
-    rows = query.all()
+    if only_strategies is not None and not only_strategies:
+        return _empty_payload(days, now)
+    # 取数（含白名单过滤）见 _window_rows：30 天以内走增量行缓存。
+    # Fetch (whitelist filter included) lives in _window_rows: incremental row cache.
+    rows = _window_rows(db, cutoff_naive, days, only_strategies)
 
     # 判定链路的健康读数：全表最近一次成功判定的时间，**刻意不受窗口限制**。
     # 判定只在 POST /webhook/trend 带着 high/low 进来时发生（见 routers/webhook.py），

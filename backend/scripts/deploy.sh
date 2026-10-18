@@ -46,6 +46,7 @@
 #   PRISMX_ALLOW_SCHEMA_ROLLBACK=1
 #                              允许在 schema_rev 已经变化的情况下自动回滚代码
 #   PRISMX_SKIP_DB_SNAPSHOT=1  跳过 pg_dump 快照
+#   PRISMX_FORCE_DB_SNAPSHOT=1 schema_rev 不变时也照样快照（默认不变就跳过）
 #   PRISMX_DB_SNAPSHOT_TIMEOUT pg_dump 最长跑多少秒（默认 300），超时当作没有快照、继续部署
 #   PRISMX_FORCE=1             无视 failed-commits 的记忆，强行重试同一个 commit
 # ---------------------------------------------------------------------------
@@ -161,6 +162,22 @@ read_schema_rev() {
 snapshot_db() {
   if [ "${PRISMX_SKIP_DB_SNAPSHOT:-0}" = "1" ]; then
     log "已按 PRISMX_SKIP_DB_SNAPSHOT=1 跳过数据库快照"
+    return 0
+  fi
+  # 新代码的目标 schema 版本与库里的一致 → 这次启动不跑迁移，快照保护的东西（单向迁移）
+  # 不会发生，跳过。2026-10-18：此前每次部署都整库 pg_dump（K 线表 140 万行），一个月
+  # 87 次，是 Supabase Egress 的大头之一；绝大多数部署并不改 schema。
+  # 读不到任一版本号、或 PRISMX_FORCE_DB_SNAPSHOT=1 时照旧快照。
+  # Skip when the new code's target schema revision equals the database's: no migration
+  # runs, so there is nothing for the snapshot to protect. Every deploy used to dump the
+  # whole database (1.4M candle rows) — 87 dumps in a month, a large share of Supabase
+  # egress — though most deploys change no schema. Unknown revisions still snapshot.
+  local target_rev
+  target_rev=$(sed -n -E 's/^CURRENT_SCHEMA_REV = ([0-9]+).*/\1/p' \
+               "$REPO/backend/app/core/database.py" 2>/dev/null | head -n 1)
+  if [ "${PRISMX_FORCE_DB_SNAPSHOT:-0}" != "1" ] && [ -n "${schema_before:-}" ] \
+     && [ -n "$target_rev" ] && [ "$schema_before" = "$target_rev" ]; then
+    log "schema_rev 不变（$schema_before），本次不跑迁移，跳过数据库快照（PRISMX_FORCE_DB_SNAPSHOT=1 可强制）"
     return 0
   fi
   local url out

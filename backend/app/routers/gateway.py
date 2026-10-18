@@ -724,7 +724,11 @@ GATEWAY_EVENT_POLL_INTERVAL = 0.25
 # accounts_cache）。绑定/解绑/撤销会主动失效，这个 TTL 只兜其它不经那几处的改动
 # （例如管理端直接改库）。/ TTL of the loop's cached (user_id, login) mapping;
 # bind/unbind/revoke invalidate it actively, the TTL only bounds other writers.
-GATEWAY_ACCOUNTS_CACHE_SECONDS = 5.0
+# 5 → 60 秒（2026-10-18，Egress）：5 秒时每天回源约 2 万次、每次读全部网关账号；
+# 那几处写入照旧主动失效（约 1 秒生效），TTL 只影响绕过它们的改动。
+# 5 → 60s (2026-10-18, egress): ~20k full reloads a day at 5s. The writers above still
+# invalidate actively (~1s); the TTL only bounds edits that bypass them.
+GATEWAY_ACCOUNTS_CACHE_SECONDS = 60.0
 
 # ---- 事件队列的单一消费者 / single consumer for the event queues ----
 #
@@ -1230,7 +1234,8 @@ def observe_server_offset(deals: list, opened_at_by_position: dict[int, datetime
     return round(median / _OFFSET_ROUND_SECONDS) * _OFFSET_ROUND_SECONDS
 
 
-def platform_positions(db: Session, user_id: str, login: str) -> tuple[set[int], dict[int, datetime]]:
+def platform_positions(db: Session, user_id: str, login: str,
+                       only_positions: set[int] | None = None) -> tuple[set[int], dict[int, datetime]]:
     """本平台在该账号开过的仓位号，以及可用来观测时区偏移的「仓位号 → 下单时刻」。
 
     仓位号集合含挂单成交的仓位（归属判定要认出它们）；偏移样本只要市价单：挂单的
@@ -1243,15 +1248,28 @@ def platform_positions(db: Session, user_id: str, login: str) -> tuple[set[int],
     samples use market orders only, because a pending order's created_at is when it
     was placed and the fill can come much later, so the difference is zone + wait.
     """
-    rows = db.query(Order.mt5_position, Order.created_at, Order.action).filter(
+    q = db.query(Order.mt5_position, Order.created_at, Order.action).filter(
         Order.user_id == user_id,
         Order.mt5_login == login,
         OPENED_POSITION,
         Order.mt5_position.isnot(None),
-    ).all()
+    )
+    # 给了 only_positions（这批成交涉及的仓位号）就只查这些：调用方只拿结果做
+    # 「这批成交的仓位号在不在里面」与「这批开仓腿的下单时刻」，别的仓位号用不上——
+    # 以前每次扫描都把该账号历史上全部仓位读回来（每天几十万次）。
+    # With only_positions (the ids this batch of deals touches) only those are read:
+    # the caller only asks "is this deal's position ours" and "when was it ordered",
+    # so the account's whole position history (read on every scan) is unnecessary.
+    if only_positions is not None:
+        q = q.filter(Order.mt5_position.in_(list(only_positions)))
+    rows = q.all()
     known = {int(t) for (t, _, _) in rows}
     opened_at = {int(t): c for (t, c, action) in rows if action == "ORDER"}
     return known, opened_at
+
+# platform_positions 按仓位号收窄时 IN 列表的上限，超过就整账号查。
+# Cap on the IN list when narrowing platform_positions; larger batches read the account.
+_PLATFORM_POSITIONS_IN_MAX = 500
 
 # MT5 成交类型/进出方向常量（对应 SDK 的 EnDealAction / EnDealEntry）
 _DEAL_ACTION_BUY = 0
@@ -1661,8 +1679,13 @@ async def gateway_positions_loop() -> None:
                 row.mt5_group = rsp.group
                 row.trade_mode = classify_group(rsp.group, get_account_type_settings(db))
                 row.trade_mode_source = SOURCE_GROUP if row.trade_mode is not None else None
+            # 提交前取值：提交后会话会让 row 过期，再读 row.balance 就是又一次整行 SELECT
+            # （每个账号每拍一次）。值就是上面刚写进去的那个。
+            # Read before committing: after commit the row is expired and touching
+            # row.balance re-SELECTs the whole row (once per account per tick).
+            balance = float(row.balance or 0.0)
             db.commit()
-            return float(row.balance or 0.0)
+            return balance
         finally:
             db.close()
             if revoked:
@@ -1715,7 +1738,17 @@ async def gateway_positions_loop() -> None:
             # 时区偏移（见 observe_server_offset / platform_positions）。
             # Market orders' created_at comes along: the IN leg's server time minus
             # it is the server's zone offset (see platform_positions).
-            known, opened_at = platform_positions(db, user_id, login)
+            # 只查这批成交涉及的仓位号（见 platform_positions）。前缀为空时不收窄：那时
+            # build_closed_trade_legs 用「known 是否为空」决定过不过滤，收窄会改变它。
+            # 仓位号太多（首扫回补一年）也不收窄，免得 IN 列表过长。
+            # Only the positions this batch touches (see platform_positions). Not when the
+            # prefix is blank — build_closed_trade_legs then filters on "is known empty",
+            # which narrowing would change — nor for huge batches (a year's backfill).
+            deal_positions = {int(p) for d in deals if (p := getattr(d, "position_id", None))}
+            narrow = (bool((settings.GATEWAY_COMMENT_PREFIX or "").strip())
+                      and len(deal_positions) <= _PLATFORM_POSITIONS_IN_MAX)
+            known, opened_at = platform_positions(
+                db, user_id, login, deal_positions if narrow else None)
 
             offset = observe_server_offset(deals, opened_at)
             if offset is not None:

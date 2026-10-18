@@ -21,7 +21,8 @@ from app.models import (
 from .badges import award_badge
 from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, BASELINE_EPS, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows
+from .boards import REAL, BASELINE_EPS, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows, touch_snapshot_if_stale
+from . import input_sig
 
 
 TRACKS = ("real", "demo")
@@ -653,6 +654,28 @@ def _snapshot_one_comp(db, comp: Competition, force: bool = False) -> list[dict]
 # backends, so the first request in a window gets 1 and does the work while the
 # rest get >1 and read the snapshot — exactly the race a get+set pair loses.
 REFRESH_MIN_INTERVAL = 20.0
+
+
+def _comp_inputs(db, comp: Competition) -> str | None:
+    """这场比赛计分输入的指纹（见 input_sig）。/ Fingerprint of this contest's scoring inputs."""
+    from app.services.settings_store import get_gamification_settings
+    return input_sig.input_signature(
+        db, "comp", comp.id, {"cid": comp.id, "key": comp_period_key(comp.id)},
+        get_gamification_settings(db))
+
+
+def _comp_check(db, comp: Competition) -> tuple[str | None, dict | None]:
+    """(输入指纹, same)：计分输入与快照都和上次重算一致时 same 为上次记下的附加信息
+    （此时不必重算，顺带照旧刷 computed_at），否则 None。输入没变名次就不可能变，
+    跳过与重算的结果逐行相同。重算的调用方把这个指纹在提交后 remember 下来。
+    (input fingerprint, same): `same` is the stored extra info when inputs and snapshot
+    both match the last recompute (skip it; the computed_at touch still happens), else
+    None. Recomputing callers remember the fingerprint after committing."""
+    sig = _comp_inputs(db, comp)
+    same = input_sig.unchanged(db, "comp", comp.id, sig, comp_period_key(comp.id))
+    if same is not None:
+        touch_snapshot_if_stale(db, comp.metric, comp_period_key(comp.id))
+    return sig, same
 _REFRESH_KEY_PREFIX = "comp-refresh:"
 
 
@@ -685,8 +708,14 @@ def refresh_comp_board(db, comp: Competition, force: bool = False) -> bool:
         if n > 1:
             return False
     try:
+        sig, same = _comp_check(db, comp)
+        if not force and same is not None:
+            db.commit()
+            return False
         _snapshot_one_comp(db, comp)
+        snap_sig = input_sig.snapshot_signature(db, comp_period_key(comp.id))
         db.commit()
+        input_sig.remember("comp", comp.id, sig, snap_sig)
     except IntegrityError:
         # delete-then-insert 撞唯一约束 (board, period_key, user_id, mt5_login)：
         # 节流已经把常态挡掉，剩下的是「节流键刚过期 + 两个 worker 同时进来」这
@@ -790,9 +819,16 @@ def snapshot_competitions(db, now: datetime) -> dict:
         ends_at = _aware(comp.ends_at)
         if comp.status == "running":
             reconcile_deposits(db, key, now=now, bounds=(starts_at, ends_at))
+        sig, same = _comp_check(db, comp)
+        if same is not None:
+            total_rows += int(same.get("rows", 0))
+            db.commit()
+            continue
         rows = _snapshot_one_comp(db, comp)
         total_rows += len(rows)
+        snap_sig = input_sig.snapshot_signature(db, key)
         db.commit()
+        input_sig.remember("comp", comp.id, sig, snap_sig, {"rows": len(rows)})
     return {"comps": len(comps), "rows": total_rows}
 
 
