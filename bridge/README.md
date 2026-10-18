@@ -53,6 +53,7 @@ python bridge_app.py
 pip install -r requirements.txt pyinstaller
 pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 ```
+`requirements.txt` 自 2026-10-10（1.4.9）起全部钉死精确版本（`MetaTrader5==5.0.6231`、`cryptography==50.0.2`、`Pillow==12.3.0` 等，Pillow 必须 >= 10.3），升级时改版本号、重跑测试再打包。
 产出 `dist/PRISMX-Bridge-Setup.exe`（单文件，双击即用），文件名必须与 GitHub Release 资产名、
 `bridge_app.BRIDGE_ASSET_FILENAME`、前端 `frontend/src/api/bridgeDownload.ts` 的 `BRIDGE_FILENAME`（下载页 `DownloadPage.tsx` 与绑定页 `BindPage.tsx` 都引用它）三处一致。
 
@@ -95,7 +96,9 @@ pyinstaller --clean --noconfirm PRISMX-Bridge.spec
 自更新是整条链路上**唯一**一处「把远端二进制装到用户机器上并执行」的地方，而那台机器正登录着
 用户真实的 MT5 账号。校验顺序：先取 Release 里的 `SHA256SUMS` + `SHA256SUMS.sig` 验签（证明清单出自
 发布者），再下载 exe 比对哈希（证明拿到的字节就是清单认的那份）。任何一步失败都**不会**替换自身，
-退回「请手动下载」。所以：**没签名 = 没有一键更新**，不是「跳过校验」。
+退回「请手动下载」。所以：**没签名 = 没有一键更新**，不是「跳过校验」。1.4.9 起验签 / 校验失败后「手动下载」
+只打开官方 Releases 页（`RELEASES_PAGE`），不再直接打开刚被拒的那个资产直链；交给浏览器的地址一律先过
+`safe_update_page_url`（必须 https 且主机在 `UPDATE_ALLOWED_HOSTS`，否则换成 Releases 页）。
 
 | 东西 | 在哪 | 作用 |
 |---|---|---|
@@ -158,7 +161,7 @@ sig = key.sign(manifest)   # 签原始字节，不是十六进制字符串
 
 ## 文件说明
 - `bridge_app.py`：GUI + 协调器 + 后端轮询（主进程）。状态循环 1.5 秒一拍，顺序是
-  **持仓 → 变化的报价 → 平仓明细 → 回执**；指令另起一条长轮询线程（`_command_loop`），
+  **持仓 → 账号心跳 `/poll`（`fetchCommands=False`，约 3 秒一次）→ 变化的报价 → 平仓明细 → 回执重试**；指令另起一条长轮询线程（`_command_loop`），
   落库即取、立刻执行，不再排在整轮之后。单终端时报价再另起一条线程（`_quote_loop`），
   每 0.5 秒只读关注品种的 tick、只发变化的；多终端、线程退出或卡住时自动退回状态循环发报价。
   状态循环读终端分两段拿 MT5 锁（账号/持仓/报价 → 平仓明细扫描），段间让下单指令插进来。
@@ -182,7 +185,7 @@ sig = key.sign(manifest)   # 签原始字节，不是十六进制字符串
   打包下子进程起不来，改成了单进程）。单终端场景保持附着不重连。
 - `PRISMX-Bridge.spec`：PyInstaller 打包配置（onefile / 无 UPX），**入库、手工维护**（见上）。
 - `release_sign.py`：发版签名脚本（见上）。
-- `tests/`：`python -m pytest tests`（2026-10-08 共 134 条）。七个测试文件分别覆盖本地配置的加密语义（`test_config_storage.py`）、执行三态 FILLED / REJECTED / FAILED（`test_execution_three_states.py`）、
+- `tests/`：`python -m pytest tests`（2026-10-18 共 144 条：142 通过、2 跳过；2026-10-08 时为 134 条）。七个测试文件分别覆盖本地配置的加密语义（`test_config_storage.py`）、执行三态 FILLED / REJECTED / FAILED（`test_execution_three_states.py`）、
   重发指令的二次确认（`test_redelivery_reconfirm.py`）、报价独立线程与状态循环分段拿锁（`test_quote_thread_and_lock_split.py`，1.4.6）、减负与退避（`test_load_and_resilience.py`，1.4.7）、
   引擎交接与下单防护（`test_engine_handover_and_order_guards.py`，1.4.8）、自更新验签（`test_update_verification.py`）。
 
