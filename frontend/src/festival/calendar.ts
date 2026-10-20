@@ -82,7 +82,7 @@ export function windowsStartingIn(y: number): FestivalWindow[] {
   if (sp) out.push({ key: 'spring', start: shift(sp[0], -1), end: sp[1] })
   const ma = MID_AUTUMN[y]
   if (ma) out.push({ key: 'midautumn', start: shift(ma, -3), end: shift(ma, 1) })
-  out.push({ key: 'halloween', start: y + '-10-25', end: y + '-10-31' })
+  out.push({ key: 'halloween', start: y + '-10-20', end: y + '-10-31' })
   out.push({ key: 'christmas', start: y + '-12-18', end: y + '-12-26' })
   // 跨年：12/30 → 次年 1/2 / spans the year boundary
   out.push({ key: 'newyear', start: y + '-12-30', end: y + 1 + '-01-02' })
