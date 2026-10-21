@@ -44,8 +44,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from sqlalchemy import exists, func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, exists, func, not_, or_, select
+from sqlalchemy.orm import Session, aliased
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
@@ -70,8 +70,11 @@ logger = logging.getLogger("prismx.email_automation")
 # 扫描节奏 / scan pacing
 SCAN_INTERVAL_SECONDS = 300
 SCAN_STARTUP_DELAY_SECONDS = 45
-# 一条规则一轮最多展开多少人：防止一个写错的条件一次塞进几万行。剩下的下一轮接着展开。
+# 一条规则一轮最多展开多少人：防止一个写错的条件一次塞进几万行。剩下的下一轮接着展开——
+# 所以条件都在库里判断、已排过队的也在库里排除（_queued），不能让它们一直占着名额。
 # Per-rule cap per pass, so a mistaken condition can't dump tens of thousands of rows at once.
+# The rest are taken next pass, which is why conditions run in SQL and already-queued rows
+# are excluded there (_queued) instead of holding the slots forever.
 MAX_CANDIDATES_PER_RULE = 2000
 # 每人每天最多一封自动邮件 / at most one automated email per person per day
 PER_USER_GAP = timedelta(hours=24)
@@ -110,7 +113,7 @@ class RuleParams:
     id: str | None = None
 
 
-TriggerFn = Callable[[Session, RuleParams, datetime, "datetime | None", "str | None"], list[Cand]]
+TriggerFn = Callable[[Session, RuleParams, datetime, "datetime | None", "str | None", bool], list[Cand]]
 
 
 def _iso(dt: datetime) -> str:
@@ -133,9 +136,11 @@ def _plan_clause(q, plan: str):
     return q
 
 
-def _users(db: Session, rule, user_id: str | None):
-    """收得到这条规则的人：有邮箱、没停用、符合等级筛选、（推广时）没退订。"""
-    q = db.query(User).filter(User.email.contains("@"), User.disabled_at.is_(None))
+def _recipients(q, rule, user_id: str | None):
+    """收得到这条规则的人：有邮箱、没停用、符合等级筛选、（推广时）没退订。q 里要带着 User。
+    Who can receive this rule: has an email, not disabled, matches the plan filter and (for
+    marketing) hasn't opted out. q must already select from or join User."""
+    q = q.filter(User.email.contains("@"), User.disabled_at.is_(None))
     q = _plan_clause(q, rule.plan_filter or "all")
     if rule.kind != eb.KIND_NOTICE:
         q = q.filter(~exists().where(EmailOptOut.user_id == User.id))
@@ -144,21 +149,43 @@ def _users(db: Session, rule, user_id: str | None):
     return q
 
 
-def _after(col, *extra) -> TriggerFn:
-    """「事件时间 = col + 延迟」型条件。窗口 [lo, now] 换算成 col ∈ [lo − d, now − d]。"""
+def _users(db: Session, rule, user_id: str | None):
+    return _recipients(db.query(User), rule, user_id)
 
-    def fn(db, rule, now, lo, user_id):
+
+def _queued(rule, user_col, *, occurrence=None, since=None):
+    """这条规则已经给这个人排过队（任何状态）。扫描时用 ~_queued(...) 在库里先排除，免得排过的人
+    一直占着每轮 MAX_CANDIDATES_PER_RULE 的名额、新来的人永远排不上。只给扫描用：发送前复核
+    同一个人时不能把他自己排除掉。
+    This rule already queued this person (any status). Scanning filters with ~_queued(...)
+    so queued people stop taking the per-pass MAX_CANDIDATES_PER_RULE slots and starving
+    newcomers. Scan only: the send-time recheck must not exclude the person itself."""
+    S = EmailAutomationSend
+    conds = [S.rule_id == rule.id, S.user_id == user_col]
+    if occurrence is not None:
+        conds.append(S.occurrence == occurrence)
+    if since is not None:
+        conds.append(S.created_at >= since)
+    return exists().where(*conds)
+
+
+def _after(col, *extra) -> TriggerFn:
+    """「事件时间 = col + 延迟」型条件。窗口 [lo, now] 换算成 col ∈ [lo − d, now − d]。每人只有一次。"""
+
+    def fn(db, rule, now, lo, user_id, fresh=False):
         d = _delay(rule)
         q = _users(db, rule, user_id).filter(col <= now - d, *extra)
         if lo is not None:
             q = q.filter(col >= lo - d)
+        if fresh and rule.id:
+            q = q.filter(~_queued(rule, User.id))
         rows = q.with_entities(User.id).order_by(col).limit(MAX_CANDIDATES_PER_RULE).all()
         return [Cand(uid) for (uid,) in rows]
 
     return fn
 
 
-def _first_payment(db, rule, now, lo, user_id):
+def _first_payment(db, rule, now, lo, user_id, fresh=False):
     d = _delay(rule)
     first = db.query(Payment.user_id.label("uid"), func.min(Payment.finished_at).label("at")).filter(
         Payment.status == "FINISHED", Payment.finished_at.isnot(None)
@@ -169,59 +196,63 @@ def _first_payment(db, rule, now, lo, user_id):
     q = _users(db, rule, user_id).join(first, first.c.uid == User.id).filter(first.c.at <= now - d)
     if lo is not None:
         q = q.filter(first.c.at >= lo - d)
+    if fresh and rule.id:
+        q = q.filter(~_queued(rule, User.id))
     rows = q.with_entities(User.id).order_by(first.c.at).limit(MAX_CANDIDATES_PER_RULE).all()
     return [Cand(uid) for (uid,) in rows]
 
 
-def _mt5_first_bind(db, rule, now, lo, user_id):
+# mt5.bind 的 data 是紧凑 JSON（activity_log._dumps），复活那条里一定有这一段
+# mt5.bind data is compact JSON (activity_log._dumps); a revived bind always contains this
+_REVIVED_JSON = '"revived":true'
+
+
+def _mt5_first_bind(db, rule, now, lo, user_id, fresh=False):
     """第一次绑定 MT5。来源是操作日志的 mt5.bind（rev 38 起才有），所以三道判断：
     这是这个人最早的一条 mt5.bind；不是「复活」一个以前删掉的账号；名下没有别的 MT5 账号行
-    （含已解绑的软删行）——rev 38 之前就绑过的老用户靠后两条排除。
+    （含已解绑的软删行）——rev 38 之前就绑过的老用户靠后两条排除。三道判断都在库里做，
+    不符合的事件不占每轮的名额。
 
     First MT5 bind, from the activity log's mt5.bind (only since rev 38): the user's
     earliest such event, not a revived account, and no other account row (soft-deleted
-    included) — the last two keep pre-rev-38 users from counting as first-timers."""
+    included) — the last two keep pre-rev-38 users from counting as first-timers. All three
+    run in SQL so non-matching events don't take the per-pass slots."""
     d = _delay(rule)
-    q = db.query(ActivityEvent).filter(ActivityEvent.kind == activity_log.MT5_BIND, ActivityEvent.created_at <= now - d)
+    E = ActivityEvent
+    earlier = aliased(ActivityEvent)
+    q = _recipients(db.query(E).join(User, User.id == E.user_id), rule, user_id).filter(
+        E.kind == activity_log.MT5_BIND,
+        E.created_at <= now - d,
+        or_(E.data.is_(None), ~E.data.contains(_REVIVED_JSON)),
+        ~exists().where(earlier.user_id == E.user_id, earlier.kind == activity_log.MT5_BIND, earlier.created_at < E.created_at),
+        ~exists().where(MT5Account.user_id == E.user_id, MT5Account.id != E.ref_id),
+    )
     if lo is not None:
-        q = q.filter(ActivityEvent.created_at >= lo - d)
-    if user_id:
-        q = q.filter(ActivityEvent.user_id == user_id)
-    events = q.order_by(ActivityEvent.created_at).limit(MAX_CANDIDATES_PER_RULE).all()
+        q = q.filter(E.created_at >= lo - d)
+    if fresh and rule.id:
+        q = q.filter(~_queued(rule, E.user_id))
+    out: list[Cand] = []
     seen: set[str] = set()
-    picked: list[ActivityEvent] = []
-    for ev in events:
-        if not ev.user_id or ev.user_id in seen:
+    for ev in q.order_by(E.created_at).limit(MAX_CANDIDATES_PER_RULE).all():
+        # 同一时刻两条 mt5.bind 只算一次；data 写法万一变了，这里再按解析结果兜一次底
+        # Two binds at the same instant count once; revived is re-checked on the parsed data
+        if ev.user_id in seen or activity_log.decode_data(ev.data).get("revived"):
             continue
         seen.add(ev.user_id)
-        if activity_log.decode_data(ev.data).get("revived"):
-            continue
-        earlier = (
-            db.query(ActivityEvent.id)
-            .filter(
-                ActivityEvent.user_id == ev.user_id,
-                ActivityEvent.kind == activity_log.MT5_BIND,
-                ActivityEvent.created_at < ev.created_at,
-            )
-            .first()
-        )
-        if earlier:
-            continue
-        other = db.query(MT5Account.id).filter(MT5Account.user_id == ev.user_id, MT5Account.id != ev.ref_id).first()
-        if other:
-            continue
-        picked.append(ev)
-    if not picked:
-        return []
-    ok = {uid for (uid,) in _users(db, rule, None).filter(User.id.in_([e.user_id for e in picked])).with_entities(User.id)}
-    return [Cand(e.user_id, mt5_login=e.mt5_login) for e in picked if e.user_id in ok]
+        out.append(Cand(ev.user_id, mt5_login=ev.mt5_login))
+    return out
 
 
 def _expiring(trial: bool) -> TriggerFn:
     """到期前 d 提醒：事件时间 = 到期时间 − d，窗口换算成 到期时间 ∈ [lo + d, now + d]，且还没到期。
-    occurrence 是这一次的到期时间：续了期就是新的一次，会再提醒。"""
+    occurrence 是这一次的到期时间：续了期就是新的一次，会再提醒。窗口本身有界（只含接下来 d
+    之内到期的人），所以不用 _queued：除非 d 之内到期的人超过每轮上限，否则挤不掉谁。
 
-    def fn(db, rule, now, lo, user_id):
+    The window is bounded on its own (only people expiring within the next d), so no
+    _queued is needed: it can only crowd anyone out if more than the per-pass cap expire
+    within d."""
+
+    def fn(db, rule, now, lo, user_id, fresh=False):
         d = _delay(rule)
         q = _users(db, rule, user_id).filter(
             User.plan != "FREE",
@@ -244,74 +275,64 @@ def _expiring(trial: bool) -> TriggerFn:
 def _expired(trial: bool) -> TriggerFn:
     """到期后 d：降级时 plan_expires_at 会被清空，到期的那一刻只留在 plan:auto_expire 审计行里，
     所以从审计行出发；occurrence 是那一行的 id。现在还是 FREE 才发（又付了费就不提醒）。
-    试用到期 = 用过试用、且从没有成功付过款；其余的到期都算付费会员到期。
+    试用到期 = 用过试用、且从没有成功付过款；其余的到期都算付费会员到期。判断都在库里做，
+    另一类的到期不占这条规则的名额。
 
     After-expiry: the downgrade clears plan_expires_at, so the moment only survives in
     the plan:auto_expire audit row (its id is the occurrence). Only users still FREE.
-    A trial expiry is a user who used a trial and never completed a payment."""
+    A trial expiry is a user who used a trial and never completed a payment. Filtered in
+    SQL so the other kind's expiries don't take this rule's slots."""
 
-    def fn(db, rule, now, lo, user_id):
+    def fn(db, rule, now, lo, user_id, fresh=False):
         d = _delay(rule)
-        q = db.query(AdminAuditLog.id, AdminAuditLog.target_user_id, AdminAuditLog.created_at).filter(
-            AdminAuditLog.field == "plan:auto_expire",
-            AdminAuditLog.created_at <= now - d,
+        A = AdminAuditLog
+        paid = exists().where(Payment.user_id == User.id, Payment.status == "FINISHED")
+        was_trial = and_(User.trial_used_at.isnot(None), ~paid)
+        q = _recipients(
+            db.query(A.id, A.target_user_id, A.created_at).join(User, User.id == A.target_user_id), rule, user_id
+        ).filter(
+            A.field == "plan:auto_expire",
+            A.created_at <= now - d,
+            User.plan == "FREE",
+            was_trial if trial else not_(was_trial),
         )
         if lo is not None:
-            q = q.filter(AdminAuditLog.created_at >= lo - d)
-        if user_id:
-            q = q.filter(AdminAuditLog.target_user_id == user_id)
-        rows = q.order_by(AdminAuditLog.created_at).limit(MAX_CANDIDATES_PER_RULE).all()
-        uids = list({r.target_user_id for r in rows if r.target_user_id})
-        if not uids:
-            return []
-        users = dict(
-            _users(db, rule, None)
-            .filter(User.id.in_(uids), User.plan == "FREE")
-            .with_entities(User.id, User.trial_used_at)
-            .all()
-        )
-        paid = {
-            uid for (uid,) in db.query(Payment.user_id).filter(Payment.user_id.in_(uids), Payment.status == "FINISHED").distinct()
-        }
-        out = []
-        for r in rows:
-            if r.target_user_id not in users:
-                continue
-            was_trial = users[r.target_user_id] is not None and r.target_user_id not in paid
-            if was_trial == trial:
-                out.append(Cand(r.target_user_id, r.id, expires_at=r.created_at))
-        return out
+            q = q.filter(A.created_at >= lo - d)
+        if fresh and rule.id:
+            q = q.filter(~_queued(rule, A.target_user_id, occurrence=A.id))
+        rows = q.order_by(A.created_at).limit(MAX_CANDIDATES_PER_RULE).all()
+        return [Cand(r.target_user_id, r.id, expires_at=r.created_at) for r in rows]
 
     return fn
 
 
-def _inactive(db, rule, now, lo, user_id):
+def _inactive(db, rule, now, lo, user_id, fresh=False):
     """连续 d 没活跃。occurrence 是那一次的最后活跃时间：回来用过再沉下去就是新的一次，
-    max_times 限制同一个人一共最多召回几次。从没活跃过的人按注册时间算。"""
+    max_times 限制同一个人一共最多召回几次。从没活跃过的人按注册时间算。
+    扫描时「这一次已经排过」= 有一行建于最后活跃时间之后：排队时这个人一定还没回来，回来之后
+    最后活跃时间一定晚于那一行。max_times 也在库里判断，召回满次数的人不占名额。
+
+    Scanning treats "this time already queued" as a row created after the last-active time:
+    the person was still away when it was queued, and coming back moves last-active past it.
+    max_times is checked in SQL too, so people at the cap don't take slots."""
     d = _delay(rule)
     seen = func.coalesce(User.last_active_at, User.created_at)
     q = _users(db, rule, user_id).filter(seen <= now - d)
     if lo is not None:
         q = q.filter(seen >= lo - d)
+    if rule.max_times and rule.id:
+        S = EmailAutomationSend
+        sent = (
+            select(func.count(S.id))
+            .where(S.rule_id == rule.id, S.user_id == User.id, S.status == "sent")
+            .correlate(User)
+            .scalar_subquery()
+        )
+        q = q.filter(sent < rule.max_times)
+    if fresh and rule.id:
+        q = q.filter(~_queued(rule, User.id, since=seen))
     rows = q.with_entities(User.id, seen).order_by(seen).limit(MAX_CANDIDATES_PER_RULE).all()
-    cands = [Cand(uid, _iso(at)) for uid, at in rows if at is not None]
-    if rule.max_times and cands:
-        sent: dict[str, int] = {}
-        if rule.id:
-            ids = [c.user_id for c in cands]
-            for i in range(0, len(ids), 500):
-                sent.update(
-                    db.query(EmailAutomationSend.user_id, func.count(EmailAutomationSend.id))
-                    .filter(
-                        EmailAutomationSend.rule_id == rule.id,
-                        EmailAutomationSend.status == "sent",
-                        EmailAutomationSend.user_id.in_(ids[i:i + 500]),
-                    )
-                    .group_by(EmailAutomationSend.user_id)
-                    .all()
-                )
-        cands = [c for c in cands if sent.get(c.user_id, 0) < rule.max_times]
-    return cands
+    return [Cand(uid, _iso(at)) for uid, at in rows if at is not None]
 
 
 @dataclass(frozen=True)
@@ -336,9 +357,13 @@ TRIGGERS: dict[str, TriggerSpec] = {
 }
 
 
-def candidates(db: Session, rule, now: datetime, lo: datetime | None, user_id: str | None = None) -> list[Cand]:
+def candidates(
+    db: Session, rule, now: datetime, lo: datetime | None, user_id: str | None = None, *, fresh: bool = False
+) -> list[Cand]:
+    """满足条件的触发。fresh=True（只有扫描用）时在库里先排除这条规则已经排过队的。
+    Matching firings; fresh=True (scan only) leaves out what this rule already queued."""
     spec = TRIGGERS.get(rule.trigger)
-    return spec.fn(db, rule, now, lo, user_id) if spec else []
+    return spec.fn(db, rule, now, lo, user_id, fresh) if spec else []
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +473,7 @@ def scan_rule(db: Session, rule: EmailAutomation, now: datetime) -> int:
     """展开一条规则：新满足条件的人写成 pending 行。调用方 commit。返回新增行数。"""
     if rule.activated_at is None or rule.trigger not in TRIGGERS:
         return 0
-    cands = candidates(db, rule, now, rule.activated_at)
+    cands = candidates(db, rule, now, rule.activated_at, fresh=True)
     if not cands:
         return 0
     uids = list({c.user_id for c in cands})

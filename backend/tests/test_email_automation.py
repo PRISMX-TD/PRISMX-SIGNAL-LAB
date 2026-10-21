@@ -278,6 +278,96 @@ def test_inactive_recall_respects_max_times(db_session, admin):
     assert len(_sends(db_session, rule)) == 1
 
 
+# ---------- 每轮上限 / the per-pass cap ----------
+# 每轮最多取 MAX_CANDIDATES_PER_RULE 人。已经排过队的、或者条件不符的人不能一直占着名额，
+# 否则规则累计命中超过上限之后，新来的人永远排不上。这里把上限调成 2 来复现。
+# A pass takes at most MAX_CANDIDATES_PER_RULE people; already-queued or non-matching rows
+# must not keep those slots, or once a rule has matched more than the cap nobody new is
+# ever queued. The cap is set to 2 here to reproduce that.
+
+
+def test_signup_keeps_queueing_after_the_cap_is_reached(db_session, admin, monkeypatch):
+    monkeypatch.setattr(ea, "MAX_CANDIDATES_PER_RULE", 2)
+    now = _now()
+    rule = _rule(db_session, admin, activated_at=now - timedelta(days=1))
+    for i in range(2):
+        _user(db_session, f"a{i}@t.co", created_at=now - timedelta(hours=20 - i))
+    assert ea.scan_once(db_session, now) == 2
+    for i in range(2):
+        _user(db_session, f"b{i}@t.co", created_at=now - timedelta(minutes=10 - i))
+    assert ea.scan_once(db_session, now + timedelta(minutes=5)) == 2
+    assert len(_sends(db_session, rule)) == 4
+
+
+def test_inactive_keeps_queueing_after_the_cap_is_reached(db_session, admin, monkeypatch):
+    monkeypatch.setattr(ea, "MAX_CANDIDATES_PER_RULE", 2)
+    now = _now()
+    rule = _rule(db_session, admin, trigger="inactive", delay=7 * 1440, activated_at=now - timedelta(days=30))
+    for i in range(2):
+        _user(db_session, f"z{i}@t.co", last_active_at=now - timedelta(days=9, hours=i))
+    assert ea.scan_once(db_session, now) == 2
+    late = _user(db_session, "late@t.co", last_active_at=now - timedelta(days=7, minutes=30))
+    assert ea.scan_once(db_session, now + timedelta(minutes=5)) == 1
+    assert late.id in {s.user_id for s in _sends(db_session, rule)}
+
+
+def test_inactive_cap_reached_users_do_not_hold_slots(db_session, admin, monkeypatch):
+    monkeypatch.setattr(ea, "MAX_CANDIDATES_PER_RULE", 2)
+    now = _now()
+    rule = _rule(db_session, admin, trigger="inactive", delay=7 * 1440, max_times=1, activated_at=now - timedelta(days=60))
+    done = [_user(db_session, f"d{i}@t.co", last_active_at=now - timedelta(days=20, hours=i)) for i in range(2)]
+    for u in done:
+        db_session.add(EmailAutomationSend(rule_id=rule.id, user_id=u.id, occurrence="old", status="sent",
+                                           created_at=now - timedelta(days=30), sent_at=now - timedelta(days=30)))
+    db_session.commit()
+    fresh = _user(db_session, "f@t.co", last_active_at=now - timedelta(days=8))
+    ea.scan_once(db_session, now)
+    assert [s.user_id for s in _sends(db_session, rule) if s.status == "pending"] == [fresh.id]
+
+
+def test_paid_expiry_is_not_crowded_out_by_trial_expiries(db_session, admin, monkeypatch):
+    monkeypatch.setattr(ea, "MAX_CANDIDATES_PER_RULE", 2)
+    now = _now()
+    rule = _rule(db_session, admin, trigger="plan_expired", activated_at=now - timedelta(days=5))
+    trials = [_user(db_session, f"t{i}@t.co", trial_used_at=now - timedelta(days=10)) for i in range(3)]
+    paid = _user(db_session, "p@t.co")
+    for i, u in enumerate(trials + [paid]):
+        db_session.add(AdminAuditLog(admin_user_id=u.id, target_user_id=u.id, field="plan:auto_expire",
+                                     old_value="PRO", new_value="FREE", created_at=now - timedelta(hours=4 - i)))
+    db_session.commit()
+    ea.scan_once(db_session, now)
+    assert [s.user_id for s in _sends(db_session, rule)] == [paid.id]
+
+
+def test_first_bind_is_not_crowded_out_by_revived_accounts(db_session, admin, monkeypatch):
+    monkeypatch.setattr(ea, "MAX_CANDIDATES_PER_RULE", 2)
+    now = _now()
+    rule = _rule(db_session, admin, trigger="mt5_first_bind", activated_at=now - timedelta(hours=5))
+    for i in range(3):
+        u = _user(db_session, f"rev{i}@t.co")
+        acc = MT5Account(user_id=u.id, login=f"30{i}")
+        db_session.add(acc)
+        db_session.commit()
+        _bind_event(db_session, u, acc, now - timedelta(hours=4 - i), revived=True)
+    first = _user(db_session, "first@t.co")
+    acc = MT5Account(user_id=first.id, login="3100")
+    db_session.add(acc)
+    db_session.commit()
+    _bind_event(db_session, first, acc, now - timedelta(minutes=30))
+    ea.scan_once(db_session, now)
+    assert [s.user_id for s in _sends(db_session, rule)] == [first.id]
+
+
+def test_queued_users_still_pass_the_send_time_recheck(db_session, admin):
+    # 「排除已排队的人」只用于扫描；发送前复核同一个人时不能把他自己排除掉
+    # The already-queued exclusion is for scanning only; the send-time recheck must still match
+    now = _now()
+    rule = _rule(db_session, admin, activated_at=now - timedelta(hours=1))
+    u = _user(db_session, "q@t.co", created_at=now - timedelta(minutes=30))
+    ea.scan_once(db_session, now)
+    assert [c.user_id for c in ea.candidates(db_session, rule, now, None, u.id)] == [u.id]
+
+
 # ---------- 发送 / sending ----------
 
 def test_claim_fills_variables_and_records(db_session, admin, configured):
