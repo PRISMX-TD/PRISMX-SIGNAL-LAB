@@ -2416,6 +2416,89 @@ export interface EmailStatus {
   sentToday: number
 }
 
+// ---- 自动邮件（rev 44）/ automated email ----
+// 情景的含义与延迟怎么算见后端 services/email_automation.TRIGGERS。
+// What each trigger means and how its delay counts: backend services/email_automation.TRIGGERS.
+export type EmailAutomationTrigger =
+  | 'signup'
+  | 'unverified'
+  | 'no_mt5'
+  | 'mt5_first_bind'
+  | 'trial_started'
+  | 'trial_expiring'
+  | 'trial_expired'
+  | 'plan_expiring'
+  | 'plan_expired'
+  | 'first_payment'
+  | 'inactive'
+
+export interface EmailAutomationCondition {
+  trigger: EmailAutomationTrigger
+  delayMinutes: number
+  planFilter: EmailAudiencePlan
+  maxTimes: number | null
+  kind: EmailKind
+}
+
+export interface EmailAutomationInput {
+  name: string
+  condition: EmailAutomationCondition
+  content: EmailContentInput
+  priority: number
+}
+
+export interface EmailAutomation {
+  id: string
+  name: string
+  trigger: EmailAutomationTrigger
+  delayMinutes: number
+  planFilter: EmailAudiencePlan
+  maxTimes: number | null
+  priority: number
+  kind: EmailKind
+  subjectZh: string
+  bodyZh: string
+  subjectEn: string
+  bodyEn: string
+  enabled: boolean
+  activatedAt: string | null
+  createdAt: string | null
+  updatedAt: string | null
+  createdByEmail: string | null
+  sent7d: number
+  failed7d: number
+  skipped7d: number
+  pending: number
+  sentTotal: number
+}
+
+export interface EmailAutomationList {
+  rules: EmailAutomation[]
+  // 整体暂停（额度用完 / 发信商拒绝配置），到 until 自动恢复 / whole-automation pause, lifts at `until`
+  pause: { reason: string; until: string } | null
+}
+
+export interface EmailAutomationEstimate {
+  count: number
+  days: number
+  sample: string[]
+  capped: boolean
+}
+
+export type EmailAutomationSendStatus = 'pending' | 'sending' | 'sent' | 'failed' | 'skipped'
+
+export interface EmailAutomationSend {
+  id: string
+  userId: string
+  email: string | null
+  nickname: string | null
+  status: EmailAutomationSendStatus
+  error: string | null
+  createdAt: string | null
+  dueAt: string | null
+  sentAt: string | null
+}
+
 // ---- 公开比赛页 / 推广（设计 2026-10-08）/ public competition page & promotion ----
 // 公开载荷类型由 Part E（Task E4）在本文件定义为 PublicCompetition / PublicCompetitionRow；
 // 管理端预览与之同形状，这里只起别名，不再重复定义。

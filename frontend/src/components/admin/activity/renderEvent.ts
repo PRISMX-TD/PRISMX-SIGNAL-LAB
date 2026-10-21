@@ -45,7 +45,7 @@ export const ACTIVITY_KINDS = [
   'admin.user_plan', 'admin.user_role', 'admin.user_attribution', 'admin.user_edit', 'admin.user_disable',
   'admin.user_enable', 'admin.verify_email', 'admin.bulk_edit', 'admin.setting', 'admin.gamification',
   'admin.invite_link', 'admin.agent_assign', 'agent.plan', 'admin.competition', 'admin.competition_participant',
-  'admin.announcement', 'admin.email', 'admin.ops', 'admin.ticket', 'admin.other',
+  'admin.announcement', 'admin.email', 'admin.email_auto', 'admin.ops', 'admin.ticket', 'admin.other',
   'support.view_customer', 'support.reveal_phone', 'support.search', 'support.action', 'support.follow_up',
 ] as const
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number]
@@ -1066,6 +1066,13 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
     const count = num(p.count)
     return [(count != null ? t('admin.log.ev.email.sendTo', { subject, count }) : t('admin.log.ev.email.send', { subject })) + kindText]
   },
+  'admin.email_auto': ({ t, p }) => {
+    const name = str(p.name) ? q(t, clip(str(p.name)!)) : t('admin.log.v.untitled')
+    const action = str(p.action)
+    const known = ['create', 'update', 'enable', 'disable', 'delete', 'resume']
+    if (action === 'resume') return [t('admin.log.ev.emailAuto.resume')]
+    return [t(`admin.log.ev.emailAuto.${action && known.includes(action) ? action : 'update'}`, { name })]
+  },
   'admin.ops': ({ t, p }) => {
     const action = str(p.action)
     const target = str(p.target)
@@ -1246,7 +1253,7 @@ export function changeFieldLabel(kind: string, field: string, sub: string | null
       return withSub(lbl(t, `competition.admin.fields.${parts[2]}`, inTable('compField', parts[2])))
     }
     if (PLAN_VALUE_FIELDS.includes(field)) return lbl(t, 'admin.log.v.userField.plan', field)
-    if (['plan', 'account', 'ops', 'announcement', 'email', 'competition'].includes(head)) return sub != null ? misc(sub) : kindName(kind, t)
+    if (['plan', 'account', 'ops', 'announcement', 'email', 'email_auto', 'competition'].includes(head)) return sub != null ? misc(sub) : kindName(kind, t)
     return null
   })()
   // 认不出：原样显示 / unrecognised: shown verbatim

@@ -7,6 +7,12 @@ describe('admin console sections', () => {
     expect(new Set(all).size).toBe(all.length)
   })
 
+  it('uses lower-case section keys only', () => {
+    // 控制台把地址里的分区名转成小写再比对（AdminPage），带大写的 key 永远打不开。
+    // The console lower-cases the section from the URL before matching, so a mixed-case key is unreachable.
+    for (const s of ADMIN_GROUPS.flatMap((g) => g.sections)) expect(s).toBe(s.toLowerCase())
+  })
+
   it('keeps every legacy tab key reachable', () => {
     // 原来的 15 个页签 key（support 除外）都必须还是合法分区，否则旧深链会掉到默认页。
     // The old 15 tab keys (bar support) must all still be sections, or old deep links fall through.

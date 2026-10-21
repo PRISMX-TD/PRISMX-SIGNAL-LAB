@@ -1070,7 +1070,7 @@
         "overview": "平台的运营数据与系统健康状况。",
         "users": "账号、角色与订阅，以及每个人的操作记录。",
         "growth": "推广链接、交易比赛与等级榜单。",
-        "content": "用户看到的内容：策略介绍、胜率公开、公告与邮件。",
+        "content": "用户看到的内容：策略介绍、胜率公开、公告、群发与自动邮件。",
         "support": "工单、客服成员、跟进分配、进度与审批。",
         "settings": "商业条款与后台计算参数。"
       },
@@ -1094,7 +1094,8 @@
         "performance": "业绩",
         "templates": "快捷回复",
         "ops": "运营设置",
-        "system": "系统参数"
+        "system": "系统参数",
+        "autoemail": "自动邮件"
       }
     },
     "totalUsers": "总用户数",
@@ -1881,6 +1882,14 @@
             "message": "通过跟进发了消息",
             "expired": "跟进到期自动结束"
           }
+        },
+        "emailAuto": {
+          "create": "新建了自动邮件规则{{name}}",
+          "update": "修改了自动邮件规则{{name}}",
+          "enable": "打开了自动邮件规则{{name}}",
+          "disable": "关闭了自动邮件规则{{name}}",
+          "delete": "删除了自动邮件规则{{name}}",
+          "resume": "提前恢复了暂停中的自动邮件"
         }
       },
       "kindName": {
@@ -1952,7 +1961,8 @@
           "email": "群发邮件",
           "ops": "运维操作",
           "ticket": "工单",
-          "other": "其它管理操作"
+          "other": "其它管理操作",
+          "email_auto": "自动邮件规则"
         },
         "agent": {
           "plan": "代理调整会员"
@@ -2139,7 +2149,8 @@
         "boards": "周期排行榜",
         "candle_retention": "K 线清理",
         "gateway_positions": "直连持仓刷新",
-        "signal_engine": "模拟信号引擎"
+        "signal_engine": "模拟信号引擎",
+        "email_automation": "自动邮件扫描"
       },
       "runbook": {
         "title": "遇到问题怎么办",
@@ -2945,6 +2956,155 @@
       "pasteToggle": "或者直接粘贴邮箱名单",
       "insertImage": "插入图片",
       "imageUploading": "上传中…"
+    },
+    "emailAuto": {
+      "title": "自动邮件",
+      "intro": "设定情景和模板，满足条件的用户会自动收到邮件。规则打开后，从那一刻起满足条件的人才会收到，之前的不补发；每人每天最多收一封自动邮件。",
+      "create": "新建规则",
+      "empty": "还没有自动邮件规则。点「新建规则」，选一个情景开始。",
+      "colEnabled": "开关",
+      "colRule": "规则",
+      "colPriority": "优先级",
+      "col7d": "近 7 天",
+      "colTotal": "累计已发",
+      "edit": "编辑",
+      "log": "记录",
+      "delete": "删除",
+      "enabledOk": "已打开，从现在起满足条件的人会收到",
+      "disabledOk": "已关闭",
+      "createdOk": "已保存。规则还是关着的，确认没问题后在列表里打开",
+      "since": "{{time}} 起生效",
+      "sentN": "已发 {{n}}",
+      "maxTimesN": "每人最多 {{n}} 次",
+      "unitN": {
+        "minutes": "{{n}} 分钟",
+        "hours": "{{n}} 小时",
+        "days": "{{n}} 天"
+      },
+      "unit": {
+        "minutes": "分钟",
+        "hours": "小时",
+        "days": "天"
+      },
+      "desc": {
+        "signup": "注册 {{delay}}后发送",
+        "signupNow": "注册后立即发送",
+        "unverified": "注册满 {{delay}}仍未验证邮箱时发送",
+        "no_mt5": "注册满 {{delay}}仍未绑定 MT5 时发送",
+        "mt5_first_bind": "首次绑定 MT5 {{delay}}后发送",
+        "mt5_first_bindNow": "首次绑定 MT5 后立即发送",
+        "trial_started": "开通 PRO 试用 {{delay}}后发送",
+        "trial_startedNow": "开通 PRO 试用后立即发送",
+        "trial_expiring": "PRO 试用到期前 {{delay}}发送",
+        "trial_expired": "PRO 试用到期 {{delay}}后发送（期间没有付费）",
+        "trial_expiredNow": "PRO 试用到期后立即发送（期间没有付费）",
+        "plan_expiring": "付费会员到期前 {{delay}}发送",
+        "plan_expired": "付费会员到期 {{delay}}后发送（期间没有续费）",
+        "plan_expiredNow": "付费会员到期后立即发送（期间没有续费）",
+        "first_payment": "首次付费成功 {{delay}}后发送",
+        "first_paymentNow": "首次付费成功后立即发送",
+        "inactive": "连续 {{delay}}没有活跃时发送"
+      },
+      "trig": {
+        "signup": "新注册",
+        "unverified": "注册后一直没验证邮箱",
+        "no_mt5": "注册后一直没绑定 MT5",
+        "mt5_first_bind": "首次绑定 MT5",
+        "trial_started": "开通 PRO 试用",
+        "trial_expiring": "PRO 试用即将到期",
+        "trial_expired": "PRO 试用已到期（没有付费）",
+        "plan_expiring": "付费会员即将到期",
+        "plan_expired": "付费会员已到期（没有续费）",
+        "first_payment": "首次付费成功",
+        "inactive": "长时间没活跃（沉睡召回）"
+      },
+      "trigHint": {
+        "signup": "用户注册之后发。注册时系统已经会自动发一封验证邮件，欢迎信建议延迟 1 天，免得两封挤在一起。",
+        "unverified": "注册满设定的时间、邮箱还没验证的人。发送前会再查一次，已经验证了的不发。",
+        "no_mt5": "注册满设定的时间、名下一个 MT5 账号都没绑过的人。发送前会再查一次，已经绑上的不发。",
+        "mt5_first_bind": "第一次绑定 MT5 账号的人；重新绑回以前删掉的账号、或名下已有别的账号的不算。",
+        "trial_started": "领取或通过邀请链接开通了 PRO 试用的人。",
+        "trial_expiring": "PRO 试用到期前提醒。发送前会再查一次，已经付费转正的不发。",
+        "trial_expired": "PRO 试用到期、降回免费版、而且从没付过款的人。发送时已经重新开通的不发。",
+        "plan_expiring": "付费 PRO 会员到期前提醒。每次续费后的新到期日会再提醒一次。",
+        "plan_expired": "付费会员到期降回免费版的人。发送时已经续费的不发。",
+        "first_payment": "第一次付款成功开通 PRO 的人（之后的续费不再发）。",
+        "inactive": "连续这么久没打开过 App / 网站的人。回来用过之后再沉下去算新的一次，用「每人最多几次」控制总次数。"
+      },
+      "delayLabel": {
+        "signup": "注册后多久发",
+        "unverified": "注册满多久仍未验证",
+        "no_mt5": "注册满多久仍未绑定",
+        "mt5_first_bind": "绑定后多久发",
+        "trial_started": "开通后多久发",
+        "trial_expiring": "到期前多久提醒",
+        "trial_expired": "到期后多久发",
+        "plan_expiring": "到期前多久提醒",
+        "plan_expired": "到期后多久发",
+        "first_payment": "付费后多久发",
+        "inactive": "连续多久没活跃"
+      },
+      "pause": {
+        "quotaDaily": "自动邮件已暂停：今天的发信额度用完了。",
+        "quotaMonthly": "自动邮件已暂停：本月的发信额度用完了。",
+        "provider": "自动邮件已暂停：发信商拒绝了我们的发信配置（{{code}}），请检查 Resend 设置。",
+        "until": "{{time}} 自动恢复。",
+        "resume": "立即恢复"
+      },
+      "confirm": {
+        "enableTitle": "打开「{{name}}」？",
+        "enableBody": "打开后，从现在起满足条件的用户会收到这封邮件。之前就已经满足条件的人不会补发。",
+        "enable": "打开",
+        "disableTitle": "关闭「{{name}}」？",
+        "disableBody": "关闭后不再发送。还在排队的 {{n}} 封也不会发出——重新打开时从那一刻重新开始算。",
+        "disable": "关闭",
+        "deleteTitle": "删除「{{name}}」？",
+        "deleteBody": "删除后不再发送，还在排队的 {{n}} 封也不会发出。已经发出去的收不回来。",
+        "delete": "删除"
+      },
+      "editTitle": "编辑规则",
+      "createTitle": "新建规则",
+      "name": "规则名称（只给管理员看）",
+      "trigger": "情景",
+      "maxTimes": "每人最多几次",
+      "minDelay": "这个情景的时间至少要 {{delay}}",
+      "priority": "优先级",
+      "priorityHint": "每人每天最多收一封自动邮件。同一天命中好几条规则时，数字小的先发，其余的顺延到第二天。",
+      "estimate": "按这个条件，最近 {{days}} 天会有 {{n}} 人触发",
+      "estimateCapped": "按这个条件，最近 {{days}} 天至少有 {{n}} 人触发",
+      "estimateHint": "只是估算，不会发信。规则打开后才开始算，过去的不补发。",
+      "variables": "可用变量（点一下插入到光标处）",
+      "variablesHint": "发送时按收件人替换：昵称没填时用邮箱 @ 前面的部分；到期日期按北京时间；没有对应信息时替换为空。",
+      "conditionChangedWarn": "你改了触发条件：保存后，还在排队的信不再发送，之后按新条件从现在开始重新算。",
+      "save": "保存",
+      "createHint": "新建的规则默认关着，保存后在列表里打开。",
+      "previewHint": "预览里的变量用你自己的资料代入；到期类情景用一个示例到期日期。",
+      "logTitle": "「{{name}}」的发送记录",
+      "logEmpty": "还没有发送记录",
+      "colQueued": "触发时间",
+      "colSent": "发送时间",
+      "dueAt": "将于 {{time}} 发送",
+      "sendStatus": {
+        "all": "全部状态",
+        "pending": "排队中",
+        "sending": "发送中",
+        "sent": "已发送",
+        "failed": "失败",
+        "skipped": "已跳过"
+      },
+      "reason": {
+        "no_user": "账号不存在",
+        "disabled": "账号已停用",
+        "opted_out": "用户已退订",
+        "stale": "排队超过 7 天，不再发送",
+        "condition_gone": "发送时条件已不成立",
+        "deferred": "今天已收过一封自动邮件，顺延",
+        "rule_disabled": "规则已关闭",
+        "rule_deleted": "规则已删除",
+        "rule_changed": "规则条件已修改",
+        "interrupted": "发送中途中断",
+        "network": "连不上发信商"
+      }
     },
     "emailUnverified": "邮箱未验证",
     "markVerified": "标记已验证",

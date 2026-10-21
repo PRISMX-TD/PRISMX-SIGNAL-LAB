@@ -22,6 +22,7 @@ import ActivityLogPanel, { type LogsPreset } from '../components/admin/ActivityL
 import AdminTicketsPanel from '../components/admin/AdminTicketsPanel'
 import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
+import EmailAutomationPanel from '../components/admin/EmailAutomationPanel'
 import EmailPanel from '../components/admin/EmailPanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
@@ -209,6 +210,9 @@ function AdminConsole({ section }: { section: AdminSection }) {
       break
     case 'email':
       content = <EmailPanel presetUserIds={emailPreset} onPresetCleared={() => setEmailPreset([])} />
+      break
+    case 'autoemail':
+      content = <EmailAutomationPanel />
       break
     case 'tickets':
       content = <AdminTicketsPanel onToast={showToast} />

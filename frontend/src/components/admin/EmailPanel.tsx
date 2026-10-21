@@ -46,7 +46,7 @@ function parseEmails(text: string): string[] {
   return Array.from(new Set(text.split(/[\s,;，；]+/).map((s) => s.trim().toLowerCase()).filter((s) => s.includes('@'))))
 }
 
-function useDebounced<T>(value: T, ms: number): T {
+export function useDebounced<T>(value: T, ms: number): T {
   const [v, setV] = useState(value)
   useEffect(() => {
     const id = window.setTimeout(() => setV(value), ms)
@@ -59,7 +59,8 @@ function useDebounced<T>(value: T, ms: number): T {
 // → 在光标处插入 ![](地址)。图片单独占一段，前后补空行，免得和文字挤在同一行。
 // Body textarea with "insert image": pick → convert to mail-safe JPEG / PNG
 // (shrinkImageForEmail) → upload → insert ![](url) at the cursor as its own paragraph.
-function EmailBodyField({
+// 自动邮件面板也用它 / shared with the automated-email panel
+export function EmailBodyField({
   label,
   value,
   onChange,

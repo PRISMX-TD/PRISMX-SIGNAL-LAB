@@ -1070,7 +1070,7 @@
         "overview": "Operating numbers and system health.",
         "users": "Accounts, roles and plans, with a record of every action.",
         "growth": "Promo links, trading competitions, levels and boards.",
-        "content": "What users read: strategy guides, win-rate publication, announcements and email.",
+        "content": "What users read: strategy guides, win-rate publication, announcements, broadcasts and automated email.",
         "support": "Tickets, staff, follow-up assignment, progress and approvals.",
         "settings": "Commercial terms and backend parameters."
       },
@@ -1094,7 +1094,8 @@
         "performance": "Performance",
         "templates": "Canned replies",
         "ops": "Operations",
-        "system": "System"
+        "system": "System",
+        "autoemail": "Automated email"
       }
     },
     "totalUsers": "Total users",
@@ -1889,6 +1890,14 @@
             "message": "Sent a message from a follow-up",
             "expired": "Follow-up expired"
           }
+        },
+        "emailAuto": {
+          "create": "created the automated email rule {{name}}",
+          "update": "edited the automated email rule {{name}}",
+          "enable": "turned on the automated email rule {{name}}",
+          "disable": "turned off the automated email rule {{name}}",
+          "delete": "deleted the automated email rule {{name}}",
+          "resume": "resumed paused automated email early"
         }
       },
       "kindName": {
@@ -1960,7 +1969,8 @@
           "email": "Bulk email",
           "ops": "Ops action",
           "ticket": "Ticket",
-          "other": "Other admin change"
+          "other": "Other admin change",
+          "email_auto": "Automated email rule"
         },
         "agent": {
           "plan": "Agent plan change"
@@ -2147,7 +2157,8 @@
         "boards": "Period leaderboards",
         "candle_retention": "Candle cleanup",
         "gateway_positions": "Direct-account positions",
-        "signal_engine": "Mock signal engine"
+        "signal_engine": "Mock signal engine",
+        "email_automation": "Automated email scan"
       },
       "runbook": {
         "title": "What to do when something breaks",
@@ -2955,6 +2966,155 @@
       "pasteToggle": "Or paste a list of addresses",
       "insertImage": "Insert image",
       "imageUploading": "Uploading…"
+    },
+    "emailAuto": {
+      "title": "Automated email",
+      "intro": "Set a trigger and a template, and users who match get the email automatically. A rule only counts events from the moment it is turned on, so nobody is emailed retroactively, and each person gets at most one automated email per day.",
+      "create": "New rule",
+      "empty": "No automated email rules yet. Click \"New rule\" and pick a trigger to start.",
+      "colEnabled": "On",
+      "colRule": "Rule",
+      "colPriority": "Priority",
+      "col7d": "Last 7 days",
+      "colTotal": "Sent in total",
+      "edit": "Edit",
+      "log": "Log",
+      "delete": "Delete",
+      "enabledOk": "Turned on: users who match from now on will get it",
+      "disabledOk": "Turned off",
+      "createdOk": "Saved. The rule is still off; turn it on in the list when you're ready",
+      "since": "Live since {{time}}",
+      "sentN": "{{n}} sent",
+      "maxTimesN": "At most {{n}} per person",
+      "unitN": {
+        "minutes": "{{n}} min",
+        "hours": "{{n}} h",
+        "days": "{{n}} d"
+      },
+      "unit": {
+        "minutes": "minutes",
+        "hours": "hours",
+        "days": "days"
+      },
+      "desc": {
+        "signup": "Sent {{delay}} after sign-up",
+        "signupNow": "Sent right after sign-up",
+        "unverified": "Sent when the email is still unverified {{delay}} after sign-up",
+        "no_mt5": "Sent when no MT5 account is linked {{delay}} after sign-up",
+        "mt5_first_bind": "Sent {{delay}} after the first MT5 link",
+        "mt5_first_bindNow": "Sent right after the first MT5 link",
+        "trial_started": "Sent {{delay}} after a PRO trial starts",
+        "trial_startedNow": "Sent right after a PRO trial starts",
+        "trial_expiring": "Sent {{delay}} before a PRO trial ends",
+        "trial_expired": "Sent {{delay}} after a PRO trial ends without payment",
+        "trial_expiredNow": "Sent right after a PRO trial ends without payment",
+        "plan_expiring": "Sent {{delay}} before a paid membership ends",
+        "plan_expired": "Sent {{delay}} after a paid membership ends without renewal",
+        "plan_expiredNow": "Sent right after a paid membership ends without renewal",
+        "first_payment": "Sent {{delay}} after the first payment",
+        "first_paymentNow": "Sent right after the first payment",
+        "inactive": "Sent after {{delay}} without activity"
+      },
+      "trig": {
+        "signup": "New sign-up",
+        "unverified": "Email still unverified",
+        "no_mt5": "No MT5 linked yet",
+        "mt5_first_bind": "First MT5 link",
+        "trial_started": "PRO trial started",
+        "trial_expiring": "PRO trial ending soon",
+        "trial_expired": "PRO trial ended (no payment)",
+        "plan_expiring": "Paid membership ending soon",
+        "plan_expired": "Paid membership ended (not renewed)",
+        "first_payment": "First payment",
+        "inactive": "Inactive for a while (win-back)"
+      },
+      "trigHint": {
+        "signup": "Sent after a user signs up. Sign-up already sends a verification email, so a one-day delay keeps the two from arriving together.",
+        "unverified": "Users whose email is still unverified after the set time. Re-checked before sending; anyone who has verified is skipped.",
+        "no_mt5": "Users who have never linked an MT5 account after the set time. Re-checked before sending; anyone who has linked is skipped.",
+        "mt5_first_bind": "Users linking their first MT5 account. Re-linking a previously removed account, or already having another account, doesn't count.",
+        "trial_started": "Users who claimed a PRO trial or got one through an invite link.",
+        "trial_expiring": "A reminder before a PRO trial ends. Re-checked before sending; anyone who has already paid is skipped.",
+        "trial_expired": "Users whose PRO trial ended and who never paid. Anyone back on PRO by send time is skipped.",
+        "plan_expiring": "A reminder before a paid PRO membership ends. Each renewal's new end date gets its own reminder.",
+        "plan_expired": "Paid members who dropped back to the free plan. Anyone who has renewed by send time is skipped.",
+        "first_payment": "Users completing their first payment for PRO (later renewals don't trigger it).",
+        "inactive": "Users who haven't opened the app or site for this long. Coming back and going quiet again counts as a new time; cap the total with \"At most per person\"."
+      },
+      "delayLabel": {
+        "signup": "Send after sign-up",
+        "unverified": "Unverified for",
+        "no_mt5": "Unlinked for",
+        "mt5_first_bind": "Send after linking",
+        "trial_started": "Send after start",
+        "trial_expiring": "Remind before the end",
+        "trial_expired": "Send after the end",
+        "plan_expiring": "Remind before the end",
+        "plan_expired": "Send after the end",
+        "first_payment": "Send after payment",
+        "inactive": "Inactive for"
+      },
+      "pause": {
+        "quotaDaily": "Automated email is paused: today's sending quota is used up.",
+        "quotaMonthly": "Automated email is paused: this month's sending quota is used up.",
+        "provider": "Automated email is paused: the email provider rejected our sending configuration ({{code}}). Check the Resend settings.",
+        "until": "Resumes automatically at {{time}}.",
+        "resume": "Resume now"
+      },
+      "confirm": {
+        "enableTitle": "Turn on \"{{name}}\"?",
+        "enableBody": "From now on, users who match will get this email. People who already matched before now won't be emailed.",
+        "enable": "Turn on",
+        "disableTitle": "Turn off \"{{name}}\"?",
+        "disableBody": "Nothing more is sent, including the {{n}} still queued. Turning it back on starts counting again from that moment.",
+        "disable": "Turn off",
+        "deleteTitle": "Delete \"{{name}}\"?",
+        "deleteBody": "Nothing more is sent, including the {{n}} still queued. Emails already sent can't be recalled.",
+        "delete": "Delete"
+      },
+      "editTitle": "Edit rule",
+      "createTitle": "New rule",
+      "name": "Rule name (admins only)",
+      "trigger": "Trigger",
+      "maxTimes": "At most per person",
+      "minDelay": "This trigger needs at least {{delay}}",
+      "priority": "Priority",
+      "priorityHint": "Each person gets at most one automated email a day. When several rules match on the same day, the lowest number goes first and the rest move to the next day.",
+      "estimate": "With this condition, {{n}} people would have triggered in the last {{days}} days",
+      "estimateCapped": "With this condition, at least {{n}} people would have triggered in the last {{days}} days",
+      "estimateHint": "An estimate only; nothing is sent. Counting starts when the rule is turned on and the past is never backfilled.",
+      "variables": "Variables (click to insert at the cursor)",
+      "variablesHint": "Filled per recipient when sending: a missing nickname falls back to the part of the email before @; dates are in Beijing time; anything unknown is left blank.",
+      "conditionChangedWarn": "You changed the trigger condition: after saving, emails still queued won't be sent and counting restarts from now under the new condition.",
+      "save": "Save",
+      "createHint": "New rules start turned off. Turn it on in the list after saving.",
+      "previewHint": "Variables in the preview use your own details; expiry triggers use a sample end date.",
+      "logTitle": "Send log of \"{{name}}\"",
+      "logEmpty": "Nothing sent yet",
+      "colQueued": "Triggered",
+      "colSent": "Sent",
+      "dueAt": "Goes out at {{time}}",
+      "sendStatus": {
+        "all": "All statuses",
+        "pending": "Queued",
+        "sending": "Sending",
+        "sent": "Sent",
+        "failed": "Failed",
+        "skipped": "Skipped"
+      },
+      "reason": {
+        "no_user": "Account not found",
+        "disabled": "Account disabled",
+        "opted_out": "Unsubscribed",
+        "stale": "Queued over 7 days, dropped",
+        "condition_gone": "Condition no longer true at send time",
+        "deferred": "Already got an automated email today, moved back",
+        "rule_disabled": "Rule turned off",
+        "rule_deleted": "Rule deleted",
+        "rule_changed": "Rule condition changed",
+        "interrupted": "Interrupted mid-send",
+        "network": "Couldn't reach the email provider"
+      }
     },
     "emailUnverified": "Email unverified",
     "markVerified": "Mark verified",

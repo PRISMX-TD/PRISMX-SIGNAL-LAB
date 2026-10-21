@@ -4,6 +4,7 @@ import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, T
 import type { PendingCompetition } from './types'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
+import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { AdminFollowUpRecord, AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportProgress, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
@@ -1430,6 +1431,32 @@ export const adminApi = {
     request<EmailCampaign>(`/admin/emails/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   resumeEmailCampaign: (id: string) =>
     request<EmailCampaign>(`/admin/emails/${encodeURIComponent(id)}/resume`, { method: 'POST' }),
+  // 自动邮件规则。新建的是关着的；打开 = 从现在起满足条件的人才发，不补发老用户。
+  // Automated-email rules. New rules start disabled; enabling counts only events from now on.
+  listEmailAutomations: () => request<EmailAutomationList>('/admin/email-automations'),
+  createEmailAutomation: (payload: EmailAutomationInput) =>
+    request<EmailAutomation>('/admin/email-automations', { method: 'POST', body: JSON.stringify(payload) }),
+  updateEmailAutomation: (id: string, payload: EmailAutomationInput) =>
+    request<EmailAutomation>(`/admin/email-automations/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(payload) }),
+  setEmailAutomationEnabled: (id: string, enabled: boolean) =>
+    request<EmailAutomation>(`/admin/email-automations/${encodeURIComponent(id)}/${enabled ? 'enable' : 'disable'}`, { method: 'POST' }),
+  deleteEmailAutomation: (id: string) =>
+    request<{ ok: boolean }>(`/admin/email-automations/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  estimateEmailAutomation: (condition: EmailAutomationCondition, signal?: AbortSignal) =>
+    request<EmailAutomationEstimate>('/admin/email-automations/estimate', { method: 'POST', body: JSON.stringify(condition), signal }),
+  previewEmailAutomation: (trigger: EmailAutomationTrigger, content: EmailContentInput, signal?: AbortSignal) =>
+    request<EmailPreview>('/admin/email-automations/preview', { method: 'POST', body: JSON.stringify({ trigger, content }), signal }),
+  testEmailAutomation: (trigger: EmailAutomationTrigger, content: EmailContentInput) =>
+    request<{ ok: boolean; to: string }>('/admin/email-automations/test', { method: 'POST', body: JSON.stringify({ trigger, content }) }),
+  resumeEmailAutomations: () => request<{ ok: boolean }>('/admin/email-automations/resume', { method: 'POST' }),
+  listEmailAutomationSends: (id: string, status: EmailAutomationSendStatus | '', limit: number, offset: number) =>
+    request<{ sends: EmailAutomationSend[]; total: number; limit: number; offset: number }>(
+      `/admin/email-automations/${encodeURIComponent(id)}/sends?${new URLSearchParams({
+        ...(status ? { status } : {}),
+        limit: String(limit),
+        offset: String(offset),
+      }).toString()}`,
+    ),
   listAnnouncements: () => request<AnnouncementList>('/admin/announcements'),
   createAnnouncement: (payload: AnnouncementInput) =>
     request<Announcement>('/admin/announcements', { method: 'POST', body: JSON.stringify(payload) }),

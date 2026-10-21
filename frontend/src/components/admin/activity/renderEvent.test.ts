@@ -23,7 +23,7 @@ const LANGS = [['zh', zh], ['en', en]] as const
 // 契约 §6 的机器可读清单（53 种）/ the contract's §6 machine-readable list (53 kinds)
 const CONTRACT_KINDS = [
   'admin.agent_assign', 'admin.announcement', 'admin.bulk_edit', 'admin.competition', 'admin.competition_participant',
-  'admin.email', 'admin.gamification', 'admin.invite_link', 'admin.ops', 'admin.other', 'admin.setting', 'admin.ticket',
+  'admin.email', 'admin.email_auto', 'admin.gamification', 'admin.invite_link', 'admin.ops', 'admin.other', 'admin.setting', 'admin.ticket',
   'admin.user_attribution', 'admin.user_disable', 'admin.user_edit', 'admin.user_enable', 'admin.user_plan',
   'admin.user_role', 'admin.verify_email', 'agent.plan', 'auto.partial_tp', 'auto.settings', 'auto.sl', 'deal.close',
   'deal.stopout_group', 'mt5.bind', 'mt5.reverify', 'mt5.revoked', 'mt5.unbind', 'pending.cancel', 'pending.modify',
@@ -63,9 +63,9 @@ function item(kind: string, params: Record<string, unknown>, extra: Partial<Acti
 const allWithChildren = (list: ActivityItem[]) => list.flatMap((i) => [i, ...(i.children ?? [])])
 
 describe('kind 清单 / kind list', () => {
-  it('前端认得契约里的全部 58 种，且一种不多 / the frontend knows exactly the contract’s 58 kinds', () => {
+  it('前端认得契约里的全部 59 种，且一种不多 / the frontend knows exactly the contract’s 59 kinds', () => {
     expect([...ACTIVITY_KINDS].sort()).toEqual([...CONTRACT_KINDS].sort())
-    expect(ACTIVITY_KINDS.length).toBe(58)
+    expect(ACTIVITY_KINDS.length).toBe(59)
   })
 
   it('例子覆盖每一种 kind / the examples cover every kind', () => {
