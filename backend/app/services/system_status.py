@@ -48,6 +48,7 @@ LOOP_INTERVALS: dict[str, int] = {
     "sentiment": 300,
     "plan_expiry": 900,
     "email_broadcast": 300,
+    "email_automation": 300,        # 自动邮件条件扫描（rev 44）/ automated-email scan
     "gamification": 3600,
     "competitions": 60,
     "boards": 300,

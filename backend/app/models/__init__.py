@@ -1965,6 +1965,94 @@ class EmailOptOut(Base):
     created_at = Column(DateTime, default=_now)
 
 
+class EmailAutomation(Base):
+    """自动邮件规则（rev 44）：「什么情景 + 延迟多久 → 发哪封信」。
+
+    触发条件（trigger 的取值与判定见 services/email_automation.TRIGGERS）由后台循环每 5 分钟
+    扫一遍，满足条件的人展开成 email_automation_sends 的一行，再由群发那条发送循环发出去。
+
+    **不补发老用户。** activated_at 是这条规则最近一次「开启」（或改了触发条件）的时间；只有
+    事件发生在它之后的人才会收到——一打开「新注册」就给全部老用户发欢迎信是事故。
+
+    正文与群发一样中英各一份；可以写 {昵称} 之类的变量，发送那一刻按收件人替换。
+    deleted_at 是软删：发送记录还挂在这条规则上，历史要看得到。
+
+    An automated-email rule (rev 44): trigger + delay → message. The scan loop
+    expands matching users into email_automation_sends rows, which the broadcast
+    send loop delivers. Only events after activated_at (the last enable or
+    trigger change) count — enabling a rule never backfills existing users.
+    Bodies are zh + en like broadcasts, with per-recipient variables. Soft-deleted
+    so the send history stays attached.
+    """
+
+    __tablename__ = "email_automations"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    name = Column(String, nullable=False)
+    trigger = Column(String, nullable=False)
+    # 延迟 / 提前量（分钟）；含义随 trigger 变：注册后多久、到期前多久、多久没活跃……
+    # delay / lead time in minutes; its meaning depends on the trigger
+    delay_minutes = Column(Integer, nullable=False, default=0)
+    # 只有「沉睡召回」用：同一个人最多召回几次 / recall cap, inactive trigger only
+    max_times = Column(Integer, nullable=True)
+    # all / FREE / PRO / TRIAL / PAID，与群发的筛选同义 / same values as the broadcast filter
+    plan_filter = Column(String, nullable=False, default="all")
+    # 越小越先发；同一个人一天只收一封自动邮件，几条同时命中时先发小的
+    # lower sends first; with one automated email per person per day, the lowest wins
+    priority = Column(Integer, nullable=False, default=100)
+    kind = Column(String, nullable=False, default="marketing")
+    subject_zh = Column(String, nullable=True)
+    body_zh = Column(Text, nullable=True)
+    subject_en = Column(String, nullable=True)
+    body_en = Column(Text, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    activated_at = Column(DateTime, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now)
+    deleted_at = Column(DateTime, nullable=True)
+
+
+class EmailAutomationSend(Base):
+    """自动邮件的一次发送：某条规则在某个人身上的一次触发。
+
+    (rule_id, user_id, occurrence) 唯一 = 「同一件事只发一次」。occurrence 是这次触发的身份：
+    一次性的情景（新注册、首次绑定……）恒为 "1"；会重复出现的情景各有各的键——会员到期提醒
+    是那一次的到期时间，到期后是那一行降级审计的 id，沉睡召回是那一次的最后活跃时间。
+
+    与 email_deliveries 一样不存邮箱、认领靠条件 UPDATE、终态 sent / failed / skipped。
+    due_at 是最早可发时间：「每人每天一封」顶掉的那封会把 due_at 推到第二天。
+
+    One firing of a rule for one user, unique on (rule_id, user_id, occurrence) so
+    each event sends once. occurrence is "1" for one-off triggers and the event's
+    own identity for repeatable ones (that expiry, that downgrade audit row, that
+    last-active time). Like email_deliveries: no stored address, conditional-UPDATE
+    claims, terminal sent / failed / skipped. due_at is the earliest send time; the
+    one-per-day cap pushes a deferred send to the next day.
+    """
+
+    __tablename__ = "email_automation_sends"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "user_id", "occurrence", name="uq_email_automation_send"),
+        Index("idx_email_automation_sends_status_due", "status", "due_at"),
+        Index("idx_email_automation_sends_sent_at", "sent_at"),
+        Index("idx_email_automation_sends_user_sent", "user_id", "sent_at"),
+        Index("idx_email_automation_sends_rule_created", "rule_id", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    rule_id = Column(String, ForeignKey("email_automations.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    occurrence = Column(String, nullable=False, default="1")
+    status = Column(String, nullable=False, default="pending")
+    attempts = Column(Integer, nullable=False, default=0)
+    error = Column(String, nullable=True)
+    created_at = Column(DateTime, default=_now)
+    due_at = Column(DateTime, nullable=False, default=_now)
+    claimed_at = Column(DateTime, nullable=True)
+    sent_at = Column(DateTime, nullable=True)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 客服台（rev 41，设计 docs/superpowers/specs/2026-10-17-support-desk-design.md）
 # Support desk (rev 41; see the 2026-10-17 support-desk design).

@@ -137,6 +137,7 @@ ADMIN_COMPETITION = "admin.competition"
 ADMIN_COMPETITION_PARTICIPANT = "admin.competition_participant"
 ADMIN_ANNOUNCEMENT = "admin.announcement"
 ADMIN_EMAIL = "admin.email"
+ADMIN_EMAIL_AUTO = "admin.email_auto"
 ADMIN_OPS = "admin.ops"
 ADMIN_GAMIFICATION = "admin.gamification"
 ADMIN_TICKET = "admin.ticket"
@@ -179,6 +180,7 @@ KIND_CATEGORY: dict[str, str] = {
     ADMIN_COMPETITION_PARTICIPANT: "admin",
     ADMIN_ANNOUNCEMENT: "admin",
     ADMIN_EMAIL: "admin",
+    ADMIN_EMAIL_AUTO: "admin",
     ADMIN_OPS: "admin",
     ADMIN_GAMIFICATION: "admin",
     ADMIN_TICKET: "admin",
@@ -1291,6 +1293,8 @@ def _audit_family(f: str) -> str | None:
         return "announcement"
     if head == "email" and len(parts) == 2 and parts[1] in ("send", "cancel", "resume"):
         return "email"
+    if head == "email_auto" and len(parts) == 2:
+        return "email_auto"
     if head == "invite" and len(parts) == 2:
         return f"invite:{parts[1]}"
     if head == "invite" and len(parts) == 3 and parts[2] == "agent":
@@ -1312,7 +1316,7 @@ def _audit_family(f: str) -> str | None:
 # Platform-wide families whose target_user_id is just the actor standing in
 def _placeholder_family(family: str) -> bool:
     return (
-        family in ("setting", "gamification", "ops", "announcement", "email")
+        family in ("setting", "gamification", "ops", "announcement", "email", "email_auto")
         or (family.startswith("invite:") and not family.endswith(":agent"))
         or (family.startswith("competition:") and not family.startswith("competition:participant:"))
     )
@@ -1357,6 +1361,8 @@ def _family_kind(family: str, fields: set[str]) -> str:
         return ADMIN_ANNOUNCEMENT
     if family == "email":
         return ADMIN_EMAIL
+    if family == "email_auto":
+        return ADMIN_EMAIL_AUTO
     if family.startswith("invite:"):
         return ADMIN_AGENT_ASSIGN if family.endswith(":agent") else ADMIN_INVITE_LINK
     if family.startswith("agent:"):
@@ -2380,6 +2386,15 @@ def _audit_params(p: _Proto, ctx: _Ctx) -> dict:
             "count": new_j.get("recipients"),
             "subject": (camp.subject_zh or camp.subject_en) if camp is not None else None,
             "mail_kind": new_j.get("kind") or (camp.kind if camp is not None else None),
+        }
+    if kind == ADMIN_EMAIL_AUTO:
+        # 规则名与情景直接写在 new_value 里（routers/email_automations._audit），不用再查表
+        # the rule name and trigger are in new_value itself, no lookup needed
+        new_j = _as_dict(head.new_value)
+        return {
+            "action": (head.field or "").split(":", 1)[1],
+            "rule_id": str(new_j["id"]) if new_j.get("id") else None,
+            "name": new_j.get("name"), "trigger": new_j.get("trigger"),
         }
     if kind == ADMIN_OPS:
         rest = (head.field or "").split(":", 1)[1]

@@ -401,7 +401,9 @@ def _hash_legacy_api_tokens() -> None:
 # rev 43 — 跟进：客服可选的状态全部只是标签（converted / no_interest 也算进行中），部分唯一索引
 #          按新状态集重建；此前被这两个状态关掉的跟进恢复（同一用户已有进行中、或用户要求勿扰的改成
 #          revoked）。小表，幂等。
-CURRENT_SCHEMA_REV = 43
+# rev 44 — 自动邮件（2026-10-21）：新表 email_automations / email_automation_sends（create_all
+#          建表建索引）。同 rev 39：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
+CURRENT_SCHEMA_REV = 44
 
 _SCHEMA_REV_KEY = "schema_rev"
 

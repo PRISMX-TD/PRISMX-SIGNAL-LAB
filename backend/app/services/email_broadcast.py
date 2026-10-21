@@ -538,8 +538,13 @@ def delivery_counts(db: Session, campaign_ids: list[str]) -> dict[str, dict[str,
 
 
 def sent_today(db: Session) -> int:
+    """今天（UTC）已发出的信：群发 + 自动邮件一起数，两者共用一个每日上限。
+    Today's sends (UTC), broadcasts and automated email together: they share one daily cap."""
+    from app.services import email_automation
+
     start = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    return db.query(func.count(EmailDelivery.id)).filter(EmailDelivery.sent_at >= start).scalar() or 0
+    broadcast = db.query(func.count(EmailDelivery.id)).filter(EmailDelivery.sent_at >= start).scalar() or 0
+    return broadcast + email_automation.sent_today(db)
 
 
 # ---------------------------------------------------------------------------
@@ -734,18 +739,31 @@ def record_result(db: Session, job: Job, result: mailer.SendResult) -> None:
     db.commit()
 
 
-def _claim_sync() -> Job | str:
+def _claim_sync():
+    """先认领自动邮件，没有了再认领群发：自动邮件是对某件事的及时回应，排在群发后面就晚了。
+    Automated email first, then broadcasts: an automated message answers an event and
+    loses its point if it queues behind a long broadcast."""
+    from app.services import email_automation
+
     db = SessionLocal()
     try:
+        auto = email_automation.claim_next(db)
+        if auto != IDLE:
+            return auto
         return claim_next(db)
     finally:
         db.close()
 
 
-def _record_sync(job: Job, result: mailer.SendResult) -> None:
+def _record_sync(job, result: mailer.SendResult) -> None:
+    from app.services import email_automation
+
     db = SessionLocal()
     try:
-        record_result(db, job, result)
+        if isinstance(job, email_automation.AutoJob):
+            email_automation.record_result(db, job, result)
+        else:
+            record_result(db, job, result)
     finally:
         db.close()
 
@@ -754,9 +772,9 @@ async def drain_once() -> float:
     """发一轮，返回距离下一轮的秒数。/ One pass; returns the delay before the next."""
     for _ in range(MAX_SENDS_PER_PASS):
         job = await run_in_threadpool(_claim_sync)
-        if job == IDLE:
+        if isinstance(job, str) and job == IDLE:
             return IDLE_SECONDS
-        if job == CAP_REACHED:
+        if isinstance(job, str) and job == CAP_REACHED:
             return CAP_RECHECK_SECONDS
         result = await run_in_threadpool(
             mailer.deliver, job.email, job.message.subject, job.message.html, job.message.text, job.message.headers

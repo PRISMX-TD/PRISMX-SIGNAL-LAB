@@ -2372,3 +2372,119 @@ class EmailStatusOut(BaseModel):
     fromAddress: str
     dailyCap: int
     sentToday: int
+
+
+# ---------- 自动邮件（rev 44）/ automated email ----------
+
+EmailAutomationTrigger = Literal[
+    "signup", "unverified", "no_mt5", "mt5_first_bind", "trial_started", "trial_expiring",
+    "trial_expired", "plan_expiring", "plan_expired", "first_payment", "inactive",
+]
+# 延迟上限一年 / delays are capped at a year
+EMAIL_AUTOMATION_DELAY_MAX = 365 * 24 * 60
+
+
+class EmailAutomationConditionIn(BaseModel):
+    """触发条件：情景 + 延迟（分钟）+ 等级筛选 +（沉睡召回）最多几次。估算人数也只用这几项。"""
+
+    trigger: EmailAutomationTrigger
+    delayMinutes: int = Field(default=0, ge=0, le=EMAIL_AUTOMATION_DELAY_MAX)
+    planFilter: Literal["all", "FREE", "PRO", "TRIAL", "PAID"] = "all"
+    maxTimes: int | None = Field(default=None, ge=1, le=20)
+    kind: Literal["marketing", "notice"] = "marketing"
+
+    @model_validator(mode="after")
+    def _min_delay(self):
+        from app.services.email_automation import TRIGGERS
+
+        floor = TRIGGERS[self.trigger].min_delay
+        if self.delayMinutes < floor:
+            raise ValueError(
+                f"这个情景的时间至少要 {floor} 分钟 / this trigger needs at least {floor} minutes"
+            )
+        if self.trigger != "inactive":
+            self.maxTimes = None
+        return self
+
+
+class EmailAutomationIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    condition: EmailAutomationConditionIn
+    content: EmailContentIn
+    priority: int = Field(default=100, ge=1, le=999)
+
+    @field_validator("name")
+    @classmethod
+    def _one_line_name(cls, v: str) -> str:
+        v = " ".join((v or "").split())
+        if not v:
+            raise ValueError("规则名称不能为空 / name is required")
+        return v
+
+
+class EmailAutomationPreviewIn(BaseModel):
+    trigger: EmailAutomationTrigger = "signup"
+    content: EmailContentIn
+
+
+class EmailAutomationOut(BaseModel):
+    id: str
+    name: str
+    trigger: str
+    delayMinutes: int
+    planFilter: str
+    maxTimes: int | None = None
+    priority: int
+    kind: str
+    subjectZh: str = ""
+    bodyZh: str = ""
+    subjectEn: str = ""
+    bodyEn: str = ""
+    enabled: bool
+    activatedAt: datetime | None = None
+    createdAt: datetime | None = None
+    updatedAt: datetime | None = None
+    createdByEmail: str | None = None
+    sent7d: int = 0
+    failed7d: int = 0
+    skipped7d: int = 0
+    pending: int = 0
+    sentTotal: int = 0
+
+
+class EmailAutomationPauseOut(BaseModel):
+    reason: str
+    until: datetime
+
+
+class EmailAutomationListOut(BaseModel):
+    rules: list[EmailAutomationOut]
+    # 自动邮件整体暂停（额度用完 / 发信商拒绝配置），到时间自动恢复 / whole-automation pause
+    pause: EmailAutomationPauseOut | None = None
+
+
+class EmailAutomationEstimateOut(BaseModel):
+    count: int
+    days: int
+    sample: list[str] = Field(default_factory=list)
+    # 一轮最多展开 2000 人，到顶了说明实际更多 / hit the per-pass cap, the real number is higher
+    capped: bool = False
+
+
+class EmailAutomationSendOut(BaseModel):
+    id: str
+    userId: str
+    email: str | None = None
+    nickname: str | None = None
+    status: str
+    error: str | None = None
+    createdAt: datetime | None = None
+    dueAt: datetime | None = None
+    sentAt: datetime | None = None
+
+
+class EmailAutomationSendListOut(BaseModel):
+    sends: list[EmailAutomationSendOut]
+    total: int
+    limit: int
+    offset: int
