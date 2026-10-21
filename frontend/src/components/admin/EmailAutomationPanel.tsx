@@ -543,7 +543,7 @@ function RuleEditor({
   )
 
   return (
-    <div className="grid gap-4 lg:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div className="glass p-4">
         <div className="mb-4 flex items-center gap-3">
           <h3 className="flex-1 font-display text-base font-semibold text-neutral-100">
@@ -566,7 +566,6 @@ function RuleEditor({
               options={TRIGGER_ORDER.map((tr) => ({ value: tr, label: t(`admin.emailAuto.trig.${tr}`) }))}
               className="w-full"
             />
-            <p className="mt-1 text-xs text-neutral-500">{t(`admin.emailAuto.trigHint.${draft.trigger}`)}</p>
           </div>
 
           <div className="flex flex-wrap items-end gap-3">
@@ -600,11 +599,29 @@ function RuleEditor({
               </label>
             )}
           </div>
-          <p className={`text-xs ${delayOk ? 'text-neutral-400' : 'text-down'}`}>
-            {delayOk
-              ? delayText(draft.trigger, condition.delayMinutes)
-              : t('admin.emailAuto.minDelay', { delay: t(`admin.emailAuto.unitN.${splitDelay(minDelay).unit}`, { n: splitDelay(minDelay).value }) })}
-          </p>
+          {!delayOk && (
+            <p className="text-xs text-down">
+              {t('admin.emailAuto.minDelay', { delay: t(`admin.emailAuto.unitN.${splitDelay(minDelay).unit}`, { n: splitDelay(minDelay).value }) })}
+            </p>
+          )}
+
+          {/* 触发条件说明：谁会收到 / 什么时候发 / 哪些情况不发，和后端 TRIGGERS 的判断一致 */}
+          {/* What the trigger means: who, when, and who is skipped — mirrors the backend TRIGGERS */}
+          <div className="rounded-lg bg-white/5 px-3 py-2.5 text-xs">
+            <div className="mb-2 font-medium text-neutral-200">{t('admin.emailAuto.cond.title')}</div>
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5">
+              <dt className="text-neutral-500">{t('admin.emailAuto.cond.who')}</dt>
+              <dd className="text-neutral-300">{t(`admin.emailAuto.cond.${draft.trigger}.who`)}</dd>
+              <dt className="text-neutral-500">{t('admin.emailAuto.cond.when')}</dt>
+              <dd className="text-neutral-300">
+                {delayOk ? delayText(draft.trigger, condition.delayMinutes) : '—'}
+                <span className="text-neutral-500">{t('admin.emailAuto.cond.scan')}</span>
+              </dd>
+              <dt className="text-neutral-500">{t('admin.emailAuto.cond.skip')}</dt>
+              <dd className="text-neutral-300">{t(`admin.emailAuto.cond.${draft.trigger}.skip`)}</dd>
+            </dl>
+            <p className="mt-2 border-t border-white/5 pt-2 text-neutral-500">{t('admin.emailAuto.cond.common')}</p>
+          </div>
 
           <div className="flex flex-wrap items-end gap-3">
             <div>
@@ -628,6 +645,7 @@ function RuleEditor({
               />
             </label>
           </div>
+          <p className="text-xs text-neutral-500">{t('admin.emailAuto.planHint')}</p>
           <p className="text-xs text-neutral-500">{t('admin.emailAuto.priorityHint')}</p>
 
           <div className="flex flex-wrap gap-4" role="radiogroup" aria-label={t('admin.email.kind')}>

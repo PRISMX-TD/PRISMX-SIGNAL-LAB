@@ -3028,19 +3028,6 @@
         "first_payment": "First payment",
         "inactive": "Inactive for a while (win-back)"
       },
-      "trigHint": {
-        "signup": "Sent after a user signs up. Sign-up already sends a verification email, so a one-day delay keeps the two from arriving together.",
-        "unverified": "Users whose email is still unverified after the set time. Re-checked before sending; anyone who has verified is skipped.",
-        "no_mt5": "Users who have never linked an MT5 account after the set time. Re-checked before sending; anyone who has linked is skipped.",
-        "mt5_first_bind": "Users linking their first MT5 account. Re-linking a previously removed account, or already having another account, doesn't count.",
-        "trial_started": "Users who claimed a PRO trial or got one through an invite link.",
-        "trial_expiring": "A reminder before a PRO trial ends. Re-checked before sending; anyone who has already paid is skipped.",
-        "trial_expired": "Users whose PRO trial ended and who never paid. Anyone back on PRO by send time is skipped.",
-        "plan_expiring": "A reminder before a paid PRO membership ends. Each renewal's new end date gets its own reminder.",
-        "plan_expired": "Paid members who dropped back to the free plan. Anyone who has renewed by send time is skipped.",
-        "first_payment": "Users completing their first payment for PRO (later renewals don't trigger it).",
-        "inactive": "Users who haven't opened the app or site for this long. Coming back and going quiet again counts as a new time; cap the total with \"At most per person\"."
-      },
       "delayLabel": {
         "signup": "Send after sign-up",
         "unverified": "Unverified for",
@@ -3114,7 +3101,60 @@
         "rule_changed": "Rule condition changed",
         "interrupted": "Interrupted mid-send",
         "network": "Couldn't reach the email provider"
-      }
+      },
+      "cond": {
+        "title": "Trigger conditions",
+        "who": "Who gets it",
+        "when": "When it's sent",
+        "skip": "Who is skipped",
+        "scan": " (checked every 5 minutes, so it may arrive a few minutes late)",
+        "common": "Every trigger counts only events after the rule is switched on; nothing is backfilled. Disabled accounts never get mail; marketing emails skip anyone who unsubscribed, notices still go out. Conditions and level are re-checked just before sending, and anyone who no longer matches is skipped.",
+        "signup": {
+          "who": "Every new sign-up, whether or not the email is verified.",
+          "skip": "No extra exclusions. Sign-up already sends a verification email, so a one-day delay keeps the two from arriving together."
+        },
+        "unverified": {
+          "who": "Users whose email is still unverified the set time after signing up.",
+          "skip": "Anyone who has verified by send time."
+        },
+        "no_mt5": {
+          "who": "Users who have never linked an MT5 account the set time after signing up.",
+          "skip": "Anyone who has linked MT5 by send time."
+        },
+        "mt5_first_bind": {
+          "who": "Users linking their first MT5 account; {mt5_login} is the one just linked.",
+          "skip": "Re-linking a previously removed account, or having had another MT5 account before, doesn't count as a first link."
+        },
+        "trial_started": {
+          "who": "Users who started a PRO trial, whether claimed themselves or through an invite link.",
+          "skip": "No extra exclusions. A trial can only be started once, so each person gets at most one."
+        },
+        "trial_expiring": {
+          "who": "Users with an active PRO trial, the set time before it ends — e.g. 2 days means 2 days before the end date.",
+          "skip": "Anyone who has paid or whose trial has already ended by send time."
+        },
+        "trial_expired": {
+          "who": "Users whose trial ended, who were moved back to the free plan automatically, and who never paid.",
+          "skip": "Anyone back on PRO by send time. An admin switching someone to free doesn't count as an expiry."
+        },
+        "plan_expiring": {
+          "who": "PRO members (not trials) with an active plan, the set time before it ends; admin-granted PRO with an end date counts too.",
+          "skip": "Lifetime members with no end date. Anyone who renews before send time is skipped this time and reminded again before the new end date."
+        },
+        "plan_expired": {
+          "who": "PRO members whose plan ended and who were moved back to the free plan automatically. Users who only had a trial and never paid fall under \"PRO trial ended\" instead.",
+          "skip": "Anyone who has renewed by send time. An admin switching someone to free doesn't count as an expiry."
+        },
+        "first_payment": {
+          "who": "Users completing their first successful payment.",
+          "skip": "Later renewals. Admin-granted PRO has no payment, so it doesn't count."
+        },
+        "inactive": {
+          "who": "Users who haven't opened the app or site for the set time; anyone who never came back after signing up counts from sign-up.",
+          "skip": "Anyone who has come back by send time. Coming back and going quiet again counts as a new time; cap the total with \"At most per person\"."
+        }
+      },
+      "planHint": "Level: only users on the chosen plan get it. The plan is checked when the trigger fires and again at send time; anyone whose plan has changed is skipped."
     },
     "emailUnverified": "Email unverified",
     "markVerified": "Mark verified",
