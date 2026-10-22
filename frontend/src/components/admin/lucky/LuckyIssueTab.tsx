@@ -1,13 +1,15 @@
 // 发券：按比赛名次 / 排行榜名次（分档）/ 手动搜索 → 合并进确认清单 → 填原因 → 二次确认发放。
-// 名次在后端解析（/issue/preview），前端只展示、改张数、删人。轮盘关着时提示「打开后再通知」。
+// 名次在后端解析（/issue/preview），前端只展示、改张数、删人。v2：券发给当前选中的那一期（顶部显示期名），
+// 已结束的期不能发；这一期没在用户端显示时提示「打开后再通知」。发放记录 / 收回也按这一期。
 // Issue tickets: by competition rank / leaderboard rank (tiers) / manual search -> merge into one
 // confirm list -> reason -> confirm twice. Ranks are resolved by the backend (/issue/preview); the UI
-// only shows them and lets the admin edit counts or drop people. While the wheel is hidden the page
-// says users are notified once it is switched on.
+// only shows them and lets the admin edit counts or drop people. v2: tickets go to the selected round
+// (named at the top); an ended round can't be issued to; while the round is hidden the page says users
+// are notified once it is switched on. Batches and revoking are scoped to the round too.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
-import type { LuckyAdminConfig, LuckyBatch, LuckyTier } from '../../../api/luckyTypes'
+import type { LuckyBatch, LuckyRoundAdmin, LuckyTier } from '../../../api/luckyTypes'
 import type { AdminUser, CompetitionAdminRow } from '../../../api/types'
 import { fmtTime, localizeApiError } from '../../../api/utils'
 import { newRequestId } from '../../../utils/luckyWheel'
@@ -33,9 +35,9 @@ function NumBox({ value, max, label, onCommit }: { value: number; max: number; l
   )
 }
 
-export default function LuckyIssueTab({ cfg, batches, onIssued }: {
-  cfg: LuckyAdminConfig | null; batches: LuckyBatch[]; onIssued: () => void
-}) {
+// 外壳按 round.id 做 key：换期就整页重置（清单、requestId 都不跨期沿用）。
+// The shell keys this by round.id, so switching rounds resets everything (list and requestId never carry over).
+export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAdmin; onIssued: () => void }) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('comp')
   const [comps, setComps] = useState<CompetitionAdminRow[]>([])
@@ -54,9 +56,13 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
   const [requestId, setRequestId] = useState(newRequestId)
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
+  const [batches, setBatches] = useState<LuckyBatch[]>([])
   const searchSeq = useRef(0)
+  const loadBatches = () => adminApi.luckyBatches(round.id).then((r) => setBatches(r.batches))
   useEffect(() => {
     let live = true
+    adminApi.luckyBatches(round.id).then((r) => { if (live) setBatches(r.batches) })
+      .catch((e) => { if (live) setMsg(e instanceof Error ? localizeApiError(e.message) : t('common.error')) })
     adminApi.competitions().then((r) => { if (live) setComps(r.filter((c) => c.status !== 'draft')) })
       .catch((e) => { if (live) setMsg(e instanceof Error ? localizeApiError(e.message) : t('common.error')) })
     return () => { live = false }
@@ -66,10 +72,8 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
     setBusy(true); setMsg('')
     try { await fn() } catch (e) { setMsg(e instanceof Error ? localizeApiError(e.message) : t('common.error')) } finally { setBusy(false) }
   }
-  if (!cfg) return null
-  const round = cfg.round
-  if (!round || round.phase === 'ended' || round.phase === 'none') {
-    return <div className="card p-6 text-sm text-neutral-400">{t('admin.lucky.issue.needRound')}</div>
+  if (round.phase === 'ended') {
+    return <div className="card p-6 text-sm text-neutral-400">{t('admin.lucky.issue.ended')}</div>
   }
   const tot = totals(list)
   const over = limitProblem(list)
@@ -91,7 +95,8 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
 
   return (
     <div className="space-y-4">
-      {!cfg.visible && <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{t('admin.lucky.issue.hiddenWarn')}</div>}
+      <p className="break-words text-sm text-neutral-300">{t('admin.lucky.issue.target', { name: round.name })}</p>
+      {!round.visible && <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{t('admin.lucky.issue.hiddenWarn')}</div>}
       <section className="card space-y-3 p-4">
         <div className="seg-tabs w-full sm:w-fit">
           {(['comp', 'board', 'manual'] as Mode[]).map((m) => (
@@ -121,7 +126,7 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
                     <option value="custom">{t('admin.lucky.issue.custom')}</option>
                   </select>
                   {periodKind === 'custom' && (
-                    <input className="input w-60 py-1.5 text-sm" maxLength={16} placeholder={t('admin.lucky.issue.periodKey')}
+                    <input className="input w-full py-1.5 text-sm sm:w-60" maxLength={16} placeholder={t('admin.lucky.issue.periodKey')}
                       value={customPeriod} onChange={(e) => setCustomPeriod(e.target.value)} />
                   )}
                 </>
@@ -161,7 +166,7 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
         ) : (
           <div className="space-y-2">
             <div className="flex gap-2">
-              <input className="input w-64 py-1.5 text-sm" placeholder={t('admin.lucky.issue.search')} value={q} onChange={(e) => setQ(e.target.value)}
+              <input className="input min-w-0 flex-1 py-1.5 text-sm sm:w-64 sm:flex-none" placeholder={t('admin.lucky.issue.search')} value={q} onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && q.trim() && !busy) search() }} />
               <button type="button" className="btn-ghost px-3 py-1 text-xs" aria-label={t('admin.lucky.issue.search')}
                 disabled={busy || !q.trim()} onClick={search}>⌕</button>
@@ -214,17 +219,18 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
           </div>
         )}
         <div className="flex flex-wrap items-center gap-3">
-          <input className="input w-72 py-1.5 text-sm" maxLength={80} placeholder={t('admin.lucky.issue.reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
+          <input className="input w-full py-1.5 text-sm sm:w-72" maxLength={80} placeholder={t('admin.lucky.issue.reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
           <span className="text-xs text-neutral-400">{t('admin.lucky.issue.summary', tot)}</span>
           {over && <span className="text-xs text-down">{t(`admin.lucky.issue.err.${over}`)}</span>}
           <button type="button" className="btn-primary ml-auto px-3 py-1.5 text-sm disabled:opacity-40"
             disabled={busy || !reason.trim() || !list.length || over !== null}
             onClick={() => run(async () => {
               if (!window.confirm(t('admin.lucky.issue.confirmAsk', tot))) return
-              const r = await adminApi.luckyIssue(reason.trim(), requestId, list.map((x) => ({
-                userId: x.userId, count: x.count, source: x.source, sourceRef: x.sourceRef, rank: x.rank })))
+              const r = await adminApi.luckyIssue({ roundId: round.id, reason: reason.trim(), requestId, items: list.map((x) => ({
+                userId: x.userId, count: x.count, source: x.source, sourceRef: x.sourceRef, rank: x.rank })) })
               setMsg(t('admin.lucky.issue.done', { users: r.userCount, tickets: r.ticketCount }))
               setList([]); setReason(''); setRequestId(newRequestId()); onIssued()
+              await loadBatches().catch(() => {})
             })}>{t('admin.lucky.issue.confirm')}</button>
         </div>
         {msg && <p className="text-xs text-neutral-300" role="status">{msg}</p>}
@@ -242,8 +248,9 @@ export default function LuckyIssueTab({ cfg, batches, onIssued }: {
               <button type="button" className="btn-ghost ml-auto px-2 py-0.5 text-xs" disabled={busy}
                 onClick={() => run(async () => {
                   if (!window.confirm(t('admin.lucky.issue.revokeAsk', { reason: b.reason }))) return
-                  const r = await adminApi.luckyRevoke({ batchId: b.id })
+                  const r = await adminApi.luckyRevoke({ batchId: b.id, roundId: round.id })
                   setMsg(t('admin.lucky.issue.revoked', { n: r.revoked })); onIssued()
+                  await loadBatches().catch(() => {})
                 })}>
                 {t('admin.lucky.issue.revoke')}</button>
             </li>

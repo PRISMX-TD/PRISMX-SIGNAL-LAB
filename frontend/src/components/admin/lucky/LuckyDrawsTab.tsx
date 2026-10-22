@@ -1,19 +1,21 @@
-// 抽奖记录 / 待发奖：mode=all 看全部抽奖记录（按状态筛选、导出 CSV）；mode=pending 是待发奖队列
-// （pending / submitted），可标「已发放」或「取消」。领奖期限由管理员自己掌握，这里不显示、不判断。
-// Draws / pending tab: mode=all lists every draw (status filter, CSV export); mode=pending is the
-// fulfilment queue (pending / submitted) with "mark delivered" and "cancel". The claim deadline is
-// the admin's call, so nothing here shows or enforces one.
+// 抽奖记录 / 待发奖：mode=all 看当前选中那一期的抽奖记录（按状态筛选、导出 CSV）；mode=pending 是跨期的
+// 待发奖队列（pending / submitted），每行带期名，可标「已发放」或「取消」。按概率模式抽中已抽完的格
+// 记为「已抽完未中奖」。领奖期限由管理员自己掌握，这里不显示、不判断。
+// Draws / pending tab: mode=all lists the selected round's draws (status filter, CSV export);
+// mode=pending is the cross-round fulfilment queue (pending / submitted, each row names its round) with
+// "mark delivered" and "cancel". A prob-mode hit on a sold-out slot shows as a sold-out miss. The claim
+// deadline is the admin's call, so nothing here shows or enforces one.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { adminApi } from '../../../api/client'
 import type { LuckyAdminDraw, LuckyFulfillment } from '../../../api/luckyTypes'
 import { fmtTime, localizeApiError } from '../../../api/utils'
-import { PAGE, clampOffset, csvFileName, drawsQuery, parseNote, type DrawsStatus } from './luckyDraws'
+import { PAGE, clampOffset, csvFileName, csvQuery, drawsQuery, parseNote, type DrawsStatus } from './luckyDraws'
 
 const STATUSES: LuckyFulfillment[] = ['auto_done', 'pending', 'submitted', 'delivered', 'cancelled']
 
-export default function LuckyDrawsTab({ mode, onChange }: { mode: 'all' | 'pending'; onChange: () => void }) {
+export default function LuckyDrawsTab({ mode, roundId, onChange }: { mode: 'all' | 'pending'; roundId?: string; onChange: () => void }) {
   const { t } = useTranslation()
   const [status, setStatus] = useState<DrawsStatus>('')
   const [offset, setOffset] = useState(0)
@@ -28,7 +30,7 @@ export default function LuckyDrawsTab({ mode, onChange }: { mode: 'all' | 'pendi
   // Rapid filter / page clicks must not let a slow old response overwrite a newer one.
   useEffect(() => {
     const mine = ++seq.current
-    adminApi.luckyDraws(drawsQuery(mode, status, offset))
+    adminApi.luckyDraws(drawsQuery(mode, status, offset, roundId))
       .then((r) => {
         if (mine !== seq.current) return
         setData(r)
@@ -38,7 +40,7 @@ export default function LuckyDrawsTab({ mode, onChange }: { mode: 'all' | 'pendi
       })
       .catch((e) => { if (mine === seq.current) setMsg(errText(e)) })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, status, offset, tick])
+  }, [mode, status, offset, tick, roundId])
 
   const act = async (d: LuckyAdminDraw, kind: 'deliver' | 'cancel') => {
     if (busy) return
@@ -57,7 +59,8 @@ export default function LuckyDrawsTab({ mode, onChange }: { mode: 'all' | 'pendi
     if (busy) return
     setBusy(true); setMsg('')
     try {
-      const blob = await adminApi.luckyDrawsCsv(mode === 'pending' ? 'open' : status)
+      const q = csvQuery(mode, status, roundId)
+      const blob = await adminApi.luckyDrawsCsv(q.status, q.roundId)
       const href = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = href; a.download = csvFileName(mode, status)
@@ -87,16 +90,19 @@ export default function LuckyDrawsTab({ mode, onChange }: { mode: 'all' | 'pendi
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-white/5 text-xs text-neutral-500">
-              {['time', 'user', 'prize', 'status', 'claim'].map((k) => <th key={k} className="px-4 py-2 text-left font-normal">{t(`admin.lucky.draws.${k}`)}</th>)}
+              {(mode === 'pending' ? ['time', 'round', 'user', 'prize', 'status', 'claim'] : ['time', 'user', 'prize', 'status', 'claim']).map((k) => <th key={k} className="px-4 py-2 text-left font-normal">{t(`admin.lucky.draws.${k}`)}</th>)}
               {mode === 'pending' && <th />}
             </tr></thead>
             <tbody>
               {data.draws.map((d) => (
                 <tr key={d.id} className="border-b border-white/5 align-top last:border-0">
                   <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-neutral-400">{fmtTime(d.createdAt)}</td>
+                  {mode === 'pending' && <td className="max-w-[10rem] break-words px-4 py-2.5 text-xs text-neutral-300">{d.roundName}</td>}
                   <td className="px-4 py-2.5"><div className="text-neutral-100">{d.user.nickname || '—'}</div><div className="text-xs text-neutral-500">{d.user.email}</div></td>
                   <td className="px-4 py-2.5 text-neutral-200">{d.prize.name}</td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-xs text-neutral-300">{t(`lucky.status.${d.fulfillmentStatus}`)}</td>
+                  <td className="whitespace-nowrap px-4 py-2.5 text-xs text-neutral-300">
+                    {d.soldOut ? <span className="text-amber-300">{t('admin.lucky.draws.soldOut')}</span> : t(`lucky.status.${d.fulfillmentStatus}`)}
+                  </td>
                   <td className="px-4 py-2.5 text-xs text-neutral-300">
                     {d.claimInfo && <div className="whitespace-pre-wrap">{d.claimInfo}</div>}
                     {d.supportTicketId && (

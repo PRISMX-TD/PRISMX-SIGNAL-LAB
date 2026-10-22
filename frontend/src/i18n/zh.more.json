@@ -1100,38 +1100,39 @@
       }
     },
     "lucky": {
-      "kpi": {
-        "issued": "本期已发券",
-        "used": "已使用",
-        "pending": "待发奖",
-        "ends": "本期结束"
-      },
       "tab": {
-        "settings": "轮盘设置",
+        "prizes": "奖品设置",
         "issue": "发券",
         "draws": "抽奖记录",
         "pending": "待发奖"
       },
-      "visible": "在用户端显示轮盘",
       "startsAt": "开始时间",
       "endsAt": "结束时间",
       "userSees": "用户端显示：{{time}}（UTC+8）",
-      "createRound": "设置开放时间",
-      "saveRound": "保存时间",
-      "endNow": "立即结束",
-      "confirmEnd": "结束后本期所有未使用的抽奖券会作废，确定？",
+      "endNow": "结束",
+      "confirmEnd": "结束后这一期所有未使用的抽奖券会作废，确定？",
+      "confirmEndRound": "现在结束「{{name}}」？这一期所有未使用的抽奖券会作废。",
       "voided": "已作废 {{n}} 张未使用的券",
-      "noRound": "还没有设置开放时间",
       "phase": {
-        "none": "未设置",
-        "upcoming": "即将开始",
+        "upcoming": "未开始",
         "active": "进行中",
         "ended": "已结束"
       },
+      "mode": {
+        "label": "奖品模式",
+        "qty": "按份量",
+        "prob": "按概率",
+        "qtyHint": "像抽奖箱：每格按剩余份数抽，份数为 0 的格不会被抽中；全部抽完后不再扣券。",
+        "probHint": "按概率抽，合计要 100%；抽中已抽完的格算未中奖（券照用），概率不会分给其他格。",
+        "locked": "已经有人抽过，不能改模式"
+      },
+      "endedReadOnly": "这一期已结束，奖品不能再改",
       "name": "奖品名称",
+      "kindLabel": "奖品类型",
       "days": "天数",
-      "stock": "库存",
-      "perUser": "每人上限",
+      "prob": "概率 %",
+      "stockQty": "份数",
+      "stockCap": "份数上限（可空）",
       "description": "说明（选填）",
       "claimHint": "领奖提示，如：请填写收件人、电话、地址",
       "kind": {
@@ -1139,10 +1140,6 @@
         "custom": "自定义奖品",
         "retry": "再来一次",
         "none": "谢谢参与"
-      },
-      "soldOut": {
-        "to_fallback": "抽完后并入「谢谢参与」",
-        "redistribute": "抽完后按比例分给其他格"
       },
       "claimMode": {
         "pick": "选择领取方式",
@@ -1154,13 +1151,14 @@
       "colorReset": "恢复自动",
       "confirmLeave": "奖项有未保存的改动，离开会丢失，确定？",
       "remove": "删除",
+      "moveUp": "上移",
       "addSlot": "+ 添加一格",
       "total": "概率合计 {{n}}%",
-      "given": "已发出 {{n}} 个",
+      "totalQty": "共 {{n}} 份",
+      "given": "已发出 {{n}}",
       "savePrizes": "保存奖项",
       "saved": "已保存",
       "err": {
-        "number": "库存要填 ≥0 的整数，每人上限要填 ≥1 的整数（不限请留空）",
         "prob": "每格概率要在 0–100% 之间",
         "decimals": "概率最多两位小数",
         "slots": "轮盘要有 2–12 格",
@@ -1168,13 +1166,59 @@
         "name": "有格子没填名称",
         "days": "PRO 天数要填 1–3650",
         "claimMode": "自定义奖品要选领取方式",
-        "noneLimited": "「谢谢参与」不能设库存或上限",
-        "stockBelowUsed": "库存不能少于已发出的数量",
-        "fallback": "有格子抽完要并入「谢谢参与」，请添加一格「谢谢参与」"
+        "stockBelowUsed": "份数不能少于已发出的数量",
+        "capNumber": "份数上限要填 ≥0 的整数（不限请留空）",
+        "stockRequired": "按份量模式每格都要填份数",
+        "stockNumber": "份数要填 ≥0 的整数",
+        "qtyTotal": "总份数要大于 0"
+      },
+      "round": {
+        "list": "抽奖期",
+        "adminSees": "管理员不受显示开关限制，没显示的期也能自己抽来测试",
+        "new": "+ 新建一期",
+        "empty": "还没有任何一期，点「新建一期」开始",
+        "showEnded": "显示已结束的 {{n}} 期",
+        "hideEnded": "收起已结束的 {{n}} 期",
+        "current": "当前：{{name}}",
+        "stats": "已发券 {{issued}} · 已用 {{used}} · 待发奖 {{pending}}",
+        "visibleFor": "「{{name}}」在用户端显示",
+        "shown": "用户端显示",
+        "hidden": "用户端隐藏",
+        "edit": "编辑",
+        "delete": "删除",
+        "createTitle": "新建一期",
+        "editTitle": "编辑这一期",
+        "name": "名称",
+        "namePh": "如：双十一幸运轮盘",
+        "startLocked": "已开始的期不能改开始时间",
+        "endNowWarn": "结束时间已到：保存后这一期立即结束，未使用的券会作废",
+        "modeWhere": "（在「奖品设置」里改）",
+        "save": "保存",
+        "create": "创建",
+        "created": "已创建「{{name}}」，下一步设置奖品",
+        "err": {
+          "name": "请填写名称",
+          "nameLong": "名称最多 40 个字",
+          "start": "请选择开始时间",
+          "end": "请选择结束时间",
+          "order": "结束时间要晚于开始时间",
+          "past": "结束时间要晚于现在"
+        }
+      },
+      "del": {
+        "title": "删除这一期",
+        "lead": "将永久删除「{{name}}」，以及：",
+        "draws": "抽奖记录 {{n}} 条",
+        "tickets": "抽奖券 {{n}} 张（含已用）",
+        "batchesPrizes": "全部发券批次和奖品设置",
+        "keeps": "不会撤回：已加给用户的 PRO 天数、已开的客服工单、操作日志和已发出的通知。",
+        "pendingWarn": "还有 {{n}} 个奖品没发放，删除后后台就找不到这些记录了",
+        "typeName": "输入期名确认",
+        "confirm": "永久删除",
+        "done": "已删除：抽奖记录 {{draws}} 条、券 {{tickets}} 张、发券批次 {{batches}} 个、奖品 {{prizes}} 格"
       },
       "issue": {
-        "needRound": "请先在「轮盘设置」里设置开放时间",
-        "hiddenWarn": "轮盘关闭中：现在发券不会通知用户，打开显示开关后自动通知",
+        "hiddenWarn": "这一期还没在用户端显示：现在发券不会通知用户，打开显示后自动通知",
         "fromComp": "按比赛名次",
         "fromBoard": "按排行榜名次",
         "manual": "手动勾选",
@@ -1205,7 +1249,7 @@
         "confirmAsk": "确定给 {{users}} 人发 {{tickets}} 张抽奖券？",
         "done": "已发放：{{users}} 人、{{tickets}} 张",
         "clear": "清空",
-        "batches": "本期发放记录",
+        "batches": "这一期的发放记录",
         "revoke": "收回未使用",
         "revoked": "已收回 {{n}} 张",
         "limit": "单批最多 2000 人、每人 100 张、共 20000 张",
@@ -1213,14 +1257,16 @@
         "loaded": "已加入名单：{{n}} 人",
         "none": "没有符合条件的人",
         "emptyList": "清单还是空的：从上面选人加入",
-        "noBatches": "本期还没有发过券",
+        "noBatches": "这一期还没有发过券",
         "revokeAsk": "收回「{{reason}}」这一批里还没使用的券？已使用的不受影响。",
         "err": {
           "reversed": "名次区间写反了（起始名次要不大于结束名次）",
           "overlap": "名次区间重叠，请调整",
           "users": "单批最多 2000 人，请先删减",
           "tickets": "整批最多 20000 张，请先删减"
-        }
+        },
+        "ended": "这一期已结束，不能再发券",
+        "target": "发给：{{name}}"
       },
       "draws": {
         "all": "全部状态",
@@ -1237,7 +1283,9 @@
         "openTicket": "打开工单",
         "empty": "没有记录",
         "reasonRequired": "取消要写原因（用户看得到）",
-        "noteLong": "备注最多 200 个字"
+        "noteLong": "备注最多 200 个字",
+        "soldOut": "已抽完未中奖",
+        "round": "期"
       }
     },
     "totalUsers": "总用户数",
@@ -2040,14 +2088,16 @@
         "visible": "轮盘显示：{{visible}}",
         "on": "开",
         "off": "关",
-        "round_create": "设置了开放时间",
-        "round_update": "修改了开放时间（作废 {{voided}} 张）",
+        "round_create": "新建了一期",
+        "round_update": "修改了这一期（作废 {{voided}} 张）",
         "round_end": "立即结束本期（作废 {{voided}} 张）",
         "round_auto_end": "本期到点自动结束（作废 {{voided}} 张）",
         "issue": "发券「{{reason}}」：{{users}} 人、{{tickets}} 张",
         "revoke": "收回 {{revoked}} 张未使用的券",
         "deliver": "标记奖品已发放",
-        "cancel": "取消了一个奖品"
+        "cancel": "取消了一个奖品",
+        "round_delete": "删除了这一期（抽奖记录 {{draws}} 条、券 {{tickets}} 张、发券批次 {{batches}} 个、奖品 {{prizes}} 格）",
+        "withRound": "{{round}}· {{text}}"
       },
       "kindName": {
         "user": {
@@ -5023,7 +5073,8 @@
       "none": "谢谢参与，下次好运！",
       "retry": "再来一次！已退回一张券",
       "proDays": "恭喜获得 {{n}} 天 PRO 会员，已到账",
-      "custom": "恭喜抽中「{{name}}」"
+      "custom": "恭喜抽中「{{name}}」",
+      "soldOut": "这份奖品已经被抽完了，本次未中奖"
     },
     "status": {
       "auto_done": "已到账",
@@ -5031,6 +5082,8 @@
       "submitted": "处理中",
       "delivered": "已发放",
       "cancelled": "已取消"
-    }
+    },
+    "rounds": "抽奖活动",
+    "ticketsBadge": "{{n}} 张未用"
   }
 }
