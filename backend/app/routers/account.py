@@ -61,6 +61,11 @@ class AccountInfoOut(BaseModel):
     gamificationVisible: bool = False
     leaderboardVisible: bool = False
     competitionsVisible: bool = False
+    # 幸运轮盘入口（rev 45）：开关开着且有未结束的一期才露；管理员总露（上线前自测）。
+    # luckyTickets = 本期未用券数，给首页卡片和角标用。
+    # Lucky-wheel entry: shown when switched on with an unended round; always for admins.
+    luckyWheelVisible: bool = False
+    luckyTickets: int = 0
     nickname: str | None = None
     # 昵称是否还欠着。登录响应里也有同名字段，这里再下发一次是为了存量会话：
     # 强制上线时已经登录的人，本地缓存的 user 里根本没有这个键（undefined 即
@@ -107,6 +112,23 @@ class AccountInfoOut(BaseModel):
         from_attributes = True
 
 
+def lucky_flags(db: Session, user: User) -> tuple[bool, int]:
+    """(轮盘入口是否可见, 本期未用券数)。
+
+    普通用户要「开关开着 + 有一期未结束（未开始或进行中）」才可见；管理员总可见，
+    方便上线前自测。券数只在有未结束的期时才查，没有期就是 0。
+    (entry visible, unused tickets this round). Users need the switch on and an
+    unended round (upcoming or active); admins always see it for pre-launch
+    testing. Tickets are only counted while a round is open, else 0.
+    """
+    from app.services.lucky import common, rounds
+    from app.services.lucky.spin import unused_count
+    r = rounds.current_round(db)
+    open_round = r is not None and rounds.phase(r, common.utcnow()) in ("upcoming", "active")
+    visible = user.role == "admin" or (open_round and common.is_visible(db))
+    return visible, (unused_count(db, user.id, r.id) if visible and open_round else 0)
+
+
 @router.get("/me", response_model=AccountInfoOut)
 def get_account(
     db: Session = Depends(get_db),
@@ -136,6 +158,7 @@ def get_account(
         }
         gamification_level = level_of(done_ids)
         gamification_title = LEVEL_TITLES[gamification_level - 1]
+    lucky_visible, lucky_tickets = lucky_flags(db, current_user)
     return AccountInfoOut(
         id=current_user.id,
         email=current_user.email,
@@ -170,6 +193,8 @@ def get_account(
             True if current_user.role == "admin"
             else bool(get_gamification_settings(db).get("competitions_visible"))
         ),
+        luckyWheelVisible=lucky_visible,
+        luckyTickets=lucky_tickets,
         nickname=current_user.nickname,
         needsNickname=not (current_user.nickname or "").strip(),
         nicknamePublic=bool(current_user.nickname_public),

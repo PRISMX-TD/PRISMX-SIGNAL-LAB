@@ -462,6 +462,9 @@ def _scenario(db, i: int, admin: User, agent: User, helper: User, comp: Competit
            else f'{{"id": "{camp.id}", "status": "cancelled"}}', at=m(71), op=f"em{i}")
     _audit(db, admin, admin, "email_auto:create" if i == 0 else "email_auto:enable", "",
            f'{{"id": "rule{i}", "name": "欢迎信", "trigger": "signup"}}', at=m(71), op=f"ea{i}")
+    _audit(db, admin, admin, "lucky:issue" if i == 0 else "lucky:visible", "",
+           '{"id": "b1", "reason": "10月赛", "users": 3, "tickets": 9, "notified": true}' if i == 0
+           else '{"visible": true}', at=m(71), op=f"lw{i}")
     _audit(db, admin, u, f"ticket:{ticket.id}:status", "open", "closed", at=m(72), op=f"tk{i}")
     _audit(db, admin, u, f"ticket:{ticket.id}:reply", "", "您好，款项已到账，请查收。", at=m(72), op=f"tk{i}")
     _audit(db, admin, u if i == 0 else admin, ("strategy:ab_test", "feature:dark_mode")[i], "", ("on", "true")[i],

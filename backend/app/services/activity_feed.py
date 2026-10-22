@@ -138,6 +138,7 @@ ADMIN_COMPETITION_PARTICIPANT = "admin.competition_participant"
 ADMIN_ANNOUNCEMENT = "admin.announcement"
 ADMIN_EMAIL = "admin.email"
 ADMIN_EMAIL_AUTO = "admin.email_auto"
+ADMIN_LUCKY = "admin.lucky"
 ADMIN_OPS = "admin.ops"
 ADMIN_GAMIFICATION = "admin.gamification"
 ADMIN_TICKET = "admin.ticket"
@@ -181,6 +182,7 @@ KIND_CATEGORY: dict[str, str] = {
     ADMIN_ANNOUNCEMENT: "admin",
     ADMIN_EMAIL: "admin",
     ADMIN_EMAIL_AUTO: "admin",
+    ADMIN_LUCKY: "admin",
     ADMIN_OPS: "admin",
     ADMIN_GAMIFICATION: "admin",
     ADMIN_TICKET: "admin",
@@ -1295,6 +1297,8 @@ def _audit_family(f: str) -> str | None:
         return "email"
     if head == "email_auto" and len(parts) == 2:
         return "email_auto"
+    if head == "lucky" and len(parts) == 2:
+        return "lucky"
     if head == "invite" and len(parts) == 2:
         return f"invite:{parts[1]}"
     if head == "invite" and len(parts) == 3 and parts[2] == "agent":
@@ -1316,7 +1320,7 @@ def _audit_family(f: str) -> str | None:
 # Platform-wide families whose target_user_id is just the actor standing in
 def _placeholder_family(family: str) -> bool:
     return (
-        family in ("setting", "gamification", "ops", "announcement", "email", "email_auto")
+        family in ("setting", "gamification", "ops", "announcement", "email", "email_auto", "lucky")
         or (family.startswith("invite:") and not family.endswith(":agent"))
         or (family.startswith("competition:") and not family.startswith("competition:participant:"))
     )
@@ -1363,6 +1367,8 @@ def _family_kind(family: str, fields: set[str]) -> str:
         return ADMIN_EMAIL
     if family == "email_auto":
         return ADMIN_EMAIL_AUTO
+    if family == "lucky":
+        return ADMIN_LUCKY
     if family.startswith("invite:"):
         return ADMIN_AGENT_ASSIGN if family.endswith(":agent") else ADMIN_INVITE_LINK
     if family.startswith("agent:"):
@@ -2396,6 +2402,11 @@ def _audit_params(p: _Proto, ctx: _Ctx) -> dict:
             "rule_id": str(new_j["id"]) if new_j.get("id") else None,
             "name": new_j.get("name"), "trigger": new_j.get("trigger"),
         }
+    if kind == ADMIN_LUCKY:
+        # 动作要素直接写在 new_value 里（routers/lucky_wheel._audit），不用再查表
+        # the payload is in new_value itself (routers/lucky_wheel._audit), no lookup needed
+        new_j = _as_dict(head.new_value)
+        return {"action": (head.field or "").split(":", 1)[1], **new_j}
     if kind == ADMIN_OPS:
         rest = (head.field or "").split(":", 1)[1]
         action, _, target = rest.partition(":")
