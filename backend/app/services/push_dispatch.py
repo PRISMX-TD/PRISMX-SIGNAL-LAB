@@ -171,10 +171,13 @@ EVENT_ANNOUNCEMENT = "announcement"
 # 客服台跟进提醒（rev 41）：到点 / 新分配 / 即将过期，只推给对应客服。
 # Support-desk follow-up reminders (rev 41), pushed to the assigned agent only.
 EVENT_SUPPORT_REMINDER = "support_reminder"
+# 幸运轮盘（rev 45）：收到抽奖券、券即将作废、奖品已发放 / 已取消。点开落到 /lucky。
+# Lucky wheel (rev 45): tickets received, tickets expiring, prize delivered / cancelled; opens /lucky.
+EVENT_LUCKY_WHEEL = "lucky_wheel"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
-    EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER,
+    EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER, EVENT_LUCKY_WHEEL,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知
@@ -1213,6 +1216,39 @@ async def dispatch_announcement_push_async(announcement_id: str, title: str, bod
         await run_in_threadpool(dispatch_announcement_push, announcement_id, title, body)
     except Exception:
         logger.exception("dispatch_announcement_push_async error")
+
+
+def dispatch_users_push(user_ids: list[str], event_type: str, title: str, body: str,
+                        url: str, tag: str) -> None:
+    """给一批指定用户推同一条通知（发券、作废提醒）。判定与取订阅批量做完再发，同公告那条。
+    同步、阻塞网络 IO：从 BackgroundTasks / 线程池里调。
+    Push one message to a given set of users (ticket grants, expiry reminders). Verdicts and
+    subscriptions are fetched in bulk first, like the announcement push. Blocking — call it
+    from BackgroundTasks or the thread pool."""
+    if event_type not in EVENT_TYPES or not user_ids:
+        return
+    pem = settings.vapid_private_key
+    if not pem or not settings.VAPID_PUBLIC_KEY:
+        return
+    try:
+        db = SessionLocal()
+        try:
+            targets = _bulk_prefs_allow(db, list(dict.fromkeys(user_ids)), event_type)
+            subs_by_user = _subs_by_user(db, targets) if targets else {}
+            subs = _snapshot(sub for uid in targets for sub in subs_by_user.get(uid, []))
+        finally:
+            db.close()
+        if targets:
+            _ws_fallback(targets, title, body, url=url, tag=tag)
+        if not subs:
+            return
+        payload = json.dumps({"title": title, "body": body, "icon": "/icons/icon-192.png",
+                              "tag": tag, "url": url}, ensure_ascii=False)
+        results = _send_all(subs, payload, pem, {"sub": settings.VAPID_SUBJECT},
+                            {"Urgency": "normal", "TTL": str(86400)})
+        _prune_subscriptions([sub.id for sub, (_ok, stale) in zip(subs, results) if stale])
+    except Exception:
+        logger.exception("[push] dispatch_users_push error (event=%s, n=%d)", event_type, len(user_ids))
 
 
 # ---------- 诊断用测试推送 / diagnostic test push ----------

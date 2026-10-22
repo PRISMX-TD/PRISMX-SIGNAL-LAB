@@ -19,11 +19,16 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.core.strategy_limits import user_limiter
 from app.models import LuckyDraw, LuckyTicket, LuckyTicketBatch, User
-from app.schemas import LuckyPrizeIn, LuckyRoundIn, LuckyRoundPatch, LuckySpinIn, LuckyVisibleIn
+from app.schemas import (
+    LuckyIssueIn, LuckyPrizeIn, LuckyRankSourceIn, LuckyRevokeIn, LuckyRoundIn, LuckyRoundPatch, LuckySpinIn,
+    LuckyVisibleIn,
+)
 from app.services.audit import log_change
 from app.services.deps import get_current_user, require_admin
 from app.services.lucky import common, prizes, rounds
+from app.services.lucky import issue as issue_svc
 from app.services.lucky import spin as spin_svc
+from app.services.notification_feed import notify_ws
 
 logger = logging.getLogger("prismx.lucky")
 
@@ -38,6 +43,16 @@ def _audit(db: Session, admin: User, action: str, payload: dict) -> None:
     affected users ride in the payload."""
     log_change(db, admin.id, admin.id, f"lucky:{action}", None,
                json.dumps(payload, ensure_ascii=False, default=str))
+
+
+def _after_notify(background_tasks: BackgroundTasks | None, groups: dict[str, list[str]]) -> None:
+    """提交之后：WS 提醒在线用户刷新通知，推送放后台任务（阻塞网络 IO）。
+    After commit: nudge online users over WS; queue the push (blocking network IO) as a background task."""
+    for reason, uids in groups.items():
+        for uid in uids:
+            notify_ws(uid)
+        if background_tasks is not None and uids:
+            background_tasks.add_task(issue_svc.push_tickets, uids, reason)
 
 
 def _config_out(db: Session) -> dict:
@@ -102,9 +117,60 @@ def admin_set_visible(body: LuckyVisibleIn, db: Session = Depends(get_db),
     was = common.is_visible(db)
     common.set_visible(db, body.visible)
     _audit(db, admin, "visible", {"visible": body.visible})
+    # 关→开时给「关着时发的券」补通知；站内通知与开关、审计同一次提交，开关反复拨不会重复通知
+    # （notified_at 已置）。推送在提交之后。
+    # Off→on: notify batches issued while hidden. The feed rows commit with the flag and the
+    # audit row; notified_at makes repeated flips a no-op. Push goes out after the commit.
+    groups = issue_svc.notify_pending(db, common.utcnow()) if body.visible and not was else {}
     db.commit()
-    # Task 5 在这里接「打开时补通知」/ Task 5 hooks deferred notifications in here
+    _after_notify(background_tasks, groups)
     return _config_out(db)
+
+
+@admin_router.post("/issue/preview")
+def admin_issue_preview(body: LuckyRankSourceIn, db: Session = Depends(get_db),
+                        admin: User = Depends(require_admin)):
+    return {"rows": issue_svc.resolve_ranks(db, body)}
+
+
+@admin_router.post("/issue")
+def admin_issue(body: LuckyIssueIn, db: Session = Depends(get_db), admin: User = Depends(require_admin),
+                background_tasks: BackgroundTasks = None):
+    now = common.utcnow()
+    batch, notified = issue_svc.issue(db, admin, body, now)
+    fresh = batch.created_at == now
+    if fresh:
+        _audit(db, admin, "issue", {"id": batch.id, "reason": batch.reason, "users": batch.user_count,
+                                    "tickets": batch.ticket_count, "notified": notified})
+    db.commit()
+    if fresh and notified:
+        uids = [i.userId for i in body.items]
+        _after_notify(background_tasks, {batch.reason: uids})
+    return {"id": batch.id, "userCount": batch.user_count, "ticketCount": batch.ticket_count,
+            "notified": notified}
+
+
+@admin_router.post("/revoke")
+def admin_revoke(body: LuckyRevokeIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    n = issue_svc.revoke(db, body.batchId, body.userId)
+    _audit(db, admin, "revoke", {"batchId": body.batchId, "userId": body.userId, "revoked": n})
+    db.commit()
+    return {"revoked": n}
+
+
+@admin_router.get("/batches")
+def admin_batches(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    r = rounds.current_round(db)
+    if r is None:
+        return {"batches": []}
+    rows = (db.query(LuckyTicketBatch).filter(LuckyTicketBatch.round_id == r.id)
+            .order_by(LuckyTicketBatch.created_at.desc()).limit(200).all())
+    used = dict(db.query(LuckyTicket.batch_id, func.count(LuckyTicket.id))
+                .filter(LuckyTicket.round_id == r.id, LuckyTicket.status == "used")
+                .group_by(LuckyTicket.batch_id).all())
+    return {"batches": [{"id": b.id, "reason": b.reason, "createdAt": b.created_at, "userCount": b.user_count,
+                         "ticketCount": b.ticket_count, "used": used.get(b.id, 0),
+                         "notified": b.notified_at is not None} for b in rows]}
 
 
 # ---- 用户端 / user side ----

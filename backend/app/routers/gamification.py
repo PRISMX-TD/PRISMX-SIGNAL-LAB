@@ -86,6 +86,27 @@ def require_leaderboard_visible(db: Session = Depends(get_db),
     return user
 
 
+def resolve_period_key(period: str) -> str:
+    """"week"/"month" → 以当前 UTC 时间算出的进行中周期 key；显式 key 校验格式与存在性
+    （已封存历史周期只能这样访问，快照只读）。坏值 400。
+    正则只校验形状：2026-13、2026-00、2026-W60 形状合法但不是真实周期，下游
+    period_bounds 会抛 ValueError（→500），这里提前转成 400。
+    "week"/"month" → the running period key (from the current UTC time); an explicit key is
+    checked for shape and existence. Bad input → 400. The regex only checks shape, so
+    2026-13 / 2026-00 / 2026-W60 would pass it and make period_bounds raise (→500)."""
+    if period == "week":
+        return periods.week_key(datetime.now(timezone.utc))
+    if period == "month":
+        return periods.month_key(datetime.now(timezone.utc))
+    if not _PERIOD_KEY_RE.match(period or ""):
+        raise HTTPException(400, "周期格式错误 / Invalid period")
+    try:
+        periods.period_bounds(period)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "周期不存在 / Invalid period") from None
+    return period
+
+
 def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str,
                               reveal: bool = False) -> dict:
     """榜单页负载（设计 §4.3）：board/period 校验后转交 `build_board_rows_payload`。
@@ -96,22 +117,7 @@ def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str
     """
     if board not in LEADERBOARD_BOARDS:
         raise HTTPException(400, "未知榜单 / Unknown board")
-    if period == "week":
-        period_key = periods.week_key(datetime.now(timezone.utc))
-    elif period == "month":
-        period_key = periods.month_key(datetime.now(timezone.utc))
-    else:
-        if not _PERIOD_KEY_RE.match(period or ""):
-            raise HTTPException(400, "周期格式错误 / Invalid period")
-        # 正则只校验形状：2026-13、2026-00、2026-W60 形状合法但不是真实周期，
-        # 下游 period_bounds 会抛 ValueError（→500），这里提前转成 400。
-        # The regex only checks shape: 2026-13 / 2026-00 / 2026-W60 pass it but
-        # are not real periods and period_bounds would raise ValueError (→500).
-        try:
-            periods.period_bounds(period)
-        except (ValueError, TypeError):
-            raise HTTPException(400, "周期不存在 / Invalid period") from None
-        period_key = period
+    period_key = resolve_period_key(period)
     return build_board_rows_payload(db, viewer, board, period_key, reveal=reveal)
 
 

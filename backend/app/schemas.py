@@ -2525,3 +2525,36 @@ class LuckyPrizeIn(BaseModel):
     onSoldOut: Literal["to_fallback", "redistribute"] = "to_fallback"
     claimMode: Literal["form", "ticket"] | None = None
     claimHint: str | None = Field(default=None, max_length=200)
+
+
+class LuckyTierIn(BaseModel):
+    fromRank: int = Field(ge=1, le=1000)
+    toRank: int = Field(ge=1, le=1000)
+    count: int = Field(ge=1, le=100)
+
+
+class LuckyRankSourceIn(BaseModel):
+    type: Literal["comp", "board"]
+    compId: str | None = None
+    board: Literal["return_pct", "win_rate"] | None = None
+    period: str | None = Field(default=None, max_length=16)
+    tiers: list[LuckyTierIn] = Field(min_length=1, max_length=20)
+
+
+class LuckyIssueItemIn(BaseModel):
+    userId: str
+    count: int = Field(ge=1, le=100)
+    source: Literal["manual", "comp_rank", "board_rank"]
+    sourceRef: str | None = Field(default=None, max_length=80)
+    rank: int | None = None
+
+
+class LuckyIssueIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=80)
+    requestId: str = Field(min_length=8, max_length=64)
+    items: list[LuckyIssueItemIn] = Field(min_length=1, max_length=2000)
+
+
+class LuckyRevokeIn(BaseModel):
+    batchId: str | None = None
+    userId: str | None = None

@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from app.models import PushSubscription, User
+from app.models import NotificationPref, PushSubscription, User
 from app.services import push_dispatch as pd
 
 
@@ -69,3 +69,15 @@ def test_ticket_id_is_url_encoded(db_session, push_env):
     _user(db_session, "u3")
     pd.dispatch_ticket_reply("a&b c", "u3")
     assert push_env.payloads[0]["url"] == "/support?ticket=a%26b%20c"
+
+
+def test_users_push_puts_url_top_level(db_session, push_env):
+    """幸运轮盘发券推送：url 在顶层，WS 兜底落到同一页 / lucky-wheel ticket push, top-level url."""
+    _user(db_session, "lw1")
+    db_session.add(NotificationPref(user_id="lw1", enabled=True))
+    db_session.commit()
+    pd.dispatch_users_push(["lw1"], pd.EVENT_LUCKY_WHEEL, "获得抽奖券", "去转一转",
+                           url="/lucky", tag="prismx-lucky")
+    assert push_env.payloads and push_env.payloads[0]["url"] == "/lucky"
+    assert push_env.payloads[0]["tag"] == "prismx-lucky"
+    assert push_env.ws_urls == ["/lucky"]

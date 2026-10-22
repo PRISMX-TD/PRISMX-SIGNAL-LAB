@@ -47,6 +47,12 @@ KIND_COMP_PUBLIC_NAME = "comp_public_name"
 # for admins. Frontend copy: notifFeed.support_reminder / notifFeed.support_alert.
 KIND_SUPPORT_REMINDER = "support_reminder"
 KIND_SUPPORT_ALERT = "support_alert"
+# 幸运轮盘（rev 45）：text 是发券原因 / 奖品名 / 取消原因；标题在前端 `notifFeed.<kind>`（5 语），
+# 链接恒为 /lucky。/ Lucky wheel; titles live in the frontend's notifFeed.<kind>.
+KIND_LUCKY_TICKET = "lucky_ticket"
+KIND_LUCKY_EXPIRING = "lucky_ticket_expiring"
+KIND_LUCKY_DELIVERED = "lucky_prize_delivered"
+KIND_LUCKY_CANCELLED = "lucky_prize_cancelled"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再
 # 兜一道，避免将来别的来源塞进超长字符串。
