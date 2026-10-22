@@ -1,0 +1,806 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   抽奖页 / the lucky page (.lk-*)
+   ───────────────────────────────────────────────────────────────────────────
+   舞台卡（转盘）+ 侧栏三块。卡片、按钮、输入框沿用全站的 .card / .btn-* / .input；
+   这里只补这一页自己的东西：倒计时格、券叠、票根、揭晓卡、彩纸。转盘本身的样式在
+   lucky.css（后台预览也用）。由 pages/LuckyPage.tsx 引入，跟着页面 chunk 按需加载。
+   The stage card (wheel) plus three side panels. Cards, buttons and inputs reuse
+   the site's .card / .btn-* / .input; this adds only what is specific to the
+   page: countdown cells, the ticket stack, ticket stubs, the reveal and confetti.
+   The wheel's own styles are in lucky.css (the admin preview uses them too).
+   Imported by pages/LuckyPage.tsx, so it ships in that page's chunk.
+
+   兼容下限 Chrome 70：不用 inset 简写、不用 aspect-ratio、不用 :has()；渐变色标只写单个位置
+   （「颜色 0 1px」这种双位置写法 Chrome 71 才支持，70 会把整条 background 丢掉）。
+   Chrome 70 floor: no inset shorthand, no aspect-ratio, no :has(); gradient stops take one position
+   each (two-position stops like "colour 0 1px" need Chrome 71; 70 drops the whole background).
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.lk {
+  --lk-accent: var(--gold);
+  --lk-accent-ink: #141418;
+}
+.lk[data-fest='spring'] {
+  --lk-accent: #e8483c;
+  --lk-accent-ink: #fff;
+}
+.lk[data-fest='midautumn'] {
+  --lk-accent: #f2b544;
+}
+.lk[data-fest='halloween'] {
+  --lk-accent: #f28a3a;
+}
+.lk[data-fest='christmas'] {
+  --lk-accent: #f3ce6a;
+}
+.lk[data-fest='newyear'] {
+  --lk-accent: #f1d08a;
+}
+
+/* 期切换 / round switcher */
+.lk-rounds {
+  display: flex;
+  gap: 8px;
+  margin: 0 -4px 16px;
+  padding: 0 4px 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.lk-rounds::-webkit-scrollbar {
+  display: none;
+}
+.lk-round {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.lk-round:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.lk-round:disabled {
+  opacity: 0.4;
+}
+.lk-round.is-on {
+  background: var(--purple);
+  border-color: var(--purple);
+  color: #fff;
+}
+.lk-round-name {
+  max-width: 11rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lk-round-soon {
+  font-size: 11px;
+  opacity: 0.7;
+}
+.lk-round-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--lk-accent);
+  color: var(--lk-accent-ink);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.lk-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+}
+@media (min-width: 1024px) {
+  .lk-grid {
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.lk-side {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+/* 舞台 / stage */
+.lk-stage {
+  position: relative;
+  min-width: 0;
+  padding: 24px;
+  overflow: hidden;
+}
+.lk-stage-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.lk-fest {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--lk-accent);
+  font-size: 12px;
+  font-weight: 500;
+}
+.lk-fest .fd-empty-mini {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.lk-title {
+  font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  word-break: break-word;
+}
+.lk-window {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.lk-cd {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.lk-cd-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.lk-cd-cells {
+  display: flex;
+  gap: 6px;
+}
+.lk-cd-cell {
+  display: flex;
+  min-width: 44px;
+  flex-direction: column;
+  align-items: center;
+  padding: 6px 8px 5px;
+  border-radius: 8px;
+  background: var(--nest);
+}
+.lk-cd-cell b {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.1;
+  color: var(--text);
+}
+.lk-cd-cell i {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--text-3);
+}
+
+/* 转盘后面的同心圆：雷达 / 仪表盘的底纹，呼应 Signal。只是发丝线，不是光。
+   Concentric rings behind the wheel: a radar / dial texture echoing "Signal". Hairlines, not light. */
+.lk-wheel-wrap {
+  position: relative;
+  margin: 12px auto 4px;
+  padding: 20px 0;
+}
+.lk-wheel-wrap::before {
+  content: '';
+  position: absolute;
+  top: -12%;
+  bottom: -12%;
+  left: -24px;
+  right: -24px;
+  pointer-events: none;
+  background: repeating-radial-gradient(circle at 50% 50%, transparent 0, transparent 33px, rgba(255, 255, 255, 0.04) 33px, rgba(255, 255, 255, 0.04) 34px);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 32%, transparent 68%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 32%, transparent 68%);
+}
+.lk-stage-foot {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.lk-cheer {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+  text-align: center;
+}
+.lk-stack {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lk-stack-cards {
+  position: relative;
+  width: 38px;
+  height: 26px;
+}
+.lk-stack-cards i {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 34px;
+  height: 22px;
+  border: 1px solid #0c0c0e;
+  border-radius: 5px;
+  background: var(--purple);
+}
+.lk-stack-cards i:nth-child(1) {
+  transform: translate(4px, 4px);
+  background: #321786;
+}
+.lk-stack-cards i:nth-child(2) {
+  transform: translate(2px, 2px);
+  background: #4519c4;
+}
+.lk-stack-cards i:nth-child(3)::after,
+.lk-stack-cards .lk-stack-fly::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  right: 9px;
+  border-left: 1.5px dashed rgba(255, 255, 255, 0.45);
+}
+.lk-stack.is-empty .lk-stack-cards i {
+  background: #2a2a33;
+}
+.lk-stack-n {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.lk-stack-n b,
+.lk-left b {
+  margin-left: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.lk-sound {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text-3);
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.lk-sound.is-on {
+  color: var(--text-2);
+}
+.lk-sound:hover {
+  background: var(--nest);
+  color: var(--text);
+}
+.lk-void {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+}
+.lk-err {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--down);
+  text-align: center;
+}
+
+/* 侧栏 / side panels */
+.lk-panel {
+  min-width: 0;
+  padding: 20px;
+}
+.lk-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.lk-panel-title {
+  font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+.lk-panel-aux,
+.lk-left {
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.lk-empty {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.lk-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+  word-break: break-word;
+}
+.lk-more {
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--purple-hi);
+}
+.lk-more:hover {
+  color: var(--purple-soft);
+}
+
+/* 票根 / ticket stubs: a deep-violet body with a fine printed security hatch, a solid stub on the right
+   and a dashed tear line between, with two half-round notches bitten out in the card colour. */
+.lk-tickets {
+  display: grid;
+  gap: 10px;
+}
+.lk-ticket {
+  position: relative;
+  display: flex;
+  min-height: 62px;
+}
+.lk-ticket-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 10px 0 0 10px;
+  background:
+    repeating-linear-gradient(-45deg, rgba(146, 132, 255, 0.08) 0, rgba(146, 132, 255, 0.08) 1px, transparent 1px, transparent 6px),
+    #1d1534;
+}
+.lk-ticket-reason {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lk-ticket-date {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.lk-ticket-stub {
+  position: relative;
+  display: flex;
+  width: 72px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-left: 2px dashed rgba(12, 12, 14, 0.6);
+  border-radius: 0 10px 10px 0;
+  background: var(--purple);
+  color: #fff;
+}
+.lk-ticket-stub::before,
+.lk-ticket-stub::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.lk-ticket-stub::before {
+  top: -7px;
+}
+.lk-ticket-stub::after {
+  bottom: -7px;
+}
+.lk-ticket-n {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 18px;
+  font-weight: 700;
+}
+.lk-ticket.is-retry .lk-ticket-main {
+  background:
+    repeating-linear-gradient(-45deg, rgba(224, 168, 60, 0.09) 0, rgba(224, 168, 60, 0.09) 1px, transparent 1px, transparent 6px),
+    #211b12;
+}
+.lk-ticket.is-retry .lk-ticket-stub {
+  background: var(--gold);
+  color: #141418;
+}
+
+/* 奖品 / prizes */
+.lk-prizes {
+  display: grid;
+  gap: 12px;
+}
+.lk-prize {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.lk-art {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.lk-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.lk-prize-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  word-break: break-word;
+}
+.lk-prize-desc {
+  display: -webkit-box;
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-3);
+  word-break: break-word;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.lk-tag {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--nest);
+  color: var(--text-2);
+  font-size: 11px;
+}
+.lk-tag.is-pro {
+  background: rgb(var(--purple-rgb) / 0.22);
+  color: var(--purple-soft);
+}
+.lk-won-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.lk-won-row:first-child {
+  padding-top: 0;
+}
+.lk-won-row:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.lk-won-claim {
+  margin-top: 10px;
+  padding-left: 44px;
+}
+.lk-won-claim:empty {
+  display: none;
+}
+.lk-status {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.lk-status.is-done {
+  background: var(--up-bg);
+  color: var(--up);
+}
+.lk-status.is-wait {
+  background: rgb(var(--gold-rgb) / 0.16);
+  color: var(--gold);
+}
+.lk-status.is-busy {
+  background: rgb(var(--purple-rgb) / 0.22);
+  color: var(--purple-soft);
+}
+.lk-status.is-off {
+  background: var(--nest);
+  color: var(--text-3);
+}
+
+/* 关闭 / 加载 / closed and loading */
+.lk-closed {
+  padding: 48px 24px;
+  text-align: center;
+}
+.lk-closed-mark {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  background: conic-gradient(#5a22ee 0, #5a22ee 25%, #2a2a33 25%, #2a2a33 50%, #9284ff 50%, #9284ff 75%, #2a2a33 75%);
+  opacity: 0.55;
+  box-shadow: 0 0 0 5px #121215, 0 0 0 6px rgba(255, 255, 255, 0.1);
+}
+.lk-closed-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text);
+}
+.lk-closed-sub {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+.lk-skel-wheel {
+  max-width: 380px;
+  margin: 48px auto;
+}
+.lk-skel-wheel::before {
+  content: '';
+  display: block;
+  padding-bottom: 100%;
+  border-radius: 50%;
+  background: var(--nest);
+}
+.lk-skel-panel {
+  height: 168px;
+}
+
+/* 揭晓卡 / reveal */
+.lk-scrim {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(9, 9, 11, 0.74);
+}
+.lk-reveal {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 380px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 32px 24px 24px;
+  border-radius: 24px;
+  background: var(--surface);
+  text-align: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), 0 30px 80px -20px rgba(0, 0, 0, 0.9);
+}
+.lk-reveal::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 32px;
+  right: 32px;
+  height: 3px;
+  border-radius: 0 0 3px 3px;
+  background: var(--lk-accent);
+}
+.lk-reveal.is-retry::before {
+  background: var(--purple-hi);
+}
+.lk-reveal.is-miss::before {
+  background: var(--line-hi);
+}
+.lk-reveal-art {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+.lk-reveal-eyebrow {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: var(--lk-accent);
+}
+.lk-reveal-title {
+  font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  word-break: break-word;
+}
+.lk-reveal-sub {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.lk-reveal-desc {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+  word-break: break-word;
+}
+.lk-reveal-claim {
+  margin-top: 18px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--nest);
+  text-align: left;
+}
+.lk-reveal-actions {
+  display: grid;
+  gap: 10px;
+  margin-top: 22px;
+}
+.lk-btn {
+  width: 100%;
+  height: 44px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* 彩纸：发射点在揭晓卡上方，压在卡片后面，落下时从卡后穿过，不挡字。
+   Confetti: emitted above the reveal card and layered behind it, so falling pieces pass behind the text. */
+.lk-confetti {
+  position: absolute;
+  top: calc(50% - 170px);
+  left: 50%;
+  width: 0;
+  height: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.lk-bit {
+  position: absolute;
+  top: -6px;
+  left: -4px;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: lk-confetti;
+  animation-fill-mode: both;
+}
+.lk-bit-1 {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.lk-bit-2 {
+  width: 4px;
+  height: 14px;
+}
+.lk-bit-art {
+  width: 20px;
+  height: 20px;
+  background: none;
+}
+.lk-bit-art svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.lk-stack-fly {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .lk-scrim {
+    animation: lk-fade 0.2s var(--ease-out) both;
+  }
+  .lk-reveal {
+    animation: lk-pop 0.55s var(--spring) both;
+  }
+  .lk-reveal-art {
+    animation: lk-stamp 0.7s var(--spring) 0.1s both;
+  }
+  .lk-stack-cards .lk-stack-fly {
+    animation: lk-fly 0.75s var(--ease-out) forwards;
+  }
+}
+@keyframes lk-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes lk-pop {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lk-stamp {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(-24deg);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes lk-fly {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(16px, -44px) rotate(-18deg);
+  }
+}
+@keyframes lk-confetti {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg) scale(0.3);
+    animation-timing-function: cubic-bezier(0.15, 0.7, 0.3, 1);
+  }
+  40% {
+    opacity: 1;
+    transform: translate(var(--x), var(--y)) rotate(calc(var(--r) * 0.45)) scale(1);
+    animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(var(--x) * 1.2), calc(var(--y) + var(--fall))) rotate(var(--r)) scale(0.9);
+  }
+}
+
+@media (max-width: 639px) {
+  .lk-stage {
+    padding: 18px 16px;
+  }
+  .lk-panel {
+    padding: 16px;
+  }
+  .lk-title {
+    font-size: 20px;
+  }
+  .lk-cd {
+    align-items: flex-start;
+  }
+  .lk-cd-cell {
+    min-width: 40px;
+  }
+  .lk-stage-foot {
+    gap: 10px;
+  }
+  .lk-wheel-wrap {
+    padding: 12px 0;
+  }
+}

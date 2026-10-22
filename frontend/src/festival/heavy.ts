@@ -29,3 +29,5 @@ export { default as FestivalGreeting } from './FestivalGreetingImpl'
 export { default as FestivalEmpty } from './FestivalEmptyImpl'
 export { default as FestivalRibbon } from './FestivalRibbonImpl'
 export { applyCharm, startCharmGuard } from './charm'
+// 幸运轮盘中奖彩纸用的节日碎片（与新信号迸发同一套图）/ festival shards for the lucky-wheel confetti
+export { shards } from './decor'

@@ -1179,8 +1179,6 @@
         "empty": "No rounds yet. Click “New round” to start",
         "showEnded": "Show {{n}} ended rounds",
         "hideEnded": "Hide {{n}} ended rounds",
-        "current": "Selected: {{name}}",
-        "stats": "Issued {{issued}} · used {{used}} · pending {{pending}}",
         "visibleFor": "Show “{{name}}” to users",
         "shown": "Shown to users",
         "hidden": "Hidden from users",
@@ -1203,7 +1201,9 @@
           "end": "Pick an end time",
           "order": "The end must be after the start",
           "past": "The end must be in the future"
-        }
+        },
+        "meterLabel": "{{used}} of {{issued}} tickets used",
+        "pending": "{{n}} to deliver"
       },
       "del": {
         "title": "Delete round",
@@ -1266,7 +1266,17 @@
           "tickets": "At most 20000 tickets per batch, remove some first"
         },
         "ended": "This round has ended; no more tickets can be issued",
-        "target": "Issuing to: {{name}}"
+        "target": "Issuing to: {{name}}",
+        "pickTitle": "Choose recipients",
+        "col": {
+          "user": "User",
+          "source": "Source",
+          "count": "Tickets",
+          "time": "Time",
+          "reason": "Reason",
+          "users": "Users",
+          "used": "Used / issued"
+        }
       },
       "draws": {
         "all": "All statuses",
@@ -1285,7 +1295,53 @@
         "reasonRequired": "A cancel reason is required (the user sees it)",
         "noteLong": "Notes are limited to 200 characters",
         "soldOut": "Sold out (no win)",
-        "round": "Round"
+        "round": "Round",
+        "prev": "Previous page",
+        "next": "Next page",
+        "total": "{{n}} records"
+      },
+      "moveDown": "Move down",
+      "kpi": {
+        "active": "Active rounds",
+        "upcomingFoot": "{{n}} more not started",
+        "issued": "Tickets issued",
+        "used": "Tickets used",
+        "usedFoot": "{{pct}}% of issued",
+        "pending": "Prizes to deliver",
+        "pendingFoot": "All rounds. Click to handle"
+      },
+      "slots": {
+        "title": "Slots",
+        "count": "{{n}} / {{max}} slots",
+        "auto": "Auto",
+        "daysUnit": "days"
+      },
+      "preview": {
+        "title": "Preview",
+        "hint": "The same wheel users see",
+        "spin": "Try",
+        "spinSub": "No ticket",
+        "spinAria": "Test spin (preview only: no ticket used, nothing recorded)",
+        "result": "Test result: {{name}} (preview only: no ticket used, nothing recorded)",
+        "resultSoldOut": "Test result: {{name}} has run out, so a user landing here gets no prize (preview only)",
+        "noWeight": "No slot can be won yet. Fill in quantities or odds first",
+        "slotN": "Slot {{n}}",
+        "soldOut": "Sold out",
+        "festLabel": "Festival skin",
+        "festHint": "\"Auto\" follows the site's current festival. This only changes the preview, not what users see",
+        "fest": {
+          "auto": "Auto",
+          "none": "None",
+          "spring": "Lunar New Year",
+          "midautumn": "Mid-Autumn",
+          "halloween": "Halloween",
+          "christmas": "Christmas",
+          "newyear": "New Year"
+        },
+        "share": "Chance per slot",
+        "shareQty": "Based on remaining quantity; a slot at 0 can't be won",
+        "shareProb": "Based on the set odds; a slot that has run out keeps its odds and counts as a miss",
+        "shareEmpty": "Nothing to win yet"
       }
     },
     "totalUsers": "Total users",
@@ -5058,14 +5114,8 @@
   },
   "lucky": {
     "closed": "The lucky wheel isn't open right now",
-    "window": "Open {{from}} – {{to}}",
     "voidNotice": "Unused tickets expire automatically when this round ends",
-    "startsIn": "Starts in {{d}}d {{h}}h {{m}}m {{s}}s",
-    "endsIn": "Ends in {{d}}d {{h}}h {{m}}m {{s}}s",
     "notStarted": "Not started yet",
-    "spin": "Spin ({{n}} left)",
-    "spinning": "Spinning…",
-    "noTickets": "No tickets yet — join platform events or competitions to earn some",
     "noTicketsHint": "No tickets this round yet",
     "retryTicket": "Spin again refund",
     "prizes": "Prizes",
@@ -5079,13 +5129,6 @@
     "close": "Got it",
     "cardTitle": "You have {{n}} lucky-draw tickets waiting",
     "cardCta": "Spin now",
-    "result": {
-      "none": "No prize this time — better luck next spin!",
-      "retry": "Spin again! Your ticket is back",
-      "proDays": "You won {{n}} days of PRO — already added",
-      "custom": "You won “{{name}}”",
-      "soldOut": "This prize has already run out, so no win this time"
-    },
     "status": {
       "auto_done": "Credited",
       "pending": "To claim",
@@ -5094,6 +5137,59 @@
       "cancelled": "Cancelled"
     },
     "rounds": "Lucky draws",
-    "ticketsBadge": "{{n}} unused"
+    "ticketsBadge": "{{n}} unused",
+    "available": "Tickets",
+    "issuedOn": "Issued {{time}}",
+    "more": "Show {{n}} more",
+    "fewer": "Show less",
+    "slots": "{{n}} slots",
+    "kindTag": {
+      "pro_days": "PRO",
+      "custom": "Gift"
+    },
+    "closedSub": "When the next round opens, you can spin here",
+    "startsLabel": "Starts in",
+    "endsLabel": "Ends in",
+    "unitD": "days",
+    "unitH": "hrs",
+    "unitM": "min",
+    "unitS": "sec",
+    "hub": {
+      "go": "SPIN",
+      "left": "{{n}} left",
+      "none": "No tickets",
+      "soon": "Soon",
+      "aria": "Spin the wheel, {{n}} tickets left"
+    },
+    "sound": {
+      "mute": "Turn sound off",
+      "unmute": "Turn sound on"
+    },
+    "cheer": {
+      "ready": "Your luck is loaded. Tap the centre to spin",
+      "spinning": "Round and round it goes…",
+      "win": "You're on a roll! Tickets left, keep spinning",
+      "winOut": "Congrats! That's every ticket for this round",
+      "retry": "A free go on the house. Spin again",
+      "miss1": "So close. Try your next ticket",
+      "miss2": "Chin up, every spin is a fresh chance",
+      "miss3": "Stay cool and give it another whirl",
+      "out": "Out of tickets for this round. Join events to earn more",
+      "none": "No tickets this round yet. Join platform events or competitions to earn some",
+      "upcoming": "Not open yet. Spin as soon as it starts"
+    },
+    "reveal": {
+      "won": "You won",
+      "proTitle": "{{n}} days of PRO",
+      "proSub": "Already added to your account, ready to use",
+      "retryTitle": "Spin again!",
+      "retry": "Your ticket is back. Give it another go",
+      "missTitle": "So close",
+      "none": "It stopped on “{{name}}”. Every spin is a fresh chance",
+      "soldOut": "This prize just ran out, so no win this time",
+      "again": "Spin again ({{n}} left)",
+      "spinNow": "Spin it now",
+      "keep": "Awesome"
+    }
   }
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { LuckyPrizeAdmin } from '../../../api/luckyTypes'
-import { autoColor, blankRow, fromAdmin, problems, toInput, totalPct, totalQty } from './prizeForm'
+import { PALETTE } from '../../lucky/wheelArt'
+import { autoColor, blankRow, fromAdmin, pickWeighted, previewWeights, problems, resolveFestival, sharePct, slotSoldOut, toInput, totalPct, totalQty } from './prizeForm'
 
 const ok = (kind: Parameters<typeof blankRow>[0], p: Record<string, unknown> = {}) => ({ ...blankRow(kind), name: 'x', ...p })
 
@@ -108,7 +109,47 @@ describe('prizeForm · shared', () => {
     }
   })
   it('auto colour follows the wheel palette and wraps', () => {
-    expect(autoColor(0)).toBe('#7c5cff')
+    expect(autoColor(0)).toBe(PALETTE[0])
     expect(autoColor(8)).toBe(autoColor(0))
+  })
+})
+
+describe('prizeForm · 预览 preview', () => {
+  it('weights follow remaining stock in qty mode and basis points in prob mode', () => {
+    const rows = [ok('custom', { stock: '5', stockUsed: 2 }), ok('none', { stock: '0' }), ok('retry', { stock: 'x' })]
+    expect(previewWeights(rows, 'qty')).toEqual([3, 0, 0])
+    const prob = [ok('custom', { probPct: '12.5', stock: '1', stockUsed: 1 }), ok('none', { probPct: '87.5' })]
+    // 按概率：份数用完的格概率不变 / prob mode: a sold-out slot keeps its odds
+    expect(previewWeights(prob, 'prob')).toEqual([1250, 8750])
+  })
+  it('never lets used exceed stock into a negative weight', () => {
+    expect(previewWeights([ok('custom', { stock: '1', stockUsed: 3 })], 'qty')).toEqual([0])
+  })
+  it('shares are percentages with one decimal, zero when nothing is left', () => {
+    expect(sharePct([1, 2, 1])).toEqual([25, 50, 25])
+    expect(sharePct([1, 2])).toEqual([33.3, 66.7])
+    expect(sharePct([0, 0])).toEqual([0, 0])
+  })
+  it('picks by weight and skips zero-weight slots', () => {
+    const w = [0, 30, 0, 70]
+    expect(pickWeighted(w, 0)).toBe(1)
+    expect(pickWeighted(w, 0.2999)).toBe(1)
+    expect(pickWeighted(w, 0.3)).toBe(3)
+    expect(pickWeighted(w, 0.9999999)).toBe(3)
+    expect(pickWeighted(w, 1)).toBe(3)
+    expect(pickWeighted([0, 0], 0.5)).toBe(-1)
+    expect(pickWeighted([], 0.5)).toBe(-1)
+  })
+  it('marks a prob-mode slot whose cap is used up, never a qty-mode or uncapped one', () => {
+    expect(slotSoldOut(ok('custom', { stock: '2', stockUsed: 2 }), 'prob')).toBe(true)
+    expect(slotSoldOut(ok('custom', { stock: '', stockUsed: 9 }), 'prob')).toBe(false)
+    expect(slotSoldOut(ok('custom', { stock: '2', stockUsed: 1 }), 'prob')).toBe(false)
+    expect(slotSoldOut(ok('custom', { stock: '2', stockUsed: 2 }), 'qty')).toBe(false)
+  })
+  it('resolves the festival preview choice', () => {
+    expect(resolveFestival('auto', 'halloween')).toBe('halloween')
+    expect(resolveFestival('auto', null)).toBeNull()
+    expect(resolveFestival('none', 'halloween')).toBeNull()
+    expect(resolveFestival('spring', null)).toBe('spring')
   })
 })

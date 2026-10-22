@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { LuckyDraw, LuckyPhase, LuckyRoundState } from '../api/luckyTypes'
-import { LAST_ROUND_KEY, isWheelClosed, openRounds, pickRound, readLastRound, resultKey, wonDraws, withTicketsLeft, writeLastRound } from './luckyView'
+import { LAST_ROUND_KEY, isWheelClosed, openRounds, cheerKey, pickRound, readLastRound, revealCopy, wonDraws, withTicketsLeft, writeLastRound } from './luckyView'
 
 const rs = (id: string, phase: LuckyPhase, unused = 0): LuckyRoundState => ({
   round: { id, name: `期${id}`, startsAt: '', endsAt: '', phase },
@@ -50,20 +50,41 @@ describe('withTicketsLeft', () => {
   })
 })
 
-describe('wonDraws / resultKey', () => {
-  it('hides thanks-for-playing and sold-out misses from My prizes', () => {
-    const list = [draw('none'), draw('pro_days', true), draw('pro_days'), draw('custom')]
+describe('wonDraws / revealCopy', () => {
+  it('hides thanks-for-playing, spin-again refunds and sold-out misses from My prizes', () => {
+    const list = [draw('none'), draw('retry'), draw('pro_days', true), draw('pro_days'), draw('custom')]
     expect(wonDraws(list).map((d) => [d.prize.kind, d.soldOut])).toEqual([['pro_days', false], ['custom', false]])
   })
   it('a sold-out miss reads as a miss whatever the slot was', () => {
-    expect(resultKey(draw('custom', true))).toEqual({ key: 'lucky.result.soldOut' })
-    expect(resultKey(draw('pro_days', true, { proDays: 7 }))).toEqual({ key: 'lucky.result.soldOut' })
+    expect(revealCopy(draw('custom', true))).toEqual({ tone: 'miss', titleKey: 'lucky.reveal.missTitle', subKey: 'lucky.reveal.soldOut' })
+    expect(revealCopy(draw('pro_days', true, { proDays: 7 })).tone).toBe('miss')
   })
-  it('picks the sentence by prize kind otherwise', () => {
-    expect(resultKey(draw('none')).key).toBe('lucky.result.none')
-    expect(resultKey(draw('retry')).key).toBe('lucky.result.retry')
-    expect(resultKey(draw('pro_days', false, { proDays: 7 }))).toEqual({ key: 'lucky.result.proDays', params: { n: 7 } })
-    expect(resultKey(draw('custom'))).toEqual({ key: 'lucky.result.custom', params: { name: '耳机' } })
+  it('picks the tone and copy by prize kind otherwise', () => {
+    expect(revealCopy(draw('none'))).toMatchObject({ tone: 'miss', subKey: 'lucky.reveal.none', params: { name: '耳机' } })
+    expect(revealCopy(draw('retry'))).toMatchObject({ tone: 'retry', titleKey: 'lucky.reveal.retryTitle' })
+    expect(revealCopy(draw('pro_days', false, { proDays: 7 }))).toMatchObject({ tone: 'win', titleKey: 'lucky.reveal.proTitle', params: { n: 7 } })
+    // 实物奖品：大标题就是奖品名，不走文案键 / custom: the headline is the prize name itself
+    expect(revealCopy(draw('custom'))).toEqual({ tone: 'win', eyebrowKey: 'lucky.reveal.won', titleText: '耳机' })
+  })
+})
+
+describe('cheerKey', () => {
+  const base = { phase: 'active' as const, spinning: false, unused: 3, hadTickets: true, last: null, missStreak: 0 }
+  it('says when the round has not started or a spin is running', () => {
+    expect(cheerKey({ ...base, phase: 'upcoming' })).toBe('lucky.cheer.upcoming')
+    expect(cheerKey({ ...base, spinning: true })).toBe('lucky.cheer.spinning')
+  })
+  it('separates never-had-tickets from used-them-all', () => {
+    expect(cheerKey({ ...base, unused: 0, hadTickets: false })).toBe('lucky.cheer.none')
+    expect(cheerKey({ ...base, unused: 0 })).toBe('lucky.cheer.out')
+    expect(cheerKey({ ...base, unused: 0, last: 'win' })).toBe('lucky.cheer.winOut')
+  })
+  it('reacts to the last outcome and rotates miss lines without repeating', () => {
+    expect(cheerKey(base)).toBe('lucky.cheer.ready')
+    expect(cheerKey({ ...base, last: 'win' })).toBe('lucky.cheer.win')
+    expect(cheerKey({ ...base, last: 'retry' })).toBe('lucky.cheer.retry')
+    const misses = [1, 2, 3, 4].map((k) => cheerKey({ ...base, last: 'miss', missStreak: k }))
+    expect(misses).toEqual(['lucky.cheer.miss1', 'lucky.cheer.miss2', 'lucky.cheer.miss3', 'lucky.cheer.miss1'])
   })
 })
 

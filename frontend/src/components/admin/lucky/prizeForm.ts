@@ -10,7 +10,8 @@
 //   prob: every slot needs 0–100% with at most two decimals, summing to 100%; the stock cap is optional.
 //   Both: 2–12 slots, names, PRO days 1–3650, a claim mode for custom prizes, stock >= already given.
 import type { LuckyClaimMode, LuckyMode, LuckyPrizeAdmin, LuckyPrizeInput, LuckyPrizeKind } from '../../../api/luckyTypes'
-import { PALETTE } from '../../lucky/LuckyWheel'
+import type { FestivalKey } from '../../../festival/calendar'
+import { PALETTE } from '../../lucky/wheelArt'
 
 export interface PrizeRow {
   key: string; id?: string; name: string; description: string; imageUrl: string; color: string
@@ -85,3 +86,53 @@ export const toInput = (rows: PrizeRow[], mode: LuckyMode): LuckyPrizeInput[] =>
   claimMode: r.kind === 'custom' ? (r.claimMode || null) : null,
   claimHint: r.kind === 'custom' ? r.claimHint.trim() || null : null,
 }))
+
+// ── 预览：分布图与「试转」/ preview: the share bar and the local test spin ──
+
+/**
+ * 每格在当前设置下的抽中权重，与后端同口径：按份量 = 剩余份数（份数 - 已发出，不合法按 0）；
+ * 按概率 = 万分比。按概率模式里份数已满的格权重不变（落在那里算未中奖，概率不会分给别的格）。
+ * Each slot's weight under the current settings, same rules as the backend: qty = remaining stock
+ * (stock - given, invalid counts as 0); prob = basis points. A sold-out slot keeps its odds in prob mode
+ * (landing there is a miss; the odds are never handed to other slots).
+ */
+export function previewWeights(rows: PrizeRow[], mode: LuckyMode): number[] {
+  return rows.map((r) => {
+    if (mode === 'prob') return Math.max(0, bp(r.probPct))
+    return isInt(r.stock, 0) ? Math.max(0, Number(r.stock) - r.stockUsed) : 0
+  })
+}
+
+/** 每格占比（%，一位小数）；全部为 0 时都是 0 / Share of each slot in %, one decimal; all zero when the total is 0. */
+export function sharePct(weights: number[]): number[] {
+  const sum = weights.reduce((a, w) => a + w, 0)
+  return weights.map((w) => (sum > 0 ? Math.round((w / sum) * 1000) / 10 : 0))
+}
+
+/**
+ * 按权重挑一格；rand ∈ [0, 1)。权重全为 0 返回 -1（试转按钮据此提示，不转）。
+ * Pick a slot by weight; rand in [0, 1). Returns -1 when every weight is 0 (the test spin then explains instead of spinning).
+ */
+export function pickWeighted(weights: number[], rand: number): number {
+  const sum = weights.reduce((a, w) => a + Math.max(0, w), 0)
+  if (sum <= 0) return -1
+  let x = Math.min(Math.max(rand, 0), 0.999999999) * sum
+  for (let i = 0; i < weights.length; i++) {
+    const w = Math.max(0, weights[i])
+    if (x < w) return i
+    x -= w
+  }
+  for (let i = weights.length - 1; i >= 0; i--) if (weights[i] > 0) return i
+  return -1
+}
+
+export type FestivalChoice = 'auto' | 'none' | FestivalKey
+export const FESTIVAL_CHOICES: FestivalChoice[] = ['auto', 'none', 'spring', 'midautumn', 'halloween', 'christmas', 'newyear']
+
+/** 预览用哪个节日皮肤：「自动」跟着站点当前的节日 / Which festival skin the preview uses; auto follows the site. */
+export const resolveFestival = (choice: FestivalChoice, site: FestivalKey | null): FestivalKey | null =>
+  choice === 'auto' ? site : choice === 'none' ? null : choice
+
+/** 按概率模式里份数已经发完的格（试转抽到它时提示「用户抽到算未中奖」）/ A prob-mode slot whose cap is used up. */
+export const slotSoldOut = (r: PrizeRow, mode: LuckyMode) =>
+  mode === 'prob' && isInt(r.stock, 0) && Number(r.stock) <= r.stockUsed

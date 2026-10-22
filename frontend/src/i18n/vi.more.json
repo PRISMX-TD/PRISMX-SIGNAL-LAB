@@ -2422,14 +2422,8 @@
   },
   "lucky": {
     "closed": "Vòng quay may mắn hiện chưa mở",
-    "window": "Thời gian mở: {{from}} ～ {{to}}",
     "voidNotice": "Khi kỳ này kết thúc, vé chưa dùng sẽ tự động hết hiệu lực",
-    "startsIn": "Bắt đầu sau {{d}} ngày {{h}} giờ {{m}} phút {{s}} giây",
-    "endsIn": "Kết thúc sau {{d}} ngày {{h}} giờ {{m}} phút {{s}} giây",
     "notStarted": "Chưa bắt đầu",
-    "spin": "Quay (còn {{n}} vé)",
-    "spinning": "Đang quay…",
-    "noTickets": "Chưa có vé. Tham gia sự kiện hoặc cuộc thi của nền tảng để nhận vé",
     "noTicketsHint": "Kỳ này chưa có vé",
     "retryTicket": "Quay lại (hoàn vé)",
     "prizes": "Danh sách phần thưởng",
@@ -2443,13 +2437,6 @@
     "close": "Đã hiểu",
     "cardTitle": "Bạn có {{n}} vé quay thưởng đang chờ",
     "cardCta": "Quay ngay",
-    "result": {
-      "none": "Rất tiếc, lần này chưa trúng. Chúc may mắn lần sau!",
-      "retry": "Quay thêm lần nữa! Vé đã được hoàn lại",
-      "proDays": "Chúc mừng! Bạn nhận được {{n}} ngày PRO, đã cộng vào tài khoản",
-      "custom": "Chúc mừng bạn đã trúng “{{name}}”",
-      "soldOut": "Phần quà này đã hết, lần này bạn chưa trúng"
-    },
     "status": {
       "auto_done": "Đã cộng",
       "pending": "Chờ nhận",
@@ -2458,6 +2445,59 @@
       "cancelled": "Đã hủy"
     },
     "rounds": "Các đợt quay thưởng",
-    "ticketsBadge": "{{n}} vé chưa dùng"
+    "ticketsBadge": "{{n}} vé chưa dùng",
+    "available": "Vé khả dụng",
+    "issuedOn": "Phát ngày {{time}}",
+    "more": "Xem thêm {{n}}",
+    "fewer": "Thu gọn",
+    "slots": "{{n}} ô",
+    "kindTag": {
+      "pro_days": "Hội viên",
+      "custom": "Quà tặng"
+    },
+    "closedSub": "Khi vòng mới mở, bạn có thể quay tại đây",
+    "startsLabel": "Bắt đầu sau",
+    "endsLabel": "Kết thúc sau",
+    "unitD": "ngày",
+    "unitH": "giờ",
+    "unitM": "phút",
+    "unitS": "giây",
+    "hub": {
+      "go": "QUAY",
+      "left": "Còn {{n}}",
+      "none": "Hết vé",
+      "soon": "Sắp mở",
+      "aria": "Quay vòng quay, còn {{n}} vé"
+    },
+    "sound": {
+      "mute": "Tắt âm thanh",
+      "unmute": "Bật âm thanh"
+    },
+    "cheer": {
+      "ready": "Vận may đã sẵn sàng. Chạm nút giữa để quay",
+      "spinning": "Đang quay…",
+      "win": "Đang hên! Còn vé, quay tiếp nào",
+      "winOut": "Chúc mừng! Bạn đã dùng hết vé vòng này",
+      "retry": "Thêm một lượt miễn phí. Quay lại nào",
+      "miss1": "Suýt nữa thôi. Thử vé tiếp theo nhé",
+      "miss2": "Đừng nản, mỗi lượt quay là một cơ hội mới",
+      "miss3": "Bình tĩnh và quay thêm lượt nữa",
+      "out": "Đã hết vé vòng này. Tham gia sự kiện để nhận thêm",
+      "none": "Vòng này bạn chưa có vé. Tham gia sự kiện hoặc cuộc thi của nền tảng để nhận",
+      "upcoming": "Chưa bắt đầu. Đến giờ là quay được"
+    },
+    "reveal": {
+      "won": "Chúc mừng bạn trúng",
+      "proTitle": "{{n}} ngày PRO",
+      "proSub": "Đã cộng vào tài khoản, dùng được ngay",
+      "retryTitle": "Quay lại!",
+      "retry": "Vé đã được hoàn lại. Quay thêm lần nữa nhé",
+      "missTitle": "Suýt nữa",
+      "none": "Dừng ở “{{name}}”. Mỗi lượt quay là một cơ hội mới",
+      "soldOut": "Phần quà này vừa hết, lượt này không trúng",
+      "again": "Quay tiếp (còn {{n}} vé)",
+      "spinNow": "Quay ngay",
+      "keep": "Tuyệt"
+    }
   }
 }

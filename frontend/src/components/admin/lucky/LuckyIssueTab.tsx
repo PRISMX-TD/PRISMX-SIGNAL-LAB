@@ -1,11 +1,13 @@
 // 发券：按比赛名次 / 排行榜名次（分档）/ 手动搜索 → 合并进确认清单 → 填原因 → 二次确认发放。
-// 名次在后端解析（/issue/preview），前端只展示、改张数、删人。v2：券发给当前选中的那一期（顶部显示期名），
+// 名次在后端解析（/issue/preview），前端只展示、改张数、删人。v2：券发给当前选中的那一期（卡头写着期名），
 // 已结束的期不能发；这一期没在用户端显示时提示「打开后再通知」。发放记录 / 收回也按这一期。
+// 三张卡：选人、确认清单、这一期的发放记录。
 // Issue tickets: by competition rank / leaderboard rank (tiers) / manual search -> merge into one
 // confirm list -> reason -> confirm twice. Ranks are resolved by the backend (/issue/preview); the UI
 // only shows them and lets the admin edit counts or drop people. v2: tickets go to the selected round
-// (named at the top); an ended round can't be issued to; while the round is hidden the page says users
-// are notified once it is switched on. Batches and revoking are scoped to the round too.
+// (named in the card head); an ended round can't be issued to; while the round is hidden the page says
+// users are notified once it is switched on. Batches and revoking are scoped to the round too.
+// Three cards: pick recipients, the confirm list, and this round's batches.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
@@ -17,6 +19,7 @@ import { clampCount, limitProblem, merge, periodValid, tierProblem, totals, type
 
 type Mode = 'comp' | 'board' | 'manual'
 type PeriodKind = 'week' | 'month' | 'custom'
+const MODE_KEY: Record<Mode, string> = { comp: 'fromComp', board: 'fromBoard', manual: 'manual' }
 
 // 数字输入：输入中允许暂时为空（不然删光就被改回 1，再打 5 变成 15），失焦时回到当前有效值。
 // Numeric box: may be empty while typing (otherwise clearing snaps to 1 and typing 5 gives 15);
@@ -25,7 +28,7 @@ function NumBox({ value, max, label, onCommit }: { value: number; max: number; l
   const [text, setText] = useState(String(value))
   useEffect(() => setText(String(value)), [value])
   return (
-    <input className="input w-16 py-1 text-sm" inputMode="numeric" aria-label={label} value={text}
+    <input className="input num w-16" inputMode="numeric" aria-label={label} value={text}
       onChange={(e) => {
         const s = e.target.value.replace(/\D/g, '').slice(0, 5)
         setText(s)
@@ -73,7 +76,7 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
     try { await fn() } catch (e) { setMsg(e instanceof Error ? localizeApiError(e.message) : t('common.error')) } finally { setBusy(false) }
   }
   if (round.phase === 'ended') {
-    return <div className="card p-6 text-sm text-neutral-400">{t('admin.lucky.issue.ended')}</div>
+    return <div className="adm-card adm-empty"><p className="adm-empty-title">{t('admin.lucky.issue.ended')}</p></div>
   }
   const tot = totals(list)
   const over = limitProblem(list)
@@ -94,67 +97,77 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
   }], dupMode))
 
   return (
-    <div className="space-y-4">
-      <p className="break-words text-sm text-neutral-300">{t('admin.lucky.issue.target', { name: round.name })}</p>
-      {!round.visible && <div className="rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-300">{t('admin.lucky.issue.hiddenWarn')}</div>}
-      <section className="card space-y-3 p-4">
-        <div className="seg-tabs w-full sm:w-fit">
+    <div className="lka-issue space-y-4">
+      {!round.visible && <div className="lka-warn-bar">{t('admin.lucky.issue.hiddenWarn')}</div>}
+
+      <section className="adm-card">
+        <div className="lka-card-head">
+          <div className="min-w-0">
+            <h4 className="lka-h">{t('admin.lucky.issue.pickTitle')}</h4>
+            <p className="lka-sub break-words">{t('admin.lucky.issue.target', { name: round.name })}</p>
+          </div>
+        </div>
+        <div className="adm-seg lka-scroll" role="radiogroup" aria-label={t('admin.lucky.issue.pickTitle')}>
           {(['comp', 'board', 'manual'] as Mode[]).map((m) => (
-            <button key={m} type="button" className={mode === m ? 'on' : ''} onClick={() => setMode(m)}>
-              {t(`admin.lucky.issue.${m === 'comp' ? 'fromComp' : m === 'board' ? 'fromBoard' : 'manual'}`)}</button>
+            <button key={m} type="button" role="radio" aria-checked={mode === m} className={mode === m ? 'is-on' : ''}
+              onClick={() => setMode(m)}>{t(`admin.lucky.issue.${MODE_KEY[m]}`)}</button>
           ))}
         </div>
+
         {mode !== 'manual' ? (
-          <>
+          <div className="mt-4 space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               {mode === 'comp' ? (
-                <select className="input py-1.5 text-sm" aria-label={t('admin.lucky.issue.pickComp')} value={compId} onChange={(e) => setCompId(e.target.value)}>
+                <select className="input w-full sm:w-72" aria-label={t('admin.lucky.issue.pickComp')} value={compId}
+                  onChange={(e) => setCompId(e.target.value)}>
                   <option value="">{t('admin.lucky.issue.pickComp')}</option>
                   {comps.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               ) : (
                 <>
-                  <select className="input py-1.5 text-sm" aria-label={t('admin.lucky.issue.fromBoard')} value={board}
+                  <select className="input w-auto" aria-label={t('admin.lucky.issue.fromBoard')} value={board}
                     onChange={(e) => setBoard(e.target.value as typeof board)}>
                     <option value="return_pct">{t('admin.lucky.issue.board.return_pct')}</option>
                     <option value="win_rate">{t('admin.lucky.issue.board.win_rate')}</option>
                   </select>
-                  <select className="input py-1.5 text-sm" aria-label={t('admin.lucky.issue.period')} value={periodKind}
+                  <select className="input w-auto" aria-label={t('admin.lucky.issue.period')} value={periodKind}
                     onChange={(e) => setPeriodKind(e.target.value as PeriodKind)}>
                     <option value="week">{t('admin.lucky.issue.week')}</option>
                     <option value="month">{t('admin.lucky.issue.month')}</option>
                     <option value="custom">{t('admin.lucky.issue.custom')}</option>
                   </select>
                   {periodKind === 'custom' && (
-                    <input className="input w-full py-1.5 text-sm sm:w-60" maxLength={16} placeholder={t('admin.lucky.issue.periodKey')}
-                      value={customPeriod} onChange={(e) => setCustomPeriod(e.target.value)} />
+                    <input className="input w-full sm:w-60" maxLength={16} placeholder={t('admin.lucky.issue.periodKey')}
+                      aria-label={t('admin.lucky.issue.periodKey')} value={customPeriod} onChange={(e) => setCustomPeriod(e.target.value)} />
                   )}
                 </>
               )}
             </div>
-            {tiers.map((tr, i) => (
-              <div key={i} className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
-                {t('admin.lucky.issue.from')}
-                <NumBox value={tr.fromRank} max={1000} label={t('admin.lucky.issue.from')} onCommit={(n) => patchTier(i, { fromRank: n })} />
-                {t('admin.lucky.issue.to')}
-                <NumBox value={tr.toRank} max={1000} label={t('admin.lucky.issue.to')} onCommit={(n) => patchTier(i, { toRank: n })} />
-                {t('admin.lucky.issue.count')}
-                <NumBox value={tr.count} max={100} label={t('admin.lucky.issue.count')} onCommit={(n) => patchTier(i, { count: n })} />
-                {tiers.length > 1 && (
-                  <button type="button" className="text-down" aria-label={t('admin.lucky.remove')}
-                    onClick={() => setTiers((xs) => xs.filter((_, j) => j !== i))}>✕</button>
-                )}
-              </div>
-            ))}
-            {tierErr && <p className="text-xs text-down">{t(`admin.lucky.issue.err.${tierErr}`)}</p>}
-            <div className="flex gap-2">
-              <button type="button" className="btn-ghost px-3 py-1 text-xs" disabled={tiers.length >= 20}
+            <div className="space-y-2">
+              {tiers.map((tr, i) => (
+                <div key={i} className="lka-tier">
+                  {t('admin.lucky.issue.from')}
+                  <NumBox value={tr.fromRank} max={1000} label={t('admin.lucky.issue.from')} onCommit={(n) => patchTier(i, { fromRank: n })} />
+                  {t('admin.lucky.issue.to')}
+                  <NumBox value={tr.toRank} max={1000} label={t('admin.lucky.issue.to')} onCommit={(n) => patchTier(i, { toRank: n })} />
+                  {t('admin.lucky.issue.count')}
+                  <NumBox value={tr.count} max={100} label={t('admin.lucky.issue.count')} onCommit={(n) => patchTier(i, { count: n })} />
+                  {tiers.length > 1 && (
+                    <button type="button" className="adm-icon-btn ml-auto" aria-label={t('admin.lucky.remove')} title={t('admin.lucky.remove')}
+                      onClick={() => setTiers((xs) => xs.filter((_, j) => j !== i))}><Cross /></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            {tierErr && <p className="lka-note is-down">{t(`admin.lucky.issue.err.${tierErr}`)}</p>}
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="adm-btn" disabled={tiers.length >= 20}
                 onClick={() => setTiers((xs) => {
                   const end = Math.max(0, ...xs.map((x) => x.toRank))
                   return [...xs, { fromRank: Math.min(1000, end + 1), toRank: Math.min(1000, end + 10), count: 1 }]
                 })}>
                 {t('admin.lucky.issue.addTier')}</button>
-              <button type="button" className="btn-primary px-3 py-1 text-xs disabled:opacity-40" disabled={loadBlocked}
+              <button type="button" className="adm-btn is-primary" disabled={loadBlocked}
                 onClick={() => run(async () => {
                   const src = mode === 'comp' ? { type: 'comp' as const, compId, tiers } : { type: 'board' as const, board, period, tiers }
                   const r = await adminApi.luckyIssuePreview(src)
@@ -162,55 +175,82 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
                   setMsg(r.rows.length ? t('admin.lucky.issue.loaded', { n: r.rows.length }) : t('admin.lucky.issue.none'))
                 })}>{t('admin.lucky.issue.load')}</button>
             </div>
-          </>
+          </div>
         ) : (
-          <div className="space-y-2">
+          <div className="mt-4 space-y-2">
             <div className="flex gap-2">
-              <input className="input min-w-0 flex-1 py-1.5 text-sm sm:w-64 sm:flex-none" placeholder={t('admin.lucky.issue.search')} value={q} onChange={(e) => setQ(e.target.value)}
+              <input className="input min-w-0 flex-1 sm:w-72 sm:flex-none" placeholder={t('admin.lucky.issue.search')}
+                aria-label={t('admin.lucky.issue.search')} value={q} onChange={(e) => setQ(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && q.trim() && !busy) search() }} />
-              <button type="button" className="btn-ghost px-3 py-1 text-xs" aria-label={t('admin.lucky.issue.search')}
-                disabled={busy || !q.trim()} onClick={search}>⌕</button>
+              <button type="button" className="adm-btn" aria-label={t('admin.lucky.issue.search')}
+                disabled={busy || !q.trim()} onClick={search}><SearchIcon /></button>
             </div>
-            {found && !found.length && <p className="text-xs text-neutral-500">{t('admin.lucky.issue.none')}</p>}
-            <ul className="space-y-1 text-sm">
-              {(found ?? []).map((u) => (
-                <li key={u.id} className="flex items-center justify-between gap-2">
-                  <span className="truncate text-neutral-200">{u.nickname || '—'} · {u.email}</span>
-                  <button type="button" className="btn-ghost px-2 py-0.5 text-xs" onClick={() => addManual(u)}>{t('admin.lucky.issue.add')}</button>
-                </li>
-              ))}
-            </ul>
+            {found && !found.length && <p className="lka-note">{t('admin.lucky.issue.none')}</p>}
+            {found && found.length > 0 && (
+              <ul className="lka-found">
+                {found.map((u) => (
+                  <li key={u.id}>
+                    <span className="lka-cell-user">
+                      <b>{u.nickname || '—'}</b>
+                      <span>{u.email}</span>
+                    </span>
+                    <button type="button" className="adm-btn" onClick={() => addManual(u)}>{t('admin.lucky.issue.add')}</button>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </section>
 
-      <section className="card space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <h3 className="font-display text-sm font-semibold text-neutral-100">{t('admin.lucky.issue.list')}</h3>
-          <select className="input py-1 text-xs" aria-label={t('admin.lucky.issue.dup')} value={dupMode} onChange={(e) => setDupMode(e.target.value as DupMode)}>
-            <option value="sum">{t('admin.lucky.issue.dupSum')}</option>
-            <option value="once">{t('admin.lucky.issue.dupOnce')}</option>
-          </select>
-          <span className="text-xs text-neutral-500">{t('admin.lucky.issue.limit')}</span>
-          {list.length > 0 && <button type="button" className="btn-ghost ml-auto px-2 py-0.5 text-xs" onClick={() => setList([])}>{t('admin.lucky.issue.clear')}</button>}
+      <section className="adm-card">
+        <div className="lka-card-head">
+          <div className="min-w-0">
+            <h4 className="lka-h">{t('admin.lucky.issue.list')}</h4>
+            <p className="lka-sub">{t('admin.lucky.issue.limit')}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="lka-field">
+              {t('admin.lucky.issue.dup')}
+              <select className="input w-auto" aria-label={t('admin.lucky.issue.dup')} value={dupMode}
+                onChange={(e) => setDupMode(e.target.value as DupMode)}>
+                <option value="sum">{t('admin.lucky.issue.dupSum')}</option>
+                <option value="once">{t('admin.lucky.issue.dupOnce')}</option>
+              </select>
+            </label>
+            {list.length > 0 && (
+              <button type="button" className="adm-btn is-quiet" onClick={() => setList([])}>{t('admin.lucky.issue.clear')}</button>
+            )}
+          </div>
         </div>
         {list.length === 0 ? (
-          <p className="text-xs text-neutral-500">{t('admin.lucky.issue.emptyList')}</p>
+          <p className="lka-note">{t('admin.lucky.issue.emptyList')}</p>
         ) : (
-          <div className="max-h-[360px] overflow-auto">
-            <table className="w-full text-sm">
+          <div className="lka-scroll-y">
+            <table className="adm-table">
+              <thead>
+                <tr>
+                  <th>{t('admin.lucky.issue.col.user')}</th>
+                  <th>{t('admin.lucky.issue.col.source')}</th>
+                  <th>{t('admin.lucky.issue.col.count')}</th>
+                  <th><span className="sr-only">{t('admin.lucky.remove')}</span></th>
+                </tr>
+              </thead>
               <tbody>
                 {list.map((x) => (
-                  <tr key={x.userId} className="border-b border-white/5 last:border-0">
-                    <td className="px-2 py-1.5"><div className="truncate text-neutral-100">{x.nickname || '—'}</div><div className="text-xs text-neutral-500">{x.email}</div></td>
-                    <td className="px-2 py-1.5 text-xs text-neutral-400">{x.label}{x.rank ? ` #${x.rank}` : ''}{x.dup && <span className="ml-1 text-amber-300">{t('admin.lucky.issue.dup')}</span>}</td>
-                    <td className="px-2 py-1.5">
+                  <tr key={x.userId}>
+                    <td className="lka-cell-user"><b>{x.nickname || '—'}</b><span>{x.email}</span></td>
+                    <td className="text-xs text-neutral-400">
+                      <span className="num">{x.label}{x.rank ? ` #${x.rank}` : ''}</span>
+                      {x.dup && <span className="adm-pill is-warn ml-1.5">{t('admin.lucky.issue.dup')}</span>}
+                    </td>
+                    <td>
                       <NumBox value={x.count} max={100} label={t('admin.lucky.issue.count')}
                         onCommit={(n) => setList((l) => l.map((y) => (y.userId === x.userId ? { ...y, count: n } : y)))} />
                     </td>
-                    <td className="px-2 py-1.5 text-right">
-                      <button type="button" className="text-xs text-down" aria-label={t('admin.lucky.remove')}
-                        onClick={() => setList((l) => l.filter((y) => y.userId !== x.userId))}>✕</button>
+                    <td className="text-right">
+                      <button type="button" className="adm-icon-btn" aria-label={t('admin.lucky.remove')} title={t('admin.lucky.remove')}
+                        onClick={() => setList((l) => l.filter((y) => y.userId !== x.userId))}><Cross /></button>
                     </td>
                   </tr>
                 ))}
@@ -218,11 +258,12 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
             </table>
           </div>
         )}
-        <div className="flex flex-wrap items-center gap-3">
-          <input className="input w-full py-1.5 text-sm sm:w-72" maxLength={80} placeholder={t('admin.lucky.issue.reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
-          <span className="text-xs text-neutral-400">{t('admin.lucky.issue.summary', tot)}</span>
-          {over && <span className="text-xs text-down">{t(`admin.lucky.issue.err.${over}`)}</span>}
-          <button type="button" className="btn-primary ml-auto px-3 py-1.5 text-sm disabled:opacity-40"
+        <div className="lka-slots-foot">
+          <input className="input w-full sm:w-72" maxLength={80} placeholder={t('admin.lucky.issue.reason')}
+            aria-label={t('admin.lucky.issue.reason')} value={reason} onChange={(e) => setReason(e.target.value)} />
+          <span className="lka-total num">{t('admin.lucky.issue.summary', tot)}</span>
+          {over && <span className="adm-pill is-down">{t(`admin.lucky.issue.err.${over}`)}</span>}
+          <button type="button" className="adm-btn is-primary ml-auto"
             disabled={busy || !reason.trim() || !list.length || over !== null}
             onClick={() => run(async () => {
               if (!window.confirm(t('admin.lucky.issue.confirmAsk', tot))) return
@@ -233,30 +274,68 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
               await loadBatches().catch(() => {})
             })}>{t('admin.lucky.issue.confirm')}</button>
         </div>
-        {msg && <p className="text-xs text-neutral-300" role="status">{msg}</p>}
+        {msg && <p className="lka-note mt-3" role="status">{msg}</p>}
       </section>
 
-      <section className="card p-4">
-        <h3 className="mb-2 font-display text-sm font-semibold text-neutral-100">{t('admin.lucky.issue.batches')}</h3>
-        {batches.length === 0 && <p className="text-xs text-neutral-500">{t('admin.lucky.issue.noBatches')}</p>}
-        <ul className="space-y-1.5 text-sm">
-          {batches.map((b) => (
-            <li key={b.id} className="flex flex-wrap items-center gap-3">
-              <span className="text-xs text-neutral-500">{fmtTime(b.createdAt)}</span>
-              <span className="text-neutral-200">{b.reason}</span>
-              <span className="font-mono text-xs text-neutral-400">{b.userCount} · {b.used}/{b.ticketCount}</span>
-              <button type="button" className="btn-ghost ml-auto px-2 py-0.5 text-xs" disabled={busy}
-                onClick={() => run(async () => {
-                  if (!window.confirm(t('admin.lucky.issue.revokeAsk', { reason: b.reason }))) return
-                  const r = await adminApi.luckyRevoke({ batchId: b.id, roundId: round.id })
-                  setMsg(t('admin.lucky.issue.revoked', { n: r.revoked })); onIssued()
-                  await loadBatches().catch(() => {})
-                })}>
-                {t('admin.lucky.issue.revoke')}</button>
-            </li>
-          ))}
-        </ul>
+      <section className="adm-card">
+        <div className="lka-card-head">
+          <h4 className="lka-h">{t('admin.lucky.issue.batches')}</h4>
+        </div>
+        {batches.length === 0 ? <p className="lka-note">{t('admin.lucky.issue.noBatches')}</p> : (
+          <div className="overflow-x-auto">
+            <table className="adm-table">
+              <thead>
+                <tr>
+                  <th>{t('admin.lucky.issue.col.time')}</th>
+                  <th>{t('admin.lucky.issue.col.reason')}</th>
+                  <th>{t('admin.lucky.issue.col.users')}</th>
+                  <th>{t('admin.lucky.issue.col.used')}</th>
+                  <th><span className="sr-only">{t('admin.lucky.issue.revoke')}</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {batches.map((b) => (
+                  <tr key={b.id}>
+                    <td className="num whitespace-nowrap text-xs text-neutral-400">{fmtTime(b.createdAt)}</td>
+                    <td className="min-w-[10rem] break-words text-neutral-200">{b.reason}</td>
+                    <td className="num text-neutral-300">{b.userCount}</td>
+                    <td className="num whitespace-nowrap text-neutral-300">{b.used} / {b.ticketCount}</td>
+                    <td className="text-right">
+                      <button type="button" className="adm-btn" disabled={busy}
+                        onClick={() => run(async () => {
+                          if (!window.confirm(t('admin.lucky.issue.revokeAsk', { reason: b.reason }))) return
+                          const r = await adminApi.luckyRevoke({ batchId: b.id, roundId: round.id })
+                          setMsg(t('admin.lucky.issue.revoked', { n: r.revoked })); onIssued()
+                          await loadBatches().catch(() => {})
+                        })}>
+                        {t('admin.lucky.issue.revoke')}</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
+  )
+}
+
+function Cross() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
+      aria-hidden>
+      <path d="M7 7l10 10M17 7L7 17" />
+    </svg>
+  )
+}
+
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
+      aria-hidden>
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M20 20l-4.2-4.2" />
+    </svg>
   )
 }

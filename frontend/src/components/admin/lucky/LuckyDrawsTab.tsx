@@ -14,6 +14,15 @@ import { fmtTime, localizeApiError } from '../../../api/utils'
 import { PAGE, clampOffset, csvFileName, csvQuery, drawsQuery, parseNote, type DrawsStatus } from './luckyDraws'
 
 const STATUSES: LuckyFulfillment[] = ['auto_done', 'pending', 'submitted', 'delivered', 'cancelled']
+// 要处理的是琥珀色，办完的是绿色，取消是红色，自动到账不着色。
+// Needs action reads amber, done reads green, cancelled red; automatic payouts stay neutral.
+const STATUS_PILL: Record<LuckyFulfillment, string> = {
+  auto_done: '',
+  pending: 'is-warn',
+  submitted: 'is-info',
+  delivered: 'is-up',
+  cancelled: 'is-down',
+}
 
 export default function LuckyDrawsTab({ mode, roundId, onChange }: { mode: 'all' | 'pending'; roundId?: string; onChange: () => void }) {
   const { t } = useTranslation()
@@ -70,52 +79,67 @@ export default function LuckyDrawsTab({ mode, roundId, onChange }: { mode: 'all'
     } catch (e) { setMsg(errText(e)) } finally { setBusy(false) }
   }
 
+  const cols = mode === 'pending' ? ['time', 'round', 'user', 'prize', 'status', 'claim'] : ['time', 'user', 'prize', 'status', 'claim']
   return (
-    <section className="card">
-      <div className="flex flex-wrap items-center gap-3 px-4 pt-4">
+    <section className="lka-draws space-y-3">
+      <div className="adm-toolbar">
         {mode === 'all' && (
-          <select className="input py-1.5 text-sm" value={status} aria-label={t('admin.lucky.draws.status')}
-            onChange={(e) => { setOffset(0); setMsg(''); setStatus(e.target.value as DrawsStatus) }}>
-            <option value="">{t('admin.lucky.draws.all')}</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{t(`lucky.status.${s}`)}</option>)}
-          </select>
+          <label className="adm-filter">
+            <span>{t('admin.lucky.draws.status')}</span>
+            <select className="input w-auto" value={status} aria-label={t('admin.lucky.draws.status')}
+              onChange={(e) => { setOffset(0); setMsg(''); setStatus(e.target.value as DrawsStatus) }}>
+              <option value="">{t('admin.lucky.draws.all')}</option>
+              {STATUSES.map((s) => <option key={s} value={s}>{t(`lucky.status.${s}`)}</option>)}
+            </select>
+          </label>
         )}
-        <span className="text-xs text-neutral-500">{data.total}</span>
-        <button type="button" className="btn-ghost ml-auto px-3 py-1 text-xs disabled:opacity-40" disabled={busy} onClick={exportCsv}>
-          {t('admin.lucky.draws.export')}
-        </button>
+        <div className="adm-toolbar-end">
+          <span className="adm-count num">{t('admin.lucky.draws.total', { n: data.total })}</span>
+          <button type="button" className="adm-btn" disabled={busy} onClick={exportCsv}>{t('admin.lucky.draws.export')}</button>
+        </div>
       </div>
-      {msg && <p className="px-4 pt-2 text-xs text-down" role="alert">{msg}</p>}
-      {data.draws.length === 0 ? <div className="py-10 text-center text-sm text-neutral-500">{t('admin.lucky.draws.empty')}</div> : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-white/5 text-xs text-neutral-500">
-              {(mode === 'pending' ? ['time', 'round', 'user', 'prize', 'status', 'claim'] : ['time', 'user', 'prize', 'status', 'claim']).map((k) => <th key={k} className="px-4 py-2 text-left font-normal">{t(`admin.lucky.draws.${k}`)}</th>)}
-              {mode === 'pending' && <th />}
-            </tr></thead>
+      {msg && <p className="lka-note is-down" role="alert">{msg}</p>}
+      {data.draws.length === 0 ? (
+        <div className="adm-card adm-empty"><p className="adm-empty-title">{t('admin.lucky.draws.empty')}</p></div>
+      ) : (
+        <div className="adm-table-wrap">
+          <table className="adm-table">
+            <thead>
+              <tr>
+                {cols.map((k) => <th key={k}>{t(`admin.lucky.draws.${k}`)}</th>)}
+                {mode === 'pending' && <th><span className="sr-only">{t('admin.lucky.draws.deliver')}</span></th>}
+              </tr>
+            </thead>
             <tbody>
               {data.draws.map((d) => (
-                <tr key={d.id} className="border-b border-white/5 align-top last:border-0">
-                  <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-neutral-400">{fmtTime(d.createdAt)}</td>
-                  {mode === 'pending' && <td className="max-w-[10rem] break-words px-4 py-2.5 text-xs text-neutral-300">{d.roundName}</td>}
-                  <td className="px-4 py-2.5"><div className="text-neutral-100">{d.user.nickname || '—'}</div><div className="text-xs text-neutral-500">{d.user.email}</div></td>
-                  <td className="px-4 py-2.5 text-neutral-200">{d.prize.name}</td>
-                  <td className="whitespace-nowrap px-4 py-2.5 text-xs text-neutral-300">
-                    {d.soldOut ? <span className="text-amber-300">{t('admin.lucky.draws.soldOut')}</span> : t(`lucky.status.${d.fulfillmentStatus}`)}
+                <tr key={d.id}>
+                  <td className="num whitespace-nowrap text-xs text-neutral-400">{fmtTime(d.createdAt)}</td>
+                  {mode === 'pending' && <td className="max-w-[10rem] break-words text-xs text-neutral-300">{d.roundName}</td>}
+                  <td className="lka-cell-user"><b>{d.user.nickname || '—'}</b><span>{d.user.email}</span></td>
+                  <td className="min-w-[7rem] text-neutral-200">{d.prize.name}</td>
+                  <td className="whitespace-nowrap">
+                    {d.soldOut
+                      ? <span className="adm-pill is-warn">{t('admin.lucky.draws.soldOut')}</span>
+                      : <span className={`adm-pill ${STATUS_PILL[d.fulfillmentStatus] ?? ''}`}>{t(`lucky.status.${d.fulfillmentStatus}`)}</span>}
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-neutral-300">
-                    {d.claimInfo && <div className="whitespace-pre-wrap">{d.claimInfo}</div>}
+                  <td className="min-w-[10rem] text-xs text-neutral-300">
+                    {d.claimInfo && <div className="whitespace-pre-wrap break-words">{d.claimInfo}</div>}
                     {d.supportTicketId && (
                       // 用 Link 而不是 <a href>：Capacitor App 里整页刷新会丢状态
                       // Link, not a raw anchor: a full reload loses state in the Capacitor app
-                      <Link className="text-prism-200 hover:underline" to={`/admin/tickets?ticket=${encodeURIComponent(d.supportTicketId)}`}>{t('admin.lucky.draws.openTicket')}</Link>
+                      <Link className="adm-link-btn" to={`/admin/tickets?ticket=${encodeURIComponent(d.supportTicketId)}`}>
+                        {t('admin.lucky.draws.openTicket')}</Link>
                     )}
-                    {d.adminNote && <div className="text-neutral-500">{d.adminNote}</div>}
+                    {d.adminNote && <div className="mt-1 break-words text-neutral-500">{d.adminNote}</div>}
                   </td>
                   {mode === 'pending' && (
-                    <td className="whitespace-nowrap px-4 py-2.5 text-right">
-                      <button type="button" className="btn-ghost px-2 py-0.5 text-xs disabled:opacity-40" disabled={busy} onClick={() => act(d, 'deliver')}>{t('admin.lucky.draws.deliver')}</button>
-                      <button type="button" className="ml-1 rounded px-2 py-0.5 text-xs text-down hover:bg-white/10 disabled:opacity-40" disabled={busy} onClick={() => act(d, 'cancel')}>{t('admin.lucky.draws.cancel')}</button>
+                    <td className="whitespace-nowrap text-right">
+                      <div className="inline-flex gap-1.5">
+                        <button type="button" className="adm-btn" disabled={busy} onClick={() => act(d, 'deliver')}>
+                          {t('admin.lucky.draws.deliver')}</button>
+                        <button type="button" className="adm-btn is-danger" disabled={busy} onClick={() => act(d, 'cancel')}>
+                          {t('admin.lucky.draws.cancel')}</button>
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -124,10 +148,24 @@ export default function LuckyDrawsTab({ mode, roundId, onChange }: { mode: 'all'
           </table>
         </div>
       )}
-      <div className="flex justify-end gap-2 p-3">
-        <button type="button" className="btn-ghost px-2.5 py-1 disabled:opacity-40" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>‹</button>
-        <button type="button" className="btn-ghost px-2.5 py-1 disabled:opacity-40" disabled={offset + PAGE >= data.total} onClick={() => setOffset(offset + PAGE)}>›</button>
-      </div>
+      {data.total > PAGE && (
+        <div className="lka-pager">
+          <button type="button" className="adm-icon-btn" disabled={offset === 0} aria-label={t('admin.lucky.draws.prev')}
+            title={t('admin.lucky.draws.prev')} onClick={() => setOffset(Math.max(0, offset - PAGE))}><Chevron left /></button>
+          <span className="adm-count num">{offset + 1}–{Math.min(offset + PAGE, data.total)}</span>
+          <button type="button" className="adm-icon-btn" disabled={offset + PAGE >= data.total} aria-label={t('admin.lucky.draws.next')}
+            title={t('admin.lucky.draws.next')} onClick={() => setOffset(offset + PAGE)}><Chevron /></button>
+        </div>
+      )}
     </section>
+  )
+}
+
+function Chevron({ left = false }: { left?: boolean }) {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
+      strokeLinejoin="round" aria-hidden>
+      <path d={left ? 'M15 6l-6 6 6 6' : 'M9 6l6 6-6 6'} />
+    </svg>
   )
 }

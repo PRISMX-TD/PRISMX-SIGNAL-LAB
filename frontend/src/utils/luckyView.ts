@@ -36,18 +36,59 @@ export function withTicketsLeft(state: LuckyState, roundId: string, left: number
   }
 }
 
-/** 「我的奖品」：谢谢参与和「已抽完未中奖」都不算中奖 / "My prizes": neither "thanks" nor a sold-out miss is a win. */
-export const wonDraws = (draws: LuckyDraw[]): LuckyDraw[] => draws.filter((d) => d.prize.kind !== 'none' && !d.soldOut)
+/**
+ * 「我的奖品」：谢谢参与、「已抽完未中奖」都不算；「再来一次」只是退回一张券（票夹里能看到），也不列。
+ * "My prizes": neither "thanks" nor a sold-out miss counts, and "spin again" only refunds a ticket (shown in
+ * the wallet), so it is left out too.
+ */
+export const wonDraws = (draws: LuckyDraw[]): LuckyDraw[] =>
+  draws.filter((d) => d.prize.kind !== 'none' && d.prize.kind !== 'retry' && !d.soldOut)
 
-/** 结果弹框标题用的文案键 / The i18n key (and params) for the result modal's title. */
-export function resultKey(draw: Pick<LuckyDraw, 'prize' | 'soldOut'>): { key: string; params?: Record<string, unknown> } {
-  if (draw.soldOut) return { key: 'lucky.result.soldOut' }
+// 结果揭晓卡的文案：中奖（实物 / PRO）、再来一次、没中（谢谢参与 / 已抽完）三种语气。
+// 实物奖品的大标题直接用奖品名（管理员填的，不翻译）；其余走文案键。
+// The reveal card's copy in three tones: a win (custom / PRO), spin again, or a miss ("thanks" or a
+// sold-out slot). A custom prize's headline is the prize name itself (admin-written, untranslated).
+export type RevealTone = 'win' | 'retry' | 'miss'
+export interface RevealCopy {
+  tone: RevealTone
+  eyebrowKey?: string
+  titleKey?: string
+  titleText?: string
+  subKey?: string
+  params?: Record<string, unknown>
+}
+
+export function revealCopy(draw: Pick<LuckyDraw, 'prize' | 'soldOut'>): RevealCopy {
+  if (draw.soldOut) return { tone: 'miss', titleKey: 'lucky.reveal.missTitle', subKey: 'lucky.reveal.soldOut' }
   switch (draw.prize.kind) {
-    case 'none': return { key: 'lucky.result.none' }
-    case 'retry': return { key: 'lucky.result.retry' }
-    case 'pro_days': return { key: 'lucky.result.proDays', params: { n: draw.prize.proDays } }
-    default: return { key: 'lucky.result.custom', params: { name: draw.prize.name } }
+    case 'none': return { tone: 'miss', titleKey: 'lucky.reveal.missTitle', subKey: 'lucky.reveal.none', params: { name: draw.prize.name } }
+    case 'retry': return { tone: 'retry', titleKey: 'lucky.reveal.retryTitle', subKey: 'lucky.reveal.retry' }
+    case 'pro_days':
+      return { tone: 'win', eyebrowKey: 'lucky.reveal.won', titleKey: 'lucky.reveal.proTitle', subKey: 'lucky.reveal.proSub', params: { n: draw.prize.proDays } }
+    default: return { tone: 'win', eyebrowKey: 'lucky.reveal.won', titleText: draw.prize.name }
   }
+}
+
+/**
+ * 转盘下面那句鼓励的话。连着没中时三句轮换，不重复同一句；绝不暗示「越抽越容易中」。
+ * The encouraging line under the wheel. Consecutive misses rotate through three lines so the same one
+ * never repeats twice in a row; nothing ever implies the odds improve with more spins.
+ */
+export type Outcome = RevealTone | null
+export function cheerKey(s: {
+  phase: 'upcoming' | 'active' | 'ended'; spinning: boolean; unused: number; hadTickets: boolean
+  last: Outcome; missStreak: number
+}): string {
+  if (s.phase !== 'active') return 'lucky.cheer.upcoming'
+  if (s.spinning) return 'lucky.cheer.spinning'
+  if (s.unused <= 0) {
+    if (s.last === 'win') return 'lucky.cheer.winOut'
+    return s.hadTickets ? 'lucky.cheer.out' : 'lucky.cheer.none'
+  }
+  if (s.last === 'win') return 'lucky.cheer.win'
+  if (s.last === 'retry') return 'lucky.cheer.retry'
+  if (s.last === 'miss') return `lucky.cheer.miss${((Math.max(1, s.missStreak) - 1) % 3) + 1}`
+  return 'lucky.cheer.ready'
 }
 
 // 记住上次选的期：localStorage 在隐私模式 / 被禁用时会抛错，读写都包 try/catch，失败就当没记住。

@@ -1,11 +1,14 @@
-// 后台「增长 → 幸运轮盘」（v2 多期）。顶部是期列表：期名、时间（UTC+8）、状态、模式、「用户端显示」开关、
-// 统计（已发券 / 已用 / 待发奖），每期可编辑、结束、删除；右上「新建一期」。选中一期后下方是它的
-// 「奖品设置」「发券」「抽奖记录」；「待发奖」是跨期的全局队列。
+// 后台「增长 → 幸运轮盘」（v2 多期）。最上面四格 KPI：进行中的期、已发券、已使用、待发奖（跨期合计，点它直接
+// 去「待发奖」）。下面是期列表卡：每期一块，期名、状态、模式、时间（UTC+8）、已用 / 已发的细条，底栏是
+// 「用户端显示」开关和编辑 / 结束 / 删除；已结束的期默认收起。选中一期后显示期名和页签：「奖品设置」「发券」
+// 「抽奖记录」，「待发奖」是跨期的全局队列。
 // 管理员不受显示开关限制：没打开显示的期管理员在用户端也能看到、能抽（内部测试用）。
-// Admin "Growth -> Lucky wheel" (v2, several rounds). The top lists rounds: name, window (UTC+8),
-// phase, mode, the "show to users" switch and stats, with edit / end / delete per round and "New round"
-// at the top right. Selecting a round shows its prize settings / issue / draws tabs below; "Pending" is
-// the global cross-round queue. Admins bypass the visible switch (they can test hidden rounds).
+// Admin "Growth -> Lucky wheel" (v2, several rounds). On top, four KPIs: active rounds, tickets issued,
+// tickets used and pending prizes (cross-round; clicking it opens the Pending tab). Below, the round list:
+// one tile per round with name, phase, mode, window (UTC+8) and a used / issued meter, and a footer with
+// the "show to users" switch and edit / end / delete; ended rounds start collapsed. Selecting a round shows
+// its name and tabs: prize settings / issue / draws; "Pending" is the global cross-round queue. Admins
+// bypass the visible switch (they can test hidden rounds).
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
@@ -16,15 +19,16 @@ import LuckyDrawsTab from './LuckyDrawsTab'
 import LuckyIssueTab from './LuckyIssueTab'
 import { DeleteRoundSheet, RoundFormSheet } from './LuckyRoundSheets'
 import LuckySettingsTab from './LuckySettingsTab'
-import { keepSelection, replaceRound, splitRounds } from './luckyRounds'
+import { keepSelection, replaceRound, roundKpis, splitRounds, usedRatio } from './luckyRounds'
+import './luckyAdmin.css'
 
 type Tab = 'prizes' | 'issue' | 'draws' | 'pending'
 type Sheet = { kind: 'create' } | { kind: 'edit'; round: LuckyRoundAdmin } | { kind: 'delete'; round: LuckyRoundAdmin } | null
 
-const PHASE_TONE: Record<LuckyRoundAdmin['phase'], string> = {
-  upcoming: 'bg-sky-500/15 text-sky-300',
-  active: 'bg-up/15 text-up',
-  ended: 'bg-white/10 text-neutral-400',
+const PHASE_PILL: Record<LuckyRoundAdmin['phase'], string> = {
+  upcoming: 'is-info',
+  active: 'is-up',
+  ended: '',
 }
 
 export default function LuckyWheelPanel() {
@@ -73,85 +77,122 @@ export default function LuckyWheelPanel() {
     } catch (e) { setErr(errText(e)) } finally { setBusyId(null) }
   }
 
-  if (!rounds) return <div className="card p-6 text-sm text-neutral-500">{err || t('common.loading')}</div>
+  if (!rounds) return <div className="adm-card text-sm text-neutral-500">{err || t('common.loading')}</div>
   const { open, ended } = splitRounds(rounds)
+  const kpi = roundKpis(rounds)
   const roundTabs: Tab[] = selected ? ['prizes', 'issue', 'draws', 'pending'] : ['pending']
   const activeTab: Tab = selected ? tab : 'pending'
+  const goTab = (k: Tab) => { if (k !== activeTab) guard(() => setTab(k)) }
 
-  const card = (r: LuckyRoundAdmin) => {
+  const tile = (r: LuckyRoundAdmin) => {
     const on = r.id === selId
     const isEnded = r.phase === 'ended'
     return (
-      <li key={r.id} className={`min-w-0 rounded-lg border p-3 ${on ? 'border-prism-500/60 bg-prism-500/10' : 'border-white/10 bg-white/[0.03]'}`}>
-        <div className="flex items-start gap-3">
-          <button type="button" className="min-w-0 flex-1 text-left" aria-pressed={on}
-            onClick={() => { if (!on) guard(() => setSelId(r.id)) }}>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="break-all font-semibold text-neutral-100">{r.name}</span>
-              <span className={`rounded px-1.5 py-0.5 text-[11px] ${PHASE_TONE[r.phase]}`}>{t(`admin.lucky.phase.${r.phase}`)}</span>
-              <span className="rounded bg-white/5 px-1.5 py-0.5 text-[11px] text-neutral-300">{t(`admin.lucky.mode.${r.mode}`)}</span>
-            </div>
-            <div className="mt-1 break-words text-xs text-neutral-400">{fmtTime(r.startsAt)} ～ {fmtTime(r.endsAt)}</div>
-            <div className="mt-0.5 text-xs text-neutral-500">
-              {t('admin.lucky.round.stats', { issued: r.stats.issued, used: r.stats.used, pending: r.stats.pendingClaims })}
-            </div>
-          </button>
+      <li key={r.id} className={`lka-round ${on ? 'is-on' : ''} ${isEnded && !on ? 'is-ended' : ''}`}>
+        <button type="button" className="lka-round-main" aria-pressed={on}
+          onClick={() => { if (!on) guard(() => setSelId(r.id)) }}>
+          <span className="lka-round-name">{r.name}</span>
+          <span className="lka-round-pills">
+            <span className={`adm-pill ${PHASE_PILL[r.phase]}`}>{t(`admin.lucky.phase.${r.phase}`)}</span>
+            <span className="adm-pill">{t(`admin.lucky.mode.${r.mode}`)}</span>
+            {r.stats.pendingClaims > 0 && (
+              <span className="adm-pill is-warn num">{t('admin.lucky.round.pending', { n: r.stats.pendingClaims })}</span>
+            )}
+          </span>
+          <span className="lka-round-time num block">{fmtTime(r.startsAt)} ～ {fmtTime(r.endsAt)}</span>
+          <span className="lka-meter" aria-hidden><i style={{ width: `${usedRatio(r.stats) * 100}%` }} /></span>
+          <span className="lka-round-stats num block">{t('admin.lucky.round.meterLabel', { used: r.stats.used, issued: r.stats.issued })}</span>
+        </button>
+        <div className="lka-round-foot">
           {!isEnded && (
-            <label className="flex shrink-0 flex-col items-end gap-1 text-[11px] text-neutral-400">
+            <label className="lka-vis">
               <Switch checked={r.visible} busy={busyId === r.id} onChange={(v) => void setVisible(r, v)}
                 aria-label={t('admin.lucky.round.visibleFor', { name: r.name })} />
               {t(r.visible ? 'admin.lucky.round.shown' : 'admin.lucky.round.hidden')}
             </label>
           )}
-        </div>
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {!isEnded && (
-            <>
-              <button type="button" className="btn-ghost px-2.5 py-1 text-xs" onClick={() => setSheet({ kind: 'edit', round: r })}>
-                {t('admin.lucky.round.edit')}</button>
-              <button type="button" className="btn-ghost px-2.5 py-1 text-xs text-amber-300 disabled:opacity-40" disabled={busyId === r.id}
-                onClick={() => void endRound(r)}>{t('admin.lucky.endNow')}</button>
-            </>
-          )}
-          <button type="button" className="rounded px-2.5 py-1 text-xs text-down hover:bg-white/10"
-            onClick={() => setSheet({ kind: 'delete', round: r })}>{t('admin.lucky.round.delete')}</button>
+          <div className="lka-round-actions">
+            {!isEnded && (
+              <>
+                <button type="button" className="lka-act" onClick={() => setSheet({ kind: 'edit', round: r })}>
+                  {t('admin.lucky.round.edit')}</button>
+                <button type="button" className="lka-act is-warn" disabled={busyId === r.id}
+                  onClick={() => void endRound(r)}>{t('admin.lucky.endNow')}</button>
+              </>
+            )}
+            <button type="button" className="lka-act is-down" onClick={() => setSheet({ kind: 'delete', round: r })}>
+              {t('admin.lucky.round.delete')}</button>
+          </div>
         </div>
       </li>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <section className="card space-y-3 p-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-display text-sm font-semibold text-neutral-100">{t('admin.lucky.round.list')}</h3>
-          <span className="text-xs text-neutral-500">{t('admin.lucky.round.adminSees')}</span>
-          <button type="button" className="btn-primary ml-auto px-3 py-1.5 text-sm" onClick={() => setSheet({ kind: 'create' })}>
+    <div className="lka space-y-5">
+      <div className="adm-kpis is-quad">
+        <div className="adm-kpi">
+          <span className="adm-kpi-label">{t('admin.lucky.kpi.active')}</span>
+          <span className="adm-kpi-value num">{kpi.active}</span>
+          <span className="adm-kpi-foot lka-note">{t('admin.lucky.kpi.upcomingFoot', { n: kpi.upcoming })}</span>
+        </div>
+        <div className="adm-kpi">
+          <span className="adm-kpi-label">{t('admin.lucky.kpi.issued')}</span>
+          <span className="adm-kpi-value num">{kpi.issued}</span>
+        </div>
+        <div className="adm-kpi">
+          <span className="adm-kpi-label">{t('admin.lucky.kpi.used')}</span>
+          <span className="adm-kpi-value num">{kpi.used}</span>
+          <span className="adm-kpi-foot lka-note">{t('admin.lucky.kpi.usedFoot', { pct: Math.round(usedRatio(kpi) * 100) })}</span>
+        </div>
+        <button type="button" className={`adm-kpi adm-kpi-btn ${activeTab === 'pending' ? 'is-on' : ''}`}
+          aria-pressed={activeTab === 'pending'} onClick={() => goTab('pending')}>
+          <span className="adm-kpi-label">
+            {pending > 0 && <i className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden />}
+            {t('admin.lucky.kpi.pending')}
+          </span>
+          <span className={`adm-kpi-value num ${pending > 0 ? 'is-warn' : ''}`}>{pending}</span>
+          <span className="adm-kpi-foot lka-note">{t('admin.lucky.kpi.pendingFoot')}</span>
+        </button>
+      </div>
+
+      <section className="adm-card">
+        <div className="lka-card-head">
+          <div className="min-w-0">
+            <h3 className="lka-h">{t('admin.lucky.round.list')}</h3>
+            <p className="lka-sub">{t('admin.lucky.round.adminSees')}</p>
+          </div>
+          <button type="button" className="adm-btn is-primary" onClick={() => setSheet({ kind: 'create' })}>
             {t('admin.lucky.round.new')}</button>
         </div>
-        {rounds.length === 0 && <p className="py-4 text-center text-sm text-neutral-500">{t('admin.lucky.round.empty')}</p>}
-        {open.length > 0 && <ul className="grid gap-3 md:grid-cols-2">{open.map(card)}</ul>}
+        {rounds.length === 0 && (
+          <div className="adm-empty"><p className="adm-empty-title">{t('admin.lucky.round.empty')}</p></div>
+        )}
+        {open.length > 0 && <ul className="lka-rounds">{open.map(tile)}</ul>}
         {ended.length > 0 && (
-          <div className="space-y-2">
-            <button type="button" className="text-xs text-neutral-400 hover:text-neutral-200" aria-expanded={showEnded}
-              onClick={() => setShowEnded((v) => !v)}>
+          <div className={open.length > 0 ? 'mt-4' : ''}>
+            <button type="button" className="adm-link-btn" aria-expanded={showEnded} onClick={() => setShowEnded((v) => !v)}>
               {t(showEnded ? 'admin.lucky.round.hideEnded' : 'admin.lucky.round.showEnded', { n: ended.length })}</button>
             {(showEnded || selected?.phase === 'ended') && (
-              <ul className="grid gap-3 md:grid-cols-2">{(showEnded ? ended : ended.filter((r) => r.id === selId)).map(card)}</ul>
+              <ul className="lka-rounds mt-3">{(showEnded ? ended : ended.filter((r) => r.id === selId)).map(tile)}</ul>
             )}
           </div>
         )}
-        {err && <p className="text-xs text-down" role="alert">{err}</p>}
-        {msg && <p className="text-xs text-neutral-300" role="status">{msg}</p>}
+        {err && <p className="lka-note is-down mt-3" role="alert">{err}</p>}
+        {msg && <p className="lka-note mt-3" role="status">{msg}</p>}
       </section>
 
-      {selected && <p className="break-words text-sm text-neutral-300">{t('admin.lucky.round.current', { name: selected.name })}</p>}
-      <div className="seg-tabs w-full sm:w-fit" role="tablist">
-        {roundTabs.map((k) => (
-          <button key={k} type="button" role="tab" aria-selected={activeTab === k} className={activeTab === k ? 'on' : ''}
-            onClick={() => { if (k !== activeTab) guard(() => setTab(k)) }}>
-            {t(`admin.lucky.tab.${k}`)}{k === 'pending' && pending > 0 ? ` · ${pending}` : ''}</button>
-        ))}
+      <div>
+        {selected && <h3 className="lka-sel-name">{selected.name}</h3>}
+        <div className="adm-tabs lka-tabs no-scrollbar" role="tablist">
+          {roundTabs.map((k) => (
+            <button key={k} type="button" role="tab" aria-selected={activeTab === k} className={`adm-tab ${activeTab === k ? 'is-active' : ''}`}
+              onClick={() => goTab(k)}>
+              {t(`admin.lucky.tab.${k}`)}
+              {k === 'pending' && pending > 0 && <span className="adm-pill is-warn num">{pending}</span>}
+            </button>
+          ))}
+        </div>
       </div>
       {selected && activeTab === 'prizes' && (
         <LuckySettingsTab key={selected.id} round={selected} onDirty={setDirty} onSaved={update} />

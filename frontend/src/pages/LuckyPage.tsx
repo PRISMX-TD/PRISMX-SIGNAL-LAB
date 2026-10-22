@@ -1,24 +1,39 @@
-// 幸运轮盘 v2（rev 46）：可以同时有好几期。没有期 → 「暂未开放」卡片 + 我的奖品；一期 → 直接显示；
-// 多期 → 顶部切换（期名 + 该期未用券数），记住上次选的期。每期：开放时间 + 作废说明、转盘、
-// 奖品一览（不显示概率 / 份数）、我的抽奖券；我的奖品跨期列出。
-// 结果由后端决定：点「抽奖」→ POST /lucky-wheel/spin {roundId} → 按返回的 slotIndex 转过去 → 停下再弹结果。
-// 按概率模式抽中已抽完的格：转盘照样停在那一格，弹框说「这份奖品已经被抽完了，本次未中奖」。
-// Lucky wheel page (v2, rev 46). Several rounds can run at once: none -> the "not open" card plus My
-// prizes; one -> shown directly; several -> a switcher (round name + unused-ticket badge) that remembers
-// the last pick. The backend picks the result; we spin to its slotIndex, then show it. A prob-mode hit
-// on a sold-out slot still stops on that slot and the modal says it was a miss.
-import { useEffect, useId, useRef, useState } from 'react'
+// 幸运轮盘页（v2 多期，2026-10-22 重做界面）。可以同时有好几期：没有期 → 「暂未开放」+ 我的奖品；
+// 一期 → 直接显示；多期 → 顶部切换（期名 + 该期未用券数），记住上次选的期。
+// 左边是舞台：期名、开放时间、倒计时，转盘（中间的按钮就是抽奖键），下面是券叠、一句随结果变化的
+// 鼓励的话和音效开关。右边是票夹（我的抽奖券）、奖品一览、我的奖品（跨期）。
+// 结果由后端决定：点按钮 → POST /lucky-wheel/spin {roundId} → 转到返回的 slotIndex → 停下再弹揭晓卡。
+// 按概率模式抽中已抽完的格：转盘照样停在那一格，揭晓卡说「这份奖品刚刚被抽完了」。
+// 节日（站内节日日历，用户可在账户设置里关掉）只换皮：灯珠 / 轮缘 / 指针配色、问候语、中奖彩纸的图案。
+// Lucky wheel page (v2, rounds side by side; UI redone 2026-10-22). None -> "not open" plus My prizes;
+// one -> shown directly; several -> a switcher (name + unused-ticket badge) that remembers the pick.
+// Left: the stage (name, window, countdown, the wheel whose hub is the spin button, then the ticket
+// stack, an encouraging line that follows the outcome, and the sound toggle). Right: the ticket wallet,
+// the prize list and the cross-round My prizes. The backend picks the result; we spin to its slotIndex,
+// then show the reveal card. A festival (the site calendar; users can switch it off) only reskins:
+// bulb / rim / pointer colours, a greeting and the confetti pieces.
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { luckyApi } from '../api/client'
 import type { LuckyDraw, LuckySpinResult, LuckyState } from '../api/luckyTypes'
-import { fmtTime, localizeApiError } from '../api/utils'
-import LuckyWheel, { SPIN_MS, prefersReducedMotion } from '../components/lucky/LuckyWheel'
+import { localizeApiError } from '../api/utils'
+import { FestivalEmptyMini } from '../festival/FestivalDecor'
+import { useFestivalOptional } from '../festival/FestivalProvider'
+import LuckyWheel, { type LuckyWheelHandle } from '../components/lucky/LuckyWheel'
+import { MyPrizes, PrizeList } from '../components/lucky/PrizeBoard'
+import ResultReveal from '../components/lucky/ResultReveal'
+import TicketWallet from '../components/lucky/TicketWallet'
+import { playMiss, playRetry, playWin, primeAudio, setSoundEnabled, soundEnabled } from '../components/lucky/luckySound'
+import { slotColor } from '../components/lucky/wheelArt'
 import { useAuth } from '../store/auth'
-import { countdownParts } from '../utils/luckyCountdown'
+import { countdownParts, fmtWindow } from '../utils/luckyCountdown'
 import { resolveSlot } from '../utils/luckySlot'
-import { isWheelClosed, openRounds, pickRound, readLastRound, resultKey, withTicketsLeft, wonDraws, writeLastRound } from '../utils/luckyView'
-import { newRequestId, targetRotation } from '../utils/luckyWheel'
+import {
+  cheerKey, isWheelClosed, openRounds, pickRound, readLastRound, revealCopy, withTicketsLeft, writeLastRound, type Outcome,
+} from '../utils/luckyView'
+import { newRequestId } from '../utils/luckyWheel'
+import '../components/lucky/luckyPage.css'
 
 function useCountdown(to: string | undefined) {
   const [now, setNow] = useState(() => Date.now())
@@ -29,29 +44,37 @@ function useCountdown(to: string | undefined) {
   return countdownParts(to, now)
 }
 
+const pad = (n: number) => (n < 10 ? `0${n}` : String(n))
+
+type Reveal = { draw: LuckySpinResult; color: string }
+
 export default function LuckyPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { refreshUser } = useAuth()
+  const festival = useFestivalOptional()?.festival ?? null
   const [state, setState] = useState<LuckyState | null>(null)
   const [draws, setDraws] = useState<LuckyDraw[]>([])
   const [err, setErr] = useState('')
-  const [rotation, setRotation] = useState(0)
   const [spinning, setSpinning] = useState(false)
-  const [result, setResult] = useState<LuckySpinResult | null>(null)
+  const [reveal, setReveal] = useState<Reveal | null>(null)
+  const [sound, setSound] = useState(soundEnabled)
+  const [last, setLast] = useState<Outcome>(null)
+  const [missStreak, setMissStreak] = useState(0)
+  // 每抽一次 +1：券叠顶上那张飞走一次 / bumped per spin: the top ticket on the stack flies off once
+  const [tear, setTear] = useState(0)
   // 上次选的期（localStorage，读不到就是 null）/ the last picked round (null when storage is unavailable)
   const [selId, setSelId] = useState<string | null>(() => readLastRound())
-  const timer = useRef<number>()
+  const wheel = useRef<LuckyWheelHandle>(null)
   // 同步锁：state 更新是异步的，连点两下时 spinning 还没变 true，靠它挡住第二个请求。
   // Synchronous lock: `spinning` only flips after a render, so a fast double-click would slip a second
   // request through; this ref closes that gap.
   const spinLock = useRef(false)
-  // 抽奖请求发出到动画结束之间为 true：中途离开页面时要补一次 refreshUser，否则首页券数是旧的。
-  // True from sending the request until the animation ends; if the user leaves in between we still
-  // refresh the account so the dashboard ticket count isn't stale.
-  const inFlight = useRef(false)
-  const refreshRef = useRef(refreshUser)
-  refreshRef.current = refreshUser
+  const alive = useRef(true)
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
+  }, [])
   const errText = (e: unknown) => (e instanceof Error ? localizeApiError(e.message) : t('common.error'))
 
   const load = () => Promise.all([luckyApi.state(), luckyApi.draws()])
@@ -59,10 +82,6 @@ export default function LuckyPage() {
     .catch((e) => setErr(errText(e)))
   useEffect(() => {
     void load()
-    return () => {
-      window.clearTimeout(timer.current)
-      if (inFlight.current) void refreshRef.current?.()
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -76,7 +95,6 @@ export default function LuckyPage() {
   // 万一服务器时钟略慢、阶段还没翻，也不会每秒重拉。切到另一期时按那一期的时间算。
   // When the countdown reaches zero (start / end) reload once so the phase flips by itself; once per
   // target time, so a server clock a hair behind can't turn this into a once-a-second refetch.
-  // Switching rounds switches the target too.
   const reloadedFor = useRef<string | null>(null)
   const cdDone = !!cd?.done
   useEffect(() => {
@@ -92,22 +110,41 @@ export default function LuckyPage() {
     setSelId(id)
     writeLastRound(id)
     setErr('')
+    setLast(null)
+    setMissStreak(0)
+  }
+
+  const toggleSound = () => {
+    setSound((on) => {
+      setSoundEnabled(!on)
+      if (!on) primeAudio()
+      return !on
+    })
   }
 
   const onSpin = async () => {
     if (!state || !cur || spinning || spinLock.current) return
     const roundId = cur.round.id
     spinLock.current = true
-    inFlight.current = true
+    // 必须在点击这一下里唤醒声音（iOS / Chrome 的自动播放规则）/ wake audio inside the tap (autoplay rules)
+    primeAudio()
     setErr('')
+    setReveal(null)
     setSpinning(true)
-    const finish = (r: LuckySpinResult) => {
+    setTear((n) => n + 1)
+    const finish = (r: LuckySpinResult, color: string) => {
+      const tone = revealCopy(r).tone
       setSpinning(false)
-      setResult(r)
+      setReveal({ draw: r, color })
+      setLast(tone)
+      setMissStreak((n) => (tone === 'miss' ? n + 1 : 0))
+      // 转到一半离开了这页就不出声，免得结果音在别的页面响 / left mid-spin: no result sound on another page
+      if (alive.current) {
+        if (tone === 'win') { wheel.current?.celebrate(); playWin() } else if (tone === 'retry') playRetry(); else playMiss()
+      }
       setState((s) => s && withTicketsLeft(s, r.round?.id ?? roundId, r.ticketsLeft))
       void luckyApi.draws().then((d) => setDraws(d.draws)).catch(() => {})
       void refreshUser?.()
-      inFlight.current = false
       spinLock.current = false
     }
     try {
@@ -127,243 +164,160 @@ export default function LuckyPage() {
           slot = resolveSlot(prizes, r.prize.id, r.slotIndex)
         } catch { /* 拉不到就按现有列表尽力而为 / best effort with what we have */ }
       }
-      if (slot.index < 0) { finish(r); return }
-      const idx = slot.index
-      const n = prizes.length
-      setRotation((c) => targetRotation(c, idx, n, Math.random() * 2 - 1))
-      timer.current = window.setTimeout(() => finish(r), prefersReducedMotion() ? 200 : SPIN_MS + 200)
+      const color = slotColor(r.prize.color, Math.max(slot.index, 0))
+      // 页面中途被卸掉时 spinTo 会立刻 resolve，finish 照常补拉账户（首页券数不会停在旧值）。
+      // If the page unmounts mid-spin, spinTo resolves at once and finish still refreshes the account.
+      // 格数按这份（可能刚拉的）列表传进去：setState(fresh) 还没重画，转盘自己记的仍是旧格数。
+      // Aim with this (possibly just fetched) list's count: setState(fresh) hasn't re-rendered the wheel yet.
+      if (slot.index >= 0 && wheel.current) await wheel.current.spinTo(slot.index, prizes.length)
+      finish(r, color)
     } catch (e) {
       setSpinning(false)
-      inFlight.current = false
       spinLock.current = false
       setErr(errText(e))
       void load()
     }
   }
 
-  if (!state) return <div className="py-16 text-center text-sm text-neutral-500">{err || t('common.loading')}</div>
-  // 结果弹框在两个分支里都要画：倒计时归零、重载后这一期不见了（关闭）时，不能把还没看的结果卸掉。
-  // The result modal is rendered in both branches: when the countdown hits zero and the reload drops
-  // the round (closed), an unseen result must not be unmounted.
-  const modal = result && (
-    <ResultModal draw={result} onClose={() => setResult(null)} onChange={(d) => {
-      setDraws((xs) => xs.map((x) => (x.id === d.id ? d : x)))
-      setResult({ ...result, ...d })
-    }} navigate={navigate} />
+  if (!state) {
+    return (
+      <div className="lk">
+        {err ? <div className="card lk-closed"><p className="lk-closed-sub">{err}</p></div> : (
+          <div className="lk-grid" aria-busy="true">
+            <section className="card lk-stage"><div className="lk-skel-wheel" /></section>
+            <aside className="lk-side"><div className="card lk-skel-panel" /><div className="card lk-skel-panel" /></aside>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // 揭晓卡在两个分支里都要画：倒计时归零、重载后这一期不见了（关闭）时，不能把还没看的结果卸掉。
+  // The reveal is rendered in both branches: if the reload at zero drops the round, an unseen result stays.
+  const unusedNow = cur?.tickets.unused ?? 0
+  const modal = reveal && (
+    <ResultReveal draw={reveal.draw} color={reveal.color} festival={festival}
+      again={round?.phase === 'active' && reveal.draw.round?.id === round.id ? unusedNow : 0}
+      onAgain={() => { setReveal(null); void onSpin() }}
+      onClose={() => setReveal(null)}
+      onChange={(d) => {
+        setDraws((xs) => xs.map((x) => (x.id === d.id ? d : x)))
+        setReveal((cur0) => (cur0 ? { ...cur0, draw: { ...cur0.draw, ...d } } : cur0))
+      }} navigate={navigate} />
   )
+
   if (isWheelClosed(state) || !cur || !round) {
     // 关闭时仍显示「我的奖品」：奖品没有系统领取期限，期结束后用户还要能领奖。
     // Still show "My prizes" while closed: no system claim deadline, winners claim after the round.
     return (
-      <div className="mx-auto max-w-xl space-y-5">
-        <div className="card p-10 text-center text-neutral-400">{t('lucky.closed')}</div>
+      <div className="lk mx-auto max-w-xl space-y-5">
+        <div className="card lk-closed">
+          <div className="lk-closed-mark" aria-hidden />
+          <p className="lk-closed-title">{t('lucky.closed')}</p>
+          <p className="lk-closed-sub">{t('lucky.closedSub')}</p>
+        </div>
         {draws.length > 0 && <MyPrizes draws={draws} onChange={setDraws} navigate={navigate} />}
         {modal}
       </div>
     )
   }
 
+  const active = round.phase === 'active'
   const unused = cur.tickets.unused
-  const canSpin = round.phase === 'active' && unused > 0 && !spinning
+  const hadTickets = cur.tickets.batches.length > 0
+  const cheer = cheerKey({ phase: round.phase, spinning, unused, hadTickets, last, missStreak })
+  const hubSub = !active ? t('lucky.hub.soon') : unused > 0 ? t('lucky.hub.left', { n: unused }) : t('lucky.hub.none')
+
   return (
-    <div className="space-y-4">
+    <div className="lk" data-fest={festival ?? undefined}>
       {rounds.length > 1 && (
-        <div role="tablist" aria-label={t('lucky.rounds')} className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+        <div role="tablist" aria-label={t('lucky.rounds')} className="lk-rounds">
           {rounds.map((r) => {
             const on = r.round.id === round.id
             return (
               <button key={r.round.id} type="button" role="tab" aria-selected={on} disabled={spinning && !on}
-                onClick={() => select(r.round.id)}
-                className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition disabled:opacity-40 ${
-                  on ? 'border-prism-500/70 bg-prism-500/15 text-neutral-50' : 'border-white/10 text-neutral-300 hover:bg-white/5'}`}>
-                <span className="max-w-[11rem] truncate">{r.round.name}</span>
-                {r.round.phase === 'upcoming' && <span className="text-[11px] text-neutral-500">{t('lucky.notStarted')}</span>}
+                onClick={() => select(r.round.id)} className={`lk-round ${on ? 'is-on' : ''}`}>
+                <span className="lk-round-name">{r.round.name}</span>
+                {r.round.phase === 'upcoming' && <span className="lk-round-soon">{t('lucky.notStarted')}</span>}
                 {r.tickets.unused > 0 && (
-                  <span className="rounded-full bg-amber-400/20 px-1.5 font-mono text-[11px] text-amber-300"
-                    aria-label={t('lucky.ticketsBadge', { n: r.tickets.unused })}>{r.tickets.unused}</span>
+                  <span className="lk-round-badge" aria-label={t('lucky.ticketsBadge', { n: r.tickets.unused })}>{r.tickets.unused}</span>
                 )}
               </button>
             )
           })}
         </div>
       )}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="card min-w-0 p-5">
-          <div className="mb-5 space-y-1 text-center">
-            <h1 className="break-words font-display text-base font-semibold text-neutral-100">{round.name}</h1>
-            <div className="break-words text-sm text-neutral-300">
-              {t('lucky.window', { from: fmtTime(round.startsAt), to: fmtTime(round.endsAt) })}
+
+      <div className="lk-grid">
+        <section className="card lk-stage">
+          <header className="lk-stage-head">
+            <div className="min-w-0">
+              {festival && (
+                <div className="lk-fest">
+                  <FestivalEmptyMini />
+                  <span>{t(`festival.greeting.${festival}`)}</span>
+                </div>
+              )}
+              <h1 className="lk-title">{round.name}</h1>
+              <p className="lk-window">{fmtWindow(round.startsAt, round.endsAt)}</p>
             </div>
-            <div className="text-xs text-amber-300">{t('lucky.voidNotice')}</div>
             {cd && !cd.done && (
-              <div className="font-mono text-xs text-neutral-400">
-                {t(round.phase === 'upcoming' ? 'lucky.startsIn' : 'lucky.endsIn', cd)}
+              <div className="lk-cd" role="timer" aria-label={`${t(active ? 'lucky.endsLabel' : 'lucky.startsLabel')} ${cd.d} ${t('lucky.unitD')} ${pad(cd.h)}:${pad(cd.m)}:${pad(cd.s)}`}>
+                <span className="lk-cd-label">{t(active ? 'lucky.endsLabel' : 'lucky.startsLabel')}</span>
+                <span className="lk-cd-cells" aria-hidden>
+                  {([['d', cd.d], ['h', cd.h], ['m', cd.m], ['s', cd.s]] as const).map(([u, v]) => (
+                    <span key={u} className="lk-cd-cell"><b>{u === 'd' ? v : pad(v)}</b><i>{t(`lucky.unit${u.toUpperCase()}`)}</i></span>
+                  ))}
+                </span>
               </div>
             )}
+          </header>
+
+          <div className="lk-wheel-wrap">
+            <LuckyWheel ref={wheel} prizes={cur.prizes} festival={festival} sound={sound}
+              hub={{
+                label: t('lucky.hub.go'),
+                sub: spinning ? undefined : hubSub,
+                ariaLabel: t('lucky.hub.aria', { n: unused }),
+                disabled: !active || unused <= 0,
+                busy: spinning,
+                invite: active && unused > 0,
+                onPress: () => void onSpin(),
+              }} />
           </div>
-          {/* 等分扇区，不暴露概率 / 份数；份数用完的格照常显示 / equal slices; sold-out slots look the same */}
-          <LuckyWheel prizes={cur.prizes} rotation={rotation} spinning={spinning} />
-          <div className="mt-5 flex flex-col items-center gap-2">
-            <button type="button" className="btn-primary min-w-[200px] py-2.5 text-base disabled:opacity-40"
-              disabled={!canSpin} onClick={onSpin}>
-              {round.phase === 'upcoming' ? t('lucky.notStarted')
-                : spinning ? t('lucky.spinning')
-                : t('lucky.spin', { n: unused })}
+
+          <div className="lk-stage-foot">
+            <div className={`lk-stack ${unused > 0 ? '' : 'is-empty'}`}>
+              <span className="lk-stack-cards" aria-hidden>
+                <i /><i /><i />
+                {tear > 0 && <i key={tear} className="lk-stack-fly" />}
+              </span>
+              <span className="lk-stack-n">{t('lucky.available')} <b>{unused}</b></span>
+            </div>
+            <p className="lk-cheer" aria-live="polite">{t(cheer)}</p>
+            <button type="button" className={`lk-sound ${sound ? 'is-on' : ''}`} aria-pressed={sound}
+              aria-label={t(sound ? 'lucky.sound.mute' : 'lucky.sound.unmute')} title={t(sound ? 'lucky.sound.mute' : 'lucky.sound.unmute')}
+              onClick={toggleSound}>
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+                {sound
+                  ? <><path d="M15.5 9a4.2 4.2 0 0 1 0 6" /><path d="M18 6.5a7.8 7.8 0 0 1 0 11" /></>
+                  : <path d="M16 9.5l5 5M21 9.5l-5 5" />}
+              </svg>
             </button>
-            {unused === 0 && round.phase === 'active' && (
-              <p className="text-center text-xs text-neutral-500">{t('lucky.noTickets')}</p>
-            )}
-            {err && <p className="text-center text-xs text-down">{err}</p>}
           </div>
+          {err && <p className="lk-err" role="alert">{err}</p>}
+          <p className="lk-void">{t('lucky.voidNotice')}</p>
         </section>
 
-        <aside className="min-w-0 space-y-5">
-          <section className="card p-4">
-            <h2 className="mb-3 font-display text-sm font-semibold text-neutral-100">{t('lucky.prizes')}</h2>
-            <ul className="space-y-2">
-              {cur.prizes.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 text-sm">
-                  {p.imageUrl ? <img src={p.imageUrl} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
-                    : <span className="h-8 w-8 shrink-0 rounded" style={{ background: p.color || '#334155' }} />}
-                  <div className="min-w-0">
-                    <div className="truncate text-neutral-100">{p.name}</div>
-                    {p.description && <div className="truncate text-xs text-neutral-500">{p.description}</div>}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section className="card p-4">
-            <h2 className="mb-3 font-display text-sm font-semibold text-neutral-100">{t('lucky.myTickets')}</h2>
-            {cur.tickets.batches.length === 0 ? <p className="text-xs text-neutral-500">{t('lucky.noTicketsHint')}</p> : (
-              <ul className="space-y-1.5 text-xs text-neutral-300">
-                {cur.tickets.batches.map((b, i) => (
-                  <li key={`${b.reason ?? 'retry'}-${b.issuedAt}-${i}`} className="flex justify-between gap-2">
-                    {/* reason 为 null = 「再来一次」退回的券 / null reason = a retry refund */}
-                    <span className="truncate">{b.reason ?? t('lucky.retryTicket')}</span>
-                    <span className="shrink-0 font-mono">×{b.count}</span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
+        <aside className="lk-side">
+          <TicketWallet unused={unused} batches={cur.tickets.batches} />
+          <PrizeList prizes={cur.prizes} />
           <MyPrizes draws={draws} onChange={setDraws} navigate={navigate} />
         </aside>
       </div>
 
       {modal}
-    </div>
-  )
-}
-
-function ClaimActions({ draw, onChange, navigate }: {
-  draw: LuckyDraw; onChange: (d: LuckyDraw) => void; navigate: (to: string) => void
-}) {
-  const { t } = useTranslation()
-  const [text, setText] = useState(draw.claimInfo ?? '')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const open = draw.fulfillmentStatus === 'pending' || draw.fulfillmentStatus === 'submitted'
-  const errText = (e: unknown) => (e instanceof Error ? localizeApiError(e.message) : t('common.error'))
-  // 已抽完未中奖不用领奖 / a sold-out miss has nothing to claim
-  if (draw.prize.kind !== 'custom' || draw.soldOut) return null
-  if (!open) {
-    return draw.adminNote ? <p className="text-xs text-neutral-400">{draw.adminNote}</p> : null
-  }
-  if (draw.prize.claimMode === 'ticket') {
-    return (
-      <div className="space-y-1.5">
-        <button type="button" className="btn-ghost px-3 py-1 text-xs" disabled={busy} onClick={async () => {
-          // 已有工单就直接去看，不再重复开 / an existing ticket is just opened, never re-created
-          if (draw.supportTicketId) { navigate(`/support?ticket=${encodeURIComponent(draw.supportTicketId)}`); return }
-          setBusy(true)
-          setErr('')
-          try {
-            const r = await luckyApi.claimTicket(draw.id)
-            onChange(r.draw)
-            navigate(`/support?ticket=${encodeURIComponent(r.ticketId)}`)
-          } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
-        }}>
-          {draw.supportTicketId ? t('lucky.viewTicket') : t('lucky.claimByTicket')}
-        </button>
-        {err && <p className="text-xs text-down">{err}</p>}
-      </div>
-    )
-  }
-  return (
-    <div className="space-y-1.5">
-      {draw.prize.claimHint && <p className="break-words text-xs text-neutral-400">{draw.prize.claimHint}</p>}
-      <textarea className="input w-full py-1.5 text-sm" rows={3} maxLength={1000} value={text}
-        onChange={(e) => setText(e.target.value)} />
-      <button type="button" className="btn-primary px-3 py-1 text-xs disabled:opacity-40"
-        disabled={busy || !text.trim()} onClick={async () => {
-          setBusy(true)
-          setErr('')
-          try { onChange(await luckyApi.claimInfo(draw.id, text)) } catch (e) { setErr(errText(e)) } finally { setBusy(false) }
-        }}>
-        {draw.fulfillmentStatus === 'submitted' ? t('lucky.updateClaim') : t('lucky.submitClaim')}
-      </button>
-      {err && <p className="text-xs text-down">{err}</p>}
-    </div>
-  )
-}
-
-function MyPrizes({ draws, onChange, navigate }: {
-  draws: LuckyDraw[]; onChange: (xs: LuckyDraw[]) => void; navigate: (to: string) => void
-}) {
-  const { t } = useTranslation()
-  const won = wonDraws(draws)
-  return (
-    <section className="card p-4">
-      <h2 className="mb-3 font-display text-sm font-semibold text-neutral-100">{t('lucky.myPrizes')}</h2>
-      {won.length === 0 ? <p className="text-xs text-neutral-500">{t('lucky.noPrizes')}</p> : (
-        <ul className="space-y-3">
-          {won.map((d) => (
-            <li key={d.id} className="space-y-1.5 border-b border-white/5 pb-3 last:border-0">
-              <div className="flex items-center justify-between gap-2 text-sm">
-                <span className="truncate text-neutral-100">{d.prize.name}</span>
-                <span className="shrink-0 text-xs text-neutral-400">{t(`lucky.status.${d.fulfillmentStatus}`)}</span>
-              </div>
-              <div className="break-words text-xs text-neutral-500">
-                {fmtTime(d.createdAt)}{d.roundName ? ` · ${d.roundName}` : ''}
-              </div>
-              <ClaimActions draw={d} navigate={navigate}
-                onChange={(nd) => onChange(draws.map((x) => (x.id === nd.id ? nd : x)))} />
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
-  )
-}
-
-function ResultModal({ draw, onClose, onChange, navigate }: {
-  draw: LuckyDraw; onClose: () => void; onChange: (d: LuckyDraw) => void; navigate: (to: string) => void
-}) {
-  const { t } = useTranslation()
-  const titleId = useId()
-  const closeRef = useRef<HTMLButtonElement>(null)
-  // 打开即把焦点交给「知道了」，Esc 关闭 / Focus the close button on open; Escape closes.
-  useEffect(() => {
-    closeRef.current?.focus()
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  const rk = resultKey(draw)
-  const title = t(rk.key, rk.params)
-  // 已抽完未中奖：不显示那份奖品的图和说明，免得像是中了 / a sold-out miss hides the prize art so it doesn't read as a win
-  const showPrize = !draw.soldOut
-  return (
-    <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
-      <div className="card max-h-[90vh] w-full max-w-sm space-y-4 overflow-y-auto p-6 text-center" onClick={(e) => e.stopPropagation()}>
-        {showPrize && draw.prize.imageUrl && <img src={draw.prize.imageUrl} alt="" className="mx-auto h-20 w-20 rounded-lg object-cover" />}
-        <div id={titleId} className="break-words font-display text-lg font-semibold text-neutral-100">{title}</div>
-        {showPrize && draw.prize.description && <p className="break-words text-sm text-neutral-400">{draw.prize.description}</p>}
-        <div className="text-left"><ClaimActions draw={draw} onChange={onChange} navigate={navigate} /></div>
-        <button ref={closeRef} type="button" className="btn-ghost w-full py-2" onClick={onClose}>{t('lucky.close')}</button>
-      </div>
     </div>
   )
 }

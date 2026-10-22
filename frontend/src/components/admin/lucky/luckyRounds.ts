@@ -80,3 +80,16 @@ export function roundPatch(orig: LuckyRoundAdmin, f: RoundForm): LuckyRoundPatch
 
 /** 删除前要求输入的期名与原名完全一致（只去掉两端空白）/ The typed name must match exactly (outer whitespace aside). */
 export const deleteNameMatches = (typed: string, name: string) => typed.trim() !== '' && typed.trim() === name.trim()
+
+/** 顶部指标条：进行中 / 未开始的期数，与所有期合计的已发券、已使用 / KPI strip: active / upcoming counts and issued / used summed over every round. */
+export function roundKpis(rounds: LuckyRoundAdmin[]): { active: number; upcoming: number; issued: number; used: number } {
+  return rounds.reduce((a, r) => ({
+    active: a.active + (r.phase === 'active' ? 1 : 0),
+    upcoming: a.upcoming + (r.phase === 'upcoming' ? 1 : 0),
+    issued: a.issued + r.stats.issued,
+    used: a.used + r.stats.used,
+  }), { active: 0, upcoming: 0, issued: 0, used: 0 })
+}
+
+/** 已使用占已发券的比例（0–1），没发过券是 0 / Used over issued (0–1); 0 when nothing was issued. */
+export const usedRatio = (s: { issued: number; used: number }) => (s.issued > 0 ? Math.min(1, Math.max(0, s.used / s.issued)) : 0)

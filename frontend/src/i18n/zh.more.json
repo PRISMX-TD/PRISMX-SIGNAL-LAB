@@ -1179,8 +1179,6 @@
         "empty": "还没有任何一期，点「新建一期」开始",
         "showEnded": "显示已结束的 {{n}} 期",
         "hideEnded": "收起已结束的 {{n}} 期",
-        "current": "当前：{{name}}",
-        "stats": "已发券 {{issued}} · 已用 {{used}} · 待发奖 {{pending}}",
         "visibleFor": "「{{name}}」在用户端显示",
         "shown": "用户端显示",
         "hidden": "用户端隐藏",
@@ -1203,7 +1201,9 @@
           "end": "请选择结束时间",
           "order": "结束时间要晚于开始时间",
           "past": "结束时间要晚于现在"
-        }
+        },
+        "meterLabel": "已使用 {{used}} / {{issued}} 张",
+        "pending": "待发奖 {{n}}"
       },
       "del": {
         "title": "删除这一期",
@@ -1266,7 +1266,17 @@
           "tickets": "整批最多 20000 张，请先删减"
         },
         "ended": "这一期已结束，不能再发券",
-        "target": "发给：{{name}}"
+        "target": "发给：{{name}}",
+        "pickTitle": "选择发放对象",
+        "col": {
+          "user": "用户",
+          "source": "来源",
+          "count": "张数",
+          "time": "时间",
+          "reason": "原因",
+          "users": "人数",
+          "used": "已用 / 发出"
+        }
       },
       "draws": {
         "all": "全部状态",
@@ -1285,7 +1295,53 @@
         "reasonRequired": "取消要写原因（用户看得到）",
         "noteLong": "备注最多 200 个字",
         "soldOut": "已抽完未中奖",
-        "round": "期"
+        "round": "期",
+        "prev": "上一页",
+        "next": "下一页",
+        "total": "共 {{n}} 条"
+      },
+      "moveDown": "下移",
+      "kpi": {
+        "active": "进行中的期",
+        "upcomingFoot": "另有 {{n}} 期未开始",
+        "issued": "已发券",
+        "used": "已使用",
+        "usedFoot": "占已发券 {{pct}}%",
+        "pending": "待发奖",
+        "pendingFoot": "所有期合计，点击处理"
+      },
+      "slots": {
+        "title": "奖品格",
+        "count": "{{n}} / {{max}} 格",
+        "auto": "自动",
+        "daysUnit": "天"
+      },
+      "preview": {
+        "title": "预览",
+        "hint": "和用户端是同一个转盘",
+        "spin": "试转",
+        "spinSub": "不扣券",
+        "spinAria": "试转一次（仅预览，不扣券、不记录）",
+        "result": "试转结果：{{name}}（仅预览，不扣券、不记录）",
+        "resultSoldOut": "试转结果：{{name}} 已抽完，用户抽到会算未中奖（仅预览）",
+        "noWeight": "现在没有能抽中的格：先填份数或概率",
+        "slotN": "第 {{n}} 格",
+        "soldOut": "已抽完",
+        "festLabel": "节日皮肤",
+        "festHint": "「自动」跟随站点当前的节日。这里只改预览，不影响用户端",
+        "fest": {
+          "auto": "自动",
+          "none": "无",
+          "spring": "春节",
+          "midautumn": "中秋",
+          "halloween": "万圣节",
+          "christmas": "圣诞",
+          "newyear": "新年"
+        },
+        "share": "抽中占比",
+        "shareQty": "按剩余份数计算，份数为 0 的格抽不中",
+        "shareProb": "按设置的概率计算；份数用完的格仍占概率，抽中算未中奖",
+        "shareEmpty": "还没有可抽的份数"
       }
     },
     "totalUsers": "总用户数",
@@ -5048,14 +5104,8 @@
   },
   "lucky": {
     "closed": "幸运轮盘暂未开放",
-    "window": "开放时间：{{from}} ～ {{to}}",
     "voidNotice": "本期结束后，未使用的抽奖券将自动作废",
-    "startsIn": "距开始 {{d}} 天 {{h}} 时 {{m}} 分 {{s}} 秒",
-    "endsIn": "距结束 {{d}} 天 {{h}} 时 {{m}} 分 {{s}} 秒",
     "notStarted": "尚未开始",
-    "spin": "抽奖（剩 {{n}} 张）",
-    "spinning": "转动中…",
-    "noTickets": "暂无抽奖券，参加平台活动 / 比赛可获得",
     "noTicketsHint": "本期还没有抽奖券",
     "retryTicket": "再来一次",
     "prizes": "奖品一览",
@@ -5069,13 +5119,6 @@
     "close": "知道了",
     "cardTitle": "你有 {{n}} 张抽奖券待使用",
     "cardCta": "去抽奖",
-    "result": {
-      "none": "谢谢参与，下次好运！",
-      "retry": "再来一次！已退回一张券",
-      "proDays": "恭喜获得 {{n}} 天 PRO 会员，已到账",
-      "custom": "恭喜抽中「{{name}}」",
-      "soldOut": "这份奖品已经被抽完了，本次未中奖"
-    },
     "status": {
       "auto_done": "已到账",
       "pending": "待领取",
@@ -5084,6 +5127,59 @@
       "cancelled": "已取消"
     },
     "rounds": "抽奖活动",
-    "ticketsBadge": "{{n}} 张未用"
+    "ticketsBadge": "{{n}} 张未用",
+    "available": "可用券",
+    "issuedOn": "{{time}} 发放",
+    "more": "展开其余 {{n}} 批",
+    "fewer": "收起",
+    "slots": "共 {{n}} 格",
+    "kindTag": {
+      "pro_days": "会员",
+      "custom": "礼品"
+    },
+    "closedSub": "下一期开放后，就能在这里转盘抽奖",
+    "startsLabel": "距开始",
+    "endsLabel": "距结束",
+    "unitD": "天",
+    "unitH": "时",
+    "unitM": "分",
+    "unitS": "秒",
+    "hub": {
+      "go": "抽奖",
+      "left": "剩 {{n}} 张",
+      "none": "暂无券",
+      "soon": "未开始",
+      "aria": "转动轮盘抽奖，剩 {{n}} 张券"
+    },
+    "sound": {
+      "mute": "关闭音效",
+      "unmute": "打开音效"
+    },
+    "cheer": {
+      "ready": "好运已就位，点中间的按钮开转",
+      "spinning": "转起来了……",
+      "win": "手气正旺！还有券，继续转",
+      "winOut": "恭喜！这一期的券都用完了",
+      "retry": "送你一次机会，再转一下",
+      "miss1": "差一点点，下一张券再试试",
+      "miss2": "别灰心，每一转都是新的机会",
+      "miss3": "保持好心情，再来一转",
+      "out": "本期的券用完了，参加活动可以拿到更多",
+      "none": "本期还没有抽奖券，参加平台活动或比赛可以获得",
+      "upcoming": "还没开始，到点就能转"
+    },
+    "reveal": {
+      "won": "恭喜你抽中",
+      "proTitle": "{{n}} 天 PRO 会员",
+      "proSub": "已自动到账，现在就能用",
+      "retryTitle": "再来一次！",
+      "retry": "这张券已经退回，再转一次吧",
+      "missTitle": "差一点点",
+      "none": "停在了「{{name}}」，每一转都是新的机会",
+      "soldOut": "这份奖品刚刚被抽完了，本次未中奖",
+      "again": "再转一次（剩 {{n}} 张）",
+      "spinNow": "马上再转",
+      "keep": "收下了"
+    }
   }
 }

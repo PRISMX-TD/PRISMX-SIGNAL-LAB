@@ -1,0 +1,600 @@
+/* ═════════════ 后台 · 幸运轮盘 / admin · lucky wheel ═════════════
+   只随 LuckyWheelPanel 加载，选择器一律 .lka- 前缀。材质跟管理控制台（admin.css）走：实色面、
+   1px 发丝线、无模糊无光晕；紫只出现在「选中」「主按钮」上。期卡片与奖品格是内嵌在卡里的格，用
+   更深一档的 well 面，选中的期卡抬到 surface-2 并加一条 1px 紫边。
+   Loaded only with LuckyWheelPanel; every selector is .lka- prefixed. Same material as the admin
+   console: opaque planes, 1px hairlines, no blur or halo; violet only marks selection and the primary
+   button. Round tiles and prize slots are wells nested in a card; the selected round lifts to
+   surface-2 with a 1px violet edge.
+   兼容下限 Chrome 70：不用 inset 简写、aspect-ratio、:has()。
+   Chrome 70 floor: no inset shorthand, no aspect-ratio, no :has(). */
+
+.lka,
+.lka-modes {
+  --lka-well: #141419;
+}
+
+.lka-h {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: #f4f4f5;
+}
+.lka-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.lka-note {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+.lka-note.is-warn {
+  color: rgb(252 211 77);
+}
+.lka-note.is-down {
+  color: var(--down);
+}
+.lka-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.lka-card-head > :last-child:not(:first-child) {
+  margin-left: auto;
+}
+
+/* ── 期列表 / round list ── */
+.lka-rounds {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+@media (min-width: 768px) {
+  .lka-rounds {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1280px) {
+  .lka-rounds {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.lka-round {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: var(--lka-well);
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.lka-round:hover {
+  background: #18181e;
+}
+.lka-round.is-on {
+  border-color: var(--purple-hi);
+  background: var(--surface-2);
+}
+.lka-round.is-ended {
+  opacity: 0.72;
+}
+.lka-round-main {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 14px 16px 12px;
+  text-align: left;
+  border-radius: 14px 14px 0 0;
+}
+.lka-round-name {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: #fafafa;
+  word-break: break-word;
+}
+.lka-round-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.lka-round-time {
+  margin-top: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+  word-break: break-word;
+}
+.lka-meter {
+  display: block;
+  height: 4px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.06);
+}
+.lka-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: rgb(var(--text-2-rgb) / 0.6);
+}
+.lka-round-stats {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.lka-round-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: auto;
+  padding: 10px 16px 12px;
+  border-top: 1px solid var(--line);
+}
+.lka-vis {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.lka-round-actions {
+  display: flex;
+  gap: 14px;
+  margin-left: auto;
+}
+.lka-act {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.lka-act:hover:not(:disabled) {
+  color: var(--text);
+}
+.lka-act.is-warn:hover:not(:disabled) {
+  color: rgb(252 211 77);
+}
+.lka-act.is-down {
+  color: rgb(var(--down-rgb) / 0.85);
+}
+.lka-act.is-down:hover:not(:disabled) {
+  color: var(--down);
+}
+.lka-act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* 选中的期：名字 + 页签 / the selected round: name + tabs */
+.lka-sel-name {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: #fafafa;
+  word-break: break-word;
+}
+.adm-tabs.lka-tabs {
+  margin-top: 0;
+}
+.lka-sel-name + .adm-tabs.lka-tabs {
+  margin-top: 12px;
+}
+.lka-tabs .adm-pill {
+  height: 18px;
+  padding: 0 6px;
+}
+
+/* ── 奖品模式选项卡 / mode option cards ── */
+.lka-modes {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+@media (min-width: 640px) {
+  .lka-modes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.lka-mode {
+  display: block;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--lka-well);
+  text-align: left;
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.lka-mode:hover:not(:disabled) {
+  border-color: var(--line-hi);
+}
+.lka-mode.is-on {
+  border-color: var(--purple-hi);
+  background: var(--surface-2);
+}
+.lka-mode:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+.lka-mode-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fafafa;
+}
+/* 单选圈：选中时实心紫点 / the radio ring: a solid violet dot when on */
+.lka-mode-dot {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 999px;
+  border: 1.5px solid var(--text-3);
+}
+.lka-mode.is-on .lka-mode-dot {
+  border-color: var(--purple-hi);
+}
+.lka-mode.is-on .lka-mode-dot::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--purple-hi);
+}
+.lka-mode-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* ── 奖品设置 / prize settings ── */
+.lka-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (min-width: 1280px) {
+  .lka-settings {
+    grid-template-columns: minmax(0, 1fr) 360px;
+  }
+  .lka-preview {
+    position: -webkit-sticky;
+    position: sticky;
+    top: calc(var(--app-hdr, 65px) + 16px);
+  }
+}
+.lka-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.lka-slot {
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--lka-well);
+}
+.lka-slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.lka-slot-row + .lka-slot-row {
+  margin-top: 8px;
+}
+@media (min-width: 640px) {
+  .lka-slot-row.is-sub {
+    padding-left: 34px;
+  }
+}
+.lka-slot-idx {
+  width: 26px;
+  flex: none;
+  font-size: 12px;
+  color: var(--text-3);
+  text-align: center;
+}
+.lka-slot .input {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+.lka-in-name {
+  min-width: 0;
+  flex: 1 1 140px;
+}
+@media (min-width: 640px) {
+  .lka-in-name {
+    flex: 0 1 180px;
+  }
+}
+.lka-in-kind {
+  width: auto;
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.lka-in-num {
+  width: 80px;
+  flex: none;
+}
+.lka-in-cap {
+  width: 128px;
+  flex: none;
+}
+.lka-in-grow {
+  min-width: 0;
+  flex: 1 1 200px;
+}
+@media (min-width: 640px) {
+  .lka-in-grow {
+    max-width: 320px;
+  }
+}
+.lka-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.lka-slot-tools {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.lka-slot-tools .adm-icon-btn {
+  width: 28px;
+  height: 28px;
+}
+.lka .adm-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  background: transparent;
+  color: var(--text-3);
+}
+.lka-slot-tools .adm-icon-btn.is-down:hover:not(:disabled) {
+  color: var(--down);
+}
+
+/* 颜色块：整块是原生取色器的点击区 / the swatch: the whole dot is the native picker's hit area */
+.lka-swatch {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.lka-swatch-dot {
+  display: block;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.18);
+}
+.lka-swatch.is-auto .lka-swatch-dot {
+  opacity: 0.55;
+}
+.lka-swatch input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  opacity: 0;
+  cursor: pointer;
+  border: 0;
+  padding: 0;
+}
+.lka-swatch-text {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.lka-swatch:focus-within .lka-swatch-dot {
+  box-shadow: 0 0 0 2px var(--purple-hi);
+}
+
+.lka-slots-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.lka-total {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.lka-total.is-bad {
+  color: var(--down);
+}
+
+/* ── 预览 / preview ── */
+.lka-preview-wheel {
+  padding: 8px 4px 4px;
+}
+.lka-test {
+  min-height: 20px;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: center;
+  color: var(--text-2);
+}
+.lka-sect {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.lka-sect-title {
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-2);
+}
+.lka-scroll {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.lka-scroll::-webkit-scrollbar {
+  display: none;
+}
+.lka-scroll.adm-seg {
+  width: -webkit-max-content;
+  width: max-content;
+  max-width: 100%;
+}
+.lka-scroll.adm-seg > button {
+  flex: none;
+  padding: 0 11px;
+}
+.lka-stack {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--nest);
+}
+.lka-stack > i {
+  display: block;
+  height: 100%;
+  min-width: 3px;
+}
+.lka-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+}
+.lka-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.lka-legend-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.14);
+}
+.lka-legend-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lka-legend-pct {
+  flex: none;
+  color: var(--text);
+}
+.lka-legend li.is-zero {
+  color: var(--text-3);
+}
+.lka-legend li.is-zero .lka-legend-pct {
+  color: var(--text-3);
+}
+
+/* ── 发券 / 记录 ── issue / draws ── */
+.lka-warn-bar {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgb(251 191 36 / 0.1);
+  font-size: 12px;
+  line-height: 1.55;
+  color: rgb(252 211 77);
+}
+.lka-tier {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--lka-well);
+  font-size: 12px;
+  color: var(--text-3);
+}
+.lka-tier .input,
+.lka-issue .input,
+.lka-draws .input {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.lka-found {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.lka-found li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.lka-found li:hover {
+  background: rgb(255 255 255 / 0.025);
+}
+.lka-scroll-y {
+  max-height: 380px;
+  overflow: auto;
+}
+.lka-cell-user {
+  min-width: 0;
+}
+.lka-cell-user b {
+  display: block;
+  font-weight: 500;
+  color: #f4f4f5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 260px;
+}
+.lka-cell-user span {
+  display: block;
+  font-size: 12px;
+  color: var(--text-3);
+  word-break: break-all;
+}
+.lka-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 14px;
+}

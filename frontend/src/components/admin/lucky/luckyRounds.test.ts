@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { LuckyPhase, LuckyRoundAdmin } from '../../../api/luckyTypes'
 import {
   deleteNameMatches, endsInPast, fromLocalInput, keepSelection, replaceRound, roundFormProblem, roundPatch,
-  shown, splitRounds, toLocalInput,
+  roundKpis, shown, splitRounds, toLocalInput, usedRatio,
 } from './luckyRounds'
 
 const round = (id: string, phase: LuckyPhase, extra: Partial<LuckyRoundAdmin> = {}): LuckyRoundAdmin => ({
@@ -97,5 +97,20 @@ describe('luckyRounds.deleteNameMatches', () => {
     expect(deleteNameMatches(' 期a ', '期a')).toBe(true)
     expect(deleteNameMatches('期', '期a')).toBe(false)
     expect(deleteNameMatches('', '')).toBe(false)
+  })
+})
+
+describe('luckyRounds KPIs', () => {
+  const s = (issued: number, used: number) => ({ issued, used, unused: issued - used, pendingClaims: 0, draws: used })
+  it('counts active / upcoming rounds and sums tickets over every round, ended ones included', () => {
+    const k = roundKpis([round('a', 'active', { stats: s(10, 4) }), round('b', 'upcoming', { stats: s(5, 0) }),
+      round('c', 'ended', { stats: s(7, 7) }), round('d', 'active')])
+    expect(k).toEqual({ active: 2, upcoming: 1, issued: 22, used: 11 })
+    expect(roundKpis([])).toEqual({ active: 0, upcoming: 0, issued: 0, used: 0 })
+  })
+  it('used ratio stays within 0–1 and is 0 before any ticket is issued', () => {
+    expect(usedRatio(s(4, 1))).toBe(0.25)
+    expect(usedRatio(s(0, 0))).toBe(0)
+    expect(usedRatio({ issued: 2, used: 5 })).toBe(1)
   })
 })

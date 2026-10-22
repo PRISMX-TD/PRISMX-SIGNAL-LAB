@@ -8,9 +8,10 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
-import type { LuckyMode, LuckyRoundAdmin } from '../../../api/luckyTypes'
+import type { LuckyRoundAdmin } from '../../../api/luckyTypes'
 import { localizeApiError } from '../../../api/utils'
 import AdminSheet from '../AdminSheet'
+import LuckyModeOptions from './LuckyModeOptions'
 import {
   NAME_MAX, deleteNameMatches, endsInPast, fromLocalInput, roundFormProblem, roundPatch, shown, toLocalInput, type RoundForm,
 } from './luckyRounds'
@@ -61,19 +62,19 @@ export function RoundFormSheet({ round, onClose, onDone }: {
       <div className="mt-4 space-y-4">
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.round.name')}</span>
-          <input className="input w-full py-1.5 text-sm" maxLength={NAME_MAX} placeholder={t('admin.lucky.round.namePh')}
+          <input className="input w-full" maxLength={NAME_MAX} placeholder={t('admin.lucky.round.namePh')}
             value={f.name} onChange={(e) => set({ name: e.target.value })} />
         </label>
         <div className="grid gap-4 sm:grid-cols-2">
           <label className="block min-w-0">
             <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.startsAt')}</span>
-            <input type="datetime-local" className="input w-full py-1.5 text-sm" value={f.start}
+            <input type="datetime-local" className="input w-full" value={f.start}
               disabled={editing && round?.phase !== 'upcoming'} onChange={(e) => set({ start: e.target.value })} />
             {shown(f.start) && <span className="mt-1 block text-[11px] text-neutral-500">{t('admin.lucky.userSees', { time: shown(f.start) })}</span>}
           </label>
           <label className="block min-w-0">
             <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.endsAt')}</span>
-            <input type="datetime-local" className="input w-full py-1.5 text-sm" value={f.end} onChange={(e) => set({ end: e.target.value })} />
+            <input type="datetime-local" className="input w-full" value={f.end} onChange={(e) => set({ end: e.target.value })} />
             {shown(f.end) && <span className="mt-1 block text-[11px] text-neutral-500">{t('admin.lucky.userSees', { time: shown(f.end) })}</span>}
           </label>
         </div>
@@ -85,25 +86,14 @@ export function RoundFormSheet({ round, onClose, onDone }: {
             <p className="text-sm text-neutral-200">{t(`admin.lucky.mode.${f.mode}`)}
               <span className="ml-2 text-xs text-neutral-500">{t('admin.lucky.round.modeWhere')}</span></p>
           ) : (
-            <div className="space-y-2" role="radiogroup" aria-label={t('admin.lucky.mode.label')}>
-              {(['qty', 'prob'] as LuckyMode[]).map((m) => (
-                <label key={m} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2.5 text-sm ${
-                  f.mode === m ? 'border-prism-500/60 bg-prism-500/10' : 'border-white/10'}`}>
-                  <input type="radio" name="lucky-mode" className="mt-0.5" checked={f.mode === m} onChange={() => set({ mode: m })} />
-                  <span className="min-w-0">
-                    <span className="block text-neutral-100">{t(`admin.lucky.mode.${m}`)}</span>
-                    <span className="block text-xs text-neutral-500">{t(`admin.lucky.mode.${m}Hint`)}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
+            <LuckyModeOptions value={f.mode} onChange={(m) => set({ mode: m })} />
           )}
         </div>
         {problem && problem !== 'name' && <p className="text-xs text-amber-300">{t(`admin.lucky.round.err.${problem}`)}</p>}
         {err && <p className="text-xs text-down" role="alert">{err}</p>}
-        <div className="flex gap-3">
-          <button type="button" className="btn-ghost flex-1 py-2 text-sm" onClick={onClose}>{t('common.cancel')}</button>
-          <button type="button" className="btn-primary flex-1 py-2 text-sm disabled:opacity-40" disabled={busy || !!problem} onClick={submit}>
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <button type="button" className="adm-btn" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="button" className="adm-btn is-primary" disabled={busy || !!problem} onClick={submit}>
             {t(editing ? 'admin.lucky.round.save' : 'admin.lucky.round.create')}</button>
         </div>
       </div>
@@ -136,14 +126,13 @@ export function DeleteRoundSheet({ round, onClose, onDeleted }: {
         )}
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.del.typeName')}</span>
-          <input className="input w-full py-1.5 text-sm" value={typed} placeholder={round.name} autoComplete="off"
+          <input className="input w-full" value={typed} placeholder={round.name} autoComplete="off"
             onChange={(e) => setTyped(e.target.value)} />
         </label>
         {err && <p className="text-xs text-down" role="alert">{err}</p>}
-        <div className="flex gap-3 pt-1">
-          <button type="button" className="btn-ghost flex-1 py-2 text-sm" onClick={onClose}>{t('common.cancel')}</button>
-          <button type="button" disabled={!ok || busy}
-            className="flex-1 rounded-lg bg-down/80 py-2 text-sm font-medium text-white transition hover:bg-down disabled:opacity-40"
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <button type="button" className="adm-btn" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="button" disabled={!ok || busy} className="adm-btn is-danger"
             onClick={async () => {
               if (!ok || busy) return
               setBusy(true); setErr('')
