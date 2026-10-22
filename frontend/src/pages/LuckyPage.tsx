@@ -63,6 +63,9 @@ export default function LuckyPage() {
   const [missStreak, setMissStreak] = useState(0)
   // 每抽一次 +1：券叠顶上那张飞走一次 / bumped per spin: the top ticket on the stack flies off once
   const [tear, setTear] = useState(0)
+  // 结果回来、剩余张数真正变了才让数字跳一下（撕券在点下去时就播了）/ pops the count once the new total
+  // arrives (the tear itself plays on the tap)
+  const [bump, setBump] = useState(0)
   // 上次选的期（localStorage，读不到就是 null）/ the last picked round (null when storage is unavailable)
   const [selId, setSelId] = useState<string | null>(() => readLastRound())
   const wheel = useRef<LuckyWheelHandle>(null)
@@ -143,6 +146,7 @@ export default function LuckyPage() {
         if (tone === 'win') { wheel.current?.celebrate(); playWin() } else if (tone === 'retry') playRetry(); else playMiss()
       }
       setState((s) => s && withTicketsLeft(s, r.round?.id ?? roundId, r.ticketsLeft))
+      setBump((n) => n + 1)
       void luckyApi.draws().then((d) => setDraws(d.draws)).catch(() => {})
       void refreshUser?.()
       spinLock.current = false
@@ -288,11 +292,14 @@ export default function LuckyPage() {
 
           <div className="lk-stage-foot">
             <div className={`lk-stack ${unused > 0 ? '' : 'is-empty'}`}>
-              <span className="lk-stack-cards" aria-hidden>
+              {/* data-n：剩 1–2 张时只叠 1–2 张；0 张时三张灰色空白券 / data-n: 1–2 left shows 1–2 cards; 0 shows three grey blanks */}
+              <span className="lk-stack-cards" data-n={Math.min(unused, 3)} aria-hidden>
                 <i /><i /><i />
                 {tear > 0 && <i key={tear} className="lk-stack-fly" />}
               </span>
-              <span className="lk-stack-n">{t('lucky.available')} <b>{unused}</b></span>
+              <span className="lk-stack-n">
+                {t('lucky.available')} <b key={bump} className={bump > 0 ? 'is-bump' : undefined}>{unused}</b>
+              </span>
             </div>
             <p className="lk-cheer" aria-live="polite">{t(cheer)}</p>
             <button type="button" className={`lk-sound ${sound ? 'is-on' : ''}`} aria-pressed={sound}

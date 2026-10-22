@@ -118,6 +118,7 @@
 
 /* 舞台 / stage */
 .lk-stage {
+  --lk-hole: var(--surface);
   position: relative;
   min-width: 0;
   padding: 24px;
@@ -233,53 +234,189 @@
   color: var(--text-2);
   text-align: center;
 }
+/* 转盘下方的券堆：同款迷你券扇形叠三张（data-n = min(剩余, 3)），用掉一张时最上面那张沿撕线撕开——
+   主券往右上飞走、存根往下掉（.lk-stack-fly，每次换 key 重播）。没券时三张灰色空白券。
+   The stack under the wheel: three mini tickets of the same design fanned out (data-n = min(left, 3)).
+   Spending one tears the top card along its perforation: the main part flies up-right, the stub drops
+   (.lk-stack-fly, replayed by a new key). With no tickets left it shows three greyed blanks. */
 .lk-stack {
   display: flex;
   align-items: center;
-  gap: 12px;
 }
 .lk-stack-cards {
   position: relative;
-  width: 38px;
-  height: 26px;
+  display: block;
+  flex: none;
+  width: 64px;
+  height: 44px;
+  margin-right: 12px;
 }
+/* left: 10px keeps the whole fan (bottom card rotated -15deg) inside the 64px box */
 .lk-stack-cards i {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 34px;
-  height: 22px;
-  border: 1px solid #0c0c0e;
+  top: 9px;
+  left: 10px;
+  width: 52px;
+  height: 32px;
   border-radius: 5px;
-  background: var(--purple);
+  transform-origin: 12% 100%;
+  pointer-events: none;
 }
-.lk-stack-cards i:nth-child(1) {
-  transform: translate(4px, 4px);
-  background: #321786;
+.lk-stack-cards i:not(.lk-stack-fly) {
+  overflow: hidden;
+  border: 1px solid transparent;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.72)) 12px 8px / 15px 2px no-repeat padding-box,
+    linear-gradient(rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.3)) 12px 13px / 19px 2px no-repeat padding-box,
+    linear-gradient(rgba(190, 175, 255, 0.3), rgba(190, 175, 255, 0.3)) 12px 24px / 20px 1px no-repeat padding-box,
+    linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8)) calc(100% - 4px) 9px / 7px 5px no-repeat padding-box,
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0, rgba(255, 255, 255, 0.45) 1px, rgba(255, 255, 255, 0) 1px, rgba(255, 255, 255, 0) 2px) calc(100% - 3px) 19px / 9px 3px no-repeat padding-box,
+    linear-gradient(180deg, rgba(124, 86, 255, 0.55) 0, rgba(90, 34, 238, 0.38) 100%) 100% 0 / 15px 100% no-repeat padding-box,
+    linear-gradient(180deg, #8d78ff 0, #e4dcff 28%, #8fc8f0 50%, #6c4ff0 72%, #e2b5fb 100%) 4px 0 / 4px 100% no-repeat padding-box,
+    linear-gradient(100deg, #2f186f 0, #1d0e47 100%) padding-box,
+    linear-gradient(125deg, #b3a3ff 0, #efeaff 28%, #8fc8f0 50%, #6c4ff0 72%, #e2b5fb 100%) border-box;
+  -webkit-mask-image:
+    radial-gradient(circle at calc(100% - 16px) 0, transparent 0, transparent 3.5px, #000 4px),
+    radial-gradient(circle at calc(100% - 16px) 100%, transparent 0, transparent 3.5px, #000 4px);
+  -webkit-mask-size: 100% 51%;
+  -webkit-mask-position: 0 0, 0 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    radial-gradient(circle at calc(100% - 16px) 0, transparent 0, transparent 3.5px, #000 4px),
+    radial-gradient(circle at calc(100% - 16px) 100%, transparent 0, transparent 3.5px, #000 4px);
+  mask-size: 100% 51%;
+  mask-position: 0 0, 0 100%;
+  mask-repeat: no-repeat;
+  transition: opacity 0.3s var(--ease-out), -webkit-filter 0.3s var(--ease-out), filter 0.3s var(--ease-out);
 }
-.lk-stack-cards i:nth-child(2) {
-  transform: translate(2px, 2px);
-  background: #4519c4;
-}
-.lk-stack-cards i:nth-child(3)::after,
-.lk-stack-cards .lk-stack-fly::after {
+/* perforation dots on each mini ticket */
+.lk-stack-cards i:not(.lk-stack-fly)::before {
   content: '';
   position: absolute;
-  top: 3px;
-  bottom: 3px;
-  right: 9px;
-  border-left: 1.5px dashed rgba(255, 255, 255, 0.45);
+  top: 4px;
+  bottom: 4px;
+  right: 14px;
+  width: 2px;
+  background: radial-gradient(circle at 1px 1.5px, var(--lk-hole) 0, var(--lk-hole) 0.75px, rgba(0, 0, 0, 0) 1.1px) 0 50% / 2px 3.6px repeat-y;
 }
-.lk-stack.is-empty .lk-stack-cards i {
-  background: #2a2a33;
+/* fan: bottom → top */
+.lk-stack-cards i:nth-child(1) {
+  transform: translate(-1px, 1px) rotate(-15deg);
+  -webkit-filter: brightness(0.5) saturate(0.85);
+  filter: brightness(0.5) saturate(0.85);
+}
+.lk-stack-cards i:nth-child(2) {
+  transform: rotate(-7.5deg);
+  -webkit-filter: brightness(0.72);
+  filter: brightness(0.72);
+}
+.lk-stack-cards i:nth-child(3) {
+  transform: rotate(0.5deg);
+}
+/* glint on the top card only */
+.lk-stack-cards i:nth-child(3)::after {
+  content: '';
+  position: absolute;
+  top: -30%;
+  bottom: -30%;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(105deg, rgba(255, 255, 255, 0) 0, rgba(200, 230, 255, 0.12) 36%, rgba(255, 255, 255, 0.34) 50%, rgba(255, 190, 240, 0.1) 64%, rgba(255, 255, 255, 0) 100%);
+  transform: translateX(-130%);
+}
+/* how many cards show: data-n = min(unused, 3) */
+.lk-stack-cards[data-n="2"] i:nth-child(1),
+.lk-stack-cards[data-n="1"] i:nth-child(1),
+.lk-stack-cards[data-n="1"] i:nth-child(2) {
+  opacity: 0;
+}
+/* empty: three greyed blanks */
+.lk-stack.is-empty .lk-stack-cards i:not(.lk-stack-fly) {
+  opacity: 0.5;
+  -webkit-filter: grayscale(1) brightness(0.62);
+  filter: grayscale(1) brightness(0.62);
+}
+.lk-stack.is-empty .lk-stack-cards i:nth-child(1) {
+  opacity: 0.28;
+}
+.lk-stack.is-empty .lk-stack-cards i:nth-child(2) {
+  opacity: 0.38;
+}
+.lk-stack.is-empty .lk-stack-cards i:not(.lk-stack-fly)::after {
+  display: none;
 }
 .lk-stack-n {
   font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
 }
+.lk-stack.is-empty .lk-stack-n b {
+  color: var(--text-3);
+}
+
+/* the torn-off ticket: ::before = main part (flies up-right), ::after = stub (drops) */
+.lk-stack-cards .lk-stack-fly {
+  z-index: 2;
+  transform: rotate(0.5deg);
+}
+.lk-stack-fly::before,
+.lk-stack-fly::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0;
+  box-shadow: inset 0 0 0 1px rgba(196, 182, 255, 0.55);
+}
+.lk-stack-fly::before {
+  left: 0;
+  width: 36px;
+  border-radius: 5px 0 0 5px;
+  transform-origin: 100% 50%;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.72)) 13px 9px / 15px 2px no-repeat,
+    linear-gradient(rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0.3)) 13px 14px / 19px 2px no-repeat,
+    linear-gradient(rgba(190, 175, 255, 0.3), rgba(190, 175, 255, 0.3)) 13px 25px / 20px 1px no-repeat,
+    linear-gradient(180deg, #8d78ff 0, #e4dcff 28%, #8fc8f0 50%, #6c4ff0 72%, #e2b5fb 100%) 5px 0 / 4px 100% no-repeat,
+    linear-gradient(100deg, #34197a 0, #23115a 100%);
+  -webkit-mask-image:
+    radial-gradient(circle at 100% 0, transparent 0, transparent 3.5px, #000 4px),
+    radial-gradient(circle at 100% 100%, transparent 0, transparent 3.5px, #000 4px);
+  -webkit-mask-size: 100% 51%;
+  -webkit-mask-position: 0 0, 0 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    radial-gradient(circle at 100% 0, transparent 0, transparent 3.5px, #000 4px),
+    radial-gradient(circle at 100% 100%, transparent 0, transparent 3.5px, #000 4px);
+  mask-size: 100% 51%;
+  mask-position: 0 0, 0 100%;
+  mask-repeat: no-repeat;
+}
+.lk-stack-fly::after {
+  right: 0;
+  width: 16px;
+  border-radius: 0 5px 5px 0;
+  transform-origin: 0 50%;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.8)) 5px 10px / 7px 5px no-repeat,
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.45) 0, rgba(255, 255, 255, 0.45) 1px, rgba(255, 255, 255, 0) 1px, rgba(255, 255, 255, 0) 2px) 4px 20px / 9px 3px no-repeat,
+    linear-gradient(180deg, #4b30b0 0, #3a1f93 100%);
+  -webkit-mask-image:
+    radial-gradient(circle at 0 0, transparent 0, transparent 3.5px, #000 4px),
+    radial-gradient(circle at 0 100%, transparent 0, transparent 3.5px, #000 4px);
+  -webkit-mask-size: 100% 51%;
+  -webkit-mask-position: 0 0, 0 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    radial-gradient(circle at 0 0, transparent 0, transparent 3.5px, #000 4px),
+    radial-gradient(circle at 0 100%, transparent 0, transparent 3.5px, #000 4px);
+  mask-size: 100% 51%;
+  mask-position: 0 0, 0 100%;
+  mask-repeat: no-repeat;
+}
 .lk-stack-n b,
 .lk-left b {
+  display: inline-block;
   margin-left: 4px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 17px;
@@ -319,6 +456,8 @@
 
 /* 侧栏 / side panels */
 .lk-panel {
+  /* 打孔的「孔」画成卡片底色 / perforation holes are painted in the card colour */
+  --lk-hole: var(--surface);
   min-width: 0;
   padding: 20px;
 }
@@ -351,92 +490,389 @@
   color: var(--text-3);
   word-break: break-word;
 }
-.lk-more {
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--purple-hi);
-}
-.lk-more:hover {
-  color: var(--purple-soft);
-}
 
-/* 票根 / ticket stubs: a deep-violet body with a fine printed security hatch, a solid stub on the right
-   and a dashed tear line between, with two half-round notches bitten out in the card colour. */
+/* 票根：印在深紫卡纸上的入场券。左边一条镭射烫金防伪条，底纹是扭索纹 + 一行微缩字，整张带极淡纸纹；
+   主券和存根之间是真打孔撕线，上下两个半圆缺口是遮罩挖空的（透出面板底色）。存根上是金属质感的张数、
+   装饰条码和竖排序号（发放日月 + 第几批，纯装饰）。「再来一次」退回的券换成暖金卡纸和金箔。
+   约每 9 秒一道斜光从上到下依次扫过（--i 错开），箔条颜色跟着流动。
+   Ticket stubs: an admission ticket printed on deep-violet card stock, with a holographic foil stripe on
+   the left, a guilloche + micro-print security pattern and faint paper grain. A real perforation splits
+   main and stub; the two half-round notches are cut out by a mask, so the panel shows through. The stub
+   carries a metallic count, a decorative barcode and a vertical serial (issue day/month + batch number,
+   decoration only). Spin-again refunds use warm gold stock and gold foil. Roughly every 9 s a diagonal
+   sheen sweeps down the wallet, staggered by --i, and the foil colours shift with it. */
 .lk-tickets {
   display: grid;
   gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .lk-ticket {
+  --stub: 84px;
+  --tk-stock: linear-gradient(100deg, #2c1769 0, #221156 48%, #1b0d45 100%);
+  --tk-edge: linear-gradient(120deg, rgba(190, 172, 255, 0.46) 0, rgba(120, 96, 230, 0.14) 30%, rgba(150, 212, 255, 0.3) 58%, rgba(120, 96, 230, 0.12) 78%, rgba(232, 172, 255, 0.38) 100%);
+  --tk-stub: linear-gradient(180deg, rgba(124, 86, 255, 0.36) 0, rgba(90, 34, 238, 0.2) 100%);
+  --tk-ink-a: rgba(168, 140, 255, 0.06);
+  --tk-ink-b: rgba(150, 205, 255, 0.15);
+  --tk-ink-c: rgba(224, 168, 255, 0.2);
+  --tk-ros: linear-gradient(135deg, rgba(205, 192, 255, 0.22) 0, rgba(150, 210, 255, 0.13) 50%, rgba(232, 176, 255, 0.22) 100%);
+  --tk-kicker: #bbaaff;
+  --tk-date: #aea8cc;
+  --tk-stub-ink: #c6baff;
+  --tk-serial: rgba(198, 186, 255, 0.62);
+  --tk-ico: #bbaaff;
+  --tk-n: linear-gradient(180deg, #ffffff 0, #ebe5ff 40%, #ab9cff 56%, #c4e8ff 74%, #f5f2ff 100%);
+  --tk-foil: repeating-linear-gradient(180deg, #7a63f0 0, #b7a6ff 10px, #e6deff 18px, #9fd0f2 28px, #7c5cf6 40px, #5b3fe0 48px, #c99cf6 60px, #f2dcfb 68px, #a48fff 80px, #7a63f0 96px);
   position: relative;
   display: flex;
-  min-height: 62px;
+  /* 至少 80px；系统放大字号时能长高，不裁字 / at least 80px; grows when the system scales text */
+  min-height: 80px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--text);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 .09 0 0 0 0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 140px 140px repeat padding-box,
+    var(--tk-stock) padding-box,
+    var(--tk-edge) border-box;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), inset 0 -1px 0 rgba(0, 0, 0, 0.3);
+  /* two real half-circle notches at the perforation (seam = stub's left edge, +1px border) */
+  -webkit-mask-image:
+    radial-gradient(circle at calc(100% - var(--stub) - 1px) 0, transparent 0, transparent 7px, #000 7.5px),
+    radial-gradient(circle at calc(100% - var(--stub) - 1px) 100%, transparent 0, transparent 7px, #000 7.5px);
+  -webkit-mask-size: 100% 51%;
+  -webkit-mask-position: 0 0, 0 100%;
+  -webkit-mask-repeat: no-repeat;
+  mask-image:
+    radial-gradient(circle at calc(100% - var(--stub) - 1px) 0, transparent 0, transparent 7px, #000 7.5px),
+    radial-gradient(circle at calc(100% - var(--stub) - 1px) 100%, transparent 0, transparent 7px, #000 7.5px);
+  mask-size: 100% 51%;
+  mask-position: 0 0, 0 100%;
+  mask-repeat: no-repeat;
 }
+@media (max-width: 400px) {
+  .lk-ticket {
+    --stub: 78px;
+  }
+}
+
+/* guilloche rope — main body only, iridescent ink, phase shifted per ticket */
+.lk-ticket::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: var(--stub);
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(100deg, var(--tk-ink-a) 0, var(--tk-ink-b) 48%, var(--tk-ink-c) 82%, var(--tk-ink-a) 100%);
+  -webkit-mask-image: url('./art/ticket-guilloche.svg');
+  -webkit-mask-size: 120px 80px;
+  -webkit-mask-repeat: repeat-x;
+  -webkit-mask-position: calc(var(--i, 0) * -37px) 50%;
+  mask-image: url('./art/ticket-guilloche.svg');
+  mask-size: 120px 80px;
+  mask-repeat: repeat-x;
+  mask-position: calc(var(--i, 0) * -37px) 50%;
+}
+
+/* light sweep — parked off the left edge, plays occasionally (see motion block) */
+.lk-ticket::after {
+  content: '';
+  position: absolute;
+  top: -30%;
+  bottom: -30%;
+  left: 0;
+  width: 42%;
+  z-index: 2;
+  pointer-events: none;
+  background: linear-gradient(105deg, rgba(255, 255, 255, 0) 0, rgba(150, 210, 255, 0.06) 30%, rgba(255, 255, 255, 0.18) 48%, rgba(255, 255, 255, 0.05) 56%, rgba(255, 170, 235, 0.08) 66%, rgba(255, 255, 255, 0) 100%);
+  transform: translateX(-120%);
+}
+
+/* holographic foil stripe — laminated, runs edge to edge */
+.lk-ticket-foil {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 14px;
+  width: 11px;
+  z-index: 1;
+  overflow: hidden;
+  box-shadow: -1px 0 0 rgba(6, 2, 20, 0.45), 1px 0 0 rgba(6, 2, 20, 0.45);
+}
+.lk-ticket-foil::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(100% + 96px);
+  background: var(--tk-foil);
+}
+.lk-ticket-foil::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12' fill='none' stroke-linejoin='round'%3E%3Cpath d='M6 2.2 10.4 10H1.6Z' stroke='rgba(255,255,255,.75)' stroke-width='1' transform='translate(0 .6)'/%3E%3Cpath d='M6 2.2 10.4 10H1.6Z' stroke='rgba(24,10,56,.55)' stroke-width='1'/%3E%3Cpath d='M6 2.2V10' stroke='rgba(24,10,56,.35)' stroke-width='.6'/%3E%3C/svg%3E") 50% 50% / 9px 9px no-repeat,
+    repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0, rgba(255, 255, 255, 0.2) 1px, rgba(255, 255, 255, 0) 1px, rgba(255, 255, 255, 0) 3px),
+    linear-gradient(90deg, rgba(16, 6, 44, 0.42) 0, rgba(16, 6, 44, 0) 38%, rgba(255, 255, 255, 0.14) 55%, rgba(16, 6, 44, 0) 72%, rgba(16, 6, 44, 0.36) 100%);
+  box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.3), inset -1px 0 0 rgba(255, 255, 255, 0.14);
+}
+
 .lk-ticket-main {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-width: 0;
-  flex: 1;
+  flex: 1 1 auto;
   flex-direction: column;
   justify-content: center;
-  gap: 4px;
-  padding: 10px 14px;
-  border-radius: 10px 0 0 10px;
-  background:
-    repeating-linear-gradient(-45deg, rgba(146, 132, 255, 0.08) 0, rgba(146, 132, 255, 0.08) 1px, transparent 1px, transparent 6px),
-    #1d1534;
+  padding: 0 14px 10px 38px;
+}
+/* micro-print security line (reads as a fine rule at 1×, as text when magnified) */
+.lk-ticket-main::after {
+  content: '';
+  position: absolute;
+  left: 38px;
+  right: 14px;
+  bottom: 7px;
+  height: 6px;
+  background: var(--tk-kicker);
+  opacity: 0.34;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='168' height='6' viewBox='0 0 168 6'%3E%3Ctext x='0' y='4.9' font-family='monospace' font-size='5' font-weight='700' textLength='164' lengthAdjust='spacingAndGlyphs'%3EPRISMX %C2%B7 SIGNAL LAB %C2%B7 LUCKY DRAW %C2%B7 %3C/text%3E%3C/svg%3E");
+  -webkit-mask-size: 168px 6px;
+  -webkit-mask-repeat: repeat-x;
+  -webkit-mask-position: 0 0;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='168' height='6' viewBox='0 0 168 6'%3E%3Ctext x='0' y='4.9' font-family='monospace' font-size='5' font-weight='700' textLength='164' lengthAdjust='spacingAndGlyphs'%3EPRISMX %C2%B7 SIGNAL LAB %C2%B7 LUCKY DRAW %C2%B7 %3C/text%3E%3C/svg%3E");
+  mask-size: 168px 6px;
+  mask-repeat: repeat-x;
+  mask-position: 0 0;
+}
+.lk-ticket-kicker {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  margin-bottom: 4px;
+  font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--tk-kicker);
+}
+.lk-ticket-kicker em {
+  display: block;
+  flex: none;
+  width: 4px;
+  height: 4px;
+  margin: 0 7px 0 4px;
+  background: var(--lk-accent);
+  transform: rotate(45deg);
 }
 .lk-ticket-reason {
+  display: block;
   overflow: hidden;
-  font-size: 13px;
-  font-weight: 500;
+  /* 2px of clip room above/below for stacked Vietnamese capitals (Ấ Ầ Ổ) and Thai marks;
+     the negative margin keeps the 19px line box, so the ticket layout does not move */
+  margin: -2px 0;
+  padding: 2px 0;
+  font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 19px;
+  letter-spacing: 0.01em;
   color: var(--text);
   white-space: nowrap;
   text-overflow: ellipsis;
+  text-shadow: 0 1px 0 rgba(8, 3, 24, 0.6);
+}
+.lk-ticket-ico {
+  /* preflight 把 svg 设成 block，这里拉回行内 / preflight makes svg block; keep it inline */
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  margin-right: 5px;
+  vertical-align: -2px;
+  color: var(--tk-ico);
 }
 .lk-ticket-date {
+  margin-top: 1px;
+  font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 11px;
-  color: var(--text-3);
+  font-weight: 500;
+  line-height: 15px;
+  letter-spacing: 0.02em;
+  color: var(--tk-date);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
+
 .lk-ticket-stub {
   position: relative;
   display: flex;
-  width: 72px;
   flex: none;
+  width: var(--stub);
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-left: 2px dashed rgba(12, 12, 14, 0.6);
-  border-radius: 0 10px 10px 0;
-  background: var(--purple);
-  color: #fff;
+  padding: 0 14px 0 4px;
+  background: var(--tk-stub);
+  color: var(--tk-stub-ink);
+  box-shadow: inset 1px 0 0 rgba(0, 0, 0, 0.28);
 }
-.lk-ticket-stub::before,
+/* punched perforation: shadowed top edge, lit bottom rim, hole in the panel colour */
+.lk-ticket-stub::before {
+  content: '';
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: -3px;
+  width: 6px;
+  z-index: 3;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 3px 3.5px, var(--lk-hole) 0, var(--lk-hole) 1.4px, rgba(0, 0, 0, 0) 1.9px),
+    radial-gradient(circle at 3px 4.2px, rgba(255, 255, 255, 0.22) 0, rgba(255, 255, 255, 0.22) 1.5px, rgba(255, 255, 255, 0) 2px),
+    radial-gradient(circle at 3px 3px, rgba(0, 0, 0, 0.55) 0, rgba(0, 0, 0, 0.55) 1.7px, rgba(0, 0, 0, 0) 2.2px);
+  background-size: 6px 7px;
+  background-repeat: repeat-y;
+  background-position: 0 50%;
+}
+/* rosette security print behind the count */
 .lk-ticket-stub::after {
   content: '';
   position: absolute;
-  left: -8px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: var(--surface);
-}
-.lk-ticket-stub::before {
-  top: -7px;
-}
-.lk-ticket-stub::after {
-  bottom: -7px;
+  top: 50%;
+  left: calc(50% - 5px);
+  width: 70px;
+  height: 70px;
+  margin: -35px 0 0 -35px;
+  pointer-events: none;
+  background: var(--tk-ros);
+  -webkit-mask-image: url('./art/ticket-rosette.svg');
+  -webkit-mask-size: 70px 70px;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: url('./art/ticket-rosette.svg');
+  mask-size: 70px 70px;
+  mask-repeat: no-repeat;
 }
 .lk-ticket-n {
+  position: relative;
+  z-index: 1;
+  display: block;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 18px;
+  font-size: 26px;
   font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  color: #f1edff;
+  background: var(--tk-n);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  -webkit-filter: drop-shadow(0 1px 0 rgba(10, 4, 30, 0.55));
+  filter: drop-shadow(0 1px 0 rgba(10, 4, 30, 0.55));
 }
-.lk-ticket.is-retry .lk-ticket-main {
-  background:
-    repeating-linear-gradient(-45deg, rgba(224, 168, 60, 0.09) 0, rgba(224, 168, 60, 0.09) 1px, transparent 1px, transparent 6px),
-    #211b12;
+.lk-ticket-n i {
+  margin-right: 1px;
+  font-size: 15px;
+  font-style: normal;
+  font-weight: 500;
+  vertical-align: 5px;
 }
-.lk-ticket.is-retry .lk-ticket-stub {
-  background: var(--gold);
-  color: #141418;
+.lk-ticket-code {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 46px;
+  height: 8px;
+  margin-top: 7px;
+  background: currentColor;
+  opacity: 0.6;
+  -webkit-mask-image: url('./art/ticket-barcode.svg');
+  -webkit-mask-size: 104px 8px;
+  -webkit-mask-repeat: repeat-x;
+  -webkit-mask-position: calc(var(--i, 0) * -19px) 0;
+  mask-image: url('./art/ticket-barcode.svg');
+  mask-size: 104px 8px;
+  mask-repeat: repeat-x;
+  mask-position: calc(var(--i, 0) * -19px) 0;
+}
+.lk-ticket-serial {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 4px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 8px;
+  font-weight: 500;
+  line-height: 10px;
+  letter-spacing: 0.16em;
+  color: var(--tk-serial);
+  white-space: nowrap;
+  -webkit-writing-mode: vertical-rl;
+  writing-mode: vertical-rl;
+  transform: translateY(-50%) rotate(180deg);
+}
+
+/* retry refund — gold foil on warm card stock */
+.lk-ticket.is-retry {
+  --tk-stock: linear-gradient(100deg, #2f2310 0, #251a0b 48%, #1d1509 100%);
+  --tk-edge: linear-gradient(120deg, rgba(248, 214, 140, 0.5) 0, rgba(224, 168, 60, 0.14) 30%, rgba(255, 236, 190, 0.32) 58%, rgba(224, 168, 60, 0.12) 78%, rgba(240, 190, 96, 0.42) 100%);
+  --tk-stub: linear-gradient(180deg, rgba(224, 168, 60, 0.3) 0, rgba(224, 168, 60, 0.14) 100%);
+  --tk-ink-a: rgba(224, 168, 60, 0.06);
+  --tk-ink-b: rgba(255, 216, 146, 0.14);
+  --tk-ink-c: rgba(240, 186, 92, 0.19);
+  --tk-ros: linear-gradient(135deg, rgba(255, 222, 160, 0.22) 0, rgba(224, 168, 60, 0.12) 50%, rgba(255, 232, 186, 0.22) 100%);
+  --tk-kicker: #e9c57c;
+  --tk-date: #bbae95;
+  --tk-stub-ink: #f0cd84;
+  --tk-serial: rgba(244, 212, 146, 0.62);
+  --tk-ico: #f0c56e;
+  --tk-n: linear-gradient(180deg, #fff8e2 0, #f6dc98 40%, #ebb553 57%, #f4cb74 74%, #fff1cc 100%);
+  --tk-foil: repeating-linear-gradient(180deg, #8f5f17 0, #d9a446 12px, #fbe7b0 20px, #e9b85a 30px, #a46d1c 42px, #7a4b0f 50px, #e1aa4c 62px, #fff1cc 70px, #c58b2f 82px, #8f5f17 96px);
+}
+.lk-ticket.is-retry .lk-ticket-reason {
+  text-shadow: 0 1px 0 rgba(20, 12, 2, 0.6);
+}
+
+/* 展开其余 N 批 — a dashed "tear line" button */
+.lk-more {
+  display: flex;
+  width: 100%;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 12px;
+  padding: 0;
+  border: 1px dashed rgba(146, 132, 255, 0.26);
+  border-radius: 10px;
+  background: rgba(146, 132, 255, 0.04);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--purple-hi);
+  cursor: pointer;
+  transition: color 0.18s var(--ease-out), border-color 0.18s var(--ease-out), background-color 0.18s var(--ease-out);
+}
+.lk-more svg {
+  margin-left: 6px;
+}
+.lk-more:hover {
+  border-color: rgba(146, 132, 255, 0.45);
+  background: rgba(146, 132, 255, 0.08);
+  color: var(--purple-soft);
 }
 
 /* 奖品 / prizes */
@@ -712,21 +1148,65 @@
   overflow: visible;
 }
 
-.lk-stack-fly {
-  opacity: 0;
+/* 动效默认开启，系统开了「减少动态效果」时在最后统一关掉。不用 no-preference 包起来：
+   Chrome 70–73 不认识这个媒体特性，包起来的话旧 WebView 上所有动画都不播。
+   Motion is on by default and switched off at the end under prefers-reduced-motion: reduce. It is not
+   wrapped in an opt-in no-preference block: Chrome 70–73 don't know that media feature, so old WebViews
+   would lose every animation. */
+.lk-scrim {
+  animation: lk-fade 0.2s var(--ease-out) both;
 }
-@media (prefers-reduced-motion: no-preference) {
-  .lk-scrim {
-    animation: lk-fade 0.2s var(--ease-out) both;
+.lk-reveal {
+  animation: lk-pop 0.55s var(--spring) both;
+}
+.lk-reveal-art {
+  animation: lk-stamp 0.7s var(--spring) 0.1s both;
+}
+/* 斜光每 9 秒扫一次，往下每张晚 140ms / one slow sweep every 9 s, 140 ms later per ticket down the wallet */
+.lk-ticket::after,
+.lk-ticket-foil::before {
+  animation-duration: 9s;
+  animation-timing-function: cubic-bezier(0.45, 0.05, 0.2, 1);
+  animation-iteration-count: infinite;
+  animation-fill-mode: both;
+  animation-delay: calc(1.2s + var(--i, 0) * 0.14s);
+}
+.lk-ticket::after {
+  animation-name: lk-sheen;
+}
+.lk-ticket-foil::before {
+  animation-name: lk-foil;
+}
+.lk-stack-cards i:nth-child(3)::after {
+  animation: lk-sheen 9s cubic-bezier(0.45, 0.05, 0.2, 1) 2s infinite both;
+}
+/* 撕券只播一次，720ms；新的 .lk-stack-fly（换 key）会重播 / one-shot tear, 720 ms; a new .lk-stack-fly (new key) replays it */
+.lk-stack-fly::before {
+  animation: lk-tear-main 0.72s cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
+}
+.lk-stack-fly::after {
+  animation: lk-tear-stub 0.72s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+}
+.lk-stack-n b.is-bump {
+  animation: lk-bump 0.45s var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lk-scrim,
+  .lk-reveal,
+  .lk-reveal-art,
+  .lk-ticket::after,
+  .lk-ticket-foil::before,
+  .lk-stack-cards i:nth-child(3)::after,
+  .lk-stack-fly::before,
+  .lk-stack-fly::after,
+  .lk-stack-n b.is-bump {
+    animation: none;
   }
-  .lk-reveal {
-    animation: lk-pop 0.55s var(--spring) both;
+  .lk-stack-fly {
+    display: none;
   }
-  .lk-reveal-art {
-    animation: lk-stamp 0.7s var(--spring) 0.1s both;
-  }
-  .lk-stack-cards .lk-stack-fly {
-    animation: lk-fly 0.75s var(--ease-out) forwards;
+  .lk-stack-cards i:not(.lk-stack-fly) {
+    transition: none;
   }
 }
 @keyframes lk-fade {
@@ -754,14 +1234,72 @@
     transform: none;
   }
 }
-@keyframes lk-fly {
+@keyframes lk-sheen {
+  0% {
+    transform: translateX(-120%);
+  }
+  15% {
+    transform: translateX(260%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+@keyframes lk-foil {
+  0% {
+    transform: translateY(0);
+  }
+  15% {
+    transform: translateY(-96px);
+  }
+  100% {
+    transform: translateY(-96px);
+  }
+}
+@keyframes lk-tear-main {
+  0% {
+    opacity: 1;
+    transform: none;
+    -webkit-filter: none;
+    filter: none;
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-1px, -2px) rotate(-5deg);
+    -webkit-filter: brightness(1.35);
+    filter: brightness(1.35);
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(30px, -34px) rotate(24deg) scale(0.9);
+    -webkit-filter: none;
+    filter: none;
+  }
+}
+@keyframes lk-tear-stub {
   0% {
     opacity: 1;
     transform: none;
   }
+  20% {
+    opacity: 1;
+    transform: translate(1px, 1px) rotate(4deg);
+  }
   100% {
     opacity: 0;
-    transform: translate(16px, -44px) rotate(-18deg);
+    transform: translate(7px, 16px) rotate(-16deg);
+  }
+}
+@keyframes lk-bump {
+  0% {
+    transform: scale(1.32);
+    color: #ffffff;
+  }
+  100% {
+    transform: none;
   }
 }
 @keyframes lk-confetti {

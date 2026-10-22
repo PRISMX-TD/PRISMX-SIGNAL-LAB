@@ -255,29 +255,39 @@
   }
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .lw-hub.is-invite {
-    animation: lw-invite 2.6s var(--ease-in-out) infinite;
-  }
-  /* 有券待抽：两组灯珠缓慢互换 / tickets waiting: the two groups swap slowly */
-  .lw[data-invite] .lw-bulb.is-a .lw-bulb-on {
-    animation: lw-swap 2.4s steps(1, end) infinite;
-  }
+/* 动效默认开启，「减少动态效果」时关掉（Chrome 70–73 不认识 no-preference，包起来旧 WebView 就全不动了）。
+   减弱动效时转盘不转也不庆祝（见 LuckyWheel），所以只需关掉待机的呼吸和灯珠互换。
+   Motion is on by default and off under reduce (Chrome 70–73 don't know no-preference, so an opt-in block
+   would freeze old WebViews). With reduced motion the wheel never spins or celebrates (see LuckyWheel),
+   so only the idle breathing and bulb swap need switching off. */
+.lw-hub.is-invite {
+  animation: lw-invite 2.6s var(--ease-in-out) infinite;
+}
+/* 有券待抽：两组灯珠缓慢互换 / tickets waiting: the two groups swap slowly */
+.lw[data-invite] .lw-bulb.is-a .lw-bulb-on {
+  animation: lw-swap 2.4s steps(1, end) infinite;
+}
+.lw[data-invite] .lw-bulb.is-b .lw-bulb-on {
+  animation: lw-swap 2.4s steps(1, end) -1.2s infinite;
+}
+/* 转动：追光。每颗按序号错开，一圈 0.9 秒 / spinning: a chase, each bulb offset by index, 0.9 s per lap */
+.lw[data-phase='spinning'] .lw-bulb .lw-bulb-on {
+  opacity: 0.12;
+  animation: lw-chase 0.9s linear infinite;
+  animation-delay: calc(var(--k) * -0.9s / var(--nb));
+}
+/* 中奖：齐闪 / win: everything flashes together */
+.lw[data-phase='win'] .lw-bulb .lw-bulb-on {
+  animation: lw-flash 0.32s steps(1, end) 6;
+}
+.lw[data-phase='win'] .lw-bulb.is-b .lw-bulb-on {
+  animation-delay: -0.16s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lw-hub.is-invite,
+  .lw[data-invite] .lw-bulb.is-a .lw-bulb-on,
   .lw[data-invite] .lw-bulb.is-b .lw-bulb-on {
-    animation: lw-swap 2.4s steps(1, end) -1.2s infinite;
-  }
-  /* 转动：追光。每颗按序号错开，一圈 0.9 秒 / spinning: a chase, each bulb offset by index, 0.9 s per lap */
-  .lw[data-phase='spinning'] .lw-bulb .lw-bulb-on {
-    opacity: 0.12;
-    animation: lw-chase 0.9s linear infinite;
-    animation-delay: calc(var(--k) * -0.9s / var(--nb));
-  }
-  /* 中奖：齐闪 / win: everything flashes together */
-  .lw[data-phase='win'] .lw-bulb .lw-bulb-on {
-    animation: lw-flash 0.32s steps(1, end) 6;
-  }
-  .lw[data-phase='win'] .lw-bulb.is-b .lw-bulb-on {
-    animation-delay: -0.16s;
+    animation: none;
   }
 }
 @keyframes lw-invite {
