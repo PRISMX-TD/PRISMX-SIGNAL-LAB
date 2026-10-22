@@ -4,6 +4,7 @@
 // on save. Validation mirrors the backend's odds.validate purely as an early hint; the backend
 // remains the final authority.
 import type { LuckyClaimMode, LuckyPrizeAdmin, LuckyPrizeInput, LuckyPrizeKind, LuckySoldOut } from '../../../api/luckyTypes'
+import { PALETTE } from '../../lucky/LuckyWheel'
 
 export interface PrizeRow {
   key: string; id?: string; name: string; description: string; imageUrl: string; color: string
@@ -32,11 +33,10 @@ const num = (s: string) => (blank(s) ? null : Number(s))
 const bp = (s: string) => Math.round((Number(s) || 0) * 100)
 export const totalPct = (rows: PrizeRow[]) => rows.reduce((a, r) => a + bp(r.probPct), 0) / 100
 
-// 与 components/lucky/LuckyWheel.tsx 的 PALETTE 保持一致：格子没存颜色时转盘按序号取这里的色。
-// Keep in sync with PALETTE in components/lucky/LuckyWheel.tsx: a slot with no saved colour is
-// painted with this palette entry by index.
-const WHEEL_PALETTE = ['#7c5cff', '#2dd4bf', '#f59e0b', '#ef4444', '#3b82f6', '#22c55e', '#ec4899', '#a855f7']
-export const autoColor = (i: number) => WHEEL_PALETTE[i % WHEEL_PALETTE.length]
+// 格子没存颜色时转盘按序号取 LuckyWheel 的 PALETTE；这里直接引用同一份，不再各抄一遍。
+// A slot with no saved colour is painted with LuckyWheel's PALETTE entry by index; import the same
+// array rather than keeping a second copy.
+export const autoColor = (i: number) => PALETTE[i % PALETTE.length]
 
 const isInt = (s: string, min: number) => /^\d+$/.test(s.trim()) && Number(s) >= min
 

@@ -5,7 +5,7 @@
 import type { LuckyPrizePublic } from '../../api/luckyTypes'
 import { slotSpan } from '../../utils/luckyWheel'
 
-const PALETTE = ['#7c5cff', '#2dd4bf', '#f59e0b', '#ef4444', '#3b82f6', '#22c55e', '#ec4899', '#a855f7']
+export const PALETTE = ['#7c5cff', '#2dd4bf', '#f59e0b', '#ef4444', '#3b82f6', '#22c55e', '#ec4899', '#a855f7']
 export const SPIN_MS = 4800
 
 export function prefersReducedMotion(): boolean {

@@ -11,6 +11,7 @@ import LuckyWheel, { SPIN_MS, prefersReducedMotion } from '../components/lucky/L
 import { useAuth } from '../store/auth'
 import { countdownParts } from '../utils/luckyCountdown'
 import { resolveSlot } from '../utils/luckySlot'
+import { isWheelClosed } from '../utils/luckyView'
 import { newRequestId, targetRotation } from '../utils/luckyWheel'
 
 function useCountdown(to: string | undefined) {
@@ -121,8 +122,25 @@ export default function LuckyPage() {
   }
 
   if (!state) return <div className="py-16 text-center text-sm text-neutral-500">{err || t('common.loading')}</div>
-  if (!state.visible || !round || round.phase === 'none' || round.phase === 'ended') {
-    return <div className="card mx-auto max-w-xl p-10 text-center text-neutral-400">{t('lucky.closed')}</div>
+  // 结果弹框在两个分支里都要画：倒计时归零、重载后阶段翻成 ended 时，不能把还没看的结果卸掉。
+  // The result modal is rendered in both branches: when the countdown hits zero and the reload flips
+  // the phase to ended, an unseen result must not be unmounted.
+  const modal = result && (
+    <ResultModal draw={result} onClose={() => setResult(null)} onChange={(d) => {
+      setDraws((xs) => xs.map((x) => (x.id === d.id ? d : x)))
+      setResult({ ...result, ...d })
+    }} navigate={navigate} />
+  )
+  if (isWheelClosed(state) || !round) {
+    // 关闭时仍显示「我的奖品」：奖品没有系统领取期限，期结束后用户还要能领奖。
+    // Still show "My prizes" while closed: no system claim deadline, winners claim after the round.
+    return (
+      <div className="mx-auto max-w-xl space-y-5">
+        <div className="card p-10 text-center text-neutral-400">{t('lucky.closed')}</div>
+        {draws.length > 0 && <MyPrizes draws={draws} onChange={setDraws} navigate={navigate} />}
+        {modal}
+      </div>
+    )
   }
 
   const canSpin = round.phase === 'active' && state.tickets.unused > 0 && !spinning
@@ -188,10 +206,7 @@ export default function LuckyPage() {
         <MyPrizes draws={draws} onChange={setDraws} navigate={navigate} />
       </aside>
 
-      {result && <ResultModal draw={result} onClose={() => setResult(null)} onChange={(d) => {
-        setDraws((xs) => xs.map((x) => (x.id === d.id ? d : x)))
-        setResult({ ...result, ...d })
-      }} navigate={navigate} />}
+      {modal}
     </div>
   )
 }
