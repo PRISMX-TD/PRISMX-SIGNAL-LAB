@@ -2192,3 +2192,124 @@ class SupportAction(Base):
     kind = Column(String, nullable=False)
     data = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 幸运轮盘（rev 45，设计 docs/superpowers/specs/2026-10-22-lucky-wheel-design.md）
+# Lucky wheel (rev 45; see the 2026-10-22 lucky-wheel design).
+# 全站只有一个轮盘：奖项是全局的一套，「期」只管开放时间；券属于发放时的那一期，
+# 有效期 = 那一期的 ends_at（不在券上另存，延长结束时间券就跟着延长）。
+# One wheel for the whole site: prizes are one global set, a round only carries the
+# open window; a ticket belongs to the round it was issued in and is valid until that
+# round's ends_at (not stored per ticket, so extending the round extends every ticket).
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class LuckyRound(Base):
+    """一期：开放时间窗口。同一时间最多一期未结束（ended_at 为空）。
+    One round: the open window. At most one round is unended (ended_at NULL) at a time."""
+    __tablename__ = "lucky_wheel_rounds"
+    __table_args__ = (Index("idx_lucky_rounds_ended_ends", "ended_at", "ends_at"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    starts_at = Column(DateTime, nullable=False)
+    ends_at = Column(DateTime, nullable=False)
+    # 实际结束时刻：到点或管理员「立即结束」，作废跑完才写 / set once voiding has run
+    ended_at = Column(DateTime, nullable=True)
+    reminder_sent_at = Column(DateTime, nullable=True)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class LuckyPrize(Base):
+    """轮盘上的一格。抽中过的不硬删，只下架（archived）——抽奖记录要能对上。
+    One wheel slot. A slot that has been won is archived, never hard-deleted."""
+    __tablename__ = "lucky_wheel_prizes"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    sort_order = Column(Integer, nullable=False, default=0)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    image_url = Column(String, nullable=True)
+    color = Column(String, nullable=True)
+    kind = Column(String, nullable=False)              # pro_days / none / retry / custom
+    pro_days = Column(Integer, nullable=True)
+    prob_bp = Column(Integer, nullable=False, default=0)  # 万分比 / basis points of 10000
+    stock = Column(Integer, nullable=True)             # NULL = 不限 / unlimited
+    stock_used = Column(Integer, nullable=False, default=0)
+    per_user_limit = Column(Integer, nullable=True)    # 每期每人最多中几次 / per user per round
+    on_sold_out = Column(String, nullable=False, default="to_fallback")
+    claim_mode = Column(String, nullable=True)         # custom 才有：form / ticket
+    claim_hint = Column(String, nullable=True)
+    archived = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, default=_now)
+
+
+class LuckyTicketBatch(Base):
+    """一次发券。notified_at 为空 = 发的时候轮盘关着，打开开关时补通知。
+    One issuance. notified_at NULL = issued while the wheel was hidden; notified on open."""
+    __tablename__ = "lucky_ticket_batches"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    round_id = Column(String, ForeignKey("lucky_wheel_rounds.id"), nullable=False, index=True)
+    reason = Column(String, nullable=False)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=_now)
+    user_count = Column(Integer, nullable=False, default=0)
+    ticket_count = Column(Integer, nullable=False, default=0)
+    notified_at = Column(DateTime, nullable=True)
+    # 前端每次点「确认发放」生成一次：网络重试不会发两批 / one per confirm click
+    request_id = Column(String, nullable=False, unique=True)
+
+
+class LuckyTicket(Base):
+    """一张券一行（逐张可查）。状态 unused → used / voided / revoked。
+    One row per ticket. Status unused → used / voided / revoked."""
+    __tablename__ = "lucky_tickets"
+    __table_args__ = (
+        Index("idx_lucky_tickets_user_round_status", "user_id", "round_id", "status"),
+        Index("idx_lucky_tickets_round_status", "round_id", "status"),
+        Index("idx_lucky_tickets_batch", "batch_id"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    round_id = Column(String, ForeignKey("lucky_wheel_rounds.id"), nullable=False)
+    batch_id = Column(String, ForeignKey("lucky_ticket_batches.id"), nullable=True)  # retry 补发为空
+    source = Column(String, nullable=False)       # manual / comp_rank / board_rank / retry
+    source_ref = Column(String, nullable=True)    # 比赛 id / "board:period" / 产生它的抽奖记录 id
+    rank = Column(Integer, nullable=True)
+    status = Column(String, nullable=False, default="unused")
+    issued_at = Column(DateTime, default=_now)
+    used_at = Column(DateTime, nullable=True)
+    voided_at = Column(DateTime, nullable=True)
+
+
+class LuckyDraw(Base):
+    """一次抽奖。prize_snapshot 是抽中那一刻奖项的 JSON（改配置不影响历史账）。
+    ticket_id 唯一：并发下同一张券最多落一条；(user_id, request_id) 唯一：重放返回同一条。
+    One spin. prize_snapshot freezes the slot as it was. ticket_id unique so a ticket lands
+    at most once under concurrency; (user_id, request_id) unique so a replay returns the same row."""
+    __tablename__ = "lucky_draws"
+    __table_args__ = (
+        UniqueConstraint("user_id", "request_id", name="uq_lucky_draw_request"),
+        Index("idx_lucky_draws_user_round", "user_id", "round_id"),
+        Index("idx_lucky_draws_round_created", "round_id", "created_at"),
+        Index("idx_lucky_draws_fulfillment", "fulfillment_status", "created_at"),
+    )
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    round_id = Column(String, ForeignKey("lucky_wheel_rounds.id"), nullable=False)
+    ticket_id = Column(String, ForeignKey("lucky_tickets.id"), nullable=False, unique=True)
+    prize_id = Column(String, ForeignKey("lucky_wheel_prizes.id"), nullable=False)
+    prize_snapshot = Column(Text, nullable=False)
+    request_id = Column(String, nullable=False)
+    created_at = Column(DateTime, default=_now)
+    # auto_done / pending / submitted / delivered / cancelled
+    fulfillment_status = Column(String, nullable=False)
+    claim_info = Column(Text, nullable=True)       # 可能含地址：只给本人与管理员看 / may hold an address
+    support_ticket_id = Column(String, ForeignKey("tickets.id"), nullable=True)
+    handled_by = Column(String, ForeignKey("users.id"), nullable=True)
+    handled_at = Column(DateTime, nullable=True)
+    admin_note = Column(String, nullable=True)     # 发放备注或取消原因（用户看得到）

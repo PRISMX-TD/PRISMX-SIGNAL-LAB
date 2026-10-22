@@ -403,7 +403,9 @@ def _hash_legacy_api_tokens() -> None:
 #          revoked）。小表，幂等。
 # rev 44 — 自动邮件（2026-10-21）：新表 email_automations / email_automation_sends（create_all
 #          建表建索引）。同 rev 39：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
-CURRENT_SCHEMA_REV = 44
+# rev 45 — 幸运轮盘（2026-10-22）：新表 lucky_wheel_rounds / lucky_wheel_prizes / lucky_ticket_batches /
+#          lucky_tickets / lucky_draws（create_all 建表建索引）。同 rev 44：无 ADD COLUMN、无回填。
+CURRENT_SCHEMA_REV = 45
 
 _SCHEMA_REV_KEY = "schema_rev"
 
