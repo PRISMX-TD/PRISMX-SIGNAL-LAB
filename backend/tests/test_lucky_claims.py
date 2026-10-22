@@ -226,7 +226,7 @@ def test_deliver_and_cancel_also_push(people, monkeypatch):
     router.admin_cancel(d2.id, LuckyHandleIn(note="联系不上"), db, admin, background_tasks=bt2)
     for t in bt.tasks + bt2.tasks:
         t.func(*t.args, **t.kwargs)
-    assert [g[0] for g in got] == [[u.id], [u.id]] and {g[4] for g in got} == {"/lucky"}
+    assert [g[0] for g in got] == [[u.id], [u.id]] and {g[4] for g in got} == {"/lucky/prizes"}
     assert "手表" in got[0][3] and "联系不上" in got[1][3] and got[0][2] != got[1][2]
 
 

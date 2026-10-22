@@ -2450,6 +2450,12 @@
     "issuedOn": "Phát ngày {{time}}",
     "more": "Xem thêm {{n}}",
     "fewer": "Thu gọn",
+    "fillClaim": "Điền thông tin nhận thưởng",
+    "prizesSub": "Lịch sử trúng thưởng và tiến độ nhận thưởng",
+    "filterDone": "Hoàn tất",
+    "noPrizesHint": "Phần thưởng bạn trúng sẽ hiện ở đây, quà cũng được nhận tại trang này",
+    "dayCount": "{{n}} mục",
+    "prizesTotal": "Tổng {{n}} phần thưởng",
     "slots": "{{n}} ô",
     "kindTag": {
       "pro_days": "Hội viên",

@@ -2994,7 +2994,8 @@
         "/app-download": "App download",
         "/simulator": "Signal replay",
         "/agent": "Agent view",
-        "/lucky": "Lucky wheel"
+        "/lucky": "Lucky wheel",
+        "/lucky/prizes": "My prizes"
       }
     },
     "searchPlaceholder": "Search by nickname, email or phone…",
@@ -5142,6 +5143,12 @@
     "issuedOn": "Issued {{time}}",
     "more": "Show {{n}} more",
     "fewer": "Show less",
+    "fillClaim": "Fill in claim details",
+    "prizesSub": "Every win and its claim progress",
+    "filterDone": "Completed",
+    "noPrizesHint": "Prizes you win are listed here, and gifts are claimed from this page",
+    "dayCount": "{{n}} won",
+    "prizesTotal": "{{n}} prizes in total",
     "slots": "{{n}} slots",
     "kindTag": {
       "pro_days": "PRO",

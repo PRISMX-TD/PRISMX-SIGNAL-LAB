@@ -2986,7 +2986,8 @@
         "/app-download": "下载 App",
         "/simulator": "信号回放",
         "/agent": "代理页面",
-        "/lucky": "幸运轮盘"
+        "/lucky": "幸运轮盘",
+        "/lucky/prizes": "我的奖品"
       }
     },
     "searchPlaceholder": "按昵称、邮箱或手机号搜索…",
@@ -5132,6 +5133,12 @@
     "issuedOn": "{{time}} 发放",
     "more": "展开其余 {{n}} 批",
     "fewer": "收起",
+    "fillClaim": "填写领奖信息",
+    "prizesSub": "每一次中奖和领奖进度都在这里",
+    "filterDone": "已完成",
+    "noPrizesHint": "抽中的奖品会列在这里，礼品也在这里领取",
+    "dayCount": "{{n}} 个",
+    "prizesTotal": "共 {{n}} 个奖品",
     "slots": "共 {{n}} 格",
     "kindTag": {
       "pro_days": "会员",

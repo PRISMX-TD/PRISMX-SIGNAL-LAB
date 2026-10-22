@@ -54,6 +54,7 @@ const TRACKED_PATHS = new Set([
   '/simulator',
   '/agent',
   '/lucky',
+  '/lucky/prizes',
 ])
 
 // 带参路由归一成模板再上报：`/u/gebnck49j5` → `/u/:publicId`。

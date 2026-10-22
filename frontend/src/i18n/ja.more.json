@@ -2450,6 +2450,12 @@
     "issuedOn": "{{time}} 配布",
     "more": "残り {{n}} 件を表示",
     "fewer": "閉じる",
+    "fillClaim": "受取情報を入力",
+    "prizesSub": "当選履歴と受取状況",
+    "filterDone": "完了",
+    "noPrizesHint": "当選した賞品はここに表示され、ギフトもここから受け取れます",
+    "dayCount": "{{n}} 件",
+    "prizesTotal": "合計 {{n}} 件",
     "slots": "全 {{n}} マス",
     "kindTag": {
       "pro_days": "会員",

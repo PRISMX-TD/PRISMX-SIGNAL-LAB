@@ -18,7 +18,7 @@ from app.services.lucky.common import (
 )
 from app.services.notification_feed import KIND_LUCKY_CANCELLED, KIND_LUCKY_DELIVERED, create_notification
 
-LINK = "/lucky"
+LINK = "/lucky/prizes"
 
 
 def _snap(d: LuckyDraw) -> dict:

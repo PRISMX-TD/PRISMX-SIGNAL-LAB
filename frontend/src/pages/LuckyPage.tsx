@@ -21,7 +21,7 @@ import { localizeApiError } from '../api/utils'
 import { FestivalEmptyMini } from '../festival/FestivalDecor'
 import { useFestivalOptional } from '../festival/FestivalProvider'
 import LuckyWheel, { type LuckyWheelHandle } from '../components/lucky/LuckyWheel'
-import { MyPrizes, PrizeList } from '../components/lucky/PrizeBoard'
+import { PrizeList, PrizesEntry } from '../components/lucky/PrizeBoard'
 import ResultReveal from '../components/lucky/ResultReveal'
 import TicketWallet from '../components/lucky/TicketWallet'
 import { playMiss, playRetry, playWin, primeAudio, setSoundEnabled, soundEnabled } from '../components/lucky/luckySound'
@@ -220,7 +220,7 @@ export default function LuckyPage() {
           <p className="lk-closed-title">{t('lucky.closed')}</p>
           <p className="lk-closed-sub">{t('lucky.closedSub')}</p>
         </div>
-        {draws.length > 0 && <MyPrizes draws={draws} onChange={setDraws} navigate={navigate} />}
+        {draws.length > 0 && <PrizesEntry draws={draws} />}
         {modal}
       </div>
     )
@@ -320,7 +320,7 @@ export default function LuckyPage() {
         <aside className="lk-side">
           <TicketWallet unused={unused} batches={cur.tickets.batches} />
           <PrizeList prizes={cur.prizes} />
-          <MyPrizes draws={draws} onChange={setDraws} navigate={navigate} />
+          <PrizesEntry draws={draws} />
         </aside>
       </div>
 

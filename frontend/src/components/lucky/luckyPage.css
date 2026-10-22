@@ -927,47 +927,42 @@
   background: rgb(var(--purple-rgb) / 0.22);
   color: var(--purple-soft);
 }
-.lk-won-row {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+/* 我的奖品入口：整张卡是一个链接，去 /lucky/prizes；有待领取时右边一枚金色计数，没有就只写共几个。
+   The My prizes entry: the whole card links to /lucky/prizes; a gold count when something is waiting,
+   otherwise just the total. */
+.lk-entry {
+  display: flex;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+  transition: background-color var(--dur-base) var(--ease-out);
 }
-.lk-won-row:first-child {
-  padding-top: 0;
-}
-.lk-won-row:last-child {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-.lk-won-claim {
-  margin-top: 10px;
-  padding-left: 44px;
-}
-.lk-won-claim:empty {
-  display: none;
-}
-.lk-status {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-.lk-status.is-done {
-  background: var(--up-bg);
-  color: var(--up);
-}
-.lk-status.is-wait {
-  background: rgb(var(--gold-rgb) / 0.16);
-  color: var(--gold);
-}
-.lk-status.is-busy {
-  background: rgb(var(--purple-rgb) / 0.22);
-  color: var(--purple-soft);
-}
-.lk-status.is-off {
-  background: var(--nest);
+.lk-entry:hover { background: var(--surface-2); }
+.lk-entry-main { flex: 1; min-width: 0; }
+.lk-entry-sub {
+  margin-top: 4px;
+  font-size: 12px;
   color: var(--text-3);
 }
+.lk-entry-badge {
+  flex: none;
+  margin-left: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgb(var(--gold-rgb) / 0.16);
+  box-shadow: inset 0 0 0 1px rgb(var(--gold-rgb) / 0.3);
+  color: var(--gold);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.lk-entry-chev {
+  flex: none;
+  margin-left: 10px;
+  color: var(--text-3);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.lk-entry:hover .lk-entry-chev { transform: translateX(2px); color: var(--text-2); }
 
 /* 关闭 / 加载 / closed and loading */
 .lk-closed {

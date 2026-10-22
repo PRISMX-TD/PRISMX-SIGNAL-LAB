@@ -1,0 +1,285 @@
+/* ═════════════ 我的奖品子页 / My prizes page (/lucky/prizes, 2026-10-22) ═════════════
+   照订单回执页（styles/orders.css 的 .ord-slip）的语言：一个奖品一张回执单——左边时间票根加打孔虚线，
+   右边状态印章，其余分层只靠发丝线与留白。lkp- 前缀只在这页用，不进全站词汇。
+   新写的 CSS 不用 flex gap（App 的 Chrome 70 WebView 不支持），间距一律用 margin。
+   The orders page's receipt language: one slip per prize, a time stub with a perforation on the left and a
+   status stamp on the right; everything else is hairlines and space. lkp- is local to this page. No flex
+   gap here (the App's Chrome 70 WebView lacks it), spacing is margins. */
+.lkp { max-width: 960px; margin: 0 auto; }
+
+.lkp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  margin: 4px -3px 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+}
+.lkp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  margin: 3px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.lkp-chip b {
+  margin-left: 8px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+}
+.lkp-chip:hover { color: var(--text-2); box-shadow: inset 0 0 0 1px var(--line-hi); }
+.lkp-chip.on { background: var(--purple); color: #fff; box-shadow: none; }
+.lkp-chip.on b { color: rgba(255, 255, 255, 0.72); }
+
+.lkp-day {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 22px 4px 10px;
+}
+.lkp-day-d { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.lkp-day-d span { margin-left: 8px; font-weight: 400; color: var(--text-3); }
+.lkp-day-n {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+.lkp-slips > * + * { margin-top: 8px; }
+
+/* ── 回执单 / the slip ── 四列：票根 · 奖品 · 领奖按钮 · 印章；表单展开时占第二行整行。
+   Four columns: stub · prize · claim button · stamp; the claim form takes a full second row. */
+.lkp-slip {
+  position: relative;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto auto;
+  grid-template-areas: "stub body act stamp" "form form form form";
+  align-items: center;
+  background: var(--surface);
+  border-radius: var(--r-panel);
+  transition: background-color var(--dur-base) var(--ease-out);
+  animation: lkp-in 0.5s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+.lkp-slip:hover { background: var(--surface-2); }
+.lkp-slip[data-status="cancelled"] > * { opacity: 0.6; }
+.lkp-stub {
+  grid-area: stub;
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  min-height: 64px;
+  padding: 14px 14px 14px 18px;
+  border-right: 1px dashed var(--line-hi);
+}
+/* 票根打孔：两枚半圆缺口，填画布色 / ticket notches in canvas colour */
+.lkp-stub::before,
+.lkp-stub::after {
+  content: "";
+  position: absolute;
+  right: -6.5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  z-index: 1;
+}
+.lkp-stub::before { top: -6px; }
+.lkp-stub::after { bottom: -6px; }
+.lkp-stub-t {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.lkp-stub-a {
+  margin-top: 7px;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lkp-body {
+  grid-area: body;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 12px 18px;
+}
+.lkp-body > :first-child { flex: none; }
+.lkp-ident { min-width: 0; margin-left: 12px; }
+.lkp-name {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lkp-msg {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.lkp-msg.bad { color: var(--down); }
+.lkp-act { grid-area: act; padding: 12px 4px; }
+.lkp-btn { height: 30px; padding: 0 14px; font-size: 12px; white-space: nowrap; }
+.lkp-stampcell {
+  grid-area: stamp;
+  display: flex;
+  justify-content: flex-end;
+  min-width: 132px;
+  padding: 12px 20px 12px 12px;
+}
+/* 印章：1.5px 描边、微倾 4°、等宽大写；颜色是状态，不是装饰。
+   The stamp: 1.5px stroke, 4° tilt, mono caps; its colour is the status. */
+.lkp-stamp {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10.5px;
+  line-height: 1;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transform: rotate(-4deg);
+  opacity: 0.9;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.lkp-stamp i {
+  width: 3px;
+  height: 3px;
+  margin: 0 7px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+.lkp-stamp .zh { font-size: 11px; letter-spacing: 0.06em; text-transform: none; }
+.lkp-slip:hover .lkp-stamp { opacity: 1; }
+.lkp-slip[data-status="pending"] .lkp-stamp { color: var(--mid); animation: breathe 2.4s ease-in-out infinite; }
+.lkp-slip[data-status="submitted"] .lkp-stamp { color: var(--purple); }
+.lkp-slip[data-status="delivered"] .lkp-stamp,
+.lkp-slip[data-status="auto_done"] .lkp-stamp { color: var(--up); }
+.lkp-slip[data-status="cancelled"] .lkp-stamp { color: var(--text-3); }
+
+.lkp-form {
+  grid-area: form;
+  padding: 14px 20px 16px 130px;
+  border-top: 1px dashed var(--line-hi);
+}
+
+/* 加载 / 空 / 错 — loading, empty, error */
+.lkp-slip.is-skel { height: 64px; animation: none; }
+.lkp-slip.is-skel:hover { background: var(--surface); }
+.lkp-ghost {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  margin-top: 22px;
+  border: 1px dashed var(--line-hi);
+  border-radius: var(--r-panel);
+}
+.lkp-ghost-t {
+  padding: 18px 14px 18px 18px;
+  border-right: 1px dashed var(--line-hi);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.lkp-ghost-b { padding: 18px 20px; }
+.lkp-ghost-b b { display: block; font-size: 14px; font-weight: 500; color: var(--text-2); }
+.lkp-ghost-b p { margin: 6px 0 0; max-width: 44ch; font-size: 12.5px; color: var(--text-3); }
+.lkp-err { margin-top: 20px; font-size: 13px; color: var(--down); }
+
+@keyframes lkp-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── 手机：三行（票根 + 印章 / 奖品 / 按钮）── phones: stub + stamp / prize / button */
+@media (max-width: 767px) {
+  .lkp-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .lkp-chips::-webkit-scrollbar { display: none; }
+  .lkp-chip { flex: none; }
+  .lkp-slip {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "stub stamp" "body body" "act act" "form form";
+  }
+  .lkp-stub {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 0;
+    padding: 12px 16px;
+    border-right: 0;
+    border-bottom: 1px dashed var(--line-hi);
+  }
+  .lkp-stub-a { margin: 0 0 0 12px; }
+  .lkp-stub::before { top: auto; right: auto; left: -6px; bottom: -6.5px; }
+  .lkp-stub::after { display: none; }
+  .lkp-stampcell {
+    position: relative;
+    align-self: stretch;
+    align-items: center;
+    min-width: 0;
+    padding: 12px 16px 12px 0;
+    border-bottom: 1px dashed var(--line-hi);
+  }
+  .lkp-stampcell::after {
+    content: "";
+    position: absolute;
+    right: -6px;
+    bottom: -6.5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--bg);
+    z-index: 1;
+  }
+  .lkp-stamp { transform: rotate(-3deg); }
+  .lkp-body { padding: 14px 16px; }
+  .lkp-act { padding: 0 16px 14px; }
+  .lkp-act:empty { display: none; }
+  .lkp-btn { width: 100%; height: 40px; font-size: 13px; }
+  .lkp-form { padding: 14px 16px 16px; }
+  .lkp-ghost { grid-template-columns: 1fr; }
+  .lkp-ghost-t { border-right: 0; border-bottom: 1px dashed var(--line-hi); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lkp-slip,
+  .lkp-slip[data-status="pending"] .lkp-stamp { animation: none; }
+}
