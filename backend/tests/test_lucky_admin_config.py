@@ -249,6 +249,29 @@ def test_stock_cannot_drop_below_used(db_session, admin):
     assert out["prizes"][0]["stockUsed"] == 4
 
 
+def test_stock_floor_uses_fresh_used_count_not_the_cached_one(db_session, admin):
+    """会话里已缓存的奖项（路由先读一遍做审计快照）不能拿来比份数下限：另一个事务（开奖）刚把已发出数
+    加上去，保存要按最新值拒绝。
+    The prize rows cached in the session (the router reads them first for the audit snapshot) must
+    not drive the stock floor: a spin in another transaction just bumped stock_used, and the save must
+    see it."""
+    from sqlalchemy.orm import Session
+
+    r = _create(db_session, admin, mode="qty")
+    out = _save(db_session, admin, r["id"], "qty", [P(name="A", kind="retry", stock=5), P(stock=1)])
+    pid = out["prizes"][0]["id"]
+    cached = db_session.get(LuckyPrize, pid)   # 持有引用，身份映射里留着旧值 / hold it so the identity map keeps the old value
+    assert cached.stock_used == 0
+    other = Session(bind=db_session.get_bind())
+    other.get(LuckyPrize, pid).stock_used = 4
+    other.commit()
+    other.close()
+    assert cached.stock_used == 0   # 本会话里仍是旧值 / still stale in this session
+    with pytest.raises(HTTPException) as e:
+        _save(db_session, admin, r["id"], "qty", [P(id=pid, name="A", kind="retry", stock=3), P(stock=1)])
+    assert e.value.status_code == 400
+
+
 def test_prizes_of_an_ended_round_are_frozen(db_session, admin):
     r = _create(db_session, admin)
     router.admin_end_round(r["id"], db_session, admin)

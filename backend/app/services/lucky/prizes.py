@@ -28,7 +28,17 @@ def save_prizes(db: Session, r: LuckyRound, mode: str, items: list) -> list[Luck
     items are LuckyPrizeIn in wheel order, scoped to this round. With id → update; without → create;
     slots left out are archived, never deleted (draw rows reference them). The mode can't change once
     the round has draws (409): qty and prob draws mean different things and would not add up within one
-    round. qty mode stores no odds (prob_bp = 0). No commit."""
+    round. qty mode stores no odds (prob_bp = 0). No commit.
+
+    先对期行加 FOR UPDATE 并重读：开奖对期行持 FOR KEY SHARE，两者因此串行——正在进行的开奖先落库，
+    这里再查「有没有抽奖记录」、读最新的已发出数；否则一次并发开奖可能在改模式的检查之后才写下记录，
+    或让「份数不能少于已发出数」按旧的已发出数放行。
+    Lock the round FOR UPDATE and reload first: a spin holds FOR KEY SHARE on it, so the two serialise —
+    an in-flight spin lands before the "any draws?" check and the stock-vs-used check read their data;
+    otherwise a concurrent spin could slip a draw in after the mode check, or the stock floor could be
+    checked against a stale used count."""
+    r = (db.query(LuckyRound).filter(LuckyRound.id == r.id).with_for_update()
+         .populate_existing().one())
     if mode != r.mode and db.query(LuckyDraw.id).filter(LuckyDraw.round_id == r.id).first() is not None:
         raise HTTPException(409, "已经有人抽过，不能改模式 / This round already has draws; the mode is fixed")
     drafts = [odds.PrizeDraft(
@@ -39,8 +49,10 @@ def save_prizes(db: Session, r: LuckyRound, mode: str, items: list) -> list[Luck
     errs = odds.validate(mode, drafts)
     if errs:
         raise HTTPException(422, "；".join(errs))
+    # populate_existing：路由先读过一遍上架奖项做审计快照，这里要拿锁之后的最新已发出数
+    # populate_existing: the router already loaded these for the audit snapshot; take post-lock stock_used
     existing = {p.id: p for p in db.query(LuckyPrize)
-                .filter(LuckyPrize.round_id == r.id, LuckyPrize.archived.is_(False))}
+                .filter(LuckyPrize.round_id == r.id, LuckyPrize.archived.is_(False)).populate_existing()}
     now = utcnow()
     kept: list[LuckyPrize] = []
     for order, (i, d) in enumerate(zip(items, drafts)):
