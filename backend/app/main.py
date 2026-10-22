@@ -34,6 +34,7 @@ from app.services.signal_resolution import stale_signal_sweep_loop
 from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 from app.services.background import BackgroundLoops
 from app.services.support_desk import support_desk_loop
+from app.services.lucky.sweep import lucky_wheel_loop
 from app.services import capacity, loop_health
 from app.services.connection_manager import manager
 
@@ -248,6 +249,8 @@ async def lifespan(app: FastAPI):
         "capacity": capacity.capacity_loop,
         # 客服台跟进提醒 / 过期（5 分钟，rev 41）/ support-desk reminders and expiry
         "support_desk": support_desk_loop,
+        # 幸运轮盘：到点作废未用券、结束前 24 小时提醒（60 秒）/ lucky wheel: void at end, 24h reminder
+        "lucky_wheel": lucky_wheel_loop,
     })
     loops.launch()
     app.state.background_loops = loops

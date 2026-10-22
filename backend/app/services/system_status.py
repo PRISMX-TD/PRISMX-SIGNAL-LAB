@@ -57,6 +57,7 @@ LOOP_INTERVALS: dict[str, int] = {
     "signal_engine": 15,
     "capacity": 60,
     "support_desk": 300,            # 客服台跟进提醒 / 过期（rev 41）/ support-desk reminders
+    "lucky_wheel": 60,              # 幸运轮盘作废 / 提醒（rev 45）/ lucky wheel void + reminder
 }
 STALE_DEFAULT = 3600
 LOOP_ERROR_RECENT_SEC = 3600
