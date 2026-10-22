@@ -2558,3 +2558,11 @@ class LuckyIssueIn(BaseModel):
 class LuckyRevokeIn(BaseModel):
     batchId: str | None = None
     userId: str | None = None
+
+
+class LuckyClaimInfoIn(BaseModel):
+    text: str = Field(min_length=1, max_length=1000)
+
+
+class LuckyHandleIn(BaseModel):
+    note: str = Field(default="", max_length=200)

@@ -8,10 +8,13 @@ Lucky-wheel endpoints (rev 45). admin_router guards itself with require_admin (m
 again on include); logic lives in services/lucky/*, this file handles input, the transaction
 boundary and the audit trail.
 """
+import csv
+import io
 import json
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi.responses import Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -20,12 +23,12 @@ from app.core.database import get_db
 from app.core.strategy_limits import user_limiter
 from app.models import LuckyDraw, LuckyTicket, LuckyTicketBatch, User
 from app.schemas import (
-    LuckyIssueIn, LuckyPrizeIn, LuckyRankSourceIn, LuckyRevokeIn, LuckyRoundIn, LuckyRoundPatch, LuckySpinIn,
-    LuckyVisibleIn,
+    LuckyClaimInfoIn, LuckyHandleIn, LuckyIssueIn, LuckyPrizeIn, LuckyRankSourceIn, LuckyRevokeIn, LuckyRoundIn,
+    LuckyRoundPatch, LuckySpinIn, LuckyVisibleIn,
 )
 from app.services.audit import log_change
 from app.services.deps import get_current_user, require_admin
-from app.services.lucky import common, prizes, rounds
+from app.services.lucky import claims, common, prizes, rounds
 from app.services.lucky import issue as issue_svc
 from app.services.lucky import spin as spin_svc
 from app.services.notification_feed import notify_ws
@@ -173,6 +176,60 @@ def admin_batches(db: Session = Depends(get_db), admin: User = Depends(require_a
                          "notified": b.notified_at is not None} for b in rows]}
 
 
+def _csv_cell(v) -> str:
+    """导出给 Excel 打开：以 = + - @ 开头的文本会被当公式，前面补一个单引号（用户填的地址 / 邮箱不可信）。
+    Opened in Excel: text starting with = + - @ runs as a formula, so prefix a quote (user-typed fields are untrusted)."""
+    t = "" if v is None else str(v)
+    return "'" + t if t[:1] in ("=", "+", "-", "@", "\t", "\r") else t
+
+
+# 注意：/draws.csv 必须声明在任何 /draws/{draw_id} 路由之前，否则会被当成 id。
+# /draws.csv must stay declared before any /draws/{draw_id} route or it is read as an id.
+@admin_router.get("/draws")
+def admin_draws(status: str | None = Query(default=None, max_length=16),
+                roundId: str | None = None, userId: str | None = None, prizeId: str | None = None,
+                limit: int = Query(default=50, ge=1, le=200), offset: int = Query(default=0, ge=0),
+                db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    q = claims.admin_query(db, status=status, round_id=roundId, user_id=userId, prize_id=prizeId)
+    total = q.count()
+    return {"total": total, "draws": [claims.admin_row(d, u) for d, u in q.offset(offset).limit(limit)]}
+
+
+@admin_router.get("/draws.csv")
+def admin_draws_csv(status: str | None = Query(default=None, max_length=16), roundId: str | None = None,
+                    db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["时间(UTC)", "邮箱", "昵称", "奖品", "类型", "状态", "领奖信息", "工单", "备注"])
+    for d, u in claims.admin_query(db, status=status, round_id=roundId).limit(20000):
+        r = claims.admin_row(d, u)
+        w.writerow([f"{d.created_at:%Y-%m-%d %H:%M}", _csv_cell(u.email), _csv_cell(u.nickname),
+                    _csv_cell(r["prize"]["name"]), r["prize"]["kind"], d.fulfillment_status,
+                    _csv_cell(d.claim_info), d.support_ticket_id or "", _csv_cell(d.admin_note)])
+    return Response(content=("\ufeff" + buf.getvalue()).encode("utf-8"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="lucky-draws.csv"'})
+
+
+@admin_router.post("/draws/{draw_id}/deliver")
+def admin_deliver(draw_id: str, body: LuckyHandleIn, db: Session = Depends(get_db),
+                  admin: User = Depends(require_admin)):
+    d = claims.deliver(db, admin, draw_id, body.note)
+    _audit(db, admin, "deliver", {"drawId": d.id, "userId": d.user_id, "note": d.admin_note})
+    db.commit()
+    notify_ws(d.user_id)
+    return {"ok": True}
+
+
+@admin_router.post("/draws/{draw_id}/cancel")
+def admin_cancel(draw_id: str, body: LuckyHandleIn, db: Session = Depends(get_db),
+                 admin: User = Depends(require_admin)):
+    d = claims.cancel(db, admin, draw_id, body.note)
+    _audit(db, admin, "cancel", {"drawId": d.id, "userId": d.user_id, "note": d.admin_note})
+    db.commit()
+    notify_ws(d.user_id)
+    return {"ok": True}
+
+
 # ---- 用户端 / user side ----
 
 
@@ -232,3 +289,20 @@ def user_draws(db: Session = Depends(get_db), user: User = Depends(get_current_u
     rows = (db.query(LuckyDraw).filter(LuckyDraw.user_id == user.id)
             .order_by(LuckyDraw.created_at.desc()).limit(100).all())
     return {"draws": [spin_svc.draw_out(d, None) for d in rows]}
+
+
+@router.post("/draws/{draw_id}/claim-info")
+def user_claim_info(draw_id: str, body: LuckyClaimInfoIn, db: Session = Depends(get_db),
+                    user: User = Depends(get_current_user)):
+    d = claims.submit_info(db, user, draw_id, body.text)
+    db.commit()
+    return spin_svc.draw_out(d, None)
+
+
+@router.post("/draws/{draw_id}/claim-ticket")
+def user_claim_ticket(draw_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    d, admin_ids = claims.open_ticket(db, user, draw_id)
+    db.commit()
+    for aid in admin_ids:
+        notify_ws(aid)
+    return {"ticketId": d.support_ticket_id, "draw": spin_svc.draw_out(d, None)}
