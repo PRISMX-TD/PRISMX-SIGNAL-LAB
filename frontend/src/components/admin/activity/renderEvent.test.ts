@@ -611,13 +611,15 @@ describe('幸运轮盘操作日志 / lucky-wheel activity sentences', () => {
     [{ action: 'prizes' }, '保存了轮盘奖项', 'Saved the wheel prizes'],
     [{ action: 'visible', visible: true }, '轮盘显示：开', 'Wheel visibility: on'],
     [{ action: 'visible', visible: false }, '轮盘显示：关', 'Wheel visibility: off'],
-    [{ action: 'round_create' }, '设置了开放时间', 'Set the opening window'],
-    [{ action: 'round_update', voided: 5 }, '修改了开放时间（作废 5 张）', 'Changed the opening window (5 tickets voided)'],
+    [{ action: 'round_create' }, '新建了一期', 'Created a round'],
+    [{ action: 'round_update', voided: 5 }, '修改了这一期（作废 5 张）', 'Edited the round (5 tickets voided)'],
     [{ action: 'round_end', voided: 2 }, '立即结束本期（作废 2 张）', 'Ended the round now (2 tickets voided)'],
     [{ action: 'issue', reason: '10月赛', users: 3, tickets: 9 }, '发券「10月赛」：3 人、9 张', 'Issued tickets “10月赛”: 3 users, 9 tickets'],
     [{ action: 'revoke', revoked: 4 }, '收回 4 张未使用的券', 'Revoked 4 unused tickets'],
     [{ action: 'deliver' }, '标记奖品已发放', 'Marked a prize as delivered'],
     [{ action: 'cancel' }, '取消了一个奖品', 'Cancelled a prize'],
+    [{ action: 'round_delete', draws: 3, tickets: 9, batches: 2, prizes: 4 },
+      '删除了这一期（抽奖记录 3 条、券 9 张、发券批次 2 个、奖品 4 格）', 'Deleted the round (3 draws, 9 tickets, 2 batches, 4 prizes)'],
   ]
   it.each(CASES)('%j', (params, zhText, enText) => {
     expect(renderEvent(lucky(params), zh).text).toBe(zhText)
@@ -635,6 +637,20 @@ describe('幸运轮盘操作日志 / lucky-wheel activity sentences', () => {
   it('缺数字当 0、缺原因用占位，不出 undefined / missing numbers read as 0 and a missing reason gets a placeholder', () => {
     expect(renderEvent(lucky({ action: 'revoke' }), zh).text).toBe('收回 0 张未使用的券')
     expect(renderEvent(lucky({ action: 'issue' }), zh).text).toBe('发券「（无标题）」：0 人、0 张')
+  })
+  it('v2 多期：带期名时句首标出是哪一期 / v2 prefixes the sentence with the round name when present', () => {
+    const del = { action: 'round_delete', id: 'r1', name: '双十一', draws: 3, tickets: 9, batches: 2, prizes: 4 }
+    expect(renderEvent(lucky(del), zh).text).toBe('「双十一」· 删除了这一期（抽奖记录 3 条、券 9 张、发券批次 2 个、奖品 4 格）')
+    expect(renderEvent(lucky(del), en).text).toBe('“双十一” · Deleted the round (3 draws, 9 tickets, 2 batches, 4 prizes)')
+    expect(renderEvent(lucky({ action: 'round_create', name: '双十一', mode: 'qty' }), zh).text).toBe('「双十一」· 新建了一期')
+    expect(renderEvent(lucky({ action: 'visible', name: '双十一', visible: true }), zh).text).toBe('「双十一」· 轮盘显示：开')
+    const issue = { action: 'issue', roundId: 'r1', roundName: '双十一', reason: '10月赛', users: 3, tickets: 9 }
+    expect(renderEvent(lucky(issue), zh).text).toBe('「双十一」· 发券「10月赛」：3 人、9 张')
+    const prizes = { action: 'prizes', roundId: 'r1', roundName: '双十一', mode: 'prob', changes: [{ id: 'a' }], archived: [] }
+    expect(renderEvent(lucky(prizes), zh).text).toBe('「双十一」· 保存了轮盘奖项（改动 1 格、下架 0 格）')
+    expect(renderEvent(lucky({ action: 'round_end', name: '双十一', voided: 7, auto: true }), zh).text).toBe('「双十一」· 本期到点自动结束（作废 7 张）')
+    // issue 自带的 name 字段（如果有）不当成期名 / a stray `name` on a non-round action is not taken as the round
+    expect(renderEvent(lucky({ action: 'deliver', name: '耳机' }), zh).text).toBe('标记奖品已发放')
   })
   it('认不出的动作退回通用名 / an unknown action falls back to the generic name', () => {
     expect(renderEvent(lucky({ action: 'surprise' }), zh).text).toBe('幸运轮盘')
