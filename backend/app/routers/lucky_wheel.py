@@ -12,14 +12,18 @@ import json
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.models import User
-from app.schemas import LuckyPrizeIn, LuckyRoundIn, LuckyRoundPatch, LuckyVisibleIn
+from app.core.strategy_limits import user_limiter
+from app.models import LuckyDraw, LuckyTicket, LuckyTicketBatch, User
+from app.schemas import LuckyPrizeIn, LuckyRoundIn, LuckyRoundPatch, LuckySpinIn, LuckyVisibleIn
 from app.services.audit import log_change
 from app.services.deps import get_current_user, require_admin
 from app.services.lucky import common, prizes, rounds
+from app.services.lucky import spin as spin_svc
 
 logger = logging.getLogger("prismx.lucky")
 
@@ -101,3 +105,57 @@ def admin_set_visible(body: LuckyVisibleIn, db: Session = Depends(get_db),
     db.commit()
     # Task 5 在这里接「打开时补通知」/ Task 5 hooks deferred notifications in here
     return _config_out(db)
+
+
+# ---- 用户端 / user side ----
+
+
+@router.get("")
+def user_state(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """轮盘页一次拿齐：能不能玩、本期时间、奖品（不含概率）、本期我的券。
+    Everything the page needs: playable, the window, prizes (no odds), my tickets this round."""
+    now = common.utcnow()
+    if not spin_svc.can_play(db, user):
+        return {"visible": False, "round": None, "prizes": [], "tickets": {"unused": 0, "batches": []}}
+    r = rounds.current_round(db)
+    batches = []
+    unused = 0
+    if r is not None:
+        unused = spin_svc.unused_count(db, user.id, r.id)
+        rows = (db.query(LuckyTicketBatch.reason, LuckyTicketBatch.created_at, func.count(LuckyTicket.id))
+                .join(LuckyTicket, LuckyTicket.batch_id == LuckyTicketBatch.id)
+                .filter(LuckyTicket.user_id == user.id, LuckyTicket.round_id == r.id)
+                .group_by(LuckyTicketBatch.id, LuckyTicketBatch.reason, LuckyTicketBatch.created_at)
+                .order_by(LuckyTicketBatch.created_at.desc()).all())
+        batches = [{"reason": reason, "issuedAt": at, "count": n} for reason, at, n in rows]
+    return {
+        "visible": True,
+        "round": rounds.round_out(r, now),
+        "prizes": [prizes.public_out(p) for p in prizes.active_prizes(db)],
+        "tickets": {"unused": unused, "batches": batches},
+    }
+
+
+@router.post("/spin")
+@user_limiter.limit(settings.RATE_LIMIT_LUCKY_SPIN)
+def user_spin(request: Request, body: LuckySpinIn, db: Session = Depends(get_db),
+              user: User = Depends(get_current_user)):
+    """开一次奖。结果由服务端决定，同一个 requestId 重试返回同一条记录。
+    One spin. The server decides; retrying the same requestId returns the same draw."""
+    try:
+        d = spin_svc.spin(db, user, body.requestId)
+        db.commit()
+    except spin_svc.SpinError as e:
+        db.rollback()
+        raise HTTPException(e.status, e.detail) from None
+    r = rounds.current_round(db)
+    left = spin_svc.unused_count(db, user.id, d.round_id)
+    return {**spin_svc.draw_out(d, spin_svc.slot_index(db, d.prize_id)), "ticketsLeft": left,
+            "round": rounds.round_out(r, common.utcnow())}
+
+
+@router.get("/draws")
+def user_draws(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = (db.query(LuckyDraw).filter(LuckyDraw.user_id == user.id)
+            .order_by(LuckyDraw.created_at.desc()).limit(100).all())
+    return {"draws": [spin_svc.draw_out(d, None) for d in rows]}

@@ -2506,6 +2506,10 @@ class LuckyVisibleIn(BaseModel):
     visible: bool
 
 
+class LuckySpinIn(BaseModel):
+    requestId: str = Field(min_length=8, max_length=64)
+
+
 class LuckyPrizeIn(BaseModel):
     id: str | None = None
     name: str = Field(min_length=1, max_length=40)

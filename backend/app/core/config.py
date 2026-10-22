@@ -280,6 +280,8 @@ class Settings(BaseSettings):
     # through this endpoint; the daily cap keeps one account from treating it as free
     # file storage. Real tickets need a dozen images a day at most.
     RATE_LIMIT_TICKET_UPLOAD: str = "10/minute;60/day"
+    # 幸运轮盘抽奖（按用户）：真人一分钟点不了 30 次，只拦脚本 / per user; only scripts hit it
+    RATE_LIMIT_LUCKY_SPIN: str = "30/minute"
     # 单次回测的成本上限：bars 数 × 规则条件数。纯速率限制无法阻止"一次请求就
     # 占满 CPU 很久"，这一层直接把单次请求的工作量封顶。默认 60000 = 5000 根 ×
     # 12 条，恰好容纳滥用上限下的最坏合法情况。
