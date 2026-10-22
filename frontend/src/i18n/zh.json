@@ -19,7 +19,11 @@
     "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服",
     "agent_plan_change": "代理修改了客户会员",
     "support_reminder": "客服跟进提醒",
-    "support_alert": "客服后台待处理"
+    "support_alert": "客服后台待处理",
+    "lucky_ticket": "获得抽奖券",
+    "lucky_ticket_expiring": "抽奖券即将作废",
+    "lucky_prize_delivered": "奖品已发放",
+    "lucky_prize_cancelled": "奖品已取消"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -791,5 +795,8 @@
     "pageFailBody": "这个链接无效或已过期。登录后点顶部提示条里的「重新发送」，再收一封新的即可。",
     "goBind": "去绑定 MT5",
     "backToApp": "返回应用"
+  },
+  "lucky": {
+    "title": "幸运轮盘"
   }
 }

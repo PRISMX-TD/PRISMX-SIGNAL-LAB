@@ -2419,5 +2419,42 @@
     "drawer": {
       "title": "顧客情報"
     }
+  },
+  "lucky": {
+    "closed": "ラッキールーレットは現在開催しておりません",
+    "window": "開催期間：{{from}} ～ {{to}}",
+    "voidNotice": "今期が終了すると、未使用のチケットは自動的に失効します",
+    "startsIn": "開始まで {{d}}日 {{h}}時間 {{m}}分 {{s}}秒",
+    "endsIn": "終了まで {{d}}日 {{h}}時間 {{m}}分 {{s}}秒",
+    "notStarted": "まだ始まっていません",
+    "spin": "回す（残り{{n}}枚）",
+    "spinning": "回転中…",
+    "noTickets": "チケットがありません。イベントや大会に参加すると獲得できます",
+    "noTicketsHint": "今期のチケットはまだありません",
+    "retryTicket": "もう一回（返却分）",
+    "prizes": "賞品一覧",
+    "myTickets": "マイチケット",
+    "myPrizes": "マイ賞品",
+    "noPrizes": "当選履歴はまだありません",
+    "claimByTicket": "チケットを送信して受け取る",
+    "viewTicket": "受け取りチケットを見る",
+    "submitClaim": "受け取り情報を送信",
+    "updateClaim": "受け取り情報を修正",
+    "close": "OK",
+    "cardTitle": "未使用の抽選チケットが{{n}}枚あります",
+    "cardCta": "回しに行く",
+    "result": {
+      "none": "残念、ハズレです。次回に期待！",
+      "retry": "もう一回！チケットが1枚戻りました",
+      "proDays": "おめでとうございます！PRO会員{{n}}日分を付与しました",
+      "custom": "「{{name}}」が当たりました！"
+    },
+    "status": {
+      "auto_done": "付与済み",
+      "pending": "受け取り待ち",
+      "submitted": "処理中",
+      "delivered": "発送済み",
+      "cancelled": "キャンセル"
+    }
   }
 }

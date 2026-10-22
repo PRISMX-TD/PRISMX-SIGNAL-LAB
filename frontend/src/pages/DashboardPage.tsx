@@ -8,6 +8,7 @@ import { useSentiment } from '../api/useSentiment'
 import NotifDeviceBanner from '../components/NotifDeviceBanner'
 import OnboardingCard from '../components/OnboardingCard'
 import CompetitionMarquee from '../components/CompetitionMarquee'
+import LuckyTicketsCard from '../components/lucky/LuckyTicketsCard'
 import { SkeletonPage } from '../components/Skeleton'
 import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
@@ -147,6 +148,7 @@ export default function DashboardPage() {
           Competition marquee: only shows while a competition is open for
           registration, upcoming or running; otherwise takes no space. */}
       <CompetitionMarquee />
+      <LuckyTicketsCard />
       {!loaded ? (
         <SkeletonPage cards={3} />
       ) : (

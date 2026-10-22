@@ -4836,5 +4836,42 @@
     "drawer": {
       "title": "客户资料"
     }
+  },
+  "lucky": {
+    "closed": "幸运轮盘暂未开放",
+    "window": "开放时间：{{from}} ～ {{to}}",
+    "voidNotice": "本期结束后，未使用的抽奖券将自动作废",
+    "startsIn": "距开始 {{d}} 天 {{h}} 时 {{m}} 分 {{s}} 秒",
+    "endsIn": "距结束 {{d}} 天 {{h}} 时 {{m}} 分 {{s}} 秒",
+    "notStarted": "尚未开始",
+    "spin": "抽奖（剩 {{n}} 张）",
+    "spinning": "转动中…",
+    "noTickets": "暂无抽奖券，参加平台活动 / 比赛可获得",
+    "noTicketsHint": "本期还没有抽奖券",
+    "retryTicket": "再来一次",
+    "prizes": "奖品一览",
+    "myTickets": "我的抽奖券",
+    "myPrizes": "我的奖品",
+    "noPrizes": "还没有中奖记录",
+    "claimByTicket": "提交工单领奖",
+    "viewTicket": "查看领奖工单",
+    "submitClaim": "提交领奖信息",
+    "updateClaim": "修改领奖信息",
+    "close": "知道了",
+    "cardTitle": "你有 {{n}} 张抽奖券待使用",
+    "cardCta": "去抽奖",
+    "result": {
+      "none": "谢谢参与，下次好运！",
+      "retry": "再来一次！已退回一张券",
+      "proDays": "恭喜获得 {{n}} 天 PRO 会员，已到账",
+      "custom": "恭喜抽中「{{name}}」"
+    },
+    "status": {
+      "auto_done": "已到账",
+      "pending": "待领取",
+      "submitted": "处理中",
+      "delivered": "已发放",
+      "cancelled": "已取消"
+    }
   }
 }

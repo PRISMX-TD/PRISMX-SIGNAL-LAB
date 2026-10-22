@@ -4846,5 +4846,42 @@
     "drawer": {
       "title": "Customer profile"
     }
+  },
+  "lucky": {
+    "closed": "The lucky wheel isn't open right now",
+    "window": "Open {{from}} – {{to}}",
+    "voidNotice": "Unused tickets expire automatically when this round ends",
+    "startsIn": "Starts in {{d}}d {{h}}h {{m}}m {{s}}s",
+    "endsIn": "Ends in {{d}}d {{h}}h {{m}}m {{s}}s",
+    "notStarted": "Not started yet",
+    "spin": "Spin ({{n}} left)",
+    "spinning": "Spinning…",
+    "noTickets": "No tickets yet — join platform events or competitions to earn some",
+    "noTicketsHint": "No tickets this round yet",
+    "retryTicket": "Spin again refund",
+    "prizes": "Prizes",
+    "myTickets": "My tickets",
+    "myPrizes": "My prizes",
+    "noPrizes": "No prizes yet",
+    "claimByTicket": "Claim via support ticket",
+    "viewTicket": "View claim ticket",
+    "submitClaim": "Submit claim details",
+    "updateClaim": "Update claim details",
+    "close": "Got it",
+    "cardTitle": "You have {{n}} lucky-draw tickets waiting",
+    "cardCta": "Spin now",
+    "result": {
+      "none": "No prize this time — better luck next spin!",
+      "retry": "Spin again! Your ticket is back",
+      "proDays": "You won {{n}} days of PRO — already added",
+      "custom": "You won “{{name}}”"
+    },
+    "status": {
+      "auto_done": "Credited",
+      "pending": "To claim",
+      "submitted": "Processing",
+      "delivered": "Sent",
+      "cancelled": "Cancelled"
+    }
   }
 }

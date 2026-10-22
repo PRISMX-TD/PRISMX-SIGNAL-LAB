@@ -495,6 +495,11 @@ export default function Layout() {
     ...(user?.competitionsVisible
       ? [{ to: '/competitions', icon: 'competitions', label: t('competition.title') }]
       : []),
+    // 幸运轮盘：第四个内测开关 luckyWheelVisible（图标暂复用比赛的旗帜）。
+    // Lucky wheel: the fourth beta switch, luckyWheelVisible (reuses the competitions flag icon).
+    ...(user?.luckyWheelVisible
+      ? [{ to: '/lucky', icon: 'competitions', label: t('lucky.title') }]
+      : []),
     // 代理页：按 /auth/me 下发的 isAgent 露入口（见 User.isAgent），入口判断先例同上。
     // Agent view: shown off the isAgent flag from /auth/me; same entry-hiding precedent.
     ...(user?.isAgent ? [{ to: '/agent', icon: 'agent', label: t('nav.agent') }] : []),
@@ -799,11 +804,11 @@ export default function Layout() {
                   leaderboard / competitions (2026-09-07), shown when any of the
                   three beta switches is on; custom strategies moved into the
                   user menu. */}
-              {(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible) && (
+              {(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible || user?.luckyWheelVisible) && (
                 <NavItem
-                  to={user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : '/competitions'}
+                  to={user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : '/lucky'}
                   label={t('nav.growth')}
-                  match={['/achievements', '/leaderboard', '/competitions']}
+                  match={['/achievements', '/leaderboard', '/competitions', '/lucky']}
                 />
               )}
             </nav>

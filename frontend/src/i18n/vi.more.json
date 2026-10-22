@@ -2419,5 +2419,42 @@
     "drawer": {
       "title": "Hồ sơ khách hàng"
     }
+  },
+  "lucky": {
+    "closed": "Vòng quay may mắn hiện chưa mở",
+    "window": "Thời gian mở: {{from}} ～ {{to}}",
+    "voidNotice": "Khi kỳ này kết thúc, vé chưa dùng sẽ tự động hết hiệu lực",
+    "startsIn": "Bắt đầu sau {{d}} ngày {{h}} giờ {{m}} phút {{s}} giây",
+    "endsIn": "Kết thúc sau {{d}} ngày {{h}} giờ {{m}} phút {{s}} giây",
+    "notStarted": "Chưa bắt đầu",
+    "spin": "Quay (còn {{n}} vé)",
+    "spinning": "Đang quay…",
+    "noTickets": "Chưa có vé. Tham gia sự kiện hoặc cuộc thi của nền tảng để nhận vé",
+    "noTicketsHint": "Kỳ này chưa có vé",
+    "retryTicket": "Quay lại (hoàn vé)",
+    "prizes": "Danh sách phần thưởng",
+    "myTickets": "Vé của tôi",
+    "myPrizes": "Phần thưởng của tôi",
+    "noPrizes": "Chưa có lịch sử trúng thưởng",
+    "claimByTicket": "Gửi phiếu hỗ trợ để nhận thưởng",
+    "viewTicket": "Xem phiếu nhận thưởng",
+    "submitClaim": "Gửi thông tin nhận thưởng",
+    "updateClaim": "Sửa thông tin nhận thưởng",
+    "close": "Đã hiểu",
+    "cardTitle": "Bạn có {{n}} vé quay thưởng đang chờ",
+    "cardCta": "Quay ngay",
+    "result": {
+      "none": "Rất tiếc, lần này chưa trúng. Chúc may mắn lần sau!",
+      "retry": "Quay thêm lần nữa! Vé đã được hoàn lại",
+      "proDays": "Chúc mừng! Bạn nhận được {{n}} ngày PRO, đã cộng vào tài khoản",
+      "custom": "Chúc mừng bạn đã trúng “{{name}}”"
+    },
+    "status": {
+      "auto_done": "Đã cộng",
+      "pending": "Chờ nhận",
+      "submitted": "Đang xử lý",
+      "delivered": "Đã gửi",
+      "cancelled": "Đã hủy"
+    }
   }
 }

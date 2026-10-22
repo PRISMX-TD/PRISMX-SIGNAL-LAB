@@ -19,7 +19,11 @@
     "plan_refund": "注文が返金されました。対象となっていた会員期間は取り消されています。ご不明な点はサポートまでお問い合わせください。",
     "agent_plan_change": "代理店が顧客のプランを変更しました",
     "support_reminder": "フォローのリマインダー",
-    "support_alert": "サポート管理の要対応事項"
+    "support_alert": "サポート管理の要対応事項",
+    "lucky_ticket": "抽選チケットを獲得しました",
+    "lucky_ticket_expiring": "抽選チケットの有効期限が近づいています",
+    "lucky_prize_delivered": "賞品を発送しました",
+    "lucky_prize_cancelled": "賞品はキャンセルされました"
   },
   "nav": {
     "dashboard": "ダッシュボード",
@@ -561,5 +565,8 @@
     "pageFailBody": "このリンクは無効か期限切れです。ログイン後、上部のお知らせにある「再送信」から新しいメールを受け取ってください。",
     "goBind": "MT5 を連携する",
     "backToApp": "アプリに戻る"
+  },
+  "lucky": {
+    "title": "ラッキールーレット"
   }
 }

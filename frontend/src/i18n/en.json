@@ -19,7 +19,11 @@
     "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions.",
     "agent_plan_change": "An agent changed a customer's plan",
     "support_reminder": "Follow-up reminder",
-    "support_alert": "Support console needs attention"
+    "support_alert": "Support console needs attention",
+    "lucky_ticket": "You got lucky-draw tickets",
+    "lucky_ticket_expiring": "Your tickets expire soon",
+    "lucky_prize_delivered": "Your prize has been sent",
+    "lucky_prize_cancelled": "Your prize was cancelled"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -791,5 +795,8 @@
     "pageFailBody": "This link is invalid or has expired. Sign in and tap \"Resend\" in the banner at the top to get a new one.",
     "goBind": "Bind MT5",
     "backToApp": "Back to the app"
+  },
+  "lucky": {
+    "title": "Lucky Wheel"
   }
 }

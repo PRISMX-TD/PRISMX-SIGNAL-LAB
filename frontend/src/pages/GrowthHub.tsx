@@ -1,16 +1,18 @@
-// 「成长」外壳：成就（等级勋章）/ 排行榜 / 交易比赛 三页共用的一个页头 + 页签。
+// 「成长」外壳：成就（等级勋章）/ 排行榜 / 交易比赛 / 幸运轮盘 四页共用的一个页头 + 页签。
 //
 // 2026-09-07 起顶栏只留一个「成长」入口，三页各自的路由（/achievements、
 // /leaderboard、/competitions）全部保留，只是都套进这个壳里、由 tab 决定高亮
 // 哪个页签——站内既有链接（用户菜单的等级药丸、仪表盘胜率卡）一条不用改。
 // 三页原来各自的页标题已撤掉，否则会出现「壳标题 + 页签 + 页内标题」三层。
 //
-// 页签按三个内测开关各自显隐（与 Layout / UserMenu 的入口门控同一套判断）；
+// 2026-10-22 起加入第四页：幸运轮盘（/lucky，开关 luckyWheelVisible）。
+//
+// 页签按各自的内测开关显隐（与 Layout / UserMenu 的入口门控同一套判断）；
 // 直接打 URL 进了一个开关未开的页，页面自己会退化成一条内测提示（各页的
 // forbidden 分支），这里不拦。不足两个可见页签时不画页签条。
 //
 // The "Growth" shell: one header + one tab strip shared by achievements (level &
-// badges), leaderboard and competitions. Since 2026-09-07 the top nav carries a
+// badges), leaderboard, competitions and (since 2026-10-22) the lucky wheel. Since 2026-09-07 the top nav carries a
 // single "Growth" entry; the three routes are kept as-is and simply render
 // inside this shell, with `tab` picking the highlighted segment — so no
 // existing in-app link (user-menu level chip, dashboard win-rate card) had to
@@ -27,12 +29,13 @@ import type { ReactNode } from 'react'
 import { useAuth } from '../store/auth'
 import PageHead from '../components/PageHead'
 
-export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions'
+export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions' | 'lucky'
 
-const TABS: { key: GrowthTab; to: string; labelKey: string; flag: 'gamificationVisible' | 'leaderboardVisible' | 'competitionsVisible' }[] = [
+const TABS: { key: GrowthTab; to: string; labelKey: string; flag: 'gamificationVisible' | 'leaderboardVisible' | 'competitionsVisible' | 'luckyWheelVisible' }[] = [
   { key: 'achievements', to: '/achievements', labelKey: 'nav.growthBadges', flag: 'gamificationVisible' },
   { key: 'leaderboard', to: '/leaderboard', labelKey: 'leaderboard.title', flag: 'leaderboardVisible' },
   { key: 'competitions', to: '/competitions', labelKey: 'competition.title', flag: 'competitionsVisible' },
+  { key: 'lucky', to: '/lucky', labelKey: 'lucky.title', flag: 'luckyWheelVisible' },
 ]
 
 export default function GrowthHub({ tab, children }: { tab: GrowthTab; children: ReactNode }) {

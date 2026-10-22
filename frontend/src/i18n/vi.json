@@ -19,7 +19,11 @@
     "plan_refund": "Đơn hàng đã được hoàn tiền — số ngày thành viên tương ứng đã bị thu hồi. Liên hệ hỗ trợ nếu bạn có thắc mắc.",
     "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng",
     "support_reminder": "Nhắc việc theo dõi",
-    "support_alert": "Trang quản trị hỗ trợ cần xử lý"
+    "support_alert": "Trang quản trị hỗ trợ cần xử lý",
+    "lucky_ticket": "Bạn nhận được vé quay thưởng",
+    "lucky_ticket_expiring": "Vé quay thưởng sắp hết hạn",
+    "lucky_prize_delivered": "Phần thưởng đã được gửi",
+    "lucky_prize_cancelled": "Phần thưởng đã bị hủy"
   },
   "nav": {
     "dashboard": "Tổng quan",
@@ -561,5 +565,8 @@
     "pageFailBody": "Liên kết này không hợp lệ hoặc đã hết hạn. Đăng nhập rồi bấm \"Gửi lại\" trên thanh thông báo phía trên để nhận email mới.",
     "goBind": "Liên kết MT5",
     "backToApp": "Quay lại ứng dụng"
+  },
+  "lucky": {
+    "title": "Vòng quay may mắn"
   }
 }

@@ -127,6 +127,7 @@ const StrategiesPage = lazyPage(() => import('./pages/StrategiesPage'), 'Strateg
 const AchievementsPage = lazyPage(() => import('./pages/AchievementsPage'), 'AchievementsPage')
 const LeaderboardPage = lazyPage(() => import('./pages/LeaderboardPage'), 'LeaderboardPage')
 const CompetitionsPage = lazyPage(() => import('./pages/CompetitionsPage'), 'CompetitionsPage')
+const LuckyPage = lazyPage(() => import('./pages/LuckyPage'), 'LuckyPage')
 const ProfilePage = lazyPage(() => import('./pages/ProfilePage'), 'ProfilePage')
 const LegalPage = lazyPage(() => import('./pages/LegalPage'), 'LegalPage', { core: true })
 const FaqPage = lazyPage(() => import('./pages/FaqPage'), 'FaqPage', { core: true })
@@ -600,6 +601,9 @@ export default function App() {
                   403, degraded by the page itself (see CompetitionsPage's
                   forbidden branch). */}
               <Route path="/competitions" element={<GrowthHub tab="competitions"><CompetitionsPage /></GrowthHub>} />
+              {/* 幸运轮盘（rev 45）：同样不做路由门控；开关未开时页面自己显示「暂未开放」。
+                  Lucky wheel (rev 45): no route gate either; the page shows "not open" itself. */}
+              <Route path="/lucky" element={<GrowthHub tab="lucky"><LuckyPage /></GrowthHub>} />
               {/* 公开主页（2026-09-07）：从榜面名字点进来；不套外壳，自带返回。
                   Public profile: reached from board names; no shell, carries its own back link. */}
               <Route path="/u/:publicId" element={<ProfilePage />} />

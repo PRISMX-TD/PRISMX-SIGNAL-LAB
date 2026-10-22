@@ -1556,6 +1556,7 @@ export interface WSMessage {
 // data: it comes from `kind` via i18n. The backend deliberately stores no copy,
 // otherwise switching language would only affect newly created rows.
 export type NotificationKind = 'ticket_reply' | 'ticket_new' | 'comp_public_name' | 'support_reminder' | 'support_alert'
+  | 'lucky_ticket' | 'lucky_ticket_expiring' | 'lucky_prize_delivered' | 'lucky_prize_cancelled'
 
 export interface NotificationFeedItem {
   id: string
