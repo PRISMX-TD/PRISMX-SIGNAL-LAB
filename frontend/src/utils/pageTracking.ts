@@ -53,6 +53,7 @@ const TRACKED_PATHS = new Set([
   '/app-download',
   '/simulator',
   '/agent',
+  '/lucky',
 ])
 
 // 带参路由归一成模板再上报：`/u/gebnck49j5` → `/u/:publicId`。

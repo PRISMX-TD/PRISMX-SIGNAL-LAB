@@ -2036,12 +2036,14 @@
       },
       "lucky": {
         "prizes": "保存了轮盘奖项",
+        "prizes_detail": "保存了轮盘奖项（改动 {{changed}} 格、下架 {{archived}} 格）",
         "visible": "轮盘显示：{{visible}}",
         "on": "开",
         "off": "关",
         "round_create": "设置了开放时间",
         "round_update": "修改了开放时间（作废 {{voided}} 张）",
         "round_end": "立即结束本期（作废 {{voided}} 张）",
+        "round_auto_end": "本期到点自动结束（作废 {{voided}} 张）",
         "issue": "发券「{{reason}}」：{{users}} 人、{{tickets}} 张",
         "revoke": "收回 {{revoked}} 张未使用的券",
         "deliver": "标记奖品已发放",
@@ -2877,7 +2879,8 @@
         "/download": "下载桥接",
         "/app-download": "下载 App",
         "/simulator": "信号回放",
-        "/agent": "代理页面"
+        "/agent": "代理页面",
+        "/lucky": "幸运轮盘"
       }
     },
     "searchPlaceholder": "按昵称、邮箱或手机号搜索…",

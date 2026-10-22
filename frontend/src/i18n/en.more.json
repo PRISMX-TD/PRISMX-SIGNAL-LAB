@@ -2044,12 +2044,14 @@
       },
       "lucky": {
         "prizes": "Saved the wheel prizes",
+        "prizes_detail": "Saved the wheel prizes ({{changed}} changed, {{archived}} retired)",
         "visible": "Wheel visibility: {{visible}}",
         "on": "on",
         "off": "off",
         "round_create": "Set the opening window",
         "round_update": "Changed the opening window ({{voided}} tickets voided)",
         "round_end": "Ended the round now ({{voided}} tickets voided)",
+        "round_auto_end": "The round ended on schedule ({{voided}} tickets voided)",
         "issue": "Issued tickets “{{reason}}”: {{users}} users, {{tickets}} tickets",
         "revoke": "Revoked {{revoked}} unused tickets",
         "deliver": "Marked a prize as delivered",
@@ -2885,7 +2887,8 @@
         "/download": "Bridge download",
         "/app-download": "App download",
         "/simulator": "Signal replay",
-        "/agent": "Agent view"
+        "/agent": "Agent view",
+        "/lucky": "Lucky wheel"
       }
     },
     "searchPlaceholder": "Search by nickname, email or phone…",

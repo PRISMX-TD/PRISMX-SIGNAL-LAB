@@ -1079,6 +1079,14 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
     const action = typeof p.action === 'string' ? p.action : ''
     const known = ['prizes', 'visible', 'round_create', 'round_update', 'round_end', 'issue', 'revoke', 'deliver', 'cancel']
     if (!known.includes(action)) return [t('admin.log.kindName.admin.lucky')]
+    // 保存奖项：新版审计带 changes / archived 两个数组，句子里说清动了几格；旧行没有就退回原句。
+    // 到点自动结束（后台循环）带 auto=true，用系统口吻的句子。
+    // Prize save: newer audit rows carry changes / archived arrays, so the sentence says how many slots
+    // moved; older rows fall back to the plain one. The sweeper's end carries auto=true.
+    if (action === 'prizes' && Array.isArray(p.changes) && Array.isArray(p.archived)) {
+      return [t('admin.log.lucky.prizes_detail', { changed: p.changes.length, archived: p.archived.length })]
+    }
+    if (action === 'round_end' && p.auto === true) return [t('admin.log.lucky.round_auto_end', { voided: num(p.voided) ?? 0 })]
     return [t(`admin.log.lucky.${action}`, {
       reason: str(p.reason) ? clip(str(p.reason)!) : t('admin.log.v.untitled'),
       users: num(p.users) ?? 0, tickets: num(p.tickets) ?? 0, revoked: num(p.revoked) ?? 0, voided: num(p.voided) ?? 0,

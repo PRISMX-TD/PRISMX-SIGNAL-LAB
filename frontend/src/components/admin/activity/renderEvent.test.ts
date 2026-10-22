@@ -623,6 +623,15 @@ describe('幸运轮盘操作日志 / lucky-wheel activity sentences', () => {
     expect(renderEvent(lucky(params), zh).text).toBe(zhText)
     expect(renderEvent(lucky(params), en).text).toBe(enText)
   })
+  it('保存奖项带 changes / archived 时说清动了几格；到点自动结束用系统口吻 / detailed prize save and the automatic end', () => {
+    const detail = { action: 'prizes', prizes: [], changes: [{ id: 'a' }, { id: 'b' }], archived: [{ id: 'c' }] }
+    expect(renderEvent(lucky(detail), zh).text).toBe('保存了轮盘奖项（改动 2 格、下架 1 格）')
+    expect(renderEvent(lucky(detail), en).text).toBe('Saved the wheel prizes (2 changed, 1 retired)')
+    expect(renderEvent(lucky({ action: 'prizes', changes: [], archived: [] }), zh).text).toBe('保存了轮盘奖项（改动 0 格、下架 0 格）')
+    const auto = { action: 'round_end', voided: 7, auto: true }
+    expect(renderEvent(lucky(auto), zh).text).toBe('本期到点自动结束（作废 7 张）')
+    expect(renderEvent(lucky(auto), en).text).toBe('The round ended on schedule (7 tickets voided)')
+  })
   it('缺数字当 0、缺原因用占位，不出 undefined / missing numbers read as 0 and a missing reason gets a placeholder', () => {
     expect(renderEvent(lucky({ action: 'revoke' }), zh).text).toBe('收回 0 张未使用的券')
     expect(renderEvent(lucky({ action: 'issue' }), zh).text).toBe('发券「（无标题）」：0 人、0 张')
