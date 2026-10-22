@@ -1,12 +1,5 @@
 """幸运轮盘的常量与小工具。/ Lucky-wheel constants and helpers."""
-import json
 from datetime import datetime, timedelta, timezone
-
-from sqlalchemy.orm import Session
-
-from app.models import PlatformSetting
-
-VISIBLE_KEY = "lucky_wheel_visible"
 
 KIND_PRO_DAYS = "pro_days"
 KIND_NONE = "none"
@@ -14,9 +7,11 @@ KIND_RETRY = "retry"
 KIND_CUSTOM = "custom"
 PRIZE_KINDS = (KIND_PRO_DAYS, KIND_NONE, KIND_RETRY, KIND_CUSTOM)
 
-SOLD_OUT_FALLBACK = "to_fallback"
-SOLD_OUT_REDISTRIBUTE = "redistribute"
-SOLD_OUT_MODES = (SOLD_OUT_FALLBACK, SOLD_OUT_REDISTRIBUTE)
+# 每期一种奖品模式（rev 46）：qty = 按份量（抽奖箱），prob = 按概率。
+# One prize mode per round (rev 46): qty = by quantity (a raffle box), prob = by probability.
+MODE_QTY = "qty"
+MODE_PROB = "prob"
+MODES = (MODE_QTY, MODE_PROB)
 
 CLAIM_FORM = "form"
 CLAIM_TICKET = "ticket"
@@ -51,6 +46,7 @@ MAX_SLOTS = 12
 MAX_BATCH_USERS = 2000
 MAX_PER_USER = 100
 MAX_BATCH_TICKETS = 20000
+MAX_ROUND_NAME = 40
 
 
 def opens_text(starts_at: datetime) -> str:
@@ -62,20 +58,3 @@ def opens_text(starts_at: datetime) -> str:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
-
-
-def is_visible(db: Session) -> bool:
-    """直接读库不走 settings_store 缓存：开关一拨用户端立刻生效，这一行是主键查询，很便宜。
-    Read straight from the table (no settings_store cache) so a flip takes effect at once."""
-    row = db.query(PlatformSetting).filter(PlatformSetting.key == VISIBLE_KEY).first()
-    if row is None:
-        return False
-    try:
-        return bool(json.loads(row.value))
-    except (TypeError, ValueError):
-        return False
-
-
-def set_visible(db: Session, visible: bool) -> None:
-    from app.services.settings_store import set_setting
-    set_setting(db, VISIBLE_KEY, bool(visible))

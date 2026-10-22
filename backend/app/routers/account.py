@@ -61,9 +61,10 @@ class AccountInfoOut(BaseModel):
     gamificationVisible: bool = False
     leaderboardVisible: bool = False
     competitionsVisible: bool = False
-    # 幸运轮盘入口（rev 45）：开关开着且有未结束的一期才露；管理员总露（上线前自测）。
-    # luckyTickets = 本期未用券数，给首页卡片和角标用。
-    # Lucky-wheel entry: shown when switched on with an unended round; always for admins.
+    # 幸运轮盘入口（rev 46）：有一期打开了显示且未结束才露；管理员总露（内部测试）。
+    # luckyTickets = 他能看到的未结束期里的未用券合计，给首页卡片和角标用。
+    # Lucky-wheel entry (rev 46): shown when some visible round is unended; always for admins.
+    # luckyTickets = unused tickets summed over the unended rounds this person can see.
     luckyWheelVisible: bool = False
     luckyTickets: int = 0
     nickname: str | None = None
@@ -113,32 +114,39 @@ class AccountInfoOut(BaseModel):
 
 
 def lucky_flags(db: Session, user: User) -> tuple[bool, int]:
-    """(轮盘入口是否可见, 本期未用券数)。
+    """(轮盘入口是否可见, 能看到的未结束期里的未用券合计)。
 
-    普通用户要「开关开着 + 有一期未结束（未开始或进行中）」才可见；管理员总可见，
-    方便上线前自测。另外：只要这个人还有待领取的自定义奖（pending / submitted），入口就一直
-    可见——期结束或开关关掉后，他还得回 /lucky 填领奖信息、看进度，不能因此找不到入口。
-    券数只在有未结束的期时才查，没有期就是 0。
-    (entry visible, unused tickets this round). Users need the switch on and an
-    unended round (upcoming or active); admins always see it for pre-launch
-    testing. A user who still has an open custom-prize claim (pending / submitted) also keeps
-    the entry, even after the round ended or the switch went off — they must be able to get back
-    to /lucky to submit details and follow the claim. Tickets are only counted while a round is
-    open, else 0.
+    普通用户要「有一期打开了显示、且未结束（未开始或进行中）」才可见；管理员总可见，方便内部测试。
+    另外：只要这个人还有待领取的自定义奖（pending / submitted），入口就一直可见——期结束或显示关掉后，
+    他还得回 /lucky 填领奖信息、看进度，不能因此找不到入口。
+    券数只算他看得到的未结束期（rev 46 修掉 v1 的小问题：关着显示的期里的券不算进角标——
+    点进去也看不到那一期，角标却说有券）。
+
+    (entry visible, unused tickets over the unended rounds this person can see). Users need some
+    visible round that is unended (upcoming or active); admins always see the entry for internal
+    testing. A user who still has an open custom-prize claim (pending / submitted) also keeps the
+    entry, even after the round ended or was hidden — they must be able to get back to /lucky to
+    submit details and follow the claim. Tickets only count in rounds the person can see (rev 46
+    fixes a v1 wrinkle: a badge counting tickets in a hidden round the user can't open).
     """
-    from sqlalchemy import exists
+    from sqlalchemy import exists, func
 
-    from app.models import LuckyDraw
+    from app.models import LuckyDraw, LuckyRound, LuckyTicket
     from app.services.lucky import common, rounds
-    from app.services.lucky.spin import unused_count
-    r = rounds.current_round(db)
-    open_round = r is not None and rounds.phase(r, common.utcnow()) in ("upcoming", "active")
-    visible = user.role == "admin" or (open_round and common.is_visible(db))
+    now = common.utcnow()
+    open_ids = rounds.open_rounds_query(db, user, now).with_entities(LuckyRound.id)
+    visible = user.role == "admin" or db.query(open_ids.exists()).scalar()
     if not visible:
         visible = db.query(
             exists().where(LuckyDraw.user_id == user.id, LuckyDraw.fulfillment_status.in_(common.F_OPEN))
         ).scalar()
-    return bool(visible), (unused_count(db, user.id, r.id) if visible and open_round else 0)
+    if not visible:
+        return False, 0
+    n = (db.query(func.count(LuckyTicket.id))
+         .filter(LuckyTicket.user_id == user.id, LuckyTicket.status == common.T_UNUSED,
+                 LuckyTicket.round_id.in_(open_ids))
+         .scalar() or 0)
+    return True, int(n)
 
 
 @router.get("/me", response_model=AccountInfoOut)

@@ -2490,14 +2490,17 @@ class EmailAutomationSendListOut(BaseModel):
     offset: int
 
 
-# ---------- 幸运轮盘（rev 45）/ lucky wheel ----------
+# ---------- 幸运轮盘（rev 45，rev 46 改多期）/ lucky wheel (multi-round since rev 46) ----------
 
 class LuckyRoundIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
     startsAt: datetime
     endsAt: datetime
+    mode: Literal["qty", "prob"]
 
 
 class LuckyRoundPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=40)
     startsAt: datetime | None = None
     endsAt: datetime | None = None
 
@@ -2508,6 +2511,7 @@ class LuckyVisibleIn(BaseModel):
 
 class LuckySpinIn(BaseModel):
     requestId: str = Field(min_length=8, max_length=64)
+    roundId: str = Field(min_length=1, max_length=64)
 
 
 class LuckyPrizeIn(BaseModel):
@@ -2518,13 +2522,19 @@ class LuckyPrizeIn(BaseModel):
     color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
     kind: Literal["pro_days", "none", "retry", "custom"]
     proDays: int | None = Field(default=None, ge=1, le=3650)
-    # 百分比，两位小数；落库换成万分比 / percent with two decimals; stored as basis points
-    probPct: float = Field(ge=0, le=100)
+    # 百分比，两位小数；落库换成万分比。prob 模式必填，qty 模式忽略（存 0）。
+    # percent with two decimals, stored as basis points; required in prob mode, ignored in qty mode.
+    probPct: float | None = Field(default=None, ge=0, le=100)
+    # 份数：qty 模式必填；prob 模式可空（= 不限）/ quantity: required in qty mode, optional (= unlimited) in prob
     stock: int | None = Field(default=None, ge=0, le=1_000_000)
-    perUserLimit: int | None = Field(default=None, ge=1, le=1000)
-    onSoldOut: Literal["to_fallback", "redistribute"] = "to_fallback"
     claimMode: Literal["form", "ticket"] | None = None
     claimHint: str | None = Field(default=None, max_length=200)
+
+
+class LuckyPrizesIn(BaseModel):
+    mode: Literal["qty", "prob"]
+    # 格数 2–12 由 odds.validate 报中文错；这里只挡离谱的请求体 / 2–12 is checked by odds.validate
+    prizes: list[LuckyPrizeIn] = Field(max_length=50)
 
 
 class LuckyTierIn(BaseModel):
@@ -2550,12 +2560,14 @@ class LuckyIssueItemIn(BaseModel):
 
 
 class LuckyIssueIn(BaseModel):
+    roundId: str = Field(min_length=1, max_length=64)
     reason: str = Field(min_length=1, max_length=80)
     requestId: str = Field(min_length=8, max_length=64)
     items: list[LuckyIssueItemIn] = Field(min_length=1, max_length=2000)
 
 
 class LuckyRevokeIn(BaseModel):
+    roundId: str = Field(min_length=1, max_length=64)
     batchId: str | None = None
     userId: str | None = None
 

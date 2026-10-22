@@ -19,12 +19,14 @@ def _user(db, email, **kw):
     return u
 
 
-def _draw(db, user, mode, status="pending"):
+def _draw(db, user, mode, status="pending", r=None):
     admin = db.query(User).filter(User.role == "admin").first()
-    r = db.query(LuckyRound).first() or LuckyRound(starts_at=common.utcnow(), ends_at=common.utcnow() + timedelta(days=1),
-                                                   created_by=admin.id)
+    r = r or db.query(LuckyRound).first() or LuckyRound(
+        name="第一期", starts_at=common.utcnow(), ends_at=common.utcnow() + timedelta(days=1), created_by=admin.id)
     db.add(r)
-    p = LuckyPrize(sort_order=0, name="手表", kind="custom", claim_mode=mode, prob_bp=10000, claim_hint="写地址")
+    db.flush()
+    p = LuckyPrize(round_id=r.id, sort_order=0, name="手表", kind="custom", claim_mode=mode, prob_bp=10000,
+                   claim_hint="写地址")
     db.add(p)
     db.flush()
     t = LuckyTicket(user_id=user.id, round_id=r.id, source="manual", status="used")
@@ -71,6 +73,7 @@ def test_ticket_claim_creates_one_claim_ticket(people):
     a = router.user_claim_ticket(d.id, db, u)
     b = router.user_claim_ticket(d.id, db, u)
     assert a["ticketId"] == b["ticketId"]
+    assert a["draw"]["roundName"] == "第一期" and a["draw"]["soldOut"] is False
     t = db.get(Ticket, a["ticketId"])
     assert t.category == "claim" and "手表" in t.title and t.user_id == u.id
     assert "手表" in db.query(TicketReply).filter(TicketReply.ticket_id == t.id).one().body
@@ -111,6 +114,41 @@ def test_admin_list_filters_open(people):
     out = router.admin_draws(status="open", roundId=None, userId=None, prizeId=None, limit=50, offset=0,
                              db=db, admin=admin)
     assert out["total"] == 1 and out["draws"][0]["user"]["email"] == "u@t.co"
+    row = out["draws"][0]
+    assert row["roundName"] == "第一期" and row["soldOut"] is False and row["roundId"]
+
+
+def test_pending_list_spans_rounds_and_round_filter_narrows(people):
+    """待发奖跨期列出、每行带期名；抽奖记录按 roundId 限定在一期。
+    Pending spans rounds with each row naming its round; roundId narrows the draw list to one round."""
+    db, admin, u = people
+    now = common.utcnow()
+    a = LuckyRound(name="甲期", starts_at=now, ends_at=now + timedelta(days=1), created_by=admin.id)
+    b = LuckyRound(name="乙期", starts_at=now, ends_at=now + timedelta(days=1), created_by=admin.id)
+    db.add_all([a, b])
+    db.commit()
+    _draw(db, u, "form", r=a)
+    _draw(db, u, "ticket", r=b)
+    out = router.admin_draws(status="open", roundId=None, userId=None, prizeId=None, limit=50, offset=0,
+                             db=db, admin=admin)
+    assert sorted(x["roundName"] for x in out["draws"]) == ["乙期", "甲期"]
+    only_b = router.admin_draws(status=None, roundId=b.id, userId=None, prizeId=None, limit=50, offset=0,
+                                db=db, admin=admin)
+    assert only_b["total"] == 1 and only_b["draws"][0]["roundName"] == "乙期"
+
+
+def test_sold_out_miss_rows_are_flagged(people):
+    db, admin, u = people
+    d = _draw(db, u, "form", status="auto_done")
+    d.sold_out_miss = True
+    db.commit()
+    out = router.admin_draws(status=None, roundId=None, userId=None, prizeId=None, limit=50, offset=0,
+                             db=db, admin=admin)
+    assert out["draws"][0]["soldOut"] is True
+    body = router.admin_draws_csv(status=None, roundId=None, db=db, admin=admin).body.decode("utf-8-sig")
+    assert "已抽完未中奖" in body
+    (mine,) = router.user_draws(db, u)["draws"]
+    assert mine["soldOut"] is True and mine["roundName"] == "第一期"
 
 
 def test_csv_export(people):
@@ -119,6 +157,7 @@ def test_csv_export(people):
     resp = router.admin_draws_csv(status=None, roundId=None, db=db, admin=admin)
     body = resp.body.decode("utf-8-sig")
     assert "u@t.co" in body and "手表" in body
+    assert body.splitlines()[0].split(",")[:2] == ["时间(UTC)", "期"] and ",第一期," in body
 
 
 def test_csv_neutralises_spreadsheet_formulas(people):

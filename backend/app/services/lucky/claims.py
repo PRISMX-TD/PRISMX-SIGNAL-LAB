@@ -12,7 +12,7 @@ import json
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import LuckyDraw, Ticket, TicketReply, User
+from app.models import LuckyDraw, LuckyRound, Ticket, TicketReply, User
 from app.services.lucky.common import (
     CLAIM_FORM, CLAIM_TICKET, F_CANCELLED, F_DELIVERED, F_OPEN, F_SUBMITTED, utcnow,
 )
@@ -122,7 +122,10 @@ def cancel(db: Session, admin: User, draw_id: str, reason: str) -> LuckyDraw:
 
 def admin_query(db: Session, *, status: str | None = None, round_id: str | None = None,
                 user_id: str | None = None, prize_id: str | None = None):
-    q = db.query(LuckyDraw, User).join(User, User.id == LuckyDraw.user_id)
+    """返回 (记录, 用户, 期名) 的查询。删期会连记录一起删，所以内连接期表不会丢行。
+    A query of (draw, user, round name). Deleting a round deletes its draws, so the inner join loses nothing."""
+    q = (db.query(LuckyDraw, User, LuckyRound.name).join(User, User.id == LuckyDraw.user_id)
+         .join(LuckyRound, LuckyRound.id == LuckyDraw.round_id))
     if status == "open":
         q = q.filter(LuckyDraw.fulfillment_status.in_(F_OPEN))
     elif status:
@@ -137,9 +140,10 @@ def admin_query(db: Session, *, status: str | None = None, round_id: str | None 
     return q.order_by(LuckyDraw.created_at.desc(), LuckyDraw.id.desc())
 
 
-def admin_row(d: LuckyDraw, u: User) -> dict:
+def admin_row(d: LuckyDraw, u: User, round_name: str | None) -> dict:
     s = _snap(d)
-    return {"id": d.id, "createdAt": d.created_at, "roundId": d.round_id,
+    return {"id": d.id, "createdAt": d.created_at, "roundId": d.round_id, "roundName": round_name,
+            "soldOut": bool(d.sold_out_miss),
             "user": {"id": u.id, "email": u.email, "nickname": u.nickname},
             "prize": {"id": d.prize_id, "name": s.get("name"), "kind": s.get("kind"),
                       "proDays": s.get("proDays"), "claimMode": s.get("claimMode"), "probBp": s.get("probBp")},

@@ -1,8 +1,10 @@
-"""每分钟一轮：① 到点的期结束并作废未用券；② 距结束 ≤ 24 小时、开关开着，给本期还有未用券的人
-提醒一次（每期一次，reminder_sent_at 去重）。抽奖接口自己也校验期在进行中，这里晚几十秒没关系。
+"""每分钟一轮，每期各管各的：① 到点的期结束并作废未用券；② 打开了显示、进行中、距结束 ≤ 24 小时、
+还没提醒过的期，各给本期还有未用券的人提醒一次（reminder_sent_at 去重）。抽奖接口自己也校验期在
+进行中，这里晚几十秒没关系。
 
-Every minute: end due rounds (voiding unused tickets); within 24h of the end and while visible,
-remind holders of unused tickets once per round. The spin endpoint checks the window itself.
+Every minute, each round on its own: end due rounds (voiding unused tickets); for every visible,
+active round within 24h of its end that hasn't reminded yet, remind its holders of unused tickets
+once. The spin endpoint checks the window itself.
 """
 import asyncio
 import json
@@ -16,8 +18,8 @@ from app.core.database import SessionLocal
 from app.models import LuckyRound, LuckyTicket
 from app.services.audit import log_change
 from app.services.lucky import rounds
-from app.services.lucky.common import T_UNUSED, is_visible, utcnow
-from app.services.notification_feed import KIND_LUCKY_EXPIRING, create_notification, notify_ws
+from app.services.lucky.common import T_UNUSED, utcnow
+from app.services.notification_feed import KIND_LUCKY_EXPIRING, create_notification, notify_ws_many
 
 logger = logging.getLogger("prismx.lucky")
 
@@ -34,30 +36,39 @@ def sweep_once(db, now: datetime) -> dict:
         # An automatic end is audited too (spec 2.2, "ended, N voided"): the table needs an actor, so the
         # round's creator stands in and auto=true makes the activity log show a system action.
         log_change(db, r.created_by, r.created_by, "lucky:round_end", None,
-                   json.dumps({"id": r.id, "voided": n, "auto": True}, ensure_ascii=False))
+                   json.dumps({"id": r.id, "name": r.name, "voided": n, "auto": True}, ensure_ascii=False))
         out["voided"] += n
         out["ended"] += 1
     db.commit()
-    r = rounds.current_round(db)
-    if (r is None or r.reminder_sent_at is not None or not is_visible(db)
-            or rounds.phase(r, now) != "active" or r.ends_at - now > REMIND_BEFORE):
+    due = (db.query(LuckyRound)
+           .filter(LuckyRound.ended_at.is_(None), LuckyRound.visible.is_(True),
+                   LuckyRound.reminder_sent_at.is_(None), LuckyRound.starts_at <= now,
+                   LuckyRound.ends_at > now, LuckyRound.ends_at <= now + REMIND_BEFORE)
+           .order_by(LuckyRound.ends_at, LuckyRound.id).all())
+    if not due:
         return out
-    rows = (db.query(LuckyTicket.user_id, func.count(LuckyTicket.id))
-            .filter(LuckyTicket.round_id == r.id, LuckyTicket.status == T_UNUSED)
-            .group_by(LuckyTicket.user_id).all())
-    for uid, n in rows:
-        create_notification(db, uid, KIND_LUCKY_EXPIRING, text=f"×{n} · {r.ends_at:%Y-%m-%d %H:%M} UTC",
-                            link="/lucky", ref_id=r.id)
-    r.reminder_sent_at = now
+    pushes: list[tuple[str, list[str]]] = []
+    for r in due:
+        rows = (db.query(LuckyTicket.user_id, func.count(LuckyTicket.id))
+                .filter(LuckyTicket.round_id == r.id, LuckyTicket.status == T_UNUSED)
+                .group_by(LuckyTicket.user_id).all())
+        for uid, n in rows:
+            create_notification(db, uid, KIND_LUCKY_EXPIRING,
+                                text=f"{r.name} · ×{n} · {r.ends_at:%Y-%m-%d %H:%M} UTC", link="/lucky", ref_id=r.id)
+        r.reminder_sent_at = now
+        pushes.append((r.name, [uid for uid, _ in rows]))
     db.commit()
-    uids = [uid for uid, _ in rows]
-    for uid in uids:
-        notify_ws(uid)
-    if uids:
-        from app.services.push_dispatch import EVENT_LUCKY_WHEEL, dispatch_users_push
-        dispatch_users_push(uids, EVENT_LUCKY_WHEEL, "抽奖券即将作废",
-                            "你还有未使用的抽奖券，本期结束后自动作废", url="/lucky", tag="prismx-lucky")
-    out["reminded"] = len(uids)
+    # 提交之后：WS 整批一次提交主循环，推送按期各发一次（文案带期名）
+    # After the commit: one WS submission for everyone, then one push per round (named in the copy)
+    all_uids = [uid for _, uids in pushes for uid in uids]
+    notify_ws_many(all_uids)
+    from app.services.push_dispatch import EVENT_LUCKY_WHEEL, dispatch_users_push
+    for name, uids in pushes:
+        if uids:
+            dispatch_users_push(uids, EVENT_LUCKY_WHEEL, "抽奖券即将作废",
+                                f"你在「{name}」还有未使用的抽奖券，结束后自动作废", url="/lucky",
+                                tag="prismx-lucky")
+    out["reminded"] = len(all_uids)
     return out
 
 

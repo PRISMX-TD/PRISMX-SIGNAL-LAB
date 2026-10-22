@@ -17,9 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Competition, LeaderboardSnapshot, LuckyRound, LuckyTicket, LuckyTicketBatch, User
 from app.services.lucky import rounds
-from app.services.lucky.common import (
-    MAX_BATCH_TICKETS, SRC_BOARD, SRC_COMP, T_REVOKED, T_UNUSED, is_visible, opens_text,
-)
+from app.services.lucky.common import MAX_BATCH_TICKETS, SRC_BOARD, SRC_COMP, T_REVOKED, T_UNUSED, opens_text
 from app.services.notification_feed import KIND_LUCKY_TICKET, create_notification
 
 LINK = "/lucky"
@@ -67,13 +65,21 @@ def resolve_ranks(db: Session, src) -> list[dict]:
     return out
 
 
-def issue(db: Session, admin: User, body, now: datetime) -> tuple[LuckyTicketBatch, bool]:
+def issue(db: Session, admin: User, body, now: datetime) -> tuple[LuckyTicketBatch, bool, LuckyRound | None]:
+    """发一批券到 body.roundId 那一期。返回 (批次, 是否已通知, 期)；重放时期可能已不在（返回 None）。
+    通知与否跟着这一期的「在用户端显示」开关走：关着发的券等打开显示时补通知。
+    Issue a batch into round body.roundId. Returns (batch, notified, round); on a replay the round may
+    be gone (None). Notification follows the round's visible switch: a hidden round's batches are
+    notified when it is switched on."""
     prior = db.query(LuckyTicketBatch).filter(LuckyTicketBatch.request_id == body.requestId).first()
     if prior is not None:
-        return prior, prior.notified_at is not None
-    r = rounds.current_round(db)
-    if rounds.phase(r, now) in ("none", "ended"):
-        raise HTTPException(400, "请先设置开放时间 / Set the open window first")
+        return prior, prior.notified_at is not None, db.get(LuckyRound, prior.round_id)
+    # FOR KEY SHARE：与删期串行，免得券刚写进去期就被删了、撞外键。
+    # FOR KEY SHARE serialises with a round delete, so the tickets never land on a vanished round.
+    r = (db.query(LuckyRound).filter(LuckyRound.id == body.roundId)
+         .with_for_update(read=True, key_share=True).populate_existing().first())
+    if not rounds.is_open(r, now):
+        raise HTTPException(400, "这一期不存在或已结束 / The round doesn't exist or has ended")
     ids = [i.userId for i in body.items]
     if len(set(ids)) != len(ids):
         raise HTTPException(400, "名单里有重复的人，请先合并 / Duplicate users in the list")
@@ -98,22 +104,22 @@ def issue(db: Session, admin: User, body, now: datetime) -> tuple[LuckyTicketBat
         prior = db.query(LuckyTicketBatch).filter(LuckyTicketBatch.request_id == body.requestId).first()
         if prior is None:
             raise
-        return prior, prior.notified_at is not None
+        return prior, prior.notified_at is not None, db.get(LuckyRound, prior.round_id)
     db.bulk_insert_mappings(LuckyTicket, [
         {"user_id": i.userId, "round_id": r.id, "batch_id": batch.id, "source": i.source,
          "source_ref": i.sourceRef, "rank": i.rank, "status": T_UNUSED, "issued_at": now}
         for i in body.items for _ in range(i.count)
     ])
     notified = False
-    if is_visible(db):
+    if r.visible:
         notify_batch(db, batch, now)
         notified = True
-    return batch, notified
+    return batch, notified, r
 
 
 def notify_batch(db: Session, batch: LuckyTicketBatch, now: datetime) -> list[str]:
-    """给这一批里本期仍有未用券的人各写一条站内通知（text = 张数 + 原因）。
-    One feed row per user in the batch who still holds unused tickets from it."""
+    """给这一批里本期仍有未用券的人各写一条站内通知（text = 张数 + 期名 + 原因）。
+    One feed row per user in the batch who still holds unused tickets from it (count + round + reason)."""
     rows = (db.query(LuckyTicket.user_id, func.count(LuckyTicket.id))
             .filter(LuckyTicket.batch_id == batch.id, LuckyTicket.status == T_UNUSED)
             .group_by(LuckyTicket.user_id).all())
@@ -121,17 +127,19 @@ def notify_batch(db: Session, batch: LuckyTicketBatch, now: datetime) -> list[st
     # Round not started yet: say when it opens, so nobody thinks they can spin now (spec 5.4)
     r = db.get(LuckyRound, batch.round_id)
     when = f" · {opens_text(r.starts_at)}" if r is not None and rounds.phase(r, now) == "upcoming" else ""
+    # 多期并行后，同一个人可能同时有几期的券：文案带上期名才分得清（rev 46）
+    # With rounds running side by side a user may hold tickets in several; the round name tells them apart
+    name = f"{r.name} · " if r is not None and r.name else ""
     for uid, n in rows:
-        create_notification(db, uid, KIND_LUCKY_TICKET, text=f"×{n} · {batch.reason}{when}", link=LINK,
+        create_notification(db, uid, KIND_LUCKY_TICKET, text=f"×{n} · {name}{batch.reason}{when}", link=LINK,
                             ref_id=batch.id)
     batch.notified_at = now
     return [uid for uid, _ in rows]
 
 
-def notify_pending(db: Session, now: datetime) -> dict[str, list[str]]:
-    r = rounds.current_round(db)
-    if r is None:
-        return {}
+def notify_pending(db: Session, r: LuckyRound, now: datetime) -> dict[str, list[str]]:
+    """这一期打开显示时，给它关着时发的批次（notified_at 为空）补通知。返回 {原因: [用户 id]}。
+    When a round is switched on, notify its batches issued while hidden. Returns {reason: [user ids]}."""
     out: dict[str, list[str]] = {}
     for b in db.query(LuckyTicketBatch).filter(LuckyTicketBatch.round_id == r.id,
                                                LuckyTicketBatch.notified_at.is_(None)):
@@ -141,12 +149,10 @@ def notify_pending(db: Session, now: datetime) -> dict[str, list[str]]:
     return out
 
 
-def revoke(db: Session, batch_id: str | None, user_id: str | None) -> int:
+def revoke(db: Session, r: LuckyRound, batch_id: str | None, user_id: str | None) -> int:
+    """收回这一期里（按批次 / 按用户）还没用的券。/ Revoke a round's unused tickets by batch and / or user."""
     if not batch_id and not user_id:
         raise HTTPException(400, "要指定批次或用户 / Give a batch or a user")
-    r = rounds.current_round(db)
-    if r is None:
-        return 0
     q = db.query(LuckyTicket).filter(LuckyTicket.round_id == r.id, LuckyTicket.status == T_UNUSED)
     if batch_id:
         q = q.filter(LuckyTicket.batch_id == batch_id)
