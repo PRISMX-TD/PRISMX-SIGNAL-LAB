@@ -117,6 +117,10 @@ export interface User {
   // GamificationSettings.competitionsVisible). Likewise only filled in by
   // refreshUser(); see the gamificationVisible comment above for the precedent.
   competitionsVisible?: boolean
+  // 幸运轮盘入口与本期未用券数（/account 下发，见后端 account.lucky_flags）
+  // Lucky-wheel entry and this round's unused ticket count (from /account)
+  luckyWheelVisible?: boolean
+  luckyTickets?: number
   // 等级/称号（§7）：随 gamificationVisible 一起搭 refreshUser()（GET
   // /auth/me）这趟便车下发，用户菜单角标不用再单独请求 gamificationApi.me()。
   // 只有 gamificationVisible 为真时后端才会算，否则是 null——先例同上面三个

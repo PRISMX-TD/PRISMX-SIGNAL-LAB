@@ -2,6 +2,7 @@
 import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { PendingCompetition } from './types'
+import type { LuckyAdminConfig, LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueItem, LuckyIssueRow, LuckyPrizeInput, LuckyRankSource, LuckyRound, LuckySpinResult, LuckyState } from './luckyTypes'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
@@ -545,6 +546,33 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
     return undefined as T
   }
   return res.json() as Promise<T>
+}
+
+// 下载二进制 / CSV（带登录头）。<a href> 带不了 Authorization，所以导出要先 fetch 成 Blob 再交给调用方存盘。
+// 不走 request()：它按 JSON 解析响应体；这里只做最小的鉴权 + 错误还原，不含入口切换与重发。
+// Authenticated binary / CSV download. A plain <a href> can't carry the Authorization header, so
+// exports fetch a Blob first. Kept apart from request(), which parses JSON; no entry-point
+// switching or resend here, just auth and a readable error.
+async function requestBlob(path: string, requestTimeoutMs = DEFAULT_TIMEOUT_MS): Promise<Blob> {
+  const token = getToken()
+  const { signal, cleanup } = withTimeout(null, requestTimeoutMs)
+  try {
+    const res = await fetch(`${API_BASE}/api${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      signal,
+    })
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`
+      try {
+        const body = await res.json()
+        if (typeof body?.detail === 'string' && body.detail) detail = body.detail
+      } catch { /* 非 JSON 响应体 / non-JSON body */ }
+      throw new ApiHttpError(detail, res.status)
+    }
+    return await res.blob()
+  } finally {
+    cleanup()
+  }
 }
 
 // 认证 / Auth
@@ -1352,6 +1380,18 @@ export const ticketApi = {
   },
 }
 
+// 幸运轮盘（rev 45）：结果由后端决定，前端只播动画 / the backend decides, the page animates
+export const luckyApi = {
+  state: () => request<LuckyState>('/lucky-wheel'),
+  spin: (requestId: string) =>
+    request<LuckySpinResult>('/lucky-wheel/spin', { method: 'POST', body: JSON.stringify({ requestId }) }),
+  draws: () => request<{ draws: LuckyDraw[] }>('/lucky-wheel/draws'),
+  claimInfo: (id: string, text: string) =>
+    request<LuckyDraw>(`/lucky-wheel/draws/${encodeURIComponent(id)}/claim-info`, { method: 'POST', body: JSON.stringify({ text }) }),
+  claimTicket: (id: string) =>
+    request<{ ticketId: string; draw: LuckyDraw }>(`/lucky-wheel/draws/${encodeURIComponent(id)}/claim-ticket`, { method: 'POST' }),
+}
+
 // 分享卡图片中转：App（WebView）里存不了图，传上去换一个 24 小时有效的保存页，交给系统浏览器打开。
 // Share-card relay: the App (WebView) can't save images, so upload and get a 24-hour save page for the system browser.
 export const shareApi = {
@@ -1449,6 +1489,35 @@ export const adminApi = {
   testEmailAutomation: (trigger: EmailAutomationTrigger, content: EmailContentInput) =>
     request<{ ok: boolean; to: string }>('/admin/email-automations/test', { method: 'POST', body: JSON.stringify({ trigger, content }) }),
   resumeEmailAutomations: () => request<{ ok: boolean }>('/admin/email-automations/resume', { method: 'POST' }),
+  // 幸运轮盘（rev 45）/ lucky wheel
+  luckyConfig: () => request<LuckyAdminConfig>('/admin/lucky-wheel/config'),
+  luckySavePrizes: (items: LuckyPrizeInput[]) =>
+    request<LuckyAdminConfig>('/admin/lucky-wheel/prizes', { method: 'PUT', body: JSON.stringify(items) }),
+  luckyCreateRound: (startsAt: string, endsAt: string) =>
+    request<LuckyRound>('/admin/lucky-wheel/rounds', { method: 'POST', body: JSON.stringify({ startsAt, endsAt }) }),
+  luckyUpdateRound: (patch: { startsAt?: string; endsAt?: string }) =>
+    request<LuckyRound & { voided: number }>('/admin/lucky-wheel/rounds/current', { method: 'PATCH', body: JSON.stringify(patch) }),
+  luckyEndRound: () => request<LuckyRound & { voided: number }>('/admin/lucky-wheel/rounds/current/end', { method: 'POST' }),
+  luckySetVisible: (visible: boolean) =>
+    request<LuckyAdminConfig>('/admin/lucky-wheel/visible', { method: 'PUT', body: JSON.stringify({ visible }) }),
+  luckyIssuePreview: (source: LuckyRankSource) =>
+    request<{ rows: LuckyIssueRow[] }>('/admin/lucky-wheel/issue/preview', { method: 'POST', body: JSON.stringify(source) }),
+  luckyIssue: (reason: string, requestId: string, items: LuckyIssueItem[]) =>
+    request<{ id: string; userCount: number; ticketCount: number; notified: boolean }>(
+      '/admin/lucky-wheel/issue', { method: 'POST', body: JSON.stringify({ reason, requestId, items }) }),
+  luckyRevoke: (p: { batchId?: string; userId?: string }) =>
+    request<{ revoked: number }>('/admin/lucky-wheel/revoke', { method: 'POST', body: JSON.stringify(p) }),
+  luckyBatches: () => request<{ batches: LuckyBatch[] }>('/admin/lucky-wheel/batches'),
+  luckyDraws: (q: { status?: LuckyFulfillment | 'open' | ''; roundId?: string; userId?: string; prizeId?: string; limit: number; offset: number }) =>
+    request<{ total: number; draws: LuckyAdminDraw[] }>(`/admin/lucky-wheel/draws?${new URLSearchParams(
+      Object.entries(q).filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, String(v)]))}`),
+  luckyDrawsCsv: (status: string, roundId?: string) =>
+    requestBlob(`/admin/lucky-wheel/draws.csv?${new URLSearchParams(
+      Object.entries({ status, roundId }).filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, String(v)]))}`),
+  luckyDeliver: (id: string, note: string) =>
+    request<{ ok: boolean }>(`/admin/lucky-wheel/draws/${encodeURIComponent(id)}/deliver`, { method: 'POST', body: JSON.stringify({ note }) }),
+  luckyCancel: (id: string, note: string) =>
+    request<{ ok: boolean }>(`/admin/lucky-wheel/draws/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: JSON.stringify({ note }) }),
   listEmailAutomationSends: (id: string, status: EmailAutomationSendStatus | '', limit: number, offset: number) =>
     request<{ sends: EmailAutomationSend[]; total: number; limit: number; offset: number }>(
       `/admin/email-automations/${encodeURIComponent(id)}/sends?${new URLSearchParams({
