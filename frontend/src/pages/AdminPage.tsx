@@ -26,6 +26,7 @@ import EmailAutomationPanel from '../components/admin/EmailAutomationPanel'
 import EmailPanel from '../components/admin/EmailPanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
+import LuckyWheelPanel from '../components/admin/lucky/LuckyWheelPanel'
 import OpsSettingsPanel from '../components/admin/OpsSettingsPanel'
 import PlatformStrategiesPanel from '../components/admin/PlatformStrategiesPanel'
 import StrategyWinratePanel from '../components/admin/StrategyWinratePanel'
@@ -198,6 +199,9 @@ function AdminConsole({ section }: { section: AdminSection }) {
       break
     case 'gamification':
       content = <GamificationPanel />
+      break
+    case 'luckywheel':
+      content = <LuckyWheelPanel />
       break
     case 'guide':
       content = <PlatformStrategiesPanel />

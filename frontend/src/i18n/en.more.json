@@ -1095,7 +1095,128 @@
         "templates": "Canned replies",
         "ops": "Operations",
         "system": "System",
-        "autoemail": "Automated email"
+        "autoemail": "Automated email",
+        "luckywheel": "Lucky wheel"
+      }
+    },
+    "lucky": {
+      "kpi": {
+        "issued": "Tickets issued",
+        "used": "Used",
+        "pending": "Awaiting fulfilment",
+        "ends": "Round ends"
+      },
+      "tab": {
+        "settings": "Wheel settings",
+        "issue": "Issue tickets",
+        "draws": "Draw history",
+        "pending": "To fulfil"
+      },
+      "visible": "Show the wheel to users",
+      "startsAt": "Starts",
+      "endsAt": "Ends",
+      "userSees": "Users see: {{time}} (UTC+8)",
+      "createRound": "Set opening window",
+      "saveRound": "Save window",
+      "endNow": "End now",
+      "confirmEnd": "Ending the round voids every unused ticket of this round. Continue?",
+      "voided": "{{n}} unused tickets voided",
+      "noRound": "No opening window set yet",
+      "phase": {
+        "none": "Not set",
+        "upcoming": "Upcoming",
+        "active": "Active",
+        "ended": "Ended"
+      },
+      "name": "Prize name",
+      "days": "Days",
+      "stock": "Stock",
+      "perUser": "Per-user cap",
+      "description": "Description (optional)",
+      "claimHint": "Claim hint, e.g. enter recipient, phone and address",
+      "kind": {
+        "pro_days": "PRO membership days",
+        "custom": "Custom prize",
+        "retry": "Spin again",
+        "none": "Better luck next time"
+      },
+      "soldOut": {
+        "to_fallback": "When gone, fold into \"Better luck next time\"",
+        "redistribute": "When gone, share out across the other slots"
+      },
+      "claimMode": {
+        "pick": "Pick claim method",
+        "form": "Winner fills in claim details",
+        "ticket": "Winner opens a support ticket"
+      },
+      "remove": "Remove",
+      "addSlot": "+ Add slot",
+      "total": "Odds total {{n}}%",
+      "given": "{{n}} given out",
+      "savePrizes": "Save prizes",
+      "saved": "Saved",
+      "err": {
+        "slots": "The wheel needs 2–12 slots",
+        "total": "Odds must total exactly 100%",
+        "name": "A slot has no name",
+        "days": "PRO days must be 1–3650",
+        "claimMode": "A custom prize needs a claim method",
+        "noneLimited": "\"Better luck next time\" cannot have stock or a cap",
+        "stockBelowUsed": "Stock cannot be below the number already given out",
+        "fallback": "A slot that can run out needs a \"Better luck next time\" slot to fold into; add one"
+      },
+      "issue": {
+        "needRound": "Set the opening window under \"Wheel settings\" first",
+        "hiddenWarn": "The wheel is hidden: issuing now will not notify users; they are notified automatically once you turn it on",
+        "fromComp": "By competition rank",
+        "fromBoard": "By leaderboard rank",
+        "manual": "Pick manually",
+        "pickComp": "Choose a competition",
+        "board": {
+          "return_pct": "Return board",
+          "win_rate": "Win-rate board"
+        },
+        "period": "Period",
+        "week": "This week",
+        "month": "This month",
+        "periodKey": "Or enter a period, e.g. 2026-10 / 2026-W42",
+        "tier": "Ranks {{from}}–{{to}}: {{count}} each",
+        "addTier": "+ Add tier",
+        "from": "From",
+        "to": "To",
+        "count": "Tickets",
+        "load": "Add to list",
+        "search": "Search email / nickname",
+        "add": "Add",
+        "list": "Confirm list",
+        "dup": "Duplicate",
+        "dupSum": "Add the counts",
+        "dupOnce": "Count once",
+        "reason": "Reason (visible to the user)",
+        "summary": "{{users}} users, {{tickets}} tickets",
+        "confirm": "Confirm and issue",
+        "confirmAsk": "Issue {{tickets}} tickets to {{users}} users?",
+        "done": "Issued: {{users}} users, {{tickets}} tickets",
+        "clear": "Clear",
+        "batches": "Batches this round",
+        "revoke": "Revoke unused",
+        "revoked": "{{n}} tickets revoked",
+        "limit": "Per batch: up to 2000 users, 100 tickets each, 20000 in total"
+      },
+      "draws": {
+        "all": "All statuses",
+        "user": "User",
+        "prize": "Prize",
+        "time": "Time",
+        "status": "Status",
+        "claim": "Claim info / ticket",
+        "export": "Export CSV",
+        "deliver": "Mark delivered",
+        "cancel": "Cancel",
+        "note": "Note (e.g. tracking number; visible to the user)",
+        "cancelReason": "Cancel reason (required; visible to the user)",
+        "openTicket": "Open ticket",
+        "empty": "No records"
       }
     },
     "totalUsers": "Total users",

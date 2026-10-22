@@ -20,6 +20,12 @@ describe('admin console sections', () => {
     for (const key of legacy) expect(isAdminSection(key)).toBe(true)
   })
 
+  it('puts the lucky wheel in growth', () => {
+    expect(sectionsOf('growth')).toContain('luckywheel')
+    expect(groupOf('luckywheel')).toBe('growth')
+    expect(legacyAdminTarget('?tab=luckywheel')).toBe('/admin/luckywheel')
+  })
+
   it('maps sections to their group', () => {
     expect(groupOf('logs')).toBe('users')
     expect(groupOf('approvals')).toBe('support')

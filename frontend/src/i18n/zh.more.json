@@ -1095,7 +1095,128 @@
         "templates": "快捷回复",
         "ops": "运营设置",
         "system": "系统参数",
-        "autoemail": "自动邮件"
+        "autoemail": "自动邮件",
+        "luckywheel": "幸运轮盘"
+      }
+    },
+    "lucky": {
+      "kpi": {
+        "issued": "本期已发券",
+        "used": "已使用",
+        "pending": "待发奖",
+        "ends": "本期结束"
+      },
+      "tab": {
+        "settings": "轮盘设置",
+        "issue": "发券",
+        "draws": "抽奖记录",
+        "pending": "待发奖"
+      },
+      "visible": "在用户端显示轮盘",
+      "startsAt": "开始时间",
+      "endsAt": "结束时间",
+      "userSees": "用户端显示：{{time}}（UTC+8）",
+      "createRound": "设置开放时间",
+      "saveRound": "保存时间",
+      "endNow": "立即结束",
+      "confirmEnd": "结束后本期所有未使用的抽奖券会作废，确定？",
+      "voided": "已作废 {{n}} 张未使用的券",
+      "noRound": "还没有设置开放时间",
+      "phase": {
+        "none": "未设置",
+        "upcoming": "即将开始",
+        "active": "进行中",
+        "ended": "已结束"
+      },
+      "name": "奖品名称",
+      "days": "天数",
+      "stock": "库存",
+      "perUser": "每人上限",
+      "description": "说明（选填）",
+      "claimHint": "领奖提示，如：请填写收件人、电话、地址",
+      "kind": {
+        "pro_days": "PRO 会员天数",
+        "custom": "自定义奖品",
+        "retry": "再来一次",
+        "none": "谢谢参与"
+      },
+      "soldOut": {
+        "to_fallback": "抽完后并入「谢谢参与」",
+        "redistribute": "抽完后按比例分给其他格"
+      },
+      "claimMode": {
+        "pick": "选择领取方式",
+        "form": "中奖后填写领奖信息",
+        "ticket": "提交工单联系客服"
+      },
+      "remove": "删除",
+      "addSlot": "+ 添加一格",
+      "total": "概率合计 {{n}}%",
+      "given": "已发出 {{n}} 个",
+      "savePrizes": "保存奖项",
+      "saved": "已保存",
+      "err": {
+        "slots": "轮盘要有 2–12 格",
+        "total": "概率合计必须是 100%",
+        "name": "有格子没填名称",
+        "days": "PRO 天数要填 1–3650",
+        "claimMode": "自定义奖品要选领取方式",
+        "noneLimited": "「谢谢参与」不能设库存或上限",
+        "stockBelowUsed": "库存不能少于已发出的数量",
+        "fallback": "有格子抽完要并入「谢谢参与」，请添加一格「谢谢参与」"
+      },
+      "issue": {
+        "needRound": "请先在「轮盘设置」里设置开放时间",
+        "hiddenWarn": "轮盘关闭中：现在发券不会通知用户，打开显示开关后自动通知",
+        "fromComp": "按比赛名次",
+        "fromBoard": "按排行榜名次",
+        "manual": "手动勾选",
+        "pickComp": "选择比赛",
+        "board": {
+          "return_pct": "收益榜",
+          "win_rate": "胜率榜"
+        },
+        "period": "周期",
+        "week": "本周",
+        "month": "本月",
+        "periodKey": "或填周期，如 2026-10 / 2026-W42",
+        "tier": "第 {{from}}–{{to}} 名 每人 {{count}} 张",
+        "addTier": "+ 添加档位",
+        "from": "从",
+        "to": "到",
+        "count": "张数",
+        "load": "加入名单",
+        "search": "搜索邮箱 / 昵称",
+        "add": "加入",
+        "list": "确认清单",
+        "dup": "重复",
+        "dupSum": "张数相加",
+        "dupOnce": "只算一次",
+        "reason": "发放原因（用户看得到）",
+        "summary": "共 {{users}} 人、{{tickets}} 张",
+        "confirm": "确认发放",
+        "confirmAsk": "确定给 {{users}} 人发 {{tickets}} 张抽奖券？",
+        "done": "已发放：{{users}} 人、{{tickets}} 张",
+        "clear": "清空",
+        "batches": "本期发放记录",
+        "revoke": "收回未使用",
+        "revoked": "已收回 {{n}} 张",
+        "limit": "单批最多 2000 人、每人 100 张、共 20000 张"
+      },
+      "draws": {
+        "all": "全部状态",
+        "user": "用户",
+        "prize": "奖品",
+        "time": "时间",
+        "status": "状态",
+        "claim": "领奖信息 / 工单",
+        "export": "导出 CSV",
+        "deliver": "已发放",
+        "cancel": "取消",
+        "note": "备注（如快递单号，用户看得到）",
+        "cancelReason": "取消原因（必填，用户看得到）",
+        "openTicket": "打开工单",
+        "empty": "没有记录"
       }
     },
     "totalUsers": "总用户数",
