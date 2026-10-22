@@ -405,7 +405,12 @@ def _hash_legacy_api_tokens() -> None:
 #          建表建索引）。同 rev 39：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
 # rev 45 — 幸运轮盘（2026-10-22）：新表 lucky_wheel_rounds / lucky_wheel_prizes / lucky_ticket_batches /
 #          lucky_tickets / lucky_draws（create_all 建表建索引）。同 rev 44：无 ADD COLUMN、无回填。
-CURRENT_SCHEMA_REV = 45
+# rev 46 — 幸运轮盘 v2（2026-10-22）：多期并行、每期自带奖品与「在用户端显示」开关、两种奖品模式。
+#          rounds +name/mode/visible，prizes +round_id、删 per_user_limit/on_sold_out，draws +sold_out_miss。
+#          线上只有当天的测试数据（用户已同意清空）：库里版本 < 46 时把 5 张 lucky 表整张 DROP，再按新
+#          模型重建（空表），并删掉已废弃的全站开关 platform_settings.lucky_wheel_visible。只跑这一次，
+#          见 _reset_lucky_wheel_rev46。
+CURRENT_SCHEMA_REV = 46
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1812,6 +1817,10 @@ def _migrate_columns() -> None:
     # rev 40：规范邮箱回填（列在上面的 users 段补出）。/ canonical-email backfill.
     _backfill_email_canonical()
 
+    # rev 46：幸运轮盘 v2，5 张 lucky 表按新结构重建（清空）。只在库里版本 < 46 时跑。
+    # rev 46: lucky wheel v2 — rebuild the 5 lucky tables empty. Only when the stored revision < 46.
+    _reset_lucky_wheel_rev46(applied, is_postgres, inspector)
+
     # rev 42：跟进「联系不上」仍算进行中 + 重建部分唯一索引 + 清空默认期限。
     # rev 42: unreachable follow-ups stay active; rebuild the partial unique index; clear deadlines.
     _migrate_follow_ups_rev42()
@@ -1832,6 +1841,68 @@ def _migrate_columns() -> None:
     # untouched so the next boot retries (every step is idempotent).
     _write_schema_rev(CURRENT_SCHEMA_REV)
     logger.info("列迁移完成，schema_rev=%d", CURRENT_SCHEMA_REV)
+
+
+# 按外键依赖顺序：先删引用别人的表。/ FK order: referencing tables first.
+_LUCKY_TABLES_REV46 = ("lucky_draws", "lucky_tickets", "lucky_ticket_batches", "lucky_wheel_prizes",
+                       "lucky_wheel_rounds")
+
+
+def _reset_lucky_wheel_rev46(applied: int | None, is_postgres: bool, insp=None) -> None:
+    """rev 46：把幸运轮盘 5 张表 DROP 掉再按新模型建一遍（空表），并删掉废弃的全站开关那一行。
+
+    为什么整表重建而不是 ADD COLUMN：v2 给奖项加了非空的 round_id、给期加了非空的 name，旧行没有
+    合理的值可回填；而线上只有当天的测试数据，用户已同意清空。为什么要在这里显式建表：init_db 里
+    create_all 先于本函数执行，那时旧表还在，create_all 会跳过它们——不在这里重建，升级后就是
+    「表被删了、没人再建」或者「旧结构还在」。
+
+    只跑一次的条件：库里记的版本 < 46。另外，版本读不到（None）但库里的 lucky_wheel_prizes 还是旧
+    结构（没有 round_id）时也重建——旧结构在 v2 下根本不能用。版本读不到、结构已是新的（新库，
+    create_all 刚建好）就不动，免得把 v2 的正式数据当成旧数据清掉。
+
+    Postgres 上 DDL 是事务性的：DROP、DELETE、CREATE 在同一个事务里，中途失败整体回滚、版本号不写，
+    下次启动重来。DROP 用 CASCADE（库里若有手工加的视图 / 外键也一并处理）；SQLite 没有 CASCADE 关键字，
+    按依赖顺序逐张删即可。
+
+    rev 46: drop the 5 lucky-wheel tables, rebuild them empty from the new models, and delete the
+    retired site-wide switch row.
+
+    Why rebuild rather than ADD COLUMN: v2 adds a NOT NULL round_id to prizes and a NOT NULL name to
+    rounds, which old rows have no sensible value for; production only holds the day's test data and
+    the user agreed to wipe it. Why create explicitly here: init_db runs create_all before this
+    function, while the old tables still exist, so create_all skips them — without rebuilding here the
+    upgrade would leave either dropped tables nobody recreates or the old structure in place.
+
+    Runs once: when the stored revision is < 46. Also when the revision is unreadable (None) but
+    lucky_wheel_prizes still has the old structure (no round_id), which v2 can't use at all. An
+    unreadable revision with the new structure (a fresh database, just built by create_all) is left
+    alone so real v2 data is never mistaken for old data.
+
+    On Postgres DDL is transactional: DROP, DELETE and CREATE share one transaction, so a failure
+    midway rolls everything back, the revision isn't written and the next boot retries. DROP uses
+    CASCADE (covering any hand-made view / FK); SQLite has no CASCADE keyword, and dropping in
+    dependency order is enough there.
+    """
+    from app import models
+
+    # 复用 _migrate_columns 开头那个 inspector（前面的步骤不碰 lucky 表，它的快照对这几张表仍准确）
+    # Reuse _migrate_columns' inspector (earlier steps never touch the lucky tables, so its snapshot holds)
+    insp = insp if insp is not None else inspect(engine)
+    names = set(insp.get_table_names())
+    legacy = ("lucky_wheel_prizes" in names
+              and "round_id" not in {c["name"] for c in insp.get_columns("lucky_wheel_prizes")})
+    if not ((applied is not None and applied < 46) or legacy):
+        return
+    tables = [models.LuckyRound.__table__, models.LuckyPrize.__table__, models.LuckyTicketBatch.__table__,
+              models.LuckyTicket.__table__, models.LuckyDraw.__table__]
+    cascade = " CASCADE" if is_postgres else ""
+    with engine.begin() as conn:
+        for t in _LUCKY_TABLES_REV46:
+            conn.execute(text(f"DROP TABLE IF EXISTS {t}{cascade}"))
+        if "platform_settings" in names:
+            conn.execute(text("DELETE FROM platform_settings WHERE key = 'lucky_wheel_visible'"))
+        Base.metadata.create_all(bind=conn, tables=tables)
+    logger.info("rev 46：幸运轮盘 5 张表已按新结构重建（清空），全站开关行已删除")
 
 
 def _migrate_follow_ups_rev42() -> None:

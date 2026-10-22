@@ -2195,23 +2195,31 @@ class SupportAction(Base):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 幸运轮盘（rev 45，设计 docs/superpowers/specs/2026-10-22-lucky-wheel-design.md）
-# Lucky wheel (rev 45; see the 2026-10-22 lucky-wheel design).
-# 全站只有一个轮盘：奖项是全局的一套，「期」只管开放时间；券属于发放时的那一期，
-# 有效期 = 那一期的 ends_at（不在券上另存，延长结束时间券就跟着延长）。
-# One wheel for the whole site: prizes are one global set, a round only carries the
-# open window; a ticket belongs to the round it was issued in and is valid until that
-# round's ends_at (not stored per ticket, so extending the round extends every ticket).
+# 幸运轮盘（rev 45 建，rev 46 改成多期；设计 docs/superpowers/specs/2026-10-22-lucky-wheel-design.md）
+# Lucky wheel (built in rev 45, multi-round since rev 46; see the 2026-10-22 lucky-wheel design).
+# 每一期自带名称、开放时间、奖品模式（按份量 / 按概率）、自己的一套奖品和「在用户端显示」开关；
+# 多期可以同时进行。券属于发放时的那一期，有效期 = 那一期的 ends_at（不在券上另存，延长结束时间
+# 券就跟着延长）。
+# Every round carries its own name, open window, prize mode (by quantity / by probability), its
+# own prize set and a "shown to users" switch; rounds may overlap. A ticket belongs to the round it
+# was issued in and is valid until that round's ends_at (not stored per ticket, so extending the
+# round extends every ticket).
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 class LuckyRound(Base):
-    """一期：开放时间窗口。同一时间最多一期未结束（ended_at 为空）。
-    One round: the open window. At most one round is unended (ended_at NULL) at a time."""
+    """一期。多期可以并存；visible 关着时普通用户看不到这一期（管理员不受限，用来内部测试）。
+    mode：qty = 按份量（抽奖箱，剩余份数就是权重），prob = 按概率（万分比权重）。
+    One round. Several may run at once; while visible is off ordinary users can't see it (admins
+    always can, for internal testing). mode: qty = by quantity (a raffle box, remaining stock is the
+    weight), prob = by probability (basis-point weights)."""
     __tablename__ = "lucky_wheel_rounds"
     __table_args__ = (Index("idx_lucky_rounds_ended_ends", "ended_at", "ends_at"),)
 
     id = Column(String, primary_key=True, default=_uuid)
+    name = Column(String, nullable=False)
+    mode = Column(String, nullable=False, default="prob")   # qty / prob
+    visible = Column(Boolean, nullable=False, default=False)
     starts_at = Column(DateTime, nullable=False)
     ends_at = Column(DateTime, nullable=False)
     # 实际结束时刻：到点或管理员「立即结束」，作废跑完才写 / set once voiding has run
@@ -2222,11 +2230,14 @@ class LuckyRound(Base):
 
 
 class LuckyPrize(Base):
-    """轮盘上的一格。抽中过的不硬删，只下架（archived）——抽奖记录要能对上。
-    One wheel slot. A slot that has been won is archived, never hard-deleted."""
+    """某一期轮盘上的一格。抽中过的不硬删，只下架（archived）——抽奖记录要能对上；
+    删整期时连同记录一起硬删。
+    One slot on a round's wheel. A slot that has been won is archived, never hard-deleted (draw
+    rows reference it) — except when the whole round is deleted along with its draws."""
     __tablename__ = "lucky_wheel_prizes"
 
     id = Column(String, primary_key=True, default=_uuid)
+    round_id = Column(String, ForeignKey("lucky_wheel_rounds.id"), nullable=False, index=True)
     sort_order = Column(Integer, nullable=False, default=0)
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
@@ -2234,11 +2245,9 @@ class LuckyPrize(Base):
     color = Column(String, nullable=True)
     kind = Column(String, nullable=False)              # pro_days / none / retry / custom
     pro_days = Column(Integer, nullable=True)
-    prob_bp = Column(Integer, nullable=False, default=0)  # 万分比 / basis points of 10000
-    stock = Column(Integer, nullable=True)             # NULL = 不限 / unlimited
+    prob_bp = Column(Integer, nullable=False, default=0)  # 万分比；qty 模式存 0 / basis points; 0 in qty mode
+    stock = Column(Integer, nullable=True)             # NULL = 不限（仅 prob 模式）/ unlimited (prob mode only)
     stock_used = Column(Integer, nullable=False, default=0)
-    per_user_limit = Column(Integer, nullable=True)    # 每期每人最多中几次 / per user per round
-    on_sold_out = Column(String, nullable=False, default="to_fallback")
     claim_mode = Column(String, nullable=True)         # custom 才有：form / ticket
     claim_hint = Column(String, nullable=True)
     archived = Column(Boolean, nullable=False, default=False)
@@ -2313,3 +2322,7 @@ class LuckyDraw(Base):
     handled_by = Column(String, ForeignKey("users.id"), nullable=True)
     handled_at = Column(DateTime, nullable=True)
     admin_note = Column(String, nullable=True)     # 发放备注或取消原因（用户看得到）
+    # 按概率模式下抽中的格份数已用完：券照常用掉，但不发奖、不加已发出数（rev 46）。
+    # By-probability round landed on a slot whose stock is used up: the ticket is spent, but
+    # nothing is granted and the used count stays put (rev 46).
+    sold_out_miss = Column(Boolean, nullable=False, default=False)
