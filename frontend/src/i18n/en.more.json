@@ -1100,81 +1100,125 @@
       }
     },
     "lucky": {
-      "kpi": {
-        "issued": "Tickets issued",
-        "used": "Used",
-        "pending": "Awaiting fulfilment",
-        "ends": "Round ends"
-      },
       "tab": {
-        "settings": "Wheel settings",
+        "prizes": "Prizes",
         "issue": "Issue tickets",
-        "draws": "Draw history",
-        "pending": "To fulfil"
+        "draws": "Draws",
+        "pending": "Pending"
       },
-      "visible": "Show the wheel to users",
       "startsAt": "Starts",
       "endsAt": "Ends",
       "userSees": "Users see: {{time}} (UTC+8)",
-      "createRound": "Set opening window",
-      "saveRound": "Save window",
-      "endNow": "End now",
-      "confirmEnd": "Ending the round voids every unused ticket of this round. Continue?",
+      "endNow": "End",
+      "confirmEnd": "Ending voids every unused ticket of this round. Continue?",
+      "confirmEndRound": "End “{{name}}” now? Every unused ticket of this round will be voided.",
       "voided": "{{n}} unused tickets voided",
-      "noRound": "No opening window set yet",
       "phase": {
-        "none": "Not set",
-        "upcoming": "Upcoming",
-        "active": "Active",
+        "upcoming": "Not started",
+        "active": "Running",
         "ended": "Ended"
       },
+      "mode": {
+        "label": "Prize mode",
+        "qty": "By quantity",
+        "prob": "By probability",
+        "qtyHint": "Like a raffle box: each slot is drawn by its remaining quantity; a slot at 0 never wins. Once everything is gone no ticket is used.",
+        "probHint": "Drawn by probability, which must total 100%. Hitting a slot that has run out is a miss (the ticket is used); its odds are not passed to other slots.",
+        "locked": "Someone has already drawn, so the mode can’t change"
+      },
+      "endedReadOnly": "This round has ended; its prizes can’t be changed",
       "name": "Prize name",
+      "kindLabel": "Prize type",
       "days": "Days",
-      "stock": "Stock",
-      "perUser": "Per-user cap",
+      "prob": "Odds %",
+      "stockQty": "Quantity",
+      "stockCap": "Quantity cap (optional)",
       "description": "Description (optional)",
-      "claimHint": "Claim hint, e.g. enter recipient, phone and address",
+      "claimHint": "Claim hint, e.g. recipient, phone, address",
       "kind": {
         "pro_days": "PRO membership days",
         "custom": "Custom prize",
         "retry": "Spin again",
         "none": "Better luck next time"
       },
-      "soldOut": {
-        "to_fallback": "When gone, fold into \"Better luck next time\"",
-        "redistribute": "When gone, share out across the other slots"
-      },
       "claimMode": {
-        "pick": "Pick claim method",
-        "form": "Winner fills in claim details",
-        "ticket": "Winner opens a support ticket"
+        "pick": "Choose how to claim",
+        "form": "Fill in claim details after winning",
+        "ticket": "Open a support ticket"
       },
       "color": "Slot colour",
       "colorAuto": "Auto colour",
-      "colorReset": "Reset to auto",
-      "confirmLeave": "You have unsaved prize edits that will be lost. Leave anyway?",
+      "colorReset": "Back to auto",
+      "confirmLeave": "Unsaved prize changes will be lost. Leave anyway?",
       "remove": "Remove",
-      "addSlot": "+ Add slot",
+      "moveUp": "Move up",
+      "addSlot": "+ Add a slot",
       "total": "Odds total {{n}}%",
-      "given": "{{n}} given out",
+      "totalQty": "{{n}} in total",
+      "given": "{{n}} given",
       "savePrizes": "Save prizes",
       "saved": "Saved",
       "err": {
-        "number": "Stock must be a whole number ≥ 0 and the per-user cap a whole number ≥ 1 (leave blank for unlimited)",
-        "prob": "Each slot's odds must be between 0 and 100%",
+        "prob": "Each slot’s odds must be 0–100%",
         "decimals": "Odds allow at most two decimals",
         "slots": "The wheel needs 2–12 slots",
-        "total": "Odds must total exactly 100%",
+        "total": "Odds must total 100%",
         "name": "A slot has no name",
         "days": "PRO days must be 1–3650",
-        "claimMode": "A custom prize needs a claim method",
-        "noneLimited": "\"Better luck next time\" cannot have stock or a cap",
-        "stockBelowUsed": "Stock cannot be below the number already given out",
-        "fallback": "A slot that can run out needs a \"Better luck next time\" slot to fold into; add one"
+        "claimMode": "Custom prizes need a claim method",
+        "stockBelowUsed": "Quantity can’t be below what was already given",
+        "capNumber": "The cap must be a whole number ≥ 0 (leave blank for no cap)",
+        "stockRequired": "In quantity mode every slot needs a quantity",
+        "stockNumber": "Quantity must be a whole number ≥ 0",
+        "qtyTotal": "The total quantity must be above 0"
+      },
+      "round": {
+        "list": "Rounds",
+        "adminSees": "Admins bypass the visibility switch and can test hidden rounds themselves",
+        "new": "+ New round",
+        "empty": "No rounds yet. Click “New round” to start",
+        "showEnded": "Show {{n}} ended rounds",
+        "hideEnded": "Hide {{n}} ended rounds",
+        "current": "Selected: {{name}}",
+        "stats": "Issued {{issued}} · used {{used}} · pending {{pending}}",
+        "visibleFor": "Show “{{name}}” to users",
+        "shown": "Shown to users",
+        "hidden": "Hidden from users",
+        "edit": "Edit",
+        "delete": "Delete",
+        "createTitle": "New round",
+        "editTitle": "Edit round",
+        "name": "Name",
+        "namePh": "e.g. Singles’ Day wheel",
+        "startLocked": "A started round’s start time can’t change",
+        "endNowWarn": "The end time has passed: saving ends this round now and voids unused tickets",
+        "modeWhere": "(change it under Prizes)",
+        "save": "Save",
+        "create": "Create",
+        "created": "Created “{{name}}”. Next, set up its prizes",
+        "err": {
+          "name": "Enter a name",
+          "nameLong": "Names are at most 40 characters",
+          "start": "Pick a start time",
+          "end": "Pick an end time",
+          "order": "The end must be after the start",
+          "past": "The end must be in the future"
+        }
+      },
+      "del": {
+        "title": "Delete round",
+        "lead": "This permanently deletes “{{name}}” together with:",
+        "draws": "{{n}} draw records",
+        "tickets": "{{n}} tickets (used ones included)",
+        "batchesPrizes": "All ticket batches and prize settings",
+        "keeps": "Not undone: PRO days already granted, support tickets already opened, the activity log and notifications already sent.",
+        "pendingWarn": "{{n}} prizes are still undelivered; after deleting, the admin can no longer find those records",
+        "typeName": "Type the round name to confirm",
+        "confirm": "Delete permanently",
+        "done": "Deleted: {{draws}} draws, {{tickets}} tickets, {{batches}} batches, {{prizes}} prizes"
       },
       "issue": {
-        "needRound": "Set the opening window under \"Wheel settings\" first",
-        "hiddenWarn": "The wheel is hidden: issuing now will not notify users; they are notified automatically once you turn it on",
+        "hiddenWarn": "This round isn’t shown to users yet: issuing now sends no notification; users are notified once you switch it on",
         "fromComp": "By competition rank",
         "fromBoard": "By leaderboard rank",
         "manual": "Pick manually",
@@ -1205,7 +1249,7 @@
         "confirmAsk": "Issue {{tickets}} tickets to {{users}} users?",
         "done": "Issued: {{users}} users, {{tickets}} tickets",
         "clear": "Clear",
-        "batches": "Batches this round",
+        "batches": "Batches for this round",
         "revoke": "Revoke unused",
         "revoked": "{{n}} tickets revoked",
         "limit": "Per batch: up to 2000 users, 100 tickets each, 20000 in total",
@@ -1213,14 +1257,16 @@
         "loaded": "Added to the list: {{n}} users",
         "none": "Nobody matched",
         "emptyList": "The list is empty: pick people above to add them",
-        "noBatches": "No tickets issued this round yet",
+        "noBatches": "No tickets issued in this round yet",
         "revokeAsk": "Revoke the unused tickets in the \"{{reason}}\" batch? Used tickets are not affected.",
         "err": {
           "reversed": "Rank range is reversed (the start must not exceed the end)",
           "overlap": "Rank ranges overlap, please adjust",
           "users": "At most 2000 users per batch, remove some first",
           "tickets": "At most 20000 tickets per batch, remove some first"
-        }
+        },
+        "ended": "This round has ended; no more tickets can be issued",
+        "target": "Issuing to: {{name}}"
       },
       "draws": {
         "all": "All statuses",
@@ -1237,7 +1283,9 @@
         "openTicket": "Open ticket",
         "empty": "No records",
         "reasonRequired": "A cancel reason is required (the user sees it)",
-        "noteLong": "Notes are limited to 200 characters"
+        "noteLong": "Notes are limited to 200 characters",
+        "soldOut": "Sold out (no win)",
+        "round": "Round"
       }
     },
     "totalUsers": "Total users",
@@ -2048,14 +2096,16 @@
         "visible": "Wheel visibility: {{visible}}",
         "on": "on",
         "off": "off",
-        "round_create": "Set the opening window",
-        "round_update": "Changed the opening window ({{voided}} tickets voided)",
+        "round_create": "Created a round",
+        "round_update": "Edited the round ({{voided}} tickets voided)",
         "round_end": "Ended the round now ({{voided}} tickets voided)",
         "round_auto_end": "The round ended on schedule ({{voided}} tickets voided)",
         "issue": "Issued tickets “{{reason}}”: {{users}} users, {{tickets}} tickets",
         "revoke": "Revoked {{revoked}} unused tickets",
         "deliver": "Marked a prize as delivered",
-        "cancel": "Cancelled a prize"
+        "cancel": "Cancelled a prize",
+        "round_delete": "Deleted the round ({{draws}} draws, {{tickets}} tickets, {{batches}} batches, {{prizes}} prizes)",
+        "withRound": "{{round}} · {{text}}"
       },
       "kindName": {
         "user": {
@@ -5033,7 +5083,8 @@
       "none": "No prize this time — better luck next spin!",
       "retry": "Spin again! Your ticket is back",
       "proDays": "You won {{n}} days of PRO — already added",
-      "custom": "You won “{{name}}”"
+      "custom": "You won “{{name}}”",
+      "soldOut": "This prize has already run out, so no win this time"
     },
     "status": {
       "auto_done": "Credited",
@@ -5041,6 +5092,8 @@
       "submitted": "Processing",
       "delivered": "Sent",
       "cancelled": "Cancelled"
-    }
+    },
+    "rounds": "Lucky draws",
+    "ticketsBadge": "{{n}} unused"
   }
 }

@@ -1,4 +1,4 @@
-// 抽奖记录 / 待发奖页的纯逻辑：筛选 → 查询参数、翻页越界回退、备注输入校验、CSV 文件名。
+// 抽奖记录 / 待发奖页的纯逻辑：筛选 → 查询参数（v2：记录按期、待发奖跨期）、翻页越界回退、备注输入校验、CSV 文件名。
 // 放在 .ts 里是因为仓库没有 DOM 测试环境，这些判断写在组件里就测不到。
 // Pure logic for the draws / pending tab: filter → query params, page clamping, note-input
 // validation and the CSV file name. Kept in a .ts file because the repo has no DOM test
@@ -13,12 +13,19 @@ export const PAGE = 50
 export const NOTE_MAX = 200
 
 /**
- * 待发奖队列固定查 open（pending + submitted），不理会下拉框；全部记录页按所选状态，空串 = 不筛。
- * The pending queue always asks for `open` (pending + submitted) and ignores the dropdown; the
- * all-records tab uses the chosen status, empty = no filter.
+ * 待发奖队列固定查 open（pending + submitted），不理会下拉框，且跨期（不带 roundId）；
+ * 抽奖记录页按所选状态（空串 = 不筛），只看当前选中的那一期。
+ * The pending queue always asks for `open` (pending + submitted), ignores the dropdown and spans every
+ * round (no roundId); the records tab uses the chosen status (empty = no filter) for the selected round.
  */
-export function drawsQuery(mode: DrawsMode, status: DrawsStatus, offset: number) {
-  return { status: mode === 'pending' ? ('open' as const) : status, limit: PAGE, offset }
+export function drawsQuery(mode: DrawsMode, status: DrawsStatus, offset: number, roundId?: string | null) {
+  if (mode === 'pending') return { status: 'open' as const, limit: PAGE, offset }
+  return { status, roundId: roundId ?? undefined, limit: PAGE, offset }
+}
+
+/** CSV 导出的筛选，与列表同口径 / CSV export filters, same scope as the list. */
+export function csvQuery(mode: DrawsMode, status: DrawsStatus, roundId?: string | null): { status: string; roundId?: string } {
+  return mode === 'pending' ? { status: 'open' } : { status, roundId: roundId ?? undefined }
 }
 
 /**

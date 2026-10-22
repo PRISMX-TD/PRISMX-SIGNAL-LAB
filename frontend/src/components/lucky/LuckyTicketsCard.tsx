@@ -1,5 +1,5 @@
-// 首页提示：轮盘可玩且本期还有未用券时出现，点了进 /lucky。
-// Dashboard nudge when tickets are waiting; links to /lucky.
+// 首页提示：轮盘可玩且还有未用券时出现，点了进 /lucky。v2 起 luckyTickets 是本人能看到的各期未用券合计。
+// Dashboard nudge when tickets are waiting; links to /lucky. Since v2 luckyTickets sums every visible open round.
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../store/auth'

@@ -1,13 +1,21 @@
 import { describe, expect, it } from 'vitest'
-import { NOTE_MAX, PAGE, clampOffset, csvFileName, drawsQuery, parseNote } from './luckyDraws'
+import { NOTE_MAX, PAGE, clampOffset, csvFileName, csvQuery, drawsQuery, parseNote } from './luckyDraws'
 
 describe('luckyDraws.drawsQuery', () => {
-  it('pending mode always asks for the open queue, ignoring the dropdown', () => {
-    expect(drawsQuery('pending', 'delivered', 50)).toEqual({ status: 'open', limit: PAGE, offset: 50 })
+  it('pending mode always asks for the open queue across every round, ignoring the dropdown', () => {
+    expect(drawsQuery('pending', 'delivered', 50, 'r1')).toEqual({ status: 'open', limit: PAGE, offset: 50 })
   })
-  it('all mode passes the chosen status, empty = every status', () => {
-    expect(drawsQuery('all', '', 0)).toEqual({ status: '', limit: PAGE, offset: 0 })
-    expect(drawsQuery('all', 'submitted', 0).status).toBe('submitted')
+  it('all mode passes the chosen status for the selected round, empty = every status', () => {
+    expect(drawsQuery('all', '', 0, 'r1')).toEqual({ status: '', roundId: 'r1', limit: PAGE, offset: 0 })
+    expect(drawsQuery('all', 'submitted', 0, 'r1').status).toBe('submitted')
+    expect(drawsQuery('all', '', 0).roundId).toBeUndefined()
+  })
+})
+
+describe('luckyDraws.csvQuery', () => {
+  it('exports what the list shows', () => {
+    expect(csvQuery('pending', 'delivered', 'r1')).toEqual({ status: 'open' })
+    expect(csvQuery('all', 'delivered', 'r1')).toEqual({ status: 'delivered', roundId: 'r1' })
   })
 })
 

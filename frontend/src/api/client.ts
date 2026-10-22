@@ -2,7 +2,7 @@
 import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery } from './types'
 import type { PendingCompetition } from './types'
-import type { LuckyAdminConfig, LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueItem, LuckyIssueRow, LuckyPrizeInput, LuckyRankSource, LuckyRound, LuckySpinResult, LuckyState } from './luckyTypes'
+import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
@@ -1149,8 +1149,8 @@ export const userApi = {
       // GamificationSettings.competitionsVisible). Likewise only filled in by
       // refreshUser(); same precedent as gamificationVisible/leaderboardVisible.
       competitionsVisible: boolean
-      // 幸运轮盘入口是否可见 + 本期未用券数（第四个内测开关，见后端 account.lucky_flags）。
-      // Lucky wheel entry visibility + unused tickets this round (see backend account.lucky_flags).
+      // 幸运轮盘入口是否可见 + 本人在能看到的未结束期里的未用券合计（v2 按期，见后端 account.lucky_flags）。
+      // Lucky wheel entry visibility + unused tickets summed over the open rounds this user can see (see backend account.lucky_flags).
       luckyWheelVisible: boolean
       luckyTickets: number
       nickname: string | null
@@ -1384,11 +1384,12 @@ export const ticketApi = {
   },
 }
 
-// 幸运轮盘（rev 45）：结果由后端决定，前端只播动画 / the backend decides, the page animates
+// 幸运轮盘 v2（rev 46）：多期并行，抽奖要带 roundId；结果由后端决定，前端只播动画。
+// Lucky wheel v2 (rev 46): several rounds at once, so a spin names its round; the backend decides, the page animates.
 export const luckyApi = {
   state: () => request<LuckyState>('/lucky-wheel'),
-  spin: (requestId: string) =>
-    request<LuckySpinResult>('/lucky-wheel/spin', { method: 'POST', body: JSON.stringify({ requestId }) }),
+  spin: (roundId: string, requestId: string) =>
+    request<LuckySpinResult>('/lucky-wheel/spin', { method: 'POST', body: JSON.stringify({ requestId, roundId }) }),
   draws: () => request<{ draws: LuckyDraw[] }>('/lucky-wheel/draws'),
   claimInfo: (id: string, text: string) =>
     request<LuckyDraw>(`/lucky-wheel/draws/${encodeURIComponent(id)}/claim-info`, { method: 'POST', body: JSON.stringify({ text }) }),
@@ -1493,25 +1494,28 @@ export const adminApi = {
   testEmailAutomation: (trigger: EmailAutomationTrigger, content: EmailContentInput) =>
     request<{ ok: boolean; to: string }>('/admin/email-automations/test', { method: 'POST', body: JSON.stringify({ trigger, content }) }),
   resumeEmailAutomations: () => request<{ ok: boolean }>('/admin/email-automations/resume', { method: 'POST' }),
-  // 幸运轮盘（rev 45）/ lucky wheel
-  luckyConfig: () => request<LuckyAdminConfig>('/admin/lucky-wheel/config'),
-  luckySavePrizes: (items: LuckyPrizeInput[]) =>
-    request<LuckyAdminConfig>('/admin/lucky-wheel/prizes', { method: 'PUT', body: JSON.stringify(items) }),
-  luckyCreateRound: (startsAt: string, endsAt: string) =>
-    request<LuckyRound>('/admin/lucky-wheel/rounds', { method: 'POST', body: JSON.stringify({ startsAt, endsAt }) }),
-  luckyUpdateRound: (patch: { startsAt?: string; endsAt?: string }) =>
-    request<LuckyRound & { voided: number }>('/admin/lucky-wheel/rounds/current', { method: 'PATCH', body: JSON.stringify(patch) }),
-  luckyEndRound: () => request<LuckyRound & { voided: number }>('/admin/lucky-wheel/rounds/current/end', { method: 'POST' }),
-  luckySetVisible: (visible: boolean) =>
-    request<LuckyAdminConfig>('/admin/lucky-wheel/visible', { method: 'PUT', body: JSON.stringify({ visible }) }),
+  // 幸运轮盘 v2（rev 46，按期管理）/ lucky wheel v2, managed per round
+  luckyRounds: () => request<{ rounds: LuckyRoundAdmin[] }>('/admin/lucky-wheel/rounds'),
+  luckyRound: (id: string) => request<LuckyRoundDetail>(`/admin/lucky-wheel/rounds/${encodeURIComponent(id)}`),
+  luckyCreateRound: (body: LuckyRoundCreate) =>
+    request<LuckyRoundAdmin>('/admin/lucky-wheel/rounds', { method: 'POST', body: JSON.stringify(body) }),
+  luckyUpdateRound: (id: string, patch: LuckyRoundPatch) =>
+    request<LuckyRoundAdmin & { voided: number }>(`/admin/lucky-wheel/rounds/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  luckySetRoundVisible: (id: string, visible: boolean) =>
+    request<LuckyRoundAdmin>(`/admin/lucky-wheel/rounds/${encodeURIComponent(id)}/visible`, { method: 'PUT', body: JSON.stringify({ visible }) }),
+  luckySavePrizes: (id: string, body: { mode: LuckyMode; prizes: LuckyPrizeInput[] }) =>
+    request<LuckyRoundDetail>(`/admin/lucky-wheel/rounds/${encodeURIComponent(id)}/prizes`, { method: 'PUT', body: JSON.stringify(body) }),
+  luckyEndRound: (id: string) =>
+    request<LuckyRoundAdmin & { voided: number }>(`/admin/lucky-wheel/rounds/${encodeURIComponent(id)}/end`, { method: 'POST' }),
+  luckyDeleteRound: (id: string) => request<LuckyRoundDeleted>(`/admin/lucky-wheel/rounds/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   luckyIssuePreview: (source: LuckyRankSource) =>
     request<{ rows: LuckyIssueRow[] }>('/admin/lucky-wheel/issue/preview', { method: 'POST', body: JSON.stringify(source) }),
-  luckyIssue: (reason: string, requestId: string, items: LuckyIssueItem[]) =>
-    request<{ id: string; userCount: number; ticketCount: number; notified: boolean }>(
-      '/admin/lucky-wheel/issue', { method: 'POST', body: JSON.stringify({ reason, requestId, items }) }),
-  luckyRevoke: (p: { batchId?: string; userId?: string }) =>
+  luckyIssue: (body: LuckyIssueBody) =>
+    request<LuckyIssueResult>('/admin/lucky-wheel/issue', { method: 'POST', body: JSON.stringify(body) }),
+  luckyRevoke: (p: { batchId?: string; userId?: string; roundId: string }) =>
     request<{ revoked: number }>('/admin/lucky-wheel/revoke', { method: 'POST', body: JSON.stringify(p) }),
-  luckyBatches: () => request<{ batches: LuckyBatch[] }>('/admin/lucky-wheel/batches'),
+  luckyBatches: (roundId: string) =>
+    request<{ batches: LuckyBatch[] }>(`/admin/lucky-wheel/batches?${new URLSearchParams({ roundId })}`),
   luckyDraws: (q: { status?: LuckyFulfillment | 'open' | ''; roundId?: string; userId?: string; prizeId?: string; limit: number; offset: number }) =>
     request<{ total: number; draws: LuckyAdminDraw[] }>(`/admin/lucky-wheel/draws?${new URLSearchParams(
       Object.entries(q).filter(([, v]) => v !== '' && v != null).map(([k, v]) => [k, String(v)]))}`),

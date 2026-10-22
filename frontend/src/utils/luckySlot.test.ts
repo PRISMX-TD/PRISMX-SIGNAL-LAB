@@ -26,4 +26,10 @@ describe('resolveSlot', () => {
     expect(resolveSlot(list, 'gone', null)).toEqual({ index: -1, consistent: false })
     expect(resolveSlot([], 'a', 0)).toEqual({ index: -1, consistent: false })
   })
+
+  it('lands a v2 sold-out miss on the slot it hit (slots with no stock stay on the wheel)', () => {
+    // 按概率模式抽中已抽完的格：后端照样返回那一格的 id 和下标，转盘停在那里再弹「本次未中奖」
+    const wheel = [{ id: 'a' }, { id: 'soldout' }, { id: 'c' }]
+    expect(resolveSlot(wheel, 'soldout', 1)).toEqual({ index: 1, consistent: true })
+  })
 })
