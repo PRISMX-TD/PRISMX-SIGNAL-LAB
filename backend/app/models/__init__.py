@@ -2309,7 +2309,7 @@ class LuckyDraw(Base):
     # auto_done / pending / submitted / delivered / cancelled
     fulfillment_status = Column(String, nullable=False)
     claim_info = Column(Text, nullable=True)       # 可能含地址：只给本人与管理员看 / may hold an address
-    support_ticket_id = Column(String, ForeignKey("tickets.id"), nullable=True)
+    support_ticket_id = Column(String, ForeignKey("tickets.id", ondelete="SET NULL"), nullable=True)
     handled_by = Column(String, ForeignKey("users.id"), nullable=True)
     handled_at = Column(DateTime, nullable=True)
     admin_note = Column(String, nullable=True)     # 发放备注或取消原因（用户看得到）

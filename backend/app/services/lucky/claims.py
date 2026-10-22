@@ -43,8 +43,11 @@ def _own_open(db: Session, user: User, draw_id: str, mode: str) -> LuckyDraw:
 
 
 def submit_info(db: Session, user: User, draw_id: str, text: str) -> LuckyDraw:
+    text = text.strip()
+    if not text:
+        raise HTTPException(400, "内容不能为空 / Text cannot be empty")
     d = _own_open(db, user, draw_id, CLAIM_FORM)
-    d.claim_info = text.strip()
+    d.claim_info = text
     d.fulfillment_status = F_SUBMITTED
     return d
 
@@ -110,7 +113,8 @@ def admin_query(db: Session, *, status: str | None = None, round_id: str | None 
         q = q.filter(LuckyDraw.user_id == user_id)
     if prize_id:
         q = q.filter(LuckyDraw.prize_id == prize_id)
-    return q.order_by(LuckyDraw.created_at.desc())
+    # id 作并列时的次序，翻页不重不漏 / id breaks created_at ties so paging is stable
+    return q.order_by(LuckyDraw.created_at.desc(), LuckyDraw.id.desc())
 
 
 def admin_row(d: LuckyDraw, u: User) -> dict:

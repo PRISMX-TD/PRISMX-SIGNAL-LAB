@@ -25,7 +25,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.strategy_limits import user_limiter
-from app.models import Ticket, TicketReply, User, UserNotification
+from app.models import LuckyDraw, Ticket, TicketReply, User, UserNotification
 from app.schemas import (
     AdminTicketAssign,
     AdminTicketReplyCreate,
@@ -855,6 +855,12 @@ def admin_delete_ticket(
     title = (ticket.title or "").strip() or f"#{ticket.id[:8]}"
     log_change(db, admin.id, ticket.user_id, f"ticket:{ticket.id}:delete", None, title)
     notes.delete(synchronize_session=False)
+    # 幸运轮盘的领奖记录可能指向这张申领工单：先断开引用，否则 Postgres 外键拦住删除；
+    # 断开后用户可以为该奖品重新开一张。
+    # A lucky-wheel draw may point at this claim ticket: clear the link first or the Postgres FK
+    # blocks the delete; the user can then open a fresh one for that prize.
+    db.query(LuckyDraw).filter(LuckyDraw.support_ticket_id == ticket.id).update(
+        {LuckyDraw.support_ticket_id: None}, synchronize_session=False)
     for r in replies:
         db.delete(r)
     db.delete(ticket)

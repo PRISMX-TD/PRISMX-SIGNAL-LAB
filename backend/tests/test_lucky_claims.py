@@ -56,11 +56,13 @@ def test_form_claim_rejected_for_other_user_or_ticket_mode(people):
     db, _a, u = people
     other = _user(db, "o@t.co")
     d = _draw(db, u, "form")
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as e:
         router.user_claim_info(d.id, LuckyClaimInfoIn(text="x"), db, other)
+    assert e.value.status_code == 404
     d2 = _draw(db, u, "ticket")
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as e:
         router.user_claim_info(d2.id, LuckyClaimInfoIn(text="x"), db, u)
+    assert e.value.status_code == 400
 
 
 def test_ticket_claim_creates_one_claim_ticket(people):
@@ -84,8 +86,9 @@ def test_deliver_and_cancel_notify_user(people):
     db.refresh(d)
     assert d.fulfillment_status == "delivered" and d.admin_note == "顺丰 SF123"
     d2 = _draw(db, u, "form")
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as e:
         router.admin_cancel(d2.id, LuckyHandleIn(note=""), db, admin)   # 取消必须写原因
+    assert e.value.status_code == 400
     router.admin_cancel(d2.id, LuckyHandleIn(note="联系不上"), db, admin)
     kinds = sorted(n.kind for n in db.query(UserNotification).filter(UserNotification.user_id == u.id))
     assert kinds == ["lucky_prize_cancelled", "lucky_prize_delivered"]
@@ -95,8 +98,9 @@ def test_cannot_handle_twice(people):
     db, admin, u = people
     d = _draw(db, u, "form", status="submitted")
     router.admin_deliver(d.id, LuckyHandleIn(note=""), db, admin)
-    with pytest.raises(HTTPException):
+    with pytest.raises(HTTPException) as e:
         router.admin_cancel(d.id, LuckyHandleIn(note="x"), db, admin)
+    assert e.value.status_code == 400
 
 
 def test_admin_list_filters_open(people):
@@ -124,3 +128,43 @@ def test_csv_neutralises_spreadsheet_formulas(people):
     db.commit()
     body = router.admin_draws_csv(status=None, roundId=None, db=db, admin=admin).body.decode("utf-8-sig")
     assert "'=HYPERLINK" in body
+
+
+def test_whitespace_only_claim_text_is_rejected(people):
+    db, _a, u = people
+    d = _draw(db, u, "form")
+    with pytest.raises(HTTPException) as e:
+        router.user_claim_info(d.id, LuckyClaimInfoIn(text="   "), db, u)
+    assert e.value.status_code == 400
+    db.refresh(d)
+    assert d.claim_info is None and d.fulfillment_status == "pending"
+
+
+def test_admin_list_paging_is_stable_on_created_at_ties(people):
+    db, admin, u = people
+    for _ in range(4):
+        _draw(db, u, "form")
+    same = common.utcnow()
+    for d in db.query(LuckyDraw).all():
+        d.created_at = same
+    db.commit()
+    seen = []
+    for off in range(0, 4, 2):
+        out = router.admin_draws(status=None, roundId=None, userId=None, prizeId=None, limit=2, offset=off,
+                                 db=db, admin=admin)
+        seen += [r["id"] for r in out["draws"]]
+    assert seen == sorted(seen, reverse=True) and len(set(seen)) == 4
+
+
+def test_deleting_a_claim_ticket_clears_the_draw_link_and_allows_a_new_one(people):
+    from fastapi import BackgroundTasks
+    from app.routers import tickets as tk
+    db, admin, u = people
+    d = _draw(db, u, "ticket")
+    first = router.user_claim_ticket(d.id, db, u)["ticketId"]
+    assert tk.admin_delete_ticket(first, BackgroundTasks(), db, admin) == {"deleted": True}
+    db.expire_all()
+    assert db.get(Ticket, first) is None
+    assert db.get(LuckyDraw, d.id).support_ticket_id is None
+    again = router.user_claim_ticket(d.id, db, u)["ticketId"]
+    assert again and again != first
