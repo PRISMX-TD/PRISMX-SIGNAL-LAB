@@ -1208,7 +1208,19 @@
         "batches": "Batches this round",
         "revoke": "Revoke unused",
         "revoked": "{{n}} tickets revoked",
-        "limit": "Per batch: up to 2000 users, 100 tickets each, 20000 in total"
+        "limit": "Per batch: up to 2000 users, 100 tickets each, 20000 in total",
+        "custom": "Specific period",
+        "loaded": "Added to the list: {{n}} users",
+        "none": "Nobody matched",
+        "emptyList": "The list is empty: pick people above to add them",
+        "noBatches": "No tickets issued this round yet",
+        "revokeAsk": "Revoke the unused tickets in the \"{{reason}}\" batch? Used tickets are not affected.",
+        "err": {
+          "reversed": "Rank range is reversed (the start must not exceed the end)",
+          "overlap": "Rank ranges overlap, please adjust",
+          "users": "At most 2000 users per batch, remove some first",
+          "tickets": "At most 20000 tickets per batch, remove some first"
+        }
       },
       "draws": {
         "all": "All statuses",
