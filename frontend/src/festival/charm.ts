@@ -155,19 +155,50 @@ function scan() {
   const top = parseFloat(vars.getPropertyValue('--fd-charm-top')) || 0
   const origin = { left: 0, top: 0, width: 0, height: 0 } as DOMRect
   const buttons = Array.prototype.slice.call(document.querySelectorAll(SEL)) as HTMLElement[]
-  buttons.forEach((el) => {
+  // 原来每个按钮都把自己所在的整个 section / main 的文字框收集一遍，中间还穿插着改
+  // data-fd-crowded（改属性 → 下一个按钮量尺寸时被迫同步重排）。表格多、按钮多的页面
+  // （后台比赛、订单）一次就是几秒的同步计算，MutationObserver 又让它随 DOM 变化反复跑——
+  // 整个画面卡住、点什么都没反应，几秒后才恢复。现在：同一个区域只收集一次、不合并成块，
+  // 先把所有判断都量完，最后统一写属性。
+  // Each button used to collect every text box of its whole section / main, with
+  // data-fd-crowded writes interleaved (a write forces a synchronous relayout on the
+  // next button's measurement). On table-heavy pages with many buttons (admin
+  // competitions, orders) that was seconds of synchronous work, re-run by the
+  // MutationObserver on DOM changes — the whole screen froze and ignored taps for a
+  // few seconds. Now each scope is collected once, unmerged, every decision is measured
+  // first, and attributes are written at the end.
+  const byScope = new Map<Element, Box[]>()
+  const crowded: boolean[] = []
+  buttons.forEach((el, idx) => {
     const b = el.getBoundingClientRect()
-    if (b.width < 1 || b.height < 1) return
+    if (b.width < 1 || b.height < 1) {
+      crowded[idx] = el.hasAttribute('data-fd-crowded')
+      return
+    }
     const box: Box =
       key === 'christmas'
         ? { x: b.left + b.width * 0.22, y: b.top + top, w: b.width * 0.56, h }
         : { x: b.left + b.width / 2 - w / 2, y: b.top + top, w, h }
     const scope = el.closest('section, form, article, main, footer, header, [role="dialog"]') || el.parentElement
-    // 按钮自己的文字整个落在按钮里，不算邻居。/ the button's own label lies wholly inside it and is not a neighbour
-    const info = collectInfo([scope], origin, { ignoreControl: el, anyOpacity: true }).filter(
+    if (!scope) {
+      crowded[idx] = false
+      return
+    }
+    let all = byScope.get(scope)
+    if (!all) {
+      all = collectInfo([scope], origin, { anyOpacity: true, raw: true })
+      byScope.set(scope, all)
+    }
+    // 按钮自己的外框与文字整个落在按钮里，不算邻居。/ the button's own box and label lie wholly inside it and are not neighbours
+    const info = all.filter(
       (i) => !(i.x >= b.left - 0.5 && i.y >= b.top - 0.5 && i.x + i.w <= b.right + 0.5 && i.y + i.h <= b.bottom + 0.5)
     )
-    if (hitsAny(box, info, 3)) el.setAttribute('data-fd-crowded', '')
+    crowded[idx] = hitsAny(box, info, 3)
+  })
+  buttons.forEach((el, idx) => {
+    const want = crowded[idx]
+    if (want === el.hasAttribute('data-fd-crowded')) return
+    if (want) el.setAttribute('data-fd-crowded', '')
     else el.removeAttribute('data-fd-crowded')
   })
 }
@@ -194,14 +225,16 @@ export function startCharmGuard(): () => void {
       io.observe(e)
     })
   }
-  // 节流而不是防抖：内容一直在变时也会隔一会儿看一次。/ throttled, not debounced: it still runs while content keeps changing
+  // 节流而不是防抖：内容一直在变时也会隔一会儿看一次（800ms：收起小饰慢半拍无所谓，扫描要省）。
+  // throttled, not debounced: it still runs while content keeps changing (800ms — a charm
+  // making way a beat late is fine; the scan is what costs)
   function run() {
     if (pending) return
     pending = window.setTimeout(() => {
       pending = 0
       watch()
       scan()
-    }, 300)
+    }, 800)
   }
   const timers = [60, 900, 2600].map((ms) => window.setTimeout(run, ms))
   const mo = typeof MutationObserver !== 'undefined' ? new MutationObserver(run) : null

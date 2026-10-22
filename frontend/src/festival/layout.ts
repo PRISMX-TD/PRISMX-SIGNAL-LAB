@@ -95,6 +95,11 @@ export interface InfoOptions {
   // 不看透明度：还在淡入的文字也算（按钮小饰让位时要按「终将出现」的内容来判断）。
   // Ignore opacity: text still fading in counts too (the button charm makes way for content that is about to appear).
   anyOpacity?: boolean
+  // 不合并成块，原样返回行框与控件框。只做碰撞判断时用：合并对「有没有碰到」没有影响，
+  // 却是整次收集里最贵的一步。
+  // Return the raw line and control boxes without merging. For pure hit tests merging
+  // changes nothing about "does it touch", yet it is the most expensive step.
+  raw?: boolean
 }
 
 // 收集 roots 下所有可见的文字行矩形与可点控件矩形，坐标相对 origin。
@@ -131,24 +136,41 @@ export function collectInfo(roots: (Element | null)[], origin: DOMRect, opts: In
       if (b) out.push(b)
     })
   })
-  return merge(out)
+  return opts.raw ? out : merge(out)
 }
 
 // 把挨得很近的行框并成块：碰撞检测和粒子遮挡都用块，既快又不会从两行字的缝里钻过去。
 // Merge boxes that nearly touch into blocks — faster for collision and particle
 // occlusion, and nothing can slip through the gap between two lines of text.
 export function merge(list: Box[], gap = 10): Box[] {
+  // 原来每并一次就 break 回到 i=0 从头再比，表格这种一行挨一行、几乎全要并的内容是
+  // O(n³)：几千个行框就是数秒的同步计算，整页卡死（Chrome 弹「此页面没有响应」）。
+  // 现在一个框一路吞掉碰得到的框，变大后只从它后面重新比；删除用末尾换位而不是 splice。
+  // 结果与原来一样是「互不相碰的块」，只是块的先后顺序可能不同（没有调用方依赖顺序）。
+  // This used to break back to i=0 after every single merge — O(n³) on table-like
+  // content where nearly every line merges with the next: thousands of line boxes meant
+  // seconds of synchronous work and a frozen page ("Page Unresponsive" in Chrome). Now a
+  // box keeps absorbing whatever it touches, rescanning only the boxes after it when it
+  // grows, and removal swaps in the last element instead of splicing. The result is still
+  // a set of mutually non-touching blocks; only their order may differ (no caller relies
+  // on it).
   const boxes = list.slice()
   let changed = true
   while (changed) {
     changed = false
-    outer: for (let i = 0; i < boxes.length; i++) {
-      for (let j = i + 1; j < boxes.length; j++) {
-        if (intersects(inflate(boxes[i], gap), boxes[j])) {
+    for (let i = 0; i < boxes.length; i++) {
+      let g = inflate(boxes[i], gap)
+      let j = i + 1
+      while (j < boxes.length) {
+        if (intersects(g, boxes[j])) {
           boxes[i] = union([boxes[i], boxes[j]]) as Box
-          boxes.splice(j, 1)
+          boxes[j] = boxes[boxes.length - 1]
+          boxes.pop()
+          g = inflate(boxes[i], gap)
           changed = true
-          break outer
+          j = i + 1
+        } else {
+          j++
         }
       }
     }
