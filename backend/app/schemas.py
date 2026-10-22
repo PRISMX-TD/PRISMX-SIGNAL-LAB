@@ -2488,3 +2488,36 @@ class EmailAutomationSendListOut(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ---------- 幸运轮盘（rev 45）/ lucky wheel ----------
+
+class LuckyRoundIn(BaseModel):
+    startsAt: datetime
+    endsAt: datetime
+
+
+class LuckyRoundPatch(BaseModel):
+    startsAt: datetime | None = None
+    endsAt: datetime | None = None
+
+
+class LuckyVisibleIn(BaseModel):
+    visible: bool
+
+
+class LuckyPrizeIn(BaseModel):
+    id: str | None = None
+    name: str = Field(min_length=1, max_length=40)
+    description: str | None = Field(default=None, max_length=300)
+    imageUrl: str | None = Field(default=None, max_length=500)
+    color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    kind: Literal["pro_days", "none", "retry", "custom"]
+    proDays: int | None = Field(default=None, ge=1, le=3650)
+    # 百分比，两位小数；落库换成万分比 / percent with two decimals; stored as basis points
+    probPct: float = Field(ge=0, le=100)
+    stock: int | None = Field(default=None, ge=0, le=1_000_000)
+    perUserLimit: int | None = Field(default=None, ge=1, le=1000)
+    onSoldOut: Literal["to_fallback", "redistribute"] = "to_fallback"
+    claimMode: Literal["form", "ticket"] | None = None
+    claimHint: str | None = Field(default=None, max_length=200)
