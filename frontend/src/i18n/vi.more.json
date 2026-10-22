@@ -2447,7 +2447,8 @@
       "none": "Rất tiếc, lần này chưa trúng. Chúc may mắn lần sau!",
       "retry": "Quay thêm lần nữa! Vé đã được hoàn lại",
       "proDays": "Chúc mừng! Bạn nhận được {{n}} ngày PRO, đã cộng vào tài khoản",
-      "custom": "Chúc mừng bạn đã trúng “{{name}}”"
+      "custom": "Chúc mừng bạn đã trúng “{{name}}”",
+      "soldOut": "Phần quà này đã hết, lần này bạn chưa trúng"
     },
     "status": {
       "auto_done": "Đã cộng",
@@ -2455,6 +2456,8 @@
       "submitted": "Đang xử lý",
       "delivered": "Đã gửi",
       "cancelled": "Đã hủy"
-    }
+    },
+    "rounds": "Các đợt quay thưởng",
+    "ticketsBadge": "{{n}} vé chưa dùng"
   }
 }
