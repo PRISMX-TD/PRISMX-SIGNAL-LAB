@@ -1235,7 +1235,9 @@
         "note": "Note (e.g. tracking number; visible to the user)",
         "cancelReason": "Cancel reason (required; visible to the user)",
         "openTicket": "Open ticket",
-        "empty": "No records"
+        "empty": "No records",
+        "reasonRequired": "A cancel reason is required (the user sees it)",
+        "noteLong": "Notes are limited to 200 characters"
       }
     },
     "totalUsers": "Total users",
@@ -2040,6 +2042,19 @@
           "resume": "resumed paused automated email early"
         }
       },
+      "lucky": {
+        "prizes": "Saved the wheel prizes",
+        "visible": "Wheel visibility: {{visible}}",
+        "on": "on",
+        "off": "off",
+        "round_create": "Set the opening window",
+        "round_update": "Changed the opening window ({{voided}} tickets voided)",
+        "round_end": "Ended the round now ({{voided}} tickets voided)",
+        "issue": "Issued tickets “{{reason}}”: {{users}} users, {{tickets}} tickets",
+        "revoke": "Revoked {{revoked}} unused tickets",
+        "deliver": "Marked a prize as delivered",
+        "cancel": "Cancelled a prize"
+      },
       "kindName": {
         "user": {
           "register": "Sign-up",
@@ -2110,7 +2125,8 @@
           "ops": "Ops action",
           "ticket": "Ticket",
           "other": "Other admin change",
-          "email_auto": "Automated email rule"
+          "email_auto": "Automated email rule",
+          "lucky": "Lucky wheel"
         },
         "agent": {
           "plan": "Agent plan change"

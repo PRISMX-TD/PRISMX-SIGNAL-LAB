@@ -32,8 +32,8 @@ import type { ActivityItem, ActivityPerson, ActivityTag } from '../../../api/typ
 import { resolvePriceDigits } from '../../charts/chartConfig'
 import { bjDate, bjDateTime, bjDayKey, bjHm } from './time'
 
-// 与后端 activity_feed.KINDS 一致（契约 §6 机器可读清单 53 种 + 客服台 rev 41 的 5 种 = 58 种）。
-// Mirrors the backend's activity_feed.KINDS (contract §6's 53 kinds + the 5 support-desk kinds of rev 41).
+// 与后端 activity_feed.KINDS 一致（契约 §6 机器可读清单 53 种 + 客服台 rev 41 的 5 种 + 自动邮件 + 幸运轮盘 = 60 种）。
+// Mirrors the backend's activity_feed.KINDS (contract §6's 53 kinds + the 5 support-desk kinds of rev 41, plus automated email and the lucky wheel = 60).
 export const ACTIVITY_KINDS = [
   'user.register', 'user.login', 'user.email_verified', 'user.password_reset_requested', 'user.password_reset',
   'user.password_changed', 'user.nickname', 'user.phone_set',
@@ -45,7 +45,7 @@ export const ACTIVITY_KINDS = [
   'admin.user_plan', 'admin.user_role', 'admin.user_attribution', 'admin.user_edit', 'admin.user_disable',
   'admin.user_enable', 'admin.verify_email', 'admin.bulk_edit', 'admin.setting', 'admin.gamification',
   'admin.invite_link', 'admin.agent_assign', 'agent.plan', 'admin.competition', 'admin.competition_participant',
-  'admin.announcement', 'admin.email', 'admin.email_auto', 'admin.ops', 'admin.ticket', 'admin.other',
+  'admin.announcement', 'admin.email', 'admin.email_auto', 'admin.lucky', 'admin.ops', 'admin.ticket', 'admin.other',
   'support.view_customer', 'support.reveal_phone', 'support.search', 'support.action', 'support.follow_up',
 ] as const
 export type ActivityKind = (typeof ACTIVITY_KINDS)[number]
@@ -1073,6 +1073,18 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
     if (action === 'resume') return [t('admin.log.ev.emailAuto.resume')]
     return [t(`admin.log.ev.emailAuto.${action && known.includes(action) ? action : 'update'}`, { name })]
   },
+  'admin.lucky': ({ t, p }) => {
+    // 后端 routers/lucky_wheel._audit 写入的全部动作；认不出的退回通用名，不丢。
+    // Every action routers/lucky_wheel._audit writes; an unknown one falls back to the generic name.
+    const action = typeof p.action === 'string' ? p.action : ''
+    const known = ['prizes', 'visible', 'round_create', 'round_update', 'round_end', 'issue', 'revoke', 'deliver', 'cancel']
+    if (!known.includes(action)) return [t('admin.log.kindName.admin.lucky')]
+    return [t(`admin.log.lucky.${action}`, {
+      reason: str(p.reason) ? clip(str(p.reason)!) : t('admin.log.v.untitled'),
+      users: num(p.users) ?? 0, tickets: num(p.tickets) ?? 0, revoked: num(p.revoked) ?? 0, voided: num(p.voided) ?? 0,
+      visible: p.visible ? t('admin.log.lucky.on') : t('admin.log.lucky.off'),
+    })]
+  },
   'admin.ops': ({ t, p }) => {
     const action = str(p.action)
     const target = str(p.target)
@@ -1253,7 +1265,7 @@ export function changeFieldLabel(kind: string, field: string, sub: string | null
       return withSub(lbl(t, `competition.admin.fields.${parts[2]}`, inTable('compField', parts[2])))
     }
     if (PLAN_VALUE_FIELDS.includes(field)) return lbl(t, 'admin.log.v.userField.plan', field)
-    if (['plan', 'account', 'ops', 'announcement', 'email', 'email_auto', 'competition'].includes(head)) return sub != null ? misc(sub) : kindName(kind, t)
+    if (['plan', 'account', 'ops', 'announcement', 'email', 'email_auto', 'lucky', 'competition'].includes(head)) return sub != null ? misc(sub) : kindName(kind, t)
     return null
   })()
   // 认不出：原样显示 / unrecognised: shown verbatim

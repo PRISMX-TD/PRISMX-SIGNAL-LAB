@@ -12,7 +12,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ActivityItem } from '../../../api/types'
 import examples from './contractExamples.json'
-import { ACTIVITY_KINDS, actorLabel, chipsFor, failReason, fmtLots, fmtPnl, kindName, pxDigits, renderEvent, symDigits } from './renderEvent'
+import { ACTIVITY_KINDS, actorLabel, changeFieldLabel, chipsFor, failReason, fmtLots, fmtPnl, kindName, pxDigits, renderEvent, symDigits } from './renderEvent'
 import { makeT } from './testT'
 
 const EXAMPLES = examples as unknown as ActivityItem[]
@@ -23,7 +23,7 @@ const LANGS = [['zh', zh], ['en', en]] as const
 // 契约 §6 的机器可读清单（53 种）/ the contract's §6 machine-readable list (53 kinds)
 const CONTRACT_KINDS = [
   'admin.agent_assign', 'admin.announcement', 'admin.bulk_edit', 'admin.competition', 'admin.competition_participant',
-  'admin.email', 'admin.email_auto', 'admin.gamification', 'admin.invite_link', 'admin.ops', 'admin.other', 'admin.setting', 'admin.ticket',
+  'admin.email', 'admin.email_auto', 'admin.lucky', 'admin.gamification', 'admin.invite_link', 'admin.ops', 'admin.other', 'admin.setting', 'admin.ticket',
   'admin.user_attribution', 'admin.user_disable', 'admin.user_edit', 'admin.user_enable', 'admin.user_plan',
   'admin.user_role', 'admin.verify_email', 'agent.plan', 'auto.partial_tp', 'auto.settings', 'auto.sl', 'deal.close',
   'deal.stopout_group', 'mt5.bind', 'mt5.reverify', 'mt5.revoked', 'mt5.unbind', 'pending.cancel', 'pending.modify',
@@ -63,9 +63,9 @@ function item(kind: string, params: Record<string, unknown>, extra: Partial<Acti
 const allWithChildren = (list: ActivityItem[]) => list.flatMap((i) => [i, ...(i.children ?? [])])
 
 describe('kind 清单 / kind list', () => {
-  it('前端认得契约里的全部 59 种，且一种不多 / the frontend knows exactly the contract’s 59 kinds', () => {
+  it('前端认得契约里的全部 60 种，且一种不多 / the frontend knows exactly the contract’s 60 kinds', () => {
     expect([...ACTIVITY_KINDS].sort()).toEqual([...CONTRACT_KINDS].sort())
-    expect(ACTIVITY_KINDS.length).toBe(59)
+    expect(ACTIVITY_KINDS.length).toBe(60)
   })
 
   it('例子覆盖每一种 kind / the examples cover every kind', () => {
@@ -601,5 +601,38 @@ describe('谁操作与小标签 / actor and chips', () => {
   it('部分平仓 / 仓位已不在 / 自动 不再做成小标签（句子和「谁操作」已经说了）/ partial, gone, auto get no chip', () => {
     const it2 = item('auto.partial_tp', {}, { tags: ['auto', 'partial', 'late', 'shared_login'], status: 'pending' })
     expect(chipsFor(it2, en).map((c) => c.label)).toEqual(['Pending', 'Recorded late', 'Shared account'])
+  })
+})
+
+describe('幸运轮盘操作日志 / lucky-wheel activity sentences', () => {
+  const lucky = (params: Record<string, unknown>) =>
+    item('admin.lucky', params, { cat: 'admin', actor: { type: 'admin', id: 'a1', name: '小王', email: 'ops@example.com' }, user: null, login: null, account: null })
+  const CASES: [Record<string, unknown>, string, string][] = [
+    [{ action: 'prizes' }, '保存了轮盘奖项', 'Saved the wheel prizes'],
+    [{ action: 'visible', visible: true }, '轮盘显示：开', 'Wheel visibility: on'],
+    [{ action: 'visible', visible: false }, '轮盘显示：关', 'Wheel visibility: off'],
+    [{ action: 'round_create' }, '设置了开放时间', 'Set the opening window'],
+    [{ action: 'round_update', voided: 5 }, '修改了开放时间（作废 5 张）', 'Changed the opening window (5 tickets voided)'],
+    [{ action: 'round_end', voided: 2 }, '立即结束本期（作废 2 张）', 'Ended the round now (2 tickets voided)'],
+    [{ action: 'issue', reason: '10月赛', users: 3, tickets: 9 }, '发券「10月赛」：3 人、9 张', 'Issued tickets “10月赛”: 3 users, 9 tickets'],
+    [{ action: 'revoke', revoked: 4 }, '收回 4 张未使用的券', 'Revoked 4 unused tickets'],
+    [{ action: 'deliver' }, '标记奖品已发放', 'Marked a prize as delivered'],
+    [{ action: 'cancel' }, '取消了一个奖品', 'Cancelled a prize'],
+  ]
+  it.each(CASES)('%j', (params, zhText, enText) => {
+    expect(renderEvent(lucky(params), zh).text).toBe(zhText)
+    expect(renderEvent(lucky(params), en).text).toBe(enText)
+  })
+  it('缺数字当 0、缺原因用占位，不出 undefined / missing numbers read as 0 and a missing reason gets a placeholder', () => {
+    expect(renderEvent(lucky({ action: 'revoke' }), zh).text).toBe('收回 0 张未使用的券')
+    expect(renderEvent(lucky({ action: 'issue' }), zh).text).toBe('发券「（无标题）」：0 人、0 张')
+  })
+  it('认不出的动作退回通用名 / an unknown action falls back to the generic name', () => {
+    expect(renderEvent(lucky({ action: 'surprise' }), zh).text).toBe('幸运轮盘')
+    expect(renderEvent(lucky({}), en).text).toBe('Lucky wheel')
+  })
+  it('「项目」列显示通用名而不是原始键 / the field column shows the generic name, not the raw key', () => {
+    expect(changeFieldLabel('admin.lucky', 'lucky:issue', null, zh)).toBe('幸运轮盘')
+    expect(changeFieldLabel('admin.lucky', 'lucky:issue', null, en)).toBe('Lucky wheel')
   })
 })
