@@ -48,6 +48,43 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+// 单次拉取的上限。连接卡死（丢包后 TCP 迟迟不重传、移动网络半断）时 import() 既不成功
+// 也不失败，上面那套重试 / 重载永远等不到触发，而路由切换包在 transition 里，旧页面一直
+// 停在屏幕上——就是「点了没反应」。超时后不再重试：浏览器对同一个还在拉的模块只会返回
+// 同一个挂着的 promise，重试只是再等一轮；直接走整页重载，换一条新连接。30 秒对最大的
+// chunk 在慢网上也足够宽。消息里带 "Loading chunk"，isChunkLoadError 认得它。
+// Per-attempt ceiling. On a stalled connection import() neither resolves nor rejects, so
+// the retry / reload ladder above never starts, and since navigations run in a transition
+// the old page just sits there — "the tap did nothing". No retry after a stall: the
+// browser hands back the same pending promise for a module still being fetched, so
+// retrying only waits again; go straight to the reload, which opens fresh connections.
+// 30s is generous for the largest chunk on a slow link. The message contains
+// "Loading chunk" so isChunkLoadError recognises it.
+const ATTEMPT_TIMEOUT_MS = 30_000
+
+class ChunkStallError extends Error {
+  constructor(name: string) {
+    super(`Loading chunk ${name} timed out after ${ATTEMPT_TIMEOUT_MS}ms`)
+    this.name = 'ChunkStallError'
+  }
+}
+
+function withStallTimeout<T>(p: Promise<T>, name: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new ChunkStallError(name)), ATTEMPT_TIMEOUT_MS)
+    p.then(
+      (v) => {
+        clearTimeout(t)
+        resolve(v)
+      },
+      (e) => {
+        clearTimeout(t)
+        reject(e)
+      },
+    )
+  })
+}
+
 // sessionStorage 三处读写全部包 try：隐私模式 / 受限 WebView 下 getItem 都可能抛，
 // 而这里正处在错误恢复路径上，再抛一次就是雪上加霜。
 // All storage access is wrapped: private mode / restricted WebViews can throw on
@@ -110,7 +147,7 @@ export function lazyRetry<P extends object>(
     let lastErr: unknown
     for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
       try {
-        const mod = await factory()
+        const mod = await withStallTimeout(factory(), name)
         // 成功即清标记：下一次真正的发版陈旧仍有一次重载机会
         // Clear on success so the next genuine stale deploy still gets one reload.
         clearReloaded(name)
@@ -119,6 +156,8 @@ export function lazyRetry<P extends object>(
         lastErr = err
         // 代码 bug，不重试 / a real bug: surface it
         if (!isChunkLoadError(err)) throw err
+        // 卡死不重试，直接去重载 / a stall skips the retries and goes to the reload
+        if (err instanceof ChunkStallError) break
         if (attempt < RETRY_DELAYS_MS.length) await sleep(RETRY_DELAYS_MS[attempt])
       }
     }

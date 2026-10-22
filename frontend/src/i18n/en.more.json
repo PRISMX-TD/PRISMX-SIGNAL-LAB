@@ -149,6 +149,7 @@
     "currentPrice": "Live",
     "refPrice": "Ref. price",
     "slowBroker": "The broker is responding slowly — please don’t place the order again",
+    "slowBrokerLeave": "The broker is responding slowly — please don’t place the order again. You can close this and check the result on the Orders page later",
     "sizeMode": "Sizing",
     "sizeModeLots": "Lots",
     "sizeModeRisk": "Risk %",

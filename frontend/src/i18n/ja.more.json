@@ -149,6 +149,7 @@
     "currentPrice": "現在値",
     "refPrice": "参考価格",
     "slowBroker": "ブローカーの応答が遅れています。注文を再送しないでください",
+    "slowBrokerLeave": "ブローカーの応答が遅れています。注文を再送しないでください。閉じて、後で「注文」ページで結果を確認できます",
     "sizeMode": "数量指定",
     "sizeModeLots": "ロット",
     "sizeModeRisk": "リスク %",

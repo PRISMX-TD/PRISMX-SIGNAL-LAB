@@ -149,6 +149,7 @@
     "currentPrice": "Hiện tại",
     "refPrice": "Giá tham chiếu",
     "slowBroker": "Sàn đang phản hồi chậm — vui lòng không đặt lệnh lại",
+    "slowBrokerLeave": "Sàn đang phản hồi chậm — vui lòng không đặt lệnh lại. Bạn có thể đóng và xem kết quả ở trang Lệnh sau",
     "sizeMode": "Khối lượng",
     "sizeModeLots": "Lot",
     "sizeModeRisk": "% rủi ro",

@@ -255,6 +255,12 @@ const RATE_LIMITED =
 // seconds in practice. Override per call with requestTimeoutMs (0 disables,
 // reserved for endpoints that may genuinely run long).
 const DEFAULT_TIMEOUT_MS = 30_000
+// 响应头到达之后读响应体的上限（见 request 的 send）。最大的 /bootstrap 也只有几百 KB，
+// 慢网上 30 秒绰绰有余；超过它基本就是连接半断、永远读不完了。
+// Ceiling for reading the body once headers are in (see send in request). The largest body,
+// /bootstrap, is a few hundred KB — 30s is ample on a slow link; past it the connection has
+// almost certainly gone half-open and will never finish.
+const BODY_TIMEOUT_MS = 30_000
 
 // 超时/取消的统一错误名。调用方用 isAbortError() 区分"用户离开了这个页面"与
 // "请求真的失败了"——前者不该弹任何提示。
@@ -375,6 +381,9 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   // After the 8s gate switches entry points we abort the hanging fetch ourselves; this flag
   // tells that AbortError apart from a caller cancel / the 30s timeout.
   let gateSwitched = false
+  // 响应体读取的计时器（见 send 的 finally）；读完或放弃时调用 finishBody 撤掉。
+  // The body-read timer (see send's finally); finishBody drops it once the body is read.
+  let finishBody = () => {}
   const send = async (gate: boolean) => {
     const { signal, cleanup, abort } = withTimeout(
       callerSignal,
@@ -395,17 +404,31 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
         })
       }, HEADERS_GATE_MS)
     }
+    let ok = false
     try {
-      return await fetch(`${API_BASE}/api${path}`, { ...init, headers, signal })
+      const r = await fetch(`${API_BASE}/api${path}`, { ...init, headers, signal })
+      ok = true
+      return r
     } finally {
       done = true
       if (gateTimer !== undefined) window.clearTimeout(gateTimer)
-      // 响应头一到就可以撤掉计时器：超时管的是"服务器迟迟不应答"，不是"响应体
-      // 读得慢"。放在 finally 里保证抛错路径也清得掉，不留悬挂的定时器与监听器。
-      // The timer is dropped as soon as headers arrive: the timeout guards against
-      // a server that never answers, not a slow body. In `finally` so the throwing
-      // path clears it too, leaving no dangling timer or listener.
+      // 响应头一到就撤掉请求计时器（超时管的是"服务器迟迟不应答"），但响应体另起一个
+      // BODY_TIMEOUT_MS 的计时器：原来体读取完全不设限，手机网络在头到之后半断时
+      // res.json() 永不结束，按钮的 busy、整页骨架就一直挂着——「点了卡住没反应」。
+      // 到点 abort 同一个 controller，res.json() 以 AbortError 拒绝，调用点照常报错恢复。
+      // 放在 finally 里保证抛错路径也清得掉，不留悬挂的定时器与监听器。
+      // The request timer is dropped as soon as headers arrive (it guards against a server
+      // that never answers), but the body gets its own BODY_TIMEOUT_MS timer: the read used
+      // to be unbounded, so a mobile link going half-open after the headers left res.json()
+      // pending forever — busy buttons and page skeletons stuck, "tapped and nothing
+      // happens". On expiry the same controller aborts, res.json() rejects with AbortError
+      // and the call site recovers as for any error. In `finally` so the throwing path
+      // clears it too.
       cleanup()
+      if (ok) {
+        const bodyTimer = window.setTimeout(abort, BODY_TIMEOUT_MS)
+        finishBody = () => window.clearTimeout(bodyTimer)
+      }
     }
   }
   let res: Response
@@ -519,6 +542,7 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
       // bare "HTTP 429" again.
       if (res.status === 429) detail = RATE_LIMITED
     }
+    finishBody()
     // 403 的两种含义要分开：**没登录**是 401（上面已清 token 并跳登录页），
     // 403 是"身份有效但这件事不让你做"——**绝不能**跳登录页，那会把被停用的人
     // 塞进"登录 → 立刻又被拒 → 再跳登录"的死循环，而他每次看到的都是"登录已
@@ -543,9 +567,14 @@ async function request<T>(path: string, options: ApiRequestInit = {}): Promise<T
   // future fire-and-forget endpoint). Unconditional res.json() threw on it and
   // forced callers to bypass this wrapper with raw fetch.
   if (res.status === 204 || res.headers.get('content-length') === '0') {
+    finishBody()
     return undefined as T
   }
-  return res.json() as Promise<T>
+  try {
+    return (await res.json()) as T
+  } finally {
+    finishBody()
+  }
 }
 
 // 下载二进制 / CSV（带登录头）。<a href> 带不了 Authorization，所以导出要先 fetch 成 Blob 再交给调用方存盘。

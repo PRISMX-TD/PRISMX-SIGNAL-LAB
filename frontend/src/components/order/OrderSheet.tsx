@@ -32,6 +32,18 @@ import { useVisualViewportVars } from './useVisualViewportVars'
 // seconds of spinner is when people start doubting the tap — the double-order moment.
 const SLOW_SUBMIT_MS = 5000
 
+// 提交等了这么久还没回执，就放开关闭（遮罩 / ✕ / Esc / 返回）。原来整个在途期间一律不许关，
+// 直连账号最长 160 秒、连接级失败重发时还能更久——全屏弹窗挡住整个 App，用户能做的只有
+// 干等，看上去就是「点了之后卡死」。15 秒后「请勿重复下单」的提示已经看了 10 秒，此时让人
+// 关掉去看订单页，比把人困住更安全；请求本身不取消，照常在后台完成。
+// After this long without a receipt, closing (scrim / ✕ / Esc / back) is allowed again.
+// It used to be blocked for the whole flight — up to 160s for a gateway account, longer
+// on a connection-level resend — with a full-screen sheet over the whole app, which reads
+// as "tapped and it froze". By 15s the don't-place-again note has been up for 10s; letting
+// people close and check the orders page beats trapping them. The request isn't
+// cancelled and still completes in the background.
+const LEAVE_ALLOWED_MS = 15_000
+
 // 提交进行中挡住返回手势：压一条历史记录占位，用户划返回只消费这一条、弹窗不关；
 // 消费掉之后换一个 key 重新挂载，再压一条，于是连划几次都挡得住。提交一结束它就卸载，
 // useBackToClose 的清理会把占位记录撤掉。页面自己的 useBackToClose 在栈里更靠下，
@@ -91,8 +103,16 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   // success (so the slider doesn't come back), hence close-blocking keys off this —
   // once the receipt is out the user may of course close.
   const inFlight = receipt === 'waiting'
-  const inFlightRef = useRef(inFlight)
-  inFlightRef.current = inFlight
+  // 在途超过 LEAVE_ALLOWED_MS 后可以关 / closable again once in flight past LEAVE_ALLOWED_MS
+  const [canLeave, setCanLeave] = useState(false)
+  useEffect(() => {
+    if (!inFlight) { setCanLeave(false); return }
+    const timer = window.setTimeout(() => setCanLeave(true), LEAVE_ALLOWED_MS)
+    return () => window.clearTimeout(timer)
+  }, [inFlight])
+  const closeLocked = inFlight && !canLeave
+  const inFlightRef = useRef(closeLocked)
+  inFlightRef.current = closeLocked
   // 提交中点遮罩 / ✕ / 按 Esc / 划返回都不关：请求还在路上时关掉弹窗，用户看不到结果，
   // 最常见的下一步就是再下一单。/ While in flight, scrim / ✕ / Esc / back don't
   // close: closing mid-request hides the outcome and the usual next move is to place again.
@@ -191,9 +211,9 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   // transform would become the containing block for fixed and mislocate the modal.
   return createPortal(
     <div ref={overlayRef} className="slide-overlay" onClick={guardedCancel}>
-      {inFlight && <BackBlocker key={backGen} onBack={() => setBackGen((g) => g + 1)} />}
+      {closeLocked && <BackBlocker key={backGen} onBack={() => setBackGen((g) => g + 1)} />}
       <div ref={sheetRef} className="slide-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={inFlight || undefined} tabIndex={-1}>
-        <button className="slide-cancel-x" onClick={guardedCancel} disabled={inFlight} aria-label={t('common.close')}>
+        <button className="slide-cancel-x" onClick={guardedCancel} disabled={closeLocked} aria-label={t('common.close')}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
         </button>
 
@@ -385,7 +405,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
               {receipt === 'error' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>{error || t('order.rejected', { msg: '' })}</>}
             </div>
             {receipt === 'waiting' && slow && (
-              <p className="slide-slow" role="status">{t('order.slowBroker')}</p>
+              <p className="slide-slow" role="status">{t(canLeave ? 'order.slowBrokerLeave' : 'order.slowBroker')}</p>
             )}
           </div>
         )}

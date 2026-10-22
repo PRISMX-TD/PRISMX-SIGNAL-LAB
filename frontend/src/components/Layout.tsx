@@ -1025,6 +1025,18 @@ export default function Layout() {
                     key={it.to}
                     to={it.to}
                     className={({ isActive }) => `lg-sheet-item ${isActive ? 'on' : ''}`}
+                    // 点的就是当前页：路径不变，上面「路由切换时关闭」不会触发，面板原样挂着，
+                    // 像是点了没反应。直接收起，且不做同址导航（那会 replace 掉面板的返回占位）。
+                    // Tapping the current page: the path doesn't change, so the close-on-navigation
+                    // effect never fires and the sheet just stays — a tap that seems to do nothing.
+                    // Close it, and skip the same-path navigation (it would replace the sheet's
+                    // back placeholder).
+                    onClick={(e) => {
+                      if (location.pathname === it.to) {
+                        e.preventDefault()
+                        setMoreOpen(false)
+                      }
+                    }}
                   >
                     <TabIcon name={it.icon} />
                     <span>{it.label}</span>

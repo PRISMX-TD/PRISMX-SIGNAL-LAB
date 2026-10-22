@@ -595,11 +595,17 @@
   /* 全屏容器：覆盖整个视口，z-60 盖过 header(z-30) 和 tabbar(z-40) */
   .chart-fullscreen-container {
     position: fixed !important;
-    top: 0;
-    right: !important;
-    bottom: 0;
-    left: !important;
+    /* 原本是 inset: 0 !important，改写成长属性时 right / left 丢了值，整条声明被丢弃，
+       全屏容器只剩原位缩宽，加上 body 被钉死，屏幕一部分盖不住也滚不动。
+       Was inset: 0 !important; the longhand rewrite lost the right / left values, so
+       both declarations were dropped and the container shrank in place. */
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: 0 !important;
     z-index: 60 !important;
+    /* 100dvh 要 Chrome 108；更老的 WebView 先吃 100vh / 100dvh needs Chrome 108 */
+    height: 100vh !important;
     height: 100dvh !important;
     min-height: unset !important;
     border-radius: 0 !important;

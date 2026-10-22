@@ -8,7 +8,8 @@ import {
   decidedHomeMode, demoteToLanding, markHomeView, releaseHomeHold, resolveHomeMode, type HomeMode,
 } from './guest/homeMode'
 import { browserLangs, isPublicCompPath, pickPublicLang } from './utils/publicLang'
-import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { NavPendingBar, NavPendingRouter } from './components/NavPendingRouter'
 import { loggedOutRedirect } from './utils/loggedOutRedirect'
 import { adminTargetForDesk } from './components/admin/console/sections'
 import { AuthProvider, useAuth } from './store/auth'
@@ -425,17 +426,14 @@ export default function App() {
     <AuthProvider>
       <PrefsProvider>
         <FestivalProvider>
-        {/* v7_startTransition：路由切换包在 startTransition 里——切到还没下载的懒页面时
-            保留旧页面直到新页面就绪，而不是先闪一下 Suspense 占位。
-            v7_relativeSplatPath：只影响 splat 路由里的相对路径解析；本应用唯一的 splat
-            是 path="*" 的 <Navigate to="/">（绝对路径），行为不变，开它只是提前对齐 v7、
-            顺带消掉控制台的 future-flag 警告。
-            v7_startTransition wraps navigations in startTransition, so switching to a
-            not-yet-loaded lazy page keeps the old page until the new one is ready instead
-            of flashing the Suspense fallback. v7_relativeSplatPath only changes relative
-            resolution inside splat routes; the only splat here is path="*" navigating to
-            the absolute "/", so behaviour is unchanged. */}
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        {/* NavPendingRouter = BrowserRouter（v7_startTransition）+ 顶部切页进度条：切到还没
+            下载的懒页面时保留旧页面直到新页面就绪，同时 NavPendingBar 告诉用户「在走」，
+            不再像点了没反应。见 components/NavPendingRouter.tsx。
+            NavPendingRouter = BrowserRouter (v7_startTransition) plus a top progress bar:
+            the old page stays until the new one is ready, and NavPendingBar shows the
+            navigation is in flight instead of looking like the tap did nothing. */}
+        <NavPendingRouter>
+          <NavPendingBar />
           {/* SPA 路由切换时补发 Meta Pixel 的 PageView。必须在 BrowserRouter 内
               （要用 useLocation）、Routes 外（要覆盖全部路由，含 Layout 之外的
               落地页/登录页/法务页）。见 components/MetaPixel.tsx 的说明。
@@ -669,7 +667,7 @@ export default function App() {
               <FestivalDemoPanel />
             </Suspense>
           )}
-        </BrowserRouter>
+        </NavPendingRouter>
         </FestivalProvider>
       </PrefsProvider>
     </AuthProvider>

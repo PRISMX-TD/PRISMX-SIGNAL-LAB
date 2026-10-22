@@ -77,13 +77,28 @@ export async function getSWReg(): Promise<ServiceWorkerRegistration | null> {
   return _reg
 }
 
+// pushManager.subscribe 的上限。Chrome 要先连 Google 推送服务（FCM）拿通道，大陆网络下
+// 这一步可能既不成功也不失败地一直挂着——通知开关跟着一直转圈、点不动。到点按失败处理，
+// 调用方照常报「这台设备可能收不到后台通知」。
+// Ceiling for pushManager.subscribe. Chrome must reach Google's push service (FCM) first,
+// and on mainland networks that can hang without ever settling — the notification toggle
+// spun and stayed disabled with it. On expiry it counts as a failure and the caller says
+// this device may not get background notifications, as for any other failure.
+const SUBSCRIBE_TIMEOUT_MS = 20_000
+
 export async function subscribePush(applicationServerKey: string) {
   const reg = await getSWReg()
   if (!reg) return null
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(applicationServerKey),
-  })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const sub = await Promise.race([
+    reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(applicationServerKey),
+    }),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("pushManager.subscribe timed out")), SUBSCRIBE_TIMEOUT_MS)
+    }),
+  ]).finally(() => clearTimeout(timer))
   const raw = sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
   return { endpoint: raw.endpoint!, keys: raw.keys! }
 }

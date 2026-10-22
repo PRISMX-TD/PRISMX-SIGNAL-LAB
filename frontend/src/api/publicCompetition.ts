@@ -31,23 +31,28 @@ const TIMEOUT_MS = 15_000
 export async function publicGetJson<T>(path: string): Promise<T> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS)
-  let res: Response
+  // 计时器一直管到响应体读完：头到之后连接半断时 res.json() 不会自己结束，页面就一直转圈。
+  // The timer covers the body read too: after the headers a half-open link leaves res.json()
+  // pending forever and the page spinning.
   try {
-    res = await fetch(`${API_BASE}/api${path}`, {
-      method: 'GET',
-      cache: 'no-store',
-      credentials: 'omit',
-      headers: { Accept: 'application/json' },
-      signal: controller.signal,
-    })
-  } catch (err) {
-    void reportApiFailure()
-    throw err
+    let res: Response
+    try {
+      res = await fetch(`${API_BASE}/api${path}`, {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'omit',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      })
+    } catch (err) {
+      void reportApiFailure()
+      throw err
+    }
+    if (!res.ok) throw new PublicHttpError(res.status)
+    return (await res.json()) as T
   } finally {
     clearTimeout(timer)
   }
-  if (!res.ok) throw new PublicHttpError(res.status)
-  return (await res.json()) as T
 }
 
 export const publicCompetitionApi = {

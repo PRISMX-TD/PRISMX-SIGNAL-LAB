@@ -149,6 +149,7 @@
     "currentPrice": "现价",
     "refPrice": "参考价",
     "slowBroker": "券商响应较慢，请勿重复下单",
+    "slowBrokerLeave": "券商响应较慢，请勿重复下单。可以先关闭，稍后在「订单回执」页查看结果",
     "sizeMode": "手数模式",
     "sizeModeLots": "手数",
     "sizeModeRisk": "风险百分比",

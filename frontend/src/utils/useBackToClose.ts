@@ -196,36 +196,67 @@ export function useBackToClose(isOpen: boolean, onClose: () => void) {
       // ourselves back onto the stack until this self-triggered popstate
       // actually lands, then remove for good.
       openStack.push(id)
-      // 先记账再 back()：这次 back 的 popstate 落地前，可能已经有新弹窗压入了自己的
-      // 记录（同一次提交里 effect 跑在所有 cleanup 之后），计数就是让那个新实例认出
-      // 「这次 popstate 不是用户按的返回」的唯一依据。递减放在监听器里，等事件真正
-      // 落地、所有实例都判断完之后再做。
-      // Book-keep before back(): by the time this back()'s popstate lands, a newly
-      // opened modal may already have pushed its own entry (effects run after all
-      // cleanups in the same commit), and this count is the only way that new
-      // instance can tell "this popstate wasn't a user-initiated back". The
-      // decrement happens in the listener, after the event has actually landed and
-      // every instance has made its decision.
-      selfInitiatedBacks++
-      const onSelfTriggeredPop = () => {
-        window.removeEventListener('popstate', onSelfTriggeredPop)
-        // 递减必须晚于本次事件的所有监听器。新弹窗的 onPopState 注册得比这里更晚
-        // （它的 effect 跑在本次 cleanup 之后），因而会在本监听器之后被调用；就地
-        // 递减会让它看到 0 并把这次 popstate 误当成用户返回，正是要防的那个 bug。
-        // 用 setTimeout 排到事件派发完成之后。
-        // The decrement must outlive every listener for this event. A newly opened
-        // modal registers its onPopState later than this one (its effect runs after
-        // this cleanup), so it is invoked after us; decrementing in place would let
-        // it see 0 and mistake this popstate for a user-initiated back — precisely
-        // the bug being guarded against. setTimeout defers past dispatch.
-        setTimeout(() => {
-          selfInitiatedBacks--
-        }, 0)
+      const release = () => {
         const i = openStack.lastIndexOf(id)
         if (i !== -1) openStack.splice(i, 1)
       }
-      window.addEventListener('popstate', onSelfTriggeredPop)
-      window.history.back()
+      // back() 推迟到下一个任务、并在那时重新确认顶端仍是弹窗记录才发。
+      //
+      // 手机上一次轻点是 mousedown / mouseup / click 在**同一个任务**里连发。通知铃铛、
+      // 用户菜单这类「mousedown 点外面就收起」的弹层：mousedown 先把它关掉，这里同步
+      // back()；同一个任务里 click 接着跑 NavLink 的 navigate()（pushState）；随后那次
+      // back() 才异步落地——把用户刚点的导航撤销掉，页面原地不动。实测 Chromium 就是这样：
+      // back() 之后同步 pushState，最终停在原页面。表现正是「点了没反应」。
+      // 推迟一个任务后，那次 click 已经跑完：顶端若已换成真实导航的记录，就不 back，
+      // 留一条无害的死记录（与上面「打开期间发生了真实导航」同一个取舍）。
+      //
+      // Defer back() to the next task and re-check that the top entry is still a modal
+      // marker before issuing it.
+      //
+      // On a phone one tap fires mousedown / mouseup / click in the *same task*. A popover
+      // that closes on an outside mousedown (notification bell, user menu) closed here and
+      // called back() synchronously; the click then ran a NavLink's navigate() (pushState)
+      // in that same task; the back() landed afterwards and undid the navigation the user
+      // had just made — verified in Chromium: back() then a synchronous pushState ends on
+      // the original page. That is "tapped and nothing happened". One task later the click
+      // has run; if the top is now a real navigation's entry, skip the back and leave a
+      // harmless dead entry (the same trade-off as above).
+      window.setTimeout(() => {
+        const nowTop = window.history.state as { __modalBack?: boolean } | null
+        if (!nowTop?.__modalBack) {
+          release()
+          return
+        }
+        // 先记账再 back()：这次 back 的 popstate 落地前，可能已经有新弹窗压入了自己的
+        // 记录（同一次提交里 effect 跑在所有 cleanup 之后），计数就是让那个新实例认出
+        // 「这次 popstate 不是用户按的返回」的唯一依据。递减放在监听器里，等事件真正
+        // 落地、所有实例都判断完之后再做。
+        // Book-keep before back(): by the time this back()'s popstate lands, a newly
+        // opened modal may already have pushed its own entry (effects run after all
+        // cleanups in the same commit), and this count is the only way that new
+        // instance can tell "this popstate wasn't a user-initiated back". The
+        // decrement happens in the listener, after the event has actually landed and
+        // every instance has made its decision.
+        selfInitiatedBacks++
+        const onSelfTriggeredPop = () => {
+          window.removeEventListener('popstate', onSelfTriggeredPop)
+          // 递减必须晚于本次事件的所有监听器。新弹窗的 onPopState 注册得比这里更晚
+          // （它的 effect 跑在本次 cleanup 之后），因而会在本监听器之后被调用；就地
+          // 递减会让它看到 0 并把这次 popstate 误当成用户返回，正是要防的那个 bug。
+          // 用 setTimeout 排到事件派发完成之后。
+          // The decrement must outlive every listener for this event. A newly opened
+          // modal registers its onPopState later than this one (its effect runs after
+          // this cleanup), so it is invoked after us; decrementing in place would let
+          // it see 0 and mistake this popstate for a user-initiated back — precisely
+          // the bug being guarded against. setTimeout defers past dispatch.
+          setTimeout(() => {
+            selfInitiatedBacks--
+          }, 0)
+          release()
+        }
+        window.addEventListener('popstate', onSelfTriggeredPop)
+        window.history.back()
+      }, 0)
     }
   }, [isOpen])
 }
