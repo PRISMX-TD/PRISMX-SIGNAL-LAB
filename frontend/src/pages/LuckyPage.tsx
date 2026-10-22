@@ -1,7 +1,7 @@
 // 幸运轮盘（rev 45）：开放时间 + 作废说明、转盘、奖品一览（不显示概率）、我的抽奖券、我的奖品与领奖。
 // 结果由后端决定：点「抽奖」→ POST /lucky-wheel/spin → 按返回的 slotIndex 转过去 → 停下再弹结果。
 // Lucky wheel page. The backend picks the result; we spin to its slotIndex, then show it.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { luckyApi } from '../api/client'
@@ -10,6 +10,7 @@ import { fmtTime, localizeApiError } from '../api/utils'
 import LuckyWheel, { SPIN_MS, prefersReducedMotion } from '../components/lucky/LuckyWheel'
 import { useAuth } from '../store/auth'
 import { countdownParts } from '../utils/luckyCountdown'
+import { resolveSlot } from '../utils/luckySlot'
 import { newRequestId, targetRotation } from '../utils/luckyWheel'
 
 function useCountdown(to: string | undefined) {
@@ -32,6 +33,16 @@ export default function LuckyPage() {
   const [spinning, setSpinning] = useState(false)
   const [result, setResult] = useState<LuckySpinResult | null>(null)
   const timer = useRef<number>()
+  // 同步锁：state 更新是异步的，连点两下时 spinning 还没变 true，靠它挡住第二个请求。
+  // Synchronous lock: `spinning` only flips after a render, so a fast double-click would slip a second
+  // request through; this ref closes that gap.
+  const spinLock = useRef(false)
+  // 抽奖请求发出到动画结束之间为 true：中途离开页面时要补一次 refreshUser，否则首页券数是旧的。
+  // True from sending the request until the animation ends; if the user leaves in between we still
+  // refresh the account so the dashboard ticket count isn't stale.
+  const inFlight = useRef(false)
+  const refreshRef = useRef(refreshUser)
+  refreshRef.current = refreshUser
   const errText = (e: unknown) => (e instanceof Error ? localizeApiError(e.message) : t('common.error'))
 
   const load = () => Promise.all([luckyApi.state(), luckyApi.draws()])
@@ -39,7 +50,10 @@ export default function LuckyPage() {
     .catch((e) => setErr(errText(e)))
   useEffect(() => {
     void load()
-    return () => window.clearTimeout(timer.current)
+    return () => {
+      window.clearTimeout(timer.current)
+      if (inFlight.current) void refreshRef.current?.()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -47,30 +61,67 @@ export default function LuckyPage() {
   const target = round?.phase === 'upcoming' ? round.startsAt : round?.endsAt
   const cd = useCountdown(target)
 
+  // 倒计时走到 0（开始 / 结束）时重新拉一次状态，阶段才会自己翻过去；每个目标时间只拉一次，
+  // 万一服务器时钟略慢、阶段还没翻，也不会每秒重拉。
+  // When the countdown reaches zero (start / end) reload once so the phase flips by itself; once per
+  // target time, so a server clock a hair behind can't turn this into a once-a-second refetch.
+  const reloadedFor = useRef<string | null>(null)
+  const cdDone = !!cd?.done
+  useEffect(() => {
+    if (!cdDone || !target || reloadedFor.current === target) return
+    reloadedFor.current = target
+    void load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cdDone, target])
+
   const onSpin = async () => {
-    if (!state || spinning) return
+    if (!state || spinning || spinLock.current) return
+    spinLock.current = true
+    inFlight.current = true
     setErr('')
     setSpinning(true)
+    const finish = (r: LuckySpinResult) => {
+      setSpinning(false)
+      setResult(r)
+      setState((s) => s && { ...s, tickets: { ...s.tickets, unused: r.ticketsLeft } })
+      void luckyApi.draws().then((d) => setDraws(d.draws)).catch(() => {})
+      void refreshUser?.()
+      inFlight.current = false
+      spinLock.current = false
+    }
     try {
       const r = await luckyApi.spin(newRequestId())
-      const idx = r.slotIndex ?? 0
-      setRotation((cur) => targetRotation(cur, idx, state.prizes.length, Math.random() * 2 - 1))
-      timer.current = window.setTimeout(() => {
-        setSpinning(false)
-        setResult(r)
-        setState((s) => s && { ...s, tickets: { ...s.tickets, unused: r.ticketsLeft } })
-        void luckyApi.draws().then((d) => setDraws(d.draws)).catch(() => {})
-        void refreshUser?.()
-      }, prefersReducedMotion() ? 200 : SPIN_MS + 200)
+      // 后端的 slotIndex 按它此刻的上架顺序算；本地奖品列表可能已被管理员改过。对不上就先拉新状态
+      // （转盘按新格子重画），再按新列表算要停的格；仍找不到就不转，直接出结果。
+      // The backend's slotIndex follows its current listing; our cached prizes may be stale. On a
+      // mismatch refetch state first (the wheel redraws with the new slots), then resolve against it;
+      // if there is still nowhere to land, skip the animation and show the result.
+      let prizes = state.prizes
+      let slot = resolveSlot(prizes, r.prize.id, r.slotIndex)
+      if (!slot.consistent) {
+        try {
+          const fresh = await luckyApi.state()
+          setState(fresh)
+          prizes = fresh.prizes
+          slot = resolveSlot(prizes, r.prize.id, r.slotIndex)
+        } catch { /* 拉不到就按现有列表尽力而为 / best effort with what we have */ }
+      }
+      if (slot.index < 0) { finish(r); return }
+      const idx = slot.index
+      const n = prizes.length
+      setRotation((cur) => targetRotation(cur, idx, n, Math.random() * 2 - 1))
+      timer.current = window.setTimeout(() => finish(r), prefersReducedMotion() ? 200 : SPIN_MS + 200)
     } catch (e) {
       setSpinning(false)
+      inFlight.current = false
+      spinLock.current = false
       setErr(errText(e))
       void load()
     }
   }
 
   if (!state) return <div className="py-16 text-center text-sm text-neutral-500">{err || t('common.loading')}</div>
-  if (!state.visible || !round || round.phase === 'none') {
+  if (!state.visible || !round || round.phase === 'none' || round.phase === 'ended') {
     return <div className="card mx-auto max-w-xl p-10 text-center text-neutral-400">{t('lucky.closed')}</div>
   }
 
@@ -227,18 +278,28 @@ function ResultModal({ draw, onClose, onChange, navigate }: {
   draw: LuckyDraw; onClose: () => void; onChange: (d: LuckyDraw) => void; navigate: (to: string) => void
 }) {
   const { t } = useTranslation()
+  const titleId = useId()
+  const closeRef = useRef<HTMLButtonElement>(null)
+  // 打开即把焦点交给「知道了」，Esc 关闭 / Focus the close button on open; Escape closes.
+  useEffect(() => {
+    closeRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const title = draw.prize.kind === 'none' ? t('lucky.result.none')
     : draw.prize.kind === 'retry' ? t('lucky.result.retry')
     : draw.prize.kind === 'pro_days' ? t('lucky.result.proDays', { n: draw.prize.proDays })
     : t('lucky.result.custom', { name: draw.prize.name })
   return (
-    <div role="dialog" aria-modal className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-labelledby={titleId} className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
       <div className="card max-h-[90vh] w-full max-w-sm space-y-4 overflow-y-auto p-6 text-center" onClick={(e) => e.stopPropagation()}>
         {draw.prize.imageUrl && <img src={draw.prize.imageUrl} alt="" className="mx-auto h-20 w-20 rounded-lg object-cover" />}
-        <div className="break-words font-display text-lg font-semibold text-neutral-100">{title}</div>
+        <div id={titleId} className="break-words font-display text-lg font-semibold text-neutral-100">{title}</div>
         {draw.prize.description && <p className="break-words text-sm text-neutral-400">{draw.prize.description}</p>}
         <div className="text-left"><ClaimActions draw={draw} onChange={onChange} navigate={navigate} /></div>
-        <button type="button" className="btn-ghost w-full py-2" onClick={onClose}>{t('lucky.close')}</button>
+        <button ref={closeRef} type="button" className="btn-ghost w-full py-2" onClick={onClose}>{t('lucky.close')}</button>
       </div>
     </div>
   )
