@@ -1149,6 +1149,10 @@ export const userApi = {
       // GamificationSettings.competitionsVisible). Likewise only filled in by
       // refreshUser(); same precedent as gamificationVisible/leaderboardVisible.
       competitionsVisible: boolean
+      // 幸运轮盘入口是否可见 + 本期未用券数（第四个内测开关，见后端 account.lucky_flags）。
+      // Lucky wheel entry visibility + unused tickets this round (see backend account.lucky_flags).
+      luckyWheelVisible: boolean
+      luckyTickets: number
       nickname: string | null
       // 是否还欠一个昵称（全员必填）。搭这趟车是为了强制上线时已经登录的会话——
       // 他们缓存的 user 里没有这个键，只有 refreshUser() 能补上（见后端注释）。

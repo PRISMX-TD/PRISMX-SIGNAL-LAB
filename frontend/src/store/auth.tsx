@@ -347,6 +347,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // Competitions visibility is a third, independent beta switch riding
           // the same trip — same precedent as the two lines above.
           competitionsVisible: me.competitionsVisible,
+          // 幸运轮盘入口与本期未用券数：第四个内测开关，同一趟车、同一先例。漏了这两行时
+          // 开关开着入口也出不来（2026-10-22 上线当天踩过）。
+          // Lucky wheel entry + unused tickets: the fourth beta switch, same trip. Leaving these
+          // out kept the entry hidden with the switch on (hit on launch day, 2026-10-22).
+          luckyWheelVisible: me.luckyWheelVisible,
+          luckyTickets: me.luckyTickets,
           // 等级/称号同样搭这趟车：后端只在 gamificationVisible 为真时算，
           // 否则是 null——UserMenu 的角标靠这两个字段渲染，不用再单独请求。
           // Level/title ride the same trip: the backend only computes these
@@ -382,6 +388,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           gamificationVisible: me.gamificationVisible,
           leaderboardVisible: me.leaderboardVisible,
           competitionsVisible: me.competitionsVisible,
+          luckyWheelVisible: me.luckyWheelVisible,
+          luckyTickets: me.luckyTickets,
           gamificationLevel: me.gamificationLevel,
           gamificationTitle: me.gamificationTitle,
           needsNickname: me.needsNickname,
