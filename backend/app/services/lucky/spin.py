@@ -21,8 +21,8 @@ from sqlalchemy.orm import Session
 from app.models import LuckyDraw, LuckyPrize, LuckyTicket, User
 from app.services.lucky import odds, prizes, rounds
 from app.services.lucky.common import (
-    F_AUTO, F_PENDING, KIND_CUSTOM, KIND_NONE, KIND_PRO_DAYS, KIND_RETRY, SRC_RETRY, T_UNUSED, T_USED,
-    is_visible, utcnow,
+    F_AUTO, F_PENDING, KIND_CUSTOM, KIND_NONE, KIND_PRO_DAYS, KIND_RETRY, LUCKY_EXPIRY_FIELD, LUCKY_PLAN_FIELD,
+    SRC_RETRY, T_UNUSED, T_USED, is_visible, utcnow,
 )
 
 
@@ -156,7 +156,11 @@ def _spin_once(db, user, r, request_id, now, rand_below) -> LuckyDraw:
     db.flush()   # 唯一约束在这里撞 / the unique index fires here
     if p.kind == KIND_PRO_DAYS:
         from app.routers.support import apply_comp_days
-        apply_comp_days(db, user.id, user, p.pro_days)
+        # 中奖是用户本人触发的，不是管理员动作：审计写 plan:lucky_* 专用字段，操作日志整族跳过
+        # （产品决定：抽奖不进操作日志）。
+        # The win is the user's own doing, not an admin action: audit under the dedicated
+        # plan:lucky_* fields, which the activity log skips (product decision: spins stay out of it).
+        apply_comp_days(db, user.id, user, p.pro_days, audit_fields=(LUCKY_PLAN_FIELD, LUCKY_EXPIRY_FIELD))
     elif p.kind == KIND_RETRY:
         db.add(LuckyTicket(user_id=user.id, round_id=r.id, source=SRC_RETRY, source_ref=d.id, issued_at=now))
         db.flush()

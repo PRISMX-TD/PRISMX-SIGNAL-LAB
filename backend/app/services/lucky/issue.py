@@ -12,12 +12,13 @@ from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Competition, LeaderboardSnapshot, LuckyTicket, LuckyTicketBatch, User
+from app.models import Competition, LeaderboardSnapshot, LuckyRound, LuckyTicket, LuckyTicketBatch, User
 from app.services.lucky import rounds
 from app.services.lucky.common import (
-    MAX_BATCH_TICKETS, SRC_BOARD, SRC_COMP, T_REVOKED, T_UNUSED, is_visible,
+    MAX_BATCH_TICKETS, SRC_BOARD, SRC_COMP, T_REVOKED, T_UNUSED, is_visible, opens_text,
 )
 from app.services.notification_feed import KIND_LUCKY_TICKET, create_notification
 
@@ -84,8 +85,20 @@ def issue(db: Session, admin: User, body, now: datetime) -> tuple[LuckyTicketBat
         raise HTTPException(404, "名单里有不存在的用户 / Unknown user in the list")
     batch = LuckyTicketBatch(round_id=r.id, reason=body.reason.strip(), created_by=admin.id, created_at=now,
                              user_count=len(ids), ticket_count=total, request_id=body.requestId)
-    db.add(batch)
-    db.flush()
+    # 同一个 requestId 的两个请求同时到：都过了上面的查重，输的那个在这里撞 request_id 唯一约束。
+    # 回滚到 savepoint 后按重放处理——返回先到的那一批，不是 500；已经写进来的券不受影响。
+    # Two requests with the same requestId can both pass the check above; the loser hits the unique
+    # request_id here. Roll back to the savepoint and treat it as a replay — return the winner's batch,
+    # not a 500 — leaving everything the winner wrote untouched.
+    try:
+        with db.begin_nested():
+            db.add(batch)
+            db.flush()
+    except IntegrityError:
+        prior = db.query(LuckyTicketBatch).filter(LuckyTicketBatch.request_id == body.requestId).first()
+        if prior is None:
+            raise
+        return prior, prior.notified_at is not None
     db.bulk_insert_mappings(LuckyTicket, [
         {"user_id": i.userId, "round_id": r.id, "batch_id": batch.id, "source": i.source,
          "source_ref": i.sourceRef, "rank": i.rank, "status": T_UNUSED, "issued_at": now}
@@ -104,8 +117,13 @@ def notify_batch(db: Session, batch: LuckyTicketBatch, now: datetime) -> list[st
     rows = (db.query(LuckyTicket.user_id, func.count(LuckyTicket.id))
             .filter(LuckyTicket.batch_id == batch.id, LuckyTicket.status == T_UNUSED)
             .group_by(LuckyTicket.user_id).all())
+    # 本期还没开始：文案写开启时间，别让人以为现在就能转（设计 §5.4）
+    # Round not started yet: say when it opens, so nobody thinks they can spin now (spec 5.4)
+    r = db.get(LuckyRound, batch.round_id)
+    when = f" · {opens_text(r.starts_at)}" if r is not None and rounds.phase(r, now) == "upcoming" else ""
     for uid, n in rows:
-        create_notification(db, uid, KIND_LUCKY_TICKET, text=f"×{n} · {batch.reason}", link=LINK, ref_id=batch.id)
+        create_notification(db, uid, KIND_LUCKY_TICKET, text=f"×{n} · {batch.reason}{when}", link=LINK,
+                            ref_id=batch.id)
     batch.notified_at = now
     return [uid for uid, _ in rows]
 
@@ -137,7 +155,10 @@ def revoke(db: Session, batch_id: str | None, user_id: str | None) -> int:
     return q.update({LuckyTicket.status: T_REVOKED}, synchronize_session=False)
 
 
-def push_tickets(user_ids: list[str], reason: str) -> None:
+def push_tickets(user_ids: list[str], reason: str, opens_at: datetime | None = None) -> None:
+    """opens_at 有值 = 本期还没开始：推送写开启时间（UTC+8），到时再来转。
+    opens_at set = the round hasn't started: the push names the opening time (UTC+8)."""
     from app.services.push_dispatch import EVENT_LUCKY_WHEEL, dispatch_users_push
-    dispatch_users_push(user_ids, EVENT_LUCKY_WHEEL, "获得抽奖券", f"{reason}——去「幸运轮盘」转一转吧",
-                        url=LINK, tag="prismx-lucky")
+    body = (f"{reason}——{opens_text(opens_at)}，届时来「幸运轮盘」转一转吧" if opens_at is not None
+            else f"{reason}——去「幸运轮盘」转一转吧")
+    dispatch_users_push(user_ids, EVENT_LUCKY_WHEEL, "获得抽奖券", body, url=LINK, tag="prismx-lucky")

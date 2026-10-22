@@ -86,6 +86,7 @@ from app.services.auto_manage import (
 )
 from app.services.close_all import CLOSE_ALL_PREFIX, batch_of
 from app.services.gateway_binding import is_removed, is_revoked
+from app.services.lucky.common import LUCKY_AUDIT_PREFIX
 from app.services.order_payload import GATEWAY_STALE_ORDER_MESSAGE, STALE_ORDER_MESSAGE, order_source_tag
 from app.services.stats_time import local_day
 from app.services.trade_performance import position_id_of
@@ -933,6 +934,10 @@ def _sources(
     if cat in ("all", "account", "admin") and scope.login is None:
         a = AdminAuditLog
         conds = bounds(a.created_at)
+        # 幸运轮盘中奖送的 PRO 天数是用户本人触发的，产品决定不进操作日志（也不能显示成管理员动作）。
+        # PRO days won on the lucky wheel are the user's own doing; by product decision they stay out of
+        # the log (and must never read as an admin action).
+        conds.append(~a.field.like(LUCKY_AUDIT_PREFIX + "%"))
         if cat == "account":
             conds.append(_account_field_cond())
         elif cat == "admin":
@@ -1465,6 +1470,12 @@ def _audit_single(rows: list[_Row], key: str) -> _Proto:
         else:
             p.actor_type = "admin"
         p.actor_id = head.admin_user_id
+        if family == "lucky" and _as_dict(head.new_value).get("auto") is True:
+            # 后台循环到点自动结束一期：审计行借期的创建者 id 占位（表里 admin_user_id 非空），
+            # 显示上是系统动作，不能记在那位管理员头上。
+            # The sweeper's automatic round end borrows the round creator's id as the stand-in
+            # (admin_user_id is NOT NULL); it reads as a system action, not that admin's.
+            p.actor_type, p.actor_id = "system", None
         if _placeholder_family(family):
             p.user_id = None
         elif family.startswith("other:") and head.target_user_id == head.admin_user_id:

@@ -31,7 +31,7 @@ from app.services.deps import get_current_user, require_admin
 from app.services.lucky import claims, common, prizes, rounds
 from app.services.lucky import issue as issue_svc
 from app.services.lucky import spin as spin_svc
-from app.services.notification_feed import notify_ws
+from app.services.notification_feed import notify_ws, notify_ws_many
 
 logger = logging.getLogger("prismx.lucky")
 
@@ -48,14 +48,24 @@ def _audit(db: Session, admin: User, action: str, payload: dict) -> None:
                json.dumps(payload, ensure_ascii=False, default=str))
 
 
-def _after_notify(background_tasks: BackgroundTasks | None, groups: dict[str, list[str]]) -> None:
-    """提交之后：WS 提醒在线用户刷新通知，推送放后台任务（阻塞网络 IO）。
-    After commit: nudge online users over WS; queue the push (blocking network IO) as a background task."""
-    for reason, uids in groups.items():
-        for uid in uids:
-            notify_ws(uid)
-        if background_tasks is not None and uids:
-            background_tasks.add_task(issue_svc.push_tickets, uids, reason)
+def _opens_at(db: Session, now):
+    """当前期还没开始就返回开始时间（通知 / 推送文案要写「X月X日 开启」），否则 None。
+    The current round's start while it is still upcoming (the copy then names the opening time), else None."""
+    r = rounds.current_round(db)
+    return r.starts_at if r is not None and rounds.phase(r, now) == "upcoming" else None
+
+
+def _after_notify(background_tasks: BackgroundTasks | None, groups: dict[str, list[str]], opens_at=None) -> None:
+    """提交之后：WS 提醒在线用户刷新通知，推送放后台任务（阻塞网络 IO）。WS 整批只提交一次主循环
+    （最多 2000 人逐个等 2 秒会把请求卡住）。
+    After commit: nudge online users over WS — one main-loop submission for the whole batch, since
+    up to 2000 users at 2s each would stall the request — and queue the push (blocking network IO)
+    as a background task."""
+    notify_ws_many([uid for uids in groups.values() for uid in uids])
+    if background_tasks is not None:
+        for reason, uids in groups.items():
+            if uids:
+                background_tasks.add_task(issue_svc.push_tickets, uids, reason, opens_at)
 
 
 def _config_out(db: Session) -> dict:
@@ -75,9 +85,22 @@ def admin_get_config(db: Session = Depends(get_db), admin: User = Depends(requir
 @admin_router.put("/prizes")
 def admin_save_prizes(body: list[LuckyPrizeIn], db: Session = Depends(get_db),
                       admin: User = Depends(require_admin)):
+    # 设计 §3.3：保存要逐项留痕。先取保存前上架的每一格，保存后对比：记整套新配置、每个改动格的
+    # 前 / 后、被下架的格；没动的格不进 changes，日志才看得出这次到底改了什么（天数 / 库存 / 上限都是
+    # 会送出真东西的字段）。
+    # Spec 3.3: a save is logged field by field. Snapshot the live slots first, then diff: the full new
+    # set, before / after of each changed slot, and the archived ones. Untouched slots stay out of
+    # `changes` so the log shows what actually moved (days / stock / limits give real things away).
+    before = {p.id: prizes.audit_view(p) for p in prizes.active_prizes(db)}
     kept = prizes.save_prizes(db, body)
-    _audit(db, admin, "prizes", {"prizes": [{"name": p.name, "kind": p.kind, "probBp": p.prob_bp}
-                                            for p in kept]})
+    after = [prizes.audit_view(p) for p in kept]
+    kept_ids = {a["id"] for a in after}
+    _audit(db, admin, "prizes", {
+        "prizes": after,
+        "changes": [{"id": a["id"], "name": a["name"], "before": before.get(a["id"]), "after": a}
+                    for a in after if before.get(a["id"]) != a],
+        "archived": [{"id": i, "name": v["name"]} for i, v in before.items() if i not in kept_ids],
+    })
     db.commit()
     return _config_out(db)
 
@@ -124,9 +147,10 @@ def admin_set_visible(body: LuckyVisibleIn, db: Session = Depends(get_db),
     # （notified_at 已置）。推送在提交之后。
     # Off→on: notify batches issued while hidden. The feed rows commit with the flag and the
     # audit row; notified_at makes repeated flips a no-op. Push goes out after the commit.
-    groups = issue_svc.notify_pending(db, common.utcnow()) if body.visible and not was else {}
+    now = common.utcnow()
+    groups = issue_svc.notify_pending(db, now) if body.visible and not was else {}
     db.commit()
-    _after_notify(background_tasks, groups)
+    _after_notify(background_tasks, groups, _opens_at(db, now) if groups else None)
     return _config_out(db)
 
 
@@ -148,7 +172,7 @@ def admin_issue(body: LuckyIssueIn, db: Session = Depends(get_db), admin: User =
     db.commit()
     if fresh and notified:
         uids = [i.userId for i in body.items]
-        _after_notify(background_tasks, {batch.reason: uids})
+        _after_notify(background_tasks, {batch.reason: uids}, _opens_at(db, now))
     return {"id": batch.id, "userCount": batch.user_count, "ticketCount": batch.ticket_count,
             "notified": notified}
 
@@ -212,21 +236,27 @@ def admin_draws_csv(status: str | None = Query(default=None, max_length=16), rou
 
 @admin_router.post("/draws/{draw_id}/deliver")
 def admin_deliver(draw_id: str, body: LuckyHandleIn, db: Session = Depends(get_db),
-                  admin: User = Depends(require_admin)):
+                  admin: User = Depends(require_admin), background_tasks: BackgroundTasks = None):
     d = claims.deliver(db, admin, draw_id, body.note)
     _audit(db, admin, "deliver", {"drawId": d.id, "userId": d.user_id, "note": d.admin_note})
+    uid, name = d.user_id, claims.prize_name(d)
     db.commit()
-    notify_ws(d.user_id)
+    notify_ws(uid)
+    if background_tasks is not None:
+        background_tasks.add_task(claims.push_handled, uid, True, name, None)
     return {"ok": True}
 
 
 @admin_router.post("/draws/{draw_id}/cancel")
 def admin_cancel(draw_id: str, body: LuckyHandleIn, db: Session = Depends(get_db),
-                 admin: User = Depends(require_admin)):
+                 admin: User = Depends(require_admin), background_tasks: BackgroundTasks = None):
     d = claims.cancel(db, admin, draw_id, body.note)
     _audit(db, admin, "cancel", {"drawId": d.id, "userId": d.user_id, "note": d.admin_note})
+    uid, name, reason = d.user_id, claims.prize_name(d), d.admin_note
     db.commit()
-    notify_ws(d.user_id)
+    notify_ws(uid)
+    if background_tasks is not None:
+        background_tasks.add_task(claims.push_handled, uid, False, name, reason)
     return {"ok": True}
 
 
@@ -286,8 +316,14 @@ def user_spin(request: Request, body: LuckySpinIn, db: Session = Depends(get_db)
 
 @router.get("/draws")
 def user_draws(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = (db.query(LuckyDraw).filter(LuckyDraw.user_id == user.id)
-            .order_by(LuckyDraw.created_at.desc()).limit(100).all())
+    # 待领取（pending / submitted）的一条不能因为抽得多而掉出列表：先全取，再补最近 100 条其余的。
+    # An open claim must never fall off the list behind a heavy user's history: take every open one,
+    # then fill with the latest 100 of the rest.
+    base = db.query(LuckyDraw).filter(LuckyDraw.user_id == user.id)
+    open_rows = base.filter(LuckyDraw.fulfillment_status.in_(common.F_OPEN)).all()
+    rest = (base.filter(LuckyDraw.fulfillment_status.notin_(common.F_OPEN))
+            .order_by(LuckyDraw.created_at.desc(), LuckyDraw.id.desc()).limit(100).all())
+    rows = sorted(open_rows + rest, key=lambda d: (d.created_at, d.id), reverse=True)
     return {"draws": [spin_svc.draw_out(d, None) for d in rows]}
 
 

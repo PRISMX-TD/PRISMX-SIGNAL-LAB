@@ -116,17 +116,29 @@ def lucky_flags(db: Session, user: User) -> tuple[bool, int]:
     """(轮盘入口是否可见, 本期未用券数)。
 
     普通用户要「开关开着 + 有一期未结束（未开始或进行中）」才可见；管理员总可见，
-    方便上线前自测。券数只在有未结束的期时才查，没有期就是 0。
+    方便上线前自测。另外：只要这个人还有待领取的自定义奖（pending / submitted），入口就一直
+    可见——期结束或开关关掉后，他还得回 /lucky 填领奖信息、看进度，不能因此找不到入口。
+    券数只在有未结束的期时才查，没有期就是 0。
     (entry visible, unused tickets this round). Users need the switch on and an
     unended round (upcoming or active); admins always see it for pre-launch
-    testing. Tickets are only counted while a round is open, else 0.
+    testing. A user who still has an open custom-prize claim (pending / submitted) also keeps
+    the entry, even after the round ended or the switch went off — they must be able to get back
+    to /lucky to submit details and follow the claim. Tickets are only counted while a round is
+    open, else 0.
     """
+    from sqlalchemy import exists
+
+    from app.models import LuckyDraw
     from app.services.lucky import common, rounds
     from app.services.lucky.spin import unused_count
     r = rounds.current_round(db)
     open_round = r is not None and rounds.phase(r, common.utcnow()) in ("upcoming", "active")
     visible = user.role == "admin" or (open_round and common.is_visible(db))
-    return visible, (unused_count(db, user.id, r.id) if visible and open_round else 0)
+    if not visible:
+        visible = db.query(
+            exists().where(LuckyDraw.user_id == user.id, LuckyDraw.fulfillment_status.in_(common.F_OPEN))
+        ).scalar()
+    return bool(visible), (unused_count(db, user.id, r.id) if visible and open_round else 0)
 
 
 @router.get("/me", response_model=AccountInfoOut)

@@ -372,3 +372,32 @@ def test_route_spin_and_draws(world):
         lw.user_spin(_request(), LuckySpinIn(requestId="req-87654321"), db, u)
     assert e.value.status_code == 409
     assert [d["id"] for d in lw.user_draws(db, u)["draws"]] == [body["id"]]
+
+
+def test_pro_days_win_is_not_an_admin_activity_row(world):
+    """最终评审 I1：抽中 PRO 天数不能在后台操作日志里变成「管理员 <普通用户> 改了会员到期」。
+    到期日照常入账，审计写在专用字段 plan:lucky_*，活动日志整族不列。
+    Final review I1: a PRO-days win must not surface as an admin action by the winning user. The
+    expiry is still credited; the audit rows use the dedicated plan:lucky_* fields and the feed skips them."""
+    from app.models import AdminAuditLog
+    from app.services import activity_feed as feed
+
+    db, _a, u, r = world
+    free = _user(db, "free@t.co")                      # FREE 用户：升 PRO + 到期两行 / FREE: upgrade + expiry
+    _prizes(db, dict(name="7 天", kind="pro_days", pro_days=7, prob_bp=10000),
+            dict(name="谢谢", kind="none", prob_bp=0))
+    _tickets(db, u, r, 1)
+    _tickets(db, free, r, 1)
+    spin.spin(db, u, "req-i1-a", rand_below=first)
+    spin.spin(db, free, "req-i1-b", rand_below=first)
+    db.commit()
+    assert u.plan_expires_at is not None and free.plan == "PRO" and free.plan_expires_at is not None
+    fields = {a.field for a in db.query(AdminAuditLog)}
+    assert fields and all(f.startswith("plan:lucky") for f in fields)
+    assert "plan_expires_at" not in fields and "plan" not in fields
+    def shown(**kw):    # 注册行是测试造用户带出来的，与中奖无关 / registrations come from creating the users
+        return [i for i in feed.list_activity(db, **kw)["items"] if i["kind"] != "user.register"]
+
+    for cat in ("all", "admin", "account"):
+        assert shown(cat=cat) == []
+    assert shown(user_id=free.id) == []

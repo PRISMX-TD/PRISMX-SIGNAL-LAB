@@ -5,6 +5,7 @@ Every minute: end due rounds (voiding unused tickets); within 24h of the end and
 remind holders of unused tickets once per round. The spin endpoint checks the window itself.
 """
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 
@@ -13,6 +14,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import LuckyRound, LuckyTicket
+from app.services.audit import log_change
 from app.services.lucky import rounds
 from app.services.lucky.common import T_UNUSED, is_visible, utcnow
 from app.services.notification_feed import KIND_LUCKY_EXPIRING, create_notification, notify_ws
@@ -26,7 +28,14 @@ REMIND_BEFORE = timedelta(hours=24)
 def sweep_once(db, now: datetime) -> dict:
     out = {"ended": 0, "voided": 0, "reminded": 0}
     for r in db.query(LuckyRound).filter(LuckyRound.ended_at.is_(None), LuckyRound.ends_at <= now).all():
-        out["voided"] += rounds.end_round(db, r, now, None)
+        n = rounds.end_round(db, r, now, None)
+        # 到点自动结束也要留痕（设计 §2.2「已结束、作废 N 张」）：审计表的操作者非空，借期的创建者占位，
+        # new_value 里 auto=true，操作日志据此显示成系统动作。
+        # An automatic end is audited too (spec 2.2, "ended, N voided"): the table needs an actor, so the
+        # round's creator stands in and auto=true makes the activity log show a system action.
+        log_change(db, r.created_by, r.created_by, "lucky:round_end", None,
+                   json.dumps({"id": r.id, "voided": n, "auto": True}, ensure_ascii=False))
+        out["voided"] += n
         out["ended"] += 1
     db.commit()
     r = rounds.current_round(db)

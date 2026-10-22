@@ -87,6 +87,29 @@ def create_notification(
     return row
 
 
+def notify_ws_many(user_ids) -> None:
+    """notify_ws 的批量版：一批用户**一次**提交到主循环（push_to_users，多 worker 时是一次
+    publish 带名单）。逐人 notify_ws 每次都是一次跨线程往返、最长等 2 秒，几千人的批量发券会把
+    请求线程卡住。同样只发信号、失败只记日志。
+    Batch notify_ws: ONE submission to the main loop for the whole list (push_to_users, a single
+    publish carrying the targets under multiple workers). Per-user notify_ws is a cross-thread
+    round-trip of up to 2s each, which stalls the request thread on a several-thousand-user issue.
+    Signal only; failures are logged and swallowed."""
+    ids = [u for u in dict.fromkeys(user_ids or []) if u]
+    if not ids:
+        return
+    try:
+        from app.services.connection_manager import manager
+        from app.services.gateway_client import run_on_main_loop
+
+        run_on_main_loop(
+            manager.push_to_users(ids, {"type": "NOTIFICATION_NEW", "data": {}}),
+            timeout=_WS_TIMEOUT,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("站内通知 WS 批量下发失败 / in-app notification WS batch signal failed", exc_info=True)
+
+
 def notify_ws(user_id: str) -> None:
     """告诉这个用户此刻在线的页面「有新通知了」，让铃铛立刻重拉。
 

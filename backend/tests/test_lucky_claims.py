@@ -168,3 +168,43 @@ def test_deleting_a_claim_ticket_clears_the_draw_link_and_allows_a_new_one(peopl
     assert db.get(LuckyDraw, d.id).support_ticket_id is None
     again = router.user_claim_ticket(d.id, db, u)["ticketId"]
     assert again and again != first
+
+
+def test_deliver_and_cancel_also_push(people, monkeypatch):
+    """最终评审 M3：发放 / 取消除了站内通知 + WS，还要走推送（后台任务）。
+    Final review M3: deliver / cancel also queue a push, next to the in-app row and WS signal."""
+    from fastapi import BackgroundTasks
+
+    db, admin, u = people
+    got = []
+    monkeypatch.setattr("app.services.push_dispatch.dispatch_users_push",
+                        lambda uids, ev, title, body, url, tag: got.append((list(uids), ev, title, body, url)))
+    d = _draw(db, u, "form", status="submitted")
+    bt = BackgroundTasks()
+    router.admin_deliver(d.id, LuckyHandleIn(note="顺丰 SF123"), db, admin, background_tasks=bt)
+    d2 = _draw(db, u, "form")
+    bt2 = BackgroundTasks()
+    router.admin_cancel(d2.id, LuckyHandleIn(note="联系不上"), db, admin, background_tasks=bt2)
+    for t in bt.tasks + bt2.tasks:
+        t.func(*t.args, **t.kwargs)
+    assert [g[0] for g in got] == [[u.id], [u.id]] and {g[4] for g in got} == {"/lucky"}
+    assert "手表" in got[0][3] and "联系不上" in got[1][3] and got[0][2] != got[1][2]
+
+
+def test_user_draws_always_lists_open_claims_beyond_the_recent_100(people):
+    """最终评审 M5：抽得多的人，早先那条待领取的奖不能被最近 100 条挤掉。
+    Final review M5: a heavy user's old open claim must not fall off behind the latest 100 draws."""
+    db, admin, u = people
+    old = _draw(db, u, "form")                         # pending
+    old.created_at = common.utcnow() - timedelta(days=30)
+    for i in range(105):
+        t = LuckyTicket(user_id=u.id, round_id=old.round_id, source="manual", status="used")
+        db.add(t)
+        db.flush()
+        db.add(LuckyDraw(user_id=u.id, round_id=old.round_id, ticket_id=t.id, prize_id=old.prize_id,
+                         request_id=f"bulk-{i:04d}", prize_snapshot=json.dumps({"name": "谢谢", "kind": "none"}),
+                         fulfillment_status="auto_done", created_at=common.utcnow() - timedelta(minutes=i)))
+    db.commit()
+    ids = [x["id"] for x in router.user_draws(db, u)["draws"]]
+    assert old.id in ids and len(ids) == 101
+    assert ids[0] != old.id and ids[-1] == old.id      # 仍按时间倒序 / still newest first

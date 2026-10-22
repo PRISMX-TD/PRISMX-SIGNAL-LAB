@@ -57,3 +57,22 @@ def test_no_reminder_when_hidden_or_far(db_session):
     common.set_visible(db_session, True)
     db_session.commit()
     assert sweep.sweep_once(db_session, now - timedelta(days=2))["reminded"] == 0   # 还早 / too early
+
+
+def test_auto_end_writes_a_system_audit_row(db_session):
+    """最终评审 M2：到点自动结束也要留一条「已结束、作废 N 张」的审计，且不挂在某个管理员名下。
+    Final review M2: the sweeper's auto end leaves a round_end audit ("ended, N voided"), not attributed to an admin."""
+    import json
+
+    from app.models import AdminAuditLog
+    from app.services import activity_feed as feed
+
+    r, _u, _v, now = _setup(db_session, timedelta(seconds=-5))
+    sweep.sweep_once(db_session, now)
+    row, = db_session.query(AdminAuditLog).filter(AdminAuditLog.field == "lucky:round_end").all()
+    assert json.loads(row.new_value) == {"id": r.id, "voided": 1, "auto": True}
+    sweep.sweep_once(db_session, now)
+    assert db_session.query(AdminAuditLog).filter(AdminAuditLog.field == "lucky:round_end").count() == 1
+    item, = [i for i in feed.list_activity(db_session)["items"] if i["kind"] != "user.register"]
+    assert item["kind"] == "admin.lucky" and item["actor"]["type"] == "system"
+    assert item["params"]["action"] == "round_end" and item["params"]["voided"] == 1

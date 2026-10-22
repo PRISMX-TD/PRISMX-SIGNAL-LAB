@@ -90,6 +90,26 @@ def _handle(db: Session, admin: User, draw_id: str, status: str, note: str) -> L
     return d
 
 
+def prize_name(d: LuckyDraw) -> str:
+    return _snap(d).get("name") or ""
+
+
+def push_handled(user_id: str, delivered: bool, name: str, note: str | None) -> None:
+    """发放 / 取消后的系统推送（设计 §6：站内通知 + 推送）。同步阻塞，从 BackgroundTasks 调；
+    参数都是提交前取好的纯值，后台任务里不再碰会话。取消原因用户在站内本来就看得到，所以带上；
+    发放备注（快递单号之类）只在站内通知里，不进系统通知栏。
+    Push after a delivery / cancellation (spec 6: in-app + push). Blocking; call from BackgroundTasks
+    with plain values read before the commit so the task never touches the session. The cancel reason
+    is already visible to the user in-app, so it rides along; a delivery note (tracking numbers) stays
+    in the in-app row and out of the notification tray."""
+    from app.services.push_dispatch import EVENT_LUCKY_WHEEL, dispatch_users_push
+    if delivered:
+        title, body = "奖品已发放", f"「{name}」已发放，点开查看"
+    else:
+        title, body = "奖品已取消", f"「{name}」已取消：{note}" if note else f"「{name}」已取消"
+    dispatch_users_push([user_id], EVENT_LUCKY_WHEEL, title, body, url=LINK, tag="prismx-lucky")
+
+
 def deliver(db: Session, admin: User, draw_id: str, note: str) -> LuckyDraw:
     return _handle(db, admin, draw_id, F_DELIVERED, note)
 

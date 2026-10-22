@@ -123,3 +123,38 @@ def test_stock_cannot_drop_below_used(db_session, admin):
 def test_visible_toggle(db_session, admin):
     router.admin_set_visible(LuckyVisibleIn(visible=True), db_session, admin, background_tasks=None)
     assert common.is_visible(db_session) is True
+
+
+def _audits(db):
+    import json
+    return [json.loads(a.new_value) for a in
+            db.query(AdminAuditLog).filter(AdminAuditLog.field == "lucky:prizes").order_by(AdminAuditLog.created_at)]
+
+
+def test_prize_save_audit_records_money_fields_before_and_after(db_session, admin):
+    """最终评审 I3：保存奖项的审计要带上会动钱的字段（天数、库存、每人上限、抽完规则、领取方式……）
+    和改动前 / 后，以及被下架的格子。
+    Final review I3: the prize-save audit carries the money-moving fields with before / after, plus archives."""
+    out = router.admin_save_prizes(
+        [P(name="A", kind="pro_days", proDays=7, probPct=50, stock=3), P(name="B", probPct=50)], db_session, admin)
+    a_id, b_id = (p["id"] for p in out["prizes"])
+    first = _audits(db_session)[-1]
+    assert [c["before"] for c in first["changes"]] == [None, None]          # 新建 / created
+    assert first["prizes"][0]["proDays"] == 7 and first["prizes"][0]["stock"] == 3
+
+    router.admin_save_prizes(
+        [P(id=a_id, name="A", kind="pro_days", proDays=30, probPct=50, stock=3, perUserLimit=2,
+           onSoldOut="redistribute"), P(id=b_id, name="B", probPct=50)], db_session, admin)
+    payload = [x for x in _audits(db_session) if x["changes"] and x["changes"][0]["before"] is not None][-1]
+    assert [c["id"] for c in payload["changes"]] == [a_id]                  # B 没动不记 / unchanged B is skipped
+    ch = payload["changes"][0]
+    assert ch["before"]["proDays"] == 7 and ch["after"]["proDays"] == 30
+    assert ch["before"]["perUserLimit"] is None and ch["after"]["perUserLimit"] == 2
+    assert ch["after"]["onSoldOut"] == "redistribute"
+    assert {"imageUrl", "claimMode", "sortOrder", "active"} <= set(ch["after"])
+    assert payload["archived"] == []
+
+    router.admin_save_prizes([P(id=a_id, name="A", kind="pro_days", proDays=30, probPct=100, stock=3, perUserLimit=2,
+                                onSoldOut="redistribute"), P(name="C", probPct=0)], db_session, admin)
+    last = [x for x in _audits(db_session) if x["archived"]][-1]
+    assert [x["id"] for x in last["archived"]] == [b_id]

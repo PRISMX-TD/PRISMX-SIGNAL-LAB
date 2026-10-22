@@ -138,3 +138,92 @@ def test_revoke_only_unused(world):
     db.commit()
     res = router.admin_revoke(LuckyRevokeIn(batchId=out["id"]), db, admin)
     assert res["revoked"] == 2
+
+
+def test_issue_notification_is_one_ws_call_for_the_whole_batch(world, monkeypatch):
+    """最终评审 M1：发一大批券，WS 提醒只提交一次到主循环，不是每人一次。
+    Final review M1: a big batch costs ONE submission to the main loop, not one per user."""
+    from fastapi import BackgroundTasks
+
+    db, admin, _r = world
+    common.set_visible(db, True)
+    db.commit()
+    users = [_user(db, f"w{i}@t.co") for i in range(30)]
+    calls = []
+
+    def fake_run(coro, timeout):
+        calls.append(timeout)
+        coro.close()
+
+    monkeypatch.setattr("app.services.gateway_client.run_on_main_loop", fake_run)
+    router.admin_issue(_body(users, rid="req-ws-0001"), db, admin, background_tasks=BackgroundTasks())
+    assert len(calls) == 1
+
+
+def _push_calls(bt, monkeypatch):
+    got = []
+    monkeypatch.setattr("app.services.push_dispatch.dispatch_users_push",
+                        lambda uids, ev, title, body, url, tag: got.append((list(uids), title, body, url)))
+    for t in bt.tasks:
+        t.func(*t.args, **t.kwargs)
+    return got
+
+
+def test_ticket_copy_for_an_upcoming_round_says_when_it_opens(world, monkeypatch):
+    """最终评审 M4：期还没开始，通知和推送写「X月X日 HH:MM 开启」（UTC+8），不叫人现在就去转。
+    Final review M4: for an upcoming round the copy says when it opens (UTC+8), not "spin now"."""
+    from fastapi import BackgroundTasks
+
+    db, admin, r = world
+    common.set_visible(db, True)
+    r.starts_at = common.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=3, hours=4)
+    r.ends_at = r.starts_at + timedelta(days=5)
+    db.commit()
+    u = _user(db, "u@t.co")
+    bt = BackgroundTasks()
+    router.admin_issue(_body([u]), db, admin, background_tasks=bt)
+    local = r.starts_at + timedelta(hours=8)
+    when = f"{local.month}月{local.day}日 {local:%H:%M}"
+    n = db.query(UserNotification).filter(UserNotification.user_id == u.id).one()
+    assert f"{when}开启" in n.text
+    (uids, _title, body, url), = _push_calls(bt, monkeypatch)
+    assert uids == [u.id] and url == "/lucky" and f"{when}开启" in body and "转一转" in body
+
+
+def test_ticket_copy_for_an_active_round_keeps_the_spin_prompt(world, monkeypatch):
+    from fastapi import BackgroundTasks
+
+    db, admin, _r = world
+    common.set_visible(db, True)
+    db.commit()
+    u = _user(db, "u@t.co")
+    bt = BackgroundTasks()
+    router.admin_issue(_body([u]), db, admin, background_tasks=bt)
+    assert "开启" not in db.query(UserNotification).one().text
+    (_uids, _title, body, _url), = _push_calls(bt, monkeypatch)
+    assert "开启" not in body and "转一转" in body
+
+
+def test_concurrent_same_request_id_returns_the_existing_batch(world, monkeypatch):
+    """最终评审 M6：两个请求同一个 requestId 同时进来，输的那个撞唯一约束 → 回滚并返回已有批次，不是 500。
+    Final review M6: the loser of a same-requestId race hits the unique index and replays the winner."""
+    from app.models import AdminAuditLog
+
+    db, admin, r = world
+    u = _user(db, "u@t.co")
+    real = issue.rounds.current_round
+    state = {"n": 0}
+
+    def racing(db_):
+        state["n"] += 1
+        if state["n"] == 1:      # 在「已确认没有同名批次」之后、自己落库之前，另一个请求抢先写入
+            db_.add(LuckyTicketBatch(round_id=r.id, reason="先到的", created_by=admin.id, user_count=1,
+                                     ticket_count=2, request_id="req-race-01", notified_at=common.utcnow()))
+            db_.flush()
+        return real(db_)
+
+    monkeypatch.setattr(issue.rounds, "current_round", racing)
+    out = router.admin_issue(_body([u], rid="req-race-01"), db, admin, background_tasks=None)
+    assert out["notified"] is True and out["ticketCount"] == 2
+    assert db.query(LuckyTicketBatch).count() == 1 and db.query(LuckyTicket).count() == 0
+    assert db.query(AdminAuditLog).filter(AdminAuditLog.field == "lucky:issue").count() == 0   # 重放不重复审计

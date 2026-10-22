@@ -80,6 +80,17 @@ def admin_out(p: LuckyPrize) -> dict:
             "claimMode": p.claim_mode, "claimHint": p.claim_hint}
 
 
+def audit_view(p: LuckyPrize) -> dict:
+    """操作日志里记的一格：后台能看到的全部字段（天数、库存、每人上限、抽完规则、领取方式、图片、
+    上架状态、顺序……），去掉随抽奖变化的已发出数，免得把「别人抽了一次」记成一次修改。
+    One slot as recorded in the activity log: every field the admin sees (days, stock, per-user
+    limit, sold-out rule, claim mode, image, active, order …) minus the running used-count, so a
+    spin by someone else never shows up as an edit."""
+    out = {**admin_out(p), "sortOrder": p.sort_order, "active": not p.archived}
+    out.pop("stockUsed", None)
+    return out
+
+
 def snapshot(p: LuckyPrize) -> str:
     """抽奖记录里存的奖项快照：之后管理员改了奖项，这条记录仍按当时的样子显示。
     Stored on a draw row so later prize edits don't rewrite history."""
