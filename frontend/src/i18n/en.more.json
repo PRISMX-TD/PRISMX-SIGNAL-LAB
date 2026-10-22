@@ -1149,6 +1149,10 @@
         "form": "Winner fills in claim details",
         "ticket": "Winner opens a support ticket"
       },
+      "color": "Slot colour",
+      "colorAuto": "Auto colour",
+      "colorReset": "Reset to auto",
+      "confirmLeave": "You have unsaved prize edits that will be lost. Leave anyway?",
       "remove": "Remove",
       "addSlot": "+ Add slot",
       "total": "Odds total {{n}}%",
@@ -1156,6 +1160,9 @@
       "savePrizes": "Save prizes",
       "saved": "Saved",
       "err": {
+        "number": "Stock must be a whole number ≥ 0 and the per-user cap a whole number ≥ 1 (leave blank for unlimited)",
+        "prob": "Each slot's odds must be between 0 and 100%",
+        "decimals": "Odds allow at most two decimals",
         "slots": "The wheel needs 2–12 slots",
         "total": "Odds must total exactly 100%",
         "name": "A slot has no name",

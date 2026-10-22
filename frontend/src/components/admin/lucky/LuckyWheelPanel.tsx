@@ -19,6 +19,7 @@ export default function LuckyWheelPanel() {
   const [batches, setBatches] = useState<LuckyBatch[]>([])
   const [pending, setPending] = useState(0)
   const [err, setErr] = useState('')
+  const [dirty, setDirty] = useState(false)
   const reload = () => {
     const fail = (e: unknown) => setErr(e instanceof Error ? localizeApiError(e.message) : t('common.error'))
     void adminApi.luckyConfig().then(setCfg).catch(fail)
@@ -42,10 +43,16 @@ export default function LuckyWheelPanel() {
       <div className="seg-tabs w-full sm:w-fit" role="tablist">
         {(['settings', 'issue', 'draws', 'pending'] as Tab[]).map((k) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''}
-            onClick={() => setTab(k)}>{t(`admin.lucky.tab.${k}`)}</button>
+            onClick={() => {
+              // 设置页有未保存的奖项改动时，离开前确认（切走会卸载设置页，改动就丢了）。
+              // Unsaved prize edits are lost when the settings tab unmounts, so confirm first.
+              if (k === tab) return
+              if (tab === 'settings' && dirty && !window.confirm(t('admin.lucky.confirmLeave'))) return
+              setTab(k)
+            }}>{t(`admin.lucky.tab.${k}`)}</button>
         ))}
       </div>
-      {tab === 'settings' && cfg && <LuckySettingsTab cfg={cfg} onChange={(c) => { setCfg(c); reload() }} />}
+      {tab === 'settings' && cfg && <LuckySettingsTab cfg={cfg} onDirty={setDirty} onChange={(c) => { setCfg(c); reload() }} />}
       {tab === 'issue' && <LuckyIssueTab cfg={cfg} batches={batches} onIssued={reload} />}
       {tab === 'draws' && <LuckyDrawsTab mode="all" onChange={reload} />}
       {tab === 'pending' && <LuckyDrawsTab mode="pending" onChange={reload} />}

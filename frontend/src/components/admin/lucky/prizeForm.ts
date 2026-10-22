@@ -24,9 +24,21 @@ export const fromAdmin = (p: LuckyPrizeAdmin): PrizeRow => ({
   onSoldOut: p.onSoldOut, claimMode: p.claimMode ?? '', claimHint: p.claimHint ?? '', stockUsed: p.stockUsed,
 })
 
-const num = (s: string) => (s.trim() === '' ? null : Number(s))
+const blank = (s: string) => s.trim() === ''
+// 空白（含只有空格）= 不限；否则必须是合法数字，这里不再把 NaN 悄悄变成 null。
+// Blank (incl. whitespace-only) = unlimited; anything else must be a real number, so NaN can never
+// quietly turn into null (= unlimited) on save.
+const num = (s: string) => (blank(s) ? null : Number(s))
 const bp = (s: string) => Math.round((Number(s) || 0) * 100)
 export const totalPct = (rows: PrizeRow[]) => rows.reduce((a, r) => a + bp(r.probPct), 0) / 100
+
+// 与 components/lucky/LuckyWheel.tsx 的 PALETTE 保持一致：格子没存颜色时转盘按序号取这里的色。
+// Keep in sync with PALETTE in components/lucky/LuckyWheel.tsx: a slot with no saved colour is
+// painted with this palette entry by index.
+const WHEEL_PALETTE = ['#7c5cff', '#2dd4bf', '#f59e0b', '#ef4444', '#3b82f6', '#22c55e', '#ec4899', '#a855f7']
+export const autoColor = (i: number) => WHEEL_PALETTE[i % WHEEL_PALETTE.length]
+
+const isInt = (s: string, min: number) => /^\d+$/.test(s.trim()) && Number(s) >= min
 
 export function problems(rows: PrizeRow[]): string[] {
   const out = new Set<string>()
@@ -34,12 +46,17 @@ export function problems(rows: PrizeRow[]): string[] {
   if (rows.reduce((a, r) => a + bp(r.probPct), 0) !== 10000) out.add('admin.lucky.err.total')
   for (const r of rows) {
     if (!r.name.trim()) out.add('admin.lucky.err.name')
-    if (r.kind === 'pro_days' && !(Number(r.proDays) >= 1 && Number(r.proDays) <= 3650)) out.add('admin.lucky.err.days')
+    const p = blank(r.probPct) ? 0 : Number(r.probPct)
+    if (!Number.isFinite(p) || p < 0 || p > 100) out.add('admin.lucky.err.prob')
+    else if (Math.abs(p * 100 - Math.round(p * 100)) > 1e-6) out.add('admin.lucky.err.decimals')
+    if (r.kind === 'pro_days' && !(Number.isInteger(Number(r.proDays)) && Number(r.proDays) >= 1 && Number(r.proDays) <= 3650)) out.add('admin.lucky.err.days')
     if (r.kind === 'custom' && !r.claimMode) out.add('admin.lucky.err.claimMode')
-    if (r.kind === 'none' && (r.stock !== '' || r.perUserLimit !== '')) out.add('admin.lucky.err.noneLimited')
-    if (r.stock !== '' && Number(r.stock) < r.stockUsed) out.add('admin.lucky.err.stockBelowUsed')
+    if (r.kind === 'none' && (!blank(r.stock) || !blank(r.perUserLimit))) out.add('admin.lucky.err.noneLimited')
+    if (!blank(r.stock) && !isInt(r.stock, 0)) out.add('admin.lucky.err.number')
+    else if (!blank(r.stock) && Number(r.stock) < r.stockUsed) out.add('admin.lucky.err.stockBelowUsed')
+    if (!blank(r.perUserLimit) && !isInt(r.perUserLimit, 1)) out.add('admin.lucky.err.number')
   }
-  const needsFallback = rows.some((r) => (r.stock !== '' || r.perUserLimit !== '') && r.onSoldOut === 'to_fallback')
+  const needsFallback = rows.some((r) => (!blank(r.stock) || !blank(r.perUserLimit)) && r.onSoldOut === 'to_fallback')
   if (needsFallback && !rows.some((r) => r.kind === 'none')) out.add('admin.lucky.err.fallback')
   return [...out]
 }
