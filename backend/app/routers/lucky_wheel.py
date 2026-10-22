@@ -128,6 +128,13 @@ def user_state(db: Session = Depends(get_db), user: User = Depends(get_current_u
                 .group_by(LuckyTicketBatch.id, LuckyTicketBatch.reason, LuckyTicketBatch.created_at)
                 .order_by(LuckyTicketBatch.created_at.desc()).all())
         batches = [{"reason": reason, "issuedAt": at, "count": n} for reason, at, n in rows]
+        # 没有批次的券（「再来一次」补发）单独补一行，否则各批数量加起来会小于 unused
+        # Tickets with no batch (retry refunds) get their own row, else the counts sum below `unused`
+        extra_n, extra_at = (db.query(func.count(LuckyTicket.id), func.max(LuckyTicket.issued_at))
+                             .filter(LuckyTicket.user_id == user.id, LuckyTicket.round_id == r.id,
+                                     LuckyTicket.batch_id.is_(None)).one())
+        if extra_n:
+            batches.append({"reason": None, "issuedAt": extra_at, "count": extra_n})
     return {
         "visible": True,
         "round": rounds.round_out(r, now),

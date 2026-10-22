@@ -118,6 +118,20 @@ def _next_ticket(db: Session, user: User, round_id: str) -> LuckyTicket | None:
 
 
 def _spin_once(db, user, r, request_id, now, rand_below) -> LuckyDraw:
+    # 先锁并重读用户行（锁序：用户 → 券 → 奖项）。user 是鉴权时读的，可能已过期：同一人两个并发
+    # 抽中 PRO 天数，若各自拿旧的 plan_expires_at 去加，后写的会覆盖先写的；管理员刚设的永久 PRO
+    # 也会被旧值冲掉。锁住之后，并发的第二个请求在这里排队，读到的是第一个提交后的到期日。
+    # 同一把锁之后再查一次 request_id：赛跑输掉的重放拿到的是已有记录，而不是 409「没券」。
+    # Lock and reload the user row first (lock order: user -> ticket -> prizes). `user` was read at
+    # auth time and may be stale: two concurrent pro_days wins would each add to the old expiry and
+    # the later write would clobber the earlier; an admin's fresh permanent-PRO grant could be undone
+    # too. Under the lock the second request queues here and sees the first one's committed expiry.
+    # The request_id is re-checked under the same lock so a replay that lost the race gets the
+    # existing draw, not a "no tickets" 409.
+    user = (db.query(User).filter(User.id == user.id).with_for_update().populate_existing().one())
+    prior = db.query(LuckyDraw).filter(LuckyDraw.user_id == user.id, LuckyDraw.request_id == request_id).first()
+    if prior is not None:
+        return prior
     ticket = _next_ticket(db, user, r.id)
     if ticket is None:
         raise SpinError(409, "没有可用的抽奖券 / No tickets left")
