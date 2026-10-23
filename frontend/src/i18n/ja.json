@@ -23,7 +23,9 @@
     "lucky_ticket": "抽選チケットを獲得しました",
     "lucky_ticket_expiring": "抽選チケットの有効期限が近づいています",
     "lucky_prize_delivered": "賞品を発送しました",
-    "lucky_prize_cancelled": "賞品はキャンセルされました"
+    "lucky_prize_cancelled": "賞品はキャンセルされました",
+    "agent_tree_change": "代理店が下位代理店を変更しました",
+    "agent_promoted": "代理店になりました。代理店ページを開いてください"
   },
   "nav": {
     "dashboard": "ダッシュボード",

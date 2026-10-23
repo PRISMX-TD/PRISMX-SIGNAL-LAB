@@ -23,7 +23,9 @@
     "lucky_ticket": "คุณได้รับตั๋วหมุนวงล้อ",
     "lucky_ticket_expiring": "ตั๋วหมุนวงล้อใกล้หมดอายุ",
     "lucky_prize_delivered": "ส่งรางวัลแล้ว",
-    "lucky_prize_cancelled": "รางวัลถูกยกเลิก"
+    "lucky_prize_cancelled": "รางวัลถูกยกเลิก",
+    "agent_tree_change": "เอเจนต์เปลี่ยนแปลงเอเจนต์ใต้สาย",
+    "agent_promoted": "คุณเป็นเอเจนต์แล้ว เปิดหน้าเอเจนต์ได้เลย"
   },
   "nav": {
     "dashboard": "แดชบอร์ด",

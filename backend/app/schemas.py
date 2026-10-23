@@ -2013,6 +2013,8 @@ class InviteLinkAgentOut(BaseModel):
     email: str
     nickname: str | None = None
     assignedAt: datetime | None = None
+    # 代理层级（rev 47）：他是第几级。/ The agent's level in the hierarchy (rev 47).
+    level: int | None = None
 
 
 class InviteLinkAssignAgent(BaseModel):
@@ -2202,6 +2204,94 @@ class AgentPlanUpdate(BaseModel):
     # Hard cap of 60 days per call (product decision). A year takes six clicks;
     # the friction is the point — it stops a single click reaching year 2099.
     days: int | None = Field(default=None, ge=1, le=60)
+
+
+# ---------- 代理层级（rev 47）/ agent hierarchy ----------
+
+
+class AgentTeamNodeOut(BaseModel):
+    """代理页「团队」里的一个代理（含自己那一行）。用邮箱当标识，理由同 AgentPlanUpdate：
+    名单本来就给完整邮箱，user id 从不下发给代理。自己那一行的 parentEmail 恒为 null——
+    下级看不到上级，这是硬规则，不是前端藏起来。
+    数字：direct* 只算他自己链接带来的人，teamCustomers 再加上他整棵子树的。
+    One agent in the "Team" view, the caller's own row included. Identified by
+    email (user ids never reach agents). The caller's own parentEmail is always
+    null: looking upwards is not possible by construction. direct* counts only
+    their own links; teamCustomers adds their whole subtree."""
+    email: str
+    nickname: str | None = None
+    level: int
+    parentEmail: str | None = None
+    isSelf: bool = False
+    directCustomers: int = 0
+    teamCustomers: int = 0
+    activeUsers7d: int = 0
+    mt5Users: int = 0
+    createdAt: datetime | None = None
+
+
+class AgentTeamOut(BaseModel):
+    """GET /agent/team：我是第几级、能不能改、最大层级、我这棵树（宽度优先，自己在最前）。
+    level 为 null = 不是代理（nodes 为空）。
+    The caller's level, whether they may write, the max depth, and their tree
+    (breadth-first, self first). level null = not an agent."""
+    level: int | None = None
+    canManage: bool = False
+    maxDepth: int
+    nodes: list[AgentTeamNodeOut] = []
+
+
+class AgentTreeUserOut(AgentLinkUserOut):
+    """「全部客户」里的一行：AgentLinkUserOut 的全部字段，加上他来自哪个代理（via*），
+    以及他自己是不是代理（agentLevel，不是为 null）。
+    One row of "All customers": every AgentLinkUserOut field plus the agent they
+    came through (via*) and their own level if they are an agent."""
+    viaEmail: str | None = None
+    viaNickname: str | None = None
+    agentLevel: int | None = None
+
+
+class AgentTreeUsersOut(BaseModel):
+    users: list[AgentTreeUserOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class AgentTreeTarget(BaseModel):
+    """升 / 撤代理的目标，按邮箱定位（同 AgentPlanUpdate）。/ Target by email."""
+    email: EmailStr
+
+
+class AdminAgentTreeLinkOut(BaseModel):
+    id: str
+    code: str
+    label: str
+    isActive: bool
+
+
+class AdminAgentTreeNodeOut(BaseModel):
+    """管理后台「代理层级」里的一个代理。管理员看得到 user id，与用户管理一致。
+    One agent in the admin tree view; admins see user ids, as elsewhere."""
+    userId: str
+    email: str
+    nickname: str | None = None
+    level: int
+    parentUserId: str | None = None
+    links: list[AdminAgentTreeLinkOut] = []
+    directCustomers: int = 0
+    teamCustomers: int = 0
+    createdAt: datetime | None = None
+
+
+class AdminAgentTreeOut(BaseModel):
+    maxDepth: int
+    nodes: list[AdminAgentTreeNodeOut]
+
+
+class AdminAgentSettingsUpdate(BaseModel):
+    # 上限 20 与 settings_store.AGENT_MAX_DEPTH_LIMIT 一致。/ Matches AGENT_MAX_DEPTH_LIMIT.
+    maxDepth: int = Field(ge=1, le=20)
 
 
 # ---------- 管理后台群发邮件 / admin email broadcast ----------

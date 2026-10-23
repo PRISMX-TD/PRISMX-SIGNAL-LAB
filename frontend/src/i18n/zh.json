@@ -23,7 +23,9 @@
     "lucky_ticket": "获得抽奖券",
     "lucky_ticket_expiring": "抽奖券即将作废",
     "lucky_prize_delivered": "奖品已发放",
-    "lucky_prize_cancelled": "奖品已取消"
+    "lucky_prize_cancelled": "奖品已取消",
+    "agent_tree_change": "代理调整了下级代理",
+    "agent_promoted": "你已成为代理，点击查看代理页面"
   },
   "nav": {
     "dashboard": "仪表盘",

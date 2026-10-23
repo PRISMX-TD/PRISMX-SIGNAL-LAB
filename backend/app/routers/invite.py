@@ -34,6 +34,7 @@ from app.core.rate_limit import limiter
 from app.routers.admin import _like_escape
 from app.models import (
     AdminAuditLog,
+    AgentNode,
     Competition,
     CompetitionParticipant,
     InviteLink,
@@ -44,6 +45,10 @@ from app.models import (
     User,
 )
 from app.schemas import (
+    AdminAgentSettingsUpdate,
+    AdminAgentTreeLinkOut,
+    AdminAgentTreeNodeOut,
+    AdminAgentTreeOut,
     AgentLinkOut,
     AgentLinkUserOut,
     AgentLinkUsersOut,
@@ -51,6 +56,11 @@ from app.schemas import (
     AgentOpenAccountUrlUpdate,
     AgentOverviewOut,
     AgentPlanUpdate,
+    AgentTeamNodeOut,
+    AgentTeamOut,
+    AgentTreeTarget,
+    AgentTreeUserOut,
+    AgentTreeUsersOut,
     OverviewRangeOut,
     InviteClickRequest,
     InviteLinkAgentOut,
@@ -66,6 +76,14 @@ from app.services.admin_overview import activity_daily, headline
 # Both predicates live in services: account.py needs the first, admin.py the
 # second, and importing across routers would tie them together (see their docs).
 from app.services.agents import is_agent
+from app.services.agent_tree import (
+    descendants,
+    ensure_top_node,
+    links_by_code,
+    node_of,
+    owner_of_code,
+    remove_node,
+)
 from app.services.audit import log_change as _log_change
 from app.services.email_domains import alias_trial_used
 from app.services.deps import get_current_user, require_admin
@@ -74,6 +92,8 @@ from app.services.gateway_binding import is_revoked, not_removed
 from app.services.open_account import MSG_COMP_LINK_OPEN_URL, normalize_agent_open_url
 from app.services.notification_feed import (
     KIND_AGENT_PLAN_CHANGE,
+    KIND_AGENT_PROMOTED,
+    KIND_AGENT_TREE_CHANGE,
     create_notification,
     notify_ws,
 )
@@ -83,6 +103,11 @@ from app.services.pagination import (
     resolve_range_or_422 as _resolve_range_or_422,
 )
 from app.services.plans import PLAN_DAYS, trial_grant_days
+from app.services.settings_store import (
+    get_agent_settings,
+    invalidate_agent_cache,
+    save_agent_settings,
+)
 from app.services.stats_time import RangeSpec
 from app.services.stats_time import day_start_utc
 from app.services.stats_time import today as stats_today
@@ -503,9 +528,17 @@ def _agents_by_link(db: Session, link_ids: list[str]) -> dict[str, list[InviteLi
         .order_by(InviteLinkAgent.created_at)
         .all()
     )
+    levels = dict(
+        db.query(AgentNode.user_id, AgentNode.depth)
+        .filter(AgentNode.user_id.in_({a.user_id for a, _e, _n in rows}))
+        .all()
+    ) if rows else {}
     for a, email, nickname in rows:
         out.setdefault(a.link_id, []).append(
-            InviteLinkAgentOut(userId=a.user_id, email=email, nickname=nickname, assignedAt=a.created_at)
+            InviteLinkAgentOut(
+                userId=a.user_id, email=email, nickname=nickname, assignedAt=a.created_at,
+                level=levels.get(a.user_id),
+            )
         )
     return out
 
@@ -715,14 +748,58 @@ def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> In
         raise HTTPException(
             status_code=409, detail="该用户已是此链接的代理 / User is already an agent of this link"
         )
+    # rev 47：一条链接只属于一个代理（理由见 InviteLinkAgent 模型注释）。
+    # rev 47: one agent per link (see the InviteLinkAgent model).
+    taken = db.query(InviteLinkAgent.id).filter(InviteLinkAgent.link_id == link.id).first()
+    if taken is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="这条链接已有代理，一条链接只能有一个代理 / This link already has an agent; a link can have only one",
+        )
     row = InviteLinkAgent(link_id=link.id, user_id=target.id, assigned_by=admin.id)
     db.add(row)
+    # 管理员指派 = 任命一级代理；他已经在树上（比如本来就是某人的下级）就不动层级。
+    # An admin assignment appoints a top-level agent; an existing node keeps its level.
+    ensure_top_node(db, target.id, admin.id)
     _log_change(db, admin.id, target.id, f"invite:{link.code}:agent", None, "assigned")
     db.commit()
     return row
 
 
+_MSG_HAS_CHILDREN = (
+    "该代理下面还有下级代理，请先撤销或处理下级代理 / "
+    "This agent still has sub-agents; remove or reassign them first"
+)
+
+
+def _other_link_count(db: Session, user_id: str, link_id: str) -> int:
+    """这个代理除了 link_id 之外还持有几条未删除的链接。/ Other non-deleted links they hold."""
+    return (
+        db.query(InviteLinkAgent.id)
+        .join(InviteLink, InviteLink.id == InviteLinkAgent.link_id)
+        .filter(
+            InviteLinkAgent.user_id == user_id,
+            InviteLinkAgent.link_id != link_id,
+            InviteLink.deleted_at.is_(None),
+        )
+        .count()
+    )
+
+
+def _has_children(db: Session, user_id: str) -> bool:
+    return db.query(AgentNode.id).filter(AgentNode.parent_user_id == user_id).first() is not None
+
+
 def unassign_agent(db: Session, admin: User, link: InviteLink, user_id: str) -> None:
+    """取消指派。这是他最后一条链接时，等于撤掉他的代理身份，按层级规则处理（rev 47）：
+    - 一级代理下面还有下级 → 409，先处理下级（产品决定：否则二级会突然变成一级、拿到修改权）；
+    - 下级代理 → 与一级代理在代理页撤他同一套（services/agent_tree.remove_node）：链接停用
+      并转给他的上级，客户仍在上级的树上，下级整体上移一级；
+    - 一级代理且没有下级 → 删指派行与节点，与原来一样。
+    Unassign. When it is their last link this removes them as an agent: a
+    top-level agent with sub-agents is refused (409); a sub-agent goes through
+    remove_node (link disabled and handed to the parent); otherwise the row and
+    node are simply deleted."""
     row = (
         db.query(InviteLinkAgent)
         .filter(InviteLinkAgent.link_id == link.id, InviteLinkAgent.user_id == user_id)
@@ -730,7 +807,22 @@ def unassign_agent(db: Session, admin: User, link: InviteLink, user_id: str) -> 
     )
     if row is None:
         raise HTTPException(status_code=404, detail="指派不存在 / Assignment not found")
+    node = node_of(db, user_id)
+    last = _other_link_count(db, user_id, link.id) == 0
+    if last and node is not None and node.parent_user_id is None and _has_children(db, user_id):
+        raise HTTPException(status_code=409, detail=_MSG_HAS_CHILDREN)
+    if last and node is not None and node.parent_user_id is not None:
+        parent_id = node.parent_user_id
+        old = _audit_value(link)
+        remove_node(db, node)
+        _log_change(db, admin.id, user_id, f"invite:{link.code}:agent", "assigned", None)
+        _log_change(db, admin.id, parent_id, f"invite:{link.code}:agent", None, "assigned")
+        _log_change(db, admin.id, admin.id, f"invite:{link.code}", old, _audit_value(link))
+        db.commit()
+        return
     db.delete(row)
+    if last and node is not None:
+        db.delete(node)
     _log_change(db, admin.id, user_id, f"invite:{link.code}:agent", "assigned", None)
     db.commit()
 
@@ -994,7 +1086,9 @@ def _has_live_paid_plan(db: Session, target_id: str, now: datetime) -> bool:
     return False
 
 
-def _notify_admins_agent_write(db: Session, agent: User, target: User, summary: str) -> list[str]:
+def _notify_admins_agent_write(
+    db: Session, agent: User, target: User, summary: str, kind: str = KIND_AGENT_PLAN_CHANGE
+) -> list[str]:
     """代理动了别人的会员，给每位管理员留一条站内通知，返回收到的管理员 id。
 
     为什么必须有：代理页是 /agent/* 下唯一的写端点，改的是**别人的**付费权益，
@@ -1021,7 +1115,7 @@ def _notify_admins_agent_write(db: Session, agent: User, target: User, summary: 
         create_notification(
             db,
             admin_id,
-            KIND_AGENT_PLAN_CHANGE,
+            kind,
             text=summary,
             # 邮箱进 URL 必须编码：本地部分可以合法地带 "+"、"&"、"#"，原样拼进去会把查询串截断
             # 或改写（"+" 被读成空格）。/ Encode: a local part may legally hold "+", "&"
@@ -1062,9 +1156,19 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     downgrading it would have an agent overrule an admin. Every changed field
     gets its own prefixed audit row, and every write notifies the admins.
     """
+    _require_top(db, agent)
     link = _owned_link(db, agent, link_id)
     target = _agent_target(db, link, body.email, agent)
+    return _apply_agent_plan(db, agent, target, link.code, body)
 
+
+def _apply_agent_plan(
+    db: Session, agent: User, target: User, code: str, body: AgentPlanUpdate
+) -> AgentLinkUserOut:
+    """agent_set_plan 的执行部分：目标已经校验过（是这个代理树上的人、不是管理员、不是自己）。
+    code 是目标归属的链接码，进审计字段前缀。按链接改（旧端点）与按整棵树改（rev 47）共用。
+    The shared execution half once the target is vetted; `code` is the target's
+    link code for the audit prefix. Used by the per-link and the tree endpoint."""
     if target.plan == "PRO" and target.plan_expires_at is None:
         raise HTTPException(
             status_code=409,
@@ -1122,9 +1226,9 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     # Like an admin's, a manual change is authoritative and clears the trial flag.
     target.plan_is_trial = False
 
-    _log_change(db, agent.id, target.id, f"agent:{link.code}:plan", old_plan, target.plan)
+    _log_change(db, agent.id, target.id, f"agent:{code}:plan", old_plan, target.plan)
     _log_change(
-        db, agent.id, target.id, f"agent:{link.code}:plan_expires_at", old_expiry, target.plan_expires_at
+        db, agent.id, target.id, f"agent:{code}:plan_expires_at", old_expiry, target.plan_expires_at
     )
     if granted_days:
         # 配额账本那一行（见 _AGENT_EXTEND_AUDIT_SUFFIX）。old_value 用 0 而不是
@@ -1137,7 +1241,7 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
             db,
             agent.id,
             target.id,
-            f"agent:{link.code}{_AGENT_EXTEND_AUDIT_SUFFIX}",
+            f"agent:{code}{_AGENT_EXTEND_AUDIT_SUFFIX}",
             0,
             granted_days,
         )
@@ -1166,6 +1270,332 @@ def _agent_user_out(db: Session, u: User) -> AgentLinkUserOut:
         planExpiresAt=u.plan_expires_at,
         lastActiveDay=_last_active_days(db, [u.id]).get(u.id),
         mt5Accounts=_mt5_accounts(db, [u.id]).get(u.id, []),
+    )
+
+
+# ---------- 代理层级（rev 47）/ agent hierarchy ----------
+#
+# 规则见 AgentNode 模型注释。几条贯穿下面所有端点的约定：
+# - 范围 = 自己 + 全部下级（services/agent_tree.descendants）持有的链接带来的人；不在范围内的
+#   人与不存在的人同一个 404，不给「这个人存在但不归你」的信号；
+# - 写操作只有一级代理能做（_require_top，403）；
+# - 目标一律按邮箱定位，user id 不下发给代理（同 AgentPlanUpdate）。
+# Rules are in the AgentNode docstring. Scope = the caller's own and every
+# descendant's links; out-of-scope and unknown are the same 404; writes are
+# top-level only (403); targets are addressed by email, never by user id.
+
+_MSG_TOP_ONLY = "只有一级代理可以操作 / Only top-level agents can do this"
+
+
+def _caller_level(db: Session, user: User) -> int | None:
+    """调用者是第几级代理；不是代理返回 None。持有链接却还没有节点的（rev 47 迁移补节点之前的
+    过渡态）按一级看待——rev 47 之前的代理全是管理员任命的。
+    The caller's level, or None for non-agents. A link holder without a node (the
+    window before the rev 47 backfill) counts as top level, which they all were."""
+    node = node_of(db, user.id)
+    if node is not None:
+        return node.depth or 1
+    return 1 if is_agent(db, user.id) else None
+
+
+def _require_top(db: Session, user: User) -> None:
+    if _caller_level(db, user) != 1:
+        raise HTTPException(status_code=403, detail=_MSG_TOP_ONLY)
+
+
+def _scope(db: Session, user: User) -> tuple[list[AgentNode], dict[str, tuple[str, InviteLink]]]:
+    """(全部下级节点, 自己与下级持有的链接 {code: (主人, 链接)})。
+    (every descendant node, the links held by the caller and descendants)."""
+    nodes = descendants(db, user.id)
+    return nodes, links_by_code(db, [user.id] + [n.user_id for n in nodes])
+
+
+def _tree_target(db: Session, codes: dict, email: str, agent: User) -> User:
+    """按邮箱在范围内找人，规则同 _agent_target：不在范围 / 不存在 / 管理员都是 404，自己 403。
+    Resolve an in-scope user by email; same rules as _agent_target."""
+    target = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
+    if target is None or target.role == "admin" or target.invite_code not in codes:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    if target.id == agent.id:
+        raise HTTPException(
+            status_code=403,
+            detail="不能修改自己的会员 / You cannot change your own plan",
+        )
+    return target
+
+
+def _tree_user_outs(db: Session, rows: list[User], codes: dict) -> list[AgentTreeUserOut]:
+    """一批客户行：活跃日、MT5、来自哪个代理、自己是不是代理，各一条批量查询。
+    A batch of customer rows; one batched query per extra column."""
+    ids = [u.id for u in rows]
+    last_active = _last_active_days(db, ids)
+    accounts = _mt5_accounts(db, ids)
+    levels = (
+        dict(db.query(AgentNode.user_id, AgentNode.depth).filter(AgentNode.user_id.in_(ids)).all())
+        if ids
+        else {}
+    )
+    owner_ids = list({codes[u.invite_code][0] for u in rows if u.invite_code in codes})
+    owners = (
+        {o.id: o for o in db.query(User).filter(User.id.in_(owner_ids)).all()} if owner_ids else {}
+    )
+    out = []
+    for u in rows:
+        owner = owners.get(codes[u.invite_code][0]) if u.invite_code in codes else None
+        out.append(
+            AgentTreeUserOut(
+                nickname=u.nickname,
+                email=u.email,
+                plan=u.plan,
+                createdAt=u.created_at,
+                planExpiresAt=u.plan_expires_at,
+                lastActiveDay=last_active.get(u.id),
+                mt5Accounts=accounts.get(u.id, []),
+                viaEmail=owner.email if owner else None,
+                viaNickname=owner.nickname if owner else None,
+                agentLevel=levels.get(u.id),
+            )
+        )
+    return out
+
+
+def agent_team(db: Session, user: User) -> AgentTeamOut:
+    """我的团队：自己 + 全部下级，每人带直属客户数、整棵子树客户数、近 7 日活跃、已连 MT5。
+    数字与「我的链接」卡片同一批函数算（_registrations / _active_users / _mt5_users），
+    只是按链接主人汇总。自己那一行不带上级——下级看不到上级。
+    The caller's team: self plus every descendant, with direct and subtree
+    customer counts, 7-day actives and MT5 head count, computed by the same
+    functions as the link cards and summed per owner. The caller's own row
+    carries no parent: looking upwards is not possible."""
+    max_depth = get_agent_settings(db)["agent_max_depth"]
+    level = _caller_level(db, user)
+    if level is None:
+        return AgentTeamOut(level=None, canManage=False, maxDepth=max_depth, nodes=[])
+    nodes, codes = _scope(db, user)
+    code_list = list(codes)
+    regs = _registrations(db, code_list)
+    active = _active_users(db, code_list)
+    mt5 = _mt5_users(db, code_list)
+    direct: dict[str, int] = {}
+    act: dict[str, int] = {}
+    m5: dict[str, int] = {}
+    for code, (owner, _link) in codes.items():
+        direct[owner] = direct.get(owner, 0) + regs.get(code, 0)
+        act[owner] = act.get(owner, 0) + active.get(code, 0)
+        m5[owner] = m5.get(owner, 0) + mt5.get(code, 0)
+    # 宽度优先倒过来走 = 先子后父，每个节点加到父节点上时自己的子树已经算完。
+    # Reversed breadth-first visits children before parents, so each subtree total
+    # is final by the time it is added to its parent.
+    team = dict(direct)
+    for n in reversed(nodes):
+        team[n.parent_user_id] = team.get(n.parent_user_id, 0) + team.get(n.user_id, 0)
+    ids = [user.id] + [n.user_id for n in nodes]
+    people = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()}
+    me = node_of(db, user.id)
+
+    def row(uid: str, lvl: int, parent: str | None, created) -> AgentTeamNodeOut:
+        u = people.get(uid)
+        p = people.get(parent) if parent else None
+        return AgentTeamNodeOut(
+            email=u.email if u else "",
+            nickname=u.nickname if u else None,
+            level=lvl,
+            parentEmail=p.email if p else None,
+            isSelf=uid == user.id,
+            directCustomers=direct.get(uid, 0),
+            teamCustomers=team.get(uid, 0),
+            activeUsers7d=act.get(uid, 0),
+            mt5Users=m5.get(uid, 0),
+            createdAt=created,
+        )
+
+    out = [row(user.id, level, None, me.created_at if me else None)]
+    out += [row(n.user_id, n.depth or 1, n.parent_user_id, n.created_at) for n in nodes]
+    return AgentTeamOut(level=level, canManage=level == 1, maxDepth=max_depth, nodes=out)
+
+
+def agent_tree_users(
+    db: Session,
+    user: User,
+    limit: int = PAGE_SIZE_DEFAULT,
+    offset: int = 0,
+    q: str | None = None,
+    under: str | None = None,
+) -> AgentTreeUsersOut:
+    """整棵子树的客户名单（行的口径与 agent_link_users 相同）。under 给了邮箱就只看那个代理
+    自己链接带来的人（他得在范围内，否则 404）。
+    The whole subtree's customers, same row semantics as agent_link_users.
+    `under` (an agent's email) narrows to that agent's own links; 404 if out of scope."""
+    nodes, codes = _scope(db, user)
+    code_list = list(codes)
+    if under:
+        owner_ids = [user.id] + [n.user_id for n in nodes]
+        owner = (
+            db.query(User.id)
+            .filter(func.lower(User.email) == under.strip().lower(), User.id.in_(owner_ids))
+            .first()
+        )
+        if owner is None:
+            raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+        code_list = [c for c, (o, _l) in codes.items() if o == owner[0]]
+    if not code_list:
+        return AgentTreeUsersOut(users=[], total=0, limit=limit, offset=offset)
+    query = db.query(User).filter(User.invite_code.in_(code_list))
+    q = (q or "").strip()
+    if q:
+        # 搜索口径同 agent_link_users：只搜昵称与邮箱，通配符转义。
+        # Same search as agent_link_users: nickname and email only, wildcards escaped.
+        like = f"%{_like_escape(q)}%"
+        query = query.filter(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
+    total = query.count()
+    rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+    return AgentTreeUsersOut(users=_tree_user_outs(db, rows, codes), total=total, limit=limit, offset=offset)
+
+
+def agent_tree_set_plan(db: Session, agent: User, body: AgentPlanUpdate) -> AgentTreeUserOut:
+    """一级代理给整棵树里的人改会员。边界、配额、审计、通知全部与按链接改的那条路相同
+    （_apply_agent_plan），只是「是不是你的人」换成按整棵树判。
+    A top-level agent changes the plan of anyone in their tree; every guard is
+    shared with the per-link path, only the scope check is tree-wide."""
+    _require_top(db, agent)
+    _nodes, codes = _scope(db, agent)
+    target = _tree_target(db, codes, body.email, agent)
+    _apply_agent_plan(db, agent, target, target.invite_code, body)
+    return _tree_user_outs(db, [target], codes)[0]
+
+
+def _promoted_label(target: User) -> str:
+    """自动生成的链接的标记名：昵称，没有就用邮箱 @ 前面那段。管理后台的链接列表靠它认人。
+    Label for an auto-created link: the nickname, else the email's local part."""
+    name = (target.nickname or "").strip() or target.email.split("@", 1)[0]
+    return name[:40]
+
+
+def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
+    """一级代理把自己树里的一个普通用户升为代理（rev 47）。
+
+    新代理的上级是他注册所用链接的主人（不一定是 actor 本人），层级 = 上级层级 + 1，不得超过
+    agent_max_depth。系统给他生成一条专属链接：送不送试用跟他注册时那条链接一致，开户网址留空
+    由他自己填。审计照管理员指派的写法（invite:{code} 建链接 + invite:{code}:agent 指派），
+    被升的人收到一条站内通知，管理员各收到一条。
+
+    A top-level agent promotes an ordinary user in their tree. The new parent is
+    the owner of the link the user signed up through, level = parent + 1, capped
+    by agent_max_depth. A fresh link is created (trial setting copied from that
+    signup link, open-account URL left for the new agent); audited like an admin
+    assignment; the user and every admin get an in-app notification.
+    """
+    _require_top(db, actor)
+    _nodes, codes = _scope(db, actor)
+    target = _tree_target(db, codes, email, actor)
+    if node_of(db, target.id) is not None or is_agent(db, target.id):
+        raise HTTPException(status_code=409, detail="该用户已经是代理 / This user is already an agent")
+    parent_id, parent_link = codes[target.invite_code]
+    parent_node = node_of(db, parent_id)
+    depth = (parent_node.depth if parent_node is not None else 1) + 1
+    max_depth = get_agent_settings(db)["agent_max_depth"]
+    if depth > max_depth:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"已达到最大层级（{max_depth} 级），不能再往下升代理 / "
+                f"The maximum depth ({max_depth} levels) is reached"
+            ),
+        )
+    link = InviteLink(
+        code=new_unique_code(db),
+        label=_promoted_label(target),
+        is_active=True,
+        grants_trial=bool(parent_link.grants_trial),
+        competition_id=None,
+        channel=None,
+    )
+    db.add(link)
+    db.flush()
+    db.add(InviteLinkAgent(link_id=link.id, user_id=target.id, assigned_by=actor.id))
+    db.add(AgentNode(user_id=target.id, parent_user_id=parent_id, depth=depth, created_by=actor.id))
+    _log_change(db, actor.id, actor.id, f"invite:{link.code}", None, _audit_value(link))
+    _log_change(db, actor.id, target.id, f"invite:{link.code}:agent", None, "assigned")
+    create_notification(db, target.id, KIND_AGENT_PROMOTED, link="/agent")
+    admin_ids = _notify_admins_agent_write(
+        db, actor, target, f"{actor.email} → {target.email}: L{depth} agent", KIND_AGENT_TREE_CHANGE
+    )
+    db.commit()
+    db.refresh(target)
+    notify_ws(target.id)
+    for admin_id in admin_ids:
+        notify_ws(admin_id)
+    return _tree_user_outs(db, [target], codes)[0]
+
+
+def agent_demote(db: Session, actor: User, email: str) -> AgentTeamOut:
+    """一级代理撤销自己树里的一个代理（rev 47）。机制见 services/agent_tree.remove_node：他的
+    链接停用并转给他的上级（客户仍在树上），下级整体上移一级。不在 actor 子树里的代理（包括
+    actor 自己）一律 404。返回刷新后的团队。
+    A top-level agent removes an agent below them (see remove_node). Anyone not
+    strictly below the actor — the actor included — is a 404. Returns the
+    refreshed team."""
+    _require_top(db, actor)
+    target = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
+    node = node_of(db, target.id) if target is not None else None
+    if node is None or node.user_id not in {n.user_id for n in descendants(db, actor.id)}:
+        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+    parent_id = node.parent_user_id
+    before = {l.id: _audit_value(l) for _owner, l in links_by_code(db, [target.id]).values()}
+    for link in remove_node(db, node):
+        _log_change(db, actor.id, target.id, f"invite:{link.code}:agent", "assigned", None)
+        if parent_id is not None:
+            _log_change(db, actor.id, parent_id, f"invite:{link.code}:agent", None, "assigned")
+        if link.id in before:
+            _log_change(db, actor.id, actor.id, f"invite:{link.code}", before[link.id], _audit_value(link))
+    admin_ids = _notify_admins_agent_write(
+        db, actor, target, f"{actor.email} → {target.email}: agent revoked", KIND_AGENT_TREE_CHANGE
+    )
+    db.commit()
+    for admin_id in admin_ids:
+        notify_ws(admin_id)
+    return agent_team(db, actor)
+
+
+def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
+    """管理后台「代理层级」：全部代理、各自的链接与客户数。按 (层级, 任命时间) 排好，前端拼树。
+    The admin tree: every agent with links and customer counts, sorted by
+    (level, created_at); the frontend assembles the tree."""
+    nodes = db.query(AgentNode).all()
+    nodes.sort(key=lambda n: (n.depth or 1, n.created_at is None, n.created_at or datetime.min))
+    ids = [n.user_id for n in nodes]
+    codes = links_by_code(db, ids)
+    regs = _registrations(db, list(codes))
+    direct: dict[str, int] = {}
+    links: dict[str, list[AdminAgentTreeLinkOut]] = {}
+    for code, (owner, link) in codes.items():
+        direct[owner] = direct.get(owner, 0) + regs.get(code, 0)
+        links.setdefault(owner, []).append(
+            AdminAgentTreeLinkOut(id=link.id, code=link.code, label=link.label, isActive=link.is_active)
+        )
+    # 深的先加到父节点上，与 agent_team 同一个思路。/ Deepest first, as in agent_team.
+    team = dict(direct)
+    known = set(ids)
+    for n in sorted(nodes, key=lambda n: -(n.depth or 1)):
+        if n.parent_user_id in known:
+            team[n.parent_user_id] = team.get(n.parent_user_id, 0) + team.get(n.user_id, 0)
+    people = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()} if ids else {}
+    return AdminAgentTreeOut(
+        maxDepth=get_agent_settings(db)["agent_max_depth"],
+        nodes=[
+            AdminAgentTreeNodeOut(
+                userId=n.user_id,
+                email=people[n.user_id].email if n.user_id in people else "",
+                nickname=people[n.user_id].nickname if n.user_id in people else None,
+                level=n.depth or 1,
+                parentUserId=n.parent_user_id,
+                links=links.get(n.user_id, []),
+                directCustomers=direct.get(n.user_id, 0),
+                teamCustomers=team.get(n.user_id, 0),
+                createdAt=n.created_at,
+            )
+            for n in nodes
+        ],
     )
 
 
@@ -1412,6 +1842,15 @@ def delete_invite_link(
     attributed = db.query(User.id).filter(User.invite_code == link.code).first() is not None
     mode = "soft" if attributed else "hard"
     old = _audit_value(link)
+    # rev 47：这是某个代理的最后一条链接时，删链接就等于撤掉他。下面还有下级代理 → 409（同
+    # unassign_agent）；没有下级 → 节点跟着删。
+    # rev 47: deleting an agent's last link removes them as an agent — refused
+    # while they have sub-agents, otherwise their node goes too.
+    for (owner_id,) in db.query(InviteLinkAgent.user_id).filter(InviteLinkAgent.link_id == link.id).all():
+        if _other_link_count(db, owner_id, link.id) == 0:
+            if _has_children(db, owner_id):
+                raise HTTPException(status_code=409, detail=_MSG_HAS_CHILDREN)
+            db.query(AgentNode).filter(AgentNode.user_id == owner_id).delete(synchronize_session=False)
     db.query(InviteLinkAgent).filter(InviteLinkAgent.link_id == link.id).delete(
         synchronize_session=False
     )
@@ -1542,3 +1981,83 @@ def my_agent_link_users(
     user: User = Depends(get_current_user),
 ):
     return agent_link_users(db, user, link_id, limit, offset, q)
+
+
+# ---------- 代理层级端点（rev 47）/ agent hierarchy endpoints ----------
+
+
+@agent_router.get("/team", response_model=AgentTeamOut)
+def my_agent_team(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """我是第几级、能不能改、我这棵树。非代理拿到 level=null 的空树，不是 403（同 /agent/links）。
+    My level, write access and tree. Non-agents get an empty tree, not a 403."""
+    return agent_team(db, user)
+
+
+@agent_router.get("/customers", response_model=AgentTreeUsersOut)
+def my_agent_customers(
+    limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
+    offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, max_length=128),
+    agent: str | None = Query(default=None, max_length=320, description="只看这个代理的直属客户（邮箱）/ narrow to one agent (email)"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return agent_tree_users(db, user, limit, offset, q, agent)
+
+
+@agent_router.patch("/customers/plan", response_model=AgentTreeUserOut)
+@limiter.limit("30/minute")
+def my_agent_customer_plan(
+    request: Request,
+    body: AgentPlanUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """一级代理改整棵树里某个客户的会员。限流理由同按链接改的那条（它能批量开 PRO）。
+    Top-level agents only; rate-limited like the per-link endpoint."""
+    return agent_tree_set_plan(db, user, body)
+
+
+@agent_router.post("/promote", response_model=AgentTreeUserOut)
+@limiter.limit("30/minute")
+def my_agent_promote(
+    request: Request,
+    body: AgentTreeTarget,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return agent_promote(db, user, body.email)
+
+
+@agent_router.post("/demote", response_model=AgentTeamOut)
+@limiter.limit("30/minute")
+def my_agent_demote(
+    request: Request,
+    body: AgentTreeTarget,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return agent_demote(db, user, body.email)
+
+
+@admin_router.get("/agent-tree", response_model=AdminAgentTreeOut)
+def get_agent_tree(db: Session = Depends(get_db), _admin: User = Depends(require_admin)):
+    return admin_agent_tree(db)
+
+
+@admin_router.put("/agent-settings", response_model=AdminAgentTreeOut)
+def put_agent_settings(
+    body: AdminAgentSettingsUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """改最大层级。调低不动已有的代理（见 settings_store.AGENT_DEFAULTS）。审计照平台设置的
+    逐键写法（setting:agent:<key>）。
+    Change the max depth; lowering it demotes nobody. Audited per key like the
+    other platform settings."""
+    old = get_agent_settings(db)["agent_max_depth"]
+    save_agent_settings(db, {"agent_max_depth": body.maxDepth})
+    _log_change(db, admin.id, admin.id, "setting:agent:agent_max_depth", json.dumps(old), json.dumps(body.maxDepth))
+    db.commit()
+    invalidate_agent_cache()
+    return admin_agent_tree(db)

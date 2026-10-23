@@ -410,7 +410,10 @@ def _hash_legacy_api_tokens() -> None:
 #          线上只有当天的测试数据（用户已同意清空）：库里版本 < 46 时把 5 张 lucky 表整张 DROP，再按新
 #          模型重建（空表），并删掉已废弃的全站开关 platform_settings.lucky_wheel_visible。只跑这一次，
 #          见 _reset_lucky_wheel_rev46。
-CURRENT_SCHEMA_REV = 46
+# rev 47 — 代理层级（2026-10-24）：新表 agent_nodes（create_all 建）；invite_link_agents(link_id)
+#          唯一索引（一条链接只属于一个代理，先查重，有重复就跳过并告警，不挡启动）；存量代理
+#          每人回填一个一级节点（parent 为空、depth 1）。见 _migrate_agent_tree_rev47。
+CURRENT_SCHEMA_REV = 47
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1821,6 +1824,10 @@ def _migrate_columns() -> None:
     # rev 46: lucky wheel v2 — rebuild the 5 lucky tables empty. Only when the stored revision < 46.
     _reset_lucky_wheel_rev46(applied, is_postgres, inspector)
 
+    # rev 47：代理层级——链接唯一代理的索引 + 存量代理回填一级节点。
+    # rev 47: agent hierarchy — one-agent-per-link index + top-level nodes for existing agents.
+    _migrate_agent_tree_rev47()
+
     # rev 42：跟进「联系不上」仍算进行中 + 重建部分唯一索引 + 清空默认期限。
     # rev 42: unreachable follow-ups stay active; rebuild the partial unique index; clear deadlines.
     _migrate_follow_ups_rev42()
@@ -2027,6 +2034,51 @@ def _backfill_email_canonical() -> None:
             [{"c": canonical_email(email), "id": uid} for uid, email in rows],
         )
     logger.info("rev 40：规范邮箱回填 %d 行", len(rows))
+
+
+def _migrate_agent_tree_rev47() -> None:
+    """rev 47：代理层级的两步存量处理。幂等、可重跑。
+
+    ① invite_link_agents(link_id) 唯一索引。建之前先查有没有一条链接挂了多个代理：有就
+       跳过建索引、只告警——上线前已人工清理成一链一代理，但万一漏了一条，宁可少一道约束
+       也不能让启动失败（应用层 assign_agent 照样拒绝第二个代理）。
+    ② 每个持有链接、还没有节点的代理补一个一级节点（parent 为空、depth 1）：rev 47 之前的
+       代理全是管理员任命的，正好就是一级。
+
+    rev 47: (1) the one-agent-per-link unique index, skipped with a warning if any
+    link still has several agents (the app layer rejects a second agent anyway);
+    (2) a top-level node for every link holder that lacks one — every pre-47
+    agent was appointed by an admin, i.e. top level.
+    """
+    import uuid as _uuid_mod
+
+    with engine.begin() as conn:
+        dup = conn.execute(text(
+            "SELECT link_id FROM invite_link_agents GROUP BY link_id HAVING COUNT(*) > 1 LIMIT 1"
+        )).first()
+        if dup is None:
+            conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_invite_link_agents_link "
+                "ON invite_link_agents(link_id)"
+            ))
+        else:
+            logger.warning(
+                "rev 47：invite_link_agents 里仍有一条链接挂多个代理（%s），跳过唯一索引 / "
+                "a link still has several agents; unique index skipped", dup[0],
+            )
+        rows = conn.execute(text(
+            "SELECT DISTINCT a.user_id FROM invite_link_agents a "
+            "WHERE NOT EXISTS (SELECT 1 FROM agent_nodes n WHERE n.user_id = a.user_id)"
+        )).fetchall()
+        if rows:
+            conn.execute(
+                text(
+                    "INSERT INTO agent_nodes (id, user_id, parent_user_id, depth, created_at) "
+                    "VALUES (:id, :uid, NULL, 1, CURRENT_TIMESTAMP)"
+                ),
+                [{"id": str(_uuid_mod.uuid4()), "uid": uid} for (uid,) in rows],
+            )
+    logger.info("rev 47：代理层级迁移完成，回填一级节点 %d 个", len(rows))
 
 
 def _backfill_conversions() -> None:

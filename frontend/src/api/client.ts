@@ -7,6 +7,7 @@ import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPop
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
 import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
+import type { AdminAgentTree, AgentTeam, AgentTreeUser, AgentTreeUsers } from './types'
 import type { AdminFollowUpRecord, AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportProgress, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
@@ -1721,6 +1722,13 @@ export const adminApi = {
     request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}/agents/${encodeURIComponent(userId)}`, {
       method: 'DELETE',
     }),
+  // 代理层级（rev 47）：全部代理的树 + 最大层级。/ Agent hierarchy: every agent + the max depth.
+  agentTree: () => request<AdminAgentTree>('/admin/invite-links/agent-tree'),
+  setAgentMaxDepth: (maxDepth: number) =>
+    request<AdminAgentTree>('/admin/invite-links/agent-settings', {
+      method: 'PUT',
+      body: JSON.stringify({ maxDepth }),
+    }),
   getSettings: () => request<AdminBrokerSettings>('/admin/settings'),
   updateSettings: (payload: AdminBrokerSettings) =>
       request<AdminBrokerSettings>('/admin/settings', {
@@ -2169,6 +2177,26 @@ export const agentApi = {
       method: 'PATCH',
       body: JSON.stringify({ url }),
     }),
+  // ---- 代理层级（rev 47）/ agent hierarchy ----
+  // 我是第几级、能不能改、我这棵树（自己在最前）。/ My level, write access and tree.
+  team: () => request<AgentTeam>('/agent/team'),
+  // 整棵子树的客户；agent 给邮箱就只看那个代理的直属客户。/ Subtree customers; `agent` narrows.
+  customers: (params: { limit?: number; offset?: number; q?: string; agent?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.limit) qs.set('limit', String(params.limit))
+    if (params.offset) qs.set('offset', String(params.offset))
+    if (params.q) qs.set('q', params.q)
+    if (params.agent) qs.set('agent', params.agent)
+    const q = qs.toString()
+    return request<AgentTreeUsers>(`/agent/customers${q ? `?${q}` : ''}`)
+  },
+  // 下面三个只有一级代理能调（其余 403）。/ The three writes below are top-level only (403 otherwise).
+  setCustomerPlan: (body: AgentPlanChange) =>
+    request<AgentTreeUser>('/agent/customers/plan', { method: 'PATCH', body: JSON.stringify(body) }),
+  promote: (email: string) =>
+    request<AgentTreeUser>('/agent/promote', { method: 'POST', body: JSON.stringify({ email }) }),
+  demote: (email: string) =>
+    request<AgentTeam>('/agent/demote', { method: 'POST', body: JSON.stringify({ email }) }),
 }
 
 // ---- 看门狗运维接口 / watchdog ops endpoint ----

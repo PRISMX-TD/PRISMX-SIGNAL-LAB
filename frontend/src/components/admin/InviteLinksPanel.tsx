@@ -26,6 +26,7 @@ import Select from '../Select'
 import Switch from '../Switch'
 import { SkeletonLine } from '../Skeleton'
 import CopyLinkButton from './invite/CopyLinkButton'
+import AgentTreeDrawer from './invite/AgentTreeDrawer'
 import InviteLinkCreateDrawer from './invite/InviteLinkCreateDrawer'
 import InviteLinkEditDrawer from './invite/InviteLinkEditDrawer'
 import ToastBar from './invite/ToastBar'
@@ -66,6 +67,8 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   // The drawer keeps an id, not the object, so it re-reads the row after each write.
   const [editId, setEditId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
+  // 代理层级抽屉（rev 47）。/ The agent-hierarchy drawer (rev 47).
+  const [showTree, setShowTree] = useState(false)
   // 待确认的「移除代理」。移除入口是代理标签上那枚 × ——一个极小的点击目标，
   // 误触就撤销了该用户的 /agent 入口（他下次刷新就看不到代理页，归因数据与 KPI
   // 也会短暂对不上）。动作本身可逆（重新指派即可），所以用普通确认框而不是危险态。
@@ -240,9 +243,12 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           <Switch checked={filter.showInactive} onChange={(v) => setFilter((f) => ({ ...f, showInactive: v }))} />
           {t('admin.invite.showInactive')}
         </label>
+        <button type="button" className="btn-ghost ml-auto px-4 py-1.5 text-xs" onClick={() => setShowTree(true)}>
+          {t('admin.invite.tree.open')}
+        </button>
         <button
           type="button"
-          className="btn-primary ml-auto px-4 py-1.5 text-xs disabled:opacity-40"
+          className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
           disabled={busyId !== null}
           onClick={() => setCreating(true)}
         >
@@ -362,6 +368,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
         </>
       )}
 
+      {showTree && <AgentTreeDrawer onClose={() => setShowTree(false)} />}
       {creating && (
         <InviteLinkCreateDrawer
           busy={busyId !== null}

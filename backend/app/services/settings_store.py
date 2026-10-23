@@ -1102,3 +1102,51 @@ def save_support_settings(db, data: dict) -> None:
     merged = _load_support_from_db(db)
     merged.update({k: v for k, v in data.items() if k in SUPPORT_DEFAULTS})
     set_setting(db, "support", merged)
+
+
+# 代理层级（rev 47）：最大层级。一级代理 = 1，「升为代理」时新节点的层级不能超过它。
+# 默认 5（2026-10-24 产品决定），管理员在后台「代理层级」里改。调低不会动已有的代理——
+# 已经超出的那些照常保留，只是不能再往下升。
+# Agent hierarchy (rev 47): the deepest level a promotion may create (top level = 1).
+# Default 5; admins change it from the agent-tree panel. Lowering it never demotes
+# anyone — agents already deeper stay, they just cannot promote further down.
+AGENT_DEFAULTS: dict = {
+    "agent_max_depth": 5,
+}
+AGENT_MAX_DEPTH_LIMIT = 20
+
+_agent_cache = _TtlCache()
+
+
+def invalidate_agent_cache() -> None:
+    _agent_cache.invalidate()
+
+
+def _load_agent_from_db(db) -> dict:
+    """读代理层级设置；只认 1..AGENT_MAX_DEPTH_LIMIT 的整数，坏值回落默认。
+    Read the agent-hierarchy settings; only ints in 1..AGENT_MAX_DEPTH_LIMIT count."""
+    data = dict(AGENT_DEFAULTS)
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "agent").first()
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                v = stored.get("agent_max_depth")
+                if isinstance(v, int) and not isinstance(v, bool) and 1 <= v <= AGENT_MAX_DEPTH_LIMIT:
+                    data["agent_max_depth"] = v
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for agent, using defaults")
+    return data
+
+
+def get_agent_settings(db) -> dict:
+    """读取代理层级设置（独立缓存）。/ Read the agent-hierarchy settings (own cache)."""
+    return dict(_agent_cache.get(db, _load_agent_from_db))
+
+
+def save_agent_settings(db, data: dict) -> None:
+    """写入代理层级设置（不提交，调用方 commit 后 invalidate）。
+    Write the agent-hierarchy settings (no commit; caller commits then invalidates)."""
+    merged = _load_agent_from_db(db)
+    merged.update({k: v for k, v in data.items() if k in AGENT_DEFAULTS})
+    set_setting(db, "agent", merged)

@@ -2661,14 +2661,14 @@
       "colAgents": "Agents",
       "assign": "Assign",
       "assignTitle": "Assign an agent",
-      "assignHint": "The assigned user gets an extra \"Agent view\" page showing this link's clicks, signups and the list of users who registered through it (read-only; no phone numbers or full emails). Role and entitlements are unchanged.",
+      "assignHint": "The assigned user becomes a top-level agent with an \"Agent view\": this link's figures and client list, membership adjustments, and the ability to promote clients in their tree to sub-agents. A link can have only one agent. Role and entitlements are unchanged.",
       "assignSearch": "Search by email or phone",
       "assignNoResult": "No matching users",
       "assignAlready": "Assigned",
       "unassign": "Remove agent",
       "noAgents": "None",
       "unassignConfirmTitle": "Confirm removing agent",
-      "unassignConfirmBody": "{{name}} will lose the agent view and this link’s client list. They can be assigned again later.",
+      "unassignConfirmBody": "{{name}} will no longer see this link's clients. If it is their last link they stop being an agent: a sub-agent's link is disabled and handed to their upline; a top-level agent who still has sub-agents cannot be removed until those are dealt with.",
       "delete": "Delete link",
       "deleted": "Link deleted",
       "deleteConfirmTitle": "Delete “{{label}}”?",
@@ -2717,7 +2717,20 @@
       "fieldAgents": "Agents",
       "competitionNoAgents": "Competition promo links are platform-owned and can't have agents. Agents promote competitions with their own code via “Copy competition link” on the agent page.",
       "fieldCreated": "Created",
-      "trialTag": "Trial"
+      "trialTag": "Trial",
+      "tree": {
+        "open": "Agent hierarchy",
+        "title": "Agent hierarchy",
+        "hint": "Top-level agents are the people assigned to links; sub-agents are promoted by top-level agents from their agent view. To remove an agent, unassign their link: a sub-agent's link is disabled and handed to their upline; a top-level agent who still has sub-agents cannot be removed until those are dealt with.",
+        "maxDepth": "Maximum depth",
+        "maxDepthHint": "Top-level agents are level 1; range 1–20. Lowering it removes nobody — it only stops further promotions past the limit.",
+        "save": "Save",
+        "saving": "Saving…",
+        "saved": "Saved",
+        "empty": "No agents yet.",
+        "level": "L{{n}}",
+        "counts": "{{direct}} direct · {{total}} in team"
+      }
     },
     "announcements": {
       "hint": "Write and publish announcements here. Users see published ones in the bell panel and on the Announcements page; drafts are admin-only. Fill in both languages; if only one is filled, the other language falls back to it.",
@@ -4067,6 +4080,44 @@
       "saved": "Saved",
       "cleared": "Cleared",
       "invalid": "Must be an https Make Capital link"
+    },
+    "subtitleReadOnly": "You are a level-{{n}} agent: you can see your links, your sub-agents and their clients. Everything here is read-only.",
+    "tabs": {
+      "links": "My links",
+      "team": "Team",
+      "customers": "All clients"
+    },
+    "team": {
+      "level": "Level {{n}}",
+      "you": "You",
+      "since": "Agent since {{date}}",
+      "showCustomers": "View clients",
+      "remove": "Remove agent",
+      "direct": "Direct clients",
+      "total": "Team clients",
+      "topHint": "You are a top-level agent: you can adjust membership for anyone in your tree, promote clients to sub-agents from “All clients” (up to level {{max}}), and remove sub-agents.",
+      "readOnlyHint": "You are a level-{{n}} agent; this view is read-only. Promotions and membership changes are made by your top-level agent.",
+      "countNote": "Direct clients counts people from their own links; team clients adds everyone below them. Active (7d) and MT5 linked count direct clients only.",
+      "emptyTop": "No sub-agents yet. Promote a client from “All clients”.",
+      "empty": "No sub-agents yet.",
+      "removeTitle": "Remove this agent?",
+      "removeBody": "{{name}} becomes an ordinary user again. Their link is disabled and handed to their upline; the clients they brought stay in your team, and their sub-agents move up one level."
+    },
+    "customers": {
+      "allAgents": "All agents",
+      "filterAgent": "Filter by agent",
+      "count": "{{n}} clients",
+      "empty": "No clients yet.",
+      "colVia": "Came via",
+      "agentBadge": "Level-{{n}} agent"
+    },
+    "promote": {
+      "button": "Make agent",
+      "hint": "Promoting a client gives them their own invite link and a read-only agent view. Their upline is the agent whose link they signed up through.",
+      "title": "Make this client an agent?",
+      "body": "{{name}} becomes a level-{{n}} agent under {{parent}}, with their own invite link. They can see their downline but cannot change anything.",
+      "done": "{{name}} is now a level-{{n}} agent.",
+      "tooDeep": "Maximum depth ({{max}} levels) reached"
     }
   },
   "announcements": {

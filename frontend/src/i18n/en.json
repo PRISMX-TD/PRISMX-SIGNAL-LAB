@@ -23,7 +23,9 @@
     "lucky_ticket": "You got lucky-draw tickets",
     "lucky_ticket_expiring": "Your tickets expire soon",
     "lucky_prize_delivered": "Your prize has been sent",
-    "lucky_prize_cancelled": "Your prize was cancelled"
+    "lucky_prize_cancelled": "Your prize was cancelled",
+    "agent_tree_change": "An agent changed their sub-agents",
+    "agent_promoted": "You're now an agent — open your agent view"
   },
   "nav": {
     "dashboard": "Dashboard",

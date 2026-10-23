@@ -33,6 +33,12 @@ KIND_TICKET_NEW = "ticket_new"
 # An agent changed a customer's plan; admins only. The title lives in the frontend's
 # `notifFeed.agent_plan_change`; the text body carries who/whom/what.
 KIND_AGENT_PLAN_CHANGE = "agent_plan_change"
+# 代理层级（rev 47）：一级代理升 / 撤了一个代理。agent_tree_change 只发管理员（同上，让这件事
+# 有人看见）；agent_promoted 发给被升的那个人，链接到 /agent。前端补 notifFeed.<kind>（5 语）。
+# Agent hierarchy (rev 47): agent_tree_change goes to admins whenever a top-level
+# agent promotes or demotes someone; agent_promoted tells the promoted user.
+KIND_AGENT_TREE_CHANGE = "agent_tree_change"
+KIND_AGENT_PROMOTED = "agent_promoted"
 # 一场已有报名的比赛首次打开公开页（设计 §1.8）：公开前报名的人 public_name 为 NULL，
 # 在公开榜上是匿名的；通知他们可以去站内比赛页选择「在公开页显示我的昵称」。
 # 标题文案在前端 i18n 的 `notifFeed.comp_public_name`（5 语）。

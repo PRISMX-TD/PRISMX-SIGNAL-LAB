@@ -24,153 +24,65 @@
 // Make Capital 开户链接，经他链接进比赛页的访客点「开户」时跳那里。
 // Each card also carries "My open-account link" (OpenAccountLinkEditor): the agent's own
 // Make Capital link, used when their visitors tap "Open account" on a competition page.
+// rev 47 代理层级：页头下三个页签——「我的链接」（上面说的这些）、「团队」（我和全部下级代理，
+// AgentTeamPanel）、「全部客户」（整棵子树的客户，AgentCustomersPanel）。页签记在 ?tab= 里，
+// 手机返回能回到上一个页签。只有一级代理（/agent/team 的 canManage）能改会员、升 / 撤代理，
+// 二级及以下只读——「我的链接」名单里的「调整会员」按钮也按它藏。
+// rev 47 agent hierarchy: three tabs under the header — My links (above), Team
+// (AgentTeamPanel) and All customers (AgentCustomersPanel), kept in ?tab= so the back
+// gesture returns to the previous tab. Only top-level agents (canManage) may write;
+// lower levels are read-only, so the per-link "Membership" button hides for them too.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useSearchParams } from 'react-router-dom'
 import PageHead from '../components/PageHead'
 import { SkeletonLine } from '../components/Skeleton'
+import AgentCustomersPanel from '../components/agent/AgentCustomersPanel'
 import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
+import AgentTeamPanel from '../components/agent/AgentTeamPanel'
 import PlanDialog from '../components/agent/PlanDialog'
 import OpenAccountLinkEditor from '../components/agent/OpenAccountLinkEditor'
 import { API_BASE, agentApi } from '../api/client'
 import { fmtDate, localizeApiError } from '../api/utils'
+import { CardRow, LastActive, Mt5List, PlanBadge, PlanCell, planExpiryText } from '../components/agent/customerCells'
 import { agentCompetitionUrl, inviteUrl } from '../utils/promoLinkUrl'
+import { segBtn } from '../utils/segBtn'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
-import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentMT5Account } from '../api/types'
+import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentTeam } from '../api/types'
 
 const PAGE_SIZE = 50
 
-// 「近 7 日」的分界日。后端给的 lastActiveDay 是北京时间的日历日字符串
-// （YYYY-MM-DD），所以这里也按北京时间取当天，再直接比字符串——ISO 日期按
-// 字典序比就是按时间比，不用解析成 Date（解析会把它当 UTC 零点再偏一次时区）。
-// Cut-off day for "last 7 days". lastActiveDay is a Beijing-time calendar date
-// string, so this one is too, and ISO dates compare correctly as strings —
-// parsing them into Date would shift them by a timezone a second time.
-const statsDay = (ms: number) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
-const isRecentDay = (day: string) => day >= statsDay(Date.now() - 6 * 86_400_000)
-
-const MT5_TYPE_KEY = { real: 'agent.mt5Real', demo: 'agent.mt5Demo', contest: 'agent.mt5Contest' } as const
-
-// MT5 绑定：打码账号 + 实盘/模拟 + 服务器，外加「连没连上」。
-//
-// 这一列只回答代理真正要问的那一句：这个人接进来了没有。通道（直连/桥接）、
-// 此刻在不在线、最近一次连接是什么时候，2026-09-19 全部撤掉——代理拿它们做不了
-// 任何决定，而且两条通道口径不同摆在一起只会被误读（桥接的在线随客户关电脑闪烁；
-// 直连的"在线"其实是平台自己那台网关的健康状态、全站共享）。别再加回来。
-//
-// 不能跟单的绑定（直连授权作废）照样列出，只是压灰标「未连接」：跟能用的账号
-// 长得一样，代理会以为客户在跟单，其实没有。
-//
-// One binding per line: masked login, real/demo, server, and whether it is
-// connected. That last bit is the only question an agent can act on; channel,
-// live online state and last-seen were all removed (see the backend schema).
-// Unusable bindings are greyed out rather than hidden — looking identical to a
-// working account would have the agent believe their client is trading.
-function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
-  const { t } = useTranslation()
-  if (accounts.length === 0) return <span className="text-neutral-500">{t('agent.mt5None')}</span>
-  return (
-    <ul className="space-y-1.5">
-      {accounts.map((a, i) => (
-        <li key={`${a.login}-${i}`} className="min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className={`num ${a.connected ? 'text-neutral-100' : 'text-neutral-500 line-through'}`}>
-              {a.login}
-            </span>
-            <span
-              className={`rounded-full px-1.5 py-0.5 text-[11px] ${
-                a.accountType === 'real' && a.connected ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
-              }`}
-            >
-              {t(a.accountType ? MT5_TYPE_KEY[a.accountType] : 'agent.mt5Unknown')}
-            </span>
-            {!a.connected && (
-              <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[11px] text-neutral-400">
-                {t('agent.mt5None')}
-              </span>
-            )}
-          </div>
-          {a.server && <p className="break-words text-[11px] text-neutral-500">{a.server}</p>}
-        </li>
-      ))}
-    </ul>
-  )
-}
-
-function PlanBadge({ plan }: { plan: string }) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs ${
-        plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-      }`}
-    >
-      {plan}
-    </span>
-  )
-}
-
-// 会员到期文案。FREE 没有到期可言（返回 null，调用方整行不画）；不限期（PRO 且
-// 没有到期日）是管理员手动给的，直接说出来，免得代理点了才吃一个 409。
-//
-// **带年份**（fmtDate 而不是 fmtTime）：到期日常常落在明年，只写「31/12」谁也说不清
-// 是哪一年，而这恰恰是代理点「延长」之前最需要看准的一个数。
-// Expiry caption; null for FREE. Uses fmtDate (with the year) rather than
-// fmtTime: an expiry routinely lands in a later year, and "31/12" alone cannot
-// say which — precisely the number an agent checks before extending.
-type TFn = ReturnType<typeof useTranslation>['t']
-
-function planExpiryText(user: AgentLinkUser, t: TFn): string | null {
-  if (user.plan !== 'PRO') return null
-  return user.planExpiresAt ? fmtDate(user.planExpiresAt) : t('agent.plan.noExpiry')
-}
-
-// 桌面表格的「等级」格：徽标 + 到期（带标签，否则与右边的注册时间分不清）。
-// Desktop tier cell: badge plus a labelled expiry — without the label it reads
-// as just another timestamp next to the signup one.
-function PlanCell({ user }: { user: AgentLinkUser }) {
-  const { t } = useTranslation()
-  const expiry = planExpiryText(user, t)
-  return (
-    <div className="min-w-0">
-      <PlanBadge plan={user.plan} />
-      {expiry && (
-        <p className="num mt-1 text-[11px] text-neutral-500">{t('agent.plan.until', { time: expiry })}</p>
-      )}
-    </div>
-  )
-}
-
-// 手机卡里的一行「标签 + 值」。四行共用一个组件，标签宽度就自然对齐成一列；
-// 手机上每个时间都必须自带标签——桌面有表头，手机没有，两个时间叠在一起谁也
-// 认不出哪个是到期、哪个是注册（2026-09-19 负责人就是这么发现的）。
-// One labelled row on the phone card. A shared component keeps the label column
-// aligned, and on a phone every timestamp needs its own label: there is no table
-// header here, so two stacked times are indistinguishable.
-function CardRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="mt-1.5 flex items-baseline gap-2 text-xs">
-      <span className="w-16 shrink-0 text-[11px] text-neutral-500">{label}</span>
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  )
-}
-
-function LastActive({ day }: { day: string | null }) {
-  const { t } = useTranslation()
-  if (!day) return <span className="text-neutral-500">{t('agent.neverActive')}</span>
-  // 近 7 日内的亮着，更早的压灰——一眼看出哪些人已经不来了。
-  // Recent days stay bright, older ones grey out: who stopped coming, at a glance.
-  return (
-    <span className={`num whitespace-nowrap ${isRecentDay(day) ? 'text-neutral-100' : 'text-neutral-500'}`}>
-      {day}
-    </span>
-  )
-}
+type Tab = 'links' | 'team' | 'customers'
+const TABS: Tab[] = ['links', 'team', 'customers']
 
 export default function AgentPage() {
   const { t } = useTranslation()
   useDocumentTitle(t('agent.title'))
 
   const [links, setLinks] = useState<AgentLink[] | null>(null)
+  // 我在代理树上的位置（rev 47）：决定能不能写、页签里的团队与客户。加载失败就当只读，
+  // 「我的链接」照常可用。
+  // My place in the agent tree (rev 47): write access plus the Team / Customers tabs.
+  // A failed load just means read-only; My links keeps working.
+  const [team, setTeam] = useState<AgentTeam | null>(null)
+  const canManage = team?.canManage ?? false
+  const [params, setParams] = useSearchParams()
+  const tabParam = params.get('tab') as Tab | null
+  const tab: Tab = tabParam && TABS.includes(tabParam) ? tabParam : 'links'
+  // 「全部客户」按代理筛的邮箱；从「团队」点「查看客户」带过来。
+  // The All-customers agent filter, set when Team's "View customers" jumps over.
+  const [customerAgent, setCustomerAgent] = useState('')
+  const switchTab = (next: Tab) => {
+    if (next === tab) return
+    setParams(next === 'links' ? {} : { tab: next })
+  }
+  const loadTeam = () => {
+    agentApi
+      .team()
+      .then(setTeam)
+      .catch(() => {})
+  }
+  useEffect(loadTeam, [])
   const [error, setError] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [copiedId, setCopiedId] = useState<string | null>(null)
@@ -302,9 +214,50 @@ export default function AgentPage() {
       <PageHead
         as="h1"
         title={t('agent.title')}
-        subtitle={t('agent.subtitle')}
-        count={links && links.length > 1 ? links.length : null}
+        subtitle={team && !canManage && team.level != null ? t('agent.subtitleReadOnly', { n: team.level }) : t('agent.subtitle')}
+        count={tab === 'links' && links && links.length > 1 ? links.length : null}
       />
+
+      {/* 页签：只有确实是代理（team.level 非空）才出现。/ Tabs, only for actual agents. */}
+      {team && team.level != null && (
+        <div className="mb-4 flex flex-wrap gap-1.5" role="tablist">
+          {TABS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={tab === k}
+              className={segBtn(tab === k)}
+              onClick={() => switchTab(k)}
+            >
+              {t(`agent.tabs.${k}`)}
+              {k === 'team' && team.nodes.length > 1 && <span className="num ml-1 opacity-60">{team.nodes.length - 1}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {team && tab === 'team' && (
+        <AgentTeamPanel
+          team={team}
+          onTeamChange={setTeam}
+          onShowCustomers={(email) => {
+            setCustomerAgent(email)
+            switchTab('customers')
+          }}
+        />
+      )}
+      {team && tab === 'customers' && (
+        <AgentCustomersPanel
+          team={team}
+          agentFilter={customerAgent}
+          onAgentFilterChange={setCustomerAgent}
+          onPromoted={loadTeam}
+        />
+      )}
+
+      {tab === 'links' && (
+      <>
 
       {error && (
         <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down" role="alert">
@@ -479,7 +432,7 @@ export default function AgentPage() {
                         <th className="px-4 py-3 font-medium">{t('agent.colMt5')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colActive')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colRegistered')}</th>
-                        <th className="px-4 py-3 font-medium text-right">{t('agent.colAction')}</th>
+                        {canManage && <th className="px-4 py-3 font-medium text-right">{t('agent.colAction')}</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -503,16 +456,18 @@ export default function AgentPage() {
                           <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">
                             {fmtDate(u.createdAt)}
                           </td>
-                          <td className="px-4 py-3 text-right">
-                            <button
-                              type="button"
-                              className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
-                              disabled={u.plan === 'PRO' && !u.planExpiresAt}
-                              onClick={() => setEditing(u)}
-                            >
-                              {t('agent.plan.adjust')}
-                            </button>
-                          </td>
+                          {canManage && (
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                type="button"
+                                className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
+                                disabled={u.plan === 'PRO' && !u.planExpiresAt}
+                                onClick={() => setEditing(u)}
+                              >
+                                {t('agent.plan.adjust')}
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -550,14 +505,16 @@ export default function AgentPage() {
                       <CardRow label={t('agent.colMt5')}>
                         <Mt5List accounts={u.mt5Accounts} />
                       </CardRow>
-                      <button
-                        type="button"
-                        className="btn-ghost mt-2 w-full py-1.5 text-xs disabled:opacity-40"
-                        disabled={u.plan === 'PRO' && !u.planExpiresAt}
-                        onClick={() => setEditing(u)}
-                      >
-                        {t('agent.plan.adjust')}
-                      </button>
+                      {canManage && (
+                        <button
+                          type="button"
+                          className="btn-ghost mt-2 w-full py-1.5 text-xs disabled:opacity-40"
+                          disabled={u.plan === 'PRO' && !u.planExpiresAt}
+                          onClick={() => setEditing(u)}
+                        >
+                          {t('agent.plan.adjust')}
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
@@ -586,6 +543,9 @@ export default function AgentPage() {
             ) : null}
           </div>
         </section>
+      )}
+
+      </>
       )}
 
       {editing && selected && (

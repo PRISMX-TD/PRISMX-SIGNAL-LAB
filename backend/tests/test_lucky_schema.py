@@ -22,8 +22,8 @@ from app.services.lucky import common
 LUCKY = ("lucky_wheel_rounds", "lucky_wheel_prizes", "lucky_ticket_batches", "lucky_tickets", "lucky_draws")
 
 
-def test_schema_rev_is_46():
-    assert db_mod.CURRENT_SCHEMA_REV == 46
+def test_schema_rev_is_at_least_46():
+    assert db_mod.CURRENT_SCHEMA_REV >= 46
 
 
 def test_tables_exist_with_v2_columns(db_session):
@@ -216,7 +216,7 @@ def test_rev46_rebuilds_lucky_tables_empty_and_drops_the_switch(rev45_engine):
         keys = {k: v for k, v in conn.execute(text("SELECT key, value FROM platform_settings"))}
         assert conn.execute(text("SELECT COUNT(*) FROM users")).scalar() == 1   # 别的表不受影响 / others untouched
     assert "lucky_wheel_visible" not in keys
-    assert json.loads(keys["schema_rev"]) == 46
+    assert json.loads(keys["schema_rev"]) == db_mod.CURRENT_SCHEMA_REV
     # 新结构能直接用：索引齐、可以写入 / the new tables work: indexes rebuilt, rows insert
     idx = {i["name"] for i in insp.get_indexes("lucky_tickets")}
     assert "idx_lucky_tickets_user_round_status" in idx

@@ -1588,7 +1588,7 @@ class InviteLinkAgent(Base):
     「代理」不是角色。users.role 不改、权益不变——代理身份完全由「本表里有没有
     这个人的行」派生（见 routers/invite.py 的 is_agent）。这样后端所有 require_admin
     判定与前端所有 role === 'admin' 判定都不必碰，也不会出现代理被误当成半个
-    管理员的可能。一条链接可指派给多人，一个人也可持有多条链接；取消指派删本表
+    管理员的可能。一个人可持有多条链接（一条链接只能有一个代理，见下）；取消指派删本表
     的行即可，不碰 invite_links。删除链接（硬删或软删）时本表该链接的行一并删除。
 
     An invite link's "agent" assignment: an admin assigns a link to a user, who
@@ -1596,12 +1596,24 @@ class InviteLinkAgent(Base):
     it brought in on the /agent page. "Agent" is not a role: users.role is
     untouched and entitlements are unchanged — agent-ness is derived purely from
     having a row here (see is_agent in routers/invite.py), so no require_admin
-    or role === 'admin' check anywhere needs to know about it. Many agents per
-    link, many links per agent; unassigning deletes the row here and leaves
-    invite_links alone. Deleting a link (hard or soft) removes its rows here too.
+    or role === 'admin' check anywhere needs to know about it. Many links per
+    agent; unassigning deletes the row here and leaves invite_links alone.
+    Deleting a link (hard or soft) removes its rows here too.
+
+    rev 47（代理层级）起**一条链接只属于一个代理**（uq_invite_link_agents_link）：客户按
+    users.invite_code 归到链接、再按链接归到代理，一条链接挂两个代理时客户就说不清挂在
+    树的哪个位置。上下级关系不在本表，见 AgentNode。
+    Since rev 47 (agent hierarchy) a link has exactly one agent: customers hang off
+    links and links off agents, so a shared link would put its customers in two
+    places in the tree. Parent/child lives in AgentNode, not here.
     """
     __tablename__ = "invite_link_agents"
-    __table_args__ = (UniqueConstraint("link_id", "user_id", name="uq_invite_link_agent"),)
+    __table_args__ = (
+        UniqueConstraint("link_id", "user_id", name="uq_invite_link_agent"),
+        # 老库由 _migrate_columns 补建（先查重，有重复就跳过并告警，不挡启动）。
+        # Built for old databases by _migrate_columns (skipped with a warning on duplicates).
+        Index("uq_invite_link_agents_link", "link_id", unique=True),
+    )
 
     id = Column(String, primary_key=True, default=_uuid)
     link_id = Column(String, ForeignKey("invite_links.id"), nullable=False, index=True)
@@ -1612,6 +1624,46 @@ class InviteLinkAgent(Base):
     # The assigning admin. The audit log has its own copy; kept here so the list
     # can show it without a reverse lookup.
     assigned_by = Column(String, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class AgentNode(Base):
+    """代理层级树上的一个节点（rev 47，2026-10-24 产品决定）。
+
+    每个代理一行：parent_user_id 为空 = 一级代理（管理员任命），否则指向上级代理。
+    depth 是层级（一级 = 1），冗余存一份，是为了「不能超过最大层级」与「只有一级能改」
+    这两条判定不必每次沿树往上数。
+
+    树怎么长出来：一级代理在自己整棵树里把某个普通用户升为代理时，新节点的上级**由注册
+    路径决定**——就是他注册时用的那条链接（users.invite_code）的主人，不是点按钮的人。
+    同时系统给他生成一条专属链接（invite_link_agents 一行）。
+
+    可见范围：一个代理看得到自己与所有下级（递归）链接带来的客户；看不到上级与同级。
+    写权限：只有一级代理能改会员、升 / 撤代理，二级及以下只读（自己链接的开户网址除外）。
+
+    撤销（见 services/agent_tree.remove_node）：他的链接停用并转给他的上级，下级代理整体
+    上移一级挂到他的上级下面；客户的 invite_code 一律不动，所以人始终还在树上。
+
+    One node of the agent tree (rev 47). parent_user_id NULL = top-level agent
+    (appointed by an admin), otherwise the parent agent. depth (top = 1) is
+    stored so the max-depth and top-level-only checks never walk the tree.
+    A promoted user's parent is decided by their signup path — the owner of the
+    link in users.invite_code — not by whoever pressed the button. An agent sees
+    their own and every descendant's customers, never upwards or sideways; only
+    top-level agents may write. Removal hands the links to the parent and lifts
+    the subtree one level; customers' invite_code is never touched.
+    """
+    __tablename__ = "agent_nodes"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    # 上级代理；NULL = 一级。按它查「我的直属下级」，所以建索引。
+    # The parent agent; NULL = top level. Indexed for "my direct children" lookups.
+    parent_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
+    depth = Column(Integer, nullable=False, default=1)
+    # 谁让他成为代理：一级是指派链接的管理员，下级是点「升为代理」的一级代理。
+    # Who made them an agent: the assigning admin for top level, else the promoting agent.
+    created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=_now)
 
 

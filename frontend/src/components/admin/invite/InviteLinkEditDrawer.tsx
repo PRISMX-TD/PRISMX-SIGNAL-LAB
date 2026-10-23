@@ -182,6 +182,9 @@ export default function InviteLinkEditDrawer({
                     title={a.email}
                   >
                     {a.nickname || a.email}
+                    {a.level != null && (
+                      <span className="text-[10px] text-prism-300/80">{t('admin.invite.tree.level', { n: a.level })}</span>
+                    )}
                     <button
                       type="button"
                       className="text-prism-300/70 hover:text-down disabled:opacity-40"
@@ -197,7 +200,11 @@ export default function InviteLinkEditDrawer({
             ) : (
               <p className="mt-2 text-xs text-neutral-500">{t('admin.invite.noAgents')}</p>
             )}
-            <AgentPicker assignedIds={new Set(agents.map((a) => a.userId))} busy={busy} onAssign={onAssign} />
+            {/* rev 47 起一条链接只能有一个代理（后端 409 兜底）：已有代理就不再给选人框。
+                Since rev 47 a link holds one agent (409 server-side); no picker once assigned. */}
+            {agents.length === 0 && (
+              <AgentPicker assignedIds={new Set(agents.map((a) => a.userId))} busy={busy} onAssign={onAssign} />
+            )}
           </>
         )}
       </div>

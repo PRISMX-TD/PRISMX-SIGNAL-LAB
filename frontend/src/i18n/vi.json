@@ -23,7 +23,9 @@
     "lucky_ticket": "Bạn nhận được vé quay thưởng",
     "lucky_ticket_expiring": "Vé quay thưởng sắp hết hạn",
     "lucky_prize_delivered": "Phần thưởng đã được gửi",
-    "lucky_prize_cancelled": "Phần thưởng đã bị hủy"
+    "lucky_prize_cancelled": "Phần thưởng đã bị hủy",
+    "agent_tree_change": "Một đại lý đã thay đổi đại lý cấp dưới",
+    "agent_promoted": "Bạn đã trở thành đại lý — mở trang đại lý"
   },
   "nav": {
     "dashboard": "Tổng quan",

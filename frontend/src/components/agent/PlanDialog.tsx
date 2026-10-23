@@ -22,15 +22,19 @@ import type { AgentLinkUser, AgentPlanChange } from '../../api/types'
 
 const EXTEND_OPTIONS = [7, 30, 60]
 
-export default function PlanDialog({
+// linkId 为 null = 走整棵树的端点（rev 47「全部客户」）；后端按调用者的整棵子树校验目标，
+// 返回带 via* 的那一行，所以这里按调用方传进来的行类型原样交回。
+// linkId null = the tree-wide endpoint (rev 47 "All customers"), which returns the
+// row with via* fields — handed back as whatever row type the caller passed in.
+export default function PlanDialog<U extends AgentLinkUser>({
   linkId,
   user,
   onDone,
   onClose,
 }: {
-  linkId: string
-  user: AgentLinkUser
-  onDone: (updated: AgentLinkUser) => void
+  linkId: string | null
+  user: U
+  onDone: (updated: U) => void
   onClose: () => void
 }) {
   const { t } = useTranslation()
@@ -59,7 +63,7 @@ export default function PlanDialog({
     setBusy(true)
     setError(null)
     try {
-      onDone(await agentApi.setUserPlan(linkId, body))
+      onDone((await (linkId ? agentApi.setUserPlan(linkId, body) : agentApi.setCustomerPlan(body))) as U)
     } catch (err: unknown) {
       setError(localizeApiError(err instanceof Error ? err.message : String(err)))
       setBusy(false)

@@ -274,6 +274,8 @@ export interface InviteLinkAgent {
   email: string
   nickname: string | null
   assignedAt: string | null
+  // 代理层级（rev 47）：第几级，一级 = 管理员任命。/ Agent level; 1 = appointed by an admin.
+  level?: number | null
 }
 
 // 代理页（/agent）：我持有的一条链接。刻意不含 grantsTrial（那是管理员与全局总闸之间的事）。
@@ -344,6 +346,65 @@ export interface AgentOverview {
   range: AdminOverviewRange
   headline: AdminOverviewHeadline
   activity: AdminActivityDay[]
+}
+
+// 代理层级（rev 47）。目标一律按邮箱定位，user id 不下发给代理。自己那一行的 parentEmail
+// 恒为 null：下级看不到上级。direct* 只算他自己链接带来的人，teamCustomers 加上整棵子树。
+// Agent hierarchy (rev 47). Targets are addressed by email; user ids never reach agents.
+// The caller's own parentEmail is always null. direct* = own links only; teamCustomers
+// adds the whole subtree.
+export interface AgentTeamNode {
+  email: string
+  nickname: string | null
+  level: number
+  parentEmail: string | null
+  isSelf: boolean
+  directCustomers: number
+  teamCustomers: number
+  activeUsers7d: number
+  mt5Users: number
+  createdAt: string | null
+}
+
+// level 为 null = 不是代理。canManage = 一级代理（只有一级能改会员、升 / 撤代理）。
+// level null = not an agent. canManage = top level (the only level that may write).
+export interface AgentTeam {
+  level: number | null
+  canManage: boolean
+  maxDepth: number
+  nodes: AgentTeamNode[]
+}
+
+// 「全部客户」的一行：经哪个代理来的（via*），自己是不是代理（agentLevel）。
+// One "All customers" row: who they came through, and their own level if an agent.
+export interface AgentTreeUser extends AgentLinkUser {
+  viaEmail: string | null
+  viaNickname: string | null
+  agentLevel: number | null
+}
+
+export interface AgentTreeUsers {
+  users: AgentTreeUser[]
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface AdminAgentTreeNode {
+  userId: string
+  email: string
+  nickname: string | null
+  level: number
+  parentUserId: string | null
+  links: { id: string; code: string; label: string; isActive: boolean }[]
+  directCustomers: number
+  teamCustomers: number
+  createdAt: string | null
+}
+
+export interface AdminAgentTree {
+  maxDepth: number
+  nodes: AdminAgentTreeNode[]
 }
 
 // 代理调整客户会员。extend 需要 days（1–60，后端同样卡上限）；downgrade 不带 days。
