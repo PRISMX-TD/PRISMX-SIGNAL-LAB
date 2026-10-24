@@ -24,7 +24,8 @@ import { announcementApi, notificationApi } from "../api/client"
 import { fmtDayShort } from "../api/utils"
 import type { Announcement, NotificationFeedItem } from "../api/types"
 import { useLive } from "../store/live"
-import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
+import { detectPushEnv, deviceNotifHint } from "../utils/pushEnv"
+import { useDeviceSubState } from "../utils/pushDeviceState"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
 import { useBackToClose } from "../utils/useBackToClose"
 import { getSharedNotifPrefs, invalidateSharedNotifPrefs, updateSharedNotifPrefs } from "../utils/notifPrefsShared"
@@ -157,10 +158,45 @@ export default function NotificationBell() {
   }, [open])
 
   const env = detectPushEnv()
-  const hintKey = PUSH_ENV_HINT_KEYS[env]
-  // hintKey 为 null 即环境完全就绪（granted/ready），无需提示。
-  // A null hintKey means the environment is fully ready (granted/ready).
-  const status: Status = !enabled ? "off" : env === "granted" ? "on" : "attention"
+  const deviceState = useDeviceSubState()
+  // 账号开着时这台设备还差什么（null = 真正就绪）。以前这里只看 PUSH_ENV_HINT_KEYS，
+  // 「这台设备没授权过」那一格（ready）落到兜底文案「当前浏览器不支持推送通知」上，订阅失败
+  // 则干脆显示绿色「已开启」——见 deviceNotifHint。
+  // What this device still lacks while the account toggle is on (null = genuinely ready).
+  // The never-granted state used to fall through to "this browser doesn't support push",
+  // and a failed subscribe showed a green "on" — see deviceNotifHint.
+  const deviceHint = deviceNotifHint(env, deviceState)
+  const status: Status = !enabled ? "off" : deviceHint ? "attention" : "on"
+
+  const currentFilters = () =>
+    notificationApi.getPrefs().then((prefs) => ({
+      selected_categories: prefs.selected_categories,
+      selected_symbols: prefs.selected_symbols,
+      event_types: prefs.event_types,
+    }))
+
+  // 「在本机开启 / 重试」：账号开关本来就开着，只补这台设备的权限与订阅。与 handleToggle(true)
+  // 的区别只在失败时——这里不能把开关弹回「关」：服务端仍是开，这台设备拒绝授权不改变别的
+  // 设备照常收。enableNotifications 必须是这个点击处理里的第一个调用（iOS 只认手势里同步
+  // 发起的权限申请，见它的注释）。
+  // "Enable on this device / retry": the account toggle is already on; only this device's
+  // permission and subscription are fixed. Unlike handleToggle(true), a failure must not flip
+  // the switch off — the server is still on and other devices still receive. The
+  // enableNotifications call must come first in the tap (iOS gesture rule, see its notes).
+  async function handleEnableHere() {
+    const pending = enableNotifications(currentFilters)
+    setErr(null)
+    setNote(null)
+    setBusy(true)
+    try {
+      await pending
+      updateSharedNotifPrefs({ enabled: true })
+    } catch (e: unknown) {
+      setErr(e instanceof NotifEnableError ? t(ENABLE_ERROR_KEYS[e.reason]) : t("account.notifError"))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   async function handleToggle(on: boolean) {
     setErr(null)
@@ -181,13 +217,7 @@ export default function NotificationBell() {
         // whatever filters the user already picked. This fetch must happen
         // inside enableNotifications, after the permission request; an await
         // before it keeps iOS Safari from showing the permission sheet at all.
-        const r = await enableNotifications(() =>
-          notificationApi.getPrefs().then((prefs) => ({
-            selected_categories: prefs.selected_categories,
-            selected_symbols: prefs.selected_symbols,
-            event_types: prefs.event_types,
-          })),
-        )
+        const r = await enableNotifications(currentFilters)
         setEnabled(true)
         updateSharedNotifPrefs({ enabled: true })
         // 偏好已经落库=账号层面确实开了，开关就该是「开」。这台设备没能建起推送订阅
@@ -381,9 +411,18 @@ export default function NotificationBell() {
                 {t("notifPanel.fullSettings")} →
               </Link>
             </div>
-            {status === "attention" && <p className="warn">{t(hintKey ?? "account.notifUnsupported")}</p>}
+            {status === "attention" && deviceHint && (
+              <p className="warn">
+                {t(deviceHint.key)}
+                {deviceHint.action && (
+                  <button type="button" className="notif-fix-btn" disabled={busy} onClick={() => void handleEnableHere()}>
+                    {t(deviceHint.action === "enable" ? "account.notifEnableHere" : "account.notifRetryHere")}
+                  </button>
+                )}
+              </p>
+            )}
             {err && <p className="err">{err}</p>}
-            {note && <p className="warn">{note}</p>}
+            {note && !deviceHint && <p className="warn">{note}</p>}
           </section>
         </div>
       )}

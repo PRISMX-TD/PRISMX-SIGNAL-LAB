@@ -246,7 +246,11 @@
     "notifIosNeedsInstall": "iPhone/iPad 需要先把本站添加到主屏幕才能接收推送。请在 Safari 底部分享菜单中选择「添加到主屏幕」，然后从主屏幕图标打开本站，再开启通知。",
     "notifIosTooOld": "当前 iOS 版本不支持网页推送通知。请将系统升级到 iOS 16.4 或更高版本后再试。",
     "notifPermissionBlocked": "通知权限已被拒绝，需要在系统设置中手动开启。iPhone/iPad：设置 → 通知 → Signal Lab；Android Chrome：浏览器菜单 → 设置 → 网站设置 → 通知。",
-    "notifDeviceFailed": "已开启。但这台设备暂时连不上推送服务器，后台通知可能收不到；连上后会自动恢复。"
+    "notifDeviceFailed": "已开启。但这台设备暂时连不上推送服务器，后台通知可能收不到；连上后会自动恢复。",
+    "notifDeviceNotAllowed": "通知已在账号里开启，但这台设备还没允许。点「在本机开启」，在系统弹窗里选「允许」，这台设备才能收到推送。",
+    "notifEnableHere": "在本机开启",
+    "notifRetryHere": "重试",
+    "notifDeviceEnabled": "这台设备已开启推送。"
   },
   "connStatus": {
     "online": "已连接",

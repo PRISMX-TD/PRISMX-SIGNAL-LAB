@@ -187,17 +187,32 @@ self.addEventListener("push", (event) => {
       data = { title: "PRISMX Signal", body: event.data.text() }
     }
   }
-  const promise = self.registration.showNotification(data.title, {
-    body: data.body || "",
-    icon: data.icon || "/icons/icon-192.png",
-    badge: "/icons/icon-192.png",
-    // 每条信号用唯一 tag，避免后一条覆盖前一条导致“丢通知”；renotify 确保每条都提醒。
-    // Unique tag per signal so a new one doesn't replace the previous; renotify alerts each time.
-    tag: data.tag || `prismx-signal-${Date.now()}`,
-    renotify: true,
-    requireInteraction: false,
-    data: { url: data.url || "/app" },
-  })
+  // 载荷是合法 JSON 但不是对象（如数字 / null）时也要有标题可用。
+  // A valid-JSON payload that isn't an object still needs a usable title.
+  if (!data || typeof data !== "object") data = { body: String(data) }
+  const title = typeof data.title === "string" && data.title ? data.title : "PRISMX Signal"
+  const body = typeof data.body === "string" ? data.body : ""
+  const promise = self.registration
+    .showNotification(title, {
+      body: body,
+      icon: data.icon || "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      // 每条信号用唯一 tag，避免后一条覆盖前一条导致“丢通知”；renotify 确保每条都提醒。
+      // Unique tag per signal so a new one doesn't replace the previous; renotify alerts each time.
+      tag: data.tag || `prismx-signal-${Date.now()}`,
+      renotify: true,
+      requireInteraction: false,
+      data: { url: data.url || "/app" },
+    })
+    // 带全套选项那次弹失败了（某个选项在这个引擎上不被接受），退回只带标题正文再弹一次。
+    // 这一步不是锦上添花：Web Push 订阅是 userVisibleOnly 的，收到推送却没弹出任何通知，
+    // Safari（iOS 主屏 Web App）会把这个订阅直接作废、Chrome 会改弹一条「本站已在后台更新」——
+    // 前者等于这台 iPhone 从此再也收不到推送，而且没有任何报错。
+    // If the full-options call fails (an option this engine rejects), retry with just title
+    // and body. Not a nicety: subscriptions are userVisibleOnly, and a push that shows nothing
+    // gets the subscription revoked by Safari (iOS home-screen apps) or a generic "site
+    // updated in the background" from Chrome — the former silently ends push on that iPhone.
+    .catch(() => self.registration.showNotification(title, { body: body, data: { url: "/app" } }))
   event.waitUntil(promise)
 })
 

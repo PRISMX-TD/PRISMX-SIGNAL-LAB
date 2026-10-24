@@ -576,7 +576,7 @@ def _fcm_should_prune(status: int, err: dict) -> bool:
     return False
 
 
-def _fcm_one(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
+def _fcm_one(sub: PushSubscription, payload: str, headers: dict | None = None) -> tuple[bool, bool]:
     """向单个 App 订阅推送一条消息，**保证不抛异常**——这是本函数的硬契约。
 
     派发循环外面只有一层 `except Exception`，异常从这里逃出去的后果不是"这条推送
@@ -595,13 +595,40 @@ def _fcm_one(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
     anything unexpected degrades to (False, False) plus one warning.
     """
     try:
-        return _fcm_send(sub, payload)
+        return _fcm_send(sub, payload, headers)
     except Exception as e:
         logger.warning("[push] fcm unexpected error sub=%s: %s", sub.id, e)
         return False, False
 
 
-def _fcm_send(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
+def _fcm_android_options(headers: dict | None) -> dict:
+    """把 Web Push 的 Urgency / TTL 头翻成 FCM 的 android 配置。
+
+    以前 FCM 这一支只写死 priority=high、不带 ttl：FCM 的默认 TTL 是 **4 周**。设备连不上
+    Google 的那段时间（大陆用户关了 VPN、手机长时间断网），消息在 FCM 那边一直排着，等
+    哪天连上了一股脑弹出来——十分钟前就过期的信号、昨天的成交提醒，全是噪音。网页那条路
+    早就按 TTL 头让推送服务过期丢弃，这里对齐。Urgency 也照搬：公告是 normal，不必为它
+    在 Doze 里唤醒设备。头缺失时保持原样（high、不设 ttl）。
+
+    Translate Web Push's Urgency / TTL headers into FCM's android config. This branch used
+    to hard-code priority=high with no ttl, and FCM's default TTL is four weeks: while a
+    device couldn't reach Google its messages queued up and later burst out together —
+    long-expired signals and yesterday's fills. The web path already lets the push service
+    drop expired messages via TTL; this aligns with it. Missing headers keep the old shape.
+    """
+    lower = {str(k).lower(): v for k, v in (headers or {}).items()}
+    urgency = str(lower.get("urgency") or "high").lower()
+    options: dict = {"priority": "normal" if urgency in ("normal", "low", "very-low") else "high"}
+    try:
+        ttl = int(lower["ttl"])
+    except (KeyError, TypeError, ValueError):
+        ttl = None
+    if ttl is not None and ttl >= 0:
+        options["ttl"] = f"{ttl}s"
+    return options
+
+
+def _fcm_send(sub: PushSubscription, payload: str, headers: dict | None = None) -> tuple[bool, bool]:
     """实际发送。返回 (是否发送成功, 是否应清理)，与 _webpush_one 同一份契约，
     好让派发循环两边一视同仁。只经由 _fcm_one 调用（它负责兜底）。
     The actual send, under the same (sent, should prune) contract as
@@ -650,11 +677,11 @@ def _fcm_send(sub: PushSubscription, payload: str) -> tuple[bool, bool]:
             "token": token,
             "notification": notification,
             "data": {"payload": payload},
-            # 与 Web Push 的 Urgency: high 对齐：信号与账户事件都有时效，要求系统
-            # 尽快下发（含 Doze 休眠期间尝试唤醒）。
-            # Mirrors Web Push's Urgency: high — signals and account events are
-            # time-sensitive, so ask the system to deliver ASAP (Doze included).
-            "android": {"priority": "high"},
+            # 与 Web Push 的 Urgency / TTL 对齐（见 _fcm_android_options）：信号与账户事件
+            # 要求系统尽快下发（含 Doze 休眠期间尝试唤醒），过了时效就让 FCM 丢掉。
+            # Mirrors Web Push's Urgency / TTL (see _fcm_android_options): deliver ASAP,
+            # Doze included, and let FCM drop it once stale.
+            "android": _fcm_android_options(headers),
         }
     }
     url = FCM_ENDPOINT_TMPL.format(project_id=project_id)
@@ -711,7 +738,7 @@ def _send_one(
     else takes the unchanged Web Push path. Same (sent, should prune) contract
     on both sides, so callers' pruning bookkeeping is untouched."""
     if is_fcm_endpoint(sub.endpoint):
-        return _fcm_one(sub, payload)
+        return _fcm_one(sub, payload, headers)
     return _webpush_one(sub, payload, pem, vapid_claims, headers)
 
 

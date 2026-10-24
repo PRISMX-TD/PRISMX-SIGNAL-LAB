@@ -246,7 +246,11 @@
     "notifIosNeedsInstall": "iPhone/iPad must add this site to the Home Screen to receive pushes. Tap Share in Safari, choose \"Add to Home Screen\", then open the site from that icon and enable notifications.",
     "notifIosTooOld": "This iOS version doesn't support web push notifications. Update to iOS 16.4 or later and try again.",
     "notifPermissionBlocked": "Notification permission was denied and must be re-enabled in system settings. iPhone/iPad: Settings → Notifications → Signal Lab. Android Chrome: browser menu → Settings → Site settings → Notifications.",
-    "notifDeviceFailed": "Enabled. This device cannot reach the push server right now, so background notifications may not arrive; it recovers automatically once it can."
+    "notifDeviceFailed": "Enabled. This device cannot reach the push server right now, so background notifications may not arrive; it recovers automatically once it can.",
+    "notifDeviceNotAllowed": "Notifications are on for your account, but this device hasn't allowed them yet. Tap \"Enable here\" and choose \"Allow\" in the system prompt so this device can receive pushes.",
+    "notifEnableHere": "Enable here",
+    "notifRetryHere": "Retry",
+    "notifDeviceEnabled": "Push notifications are now on for this device."
   },
   "connStatus": {
     "online": "Connected",

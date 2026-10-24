@@ -7,7 +7,7 @@ import { LiveProvider, useLive } from '../store/live'
 import { useAuth } from '../store/auth'
 import { pushApi } from '../api/client'
 import { getSharedNotifPrefs } from '../utils/notifPrefsShared'
-import { ensurePushSubscription, pushSupported } from '../utils/push'
+import { ensurePushSubscription, pushSupported, reportSubscription } from '../utils/push'
 import { recordDiag } from '../utils/pushDiag'
 import Logo from './Logo'
 import FestivalGreeting from '../festival/FestivalGreeting'
@@ -617,10 +617,19 @@ export default function Layout() {
   // never received anything. Runs silently only when this device already has
   // permission (the user opted in here at some point) and the account toggle
   // is on; never prompts.
+  // 2026-10-24：挂载时权限不是 granted 也照样挂上监听（只是那一刻不补订阅）。以前这里直接
+  // return，于是「账号开着、这台设备还没授权」的人（典型：iPhone 删掉主屏图标重新添加，
+  // 新图标的权限回到 default）在这次会话里点了「在本机开启」之后，回前台的自愈与 SW 轮换
+  // 广播的监听都不存在，要等下一次冷启动。
+  // Since 2026-10-24 the listeners are attached even when permission isn't granted at
+  // mount (no subscribe attempt at that moment). The early return meant a user who granted
+  // it mid-session (typically an iPhone home-screen icon re-added, its permission back to
+  // default) had no foreground self-heal or SW-renewal listener until the next cold start.
   useEffect(() => {
-    if (!pushSupported() || Notification.permission !== 'granted') return
+    if (!pushSupported()) return
     let cancelled = false
     const report = async () => {
+      if (Notification.permission !== 'granted') return
       try {
         // 共享读取：与 NotificationBell / NotifDeviceBanner 同一时刻的请求合并成一次。
         // Shared read: merged with the bell's and banner's simultaneous requests.
@@ -629,7 +638,7 @@ export default function Layout() {
         if (cancelled || !prefs.enabled) return
         await ensurePushSubscription(
           async () => (await pushApi.getVapidKey()).publicKey,
-          (endpoint, keys) => pushApi.subscribe(endpoint, keys),
+          (endpoint, keys, previouslyReported) => pushApi.subscribe(endpoint, keys, previouslyReported),
         )
       } catch (err) {
         // 仍然静默：这里只是自愈，不该打扰正常使用。原因记进诊断。
@@ -647,8 +656,7 @@ export default function Layout() {
     // immediately reports it without waiting for the next app visit.
     const onSwMsg = (ev: MessageEvent) => {
       if (ev.data?.type === "PUSH_SUB_RENEWED" && ev.data?.endpoint && ev.data?.keys) {
-        void pushApi
-          .subscribe(ev.data.endpoint, ev.data.keys)
+        void reportSubscription(ev.data.endpoint, ev.data.keys, (endpoint, keys) => pushApi.subscribe(endpoint, keys))
           .then(() => recordDiag('report'))
           .catch((err) => recordDiag('report', err))
       }

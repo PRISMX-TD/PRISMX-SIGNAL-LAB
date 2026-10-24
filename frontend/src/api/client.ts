@@ -2114,10 +2114,16 @@ export const inviteApi = {
 // 推送订阅 / Push subscriptions
 export const pushApi = {
   getVapidKey: () => request<{ publicKey: string }>('/notifications/push/vapid-public-key'),
-  subscribe: (endpoint: string, keys: { p256dh: string; auth: string }) =>
-    request<{ ok: boolean }>('/notifications/push/subscribe', {
+  // previouslyReported：这个 endpoint 本设备以前报过。后端发现行已被派发清掉（死订阅）就回
+  // stale: true、不插回去，前端据此换一条新订阅（见 utils/push.ts 的 REPORTED_KEY）。
+  // previouslyReported: this device reported the endpoint before; a pruned (dead) row comes
+  // back as stale: true instead of being re-inserted (see REPORTED_KEY in utils/push.ts).
+  subscribe: (endpoint: string, keys: { p256dh: string; auth: string }, previouslyReported = false) =>
+    request<{ ok: boolean; stale?: boolean }>('/notifications/push/subscribe', {
       method: 'POST',
-      body: JSON.stringify({ endpoint, keys }),
+      body: JSON.stringify(
+        previouslyReported ? { endpoint, keys, previously_reported: true } : { endpoint, keys },
+      ),
     }),
   // authToken：登出时本地 token 已清，用登出前那个 token 删本账号名下的订阅。
   // authToken: on logout the local token is already gone; the pre-logout token deletes the

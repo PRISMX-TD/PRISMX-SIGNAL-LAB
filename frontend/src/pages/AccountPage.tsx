@@ -10,7 +10,8 @@ import { userApi, notificationApi, setToken } from "../api/client"
 import type { ProfilePatch } from "../api/types"
 import { fmtDay, localizeApiError } from "../api/utils"
 import { getSWReg } from "../utils/push"
-import { detectPushEnv, PUSH_ENV_HINT_KEYS } from "../utils/pushEnv"
+import { detectPushEnv, deviceNotifHint } from "../utils/pushEnv"
+import { useDeviceSubState } from "../utils/pushDeviceState"
 import PushDiagnostics from "../components/PushDiagnostics"
 import { SkeletonBlock, SkeletonLine } from "../components/Skeleton"
 import BadgeIcon from "../components/badges/BadgeIcon"
@@ -105,7 +106,9 @@ export default function AccountPage() {
   const [notifWinEnd, setNotifWinEnd] = useState("22:00")
   const [notifMsg, setNotifMsg] = useState<{ kind: "ok" | "err" | "warn"; text: string } | null>(null)
   const [notifLoading, setNotifLoading] = useState(false)
-  const hintKey = PUSH_ENV_HINT_KEYS[detectPushEnv()]
+  // 账号开着时这台设备还差什么（含「这台设备没授权过」与「订阅失败」，见 deviceNotifHint）。
+  // What this device still lacks while the account toggle is on (see deviceNotifHint).
+  const deviceHint = deviceNotifHint(detectPushEnv(), useDeviceSubState())
   // 分类/品种/事件/时段偏好防抖落库 / debounce saving category, symbol, event & window prefs
   const catSaveTimer = useRef<number | undefined>(undefined)
   const symbolSaveTimer = useRef<number | undefined>(undefined)
@@ -318,6 +321,42 @@ export default function AccountPage() {
       })
     } finally {
       setProfileSaving(false)
+    }
+  }
+
+  // 「在本机开启 / 重试」：账号开关本来就开着，只补这台设备的权限与订阅；失败不动开关
+  // （服务端仍是开，别的设备照常收）。enableNotifications 必须是点击里的第一个调用：iOS
+  // 只认手势里同步发起的权限申请（见它的注释）。
+  // "Enable on this device / retry": the account toggle is already on, so only this
+  // device's permission and subscription are fixed and a failure leaves the switch alone.
+  // enableNotifications must be the first call in the tap (iOS gesture rule).
+  async function handleEnableHere() {
+    const pending = enableNotifications(() =>
+      Promise.resolve({
+        selected_categories: notifCats,
+        selected_symbols: notifSymbols,
+        event_types: notifEvents,
+      }),
+    )
+    setNotifMsg(null)
+    setNotifLoading(true)
+    try {
+      const { cats, syms, events, deviceSubscribed } = await pending
+      setNotifCats(cats)
+      setNotifSymbols(syms)
+      setNotifEvents(events)
+      // 订阅失败时（网页）deviceHint 已经换成「连不上推送服务器 + 重试」，这里不再重复一句；
+      // App 里订阅失败时壳已转长连接兜底，不算失败（见 utils/push.ts 的 subscribeFresh）。
+      // On a failed subscribe (web) the device hint already reads "can't reach the push server +
+      // retry"; in the app the shell has switched to its socket fallback (see utils/push.ts).
+      if (deviceSubscribed) setNotifMsg({ kind: "ok", text: t("account.notifDeviceEnabled") })
+    } catch (err: unknown) {
+      setNotifMsg({
+        kind: "err",
+        text: err instanceof NotifEnableError ? t(ENABLE_ERROR_KEYS[err.reason]) : t("account.notifError"),
+      })
+    } finally {
+      setNotifLoading(false)
     }
   }
 
@@ -874,7 +913,16 @@ export default function AccountPage() {
                 </Link>
               </p>
             )}
-            {notifEnabled && hintKey && <p className="acct-hint warn">{t(hintKey)}</p>}
+            {notifEnabled && deviceHint && (
+              <p className="acct-hint warn">
+                {t(deviceHint.key)}
+                {deviceHint.action && (
+                  <button type="button" className="notif-fix-btn" disabled={notifLoading} onClick={() => void handleEnableHere()}>
+                    {t(deviceHint.action === "enable" ? "account.notifEnableHere" : "account.notifRetryHere")}
+                  </button>
+                )}
+              </p>
+            )}
             {notifEnabled && <p className="acct-hint">{t("account.notifFilterHint")}</p>}
 
             {notifEnabled && (

@@ -275,6 +275,20 @@ class PushSubscribeIn(BaseModel):
     # 长度上限防止塞入超大字符串占用存储 / length caps guard against oversized blobs
     endpoint: str = Field(min_length=1, max_length=1024)
     keys: dict
+    # 前端说「这个 endpoint 我以前已经报过」。此时库里却没有这一行，几乎只有一种解释：
+    # 派发时推送服务回了 410/404（或 FCM UNREGISTERED），行被清掉了——这个订阅已经死了。
+    # 浏览器那边却还拿着它：iOS 与多数 Chromium 不发 pushsubscriptionchange，
+    # getSubscription() 照旧返回这条死订阅。以前前端每次回前台把它原样重报一遍，后端又把
+    # 死行插回去，下一次推送再 410 清掉……设备永远收不到、也永远不会自己好。
+    # 现在这种情况不插回去，回 stale=True，让前端退订、重新订阅一个新 endpoint 再报。
+    # 老前端不带这个字段（默认 False），行为与以前完全一样。
+    # The frontend says "I have reported this endpoint before". If the row is gone anyway,
+    # dispatch pruned it on a 410/404 (or FCM UNREGISTERED): the subscription is dead, yet
+    # the browser keeps returning it from getSubscription() (iOS and most Chromium never fire
+    # pushsubscriptionchange). Re-inserting it on every foreground meant a device that never
+    # received anything and never healed. Now it is not re-inserted: stale=True tells the
+    # frontend to unsubscribe and report a fresh endpoint. Old frontends omit the field.
+    previously_reported: bool = False
 
 
 @router.post("/push/subscribe")
@@ -358,6 +372,10 @@ def push_subscribe(
     if existing:
         existing.keys_p256dh = p256dh
         existing.keys_auth = auth
+    elif body.previously_reported:
+        # 见 PushSubscribeIn.previously_reported：死订阅不插回去，让前端换一个新的。
+        # See PushSubscribeIn.previously_reported: don't resurrect a dead subscription.
+        return {"ok": True, "stale": True}
     else:
         db.add(
             PushSubscription(

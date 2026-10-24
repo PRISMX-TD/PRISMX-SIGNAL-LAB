@@ -22,6 +22,7 @@
 // visible page, or an existing push subscription all mean "no").
 
 import { getSWReg } from "./push"
+import { isAppHidden } from "./appVisibility"
 
 // 与 public/sw.js 里的同名函数一字不差（那份是给 Service Worker 用的，sw.js 是直接
 // 交付的纯 JS，import 不进来，只能各留一份）。改这里记得同时改那里：口径不一致的
@@ -51,7 +52,18 @@ export async function showFallbackNotification(raw: unknown): Promise<boolean> {
     const title = typeof n.title === "string" ? n.title.trim() : ""
     if (!title) return false
     if (typeof Notification === "undefined" || Notification.permission !== "granted") return false
-    if (typeof document !== "undefined" && !document.hidden) return false
+    // 「页面正开着」不能只看 document.hidden：安卓 App（Capacitor 不调 WebView.onPause）切
+    // 后台、锁屏时，不少 WebView 上 document.hidden 一直是 false——于是这条兜底在它唯一要服务
+    // 的场景（大陆 App 挂在后台、靠前台服务维持长连接）里被这道闸挡掉，通知是否弹出全看
+    // 机型与系统版本，时有时无。isAppHidden 把 App 壳的 apppack:background / foreground
+    // 也算进来（见 utils/appVisibility.ts），网页上与 document.hidden 完全等价。
+    // "The page is open" can't rest on document.hidden alone: in the Android app (Capacitor
+    // never calls WebView.onPause) many WebViews keep document.hidden false when backgrounded
+    // or locked — so this fallback was blocked in the one case it exists for (a mainland app
+    // in the background on its foreground-service socket), firing or not by device model.
+    // isAppHidden also counts the shell's apppack:background / foreground; on the web it
+    // equals document.hidden.
+    if (!isAppHidden()) return false
 
     const reg = await getSWReg()
     // 有订阅 = 真推送这条路是通的，后端那一份会送到，别弹第二遍。

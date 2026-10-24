@@ -21,6 +21,8 @@
 // synchronously off a user gesture; one extra await on the toggle path makes it
 // never appear (see the notes in utils/notifications.ts).
 
+import type { DeviceSubState } from "./pushDeviceState"
+
 export type PushEnv =
   | "granted"            // API 齐备且已授权 / capable and already granted
   | "ready"              // API 齐备，权限可申请 / capable, permission requestable
@@ -144,4 +146,35 @@ export const PUSH_ENV_HINT_KEYS: Record<PushEnv, string | null> = {
   "ios-needs-install": "account.notifIosNeedsInstall",
   "ios-too-old": "account.notifIosTooOld",
   unsupported: "account.notifUnsupported",
+}
+
+/**
+ * **账号开关已经开着**时，这台设备还差什么：提示文案 key + 能就地解决的那一步。
+ * 两种都不差返回 null（真正就绪）。纯同步。
+ *
+ * 比 PUSH_ENV_HINT_KEYS 多出来的两格，都是以前界面上「看着开着、其实收不到」的情况：
+ *   · ready —— 能力齐备，只是**这台设备从没授权过**。账号开关是跨设备同步的，在电脑上开过、
+ *     或者 iPhone 删掉主屏图标重新添加（新图标权限回到 default），这台设备的开关就显示
+ *     「开」，却从没弹过权限框、从没订阅。以前铃铛在这一格显示「当前浏览器不支持推送通知」
+ *     ——错的，而且开关是开着的，用户只能先关再开才会弹权限框，几乎没人会这么试。
+ *     现在给「在本机开启」：点一下同步弹权限框（iOS 只认用户手势里同步发起的申请）。
+ *   · granted 但订阅失败 —— 有权限、pushManager.subscribe() 却没成（安卓 Chrome 连不上 FCM、
+ *     订阅超时）。以前铃铛是绿的。现在如实提示并给「重试」。
+ *
+ * What THIS device still lacks while the account toggle is on: hint key plus the action
+ * that fixes it in place; null when genuinely ready. Two states beyond PUSH_ENV_HINT_KEYS,
+ * both previously shown as "on" while nothing could arrive: `ready` (this device never
+ * granted permission — the toggle syncs across devices, and a re-added iPhone home-screen
+ * icon starts back at default; the bell used to say "this browser doesn't support push")
+ * gets "enable on this device", which must request permission synchronously in the tap;
+ * `granted` with a failed subscribe gets an honest hint and "retry".
+ */
+export function deviceNotifHint(
+  env: PushEnv,
+  device: DeviceSubState,
+): { key: string; action: "enable" | "retry" | null } | null {
+  if (env === "ready") return { key: "account.notifDeviceNotAllowed", action: "enable" }
+  if (env === "granted") return device === "failed" ? { key: "account.notifDeviceFailed", action: "retry" } : null
+  const key = PUSH_ENV_HINT_KEYS[env]
+  return key ? { key, action: null } : null
 }

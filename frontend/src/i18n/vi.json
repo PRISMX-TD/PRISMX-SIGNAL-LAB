@@ -246,7 +246,11 @@
     "notifIosNeedsInstall": "Trên iPhone/iPad, bạn cần thêm trang này vào Màn hình chính để nhận thông báo. Nhấn Chia sẻ trong Safari, chọn \"Thêm vào MH chính\", rồi mở trang từ biểu tượng đó và bật thông báo.",
     "notifIosTooOld": "Phiên bản iOS này không hỗ trợ thông báo đẩy web. Hãy cập nhật lên iOS 16.4 trở lên rồi thử lại.",
     "notifPermissionBlocked": "Quyền thông báo đã bị từ chối và cần bật lại trong cài đặt hệ thống. iPhone/iPad: Cài đặt → Thông báo → Signal Lab. Android Chrome: menu trình duyệt → Cài đặt → Cài đặt trang web → Thông báo.",
-    "notifDeviceFailed": "Đã bật. Thiết bị này hiện không kết nối được máy chủ push, nên thông báo nền có thể không đến; sẽ tự khôi phục khi kết nối lại được."
+    "notifDeviceFailed": "Đã bật. Thiết bị này hiện không kết nối được máy chủ push, nên thông báo nền có thể không đến; sẽ tự khôi phục khi kết nối lại được.",
+    "notifDeviceNotAllowed": "Thông báo đã bật cho tài khoản, nhưng thiết bị này chưa cho phép. Nhấn \"Bật trên máy này\" rồi chọn \"Cho phép\" trong hộp thoại hệ thống để thiết bị này nhận được thông báo đẩy.",
+    "notifEnableHere": "Bật trên máy này",
+    "notifRetryHere": "Thử lại",
+    "notifDeviceEnabled": "Đã bật thông báo đẩy trên thiết bị này."
   },
   "connStatus": {
     "online": "Đã kết nối",

@@ -6,8 +6,8 @@
 // dance (permission request, Service Worker subscription, prefs save). Pulled
 // out here so the two don't drift.
 import { notificationApi, pushApi } from "../api/client"
-import { subscribePush, unsubscribePush, getSWReg, pushSupported } from "./push"
-import { recordDiag } from "./pushDiag"
+import { ensurePushSubscription, forgetReportedSubscription, unsubscribePush, getSWReg, pushSupported } from "./push"
+import { setDeviceSubState } from "./pushDeviceState"
 
 // 白名单哨兵值：不限（命中任意取值，含以后才出现的品种）。与后端
 // push_dispatch.py 的 ALL_SENTINEL 保持一致。
@@ -82,6 +82,8 @@ export async function disableNotifications(): Promise<void> {
     (async () => {
       const reg = await getSWReg()
       const currentSub = await reg?.pushManager?.getSubscription()
+      forgetReportedSubscription()
+      setDeviceSubState("unknown")
       if (currentSub) {
         const json = currentSub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
         await pushApi.unsubscribe(json.endpoint!, json.keys!)
@@ -164,17 +166,26 @@ export async function enableNotifications(
   // 现在：落库失败照旧抛（那才是真的没开成），订阅失败只报一个标志位，由调用方决定
   // 怎么说。**不吞掉、不假装成功**——调用方拿到 deviceSubscribed=false 必须如实告诉用户
   // 这台设备可能收不到后台通知。
+  //
+  // 建订阅 / 上报统一走 ensurePushSubscription（与 Layout 的自愈同一处），死订阅识别因此
+  // 在这条路上也生效。VAPID 公钥仍与落库并行预取；已有订阅时用不上，先挂一个空 catch，
+  // 免得它的失败成为未处理的拒绝。
+  // Subscribing / reporting goes through ensurePushSubscription (the same code as Layout's
+  // self-heal), so the stale check applies here too. The VAPID key is still prefetched in
+  // parallel with the save; with an existing subscription it goes unused, hence the noop catch.
   const vapidPromise = pushApi.getVapidKey()
+  vapidPromise.catch(() => {})
   let deviceSubscribed = true
   const subscribeThisDevice = async () => {
     try {
-      const [vapid] = await Promise.all([vapidPromise, getSWReg()])
-      const sub = await subscribePush(vapid.publicKey)
-      if (sub) await pushApi.subscribe(sub.endpoint, sub.keys)
-      else deviceSubscribed = false
-    } catch (err) {
+      deviceSubscribed = await ensurePushSubscription(
+        async () => (await vapidPromise).publicKey,
+        (endpoint, keys, previouslyReported) => pushApi.subscribe(endpoint, keys, previouslyReported),
+      )
+      if (!deviceSubscribed) setDeviceSubState("failed")
+    } catch {
+      // 失败原因 ensurePushSubscription 已逐环记进诊断 / each step already recorded its failure
       deviceSubscribed = false
-      recordDiag("subscribe", err)
     }
   }
   await Promise.all([
