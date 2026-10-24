@@ -6,7 +6,7 @@
 // shape. Every label is the plain name.
 import { geoMercator, geoNaturalEarth1, geoPath } from 'd3-geo'
 import type { FeatureCollection, Geometry } from 'geojson'
-import { useMemo, useState, type MouseEvent } from 'react'
+import { useEffect, useMemo, useState, type KeyboardEvent, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { feature } from 'topojson-client'
 import type { Topology } from 'topojson-specification'
@@ -64,7 +64,15 @@ export default function GeoMap({ mode, countries, provinces, lang, onPickChina }
     return c ? countryLabel(c, lang) : fallback
   }
 
+  // 切换视图时清掉残留提示 / drop any stale tooltip when the view switches
+  useEffect(() => setHover(null), [mode])
+
   const show = (e: MouseEvent<SVGElement>, name: string, count: number) => {
+    // 没人的地区不弹提示（避免显示英文底图名） / no tooltip for empty regions
+    if (count === 0) {
+      setHover(null)
+      return
+    }
     const box = (e.currentTarget.ownerSVGElement ?? e.currentTarget).getBoundingClientRect()
     setHover({ name, count, x: e.clientX - box.left, y: e.clientY - box.top })
   }
@@ -86,6 +94,19 @@ export default function GeoMap({ mode, countries, provinces, lang, onPickChina }
               onMouseMove={(e) => show(e, name, count)}
               onMouseLeave={() => setHover(null)}
               onClick={clickable ? onPickChina : undefined}
+              {...(clickable
+                ? {
+                    role: 'button',
+                    tabIndex: 0,
+                    'aria-label': t('admin.overview.geo.clickChina'),
+                    onKeyDown: (e: KeyboardEvent<SVGPathElement>) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onPickChina()
+                      }
+                    },
+                  }
+                : {})}
             />
           )
         })}
