@@ -3,7 +3,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from fastapi import Depends, Header, HTTPException, Response, status
+from fastapi import Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal, get_db
 from app.core.security import create_access_token, decode_token_payload
 from app.models import User, UserActiveDay
-from app.services import shared_cache
+from app.services import ip_log, shared_cache
 from app.services.plan_expiry import downgrade_if_expired
 from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
 
@@ -188,6 +188,7 @@ def get_current_user(
     response: Response,
     authorization: str | None = Header(default=None),
     db: Session = Depends(get_db),
+    request: Request = None,
 ) -> User:
     """从 Authorization: Bearer <token> 解析当前用户 / resolve current user from JWT."""
     if not authorization or not authorization.startswith("Bearer "):
@@ -259,11 +260,11 @@ def get_current_user(
         if remaining < settings.JWT_EXPIRE_MINUTES * 60 / 2:
             response.headers[REFRESHED_TOKEN_HEADER] = create_access_token(user.id, user.token_version or 0)
 
-    _touch_last_active(db, user)
+    _touch_last_active(db, user, request)
     return user
 
 
-def _touch_last_active(db: Session, user: User) -> None:
+def _touch_last_active(db: Session, user: User, request: Request | None = None) -> None:
     """限流写入 last_active_at：同一用户 5 分钟内只落库一次，供 DAU 统计用。
     跨 UTC 日界的首次触发额外写一行 user_active_days（「三日之约」数据源）；
     与另一并发会话撞唯一约束时只撤销这一行（SAVEPOINT），last_active_at 与
@@ -278,7 +279,8 @@ def _touch_last_active(db: Session, user: User) -> None:
     user_active_days row. A unique-constraint collision with a concurrent
     session rolls back only that insert (SAVEPOINT); last_active_at and anything
     else pending on the session still commit. A whole-session rollback here
-    would silently discard sibling writes made earlier in the auth chain."""
+    would silently discard sibling writes made earlier in the auth chain.
+    真正落库的那次顺带记录 IP（ip_log.record，rev 48）。"""
     now = datetime.now(timezone.utc)
     last = user.last_active_at
     if last is not None:
@@ -317,6 +319,10 @@ def _touch_last_active(db: Session, user: User) -> None:
             # The savepoint undoes only this insert; the row exists, which is the
             # correct end state.
             pass
+    # 用户 IP 与地区（rev 48）：只在这次真正落库时顺带记一次，失败不影响鉴权。
+    # Login IP and region (rev 48): logged only on this throttled write; never fails auth.
+    if request is not None and request.client is not None:
+        ip_log.record(db, user, request.client.host, now)
     db.commit()
 
 
