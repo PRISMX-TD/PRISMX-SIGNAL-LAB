@@ -356,7 +356,8 @@ export interface AgentOverview {
 export interface AgentTeamNode {
   email: string
   nickname: string | null
-  level: number
+  // 只有一级代理看得到层级；二级起恒为 null。/ Levels reach top-level agents only; null below.
+  level: number | null
   parentEmail: string | null
   isSelf: boolean
   directCustomers: number
@@ -369,6 +370,9 @@ export interface AgentTeamNode {
 // level 为 null = 不是代理。canManage = 一级代理（只有一级能改会员、升 / 撤代理）。
 // level null = not an agent. canManage = top level (the only level that may write).
 export interface AgentTeam {
+  // isAgent = 在不在代理树上；level 只有一级代理才有（=1），二级起为 null（不让下级知道自己第几级）。
+  // isAgent: in the tree at all; level is 1 for top-level agents and null below.
+  isAgent: boolean
   level: number | null
   canManage: boolean
   maxDepth: number
@@ -380,6 +384,8 @@ export interface AgentTeam {
 export interface AgentTreeUser extends AgentLinkUser {
   viaEmail: string | null
   viaNickname: string | null
+  // isAgent 人人可见；agentLevel 只有一级代理看得到。/ agentLevel is for top-level viewers only.
+  isAgent: boolean
   agentLevel: number | null
 }
 

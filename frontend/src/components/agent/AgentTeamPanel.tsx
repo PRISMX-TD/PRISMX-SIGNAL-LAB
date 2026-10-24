@@ -65,7 +65,7 @@ function NodeCustomers({
     }
   }, [team, agentEmail])
 
-  const plain = (rows ?? []).filter((u) => u.agentLevel == null)
+  const plain = (rows ?? []).filter((u) => !u.isAgent)
   const more = total - (rows?.length ?? 0)
   return (
     <div
@@ -180,9 +180,12 @@ export default function AgentTeamPanel({
             <div className="min-w-0">
               <p className="flex flex-wrap items-center gap-1.5 text-sm text-neutral-100">
                 <span className="truncate">{n.nickname || n.email}</span>
-                <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
-                  {t('agent.team.level', { n: n.level })}
-                </span>
+                {/* 层级只有一级代理看得到（后端二级起不下发）。/ Levels are sent to top-level agents only. */}
+                {n.level != null && (
+                  <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
+                    {t('agent.team.level', { n: n.level })}
+                  </span>
+                )}
                 {n.isSelf && (
                   <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[11px] text-neutral-400">
                     {t('agent.team.you')}
@@ -248,7 +251,7 @@ export default function AgentTeamPanel({
         <p>
           {team.canManage
             ? t('agent.team.topHint', { max: team.maxDepth })
-            : t('agent.team.readOnlyHint', { n: team.level ?? 0 })}
+            : t('agent.team.readOnlyHint')}
         </p>
         <p className="text-neutral-500">{t('agent.team.countNote')}</p>
       </div>

@@ -2217,10 +2217,12 @@ class AgentTeamNodeOut(BaseModel):
     One agent in the "Team" view, the caller's own row included. Identified by
     email (user ids never reach agents). The caller's own parentEmail is always
     null: looking upwards is not possible by construction. direct* counts only
-    their own links; teamCustomers adds their whole subtree."""
+    their own links; teamCustomers adds their whole subtree.
+    level 只给一级代理看（2026-10-24 产品决定）：二级起连自己是第几级都不知道，恒为 null。
+    level is shown to top-level agents only; null for everyone below."""
     email: str
     nickname: str | None = None
-    level: int
+    level: int | None = None
     parentEmail: str | None = None
     isSelf: bool = False
     directCustomers: int = 0
@@ -2232,9 +2234,11 @@ class AgentTeamNodeOut(BaseModel):
 
 class AgentTeamOut(BaseModel):
     """GET /agent/team：我是第几级、能不能改、最大层级、我这棵树（宽度优先，自己在最前）。
-    level 为 null = 不是代理（nodes 为空）。
-    The caller's level, whether they may write, the max depth, and their tree
-    (breadth-first, self first). level null = not an agent."""
+    isAgent = 在不在树上；level 只有一级代理才给（=1），二级起一律 null——下级不该知道自己
+    （和下面每个人）是第几级（2026-10-24 产品决定）。
+    isAgent: whether the caller is in the tree at all. level is given to top-level
+    agents only (always 1); null below, so sub-agents never learn their depth."""
+    isAgent: bool = False
     level: int | None = None
     canManage: bool = False
     maxDepth: int
@@ -2245,9 +2249,11 @@ class AgentTreeUserOut(AgentLinkUserOut):
     """「全部客户」里的一行：AgentLinkUserOut 的全部字段，加上他来自哪个代理（via*），
     以及他自己是不是代理（agentLevel，不是为 null）。
     One row of "All customers": every AgentLinkUserOut field plus the agent they
-    came through (via*) and their own level if they are an agent."""
+    came through (via*) and whether they are an agent themselves. agentLevel is
+    filled for top-level viewers only (sub-agents see isAgent without a level)."""
     viaEmail: str | None = None
     viaNickname: str | None = None
+    isAgent: bool = False
     agentLevel: int | None = None
 
 

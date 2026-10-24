@@ -87,7 +87,7 @@ export default function AgentCustomersPanel({
       { value: '', label: t('agent.customers.allAgents') },
       ...team.nodes.map((n) => ({
         value: n.email,
-        label: `${n.nickname || n.email} · ${t('agent.team.level', { n: n.level })}`,
+        label: n.level != null ? `${n.nickname || n.email} · ${t('agent.team.level', { n: n.level })}` : n.nickname || n.email,
       })),
     ],
     [team.nodes, t],
@@ -129,16 +129,16 @@ export default function AgentCustomersPanel({
     )
 
   const agentBadge = (u: AgentTreeUser) =>
-    u.agentLevel != null && (
+    u.isAgent && (
       <span className="ml-1.5 rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
-        {t('agent.customers.agentBadge', { n: u.agentLevel })}
+        {u.agentLevel != null ? t('agent.customers.agentBadge', { n: u.agentLevel }) : t('agent.customers.agentBadgePlain')}
       </span>
     )
 
   // 升为代理按钮：已经是代理不出现；超过最大层级置灰并把原因写在 title 与手机上的说明里。
   // Promote: hidden for agents; disabled with the reason past the max depth.
   const promoteButton = (u: AgentTreeUser, wide = false) => {
-    if (!canManage || u.agentLevel != null) return null
+    if (!canManage || u.isAgent) return null
     const lvl = nextLevel(u)
     const tooDeep = lvl != null && lvl > team.maxDepth
     return (

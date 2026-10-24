@@ -1324,9 +1324,13 @@ def _tree_target(db: Session, codes: dict, email: str, agent: User) -> User:
     return target
 
 
-def _tree_user_outs(db: Session, rows: list[User], codes: dict) -> list[AgentTreeUserOut]:
+def _tree_user_outs(
+    db: Session, rows: list[User], codes: dict, show_levels: bool = True
+) -> list[AgentTreeUserOut]:
     """一批客户行：活跃日、MT5、来自哪个代理、自己是不是代理，各一条批量查询。
-    A batch of customer rows; one batched query per extra column."""
+    show_levels=False（二级起的代理在看）时只说是不是代理、不给层级。
+    A batch of customer rows; one batched query per extra column. With
+    show_levels=False (a sub-agent viewing) only isAgent is given, no level."""
     ids = [u.id for u in rows]
     last_active = _last_active_days(db, ids)
     accounts = _mt5_accounts(db, ids)
@@ -1353,7 +1357,8 @@ def _tree_user_outs(db: Session, rows: list[User], codes: dict) -> list[AgentTre
                 mt5Accounts=accounts.get(u.id, []),
                 viaEmail=owner.email if owner else None,
                 viaNickname=owner.nickname if owner else None,
-                agentLevel=levels.get(u.id),
+                isAgent=u.id in levels,
+                agentLevel=levels.get(u.id) if show_levels else None,
             )
         )
     return out
@@ -1393,7 +1398,7 @@ def agent_team(db: Session, user: User) -> AgentTeamOut:
     people = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()}
     me = node_of(db, user.id)
 
-    def row(uid: str, lvl: int, parent: str | None, created) -> AgentTeamNodeOut:
+    def row(uid: str, lvl: int | None, parent: str | None, created) -> AgentTeamNodeOut:
         u = people.get(uid)
         p = people.get(parent) if parent else None
         return AgentTeamNodeOut(
@@ -1409,9 +1414,14 @@ def agent_team(db: Session, user: User) -> AgentTeamOut:
             createdAt=created,
         )
 
-    out = [row(user.id, level, None, me.created_at if me else None)]
-    out += [row(n.user_id, n.depth or 1, n.parent_user_id, n.created_at) for n in nodes]
-    return AgentTeamOut(level=level, canManage=level == 1, maxDepth=max_depth, nodes=out)
+    # 层级只给一级代理看：二级起连自己是第几级都不下发（下级的层级减一就是自己的，一起抹掉）。
+    # Levels go to top-level agents only — a sub-agent's children would give theirs away too.
+    top = level == 1
+    out = [row(user.id, level if top else None, None, me.created_at if me else None)]
+    out += [row(n.user_id, (n.depth or 1) if top else None, n.parent_user_id, n.created_at) for n in nodes]
+    return AgentTeamOut(
+        isAgent=True, level=level if top else None, canManage=top, maxDepth=max_depth, nodes=out
+    )
 
 
 def agent_tree_users(
@@ -1449,7 +1459,8 @@ def agent_tree_users(
         query = query.filter(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
     total = query.count()
     rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
-    return AgentTreeUsersOut(users=_tree_user_outs(db, rows, codes), total=total, limit=limit, offset=offset)
+    users = _tree_user_outs(db, rows, codes, show_levels=_caller_level(db, user) == 1)
+    return AgentTreeUsersOut(users=users, total=total, limit=limit, offset=offset)
 
 
 def agent_tree_set_plan(db: Session, agent: User, body: AgentPlanUpdate) -> AgentTreeUserOut:

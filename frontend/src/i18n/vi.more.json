@@ -1375,7 +1375,7 @@
       "cleared": "Đã xóa",
       "invalid": "Phải là link https của Make Capital"
     },
-    "subtitleReadOnly": "Bạn là đại lý cấp {{n}}: có thể xem liên kết của mình, đại lý cấp dưới và khách hàng của họ. Mọi nội dung chỉ để xem.",
+    "subtitleReadOnly": "Bạn là đại lý cấp dưới: có thể xem liên kết của mình, đại lý cấp dưới và khách hàng của họ. Mọi nội dung chỉ để xem.",
     "tabs": {
       "links": "Liên kết của tôi",
       "team": "Đội nhóm",
@@ -1390,7 +1390,7 @@
       "direct": "Khách trực tiếp",
       "total": "Khách cả nhóm",
       "topHint": "Bạn là đại lý cấp 1: có thể điều chỉnh gói cho mọi khách trong cây của mình, nâng khách hàng thành đại lý cấp dưới ở mục “Tất cả khách hàng” (tối đa cấp {{max}}) và gỡ đại lý cấp dưới.",
-      "readOnlyHint": "Bạn là đại lý cấp {{n}}, mục này chỉ để xem. Việc nâng/gỡ đại lý và điều chỉnh gói do đại lý cấp 1 thực hiện.",
+      "readOnlyHint": "Mục này chỉ để xem. Việc nâng/gỡ đại lý và điều chỉnh gói do đại lý cấp 1 thực hiện.",
       "countNote": "Khách trực tiếp chỉ tính người đến từ liên kết của chính họ; khách cả nhóm cộng thêm mọi người bên dưới. Hoạt động 7 ngày và MT5 đã kết nối chỉ tính khách trực tiếp.",
       "emptyTop": "Chưa có đại lý cấp dưới. Bạn có thể nâng khách hàng thành đại lý ở mục “Tất cả khách hàng”.",
       "empty": "Chưa có đại lý cấp dưới.",
@@ -1406,7 +1406,8 @@
       "count": "{{n}} khách",
       "empty": "Chưa có khách hàng.",
       "colVia": "Đến từ",
-      "agentBadge": "Đại lý cấp {{n}}"
+      "agentBadge": "Đại lý cấp {{n}}",
+      "agentBadgePlain": "Đại lý"
     },
     "promote": {
       "button": "Nâng thành đại lý",

@@ -4081,7 +4081,7 @@
       "cleared": "Cleared",
       "invalid": "Must be an https Make Capital link"
     },
-    "subtitleReadOnly": "You are a level-{{n}} agent: you can see your links, your sub-agents and their clients. Everything here is read-only.",
+    "subtitleReadOnly": "You are a sub-agent: you can see your links, your sub-agents and their clients. Everything here is read-only.",
     "tabs": {
       "links": "My links",
       "team": "Team",
@@ -4096,7 +4096,7 @@
       "direct": "Direct clients",
       "total": "Team clients",
       "topHint": "You are a top-level agent: you can adjust membership for anyone in your tree, promote clients to sub-agents from “All clients” (up to level {{max}}), and remove sub-agents.",
-      "readOnlyHint": "You are a level-{{n}} agent; this view is read-only. Promotions and membership changes are made by your top-level agent.",
+      "readOnlyHint": "This view is read-only. Promotions and membership changes are made by your top-level agent.",
       "countNote": "Direct clients counts people from their own links; team clients adds everyone below them. Active (7d) and MT5 linked count direct clients only.",
       "emptyTop": "No sub-agents yet. Promote a client from “All clients”.",
       "empty": "No sub-agents yet.",
@@ -4112,7 +4112,8 @@
       "count": "{{n}} clients",
       "empty": "No clients yet.",
       "colVia": "Came via",
-      "agentBadge": "Level-{{n}} agent"
+      "agentBadge": "Level-{{n}} agent",
+      "agentBadgePlain": "Agent"
     },
     "promote": {
       "button": "Make agent",

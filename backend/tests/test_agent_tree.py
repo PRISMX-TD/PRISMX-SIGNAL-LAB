@@ -135,7 +135,7 @@ def test_upper_sees_the_whole_subtree_lower_sees_only_its_own(db_session):
     assert _emails(agent_tree_users(db_session, a)) == {a1.email, b.email, c1.email}
 
     b_team = agent_team(db_session, b)
-    assert b_team.level == 2 and b_team.canManage is False
+    assert b_team.isAgent and b_team.level is None and b_team.canManage is False
     # 下级看不到上级：自己那一行没有 parentEmail，树里也没有 A。
     assert [n.email for n in b_team.nodes] == [b.email]
     assert b_team.nodes[0].parentEmail is None
@@ -148,6 +148,26 @@ def test_customer_rows_say_which_agent_they_came_through(db_session):
     assert rows[c1.email].viaEmail == b.email and rows[c1.email].viaNickname == "小B"
     assert rows[a1.email].viaEmail == a.email
     assert rows[b.email].agentLevel == 2 and rows[a1.email].agentLevel is None
+    assert rows[b.email].isAgent and not rows[a1.email].isAgent
+
+
+def test_sub_agents_never_see_levels(db_session):
+    # 2026-10-24 产品决定：二级起看不到自己（和下级）是第几级，只有一级代理看得到层级。
+    admin, a, la, a1, b, lb, c1 = _tree(db_session)
+    agent_promote(db_session, a, c1.email)  # c1 成为 B 下面的第 3 级
+
+    a_team = agent_team(db_session, a)
+    assert [n.level for n in a_team.nodes] == [1, 2, 3]
+
+    b_team = agent_team(db_session, b)
+    assert b_team.isAgent and b_team.level is None
+    assert [n.email for n in b_team.nodes] == [b.email, c1.email]
+    assert all(n.level is None for n in b_team.nodes)
+    row = next(u for u in agent_tree_users(db_session, b).users if u.email == c1.email)
+    assert row.isAgent and row.agentLevel is None
+    # 一级代理那边照旧看得到。
+    row = next(u for u in agent_tree_users(db_session, a).users if u.email == c1.email)
+    assert row.isAgent and row.agentLevel == 3
 
 
 def test_filter_by_agent_stays_inside_the_scope(db_session):
@@ -165,6 +185,7 @@ def test_non_agent_gets_an_empty_tree(db_session):
     u = _mk_user(db_session, "u@x.io")
     team = agent_team(db_session, u)
     assert team.level is None and team.nodes == [] and team.canManage is False
+    assert team.isAgent is False
     assert agent_tree_users(db_session, u).total == 0
 
 

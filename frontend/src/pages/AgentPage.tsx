@@ -214,12 +214,12 @@ export default function AgentPage() {
       <PageHead
         as="h1"
         title={t('agent.title')}
-        subtitle={team && !canManage && team.level != null ? t('agent.subtitleReadOnly', { n: team.level }) : t('agent.subtitle')}
+        subtitle={team?.isAgent && !canManage ? t('agent.subtitleReadOnly') : t('agent.subtitle')}
         count={tab === 'links' && links && links.length > 1 ? links.length : null}
       />
 
-      {/* 页签：只有确实是代理（team.level 非空）才出现。/ Tabs, only for actual agents. */}
-      {team && team.level != null && (
+      {/* 页签：只有确实在代理树上（isAgent）才出现。/ Tabs, only for agents in the tree. */}
+      {team?.isAgent && (
         <div className="mb-4 flex flex-wrap gap-1.5" role="tablist">
           {TABS.map((k) => (
             <button
