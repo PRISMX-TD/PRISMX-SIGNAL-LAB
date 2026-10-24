@@ -448,7 +448,7 @@
             "MT5 connection data: the login number, broker server name, account name, currency, balance, equity, leverage and symbol suffix reported by the bridge app, plus its online heartbeat time.",
             "Trading records: the place / close / modify instructions you send through the platform and their receipts; and the real closing-deal records for platform-opened positions reported by the bridge (time, symbol, side, volume, fill price, P&L).",
             "Usage statistics: page-view counts and dwell time (aggregated per page-and-hour, containing no user identity), plus a per-day dedup marker for \"this user opened this page on this day\" (day granularity only — no timestamp, no duration).",
-            "Technical data: your push subscription endpoint (when notifications are on), the bridge app's version, and request IP addresses (used only for rate limiting and failed-login lockout, never for profiling)."
+            "Technical data: your push subscription endpoint (when notifications are on) and the bridge app version; request IP addresses are used for rate limiting and failed-login lockout; for account security and statistics we also record login IPs and the approximate location estimated from them (country / province / city). We do not build profiles."
           ]
         },
         {
@@ -492,6 +492,7 @@
           "p": [
             "Account and trading records are kept for as long as your account exists. Unbinding an MT5 account does not delete its historical fills — they simply stop counting toward your statistics, and re-binding restores the view.",
             "Per-day page-visit dedup markers are pruned automatically after roughly 100 days.",
+            "Login IP records are deleted automatically 90 days after they were last seen; an account's approximate location (country / province / city) is kept with the account.",
             "1-minute candles are kept for 30 days by default; other timeframes are kept long-term (this is market data and contains no personal identity).",
             "After you close your account we delete or anonymise your personal data within a reasonable period, except where the law requires retention."
           ]
