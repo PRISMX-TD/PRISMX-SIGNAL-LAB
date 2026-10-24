@@ -22,7 +22,9 @@ export default function UserIpSheet({ userId, userLabel, onClose, onPickUser }: 
   const [rows, setRows] = useState<AdminUserIp[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [openIp, setOpenIp] = useState<string | null>(null)
-  const [others, setOthers] = useState<AdminIpUser[] | null>(null)
+  // 展开区的数据带着它所属的 IP：晚到的旧响应对不上当前展开的 IP 就丢弃。
+  // The expansion data carries its IP: a late response for a no-longer-open IP is dropped.
+  const [others, setOthers] = useState<{ ip: string; list: AdminIpUser[] | null; failed: boolean } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -36,10 +38,10 @@ export default function UserIpSheet({ userId, userLabel, onClose, onPickUser }: 
   const toggle = (ip: string) => {
     if (openIp === ip) { setOpenIp(null); return }
     setOpenIp(ip)
-    setOthers(null)
+    setOthers({ ip, list: null, failed: false })
     adminApi.ipUsers(ip).then(
-      (list) => setOthers(list.filter((u) => u.userId !== userId)),
-      () => setOthers([]),
+      (list) => setOthers((prev) => (prev?.ip === ip ? { ip, list: list.filter((u) => u.userId !== userId), failed: false } : prev)),
+      () => setOthers((prev) => (prev?.ip === ip ? { ip, list: null, failed: true } : prev)),
     )
   }
 
@@ -68,9 +70,11 @@ export default function UserIpSheet({ userId, userLabel, onClose, onPickUser }: 
               )}
               {openIp === r.ip && (
                 <div className="mt-2 border-t border-white/10 pt-2">
-                  {!others ? <SkeletonLine height={40} /> : (
+                  {others?.ip === r.ip && others.failed ? (
+                    <p className="text-down">{t('admin.users.ip.failed')}</p>
+                  ) : others?.ip !== r.ip || !others.list ? <SkeletonLine height={40} /> : (
                     <ul className="space-y-1">
-                      {others.map((u) => (
+                      {others.list.map((u) => (
                         <li key={u.userId} className="flex justify-between gap-3">
                           <button type="button" onClick={() => onPickUser(u.email)} className="truncate text-left text-prism-300 hover:underline">
                             {u.nickname ? `${u.nickname} · ${u.email}` : u.email}
