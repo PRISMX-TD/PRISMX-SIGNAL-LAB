@@ -1021,7 +1021,22 @@
     "n2": "请只从本页下载安装包，不要安装他人转发的 APK。",
     "n3": "安装包托管在 GitHub，个别网络下下载较慢，可稍后重试。",
     "downloadBtn": "下载 APK",
-    "notesTitle": "安装说明"
+    "notesTitle": "安装说明",
+    "inApp": {
+      "installBtn": "下载并安装",
+      "installOnlyBtn": "安装",
+      "current": "当前版本 {{version}}",
+      "downloading": "正在下载 {{percent}}%",
+      "downloadingNoSize": "正在下载…",
+      "opening": "下载完成，正在打开安装界面…",
+      "opened": "已打开安装界面。若不小心退出了，点「安装」再来一次。",
+      "upToDate": "已经是最新版本（{{version}}），不用更新。",
+      "needPermission": "需要允许 Signal Lab 安装应用：点「安装」，在系统设置里打开「允许此来源」，返回后会接着安装。",
+      "failedNetwork": "下载没完成，请检查网络后重试。",
+      "failedPackage": "下载到的安装包没通过校验，已删除，请稍后重试。",
+      "failedInstall": "没能打开安装界面。",
+      "browserFallback": "改用浏览器下载"
+    }
   },
   "download": {
     "title": "下载 PRISMX 桥接程序",

@@ -1021,7 +1021,22 @@
     "n2": "Chỉ tải bộ cài từ trang này. Không bao giờ cài file APK do người khác gửi cho bạn.",
     "n3": "Bộ cài được lưu trên GitHub, một số mạng có thể tải chậm. Nếu bị treo, hãy thử lại sau.",
     "downloadBtn": "Tải APK",
-    "notesTitle": "Lưu ý khi cài đặt"
+    "notesTitle": "Lưu ý khi cài đặt",
+    "inApp": {
+      "installBtn": "Tải và cài đặt",
+      "installOnlyBtn": "Cài đặt",
+      "current": "Phiên bản hiện tại {{version}}",
+      "downloading": "Đang tải {{percent}}%",
+      "downloadingNoSize": "Đang tải…",
+      "opening": "Đã tải xong, đang mở trình cài đặt…",
+      "opened": "Đã mở trình cài đặt. Nếu lỡ đóng, hãy nhấn “Cài đặt” để thử lại.",
+      "upToDate": "Bạn đang dùng phiên bản mới nhất ({{version}}).",
+      "needPermission": "Cần cho phép Signal Lab cài đặt ứng dụng: nhấn “Cài đặt”, bật “Cho phép từ nguồn này” trong Cài đặt rồi quay lại để tiếp tục.",
+      "failedNetwork": "Tải xuống chưa hoàn tất. Hãy kiểm tra kết nối và thử lại.",
+      "failedPackage": "Gói đã tải không vượt qua kiểm tra và đã bị xóa. Vui lòng thử lại sau.",
+      "failedInstall": "Không mở được trình cài đặt.",
+      "browserFallback": "Tải bằng trình duyệt"
+    }
   },
   "download": {
     "title": "Tải PRISMX Bridge",
