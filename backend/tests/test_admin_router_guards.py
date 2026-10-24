@@ -8,7 +8,7 @@ Admin routers must carry require_admin themselves, not only via main.py.
 """
 from fastapi import FastAPI
 
-from app.routers import competitions, gamification, invite, support, tickets
+from app.routers import admin_geo, competitions, gamification, invite, support, tickets
 from app.services.deps import require_admin, require_staff
 
 
@@ -41,3 +41,8 @@ def test_support_routers_guard_themselves():
     Every /support route needs require_staff; /admin/support carries require_admin."""
     assert _all_routes_guarded(support.router, require_staff)
     assert _all_routes_guarded(support.admin_router, require_admin)
+
+
+def test_admin_geo_router_guards_itself():
+    """用户 IP 只给管理员看（rev 48）/ user IPs are admin-only."""
+    assert _all_routes_guarded(admin_geo.router)
