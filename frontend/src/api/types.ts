@@ -648,6 +648,31 @@ export interface AdminNetQuality {
   hourly: { hour: string; connects: number; disconnects: number; good: number; fair: number; poor: number; avgRtt: number | null }[]
 }
 
+// 用户分布（rev 48）。台湾 / 香港 / 澳门在 countries 里各自单列，只写名字。
+export type GeoScope = 'all' | '7d' | '30d'
+export interface AdminGeoCountry { code: string | null; numeric: string | null; name: string; nameEn: string; count: number }
+export interface AdminGeoProvince { name: string; count: number }
+export interface AdminGeoCity { countryCode: string | null; country: string; province: string | null; city: string; count: number }
+export interface AdminGeoDistribution {
+  scope: GeoScope
+  total: number
+  located: number
+  countries: AdminGeoCountry[]
+  cnProvinces: AdminGeoProvince[]
+  cities: AdminGeoCity[]
+}
+export interface AdminUserIp {
+  ip: string
+  country: string | null
+  countryCode: string | null
+  province: string | null
+  city: string | null
+  firstSeenAt: string
+  lastSeenAt: string
+  otherUsers: number
+}
+export interface AdminIpUser { userId: string; email: string; nickname: string | null; lastSeenAt: string }
+
 export interface AdminOverview {
   range: AdminOverviewRange
   headline: AdminOverviewHeadline
