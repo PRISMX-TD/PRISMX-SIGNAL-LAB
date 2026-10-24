@@ -2987,7 +2987,27 @@
       },
       "loadFailed": "Failed to load",
       "retry": "Retry",
-      "dataSince": "Visit data starts {{since}}; users who signed up earlier are not counted in retention."
+      "dataSince": "Visit data starts {{since}}; users who signed up earlier are not counted in retention.",
+      "geo": {
+        "title": "Where users are",
+        "hint": "Estimated from each user's latest login IP; proxy / VPN users show their exit location.",
+        "scopeLabel": "Scope",
+        "scope": {
+          "all": "All registered users",
+          "7d": "Active in 7 days",
+          "30d": "Active in 30 days"
+        },
+        "byCountry": "By country / region",
+        "byCity": "By city",
+        "unknown": "Unknown location: {{count}}",
+        "people": "{{count}}",
+        "tooltip": "{{name}} · {{count}}",
+        "backToWorld": "Back to world",
+        "clickChina": "Click China for provinces",
+        "empty": "Recording started with this release; users appear after they next open the app.",
+        "failed": "Couldn't load the user map",
+        "retry": "Retry"
+      }
     },
     "pageStats": {
       "title": "Page views",

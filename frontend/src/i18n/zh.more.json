@@ -2979,7 +2979,27 @@
       },
       "loadFailed": "加载失败",
       "retry": "重试",
-      "dataSince": "访问数据自 {{since}} 起记录，之前注册的用户不计入留存。"
+      "dataSince": "访问数据自 {{since}} 起记录，之前注册的用户不计入留存。",
+      "geo": {
+        "title": "用户分布",
+        "hint": "按用户最后一次登录的 IP 估算地区；代理 / VPN 用户显示的是出口地区。",
+        "scopeLabel": "统计范围",
+        "scope": {
+          "all": "全部注册用户",
+          "7d": "近 7 天活跃",
+          "30d": "近 30 天活跃"
+        },
+        "byCountry": "按国家 / 地区",
+        "byCity": "按城市",
+        "unknown": "未知地区 {{count}} 人",
+        "people": "{{count}} 人",
+        "tooltip": "{{name}} · {{count}} 人",
+        "backToWorld": "返回世界",
+        "clickChina": "点中国查看各省",
+        "empty": "上线后开始记录，用户再次打开后才会出现。",
+        "failed": "用户分布加载失败",
+        "retry": "重试"
+      }
     },
     "pageStats": {
       "title": "页面访问统计",

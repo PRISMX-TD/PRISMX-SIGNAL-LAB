@@ -14,6 +14,7 @@ import { SkeletonLine } from '../../Skeleton'
 import PageStatsCard from '../PageStatsCard'
 import ActivityChart from './ActivityChart'
 import FunnelCard from './FunnelCard'
+import GeoDistributionCard from './GeoDistributionCard'
 import HeadlineCards from './HeadlineCards'
 import NetQualityCard from './NetQualityCard'
 import PlanBreakdown from './PlanBreakdown'
@@ -93,6 +94,9 @@ export default function OverviewPanel() {
           {/* 实时数据，自己拉、自己刷新 / live, self-fetching */}
           <NetQualityCard />
           <ActivityChart daily={overview.data.activityDaily} dataSince={overview.data.visitorDataSince} />
+          {/* 用户分布自己拉数据、自己切范围，与 overview 请求各自成败。
+              Self-fetching with its own scope switch; fails independently. */}
+          <GeoDistributionCard />
           <FunnelCard funnel={overview.data.funnel} />
           <RetentionCard retention={overview.data.retention} dataSince={overview.data.visitorDataSince} />
           <PlanBreakdown plans={overview.data.plans} />
