@@ -103,6 +103,15 @@ def test_cache_hit_skips_db(db_session, geo, monkeypatch):
     assert calls == []
 
 
+def test_switch_back_same_day_restores_current_region(db_session, geo):
+    u = _user(db_session)
+    for h, ip in ((0, "8.8.8.8"), (1, "9.9.9.9"), (2, "8.8.8.8")):   # A→B→A 同一 UTC 日
+        ip_log.record(db_session, u, ip, NOW + timedelta(hours=h))
+        db_session.commit()
+    assert db_session.get(User, u.id).geo_country_code == "CN"
+    assert len(_rows(db_session, u)) == 2
+
+
 def test_unknown_region_keeps_ip_and_previous_geo(db_session, geo):
     u = _user(db_session)
     ip_log.record(db_session, u, "8.8.8.8", NOW)

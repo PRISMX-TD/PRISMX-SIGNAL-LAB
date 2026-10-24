@@ -3800,6 +3800,7 @@
         "firstSeen": "First {{time}}",
         "lastSeen": "Last {{time}}",
         "unknownRegion": "Unknown location",
+        "others_one": "{{count}} other account used this IP",
         "others": "{{count}} other accounts used this IP",
         "noOthers": "No other accounts",
         "hideOthers": "Hide",

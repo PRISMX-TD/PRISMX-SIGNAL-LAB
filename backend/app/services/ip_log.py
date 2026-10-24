@@ -78,19 +78,23 @@ def record(db: Session, user: User, raw_ip: str | None, now: datetime) -> None:
         if ip is None:
             return
         key = (user.id, ip, now.strftime("%Y-%m-%d"))
-        if _cache_hit(key):
-            return
         geo = ip_geo.lookup(ip)
         seen_at = now.replace(tzinfo=None)
-        with db.begin_nested():
-            _upsert(db, user.id, ip, geo, seen_at)
+        # 缓存只省 user_ips 的 upsert；当前地区每次都更新（A→B→A 同一天也要回到 A）。
+        # The cache only skips the user_ips upsert; the current region always follows
+        # the latest IP (A→B→A within one day must end on A).
+        hit = _cache_hit(key)
+        if not hit:
+            with db.begin_nested():
+                _upsert(db, user.id, ip, geo, seen_at)
         if geo is not None:
             user.geo_country = geo.country
             user.geo_country_code = geo.country_code
             user.geo_province = geo.province
             user.geo_city = geo.city
             user.geo_at = seen_at
-        _cache_add(key)
+        if not hit:
+            _cache_add(key)
     except Exception:
         logger.warning("记录用户 IP 失败 user=%s", getattr(user, "id", None), exc_info=True)
 

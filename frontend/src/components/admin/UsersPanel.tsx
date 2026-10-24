@@ -1026,6 +1026,7 @@ export default function UsersPanel({
       )}
       {ipSheet && (
         <UserIpSheet
+          key={ipSheet.id}
           userId={ipSheet.id}
           userLabel={ipSheet.label}
           onClose={() => setIpSheet(null)}
