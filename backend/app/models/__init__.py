@@ -110,6 +110,15 @@ class User(Base):
     # get_current_user (written at most once per 5 minutes per user) to avoid
     # an UPDATE on every single request.
     last_active_at = Column(DateTime, nullable=True)
+    # 最后所在地区（rev 48，用户分布地图）：每次记录 IP 时同步更新，长期保留；
+    # 完整 IP 在 user_ips 里只留 90 天。台湾 / 香港 / 澳门只写名字。
+    # Last known region (rev 48): updated on every IP record, kept long-term; the
+    # raw IPs in user_ips are kept 90 days. TW/HK/MO are plain names.
+    geo_country = Column(String, nullable=True)
+    geo_country_code = Column(String, nullable=True)
+    geo_province = Column(String, nullable=True)
+    geo_city = Column(String, nullable=True)
+    geo_at = Column(DateTime, nullable=True)
     # 该用户最近一次上报的 Bridge 桌面程序版本号（如 "1.3.15"），随
     # POST /api/bridge/poll 上报，用于网页端提示"有新版本 Bridge 可更新"。
     # 空表示还没连过带这个字段的新版 Bridge（或从未连过）。
@@ -1700,6 +1709,28 @@ class UserActiveDay(Base):
     id = Column(String, primary_key=True, default=_uuid)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     day = Column(String, nullable=False)  # UTC ISO 日期 "2026-09-02"
+
+
+class UserIp(Base):
+    """用户登录 IP（rev 48）。写入点 services/ip_log.record（鉴权链里每用户每 5 分钟
+    最多一次）；ip_retention_sweep_loop 删除 last_seen_at 超过 90 天的行。
+    同 IP 只做提醒，不做封号依据。
+    A user's login IPs (rev 48), written by ip_log.record and swept after 90 days."""
+    __tablename__ = "user_ips"
+    __table_args__ = (
+        UniqueConstraint("user_id", "ip", name="uq_user_ip"),
+        Index("ix_user_ips_ip", "ip"),
+        Index("ix_user_ips_last_seen_at", "last_seen_at"),
+    )
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    ip = Column(String, nullable=False)
+    country = Column(String, nullable=True)
+    country_code = Column(String, nullable=True)
+    province = Column(String, nullable=True)
+    city = Column(String, nullable=True)
+    first_seen_at = Column(DateTime, nullable=False)
+    last_seen_at = Column(DateTime, nullable=False)
 
 
 class PeriodBaseline(Base):

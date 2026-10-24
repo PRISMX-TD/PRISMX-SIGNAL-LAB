@@ -413,7 +413,10 @@ def _hash_legacy_api_tokens() -> None:
 # rev 47 — 代理层级（2026-10-24）：新表 agent_nodes（create_all 建）；invite_link_agents(link_id)
 #          唯一索引（一条链接只属于一个代理，先查重，有重复就跳过并告警，不挡启动）；存量代理
 #          每人回填一个一级节点（parent 为空、depth 1）。见 _migrate_agent_tree_rev47。
-CURRENT_SCHEMA_REV = 47
+# rev 48 — 用户 IP 与地区（2026-10-25）：新表 user_ips（create_all 建表建索引）；users 加
+#          geo_country / geo_country_code / geo_province / geo_city / geo_at（可空、不回填——
+#          上线前没存过 IP，无从回填）。
+CURRENT_SCHEMA_REV = 48
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1057,6 +1060,12 @@ def _migrate_columns() -> None:
             "support_tier": "VARCHAR",
             "support_reveal_limit": "INTEGER",
             "do_not_contact_at": datetime_type,
+            # rev 48：最后所在地区。可空、不回填 / last known region; nullable, no backfill.
+            "geo_country": "VARCHAR",
+            "geo_country_code": "VARCHAR",
+            "geo_province": "VARCHAR",
+            "geo_city": "VARCHAR",
+            "geo_at": datetime_type,
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
