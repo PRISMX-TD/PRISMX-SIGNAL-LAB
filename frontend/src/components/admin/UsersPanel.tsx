@@ -21,7 +21,8 @@ import Switch from '../Switch'
 import { Avatar, fmtClock } from '../support/supportUi'
 import type { LogsPreset } from './ActivityLogPanel'
 import DisableUserModal from './DisableUserModal'
-import { IconClose, IconHistory, IconSearch } from './console/consoleIcons'
+import { IconClose, IconGlobe, IconHistory, IconSearch } from './console/consoleIcons'
+import UserIpSheet from './users/UserIpSheet'
 import { attributionOptions } from './invite/inviteLinkLogic'
 import { isUserDisabled } from './userStatus'
 
@@ -116,6 +117,8 @@ export default function UsersPanel({
   const [searchParams, setSearchParams] = useSearchParams()
   const [initialQ] = useState(() => searchParams.get('q') ?? '')
   const [query, setQuery] = useState(initialQ)
+  // 登录 IP 侧栏的目标用户 / target of the login-IP sheet
+  const [ipSheet, setIpSheet] = useState<{ id: string; label: string } | null>(null)
   const [planFilter, setPlanFilter] = useState('')
   // 按注册归因筛选：'' = 全部，NO_INVITE = 只看没有归因的人，其余是某条链接的 code。
   // Filter by attribution: '' all, NO_INVITE only unattributed, otherwise a link's code.
@@ -805,6 +808,16 @@ export default function UsersPanel({
                         >
                           <IconHistory size={15} />
                         </button>
+                        {/* 登录 IP 与同 IP 账户（rev 48，仅管理员可见此面板）/ login IPs, admin-only panel */}
+                        <button
+                          type="button"
+                          className="adm-icon-btn"
+                          title={t('admin.users.ip.rowBtnHint')}
+                          aria-label={t('admin.users.ip.rowBtn')}
+                          onClick={() => setIpSheet({ id: u.id, label: u.nickname || u.email })}
+                        >
+                          <IconGlobe size={15} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1009,6 +1022,21 @@ export default function UsersPanel({
           confirmLabel={t('admin.enableConfirm')}
           onConfirm={() => void applyDisabled(enableTarget, null)}
           onCancel={() => setEnableTarget(null)}
+        />
+      )}
+      {ipSheet && (
+        <UserIpSheet
+          userId={ipSheet.id}
+          userLabel={ipSheet.label}
+          onClose={() => setIpSheet(null)}
+          onPickUser={(email) => {
+            // 搜索靠提交触发：关侧栏后把邮箱填进搜索框并直接查一次（新值走 opts）。
+            // Search is submit-driven: close the sheet, fill the box and load once (value via opts).
+            setIpSheet(null)
+            setQuery(email)
+            setSelectedIds(new Set())
+            void load({ q: email, page: 0 })
+          }}
         />
       )}
     </div>

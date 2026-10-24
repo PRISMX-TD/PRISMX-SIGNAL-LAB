@@ -107,3 +107,10 @@ export const IconHistory = ({ size = 14 }: { size?: number }) => (
     <path d="M9 9h6M9 12.5h6M9 16h3.5" />
   </Svg>
 )
+
+export const IconGlobe = ({ size = 14 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M3.5 12h17M12 3.5c2.4 2.3 3.6 5.1 3.6 8.5s-1.2 6.2-3.6 8.5c-2.4-2.3-3.6-5.1-3.6-8.5s1.2-6.2 3.6-8.5z" />
+  </Svg>
+)

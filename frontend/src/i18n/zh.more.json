@@ -3780,6 +3780,22 @@
       "title": "删除这张工单？",
       "body": "工单连同全部回复、内部备注和附图会一起删除，无法恢复；用户那边也不再看得到这张工单。",
       "done": "工单已删除"
+    },
+    "users": {
+      "ip": {
+        "rowBtn": "登录 IP",
+        "rowBtnHint": "查看这个用户最近的登录 IP 与地区",
+        "title": "登录 IP",
+        "empty": "还没有记录（上线后用户再次打开才会出现）",
+        "firstSeen": "首次 {{time}}",
+        "lastSeen": "最近 {{time}}",
+        "unknownRegion": "未知地区",
+        "others": "另有 {{count}} 个账户用过这个 IP",
+        "noOthers": "没有其他账户用过",
+        "hideOthers": "收起",
+        "failed": "加载失败",
+        "note": "共用 IP 可能只是同一网络（例如手机网络共用出口），仅供参考。IP 记录保留 90 天。"
+      }
     }
   },
   "simulator": {

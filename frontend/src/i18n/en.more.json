@@ -3790,6 +3790,22 @@
       "title": "Delete this ticket?",
       "body": "The ticket and all its replies, internal notes and images will be deleted for good; the user will no longer see it either.",
       "done": "Ticket deleted"
+    },
+    "users": {
+      "ip": {
+        "rowBtn": "Login IPs",
+        "rowBtnHint": "Recent login IPs and locations for this user",
+        "title": "Login IPs",
+        "empty": "Nothing recorded yet (users appear after they next open the app)",
+        "firstSeen": "First {{time}}",
+        "lastSeen": "Last {{time}}",
+        "unknownRegion": "Unknown location",
+        "others": "{{count}} other accounts used this IP",
+        "noOthers": "No other accounts",
+        "hideOthers": "Hide",
+        "failed": "Failed to load",
+        "note": "A shared IP may just be the same network (e.g. a mobile carrier's shared exit). For reference only. IPs are kept for 90 days."
+      }
     }
   },
   "simulator": {
