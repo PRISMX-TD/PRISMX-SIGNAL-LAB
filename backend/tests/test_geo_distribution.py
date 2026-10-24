@@ -46,12 +46,13 @@ MY = ("马来西亚", "MY", None, "Kuala Lumpur")
 @pytest.fixture()
 def world(db_session):
     db = db_session
-    _user(db, "admin@t.co", geo=SZ, role="admin")
+    admin = _user(db, "admin@t.co", geo=SZ, role="admin")
     a = _user(db, "a@t.co", geo=SZ)
     b = _user(db, "b@t.co", geo=GZ, disabled=True)
     c = _user(db, "c@t.co", geo=TW)
     d = _user(db, "d@t.co", geo=MY)
     _user(db, "e@t.co")                                  # 没有地区 / unlocated
+    _ip(db, admin, "9.9.9.9", 1, SZ)                    # 管理员在窗口内也不能算 / admin inside window must not count
     _ip(db, a, "1.1.1.1", 2, SZ)
     _ip(db, a, "1.1.1.2", 20, GZ)                       # 更早 / older
     _ip(db, c, "2.2.2.2", 10, TW)

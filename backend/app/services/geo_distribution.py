@@ -74,7 +74,7 @@ def _compute(db: Session, scope: Scope, now: datetime) -> dict:
                 .filter(NOT_ADMIN, User.geo_country.isnot(None)).all())
         return _aggregate(scope, total, [tuple(r) for r in rows])
     cutoff = now.replace(tzinfo=None) - timedelta(days=_WINDOW_DAYS[scope])
-    rn = func.row_number().over(partition_by=UserIp.user_id, order_by=UserIp.last_seen_at.desc()).label("rn")
+    rn = func.row_number().over(partition_by=UserIp.user_id, order_by=(UserIp.last_seen_at.desc(), UserIp.id.desc())).label("rn")
     latest = (db.query(UserIp.user_id, UserIp.country, UserIp.country_code, UserIp.province, UserIp.city, rn)
               .join(User, User.id == UserIp.user_id)
               .filter(NOT_ADMIN, UserIp.last_seen_at >= cutoff)
