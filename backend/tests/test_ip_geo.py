@@ -78,3 +78,9 @@ def test_lookup_real_file():
     ip_geo._reset_searcher()
     assert ip_geo.lookup("112.96.38.165") == Geo("中国", "CN", "广东", "广州")
     assert ip_geo.lookup("1.36.0.1") == Geo("香港", "HK", None, None)
+
+
+def test_country_names_fixed_catalog_typos():
+    # pycountry zh_CN 目录的错字已在生成脚本里覆盖 / catalog typos overridden in the generator
+    assert ip_geo.country_names("KH")[0] == "柬埔寨"
+    assert ip_geo.country_names("GT")[0] == "危地马拉"

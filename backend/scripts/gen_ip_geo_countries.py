@@ -27,6 +27,13 @@ OVERRIDES = {
     "TZ": ("坦桑尼亚", "Tanzania"),
     "MD": ("摩尔多瓦", "Moldova"),
     "PS": ("巴勒斯坦", "Palestine"),
+    # pycountry zh_CN 目录里的错字 / 台湾译法，换成大陆通用写法（英文名不变）
+    # misspelled or Taiwan-style names in the zh_CN catalog -> mainland standard (English unchanged)
+    "KH": ("柬埔寨", "Cambodia"),
+    "GT": ("危地马拉", "Guatemala"),
+    "PF": ("法属波利尼西亚", "French Polynesia"),
+    "KG": ("吉尔吉斯斯坦", "Kyrgyzstan"),
+    "BD": ("孟加拉国", "Bangladesh"),
 }
 
 
