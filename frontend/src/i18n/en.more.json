@@ -4101,7 +4101,10 @@
       "emptyTop": "No sub-agents yet. Promote a client from “All clients”.",
       "empty": "No sub-agents yet.",
       "removeTitle": "Remove this agent?",
-      "removeBody": "{{name}} becomes an ordinary user again. Their link is disabled and handed to their upline; the clients they brought stay in your team, and their sub-agents move up one level."
+      "removeBody": "{{name}} becomes an ordinary user again. Their link is disabled and handed to their upline; the clients they brought stay in your team, and their sub-agents move up one level.",
+      "customersShow": "Show direct clients ({{n}})",
+      "customersHide": "Hide direct clients",
+      "customersMore": "{{n}} more — view in “All clients”"
     },
     "customers": {
       "allAgents": "All agents",

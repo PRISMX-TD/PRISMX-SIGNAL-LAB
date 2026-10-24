@@ -7,17 +7,102 @@
 // 只有一级代理（canManage）看得到「撤销代理」：撤掉之后他的链接停用并转给他的上级，
 // 客户仍在树上，他的下级整体上移一级（见后端 services/agent_tree.remove_node）。
 //
+// 每个代理下面还能展开他的直属普通客户（2026-10-24 加：只列代理的树里看不到「下线」）。
+// 已经是代理的直属客户本来就画成子节点，这里过滤掉不重复；每人最多拉 20 个，多的去
+// 「全部客户」看。团队不大（≤ 10 个代理）时默认全部展开，大了默认收起，免得一进页就发一串请求。
+//
 // Agent view "Team" (rev 47): the caller and every agent below them, assembled
 // from the server's flat breadth-first list by parentEmail. The caller's own row
 // has no parent — looking upwards is impossible server-side. Only top-level
-// agents (canManage) see "Remove agent".
-import { useMemo, useState } from 'react'
+// agents (canManage) see "Remove agent". Each agent can also expand their direct
+// non-agent customers (up to 20; more lives in "All customers"); small teams
+// start expanded, large ones collapsed to avoid a burst of requests.
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { agentApi } from '../../api/client'
 import { fmtDate, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
 import ConfirmModal from '../ConfirmModal'
-import type { AgentTeam, AgentTeamNode } from '../../api/types'
+import type { AgentTeam, AgentTeamNode, AgentTreeUser } from '../../api/types'
+import { LastActive, PlanBadge } from './customerCells'
+
+const CUSTOMERS_PER_NODE = 20
+const AUTO_EXPAND_MAX_NODES = 10
+
+// 一个代理名下的直属普通客户（懒加载）。team 变了（升 / 撤代理之后）重新拉。
+// One agent's direct non-agent customers, fetched on mount; refetched when the team changes.
+function NodeCustomers({
+  team,
+  agentEmail,
+  indent,
+  onShowAll,
+}: {
+  team: AgentTeam
+  agentEmail: string
+  indent: number
+  onShowAll: () => void
+}) {
+  const { t } = useTranslation()
+  const [rows, setRows] = useState<AgentTreeUser[] | null>(null)
+  const [total, setTotal] = useState(0)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    setError(null)
+    agentApi
+      .customers({ agent: agentEmail, limit: CUSTOMERS_PER_NODE })
+      .then((r) => {
+        if (!alive) return
+        setRows(r.users)
+        setTotal(r.total)
+      })
+      .catch((err: unknown) => {
+        if (alive) setError(localizeApiError(err instanceof Error ? err.message : String(err)))
+      })
+    return () => {
+      alive = false
+    }
+  }, [team, agentEmail])
+
+  const plain = (rows ?? []).filter((u) => u.agentLevel == null)
+  const more = total - (rows?.length ?? 0)
+  return (
+    <div
+      className="border-l border-dashed border-white/10 pb-3 pr-4"
+      style={{ marginLeft: `${Math.min(indent + 1, 5) * 14}px`, paddingLeft: '12px' }}
+    >
+      {error ? (
+        <p className="text-xs text-down">{error}</p>
+      ) : rows === null ? (
+        <p className="text-xs text-neutral-500">{t('common.loading')}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {plain.map((u) => (
+            <li key={u.email} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-white/[0.03] px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-[13px] text-neutral-200">{u.nickname || t('agent.noNickname')}</p>
+                <p className="num break-all text-[11px] text-neutral-500">{u.email}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2 text-[11px] text-neutral-500">
+                <PlanBadge plan={u.plan} />
+                <span>{t('agent.colActive')}</span>
+                <LastActive day={u.lastActiveDay} />
+              </div>
+            </li>
+          ))}
+          {more > 0 && (
+            <li>
+              <button type="button" className="text-xs text-prism-300 hover:text-prism-200" onClick={onShowAll}>
+                {t('agent.team.customersMore', { n: more })}
+              </button>
+            </li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 export default function AgentTeamPanel({
   team,
@@ -48,6 +133,18 @@ export default function AgentTeamPanel({
   }, [team.nodes])
   const self = team.nodes.find((n) => n.isSelf) ?? null
   const subCount = team.nodes.length - 1
+  // 展开状态：只记「和默认不一样」的那些人，团队刷新后默认值照样适用。
+  // Only deviations from the default are stored, so the default survives a team refresh.
+  const autoOpen = team.nodes.length <= AUTO_EXPAND_MAX_NODES
+  const [toggled, setToggled] = useState<Set<string>>(() => new Set())
+  const isOpen = (email: string) => autoOpen !== toggled.has(email)
+  const toggle = (email: string) =>
+    setToggled((prev) => {
+      const next = new Set(prev)
+      if (next.has(email)) next.delete(email)
+      else next.add(email)
+      return next
+    })
 
   const remove = async () => {
     if (!removing) return
@@ -66,6 +163,10 @@ export default function AgentTeamPanel({
 
   const renderNode = (n: AgentTeamNode, indent: number): React.ReactNode => {
     const kids = children.get(n.email) ?? []
+    // 直属客户里已经是代理的就是 kids（新代理的上级 = 他注册所用链接的主人），减掉才是普通客户数。
+    // Direct customers who became agents are exactly `kids`; the rest are plain customers.
+    const plainCount = Math.max(0, n.directCustomers - kids.length)
+    const open = plainCount > 0 && isOpen(n.email)
     return (
       <li key={n.email}>
         {/* 缩进封顶 4 层：手机屏宽有限，再往里缩名字就挤没了；层级另有「第 N 级」徽标说明。
@@ -122,7 +223,20 @@ export default function AgentTeamPanel({
               </div>
             ))}
           </div>
+          {plainCount > 0 && (
+            <button
+              type="button"
+              className="mt-2 text-xs text-prism-300 hover:text-prism-200"
+              aria-expanded={open}
+              onClick={() => toggle(n.email)}
+            >
+              {open ? t('agent.team.customersHide') : t('agent.team.customersShow', { n: plainCount })}
+            </button>
+          )}
         </div>
+        {open && (
+          <NodeCustomers team={team} agentEmail={n.email} indent={indent} onShowAll={() => onShowCustomers(n.email)} />
+        )}
         {kids.length > 0 && <ul>{kids.map((k) => renderNode(k, indent + 1))}</ul>}
       </li>
     )
