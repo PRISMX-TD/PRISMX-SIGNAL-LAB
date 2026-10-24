@@ -11,16 +11,19 @@ fail authentication.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 import uuid
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from starlette.concurrency import run_in_threadpool
 
+from app.core.database import SessionLocal
 from app.models import User, UserIp
 from app.services import ip_geo
 
@@ -90,3 +93,53 @@ def record(db: Session, user: User, raw_ip: str | None, now: datetime) -> None:
         _cache_add(key)
     except Exception:
         logger.warning("记录用户 IP 失败 user=%s", getattr(user, "id", None), exc_info=True)
+
+
+IP_RETENTION_DAYS = 90
+IP_SWEEP_INTERVAL_SECONDS = 86400
+# 错开 K 线清理（30 秒）等启动期任务 / staggered from the other startup sweeps
+IP_SWEEP_STARTUP_DELAY_SECONDS = 600
+
+
+def sweep_old_ips(db: Session, now: datetime | None = None, batch: int = 5000) -> int:
+    """删 last_seen_at 早于 90 天前的行，分批提交避免大事务；users.geo_* 不动。
+    Delete rows unseen for 90 days in committed batches; users.geo_* is untouched."""
+    now = now or datetime.now(timezone.utc)
+    cutoff = now.replace(tzinfo=None) - timedelta(days=IP_RETENTION_DAYS)
+    total = 0
+    while True:
+        ids = [r[0] for r in db.query(UserIp.id).filter(UserIp.last_seen_at < cutoff).limit(batch).all()]
+        if not ids:
+            return total
+        db.query(UserIp).filter(UserIp.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        total += len(ids)
+
+
+def _run_ip_sweep() -> None:
+    db = SessionLocal()
+    try:
+        removed = sweep_old_ips(db)
+        if removed:
+            logger.info("ip_retention: 删除 %d 条 90 天前的 IP 记录", removed)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+async def ip_retention_sweep_loop(startup_delay: float = IP_SWEEP_STARTUP_DELAY_SECONDS) -> None:
+    """每天一次删 90 天前的用户 IP。走线程池、延后首轮，不挡启动（同 candle_retention）。
+    Daily sweep of 90-day-old user IPs; threadpool + delayed first pass like candle_retention."""
+    if startup_delay:
+        await asyncio.sleep(startup_delay)
+    from app.services import loop_health
+
+    while True:
+        loop_health.beat("ip_retention")
+        try:
+            await run_in_threadpool(_run_ip_sweep)
+        except Exception:
+            logger.exception("ip_retention_sweep_loop error")
+        await asyncio.sleep(IP_SWEEP_INTERVAL_SECONDS)

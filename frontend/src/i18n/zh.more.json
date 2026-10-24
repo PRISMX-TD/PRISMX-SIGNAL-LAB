@@ -2428,6 +2428,7 @@
         "competitions": "比赛排行",
         "boards": "周期排行榜",
         "candle_retention": "K 线清理",
+        "ip_retention": "IP 记录清理",
         "gateway_positions": "直连持仓刷新",
         "signal_engine": "模拟信号引擎",
         "email_automation": "自动邮件扫描"

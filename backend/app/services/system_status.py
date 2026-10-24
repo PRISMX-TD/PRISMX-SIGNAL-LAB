@@ -53,6 +53,7 @@ LOOP_INTERVALS: dict[str, int] = {
     "competitions": 60,
     "boards": 300,
     "candle_retention": 86400,
+    "ip_retention": 86400,
     "gateway_positions": 2,
     "signal_engine": 15,
     "capacity": 60,

@@ -140,3 +140,29 @@ def test_record_failure_never_breaks_auth(db_session, geo, monkeypatch):
 
 def test_get_current_user_asks_fastapi_for_request():
     assert get_dependant(path="/", call=deps.get_current_user).request_param_name == "request"
+
+
+def _ip_row(db, u, ip, last_seen):
+    db.add(UserIp(user_id=u.id, ip=ip, first_seen_at=last_seen, last_seen_at=last_seen))
+
+
+def test_sweep_deletes_only_older_than_90_days_and_keeps_user_geo(db_session):
+    u = _user(db_session)
+    u.geo_country, u.geo_city = "中国", "深圳"
+    base = NOW.replace(tzinfo=None)
+    _ip_row(db_session, u, "1.1.1.1", base - timedelta(days=91))
+    _ip_row(db_session, u, "2.2.2.2", base - timedelta(days=89))
+    db_session.commit()
+    assert ip_log.sweep_old_ips(db_session, now=NOW) == 1
+    assert [r.ip for r in _rows(db_session, u)] == ["2.2.2.2"]
+    assert db_session.get(User, u.id).geo_city == "深圳"
+
+
+def test_sweep_works_in_batches(db_session):
+    u = _user(db_session)
+    old = NOW.replace(tzinfo=None) - timedelta(days=100)
+    for i in range(7):
+        _ip_row(db_session, u, f"3.3.3.{i + 1}", old)
+    db_session.commit()
+    assert ip_log.sweep_old_ips(db_session, now=NOW, batch=3) == 7
+    assert _rows(db_session, u) == []

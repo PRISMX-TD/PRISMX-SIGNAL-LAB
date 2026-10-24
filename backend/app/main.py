@@ -25,6 +25,7 @@ from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
 from app.services.candle_store import candle_retention_sweep_loop
+from app.services.ip_log import ip_retention_sweep_loop
 from app.services.gamification.loop import board_loop, competition_loop, gamification_loop
 from app.services.plan_expiry import plan_expiry_sweep_loop
 from app.services.email_broadcast import email_broadcast_loop
@@ -243,6 +244,7 @@ async def lifespan(app: FastAPI):
         "boards": board_loop,
         # K 线历史保留策略 / candle retention sweep
         "candle_retention": candle_retention_sweep_loop,
+        "ip_retention": ip_retention_sweep_loop,
         # Gateway 账号持仓轮询 / gateway position polling
         "gateway_positions": gateway_positions_loop,
         # 在线峰值采样（每分钟），给系统状态页的「容量」灯 / per-minute peak sampling for the capacity light

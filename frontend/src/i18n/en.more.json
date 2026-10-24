@@ -2436,6 +2436,7 @@
         "competitions": "Competition rankings",
         "boards": "Period leaderboards",
         "candle_retention": "Candle cleanup",
+        "ip_retention": "IP log cleanup",
         "gateway_positions": "Direct-account positions",
         "signal_engine": "Mock signal engine",
         "email_automation": "Automated email scan"
