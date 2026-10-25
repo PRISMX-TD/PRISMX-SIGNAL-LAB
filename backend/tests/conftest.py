@@ -142,6 +142,21 @@ def _clear_reconcile_marks():
         mem.delete(*keys)
 
 
+@pytest.fixture(autouse=True)
+def _market_hours_gate_off(monkeypatch):
+    """下单前的交易时段闸门默认关掉：全仓的下单用例随时都可能在周末跑，XAUUSD 的单不能
+    因为「今天是周六」被 409 拒掉。专门测这道闸的用例（test_market_hours.py）自己再打开。
+    The market-hours gate is off in tests by default: the suite may run on a weekend
+    and XAUUSD orders must not be refused because today is Saturday. The gate's own
+    tests re-enable it."""
+    from app.core.config import settings
+    from app.services import market_hours
+    monkeypatch.setattr(settings, "MARKET_HOURS_GATE", False)
+    market_hours.clear_cache()
+    yield
+    market_hours.clear_cache()
+
+
 @pytest.fixture()
 def db_session():
     """一次性的内存 SQLite 会话，建全表。

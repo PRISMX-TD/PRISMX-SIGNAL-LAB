@@ -2,6 +2,7 @@
 import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
 import type { PendingCompetition } from './types'
+import type { MarketStatus } from './types'
 import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
@@ -935,6 +936,10 @@ export const orderApi = {
   winrate: (login?: string) =>
     request<PersonalWinRate>(`/orders/winrate${login ? `?login=${encodeURIComponent(login)}` : ''}`),
   closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
+  // 某品种现在能不能下单（按 MT5 交易时段；休市时 nextOpenAt 是预计开盘时间）。
+  // Whether the symbol can be traded now (MT5 trade sessions; nextOpenAt when closed).
+  marketStatus: (symbol: string) =>
+    request<MarketStatus>(`/orders/market-status?symbol=${encodeURIComponent(symbol)}`),
 }
 
 // 自定义策略：挑条件 → 查数据覆盖 → 回测 → 启用 → 触发个人信号 → 一键下单

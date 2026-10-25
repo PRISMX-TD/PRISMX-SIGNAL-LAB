@@ -54,6 +54,7 @@ from app.services.order_payload import (
     void_stale_order,
 )
 from app.services.pending_orders import gateway_logins, push_gateway_pending_orders, submit_to_main_loop
+from app.services import market_hours
 from app.services.plans import is_realtime_plan
 from app.services import shared_cache
 from app.services.trade_performance import (
@@ -122,6 +123,22 @@ def place_order(
         target_acc = online_accounts[0]
     equity = target_acc.equity if target_acc and target_acc.equity else None
     validate_order(req.symbol, req.side, req.volume, equity)
+
+    # 1b) 交易时段：MT5 不能交易的时候平台也不收单（周末只有加密货币能下）。放在
+    #     幂等与落库之前——休市单根本不该成为一条 PENDING 指令，否则桥接 / 网关会
+    #     把它发到券商，MT5 挂成「request adding」。按目标账号（网关账号时）的组解析
+    #     品种后缀；没有目标账号就按品种表最短匹配，网关不可达退回固定周末日历。
+    # 1b) Market hours: when MT5 cannot trade, neither does the platform (weekends:
+    #     crypto only). Before idempotency and persistence — a closed-market order
+    #     must never become a PENDING command, or the bridge / gateway forwards it
+    #     and MT5 parks it as "request adding".
+    gw_login = None
+    if target_acc is not None and target_acc.source == "gateway":
+        try:
+            gw_login = int(target_acc.login)
+        except (TypeError, ValueError):
+            gw_login = None
+    market_hours.assert_market_open(req.symbol, gw_login)
 
     # 未指定目标账号且有多个账号在线：直接拒单并提示，而不是让指令
     # 静默滞留 5 分钟后作废（桥接只在恰好一个在线账号时才能兜底路由）。
@@ -683,6 +700,36 @@ def _bound_logins(db: Session, user_id: str) -> list[str]:
     win-rate / closed-trade filters, and removing an account means "stop showing
     and trading it", not "erase my record on it"."""
     return [row[0] for row in db.query(MT5Account.login).filter(MT5Account.user_id == user_id).all()]
+
+
+@router.get("/market-status", response_model=dict)
+async def order_market_status(
+    symbol: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """某品种现在能不能下单：下单表单打开时查一次，休市就禁用确认并显示预计开盘时间。
+    与 place_order 用同一份判定（网关 /symbol-sessions，退回固定周末日历）。
+    Whether the symbol can be traded now — the order forms poll this to disable the
+    confirm control and show the expected reopen time. Same judgement as place_order."""
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 20:
+        raise HTTPException(status_code=400, detail="品种无效 / Invalid symbol")
+    # 有网关账号就带上它的 login，让网关按该组解析后缀（XAUUSD → XAUUSD.s）。
+    # Pass a gateway login when the user has one so the group suffix resolves.
+    gw_login = None
+    gw_acc = (
+        db.query(MT5Account.login)
+        .filter(MT5Account.user_id == user.id, MT5Account.source == "gateway", not_removed())
+        .first()
+    )
+    if gw_acc is not None:
+        try:
+            gw_login = int(gw_acc[0])
+        except (TypeError, ValueError):
+            gw_login = None
+    status = await market_hours.market_status_async(symbol, gw_login)
+    return market_hours.serialize(status)
 
 
 @router.get("/winrate", response_model=dict)

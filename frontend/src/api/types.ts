@@ -999,6 +999,17 @@ export interface SimulateResult {
 
 // 个人跟单胜率：基于真实平仓明细，只有自己能看到自己的
 // Personal win rate: based on real closed trades, visible only to the user themself
+// 某品种现在能不能下单（GET /orders/market-status）。source：gateway = 按 MT5 品种
+// 配置判；calendar = 网关不可达时的固定周末日历。nextOpenAt 休市时才有。
+// Whether a symbol trades now. source: gateway = MT5's own sessions; calendar = the
+// weekend fallback. nextOpenAt only while closed.
+export interface MarketStatus {
+  symbol: string
+  open: boolean
+  source: 'gateway' | 'calendar'
+  nextOpenAt: string | null
+}
+
 export interface PersonalWinRate {
   wins: number
   losses: number

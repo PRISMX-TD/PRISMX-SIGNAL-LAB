@@ -162,6 +162,8 @@
     "tpWrongSide": "Take profit is on the wrong side of the current price",
     "signalExpiresIn": "Signal expires in",
     "signalExpiredInModal": "This signal just expired and can no longer be traded",
+    "marketClosed": "Market closed, orders are paused (only crypto trades on weekends)",
+    "marketClosedUntil": "Market closed, reopens around {{time}}; orders are paused until then",
     "slTpInvalid": "Fix the stop loss / take profit before confirming",
     "riskNote": "Fills at the MT5 broker price; auto-cancelled if not executed in 5 min. Signal tool only, not investment advice.",
     "submitting": "Submitting…",

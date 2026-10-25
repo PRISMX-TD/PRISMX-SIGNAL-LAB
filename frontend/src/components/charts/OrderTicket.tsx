@@ -19,6 +19,7 @@ import { useGlobalQuote, useQuotes } from '../../store/live'
 import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
+import { useMarketClosedText, useMarketStatus } from '../order/useMarketStatus'
 
 interface Props {
   symbol: string
@@ -113,8 +114,13 @@ function OrderTicket({
 
   // 风险模式算不出合法手数时不能提交（见 OrderSheet 同名判断）
   // Block submit when risk sizing can't produce a legal lot (same rule as OrderSheet)
+  // 休市（MT5 交易时段外）：按钮禁用并在票上说明几点开盘；后端同样会拒（409）。
+  // Closed market (outside MT5 sessions): CTA disabled with the reopen time on the
+  // ticket; the backend refuses too (409).
+  const market = useMarketStatus(symbol)
+  const marketClosedText = useMarketClosedText(market)
   const canSubmit = form.hasAccounts && !form.slTpInvalid && form.priceError == null && !submitting
-    && !form.riskBelowMinLot
+    && !form.riskBelowMinLot && !market.closed
   const ccy = selected?.accountCurrency ?? ''
 
   const submit = async () => {
@@ -333,6 +339,7 @@ function OrderTicket({
       {!form.hasAccounts && (
         <p className="term-warn">{accounts.length === 0 ? t('charts.ticket.noBridge') : t('charts.ticket.offline')}</p>
       )}
+      {market.closed && <p className="term-warn">{marketClosedText}</p>}
 
       <button type="button" className={`term-cta ${isBuy ? 'buy' : 'sell'} ${submitting ? 'busy' : ''}`} disabled={!canSubmit} onClick={submit}>
         {submitting ? (

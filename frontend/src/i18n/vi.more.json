@@ -162,6 +162,8 @@
     "tpWrongSide": "Take Profit nằm sai phía so với giá hiện tại",
     "signalExpiresIn": "Tín hiệu hết hạn sau",
     "signalExpiredInModal": "Tín hiệu này vừa hết hạn, không thể giao dịch nữa",
+    "marketClosed": "Thị trường đóng cửa, tạm không thể đặt lệnh (cuối tuần chỉ giao dịch được crypto)",
+    "marketClosedUntil": "Thị trường đóng cửa, dự kiến mở lại khoảng {{time}}, tạm không thể đặt lệnh",
     "slTpInvalid": "Hãy sửa Stop Loss / Take Profit trước khi xác nhận",
     "riskNote": "Khớp theo giá của sàn MT5; tự động hủy nếu không khớp trong 5 phút. Chỉ là công cụ tín hiệu, không phải lời khuyên đầu tư.",
     "submitting": "Đang gửi…",

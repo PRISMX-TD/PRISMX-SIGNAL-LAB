@@ -18,6 +18,7 @@ import { useNow } from './signals/hooks'
 import { useStickyOnlineAccounts } from '../utils/useStickyOnlineAccounts'
 import OrderSheet from './order/OrderSheet'
 import { useOrderForm } from './order/useOrderForm'
+import { useMarketClosedBlock } from './order/useMarketStatus'
 
 interface Props {
   signal: Signal
@@ -82,6 +83,8 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount: quo
   const now = useNow(1000)
   const cd = calcCountdown(signal.expireAt, SIGNAL_LIFESPAN_MS, now)
   const expired = cd?.expired ?? false
+  // 休市（MT5 交易时段外）同样禁止滑动确认 / closed market (outside MT5 sessions) blocks the slide too
+  const marketClosed = useMarketClosedBlock(signal.symbol)
   const cdTone = cd && cd.remainMs < 2 * 60 * 1000 ? 'text-down' : 'text-neutral-300'
 
   // 切换正向 / 反向时把止损止盈重置成该方向下的信号值（用户之前手改的值作废——
@@ -140,7 +143,7 @@ export default function SlideOrderModal({ signal, accounts, quotesByAccount: quo
       blocked={expired ? {
         banner: <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{t('order.signalExpiredInModal')}</div>,
         error: t('order.signalExpiredInModal'),
-      } : null}
+      } : marketClosed}
       onCancel={onCancel}
       onConfirm={(volume, mt5Login, stopLoss, takeProfit, clientOrderId) =>
         onConfirm(volume, mt5Login, stopLoss, takeProfit, clientOrderId, reverse)}

@@ -12,6 +12,7 @@ import { useStickyOnlineAccounts } from '../utils/useStickyOnlineAccounts'
 import { priceDigits } from './charts/chartConfig'
 import OrderSheet, { type OrderConfirm } from './order/OrderSheet'
 import { useOrderForm } from './order/useOrderForm'
+import { useMarketClosedBlock } from './order/useMarketStatus'
 
 interface Props {
   symbol: string
@@ -57,6 +58,8 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
   // 与 SlideOrderModal 同一套：在线标志抖动不应该把账户切换器整个卸载。
   // Same as SlideOrderModal: a flickering online flag must not unmount the switcher.
   const availableAccounts = useStickyOnlineAccounts(accounts)
+  // 休市（MT5 交易时段外）禁止下单 / closed market (outside MT5 sessions) blocks the order
+  const marketClosed = useMarketClosedBlock(symbol)
   const form = useOrderForm({
     symbol, side,
     accounts: availableAccounts,
@@ -71,6 +74,7 @@ export default function ChartOrderModal({ symbol, side, accounts, quotesByAccoun
       symbol={symbol}
       totalAccounts={accounts.length}
       priceText={form.entryRef == null ? '-' : form.entryRef.toFixed(shownDigits)}
+      blocked={marketClosed}
       onCancel={onCancel}
       onConfirm={onConfirm}
     />

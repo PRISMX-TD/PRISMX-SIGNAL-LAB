@@ -162,6 +162,8 @@
     "tpWrongSide": "止盈价与现价方向不对",
     "signalExpiresIn": "信号剩余",
     "signalExpiredInModal": "该信号刚刚过期，无法再下单",
+    "marketClosed": "休市中，暂不能下单（周末只有加密货币可交易）",
+    "marketClosedUntil": "休市中，预计 {{time}} 开盘，暂不能下单",
     "slTpInvalid": "请先修正止损/止盈再确认下单",
     "riskNote": "以 MT5 实际成交价为准，5 分钟未执行自动取消。仅为信号工具，不构成投资建议。",
     "submitting": "提交中…",

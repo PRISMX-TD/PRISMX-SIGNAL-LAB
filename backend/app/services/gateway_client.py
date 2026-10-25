@@ -833,6 +833,27 @@ async def get_deals_batch(
 
 # ---------- 查单结果（网关 GET /trade/result，只读）----------
 
+async def get_symbol_sessions(symbol: str, login: int | None = None, timeout: float = 3.0) -> dict | None:
+    """读品种的 MT5 交易时段与「现在能不能开仓」（网关 /symbol-sessions，2026-10-25）。
+
+    回 `{ok, symbol, tradeMode, serverTime, serverUtcOffsetSec, sessionsKnown, holiday,
+    openNow, nextOpenUtc, sessions:[{day,open,close}]}`；网关不可达 / 旧网关没有这个
+    接口 / 品种读不到时返回 None（调用方退回固定周末日历，见 services/market_hours）。
+    login 可省略：带上时网关按该账号的组解析后缀（XAUUSD → XAUUSD.s）。
+    The symbol's MT5 trade sessions and whether it can be traded right now. None when
+    the gateway is unreachable, too old for this endpoint, or the symbol is unknown;
+    callers fall back to the fixed weekend calendar. With a login the gateway resolves
+    the group suffix.
+    """
+    body: dict = {"symbol": symbol}
+    if login:
+        body["login"] = int(login)
+    data = await _post("/symbol-sessions", body, timeout=timeout)
+    if not isinstance(data, dict) or not data.get("ok"):
+        return None
+    return data
+
+
 async def get_trade_result(
     login: int, client_order_id: str, action: str, timeout: float = 8.0,
 ) -> dict | None:

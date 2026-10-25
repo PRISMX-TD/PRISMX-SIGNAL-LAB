@@ -180,6 +180,11 @@ def _is_market_closed(t: float, symbol: str) -> bool:
     return False
 
 
+# 下单闸门（services/market_hours）在网关不可达时也按这份周末日历判休市，公开一个名字。
+# The order gate (services/market_hours) reuses this weekend calendar as its fallback.
+is_weekend_closed = _is_market_closed
+
+
 # 每天扫一次即可,K 线不是分秒必争的时效数据 / once a day is plenty; candles aren't latency-sensitive
 RETENTION_SWEEP_INTERVAL_SECONDS = 24 * 60 * 60
 

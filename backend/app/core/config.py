@@ -613,6 +613,11 @@ class Settings(BaseSettings):
     # 风控 / Risk control
     MAX_VOLUME_PER_ORDER: float = 10.0  # 单笔最大手数 / max lots per order
     MIN_VOLUME_PER_ORDER: float = 0.01  # 单笔最小手数 / min lots per order
+    # 下单前按 MT5 交易时段拦休市品种（周末只有加密货币能下）。关掉 = 应急放行，
+    # 休市单会照样发到网关 / 桥接，由券商自己拒（或挂成「request adding」）。
+    # Refuse orders outside the symbol's MT5 trade sessions (weekends: crypto only).
+    # Off = emergency bypass; closed-market orders then reach the broker unchecked.
+    MARKET_HOURS_GATE: bool = True
     # 按账户净值粗估的手数上限：每手所需净值（账户币种）。净值/该值 = 允许的最大手数。
     # Rough equity-based lot cap: required equity per lot (account currency).
     EQUITY_PER_LOT: float = 200.0
