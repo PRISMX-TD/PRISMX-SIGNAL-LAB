@@ -44,7 +44,12 @@ namespace Prismx.Mt5Gateway
         private static string _currentFile;
         private static long _currentBytes;
         private static int _overflowIndex;
+        private static bool _droppingToday;
         private static StreamWriter _writer;
+
+        // 每天最多几个 .overflowN 文件。加上主文件,单日上限约 (1 + 5) × 100 MB。
+        // Max .overflowN files per day; with the main file that caps a day at ~600 MB.
+        private const int MaxOverflowFilesPerDay = 5;
 
         public static void Init(string baseDir)
         {
@@ -98,6 +103,8 @@ namespace Prismx.Mt5Gateway
                 message = format;
             }
 
+            message = EscapeControlChars(message);
+
             string line = string.Format("{0:yyyy-MM-dd HH:mm:ss} [{1}] {2}",
                 DateTime.Now, level, message);
 
@@ -126,6 +133,7 @@ namespace Prismx.Mt5Gateway
                         // 跨天是天然的每日触发点,不需要再引入一个线程。
                         _currentDate = today;
                         _overflowIndex = 0;
+                        _droppingToday = false;
                         _currentFile = Path.Combine(_dir,
                             string.Format("gateway-{0:yyyyMMdd}.log", today));
                         _currentBytes = SafeFileLength(_currentFile);
@@ -133,6 +141,33 @@ namespace Prismx.Mt5Gateway
                     }
 
                     long lineBytes = Encoding.UTF8.GetByteCount(line) + Environment.NewLine.Length;
+
+                    // 当天溢出文件已到上限:只在最后一个文件末尾补一行说明,之后当天的
+                    // 文件日志全部丢弃(控制台照写),跨天自动恢复。否则刷屏一晚上照样能
+                    // 生出无数个 .overflowN 把盘写满。
+                    // Daily overflow cap reached: append one marker line, then drop file
+                    // logging until the next day; otherwise a runaway loop still fills the
+                    // disk, just one .overflowN at a time.
+                    if (_droppingToday)
+                        return;
+
+                    if (_currentBytes + lineBytes > MaxFileBytes && _overflowIndex >= MaxOverflowFilesPerDay)
+                    {
+                        _droppingToday = true;
+                        if (_writer == null)
+                        {
+                            _writer = new StreamWriter(
+                                new FileStream(_currentFile, FileMode.Append, FileAccess.Write, FileShare.ReadWrite),
+                                new UTF8Encoding(false));
+                            _writer.AutoFlush = true;
+                        }
+                        _writer.WriteLine(string.Format(
+                            "{0:yyyy-MM-dd HH:mm:ss} [ERROR] 当天日志已写满 {1} 个溢出文件,今天余下的文件日志全部丢弃 / "
+                            + "daily log overflow cap reached, dropping file logs until tomorrow",
+                            DateTime.Now, MaxOverflowFilesPerDay));
+                        CloseWriter();
+                        return;
+                    }
 
                     if (_currentBytes + lineBytes > MaxFileBytes)
                     {
@@ -172,6 +207,61 @@ namespace Prismx.Mt5Gateway
                     CloseWriter();
                 }
             }
+        }
+
+        /// <summary>
+        /// 把控制字符转义成可见形式(\r \n \t \xNN \uNNNN)。日志参数里有调用方给的字符串
+        /// (clientOrderId、tag、MT5 报错文本……),带 CR/LF 就能伪造出一整行假日志;
+        /// U+2028/2029、U+0085 在部分查看器里同样会断行。正常文本原样返回,不额外分配。
+        /// Escapes control characters. Log arguments include caller-supplied strings, and
+        /// a CR/LF would forge whole log lines; U+0085/2028/2029 break lines in some viewers
+        /// too. Clean text is returned as is, without allocating.
+        /// </summary>
+        internal static string EscapeControlChars(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+                return s;
+
+            int i = 0;
+            while (i < s.Length && !NeedsEscape(s[i]))
+                i++;
+
+            if (i == s.Length)
+                return s;
+
+            StringBuilder sb = new StringBuilder(s.Length + 16);
+            sb.Append(s, 0, i);
+
+            for (; i < s.Length; i++)
+            {
+                char c = s[i];
+
+                if (!NeedsEscape(c))
+                {
+                    sb.Append(c);
+                    continue;
+                }
+
+                switch (c)
+                {
+                    case '\r': sb.Append("\\r"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    default:
+                        if (c < 0x100)
+                            sb.Append("\\x").Append(((int)c).ToString("X2"));
+                        else
+                            sb.Append("\\u").Append(((int)c).ToString("X4"));
+                        break;
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static bool NeedsEscape(char c)
+        {
+            return c < 0x20 || (c >= 0x7F && c <= 0x9F) || c == (char)0x2028 || c == (char)0x2029;
         }
 
         /// <summary>关掉当前的日志写入器。调用方持 Gate。

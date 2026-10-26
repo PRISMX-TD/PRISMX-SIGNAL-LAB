@@ -147,7 +147,13 @@ if ($Status) {
             if ($null -ne $rep -and $rep.Interval) {
                 $dur = if ($rep.Duration) { $rep.Duration } else { "无限(Duration 为空)" }
                 Write-Note "看门狗重复    : 每 $($rep.Interval),持续 $dur"
+                # 安装时给的是 10 年(见下文为什么不用 MaxValue),一年以上都按"无限"算
+                $finite = $false
                 if ($rep.Duration) {
+                    try { $finite = ([Xml.XmlConvert]::ToTimeSpan($rep.Duration)).TotalDays -lt 365 }
+                    catch { $finite = $true }
+                }
+                if ($finite) {
                     Write-Bad "  看门狗重复时长不是「无限」!到点后进程消失将不再自愈。请重跑安装以修正。"
                 }
             }
@@ -303,11 +309,11 @@ if ($running) {
 
 Write-Step "创建计划任务"
 
-# 已存在就先删掉,让本脚本可以反复执行而不出错
-if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
-    Write-Note "删除了同名的旧任务"
-}
+# 已存在的同名任务不先删:下面用 Register-ScheduledTask -Force 原地覆盖。以前是先
+# Unregister 再 Register,新任务注册失败时(比如重复时长被拒收)旧任务已经没了,
+# gateway 从此既不开机自启也不自动拉起。-Force 失败时旧任务原样保留。
+# Overwrite in place with -Force instead of unregister-then-register: a failed
+# registration used to leave no task at all.
 
 # WorkingDirectory 必须设成 gateway 目录:MT5 SDK 按**当前工作目录**建 bases\ 缓存
 # 目录,工作目录不对会直接起不来。这是最容易踩的坑。
@@ -327,10 +333,15 @@ $action = New-ScheduledTaskAction -Execute $ExePath -Argument "serve" -WorkingDi
 #      ("forever" and "1 day" have both been observed). If it resolves to 1 day, the
 #      self-healing this script promises silently stops working on day two, and
 #      -Status still shows the task as Ready.
+#      但不能给 [TimeSpan]::MaxValue:它序列化成 P99999999DT23H59M59S,这台 VPS 的任务
+#      计划程序直接拒收("任务 XML 包含格式不正确或超出范围的值",2026-10-04 装看门狗时
+#      实测)。给 10 年,实际等于永远,-Status 也按"10 年以上 = 无限"认。
+#      Not [TimeSpan]::MaxValue: Task Scheduler on the VPS rejects its
+#      P99999999DT23H59M59S as out of range. Ten years is forever in practice.
 $trigAtStartup = New-ScheduledTaskTrigger -AtStartup
 $trigWatchdog  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
                     -RepetitionInterval (New-TimeSpan -Minutes 2) `
-                    -RepetitionDuration ([TimeSpan]::MaxValue)
+                    -RepetitionDuration (New-TimeSpan -Days 3650)
 
 # 以 SYSTEM 身份、最高权限运行 —— 这才是"不依赖任何人登录"的关键,
 # 同时不需要在任务里存任何账号密码。
@@ -351,26 +362,45 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartCount 3 `
     -RestartInterval (New-TimeSpan -Minutes 1)
 
-Register-ScheduledTask -TaskName $TaskName `
-    -Action $action `
-    -Trigger @($trigAtStartup, $trigWatchdog) `
-    -Principal $principal `
-    -Settings $settings `
-    -Description "PRISMX MT5 Gateway - 开机自启,不依赖登录会话,进程消失后 2 分钟内自愈" | Out-Null
+# Register-ScheduledTask 失败抛的是非终止错误:不写 -ErrorAction Stop 会照样往下走,
+# 打出"已创建"。
+try {
+    Register-ScheduledTask -TaskName $TaskName `
+        -Action $action `
+        -Trigger @($trigAtStartup, $trigWatchdog) `
+        -Principal $principal `
+        -Settings $settings `
+        -Description "PRISMX MT5 Gateway - 开机自启,不依赖登录会话,进程消失后 2 分钟内自愈" `
+        -Force -ErrorAction Stop | Out-Null
+} catch {
+    Write-Bad "创建计划任务失败:$($_.Exception.Message)"
+    Write-Bad "原有的同名任务(如果有)没被改动。"
+    exit 1
+}
 
 Write-Ok "计划任务 '$TaskName' 已创建"
 
-Write-Step "收紧 gateway.ini 与 logs\ 的权限"
+Write-Step "收紧 gateway.ini、logs\ 与 state\ 的权限"
 
 # 任务以 SYSTEM 运行,但 gateway.ini 明文存着 Manager 账号密码与 api_token
 # (Config.cs 读的就是它),默认继承目录 ACL 时本机 Users 组可读。这台机器同时
 # 开着 RDP——任何能登上来的账号都能拿到「全券商账号的管理员凭据」+「等同全体
 # 客户下单权限的 token」。装的时候就把继承断掉,只留 SYSTEM 与 Administrators。
 # logs\ 同理:日志里不打密码,但持仓、成交、账号号码都在里面。
+# state\ 是幂等缓存(idempotency.jsonl):账号号码、clientOrderId、每笔交易的结果。
+# 网关第一次下单才建它,这里先建好,保证一开始就是收紧过的 ACL。
+# state\ holds the idempotency cache (logins, clientOrderIds, trade results). The
+# gateway only creates it on the first trade, so create it here with the tight ACL.
 # The task runs as SYSTEM, yet gateway.ini holds the manager password and the API
 # token in cleartext and inherits a directory ACL that lets local Users read it —
 # on a box that also serves RDP. Break inheritance at install time.
-foreach ($target in @($IniPath, (Join-Path $GatewayDir 'logs'))) {
+$StateDir = Join-Path $GatewayDir 'state'
+if (-not (Test-Path $StateDir)) {
+    try { New-Item -ItemType Directory -Path $StateDir -ErrorAction Stop | Out-Null }
+    catch { Write-Note "创建 $StateDir 失败:$($_.Exception.Message)" }
+}
+
+foreach ($target in @($IniPath, (Join-Path $GatewayDir 'logs'), $StateDir)) {
     if (-not (Test-Path $target)) { continue }
     try {
         & icacls.exe $target /inheritance:r /grant:r "SYSTEM:(F)" "Administrators:(F)" /T /C | Out-Null

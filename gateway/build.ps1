@@ -4,9 +4,31 @@
     不需要 Visual Studio,用 .NET Framework 自带的 csc.exe。
 
     用法:在本目录执行  .\build.ps1
+          .\build.ps1 -Out mt5gateway.new.exe   编译到另一个文件(网关照常运行,不占用正在跑的 exe)
+
+    -Out:输出文件,相对路径按本目录算,默认 mt5gateway.exe。restart-gateway.ps1 用它在停服务
+    之前先编译到临时 exe,编译失败就根本不停服务。指定 -Out 时不往本目录拷运行时 DLL
+    (正在跑的网关占着它们,拷不进去),只核对它们与 SDK 目录里的是否一致,不一致就报错退出。
+    -Out: output file (relative to this folder, default mt5gateway.exe). restart-gateway.ps1
+    uses it to compile to a temp exe before stopping the service. With -Out the runtime DLLs
+    are not copied (the running gateway holds them); they are only compared with the SDK's.
 #>
+param(
+    [string]$Out = ""
+)
 
 $ErrorActionPreference = "Stop"
+
+$defaultOut = Join-Path $PSScriptRoot "mt5gateway.exe"
+$customOut = $false
+if ($Out) {
+    if (-not [System.IO.Path]::IsPathRooted($Out)) { $Out = Join-Path $PSScriptRoot $Out }
+    $Out = [System.IO.Path]::GetFullPath($Out)
+    if ($Out -ne [System.IO.Path]::GetFullPath($defaultOut)) { $customOut = $true }
+} else {
+    $Out = $defaultOut
+}
+$outName = Split-Path $Out -Leaf
 
 $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) {
@@ -87,7 +109,7 @@ try {
         "ReadChannel.cs"
     )
 
-    & $csc /nologo /target:exe /platform:x64 /optimize+ /out:mt5gateway.exe `
+    & $csc /nologo /target:exe /platform:x64 /optimize+ "/out:$Out" `
         /reference:"$libs\MetaQuotes.MT5CommonAPI64.dll" `
         /reference:"$libs\MetaQuotes.MT5ManagerAPI64.dll" `
         $sources
@@ -97,7 +119,28 @@ try {
     # 运行时需要托管包装器 + 原生 DLL 与 exe 同目录。
     # AVX/AVX2 变体由 API 依 CPU 自动挑选,一并放着。
     # $libs 已经退回本目录时不用拷——源和目标是同一个文件,拷了反而报错。
-    if ($copyRuntimeDlls) {
+    # 指定了 -Out(网关可能正在跑、占着这些 DLL)时不拷,只核对:不一致就报错,
+    # 免得新 exe 按新 SDK 编译、运行时却加载到本目录的旧 DLL。
+    # With -Out (the gateway may be running and holding these DLLs) only compare;
+    # a mismatch fails the build rather than pairing a new exe with old DLLs.
+    if ($copyRuntimeDlls -and $customOut) {
+        foreach ($dll in @(
+            "MetaQuotes.MT5CommonAPI64.dll",
+            "MetaQuotes.MT5ManagerAPI64.dll",
+            "MT5APIManager64.dll",
+            "MT5APIManager64avx.dll",
+            "MT5APIManager64avx2.dll"
+        )) {
+            $src = Join-Path $libs $dll
+            $dst = Join-Path $PSScriptRoot $dll
+            if (-not (Test-Path $src)) { continue }
+            if ((-not (Test-Path $dst)) -or
+                ((Get-FileHash $src -Algorithm SHA256).Hash -ne (Get-FileHash $dst -Algorithm SHA256).Hash)) {
+                Write-Error ("本目录的 $dll 与 SDK 目录里的不一致(或缺失),不能只编译到 -Out 再替换 exe。" +
+                    "请先停网关,再不带 -Out 运行 .\build.ps1 完整编译(会顺带拷 DLL)。")
+            }
+        }
+    } elseif ($copyRuntimeDlls) {
         foreach ($dll in @(
             "MetaQuotes.MT5CommonAPI64.dll",
             "MetaQuotes.MT5ManagerAPI64.dll",
@@ -110,7 +153,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "[OK] 编译完成:mt5gateway.exe" -ForegroundColor Green
+    Write-Host "[OK] 编译完成:$outName" -ForegroundColor Green
 
     if (-not (Test-Path "gateway.ini")) {
         Write-Host ""

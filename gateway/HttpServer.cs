@@ -12,6 +12,7 @@
 //| 开到公网 —— 这个 token 等于全体客户的下单权限。                   |
 //+------------------------------------------------------------------+
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -54,6 +55,25 @@ namespace Prismx.Mt5Gateway
             _link = link;
             _tokenBytes = Encoding.UTF8.GetBytes(cfg.ApiToken);
             _listener.Prefixes.Add(cfg.ListenPrefix);
+        }
+
+        /// <summary>clientOrderId 上限,与 /trade/result 一致。/ Same cap as /trade/result.</summary>
+        private const int MaxClientOrderIdLength = 128;
+
+        /// <summary>
+        /// clientOrderId 超长就回 400(返回 true 表示已经回了)。它进幂等缓存的 key、落盘、
+        /// 也进日志:不设上限,一个调用方就能用超长 key 把内存与磁盘撑大。
+        /// Rejects an over-long clientOrderId with 400 (true = answered). It becomes
+        /// part of the idempotency key, is persisted and logged; unbounded, one caller
+        /// could bloat memory and disk with huge keys.
+        /// </summary>
+        private bool RejectBadClientOrderId(HttpListenerContext ctx, JsonObject body)
+        {
+            if (body.GetString("clientOrderId").Length <= MaxClientOrderIdLength)
+                return false;
+
+            WriteError(ctx, 400, "bad_request", "clientOrderId 不得超过 " + MaxClientOrderIdLength + " 个字符");
+            return true;
         }
 
         /// <summary>
@@ -135,6 +155,10 @@ namespace Prismx.Mt5Gateway
         /// <summary>在途请求的名额。/health 不占名额。
         /// Slots for in-flight requests; /health never takes one.</summary>
         private SemaphoreSlim _slots;
+
+        /// <summary>因查询通道全忙而回 503 read_busy 的次数(进程内累计),/health 暴露。
+        /// Count of read_busy 503s since start, exposed on /health.</summary>
+        private int _readBusyCount;
 
         public void Start()
         {
@@ -250,6 +274,10 @@ namespace Prismx.Mt5Gateway
                 case "/orders":
                 case "/deals":
                 case "/quote":
+                case "/symbol-sessions":
+                case "/positions-batch":
+                case "/accounts-batch":
+                case "/deals-batch":
                     return true;
                 default:
                     return false;
@@ -357,6 +385,25 @@ namespace Prismx.Mt5Gateway
                     // queries are back on the trading link.
                     .Field("readChannels", (uint)_link.ReadChannelsConfigured)
                     .Field("readChannelsConnected", (uint)_link.ReadChannelsConnected)
+                    // 累计因查询通道全忙回过多少次 503 read_busy(读接口不再溢到交易连接)。
+                    // Total read_busy 503s (reads no longer spill onto the trading link).
+                    .Field("readBusyCount", (uint)Thread.VolatileRead(ref _readBusyCount))
+                    // 支持 /positions-batch、/accounts-batch、/deals-batch 与 GET /trade/result。
+                    // 后端据此决定是否走批量;旧网关没有这个字段 = 不支持。
+                    // Supports the batch read endpoints and GET /trade/result; absent on old builds.
+                    .Field("batchSupported", true)
+                    // 挂单订阅验证(只计数):券商推不推挂单 UPDATE、本地 pump 与 /orders 服务器
+                    // 结果是否一致。ordersSetMismatch/ordersFieldMismatch 长期为 0 且
+                    // ordersCompared 足够大,才有理由把 /orders 改走本地。
+                    // Pending-order validation (counting only): does the broker push order
+                    // UPDATE, and does the local pump match the /orders server result.
+                    .Field("orderSubscribed", _link.OrderSubscribed)
+                    .Field("orderAddEvents", (uint)_link.OrderAddEvents)
+                    .Field("orderUpdateEvents", (uint)_link.OrderUpdateEvents)
+                    .Field("orderDeleteEvents", (uint)_link.OrderDeleteEvents)
+                    .Field("ordersCompared", (uint)_link.OrdersCompared)
+                    .Field("ordersSetMismatch", (uint)_link.OrdersSetMismatch)
+                    .Field("ordersFieldMismatch", (uint)_link.OrdersFieldMismatch)
                  .EndObject();
                 // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
                 // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),
@@ -433,6 +480,18 @@ namespace Prismx.Mt5Gateway
                 case "/positions":
                     RequirePost(ctx, method, HandlePositions);
                     return;
+                case "/positions-batch":
+                    RequirePost(ctx, method, HandlePositionsBatch);
+                    return;
+                case "/accounts-batch":
+                    RequirePost(ctx, method, HandleAccountsBatch);
+                    return;
+                case "/deals-batch":
+                    RequirePost(ctx, method, HandleDealsBatch);
+                    return;
+                case "/trade/result":
+                    HandleTradeResult(ctx, method);
+                    return;
                 case "/position-events":
                     HandlePositionEvents(ctx, method);
                     return;
@@ -447,6 +506,9 @@ namespace Prismx.Mt5Gateway
                     return;
                 case "/quote":
                     RequirePost(ctx, method, HandleQuote);
+                    return;
+                case "/symbol-sessions":
+                    RequirePost(ctx, method, HandleSymbolSessions);
                     return;
                 case "/trade/open":
                     RequirePost(ctx, method, HandleOpen);
@@ -466,10 +528,30 @@ namespace Prismx.Mt5Gateway
                 case "/trade/modify-pending":
                     RequirePost(ctx, method, HandleModifyPending);
                     return;
+                case "/admin/reconnect":
+                    RequirePost(ctx, method, HandleAdminReconnect);
+                    return;
                 default:
                     WriteError(ctx, 404, "not_found", "未知接口:" + path);
                     return;
             }
+        }
+
+        /// <summary>
+        /// 管理后台「重连 MT5」:不重启进程,只把与券商的连接断开重连(由 watchdog 线程
+        /// 在 1 秒内执行)。重连期间下单回"重连中"、什么都没发出去,与平时断线一致。
+        /// accepted=false 表示本来就没连上、重连已经在进行,这次请求什么也没做。
+        /// Admin "reconnect MT5": drop and re-establish the broker link without
+        /// restarting the process. accepted=false: already disconnected, nothing done.
+        /// </summary>
+        private void HandleAdminReconnect(HttpListenerContext ctx, JsonObject body)
+        {
+            bool accepted = _link.RequestReconnect();
+            Log.Warn("收到管理后台重连请求(来自 {0}):{1}", RemoteIp(ctx),
+                accepted ? "已安排" : "当前未连接,重连本已在进行");
+            JsonWriter j = new JsonWriter();
+            j.BeginObject().Field("ok", true).Field("accepted", accepted).EndObject();
+            WriteJson(ctx, 200, j.ToString());
         }
 
         private void RequirePost(HttpListenerContext ctx, string method,
@@ -494,6 +576,94 @@ namespace Prismx.Mt5Gateway
             }
 
             handler(ctx, body);
+        }
+
+        /// <summary>
+        /// 查询通道全忙:回 503 read_busy。请求没有碰 MT5 交易连接,后端按读失败处理、沿用上一帧。
+        /// Every query channel stayed busy: 503 read_busy. Nothing touched the trading link;
+        /// the backend treats it as a failed read and keeps its last snapshot.
+        /// </summary>
+        private void WriteReadBusy(HttpListenerContext ctx)
+        {
+            Interlocked.Increment(ref _readBusyCount);
+            WriteError(ctx, 503, "read_busy", "查询通道繁忙,本次读取未执行,请稍后重试");
+        }
+
+        /// <summary>
+        /// 单人读接口的组白名单(allowed_groups)。返回 false = 组查不出来,已回 503/502;
+        /// 返回 true 时 allowed=false 表示账号不存在或组不在白名单,调用方按"不存在"
+        /// 回复(与真不存在一字不差,不当存在性探针)。组查询走缓存/本地 pump,见
+        /// Mt5Link.ResolveReadGroups。
+        /// allowed_groups for single-login reads. false = group unknown, 503/502 already
+        /// sent. true with allowed=false: missing or disallowed — answer exactly like a
+        /// missing account so this is no existence oracle.
+        /// </summary>
+        private bool CheckReadAllowed(HttpListenerContext ctx, ulong login, out bool allowed)
+        {
+            // 没配白名单 = 不限制,省掉组查询。/ No whitelist: nothing to check.
+            allowed = !_cfg.HasGroupWhitelist;
+            if (allowed)
+                return true;
+
+            System.Collections.Generic.Dictionary<ulong, string> groups;
+            MTRetCode res;
+            bool readBusy;
+
+            if (!_link.ResolveReadGroups(new ulong[] { login }, true, out groups, out res, out readBusy))
+            {
+                if (readBusy)
+                    WriteReadBusy(ctx);
+                else
+                    WriteError(ctx, 502, res.ToString(), "读取账号组失败");
+                return false;
+            }
+
+            string group;
+            allowed = groups.TryGetValue(login, out group) && _cfg.IsGroupAllowed(group);
+            return true;
+        }
+
+        /// <summary>
+        /// 批量读接口的组白名单:返回 false = 组查不出来,已按批量失败回复(后端退回逐人接口);
+        /// 返回 true 时 allowed 是可以读的 login(保持原顺序)。其余 login 按"不存在"处理。
+        /// Batch form: false = failure already answered (backend falls back to single
+        /// reads). true: allowed holds the readable logins; the rest are treated as unknown.
+        /// </summary>
+        private bool FilterReadAllowed(HttpListenerContext ctx, ulong[] logins, out ulong[] allowed)
+        {
+            allowed = logins;
+            if (!_cfg.HasGroupWhitelist)
+                return true;
+
+            System.Collections.Generic.Dictionary<ulong, string> groups;
+            MTRetCode res;
+            bool readBusy;
+
+            if (!_link.ResolveReadGroups(logins, false, out groups, out res, out readBusy))
+            {
+                WriteBatchFailure(ctx, readBusy, res);
+                return false;
+            }
+
+            System.Collections.Generic.List<ulong> ok = new System.Collections.Generic.List<ulong>(logins.Length);
+            foreach (ulong login in logins)
+            {
+                string group;
+                if (groups.TryGetValue(login, out group) && _cfg.IsGroupAllowed(group))
+                    ok.Add(login);
+            }
+
+            allowed = ok.ToArray();
+            return true;
+        }
+
+        /// <summary>{ ok:true, name:[] }——与"账号存在但没有数据"的回复逐字相同。
+        /// Identical to the reply for an existing login with no data.</summary>
+        private void WriteEmptyList(HttpListenerContext ctx, string name)
+        {
+            JsonWriter j = new JsonWriter();
+            j.BeginObject().Field("ok", true).BeginArray(name).EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
         }
 
         //+------------------------------------------------------------------+
@@ -522,10 +692,14 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            // 组不在白名单时回复与"账号不存在"逐字相同(404 + NOTFOUND),不验密码:
+            // 否则 403 group_not_allowed 等于告诉调用方"这个号在券商那里存在"。
+            // A disallowed group answers exactly like a missing account (no password
+            // check), so the endpoint is not an account-existence oracle.
             if (!_cfg.IsGroupAllowed(info.Group))
             {
                 Log.Warn("拒绝绑定:账号 {0} 的组 {1} 不在白名单", login, info.Group);
-                WriteError(ctx, 403, "group_not_allowed", "该账号所属组不允许接入");
+                WriteError(ctx, 404, MTRetCode.MT_RET_ERR_NOTFOUND.ToString(), "账号不存在或无法读取");
                 return;
             }
 
@@ -583,13 +757,29 @@ namespace Prismx.Mt5Gateway
             }
 
             MTRetCode res;
-            AccountInfo info = _link.GetAccount(login, out res);
+            bool readBusy;
+            AccountInfo info = _link.GetAccount(login, out res, out readBusy, false);
+
+            if (info == null && readBusy)
+            {
+                WriteReadBusy(ctx);
+                return;
+            }
 
             if (info == null)
             {
                 WriteError(ctx, 404, res.ToString(), "读取账号失败");
                 return;
             }
+
+            // 组不在白名单:与账号不存在回得一模一样。/ Disallowed group: same as not found.
+            if (!_cfg.IsGroupAllowed(info.Group))
+            {
+                WriteError(ctx, 404, MTRetCode.MT_RET_ERR_NOTFOUND.ToString(), "读取账号失败");
+                return;
+            }
+
+            _link.RememberReadGroup(login, info.Group);
 
             JsonWriter j = new JsonWriter();
             j.BeginObject()
@@ -620,8 +810,28 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            // 组不在白名单 / 账号不存在:与没有持仓的账号一样回空列表(PositionRequest 对
+            // 不存在的账号本来就回 NOTFOUND → 空列表)。
+            // Disallowed or missing: an empty list, exactly what a missing login gets.
+            bool allowed;
+            if (!CheckReadAllowed(ctx, login, out allowed))
+                return;
+
+            if (!allowed)
+            {
+                WriteEmptyList(ctx, "positions");
+                return;
+            }
+
             MTRetCode res;
-            PositionInfo[] list = _link.GetPositions(login, out res);
+            bool readBusy;
+            PositionInfo[] list = _link.GetPositions(login, out res, out readBusy, false);
+
+            if (list == null && readBusy)
+            {
+                WriteReadBusy(ctx);
+                return;
+            }
 
             if (list == null)
             {
@@ -748,14 +958,36 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            // 组白名单,同 /positions / allowed_groups, same as /positions
+            bool allowed;
+            if (!CheckReadAllowed(ctx, login, out allowed))
+                return;
+
+            if (!allowed)
+            {
+                WriteEmptyList(ctx, "orders");
+                return;
+            }
+
             MTRetCode res;
-            OrderInfo[] list = _link.GetOrders(login, out res);
+            bool readBusy;
+            OrderInfo[] list = _link.GetOrders(login, out res, out readBusy, false);
+
+            if (list == null && readBusy)
+            {
+                WriteReadBusy(ctx);
+                return;
+            }
 
             if (list == null)
             {
                 WriteError(ctx, 502, res.ToString(), "读取挂单失败");
                 return;
             }
+
+            // 只观测:本地 pump 结果与服务器结果对比计数,返回值仍是服务器的。
+            // Observation only: the server result below is what gets returned.
+            _link.CompareLocalOrders(login, list);
 
             JsonWriter j = new JsonWriter();
             j.BeginObject().Field("ok", true).BeginArray("orders");
@@ -776,6 +1008,330 @@ namespace Prismx.Mt5Gateway
 
             j.EndArray().EndObject();
             WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
+        //| 批量读接口。body 是平的一层 JSON,所以 logins 用逗号分隔的字符串:    |
+        //|   { "logins": "500123,500124" }  /deals-batch 另带 from / to        |
+        //| 响应 { ok, results:[ 每个 login 一项,形状与对应单人接口一致,另带    |
+        //| login 字段;取不到的账号 ok:false + error ] }。整体失败回 502/503,    |
+        //| 后端据此退回逐人接口。                                              |
+        //| Batch reads. Bodies are flat JSON, hence the comma-separated string. |
+        //+------------------------------------------------------------------+
+        private const int MaxBatchLogins = 100;
+
+        private bool TryParseLogins(HttpListenerContext ctx, JsonObject body, out ulong[] logins)
+        {
+            logins = null;
+            string raw = body.GetString("logins");
+            System.Collections.Generic.List<ulong> list = new System.Collections.Generic.List<ulong>();
+            System.Collections.Generic.HashSet<ulong> seen = new System.Collections.Generic.HashSet<ulong>();
+
+            foreach (string part in raw.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                ulong v;
+                if (!ulong.TryParse(part.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out v) || v == 0)
+                {
+                    WriteError(ctx, 400, "bad_request", "logins 必须是逗号分隔的正整数");
+                    return false;
+                }
+
+                if (seen.Add(v))
+                    list.Add(v);
+            }
+
+            if (list.Count == 0 || list.Count > MaxBatchLogins)
+            {
+                WriteError(ctx, 400, "bad_request", "logins 数量须在 1~" + MaxBatchLogins + " 之间");
+                return false;
+            }
+
+            logins = list.ToArray();
+            return true;
+        }
+
+        /// <summary>批量读失败的统一回复:全忙 503 read_busy,其余 503 read_unavailable(没有可用的
+        /// 查询通道,批量不溢到交易连接)或 502(服务器报错)。
+        /// Failure reply: 503 read_busy when saturated, 503 read_unavailable when no query channel
+        /// can serve (batch never spills onto the trading link), 502 on a server error.</summary>
+        private void WriteBatchFailure(HttpListenerContext ctx, bool readBusy, MTRetCode res)
+        {
+            if (readBusy)
+            {
+                WriteReadBusy(ctx);
+                return;
+            }
+
+            if (res == MTRetCode.MT_RET_ERR_NETWORK)
+            {
+                WriteError(ctx, 503, "read_unavailable", "没有可用的查询通道,批量读取未执行");
+                return;
+            }
+
+            WriteError(ctx, 502, res.ToString(), "批量读取失败");
+        }
+
+        private void HandlePositionsBatch(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong[] logins;
+            if (!TryParseLogins(ctx, body, out logins))
+                return;
+
+            // 组不在白名单的 login 不去读,回复与不存在的 login 一样(空列表)。
+            // Disallowed logins are not read and look like unknown ones (empty list).
+            ulong[] readable;
+            if (!FilterReadAllowed(ctx, logins, out readable))
+                return;
+
+            System.Collections.Generic.Dictionary<ulong, PositionInfo[]> by =
+                new System.Collections.Generic.Dictionary<ulong, PositionInfo[]>();
+            MTRetCode res;
+            bool readBusy;
+
+            if (readable.Length > 0 && !_link.GetPositionsBatch(readable, out by, out res, out readBusy))
+            {
+                WriteBatchFailure(ctx, readBusy, res);
+                return;
+            }
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject().Field("ok", true).BeginArray("results");
+
+            foreach (ulong login in logins)
+            {
+                PositionInfo[] list;
+                if (!by.TryGetValue(login, out list))
+                    list = new PositionInfo[0];
+
+                j.BeginObject().Field("login", login).Field("ok", true).BeginArray("positions");
+
+                foreach (PositionInfo p in list)
+                {
+                    // 字段与 HandlePositions 逐项一致 / keep identical to HandlePositions
+                    j.BeginObject()
+                        .Field("ticket", p.Ticket)
+                        .Field("symbol", p.Symbol)
+                        .Field("side", p.Side)
+                        .Field("volume", p.Volume)
+                        .Field("priceOpen", p.PriceOpen)
+                        .Field("priceCurrent", p.PriceCurrent)
+                        .Field("stopLoss", p.StopLoss)
+                        .Field("takeProfit", p.TakeProfit)
+                        .Field("profit", p.Profit)
+                        .Field("comment", p.Comment)
+                     .EndObject();
+                }
+
+                j.EndArray().EndObject();
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        private void HandleAccountsBatch(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong[] logins;
+            if (!TryParseLogins(ctx, body, out logins))
+                return;
+
+            System.Collections.Generic.Dictionary<ulong, AccountInfo> by;
+            MTRetCode res;
+            bool readBusy;
+
+            if (!_link.GetAccountsBatch(logins, out by, out res, out readBusy))
+            {
+                WriteBatchFailure(ctx, readBusy, res);
+                return;
+            }
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject().Field("ok", true).BeginArray("results");
+
+            foreach (ulong login in logins)
+            {
+                AccountInfo info;
+
+                // 组不在白名单与读不到一样回复(组随这次读取一起拿到,不多一趟往返)。
+                // Disallowed group answers like not found (group came with this read).
+                if (!by.TryGetValue(login, out info) || !_cfg.IsGroupAllowed(info.Group))
+                {
+                    j.BeginObject()
+                        .Field("login", login)
+                        .Field("ok", false)
+                        .Field("error", MTRetCode.MT_RET_ERR_NOTFOUND.ToString())
+                        .Field("message", "读取账号失败")
+                     .EndObject();
+                    continue;
+                }
+
+                // 喂给读接口的组缓存:持仓批量轮询据此免掉组查询。
+                // Feed the read group cache so the positions poll needs no lookup.
+                _link.RememberReadGroup(login, info.Group);
+
+                // 字段与 HandleAccount 逐项一致 / keep identical to HandleAccount
+                j.BeginObject()
+                    .Field("ok", true)
+                    .Field("login", info.Login)
+                    .Field("name", info.Name)
+                    .Field("group", info.Group)
+                    .Field("leverage", info.Leverage)
+                    .Field("balance", info.Balance)
+                    .Field("equity", info.Equity)
+                    .Field("margin", info.Margin)
+                    .Field("marginFree", info.MarginFree)
+                    .Field("lastPassChange", UnixSeconds(info.LastPassChange))
+                 .EndObject();
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        private void HandleDealsBatch(HttpListenerContext ctx, JsonObject body)
+        {
+            ulong[] logins;
+            if (!TryParseLogins(ctx, body, out logins))
+                return;
+
+            long from = (long)body.GetUlong("from");
+            long to = (long)body.GetUlong("to");
+
+            if (from <= 0 || to <= 0 || to < from)
+            {
+                WriteError(ctx, 400, "bad_request", "from/to 必填且 to 不得早于 from(Unix 秒)");
+                return;
+            }
+
+            // 组白名单,同 /positions-batch / allowed_groups, same as /positions-batch
+            ulong[] readable;
+            if (!FilterReadAllowed(ctx, logins, out readable))
+                return;
+
+            System.Collections.Generic.Dictionary<ulong, DealInfo[]> by =
+                new System.Collections.Generic.Dictionary<ulong, DealInfo[]>();
+            MTRetCode res;
+            bool readBusy;
+
+            if (readable.Length > 0 && !_link.GetDealsBatch(readable, from, to, out by, out res, out readBusy))
+            {
+                WriteBatchFailure(ctx, readBusy, res);
+                return;
+            }
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject().Field("ok", true).BeginArray("results");
+
+            foreach (ulong login in logins)
+            {
+                DealInfo[] list;
+                if (!by.TryGetValue(login, out list))
+                    list = new DealInfo[0];
+
+                j.BeginObject().Field("login", login).Field("ok", true).BeginArray("deals");
+
+                foreach (DealInfo d in list)
+                {
+                    // 字段与 HandleDeals 逐项一致 / keep identical to HandleDeals
+                    j.BeginObject()
+                        .Field("ticket", d.Ticket)
+                        .Field("positionId", d.PositionId)
+                        .Field("symbol", d.Symbol)
+                        .Field("action", d.Action)
+                        .Field("entry", d.Entry)
+                        .Field("volume", d.Volume)
+                        .Field("price", d.Price)
+                        .Field("profit", d.Profit)
+                        .Field("commission", d.Commission)
+                        .Field("storage", d.Storage)
+                        .Field("time", (ulong)d.Time)
+                        .Field("comment", d.Comment)
+                        .Field("reason", d.Reason)
+                        .Field("sl", d.PriceSL)
+                        .Field("tp", d.PriceTP)
+                     .EndObject();
+                }
+
+                j.EndArray().EndObject();
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
+        //| GET /trade/result?login=&clientOrderId=[&action=]  查幂等结果      |
+        //|                                                                  |
+        //| **只读**:只 TryPeek 幂等记录,不登记、不执行、不碰 MT5、不改任何    |
+        //| 下单行为。后端超时订单扫描据此问「这笔到底成没成」。                |
+        //| status:                                                          |
+        //|   done        —— 有结果:ok/retcode/message/deal/order/position/price |
+        //|                  (retcode=MT_RET_REQUEST_PLACED_UNCONFIRMED 表示      |
+        //|                  网关重启中断、结果未知,调用方须按「未知」处理)     |
+        //|   in_progress —— 有记录但仍在执行                                  |
+        //|   not_found   —— 没有记录(没到过网关,或已过 24 小时 TTL)            |
+        //| action 省略时依次试 open/close/pending/cancel/modify-pending/modify。|
+        //| Read-only: peeks the idempotency table, never registers or executes. |
+        //+------------------------------------------------------------------+
+        private static readonly string[] ResultActions =
+            new string[] { "open", "close", "pending", "cancel", "modify-pending", "modify" };
+
+        private void HandleTradeResult(HttpListenerContext ctx, string method)
+        {
+            if (method != "GET")
+            {
+                WriteError(ctx, 405, "method_not_allowed", "只接受 GET");
+                return;
+            }
+
+            System.Collections.Specialized.NameValueCollection q = ctx.Request.QueryString;
+            ulong login;
+            string clientOrderId = (q["clientOrderId"] ?? "").Trim();
+            string action = (q["action"] ?? "").Trim().ToLowerInvariant();
+
+            if (!ulong.TryParse((q["login"] ?? "").Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out login)
+                || login == 0 || clientOrderId.Length == 0 || clientOrderId.Length > MaxClientOrderIdLength)
+            {
+                WriteError(ctx, 400, "bad_request", "login 与 clientOrderId 必填");
+                return;
+            }
+
+            string[] actions = action.Length > 0 ? new string[] { action } : ResultActions;
+
+            foreach (string a in actions)
+            {
+                TradeResult done;
+
+                if (!_idem.TryPeek(IdempotencyCache.Key(login, a, clientOrderId), out done))
+                    continue;
+
+                JsonWriter j = new JsonWriter();
+                j.BeginObject().Field("ok", true).Field("action", a);
+
+                if (done == null)
+                {
+                    j.Field("status", "in_progress");
+                }
+                else
+                {
+                    j.Field("status", "done")
+                        .Field("tradeOk", done.Ok)
+                        .Field("retcode", done.Retcode)
+                        .Field("message", done.Message)
+                        .Field("deal", done.Deal)
+                        .Field("order", done.Order)
+                        .Field("position", done.Position)
+                        .Field("price", done.Price);
+                }
+
+                j.EndObject();
+                WriteJson(ctx, 200, j.ToString());
+                return;
+            }
+
+            JsonWriter nf = new JsonWriter();
+            nf.BeginObject().Field("ok", true).Field("status", "not_found").EndObject();
+            WriteJson(ctx, 200, nf.ToString());
         }
 
         //+------------------------------------------------------------------+
@@ -804,8 +1360,26 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            // 组白名单,同 /positions / allowed_groups, same as /positions
+            bool allowed;
+            if (!CheckReadAllowed(ctx, login, out allowed))
+                return;
+
+            if (!allowed)
+            {
+                WriteEmptyList(ctx, "deals");
+                return;
+            }
+
             MTRetCode res;
-            DealInfo[] list = _link.GetDeals(login, from, to, out res);
+            bool readBusy;
+            DealInfo[] list = _link.GetDeals(login, from, to, out res, out readBusy, false);
+
+            if (list == null && readBusy)
+            {
+                WriteReadBusy(ctx);
+                return;
+            }
 
             if (list == null)
             {
@@ -874,6 +1448,69 @@ namespace Prismx.Mt5Gateway
         }
 
         //+------------------------------------------------------------------+
+        //| POST /symbol-sessions  品种交易时段与当前是否可下单              |
+        //| { symbol, login? } -> { symbol, group, tradeMode, serverTime,    |
+        //|   serverUtcOffsetSec, sessionsKnown, holiday, openNow,           |
+        //|   nextOpenUtc, sessions:[{day,open,close}] }                     |
+        //| 后端据此在下单前拦住休市品种(周末只有加密货币能下),并给前端显示  |
+        //| 「预计开盘时间」。login 可省略:省略时按品种表里的最短匹配名读。    |
+        //+------------------------------------------------------------------+
+        private void HandleSymbolSessions(HttpListenerContext ctx, JsonObject body)
+        {
+            string symbol = body.GetString("symbol");
+            ulong login = body.GetUlong("login");
+
+            if (symbol.Length == 0)
+            {
+                WriteError(ctx, 400, "bad_request", "symbol 必填");
+                return;
+            }
+
+            Mt5Link.SymbolSessionInfo info;
+            MTRetCode res;
+
+            if (!_link.GetSymbolSessions(symbol, login, out info, out res))
+            {
+                WriteError(ctx, 404, res.ToString(), "读不到该品种的交易时段(品种名是否正确?)");
+                return;
+            }
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject()
+                .Field("ok", true)
+                .Field("symbol", info.Symbol)
+                .Field("group", info.Group)
+                .Field("tradeMode", (uint)info.TradeMode)
+                .Field("serverTime", (double)info.ServerTime)
+                .Field("serverUtcOffsetSec", (double)info.ServerUtcOffsetSec)
+                .Field("sessionsKnown", info.SessionsKnown)
+                .Field("holiday", info.Holiday)
+                .Field("openNow", info.OpenNow)
+                .Field("nextOpenUtc", (double)info.NextOpenUtc)
+                .BeginArray("sessions");
+
+            for (int day = 0; day < 7; day++)
+            {
+                List<int[]> list = info.Sessions[day];
+
+                if (list == null)
+                    continue;
+
+                foreach (int[] s in list)
+                {
+                    j.BeginObject()
+                        .Field("day", (uint)day)
+                        .Field("open", (uint)s[0])
+                        .Field("close", (uint)s[1])
+                     .EndObject();
+                }
+            }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
         //| POST /trade/open  市价开仓                                       |
         //| { login, symbol, side:"BUY"|"SELL", volume, stopLoss, takeProfit,|
         //|   tag }                                                          |
@@ -896,6 +1533,18 @@ namespace Prismx.Mt5Gateway
                 WriteError(ctx, 400, "bad_request", "side 只能是 BUY 或 SELL");
                 return;
             }
+
+            // 交易连接不在就立刻回,不去排 _gate(见 RejectWhileLinkDown)。
+            // Answer at once while the link is down; see RejectWhileLinkDown.
+            if (RejectBadClientOrderId(ctx, body))
+                return;
+
+            if (RejectWhileLinkDown(ctx, login, "open", body.GetString("clientOrderId")))
+                return;
+
+            // 已知 key 先回放,再查账号(见 ReplayIfCompleted)。/ Replay known keys before the account check.
+            if (ReplayIfCompleted(ctx, login, "open", body.GetString("clientOrderId")))
+                return;
 
             if (!EnsureTradableAccount(ctx, login))
                 return;
@@ -942,6 +1591,16 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            if (RejectBadClientOrderId(ctx, body))
+                return;
+
+            if (RejectWhileLinkDown(ctx, login, "close", body.GetString("clientOrderId")))
+                return;
+
+            // 已知 key 先回放,再查账号(见 ReplayIfCompleted)。/ Replay known keys before the account check.
+            if (ReplayIfCompleted(ctx, login, "close", body.GetString("clientOrderId")))
+                return;
+
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
@@ -978,6 +1637,9 @@ namespace Prismx.Mt5Gateway
                 WriteError(ctx, 400, "bad_request", "login 与 ticket 必填");
                 return;
             }
+
+            if (RejectWhileLinkDown(ctx, login, "modify", ""))
+                return;
 
             if (!EnsureTradableAccount(ctx, login))
                 return;
@@ -1036,6 +1698,16 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            if (RejectBadClientOrderId(ctx, body))
+                return;
+
+            if (RejectWhileLinkDown(ctx, login, "pending", body.GetString("clientOrderId")))
+                return;
+
+            // 已知 key 先回放,再查账号(见 ReplayIfCompleted)。/ Replay known keys before the account check.
+            if (ReplayIfCompleted(ctx, login, "pending", body.GetString("clientOrderId")))
+                return;
+
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
@@ -1076,6 +1748,16 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            if (RejectBadClientOrderId(ctx, body))
+                return;
+
+            if (RejectWhileLinkDown(ctx, login, "cancel", body.GetString("clientOrderId")))
+                return;
+
+            // 已知 key 先回放,再查账号(见 ReplayIfCompleted)。/ Replay known keys before the account check.
+            if (ReplayIfCompleted(ctx, login, "cancel", body.GetString("clientOrderId")))
+                return;
+
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
@@ -1115,6 +1797,16 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            if (RejectBadClientOrderId(ctx, body))
+                return;
+
+            if (RejectWhileLinkDown(ctx, login, "modify-pending", body.GetString("clientOrderId")))
+                return;
+
+            // 已知 key 先回放,再查账号(见 ReplayIfCompleted)。/ Replay known keys before the account check.
+            if (ReplayIfCompleted(ctx, login, "modify-pending", body.GetString("clientOrderId")))
+                return;
+
             if (!EnsureTradableAccount(ctx, login))
                 return;
 
@@ -1145,6 +1837,94 @@ namespace Prismx.Mt5Gateway
 
                 return r;
             });
+        }
+
+        /// <summary>
+        /// 交易连接不在时,交易接口在碰 MT5 之前就回答,返回 true 表示已经回了。
+        ///
+        /// 以前这时请求照常往下走:先在 EnsureTradableAccount 查账号、再在 Mt5Link 里
+        /// 解析品种、取价,每一步都要排 _gate——而重连时 ConnectOnce 在锁里最长攥 30 秒。
+        /// 结果是下单白挂半分钟,最后还是失败,账号查询失败时甚至回成"账号不存在"。
+        ///
+        /// 顺序要紧:同一 clientOrderId **已有记录**时(后端超时后拿同一个号再问一次,
+        /// 正好常落在断线窗口里),必须照常回放那份结果——那笔可能早已成交,回一句
+        /// "重连中"会被后端落成 REJECTED,诱导用户重下。只有从没见过的 key 才直接回
+        /// Mt5Link.LinkDownResult(MT_RET_ERR_CONNECTION,后端落 REJECTED = 确定未执行),
+        /// 且不写进幂等缓存:连回来之后同一个号再来,应该真正执行。
+        ///
+        /// While the trading link is down, answer before touching MT5 (true = answered).
+        /// Such requests used to queue on _gate at every step while ConnectOnce held it
+        /// for up to 30s, then fail anyway — sometimes as "account not found". A key the
+        /// idempotency cache already knows (the backend's same-id re-ask tends to land in
+        /// exactly this window) is replayed as usual: it may have filled, and "reconnecting"
+        /// would be recorded as REJECTED. Only unseen keys get LinkDownResult, uncached, so
+        /// the same id executes for real once the link is back.
+        /// </summary>
+        private bool RejectWhileLinkDown(HttpListenerContext ctx, ulong login, string action,
+            string clientOrderId)
+        {
+            if (_link.IsConnected)
+                return false;
+
+            if (clientOrderId.Length > 0)
+            {
+                string key = IdempotencyCache.Key(login, action, clientOrderId);
+                TradeResult done;
+
+                if (_idem.TryPeek(key, out done))
+                {
+                    if (done != null)
+                    {
+                        Log.Info("{0} 交易连接不在,回放已有结果 login={1} clientOrderId={2} -> {3} {4}",
+                            action, login, clientOrderId, done.Ok ? "成功" : "失败", done.Retcode);
+                        WriteTradeResult(ctx, done, true);
+                        return true;
+                    }
+
+                    // 还在执行:照常排到它后面拿同一份结果(断线会立刻叫醒它)。万一
+                    // 条目恰好刚被清掉、轮到本请求执行,run 也只回"重连中",不碰 MT5。
+                    // Still in flight: wait for its result as usual (the drop wakes it at
+                    // once). Should the entry vanish meanwhile, run only answers
+                    // "reconnecting" and never touches MT5.
+                    ExecuteIdempotent(ctx, login, action, clientOrderId, Mt5Link.LinkDownResult);
+                    return true;
+                }
+            }
+
+            Log.Warn("{0} 交易连接重连中,直接拒绝 login={1} clientOrderId={2}", action, login, clientOrderId);
+            WriteTradeResult(ctx, Mt5Link.LinkDownResult(), false);
+            return true;
+        }
+
+        /// <summary>
+        /// 同一 clientOrderId 已有**完成的**结果时直接回放,返回 true 表示已经回了。
+        /// 放在 EnsureTradableAccount 之前,理由与 RejectWhileLinkDown 相同:后端超时后
+        /// 拿同一个号再问,那笔可能早已成交;此时账号检查若因缓存过期、临时查询失败或
+        /// 组白名单刚改而回 404/403,后端会把一笔真实成交落成失败。仍在执行的 key 不在
+        /// 这里处理,照常走账号检查后进 ExecuteIdempotent 排队拿同一份结果(那笔刚过了
+        /// 同一个检查,缓存命中)。
+        /// Replay a completed result for a known clientOrderId (true = answered). Runs
+        /// before EnsureTradableAccount for the same reason as RejectWhileLinkDown: a
+        /// same-id re-ask may concern a trade that already filled, and a 404/403 from a
+        /// stale/transient account check would be recorded as a failure. In-flight keys
+        /// fall through and wait inside ExecuteIdempotent as usual.
+        /// </summary>
+        private bool ReplayIfCompleted(HttpListenerContext ctx, ulong login, string action,
+            string clientOrderId)
+        {
+            if (clientOrderId.Length == 0)
+                return false;
+
+            string key = IdempotencyCache.Key(login, action, clientOrderId);
+            TradeResult done;
+
+            if (!_idem.TryPeek(key, out done) || done == null)
+                return false;
+
+            Log.Info("{0} 重复请求,回放缓存结果 login={1} clientOrderId={2} -> {3} {4}",
+                action, login, clientOrderId, done.Ok ? "成功" : "失败", done.Retcode);
+            WriteTradeResult(ctx, done, true);
+            return true;
         }
 
         /// <summary>

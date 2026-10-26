@@ -33,7 +33,8 @@ listen = http://127.0.0.1:8800/
 
 # 允许调用的来源 IP,逗号分隔,精确匹配。留空 = 不限制。
 #
-# listen 绑在全网卡(http://+:8800/)时,这一项是网关自己这层的防线,不填的话
+# listen 只要不是回环地址(127.0.0.1 / localhost / [::1]),包括全网卡
+# http://+:8800/ 和任何具体 IP / 主机名,这一项就是网关自己这层的防线,不填的话
 # 启动会直接被拒绝(除非写了 i_know_what_im_doing)。填后端那台机器的隧道地址:
 #   allowed_ips = 10.66.0.1
 allowed_ips =
@@ -66,9 +67,13 @@ http_max_concurrent = 256
 
 # 查询通道条数:另开几条只做查询的连接(同一 manager 账号),持仓/成交/挂单/资金查询
 # 走它们,不再挡住下单。0 = 不开。券商须允许同一 manager 账号多处同时登录。
+# 建议:在线用户多起来(读通道常回 503 read_busy、/health 的 readBusyCount 一直涨)时
+# 改成 4(上限 8;Make Capital 2026-09-24 实测允许多处登录)。改完重启,看 /health 的
+# readChannelsConnected 是否等于这里的值。网关自带批量读接口后(/health batchSupported=true)
+# 通常用不到 4,先看 readBusyCount 再决定。
 read_channels = 2
 
-# 显式解除两条启动检查(allowed_groups 为空、绑全网卡却没配 allowed_ips)。
+# 显式解除两条启动检查(allowed_groups 为空、listen 不是回环却没配 allowed_ips)。
 # 这两条各自都是最后一道闸,只在临时排障时打开,别长期留着。
 # i_know_what_im_doing = true
 

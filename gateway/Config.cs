@@ -233,17 +233,55 @@ namespace Prismx.Mt5Gateway
                         "allowed_groups 为空,等于允许对这家券商的所有账号代客下单。"
                         + "请填上允许的组前缀;确实要不限制就在 gateway.ini 里写 i_know_what_im_doing = true");
 
-                // 绑全网卡 + 没有来源 IP 白名单 = 只剩云安全组一道防线。
-                bool bindsAll = ListenPrefix.Contains("//+:")
-                    || ListenPrefix.Contains("//*:")
-                    || ListenPrefix.Contains("//0.0.0.0:");
-
-                if (bindsAll && AllowedIps.Count == 0)
+                // 没有来源 IP 白名单时只允许绑回环。以前只认 +、*、0.0.0.0 三种全网卡写法,
+                // 绑一个具体的公网/内网 IP(或主机名)同样对外,却能不配 allowed_ips 就起来。
+                // Without allowed_ips only a loopback bind is accepted. The old check only
+                // caught +, * and 0.0.0.0; a specific public/LAN IP or hostname is just as
+                // reachable and used to start without allowed_ips.
+                if (AllowedIps.Count == 0 && !IsLoopbackPrefix(ListenPrefix))
                     throw new Exception(
-                        "listen 绑在所有网卡上却没有配 allowed_ips,下单接口的唯一防线就只剩云安全组了。"
-                        + "请填 allowed_ips(如后端的隧道地址),或改成只绑具体 IP;"
-                        + "确实要这样就在 gateway.ini 里写 i_know_what_im_doing = true");
+                        "listen 不是回环地址(127.0.0.1 / localhost / [::1])却没有配 allowed_ips,"
+                        + "下单接口的唯一防线就只剩云安全组了。请填 allowed_ips(如后端的隧道地址 10.66.0.1),"
+                        + "或改成只绑 127.0.0.1;确实要这样就在 gateway.ini 里写 i_know_what_im_doing = true");
             }
+        }
+
+        /// <summary>
+        /// listen 前缀的主机是不是回环(127.0.0.1 / localhost / [::1])。HttpListener 的
+        /// http://+:8800/ 这类写法 Uri 解析不了,所以手工取 "://" 与下一个 "/" 之间、去掉端口。
+        /// Whether the listen prefix host is loopback. Parsed by hand: HttpListener
+        /// wildcards such as http://+:8800/ are not valid Uri hosts.
+        /// </summary>
+        internal static bool IsLoopbackPrefix(string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix))
+                return false;
+
+            int start = prefix.IndexOf("://", StringComparison.Ordinal);
+            if (start < 0)
+                return false;
+            start += 3;
+
+            int end = prefix.IndexOf('/', start);
+            string hostPort = end < 0 ? prefix.Substring(start) : prefix.Substring(start, end - start);
+            string host;
+
+            if (hostPort.StartsWith("["))
+            {
+                int close = hostPort.IndexOf(']');
+                if (close < 0)
+                    return false;
+                host = hostPort.Substring(0, close + 1);
+            }
+            else
+            {
+                int colon = hostPort.IndexOf(':');
+                host = colon < 0 ? hostPort : hostPort.Substring(0, colon);
+            }
+
+            return string.Equals(host, "127.0.0.1", StringComparison.Ordinal)
+                || string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(host, "[::1]", StringComparison.Ordinal);
         }
 
         /// <summary>显式解除上面两条启动检查。只应在临时排障时打开。
@@ -274,6 +312,13 @@ namespace Prismx.Mt5Gateway
             }
 
             return false;
+        }
+
+        /// <summary>配了组白名单(为空时不限制,读接口可以省掉组查询)。
+        /// Whether a group whitelist is configured (empty = unrestricted).</summary>
+        public bool HasGroupWhitelist
+        {
+            get { return AllowedGroups.Count > 0; }
         }
 
         /// <summary>组是否在白名单内。白名单为空表示不限制。</summary>
