@@ -123,6 +123,15 @@
   color: var(--text-2);
 }
 
+/* 本金门槛那一段与上面的出入金例子隔开；「不计入」用灰色，不跟「计入」的绿色混在一起。
+   The capital-floor block sits apart from the cash-flow cases; "not counted" is muted, not green. */
+.cf-floor {
+  margin-top: 24px;
+}
+.cf-case-r.is-off {
+  color: var(--text-3);
+}
+
 .cf-notes {
   margin: 18px 0 0;
   padding: 0 0 0 16px;

@@ -321,11 +321,19 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
             profits_by_login = _resolved_in_period(
                 db, viewer.id, logins, period_key, taken_at_by_login,
                 bounds=(period_start, period_end))
-            best = max(baseline_rows,
-                       key=lambda b: len(profits_by_login.get(b.mt5_login, [])))
+            # 收益榜只数本金达标的仓位（与 compute_board_rows 同一个 return_score）。
+            # The return board counts only in-range positions (same return_score as the board).
+            def _sample(b):
+                resolved = profits_by_login.get(b.mt5_login, [])
+                if board != "return_pct" or not resolved:
+                    return len(resolved)
+                scored = return_score(b, resolved, gates["min_baseline_usd"])
+                return scored[1] if scored else 0
+            samples = {b.mt5_login: _sample(b) for b in baseline_rows}
+            best = max(baseline_rows, key=lambda b: samples[b.mt5_login])
             progress = {
                 "login": best.mt5_login,
-                "sample": len(profits_by_login.get(best.mt5_login, [])),
+                "sample": samples[best.mt5_login],
                 "baselineUsd": best.baseline + best.adjust,
                 "minTrades": (gates["min_trades_return"] if board == "return_pct"
                               else gates["min_trades_winrate"]),

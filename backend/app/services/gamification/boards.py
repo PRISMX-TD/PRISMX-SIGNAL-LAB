@@ -157,13 +157,15 @@ def baseline_in_range(capital: float, min_baseline: float, max_baseline: float |
 
 def return_score(b, resolved, min_baseline: float, max_baseline: float | None = None):
     """收益榜一行的分数：resolved = [(opened_at, closed_at, profit), ...]。
-    返回 (score, sample)；任一笔仓位的本金低于门槛或 ≤ 0 → None（整行不入榜，
-    与原来「分母 ≥ min_baseline」的闸同一语义：本金不够时的交易不排名）。
-    比赛设了本金上限时同理：任一笔仓位的本金高于上限（报名后入金超过上限）→ None。
-    Score for one return_pct row. None when any position's capital is below the
-    floor or non-positive — the whole row stays off the board, same semantics as
-    the old denominator gate. Likewise above a competition's ceiling (deposited
-    past it after signing up).
+    返回 (score, sample)，sample 只数本金达标的仓位；本金低于门槛、高于上限或 ≤ 0
+    的仓位跳过不计（本金不够时的交易不排名），一笔达标的都没有 → None。
+    2026-10-26 之前是「任一笔不达标整行不入榜」：周一 90 本金做了几笔、周二入金到
+    100 以上，这一整周都上不了榜（603494 的 10 月月榜）。现在只剔除那几笔。
+    Score for one return_pct row; sample counts only the positions whose capital
+    is in range. A position below the floor, above the ceiling or non-positive is
+    skipped (trades on too little capital don't rank); None when none qualify.
+    Before 2026-10-26 one such position dropped the whole row, so trading on 90
+    on Monday and topping up to 100 on Tuesday kept the account off that week.
     """
     # 先按本金分组再各除一次，而不是逐笔相除再相加：没有出入金时结果与原来的
     # total / denom 逐位相同（逐笔相除会多出浮点尾差，让本该打平的两行分不出胜负）。
@@ -171,17 +173,21 @@ def return_score(b, resolved, min_baseline: float, max_baseline: float | None = 
     # bit-for-bit the old total / denom (per-position division would introduce
     # float noise and break exact ties).
     by_denom: dict[float, float] = defaultdict(float)
+    sample = 0
     for opened_at, closed_at, profit in resolved:
         denom = position_denominator(b, opened_at, closed_at)
-        # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不入榜：NaN 过得了下面的区间判断。
-        # A non-finite capital (a stale NaN balance) is off the board like <= 0; NaN would pass the range check.
+        # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不计：NaN 过得了下面的区间判断。
+        # A non-finite capital (a stale NaN balance) is skipped like <= 0; NaN would pass the range check.
         if not math.isfinite(denom) or denom <= 0 or not baseline_in_range(denom, min_baseline, max_baseline):
-            return None
+            continue
         by_denom[denom] += profit
+        sample += 1
+    if not sample:
+        return None
     score = sum(total / d for d, total in by_denom.items())
     if not math.isfinite(score):
         return None
-    return score, len(resolved)
+    return score, sample
 
 
 def _realized_since_bulk(db, baselines, until) -> dict:
@@ -540,10 +546,12 @@ def compute_board_rows(db, period_key: str) -> dict:
             profits = [p for _o, _c, p in resolved]
             sample = len(profits)
             total = sum(profits)
+            # 收益榜的笔数门槛只数本金达标的仓位（scored[1]）；胜率榜照旧数全部。
+            # The return board's trade gate counts only in-range positions; win rate counts all.
             scored = return_score(b, resolved, min_baseline)
-            if sample >= min_trades_return and scored is not None:
+            if scored is not None and scored[1] >= min_trades_return:
                 ret_rows.append({"userId": uid, "login": lg,
-                                 "score": scored[0], "sample": sample})
+                                 "score": scored[0], "sample": scored[1]})
             # 「本期盈亏为正」原本写死在这里（高胜率 ≠ 赚钱：小赢大亏的打法能刷出
             # 高胜率却在亏钱，这道闸挡的就是它）。2026-09-04 应产品要求改成可配
             # 开关 `winrate_require_profit`，默认关闭——内测期样本太小，这道闸把

@@ -4471,7 +4471,7 @@
     "gates": {
       "returnMetric": "Ranked by return rate, not P&L amount",
       "minTradesReturn": "≥{{n}} full closes this period",
-      "minBaseline": "≥{{usd}} USD starting capital",
+      "minBaseline": "Trades count only on ≥{{usd}} USD capital",
       "deposits": "Capital per trade = money in the account when it opened or closed (the larger) · deposits and withdrawals both count",
       "identity": "Per account · nickname public · middle two characters of the account number masked",
       "minTradesWinrate": "≥{{n}} trades this period",
@@ -4794,7 +4794,33 @@
       "w": "Scored on the 10,000 it closed with — the larger moment again, so a deposit can't make the return look better."
     },
     "noteSmall": "Small drops aren't withdrawals: commission, swap and similar odds and ends are ignored. A drop counts as a withdrawal only when it exceeds both 100 USD and 5% of the account's capital.",
-    "noteFloor": "An account below {{usd}} USD of capital doesn't rank — this keeps figures like \"earned 500 on 300, up 167%\" off the board.",
+    "floor": {
+      "rule": "A trade counts toward the return board only if the account held at least {{usd}} USD of capital while it was open. Trades below that are left out, without affecting the rest. Weekly and monthly boards work the same way.",
+      "case1": {
+        "t": "Trading below the floor",
+        "s": "Monday, capital {{low}}: 10 trades",
+        "r": "Not counted",
+        "w": "Trades made on less than {{usd}} USD don't count — this keeps figures like \"earned 500 on 300, up 167%\" off the board."
+      },
+      "case2": {
+        "t": "Topping up, then trading on",
+        "s": "Tuesday, deposit up to {{usd}}: 6 more trades",
+        "r": "6 counted",
+        "w": "Trades after you reach the floor score normally, so you can rank that same week once you have enough. Monday's 10 can't be used to make up the count."
+      },
+      "case3": {
+        "t": "Same for the monthly board",
+        "s": "Capital {{low}} at the start of the month, deposit up to {{usd}} on the 23rd",
+        "r": "Counted from the 23rd",
+        "w": "Trades before the 23rd don't count toward the monthly board; trades after it do, so you can still rank that month."
+      },
+      "case4": {
+        "t": "Losses don't push you under the floor",
+        "s": "Capital {{usd}}, lose {{loss}}, balance {{low}}",
+        "r": "Still counted",
+        "w": "Capital only changes with deposits and withdrawals, not with trading P&L, so your later trades this period still count. Next period's capital is taken from the balance at that time."
+      }
+    },
     "noteCeiling": "An account above {{usd}} USD of capital doesn't rank in this competition — including deposits past the ceiling after signing up.",
     "noteExact": "This competition only accepts accounts with exactly {{usd}} USD; if deposits or withdrawals after signing up move the capital off that amount, the account doesn't rank.",
     "noteWinRate": "The win-rate board is unaffected by cash flows: it only counts how many trades you won and lost.",

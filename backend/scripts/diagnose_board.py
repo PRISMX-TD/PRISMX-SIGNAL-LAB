@@ -3,7 +3,7 @@
 背景 / Background
 -----------------
 收益榜的一行要过七道关：账户是实盘 → 有余额（才能拍基线）→ 属主没退榜 →
-本周期有基线 → 分母（基线 + 入金调整）达门槛 → 名下有「整仓平掉且经服务端
+本周期有基线 → 有仓位交易时本金达门槛（不达标的那几笔跳过） → 名下有「整仓平掉且经服务端
 核验」的仓位 → 最后一腿的平仓时间落在 [max(期初, 拍基线时刻), 期末) 内。
 任何一关没过，这个账户就不在榜上，而页面上只看得到结果、看不到卡在哪一关。
 
@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 
 from app.core.database import SessionLocal
 from app.models import ClosedTrade, LeaderboardSnapshot, MT5Account, PeriodBaseline, User
-from app.services.gamification.boards import REAL, _aware, _resolved_in_period, board_gates
+from app.services.gamification.boards import REAL, _aware, _resolved_in_period, board_gates, return_score
 from app.services.gamification.periods import month_key, period_bounds, week_key
 from app.services.gamification.stats import _filled_orders, _legs_by_position, _resolve
 from app.services.settings_store import get_gamification_settings
@@ -245,7 +245,7 @@ def main() -> int:
         wr_desc = f"≥{min_wr} 笔" + ("且本期盈亏为正" if wr_require_profit else "（不要求本期盈亏为正）")
         print(f"周期 {key}：{_fmt(start)} → {_fmt(end)}"
               f"（{'进行中' if end > now else '已封存'}，现在 {_fmt(now)}）")
-        print(f"门槛：收益榜 ≥{min_ret} 笔 · 分母 ≥{min_baseline:g} USD ；胜率榜 {wr_desc}")
+        print(f"门槛：收益榜 ≥{min_ret} 笔本金达标的整仓（单笔本金 ≥{min_baseline:g} USD）；胜率榜 {wr_desc}")
         print()
 
         accounts = db.query(MT5Account).all()
@@ -281,16 +281,22 @@ def main() -> int:
             taken = {lg: b.taken_at for lg, b in blmap.items()}
             profits_by_login = _resolved_in_period(db, uid, set(blmap), key, taken)
             for lg, b in blmap.items():
-                profits = profits_by_login.get(lg, [])
+                resolved = profits_by_login.get(lg, [])
+                profits = [p for _o, _c, p in resolved]
                 denom = b.baseline + b.adjust
+                # 与 boards.compute_board_rows 同一个 return_score：本金不足的仓位跳过，
+                # 收益榜笔数只数达标的；一笔都不达标才算「分母不达标」。
+                # Same return_score as the board: out-of-range positions are skipped and
+                # only in-range ones count; "denominator too low" means none qualified.
+                scored = return_score(b, resolved, min_baseline) if resolved else None
                 row = {"uid": uid, "login": lg, "denom": denom, "sample": len(profits),
+                       "eligible": scored[1] if scored else 0,
                        "total": sum(profits), "baseline": b.baseline, "adjust": b.adjust,
                        "taken_at": b.taken_at}
                 details.append(row)
-                if not (denom >= min_baseline and denom > 0):
+                if resolved and scored is None:
                     drop_denom.append(row)
-                    continue
-                if len(profits) < min_ret:
+                elif row["eligible"] < min_ret:
                     drop_no_trade.append(row)
                 else:
                     on_ret.append(row)
@@ -301,8 +307,8 @@ def main() -> int:
 
         print("── 有基线账户的计分漏斗 ──")
         print(f"  有基线                            {len(details):>4}")
-        print(f"  ├ 分母不达标（<{min_baseline:g} USD）        {len(drop_denom):>4}")
-        print(f"  ├ 本期整仓笔数 <{min_ret}                {len(drop_no_trade):>4}")
+        print(f"  ├ 没有一笔本金达标（<{min_baseline:g} USD）  {len(drop_denom):>4}")
+        print(f"  ├ 本金达标的整仓 <{min_ret} 笔            {len(drop_no_trade):>4}")
         print(f"  └ 进入收益榜                      {len(on_ret):>4}")
         print(f"     其中同时进入胜率榜（{wr_desc}）  {len(on_wr):>4}")
         print()
@@ -320,7 +326,7 @@ def main() -> int:
 
         # 卡在「本期整仓笔数不足」的账户最值得看：到底是没交易，还是交易了但没算进来
         if drop_no_trade:
-            print("── 有基线、分母达标，但本期算不出足够整仓的账户 ──")
+            print("── 有基线，但本期本金达标的整仓不够的账户 ──")
             for row in sorted(drop_no_trade, key=lambda r: r["login"]):
                 d = _login_detail(db, row["uid"], row["login"], start, end, row["taken_at"])
                 reason = []
@@ -338,24 +344,26 @@ def main() -> int:
                         reason.append(f"{d['after_end']} 笔平在期末之后")
                 if d["unverified_legs"]:
                     reason.append(f"另有 {d['unverified_legs']} 条未核验的平仓记录")
-                print(f"  {row['login']}  本期 {row['sample']} 笔"
-                      f"（需 {min_ret}）· 分母 {row['denom']:.2f}"
+                if row["eligible"] < row["sample"]:
+                    reason.append(f"{row['sample'] - row['eligible']} 笔交易时本金 <{min_baseline:g} USD（不计入收益榜）")
+                print(f"  {row['login']}  本期 {row['sample']} 笔、达标 {row['eligible']} 笔"
+                      f"（需 {min_ret}）· 当前本金 {row['denom']:.2f}"
                       f" · 基线拍于 {_fmt(row['taken_at'])}")
                 print(f"      → {'；'.join(reason) if reason else '无明显原因，需人工细查'}")
             print()
 
         if drop_denom:
-            print("── 分母不达标的账户 ──")
+            print("── 没有一笔本金达标的账户 ──")
             for row in sorted(drop_denom, key=lambda r: r["login"]):
-                print(f"  {row['login']}  分母 {row['denom']:.2f}"
+                print(f"  {row['login']}  本期 {row['sample']} 笔 · 当前本金 {row['denom']:.2f}"
                       f"（基线 {row['baseline']:.2f} + 入金调整 {row['adjust']:.2f}）")
             print()
 
         if args.verbose and details:
             print("── 全部有基线账户明细 ──")
             for row in sorted(details, key=lambda r: (-r["sample"], r["login"])):
-                print(f"  {row['login']}  本期 {row['sample']} 笔 · 盈亏 {row['total']:+.2f}"
-                      f" · 分母 {row['denom']:.2f} · 基线拍于 {_fmt(row['taken_at'])}")
+                print(f"  {row['login']}  本期 {row['sample']} 笔（本金达标 {row['eligible']}）· 盈亏 {row['total']:+.2f}"
+                      f" · 当前本金 {row['denom']:.2f} · 基线拍于 {_fmt(row['taken_at'])}")
             print()
 
         print("提示：账户漏斗第一行掉得最多时，多半是「实盘判定」——只有 trade_mode=2 的账户"

@@ -41,6 +41,7 @@ import { useTranslation } from 'react-i18next'
 import { fmtUsd } from '../api/utils'
 
 const CASES = [1, 2, 3, 4] as const
+const FLOOR_CASES = [1, 2, 3, 4] as const
 
 export default function CashflowRules({
   minBaselineUsd,
@@ -68,6 +69,10 @@ export default function CashflowRules({
 }) {
   const { t } = useTranslation()
   const plain = variant === 'competition'
+  // 例子用的「不够门槛」金额：门槛的九成（100 → 90），差额就是例子里亏掉的钱。
+  // The "below the floor" example amount: 90% of the floor (100 → 90); the gap is the example loss.
+  const low = Math.round(minBaselineUsd * 0.9)
+  const floorVars = { usd: fmtUsd(minBaselineUsd), low: fmtUsd(low), loss: fmtUsd(minBaselineUsd - low) }
 
   return (
     <details className={plain ? 'cf-rules is-plain' : 'card glass cf-rules'}>
@@ -125,15 +130,31 @@ export default function CashflowRules({
           ))}
         </ol>
 
+        {/* 本金门槛：只剔除本金不足时做的那几笔，其余照常（2026-10-26 起；之前是整行
+            不入榜）。例子里的金额跟着门槛走，管理端改了门槛也不会写错数。
+            Capital floor: only the trades made on too little capital are skipped
+            (since 2026-10-26; it used to drop the whole row). The example amounts
+            follow the configured floor so they stay right when an admin changes it. */}
+        <p className="cf-formula cf-floor">{t('cashflowRules.floor.rule', floorVars)}</p>
+        <ol className="cf-cases">
+          {FLOOR_CASES.map((n) => (
+            <li key={n}>
+              <span className="cf-case-head">
+                <span className="cf-case-t">{t(`cashflowRules.floor.case${n}.t`, floorVars)}</span>
+                <span className={n === 1 ? 'cf-case-r is-off' : 'cf-case-r'}>{t(`cashflowRules.floor.case${n}.r`, floorVars)}</span>
+              </span>
+              <span className="cf-case-s">{t(`cashflowRules.floor.case${n}.s`, floorVars)}</span>
+              <span className="cf-case-w">{t(`cashflowRules.floor.case${n}.w`, floorVars)}</span>
+            </li>
+          ))}
+        </ol>
+
         <ul className="cf-notes">
           <li>{t('cashflowRules.noteSmall')}</li>
           {maxBaselineUsd != null && maxBaselineUsd === minBaselineUsd ? (
             <li>{t('cashflowRules.noteExact', { usd: fmtUsd(maxBaselineUsd) })}</li>
           ) : (
-            <>
-              <li>{t('cashflowRules.noteFloor', { usd: fmtUsd(minBaselineUsd) })}</li>
-              {maxBaselineUsd != null && <li>{t('cashflowRules.noteCeiling', { usd: fmtUsd(maxBaselineUsd) })}</li>}
-            </>
+            maxBaselineUsd != null && <li>{t('cashflowRules.noteCeiling', { usd: fmtUsd(maxBaselineUsd) })}</li>
           )}
           <li>{t('cashflowRules.noteWinRate')}</li>
           <li>{t('cashflowRules.noteSealedBoard')}</li>

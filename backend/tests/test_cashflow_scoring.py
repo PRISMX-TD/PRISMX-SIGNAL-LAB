@@ -4,12 +4,12 @@
 max(开仓时刻本金, 平仓时刻本金)，收益率 = Σ 盈亏 ÷ 各自本金。这里钉住四件事：
   · 先赚再出金：本金按出金前算，收益率放大不了（改法最容易开的那个洞）；
   · 先出金再交易：本金按出金后算，不再被压低（改的初衷）；
-  · 出金后本金低于门槛还在交易：整行不入榜（与原来的分母闸同一语义）；
+  · 本金低于门槛时做的单不计入收益榜，其余照常（2026-10-26 前是整行不入榜）；
   · 没有出入金时分数与原公式逐位相同；比赛榜走同一个 return_score。
 
 Per-position capital-at-time scoring for the return board. Pins: earn-then-
 withdraw can't inflate, withdraw-then-trade is credited at the smaller capital,
-sub-floor capital drops the row, no-flow rows match the old formula exactly, and
+positions on sub-floor capital are skipped (the rest still count), no-flow rows match the old formula exactly, and
 competitions use the same return_score.
 """
 from datetime import datetime, timedelta, timezone
@@ -110,8 +110,9 @@ def test_deposit_mid_trade_dilutes_like_before(db_session):
     assert abs(row["score"] - 500.0 / 10000.0) < 1e-9
 
 
-def test_trading_below_floor_after_withdrawal_drops_row(db_session):
-    """提到只剩 300（< 500 门槛）还在交易：整行不入榜，而不是按 300 算出夸张收益率。"""
+def test_trading_below_floor_after_withdrawal_is_not_counted(db_session):
+    """提到只剩 300（< 500 门槛）还在交易：这几笔不计，而不是按 300 算出夸张收益率；
+    一笔达标的都没有 → 不入榜。"""
     u = _user(db_session, "cf5@t.co"); _acct(db_session, u, "A", 2000.0)
     ensure_baselines(db_session, PK, T0)
     assert _withdraw(db_session, "A", 300.0, T0 + timedelta(days=1)) == 1
@@ -138,7 +139,49 @@ def test_return_score_helper_and_denominator():
     assert position_denominator(b, after, after + timedelta(hours=1)) == 600.0
     assert return_score(b, [(after, after, 60.0)], 500.0) == (0.1, 1)
     assert return_score(b, [(after, after, 60.0)], 700.0) is None   # 本金 600 < 门槛
-    assert return_score(b, [], 500.0) == (0.0, 0)
+    assert return_score(b, [], 500.0) is None
+    # 一笔 600（达标）+ 一笔 1000：门槛 700 时只算 1000 那笔，sample 只数达标的
+    # 600 + 1000 capital: at a 700 floor only the 1000 one counts and sample says 1
+    mixed = [(after, after, 60.0), (before, after, 50.0)]
+    assert return_score(b, mixed, 700.0) == (0.05, 1)
+    assert return_score(b, mixed, 500.0) == (60.0 / 600.0 + 50.0 / 1000.0, 2)
+
+
+def _monday_below_floor_then_topped_up(db, email):
+    """周一本金 450（< 500 门槛）做 5 笔各赚 10，周二入金把本金补到 1000。
+    Monday on 450 (below the 500 floor), five +10 trades; Tuesday tops capital up to 1000."""
+    u = _user(db, email); _acct(db, u, "A", 450.0)
+    ensure_baselines(db, PK, T0)
+    _five_wins(db, u, "A", 10.0, T0 + timedelta(hours=1), T0 + timedelta(hours=2))
+    acct = db.query(MT5Account).filter_by(login="A").first()
+    acct.balance = 500.0; db.commit()
+    assert reconcile_deposits(db, PK, now=T0 + timedelta(hours=3)) == 0     # 纯盈利，记下对账时刻
+    acct.balance = 1050.0; db.commit()
+    assert reconcile_deposits(db, PK, now=T0 + timedelta(days=1)) == 1      # 入金 550 → 本金 1000
+    return u
+
+
+def test_trades_below_floor_skipped_rest_still_rank(db_session):
+    """周一本金不够做的 5 笔不计、也不连累整周；周二入金后的 5 笔照常上榜（603494，2026-10-26）。
+    Monday's sub-floor trades are skipped without sinking the week; the 5 after Tuesday's top-up rank."""
+    u = _monday_below_floor_then_topped_up(db_session, "cf9@t.co")
+    wed = T0 + timedelta(days=2)
+    _five_wins(db_session, u, "A", 20.0, wed, wed + timedelta(hours=1), start=6)   # +100
+    row = _score(db_session, "A")
+    assert row is not None and row["sample"] == 5
+    assert abs(row["score"] - 100.0 / 1000.0) < 1e-9
+    wr = {r["login"]: r for r in compute_board_rows(db_session, PK)["win_rate"]}
+    assert wr.get("A") is None or wr["A"]["sample"] == 10        # 胜率榜照旧数全部
+
+
+def test_trade_gate_counts_only_positions_above_floor(db_session):
+    """本金达标的只有 4 笔（< 5 笔门槛）：周一那 5 笔不能凑数，不入收益榜。
+    Only 4 in-range positions (< the 5-trade gate): Monday's 5 can't pad the count."""
+    u = _monday_below_floor_then_topped_up(db_session, "cf10@t.co")
+    wed = T0 + timedelta(days=2)
+    for t in range(6, 10):
+        _pos(db_session, u, "A", t, 20.0, wed, wed + timedelta(hours=1))
+    assert _score(db_session, "A") is None
 
 
 def test_refill_from_empty_then_trade_before_next_check_ranks(db_session):

@@ -1727,7 +1727,7 @@
     "gates": {
       "returnMetric": "Xếp hạng theo tỷ suất lợi nhuận, không theo số tiền lãi/lỗ",
       "minTradesReturn": "≥{{n}} lệnh đóng hoàn toàn trong kỳ",
-      "minBaseline": "Vốn ban đầu ≥{{usd}} USD",
+      "minBaseline": "Chỉ tính lệnh khi vốn ≥{{usd}} USD",
       "deposits": "Vốn mỗi lệnh = số tiền trong tài khoản lúc mở hoặc đóng lệnh (lấy giá trị lớn hơn) · tính cả nạp và rút",
       "identity": "Theo từng tài khoản · biệt danh công khai · ẩn hai ký tự giữa của số tài khoản",
       "minTradesWinrate": "≥{{n}} lệnh trong kỳ",
@@ -2050,7 +2050,33 @@
       "w": "Tính trên 10,000 lúc đóng — vẫn lấy thời điểm lớn hơn, nên nạp tiền không làm tỷ suất đẹp hơn."
     },
     "noteSmall": "Khoản giảm nhỏ không tính là rút tiền: hoa hồng, swap và các khoản lặt vặt tương tự được bỏ qua. Chỉ tính là rút khi khoản giảm vượt cả 100 USD và 5% vốn tài khoản.",
-    "noteFloor": "Tài khoản có vốn dưới {{usd}} USD không được xếp hạng — tránh những con số kiểu \"lãi 500 trên 300, tăng 167%\" lên bảng.",
+    "floor": {
+      "rule": "Một lệnh chỉ được tính vào bảng lợi nhuận khi lúc giao dịch tài khoản có vốn ít nhất {{usd}} USD. Lệnh không đủ vốn bị bỏ qua nhưng không ảnh hưởng thành tích còn lại. Bảng tuần và bảng tháng giống nhau.",
+      "case1": {
+        "t": "Giao dịch khi vốn chưa đủ",
+        "s": "Thứ Hai vốn {{low}}, giao dịch 10 lệnh",
+        "r": "Không tính",
+        "w": "Lệnh giao dịch khi vốn dưới {{usd}} USD không tính lợi nhuận — tránh những con số kiểu \"lãi 500 trên 300, tăng 167%\" lên bảng."
+      },
+      "case2": {
+        "t": "Nạp đủ rồi giao dịch tiếp",
+        "s": "Thứ Ba nạp lên {{usd}}, giao dịch thêm 6 lệnh",
+        "r": "Tính 6 lệnh",
+        "w": "Lệnh sau khi đạt ngưỡng được tính bình thường, đủ số lệnh là lên bảng ngay trong tuần đó. 10 lệnh thứ Hai không được dùng để bù số lệnh."
+      },
+      "case3": {
+        "t": "Bảng tháng cũng vậy",
+        "s": "Đầu tháng vốn {{low}}, ngày 23 nạp lên {{usd}}",
+        "r": "Tính từ ngày 23",
+        "w": "Lệnh trước ngày 23 không tính vào bảng tháng, lệnh sau đó tính bình thường, vẫn lên bảng được trong tháng."
+      },
+      "case4": {
+        "t": "Thua lỗ không làm vốn tụt dưới ngưỡng",
+        "s": "Vốn {{usd}}, lỗ {{loss}}, số dư còn {{low}}",
+        "r": "Vẫn tính",
+        "w": "Vốn chỉ thay đổi khi nạp hoặc rút, lãi lỗ giao dịch không làm đổi vốn, nên các lệnh sau trong kỳ vẫn được tính. Vốn kỳ sau tính lại theo số dư lúc đó."
+      }
+    },
     "noteCeiling": "Trong cuộc thi này, tài khoản có vốn trên {{usd}} USD không được xếp hạng — kể cả nạp thêm vượt mức trần sau khi đăng ký.",
     "noteExact": "Cuộc thi này chỉ nhận tài khoản có vốn đúng {{usd}} USD; nếu nạp/rút sau khi đăng ký làm vốn lệch khỏi con số này, tài khoản không được xếp hạng.",
     "noteWinRate": "Bảng tỷ lệ thắng không bị ảnh hưởng bởi nạp rút: chỉ đếm số lệnh thắng và thua.",
