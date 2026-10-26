@@ -85,10 +85,10 @@ def refund_revocation(
     ── entitlement_floor 是干什么的 ──
     减天数在「叠加续费」下是准确的，但有一种情况不是：用户的会员**断档过**，后
     来又付了一笔，那笔是从「此刻」重新起算的，现在的到期时间里根本不含这笔被退
-    款的天数，再减一次就是从后面那笔身上割肉。调用方按「每笔已完成付款的
-    finished_at + 套餐天数」算出**别的付款单独就能保证的最晚到期时间**传进来
-    （与 routers/invite._has_live_paid_plan 判定「这笔钱买到的窗口」用的是同一个
-    公式），这里取它与减完之后的较晚者做下限。断档重付时下限正好等于当前到期
+    款的天数，再减一次就是从后面那笔身上割肉。调用方用
+    services/paid_entitlement.paid_entitlement_end 算出**别的付款单独就能保证的最晚
+    到期时间**（叠加链 + 入账时记下的 credited_until，与 routers/invite._has_live_paid_plan
+    用的是同一个函数）传进来，这里取它与减完之后的较晚者做下限。断档重付时下限正好等于当前到期
     时间，于是这笔退款一天都扣不到——这正是我们要的。
 
     ── 不限期 PRO（plan_expires_at IS NULL）为什么原样不动 ──
@@ -112,8 +112,9 @@ def refund_revocation(
     membership lapsed and was re-bought, the later payment restarted from "now"
     and the current expiry no longer contains these days — subtracting would eat
     into that payment. The caller passes the latest expiry that *other* finished
-    payments guarantee on their own (finished_at + plan days, the same formula
-    invite._has_live_paid_plan uses), and it acts as a floor.
+    payments guarantee on their own (services/paid_entitlement.paid_entitlement_end:
+    the stacking chain plus each payment's recorded credited_until, the same
+    function invite._has_live_paid_plan uses), and it acts as a floor.
 
     Permanent PRO (null expiry) is left completely alone: it is a comp grant this
     money never bought (crediting takes the `pass` branch, ordering is refused

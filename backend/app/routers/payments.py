@@ -28,6 +28,7 @@ from app.services.nowpayments import (
 )
 from app.core.config import settings
 from app.services.notification_feed import create_notification, notify_ws
+from app.services.paid_entitlement import paid_entitlement_end
 from app.services.plans import PLAN_DAYS, refund_revocation, trial_grant_days
 from app.services.settings_store import get_pricing_settings, get_trial_settings
 
@@ -848,11 +849,14 @@ def _as_utc(value: datetime | None) -> datetime | None:
 
 
 def _other_payments_entitlement_floor(db: Session, record: Payment) -> datetime | None:
-    """这个用户**除这一笔之外**的已完成付款，单独就能保证的最晚到期时间。
+    """这个用户**除这一笔之外**的已完成付款买到的权益最晚到哪天。
 
-    公式与 routers/invite._has_live_paid_plan 完全一致（finished_at + 套餐天数）：
-    那边回答的是「这个人手里有没有一笔还在窗口里的付款」，这边回答的是「把这笔
-    退款扣完之后，还有哪笔付款的窗口不许被扣穿」——同一个「这笔钱买到的窗口」。
+    算法在 services/paid_entitlement.paid_entitlement_end，与代理降级保护
+    （routers/invite._has_live_paid_plan）共用：叠加链 + 每笔入账时记下的 credited_until
+    （老行退回 plan:payment 审计行），取最大值。以前这里按每笔 finished_at + 套餐天数
+    单独算，两笔叠在一起的年付只保护得住一年，退掉一笔早已断档的旧单会把后面叠出来的
+    时间也扣掉。被退的这一笔叠进别人 credited_until 里的天数，那边会先扣掉再比，所以
+    「付两笔、退一笔、留两份」也不成立。
 
     为什么需要它：减天数的前提是「这笔的天数还留在当前到期时间里」。用户会员断档
     之后又付了一笔时，后一笔是从付款时刻重新起算的，当前到期时间里根本没有这笔被
@@ -860,35 +864,19 @@ def _other_payments_entitlement_floor(db: Session, record: Payment) -> datetime 
     都扣不掉，正是我们要的保守方向。
 
     只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED/REFUNDED 的不该给窗口。
-    record 本身在调用前已经被抢占改成 REFUNDED，不会被这个查询选中；仍显式排掉它
-    的 id，是为了不让这段逻辑的正确性依赖调用顺序。
+    record 本身在调用前已经被抢占改成 REFUNDED；仍显式把它的 id 传进去，是为了不让
+    这段逻辑的正确性依赖调用顺序。
 
-    The latest expiry this user's *other* finished payments guarantee on their
-    own — same finished_at + plan-days formula as invite._has_live_paid_plan.
-    Subtracting this payment's days assumes those days are still inside the
-    current expiry; after a lapse-and-rebuy they aren't, and subtracting would
-    come out of the newer payment. This floor makes that case revoke nothing.
-    FINISHED only, and this record's own id is excluded explicitly so the result
-    doesn't depend on the caller having already flipped it to REFUNDED.
+    The latest expiry this user's *other* finished payments pay for, via the
+    shared services/paid_entitlement algorithm (stacking chain + credited_until,
+    audit-row fallback for legacy rows) — the same one invite._has_live_paid_plan
+    uses. The old per-payment finished_at + days protected only one of two
+    stacked yearly terms. Subtracting this payment's days assumes they are still
+    inside the current expiry; after a lapse-and-rebuy they aren't, and this
+    floor makes that case revoke nothing. This record's id is passed explicitly
+    so the result doesn't depend on the caller having already flipped it.
     """
-    rows = (
-        db.query(Payment.plan, Payment.finished_at)
-        .filter(
-            Payment.user_id == record.user_id,
-            Payment.status == "FINISHED",
-            Payment.id != record.id,
-        )
-        .all()
-    )
-    floor: datetime | None = None
-    for plan, finished_at in rows:
-        if finished_at is None:
-            continue
-        ends = finished_at if finished_at.tzinfo else finished_at.replace(tzinfo=timezone.utc)
-        ends = ends + timedelta(days=PLAN_DAYS.get(plan, 30))
-        if floor is None or ends > floor:
-            floor = ends
-    return floor
+    return paid_entitlement_end(db, record.user_id, exclude_payment_id=record.id)
 
 
 def _revoke_refunded_entitlement(db: Session, record: Payment) -> None:
@@ -1251,6 +1239,16 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
                             base = current
                     user.plan = "PRO"
                     user.plan_expires_at = base + timedelta(days=days)
+                    # rev 49：当场记下这笔入账后的到期时间。base 可能是代理 / 管理员 / 客服给的
+                    # 时长，事后只凭 finished_at + 天数推不出来；付费窗口的读取方见
+                    # services/paid_entitlement。永久 PRO 那条分支什么都没加，留 NULL。
+                    # rev 49: record the post-credit expiry now. base may be agent/admin/
+                    # support time that finished_at + days can't reconstruct later; read
+                    # by services/paid_entitlement. The permanent-PRO branch adds nothing
+                    # and leaves it NULL.
+                    db.query(Payment).filter(Payment.id == record.id).update(
+                        {"credited_until": user.plan_expires_at}, synchronize_session=False
+                    )
                 # 付费导致的等级变化写审计行。试用领取（plan:trial_claim）、注册送
                 # （plan:invite_trial）、自动到期（plan:auto_expire）、管理员与代理
                 # 改动都各有一条，唯独"付了钱升上去"这一条没有——于是"这个人的 PRO

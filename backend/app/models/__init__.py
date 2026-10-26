@@ -908,6 +908,16 @@ class Payment(Base):
     actually_paid = Column(Float, nullable=True)
     created_at = Column(DateTime, default=_now)
     finished_at = Column(DateTime, nullable=True)
+    # rev 49：入账那一刻用户新的 plan_expires_at（UTC）。付款是叠在「现有到期」之后加的，
+    # 而现有到期可能来自代理 / 管理员 / 客服给的时长，事后只看 finished_at + 套餐天数
+    # 推不出这笔钱真正买到哪天——当场记下来最准。NULL = rev 49 之前的老行，或入账时
+    # 什么都没加（不限期 PRO 走 pass 分支）；读的一侧见 services/paid_entitlement。
+    # rev 49: the user's new plan_expires_at (UTC) at the moment this payment was
+    # credited. Crediting stacks after the current expiry, which may come from
+    # agent/admin/support grants, so finished_at + plan days can't reconstruct
+    # what the money bought — record it on the spot. NULL means a pre-rev-49 row
+    # or a credit that added nothing (permanent PRO); see services/paid_entitlement.
+    credited_until = Column(DateTime, nullable=True)
 
 
 class Candle(Base):

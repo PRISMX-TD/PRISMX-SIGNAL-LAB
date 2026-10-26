@@ -27,6 +27,9 @@ from app.schemas import (
 from app.services.deps import get_current_user, get_db, require_admin
 from app.services.gamification import identity
 from app.services.gamification.badges import equipped_badge_tiers
+from app.services.gamification.finite import (
+    finite_board as _finite_board, finite_or_none as _finite_or_none, score_ok as _score_ok,
+    scrub as _scrub)
 from app.services.gamification.competitions import (
     TRACKS, auto_enroll, comp_gates, comp_period_key, competition_integrity,
     participant_details, refresh_comp_board, register_participant, settle_competition)
@@ -56,6 +59,14 @@ def require_competitions_visible(db: Session = Depends(get_db),
                                   user: User = Depends(get_current_user)) -> User:
     _check_competitions_visible(db, user)
     return user
+
+
+# 非有限分数的出口清洗（finalScore -> null，榜单行整行不出）统一在 services/gamification/finite.py；
+# 常设榜、比赛榜（build_board_rows_payload）与公开页（build_public_payload）出口处已经清洗过，
+# 这里再套一层是幂等的兜底。
+# Non-finite score sanitising (finalScore -> null, board rows dropped) lives in
+# services/gamification/finite.py; build_board_rows_payload and build_public_payload already
+# apply it, so the wrappers here are an idempotent second layer.
 
 
 def _summary_out(comp: Competition, top: list[dict] | None = None,
@@ -117,6 +128,10 @@ def _leaders(db: Session, comps: list[Competition]) -> dict[str, list[dict]]:
     for r in rows:
         comp = by_key[r.period_key]
         if r.board != comp.metric:
+            continue
+        # 修复前写进库的非有限分数：整行不进前三预览（见 _finite_board）。
+        # A non-finite score stored before the fix stays out of the preview (see _finite_board).
+        if not _score_ok(r.score):
             continue
         u = users.get(r.user_id)
         out.setdefault(comp.id, []).append({
@@ -202,7 +217,7 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
     # Same grouped count as the list; it used to be omitted here, so detail showed 0.
     counts = _participant_counts(db, [comp.id])
     out = _summary_out(comp, participants=counts.get(comp.id, 0))
-    out["board"] = board
+    out["board"] = _finite_board(board)
     # 本场此刻是否有公开页（分享卡二维码指向 /c/<id> 用，设计 §4）。
     # Whether this competition has a public page right now (share-card QR, §4).
     out["publicView"] = is_publicly_viewable(db, comp)
@@ -223,7 +238,7 @@ def get_competition(request: Request, comp_id: str, db: Session = Depends(get_db
         "login": p.mt5_login,
         "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,
         "finalRank": p.final_rank,
-        "finalScore": p.final_score,
+        "finalScore": _finite_or_none(p.final_score),
         "disqualified": p.disqualified,
         "sample": samples.get(p.mt5_login),
         "publicName": p.public_name,
@@ -474,7 +489,7 @@ def _participant_out(p: CompetitionParticipant, email: str | None,
         "login": p.mt5_login,
         "registeredAt": p.registered_at.isoformat() if p.registered_at else None,
         "scoringFrom": p.scoring_from.isoformat() if p.scoring_from else None,
-        "finalScore": p.final_score,
+        "finalScore": _finite_or_none(p.final_score),
         "finalRank": p.final_rank,
         "disqualified": p.disqualified,
         "disqualifyReason": p.disqualify_reason,
@@ -486,7 +501,7 @@ def _participant_out(p: CompetitionParticipant, email: str | None,
         "nameHidden": bool(p.name_hidden),
         # 管理端名单才有的明细（见 participant_details）；PATCH 的回包不带。
         # Admin-list-only detail (see participant_details); absent from PATCH replies.
-        **(details or {}),
+        **_scrub(details or {}),
     }
 
 
@@ -786,7 +801,7 @@ def admin_competition_integrity(comp_id: str, db: Session = Depends(get_db)):
     标记。只读；终审闸门用的是同一份报告（settle_competition → top_entry_flags）。
     Integrity report; read-only. The settle gate reads the same report."""
     comp = _get_comp_or_404(db, comp_id)
-    return competition_integrity(db, comp)
+    return _scrub(competition_integrity(db, comp))
 
 
 @admin_router.get("/{comp_id}/board")
@@ -810,8 +825,8 @@ def admin_competition_board(comp_id: str, db: Session = Depends(get_db),
     """
     comp = _get_comp_or_404(db, comp_id)
     refresh_comp_board(db, comp)
-    return build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id),
-                                     reveal=True, gates_override=_comp_gates(db, comp))
+    return _finite_board(build_board_rows_payload(db, admin, comp.metric, comp_period_key(comp.id),
+                                                  reveal=True, gates_override=_comp_gates(db, comp)))
 
 
 @admin_router.get("/{comp_id}/public-preview")
@@ -820,7 +835,7 @@ def admin_public_preview(comp_id: str, db: Session = Depends(get_db)):
     不看任何开关（草稿、未公开、总开关关着都能预览）——上线前就靠它验收。
     Public-page preview: the same payload visitors get, uncached and ignoring
     every switch, so admins can check it before going live."""
-    return build_public_payload(db, _get_comp_or_404(db, comp_id))
+    return _finite_board(build_public_payload(db, _get_comp_or_404(db, comp_id)))
 
 
 @admin_router.get("/{comp_id}/funnel")

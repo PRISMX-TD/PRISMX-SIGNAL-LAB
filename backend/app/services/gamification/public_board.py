@@ -30,6 +30,7 @@ from app.utils.timeutil import aware as _aware
 
 from .badges import equipped_badge_tiers
 from .competitions import comp_gates, comp_period_key, track_modes
+from .finite import finite_board
 
 # 大小写都认；调用方先 normalize_comp_id() 转小写再查库 / 拼缓存键（库里存小写）。
 # Case-insensitive; callers lowercase via normalize_comp_id() before lookups.
@@ -169,7 +170,11 @@ def build_public_payload(db, comp: Competition) -> dict:
         next_id = fid if fid and fid != comp.id else None
     min_trades = (gates["min_trades_winrate"] if comp.metric == "win_rate"
                   else gates["min_trades_return"])
-    return {
+    # 修复前写进快照的非有限分数整行不出（见 finite.py）；公开页的结果会进 shared_cache，
+    # 所以在这里清洗，缓存里存的就是干净的那份。
+    # Non-finite (pre-fix) snapshot scores are dropped (see finite.py). The public page
+    # caches this result, so cleaning here keeps the cached copy clean too.
+    return finite_board({
         "id": comp.id,
         "name": comp.name,
         "description": comp.description,
@@ -192,7 +197,7 @@ def build_public_payload(db, comp: Competition) -> dict:
         "snapshotAt": _iso(_aware(snapshot_at)) if snapshot_at else None,
         "rows": rows,
         "nextCompetitionId": next_id,
-    }
+    })
 
 
 def record_funnel_event(db, comp_id: str, step: str, ref: str | None,

@@ -25,6 +25,7 @@ from app.services.gamification import (
 )
 from app.services.gamification import identity, periods
 from app.services.gamification.badge_progress import badge_progress
+from app.services.gamification.finite import finite_board, finite_or_none, score_ok
 from app.services.gamification.stats import compute_account_lifetime_stats, load_trade_data
 from app.services.gamification.boards import (_resolved_in_period, board_gates, leaderboard_cache_key,
                                               position_capitals, return_score)
@@ -360,7 +361,12 @@ def build_board_rows_payload(db: Session, viewer: User, board: str, period_key: 
         payload["previousWinner"] = previous_winner
     if base["snapshotAt"] is not None:
         payload["snapshotAt"] = base["snapshotAt"]
-    return payload
+    # 修复前写进快照的非有限分数：整行不出、me / previousWinner 置 None（见 finite.py）。
+    # 返回新对象，缓存里的 base 不动。常设榜、管理端预览、比赛榜都从这里出。
+    # Non-finite scores stored before the fix: rows dropped, me / previousWinner -> None
+    # (see finite.py). Returns new containers, the cached base is untouched. Standing
+    # boards, the admin preview and competition boards all come through here.
+    return finite_board(payload)
 
 
 def _board_base(db: Session, board: str, period_key: str, reveal: bool) -> dict:
@@ -838,7 +844,9 @@ def build_profile_payload(db: Session, viewer: User, public_id: str) -> dict:
                 "entries": [{
                     "login": r.mt5_login if is_self else identity.mask_account(r.mt5_login),
                     "rank": r.rank, "score": r.score,
-                } for r in rows],
+                # 非有限分数（修复前的旧数据）不上主页，与榜单同一口径（见 finite.py）。
+                # Non-finite (pre-fix) scores stay off the profile, as on the boards.
+                } for r in rows if score_ok(r.score)],
             })
 
     comps = (db.query(CompetitionParticipant, Competition)
@@ -856,7 +864,7 @@ def build_profile_payload(db: Session, viewer: User, public_id: str) -> dict:
     competitions = [{
         "id": c.id, "name": c.name,
         "login": p.mt5_login if is_self else identity.mask_account(p.mt5_login),
-        "finalRank": p.final_rank, "finalScore": p.final_score,
+        "finalRank": p.final_rank, "finalScore": finite_or_none(p.final_score),
     } for p, c in comps]
 
     stats = _profile_stats(db, target) if (target.stats_public or is_self) else None

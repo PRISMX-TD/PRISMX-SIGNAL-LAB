@@ -2,9 +2,12 @@
 import asyncio
 import functools
 import logging
+import math
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
@@ -326,6 +329,40 @@ async def _db_pool_timeout_handler(request: Request, exc: SQLAlchemyPoolTimeoutE
         content={"detail": "服务繁忙，请稍后重试 / Service busy, please retry shortly"},
         headers={"Retry-After": "2"},
     )
+
+
+def _json_safe(obj):
+    """把非有限浮点换成它的字符串形式（"nan" / "inf" / "-inf"），其余原样（递归）。
+    Replace non-finite floats with their string form, recursively; everything else as is."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """与 FastAPI 自带的 422 同一个形状（detail 列表，每项 loc / msg / type / input …），
+    只是把回显里的非有限值变成字符串。
+
+    自带处理器会把出错的原值（input，有时还有 ctx）原样回显。请求体里写裸 NaN / Infinity 是
+    Python 的 json 能解析的，模型用 allow_inf_nan=False 拒掉它之后，回显里还是那个 NaN——
+    JSONResponse 用 allow_nan=False 渲染，当场抛错，本该是 422 的请求变成 500（还会刷一条
+    错误日志）。这里只动非有限浮点（改成 "nan" / "inf" / "-inf"），别的字段、键名、顺序一律
+    不变，现有客户端与测试读到的 422 一模一样。
+    Same shape as FastAPI's own 422 (a detail list of loc / msg / type / input ...), with
+    non-finite echoes turned into strings. The stock handler echoes the offending input
+    (and sometimes ctx) verbatim; Python's json parses bare NaN / Infinity, so after a model
+    rejects it with allow_inf_nan=False the echo still holds that NaN, JSONResponse
+    (allow_nan=False) raises, and a 422 becomes a 500. Only non-finite floats change;
+    every other field, key and order is identical, so existing clients and tests see the
+    same 422 as before."""
+    return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
+
 # 响应压缩：≥1 KB 的 JSON 才压（信号列表、榜单、订单页这些几十 KB 的负载压完只剩
 # 零头；更小的压了反而多花 CPU）。线上 nginx 没有对 API 开 gzip，这是应用层的兜底。
 # compresslevel 取 5：JSON 在 5 以上压缩率几乎不再提高，CPU 却成倍上涨（Starlette

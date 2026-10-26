@@ -126,6 +126,28 @@ def hit_limit(limit: str, *identifiers: str) -> bool:
         logger.warning("rate limit storage error on %s; allowing", identifiers[:1], exc_info=True)
         return True
 
+
+def limit_exhausted(limit: str, *identifiers: str) -> bool:
+    """只看不扣：这只桶的额度是否已经用光（与 hit_limit 同一个存储、同一个开关）。
+
+    给「先挡再干活」用——比如桥接鉴权：失败额度用光的来源连库都不让查，而有效请求又不该
+    因为看了一眼就被记一笔。存储出错时当作没用光（与 hit_limit 同样放行）。
+    Peek without charging: whether this bucket is already used up (same storage and
+    switch as hit_limit). For "refuse before doing the work" checks such as bridge auth,
+    where a source that spent its failure budget shouldn't even reach the DB, yet a
+    valid request mustn't be charged just for looking. Storage errors read as "not
+    exhausted", failing open like hit_limit.
+    """
+    if not limiter.enabled:
+        return False
+    from limits import parse
+
+    try:
+        return not limiter.limiter.test(parse(limit), *identifiers)
+    except Exception:  # noqa: BLE001
+        logger.warning("rate limit storage error on %s; allowing", identifiers[:1], exc_info=True)
+        return False
+
 # ---------------------------------------------------------------------------
 # 失败计数与临时锁定 / failed-attempt tracking and temporary lockout
 #

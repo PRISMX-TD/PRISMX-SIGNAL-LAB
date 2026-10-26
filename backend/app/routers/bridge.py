@@ -4,13 +4,14 @@ executes order commands via REST + API token.
 """
 import hashlib
 import logging
+import math
 import time
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, Field, PlainValidator, ValidationError, model_validator
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import SessionLocal, get_db
+from app.core.rate_limit import client_ip_key, hit_limit, limit_exhausted
 from app.core.security import authenticate_api_token, hash_api_token
 from app.models import ClosedTrade, MT5Account, Order, Signal, User
 from app.services.order_payload import is_reverse_order, is_stale_pending, order_source_tag, order_update_payload, void_stale_order
@@ -288,10 +290,27 @@ async def _push_accounts_status_if_changed(
 def get_bridge_user(
     x_api_token: str | None = Header(default=None),
     db: Session = Depends(get_db),
+    request: Request = None,
 ) -> User:
-    """通过 API Token 鉴权桥接程序 / authenticate bridge app by API token."""
-    user = _authenticate_cached(db, x_api_token)
+    """通过 API Token 鉴权桥接程序 / authenticate bridge app by API token.
+
+    鉴权失败按来源 IP 计数（BRIDGE_AUTH_FAIL_RATE），超了 429。命中正向缓存的有效 Token
+    完全不看这只桶；没命中时，已经把失败额度用光的来源先挡在查库之前——否则换着花样发
+    不同的假 Token，每个请求仍要一次 SELECT。`request` 可空只为直接调用本函数的老测试。
+    Failed auth is counted per source IP (BRIDGE_AUTH_FAIL_RATE) and answered 429 once
+    over. A valid token already in the positive cache never looks at that bucket; on a
+    miss, a source that has used up its failure budget is refused *before* the DB lookup,
+    or rotating fake tokens would still cost one SELECT each. `request` may be None only
+    for older tests that call this function directly."""
+    ip = client_ip_key(request) if request is not None else None
+    user = _cached_bridge_user(x_api_token)
+    if user is None:
+        if ip is not None and limit_exhausted(BRIDGE_AUTH_FAIL_RATE, "bridge:auth:fail", ip):
+            raise HTTPException(status_code=429, detail="请求过于频繁 / Too many requests")
+        user = _authenticate_cached(db, x_api_token)
     if not user:
+        if ip is not None and not hit_limit(BRIDGE_AUTH_FAIL_RATE, "bridge:auth:fail", ip):
+            raise HTTPException(status_code=429, detail="请求过于频繁 / Too many requests")
         raise HTTPException(status_code=401, detail="API Token 无效 / Invalid API token")
     # 账号停用闸门：与 JWT 路径（deps.get_current_user）同一判定、同样 403 与原因。
     # 桥接不走 get_current_user，这里不挡的话，被停用的人桥接照常上报、照常领单下单。
@@ -342,6 +361,37 @@ _auth_cache_lock = Lock()
 # immediately, others by TTL).
 _auth_version = BRIDGE_AUTH_VERSION
 
+# ---------- 否定缓存 / negative auth cache ----------
+# 正向缓存只记「认得的」Token；不认识的 Token 以前每个请求都要一次 SELECT——一个拿着过期 /
+# 编造 Token 的客户端（或故意刷的人）每秒好几次打到库上。这里把「查无此人」也记一小会儿：
+# 键同样是 Token 的 SHA-256，值是 (过期时刻, 装载时的共享版本号)。有上限、满了踢最旧的，
+# 刷大量不同 Token 撑不爆内存（那条路另由 get_bridge_user 的按 IP 失败限流管）。
+# 有效 Token 绝不会被它挡住：任何新 Token 落库（/ea/token/reset、改密 / 重置密码的
+# rotate_api_token）之后都会调 invalidate_auth_cache_for_hash——它清空本进程的否定缓存并换
+# 共享版本号，其它 worker 上的否定条目按版本不符当未命中；就算有哪条路径没调，最迟也就
+# TTL（60 秒）。新 Token 本身是 256 位随机数，事先被人撞进否定缓存的概率可以忽略。
+# The positive cache only remembers known tokens; an unknown one used to cost a SELECT
+# per request — a client holding a stale or made-up token (or someone doing it on
+# purpose) hits the DB several times a second. Remember "no such token" briefly too:
+# same SHA-256 key, value (expiry, shared version at load time). Bounded with
+# oldest-first eviction so a spray of distinct tokens can't grow it without limit (that
+# path is also covered by get_bridge_user's per-IP failure limit). A valid token is never
+# blocked by it: every path that stores a new token (/ea/token/reset, rotate_api_token on
+# password change / reset) calls invalidate_auth_cache_for_hash, which clears this
+# process's negative cache and bumps the shared version so other workers treat their
+# entries as misses; a path that forgot would still wait at most the TTL (60s). New tokens
+# are 256-bit random, so one being pre-seeded here is negligible.
+_AUTH_NEGATIVE_TTL = 60.0  # 秒 / seconds
+_AUTH_NEGATIVE_MAX = 4096
+_auth_negative_cache: dict[str, tuple[float, str | None]] = {}
+
+# 桥接鉴权失败的按 IP 额度。真桥接拿着过期 Token 时大约每秒 2~3 个请求（状态 + 报价线程）
+# 都会失败，这个数要留足余量：只有每秒 10 个以上的失败才会被 429。
+# Per-IP budget for failed bridge auth. A real bridge holding a stale token fails ~2-3
+# requests a second (status loop + quote thread), so this leaves ample headroom: only
+# more than ~10 failures a second get 429s.
+BRIDGE_AUTH_FAIL_RATE = "600/minute"
+
 
 def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
     """按 token 哈希清除鉴权缓存条目。Token 重置时调用，让旧 Token 立即失效，
@@ -358,6 +408,10 @@ def invalidate_auth_cache_for_hash(token_hash: str | None) -> None:
         return
     with _auth_cache_lock:
         _auth_cache.pop(token_hash, None)
+        # 刚落库的新 Token 可能正好在否定缓存里（极不可能，但不能赌）：本进程整个清掉，
+        # 其它 worker 靠下面的版本号。/ The freshly stored token could sit in the negative
+        # cache; clear it here, other workers follow the version bump below.
+        _auth_negative_cache.clear()
     # 调用方已 commit（新哈希已落库）之后才换版本号：拿到新版本号的 worker，
     # 回库时一定读到新哈希。/ Bumped after the caller's commit, so any worker
     # holding the new version re-reads the new hash.
@@ -382,6 +436,39 @@ def _cached_user_usable(user: User) -> bool:
     return state.session is None and not state.expired
 
 
+def _version_stale(entry_ver: str | None, ver: str | None) -> bool:
+    return ver is not None and entry_ver is not None and ver != entry_ver
+
+
+def _cached_bridge_user(x_api_token: str | None) -> User | None:
+    """只看正向缓存、不碰数据库：命中且仍可用就返回用户，否则 None。
+    Positive-cache lookup only, never the DB: the user on a usable hit, else None."""
+    if not x_api_token:
+        return None
+    hit = _auth_cache.get(hash_api_token(x_api_token))
+    if (
+        hit is not None
+        and hit[0] > time.monotonic()
+        and not _version_stale(hit[2], _auth_version.current())
+        and _cached_user_usable(hit[1])
+    ):
+        return hit[1]
+    return None
+
+
+def _remember_unknown(key: str, now: float, ver: str | None) -> None:
+    """把一个查无此人的 Token 哈希记进否定缓存；满了先清过期项，仍满就按插入顺序踢最旧的。
+    Record an unknown token hash; when full, prune expired entries, then evict the oldest."""
+    with _auth_cache_lock:
+        _auth_negative_cache.pop(key, None)
+        if len(_auth_negative_cache) >= _AUTH_NEGATIVE_MAX:
+            for k in [k for k, (exp, _v) in _auth_negative_cache.items() if exp <= now]:
+                del _auth_negative_cache[k]
+            while len(_auth_negative_cache) >= _AUTH_NEGATIVE_MAX:
+                del _auth_negative_cache[next(iter(_auth_negative_cache))]
+        _auth_negative_cache[key] = (now + _AUTH_NEGATIVE_TTL, ver)
+
+
 def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
     if not x_api_token:
         return None
@@ -396,11 +483,22 @@ def _authenticate_cached(db: Session, x_api_token: str | None) -> User | None:
     if (
         hit is not None
         and hit[0] > now
-        and not (ver is not None and hit[2] is not None and ver != hit[2])
+        and not _version_stale(hit[2], ver)
         and _cached_user_usable(hit[1])
     ):
         return hit[1]
+    # 否定缓存：最近确认过「没有这个 Token」且版本号没变，就不再查库。
+    # Negative cache: recently confirmed unknown and the version hasn't moved — skip the DB.
+    miss = _auth_negative_cache.get(key)
+    if miss is not None and miss[0] > now and not _version_stale(miss[1], ver):
+        return None
     user = authenticate_api_token(db, x_api_token)
+    if user is None:
+        _remember_unknown(key, now, ver)
+        return None
+    if miss is not None:
+        with _auth_cache_lock:
+            _auth_negative_cache.pop(key, None)
     if user is not None:
         # 缓存前先把实例摘出会话。SQLAlchemy 的 expire_on_commit 默认为 True，
         # 只要本请求后续任何一次 db.commit()，留在会话里的实例就会被整体标记为
@@ -1376,7 +1474,9 @@ class BridgeResultRequest(BaseModel):
     # completed trade everywhere FILLED is counted.
     status: Literal["FILLED", "REJECTED", "FAILED", "PLACED"] | None = None
     mt5Ticket: int | None = None
-    filledPrice: float | None = None
+    # 成交价 / 手数拒 NaN / ±Infinity：它们会落进订单行、推给前端、进个人胜率。
+    # Fill price / volume reject NaN / ±Infinity: they land in the order row, the push and stats.
+    filledPrice: float | None = Field(default=None, allow_inf_nan=False)
     # 实际执行的手数（桥接 1.4.2 起上报）。桥接会按券商的步长与上下限规整用户填的
     # 手数——0.005 手在最小 0.01 的品种上会被抬成 0.01，也就是仓位比用户意图大一倍。
     # 不把真实值写回去的话，订单行、持仓对账与个人胜率用的都是用户当初填的数。
@@ -1387,7 +1487,7 @@ class BridgeResultRequest(BaseModel):
     # doubled position. Without writing the real value back, the order row,
     # reconciliation and personal win-rate all use what the user typed. Older
     # bridges omit it, in which case the stored value is left alone.
-    volume: float | None = Field(default=None, gt=0)
+    volume: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     message: str | None = None
     # 实际执行该指令的 MT5 账号 login。未指定目标账号、靠"唯一在线账号"兜底
     # 路由时，落库的指令本身不知道最终打到了哪个账号；有了这个字段，个人胜率
@@ -1685,8 +1785,114 @@ async def bridge_result(
     return {"ok": True}
 
 
+def _finite_number(v: Any) -> int | float:
+    """有限的 JSON 数：int / float 原样返回（不转换类型），NaN / ±Infinity、字符串、布尔一律拒。
+    A finite JSON number, returned as is (no type coercion); NaN / ±Infinity, strings and
+    booleans are rejected."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        raise ValueError("must be a number")
+    if isinstance(v, float) and not math.isfinite(v):
+        raise ValueError("must be a finite number")
+    return v
+
+
+def _numeric_id(v: Any) -> int | str:
+    """ticket / login：非布尔的整数，或纯数字字符串，原样返回。
+    ticket / login: a non-bool int or an all-digit string, returned unchanged."""
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    if isinstance(v, str) and 0 < len(v) <= 20 and v.isascii() and v.isdigit():
+        return v
+    raise ValueError("must be an integer or a numeric string")
+
+
+FiniteNumber = Annotated[int | float, PlainValidator(_finite_number)]
+NumericId = Annotated[int | str, PlainValidator(_numeric_id)]
+
+
+def _has_non_finite(v: Any) -> bool:
+    if isinstance(v, float):
+        return not math.isfinite(v)
+    if isinstance(v, dict):
+        return any(_has_non_finite(x) for x in v.values())
+    if isinstance(v, list):
+        return any(_has_non_finite(x) for x in v)
+    return False
+
+
+class _BridgeRow(BaseModel):
+    """未知键照收，但其中也不许有 NaN / ±Infinity：它们同样原样进 WS 推送与快照。
+    Unknown keys are allowed, but not with NaN / ±Infinity inside: they reach the WS
+    push and snapshots verbatim too."""
+    model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="after")
+    def _extras_finite(self):
+        if self.__pydantic_extra__ and _has_non_finite(self.__pydantic_extra__):
+            raise ValueError("extra fields must not contain NaN / Infinity")
+        return self
+
+
+class BridgePositionRow(_BridgeRow):
+    """桥接上报的一行持仓（形状见 bridge/mt5_worker._positions_payload）。
+
+    以前 `data` 是裸 list，任何东西都原样进 WS 推送、Redis 快照、自动仓管和比赛结束拍照。
+    一个 NaN 盈亏写成 JSON 是裸 `NaN`——前端 JSON.parse 当场抛错、整张持仓表停更，而且
+    还会进比赛结束快照与浮亏核对。这里只卡类型：数值必须是有限数（不做 int→float 转换），
+    ticket / login 是整数或纯数字字符串；全部可缺省（旧桥接 / 部分字段缺失照收），未知键
+    放行（extra="allow"）。下游拿到的是 model_dump(exclude_unset=True)——没上报的键不会被
+    补成 None，字段声明顺序与桥接的输出顺序一致，所以对真实桥接而言 dict 一字不差。
+    One position row as the bridge reports it. `data` used to be a bare list, so anything
+    went straight into the WS push, the Redis snapshot, auto-manage and the comp end
+    capture; a NaN profit serialises as bare `NaN`, which kills JSON.parse on the client.
+    Only types are enforced: numbers must be finite (no int->float coercion), ticket /
+    login an int or digit string; every field optional and unknown keys allowed. Downstream
+    receives model_dump(exclude_unset=True), with fields declared in the bridge's own
+    order, so a real bridge's dicts come through byte-for-byte.
+    """
+    ticket: NumericId | None = None
+    symbol: str | None = Field(default=None, max_length=64)
+    side: str | None = Field(default=None, max_length=16)
+    volume: FiniteNumber | None = None
+    profit: FiniteNumber | None = None
+    entryPrice: FiniteNumber | None = None
+    currentPrice: FiniteNumber | None = None
+    stopLoss: FiniteNumber | None = None
+    takeProfit: FiniteNumber | None = None
+    login: NumericId | None = None
+
+
+class BridgePendingOrderRow(_BridgeRow):
+    """桥接上报的一张挂单（形状见 bridge/mt5_worker._pending_orders_payload），规则同上。
+    One pending order as the bridge reports it; same rules as BridgePositionRow."""
+
+    ticket: NumericId | None = None
+    symbol: str | None = Field(default=None, max_length=64)
+    type: str | None = Field(default=None, max_length=32)
+    side: str | None = Field(default=None, max_length=16)
+    volume: FiniteNumber | None = None
+    price: FiniteNumber | None = None
+    stopLoss: FiniteNumber | None = None
+    takeProfit: FiniteNumber | None = None
+    login: NumericId | None = None
+
+
+# 单次持仓 / 挂单上报的行数上限。桥接只报本平台魔术号的仓位，按 MAX_POLL_ACCOUNTS 个终端
+# 算也远到不了；以前这里没有上限，16MB 的桥接请求体能塞进十万行，逐行进推送、快照与评估。
+# Per-report row cap for positions / pending orders. The bridge only reports this
+# platform's magic-number positions, nowhere near this even across MAX_POLL_ACCOUNTS
+# terminals; there was no cap before, and the 16MB bridge body could carry ~100k rows.
+MAX_POSITIONS_PER_REPORT = 2000
+
+
+def _rows_as_dicts(rows: list[BaseModel] | None) -> list[dict] | None:
+    if rows is None:
+        return None
+    return [r.model_dump(exclude_unset=True) for r in rows]
+
+
 class BridgePositionsRequest(BaseModel):
-    data: list = []
+    data: list[BridgePositionRow] = Field(default=[], max_length=MAX_POSITIONS_PER_REPORT)
     # 券商服务器上真实挂着的挂单（桥接 >= 1.4.3）。可选：旧桥接不带这个键，
     # 此时**不推**空列表——推空会把前端那份挂单清掉，而"旧桥接没上报"并不等于
     # "这个账号没有挂单"。None 与 [] 必须区分，所以缺省是 None 而不是 []。
@@ -1694,13 +1900,40 @@ class BridgePositionsRequest(BaseModel):
     # absent nothing is pushed: an empty push would clear the frontend's list, but
     # "an old bridge didn't report" is not "this account has no pending orders".
     # None and [] mean different things, hence the None default.
-    pendingOrders: list | None = None
+    pendingOrders: list[BridgePendingOrderRow] | None = Field(
+        default=None, max_length=MAX_POSITIONS_PER_REPORT)
+
+
+async def _positions_body(request: Request) -> BridgePositionsRequest:
+    """自己解析 /bridge/positions 的请求体，校验失败给一个**能序列化**的 422。
+
+    FastAPI 默认的 422 会把出错的原值（input）原样回显；值是 NaN / Infinity 时，回显本身
+    又不是合法 JSON，JSONResponse 渲染直接抛错——本该是 422 的请求变成 500。这里去掉
+    input / ctx 再回，loc 仍按 FastAPI 的形状带 "body" 前缀。
+    Parse the /bridge/positions body ourselves so a validation failure is a 422 that
+    can actually be serialised. FastAPI's default 422 echoes the offending input; for
+    NaN / Infinity that echo is itself not valid JSON, so rendering raises and the 422
+    becomes a 500. input / ctx are dropped; loc keeps FastAPI's "body" prefix."""
+    try:
+        raw = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=422, detail=[
+            {"type": "json_invalid", "loc": ["body"], "msg": "JSON decode error"}])
+    try:
+        return BridgePositionsRequest.model_validate(raw)
+    except ValidationError as e:
+        errors = e.errors(include_url=False, include_context=False, include_input=False)
+        for err in errors:
+            err["loc"] = ["body", *err["loc"]]
+        raise HTTPException(status_code=422, detail=errors)
 
 
 @router.post("/positions")
 async def bridge_positions(
-    req: BridgePositionsRequest,
+    # 先鉴权、再解析请求体：没带对 Token 的请求一律 401 / 429，不先告诉它请求体哪里不对。
+    # Authenticate before parsing the body: a bad token gets 401 / 429, not body feedback.
     user: User = Depends(get_bridge_user),
+    req: BridgePositionsRequest = Depends(_positions_body),
     db: Session = Depends(get_db),
 ):
     """桥接程序上报持仓 / bridge reports open positions.
@@ -1719,20 +1952,24 @@ async def bridge_positions(
     # push_positions caches the snapshot, attaches per-login floating P/L, and
     # skips ticks identical to the previous one. The account card now shares the
     # positions table's data instead of waiting on the 5s /bridge/accounts poll.
-    await manager.push_positions(user.id, req.data, source="bridge")
-    if req.pendingOrders is not None:
-        await manager.push_pending_orders(user.id, req.pendingOrders, source="bridge")
+    # 下游一律拿普通 dict（与改类型之前完全一样），见 BridgePositionRow。
+    # Downstream keeps receiving plain dicts, exactly as before; see BridgePositionRow.
+    rows = _rows_as_dicts(req.data)
+    pending = _rows_as_dicts(req.pendingOrders)
+    await manager.push_positions(user.id, rows, source="bridge")
+    if pending is not None:
+        await manager.push_pending_orders(user.id, pending, source="bridge")
     # 拿实时持仓给个人胜率对账：给仍持仓的本平台仓位盖时间戳，让平仓明细漏报的
     # 仓位最终退出"进行中"。对账失败绝不影响持仓上报本身。
     # Reconcile personal win-rate against live positions: stamp still-open
     # platform positions so ones with missed close-legs eventually leave
     # "进行中". A reconciliation failure never breaks the report itself.
     try:
-        await run_in_threadpool(mark_positions_seen, db, user.id, req.data)
+        await run_in_threadpool(mark_positions_seen, db, user.id, rows)
     except Exception:
         logger.exception("position reconciliation failed (user=%s)", user.id)
     try:
-        await run_in_threadpool(evaluate_positions, db, user.id, req.data, source="bridge")
+        await run_in_threadpool(evaluate_positions, db, user.id, rows, source="bridge")
     except Exception:
         logger.exception("auto_manage evaluation failed (user=%s)", user.id)
     return {"ok": True}
@@ -1754,8 +1991,10 @@ class BridgeQuote(BaseModel):
     # currently-deployed desktop app — see manager.update_quotes, which
     # silently drops entries missing login instead of erroring.
     login: str | None = Field(default=None, pattern=LOGIN_PATTERN)
-    bid: float
-    ask: float
+    # 报价拒 NaN / ±Infinity：原样推给前端，裸 NaN 会让 JSON.parse 抛错、报价面板停更。
+    # Quotes reject NaN / ±Infinity: they are pushed as is, and a bare NaN breaks JSON.parse.
+    bid: float = Field(allow_inf_nan=False)
+    ask: float = Field(allow_inf_nan=False)
     digits: int | None = Field(default=None, ge=0, le=10)
     ts: str | None = Field(default=None, max_length=40)
     # 券商对该品种的真实合约规格（桥接 v1.3.23 起上报，见 mt5_worker._symbol_spec）：
@@ -1765,9 +2004,9 @@ class BridgeQuote(BaseModel):
     # The broker's real contract spec (bridge >= 1.3.23): units per lot, tick
     # size and loss-side tick value in the deposit currency. Optional so older
     # bridges keep working; passed through to the web app as-is.
-    contractSize: float | None = Field(default=None, gt=0)
-    tickSize: float | None = Field(default=None, gt=0)
-    tickValue: float | None = Field(default=None, gt=0)
+    contractSize: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    tickSize: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    tickValue: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
 # 单次报价条数上限：桥接每个终端只报几个平台品种（mt5_worker.QUOTE_SYMBOLS），按

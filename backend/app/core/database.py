@@ -416,7 +416,12 @@ def _hash_legacy_api_tokens() -> None:
 # rev 48 — 用户 IP 与地区（2026-10-25）：新表 user_ips（create_all 建表建索引）；users 加
 #          geo_country / geo_country_code / geo_province / geo_city / geo_at（可空、不回填——
 #          上线前没存过 IP，无从回填）。
-CURRENT_SCHEMA_REV = 48
+# rev 49 — 付款入账到期（2026-10-26，安全审计 run-1 后续）：payments 加 credited_until（入账那一刻
+#          用户新的 plan_expires_at）。可空、不回填——老行留 NULL，读的一侧（services/paid_entitlement）
+#          对 NULL 退回原来的叠加链 + plan:payment 审计行推算。纯 ADD COLUMN，不重写表，不产生可感知的停机。
+#          rev 49 — payment credit expiry: payments.credited_until (the user's new plan_expires_at
+#          at crediting). Nullable, not backfilled; NULL falls back to the chain + audit-row logic.
+CURRENT_SCHEMA_REV = 49
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1421,6 +1426,11 @@ def _migrate_columns() -> None:
         if "actually_paid" not in payment_cols:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE payments ADD COLUMN actually_paid FLOAT"))
+        # rev 49：入账那一刻用户新的到期时间。可空、不回填——老行 NULL 由读的一侧退回旧推算。
+        # rev 49: the post-credit expiry; nullable, not backfilled (NULL = legacy fallback).
+        if "credited_until" not in payment_cols:
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE payments ADD COLUMN credited_until {datetime_type}"))
 
     # invite_links：新增「经此链接注册自动开通试用」开关。这张表在此之前从未
     # 改过列，所以本块是它的第一段迁移。回填成 FALSE 而不是留 NULL：NULL 在

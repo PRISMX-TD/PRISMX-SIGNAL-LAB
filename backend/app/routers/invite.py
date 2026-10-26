@@ -102,7 +102,8 @@ from app.services.pagination import (
     PAGE_SIZE_MAX,
     resolve_range_or_422 as _resolve_range_or_422,
 )
-from app.services.plans import PLAN_DAYS, trial_grant_days
+from app.services.paid_entitlement import paid_entitlement_end
+from app.services.plans import trial_grant_days
 from app.services.settings_store import (
     get_agent_settings,
     invalidate_agent_cache,
@@ -1061,94 +1062,19 @@ def _has_live_paid_plan(db: Session, target_id: str, now: datetime) -> bool:
 
     判据是付款本身而不是 users.plan：plan 是个会被覆盖的当前状态，一旦代理已经
     点下降级，事后再看 plan 只能看到 FREE，付过钱这件事就查不出来了。payments
-    表是不可变的事实，按 finished_at + 套餐天数算出这笔钱买到的窗口，落在窗口里
-    就说明"他现在的权益是花钱买的"。
+    表是不可变的事实，这笔钱买到的窗口由 services/paid_entitlement 统一计算（叠加链 +
+    入账时记下的 credited_until，老行退回 plan:payment 审计行），与退款收回下限共用。
 
-    只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED 的从来没到过。
+    只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED/REFUNDED 的不给窗口。
 
     Whether this user holds a completed payment whose window hasn't lapsed. The
     verdict comes from the payments table rather than users.plan, because plan is
     mutable current state — once a downgrade lands, it reads FREE and the fact
-    that money changed hands is no longer visible. Payments are immutable facts:
-    finished_at plus the plan's day count is the window the money bought.
+    that money changed hands is no longer visible. The paid window is computed by
+    services/paid_entitlement (shared with the refund revoke floor).
     """
-    ends = _paid_entitlement_end(db, target_id)
+    ends = paid_entitlement_end(db, target_id)
     return ends is not None and ends > now
-
-
-# 付款入账写的审计行（payments._sync_payment_status 的 plan:payment）与这笔付款的
-# finished_at 在同一个事务里落下，按这个时间差把两者配上对。
-# The plan:payment audit row is written in the same transaction that stamps the
-# payment's finished_at; rows within this many seconds are paired with it.
-_PAYMENT_AUDIT_MATCH_SECONDS = 300
-
-
-def _aware(value: datetime) -> datetime:
-    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-
-
-def _audit_expiry(raw: str | None) -> datetime | None:
-    """解析 plan:payment 审计行的新值 `PRO(<到期时间>)`，取出入账后的到期时间。
-    Parse the `PRO(<expiry>)` new_value of a plan:payment audit row."""
-    if not raw or "(" not in raw or not raw.endswith(")"):
-        return None
-    inner = raw[raw.index("(") + 1:-1].strip()
-    if not inner or inner == "None":
-        return None
-    try:
-        return _aware(datetime.fromisoformat(inner))
-    except ValueError:
-        return None
-
-
-def _paid_entitlement_end(db: Session, target_id: str) -> datetime | None:
-    """已完成付款买到的权益最晚到哪天（审计 agent-downgrade-paid-guard-ignores-stacked-renewals）。
-
-    入账是「从 max(现有到期, 现在) 往后加」，所以提前续费、或在代理 / 管理员 / 客服加过的
-    时长之后再付款，付的那几天都叠在后面——只按 finished_at + 套餐天数算会把它们漏掉。
-    这里取两者的最大值：
-      ① 只用付款本身推一遍叠加链：end = max(end, finished_at) + 天数（两笔年付叠在一起）；
-      ② 每笔付款入账时写下的 plan:payment 审计行里的真实到期时间（叠在非付费时长之后）。
-    只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED/REFUNDED 的不给窗口。
-
-    The latest moment a FINISHED payment still pays for. Crediting extends from
-    max(current expiry, now), so early renewals and payments made on top of
-    agent/admin/support time stack after that time; finished_at + plan days alone
-    misses them. Take the max of (1) the payments' own stacking chain and (2) the
-    actual post-credit expiry recorded in each payment's plan:payment audit row."""
-    rows = (
-        db.query(Payment.plan, Payment.finished_at)
-        .filter(Payment.user_id == target_id, Payment.status == "FINISHED")
-        .order_by(Payment.finished_at.asc())
-        .all()
-    )
-    finished = [(plan, _aware(f)) for plan, f in rows if f is not None]
-    if not finished:
-        return None
-    end: datetime | None = None
-    for plan, f in finished:
-        base = f if end is None or end < f else end
-        end = base + timedelta(days=PLAN_DAYS.get(plan, 30))
-    window = timedelta(seconds=_PAYMENT_AUDIT_MATCH_SECONDS)
-    audits = (
-        db.query(AdminAuditLog.new_value, AdminAuditLog.created_at)
-        .filter(
-            AdminAuditLog.target_user_id == target_id,
-            AdminAuditLog.field == "plan:payment",
-            AdminAuditLog.created_at >= (finished[0][1] - window).replace(tzinfo=None),
-        )
-        .all()
-    )
-    for new_value, created_at in audits:
-        if created_at is None:
-            continue
-        at = _aware(created_at)
-        if not any(abs(at - f) <= window for _plan, f in finished):
-            continue
-        credited = _audit_expiry(new_value)
-        if credited is not None and credited > end:
-            end = credited
-    return end
 
 
 def _notify_admins_agent_write(
