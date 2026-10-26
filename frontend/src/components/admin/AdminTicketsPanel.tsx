@@ -269,7 +269,7 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                             : 'rounded-tl-md bg-[var(--surface-2)]'
                       }`}
                     >
-                      {r.body && <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-100">{r.body}</p>}
+                      {r.body && <p className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-100">{r.body}</p>}
                       <TicketImageGrid urls={r.images} count={r.imageCount} />
                     </div>
                   </div>

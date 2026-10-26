@@ -65,7 +65,9 @@
     user-select: none;
     -webkit-touch-callout: none;
   }
-  input, textarea, [contenteditable="true"] {
+  /* .selectable：工单对话等需要长按复制的正文单独放开。
+     .selectable: message text (tickets) that users long-press to copy. */
+  input, textarea, [contenteditable="true"], .selectable {
     -webkit-user-select: text;
     user-select: text;
     -webkit-touch-callout: default;

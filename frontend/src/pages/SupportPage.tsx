@@ -107,7 +107,7 @@ function Message({ authorEmail, authorRole, authorName, body, images, imageCount
           <span className="name">{name}</span>
           <span className="time num">{fmtStamp(createdAt)}</span>
         </div>
-        {body && <p className="sup-msg-body">{body}</p>}
+        {body && <p className="sup-msg-body selectable">{body}</p>}
         <TicketImageGrid urls={images} count={imageCount} />
       </div>
     </div>
