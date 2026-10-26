@@ -68,12 +68,35 @@ def display_name(nickname, email) -> str:
     return mask_name(local)             # 邮箱是登录凭据的一半：永远打码
 
 
+# Unicode 的 Default_Ignorable_Code_Point（DerivedCoreProperties.txt）：渲染时不显示的码位。
+# 只按 Cc/Cf 分类去不够——U+034F 组合字形连接符、U+FE00–FE0F 变体选择符属于 Mn，韩文填充符
+# U+115F/U+1160/U+3164/U+FFA0 属于 Lo，它们同样看不见，却能把「admin」拆开、给别人的昵称加一个
+# 看不见的尾巴冒名（2026-10-26 审计）。表里与 Cf 重叠的部分无妨。
+# Unicode Default_Ignorable_Code_Point ranges. Cc/Cf alone missed the Mn joiner /
+# variation selectors and the Lo Hangul fillers, which are just as invisible and split
+# reserved words or clone someone's nickname (2026-10-26 audit). Overlap with Cf is harmless.
+_DEFAULT_IGNORABLE = (
+    (0x00AD, 0x00AD), (0x034F, 0x034F), (0x061C, 0x061C), (0x115F, 0x1160),
+    (0x17B4, 0x17B5), (0x180B, 0x180F), (0x200B, 0x200F), (0x202A, 0x202E),
+    (0x2060, 0x206F), (0x3164, 0x3164), (0xFE00, 0xFE0F), (0xFEFF, 0xFEFF),
+    (0xFFA0, 0xFFA0), (0xFFF0, 0xFFF8), (0x1BCA0, 0x1BCA3), (0x1D173, 0x1D17A),
+    (0xE0000, 0xE0FFF),
+)
+
+
+def _ignorable(ch: str) -> bool:
+    cp = ord(ch)
+    return any(lo <= cp <= hi for lo, hi in _DEFAULT_IGNORABLE)
+
+
 def strip_invisible(nick: str) -> str:
-    """去掉 Unicode 控制符（Cc）与格式符（Cf，含零宽字符和双向覆盖 U+202A–202E /
-    U+2066–2069）。这些字符看不见，却能把「prismx」拆开躲过保留词、或把榜单行的
-    文字方向倒过来。Drops Cc/Cf characters (zero-width and bidi overrides
-    included): invisible, yet they split reserved words or flip a row's text."""
-    return "".join(ch for ch in (nick or "") if unicodedata.category(ch) not in ("Cc", "Cf"))
+    """去掉 Unicode 控制符（Cc）、格式符（Cf，含零宽字符和双向覆盖 U+202A–202E /
+    U+2066–2069）以及其余「默认可忽略」码位（见 _DEFAULT_IGNORABLE）。这些字符看不见，
+    却能把「prismx」拆开躲过保留词、或把榜单行的文字方向倒过来。Drops Cc/Cf characters
+    (zero-width and bidi overrides included) and every other Default_Ignorable_Code_Point:
+    invisible, yet they split reserved words or flip a row's text."""
+    return "".join(ch for ch in (nick or "")
+                   if unicodedata.category(ch) not in ("Cc", "Cf") and not _ignorable(ch))
 
 
 def nickname_key(nick: str) -> str:
@@ -88,7 +111,9 @@ def nickname_key(nick: str) -> str:
     index while the display value stays exactly as the user typed it. Shared with
     the reserved-word and promo checks so they never normalize differently.
     """
-    return "".join(unicodedata.normalize("NFKC", strip_invisible(nick)).lower().split())
+    # NFKC 之后再去一次：U+3164 / U+FFA0 归一后变成 U+1160，同样看不见。
+    # Strip again after NFKC: U+3164 / U+FFA0 normalise to U+1160, still invisible.
+    return "".join(strip_invisible(unicodedata.normalize("NFKC", strip_invisible(nick))).lower().split())
 
 
 def nickname_reserved(nick: str) -> bool:

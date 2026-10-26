@@ -42,6 +42,11 @@ from app.services.symbol_aliases import broker_symbol
 # Keeps the prismx.orders logger name so existing log greps still match.
 logger = logging.getLogger("prismx.orders")
 
+# 管理已有仓位 / 挂单的动作：受休市闸门约束（与开仓一样），但「只平」品种放行。
+# Actions that manage an existing position / pending order: market-hours gated like
+# an open, but allowed on close-only symbols.
+MANAGE_ACTIONS = frozenset({"CLOSE", "MODIFY", "MODIFY_PENDING", "CANCEL_PENDING"})
+
 
 def gateway_account(db: Session, mt5_login: str | None, user_id: str | None = None) -> MT5Account | None:
     """取目标 MT5 账号的 gateway 绑定行；不是 gateway 账号返回 None。
@@ -554,6 +559,36 @@ def try_gateway_execute(
         return order_update_payload(order)
 
     login = int(order.mt5_login)
+
+    # 休市不发平仓 / 改单 / 改挂单 / 撤挂单（审计 A2，2026-10-26）。开仓与挂单在 place_order
+    # 前面已经判过；这几类「管理」动作以前一路直达网关，休市时 dealer 请求会被 MT5 挂成
+    # 删不掉的「request adding」，平仓还带着收盘前最后一跳的价格。路由层先以 409 拦下，这里
+    # 兜住自动仓管与一键平仓这两条不经路由闸门的路，落成 REJECTED（与撤销绑定同一处理）。
+    # 「只平」品种照常放行（见 market_hours.manage_allowed）。
+    # No close / modify / pending modify / pending cancel into a closed session (audit
+    # A2). Opens are gated in place_order; these used to reach the gateway unchecked,
+    # where MT5 parks a closed-session dealer request as an unremovable "request adding"
+    # (a close also carries the last pre-close tick). The routes already 409; this
+    # covers auto-management and close-all, recorded as REJECTED like a revoked binding.
+    # Close-only symbols still pass (see market_hours.manage_allowed).
+    if order.action in MANAGE_ACTIONS:
+        from app.services import market_hours
+        try:
+            closed = market_hours.closed_for_manage(order.symbol, login)
+        except Exception:  # noqa: BLE001 —— 判定出错不挡平仓 / a failed check never blocks a close
+            logger.warning("休市判定出错，放行 %s %s", order.action, order.client_order_id,
+                           exc_info=True)
+            closed = None
+        if closed is not None:
+            order.status = "REJECTED"
+            order.message = market_hours.closed_message(closed)
+            db.commit()
+            db.refresh(order)
+            logger.info(
+                "Gateway %s 休市拒绝: %s mt5=%s symbol=%s",
+                order.action, order.client_order_id, order.mt5_login, order.symbol,
+            )
+            return order_update_payload(order)
 
     # 调网关之前先把事务结束掉，把数据库连接还回池里。否则这个会话会一直攥着一条
     # 连接等 dealer 回执（最长 65 秒，超时再问一次共 140 秒），而池子总共只有

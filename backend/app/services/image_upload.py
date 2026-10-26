@@ -474,3 +474,151 @@ def signed_image_urls(keys: list[str]) -> dict[str, str]:
         if path in signed:
             out[key] = signed[path] + frag
     return out
+
+
+# ---------------------------------------------------------------------------
+# 私有桶的保留期与配额 / private-bucket retention and quota（审计 2026-10-26）
+#
+# 以前私有桶里的东西永远不删：分享图（share/<uid>/…）的令牌 24 小时就失效，对象却一直留着；
+# 唯一的约束是按天限速（RATE_LIMIT_TICKET_UPLOAD），那是速率不是配额——一个账号每天能往运营方
+# 付费的桶里塞几百 MB，日积月累。现在上传前先调 enforce_private_quota(folder)：
+#   · share/ 文件夹：超过 SHARE_OBJECT_TTL_SECONDS 的先删掉（令牌早失效了，没人能再打开）；
+#   · 剩下的累计字节数到了 PRIVATE_IMAGE_QUOTA_BYTES 就拒绝（工单图按用户累计，不按时间删——
+#     它们可能挂在工单消息上，引用关系在 tickets 那边）；
+#   · 顺带至多每小时一次、在后台线程里把所有用户 share/ 下过期的对象扫掉，不再上传的用户也清得到。
+# 列目录失败一律放行：存储抖一下不该把上传整个挡住，上传本身失败自有它的报错。
+#
+# Previously nothing in the private bucket was ever deleted: share images outlive their
+# 24h tokens forever, and the only bound was a daily rate, which is not a quota. Upload
+# routes now call enforce_private_quota(folder) first: expired share/ objects are purged,
+# then a cumulative per-folder byte quota applies (ticket images are never aged out — they
+# may be attached to messages). At most hourly, a background thread also sweeps every
+# user's expired share/ objects. A failed listing fails open.
+# ---------------------------------------------------------------------------
+
+# 分享令牌 24 小时，多留 1 小时余量 / share tokens live 24h; keep 1h of slack
+SHARE_OBJECT_TTL_SECONDS = 25 * 3600
+_LIST_PAGE = 1000
+_LIST_MAX_PAGES = 20
+GLOBAL_SWEEP_INTERVAL = 3600.0
+_sweep_lock = threading.Lock()
+_last_global_sweep = 0.0
+
+
+def _list_folder(folder: str) -> list[dict] | None:
+    """列出私有桶里某个文件夹的直接子项（分页）；失败返回 None。
+    List a folder's direct children in the private bucket (paged); None on failure."""
+    base = settings.SUPABASE_URL.rstrip("/")
+    bucket = settings.TICKET_IMAGE_BUCKET
+    out: list[dict] = []
+    for page in range(_LIST_MAX_PAGES):
+        try:
+            resp = httpx.post(
+                f"{base}/storage/v1/object/list/{bucket}",
+                json={"prefix": folder, "limit": _LIST_PAGE, "offset": page * _LIST_PAGE,
+                      "sortBy": {"column": "name", "order": "asc"}},
+                headers=_auth_headers(),
+                timeout=10.0,
+            )
+            rows = resp.json() if resp.status_code < 400 else None
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("listing private images under %s failed: %s", folder, exc)
+            return None
+        if not isinstance(rows, list):
+            logger.warning("listing private images under %s rejected: %s", folder, resp.status_code)
+            return None
+        out.extend(r for r in rows if isinstance(r, dict))
+        if len(rows) < _LIST_PAGE:
+            break
+    return out
+
+
+def _created_ts(row: dict) -> float | None:
+    raw = row.get("created_at")
+    if not isinstance(raw, str):
+        return None
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def _purge_expired_share(folder: str, rows: list[dict]) -> list[dict]:
+    """删掉 share 文件夹里过期的对象，返回剩下的。/ Delete expired share objects; return the rest."""
+    cutoff = time.time() - SHARE_OBJECT_TTL_SECONDS
+    expired, live = [], []
+    for r in rows:
+        if r.get("id") is None:          # 子文件夹 / a sub-folder
+            continue
+        ts = _created_ts(r)
+        (expired if ts is not None and ts < cutoff else live).append(r)
+    if expired:
+        delete_private_images([f"{folder}/{r['name']}" for r in expired])
+    return live
+
+
+def sweep_expired_share_images() -> None:
+    """把所有用户 share/ 下过期的对象删掉。/ Delete every user's expired share/ objects."""
+    users = _list_folder("share")
+    if not users:
+        return
+    for row in users:
+        name = row.get("name")
+        if row.get("id") is None and isinstance(name, str) and name and "/" not in name:
+            folder = f"share/{name}"
+            rows = _list_folder(folder)
+            if rows:
+                _purge_expired_share(folder, rows)
+
+
+def _spawn(fn) -> None:
+    threading.Thread(target=fn, name="share-image-sweep", daemon=True).start()
+
+
+def _run_global_sweep() -> None:
+    try:
+        sweep_expired_share_images()
+    except Exception:  # noqa: BLE001 —— 清扫失败只记日志 / sweep failures are logged only
+        logger.exception("share image sweep failed")
+
+
+def _maybe_global_sweep() -> None:
+    global _last_global_sweep
+    now = time.monotonic()
+    with _sweep_lock:
+        if _last_global_sweep and now - _last_global_sweep < GLOBAL_SWEEP_INTERVAL:
+            return
+        _last_global_sweep = now
+    _spawn(_run_global_sweep)
+
+
+def enforce_private_quota(folder: str) -> None:
+    """上传前调用（同步，放在线程池里）：清掉过期分享图，再按累计字节数检查配额，满了抛 UploadError。
+    Call before upload_private_image (sync, from the threadpool): purge expired share images,
+    then enforce the cumulative byte quota, raising UploadError when the folder is full."""
+    if not is_private_configured():
+        return
+    is_share = folder.startswith("share/")
+    if is_share:
+        _maybe_global_sweep()
+    rows = _list_folder(folder)
+    if rows is None:
+        return
+    if is_share:
+        rows = _purge_expired_share(folder, rows)
+    used = 0
+    for r in rows:
+        meta = r.get("metadata")
+        if r.get("id") is not None and isinstance(meta, dict):
+            try:
+                used += int(meta.get("size") or 0)
+            except (TypeError, ValueError):
+                pass
+    if used >= settings.PRIVATE_IMAGE_QUOTA_BYTES:
+        mb = settings.PRIVATE_IMAGE_QUOTA_BYTES / (1024 * 1024)
+        logger.warning("private image quota reached for %s: %d bytes", folder, used)
+        raise UploadError(
+            f"图片存储空间已满（{mb:.0f}MB），请联系客服 / Image storage is full ({mb:.0f}MB), please contact support"
+        )

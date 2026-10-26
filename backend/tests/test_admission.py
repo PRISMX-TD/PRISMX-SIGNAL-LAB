@@ -131,8 +131,6 @@ def test_get_orders_is_an_ordinary_request(lanes):
 @pytest.mark.parametrize("path,method", [
     ("/", "GET"),
     ("/api/admin/trial", "GET"),
-    ("/api/bridge/poll", "POST"),
-    ("/api/bridge/result", "POST"),
     ("/api/payments/webhook", "POST"),
     ("/api/feed/quotes", "POST"),
     ("/api/feed/candles", "POST"),

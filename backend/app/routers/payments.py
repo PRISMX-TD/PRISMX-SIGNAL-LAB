@@ -952,7 +952,8 @@ def _revoke_refunded_entitlement(db: Session, record: Payment) -> None:
     # 锁住用户行：同一用户的另一笔支付可能正在入账，两边都在改 plan_expires_at。
     # Lock the user row: another payment of the same user may be crediting right
     # now, and both sides write plan_expires_at.
-    user = db.query(User).filter(User.id == record.user_id).with_for_update().first()
+    # populate_existing：与入账同理，用锁住的行覆盖会话里可能已陈旧的 User / refresh from the locked row, as in crediting.
+    user = db.query(User).filter(User.id == record.user_id).with_for_update().populate_existing().first()
     notify_user_id: str | None = None
     if user is not None:
         old_plan, old_expiry = user.plan, user.plan_expires_at
@@ -1197,10 +1198,18 @@ def _sync_payment_status(db: Session, record: Payment, np_status_val: str, np_da
             # 锁住用户行，防止同一用户两笔支付同时完成时互相覆盖到期时间
             # Lock the user row so two payments finishing at once can't clobber
             # each other's expiry (SQLite ignores FOR UPDATE — fine for tests)
+            # populate_existing：/status 轮询的会话里 get_current_user 早已把这个 User
+            # 载入身份映射，await NOWPayments 期间别的事务可能改过它的会员；不强制
+            # 用锁住的行覆盖，下面的到期 / 试用判断用的就是 await 之前的旧快照。
+            # populate_existing: on the /status poll path get_current_user already
+            # loaded this User into the session before the NOWPayments await, so
+            # without it the plan / expiry / trial decisions below would come from
+            # that stale snapshot instead of the locked row.
             user = (
                 db.query(User)
                 .filter(User.id == record.user_id)
                 .with_for_update()
+                .populate_existing()
                 .first()
             )
             if user:

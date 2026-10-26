@@ -41,6 +41,7 @@ from app.services.deps import STAFF_ROLES, StaffCtx, get_current_user, get_curre
 from app.services.image_upload import (
     UploadError,
     delete_private_images,
+    enforce_private_quota,
     is_private_configured,
     read_upload_capped,
     signed_image_urls,
@@ -308,7 +309,13 @@ async def upload_ticket_image(
     try:
         # 同步 httpx 挪进线程池，别卡事件循环（见 admin.upload_admin_image 的说明）
         # The sync httpx call goes to the threadpool, off the event loop (see admin.upload_admin_image)
-        key = await run_in_threadpool(upload_private_image, data, user_id)
+        def _upload() -> str:
+            # 先查文件夹累计配额（见 image_upload.enforce_private_quota），再上传
+            # Check the folder's cumulative quota first (see image_upload.enforce_private_quota)
+            enforce_private_quota(user_id)
+            return upload_private_image(data, user_id)
+
+        key = await run_in_threadpool(_upload)
     except UploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"key": key}
@@ -426,8 +433,11 @@ def get_ticket(
         .all()
     )
     # 自己的工单按用户视角（内部备注不出现）；工作人员看别人的工单按工作人员视角。
-    # Own ticket -> user view (no internal notes); staff viewing someone else's -> staff view.
-    return _ticket_out(ticket, replies, ticket.user_id != user.id and _is_staff(user), db)
+    # Own ticket -> user view (no internal notes); staff viewing someone else's -> staff view,
+    # masked per tier exactly like /api/admin/tickets/{id} (outsourced agents see masked emails).
+    if ticket.user_id != user.id and _is_staff(user):
+        return mask_ticket_for(_ticket_out(ticket, replies, True, db), ticket, _staff(user))
+    return _ticket_out(ticket, replies, False, db)
 
 
 @router.post("/{ticket_id}/reply", response_model=TicketOut)
@@ -609,7 +619,7 @@ def list_all_tickets(
             priority=t.priority,
             status=t.status,
             updatedAt=t.updated_at,
-            latestReply=_latest_reply(t, True),
+            latestReply=_mask_reply_for(_latest_reply(t, True), t, ctx),
             assigneeId=t.assignee_id,
             assigneeName=names.get(t.assignee_id) if t.assignee_id else None,
         )
@@ -627,6 +637,30 @@ def _customer_email(user: User, ctx: StaffCtx) -> str:
     return user.email
 
 
+def _mask_reply_for(reply: TicketReplyOut | None, ticket: Ticket, ctx: StaffCtx) -> TicketReplyOut | None:
+    """外包客服看到的提交人回复邮箱要脱敏（设计 §2.3）；工作人员回复的邮箱照旧。
+    Mask the submitter's authorEmail for outsourced viewers (design §2.3); staff authors untouched."""
+    if reply is not None and ctx.is_outsourced and reply.authorId == ticket.user_id:
+        from app.services.support_view import mask_email
+
+        reply.authorEmail = mask_email(reply.authorEmail) or ""
+    return reply
+
+
+def mask_ticket_for(out: TicketOut, ticket: Ticket, ctx: StaffCtx) -> TicketOut:
+    """把工作人员视角的 TicketOut 按查看者 tier 脱敏。所有给工作人员回 TicketOut 的地方都要过这一道——
+    以前只有 /api/admin/tickets/{id} 过了，用户端详情、列表的 latestReply、客服来信都漏了。
+    Apply tier masking to a staff-view TicketOut. Every staff-facing TicketOut must pass
+    through here (the user-side detail, list latestReply and support message used to skip it)."""
+    if ctx.is_outsourced:
+        from app.services.support_view import mask_email
+
+        out.userEmail = mask_email(out.userEmail) or ""
+        for r in out.replies:
+            _mask_reply_for(r, ticket, ctx)
+    return out
+
+
 def _staff_ticket_out(db: Session, ticket: Ticket, ctx: StaffCtx) -> TicketOut:
     replies = (
         db.query(TicketReply)
@@ -634,15 +668,7 @@ def _staff_ticket_out(db: Session, ticket: Ticket, ctx: StaffCtx) -> TicketOut:
         .order_by(TicketReply.created_at.asc())
         .all()
     )
-    out = _ticket_out(ticket, replies, True, db)
-    if ctx.is_outsourced:
-        from app.services.support_view import mask_email
-
-        out.userEmail = mask_email(out.userEmail) or ""
-        for r in out.replies:
-            if r.authorId == ticket.user_id:
-                r.authorEmail = mask_email(r.authorEmail) or ""
-    return out
+    return mask_ticket_for(_ticket_out(ticket, replies, True, db), ticket, ctx)
 
 
 @admin_router.get("/{ticket_id}", response_model=TicketOut)

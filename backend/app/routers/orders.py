@@ -55,7 +55,7 @@ from app.services.order_payload import (
 )
 from app.services.pending_orders import gateway_logins, push_gateway_pending_orders, submit_to_main_loop
 from app.services import market_hours
-from app.services.plans import is_realtime_plan
+from app.services.plans import is_realtime_plan, max_mt5_accounts, plan_slot_rows
 from app.services import shared_cache
 from app.services.trade_performance import (
     TRADE_CACHE_TTL,
@@ -121,6 +121,18 @@ def place_order(
             raise HTTPException(status_code=404, detail="账号不存在或不属于当前用户 / Account not found")
     elif len(online_accounts) == 1:
         target_acc = online_accounts[0]
+    # 0b) 套餐账户名额（审计 A2）：降级 / 试用到期后多出来的 gateway 账号不能再开仓。桥接那边
+    #     早就只让「按 login 升序的前 N 个」在线（routers/bridge.py 的 allowed_bound），网关
+    #     通道此前只在绑定那一刻查名额，旧绑定照样能下单。平仓 / 改单 / 撤单不受影响。
+    # 0b) Plan account slots (audit A2): a gateway account left over the limit after a
+    #     downgrade or an expired trial may not open. The bridge already keeps only the
+    #     first N logins online (routers/bridge.py allowed_bound); the gateway channel
+    #     checked the limit only at bind time. Closes / modifies / cancels stay allowed.
+    if _over_plan_account_limit(user.plan, accounts, target_acc):
+        raise HTTPException(
+            status_code=403,
+            detail=f"已达到账户数上限（{max_mt5_accounts(user.plan)}），请升级或删除旧账号",
+        )
     equity = target_acc.equity if target_acc and target_acc.equity else None
     validate_order(req.symbol, req.side, req.volume, equity)
 
@@ -934,6 +946,55 @@ def _position_before(user_id: str, login: str | None, ticket: int) -> dict | Non
         return None
 
 
+def _over_plan_account_limit(
+    plan: str | None, accounts: list[MT5Account], target: MT5Account | None,
+) -> bool:
+    """target 是不是一个超出套餐账户名额的 gateway 账号（只用于开仓 / 挂单）。
+
+    与 routers/bridge.py 的 allowed_bound 同一条规则：plan_slot_rows 先让额外的直连模拟
+    名额吸收符合条件的行，剩下占常规名额的行按 login 升序只有前 max_mt5_accounts 个可用。
+    占着额外名额的那一行永远可用。PRO（不限）直接放行。
+    Whether target is a gateway account beyond the plan's account slots (opens only).
+    Same rule as bridge allowed_bound: plan_slot_rows lets the extra demo slot absorb
+    eligible rows, then only the first max_mt5_accounts regular rows by ascending login
+    are usable. A row sitting in the extra slot is always usable; PRO is unlimited.
+    """
+    if target is None or target.source != "gateway":
+        return False
+    limit = max_mt5_accounts(plan)
+    if limit is None:
+        return False
+    slot_rows = plan_slot_rows(plan, accounts)
+    if not any(r is target for r in slot_rows):
+        return False
+    allowed = set(sorted(r.login for r in slot_rows)[:limit])
+    return target.login not in allowed
+
+
+def _assert_manage_market_open(
+    db: Session, user_id: str, mt5_login: str | None, symbol: str | None,
+) -> None:
+    """平仓 / 改单 / 改挂单 / 撤挂单落库前的休市闸门（审计 A2），只管 gateway 账号。
+
+    网关直接发 dealer 请求，休市时会被 MT5 挂成删不掉的「request adding」；桥接走 MT5
+    终端，休市当场就被终端拒，不需要这一层。与开仓同一句 409 文案；「只平」品种放行。
+    Market-hours gate before a close / modify / pending modify / pending cancel is
+    persisted (audit A2), gateway accounts only: the gateway sends dealer requests,
+    which MT5 parks in a closed session, while the bridge's terminal refuses them at
+    once. Same 409 text as an open; close-only symbols pass.
+    """
+    if not settings.MARKET_HOURS_GATE or not mt5_login:
+        return
+    acc = gateway_account(db, mt5_login, user_id)
+    if acc is None:
+        return
+    try:
+        login = int(acc.login)
+    except (TypeError, ValueError):
+        login = None
+    market_hours.assert_market_open_for_manage(symbol, login)
+
+
 def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:
     """校验目标账号归属当前用户（指定 mt5Login 时）。
     Verify the target account belongs to the current user (when mt5Login given).
@@ -996,6 +1057,7 @@ def close_position(
         return _serialize(existing)
 
     mt5_login = _require_close_login(db, user.id, req.mt5Login)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
     # 平仓前的仓位手数：操作日志判断「全平还是部分平」只能靠它（桥接回执会把 volume
     # 改写成实际成交手数）。放在幂等早返回之后，重放不读快照；读不到留空，不挡单。
     # The position's volume before the close — the only reliable "full or partial"
@@ -1094,6 +1156,8 @@ def modify_pending_order(
     if existing:
         return _serialize(existing)
 
+    mt5_login = _require_close_login(db, user.id, req.mt5Login)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
     order = Order(
         user_id=user.id,
         client_order_id=req.clientOrderId,
@@ -1107,7 +1171,7 @@ def modify_pending_order(
         price=req.price,
         sl=req.stopLoss,
         tp=req.takeProfit,
-        mt5_login=_require_close_login(db, user.id, req.mt5Login),
+        mt5_login=mt5_login,
         status="PENDING",
     )
     result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
@@ -1157,6 +1221,8 @@ def cancel_pending_order(
     if existing:
         return _serialize(existing)
 
+    mt5_login = _require_close_login(db, user.id, req.mt5Login)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
     order = Order(
         user_id=user.id,
         client_order_id=req.clientOrderId,
@@ -1171,7 +1237,7 @@ def cancel_pending_order(
         side="BUY",
         volume=0.0,
         ticket=req.ticket,
-        mt5_login=_require_close_login(db, user.id, req.mt5Login),
+        mt5_login=mt5_login,
         status="PENDING",
     )
     result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
@@ -1227,6 +1293,21 @@ def close_all_positions(
     # Cross-worker snapshot: gateway positions live only in the leader's memory, so
     # the local one is empty whenever this request lands on the other worker.
     positions = manager.get_positions_shared(user.id)
+    # 落在 gateway 账号上的仓位只认网关自己报的那一份（审计 A2）：桥接令牌可以往「桥接」
+    # 那一路塞任意行、自称是网关账号的仓位，以前每一行都会变成一次网关平仓调用。
+    # Rows targeting a gateway account must be in the gateway's own slice (audit A2): a
+    # bridge token can stuff arbitrary rows naming a gateway login into the bridge slice,
+    # and each used to become one gateway close call.
+    gw_logins = close_all.gateway_logins(db, user.id)
+    if gw_logins:
+        try:
+            by_source = manager._shared_by_source("positions", user.id)
+        except Exception:  # noqa: BLE001 —— 读不到网关那一路就不平网关仓 / fail closed
+            logger.warning("一键平仓读取分来源持仓失败 (user=%s)", user.id, exc_info=True)
+            by_source = {"gateway": []}
+        positions = close_all.drop_unverified_gateway_rows(
+            positions, by_source, gw_logins, req.mt5Login,
+        )
     batch, created, skipped = close_all.queue(
         db, user.id, req.clientOrderId, req.mt5Login, positions
     )
@@ -1248,7 +1329,6 @@ def close_all_positions(
     # 落库成功就叫醒长轮询中的桥接，别等它下一拍才发现有活 / wake the long poll
     bridge_wake.notify(user.id)
 
-    gw_logins = close_all.gateway_logins(db, user.id)
     gw_ids = [o.id for o in created if o.mt5_login and o.mt5_login in gw_logins]
     if gw_ids:
         # 响应发出之后才跑（Starlette 的 BackgroundTasks）。同步函数会被放到线程池，
@@ -1293,6 +1373,7 @@ def modify_position(
         return _serialize(existing)
 
     mt5_login = _require_close_login(db, user.id, req.mt5Login)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
     # 改单前的止损 / 止盈（0 = 原来没有），操作日志据此把「止损改为 X」说成「设置 / 移动 /
     # 移除止损」；顺带记下仓位手数。放在幂等早返回之后，重放不读快照；读不到留空，不挡单。
     # The SL / TP before this modify (0 = none), letting the activity log say "set /

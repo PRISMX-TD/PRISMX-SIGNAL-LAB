@@ -12,7 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import inspect as sa_inspect
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -25,7 +25,9 @@ from app.services.order_payload import is_reverse_order, is_stale_pending, order
 from app.schemas import LOGIN_PATTERN, SUFFIX_PATTERN, AccountSuffixRequest, MT5AccountOut
 from app.services.auto_manage import AUTO_PREFIX, evaluate_positions
 from app.services.connection_manager import manager
-from app.services.closed_trade_store import leg_profit_plausible, logins_needing_backfill, upsert_leg
+from app.services.closed_trade_store import (
+    leg_profit_plausible, logins_needing_backfill, platform_position_facts, upsert_leg,
+)
 from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current_user, is_account_online
 from app.services.gateway_binding import (
     bind_event_data, is_removed, is_revoked, log_unbind, mark_removed, not_removed, restore_removed,
@@ -469,8 +471,23 @@ class BridgeAccount(BaseModel):
     tradeMode: int | None = Field(default=None, ge=0, le=2)
 
 
+# 账号数的绝对上限（2026-10-26 安全审计）：套餐上限对 PRO / 试用是「不限」，而桥接上报的
+# login / server 是自报的、不需要密码，一个用户就能无限建 mt5_accounts 行和 mt5.bind 操作日志，
+# 还会拖大全站 2 秒一轮的离线扫描。这里给三层兜底，真实用户远远碰不到：
+#   · 单次上报最多 MAX_POLL_ACCOUNTS 个账号（一台电脑开不了这么多 MT5 终端）；
+#   · 套餐不限时，同时在册的桥接账号最多 MAX_BRIDGE_ACCOUNTS 个（新建 / 复活受限）；
+#   · 本人的非 gateway 账号行（含软删）累计最多 MAX_BRIDGE_ACCOUNT_ROWS 行——软删不硬删，
+#     删了再建也会一直攒，到顶后只能复活旧行，不再建新行。
+# Absolute account bounds: PRO / trial have no plan cap, and bridge logins are
+# self-reported without a password, so one user could mint unlimited account rows and
+# bind events and inflate the 2s offline scan. Real users never get near these.
+MAX_POLL_ACCOUNTS = 50
+MAX_BRIDGE_ACCOUNTS = 20
+MAX_BRIDGE_ACCOUNT_ROWS = 100
+
+
 class BridgePollRequest(BaseModel):
-    accounts: list[BridgeAccount] = []
+    accounts: list[BridgeAccount] = Field(default=[], max_length=MAX_POLL_ACCOUNTS)
     # Bridge 桌面程序自身的版本号（如 "1.3.15"），用于网页端提示更新——
     # 见 bridge_version_check.py。旧版 Bridge 不带这个字段，可选。
     # The Bridge desktop app's own version (e.g. "1.3.15"), used to power the
@@ -824,6 +841,10 @@ def _report_accounts_db_work(
     allowed_bound: set[str] | None = (
         set(bound_logins_ordered[:account_limit]) if account_limit is not None else None
     )
+    # 新建 / 复活用的上限：套餐不限时退回绝对上限；行数累计上限另算（见 MAX_BRIDGE_ACCOUNT_ROWS）。
+    # Cap for new / revived rows: the absolute cap when the plan is unlimited; total rows apart.
+    create_limit = account_limit if account_limit is not None else MAX_BRIDGE_ACCOUNTS
+    bridge_row_count = sum(1 for r in all_rows if r.source != "gateway")
     suffix_by_login: dict[str, str] = {}
     online_logins: set[str] = set()
     balances: dict[str, float] = {}
@@ -860,14 +881,20 @@ def _report_accounts_db_work(
         prior = known_rows.get((acc.login, acc.server or None))
         prior_removed = prior is not None and is_removed(prior)
         prior_revoked_at = prior.revoked_at if prior_removed else None
+        # 全新的行受累计行数上限约束 / brand-new rows are subject to the total-row cap
+        if prior is None and bridge_row_count >= MAX_BRIDGE_ACCOUNT_ROWS:
+            rejected_logins.append(acc.login)
+            continue
         row, created = _upsert_account(
-            db, user.id, acc, existing_count, account_limit, known_rows=known_rows
+            db, user.id, acc, existing_count, create_limit, known_rows=known_rows
         )
         if row is None:
             rejected_logins.append(acc.login)
             continue
         if created:
             existing_count += 1
+            if prior is None:
+                bridge_row_count += 1
             new_binds.append((row, prior_removed, prior_revoked_at))
         suffix_by_login[acc.login] = (row.symbol_suffix or "").strip()
         online_logins.add(acc.login)
@@ -1407,7 +1434,7 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     订单推两帧 ORDER_UPDATE、发两条 Web Push，第二个还会返回 {"ok": true} 而不是
     {"ok": true, "duplicate": true}。既然事件循环不再仲裁，就得让数据库来仲裁。
 
-    SQL 条数与顺序不变：仍是 1 条 SELECT + 1 条 UPDATE + COMMIT + 1 条 refresh。
+    SQL：订单 SELECT + gateway 账号核对 SELECT + 1 条 UPDATE + COMMIT + 1 条 refresh。
 
     Idempotency moves into the UPDATE's WHERE clause and is decided by the affected
     row count instead of "read the status, then write unconditionally". The old
@@ -1415,7 +1442,8 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     a concurrent second result could only start after the first commit and would
     always take the duplicate branch. In a thread pool both would observe PENDING
     and both commit, emitting two ORDER_UPDATE frames and two web pushes. With the
-    event loop no longer arbitrating, the database has to. Same SQL count and order.
+    event loop no longer arbitrating, the database has to. SQL: order SELECT, gateway
+    account check SELECT, one UPDATE, COMMIT, one refresh.
     """
     order = (
         db.query(Order)
@@ -1424,6 +1452,42 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     )
     if not order:
         return None, False
+
+    # 执行账号核对（2026-10-26 安全审计）：回执只凭用户自己的 API Token，status / 票号 /
+    # login 全是桥接自报的。gateway 账号的订单由服务端直连执行、/bridge/poll 从不下发，
+    # 桥接对它没有任何可回报的；而 PLACED 回执会写 mt5_position，网关平仓扫描又按
+    # mt5_position 认「平台开的仓」并记 verified——放行就等于让用户把直连账户上手动开的
+    # 盈利仓位冒充成平台单进榜单 / 比赛。所以订单的账号（或兜底路由时回执里报的账号）
+    # 只要是本人的 gateway 账号（含已撤销 / 已删除，与 /bridge/poll 的跳过口径一致），整条
+    # 回执不生效，按重复回执应答让桥接别再重试。
+    # Execution-account check: the result is authenticated only by the user's own
+    # token and every field is self-reported. Gateway-account orders are executed
+    # server-side and never handed to the bridge (/bridge/poll skips them), yet a PLACED
+    # result writes mt5_position, which the gateway close scan accepts as proof of a
+    # platform-opened (verified) position. So a result whose order login — or, for a
+    # fallback-routed order, reported login — is one of the user's gateway logins (any,
+    # matching /bridge/poll) is a no-op answered as a duplicate so the bridge stops
+    # retrying. A reported gateway login is never used to fill mt5_login / stamp either.
+    candidates = [x for x in {order.mt5_login, req.login} if x]
+    gateway_owned: set[str] = set()
+    if candidates:
+        gateway_owned = {
+            r[0]
+            for r in db.query(MT5Account.login)
+            .filter(
+                MT5Account.user_id == user_id,
+                MT5Account.source == "gateway",
+                MT5Account.login.in_(candidates),
+            )
+            .all()
+        }
+    if order.mt5_login in gateway_owned or (not order.mt5_login and req.login in gateway_owned):
+        logger.warning(
+            "桥接回执指向 gateway 账号的订单，已忽略 / bridge result for a gateway-account order "
+            "ignored: user=%s order=%s login=%s", user_id, req.clientOrderId, order.mt5_login or req.login,
+        )
+        return order, True
+    reported_login = req.login if req.login not in gateway_owned else None
 
     final_status = _result_status(req)
     values = {
@@ -1447,9 +1511,11 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     # 兜底路由时补上实际执行账号，指定过目标账号的订单不覆盖已有值。
     # Backfill the actual executing account for fallback-routed orders; never
     # overwrite an order that already specified its target account.
-    login = req.login or order.mt5_login
-    if req.login and not order.mt5_login:
-        values["mt5_login"] = req.login
+    # 订单自己指定过账号就以订单为准（回执报的 login 不能把打章换到别的账号上）。
+    # The order's own account wins (a reported login can't redirect stamping elsewhere).
+    login = order.mt5_login or reported_login
+    if reported_login and not order.mt5_login:
+        values["mt5_login"] = reported_login
 
     # 成交打章：从账号行拷贝 trade_mode 快照（设计 §1.2），失败/拒绝不打章。
     # 认 FILLED 与挂出成功的挂单（PLACED，理由见 gamification/stamp.py）——
@@ -1666,7 +1732,7 @@ async def bridge_positions(
     except Exception:
         logger.exception("position reconciliation failed (user=%s)", user.id)
     try:
-        await run_in_threadpool(evaluate_positions, db, user.id, req.data)
+        await run_in_threadpool(evaluate_positions, db, user.id, req.data, source="bridge")
     except Exception:
         logger.exception("auto_manage evaluation failed (user=%s)", user.id)
     return {"ok": True}
@@ -1704,8 +1770,15 @@ class BridgeQuote(BaseModel):
     tickValue: float | None = Field(default=None, gt=0)
 
 
+# 单次报价条数上限：桥接每个终端只报几个平台品种（mt5_worker.QUOTE_SYMBOLS），按
+# MAX_POLL_ACCOUNTS 个终端算也远不到这个数；每用户累计键数另由 connection_manager 封顶。
+# Per-request quote cap: the bridge reports a handful of platform symbols per terminal;
+# the per-user key total is capped separately in connection_manager.
+MAX_QUOTES_PER_REPORT = 500
+
+
 class BridgeQuotesRequest(BaseModel):
-    data: list[BridgeQuote] = []
+    data: list[BridgeQuote] = Field(default=[], max_length=MAX_QUOTES_PER_REPORT)
 
 
 @router.post("/quotes")
@@ -1775,8 +1848,20 @@ class BridgeClosedTrade(BaseModel):
     feeAlloc: int | None = None
 
 
+# 单次平仓腿条数上限：桥接按 100 条一批上报（bridge_app._TRADES_PER_POST），留足余量。
+# Per-request leg cap: the bridge posts in batches of 100; generous headroom.
+MAX_TRADES_PER_REPORT = 500
+# 每用户累计「未核验」平仓腿上限（2026-10-26 安全审计）：核不过的腿照常入库是有意的（回执
+# 丢失等正当原因），但 dealTicket 是桥接随便填的，不封顶就能无限往共享库里灌行。到顶后
+# 新的未核验腿不再落库（计入被拒），已核验的腿与已有腿的补列不受影响。真实账户一年也就
+# 几千笔。/ Per-user cap on stored unverified legs: they are kept on purpose, but deal
+# tickets are client-chosen, so without a cap one user could grow the shared table
+# forever. Past it, new unverified legs are dropped; verified legs and enrichment are not.
+MAX_UNVERIFIED_LEGS_PER_USER = 50000
+
+
 class BridgeClosedTradesRequest(BaseModel):
-    data: list[BridgeClosedTrade] = []
+    data: list[BridgeClosedTrade] = Field(default=[], max_length=MAX_TRADES_PER_REPORT)
 
 
 # 归属核验的仓位号集合搬到 services/trade_performance.known_position_ids；
@@ -1886,24 +1971,42 @@ def _trade_history_db_work(
                 )
                 .all()
             )
+    # 本人已入库的未核验腿数：到 MAX_UNVERIFIED_LEGS_PER_USER 就不再收新的未核验腿。
+    # Stored unverified legs so far; new ones stop at MAX_UNVERIFIED_LEGS_PER_USER.
+    unverified_stored = 0
+    if accepted:
+        unverified_stored = (
+            db.query(func.count(ClosedTrade.id))
+            .filter(ClosedTrade.user_id == user_id, or_(ClosedTrade.verified.is_(None),
+                                                        ClosedTrade.verified.is_(False)))
+            .scalar()
+            or 0
+        )
     inserted = 0
     unverified = 0
     implausible = 0
     for leg in accepted:
         is_ours = (leg.login, leg.positionTicket) in known
+        is_new = (leg.login, leg.dealTicket) not in stored_deals
         payload = leg.model_dump()
         # 归属对得上、且是新腿：再拿服务端行情核一遍盈亏。超出物理上限的照常入库但标
         # verified=False——所有公开统计只认 True，于是它不计分（2026-10-10 产品决定）。
+        # 开仓时间缺省时用平台订单记的（核对要用区间，不能让桥接靠不报开仓时间关掉它），
+        # 品种也要和平台订单对得上（不能挑一个波动大的品种把上限撑大）。
         # Attributed new legs also get the P&L plausibility check; implausible ones are
-        # stored with verified=False, which every public statistic excludes.
-        if is_ours and (leg.login, leg.dealTicket) not in stored_deals:
+        # stored with verified=False, which every public statistic excludes. A missing
+        # openTime is taken from the platform order (omitting it must not switch the
+        # check off), and the symbol must match the platform order's.
+        if is_ours and is_new:
             acct = acct_by_login.get(leg.login)
+            facts = platform_position_facts(db, user_id, leg.login, leg.positionTicket)
+            if payload.get("openTime") is None and facts.get("open_time") is not None:
+                payload["openTime"] = facts["open_time"]
             ok, basis = leg_profit_plausible(
                 db, payload,
                 account_currency=getattr(acct, "account_currency", None),
                 symbol_suffix=getattr(acct, "symbol_suffix", None),
-                balance=getattr(acct, "balance", None),
-                equity=getattr(acct, "equity", None),
+                expected_symbol=facts.get("symbol"),
             )
             if not ok:
                 is_ours = False
@@ -1914,6 +2017,11 @@ def _trade_history_db_work(
                     user_id, leg.login, leg.dealTicket, leg.symbol, leg.closeVolume, leg.profit, basis,
                 )
         if not is_ours:
+            if is_new:
+                if unverified_stored >= MAX_UNVERIFIED_LEGS_PER_USER:
+                    rejected += 1
+                    continue
+                unverified_stored += 1
             unverified += 1
         # 撞去重键不再丢弃，只补空列（一次性回扫补齐旧记录），见 closed_trade_store。
         # "inserted" 计数把补齐也算进去：都是新落地的数据，都该推 CLOSED_TRADE_NEW。

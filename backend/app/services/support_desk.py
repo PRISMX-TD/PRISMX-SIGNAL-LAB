@@ -101,6 +101,16 @@ def count_actions(db: Session, actor_id: str, kind: str, since: datetime) -> int
     )
 
 
+def lock_actor(db: Session, actor_id: str) -> None:
+    """锁住该客服自己的 users 行（SELECT … FOR UPDATE），把同一客服的并发计数 + 写入串行化：
+    「先数再插」在没有锁时两个并发请求会读到同一个已提交计数、都通过上限（审计 reveal-phone cap race）。
+    锁随事务提交 / 回滚释放；SQLite 下 FOR UPDATE 是空操作（单写者本来就串行）。
+    Lock the agent's own users row so concurrent count-then-insert from one agent serialises;
+    without it two in-flight requests read the same committed count and both pass the cap.
+    Released at commit / rollback; a no-op on SQLite (single writer)."""
+    db.query(User.id).filter(User.id == actor_id).with_for_update().first()
+
+
 def day_start() -> datetime:
     """「每日」按 STATS_TZ 自然日切（与看板一致），返回该日零点的 naive UTC。
     The daily cap resets at the STATS_TZ day boundary (same as the dashboard)."""
@@ -157,6 +167,11 @@ def check_anomaly(db: Session, ctx: StaffCtx, kind: str) -> list[str]:
     threshold = s["support_alert_reveal_per_hour"] if kind == ACT_REVEAL else s["support_alert_views_per_hour"]
     if threshold <= 0:
         return []
+    # 先锁再数：并发请求按锁排队，每个事务都能看到前一个已提交的行，计数逐一递增，
+    # 「== threshold + 1」这一下才不会被一批并发请求跨过去。
+    # Lock before counting so concurrent requests queue up and each sees the previous
+    # commit; the count then steps one at a time and a burst can't jump over threshold + 1.
+    lock_actor(db, ctx.user.id)
     db.flush()
     n = count_actions(db, ctx.user.id, kind, utcnow() - timedelta(hours=1))
     if n != threshold + 1:

@@ -23,7 +23,9 @@ import hashlib
 import hmac
 import html
 import json
+import threading
 import time
+from collections import OrderedDict
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -31,10 +33,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, Response
 
 from app.core.config import settings
+from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user_id_light
 from app.services.image_upload import (
     UploadError,
+    enforce_private_quota,
     is_private_configured,
     read_upload_capped,
     upload_private_image,
@@ -93,8 +97,16 @@ async def upload_share_image(request: Request, file: UploadFile = File(...),
     # 先看声明大小、再有界读取：超大请求体永远不会整段读进内存（见 read_upload_capped）
     # Declared-size check then a bounded read: a huge body is never loaded whole
     data = await read_upload_capped(file, request)
+    folder = f"share/{user_id}"
+
+    def _store() -> str:
+        # 先清掉本人过期的分享图、再看累计配额，然后才传（审计 2026-10-26）
+        # Purge this user's expired share images and check the quota before storing
+        enforce_private_quota(folder)
+        return upload_private_image(data, folder)
+
     try:
-        key = await run_in_threadpool(upload_private_image, data, f"share/{user_id}")
+        key = await run_in_threadpool(_store)
     except UploadError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     path = key.partition("#")[0]
@@ -110,16 +122,72 @@ def _fetch_object(path: str) -> bytes:
     return resp.content
 
 
+# 中转缓存（审计 2026-10-26）：这个端点不用登录，以前每次请求都用 service key 从 Supabase
+# 整张拉一遍（最多 4MB），一个链接被反复刷就是成倍的存储出口流量；保存页自己也会对同一张图
+# 请求两三次（<img>、fetch 给 navigator.share、?dl=1 下载）。现在同一张图在 RELAY_CACHE_TTL
+# 内只回源一次，按总字节 LRU 淘汰；再加按 IP 限流。令牌每次照样校验，过期的照样 404。
+# 进程内、每个 worker 一份，丢了只是多回源一次。
+# Relay cache (audit 2026-10-26): this public endpoint used to download the whole object
+# (up to 4MB) from Supabase with the service key on every request, and the save page
+# itself requests the image two or three times. Now each image is fetched at most once
+# per RELAY_CACHE_TTL, LRU-evicted by total bytes, and the route is rate limited per IP.
+# Tokens are still verified on every request. Per worker; losing it costs one refetch.
+RELAY_CACHE_MAX_BYTES = 32 * 1024 * 1024
+RELAY_CACHE_TTL = 600.0
+RELAY_RATE = "30/minute"
+_relay_lock = threading.Lock()
+_relay_cache: "OrderedDict[str, tuple[float, bytes]]" = OrderedDict()
+_relay_bytes = 0
+
+
+def _relay_cache_clear() -> None:
+    global _relay_bytes
+    with _relay_lock:
+        _relay_cache.clear()
+        _relay_bytes = 0
+
+
+def _relay_cache_bytes() -> int:
+    return _relay_bytes
+
+
+def _cached_object(path: str) -> bytes:
+    """有缓存且没过期就用缓存，否则回源一次并放进缓存（单张超过总上限的不缓存）。
+    Serve from the cache while fresh, else fetch once and cache (unless larger than the cap)."""
+    global _relay_bytes
+    now = time.monotonic()
+    with _relay_lock:
+        hit = _relay_cache.get(path)
+        if hit is not None and hit[0] > now:
+            _relay_cache.move_to_end(path)
+            return hit[1]
+    data = _fetch_object(path)
+    if len(data) <= RELAY_CACHE_MAX_BYTES:
+        with _relay_lock:
+            old = _relay_cache.pop(path, None)
+            if old is not None:
+                _relay_bytes -= len(old[1])
+            _relay_cache[path] = (now + RELAY_CACHE_TTL, data)
+            _relay_bytes += len(data)
+            while _relay_bytes > RELAY_CACHE_MAX_BYTES and _relay_cache:
+                _k, (_exp, blob) = _relay_cache.popitem(last=False)
+                _relay_bytes -= len(blob)
+    return data
+
+
 @router.get("/i/{token}.png")
-async def share_image_png(token: str, dl: int = 0):
+@limiter.limit(RELAY_RATE)
+async def share_image_png(request: Request, token: str, dl: int = 0):
     """图片本体；?dl=1 时作为附件下发，浏览器直接存到手机。
     The image itself; with ?dl=1 it's sent as an attachment so the browser saves it."""
     path = read_token(token)
-    data = await run_in_threadpool(_fetch_object, path)
+    data = await run_in_threadpool(_cached_object, path)
     disp = 'attachment; filename="signal-lab.png"' if dl else 'inline; filename="signal-lab.png"'
+    # Content-Encoding: identity —— 让 main 的 GZipMiddleware 原样放过：PNG 已经压缩过，
+    # 再 deflate 一遍 4MB 只是白花 CPU。/ lets the app's GZip pass the already-compressed PNG through.
     return Response(content=data, media_type="image/png",
                     headers={"Content-Disposition": disp, "Cache-Control": "private, max-age=3600",
-                             "X-Content-Type-Options": "nosniff"})
+                             "X-Content-Type-Options": "nosniff", "Content-Encoding": "identity"})
 
 
 _TEXT = {

@@ -417,7 +417,8 @@ def test_session_allows_windows_midnight_and_malformed():
 
 
 def _user(db):
-    u = User(email="s@t.co", api_token="tok_s"); db.add(u); db.commit(); return u
+    # PRO：PRO 专属开启时（默认）只有有效 PRO 的策略出新信号（2026-10-26 审计）。
+    u = User(email="s@t.co", api_token="tok_s", plan="PRO"); db.add(u); db.commit(); return u
 
 
 def _strategy(db, u, rules, **kw):

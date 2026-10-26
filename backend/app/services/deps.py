@@ -4,14 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import Depends, Header, HTTPException, Request, Response, status
-from sqlalchemy import event, inspect as sa_inspect
+from sqlalchemy import delete, event, inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, object_session
 
 from app.core.config import settings
 from app.core.database import SessionLocal, get_db
 from app.core.security import create_access_token, decode_token_payload
-from app.models import User, UserActiveDay
+from app.models import PushSubscription, User, UserActiveDay
 from app.services import ip_log, shared_cache
 from app.services.plan_expiry import downgrade_if_expired
 from app.services.symbol_aliases import is_volume_on_step, lot_step, min_lot
@@ -511,8 +511,24 @@ def _note_auth_change(target: User) -> None:
 @event.listens_for(User, "after_update")
 def _user_updated(mapper, connection, target: User) -> None:
     state = sa_inspect(target)
-    if state.attrs.token_version.history.has_changes() or state.attrs.disabled_at.history.has_changes():
+    tv_changed = state.attrs.token_version.history.has_changes()
+    if tv_changed or state.attrs.disabled_at.history.has_changes():
         _note_auth_change(target)
+    if tv_changed and target.id:
+        # 会话版本一变（退出所有设备、改密、重置密码、管理员停用）就删掉这个账号的全部推送订阅，
+        # 与 tv 自增在同一个事务里（回滚则一起撤销）。订阅行不绑定会话：拿着泄露 JWT 的人注册的
+        # 设备，原本在吊销之后仍会一直收到本人的账户 / 交易通知（2026-10-26 审计）。本人的设备
+        # 下次回前台会按「报过但行没了」拿到 stale、自动重新订阅（frontend utils/push.ts）。
+        # 放在这里而不是各个路由里：任何经 ORM 自增 tv 的路径都自动覆盖，不靠每处记得调用。
+        # A session-version bump (logout-all, password change/reset, admin disable)
+        # deletes all of the account's push subscriptions in the same transaction (a
+        # rollback undoes both). Subscription rows aren't bound to a session, so a
+        # device registered with a leaked JWT kept receiving the owner's account and
+        # trading alerts after revocation (2026-10-26 audit). The owner's own devices
+        # get "stale" on their next foreground re-report and resubscribe by
+        # themselves (frontend utils/push.ts). Here rather than in each route so every
+        # ORM tv bump is covered without each caller remembering.
+        connection.execute(delete(PushSubscription).where(PushSubscription.user_id == target.id))
 
 
 @event.listens_for(User, "after_delete")
@@ -520,8 +536,25 @@ def _user_deleted(mapper, connection, target: User) -> None:
     _note_auth_change(target)
 
 
+# SQLAlchemy 对 SAVEPOINT（begin_nested）的释放与回滚也会派发 after_commit / after_rollback。
+# 只认最外层事务：释放 SAVEPOINT 时外层还没 COMMIT，此刻删缓存，并发的未命中读者会把库里
+# 仍是旧值的 tv 写回缓存、在 300 秒内放行被吊销的 token（reset_password → mark_verified →
+# conversions.record 的 begin_nested 正是这条路，2026-10-26 审计）；SAVEPOINT 回滚只撤销
+# 它里面的改动，之前已 flush 的 tv 自增还在，记录不能丢。派发时 session 的当前事务就是正在
+# 结束的那一层，所以 in_nested_transaction() 为真即是 SAVEPOINT。
+# SQLAlchemy dispatches after_commit / after_rollback for SAVEPOINT (begin_nested)
+# release and rollback too. Only the outermost transaction counts: at a SAVEPOINT
+# release the outer COMMIT hasn't happened, so dropping the cache then lets a
+# concurrent cache-miss reader write the still-committed old tv back and admit the
+# revoked token for 300s (reset_password → mark_verified → conversions.record's
+# begin_nested is exactly that path, 2026-10-26 audit); a SAVEPOINT rollback only
+# undoes what happened inside it, so a tv bump flushed before it still stands and
+# the note must survive. During dispatch the session's current transaction is the
+# one ending, so in_nested_transaction() means it is a SAVEPOINT.
 @event.listens_for(Session, "after_commit")
 def _invalidate_auth_after_commit(session: Session) -> None:
+    if session.in_nested_transaction():
+        return
     ids = session.info.pop(_AUTH_INVALIDATE_KEY, None)
     if ids:
         invalidate_auth_state(*ids)
@@ -529,4 +562,6 @@ def _invalidate_auth_after_commit(session: Session) -> None:
 
 @event.listens_for(Session, "after_rollback")
 def _forget_auth_changes_on_rollback(session: Session) -> None:
+    if session.in_nested_transaction():
+        return
     session.info.pop(_AUTH_INVALIDATE_KEY, None)

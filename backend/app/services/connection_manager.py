@@ -114,6 +114,15 @@ _SNAPSHOT_KEYS = {
 # retires the whole set.
 QUOTES_KEY = "uquotes:{user}"
 QUOTES_TTL_SECONDS = 3600
+# 每用户最多保留这么多个 (login, 品种) 报价键（本进程与 Redis 各自封顶）。2026-10-26 安全
+# 审计：键由桥接自报的 login / symbol 拼成、从不逐键回收，只要一小时内还在报就整份续期，
+# 不封顶的话一个用户就能把 worker 内存和 Redis 撑大，每次上报的 HGETALL 也越来越重。真实
+# 桥接每个终端只报几个平台品种，远到不了。已有的键照常更新，只是不再收新键。
+# Per-user cap on (login, symbol) quote keys, applied locally and in Redis. Keys come
+# from self-reported login / symbol and are never evicted one by one, so without a cap
+# one user could grow worker memory and Redis (and each report's HGETALL) forever.
+# Existing keys keep updating; only new keys past the cap are dropped.
+MAX_QUOTE_KEYS_PER_USER = 500
 # 本进程快照兜底的回收节奏（秒），见 ConnectionManager._maybe_prune_local。
 # How often local fallback snapshots are swept; see _maybe_prune_local.
 LOCAL_PRUNE_EVERY = 60.0
@@ -1032,9 +1041,15 @@ class ConnectionManager:
             self._quotes_at[user_id] = time.monotonic()
             self._maybe_prune_local()
         prev = self._quotes.setdefault(user_id, {})
+        total = sum(len(v) for v in prev.values())
         changed: list = []
         for q in quotes:
-            by_symbol = prev.setdefault(q["login"], {})
+            by_symbol = prev.get(q["login"])
+            if by_symbol is None or q["symbol"] not in by_symbol:
+                if total >= MAX_QUOTE_KEYS_PER_USER:
+                    continue
+                total += 1
+                by_symbol = prev.setdefault(q["login"], {})
             if _quote_changed(by_symbol.get(q["symbol"]), q):
                 by_symbol[q["symbol"]] = q
                 changed.append(q)
@@ -1044,11 +1059,18 @@ class ConnectionManager:
         r = shared_state._redis()
         key = shared_state._k(QUOTES_KEY.format(user=user_id))
         stored = r.hgetall(key)
+        total = len(stored)
+        added: set[str] = set()
         changed: list = []
         pipe = r.pipeline()
         for q in quotes:
             field = f"{q['login']}|{q['symbol']}"
             raw = stored.get(field)
+            if raw is None and field not in added:
+                if total >= MAX_QUOTE_KEYS_PER_USER:
+                    continue
+                total += 1
+                added.add(field)
             try:
                 old = json.loads(raw) if raw else None
             except (ValueError, TypeError):

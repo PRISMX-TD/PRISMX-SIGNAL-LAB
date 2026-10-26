@@ -102,6 +102,9 @@ def platform_position_facts(db: Session, user_id: str, login: str, position_tick
     if opening is None:
         return {}
     facts = {
+        # symbol 不是兜底列（_FALLBACK_COLS 不含它），只给桥接合理性核对比对品种用。
+        # symbol is not a fallback column; the bridge plausibility check compares against it.
+        "symbol": opening.symbol,
         "open_price": opening.filled_price,
         "open_time": opening.updated_at or opening.created_at,
         "sl": opening.sl or None,
@@ -277,15 +280,21 @@ def logins_needing_backfill(db: Session, user_id: str, logins: list[str] | set[s
 # 再给 1.5 倍 + 手续费 / 隔夜利息 / 少量绝对余量。超出的腿照常入库，但标 verified=False，
 # 所有公开统计（榜单 / 勋章 / 公开主页胜率）只认 verified=True，于是它不计分。
 #
-# 拿不到行情或合约规格时不拦：退回按账户余额 / 净值的宽松上限，再拿不到就放行。
+# 拿不到行情 / 合约规格 / 币种换算时，只放行亏损和很小的盈利（2026-10-26 安全审计）：
+# 以前退回「10 倍账户余额 / 净值」，再没有就整条放行——可余额、净值、币种、品种、开仓
+# 时间全是同一个桥接自报的，伪造盈利的人只要报个表外品种、不报开仓时间或报个冷门币种，
+# 就能让上限按自己报的余额算，甚至没有上限。现在无从核对 = 不认盈利（照常入库，只是
+# verified=False 不计分）。开仓时间缺省由调用方用平台订单补上，品种要和平台订单一致。
 # 网关通道不走这里——那是服务端自己从券商读的。
 #
 # Bridge-leg plausibility (product decision 2026-10-10: bridge users stay on public
 # boards, but the server checks the reported P&L against its own market data). The
 # candle high/low over [open, close] bounds what the leg could physically make; legs
 # beyond 1.5x that (plus fees / small margin) are stored with verified=False, which
-# every public statistic already excludes. No candles or no contract spec -> fall back
-# to a loose cap relative to the account's balance/equity, else accept.
+# every public statistic already excludes. No candles / contract spec / currency
+# conversion -> only losses and tiny gains pass: the old fallback (10x the
+# bridge-reported balance, else no cap) was built from the same untrusted program's
+# numbers, which a forger could pick or omit at will.
 # ─────────────────────────────────────────────────────────────────────────────
 
 logger = logging.getLogger("prismx.closed_trades")
@@ -320,7 +329,7 @@ PLAUSIBILITY_RANGE_SLACK = 1.5          # 区间理论最大值的倍数 / multi
 PLAUSIBILITY_ABS_MARGIN_USD = 20.0      # 绝对余量（美元）/ absolute margin in USD
 PLAUSIBILITY_FEE_PER_LOT_USD = 50.0     # 每手手续费余量 / commission allowance per lot
 PLAUSIBILITY_SWAP_PER_DAY = 0.002       # 每持仓日按名义价值 0.2% 给隔夜利息余量 / swap allowance
-FALLBACK_BALANCE_MULT = 10.0            # 兜底：单腿盈利不超过余额 / 净值的倍数 / fallback cap
+# 无从核对时放行的盈利上限（美元，按账户币种倍数换算）/ gain allowed when nothing can be checked
 FALLBACK_ABS_MARGIN_USD = 100.0
 
 # M1 只在短持仓上用（区间最贴近真实）；更长的、或 M1 已过保留期的用 H1 / 日线。
@@ -476,16 +485,19 @@ def leg_profit_plausible(
     *,
     account_currency: str | None = None,
     symbol_suffix: str | None = None,
-    balance: float | None = None,
-    equity: float | None = None,
+    expected_symbol: str | None = None,
 ) -> tuple[bool, str]:
-    """桥接平仓腿的盈亏是否可信。返回 (是否可信, 依据)：'range'（行情区间）/ 'balance'
-    （余额兜底）/ 'none'（无从核对，放行）。
+    """桥接平仓腿的盈亏是否可信。返回 (是否可信, 依据)：'range'（行情区间）/ 'symbol'
+    （品种和平台订单对不上）/ 'none'（无从核对：只放行亏损和很小的盈利）。
+    `expected_symbol`：平台开仓单记的品种（服务端事实）；给了就必须对得上。
     Whether a bridge leg's P&L is plausible: (ok, basis) with basis 'range' (candle
-    bound), 'balance' (fallback cap) or 'none' (nothing to check against -> accepted)."""
+    bound), 'symbol' (doesn't match the platform order's symbol) or 'none' (nothing
+    to check against -> only losses and tiny gains pass)."""
     profit = leg.get("profit")
     if not isinstance(profit, (int, float)) or not math.isfinite(profit):
         return False, "range"
+    if expected_symbol and _base_symbol(leg.get("symbol") or "", symbol_suffix) != _base_symbol(expected_symbol):
+        return False, "symbol"
     try:
         bound = max_plausible_profit(
             db, leg, account_currency=account_currency, symbol_suffix=symbol_suffix
@@ -495,19 +507,11 @@ def leg_profit_plausible(
         bound = None
     if bound is not None:
         return abs(profit) <= bound, "range"
-    # 兜底：只拦盈利（伪造的方向），亏损可以超过爆仓后的余额。余额 / 净值也是自报的，
-    # 所以这只是个宽松的粗筛。
-    # Fallback: only gains are capped (the forging direction); a loss can exceed the
-    # post-blow-up balance. Balance is self-reported too, so this is a loose screen.
-    base = max(
-        (v for v in (balance, equity) if isinstance(v, (int, float)) and math.isfinite(v)),
-        default=None,
-    )
-    if base is not None and base > 0:
-        mult = _ACCOUNT_CCY_MULT.get((account_currency or "").strip().upper(), 1.0)
-        cap = FALLBACK_BALANCE_MULT * base + FALLBACK_ABS_MARGIN_USD * mult
-        return profit <= cap, "balance"
-    return True, "none"
+    # 无从核对：只拦盈利（伪造的方向），亏损照常放行。不再拿桥接自报的余额 / 净值当上限。
+    # Nothing to check against: only gains are capped (the forging direction), and never
+    # by the bridge's self-reported balance / equity.
+    mult = _ACCOUNT_CCY_MULT.get((account_currency or "").strip().upper(), 1.0)
+    return profit <= FALLBACK_ABS_MARGIN_USD * mult, "none"
 
 
 def reset_plausibility_cache_for_tests() -> None:

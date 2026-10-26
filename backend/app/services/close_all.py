@@ -47,6 +47,13 @@ logger = logging.getLogger("prismx.close_all")
 # 一次"全部平仓"里同时发往网关的平仓笔数上限 / closes sent to the gateway at once per batch
 CLOSE_ALL_PARALLEL = 16
 
+# 一次"全部平仓"最多排多少笔（审计 A2）。正常用户远到不了；超出的这次不排，再按一次即可。
+# 防的是一份被塞满的持仓快照把一个请求放大成成千上万条指令与网关调用。
+# Cap on closes queued by one close-all (audit A2). Real users never get near it; the
+# rest can be closed with another press. Stops one stuffed snapshot from fanning a
+# single request out into thousands of commands and gateway calls.
+CLOSE_ALL_MAX_POSITIONS = 200
+
 # 子指令 clientOrderId 的前缀与分隔符。前缀让回执侧一眼认出"这是一键平仓的
 # 子指令"（与自动仓管的 AUTO_PREFIX 同一个套路）；分隔符选 `#` 而不是 `_`，
 # 因为客户端生成的 id 本身就含 `_`（co_xxx_yyy），用 `_` 切不出批次。
@@ -167,6 +174,62 @@ def _log_batch(db: Session, user_id: str, batch: str, created: list[Order], skip
     activity_log.log_events(db, events)
 
 
+def _row_ticket(p) -> int:
+    try:
+        return int(p.get("ticket") or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+
+
+def drop_unverified_gateway_rows(
+    positions: list,
+    by_source: dict,
+    gateway_logins: set[str],
+    mt5_login: str | None,
+) -> list:
+    """去掉「落在 gateway 账号上、却不在网关自己那份持仓里」的行（审计 A2）。
+
+    合并快照里的桥接那一路是桥接令牌原样上报的，任何人都能在里面写一行自称是自己网关
+    账号的仓位；一键平仓按行里的 login 分流，每一行都会变成一次网关 /trade/close。网关
+    账号的仓位只认网关那一路（键 (login, ticket)）。没带 login 的行按请求里的账号算目标，
+    同样要过这一关。
+
+    by_source 为空（这个用户压根没有任何来源的快照）时原样返回：此时合并快照也是空的，
+    没东西可放大；by_source 有内容而缺 "gateway" 键，视为网关那一路为空。
+
+    Drop rows that target a gateway account but are not in the gateway's own slice
+    (audit A2). The bridge slice is stored as the bridge token reported it, so anyone
+    holding it can add rows naming their gateway login, and close-all routes each such
+    row to a gateway /trade/close. Gateway-account rows are accepted only from the
+    gateway slice, keyed (login, ticket); a login-less row targets the requested account
+    and is checked the same way. An empty by_source (no snapshot at all) returns the
+    input unchanged — the merged snapshot is empty too; a missing "gateway" key with
+    other sources present means the gateway slice is empty.
+    """
+    if not gateway_logins or not by_source:
+        return list(positions)
+    gw_rows = by_source.get("gateway")
+    known: set[tuple[str, int]] = set()
+    if isinstance(gw_rows, list):
+        for r in gw_rows:
+            if isinstance(r, dict) and r.get("login"):
+                known.add((str(r.get("login")), _row_ticket(r)))
+    out = []
+    dropped = 0
+    for p in positions:
+        login = (p.get("login") if isinstance(p, dict) else None) or mt5_login
+        if login and str(login) in gateway_logins and (str(login), _row_ticket(p)) not in known:
+            dropped += 1
+            continue
+        out.append(p)
+    if dropped:
+        logger.warning(
+            "close_all: 丢弃 %d 条不在网关持仓里的网关账号行 / dropped %d unverified gateway rows",
+            dropped, dropped,
+        )
+    return out
+
+
 def queue(
     db: Session,
     user_id: str,
@@ -211,6 +274,13 @@ def queue(
 
     if not wanted:
         return batch, [], 0
+
+    if len(wanted) > CLOSE_ALL_MAX_POSITIONS:
+        logger.warning(
+            "close_all: 本批 %d 笔超过上限 %d，只排前 %d 笔 (user=%s batch=%s)",
+            len(wanted), CLOSE_ALL_MAX_POSITIONS, CLOSE_ALL_MAX_POSITIONS, user_id, batch,
+        )
+        wanted = wanted[:CLOSE_ALL_MAX_POSITIONS]
 
     tickets = [t for t, _, _ in wanted]
     # 「忙」按 (账号, 票号) 认，而且只认**全平**指令（volume 为 0，一键平仓的子指令

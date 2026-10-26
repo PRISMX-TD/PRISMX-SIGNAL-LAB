@@ -17,8 +17,10 @@ from datetime import datetime, timezone
 from urllib.parse import quote, urlparse
 from zoneinfo import ZoneInfo
 
+import requests
 from starlette.concurrency import run_in_threadpool
 from pywebpush import WebPushException, webpush
+from urllib3.util import parse_url
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -53,21 +55,85 @@ _PUSH_HOST_SUFFIXES = tuple(
 )
 
 
+# endpoint 里只允许出现的字符：可打印 ASCII，不含空白与反斜杠（2026-10-26 审计）。
+# urllib.parse 与真正发请求的 urllib3 对 URL 的切法不一样——最典型的是反斜杠：
+# urlparse 把 "https://attacker.example\@fcm.googleapis.com/x" 的主机认作
+# fcm.googleapis.com（放行），urllib3 却在 "\" 处截断、连向 attacker.example。
+# 白名单判的主机与实际连接的主机必须是同一个，所以凡是两个解析器可能分歧的写法
+# （反斜杠、空白/控制字符、非 ASCII、userinfo、显式端口）一律拒绝，再要求两边
+# 解析出的主机逐字相同。真实推送服务的 endpoint 从来不含这些东西。
+# Characters an endpoint may contain: printable ASCII without whitespace or
+# backslash (2026-10-26 audit). urllib.parse and urllib3 (which actually makes the
+# request) split URLs differently — a backslash is the classic case: urlparse
+# reads "https://attacker.example\@fcm.googleapis.com/x" as host
+# fcm.googleapis.com (allowed) while urllib3 cuts at "\" and connects to
+# attacker.example. The approved host and the connected host must be the same, so
+# every form where the two parsers may disagree (backslash, whitespace/control,
+# non-ASCII, userinfo, explicit port) is rejected outright, and both parsers must
+# then agree on the host. Real push-service endpoints never contain any of these.
+_ENDPOINT_SAFE_RE = re.compile(r"^[\x21-\x5b\x5d-\x7e]+$")
+
+
 def is_allowed_push_endpoint(endpoint: str) -> bool:
     """endpoint 是否是可信推送服务的 https 地址 / whether this is an https URL on a known push service."""
+    if not isinstance(endpoint, str) or not _ENDPOINT_SAFE_RE.match(endpoint):
+        return False
     try:
         parsed = urlparse(endpoint)
+        port = parsed.port
     except ValueError:
         return False
     if parsed.scheme != "https":
         return False
+    # userinfo（"@"）与显式端口：真实推送服务都没有，且正是解析器分歧的高发地带。
+    # userinfo ("@") and explicit ports: no real push service uses them, and they
+    # are where parsers disagree most.
+    if "@" in parsed.netloc or port is not None or ":" in parsed.netloc:
+        return False
     host = (parsed.hostname or "").lower()
     if not host:
+        return False
+    # 实际发请求的是 requests → urllib3：它解析出的主机必须与这里判的是同一个。
+    # The request goes out via requests → urllib3; its host must be the one judged here.
+    try:
+        connect_host = (parse_url(endpoint).host or "").lower()
+    except Exception:  # noqa: BLE001 —— urllib3 的 LocationParseError 等 / LocationParseError etc.
+        return False
+    if connect_host != host:
         return False
     # 后缀匹配必须带点边界，否则 "evilfcm.googleapis.com.attacker.tld" 之类
     # 也会被 endswith 放行。/ The dot boundary matters: a bare endswith would
     # also accept "…googleapis.com.attacker.tld".
     return any(host == s or host.endswith("." + s) for s in _PUSH_HOST_SUFFIXES)
+
+
+class _NoRedirectSession(requests.Session):
+    """不跟随重定向的 requests 会话，交给 pywebpush 用（2026-10-26 审计）。
+    推送服务从不用 3xx 回应投递；跟随重定向等于让白名单之外的任意地址（含内网）
+    借一个 3xx 就被服务端请求到。3xx 在 pywebpush 里按失败处理，不清理订阅。
+    A requests session that never follows redirects, handed to pywebpush
+    (2026-10-26 audit). Push services never answer a delivery with 3xx; following
+    one would let any address outside the allowlist (internal ones included) be
+    reached through a single redirect. pywebpush treats a 3xx as a failure, and
+    the row is not pruned."""
+
+    def request(self, method, url, *args, **kwargs):
+        kwargs["allow_redirects"] = False
+        return super().request(method, url, *args, **kwargs)
+
+
+# 每个发送线程一个会话（requests.Session 不保证跨线程安全；_send_all 是线程池）。
+# One session per sending thread (requests.Session isn't guaranteed thread-safe;
+# _send_all runs on a pool).
+_webpush_sessions = threading.local()
+
+
+def _webpush_session() -> requests.Session:
+    sess = getattr(_webpush_sessions, "session", None)
+    if sess is None:
+        sess = _NoRedirectSession()
+        _webpush_sessions.session = sess
+    return sess
 
 
 # ---------- App 端订阅（FCM）/ app-side subscriptions (FCM) ----------
@@ -324,12 +390,18 @@ def _matched_user_ids(db, cat: str, symbol: str) -> set[str]:
     # 查询里筛掉，不逐人判定。恢复（清空 disabled_at）后下一条信号就照常推。
     # Admin-disabled accounts get no push (disabled_at is a gate, independent of
     # plan): filtered in the same query. Re-enabling takes effect on the next signal.
+    # 到期也要看（plan_expires_at）：已过期、还没被清扫改成 FREE 的付费行不再收新信号推送，
+    # 与 signal_broadcast 的 WS 闸门同一口径（2026-10-26 审计）。
+    # Expiry counts too: a paid row past plan_expires_at that the sweep hasn't
+    # rewritten to FREE yet gets no new-signal push, matching signal_broadcast's WS
+    # gate (2026-10-26 audit).
+    now = datetime.now(timezone.utc)
     realtime_ids = {
         uid
-        for uid, plan in db.query(User.id, User.plan)
+        for uid, plan, expires_at in db.query(User.id, User.plan, User.plan_expires_at)
         .filter(User.id.in_(user_ids), User.disabled_at.is_(None))
         .all()
-        if can_use_push(plan)
+        if can_use_push(plan, expires_at, now)
     }
     skipped = len(user_ids) - len(realtime_ids)
     if skipped:
@@ -387,6 +459,8 @@ def _webpush_one(
             # Without it requests waits forever: one hung push-service connection
             # would pin this thread, the whole batch and its pool slot with it.
             timeout=_WEBPUSH_TIMEOUT,
+            # 不跟随重定向（见 _NoRedirectSession）/ never follow redirects (see _NoRedirectSession)
+            requests_session=_webpush_session(),
         )
         return True, False
     except WebPushException as e:
@@ -984,17 +1058,18 @@ def _event_prefs_allow(db, user_id: str, event_type: str) -> bool:
         return False
     if not _within_push_window(pref):
         return False
-    row = db.query(User.plan, User.disabled_at).filter(User.id == user_id).first()
+    row = db.query(User.plan, User.disabled_at, User.plan_expires_at).filter(User.id == user_id).first()
     if row is None:
         return False
-    plan, disabled_at = row
+    plan, disabled_at, expires_at = row
     # 停用账号一律不推（账户事件、自动仓管动作、成就、掉线提醒……都走这里）。
     # Disabled accounts get no event push at all (account events, auto-manage
     # actions, badges, bridge-offline alerts all pass through here).
     if disabled_at is not None:
         logger.debug("[push] skip event %r for disabled user %s", event_type, user_id)
         return False
-    return can_use_push(plan)
+    # 带上到期时间：过期未清扫的付费行与 FREE 同等对待 / expired-but-unswept paid rows count as FREE
+    return can_use_push(plan, expires_at)
 
 
 # 批量判定一次取多少个 id。SQLite 的 IN 参数个数有编译期上限（老版本 999），
@@ -1028,19 +1103,19 @@ def _bulk_prefs_allow(db, user_ids: list[str], event_type: str) -> list[str]:
     used to issue three queries per subscribed user, serially, in one pass.
     """
     prefs: dict[str, object] = {}
-    plans: dict[str, str | None] = {}
+    plans: dict[str, tuple] = {}
     for chunk in _chunks(user_ids):
         for pref in db.query(NotificationPref).filter(NotificationPref.user_id.in_(chunk)).all():
             prefs[pref.user_id] = pref
         # 停用账号不进 plans：下面 `uid not in plans` 就把它挡掉，与 _event_prefs_allow
         # 的「停用不推」一致。/ Disabled accounts are left out of `plans`, so the
         # membership check below drops them, matching _event_prefs_allow.
-        for uid, plan in (
-            db.query(User.id, User.plan)
+        for uid, plan, expires_at in (
+            db.query(User.id, User.plan, User.plan_expires_at)
             .filter(User.id.in_(chunk), User.disabled_at.is_(None))
             .all()
         ):
-            plans[uid] = plan
+            plans[uid] = (plan, expires_at)
 
     allowed: list[str] = []
     for uid in user_ids:
@@ -1051,7 +1126,7 @@ def _bulk_prefs_allow(db, user_ids: list[str], event_type: str) -> list[str]:
             continue
         if not _within_push_window(pref):
             continue
-        if uid not in plans or not can_use_push(plans[uid]):
+        if uid not in plans or not can_use_push(*plans[uid]):
             continue
         allowed.append(uid)
     return allowed

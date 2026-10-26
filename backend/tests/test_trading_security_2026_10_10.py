@@ -256,22 +256,20 @@ def test_cent_account_bound_scales_by_100(db_session):
     assert db_session.query(ClosedTrade).one().verified is True
 
 
-def test_missing_candles_fall_back_to_balance_cap(db_session):
+def test_missing_candles_cap_gains_at_fixed_margin(db_session):
+    """没有 K 线可核对时不再拿自报余额兜底：亏损照收，盈利只放行固定小额。
+    No candles to check against: losses pass, gains only up to a fixed small margin
+    (the self-reported balance is no longer a fallback)."""
     u = _bridge_setup(db_session, "pl4@t.co", balance=1000.0)
-    ok, basis = cts.leg_profit_plausible(db_session, _leg_payload(profit=8000.0),
-                                         account_currency="USD", balance=1000.0, equity=1000.0)
-    assert ok and basis == "balance"                                   # 10 × 1000 + 100 之内
-    ok, basis = cts.leg_profit_plausible(db_session, _leg_payload(profit=50000.0),
-                                         account_currency="USD", balance=1000.0)
-    assert not ok and basis == "balance"
-    ok, _ = cts.leg_profit_plausible(db_session, _leg_payload(profit=-50000.0),
-                                     account_currency="USD", balance=1000.0)
+    ok, basis = cts.leg_profit_plausible(db_session, _leg_payload(profit=50.0), account_currency="USD")
+    assert ok and basis == "none"
+    ok, basis = cts.leg_profit_plausible(db_session, _leg_payload(profit=8000.0), account_currency="USD")
+    assert not ok and basis == "none"
+    ok, _ = cts.leg_profit_plausible(db_session, _leg_payload(profit=-50000.0), account_currency="USD")
     assert ok                                                          # 亏损不拦 / losses pass
-    ok, basis = cts.leg_profit_plausible(db_session, _leg_payload(profit=50000.0))
-    assert ok and basis == "none"                                      # 无从核对：放行
     leg = bridge_mod.BridgeClosedTrade(**_leg_payload(profit=500.0))
     bridge_mod._trade_history_db_work(db_session, u.id, [leg])
-    assert db_session.query(ClosedTrade).one().verified is True
+    assert db_session.query(ClosedTrade).one().verified is False
 
 
 def test_unknown_symbol_or_currency_falls_back():

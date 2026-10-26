@@ -272,10 +272,24 @@ def shown_account_limit(plan: str | None, rows: list) -> int | None:
     return base + (len(rows) - len(plan_slot_rows(plan, rows)))
 
 
-def can_use_push(plan: str | None) -> bool:
+def can_use_push(
+    plan: str | None, expires_at: datetime | None = None, now: datetime | None = None
+) -> bool:
     """该等级是否可以开启 Web Push 通知（FREE 之外全部可用）。
-    Whether this plan may enable Web Push notifications (everyone except FREE)."""
-    return is_realtime_plan(plan)
+
+    传入 expires_at 时同时看到期：已过期但还没被 plan_expiry 改写成 FREE 的付费行
+    （用户没发过请求、15 分钟一轮的清扫还没轮到）不再有推送权益，与 signal_broadcast
+    的 WS 新信号闸门同一口径（2026-10-26 审计）。后台推送路径必须传；路由层的
+    current_user 已经过 get_current_user 的读时降级，只传 plan 即可。
+
+    Whether this plan may enable Web Push notifications (everyone except FREE).
+    With expires_at, expiry counts too: a paid row past its expiry that
+    plan_expiry hasn't rewritten to FREE yet (no request since, the 15-minute
+    sweep not yet run) has no push entitlement — the same rule as
+    signal_broadcast's WS new-signal gate (2026-10-26 audit). Background push
+    paths must pass it; route-level current_user was already downgraded at read
+    time by get_current_user, so plan alone suffices there."""
+    return is_realtime_plan(plan) and not is_plan_expired(plan, expires_at, now)
 
 
 def can_auto_manage(plan: str | None) -> bool:

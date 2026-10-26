@@ -1072,18 +1072,83 @@ def _has_live_paid_plan(db: Session, target_id: str, now: datetime) -> bool:
     that money changed hands is no longer visible. Payments are immutable facts:
     finished_at plus the plan's day count is the window the money bought.
     """
+    ends = _paid_entitlement_end(db, target_id)
+    return ends is not None and ends > now
+
+
+# 付款入账写的审计行（payments._sync_payment_status 的 plan:payment）与这笔付款的
+# finished_at 在同一个事务里落下，按这个时间差把两者配上对。
+# The plan:payment audit row is written in the same transaction that stamps the
+# payment's finished_at; rows within this many seconds are paired with it.
+_PAYMENT_AUDIT_MATCH_SECONDS = 300
+
+
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _audit_expiry(raw: str | None) -> datetime | None:
+    """解析 plan:payment 审计行的新值 `PRO(<到期时间>)`，取出入账后的到期时间。
+    Parse the `PRO(<expiry>)` new_value of a plan:payment audit row."""
+    if not raw or "(" not in raw or not raw.endswith(")"):
+        return None
+    inner = raw[raw.index("(") + 1:-1].strip()
+    if not inner or inner == "None":
+        return None
+    try:
+        return _aware(datetime.fromisoformat(inner))
+    except ValueError:
+        return None
+
+
+def _paid_entitlement_end(db: Session, target_id: str) -> datetime | None:
+    """已完成付款买到的权益最晚到哪天（审计 agent-downgrade-paid-guard-ignores-stacked-renewals）。
+
+    入账是「从 max(现有到期, 现在) 往后加」，所以提前续费、或在代理 / 管理员 / 客服加过的
+    时长之后再付款，付的那几天都叠在后面——只按 finished_at + 套餐天数算会把它们漏掉。
+    这里取两者的最大值：
+      ① 只用付款本身推一遍叠加链：end = max(end, finished_at) + 天数（两笔年付叠在一起）；
+      ② 每笔付款入账时写下的 plan:payment 审计行里的真实到期时间（叠在非付费时长之后）。
+    只看 FINISHED：PROCESSING 的钱还没到账，EXPIRED/FAILED/REFUNDED 的不给窗口。
+
+    The latest moment a FINISHED payment still pays for. Crediting extends from
+    max(current expiry, now), so early renewals and payments made on top of
+    agent/admin/support time stack after that time; finished_at + plan days alone
+    misses them. Take the max of (1) the payments' own stacking chain and (2) the
+    actual post-credit expiry recorded in each payment's plan:payment audit row."""
     rows = (
         db.query(Payment.plan, Payment.finished_at)
         .filter(Payment.user_id == target_id, Payment.status == "FINISHED")
+        .order_by(Payment.finished_at.asc())
         .all()
     )
-    for plan, finished_at in rows:
-        if finished_at is None:
+    finished = [(plan, _aware(f)) for plan, f in rows if f is not None]
+    if not finished:
+        return None
+    end: datetime | None = None
+    for plan, f in finished:
+        base = f if end is None or end < f else end
+        end = base + timedelta(days=PLAN_DAYS.get(plan, 30))
+    window = timedelta(seconds=_PAYMENT_AUDIT_MATCH_SECONDS)
+    audits = (
+        db.query(AdminAuditLog.new_value, AdminAuditLog.created_at)
+        .filter(
+            AdminAuditLog.target_user_id == target_id,
+            AdminAuditLog.field == "plan:payment",
+            AdminAuditLog.created_at >= (finished[0][1] - window).replace(tzinfo=None),
+        )
+        .all()
+    )
+    for new_value, created_at in audits:
+        if created_at is None:
             continue
-        ends = finished_at if finished_at.tzinfo else finished_at.replace(tzinfo=timezone.utc)
-        if ends + timedelta(days=PLAN_DAYS.get(plan, 30)) > now:
-            return True
-    return False
+        at = _aware(created_at)
+        if not any(abs(at - f) <= window for _plan, f in finished):
+            continue
+        credited = _audit_expiry(new_value)
+        if credited is not None and credited > end:
+            end = credited
+    return end
 
 
 def _notify_admins_agent_write(

@@ -104,6 +104,28 @@ limiter = Limiter(
     **limiter_options(),
 )
 
+
+def hit_limit(limit: str, *identifiers: str) -> bool:
+    """在函数体里手动扣一次额度（与装饰器同一个存储、同一个开关）；还有额度返回 True。
+
+    给「要先看过请求内容才知道记在哪只桶」的端点用——装饰器只能在进函数之前、按同一个键
+    扣，比如 webhook 要先验密钥，再决定记在「真信号」还是「失败」那只桶。存储出错时放行
+    （与 limiter_options 的 swallow_errors 同一取舍：限流故障不该把接口打成 500）。
+    Charge one hit by hand inside a handler (same storage and switch as the decorators);
+    True while within the limit. For endpoints that must look at the request before
+    choosing a bucket — e.g. the webhooks check the secret first. Storage errors fail open,
+    the same trade-off as swallow_errors in limiter_options.
+    """
+    if not limiter.enabled:
+        return True
+    from limits import parse
+
+    try:
+        return bool(limiter.limiter.hit(parse(limit), *identifiers))
+    except Exception:  # noqa: BLE001
+        logger.warning("rate limit storage error on %s; allowing", identifiers[:1], exc_info=True)
+        return True
+
 # ---------------------------------------------------------------------------
 # 失败计数与临时锁定 / failed-attempt tracking and temporary lockout
 #

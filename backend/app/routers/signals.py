@@ -155,8 +155,12 @@ def strategy_analysis(
         json.dumps(sorted(public), ensure_ascii=False).encode("utf-8")).hexdigest()
     return shared_cache.cached_json(
         key, _ANALYSIS_CACHE_SECONDS,
+        # hide_live：还能下单的信号不进统计，否则按品种、按方向的 pending 计数会把它泄露给
+        # FREE（2026-10-26 审计，见 compute_strategy_session_winrate）。
+        # hide_live: still-tradeable signals stay out, or per-symbol / per-side pending
+        # counts would leak them to FREE (2026-10-26 audit).
         lambda: jsonable_encoder(
-            compute_strategy_session_winrate(db, ANALYSIS_DAYS, only_strategies=public)),
+            compute_strategy_session_winrate(db, ANALYSIS_DAYS, only_strategies=public, hide_live=True)),
     )
 
 

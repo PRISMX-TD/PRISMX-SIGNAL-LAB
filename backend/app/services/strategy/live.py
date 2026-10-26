@@ -29,7 +29,9 @@ from datetime import datetime, timedelta, timezone
 from app.core.database import SessionLocal
 from app.models import Candle, StrategySignal, StrategyWatch, User, UserStrategy
 from app.services.connection_manager import manager
+from app.services.plans import is_plan_expired
 from app.services.push_dispatch import EVENT_STRATEGY_SIGNAL, dispatch_event_push_async
+from app.services.settings_store import get_strategy_settings
 from app.services.strategy import costs as ct
 from app.services.strategy.backtest import ExitSpec, exit_prices
 from app.services.strategy.conditions import evaluate_conditions
@@ -183,8 +185,27 @@ def _evaluate_sync(symbol: str, interval: str, new_ts: list[int] | None = None) 
                 UserStrategy.enabled.is_(True),
                 User.disabled_at.is_(None),
             )
+            .add_columns(User.plan, User.plan_expires_at)
             .all()
         )
+        # PRO 专属（管理后台默认开启）时，只有有效 PRO 的策略继续出新信号（2026-10-26 审计）：
+        # 降级 / 到期并不会自动停用策略，原来 FREE 用户的旧策略照样每根 K 线出信号、走 WS 推送。
+        # 看到期时间而不只看 plan 列：过期但还没被清扫改写的行也算失效。策略本身不动，续费后
+        # 下一根 K 线自动恢复；已有 PENDING 信号的判定不受影响（与候选无关）。
+        # With the PRO-only gate on (the admin default), only strategies of an effective
+        # PRO keep firing (2026-10-26 audit): a downgrade or expiry doesn't disable
+        # strategies, so a FREE user's old strategy kept firing every bar over WS.
+        # Expiry is read, not just the plan column, so an expired-but-unswept row counts
+        # as lapsed. The strategy itself is untouched and resumes on the next bar after
+        # renewal; resolution of existing PENDING signals is unaffected.
+        if get_strategy_settings(db)["pro_only"]:
+            now = datetime.now(timezone.utc)
+            candidates = [
+                s for s, plan, expires_at in candidates
+                if plan == "PRO" and not is_plan_expired(plan, expires_at, now)
+            ]
+        else:
+            candidates = [s for s, _plan, _expires_at in candidates]
         if not candidates:
             has_pending = (
                 db.query(StrategySignal)

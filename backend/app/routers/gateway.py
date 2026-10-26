@@ -1551,7 +1551,7 @@ async def gateway_positions_loop() -> None:
 
     from starlette.concurrency import run_in_threadpool
 
-    from app.services.auto_manage import auto_manage_user_ids, evaluate_positions
+    from app.services.auto_manage import GatewayPositions, auto_manage_user_ids, evaluate_positions
     from app.services.connection_manager import manager
     from app.services.trade_performance import mark_positions_seen
     from app.services.gateway_client import drain_deal_events, drain_position_events
@@ -2022,7 +2022,9 @@ async def gateway_positions_loop() -> None:
         the next pass for this user can only start once this one has truly ended."""
         db = SessionLocal()
         try:
-            evaluate_positions(db, user_id, data)
+            # 包一层 GatewayPositions：告诉自动仓管这批行是后端自己从网关读的（审计 A2）。
+            # Wrapped so auto-management knows these rows were read from the gateway (audit A2).
+            evaluate_positions(db, user_id, GatewayPositions(data))
         except Exception:
             logger.exception("gateway auto_manage failed (user=%s)", user_id)
         finally:

@@ -33,11 +33,22 @@ def _aware(dt):
     return dt if dt is None or dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
+def excluded_user_ids(db) -> set:
+    """不进榜的用户：自己退榜的（leaderboard_opt_out）与被管理员封禁的（disabled_at）。
+    封禁原本只挡登录与下单，榜单 / 比赛的后台循环照样给他拍基线、自动入场、排名、终审发
+    勋章（2026-10-26 审计）。周期榜、比赛榜、自动入场共用这一份名单。
+    Users kept off every board: opted out, or disabled by an admin. The ban used to stop
+    sign-in and orders only, while the background passes kept baselining, enrolling,
+    ranking and badging the user (2026-10-26 audit)."""
+    return {r[0] for r in db.query(User.id).filter(
+        (User.leaderboard_opt_out.is_(True)) | (User.disabled_at.isnot(None)))}
+
+
 def ensure_baselines(db, period_key: str, now: datetime) -> int:
-    """对每个实盘、balance 非 NULL、属主未退榜的账户，若该 (user, login, period) 无
+    """对每个实盘、balance 非 NULL、属主未退榜且未被封禁的账户，若该 (user, login, period) 无
     基线则插入（baseline=balance, taken_at=now）。只对当前进行中的周期调用。
     """
-    opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
+    opted_out = excluded_user_ids(db)
     existing = {(r.user_id, r.mt5_login) for r in
                 db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key)}
     created = 0
@@ -102,24 +113,65 @@ def ensure_baselines(db, period_key: str, now: datetime) -> int:
 # `adjust` stays their running sum, and legacy rows with adjust but no flows are
 # treated as "in effect for the whole period" (the residue term in capital_at).
 
-def _flows(b) -> list[tuple[datetime, float]]:
-    """基线行的出入金流水，按时间升序；坏 JSON 当作没有流水（不抛）。"""
+def _flow_items(b) -> list[tuple[datetime, float, dict | None]]:
+    """基线行的出入金流水（含每条的对账元数据），按时间升序；坏 JSON 当作没有流水（不抛）。
+
+    每条是 [时刻, 金额] 或 [时刻, 金额, 元数据]。元数据（2026-10-26 起新记的流水才有）是
+    _reverse_flows 判断「这笔能不能原地冲回」用的，见那里的说明：
+      at  记账的那一轮对账时刻；r 那一刻已入库、平仓时刻不晚于 at 的已实现盈亏；
+      e   记账那一轮里由平仓行先到、余额没跟上解释得了的金额；
+      late（只有比赛）拖过 FLOW_ARTIFACT_WINDOW 才被冲回的金额——留作资金进出的证据。
+    Flow entries with their reconcile metadata, oldest first; bad JSON reads as none.
+    Each is [time, amount] or [time, amount, meta]; see _reverse_flows for the meta."""
     raw = getattr(b, "flows", None)
     if not raw:
         return []
     try:
         items = json.loads(raw)
-        out = [(_aware(datetime.fromisoformat(t)), float(a)) for t, a in items]
-    except (ValueError, TypeError):
+        out = []
+        for it in items:
+            t, a = it[0], it[1]
+            meta = it[2] if len(it) > 2 and isinstance(it[2], dict) else None
+            out.append((_aware(datetime.fromisoformat(t)), float(a), meta))
+    except (ValueError, TypeError, IndexError, KeyError):
         return []
     out.sort(key=lambda x: x[0])
     return out
 
 
-def _append_flow(b, at: datetime, amount: float) -> None:
-    items = [[t.isoformat(), a] for t, a in _flows(b)]
-    items.append([_aware(at).isoformat(), float(amount)])
-    b.flows = json.dumps(items)
+def _flows(b) -> list[tuple[datetime, float]]:
+    """基线行的出入金流水 [(时刻, 金额)]，按时间升序；坏 JSON 当作没有流水（不抛）。"""
+    return [(t, a) for t, a, _m in _flow_items(b)]
+
+
+def _dump_flow_items(items) -> str:
+    return json.dumps([[t.isoformat(), a] + ([m] if m else []) for t, a, m in items])
+
+
+def _append_flow(b, at: datetime, amount: float, meta: dict | None = None) -> None:
+    items = _flow_items(b)
+    items.append((_aware(at), float(amount), meta))
+    b.flows = _dump_flow_items(items)
+
+
+def peak_flow_deviation(b) -> float:
+    """期内任一时刻「入金本金偏离基线」的最大绝对值（含无时间信息的旧 adjust 残差）。
+    入金后又全部出金，net adjust 回到 0，这个数仍是那笔入金——比赛的资金进出标黄用它，
+    不只看期末的净额（2026-10-26 审计）。
+    The largest |capital − baseline| at any instant from recorded flows (legacy residue
+    included). A deposit later withdrawn nets adjust back to 0 but still shows here."""
+    flows = _flows(b)
+    residue = float(b.adjust or 0.0) - sum(a for _, a in flows)
+    run, peak = residue, abs(residue)
+    for _t, a in flows:
+        run += a
+        peak = max(peak, abs(run))
+    return peak
+
+
+def late_reversed_total(b) -> float:
+    """比赛基线行上「拖得太久才被冲回」的流水合计（见 _reverse_flows 的 late）。"""
+    return sum(float(m.get("late") or 0.0) for _t, _a, m in _flow_items(b) if m)
 
 
 def capital_at(b, t: datetime) -> float:
@@ -250,6 +302,14 @@ def _realized_since_bulk(db, baselines, until) -> dict:
     their P&L lands in the delta like any other flow, matching the scoring path,
     which already counts verified legs only.
     """
+    return {k: sum(p for _c, p in legs) for k, legs in _realized_legs_bulk(db, baselines, until).items()}
+
+
+def _realized_legs_bulk(db, baselines, until) -> dict:
+    """同 _realized_since_bulk，但不求和：{(user_id, mt5_login): [(closed_at, profit), ...]}。
+    对账要知道每条腿的平仓时刻，才能判断差额是不是平仓行与余额错拍（见 _reverse_flows）。
+    Like _realized_since_bulk without summing: the close times let the reconcile tell a
+    close-row / balance timing artifact from a real cash flow (see _reverse_flows)."""
     if not baselines:
         return {}
     taken = {(b.user_id, b.mt5_login): _aware(b.taken_at) for b in baselines}
@@ -259,12 +319,12 @@ def _realized_since_bulk(db, baselines, until) -> dict:
                    ClosedTrade.closed_at >= min(taken.values())))
     if until is not None:
         q = q.filter(ClosedTrade.closed_at < until)
-    out = {k: 0.0 for k in taken}
+    out = {k: [] for k in taken}
     for uid, login, closed_at, profit in q.all():
         k = (uid, login)
         since = taken.get(k)
         if since is not None and _aware(closed_at) >= since and math.isfinite(profit or 0.0):
-            out[k] += profit or 0.0
+            out[k].append((_aware(closed_at), profit or 0.0))
     return out
 
 
@@ -329,10 +389,59 @@ def _deposit_at(row, prev_check: datetime | None, now: datetime) -> datetime:
     return min(at, now)
 
 
-def _reverse_flows(row, delta: float) -> float:
+# 比赛里，拖过这么久才被冲回的流水不再当成错拍，冲回的金额留作资金进出的证据（标黄）。
+# 网关账户的余额与平仓行最多差一两个轮询周期；比赛对账 60 秒一趟，15 分钟足够宽。
+# In competitions, a flow reversed later than this is no longer taken for a timing
+# artifact: the reversed amount is kept as cash-flow evidence (flagged). Gateway balance
+# and close rows drift by a poll or two; the contest reconcile runs every 60 s.
+FLOW_ARTIFACT_WINDOW = timedelta(minutes=15)
+
+
+def _realized_upto(legs, t: datetime) -> float:
+    return sum(p for c, p in legs if c <= t)
+
+
+def _realized_between(legs, lo: datetime, hi: datetime) -> float:
+    return sum(p for c, p in legs if lo <= c <= hi)
+
+
+def _reversible(meta: dict | None, amount: float, legs, sign: float) -> float:
+    """这条流水最多还能原地冲回多少（≥0）。
+
+    能冲回的只有「平仓行与余额错拍」解释得了的部分，两种错拍：
+    · 平仓行先到、余额没跟上：记账那一轮里新平掉的单子的盈亏正好与流水反向，记账时已经
+      算进 e；
+    · 余额先到、平仓行晚到：之后补进来的、平仓时刻不晚于记账时刻的单子盈亏（现在算的
+      _realized_upto(at) − 记账时的 r）与流水同向。
+    除此之外的部分是真实的资金进出（或平台外交易），不能原地抹掉——以前只封顶净 adjust，
+    「入金 → 用大本金交易 → 出金」会把入金整笔冲掉，期间的单按基线算本金，收益率按
+    入金 / 基线 倍放大；比赛的资金进出标记也随之消失（2026-10-26 审计）。
+    没有元数据的流水（2026-10-26 之前记的，或暂存的元数据丢了）不原地冲回：最坏多记一条
+    反向流水，不会放大收益率。
+    How much of this flow may still be reversed in place: only the part a close-row /
+    balance timing artifact explains — rows that arrived before the balance (e, fixed
+    when recorded) or rows that arrived after it but closed by the recording time
+    (realized up to `at` now minus `r` then). Anything else is real cash flow and must
+    not be erased retroactively. Flows without metadata (pre-2026-10-26, or metadata
+    lost) are not reversed: at worst an extra opposite flow, never an inflated return."""
+    if meta is None:
+        return 0.0
+    try:
+        at = _aware(datetime.fromisoformat(meta["at"]))
+        r, e = float(meta.get("r") or 0.0), float(meta.get("e") or 0.0)
+    except (KeyError, TypeError, ValueError):
+        return 0.0
+    moved = _realized_upto(legs, at) - r
+    late_rows = max(0.0, moved if sign > 0 else -moved)
+    return max(0.0, e) + late_rows
+
+
+def _reverse_flows(row, delta: float, legs=(), now: datetime | None = None,
+                   keep_evidence: bool = False) -> float:
     """先拿这次差额冲回方向相反、尚未抵消的流水，返回冲掉的部分（与 delta 同号）。
     delta < 0 冲最近的入金、delta > 0 冲最近的出金，从后往前、改原流水金额（不另记
-    一条反向流水），冲减额封顶同方向的净 adjust——所以本金不会被冲过基线。
+    一条反向流水），冲减额封顶同方向的净 adjust——所以本金不会被冲过基线；每条流水
+    再封顶它自己能用错拍解释的部分（_reversible），真实的资金进出不会被冲掉。
 
     这类成对流水几乎都是假的：余额与平仓行到达先后不一致（gateway 离线用户的平仓行
     即时入库、余额却要等他上线才刷新；在线时也有十几秒的错拍），差额先被记成入金 /
@@ -340,15 +449,16 @@ def _reverse_flows(row, delta: float) -> float:
     小额的反向差额还够不到出金门槛、整笔冲不掉。限额比赛（本金必须正好 N）里，任何
     一笔仓位落在这样的窗口里整行就掉榜（2026-10-06：100461 的 +101.9、100462 的
     +2722 窗口、100456 的 +0.16）。原地冲回 = 那笔流水从未发生，窗口一起消失。
-    代价：真实的入金后又真实出金，会被并成一笔较小的入金（中间这段本金偏低）——
-    少见，且只让收益率略偏高，换来的是不再误伤。
+    2026-10-26 起只冲错拍解释得了的部分：真实的入金后又出金不再被并掉（那会把期间的
+    单按基线算本金、放大收益率，也会抹掉比赛的资金进出标记）。
+    keep_evidence（比赛）：拖过 FLOW_ARTIFACT_WINDOW 才冲回的部分记进那条流水的 late，
+    冲成 0 的流水也留着，资金进出的标记据此不消失。
     Offsets this round's gap against the most recent opposite, still-outstanding
-    flows first, editing them in place (newest first) and capped at the net adjust
-    on that side, so capital never crosses the baseline. Returns the part absorbed
-    (same sign as delta). Such pairs are almost always artifacts of the balance and
-    the close rows arriving out of step; recording the reversal as a separate flow
-    left a window of wrong capital that knocked fixed-capital competition rows off
-    the board, and a small reversal could not even clear the withdrawal threshold."""
+    flows first, editing them in place (newest first), capped at the net adjust on
+    that side and, per flow, at what a balance / close-row timing artifact explains
+    (_reversible), so a real deposit-then-withdrawal is never merged away. Returns the
+    part absorbed (same sign as delta). With keep_evidence (competitions), amounts
+    reversed later than FLOW_ARTIFACT_WINDOW are kept on the flow as `late`."""
     if delta < 0:
         cap = min(-delta, max(row.adjust or 0.0, 0.0))
         sign = 1.0                                   # 冲入金 / unwind deposits
@@ -357,23 +467,112 @@ def _reverse_flows(row, delta: float) -> float:
         sign = -1.0                                  # 冲出金 / unwind withdrawals
     if cap <= RECONCILE_TOLERANCE:
         return 0.0
-    flows = _flows(row)
+    items = _flow_items(row)
     left = cap
-    for i in range(len(flows) - 1, -1, -1):
+    for i in range(len(items) - 1, -1, -1):
         if left <= RECONCILE_TOLERANCE:
             break
-        at, a = flows[i]
+        at, a, meta = items[i]
         if a * sign <= 0:
             continue
-        take = min(abs(a), left)
-        flows[i] = (at, a - sign * take)
+        take = min(abs(a), left, _reversible(meta, a, legs, sign))
+        if take <= RECONCILE_TOLERANCE:
+            continue
+        meta = dict(meta) if meta else None
+        if meta is not None:
+            # 先用掉记账时的 e，剩下的挪 r，同一笔晚到的盈亏不会被重复用来冲回。
+            # Spend e first, then shift r, so the same late rows can't be reused.
+            used_e = min(max(0.0, float(meta.get("e") or 0.0)), take)
+            meta["e"] = float(meta.get("e") or 0.0) - used_e
+            meta["r"] = float(meta.get("r") or 0.0) + sign * (take - used_e)
+        if keep_evidence and now is not None:
+            rec_at = at
+            if meta is not None and meta.get("at"):
+                try:
+                    rec_at = _aware(datetime.fromisoformat(meta["at"]))
+                except (TypeError, ValueError):
+                    pass
+            if _aware(now) - rec_at > FLOW_ARTIFACT_WINDOW:
+                meta = meta if meta is not None else {}
+                meta["late"] = float(meta.get("late") or 0.0) + take
+        items[i] = (at, a - sign * take, meta)
         left -= take
     done = cap - left
     if done <= RECONCILE_TOLERANCE:
         return 0.0
-    row.flows = json.dumps([[t.isoformat(), a] for t, a in flows if abs(a) > RECONCILE_TOLERANCE])
+    row.flows = _dump_flow_items([
+        (t, a, m) for t, a, m in items
+        if abs(a) > RECONCILE_TOLERANCE or (m and float(m.get("late") or 0.0) > RECONCILE_TOLERANCE)])
     row.adjust -= sign * done
     return -sign * done
+
+
+# 新流水的元数据先暂存在 shared_state，下一轮对账开头再并进那条流水（第三个元素）。
+# 不当场写进去，是因为周期榜的流水在记账那一轮仍保持 [时刻, 金额] 两元素的形状（既有
+# 测试与排查脚本按这个形状读）；冲回最早也发生在下一轮，那时元数据已经并进去了。
+# 暂存丢了（没配 Redis 又恰好重启）→ 这条流水按「不可冲回」处理，只会多记一条反向流水，
+# 不会放大收益率。
+# A new flow's metadata waits in shared_state and is folded into the entry (third
+# element) at the start of the next reconcile, keeping the recording round's two-element
+# shape. Reversal can only happen from the next round on, by which time it is folded.
+# Lost (no Redis + restart) → the flow is not reversible: an extra opposite flow at worst.
+def _pending_meta_key(period_key: str) -> str:
+    return f"gami:flowmeta:{period_key}"
+
+
+def _row_tag(row) -> str:
+    return f"{row.user_id}:{row.mt5_login}"
+
+
+def _flow_tag(at: datetime, amount: float) -> str:
+    return f"{_aware(at).isoformat()}|{float(amount)!r}"
+
+
+def _load_pending_meta(period_key: str) -> dict:
+    """整个周期一次读回暂存的元数据：{行: {流水: 元数据}}（每轮一次读，不是每行一次）。"""
+    try:
+        pending = shared_state.kv_get_json(_pending_meta_key(period_key))
+    except Exception:
+        log.warning("flow metadata unreadable for %s", period_key, exc_info=True)
+        return {}
+    return pending if isinstance(pending, dict) else {}
+
+
+def _save_pending_meta(period_key: str, pending: dict) -> None:
+    try:
+        if pending:
+            shared_state.kv_set_json(_pending_meta_key(period_key), pending,
+                                     RECONCILE_MARK_TTL_SECONDS)
+        else:
+            shared_state.kv_delete(_pending_meta_key(period_key))
+    except Exception:
+        log.warning("flow metadata not saved for %s", period_key, exc_info=True)
+
+
+def _fold_pending_meta(row, pending_for_row) -> bool:
+    """把暂存的元数据并进对应流水；返回是否改了 row.flows。"""
+    if not isinstance(pending_for_row, dict) or not pending_for_row:
+        return False
+    items = _flow_items(row)
+    changed = False
+    for i, (t, a, m) in enumerate(items):
+        meta = pending_for_row.get(_flow_tag(t, a))
+        if m is None and isinstance(meta, dict):
+            items[i] = (t, a, meta)
+            changed = True
+    if changed:
+        row.flows = _dump_flow_items(items)
+    return changed
+
+
+def _flow_meta(legs, at: datetime, window_start: datetime, amount: float) -> dict:
+    """新流水的对账元数据（见 _flow_items / _reversible）：记账时刻、那一刻平仓时刻不晚于
+    它的已实现盈亏、以及这一轮里新平掉的单子能解释的金额（平仓行先到、余额没跟上）。
+    Reconcile metadata for a new flow: when it was recorded, realized P/L closed by then,
+    and how much this round's fresh closes explain (rows ahead of the balance)."""
+    moved = _realized_between(legs, window_start, at)
+    explained = min(abs(amount), max(0.0, -moved if amount > 0 else moved))
+    return {"at": _aware(at).isoformat(), "r": _realized_upto(legs, at), "e": explained}
 
 
 def reconcile_deposits(db, period_key: str, now: datetime = None,
@@ -385,7 +584,7 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
     adjust += delta（负数），记一条流水；够不到门槛的小额负差（手续费、隔夜利息）
     忽略；账号行已不在（解绑）→ 冻结不动，不报错。
     以上判断之前，差额先冲回方向相反的未抵消流水（_reverse_flows，原地改、封顶
-    净 adjust）：桥接晚报的平仓单先被看成一笔出金，下一轮余额对上后把那笔出金
+    净 adjust 与错拍解释得了的部分）：桥接晚报的平仓单先被看成一笔出金，下一轮余额对上后把那笔出金
     原地冲掉，而不是再记一笔等额入金——中间不留本金不对的窗口。
     流水带时间，计分时按每笔仓位开/平仓时刻各取本金（见 capital_at）。
 
@@ -417,32 +616,48 @@ def reconcile_deposits(db, period_key: str, now: datetime = None,
                 .filter(MT5Account.balance.isnot(None))
                 if math.isfinite(a.balance)}
     prev_check = _last_reconciled_at(period_key)
+    # 比赛的资金进出只靠标黄把关，拖久了才冲回的流水留作证据（见 _reverse_flows）。
+    # Competitions rely on the cash-flow flag, so late reversals are kept as evidence.
+    keep_evidence = period_key.startswith("comp:")
     adjusted = 0
-    baseline_rows = [r for r in db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key)
-                     if acct_map.get((r.user_id, r.mt5_login)) is not None]
-    realized_by_acct = _realized_since_bulk(db, baseline_rows, end)   # 一次查询，不再每条基线一次
+    folded = False
+    pending = _load_pending_meta(period_key)
+    all_rows = db.query(PeriodBaseline).filter(PeriodBaseline.period_key == period_key).all()
+    baseline_rows = [r for r in all_rows if acct_map.get((r.user_id, r.mt5_login)) is not None]
+    legs_by_acct = _realized_legs_bulk(db, baseline_rows, end)   # 一次查询，不再每条基线一次
     for row in baseline_rows:
+        folded = _fold_pending_meta(row, pending.pop(_row_tag(row), None)) or folded
         balance = acct_map[(row.user_id, row.mt5_login)]      # 解绑/无余额的基线已滤掉：冻结不动
-        realized = realized_by_acct[(row.user_id, row.mt5_login)]
+        legs = legs_by_acct[(row.user_id, row.mt5_login)]
+        realized = sum(p for _c, p in legs)
         delta = balance - (row.baseline + row.adjust) - realized
         changed = False
         if abs(delta) > RECONCILE_TOLERANCE:
-            absorbed = _reverse_flows(row, delta)        # 先冲回反向的假流水（见上方说明）
+            # 先冲回反向的假流水（见上方说明）/ unwind timing artifacts first
+            absorbed = _reverse_flows(row, delta, legs, now, keep_evidence)
             if absorbed:
                 delta -= absorbed
                 changed = True
         denom = row.baseline + row.adjust
+        window_start = _deposit_at(row, prev_check, now)
         if delta > RECONCILE_TOLERANCE:
             row.adjust += delta                          # 入金：记在上一次对账时刻（见上方说明）
-            _append_flow(row, _deposit_at(row, prev_check, now), delta)
+            _append_flow(row, window_start, delta)
+            pending.setdefault(_row_tag(row), {})[_flow_tag(window_start, delta)] =                 _flow_meta(legs, now, window_start, delta)
             changed = True
         elif delta < 0 and -delta >= max(WITHDRAWAL_MIN_ABS, WITHDRAWAL_MIN_FRAC * denom):
             row.adjust += delta                          # 出金：此后仓位的本金减少
             _append_flow(row, now, delta)
+            pending.setdefault(_row_tag(row), {})[_flow_tag(now, delta)] =                 _flow_meta(legs, now, window_start, delta)
             changed = True
         adjusted += changed
-    if adjusted:
+    if adjusted or folded:
         db.commit()
+    # 剩下的 = 这一轮新记的 + 这一轮没轮到的行（余额暂时读不到）的旧暂存；基线行已不在的丢掉。
+    # What's left: this round's new flows plus entries for rows skipped this round;
+    # entries for rows no longer in the period are dropped.
+    live = {_row_tag(r) for r in all_rows}
+    _save_pending_meta(period_key, {k: v for k, v in pending.items() if k in live})
     _mark_reconciled(period_key, now)
     return adjusted
 
@@ -564,7 +779,9 @@ def compute_board_rows(db, period_key: str) -> dict:
     min_trades_return = gates["min_trades_return"]
     min_trades_winrate = gates["min_trades_winrate"]
     wr_require_profit = gates["winrate_require_profit"]
-    opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
+    # 封禁（disabled_at）与退榜同样在计算期过滤：基线可能是封禁前拍的。
+    # Bans are filtered here too, like opt-outs: the baseline may predate the ban.
+    opted_out = excluded_user_ids(db)
     baselines = db.query(PeriodBaseline).filter(
         PeriodBaseline.period_key == period_key).all()
     by_user = defaultdict(dict)

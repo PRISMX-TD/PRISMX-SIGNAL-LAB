@@ -9,8 +9,8 @@
 （归属在写入那一刻定死，不再重算）。
 
 **mt5_real 自动识别**：trade_mode=2（实盘）且券商匹配（直连 gateway 行一律是合作券商；
-桥接行看 server 是否命中 broker_patterns）。trade_mode_source='self'（桥接自报、未经核实）
-→ pending_review 等 admin 审核，其余 → confirmed。
+桥接行看 server 是否命中 broker_patterns）。gateway 行按券商组名判定 → confirmed；桥接行的
+server / login 都是自报的 → 一律 pending_review 等 admin 审核。
 
 Conversion tracking (design §6); the only writer of the conversions table.
 record() is idempotent on (user_id, kind, dedupe_key) — "<login>@<server>" for
@@ -162,9 +162,18 @@ def classify_mt5(row, patterns) -> str | None:
         tm = None
     if tm != _REAL:
         return None
-    if getattr(row, "source", None) != "gateway" and not server_matches_broker(row.server, patterns):
+    if getattr(row, "source", None) == "gateway":
+        return STATUS_PENDING if row.trade_mode_source == "self" else STATUS_CONFIRMED
+    if not server_matches_broker(row.server, patterns):
         return None
-    return STATUS_PENDING if row.trade_mode_source == "self" else STATUS_CONFIRMED
+    # 桥接行一律待审（2026-10-26 安全审计）：它的 server / login 是用户侧程序自报的，号段 /
+    # 服务器名规则拿这两样判出来的「实盘」也就没人核实过（见 account_type.classify_account_
+    # with_source）。只认来源字段的话，老库里残留的 login_rule / server_rule 桥接行照样会被
+    # 自动确认、记到跟进客服名下。只有券商组名（gateway 才拿得到）能直接确认。
+    # Bridge rows always go to review: their server / login are self-reported, so a
+    # rule verdict built on them proves nothing — including legacy rows still labelled
+    # login_rule / server_rule. Only a broker group (gateway-only) confirms directly.
+    return STATUS_CONFIRMED if row.trade_mode_source == "group" else STATUS_PENDING
 
 
 def record_mt5_bind(db: Session, user_id: str, row) -> Conversion | None:

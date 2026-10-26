@@ -61,6 +61,12 @@ class MarketStatus:
     source: str
     next_open_at: datetime | None
     checked_at: float
+    # MT5 品种的 TradeMode（0 禁止 / 1 只多 / 2 只空 / 3 只平 / 4 全部）；日历兜底时为 None。
+    # 只平（3）时网关的 openNow 一律是 False（不再看时段），平仓 / 改单 / 撤单的闸门要据此放行。
+    # The symbol's MT5 TradeMode (0 disabled / 1 long only / 2 short only / 3 close only /
+    # 4 full); None from the calendar. Under close-only the gateway reports openNow=False
+    # without looking at sessions, so the manage gate must not refuse on that alone.
+    trade_mode: int | None = None
 
 
 _cache: dict[str, MarketStatus] = {}
@@ -106,7 +112,15 @@ async def _gateway_status(symbol: str, login: int | None) -> MarketStatus | None
             next_open = datetime.fromtimestamp(ts, timezone.utc)
     except (TypeError, ValueError):
         next_open = None
-    return MarketStatus(base, bool(data["openNow"]), "gateway", next_open, time.monotonic())
+    trade_mode = None
+    try:
+        if data.get("tradeMode") is not None:
+            trade_mode = int(data["tradeMode"])
+    except (TypeError, ValueError):
+        trade_mode = None
+    return MarketStatus(
+        base, bool(data["openNow"]), "gateway", next_open, time.monotonic(), trade_mode,
+    )
 
 
 async def market_status_async(symbol: str, login: int | None = None) -> MarketStatus:
@@ -166,6 +180,49 @@ def assert_market_open(symbol: str, login: int | None = None) -> None:
     if status.open:
         return
     logger.info("休市拒单 %s（%s）", status.symbol, status.source)
+    raise HTTPException(status_code=409, detail=closed_message(status))
+
+
+# MT5 CIMTConSymbol.EnTradeMode 里「只平」的取值 / MT5's TRADE_CLOSEONLY value
+TRADE_MODE_CLOSEONLY = 3
+
+
+def manage_allowed(status: MarketStatus) -> bool:
+    """平仓 / 改单 / 改挂单 / 撤挂单（「管理」已有仓位与挂单）此刻能不能发。
+
+    和开仓同一份判定，只有一处不同：券商把品种设成「只平」时，网关的 openNow 不再看
+    交易时段、一律回 False——那是「不能开新仓」，不是「休市」，平仓必须照常放行。只平时
+    后端判不了时段，交给网关那道闸（它按时段判、不看只平）。
+    Whether a close / modify / pending modify / pending cancel may be sent now. Same
+    verdict as an open except under close-only, where the gateway's openNow is False
+    regardless of the session: that means "no new positions", not "closed", so closes
+    must still pass; the gateway's own manage gate judges the session in that case.
+    """
+    return status.open or status.trade_mode == TRADE_MODE_CLOSEONLY
+
+
+def closed_for_manage(symbol: str | None, login: int | None = None) -> MarketStatus | None:
+    """休市时返回该品种的状态（调用方据此拒单），能发或判不了返回 None。
+    MARKET_HOURS_GATE 关掉、品种为空时一律 None。
+    The closed status when a manage action must not be sent now, else None (also
+    when MARKET_HOURS_GATE is off or the symbol is empty)."""
+    if not settings.MARKET_HOURS_GATE or not symbol:
+        return None
+    status = market_status(symbol, login)
+    if manage_allowed(status):
+        return None
+    return status
+
+
+def assert_market_open_for_manage(symbol: str | None, login: int | None = None) -> None:
+    """平仓 / 改单 / 撤单前调用：休市以 409 拒，文案与开仓同一句（closed_message）。
+    休市时发出的 dealer 请求同样会被 MT5 挂成删不掉的「request adding」。
+    Call before a close / modify / cancel: 409 when closed, with the same message as
+    an open. A dealer request sent into a closed session is parked the same way."""
+    status = closed_for_manage(symbol, login)
+    if status is None:
+        return
+    logger.info("休市拒绝平仓 / 改单 %s（%s）", status.symbol, status.source)
     raise HTTPException(status_code=409, detail=closed_message(status))
 
 

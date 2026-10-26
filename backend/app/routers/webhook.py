@@ -22,7 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.rate_limit import limiter
+from app.core.rate_limit import client_ip_key, hit_limit, limiter
 from app.models import Signal, Trend
 from app.schemas import SYMBOL_PATTERN
 from app.services.connection_manager import manager
@@ -39,6 +39,31 @@ import json
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 logger = logging.getLogger("prismx.webhook")
+
+# 信号入口的两只桶（审计 2026-10-26）：以前 @limiter.limit("60/minute") 在验密钥之前就扣按 IP
+# 的额度，TradingView 是多租户共用出口 IP 的——别的订阅者把警报指到这里、带个错密钥，就能把
+# 运营方真信号的额度用光，真信号 429、不落库、不推送。现在先验密钥再扣：密钥对的记在
+# 「真信号」桶，密钥错的记在另一个「失败」桶，失败再多也只会让失败的请求 429。
+# Two buckets for the signal endpoints (audit 2026-10-26). The old decorator charged the
+# per-IP bucket before the secret check, and TradingView shares egress IPs across tenants,
+# so anyone could aim wrong-secret alerts here and starve the operator's genuine ones.
+# Now the secret is checked first: genuine requests charge the producer bucket, failures
+# a separate one, so a failure flood can only rate-limit failures.
+SIGNAL_RATE = "60/minute"
+SIGNAL_FAIL_RATE = "60/minute"
+
+
+def _signal_gate(request: Request, endpoint: str, ok: bool, detail: str) -> None:
+    """密钥校验之后再扣额度；失败的计入失败桶，超了 429，否则 401。
+    Charge the budget after the secret check; failures go to their own bucket."""
+    ip = client_ip_key(request)
+    if ok:
+        if not hit_limit(SIGNAL_RATE, f"webhook:{endpoint}:ok", ip):
+            raise HTTPException(status_code=429, detail="请求过于频繁 / Too many requests")
+        return
+    if not hit_limit(SIGNAL_FAIL_RATE, f"webhook:{endpoint}:fail", ip):
+        raise HTTPException(status_code=429, detail="请求过于频繁 / Too many requests")
+    raise HTTPException(status_code=401, detail=detail)
 
 
 class TradingViewSignal(BaseModel):
@@ -202,18 +227,18 @@ async def _fan_out_new_signal(data: dict, sig: Signal) -> None:
 
 
 @router.post("/tradingview", response_model=dict)
-@limiter.limit("60/minute")
 async def tradingview_webhook(request: Request, payload: TradingViewSignal, background_tasks: BackgroundTasks):
-    """接收 TradingView 信号：校验密钥 -> 去重 -> 存库 -> 广播。
-    Receive a TradingView signal: verify secret -> dedup -> persist -> broadcast.
+    """接收 TradingView 信号：校验密钥 -> 限流 -> 去重 -> 存库 -> 广播。
+    Receive a TradingView signal: verify secret -> rate limit -> dedup -> persist -> broadcast.
     """
     # 1) 来源校验：常量时间比较，密钥未配置则一律拒绝 / verify source, reject if unset
     # 按 UTF-8 字节比较，避免非 ASCII 密钥触发 compare_digest 的 TypeError（应返回 401 而非 500）。
     # Compare as UTF-8 bytes so a non-ASCII secret returns 401 instead of crashing compare_digest.
-    if not settings.WEBHOOK_SECRET or not secrets.compare_digest(
+    # 限流在校验之后、按结果分桶，见 _signal_gate / rate limit after the check, see _signal_gate
+    ok = bool(settings.WEBHOOK_SECRET) and secrets.compare_digest(
         payload.secret.encode("utf-8"), settings.WEBHOOK_SECRET.encode("utf-8")
-    ):
-        raise HTTPException(status_code=401, detail="Webhook 密钥无效 / invalid webhook secret")
+    )
+    _signal_gate(request, "tradingview", ok, "Webhook 密钥无效 / invalid webhook secret")
 
     # 落库整段是同步 SQLAlchemy，走线程池。去重的并发竞态由 external_id 的唯一
     # 约束 + IntegrityError 回退兜底，与改造前一致，不需要额外加锁。
@@ -233,7 +258,6 @@ async def tradingview_webhook(request: Request, payload: TradingViewSignal, back
 
 
 @router.post("/mt5-signal", response_model=dict)
-@limiter.limit("60/minute")
 async def mt5_signal_webhook(request: Request, payload: TradingViewSignal, background_tasks: BackgroundTasks):
     """接收 MT5 信号 EA 推送的交易信号，载荷与 /tradingview 相同。
     密钥用 EA_TOKEN（与行情 EA 同一个），放在 body 的 "secret" 字段；落库 source="mt5"，
@@ -242,10 +266,10 @@ async def mt5_signal_webhook(request: Request, payload: TradingViewSignal, backg
     Authenticated with EA_TOKEN (shared with the market-feed EA) in the body's
     "secret" field; stored with source="mt5", otherwise identical pipeline.
     """
-    if not settings.EA_TOKEN or not secrets.compare_digest(
+    ok = bool(settings.EA_TOKEN) and secrets.compare_digest(
         payload.secret.encode("utf-8"), settings.EA_TOKEN.encode("utf-8")
-    ):
-        raise HTTPException(status_code=401, detail="EA Token 无效 / invalid EA token")
+    )
+    _signal_gate(request, "mt5-signal", ok, "EA Token 无效 / invalid EA token")
 
     deduped_id, data, sig = await run_in_threadpool(_persist_signal_sync, payload, "mt5", "MT5")
     if deduped_id is not None:
@@ -257,6 +281,13 @@ async def mt5_signal_webhook(request: Request, payload: TradingViewSignal, backg
 
 # 允许的趋势方向 / allowed trend directions
 TrendDir = Literal["UP", "DOWN", "FLAT"]
+# 单个品种最多带多少个周期 / most timeframes one symbol may carry
+TRENDS_MAX = 32
+# /trend 请求体上限：批量 64 个品种也只有十几 KB（审计 2026-10-26；main 的
+# BodyLimitMiddleware 对 /webhook/* 也是 64KB，这里是路由自己的一道）。
+# /trend body cap: even a 64-symbol batch is a few dozen KB (audit 2026-10-26; the app's
+# BodyLimitMiddleware applies the same 64KB to /webhook/*, this is the route's own check).
+TREND_BODY_MAX_BYTES = 64 * 1024
 
 
 def _valid_trend_secret(secret: str) -> bool:
@@ -305,7 +336,9 @@ class TrendSignal(BaseModel):
     secret: str = Field(min_length=1, max_length=128)
     symbol: str = Field(pattern=SYMBOL_PATTERN)
     # 各周期趋势，键为周期名(M5/M15/H1/H4)，值为方向 / per-timeframe map
-    trends: dict[str, TrendDir]
+    # 条数上限：真实周期不过十来个，防畸形载荷撑大每条的处理（审计 2026-10-26）
+    # Capped: real timeframes number about ten; refuses bloated maps (audit 2026-10-26)
+    trends: dict[str, TrendDir] = Field(max_length=TRENDS_MAX)
     # 该指标所在图表周期（如 5 分钟）当前 K 线的最高/最低价，用于顺带判定该品种
     # 下所有未分胜负信号是否命中止盈/止损。两者都缺省则跳过胜负判定，仅更新趋势。
     # High/low of the current bar on this indicator's chart timeframe (e.g. 5m),
@@ -324,7 +357,7 @@ class TrendItem(BaseModel):
     the batch envelope carries once for the whole request."""
 
     symbol: str = Field(pattern=SYMBOL_PATTERN)
-    trends: dict[str, TrendDir]
+    trends: dict[str, TrendDir] = Field(max_length=TRENDS_MAX)
     high: float | None = Field(default=None, ge=0)
     low: float | None = Field(default=None, ge=0)
     id: str | None = Field(default=None, max_length=128)
@@ -473,15 +506,24 @@ async def tradingview_trend(request: Request):
     Read the raw body and parse manually, independent of Content-Type. TradingView
     sends webhooks as text/plain, which would trigger a 422 with a declared JSON body.
     """
+    # 超过上限立刻 413，不在事件循环上解码、扫描一个超大字符串。读取本身由 main 的
+    # BodyLimitMiddleware 限在 64KB（读到超限那一块就 413），这里是路由自己的一道。
+    # 413 past the cap, before decoding or scanning anything on the event loop. The read
+    # itself is bounded at 64KB by the app's BodyLimitMiddleware; this is the route's own check.
     raw = await request.body()
+    if len(raw) > TREND_BODY_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="请求体过大 / Request body too large")
     text = raw.decode("utf-8", errors="ignore").strip()
     payload = None
     batch = None
     # 先尝试整体解析；失败则从文本中抠出第一个 {...} JSON 块再解析。
     # TradingView 有时会把警报说明文字和 alert() 的 JSON 拼在一起发送。
+    # 扫描只在整体解析不成时才做（以前每个请求都先扫一遍）。
     # Try whole-body parse first; if it fails, extract the first {...} block.
     # TradingView may concatenate the alert description with the alert() JSON.
-    for candidate in (text, _extract_json_block(text)):
+    # The scan runs only when the whole-body parse fails (it used to run on every request).
+    for attempt in range(2):
+        candidate = text if attempt == 0 else _extract_json_block(text)
         if not candidate:
             continue
         try:

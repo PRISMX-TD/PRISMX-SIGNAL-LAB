@@ -387,8 +387,20 @@ _VAR_RE = re.compile(r"\{(" + "|".join(re.escape(k) for k in _VAR_NAMES) + r")\}
 _MARKUP_CHARS = re.compile(r"[*\[\]()<>{}\r\n]|https?:/*", re.IGNORECASE)
 
 
+def _clean_nickname(nick: str) -> str:
+    """反复去标记直到不再变化：只去一遍的话，删掉 `ht*tps://` 里的 `*` 会拼出一个新的
+    `https://`，没人再查（2026-10-26 审计）。每一轮至少删掉一个字符，所以必然收敛。
+    Strip until stable: a single pass let `ht*tps://` collapse into a fresh `https://`
+    that was never re-checked (2026-10-26 audit). Each round removes at least one
+    character, so the loop terminates."""
+    prev, cur = None, nick or ""
+    while cur != prev:
+        prev, cur = cur, _MARKUP_CHARS.sub("", cur)
+    return cur.strip()
+
+
 def variables_for(db: Session, user: User, cand: Cand | None, now: datetime) -> dict[str, str]:
-    nickname = _MARKUP_CHARS.sub("", user.nickname or "").strip() or (user.email or "").partition("@")[0]
+    nickname = _clean_nickname(user.nickname) or (user.email or "").partition("@")[0]
     expires = (cand.expires_at if cand else None) or user.plan_expires_at
     expiry_date = days_left = ""
     if expires is not None:

@@ -66,6 +66,8 @@ _COMP_INPUT_SQL = f"""
 SELECT
   (SELECT {_AGG.format(row="c")} FROM competitions c WHERE c.id = :cid),
   (SELECT {_AGG.format(row="p")} FROM competition_participants p WHERE p.competition_id = :cid),
+  (SELECT {_AGG.format(row="(u.id, u.disabled_at IS NOT NULL)")} FROM users u WHERE u.id IN
+      (SELECT user_id FROM competition_participants WHERE competition_id = :cid)),
   (SELECT {_AGG.format(row="b")} FROM period_baselines b WHERE b.period_key = :key),
   (SELECT {_AGG.format(row=_ORDER_ROW)} FROM orders o WHERE o.user_id IN
       (SELECT user_id FROM competition_participants WHERE competition_id = :cid)),
@@ -76,7 +78,7 @@ SELECT
 _BOARD_INPUT_SQL = f"""
 SELECT
   (SELECT {_AGG.format(row="b")} FROM period_baselines b WHERE b.period_key = :key),
-  (SELECT {_AGG.format(row="(u.id, u.leaderboard_opt_out)")} FROM users u WHERE u.id IN
+  (SELECT {_AGG.format(row="(u.id, u.leaderboard_opt_out, u.disabled_at IS NOT NULL)")} FROM users u WHERE u.id IN
       (SELECT user_id FROM period_baselines WHERE period_key = :key)),
   (SELECT {_AGG.format(row=_ORDER_ROW)} FROM orders o WHERE o.user_id IN
       (SELECT user_id FROM period_baselines WHERE period_key = :key)),

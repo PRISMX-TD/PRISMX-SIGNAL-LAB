@@ -250,17 +250,28 @@ def classify_account_with_source(
 ) -> tuple[int | None, str | None]:
     """同 classify_account，多返回一个来源（SOURCE_GROUP / SOURCE_LOGIN_RULE /
     SOURCE_SERVER_RULE），判不出来返回 (None, None)。
+
+    **号段 / 服务器名规则判出「实盘」时来源记 self**（2026-10-26 安全审计）：这两条规则的
+    输入（server、login）只有桥接行才有——gateway 行 server 恒为空串、走组名——而桥接的
+    server / login 是用户侧程序自报的，没有密码也没有券商佐证。规则本身是后台配的，但
+    「这个账号真在那台服务器上、真是那个号段」没人核实过，于是判成实盘时不能挂上
+    VERIFIED_SOURCES 的来源（那会让转化识别直接记 confirmed、管理端抽查看不到「自报」）。
+    判成模拟 / 竞赛仍记规则来源：那是安全方向，伪造它对用户没有好处。
     Same as classify_account plus which rule decided; (None, None) when nothing did.
+    A REAL verdict from the login / server rules is labelled self: their inputs exist
+    only on bridge rows (gateway rows have server "" and use the group) and are
+    self-reported there, so they cannot vouch for a live account. Demo / contest
+    verdicts keep the rule source — the safe direction, nothing to gain by faking it.
     """
     by_group = classify_group(group, settings)
     if by_group is not None:
         return by_group, SOURCE_GROUP
     by_login = classify_login(server, login, settings)
     if by_login is not None:
-        return by_login, SOURCE_LOGIN_RULE
+        return by_login, SOURCE_SELF if by_login == REAL else SOURCE_LOGIN_RULE
     by_server = classify_server(server, settings)
     if by_server is not None:
-        return by_server, SOURCE_SERVER_RULE
+        return by_server, SOURCE_SELF if by_server == REAL else SOURCE_SERVER_RULE
     return None, None
 
 

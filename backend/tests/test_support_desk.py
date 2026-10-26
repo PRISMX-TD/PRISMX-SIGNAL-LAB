@@ -385,7 +385,7 @@ def _acc(db, user, login, **kw):
 
 @pytest.mark.parametrize("kw,expected", [
     ({"source": "gateway", "server": "", "trade_mode": 2, "trade_mode_source": "group"}, "confirmed"),
-    ({"server": "MakeCapital-Live", "trade_mode": 2, "trade_mode_source": "server_rule"}, "confirmed"),
+    ({"server": "MakeCapital-Live", "trade_mode": 2, "trade_mode_source": "server_rule"}, "pending_review"),  # 桥接自报的服务器名不能自动确认
     ({"server": "MakeCapital-Live", "trade_mode": 2, "trade_mode_source": "self"}, "pending_review"),
     ({"server": "MakeCapital-Demo", "trade_mode": 0, "trade_mode_source": "self"}, None),
     ({"server": "OtherBroker-Live", "trade_mode": 2, "trade_mode_source": "server_rule"}, None),
@@ -404,7 +404,7 @@ def test_mt5_auto_detection_branches(db, kw, expected):
 def test_record_is_idempotent_and_credits_active_follow_up(db, people):
     c, staff = people["customer"], people["internal"]
     fu = _assign(db, people["admin"], staff, c, goal="open_mt5")
-    acc = _acc(db, c, "999", server="MakeCapital-Live", trade_mode=2, trade_mode_source="login_rule")
+    acc = _acc(db, c, "999", source="gateway", server="", mt5_group="real\\MC", trade_mode=2, trade_mode_source="group")
     first = conversions.record_mt5_bind(db, c.id, acc)
     again = conversions.record_mt5_bind(db, c.id, acc)
     db.commit()

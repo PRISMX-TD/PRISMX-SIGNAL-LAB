@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from sqlalchemy.exc import TimeoutError as SQLAlchemyPoolTimeoutError
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from app.core.admission import AdmissionMiddleware
+from app.core.admission import AdmissionMiddleware, BodyLimitMiddleware
 from app.core.config import settings, _WORKER_COUNT
 from app.core.database import init_db
 from app.core.rate_limit import limiter
@@ -357,6 +357,13 @@ async def _db_pool_timeout_handler(request: Request, exc: SQLAlchemyPoolTimeoutE
 # CORS, so its 503s still carry the CORS headers and the frontend sees a real status.
 app.add_middleware(AdmissionMiddleware)
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+# 请求体上限（core/admission.BodyLimitMiddleware，审计 2026-10-26）：按路径给预算，超了 413，
+# 在任何解析与鉴权之前。放在入口排队外面：声明大小超限的请求连排队名额都不占；放在 CORS
+# 里面：413 照样带跨域头，前端读得到状态码。
+# Request-body budget (audit 2026-10-26): 413 per path before any parsing or auth. Outside
+# admission, so an oversize request never takes a lane slot; inside CORS, so the 413
+# still carries the CORS headers.
+app.add_middleware(BodyLimitMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

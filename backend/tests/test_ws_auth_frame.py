@@ -23,6 +23,7 @@ No TestClient (repo convention: routes with Depends and rate-limit decorators
 aren't tested end to end) — the coroutine is driven with a fake WebSocket.
 """
 import asyncio
+import json
 import time
 
 import pytest
@@ -52,6 +53,16 @@ class _FakeWS:
         if self._silent:
             await asyncio.sleep(3600)   # 比超时长得多，交给 wait_for 打断
         return self._first_frame
+
+    async def receive(self):
+        """首帧现在按原始 ASGI 消息读（ws.py 先卡长度再解析），脚本与 receive_json 相同。
+        The first frame is now read as a raw ASGI message (length-capped before parsing);
+        same script as receive_json."""
+        if self._disconnect:
+            return {"type": "websocket.disconnect", "code": 1001}
+        if self._silent:
+            await asyncio.sleep(3600)
+        return {"type": "websocket.receive", "text": json.dumps(self._first_frame)}
 
     async def receive_text(self):
         raise WebSocketDisconnect(code=1000)

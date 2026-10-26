@@ -491,8 +491,18 @@ def update_strategy(
     row = db.query(UserStrategy).filter(UserStrategy.id == strategy_id, UserStrategy.user_id == user.id).first()
     if row is None:
         raise HTTPException(status_code=404, detail="策略不存在 / strategy not found")
-    if body.enabled is not None:
+    # 改名与「停用」之外的任何改动都要过 PRO 闸门（2026-10-26 审计）：原来只有 enabled 开关
+    # 才查，PRO 到期之后仍能改一条启用中策略的品种、周期、条件与出场——一次试用换来一个永久
+    # 可用可改的 PRO 功能。停用与改名不需要资格：降级用户得能把自己的策略关掉。
+    # Any change other than a rename or switching the strategy off goes through the
+    # PRO gate (2026-10-26 audit). Only the enabled toggle used to check it, so after
+    # PRO lapsed an enabled strategy's symbol, interval, rules and exits stayed
+    # editable — one trial bought a permanently usable PRO feature. Renaming and
+    # disabling need no entitlement: a downgraded user must be able to switch it off.
+    gated = body.model_fields_set - {"name"}
+    if gated and not (gated == {"enabled"} and body.enabled is False):
         _check_access(db, user)
+    if body.enabled is not None:
         row.enabled = body.enabled
     if body.name is not None:
         row.name = body.name.strip() or None

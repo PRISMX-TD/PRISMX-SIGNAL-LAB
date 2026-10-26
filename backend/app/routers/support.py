@@ -486,6 +486,9 @@ def support_reveal_phone(user_id: str, db: Session = Depends(get_db), staff: Sta
     used = None
     if ctx.is_outsourced:
         limit = _reveal_limit(db, ctx.user)
+        # 先锁住自己的行再数：并发请求排队，超限检查与写入成为原子的一步。
+        # Lock our own row before counting so the cap check and the insert are atomic.
+        desk.lock_actor(db, ctx.user.id)
         used = desk.count_actions(db, ctx.user.id, desk.ACT_REVEAL, desk.day_start())
         if used >= limit:
             raise HTTPException(
@@ -648,6 +651,39 @@ def apply_comp_days(db: Session, actor_id: str, user: User, days: int,
     return new_exp
 
 
+# 补偿天数的累计窗口：客服直接生效的额度按「同一用户、最近 N 天」累计，不是按单次请求算——
+# 否则连发 N 次 7 天就绕过了审批（审计 comp-days-approval-cap-per-request-only）。
+# Rolling window for the comp-days cap: direct grants are capped per target over the last N
+# days, not per request, so N back-to-back 7-day grants can't sidestep the approval queue.
+COMP_DAYS_WINDOW_DAYS = 30
+
+
+def _comp_days_used(db: Session, target_id: str, since: datetime) -> int:
+    """该用户在窗口内已经占用的补偿天数：直接生效的（support_actions）+ 待审批 / 已批准的申请。
+    Comp days already counted against the target in the window: direct grants plus pending
+    and approved requests."""
+    total = 0
+    rows = (
+        db.query(SupportAction.data)
+        .filter(SupportAction.target_user_id == target_id, SupportAction.kind == desk.ACT_COMP_DAYS,
+                SupportAction.created_at >= since)
+        .all()
+    )
+    reqs = (
+        db.query(SupportRequest.payload)
+        .filter(SupportRequest.target_user_id == target_id, SupportRequest.kind == "comp_days",
+                or_(SupportRequest.status == "pending",
+                    and_(SupportRequest.status == "approved", SupportRequest.reviewed_at >= since)))
+        .all()
+    )
+    for (raw,) in [*rows, *reqs]:
+        try:
+            total += max(0, int((_loads(raw) or {}).get("days") or 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 @router.post("/users/{user_id}/comp-days", response_model=dict)
 def support_comp_days(
     user_id: str,
@@ -655,14 +691,27 @@ def support_comp_days(
     db: Session = Depends(get_db),
     staff: StaffCtx = Depends(require_staff),
 ):
-    """补偿天数。单次 ≤ support_comp_days_max（默认 7）直接生效；超过 → 生成审批单等 admin 处理。
+    """补偿天数。同一用户最近 COMP_DAYS_WINDOW_DAYS 天累计（含待审批 / 已批准）≤ support_comp_days_max
+    （默认 7）直接生效；超过 → 生成审批单等 admin 处理。给自己 / 其他工作人员一律走审批。
     admin 不受上限约束。
     Compensation days: up to support_comp_days_max (default 7) applies at once;
     above it a request goes to the admin approval queue. Admins are uncapped."""
     ctx = _ctx(staff)
     user, _fu = _visible_user(db, ctx, user_id)
     cap = get_support_settings(db)["support_comp_days_max"]
-    if not ctx.is_admin and body.days > cap:
+    needs_approval = False
+    if not ctx.is_admin:
+        # 锁住目标用户行，同一用户的并发补偿排队，累计额度不会被并发请求一起读穿。
+        # Lock the target row so concurrent grants for one user queue up behind the cumulative check.
+        db.query(User.id).filter(User.id == user.id).with_for_update().first()
+        since = _now() - timedelta(days=COMP_DAYS_WINDOW_DAYS)
+        needs_approval = (
+            # 给自己或其他工作人员补天数一律走审批 / grants to oneself or other staff always need approval
+            user.id == ctx.user.id
+            or user.role in ("admin", "support")
+            or _comp_days_used(db, user.id, since) + body.days > cap
+        )
+    if needs_approval:
         req = SupportRequest(
             kind="comp_days", requester_id=ctx.user.id, target_user_id=user.id,
             payload=json.dumps({"days": body.days, "reason": body.reason}, ensure_ascii=False),
@@ -724,7 +773,7 @@ def support_message(
     shown as a letter from Signal Lab Support), assigned to the sender; the user
     gets an in-app notification and a push. Only for the caller's active
     follow-ups (admins: anyone)."""
-    from app.routers.tickets import _ticket_out
+    from app.routers.tickets import _ticket_out, mask_ticket_for
 
     ctx = _ctx(staff)
     user, fu = _visible_user(db, ctx, user_id)
@@ -757,7 +806,7 @@ def support_message(
         dispatch_ticket_reply(ticket.id, user.id)
     except Exception:
         logger.warning("客服来信推送失败: ticket=%s user=%s", ticket.id, user.id, exc_info=True)
-    return {"ticket": _ticket_out(ticket, [reply], True, db).model_dump()}
+    return {"ticket": mask_ticket_for(_ticket_out(ticket, [reply], True, db), ticket, ctx).model_dump()}
 
 
 @router.post("/users/{user_id}/follow-up-request", response_model=dict)

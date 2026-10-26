@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models import EXTERNAL_SIGNAL_SOURCES, Signal
 
 
@@ -525,8 +526,14 @@ def _window_rows(db: Session, cutoff_naive: datetime, days: int,
     return out
 
 
+# hide_live 时额外多藏的余量（分钟）：过期扫描每 5 秒一拍，提交也可能晚几秒。
+# Extra margin (minutes) for hide_live: the expiry sweep ticks every 5s and commits lag.
+LIVE_SIGNAL_MARGIN_MINUTES = 1
+
+
 def compute_strategy_session_winrate(
-    db: Session, days: int = 7, only_strategies: list[str] | None = None
+    db: Session, days: int = 7, only_strategies: list[str] | None = None,
+    *, hide_live: bool = False,
 ) -> dict:
     """近 `days` 天（滚动窗口，按信号创建时间）每个策略在各时段的胜率。
 
@@ -544,6 +551,17 @@ def compute_strategy_session_winrate(
     signal that only reached TP during New York hours under New York. The window
     filter must use the same axis or signals straddling the edge get dropped or
     double-counted.
+
+    hide_live=True（用户端「策略分析」）：创建不满 SIGNAL_EXPIRE_MINUTES（再加一点余量）的
+    信号整条不计——那段时间里它还能下单，FREE 等级看不到它；按品种、按方向的 pending / samples
+    计数会把「哪个策略刚在哪个品种上发了哪个方向」原样泄露出去（2026-10-26 审计）。已判定的
+    也一并不计：止盈止损同样暴露方向。过了这段时间照常计入。管理端不传。
+    hide_live=True (the user-facing analysis): signals younger than
+    SIGNAL_EXPIRE_MINUTES (plus a margin) are left out entirely — they are still
+    tradeable and invisible to FREE, and per-symbol, per-side pending / samples
+    counts would leak "which strategy just fired which direction on which symbol"
+    (2026-10-26 audit). Resolved ones are left out too, since TP/SL reveals the
+    direction as well. They count as normal once that window passes. Admin omits it.
     """
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
@@ -583,6 +601,10 @@ def compute_strategy_session_winrate(
     # 取数（含白名单过滤）见 _window_rows：30 天以内走增量行缓存。
     # Fetch (whitelist filter included) lives in _window_rows: incremental row cache.
     rows = _window_rows(db, cutoff_naive, days, only_strategies)
+    if hide_live:
+        live_floor = (now - timedelta(
+            minutes=settings.SIGNAL_EXPIRE_MINUTES + LIVE_SIGNAL_MARGIN_MINUTES)).replace(tzinfo=None)
+        rows = [r for r in rows if r[3] is not None and r[3] <= live_floor]
 
     # 判定链路的健康读数：全表最近一次成功判定的时间，**刻意不受窗口限制**。
     # 判定只在 POST /webhook/trend 带着 high/low 进来时发生（见 routers/webhook.py），

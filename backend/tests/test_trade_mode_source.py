@@ -44,7 +44,7 @@ def test_demo_keyword_in_server_name_forces_demo():
 def test_with_source_reports_which_rule_decided():
     s = ACCOUNT_TYPE_DEFAULTS
     assert classify_account_with_source("demo\\x", "Any", "1", s) == (DEMO, SOURCE_GROUP)
-    assert classify_account_with_source(None, "MakeCapital-Live", "600123", s) == (REAL, SOURCE_LOGIN_RULE)
+    assert classify_account_with_source(None, "MakeCapital-Live", "600123", s) == (REAL, SOURCE_SELF)  # 实盘结论来自自报的服务器/登录号，只算 self
     assert classify_account_with_source(None, "Foo-Demo", "1", s) == (DEMO, SOURCE_SERVER_RULE)
     assert classify_account_with_source(None, "Unknown-Live", "1", s) == (None, None)
 
@@ -78,10 +78,10 @@ def test_self_reported_demo_may_lower_login_rule_real(db_session):
     assert (row.trade_mode, row.trade_mode_source) == (DEMO, SOURCE_SELF)
 
 
-def test_rule_real_without_self_report_is_rule_sourced(db_session):
+def test_rule_real_without_self_report_is_self_sourced(db_session):
     u = _user(db_session, "tm4@t.co")
     row = _poll(db_session, u.id, "600123", "MakeCapital-Live")
-    assert (row.trade_mode, row.trade_mode_source) == (REAL, SOURCE_LOGIN_RULE)
+    assert (row.trade_mode, row.trade_mode_source) == (REAL, SOURCE_SELF)
 
 
 def test_self_report_used_when_no_rule_applies_and_marked_self(db_session):
@@ -124,12 +124,12 @@ def test_loop_rejudges_self_reported_rows_with_rules(db_session):
     got = {r.login: (r.trade_mode, r.trade_mode_source)
            for r in db_session.query(MT5Account).filter_by(user_id=u.id)}
     assert got["1"] == (DEMO, SOURCE_SERVER_RULE)        # 自报实盘、服务器带 demo → 改回模拟
-    assert got["600555"] == (REAL, SOURCE_LOGIN_RULE)    # 规则也说实盘 → 来源升级
+    assert got["600555"] == (REAL, SOURCE_SELF)          # 规则说实盘也只算自报 → 不升级
     assert got["600556"] == (DEMO, SOURCE_SELF)          # 自报往下降 → 保留
     assert got["3"] == (REAL, SOURCE_SELF)               # 来源未知的旧行 → 标 self
     assert got["4"] == (REAL, SOURCE_SELF)               # 没规则 → 不动
     assert got["5"] == (DEMO, SOURCE_LOGIN_RULE)         # 没判过 → default=demo
-    assert changed == 4
+    assert changed == 3
 
 
 # ---- 管理端预览带来源 / admin preview flag ------------------------------------------

@@ -381,6 +381,16 @@ class Settings(BaseSettings):
     # gateway's 140s worst case), and in a fast market "not sent" early beats a long wait.
     ORDER_MAX_INFLIGHT: int = 48
     ORDER_QUEUE_TIMEOUT: float = 6.0
+    # 请求体上限（core/admission.BodyLimitMiddleware）：鉴权之前就按路径挡掉超大请求体，
+    # 超了回 413。普通接口 1MB（最大的真实载荷是管理员群发名单，约 300KB）；EA 行情与
+    # 桥接上报 16MB（日常 K 线回补约 1.9MB，桥接一年的平仓回补也在几 MB）。webhook、
+    # 支付回调、埋点、退订、图片上传各自更小的预算写在 admission.body_budget 里。
+    # Request-body budget, enforced before auth with a 413: 1MB for ordinary routes (the
+    # largest real payload is an admin broadcast list, ~300KB); 16MB for the EA feed and
+    # bridge reports (routine candle backfill ~1.9MB). Smaller per-route budgets for
+    # webhooks, the IPN, telemetry, unsubscribe and uploads live in admission.body_budget.
+    REQUEST_BODY_MAX_BYTES: int = 1024 * 1024
+    REQUEST_BODY_BULK_MAX_BYTES: int = 16 * 1024 * 1024
 
     # MT5 Gateway（C# 程序，直接通过 Manager API 操作 MT5，不需要 bridge 轮询）。
     # Make Capital 用户的订单会走这条通道。
@@ -774,6 +784,13 @@ class Settings(BaseSettings):
     # originals, and the backend buffers the whole file in memory before
     # forwarding — a high cap would let concurrent uploads eat RAM.
     UPLOAD_MAX_BYTES: int = 4 * 1024 * 1024
+    # 私有工单桶里每个用户文件夹（工单图 <uid>/、分享图 share/<uid>/ 各算各的）的累计字节上限。
+    # 按天限速不是配额：没有它，一个账号每天能往运营方付费的桶里塞约 480MB 且永不清理。
+    # 分享图过了令牌有效期就删，不占配额（services/image_upload.enforce_private_quota）。
+    # Cumulative byte cap per user folder in the private ticket bucket (<uid>/ and
+    # share/<uid>/ counted separately). A daily rate is not a quota; expired share images
+    # are purged first and don't count (services/image_upload.enforce_private_quota).
+    PRIVATE_IMAGE_QUOTA_BYTES: int = 200 * 1024 * 1024
     # 工单图片的存储桶：**私有**桶，与上面的公开插图桶分开。用户截图里常有账号、余额、
     # 付款凭证，公开桶靠「URL 猜不到」挡人不够——链接一旦外流谁都能打开。私有桶里的图
     # 只能凭后端签发、会过期的签名链接看，而签名只发给工单本人和管理员。

@@ -7,6 +7,7 @@
 能解析的自然周/月格式。
 """
 import json
+import logging
 import math
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -21,9 +22,10 @@ from app.models import (
 from .badges import award_badge
 from .badge_judges import campaigner_tier, finished_competition_count
 from app.services.account_type import CONTEST, DEMO
-from .boards import REAL, BASELINE_EPS, _aware, _resolved_in_period, baseline_in_range, board_gates, reconcile_deposits, replace_snapshot_rows, touch_snapshot_if_stale
+from .boards import REAL, BASELINE_EPS, _aware, _resolved_in_period, baseline_in_range, board_gates, excluded_user_ids, reconcile_deposits, replace_snapshot_rows, touch_snapshot_if_stale
 from . import input_sig
 
+log = logging.getLogger("gamification")
 
 TRACKS = ("real", "demo")
 # 赛道 → 允许参赛的 trade_mode 集合。demo 赛道收模拟与赛区账户（都不是真金白银）；
@@ -123,9 +125,15 @@ def comp_return_score(b, resolved, min_baseline: float, max_baseline: float | No
     from the standing boards' per-position capital on purpose: one starting line
     for everyone and a one-sentence rule. Cash flow is flagged for admin review."""
     base = float(b.baseline or 0.0)
-    if base <= 0 or not baseline_in_range(base, min_baseline, max_baseline):
+    if not math.isfinite(base) or base <= 0 or not baseline_in_range(base, min_baseline, max_baseline):
         return None
-    return sum(pr for _o, _c, pr in resolved) / base, len(resolved)
+    score = sum(pr for _o, _c, pr in resolved) / base
+    # 与 boards.return_score 同一道闸：NaN 会让排序名次全乱、写进 final_score、JSON 输出直接 500。
+    # Same guard as boards.return_score: a NaN scrambles every rank, becomes a final_score
+    # and breaks JSON rendering.
+    if not math.isfinite(score):
+        return None
+    return score, len(resolved)
 
 
 def _load_end_positions(p) -> tuple[datetime, dict[str, float]] | None:
@@ -137,9 +145,10 @@ def _load_end_positions(p) -> tuple[datetime, dict[str, float]] | None:
         snap = json.loads(raw)
         at = _aware(datetime.fromisoformat(snap["at"]))
         pnl = {str(k): float(v) for k, v in (snap.get("pnl") or {}).items()}
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, AttributeError):
         return None
-    return at, pnl
+    # 非有限值（NaN / Infinity）一律丢掉：加进成绩就是 NaN 分数。/ Drop non-finite values.
+    return at, {k: v for k, v in pnl.items() if math.isfinite(v)}
 
 
 def _load_end_account_floating(p) -> float | None:
@@ -261,6 +270,13 @@ def compute_comp_rows(db, comp: Competition) -> list[dict]:
     participants = (db.query(CompetitionParticipant)
                        .filter(CompetitionParticipant.competition_id == comp.id,
                                CompetitionParticipant.disqualified.is_(False)).all())
+    # 被管理员封禁的用户不出行（于是也拿不到名次、终审不发勋章），见 boards.excluded_user_ids。
+    # 只按封禁滤、不按退榜滤：比赛是报名参加的，退榜管的是周期榜。
+    # Disabled users produce no row (so no rank, no settlement badges). Only bans are
+    # filtered here; opting out governs the standing boards, competitions are opt-in.
+    banned = {r[0] for r in db.query(User.id).filter(
+        User.id.in_({p.user_id for p in participants}), User.disabled_at.isnot(None))}
+    participants = [p for p in participants if p.user_id not in banned]
     if not participants:
         return []
 
@@ -382,7 +398,8 @@ def participant_details(db, comp: Competition, participants: list) -> dict[str, 
             "netCashflow": float(b.adjust or 0.0) if b is not None else None,
             # 资金进出（含平台外交易）超过报名本金的 CASHFLOW_FLAG_FRAC：标黄人工复核。
             # Cash flow (incl. off-platform trading) beyond the flag share: review.
-            "cashflowFlagged": _cashflow_flagged(b),
+            "cashflowFlagged": (_cashflow_flagged(b)
+                                or _offplatform_flagged(b, _offplatform_end_exposure(db, comp, p))),
             "endCaptured": p.end_positions is not None,
             "sample": None,
             "minTrades": min_trades,
@@ -446,7 +463,46 @@ def _cashflow_flagged(b) -> bool:
     if b is None:
         return False
     base = float(b.baseline or 0.0)
-    return base > 0 and abs(float(b.adjust or 0.0)) >= CASHFLOW_FLAG_FRAC * base
+    if base <= 0:
+        return False
+    # 不只看期末净额：入金后又出金、平台外亏了再补钱，净额都回到 0。看期内任一时刻的
+    # 偏离峰值，再加上拖久了才被原地冲回的金额（boards._reverse_flows 留下的证据）。
+    # Not just the closing net: deposit-then-withdraw or an off-platform loss topped back
+    # up both net to 0. Use the peak deviation at any instant plus amounts reversed late.
+    from .boards import late_reversed_total, peak_flow_deviation
+    moved = max(abs(float(b.adjust or 0.0)), peak_flow_deviation(b), late_reversed_total(b))
+    return moved >= CASHFLOW_FLAG_FRAC * base
+
+
+def _offplatform_end_exposure(db, comp: Competition, p) -> float:
+    """结束快照里**不是平台单**的仓位的浮动盈亏绝对值之和。
+
+    对账只看期内已实现的余额，而且比赛结束就停；同一账户里开一张与平台单反向的手动单、
+    拖过 ends_at 再平，那条腿的亏损永远进不了资金进出，平台那条腿却照常计分——设计里
+    点名要挡的对冲（2026-10-26 审计）。结束快照本来就记下了账户里每一张持仓，这里把
+    平台单以外的挑出来，交给 _offplatform_flagged 判断要不要标黄。
+    Sum of |floating P/L| over end-snapshot tickets that are not platform positions:
+    an opposite manual leg held through ends_at never reaches the reconcile, yet the
+    platform leg is scored — the hedge the design names. The end snapshot already
+    lists every open ticket; this picks out the non-platform ones."""
+    snap = _load_end_positions(p)
+    if snap is None or not snap[1]:
+        return 0.0
+    from app.services.trade_performance import position_id_of
+    from .stats import _filled_orders
+    platform = {str(pid) for pid in
+                (position_id_of(o) for o in _filled_orders(db, p.user_id, logins={p.mt5_login},
+                                                           modes=track_modes(comp.track)))
+                if pid}
+    return sum(abs(v) for k, v in snap[1].items() if k not in platform)
+
+
+def _offplatform_flagged(b, exposure: float) -> bool:
+    """平台外持仓的浮动盈亏超过报名本金的 CASHFLOW_FLAG_FRAC → 标黄（与资金进出同一个比例）。"""
+    if b is None:
+        return False
+    base = float(b.baseline or 0.0)
+    return base > 0 and exposure >= CASHFLOW_FLAG_FRAC * base
 
 
 def _direction(side) -> int:
@@ -488,7 +544,10 @@ def entry_flags(db, comp: Competition, participants: list) -> dict[str, dict]:
         primary = gw if gw is not None else (rows[0] if rows else None)
         b = baselines.get(key)
         kinds: list[str] = []
-        if _cashflow_flagged(b):
+        off = _offplatform_end_exposure(db, comp, p)
+        # 结束时还开着的平台外持仓与资金进出同属「平台外交易」，共用同一个标记。
+        # Off-platform positions open at the end are off-platform trading too: same flag.
+        if _cashflow_flagged(b) or _offplatform_flagged(b, off):
             kinds.append("cashflowFlagged")
         if primary is None or primary.revoked_at is not None:
             kinds.append("accountRevoked")
@@ -497,6 +556,7 @@ def entry_flags(db, comp: Competition, participants: list) -> dict[str, dict]:
         out[p.id] = {"kinds": kinds, "detail": {
             "balanceAtSignup": float(b.baseline) if b is not None else None,
             "netCashflow": float(b.adjust or 0.0) if b is not None else None,
+            "offPlatformFloating": round(off, 2),
             "sources": sorted({a.source or "" for a in rows}),
             "revokedReason": primary.revoked_reason if primary is not None else None,
             "hedgePairs": 0,
@@ -874,6 +934,38 @@ MSG_ENTRY_TAKEN = ("该账户已被其他用户报名，请联系客服 / "
                    "This account has already been entered by another user, please contact support")
 
 
+def _check_entry_cap(db, comp: Competition, user_id: str, mt5_login: str,
+                     lock: bool = False) -> None:
+    """每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——重复报同一个
+    账户是幂等路径。被取消资格的条目照数：取消资格不退还名额，否则「报满 → 故意违规 →
+    腾出名额再报」就成了绕过这道闸的后门。
+
+    lock=True：先 SELECT … FOR UPDATE 锁住这个用户的 users 行再数，且调用方在同一个事务里
+    插入、提交（提交即解锁）。同一个用户的并发报名因此排队：后到的那个等前一个提交后才数，
+    看得到它刚插的行（2026-10-26 审计：原来是「数完 → 结束事务 → 网关读 8 秒 → 插入」，两个
+    并发请求各报一个账户都能过）。按人限数没法用唯一约束表达，只能靠锁；SQLite 不支持
+    FOR UPDATE（语句照跑、不加锁），它的写入本身是串行的。
+    Per-user entry cap. Only other logins count; disqualified entries still count.
+    lock=True takes a row lock on the user (SELECT … FOR UPDATE) before counting, and the
+    caller inserts and commits in the same transaction, so concurrent registrations by one
+    user serialise and the later one sees the earlier insert. A per-user count can't be a
+    unique constraint, hence the lock. SQLite ignores FOR UPDATE; its writes are serial."""
+    if lock:
+        db.query(User.id).filter(User.id == user_id).with_for_update().first()
+    cap = max_entries_per_user(comp.track)
+    existing_entries = (db.query(CompetitionParticipant)
+                          .filter(CompetitionParticipant.competition_id == comp.id,
+                                  CompetitionParticipant.user_id == user_id,
+                                  CompetitionParticipant.mt5_login != mt5_login).count())
+    if existing_entries >= cap:
+        if lock:
+            db.rollback()                           # 释放行锁 / release the row lock
+        raise HTTPException(
+            status_code=400,
+            detail=(f"每人每场最多报名 {cap} 个账户 / "
+                    f"At most {cap} account(s) per person per competition"))
+
+
 def register_participant(db, comp: Competition, user: User, mt5_login: str,
                           now: datetime) -> CompetitionParticipant:
     """报名参赛（设计 §1.7/§1.8；2026-10-08 §1.11–§1.13）：仅 `enrollment=="signup"` 的比赛
@@ -930,21 +1022,10 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
             raise HTTPException(status_code=409, detail=MSG_ENTRY_TAKEN)
         return existing
 
-    # 每人每场的条目上限（见 _TRACK_MAX_ENTRIES 的说明）。只数「别的 login」——
-    # 重复报同一个账户是上面的幂等路径。被取消资格的条目照数：取消资格不退还名额，
-    # 否则「报满 → 故意违规 → 腾出名额再报」就成了绕过这道闸的后门。
-    # Per-user entry cap (see _TRACK_MAX_ENTRIES). Only *other* logins are counted;
-    # disqualified entries still count so a disqualification never frees a slot.
-    cap = max_entries_per_user(comp.track)
-    existing_entries = (db.query(CompetitionParticipant)
-                          .filter(CompetitionParticipant.competition_id == comp.id,
-                                  CompetitionParticipant.user_id == user.id,
-                                  CompetitionParticipant.mt5_login != mt5_login).count())
-    if existing_entries >= cap:
-        raise HTTPException(
-            status_code=400,
-            detail=(f"每人每场最多报名 {cap} 个账户 / "
-                    f"At most {cap} account(s) per person per competition"))
+    # 每人每场的条目上限：这里先数一次（满了就不必去网关读），插入前锁住再数一次。
+    # Per-user entry cap: an early count here (skip the gateway read when full), and a
+    # locked re-count right before the insert.
+    _check_entry_cap(db, comp, user.id, mt5_login)
 
     # 本金门槛在报名时就挡（与计分同一个 comp_gates，两边不分叉），用的是网关实时读到的
     # 资金。上下限相等 = 只收这一个金额，且要求无持仓（净值与余额差在 BASELINE_EPS 内）——
@@ -997,6 +1078,11 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
     # public_board depends on this module.
     from .public_board import initial_public_name
     public_name = initial_public_name(db, comp)
+    # 上限在插入的同一个事务里、锁住用户行之后再数一遍（见 _check_entry_cap）：上面那次数完
+    # 事务就结束了，网关读的几秒里另一个并发请求完全可以先提交。
+    # Re-count under the user-row lock in the inserting transaction (see _check_entry_cap):
+    # the first count's transaction ended before the gateway read.
+    _check_entry_cap(db, comp, user.id, mt5_login, lock=True)
     db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id, mt5_login=mt5_login,
                                   scoring_from=scoring_from, public_name=public_name))
     db.add(PeriodBaseline(user_id=user.id, mt5_login=mt5_login, period_key=key,
@@ -1017,6 +1103,7 @@ def register_participant(db, comp: Competition, user: User, mt5_login: str,
         # 撞的不是参赛行的唯一约束，而是 period_baselines 的——孤儿基线（此前
         # 某次写入只落了基线没落参赛行，成因不追究，防御性兜底）：基线已在，
         # 复用它（不重拍 taken_at），只补插参赛行。
+        _check_entry_cap(db, comp, user.id, mt5_login, lock=True)
         db.add(CompetitionParticipant(competition_id=comp.id, user_id=user.id,
                                       mt5_login=mt5_login, scoring_from=scoring_from,
                                       public_name=public_name))
@@ -1045,7 +1132,7 @@ def auto_enroll(db, comp: Competition, now: datetime) -> int:
     now = _aware(now)
     key = comp_period_key(comp.id)
     scoring_from = _aware(comp.starts_at)
-    opted_out = {r[0] for r in db.query(User.id).filter(User.leaderboard_opt_out.is_(True))}
+    opted_out = excluded_user_ids(db)                # 退榜 + 封禁 / opted out or disabled
     already = {p.mt5_login for p in
                db.query(CompetitionParticipant).filter(
                    CompetitionParticipant.competition_id == comp.id)}
@@ -1291,6 +1378,81 @@ def _save_end_captures(snaps: dict[str, str]) -> None:
         db.close()
 
 
+def _row_pnl(rows, login, losses_only: bool) -> dict[str, float]:
+    """缓存持仓行 -> {仓位号: 浮动盈亏}，只收本 login、结构正常、盈亏是有限数的行。
+
+    缓存行来自 POST /api/bridge/positions，元素类型、字段类型全由客户端决定：以前这里
+    直接 r.get() / float()，一行 1 或 profit 为 "x" 就抛异常，整轮所有参赛者的快照都
+    存不下；"nan" 则变成 NaN 分数（2026-10-26 审计）。坏行一律跳过。
+    losses_only：不可核验的来源（桥接，用户自己电脑上报）只记浮亏、浮盈按 0——
+    结束时拖着不平的亏损单照样计入，伪造的浮盈加不了分。
+    Cached rows -> {ticket: floating P/L}, keeping only well-formed rows for this login
+    with a finite numeric profit; bad rows are skipped instead of failing the whole
+    capture. losses_only caps unverifiable (bridge-reported) values at 0."""
+    out: dict[str, float] = {}
+    for r in rows or []:
+        if not isinstance(r, dict) or str(r.get("login")) != str(login):
+            continue
+        ticket, profit = r.get("ticket"), r.get("profit")
+        if isinstance(ticket, bool) or not isinstance(ticket, (int, str)) or not str(ticket).strip():
+            continue
+        if profit is None:
+            profit = 0.0
+        if isinstance(profit, bool) or not isinstance(profit, (int, float)):
+            continue
+        profit = float(profit)
+        if not math.isfinite(profit):
+            continue
+        out[str(ticket).strip()] = min(profit, 0.0) if losses_only else profit
+    return out
+
+
+def _gateway_pnl(rows) -> dict[str, float]:
+    """网关 /positions 的行 -> {仓位号: 浮动盈亏}；读不懂或非有限的行跳过。
+    Gateway rows -> {ticket: floating P/L}, skipping unreadable / non-finite ones."""
+    out: dict[str, float] = {}
+    for r in rows or []:
+        try:
+            ticket = int(r.ticket)
+            profit = float(r.profit or 0.0)
+        except (AttributeError, TypeError, ValueError):
+            continue
+        if math.isfinite(profit):
+            out[str(ticket)] = profit
+    return out
+
+
+async def _cached_pnl(uid, login) -> dict[str, float]:
+    """该用户最近推上来的持仓缓存 -> 本 login 的 {仓位号: 浮动盈亏}，按来源区分可信度：
+    网关那一路（服务端直接从券商读到的）照收；桥接那一路是用户自己的程序上报的，可以
+    随便写，只记浮亏（见 _row_pnl）。同一仓位两路都有时以网关为准。
+    以前读的是两路拼在一起、不带来源的合并列表，伪造一行 profit 就能把结束时还开着的
+    平台单估成任意浮盈（2026-10-26 审计）。
+    The user's cached positions for this login, trusted by source: the gateway slice
+    (read server-side from the broker) as-is, the bridge slice (posted by the user's
+    own client) losses-only; the gateway wins on overlap. This used to read the merged,
+    source-less list, so one forged row could value an open platform position at any profit."""
+    from starlette.concurrency import run_in_threadpool
+    from app.services.connection_manager import manager
+    # 合并列表不带来源，整体按不可核验处理（只记浮亏）；再单独取网关那一路，按原值覆盖。
+    # The merged list carries no source, so all of it is losses-only; the gateway slice,
+    # read separately, then overrides with its real values.
+    try:
+        merged = await manager.get_positions_shared_async(uid)
+    except Exception:  # noqa: BLE001 — 缓存读不到就走账户级兜底 / fall through
+        merged = []
+    pnl = _row_pnl(merged if isinstance(merged, list) else [], login, losses_only=True)
+    try:
+        by_source = await run_in_threadpool(manager._shared_by_source, "positions", uid)
+    except Exception:  # noqa: BLE001 — 来源分不清就全按不可核验处理 / unknown provenance
+        log.warning("end capture: per-source position cache unreadable for %s", uid, exc_info=True)
+        by_source = None
+    gw_rows = by_source.get("gateway") if isinstance(by_source, dict) else None
+    if isinstance(gw_rows, list):
+        pnl.update(_row_pnl(gw_rows, login, losses_only=False))
+    return pnl
+
+
 async def capture_end_positions(now: datetime | None = None) -> int:
     """比赛一进入 ended，就给每个参赛账户拍一张结束持仓快照（仓位号 -> 浮动盈亏），
     供 _end_valuation 把结束时还开着的平台单计入成绩。比赛循环每轮调用，只处理还没
@@ -1301,19 +1463,21 @@ async def capture_end_positions(now: datetime | None = None) -> int:
     已知的逐仓浮动盈亏）；缓存里也没有，就按账户行最后已知的 净值 - 余额 记一笔账户级
     浮亏（acctFloating，只记亏损），由 _end_valuation 平摊给没平完的平台单——以前这里记
     空快照，结束前解绑就能把拖着不平的亏损单整笔甩掉。快照带 lastKnown 标记，不再重试。
+    缓存里桥接那一路只记浮亏（见 _cached_pnl）。逐条目隔离：一个条目出错只跳过它自己
+    （下一轮重试），其余条目照常落库（2026-10-26 审计）。
     As soon as a competition is ended, snapshot each entry's open positions
     (position id -> floating P/L) for _end_valuation. Runs every competition-loop
     tick and only touches entries not yet captured, so a failed read retries on the
     next tick. Gateway accounts are read from the gateway (works for offline users);
-    bridge accounts can only use the bridge's latest pushed snapshot. Unbound
-    accounts, or bridge accounts with no snapshot, get an empty one (no retry).
+    bridge accounts can only use the cached snapshot, whose bridge slice counts losses
+    only (see _cached_pnl). Each entry is isolated: one failing entry is skipped (and
+    retried next tick) without discarding everyone else's snapshot.
     """
     from starlette.concurrency import run_in_threadpool
     todo = await run_in_threadpool(_end_capture_todo)
     if not todo:
         return 0
     from app.services import gateway_client as gw
-    from app.services.connection_manager import manager
     at = (now or datetime.now(timezone.utc)).isoformat()
     snaps: dict[str, str] = {}
     extras: dict[str, dict] = {}
@@ -1322,12 +1486,7 @@ async def capture_end_positions(now: datetime | None = None) -> int:
         """读不到账户时的兜底：最后已知的持仓缓存；再没有就记账户级浮亏（见上）。
         Fallback for an unreadable account: last known cached positions, else the
         account-level floating loss."""
-        try:
-            cached = await manager.get_positions_shared_async(uid)
-        except Exception:  # noqa: BLE001 — 缓存读不到就走账户级兜底 / fall through
-            cached = []
-        got = {str(r.get("ticket")): float(r.get("profit") or 0.0)
-               for r in (cached or []) if str(r.get("login")) == str(login)}
+        got = await _cached_pnl(uid, login)
         extra = {"lastKnown": True}
         if not got and isinstance(balance, (int, float)) and isinstance(equity, (int, float)):
             floating = float(equity) - float(balance)
@@ -1336,36 +1495,42 @@ async def capture_end_positions(now: datetime | None = None) -> int:
         return got, extra
 
     for pid, uid, login, source, readable, balance, equity in todo:
-        pnl = None
-        if not readable:
-            pnl, extras[pid] = await _last_known(uid, login, balance, equity)
-        elif source == "gateway":
-            try:
-                rows, err = await gw.get_positions(int(login))
-            except Exception:
-                rows, err = [], "exception"
-            if not err:
-                pnl = {str(r.ticket): float(r.profit or 0.0) for r in rows}
-                if not pnl:
-                    # 空列表不一定是空仓：网关对「组未开放」的账号同样回 ok + 空列表（/account
-                    # 则回 404）。拿 /account 复核——读不到，或净值与余额对不上（还有浮动盈亏）
-                    # 的，按读不到处理，走最后已知数据，免得结束时的亏损单被当成「没有持仓」。
-                    # An empty list isn't proof of flat: the gateway answers ok + [] for a
-                    # login whose group isn't enabled (and 404 on /account). Cross-check
-                    # /account; unreadable or still carrying floating P/L → last known data.
-                    try:
-                        acc = await gw.get_account(int(login))
-                    except Exception:  # noqa: BLE001
-                        acc = None
-                    fl_now = (float(acc.equity) - float(acc.balance)) if acc is not None else None
-                    if fl_now is None or not math.isfinite(fl_now) or abs(fl_now) > 0.005:
-                        pnl, extras[pid] = await _last_known(uid, login, balance, equity)
-        else:
-            rows = await manager.get_positions_shared_async(uid)
-            pnl = {str(r.get("ticket")): float(r.get("profit") or 0.0)
-                   for r in (rows or []) if str(r.get("login")) == str(login)}
-        if pnl is not None:
-            snaps[pid] = json.dumps({"at": at, "pnl": pnl, **extras.get(pid, {})})
+        try:
+            pnl = None
+            if not readable:
+                pnl, extras[pid] = await _last_known(uid, login, balance, equity)
+            elif source == "gateway":
+                try:
+                    rows, err = await gw.get_positions(int(login))
+                except Exception:
+                    rows, err = [], "exception"
+                if not err:
+                    pnl = _gateway_pnl(rows)
+                    if not pnl:
+                        # 空列表不一定是空仓：网关对「组未开放」的账号同样回 ok + 空列表（/account
+                        # 则回 404）。拿 /account 复核——读不到，或净值与余额对不上（还有浮动盈亏）
+                        # 的，按读不到处理，走最后已知数据，免得结束时的亏损单被当成「没有持仓」。
+                        # An empty list isn't proof of flat: the gateway answers ok + [] for a
+                        # login whose group isn't enabled (and 404 on /account). Cross-check
+                        # /account; unreadable or still carrying floating P/L → last known data.
+                        try:
+                            acc = await gw.get_account(int(login))
+                        except Exception:  # noqa: BLE001
+                            acc = None
+                        try:
+                            fl_now = (float(acc.equity) - float(acc.balance)) if acc is not None else None
+                        except (AttributeError, TypeError, ValueError):
+                            fl_now = None
+                        if fl_now is None or not math.isfinite(fl_now) or abs(fl_now) > 0.005:
+                            pnl, extras[pid] = await _last_known(uid, login, balance, equity)
+            else:
+                pnl = await _cached_pnl(uid, login)
+            if pnl is not None:
+                snaps[pid] = json.dumps({"at": at, "pnl": pnl, **extras.get(pid, {})},
+                                        allow_nan=False)
+        except Exception:  # noqa: BLE001 — 只跳过这一条，下一轮重试 / skip this entry, retry next tick
+            log.warning("end capture failed for participant %s (login %s)", pid, login, exc_info=True)
+            snaps.pop(pid, None)
     if snaps:
         await run_in_threadpool(_save_end_captures, snaps)
     return len(snaps)

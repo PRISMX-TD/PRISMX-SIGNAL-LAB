@@ -19,6 +19,8 @@ one, so the old assertions still hold.
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+import numpy as np
+
 from app.services.strategy import costs as ct
 from app.services.strategy.conditions import evaluate_conditions
 
@@ -126,6 +128,88 @@ def resolve_trade(
     return None, None
 
 
+class _TouchIndex:
+    """「从某根起，第一根最低价 <= x / 最高价 >= x 的 K 线」的对数时间查询（稀疏表 + 二进制跳跃）。
+
+    允许持仓重叠时每根信号 K 线都要找一次出场；逐根往后扫在出场永远够不着（止损/止盈设得极远、
+    又不设超时）时是 O(信号数 × 剩余根数)，6 万根 K 线就是十几亿次比较，而成本上限
+    （strategy_limits.cost_units = 根数 × 条件数）量不到这部分（2026-10-26 审计）。建表
+    O(n log n)（numpy 向量化），每次查询 O(log n)，结果与 resolve_trade 逐根扫描逐字相同。
+
+    Logarithmic "first bar from i whose low <= x / high >= x" queries (sparse table +
+    binary lifting). With overlapping trades allowed every signal bar searches for its
+    exit; scanning bar by bar is O(signals x remaining bars) when exits are unreachable
+    (far SL/TP, no timeout) — over a billion comparisons at 60k bars, a cost the cost cap
+    (bars x conditions) never measured (2026-10-26 audit). Building is O(n log n)
+    (vectorised), each query O(log n), and results match resolve_trade's scan exactly.
+    """
+
+    def __init__(self, bars: list[dict]):
+        self.n = len(bars)
+        # NaN 永远不算触及：最低价当 +inf、最高价当 -inf。/ NaN never touches.
+        lows = np.nan_to_num(np.array([b["l"] for b in bars], dtype=float), nan=np.inf)
+        highs = np.nan_to_num(np.array([b["h"] for b in bars], dtype=float), nan=-np.inf)
+        self._min = [lows]
+        self._max = [highs]
+        k = 1
+        while (1 << k) <= self.n:
+            half = 1 << (k - 1)
+            pm, px = self._min[-1], self._max[-1]
+            self._min.append(np.minimum(pm[:-half], pm[half:]))
+            self._max.append(np.maximum(px[:-half], px[half:]))
+            k += 1
+        self._lows = lows.tolist()
+        self._highs = highs.tolist()
+
+    def _first(self, tables, values, start: int, end: int, untouched) -> int | None:
+        """[start, end] 里第一根不满足 untouched 的下标；没有返回 None。
+        First index in [start, end] whose value fails `untouched`, else None."""
+        if start > end:
+            return None
+        pos = start
+        for k in range(len(tables) - 1, -1, -1):
+            span = 1 << k
+            if pos + span - 1 <= end and untouched(float(tables[k][pos])):
+                pos += span
+        if pos <= end and not untouched(values[pos]):
+            return pos
+        return None
+
+    def first_low_at_or_below(self, start: int, end: int, level: float) -> int | None:
+        return self._first(self._min, self._lows, start, end, lambda v: v > level)
+
+    def first_high_at_or_above(self, start: int, end: int, level: float) -> int | None:
+        return self._first(self._max, self._highs, start, end, lambda v: v < level)
+
+
+def resolve_trade_indexed(
+    index: _TouchIndex, entry_i: int, side: str, sl: float, tp: float, timeout_bars: int | None
+) -> tuple[str | None, int | None]:
+    """resolve_trade 的索引版：同一套规则（同根双触按止损、触及优先于超时），O(log n)。
+    The indexed resolve_trade: same rules (double touch = stop, touch beats timeout), O(log n)."""
+    last = index.n - 1
+    timeout_j = None
+    if timeout_bars is not None:
+        # resolve_trade 在 j - entry_i >= timeout_bars 的第一根超时，且 j 从 entry_i + 1 起。
+        # resolve_trade times out at the first j >= entry_i + 1 with j - entry_i >= timeout_bars.
+        timeout_j = entry_i + max(1, timeout_bars)
+    end = last if timeout_j is None else min(last, timeout_j)
+    start = entry_i + 1
+    if side == "BUY":
+        j_sl = index.first_low_at_or_below(start, end, sl)
+        j_tp = index.first_high_at_or_above(start, end, tp)
+    else:
+        j_sl = index.first_high_at_or_above(start, end, sl)
+        j_tp = index.first_low_at_or_below(start, end, tp)
+    if j_sl is not None and (j_tp is None or j_sl <= j_tp):
+        return "HIT_SL", j_sl
+    if j_tp is not None:
+        return "HIT_TP", j_tp
+    if timeout_j is not None and timeout_j <= last:
+        return "TIMEOUT", timeout_j
+    return None, None
+
+
 def _atr_series(bars: list[dict], period: int = 14) -> list[float | None]:
     """回测内部用的 ATR 序列，供 atr 出场方法逐 bar 取值。
     ATR series for the atr-based exit methods to read per bar."""
@@ -161,6 +245,11 @@ def _collect_entries(
     Step one: locate each trade's entry/exit, no equity bookkeeping yet."""
     raw: list[dict] = []
     open_positions: list[dict] = []
+    # 允许重叠时每根信号都要找一次出场：用索引把逐根扫描换成 O(log n) 查询（见 _TouchIndex）。
+    # 一次一单本来就是线性的（每次从上一笔出场之后接着扫），照旧逐根扫。
+    # With overlap allowed every signal bar searches for its exit, so use the index
+    # (see _TouchIndex). One-at-a-time is already linear and keeps the plain scan.
+    index = None if one_trade_at_a_time or not bars else _TouchIndex(bars)
 
     def _open(i: int, side: str) -> dict | None:
         atr_value = atrs[i] if atrs else None
@@ -170,7 +259,10 @@ def _collect_entries(
             return None
         entry_price = ct.round_price(ct.entry_fill(side, bars[i]["c"], costs))
         sl, tp = exit_prices(side, entry_price, symbol, spec, atr_value)
-        result, j = resolve_trade(bars, i, side, sl, tp, spec.timeout_bars)
+        if index is not None:
+            result, j = resolve_trade_indexed(index, i, side, sl, tp, spec.timeout_bars)
+        else:
+            result, j = resolve_trade(bars, i, side, sl, tp, spec.timeout_bars)
         return {
             "i": i, "side": side, "entry_price": entry_price, "sl": sl, "tp": tp,
             "exit_result": result, "exit_j": j,

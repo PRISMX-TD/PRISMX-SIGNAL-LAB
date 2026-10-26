@@ -44,6 +44,29 @@ AUTH_FRAME_TIMEOUT_SECONDS = 5
 # PONG and background flag — both in-memory — but skip the Redis write.
 PING_SAMPLE_MIN_INTERVAL_SECONDS = 4.0
 
+# 鉴权首帧的长度上限（字符）。真实的 AUTH 帧只有几百字节（一个 JWT 加两个键）；不设上限时，
+# 一个未鉴权的连接可以发一帧十几 MB 的 JSON，让事件循环在鉴权之前就去整段 json.loads
+# （2026-10-26 审计）。超长直接按鉴权失败处理，不解析。服务器层的 --ws-max-size 是另一道闸，
+# 在部署配置里。
+# Length cap (characters) on the auth frame. A real AUTH frame is a few hundred
+# bytes (one JWT, two keys); uncapped, an unauthenticated socket could send a
+# multi-megabyte JSON frame and have the event loop json.loads all of it before
+# any credential check (2026-10-26 audit). Oversized frames fail auth unparsed.
+# The server-level --ws-max-size is a separate gate in the deployment config.
+MAX_AUTH_FRAME_CHARS = 4096
+
+# 已建立的连接多久复核一次会话（秒）。鉴权原本只在建连那一刻做一次：退出所有设备、改密 / 重置
+# 密码、管理员停用、JWT 到期之后，一条早已打开的连接会一直收下去（2026-10-26 审计）。
+# 现在每隔这么久用同一个 _authenticate 再判一次（命中 {tv, d} 缓存时只是一次 Redis 读，
+# 吊销提交后缓存立即失效），不通过就注销并关闭连接。
+# How often an open connection re-checks its session (seconds). Auth used to run
+# once at connect, so logout-all, a password change/reset, an admin disable or JWT
+# expiry left an already-open socket streaming indefinitely (2026-10-26 audit).
+# Every interval the same _authenticate runs again (one Redis read on a {tv, d}
+# cache hit; revocation drops the cache on commit) and a failure unregisters and
+# closes the socket.
+SESSION_RECHECK_SECONDS = 30.0
+
 
 def _authenticate(token: str) -> str | None:
     """校验 token 并返回 user_id；会话版本不匹配（改密码后已失效）返回 None。
@@ -74,6 +97,66 @@ def _authenticate(token: str) -> str | None:
     if state is None or token_tv != state["tv"] or state["d"]:
         return None
     return user_id
+
+
+def _parse_auth_frame(message: dict) -> str:
+    """从首帧（原始 ASGI 消息）里取出 token；超长、非文本、非 AUTH 一律返回空串。
+    先看长度再解析，超长帧不会被 json.loads。
+    Extract the token from the first frame (a raw ASGI message); oversized,
+    undecodable or non-AUTH frames give "". Length is checked before parsing, so
+    an oversized frame never reaches json.loads."""
+    raw = message.get("text")
+    if raw is None:
+        data = message.get("bytes")
+        if not isinstance(data, (bytes, bytearray)) or len(data) > MAX_AUTH_FRAME_CHARS:
+            return ""
+        try:
+            raw = bytes(data).decode("utf-8")
+        except UnicodeDecodeError:
+            return ""
+    if not isinstance(raw, str) or len(raw) > MAX_AUTH_FRAME_CHARS:
+        return ""
+    try:
+        first = json.loads(raw)
+    except (TypeError, ValueError):
+        return ""
+    if isinstance(first, dict) and first.get("type") == "AUTH":
+        return str(first.get("token", "") or "")
+    return ""
+
+
+async def _watch_session(websocket: WebSocket, user_id: str, token: str, state: dict) -> None:
+    """定期复核这条连接的会话；吊销 / 停用 / 到期后先注销（不再投递任何帧），再告知并关闭。
+    注销在前：哪怕关闭握手卡住，这条连接也已经收不到该用户的数据。复核本身出错（Redis 与库
+    同时抖）不断开，下一轮再判。
+    Periodically re-check this connection's session; once revoked / disabled /
+    expired, unregister first (no further frames are delivered), then tell the
+    client and close. Unregistering first means the socket gets nothing more even
+    if the close handshake stalls. A failing check (Redis and DB both down) keeps
+    the socket and retries next round."""
+    while True:
+        await asyncio.sleep(SESSION_RECHECK_SECONDS)
+        try:
+            current = await run_in_threadpool(_authenticate, token)
+        except Exception:  # noqa: BLE001
+            logger.debug("ws session re-check failed (user_id=%s)", user_id, exc_info=True)
+            continue
+        if current == user_id:
+            continue
+        state["revoked"] = True
+        await manager.unregister_client(user_id, websocket)
+        logger.info("ws session revoked, closing (user_id=%s)", user_id)
+        try:
+            # 前端收到 AUTH_FAIL 会关闭并用当时存着的 token 重连（store/useClientSocket.ts）：
+            # 改密那台设备拿到了新 token，重连即恢复；被吊销的旧 token 重连只会再次失败。
+            # On AUTH_FAIL the frontend closes and reconnects with whatever token it holds
+            # (store/useClientSocket.ts): the device that changed the password has a fresh
+            # one and recovers; a revoked token just fails again.
+            await websocket.send_json({"type": "AUTH_FAIL", "reason": "invalid token"})
+            await websocket.close(code=1008)
+        except Exception:  # noqa: BLE001 —— 对端已经走了 / the peer is already gone
+            pass
+        return
 
 
 async def _netq(fn, *args) -> None:
@@ -107,8 +190,9 @@ async def ws_client(websocket: WebSocket):
     Client WebSocket: authenticate by JWT, then receive signal/order pushes.
 
     鉴权方式：连接后由客户端发送首帧 {"type":"AUTH","token":"<jwt>"}。
-    只在建连这一刻校验会话版本——已经建立的连接不会因为期间发生的密码修改被强制
-    断开，会随该连接下次重连时自然生效（前端重连时会带上刷新过的新 token）。
+    连接存续期间每 SESSION_RECHECK_SECONDS 秒复核一次会话（见 _watch_session）：退出
+    所有设备、改密 / 重置密码、管理员停用、JWT 到期之后，这条连接会被注销并关闭，前端
+    再用手里的 token 重连。
 
     这里刻意不接受 `?token=<jwt>` 这种 query 参数写法。URL 会被反向代理、网关、
     CDN 的访问日志原样记下来，而本站的 JWT 有效期长达 30 天（见 config 里
@@ -117,10 +201,10 @@ async def ws_client(websocket: WebSocket):
     store/useClientSocket.ts），这条回退没有任何在用的调用方，只留下风险。
 
     Auth: client sends a first frame {"type":"AUTH","token":"<jwt>"} after connect.
-    The session-version check only runs at connect time — an already-open
-    connection isn't force-dropped by a password change that happens while it's
-    live; it takes effect the next time that connection reconnects (picking up
-    the refreshed token the frontend stores by then).
+    The session is re-checked every SESSION_RECHECK_SECONDS while the connection
+    is open (see _watch_session): after logout-all, a password change/reset, an
+    admin disable or JWT expiry the socket is unregistered and closed, and the
+    frontend reconnects with whatever token it holds by then.
 
     A `?token=<jwt>` query parameter is deliberately NOT accepted. URLs are
     recorded verbatim by reverse-proxy, gateway and CDN access logs, and this
@@ -132,13 +216,16 @@ async def ws_client(websocket: WebSocket):
     await websocket.accept()
 
     # 鉴权 token 只从首帧取，且限时 / the auth token comes from the first frame only, with a deadline
+    # 读原始消息而不是 receive_json：先按 MAX_AUTH_FRAME_CHARS 卡长度再解析（见 _parse_auth_frame）。
+    # The raw message rather than receive_json, so length is capped before parsing.
     token = ""
     try:
-        first = await asyncio.wait_for(
-            websocket.receive_json(), timeout=AUTH_FRAME_TIMEOUT_SECONDS
+        message = await asyncio.wait_for(
+            websocket.receive(), timeout=AUTH_FRAME_TIMEOUT_SECONDS
         )
-        if isinstance(first, dict) and first.get("type") == "AUTH":
-            token = str(first.get("token", "") or "")
+        if message.get("type") == "websocket.disconnect":
+            raise WebSocketDisconnect(code=message.get("code", 1000))
+        token = _parse_auth_frame(message)
     except WebSocketDisconnect:
         # 客户端在发出鉴权帧之前就断开了。连接已经不存在，没有对象可以通知，直接
         # 收工。必须单独接住这一支：若和下面的通用分支一样往下走，就会对一个已经
@@ -190,6 +277,8 @@ async def ws_client(websocket: WebSocket):
     # waits for it before record_disconnect so a connect-then-drop leaves no ghost entry.
     netq_task: asyncio.Task | None = None
     last_sample_at = float("-inf")
+    session_state = {"revoked": False}
+    watch_task: asyncio.Task | None = None
     # register 之后的一切都必须在 try 里。
     #
     # 下面这几帧补推原来在 try 之外：客户端在鉴权成功后立刻断开（移动端切后台、
@@ -208,6 +297,7 @@ async def ws_client(websocket: WebSocket):
     # and egress on this project is a standing concern.
     try:
         await websocket.send_json({"type": "AUTH_OK", "userId": user_id})
+        watch_task = asyncio.create_task(_watch_session(websocket, user_id, token, session_state))
         netq_task = asyncio.create_task(_netq(net_quality.record_connect, conn_id, user_id))
         # 连接即补推最近一次持仓 / 挂单 / 分账户报价 / 全站报价快照，避免刷新后先空一拍。
         # 四份数据一次取齐（一个 Redis pipeline、一次往返，见 manager.connect_snapshot_async），
@@ -303,8 +393,13 @@ async def ws_client(websocket: WebSocket):
     except WebSocketDisconnect:
         pass
     except Exception:
-        logger.exception("ws_client error (user_id=%s)", user_id)
+        # 会话被吊销后连接已由 _watch_session 关闭，此后的收发报错是预期内的，不记异常。
+        # After a revocation _watch_session has closed the socket; errors past that are expected.
+        if not session_state["revoked"]:
+            logger.exception("ws_client error (user_id=%s)", user_id)
     finally:
+        if watch_task is not None:
+            watch_task.cancel()
         # 改用 finally：两个 except 各自 unregister 一次，等于要求「所有退出路径都
         # 记得加一行」，而补推那几帧挪进 try 之后退出路径又多了几条。放在 finally 里
         # 是让"注册过就一定注销"成为结构性保证，而不是靠每处都写对。

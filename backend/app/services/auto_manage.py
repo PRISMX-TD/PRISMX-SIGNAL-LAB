@@ -58,6 +58,38 @@ logger = logging.getLogger("prismx.auto_manage")
 # skipped so we don't emit a 1-pip MODIFY every 1.5 seconds.
 MIN_STEP_R = 0.1
 
+# 改止损失败后的退避（审计 A2）：同一仓位的自动 MODIFY 被拒 / 失败后，在上报的止损没变的
+# 前提下，第 n 次失败后至少等 BASE·2^(n-1) 秒（封顶 MAX）才再发。以前只认 PENDING 去重，
+# 指令一被拒，下一拍（1.5~2 秒）就原样再发一条：新订单行、新执行、新推送，故障持续多久就
+# 刷多久（休市、止损贴着冻结距离、绑定已撤销都会持续失败）。上报的止损变了说明情况变了，
+# 不再退避。只数窗口 MAX 内的失败。
+# Backoff after a failed SL move (audit A2): once an auto MODIFY for a position is
+# rejected / failed, and the reported stop is still the same, wait at least
+# BASE*2^(n-1) seconds after the n-th failure (capped at MAX) before re-issuing. The
+# old dedupe only saw PENDING commands, so a rejected move was re-sent on the very next
+# report (1.5-2s) - new row, new execution, new push - for as long as the failure
+# lasted. A changed reported stop means the situation changed and resets it. Only
+# failures within the MAX window count.
+MODIFY_RETRY_BASE_SECONDS = 60
+MODIFY_RETRY_MAX_SECONDS = 3600
+_FAILED_STATUSES = ("REJECTED", "FAILED")
+
+# 持仓行的来源（审计 A2）。gateway = 后端自己的网关持仓循环读出来的，可信；bridge =
+# 桥接令牌上报的，可以随便写，绝不能驱动 gateway 账号上的改单 / 平仓。
+# Where a position report came from (audit A2). gateway = read by the backend's own
+# gateway positions loop, trusted; bridge = posted with a bridge token, arbitrary, and
+# must never drive a modify / close on a gateway account.
+SOURCE_GATEWAY = "gateway"
+SOURCE_BRIDGE = "bridge"
+
+
+class GatewayPositions(list):
+    """网关持仓循环交给 evaluate_positions 的行，类型本身就是「来自网关」的标记。
+    请求体反序列化不出这个类型，桥接上报冒充不了；调用签名也不用变。
+    Rows handed over by the gateway positions loop; the type itself marks them as
+    gateway-sourced. No request body can deserialize into it, so a bridge report
+    cannot pose as one, and the call signature stays unchanged."""
+
 # 状态行保留天数：仓位平掉后其状态行不再被触达，过期清理。
 # Days to keep state rows; rows for long-gone positions get pruned.
 STATE_RETENTION_DAYS = 7
@@ -273,8 +305,17 @@ def _sl_kind(desired: float, entry: float, current_sl: float) -> str:
     return AUTO_KIND_TRAIL
 
 
-def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
+def evaluate_positions(
+    db: Session, user_id: str, positions: list, source: str | None = None,
+) -> int:
     """对一次持仓上报做规则评估，返回本轮新建的指令条数。
+
+    source 说明这批行从哪来（见 SOURCE_GATEWAY / SOURCE_BRIDGE 与 _trusted_rows）：
+    网关持仓循环传 GatewayPositions（等同 "gateway"），桥接上报应传 "bridge"；不传（旧调用方）时，落在 gateway
+    账号上的行要拿网关自己那一路持仓核对过才用。
+    `source` says where the rows came from (see _trusted_rows): the gateway loop passes
+    GatewayPositions (same as "gateway"), bridge reports should pass "bridge"; without it (legacy callers) rows on
+    a gateway account are checked against the gateway's own slice first.
     Run one rule pass over a position report; returns how many commands were
     enqueued. 异常由调用方兜底记录——本函数抛错不能影响持仓上报主流程。
     The caller catches exceptions — a failure here must never break the
@@ -294,6 +335,8 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
     # lookup. A bridge with no positions still reports an empty table every 1.5s.
     if not positions:
         return 0
+    if source is None and isinstance(positions, GatewayPositions):
+        source = SOURCE_GATEWAY
     name = f"auto_manage:{user_id}"
     owner = f"{shared_state.WORKER_ID}:{uuid.uuid4().hex[:8]}"
     try:
@@ -302,11 +345,11 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
         logger.warning("auto_manage: shared lock unavailable, using in-process lock", exc_info=True)
         lock = _get_eval_lock(user_id)
         with lock:
-            return _evaluate_positions_locked(db, user_id, positions)
+            return _run_locked(db, user_id, positions, source)
     if not acquired:
         return 0
     try:
-        return _evaluate_positions_locked(db, user_id, positions)
+        return _run_locked(db, user_id, positions, source)
     finally:
         try:
             shared_state.release_lock(name, owner=owner)
@@ -314,12 +357,169 @@ def evaluate_positions(db: Session, user_id: str, positions: list) -> int:
             logger.warning("auto_manage: shared lock release failed (user=%s)", user_id, exc_info=True)
 
 
-def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> int:
+def _run_locked(db: Session, user_id: str, positions: list, source: str | None) -> int:
+    # 不带 source 时按旧签名调用：单测会把 _evaluate_positions_locked 换成三参数的替身。
+    # Without a source keep the old 3-argument call (tests swap in 3-argument stand-ins).
+    if source is None:
+        return _evaluate_positions_locked(db, user_id, positions)
+    return _evaluate_positions_locked(db, user_id, positions, source=source)
+
+
+def _gateway_logins(db: Session, user_id: str) -> set[str]:
+    """该用户未删除的 gateway 绑定（含已撤销的）——与 _execute_gateway_orders 分流用的
+    是同一个集合：落在这些 login 上的指令都会被送去网关执行。
+    The user's non-removed gateway bindings (revoked included): the same set
+    _execute_gateway_orders routes to the gateway."""
+    from app.services.gateway_binding import not_removed
+    return {
+        row[0] for row in db.query(MT5Account.login).filter(
+            MT5Account.user_id == user_id,
+            MT5Account.source == "gateway",
+            not_removed(),
+        ).all()
+    }
+
+
+def _gateway_slice(user_id: str) -> list | None:
+    """后端网关持仓循环写下的该用户持仓（跨 worker 快照里 "gateway" 那一路）。
+    从没有任何来源的快照时返回 None（判不了）；读出错按「网关那一路为空」处理。
+    The user's gateway-loop positions (the "gateway" slice of the shared snapshot).
+    None when no snapshot exists for any source; a read error counts as empty."""
+    try:
+        from app.services.connection_manager import manager
+        by_source = manager._shared_by_source("positions", user_id)
+    except Exception:  # noqa: BLE001 —— 读不到就不信任这些行 / unreadable: trust nothing
+        logger.warning("auto_manage: gateway slice read failed (user=%s)", user_id, exc_info=True)
+        return []
+    if not by_source:
+        return None
+    rows = by_source.get(SOURCE_GATEWAY)
+    return rows if isinstance(rows, list) else []
+
+
+def _row_key(p: dict) -> tuple[str, int]:
+    try:
+        ticket = int(p.get("ticket") or 0)
+    except (TypeError, ValueError):
+        ticket = 0
+    return str(p.get("login") or ""), ticket
+
+
+def _trusted_rows(
+    db: Session, user_id: str, positions: list, source: str | None,
+) -> tuple[list, set[str]]:
+    """只留下可以拿来做决定的持仓行，并返回该用户的 gateway login 集合（审计 A2）。
+
+    落在 gateway 账号上的改单 / 平仓会被 _execute_gateway_orders 直接送到网关执行，而它的
+    全部决定依据（入场价、现价、止损、止盈、手数、login）都取自行本身。所以：
+      - source="gateway"：后端自己读网关得来，只留 login 确实是该用户 gateway 绑定的行；
+      - source="bridge"：桥接令牌上报的，任何人都能伪造，落在 gateway 账号上的行一律丢掉
+        （与 /bridge/poll 跳过 gateway 账号、平仓历史拒收 gateway 账号同一口径）；
+      - 不传（旧调用方，比如还没带 source 的桥接上报）：gateway 账号上的行要在网关那一路
+        快照里找得到 (login, ticket)，并改用网关那一行的数据；完全没有快照时（判不了）原样保留。
+    Keep only rows that may drive decisions, and return the user's gateway logins
+    (audit A2). Commands on a gateway account are executed on the gateway directly and
+    every input (entry, price, SL, TP, volume, login) comes from the row, so: gateway
+    rows are trusted (login must be a gateway binding); bridge rows naming a gateway
+    login are dropped; legacy callers have gateway-login rows replaced by the gateway
+    slice's row for the same (login, ticket), dropped when absent, and kept as-is only
+    when no snapshot exists at all.
+    """
+    gw_logins = _gateway_logins(db, user_id)
+    if source == SOURCE_GATEWAY:
+        return [p for p in positions if str(p.get("login") or "") in gw_logins], gw_logins
+    if not gw_logins:
+        return positions, gw_logins
+    others = [p for p in positions if str(p.get("login") or "") not in gw_logins]
+    if len(others) == len(positions):
+        return positions, gw_logins
+    if source == SOURCE_BRIDGE:
+        logger.warning(
+            "auto_manage: ignored %d bridge row(s) naming a gateway login (user=%s)",
+            len(positions) - len(others), user_id,
+        )
+        return others, gw_logins
+    slice_rows = _gateway_slice(user_id)
+    if slice_rows is None:
+        return positions, gw_logins
+    index = {
+        _row_key(r): r for r in slice_rows
+        if isinstance(r, dict) and str(r.get("login") or "") in gw_logins
+    }
+    verified: list = []
+    seen: set[tuple[str, int]] = set()
+    for p in positions:
+        key = _row_key(p)
+        if key[0] not in gw_logins or key in seen:
+            continue
+        seen.add(key)
+        real = index.get(key)
+        if real is not None:
+            verified.append(real)
+    return others + verified, gw_logins
+
+
+def _modify_backing_off(
+    failures: list[tuple[datetime, float | None]] | None, current_sl: float, now: datetime,
+) -> bool:
+    """这个仓位的自动改止损是否还在失败退避期内（见 MODIFY_RETRY_BASE_SECONDS）。
+    只数「失败时的原止损」与这次上报相同的那些失败。
+    Whether this position's auto SL move is still backing off after failures (see
+    MODIFY_RETRY_BASE_SECONDS); only failures issued against the same reported stop count."""
+    if not failures:
+        return False
+    same = [
+        created for created, prev in failures
+        if abs(float(prev or 0.0) - current_sl) <= 1e-9
+    ]
+    if not same:
+        return False
+    last = max(same)
+    wait = min(MODIFY_RETRY_BASE_SECONDS * (2 ** (len(same) - 1)), MODIFY_RETRY_MAX_SECONDS)
+    return (now - last).total_seconds() < wait
+
+
+def _recent_modify_failures(
+    db: Session, user_id: str, tickets: set[int], now: datetime,
+) -> dict[int, list[tuple[datetime, float | None]]]:
+    """窗口 MODIFY_RETRY_MAX_SECONDS 内被拒 / 失败的自动改止损，按仓位号分组。
+    Auto SL moves rejected / failed within the MAX window, grouped by ticket."""
+    cutoff = (now - timedelta(seconds=MODIFY_RETRY_MAX_SECONDS)).replace(tzinfo=None)
+    out: dict[int, list[tuple[datetime, float | None]]] = {}
+    rows = (
+        db.query(Order.ticket, Order.created_at, Order.prev_sl)
+        .filter(
+            Order.user_id == user_id,
+            Order.action == "MODIFY",
+            Order.client_order_id.like(f"{AUTO_PREFIX}%"),
+            Order.status.in_(_FAILED_STATUSES),
+            Order.ticket.in_(list(tickets)),
+            Order.created_at >= cutoff,
+        )
+        .all()
+    )
+    for ticket, created, prev in rows:
+        if ticket is None or created is None:
+            continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        out.setdefault(int(ticket), []).append((created, prev))
+    return out
+
+
+def _evaluate_positions_locked(
+    db: Session, user_id: str, positions: list, source: str | None = None,
+) -> int:
     """实际评估逻辑（调用方已持有该用户的评估锁）。"""
     if not positions:
         return 0
     eligible, cfg = _is_eligible(db, user_id)
     if not eligible or cfg is None:
+        return 0
+
+    # 先按来源筛掉不能信的行（见 _trusted_rows）/ drop rows that can't be trusted first
+    positions, gw_logins = _trusted_rows(db, user_id, positions, source)
+    if not positions:
         return 0
 
     # 只管理本平台开的仓位 / only manage positions opened through PRISMX
@@ -415,6 +615,34 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     }
 
     now = datetime.now(timezone.utc)
+    modify_failures = _recent_modify_failures(db, user_id, platform_tickets, now)
+
+    # 休市判定（审计 A2）：休市时不产生任何自动指令——发出去也只会被拒或被 MT5 挂成
+    # 「request adding」，分批止盈还会因为入队即标记而永远丢掉。按品种在本轮内缓存，
+    # 只在真要下指令时才问（market_hours 自己还有 30 秒缓存）。
+    # Market hours (audit A2): no auto command while the symbol is closed - it would be
+    # rejected or parked, and a partial take-profit (marked on enqueue) would be lost
+    # for good. Cached per symbol for this pass and only asked when a command is due.
+    closed_cache: dict[str, bool] = {}
+
+    def _market_closed(symbol: str, login) -> bool:
+        if symbol in closed_cache:
+            return closed_cache[symbol]
+        from app.services import market_hours
+        gw_login = None
+        if login and str(login) in gw_logins:
+            try:
+                gw_login = int(login)
+            except (TypeError, ValueError):
+                gw_login = None
+        try:
+            closed = market_hours.closed_for_manage(symbol, gw_login) is not None
+        except Exception:  # noqa: BLE001 —— 判定出错不挡自动仓管 / never block on a failed check
+            logger.warning("auto_manage: market status check failed (%s)", symbol, exc_info=True)
+            closed = False
+        closed_cache[symbol] = closed
+        return closed
+
     # 本轮新建的指令。除了计数，提交后还要把其中落在 gateway 账号上的立刻执行掉
     # （gateway 没有桥接来取，见 _execute_gateway_orders）。
     # This pass's new commands. Counted, and after the commit the ones targeting
@@ -425,7 +653,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     # Notifications are deferred until after the final db.commit() succeeds,
     # so a rule that decided to act but whose commit later failed/rolled back
     # never results in a push about something that didn't actually happen.
-    pending_pushes: list[tuple[str, str]] = []
+    pending_pushes: list[tuple[Order, str, str]] = []
     for p in positions:
         ticket = int(p.get("ticket") or 0)
         if ticket not in platform_tickets:
@@ -500,6 +728,10 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                 should_move = improvement >= MIN_STEP_R * risk
             else:
                 should_move = True  # 有 R 但当前无 SL（被手动清掉）：补上 / SL was cleared manually; restore it
+            if should_move and _modify_backing_off(modify_failures.get(ticket), current_sl, now):
+                should_move = False
+            if should_move and _market_closed(symbol, login):
+                should_move = False
             if should_move:
                 cmd = Order(
                     user_id=user_id,
@@ -526,6 +758,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                 pending_auto_tickets.add(ticket)
                 kind = "保本" if desired == entry else "追踪止损"
                 pending_pushes.append((
+                    cmd,
                     f"自动仓位管理：{symbol}",
                     f"止损已自动移至 {desired:.5f}（{kind}）",
                 ))
@@ -537,6 +770,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
             and not state.partial_done
             and profit_r >= cfg.ptp_trigger_r
             and ticket not in pending_auto_tickets
+            and not _market_closed(symbol, login)
         ):
             # 手数必须落在该品种的步长上，并且要向下取整——原油步长是 0.1，按
             # 固定的 0.01 取整会算出 0.05 这种手数。非整数倍的手数不会被 MT5 当场
@@ -574,6 +808,7 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
                 created_orders.append(cmd)
                 pending_auto_tickets.add(ticket)
                 pending_pushes.append((
+                    cmd,
                     f"自动仓位管理：{symbol}",
                     f"已自动分批止盈 {close_vol} 手",
                 ))
@@ -596,13 +831,18 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
         bridge_wake.notify(user_id)
         # Gateway 账号没有桥接来取这些指令，提交后由本函数直接执行。
         # Gateway accounts have no bridge to fetch these; execute them here.
-        _execute_gateway_orders(db, user_id, created_orders)
+        _execute_gateway_orders(db, user_id, created_orders, gw_logins)
         # 提交成功后才真正发送通知（见 pending_pushes 声明处的说明）；单条
         # 推送失败不影响其它推送或本函数的返回值。
         # Only send notifications after the commit actually succeeds (see the
         # note where pending_pushes is declared); one failed push must not
         # affect the others or this function's return value.
-        for title, body in pending_pushes:
+        for cmd, title, body in pending_pushes:
+            # 网关指令当场就有结果：被拒 / 失败的不再推「止损已移至」这类成功措辞（审计 A2）。
+            # Gateway commands already have their outcome: no success-worded push for a
+            # rejected / failed one (audit A2).
+            if cmd.status in _FAILED_STATUSES:
+                continue
             try:
                 dispatch_event_push(user_id, EVENT_AUTO_MANAGE, title, body)
             except Exception:
@@ -610,7 +850,9 @@ def _evaluate_positions_locked(db: Session, user_id: str, positions: list) -> in
     return len(created_orders)
 
 
-def _execute_gateway_orders(db: Session, user_id: str, orders: list[Order]) -> None:
+def _execute_gateway_orders(
+    db: Session, user_id: str, orders: list[Order], gateway_logins: set[str] | None = None,
+) -> None:
     """把落在 gateway 账号上的自动指令立刻执行掉。
 
     Bridge 账号的指令由桥接轮询 /bridge/poll 取走执行；gateway 账号没有桥接，
@@ -636,14 +878,8 @@ def _execute_gateway_orders(db: Session, user_id: str, orders: list[Order]) -> N
     rather than duplicating the retcode-to-status mapping; imported inside the
     function to avoid a services/routers import cycle.
     """
-    from app.services.gateway_binding import not_removed
-    gateway_logins = {
-        row[0] for row in db.query(MT5Account.login).filter(
-            MT5Account.user_id == user_id,
-            MT5Account.source == "gateway",
-            not_removed(),
-        ).all()
-    }
+    if gateway_logins is None:
+        gateway_logins = _gateway_logins(db, user_id)
     targets = [o for o in orders if o.mt5_login and o.mt5_login in gateway_logins]
     if not targets:
         return
