@@ -4472,7 +4472,7 @@
       "returnMetric": "Ranked by return rate, not P&L amount",
       "minTradesReturn": "≥{{n}} full closes this period",
       "minBaseline": "Trades count only on ≥{{usd}} USD capital",
-      "deposits": "Capital per trade = money in the account when it opened or closed (the larger) · deposits and withdrawals both count",
+      "deposits": "Capital = starting balance + deposits − withdrawals · larger of open and close per trade",
       "identity": "Per account · nickname public · middle two characters of the account number masked",
       "minTradesWinrate": "≥{{n}} trades this period",
       "positive": "Positive P&L required to rank"
@@ -4765,10 +4765,10 @@
       "entryFloor": "Your balance at signup must be at least {{usd}} USD.",
       "entryCeiling": "Your balance at signup must be at most {{usd}} USD."
     },
-    "title": "How deposits and withdrawals count",
-    "hint": "Withdrawing never erases what you earned; depositing can't inflate your rank",
-    "lead": "Return = profit ÷ how much was in the account at the time. Every trade is scored on its own, against the capital in the account while that trade was open — not the balance at the start or end of the period.",
-    "formula": "A trade's capital = the larger of what was in the account when it opened and when it closed",
+    "title": "How returns are calculated",
+    "hint": "Capital counts deposits only · trades below the floor don't count",
+    "lead": "Return = profit from counted trades ÷ capital. Weekly and monthly boards work the same way.",
+    "formula": "Capital = balance at period start + deposits − withdrawals this period (trading profit and loss never count as capital)",
     "case1": {
       "t": "Earn, then withdraw",
       "s": "10,000 capital → earn 1,000 → withdraw 9,000",
@@ -4795,30 +4795,36 @@
     },
     "noteSmall": "Small drops aren't withdrawals: commission, swap and similar odds and ends are ignored. A drop counts as a withdrawal only when it exceeds both 100 USD and 5% of the account's capital.",
     "floor": {
-      "rule": "A trade counts toward the return board only if the account held at least {{usd}} USD of capital while it was open. Trades below that are left out, without affecting the rest. Weekly and monthly boards work the same way.",
+      "title": "Capital floor: {{usd}} USD",
       "case1": {
         "t": "Trading below the floor",
-        "s": "Monday, capital {{low}}: 10 trades",
+        "s": "Capital {{low}}, trading brings the balance to {{usd}}",
         "r": "Not counted",
-        "w": "Trades made on less than {{usd}} USD don't count — this keeps figures like \"earned 500 on 300, up 167%\" off the board."
+        "w": "Capital counts deposits only, so profit can't lift you over the floor. These trades don't count, but they don't hurt the rest either."
       },
       "case2": {
-        "t": "Topping up, then trading on",
-        "s": "Tuesday, deposit up to {{usd}}: 6 more trades",
-        "r": "6 counted",
-        "w": "Trades after you reach the floor score normally, so you can rank that same week once you have enough. Monday's 10 can't be used to make up the count."
+        "t": "After topping up",
+        "s": "Deposit {{loss}} more (capital {{usd}}), then one trade earns {{gain}}",
+        "r": "10%",
+        "w": "The {{loss}} earned by the uncounted trades is in the account too, so it's included: {{gain}} ÷ ({{usd}} + {{loss}})."
       },
       "case3": {
-        "t": "Same for the monthly board",
-        "s": "Capital {{low}} at the start of the month, deposit up to {{usd}} on the 23rd",
-        "r": "Counted from the 23rd",
-        "w": "Trades before the 23rd don't count toward the monthly board; trades after it do, so you can still rank that month."
+        "t": "Topping up while a trade is open",
+        "s": "Open on {{low}} capital, deposit up to {{usd}}, then close +{{p20}}",
+        "r": "20%",
+        "w": "A trade uses the larger capital of its open and close moments, so it's {{usd}}."
       },
       "case4": {
-        "t": "Losses don't push you under the floor",
+        "t": "Losing after you qualify",
         "s": "Capital {{usd}}, lose {{loss}}, balance {{low}}",
         "r": "Still counted",
-        "w": "Capital only changes with deposits and withdrawals, not with trading P&L, so your later trades this period still count. Next period's capital is taken from the balance at that time."
+        "w": "Losses don't change capital, so later trades still count."
+      },
+      "case5": {
+        "t": "Trades across weeks or months",
+        "s": "Opened last week, closed this week",
+        "r": "This week",
+        "w": "A trade belongs to the period it closes in and uses that period's capital, including any floating profit or loss carried over."
       }
     },
     "noteCeiling": "An account above {{usd}} USD of capital doesn't rank in this competition — including deposits past the ceiling after signing up.",
@@ -4826,7 +4832,8 @@
     "noteWinRate": "The win-rate board is unaffected by cash flows: it only counts how many trades you won and lost.",
     "noteSealedBoard": "Once a period ends its results are sealed; no later deposit, withdrawal or trade can change a finished ranking.",
     "noteSealedComp": "Once a competition ends, the settled result is final; later deposits, withdrawals and trades no longer move it.",
-    "noteNoFlow": "For accounts that never deposit or withdraw, the calculation is exactly what it always was."
+    "flowsTitle": "Deposits and withdrawals",
+    "noteNewPeriod": "Each period starts by taking capital from the balance at that moment, so last period's profit counts as capital from this period on."
   },
   "festival": {
     "names": {

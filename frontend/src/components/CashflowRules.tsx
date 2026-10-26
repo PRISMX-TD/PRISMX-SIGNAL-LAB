@@ -41,7 +41,7 @@ import { useTranslation } from 'react-i18next'
 import { fmtUsd } from '../api/utils'
 
 const CASES = [1, 2, 3, 4] as const
-const FLOOR_CASES = [1, 2, 3, 4] as const
+const FLOOR_CASES = [1, 2, 3, 4, 5] as const
 
 export default function CashflowRules({
   minBaselineUsd,
@@ -69,10 +69,17 @@ export default function CashflowRules({
 }) {
   const { t } = useTranslation()
   const plain = variant === 'competition'
-  // 例子用的「不够门槛」金额：门槛的九成（100 → 90），差额就是例子里亏掉的钱。
-  // The "below the floor" example amount: 90% of the floor (100 → 90); the gap is the example loss.
+  // 门槛例子的金额（门槛 100 时）：不够门槛 90、差额 10；补入金后那笔赚 11 = (100 + 10) 的 10%；
+  // 持仓中补入金那笔赚 20 = 100 的 20%。例子里写死的 10% / 20% 靠这两个比例成立。
+  // Floor example amounts (at a 100 floor): 90 below, a 10 gap; the post-top-up trade earns
+  // 11 = 10% of (100 + 10); the spanning trade earns 20 = 20% of 100. The copy's fixed
+  // 10% / 20% hold because of these ratios.
   const low = Math.round(minBaselineUsd * 0.9)
-  const floorVars = { usd: fmtUsd(minBaselineUsd), low: fmtUsd(low), loss: fmtUsd(minBaselineUsd - low) }
+  const gap = minBaselineUsd - low
+  const floorVars = {
+    usd: fmtUsd(minBaselineUsd), low: fmtUsd(low), loss: fmtUsd(gap),
+    gain: fmtUsd(Math.round((minBaselineUsd + gap) * 10) / 100), p20: fmtUsd(Math.round(minBaselineUsd * 20) / 100),
+  }
 
   return (
     <details className={plain ? 'cf-rules is-plain' : 'card glass cf-rules'}>
@@ -115,6 +122,28 @@ export default function CashflowRules({
         <p className="cf-lead">{t('cashflowRules.lead')}</p>
         <p className="cf-formula">{t('cashflowRules.formula')}</p>
 
+        {/* 本金门槛放在前面：这是用户最常问的「为什么我不上榜」。只剔除本金不够时做的那几笔、
+            门槛只认入金、不计入的单赚的钱并进后面的分母（2026-10-26 起）。例子里的金额跟着
+            门槛走，管理端改了门槛也不会写错数。
+            The capital floor comes first: it answers the most common "why am I not ranked".
+            Only trades on too little capital are skipped, the floor counts deposits only, and
+            skipped profit joins later denominators (since 2026-10-26). Example amounts follow
+            the configured floor so they stay right when an admin changes it. */}
+        <h4 className="cf-sub">{t('cashflowRules.floor.title', floorVars)}</h4>
+        <ol className="cf-cases">
+          {FLOOR_CASES.map((n) => (
+            <li key={n}>
+              <span className="cf-case-head">
+                <span className="cf-case-t">{t(`cashflowRules.floor.case${n}.t`, floorVars)}</span>
+                <span className={n === 1 ? 'cf-case-r num is-off' : 'cf-case-r num'}>{t(`cashflowRules.floor.case${n}.r`, floorVars)}</span>
+              </span>
+              <span className="cf-case-s">{t(`cashflowRules.floor.case${n}.s`, floorVars)}</span>
+              <span className="cf-case-w">{t(`cashflowRules.floor.case${n}.w`, floorVars)}</span>
+            </li>
+          ))}
+        </ol>
+
+        <h4 className="cf-sub">{t('cashflowRules.flowsTitle')}</h4>
         <ol className="cf-cases">
           {CASES.map((n) => (
             <li key={n}>
@@ -130,35 +159,11 @@ export default function CashflowRules({
           ))}
         </ol>
 
-        {/* 本金门槛：只剔除本金不足时做的那几笔，其余照常（2026-10-26 起；之前是整行
-            不入榜）。例子里的金额跟着门槛走，管理端改了门槛也不会写错数。
-            Capital floor: only the trades made on too little capital are skipped
-            (since 2026-10-26; it used to drop the whole row). The example amounts
-            follow the configured floor so they stay right when an admin changes it. */}
-        <p className="cf-formula cf-floor">{t('cashflowRules.floor.rule', floorVars)}</p>
-        <ol className="cf-cases">
-          {FLOOR_CASES.map((n) => (
-            <li key={n}>
-              <span className="cf-case-head">
-                <span className="cf-case-t">{t(`cashflowRules.floor.case${n}.t`, floorVars)}</span>
-                <span className={n === 1 ? 'cf-case-r is-off' : 'cf-case-r'}>{t(`cashflowRules.floor.case${n}.r`, floorVars)}</span>
-              </span>
-              <span className="cf-case-s">{t(`cashflowRules.floor.case${n}.s`, floorVars)}</span>
-              <span className="cf-case-w">{t(`cashflowRules.floor.case${n}.w`, floorVars)}</span>
-            </li>
-          ))}
-        </ol>
-
         <ul className="cf-notes">
+          <li>{t('cashflowRules.noteNewPeriod')}</li>
           <li>{t('cashflowRules.noteSmall')}</li>
-          {maxBaselineUsd != null && maxBaselineUsd === minBaselineUsd ? (
-            <li>{t('cashflowRules.noteExact', { usd: fmtUsd(maxBaselineUsd) })}</li>
-          ) : (
-            maxBaselineUsd != null && <li>{t('cashflowRules.noteCeiling', { usd: fmtUsd(maxBaselineUsd) })}</li>
-          )}
           <li>{t('cashflowRules.noteWinRate')}</li>
           <li>{t('cashflowRules.noteSealedBoard')}</li>
-          <li>{t('cashflowRules.noteNoFlow')}</li>
         </ul>
       </div>
       )}

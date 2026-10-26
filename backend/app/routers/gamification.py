@@ -27,7 +27,7 @@ from app.services.gamification import identity, periods
 from app.services.gamification.badge_progress import badge_progress
 from app.services.gamification.stats import compute_account_lifetime_stats, load_trade_data
 from app.services.gamification.boards import (_resolved_in_period, board_gates, leaderboard_cache_key,
-                                              position_denominator, return_score)
+                                              position_capitals, return_score)
 from app.services.gamification.conditions import WINRATE_CONDITIONS
 from app.services.settings_store import (
     get_gamification_settings, invalidate_gamification_cache, save_gamification_settings)
@@ -755,8 +755,16 @@ def gamification_share_trade(request: Request, login: str, position: int | None 
     if b is None:
         return {"returnPct": None}
     gates = board_gates(get_gamification_settings(db))
-    denom = position_denominator(b, opened, closed)
-    if denom <= 0 or denom < gates["min_baseline_usd"]:
+    # 与月榜同一个 position_capitals：不够门槛 → null；够的话分母还要加上本月此前不计入
+    # 的单的盈利。把这笔追加在末尾取最后一个：它若已在 resolved 里，重复的「计入」仓位
+    # 不影响任何分母（只有不计入的仓位进累计）。
+    # Same position_capitals as the month board: below the floor → null, otherwise the
+    # denominator also carries this month's earlier skipped profit. Appending this trade
+    # and reading the last slot is safe even if it's already in `resolved`: a duplicate
+    # counted position feeds no denominator (only skipped ones accumulate).
+    resolved = _resolved_in_period(db, user.id, {login}, b.period_key, {login: b.taken_at}).get(login, [])
+    denom = position_capitals(b, resolved + [(opened, closed, profit)], gates["min_baseline_usd"])[-1]
+    if denom is None:
         return {"returnPct": None}
     return {"returnPct": profit / denom * 100}
 

@@ -2,6 +2,7 @@
 import json
 import logging
 import math
+from bisect import bisect_right
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -155,17 +156,54 @@ def baseline_in_range(capital: float, min_baseline: float, max_baseline: float |
     return max_baseline is None or capital <= max_baseline + BASELINE_EPS
 
 
+def position_capitals(b, resolved, min_baseline: float,
+                      max_baseline: float | None = None) -> list[float | None]:
+    """收益榜给每笔仓位用的本金，与 resolved 一一对应；None = 这笔不计入。
+
+    两步（2026-10-26 产品定的口径）：
+    ① 够不够门槛只看入金本金 `position_denominator`（基线 + 出入金，取开 / 平仓时刻较大者，
+       不含盈亏）：低于门槛、高于上限或 ≤ 0 → 这一笔不计入，不连累其他笔。赚的钱凑不了门槛。
+    ② 计入的那笔，分母再加上「平仓时刻之前已平掉的、不计入的单」的累计盈利（累计为亏损时
+       按 0）。那笔钱确实在账户里参与了后面的交易；不加的话，门槛下赚了钱、补入金过门槛、
+       再亏光的账户会出现 −137% 这种亏损超过本金的数（603494 的 10 月月榜）。亏损不扣，是
+       防止先在门槛下亏小分母、补一点入金过门槛，再拿很小的分母刷收益率——这一步只会让
+       收益率更保守。
+    Per-position capital for the return board, aligned with `resolved`; None = not
+    counted. (1) The gate uses deposit capital only (`position_denominator`: baseline
+    plus flows, the larger of open / close, no P&L); out of range → that position is
+    skipped without sinking the rest, and profit can't lift an account over the floor.
+    (2) A counted position's denominator adds the net profit (floored at 0) of skipped
+    positions closed by its close: that money was in the account, and without it a
+    profitable sub-floor run followed by a top-up and a wipe-out showed −137%. Losses
+    aren't deducted so a shrunken denominator can't be farmed — this only ever makes
+    returns more conservative."""
+    gates = [position_denominator(b, o, c) for o, c, _p in resolved]
+    # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不计：NaN 过得了区间判断。
+    # A non-finite capital (a stale NaN balance) is skipped like <= 0; NaN would pass the range check.
+    ok = [math.isfinite(g) and g > 0 and baseline_in_range(g, min_baseline, max_baseline) for g in gates]
+    skipped = sorted((c, p) for (_o, c, p), k in zip(resolved, ok) if not k)
+    times = [c for c, _p in skipped]
+    prefix = [0.0]
+    for _c, p in skipped:
+        prefix.append(prefix[-1] + p)
+    out: list[float | None] = []
+    for (_o, c, _p), g, k in zip(resolved, gates, ok):
+        if not k:
+            out.append(None)
+            continue
+        out.append(g + max(0.0, prefix[bisect_right(times, c)]))
+    return out
+
+
 def return_score(b, resolved, min_baseline: float, max_baseline: float | None = None):
     """收益榜一行的分数：resolved = [(opened_at, closed_at, profit), ...]。
-    返回 (score, sample)，sample 只数本金达标的仓位；本金低于门槛、高于上限或 ≤ 0
-    的仓位跳过不计（本金不够时的交易不排名），一笔达标的都没有 → None。
+    返回 (score, sample)，sample 只数计入的仓位；每笔用的本金与哪些笔不计入见
+    `position_capitals`。一笔计入的都没有 → None。
     2026-10-26 之前是「任一笔不达标整行不入榜」：周一 90 本金做了几笔、周二入金到
     100 以上，这一整周都上不了榜（603494 的 10 月月榜）。现在只剔除那几笔。
-    Score for one return_pct row; sample counts only the positions whose capital
-    is in range. A position below the floor, above the ceiling or non-positive is
-    skipped (trades on too little capital don't rank); None when none qualify.
-    Before 2026-10-26 one such position dropped the whole row, so trading on 90
-    on Monday and topping up to 100 on Tuesday kept the account off that week.
+    Score for one return_pct row; sample counts only the counted positions (see
+    `position_capitals` for which ones and on what capital). None when none count.
+    Before 2026-10-26 one sub-floor position dropped the whole row.
     """
     # 先按本金分组再各除一次，而不是逐笔相除再相加：没有出入金时结果与原来的
     # total / denom 逐位相同（逐笔相除会多出浮点尾差，让本该打平的两行分不出胜负）。
@@ -174,11 +212,8 @@ def return_score(b, resolved, min_baseline: float, max_baseline: float | None = 
     # float noise and break exact ties).
     by_denom: dict[float, float] = defaultdict(float)
     sample = 0
-    for opened_at, closed_at, profit in resolved:
-        denom = position_denominator(b, opened_at, closed_at)
-        # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不计：NaN 过得了下面的区间判断。
-        # A non-finite capital (a stale NaN balance) is skipped like <= 0; NaN would pass the range check.
-        if not math.isfinite(denom) or denom <= 0 or not baseline_in_range(denom, min_baseline, max_baseline):
+    for (_o, _c, profit), denom in zip(resolved, position_capitals(b, resolved, min_baseline, max_baseline)):
+        if denom is None:
             continue
         by_denom[denom] += profit
         sample += 1

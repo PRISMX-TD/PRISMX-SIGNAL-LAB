@@ -127,3 +127,18 @@ def test_share_trade_floor_and_missing_baseline(db_session):
     c = _client(db_session, u)
     assert c.get("/gamification/share/trade", params={"login": "A", "position": 11}).json()["returnPct"] is None
     assert c.get("/gamification/share/trade", params={"login": "A", "position": 12}).json()["returnPct"] is None
+
+
+def test_share_trade_carries_skipped_profit_like_the_board(db_session):
+    """单笔战报与月榜同一个 position_capitals：门槛下赚的 50（不计入）并进之后那笔的分母。
+    Single-trade card uses the board's position_capitals: the skipped sub-floor +50 joins the denominator."""
+    u = _user(db_session, "sk@t.co"); _acct(db_session, u, "A", 400.0)      # 低于 500 门槛
+    ensure_baselines(db_session, MK, T0)
+    _pos(db_session, u, "A", 11, 50.0, T0 + timedelta(days=2), T0 + timedelta(days=2, hours=2))
+    b = db_session.query(PeriodBaseline).filter_by(user_id=u.id, mt5_login="A", period_key=MK).one()
+    _append_flow(b, T0 + timedelta(days=10), 600.0); b.adjust = 600.0; db_session.commit()   # 入金到 1000
+    _leg(db_session, u, "A", 12, 105.0, datetime(2026, 9, 12, 1), datetime(2026, 9, 12, 5))
+    c = _client(db_session, u)
+    assert c.get("/gamification/share/trade", params={"login": "A", "position": 11}).json()["returnPct"] is None
+    r = c.get("/gamification/share/trade", params={"login": "A", "position": 12}).json()
+    assert abs(r["returnPct"] - 10.0) < 1e-9            # 105 / (1000 + 50)

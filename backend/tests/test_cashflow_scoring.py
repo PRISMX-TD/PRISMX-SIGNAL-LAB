@@ -16,7 +16,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import ClosedTrade, MT5Account, Order, PeriodBaseline, User
 from app.services.gamification.boards import (
-    compute_board_rows, ensure_baselines, position_denominator, reconcile_deposits, return_score,
+    compute_board_rows, ensure_baselines, position_capitals, position_denominator, reconcile_deposits,
+    return_score,
 )
 
 UTC = timezone.utc
@@ -140,10 +141,11 @@ def test_return_score_helper_and_denominator():
     assert return_score(b, [(after, after, 60.0)], 500.0) == (0.1, 1)
     assert return_score(b, [(after, after, 60.0)], 700.0) is None   # 本金 600 < 门槛
     assert return_score(b, [], 500.0) is None
-    # 一笔 600（达标）+ 一笔 1000：门槛 700 时只算 1000 那笔，sample 只数达标的
-    # 600 + 1000 capital: at a 700 floor only the 1000 one counts and sample says 1
+    # 一笔 600 + 一笔 1000：门槛 700 时只算 1000 那笔（sample 只数计入的），
+    # 不计入那笔同时平掉的 +60 并进分母 → 50 ÷ 1060
+    # 600 + 1000 capital: at a 700 floor only the 1000 one counts, carrying the skipped +60
     mixed = [(after, after, 60.0), (before, after, 50.0)]
-    assert return_score(b, mixed, 700.0) == (0.05, 1)
+    assert return_score(b, mixed, 700.0) == (50.0 / 1060.0, 1)
     assert return_score(b, mixed, 500.0) == (60.0 / 600.0 + 50.0 / 1000.0, 2)
 
 
@@ -169,9 +171,32 @@ def test_trades_below_floor_skipped_rest_still_rank(db_session):
     _five_wins(db_session, u, "A", 20.0, wed, wed + timedelta(hours=1), start=6)   # +100
     row = _score(db_session, "A")
     assert row is not None and row["sample"] == 5
-    assert abs(row["score"] - 100.0 / 1000.0) < 1e-9
+    # 分母 = 入金本金 1000 + 周一不计入的单赚的 50 / capital 1000 + Monday's skipped +50
+    assert abs(row["score"] - 100.0 / 1050.0) < 1e-9
     wr = {r["login"]: r for r in compute_board_rows(db_session, PK)["win_rate"]}
     assert wr.get("A") is None or wr["A"]["sample"] == 10        # 胜率榜照旧数全部
+
+
+def test_skipped_profit_joins_later_denominators_losses_do_not():
+    """不计入的单：累计盈利并入之后计入那笔的分母（平仓时刻之前平掉的才算），亏损不扣；
+    门槛只看入金本金，盈利凑不了门槛。
+    Skipped positions: their net profit joins the denominator of later counted ones
+    (only those closed by its close), losses aren't deducted, and profit never lifts the gate."""
+    b = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=90.0, adjust=10.0,
+                       taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", 10.0]]')
+    mon, tue, wed = T0 + timedelta(hours=1), T0 + timedelta(days=1, hours=13), T0 + timedelta(days=2)
+    # 周一本金 90 赚 10（不计入）；周二入金到 100 后一笔赚 11 → 11 ÷ (100 + 10) = 10%
+    caps = position_capitals(b, [(mon, mon, 10.0), (tue, tue, 11.0)], 100.0)
+    assert caps == [None, 110.0]
+    assert abs(return_score(b, [(mon, mon, 10.0), (tue, tue, 11.0)], 100.0)[0] - 0.1) < 1e-12
+    # 周一亏的不扣：分母仍是 100 / a skipped loss isn't deducted
+    assert position_capitals(b, [(mon, mon, -30.0), (tue, tue, 11.0)], 100.0) == [None, 100.0]
+    # 盈亏相抵后按净额：+10 − 4 = 6 / netted: +10 − 4
+    assert position_capitals(b, [(mon, mon, 10.0), (mon, mon, -4.0), (tue, tue, 1.0)], 100.0)[2] == 106.0
+    # 跨过入金的那笔（开仓 90、平仓 100）照样拿到之前不计入的盈利 / a position spanning the top-up gets it too
+    assert position_capitals(b, [(mon, mon, 7.0), (mon, wed, 5.0)], 100.0) == [None, 107.0]
+    # 周二赚到余额 100 但入金仍 90 → 门槛不过 / profit alone never passes the gate
+    assert position_capitals(b, [(mon, mon, 10.0), (mon, T0 + timedelta(hours=5), 1.0)], 100.0) == [None, None]
 
 
 def test_trade_gate_counts_only_positions_above_floor(db_session):
