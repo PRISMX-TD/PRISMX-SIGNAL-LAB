@@ -3,7 +3,7 @@
 // （AgentTreeDrawer），任命要靠「在链接上指派」——rev 50 起谁是代理只看代理树，链接只决定以后
 // 经它注册的人归谁，所以代理的增删改从链接里搬了出来。
 //
-// - 任命：搜一个用户 → 选上级（或一级）→ 默认顺手给他生成一条专属链接。他已经归属的客户不动。
+// - 任命：搜一个用户 → 选上级（或一级）→ 一律给他生成一条专属链接（不再可选）。他已经归属的客户不动。
 // - 撤销：他名下的客户与链接交给上级（一级则客户变平台客户、链接变平台链接），下级整体上移一级；
 //   一级代理下面还有人时后端 409，先改挂或撤下级。
 // - 改挂上级：连同整棵子树（客户本来就归他们，一起过去）。选项里已经去掉他自己、他的下级、
@@ -20,7 +20,6 @@ import { localizeApiError } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
 import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
-import Switch from '../Switch'
 import type { AdminAgentTree, AdminAgentTreeNode, AdminUser } from '../../api/types'
 
 export default function AgentsPanel() {
@@ -289,9 +288,9 @@ export default function AgentsPanel() {
           tree={tree}
           busy={busy}
           onCancel={() => setAppointing(false)}
-          onSubmit={async (userId, parentUserId, createLink, label) => {
+          onSubmit={async (userId, parentUserId, label) => {
             const ok = await run(
-              () => adminApi.appointAgent(userId, parentUserId, createLink),
+              () => adminApi.appointAgent(userId, parentUserId),
               t('admin.agents.appointDone', { name: label }),
             )
             if (ok) setAppointing(false)
@@ -358,14 +357,13 @@ function AppointForm({
   tree: AdminAgentTree
   busy: boolean
   onCancel: () => void
-  onSubmit: (userId: string, parentUserId: string | null, createLink: boolean, label: string) => void
+  onSubmit: (userId: string, parentUserId: string | null, label: string) => void
 }) {
   const { t } = useTranslation()
   const [q, setQ] = useState('')
   const [results, setResults] = useState<AdminUser[] | null>(null)
   const [picked, setPicked] = useState<AdminUser | null>(null)
   const [parent, setParent] = useState('')
-  const [createLink, setCreateLink] = useState(true)
 
   useEffect(() => {
     const term = q.trim()
@@ -452,15 +450,9 @@ function AppointForm({
         </>
       )}
 
-      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className="label">{t('admin.agents.parent')}</label>
-          <Select value={parent} onChange={setParent} ariaLabel={t('admin.agents.parent')} options={parentOptions} />
-        </div>
-        <label className="flex cursor-pointer items-center gap-2 self-end pb-2 text-xs text-neutral-300">
-          <Switch checked={createLink} onChange={setCreateLink} />
-          {t('admin.agents.createLink')}
-        </label>
+      <div className="mt-3 sm:max-w-xs">
+        <label className="label">{t('admin.agents.parent')}</label>
+        <Select value={parent} onChange={setParent} ariaLabel={t('admin.agents.parent')} options={parentOptions} />
       </div>
       <p className="mt-2 text-[11px] leading-snug text-neutral-500">{t('admin.agents.appointHint')}</p>
 
@@ -469,7 +461,7 @@ function AppointForm({
           type="button"
           className="btn-primary px-4 py-1.5 text-xs disabled:opacity-40"
           disabled={!picked || busy}
-          onClick={() => picked && onSubmit(picked.id, parent || null, createLink, picked.nickname || picked.email)}
+          onClick={() => picked && onSubmit(picked.id, parent || null, picked.nickname || picked.email)}
         >
           {t('admin.agents.appointConfirm')}
         </button>

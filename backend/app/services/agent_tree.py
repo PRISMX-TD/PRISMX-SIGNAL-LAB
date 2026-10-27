@@ -143,16 +143,17 @@ def remove_node(db: Session, node: AgentNode) -> tuple[list[InviteLink], list[st
     """撤销一个代理，返回 (他被转走的链接, 被转走的客户 id)。不提交。
 
     - 他名下的客户：转给他的上级；他是一级就变成平台客户（agent_user_id 置空）；
-    - 他的链接：有上级 → 停用并转给上级（防止他继续拿着旧链接拉人，而拉来的人归上级）；
-      一级 → 只摘掉主人，链接照常可用，变成平台链接；
+    - 他的链接：一律摘掉主人变成平台链接。有上级 → 同时停用（防止他继续拿着旧链接拉人）；
+      一级 → 照常可用。10-28 前有上级时是停用后转给上级，结果上级的代理页堆满用不了的卡；
+      现在停用的链接只留在后台「推广链接」里；
     - 他本人从此是普通客户，归他原来的上级（一级则没有归属）；
     - 下级整体上移一级：直属下级改挂到他的上级下面，整棵子树 depth 各减 1。
     调用方负责先拦住「一级代理下面还有人」（产品决定：不让撤，先改挂或撤下级）。
 
-    Remove an agent; returns (links handed over, customer ids moved). Customers
-    and links go to the parent — at top level customers become platform
-    customers and links simply lose their owner, staying active; with a parent
-    the links are disabled. The agent becomes an ordinary customer of their old
+    Remove an agent; returns (links taken back, customer ids moved). Customers
+    go to the parent (platform customers at top level). Links always lose their
+    owner and become platform links; with a parent they are also disabled (they
+    used to be handed to the parent, cluttering the parent's agent page). The agent becomes an ordinary customer of their old
     parent and the subtree moves up a level. Callers block removing a top-level
     agent who still has children. Does not commit.
     """
@@ -166,7 +167,7 @@ def remove_node(db: Session, node: AgentNode) -> tuple[list[InviteLink], list[st
         )
     links = db.query(InviteLink).filter(InviteLink.owner_user_id == node.user_id).all()
     for link in links:
-        set_link_owner(db, link, parent_id, None)
+        set_link_owner(db, link, None, None)
         if parent_id is not None:
             link.is_active = False
     me = db.get(User, node.user_id)

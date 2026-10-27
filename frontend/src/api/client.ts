@@ -1724,12 +1724,12 @@ export const adminApi = {
       method: 'PUT',
       body: JSON.stringify({ maxDepth }),
     }),
-  // 任命代理：parentUserId 为 null = 一级；createLink = 顺手给他生成一条专属链接。
-  // Appoint an agent (null parent = top level); createLink mints them a link.
-  appointAgent: (userId: string, parentUserId: string | null, createLink: boolean) =>
+  // 任命代理：parentUserId 为 null = 一级；后端一律顺手给他生成一条专属链接。
+  // Appoint an agent (null parent = top level); the server always mints them a link.
+  appointAgent: (userId: string, parentUserId: string | null) =>
     request<AdminAgentTree>('/admin/agents', {
       method: 'POST',
-      body: JSON.stringify({ userId, parentUserId, createLink }),
+      body: JSON.stringify({ userId, parentUserId }),
     }),
   // 撤销代理：客户与链接交给上级（一级则变平台客户 / 平台链接），下级整体上移一级。
   // 一级代理下面还有人时 409。/ Revoke: customers and links go to the parent; 409 for a top-level agent with children.

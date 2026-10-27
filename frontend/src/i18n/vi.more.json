@@ -1366,7 +1366,7 @@
       "emptyTop": "Chưa có đại lý cấp dưới. Bạn có thể nâng khách hàng thành đại lý ở mục “Tất cả khách hàng”.",
       "empty": "Chưa có đại lý cấp dưới.",
       "removeTitle": "Xác nhận gỡ đại lý",
-      "removeBody": "{{name}} sẽ trở lại là người dùng thường. Liên kết của họ bị tắt và chuyển cho cấp trên; khách hàng họ mang đến vẫn ở trong nhóm của bạn, đại lý cấp dưới của họ được nâng lên một cấp.",
+      "removeBody": "{{name}} sẽ trở lại là người dùng thường. Liên kết của họ bị tắt và nền tảng thu hồi; khách hàng họ mang đến vẫn ở trong nhóm của bạn, đại lý cấp dưới của họ được nâng lên một cấp.",
       "customersShow": "Hiện khách trực tiếp ({{n}})",
       "customersHide": "Ẩn khách trực tiếp",
       "customersMore": "Còn {{n}} người, xem ở “Tất cả khách hàng”"

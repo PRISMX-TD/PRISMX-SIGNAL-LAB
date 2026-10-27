@@ -1543,11 +1543,12 @@ def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
 
 
 def admin_appoint_agent(db: Session, admin: User, body: AdminAgentAppoint) -> AdminAgentTreeOut:
-    """管理员任命代理：挂在 parentUserId 下（null = 一级），可选同时生成一条专属链接。
+    """管理员任命代理：挂在 parentUserId 下（null = 一级），同时生成一条专属链接——代理没链接就拉不了人，
+    所以不再给「不生成」的选项（要把现成的链接给他，到推广链接里换主人，多出的这条停用即可）。
     不改他的来源，也不改任何客户（设计 §6）；他自己原来的归属代理由 add_node 清掉。已是代理 409，
     上级不是代理 404。
-    Admin appoints an agent under parentUserId (null = top), optionally minting
-    a link. Touches no customer; add_node clears the appointee's own owner.
+    Admin appoints an agent under parentUserId (null = top) and always mints
+    them a link. Touches no customer; add_node clears the appointee's own owner.
     409 if already an agent; 404 for a bad parent."""
     target = db.get(User, body.userId)
     if target is None:
@@ -1564,8 +1565,7 @@ def admin_appoint_agent(db: Session, admin: User, body: AdminAgentAppoint) -> Ad
     add_node(db, target.id, parent, admin.id)
     parent_user = db.get(User, parent.user_id) if parent is not None else None
     _log_change(db, admin.id, target.id, "agent_parent", None, parent_user.email if parent_user else "-")
-    if body.createLink:
-        _mint_agent_link(db, admin, target, False)
+    _mint_agent_link(db, admin, target, False)
     create_notification(db, target.id, KIND_AGENT_PROMOTED, link="/agent")
     db.commit()
     notify_ws(target.id)

@@ -2294,11 +2294,12 @@ class AdminAgentMove(BaseModel):
 
 
 class AdminAgentAppoint(BaseModel):
-    """管理员任命代理（rev 50）：parentUserId 为 null = 一级；createLink 同时给他生成一条专属链接。
-    Admin appoints an agent; null parent = top level; createLink also mints a link."""
+    """管理员任命代理（rev 50）：parentUserId 为 null = 一级；一律同时给他生成一条专属链接
+    （10-28 起去掉了 createLink 开关；旧客户端多传的字段直接忽略）。
+    Admin appoints an agent; null parent = top level; a link is always minted
+    (the createLink switch is gone; a stray field from old clients is ignored)."""
     userId: str = Field(min_length=1, max_length=64)
     parentUserId: str | None = Field(default=None, max_length=64)
-    createLink: bool = True
 
 
 class AdminLinkOwnerUpdate(BaseModel):

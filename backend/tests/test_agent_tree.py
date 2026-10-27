@@ -62,10 +62,8 @@ def _link_of(db, user):
     )
 
 
-def _appoint(db, admin, user, parent=None, create_link=True):
-    admin_appoint_agent(
-        db, admin, AdminAgentAppoint(userId=user.id, parentUserId=parent.id if parent else None, createLink=create_link)
-    )
+def _appoint(db, admin, user, parent=None):
+    admin_appoint_agent(db, admin, AdminAgentAppoint(userId=user.id, parentUserId=parent.id if parent else None))
     return _link_of(db, user)
 
 
@@ -108,7 +106,9 @@ def test_admin_appointment_makes_a_top_level_node_with_a_link(db_session):
 def test_an_agent_without_links_is_still_an_agent(db_session):
     admin = _mk_user(db_session, "admin@x.io", role="admin")
     a = _mk_user(db_session, "a@x.io")
-    assert _appoint(db_session, admin, a, create_link=False) is None
+    la = _appoint(db_session, admin, a)
+    delete_invite_link(link_id=la.id, db=db_session, admin=admin)  # 没人注册过 → 硬删 / hard delete
+    assert _link_of(db_session, a) is None
     assert is_agent(db_session, a.id)
     assert agent_team(db_session, a).isAgent is True
 
@@ -343,7 +343,10 @@ def test_demotion_hands_customers_and_links_up_and_lifts_the_subtree(db_session)
 
     assert not is_agent(db_session, b.id)
     db_session.refresh(lb)
-    assert lb.is_active is False and lb.owner_user_id == a.id
+    # 链接收回成平台链接并停用，不再转给上级（上级的代理页不出现用不了的卡）。
+    # The link becomes a disabled platform link instead of landing on the upline's page.
+    assert lb.is_active is False and lb.owner_user_id is None
+    assert lb.code not in {l.code for l in agent_links(db_session, a)}
     # c1 上移一级、改挂到 A 下；B 的客户与 B 本人都归 A。
     c_node = db_session.query(AgentNode).filter_by(user_id=c1.id).one()
     assert c_node.parent_user_id == a.id and c_node.depth == 2
