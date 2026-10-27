@@ -46,8 +46,6 @@ const MID_AUTUMN: Record<number, string> = {
   2030: '2030-09-12',
 }
 
-export const LUNAR_YEARS = { first: 2026, last: 2030 }
-
 function pad(n: number) {
   return (n < 10 ? '0' : '') + n
 }

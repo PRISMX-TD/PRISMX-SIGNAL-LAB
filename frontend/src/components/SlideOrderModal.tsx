@@ -11,7 +11,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGlobalQuote, useQuotes } from '../store/live'
-import type { MT5Account, Quote, Signal } from '../api/types'
+import type { MT5Account, Signal } from '../api/types'
 import { brokerSymbol, calcCountdown } from '../api/utils'
 import { SIGNAL_LIFESPAN_MS } from './signals/SignalView'
 import { useNow } from './signals/hooks'
@@ -23,12 +23,6 @@ import { useMarketClosedBlock } from './order/useMarketStatus'
 interface Props {
   signal: Signal
   accounts: MT5Account[]
-  // 按交易商账户区分的报价：login -> {symbol: Quote}。选中哪个账户就用哪个交易商的报价。
-  // Per-broker-account quotes: whichever account is selected drives which broker's quote is used.
-  // 可省略：省略时弹窗自己订阅（顶层页面不必为它订阅报价而每 0.5 秒整页重渲染）。
-  // Optional: when omitted the modal subscribes itself, so pages needn't subscribe just for it
-  // (and re-render the whole page every 0.5s).
-  quotesByAccount?: Record<string, Record<string, Quote>>
   onCancel: () => void
   // 比 OrderSheet 的 OrderConfirm 多一个 reverse：这一单是不是反向跟单。
   // OrderSheet's OrderConfirm plus `reverse`: whether this is a reverse copy.
@@ -46,10 +40,14 @@ interface Props {
 // Prefill: in reverse the signal's TP becomes the stop and its SL the target.
 const levelText = (v: number | null) => (v != null ? String(v) : '')
 
-export default function SlideOrderModal({ signal, accounts, quotesByAccount: quotesByAccountProp, onCancel, onConfirm }: Props) {
+export default function SlideOrderModal({ signal, accounts, onCancel, onConfirm }: Props) {
   const { t } = useTranslation()
-  const ctxAccountQuotes = useQuotes()
-  const quotesByAccount = quotesByAccountProp ?? ctxAccountQuotes
+  // 按交易商账户区分的报价：login -> {symbol: Quote}。选中哪个账户就用哪个交易商的报价。
+  // 弹窗自己订阅（顶层页面不必为它订阅报价而每 0.5 秒整页重渲染）。
+  // Per-broker-account quotes: whichever account is selected drives which broker's quote is used.
+  // The modal subscribes itself, so pages needn't subscribe just for it (and re-render the
+  // whole page every 0.5s).
+  const quotesByAccount = useQuotes()
   // 不用 accounts.filter(a => a.online)：在线标志抖一下就会把切换器整个卸载，
   // 表现为"一点切换账号，弹窗就没了"。见 useStickyOnlineAccounts 的说明。
   // Not a plain online filter — a flickering flag would unmount the switcher mid-click.

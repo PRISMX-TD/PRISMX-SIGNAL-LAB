@@ -51,7 +51,7 @@ export interface DrawLayerHandle {
 interface Point { t: number; p: number }
 interface Drawing { id: string; type: DrawType; pts: Point[]; color: string; locked?: boolean; lineWidth?: number; lineStyle?: 'solid' | 'dashed' | 'dotted' }
 interface Props {
-  chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; lastPrice: number; barTimes: () => number[]; digits?: number
+  chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; barTimes: () => number[]; digits?: number
   // 句柄上的状态（当前工具 / 选中 / 数量…）提交后通知外部工具栏重渲染。外部点按钮时页面会先于
   // 本组件重渲染、读到旧句柄，按下态就慢一拍；画完自动回到光标也不会反映到工具栏上。
   // Fires after the handle's state (tool / selection / counts…) commits, so external toolbars

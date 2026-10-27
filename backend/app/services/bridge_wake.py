@@ -104,7 +104,7 @@ async def run_subscriber() -> None:
     while True:
         pubsub = client = None
         try:
-            sub = shared_state.new_async_pubsub(CHANNEL, with_client=True)
+            sub = shared_state.new_async_pubsub(CHANNEL)
             if sub is None:
                 return
             pubsub, channel, client = sub

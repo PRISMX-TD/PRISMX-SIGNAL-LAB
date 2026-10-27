@@ -1,7 +1,4 @@
 {
-  "nav": {
-    "download": "Download Bridge"
-  },
   "common": {
     "copy": "Copy",
     "prevPage": "Previous",
@@ -195,10 +192,6 @@
   "account": {
     "title": "Account",
     "loadError": "Failed to load account info",
-    "platform": "Platform Account",
-    "email": "Email",
-    "registeredAt": "Registered",
-    "expiresAt": "PRO Expires",
     "neverExpires": "No expiry",
     "planTrialTag": "PRO (Trial)",
     "balance": "Balance",
@@ -206,7 +199,6 @@
     "marginLevel": "Margin level",
     "leverage": "Leverage",
     "changePassword": "Change password",
-    "setPassword": "Set password",
     "oldPassword": "Old password",
     "newPassword": "New password (min 8 chars)",
     "pwTooShort": "New password must be at least 8 characters",
@@ -221,14 +213,7 @@
     "notifSymbolLabel": "By symbol",
     "notifAll": "All",
     "notifEvent": {
-      "order_filled": "Order filled",
-      "order_rejected": "Order rejected",
-      "auto_manage": "Auto position management triggered",
-      "bridge_offline": "PRISMX Bridge went offline",
-      "account_revoked": "Direct connection needs re-verification",
-      "strategy_signal": "My strategy signals",
-      "badge_awarded": "New badge earned",
-      "support_reminder": "Support follow-up reminders"
+      "strategy_signal": "My strategy signals"
     },
     "notifWindowHeading": "Push hours",
     "notifWindowEnable": "Only push during these hours",
@@ -501,24 +486,13 @@
       "enter": "Fullscreen",
       "exit": "Exit fullscreen"
     },
-    "mtabs": {
-      "chart": "Chart",
-      "watchlist": "Watchlist",
-      "trade": "Trade",
-      "positions": "Positions"
-    },
     "symhead": {
       "bid": "Bid",
       "ask": "Ask",
       "spread": "Spread",
       "high": "High",
       "low": "Low",
-      "change": "Chg",
-      "mBid": "Bid",
-      "mAsk": "Ask",
-      "mSpread": "Spr",
-      "mHigh": "H",
-      "mLow": "L"
+      "change": "Chg"
     },
     "watchlist": {
       "title": "Watchlist",
@@ -587,15 +561,11 @@
       "orders": "Pending",
       "noPositions": "No open positions",
       "noOrders": "No pending orders",
-      "colSymbol": "Symbol",
-      "colSide": "Side",
-      "colVolume": "Lots",
       "colEntry": "Entry",
       "colCurrent": "Current",
       "colSl": "SL",
       "colTp": "TP",
       "colPnl": "Floating P&L",
-      "colStatus": "Status",
       "buy": "Buy",
       "sell": "Sell",
       "close": "Close",
@@ -650,10 +620,8 @@
     "hitSl": "Hit SL",
     "openPositions": "Open",
     "resolvedCount": "{{n}} resolved",
-    "bySymbol": "By Symbol",
     "noData": "Not enough data yet",
     "viewDetail": "View details",
-    "disclaimer": "Past performance does not guarantee future results.",
     "closedTradesTitle": "Closed Trade History",
     "closedTradesHint": "Every real fill — the raw records the win rate above is built from.",
     "closedTradesEmpty": "No closed trades yet",
@@ -685,15 +653,11 @@
       "scope": "Covering the last {{days}} days · {{account}} · based on your own real closed trades"
     },
     "colTime": "Time",
-    "colType": "Type",
     "colSymbol": "Symbol",
     "colSide": "Side",
     "colVolume": "Vol",
-    "colStatus": "Status",
     "colTicket": "MT5 Ticket",
     "colPrice": "Fill Price",
-    "colMessage": "Message",
-    "colAction": "Action",
     "closed": {
       "openTime": "Open Time",
       "position": "Position",
@@ -778,7 +742,6 @@
       "totalPnl": "Total P&L"
     },
     "filterStatus": "Status",
-    "filterSide": "Side",
     "filterSymbol": "Symbol",
     "symbolPlaceholder": "e.g. XAUUSD",
     "filterFrom": "From date",
@@ -794,7 +757,6 @@
       "performance": "Performance",
       "activity": "Activity Log"
     },
-    "historyHint": "Every order, close, modify and cancel command with its execution status and receipt.",
     "reverse": "Reverse",
     "reverseHint": "Reverse-signal order: opposite side to the signal, TP and SL swapped"
   },
@@ -852,11 +814,6 @@
     "tokenSavedClose": "I've saved it, close",
     "resetToken": "Reset Token",
     "resetConfirm": "Resetting invalidates the old token immediately. Any running Bridge app must be updated with the new token, or it will fail to connect. Reset?",
-    "statusTitle": "MT5 Connection Status",
-    "connection": "Connection",
-    "boundAccount": "Primary Account",
-    "lastHeartbeat": "Last Heartbeat",
-    "none": "Not connected",
     "suffixTitle": "Symbol Suffix",
     "suffixHint": "If your broker's symbols carry a suffix (e.g. the .sc in GBPUSD.sc), enter it here. It will be appended to the symbol when placing orders. Leave empty for none.",
     "suffixLabel": "Symbol Suffix",
@@ -1062,14 +1019,9 @@
     "n2": "Run the bridge on the same computer where MT5 is logged in.",
     "n3": "Enable \"Allow algorithmic trading\" in MT5, otherwise orders will be rejected by the terminal.",
     "n4": "Your API token is like a password. Never share it; if you suspect a leak, reset it anytime on the Connect MT5 page.",
-    "n5": "Windows only; macOS is not supported yet.",
-    "sourceTitle": "Source and verification",
-    "sourceDesc": "The installer is hosted on GitHub Releases, where you can review release notes and file checksums.",
-    "sourceLink": "View releases on GitHub"
+    "n5": "Windows only; macOS is not supported yet."
   },
   "admin": {
-    "title": "Admin",
-    "subtitle": "User roles, subscription plans and basic operating metrics",
     "console": {
       "title": "Admin console",
       "selectedPre": "",
@@ -1364,23 +1316,6 @@
     },
     "totalUsers": "Total users",
     "planBreakdown": "Subscription plan",
-    "tab": {
-      "data": "Dashboard",
-      "winrate": "Publication",
-      "users": "Users",
-      "logs": "Activity log",
-      "invites": "Invite Links",
-      "ops": "Operations",
-      "system": "System",
-      "guide": "Strategy Guide",
-      "announcements": "Announcements",
-      "email": "Email",
-      "tickets": "Tickets",
-      "gamification": "Gamification",
-      "competitions": "Competitions",
-      "health": "System status",
-      "support": "Support"
-    },
     "log": {
       "title": "Activity log",
       "subtitle": "Sign-ups, MT5 links, trades, stops and targets, admin actions — one line each; open a row for details.",
@@ -3591,14 +3526,6 @@
     },
     "support": {
       "bulkAssign": "Assign to support",
-      "sub": {
-        "staff": "Agents",
-        "assign": "Assign follow-ups",
-        "approvals": "Approvals",
-        "performance": "Performance",
-        "templates": "Canned replies",
-        "settings": "Settings"
-      },
       "role": {
         "user": "User",
         "support": "Support",
@@ -4477,10 +4404,6 @@
       "minTradesWinrate": "≥{{n}} trades this period",
       "positive": "Positive P&L required to rank"
     },
-    "rules": {
-      "return_pct": "Ranked by return rate (%): each trade's P&L is divided by the capital in the account when it opened or closed (the larger), so deposits and withdrawals both count. Accounts below {{usd}} USD capital or with fewer than {{n}} trades don't rank.",
-      "win_rate": "Needs ≥{{n}} trades this period with positive P&L to rank — a high win rate alone doesn't mean profit."
-    },
     "admin": {
       "preview": "Leaderboard preview",
       "leaderboardSwitch": "Leaderboard user-facing visibility",
@@ -4522,7 +4445,6 @@
       "regCloses": "Registration closes in",
       "regOpens": "Registration opens in"
     },
-    "myLiveRank": "Currently #{{n}}",
     "myPending": "Score pending - you enter the board once the trade gate is met",
     "myRank": "Your rank",
     "registerMore": "Enter another account",
@@ -4554,10 +4476,8 @@
     "liveBoard": "Live board",
     "finalBoard": "Final board",
     "pendingSettle": "Competition ended — results pending final settlement",
-    "prizeNote": "Prize",
     "starts": "Starts",
     "ends": "Ends",
-    "myEntries": "My entries",
     "scoringFrom": "Scoring from",
     "finalRank": "Final rank",
     "disqualified": "Disqualified",
@@ -4566,10 +4486,7 @@
     "pickAccountHint": "Only your real-money accounts are listed",
     "pickAccountHintDemo": "Only your demo accounts are listed",
     "noAccounts": "No trading accounts connected yet — bind an account first",
-    "noRealAccounts": "No real-money accounts connected — only real accounts may enter",
-    "noDemoAccounts": "No demo accounts connected — only demo accounts may enter this competition",
     "pendingAccountType": "Account type not yet determined — please try again later",
-    "registered": "Registered",
     "registerSuccess": "Registered successfully",
     "regNotOpen": "Registration hasn't opened yet",
     "regClosed": "Registration is closed",
@@ -4836,13 +4753,6 @@
     "noteNewPeriod": "Each period starts by taking capital from the balance at that moment, so last period's profit counts as capital from this period on."
   },
   "festival": {
-    "names": {
-      "spring": "Lunar New Year",
-      "midautumn": "Mid-Autumn",
-      "halloween": "Halloween",
-      "christmas": "Christmas",
-      "newyear": "New Year"
-    },
     "settings": {
       "title": "Festival decorations",
       "desc": "During festivals, the logo, greetings and empty states get festive artwork.",

@@ -518,10 +518,6 @@ def save_strategy_costs(db, data: dict) -> None:
 # (services/signal_resolution.py), the only verifiable source; hand-entered
 # numbers here would merely contradict it. This structure describes design
 # characteristics only.
-PLATFORM_STRATEGY_DEFAULTS: dict = {
-    "items": [],
-}
-
 _platform_strategies_cache = _TtlCache()
 
 

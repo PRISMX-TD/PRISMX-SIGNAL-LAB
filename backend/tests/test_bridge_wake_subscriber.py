@@ -5,7 +5,7 @@
 一次就多留一组连接——一段不稳定期下来连接数线性堆高，最后撞 maxclients。而这条链路
 挂着的是「订单落库立刻叫醒长轮询中的桥接」，堵住就退回 1.5 秒轮询的下单延迟。
 
-`connection_manager.run_fanout_subscriber` 早已用 `with_client=True` + finally 关闭，
+`connection_manager.run_fanout_subscriber` 早已拿回客户端句柄 + finally 关闭，
 这里钉住 `bridge_wake.run_subscriber` 与它同款。
 
 The bridge-wake fan-out subscriber must close its per-pass redis client.
@@ -56,8 +56,7 @@ def _run_one_pass(monkeypatch, messages, fail_after):
     """跑订阅循环，等它绕完一轮后取消，返回这一轮用过的 (pubsub, client)。"""
     made = []
 
-    def fake_new_async_pubsub(channel, with_client=False):
-        assert with_client, "必须用 with_client=True 才拿得到客户端句柄来关闭它"
+    def fake_new_async_pubsub(channel):
         ps, cl = _FakePubSub(list(messages), fail_after), _FakeClient()
         made.append((ps, cl))
         return ps, channel, cl

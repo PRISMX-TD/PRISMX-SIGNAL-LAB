@@ -343,16 +343,6 @@ export default {
         fadein: 'fadein 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
         breathe: 'breathe 2.4s ease-in-out infinite',
         shimmer: 'shimmer 1.8s ease-in-out infinite',
-        // 兼容既有引用：不再漂浮、不再脉冲发光，退化为静态。
-        // Legacy references kept alive but degraded to static: no more floating,
-        // no more glow pulsing.
-        float: 'none',
-        'float-slow': 'none',
-        'glow-pulse': 'none',
-        'gradient-x': 'none',
-        drift: 'none',
-        'drift-slow': 'none',
-        marquee: 'none',
       },
     },
   },

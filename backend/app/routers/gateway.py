@@ -9,7 +9,7 @@ import time
 from types import SimpleNamespace
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -27,14 +27,13 @@ from app.core.rate_limit import (
     record_failed_mt5_verify_user,
 )
 from app.models import ClosedTrade, MT5Account, Order, User
-from app.schemas import LOGIN_PATTERN
 from app.services.account_type import SOURCE_GROUP, classify_group
 from app.services.closed_trade_store import logins_needing_backfill, upsert_leg
 from app.services.deps import get_current_user, require_verified_email
 from app.services import activity_log
 from app.services.gateway_binding import (
     REASON_PASSWORD_CHANGED, REASON_USER_REMOVED, bind_event_data, enforce,
-    gateway_accounts_version, invalidate_gateway_accounts, is_removed, is_revoked, log_unbind,
+    gateway_accounts_version, invalidate_gateway_accounts, is_removed, log_unbind,
     mark_removed, not_removed,
 )
 from app.services.gateway_client import (
@@ -64,22 +63,6 @@ from app.routers.bridge import push_balances_if_changed
 logger = logging.getLogger("prismx.gateway.router")
 
 router = APIRouter(prefix="/gateway", tags=["gateway"])
-
-# 绑定失效时对用户说的话。按站内惯例做成「中文 / English」，前端的
-# localizeApiError 直接可用。
-#
-# 措辞刻意只说"需要重新验证"，不说"因为你改了密码"：撤销的判据是券商记录的
-# 改密时间变了，那件事未必是用户自己干的（券商重置、账号转手），断言原因会在
-# 少数情况下把话说错。要查真实原因看服务端日志。
-#
-# What the user is told when a binding is revoked. Deliberately says
-# "re-verify" rather than "you changed your password": the trigger is the
-# broker's record changing, which the user did not necessarily do themselves.
-_REVOKED_DETAIL = (
-    "该 MT5 账号的密码已变更，连接已断开，请重新验证 / "
-    "This MT5 account's password changed; the connection was revoked, please verify again"
-)
-
 
 # ---------- 请求/响应模型 ----------
 
@@ -113,23 +96,6 @@ class GatewayVerifyResponse(BaseModel):
     leverage: int = 0
     balance: float = 0.0
     equity: float = 0.0
-
-
-class GatewayAccountOut(BaseModel):
-    login: str
-    server: str = ""
-    source: str = "gateway"
-    accountName: str = ""
-    accountCurrency: str = ""
-    balance: float = 0.0
-    equity: float = 0.0
-    leverage: int = 0
-    group: str = ""
-    symbolSuffix: str = ""
-    # 绑定是否已失效、需要用户重新输一次主密码。
-    # Whether this binding was revoked and needs the main password re-entered.
-    needsReverify: bool = False
-    revokedReason: str = ""
 
 
 def _notify_revoked(user_id: str, login: str) -> None:
@@ -539,108 +505,6 @@ def gateway_verify(
         leverage=rsp.leverage,
         balance=rsp.balance,
         equity=rsp.equity,
-    )
-
-
-@router.get("/accounts", response_model=list[GatewayAccountOut])
-def list_gateway_accounts(
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """列出当前用户的所有 Gateway 绑定账号。"""
-    rows = (
-        db.query(MT5Account)
-        .filter(MT5Account.user_id == user.id, MT5Account.source == "gateway", not_removed())
-        .all()
-    )
-    return [
-        GatewayAccountOut(
-            login=row.login,
-            server=row.server or "",
-            source=row.source or "gateway",
-            accountName=row.account_name or "",
-            accountCurrency=row.account_currency or "",
-            balance=row.balance or 0.0,
-            equity=row.equity or 0.0,
-            leverage=row.leverage or 0,
-            group="",
-            symbolSuffix=row.symbol_suffix or "",
-            needsReverify=is_revoked(row),
-            revokedReason=row.revoked_reason or "",
-        )
-        for row in rows
-    ]
-
-
-@router.post("/account/{login}/refresh", response_model=GatewayAccountOut)
-@limiter.limit("10/minute")
-def refresh_gateway_account(
-    request: Request,
-    # 路径参数按 LOGIN_PATTERN（纯数字，≤20 位）校验，与请求体里的 login 同一把尺。
-    # 下面 `int(login)` 是无条件的：不校验时，一个非数字的 login 只要在库里配得上
-    # （历史脏数据、手工插入的行），就会在这里抛 ValueError 变成 500——而正确答案
-    # 是「这个路径参数本来就不合法」，应当 422。校验放在路由层，函数体不必再兜。
-    # The path parameter is validated with the same LOGIN_PATTERN as the request
-    # bodies. `int(login)` below is unconditional, so without this a non-numeric
-    # login that happens to match a row (legacy or hand-inserted data) raises
-    # ValueError and surfaces as a 500 when the honest answer is 422.
-    login: str = Path(pattern=LOGIN_PATTERN),
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """从 gateway 刷新某个绑定账号的最新资金信息。"""
-    import asyncio
-
-    row = (
-        db.query(MT5Account)
-        .filter(
-            MT5Account.user_id == user.id,
-            MT5Account.login == login,
-            MT5Account.source == "gateway",
-        )
-        .first()
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="Gateway 账号不存在")
-
-    # 已撤销的绑定不再代表用户去券商读任何东西，与轮询循环的口径一致。
-    # A revoked binding reads nothing on the user's behalf, matching the poller.
-    if is_revoked(row):
-        raise HTTPException(status_code=409, detail=_REVOKED_DETAIL)
-
-    rsp = run_on_main_loop(gw_get_account(int(login)), timeout=65.0)
-    if rsp is None:
-        raise HTTPException(status_code=502, detail="Gateway 查询账号失败")
-
-    # 手动刷新走的是和轮询同一套判据：这个端点也拿得到 lastPassChange，漏掉
-    # 就等于给了一条「刷新能用、轮询会撤销」的不一致路径。
-    # Same rule as the poller: this endpoint also receives lastPassChange, and
-    # skipping it here would leave an inconsistent path.
-    if not enforce(
-        db, row,
-        getattr(rsp, "last_pass_change", 0),
-        on_revoke=lambda: _notify_revoked(user.id, login),
-    ):
-        raise HTTPException(status_code=409, detail=_REVOKED_DETAIL)
-
-    row.balance = rsp.balance
-    row.equity = rsp.equity
-    row.margin = rsp.margin
-    row.leverage = rsp.leverage
-    row.account_name = rsp.name
-    db.commit()
-
-    return GatewayAccountOut(
-        login=row.login,
-        server=row.server or "",
-        source=row.source or "gateway",
-        accountName=row.account_name or "",
-        accountCurrency=row.account_currency or "",
-        balance=row.balance or 0.0,
-        equity=row.equity or 0.0,
-        leverage=row.leverage or 0,
-        group="",
-        symbolSuffix=row.symbol_suffix or "",
     )
 
 

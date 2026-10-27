@@ -642,13 +642,6 @@ class Settings(BaseSettings):
     # 30 used to sit here, disagreeing with the 10 actually in force — two numbers,
     # one of them fiction, is worse for whoever is debugging than none.
 
-    # Web Push / VAPID：私钥以 urlsafe-base64 编码的 DER（PKCS8）存储，直接交给
-    # pywebpush（py_vapid 的 from_string 走 urlsafe-base64 解码，不能用标准 PEM）。
-    # 旧字段 VAPID_PRIVATE_KEY_B64（标准 base64 PEM）仍保留作兼容，但 from_der 会解析失败，
-    # 故优先使用 VAPID_PRIVATE_KEY_DER。公钥与 subject 用于推送订阅。
-    # VAPID: private key stored as urlsafe-base64-encoded DER (PKCS8) and passed
-    # straight to pywebpush (py_vapid.from_string decodes via urlsafe-base64, so a
-    # standard PEM does not work). Public key and subject are used for push.
     # 允许作为推送订阅 endpoint 的主机后缀（逗号分隔）。服务端会主动向订阅
     # endpoint 发起 HTTP 请求，而该地址来自客户端上报——不限制就等于开放一个
     # 服务端代发请求的入口（SSRF）。这里列的是各浏览器厂商的推送服务域：
@@ -667,6 +660,15 @@ class Settings(BaseSettings):
         "notify.windows.com"
     )
 
+    # Web Push / VAPID：私钥两个字段任填其一（VAPID_PRIVATE_KEY_DER 优先）——urlsafe-base64
+    # 的 PKCS8 DER、base64 包着的 PEM（VAPID_PRIVATE_KEY_B64 的早期形态）、PEM 文本或 RAW 都行，
+    # 不要直接读这两个字段：唯一出口是下面的 vapid_private_key，它统一归一成 pywebpush
+    # 能用的 urlsafe-base64 DER。公钥与 subject 用于推送订阅。
+    # VAPID: set either private-key field (VAPID_PRIVATE_KEY_DER wins) — urlsafe-base64
+    # PKCS8 DER, base64-wrapped PEM (VAPID_PRIVATE_KEY_B64's earlier form), PEM text or RAW
+    # all work. Don't read the fields directly: vapid_private_key below is the single exit and
+    # normalises any of them to the urlsafe-base64 DER pywebpush needs. Public key and
+    # subject are used for push subscriptions.
     VAPID_PRIVATE_KEY_DER: str = ""
     VAPID_PRIVATE_KEY_B64: str = ""
     VAPID_PUBLIC_KEY: str = ""

@@ -49,12 +49,6 @@ export function isAppHidden(): boolean {
   return (typeof document !== 'undefined' && document.hidden) || shellBackground
 }
 
-/** 仅测试用：复位壳标记 / test-only reset */
-export function __resetAppVisibilityForTest() {
-  shellBackground = false
-  installed = false
-}
-
 /**
  * 回前台时调用 cb（focus / visibilitychange 变可见 / apppack:foreground 三路合一），
  * 每个订阅各自按 dedupeMs 去重。返回取消订阅函数。

@@ -11,13 +11,9 @@ leaderboards, login) are left out: from one IP they would just 429.
 """
 import argparse
 import asyncio
-import hashlib
 import json
 import multiprocessing as mp
-import os
 import random
-import statistics
-import sys
 import time
 from collections import Counter, defaultdict
 

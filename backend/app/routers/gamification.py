@@ -683,14 +683,6 @@ def gamification_leaderboard(request: Request, board: str, period: str,
 _MONTH_RE = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 
-def _parse_iso_utc(v: str) -> datetime:
-    try:
-        dt = datetime.fromisoformat(v.replace("Z", "+00:00"))
-    except ValueError:
-        raise HTTPException(status_code=422, detail="bad datetime")
-    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-
-
 def _share_baseline(db: Session, user: User, login: str, period_key: str):
     return db.query(PeriodBaseline).filter(
         PeriodBaseline.user_id == user.id, PeriodBaseline.mt5_login == login,
@@ -723,20 +715,17 @@ def gamification_share_month(request: Request, login: str, month: str,
 @router.get("/share/trade")
 @limiter.limit(settings.RATE_LIMIT_GAMIFICATION)
 def gamification_share_trade(request: Request, login: str, position: int | None = None,
-                              opened_at: str | None = None, closed_at: str | None = None,
-                              profit: float | None = None,
                               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """单笔战报：这笔盈亏 ÷ 收益榜对这笔仓位用的本金（开/平仓时刻本金取较大者）。
 
     盈亏、开 / 平仓时刻一律取服务端存的**本人**这笔仓位（login + 仓位号）的平仓腿，只认
-    verified（与收益榜同口径）；不再信客户端传来的 profit——以前随便填个盈利就能拿到
+    verified（与收益榜同口径）；不信客户端给的任何数字——以前随便填个盈利就能拿到
     一张「官方口径」的高收益率战报。找不到这笔仓位（不存在 / 不是本人的）→ 404。
-    opened_at / closed_at / profit 是旧版前端的参数，保留只为不 422，一律忽略；不带
-    position 的旧请求返回 null（前端就不显示百分比）。
+    不带 position 的请求返回 null（前端就不显示百分比）。
     Single trade: profit over the capital the return board uses for this position. The
     P&L and open/close instants come from the caller's own stored verified legs for
-    (login, position); the client-supplied profit is ignored. Unknown / not owned → 404.
-    Legacy params are accepted but ignored; a request without `position` gets null."""
+    (login, position); no client-supplied figure is trusted. Unknown / not owned → 404.
+    A request without `position` gets null."""
     if position is None:
         return {"returnPct": None}
     legs = (

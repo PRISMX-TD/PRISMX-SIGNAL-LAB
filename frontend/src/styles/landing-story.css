@@ -558,19 +558,6 @@
 .story-root:not(.is-scrub) .scr.on .js-filled {
   opacity: 1;
 }
-.story-root:not(.is-scrub) .js-sl {
-  transition: transform 1.6s var(--ease-in-out) 0.4s;
-}
-.story-root:not(.is-scrub) .scr.on .js-sl {
-  transform: translateY(-26px);
-}
-.story-root:not(.is-scrub) .js-be {
-  transition: opacity 0.4s var(--ease-out) 1.2s;
-  opacity: 0;
-}
-.story-root:not(.is-scrub) .scr.on .js-be {
-  opacity: 1;
-}
 
 /* ── 幕 0：段位揭晓 / scene 0: the rank reveal ──
    全部 cqw 定尺，桌面 330px 与真机全出血共用一套。光锥与地光沿用成就页陈列台
@@ -854,8 +841,6 @@
 .is-scrub .js-knob,
 .is-scrub .js-fill,
 .is-scrub .js-filled,
-.is-scrub .js-sl,
-.is-scrub .js-be,
 .is-scrub .js-rec,
 .is-scrub .js-row,
 .is-scrub .js-toast {
@@ -1164,9 +1149,6 @@
     bottom: 50%;
   }
 
-  [data-scr='0'] .sig-list > *:nth-child(2) {
-    display: none;
-  }
   [data-scr='0'] {
     display: flex;
     flex-direction: column;
@@ -1635,27 +1617,12 @@
   width: 100%;
   height: 100%;
 }
-.sc-label {
-  font-size: 20px;
-  letter-spacing: 0.08em;
-}
 .mkt-scene {
   opacity: 0;
   transition: opacity 0.45s var(--ease-out);
 }
 .mkt-scene.sc-on {
   opacity: 1;
-}
-.sc-path {
-  fill: none;
-  stroke-width: 2.5;
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  transition: stroke-dashoffset 1.5s var(--ease-out);
-}
-.mkt-scene.sc-on .sc-path {
-  stroke-dashoffset: 0;
-  transition-delay: 0.25s;
 }
 .sc-band {
   opacity: 0;
@@ -1681,7 +1648,6 @@
 }
 /* scrub：GSAP 拥有一切 / scrub: GSAP owns every value */
 .is-scrub .mkt-scene,
-.is-scrub .sc-path,
 .is-scrub .sc-band,
 .is-scrub .sc-stamp {
   transition: none;
@@ -1705,20 +1671,15 @@
 
 @media (max-width: 1023px) {
   /* 真机：墙占栅格第一行（画面 / 刻度 / 文字三行制，与叙事区同构）。meet
-     模式整图完整可见；非缩放描边保证线宽不随缩小变虚。价位线文字标签在此
-     尺度下只有几像素，直接隐藏。
+     模式整图完整可见；非缩放描边保证线宽不随缩小变虚。
      Real devices: the wall takes the grid's first row (visual, ticks, text -
      the same three rows as the story). meet keeps the whole drawing visible
-     and non-scaling strokes keep line weight; the level labels would be a few
-     pixels tall here, so they hide. */
+     and non-scaling strokes keep line weight. */
   .mkt-wall {
     position: static;
     grid-area: 1 / 1;
     min-height: 0;
     transform: none;
-  }
-  .sc-label {
-    display: none;
   }
 }
 

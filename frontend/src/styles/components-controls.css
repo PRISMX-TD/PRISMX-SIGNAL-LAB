@@ -722,15 +722,8 @@
     .hero-header-row + div {
       margin-top: 16px !important;
     }
-    .hero-nebula {
-      width: 46%;
-      opacity: 0.55;
-    }
     .stance-word {
       font-size: 26px;
-    }
-    .conf-val {
-      font-size: 20px;
     }
 
     /* ── 执行卡手机版：与桌面同一份标记，字号在 dashboard.css 里缩 ── */
@@ -792,18 +785,6 @@
       width: 28px;
       height: 28px;
       font-size: 10px;
-    }
-
-    /* ── 环形图缩小 / donut smaller ── */
-    .donut-wrap {
-      gap: 12px;
-    }
-    .donut {
-      width: 90px;
-      height: 90px;
-    }
-    .donut-center b {
-      font-size: 17px;
     }
 
     /* ── 按钮全宽 / full-width btn ── */

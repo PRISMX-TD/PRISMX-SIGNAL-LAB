@@ -737,7 +737,6 @@ export default function ChartsPage() {
                 series={seriesRef.current}
                 host={containerRef.current}
                 symbol={symbol}
-                lastPrice={lastPrice}
                 barTimes={getBarTimes}
                 digits={decimals}
                 onStateChange={bumpDraw}

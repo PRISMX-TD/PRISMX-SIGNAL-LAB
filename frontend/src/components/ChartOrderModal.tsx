@@ -22,13 +22,6 @@ interface Props {
   quotesByAccount: Record<string, Record<string, Quote>>
   // 图表最新收盘价：无实时报价时作为参考价 / chart's latest close, used when no live quote
   refPrice?: number
-  // 价格显示小数位。不传就从按账户报价里的券商 digits 现解（再退回品种兜底表）：
-  // 以前默认值是写死的 2，而策略页调用时不传，于是策略信号的下单弹窗里 EURUSD 的
-  // 现价显示成 "1.16"。
-  // Price display precision. When omitted it's resolved from the broker's
-  // Quote.digits (then the symbol fallback table): the old hard-coded default of 2
-  // rendered EURUSD as "1.16" on the strategies page, which passes no digits.
-  digits?: number
   // 预填止损止盈（如来自自定义策略触发的信号）；省略则保持空白手填
   // Prefilled SL/TP (e.g. from a triggered custom-strategy signal); omitted keeps them blank
   initialStopLoss?: number
@@ -53,8 +46,13 @@ function findQuote(quotesByAccount: Record<string, Record<string, Quote>>, symbo
   return undefined
 }
 
-export default function ChartOrderModal({ symbol, side, accounts, quotesByAccount, refPrice, digits, initialStopLoss, initialTakeProfit, onCancel, onConfirm }: Props) {
-  const shownDigits = digits ?? priceDigits(symbol, findQuote(quotesByAccount, symbol))
+export default function ChartOrderModal({ symbol, side, accounts, quotesByAccount, refPrice, initialStopLoss, initialTakeProfit, onCancel, onConfirm }: Props) {
+  // 价格显示小数位：从按账户报价里的券商 digits 现解（再退回品种兜底表）。以前默认值是
+  // 写死的 2，于是策略信号的下单弹窗里 EURUSD 的现价显示成 "1.16"。
+  // Price display precision, resolved from the broker's Quote.digits (then the symbol
+  // fallback table): the old hard-coded default of 2 rendered EURUSD as "1.16" on the
+  // strategies page.
+  const shownDigits = priceDigits(symbol, findQuote(quotesByAccount, symbol))
   // 与 SlideOrderModal 同一套：在线标志抖动不应该把账户切换器整个卸载。
   // Same as SlideOrderModal: a flickering online flag must not unmount the switcher.
   const availableAccounts = useStickyOnlineAccounts(accounts)

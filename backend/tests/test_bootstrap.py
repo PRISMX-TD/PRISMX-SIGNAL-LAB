@@ -82,14 +82,13 @@ def test_extras_match_standalone_endpoints(db_session, monkeypatch):
     out = asyncio.run(bs.get_bootstrap(extras=True, user=u, db=db_session))
     ex = out["extras"]
     assert set(ex) == {
-        "/orders", "/auth/me", "/orders/winrate", "/signals/winrate",
+        "/orders", "/auth/me", "/orders/winrate",
         "/announcements/popup", "/notifications/feed?limit=4", "/sentiment",
         "/notifications/prefs", "/announcements", "/site/social", "/signals/strategy-analysis",
     }
     assert ex["/orders"] == jsonable_encoder(orders.list_orders(
         limit=100, offset=0, since=None, until=None, login=None, user=u, db=db_session))
     assert ex["/orders/winrate"] == jsonable_encoder(orders.order_winrate(login=None, user=u, db=db_session))
-    assert ex["/signals/winrate"] == jsonable_encoder(signals.signal_winrate(user=u, db=db_session))
     me = account.get_account(db=db_session, current_user=u)
     assert ex["/auth/me"] == jsonable_encoder(account.AccountInfoOut.model_validate(me) if not isinstance(me, account.AccountInfoOut) else me)
     assert ex["/auth/me"]["email"] == "bs@t.co"

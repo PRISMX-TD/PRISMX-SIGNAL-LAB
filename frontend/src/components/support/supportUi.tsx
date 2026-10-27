@@ -1,18 +1,12 @@
-// 客服台共用的小件：状态 / 优先级的配色、UTC+8 的 datetime-local 换算、出错文案、弹窗外壳。
-// Small shared pieces for the support desk: status / priority tones, UTC+8 datetime-local
-// conversion, error text and a modal shell.
+// 客服台共用的小件：状态 / 优先级的配色、出错文案、弹窗外壳。
+// Small shared pieces for the support desk: status / priority tones, error text and a modal
+// shell.
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { fmtDayShort, localizeApiError, parseTime } from '../../api/utils'
 import { useDialogA11y } from '../../utils/useDialogA11y'
 import type { FollowUpPriority, FollowUpStatus } from '../../api/supportTypes'
-
-export const TICKET_STATUS_TONE: Record<string, string> = {
-  open: 'bg-amber-400/15 text-amber-300',
-  in_progress: 'bg-blue-400/15 text-blue-300',
-  closed: 'bg-neutral-500/15 text-neutral-400',
-}
 
 export const TICKET_PRIORITY_TONE: Record<string, string> = {
   low: 'bg-neutral-500/15 text-neutral-400',
@@ -39,26 +33,6 @@ export const FU_PRIORITY_TONE: Record<FollowUpPriority, string> = {
 
 export function errText(err: unknown, fallback: string): string {
   return err instanceof Error ? localizeApiError(err.message) : fallback
-}
-
-// 全站时间显示固定 UTC+8（见 api/utils 的 fmtTime），datetime-local 的输入也按 UTC+8 解释，
-// 免得同一页上「显示的时刻」和「填的时刻」不在一个时区里。
-// The site shows every time in UTC+8 (see fmtTime in api/utils), so the datetime-local input is
-// read as UTC+8 too — otherwise the shown and the typed time would live in different zones.
-const OFFSET_MS = 8 * 3600 * 1000
-
-export function isoToBjInput(iso: string | null | undefined): string {
-  if (!iso) return ''
-  const hasTz = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
-  const d = new Date(hasTz ? iso : `${iso}Z`)
-  if (Number.isNaN(d.getTime())) return ''
-  return new Date(d.getTime() + OFFSET_MS).toISOString().slice(0, 16)
-}
-
-export function bjInputToIso(v: string): string | null {
-  if (!v) return null
-  const d = new Date(`${v}:00+08:00`)
-  return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
 
 // 工单状态：点 + 词（同用户端工单页 .sup-status 的语言）。待处理 = 橙、处理中 = 品牌紫（在手里）、已关闭 = 灰。

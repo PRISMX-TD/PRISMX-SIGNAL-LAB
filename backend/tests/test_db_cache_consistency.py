@@ -265,21 +265,18 @@ def test_webhook_persist_invalidates_signal_caches(db_session, monkeypatch):
     assert shared_cache.get_json(shared_cache.SIGNAL_WINRATE_KEY) is None
 
 
-def test_signal_stats_and_winrate_are_cached(db_session):
-    from app.routers.signals import signal_stats, signal_winrate
+def test_signal_winrate_is_cached(db_session):
+    from app.routers.signals import signal_winrate
 
     u = _user_with_plan(db_session, "PRO")
     _signal(db_session, result="HIT_TP")
     first = signal_winrate(user=u, db=db_session)
     assert first["hitTp"] == 1 and first["winRate"] == 1.0
-    stats = signal_stats(user=u, db=db_session)
-    assert stats["total"] == 1
 
     _signal(db_session, result="HIT_SL")
     assert signal_winrate(user=u, db=db_session) == first               # 缓存
     shared_cache.invalidate_signal_caches()
     assert signal_winrate(user=u, db=db_session)["hitSl"] == 1
-    assert signal_stats(user=u, db=db_session)["total"] == 2
 
 
 # ---------------------------------------------------------------------------

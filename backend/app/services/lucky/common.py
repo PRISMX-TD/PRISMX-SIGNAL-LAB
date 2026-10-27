@@ -29,7 +29,6 @@ F_DELIVERED = "delivered"
 F_CANCELLED = "cancelled"
 F_OPEN = (F_PENDING, F_SUBMITTED)
 
-SRC_MANUAL = "manual"
 SRC_COMP = "comp_rank"
 SRC_BOARD = "board_rank"
 SRC_RETRY = "retry"
@@ -43,8 +42,6 @@ LUCKY_EXPIRY_FIELD = "plan:lucky_days"
 PROB_TOTAL = 10000
 MIN_SLOTS = 2
 MAX_SLOTS = 12
-MAX_BATCH_USERS = 2000
-MAX_PER_USER = 100
 MAX_BATCH_TICKETS = 20000
 MAX_ROUND_NAME = 40
 

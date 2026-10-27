@@ -90,16 +90,6 @@ export function getSentimentState(): SentimentState {
   return state
 }
 
-/** 仅测试用 / test-only */
-export function __resetSentimentForTest() {
-  if (timer !== undefined) clearTimeout(timer)
-  timer = undefined
-  inflight = null
-  subs.clear()
-  fetchedAt = 0
-  state = INITIAL
-}
-
 export function useSentiment(): SentimentState {
   return useSyncExternalStore(subscribeSentiment, getSentimentState, getSentimentState)
 }

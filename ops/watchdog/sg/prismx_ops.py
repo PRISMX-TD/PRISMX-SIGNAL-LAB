@@ -53,7 +53,6 @@ PBKDF2_ITERATIONS = 200_000
 MAX_BODY = 4096
 HISTORY_KEEP = 200
 HISTORY_SHOW = 20
-SIG_MAX_SKEW = 60
 
 DEFAULT_CORS = ",".join([
     "https://prismxsignallab.com",

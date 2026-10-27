@@ -1,7 +1,7 @@
 // 管理后台「游戏化」页签：设置卡（三开关 + 下限）+ 榜单预览 + 用户检查器。
 //
 // 两个可翻开关（等级勋章 / 排行榜）走「只升不降、发出不收回」的铁律（见
-// client.ts 的 setGamificationVisibility / updateGamificationSettings 注释）
+// client.ts 的 updateGamificationSettings 注释）
 // ——后端接口本身仍接受传 false，真正的闸门只有一处：翻到「开」之前必须
 // window.confirm 一次。翻回「关」不设二次确认，与任务书口径一致（这不是
 // 后端强制的单向锁，是前端刻意做的最后一道人工关卡）。比赛开关自 Phase 3
@@ -20,7 +20,7 @@
 // a leaderboard preview, and a user inspector.
 //
 // The two flippable switches (badges/levels, leaderboard) follow the "up
-// only, never revoked" rule (see the comments on setGamificationVisibility /
+// only, never revoked" rule (see the comment on
 // updateGamificationSettings in client.ts) — the backend endpoint itself
 // still accepts false; the one real gate is the confirm() before flipping to
 // true. Flipping back to false needs no second confirmation, per the task

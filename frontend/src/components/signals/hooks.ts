@@ -19,13 +19,6 @@ export interface OrderToast {
   kind: 'success' | 'error' | 'info'
 }
 
-// toast 配色 / toast tone classes
-export function toastToneClass(kind: OrderToast['kind']): string {
-  if (kind === 'error') return 'border-down/40 bg-down/15 text-down'
-  if (kind === 'info') return 'border-prism-600/40 bg-prism-600/15 text-prism-300'
-  return 'border-up/40 bg-up/15 text-up'
-}
-
 // 等待回执的兜底时长：正常回执 WS 几秒内就到 / fallback window; WS receipts arrive in seconds
 const RECEIPT_FALLBACK_MS = 20000
 

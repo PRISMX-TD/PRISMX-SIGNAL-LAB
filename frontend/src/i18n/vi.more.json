@@ -1,7 +1,4 @@
 {
-  "nav": {
-    "download": "Tải Bridge"
-  },
   "common": {
     "copy": "Sao chép",
     "prevPage": "Trang trước",
@@ -195,10 +192,6 @@
   "account": {
     "title": "Tài khoản",
     "loadError": "Không tải được thông tin tài khoản",
-    "platform": "Tài khoản nền tảng",
-    "email": "Email",
-    "registeredAt": "Ngày đăng ký",
-    "expiresAt": "PRO hết hạn",
     "neverExpires": "Không thời hạn",
     "planTrialTag": "PRO (dùng thử)",
     "balance": "Số dư",
@@ -206,7 +199,6 @@
     "marginLevel": "Mức ký quỹ",
     "leverage": "Đòn bẩy",
     "changePassword": "Đổi mật khẩu",
-    "setPassword": "Đặt mật khẩu",
     "oldPassword": "Mật khẩu cũ",
     "newPassword": "Mật khẩu mới (tối thiểu 8 ký tự)",
     "pwTooShort": "Mật khẩu mới phải có ít nhất 8 ký tự",
@@ -221,14 +213,7 @@
     "notifSymbolLabel": "Theo mã giao dịch",
     "notifAll": "Tất cả",
     "notifEvent": {
-      "order_filled": "Lệnh đã khớp",
-      "order_rejected": "Lệnh bị từ chối",
-      "auto_manage": "Kích hoạt quản lý vị thế tự động",
-      "bridge_offline": "PRISMX Bridge đã ngoại tuyến",
-      "account_revoked": "Kết nối trực tiếp cần xác minh lại",
-      "strategy_signal": "Tín hiệu từ chiến lược của tôi",
-      "badge_awarded": "Nhận huy hiệu mới",
-      "support_reminder": "Nhắc việc theo dõi của hỗ trợ"
+      "strategy_signal": "Tín hiệu từ chiến lược của tôi"
     },
     "notifWindowHeading": "Khung giờ nhận thông báo",
     "notifWindowEnable": "Chỉ gửi thông báo trong khung giờ này",
@@ -501,24 +486,13 @@
       "enter": "Toàn màn hình",
       "exit": "Thoát toàn màn hình"
     },
-    "mtabs": {
-      "chart": "Biểu đồ",
-      "watchlist": "Danh sách theo dõi",
-      "trade": "Giao dịch",
-      "positions": "Vị thế"
-    },
     "symhead": {
       "bid": "Bid",
       "ask": "Ask",
       "spread": "Spread",
       "high": "Cao",
       "low": "Thấp",
-      "change": "Thay đổi",
-      "mBid": "Bid",
-      "mAsk": "Ask",
-      "mSpread": "Spr",
-      "mHigh": "Cao",
-      "mLow": "Thấp"
+      "change": "Thay đổi"
     },
     "watchlist": {
       "title": "Danh sách theo dõi",
@@ -587,15 +561,11 @@
       "orders": "Lệnh chờ",
       "noPositions": "Không có vị thế mở",
       "noOrders": "Không có lệnh chờ",
-      "colSymbol": "Mã",
-      "colSide": "Chiều",
-      "colVolume": "Lot",
       "colEntry": "Giá vào",
       "colCurrent": "Hiện tại",
       "colSl": "SL",
       "colTp": "TP",
       "colPnl": "Lãi/lỗ thả nổi",
-      "colStatus": "Trạng thái",
       "buy": "Buy",
       "sell": "Sell",
       "close": "Đóng",
@@ -650,10 +620,8 @@
     "hitSl": "Chạm SL",
     "openPositions": "Đang mở",
     "resolvedCount": "{{n}} đã có kết quả",
-    "bySymbol": "Theo mã giao dịch",
     "noData": "Chưa đủ dữ liệu",
     "viewDetail": "Xem chi tiết",
-    "disclaimer": "Hiệu suất trong quá khứ không đảm bảo kết quả trong tương lai.",
     "closedTradesTitle": "Lịch sử lệnh đã đóng",
     "closedTradesHint": "Mọi lệnh khớp thực — dữ liệu gốc dùng để tính tỷ lệ thắng ở trên.",
     "closedTradesEmpty": "Chưa có lệnh đã đóng",
@@ -685,15 +653,11 @@
       "scope": "Trong {{days}} ngày gần nhất · {{account}} · dựa trên các lệnh thực đã đóng của bạn"
     },
     "colTime": "Thời gian",
-    "colType": "Loại",
     "colSymbol": "Mã",
     "colSide": "Chiều",
     "colVolume": "KL",
-    "colStatus": "Trạng thái",
     "colTicket": "Ticket MT5",
     "colPrice": "Giá khớp",
-    "colMessage": "Thông điệp",
-    "colAction": "Thao tác",
     "closed": {
       "openTime": "Thời gian mở",
       "position": "Vị thế",
@@ -778,7 +742,6 @@
       "totalPnl": "Tổng P&L"
     },
     "filterStatus": "Trạng thái",
-    "filterSide": "Chiều",
     "filterSymbol": "Mã giao dịch",
     "symbolPlaceholder": "ví dụ XAUUSD",
     "filterFrom": "Từ ngày",
@@ -794,7 +757,6 @@
       "performance": "Hiệu suất",
       "activity": "Nhật ký hoạt động"
     },
-    "historyHint": "Mọi lệnh mở, đóng, sửa và hủy cùng trạng thái thực thi và phản hồi.",
     "reverse": "Ngược",
     "reverseHint": "Lệnh ngược tín hiệu: ngược chiều tín hiệu, đã hoán đổi TP và SL"
   },
@@ -852,11 +814,6 @@
     "tokenSavedClose": "Tôi đã lưu, đóng",
     "resetToken": "Đặt lại token",
     "resetConfirm": "Đặt lại sẽ khiến token cũ mất hiệu lực ngay. Ứng dụng Bridge đang chạy phải cập nhật token mới, nếu không sẽ không kết nối được. Đặt lại?",
-    "statusTitle": "Trạng thái kết nối MT5",
-    "connection": "Kết nối",
-    "boundAccount": "Tài khoản chính",
-    "lastHeartbeat": "Tín hiệu kết nối gần nhất",
-    "none": "Chưa kết nối",
     "suffixTitle": "Hậu tố mã giao dịch",
     "suffixHint": "Nếu mã giao dịch của sàn có hậu tố (ví dụ .sc trong GBPUSD.sc), hãy nhập vào đây. Hậu tố sẽ được thêm vào mã khi đặt lệnh. Để trống nếu không có.",
     "suffixLabel": "Hậu tố mã giao dịch",
@@ -1062,10 +1019,7 @@
     "n2": "Chạy bridge trên cùng máy tính đang đăng nhập MT5.",
     "n3": "Bật \"Allow algorithmic trading\" trong MT5, nếu không lệnh sẽ bị terminal từ chối.",
     "n4": "API token giống như mật khẩu. Không chia sẻ cho ai; nếu nghi bị lộ, bạn có thể đặt lại bất cứ lúc nào ở trang Liên kết MT5.",
-    "n5": "Chỉ hỗ trợ Windows; chưa hỗ trợ macOS.",
-    "sourceTitle": "Nguồn và xác minh",
-    "sourceDesc": "Bộ cài được lưu trên GitHub Releases, nơi bạn có thể xem ghi chú phát hành và mã checksum của file.",
-    "sourceLink": "Xem các bản phát hành trên GitHub"
+    "n5": "Chỉ hỗ trợ Windows; chưa hỗ trợ macOS."
   },
   "simulator": {
     "title": "Mô phỏng lịch sử tín hiệu",
@@ -1733,10 +1687,6 @@
       "minTradesWinrate": "≥{{n}} lệnh trong kỳ",
       "positive": "Cần lãi/lỗ dương để được xếp hạng"
     },
-    "rules": {
-      "return_pct": "Xếp hạng theo tỷ suất lợi nhuận (%): lãi/lỗ của mỗi lệnh chia cho vốn trong tài khoản lúc mở hoặc đóng lệnh (lấy giá trị lớn hơn), nên cả nạp và rút đều được tính. Tài khoản có vốn dưới {{usd}} USD hoặc ít hơn {{n}} lệnh sẽ không được xếp hạng.",
-      "win_rate": "Cần ≥{{n}} lệnh trong kỳ và lãi/lỗ dương để được xếp hạng — tỷ lệ thắng cao chưa chắc đã có lãi."
-    },
     "admin": {
       "preview": "Xem trước bảng xếp hạng",
       "leaderboardSwitch": "Hiển thị bảng xếp hạng với người dùng",
@@ -1778,7 +1728,6 @@
       "regCloses": "Đóng đăng ký sau",
       "regOpens": "Mở đăng ký sau"
     },
-    "myLiveRank": "Hiện hạng #{{n}}",
     "myPending": "Chưa có điểm - bạn sẽ lên bảng khi đạt đủ số lệnh yêu cầu",
     "myRank": "Hạng của bạn",
     "registerMore": "Đăng ký thêm tài khoản",
@@ -1810,10 +1759,8 @@
     "liveBoard": "Bảng trực tiếp",
     "finalBoard": "Bảng chung cuộc",
     "pendingSettle": "Cuộc thi đã kết thúc — đang chờ tổng kết kết quả",
-    "prizeNote": "Giải thưởng",
     "starts": "Bắt đầu",
     "ends": "Kết thúc",
-    "myEntries": "Tài khoản dự thi của tôi",
     "scoringFrom": "Tính điểm từ",
     "finalRank": "Hạng chung cuộc",
     "disqualified": "Bị loại",
@@ -1822,10 +1769,7 @@
     "pickAccountHint": "Chỉ liệt kê tài khoản thực của bạn",
     "pickAccountHintDemo": "Chỉ liệt kê tài khoản demo của bạn",
     "noAccounts": "Chưa liên kết tài khoản giao dịch nào — hãy liên kết tài khoản trước",
-    "noRealAccounts": "Chưa liên kết tài khoản thực — chỉ tài khoản thực mới được tham gia",
-    "noDemoAccounts": "Chưa liên kết tài khoản demo — cuộc thi này chỉ nhận tài khoản demo",
     "pendingAccountType": "Chưa xác định được loại tài khoản — vui lòng thử lại sau",
-    "registered": "Đã đăng ký",
     "registerSuccess": "Đăng ký thành công",
     "regNotOpen": "Chưa mở đăng ký",
     "regClosed": "Đã đóng đăng ký",
@@ -2092,13 +2036,6 @@
     "noteNewPeriod": "Mỗi kỳ bắt đầu tính lại vốn theo số dư lúc đó, nên tiền lãi kỳ trước được tính là vốn từ kỳ này."
   },
   "festival": {
-    "names": {
-      "spring": "Tết Nguyên Đán",
-      "midautumn": "Trung Thu",
-      "halloween": "Halloween",
-      "christmas": "Giáng Sinh",
-      "newyear": "Năm Mới"
-    },
     "settings": {
       "title": "Trang trí dịp lễ",
       "desc": "Vào các dịp lễ, logo, lời chào và trang trống sẽ có hình trang trí theo chủ đề.",

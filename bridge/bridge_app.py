@@ -384,15 +384,13 @@ def _setup_logger() -> logging.Logger:
         # 首选用户目录；建不起来（只读 profile、漫游目录不可写、被安全软件拦）就退到
         # 系统临时目录。以前这里失败就静默放弃，此后整个程序所有 logger.warning 全部
         # 无声——而桥接偏偏是「出了问题只能靠日志」的那类程序（用户机器上没人盯控制台，
-        # console=False 连 stderr 都没有）。两处都失败才真的没有日志，并把原因留在
-        # LOG_SETUP_ERROR 里给状态栏用。
+        # console=False 连 stderr 都没有）。两处都失败才真的没有日志。
         # Prefer the home directory; if that fails (read-only profile, unwritable roaming
         # folder, security software) fall back to the system temp dir. This used to give
         # up silently, after which every logger.warning in the process vanished — on a
         # program whose only diagnostic channel is the log (nobody watches a console on
         # the user's machine, and console=False means there is no stderr). Only when both
-        # fail is there truly no log, and the reason is kept in LOG_SETUP_ERROR.
-        global LOG_SETUP_ERROR
+        # fail is there truly no log.
         fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
         errors: list[str] = []
         for candidate in (LOG_PATH, os.path.join(tempfile.gettempdir(), "prismx_bridge.log")):
@@ -407,16 +405,7 @@ def _setup_logger() -> logging.Logger:
                 break
             except Exception as e:  # noqa: BLE001 - 日志系统自身的错误没有更好的去处
                 errors.append(f"{candidate}: {e!r}")
-        else:
-            LOG_SETUP_ERROR = "; ".join(errors)
     return lg
-
-
-# 日志系统自己建不起来时的原因（两个候选路径都失败才会有值）。日志写不了就没别的
-# 地方能报这件事，所以留一个模块级变量给状态栏 / 排障时读。
-# Why the logger could not be set up (set only when both candidate paths failed).
-# There is nowhere else to report this when the log itself is unavailable.
-LOG_SETUP_ERROR: str | None = None
 
 
 logger = _setup_logger()

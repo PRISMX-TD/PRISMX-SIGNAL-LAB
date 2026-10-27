@@ -7,9 +7,7 @@ Run with the same env as the local backend (DATABASE_URL, JWT_SECRET, PYTHONPATH
 """
 import argparse
 import json
-import os
 import secrets
-import sys
 
 from app.core.config import settings  # noqa: E402
 

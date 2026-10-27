@@ -22,33 +22,29 @@ from app.utils.timeutil import aware as _aware
 
 router = APIRouter(prefix="/signals", tags=["signals"])
 
-# 按天统计的天数窗口 / number of days covered by the daily stats window
-STATS_DAYS = 7
-
 # ---------- 读缓存 / read caches ----------
-# 下面四个接口的结果与请求者无关（列表只按「是不是实时等级」分两份），却是每个
+# 下面三个接口的结果与请求者无关（列表只按「是不是实时等级」分两份），却是每个
 # 用户进信号页都要打一遍的全表级查询。结果放进 shared_cache（配了 Redis 就是全体
 # worker 共享一份），TTL 按「晚多久能接受」分别取：
 #   - 列表 10 秒：新信号入库时 webhook 会主动删键（shared_cache.invalidate_signal_caches），
 #     这个 TTL 兜的是过期翻转（ACTIVE→EXPIRED，FREE 列表因此多出一条）与胜负判定——
 #     在线用户本来就有 WS 推送，TTL 只影响刷新页面那一刻看到的快照。
-#   - 每日计数、客观胜率 60 秒：统计数字，晚一分钟无关紧要；新信号入库同样主动删键。
+#   - 客观胜率 60 秒：统计数字，晚一分钟无关紧要；新信号入库同样主动删键。
 #   - 策略分析 60 秒：最重的一个（按时段/品种/分钟点聚合 30 天），键里带上公开
 #     名单，管理员改名单后换键即生效，不必等 TTL。
 # 缓存的是 JSON 化之后的负载（jsonable_encoder），与 FastAPI 自己序列化的结果逐字
 # 相同；Redis 出错时 shared_cache 直接回源，行为与没有缓存时一致。
 #
-# The four endpoints below return the same thing to everyone (the list only
+# The three endpoints below return the same thing to everyone (the list only
 # splits on "realtime tier or not"), yet every visit to the signals page runs
 # them as table-level queries. Results go into shared_cache (one copy for all
 # workers with Redis) with TTLs chosen by how stale each may be: the list 10s
 # (new signals delete the key actively; the TTL covers expiry flips and
-# resolutions, which connected clients get over WS anyway), daily counts and the
-# objective win rate 60s, strategy analysis 60s keyed by the published list so
+# resolutions, which connected clients get over WS anyway), the objective win
+# rate 60s, strategy analysis 60s keyed by the published list so
 # an admin edit switches keys at once. Payloads are cached JSON-encoded, byte
 # for byte what FastAPI would emit; on a Redis error shared_cache just computes.
 _LIST_CACHE_SECONDS = 10
-_STATS_CACHE_SECONDS = 60
 _WINRATE_CACHE_SECONDS = 60
 _ANALYSIS_CACHE_SECONDS = 60
 
@@ -199,43 +195,6 @@ def list_platform_strategies(
     visible = [PlatformStrategyOut(**it) for it in items if it.get("published", True)]
     visible.sort(key=lambda s: (s.order, s.nameEn or s.nameZh))
     return PlatformStrategyListOut(items=visible)
-
-
-@router.get("/stats", response_model=dict)
-def signal_stats(
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """近 N 天每日信号发出量（含当天，按 UTC 日期分组）。
-    Daily signal count for the last N days (incl. today, grouped by UTC date).
-    """
-    return shared_cache.cached_json(
-        shared_cache.SIGNAL_STATS_KEY, _STATS_CACHE_SECONDS, lambda: _signal_stats_payload(db))
-
-
-def _signal_stats_payload(db: Session) -> dict:
-    now = datetime.now(timezone.utc)
-    start_date = (now - timedelta(days=STATS_DAYS - 1)).date()
-
-    rows = (
-        db.query(Signal.created_at)
-        .filter(Signal.created_at >= datetime.combine(start_date, datetime.min.time(), tzinfo=timezone.utc))
-        .all()
-    )
-
-    # 按 UTC 日期分组计数 / count grouped by UTC date, done in Python for DB-dialect neutrality
-    counts: dict[str, int] = {}
-    for i in range(STATS_DAYS):
-        day = start_date + timedelta(days=i)
-        counts[day.isoformat()] = 0
-    for (created_at,) in rows:
-        ts = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
-        key = ts.date().isoformat()
-        if key in counts:
-            counts[key] += 1
-
-    daily = [{"date": d, "count": c} for d, c in counts.items()]
-    return {"daily": daily, "total": sum(c["count"] for c in daily)}
 
 
 @router.get("/winrate", response_model=dict)

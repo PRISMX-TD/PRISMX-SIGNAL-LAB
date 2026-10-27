@@ -163,7 +163,6 @@ function MiniSignalCard({
   tp,
   rr,
   ttlPct,
-  fresh,
   compact,
 }: {
   t: T
@@ -174,7 +173,6 @@ function MiniSignalCard({
   tp: string
   rr: string
   ttlPct: number
-  fresh?: boolean
   compact?: boolean
 }) {
   return (
@@ -189,11 +187,6 @@ function MiniSignalCard({
           >
             {t(side === 'buy' ? 'landing.scrBuy' : 'landing.scrSell')}
           </span>
-          {fresh && (
-            <span className="rounded-[calc(var(--cq)*1.6)] bg-prism-600 px-[calc(var(--cq)*1.8)] py-[calc(var(--cq)*0.7)] text-[calc(var(--cq)*2.6)] font-bold text-white">
-              {t('landing.scrNew')}
-            </span>
-          )}
         </div>
         <div className="text-right">
           <div className="sig-rr num text-[calc(var(--cq)*4.4)] font-bold leading-none text-up">{rr}</div>

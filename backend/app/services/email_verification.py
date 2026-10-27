@@ -45,10 +45,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def is_verified(user: User) -> bool:
-    return user.email_verified_at is not None
-
-
 def too_many_recent_sends(user_id: str) -> bool:
     """这个账号这一小时里是不是已经发满 VERIFY_MAX_PER_HOUR 封了。
 

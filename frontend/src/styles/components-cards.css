@@ -34,14 +34,6 @@
     transform: translateY(-1px);
   }
 
-  .no-sheen::before {
-    content: none;
-  }
-
-  .flat-card {
-    box-shadow: none !important;
-  }
-
   .card {
     @apply glass;
   }
@@ -89,22 +81,6 @@
      Controls recess inside a lighter panel rather than floating above it. */
   .pos-card button:not(.btn) {
     background: rgba(0, 0, 0, 0.22);
-  }
-
-
-  /* 实色紫面板。整段区块直接刷成品牌色——这是「颜料」用法的主场：
-     大面积平涂，白字压上去，没有任何渐变或光晕。
-     Solid violet plane. Whole blocks painted in the brand colour — the main
-     event for the pigment approach: large flat fills with white type on top,
-     no gradient and no halo anywhere. */
-  .plane-uv {
-    background: var(--purple);
-    color: #fff;
-    border: none;
-    border-radius: var(--r-lg);
-  }
-  .plane-uv .sub {
-    color: rgba(255, 255, 255, 0.72);
   }
 
   /* ═════════════ 签名图形：光谱线 / signature: the spectral rule ═════════════
@@ -297,22 +273,6 @@
     border: 1px solid var(--line);
     font-weight: 500;
   }
-  /* 计数徽章：实色紫底白字。半透明紫底 + 紫字是上一版的做法，在深色卡片上
-     对比不足。/ Count badge: solid violet, white label. The previous
-     translucent-violet-on-violet-text version under-contrasted on dark cards. */
-  .count-badge {
-    min-width: 20px;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: var(--r-xs);
-    background: var(--purple);
-    color: #fff;
-    font-size: 12px;
-    display: grid;
-    place-items: center;
-    font-weight: 700;
-    border: none;
-  }
 
   /* ═════════════ 分段控制器 / segmented control ═════════════ */
   .seg {
@@ -378,12 +338,6 @@
   .animate-fade-in-up {
     animation: fade-in-up 0.45s var(--ease-out) both;
   }
-  /* 发光脉冲已移除，退化为静态：它是纯装饰的无限循环，也是移动端持续重绘的
-     主要来源之一。/ The glow pulse is gone, degraded to static: a purely
-     decorative infinite loop and a major source of continuous mobile repaint. */
-  .animate-glow-pulse {
-    animation: none;
-  }
   .animate-spin {
     animation: spin 0.8s linear infinite;
   }
@@ -391,8 +345,7 @@
      Global reduced-motion: every infinite loop stops and enter animations
      collapse to their final state. */
   @media (prefers-reduced-motion: reduce) {
-    .animate-breathe,
-    .animate-glow-pulse {
+    .animate-breathe {
       animation: none;
     }
     .animate-fade-in-up {
@@ -402,44 +355,10 @@
     }
   }
 
-  /* ── 顶栏 MT5 药丸 / topbar MT5 pill ── */
-  .mt5-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    height: 36px;
-    padding: 0 16px;
-    border-radius: 999px;
-    background: rgb(var(--up-rgb) / 0.10);
-    border: 1px solid rgb(var(--up-rgb) / 0.35);
-    color: var(--up);
-    font-size: 13px;
-    font-weight: 500;
-  }
-  .mt5-pill .dot {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-  }
-  .mt5-pill .dot.up {
-    background: var(--up);
-    box-shadow: none;
-    animation: breathe 2.4s ease-in-out infinite;
-  }
-
   /* ── 英雄卡 / hero card ── */
   .hero-card {
     position: relative;
     overflow: hidden;
-  }
-  .hero-nebula {
-    position: absolute;
-    right: -30px;
-    top: 0;
-    width: 62%;
-    height: 100%;
-    pointer-events: none;
-    opacity: 0.95;
   }
   /* 故事式分段指示器：一排细条，当前项拉宽并渐变高亮，点按任意段跳转。
      跨端统一（桌面+手机都用这个），替代旧的圆点/计数器/箭头组合。
@@ -562,12 +481,6 @@
   }
   .stance-word.neutral {
     color: var(--text-3);
-  }
-  .conf-val {
-    font-size: 26px;
-    font-weight: 700;
-    color: #fff;
-    margin-top: 4px;
   }
 
   /* 多周期标签 / multi-TF tags */
@@ -798,146 +711,6 @@
     font-weight: 700;
     color: #fff;
     transition: color 0.15s;
-  }
-  .qt-chg-chip {
-    display: inline-block;
-    min-width: 64px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 700;
-  }
-  .qt-chg-chip.up {
-    background: var(--up-bg);
-    color: var(--up);
-  }
-  .qt-chg-chip.down {
-    background: var(--down-bg);
-    color: var(--down);
-  }
-  .qt-trade-btn {
-    height: 31px;
-    padding: 0 16px;
-    font-size: 13px;
-    border-radius: 999px;
-    background: linear-gradient(92deg, rgba(90, 34, 238, 0.85), rgba(168, 85, 247, 0.85));
-    color: #fff;
-    border: none;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: inherit;
-    box-shadow: 0 2px 12px rgba(90, 34, 238, 0.35);
-    transition: filter 0.2s, transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1);
-  }
-  .qt-trade-btn:hover {
-    filter: brightness(1.12);
-  }
-  .qt-trade-btn:active {
-    transform: scale(0.94);
-  }
-
-  /* ── 市场概览 / market overview ── */
-  .donut-wrap {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-top: 12px;
-  }
-  .donut {
-    position: relative;
-    width: 116px;
-    height: 116px;
-    flex-shrink: 0;
-  }
-  .donut svg {
-    transform: rotate(-90deg);
-  }
-  .donut-center {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    display: grid;
-    place-items: center;
-    text-align: center;
-  }
-  .donut-center b {
-    font-size: 26px;
-    display: block;
-    line-height: 1.1;
-    color: #fff;
-  }
-  .donut-center span {
-    font-size: 11px;
-    color: var(--text-3);
-  }
-  .ov-legend {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    font-size: 13px;
-    flex: 1;
-  }
-  .ov-legend .row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .ov-legend .sw {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-  }
-  .ov-legend .k {
-    color: var(--text-2);
-    white-space: nowrap;
-  }
-  .ov-legend .v {
-    margin-left: auto;
-    font-weight: 700;
-    color: #fff;
-    white-space: nowrap;
-  }
-  .ov-legend .v i {
-    font-style: normal;
-    color: var(--text-3);
-    font-weight: 400;
-  }
-  .acc-section {
-    margin-top: 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
-    padding-top: 12px;
-  }
-  .acc-row {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-  }
-  .acc-row .k {
-    font-size: 13px;
-    color: var(--text-3);
-  }
-  .acc-row .v {
-    font-size: 26px;
-    font-weight: 700;
-    color: #c4b5fd;
-    margin-left: auto;
-  }
-  .acc-spark {
-    display: block;
-    width: 100%;
-    height: 56px;
-    margin-top: 4px;
-  }
-  .acc-x-labels {
-    display: flex;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--text-3);
-    margin-top: 4px;
-    padding: 0 4px;
-    font-family: "JetBrains Mono", monospace;
   }
 
   /* ── 仪表盘网格 / dashboard grid ──

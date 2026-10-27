@@ -67,7 +67,6 @@ BLOCK_TAGS = frozenset({"p", "h2", "h3", "blockquote"})
 LIST_TAGS = frozenset({"ul", "ol"})
 INLINE_TAGS = frozenset({"strong", "em", "u", "s", "span", "a", "br", "img"})
 SELF_CLOSING = frozenset({"br", "hr", "img"})
-ALLOWED_TAGS = BLOCK_TAGS | LIST_TAGS | INLINE_TAGS | {"li", "hr"}
 
 # 同义标签归一：b→strong 之类。浏览器的 execCommand 到今天仍然产出 b / i / font，
 # 归一之后渲染侧只需要认一种写法。

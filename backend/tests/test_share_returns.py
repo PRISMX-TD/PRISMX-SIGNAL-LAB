@@ -90,19 +90,16 @@ def test_share_trade_uses_capital_at_time(db_session):
     assert abs(after["returnPct"] - 5.0) < 1e-9         # (60 + 40) / 2000
 
 
-def test_share_trade_ignores_client_profit(db_session):
-    """客户端传来的 profit 一律忽略：以前随便填个盈利就能拿到官方口径的高收益率。"""
+def test_share_trade_uses_stored_profit(db_session):
+    """盈亏只取服务端存的平仓腿：以前客户端随便填个盈利就能拿到官方口径的高收益率。"""
     u = _user(db_session, "cp@t.co"); _acct(db_session, u, "A", 1000.0)
     ensure_baselines(db_session, MK, T0)
     _leg(db_session, u, "A", 11, 100.0, datetime(2026, 9, 3, 1), datetime(2026, 9, 3, 5))
     c = _client(db_session, u)
-    r = c.get("/gamification/share/trade", params={
-        "login": "A", "position": 11, "profit": 1e6,
-        "opened_at": "2026-09-03T01:00:00", "closed_at": "2026-09-03T05:00:00"}).json()
+    r = c.get("/gamification/share/trade", params={"login": "A", "position": 11}).json()
     assert abs(r["returnPct"] - 10.0) < 1e-9
-    # 旧版前端（不带 position）：不再按客户端数字算，返回 null
-    legacy = c.get("/gamification/share/trade", params={
-        "login": "A", "profit": 1e6, "opened_at": "2026-09-03T01:00:00", "closed_at": "2026-09-03T05:00:00"})
+    # 不带 position：返回 null / no position: null
+    legacy = c.get("/gamification/share/trade", params={"login": "A"})
     assert legacy.status_code == 200 and legacy.json()["returnPct"] is None
 
 

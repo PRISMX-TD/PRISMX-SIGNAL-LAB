@@ -116,9 +116,9 @@ def get_auth_state(user_id: str) -> dict | None:
     hit = shared_cache.get_json(key)
     if isinstance(hit, dict) and isinstance(hit.get("tv"), int) and isinstance(hit.get("d"), bool):
         return hit
-    # 写回竞态（见 _AUTH_GEN_KEY）：查库**之前**记下失效代号，写回**之后**再看一眼——
+    # 写回竞态（见 shared_cache.AUTH_GEN_KEY）：查库**之前**记下失效代号，写回**之后**再看一眼——
     # 期间有人提交了改密 / 停用并失效过，就把自己刚写进去的那份（可能是旧值）删掉。
-    # Write-back race (see _AUTH_GEN_KEY): note the invalidation generation BEFORE
+    # Write-back race (see shared_cache.AUTH_GEN_KEY): note the invalidation generation BEFORE
     # the query and re-check it AFTER the write-back; if an invalidation landed in
     # between, delete the (possibly stale) entry just written.
     gen_key = _auth_gen_key(user_id)
@@ -485,12 +485,10 @@ _AUTH_INVALIDATE_KEY = "prismx_auth_invalidate"
 
 # 失效代号（防「未命中读者把旧 tv 写回」的竞态）的定义与换代号都在 shared_cache 里
 # （AUTH_GEN_KEY / invalidate_auth_state）：这样**任何**直接调 shared_cache.invalidate_auth_state
-# 的地方也一样安全。这里保留旧名字，get_auth_state 与测试照旧用。
+# 的地方也一样安全。这里保留 _auth_gen_key 这个别名，get_auth_state 与测试照旧用。
 # The invalidation generation (guarding the "cache-miss reader writes back a stale tv" race) is
 # defined and bumped in shared_cache (AUTH_GEN_KEY / invalidate_auth_state), so any direct caller
-# of shared_cache.invalidate_auth_state is just as safe. The old names stay as aliases.
-_AUTH_GEN_KEY = shared_cache.AUTH_GEN_KEY
-_AUTH_GEN_TTL_SECONDS = shared_cache.AUTH_GEN_TTL_SECONDS
+# of shared_cache.invalidate_auth_state is just as safe. _auth_gen_key stays as an alias.
 _auth_gen_key = shared_cache.auth_gen_key
 
 

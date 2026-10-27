@@ -907,7 +907,7 @@ MSG_FUNDS_UNAVAILABLE = ("暂时无法核对账户资金，请稍后再试 / "
 
 def read_live_funds(acct) -> tuple[float, float]:
     """经网关实时读 (balance, equity)。register 端点是同步 def（跑在线程池里），所以走
-    run_on_main_loop 把协程排进主循环——与 routers/gateway.refresh_gateway_account 同一种调法。
+    run_on_main_loop 把协程排进主循环——与 routers/gateway.gateway_verify 同一种调法。
     acct 只用 .login（报名时传的是纯值快照，不是 ORM 行）。
     Reads (balance, equity) live from the gateway via run_on_main_loop, since the
     register endpoint is a sync def running in the threadpool. Only acct.login is

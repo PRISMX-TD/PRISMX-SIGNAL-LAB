@@ -38,13 +38,6 @@ EXPIRING_NOTICE = timedelta(days=3)
 
 # renew 不再提供，但旧跟进 / 旧申请里还有 / renew is no longer offered but old rows still carry it
 FOLLOW_UP_GOALS = ("open_mt5", "open_signallab", "renew", "activate_trial", "revisit", "other")
-FOLLOW_UP_PRIORITIES = ("low", "normal", "high")
-FOLLOW_UP_STATUSES = (
-    "pending", "contacted", "interested", "converted", "no_interest", "unreachable", "revoked", "expired",
-)
-# 客服可以自己切的状态（revoked / expired 只有 admin / 系统能写）
-# Statuses an agent may set themselves (revoked / expired are admin / system only)
-STAFF_SETTABLE_STATUSES = ("pending", "contacted", "interested", "converted", "no_interest", "unreachable")
 
 # SupportAction.kind
 ACT_VIEW = "view_customer"
@@ -117,16 +110,6 @@ def day_start() -> datetime:
     from app.services.stats_time import day_start_utc, today
 
     return naive(day_start_utc(today()))
-
-
-def staff_recipients(db: Session, exclude: str | None = None) -> list[str]:
-    """在岗的工作人员：admin + 未停用的客服 / on-duty staff: admins plus enabled support agents."""
-    rows = (
-        db.query(User.id)
-        .filter(User.role.in_(("admin", "support")), User.disabled_at.is_(None))
-        .all()
-    )
-    return [r[0] for r in rows if r[0] != exclude]
 
 
 def admin_ids(db: Session) -> list[str]:

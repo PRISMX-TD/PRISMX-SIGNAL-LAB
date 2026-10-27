@@ -246,10 +246,6 @@ KIND_CATEGORY: dict[str, str] = {
     SUPPORT_FOLLOW_UP: "admin",
 }
 
-SUPPORT_KINDS: frozenset[str] = frozenset({
-    SUPPORT_VIEW_CUSTOMER, SUPPORT_REVEAL_PHONE, SUPPORT_SEARCH, SUPPORT_ACTION, SUPPORT_FOLLOW_UP,
-})
-
 # 「只看异常」时这张表里算异常的 kind（设计 §5.5）/ kinds that count as abnormal (§5.5)
 ABNORMAL_KINDS: frozenset[str] = frozenset({MT5_REVOKED, TRADE_CORRECTED})
 

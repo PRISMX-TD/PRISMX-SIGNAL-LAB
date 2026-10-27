@@ -27,16 +27,6 @@
 
 /* ═════════════ 与设计样本对齐的剩余几条 ═════════════ */
 
-/* 样本 68：入场 / 止损 / 止盈三格右对齐。
-   这三个数存在的意义就是互相比较。等宽字体 + 右对齐 = 小数点自动成列，
-   位数不同也不会错位（1.07418 与 1.07602 这种才是真正会露馅的场景）。
-   Three prices that exist to be compared: right-aligned monospace puts the
-   decimal points on a common axis even when digit counts differ. */
-.exec-tile,
-.sig-tile {
-  text-align: right;
-}
-
 /* 样本 24：报价表整行可悬停——列表从「表格」变成「可点的行」。 */
 .qt-table tbody tr {
   transition: background-color var(--dur-fast) var(--ease-out);
@@ -46,8 +36,8 @@
 }
 
 /* ⚠ 注意：从这里到「多周期轨道」那一节之前，本文件管的**不是落地页**。
-   下面这几组规则（.seg-pill / .filter-cycle / .seg-tabs / .view-all-btn / .lg-tab /
-   .qt-trade-btn 的按下反馈与移动端触摸热区，以及 .sig-filters、.qt-table）作用的是
+   下面这几组规则（.seg-pill / .filter-cycle / .seg-tabs / .view-all-btn / .lg-tab
+   的按下反馈与移动端触摸热区，以及 .sig-filters、.qt-table）作用的是
    **登录后全站的通用控件**，落地页一个都用不到。它们当初写在这里只是因为「按下
    反馈」这一批改动是和落地页首屏一起做的。
 
@@ -64,7 +54,7 @@
 
    WARNING: from here down to the multi-timeframe section, this file is not about the
    landing page. These rules (press feedback and mobile tap targets for .seg-pill,
-   .filter-cycle, .seg-tabs, .view-all-btn, .lg-tab, .qt-trade-btn, plus .sig-filters
+   .filter-cycle, .seg-tabs, .view-all-btn, .lg-tab, plus .sig-filters
    and .qt-table) govern shared controls in the logged-in app, none of which the
    landing page uses. They live here only because the press-feedback work shipped
    alongside the landing hero.
@@ -126,15 +116,13 @@
   .seg-pill button,
   .filter-cycle,
   .seg-tabs button,
-  .view-all-btn,
-  .qt-trade-btn {
+  .view-all-btn {
     position: relative;
   }
   .seg-pill button::after,
   .filter-cycle::after,
   .seg-tabs button::after,
-  .view-all-btn::after,
-  .qt-trade-btn::after {
+  .view-all-btn::after {
     content: "";
     position: absolute;
     left: 0;

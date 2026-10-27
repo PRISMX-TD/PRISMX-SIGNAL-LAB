@@ -54,7 +54,6 @@ from app.schemas import (
     StrategyBacktestRequest,
     StrategyCreate,
     StrategyOut,
-    StrategyPerformanceOut,
     StrategySignalOut,
     StrategyUpdate,
 )
@@ -813,11 +812,8 @@ def get_backtest_bars(
     would let the charted window diverge from the computed one all over again,
     which is the exact bug being fixed.
 
-    注册在 GET /{strategy_id}/performance 之前不是必须的(路径段数不同,不会
-    互相匹配),但与 /signals 的处理保持一致:具体路径先于参数路径。
-    Registering before GET /{strategy_id}/performance isn't strictly required
-    (different segment counts, so no collision), but it matches how /signals is
-    handled: literal paths ahead of parameterized ones.
+    与 /signals 的处理保持一致:具体路径先于参数路径。
+    Placed the same way as /signals: literal paths ahead of parameterized ones.
     """
     _check_access(db, user)
     _assert_interval(interval)
@@ -939,9 +935,35 @@ def _max_loss_streak(db: Session, strategy_id: str) -> int:
 
 
 def _perf_payload(strategy_id: str, groups: dict[str, tuple[int, float]], max_streak: int) -> dict:
-    """把一个策略的分组聚合结果拼成响应体。口径见 live_performance 的说明。
-    Assemble one strategy's response body from its grouped aggregate; see
-    live_performance for the definitions."""
+    """把一个策略的分组聚合结果拼成实盘绩效响应体。口径与回测的 summary 对齐，
+    使两者可以并排比较：
+
+    - HIT_TP 记胜、HIT_SL 记负。
+    - TIMEOUT 计入已判定笔数（它是一次真实出场），但本次未新增出场价列，
+      无法还原盈亏方向，因此单列 timeouts 不摊入胜负。
+    - STALE 与 PENDING 完全排除：前者是数据源中断的兜底，不是交易结果。
+    - 已判定不足 MIN_PERF_SAMPLE 笔时不给百分比——1 胜 0 负呈现为 100% 会
+      直接误导用户加仓。
+
+    平均盈亏比按各信号自身的 TP/SL 距离比计算（命中 TP 记 +ratio，命中 SL 记
+    -1），而不是用统一的 R 值：AST 化之后每条信号的 SL/TP 距离可以各不相同。
+
+    maxLossStreak 只覆盖最近 STREAK_WINDOW 笔已判定信号（响应里的 streakWindow
+    就是这个值）；其余字段是全历史，由 _perf_groups 的一条 GROUP BY 算完。
+
+    Assemble one strategy's live-performance body from its grouped aggregate,
+    aligned with the backtest summary so the two can be compared side by side.
+    HIT_TP wins, HIT_SL loses. TIMEOUT counts toward the resolved total (it is a
+    real exit) but is tallied separately, since no exit-price column was added
+    and its direction can't be recovered. STALE and PENDING are excluded
+    entirely. Below MIN_PERF_SAMPLE resolved trades no percentages are reported:
+    1-0 rendered as 100% would directly mislead someone into sizing up. Average R
+    is computed from each signal's own TP/SL distance ratio rather than a single
+    global R, because after the AST change every signal can carry different
+    distances. maxLossStreak covers only the most recent STREAK_WINDOW resolved
+    signals (reported as streakWindow); the other fields span all history and
+    come from _perf_groups' single GROUP BY.
+    """
     wins, win_rr = groups.get("HIT_TP", (0, 0.0))
     losses, loss_rr = groups.get("HIT_SL", (0, 0.0))
     timeouts = groups.get("TIMEOUT", (0, 0.0))[0]
@@ -963,70 +985,3 @@ def _perf_payload(strategy_id: str, groups: dict[str, tuple[int, float]], max_st
         "insufficientSample": not enough,
         "sampleThreshold": MIN_PERF_SAMPLE,
     }
-
-
-def live_performance(db: Session, strategy_id: str) -> dict:
-    """一个策略的实盘绩效。口径与回测的 summary 对齐，使两者可以并排比较：
-
-    - HIT_TP 记胜、HIT_SL 记负。
-    - TIMEOUT 计入已判定笔数（它是一次真实出场），但本次未新增出场价列，
-      无法还原盈亏方向，因此单列 timeouts 不摊入胜负。
-    - STALE 与 PENDING 完全排除：前者是数据源中断的兜底，不是交易结果。
-    - 已判定不足 MIN_PERF_SAMPLE 笔时不给百分比——1 胜 0 负呈现为 100% 会
-      直接误导用户加仓。
-
-    平均盈亏比按各信号自身的 TP/SL 距离比计算（命中 TP 记 +ratio，命中 SL 记
-    -1），而不是用统一的 R 值：AST 化之后每条信号的 SL/TP 距离可以各不相同。
-
-    Live performance for one strategy, aligned with the backtest summary so the
-    two can be compared side by side. HIT_TP wins, HIT_SL loses. TIMEOUT counts
-    toward the resolved total (it is a real exit) but is tallied separately,
-    since no exit-price column was added and its direction can't be recovered.
-    STALE and PENDING are excluded entirely. Below MIN_PERF_SAMPLE resolved
-    trades no percentages are reported: 1-0 rendered as 100% would directly
-    mislead someone into sizing up. Average R is computed from each signal's own
-    TP/SL distance ratio rather than a single global R, because after the AST
-    change every signal can carry different distances.
-
-    maxLossStreak 只覆盖最近 STREAK_WINDOW 笔已判定信号（响应里的 streakWindow
-    就是这个值）；其余字段是全历史，且都在一条 GROUP BY 里算完，不再把信号行载入
-    Python。
-    maxLossStreak covers only the most recent STREAK_WINDOW resolved signals
-    (reported as streakWindow); the other fields span all history and are computed
-    by a single GROUP BY instead of loading signal rows into Python.
-    """
-    groups = _perf_groups(db, [strategy_id]).get(strategy_id, {})
-    return _perf_payload(strategy_id, groups, _max_loss_streak(db, strategy_id))
-
-
-@router.get("/{strategy_id}/performance", response_model=StrategyPerformanceOut)
-def get_strategy_performance(
-    strategy_id: str,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """实盘绩效，供策略卡片与回测结果并排对比。
-
-    跨用户访问返回 404 而不是 403：403 会确认"这个 id 确实存在"，把别人策略的
-    存在性泄露出去。
-
-    `backtest` 字段留给前端填：本次不在服务端保存历史回测结果（没有存储回测
-    快照的表，凭空加一张会把"回测是无状态的重放"这个前提也一起改掉）。前端手上
-    已有它刚发起的那次回测响应，并排对比在前端完成。
-
-    Live performance, for side-by-side comparison with a backtest on the
-    strategy card. Another user's strategy is a 404 rather than a 403 — a 403
-    would confirm the id exists and leak someone else's strategy's existence.
-    The `backtest` field is left for the frontend to fill: no backtest snapshots
-    are persisted server-side (there's no table for them, and adding one would
-    also change the premise that a backtest is a stateless replay). The frontend
-    already holds the backtest response it just requested.
-    """
-    row = (
-        db.query(UserStrategy)
-        .filter(UserStrategy.id == strategy_id, UserStrategy.user_id == user.id)
-        .first()
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="策略不存在 / strategy not found")
-    return StrategyPerformanceOut(**live_performance(db, strategy_id))

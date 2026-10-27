@@ -339,11 +339,6 @@ namespace Prismx.Mt5Gateway
             throw new FormatException("JSON 里有没配对的括号,位置 " + start);
         }
 
-        public bool Has(string key)
-        {
-            return _values.ContainsKey(key);
-        }
-
         public string GetString(string key, string fallback = "")
         {
             string v;

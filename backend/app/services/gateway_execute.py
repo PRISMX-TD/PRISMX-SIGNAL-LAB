@@ -48,7 +48,7 @@ logger = logging.getLogger("prismx.orders")
 MANAGE_ACTIONS = frozenset({"CLOSE", "MODIFY", "MODIFY_PENDING", "CANCEL_PENDING"})
 
 
-def gateway_account(db: Session, mt5_login: str | None, user_id: str | None = None) -> MT5Account | None:
+def gateway_account(db: Session, mt5_login: str | None, user_id: str) -> MT5Account | None:
     """取目标 MT5 账号的 gateway 绑定行；不是 gateway 账号返回 None。
 
     以前这里是个只回 bool 的 _is_gateway_account。改成返回整行，是因为调用方
@@ -59,17 +59,18 @@ def gateway_account(db: Session, mt5_login: str | None, user_id: str | None = No
     必须带 user_id：唯一约束是 (user_id, login, server)，两个用户可以绑同一个
     登录号（各自验证过主密码）。只按 login 查会随机拿到别人的那一行，用别人的
     撤销状态和来源来判断自己的单——下单本身仍打本人账号（前面已校验归属），
-    但判定依据错行。user_id 传 None 只为兼容旧调用，新代码一律传。
+    但判定依据错行。
     Must scope by user_id: the unique key is (user_id, login, server), so two
     users may hold the same login. Filtering on login alone picks an arbitrary
     row and judges this order by someone else's revocation state and source.
     """
     if not mt5_login:
         return None
-    q = db.query(MT5Account).filter(MT5Account.login == mt5_login)
-    if user_id is not None:
-        q = q.filter(MT5Account.user_id == user_id)
-    acc = q.first()
+    acc = (
+        db.query(MT5Account)
+        .filter(MT5Account.login == mt5_login, MT5Account.user_id == user_id)
+        .first()
+    )
     if acc is None or acc.source != "gateway":
         return None
     return acc

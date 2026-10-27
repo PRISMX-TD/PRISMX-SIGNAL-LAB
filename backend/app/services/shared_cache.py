@@ -202,16 +202,15 @@ def clear_for_tests() -> None:
 # avoided in this project (see services/pagination.py).
 SIGNAL_LIST_KEY_REALTIME = "signals:list:realtime"
 SIGNAL_LIST_KEY_FREE = "signals:list:free"
-SIGNAL_STATS_KEY = "signals:stats"
 SIGNAL_WINRATE_KEY = "signals:winrate"
 
 
 def invalidate_signal_caches() -> None:
-    """新信号入库后调用：列表、每日计数、胜率（pending 数）立即对所有 worker 失效。
+    """新信号入库后调用：列表、胜率（pending 数）立即对所有 worker 失效。
     判定（HIT_TP/HIT_SL/STALE）与过期不主动失效，靠各自的短 TTL（见 routers/signals.py）。
     Call after a new signal is stored. Resolution and expiry rely on the short
     TTLs instead (see routers/signals.py)."""
-    delete(SIGNAL_LIST_KEY_REALTIME, SIGNAL_LIST_KEY_FREE, SIGNAL_STATS_KEY, SIGNAL_WINRATE_KEY)
+    delete(SIGNAL_LIST_KEY_REALTIME, SIGNAL_LIST_KEY_FREE, SIGNAL_WINRATE_KEY)
 
 
 # ---------------------------------------------------------------------------

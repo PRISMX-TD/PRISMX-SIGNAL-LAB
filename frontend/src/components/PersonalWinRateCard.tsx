@@ -1,46 +1,29 @@
-// 个人跟单表现卡：compact 放仪表盘（一眼看战绩 + 跳转详情），
-// detailed 放订单页（同样的数据，展示更完整）。只有自己能看到自己的。
-// Personal trading performance card: compact on the dashboard (at-a-glance +
-// link to details), detailed on the Orders page (same data, fuller layout).
-// Visible only to the user themself.
+// 个人跟单表现卡：放仪表盘（一眼看战绩 + 跳转订单页详情）。只有自己能看到自己的。
+// Personal trading performance card on the dashboard (at-a-glance + link to the
+// Orders page). Visible only to the user themself.
 import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { gamificationApi, orderApi } from '../api/client'
-import { displaySymbol } from '../api/utils'
 import type { GamificationWinRateSummary, PersonalWinRate } from '../api/types'
 import { useAuth } from '../store/auth'
 import { useLive } from '../store/live'
 import RadialGauge from './RadialGauge'
-import { symbolMeta } from '../utils/symbolMeta'
 
 interface Props {
   /** 外层挂的类名，目前只用于仪表盘的手机端排序（见 .dash-personal）。
    *  A class from the caller; currently only the dashboard's mobile ordering hook. */
   className?: string
-  variant?: 'compact' | 'detailed'
-  // 只看这一个账号（订单页的账号标签驱动）；不传则是当前绑定的全部账号。
-  // Narrow to one account (driven by the Orders page's account tab); omitted covers all currently-bound accounts.
-  login?: string
 }
 
-export default function PersonalWinRateCard({ variant = 'compact', login, className = '' }: Props) {
+// 统计范围是当前绑定的全部账号。/ Covers all currently-bound accounts.
+export default function PersonalWinRateCard({ className = '' }: Props) {
   const { t } = useTranslation()
   const { user } = useAuth()
   const { closedTradeTick, wsConnected } = useLive()
   const [data, setData] = useState<PersonalWinRate | null>(null)
-  const detailed = variant === 'detailed'
   const [gwr, setGwr] = useState<GamificationWinRateSummary | null>(null)
-
-  // 切账号要先清空再拉（避免闪上一个账号的胜率），但因新平仓而重拉时不能清空
-  // ——否则每次平仓卡片都会闪一下空白。所以只在 login 变化时清。
-  // An account switch clears first (so the previous account's rate doesn't
-  // flash), but a refetch triggered by a new close must not — that would blank
-  // the card on every close. So only clear when login itself changes.
-  useEffect(() => {
-    setData(null)
-  }, [login])
 
   // 定时刷新 + 回到页面时立即刷新（focus / visibilitychange / App 壳前台事件合并、2 秒去重），
   // 让战绩随平仓近实时更新；页面在后台时跳过轮询。间隔跟 WS 走（在线 3 分钟、断开 45 秒）。
@@ -49,26 +32,26 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
   // interval follows the WS (3 min up, 45s down).
   usePollWhileVisible(
     (isCurrent) => {
-      orderApi.winrate(login).then((r) => { if (isCurrent()) setData(r) }).catch(() => {})
+      orderApi.winrate().then((r) => { if (isCurrent()) setData(r) }).catch(() => {})
     },
     () => winratePollMs(wsConnected),
     // closedTradeTick：后端刚记下新平仓，立刻重拉，胜率不落后于下方的明细列表。
     // closedTradeTick: a new close just landed — refetch now so the rate never
     // lags the trade list beneath it.
-    [login, closedTradeTick],
+    [closedTradeTick],
   )
 
-  // 综合胜率（考核口径）：只在仪表盘 compact 卡 + 开关打开时拉取，独立端点 +
+  // 综合胜率（考核口径）：只在开关打开时拉取，独立端点 +
   // 服务端 60 秒缓存，跟随上面同一个 45 秒轮询/焦点刷新节奏（设计 §2.4/§7）。
   // 失败静默——403（开关未开放）与网络错误都直接不显示这一块，不打扰账户
   // 胜率主体的展示。
-  // Combined win rate (qualifying basis): fetched only for the dashboard's
-  // compact card while the switch is on, via its own endpoint with a 60s
-  // server-side cache, riding the same 45s poll/focus cadence as above
+  // Combined win rate (qualifying basis): fetched only while the switch is on,
+  // via its own endpoint with a 60s server-side cache, riding the same 45s
+  // poll/focus cadence as above
   // (§2.4/§7). Failures are silent — a 403 (switch off) or a network error
   // just leaves this block hidden without disturbing the main account
   // win-rate display.
-  const gwrEnabled = !detailed && !!user?.gamificationVisible
+  const gwrEnabled = !!user?.gamificationVisible
   useEffect(() => {
     if (!gwrEnabled) setGwr(null)
   }, [gwrEnabled])
@@ -85,17 +68,15 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
   const gwrPct = gwr?.winRate != null ? Math.round(gwr.winRate * 100) : null
 
   return (
-    <section className={`card glass ${detailed ? 'p-5' : 'p-[18px] sm:p-6'}${className ? ` ${className}` : ''}`}>
+    <section className={`card glass p-[18px] sm:p-6${className ? ` ${className}` : ''}`}>
       <div className="flex items-center justify-between gap-3">
-        <h3 className={`font-bold text-white ${detailed ? 'text-lg' : 'text-[15px]'}`}>
+        <h3 className="font-bold text-white text-[15px]">
           {t('winrate.personalTitle')}
         </h3>
-        {!detailed && (
-          <Link to="/orders" className="dh-link">
-            {t('winrate.viewDetail')}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
-          </Link>
-        )}
+        <Link to="/orders" className="dh-link">
+          {t('winrate.viewDetail')}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6" /></svg>
+        </Link>
       </div>
       {/* 统计范围必须写在标题下面：后端给这份统计加了回看窗口（见后端
           trade_performance.WINDOW_DAYS），数字只覆盖最近这么多天。不写出来，
@@ -120,8 +101,8 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
               读起来是三件事；分隔行才是一份账。/ Three hairline rows instead of
               three grey tiles: tiles read as three separate objects, rows as one ledger. */}
           <div className="dh-perf">
-            <RadialGauge value={pct} color="var(--up)" size={detailed ? 116 : 88} strokeWidth={detailed ? 13 : 10}>
-              <b className={`num font-bold text-white ${detailed ? 'text-3xl' : 'text-2xl'}`}>{pct}%</b>
+            <RadialGauge value={pct} color="var(--up)" size={88} strokeWidth={10}>
+              <b className="num font-bold text-white text-2xl">{pct}%</b>
               <span className="mt-0.5 text-center text-[10px] leading-tight text-neutral-500">
                 {t('winrate.resolvedCount', { n: data!.totalResolved })}
               </span>
@@ -141,36 +122,13 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
               </div>
             </div>
           </div>
-
-          {detailed && data!.bySymbol.length > 0 && (
-            <div className="mt-4 border-t border-white/10 pt-3">
-              <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('winrate.bySymbol')}</span>
-              <div className="mt-2 flex h-2 overflow-hidden rounded-full bg-white/[0.06]">
-                {data!.bySymbol.map((row) => (
-                  <div
-                    key={row.symbol}
-                    style={{ width: `${(row.count / data!.totalResolved) * 100}%`, backgroundColor: symbolMeta(row.symbol).color }}
-                  />
-                ))}
-              </div>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
-                {data!.bySymbol.map((row) => (
-                  <div key={row.symbol} className="flex items-center gap-1.5 text-[11px]">
-                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: symbolMeta(row.symbol).color }} />
-                    <span className="text-neutral-300">{displaySymbol(row.symbol)}</span>
-                    <span className="text-neutral-500">{Math.round((row.count / data!.totalResolved) * 100)}%</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </>
       )}
 
       {/* 综合胜率（考核口径）：与上方账户胜率并排出现在同一张卡里，视觉上明显
           次于账户胜率主体（更小字号、独立分隔块）——账户胜率是给用户自己复
           盘的镜子，这一块是等级考核的第二个数字，两者第一次出现就摆在一起，
-          不分先后地各带标签（设计 §2.4/§7）。只在 compact 卡、开关打开、且
+          不分先后地各带标签（设计 §2.4/§7）。只在开关打开、且
           请求已经拿到数据时渲染；不依赖账户胜率是否已有数据（data 为 null
           时也能显示）。
           Combined win rate (qualifying basis): appears in the same card as the
@@ -178,10 +136,10 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
           (smaller type, its own bordered block) — the account rate is the
           user's own mirror, this is the second, qualifying number, and the
           two show up together from the start, each carrying its own label
-          (§2.4/§7). Rendered only on the compact card once the switch is on
+          (§2.4/§7). Rendered only once the switch is on
           and the request has resolved; independent of whether the account
           win rate itself has data yet. */}
-      {!detailed && gwr && (
+      {gwr && (
         <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
           <div className="flex items-center justify-between text-[11px]">
             <span className="text-neutral-500">{t('gamification.winRateCard.combined')}</span>
@@ -218,7 +176,6 @@ export default function PersonalWinRateCard({ variant = 'compact', login, classN
           </Link>
         </div>
       )}
-      {detailed && <p className="mt-3 text-[10px] text-neutral-500">{t('winrate.disclaimer')}</p>}
     </section>
   )
 }

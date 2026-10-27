@@ -1491,35 +1491,6 @@ class StrategySignalOut(BaseModel):
     createdAt: datetime
 
 
-class StrategyPerformanceOut(BaseModel):
-    """实盘绩效 + 最近一次回测的对照。已判定不足 sampleThreshold 笔时
-    winRate / avgRr 为 None，前端显示"样本不足"而不是把 1 胜 0 负写成 100%。
-    Live performance plus the latest backtest for comparison. Below
-    sampleThreshold resolved trades, winRate/avgRr are None so the frontend
-    shows "insufficient sample" instead of rendering 1-0 as 100%."""
-
-    strategyId: str
-    resolved: int
-    wins: int
-    losses: int
-    timeouts: int
-    pending: int
-    winRate: float | None = None
-    avgRr: float | None = None
-    maxLossStreak: int
-    # maxLossStreak 只统计最近 streakWindow 笔已判定信号。顺序相关指标无法聚合，
-    # 全量回看会随信号历史无界增长，所以窗口是硬上限；把窗口一起返回，前端才不会
-    # 把一个有范围的数字当成全历史最长连亏来读。
-    # maxLossStreak covers only the most recent streakWindow resolved signals: an
-    # order-dependent metric can't be aggregated, and scanning all of history
-    # grows without bound, so the window is a hard cap. It's returned alongside so
-    # the frontend doesn't read a bounded number as an all-time streak.
-    streakWindow: int
-    insufficientSample: bool
-    sampleThreshold: int
-    backtest: dict | None = None
-
-
 # ---------- API Token / MT5 连接凭证 ----------
 class EATokenOut(BaseModel):
     # 明文 token 仅在重置（生成）响应中出现一次；查询时为 None（库中只存哈希）。

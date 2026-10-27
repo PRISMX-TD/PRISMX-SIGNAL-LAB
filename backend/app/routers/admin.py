@@ -19,7 +19,6 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.services.image_upload import (
     UploadError, is_configured as is_upload_configured, read_upload_capped, upload_image,

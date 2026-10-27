@@ -1934,7 +1934,7 @@ class ConnectionManager:
         while True:
             pubsub = client = None
             try:
-                sub = shared_state.new_async_pubsub(WS_CHANNEL, with_client=True)
+                sub = shared_state.new_async_pubsub(WS_CHANNEL)
                 if sub is None:
                     return
                 pubsub, channel, client = sub

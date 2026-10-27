@@ -117,7 +117,6 @@ def _extra_sections(user: User, db: Session) -> dict:
         ("/auth/me", lambda: _encode(
             account_router.get_account(db=db, current_user=user), account_router.AccountInfoOut)),
         ("/orders/winrate", lambda: _encode(orders_router.order_winrate(login=None, user=user, db=db))),
-        ("/signals/winrate", lambda: _encode(signals_router.signal_winrate(user=user, db=db))),
         ("/announcements/popup", lambda: _encode(
             announcements_router.get_popup_announcement(db=db, user=user), AnnouncementPopupOut)),
         (f"/notifications/feed?limit={NOTIFICATION_PANEL_LIMIT}", lambda: _encode(

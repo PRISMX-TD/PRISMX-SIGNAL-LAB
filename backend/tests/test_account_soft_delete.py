@@ -100,7 +100,7 @@ def test_gateway_unbind_is_soft_and_reverify_revives(db_session, monkeypatch):
     assert gateway_mod.unbind_gateway_account("601144", user=u, db=db_session) == {"ok": True}
     row = db_session.query(MT5Account).filter_by(login="601144").one()
     assert is_removed(row) and is_revoked(row)                             # gateway 行：撤销+删除同标
-    assert gateway_mod.list_gateway_accounts(user=u, db=db_session) == []
+    assert bridge_mod.list_accounts(user=u, db=db_session)["accounts"] == []    # 账号列表不显示
     with pytest.raises(HTTPException):
         gateway_mod.unbind_gateway_account("601144", user=u, db=db_session)
 
@@ -117,7 +117,7 @@ def test_gateway_unbind_is_soft_and_reverify_revives(db_session, monkeypatch):
     assert out.valid is True
     row = db_session.query(MT5Account).filter_by(login="601144").one()
     assert not is_removed(row) and row.revoked_at is None and row.balance == 9.0
-    assert [r.login for r in gateway_mod.list_gateway_accounts(user=u, db=db_session)] == ["601144"]
+    assert [r["login"] for r in bridge_mod.list_accounts(user=u, db=db_session)["accounts"]] == ["601144"]
 
 
 def test_restore_helper_is_a_noop_on_live_rows(db_session):

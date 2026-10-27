@@ -273,7 +273,6 @@ namespace Prismx.Mt5Gateway
                 case "/positions":
                 case "/orders":
                 case "/deals":
-                case "/quote":
                 case "/symbol-sessions":
                 case "/positions-batch":
                 case "/accounts-batch":
@@ -503,9 +502,6 @@ namespace Prismx.Mt5Gateway
                     return;
                 case "/deal-events":
                     HandleDealEvents(ctx, method);
-                    return;
-                case "/quote":
-                    RequirePost(ctx, method, HandleQuote);
                     return;
                 case "/symbol-sessions":
                     RequirePost(ctx, method, HandleSymbolSessions);
@@ -1412,38 +1408,6 @@ namespace Prismx.Mt5Gateway
             }
 
             j.EndArray().EndObject();
-            WriteJson(ctx, 200, j.ToString());
-        }
-
-        //+------------------------------------------------------------------+
-        //| POST /quote  取当前买卖价                                        |
-        //+------------------------------------------------------------------+
-        private void HandleQuote(HttpListenerContext ctx, JsonObject body)
-        {
-            string symbol = body.GetString("symbol");
-            if (symbol.Length == 0)
-            {
-                WriteError(ctx, 400, "bad_request", "symbol 必填");
-                return;
-            }
-
-            double bid, ask;
-            MTRetCode res;
-
-            if (!_link.GetQuote(symbol, out bid, out ask, out res))
-            {
-                WriteError(ctx, 404, res.ToString(), "取价失败,确认品种名是否正确(注意后缀)");
-                return;
-            }
-
-            JsonWriter j = new JsonWriter();
-            j.BeginObject()
-                .Field("ok", true)
-                .Field("symbol", symbol)
-                .Field("bid", bid)
-                .Field("ask", ask)
-             .EndObject();
-
             WriteJson(ctx, 200, j.ToString());
         }
 

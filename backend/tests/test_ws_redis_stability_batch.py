@@ -506,7 +506,7 @@ def _install_pubsubs(monkeypatch, plan: list[bool]):
     """plan[i] = 第 i 次订阅是否失败。返回 (尝试次数记录, sleep 时长记录)。"""
     attempts, delays = [], []
 
-    def new_pubsub(channel, with_client=False):
+    def new_pubsub(channel):
         i = len(attempts)
         attempts.append(i)
         return _FakePubSub(plan[min(i, len(plan) - 1)]), "prismx:ws", _FakeClient()
@@ -605,7 +605,7 @@ def test_catch_up_skips_empty_snapshots_and_survives_errors(redis_on):
 def test_subscriber_connection_gets_connect_timeout_and_health_check_but_no_socket_timeout(monkeypatch):
     monkeypatch.setattr(settings, "REDIS_URL", "redis://127.0.0.1:1/0")
     shared_state.reset_for_tests()
-    ps, _channel, client = shared_state.new_async_pubsub("ws", with_client=True)
+    ps, _channel, client = shared_state.new_async_pubsub("ws")
     kwargs = client.connection_pool.connection_kwargs
     assert kwargs["socket_connect_timeout"] == 2.0
     assert kwargs["health_check_interval"] == shared_state.REDIS_HEALTH_CHECK_INTERVAL_SECONDS

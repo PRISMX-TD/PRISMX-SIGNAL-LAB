@@ -14,7 +14,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
-import type { MT5Account, Order, OrderEntryType, Quote } from '../../api/types'
+import type { MT5Account, Order, OrderEntryType } from '../../api/types'
 import { useGlobalQuote, useQuotes } from '../../store/live'
 import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
@@ -24,18 +24,6 @@ import { useMarketClosedText, useMarketStatus } from '../order/useMarketStatus'
 interface Props {
   symbol: string
   accounts: MT5Account[]
-  // 按交易商账户区分的报价：login -> {symbol: Quote}（下单参考价用选中账户的）。
-  // 不传就自己订阅（useQuotes）——图表页不再在顶层读报价，见 ChartsPage「高频数据下放」。
-  // Per-account quotes: login -> {symbol: Quote} (entry price uses the selected
-  // account's). Omitted → subscribed here (useQuotes); the charts page no longer
-  // reads quotes at its top level.
-  quotesByAccount?: Record<string, Record<string, Quote>>
-  // 全站统一报价（EA 推送）：选中账户没有该品种报价时的兜底 bid/ask。不传就按 symbol
-  // 自己订阅那一条（useGlobalQuote），其它品种跳价不会牵动这张票。
-  // Site-wide quote (EA-pushed): fallback bid/ask when the account has none. Omitted
-  // → this symbol's quote is subscribed here (useGlobalQuote), so other symbols'
-  // ticks don't touch the ticket.
-  globalQuote?: Quote
   // 图表最新收盘价：连报价都没有时的最后兜底 / chart's latest close, last-resort fallback
   refPrice: number
   digits: number
@@ -87,13 +75,19 @@ function PipPrice({ v, digits }: { v: number | null; digits: number }) {
 }
 
 function OrderTicket({
-  symbol, accounts, quotesByAccount: quotesByAccountProp, globalQuote: globalQuoteProp, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', className = '',
+  symbol, accounts, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', className = '',
 }: Props) {
   const { t } = useTranslation()
-  const ctxAccountQuotes = useQuotes()
-  const ctxGlobalQuote = useGlobalQuote(symbol)
-  const quotesByAccount = quotesByAccountProp ?? ctxAccountQuotes
-  const globalQuote = globalQuoteProp ?? ctxGlobalQuote
+  // 按交易商账户区分的报价：login -> {symbol: Quote}（下单参考价用选中账户的），在这里自己订阅
+  // （useQuotes）——图表页不在顶层读报价，见 ChartsPage「高频数据下放」。
+  // Per-account quotes: login -> {symbol: Quote} (entry price uses the selected account's),
+  // subscribed here (useQuotes); the charts page doesn't read quotes at its top level.
+  const quotesByAccount = useQuotes()
+  // 全站统一报价（EA 推送）：选中账户没有该品种报价时的兜底 bid/ask。只按 symbol 订阅那一条
+  // （useGlobalQuote），其它品种跳价不会牵动这张票。
+  // Site-wide quote (EA-pushed): fallback bid/ask when the account has none. Only this
+  // symbol's quote is subscribed (useGlobalQuote), so other symbols' ticks don't touch the ticket.
+  const globalQuote = useGlobalQuote(symbol)
   const onlineAccounts = useMemo(() => accounts.filter((a) => a.online), [accounts])
   const [side, setSide] = useState<Side>(initialSide)
   const form = useOrderForm({

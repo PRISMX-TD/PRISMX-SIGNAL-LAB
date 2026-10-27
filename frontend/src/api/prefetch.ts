@@ -22,7 +22,6 @@ export const PREFETCH_PATHS: ReadonlySet<string> = new Set([
   '/orders',
   '/auth/me',
   '/orders/winrate',
-  '/signals/winrate',
   '/announcements/popup',
   '/notifications/feed?limit=4', // NotificationBell PANEL_MESSAGES
   '/sentiment',

@@ -429,17 +429,16 @@ def subscribe_memory(fn: Callable[[str, str], None]) -> None:
     _memory.subscribe(fn)
 
 
-def new_async_pubsub(channel: str, with_client: bool = False) -> Any:
-    """给异步订阅循环用的 redis.asyncio PubSub；没配 Redis 返回 None。
+def new_async_pubsub(channel: str) -> Any:
+    """给异步订阅循环用的 redis.asyncio PubSub：返回 (pubsub, 频道键, 客户端)；没配 Redis 返回 None。
 
     每次调用都新建一个客户端（连接池）。订阅循环断线后会重来一次，所以**调用方
-    必须在 finally 里把客户端关掉**，否则 Redis 一抖动连接数就线性泄漏。
-    with_client=True 时多返回这个客户端句柄；默认仍返回两元组，老调用方不受影响。
+    必须在 finally 里把返回的客户端关掉**，否则 Redis 一抖动连接数就线性泄漏。
 
-    A fresh client (and connection pool) per call. Subscriber loops call this
-    again after every drop, so the caller must close the client in a finally
-    block or connections leak linearly through a Redis wobble. with_client=True
-    hands the client back; the default stays a 2-tuple for existing callers.
+    Returns (pubsub, channel key, client), or None without Redis. A fresh client
+    (and connection pool) per call. Subscriber loops call this again after every
+    drop, so the caller must close the returned client in a finally block or
+    connections leak linearly through a Redis wobble.
     """
     if not enabled():
         return None
@@ -458,9 +457,7 @@ def new_async_pubsub(channel: str, with_client: bool = False) -> Any:
         health_check_interval=REDIS_HEALTH_CHECK_INTERVAL_SECONDS,
     )
     ps = client.pubsub(ignore_subscribe_messages=True)
-    if with_client:
-        return ps, _k(channel), client
-    return ps, _k(channel)
+    return ps, _k(channel), client
 
 
 def ping() -> bool:

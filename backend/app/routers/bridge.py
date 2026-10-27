@@ -14,7 +14,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from pydantic import BaseModel, ConfigDict, Field, PlainValidator, ValidationError, model_validator
 from sqlalchemy import inspect as sa_inspect
 from sqlalchemy import func, or_
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 

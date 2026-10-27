@@ -58,22 +58,15 @@ body {
   overscroll-behavior-y: auto;
 }
 
-/* 减少动态偏好：停用装饰性无限动画（背景光球/漂移/走马灯/呼吸/辉光/流光），
+/* 减少动态偏好：停用装饰性无限动画（呼吸/流光），
    并取消页面淡入，回到即时呈现；加载指示（spin）保留。既是无障碍支持，也让
    低端/低电量设备省掉持续合成开销。
    Reduced motion: pause decorative infinite animations and the page-enter
    fade for instant presentation; the loading spinner stays. Accessibility plus
    a battery/perf win on low-end devices that no longer composite continuously. */
 @media (prefers-reduced-motion: reduce) {
-  .animate-float,
-  .animate-float-slow,
-  .animate-drift,
-  .animate-drift-slow,
   .animate-breathe,
-  .animate-glow-pulse,
-  .animate-marquee,
   .animate-shimmer,
-  .animate-gradient-x,
   .page-enter {
     animation: none !important;
   }
@@ -131,8 +124,7 @@ body {
 
 /* 统一 tap 反馈：可点卡片/标签/胶囊按下时轻微回弹，触感一致。
    Unified tap feedback: clickable cards/tabs/chips dip slightly on press. */
-.card-hover:active,
-.tap-press:active {
+.card-hover:active {
   transform: scale(0.98);
   transition: transform var(--dur-fast) var(--ease-out);
 }
@@ -140,6 +132,5 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after { animation: none !important; }
   .content-fade { animation: none !important; }
-  .card-hover:active,
-  .tap-press:active { transform: none; }
+  .card-hover:active { transform: none; }
 }

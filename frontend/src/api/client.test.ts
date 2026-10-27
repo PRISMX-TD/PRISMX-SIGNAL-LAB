@@ -482,7 +482,7 @@ describe('request(): first-screen prefetch', () => {
       if (url.endsWith('/api/bootstrap?extras=1')) {
         return Promise.resolve(json({
           signals: null, accounts: null, trends: null, quotes: null, symbols: null, failed: [],
-          extras: { '/orders': { orders: [], total: 0 }, '/signals/winrate': { winRate: 0.6 } },
+          extras: { '/orders': { orders: [], total: 0 }, '/site/social': { telegramUrl: 'tg' } },
         }))
       }
       return Promise.resolve(json({ orders: [{ id: 'net' }], total: 1 }))
@@ -493,7 +493,7 @@ describe('request(): first-screen prefetch', () => {
     const orders = api.orderApi.list()
     await boot
     await expect(orders).resolves.toEqual({ orders: [], total: 0 })
-    await expect(api.signalApi.winrate()).resolves.toEqual({ winRate: 0.6 })
+    await expect(api.siteApi.getSocial()).resolves.toEqual({ telegramUrl: 'tg' })
     expect(calls).toEqual([`${MAIN}/api/bootstrap?extras=1`])
     // 第二次（轮询）照常走网络 / the next poll goes to the network
     await expect(api.orderApi.list()).resolves.toEqual({ orders: [{ id: 'net' }], total: 1 })

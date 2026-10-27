@@ -937,24 +937,6 @@ export interface SignalLock {
   riskFrac: number | null
 }
 
-// 近 N 天每日信号发出量统计 / daily signal count for the last N days
-export interface SignalDailyCount {
-  date: string
-  count: number
-}
-
-// 信号客观胜率：基于行情是否先碰到止盈/止损判定，与任何用户操作无关，全平台统一
-// Objective signal win rate: based on whether price hit TP or SL first,
-// independent of any user's behavior; the same for everyone on the platform
-export interface SignalWinRate {
-  hitTp: number
-  hitSl: number
-  pending: number
-  stale: number
-  totalResolved: number
-  winRate: number | null
-}
-
 // 历史信号回放（模拟器）：用已判定的真实信号回放净值曲线。数据源是全局信号表，
 // 不含任何用户私有数据。**当前仅管理员可访问**（后端 require_admin），功能先内部
 // 试用；对外开放时只需放开后端依赖与前端入口判断。

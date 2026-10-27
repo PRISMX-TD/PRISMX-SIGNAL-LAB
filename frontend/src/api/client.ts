@@ -1,6 +1,6 @@
 // REST 客户端封装 / REST client wrapper
 import type { OpsStatus } from './types'
-import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, SignalDailyCount, SignalWinRate, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
+import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
 import type { PendingCompetition } from './types'
 import type { MarketStatus } from './types'
 import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
@@ -672,19 +672,17 @@ export const authApi = {
 // 信号 / Signals
 export const signalApi = {
   list: () => request<{ signals: Signal[] }>('/signals'),
-  stats: () => request<{ daily: SignalDailyCount[]; total: number }>('/signals/stats'),
-  winrate: () => request<SignalWinRate>('/signals/winrate'),
   // 平台策略介绍（只读，只返回已发布条目）；编辑走 adminApi.updatePlatformStrategies
   // Platform strategy write-ups (read-only, published entries only); editing
   // goes through adminApi.updatePlatformStrategies
   platformStrategies: () => request<{ items: PlatformStrategy[] }>('/signals/platform-strategies'),
   // 已公开策略的分时段/分品种/分钟点胜率。窗口固定 30 天（后端 ANALYSIS_DAYS），
   // 只统计管理员公开名单里的策略；名单为空时返回零结果。响应形状与
-  // adminApi.strategyWinrate 完全一致——两端共用同一个计算函数。
+  // 管理端的策略胜率统计完全一致——两端共用同一个计算函数。
   // Session / symbol / hour win rates for published strategies. Window pinned
   // to 30 days server-side; whitelisted strategies only, zero result when the
-  // whitelist is empty. Same shape as adminApi.strategyWinrate — one shared
-  // computation behind both.
+  // whitelist is empty. Same shape as the admin strategy win-rate
+  // stats — one shared computation behind both.
   strategyAnalysis: () => request<AdminStrategyWinRate>('/signals/strategy-analysis'),
   // 近 30 天发过信号的全部策略名，信号面板的策略多选用。
   // Every strategy name with a signal in the last 30 days, for the board's strategy filter.
@@ -1065,16 +1063,11 @@ export const strategyApi = {
     request<{ symbol: string; interval: string; days: number; bars: Candle[] }>(
       `/strategies/backtest/bars?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&days=${days}`
     ),
-  // 单个策略的绩效。回测面板用它与刚跑完的回测并排对比，那里只关心当前这一条。
-  // One strategy's performance. The backtest panel uses this to sit beside the
-  // run it just made, where only the current strategy matters.
-  performance: (id: string) =>
-    request<StrategyPerformance>(`/strategies/${encodeURIComponent(id)}/performance`),
-  // 全部策略的绩效，一次取回。策略列表要的是"每张卡片都有绩效"，逐个调
-  // performance(id) 会让请求数随策略数线性增长。
+  // 全部策略的绩效，一次取回。策略列表要的是"每张卡片都有绩效"，逐个按策略
+  // 去取会让请求数随策略数线性增长。
   // Every strategy's performance in one call. The list needs a figure on each
-  // card, and calling performance(id) per strategy grows the request count
-  // linearly with the number of strategies.
+  // card, and fetching it per strategy would grow the request count linearly
+  // with the number of strategies.
   allPerformance: () =>
     request<{ performance: StrategyPerformance[] }>('/strategies/performance'),
   signals: (limit = 50) => request<{ signals: StrategySignal[] }>(`/strategies/signals?limit=${limit}`),
@@ -1136,10 +1129,6 @@ export const gatewayApi = {
       method: 'POST',
       body: JSON.stringify({ login, password }),
     }),
-  list: () =>
-    request<{ accounts: Array<{ login: string; source: string; accountName: string; balance: number; equity: number; leverage: number; needsReverify: boolean; revokedReason: string }> }>('/gateway/accounts'),
-  refresh: (login: string) =>
-    request<{ login: string; balance: number; equity: number }>(`/gateway/account/${login}/refresh`, { method: 'POST' }),
   remove: (login: string) =>
     request<{ ok: boolean }>(`/gateway/account/${login}`, { method: 'DELETE' }),
 }
@@ -1609,12 +1598,6 @@ export const adminApi = {
     request<AdminTraderLevelUsers>(
       `/admin/trader-levels/${level}/users${statsRangeQs(range)}&scope=${scope}&limit=${limit}`,
     ),
-  // 策略 × 交易时段胜率（默认近 7 天）。时段窗口由后端随数据一起返回，前端不
-  // 复制一份小时区间——夏令时的正确性只能在后端保证。
-  // Per-strategy, per-session win rate (last 7 days by default). The session
-  // windows ship with the payload rather than being duplicated here: only the
-  // backend can get DST right.
-  strategyWinrate: (days = 7) => request<AdminStrategyWinRate>(`/admin/strategy-winrate?days=${days}`),
   // signal 透传：用户表支持搜索 + 翻页，连点时先发的响应后到就会覆盖后发的结果。
   // 调用方（AdminPage.load）每次发起新查询时中止上一次，从源头消掉这个竞态。
   // The signal is forwarded because this table is searched and paged: with rapid
@@ -1873,19 +1856,12 @@ export const adminApi = {
     // panel (with email), triggering a real judging pass (same 60s throttle).
     gamificationUser: (id: string) =>
       request<GamificationMe & { email: string }>(`/admin/gamification/user/${encodeURIComponent(id)}`),
-    gamificationVisibility: () => request<{ userVisible: boolean }>('/admin/gamification/visibility'),
-    // 只升不降、发出不收回：一旦对用户开放就不再提供关闭接口，前端确认文案见
-    // gamification.admin.confirmOpen。Up only, never revoked: once opened there
-    // is no path back to closed; the confirmation copy is gamification.admin.confirmOpen.
-    setGamificationVisibility: (userVisible: boolean) =>
-      request<{ userVisible: boolean }>('/admin/gamification/visibility', {
-        method: 'PATCH',
-        body: JSON.stringify({ userVisible }),
-      }),
-    // 设置组（Phase 2）：与上面的 /visibility 共用同一份存储记录，读-合并-写
-    // 语义组合，互不清空对方的键。Settings group (Phase 2): shares the same
-    // stored record as /visibility above, composed via read-merge-write
-    // semantics so neither clobbers the other's keys.
+    // 设置组（Phase 2）：与后端的 /visibility 开关共用同一份存储记录，读-合并-写
+    // 语义组合，互不清空对方的键。开关只升不降、发出不收回，前端确认文案见
+    // gamification.admin.confirmOpen。Settings group (Phase 2): shares the same
+    // stored record as the backend's /visibility switch, composed via
+    // read-merge-write semantics so neither clobbers the other's keys. Switches
+    // go up only, never revoked; the confirmation copy is gamification.admin.confirmOpen.
     gamificationSettings: () => request<GamificationSettings>('/admin/gamification/settings'),
     updateGamificationSettings: (patch: GamificationSettingsPatch) =>
       request<GamificationSettings>('/admin/gamification/settings', {

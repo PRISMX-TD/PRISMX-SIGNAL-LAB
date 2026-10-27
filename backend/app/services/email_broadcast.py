@@ -436,9 +436,6 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-PICKER_SORTS = ("created", "active")
-
-
 def picker_query(db: Session, q: str | None, plan: str, active_within_days: int | None,
                  inactive_for_days: int | None, sort: str = "created", agent: str | None = None):
     """「指定用户」选人列表的查询：搜索（邮箱 / 昵称 / 手机号）+ 等级 + 活跃度。

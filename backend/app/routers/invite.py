@@ -41,7 +41,6 @@ from app.models import (
     InviteLinkAgent,
     MT5Account,
     PageVisitorDay,
-    Payment,
     User,
 )
 from app.schemas import (
@@ -81,7 +80,6 @@ from app.services.agent_tree import (
     ensure_top_node,
     links_by_code,
     node_of,
-    owner_of_code,
     remove_node,
 )
 from app.services.audit import log_change as _log_change

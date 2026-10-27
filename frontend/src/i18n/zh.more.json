@@ -1,7 +1,4 @@
 {
-  "nav": {
-    "download": "下载桥接"
-  },
   "common": {
     "copy": "复制",
     "prevPage": "上一页",
@@ -195,10 +192,6 @@
   "account": {
     "title": "账户详情",
     "loadError": "加载账户信息失败",
-    "platform": "平台账户",
-    "email": "邮箱",
-    "registeredAt": "注册时间",
-    "expiresAt": "PRO 到期",
     "neverExpires": "永不过期",
     "planTrialTag": "PRO（试用）",
     "balance": "余额",
@@ -206,7 +199,6 @@
     "marginLevel": "保证金比例",
     "leverage": "杠杆",
     "changePassword": "修改密码",
-    "setPassword": "设置密码",
     "oldPassword": "旧密码",
     "newPassword": "新密码（至少 8 位）",
     "pwTooShort": "新密码至少 8 位",
@@ -221,14 +213,7 @@
     "notifSymbolLabel": "按品种",
     "notifAll": "全部",
     "notifEvent": {
-      "order_filled": "订单成交",
-      "order_rejected": "订单被拒绝",
-      "auto_manage": "自动仓位管理触发",
-      "bridge_offline": "PRISMX Bridge 掉线",
-      "account_revoked": "直连账号需重新验证",
-      "strategy_signal": "我的策略信号",
-      "badge_awarded": "获得新勋章",
-      "support_reminder": "客服跟进提醒"
+      "strategy_signal": "我的策略信号"
     },
     "notifWindowHeading": "推送时段",
     "notifWindowEnable": "仅在指定时段推送",
@@ -501,24 +486,13 @@
       "enter": "全屏",
       "exit": "退出全屏"
     },
-    "mtabs": {
-      "chart": "图表",
-      "watchlist": "自选",
-      "trade": "交易",
-      "positions": "持仓"
-    },
     "symhead": {
       "bid": "买价 Bid",
       "ask": "卖价 Ask",
       "spread": "点差",
       "high": "日内高",
       "low": "日内低",
-      "change": "涨跌",
-      "mBid": "买",
-      "mAsk": "卖",
-      "mSpread": "点差",
-      "mHigh": "高",
-      "mLow": "低"
+      "change": "涨跌"
     },
     "watchlist": {
       "title": "自选",
@@ -587,15 +561,11 @@
       "orders": "挂单",
       "noPositions": "暂无持仓 / No open positions",
       "noOrders": "暂无挂单 / No pending orders",
-      "colSymbol": "品种",
-      "colSide": "方向",
-      "colVolume": "手数",
       "colEntry": "开仓价",
       "colCurrent": "现价",
       "colSl": "止损",
       "colTp": "止盈",
       "colPnl": "浮动盈亏",
-      "colStatus": "状态",
       "buy": "买",
       "sell": "卖",
       "close": "平仓",
@@ -650,10 +620,8 @@
     "hitSl": "命中止损",
     "openPositions": "进行中",
     "resolvedCount": "已判定 {{n}} 笔",
-    "bySymbol": "品种分布",
     "noData": "数据还不够，暂不显示",
     "viewDetail": "查看详情",
-    "disclaimer": "历史表现不代表未来收益。",
     "closedTradesTitle": "已平仓交易明细",
     "closedTradesHint": "每一笔真实成交，构成上面胜率数字的原始记录。",
     "closedTradesEmpty": "暂无已平仓记录",
@@ -685,15 +653,11 @@
       "scope": "统计范围：近 {{days}} 天 · {{account}} · 基于你自己真实的平仓记录"
     },
     "colTime": "时间",
-    "colType": "类型",
     "colSymbol": "品种",
     "colSide": "方向",
     "colVolume": "手数",
-    "colStatus": "状态",
     "colTicket": "MT5 单号",
     "colPrice": "成交价",
-    "colMessage": "信息",
-    "colAction": "操作",
     "closed": {
       "openTime": "开仓时间",
       "position": "仓位",
@@ -778,7 +742,6 @@
       "totalPnl": "总浮动盈亏"
     },
     "filterStatus": "状态",
-    "filterSide": "方向",
     "filterSymbol": "品种",
     "symbolPlaceholder": "如 XAUUSD",
     "filterFrom": "起始日期",
@@ -794,7 +757,6 @@
       "performance": "绩效分析",
       "activity": "操作记录"
     },
-    "historyHint": "下单、平仓、改单、撤单的每一笔指令及其执行状态与回执。",
     "reverse": "反向",
     "reverseHint": "反向信号单：方向与信号相反，止盈止损对调"
   },
@@ -852,11 +814,6 @@
     "tokenSavedClose": "已保存，关闭",
     "resetToken": "重置 Token",
     "resetConfirm": "重置后旧 Token 立即失效，正在运行的桥接程序需要重新填入新 Token，否则会连接失败。确定重置？",
-    "statusTitle": "MT5 连接状态",
-    "connection": "连接",
-    "boundAccount": "主账号",
-    "lastHeartbeat": "最近心跳",
-    "none": "未连接",
     "suffixTitle": "品种后缀",
     "suffixHint": "若你的券商品种带后缀（如 GBPUSD.sc 的 .sc），在此填写。下单时会自动拼到品种名后面。留空表示无后缀。",
     "suffixLabel": "品种后缀",
@@ -1062,14 +1019,9 @@
     "n2": "请在已登录 MT5 的同一台电脑上运行桥接程序。",
     "n3": "需要在 MT5 中启用「允许算法交易」，否则下单会被终端拒绝。",
     "n4": "API Token 等同密码，切勿分享给他人；如怀疑泄露，可在「连接 MT5」页面随时重置。",
-    "n5": "仅支持 Windows 系统；macOS 暂不支持。",
-    "sourceTitle": "开源与校验",
-    "sourceDesc": "安装包托管于 GitHub Releases。你可以在发布页查看版本说明与文件校验信息。",
-    "sourceLink": "在 GitHub 查看发布页"
+    "n5": "仅支持 Windows 系统；macOS 暂不支持。"
   },
   "admin": {
-    "title": "管理者页面",
-    "subtitle": "用户等级、角色与基础运营指标",
     "console": {
       "title": "管理控制台",
       "selectedPre": "已选",
@@ -1364,23 +1316,6 @@
     },
     "totalUsers": "总用户数",
     "planBreakdown": "订阅等级",
-    "tab": {
-      "data": "数据看板",
-      "winrate": "策略公开",
-      "users": "用户管理",
-      "logs": "操作日志",
-      "invites": "邀请链接",
-      "ops": "运营设置",
-      "system": "系统参数",
-      "guide": "策略介绍",
-      "announcements": "公告",
-      "email": "邮件",
-      "tickets": "工单管理",
-      "gamification": "游戏化",
-      "competitions": "比赛",
-      "health": "系统状态",
-      "support": "客服"
-    },
     "log": {
       "title": "操作日志",
       "subtitle": "注册、绑定 MT5、交易、止盈止损、管理员操作……每件事一行，点开看详情。",
@@ -3581,14 +3516,6 @@
     },
     "support": {
       "bulkAssign": "分配给客服",
-      "sub": {
-        "staff": "客服成员",
-        "assign": "分配跟进",
-        "approvals": "审批",
-        "performance": "业绩",
-        "templates": "快捷回复",
-        "settings": "设置"
-      },
       "role": {
         "user": "普通用户",
         "support": "客服",
@@ -4466,10 +4393,6 @@
       "minTradesWinrate": "本期 ≥{{n}} 笔",
       "positive": "盈亏为正才能上榜"
     },
-    "rules": {
-      "return_pct": "比的是收益率（百分比）：每笔盈亏除以它开仓、平仓时账户里的本金（取较大者），入金、出金都跟着变；本金低于 {{usd}} USD 或不足 {{n}} 笔不入榜。",
-      "win_rate": "本期 ≥{{n}} 笔且盈亏为正才能上榜——胜率高不等于赚钱。"
-    },
     "admin": {
       "preview": "榜单预览",
       "leaderboardSwitch": "排行榜用户端可见性",
@@ -4511,7 +4434,6 @@
       "regCloses": "距报名截止",
       "regOpens": "距报名开放"
     },
-    "myLiveRank": "当前第 {{n}} 名",
     "myPending": "成绩计算中，达到笔数门槛后进榜",
     "myRank": "你的名次",
     "registerMore": "再报一个账户",
@@ -4543,10 +4465,8 @@
     "liveBoard": "实时榜",
     "finalBoard": "最终榜",
     "pendingSettle": "比赛已结束，成绩终审中",
-    "prizeNote": "奖品说明",
     "starts": "开赛时间",
     "ends": "结束时间",
-    "myEntries": "我的参赛账户",
     "scoringFrom": "计分起点",
     "finalRank": "最终名次",
     "disqualified": "已取消资格",
@@ -4555,10 +4475,7 @@
     "pickAccountHint": "仅列出本人名下的实盘账户",
     "pickAccountHintDemo": "仅列出本人名下的模拟账户",
     "noAccounts": "尚未连接任何交易账户，请先绑定账户",
-    "noRealAccounts": "名下没有实盘账户，仅实盘账户可参赛",
-    "noDemoAccounts": "名下没有模拟账户，本场仅模拟账户可参赛",
     "pendingAccountType": "账户类型尚未判定，请稍后再试",
-    "registered": "已报名",
     "registerSuccess": "报名成功",
     "regNotOpen": "报名尚未开始",
     "regClosed": "报名已截止",
@@ -4825,13 +4742,6 @@
     "noteNewPeriod": "每期开始时按当时的余额重新拍本金：上一期赚的钱，从这一期起就算本金了。"
   },
   "festival": {
-    "names": {
-      "spring": "春节",
-      "midautumn": "中秋",
-      "halloween": "万圣节",
-      "christmas": "圣诞",
-      "newyear": "新年"
-    },
     "settings": {
       "title": "节日装饰",
       "desc": "节日期间，Logo、问候和空状态会换上节日插画。",

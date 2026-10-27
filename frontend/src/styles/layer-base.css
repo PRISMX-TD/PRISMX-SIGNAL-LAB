@@ -153,8 +153,6 @@
     .seg button,
     .seg-pill button,
     .filter-cycle,
-    .qt-trade-btn,
-    .mt5-pill,
     .view-all-btn {
       position: relative;
     }
@@ -164,8 +162,6 @@
     .seg button::after,
     .seg-pill button::after,
     .filter-cycle::after,
-    .qt-trade-btn::after,
-    .mt5-pill::after,
     .view-all-btn::after {
       content: "";
       position: absolute;
@@ -185,8 +181,6 @@
   .seg button:active,
   .seg-pill button:active,
   .filter-cycle:active,
-  .qt-trade-btn:active,
-  .mt5-pill:active,
   .view-all-btn:active {
     transform: scale(0.96);
   }
@@ -194,8 +188,6 @@
     .seg button:active,
     .seg-pill button:active,
     .filter-cycle:active,
-    .qt-trade-btn:active,
-    .mt5-pill:active,
     .view-all-btn:active {
       transform: none;
     }

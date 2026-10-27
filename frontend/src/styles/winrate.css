@@ -281,14 +281,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.wr-rate-row .tag {
-  flex: none;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10px;
-  font-weight: 500;
-  background: rgba(255, 255, 255, 0.06);
-}
 .wr-rate-row .pct {
   flex: none;
   font-size: 17px;
@@ -325,13 +317,6 @@
 }
 
 @media (min-width: 1024px) {
-  .wr-now-grid {
-    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  }
-  .wr-aside {
-    border-left: 1px solid var(--line);
-    padding-left: 32px;
-  }
   .wr-card-row {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.6fr) auto;
   }
@@ -339,9 +324,6 @@
 @media (max-width: 639px) {
   .wr-now {
     padding: 20px;
-  }
-  .wr-now-title .name {
-    font-size: 20px;
   }
   .wr-card-row {
     padding: 20px;

@@ -46,8 +46,8 @@ function Block({ title, hint, children, className = '' }: {
   )
 }
 
-function RateRow({ label, dotColor, bucket, tag }: {
-  label: string; dotColor: string; bucket: WinRateBucket; tag?: string
+function RateRow({ label, dotColor, bucket }: {
+  label: string; dotColor: string; bucket: WinRateBucket
 }) {
   const { t } = useTranslation()
   const kind = verdictOf(bucket)
@@ -61,9 +61,6 @@ function RateRow({ label, dotColor, bucket, tag }: {
         <span className="lbl">
           <i style={{ backgroundColor: dotColor }} />
           <span className="txt">{label}</span>
-          {tag && (
-            <span className="tag" style={{ color: dotColor }}>{tag}</span>
-          )}
         </span>
         <span className="pct num" style={{ color: VERDICT_COLOR[kind] }}>
           {hasRate ? fmtPct(bucket.winRate!) : '—'}

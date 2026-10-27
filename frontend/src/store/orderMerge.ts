@@ -14,10 +14,6 @@ import type { Order, OrderStatus } from '../api/types'
 
 const TERMINAL: ReadonlySet<OrderStatus> = new Set<OrderStatus>(['FILLED', 'REJECTED', 'FAILED', 'CANCELLED'])
 
-export function isTerminalOrder(status: OrderStatus): boolean {
-  return TERMINAL.has(status)
-}
-
 function rank(status: OrderStatus): number {
   if (TERMINAL.has(status)) return 2
   return status === 'PLACED' ? 1 : 0

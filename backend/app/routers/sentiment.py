@@ -3,7 +3,6 @@ Community sentiment router: reads the backend cache only, never fetches on
 the request path (see sentiment_store.py)."""
 from fastapi import APIRouter, Depends
 
-from app.models import User
 from app.services import sentiment_store
 from app.services.deps import get_current_user_id_light
 
