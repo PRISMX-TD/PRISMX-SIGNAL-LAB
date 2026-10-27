@@ -93,11 +93,11 @@ class AccountInfoOut(BaseModel):
     # profile" link; statsPublic is the trading-stats switch.
     publicId: str | None = None
     statsPublic: bool = False
-    # 邀请链接「代理」：是否至少持有一条被指派的链接（见 InviteLinkAgent 模型注释）。
+    # 代理：是否在代理层级树上（rev 50 起看 agent_nodes，见 AgentNode 模型注释）。
     # 与上面几个可见性开关同一趟车、同一先例：不在登录响应里，refreshUser() 之后
     # 才有值，前端据此露出 /agent 入口。不是角色，不改 role。
-    # Invite-link agent: whether this user holds at least one assigned link (see
-    # the InviteLinkAgent model). Rides the same /auth/me trip as the visibility
+    # Agent: whether this user has a node in the agent tree (rev 50, see the
+    # AgentNode model). Rides the same /auth/me trip as the visibility
     # switches above; the frontend shows the /agent entry off it. Not a role.
     isAgent: bool = False
     # 邮箱是否已验证（软拦截，见 User.email_verified_at）。登录响应里也有；这里

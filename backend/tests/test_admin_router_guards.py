@@ -34,6 +34,7 @@ def test_ticket_and_invite_admin_routers_still_guarded():
     # rev 41: the ticket desk is shared by support and admins, guarded by require_staff.
     assert _all_routes_guarded(tickets.admin_router, require_staff)
     assert _all_routes_guarded(invite.admin_router)
+    assert _all_routes_guarded(invite.admin_agents_router)
 
 
 def test_support_routers_guard_themselves():

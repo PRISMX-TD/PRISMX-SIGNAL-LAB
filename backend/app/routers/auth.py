@@ -26,7 +26,8 @@ from app.core.security import (
     verify_password,
 )
 from app.models import AdminAuditLog, User
-from app.routers.invite import apply_invite, pick_ref
+from app.routers.invite import apply_invite
+from app.services.attribution import pick_signup
 from app.schemas import (
     AuthRequest,
     AuthResponse,
@@ -232,10 +233,12 @@ def register(
     # trial is held back until the address is verified (see
     # invite.grant_deferred_invite_trial) — otherwise any made-up address would
     # collect a free trial.
-    # 新前端上报最近几个 ref（refs），老 App 包只有 ref；pick_ref 按「30 天内代理
-    # 优先」选一个，选了谁不回传。/ New clients send recent refs, old app builds
-    # only `ref`; pick_ref applies agent-first and the choice is never echoed.
-    apply_invite(db, user, pick_ref(db, req.refs or ([req.ref] if req.ref else [])), grant_trial=False)
+    # 新前端上报最近几个 ref（refs），老 App 包只有 ref；pick_signup 分别挑出来源（最新的
+    # 可用链接）与归属代理（最新的有主人的链接的主人），选了谁不回传。
+    # New clients send recent refs, old app builds only `ref`; pick_signup picks
+    # the source and the owning agent separately and never echoes the choice.
+    source, owner = pick_signup(db, req.refs or ([req.ref] if req.ref else []))
+    apply_invite(db, user, source, grant_trial=False, agent_owner=owner)
     db.add(user)
     # flush 拿到 user.id 再签验证令牌（令牌行有指向 users.id 的外键）；仍是同一次
     # commit。/ Flush for user.id before issuing the token (FK); same commit.
@@ -309,7 +312,8 @@ def google_login(
         # Invite attribution on the create branch ONLY. Applying it to an
         # existing user would clobber the admin's note and fabricate
         # attribution — returning users often still carry a stored ref.
-        granted_days = apply_invite(db, user, pick_ref(db, req.refs or ([req.ref] if req.ref else [])))
+        source, owner = pick_signup(db, req.refs or ([req.ref] if req.ref else []))
+        granted_days = apply_invite(db, user, source, agent_owner=owner)
         db.add(user)
         if granted_days:
             # 这个 flush 不是多余的：User.id 是 flush 时才生成的 Python 侧默认值，

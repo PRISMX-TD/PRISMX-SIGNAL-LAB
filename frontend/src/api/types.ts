@@ -190,6 +190,13 @@ export interface AdminUser {
   // link's label, since the code means nothing to a human. Optional for the same
   // reason as the two fields above.
   inviteCode?: string | null
+  // rev 50：归属代理（谁能在代理页看到他、谁的业绩）与来源（inviteCode）分开存。null = 平台客户。
+  // isAgent = 他本人在代理树上（代理的归属不在这里改，去「代理」分区改挂上级）。
+  // rev 50: the owning agent, stored apart from the source (inviteCode); null = platform
+  // customer. isAgent = this user is in the agent tree (agents are re-parented there).
+  agentUserId?: string | null
+  agentEmail?: string | null
+  isAgent?: boolean
   // 邮箱验证时间；null = 还没验证。只有 === null 才算未验证——后端没上线时键不存在
   // （undefined），不能把全员都显示成「未验证」。
   // When the email was verified; null = not yet. Only `=== null` means
@@ -222,8 +229,12 @@ export interface InviteLink {
   // that switch is off.
   grantsTrial: boolean
   createdAt: string | null
-  // 被指派为这条链接「代理」的用户 / users assigned as this link's agents
+  // 链接主人（rev 50 起最多一个，就是 invite_links.owner_user_id）；空 = 平台链接。
+  // The link's owner (at most one since rev 50); empty = platform link.
   agents: InviteLinkAgent[]
+  // 来源是这条链接、此刻仍归主人的客户数（换主人时「连同 N 位客户迁移」的 N）。
+  // Customers from this link still owned by its owner (the N in "move N customers too").
+  ownedCustomers?: number
   // 比赛推广链接关联的比赛（软引用，创建后不可改）/ the linked competition (soft ref, immutable)
   competitionId: string | null
   competitionName: string | null

@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { adminApi, isAbortError } from '../../api/client'
 import { fmtDayShort, fmtTime, localizeApiError } from '../../api/utils'
-import type { AdminUser, InviteLink, UserPlan, UserRole } from '../../api/types'
+import type { AdminAgentTreeNode, AdminUser, InviteLink, UserPlan, UserRole } from '../../api/types'
 import ConfirmModal from '../ConfirmModal'
 import Pager from '../Pager'
 import Select from '../Select'
@@ -128,6 +128,12 @@ export default function UsersPanel({
   // The invite links: options for the filter and the bulk assign box, and the
   // code → label map for the attribution column. Nobody can read the raw code.
   const [inviteLinks, setInviteLinks] = useState<InviteLink[]>([])
+  // rev 50：归属代理与来源分开。agentFilter：'' = 全部，NO_INVITE = 平台客户，其余是代理 user id。
+  // agents 是全部代理（筛选、批量改归属的选项）。
+  // rev 50: owning agent is separate from the source. agentFilter: '' all, NO_INVITE platform
+  // customers, otherwise an agent's user id. agents feeds the filter and the bulk box.
+  const [agentFilter, setAgentFilter] = useState('')
+  const [agents, setAgents] = useState<AdminAgentTreeNode[]>([])
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [savingId, setSavingId] = useState<string | null>(null)
@@ -151,6 +157,9 @@ export default function UsersPanel({
   // meant both "unchanged" and "clear", an assignment could never be undone,
   // and assigning the wrong people is exactly this feature's likely mistake.
   const [bulkInvite, setBulkInvite] = useState('')
+  // 批量改归属代理：'' = 不改，BULK_CLEAR_INVITE = 改成平台客户，其余是代理 user id。
+  // Bulk owning agent: '' unchanged, BULK_CLEAR_INVITE = platform customer, else an agent id.
+  const [bulkAgent, setBulkAgent] = useState('')
   const [bulkSaving, setBulkSaving] = useState(false)
   const headerCheckboxRef = useRef<HTMLInputElement>(null)
 
@@ -167,7 +176,7 @@ export default function UsersPanel({
     loadCtrl.current = null
   }, [])
 
-  const load = async (opts: { q?: string; plan?: string; invite?: string; size?: number; page?: number } = {}) => {
+  const load = async (opts: { q?: string; plan?: string; invite?: string; agent?: string; size?: number; page?: number } = {}) => {
     loadCtrl.current?.abort()
     const ctrl = new AbortController()
     loadCtrl.current = ctrl
@@ -194,19 +203,21 @@ export default function UsersPanel({
             q: (opts.q ?? query) || undefined,
             plan: (opts.plan ?? planFilter) || undefined,
             inviteCode: (opts.invite ?? inviteFilter) || undefined,
+            agent: (opts.agent ?? agentFilter) || undefined,
             limit: wantedSize,
             offset: wantedPage * wantedSize,
           },
           ctrl.signal,
         ),
         adminApi.listInviteLinks({ includeDeleted: true }),
+        adminApi.agentTree(),
       ])
       // 这一批已经被后来的一次 load 取代：链接请求没有 signal、照样会成功返回，若继续往下走
       // 就会用上一次的数据把新的一次盖掉——正是这里要防的那件事。
       // Superseded by a later load: the links call carries no signal and still resolves, so
       // falling through would overwrite the newer load's data with this one's.
       if (loadCtrl.current !== ctrl) return
-      const [usersRes, linksRes] = results
+      const [usersRes, linksRes, treeRes] = results
       setPage(wantedPage)
       setPageSize(wantedSize)
       if (usersRes.status === 'fulfilled') {
@@ -215,6 +226,7 @@ export default function UsersPanel({
         setDrafts(Object.fromEntries(usersRes.value.users.map((u) => [u.id, toDraft(u)])))
       }
       if (linksRes.status === 'fulfilled') setInviteLinks(linksRes.value.links)
+      if (treeRes.status === 'fulfilled') setAgents(treeRes.value.nodes)
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected')
       // 被中止的那次不算失败：那是我们自己取消的 / an abort is our own cancellation, not a failure
       if (rejected.length && !rejected.every((r) => isAbortError(r.reason))) {
@@ -267,6 +279,16 @@ export default function UsersPanel({
     setInviteFilter(value)
     setSelectedIds(new Set())
     void load({ invite: value, page: 0 })
+  }
+  const changeAgentFilter = (value: string) => {
+    setAgentFilter(value)
+    setSelectedIds(new Set())
+    void load({ agent: value, page: 0 })
+  }
+  const agentOptions = agents.map((a) => ({ value: a.userId, label: `${a.nickname || a.email} · L${a.level}` }))
+  const agentLabel = (id: string) => {
+    const a = agents.find((x) => x.userId === id)
+    return a ? a.nickname || a.email : id
   }
 
   // 改每页条数：回第一页并清空勾选，理由同搜索与翻页（勾的必须是看得见的）。
@@ -327,7 +349,7 @@ export default function UsersPanel({
   // disagree — which is how "the dialog said plan, the request said admin"
   // happens.
   const bulkPayload = () => {
-    const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; inviteCode: string | null }> = {}
+    const payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; inviteCode: string | null; agentUserId: string | null }> = {}
     const changes: string[] = []
     if (bulkRole) {
       payload.role = bulkRole as UserRole
@@ -346,6 +368,11 @@ export default function UsersPanel({
       payload.inviteCode = clearing ? null : bulkInvite
       changes.push(t('admin.changeInvite', { value: clearing ? t('admin.inviteNone') : linkLabel(bulkInvite) }))
     }
+    if (bulkAgent) {
+      const clearing = bulkAgent === BULK_CLEAR_INVITE
+      payload.agentUserId = clearing ? null : bulkAgent
+      changes.push(t('admin.changeAgent', { value: clearing ? t('admin.agentNone') : agentLabel(bulkAgent) }))
+    }
     return { payload, changes }
   }
 
@@ -356,7 +383,7 @@ export default function UsersPanel({
   // downgrade plans and wipe expiry dates. Every change lands in the activity log (one row per
   // bulk edit, expandable per user), but traceable is not reversible, so the confirmation stays.
   const [bulkConfirm, setBulkConfirm] = useState(false)
-  const bulkHasChange = !!(bulkRole || bulkPlan || bulkSetExpiry || bulkInvite)
+  const bulkHasChange = !!(bulkRole || bulkPlan || bulkSetExpiry || bulkInvite || bulkAgent)
 
   const clearBulk = () => {
     setSelectedIds(new Set())
@@ -365,6 +392,7 @@ export default function UsersPanel({
     setBulkSetExpiry(false)
     setBulkExpiry('')
     setBulkInvite('')
+    setBulkAgent('')
   }
 
   const applyBulk = async () => {
@@ -554,6 +582,19 @@ export default function UsersPanel({
             ]}
           />
         </div>
+        <div className="adm-filter">
+          <span>{t('admin.colAgent')}</span>
+          <Select
+            value={agentFilter}
+            onChange={changeAgentFilter}
+            ariaLabel={t('admin.colAgent')}
+            options={[
+              { value: '', label: t('signals.all') },
+              { value: NO_INVITE, label: t('admin.agentNone') },
+              ...agentOptions,
+            ]}
+          />
+        </div>
         <div className="adm-toolbar-end">
           <span className="adm-count">{t('admin.totalCount', { n: total })}</span>
           <div className="adm-filter">
@@ -613,7 +654,7 @@ export default function UsersPanel({
                     指派（勾一个人也走那条路），免得一张表里多出第五个会写库的控件。
                     Which link this user counts towards, i.e. whose agent page they appear on.
                     Read-only; changes go through bulk assign (ticking one row works). */}
-                <th className="whitespace-nowrap">{t('admin.colInvite')}</th>
+                <th className="whitespace-nowrap">{t('admin.colInvite')} / {t('admin.colAgent')}</th>
                 <th>{t('admin.colLastActive')}</th>
                 <th className="text-right">{t('admin.colAction')}</th>
               </tr>
@@ -774,6 +815,19 @@ export default function UsersPanel({
                       ) : (
                         <span className="text-neutral-600">{t('admin.inviteNone')}</span>
                       )}
+                      {/* 归属代理：代理本人显示「代理」标，他的位置在「代理」分区里看。
+                          Owning agent; agents themselves get a tag (their place is in the Agents section). */}
+                      <div className="mt-1 text-[11px]">
+                        {u.isAgent ? (
+                          <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-prism-200">{t('admin.agentTag')}</span>
+                        ) : u.agentUserId ? (
+                          <span className="text-neutral-300" title={u.agentEmail ?? undefined}>
+                            {t('admin.colAgent')}: {u.agentEmail || agentLabel(u.agentUserId)}
+                          </span>
+                        ) : (
+                          <span className="text-neutral-600">{t('admin.agentNone')}</span>
+                        )}
+                      </div>
                     </td>
                     {/* 最近活跃下面带 MT5 账户数：两者都是「这个人在不在用」的只读事实，各占一列太贵。
                         MT5 count under last active: both are read-only "is this person using it" facts. */}
@@ -914,6 +968,20 @@ export default function UsersPanel({
                     ]}
                   />
                 </div>
+                <div className="adm-filter">
+                  <span>{t('admin.colAgent')}</span>
+                  <Select
+                    value={bulkAgent}
+                    onChange={setBulkAgent}
+                    openUpward
+                    ariaLabel={t('admin.colAgent')}
+                    options={[
+                      { value: '', label: t('admin.bulkNoChange') },
+                      { value: BULK_CLEAR_INVITE, label: t('admin.agentClear') },
+                      ...agentOptions,
+                    ]}
+                  />
+                </div>
               </div>
               <div className="adm-dock-actions">
                 <button
@@ -946,11 +1014,13 @@ export default function UsersPanel({
       {bulkConfirm && (() => {
         const { changes } = bulkPayload()
         const promoting = bulkRole === 'admin'
-        // 指派归因 = 把这些人的邮箱交给那个代理（/agent 的名单页返回邮箱）。这是本操作唯一对外
-        // 可见、且撤不回来的后果——撤销只能停止继续显示，看过的人已经看过了。
-        // Assigning attribution hands these people's emails to that agent (/agent lists them) —
-        // the one outward-visible, unrecallable consequence here.
-        const assigningInvite = !!bulkInvite && bulkInvite !== BULK_CLEAR_INVITE
+        // 改归属代理 = 把这些人的邮箱交给那个代理及其上级（/agent 的名单页返回邮箱）。这是本操作
+        // 唯一对外可见、且撤不回来的后果——撤销只能停止继续显示，看过的人已经看过了。rev 50 起改来源
+        // （归因链接）不再动归属，所以这条提醒只跟着归属走。
+        // Re-owning hands these people's emails to that agent and their uplines (/agent lists
+        // them) — the one outward-visible, unrecallable consequence. Since rev 50 the source
+        // link no longer decides ownership, so the warning follows the owner only.
+        const assigningAgent = !!bulkAgent && bulkAgent !== BULK_CLEAR_INVITE
         return (
           <ConfirmModal
             center
@@ -962,7 +1032,7 @@ export default function UsersPanel({
               // 拼成一段：ConfirmModal 的 message 渲染在普通 <p> 里，不保留换行符。
               // One paragraph: ConfirmModal renders `message` in a plain <p> that collapses newlines.
               (promoting ? ' ' + t('admin.bulkConfirmAdminWarn') : '') +
-              (assigningInvite ? ' ' + t('admin.bulkConfirmInviteWarn', { agent: linkLabel(bulkInvite) }) : '')
+              (assigningAgent ? ' ' + t('admin.bulkConfirmInviteWarn', { agent: agentLabel(bulkAgent) }) : '')
             }
             confirmLabel={t('admin.bulkApply')}
             onConfirm={() => void applyBulk()}

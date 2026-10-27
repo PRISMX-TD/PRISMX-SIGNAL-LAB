@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, MT5Account, PageVisitorDay, User
+from app.models import AdminAuditLog, InviteLink, MT5Account, PageVisitorDay, User
 from app.routers.invite import (
     AGENT_MAX_EXTEND_DAYS,
     agent_link_users,
@@ -66,8 +66,12 @@ def test_agent_is_derived_not_a_role(db_session):
     assert agent.role == "user"
     assert agent.plan == "FREE"
 
+    # rev 50：收回链接不再顺带撤销代理——代理身份只看节点，撤销只有一个入口。
+    # rev 50: taking the link back no longer revokes; agent-ness is the node alone.
     unassign_agent(db_session, admin, link, agent.id)
-    assert is_agent(db_session, agent.id) is False
+    assert is_agent(db_session, agent.id) is True
+    db_session.refresh(link)
+    assert link.owner_user_id is None
 
 
 def test_duplicate_assignment_is_409(db_session):
@@ -78,7 +82,8 @@ def test_duplicate_assignment_is_409(db_session):
     with pytest.raises(HTTPException) as exc:
         assign_agent(db_session, admin, link, agent)
     assert exc.value.status_code == 409
-    assert db_session.query(InviteLinkAgent).count() == 1
+    db_session.refresh(link)
+    assert link.owner_user_id == agent.id
 
 
 def test_unassign_missing_is_404(db_session):
@@ -194,13 +199,16 @@ def test_assignment_writes_audit_with_real_target(db_session):
     assign_agent(db_session, admin, link, agent)
     unassign_agent(db_session, admin, link, agent.id)
 
-    rows = db_session.query(AdminAuditLog).order_by(AdminAuditLog.created_at).all()
-    assert len(rows) == 2
+    # rev 50：任命（agent_parent，"-" = 一级）+ 主人给出 + 主人收回，目标都是那位代理。
+    # rev 50: appointment, owner set, owner cleared — all targeting the agent.
+    rows = db_session.query(AdminAuditLog).order_by(AdminAuditLog.created_at, AdminAuditLog.id).all()
     assert all(r.admin_user_id == admin.id for r in rows)
     assert all(r.target_user_id == agent.id for r in rows)
-    assert all(r.field == f"invite:{link.code}:agent" for r in rows)
-    assert (rows[0].old_value or "") == "" and rows[0].new_value == "assigned"
-    assert rows[1].old_value == "assigned" and (rows[1].new_value or "") == ""
+    by_field = {}
+    for r in rows:
+        by_field.setdefault(r.field, []).append((r.old_value or "", r.new_value or ""))
+    assert by_field["agent_parent"] == [("", "-")]
+    assert by_field[f"link_owner:{link.code}"] == [("", agent.email), (agent.email, "")]
 
 
 # ---------- 活跃与 MT5（2026-09-19 新增字段）/ activity + MT5 ----------

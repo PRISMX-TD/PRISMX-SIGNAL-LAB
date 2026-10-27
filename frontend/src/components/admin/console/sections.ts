@@ -22,6 +22,7 @@ export type AdminSection =
   | 'users'
   | 'logs'
   | 'invites'
+  | 'agents'
   | 'competitions'
   | 'gamification'
   | 'luckywheel'
@@ -46,7 +47,7 @@ export type AdminSection =
 export const ADMIN_GROUPS: { id: AdminGroup; sections: AdminSection[] }[] = [
   { id: 'overview', sections: ['data', 'health'] },
   { id: 'users', sections: ['users', 'logs'] },
-  { id: 'growth', sections: ['invites', 'competitions', 'gamification', 'luckywheel'] },
+  { id: 'growth', sections: ['invites', 'agents', 'competitions', 'gamification', 'luckywheel'] },
   { id: 'content', sections: ['guide', 'winrate', 'announcements', 'email', 'autoemail'] },
   { id: 'support', sections: ['tickets', 'staff', 'assign', 'progress', 'approvals', 'performance', 'templates'] },
   { id: 'settings', sections: ['ops', 'system'] },

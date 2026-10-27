@@ -25,7 +25,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -44,10 +44,13 @@ from app.models import (
     User,
 )
 from app.schemas import (
+    AdminAgentAppoint,
+    AdminAgentMove,
     AdminAgentSettingsUpdate,
     AdminAgentTreeLinkOut,
     AdminAgentTreeNodeOut,
     AdminAgentTreeOut,
+    AdminLinkOwnerUpdate,
     AgentLinkOut,
     AgentLinkUserOut,
     AgentLinkUsersOut,
@@ -74,14 +77,20 @@ from app.services.admin_overview import activity_daily, headline
 # admin.py 也要用，从 router 互相 import 会把两个路由绑死（见那两个模块的开头）。
 # Both predicates live in services: account.py needs the first, admin.py the
 # second, and importing across routers would tie them together (see their docs).
-from app.services.agents import is_agent
+from app.services.agents import is_agent  # noqa: F401 — 再导出给既有调用方 / re-exported
 from app.services.agent_tree import (
+    add_node,
     descendants,
-    ensure_top_node,
+    is_customer,
     links_by_code,
+    move_node,
     node_of,
     remove_node,
+    scope_filter,
+    set_link_owner,
+    subtree_height,
 )
+from app.services.attribution import pick_ref  # noqa: F401 — 再导出给既有调用方 / re-exported
 from app.services.audit import log_change as _log_change
 from app.services.email_domains import alias_trial_used
 from app.services.deps import get_current_user, require_admin
@@ -126,14 +135,15 @@ router = APIRouter(prefix="/invite", tags=["invite"])
 # costs no extra DB work. Do not rewrite this as "declared at mount only" — that
 # reads as if the per-endpoint deps were redundant and invites deleting them.
 admin_router = APIRouter(prefix="/admin/invite-links", tags=["admin"])
-# 代理页：只要求登录，不要求管理员。「是不是代理」不看 role，看 invite_link_agents
-# 里有没有这个人的行（见 is_agent）；每个端点再各自按 link 归属校验，不属于自己
-# 的链接一律 404——不给「链接存在但不是你的」这种信号。
-# Agent view: login only, no admin. Agent-ness is not a role but the presence of
-# a row in invite_link_agents (see is_agent); every endpoint re-checks ownership
-# per link and answers 404 for links that aren't the caller's — no "exists but
-# not yours" signal.
+# 代理页：只要求登录，不要求管理员。「是不是代理」不看 role，看 agent_nodes 里有没有
+# 这个人的节点（见 services/agents.is_agent）；每个端点再各自按范围 / 链接归属校验，
+# 不属于自己的一律 404——不给「存在但不是你的」这种信号。
+# Agent view: login only, no admin. Agent-ness is having a node in agent_nodes;
+# every endpoint re-checks scope / link ownership and answers 404 otherwise.
 agent_router = APIRouter(prefix="/agent", tags=["agent"])
+# 代理层级的管理端（rev 50 从 /admin/invite-links 下面独立出来）。require_admin 两处都挂，理由同上。
+# Admin side of the agent tree (split out of /admin/invite-links in rev 50); admin-guarded twice as above.
+admin_agents_router = APIRouter(prefix="/admin/agents", tags=["admin"])
 
 # 短码字符集：剔除易混淆的 0/O/1/l/I。8 位 ≈ 31^8 ≈ 8.5 千亿组合，随机碰撞
 # 由唯一查询兜底、生成时重试。
@@ -218,50 +228,9 @@ def _active_link(db: Session, code: str) -> InviteLink | None:
     )
 
 
-def pick_ref(db: Session, refs: list[str] | None) -> str | None:
-    """从浏览器上报的最近几个 ref 里选出归因码（设计 §1.5「30 天内代理优先」）。
-
-    refs 最新在前。只看其中仍活跃的链接（与 _active_link 同口径，批量查一次而
-    不是逐个调它）：有代理的链接里取最新的一个；一个代理链接都没有就取最新的
-    活跃链接；全不可用返回 None。返回库里的规范码，交给 apply_invite 照常归因。
-    选中哪一个**不回传**给客户端——否则注册接口会变成批量探测「码是否存活 / 是不是
-    代理链接」的口子，与 /invite/click 一律 204 同一个原则。
-
-    Picks the attribution code from the browser's recent refs (newest first).
-    Only still-active links count (same rule as _active_link, one batched query):
-    the newest link with agents wins; with no agent link, the newest active
-    link; None if nothing is usable. Returns the canonical code for apply_invite.
-    The choice is never echoed back — signup must not become a batch
-    liveness / agent-link oracle (same principle as click's always-204).
-    """
-    codes: list[str] = []
-    for raw in (refs or [])[:5]:
-        code = _normalize_code(raw or "")
-        if code and code not in codes:
-            codes.append(code)
-    if not codes:
-        return None
-    active = {
-        code
-        for (code,) in db.query(InviteLink.code).filter(
-            InviteLink.code.in_(codes),
-            InviteLink.is_active.is_(True),
-            InviteLink.deleted_at.is_(None),
-        )
-    }
-    if not active:
-        return None
-    with_agents = {
-        code
-        for (code,) in db.query(InviteLink.code)
-        .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
-        .filter(InviteLink.code.in_(active))
-        .distinct()
-    }
-    for code in codes:
-        if code in with_agents:
-            return code
-    return next(c for c in codes if c in active)
+# 选码（来源 / 归属 / 开户跳转的旧口径）住在 services/attribution.py；pick_ref 在上面从那里
+# 导入、在这里当本模块的名字用，既有调用方与测试不必跟着搬。
+# Ref picking lives in services/attribution; pick_ref is re-exported for existing callers.
 
 
 def offer_days(db: Session, code: str) -> int | None:
@@ -321,7 +290,12 @@ def _plan_note(db: Session, link: InviteLink) -> str:
 
 
 def apply_invite(
-    db: Session, user: User, ref: str | None, *, grant_trial: bool = True
+    db: Session,
+    user: User,
+    ref: str | None,
+    *,
+    grant_trial: bool = True,
+    agent_owner: str | None = None,
 ) -> int | None:
     """注册归因与自动试用发放：ref 命中开了送试用的活跃链接时，注册即开通
     PRO 试用；否则仅写入备注快照与归因码。
@@ -335,6 +309,12 @@ def apply_invite(
 
     返回实际发放的试用天数，未发放为 None。Task 3 的 auth.py 靠这个返回值
     决定是否写审计行。
+
+    rev 50：ref 是**来源**（写 invite_code，试用也看它）；agent_owner 是 attribution.pick_signup
+    另外挑出的**归属代理**，写 agent_user_id。没传 agent_owner 时退回来源链接自己的主人。
+    rev 50: `ref` is the source (invite_code; the trial follows it); agent_owner
+    is the owning agent picked separately by attribution.pick_signup, written to
+    agent_user_id, falling back to the source link's own owner.
 
     只应在**新建用户**的路径上调用（auth.register / google 的创建分支）。
     Google 端点是查找或创建二合一，对已存在的用户应用 ref 会覆盖管理员手写
@@ -360,6 +340,8 @@ def apply_invite(
         return None  # 乱填/停用的 code 静默忽略，注册照常 / bad codes never block signup
     user.plan_note = _plan_note(db, link)
     user.invite_code = link.code
+    if user.agent_user_id is None:
+        user.agent_user_id = agent_owner or link.owner_user_id
 
     if not grant_trial:
         return None
@@ -454,12 +436,12 @@ def grant_deferred_invite_trial(db: Session, user: User) -> int | None:
     return days
 
 
-def _link_kind(link: InviteLink, agents: list[InviteLinkAgentOut] | None) -> str:
-    """链接分类（设计 §1.1），全部由数据推导。比赛链接不能有代理（见 assign_agent），
-    所以先看 competition_id。/ Derived kind; competition links can't have agents."""
+def _link_kind(link: InviteLink) -> str:
+    """链接分类（设计 2026-10-27 §4.2），全部由数据推导。比赛链接不能有主人，所以先看 competition_id。
+    Derived kind; competition links can't have an owner."""
     if link.competition_id:
         return "competition"
-    return "agent" if agents else "platform"
+    return "agent" if link.owner_user_id else "platform"
 
 
 def _link_out(
@@ -470,6 +452,7 @@ def _link_out(
     competition_name: str | None = None,
     entries: int = 0,
     registrations_month: int = 0,
+    owned_customers: int = 0,
 ) -> InviteLinkOut:
     return InviteLinkOut(
         id=link.id,
@@ -486,9 +469,10 @@ def _link_out(
         channel=link.channel,
         openAccountUrl=link.open_account_url,
         deletedAt=link.deleted_at,
-        kind=_link_kind(link, agents),
+        kind=_link_kind(link),
         entries=entries,
         registrationsMonth=registrations_month,
+        ownedCustomers=owned_customers,
     )
 
 
@@ -515,31 +499,41 @@ def _registrations_since(db: Session, codes: list[str], since: datetime) -> dict
     )
 
 
-def _agents_by_link(db: Session, link_ids: list[str]) -> dict[str, list[InviteLinkAgentOut]]:
-    """一次 join 取出这批链接各自的代理，避免每行一查。One join for all links, no N+1."""
+def _agents_by_link(db: Session, links: list[InviteLink]) -> dict[str, list[InviteLinkAgentOut]]:
+    """这批链接各自的主人（0 或 1 个），一条查询取完。One query for all owners, no N+1."""
+    owner_ids = list({l.owner_user_id for l in links if l.owner_user_id})
+    if not owner_ids:
+        return {}
+    people = {u.id: u for u in db.query(User).filter(User.id.in_(owner_ids)).all()}
+    levels = dict(db.query(AgentNode.user_id, AgentNode.depth).filter(AgentNode.user_id.in_(owner_ids)).all())
     out: dict[str, list[InviteLinkAgentOut]] = {}
-    if not link_ids:
-        return out
+    for l in links:
+        u = people.get(l.owner_user_id or "")
+        if u is not None:
+            out[l.id] = [
+                InviteLinkAgentOut(
+                    userId=u.id, email=u.email, nickname=u.nickname, assignedAt=l.owner_assigned_at,
+                    level=levels.get(u.id),
+                )
+            ]
+    return out
+
+
+def _owned_customers(db: Session, links: list[InviteLink]) -> dict[str, int]:
+    """每条链接：来源是它、此刻仍归它当前主人（无主人则仍是平台客户）的普通客户数，键是 link.id。
+    转主人弹窗里「连同 N 位客户迁移」就是这批人（见 _move_link_customers）。
+    Per link: customers from it still owned by its current owner (or still
+    platform when it has none) -- exactly who a transfer with moveCustomers moves."""
+    if not links:
+        return {}
     rows = (
-        db.query(InviteLinkAgent, User.email, User.nickname)
-        .join(User, User.id == InviteLinkAgent.user_id)
-        .filter(InviteLinkAgent.link_id.in_(link_ids))
-        .order_by(InviteLinkAgent.created_at)
+        db.query(User.invite_code, User.agent_user_id, func.count(User.id))
+        .filter(User.invite_code.in_([l.code for l in links]), is_customer())
+        .group_by(User.invite_code, User.agent_user_id)
         .all()
     )
-    levels = dict(
-        db.query(AgentNode.user_id, AgentNode.depth)
-        .filter(AgentNode.user_id.in_({a.user_id for a, _e, _n in rows}))
-        .all()
-    ) if rows else {}
-    for a, email, nickname in rows:
-        out.setdefault(a.link_id, []).append(
-            InviteLinkAgentOut(
-                userId=a.user_id, email=email, nickname=nickname, assignedAt=a.created_at,
-                level=levels.get(a.user_id),
-            )
-        )
-    return out
+    counts = {(code, owner): n for code, owner, n in rows}
+    return {l.id: counts.get((l.code, l.owner_user_id), 0) for l in links}
 
 
 def _registrations(db: Session, codes: list[str]) -> dict[str, int]:
@@ -589,7 +583,8 @@ def _link_outs(db: Session, links: list[InviteLink]) -> list[InviteLinkOut]:
     Full output for a batch: one query each for signups, agents, names, entries."""
     counts = _registrations(db, [l.code for l in links])
     month = _registrations_since(db, [l.code for l in links], day_start_utc(stats_today().replace(day=1)))
-    agents = _agents_by_link(db, [l.id for l in links])
+    agents = _agents_by_link(db, links)
+    owned = _owned_customers(db, links)
     names = _competition_names(db, list({l.competition_id for l in links if l.competition_id}))
     entries = _entries(db, links)
     return [
@@ -600,6 +595,7 @@ def _link_outs(db: Session, links: list[InviteLink]) -> list[InviteLinkOut]:
             competition_name=names.get(l.competition_id) if l.competition_id else None,
             entries=entries.get(l.id, 0),
             registrations_month=month.get(l.code, 0),
+            owned_customers=owned.get(l.id, 0),
         )
         for l in links
     ]
@@ -725,64 +721,30 @@ def _mt5_accounts(db: Session, user_ids: list[str]) -> dict[str, list[AgentMT5Ac
     return out
 
 
-def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> InviteLinkAgent:
-    """把链接指派给用户。已指派返回 409。审计行的 target 是被指派的真实用户——
-    这是 invite:* 审计里唯一能填真目标的地方（链接本身不是 users 行）。
-    Assign a link to a user; 409 if already assigned. The audit target is the
-    assigned user — the one invite:* audit row that can carry a real target."""
-    # 比赛推广链接是平台自有的投放链接（设计 §1.1）：代理只有一个自己的码，比赛
-    # 链接一旦带上代理，「30 天内代理优先」与报名归因就会把平台投放算给代理。
-    # Competition links are platform-owned ad links (spec §1.1); an agent on one
-    # would let agent-first attribution credit platform ad spend to the agent.
-    if link.competition_id:
-        raise HTTPException(
-            status_code=400, detail="比赛推广链接不能指派代理 / Competition promo links cannot have agents"
-        )
-    exists = (
-        db.query(InviteLinkAgent.id)
-        .filter(InviteLinkAgent.link_id == link.id, InviteLinkAgent.user_id == target.id)
-        .first()
-    )
-    if exists is not None:
-        raise HTTPException(
-            status_code=409, detail="该用户已是此链接的代理 / User is already an agent of this link"
-        )
-    # rev 47：一条链接只属于一个代理（理由见 InviteLinkAgent 模型注释）。
-    # rev 47: one agent per link (see the InviteLinkAgent model).
-    taken = db.query(InviteLinkAgent.id).filter(InviteLinkAgent.link_id == link.id).first()
-    if taken is not None:
+def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> None:
+    """旧的「指派代理」（rev 50 前的 POST /admin/invite-links/{id}/agents，留一版给旧热更新包）：
+    他还不是代理就先任命为一级，再把链接给他。链接已有主人 409。不迁移老客户。
+    The pre-rev-50 assignment, kept one release for old app bundles: appoint as
+    top level if needed, then hand over the link. 409 if it has an owner."""
+    if link.owner_user_id:
         raise HTTPException(
             status_code=409,
             detail="这条链接已有代理，一条链接只能有一个代理 / This link already has an agent; a link can have only one",
         )
-    row = InviteLinkAgent(link_id=link.id, user_id=target.id, assigned_by=admin.id)
-    db.add(row)
-    # 管理员指派 = 任命一级代理；他已经在树上（比如本来就是某人的下级）就不动层级。
-    # An admin assignment appoints a top-level agent; an existing node keeps its level.
-    ensure_top_node(db, target.id, admin.id)
-    _log_change(db, admin.id, target.id, f"invite:{link.code}:agent", None, "assigned")
-    db.commit()
-    return row
+    if link.competition_id:
+        raise HTTPException(
+            status_code=400, detail="比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+        )
+    if node_of(db, target.id) is None:
+        add_node(db, target.id, None, admin.id)
+        _log_change(db, admin.id, target.id, "agent_parent", None, "-")
+    admin_set_link_owner(db, admin, link, AdminLinkOwnerUpdate(userId=target.id))
 
 
 _MSG_HAS_CHILDREN = (
-    "该代理下面还有下级代理，请先撤销或处理下级代理 / "
-    "This agent still has sub-agents; remove or reassign them first"
+    "该代理下面还有下级代理，请先改挂或撤销下级代理 / "
+    "This agent still has sub-agents; move or remove them first"
 )
-
-
-def _other_link_count(db: Session, user_id: str, link_id: str) -> int:
-    """这个代理除了 link_id 之外还持有几条未删除的链接。/ Other non-deleted links they hold."""
-    return (
-        db.query(InviteLinkAgent.id)
-        .join(InviteLink, InviteLink.id == InviteLinkAgent.link_id)
-        .filter(
-            InviteLinkAgent.user_id == user_id,
-            InviteLinkAgent.link_id != link_id,
-            InviteLink.deleted_at.is_(None),
-        )
-        .count()
-    )
 
 
 def _has_children(db: Session, user_id: str) -> bool:
@@ -790,40 +752,13 @@ def _has_children(db: Session, user_id: str) -> bool:
 
 
 def unassign_agent(db: Session, admin: User, link: InviteLink, user_id: str) -> None:
-    """取消指派。这是他最后一条链接时，等于撤掉他的代理身份，按层级规则处理（rev 47）：
-    - 一级代理下面还有下级 → 409，先处理下级（产品决定：否则二级会突然变成一级、拿到修改权）；
-    - 下级代理 → 与一级代理在代理页撤他同一套（services/agent_tree.remove_node）：链接停用
-      并转给他的上级，客户仍在上级的树上，下级整体上移一级；
-    - 一级代理且没有下级 → 删指派行与节点，与原来一样。
-    Unassign. When it is their last link this removes them as an agent: a
-    top-level agent with sub-agents is refused (409); a sub-agent goes through
-    remove_node (link disabled and handed to the parent); otherwise the row and
-    node are simply deleted."""
-    row = (
-        db.query(InviteLinkAgent)
-        .filter(InviteLinkAgent.link_id == link.id, InviteLinkAgent.user_id == user_id)
-        .first()
-    )
-    if row is None:
+    """旧的「取消指派」（留一版）：只把链接收回成平台链接。rev 50 起**不再顺带撤销代理**——
+    撤销代理只有一个入口（admin_revoke_agent / agent_demote），老客户也不跟着动。
+    The pre-rev-50 unassign, kept one release: the link just becomes a platform
+    link. It no longer revokes anyone, and customers stay where they are."""
+    if link.owner_user_id != user_id:
         raise HTTPException(status_code=404, detail="指派不存在 / Assignment not found")
-    node = node_of(db, user_id)
-    last = _other_link_count(db, user_id, link.id) == 0
-    if last and node is not None and node.parent_user_id is None and _has_children(db, user_id):
-        raise HTTPException(status_code=409, detail=_MSG_HAS_CHILDREN)
-    if last and node is not None and node.parent_user_id is not None:
-        parent_id = node.parent_user_id
-        old = _audit_value(link)
-        remove_node(db, node)
-        _log_change(db, admin.id, user_id, f"invite:{link.code}:agent", "assigned", None)
-        _log_change(db, admin.id, parent_id, f"invite:{link.code}:agent", None, "assigned")
-        _log_change(db, admin.id, admin.id, f"invite:{link.code}", old, _audit_value(link))
-        db.commit()
-        return
-    db.delete(row)
-    if last and node is not None:
-        db.delete(node)
-    _log_change(db, admin.id, user_id, f"invite:{link.code}:agent", "assigned", None)
-    db.commit()
+    admin_set_link_owner(db, admin, link, AdminLinkOwnerUpdate(userId=None))
 
 
 def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
@@ -831,8 +766,7 @@ def agent_links(db: Session, user: User) -> list[AgentLinkOut]:
     Every link the user holds, disabled ones included: the list stays theirs."""
     links = (
         db.query(InviteLink)
-        .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
-        .filter(InviteLinkAgent.user_id == user.id, InviteLink.deleted_at.is_(None))
+        .filter(InviteLink.owner_user_id == user.id, InviteLink.deleted_at.is_(None))
         .order_by(InviteLink.created_at.desc())
         .all()
     )
@@ -864,10 +798,9 @@ def _agent_link_outs(db: Session, links: list[InviteLink]) -> list[AgentLinkOut]
 def _owned_link(db: Session, user: User, link_id: str) -> InviteLink:
     link = (
         db.query(InviteLink)
-        .join(InviteLinkAgent, InviteLinkAgent.link_id == InviteLink.id)
         .filter(
             InviteLink.id == link_id,
-            InviteLinkAgent.user_id == user.id,
+            InviteLink.owner_user_id == user.id,
             InviteLink.deleted_at.is_(None),
         )
         .first()
@@ -886,40 +819,14 @@ def agent_link_users(
     offset: int = 0,
     q: str | None = None,
 ) -> AgentLinkUsersOut:
-    """经某条链接注册的用户名单，只读，字段见 AgentLinkUserOut。
-    The read-only signup list for one link; fields per AgentLinkUserOut."""
+    """旧接口（留一版）：我这条链接带来、此刻仍在我范围里的人。新前端用 /agent/customers?link=。
+    Legacy (one release): people from my link still in my scope; new clients use
+    /agent/customers?link=."""
     link = _owned_link(db, user, link_id)
-    query = db.query(User).filter(User.invite_code == link.code)
-    q = (q or "").strip()
-    if q:
-        # 只搜名单上本来就看得到的昵称与邮箱——手机号不在代理视野内，不能拿来撞。
-        # 通配符转义理由同 admin 用户搜索。
-        # Search only what the list already shows (nickname, email); phone is
-        # outside the agent's view. Wildcards escaped as in the admin search.
-        like = f"%{_like_escape(q)}%"
-        query = query.filter(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
-    total = query.count()
-    rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
-    # 活跃日与 MT5 绑定各一条批量查询，只针对当前这一页的人——名单可以很长，
-    # 逐行查会让页数一多就变成几百条查询。
-    # One batched query each for activity and bindings, scoped to this page only.
-    ids = [u.id for u in rows]
-    last_active = _last_active_days(db, ids)
-    accounts = _mt5_accounts(db, ids)
+    page = agent_tree_users(db, user, limit, offset, q, link_id=link.id)
     return AgentLinkUsersOut(
-        users=[
-            AgentLinkUserOut(
-                nickname=u.nickname,
-                email=u.email,
-                plan=u.plan,
-                createdAt=u.created_at,
-                planExpiresAt=u.plan_expires_at,
-                lastActiveDay=last_active.get(u.id),
-                mt5Accounts=accounts.get(u.id, []),
-            )
-            for u in rows
-        ],
-        total=total,
+        users=[AgentLinkUserOut(**u.model_dump(include=set(AgentLinkUserOut.model_fields))) for u in page.users],
+        total=page.total,
         limit=limit,
         offset=offset,
     )
@@ -989,37 +896,6 @@ AGENT_MAX_EXTEND_DAYS_PER_WINDOW = 90
 _AGENT_EXTEND_AUDIT_SUFFIX = ":extend_days"
 
 
-def _agent_target(db: Session, link: InviteLink, email: str, agent: User | None = None) -> User:
-    """按 (链接, 邮箱) 找人。不是这条链接带来的、或者压根不存在，都是同一个 404。
-
-    邮箱大小写不敏感：名单上显示什么，前端就回传什么，但库里存的是注册时那一份，
-    中间任何一段（复制粘贴、输入法首字母大写）都可能改掉大小写。
-
-    Resolve the target by (link, email); not-yours and not-found are the same
-    404. Case-insensitive, because the address can pass through anything that
-    capitalises it between the list and the request.
-    """
-    target = (
-        db.query(User)
-        .filter(func.lower(User.email) == email.strip().lower(), User.invite_code == link.code)
-        .first()
-    )
-    if target is None or target.role == "admin":
-        # 管理员即使真是这条链接注册的也不给动——代理不该有任何触碰管理员账号的路径。
-        # Admins are untouchable here even if they did sign up through the link.
-        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
-    if agent is not None and target.id == agent.id:
-        # 代理自己也可能挂在自己的链接下（invite_code 等于自己链接的码）：不许给自己
-        # 续 PRO / 改等级，否则代理页就成了一个免费给自己开会员的入口。
-        # An agent may themself carry their own link's invite_code; they must not
-        # be able to extend or change their own plan through the agent page.
-        raise HTTPException(
-            status_code=403,
-            detail="不能修改自己的会员 / You cannot change your own plan",
-        )
-    return target
-
-
 def _agent_extended_days(db: Session, target_id: str, now: datetime) -> int:
     """这个客户在最近 AGENT_EXTEND_WINDOW_DAYS 天里，已经被代理累计延长了几天。
 
@@ -1087,7 +963,7 @@ def _notify_admins_agent_write(
 
     不发系统推送，理由与 tickets._notify_admins_new_ticket 一样：管理员就那几个
     人，往每台设备推一条只会把后台日常变成噪音。代理自己是管理员时不通知自己
-    （他不会是——_agent_target 已经挡了管理员做目标，但操作者这一侧没挡）。
+    （他不会是——_tree_target 已经挡了管理员做目标，但操作者这一侧没挡）。
 
     One in-app notification per admin whenever an agent changes someone else's
     paid entitlement. This is the only write endpoint under /agent/*, and its
@@ -1119,7 +995,7 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     """代理调整自己名下客户的会员等级与到期日。返回改完之后的那一行。
 
     五条边界：
-    ① 只能动自己名下链接带来的人（_owned_link + _agent_target，都是 404）；
+    ① 只能动自己这条链接带来、且仍在自己范围里的人（_owned_link + _tree_target，都是 404）；
     ② 一次最多延长 AGENT_MAX_EXTEND_DAYS 天（schema 里已卡 le=60，这里再兜一次——
        schema 是给 HTTP 的，这个函数本身也会被测试与将来的调用方直接用）；
     ③ 每个客户在滚动 30 天内累计最多 AGENT_MAX_EXTEND_DAYS_PER_WINDOW 天。单次
@@ -1147,7 +1023,9 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     """
     _require_top(db, agent)
     link = _owned_link(db, agent, link_id)
-    target = _agent_target(db, link, body.email, agent)
+    target = _tree_target(db, _Scope(db, agent), body.email, agent)
+    if target.invite_code != link.code:
+        raise HTTPException(status_code=404, detail=_MSG_USER_NOT_FOUND)
     return _apply_agent_plan(db, agent, target, link.code, body)
 
 
@@ -1262,29 +1140,26 @@ def _agent_user_out(db: Session, u: User) -> AgentLinkUserOut:
     )
 
 
-# ---------- 代理层级（rev 47）/ agent hierarchy ----------
+# ---------- 代理层级 / agent hierarchy ----------
 #
-# 规则见 AgentNode 模型注释。几条贯穿下面所有端点的约定：
-# - 范围 = 自己 + 全部下级（services/agent_tree.descendants）持有的链接带来的人；不在范围内的
-#   人与不存在的人同一个 404，不给「这个人存在但不归你」的信号；
+# 规则见 AgentNode 模型注释与 services/agent_tree 顶部（rev 50）。几条贯穿下面所有端点的约定：
+# - 范围 = 归属在自己与全部下级名下的普通客户 + 全部下级代理本人；不在范围内的人与不存在的人
+#   同一个 404，不给「这个人存在但不归你」的信号；
 # - 写操作只有一级代理能做（_require_top，403）；
 # - 目标一律按邮箱定位，user id 不下发给代理（同 AgentPlanUpdate）。
-# Rules are in the AgentNode docstring. Scope = the caller's own and every
-# descendant's links; out-of-scope and unknown are the same 404; writes are
-# top-level only (403); targets are addressed by email, never by user id.
+# Rules are in the AgentNode docstring and services/agent_tree (rev 50). Scope =
+# customers owned by the caller or any descendant, plus the descendant agents;
+# out-of-scope and unknown are the same 404; writes are top-level only (403);
+# targets are addressed by email, never by user id.
 
 _MSG_TOP_ONLY = "只有一级代理可以操作 / Only top-level agents can do this"
+_MSG_USER_NOT_FOUND = "用户不存在 / User not found"
 
 
 def _caller_level(db: Session, user: User) -> int | None:
-    """调用者是第几级代理；不是代理返回 None。持有链接却还没有节点的（rev 47 迁移补节点之前的
-    过渡态）按一级看待——rev 47 之前的代理全是管理员任命的。
-    The caller's level, or None for non-agents. A link holder without a node (the
-    window before the rev 47 backfill) counts as top level, which they all were."""
+    """调用者是第几级代理；不是代理返回 None。/ The caller's level, or None for non-agents."""
     node = node_of(db, user.id)
-    if node is not None:
-        return node.depth or 1
-    return 1 if is_agent(db, user.id) else None
+    return (node.depth or 1) if node is not None else None
 
 
 def _require_top(db: Session, user: User) -> None:
@@ -1292,31 +1167,55 @@ def _require_top(db: Session, user: User) -> None:
         raise HTTPException(status_code=403, detail=_MSG_TOP_ONLY)
 
 
-def _scope(db: Session, user: User) -> tuple[list[AgentNode], dict[str, tuple[str, InviteLink]]]:
-    """(全部下级节点, 自己与下级持有的链接 {code: (主人, 链接)})。
-    (every descendant node, the links held by the caller and descendants)."""
-    nodes = descendants(db, user.id)
-    return nodes, links_by_code(db, [user.id] + [n.user_id for n in nodes])
+class _Scope:
+    """一个代理此刻的范围：自己与全部下级的 id（客户归属看它们），下级代理本人的 id，
+    以及这些人持有的链接 {code: (主人, 链接)}。
+    An agent's scope: their own and descendants' ids (customer owners), the
+    descendant agents themselves, and the links they hold."""
+
+    def __init__(self, db: Session, user: User):
+        self.nodes = descendants(db, user.id)
+        self.agent_ids = [n.user_id for n in self.nodes]
+        self.owner_ids = [user.id] + self.agent_ids
+        self.parent_of = {n.user_id: n.parent_user_id for n in self.nodes}
+        self.codes = links_by_code(db, self.owner_ids)
+
+    def filter(self):
+        return scope_filter(self.owner_ids, self.agent_ids)
 
 
-def _tree_target(db: Session, codes: dict, email: str, agent: User) -> User:
-    """按邮箱在范围内找人，规则同 _agent_target：不在范围 / 不存在 / 管理员都是 404，自己 403。
-    Resolve an in-scope user by email; same rules as _agent_target."""
-    target = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
-    if target is None or target.role == "admin" or target.invite_code not in codes:
-        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
-    if target.id == agent.id:
+def _tree_target(db: Session, scope: _Scope, email: str, agent: User) -> User:
+    """按邮箱在范围内找人：不在范围 / 不存在 / 管理员都是 404，自己 403。
+    Resolve an in-scope user by email: out of scope, unknown or admin is 404; self is 403."""
+    if email.strip().lower() == (agent.email or "").lower():
         raise HTTPException(
             status_code=403,
             detail="不能修改自己的会员 / You cannot change your own plan",
         )
+    target = (
+        db.query(User)
+        .filter(func.lower(User.email) == email.strip().lower(), scope.filter())
+        .first()
+    )
+    if target is None or target.role == "admin":
+        # 管理员即使真归在这棵树下也不给动——代理不该有任何触碰管理员账号的路径。
+        # Admins are untouchable even if they sit in the tree.
+        raise HTTPException(status_code=404, detail=_MSG_USER_NOT_FOUND)
     return target
 
 
+def _via_of(scope: _Scope, u: User) -> str | None:
+    """这个人在树上挂在谁下面：代理看节点的上级，客户看归属。
+    Whom this person hangs under: an agent's parent, a customer's owner."""
+    if u.id in scope.parent_of:
+        return scope.parent_of[u.id]
+    return u.agent_user_id
+
+
 def _tree_user_outs(
-    db: Session, rows: list[User], codes: dict, show_levels: bool = True
+    db: Session, rows: list[User], scope: _Scope, show_levels: bool = True
 ) -> list[AgentTreeUserOut]:
-    """一批客户行：活跃日、MT5、来自哪个代理、自己是不是代理，各一条批量查询。
+    """一批客户行：活跃日、MT5、挂在哪个代理下、自己是不是代理，各一条批量查询。
     show_levels=False（二级起的代理在看）时只说是不是代理、不给层级。
     A batch of customer rows; one batched query per extra column. With
     show_levels=False (a sub-agent viewing) only isAgent is given, no level."""
@@ -1328,13 +1227,11 @@ def _tree_user_outs(
         if ids
         else {}
     )
-    owner_ids = list({codes[u.invite_code][0] for u in rows if u.invite_code in codes})
-    owners = (
-        {o.id: o for o in db.query(User).filter(User.id.in_(owner_ids)).all()} if owner_ids else {}
-    )
+    via_ids = list({v for v in (_via_of(scope, u) for u in rows) if v})
+    vias = {o.id: o for o in db.query(User).filter(User.id.in_(via_ids)).all()} if via_ids else {}
     out = []
     for u in rows:
-        owner = owners.get(codes[u.invite_code][0]) if u.invite_code in codes else None
+        via = vias.get(_via_of(scope, u) or "")
         out.append(
             AgentTreeUserOut(
                 nickname=u.nickname,
@@ -1344,8 +1241,8 @@ def _tree_user_outs(
                 planExpiresAt=u.plan_expires_at,
                 lastActiveDay=last_active.get(u.id),
                 mt5Accounts=accounts.get(u.id, []),
-                viaEmail=owner.email if owner else None,
-                viaNickname=owner.nickname if owner else None,
+                viaEmail=via.email if via else None,
+                viaNickname=via.nickname if via else None,
                 isAgent=u.id in levels,
                 agentLevel=levels.get(u.id) if show_levels else None,
             )
@@ -1353,37 +1250,50 @@ def _tree_user_outs(
     return out
 
 
+def _owner_counts(db: Session, owner_ids: list[str]) -> tuple[dict, dict, dict]:
+    """按归属代理汇总：(客户数, 近 7 日活跃人数, 已连 MT5 人数)，各一条 GROUP BY。只数普通客户。
+    Per owning agent: customers, 7-day actives, MT5-connected; one GROUP BY each."""
+    if not owner_ids:
+        return {}, {}, {}
+    base = (User.agent_user_id.in_(owner_ids), is_customer())
+    regs = dict(db.query(User.agent_user_id, func.count(User.id)).filter(*base).group_by(User.agent_user_id).all())
+    active = dict(
+        db.query(User.agent_user_id, func.count(func.distinct(PageVisitorDay.user_id)))
+        .join(PageVisitorDay, PageVisitorDay.user_id == User.id)
+        .filter(*base, PageVisitorDay.day >= _active_window_start())
+        .group_by(User.agent_user_id)
+        .all()
+    )
+    mt5 = dict(
+        db.query(User.agent_user_id, func.count(func.distinct(MT5Account.user_id)))
+        .join(MT5Account, MT5Account.user_id == User.id)
+        .filter(*base, MT5Account.revoked_at.is_(None))
+        .group_by(User.agent_user_id)
+        .all()
+    )
+    return regs, active, mt5
+
+
 def agent_team(db: Session, user: User) -> AgentTeamOut:
     """我的团队：自己 + 全部下级，每人带直属客户数、整棵子树客户数、近 7 日活跃、已连 MT5。
-    数字与「我的链接」卡片同一批函数算（_registrations / _active_users / _mt5_users），
-    只是按链接主人汇总。自己那一行不带上级——下级看不到上级。
+    数字按归属（users.agent_user_id）汇总。自己那一行不带上级——下级看不到上级。
     The caller's team: self plus every descendant, with direct and subtree
-    customer counts, 7-day actives and MT5 head count, computed by the same
-    functions as the link cards and summed per owner. The caller's own row
-    carries no parent: looking upwards is not possible."""
+    customer counts, 7-day actives and MT5 head count, summed by owning agent.
+    The caller's own row carries no parent: looking upwards is not possible."""
     max_depth = get_agent_settings(db)["agent_max_depth"]
     level = _caller_level(db, user)
     if level is None:
         return AgentTeamOut(level=None, canManage=False, maxDepth=max_depth, nodes=[])
-    nodes, codes = _scope(db, user)
-    code_list = list(codes)
-    regs = _registrations(db, code_list)
-    active = _active_users(db, code_list)
-    mt5 = _mt5_users(db, code_list)
-    direct: dict[str, int] = {}
-    act: dict[str, int] = {}
-    m5: dict[str, int] = {}
-    for code, (owner, _link) in codes.items():
-        direct[owner] = direct.get(owner, 0) + regs.get(code, 0)
-        act[owner] = act.get(owner, 0) + active.get(code, 0)
-        m5[owner] = m5.get(owner, 0) + mt5.get(code, 0)
+    scope = _Scope(db, user)
+    nodes = scope.nodes
+    direct, act, m5 = _owner_counts(db, scope.owner_ids)
     # 宽度优先倒过来走 = 先子后父，每个节点加到父节点上时自己的子树已经算完。
     # Reversed breadth-first visits children before parents, so each subtree total
     # is final by the time it is added to its parent.
     team = dict(direct)
     for n in reversed(nodes):
         team[n.parent_user_id] = team.get(n.parent_user_id, 0) + team.get(n.user_id, 0)
-    ids = [user.id] + [n.user_id for n in nodes]
+    ids = scope.owner_ids
     people = {u.id: u for u in db.query(User).filter(User.id.in_(ids)).all()}
     me = node_of(db, user.id)
 
@@ -1420,48 +1330,55 @@ def agent_tree_users(
     offset: int = 0,
     q: str | None = None,
     under: str | None = None,
+    link_id: str | None = None,
 ) -> AgentTreeUsersOut:
-    """整棵子树的客户名单（行的口径与 agent_link_users 相同）。under 给了邮箱就只看那个代理
-    自己链接带来的人（他得在范围内，否则 404）。
-    The whole subtree's customers, same row semantics as agent_link_users.
-    `under` (an agent's email) narrows to that agent's own links; 404 if out of scope."""
-    nodes, codes = _scope(db, user)
-    code_list = list(codes)
+    """范围内的人（rev 50：按归属，不按来源）。under 给了邮箱就只看挂在那个代理下的人（他的
+    客户与直属下级代理，他得在范围内，否则 404）；link_id 给了就只看来源是那条链接的人（链接
+    得是范围内某人持有的，否则 404）。
+    Everyone in scope (by ownership, not source). `under` (an agent's email)
+    narrows to the people hanging directly under that agent; `link_id` narrows
+    to people whose source is that link. Either out of scope is a 404."""
+    if _caller_level(db, user) is None:
+        return AgentTreeUsersOut(users=[], total=0, limit=limit, offset=offset)
+    scope = _Scope(db, user)
+    query = db.query(User).filter(scope.filter())
     if under:
-        owner_ids = [user.id] + [n.user_id for n in nodes]
         owner = (
             db.query(User.id)
-            .filter(func.lower(User.email) == under.strip().lower(), User.id.in_(owner_ids))
+            .filter(func.lower(User.email) == under.strip().lower(), User.id.in_(scope.owner_ids))
             .first()
         )
         if owner is None:
             raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
-        code_list = [c for c, (o, _l) in codes.items() if o == owner[0]]
-    if not code_list:
-        return AgentTreeUsersOut(users=[], total=0, limit=limit, offset=offset)
-    query = db.query(User).filter(User.invite_code.in_(code_list))
+        kids = [uid for uid, parent in scope.parent_of.items() if parent == owner[0]]
+        query = query.filter(
+            or_(and_(User.agent_user_id == owner[0], is_customer()), User.id.in_(kids or [""]))
+        )
+    if link_id:
+        link = next((l for _o, l in scope.codes.values() if l.id == link_id), None)
+        if link is None:
+            raise HTTPException(status_code=404, detail="链接不存在 / Link not found")
+        query = query.filter(User.invite_code == link.code)
     q = (q or "").strip()
     if q:
-        # 搜索口径同 agent_link_users：只搜昵称与邮箱，通配符转义。
-        # Same search as agent_link_users: nickname and email only, wildcards escaped.
+        # 只搜名单上本来就看得到的昵称与邮箱——手机号不在代理视野内，不能拿来撞。通配符转义。
+        # Search only what the list already shows (nickname, email); wildcards escaped.
         like = f"%{_like_escape(q)}%"
         query = query.filter(or_(User.email.ilike(like, escape="\\"), User.nickname.ilike(like, escape="\\")))
     total = query.count()
     rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
-    users = _tree_user_outs(db, rows, codes, show_levels=_caller_level(db, user) == 1)
+    users = _tree_user_outs(db, rows, scope, show_levels=_caller_level(db, user) == 1)
     return AgentTreeUsersOut(users=users, total=total, limit=limit, offset=offset)
 
 
 def agent_tree_set_plan(db: Session, agent: User, body: AgentPlanUpdate) -> AgentTreeUserOut:
-    """一级代理给整棵树里的人改会员。边界、配额、审计、通知全部与按链接改的那条路相同
-    （_apply_agent_plan），只是「是不是你的人」换成按整棵树判。
-    A top-level agent changes the plan of anyone in their tree; every guard is
-    shared with the per-link path, only the scope check is tree-wide."""
+    """一级代理给范围里的人改会员。边界、配额、审计、通知全部在 _apply_agent_plan。
+    A top-level agent changes the plan of anyone in scope; guards live in _apply_agent_plan."""
     _require_top(db, agent)
-    _nodes, codes = _scope(db, agent)
-    target = _tree_target(db, codes, body.email, agent)
-    _apply_agent_plan(db, agent, target, target.invite_code, body)
-    return _tree_user_outs(db, [target], codes)[0]
+    scope = _Scope(db, agent)
+    target = _tree_target(db, scope, body.email, agent)
+    _apply_agent_plan(db, agent, target, target.invite_code or "-", body)
+    return _tree_user_outs(db, [target], scope)[0]
 
 
 def _promoted_label(target: User) -> str:
@@ -1471,51 +1388,65 @@ def _promoted_label(target: User) -> str:
     return name[:40]
 
 
-def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
-    """一级代理把自己树里的一个普通用户升为代理（rev 47）。
-
-    新代理的上级是他注册所用链接的主人（不一定是 actor 本人），层级 = 上级层级 + 1，不得超过
-    agent_max_depth。系统给他生成一条专属链接：送不送试用跟他注册时那条链接一致，开户网址留空
-    由他自己填。审计照管理员指派的写法（invite:{code} 建链接 + invite:{code}:agent 指派），
-    被升的人收到一条站内通知，管理员各收到一条。
-
-    A top-level agent promotes an ordinary user in their tree. The new parent is
-    the owner of the link the user signed up through, level = parent + 1, capped
-    by agent_max_depth. A fresh link is created (trial setting copied from that
-    signup link, open-account URL left for the new agent); audited like an admin
-    assignment; the user and every admin get an in-app notification.
-    """
-    _require_top(db, actor)
-    _nodes, codes = _scope(db, actor)
-    target = _tree_target(db, codes, email, actor)
-    if node_of(db, target.id) is not None or is_agent(db, target.id):
-        raise HTTPException(status_code=409, detail="该用户已经是代理 / This user is already an agent")
-    parent_id, parent_link = codes[target.invite_code]
-    parent_node = node_of(db, parent_id)
-    depth = (parent_node.depth if parent_node is not None else 1) + 1
+def _check_depth(db: Session, depth: int) -> None:
     max_depth = get_agent_settings(db)["agent_max_depth"]
     if depth > max_depth:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"已达到最大层级（{max_depth} 级），不能再往下升代理 / "
+                f"已达到最大层级（{max_depth} 级），不能再往下设代理 / "
                 f"The maximum depth ({max_depth} levels) is reached"
             ),
         )
+
+
+def _mint_agent_link(db: Session, actor: User, target: User, grants_trial: bool) -> InviteLink:
+    """给新代理生成一条专属链接：送不送试用由调用方定，开户网址留空由他自己填。审计照管理员
+    建链接的写法（invite:{code}）加一条主人变更（link_owner:{code}）。
+    Mint a new agent's own link; audited like an admin-created link plus an owner change."""
     link = InviteLink(
         code=new_unique_code(db),
         label=_promoted_label(target),
         is_active=True,
-        grants_trial=bool(parent_link.grants_trial),
+        grants_trial=grants_trial,
         competition_id=None,
         channel=None,
     )
     db.add(link)
+    set_link_owner(db, link, target.id, actor.id)
     db.flush()
-    db.add(InviteLinkAgent(link_id=link.id, user_id=target.id, assigned_by=actor.id))
-    db.add(AgentNode(user_id=target.id, parent_user_id=parent_id, depth=depth, created_by=actor.id))
     _log_change(db, actor.id, actor.id, f"invite:{link.code}", None, _audit_value(link))
-    _log_change(db, actor.id, target.id, f"invite:{link.code}:agent", None, "assigned")
+    _log_change(db, actor.id, target.id, f"link_owner:{link.code}", None, target.email)
+    return link
+
+
+def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
+    """一级代理把自己范围里的一个普通客户升为代理。
+
+    新代理的上级是这个客户此刻的归属代理（不一定是 actor 本人），层级 = 上级层级 + 1，不得超过
+    agent_max_depth。系统给他生成一条专属链接：送不送试用跟他来源那条链接一致。被升的人收到一条
+    站内通知，管理员各收到一条。
+
+    A top-level agent promotes a customer in their scope. The new parent is the
+    customer's owning agent, level = parent + 1, capped by agent_max_depth. A
+    fresh link is minted (trial setting copied from their source link); the
+    user and every admin get an in-app notification.
+    """
+    _require_top(db, actor)
+    scope = _Scope(db, actor)
+    target = _tree_target(db, scope, email, actor)
+    if node_of(db, target.id) is not None:
+        raise HTTPException(status_code=409, detail="该用户已经是代理 / This user is already an agent")
+    parent_node = node_of(db, target.agent_user_id) if target.agent_user_id else None
+    if parent_node is None:
+        # 范围内的客户必有归属代理且在树上；走到这里只可能是脏数据，按不存在处理。
+        # An in-scope customer always has an owning agent on the tree; dirty data otherwise.
+        raise HTTPException(status_code=404, detail=_MSG_USER_NOT_FOUND)
+    depth = (parent_node.depth or 1) + 1
+    _check_depth(db, depth)
+    source = db.query(InviteLink).filter(InviteLink.code == target.invite_code).first() if target.invite_code else None
+    add_node(db, target.id, parent_node, actor.id)
+    _mint_agent_link(db, actor, target, bool(source.grants_trial) if source is not None else False)
     create_notification(db, target.id, KIND_AGENT_PROMOTED, link="/agent")
     admin_ids = _notify_admins_agent_write(
         db, actor, target, f"{actor.email} → {target.email}: L{depth} agent", KIND_AGENT_TREE_CHANGE
@@ -1525,29 +1456,43 @@ def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
     notify_ws(target.id)
     for admin_id in admin_ids:
         notify_ws(admin_id)
-    return _tree_user_outs(db, [target], codes)[0]
+    return _tree_user_outs(db, [target], _Scope(db, actor))[0]
+
+
+def _revoke(db: Session, actor: User, node: AgentNode) -> None:
+    """撤销一个代理的唯一路径（代理页与管理后台共用）：机制见 services/agent_tree.remove_node。
+    一级代理下面还有下级 → 409（产品决定：先改挂或撤下级）。每条去向各写一条审计。不提交。
+    The single revoke path shared by the agent page and the admin console. A
+    top-level agent with sub-agents is refused (409). Audited; does not commit."""
+    if node.parent_user_id is None and _has_children(db, node.user_id):
+        raise HTTPException(status_code=409, detail=_MSG_HAS_CHILDREN)
+    target = db.get(User, node.user_id)
+    parent = db.get(User, node.parent_user_id) if node.parent_user_id else None
+    before = {l.id: _audit_value(l) for l in db.query(InviteLink).filter(InviteLink.owner_user_id == node.user_id)}
+    links, customers = remove_node(db, node)
+    _log_change(db, actor.id, node.user_id, "agent_parent", parent.email if parent else "-", None)
+    for link in links:
+        _log_change(
+            db, actor.id, parent.id if parent else node.user_id, f"link_owner:{link.code}",
+            target.email if target else None, parent.email if parent else None,
+        )
+        if before.get(link.id) != _audit_value(link):
+            _log_change(db, actor.id, actor.id, f"invite:{link.code}", before.get(link.id), _audit_value(link))
+    for uid in customers:
+        _log_change(db, actor.id, uid, "agent_user", target.email if target else None, parent.email if parent else None)
 
 
 def agent_demote(db: Session, actor: User, email: str) -> AgentTeamOut:
-    """一级代理撤销自己树里的一个代理（rev 47）。机制见 services/agent_tree.remove_node：他的
-    链接停用并转给他的上级（客户仍在树上），下级整体上移一级。不在 actor 子树里的代理（包括
-    actor 自己）一律 404。返回刷新后的团队。
-    A top-level agent removes an agent below them (see remove_node). Anyone not
-    strictly below the actor — the actor included — is a 404. Returns the
-    refreshed team."""
+    """一级代理撤销自己树里的一个代理（见 _revoke）。不在 actor 子树里的代理（包括 actor 自己）
+    一律 404。返回刷新后的团队。
+    A top-level agent removes an agent below them (see _revoke). Anyone not
+    strictly below the actor — the actor included — is a 404."""
     _require_top(db, actor)
     target = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
     node = node_of(db, target.id) if target is not None else None
     if node is None or node.user_id not in {n.user_id for n in descendants(db, actor.id)}:
         raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
-    parent_id = node.parent_user_id
-    before = {l.id: _audit_value(l) for _owner, l in links_by_code(db, [target.id]).values()}
-    for link in remove_node(db, node):
-        _log_change(db, actor.id, target.id, f"invite:{link.code}:agent", "assigned", None)
-        if parent_id is not None:
-            _log_change(db, actor.id, parent_id, f"invite:{link.code}:agent", None, "assigned")
-        if link.id in before:
-            _log_change(db, actor.id, actor.id, f"invite:{link.code}", before[link.id], _audit_value(link))
+    _revoke(db, actor, node)
     admin_ids = _notify_admins_agent_write(
         db, actor, target, f"{actor.email} → {target.email}: agent revoked", KIND_AGENT_TREE_CHANGE
     )
@@ -1558,18 +1503,16 @@ def agent_demote(db: Session, actor: User, email: str) -> AgentTeamOut:
 
 
 def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
-    """管理后台「代理层级」：全部代理、各自的链接与客户数。按 (层级, 任命时间) 排好，前端拼树。
+    """管理后台「代理」：全部代理、各自的链接与客户数。按 (层级, 任命时间) 排好，前端拼树。
     The admin tree: every agent with links and customer counts, sorted by
     (level, created_at); the frontend assembles the tree."""
     nodes = db.query(AgentNode).all()
     nodes.sort(key=lambda n: (n.depth or 1, n.created_at is None, n.created_at or datetime.min))
     ids = [n.user_id for n in nodes]
     codes = links_by_code(db, ids)
-    regs = _registrations(db, list(codes))
-    direct: dict[str, int] = {}
+    direct, _active, _mt5 = _owner_counts(db, ids)
     links: dict[str, list[AdminAgentTreeLinkOut]] = {}
-    for code, (owner, link) in codes.items():
-        direct[owner] = direct.get(owner, 0) + regs.get(code, 0)
+    for code, (owner, link) in sorted(codes.items(), key=lambda kv: kv[1][1].created_at or datetime.min):
         links.setdefault(owner, []).append(
             AdminAgentTreeLinkOut(id=link.id, code=link.code, label=link.label, isActive=link.is_active)
         )
@@ -1597,6 +1540,143 @@ def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
             for n in nodes
         ],
     )
+
+
+def admin_appoint_agent(db: Session, admin: User, body: AdminAgentAppoint) -> AdminAgentTreeOut:
+    """管理员任命代理：挂在 parentUserId 下（null = 一级），可选同时生成一条专属链接。
+    不改他的来源与归属，也不改任何客户（设计 §6）。已是代理 409，上级不是代理 404。
+    Admin appoints an agent under parentUserId (null = top), optionally minting
+    a link. Touches no attribution. 409 if already an agent; 404 for a bad parent."""
+    target = db.get(User, body.userId)
+    if target is None:
+        raise HTTPException(status_code=404, detail=_MSG_USER_NOT_FOUND)
+    if node_of(db, target.id) is not None:
+        raise HTTPException(status_code=409, detail="该用户已经是代理 / This user is already an agent")
+    parent = None
+    if body.parentUserId:
+        parent = node_of(db, body.parentUserId)
+        if parent is None:
+            raise HTTPException(status_code=404, detail="上级不是代理 / The upline is not an agent")
+    depth = (parent.depth or 1) + 1 if parent is not None else 1
+    _check_depth(db, depth)
+    add_node(db, target.id, parent, admin.id)
+    parent_user = db.get(User, parent.user_id) if parent is not None else None
+    _log_change(db, admin.id, target.id, "agent_parent", None, parent_user.email if parent_user else "-")
+    if body.createLink:
+        _mint_agent_link(db, admin, target, False)
+    create_notification(db, target.id, KIND_AGENT_PROMOTED, link="/agent")
+    db.commit()
+    notify_ws(target.id)
+    return admin_agent_tree(db)
+
+
+def admin_revoke_agent(db: Session, admin: User, user_id: str) -> AdminAgentTreeOut:
+    """管理员撤销代理：与代理页撤销同一条路径（_revoke）。/ Same path as the agent page."""
+    node = node_of(db, user_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+    _revoke(db, admin, node)
+    db.commit()
+    return admin_agent_tree(db)
+
+
+def admin_move_agent(db: Session, admin: User, body: AdminAgentMove) -> AdminAgentTreeOut:
+    """管理员把一个代理连同整棵子树改挂到另一个代理下面（parentUserId 为空 = 改成一级）。
+
+    只改树（services/agent_tree.move_node）：他的客户与下级跟着他走；他自己的来源与归属不动——
+    rev 50 起代理本人在树上的位置只看节点，不需要再改 invite_code 去迁就范围判断。
+    挡掉：挂到自己或自己的下级下面（环）、新位置会让子树超过最大层级、上级没变。
+
+    Admin re-parents an agent with their whole subtree (null = top level). Only
+    the tree changes; customers and sub-agents come along. Cycles, exceeding the
+    depth cap, and no-op moves are rejected.
+    """
+    node = node_of(db, body.userId)
+    if node is None:
+        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+    parent = None
+    if body.parentUserId:
+        if body.parentUserId == node.user_id or body.parentUserId in {
+            d.user_id for d in descendants(db, node.user_id)
+        }:
+            raise HTTPException(
+                status_code=409,
+                detail="不能挂到他自己或他的下级下面 / Cannot move an agent under themselves or their own sub-agent",
+            )
+        parent = node_of(db, body.parentUserId)
+        if parent is None:
+            raise HTTPException(status_code=404, detail="新上级不是代理 / The new upline is not an agent")
+    if (parent.user_id if parent else None) == node.parent_user_id:
+        raise HTTPException(status_code=409, detail="上级没有变化 / The upline is unchanged")
+    new_depth = (parent.depth or 1) + 1 if parent is not None else 1
+    max_depth = get_agent_settings(db)["agent_max_depth"]
+    if new_depth + subtree_height(db, node) > max_depth:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"挂过去后他的下线会超过最大层级（{max_depth} 级） / "
+                f"The move would push their sub-agents past the maximum depth ({max_depth} levels)"
+            ),
+        )
+
+    old_parent = db.get(User, node.parent_user_id) if node.parent_user_id else None
+    new_parent = db.get(User, parent.user_id) if parent is not None else None
+    move_node(db, node, parent)
+    _log_change(
+        db,
+        admin.id,
+        node.user_id,
+        "agent_parent",
+        old_parent.email if old_parent else "-",
+        new_parent.email if new_parent else "-",
+    )
+    db.commit()
+    return admin_agent_tree(db)
+
+
+def _move_link_customers(db: Session, actor: User, link: InviteLink, old_owner: str | None, new_owner: str | None) -> int:
+    """把来源是这条链接、此刻仍归旧主人的普通客户改归新主人。每人一条审计。返回人数。不提交。
+    Re-own the customers from this link still owned by the old owner; audited per person."""
+    owner_match = User.agent_user_id == old_owner if old_owner else User.agent_user_id.is_(None)
+    ids = [uid for (uid,) in db.query(User.id).filter(User.invite_code == link.code, owner_match, is_customer())]
+    if not ids:
+        return 0
+    emails = dict(db.query(User.id, User.email).filter(User.id.in_([i for i in (old_owner, new_owner) if i])).all())
+    db.query(User).filter(User.id.in_(ids)).update({User.agent_user_id: new_owner}, synchronize_session=False)
+    for uid in ids:
+        _log_change(db, actor.id, uid, "agent_user", emails.get(old_owner or ""), emails.get(new_owner or ""))
+    return len(ids)
+
+
+def admin_set_link_owner(db: Session, admin: User, link: InviteLink, body: AdminLinkOwnerUpdate) -> None:
+    """换链接主人（null = 平台链接）。新主人必须是代理；比赛推广链接不能有主人。默认只影响以后
+    的新注册；moveCustomers 为真才把经这条链接注册、仍归旧主人的客户一起迁过去。不改任何人的
+    代理身份（设计 §6）。
+    Set a link's owner (null = platform). The owner must be an agent;
+    competition links can't have one. Only future signups follow unless
+    moveCustomers. Nobody's agent status changes."""
+    new_owner = body.userId or None
+    if new_owner is not None:
+        # 比赛推广链接是平台自有的投放链接（设计 2026-10-08 §1.1），算给代理就把平台投放算走了。
+        # Competition links are platform ad links; an owner would claim platform spend.
+        if link.competition_id:
+            raise HTTPException(
+                status_code=400, detail="比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+            )
+        if node_of(db, new_owner) is None:
+            raise HTTPException(status_code=404, detail="该用户不是代理 / This user is not an agent")
+    old_owner = link.owner_user_id
+    if old_owner == new_owner:
+        raise HTTPException(status_code=409, detail="主人没有变化 / The owner is unchanged")
+    emails = dict(db.query(User.id, User.email).filter(User.id.in_([i for i in (old_owner, new_owner) if i])).all())
+    set_link_owner(db, link, new_owner, admin.id)
+    _log_change(
+        db, admin.id, new_owner or old_owner, f"link_owner:{link.code}",
+        emails.get(old_owner or ""), emails.get(new_owner or ""),
+    )
+    if body.moveCustomers:
+        _move_link_customers(db, admin, link, old_owner, new_owner)
+    db.commit()
 
 
 def _clean_channel(raw: str | None) -> str | None:
@@ -1691,15 +1771,14 @@ def list_invite_links(
     _admin: User = Depends(require_admin),
 ):
     # 分类筛选与 _link_kind 同一口径，在 SQL 里做：competition = 关联了比赛；agent /
-    # platform 都要求没关联比赛，再看 invite_link_agents 里有没有行。各项计数在
-    # _link_outs 里各一条批量查询。
+    # platform 都要求没关联比赛，再看有没有主人。各项计数在 _link_outs 里各一条批量查询。
     # Kind filter mirrors _link_kind, done in SQL. Counts are batched in _link_outs.
     q = db.query(InviteLink)
     # 软删的链接默认不出现；用户表的归因列 / 筛选器带 includeDeleted 拉，好显示它们的名字。
     # Soft-deleted links are hidden unless includeDeleted (the users table needs labels).
     if not includeDeleted:
         q = q.filter(InviteLink.deleted_at.is_(None))
-    has_agents = InviteLink.id.in_(select(InviteLinkAgent.link_id))
+    has_agents = InviteLink.owner_user_id.isnot(None)
     if kind == "competition":
         q = q.filter(InviteLink.competition_id.isnot(None))
     elif kind == "agent":
@@ -1829,41 +1908,46 @@ def delete_invite_link(
     没有任何用户归因到这个码 → 硬删：代理行与链接行一起删，码释放（没人挂在它上面，
     重新生成也不会错归因）。promo_funnel_daily 里按文本记的这个码不动——漏斗历史是
     软指标，留着。
-    有人归因 → 软删：写 deleted_at、停用、删代理行（代理随即失去这条链接）；链接行
-    保留，new_unique_code 仍把码视为已占用。用户的 invite_code / plan_note 一律不动。
+    有人归因 → 软删：写 deleted_at、停用；链接行（连同主人）保留，new_unique_code 仍把码视为
+    已占用。rev 50 起删链接**不碰任何人**：用户的来源、归属、代理身份一律不动（设计 R7）。
     不存在或已软删 → 404。两种都写一条 invite:{code} 审计。
 
-    Delete an invite link. HARD (row + agent rows) when no user carries the code,
-    SOFT (deleted_at, inactive, agent rows removed, row kept so the code is never
-    reissued) otherwise. Users' attribution is never touched. Unknown or already
-    soft-deleted ids are 404. Both modes are audited under invite:{code}.
+    Delete an invite link. HARD when no user carries the code, SOFT (deleted_at,
+    inactive, row and owner kept so the code is never reissued) otherwise. Since
+    rev 50 deleting a link touches nobody: sources, owners and agent status all
+    stay. Unknown or already soft-deleted ids are 404. Audited under invite:{code}.
     """
     link = _admin_link(db, link_id)
     attributed = db.query(User.id).filter(User.invite_code == link.code).first() is not None
     mode = "soft" if attributed else "hard"
     old = _audit_value(link)
-    # rev 47：这是某个代理的最后一条链接时，删链接就等于撤掉他。下面还有下级代理 → 409（同
-    # unassign_agent）；没有下级 → 节点跟着删。
-    # rev 47: deleting an agent's last link removes them as an agent — refused
-    # while they have sub-agents, otherwise their node goes too.
-    for (owner_id,) in db.query(InviteLinkAgent.user_id).filter(InviteLinkAgent.link_id == link.id).all():
-        if _other_link_count(db, owner_id, link.id) == 0:
-            if _has_children(db, owner_id):
-                raise HTTPException(status_code=409, detail=_MSG_HAS_CHILDREN)
-            db.query(AgentNode).filter(AgentNode.user_id == owner_id).delete(synchronize_session=False)
-    db.query(InviteLinkAgent).filter(InviteLinkAgent.link_id == link.id).delete(
-        synchronize_session=False
-    )
     if attributed:
         link.deleted_at = datetime.now(timezone.utc)
         link.is_active = False
     else:
+        # 冻结的旧表（rev 50 停止读写、下一版删）里可能还有指向它的行，有外键，先清掉。
+        # The frozen pre-rev-50 table may still reference it via a foreign key.
+        db.query(InviteLinkAgent).filter(InviteLinkAgent.link_id == link.id).delete(synchronize_session=False)
         db.delete(link)
     _log_change(
         db, admin.id, admin.id, f"invite:{link.code}", old, json.dumps({"deleted": mode})
     )
     db.commit()
     return {"mode": mode}
+
+
+@admin_router.put("/{link_id}/owner", response_model=InviteLinkOut)
+def put_invite_link_owner(
+    link_id: str,
+    body: AdminLinkOwnerUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """换链接主人 / 收回成平台链接，可选连同客户迁移（见 admin_set_link_owner）。
+    Set or clear a link's owner, optionally moving its customers."""
+    link = _admin_link(db, link_id)
+    admin_set_link_owner(db, admin, link, body)
+    return _link_out_full(db, link)
 
 
 @admin_router.post("/{link_id}/agents", response_model=InviteLinkOut)
@@ -1873,8 +1957,7 @@ def assign_invite_agent(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """把链接指派给一个用户，让他成为这条链接的「代理」（只读视图，权益不变）。
-    Assign the link to a user, making them its agent (read-only view, same entitlements)."""
+    """旧接口（留一版给旧热更新包）：见 assign_agent。/ Legacy, see assign_agent."""
     link = _admin_link(db, link_id)
     target = db.query(User).filter(User.id == body.userId).first()
     if target is None:
@@ -1890,6 +1973,7 @@ def unassign_invite_agent(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    """旧接口（留一版）：见 unassign_agent。/ Legacy, see unassign_agent."""
     link = _admin_link(db, link_id)
     unassign_agent(db, admin, link, user_id)
     return _link_out_full(db, link)
@@ -1934,16 +2018,10 @@ def my_agent_set_user_plan(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """代理调整自己名下客户的会员：延长 PRO（一次最多 60 天）或降回 FREE。
-
-    /agent/* 下改**别人**权益的唯一写端点（另一个写端点只改代理自己链接的开户链接）。
-    边界与审计见 agent_set_plan；限流挂在这里：它能改别人的权益，被脚本连点会把一整批
-    人开成 PRO。
-
-    The only /agent/* write that touches someone else's entitlement (the other
-    write only edits the agent's own link's open-account URL). Boundaries and audit
-    live in agent_set_plan; rate-limited because a script could mint PRO in bulk.
-    """
+    """旧接口（留一版给旧热更新包，新前端用 PATCH /agent/customers/plan）：按链接改会员。
+    边界与审计见 agent_set_plan；限流理由：能改别人的权益，被脚本连点会把一整批人开成 PRO。
+    Legacy per-link plan change (one release; new clients use /agent/customers/plan).
+    Rate-limited because a script could mint PRO in bulk."""
     return agent_set_plan(db, user, link_id, body)
 
 
@@ -1998,11 +2076,12 @@ def my_agent_customers(
     limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
     offset: int = Query(default=0, ge=0),
     q: str | None = Query(default=None, max_length=128),
-    agent: str | None = Query(default=None, max_length=320, description="只看这个代理的直属客户（邮箱）/ narrow to one agent (email)"),
+    agent: str | None = Query(default=None, max_length=320, description="只看挂在这个代理下的人（邮箱）/ narrow to one agent (email)"),
+    link: str | None = Query(default=None, max_length=64, description="只看来源是这条链接的人 / narrow to one source link"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    return agent_tree_users(db, user, limit, offset, q, agent)
+    return agent_tree_users(db, user, limit, offset, q, agent, link)
 
 
 @agent_router.patch("/customers/plan", response_model=AgentTreeUserOut)
@@ -2040,11 +2119,42 @@ def my_agent_demote(
     return agent_demote(db, user, body.email)
 
 
+@admin_agents_router.get("/tree", response_model=AdminAgentTreeOut)
 @admin_router.get("/agent-tree", response_model=AdminAgentTreeOut)
 def get_agent_tree(db: Session = Depends(get_db), _admin: User = Depends(require_admin)):
+    """全部代理。旧路径 /admin/invite-links/agent-tree 留一版。/ Legacy path kept one release."""
     return admin_agent_tree(db)
 
 
+@admin_agents_router.post("", response_model=AdminAgentTreeOut)
+def post_appoint_agent(
+    body: AdminAgentAppoint,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return admin_appoint_agent(db, admin, body)
+
+
+@admin_agents_router.post("/move", response_model=AdminAgentTreeOut)
+@admin_router.post("/agent-tree/move", response_model=AdminAgentTreeOut)
+def post_agent_tree_move(
+    body: AdminAgentMove,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return admin_move_agent(db, admin, body)
+
+
+@admin_agents_router.post("/{user_id}/revoke", response_model=AdminAgentTreeOut)
+def post_revoke_agent(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return admin_revoke_agent(db, admin, user_id)
+
+
+@admin_agents_router.put("/settings", response_model=AdminAgentTreeOut)
 @admin_router.put("/agent-settings", response_model=AdminAgentTreeOut)
 def put_agent_settings(
     body: AdminAgentSettingsUpdate,

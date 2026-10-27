@@ -1609,7 +1609,8 @@ export const adminApi = {
     // （真码是 8 位、字母表里没有 o，'none' 永远撞不上）。
     // inviteCode: a link's code shows only its signups; 'none' shows only
     // unattributed users (real codes are 8 chars from an alphabet without "o").
-    params: { q?: string; plan?: string; role?: string; inviteCode?: string; limit?: number; offset?: number } = {},
+    // agent（rev 50）：归属代理的 user id；'none' = 平台客户。/ Owning agent id; 'none' = platform customers.
+    params: { q?: string; plan?: string; role?: string; inviteCode?: string; agent?: string; limit?: number; offset?: number } = {},
     signal?: AbortSignal,
   ) => {
     const qs = new URLSearchParams()
@@ -1617,6 +1618,7 @@ export const adminApi = {
     if (params.plan) qs.set('plan', params.plan)
     if (params.role) qs.set('role', params.role)
     if (params.inviteCode) qs.set('inviteCode', params.inviteCode)
+    if (params.agent) qs.set('agent', params.agent)
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
     const suffix = qs.toString() ? `?${qs.toString()}` : ''
@@ -1624,7 +1626,7 @@ export const adminApi = {
   },
   updateUser: (
     userId: string,
-    payload: Partial<{ role: UserRole; supportTier: 'internal' | 'outsourced' | null; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null }>
+    payload: Partial<{ role: UserRole; supportTier: 'internal' | 'outsourced' | null; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null ; agentUserId: string | null }>
   ) =>
     request<AdminUser>(`/admin/users/${encodeURIComponent(userId)}`, {
       method: 'PATCH',
@@ -1634,7 +1636,9 @@ export const adminApi = {
     userIds: string[],
     // inviteCode: 传 code = 改挂到那条链接下；显式传 null = 清除归因；不传 = 不动。
     // inviteCode: a code reassigns, explicit null clears, omitted leaves it alone.
-    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null }>
+    // agentUserId（rev 50）：改归属代理，null = 平台客户；选中的人里有代理会 409。
+    // agentUserId (rev 50): re-own; null = platform. 409 if any target is an agent.
+    payload: Partial<{ role: UserRole; plan: UserPlan; planExpiresAt: string | null; planNote: string | null; inviteCode: string | null; agentUserId: string | null }>
   ) =>
     request<{ updated: number }>('/admin/users/bulk', {
       method: 'PATCH',
@@ -1703,23 +1707,40 @@ export const adminApi = {
       method: 'PATCH',
       body: JSON.stringify(payload),
     }),
-  // 代理指派：两边都回整条链接（含最新 agents），面板直接替换那一行。
-  // Agent assignment: both return the full link (fresh agents) so the panel swaps the row.
-  assignInviteAgent: (id: string, userId: string) =>
-    request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}/agents`, {
-      method: 'POST',
-      body: JSON.stringify({ userId }),
+  // 换链接主人（rev 50）：userId 为 null = 收回成平台链接；moveCustomers = 已归属旧主人、
+  // 来源是这条链接的客户一起转给新主人（不勾只影响以后注册的人）。回整条链接。
+  // Set a link's owner (null = platform). moveCustomers also moves the customers who
+  // came through it and are still owned by the old owner. Returns the full link.
+  setLinkOwner: (id: string, userId: string | null, moveCustomers = false) =>
+    request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}/owner`, {
+      method: 'PUT',
+      body: JSON.stringify({ userId, moveCustomers }),
     }),
-  unassignInviteAgent: (id: string, userId: string) =>
-    request<InviteLink>(`/admin/invite-links/${encodeURIComponent(id)}/agents/${encodeURIComponent(userId)}`, {
-      method: 'DELETE',
-    }),
-  // 代理层级（rev 47）：全部代理的树 + 最大层级。/ Agent hierarchy: every agent + the max depth.
-  agentTree: () => request<AdminAgentTree>('/admin/invite-links/agent-tree'),
+  // 代理层级（rev 50 起独立成 /admin/agents）：全部代理的树 + 最大层级。
+  // Agent hierarchy (own /admin/agents prefix since rev 50): every agent + the max depth.
+  agentTree: () => request<AdminAgentTree>('/admin/agents/tree'),
   setAgentMaxDepth: (maxDepth: number) =>
-    request<AdminAgentTree>('/admin/invite-links/agent-settings', {
+    request<AdminAgentTree>('/admin/agents/settings', {
       method: 'PUT',
       body: JSON.stringify({ maxDepth }),
+    }),
+  // 任命代理：parentUserId 为 null = 一级；createLink = 顺手给他生成一条专属链接。
+  // Appoint an agent (null parent = top level); createLink mints them a link.
+  appointAgent: (userId: string, parentUserId: string | null, createLink: boolean) =>
+    request<AdminAgentTree>('/admin/agents', {
+      method: 'POST',
+      body: JSON.stringify({ userId, parentUserId, createLink }),
+    }),
+  // 撤销代理：客户与链接交给上级（一级则变平台客户 / 平台链接），下级整体上移一级。
+  // 一级代理下面还有人时 409。/ Revoke: customers and links go to the parent; 409 for a top-level agent with children.
+  revokeAgent: (userId: string) =>
+    request<AdminAgentTree>(`/admin/agents/${encodeURIComponent(userId)}/revoke`, { method: 'POST' }),
+  // 把一个代理连同整棵子树改挂到另一个代理下面；parentUserId 为 null = 改成一级。
+  // Re-parent an agent with their whole subtree; null = top level.
+  moveAgent: (userId: string, parentUserId: string | null) =>
+    request<AdminAgentTree>('/admin/agents/move', {
+      method: 'POST',
+      body: JSON.stringify({ userId, parentUserId }),
     }),
   getSettings: () => request<AdminBrokerSettings>('/admin/settings'),
   updateSettings: (payload: AdminBrokerSettings) =>
@@ -2172,12 +2193,14 @@ export const agentApi = {
   // 我是第几级、能不能改、我这棵树（自己在最前）。/ My level, write access and tree.
   team: () => request<AgentTeam>('/agent/team'),
   // 整棵子树的客户；agent 给邮箱就只看那个代理的直属客户。/ Subtree customers; `agent` narrows.
-  customers: (params: { limit?: number; offset?: number; q?: string; agent?: string } = {}) => {
+  // link（rev 50）：只看来源是这条链接的人（代理页单条链接的名单）。/ link narrows to one source link.
+  customers: (params: { limit?: number; offset?: number; q?: string; agent?: string; link?: string } = {}) => {
     const qs = new URLSearchParams()
     if (params.limit) qs.set('limit', String(params.limit))
     if (params.offset) qs.set('offset', String(params.offset))
     if (params.q) qs.set('q', params.q)
     if (params.agent) qs.set('agent', params.agent)
+    if (params.link) qs.set('link', params.link)
     const q = qs.toString()
     return request<AgentTreeUsers>(`/agent/customers${q ? `?${q}` : ''}`)
   },

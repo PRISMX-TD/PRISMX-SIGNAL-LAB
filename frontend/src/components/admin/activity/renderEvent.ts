@@ -918,6 +918,23 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
       }
       items.push(t('admin.log.x.inviteChange', { a: side(0), b: side(1) }))
     }
+    // 代理上级（rev 50）：空 = 不是代理，'-' = 一级，其余是上级邮箱。
+    // Agent upline (rev 50): blank = not an agent, '-' = top level, else the parent's email.
+    const up = pairOf(p.agent_parent)
+    if (up) {
+      const side = (i: 0 | 1) => {
+        const v = str(up[i])
+        if (!v) return t('admin.log.v.notAgent')
+        return v === '-' ? t('admin.log.v.noAgentParent') : q(t, v)
+      }
+      items.push(t('admin.log.x.agentParentChange', { a: side(0), b: side(1) }))
+    }
+    // 归属代理（rev 50）：空 = 平台客户。/ Owning agent (rev 50): blank = platform customer.
+    const owner = pairOf(p.agent_user)
+    if (owner) {
+      const side = (i: 0 | 1) => (str(owner[i]) ? q(t, str(owner[i]) as string) : t('admin.log.v.platformCustomer'))
+      items.push(t('admin.log.x.agentUserChange', { a: side(0), b: side(1) }))
+    }
     return [items.length ? listed(t, 'admin.log.ev.userEdit.head', items) : t('admin.log.ev.userEdit.none')]
   },
   'admin.user_disable': ({ t, p }) => {
@@ -952,6 +969,7 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
         const v = c.new
         let val: string
         if (field === 'invite_code') val = str(v) ? q(t, inviteLabel(str(v)!)) : t('admin.log.v.noInvite')
+        else if (field === 'agent_user') val = str(v) ? q(t, str(v)!) : t('admin.log.v.platformCustomer')
         else if (field === 'role') val = roleLabel(t, v)
         else if (field === 'plan_expires_at') val = str(v) ? bjDate(str(v)) : t('admin.log.v.noExpiry')
         else if (field === 'plan_note') val = str(v) ? q(t, clip(str(v)!)) : t('admin.log.v.empty')
@@ -1230,7 +1248,7 @@ export function kindName(kind: string, t: TFunction): string {
 }
 
 // ---------- 详情抽屉「修改前 / 修改后」表 / the drawer's before / after table ----------
-const USER_FIELDS = ['role', 'plan', 'plan_expires_at', 'plan_note', 'invite_code']
+const USER_FIELDS = ['role', 'plan', 'plan_expires_at', 'plan_note', 'invite_code', 'agent_parent', 'agent_user']
 // 审计字段名不带前缀时（列表行的 params.changes 里只有键名），按 kind 找标签表。
 // Bare field names (params.changes carry only the key) find their label table by kind.
 const BARE_TABLE: Partial<Record<string, string>> = {
@@ -1271,7 +1289,7 @@ export function changeFieldLabel(kind: string, field: string, sub: string | null
     if (head === 'setting') return parts.length === 2 ? setting(parts[1]) : withSub(inTable('setKey', parts.slice(2).join(':')))
     if (head === 'gamification') return withSub(inTable('gamKey', parts.slice(1).join(':')))
     if (head === 'invite' && parts.length === 2) return sub != null ? inTable('inviteField', sub) : kindName('admin.invite_link', t)
-    if (head === 'invite' && parts[2] === 'agent') return misc('agent')
+    if ((head === 'invite' && parts[2] === 'agent') || (head === 'link_owner' && parts.length === 2)) return misc('agent')
     if (head === 'agent' && parts.length === 3) return parts[2] === 'extend_days' ? misc('extend_days') : lbl(t, `admin.log.v.userField.${parts[2]}`, parts[2])
     if (head === 'ticket' && parts.length === 3) return inTable('ticketField', parts[2])
     if (head === 'competition' && parts[1] === 'participant' && parts.length === 4) return misc(parts[3])

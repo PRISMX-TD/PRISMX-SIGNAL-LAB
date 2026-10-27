@@ -1,4 +1,5 @@
-// 邀请链接面板：生成带标记名的推广链接，看点击/注册统计，改名与停用/启用。
+// 推广链接面板（rev 50 前叫「邀请链接」）：生成带标记名的推广链接，看点击/注册统计，改名与停用/启用。
+// rev 50 起代理的任命 / 撤销 / 层级在「代理」分区（AgentsPanel），这里只给链接选主人。
 // 通过链接注册的用户，备注栏写入注册当时的标记名（快照，改名不追溯）；注册
 // 人数按隐藏归因码统计，管理员手改备注不影响数字。链接一律由 utils/promoLinkUrl
 // 拼 ORIGIN 而不是 window.location.origin——在 Vercel 预览域名上操作后台时复制出去的
@@ -17,6 +18,7 @@
 // show disabled / new), a compact 6-column table (cards on phones) and an edit drawer.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { useToast } from '../../utils/useToast'
 import { adminApi } from '../../api/client'
 import { fmtTime, localizeApiError } from '../../api/utils'
@@ -26,7 +28,6 @@ import Select from '../Select'
 import Switch from '../Switch'
 import { SkeletonLine } from '../Skeleton'
 import CopyLinkButton from './invite/CopyLinkButton'
-import AgentTreeDrawer from './invite/AgentTreeDrawer'
 import InviteLinkCreateDrawer from './invite/InviteLinkCreateDrawer'
 import InviteLinkEditDrawer from './invite/InviteLinkEditDrawer'
 import ToastBar from './invite/ToastBar'
@@ -46,10 +47,11 @@ import {
   summarize,
   type LinkFilter,
 } from './invite/inviteLinkLogic'
-import type { InviteLink, InviteLinkCreate, InviteLinkPatch } from '../../api/types'
+import type { AdminAgentTreeNode, InviteLink, InviteLinkCreate, InviteLinkPatch } from '../../api/types'
 
 export default function InviteLinksPanel({ globalTrialEnabled = false }: { globalTrialEnabled?: boolean }) {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const [links, setLinks] = useState<InviteLink[]>([])
   const [loading, setLoading] = useState(true)
   // 'create' 或正在保存的链接 id；同一时刻只放行一个写操作，避免连点。
@@ -67,27 +69,19 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   // The drawer keeps an id, not the object, so it re-reads the row after each write.
   const [editId, setEditId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
-  // 代理层级抽屉（rev 47）。/ The agent-hierarchy drawer (rev 47).
-  const [showTree, setShowTree] = useState(false)
-  // 待确认的「移除代理」。移除入口是代理标签上那枚 × ——一个极小的点击目标，
-  // 误触就撤销了该用户的 /agent 入口（他下次刷新就看不到代理页，归因数据与 KPI
-  // 也会短暂对不上）。动作本身可逆（重新指派即可），所以用普通确认框而不是危险态。
+  // 待确认的「换主人 / 收回」（rev 50）：agent 为 null = 收回成平台链接。moveCustomers 默认不勾——
+  // 换主人只影响以后注册的人；勾上才把来源是这条链接、仍归旧主人的客户一起转过去。
   // 用非 center 版：它要压在编辑抽屉（z-80 的 slide-overlay）上面，见 AdminSheet 注释。
-  // The pending "remove agent". The entry point is the × on an agent chip — a
-  // very small target whose mis-tap revokes that user's /agent access. Reversible by
-  // re-assigning, so a plain confirmation rather than a danger-styled one. Non-centered
-  // so it stacks above the drawer (see AdminSheet).
-  const [unassignTarget, setUnassignTarget] = useState<{ link: InviteLink; userId: string } | null>(null)
+  // The pending owner change (null = back to a platform link). moveCustomers starts
+  // unticked: a new owner only affects future signups unless the admin opts in.
+  // Non-centered so it stacks above the drawer (see AdminSheet).
+  const [ownerTarget, setOwnerTarget] = useState<{ link: InviteLink; agent: AdminAgentTreeNode | null } | null>(null)
+  const [moveCustomers, setMoveCustomers] = useState(false)
   // 待确认的「删除链接」。危险态确认框，同样用非 center 版压在抽屉上面。
   // The pending "delete link": a danger-styled, non-centered confirm above the drawer.
   const [deleteTarget, setDeleteTarget] = useState<InviteLink | null>(null)
 
-  // 名字从链接自己的 agents 列表里取，而不是在入口处传一份。
-  // The display name is looked up from the link's own agents list.
-  const unassignName = (target: { link: InviteLink; userId: string }) => {
-    const a = (target.link.agents ?? []).find((x) => x.userId === target.userId)
-    return a?.nickname || a?.email || target.userId
-  }
+  const ownerName = (a: { nickname: string | null; email: string } | null | undefined) => (a ? a.nickname || a.email : '')
 
   const { toast, showToast } = useToast()
 
@@ -143,12 +137,16 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
   const toggleTrial = (l: InviteLink) =>
     void runWrite(l.id, () => adminApi.updateInviteLink(l.id, { grantsTrial: !l.grantsTrial }))
 
-  const assignAgent = (l: InviteLink, userId: string) => void runWrite(l.id, () => adminApi.assignInviteAgent(l.id, userId))
+  const requestOwner = (l: InviteLink, agent: AdminAgentTreeNode | null) => {
+    setMoveCustomers(false)
+    setOwnerTarget({ link: l, agent })
+  }
 
-  const unassignAgent = (l: InviteLink, userId: string) => {
-    if (busyId) return
-    setUnassignTarget(null)
-    void runWrite(l.id, () => adminApi.unassignInviteAgent(l.id, userId))
+  const applyOwner = async () => {
+    if (!ownerTarget || busyId) return
+    const { link, agent } = ownerTarget
+    const ok = await runWrite(link.id, () => adminApi.setLinkOwner(link.id, agent?.userId ?? null, moveCustomers))
+    if (ok) setOwnerTarget(null)
   }
 
   // 删除不走 runWrite：它不回整条链接，成功后是把这一行从列表里拿掉。单飞闸照样遵守。
@@ -243,7 +241,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           <Switch checked={filter.showInactive} onChange={(v) => setFilter((f) => ({ ...f, showInactive: v }))} />
           {t('admin.invite.showInactive')}
         </label>
-        <button type="button" className="btn-ghost ml-auto px-4 py-1.5 text-xs" onClick={() => setShowTree(true)}>
+        <button type="button" className="btn-ghost ml-auto px-4 py-1.5 text-xs" onClick={() => navigate('/admin/agents')}>
           {t('admin.invite.tree.open')}
         </button>
         <button
@@ -368,7 +366,6 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
         </>
       )}
 
-      {showTree && <AgentTreeDrawer onClose={() => setShowTree(false)} />}
       {creating && (
         <InviteLinkCreateDrawer
           busy={busyId !== null}
@@ -387,24 +384,48 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
           onSave={(patch) => save(editing, patch)}
           onToggleActive={() => toggleActive(editing)}
           onToggleTrial={() => toggleTrial(editing)}
-          onAssign={(userId) => assignAgent(editing, userId)}
-          onRequestUnassign={(userId) => setUnassignTarget({ link: editing, userId })}
+          onRequestOwner={(agent) => requestOwner(editing, agent)}
           onRequestDelete={() => setDeleteTarget(editing)}
           onCopyFail={copyFailed}
           onClose={() => setEditId(null)}
         />
       )}
 
-      {unassignTarget && (
-        <ConfirmModal
-          busy={busyId !== null}
-          title={t('admin.invite.unassignConfirmTitle')}
-          message={t('admin.invite.unassignConfirmBody', { name: unassignName(unassignTarget) })}
-          confirmLabel={t('admin.invite.unassign')}
-          onConfirm={() => unassignAgent(unassignTarget.link, unassignTarget.userId)}
-          onCancel={() => setUnassignTarget(null)}
-        />
-      )}
+      {ownerTarget && (() => {
+        const oldOwner = (ownerTarget.link.agents ?? [])[0] ?? null
+        const n = ownerTarget.link.ownedCustomers ?? 0
+        return (
+          <ConfirmModal
+            busy={busyId !== null}
+            title={ownerTarget.agent ? t('admin.invite.ownerConfirmTitle') : t('admin.invite.ownerClearTitle')}
+            message={
+              ownerTarget.agent
+                ? t('admin.invite.ownerConfirmBody', { label: ownerTarget.link.label, name: ownerName(ownerTarget.agent) })
+                : t('admin.invite.ownerClearBody', { label: ownerTarget.link.label })
+            }
+            confirmLabel={t('common.confirm')}
+            onConfirm={() => void applyOwner()}
+            onCancel={() => setOwnerTarget(null)}
+          >
+            {/* 只有旧主人名下还有经这条链接来的客户时才给这个选项。/ Only when there is someone to move. */}
+            {oldOwner && n > 0 && (
+              <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm text-neutral-300">
+                <input
+                  type="checkbox"
+                  className="adm-check mt-0.5"
+                  checked={moveCustomers}
+                  onChange={(e) => setMoveCustomers(e.target.checked)}
+                />
+                <span>
+                  {ownerTarget.agent
+                    ? t('admin.invite.ownerMoveCustomers', { n, from: ownerName(oldOwner) })
+                    : t('admin.invite.ownerMoveCustomersPlatform', { n, from: ownerName(oldOwner) })}
+                </span>
+              </label>
+            )}
+          </ConfirmModal>
+        )
+      })()}
 
       {deleteTarget && (
         <ConfirmModal

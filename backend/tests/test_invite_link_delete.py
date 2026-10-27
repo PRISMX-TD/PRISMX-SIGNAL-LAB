@@ -11,7 +11,8 @@ import json
 import pytest
 from fastapi import HTTPException
 
-from app.models import AdminAuditLog, InviteLink, InviteLinkAgent, User
+from app.models import AdminAuditLog, InviteLink, User
+from app.services.agents import is_agent
 from app.routers.invite import (
     _active_link,
     agent_links,
@@ -77,7 +78,6 @@ def test_hard_delete_when_no_registrations(db_session):
     assert out == {"mode": "hard"}
     db.expire_all()
     assert db.get(InviteLink, link_id) is None
-    assert db.query(InviteLinkAgent).filter(InviteLinkAgent.link_id == link_id).count() == 0
     rows = _audit(db, "hard2345")
     assert any(r.new_value and json.loads(r.new_value) == {"deleted": "hard"} for r in rows)
     assert agent_links(db, agent) == []
@@ -112,11 +112,15 @@ def test_soft_delete_when_registrations(db_session, soft_deleted):
     assert link is not None
     assert link.deleted_at is not None
     assert link.is_active is False
-    assert db.query(InviteLinkAgent).filter(InviteLinkAgent.link_id == link.id).count() == 0
+    # rev 50：软删保留主人、不碰任何人——代理照旧是代理，客户照旧归他（设计 R7）。
+    # rev 50: soft delete keeps the owner and touches nobody.
+    assert link.owner_user_id == agent.id
     assert agent_links(db, agent) == []
+    assert is_agent(db, agent.id)
     db.refresh(user)
     assert user.invite_code == "soft2345"
     assert user.plan_note == "合作方A"
+    assert user.agent_user_id == agent.id
     rows = _audit(db, "soft2345")
     assert any(r.new_value and json.loads(r.new_value) == {"deleted": "soft"} for r in rows)
 

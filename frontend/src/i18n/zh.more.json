@@ -1049,7 +1049,7 @@
         "health": "系统状态",
         "users": "用户列表",
         "logs": "操作日志",
-        "invites": "邀请链接",
+        "invites": "推广链接",
         "competitions": "比赛",
         "gamification": "游戏化",
         "guide": "策略介绍",
@@ -1066,7 +1066,8 @@
         "ops": "运营设置",
         "system": "系统参数",
         "autoemail": "自动邮件",
-        "luckywheel": "幸运轮盘"
+        "luckywheel": "幸运轮盘",
+        "agents": "代理"
       }
     },
     "lucky": {
@@ -1589,7 +1590,9 @@
         "featuredSet": "设置了推荐比赛",
         "featuredChanged": "更换了推荐比赛",
         "featuredCleared": "取消了推荐比赛（改回自动挑选）",
-        "wholeGroup": "整组保存"
+        "wholeGroup": "整组保存",
+        "agentParentChange": "代理上级 {{a}} → {{b}}",
+        "agentUserChange": "归属代理 {{a}} → {{b}}"
       },
       "why": {
         "noMoney": "保证金不足",
@@ -1701,7 +1704,9 @@
           "plan_expires_at": "到期时间",
           "plan_note": "备注",
           "role": "角色",
-          "invite_code": "归因"
+          "invite_code": "来源",
+          "agent_parent": "代理上级",
+          "agent_user": "归属代理"
         },
         "setGroup": {
           "broker": "合作券商限制",
@@ -1813,7 +1818,10 @@
           "nameHidden": "隐藏名字",
           "count": "数量",
           "ids": "编号清单"
-        }
+        },
+        "noAgentParent": "无（一级代理）",
+        "notAgent": "不是代理",
+        "platformCustomer": "平台客户"
       },
       "ev": {
         "register": {
@@ -1981,10 +1989,10 @@
           "other": "改动了邀请链接{{name}}"
         },
         "agentAssign": {
-          "assign": "把邀请链接{{name}}指派给代理 {{b}}",
-          "unassign": "取消了代理 {{a}} 对邀请链接{{name}}的指派",
-          "change": "把邀请链接{{name}}从代理 {{a}} 改派给 {{b}}",
-          "other": "调整了邀请链接{{name}}的代理"
+          "assign": "把推广链接{{name}}的主人设为代理 {{b}}",
+          "unassign": "把推广链接{{name}}从代理 {{a}} 收回成平台链接",
+          "change": "把推广链接{{name}}的主人从代理 {{a}} 换成 {{b}}",
+          "other": "调整了推广链接{{name}}的主人"
         },
         "agentPlan": {
           "extend": "给客户延长 {{days}} 天 {{plan}}",
@@ -2606,14 +2614,10 @@
       "colAgents": "代理",
       "assign": "指派",
       "assignTitle": "指派代理",
-      "assignHint": "指派后该用户成为一级代理，多出「代理页面」：能看到这条链接的数据与客户名单，可以调整客户会员，并能把自己树里的客户升为下级代理。一条链接只能有一个代理。不改角色、不改权益。",
       "assignSearch": "搜邮箱或手机号",
       "assignNoResult": "没有匹配的用户",
       "assignAlready": "已指派",
-      "unassign": "移除代理",
-      "noAgents": "未指派",
-      "unassignConfirmTitle": "确认移除代理",
-      "unassignConfirmBody": "{{name}} 将不再看到这条链接下的客户。如果这是他最后一条链接，代理身份随之撤销：下级代理的链接会停用并转给他的上级；一级代理下面还有下级代理时无法移除，需先处理下级。",
+      "noAgents": "无（平台链接）",
       "delete": "删除链接",
       "deleted": "链接已删除",
       "deleteConfirmTitle": "删除「{{label}}」？",
@@ -2659,23 +2663,40 @@
       "qrSvg": "下载 SVG",
       "fieldGrantsTrial": "注册送 PRO 试用",
       "fieldActive": "启用",
-      "fieldAgents": "代理",
-      "competitionNoAgents": "比赛推广链接是平台自有的，不能指派代理。代理要推广比赛，请让他在代理页点「复制比赛链接」，用他自己的码。",
+      "fieldAgents": "链接主人",
+      "competitionNoAgents": "比赛推广链接是平台自有的，不能有主人。代理要推广比赛，请让他在代理页点「复制比赛链接」，用他自己的码。",
       "fieldCreated": "创建时间",
       "trialTag": "送试用",
       "tree": {
         "open": "代理层级",
-        "title": "代理层级",
-        "hint": "一级代理 = 在链接上指派的人；下级代理由一级代理在代理页里升。要撤某个代理，在他的链接里取消指派：下级代理的链接会停用并转给他的上级；一级代理下面还有下级时不能撤，需先处理下级。",
         "maxDepth": "最大层级",
         "maxDepthHint": "一级代理算第 1 级，范围 1–20。调低不会撤销已有的代理，只是不能再往下升。",
         "save": "保存",
-        "saving": "保存中…",
         "saved": "已保存",
         "empty": "还没有代理。",
         "level": "第 {{n}} 级",
-        "counts": "直属 {{direct}} 人 · 团队 {{total}} 人"
-      }
+        "counts": "直属 {{direct}} 人 · 团队 {{total}} 人",
+        "move": "改挂上级",
+        "moveTo": "新上级",
+        "movePick": "选择新上级…",
+        "moveTop": "不挂上级（改成一级代理）",
+        "moveConfirm": "确认改挂",
+        "moveTitle": "改挂上级",
+        "moveNone": "没有能挂的位置：不能挂到他自己或他的下级下面，也不能让他的下线超过最大层级。",
+        "moveDone": "已改挂",
+        "cancel": "取消"
+      },
+      "ownerHint": "以后经这条链接注册的人归主人所有。只能选已经是代理的人——任命代理请到「代理」分区。换主人默认不动已经注册的人，确认时可以选择一起转过去。",
+      "ownerSearch": "按昵称或邮箱筛选代理",
+      "ownerNoAgents": "还没有代理，请先到「代理」分区任命。",
+      "ownerChange": "更换",
+      "ownerClear": "收回成平台链接",
+      "ownerConfirmTitle": "更换链接主人",
+      "ownerConfirmBody": "以后经「{{label}}」注册的人会归 {{name}} 所有。",
+      "ownerClearTitle": "收回成平台链接",
+      "ownerClearBody": "以后经「{{label}}」注册的人都是平台客户，不归任何代理。",
+      "ownerMoveCustomers": "连同 {{from}} 名下经这条链接注册的 {{n}} 位客户一起转过去",
+      "ownerMoveCustomersPlatform": "{{from}} 名下经这条链接注册的 {{n}} 位客户也一起改成平台客户"
     },
     "announcements": {
       "hint": "在这里撰写并发布公告。用户会在顶栏铃铛面板与「公告」页看到已发布的公告；草稿只有管理员可见。中英文都填写；只填一种时，另一种语言的界面会回落显示已填的那一份。",
@@ -2994,10 +3015,10 @@
     "colExpiresAt": "到期时间",
     "colNote": "备注",
     "perPage": "每页",
-    "colInvite": "归因",
-    "inviteNone": "未归因",
+    "colInvite": "来源",
+    "inviteNone": "无来源",
     "inviteDeletedTag": "（已删除）",
-    "inviteClear": "清除归因",
+    "inviteClear": "清除来源",
     "colMt5Count": "MT5 账户数",
     "colLastActive": "最近活跃",
     "colAction": "操作",
@@ -3011,11 +3032,11 @@
     "bulkConfirmTitle": "确认批量修改",
     "bulkConfirmBody": "将对已选中的 {{n}} 位用户执行：{{changes}}。改完不可撤销；所有修改都会记录在操作日志里。",
     "bulkConfirmAdminWarn": "其中包含「角色 → admin」：这些账号将拿到后台的全部权限，包括改别人的角色。",
-    "bulkConfirmInviteWarn": "指派后，这些用户的邮箱会立刻出现在「{{agent}}」的代理页名单里。撤销只能停止继续显示，看过的人已经看过了。",
+    "bulkConfirmInviteWarn": "改完后，这些用户的邮箱会立刻出现在「{{agent}}」及其上级的代理页名单里。撤销只能停止继续显示，看过的人已经看过了。",
     "changeRole": "角色 → {{value}}",
     "changePlan": "等级 → {{value}}",
     "changeExpiry": "到期时间 → {{value}}",
-    "changeInvite": "归因 → {{value}}",
+    "changeInvite": "来源 → {{value}}",
     "neverExpires": "永不过期",
     "promoteTitle": "确认提升为管理员",
     "promoteBody": "{{email}} 将拿到后台的全部权限，包括改别人的角色与套餐。所有修改都会记录在操作日志里。",
@@ -3725,6 +3746,32 @@
         "failed": "加载失败",
         "note": "共用 IP 可能只是同一网络（例如手机网络共用出口），仅供参考。IP 记录保留 90 天。"
       }
+    },
+    "colAgent": "归属代理",
+    "agentNone": "平台客户",
+    "agentClear": "改成平台客户",
+    "agentTag": "代理",
+    "changeAgent": "归属代理 → {{value}}",
+    "agents": {
+      "hint": "谁是代理、上级是谁只看这棵树。客户归谁看用户列表里的「归属代理」；链接只决定以后经它注册的人归谁。撤销代理：他的客户和链接交给上级（一级代理则变成平台客户、平台链接），下级整体上移一级；一级代理下面还有下级时不能撤，先改挂或撤下级。",
+      "appoint": "任命代理",
+      "appointTitle": "任命代理",
+      "parent": "上级",
+      "parentTop": "无（一级代理）",
+      "createLink": "顺便生成一条专属链接",
+      "appointHint": "任命后他多出「代理页面」，不改角色、不改权益。他已经注册的客户归属不变，需要的话到用户列表批量改「归属代理」。",
+      "appointConfirm": "确认任命",
+      "appointDone": "已任命 {{name}}",
+      "alreadyAgent": "已是代理",
+      "repick": "重选",
+      "revoke": "撤销",
+      "revokeTitle": "撤销代理 {{name}}",
+      "revokeBody": "{{name}} 的客户和链接都会交给上级 {{parent}}（链接停用），他的下级整体上移一级，他本人变成 {{parent}} 的普通客户。",
+      "revokeBodyTop": "{{name}} 的客户都变成平台客户，他的链接变成平台链接（照常可用）。一级代理下面还有下级时不能撤销。",
+      "revokeDone": "已撤销 {{name}}",
+      "noLinks": "没有链接",
+      "moveBody": "{{name}} 会连同他下面的代理和所有客户一起挂到 {{parent}} 下面。原来的上级从此看不到他们。",
+      "moveBodyTop": "{{name}} 会连同他下面的代理和所有客户独立成一棵树，他成为一级代理（可以升 / 撤代理、改会员）。"
     }
   },
   "simulator": {

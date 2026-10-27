@@ -13,7 +13,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.models import AdminAuditLog, Competition, CompetitionParticipant, InviteLink, InviteLinkAgent, User
+from app.models import AdminAuditLog, Competition, CompetitionParticipant, InviteLink, User
 from app.routers.invite import assign_agent, pick_ref
 from app.schemas import GoogleAuthRequest, RegisterRequest
 
@@ -148,11 +148,13 @@ def test_refs_field_bounds():
             GoogleAuthRequest(credential="c" * 40, refs=bad)
 
 
-def test_register_uses_refs_agent_first_and_hides_choice(db_session):
+def test_register_splits_source_and_owner_and_hides_choice(db_session):
+    """rev 50：同时带广告链接与代理链接——来源记最新的广告链接，归属记代理链接的主人，两边各算一次。
+    rev 50: the newest link is the source, the agent link's owner is the owner."""
     from app.routers.auth import register
 
     _mk_link(db_session, code="plat2345")
-    _agent_link(db_session, "agnt2345")
+    agent_link = _agent_link(db_session, "agnt2345")
     out = register.__wrapped__(
         request=None,
         req=RegisterRequest(**_SIGNUP, ref="plat2345", refs=["plat2345", "agnt2345"]),
@@ -160,7 +162,8 @@ def test_register_uses_refs_agent_first_and_hides_choice(db_session):
         db=db_session,
     )
     user = db_session.query(User).filter(User.email == "new@example.com").one()
-    assert user.invite_code == "agnt2345"
+    assert user.invite_code == "plat2345"
+    assert user.agent_user_id == agent_link.owner_user_id
     # 选中谁不回传 / the choice is never echoed back
     assert "agnt2345" not in out.model_dump_json()
 
@@ -190,7 +193,8 @@ def test_google_signup_uses_refs(db_session, monkeypatch):
         db=db_session,
     )
     user = db_session.query(User).filter(User.email == "g@gmail.com").one()
-    assert user.invite_code == "agnt2345"
+    assert user.invite_code == "plat2345"
+    assert user.agent_user_id == db_session.query(InviteLink).filter_by(code="agnt2345").one().owner_user_id
 
 
 # ---------- B2: 比赛链接的注册备注 ----------
@@ -387,8 +391,9 @@ def test_competition_link_cannot_get_agents(db_session):
         assign_agent(db_session, admin, link, agent)
     assert exc.value.status_code == 400
     assert exc.value.detail == "比赛推广链接不能指派代理 / Competition promo links cannot have agents"
-    assert db_session.query(InviteLinkAgent).count() == 0
-    assert db_session.query(AdminAuditLog).filter(AdminAuditLog.field == "invite:comp2345:agent").count() == 0
+    db_session.refresh(link)
+    assert link.owner_user_id is None
+    assert db_session.query(AdminAuditLog).filter(AdminAuditLog.field == "link_owner:comp2345").count() == 0
 
 
 def test_assign_endpoint_rejects_competition_link(db_session):

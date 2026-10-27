@@ -171,12 +171,11 @@ def picker_users(
 
 @admin_router.get("/agents", response_model=dict)
 def picker_agents(db: Session = Depends(get_db)):
-    """选人列表的代理下拉：所有名下有邀请链接的代理。/ Agents for the picker's agent filter."""
-    from app.models import InviteLinkAgent
+    """选人列表的代理下拉：所有代理（rev 50 起按 agent_nodes）。/ Agents for the picker's agent filter."""
+    from app.models import AgentNode
     rows = (
         db.query(User.id, User.nickname, User.email)
-        .join(InviteLinkAgent, InviteLinkAgent.user_id == User.id)
-        .distinct()
+        .join(AgentNode, AgentNode.user_id == User.id)
         .order_by(User.nickname)
         .all()
     )

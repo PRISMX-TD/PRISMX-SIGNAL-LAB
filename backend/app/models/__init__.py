@@ -104,6 +104,16 @@ class User(Base):
     # from the label snapshot in plan_note, so admins editing notes can't skew
     # the stats (see apply_invite in routers/invite.py).
     invite_code = Column(String, nullable=True)
+    # rev 50：归属代理（users.id）。与 invite_code（来源）分开存：注册时如果带的是代理链接，
+    # 写入那条链接当时的主人；之后只有管理员手动改、撤销代理、转链接时勾了「连同客户迁移」
+    # 才会变——链接被删、停用、转手都不会把客户带走。代理本人在树上的位置只看 AgentNode，
+    # 这一列对代理本人不参与任何范围判断。软引用（ALTER 路径不建外键，同 competition_id）。
+    # rev 50: the owning agent (users.id), stored apart from invite_code (the
+    # source). Written at signup from the agent link's owner at that moment;
+    # changed only by an admin, by revoking an agent, or by a link transfer with
+    # "move customers" ticked — deleting, disabling or reassigning a link never
+    # moves customers. An agent's own place in the tree is AgentNode only.
+    agent_user_id = Column(String, nullable=True, index=True)
     # 最近一次带凭证请求的时间，用于计算 DAU；在 get_current_user 里限流更新
     # （同一用户 5 分钟内只写一次库），避免每个请求都触发一次 UPDATE。
     # Last authenticated request time, used to compute DAU; throttled in
@@ -1597,11 +1607,26 @@ class InviteLink(Base):
     # rev 37：软删时间（见类注释）。NULL = 未删除。
     # rev 37: soft-delete timestamp (see the class docstring). NULL = not deleted.
     deleted_at = Column(DateTime, nullable=True)
+    # rev 50：链接主人（必须是代理，即 agent_nodes 里有节点）。取代 invite_link_agents 表——
+    # 那张表自 rev 47 起就是一条链接一行，本质就是一列。主人只决定「以后经这条链接注册的人
+    # 归谁」（写进 users.agent_user_id）；换主人、删链接都不改已注册客户的归属。比赛推广链接
+    # 不能有主人。软删的链接保留主人，便于追溯。软引用，理由同 competition_id。
+    # rev 50: the link's owner (must be an agent). Replaces invite_link_agents,
+    # which has been one row per link since rev 47. The owner only decides who
+    # future signups through this link belong to; changing owners or deleting
+    # the link never moves existing customers. Competition links have none.
+    owner_user_id = Column(String, nullable=True, index=True)
+    owner_assigned_by = Column(String, nullable=True)
+    owner_assigned_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
 
 
 class InviteLinkAgent(Base):
-    """邀请链接的「代理」指派：管理员把一条链接指派给某个用户，该用户就能在
+    """**rev 50 起停止读写**，由 invite_links.owner_user_id 取代；表留一版以便回滚，下一版删除。
+    rev 50: no longer read or written (replaced by invite_links.owner_user_id);
+    kept for one release so a rollback still finds its data.
+
+    邀请链接的「代理」指派：管理员把一条链接指派给某个用户，该用户就能在
     /agent 页看到这条链接的点击数、注册人数与经它注册的用户名单（只读）。
 
     「代理」不是角色。users.role 不改、权益不变——代理身份完全由「本表里有没有
@@ -1649,28 +1674,34 @@ class InviteLinkAgent(Base):
 class AgentNode(Base):
     """代理层级树上的一个节点（rev 47，2026-10-24 产品决定）。
 
-    每个代理一行：parent_user_id 为空 = 一级代理（管理员任命），否则指向上级代理。
+    每个代理一行：parent_user_id 为空 = 一级代理，否则指向上级代理。
     depth 是层级（一级 = 1），冗余存一份，是为了「不能超过最大层级」与「只有一级能改」
     这两条判定不必每次沿树往上数。
 
-    树怎么长出来：一级代理在自己整棵树里把某个普通用户升为代理时，新节点的上级**由注册
-    路径决定**——就是他注册时用的那条链接（users.invite_code）的主人，不是点按钮的人。
-    同时系统给他生成一条专属链接（invite_link_agents 一行）。
+    rev 50 起本表是「谁是代理、上级是谁」的**唯一来源**（设计 2026-10-27）：有节点就是代理，
+    与持有几条链接无关；上级只看 parent_user_id，不再从任何人的 invite_code 推。
 
-    可见范围：一个代理看得到自己与所有下级（递归）链接带来的客户；看不到上级与同级。
-    写权限：只有一级代理能改会员、升 / 撤代理，二级及以下只读（自己链接的开户网址除外）。
+    树怎么长出来：管理员任命（可选上级，默认一级）；或一级代理在自己整棵树里把某个普通客户
+    升为代理，新节点的上级是这个客户当时的归属代理（users.agent_user_id）。管理员可以把
+    一个代理连同子树改挂到别处（services/agent_tree.move_node）。
 
-    撤销（见 services/agent_tree.remove_node）：他的链接停用并转给他的上级，下级代理整体
-    上移一级挂到他的上级下面；客户的 invite_code 一律不动，所以人始终还在树上。
+    可见范围：一个代理看得到归属在自己与所有下级名下的客户、以及所有下级代理本人；
+    看不到上级与同级。写权限：只有一级代理能改会员、升 / 撤代理，二级及以下只读（自己
+    链接的开户网址除外）。
 
-    One node of the agent tree (rev 47). parent_user_id NULL = top-level agent
-    (appointed by an admin), otherwise the parent agent. depth (top = 1) is
-    stored so the max-depth and top-level-only checks never walk the tree.
-    A promoted user's parent is decided by their signup path — the owner of the
-    link in users.invite_code — not by whoever pressed the button. An agent sees
-    their own and every descendant's customers, never upwards or sideways; only
-    top-level agents may write. Removal hands the links to the parent and lifts
-    the subtree one level; customers' invite_code is never touched.
+    撤销（见 services/agent_tree.remove_node）：他的客户与链接转给他的上级（一级则变成平台的），
+    下级代理整体上移一级挂到他的上级下面。
+
+    One node of the agent tree (rev 47). Since rev 50 this table is the single
+    source of who is an agent and who their parent is: a node makes an agent,
+    regardless of links held, and the parent is parent_user_id only. depth
+    (top = 1) is stored so the max-depth and top-level-only checks never walk
+    the tree. Admins appoint (any parent, default top) and re-parent; a
+    top-level agent promotes a customer in their tree, whose parent becomes the
+    customer's owning agent (users.agent_user_id). An agent sees the customers
+    owned by themselves and every descendant plus the descendant agents; only
+    top-level agents may write. Removal hands customers and links to the parent
+    and lifts the subtree one level.
     """
     __tablename__ = "agent_nodes"
 

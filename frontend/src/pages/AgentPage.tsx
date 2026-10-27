@@ -6,7 +6,8 @@
 // 两条口径不在这里算，全部由后端给：活跃 = page_visitor_days 里有行（到天为止，
 // 没有时刻也没有时长），MT5 账户号是后端打好码的。前端只负责显示，别在这里补
 // 任何"推算"——一推算就会和管理看板的数字对不上。
-// 「代理」不是角色：入口由 /auth/me 的 isAgent 派生（至少持有一条被指派的链接），
+// rev 50 起每条链接的名单走 /agent/customers?link=：来源是这条链接、此刻仍归我或我下级的人。
+// 「代理」不是角色：入口由 /auth/me 的 isAgent 派生（在代理树上有节点），
 // role 与权益都不动。链接 URL 由 utils/promoLinkUrl 统一拼（ORIGIN，不是
 // window.location.origin，理由同管理面板）。每条链接两个复制按钮（设计 §1.2）：
 // 邀请链接 /?ref=码、比赛链接 /c?ref=码（固定链接，打开时显示当前主推比赛；
@@ -156,7 +157,7 @@ export default function AgentPage() {
     setPage(null)
     setPageError(null)
     agentApi
-      .linkUsers(selectedId, { limit: PAGE_SIZE, offset, q: query || undefined })
+      .customers({ link: selectedId, limit: PAGE_SIZE, offset, q: query || undefined })
       .then((res) => {
         if (alive) setPage(res)
       })

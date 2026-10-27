@@ -296,6 +296,12 @@ class AdminUserOut(BaseModel):
     # on the user row would drift. The frontend already fetches the link list for
     # its dropdown and maps code to name there.
     inviteCode: str | None = None
+    # 归属代理（rev 50，users.agent_user_id）与他的邮箱；代理本人这一列不参与范围判断。
+    # The owning agent (rev 50) and their email; meaningless for agents themselves.
+    agentUserId: str | None = None
+    agentEmail: str | None = None
+    # 他本人是不是代理（在 agent_nodes 里）。/ Whether this user is an agent.
+    isAgent: bool = False
     # 邮箱验证时间；null = 还没验证（只可能是上线后用邮箱密码注册的新账号）。
     # 收不到验证信的用户找客服时，管理员据此判断并可手动标记（见
     # admin.mark_email_verified）。
@@ -345,6 +351,11 @@ class AdminUserUpdate(BaseModel):
     # Deliberately does not touch plan_note: notes are often hand-written, and
     # the two are separate facts. Send both fields if you want both changed.
     inviteCode: str | None = Field(default=None, max_length=64)
+    # 归属代理（rev 50）：不传 = 不动；null = 变成平台客户；传 user id = 改归这个代理（必须是代理）。
+    # 与 inviteCode（来源，只影响广告统计）是两件事，互不连带。目标是代理本人时 409。
+    # Owning agent (rev 50): omitted = unchanged, null = platform customer, an id =
+    # that agent (must be one). Independent of inviteCode (the ad source). 409 for agents.
+    agentUserId: str | None = Field(default=None, max_length=64)
 
 
 class VisibilityPatchIn(BaseModel):
@@ -1950,9 +1961,12 @@ class InviteLinkOut(BaseModel):
     # greys the column out when that gate is closed.
     grantsTrial: bool = False
     createdAt: datetime | None = None
-    # 被指派为这条链接「代理」的用户（见 InviteLinkAgent 模型注释）。
-    # Users assigned as this link's agents (see the InviteLinkAgent model).
+    # 链接主人（rev 50 起 0 或 1 个，见 InviteLink.owner_user_id）。保留列表形状，老前端照读。
+    # The link's owner (0 or 1 since rev 50); kept as a list so older clients still read it.
     agents: list["InviteLinkAgentOut"] = []
+    # 经这条链接注册、此刻仍归这条链接主人的普通客户数——转主人弹窗里「连同 N 位客户迁移」用。
+    # Customers from this link still owned by its owner; the transfer dialog's N.
+    ownedCustomers: int = 0
     # 比赛推广链接（设计 §1.1）：competitionId 非空即是，创建后不可改。competitionName
     # 顺带给出，列表不必再拉比赛表（比赛行不在时为 null）。channel 是自由文本渠道标签。
     # Competition promo link (spec §1.1): set iff competitionId is non-null,
@@ -2184,7 +2198,8 @@ class AgentTeamNodeOut(BaseModel):
     """代理页「团队」里的一个代理（含自己那一行）。用邮箱当标识，理由同 AgentPlanUpdate：
     名单本来就给完整邮箱，user id 从不下发给代理。自己那一行的 parentEmail 恒为 null——
     下级看不到上级，这是硬规则，不是前端藏起来。
-    数字：direct* 只算他自己链接带来的人，teamCustomers 再加上他整棵子树的。
+    数字：direct* 只算归属在他名下的客户（rev 50 起按 users.agent_user_id），teamCustomers
+    再加上他整棵子树的。
     One agent in the "Team" view, the caller's own row included. Identified by
     email (user ids never reach agents). The caller's own parentEmail is always
     null: looking upwards is not possible by construction. direct* counts only
@@ -2269,6 +2284,30 @@ class AdminAgentTreeOut(BaseModel):
 class AdminAgentSettingsUpdate(BaseModel):
     # 上限 20 与 settings_store.AGENT_MAX_DEPTH_LIMIT 一致。/ Matches AGENT_MAX_DEPTH_LIMIT.
     maxDepth: int = Field(ge=1, le=20)
+
+
+class AdminAgentMove(BaseModel):
+    """管理员把一个代理（连同整棵子树）改挂到另一个代理下面；parentUserId 为 null = 改成一级。
+    Admin re-parents an agent with their whole subtree; null parent = top level."""
+    userId: str = Field(min_length=1, max_length=64)
+    parentUserId: str | None = Field(default=None, max_length=64)
+
+
+class AdminAgentAppoint(BaseModel):
+    """管理员任命代理（rev 50）：parentUserId 为 null = 一级；createLink 同时给他生成一条专属链接。
+    Admin appoints an agent; null parent = top level; createLink also mints a link."""
+    userId: str = Field(min_length=1, max_length=64)
+    parentUserId: str | None = Field(default=None, max_length=64)
+    createLink: bool = True
+
+
+class AdminLinkOwnerUpdate(BaseModel):
+    """换链接主人（rev 50）：userId 为 null = 变成平台链接。moveCustomers 为真时，经这条链接
+    注册的普通客户也一起改归新主人（null 则变成平台客户）；默认只影响以后的新注册。
+    Set a link's owner (null = platform). moveCustomers also re-owns the
+    customers whose source is this link; by default only future signups follow."""
+    userId: str | None = Field(default=None, max_length=64)
+    moveCustomers: bool = False
 
 
 # ---------- 管理后台群发邮件 / admin email broadcast ----------

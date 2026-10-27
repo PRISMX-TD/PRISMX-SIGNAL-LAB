@@ -20,6 +20,7 @@ import { useToast } from '../utils/useToast'
 import { Avatar } from '../components/support/supportUi'
 import ActivityLogPanel, { type LogsPreset } from '../components/admin/ActivityLogPanel'
 import AdminTicketsPanel from '../components/admin/AdminTicketsPanel'
+import AgentsPanel from '../components/admin/AgentsPanel'
 import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
 import EmailAutomationPanel from '../components/admin/EmailAutomationPanel'
@@ -193,6 +194,9 @@ function AdminConsole({ section }: { section: AdminSection }) {
       break
     case 'invites':
       content = <InviteLinksPanel globalTrialEnabled={savedTrialEnabled} />
+      break
+    case 'agents':
+      content = <AgentsPanel />
       break
     case 'competitions':
       content = <CompetitionsPanel />

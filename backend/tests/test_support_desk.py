@@ -711,13 +711,13 @@ def test_follow_up_request_approval_creates_follow_up(client, db, people):
 
 
 def test_picker_agent_filter(client, db, people):
-    from app.models import InviteLink, InviteLinkAgent
+    from app.models import AgentNode, InviteLink
     agent = people["internal"]
-    link = InviteLink(code="AGT1", label="agent link")
-    db.add(link)
+    db.add(AgentNode(user_id=agent.id, depth=1))
+    db.add(InviteLink(code="AGT1", label="agent link", owner_user_id=agent.id))
     db.flush()
-    db.add(InviteLinkAgent(link_id=link.id, user_id=agent.id))
-    via = _user(db, "via@x.com", invite_code="AGT1")
+    # rev 50：代理筛选按归属（agent_user_id），不按来源。/ The agent filter goes by owner since rev 50.
+    via = _user(db, "via@x.com", invite_code="AGT1", agent_user_id=agent.id)
     db.commit()
     ha = _auth(people["admin"])
     assert [a["id"] for a in client.get("/api/admin/emails/agents", headers=ha).json()["agents"]] == [agent.id]

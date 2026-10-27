@@ -157,6 +157,34 @@ def _market_hours_gate_off(monkeypatch):
     market_hours.clear_cache()
 
 
+def _autofill_signup_owner(session) -> None:
+    """测试捷径：直接 `User(invite_code=链接码)` 造出来的人，按注册时的规则补上归属代理。
+
+    几十个用例用这种写法表示「经这条链接注册的客户」，而不是走一遍 apply_invite。rev 50 起归属
+    单独存在 users.agent_user_id（注册那一刻 = 链接当时的主人），于是这里在**新插入**的行上照
+    注册规则补一次：只补没显式给 agent_user_id 的。要测「来源有、归属没有」的用例，把
+    session.info["no_owner_autofill"] 设成 True。
+
+    Test shortcut: users built as `User(invite_code=code)` stand for customers who
+    signed up through that link, so newly inserted rows get the signup rule
+    (owner = the link's owner at that moment) unless agent_user_id is given.
+    Set session.info["no_owner_autofill"] to opt out.
+    """
+    from sqlalchemy import event
+
+    from app.models import InviteLink, User
+
+    @event.listens_for(session, "before_flush")
+    def _fill(sess, _ctx, _instances):
+        if sess.info.get("no_owner_autofill"):
+            return
+        for obj in list(sess.new):
+            if isinstance(obj, User) and obj.invite_code and obj.agent_user_id is None:
+                row = sess.query(InviteLink.owner_user_id).filter(InviteLink.code == obj.invite_code).first()
+                if row is not None and row[0] and row[0] != obj.id:
+                    obj.agent_user_id = row[0]
+
+
 @pytest.fixture()
 def db_session():
     """一次性的内存 SQLite 会话，建全表。
@@ -180,6 +208,7 @@ def db_session():
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, autocommit=False, autoflush=False)
     session = Session()
+    _autofill_signup_owner(session)
     try:
         yield session
     finally:

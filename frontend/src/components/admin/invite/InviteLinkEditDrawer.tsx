@@ -1,4 +1,4 @@
-// 邀请链接编辑抽屉（设计 §5.4）：标记、渠道、代理开户链接（非比赛链接）、链接与二维码、送试用、启停、代理管理、
+// 推广链接编辑抽屉（设计 §5.4）：标记、渠道、代理开户链接（非比赛链接）、链接与二维码、送试用、启停、链接主人、
 // 创建时间、只读的关联比赛。所有写操作都交给面板（单一 busyId 闸门在面板里），
 // 这里的按钮一律按 busy 禁用——理由见 InviteLinksPanel 里那段「禁用必须如实反映处理
 // 函数行为」的注释。
@@ -13,7 +13,7 @@ import { fmtTime } from '../../../api/utils'
 import { promoLinkUrl } from '../../../utils/promoLinkUrl'
 import { isAgentOpenUrl } from '../../../utils/openAccountLink'
 import type { Toast } from '../../../utils/useToast'
-import type { InviteLink, InviteLinkPatch } from '../../../api/types'
+import type { AdminAgentTreeNode, InviteLink, InviteLinkPatch } from '../../../api/types'
 import AgentPicker from './AgentPicker'
 import ChannelField from './ChannelField'
 import CopyLinkButton from './CopyLinkButton'
@@ -29,8 +29,7 @@ export default function InviteLinkEditDrawer({
   onSave,
   onToggleActive,
   onToggleTrial,
-  onAssign,
-  onRequestUnassign,
+  onRequestOwner,
   onRequestDelete,
   onCopyFail,
   onClose,
@@ -42,8 +41,8 @@ export default function InviteLinkEditDrawer({
   onSave: (patch: InviteLinkPatch) => Promise<boolean>
   onToggleActive: () => void
   onToggleTrial: () => void
-  onAssign: (userId: string) => void
-  onRequestUnassign: (userId: string) => void
+  // 换主人 / 收回（null）：面板弹确认框（可选连同客户迁移）。/ Change or clear the owner; the panel confirms.
+  onRequestOwner: (agent: AdminAgentTreeNode | null) => void
   onRequestDelete: () => void
   onCopyFail: () => void
   onClose: () => void
@@ -70,7 +69,9 @@ export default function InviteLinkEditDrawer({
   const openUrlInvalid = hasOpenUrl && openUrl.trim() !== '' && !isAgentOpenUrl(openUrl)
   const patch = labelPatch(link, hasOpenUrl ? { label, channel, openAccountUrl: openUrl } : { label, channel })
   const url = promoLinkUrl(link)
-  const agents = link.agents ?? []
+  const owner = (link.agents ?? [])[0] ?? null
+  const [picking, setPicking] = useState(false)
+  useEffect(() => setPicking(false), [link.id, owner?.userId])
 
   return (
     <AdminSheet
@@ -170,40 +171,43 @@ export default function InviteLinkEditDrawer({
           <p className="text-xs leading-relaxed text-neutral-500">{t('admin.invite.competitionNoAgents')}</p>
         ) : (
           <>
-            {/* 代理不是角色，这里不动 role——见后端 InviteLinkAgent 模型注释。
-                Agents are not a role — see the backend model's comment. */}
-            <p className="text-xs leading-relaxed text-neutral-500">{t('admin.invite.assignHint')}</p>
-            {agents.length > 0 ? (
-              <div className="mt-3 flex flex-wrap gap-1.5">
-                {agents.map((a) => (
-                  <span
-                    key={a.userId}
-                    className="inline-flex items-center gap-1 rounded-full bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
-                    title={a.email}
-                  >
-                    {a.nickname || a.email}
-                    {a.level != null && (
-                      <span className="text-[10px] text-prism-300/80">{t('admin.invite.tree.level', { n: a.level })}</span>
-                    )}
-                    <button
-                      type="button"
-                      className="text-prism-300/70 hover:text-down disabled:opacity-40"
-                      aria-label={t('admin.invite.unassign')}
-                      disabled={busy}
-                      onClick={() => onRequestUnassign(a.userId)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
+            {/* rev 50：主人只决定以后经这条链接注册的人归谁；已经注册的人要不要一起转，在确认框里选。
+                rev 50: the owner decides who future signups belong to; moving existing customers
+                is an option in the confirm dialog. */}
+            <p className="text-xs leading-relaxed text-neutral-500">{t('admin.invite.ownerHint')}</p>
+            {owner ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <span
+                  className="inline-flex items-center gap-1 rounded-full bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
+                  title={owner.email}
+                >
+                  {owner.nickname || owner.email}
+                  {owner.level != null && (
+                    <span className="text-[10px] text-prism-300/80">{t('admin.invite.tree.level', { n: owner.level })}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="text-xs text-prism-300 hover:text-prism-200 disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => setPicking((v) => !v)}
+                >
+                  {t('admin.invite.ownerChange')}
+                </button>
+                <button
+                  type="button"
+                  className="text-xs text-neutral-400 hover:text-down disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => onRequestOwner(null)}
+                >
+                  {t('admin.invite.ownerClear')}
+                </button>
               </div>
             ) : (
               <p className="mt-2 text-xs text-neutral-500">{t('admin.invite.noAgents')}</p>
             )}
-            {/* rev 47 起一条链接只能有一个代理（后端 409 兜底）：已有代理就不再给选人框。
-                Since rev 47 a link holds one agent (409 server-side); no picker once assigned. */}
-            {agents.length === 0 && (
-              <AgentPicker assignedIds={new Set(agents.map((a) => a.userId))} busy={busy} onAssign={onAssign} />
+            {(!owner || picking) && (
+              <AgentPicker currentOwnerId={owner?.userId ?? null} busy={busy} onPick={onRequestOwner} />
             )}
           </>
         )}

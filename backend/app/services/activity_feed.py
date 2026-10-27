@@ -266,6 +266,12 @@ _USER_FIELDS = (
     "role", "plan", "plan_expires_at", "plan_note", "invite_code",
     # rev 41 客服台：设客服 tier / 查看上限、客服重置试用 / rev 41 support desk fields
     "support_tier", "support_reveal_limit", "trial_used_at",
+    # 代理层级（rev 50）：任命 / 改挂 / 撤销代理。值是上级邮箱，"-" = 一级，空 = 不是代理
+    # agent hierarchy (rev 50): appoint / re-parent / revoke; upline email, "-" = top, blank = not an agent
+    "agent_parent",
+    # 客户的归属代理（rev 50）：旧 / 新代理邮箱，空 = 平台客户
+    # a customer's owning agent (rev 50): old / new agent email, blank = platform customer
+    "agent_user",
 )
 _PLAN_FIELDS = frozenset({"plan", "plan_expires_at", "plan_note"})
 # 账户分类里的系统 / 本人行（与 _account_field_cond 的 SQL 一一对应）
@@ -1308,6 +1314,10 @@ def _audit_family(f: str) -> str | None:
         return f"invite:{parts[1]}"
     if head == "invite" and len(parts) == 3 and parts[2] == "agent":
         return f"invite:{parts[1]}:agent"
+    # rev 50 起链接主人变更记成 link_owner:{code}，与旧的 invite:{code}:agent 同一族、同一种事件。
+    # Since rev 50 owner changes are link_owner:{code}, same family and kind as invite:{code}:agent.
+    if head == "link_owner" and len(parts) == 2:
+        return f"invite:{parts[1]}:agent"
     if head == "agent" and len(parts) == 3 and parts[2] in ("plan", "plan_expires_at", "extend_days"):
         return f"agent:{parts[1]}"
     if head == "competition" and len(parts) == 4 and parts[1] == "participant" and parts[3] in ("disqualified", "nameHidden"):
@@ -1810,7 +1820,7 @@ class _Ctx:
                 f = a.field or ""
                 if f == "invite_code":
                     codes.update(v for v in (a.old_value, a.new_value) if v)
-                elif f.startswith("invite:") or f.startswith("agent:"):
+                elif f.startswith("invite:") or f.startswith("agent:") or f.startswith("link_owner:"):
                     codes.add(f.split(":")[1])
                 elif f == "plan:invite_trial":
                     u = self.users.get(a.target_user_id)
@@ -2267,6 +2277,8 @@ def _audit_params(p: _Proto, ctx: _Ctx) -> dict:
             "expires": _pair(ch, "plan_expires_at", dt=True), "note": _pair(ch, "plan_note"),
             "invite": inv,
             "invite_label": [ctx.invite_labels.get(c) if c else None for c in inv] if inv else None,
+            "agent_parent": _pair(ch, "agent_parent"),
+            "agent_user": _pair(ch, "agent_user"),
         }
     if kind == ADMIN_USER_DISABLE:
         old, new = _as_dict(ch["account:disable"][0]), _as_dict(ch["account:disable"][1])
@@ -2323,6 +2335,13 @@ def _audit_params(p: _Proto, ctx: _Ctx) -> dict:
         }
     if kind == ADMIN_AGENT_ASSIGN:
         code = fam.split(":")[1]
+        if f"link_owner:{code}" in ch:
+            # rev 50：新旧主人都是邮箱。/ rev 50: both sides are emails.
+            old, new = (_blank(v) for v in ch[f"link_owner:{code}"])
+            return {
+                "code": code, "label": ctx.invite_labels.get(code),
+                "agent": {"email": new} if new else None, "old_agent": {"email": old} if old else None,
+            }
         old, new = ch[f"invite:{code}:agent"]
         target = ctx.user_ref(head.target_user_id)
         return {

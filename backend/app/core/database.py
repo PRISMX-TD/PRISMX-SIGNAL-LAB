@@ -421,7 +421,15 @@ def _hash_legacy_api_tokens() -> None:
 #          对 NULL 退回原来的叠加链 + plan:payment 审计行推算。纯 ADD COLUMN，不重写表，不产生可感知的停机。
 #          rev 49 — payment credit expiry: payments.credited_until (the user's new plan_expires_at
 #          at crediting). Nullable, not backfilled; NULL falls back to the chain + audit-row logic.
-CURRENT_SCHEMA_REV = 49
+# rev 50 — 代理与推广链接拆分（2026-10-27，设计 docs/superpowers/specs/2026-10-27-agent-invite-redesign.md）：
+#          invite_links 加 owner_user_id / owner_assigned_by / owner_assigned_at（取代 invite_link_agents，
+#          旧表停止读写、留一版）；users 加 agent_user_id（客户归属代理，与 invite_code 来源分开）。
+#          回填见 _migrate_agent_attribution_rev50：链接主人从旧表搬、软删链接丢的主人从审计找回、
+#          普通客户的归属 = 来源链接的主人；有链接没节点的补一级节点；depth 按实际重算。幂等。
+#          rev 50 — agent / promo-link split: link owner columns replace
+#          invite_link_agents; users.agent_user_id holds the owning agent apart
+#          from invite_code. Backfill in _migrate_agent_attribution_rev50; idempotent.
+CURRENT_SCHEMA_REV = 50
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1071,6 +1079,8 @@ def _migrate_columns() -> None:
             "geo_province": "VARCHAR",
             "geo_city": "VARCHAR",
             "geo_at": datetime_type,
+            # rev 50：归属代理，回填见 _migrate_agent_attribution_rev50 / owning agent
+            "agent_user_id": "VARCHAR",
         }
         with engine.begin() as conn:
             for name, col_type in user_new.items():
@@ -1465,6 +1475,14 @@ def _migrate_columns() -> None:
             # rev 37: soft-delete timestamp, nullable, no backfill (nothing is deleted yet).
             if "deleted_at" not in invite_cols:
                 conn.execute(text(f"ALTER TABLE invite_links ADD COLUMN deleted_at {datetime_type}"))
+            # rev 50：链接主人（取代 invite_link_agents），回填见 _migrate_agent_attribution_rev50。
+            # rev 50: link owner (replaces invite_link_agents); backfilled below.
+            if "owner_user_id" not in invite_cols:
+                conn.execute(text("ALTER TABLE invite_links ADD COLUMN owner_user_id VARCHAR"))
+            if "owner_assigned_by" not in invite_cols:
+                conn.execute(text("ALTER TABLE invite_links ADD COLUMN owner_assigned_by VARCHAR"))
+            if "owner_assigned_at" not in invite_cols:
+                conn.execute(text(f"ALTER TABLE invite_links ADD COLUMN owner_assigned_at {datetime_type}"))
 
     # rev 22：公告的「弹窗展示」开关。存量公告一律不弹——这一列是新行为的入口，
     # 回填成 TRUE 等于给所有历史公告追发一轮弹窗。两张配套新表（user_notifications、
@@ -1807,6 +1825,16 @@ def _migrate_columns() -> None:
             "CREATE INDEX IF NOT EXISTS idx_invite_links_competition "
             "ON invite_links(competition_id)"
         ))
+        # rev 50：按主人查链接、按归属代理查客户（代理页每次打开都要）。名字与模型 index=True
+        # 生成的一致，新库 create_all 建过的这里跳过。
+        # rev 50: links by owner, customers by owning agent; names match the
+        # model's index=True so a fresh database skips them.
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_invite_links_owner_user_id ON invite_links(owner_user_id)"
+        ))
+        conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_users_agent_user_id ON users(agent_user_id)"
+        ))
         # rev 38：管理后台「操作日志」按 (created_at, id) 倒序游标翻页，三张源表各一条
         # （没有它们就是全表扫描 + 排序）。created_at 写入后不再变，不影响 orders 那 99%
         # 的 HOT 更新。三张表都不大（约 1.2 万 / 6.5 千 / 1 千行），普通 CREATE INDEX 亚秒级，
@@ -1846,6 +1874,9 @@ def _migrate_columns() -> None:
     # rev 47：代理层级——链接唯一代理的索引 + 存量代理回填一级节点。
     # rev 47: agent hierarchy — one-agent-per-link index + top-level nodes for existing agents.
     _migrate_agent_tree_rev47()
+    # rev 50：来源与归属拆开——链接主人、客户归属代理的回填与体检。
+    # rev 50: source vs owner split — backfill link owners and customers' agents.
+    _migrate_agent_attribution_rev50()
 
     # rev 42：跟进「联系不上」仍算进行中 + 重建部分唯一索引 + 清空默认期限。
     # rev 42: unreachable follow-ups stay active; rebuild the partial unique index; clear deadlines.
@@ -2098,6 +2129,122 @@ def _migrate_agent_tree_rev47() -> None:
                 [{"id": str(_uuid_mod.uuid4()), "uid": uid} for (uid,) in rows],
             )
     logger.info("rev 47：代理层级迁移完成，回填一级节点 %d 个", len(rows))
+
+
+def _migrate_agent_attribution_rev50() -> None:
+    """rev 50：来源与归属拆开后的存量处理（设计 2026-10-27 §10）。幂等、可重跑，只补空值。
+
+    ① 链接主人：invite_link_agents 每行搬进 invite_links.owner_*（rev 47 起一条链接一行；万一
+       有一条挂了多行就跳过这条并告警）。比赛推广链接不搬。
+    ② 软删链接丢掉的主人：rev 37–49 软删链接时把代理行一起删了，那批客户就从代理树上「消失」。
+       从审计里找这条链接最后一条 invite:{code}:agent 记录，是 assigned 且那人仍是代理就回填。
+    ③ 体检：持有链接却没有节点的人补一个一级节点；节点的 depth 按实际父子关系重算，父节点
+       不存在的改成一级。都只告警，不挡启动。
+    ④ 普通客户（没有节点的人）的归属代理 = 他来源链接（含软删）的主人。代理本人不回填。
+
+    rev 50 backfill, idempotent and fill-only: (1) link owners from
+    invite_link_agents; (2) owners of soft-deleted links recovered from the last
+    invite:{code}:agent audit row when that user is still an agent; (3) health:
+    a top node for any owner without one, depths recomputed from parent links;
+    (4) each non-agent's owning agent = the owner of their source link.
+    """
+    import uuid as _uuid_mod
+
+    with engine.begin() as conn:
+        # ① 链接主人 / link owners
+        rows = conn.execute(text(
+            "SELECT a.link_id, a.user_id, a.assigned_by, a.created_at FROM invite_link_agents a "
+            "JOIN invite_links l ON l.id = a.link_id "
+            "WHERE l.owner_user_id IS NULL AND l.competition_id IS NULL "
+            "ORDER BY a.created_at"
+        )).fetchall()
+        by_link: dict[str, list] = {}
+        for r in rows:
+            by_link.setdefault(r[0], []).append(r)
+        moved = 0
+        for link_id, owners in by_link.items():
+            if len(owners) > 1:
+                logger.warning("rev 50：链接 %s 挂了 %d 个代理，主人不回填 / several agents on one link",
+                               link_id, len(owners))
+                continue
+            _lid, uid, by, at = owners[0]
+            conn.execute(
+                text("UPDATE invite_links SET owner_user_id = :u, owner_assigned_by = :b, "
+                     "owner_assigned_at = :t WHERE id = :id"),
+                {"u": uid, "b": by, "t": at, "id": link_id},
+            )
+            moved += 1
+
+        # ② 软删链接找回主人 / recover owners of soft-deleted links
+        node_ids = {uid for (uid,) in conn.execute(text("SELECT user_id FROM agent_nodes")).fetchall()}
+        orphans = conn.execute(text(
+            "SELECT id, code FROM invite_links WHERE deleted_at IS NOT NULL "
+            "AND owner_user_id IS NULL AND competition_id IS NULL"
+        )).fetchall()
+        recovered = lost = 0
+        for link_id, code in orphans:
+            last = conn.execute(
+                text("SELECT target_user_id, new_value FROM admin_audit_logs WHERE field = :f "
+                     "ORDER BY created_at DESC, id DESC LIMIT 1"),
+                {"f": f"invite:{code}:agent"},
+            ).first()
+            if last is None:
+                continue
+            if last[1] == "assigned" and last[0] in node_ids:
+                conn.execute(text("UPDATE invite_links SET owner_user_id = :u WHERE id = :id"),
+                             {"u": last[0], "id": link_id})
+                recovered += 1
+            elif last[1] == "assigned":
+                lost += 1
+
+        # ③ 体检 / health check
+        owners_without_node = [
+            uid for (uid,) in conn.execute(text(
+                "SELECT DISTINCT owner_user_id FROM invite_links WHERE owner_user_id IS NOT NULL"
+            )).fetchall()
+            if uid not in node_ids
+        ]
+        for uid in owners_without_node:
+            conn.execute(
+                text("INSERT INTO agent_nodes (id, user_id, parent_user_id, depth, created_at) "
+                     "VALUES (:id, :uid, NULL, 1, CURRENT_TIMESTAMP)"),
+                {"id": str(_uuid_mod.uuid4()), "uid": uid},
+            )
+        if owners_without_node:
+            logger.warning("rev 50：%d 个链接主人没有节点，已补成一级代理", len(owners_without_node))
+        nodes = conn.execute(text("SELECT user_id, parent_user_id, depth FROM agent_nodes")).fetchall()
+        parent_of = {uid: p for uid, p, _d in nodes}
+        stored = {uid: d for uid, _p, d in nodes}
+        fixed = 0
+        for uid in parent_of:
+            depth, cur, seen = 1, uid, {uid}
+            while parent_of.get(cur) in parent_of and parent_of[cur] not in seen:
+                cur = parent_of[cur]
+                seen.add(cur)
+                depth += 1
+            dangling = parent_of[uid] is not None and parent_of[uid] not in parent_of
+            if dangling or stored[uid] != depth:
+                conn.execute(
+                    text("UPDATE agent_nodes SET depth = :d, parent_user_id = :p WHERE user_id = :u"),
+                    {"d": 1 if dangling else depth, "p": None if dangling else parent_of[uid], "u": uid},
+                )
+                fixed += 1
+        if fixed:
+            logger.warning("rev 50：%d 个代理节点的层级与父子关系不符，已按实际重算", fixed)
+
+        # ④ 客户归属 / customers' owning agent
+        result = conn.execute(text(
+            "UPDATE users SET agent_user_id = ("
+            "  SELECT l.owner_user_id FROM invite_links l WHERE l.code = users.invite_code"
+            ") WHERE agent_user_id IS NULL AND invite_code IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM agent_nodes n WHERE n.user_id = users.id) "
+            "AND EXISTS (SELECT 1 FROM invite_links l WHERE l.code = users.invite_code "
+            "            AND l.owner_user_id IS NOT NULL)"
+        ))
+    logger.info(
+        "rev 50：链接主人搬迁 %d 条，软删链接找回主人 %d 条（%d 条原主人已不是代理），客户归属回填 %d 人",
+        moved, recovered, lost, result.rowcount,
+    )
 
 
 def _backfill_conversions() -> None:

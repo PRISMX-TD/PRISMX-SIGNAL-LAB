@@ -53,8 +53,12 @@ def test_covers_every_field_of_the_schema():
     判据是构造出来的载荷里没有任何字段停留在 schema 默认值上：夹具给每个字段都
     喂了非默认值，所以只要 _user_out 漏传一个，那个字段就会掉回默认值而被抓到。
     """
+    # 归属代理与「本人是代理」来自 _agent_extra 的批量查询，这里直接喂一份非默认值。
+    # Owner email and is-agent come from _agent_extra's batch query; fed directly here.
     out = _user_out(
-        _mk_user(created_at=None, last_active_at=None, plan_expires_at=None), 3
+        _mk_user(created_at=None, last_active_at=None, plan_expires_at=None, agent_user_id="ag1"),
+        3,
+        ({"ag1": "agent@b.com"}, {"u1"}),
     )
     defaults = {
         name: f.default

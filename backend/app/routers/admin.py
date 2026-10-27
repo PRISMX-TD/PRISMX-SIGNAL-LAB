@@ -23,7 +23,8 @@ from app.core.database import get_db
 from app.services.image_upload import (
     UploadError, is_configured as is_upload_configured, read_upload_capped, upload_image,
 )
-from app.models import AdminAuditLog, Competition, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
+from app.models import AdminAuditLog, AgentNode, Competition, InviteLink, MT5Account, PageVisitorDay, PageViewStat, User
+from app.services.agent_tree import check_customer_agent, set_customer_agent
 from app.services.audit import log_change
 from app.services import net_quality
 from app.services import system_status as system_status_service
@@ -98,7 +99,19 @@ def _like_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _user_out(u: User, account_count: int) -> AdminUserOut:
+def _agent_extra(db: Session, users: list[User]) -> tuple[dict[str, str], set[str]]:
+    """这批用户的归属代理邮箱与「谁本人是代理」，各一条查询（rev 50）。
+    Owning agents' emails and which users are agents, one query each (rev 50)."""
+    owner_ids = list({u.agent_user_id for u in users if u.agent_user_id})
+    emails = dict(db.query(User.id, User.email).filter(User.id.in_(owner_ids)).all()) if owner_ids else {}
+    ids = [u.id for u in users]
+    agents = {uid for (uid,) in db.query(AgentNode.user_id).filter(AgentNode.user_id.in_(ids))} if ids else set()
+    return emails, agents
+
+
+def _user_out(
+    u: User, account_count: int, extra: tuple[dict[str, str], set[str]] = ({}, set())
+) -> AdminUserOut:
     """把 User 行转成管理端的用户载荷。
 
     一份定义而不是每个端点各写一遍：列表与单用户 PATCH 此前各自构造，PATCH 那份
@@ -131,6 +144,9 @@ def _user_out(u: User, account_count: int) -> AdminUserOut:
         disabledAt=u.disabled_at,
         disabledReason=u.disabled_reason,
         inviteCode=u.invite_code,
+        agentUserId=u.agent_user_id,
+        agentEmail=extra[0].get(u.agent_user_id or ""),
+        isAgent=u.id in extra[1],
         emailVerifiedAt=u.email_verified_at,
         supportTier=u.support_tier,
         supportRevealLimit=u.support_reveal_limit,
@@ -147,6 +163,11 @@ def list_users(
         alias="inviteCode",
         max_length=64,
         description='按注册归因筛选；传 "none" 筛出完全没有归因的人 / filter by attribution, "none" = unattributed',
+    ),
+    agent: str | None = Query(
+        default=None,
+        max_length=64,
+        description='按归属代理筛选（user id）；"none" = 平台客户 / filter by owning agent, "none" = platform',
     ),
     limit: int = Query(default=PAGE_SIZE_DEFAULT, ge=1, le=PAGE_SIZE_MAX),
     offset: int = Query(default=0, ge=0),
@@ -205,6 +226,9 @@ def list_users(
             query = query.filter(User.invite_code.is_(None))
         else:
             query = query.filter(User.invite_code == invite_code.strip().lower())
+    # 直接调用路由函数时（测试）这里会是 Query 默认对象，只认字符串。/ Strings only (direct calls pass Query).
+    if isinstance(agent, str) and agent:
+        query = query.filter(User.agent_user_id.is_(None) if agent == NO_INVITE else User.agent_user_id == agent)
 
     total = query.count()
     rows = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
@@ -221,7 +245,8 @@ def list_users(
         ):
             counts[uid] = cnt
 
-    users = [_user_out(u, counts.get(u.id, 0)) for u in rows]
+    extra = _agent_extra(db, rows)
+    users = [_user_out(u, counts.get(u.id, 0), extra) for u in rows]
     return {"users": [x.model_dump(mode="json") for x in users], "total": total, "limit": limit, "offset": offset}
 
 
@@ -323,6 +348,9 @@ def _apply_user_fields(db: Session, admin: User, target: User, fields: dict) -> 
         # rather than re-querying per target.
         _log_change(db, admin.id, target.id, "invite_code", target.invite_code, fields["inviteCode"])
         target.invite_code = fields["inviteCode"]
+    if "agentUserId" in fields:
+        # 调用方已用 check_customer_agent 整批校验过。/ Validated for the whole batch by the caller.
+        set_customer_agent(db, admin.id, target, fields["agentUserId"] or None)
 
 
 def _guard_admin_demotion(db: Session, admin: User, targets: list[User], fields: dict) -> None:
@@ -433,6 +461,8 @@ def bulk_update_users(
         fields["inviteCode"] = _resolve_invite_code(db, fields["inviteCode"])
 
     targets = db.query(User).filter(User.id.in_(body.userIds)).all()
+    if "agentUserId" in fields:
+        check_customer_agent(db, targets, fields["agentUserId"] or None)
     _guard_admin_demotion(db, admin, targets, fields)
     for target in targets:
         _apply_user_fields(db, admin, target, fields)
@@ -458,6 +488,8 @@ def update_user(
     if "inviteCode" in fields:
         fields["inviteCode"] = _resolve_invite_code(db, fields["inviteCode"])
 
+    if "agentUserId" in fields:
+        check_customer_agent(db, [target], fields["agentUserId"] or None)
     _guard_admin_demotion(db, admin, [target], fields)
     _apply_user_fields(db, admin, target, fields)
 
@@ -465,7 +497,7 @@ def update_user(
     db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
-    return _user_out(target, account_count)
+    return _user_out(target, account_count, _agent_extra(db, [target]))
 
 
 # ---------- 账号停用 / account disable ----------
@@ -574,7 +606,7 @@ def disable_user(
     db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
-    return _user_out(target, account_count)
+    return _user_out(target, account_count, _agent_extra(db, [target]))
 
 
 @router.post("/users/{user_id}/enable", response_model=AdminUserOut)
@@ -615,7 +647,7 @@ def enable_user(
     db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
-    return _user_out(target, account_count)
+    return _user_out(target, account_count, _agent_extra(db, [target]))
 
 
 @router.post("/users/{user_id}/verify-email", response_model=AdminUserOut)
@@ -651,7 +683,7 @@ def mark_email_verified(
         db.refresh(target)
 
     account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
-    return _user_out(target, account_count)
+    return _user_out(target, account_count, _agent_extra(db, [target]))
 
 
 # ---------- 平台设置：合作券商锁 / platform settings: partner-broker lock ----------

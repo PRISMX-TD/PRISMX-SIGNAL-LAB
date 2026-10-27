@@ -1,6 +1,6 @@
 // 通用确认弹窗：替代原生 confirm()，与玻璃拟态风格保持一致
 // Generic confirm modal: replaces native confirm(), matches the glass aesthetic
-import { useId, useRef } from 'react'
+import { useId, useRef, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { createPortal } from 'react-dom'
 import { useDialogA11y } from '../utils/useDialogA11y'
@@ -15,6 +15,8 @@ interface Props {
   center?: boolean
   onConfirm: () => void
   onCancel: () => void
+  // 正文下面的附加内容（如「连同客户迁移」勾选框）。/ Extra content under the message (e.g. an option checkbox).
+  children?: ReactNode
 }
 
 export default function ConfirmModal({
@@ -27,6 +29,7 @@ export default function ConfirmModal({
   center,
   onConfirm,
   onCancel,
+  children,
 }: Props) {
   const { t } = useTranslation()
 
@@ -81,6 +84,7 @@ export default function ConfirmModal({
       >
         <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
         <p className="mt-3 text-sm leading-relaxed text-neutral-300">{message}</p>
+        {children}
         <div className="mt-5 flex gap-3">
           <button onClick={onCancel} disabled={busy} className="btn-ghost flex-1 py-2 text-sm">
             {cancelLabel ?? t('common.cancel')}

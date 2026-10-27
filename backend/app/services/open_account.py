@@ -7,12 +7,15 @@
 
 - normalize_agent_open_url：管理端与代理自助共用的唯一校验口。只收 Make Capital 的 https
   地址——这是一个会被公开页 302 出去的地址，放开任意域名等于给代理一个开放跳转。
-- resolve_open_account_url：选码复用注册归因同一个 pick_ref（30 天内代理优先），选中的
-  链接仍活跃、有代理、填了开户链接才用它，否则回落到比赛的。
+- resolve_open_account（公开页访客）：选码用 services/attribution.pick_ref（代理链接优先），
+  选中的链接仍活跃、有主人、填了开户链接才用它，否则回落到比赛的；
+- resolve_open_account_for_user（已登录用户）：看他的归属代理（users.agent_user_id）名下
+  填了开户链接的活跃链接，来源链接正好是其中一条就优先用它。
 
 Agent-specific open-account links: the single validation gate (https Make Capital
 hosts only — the public page 302s to this, so any other host would be an open
-redirect) and the resolution, which reuses signup attribution's pick_ref.
+redirect) and the resolution: a visitor's recent refs (agent link first), or a
+signed-in user's owning agent.
 """
 import re
 from urllib.parse import urlsplit
@@ -20,7 +23,8 @@ from urllib.parse import urlsplit
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Competition, InviteLink, InviteLinkAgent
+from app.models import Competition, InviteLink, User
+from app.services.attribution import pick_ref
 
 ALLOWED_OPEN_ACCOUNT_HOSTS = ("makecapital.com",)
 OPEN_ACCOUNT_URL_MAX = 500
@@ -90,12 +94,6 @@ def resolve_open_account(db: Session, comp: Competition, codes: list[str]) -> tu
     """(选中的邀请码, 开户链接)。公开跳转要拿选中的码去记漏斗，所以一次算出两样。
     (chosen invite code, open-account URL); the public redirect needs the code for
     its funnel row, so both come out of one pass."""
-    # pick_ref 住在 routers/invite.py（注册归因的唯一口径）；延迟导入，免得 services 在
-    # 模块加载时就反向依赖 router（同 email_verification 的做法）。
-    # pick_ref lives in routers/invite.py; imported lazily so this service doesn't
-    # depend on a router at import time (same as email_verification).
-    from app.routers.invite import pick_ref
-
     chosen = pick_ref(db, codes)
     if chosen:
         link = (
@@ -103,18 +101,40 @@ def resolve_open_account(db: Session, comp: Competition, codes: list[str]) -> tu
             .filter(InviteLink.code == chosen, InviteLink.is_active.is_(True))
             .first()
         )
-        if (
-            link is not None
-            and link.open_account_url
-            and db.query(InviteLinkAgent.id).filter(InviteLinkAgent.link_id == link.id).first()
-        ):
+        if link is not None and link.open_account_url and link.owner_user_id:
             return chosen, link.open_account_url
     return chosen, comp.open_account_url
 
 
 def resolve_open_account_url(db: Session, comp: Competition, codes: list[str]) -> str | None:
-    """这位访客 / 用户在这场比赛点「开户」该去哪：选中的链接活跃、有代理、填了开户链接就用
+    """这位访客在这场比赛点「开户」该去哪：选中的链接活跃、有主人、填了开户链接就用
     它，否则比赛的。
     Where this visitor's open-account click goes: the chosen link's URL when it is
-    active, has an agent and carries one; otherwise the competition's."""
+    active, has an owner and carries one; otherwise the competition's."""
     return resolve_open_account(db, comp, codes)[1]
+
+
+def resolve_open_account_for_user(db: Session, comp: Competition, user: User) -> str | None:
+    """已登录用户点「开户」该去哪：归属代理名下活跃、填了开户链接的链接——来源链接正好是
+    其中一条就用它，否则取最早建的那条；归属代理没有就用比赛的。按归属而不是按来源找：
+    来源链接后来转了手，他也还是原代理的客户（设计 2026-10-27 R7）。
+    A signed-in user's target: an active link of their owning agent carrying a
+    URL — their source link if it is one, else the oldest; otherwise the
+    competition's. Ownership, not source, decides (a transferred source link
+    doesn't move the customer)."""
+    if user.agent_user_id:
+        links = (
+            db.query(InviteLink)
+            .filter(
+                InviteLink.owner_user_id == user.agent_user_id,
+                InviteLink.is_active.is_(True),
+                InviteLink.deleted_at.is_(None),
+                InviteLink.open_account_url.isnot(None),
+            )
+            .order_by(InviteLink.created_at)
+            .all()
+        )
+        mine = next((l for l in links if l.code == user.invite_code), None) or (links[0] if links else None)
+        if mine is not None:
+            return mine.open_account_url
+    return comp.open_account_url

@@ -661,3 +661,30 @@ describe('幸运轮盘操作日志 / lucky-wheel activity sentences', () => {
     expect(changeFieldLabel('admin.lucky', 'lucky:issue', null, en)).toBe('Lucky wheel')
   })
 })
+
+describe('改挂代理上级 / agent upline change', () => {
+  const edit = (params: Record<string, unknown>) =>
+    item('admin.user_edit', params, { cat: 'admin', actor: { type: 'admin', id: 'a1', name: '小王', email: 'ops@example.com' } })
+  it('挂到另一个代理下面，连同归因 / under another agent, with the attribution', () => {
+    const p = { agent_parent: ['a@x.io', 'd@x.io'], invite: ['aaaa2345', 'dddd2345'], invite_label: ['A 的链接', 'D 的链接'] }
+    expect(renderEvent(edit(p), zh).text).toContain('代理上级 「a@x.io」 → 「d@x.io」')
+    expect(renderEvent(edit(p), en).text).toContain('agent upline')
+  })
+  it('改成一级 / made top-level', () => {
+    expect(renderEvent(edit({ agent_parent: ['a@x.io', '-'] }), zh).text).toContain('→ 无（一级代理）')
+    expect(renderEvent(edit({ agent_parent: ['a@x.io', '-'] }), en).text).toContain('none (top-level)')
+  })
+  it('任命与撤销：空 = 不是代理 / appoint and revoke: blank = not an agent', () => {
+    expect(renderEvent(edit({ agent_parent: [null, '-'] }), zh).text).toContain('不是代理 → 无（一级代理）')
+    expect(renderEvent(edit({ agent_parent: ['a@x.io', null] }), zh).text).toContain('→ 不是代理')
+  })
+  it('归属代理：空 = 平台客户 / owning agent: blank = platform customer', () => {
+    expect(renderEvent(edit({ agent_user: ['a@x.io', null] }), zh).text).toContain('归属代理 「a@x.io」 → 平台客户')
+    expect(renderEvent(edit({ agent_user: [null, 'b@x.io'] }), en).text).toContain('owning agent')
+  })
+  it('字段名有标签 / the field has a label', () => {
+    expect(changeFieldLabel('admin.user_edit', 'agent_parent', null, zh)).toBe('代理上级')
+    expect(changeFieldLabel('admin.user_edit', 'agent_user', null, zh)).toBe('归属代理')
+    expect(changeFieldLabel('admin.agent_assign', 'link_owner:ab12cd34', null, zh)).toBe(changeFieldLabel('admin.agent_assign', 'invite:ab12cd34:agent', null, zh))
+  })
+})

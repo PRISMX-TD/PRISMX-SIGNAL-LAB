@@ -1049,7 +1049,7 @@
         "health": "System status",
         "users": "User list",
         "logs": "Activity log",
-        "invites": "Invite links",
+        "invites": "Promo links",
         "competitions": "Competitions",
         "gamification": "Gamification",
         "guide": "Strategy guide",
@@ -1066,7 +1066,8 @@
         "ops": "Operations",
         "system": "System",
         "autoemail": "Automated email",
-        "luckywheel": "Lucky wheel"
+        "luckywheel": "Lucky wheel",
+        "agents": "Agents"
       }
     },
     "lucky": {
@@ -1592,7 +1593,9 @@
         "featuredSet": "featured competition set",
         "featuredChanged": "featured competition switched",
         "featuredCleared": "featured competition cleared (back to automatic)",
-        "wholeGroup": "whole group saved"
+        "wholeGroup": "whole group saved",
+        "agentParentChange": "agent upline {{a}} → {{b}}",
+        "agentUserChange": "owning agent {{a}} → {{b}}"
       },
       "why": {
         "noMoney": "not enough margin",
@@ -1704,7 +1707,9 @@
           "plan_expires_at": "expiry",
           "plan_note": "note",
           "role": "role",
-          "invite_code": "attribution"
+          "invite_code": "source",
+          "agent_parent": "agent upline",
+          "agent_user": "owning agent"
         },
         "setGroup": {
           "broker": "Partner broker lock",
@@ -1816,7 +1821,10 @@
           "nameHidden": "name hidden",
           "count": "count",
           "ids": "ids"
-        }
+        },
+        "noAgentParent": "none (top-level)",
+        "notAgent": "not an agent",
+        "platformCustomer": "platform customer"
       },
       "ev": {
         "register": {
@@ -1988,10 +1996,10 @@
           "other": "Changed invite link {{name}}"
         },
         "agentAssign": {
-          "assign": "Assigned invite link {{name}} to agent {{b}}",
-          "unassign": "Unassigned agent {{a}} from invite link {{name}}",
-          "change": "Reassigned invite link {{name}} from agent {{a}} to {{b}}",
-          "other": "Changed the agent of invite link {{name}}"
+          "assign": "Set agent {{b}} as owner of promo link {{name}}",
+          "unassign": "Took promo link {{name}} back from agent {{a}} as a platform link",
+          "change": "Changed the owner of promo link {{name}} from agent {{a}} to {{b}}",
+          "other": "Changed the owner of promo link {{name}}"
         },
         "agentPlan": {
           "extend": "Extended the client's {{plan}} by {{days}} days",
@@ -2614,14 +2622,10 @@
       "colAgents": "Agents",
       "assign": "Assign",
       "assignTitle": "Assign an agent",
-      "assignHint": "The assigned user becomes a top-level agent with an \"Agent view\": this link's figures and client list, membership adjustments, and the ability to promote clients in their tree to sub-agents. A link can have only one agent. Role and entitlements are unchanged.",
       "assignSearch": "Search by email or phone",
       "assignNoResult": "No matching users",
       "assignAlready": "Assigned",
-      "unassign": "Remove agent",
-      "noAgents": "None",
-      "unassignConfirmTitle": "Confirm removing agent",
-      "unassignConfirmBody": "{{name}} will no longer see this link's clients. If it is their last link they stop being an agent: a sub-agent's link is disabled and handed to their upline; a top-level agent who still has sub-agents cannot be removed until those are dealt with.",
+      "noAgents": "None (platform link)",
       "delete": "Delete link",
       "deleted": "Link deleted",
       "deleteConfirmTitle": "Delete “{{label}}”?",
@@ -2667,23 +2671,40 @@
       "qrSvg": "Download SVG",
       "fieldGrantsTrial": "Grant PRO trial on sign-up",
       "fieldActive": "Active",
-      "fieldAgents": "Agents",
-      "competitionNoAgents": "Competition promo links are platform-owned and can't have agents. Agents promote competitions with their own code via “Copy competition link” on the agent page.",
+      "fieldAgents": "Link owner",
+      "competitionNoAgents": "Competition promo links belong to the platform and can't have an owner. To promote a competition, an agent uses “Copy competition link” on their agent page, with their own code.",
       "fieldCreated": "Created",
       "trialTag": "Trial",
       "tree": {
         "open": "Agent hierarchy",
-        "title": "Agent hierarchy",
-        "hint": "Top-level agents are the people assigned to links; sub-agents are promoted by top-level agents from their agent view. To remove an agent, unassign their link: a sub-agent's link is disabled and handed to their upline; a top-level agent who still has sub-agents cannot be removed until those are dealt with.",
         "maxDepth": "Maximum depth",
         "maxDepthHint": "Top-level agents are level 1; range 1–20. Lowering it removes nobody — it only stops further promotions past the limit.",
         "save": "Save",
-        "saving": "Saving…",
         "saved": "Saved",
         "empty": "No agents yet.",
         "level": "L{{n}}",
-        "counts": "{{direct}} direct · {{total}} in team"
-      }
+        "counts": "{{direct}} direct · {{total}} in team",
+        "move": "Change upline",
+        "moveTo": "New upline",
+        "movePick": "Choose a new upline…",
+        "moveTop": "No upline (make top-level)",
+        "moveConfirm": "Move",
+        "moveTitle": "Change upline",
+        "moveNone": "Nowhere to move: not under themselves or their own sub-agents, and not past the maximum depth for their downline.",
+        "moveDone": "Moved",
+        "cancel": "Cancel"
+      },
+      "ownerHint": "Future signups through this link belong to its owner. Only existing agents can be picked — appoint agents in the Agents section. Changing the owner leaves existing signups alone unless you choose to move them when confirming.",
+      "ownerSearch": "Filter agents by nickname or email",
+      "ownerNoAgents": "No agents yet — appoint one in the Agents section first.",
+      "ownerChange": "Change",
+      "ownerClear": "Make it a platform link",
+      "ownerConfirmTitle": "Change link owner",
+      "ownerConfirmBody": "Future signups through “{{label}}” will belong to {{name}}.",
+      "ownerClearTitle": "Make it a platform link",
+      "ownerClearBody": "Future signups through “{{label}}” become platform customers, owned by no agent.",
+      "ownerMoveCustomers": "Also move the {{n}} customers who signed up through this link and belong to {{from}}",
+      "ownerMoveCustomersPlatform": "Also make the {{n}} customers from this link who belong to {{from}} platform customers"
     },
     "announcements": {
       "hint": "Write and publish announcements here. Users see published ones in the bell panel and on the Announcements page; drafts are admin-only. Fill in both languages; if only one is filled, the other language falls back to it.",
@@ -3002,10 +3023,10 @@
     "colExpiresAt": "Expires",
     "colNote": "Note",
     "perPage": "Per page",
-    "colInvite": "Attribution",
-    "inviteNone": "Unattributed",
+    "colInvite": "Source",
+    "inviteNone": "No source",
     "inviteDeletedTag": " (deleted)",
-    "inviteClear": "Clear attribution",
+    "inviteClear": "Clear source",
     "colMt5Count": "MT5 accounts",
     "colLastActive": "Last active",
     "colAction": "Action",
@@ -3019,11 +3040,11 @@
     "bulkConfirmTitle": "Confirm bulk change",
     "bulkConfirmBody": "This will apply to the {{n}} selected user(s): {{changes}}. It cannot be undone; every change is recorded in the activity log.",
     "bulkConfirmAdminWarn": "This includes \"role → admin\": those accounts gain every admin permission, including changing other people’s roles.",
-    "bulkConfirmInviteWarn": "Once assigned, these users’ email addresses appear on {{agent}}’s agent page. Undoing only stops future display — whoever has seen them has seen them.",
+    "bulkConfirmInviteWarn": "Once changed, these users’ email addresses appear on the agent pages of {{agent}} and their uplines. Undoing only stops future display — whoever has seen them has seen them.",
     "changeRole": "role → {{value}}",
     "changePlan": "plan → {{value}}",
     "changeExpiry": "expiry → {{value}}",
-    "changeInvite": "attribution → {{value}}",
+    "changeInvite": "source → {{value}}",
     "neverExpires": "never expires",
     "promoteTitle": "Confirm admin promotion",
     "promoteBody": "{{email}} will gain every admin permission, including changing other people’s roles and plans. Every change is recorded in the activity log.",
@@ -3736,6 +3757,32 @@
         "failed": "Failed to load",
         "note": "A shared IP may just be the same network (e.g. a mobile carrier's shared exit). For reference only. IPs are kept for 90 days."
       }
+    },
+    "colAgent": "Owning agent",
+    "agentNone": "Platform customer",
+    "agentClear": "Make platform customer",
+    "agentTag": "Agent",
+    "changeAgent": "owning agent → {{value}}",
+    "agents": {
+      "hint": "The tree alone says who is an agent and who their upline is. Which agent owns a customer is the “Owning agent” in the user list; a link only decides who future signups belong to. Revoking an agent hands their customers and links to the upline (top-level: platform customers and platform links) and moves their sub-agents up a level; a top-level agent with sub-agents can't be revoked until those are moved or revoked.",
+      "appoint": "Appoint agent",
+      "appointTitle": "Appoint an agent",
+      "parent": "Upline",
+      "parentTop": "None (top-level agent)",
+      "createLink": "Also create a link for them",
+      "appointHint": "They gain the agent page; role and entitlements are unchanged. Customers they already own stay as they are — re-own people in bulk from the user list if needed.",
+      "appointConfirm": "Appoint",
+      "appointDone": "Appointed {{name}}",
+      "alreadyAgent": "Already an agent",
+      "repick": "Change",
+      "revoke": "Revoke",
+      "revokeTitle": "Revoke agent {{name}}",
+      "revokeBody": "{{name}}’s customers and links go to their upline {{parent}} (links are disabled), their sub-agents move up a level, and they become an ordinary customer of {{parent}}.",
+      "revokeBodyTop": "{{name}}’s customers become platform customers and their links become platform links (still usable). A top-level agent with sub-agents can't be revoked.",
+      "revokeDone": "Revoked {{name}}",
+      "noLinks": "no links",
+      "moveBody": "{{name}} moves under {{parent}} together with their sub-agents and all customers. The previous upline no longer sees them.",
+      "moveBodyTop": "{{name}} becomes a top-level agent with their own tree (sub-agents and customers included) and can promote agents and change plans."
     }
   },
   "simulator": {
