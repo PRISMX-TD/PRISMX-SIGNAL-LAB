@@ -148,6 +148,19 @@ def test_cross_tree_appointment_takes_the_person_out_of_the_old_tree(db_session)
     assert a1.invite_code == la.code  # 来源不动 / the source is untouched
 
 
+def test_becoming_an_agent_clears_the_old_owner(db_session):
+    """当上代理就清掉归属代理（审计 agent_user）：代理的位置只看节点，旧值改挂后会跟树对不上。
+    Becoming an agent clears agent_user_id, audited; it would go stale after a move."""
+    admin, a, la, a1, b, lb, c1 = _tree(db_session)
+    db_session.refresh(b)
+    assert b.agent_user_id is None  # 被 A 升为二级 / promoted by A
+    _appoint(db_session, admin, a1)
+    db_session.refresh(a1)
+    assert a1.agent_user_id is None
+    row = db_session.query(AdminAuditLog).filter_by(target_user_id=a1.id, field="agent_user").one()
+    assert row.old_value == a.email and not row.new_value
+
+
 # ---------- 升代理 / promotion ----------
 
 def test_promotion_builds_a_child_with_its_own_link(db_session):
@@ -417,8 +430,10 @@ def test_link_transfer_moves_customers_only_when_asked(db_session):
     for u in (c1, c2):
         db_session.refresh(u)
         assert u.agent_user_id == d.id
+    # B 被升为代理时清归属也记了一条 agent_user，这里只看迁移写的。
+    # B's own owner-clear on promotion is also an agent_user row; look past it.
     rows = db_session.query(AdminAuditLog).filter_by(field="agent_user").all()
-    assert {r.target_user_id for r in rows} == {c1.id, c2.id}
+    assert {r.target_user_id for r in rows} - {b.id} == {c1.id, c2.id}
 
 
 def test_link_owner_guards(db_session):

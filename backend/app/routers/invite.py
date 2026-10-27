@@ -1544,9 +1544,11 @@ def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
 
 def admin_appoint_agent(db: Session, admin: User, body: AdminAgentAppoint) -> AdminAgentTreeOut:
     """管理员任命代理：挂在 parentUserId 下（null = 一级），可选同时生成一条专属链接。
-    不改他的来源与归属，也不改任何客户（设计 §6）。已是代理 409，上级不是代理 404。
+    不改他的来源，也不改任何客户（设计 §6）；他自己原来的归属代理由 add_node 清掉。已是代理 409，
+    上级不是代理 404。
     Admin appoints an agent under parentUserId (null = top), optionally minting
-    a link. Touches no attribution. 409 if already an agent; 404 for a bad parent."""
+    a link. Touches no customer; add_node clears the appointee's own owner.
+    409 if already an agent; 404 for a bad parent."""
     target = db.get(User, body.userId)
     if target is None:
         raise HTTPException(status_code=404, detail=_MSG_USER_NOT_FOUND)

@@ -32,7 +32,14 @@ def node_of(db: Session, user_id: str) -> AgentNode | None:
 
 def add_node(db: Session, user_id: str, parent: AgentNode | None, created_by: str | None) -> AgentNode:
     """建一个节点挂在 parent 下（None = 一级）。层级上限由调用方先查。不提交。
-    Create a node under parent (None = top level); callers check the depth cap."""
+    代理本人不该有归属代理（他的位置只看节点）：原来是谁的客户就清掉，写审计 agent_user——
+    否则改挂上级后这个旧值还指着原来的人，跟树对不上。
+    Create a node under parent (None = top level); callers check the depth cap.
+    An agent has no owning agent (the node alone places them), so a leftover
+    agent_user_id is cleared and audited — it would go stale on the next move."""
+    me = db.get(User, user_id)
+    if me is not None and me.agent_user_id is not None:
+        set_customer_agent(db, created_by, me, None)
     node = AgentNode(
         user_id=user_id,
         parent_user_id=parent.user_id if parent is not None else None,
