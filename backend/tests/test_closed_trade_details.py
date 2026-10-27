@@ -105,6 +105,28 @@ def test_bridge_market_order_matches_on_mt5_ticket(db_session, user):
     assert row.open_time is not None
 
 
+def test_open_time_fallback_is_order_creation_not_last_update(db_session, user):
+    """回归：开仓时间曾取 updated_at，持仓期间行被改过就变成平仓前不久，14 小时的单显示成几秒。
+    挂单的成交时刻没记，留空。"""
+    opened = NOW - timedelta(hours=14)
+    db_session.add(Order(
+        user_id=user.id, client_order_id="c-t", action="ORDER", symbol="XAUUSD", side="BUY",
+        volume=1.0, status="FILLED", mt5_login=LOGIN, mt5_ticket=1, mt5_position=777,
+        filled_price=2001.5, created_at=opened, updated_at=NOW - timedelta(seconds=5),
+    ))
+    db_session.add(Order(
+        user_id=user.id, client_order_id="c-p", action="PENDING", symbol="XAUUSD", side="BUY",
+        volume=1.0, status="PLACED", mt5_login=LOGIN, mt5_ticket=2, mt5_position=778,
+        price=1990.0, created_at=opened,
+    ))
+    db_session.commit()
+    upsert_leg(db_session, user.id, LOGIN, _leg(), True)
+    upsert_leg(db_session, user.id, LOGIN, _leg(positionTicket=778, dealTicket=9002), True)
+    rows = {r.deal_ticket: r for r in db_session.query(ClosedTrade).all()}
+    assert rows[9001].open_time.replace(tzinfo=None) == opened
+    assert rows[9002].open_time is None
+
+
 def test_gateway_ticket_never_matches_when_position_is_known(db_session, user):
     """网关单的 mt5_ticket 是订单号/成交号，与仓位号不同编号：有 mt5_position 时不得
     拿 mt5_ticket 去撞，否则别的仓位的开仓事实会安到这笔平仓上。"""

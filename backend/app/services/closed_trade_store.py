@@ -101,12 +101,21 @@ def platform_position_facts(db: Session, user_id: str, login: str, position_tick
     )
     if opening is None:
         return {}
+    # 开仓时间只取市价单的 created_at（下单到成交通常几秒，桥接最多晚到超时作废的 5 分钟）。
+    # 不能用 updated_at：持仓期间这一行还会被改（position_last_seen_open 等，onupdate
+    # 跟着刷新），取到的是平仓前不久的时间，持仓 14 小时的单会显示成拿了几秒。挂单
+    # （PENDING）的成交时刻平台没记，留空，宁缺不错。
+    # Open time is a market order's created_at (fills within seconds; a bridge
+    # order at most the 5-minute stale window later). Never updated_at: the row
+    # keeps being touched while the position is open, so it lands near the close
+    # and a 14-hour hold showed as seconds. A pending order's fill time isn't
+    # recorded, so it stays empty rather than wrong.
     facts = {
         # symbol 不是兜底列（_FALLBACK_COLS 不含它），只给桥接合理性核对比对品种用。
         # symbol is not a fallback column; the bridge plausibility check compares against it.
         "symbol": opening.symbol,
         "open_price": opening.filled_price,
-        "open_time": opening.updated_at or opening.created_at,
+        "open_time": opening.created_at if opening.action == "ORDER" else None,
         "sl": opening.sl or None,
         "tp": opening.tp or None,
     }
