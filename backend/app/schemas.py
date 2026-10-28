@@ -2236,6 +2236,9 @@ class AgentTeamOut(BaseModel):
     isAgent: bool = False
     level: int | None = None
     canManage: bool = False
+    # 能不能把直属客户升为推荐官（10-28）：除最后一级都能。一级另有 canManage，整棵树都能升。
+    # May promote direct customers: every level but the last. Top level promotes tree-wide via canManage.
+    canPromote: bool = False
     # rev 51：能不能给整支团队的客户改会员——管理员给的，与 canManage（一级才有）无关。
     # rev 51: may change plans for the whole team; granted by admins, independent of canManage.
     canSetPlan: bool = False

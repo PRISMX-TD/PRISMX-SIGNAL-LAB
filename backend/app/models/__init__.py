@@ -1682,11 +1682,12 @@ class AgentNode(Base):
     与持有几条链接无关；上级只看 parent_user_id，不再从任何人的 invite_code 推。
 
     树怎么长出来：管理员任命（可选上级，默认一级）；或一级代理在自己整棵树里把某个普通客户
-    升为代理，新节点的上级是这个客户当时的归属代理（users.agent_user_id）。管理员可以把
-    一个代理连同子树改挂到别处（services/agent_tree.move_node）。
+    升为代理，新节点的上级是这个客户当时的归属代理（users.agent_user_id）；二级起（最后一级
+    除外，10-28）只能升自己的直属客户。管理员可以把一个代理连同子树改挂到别处
+    （services/agent_tree.move_node）。
 
     可见范围：一个代理看得到归属在自己与所有下级名下的客户、以及所有下级代理本人；
-    看不到上级与同级。写权限：只有一级代理能升 / 撤代理；改会员看 can_set_plan（rev 51，
+    看不到上级与同级。写权限：升代理见上；只有一级代理能撤代理；改会员看 can_set_plan（rev 51，
     只有管理员能开关，与层级无关），其余只读（自己链接的开户网址除外）。
 
     撤销（见 services/agent_tree.remove_node）：他的客户与链接转给他的上级（一级则变成平台的），
@@ -1698,9 +1699,10 @@ class AgentNode(Base):
     (top = 1) is stored so the max-depth and top-level-only checks never walk
     the tree. Admins appoint (any parent, default top) and re-parent; a
     top-level agent promotes a customer in their tree, whose parent becomes the
-    customer's owning agent (users.agent_user_id). An agent sees the customers
+    customer's owning agent (users.agent_user_id); lower agents, except at the
+    last level, promote their own direct customers only. An agent sees the customers
     owned by themselves and every descendant plus the descendant agents; only
-    top-level agents promote / revoke, and changing plans needs can_set_plan
+    top-level agents revoke, and changing plans needs can_set_plan
     (rev 51, set by admins only, any level). Removal hands customers and links to the parent
     and lifts the subtree one level.
     """

@@ -264,7 +264,9 @@ export default function AgentTeamPanel({
         <IconInfo size={16} />
         <div>
           <p>
-            {team.canManage ? t('agent.team.topHint', { max: team.maxDepth }) : t('agent.team.readOnlyHint')}{' '}
+            {team.canManage
+              ? t('agent.team.topHint', { max: team.maxDepth })
+              : t(team.canPromote ? 'agent.team.promoteHint' : 'agent.team.readOnlyHint')}{' '}
             {t(team.canSetPlan ? 'agent.team.planOnHint' : 'agent.team.planOffHint')}
           </p>
           <p className="is-dim">{t('agent.team.countNote')}</p>
@@ -279,7 +281,7 @@ export default function AgentTeamPanel({
 
       {self && <ul className={`agt-tree${team.canManage ? ' can-manage' : ''}`}>{renderNode(self, 0)}</ul>}
       {subCount === 0 && (
-        <div className="agt-sheet agt-tree-empty">{team.canManage ? t('agent.team.emptyTop') : t('agent.team.empty')}</div>
+        <div className="agt-sheet agt-tree-empty">{team.canManage || team.canPromote ? t('agent.team.emptyTop') : t('agent.team.empty')}</div>
       )}
 
       {removing && (

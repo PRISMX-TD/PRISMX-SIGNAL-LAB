@@ -1158,6 +1158,7 @@ _MSG_NO_PLAN_RIGHT = (
     "管理员还没有给你开通修改会员的权限 / An admin has not given you the right to change plans"
 )
 _MSG_USER_NOT_FOUND = "用户不存在 / User not found"
+_MSG_DIRECT_ONLY = "只能把自己的直属客户升为推荐官 / You can only promote your own direct clients"
 
 
 def _caller_level(db: Session, user: User) -> int | None:
@@ -1334,6 +1335,7 @@ def agent_team(db: Session, user: User) -> AgentTeamOut:
         isAgent=True,
         level=level if top else None,
         canManage=top,
+        canPromote=level < max_depth,
         canSetPlan=bool(me and me.can_set_plan),
         maxDepth=max_depth,
         nodes=out,
@@ -1440,20 +1442,26 @@ def _mint_agent_link(db: Session, actor: User, target: User, grants_trial: bool)
 
 
 def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
-    """一级代理把自己范围里的一个普通客户升为代理。
+    """代理把一个普通客户升为代理：一级可以升自己范围里的任何客户；二级起只能升自己的直属
+    客户（10-28 产品决定），最后一级升不了（层级上限照常 409）。
 
-    新代理的上级是这个客户此刻的归属代理（不一定是 actor 本人），层级 = 上级层级 + 1，不得超过
-    agent_max_depth。系统给他生成一条专属链接：送不送试用跟他来源那条链接一致。被升的人收到一条
-    站内通知，管理员各收到一条。
+    新代理的上级是这个客户此刻的归属代理（一级升别人的客户时不是 actor 本人），层级 = 上级层级 + 1，
+    不得超过 agent_max_depth。系统给他生成一条专属链接：送不送试用跟他来源那条链接一致。被升的人
+    收到一条站内通知，管理员各收到一条。
 
-    A top-level agent promotes a customer in their scope. The new parent is the
-    customer's owning agent, level = parent + 1, capped by agent_max_depth. A
-    fresh link is minted (trial setting copied from their source link); the
-    user and every admin get an in-app notification.
+    A top-level agent promotes any customer in their scope; lower agents only
+    their own direct customers, and the last level hits the depth cap. The new
+    parent is the customer's owning agent, level = parent + 1, capped by
+    agent_max_depth. A fresh link is minted (trial setting copied from their
+    source link); the user and every admin get an in-app notification.
     """
-    _require_top(db, actor)
+    level = _caller_level(db, actor)
+    if level is None:
+        raise HTTPException(status_code=403, detail=_MSG_TOP_ONLY)
     scope = _Scope(db, actor)
     target = _tree_target(db, scope, email, actor)
+    if level != 1 and target.agent_user_id != actor.id:
+        raise HTTPException(status_code=403, detail=_MSG_DIRECT_ONLY)
     if node_of(db, target.id) is not None:
         raise HTTPException(status_code=409, detail="该用户已经是推荐官 / This user is already an ambassador")
     parent_node = node_of(db, target.agent_user_id) if target.agent_user_id else None
@@ -1475,7 +1483,7 @@ def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
     notify_ws(target.id)
     for admin_id in admin_ids:
         notify_ws(admin_id)
-    return _tree_user_outs(db, [target], _Scope(db, actor))[0]
+    return _tree_user_outs(db, [target], _Scope(db, actor), show_levels=level == 1)[0]
 
 
 def _revoke(db: Session, actor: User, node: AgentNode) -> None:

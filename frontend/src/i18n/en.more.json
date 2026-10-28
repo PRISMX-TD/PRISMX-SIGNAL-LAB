@@ -4170,6 +4170,7 @@
       "invalid": "Must be an https Make Capital link"
     },
     "subtitleReadOnly": "You are a downline ambassador: you can see your links, your downline ambassadors and their clients. Everything here is read-only.",
+    "subtitlePromote": "You are a downline ambassador: you can see your links, your downline ambassadors and their clients, and promote your own direct clients to ambassador.",
     "tabs": {
       "links": "My links",
       "team": "Team",
@@ -4190,6 +4191,7 @@
       "total": "Team clients",
       "topHint": "You are a top-level ambassador: you can promote clients to downline ambassadors from “All clients” (up to level {{max}}) and remove downline ambassadors.",
       "readOnlyHint": "This view is read-only. Promotions are made by your top-level ambassador.",
+      "promoteHint": "You can promote your own direct clients to ambassador under All clients; removing ambassadors is up to your top-level ambassador.",
       "planOnHint": "An admin has given you the right to change plans for every client in your team.",
       "planOffHint": "Changing plans needs an admin to enable it for you.",
       "countNote": "Direct clients are the regular clients currently assigned to them (ambassadors not included); team clients adds the clients of every ambassador below them. Active (7d) and MT5 linked count direct clients only.",
@@ -4212,11 +4214,14 @@
     },
     "promote": {
       "button": "Make ambassador",
-      "hint": "Promoting a client gives them their own invite link and a read-only Ambassador Hub. Their upline is the ambassador whose link they signed up through.",
+      "hint": "Promoting a client gives them their own invite link and Ambassador Hub. Their upline is the ambassador whose link they signed up through.",
       "title": "Make this client an ambassador?",
-      "body": "{{name}} becomes a level-{{n}} ambassador under {{parent}}, with their own invite link. They can see their downline but cannot change anything.",
+      "body": "{{name}} becomes a level-{{n}} ambassador under {{parent}}, with their own invite link. They can see their downline and promote their own direct clients (except at the last level).",
       "done": "{{name}} is now a level-{{n}} ambassador.",
-      "tooDeep": "Maximum depth ({{max}} levels) reached"
+      "tooDeep": "Maximum depth ({{max}} levels) reached",
+      "hintDirect": "You can promote your own direct clients to ambassador: they get their own invite link and join your downline.",
+      "bodyDirect": "{{name}} becomes an ambassador in your downline, with their own invite link. They can see their own downline.",
+      "doneDirect": "{{name}} is now an ambassador in your downline."
     },
     "subtitleNoPlan": "Your promo links, downline ambassadors and their clients. Changing memberships needs an admin to switch it on for you; for now it is view-only.",
     "hero": {

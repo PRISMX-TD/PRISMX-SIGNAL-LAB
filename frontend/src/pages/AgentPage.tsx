@@ -27,11 +27,13 @@
 // Make Capital link, used when their visitors tap "Open account" on a competition page.
 // rev 47 代理层级：页头下三个页签——「我的链接」（上面说的这些）、「团队」（我和全部下级代理，
 // AgentTeamPanel）、「全部客户」（整棵子树的客户，AgentCustomersPanel）。页签记在 ?tab= 里，
-// 手机返回能回到上一个页签。只有一级代理（/agent/team 的 canManage）能升 / 撤代理；改会员看
+// 手机返回能回到上一个页签。一级代理（/agent/team 的 canManage）整棵树升代理、撤代理；二级起除最后
+// 一级（canPromote）只能升自己的直属客户；改会员看
 // 管理员给的权限（canSetPlan，rev 51，与层级无关）——「我的链接」名单里的「调整会员」按钮也按它藏。
 // rev 47 agent hierarchy: three tabs under the header — My links (above), Team
 // (AgentTeamPanel) and All customers (AgentCustomersPanel), kept in ?tab= so the back
-// gesture returns to the previous tab. Only top-level agents (canManage) promote / revoke;
+// gesture returns to the previous tab. Top-level agents (canManage) promote tree-wide and
+// revoke; lower ones but the last (canPromote) promote their own direct clients only;
 // changing plans follows the admin-granted canSetPlan (rev 51), per-link button included.
 // 2026-10-28「代理」改名「推荐官」，页面按私行黑卡的语言重画：页头是推荐官凭证卡 + 团队核心数字
 // （components/agent/AgentHero），页签是三格分区导航；链接卡做成一张票：上半是推荐码与复制，
@@ -250,7 +252,9 @@ export default function AgentPage() {
             ? t('agent.subtitle')
             : canManage
               ? t('agent.subtitleNoPlan')
-              : t('agent.subtitleReadOnly')
+              : team.canPromote
+                ? t('agent.subtitlePromote')
+                : t('agent.subtitleReadOnly')
         }
       />
 

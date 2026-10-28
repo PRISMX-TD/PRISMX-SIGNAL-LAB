@@ -364,7 +364,6 @@ def test_only_top_level_can_write(db_session):
     for call in (
         lambda: agent_tree_set_plan(db_session, b, _plan(c1.email)),
         lambda: agent_set_plan(db_session, b, lb.id, _plan(c1.email)),
-        lambda: agent_promote(db_session, b, c1.email),
         lambda: agent_demote(db_session, b, b.email),
     ):
         with pytest.raises(HTTPException) as exc:
@@ -372,6 +371,37 @@ def test_only_top_level_can_write(db_session):
         assert exc.value.status_code == 403
     db_session.refresh(c1)
     assert c1.plan == "FREE"
+
+
+def test_sub_agent_promotes_own_direct_clients_only(db_session):
+    """10-28：二级起能把自己的直属客户升为推荐官，别人的客户不行，最后一级不行；回包不带层级。
+    Lower agents promote their own direct clients only; the last level cannot; no levels leak."""
+    admin, a, la, a1, b, lb, c1 = _tree(db_session)
+    team = agent_team(db_session, b)
+    assert team.canManage is False and team.canPromote is True and team.level is None
+    row = agent_promote(db_session, b, c1.email)
+    assert row.isAgent is True and row.agentLevel is None
+    node = db_session.query(AgentNode).filter_by(user_id=c1.id).one()
+    assert node.parent_user_id == b.id and node.depth == 3 and node.created_by == b.id
+    # c1 的客户 d1 不是 B 的直属客户：B 不能升，A 可以（整棵树）。
+    d1 = _mk_user(db_session, "d1@x.io", invite_code=_link_of(db_session, c1).code)
+    with pytest.raises(HTTPException) as exc:
+        agent_promote(db_session, b, d1.email)
+    assert exc.value.status_code == 403
+    assert not is_agent(db_session, d1.id)
+    # 最后一级：上限调到 3，c1（三级）没有升的权限，点了也是 409。
+    save_agent_settings(db_session, {"agent_max_depth": 3})
+    db_session.commit()
+    invalidate_agent_cache()
+    assert agent_team(db_session, c1).canPromote is False
+    with pytest.raises(HTTPException) as exc:
+        agent_promote(db_session, c1, d1.email)
+    assert exc.value.status_code == 409
+    assert agent_team(db_session, b).canPromote is True
+    # 不是推荐官 403。/ Non-agents are refused.
+    with pytest.raises(HTTPException) as exc:
+        agent_promote(db_session, a1, d1.email)
+    assert exc.value.status_code == 403
 
 
 def test_top_level_extends_anyone_in_the_tree(db_session):

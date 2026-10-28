@@ -3,14 +3,16 @@
 // 行的口径与「我的链接」名单完全相同（零件在 customerCells），只多两样：来自哪个代理，以及
 // 他自己是不是代理。可以按代理筛（「团队」里点「查看客户」就是带着筛选跳过来的）。
 //
-// 写操作：「升为代理」只给一级代理（canManage）；调整会员（同一个 PlanDialog，走整棵树的端点）
+// 写操作：「升为代理」一级代理（canManage）整棵树都能升，二级起（canPromote，最后一级没有）只能升
+// 自己的直属客户，弹窗与提示里不出现层级；调整会员（同一个 PlanDialog，走整棵树的端点）
 // 看管理员给的改会员权限（canSetPlan，rev 51，与层级无关）。
 // 升为代理时新代理的上级是他注册时那条链接的主人，不是点按钮的人；层级超过上限的行按钮置灰
 // 并说明原因，免得点了才吃一个 409。
 //
 // Agent view "All customers" (rev 47): everyone brought in through the caller's
 // and every descendant's links, plus "came through" and the row's own agent
-// level. Writes (membership, promote) are top-level only. A promotion's parent is
+// level. Top-level agents promote anyone in the tree; lower ones (not the last level)
+// only their own direct clients, with no level shown. A promotion's parent is
 // the owner of the link the user signed up through; rows that would exceed the
 // max depth get a disabled button with the reason rather than a 409 after the click.
 //
@@ -60,8 +62,12 @@ export default function AgentCustomersPanel({
   const { t } = useTranslation()
   const canManage = team.canManage
   const canSetPlan = team.canSetPlan
+  // 下级推荐官只能升挂在自己名下的客户（来自 = 自己）。/ Sub-ambassadors promote their own clients only.
+  const selfEmail = team.nodes.find((n) => n.isSelf)?.email ?? ''
+  const directPromote = !canManage && team.canPromote
+  const canPromoteRow = (u: AgentTreeUser) => !u.isAgent && (canManage || (directPromote && u.viaEmail === selfEmail))
   // 操作列：能升代理或能改会员就有。/ The action column shows when either write is allowed.
-  const hasActions = canManage || canSetPlan
+  const hasActions = canManage || directPromote || canSetPlan
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState<AgentTreeUsers | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -127,7 +133,10 @@ export default function AgentCustomersPanel({
     try {
       const row = await agentApi.promote(promoting.email)
       replaceRow(row)
-      setNotice(t('agent.promote.done', { name: row.nickname || row.email, n: row.agentLevel ?? '' }))
+      const name = row.nickname || row.email
+      setNotice(
+        row.agentLevel != null ? t('agent.promote.done', { name, n: row.agentLevel }) : t('agent.promote.doneDirect', { name }),
+      )
       onPromoted()
     } catch (err: unknown) {
       setError(localizeApiError(err instanceof Error ? err.message : String(err)))
@@ -166,8 +175,8 @@ export default function AgentCustomersPanel({
   // 升为代理按钮：已经是代理不出现；超过最大层级置灰并把原因写在 title 与手机上的说明里。
   // Promote: hidden for agents; disabled with the reason past the max depth.
   const promoteButton = (u: AgentTreeUser) => {
-    if (!canManage || u.isAgent) return null
-    const lvl = nextLevel(u)
+    if (!canPromoteRow(u)) return null
+    const lvl = canManage ? nextLevel(u) : null
     const tooDeep = lvl != null && lvl > team.maxDepth
     return (
       <button
@@ -210,11 +219,11 @@ export default function AgentCustomersPanel({
         <span className="agt-toolbar-count num">{page ? t('agent.customers.count', { n: page.total }) : ''}</span>
       </div>
 
-      {canManage && (
+      {(canManage || directPromote) && (
         <div className="agt-callout">
           <IconInfo size={16} />
           <div>
-            <p>{t('agent.promote.hint')}</p>
+            <p>{t(canManage ? 'agent.promote.hint' : 'agent.promote.hintDirect')}</p>
           </div>
         </div>
       )}
@@ -344,11 +353,15 @@ export default function AgentCustomersPanel({
           center
           busy={busy}
           title={t('agent.promote.title')}
-          message={t('agent.promote.body', {
-            name: promoting.nickname || promoting.email,
-            parent: promoting.viaNickname || promoting.viaEmail || '',
-            n: nextLevel(promoting) ?? '',
-          })}
+          message={
+            canManage
+              ? t('agent.promote.body', {
+                  name: promoting.nickname || promoting.email,
+                  parent: promoting.viaNickname || promoting.viaEmail || '',
+                  n: nextLevel(promoting) ?? '',
+                })
+              : t('agent.promote.bodyDirect', { name: promoting.nickname || promoting.email })
+          }
           confirmLabel={t('agent.promote.button')}
           onConfirm={() => void promote()}
           onCancel={() => setPromoting(null)}

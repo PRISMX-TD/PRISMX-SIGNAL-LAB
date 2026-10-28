@@ -1349,6 +1349,7 @@
       "invalid": "Phải là link https của Make Capital"
     },
     "subtitleReadOnly": "Bạn là đại sứ cấp dưới: có thể xem liên kết của mình, đại sứ cấp dưới và khách hàng của họ. Mọi nội dung chỉ để xem.",
+    "subtitlePromote": "Bạn là đại sứ cấp dưới: có thể xem liên kết của mình, đại sứ cấp dưới và khách hàng của họ, và nâng khách hàng trực tiếp của mình thành đại sứ.",
     "tabs": {
       "links": "Liên kết của tôi",
       "team": "Đội nhóm",
@@ -1369,6 +1370,7 @@
       "total": "Khách cả nhóm",
       "topHint": "Bạn là đại sứ cấp 1: có thể nâng khách hàng thành đại sứ cấp dưới ở mục “Tất cả khách hàng” (tối đa cấp {{max}}) và gỡ đại sứ cấp dưới.",
       "readOnlyHint": "Mục này chỉ để xem. Việc nâng/gỡ đại sứ do đại sứ cấp 1 thực hiện.",
+      "promoteHint": "Bạn có thể nâng khách hàng trực tiếp của mình thành đại sứ trong mục Tất cả khách hàng; việc gỡ đại sứ do đại sứ cấp 1 thực hiện.",
       "planOnHint": "Quản trị viên đã cấp quyền điều chỉnh gói cho bạn: bạn có thể điều chỉnh gói cho mọi khách trong nhóm.",
       "planOffHint": "Điều chỉnh gói cần quản trị viên cấp quyền cho bạn.",
       "countNote": "Khách trực tiếp là khách thường hiện thuộc về họ (không tính đại sứ); khách cả nhóm cộng thêm khách của mọi đại sứ bên dưới. Hoạt động 7 ngày và MT5 đã kết nối chỉ tính khách trực tiếp.",
@@ -1391,11 +1393,14 @@
     },
     "promote": {
       "button": "Nâng thành đại sứ",
-      "hint": "Khi nâng khách hàng thành đại sứ, hệ thống tạo liên kết riêng và Trung tâm Đại sứ (chỉ xem) cho họ. Cấp trên của họ là đại sứ sở hữu liên kết họ đã dùng để đăng ký.",
+      "hint": "Khi nâng khách hàng thành đại sứ, hệ thống tạo liên kết riêng và Trung tâm Đại sứ cho họ. Cấp trên của họ là đại sứ sở hữu liên kết họ đã dùng để đăng ký.",
       "title": "Xác nhận nâng thành đại sứ",
-      "body": "{{name}} sẽ trở thành đại sứ cấp {{n}} dưới {{parent}}, có liên kết riêng. Họ xem được tuyến dưới nhưng không thể thay đổi gì.",
+      "body": "{{name}} sẽ trở thành đại sứ cấp {{n}} dưới {{parent}}, có liên kết riêng. Họ xem được tuyến dưới và có thể nâng khách hàng trực tiếp của mình (trừ cấp cuối).",
       "done": "{{name}} đã trở thành đại sứ cấp {{n}}.",
-      "tooDeep": "Đã đạt cấp tối đa ({{max}} cấp)"
+      "tooDeep": "Đã đạt cấp tối đa ({{max}} cấp)",
+      "hintDirect": "Bạn có thể nâng khách hàng trực tiếp của mình thành đại sứ: hệ thống tạo liên kết riêng và họ trở thành đại sứ cấp dưới của bạn.",
+      "bodyDirect": "{{name}} sẽ trở thành đại sứ cấp dưới của bạn, có liên kết riêng và xem được tuyến dưới của mình.",
+      "doneDirect": "{{name}} đã trở thành đại sứ cấp dưới của bạn."
     },
     "subtitleNoPlan": "Liên kết quảng bá của bạn, đại sứ cấp dưới và khách hàng của họ. Muốn thay đổi gói thành viên cần quản trị viên bật quyền cho bạn; hiện chỉ xem được.",
     "hero": {
