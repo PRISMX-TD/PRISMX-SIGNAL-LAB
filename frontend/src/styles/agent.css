@@ -1864,7 +1864,7 @@
   }
 }
 
-/* 卡内展开的直属客户。/ Direct clients, expanded inside the card. */
+/* 卡内展开的直属客户，各种屏宽都一行一个。/ Direct clients, expanded inside the card, one per row at every width. */
 .agt-clients {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1874,11 +1874,6 @@
   margin-bottom: 0;
   padding: 0;
   list-style: none;
-}
-@media (min-width: 1280px) {
-  .agt-clients {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 .agt-client {
   min-width: 0;
