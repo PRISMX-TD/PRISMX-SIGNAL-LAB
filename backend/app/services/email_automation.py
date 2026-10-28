@@ -451,7 +451,7 @@ def build_for(db: Session, content: eb.Content, user: User, cand: Cand | None, n
         body_en=fill(content.body_en, v),
     )
     unsub = eb.unsubscribe_url(user.id) if content.kind != eb.KIND_NOTICE else None
-    return eb.build_message(filled, unsub)
+    return eb.build_message(filled, unsub, db)
 
 
 def sample_cand(trigger: str, now: datetime) -> Cand:

@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import EmailVerificationToken, User
-from app.services import activity_log
+from app.services import activity_log, email_signature
 from app.services.mailer import send_email
 from app.services.password_reset import _aware, hash_token
 
@@ -209,8 +209,10 @@ def send_verification_email(to_email: str, raw_token: str) -> bool:
         "Once verified you can bind your MT5 account and claim your PRO trial.\n"
         "If you didn't sign up for PRISMX Signal Lab, just ignore this email.\n"
     )
-    # 内联样式、不放图片，理由同找回密码那封（password_reset.send_reset_email）。
-    html = f"""<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#18181b;line-height:1.6">
+    # 内联样式、正文不放图片，理由同找回密码那封（password_reset.send_reset_email）；
+    # 末尾的品牌签名栏图片被挡也看得懂（email_signature）。
+    sig_html, sig_text = email_signature.render()
+    html = f"""<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:720px;margin:0 auto;padding:24px;color:#18181b;line-height:1.6">
   <h2 style="margin:0 0 16px;font-size:18px;font-weight:600">验证邮箱 / Verify your email</h2>
   <p style="margin:0 0 8px">欢迎注册 PRISMX Signal Lab！点下面的按钮完成邮箱验证，之后即可绑定 MT5 账号、领取 PRO 试用。</p>
   <p style="margin:0 0 20px;color:#52525b;font-size:14px">Welcome to PRISMX Signal Lab! Use the button below to verify your email — then you can bind your MT5 account and claim your PRO trial.</p>
@@ -222,9 +224,10 @@ def send_verification_email(to_email: str, raw_token: str) -> bool:
   <p style="margin:0 0 20px;word-break:break-all;font-size:12px;color:#71717a">{url}</p>
   <hr style="border:none;border-top:1px solid #e4e4e7;margin:20px 0">
   <p style="margin:0;color:#71717a;font-size:12px">如果你没有注册过 PRISMX Signal Lab，忽略这封邮件即可。<br>If you didn't sign up for PRISMX Signal Lab, just ignore this email.</p>
+  {sig_html}
 </div>"""
 
-    ok = send_email(to_email, subject, html, text)
+    ok = send_email(to_email, subject, html, f"{text}\n{sig_text}\n")
     if not ok and settings.MAIL_DEBUG_LOG_LINKS:
         # 只在 .env 里显式打开时才走这里，默认关闭。见 config.py 的说明。
         logger.warning("email verify link (MAIL_DEBUG_LOG_LINKS): %s", url)

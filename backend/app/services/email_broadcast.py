@@ -49,7 +49,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models import EmailCampaign, EmailDelivery, EmailOptOut, User
-from app.services import mailer
+from app.services import email_signature, mailer
 
 logger = logging.getLogger("prismx.email_broadcast")
 
@@ -246,10 +246,11 @@ class Message:
 _FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif"
 
 
-def build_message(content: Content, unsubscribe_url: str | None) -> Message:
+def build_message(content: Content, unsubscribe_url: str | None, db: Session | None = None) -> Message:
     """拼出一封完整的信。
 
-    版式与找回密码那封一致：全部内联样式、不放图片（图片默认被屏蔽）。中英都填了
+    版式与找回密码那封一致：全部内联样式，正文不放图片（图片默认被屏蔽），末尾接
+    品牌签名栏（email_signature，图片被挡也看得懂）。中英都填了
     就中文在上、英文在下，中间一条分隔线。推广邮件底部带退订链接，并加上
     List-Unsubscribe / List-Unsubscribe-Post 邮件头——Gmail、Yahoo 对批量发信要求
     一键退订，缺了这两个头更容易进垃圾箱。服务通知不带退订（它本来就不看退订）。
@@ -291,16 +292,20 @@ def build_message(content: Content, unsubscribe_url: str | None) -> Message:
             footer_html.append("This is a service notice about your PRISMX Signal Lab account.")
             footer_text.append("This is a service notice about your PRISMX Signal Lab account.")
 
+    sig_html, sig_text = email_signature.render(db)
     divider = '<hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0">'
     html = (
-        f'<div style="font-family:{_FONT};max-width:560px;margin:0 auto;padding:24px;color:#18181b;line-height:1.7;font-size:15px">\n'
+        f'<div style="font-family:{_FONT};max-width:720px;margin:0 auto;padding:24px;color:#18181b;line-height:1.7;font-size:15px">\n'
         '<p style="margin:0 0 20px;font-size:13px;font-weight:600;letter-spacing:.04em;color:#52525b">PRISMX Signal Lab</p>\n'
         + f"\n{divider}\n".join(html_sections)
         + f"\n{divider}\n"
         + f'<p style="margin:0;color:#71717a;font-size:12px">{"<br>".join(footer_html)}</p>\n'
-        "</div>"
+        + sig_html
+        + "</div>"
     )
-    text = "\n\n---\n\n".join(text_sections) + "\n\n---\n\n" + "\n".join(footer_text) + "\n"
+    text = (
+        "\n\n---\n\n".join(text_sections) + "\n\n---\n\n" + "\n".join(footer_text) + "\n\n" + sig_text + "\n"
+    )
 
     headers: dict[str, str] = {}
     if marketing and unsubscribe_url:
@@ -679,7 +684,7 @@ def claim_next(db: Session) -> Job | str:
 
         content = Content.from_campaign(campaign)
         unsub = unsubscribe_url(user.id) if campaign.kind != KIND_NOTICE else None
-        return Job(row.id, campaign.id, user.email, build_message(content, unsub))
+        return Job(row.id, campaign.id, user.email, build_message(content, unsub, db))
     return IDLE
 
 

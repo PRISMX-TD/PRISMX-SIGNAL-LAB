@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models import PasswordResetToken, User
+from app.services import email_signature
 from app.services.mailer import send_email
 
 logger = logging.getLogger("prismx.password_reset")
@@ -198,8 +199,10 @@ def send_reset_email(to_email: str, raw_token: str) -> bool:
         "If this wasn't you, ignore this email — nothing about your account changes.\n"
     )
     # 邮件客户端对 CSS 的支持极不一致，所以全部用内联样式、不用外部样式表，
-    # 也不放图片（图片默认被屏蔽，排版会当场垮掉）。
-    html = f"""<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;color:#18181b;line-height:1.6">
+    # 正文也不放图片（图片默认被屏蔽，排版会当场垮掉）；末尾的品牌签名栏
+    # 图片被挡时底色、文字和链接仍是 HTML（email_signature）。
+    sig_html, sig_text = email_signature.render()
+    html = f"""<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;max-width:720px;margin:0 auto;padding:24px;color:#18181b;line-height:1.6">
   <h2 style="margin:0 0 16px;font-size:18px;font-weight:600">重置密码 / Reset your password</h2>
   <p style="margin:0 0 8px">你申请了重置 PRISMX Signal Lab 的登录密码。点下面的按钮设置新密码。</p>
   <p style="margin:0 0 20px;color:#52525b;font-size:14px">You asked to reset your PRISMX Signal Lab password. Use the button below to set a new one.</p>
@@ -211,9 +214,10 @@ def send_reset_email(to_email: str, raw_token: str) -> bool:
   <p style="margin:0 0 20px;word-break:break-all;font-size:12px;color:#71717a">{url}</p>
   <hr style="border:none;border-top:1px solid #e4e4e7;margin:20px 0">
   <p style="margin:0;color:#71717a;font-size:12px">如果这不是你本人操作，忽略这封邮件即可，你的密码不会有任何变化。<br>If this wasn't you, ignore this email — nothing about your account changes.</p>
+  {sig_html}
 </div>"""
 
-    ok = send_email(to_email, subject, html, text)
+    ok = send_email(to_email, subject, html, f"{text}\n{sig_text}\n")
     if not ok and settings.MAIL_DEBUG_LOG_LINKS:
         # 只在 .env 里显式打开时才走这里，默认关闭。见 config.py 的说明。
         logger.warning("password reset link (MAIL_DEBUG_LOG_LINKS): %s", url)

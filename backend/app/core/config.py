@@ -461,6 +461,9 @@ class Settings(BaseSettings):
     # Where the emailed link points. Always the website: the Android WebView's
     # origin is https://localhost, which is meaningless in an email.
     PUBLIC_WEB_URL: str = "https://prismxsignallab.com"
+    # 每封邮件底部签名栏里展示的官方联系邮箱；留空则签名栏不显示这一项。
+    # Official contact address shown in every email's signature banner; empty hides it.
+    OFFICIAL_CONTACT_EMAIL: str = "signallab.prismx@gmail.com"
 
     # 本地开发时把重置链接打进日志，省去配发信商。**默认关闭，且必须在 .env 里
     # 显式打开**——打开后任何拿到日志的人都能改任意账号的密码，生产绝不能开。
