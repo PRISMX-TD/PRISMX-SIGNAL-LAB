@@ -11,12 +11,21 @@
 // 已经是代理的直属客户本来就画成子节点，这里过滤掉不重复；每人最多拉 20 个，多的去
 // 「全部客户」看。团队不大（≤ 10 个代理）时默认全部展开，大了默认收起，免得一进页就发一串请求。
 //
+// 2026-10-28 重画：每个推荐官一张节点卡（头像、名字与层级、四个数、操作；1280 以上一行排完），
+// 卡与卡之间画树线——竖线从上级头像正下方落下，弯进下级头像。第 3、4 层改窄台阶（层级徽标
+// 只有一级推荐官看得到，别人全靠缩进分辨上下级），第 5 层起不再缩进。直属客户展开在卡内。
+//
 // Agent view "Team" (rev 47): the caller and every agent below them, assembled
 // from the server's flat breadth-first list by parentEmail. The caller's own row
 // has no parent — looking upwards is impossible server-side. Only top-level
 // agents (canManage) see "Remove agent". Each agent can also expand their direct
 // non-agent customers (up to 20; more lives in "All customers"); small teams
 // start expanded, large ones collapsed to avoid a burst of requests.
+// Redrawn 2026-10-28: one node card per ambassador (avatar, name and level, four figures,
+// actions; a single row from 1280px) joined by tree lines that drop from the parent's avatar
+// and bend into the child's. Depths 3–4 take a narrow step (only top-level ambassadors see
+// level badges, so everyone else reads the hierarchy from the indent); indenting stops at
+// depth 5. Direct clients expand inside the card.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { agentApi } from '../../api/client'
@@ -24,7 +33,8 @@ import { fmtDate, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
 import ConfirmModal from '../ConfirmModal'
 import type { AgentTeam, AgentTeamNode, AgentTreeUser } from '../../api/types'
-import { LastActive, PlanBadge } from './customerCells'
+import { IconArrow, IconChevron, IconInfo } from './agentIcons'
+import { LastActive, Person, PlanBadge, initialOf } from './customerCells'
 
 const CUSTOMERS_PER_NODE = 20
 const AUTO_EXPAND_MAX_NODES = 10
@@ -34,12 +44,10 @@ const AUTO_EXPAND_MAX_NODES = 10
 function NodeCustomers({
   team,
   agentEmail,
-  indent,
   onShowAll,
 }: {
   team: AgentTeam
   agentEmail: string
-  indent: number
   onShowAll: () => void
 }) {
   const { t } = useTranslation()
@@ -67,40 +75,31 @@ function NodeCustomers({
 
   const plain = (rows ?? []).filter((u) => !u.isAgent)
   const more = total - (rows?.length ?? 0)
+  if (error) return <p className="agt-clients-note is-err">{error}</p>
+  if (rows === null) return <p className="agt-clients-note">{t('common.loading')}</p>
   return (
-    <div
-      className="border-l border-dashed border-white/10 pb-3 pr-4"
-      style={{ marginLeft: `${Math.min(indent + 1, 5) * 14}px`, paddingLeft: '12px' }}
-    >
-      {error ? (
-        <p className="text-xs text-down">{error}</p>
-      ) : rows === null ? (
-        <p className="text-xs text-neutral-500">{t('common.loading')}</p>
-      ) : (
-        <ul className="space-y-1.5">
-          {plain.map((u) => (
-            <li key={u.email} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg bg-white/[0.03] px-3 py-2">
-              <div className="min-w-0">
-                <p className="truncate text-[13px] text-neutral-200">{u.nickname || t('agent.noNickname')}</p>
-                <p className="num break-all text-[11px] text-neutral-500">{u.email}</p>
-              </div>
-              <div className="flex shrink-0 items-center gap-2 text-[11px] text-neutral-500">
-                <PlanBadge plan={u.plan} />
+    <>
+      <ul className="agt-clients">
+        {plain.map((u) => (
+          <li key={u.email} className="agt-client">
+            <Person nickname={u.nickname} email={u.email} small />
+            <div className="agt-client-meta">
+              <PlanBadge plan={u.plan} />
+              <span className="agt-client-seen">
                 <span>{t('agent.colActive')}</span>
                 <LastActive day={u.lastActiveDay} />
-              </div>
-            </li>
-          ))}
-          {more > 0 && (
-            <li>
-              <button type="button" className="text-xs text-prism-300 hover:text-prism-200" onClick={onShowAll}>
-                {t('agent.team.customersMore', { n: more })}
-              </button>
-            </li>
-          )}
-        </ul>
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      {more > 0 && (
+        <button type="button" className="agt-clients-more" onClick={onShowAll}>
+          {t('agent.team.customersMore', { n: more })}
+          <IconArrow size={14} />
+        </button>
       )}
-    </div>
+    </>
   )
 }
 
@@ -161,34 +160,30 @@ export default function AgentTeamPanel({
     }
   }
 
-  const renderNode = (n: AgentTeamNode, indent: number): React.ReactNode => {
+  // depth：自己是 0，直属下级 1，以此类推。子列表的 class 带上深度档位，样式据此收窄、停止缩进。
+  // depth: 0 for yourself, 1 for direct downline, and so on; the child list carries a depth
+  // tier so the stylesheet knows where to narrow and then stop the indent.
+  const renderNode = (n: AgentTeamNode, depth: number): React.ReactNode => {
     const kids = children.get(n.email) ?? []
     // 直属客户里已经是代理的就是 kids（新代理的上级 = 他注册所用链接的主人），减掉才是普通客户数。
     // Direct customers who became agents are exactly `kids`; the rest are plain customers.
     const plainCount = Math.max(0, n.directCustomers - kids.length)
     const open = plainCount > 0 && isOpen(n.email)
+    const canRemove = team.canManage && !n.isSelf
+    const childDepth = depth + 1
     return (
-      <li key={n.email}>
-        {/* 缩进封顶 4 层：手机屏宽有限，再往里缩名字就挤没了；层级另有「第 N 级」徽标说明。
-            Indent is capped at four steps — on a phone deeper indents squeeze the name
-            out; the level badge carries the depth anyway. */}
-        <div
-          className={`agt-node${n.isSelf ? ' is-self' : ''} ${indent > 0 ? 'border-l border-white/10' : ''}`}
-          style={{ marginLeft: `${Math.min(indent, 4) * 14}px`, paddingLeft: indent > 0 ? '12px' : '18px' }}
-        >
-          <div className="agt-node-main">
-            {/* 头像是名字的首字（没有头像图可用）；自己那一圈是全息箔。
-                The avatar is the name's first character; your own wears the foil ring. */}
+      <li key={n.email} className="agt-tree-item">
+        <article className={`agt-node${n.isSelf ? ' is-self' : ''}`}>
+          <div className="agt-node-row">
+            {/* 自己那一圈是全息箔。/ Your own avatar wears the foil ring. */}
             <span className="agt-avatar" aria-hidden="true">
-              {Array.from((n.nickname || n.email).trim())[0]?.toUpperCase() ?? '·'}
+              {initialOf(n.nickname || n.email)}
             </span>
             <div className="agt-node-who">
               <p className="agt-node-name">
-                <span className="truncate">{n.nickname || n.email}</span>
+                <span className="agt-node-name-text">{n.nickname || n.email}</span>
                 {/* 层级只有一级推荐官看得到（后端二级起不下发）。/ Levels reach top-level ambassadors only. */}
-                {n.level != null && (
-                  <span className="agt-tag is-violet">{t('agent.team.level', { n: n.level })}</span>
-                )}
+                {n.level != null && <span className="agt-tag is-violet">{t('agent.team.level', { n: n.level })}</span>}
                 {n.isSelf && <span className="agt-tag">{t('agent.team.you')}</span>}
               </p>
               {n.nickname && <p className="agt-node-sub num">{n.email}</p>}
@@ -196,64 +191,68 @@ export default function AgentTeamPanel({
                 <p className="agt-node-sub">{t('agent.team.since', { date: fmtDate(n.createdAt) })}</p>
               )}
             </div>
-            <div className="agt-node-actions">
+            <dl className="agt-node-stats">
+              {[
+                { label: t('agent.team.direct'), value: n.directCustomers },
+                { label: t('agent.team.total'), value: n.teamCustomers },
+                { label: t('agent.active7d'), value: n.activeUsers7d },
+                { label: t('agent.mt5Users'), value: n.mt5Users },
+              ].map((s) => (
+                <div key={s.label}>
+                  <dt>{s.label}</dt>
+                  <dd className="num">{s.value.toLocaleString('en-US')}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className={`agt-node-actions${canRemove ? ' has-two' : ''}`}>
               <button type="button" className="btn btn-ghost" onClick={() => onShowCustomers(n.email)}>
-                {t('agent.team.showCustomers')}
+                <span>{t('agent.team.showCustomers')}</span>
+                <IconArrow size={14} />
               </button>
-              {team.canManage && !n.isSelf && (
-                <button
-                  type="button"
-                  className="btn btn-ghost text-down"
-                  disabled={busy}
-                  onClick={() => setRemoving(n)}
-                >
+              {canRemove && (
+                <button type="button" className="btn btn-ghost is-danger" disabled={busy} onClick={() => setRemoving(n)}>
                   {t('agent.team.remove')}
                 </button>
               )}
+              {/* 自己那张卡没有「撤销」：宽屏上放一个看不见的同款占位，操作栏和别的卡一样宽，
+                  四个数字的列才对得齐（哪种语言的按钮多宽都一样）。
+                  Your own card has no Remove: on wide screens an invisible twin keeps the actions
+                  as wide as everyone else's, so the figure columns line up in every language. */}
+              {team.canManage && n.isSelf && (
+                <span className="btn btn-ghost agt-node-spacer" aria-hidden="true">
+                  {t('agent.team.remove')}
+                </span>
+              )}
             </div>
           </div>
-          <dl className="agt-node-stats">
-            {[
-              { label: t('agent.team.direct'), value: n.directCustomers },
-              { label: t('agent.team.total'), value: n.teamCustomers },
-              { label: t('agent.active7d'), value: n.activeUsers7d },
-              { label: t('agent.mt5Users'), value: n.mt5Users },
-            ].map((s) => (
-              <div key={s.label}>
-                <dt>{s.label}</dt>
-                <dd className="num">{s.value.toLocaleString('en-US')}</dd>
-              </div>
-            ))}
-          </dl>
           {plainCount > 0 && (
-            <button
-              type="button"
-              className="agt-node-toggle"
-              aria-expanded={open}
-              onClick={() => toggle(n.email)}
-            >
-              {open ? t('agent.team.customersHide') : t('agent.team.customersShow', { n: plainCount })}
+            <button type="button" className="agt-node-toggle" aria-expanded={open} onClick={() => toggle(n.email)}>
+              <span>{open ? t('agent.team.customersHide') : t('agent.team.customersShow', { n: plainCount })}</span>
+              <IconChevron size={15} />
             </button>
           )}
-        </div>
-        {open && (
-          <NodeCustomers team={team} agentEmail={n.email} indent={indent} onShowAll={() => onShowCustomers(n.email)} />
+          {open && <NodeCustomers team={team} agentEmail={n.email} onShowAll={() => onShowCustomers(n.email)} />}
+        </article>
+        {kids.length > 0 && (
+          <ul className={`agt-tree is-sub${childDepth >= 3 ? ' is-deep' : ''}${childDepth >= 5 ? ' is-flat' : ''}`}>
+            {kids.map((k) => renderNode(k, childDepth))}
+          </ul>
         )}
-        {kids.length > 0 && <ul>{kids.map((k) => renderNode(k, indent + 1))}</ul>}
       </li>
     )
   }
 
   return (
-    <section className="mt-4">
-      <div className="mb-3 space-y-1 text-xs leading-relaxed text-neutral-400">
-        <p>
-          {team.canManage
-            ? t('agent.team.topHint', { max: team.maxDepth })
-            : t('agent.team.readOnlyHint')}{' '}
-          {t(team.canSetPlan ? 'agent.team.planOnHint' : 'agent.team.planOffHint')}
-        </p>
-        <p className="text-neutral-500">{t('agent.team.countNote')}</p>
+    <section>
+      <div className="agt-callout">
+        <IconInfo size={16} />
+        <div>
+          <p>
+            {team.canManage ? t('agent.team.topHint', { max: team.maxDepth }) : t('agent.team.readOnlyHint')}{' '}
+            {t(team.canSetPlan ? 'agent.team.planOnHint' : 'agent.team.planOffHint')}
+          </p>
+          <p className="is-dim">{t('agent.team.countNote')}</p>
+        </div>
       </div>
 
       {error && (
@@ -262,14 +261,10 @@ export default function AgentTeamPanel({
         </div>
       )}
 
-      <div className="agt-sheet overflow-hidden">
-        {self && <ul className="divide-y divide-white/5">{renderNode(self, 0)}</ul>}
-        {subCount === 0 && (
-          <p className="border-t border-white/5 px-4 py-4 text-sm text-neutral-500">
-            {team.canManage ? t('agent.team.emptyTop') : t('agent.team.empty')}
-          </p>
-        )}
-      </div>
+      {self && <ul className={`agt-tree${team.canManage ? ' can-manage' : ''}`}>{renderNode(self, 0)}</ul>}
+      {subCount === 0 && (
+        <div className="agt-sheet agt-tree-empty">{team.canManage ? t('agent.team.emptyTop') : t('agent.team.empty')}</div>
+      )}
 
       {removing && (
         <ConfirmModal

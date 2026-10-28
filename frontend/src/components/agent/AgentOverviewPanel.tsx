@@ -27,6 +27,7 @@ import LineChart, { SERIES_COLORS } from '../admin/overview/LineChart'
 import RangePicker from '../admin/overview/RangePicker'
 import { DEFAULT_RANGE, rangeKey, toQuery, type RangeState } from '../admin/overview/rangeUtils'
 import type { AgentOverview } from '../../api/types'
+import { SectionHead } from './customerCells'
 
 // 一格指标。五格拼成一块发丝线格（styles/agent.css 的 .agt-kpis），不再是五张各自浮着的卡。
 // One figure; five of them form a single hairline grid (.agt-kpis) instead of five floating cards.
@@ -45,7 +46,12 @@ function Tile({ label, value, accent, footer }: {
   )
 }
 
-export default function AgentOverviewPanel({ linkId }: { linkId: string }) {
+// 分区标题「链接数据」，副标题是实际统计区间（名下有几条链接时前面再带上是哪一条），
+// 时间范围放在标题右边；styles/agent.css 的 .agt-range 把胶囊收成一条分段条。
+// Headed "Link performance" with the actual range as the subtitle (prefixed with the link's
+// name when there are several) and the range picker on the right, drawn as a segmented
+// strip by .agt-range in styles/agent.css.
+export default function AgentOverviewPanel({ linkId, linkLabel }: { linkId: string; linkLabel: string | null }) {
   const { t } = useTranslation()
   // 范围只存在组件里，不写 URL：代理页没有深链需求，而写 URL 要把 link 选择也
   // 一起搬进去才自洽（管理页那边是整页一个范围，情况不同）。
@@ -97,13 +103,20 @@ export default function AgentOverviewPanel({ linkId }: { linkId: string }) {
   )
 
   return (
-    <section className="mt-10">
-      <RangePicker value={range} onChange={setRange} />
-      {data && (
-        <p className="-mt-3 mb-4 text-xs text-neutral-500">
-          {t('admin.overview.range.shown', { ...data.range })}
-        </p>
-      )}
+    <section className="agt-sec">
+      <SectionHead
+        title={t('agent.overview.title')}
+        sub={
+          data
+            ? `${linkLabel ? `${linkLabel} · ` : ''}${t('admin.overview.range.shown', { ...data.range })}`
+            : linkLabel
+        }
+        tools={
+          <div className="agt-range">
+            <RangePicker value={range} onChange={setRange} />
+          </div>
+        }
+      />
 
       {error ? (
         <div className="agt-sheet mb-5 p-5 text-sm text-down" role="alert">
@@ -126,9 +139,9 @@ export default function AgentOverviewPanel({ linkId }: { linkId: string }) {
               footer={<DeltaBadge {...data.headline.signups} />}
             />
           </div>
-          <div className="agt-sheet mb-5 p-5">
-            <h2 className="mb-1 text-sm font-semibold text-white">{t('admin.overview.activity.title')}</h2>
-            <p className="mb-3 text-xs text-neutral-500">{t('agent.overview.activityHint')}</p>
+          <div className="agt-sheet agt-chart">
+            <h3>{t('admin.overview.activity.title')}</h3>
+            <p>{t('agent.overview.activityHint')}</p>
             <LineChart
               dates={dates}
               series={series}

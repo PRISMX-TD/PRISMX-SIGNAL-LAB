@@ -1,11 +1,15 @@
-// 代理页的客户行零件：MT5 绑定、等级徽标与到期、手机卡片的标签行、最近活跃日。
-// 「我的链接」名单与「全部客户」名单（rev 47 代理层级）共用，从 pages/AgentPage.tsx 搬出来，
-// 免得两份名单各自长成两种样子。
-// Customer-row pieces for the agent view, shared by the per-link list and the
-// "All customers" list (rev 47 agent hierarchy) so the two never drift apart.
+// 代理页的客户行零件：头像 + 名字、MT5 绑定、等级徽标与到期、手机卡片的事实格、最近活跃日，
+// 以及分区标题、搜索框、翻页、空态。「我的链接」名单、「全部客户」名单（rev 47 代理层级）与
+// 「团队」里展开的直属客户共用，免得几份名单各自长成几种样子。样式在 styles/agent.css。
+// Customer-row pieces for the agent view (avatar + name, MT5, tier, phone fact grid, last
+// active) plus the section head, search box, pager and empty state. Shared by the per-link
+// list, "All customers" (rev 47) and the clients under each Team node so they never drift.
+// Styles live in styles/agent.css.
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { fmtDate } from '../../api/utils'
 import type { AgentLinkUser, AgentMT5Account } from '../../api/types'
+import { IconSearch, IconUsers } from './agentIcons'
 
 // 「近 7 日」的分界日。后端给的 lastActiveDay 是北京时间的日历日字符串
 // （YYYY-MM-DD），所以这里也按北京时间取当天，再直接比字符串——ISO 日期按
@@ -65,15 +69,7 @@ export function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
 }
 
 export function PlanBadge({ plan }: { plan: string }) {
-  return (
-    <span
-      className={`rounded-full px-2 py-0.5 text-xs ${
-        plan === 'PRO' ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400'
-      }`}
-    >
-      {plan}
-    </span>
-  )
+  return <span className={`agt-plan${plan === 'PRO' ? ' is-pro' : ''}`}>{plan}</span>
 }
 
 // 会员到期文案。FREE 没有到期可言（返回 null，调用方整行不画）；不限期（PRO 且
@@ -100,35 +96,172 @@ export function PlanCell({ user }: { user: AgentLinkUser }) {
   return (
     <div className="min-w-0">
       <PlanBadge plan={user.plan} />
-      {expiry && (
-        <p className="num mt-1 text-[11px] text-neutral-500">{t('agent.plan.until', { time: expiry })}</p>
-      )}
+      {expiry && <p className="agt-plan-until num">{t('agent.plan.until', { time: expiry })}</p>}
     </div>
   )
 }
 
-// 手机卡里的一行「标签 + 值」。四行共用一个组件，标签宽度就自然对齐成一列；
-// 手机上每个时间都必须自带标签——桌面有表头，手机没有，两个时间叠在一起谁也
-// 认不出哪个是到期、哪个是注册（2026-09-19 负责人就是这么发现的）。
-// One labelled row on the phone card. A shared component keeps the label column
-// aligned, and on a phone every timestamp needs its own label: there is no table
-// header here, so two stacked times are indistinguishable.
-export function CardRow({ label, children }: { label: string; children: React.ReactNode }) {
+// 手机卡里的一格「标签在上、值在下」。手机上每个时间都必须自带标签——桌面有表头，手机
+// 没有，两个时间叠在一起谁也认不出哪个是到期、哪个是注册（2026-09-19 负责人就是这么发现的）。
+// wide 的那格独占一行（MT5 绑定可能有好几条）。
+// One phone-card cell, label above value. On a phone every timestamp needs its own label:
+// there is no table header, so two stacked times are indistinguishable. wide spans the row.
+export function Fact({ label, wide, children }: { label: string; wide?: boolean; children: ReactNode }) {
   return (
-    <div className="mt-1.5 flex items-baseline gap-2 text-xs">
-      <span className="w-16 shrink-0 text-[11px] text-neutral-500">{label}</span>
-      <div className="min-w-0 flex-1">{children}</div>
+    <div className={`agt-fact${wide ? ' is-wide' : ''}`}>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  )
+}
+
+// 头像是名字的首字（没有头像图可用）。/ The avatar is the name's first character.
+export const initialOf = (name: string) => Array.from(name.trim())[0]?.toUpperCase() ?? '·'
+
+// 名单里的「人」：首字头像 + 昵称（没有就写「未设昵称」）+ 邮箱；badge 跟在名字后面。
+// 推荐官本人的头像套紫圈，一眼分出名单里谁也在带人。
+// A person in a list: initial avatar, nickname (or "no nickname"), email, an optional badge
+// after the name. Ambassadors get a violet ring so they stand out in a customer list.
+export function Person({
+  nickname,
+  email,
+  badge,
+  agent,
+  small,
+}: {
+  nickname: string | null
+  email: string
+  badge?: ReactNode
+  agent?: boolean
+  small?: boolean
+}) {
+  const { t } = useTranslation()
+  return (
+    <div className={`agt-person${small ? ' is-sm' : ''}`}>
+      <span className={`agt-avatar${agent ? ' is-agent' : ''}`} aria-hidden="true">
+        {initialOf(nickname || email)}
+      </span>
+      <div className="agt-person-text">
+        <p className="agt-person-name">
+          {nickname ? <span>{nickname}</span> : <span className="is-dim">{t('agent.noNickname')}</span>}
+          {badge}
+        </p>
+        <p className="agt-person-mail num">{email}</p>
+      </div>
+    </div>
+  )
+}
+
+// 分区标题：标题 + 人数胶囊 + 一行副标题，右边放这一区的工具（时间范围、搜索框）。
+// Section head: title, count pill, subtitle, and the section's tools on the right.
+export function SectionHead({
+  title,
+  count,
+  sub,
+  tools,
+}: {
+  title: string
+  count?: number | null
+  sub?: ReactNode
+  tools?: ReactNode
+}) {
+  return (
+    <div className="agt-sec-head">
+      <div className="agt-sec-titles">
+        <h2 className="agt-sec-title">
+          {title}
+          {count != null && <span className="agt-sec-count num">{count.toLocaleString('en-US')}</span>}
+        </h2>
+        {sub && <p className="agt-sec-sub">{sub}</p>}
+      </div>
+      {tools && <div className="agt-sec-tools">{tools}</div>}
+    </div>
+  )
+}
+
+export function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation()
+  return (
+    <label className="agt-search">
+      <IconSearch size={15} />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={t('agent.searchPlaceholder')}
+        aria-label={t('agent.searchPlaceholder')}
+        maxLength={128}
+        className="input"
+      />
+    </label>
+  )
+}
+
+export function EmptyState({ text }: { text: string }) {
+  return (
+    <div className="agt-empty">
+      <span className="agt-empty-icon">
+        <IconUsers size={20} />
+      </span>
+      <p>{text}</p>
+    </div>
+  )
+}
+
+// 翻页条：上一页 / 第几页 / 下一页。只有一页时调用方不画。
+// Pager: previous / page x of y / next; callers skip it for a single page.
+export function Pager({
+  offset,
+  pageSize,
+  total,
+  onChange,
+}: {
+  offset: number
+  pageSize: number
+  total: number
+  onChange: (offset: number) => void
+}) {
+  const { t } = useTranslation()
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const pageNo = Math.floor(offset / pageSize) + 1
+  return (
+    <div className="agt-pager">
+      <button
+        type="button"
+        className="btn btn-ghost"
+        disabled={offset === 0}
+        onClick={() => onChange(Math.max(0, offset - pageSize))}
+      >
+        {t('agent.prev')}
+      </button>
+      <span className="num">{t('agent.pageOf', { page: pageNo, pages })}</span>
+      <button
+        type="button"
+        className="btn btn-ghost"
+        disabled={offset + pageSize >= total}
+        onClick={() => onChange(offset + pageSize)}
+      >
+        {t('agent.next')}
+      </button>
     </div>
   )
 }
 
 export function LastActive({ day }: { day: string | null }) {
   const { t } = useTranslation()
-  if (!day) return <span className="text-neutral-500">{t('agent.neverActive')}</span>
-  // 近 7 日内的亮着，更早的压灰——一眼看出哪些人已经不来了。
-  // Recent days stay bright, older ones grey out: who stopped coming, at a glance.
+  // 前面一颗点：近 7 日内是绿点、字亮着，更早的灰点压灰，从没来过是空心圈——一眼看出哪些人已经不来了。
+  // A leading dot: green and bright within 7 days, grey for older, hollow for never — who
+  // stopped coming, at a glance.
+  if (!day)
+    return (
+      <span className="agt-seen is-never">
+        <i aria-hidden="true" />
+        {t('agent.neverActive')}
+      </span>
+    )
   return (
-    <span className={`num whitespace-nowrap ${isRecentDay(day) ? 'text-neutral-100' : 'text-neutral-500'}`}>
+    <span className={`agt-seen num${isRecentDay(day) ? ' is-recent' : ''}`}>
+      <i aria-hidden="true" />
       {day}
     </span>
   )

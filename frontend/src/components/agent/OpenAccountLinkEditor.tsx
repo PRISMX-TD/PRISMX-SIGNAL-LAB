@@ -54,62 +54,63 @@ export default function OpenAccountLinkEditor({
 
   const inputId = `agent-open-url-${link.id}`
 
+  // 左边说明（标题、当前值、用途），右边输入框 + 保存 / 清除；窄的时候上下叠。样式在 styles/agent.css。
+  // Explanation on the left (title, current value, purpose), input with Save / Clear on the
+  // right; stacked when narrow. Styles in styles/agent.css.
   return (
-    <div
-      className="mt-4 border-t border-white/5 pt-3"
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
-    >
-      <label htmlFor={inputId} className="text-[11px] uppercase tracking-wide text-neutral-500">
-        {t('agent.openAccount.title')}
-      </label>
-      <p className={`mt-1 break-all text-xs ${current ? 'num text-neutral-200' : 'text-neutral-500'}`}>
-        {current ?? t('agent.openAccount.unset')}
-      </p>
-      <form
-        className="mt-2 flex flex-wrap items-center gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (canSave) void send(trimmed)
-        }}
-      >
-        <input
-          id={inputId}
-          className="input min-w-0 flex-1 text-xs"
-          type="url"
-          inputMode="url"
-          value={draft}
-          maxLength={500}
-          placeholder={t('agent.openAccount.placeholder')}
-          aria-invalid={invalid || undefined}
-          disabled={busy}
-          onChange={(e) => {
-            setDraft(e.target.value)
-            setFeedback(null)
+    <div className="agt-open" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <div className="agt-open-info">
+        <label htmlFor={inputId} className="agt-open-title">
+          {t('agent.openAccount.title')}
+        </label>
+        <p className={`agt-open-current${current ? ' num' : ' is-unset'}`}>{current ?? t('agent.openAccount.unset')}</p>
+        <p className="agt-open-explain">{t('agent.openAccount.explain')}</p>
+      </div>
+      <div className="agt-open-edit">
+        <form
+          className={`agt-open-form${current ? ' has-clear' : ''}`}
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (canSave) void send(trimmed)
           }}
-        />
-        <button type="submit" className="btn-primary px-3 py-1.5 text-xs disabled:opacity-40" disabled={!canSave}>
-          {busy ? t('agent.openAccount.saving') : t('agent.openAccount.save')}
-        </button>
-        {current && (
-          <button
-            type="button"
-            className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
+        >
+          <input
+            id={inputId}
+            className="input"
+            type="url"
+            inputMode="url"
+            value={draft}
+            maxLength={500}
+            placeholder={t('agent.openAccount.placeholder')}
+            aria-invalid={invalid || undefined}
             disabled={busy}
-            onClick={() => void send(null)}
-          >
-            {t('agent.openAccount.clear')}
+            onChange={(e) => {
+              setDraft(e.target.value)
+              setFeedback(null)
+            }}
+          />
+          <button type="submit" className="btn btn-primary" disabled={!canSave}>
+            {busy ? t('agent.openAccount.saving') : t('agent.openAccount.save')}
           </button>
-        )}
-      </form>
-      {invalid ? (
-        <p className="mt-1 text-[11px] text-down" role="alert">{t('agent.openAccount.invalid')}</p>
-      ) : feedback ? (
-        <p className={`mt-1 text-[11px] ${feedback.kind === 'ok' ? 'text-up' : 'text-down'}`} role={feedback.kind === 'err' ? 'alert' : 'status'}>
-          {feedback.text}
-        </p>
-      ) : null}
-      <p className="mt-1 text-[11px] leading-snug text-neutral-500">{t('agent.openAccount.explain')}</p>
+          {current && (
+            <button type="button" className="btn btn-ghost" disabled={busy} onClick={() => void send(null)}>
+              {t('agent.openAccount.clear')}
+            </button>
+          )}
+        </form>
+        {invalid ? (
+          <p className="agt-open-msg is-err" role="alert">
+            {t('agent.openAccount.invalid')}
+          </p>
+        ) : feedback ? (
+          <p
+            className={`agt-open-msg ${feedback.kind === 'ok' ? 'is-ok' : 'is-err'}`}
+            role={feedback.kind === 'err' ? 'alert' : 'status'}
+          >
+            {feedback.text}
+          </p>
+        ) : null}
+      </div>
     </div>
   )
 }

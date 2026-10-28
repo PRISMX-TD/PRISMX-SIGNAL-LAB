@@ -4038,6 +4038,7 @@
   "agent": {
     "colAction": "操作",
     "overview": {
+      "title": "链接数据",
       "customers": "客户总数",
       "activityHint": "只统计经这条链接注册的客户。活跃 = 当天打开过任一页面，按北京时间切天。"
     },
@@ -4094,6 +4095,7 @@
     "copyInvite": "复制邀请链接",
     "copyCompetition": "复制比赛链接",
     "competitionLinkNote": "比赛链接固定不变：别人打开时看到的是平台当前主推的比赛，经它注册的客户同样记在你名下。",
+    "notesTitle": "说明与提示",
     "openAccount": {
       "title": "我的开户链接",
       "explain": "访客通过你的链接进入比赛页并点『开户』时，会跳到这个链接，开户归属你。",

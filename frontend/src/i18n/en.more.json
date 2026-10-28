@@ -4049,6 +4049,7 @@
   "agent": {
     "colAction": "Actions",
     "overview": {
+      "title": "Link performance",
       "customers": "Customers",
       "activityHint": "Counts only clients who registered through this link. Active = opened any page that day, days cut in UTC+8."
     },
@@ -4105,6 +4106,7 @@
     "copyInvite": "Copy invite link",
     "copyCompetition": "Copy competition link",
     "competitionLinkNote": "The competition link never changes: it always opens the competition we're currently featuring, and sign-ups through it still count as yours.",
+    "notesTitle": "Notes & tips",
     "openAccount": {
       "title": "My open-account link",
       "explain": "When visitors arrive through your link and tap “Open account” on a competition page, they go to this link — the account is attributed to you.",

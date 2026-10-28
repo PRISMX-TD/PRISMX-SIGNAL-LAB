@@ -13,6 +13,12 @@
 // level. Writes (membership, promote) are top-level only. A promotion's parent is
 // the owner of the link the user signed up through; rows that would exceed the
 // max depth get a disabled button with the reason rather than a 409 after the click.
+//
+// 2026-10-28 重画：顶上一条工具栏（搜索、按推荐官筛、人数），行用和「我的链接」名单同一套零件
+// （头像 + 名字、等级、活跃点），「来自」也带首字头像；手机上是事实格卡片。
+// Redrawn 2026-10-28: one toolbar (search, ambassador filter, count); rows use the same parts
+// as the per-link list (avatar + name, tier, activity dot), "came through" gets an initial
+// avatar too; phones get fact-grid cards.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { agentApi } from '../../api/client'
@@ -22,7 +28,20 @@ import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import PlanDialog from './PlanDialog'
-import { CardRow, LastActive, Mt5List, PlanBadge, PlanCell, planExpiryText } from './customerCells'
+import { IconInfo } from './agentIcons'
+import {
+  EmptyState,
+  Fact,
+  LastActive,
+  Mt5List,
+  Pager,
+  Person,
+  PlanBadge,
+  PlanCell,
+  SearchBox,
+  initialOf,
+  planExpiryText,
+} from './customerCells'
 import type { AgentTeam, AgentTreeUser, AgentTreeUsers } from '../../api/types'
 
 const PAGE_SIZE = 50
@@ -119,36 +138,41 @@ export default function AgentCustomersPanel({
   }
 
   const total = page?.total ?? 0
-  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
-  const pageNo = Math.floor(offset / PAGE_SIZE) + 1
 
+  // 「来自」：上级推荐官的首字小头像 + 名字（有昵称时下面再带邮箱）。
+  // "Came through": the ambassador's small initial avatar and name (email below when nicknamed).
   const via = (u: AgentTreeUser) =>
     u.viaEmail ? (
-      <span className="min-w-0">
-        <span className="block truncate text-neutral-200">{u.viaNickname || u.viaEmail}</span>
-        {u.viaNickname && <span className="num block break-all text-[11px] text-neutral-500">{u.viaEmail}</span>}
+      <span className="agt-via">
+        <span className="agt-via-dot" aria-hidden="true">
+          {initialOf(u.viaNickname || u.viaEmail)}
+        </span>
+        <span className="agt-via-text">
+          <span className="agt-via-name">{u.viaNickname || u.viaEmail}</span>
+          {u.viaNickname && <span className="agt-via-mail num">{u.viaEmail}</span>}
+        </span>
       </span>
     ) : (
-      <span className="text-neutral-500">—</span>
+      <span className="agt-dim">—</span>
     )
 
   const agentBadge = (u: AgentTreeUser) =>
     u.isAgent && (
-      <span className="ml-1.5 rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
+      <span className="agt-tag is-violet">
         {u.agentLevel != null ? t('agent.customers.agentBadge', { n: u.agentLevel }) : t('agent.customers.agentBadgePlain')}
       </span>
     )
 
   // 升为代理按钮：已经是代理不出现；超过最大层级置灰并把原因写在 title 与手机上的说明里。
   // Promote: hidden for agents; disabled with the reason past the max depth.
-  const promoteButton = (u: AgentTreeUser, wide = false) => {
+  const promoteButton = (u: AgentTreeUser) => {
     if (!canManage || u.isAgent) return null
     const lvl = nextLevel(u)
     const tooDeep = lvl != null && lvl > team.maxDepth
     return (
       <button
         type="button"
-        className={`btn-ghost text-xs disabled:opacity-40 ${wide ? 'w-full py-1.5' : 'px-3 py-1.5'}`}
+        className="btn btn-ghost"
         disabled={busy || tooDeep}
         title={tooDeep ? t('agent.promote.tooDeep', { max: team.maxDepth }) : undefined}
         onClick={() => setPromoting(u)}
@@ -158,11 +182,11 @@ export default function AgentCustomersPanel({
     )
   }
 
-  const planButton = (u: AgentTreeUser, wide = false) =>
+  const planButton = (u: AgentTreeUser) =>
     canSetPlan && (
       <button
         type="button"
-        className={`btn-ghost text-xs disabled:opacity-40 ${wide ? 'w-full py-1.5' : 'px-3 py-1.5'}`}
+        className="btn btn-ghost"
         disabled={u.plan === 'PRO' && !u.planExpiresAt}
         onClick={() => setEditing(u)}
       >
@@ -171,30 +195,29 @@ export default function AgentCustomersPanel({
     )
 
   return (
-    <section className="mt-4">
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <input
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder={t('agent.searchPlaceholder')}
-          aria-label={t('agent.searchPlaceholder')}
-          maxLength={128}
-          className="input w-full sm:max-w-xs"
-        />
+    <section>
+      {/* 工具栏：搜索、按推荐官筛、人数，一条排完；手机上上下叠。
+          Toolbar: search, ambassador filter and the count in one strip; stacked on phones. */}
+      <div className="agt-toolbar">
+        <SearchBox value={search} onChange={setSearch} />
         <Select
-          className="w-full sm:w-64"
+          className="agt-toolbar-select"
           value={agentFilter}
           ariaLabel={t('agent.customers.filterAgent')}
           onChange={onAgentFilterChange}
           options={filterOptions}
         />
-        <span className="num text-xs text-neutral-500 sm:ml-auto">
-          {page ? t('agent.customers.count', { n: page.total }) : ''}
-        </span>
+        <span className="agt-toolbar-count num">{page ? t('agent.customers.count', { n: page.total }) : ''}</span>
       </div>
 
-      {canManage && <p className="mb-3 text-xs leading-relaxed text-neutral-500">{t('agent.promote.hint')}</p>}
+      {canManage && (
+        <div className="agt-callout">
+          <IconInfo size={16} />
+          <div>
+            <p>{t('agent.promote.hint')}</p>
+          </div>
+        </div>
+      )}
 
       {notice && (
         <div className="mb-3 rounded-lg border border-up/30 bg-up/10 px-4 py-2.5 text-sm text-up" role="status">
@@ -209,54 +232,48 @@ export default function AgentCustomersPanel({
 
       <div className="agt-sheet">
         {page == null && !error ? (
-          <div className="space-y-2 p-4" aria-busy="true">
+          <div className="space-y-3 p-5" aria-busy="true">
             <SkeletonLine height={16} />
             <SkeletonLine width="66%" height={16} />
             <SkeletonLine width="80%" height={16} />
           </div>
         ) : page && page.users.length === 0 ? (
-          <div className="p-8 text-center text-sm text-neutral-500">
-            {t(query ? 'agent.searchEmpty' : 'agent.customers.empty')}
-          </div>
+          <EmptyState text={t(query ? 'agent.searchEmpty' : 'agent.customers.empty')} />
         ) : page ? (
           <>
             <div className="hidden overflow-x-auto sm:block">
-              <table className="w-full text-left text-sm">
+              <table className="agt-table is-wide">
                 <thead>
-                  <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
-                    <th className="px-4 py-3 font-medium">{t('agent.colUser')}</th>
-                    <th className="px-4 py-3 font-medium">{t('agent.customers.colVia')}</th>
-                    <th className="px-4 py-3 font-medium">{t('agent.colPlan')}</th>
-                    <th className="px-4 py-3 font-medium">{t('agent.colMt5')}</th>
-                    <th className="px-4 py-3 font-medium">{t('agent.colActive')}</th>
-                    <th className="px-4 py-3 font-medium">{t('agent.colRegistered')}</th>
-                    {hasActions && <th className="px-4 py-3 text-right font-medium">{t('agent.colAction')}</th>}
+                  <tr>
+                    <th>{t('agent.colUser')}</th>
+                    <th>{t('agent.customers.colVia')}</th>
+                    <th>{t('agent.colPlan')}</th>
+                    <th>{t('agent.colMt5')}</th>
+                    <th>{t('agent.colActive')}</th>
+                    <th>{t('agent.colRegistered')}</th>
+                    {hasActions && <th className="is-act">{t('agent.colAction')}</th>}
                   </tr>
                 </thead>
                 <tbody>
                   {page.users.map((u, i) => (
-                    <tr key={`${u.email}-${i}`} className="border-b border-white/5 align-top last:border-0">
-                      <td className="px-4 py-3">
-                        <span className="block text-neutral-100">
-                          {u.nickname || <span className="text-neutral-500">{t('agent.noNickname')}</span>}
-                          {agentBadge(u)}
-                        </span>
-                        <span className="num block break-all text-xs text-neutral-400">{u.email}</span>
+                    <tr key={`${u.email}-${i}`}>
+                      <td>
+                        <Person nickname={u.nickname} email={u.email} agent={u.isAgent} badge={agentBadge(u)} />
                       </td>
-                      <td className="px-4 py-3 text-xs">{via(u)}</td>
-                      <td className="px-4 py-3">
+                      <td className="is-small">{via(u)}</td>
+                      <td>
                         <PlanCell user={u} />
                       </td>
-                      <td className="px-4 py-3 text-xs">
+                      <td className="is-small">
                         <Mt5List accounts={u.mt5Accounts} />
                       </td>
-                      <td className="px-4 py-3 text-xs">
+                      <td className="is-small">
                         <LastActive day={u.lastActiveDay} />
                       </td>
-                      <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">{fmtDate(u.createdAt)}</td>
+                      <td className="is-date num">{fmtDate(u.createdAt)}</td>
                       {hasActions && (
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex flex-wrap justify-end gap-2">
+                        <td className="is-act">
+                          <div className="agt-row-acts">
                             {planButton(u)}
                             {promoteButton(u)}
                           </div>
@@ -267,64 +284,46 @@ export default function AgentCustomersPanel({
                 </tbody>
               </table>
             </div>
-            <ul className="divide-y divide-white/5 sm:hidden">
-              {page.users.map((u, i) => (
-                <li key={`${u.email}-${i}`} className="px-4 py-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm text-neutral-100">
-                        {u.nickname || <span className="text-neutral-500">{t('agent.noNickname')}</span>}
-                        {agentBadge(u)}
-                      </p>
-                      <p className="num break-all text-xs text-neutral-400">{u.email}</p>
+            <ul className="agt-mlist sm:hidden">
+              {page.users.map((u, i) => {
+                const plan = planButton(u)
+                const promo = promoteButton(u)
+                return (
+                  <li key={`${u.email}-${i}`} className="agt-mcard">
+                    <div className="agt-mcard-top">
+                      <Person nickname={u.nickname} email={u.email} agent={u.isAgent} badge={agentBadge(u)} />
+                      <PlanBadge plan={u.plan} />
                     </div>
-                    <PlanBadge plan={u.plan} />
-                  </div>
-                  <CardRow label={t('agent.customers.colVia')}>{via(u)}</CardRow>
-                  {planExpiryText(u, t) && (
-                    <CardRow label={t('agent.colExpiry')}>
-                      <span className="num text-neutral-300">{planExpiryText(u, t)}</span>
-                    </CardRow>
-                  )}
-                  <CardRow label={t('agent.colActive')}>
-                    <LastActive day={u.lastActiveDay} />
-                  </CardRow>
-                  <CardRow label={t('agent.colRegistered')}>
-                    <span className="num text-neutral-400">{fmtDate(u.createdAt)}</span>
-                  </CardRow>
-                  <CardRow label={t('agent.colMt5')}>
-                    <Mt5List accounts={u.mt5Accounts} />
-                  </CardRow>
-                  {hasActions && (
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      {planButton(u, true)}
-                      {promoteButton(u, true)}
-                    </div>
-                  )}
-                </li>
-              ))}
+                    <dl className="agt-facts">
+                      <Fact label={t('agent.customers.colVia')} wide>
+                        {via(u)}
+                      </Fact>
+                      <Fact label={t('agent.colActive')}>
+                        <LastActive day={u.lastActiveDay} />
+                      </Fact>
+                      <Fact label={t('agent.colRegistered')}>
+                        <span className="num">{fmtDate(u.createdAt)}</span>
+                      </Fact>
+                      {planExpiryText(u, t) && (
+                        <Fact label={t('agent.colExpiry')} wide>
+                          <span className="num">{planExpiryText(u, t)}</span>
+                        </Fact>
+                      )}
+                      <Fact label={t('agent.colMt5')} wide>
+                        <Mt5List accounts={u.mt5Accounts} />
+                      </Fact>
+                    </dl>
+                    {(plan || promo) && (
+                      <div className={`agt-mcard-acts${plan && promo ? ' has-two' : ''}`}>
+                        {plan}
+                        {promo}
+                      </div>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
-            {pages > 1 && (
-              <div className="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-xs text-neutral-400">
-                <button
-                  type="button"
-                  className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
-                  disabled={offset === 0}
-                  onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-                >
-                  {t('agent.prev')}
-                </button>
-                <span className="num">{t('agent.pageOf', { page: pageNo, pages })}</span>
-                <button
-                  type="button"
-                  className="btn-ghost px-3 py-1.5 text-xs disabled:opacity-40"
-                  disabled={offset + PAGE_SIZE >= total}
-                  onClick={() => setOffset(offset + PAGE_SIZE)}
-                >
-                  {t('agent.next')}
-                </button>
-              </div>
-            )}
+            {total > PAGE_SIZE && <Pager offset={offset} pageSize={PAGE_SIZE} total={total} onChange={setOffset} />}
           </>
         ) : null}
       </div>

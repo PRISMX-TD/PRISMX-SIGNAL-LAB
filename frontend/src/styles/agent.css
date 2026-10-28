@@ -517,25 +517,171 @@
   animation: agt-rise 0.45s var(--ease-out) both;
 }
 
-/* ── 链接卡 / link cards ── */
+/* ── 分区标题 / section heads ──
+   每一区一个标题行：标题 + 紫色人数胶囊 + 一行副标题，这一区的工具（时间范围、搜索框）靠右。
+   One head per section: title, a violet count pill and a subtitle, with the section's
+   own tools (range, search) on the right. */
+.agt-sec {
+  margin-top: 48px;
+}
+.agt-sec-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+.agt-sec-titles {
+  min-width: 0;
+  margin-right: 24px;
+}
+.agt-sec-title {
+  display: flex;
+  align-items: center;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+.agt-sec-count {
+  margin-left: 10px;
+  padding: 0 9px;
+  border-radius: var(--r-xs);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--purple-soft);
+  background: rgb(var(--purple-rgb) / 0.2);
+}
+.agt-sec-sub {
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.agt-sec-tools {
+  width: 100%;
+  margin-top: 14px;
+}
+@media (min-width: 768px) {
+  .agt-sec-tools {
+    width: auto;
+    margin-top: 0;
+  }
+}
+
+/* 搜索框：放大镜画在框里。/ Search box with the magnifier inside. */
+.agt-search {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+.agt-search svg {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  margin-top: -7.5px;
+  color: var(--text-3);
+  pointer-events: none;
+}
+.agt-search .input {
+  height: 40px;
+  padding-left: 38px;
+}
+@media (min-width: 640px) {
+  .agt-search {
+    width: 280px;
+  }
+}
+
+/* 「全部客户」工具栏：手机上三样叠起来，宽屏一条排完、人数靠右。
+   The All-customers toolbar: stacked on phones, one strip with the count on the right. */
+.agt-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-row-gap: 8px;
+  margin-bottom: 16px;
+}
+.agt-toolbar-count {
+  font-size: 12.5px;
+  color: var(--text-3);
+}
+/* 下拉与搜索框同高。/ The dropdown matches the search box height. */
+.agt-toolbar-select .select-trigger {
+  height: 40px;
+}
+@media (min-width: 640px) {
+  .agt-toolbar {
+    display: flex;
+    align-items: center;
+  }
+  .agt-toolbar-select {
+    width: 240px;
+    margin-left: 10px;
+  }
+  .agt-toolbar-count {
+    margin-left: auto;
+    padding-left: 12px;
+    white-space: nowrap;
+  }
+}
+
+/* 说明条：淡紫底 + 发丝框，左边一枚信息图标。/ A faint violet note with an info icon. */
+.agt-callout {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgb(var(--purple-rgb) / 0.07);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.16);
+}
+.agt-callout > svg {
+  margin: 2px 10px 0 0;
+  color: var(--purple-hi);
+}
+.agt-callout p {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+.agt-callout p.is-dim {
+  margin-top: 4px;
+  color: var(--text-3);
+}
+
+/* ── 链接卡 / link cards ──
+   一张票：上半是推荐码、复制与四个数，下半隔一道齿孔（两侧半圆缺口 + 虚线）是开户链接。
+   多条链接时两列；只有一条时整行宽，桌面上左栏推荐码、右栏 2×2 数字格，票根也分左右。
+   A ticket: code, copy buttons and figures on top; past a perforation (half-round notches
+   and a dashed rule) the open-account stub. Two columns with several links; a single link
+   runs full width and splits into code left / 2×2 figures right on desktop. */
 .agt-links {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-gap: 16px;
 }
 @media (min-width: 768px) {
-  .agt-links {
+  .agt-links.is-multi {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+/* 竖排 flex：两栏时同一行的卡被拉成一样高，票根（flex:1）一直铺到卡底，不留一截浅色。
+   A column flex: in two columns the row stretches both cards, and the stub (flex:1) fills
+   down to the card bottom instead of leaving a band of lighter surface. */
 .agt-link {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  padding: 22px 22px 20px;
+  overflow: hidden;
   border-radius: var(--r-lg);
-  background: var(--surface);
-  box-shadow: inset 0 0 0 1px transparent;
-  transition: box-shadow var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
+  background:
+    radial-gradient(70% 90% at 100% 0%, rgb(var(--purple-rgb) / 0.12), rgb(var(--purple-rgb) / 0) 60%),
+    var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  transition: box-shadow var(--dur-base) var(--ease-out);
   animation: agt-rise 0.55s var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 0.06s);
 }
@@ -543,9 +689,10 @@
   cursor: pointer;
 }
 .agt-link.is-pickable:hover {
-  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
 }
-.agt-link.is-active {
+.agt-link.is-active,
+.agt-link.is-active:hover {
   box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.55);
 }
 /* 选中的那张左上角一道短的紫色油墨，和页签的底条同一种笔触。
@@ -553,16 +700,20 @@
 .agt-link.is-active::before {
   content: '';
   position: absolute;
-  top: 22px;
+  top: 24px;
   left: 0;
   width: 3px;
   height: 22px;
   border-radius: 0 3px 3px 0;
   background: var(--purple-hi);
 }
+.agt-link-body {
+  flex: 0 0 auto;
+  padding: 22px 22px 20px;
+}
 .agt-link-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
 }
 .agt-link-label {
@@ -576,12 +727,23 @@
   color: #fff;
 }
 .agt-chip {
+  display: inline-flex;
   flex-shrink: 0;
+  align-items: center;
   padding: 3px 10px;
   border-radius: var(--r-xs);
   font-size: 11.5px;
   color: var(--text-3);
   background: rgba(255, 255, 255, 0.05);
+}
+.agt-chip::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.8;
 }
 .agt-chip.is-on {
   color: var(--up);
@@ -591,14 +753,19 @@
   margin-top: 18px;
 }
 .agt-link-code-label {
-  font-size: 11.5px;
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.08em;
   color: var(--text-3);
 }
 .agt-link-code-value {
   display: block;
-  margin-top: 4px;
-  font-size: 26px;
-  line-height: 1.15;
+  margin-top: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 30px;
+  line-height: 1.1;
   font-weight: 700;
   letter-spacing: 0.12em;
   color: #fff;
@@ -608,12 +775,39 @@
 }
 .agt-link-url {
   display: block;
-  margin-top: 4px;
+  margin-top: 6px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 12px;
   color: var(--text-3);
+}
+.agt-link-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-gap: 8px;
+  margin-top: 18px;
+}
+.agt-link-actions.has-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* 两个按钮等宽分格，文字长（「复制失败，请手动选择」、泰文）时在按钮里折行，不撑出格子。
+   图标与文字的间距用外边距（.btn 的 flex gap 在 Chrome 70 上不生效）。
+   Equal cells; long labels (copy failed, Thai) wrap inside the button instead of spilling
+   out. The icon gap is a margin: .btn's flex gap does nothing on Chrome 70. */
+.agt-link-actions .btn {
+  min-width: 0;
+  height: auto;
+  min-height: 42px;
+  padding: 6px 12px;
+  gap: 0;
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
+  text-align: center;
+}
+.agt-link-actions .btn svg {
+  margin-right: 7px;
 }
 .agt-link-stats {
   display: grid;
@@ -649,45 +843,229 @@
     border-left: 1px solid var(--line);
   }
 }
-.agt-link-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-gap: 8px;
-  margin-top: 8px;
+/* 票根：卡是 overflow:hidden，两枚页面底色的圆只露出里面那半，就是齿孔两头的缺口。
+   The stub: the card clips overflow, so two page-coloured discs show only their inner
+   halves — the notches at both ends of the perforation. */
+.agt-link-stub {
+  position: relative;
+  flex: 1 0 auto;
+  padding: 18px 22px 20px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.14);
 }
-.agt-link-actions.has-two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+.agt-link-stub::before,
+.agt-link-stub::after {
+  content: '';
+  position: absolute;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
-/* 两个按钮等宽分格，文字长（「复制失败，请手动选择」、泰文）时在按钮里折行，不撑出格子。
-   Equal cells; long labels (copy failed, Thai) wrap inside the button instead of spilling out. */
-.agt-link-actions .btn {
-  min-width: 0;
-  height: auto;
-  min-height: 40px;
-  padding: 6px 12px;
-  font-size: 13px;
-  line-height: 1.3;
-  white-space: normal;
-  text-align: center;
+.agt-link-stub::before {
+  left: -9px;
 }
-.agt-notes {
+.agt-link-stub::after {
+  right: -9px;
+}
+@media (min-width: 1024px) {
+  .agt-links.is-single .agt-link-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-column-gap: 48px;
+    padding: 30px 32px 28px;
+  }
+  .agt-links.is-single .agt-link-code-value {
+    font-size: 42px;
+  }
+  .agt-links.is-single .agt-link-actions {
+    margin-top: 26px;
+  }
+  .agt-links.is-single .agt-link-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-gap: 1px;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border-top: 0;
+    border-radius: 18px;
+    background: var(--line);
+  }
+  .agt-links.is-single .agt-link-stats > div {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 18px 20px;
+    border-left: 0;
+    background: #17171d;
+  }
+  .agt-links.is-single .agt-link-stats dd {
+    margin-top: 12px;
+    font-size: 34px;
+  }
+  .agt-links.is-single .agt-link-stub {
+    padding: 22px 32px 26px;
+  }
+}
+
+/* 开户链接（票根里）：说明在左、输入在右；窄的时候上下叠。
+   The open-account link on the stub: explanation left, input right; stacked when narrow. */
+.agt-open-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.agt-open-current {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: var(--text);
+  word-break: break-all;
+}
+.agt-open-current.is-unset {
+  color: var(--text-3);
+}
+.agt-open-explain {
+  margin-top: 6px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.agt-open-edit {
   margin-top: 14px;
+}
+.agt-open-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-gap: 8px;
+}
+.agt-open-form.has-clear {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.agt-open-form .input {
+  height: 40px;
+  font-size: 12.5px;
+}
+.agt-open-form .btn {
+  height: 40px;
+  padding: 0 16px;
+  font-size: 12.5px;
+}
+.agt-open-msg {
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+.agt-open-msg.is-ok {
+  color: var(--up);
+}
+.agt-open-msg.is-err {
+  color: var(--down);
+}
+@media (min-width: 1024px) {
+  .agt-links.is-single .agt-open {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-column-gap: 48px;
+    align-items: center;
+  }
+  .agt-links.is-single .agt-open-edit {
+    margin-top: 0;
+  }
+}
+
+/* 「数据口径说明」折叠框。/ The "how these are counted" fold. */
+.agt-fine {
+  margin-top: 16px;
+  border-radius: 18px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.agt-fine > summary {
+  display: flex;
+  align-items: center;
+  padding: 13px 16px;
+  border-radius: 18px;
+  font-size: 12.5px;
+  color: var(--text-3);
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.agt-fine > summary::-webkit-details-marker {
+  display: none;
+}
+.agt-fine > summary:hover {
+  color: var(--text-2);
+}
+.agt-fine > summary > svg {
+  margin-right: 8px;
+  color: var(--purple-hi);
+}
+.agt-fine-chev {
+  display: inline-flex;
+  margin-left: auto;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.agt-fine[open] .agt-fine-chev {
+  transform: rotate(180deg);
+}
+.agt-fine ul {
+  margin: 0;
+  padding: 0 16px 16px 39px;
+  list-style: none;
+}
+.agt-fine li {
+  position: relative;
   font-size: 12px;
   line-height: 1.7;
   color: var(--text-3);
 }
-.agt-notes p + p {
-  margin-top: 4px;
+.agt-fine li + li {
+  margin-top: 6px;
+}
+.agt-fine li::before {
+  content: '';
+  position: absolute;
+  top: 0.75em;
+  left: -15px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgb(var(--purple-hi-rgb) / 0.6);
 }
 
 /* ── 看板 / overview ──
+   时间范围的胶囊沿用管理看板的组件，这里只换皮：选中的那颗是紫色油墨。
+   The range pills are the admin dashboard's component; only the skin changes here, with the
+   selected pill in violet ink.
    发丝线格：容器底色是线色，格子之间 1px 缝，就是分隔线。
    Hairline grid: the container is the line colour and a 1px gap is the divider. */
+.agt-range [role='group'] {
+  margin-bottom: 0;
+}
+.agt-range [role='group'] > button {
+  padding: 6px 12px;
+  border-radius: var(--r-xs);
+  font-size: 12.5px;
+  color: var(--text-3);
+  background: transparent;
+  box-shadow: none;
+}
+.agt-range [role='group'] > button:hover {
+  color: var(--text-2);
+}
+.agt-range [role='group'] > button[aria-pressed='true'] {
+  color: #fff;
+  background: rgb(var(--purple-rgb) / 0.24);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.4);
+}
 .agt-kpis {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-gap: 1px;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
   overflow: hidden;
   border-radius: var(--r-lg);
   background: var(--line);
@@ -728,6 +1106,19 @@
   line-height: 1.1;
   font-weight: 700;
 }
+.agt-chart {
+  padding: 20px 22px 18px;
+}
+.agt-chart h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+}
+.agt-chart > p {
+  margin: 4px 0 14px;
+  font-size: 12px;
+  color: var(--text-3);
+}
 
 /* ── 名单 / lists ── */
 /* 不加 overflow:hidden：看板的折线图提示框会贴边伸出去。
@@ -735,65 +1126,508 @@
 .agt-sheet {
   border-radius: var(--r-lg);
   background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
 }
-.agt-sheet thead tr {
-  border-bottom: 1px solid var(--line);
-}
-.agt-sheet th {
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  color: var(--text-3);
-  text-transform: none;
-}
-.agt-sheet tbody tr {
-  transition: background-color var(--dur-fast) var(--ease-out);
-}
-.agt-sheet tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
-}
-.agt-search {
+/* 平板宽度下表格不往里挤：给个最小宽度，放不下就在外层横向滚动（邮箱不会被拆成一字一行）。
+   On tablets the table keeps a minimum width and scrolls inside its wrapper instead of
+   squeezing columns until emails break a few letters per line. */
+.agt-table {
   width: 100%;
-  margin-bottom: 12px;
+  min-width: 720px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 13px;
 }
-@media (min-width: 640px) {
-  .agt-search {
-    max-width: 320px;
+.agt-table.is-wide {
+  min-width: 920px;
+}
+@media (max-width: 1023px) {
+  .agt-table .agt-person-mail,
+  .agt-table .agt-via-mail {
+    white-space: nowrap;
+    word-break: normal;
   }
 }
+.agt-table th {
+  padding: 14px 16px 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--line);
+}
+.agt-table td {
+  padding: 14px 16px;
+  vertical-align: middle;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+.agt-table th:first-child,
+.agt-table td:first-child {
+  padding-left: 22px;
+}
+.agt-table th:last-child,
+.agt-table td:last-child {
+  padding-right: 22px;
+}
+.agt-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.agt-table tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.agt-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.022);
+}
+.agt-table .is-small {
+  font-size: 12px;
+}
+.agt-table .is-date {
+  font-size: 12px;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.agt-table .is-act {
+  text-align: right;
+  white-space: nowrap;
+}
+.agt-table .is-act .btn,
+.agt-mcard-acts .btn {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.agt-row-acts {
+  display: inline-flex;
+}
+.agt-row-acts .btn + .btn {
+  margin-left: 8px;
+}
 
-/* ── 团队树 / team tree ── */
-.agt-node {
-  padding-top: 16px;
-  padding-bottom: 16px;
-  padding-right: 18px;
-}
-.agt-node.is-self {
-  background: linear-gradient(90deg, rgb(var(--purple-rgb) / 0.1), rgb(var(--purple-rgb) / 0) 70%);
-}
-.agt-node-main {
-  display: flex;
-  align-items: flex-start;
-  flex-wrap: wrap;
-}
+/* 人：首字头像 + 名字 + 邮箱。推荐官的头像套紫圈。
+   A person: initial avatar, name, email. Ambassadors wear a violet ring. */
 .agt-avatar {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
-  margin-right: 12px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   font-size: 15px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--text-2);
   background: var(--nest);
   box-shadow: inset 0 0 0 1px var(--line-hi);
 }
+.agt-avatar.is-agent {
+  color: var(--purple-soft);
+  background: rgb(var(--purple-rgb) / 0.16);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.45);
+}
+.agt-person {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.agt-person .agt-avatar {
+  width: 34px;
+  height: 34px;
+  margin-right: 12px;
+  font-size: 13.5px;
+}
+.agt-person.is-sm .agt-avatar {
+  width: 28px;
+  height: 28px;
+  margin-right: 10px;
+  font-size: 12px;
+}
+.agt-person-text {
+  min-width: 0;
+}
+.agt-person-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+}
+.agt-person-name > span:first-child {
+  min-width: 0;
+  max-width: 100%;
+  margin-right: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.agt-person-name .is-dim {
+  font-weight: 500;
+  color: var(--text-3);
+}
+.agt-person.is-sm .agt-person-name {
+  font-size: 13px;
+}
+.agt-person-mail {
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  word-break: break-all;
+}
+.agt-tag {
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.05);
+}
+.agt-tag.is-violet {
+  color: var(--purple-soft);
+  background: rgb(var(--purple-rgb) / 0.18);
+}
+
+/* 等级：FREE 是灰胶囊，PRO 是紫色油墨胶囊。/ Tier: grey for FREE, violet ink for PRO. */
+.agt-plan {
+  display: inline-block;
+  padding: 0 8px;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.agt-plan.is-pro {
+  color: #e4dcff;
+  background: rgb(var(--purple-rgb) / 0.3);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.4);
+}
+.agt-plan-until {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 最近活跃：近 7 日绿点，更早灰点，从没来过空心圈。
+   Last active: green within 7 days, grey for older, hollow for never. */
+.agt-seen {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.agt-seen > i {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: rgb(var(--text-3-rgb) / 0.55);
+}
+.agt-seen.is-recent {
+  color: var(--text);
+}
+.agt-seen.is-recent > i {
+  background: var(--up);
+  box-shadow: 0 0 0 3px rgb(var(--up-rgb) / 0.16);
+}
+.agt-seen.is-never > i {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgb(var(--text-3-rgb) / 0.6);
+}
+
+/* 「来自」：上级推荐官的首字小头像 + 名字。/ "Came through": a small initial avatar and name. */
+.agt-via {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+}
+.agt-via-dot {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-right: 8px;
+  border-radius: 50%;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--purple-soft);
+  background: rgb(var(--purple-rgb) / 0.16);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.35);
+}
+.agt-via-text {
+  min-width: 0;
+}
+.agt-via-name {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+}
+.agt-via-mail {
+  display: block;
+  font-size: 11px;
+  color: var(--text-3);
+  word-break: break-all;
+}
+.agt-dim {
+  color: var(--text-3);
+}
+
+/* 手机卡：人和等级在上，下面一块事实格。/ Phone card: person and tier, then a fact grid. */
+.agt-mlist {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agt-mcard {
+  padding: 16px;
+}
+.agt-mcard + .agt-mcard {
+  border-top: 1px solid var(--line);
+}
+.agt-mcard-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.agt-mcard-top .agt-person {
+  flex: 1 1 auto;
+  margin-right: 12px;
+}
+.agt-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-gap: 12px 14px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.agt-fact {
+  min-width: 0;
+}
+.agt-fact.is-wide {
+  grid-column: 1 / -1;
+}
+.agt-fact dt {
+  font-size: 11px;
+  color: var(--text-3);
+}
+.agt-fact dd {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--text-2);
+  word-break: break-word;
+}
+.agt-mcard-acts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-gap: 8px;
+  margin-top: 12px;
+}
+.agt-mcard-acts.has-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.agt-mcard-acts .btn {
+  width: 100%;
+  height: 38px;
+}
+
+.agt-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-3);
+}
+.agt-pager .btn {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+.agt-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40px 20px;
+  text-align: center;
+}
+.agt-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  color: var(--purple-hi);
+  background: rgb(var(--purple-rgb) / 0.12);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.25);
+}
+.agt-empty p {
+  max-width: 36ch;
+  margin-top: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+/* ── 团队树 / team tree ──
+   每个推荐官一张节点卡，卡之间画树线：竖线从上级头像正下方落下，经过每个下级时伸出一道
+   横线接到他的头像；最后一个下级处竖线圆角拐进去收尾。线的位置都按头像中心算：
+   手机头像 32px、卡内边距 14px → 中心在 (30, 30)；宽屏头像 40px、内边距 18/20px → (40, 38)。
+   第 3、4 层（.is-deep）改成窄台阶：每层只缩 24px，竖线贴着上级卡的左边落下——层级徽标只有
+   一级推荐官看得到，别人全靠缩进分辨谁在谁下面，所以不能缩成 0；第 5 层起（.is-flat，只有
+   管理员调高层级上限才会出现）才不再缩进，免得卡被挤没。
+   One node card per ambassador, joined by tree lines: a rail drops from under the parent's
+   avatar, a tick branches into each child's avatar, and the last child gets a rounded
+   elbow. Positions follow the avatar centre: (30, 30) on phones (32px avatar, 14px
+   padding), (40, 38) wider up (40px avatar, 18/20px padding). Depths 3–4 (.is-deep) take a
+   narrow 24px step with the rail near the parent card's edge — only top-level ambassadors get
+   level badges, so everyone else reads the hierarchy from the indent alone. Indenting stops
+   at depth 5 (.is-flat, reachable only when an admin raises the depth cap) so cards keep a
+   usable width. */
+.agt-tree {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.agt-tree-item + .agt-tree-item {
+  margin-top: 10px;
+}
+.agt-tree.is-sub {
+  position: relative;
+  margin-top: 10px;
+  margin-left: 30px;
+  padding-left: 14px;
+}
+.agt-tree.is-sub > .agt-tree-item {
+  position: relative;
+}
+.agt-tree.is-sub > .agt-tree-item::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  bottom: 0;
+  left: -14px;
+  width: 1px;
+  background: var(--line-hi);
+}
+.agt-tree.is-sub > .agt-tree-item::after {
+  content: '';
+  position: absolute;
+  top: 30px;
+  left: -14px;
+  width: 10px;
+  height: 1px;
+  background: var(--line-hi);
+}
+.agt-tree.is-sub > .agt-tree-item:last-child::before {
+  bottom: auto;
+  width: 10px;
+  height: 41px;
+  border-bottom-left-radius: 10px;
+  border-left: 1px solid var(--line-hi);
+  border-bottom: 1px solid var(--line-hi);
+  background: none;
+}
+.agt-tree.is-sub > .agt-tree-item:last-child::after {
+  display: none;
+}
+@media (min-width: 640px) {
+  .agt-tree.is-sub {
+    margin-left: 40px;
+    padding-left: 20px;
+  }
+  .agt-tree.is-sub > .agt-tree-item::before,
+  .agt-tree.is-sub > .agt-tree-item::after {
+    left: -20px;
+  }
+  .agt-tree.is-sub > .agt-tree-item::after {
+    top: 38px;
+    width: 16px;
+  }
+  .agt-tree.is-sub > .agt-tree-item:last-child::before {
+    width: 16px;
+    height: 49px;
+    border-bottom-left-radius: 12px;
+  }
+}
+/* 放在宽屏规则之后，各种屏宽都压得过 .is-sub。/ After the wide rules so they beat .is-sub at every width. */
+.agt-tree.is-deep {
+  margin-left: 12px;
+  padding-left: 12px;
+}
+.agt-tree.is-deep > .agt-tree-item::before,
+.agt-tree.is-deep > .agt-tree-item::after {
+  left: -12px;
+}
+.agt-tree.is-deep > .agt-tree-item::after {
+  width: 8px;
+}
+.agt-tree.is-deep > .agt-tree-item:last-child::before {
+  width: 8px;
+  border-bottom-left-radius: 8px;
+}
+.agt-tree.is-flat {
+  margin-left: 0;
+  padding-left: 0;
+}
+.agt-tree.is-flat > .agt-tree-item::before,
+.agt-tree.is-flat > .agt-tree-item::after {
+  display: none;
+}
+.agt-tree-empty {
+  margin-top: 10px;
+  padding: 18px 20px;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.agt-node {
+  position: relative;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--line);
+  animation: agt-rise 0.5s var(--ease-out) both;
+}
+.agt-node.is-self {
+  background:
+    radial-gradient(120% 160% at 0% 0%, rgb(var(--purple-rgb) / 0.16), rgb(var(--purple-rgb) / 0) 55%),
+    var(--surface);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.24);
+}
+/* 手机：头像 + 名字一行，下面四个数，再下面操作。
+   Phones: avatar and name, then the four figures, then the actions. */
+.agt-node-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-areas: 'av who' 'stats stats' 'act act';
+  grid-column-gap: 12px;
+}
+.agt-node-row > .agt-avatar {
+  grid-area: av;
+  align-self: start;
+  width: 32px;
+  height: 32px;
+  font-size: 13px;
+}
 /* 自己的头像套一圈全息箔，与凭证卡上的封印同一组色。
-   Your own avatar wears a holographic foil ring, the same foil as the card seal. */
-.agt-node.is-self .agt-avatar {
+   Your own avatar wears a holographic foil ring, the same foil as the card seal; the
+   child selector keeps it off the client avatars listed inside your card. */
+.agt-node.is-self > .agt-node-row > .agt-avatar {
   color: #fff;
   background:
     linear-gradient(#1d1b26, #1d1b26) padding-box,
@@ -802,7 +1636,8 @@
   box-shadow: none;
 }
 .agt-node-who {
-  flex: 1 1 180px;
+  grid-area: who;
+  align-self: center;
   min-width: 0;
 }
 .agt-node-name {
@@ -811,100 +1646,324 @@
   align-items: center;
   font-size: 14.5px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--text);
 }
-.agt-node-name > span {
-  margin-right: 6px;
+.agt-node-name-text {
+  min-width: 0;
+  max-width: 100%;
+  margin-right: 8px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.agt-tag {
-  padding: 2px 8px;
-  border-radius: var(--r-xs);
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-3);
-  background: rgba(255, 255, 255, 0.05);
+.agt-node-name .agt-tag + .agt-tag {
+  margin-left: 6px;
 }
-.agt-tag.is-violet {
-  color: var(--purple-soft);
-  background: rgb(var(--purple-rgb) / 0.18);
-}
+/* 先按空格折行，放不下的长邮箱才硬断（break-all 会把日期也拆成「24/ 10/2026」）。
+   Wrap at spaces first and hard-break only an over-long address (break-all also split dates). */
 .agt-node-sub {
   margin-top: 2px;
   font-size: 12px;
   color: var(--text-3);
-  word-break: break-all;
-}
-.agt-node-actions {
-  display: flex;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-.agt-node-actions .btn {
-  height: 32px;
-  margin-left: 8px;
-  padding: 0 12px;
-  font-size: 12px;
-}
-@media (max-width: 639px) {
-  /* 基准 0：窄屏、深缩进时名字仍排在头像右边；按钮行自己占满一行。
-     Basis 0 keeps the name beside the avatar on narrow phones; the actions take their own row. */
-  .agt-node-who {
-    flex-basis: 0%;
-  }
-  .agt-node-actions {
-    width: 100%;
-    margin-top: 2px;
-    padding-left: 50px;
-  }
-  /* 用上外边距代替 flex gap（Chrome 70）：按钮折行后上下也隔开 8px。
-     Top margin instead of flex gap (Chrome 70), so wrapped buttons keep 8px between rows. */
-  .agt-node-actions .btn {
-    margin: 8px 8px 0 0;
-  }
+  overflow-wrap: break-word;
 }
 .agt-node-stats {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 12px 0 0 50px;
+  grid-area: stats;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 14px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 .agt-node-stats > div {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
   min-width: 0;
-  padding: 0 10px 6px 0;
+  padding: 0 8px;
+}
+.agt-node-stats > div:first-child {
+  padding-left: 0;
+}
+.agt-node-stats > div + div {
+  border-left: 1px solid var(--line);
 }
 .agt-node-stats dt {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-size: 11.5px;
+  font-size: 11px;
+  line-height: 1.35;
   color: var(--text-3);
 }
 .agt-node-stats dd {
-  margin: 2px 0 0;
-  font-size: 17px;
+  margin: 4px 0 0;
+  font-size: 18px;
+  line-height: 1.15;
   font-weight: 600;
   color: var(--text);
 }
-@media (min-width: 640px) {
-  .agt-node-stats {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    max-width: 560px;
-  }
-  .agt-node-stats > div + div {
-    padding-left: 12px;
-    border-left: 1px solid var(--line);
-  }
+.agt-node-actions {
+  display: grid;
+  grid-area: act;
+  grid-template-columns: minmax(0, 1fr);
+  grid-gap: 8px;
+  margin-top: 12px;
+}
+.agt-node-actions.has-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.agt-node-actions .btn {
+  min-width: 0;
+  height: 36px;
+  padding: 0 14px;
+  gap: 0;
+  font-size: 12.5px;
+}
+.agt-node-actions .btn svg {
+  margin-left: 6px;
+}
+.agt-node-actions .btn.is-danger {
+  color: var(--down);
+}
+.agt-node-actions .btn.is-danger:hover:not(:disabled) {
+  color: var(--down);
+  background: var(--down-bg);
+  border-color: rgb(var(--down-rgb) / 0.35);
 }
 .agt-node-toggle {
-  margin: 6px 0 0 50px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  text-align: left;
+  color: var(--text-3);
+  background: none;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.agt-node-toggle:hover {
+  color: var(--text-2);
+}
+.agt-node-toggle > svg {
+  margin-left: auto;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.agt-node-toggle[aria-expanded='true'] > svg {
+  transform: rotate(180deg);
+}
+/* 手机上四个数排成 2×2：一行四个时深层卡里每格只剩 40 来像素，四位数就压到隔壁。
+   Phones show the figures 2×2: four across leaves deep cards about 40px a cell, and a
+   four-digit count runs into its neighbour. */
+@media (max-width: 639px) {
+  .agt-node-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-row-gap: 10px;
+  }
+  .agt-node-stats > div:nth-child(odd) {
+    padding-left: 0;
+    border-left: 0;
+  }
+}
+/* 竖排的操作格（768 以下）里按钮文字可以折行，长译文（「Remove ambassador」）不会撑出按钮。
+   In the stacked action cells (below 768) labels may wrap, so long translations stay
+   inside their button. */
+@media (max-width: 767px) {
+  .agt-node-actions .btn {
+    height: auto;
+    min-height: 36px;
+    padding: 6px 10px;
+    line-height: 1.3;
+    white-space: normal;
+    text-align: center;
+  }
+}
+/* 640 起头像放大、卡内边距加宽（树线位置跟着变），排法仍是竖排；768 起操作挪到名字右边。
+   From 640 the avatar and padding grow (the tree lines follow) but the card stays stacked;
+   from 768 the actions move up beside the name. */
+@media (min-width: 640px) {
+  .agt-node {
+    padding: 18px 20px;
+  }
+  .agt-node-row {
+    grid-template-columns: 40px minmax(0, 1fr);
+    grid-column-gap: 14px;
+  }
+  .agt-node-row > .agt-avatar {
+    width: 40px;
+    height: 40px;
+    font-size: 15px;
+  }
+  /* 卡内的展开条与客户列表对齐名字那一栏。/ The toggle and clients align with the name column. */
+  .agt-node-toggle {
+    width: calc(100% - 54px);
+    margin-left: 54px;
+  }
+  .agt-clients,
+  .agt-clients-more,
+  .agt-clients-note {
+    margin-left: 54px;
+  }
+}
+@media (min-width: 768px) {
+  .agt-node-row {
+    grid-template-columns: 40px minmax(0, 1fr) auto;
+    grid-template-areas: 'av who act' '. stats stats';
+  }
+  .agt-node-actions {
+    display: flex;
+    align-self: start;
+    justify-content: flex-end;
+    margin-top: 2px;
+  }
+  .agt-node-actions .btn + .btn {
+    margin-left: 8px;
+  }
+  .agt-node-stats {
+    max-width: 520px;
+    margin-top: 12px;
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+.agt-node-spacer {
+  display: none;
+}
+/* 1280 起一行排完：头像、名字、四个数、操作。卡的右边缘本来就是齐的，各张卡操作栏一样宽
+   （自己那张靠 .agt-node-spacer 补齐），数字列就对得齐。这一行定宽的部分约 750px，
+   再早切过来，深层卡的名字栏就被挤成 0。
+   From 1280 everything fits one row: avatar, name, figures, actions. Card right edges
+   already align, so equal-width actions (your own card padded by .agt-node-spacer) line the
+   figures up. The fixed part of this row is about 750px; switching any earlier squeezes the
+   name column of deep cards to nothing. */
+@media (min-width: 1280px) {
+  .agt-node-row {
+    grid-template-columns: 40px minmax(0, 1fr) auto auto;
+    grid-template-areas: 'av who stats act';
+    align-items: center;
+  }
+  .agt-node-stats {
+    grid-template-columns: repeat(4, 92px);
+    max-width: none;
+    margin: 0 18px 0 0;
+  }
+  .agt-node-stats > div,
+  .agt-node-stats > div:first-child {
+    padding: 0 14px;
+    border-left: 1px solid var(--line);
+  }
+  .agt-node-actions {
+    align-self: center;
+    margin-top: 0;
+  }
+  .agt-node-spacer {
+    display: inline-flex;
+    visibility: hidden;
+  }
+}
+
+/* 卡内展开的直属客户。/ Direct clients, expanded inside the card. */
+.agt-clients {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-gap: 6px;
+  /* 只设上下：左边距在宽屏上要让给对齐名字栏的 54px。/ Top and bottom only: wider up, margin-left is the 54px name-column inset. */
+  margin-top: 10px;
+  margin-bottom: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 1280px) {
+  .agt-clients {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.agt-client {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+/* 768 以下套餐与最近活跃排在名字下面，放不下就折行；间距全用外边距（Chrome 70 不认 flex gap），
+   折下去的一段从左边起，不带前一项的间隔。
+   Below 768 the plan and last-active line sits under the name and wraps when it must. All
+   spacing is margins (Chrome 70 ignores flex gap), so a wrapped piece starts flush left. */
+.agt-client-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 4px 0 0 38px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.agt-client-meta > * {
+  margin: 4px 10px 0 0;
+}
+.agt-client-seen {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+.agt-client-seen > span:first-child {
+  margin-right: 6px;
+}
+.agt-client-seen .agt-seen {
+  white-space: normal;
+}
+@media (min-width: 768px) {
+  .agt-client {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .agt-client .agt-person {
+    flex: 1 1 auto;
+    margin-right: 10px;
+  }
+  .agt-client-meta {
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+    margin: 0;
+  }
+  .agt-client-meta > * {
+    margin: 0 0 0 10px;
+  }
+  .agt-client-meta > *:first-child {
+    margin-left: 0;
+  }
+  .agt-client-seen {
+    flex-wrap: nowrap;
+  }
+  .agt-client-seen .agt-seen {
+    white-space: nowrap;
+  }
+}
+.agt-clients-more {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
   font-size: 12.5px;
   color: var(--purple-hi);
   background: none;
   border: 0;
   cursor: pointer;
 }
-.agt-node-toggle:hover {
+.agt-clients-more:hover {
   color: var(--purple-soft);
+}
+.agt-clients-more svg {
+  margin-left: 6px;
+}
+.agt-clients-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.agt-clients-note.is-err {
+  color: var(--down);
 }
 
 /* ── 动效 / motion ── */
@@ -943,7 +2002,8 @@
   .agt-stats-lead,
   .agt-stats-row > div,
   .agt-panel,
-  .agt-link {
+  .agt-link,
+  .agt-node {
     animation: none;
   }
   .agt-card-sheen::after {
@@ -952,7 +2012,9 @@
   .agt-card,
   .agt-tab,
   .agt-tab::after,
-  .agt-tab-index {
+  .agt-tab-index,
+  .agt-fine-chev,
+  .agt-node-toggle > svg {
     transition: none;
   }
 }

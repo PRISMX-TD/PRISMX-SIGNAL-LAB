@@ -1278,6 +1278,7 @@
   "agent": {
     "colAction": "Thao tác",
     "overview": {
+      "title": "Hiệu quả liên kết",
       "customers": "Khách hàng",
       "activityHint": "Chỉ tính khách đăng ký qua liên kết này. Hoạt động = có mở bất kỳ trang nào trong ngày, ngày tính theo UTC+8."
     },
@@ -1334,6 +1335,7 @@
     "copyInvite": "Sao chép link mời",
     "copyCompetition": "Sao chép link giải đấu",
     "competitionLinkNote": "Link giải đấu cố định: khi mở sẽ hiển thị giải đấu đang được nền tảng giới thiệu, người đăng ký qua link này vẫn được tính là khách của bạn.",
+    "notesTitle": "Ghi chú & lưu ý",
     "openAccount": {
       "title": "Link mở tài khoản của tôi",
       "explain": "Khi khách vào trang giải đấu qua link của bạn và bấm “Mở tài khoản”, họ sẽ được chuyển tới link này và tài khoản được tính cho bạn.",
