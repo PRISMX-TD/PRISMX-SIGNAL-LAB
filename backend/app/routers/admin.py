@@ -686,6 +686,60 @@ def mark_email_verified(
     return _user_out(target, account_count, _agent_extra(db, [target]))
 
 
+@router.get("/users/{user_id}/overview", response_model=dict)
+def user_overview(
+    user_id: str,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """用户档案抽屉（2026-10-28）：管理端任何列表点用户名打开。一次给齐——用户表那一行的
+    数据、客户卡片同一份资料（MT5、比赛、付费总额，admin 视角不脱敏）、最近登录 IP 与
+    同 IP 的其他账户数、最近动态时间线。只读。
+    The user drawer (2026-10-28), opened from any admin list: the user-table row, the
+    customer-card profile (MT5, competitions, paid total — unmasked for admins), recent
+    login IPs with the count of other accounts on them, and the recent-activity timeline.
+    Read-only."""
+    from app.models import UserIp
+    from app.services.deps import staff_ctx_for
+    from app.services.support_view import serialize_customer
+    from app.services.user_activity import recent_activity
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    ctx = staff_ctx_for(admin)
+    account_count = db.query(func.count(MT5Account.id)).filter(MT5Account.user_id == target.id).scalar() or 0
+    ips = (
+        db.query(UserIp)
+        .filter(UserIp.user_id == target.id)
+        .order_by(UserIp.last_seen_at.desc())
+        .limit(5)
+        .all()
+    )
+    shared = 0
+    if ips:
+        shared = (
+            db.query(func.count(func.distinct(UserIp.user_id)))
+            .filter(UserIp.ip.in_([r.ip for r in ips]), UserIp.user_id != target.id)
+            .scalar()
+            or 0
+        )
+    return {
+        "user": _user_out(target, account_count, _agent_extra(db, [target])).model_dump(mode="json"),
+        "customer": serialize_customer(db, target, ctx),
+        "ips": [
+            {
+                "ip": r.ip,
+                "place": " ".join(x for x in (r.country, r.province, r.city) if x) or None,
+                "lastSeenAt": r.last_seen_at,
+            }
+            for r in ips
+        ],
+        "sameIpUsers": int(shared),
+        "activity": recent_activity(db, target, ctx),
+    }
+
+
 # ---------- 平台设置：合作券商锁 / platform settings: partner-broker lock ----------
 
 def _broker_settings_out(data: dict) -> AdminBrokerSettings:

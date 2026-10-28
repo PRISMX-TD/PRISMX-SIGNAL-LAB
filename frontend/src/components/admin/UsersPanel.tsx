@@ -14,6 +14,7 @@ import { adminApi, isAbortError } from '../../api/client'
 import { fmtDayShort, fmtTime, localizeApiError } from '../../api/utils'
 import type { AdminAgentTreeNode, AdminUser, InviteLink, UserPlan, UserRole } from '../../api/types'
 import ConfirmModal from '../ConfirmModal'
+import Copyable, { copyToClipboard, flashCopied } from '../Copyable'
 import Pager from '../Pager'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
@@ -23,6 +24,8 @@ import type { LogsPreset } from './ActivityLogPanel'
 import DisableUserModal from './DisableUserModal'
 import { IconClose, IconGlobe, IconHistory, IconSearch } from './console/consoleIcons'
 import UserIpSheet from './users/UserIpSheet'
+import { OpenUserButton, useUserDrawer } from './users/UserOverview'
+import { downloadUsersCsv } from './users/usersCsv'
 import { attributionOptions } from './invite/inviteLinkLogic'
 import { isUserDisabled } from './userStatus'
 
@@ -248,6 +251,55 @@ export default function UsersPanel({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // 已经在用户分区时，档案抽屉里的「在用户列表中查看」只改了 ?q=，面板不会重挂载：这里接住再搜一次。
+  // When already on this section, the drawer's "find in list" only changes ?q= without a remount:
+  // pick it up here and search again.
+  const linkedQ = searchParams.get('q')
+  const firstLinkedQ = useRef(true)
+  useEffect(() => {
+    if (firstLinkedQ.current) {
+      firstLinkedQ.current = false
+      return
+    }
+    if (!linkedQ) return
+    setQuery(linkedQ)
+    setSelectedIds(new Set())
+    void load({ q: linkedQ, page: 0 })
+    const next = new URLSearchParams(searchParams)
+    next.delete('q')
+    setSearchParams(next, { replace: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkedQ])
+
+  const drawer = useUserDrawer()
+  const [exporting, setExporting] = useState(false)
+  // 导出 CSV：按当前搜索与筛选把全部页都拉下来（每页 200），不只当前这一页。
+  // CSV export: every page for the current search and filters (200 per request), not just this page.
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const all: AdminUser[] = []
+      for (let offset = 0; ; offset += 200) {
+        const r = await adminApi.listUsers({
+          q: query || undefined,
+          plan: planFilter || undefined,
+          inviteCode: inviteFilter || undefined,
+          agent: agentFilter || undefined,
+          limit: 200,
+          offset,
+        })
+        all.push(...r.users)
+        if (r.users.length < 200 || all.length >= r.total) break
+      }
+      downloadUsersCsv(all, (code) => (code ? linkLabel(code) : ''))
+      onToast('ok', t('admin.exportCsvDone', { n: all.length }))
+    } catch (err) {
+      onToast('err', err instanceof Error ? localizeApiError(err.message) : t('common.error'))
+    } finally {
+      setExporting(false)
+    }
+  }
 
   // 搜索与翻页都回到第一页并清空勾选。
   // 清勾选是有意的：批量操作是本页最危险的动作，而"选中的人跨页留着、屏幕上却
@@ -596,6 +648,9 @@ export default function UsersPanel({
           />
         </div>
         <div className="adm-toolbar-end">
+          <button type="button" className="adm-btn" title={t('admin.exportCsvHint')} disabled={exporting || total === 0} onClick={() => void exportCsv()}>
+            {exporting ? t('common.loading') : t('admin.exportCsv')}
+          </button>
           <span className="adm-count">{t('admin.totalCount', { n: total })}</span>
           <div className="adm-filter">
             <span>{t('admin.perPage')}</span>
@@ -686,21 +741,27 @@ export default function UsersPanel({
                     </td>
                     <td>
                       <div className="flex min-w-0 items-start gap-3">
-                        <Avatar name={u.nickname || u.email} size={34} tone={u.role === 'user' ? 'neutral' : 'staff'} />
+                        {/* 头像打开用户档案；昵称 / 邮箱 / 手机号点一下复制（2026-10-28）
+                            The avatar opens the profile; nickname / email / phone copy on click */}
+                        <OpenUserButton userId={u.id}>
+                          <Avatar name={u.nickname || u.email} size={34} tone={u.role === 'user' ? 'neutral' : 'staff'} />
+                        </OpenUserButton>
                         <div className="min-w-0 max-w-[196px]">
                           {/* 昵称：没设过就不占行 / nickname: omitted when unset */}
                           {u.nickname && (
-                            <div className="truncate text-[13px] font-semibold text-neutral-50" title={u.nickname}>
-                              {u.nickname}
+                            <div className="truncate text-[13px] font-semibold text-neutral-50">
+                              <Copyable text={u.nickname} label={t('supportDesk.copy.nickname')} />
                             </div>
                           )}
-                          <div className={`truncate font-mono text-xs ${u.nickname ? 'text-neutral-400' : 'text-neutral-100'}`} title={u.email}>
-                            {u.email}
+                          <div className={`truncate font-mono text-xs ${u.nickname ? 'text-neutral-400' : 'text-neutral-100'}`}>
+                            <Copyable text={u.email} label={t('supportDesk.copy.email')} />
                           </div>
                           <div className="mt-1 flex items-center gap-2 whitespace-nowrap text-[11px] text-neutral-500">
                             {/* 手机号：存量用户为空，用「-」而不是留白，否则看起来像渲染坏了。
                                 Empty for grandfathered users; a dash, not blank space. */}
-                            <span className="font-mono text-neutral-400">{u.phone || '-'}</span>
+                            <span className="font-mono text-neutral-400">
+                              {u.phone ? <Copyable text={u.phone} label={t('supportDesk.copy.phone')} /> : '-'}
+                            </span>
                             <span aria-hidden="true" className="h-2.5 w-px bg-white/10" />
                             <span title={fmtTime(u.createdAt)}>{shortStamp(u.createdAt)}</span>
                           </div>
@@ -821,8 +882,9 @@ export default function UsersPanel({
                         {u.isAgent ? (
                           <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-prism-200">{t('admin.agentTag')}</span>
                         ) : u.agentUserId ? (
-                          <span className="text-neutral-300" title={u.agentEmail ?? undefined}>
-                            {t('admin.colAgent')}: {u.agentEmail || agentLabel(u.agentUserId)}
+                          <span className="text-neutral-300">
+                            {t('admin.colAgent')}:{' '}
+                            {u.agentEmail ? <Copyable text={u.agentEmail} label={t('supportDesk.copy.email')} /> : agentLabel(u.agentUserId)}
                           </span>
                         ) : (
                           <span className="text-neutral-600">{t('admin.agentNone')}</span>
@@ -852,6 +914,17 @@ export default function UsersPanel({
                         >
                           {savingId === u.id ? t('common.loading') : t('common.save')}
                         </button>
+                        {/* 用户档案：资料、MT5、IP、最近动态 / the user profile drawer */}
+                        {drawer && (
+                          <button
+                            type="button"
+                            className="adm-btn"
+                            title={t('admin.userDrawer.openHint')}
+                            onClick={() => drawer.openUser(u.id)}
+                          >
+                            {t('admin.userDrawer.open')}
+                          </button>
+                        )}
                         {/* 跳到操作日志并只看这个人 / jump to the activity log filtered to this user */}
                         <button
                           type="button"
@@ -994,6 +1067,20 @@ export default function UsersPanel({
                 </button>
                 <button type="button" className="adm-btn" onClick={() => onEmailUsers(Array.from(selectedIds))}>
                   {t('admin.bulkEmail')}
+                </button>
+                {/* 复制勾选的人的邮箱，一行一个 / copy the ticked users' emails, one per line */}
+                <button
+                  type="button"
+                  className="adm-btn"
+                  onClick={(e) => {
+                    const el = e.currentTarget
+                    const emails = users.filter((u) => selectedIds.has(u.id)).map((u) => u.email)
+                    void copyToClipboard(emails.join('\n')).then((ok) =>
+                      flashCopied(el, ok ? t('admin.copyEmailsDone', { n: emails.length }) : t('supportDesk.copy.failed'), !ok),
+                    )
+                  }}
+                >
+                  {t('admin.copyEmails')}
                 </button>
                 <button type="button" className="adm-btn" onClick={() => onAssignUsers(Array.from(selectedIds))}>
                   {t('admin.support.bulkAssign')}

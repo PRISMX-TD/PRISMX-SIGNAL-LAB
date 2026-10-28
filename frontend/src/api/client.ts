@@ -9,6 +9,7 @@ import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailCont
 import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { AdminAgentTree, AgentTeam, AgentTreeUser, AgentTreeUsers } from './types'
+import type { AdminUserOverview } from './supportTypes'
 import type { AdminFollowUpRecord, AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportProgress, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
 import { readJson, readStorage, removeStorage, writeJson, writeStorage } from '../utils/safeStorage'
@@ -1574,6 +1575,8 @@ export const adminApi = {
   // 用户分布 / 登录 IP / 同 IP 账户（rev 48，仅管理员）
   geoDistribution: (scope: GeoScope) => request<AdminGeoDistribution>(`/admin/geo-distribution?scope=${scope}`),
   userIps: (userId: string) => request<AdminUserIp[]>(`/admin/users/${encodeURIComponent(userId)}/ips`),
+  // 用户档案抽屉：资料 + MT5 + IP + 最近动态 / the user drawer: profile, MT5, IPs, recent activity
+  userOverview: (userId: string) => request<AdminUserOverview>(`/admin/users/${encodeURIComponent(userId)}/overview`),
   ipUsers: (ip: string) => request<AdminIpUser[]>(`/admin/ips/${encodeURIComponent(ip)}/users`),
   netQuality: () => request<AdminNetQuality>('/admin/net-quality'),
   systemStatus: () => request<AdminSystemStatus>('/admin/system-status'),
@@ -1862,7 +1865,7 @@ export const adminApi = {
         method: 'POST',
         body: JSON.stringify({ body, ...opts }),
       }),
-    updateTicket: (id: string, patch: { status?: TicketStatus; priority?: TicketPriority }) =>
+    updateTicket: (id: string, patch: { status?: TicketStatus; priority?: TicketPriority; category?: TicketCategory; title?: string }) =>
       request<Ticket>(`/admin/tickets/${encodeURIComponent(id)}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
@@ -2300,6 +2303,11 @@ export const supportApi = {
     post<{ note: FollowUpNote; followUp: FollowUp }>(`/support/follow-ups/${sid(id)}/notes`, note),
   templates: (lang?: string) =>
     request<{ items: SupportTemplate[] }>(`/support/templates${lang ? `?lang=${encodeURIComponent(lang)}` : ''}`),
+  // 内部客服可新建 / 修改快捷回复（外包 403）/ internal agents may add or edit canned replies (outsourced: 403)
+  createTemplate: (tpl: { title: string; body: string; lang?: string | null }) =>
+    post<{ template: SupportTemplate }>('/support/templates', tpl),
+  updateTemplate: (id: string, tpl: { title?: string; body?: string; lang?: string | null }) =>
+    request<{ template: SupportTemplate }>(`/support/templates/${sid(id)}`, { method: 'PATCH', body: JSON.stringify(tpl) }),
 }
 
 export const adminSupportApi = {

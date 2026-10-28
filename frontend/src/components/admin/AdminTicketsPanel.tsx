@@ -10,19 +10,23 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { adminApi, adminSupportApi, isAbortError } from '../../api/client'
-import type { SupportMember } from '../../api/supportTypes'
+import type { SupportMember, SupportTemplate } from '../../api/supportTypes'
 import { fmtDate, fmtDay } from '../../api/utils'
 import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus as TicketStatusValue } from '../../api/types'
 import ConfirmModal from '../ConfirmModal'
+import Copyable from '../Copyable'
+import CopyableText from '../CopyableText'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../TicketImages'
 import { useAuth } from '../../store/auth'
 import { Avatar, TicketStatus } from '../support/supportUi'
+import { SaveTemplateButton, TICKET_CATEGORIES, TicketMetaEditor, fillTemplate } from '../support/ticketTools'
+import { OpenUserButton, UserOverviewBody, useUserDrawer } from './users/UserOverview'
 
 const STATUSES: TicketStatusValue[] = ['open', 'in_progress', 'closed']
 const PRIORITIES: TicketPriority[] = ['low', 'normal', 'urgent']
-const CATEGORIES: TicketCategory[] = ['account', 'payment', 'claim', 'technical', 'feature', 'follow_up']
+const CATEGORIES: TicketCategory[] = TICKET_CATEGORIES
 
 const PRIORITY_PILL: Record<string, string> = {
   low: '',
@@ -35,6 +39,8 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
   const { user } = useAuth()
   const [tickets, setTickets] = useState<TicketListItem[]>([])
   const [staff, setStaff] = useState<SupportMember[]>([])
+  const [templates, setTemplates] = useState<SupportTemplate[]>([])
+  const drawer = useUserDrawer()
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
@@ -91,7 +97,12 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
   useEffect(() => () => loadCtrl.current?.abort(), [])
   useEffect(() => {
     adminSupportApi.members().then((r) => setStaff(r.items.filter((m) => !m.disabled))).catch(() => {})
+    loadTemplates()
   }, [])
+
+  const loadTemplates = () => {
+    adminSupportApi.templates().then((r) => setTemplates(r.items)).catch(() => {})
+  }
 
   // 通知里的深链：?ticket=<id> 直接打开那条工单（新工单通知会带上）。参数打开后
   // 就抹掉，避免在页内退回列表后一刷新又被弹回详情。
@@ -99,15 +110,17 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
   // notification carries one). The param is cleared once used, so backing out to
   // the list and refreshing doesn't bounce back into the detail.
   const [searchParams, setSearchParams] = useSearchParams()
+  // 依赖参数本身：用户档案里点工单时本面板可能已经开着 / keyed on the param: the user drawer can link here while this panel is open
+  const deepTicket = searchParams.get('ticket')
   useEffect(() => {
-    const id = searchParams.get('ticket')
+    const id = deepTicket
     if (!id) return
     const next = new URLSearchParams(searchParams)
     next.delete('ticket')
     setSearchParams(next, { replace: true })
     adminApi.getTicket(id).then(setDetail).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [deepTicket])
 
   const openDetail = async (id: string) => {
     try {
@@ -203,6 +216,9 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
           </button>
         </div>
 
+        {/* 宽屏右边直接放用户档案：核对比赛名次、转盘奖品不用离开工单（2026-10-28）
+            Wide screens show the user profile beside the thread, so ranks and prizes are checked in place */}
+        <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="adm-card overflow-hidden p-0">
           <header className="border-b border-[var(--line)] px-5 py-4 sm:px-6">
             <h2 className="font-display text-[18px] font-semibold leading-snug text-neutral-50">{detail.title}</h2>
@@ -210,7 +226,18 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
               <TicketStatus status={detail.status} label={t(`tickets.status.${detail.status}`)} />
               <span className={`adm-pill ${PRIORITY_PILL[detail.priority] ?? ''}`}>{t(`tickets.priority.${detail.priority}`)}</span>
               <span className="adm-pill">{t(`tickets.category.${detail.category}`)}</span>
-              <span className="ml-auto truncate font-mono text-xs text-neutral-500">{detail.userEmail}</span>
+              <span className="ml-auto flex min-w-0 items-center gap-2 text-xs text-neutral-500">
+                {detail.userNickname && <Copyable text={detail.userNickname} label={t('supportDesk.copy.nickname')} className="truncate text-neutral-300" />}
+                <Copyable text={detail.userEmail} label={t('supportDesk.copy.email')} className="truncate font-mono" />
+                {drawer && (
+                  <button type="button" className="adm-link-btn xl:hidden" onClick={() => drawer.openUser(detail.userId)}>
+                    {t('admin.userDrawer.open')}
+                  </button>
+                )}
+              </span>
+            </div>
+            <div className="mt-3">
+              <TicketMetaEditor ticket={detail} onSaved={(next) => { setDetail(next); void load() }} onToast={onToast} />
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <div className="adm-seg w-max" role="group" aria-label={t('tickets.admin.colStatus')}>
@@ -269,7 +296,11 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                             : 'rounded-tl-md bg-[var(--surface-2)]'
                       }`}
                     >
-                      {r.body && <p className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-100">{r.body}</p>}
+                      {r.body && (
+                        <p className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-100">
+                          <CopyableText text={r.body} />
+                        </p>
+                      )}
                       <TicketImageGrid urls={r.images} count={r.imageCount} />
                     </div>
                   </div>
@@ -289,10 +320,28 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                 aria-label={t('tickets.replyPlaceholder')}
                 maxLength={5000}
               />
-              <div className="px-3 pb-2">
-                <TicketImagePicker state={replyImages} disabled={sending} />
+              <div className="flex flex-wrap items-center gap-3 px-3 pb-2">
+                <div className="min-w-0 flex-1">
+                  <TicketImagePicker state={replyImages} disabled={sending} />
+                </div>
+                <SaveTemplateButton body={replyText} admin onSaved={loadTemplates} onToast={onToast} />
               </div>
               <div className="flex flex-wrap items-center gap-2 border-t border-[var(--line)] px-3 py-2.5">
+                {templates.length > 0 && (
+                  <Select
+                    value=""
+                    onChange={(id) => {
+                      const tpl = templates.find((x) => x.id === id)
+                      if (!tpl) return
+                      const body = fillTemplate(tpl.body, detail)
+                      setReplyText((prev) => (prev.trim() ? `${prev}\n${body}` : body))
+                    }}
+                    openUpward
+                    className="select-tight"
+                    ariaLabel={t('supportDesk.thread.insertTemplate')}
+                    options={[{ value: '', label: t('supportDesk.thread.insertTemplate') }, ...templates.map((x) => ({ value: x.id, label: x.title }))]}
+                  />
+                )}
                 <div className="adm-filter">
                   <span>{t('tickets.admin.colStatus')}</span>
                   <Select
@@ -321,6 +370,11 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
               </div>
             </div>
           </div>
+        </div>
+
+        <aside className="adm-card hidden p-5 xl:block">
+          <UserOverviewBody key={detail.userId} userId={detail.userId} compact />
+        </aside>
         </div>
 
         {deleteConfirm && (
@@ -388,10 +442,14 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                   onClick={() => void openDetail(ticket.id)}
                   className="adm-row grid w-full grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3.5 gap-y-1 px-5 py-4 text-left sm:grid-cols-[auto_minmax(0,1fr)_auto]"
                 >
-                  <Avatar name={ticket.userEmail || ticket.title} size={34} />
+                  <OpenUserButton userId={ticket.userId}>
+                    <Avatar name={ticket.userEmail || ticket.title} size={34} />
+                  </OpenUserButton>
                   <span className="min-w-0">
                     <span className="block truncate text-[14px] font-medium text-neutral-50">{ticket.title}</span>
-                    <span className="mt-0.5 block truncate font-mono text-[11px] text-neutral-500">{ticket.userEmail || '-'}</span>
+                    <span className="mt-0.5 block truncate font-mono text-[11px] text-neutral-500">
+                      {ticket.userEmail ? <Copyable text={ticket.userEmail} label={t('supportDesk.copy.email')} /> : '-'}
+                    </span>
                     {ticket.latestReply && (
                       <span className="mt-1.5 block truncate text-xs text-neutral-400">
                         {ticket.latestReply.authorEmail}: {ticket.latestReply.body || t('tickets.images.preview')}

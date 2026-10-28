@@ -12,6 +12,7 @@ import { adminApi } from '../../../api/client'
 import type { LuckyAdminDraw, LuckyFulfillment } from '../../../api/luckyTypes'
 import { fmtTime, localizeApiError } from '../../../api/utils'
 import { PAGE, clampOffset, csvFileName, csvQuery, drawsQuery, parseNote, type DrawsStatus } from './luckyDraws'
+import Copyable from '../../Copyable'
 
 const STATUSES: LuckyFulfillment[] = ['auto_done', 'pending', 'submitted', 'delivered', 'cancelled']
 // 要处理的是琥珀色，办完的是绿色，取消是红色，自动到账不着色。
@@ -115,7 +116,7 @@ export default function LuckyDrawsTab({ mode, roundId, onChange }: { mode: 'all'
                 <tr key={d.id}>
                   <td className="num whitespace-nowrap text-xs text-neutral-400">{fmtTime(d.createdAt)}</td>
                   {mode === 'pending' && <td className="max-w-[10rem] break-words text-xs text-neutral-300">{d.roundName}</td>}
-                  <td className="lka-cell-user"><b>{d.user.nickname || '—'}</b><span>{d.user.email}</span></td>
+                  <td className="lka-cell-user"><b>{d.user.nickname ? <Copyable text={d.user.nickname} label={t('supportDesk.copy.nickname')} /> : '—'}</b><span><Copyable text={d.user.email} label={t('supportDesk.copy.email')} /></span></td>
                   <td className="min-w-[7rem] text-neutral-200">{d.prize.name}</td>
                   <td className="whitespace-nowrap">
                     {d.soldOut

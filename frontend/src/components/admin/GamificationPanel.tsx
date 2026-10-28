@@ -60,6 +60,7 @@ import type {
   LeaderboardBoard,
   LeaderboardPayload,
 } from '../../api/types'
+import Copyable from '../Copyable'
 
 type SelectedUser = GamificationMe & { email: string }
 
@@ -638,7 +639,7 @@ export default function GamificationPanel() {
                 {previewData.rows.map((row) => (
                   <tr key={row.rank} className="border-t border-white/5">
                     <td className="num py-1.5 pr-4 text-neutral-300">{row.rank}</td>
-                    <td className="py-1.5 pr-4 text-neutral-200">{row.displayName}</td>
+                    <td className="py-1.5 pr-4 text-neutral-200"><Copyable text={row.displayName} /></td>
                     {/* 管理端看真实身份（后端 reveal=True 下发）：昵称原文优先，没设昵称
                         就显示邮箱，两者都缺才回落展示名。
                         Admins see the real identity (backend sends it with reveal=True):
@@ -647,7 +648,7 @@ export default function GamificationPanel() {
                     <td className="py-1.5 pr-4 font-mono text-[11px] text-neutral-400">
                       <span className="block truncate">{row.nickname || row.email || row.displayName}</span>
                       {row.nickname && row.email && (
-                        <span className="block truncate text-neutral-600">{row.email}</span>
+                        <span className="block truncate text-neutral-600"><Copyable text={row.email} label={t('supportDesk.copy.email')} /></span>
                       )}
                     </td>
                     <td className="num py-1.5 pr-4 text-neutral-400">
@@ -786,7 +787,7 @@ export default function GamificationPanel() {
                     <tbody>
                       {selected.winRate.perLogin.map((row) => (
                         <tr key={row.login} className="border-t border-white/5">
-                          <td className="num py-1.5 pr-4 text-neutral-200">{row.login}</td>
+                          <td className="num py-1.5 pr-4 text-neutral-200"><Copyable text={row.login} label={t('supportDesk.copy.account')} /></td>
                           <td className="num py-1.5 pr-4 text-neutral-300">{row.trades}</td>
                           <td className="num py-1.5 pr-4 text-neutral-300">{row.wins}</td>
                           <td className="num py-1.5 pr-4 text-neutral-300">

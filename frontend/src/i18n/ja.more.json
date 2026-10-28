@@ -2464,6 +2464,80 @@
     "railIdle": "チケットを開くと、ここに送信者の情報が表示されます",
     "drawer": {
       "title": "顧客情報"
+    },
+    "copy": {
+      "copied": "コピーしました",
+      "copiedWhat": "{{what}}をコピーしました",
+      "failed": "コピーに失敗しました",
+      "hint": "クリックでコピー：{{text}}",
+      "nickname": "ニックネーム",
+      "email": "メール",
+      "phone": "電話番号",
+      "account": "口座番号",
+      "text": "テキスト"
+    },
+    "activity": {
+      "title": "最近のアクティビティ",
+      "empty": "アクティビティはありません",
+      "more": "すべて表示（{{n}} 件）",
+      "less": "折りたたむ",
+      "signup": "アカウント登録",
+      "compJoin": "大会「{{name}}」にエントリー",
+      "rankOf": "{{total}} 人中 {{rank}} 位",
+      "rank": "{{rank}} 位",
+      "unranked": "まだ圏外",
+      "dq": "失格",
+      "return": "収益率 {{v}}",
+      "winRate": "勝率 {{v}}",
+      "lucky": "ルーレットで「{{prize}}」を獲得",
+      "luckySoldOut": "ルーレットの景品は品切れ",
+      "payment": "${{amount}} を支払い（{{plan}}）",
+      "plan": "{{field}}：{{old}} → {{new}}",
+      "by": "操作者 {{name}}",
+      "ticket": "チケット「{{title}}」を作成",
+      "field": {
+        "plan": "プラン",
+        "plan_expires_at": "プラン期限",
+        "role": "ロール"
+      },
+      "compStatus": {
+        "draft": "下書き",
+        "upcoming": "開始前",
+        "running": "開催中",
+        "ended": "終了",
+        "settled": "確定"
+      },
+      "luckyStatus": {
+        "auto_done": "自動付与済み",
+        "pending": "受取待ち",
+        "submitted": "申請済み・発送待ち",
+        "delivered": "発送済み",
+        "cancelled": "キャンセル"
+      },
+      "event": {
+        "user_login": "ログイン",
+        "user_email_verified": "メールを認証",
+        "user_password_changed": "パスワードを変更",
+        "user_password_reset": "パスワードを再設定",
+        "user_nickname": "ニックネームを変更",
+        "user_phone_set": "電話番号を設定",
+        "mt5_bind": "MT5 {{login}} を連携",
+        "mt5_unbind": "MT5 {{login}} の連携を解除",
+        "mt5_revoked": "MT5 {{login}} の認証が失効",
+        "other": "アカウントイベント"
+      }
+    },
+    "ticketEdit": {
+      "category": "カテゴリ",
+      "categorySaved": "カテゴリを更新しました",
+      "editTitle": "タイトルを編集",
+      "titleSaved": "タイトルを更新しました",
+      "save": "保存",
+      "cancel": "キャンセル",
+      "saveTemplate": "定型文として保存",
+      "templateTitle": "定型文の名前",
+      "templateSaved": "定型文として保存しました",
+      "templateVars": "変数：{nickname} ニックネーム、{email} メール、{ticket} チケット件名"
     }
   },
   "lucky": {

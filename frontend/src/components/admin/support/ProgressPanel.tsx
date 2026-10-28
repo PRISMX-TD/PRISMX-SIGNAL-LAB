@@ -33,6 +33,7 @@ import Select from '../../Select'
 import { SkeletonLine } from '../../Skeleton'
 import { Avatar, FU_PRIORITY_TONE, FU_STATUS_TONE, Tag, errText } from '../../support/supportUi'
 import FollowUpRecordSheet from './FollowUpRecordSheet'
+import Copyable from '../../Copyable'
 
 const PAGE = 50
 const DAY_MS = 86_400_000
@@ -459,7 +460,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                             >
                               {f.nickname || f.email || '—'}
                             </button>
-                            <div className="max-w-[200px] truncate font-mono text-[11px] text-neutral-500">{f.email}</div>
+                            <div className="max-w-[200px] truncate font-mono text-[11px] text-neutral-500"><Copyable text={f.email} label={t('supportDesk.copy.email')} /></div>
                           </div>
                         </div>
                       </td>

@@ -1807,7 +1807,9 @@
           "status": "status",
           "priority": "priority",
           "reply": "reply",
-          "delete": "deletion"
+          "delete": "deletion",
+          "category": "category",
+          "title": "title"
         },
         "field": {
           "agent": "ambassador",
@@ -3790,6 +3792,54 @@
       "planRightHint": "When on, they can grant or extend PRO for customers across their whole team on the Ambassador Hub (top-level ambassadors need it switched on here too). Only admins can change this.",
       "planRightOn": "Plan right switched on for {{name}}",
       "planRightOff": "Plan right switched off for {{name}}"
+    },
+    "userDrawer": {
+      "title": "User profile",
+      "open": "Open profile",
+      "openHint": "Open the user profile: details, MT5, IPs, recent activity",
+      "loadFail": "Failed to load",
+      "retry": "Retry",
+      "plan": "Plan",
+      "expires": "Expires",
+      "permanent": "Permanent",
+      "registered": "Signed up",
+      "lastActive": "Last active",
+      "paid": "Total paid",
+      "source": "Source",
+      "agent": "Ambassador",
+      "note": "Note",
+      "role": "Role",
+      "verified": "Email verified",
+      "unverified": "Email unverified",
+      "disabled": "Disabled",
+      "trial": "Trial",
+      "mt5": "MT5 accounts",
+      "noMt5": "No MT5 linked",
+      "online": "Online",
+      "offline": "Offline",
+      "balance": "Balance",
+      "equity": "Equity",
+      "real": "Live",
+      "demo": "Demo",
+      "ips": "Recent login IPs",
+      "noIps": "No logins recorded",
+      "sameIp": "{{n}} other accounts used these IPs",
+      "logs": "Activity log",
+      "findInList": "Find in user list",
+      "copyAll": "Copy details",
+      "copyAllDone": "User details copied"
+    },
+    "copyEmails": "Copy emails",
+    "copyEmailsDone": "Copied {{n}} emails",
+    "exportCsv": "Export CSV",
+    "exportCsvHint": "Export every user matching the current filters",
+    "exportCsvDone": "Exported {{n}} users",
+    "quickSearch": {
+      "button": "Find user",
+      "placeholder": "Nickname, email or phone…",
+      "hint": "Ctrl + K opens this anywhere",
+      "empty": "No matching users",
+      "typeMore": "Type at least 2 characters"
     }
   },
   "simulator": {
@@ -5235,6 +5285,80 @@
     "railIdle": "Open a ticket to see the submitter's profile here",
     "drawer": {
       "title": "Customer profile"
+    },
+    "copy": {
+      "copied": "Copied",
+      "copiedWhat": "{{what}} copied",
+      "failed": "Copy failed",
+      "hint": "Click to copy: {{text}}",
+      "nickname": "Nickname",
+      "email": "Email",
+      "phone": "Phone",
+      "account": "Account",
+      "text": "Text"
+    },
+    "activity": {
+      "title": "Recent activity",
+      "empty": "No activity yet",
+      "more": "Show all {{n}}",
+      "less": "Show less",
+      "signup": "Signed up",
+      "compJoin": "Entered “{{name}}”",
+      "rankOf": "Rank {{rank}} of {{total}}",
+      "rank": "Rank {{rank}}",
+      "unranked": "Not ranked yet",
+      "dq": "Disqualified",
+      "return": "Return {{v}}",
+      "winRate": "Win rate {{v}}",
+      "lucky": "Wheel prize: “{{prize}}”",
+      "luckySoldOut": "Wheel slot was sold out",
+      "payment": "Paid ${{amount}} ({{plan}})",
+      "plan": "{{field}}: {{old}} → {{new}}",
+      "by": "by {{name}}",
+      "ticket": "Opened ticket “{{title}}”",
+      "field": {
+        "plan": "Plan",
+        "plan_expires_at": "Plan expiry",
+        "role": "Role"
+      },
+      "compStatus": {
+        "draft": "Draft",
+        "upcoming": "Upcoming",
+        "running": "Live",
+        "ended": "Ended",
+        "settled": "Final"
+      },
+      "luckyStatus": {
+        "auto_done": "Auto-granted",
+        "pending": "To claim",
+        "submitted": "Claimed, to deliver",
+        "delivered": "Delivered",
+        "cancelled": "Cancelled"
+      },
+      "event": {
+        "user_login": "Signed in",
+        "user_email_verified": "Verified email",
+        "user_password_changed": "Changed password",
+        "user_password_reset": "Reset password",
+        "user_nickname": "Changed nickname",
+        "user_phone_set": "Set phone number",
+        "mt5_bind": "Linked MT5 {{login}}",
+        "mt5_unbind": "Unlinked MT5 {{login}}",
+        "mt5_revoked": "MT5 {{login}} authorisation lost",
+        "other": "Account event"
+      }
+    },
+    "ticketEdit": {
+      "category": "Category",
+      "categorySaved": "Category updated",
+      "editTitle": "Edit title",
+      "titleSaved": "Title updated",
+      "save": "Save",
+      "cancel": "Cancel",
+      "saveTemplate": "Save as canned reply",
+      "templateTitle": "Name this canned reply",
+      "templateSaved": "Saved as a canned reply",
+      "templateVars": "Variables: {nickname}, {email}, {ticket} (ticket title)"
     }
   },
   "lucky": {

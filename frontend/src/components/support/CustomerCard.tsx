@@ -23,10 +23,12 @@ import {
   type SupportMe,
 } from '../../api/supportTypes'
 import ConfirmModal from '../ConfirmModal'
+import Copyable from '../Copyable'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import { copyText } from '../admin/invite/CopyLinkButton'
 import ActionMenu from './ActionMenu'
+import ActivityTimeline from './ActivityTimeline'
 import ConversionTimeline from './ConversionTimeline'
 import { IconShield } from './deskIcons'
 import { Avatar, FU_PRIORITY_TONE, FU_STATUS_TONE, Tag, TicketStatus, errText, fmtListTime } from './supportUi'
@@ -294,9 +296,12 @@ export default function CustomerCard({
       <Avatar name={c.nickname || c.email} size={wide ? 52 : 44} />
       <div className="min-w-0 flex-1">
         <h2 className={`truncate font-display font-semibold leading-tight text-neutral-50 ${wide ? 'text-xl' : 'text-[17px]'}`}>
-          {c.nickname || t('supportDesk.card.noNickname')}
+          {c.nickname ? <Copyable text={c.nickname} label={t('supportDesk.copy.nickname')} /> : t('supportDesk.card.noNickname')}
         </h2>
-        <p className="mt-0.5 truncate font-mono text-xs text-neutral-500">{c.email || '-'}</p>
+        <p className="mt-0.5 truncate font-mono text-xs text-neutral-500">
+          {/* 外包看到的是脱敏邮箱，复制它没有意义 / a masked email is not worth copying */}
+          {c.emailMasked ? c.email || '-' : <Copyable text={c.email} label={t('supportDesk.copy.email')} />}
+        </p>
         {chips}
       </div>
       {wide && openAccountBtn && <div className="hidden shrink-0 sm:block">{openAccountBtn}</div>}
@@ -308,7 +313,9 @@ export default function CustomerCard({
     '-'
   ) : (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="font-mono">{phone ?? c.phone}</span>
+      <span className="font-mono">
+        {c.phoneMasked && !phone ? c.phone : <Copyable text={phone ?? c.phone} label={t('supportDesk.copy.phone')} />}
+      </span>
       {c.phoneMasked && !phone && (
         <button
           type="button"
@@ -332,7 +339,9 @@ export default function CustomerCard({
         <h4 className="mb-2.5 text-[11px] font-medium text-neutral-500">{t('supportDesk.card.groupContact')}</h4>
         <Rows>
           <Row label={t('supportDesk.card.email')}>
-            <span className="break-all font-mono">{c.email || '-'}</span>
+            <span className="break-all font-mono">
+              {c.emailMasked ? c.email || '-' : <Copyable text={c.email} label={t('supportDesk.copy.email')} />}
+            </span>
           </Row>
           <Row label={t('supportDesk.card.phone')}>{phoneCell}</Row>
           <Row label={t('supportDesk.card.region')}>{c.region || '-'}</Row>
@@ -362,7 +371,10 @@ export default function CustomerCard({
         {c.mt5Accounts.map((a) => (
           <li key={a.id} className="rounded-2xl border border-[var(--line)] bg-white/[0.02] px-3.5 py-3 text-xs">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[13px] font-medium text-neutral-100">{a.login || t('supportDesk.card.bound')}</span>
+              <span className="font-mono text-[13px] font-medium text-neutral-100">
+                {/* 内部客服只有后 4 位，复制没用 / internal agents only see the last 4 */}
+                {a.login && !a.login.startsWith('*') ? <Copyable text={a.login} label={t('supportDesk.copy.account')} /> : a.login || t('supportDesk.card.bound')}
+              </span>
               {a.real != null && (
                 <Tag tone={a.real ? 'bg-[var(--up-bg)] text-[var(--up)]' : 'bg-white/[0.06] text-neutral-400'}>
                   {a.real ? t('supportDesk.card.real') : t('supportDesk.card.demo')}
@@ -543,6 +555,14 @@ export default function CustomerCard({
 
   const conversions = block(t('supportDesk.card.conversions'), <ConversionTimeline items={card.conversions} />, undefined, 'conversions')
 
+  // 最近动态：比赛名次、转盘奖品、会员变更、工单、登录（2026-10-28）/ recent activity (2026-10-28)
+  const activity = block(
+    t('supportDesk.activity.title'),
+    <ActivityTimeline items={card.activity} onOpenTicket={onOpenTicket} />,
+    undefined,
+    'activity',
+  )
+
   const dncModal = dncConfirm && (
     <ConfirmModal
       center
@@ -568,6 +588,7 @@ export default function CustomerCard({
           <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
             <div className="space-y-4">
               {followUp}
+              {activity}
               {conversions}
             </div>
             <div className="space-y-4">
@@ -591,6 +612,7 @@ export default function CustomerCard({
         {facts}
         {openAccountBtn}
       </div>
+      {activity}
       {profile}
       {mt5}
       {followUp}

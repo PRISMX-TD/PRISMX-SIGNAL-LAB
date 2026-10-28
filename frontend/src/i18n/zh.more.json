@@ -1804,7 +1804,9 @@
           "status": "状态",
           "priority": "优先级",
           "reply": "回复",
-          "delete": "删除"
+          "delete": "删除",
+          "category": "分类",
+          "title": "标题"
         },
         "field": {
           "agent": "推荐官",
@@ -3779,6 +3781,54 @@
       "planRightHint": "打开后，他能在推荐官中心给自己整支团队的客户开通 / 延长 PRO（一级推荐官也要在这里打开）。只有管理员能开关。",
       "planRightOn": "已给 {{name}} 打开改会员权限",
       "planRightOff": "已关闭 {{name}} 的改会员权限"
+    },
+    "userDrawer": {
+      "title": "用户档案",
+      "open": "查看档案",
+      "openHint": "打开用户档案：资料、MT5、IP、最近动态",
+      "loadFail": "加载失败",
+      "retry": "重试",
+      "plan": "等级",
+      "expires": "到期",
+      "permanent": "永久",
+      "registered": "注册",
+      "lastActive": "最近活跃",
+      "paid": "累计付费",
+      "source": "来源",
+      "agent": "归属推荐官",
+      "note": "备注",
+      "role": "角色",
+      "verified": "邮箱已验证",
+      "unverified": "邮箱未验证",
+      "disabled": "已停用",
+      "trial": "试用",
+      "mt5": "MT5 账户",
+      "noMt5": "没有绑定 MT5",
+      "online": "在线",
+      "offline": "离线",
+      "balance": "余额",
+      "equity": "净值",
+      "real": "实盘",
+      "demo": "模拟",
+      "ips": "最近登录 IP",
+      "noIps": "暂无登录记录",
+      "sameIp": "另有 {{n}} 个账号用过这些 IP",
+      "logs": "操作日志",
+      "findInList": "在用户列表中查看",
+      "copyAll": "复制资料",
+      "copyAllDone": "已复制用户资料"
+    },
+    "copyEmails": "复制邮箱",
+    "copyEmailsDone": "已复制 {{n}} 个邮箱",
+    "exportCsv": "导出 CSV",
+    "exportCsvHint": "按当前筛选导出全部用户",
+    "exportCsvDone": "已导出 {{n}} 位用户",
+    "quickSearch": {
+      "button": "搜索用户",
+      "placeholder": "输入昵称、邮箱、手机号…",
+      "hint": "Ctrl + K 随时打开",
+      "empty": "没有匹配的用户",
+      "typeMore": "至少输入 2 个字"
     }
   },
   "simulator": {
@@ -5224,6 +5274,80 @@
     "railIdle": "打开一张工单，这里会显示提交人的资料",
     "drawer": {
       "title": "客户资料"
+    },
+    "copy": {
+      "copied": "已复制",
+      "copiedWhat": "已复制{{what}}",
+      "failed": "复制失败",
+      "hint": "点击复制：{{text}}",
+      "nickname": "昵称",
+      "email": "邮箱",
+      "phone": "手机号",
+      "account": "账号",
+      "text": "内容"
+    },
+    "activity": {
+      "title": "最近动态",
+      "empty": "暂无动态",
+      "more": "显示全部 {{n}} 条",
+      "less": "收起",
+      "signup": "注册账号",
+      "compJoin": "报名比赛「{{name}}」",
+      "rankOf": "第 {{rank}} 名 / 共 {{total}} 人",
+      "rank": "第 {{rank}} 名",
+      "unranked": "暂未上榜",
+      "dq": "已取消资格",
+      "return": "收益率 {{v}}",
+      "winRate": "胜率 {{v}}",
+      "lucky": "转盘抽中「{{prize}}」",
+      "luckySoldOut": "转盘抽中的奖已发完",
+      "payment": "付款 ${{amount}}（{{plan}}）",
+      "plan": "{{field}}：{{old}} → {{new}}",
+      "by": "操作人 {{name}}",
+      "ticket": "提交工单「{{title}}」",
+      "field": {
+        "plan": "会员等级",
+        "plan_expires_at": "会员到期",
+        "role": "角色"
+      },
+      "compStatus": {
+        "draft": "草稿",
+        "upcoming": "即将开始",
+        "running": "进行中",
+        "ended": "已结束",
+        "settled": "已终审"
+      },
+      "luckyStatus": {
+        "auto_done": "已自动发放",
+        "pending": "待领取",
+        "submitted": "已申领待发放",
+        "delivered": "已发放",
+        "cancelled": "已取消"
+      },
+      "event": {
+        "user_login": "登录",
+        "user_email_verified": "验证了邮箱",
+        "user_password_changed": "修改了密码",
+        "user_password_reset": "重置了密码",
+        "user_nickname": "修改了昵称",
+        "user_phone_set": "设置了手机号",
+        "mt5_bind": "绑定 MT5 {{login}}",
+        "mt5_unbind": "解绑 MT5 {{login}}",
+        "mt5_revoked": "MT5 {{login}} 授权失效",
+        "other": "账号事件"
+      }
+    },
+    "ticketEdit": {
+      "category": "分类",
+      "categorySaved": "分类已更新",
+      "editTitle": "改标题",
+      "titleSaved": "标题已更新",
+      "save": "保存",
+      "cancel": "取消",
+      "saveTemplate": "存为快捷回复",
+      "templateTitle": "给这条快捷回复起个名字",
+      "templateSaved": "已存为快捷回复",
+      "templateVars": "可用变量：{nickname} 昵称、{email} 邮箱、{ticket} 工单标题"
     }
   },
   "lucky": {

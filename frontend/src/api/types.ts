@@ -1717,6 +1717,8 @@ export interface Ticket {
   // 指派（rev 41）：只在工作人员视角下有值 / assignment, staff view only
   assigneeId?: string | null
   assigneeName?: string | null
+  // 提交人昵称，工作人员视角才有（快捷回复 {nickname} 用）/ submitter nickname, staff view only
+  userNickname?: string | null
 }
 
 export interface TicketListItem {

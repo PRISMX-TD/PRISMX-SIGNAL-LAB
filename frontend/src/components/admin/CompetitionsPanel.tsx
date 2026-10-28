@@ -61,6 +61,7 @@ import type {
   LeaderboardPayload,
   ParticipantAdminRow,
 } from '../../api/types'
+import Copyable from '../Copyable'
 
 const TRACKS: CompetitionTrack[] = ['real', 'demo']
 const METRICS: CompetitionMetric[] = ['return_pct', 'win_rate']
@@ -1111,16 +1112,16 @@ export default function CompetitionsPanel() {
                   {participants.map((p) => (
                     <tr key={p.id} className="border-t border-white/5">
                       <td className="max-w-[180px] py-1.5 pr-4">
-                        <div className="truncate text-neutral-100">{p.nickname || '—'}</div>
+                        <div className="truncate text-neutral-100">{p.nickname ? <Copyable text={p.nickname} label={t('supportDesk.copy.nickname')} /> : '—'}</div>
                         {p.nameHidden && (
                           <span className="tag bg-white/5 text-[10px] text-neutral-400">
                             {t('admin.competitionPromo.nameHiddenTag')}
                           </span>
                         )}
-                        <div className="truncate font-mono text-[11px] text-neutral-500">{p.email ?? '—'}</div>
+                        <div className="truncate font-mono text-[11px] text-neutral-500">{p.email ? <Copyable text={p.email} label={t('supportDesk.copy.email')} /> : '—'}</div>
                       </td>
                       <td className="py-1.5 pr-4">
-                        <div className="num text-neutral-300">{p.login}</div>
+                        <div className="num text-neutral-300"><Copyable text={p.login} label={t('supportDesk.copy.account')} /></div>
                         <div className="text-[10px]">
                           {p.accountRevoked ? (
                             <span className="text-down">{t('competition.admin.participants.unbound')}</span>
@@ -1248,14 +1249,14 @@ export default function CompetitionsPanel() {
                   {board.rows.map((row) => (
                     <tr key={row.rank} className="border-t border-white/5">
                       <td className="num py-1.5 pr-4 text-neutral-300">{row.rank}</td>
-                      <td className="py-1.5 pr-4 text-neutral-200">{row.displayName}</td>
+                      <td className="py-1.5 pr-4 text-neutral-200"><Copyable text={row.displayName} /></td>
                       {/* 实时榜预览走 reveal=True（见 admin_competition_board）：这一列要的
                           是能跟参赛名单对上的完整账户号，不是用户端那份打码值。
                           The live-board preview is fetched with reveal=True (see
                           admin_competition_board): this column needs the full account
                           number to reconcile against the entry list, not the masked
                           value the user side gets. */}
-                      <td className="num py-1.5 pr-4 text-neutral-400">{row.login}</td>
+                      <td className="num py-1.5 pr-4 text-neutral-400"><Copyable text={row.login} label={t('supportDesk.copy.account')} /></td>
                       <td className="num py-1.5 pr-4 text-neutral-100">{fmtScorePct(row.score)}</td>
                       <td className="num py-1.5 text-neutral-500">{row.sample}</td>
                     </tr>

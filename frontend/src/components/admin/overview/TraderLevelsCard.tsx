@@ -16,6 +16,7 @@ import type { AdminTraderLevelUsers, AdminTraderLevels } from '../../../api/type
 import { fmtTime, localizeApiError } from '../../../api/utils'
 import { SkeletonLine } from '../../Skeleton'
 import { rangeKey, toQuery, type RangeState } from './rangeUtils'
+import Copyable from '../../Copyable'
 
 type Scope = 'all' | 'range'
 const SCOPES: Scope[] = ['all', 'range']
@@ -181,10 +182,10 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                                   {list.users.map((u) => (
                                     <tr key={u.id} className="border-t border-white/5">
                                       <td className="py-1.5">
-                                        <span className="text-neutral-200">{u.email}</span>
+                                        <span className="text-neutral-200"><Copyable text={u.email} label={t('supportDesk.copy.email')} /></span>
                                         {u.nickname && <span className="ml-2 text-[10px] text-neutral-500">{u.nickname}</span>}
                                       </td>
-                                      <td className="py-1.5 text-neutral-400">{u.phone || '—'}</td>
+                                      <td className="py-1.5 text-neutral-400">{u.phone ? <Copyable text={u.phone} label={t('supportDesk.copy.phone')} /> : '—'}</td>
                                       <td className="py-1.5 tabular-nums text-neutral-200">{fmtTime(u.reachedAt)}</td>
                                       <td className="py-1.5 text-right text-neutral-400">
                                         {u.currentLevel === list.level

@@ -10,7 +10,7 @@
 // state sections hand to each other (users → email / assign / activity log, ops settings → the
 // invites tab's "is the trial on"). Each section reads and writes inside its own Panel; the real
 // permission boundary is the backend on every /admin/* endpoint.
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { Link, Navigate, useLocation, useMatch, useNavigate, useSearchParams } from 'react-router-dom'
@@ -35,6 +35,8 @@ import SystemSettingsPanel from '../components/admin/SystemSettingsPanel'
 import SystemStatusPanel from '../components/admin/SystemStatusPanel'
 import UsersPanel from '../components/admin/UsersPanel'
 import OverviewPanel from '../components/admin/overview/OverviewPanel'
+import UserDrawer, { UserDrawerContext, type UserDrawerActions } from '../components/admin/users/UserOverview'
+import UserQuickSearch from '../components/admin/users/UserQuickSearch'
 import ApprovalsPanel from '../components/admin/support/ApprovalsPanel'
 import AssignPanel from '../components/admin/support/AssignPanel'
 import PerformancePanel from '../components/admin/support/PerformancePanel'
@@ -163,6 +165,46 @@ function AdminConsole({ section }: { section: AdminSection }) {
 
   const go = (s: AdminSection) => navigate(`/admin/${s}`)
 
+  // 用户档案抽屉与全局搜索（2026-10-28）：任何分区点头像 / 档案按钮打开抽屉；Ctrl + K 搜人。
+  // The user drawer and global search (2026-10-28): any section opens the drawer from an avatar /
+  // profile button; Ctrl + K finds a user.
+  const [drawerUser, setDrawerUser] = useState<string | null>(null)
+  const [quickSearch, setQuickSearch] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setQuickSearch(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+  const drawerActions = useMemo<UserDrawerActions>(
+    () => ({
+      openUser: (id) => setDrawerUser(id),
+      showLogs: (userId, userLabel) => {
+        setDrawerUser(null)
+        setLogsPreset({ userId, userLabel })
+        navigate('/admin/logs')
+      },
+      emailUser: (id) => {
+        setDrawerUser(null)
+        setEmailPreset([id])
+        navigate('/admin/email')
+      },
+      findInList: (email) => {
+        setDrawerUser(null)
+        navigate(`/admin/users?q=${encodeURIComponent(email)}`)
+      },
+      openTicket: (id) => {
+        setDrawerUser(null)
+        navigate(`/admin/tickets?ticket=${encodeURIComponent(id)}`)
+      },
+    }),
+    [navigate],
+  )
+
   let content: ReactNode
   switch (section) {
     case 'data':
@@ -256,6 +298,7 @@ function AdminConsole({ section }: { section: AdminSection }) {
 
   return (
     // 后台是内部工具，不加节日按钮小饰。/ admin is an internal tool: no festival button charms
+    <UserDrawerContext.Provider value={drawerActions}>
     <div data-fd-plain className="adm">
       <div className="adm-shell">
         <aside className="adm-rail" aria-label={t('admin.console.title')}>
@@ -314,6 +357,15 @@ function AdminConsole({ section }: { section: AdminSection }) {
                 <h1 className="adm-title">{t(`admin.console.group.${group}`)}</h1>
                 <p className="adm-desc">{t(`admin.console.groupDesc.${group}`)}</p>
               </div>
+              <button
+                type="button"
+                className="adm-btn ml-auto"
+                title={t('admin.quickSearch.hint')}
+                onClick={() => setQuickSearch(true)}
+              >
+                {t('admin.quickSearch.button')}
+                <kbd className="ml-1.5 hidden rounded border border-white/15 px-1 font-mono text-[10px] text-neutral-500 sm:inline">Ctrl K</kbd>
+              </button>
             </div>
             {sections.length > 1 && (
               <nav ref={tabsRef} className="adm-tabs no-scrollbar" aria-label={t(`admin.console.group.${group}`)}>
@@ -354,6 +406,17 @@ function AdminConsole({ section }: { section: AdminSection }) {
           </div>,
           document.body,
         )}
+      {quickSearch && (
+        <UserQuickSearch
+          onClose={() => setQuickSearch(false)}
+          onPick={(id) => {
+            setQuickSearch(false)
+            setDrawerUser(id)
+          }}
+        />
+      )}
+      {drawerUser && <UserDrawer userId={drawerUser} onClose={() => setDrawerUser(null)} />}
     </div>
+    </UserDrawerContext.Provider>
   )
 }

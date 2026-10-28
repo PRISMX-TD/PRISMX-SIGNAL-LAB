@@ -64,6 +64,7 @@ from app.services.settings_store import (
     save_support_settings,
 )
 from app.services.support_view import serialize_customer
+from app.services.user_activity import recent_activity
 
 logger = logging.getLogger("prismx.support")
 
@@ -463,6 +464,9 @@ def support_customer(user_id: str, db: Session = Depends(get_db), staff: StaffCt
         "followUp": _follow_up_view(fu, user) if fu is not None else None,
         "notes": notes,
         "conversions": [_conversion_view(c, ctx) for c in convs],
+        # 最近动态（比赛名次、转盘奖品、会员变更、工单、登录等），按调用者权限裁剪
+        # recent activity (contest ranks, wheel prizes, plan changes, tickets, logins), tier-trimmed
+        "activity": recent_activity(db, user, ctx),
         "tickets": [
             {"id": t.id, "title": t.title, "category": t.category, "status": t.status,
              "priority": t.priority, "updatedAt": t.updated_at, "assigneeId": t.assignee_id}
@@ -989,6 +993,34 @@ def support_templates(
     if lang:
         q = q.filter(or_(SupportReplyTemplate.lang == lang, SupportReplyTemplate.lang.is_(None)))
     return {"items": [_template_view(t) for t in q.order_by(SupportReplyTemplate.title).all()]}
+
+
+def _require_template_writer(ctx: StaffCtx) -> None:
+    """模板写权限（2026-10-28）：admin 与内部客服可新建 / 修改；外包只读。删除仍只在管理端。
+    Template writes: admins and internal agents may create / edit; outsourced stay read-only.
+    Deleting stays admin-only."""
+    if ctx.is_outsourced:
+        raise HTTPException(status_code=403, detail="外包客服不能修改快捷回复 / Outsourced agents cannot edit templates")
+
+
+@router.post("/templates", response_model=dict)
+def support_template_create(body: TemplateIn, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)):
+    """内部客服新建快捷回复 / internal agents add a canned reply."""
+    ctx = _ctx(staff)
+    _require_template_writer(ctx)
+    t = SupportReplyTemplate(title=body.title.strip(), body=body.body, lang=body.lang, created_by=ctx.user.id)
+    db.add(t)
+    db.commit()
+    return {"template": _template_view(t)}
+
+
+@router.patch("/templates/{tpl_id}", response_model=dict)
+def support_template_patch(
+    tpl_id: str, body: TemplatePatchIn, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)
+):
+    """内部客服修改快捷回复 / internal agents edit a canned reply."""
+    _require_template_writer(_ctx(staff))
+    return admin_support_template_patch(tpl_id, body, db)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

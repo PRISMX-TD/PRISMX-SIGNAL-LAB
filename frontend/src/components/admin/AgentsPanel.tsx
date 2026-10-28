@@ -24,6 +24,7 @@ import Switch from '../Switch'
 import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import type { AdminAgentTree, AdminAgentTreeNode, AdminUser } from '../../api/types'
+import Copyable from '../Copyable'
 
 export default function AgentsPanel() {
   const { t } = useTranslation()
@@ -198,7 +199,7 @@ export default function AgentsPanel() {
             </button>
           </span>
         </p>
-        {n.nickname && <p className="num break-all text-xs text-neutral-400">{n.email}</p>}
+        {n.nickname && <p className="num break-all text-xs text-neutral-400"><Copyable text={n.email} label={t('supportDesk.copy.email')} /></p>}
         <p className="mt-1 text-[11px] text-neutral-500">
           {t('admin.invite.tree.counts', { direct: n.directCustomers, total: n.teamCustomers })}
           {' · '}

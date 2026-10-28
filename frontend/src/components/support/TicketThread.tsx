@@ -12,11 +12,14 @@ import { fmtDate, fmtDay, parseTime } from '../../api/utils'
 import type { Ticket, TicketStatus as TicketStatusValue } from '../../api/types'
 import type { SupportMe, SupportMember, SupportTemplate } from '../../api/supportTypes'
 import { currentLang } from '../../i18n'
+import Copyable from '../Copyable'
+import CopyableText from '../CopyableText'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
 import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../TicketImages'
 import { IconSend, IconUser } from './deskIcons'
 import { Avatar, TICKET_PRIORITY_TONE, Tag, bjDayKey, errText, fmtClock } from './supportUi'
+import { SaveTemplateButton, TicketMetaEditor, fillTemplate } from './ticketTools'
 
 const STATUSES: TicketStatusValue[] = ['open', 'in_progress', 'closed']
 // 选中的状态用和队列里状态点同一套颜色 / the selected status uses the queue's status-dot colours
@@ -96,11 +99,15 @@ export default function TicketThread({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ticketId])
 
-  useEffect(() => {
+  const loadTemplates = useCallback(() => {
     supportApi.templates(currentLang()).then((r) => setTemplates(r.items)).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    loadTemplates()
     // 只有管理员能把工单指派给别人，成员表也只有管理员拿得到 / only admins assign to others
     if (me.isAdmin) adminSupportApi.members().then((r) => setStaff(r.items.filter((m) => !m.disabled))).catch(() => {})
-  }, [me.isAdmin])
+  }, [me.isAdmin, loadTemplates])
 
   const apply = (next: Ticket, msg: string) => {
     setTicket(next)
@@ -192,8 +199,9 @@ export default function TicketThread({
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
             <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
               <Avatar name={ticket.userEmail} size={18} />
-              <span className="truncate text-neutral-300">{ticket.userEmail}</span>
+              <Copyable text={ticket.userEmail} label={t('supportDesk.copy.email')} className="truncate text-neutral-300" />
             </span>
+            {ticket.userNickname && <Copyable text={ticket.userNickname} label={t('supportDesk.copy.nickname')} className="text-neutral-300" />}
             <span>{t(`tickets.category.${ticket.category}`)}</span>
             {ticket.priority !== 'normal' && <Tag tone={TICKET_PRIORITY_TONE[ticket.priority] ?? ''}>{t(`tickets.priority.${ticket.priority}`)}</Tag>}
             <span className="num">{fmtDate(ticket.createdAt)}</span>
@@ -209,6 +217,10 @@ export default function TicketThread({
             <span className="hidden sm:inline">{t('supportDesk.drawer.title')}</span>
           </button>
         )}
+      </div>
+
+      <div className="mt-2.5">
+        <TicketMetaEditor ticket={ticket} onSaved={(next) => { setTicket(next); onChanged() }} onToast={onToast} inputClass="h-8 rounded-lg border border-[var(--line-hi)] bg-transparent px-2.5 text-xs text-neutral-100 outline-none" />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -302,7 +314,11 @@ export default function TicketThread({
                   }`}
                   title={grouped ? fmtClock(r.createdAt) : undefined}
                 >
-                  {r.body && <p className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-100">{r.body}</p>}
+                  {r.body && (
+                    <p className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-100">
+                      <CopyableText text={r.body} />
+                    </p>
+                  )}
                   <TicketImageGrid urls={r.images} count={r.imageCount} />
                 </div>
               </div>
@@ -330,7 +346,9 @@ export default function TicketThread({
                 value=""
                 onChange={(id) => {
                   const tpl = templates.find((x) => x.id === id)
-                  if (tpl) setText((prev) => (prev.trim() ? `${prev}\n${tpl.body}` : tpl.body))
+                  if (!tpl) return
+                  const body = fillTemplate(tpl.body, ticket)
+                  setText((prev) => (prev.trim() ? `${prev}\n${body}` : body))
                 }}
                 className="select-tight"
                 ariaLabel={t('supportDesk.thread.insertTemplate')}
@@ -360,6 +378,12 @@ export default function TicketThread({
           <div className="min-w-0 flex-1">
             <TicketImagePicker state={images} disabled={sending} />
           </div>
+          {/* 外包客服只读模板，不给「存为快捷回复」/ outsourced agents only read templates */}
+          {(me.isAdmin || me.tier === 'internal') && (
+            <span className="pb-2">
+              <SaveTemplateButton body={text} admin={me.isAdmin} onSaved={loadTemplates} onToast={onToast} />
+            </span>
+          )}
           <span className="hidden pb-2 text-[11px] text-neutral-500 lg:inline">{t('supportDesk.thread.sendHint')}</span>
           <button
             type="button"

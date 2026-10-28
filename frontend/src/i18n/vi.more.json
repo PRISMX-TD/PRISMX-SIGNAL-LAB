@@ -2464,6 +2464,80 @@
     "railIdle": "Mở một phiếu để xem thông tin người gửi tại đây",
     "drawer": {
       "title": "Hồ sơ khách hàng"
+    },
+    "copy": {
+      "copied": "Đã sao chép",
+      "copiedWhat": "Đã sao chép {{what}}",
+      "failed": "Sao chép thất bại",
+      "hint": "Nhấn để sao chép: {{text}}",
+      "nickname": "Biệt danh",
+      "email": "Email",
+      "phone": "Số điện thoại",
+      "account": "Tài khoản",
+      "text": "Nội dung"
+    },
+    "activity": {
+      "title": "Hoạt động gần đây",
+      "empty": "Chưa có hoạt động",
+      "more": "Xem tất cả {{n}}",
+      "less": "Thu gọn",
+      "signup": "Đăng ký tài khoản",
+      "compJoin": "Đăng ký giải “{{name}}”",
+      "rankOf": "Hạng {{rank}}/{{total}}",
+      "rank": "Hạng {{rank}}",
+      "unranked": "Chưa có hạng",
+      "dq": "Bị loại",
+      "return": "Lợi nhuận {{v}}",
+      "winRate": "Tỷ lệ thắng {{v}}",
+      "lucky": "Vòng quay trúng “{{prize}}”",
+      "luckySoldOut": "Phần thưởng vòng quay đã hết",
+      "payment": "Thanh toán ${{amount}} ({{plan}})",
+      "plan": "{{field}}: {{old}} → {{new}}",
+      "by": "bởi {{name}}",
+      "ticket": "Tạo phiếu “{{title}}”",
+      "field": {
+        "plan": "Gói",
+        "plan_expires_at": "Hạn gói",
+        "role": "Vai trò"
+      },
+      "compStatus": {
+        "draft": "Nháp",
+        "upcoming": "Sắp diễn ra",
+        "running": "Đang diễn ra",
+        "ended": "Đã kết thúc",
+        "settled": "Đã chốt"
+      },
+      "luckyStatus": {
+        "auto_done": "Đã tự động trao",
+        "pending": "Chờ nhận",
+        "submitted": "Đã yêu cầu, chờ trao",
+        "delivered": "Đã trao",
+        "cancelled": "Đã hủy"
+      },
+      "event": {
+        "user_login": "Đăng nhập",
+        "user_email_verified": "Đã xác minh email",
+        "user_password_changed": "Đổi mật khẩu",
+        "user_password_reset": "Đặt lại mật khẩu",
+        "user_nickname": "Đổi biệt danh",
+        "user_phone_set": "Đặt số điện thoại",
+        "mt5_bind": "Liên kết MT5 {{login}}",
+        "mt5_unbind": "Hủy liên kết MT5 {{login}}",
+        "mt5_revoked": "MT5 {{login}} mất ủy quyền",
+        "other": "Sự kiện tài khoản"
+      }
+    },
+    "ticketEdit": {
+      "category": "Danh mục",
+      "categorySaved": "Đã cập nhật danh mục",
+      "editTitle": "Sửa tiêu đề",
+      "titleSaved": "Đã cập nhật tiêu đề",
+      "save": "Lưu",
+      "cancel": "Hủy",
+      "saveTemplate": "Lưu thành trả lời nhanh",
+      "templateTitle": "Đặt tên cho trả lời nhanh",
+      "templateSaved": "Đã lưu thành trả lời nhanh",
+      "templateVars": "Biến: {nickname} biệt danh, {email} email, {ticket} tiêu đề phiếu"
     }
   },
   "lucky": {

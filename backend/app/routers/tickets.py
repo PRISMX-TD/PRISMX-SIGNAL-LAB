@@ -181,6 +181,7 @@ def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: boo
         replies=[_reply_out(r, viewer_is_admin, urls) for r in replies],
         assigneeId=ticket.assignee_id if viewer_is_admin else None,
         assigneeName=_assignee_name(db, ticket) if viewer_is_admin else None,
+        userNickname=user.nickname if viewer_is_admin else None,
     )
 
 
@@ -790,6 +791,13 @@ def admin_update_ticket(
         ticket.status = body.status
     if body.priority:
         ticket.priority = body.priority
+    if body.category and body.category != ticket.category:
+        log_change(db, ctx.user.id, ticket.user_id, f"ticket:{ticket.id}:category", ticket.category, body.category)
+        ticket.category = body.category
+    title = (body.title or "").strip()
+    if title and title != ticket.title:
+        log_change(db, ctx.user.id, ticket.user_id, f"ticket:{ticket.id}:title", ticket.title, title)
+        ticket.title = title
     _audit_ticket_change(db, ctx.user.id, ticket, old_status, old_priority)
     db.commit()
     db.refresh(ticket)

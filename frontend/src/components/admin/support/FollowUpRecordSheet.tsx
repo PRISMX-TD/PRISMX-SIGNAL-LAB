@@ -17,6 +17,7 @@ import ConfirmModal from '../../ConfirmModal'
 import Select from '../../Select'
 import { SkeletonLine } from '../../Skeleton'
 import { Avatar, FU_PRIORITY_TONE, FU_STATUS_TONE, Tag, errText, fmtClock } from '../../support/supportUi'
+import Copyable from '../../Copyable'
 
 type Item = { kind: 'note'; at: number; note: FollowUpNote } | { kind: 'event'; at: number; ev: FollowUpEvent }
 
@@ -157,7 +158,7 @@ export default function FollowUpRecordSheet({
         <div className="mt-2 space-y-6">
           {/* 客户 / the customer */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <span className="min-w-0 truncate font-mono text-xs text-neutral-400">{user?.email || fu?.email || '—'}</span>
+            <span className="min-w-0 truncate font-mono text-xs text-neutral-400">{user?.email || fu?.email ? <Copyable text={user?.email || fu?.email} label={t('supportDesk.copy.email')} /> : '—'}</span>
             {user?.plan && <span className={`adm-pill ${user.plan === 'PRO' ? 'is-brand' : ''}`}>{user.plan}</span>}
             {user?.doNotContact && <span className="adm-pill is-down">{t('admin.support.progress.dnc')}</span>}
             {(user?.email || fu?.email) && (

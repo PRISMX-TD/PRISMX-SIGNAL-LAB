@@ -16,6 +16,7 @@ import type { AdminUser, CompetitionAdminRow } from '../../../api/types'
 import { fmtTime, localizeApiError } from '../../../api/utils'
 import { newRequestId } from '../../../utils/luckyWheel'
 import { clampCount, limitProblem, merge, periodValid, tierProblem, totals, type DupMode, type IssueLine } from './luckyIssue'
+import Copyable from '../../Copyable'
 
 type Mode = 'comp' | 'board' | 'manual'
 type PeriodKind = 'week' | 'month' | 'custom'
@@ -239,7 +240,7 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
               <tbody>
                 {list.map((x) => (
                   <tr key={x.userId}>
-                    <td className="lka-cell-user"><b>{x.nickname || '—'}</b><span>{x.email}</span></td>
+                    <td className="lka-cell-user"><b>{x.nickname ? <Copyable text={x.nickname} label={t('supportDesk.copy.nickname')} /> : '—'}</b><span><Copyable text={x.email} label={t('supportDesk.copy.email')} /></span></td>
                     <td className="text-xs text-neutral-400">
                       <span className="num">{x.label}{x.rank ? ` #${x.rank}` : ''}</span>
                       {x.dup && <span className="adm-pill is-warn ml-1.5">{t('admin.lucky.issue.dup')}</span>}

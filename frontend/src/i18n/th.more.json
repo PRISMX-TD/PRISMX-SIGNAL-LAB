@@ -2464,6 +2464,80 @@
     "railIdle": "เปิดทิกเก็ตเพื่อดูข้อมูลผู้ส่งที่นี่",
     "drawer": {
       "title": "ข้อมูลลูกค้า"
+    },
+    "copy": {
+      "copied": "คัดลอกแล้ว",
+      "copiedWhat": "คัดลอก{{what}}แล้ว",
+      "failed": "คัดลอกไม่สำเร็จ",
+      "hint": "คลิกเพื่อคัดลอก: {{text}}",
+      "nickname": "ชื่อเล่น",
+      "email": "อีเมล",
+      "phone": "เบอร์โทร",
+      "account": "บัญชี",
+      "text": "ข้อความ"
+    },
+    "activity": {
+      "title": "กิจกรรมล่าสุด",
+      "empty": "ยังไม่มีกิจกรรม",
+      "more": "แสดงทั้งหมด {{n}} รายการ",
+      "less": "ย่อ",
+      "signup": "สมัครสมาชิก",
+      "compJoin": "สมัครแข่งขัน “{{name}}”",
+      "rankOf": "อันดับ {{rank}} จาก {{total}}",
+      "rank": "อันดับ {{rank}}",
+      "unranked": "ยังไม่ติดอันดับ",
+      "dq": "ถูกตัดสิทธิ์",
+      "return": "ผลตอบแทน {{v}}",
+      "winRate": "อัตราชนะ {{v}}",
+      "lucky": "วงล้อได้รางวัล “{{prize}}”",
+      "luckySoldOut": "รางวัลจากวงล้อหมดแล้ว",
+      "payment": "ชำระเงิน ${{amount}} ({{plan}})",
+      "plan": "{{field}}: {{old}} → {{new}}",
+      "by": "โดย {{name}}",
+      "ticket": "เปิดทิกเก็ต “{{title}}”",
+      "field": {
+        "plan": "แพ็กเกจ",
+        "plan_expires_at": "วันหมดอายุแพ็กเกจ",
+        "role": "บทบาท"
+      },
+      "compStatus": {
+        "draft": "ฉบับร่าง",
+        "upcoming": "เร็ว ๆ นี้",
+        "running": "กำลังแข่ง",
+        "ended": "จบแล้ว",
+        "settled": "ประกาศผลแล้ว"
+      },
+      "luckyStatus": {
+        "auto_done": "มอบให้อัตโนมัติแล้ว",
+        "pending": "รอรับ",
+        "submitted": "ขอรับแล้ว รอส่ง",
+        "delivered": "ส่งแล้ว",
+        "cancelled": "ยกเลิกแล้ว"
+      },
+      "event": {
+        "user_login": "เข้าสู่ระบบ",
+        "user_email_verified": "ยืนยันอีเมลแล้ว",
+        "user_password_changed": "เปลี่ยนรหัสผ่าน",
+        "user_password_reset": "รีเซ็ตรหัสผ่าน",
+        "user_nickname": "เปลี่ยนชื่อเล่น",
+        "user_phone_set": "ตั้งเบอร์โทร",
+        "mt5_bind": "เชื่อม MT5 {{login}}",
+        "mt5_unbind": "ยกเลิกเชื่อม MT5 {{login}}",
+        "mt5_revoked": "สิทธิ์ MT5 {{login}} หมดอายุ",
+        "other": "เหตุการณ์บัญชี"
+      }
+    },
+    "ticketEdit": {
+      "category": "หมวดหมู่",
+      "categorySaved": "อัปเดตหมวดหมู่แล้ว",
+      "editTitle": "แก้ไขหัวข้อ",
+      "titleSaved": "อัปเดตหัวข้อแล้ว",
+      "save": "บันทึก",
+      "cancel": "ยกเลิก",
+      "saveTemplate": "บันทึกเป็นข้อความสำเร็จรูป",
+      "templateTitle": "ตั้งชื่อข้อความสำเร็จรูปนี้",
+      "templateSaved": "บันทึกเป็นข้อความสำเร็จรูปแล้ว",
+      "templateVars": "ตัวแปร: {nickname} ชื่อเล่น, {email} อีเมล, {ticket} หัวข้อทิกเก็ต"
     }
   },
   "lucky": {

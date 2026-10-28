@@ -1839,6 +1839,9 @@ class TicketOut(BaseModel):
     # Assignment (rev 41): filled for staff viewers only; always None for users.
     assigneeId: str | None = None
     assigneeName: str | None = None
+    # 提交人昵称（2026-10-28，工作人员视角，快捷回复的 {nickname} 变量用）；用户侧恒为 None。
+    # Submitter's nickname (2026-10-28, staff view, for the {nickname} template variable); None for users.
+    userNickname: str | None = None
 
 
 class TicketListItem(BaseModel):
@@ -1857,9 +1860,15 @@ class TicketListItem(BaseModel):
 
 
 class AdminTicketUpdate(BaseModel):
-    """管理员修改工单属性 / admin updates ticket properties."""
+    """工作人员修改工单属性（客服与管理员都可以）。2026-10-28 起还能改分类与标题——用户常把
+    申领开成「账号」、标题写成「你好」，改对了列表筛选和统计才准。
+    Staff update ticket properties (support and admins). Since 2026-10-28 also the category
+    and title — users often file a claim as "account" or title it "hi"; fixing them keeps the
+    filters and counts right."""
     status: Literal["open", "in_progress", "closed"] | None = None
     priority: Literal["low", "normal", "urgent"] | None = None
+    category: Literal["account", "payment", "claim", "technical", "feature", "follow_up"] | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class AdminTicketReplyCreate(TicketReplyCreate):

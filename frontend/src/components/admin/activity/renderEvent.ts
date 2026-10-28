@@ -1147,7 +1147,7 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
     const items = rows.map((c) => {
       const field = str(c.field) ?? ''
       if (field === 'reply') return t('admin.log.x.replied', { text: q(t, clip(str(c.new) ?? '', 40)) })
-      const prefix = field === 'status' ? 'tickets.status.' : field === 'priority' ? 'tickets.priority.' : null
+      const prefix = field === 'status' ? 'tickets.status.' : field === 'priority' ? 'tickets.priority.' : field === 'category' ? 'tickets.category.' : null
       const val = (v: unknown) => (str(v) ? (prefix ? lbl(t, `${prefix}${str(v)}`, str(v)!) : str(v)!) : null)
       const label = lbl(t, `admin.log.v.ticketField.${field}`, field)
       const a = val(c.old)

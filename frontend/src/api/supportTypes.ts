@@ -4,6 +4,8 @@
 // services/support_view.py. Permission filtering is server-side: an absent field means the
 // caller may not see it.
 
+import type { AdminUser } from './types'
+
 export type SupportTier = 'internal' | 'outsourced'
 export type FollowUpGoal = 'open_mt5' | 'open_signallab' | 'renew' | 'activate_trial' | 'revisit' | 'other'
 export type FollowUpPriority = 'low' | 'normal' | 'high'
@@ -156,6 +158,40 @@ export interface SupportCard {
   notes: FollowUpNote[]
   conversions: SupportConversion[]
   tickets: SupportCardTicket[]
+  // 最近动态（2026-10-28）/ recent activity
+  activity?: UserActivityItem[]
+}
+
+// 用户最近动态的一条（后端 services/user_activity.py）。字段按 kind 不同而不同。
+// One recent-activity entry (backend services/user_activity.py); fields depend on kind.
+export type UserActivityItem =
+  | { kind: 'signup'; at: string }
+  | {
+      kind: 'comp'
+      at: string
+      compId: string
+      name: string
+      status: string
+      metric: string
+      login: string | null
+      rank: number | null
+      total: number | null
+      score: number | null
+      disqualified: boolean
+    }
+  | { kind: 'lucky'; at: string; prize: string | null; prizeKind: string | null; status: string; soldOut: boolean; ticketId: string | null }
+  | { kind: 'payment'; at: string; plan: string; amountUsd: number }
+  | { kind: 'plan'; at: string; field: string; old: string | null; new: string | null; by: string | null }
+  | { kind: 'ticket'; at: string; ticketId: string; title: string; category: string; status: string }
+  | { kind: 'event'; at: string; event: string; login: string | null }
+
+// 管理端用户档案抽屉 / the admin user drawer
+export interface AdminUserOverview {
+  user: AdminUser
+  customer: SupportCustomer
+  ips: { ip: string; place: string | null; lastSeenAt: string | null }[]
+  sameIpUsers: number
+  activity: UserActivityItem[]
 }
 
 export interface SupportRequest {

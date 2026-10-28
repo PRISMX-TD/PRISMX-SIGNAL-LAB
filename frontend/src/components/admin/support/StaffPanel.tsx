@@ -10,6 +10,7 @@ import type { SupportMember, SupportTier } from '../../../api/supportTypes'
 import Select from '../../Select'
 import { SkeletonLine } from '../../Skeleton'
 import { errText } from '../../support/supportUi'
+import Copyable from '../../Copyable'
 
 export default function StaffPanel({ onToast }: { onToast: (kind: 'ok' | 'err', text: string) => void }) {
   const { t } = useTranslation()
@@ -63,7 +64,7 @@ export default function StaffPanel({ onToast }: { onToast: (kind: 'ok' | 'err', 
             <div className="flex items-center gap-2">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-semibold text-neutral-100">{m.nickname || m.email}</div>
-                <div className="truncate font-mono text-[11px] text-neutral-500">{m.email}</div>
+                <div className="truncate font-mono text-[11px] text-neutral-500"><Copyable text={m.email} label={t('supportDesk.copy.email')} /></div>
               </div>
               <span className={`tag ${m.disabled ? 'bg-down/15 text-down' : 'bg-up/15 text-up'}`}>
                 {m.disabled ? t('admin.statusDisabled') : t('admin.support.staff.onDuty')}
