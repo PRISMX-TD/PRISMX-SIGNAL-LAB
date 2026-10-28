@@ -1472,9 +1472,9 @@ def _revoke(db: Session, actor: User, node: AgentNode) -> None:
     links, customers = remove_node(db, node)
     _log_change(db, actor.id, node.user_id, "agent_parent", parent.email if parent else "-", None)
     for link in links:
+        # 10-28 起链接一律收回成平台链接（remove_node），新主人为空。/ Links now go back to the platform.
         _log_change(
-            db, actor.id, parent.id if parent else node.user_id, f"link_owner:{link.code}",
-            target.email if target else None, parent.email if parent else None,
+            db, actor.id, node.user_id, f"link_owner:{link.code}", target.email if target else None, None
         )
         if before.get(link.id) != _audit_value(link):
             _log_change(db, actor.id, actor.id, f"invite:{link.code}", before.get(link.id), _audit_value(link))

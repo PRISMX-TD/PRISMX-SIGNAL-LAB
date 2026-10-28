@@ -357,6 +357,10 @@ def test_demotion_hands_customers_and_links_up_and_lifts_the_subtree(db_session)
     assert _emails(agent_tree_users(db_session, a)) == {a1.email, b.email, b2.email, c1.email, d1.email}
     fields = {r.field for r in db_session.query(AdminAuditLog).all()}
     assert {"agent_parent", "agent_user", f"link_owner:{lb.code}"} <= fields
+    owner_row = db_session.query(AdminAuditLog).filter_by(field=f"link_owner:{lb.code}").order_by(
+        AdminAuditLog.created_at.desc()
+    ).first()
+    assert owner_row.old_value == b.email and not owner_row.new_value  # 收回成平台链接 / back to the platform
 
 
 def test_demotion_scope(db_session):
