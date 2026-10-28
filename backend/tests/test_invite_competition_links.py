@@ -390,7 +390,7 @@ def test_competition_link_cannot_get_agents(db_session):
     with pytest.raises(HTTPException) as exc:
         assign_agent(db_session, admin, link, agent)
     assert exc.value.status_code == 400
-    assert exc.value.detail == "比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+    assert exc.value.detail == "比赛推广链接不能指派推荐官 / Competition promo links cannot have ambassadors"
     db_session.refresh(link)
     assert link.owner_user_id is None
     assert db_session.query(AdminAuditLog).filter(AdminAuditLog.field == "link_owner:comp2345").count() == 0

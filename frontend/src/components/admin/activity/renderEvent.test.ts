@@ -596,7 +596,7 @@ describe('谁操作与小标签 / actor and chips', () => {
     expect(a('broker')).toBe('券商（MT5）')
     expect(a('admin', '运营小王', 'ops@x.com')).toBe('管理员 运营小王')
     expect(a('admin', null, 'ops@x.com')).toBe('管理员 ops@x.com')
-    expect(a('agent', null, null)).toBe('代理')
+    expect(a('agent', null, null)).toBe('推荐官')
   })
   it('部分平仓 / 仓位已不在 / 自动 不再做成小标签（句子和「谁操作」已经说了）/ partial, gone, auto get no chip', () => {
     const it2 = item('auto.partial_tp', {}, { tags: ['auto', 'partial', 'late', 'shared_login'], status: 'pending' })
@@ -667,20 +667,20 @@ describe('改挂代理上级 / agent upline change', () => {
     item('admin.user_edit', params, { cat: 'admin', actor: { type: 'admin', id: 'a1', name: '小王', email: 'ops@example.com' } })
   it('挂到另一个代理下面，连同归因 / under another agent, with the attribution', () => {
     const p = { agent_parent: ['a@x.io', 'd@x.io'], invite: ['aaaa2345', 'dddd2345'], invite_label: ['A 的链接', 'D 的链接'] }
-    expect(renderEvent(edit(p), zh).text).toContain('代理上级 「a@x.io」 → 「d@x.io」')
-    expect(renderEvent(edit(p), en).text).toContain('agent upline')
+    expect(renderEvent(edit(p), zh).text).toContain('推荐官上级 「a@x.io」 → 「d@x.io」')
+    expect(renderEvent(edit(p), en).text).toContain('ambassador upline')
   })
   it('改成一级 / made top-level', () => {
-    expect(renderEvent(edit({ agent_parent: ['a@x.io', '-'] }), zh).text).toContain('→ 无（一级代理）')
+    expect(renderEvent(edit({ agent_parent: ['a@x.io', '-'] }), zh).text).toContain('→ 无（一级推荐官）')
     expect(renderEvent(edit({ agent_parent: ['a@x.io', '-'] }), en).text).toContain('none (top-level)')
   })
   it('任命与撤销：空 = 不是代理 / appoint and revoke: blank = not an agent', () => {
-    expect(renderEvent(edit({ agent_parent: [null, '-'] }), zh).text).toContain('不是代理 → 无（一级代理）')
-    expect(renderEvent(edit({ agent_parent: ['a@x.io', null] }), zh).text).toContain('→ 不是代理')
+    expect(renderEvent(edit({ agent_parent: [null, '-'] }), zh).text).toContain('不是推荐官 → 无（一级推荐官）')
+    expect(renderEvent(edit({ agent_parent: ['a@x.io', null] }), zh).text).toContain('→ 不是推荐官')
   })
   it('归属代理：空 = 平台客户 / owning agent: blank = platform customer', () => {
-    expect(renderEvent(edit({ agent_user: ['a@x.io', null] }), zh).text).toContain('归属代理 「a@x.io」 → 平台客户')
-    expect(renderEvent(edit({ agent_user: [null, 'b@x.io'] }), en).text).toContain('owning agent')
+    expect(renderEvent(edit({ agent_user: ['a@x.io', null] }), zh).text).toContain('归属推荐官 「a@x.io」 → 平台客户')
+    expect(renderEvent(edit({ agent_user: [null, 'b@x.io'] }), en).text).toContain('owning ambassador')
   })
   it('改会员权限：on / off / plan right: on / off', () => {
     expect(renderEvent(edit({ agent_plan_right: ['off', 'on'] }), zh).text).toContain('改会员权限 关 → 开')
@@ -688,8 +688,8 @@ describe('改挂代理上级 / agent upline change', () => {
     expect(changeFieldLabel('admin.user_edit', 'agent_plan_right', null, zh)).toBe('改会员权限')
   })
   it('字段名有标签 / the field has a label', () => {
-    expect(changeFieldLabel('admin.user_edit', 'agent_parent', null, zh)).toBe('代理上级')
-    expect(changeFieldLabel('admin.user_edit', 'agent_user', null, zh)).toBe('归属代理')
+    expect(changeFieldLabel('admin.user_edit', 'agent_parent', null, zh)).toBe('推荐官上级')
+    expect(changeFieldLabel('admin.user_edit', 'agent_user', null, zh)).toBe('归属推荐官')
     expect(changeFieldLabel('admin.agent_assign', 'link_owner:ab12cd34', null, zh)).toBe(changeFieldLabel('admin.agent_assign', 'invite:ab12cd34:agent', null, zh))
   })
 })

@@ -17,15 +17,15 @@
     "ticket_new": "Có yêu cầu hỗ trợ mới cần xử lý",
     "comp_public_name": "Bảng xếp hạng công khai",
     "plan_refund": "Đơn hàng đã được hoàn tiền — số ngày thành viên tương ứng đã bị thu hồi. Liên hệ hỗ trợ nếu bạn có thắc mắc.",
-    "agent_plan_change": "Một đại lý đã thay đổi gói của khách hàng",
+    "agent_plan_change": "Một đại sứ đã thay đổi gói của khách hàng",
     "support_reminder": "Nhắc việc theo dõi",
     "support_alert": "Trang quản trị hỗ trợ cần xử lý",
     "lucky_ticket": "Bạn nhận được vé quay thưởng",
     "lucky_ticket_expiring": "Vé quay thưởng sắp hết hạn",
     "lucky_prize_delivered": "Phần thưởng đã được gửi",
     "lucky_prize_cancelled": "Phần thưởng đã bị hủy",
-    "agent_tree_change": "Một đại lý đã thay đổi đại lý cấp dưới",
-    "agent_promoted": "Bạn đã trở thành đại lý — mở trang đại lý"
+    "agent_tree_change": "Một đại sứ đã thay đổi đại sứ cấp dưới",
+    "agent_promoted": "Bạn đã trở thành đại sứ — mở Trung tâm Đại sứ"
   },
   "nav": {
     "dashboard": "Tổng quan",
@@ -45,7 +45,7 @@
     "support": "Liên hệ hỗ trợ",
     "appDownload": "Tải ứng dụng",
     "announcements": "Thông báo chung",
-    "agent": "Trang đại lý",
+    "agent": "Trung tâm Đại sứ",
     "supportDesk": "Trang quản trị hỗ trợ"
   },
   "common": {

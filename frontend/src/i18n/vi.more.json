@@ -1287,15 +1287,15 @@
       "currentPlain": "Hiện tại: {{plan}}",
       "current": "Hiện tại: {{plan}} · {{until}}",
       "until": "đến {{time}}",
-      "noExpiry": "Không hết hạn (do admin thiết lập; đại lý không thể thay đổi)",
+      "noExpiry": "Không hết hạn (do admin thiết lập; đại sứ không thể thay đổi)",
       "extend": "Gia hạn PRO",
       "days": "{{days}} ngày",
       "extendHint": "Cộng thêm vào ngày hết hạn hiện tại; khách đã hết hạn hoặc gói miễn phí tính từ bây giờ. Tối đa 60 ngày mỗi lần — một năm là sáu lần nhấn.",
       "downgrade": "Hạ về gói miễn phí",
       "downgradeConfirmTitle": "Xác nhận hạ gói",
-      "downgradeConfirmBody": "{{email}} sẽ mất ngay tín hiệu thời gian thực, thông báo đẩy và nhiều tài khoản (hiện tại: {{current}}). Đại lý không thể hoàn tác — chỉ admin mới làm được."
+      "downgradeConfirmBody": "{{email}} sẽ mất ngay tín hiệu thời gian thực, thông báo đẩy và nhiều tài khoản (hiện tại: {{current}}). Đại sứ không thể hoàn tác — chỉ admin mới làm được."
     },
-    "title": "Trang đại lý",
+    "title": "Trung tâm Đại sứ",
     "subtitle": "Các liên kết mời được giao cho bạn và khách đã đăng ký qua đó. Bạn có thể điều chỉnh gói thành viên của họ; mọi thứ khác chỉ xem.",
     "empty": "Bạn chưa được giao liên kết mời nào.",
     "clicks": "Lượt nhấp",
@@ -1346,7 +1346,7 @@
       "cleared": "Đã xóa",
       "invalid": "Phải là link https của Make Capital"
     },
-    "subtitleReadOnly": "Bạn là đại lý cấp dưới: có thể xem liên kết của mình, đại lý cấp dưới và khách hàng của họ. Mọi nội dung chỉ để xem.",
+    "subtitleReadOnly": "Bạn là đại sứ cấp dưới: có thể xem liên kết của mình, đại sứ cấp dưới và khách hàng của họ. Mọi nội dung chỉ để xem.",
     "tabs": {
       "links": "Liên kết của tôi",
       "team": "Đội nhóm",
@@ -1355,42 +1355,48 @@
     "team": {
       "level": "Cấp {{n}}",
       "you": "Bạn",
-      "since": "Làm đại lý từ {{date}}",
+      "since": "Làm đại sứ từ {{date}}",
       "showCustomers": "Xem khách hàng",
-      "remove": "Gỡ đại lý",
+      "remove": "Gỡ đại sứ",
       "direct": "Khách trực tiếp",
       "total": "Khách cả nhóm",
-      "topHint": "Bạn là đại lý cấp 1: có thể nâng khách hàng thành đại lý cấp dưới ở mục “Tất cả khách hàng” (tối đa cấp {{max}}) và gỡ đại lý cấp dưới.",
-      "readOnlyHint": "Mục này chỉ để xem. Việc nâng/gỡ đại lý do đại lý cấp 1 thực hiện.",
+      "topHint": "Bạn là đại sứ cấp 1: có thể nâng khách hàng thành đại sứ cấp dưới ở mục “Tất cả khách hàng” (tối đa cấp {{max}}) và gỡ đại sứ cấp dưới.",
+      "readOnlyHint": "Mục này chỉ để xem. Việc nâng/gỡ đại sứ do đại sứ cấp 1 thực hiện.",
       "planOnHint": "Quản trị viên đã cấp quyền điều chỉnh gói cho bạn: bạn có thể điều chỉnh gói cho mọi khách trong nhóm.",
       "planOffHint": "Điều chỉnh gói cần quản trị viên cấp quyền cho bạn.",
       "countNote": "Khách trực tiếp chỉ tính người đến từ liên kết của chính họ; khách cả nhóm cộng thêm mọi người bên dưới. Hoạt động 7 ngày và MT5 đã kết nối chỉ tính khách trực tiếp.",
-      "emptyTop": "Chưa có đại lý cấp dưới. Bạn có thể nâng khách hàng thành đại lý ở mục “Tất cả khách hàng”.",
-      "empty": "Chưa có đại lý cấp dưới.",
-      "removeTitle": "Xác nhận gỡ đại lý",
-      "removeBody": "{{name}} sẽ trở lại là người dùng thường. Liên kết của họ bị tắt và nền tảng thu hồi; khách hàng họ mang đến vẫn ở trong nhóm của bạn, đại lý cấp dưới của họ được nâng lên một cấp.",
+      "emptyTop": "Chưa có đại sứ cấp dưới. Bạn có thể nâng khách hàng thành đại sứ ở mục “Tất cả khách hàng”.",
+      "empty": "Chưa có đại sứ cấp dưới.",
+      "removeTitle": "Xác nhận gỡ đại sứ",
+      "removeBody": "{{name}} sẽ trở lại là người dùng thường. Liên kết của họ bị tắt và nền tảng thu hồi; khách hàng họ mang đến vẫn ở trong nhóm của bạn, đại sứ cấp dưới của họ được nâng lên một cấp.",
       "customersShow": "Hiện khách trực tiếp ({{n}})",
       "customersHide": "Ẩn khách trực tiếp",
       "customersMore": "Còn {{n}} người, xem ở “Tất cả khách hàng”"
     },
     "customers": {
-      "allAgents": "Tất cả đại lý",
-      "filterAgent": "Lọc theo đại lý",
+      "allAgents": "Tất cả đại sứ",
+      "filterAgent": "Lọc theo đại sứ",
       "count": "{{n}} khách",
       "empty": "Chưa có khách hàng.",
       "colVia": "Đến từ",
-      "agentBadge": "Đại lý cấp {{n}}",
-      "agentBadgePlain": "Đại lý"
+      "agentBadge": "Đại sứ cấp {{n}}",
+      "agentBadgePlain": "Đại sứ"
     },
     "promote": {
-      "button": "Nâng thành đại lý",
-      "hint": "Khi nâng khách hàng thành đại lý, hệ thống tạo liên kết riêng và trang đại lý (chỉ xem) cho họ. Cấp trên của họ là đại lý sở hữu liên kết họ đã dùng để đăng ký.",
-      "title": "Xác nhận nâng thành đại lý",
-      "body": "{{name}} sẽ trở thành đại lý cấp {{n}} dưới {{parent}}, có liên kết riêng. Họ xem được tuyến dưới nhưng không thể thay đổi gì.",
-      "done": "{{name}} đã trở thành đại lý cấp {{n}}.",
+      "button": "Nâng thành đại sứ",
+      "hint": "Khi nâng khách hàng thành đại sứ, hệ thống tạo liên kết riêng và Trung tâm Đại sứ (chỉ xem) cho họ. Cấp trên của họ là đại sứ sở hữu liên kết họ đã dùng để đăng ký.",
+      "title": "Xác nhận nâng thành đại sứ",
+      "body": "{{name}} sẽ trở thành đại sứ cấp {{n}} dưới {{parent}}, có liên kết riêng. Họ xem được tuyến dưới nhưng không thể thay đổi gì.",
+      "done": "{{name}} đã trở thành đại sứ cấp {{n}}.",
       "tooDeep": "Đã đạt cấp tối đa ({{max}} cấp)"
     },
-    "subtitleNoPlan": "Liên kết quảng bá của bạn, đại lý cấp dưới và khách hàng của họ. Muốn thay đổi gói thành viên cần quản trị viên bật quyền cho bạn; hiện chỉ xem được."
+    "subtitleNoPlan": "Liên kết quảng bá của bạn, đại sứ cấp dưới và khách hàng của họ. Muốn thay đổi gói thành viên cần quản trị viên bật quyền cho bạn; hiện chỉ xem được.",
+    "hero": {
+      "role": "Đại sứ",
+      "rankTop": "Đại sứ cấp 1",
+      "code": "Mã giới thiệu",
+      "downline": "Đại sứ cấp dưới"
+    }
   },
   "announcements": {
     "countUnit": "bài",

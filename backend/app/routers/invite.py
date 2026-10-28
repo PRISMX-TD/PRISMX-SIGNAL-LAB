@@ -730,11 +730,11 @@ def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> No
     if link.owner_user_id:
         raise HTTPException(
             status_code=409,
-            detail="这条链接已有代理，一条链接只能有一个代理 / This link already has an agent; a link can have only one",
+            detail="这条链接已有推荐官，一条链接只能有一个推荐官 / This link already has an ambassador; a link can have only one",
         )
     if link.competition_id:
         raise HTTPException(
-            status_code=400, detail="比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+            status_code=400, detail="比赛推广链接不能指派推荐官 / Competition promo links cannot have ambassadors"
         )
     if node_of(db, target.id) is None:
         add_node(db, target.id, None, admin.id)
@@ -743,8 +743,8 @@ def assign_agent(db: Session, admin: User, link: InviteLink, target: User) -> No
 
 
 _MSG_HAS_CHILDREN = (
-    "该代理下面还有下级代理，请先改挂或撤销下级代理 / "
-    "This agent still has sub-agents; move or remove them first"
+    "该推荐官下面还有下级推荐官，请先改挂或撤销下级推荐官 / "
+    "This ambassador still has downline ambassadors; move or remove them first"
 )
 
 
@@ -1153,7 +1153,7 @@ def _agent_user_out(db: Session, u: User) -> AgentLinkUserOut:
 # out-of-scope and unknown are the same 404; writes are top-level only (403);
 # targets are addressed by email, never by user id.
 
-_MSG_TOP_ONLY = "只有一级代理可以操作 / Only top-level agents can do this"
+_MSG_TOP_ONLY = "只有一级推荐官可以操作 / Only top-level ambassadors can do this"
 _MSG_NO_PLAN_RIGHT = (
     "管理员还没有给你开通修改会员的权限 / An admin has not given you the right to change plans"
 )
@@ -1366,7 +1366,7 @@ def agent_tree_users(
             .first()
         )
         if owner is None:
-            raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+            raise HTTPException(status_code=404, detail="推荐官不存在 / Ambassador not found")
         kids = [uid for uid, parent in scope.parent_of.items() if parent == owner[0]]
         query = query.filter(
             or_(and_(User.agent_user_id == owner[0], is_customer()), User.id.in_(kids or [""]))
@@ -1413,7 +1413,7 @@ def _check_depth(db: Session, depth: int) -> None:
         raise HTTPException(
             status_code=409,
             detail=(
-                f"已达到最大层级（{max_depth} 级），不能再往下设代理 / "
+                f"已达到最大层级（{max_depth} 级），不能再往下设推荐官 / "
                 f"The maximum depth ({max_depth} levels) is reached"
             ),
         )
@@ -1455,7 +1455,7 @@ def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
     scope = _Scope(db, actor)
     target = _tree_target(db, scope, email, actor)
     if node_of(db, target.id) is not None:
-        raise HTTPException(status_code=409, detail="该用户已经是代理 / This user is already an agent")
+        raise HTTPException(status_code=409, detail="该用户已经是推荐官 / This user is already an ambassador")
     parent_node = node_of(db, target.agent_user_id) if target.agent_user_id else None
     if parent_node is None:
         # 范围内的客户必有归属代理且在树上；走到这里只可能是脏数据，按不存在处理。
@@ -1468,7 +1468,7 @@ def agent_promote(db: Session, actor: User, email: str) -> AgentTreeUserOut:
     _mint_agent_link(db, actor, target, bool(source.grants_trial) if source is not None else False)
     create_notification(db, target.id, KIND_AGENT_PROMOTED, link="/agent")
     admin_ids = _notify_admins_agent_write(
-        db, actor, target, f"{actor.email} → {target.email}: L{depth} agent", KIND_AGENT_TREE_CHANGE
+        db, actor, target, f"{actor.email} → {target.email}: L{depth} ambassador", KIND_AGENT_TREE_CHANGE
     )
     db.commit()
     db.refresh(target)
@@ -1510,10 +1510,10 @@ def agent_demote(db: Session, actor: User, email: str) -> AgentTeamOut:
     target = db.query(User).filter(func.lower(User.email) == email.strip().lower()).first()
     node = node_of(db, target.id) if target is not None else None
     if node is None or node.user_id not in {n.user_id for n in descendants(db, actor.id)}:
-        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+        raise HTTPException(status_code=404, detail="推荐官不存在 / Ambassador not found")
     _revoke(db, actor, node)
     admin_ids = _notify_admins_agent_write(
-        db, actor, target, f"{actor.email} → {target.email}: agent revoked", KIND_AGENT_TREE_CHANGE
+        db, actor, target, f"{actor.email} → {target.email}: ambassador revoked", KIND_AGENT_TREE_CHANGE
     )
     db.commit()
     for admin_id in admin_ids:
@@ -1569,7 +1569,7 @@ def admin_set_plan_right(db: Session, admin: User, user_id: str, body: AdminAgen
     top level included. Audited as agent_plan_right (on / off) when it changes."""
     node = node_of(db, user_id)
     if node is None:
-        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+        raise HTTPException(status_code=404, detail="推荐官不存在 / Ambassador not found")
     if bool(node.can_set_plan) != body.enabled:
         _log_change(
             db, admin.id, user_id, "agent_plan_right",
@@ -1593,12 +1593,12 @@ def admin_appoint_agent(db: Session, admin: User, body: AdminAgentAppoint) -> Ad
     if target is None:
         raise HTTPException(status_code=404, detail=_MSG_USER_NOT_FOUND)
     if node_of(db, target.id) is not None:
-        raise HTTPException(status_code=409, detail="该用户已经是代理 / This user is already an agent")
+        raise HTTPException(status_code=409, detail="该用户已经是推荐官 / This user is already an ambassador")
     parent = None
     if body.parentUserId:
         parent = node_of(db, body.parentUserId)
         if parent is None:
-            raise HTTPException(status_code=404, detail="上级不是代理 / The upline is not an agent")
+            raise HTTPException(status_code=404, detail="上级不是推荐官 / The upline is not an ambassador")
     depth = (parent.depth or 1) + 1 if parent is not None else 1
     _check_depth(db, depth)
     add_node(db, target.id, parent, admin.id)
@@ -1615,7 +1615,7 @@ def admin_revoke_agent(db: Session, admin: User, user_id: str) -> AdminAgentTree
     """管理员撤销代理：与代理页撤销同一条路径（_revoke）。/ Same path as the agent page."""
     node = node_of(db, user_id)
     if node is None:
-        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+        raise HTTPException(status_code=404, detail="推荐官不存在 / Ambassador not found")
     _revoke(db, admin, node)
     db.commit()
     return admin_agent_tree(db)
@@ -1634,7 +1634,7 @@ def admin_move_agent(db: Session, admin: User, body: AdminAgentMove) -> AdminAge
     """
     node = node_of(db, body.userId)
     if node is None:
-        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+        raise HTTPException(status_code=404, detail="推荐官不存在 / Ambassador not found")
     parent = None
     if body.parentUserId:
         if body.parentUserId == node.user_id or body.parentUserId in {
@@ -1642,11 +1642,11 @@ def admin_move_agent(db: Session, admin: User, body: AdminAgentMove) -> AdminAge
         }:
             raise HTTPException(
                 status_code=409,
-                detail="不能挂到他自己或他的下级下面 / Cannot move an agent under themselves or their own sub-agent",
+                detail="不能挂到他自己或他的下级下面 / Cannot move an ambassador under themselves or their own downline ambassador",
             )
         parent = node_of(db, body.parentUserId)
         if parent is None:
-            raise HTTPException(status_code=404, detail="新上级不是代理 / The new upline is not an agent")
+            raise HTTPException(status_code=404, detail="新上级不是推荐官 / The new upline is not an ambassador")
     if (parent.user_id if parent else None) == node.parent_user_id:
         raise HTTPException(status_code=409, detail="上级没有变化 / The upline is unchanged")
     new_depth = (parent.depth or 1) + 1 if parent is not None else 1
@@ -1656,7 +1656,7 @@ def admin_move_agent(db: Session, admin: User, body: AdminAgentMove) -> AdminAge
             status_code=409,
             detail=(
                 f"挂过去后他的下线会超过最大层级（{max_depth} 级） / "
-                f"The move would push their sub-agents past the maximum depth ({max_depth} levels)"
+                f"The move would push their downline ambassadors past the maximum depth ({max_depth} levels)"
             ),
         )
 
@@ -1702,10 +1702,10 @@ def admin_set_link_owner(db: Session, admin: User, link: InviteLink, body: Admin
         # Competition links are platform ad links; an owner would claim platform spend.
         if link.competition_id:
             raise HTTPException(
-                status_code=400, detail="比赛推广链接不能指派代理 / Competition promo links cannot have agents"
+                status_code=400, detail="比赛推广链接不能指派推荐官 / Competition promo links cannot have ambassadors"
             )
         if node_of(db, new_owner) is None:
-            raise HTTPException(status_code=404, detail="该用户不是代理 / This user is not an agent")
+            raise HTTPException(status_code=404, detail="该用户不是推荐官 / This user is not an ambassador")
     old_owner = link.owner_user_id
     if old_owner == new_owner:
         raise HTTPException(status_code=409, detail="主人没有变化 / The owner is unchanged")

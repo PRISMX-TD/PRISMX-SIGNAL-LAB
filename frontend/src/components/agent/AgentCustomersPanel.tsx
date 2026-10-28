@@ -180,7 +180,7 @@ export default function AgentCustomersPanel({
           placeholder={t('agent.searchPlaceholder')}
           aria-label={t('agent.searchPlaceholder')}
           maxLength={128}
-          className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-white/30 focus:outline-none sm:max-w-xs"
+          className="input w-full sm:max-w-xs"
         />
         <Select
           className="w-full sm:w-64"
@@ -207,7 +207,7 @@ export default function AgentCustomersPanel({
         </div>
       )}
 
-      <div className="glass p-0">
+      <div className="agt-sheet">
         {page == null && !error ? (
           <div className="space-y-2 p-4" aria-busy="true">
             <SkeletonLine height={16} />

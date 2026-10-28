@@ -173,38 +173,37 @@ export default function AgentTeamPanel({
             Indent is capped at four steps — on a phone deeper indents squeeze the name
             out; the level badge carries the depth anyway. */}
         <div
-          className={`py-3 pr-4 ${indent > 0 ? 'border-l border-white/10' : ''}`}
-          style={{ marginLeft: `${Math.min(indent, 4) * 14}px`, paddingLeft: indent > 0 ? '12px' : '16px' }}
+          className={`agt-node${n.isSelf ? ' is-self' : ''} ${indent > 0 ? 'border-l border-white/10' : ''}`}
+          style={{ marginLeft: `${Math.min(indent, 4) * 14}px`, paddingLeft: indent > 0 ? '12px' : '18px' }}
         >
-          <div className="flex flex-wrap items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="flex flex-wrap items-center gap-1.5 text-sm text-neutral-100">
+          <div className="agt-node-main">
+            {/* 头像是名字的首字（没有头像图可用）；自己那一圈是全息箔。
+                The avatar is the name's first character; your own wears the foil ring. */}
+            <span className="agt-avatar" aria-hidden="true">
+              {Array.from((n.nickname || n.email).trim())[0]?.toUpperCase() ?? '·'}
+            </span>
+            <div className="agt-node-who">
+              <p className="agt-node-name">
                 <span className="truncate">{n.nickname || n.email}</span>
-                {/* 层级只有一级代理看得到（后端二级起不下发）。/ Levels are sent to top-level agents only. */}
+                {/* 层级只有一级推荐官看得到（后端二级起不下发）。/ Levels reach top-level ambassadors only. */}
                 {n.level != null && (
-                  <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
-                    {t('agent.team.level', { n: n.level })}
-                  </span>
+                  <span className="agt-tag is-violet">{t('agent.team.level', { n: n.level })}</span>
                 )}
-                {n.isSelf && (
-                  <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[11px] text-neutral-400">
-                    {t('agent.team.you')}
-                  </span>
-                )}
+                {n.isSelf && <span className="agt-tag">{t('agent.team.you')}</span>}
               </p>
-              {n.nickname && <p className="num break-all text-xs text-neutral-400">{n.email}</p>}
+              {n.nickname && <p className="agt-node-sub num">{n.email}</p>}
               {!n.isSelf && n.createdAt && (
-                <p className="mt-0.5 text-[11px] text-neutral-500">{t('agent.team.since', { date: fmtDate(n.createdAt) })}</p>
+                <p className="agt-node-sub">{t('agent.team.since', { date: fmtDate(n.createdAt) })}</p>
               )}
             </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <button type="button" className="btn-ghost px-3 py-1.5 text-xs" onClick={() => onShowCustomers(n.email)}>
+            <div className="agt-node-actions">
+              <button type="button" className="btn btn-ghost" onClick={() => onShowCustomers(n.email)}>
                 {t('agent.team.showCustomers')}
               </button>
               {team.canManage && !n.isSelf && (
                 <button
                   type="button"
-                  className="btn-ghost px-3 py-1.5 text-xs text-down disabled:opacity-40"
+                  className="btn btn-ghost text-down"
                   disabled={busy}
                   onClick={() => setRemoving(n)}
                 >
@@ -213,23 +212,23 @@ export default function AgentTeamPanel({
               )}
             </div>
           </div>
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <dl className="agt-node-stats">
             {[
               { label: t('agent.team.direct'), value: n.directCustomers },
               { label: t('agent.team.total'), value: n.teamCustomers },
               { label: t('agent.active7d'), value: n.activeUsers7d },
               { label: t('agent.mt5Users'), value: n.mt5Users },
             ].map((s) => (
-              <div key={s.label} className="min-w-0">
-                <p className="truncate text-[11px] text-neutral-500">{s.label}</p>
-                <p className="num text-base text-neutral-100">{s.value}</p>
+              <div key={s.label}>
+                <dt>{s.label}</dt>
+                <dd className="num">{s.value.toLocaleString('en-US')}</dd>
               </div>
             ))}
-          </div>
+          </dl>
           {plainCount > 0 && (
             <button
               type="button"
-              className="mt-2 text-xs text-prism-300 hover:text-prism-200"
+              className="agt-node-toggle"
               aria-expanded={open}
               onClick={() => toggle(n.email)}
             >
@@ -263,7 +262,7 @@ export default function AgentTeamPanel({
         </div>
       )}
 
-      <div className="glass p-0">
+      <div className="agt-sheet overflow-hidden">
         {self && <ul className="divide-y divide-white/5">{renderNode(self, 0)}</ul>}
         {subCount === 0 && (
           <p className="border-t border-white/5 px-4 py-4 text-sm text-neutral-500">

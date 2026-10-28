@@ -33,12 +33,20 @@
 // (AgentTeamPanel) and All customers (AgentCustomersPanel), kept in ?tab= so the back
 // gesture returns to the previous tab. Only top-level agents (canManage) promote / revoke;
 // changing plans follows the admin-granted canSetPlan (rev 51), per-link button included.
+// 2026-10-28「代理」改名「推荐官」，页面按私行黑卡的语言重画：页头是推荐官凭证卡 + 团队核心数字
+// （components/agent/AgentHero），页签换成文字 + 紫色底条，链接卡突出推荐码；样式在
+// styles/agent.css（只随本页加载）。路由 /agent 与接口都不变。
+// Renamed "agent" → "ambassador" on 2026-10-28 and redrawn in a black-card language:
+// the head is a credential card plus key team figures (AgentHero), text tabs over a
+// violet bar, link cards led by the referral code; styles in styles/agent.css (loaded
+// with this page only). The /agent route and the API are unchanged.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import PageHead from '../components/PageHead'
 import { SkeletonLine } from '../components/Skeleton'
 import AgentCustomersPanel from '../components/agent/AgentCustomersPanel'
+import AgentHero from '../components/agent/AgentHero'
 import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
 import AgentTeamPanel from '../components/agent/AgentTeamPanel'
 import PlanDialog from '../components/agent/PlanDialog'
@@ -47,9 +55,9 @@ import { API_BASE, agentApi } from '../api/client'
 import { fmtDate, localizeApiError } from '../api/utils'
 import { CardRow, LastActive, Mt5List, PlanBadge, PlanCell, planExpiryText } from '../components/agent/customerCells'
 import { agentCompetitionUrl, inviteUrl } from '../utils/promoLinkUrl'
-import { segBtn } from '../utils/segBtn'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentTeam } from '../api/types'
+import '../styles/agent.css'
 
 const PAGE_SIZE = 50
 
@@ -66,6 +74,9 @@ export default function AgentPage() {
   // My place in the agent tree (rev 47): write access plus the Team / Customers tabs.
   // A failed load just means read-only; My links keeps working.
   const [team, setTeam] = useState<AgentTeam | null>(null)
+  // 团队接口第一次有了结果（成功或失败）。页头在此之前只出骨架。
+  // The team call has settled once, either way; the head shows a skeleton until then.
+  const [teamReady, setTeamReady] = useState(false)
   const canManage = team?.canManage ?? false
   const canSetPlan = team?.canSetPlan ?? false
   const [params, setParams] = useSearchParams()
@@ -83,6 +94,7 @@ export default function AgentPage() {
       .team()
       .then(setTeam)
       .catch(() => {})
+      .finally(() => setTeamReady(true))
   }
   useEffect(loadTeam, [])
   const [error, setError] = useState<string | null>(null)
@@ -212,10 +224,11 @@ export default function AgentPage() {
   const pageNo = Math.floor(offset / PAGE_SIZE) + 1
 
   return (
-    <div className="mx-auto max-w-6xl">
-      <PageHead
-        as="h1"
-        title={t('agent.title')}
+    <div className="agt-page mx-auto max-w-6xl">
+      <AgentHero
+        team={team}
+        teamReady={teamReady}
+        links={links}
         subtitle={
           !team?.isAgent || canSetPlan
             ? t('agent.subtitle')
@@ -223,49 +236,53 @@ export default function AgentPage() {
               ? t('agent.subtitleNoPlan')
               : t('agent.subtitleReadOnly')
         }
-        count={tab === 'links' && links && links.length > 1 ? links.length : null}
       />
 
-      {/* 页签：只有确实在代理树上（isAgent）才出现。/ Tabs, only for agents in the tree. */}
+      {/* 页签：只有确实在推荐官树上（isAgent）才出现。/ Tabs, only for ambassadors in the tree. */}
       {team?.isAgent && (
-        <div className="mb-4 flex flex-wrap gap-1.5" role="tablist">
+        <div className="agt-tabs" role="tablist">
           {TABS.map((k) => (
             <button
               key={k}
               type="button"
               role="tab"
               aria-selected={tab === k}
-              className={segBtn(tab === k)}
+              className={`agt-tab${tab === k ? ' is-on' : ''}`}
               onClick={() => switchTab(k)}
             >
               {t(`agent.tabs.${k}`)}
-              {k === 'team' && team.nodes.length > 1 && <span className="num ml-1 opacity-60">{team.nodes.length - 1}</span>}
+              {k === 'links' && links && links.length > 1 && <span className="agt-tab-count num">{links.length}</span>}
+              {k === 'team' && team.nodes.length > 1 && <span className="agt-tab-count num">{team.nodes.length - 1}</span>}
             </button>
           ))}
         </div>
       )}
 
       {team && tab === 'team' && (
-        <AgentTeamPanel
-          team={team}
-          onTeamChange={setTeam}
-          onShowCustomers={(email) => {
-            setCustomerAgent(email)
-            switchTab('customers')
-          }}
-        />
+        <div className="agt-panel" key="team">
+          <AgentTeamPanel
+            team={team}
+            onTeamChange={setTeam}
+            onShowCustomers={(email) => {
+              setCustomerAgent(email)
+              switchTab('customers')
+            }}
+          />
+        </div>
       )}
       {team && tab === 'customers' && (
-        <AgentCustomersPanel
-          team={team}
-          agentFilter={customerAgent}
-          onAgentFilterChange={setCustomerAgent}
-          onPromoted={loadTeam}
-        />
+        <div className="agt-panel" key="customers">
+          <AgentCustomersPanel
+            team={team}
+            agentFilter={customerAgent}
+            onAgentFilterChange={setCustomerAgent}
+            onPromoted={loadTeam}
+          />
+        </div>
       )}
 
       {tab === 'links' && (
-      <>
+      <div className="agt-panel" key="links">
 
       {error && (
         <div className="mb-4 rounded-lg border border-down/40 bg-down/15 px-4 py-2.5 text-sm text-down" role="alert">
@@ -277,75 +294,77 @@ export default function AgentPage() {
           One card per link; with several, clicking a card switches the list below.
           Only the body shows a skeleton while loading — the head stays put. */}
       {links == null ? (
-        <div className="grid gap-3 sm:grid-cols-2" aria-busy="true">
+        <div className="agt-links" aria-busy="true">
           {[0, 1].map((i) => (
-            <div key={i} className="glass space-y-3 p-4">
+            <div key={i} className="agt-link space-y-3">
               <SkeletonLine width="40%" height={14} />
-              <SkeletonLine height={12} />
-              <SkeletonLine width="60%" height={28} />
+              <SkeletonLine width="55%" height={28} />
+              <SkeletonLine height={40} />
             </div>
           ))}
         </div>
       ) : links.length === 0 ? (
-        <div className="glass p-8 text-center text-sm text-neutral-500">{t('agent.empty')}</div>
+        <div className="agt-sheet p-8 text-center text-sm text-neutral-500">{t('agent.empty')}</div>
       ) : (
         // 卡是 grid 项：必须 min-w-0，否则 nowrap 的链接 URL 会把整张卡的最小宽度顶到
-        // 比手机屏还宽（grid 项默认 min-width:auto 取内容的 min-content）。
-        // The card is a grid item and needs min-w-0: otherwise the nowrap URL sets its
-        // min-content wider than a phone screen (grid items default to min-width:auto).
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {links.map((l) => {
-            const active = l.id === selectedId
+        // 比手机屏还宽（grid 项默认 min-width:auto 取内容的 min-content）。.agt-link 自带。
+        // The card is a grid item and needs min-width 0: otherwise the nowrap URL sets its
+        // min-content wider than a phone screen. .agt-link carries it.
+        <div className="agt-links">
+          {links.map((l, i) => {
+            const pickable = links.length > 1
+            const active = pickable && l.id === selectedId
             return (
               <div
                 key={l.id}
-                role={links.length > 1 ? 'button' : undefined}
-                tabIndex={links.length > 1 ? 0 : undefined}
+                role={pickable ? 'button' : undefined}
+                tabIndex={pickable ? 0 : undefined}
+                aria-pressed={pickable ? active : undefined}
                 onClick={() => select(l.id)}
                 onKeyDown={(e) => {
+                  // 只认卡片自己的按键：卡里的复制按钮、开户链接输入框冒上来的回车 / 空格要留给它们自己。
+                  // Only the card's own keys: Enter/Space from the copy buttons or the link input inside stay theirs.
+                  if (e.target !== e.currentTarget) return
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault()
                     select(l.id)
                   }
                 }}
-                className={`glass min-w-0 p-4 transition ${
-                  links.length > 1 ? 'cursor-pointer' : ''
-                } ${active && links.length > 1 ? 'ring-1 ring-prism-400/60' : ''}`}
+                className={`agt-link${pickable ? ' is-pickable' : ''}${active ? ' is-active' : ''}`}
+                style={{ '--i': i } as React.CSSProperties}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-display text-base text-neutral-100">{l.label}</p>
-                    <p className="num mt-1 truncate text-xs text-neutral-400">{inviteUrl(l.code)}</p>
-                  </div>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
-                      l.isActive ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
-                    }`}
-                  >
+                <div className="agt-link-head">
+                  <p className="agt-link-label">{l.label}</p>
+                  <span className={`agt-chip${l.isActive ? ' is-on' : ''}`}>
                     {l.isActive ? t('agent.active') : t('agent.inactive')}
                   </span>
                 </div>
-                {/* 四个数字一排：点击 / 注册 / 近 7 日活跃 / 已连 MT5。手机上两列换行，
-                    复制按钮自成一行——四个数字挤在按钮旁边会把数字压到看不清。
-                    Four numbers in a row, wrapping to two columns on phones; the copy
-                    button gets its own row rather than squeezing the figures. */}
-                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {/* 推荐码放大：当面报给别人、对着屏幕抄都靠它；完整链接退到下面一行。
+                    The code is the hero: it gets read out and copied by eye; the full URL sits below. */}
+                <div className="agt-link-code">
+                  <span className="agt-link-code-label">{t('agent.hero.code')}</span>
+                  <span className="agt-link-code-value num">{l.code}</span>
+                  <span className="agt-link-url num">{inviteUrl(l.code)}</span>
+                </div>
+                {/* 四个数字一排：点击 / 注册 / 近 7 日活跃 / 已连 MT5，发丝线分隔；窄屏两列。
+                    Four figures split by hairlines; two columns on narrow screens. */}
+                <dl className="agt-link-stats">
                   {[
                     { label: t('agent.clicks'), value: l.clicks },
                     { label: t('agent.registrations'), value: l.registrations },
                     { label: t('agent.active7d'), value: l.activeUsers7d },
                     { label: t('agent.mt5Users'), value: l.mt5Users },
                   ].map((s) => (
-                    <div key={s.label} className="min-w-0">
-                      <p className="truncate text-[11px] uppercase tracking-wide text-neutral-500">{s.label}</p>
-                      <p className="num text-2xl text-neutral-100">{s.value}</p>
+                    <div key={s.label}>
+                      <dt>{s.label}</dt>
+                      <dd className="num">{s.value.toLocaleString('en-US')}</dd>
                     </div>
                   ))}
-                </div>
-                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                </dl>
+                <div className={`agt-link-actions${featuredId ? ' has-two' : ''}`}>
                   <button
                     type="button"
-                    className="btn-ghost px-3 py-1.5 text-xs"
+                    className="btn btn-primary"
                     onClick={(e) => {
                       e.stopPropagation()
                       void copy(l, 'invite')
@@ -356,7 +375,7 @@ export default function AgentPage() {
                   {featuredId && (
                     <button
                       type="button"
-                      className="btn-ghost px-3 py-1.5 text-xs"
+                      className="btn btn-ghost"
                       onClick={(e) => {
                         e.stopPropagation()
                         void copy(l, 'comp')
@@ -379,7 +398,7 @@ export default function AgentPage() {
       )}
 
       {links && links.length > 0 && (
-        <div className="mt-3 space-y-1 text-xs leading-relaxed text-neutral-500">
+        <div className="agt-notes">
           <p>{t('agent.clicksNote')}</p>
           <p>{t('agent.statsNote')}</p>
           <p>{t('agent.mt5Note')}</p>
@@ -394,7 +413,7 @@ export default function AgentPage() {
       {/* 名单：桌面表格、手机卡片（两棵 DOM，按断点切换）。
           The list: a table on desktop, cards on phones. */}
       {selected && (
-        <section className="mt-6">
+        <section className="mt-10">
           <PageHead
             title={t('agent.usersTitle')}
             subtitle={selected.label}
@@ -415,10 +434,10 @@ export default function AgentPage() {
             placeholder={t('agent.searchPlaceholder')}
             aria-label={t('agent.searchPlaceholder')}
             maxLength={128}
-            className="mb-3 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-neutral-100 placeholder:text-neutral-500 focus:border-white/30 focus:outline-none sm:max-w-xs"
+            className="input agt-search"
           />
 
-          <div className="glass p-0">
+          <div className="agt-sheet">
             {page == null && !pageError ? (
               <div className="space-y-2 p-4" aria-busy="true">
                 <SkeletonLine height={16} />
@@ -553,7 +572,7 @@ export default function AgentPage() {
         </section>
       )}
 
-      </>
+      </div>
       )}
 
       {editing && selected && (

@@ -1,0 +1,875 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   推荐官中心（/agent）· 只随 pages/AgentPage.tsx 加载，选择器一律 .agt- 前缀
+   ───────────────────────────────────────────────────────────────────────────
+   2026-10-28 重做：「代理」改名「推荐官」，页面按「私行黑卡」的语言重画。
+   页头是一张推荐官凭证：钛黑拉丝面、钞票式扭索纹、全息封印与烫箔推荐码——全息箔用的
+   是幸运转盘券面同一组色（components/lucky/luckyPage.css 的 --tk-foil），全站只有这一种箔。
+   其余部分守全站规矩：实色面、1px 发丝线、紫只当油墨，不发光。
+
+   浏览器下限是 Chrome 70，所以这里不用 inset 简写、aspect-ratio、clamp()/min()/max()、
+   flex 的 gap（Chrome 84）；要间距的地方用 grid 或外边距。
+   卡片比例用 padding-top 撑（1 / 1.586 = 63.05%，银行卡比例）。
+
+   The Ambassador Hub (/agent), loaded only with pages/AgentPage.tsx; every
+   selector carries the .agt- prefix. Redrawn 2026-10-28 when "agent" became
+   "ambassador": the head is an ambassador credential in a private-bank black
+   card language (brushed titanium, guilloche, a holographic seal and a
+   foil-stamped referral code). The foil is the lucky-wheel ticket foil, the
+   site's only foil. Everything else keeps the site rules: flat planes, 1px
+   hairlines, violet as ink. Chrome 70 floor: no inset shorthand, aspect-ratio,
+   clamp/min/max or flex gap; the card ratio comes from padding-top.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.agt-page {
+  --agt-foil: linear-gradient(115deg, #7a63f0 0%, #b7a6ff 18%, #e6deff 30%, #9fd0f2 44%, #7c5cf6 58%, #c99cf6 72%, #f2dcfb 84%, #a48fff 100%);
+  --agt-edge: linear-gradient(130deg, rgba(190, 172, 255, 0.5) 0%, rgba(120, 96, 230, 0.12) 28%, rgba(255, 255, 255, 0.06) 50%, rgba(150, 212, 255, 0.3) 72%, rgba(232, 172, 255, 0.42) 100%);
+}
+
+/* ── 页头 / hero ──────────────────────────────────────────────────────────
+   手机：标题 → 卡 → 数字；桌面：卡在左，标题与数字在右。
+   Phone: title, card, figures. Desktop: card left, title and figures right. */
+.agt-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: 'head' 'card' 'stats';
+  grid-row-gap: 22px;
+  margin-bottom: 36px;
+}
+@media (min-width: 1024px) {
+  .agt-hero {
+    grid-template-columns: 400px minmax(0, 1fr);
+    grid-template-areas: 'card head' 'card stats';
+    grid-template-rows: auto 1fr;
+    grid-column-gap: 48px;
+    grid-row-gap: 28px;
+    align-items: start;
+    margin-bottom: 44px;
+  }
+}
+.agt-hero-head {
+  grid-area: head;
+  min-width: 0;
+  animation: agt-rise 0.6s var(--ease-out) both;
+}
+.agt-hero-head h1 {
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.01em;
+}
+.agt-hero-head p {
+  margin-top: 10px;
+  max-width: 60ch;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-3);
+}
+@media (min-width: 1024px) {
+  .agt-hero-head {
+    padding-top: 6px;
+  }
+  .agt-hero-head h1 {
+    font-size: 36px;
+  }
+}
+
+/* ── 推荐官凭证卡 / the credential card ── */
+.agt-card-wrap {
+  grid-area: card;
+  width: 100%;
+  max-width: 400px;
+  perspective: 1100px;
+  animation: agt-card-in 0.9s var(--ease-out) 0.05s both;
+}
+.agt-card {
+  --rx: 0deg;
+  --ry: 0deg;
+  --mx: 30%;
+  --my: 20%;
+  position: relative;
+  height: 0;
+  padding-top: 63.05%;
+  border: 1px solid transparent;
+  border-radius: var(--r-lg);
+  /* 三层：拉丝纹 + 左上的冷光 + 钛黑底，最外一层是彩虹描边（border-box）。
+     Brushed grain, a cold light top-left, titanium-black stock; the iridescent
+     rim sits in the border-box layer. */
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.014) 0, rgba(255, 255, 255, 0.014) 1px, transparent 1px, transparent 3px) padding-box,
+    radial-gradient(120% 95% at 0% 0%, rgba(84, 72, 140, 0.32) 0%, rgba(84, 72, 140, 0) 58%) padding-box,
+    linear-gradient(155deg, #1b1a21 0%, #111014 46%, #0c0c0f 72%, #15141a 100%) padding-box,
+    var(--agt-edge) border-box;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5),
+    0 44px 80px -44px rgba(0, 0, 0, 0.95),
+    0 22px 40px -30px rgba(0, 0, 0, 0.9);
+  overflow: hidden;
+  transform: rotateX(var(--rx)) rotateY(var(--ry));
+  transform-style: preserve-3d;
+  transition: transform 0.5s var(--ease-out);
+  user-select: none;
+}
+.agt-card.is-tilting {
+  transition: transform 0.12s linear;
+}
+/* 扭索纹：两组错开圆心的同心细环叠出钞票式的干涉纹，远看是质地，近看是线。
+   Guilloche: two off-centre families of fine rings interfering like banknote
+   print — texture from afar, lines up close. */
+.agt-card-guilloche {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  /* 右半边一朵玫瑰纹（两组圆心相距很近的同心环，叠出花瓣状的莫尔纹），左下再铺一层大弧线；
+     遮罩让纹样从右上浓到左下淡，文字所在的左半边保持干净。
+     A rosette on the right (two near-concentric ring families interfering into petals) over
+     a wide sweep of arcs from the bottom-left; the mask keeps the text side clean. */
+  background:
+    repeating-radial-gradient(circle at 80% 46%, rgba(214, 204, 255, 0.075) 0, rgba(214, 204, 255, 0.075) 1px, transparent 1px, transparent 5px),
+    repeating-radial-gradient(circle at 86% 54%, rgba(150, 212, 255, 0.06) 0, rgba(150, 212, 255, 0.06) 1px, transparent 1px, transparent 5px),
+    repeating-radial-gradient(circle at -10% 130%, rgba(255, 255, 255, 0.035) 0, rgba(255, 255, 255, 0.035) 1px, transparent 1px, transparent 8px);
+  -webkit-mask-image: radial-gradient(60% 85% at 82% 50%, #000 0%, rgba(0, 0, 0, 0.6) 45%, rgba(0, 0, 0, 0.12) 100%);
+  mask-image: radial-gradient(60% 85% at 82% 50%, #000 0%, rgba(0, 0, 0, 0.6) 45%, rgba(0, 0, 0, 0.12) 100%);
+}
+/* 反光：跟着指针走（--mx/--my），进场时从左到右扫过一次。
+   Sheen: follows the pointer (--mx/--my) and sweeps across once on entry. */
+.agt-card-sheen {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  pointer-events: none;
+  background: radial-gradient(60% 75% at var(--mx) var(--my), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 70%);
+  mix-blend-mode: screen;
+}
+.agt-card-sheen::after {
+  content: '';
+  position: absolute;
+  top: -20%;
+  bottom: -20%;
+  left: 0;
+  width: 45%;
+  background: linear-gradient(100deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.09) 45%, rgba(214, 204, 255, 0.14) 50%, rgba(255, 255, 255, 0) 60%);
+  transform: translateX(-120%) skewX(-12deg);
+  animation: agt-sweep 1.6s var(--ease-in-out) 0.75s both;
+}
+.agt-card-body {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px 22px 18px;
+}
+.agt-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.agt-card-brand {
+  display: inline-flex;
+  align-items: center;
+}
+.agt-card-brand img {
+  width: 26px;
+  height: 26px;
+  margin-right: 9px;
+  object-fit: contain;
+}
+.agt-card-brand > span {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  color: rgba(237, 237, 240, 0.72);
+}
+/* 全息封印：锥形渐变的箔面 + 两道压印环。指针移动时箔色跟着转。
+   Holographic seal: a conic foil disc with two embossed rings; the foil turns
+   with the pointer. */
+.agt-card-seal {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: conic-gradient(from calc(var(--ry) * 18) at 50% 50%, #7a63f0, #b7a6ff, #e6deff, #9fd0f2, #7c5cf6, #c99cf6, #f2dcfb, #a48fff, #7a63f0);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    inset 0 0 0 5px rgba(20, 10, 50, 0.28),
+    inset 0 0 0 6px rgba(255, 255, 255, 0.22),
+    0 2px 6px rgba(0, 0, 0, 0.5);
+  opacity: 0.92;
+}
+.agt-card-seal::after {
+  content: '';
+  position: absolute;
+  top: 11px;
+  left: 11px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.35) 0, rgba(255, 255, 255, 0.35) 1px, transparent 1px, transparent 3px);
+  box-shadow: 0 0 0 1px rgba(30, 14, 70, 0.35);
+}
+.agt-card-role {
+  font-size: 30px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: #eeecf4;
+  letter-spacing: 0.04em;
+  /* 压印：下沿一道暗、上沿一道亮。/ Debossed: dark below, light above. */
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.7), 0 -1px 0 rgba(255, 255, 255, 0.07);
+}
+.agt-card-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+}
+.agt-card-name {
+  max-width: 200px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+.agt-card-since {
+  margin-top: 3px;
+  font-size: 11px;
+  color: rgba(214, 212, 224, 0.62);
+}
+.agt-card-code {
+  margin-left: 12px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.agt-card-code > span {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: rgba(214, 212, 224, 0.6);
+}
+/* 烫箔推荐码：箔面裁进字形里；不支持 background-clip:text 的内核退成浅紫实色。
+   Foil-stamped code: the foil clipped into the glyphs; engines without
+   background-clip:text fall back to a flat light violet. */
+.agt-card-code b {
+  display: block;
+  margin-top: 3px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #c9bdff;
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .agt-card-code b {
+    background-image: var(--agt-foil);
+    background-size: 220% 100%;
+    background-position: var(--mx) 50%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+}
+@media (max-width: 380px) {
+  .agt-card-body {
+    padding: 16px 18px 15px;
+  }
+  .agt-card-role {
+    font-size: 24px;
+  }
+  .agt-card-name {
+    max-width: 150px;
+  }
+}
+
+/* ── 页头数字 / hero figures ──
+   一个主数（团队客户）+ 一排次要数，发丝线分隔，不装盒子。
+   One lead figure plus a row of secondary ones split by hairlines, no boxes. */
+.agt-stats {
+  grid-area: stats;
+  min-width: 0;
+}
+.agt-stats-lead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  animation: agt-rise 0.6s var(--ease-out) 0.12s both;
+}
+.agt-stats-lead b {
+  margin-right: 14px;
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.03em;
+}
+.agt-stats-lead > span {
+  font-size: 13px;
+  color: var(--text-3);
+}
+.agt-stats-rule {
+  height: 1px;
+  margin: 20px 0 0;
+  opacity: 0.55;
+}
+.agt-stats-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+.agt-stats-row > div {
+  min-width: 0;
+  padding: 16px 16px 0 0;
+  animation: agt-rise 0.6s var(--ease-out) both;
+  animation-delay: calc(0.2s + var(--i, 0) * 0.06s);
+}
+.agt-stats-row dt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.agt-stats-row dd {
+  margin: 6px 0 0;
+  font-size: 24px;
+  line-height: 1.1;
+  font-weight: 600;
+  color: var(--text);
+}
+@media (min-width: 640px) {
+  .agt-stats-row {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .agt-stats-row > div + div {
+    padding-left: 18px;
+    border-left: 1px solid var(--line);
+  }
+}
+@media (min-width: 1024px) {
+  /* 桌面上数字贴卡片底边，标题贴卡片顶边，右栏与卡同高。
+     On desktop the figures sit on the card's bottom edge and the title on its top edge. */
+  .agt-stats {
+    align-self: end;
+  }
+  .agt-stats-lead b {
+    font-size: 72px;
+  }
+}
+
+/* ── 页签 / tabs ──
+   文字页签 + 2px 紫色油墨底条；窄屏可以横滑。
+   底线用内阴影画在条内、油墨条贴底（bottom:0）：横滑容器会裁掉溢出的东西，
+   画在外面的话油墨条只剩一半、还多出 1px 竖向滚动。页签左右各留 4px 给焦点框。
+   Text tabs over a 2px violet ink bar; scrolls sideways on narrow screens. The hairline
+   is an inset shadow and the bar sits at bottom:0, because the scroll strip clips
+   anything outside it; each tab keeps 4px each side for the focus ring. */
+.agt-tabs {
+  display: flex;
+  margin: 0 0 24px -4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  box-shadow: inset 0 -1px 0 var(--line);
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.agt-tabs::-webkit-scrollbar {
+  display: none;
+}
+.agt-tab {
+  position: relative;
+  flex-shrink: 0;
+  margin-right: 20px;
+  padding: 12px 4px 13px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.agt-tab:hover {
+  color: var(--text);
+}
+.agt-tab.is-on {
+  color: #fff;
+}
+.agt-tab:focus-visible {
+  outline-offset: -2px;
+}
+.agt-tab::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--purple-hi);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--dur-base) var(--ease-out);
+}
+.agt-tab.is-on::after {
+  transform: scaleX(1);
+}
+.agt-tab-count {
+  margin-left: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+}
+.agt-tab.is-on .agt-tab-count {
+  color: var(--purple-hi);
+}
+.agt-panel {
+  animation: agt-rise 0.45s var(--ease-out) both;
+}
+
+/* ── 链接卡 / link cards ── */
+.agt-links {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-gap: 16px;
+}
+@media (min-width: 768px) {
+  .agt-links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.agt-link {
+  position: relative;
+  min-width: 0;
+  padding: 22px 22px 20px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
+  animation: agt-rise 0.55s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 0.06s);
+}
+.agt-link.is-pickable {
+  cursor: pointer;
+}
+.agt-link.is-pickable:hover {
+  background: var(--surface-2);
+}
+.agt-link.is-active {
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.55);
+}
+/* 选中的那张左上角一道短的紫色油墨，和页签的底条同一种笔触。
+   The selected card gets a short violet ink stroke top-left, same stroke as the tab bar. */
+.agt-link.is-active::before {
+  content: '';
+  position: absolute;
+  top: 22px;
+  left: 0;
+  width: 3px;
+  height: 22px;
+  border-radius: 0 3px 3px 0;
+  background: var(--purple-hi);
+}
+.agt-link-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+.agt-link-label {
+  min-width: 0;
+  margin-right: 12px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+}
+.agt-chip {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border-radius: var(--r-xs);
+  font-size: 11.5px;
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.05);
+}
+.agt-chip.is-on {
+  color: var(--up);
+  background: var(--up-bg);
+}
+.agt-link-code {
+  margin-top: 18px;
+}
+.agt-link-code-label {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.agt-link-code-value {
+  display: block;
+  margin-top: 4px;
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #fff;
+}
+.agt-link.is-active .agt-link-code-value {
+  color: var(--purple-hi);
+}
+.agt-link-url {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.agt-link-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.agt-link-stats > div {
+  min-width: 0;
+  padding: 0 12px 12px 0;
+}
+.agt-link-stats dt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.agt-link-stats dd {
+  margin: 4px 0 0;
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 600;
+  color: var(--text);
+}
+@media (min-width: 480px) {
+  .agt-link-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+  .agt-link-stats > div + div {
+    padding-left: 12px;
+    border-left: 1px solid var(--line);
+  }
+}
+.agt-link-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-gap: 8px;
+  margin-top: 8px;
+}
+.agt-link-actions.has-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+/* 两个按钮等宽分格，文字长（「复制失败，请手动选择」、泰文）时在按钮里折行，不撑出格子。
+   Equal cells; long labels (copy failed, Thai) wrap inside the button instead of spilling out. */
+.agt-link-actions .btn {
+  min-width: 0;
+  height: auto;
+  min-height: 40px;
+  padding: 6px 12px;
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
+  text-align: center;
+}
+.agt-notes {
+  margin-top: 14px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-3);
+}
+.agt-notes p + p {
+  margin-top: 4px;
+}
+
+/* ── 看板 / overview ──
+   发丝线格：容器底色是线色，格子之间 1px 缝，就是分隔线。
+   Hairline grid: the container is the line colour and a 1px gap is the divider. */
+.agt-kpis {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-gap: 1px;
+  margin-bottom: 20px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--line);
+}
+@media (min-width: 640px) {
+  .agt-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  .agt-kpis {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+.agt-kpi {
+  min-width: 0;
+  padding: 18px 20px;
+  background: var(--surface);
+}
+/* 2 列时第 5 格独占一行。/ The fifth cell spans the row in the two-column layout. */
+@media (max-width: 639px) {
+  .agt-kpi:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+}
+@media (min-width: 640px) and (max-width: 1023px) {
+  .agt-kpi:last-child:nth-child(5) {
+    grid-column: span 2;
+  }
+}
+.agt-kpi-label {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.agt-kpi-value {
+  margin-top: 6px;
+  font-size: 28px;
+  line-height: 1.1;
+  font-weight: 700;
+}
+
+/* ── 名单 / lists ── */
+/* 不加 overflow:hidden：看板的折线图提示框会贴边伸出去。
+   No overflow:hidden: the trend chart's tooltip can reach past the edge. */
+.agt-sheet {
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.agt-sheet thead tr {
+  border-bottom: 1px solid var(--line);
+}
+.agt-sheet th {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+  text-transform: none;
+}
+.agt-sheet tbody tr {
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.agt-sheet tbody tr:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+.agt-search {
+  width: 100%;
+  margin-bottom: 12px;
+}
+@media (min-width: 640px) {
+  .agt-search {
+    max-width: 320px;
+  }
+}
+
+/* ── 团队树 / team tree ── */
+.agt-node {
+  padding-top: 16px;
+  padding-bottom: 16px;
+  padding-right: 18px;
+}
+.agt-node.is-self {
+  background: linear-gradient(90deg, rgb(var(--purple-rgb) / 0.1), rgb(var(--purple-rgb) / 0) 70%);
+}
+.agt-node-main {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.agt-avatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-right: 12px;
+  border-radius: 50%;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  background: var(--nest);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+}
+/* 自己的头像套一圈全息箔，与凭证卡上的封印同一组色。
+   Your own avatar wears a holographic foil ring, the same foil as the card seal. */
+.agt-node.is-self .agt-avatar {
+  color: #fff;
+  background:
+    linear-gradient(#1d1b26, #1d1b26) padding-box,
+    conic-gradient(#7a63f0, #b7a6ff, #e6deff, #9fd0f2, #7c5cf6, #c99cf6, #f2dcfb, #a48fff, #7a63f0) border-box;
+  border: 2px solid transparent;
+  box-shadow: none;
+}
+.agt-node-who {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.agt-node-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.agt-node-name > span {
+  margin-right: 6px;
+}
+.agt-tag {
+  padding: 2px 8px;
+  border-radius: var(--r-xs);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  background: rgba(255, 255, 255, 0.05);
+}
+.agt-tag.is-violet {
+  color: var(--purple-soft);
+  background: rgb(var(--purple-rgb) / 0.18);
+}
+.agt-node-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--text-3);
+  word-break: break-all;
+}
+.agt-node-actions {
+  display: flex;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.agt-node-actions .btn {
+  height: 32px;
+  margin-left: 8px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+@media (max-width: 639px) {
+  /* 基准 0：窄屏、深缩进时名字仍排在头像右边；按钮行自己占满一行。
+     Basis 0 keeps the name beside the avatar on narrow phones; the actions take their own row. */
+  .agt-node-who {
+    flex-basis: 0%;
+  }
+  .agt-node-actions {
+    width: 100%;
+    margin-top: 2px;
+    padding-left: 50px;
+  }
+  /* 用上外边距代替 flex gap（Chrome 70）：按钮折行后上下也隔开 8px。
+     Top margin instead of flex gap (Chrome 70), so wrapped buttons keep 8px between rows. */
+  .agt-node-actions .btn {
+    margin: 8px 8px 0 0;
+  }
+}
+.agt-node-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 12px 0 0 50px;
+}
+.agt-node-stats > div {
+  min-width: 0;
+  padding: 0 10px 6px 0;
+}
+.agt-node-stats dt {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.agt-node-stats dd {
+  margin: 2px 0 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text);
+}
+@media (min-width: 640px) {
+  .agt-node-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    max-width: 560px;
+  }
+  .agt-node-stats > div + div {
+    padding-left: 12px;
+    border-left: 1px solid var(--line);
+  }
+}
+.agt-node-toggle {
+  margin: 6px 0 0 50px;
+  font-size: 12.5px;
+  color: var(--purple-hi);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.agt-node-toggle:hover {
+  color: var(--purple-soft);
+}
+
+/* ── 动效 / motion ── */
+@keyframes agt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes agt-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) rotateX(14deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) rotateX(0);
+  }
+}
+@keyframes agt-sweep {
+  from {
+    transform: translateX(-120%) skewX(-12deg);
+  }
+  to {
+    transform: translateX(330%) skewX(-12deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .agt-hero-head,
+  .agt-card-wrap,
+  .agt-card-sheen::after,
+  .agt-stats-lead,
+  .agt-stats-row > div,
+  .agt-panel,
+  .agt-link {
+    animation: none;
+  }
+  .agt-card-sheen::after {
+    display: none;
+  }
+  .agt-card,
+  .agt-tab::after {
+    transition: none;
+  }
+}

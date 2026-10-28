@@ -17,15 +17,15 @@
     "ticket_new": "有新工单待处理",
     "comp_public_name": "比赛公开榜单",
     "plan_refund": "订单已退款，相应会员天数已收回；如有疑问请联系客服",
-    "agent_plan_change": "代理修改了客户会员",
+    "agent_plan_change": "推荐官修改了客户会员",
     "support_reminder": "客服跟进提醒",
     "support_alert": "客服后台待处理",
     "lucky_ticket": "获得抽奖券",
     "lucky_ticket_expiring": "抽奖券即将作废",
     "lucky_prize_delivered": "奖品已发放",
     "lucky_prize_cancelled": "奖品已取消",
-    "agent_tree_change": "代理调整了下级代理",
-    "agent_promoted": "你已成为代理，点击查看代理页面"
+    "agent_tree_change": "推荐官调整了下级推荐官",
+    "agent_promoted": "你已成为推荐官，点击查看推荐官中心"
   },
   "nav": {
     "dashboard": "仪表盘",
@@ -45,7 +45,7 @@
     "support": "联系客服",
     "appDownload": "下载 App",
     "announcements": "公告",
-    "agent": "代理页面",
+    "agent": "推荐官中心",
     "supportDesk": "客服后台"
   },
   "common": {

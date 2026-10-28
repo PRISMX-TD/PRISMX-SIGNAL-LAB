@@ -17,15 +17,15 @@
     "ticket_new": "New ticket to handle",
     "comp_public_name": "Public competition board",
     "plan_refund": "Order refunded — the membership days it covered have been taken back. Contact support if you have questions.",
-    "agent_plan_change": "An agent changed a customer's plan",
+    "agent_plan_change": "An ambassador changed a customer's plan",
     "support_reminder": "Follow-up reminder",
     "support_alert": "Support console needs attention",
     "lucky_ticket": "You got lucky-draw tickets",
     "lucky_ticket_expiring": "Your tickets expire soon",
     "lucky_prize_delivered": "Your prize has been sent",
     "lucky_prize_cancelled": "Your prize was cancelled",
-    "agent_tree_change": "An agent changed their sub-agents",
-    "agent_promoted": "You're now an agent — open your agent view"
+    "agent_tree_change": "An ambassador changed their downline ambassadors",
+    "agent_promoted": "You're now an ambassador — open your Ambassador Hub"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -45,7 +45,7 @@
     "support": "Contact support",
     "appDownload": "Get the app",
     "announcements": "Announcements",
-    "agent": "Agent view",
+    "agent": "Ambassador Hub",
     "supportDesk": "Support console"
   },
   "common": {

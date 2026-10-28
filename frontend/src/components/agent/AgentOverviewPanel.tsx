@@ -28,6 +28,8 @@ import RangePicker from '../admin/overview/RangePicker'
 import { DEFAULT_RANGE, rangeKey, toQuery, type RangeState } from '../admin/overview/rangeUtils'
 import type { AgentOverview } from '../../api/types'
 
+// 一格指标。五格拼成一块发丝线格（styles/agent.css 的 .agt-kpis），不再是五张各自浮着的卡。
+// One figure; five of them form a single hairline grid (.agt-kpis) instead of five floating cards.
 function Tile({ label, value, accent, footer }: {
   label: string
   value: number
@@ -35,9 +37,9 @@ function Tile({ label, value, accent, footer }: {
   footer?: React.ReactNode
 }) {
   return (
-    <div className="glass px-4 py-4">
-      <div className="text-xs text-neutral-400">{label}</div>
-      <div className={`num mt-1 font-display text-2xl font-bold ${accent ?? 'text-neutral-50'}`}>{value}</div>
+    <div className="agt-kpi">
+      <div className="agt-kpi-label">{label}</div>
+      <div className={`agt-kpi-value num ${accent ?? 'text-neutral-50'}`}>{value.toLocaleString('en-US')}</div>
       {footer && <div className="mt-1">{footer}</div>}
     </div>
   )
@@ -95,7 +97,7 @@ export default function AgentOverviewPanel({ linkId }: { linkId: string }) {
   )
 
   return (
-    <section className="mt-6">
+    <section className="mt-10">
       <RangePicker value={range} onChange={setRange} />
       {data && (
         <p className="-mt-3 mb-4 text-xs text-neutral-500">
@@ -104,16 +106,16 @@ export default function AgentOverviewPanel({ linkId }: { linkId: string }) {
       )}
 
       {error ? (
-        <div className="glass mb-5 p-5 text-sm text-down" role="alert">
+        <div className="agt-sheet mb-5 p-5 text-sm text-down" role="alert">
           {error}
         </div>
       ) : !data ? (
-        <div className="glass mb-5 p-5" aria-busy="true">
+        <div className="agt-sheet mb-5 p-5" aria-busy="true">
           <SkeletonLine height={96} />
         </div>
       ) : (
         <>
-          <div className="mb-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <div className="agt-kpis">
             <Tile label={t('agent.overview.customers')} value={data.headline.totalUsers} />
             <Tile label={t('admin.overview.headline.activeToday')} value={data.headline.activeToday} accent="text-up" />
             <Tile label={t('admin.overview.headline.activeWeek')} value={data.headline.activeWeek} accent="text-prism-300" />
@@ -124,7 +126,7 @@ export default function AgentOverviewPanel({ linkId }: { linkId: string }) {
               footer={<DeltaBadge {...data.headline.signups} />}
             />
           </div>
-          <div className="glass mb-5 p-5">
+          <div className="agt-sheet mb-5 p-5">
             <h2 className="mb-1 text-sm font-semibold text-white">{t('admin.overview.activity.title')}</h2>
             <p className="mb-3 text-xs text-neutral-500">{t('agent.overview.activityHint')}</p>
             <LineChart

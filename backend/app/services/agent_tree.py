@@ -191,10 +191,10 @@ def check_customer_agent(db: Session, targets: list[User], agent_id: str | None)
     if ids and db.query(AgentNode.id).filter(AgentNode.user_id.in_(ids)).first() is not None:
         raise HTTPException(
             status_code=409,
-            detail="选中的人里有代理，代理请在代理层级里改挂上级 / Agents are moved in the agent tree, not here",
+            detail="选中的人里有推荐官，推荐官请在推荐官层级里改挂上级 / Ambassadors are moved in the ambassador tree, not here",
         )
     if agent_id is not None and node_of(db, agent_id) is None:
-        raise HTTPException(status_code=404, detail="该用户不是代理 / This user is not an agent")
+        raise HTTPException(status_code=404, detail="该用户不是推荐官 / This user is not an ambassador")
 
 
 def set_customer_agent(db: Session, actor_id: str, target: User, agent_id: str | None) -> None:
