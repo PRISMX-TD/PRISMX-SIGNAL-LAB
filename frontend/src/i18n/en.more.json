@@ -1595,7 +1595,8 @@
         "featuredCleared": "featured competition cleared (back to automatic)",
         "wholeGroup": "whole group saved",
         "agentParentChange": "agent upline {{a}} → {{b}}",
-        "agentUserChange": "owning agent {{a}} → {{b}}"
+        "agentUserChange": "owning agent {{a}} → {{b}}",
+        "agentPlanRightChange": "plan right {{a}} → {{b}}"
       },
       "why": {
         "noMoney": "not enough margin",
@@ -1709,7 +1710,8 @@
           "role": "role",
           "invite_code": "source",
           "agent_parent": "agent upline",
-          "agent_user": "owning agent"
+          "agent_user": "owning agent",
+          "agent_plan_right": "plan right"
         },
         "setGroup": {
           "broker": "Partner broker lock",
@@ -1824,7 +1826,9 @@
         },
         "noAgentParent": "none (top-level)",
         "notAgent": "not an agent",
-        "platformCustomer": "platform customer"
+        "platformCustomer": "platform customer",
+        "rightOn": "on",
+        "rightOff": "off"
       },
       "ev": {
         "register": {
@@ -3781,7 +3785,11 @@
       "revokeDone": "Revoked {{name}}",
       "noLinks": "no links",
       "moveBody": "{{name}} moves under {{parent}} together with their sub-agents and all customers. The previous upline no longer sees them.",
-      "moveBodyTop": "{{name}} becomes a top-level agent with their own tree (sub-agents and customers included) and can promote agents and change plans."
+      "moveBodyTop": "{{name}} becomes a top-level agent with their own tree (sub-agents and customers included) and can promote agents and change plans.",
+      "planRight": "Can change plans",
+      "planRightHint": "When on, they can grant or extend PRO for customers across their whole team on the agent page (top-level agents need it switched on here too). Only admins can change this.",
+      "planRightOn": "Plan right switched on for {{name}}",
+      "planRightOff": "Plan right switched off for {{name}}"
     }
   },
   "simulator": {
@@ -4150,7 +4158,8 @@
       "body": "{{name}} becomes a level-{{n}} agent under {{parent}}, with their own invite link. They can see their downline but cannot change anything.",
       "done": "{{name}} is now a level-{{n}} agent.",
       "tooDeep": "Maximum depth ({{max}} levels) reached"
-    }
+    },
+    "subtitleNoPlan": "Your promo links, sub-agents and their clients. Changing memberships needs an admin to switch it on for you; for now it is view-only."
   },
   "announcements": {
     "countUnit": "posts",

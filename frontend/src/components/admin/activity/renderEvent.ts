@@ -935,6 +935,12 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
       const side = (i: 0 | 1) => (str(owner[i]) ? q(t, str(owner[i]) as string) : t('admin.log.v.platformCustomer'))
       items.push(t('admin.log.x.agentUserChange', { a: side(0), b: side(1) }))
     }
+    // 代理改会员权限（rev 51）：on / off。/ An agent's plan right (rev 51): on / off.
+    const right = pairOf(p.agent_plan_right)
+    if (right) {
+      const side = (i: 0 | 1) => (str(right[i]) === 'on' ? t('admin.log.v.rightOn') : t('admin.log.v.rightOff'))
+      items.push(t('admin.log.x.agentPlanRightChange', { a: side(0), b: side(1) }))
+    }
     return [items.length ? listed(t, 'admin.log.ev.userEdit.head', items) : t('admin.log.ev.userEdit.none')]
   },
   'admin.user_disable': ({ t, p }) => {
@@ -1248,7 +1254,7 @@ export function kindName(kind: string, t: TFunction): string {
 }
 
 // ---------- 详情抽屉「修改前 / 修改后」表 / the drawer's before / after table ----------
-const USER_FIELDS = ['role', 'plan', 'plan_expires_at', 'plan_note', 'invite_code', 'agent_parent', 'agent_user']
+const USER_FIELDS = ['role', 'plan', 'plan_expires_at', 'plan_note', 'invite_code', 'agent_parent', 'agent_user', 'agent_plan_right']
 // 审计字段名不带前缀时（列表行的 params.changes 里只有键名），按 kind 找标签表。
 // Bare field names (params.changes carry only the key) find their label table by kind.
 const BARE_TABLE: Partial<Record<string, string>> = {

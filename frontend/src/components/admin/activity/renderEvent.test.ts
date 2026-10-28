@@ -682,6 +682,11 @@ describe('改挂代理上级 / agent upline change', () => {
     expect(renderEvent(edit({ agent_user: ['a@x.io', null] }), zh).text).toContain('归属代理 「a@x.io」 → 平台客户')
     expect(renderEvent(edit({ agent_user: [null, 'b@x.io'] }), en).text).toContain('owning agent')
   })
+  it('改会员权限：on / off / plan right: on / off', () => {
+    expect(renderEvent(edit({ agent_plan_right: ['off', 'on'] }), zh).text).toContain('改会员权限 关 → 开')
+    expect(renderEvent(edit({ agent_plan_right: ['on', 'off'] }), en).text).toContain('plan right on → off')
+    expect(changeFieldLabel('admin.user_edit', 'agent_plan_right', null, zh)).toBe('改会员权限')
+  })
   it('字段名有标签 / the field has a label', () => {
     expect(changeFieldLabel('admin.user_edit', 'agent_parent', null, zh)).toBe('代理上级')
     expect(changeFieldLabel('admin.user_edit', 'agent_user', null, zh)).toBe('归属代理')

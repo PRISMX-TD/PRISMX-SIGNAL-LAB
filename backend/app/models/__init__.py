@@ -1686,8 +1686,8 @@ class AgentNode(Base):
     一个代理连同子树改挂到别处（services/agent_tree.move_node）。
 
     可见范围：一个代理看得到归属在自己与所有下级名下的客户、以及所有下级代理本人；
-    看不到上级与同级。写权限：只有一级代理能改会员、升 / 撤代理，二级及以下只读（自己
-    链接的开户网址除外）。
+    看不到上级与同级。写权限：只有一级代理能升 / 撤代理；改会员看 can_set_plan（rev 51，
+    只有管理员能开关，与层级无关），其余只读（自己链接的开户网址除外）。
 
     撤销（见 services/agent_tree.remove_node）：他的客户与链接转给他的上级（一级则变成平台的），
     下级代理整体上移一级挂到他的上级下面。
@@ -1700,7 +1700,8 @@ class AgentNode(Base):
     top-level agent promotes a customer in their tree, whose parent becomes the
     customer's owning agent (users.agent_user_id). An agent sees the customers
     owned by themselves and every descendant plus the descendant agents; only
-    top-level agents may write. Removal hands customers and links to the parent
+    top-level agents promote / revoke, and changing plans needs can_set_plan
+    (rev 51, set by admins only, any level). Removal hands customers and links to the parent
     and lifts the subtree one level.
     """
     __tablename__ = "agent_nodes"
@@ -1715,6 +1716,12 @@ class AgentNode(Base):
     # Who made them an agent: the assigning admin for top level, else the promoting agent.
     created_by = Column(String, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=_now)
+    # rev 51：能不能在代理页给自己整支团队的客户改会员。只有管理员能开关，默认关，与层级无关
+    # （一级代理也要管理员开）。节点随撤销删掉，权限也就跟着没了。
+    # rev 51: may change plans for their whole team's customers. Admin-only switch,
+    # off by default, independent of level; it goes away with the node on revoke.
+    # server_default：迁移里的回填直接 INSERT 本表、不带这一列。/ Raw backfill INSERTs omit it.
+    can_set_plan = Column(Boolean, nullable=False, default=False, server_default=text("FALSE"))
 
 
 class UserTask(Base):

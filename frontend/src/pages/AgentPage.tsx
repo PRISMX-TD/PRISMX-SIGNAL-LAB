@@ -27,12 +27,12 @@
 // Make Capital link, used when their visitors tap "Open account" on a competition page.
 // rev 47 代理层级：页头下三个页签——「我的链接」（上面说的这些）、「团队」（我和全部下级代理，
 // AgentTeamPanel）、「全部客户」（整棵子树的客户，AgentCustomersPanel）。页签记在 ?tab= 里，
-// 手机返回能回到上一个页签。只有一级代理（/agent/team 的 canManage）能改会员、升 / 撤代理，
-// 二级及以下只读——「我的链接」名单里的「调整会员」按钮也按它藏。
+// 手机返回能回到上一个页签。只有一级代理（/agent/team 的 canManage）能升 / 撤代理；改会员看
+// 管理员给的权限（canSetPlan，rev 51，与层级无关）——「我的链接」名单里的「调整会员」按钮也按它藏。
 // rev 47 agent hierarchy: three tabs under the header — My links (above), Team
 // (AgentTeamPanel) and All customers (AgentCustomersPanel), kept in ?tab= so the back
-// gesture returns to the previous tab. Only top-level agents (canManage) may write;
-// lower levels are read-only, so the per-link "Membership" button hides for them too.
+// gesture returns to the previous tab. Only top-level agents (canManage) promote / revoke;
+// changing plans follows the admin-granted canSetPlan (rev 51), per-link button included.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
@@ -67,6 +67,7 @@ export default function AgentPage() {
   // A failed load just means read-only; My links keeps working.
   const [team, setTeam] = useState<AgentTeam | null>(null)
   const canManage = team?.canManage ?? false
+  const canSetPlan = team?.canSetPlan ?? false
   const [params, setParams] = useSearchParams()
   const tabParam = params.get('tab') as Tab | null
   const tab: Tab = tabParam && TABS.includes(tabParam) ? tabParam : 'links'
@@ -215,7 +216,13 @@ export default function AgentPage() {
       <PageHead
         as="h1"
         title={t('agent.title')}
-        subtitle={team?.isAgent && !canManage ? t('agent.subtitleReadOnly') : t('agent.subtitle')}
+        subtitle={
+          !team?.isAgent || canSetPlan
+            ? t('agent.subtitle')
+            : canManage
+              ? t('agent.subtitleNoPlan')
+              : t('agent.subtitleReadOnly')
+        }
         count={tab === 'links' && links && links.length > 1 ? links.length : null}
       />
 
@@ -433,7 +440,7 @@ export default function AgentPage() {
                         <th className="px-4 py-3 font-medium">{t('agent.colMt5')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colActive')}</th>
                         <th className="px-4 py-3 font-medium">{t('agent.colRegistered')}</th>
-                        {canManage && <th className="px-4 py-3 font-medium text-right">{t('agent.colAction')}</th>}
+                        {canSetPlan && <th className="px-4 py-3 font-medium text-right">{t('agent.colAction')}</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -457,7 +464,7 @@ export default function AgentPage() {
                           <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">
                             {fmtDate(u.createdAt)}
                           </td>
-                          {canManage && (
+                          {canSetPlan && (
                             <td className="px-4 py-3 text-right">
                               <button
                                 type="button"
@@ -506,7 +513,7 @@ export default function AgentPage() {
                       <CardRow label={t('agent.colMt5')}>
                         <Mt5List accounts={u.mt5Accounts} />
                       </CardRow>
-                      {canManage && (
+                      {canSetPlan && (
                         <button
                           type="button"
                           className="btn-ghost mt-2 w-full py-1.5 text-xs disabled:opacity-40"

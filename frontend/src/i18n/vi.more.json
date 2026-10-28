@@ -1387,7 +1387,8 @@
       "body": "{{name}} sẽ trở thành đại lý cấp {{n}} dưới {{parent}}, có liên kết riêng. Họ xem được tuyến dưới nhưng không thể thay đổi gì.",
       "done": "{{name}} đã trở thành đại lý cấp {{n}}.",
       "tooDeep": "Đã đạt cấp tối đa ({{max}} cấp)"
-    }
+    },
+    "subtitleNoPlan": "Liên kết quảng bá của bạn, đại lý cấp dưới và khách hàng của họ. Muốn thay đổi gói thành viên cần quản trị viên bật quyền cho bạn; hiện chỉ xem được."
   },
   "announcements": {
     "countUnit": "bài",

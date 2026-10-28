@@ -3,7 +3,8 @@
 // 行的口径与「我的链接」名单完全相同（零件在 customerCells），只多两样：来自哪个代理，以及
 // 他自己是不是代理。可以按代理筛（「团队」里点「查看客户」就是带着筛选跳过来的）。
 //
-// 写操作只给一级代理（canManage）：调整会员（同一个 PlanDialog，走整棵树的端点）与「升为代理」。
+// 写操作：「升为代理」只给一级代理（canManage）；调整会员（同一个 PlanDialog，走整棵树的端点）
+// 看管理员给的改会员权限（canSetPlan，rev 51，与层级无关）。
 // 升为代理时新代理的上级是他注册时那条链接的主人，不是点按钮的人；层级超过上限的行按钮置灰
 // 并说明原因，免得点了才吃一个 409。
 //
@@ -39,6 +40,9 @@ export default function AgentCustomersPanel({
 }) {
   const { t } = useTranslation()
   const canManage = team.canManage
+  const canSetPlan = team.canSetPlan
+  // 操作列：能升代理或能改会员就有。/ The action column shows when either write is allowed.
+  const hasActions = canManage || canSetPlan
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState<AgentTreeUsers | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -155,7 +159,7 @@ export default function AgentCustomersPanel({
   }
 
   const planButton = (u: AgentTreeUser, wide = false) =>
-    canManage && (
+    canSetPlan && (
       <button
         type="button"
         className={`btn-ghost text-xs disabled:opacity-40 ${wide ? 'w-full py-1.5' : 'px-3 py-1.5'}`}
@@ -226,7 +230,7 @@ export default function AgentCustomersPanel({
                     <th className="px-4 py-3 font-medium">{t('agent.colMt5')}</th>
                     <th className="px-4 py-3 font-medium">{t('agent.colActive')}</th>
                     <th className="px-4 py-3 font-medium">{t('agent.colRegistered')}</th>
-                    {canManage && <th className="px-4 py-3 text-right font-medium">{t('agent.colAction')}</th>}
+                    {hasActions && <th className="px-4 py-3 text-right font-medium">{t('agent.colAction')}</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -250,7 +254,7 @@ export default function AgentCustomersPanel({
                         <LastActive day={u.lastActiveDay} />
                       </td>
                       <td className="num whitespace-nowrap px-4 py-3 text-xs text-neutral-400">{fmtDate(u.createdAt)}</td>
-                      {canManage && (
+                      {hasActions && (
                         <td className="px-4 py-3 text-right">
                           <div className="flex flex-wrap justify-end gap-2">
                             {planButton(u)}
@@ -291,7 +295,7 @@ export default function AgentCustomersPanel({
                   <CardRow label={t('agent.colMt5')}>
                     <Mt5List accounts={u.mt5Accounts} />
                   </CardRow>
-                  {canManage && (
+                  {hasActions && (
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       {planButton(u, true)}
                       {promoteButton(u, true)}

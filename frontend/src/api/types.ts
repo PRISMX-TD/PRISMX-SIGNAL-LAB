@@ -378,14 +378,17 @@ export interface AgentTeamNode {
   createdAt: string | null
 }
 
-// level 为 null = 不是代理。canManage = 一级代理（只有一级能改会员、升 / 撤代理）。
-// level null = not an agent. canManage = top level (the only level that may write).
+// level 为 null = 不是代理。canManage = 一级代理（只有一级能升 / 撤代理）；canSetPlan = 管理员给的
+// 改会员权限（rev 51，与层级无关，管整支团队的客户）。
+// level null = not an agent. canManage = top level (promote / revoke); canSetPlan =
+// the admin-granted plan right (rev 51, any level, whole team).
 export interface AgentTeam {
   // isAgent = 在不在代理树上；level 只有一级代理才有（=1），二级起为 null（不让下级知道自己第几级）。
   // isAgent: in the tree at all; level is 1 for top-level agents and null below.
   isAgent: boolean
   level: number | null
   canManage: boolean
+  canSetPlan: boolean
   maxDepth: number
   nodes: AgentTeamNode[]
 }
@@ -416,6 +419,8 @@ export interface AdminAgentTreeNode {
   links: { id: string; code: string; label: string; isActive: boolean }[]
   directCustomers: number
   teamCustomers: number
+  // rev 51：能不能在代理页改会员（只有管理员能开关）。/ May change plans on the agent page (admin-set).
+  canSetPlan: boolean
   createdAt: string | null
 }
 

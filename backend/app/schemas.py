@@ -2227,6 +2227,9 @@ class AgentTeamOut(BaseModel):
     isAgent: bool = False
     level: int | None = None
     canManage: bool = False
+    # rev 51：能不能给整支团队的客户改会员——管理员给的，与 canManage（一级才有）无关。
+    # rev 51: may change plans for the whole team; granted by admins, independent of canManage.
+    canSetPlan: bool = False
     maxDepth: int
     nodes: list[AgentTeamNodeOut] = []
 
@@ -2273,6 +2276,7 @@ class AdminAgentTreeNodeOut(BaseModel):
     links: list[AdminAgentTreeLinkOut] = []
     directCustomers: int = 0
     teamCustomers: int = 0
+    canSetPlan: bool = False
     createdAt: datetime | None = None
 
 
@@ -2284,6 +2288,11 @@ class AdminAgentTreeOut(BaseModel):
 class AdminAgentSettingsUpdate(BaseModel):
     # 上限 20 与 settings_store.AGENT_MAX_DEPTH_LIMIT 一致。/ Matches AGENT_MAX_DEPTH_LIMIT.
     maxDepth: int = Field(ge=1, le=20)
+
+
+class AdminAgentPlanRight(BaseModel):
+    """管理员开 / 关某个代理的改会员权限（rev 51）。/ Admin switches an agent's plan right."""
+    enabled: bool
 
 
 class AdminAgentMove(BaseModel):

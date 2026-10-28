@@ -17,10 +17,11 @@ from app.routers.invite import (
     AGENT_EXTEND_WINDOW_DAYS,
     AGENT_MAX_EXTEND_DAYS,
     AGENT_MAX_EXTEND_DAYS_PER_WINDOW,
+    admin_set_plan_right,
     agent_set_plan,
     assign_agent,
 )
-from app.schemas import AgentPlanUpdate
+from app.schemas import AdminAgentPlanRight, AgentPlanUpdate
 from app.services.notification_feed import KIND_AGENT_PLAN_CHANGE
 
 
@@ -44,6 +45,8 @@ def _setup(db, target_kw=None):
     agent = _mk_user(db, "agent@x.io")
     link = _mk_link(db)
     assign_agent(db, admin, link, agent)
+    # rev 51：改会员要管理员先开权限。/ rev 51: the plan right is admin-granted.
+    admin_set_plan_right(db, admin, agent.id, AdminAgentPlanRight(enabled=True))
     target = _mk_user(db, "t@x.io", invite_code=link.code, **(target_kw or {}))
     return admin, agent, link, target
 

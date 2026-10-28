@@ -8,6 +8,8 @@
 //   一级代理下面还有人时后端 409，先改挂或撤下级。
 // - 改挂上级：连同整棵子树（客户本来就归他们，一起过去）。选项里已经去掉他自己、他的下级、
 //   他现在的上级，以及挂过去会超过最大层级的位置；后端同样会挡。
+// - 可改会员（rev 51）：每行一个开关，只有这里能开关；默认关，一级也要开。开了的代理能在代理页
+//   给自己整支团队的客户改会员。
 // - 调低最大层级不动已有的代理，只是不能再往下升。
 //
 // Admin "Agents" section (rev 50): the whole tree, plus appoint, revoke, re-parent and the
@@ -18,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import { SkeletonLine } from '../Skeleton'
+import Switch from '../Switch'
 import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import type { AdminAgentTree, AdminAgentTreeNode, AdminUser } from '../../api/types'
@@ -139,6 +142,12 @@ export default function AgentsPanel() {
     if (ok) setRevoking(null)
   }
 
+  const togglePlanRight = (n: AdminAgentTreeNode, enabled: boolean) =>
+    void run(
+      () => adminApi.setAgentPlanRight(n.userId, enabled),
+      t(enabled ? 'admin.agents.planRightOn' : 'admin.agents.planRightOff', { name: nameOf(n) }),
+    )
+
   const depthNum = Number(depth)
   const depthValid = Number.isInteger(depthNum) && depthNum >= 1 && depthNum <= 20
 
@@ -153,7 +162,19 @@ export default function AgentsPanel() {
           <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
             {t('admin.invite.tree.level', { n: n.level })}
           </span>
-          <span className="ml-auto flex gap-3">
+          <span className="ml-auto flex items-center gap-3">
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-300"
+              title={t('admin.agents.planRightHint')}
+            >
+              <Switch
+                checked={n.canSetPlan}
+                disabled={busy}
+                onChange={(v) => togglePlanRight(n, v)}
+                aria-label={t('admin.agents.planRight')}
+              />
+              {t('admin.agents.planRight')}
+            </label>
             {moving?.userId !== n.userId && (
               <button
                 type="button"

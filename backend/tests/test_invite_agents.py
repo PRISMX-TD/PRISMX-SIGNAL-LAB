@@ -14,16 +14,24 @@ from app.routers.invite import (
     agent_link_users,
     agent_links,
     agent_overview,
+    admin_set_plan_right,
     agent_set_plan,
-    assign_agent,
     is_agent,
     unassign_agent,
 )
-from app.schemas import AgentPlanUpdate
+from app.routers.invite import assign_agent as _assign_agent
+from app.schemas import AdminAgentPlanRight, AgentPlanUpdate
 from app.services.stats_time import resolve_range
 from app.services.account_type import DEMO, REAL
 from app.services.gateway_binding import REASON_PASSWORD_CHANGED, REASON_USER_REMOVED
 from app.services.stats_time import today as stats_today
+
+
+def assign_agent(db, admin, link, agent):
+    """指派并顺手开改会员权限（rev 51 起要管理员开）——本文件的用例都默认代理能改会员。
+    Assign and grant the plan right (admin-granted since rev 51); every case here assumes it."""
+    _assign_agent(db, admin, link, agent)
+    admin_set_plan_right(db, admin, agent.id, AdminAgentPlanRight(enabled=True))
 
 
 def _mk_link(db, code="abcd2345", label="测试渠道", active=True):

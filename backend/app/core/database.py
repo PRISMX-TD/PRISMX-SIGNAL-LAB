@@ -429,7 +429,11 @@ def _hash_legacy_api_tokens() -> None:
 #          rev 50 — agent / promo-link split: link owner columns replace
 #          invite_link_agents; users.agent_user_id holds the owning agent apart
 #          from invite_code. Backfill in _migrate_agent_attribution_rev50; idempotent.
-CURRENT_SCHEMA_REV = 50
+# rev 51 — 代理改会员权限（2026-10-28）：agent_nodes 加 can_set_plan，存量回填 FALSE（产品决定：
+#          上线后一律关闭，由管理员逐个打开；一级代理原来自带的改会员能力随之收回）。纯 ADD COLUMN + UPDATE。
+#          rev 51 — agents' plan right: agent_nodes.can_set_plan, existing rows FALSE
+#          (admins switch it on one by one; top-level agents lose the implicit right).
+CURRENT_SCHEMA_REV = 51
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1483,6 +1487,17 @@ def _migrate_columns() -> None:
                 conn.execute(text("ALTER TABLE invite_links ADD COLUMN owner_assigned_by VARCHAR"))
             if "owner_assigned_at" not in invite_cols:
                 conn.execute(text(f"ALTER TABLE invite_links ADD COLUMN owner_assigned_at {datetime_type}"))
+
+    # rev 51：代理改会员权限，存量一律关。带 DEFAULT FALSE：rev 47 / 50 的回填直接 INSERT agent_nodes
+    # 不写这一列。放在通用索引块之前（test_migration_index_order）。
+    # rev 51: agents' plan right, off for everyone. DEFAULT FALSE because the rev 47 / 50
+    # backfills INSERT agent_nodes without it. Kept ahead of the index block.
+    if "agent_nodes" in inspector.get_table_names():
+        node_cols = {c["name"] for c in inspector.get_columns("agent_nodes")}
+        if "can_set_plan" not in node_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE agent_nodes ADD COLUMN can_set_plan BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("UPDATE agent_nodes SET can_set_plan = FALSE WHERE can_set_plan IS NULL"))
 
     # rev 22：公告的「弹窗展示」开关。存量公告一律不弹——这一列是新行为的入口，
     # 回填成 TRUE 等于给所有历史公告追发一轮弹窗。两张配套新表（user_notifications、

@@ -1733,6 +1733,12 @@ export const adminApi = {
     }),
   // 撤销代理：客户与链接交给上级（一级则变平台客户 / 平台链接），下级整体上移一级。
   // 一级代理下面还有人时 409。/ Revoke: customers and links go to the parent; 409 for a top-level agent with children.
+  // 开 / 关代理的改会员权限（rev 51，只有管理员能动）。/ Switch an agent's plan right (admin-only).
+  setAgentPlanRight: (userId: string, enabled: boolean) =>
+    request<AdminAgentTree>(`/admin/agents/${encodeURIComponent(userId)}/plan-right`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
   revokeAgent: (userId: string) =>
     request<AdminAgentTree>(`/admin/agents/${encodeURIComponent(userId)}/revoke`, { method: 'POST' }),
   // 把一个代理连同整棵子树改挂到另一个代理下面；parentUserId 为 null = 改成一级。

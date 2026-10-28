@@ -21,6 +21,7 @@ from app.routers.invite import (
     admin_move_agent,
     admin_revoke_agent,
     admin_set_link_owner,
+    admin_set_plan_right,
     agent_demote,
     agent_links,
     agent_promote,
@@ -32,7 +33,7 @@ from app.routers.invite import (
     is_agent,
     unassign_agent,
 )
-from app.schemas import AdminAgentAppoint, AdminAgentMove, AdminLinkOwnerUpdate, AgentPlanUpdate
+from app.schemas import AdminAgentAppoint, AdminAgentMove, AdminAgentPlanRight, AdminLinkOwnerUpdate, AgentPlanUpdate
 from app.services.agent_tree import check_customer_agent
 from app.services.settings_store import invalidate_agent_cache, save_agent_settings
 
@@ -67,10 +68,16 @@ def _appoint(db, admin, user, parent=None):
     return _link_of(db, user)
 
 
+def _grant(db, admin, user, enabled=True):
+    return admin_set_plan_right(db, admin, user.id, AdminAgentPlanRight(enabled=enabled))
+
+
 def _tree(db, grants_trial=False):
     admin = _mk_user(db, "admin@x.io", role="admin")
     a = _mk_user(db, "a@x.io")
     la = _appoint(db, admin, a)
+    # rev 51：改会员权限要管理员开；树上的用例默认 A 有。/ The plan right is admin-granted; A has it here.
+    _grant(db, admin, a)
     if grants_trial:
         la.grants_trial = True
         db.commit()
@@ -288,6 +295,69 @@ def test_non_agent_gets_an_empty_tree(db_session):
 
 
 # ---------- 写权限 / writes ----------
+
+# ---------- 改会员权限 / plan right (rev 51) ----------
+
+def test_plan_right_is_off_by_default_even_for_top_level(db_session):
+    """任命出来的一级代理默认不能改会员；升代理、撤代理照旧（权限只管改会员）。
+    A fresh top-level agent cannot change plans; promote / revoke are unaffected."""
+    admin = _mk_user(db_session, "admin@x.io", role="admin")
+    a = _mk_user(db_session, "a@x.io")
+    la = _appoint(db_session, admin, a)
+    a1 = _mk_user(db_session, "a1@x.io", invite_code=la.code)
+    team = agent_team(db_session, a)
+    assert team.canManage is True and team.canSetPlan is False
+    for call in (
+        lambda: agent_tree_set_plan(db_session, a, _plan(a1.email)),
+        lambda: agent_set_plan(db_session, a, la.id, _plan(a1.email)),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 403
+    db_session.refresh(a1)
+    assert a1.plan == "FREE"
+    agent_promote(db_session, a, a1.email)  # 升代理不受影响 / promotion still works
+    assert is_agent(db_session, a1.id)
+
+
+def test_admin_grants_a_sub_agent_the_whole_team(db_session):
+    """二级代理开了权限，能改自己整支团队的客户（含下级代理名下的），改不了上级的客户；
+    关掉就又不能了。开关各写一条 agent_plan_right 审计，没变化不写。
+    A granted sub-agent edits customers across their whole team (sub-agents'
+    included) but not the upline's; switching off takes it away. Audited per change."""
+    admin, a, la, a1, b, lb, c1 = _tree(db_session)
+    agent_promote(db_session, a, c1.email)  # c1 → 三级，挂在 B 下 / c1 becomes L3 under B
+    lc = _link_of(db_session, c1)
+    d1 = _mk_user(db_session, "d1@x.io", invite_code=lc.code)  # c1 的客户 / c1's customer
+    tree = _grant(db_session, admin, b)
+    assert {n.email: n.canSetPlan for n in tree.nodes}[b.email] is True
+    assert agent_team(db_session, b).canSetPlan is True
+    agent_tree_set_plan(db_session, b, _plan(d1.email))
+    db_session.refresh(d1)
+    assert d1.plan == "PRO"
+    with pytest.raises(HTTPException) as exc:  # a1 归 A，不在 B 的团队 / A's customer
+        agent_tree_set_plan(db_session, b, _plan(a1.email))
+    assert exc.value.status_code == 404
+    _grant(db_session, admin, b)  # 没变化不写审计 / no-op writes no audit
+    _grant(db_session, admin, b, enabled=False)
+    with pytest.raises(HTTPException) as exc:
+        agent_tree_set_plan(db_session, b, _plan(d1.email))
+    assert exc.value.status_code == 403
+    rows = db_session.query(AdminAuditLog).filter_by(target_user_id=b.id, field="agent_plan_right").all()
+    assert sorted((r.old_value, r.new_value) for r in rows) == [("off", "on"), ("on", "off")]
+
+
+def test_plan_right_is_admin_only_and_needs_an_agent(db_session):
+    """不是代理 404；开关接口只挂在管理员路由上（require_admin），代理页没有入口。
+    Non-agents are 404; the switch lives on the admin router only."""
+    admin, a, la, a1, b, lb, c1 = _tree(db_session)
+    with pytest.raises(HTTPException) as exc:
+        _grant(db_session, admin, a1)
+    assert exc.value.status_code == 404
+    from app.routers.invite import admin_agents_router, agent_router
+    assert any(r.path.endswith("/{user_id}/plan-right") for r in admin_agents_router.routes)
+    assert not any("plan-right" in r.path for r in agent_router.routes)
+
 
 def test_only_top_level_can_write(db_session):
     admin, a, la, a1, b, lb, c1 = _tree(db_session)

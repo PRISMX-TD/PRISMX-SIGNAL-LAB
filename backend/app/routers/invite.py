@@ -46,6 +46,7 @@ from app.models import (
 from app.schemas import (
     AdminAgentAppoint,
     AdminAgentMove,
+    AdminAgentPlanRight,
     AdminAgentSettingsUpdate,
     AdminAgentTreeLinkOut,
     AdminAgentTreeNodeOut,
@@ -1021,7 +1022,7 @@ def agent_set_plan(db: Session, agent: User, link_id: str, body: AgentPlanUpdate
     downgrading it would have an agent overrule an admin. Every changed field
     gets its own prefixed audit row, and every write notifies the admins.
     """
-    _require_top(db, agent)
+    _require_plan_right(db, agent)
     link = _owned_link(db, agent, link_id)
     target = _tree_target(db, _Scope(db, agent), body.email, agent)
     if target.invite_code != link.code:
@@ -1153,6 +1154,9 @@ def _agent_user_out(db: Session, u: User) -> AgentLinkUserOut:
 # targets are addressed by email, never by user id.
 
 _MSG_TOP_ONLY = "只有一级代理可以操作 / Only top-level agents can do this"
+_MSG_NO_PLAN_RIGHT = (
+    "管理员还没有给你开通修改会员的权限 / An admin has not given you the right to change plans"
+)
 _MSG_USER_NOT_FOUND = "用户不存在 / User not found"
 
 
@@ -1165,6 +1169,14 @@ def _caller_level(db: Session, user: User) -> int | None:
 def _require_top(db: Session, user: User) -> None:
     if _caller_level(db, user) != 1:
         raise HTTPException(status_code=403, detail=_MSG_TOP_ONLY)
+
+
+def _require_plan_right(db: Session, user: User) -> None:
+    """改会员只看管理员给的 can_set_plan（rev 51），不看层级：一级没开也不行，二级开了就行。
+    Changing plans needs the admin-granted can_set_plan (rev 51), whatever the level."""
+    node = node_of(db, user.id)
+    if node is None or not node.can_set_plan:
+        raise HTTPException(status_code=403, detail=_MSG_NO_PLAN_RIGHT)
 
 
 class _Scope:
@@ -1283,7 +1295,7 @@ def agent_team(db: Session, user: User) -> AgentTeamOut:
     max_depth = get_agent_settings(db)["agent_max_depth"]
     level = _caller_level(db, user)
     if level is None:
-        return AgentTeamOut(level=None, canManage=False, maxDepth=max_depth, nodes=[])
+        return AgentTeamOut(level=None, canManage=False, canSetPlan=False, maxDepth=max_depth, nodes=[])
     scope = _Scope(db, user)
     nodes = scope.nodes
     direct, act, m5 = _owner_counts(db, scope.owner_ids)
@@ -1319,7 +1331,12 @@ def agent_team(db: Session, user: User) -> AgentTeamOut:
     out = [row(user.id, level if top else None, None, me.created_at if me else None)]
     out += [row(n.user_id, (n.depth or 1) if top else None, n.parent_user_id, n.created_at) for n in nodes]
     return AgentTeamOut(
-        isAgent=True, level=level if top else None, canManage=top, maxDepth=max_depth, nodes=out
+        isAgent=True,
+        level=level if top else None,
+        canManage=top,
+        canSetPlan=bool(me and me.can_set_plan),
+        maxDepth=max_depth,
+        nodes=out,
     )
 
 
@@ -1372,9 +1389,11 @@ def agent_tree_users(
 
 
 def agent_tree_set_plan(db: Session, agent: User, body: AgentPlanUpdate) -> AgentTreeUserOut:
-    """一级代理给范围里的人改会员。边界、配额、审计、通知全部在 _apply_agent_plan。
-    A top-level agent changes the plan of anyone in scope; guards live in _apply_agent_plan."""
-    _require_top(db, agent)
+    """有改会员权限的代理（rev 51，管理员给的，任何层级）给自己整支团队里的人改会员。
+    边界、配额、审计、通知全部在 _apply_agent_plan。
+    An agent holding the plan right (rev 51, admin-granted, any level) changes the
+    plan of anyone in their team; guards live in _apply_agent_plan."""
+    _require_plan_right(db, agent)
     scope = _Scope(db, agent)
     target = _tree_target(db, scope, body.email, agent)
     _apply_agent_plan(db, agent, target, target.invite_code or "-", body)
@@ -1535,11 +1554,31 @@ def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
                 links=links.get(n.user_id, []),
                 directCustomers=direct.get(n.user_id, 0),
                 teamCustomers=team.get(n.user_id, 0),
+                canSetPlan=bool(n.can_set_plan),
                 createdAt=n.created_at,
             )
             for n in nodes
         ],
     )
+
+
+def admin_set_plan_right(db: Session, admin: User, user_id: str, body: AdminAgentPlanRight) -> AdminAgentTreeOut:
+    """管理员开 / 关一个代理的改会员权限（rev 51）。只有管理员能动——代理页没有任何入口，
+    一级代理也不能替自己或下级开。没变化不写审计；审计字段 agent_plan_right（on / off）。
+    Admin switches an agent's plan right (rev 51). Agents have no way to set it,
+    top level included. Audited as agent_plan_right (on / off) when it changes."""
+    node = node_of(db, user_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="代理不存在 / Agent not found")
+    if bool(node.can_set_plan) != body.enabled:
+        _log_change(
+            db, admin.id, user_id, "agent_plan_right",
+            "on" if node.can_set_plan else "off", "on" if body.enabled else "off",
+        )
+        node.can_set_plan = body.enabled
+        db.commit()
+        notify_ws(user_id)
+    return admin_agent_tree(db)
 
 
 def admin_appoint_agent(db: Session, admin: User, body: AdminAgentAppoint) -> AdminAgentTreeOut:
@@ -2094,8 +2133,8 @@ def my_agent_customer_plan(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """一级代理改整棵树里某个客户的会员。限流理由同按链接改的那条（它能批量开 PRO）。
-    Top-level agents only; rate-limited like the per-link endpoint."""
+    """有改会员权限的代理（rev 51，管理员给的）改整支团队里某个客户的会员。限流理由同按链接改的那条（它能批量开 PRO）。
+    Needs the admin-granted plan right; rate-limited like the per-link endpoint."""
     return agent_tree_set_plan(db, user, body)
 
 
@@ -2145,6 +2184,16 @@ def post_agent_tree_move(
     admin: User = Depends(require_admin),
 ):
     return admin_move_agent(db, admin, body)
+
+
+@admin_agents_router.put("/{user_id}/plan-right", response_model=AdminAgentTreeOut)
+def put_agent_plan_right(
+    user_id: str,
+    body: AdminAgentPlanRight,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return admin_set_plan_right(db, admin, user_id, body)
 
 
 @admin_agents_router.post("/{user_id}/revoke", response_model=AdminAgentTreeOut)

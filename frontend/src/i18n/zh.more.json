@@ -1592,7 +1592,8 @@
         "featuredCleared": "取消了推荐比赛（改回自动挑选）",
         "wholeGroup": "整组保存",
         "agentParentChange": "代理上级 {{a}} → {{b}}",
-        "agentUserChange": "归属代理 {{a}} → {{b}}"
+        "agentUserChange": "归属代理 {{a}} → {{b}}",
+        "agentPlanRightChange": "改会员权限 {{a}} → {{b}}"
       },
       "why": {
         "noMoney": "保证金不足",
@@ -1706,7 +1707,8 @@
           "role": "角色",
           "invite_code": "来源",
           "agent_parent": "代理上级",
-          "agent_user": "归属代理"
+          "agent_user": "归属代理",
+          "agent_plan_right": "改会员权限"
         },
         "setGroup": {
           "broker": "合作券商限制",
@@ -1821,7 +1823,9 @@
         },
         "noAgentParent": "无（一级代理）",
         "notAgent": "不是代理",
-        "platformCustomer": "平台客户"
+        "platformCustomer": "平台客户",
+        "rightOn": "开",
+        "rightOff": "关"
       },
       "ev": {
         "register": {
@@ -3770,7 +3774,11 @@
       "revokeDone": "已撤销 {{name}}",
       "noLinks": "没有链接",
       "moveBody": "{{name}} 会连同他下面的代理和所有客户一起挂到 {{parent}} 下面。原来的上级从此看不到他们。",
-      "moveBodyTop": "{{name}} 会连同他下面的代理和所有客户独立成一棵树，他成为一级代理（可以升 / 撤代理、改会员）。"
+      "moveBodyTop": "{{name}} 会连同他下面的代理和所有客户独立成一棵树，他成为一级代理（可以升 / 撤代理、改会员）。",
+      "planRight": "可改会员",
+      "planRightHint": "打开后，他能在代理页给自己整支团队的客户开通 / 延长 PRO（一级代理也要在这里打开）。只有管理员能开关。",
+      "planRightOn": "已给 {{name}} 打开改会员权限",
+      "planRightOff": "已关闭 {{name}} 的改会员权限"
     }
   },
   "simulator": {
@@ -4139,7 +4147,8 @@
       "body": "{{name}} 将成为第 {{n}} 级代理，上级是 {{parent}}。系统会给他生成专属链接，他可以查看自己的下线，但不能修改任何内容。",
       "done": "{{name}} 已成为第 {{n}} 级代理。",
       "tooDeep": "已达到最大层级（{{max}} 级）"
-    }
+    },
+    "subtitleNoPlan": "你名下的推广链接、下级代理与他们的客户。修改会员需要管理员为你开通权限，目前只能查看。"
   },
   "announcements": {
     "countUnit": "条",
