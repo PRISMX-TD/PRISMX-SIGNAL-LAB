@@ -38,32 +38,40 @@ import { LastActive, Person, PlanBadge, initialOf } from './customerCells'
 
 const CUSTOMERS_PER_NODE = 20
 const AUTO_EXPAND_MAX_NODES = 10
+// 后端每页上限（services/pagination.PAGE_SIZE_MAX）。/ The backend's page-size cap.
+const PAGE_SIZE_MAX = 200
 
 // 一个代理名下的直属普通客户（懒加载）。team 变了（升 / 撤代理之后）重新拉。
+// 接口按推荐官筛时连他的直属下级推荐官一起回（total 也算他们）：多拉 kidCount 条，免得下级
+// 推荐官占掉 20 个名额；只列普通客户，「还有 N 位」按普通客户总数算。
 // One agent's direct non-agent customers, fetched on mount; refetched when the team changes.
+// The endpoint also returns direct downline ambassadors (and counts them in `total`), so
+// kidCount extra rows are fetched to keep them from taking the 20 slots; only plain
+// customers are listed, and "N more" comes from the plain total.
 function NodeCustomers({
   team,
   agentEmail,
+  plainTotal,
+  kidCount,
   onShowAll,
 }: {
   team: AgentTeam
   agentEmail: string
+  plainTotal: number
+  kidCount: number
   onShowAll: () => void
 }) {
   const { t } = useTranslation()
   const [rows, setRows] = useState<AgentTreeUser[] | null>(null)
-  const [total, setTotal] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
     setError(null)
     agentApi
-      .customers({ agent: agentEmail, limit: CUSTOMERS_PER_NODE })
+      .customers({ agent: agentEmail, limit: Math.min(PAGE_SIZE_MAX, CUSTOMERS_PER_NODE + kidCount) })
       .then((r) => {
-        if (!alive) return
-        setRows(r.users)
-        setTotal(r.total)
+        if (alive) setRows(r.users)
       })
       .catch((err: unknown) => {
         if (alive) setError(localizeApiError(err instanceof Error ? err.message : String(err)))
@@ -71,10 +79,10 @@ function NodeCustomers({
     return () => {
       alive = false
     }
-  }, [team, agentEmail])
+  }, [team, agentEmail, kidCount])
 
-  const plain = (rows ?? []).filter((u) => !u.isAgent)
-  const more = total - (rows?.length ?? 0)
+  const plain = (rows ?? []).filter((u) => !u.isAgent).slice(0, CUSTOMERS_PER_NODE)
+  const more = Math.max(0, plainTotal - plain.length)
   if (error) return <p className="agt-clients-note is-err">{error}</p>
   if (rows === null) return <p className="agt-clients-note">{t('common.loading')}</p>
   return (
@@ -165,9 +173,9 @@ export default function AgentTeamPanel({
   // tier so the stylesheet knows where to narrow and then stop the indent.
   const renderNode = (n: AgentTeamNode, depth: number): React.ReactNode => {
     const kids = children.get(n.email) ?? []
-    // 直属客户里已经是代理的就是 kids（新代理的上级 = 他注册所用链接的主人），减掉才是普通客户数。
-    // Direct customers who became agents are exactly `kids`; the rest are plain customers.
-    const plainCount = Math.max(0, n.directCustomers - kids.length)
+    // rev 50 起后端的 directCustomers 只数普通客户（升成推荐官的不算），直接用，别再减 kids。
+    // Since rev 50 directCustomers counts plain customers only; do not subtract `kids` again.
+    const plainCount = n.directCustomers
     const open = plainCount > 0 && isOpen(n.email)
     const canRemove = team.canManage && !n.isSelf
     const childDepth = depth + 1
@@ -231,7 +239,15 @@ export default function AgentTeamPanel({
               <IconChevron size={15} />
             </button>
           )}
-          {open && <NodeCustomers team={team} agentEmail={n.email} onShowAll={() => onShowCustomers(n.email)} />}
+          {open && (
+            <NodeCustomers
+              team={team}
+              agentEmail={n.email}
+              plainTotal={plainCount}
+              kidCount={kids.length}
+              onShowAll={() => onShowCustomers(n.email)}
+            />
+          )}
         </article>
         {kids.length > 0 && (
           <ul className={`agt-tree is-sub${childDepth >= 3 ? ' is-deep' : ''}${childDepth >= 5 ? ' is-flat' : ''}`}>

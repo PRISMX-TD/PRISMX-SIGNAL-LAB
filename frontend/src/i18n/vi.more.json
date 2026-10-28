@@ -1371,7 +1371,7 @@
       "readOnlyHint": "Mục này chỉ để xem. Việc nâng/gỡ đại sứ do đại sứ cấp 1 thực hiện.",
       "planOnHint": "Quản trị viên đã cấp quyền điều chỉnh gói cho bạn: bạn có thể điều chỉnh gói cho mọi khách trong nhóm.",
       "planOffHint": "Điều chỉnh gói cần quản trị viên cấp quyền cho bạn.",
-      "countNote": "Khách trực tiếp chỉ tính người đến từ liên kết của chính họ; khách cả nhóm cộng thêm mọi người bên dưới. Hoạt động 7 ngày và MT5 đã kết nối chỉ tính khách trực tiếp.",
+      "countNote": "Khách trực tiếp là khách thường hiện thuộc về họ (không tính đại sứ); khách cả nhóm cộng thêm khách của mọi đại sứ bên dưới. Hoạt động 7 ngày và MT5 đã kết nối chỉ tính khách trực tiếp.",
       "emptyTop": "Chưa có đại sứ cấp dưới. Bạn có thể nâng khách hàng thành đại sứ ở mục “Tất cả khách hàng”.",
       "empty": "Chưa có đại sứ cấp dưới.",
       "removeTitle": "Xác nhận gỡ đại sứ",

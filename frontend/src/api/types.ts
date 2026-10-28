@@ -360,10 +360,11 @@ export interface AgentOverview {
 }
 
 // 代理层级（rev 47）。目标一律按邮箱定位，user id 不下发给代理。自己那一行的 parentEmail
-// 恒为 null：下级看不到上级。direct* 只算他自己链接带来的人，teamCustomers 加上整棵子树。
+// 恒为 null：下级看不到上级。direct* = 此刻归他名下的普通客户（按 users.agent_user_id，rev 50 起；
+// 升为代理的不算），teamCustomers 加上整棵子树的普通客户。
 // Agent hierarchy (rev 47). Targets are addressed by email; user ids never reach agents.
-// The caller's own parentEmail is always null. direct* = own links only; teamCustomers
-// adds the whole subtree.
+// The caller's own parentEmail is always null. direct* = plain customers currently owned
+// (users.agent_user_id, since rev 50; agents excluded); teamCustomers adds the whole subtree's.
 export interface AgentTeamNode {
   email: string
   nickname: string | null

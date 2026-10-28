@@ -4142,7 +4142,7 @@
       "readOnlyHint": "This view is read-only. Promotions are made by your top-level ambassador.",
       "planOnHint": "An admin has given you the right to change plans for every client in your team.",
       "planOffHint": "Changing plans needs an admin to enable it for you.",
-      "countNote": "Direct clients counts people from their own links; team clients adds everyone below them. Active (7d) and MT5 linked count direct clients only.",
+      "countNote": "Direct clients are the regular clients currently assigned to them (ambassadors not included); team clients adds the clients of every ambassador below them. Active (7d) and MT5 linked count direct clients only.",
       "emptyTop": "No downline ambassadors yet. Promote a client from “All clients”.",
       "empty": "No downline ambassadors yet.",
       "removeTitle": "Remove this ambassador?",
