@@ -251,7 +251,8 @@ export default function AgentTeamPanel({
         <p>
           {team.canManage
             ? t('agent.team.topHint', { max: team.maxDepth })
-            : t('agent.team.readOnlyHint')}
+            : t('agent.team.readOnlyHint')}{' '}
+          {t(team.canSetPlan ? 'agent.team.planOnHint' : 'agent.team.planOffHint')}
         </p>
         <p className="text-neutral-500">{t('agent.team.countNote')}</p>
       </div>
