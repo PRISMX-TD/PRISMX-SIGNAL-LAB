@@ -367,54 +367,57 @@
 }
 
 /* ── 页签 / tabs ──
-   文字页签 + 2px 紫色油墨底条；窄屏可以横滑。
-   底线用内阴影画在条内、油墨条贴底（bottom:0）：横滑容器会裁掉溢出的东西，
-   画在外面的话油墨条只剩一半、还多出 1px 竖向滚动。页签左右各留 4px 给焦点框。
-   Text tabs over a 2px violet ink bar; scrolls sideways on narrow screens. The hairline
-   is an inset shadow and the bar sits at bottom:0, because the scroll strip clips
-   anything outside it; each tab keeps 4px each side for the focus ring. */
+   三格等宽的分区导航，和看板指标格同一套发丝线拼格（1px 间隙露出底色当分隔线）：
+   每格是编号 + 名字 + 数量 + 一句说明；选中的那格抬亮一层、带紫色淡晕和底部 2px 油墨条。
+   手机上三格照旧并排，只收起说明、缩小留白。容器 overflow:hidden 切圆角，所以焦点框画在格内。
+   Three equal cells in the same hairline grid as the KPI tiles (the 1px gaps show the
+   line colour): index, name, count and a one-line description. The selected cell is
+   lifted a step with a violet wash and a 2px ink bar at its foot. Phones keep the three
+   cells side by side and only drop the description. The container clips its corners,
+   so the focus ring is drawn inside the cell. */
 .agt-tabs {
-  display: flex;
-  margin: 0 0 24px -4px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  box-shadow: inset 0 -1px 0 var(--line);
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.agt-tabs::-webkit-scrollbar {
-  display: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-gap: 1px;
+  margin-bottom: 28px;
+  overflow: hidden;
+  border-radius: var(--r-lg);
+  background: var(--line);
 }
 .agt-tab {
   position: relative;
-  flex-shrink: 0;
-  margin-right: 20px;
-  padding: 12px 4px 13px;
-  font-size: 14px;
-  font-weight: 600;
+  display: block;
+  min-width: 0;
+  padding: 16px 20px 20px;
+  text-align: left;
   color: var(--text-3);
-  background: none;
+  background: #121217;
   border: 0;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 .agt-tab:hover {
-  color: var(--text);
+  color: var(--text-2);
+  background-color: #16161c;
 }
 .agt-tab.is-on {
   color: #fff;
+  background:
+    radial-gradient(120% 140% at 0% 0%, rgb(var(--purple-rgb) / 0.2), rgb(var(--purple-rgb) / 0) 60%),
+    var(--surface);
 }
 .agt-tab:focus-visible {
-  outline-offset: -2px;
+  outline-offset: -3px;
 }
 .agt-tab::after {
   content: '';
   position: absolute;
-  left: 4px;
-  right: 4px;
+  left: 0;
+  right: 0;
   bottom: 0;
   height: 2px;
-  border-radius: 2px;
   background: var(--purple-hi);
   transform: scaleX(0);
   transform-origin: left center;
@@ -423,14 +426,92 @@
 .agt-tab.is-on::after {
   transform: scaleX(1);
 }
+.agt-tab-index {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: rgb(var(--text-3-rgb) / 0.6);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.agt-tab.is-on .agt-tab-index {
+  color: var(--purple-hi);
+}
+.agt-tab-head {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+.agt-tab-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .agt-tab-count {
-  margin-left: 6px;
+  flex-shrink: 0;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: var(--r-xs);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
+  line-height: 18px;
   color: var(--text-3);
+  background: rgba(255, 255, 255, 0.06);
 }
 .agt-tab.is-on .agt-tab-count {
-  color: var(--purple-hi);
+  color: var(--purple-soft);
+  background: rgb(var(--purple-rgb) / 0.24);
+}
+.agt-tab-desc {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* 手机上一格只有约 114px：数量挪到编号那一行的右上角，名字独占一行、最多折两行
+   （英 / 越 / 泰的「全部客户」放不进一行，截成省略号就看不出是哪一格了）。
+   Phones give each cell ~114px: the count moves up to the index row's right corner and
+   the name gets its own line, wrapping to two (en/vi/th names do not fit one line). */
+@media (max-width: 639px) {
+  .agt-tabs {
+    margin-bottom: 20px;
+    border-radius: 18px;
+  }
+  .agt-tab {
+    padding: 12px 12px 14px;
+  }
+  .agt-tab-index {
+    font-size: 10px;
+    line-height: 18px;
+  }
+  .agt-tab-head {
+    margin-top: 6px;
+  }
+  .agt-tab-label {
+    display: -webkit-box;
+    font-size: 14px;
+    white-space: normal;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+  .agt-tab-count {
+    position: absolute;
+    top: 12px;
+    right: 10px;
+    margin: 0;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+  .agt-tab-desc {
+    display: none;
+  }
 }
 .agt-panel {
   animation: agt-rise 0.45s var(--ease-out) both;
@@ -869,7 +950,9 @@
     display: none;
   }
   .agt-card,
-  .agt-tab::after {
+  .agt-tab,
+  .agt-tab::after,
+  .agt-tab-index {
     transition: none;
   }
 }

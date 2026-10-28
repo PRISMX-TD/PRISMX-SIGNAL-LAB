@@ -4123,6 +4123,11 @@
       "team": "Team",
       "customers": "All clients"
     },
+    "tabDesc": {
+      "links": "Your links and who they bring in",
+      "team": "Downline ambassadors and their numbers",
+      "customers": "Every client across your team"
+    },
     "team": {
       "level": "Level {{n}}",
       "you": "You",

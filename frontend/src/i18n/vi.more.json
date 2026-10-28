@@ -1352,6 +1352,11 @@
       "team": "Đội nhóm",
       "customers": "Tất cả khách hàng"
     },
+    "tabDesc": {
+      "links": "Liên kết và khách hàng từ liên kết",
+      "team": "Đại sứ cấp dưới và kết quả",
+      "customers": "Mọi khách hàng trong nhóm của bạn"
+    },
     "team": {
       "level": "Cấp {{n}}",
       "you": "Bạn",

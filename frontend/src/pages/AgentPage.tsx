@@ -238,23 +238,40 @@ export default function AgentPage() {
         }
       />
 
-      {/* 页签：只有确实在推荐官树上（isAgent）才出现。/ Tabs, only for ambassadors in the tree. */}
+      {/* 页签：只有确实在推荐官树上（isAgent）才出现。三格等宽的分区导航：编号、名字、
+          数量、一句说明（手机上收起说明）。数量都与页签里的内容同口径：链接条数；下级推荐官
+          人数；全部客户 = 团队客户 + 下级推荐官本人（名单就是这两类人，见后端 scope_filter）。
+          Tabs, only for ambassadors in the tree: three equal cells with an index, the
+          name, a count and a one-line description (hidden on phones). Each count matches
+          its tab's content: links; downline ambassadors; all customers = team customers
+          plus the downline ambassadors themselves (exactly who the list holds). */}
       {team?.isAgent && (
         <div className="agt-tabs" role="tablist">
-          {TABS.map((k) => (
-            <button
-              key={k}
-              type="button"
-              role="tab"
-              aria-selected={tab === k}
-              className={`agt-tab${tab === k ? ' is-on' : ''}`}
-              onClick={() => switchTab(k)}
-            >
-              {t(`agent.tabs.${k}`)}
-              {k === 'links' && links && links.length > 1 && <span className="agt-tab-count num">{links.length}</span>}
-              {k === 'team' && team.nodes.length > 1 && <span className="agt-tab-count num">{team.nodes.length - 1}</span>}
-            </button>
-          ))}
+          {TABS.map((k, i) => {
+            const self = team.nodes.find((n) => n.isSelf)
+            const downline = Math.max(0, team.nodes.length - 1)
+            const count =
+              k === 'links' ? (links?.length ?? null) : k === 'team' ? downline : self ? self.teamCustomers + downline : null
+            return (
+              <button
+                key={k}
+                type="button"
+                role="tab"
+                aria-selected={tab === k}
+                className={`agt-tab${tab === k ? ' is-on' : ''}`}
+                onClick={() => switchTab(k)}
+              >
+                <span className="agt-tab-index num" aria-hidden="true">
+                  {`0${i + 1}`}
+                </span>
+                <span className="agt-tab-head">
+                  <span className="agt-tab-label">{t(`agent.tabs.${k}`)}</span>
+                  {count != null && <span className="agt-tab-count num">{count.toLocaleString('en-US')}</span>}
+                </span>
+                <span className="agt-tab-desc">{t(`agent.tabDesc.${k}`)}</span>
+              </button>
+            )
+          })}
         </div>
       )}
 
