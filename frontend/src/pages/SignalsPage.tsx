@@ -131,7 +131,7 @@ export default function SignalsPage() {
           depend on no data, and blanking them too violates the site rule that the
           head and controls stay put while data loads. */}
       <div className="content-fade">
-        <button onClick={() => navigate('/dashboard')} className="mb-4 flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
+        <button onClick={() => navigate('/dashboard')} className="mb-4 hidden sm:flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
           {t('signals.focus.backToDashboard')}
         </button>

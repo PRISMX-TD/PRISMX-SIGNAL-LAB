@@ -41,7 +41,6 @@ const SignalHero: FC<Props> = ({
 }) => {
   const { t } = useTranslation()
   const stanceLabel = stance === 'BULL' ? t('signals.focus.bull') : stance === 'BEAR' ? t('signals.focus.bear') : t('signals.focus.neutral')
-  const stanceNote = stance === 'BULL' ? t('signals.focus.adviceBull') : stance === 'BEAR' ? t('signals.focus.adviceBear') : t('signals.focus.adviceNeutral')
 
   // 手机端左右滑动切换聚焦品种：左滑下一个 / 右滑上一个
   // Mobile swipe to switch focus symbol: swipe left → next, swipe right → prev
@@ -139,9 +138,6 @@ const SignalHero: FC<Props> = ({
           )}
         </div>
       </div>
-
-      {/* Stance note */}
-      <p className="dh-hero-note relative z-10">{stanceNote}</p>
 
       <div className="dh-rails relative z-10">
         {/* 多周期轨道：这一排是同一个品种在多个周期上的方向，是一组同类读数而不是

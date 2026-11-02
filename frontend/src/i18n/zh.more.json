@@ -158,7 +158,7 @@
     "currentPrice": "现价",
     "refPrice": "参考价",
     "slowBroker": "券商响应较慢，请勿重复下单",
-    "slowBrokerLeave": "券商响应较慢，请勿重复下单。可以先关闭，稍后在「订单回执」页查看结果",
+    "slowBrokerLeave": "券商响应较慢，请勿重复下单。可以先关闭，稍后在「交易」页查看结果",
     "sizeMode": "手数模式",
     "sizeModeLots": "手数",
     "sizeModeRisk": "风险百分比",
@@ -232,11 +232,11 @@
     "notifWindowTo": "至",
     "notifWindowHint": "跨零点的时段（如 22:00 至 07:00）按隔夜处理；时段外产生的通知不会补发。时区取自本设备：{{tz}}",
     "notifProcessing": "处理中…",
-    "autoTitle": "自动仓位管理",
+    "autoTitle": "智能风控",
     "autoHint": "以 R 为单位设定规则（R = 开仓时的止损距离）。例如浮盈达到 1R 时自动把止损移到入场价。仅作用于通过 PRISMX 下单开出的仓位，手动开的仓不受影响；开仓时未设止损的仓位无法计算 R，会被跳过。所有自动指令都会出现在订单页，全程可追溯。",
-    "autoUpgradeRequired": "自动仓位管理为 PRO 专属功能，升级后即可解锁",
-    "autoPausedNotPro": "你之前开启的自动仓位管理目前已暂停：当前不是 PRO，系统不会自动移动止损或分批止盈，持仓的止损止盈需要你自己管理。升级 PRO 后按原有设置自动恢复。",
-    "autoEnable": "启用自动仓位管理",
+    "autoUpgradeRequired": "智能风控为 PRO 专属功能，升级后即可解锁",
+    "autoPausedNotPro": "你之前开启的智能风控目前已暂停：当前不是 PRO，系统不会自动移动止损或分批止盈，持仓的止损止盈需要你自己管理。升级 PRO 后按原有设置自动恢复。",
+    "autoEnable": "启用智能风控",
     "autoBe": "自动保本",
     "autoTrail": "追踪止损",
     "autoPtp": "分批止盈",
@@ -244,7 +244,7 @@
     "autoTrailDistance": "跟随距离",
     "autoPtpFraction": "平仓比例",
     "autoScopeNote": "止损只会朝有利方向移动，绝不放大风险。指令经由桥接程序在你的 MT5 上执行，桥接离线时不会有任何动作。",
-    "autoSaved": "自动仓位管理设置已保存",
+    "autoSaved": "智能风控设置已保存",
     "autoSaveError": "保存失败",
     "notifDiagTitle": "推送诊断",
     "notifDiagEnv": "运行环境",
@@ -765,9 +765,10 @@
     "cancelling": "撤单中…",
     "proExclusive": "PRO专属",
     "tab": {
-      "positions": "持仓与账户",
-      "performance": "绩效分析",
-      "activity": "操作记录"
+      "positions": "持仓",
+      "performance": "历史",
+      "activity": "日志",
+      "risk": "智能风控"
     },
     "reverse": "反向",
     "reverseHint": "反向信号单：方向与信号相反，止盈止损对调"
@@ -882,7 +883,7 @@
     "b1Title": "免安装直连",
     "b1Desc": "不用下载桥接程序，也不用租 VPS。你的电脑关机时，信号照样在服务器端执行。",
     "b2Title": "免费 PRO",
-    "b2Desc": "实时信号、一键下单、自动仓位管理、不限 MT5 账户数量——PRO 权益全部解锁。",
+    "b2Desc": "实时信号、一键下单、智能风控、不限 MT5 账户数量——PRO 权益全部解锁。",
     "b3Title": "实盘 / 模拟都支持",
     "b3Desc": "先用模拟账户熟悉整套流程，想清楚了再切实盘，操作方式完全一样。",
     "cta": "立即开户",
@@ -895,7 +896,7 @@
   },
   "upgrade": {
     "title": "升级到 PRO",
-    "subtitle": "解锁实时信号、无限 MT5 账户、自动仓位管理和推送通知",
+    "subtitle": "解锁实时信号、无限 MT5 账户、智能风控和推送通知",
     "choosePlan": "选择套餐",
     "chooseCoin": "使用 USDT 支付",
     "recommended": "推荐 · 手续费最低",
@@ -948,7 +949,7 @@
     "featTrade": "一键下单",
     "featTradeFree": "—",
     "featTradePro": "支持",
-    "featAuto": "自动仓位管理",
+    "featAuto": "智能风控",
     "featAutoFree": "—",
     "featAutoPro": "保本·追踪止损·分批止盈",
     "featPush": "推送通知",
@@ -1446,7 +1447,7 @@
       "actor": {
         "self": "本人",
         "system": "系统",
-        "auto": "自动仓管",
+        "auto": "智能风控",
         "broker": "券商（MT5）",
         "admin": "管理员 {{name}}",
         "agent": "推荐官 {{name}}",
@@ -1702,7 +1703,7 @@
           "support": "客服"
         },
         "autoField": {
-          "enabled": "自动仓管",
+          "enabled": "智能风控",
           "beenabled": "自动保本",
           "betriggerr": "保本触发",
           "trailenabled": "追踪止损",
@@ -1934,17 +1935,17 @@
           "cleared_tp": "取消止盈"
         },
         "autosl": {
-          "unknown": "自动仓管调整了止损",
+          "unknown": "智能风控调整了止损",
           "trailN": "自动追踪止损 {{n}} 次：{{a}} → {{b}}",
           "trailNTo": "自动追踪止损 {{n}} 次，移到 {{b}}",
-          "multi": "自动仓管移动止损 {{n}} 次：{{a}} → {{b}}",
-          "multiTo": "自动仓管移动止损 {{n}} 次，移到 {{b}}",
+          "multi": "智能风控移动止损 {{n}} 次：{{a}} → {{b}}",
+          "multiTo": "智能风控移动止损 {{n}} 次，移到 {{b}}",
           "be": "自动保本：止损移到开仓价 {{v}}",
           "restore": "止损被清掉后，自动补回止损 {{v}}",
           "trail": "自动追踪止损 {{a}} → {{b}}",
           "trailTo": "自动追踪止损，移到 {{b}}",
-          "move": "自动仓管移动止损 {{a}} → {{b}}",
-          "set": "自动仓管把止损设为 {{b}}"
+          "move": "智能风控移动止损 {{a}} → {{b}}",
+          "set": "智能风控把止损设为 {{b}}"
         },
         "otherTrade": "其它类型的交易指令",
         "closeAll_other": "一键平仓 {{count}} 笔",
@@ -1961,8 +1962,8 @@
         "correctedWasTimeout": "超时已自动取消",
         "stopoutGroup_other": "爆仓强平，一次平掉 {{count}} 笔",
         "autoSettings": {
-          "head": "修改自动仓管设置：",
-          "none": "保存了自动仓管设置（没有变化）"
+          "head": "修改智能风控设置：",
+          "none": "保存了智能风控设置（没有变化）"
         },
         "userPlan": {
           "head": "修改会员：",
@@ -2175,7 +2176,7 @@
         "auto": {
           "partial_tp": "自动分批止盈",
           "sl": "自动移动止损",
-          "settings": "自动仓管设置"
+          "settings": "智能风控设置"
         },
         "sltp": {
           "modify": "修改止盈止损"
@@ -2997,7 +2998,7 @@
         "/charts": "行情图表",
         "/bind": "连接 MT5",
         "/bind/bridge": "桥接设置",
-        "/orders": "订单回执",
+        "/orders": "交易",
         "/strategies": "自定义策略",
         "/achievements": "成就",
         "/leaderboard": "排行榜",
@@ -5000,7 +5001,7 @@
           "sub": "专业 K 线与画线工具，看准了直接在图上下单。"
         },
         "orders": {
-          "title": "注册后解锁订单回执",
+          "title": "注册后解锁交易",
           "sub": "连接你的 MT5，持仓、挂单、成交回执实时同步。"
         },
         "growth": {

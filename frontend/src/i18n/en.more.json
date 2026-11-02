@@ -232,7 +232,7 @@
     "notifWindowTo": "to",
     "notifWindowHint": "A range crossing midnight (e.g. 22:00 to 07:00) wraps overnight; notifications outside the window are skipped, not re-sent. Timezone from this device: {{tz}}",
     "notifProcessing": "Processing…",
-    "autoTitle": "Auto position management",
+    "autoTitle": "Smart Risk",
     "autoHint": "Rules are set in R units (R = the stop distance at open). E.g. move the stop to entry once the trade is up 1R. Applies only to positions opened through PRISMX — manual trades are never touched; positions opened without a stop have no defined R and are skipped. Every automated command shows up on the Orders page, fully traceable.",
     "autoUpgradeRequired": "Auto position management is a PRO feature — upgrade to unlock",
     "autoPausedNotPro": "Your auto position management is paused: without PRO, stops are not moved and no partial profits are taken — manage your positions' SL/TP yourself. Upgrade to PRO and it resumes with your saved settings.",
@@ -765,9 +765,10 @@
     "cancelling": "Cancelling…",
     "proExclusive": "PRO Exclusive",
     "tab": {
-      "positions": "Positions & Account",
-      "performance": "Performance",
-      "activity": "Activity Log"
+      "positions": "Positions",
+      "performance": "History",
+      "activity": "Log",
+      "risk": "Smart Risk"
     },
     "reverse": "Reverse",
     "reverseHint": "Reverse-signal order: opposite side to the signal, TP and SL swapped"
@@ -948,7 +949,7 @@
     "featTrade": "One-click trading",
     "featTradeFree": "—",
     "featTradePro": "Included",
-    "featAuto": "Auto position management",
+    "featAuto": "Smart Risk",
     "featAutoFree": "—",
     "featAutoPro": "Break-even, trailing, partial TP",
     "featPush": "Push notifications",
@@ -3005,7 +3006,7 @@
         "/charts": "Charts",
         "/bind": "Connect MT5",
         "/bind/bridge": "Bridge setup",
-        "/orders": "Orders",
+        "/orders": "Trade",
         "/strategies": "Strategies",
         "/achievements": "Achievements",
         "/leaderboard": "Leaderboard",

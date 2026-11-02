@@ -291,11 +291,9 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
       {/* 计数从实色紫药丸改成一个紫色等宽数字：页头里唯一的彩度就是它。
           Count moves from a solid violet pill to one violet tabular numeral, the
           only chroma in the head. */}
+      {/* 2026-11-02 起去掉标题 / 计数 / 副题（界面精简），页头只留筛选栏。
+          Since 2026-11-02 the title / count / subtitle are gone (UI trim); the head keeps only the filters. */}
       <PageHead
-        title={t('signals.title')}
-        count={filtered.length}
-        countUnit={t('signals.countUnit')}
-        subtitle={t('signals.subtitle')}
         actions={
         /* 筛选器。品种是下拉，桌面手机共用同一个控件——下拉在窄屏本来就好用，
             不需要再单独做一套「点击循环」。排序仍是桌面药丸 / 手机循环两套：它只有

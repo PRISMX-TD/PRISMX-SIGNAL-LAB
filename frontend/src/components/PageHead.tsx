@@ -25,7 +25,9 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 
 interface Props {
-  title: ReactNode
+  // 不给标题（且没有返回链接）就只渲染右侧槽，如信号板只留筛选栏。
+  // No title (and no back link) renders the actions slot alone, e.g. the signal board's filter bar.
+  title?: ReactNode
   subtitle?: ReactNode
   // 计数：与标题同高的紫色等宽数字，是页头里唯一的彩度。null / undefined 不渲染。
   // Count: a violet tabular numeral at title height, the head's only chroma.
@@ -54,7 +56,7 @@ export default function PageHead({ title, subtitle, count, countUnit, badge, act
   const Tag = as
   return (
     <div className={`page-head${className ? ` ${className}` : ''}`}>
-      <div className="page-head-title">
+      {(title != null || back) && <div className="page-head-title">
         {back && (back.to ? (
           <Link to={back.to} className="page-head-back">
             <BackChevron />
@@ -66,7 +68,7 @@ export default function PageHead({ title, subtitle, count, countUnit, badge, act
             {back.label}
           </button>
         ))}
-        <Tag className="font-display">
+        {title != null && <Tag className="font-display">
           <span className="page-head-name">{title}</span>
           {count != null && (
             <span className="page-head-count">
@@ -75,9 +77,9 @@ export default function PageHead({ title, subtitle, count, countUnit, badge, act
             </span>
           )}
           {badge}
-        </Tag>
+        </Tag>}
         {subtitle && <p>{subtitle}</p>}
-      </div>
+      </div>}
       {actions && <div className="page-head-actions">{actions}</div>}
     </div>
   )

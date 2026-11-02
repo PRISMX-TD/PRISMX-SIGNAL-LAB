@@ -979,6 +979,13 @@
     padding: 36px 0 8px;
   }
 }
+/* 2026-11-02 起智能风控单独一个页签，上方不再有持仓区，去掉分隔线与上边距。
+   Since 2026-11-02 smart risk has its own tab with no positions above; drop the rule and top gap. */
+.ord-lrow {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
 .ord-lrow h4 {
   display: flex;
   align-items: center;

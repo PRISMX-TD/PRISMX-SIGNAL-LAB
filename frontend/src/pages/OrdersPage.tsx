@@ -65,9 +65,13 @@ const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 
 // (activity log). Their rhythms differ completely, and stacking them made one
 // endless scroll; split, each screen answers one question. The choice persists
 // in localStorage so a refresh keeps you on the same tab.
-type OrdersTab = 'positions' | 'performance' | 'activity'
+// 2026-11-02 起四个：持仓 / 历史 / 日志 / 智能风控——智能风控（原自动仓位管理）
+// 从持仓页签底部拆出来单独成页。
+// Four since 2026-11-02: positions / history / log / smart risk — smart risk
+// (formerly auto position management) moved out of the positions tab.
+type OrdersTab = 'positions' | 'performance' | 'activity' | 'risk'
 const TAB_STORAGE_KEY = 'prismx.orders.tab'
-const TABS: OrdersTab[] = ['positions', 'performance', 'activity']
+const TABS: OrdersTab[] = ['positions', 'performance', 'activity', 'risk']
 
 // 时间全部按 UTC+8 显示，与 fmtTime 同一时区；没带时区的 ISO 串按 UTC 解。
 // All times render in UTC+8 like fmtTime; a zone-less ISO string is read as UTC.
@@ -631,12 +635,11 @@ export default function OrdersPage() {
           Page head: the site-wide PageHead with the page-wide account switcher on
           the right. This page used to carry its own mono-caps eyebrow, 42px title
           and spectral rule; unified 2026-09-08. */}
-      <PageHead
+      {/* 2026-11-02 起去掉标题与副题（界面精简），页头只剩桌面账号切换器。
+          Since 2026-11-02 the title and subtitle are gone (UI trim); only the desktop account switcher remains. */}
+      {!isPhone && accounts.length > 1 && <PageHead
         className="ord-head"
-        as="h1"
-        title={t('orders.title')}
-        subtitle={t('orders.subtitle')}
-        actions={!isPhone && accounts.length > 1 ? (
+        actions={(
           <div className="ord-accts" role="tablist">
             {accounts.map((a) => (
               <button
@@ -653,8 +656,8 @@ export default function OrdersPage() {
               </button>
             ))}
           </div>
-        ) : undefined}
-      />
+        )}
+      />}
 
       {/* 手机版账户抬头：替代页头药丸 + 账本条，三个页签共用 /
           phone masthead: replaces the head pills and the ledger strip; shared by all tabs */}
@@ -832,22 +835,6 @@ export default function OrdersPage() {
           )}
           {isPhone && <p className="ord-p ord-p-after">{t('orders.positionsScopeHint')}</p>}
 
-          {/* 自动仓位管理：放在持仓下方（管理对象就是上面这些仓位，挨着看最直观），
-              但必须显式划出来——它是每用户一条的全局配置（AutoManageSettings 的
-              user_id 上有 unique 约束），不跟随页头的账号选择器，而本 Tab 其余内容
-              都跟随。不加区分的话，用户在账号 A 下调完阈值、切到 B 看见同样的值，
-              会以为"串号了"或"没保存上"。所以用一条分隔线 + 明确的作用范围说明把它
-              和上面按账号过滤的区域隔开。
-              Auto position management sits below the positions it acts on (most
-              intuitive adjacent), but is deliberately set apart: it's a single
-              per-user config (unique constraint on AutoManageSettings.user_id)
-              that does NOT follow the page-head account selector, while
-              everything else in this tab does. Without the separation, a user
-              who tunes it under account A and switches to B sees identical
-              values and reasonably concludes it leaked across accounts or
-              failed to save. Hence the divider plus an explicit scope note. */}
-          <AutoManageCard isPro={isPro} scopeHint={t('orders.autoManageScopeHint')} />
-
           {confirmCloseAll && (
             <ConfirmModal
               title={t('orders.closeAll.title')}
@@ -865,6 +852,13 @@ export default function OrdersPage() {
           )}
         </>
       )}
+
+      {/* 智能风控（原自动仓位管理）：每用户一条的全局配置（AutoManageSettings 的 user_id
+          上有 unique 约束），不跟随账号选择器，所以保留作用范围说明。
+          Smart risk (formerly auto position management): one per-user config (unique on
+          AutoManageSettings.user_id) that does not follow the account selector, so the
+          scope note stays. */}
+      {tab === 'risk' && <AutoManageCard isPro={isPro} scopeHint={t('orders.autoManageScopeHint')} />}
 
       {/* 绩效分析：净盈亏 / 胜率 / 品种盈亏 + 已平仓明细，都跟着页头选中的账号
           （纪律分已于 2026-09-07 整体撤销）/ Performance: net P&L, win rate, P&L by

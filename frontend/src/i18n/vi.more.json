@@ -232,7 +232,7 @@
     "notifWindowTo": "đến",
     "notifWindowHint": "Khung giờ qua nửa đêm (ví dụ 22:00 đến 07:00) sẽ kéo sang hôm sau; thông báo ngoài khung giờ sẽ bị bỏ qua, không gửi lại. Múi giờ theo thiết bị này: {{tz}}",
     "notifProcessing": "Đang xử lý…",
-    "autoTitle": "Quản lý vị thế tự động",
+    "autoTitle": "Quản lý rủi ro thông minh",
     "autoHint": "Quy tắc được đặt theo đơn vị R (R = khoảng cách SL lúc mở lệnh). Ví dụ: dời SL về giá vào khi lệnh lãi 1R. Chỉ áp dụng cho vị thế mở qua PRISMX — lệnh mở thủ công không bao giờ bị động đến; vị thế mở không có SL thì không xác định được R và sẽ bị bỏ qua. Mọi lệnh tự động đều hiển thị ở trang Lệnh, truy vết đầy đủ.",
     "autoUpgradeRequired": "Quản lý vị thế tự động là tính năng PRO — nâng cấp để mở khóa",
     "autoPausedNotPro": "Quản lý vị thế tự động bạn đã bật hiện đang tạm dừng: tài khoản không phải PRO nên hệ thống sẽ không tự dời Stop Loss hay chốt lời một phần — vui lòng tự quản lý SL/TP của vị thế. Nâng cấp PRO để tự động tiếp tục với cài đặt đã lưu.",
@@ -765,9 +765,10 @@
     "cancelling": "Đang hủy…",
     "proExclusive": "Độc quyền PRO",
     "tab": {
-      "positions": "Vị thế & tài khoản",
-      "performance": "Hiệu suất",
-      "activity": "Nhật ký hoạt động"
+      "positions": "Vị thế",
+      "performance": "Lịch sử",
+      "activity": "Nhật ký",
+      "risk": "Quản lý rủi ro thông minh"
     },
     "reverse": "Ngược",
     "reverseHint": "Lệnh ngược tín hiệu: ngược chiều tín hiệu, đã hoán đổi TP và SL"
@@ -948,7 +949,7 @@
     "featTrade": "Giao dịch một chạm",
     "featTradeFree": "—",
     "featTradePro": "Có",
-    "featAuto": "Tự động quản lý vị thế",
+    "featAuto": "Quản lý rủi ro thông minh",
     "featAutoFree": "—",
     "featAutoPro": "Hòa vốn, trailing stop, chốt lời từng phần",
     "featPush": "Thông báo đẩy",
