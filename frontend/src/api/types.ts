@@ -2055,6 +2055,39 @@ export interface LeaderboardPreviousWinner {
   profileId?: string | null
 }
 
+// GET /admin/gamification/leaderboard/periods：某一类（周 / 月）有快照的期，新的在前；
+// 进行中的那一期恒在第一行（current=true）。counts 是两张榜各自的上榜账户数。
+// Admin history picker: periods of one kind that have snapshots, newest first;
+// the running one is always first. counts = ranked accounts per board.
+export interface AdminLeaderboardPeriod {
+  periodKey: string
+  current: boolean
+  start: string
+  end: string
+  counts: Record<LeaderboardBoard, number>
+}
+
+// GET /admin/gamification/leaderboard/user/{id}：某人每一期、每张榜、每个账户的名次（不含比赛）。
+// One user's weekly / monthly placements per period, board and account (no competitions).
+export interface AdminBoardHistoryEntry {
+  periodKey: string
+  kind: 'week' | 'month'
+  board: LeaderboardBoard
+  login: string
+  rank: number
+  total: number
+  score: number
+  sample: number | null
+  computedAt: string | null
+}
+
+export interface AdminBoardHistory {
+  userId: string
+  email: string
+  displayName: string
+  entries: AdminBoardHistoryEntry[]
+}
+
 export interface LeaderboardPayload {
   board: string
   periodKey: string

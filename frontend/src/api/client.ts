@@ -1,6 +1,6 @@
 // REST 客户端封装 / REST client wrapper
 import type { OpsStatus } from './types'
-import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
+import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, AdminLeaderboardPeriod, AdminBoardHistory, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
 import type { PendingCompetition } from './types'
 import type { MarketStatus } from './types'
 import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
@@ -1905,6 +1905,15 @@ export const adminApi = {
       request<LeaderboardPayload>(
         `/admin/gamification/leaderboard?board=${encodeURIComponent(board)}&period=${encodeURIComponent(period)}`
       ),
+    // 历史：期数下拉（周 / 月）与某人的周 / 月榜名次。往期整张榜就是 period 传显式 key。
+    // History: the period picker for one kind, and one user's placements. A past board
+    // in full is gamificationLeaderboard with an explicit period key.
+    gamificationLeaderboardPeriods: (kind: 'week' | 'month') =>
+      request<{ periods: AdminLeaderboardPeriod[] }>(
+        `/admin/gamification/leaderboard/periods?kind=${encodeURIComponent(kind)}`
+      ),
+    gamificationBoardHistory: (userId: string) =>
+      request<AdminBoardHistory>(`/admin/gamification/leaderboard/user/${encodeURIComponent(userId)}`),
     // ---- 比赛管理（Phase 3）/ Competition admin (Phase 3) ----
     // 全部比赛（含 draft），按创建时间倒序，每条带参赛数。
     // Every competition (draft included), newest-created first, with a participant count each.

@@ -4560,7 +4560,17 @@
       "colIdentity": "Real identity",
       "pickPeriod": "Pick a period",
       "selfReported": "Self-reported",
-      "selfReportedHint": "This account's real-money status was self-reported by the bridge on the user's PC and has not been verified by a broker group or an admin rule. Worth a spot check."
+      "selfReportedHint": "This account's real-money status was self-reported by the bridge on the user's PC and has not been verified by a broker group or an admin rule. Worth a spot check.",
+      "pickPeriodKey": "Pick an issue",
+      "currentPeriod": "Current",
+      "colHistory": "History",
+      "viewHistory": "View",
+      "historyTitle": "{{name}}'s weekly / monthly board history",
+      "historyEmpty": "This user has never been on a weekly or monthly board.",
+      "colPeriod": "Period",
+      "colBoard": "Board",
+      "closeHistory": "Close",
+      "historyHint": "Every period keeps its final ranks after it closes; use the issue picker above to browse a past board in full."
     }
   },
   "competition": {

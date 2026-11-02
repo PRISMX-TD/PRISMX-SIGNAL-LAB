@@ -4549,7 +4549,17 @@
       "colIdentity": "真实身份",
       "pickPeriod": "选择周期",
       "selfReported": "自报",
-      "selfReportedHint": "这个账户的实盘身份来自用户电脑上的桥接程序自报，未经券商组名或后台规则核实，建议抽查。"
+      "selfReportedHint": "这个账户的实盘身份来自用户电脑上的桥接程序自报，未经券商组名或后台规则核实，建议抽查。",
+      "pickPeriodKey": "选择期数",
+      "currentPeriod": "本期",
+      "colHistory": "历史",
+      "viewHistory": "查看",
+      "historyTitle": "{{name}} 的周榜 / 月榜历史",
+      "historyEmpty": "这个用户还没上过周榜或月榜。",
+      "colPeriod": "周期",
+      "colBoard": "榜单",
+      "closeHistory": "收起",
+      "historyHint": "每一期封存后的名次都会保留，可在上方「选择期数」里翻看往期整张榜。"
     }
   },
   "competition": {

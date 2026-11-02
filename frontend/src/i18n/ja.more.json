@@ -1739,7 +1739,17 @@
       "colIdentity": "実際の本人情報",
       "pickPeriod": "期間を選択",
       "selfReported": "自己申告",
-      "selfReportedHint": "この口座のリアル口座判定は、ユーザーのPC上のブリッジによる自己申告であり、ブローカーのグループ設定や管理者ルールで検証されていません。抜き打ち確認をおすすめします。"
+      "selfReportedHint": "この口座のリアル口座判定は、ユーザーのPC上のブリッジによる自己申告であり、ブローカーのグループ設定や管理者ルールで検証されていません。抜き打ち確認をおすすめします。",
+      "pickPeriodKey": "回を選択",
+      "currentPeriod": "今期",
+      "colHistory": "履歴",
+      "viewHistory": "表示",
+      "historyTitle": "{{name}} の週間 / 月間ランキング履歴",
+      "historyEmpty": "このユーザーはまだ週間・月間ランキングに入ったことがありません。",
+      "colPeriod": "期間",
+      "colBoard": "ランキング",
+      "closeHistory": "閉じる",
+      "historyHint": "各期の確定順位は締め切り後も保存されます。上の「回を選択」で過去のランキング全体を確認できます。"
     }
   },
   "competition": {

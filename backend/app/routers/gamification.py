@@ -1056,3 +1056,91 @@ def admin_leaderboard(board: str, period: str, db: Session = Depends(get_db),
     know who is on the board and which account it maps to. The user-facing path
     never passes this flag."""
     return build_leaderboard_payload(db, admin, board, period, reveal=True)
+
+
+# 历史期数下拉最多列多少期：周榜两年、月榜三年，够运营回查，也挡住一次拉全表。
+# How far back the history picker goes: two years of weeks, three of months.
+_HISTORY_LIMIT = {"week": 104, "month": 36}
+
+
+def _period_kind(key: str) -> str | None:
+    if not _PERIOD_KEY_RE.match(key or ""):
+        return None
+    return "week" if "-W" in key else "month"
+
+
+def _iso_utc(dt) -> str | None:
+    if dt is None:
+        return None
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).isoformat()
+
+
+@admin_router.get("/leaderboard/periods")
+def admin_leaderboard_periods(kind: str, db: Session = Depends(get_db)):
+    """管理端历史期数：某一类（week / month）有快照的期 key，新的在前，带两张榜各自的
+    上榜账户数与起止时间。进行中的那一期即使还没快照也放在第一行，下拉才有「本期」。
+    快照行永不清理，所以每一期封存后的名次都还在库里，按 key 取即可（见 admin_leaderboard）。
+    History periods for one kind, newest first, with per-board row counts and bounds.
+    The running period is always listed first even before its first snapshot.
+    Snapshot rows are never pruned, so every closed period's ranks are still there."""
+    if kind not in _HISTORY_LIMIT:
+        raise HTTPException(400, "未知周期类型 / Unknown period kind")
+    now = datetime.now(timezone.utc)
+    current = periods.week_key(now) if kind == "week" else periods.month_key(now)
+    counts: dict[str, dict[str, int]] = {}
+    for key, board, n in (db.query(LeaderboardSnapshot.period_key, LeaderboardSnapshot.board,
+                                   func.count(LeaderboardSnapshot.id))
+                            .filter(LeaderboardSnapshot.period_key.notlike("comp:%"))
+                            .group_by(LeaderboardSnapshot.period_key, LeaderboardSnapshot.board)):
+        if _period_kind(key) == kind:
+            counts.setdefault(key, {})[board] = n
+    counts.setdefault(current, {})
+    out = []
+    # 「2026-W05」与「2026-10」各自按字典序就是时间序（周号、月份都补了两位零）。
+    # Both key shapes sort chronologically as strings (zero-padded week / month).
+    for key in sorted(counts, reverse=True)[:_HISTORY_LIMIT[kind]]:
+        try:
+            start, end = periods.period_bounds(key)
+        except (ValueError, TypeError):
+            continue
+        out.append({
+            "periodKey": key, "current": key == current,
+            "start": start.isoformat(), "end": end.isoformat(),
+            "counts": {b: counts[key].get(b, 0) for b in LEADERBOARD_BOARDS},
+        })
+    return {"periods": out}
+
+
+@admin_router.get("/leaderboard/user/{user_id}")
+def admin_leaderboard_user_history(user_id: str, db: Session = Depends(get_db)):
+    """管理端某人的周 / 月榜历史：每一期、每张榜、每个账户的名次与分数（比赛榜不在内）。
+    One user's weekly / monthly board history: rank and score per period, board and
+    account, newest period first. Competition boards are excluded."""
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404, "用户不存在 / User not found")
+    rows = (db.query(LeaderboardSnapshot)
+              .filter(LeaderboardSnapshot.user_id == user_id,
+                      LeaderboardSnapshot.period_key.notlike("comp:%"))
+              .all())
+    keys = {r.period_key for r in rows}
+    totals = dict(((k, b), n) for k, b, n in
+                  db.query(LeaderboardSnapshot.period_key, LeaderboardSnapshot.board,
+                           func.count(LeaderboardSnapshot.id))
+                    .filter(LeaderboardSnapshot.period_key.in_(keys))
+                    .group_by(LeaderboardSnapshot.period_key, LeaderboardSnapshot.board)) if keys else {}
+    entries = []
+    for r in rows:
+        kind = _period_kind(r.period_key)
+        if kind is None or not score_ok(r.score):
+            continue
+        entries.append({
+            "periodKey": r.period_key, "kind": kind, "board": r.board,
+            "login": r.mt5_login, "rank": r.rank, "total": totals.get((r.period_key, r.board), 0),
+            "score": r.score, "sample": r.sample, "computedAt": _iso_utc(r.computed_at),
+        })
+    entries.sort(key=lambda e: (e["board"], e["rank"]))
+    entries.sort(key=lambda e: e["periodKey"], reverse=True)
+    return {"userId": target.id, "email": target.email,
+            "displayName": identity.display_name(target.nickname, target.email),
+            "entries": entries}

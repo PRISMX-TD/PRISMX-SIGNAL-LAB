@@ -53,6 +53,8 @@ import Select from '../Select'
 import Switch from '../Switch'
 import ConfirmModal from '../ConfirmModal'
 import type {
+  AdminBoardHistory,
+  AdminLeaderboardPeriod,
   AdminUser,
   GamificationMe,
   GamificationSettings,
@@ -75,6 +77,17 @@ type PreviewPeriod = 'week' | 'month'
 // reason to open up arbitrary input here.
 const PREVIEW_PERIODS: PreviewPeriod[] = ['week', 'month']
 const PREVIEW_BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
+
+// 期数下拉的文案：「2026-W44 · 10/26–11/1」。end 是开区间，显示时退一天；按 UTC，
+// 与周期 key 的切法一致（services/gamification/periods.py）。
+// Issue label "2026-W44 · 10/26–11/1"; end is exclusive so step back a day; UTC,
+// the same calendar the period keys are cut on.
+function periodLabel(p: AdminLeaderboardPeriod): string {
+  const md = (d: Date) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+  const start = new Date(p.start)
+  const last = new Date(new Date(p.end).getTime() - 86_400_000)
+  return `${p.periodKey} · ${md(start)}–${md(last)}`
+}
 
 // 单条开关行：三个可翻开关（等级勋章 / 排行榜 / 比赛）共用的布局——翻开要
 // confirm、只升不降的纪律在各自的 toggle 处理函数里，这个组件只管展示。
@@ -369,13 +382,34 @@ export default function GamificationPanel() {
   const [previewData, setPreviewData] = useState<LeaderboardPayload | null>(null)
   const [previewLoading, setPreviewLoading] = useState(true)
   const [previewError, setPreviewError] = useState<string | null>(null)
+  // 期数：'' = 进行中的那一期；选了往期就是显式 key（快照永不清理，封存后的名次都在）。
+  // Issue: '' = the running period; a past one is its explicit key (snapshots are kept).
+  const [previewKey, setPreviewKey] = useState('')
+  const [periodOptions, setPeriodOptions] = useState<AdminLeaderboardPeriod[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    setPreviewKey('')
+    setPeriodOptions([])
+    adminApi
+      .gamificationLeaderboardPeriods(previewPeriod)
+      .then((res) => {
+        if (!cancelled) setPeriodOptions(res.periods)
+      })
+      .catch(() => {
+        // 下拉拉不到就只剩「本期」，榜单本身照常 / without the list only "current" remains
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [previewPeriod])
 
   useEffect(() => {
     let cancelled = false
     setPreviewLoading(true)
     setPreviewError(null)
     adminApi
-      .gamificationLeaderboard(previewBoard, previewPeriod)
+      .gamificationLeaderboard(previewBoard, previewKey || previewPeriod)
       .then((res) => {
         if (!cancelled) setPreviewData(res)
       })
@@ -391,7 +425,28 @@ export default function GamificationPanel() {
     return () => {
       cancelled = true
     }
-  }, [previewBoard, previewPeriod])
+  }, [previewBoard, previewPeriod, previewKey])
+
+  // ---- 某人的周 / 月榜历史 / one user's board history ----
+  const [history, setHistory] = useState<AdminBoardHistory | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+
+  const openHistory = (userId: string) => {
+    setHistoryLoading(true)
+    setHistoryError(null)
+    setHistory(null)
+    adminApi
+      .gamificationBoardHistory(userId)
+      .then(setHistory)
+      .catch((err) => setHistoryError(err instanceof Error ? localizeApiError(err.message) : 'Load failed'))
+      .finally(() => setHistoryLoading(false))
+  }
+  const closeHistory = () => {
+    setHistory(null)
+    setHistoryError(null)
+    setHistoryLoading(false)
+  }
 
   // ---- 用户检查器 / user inspector ----
   const [query, setQuery] = useState('')
@@ -612,7 +667,21 @@ export default function GamificationPanel() {
             options={PREVIEW_PERIODS.map((p) => ({ value: p, label: t(`leaderboard.periods.${p}`) }))}
             onChange={(v) => setPreviewPeriod(v as PreviewPeriod)}
           />
+          <Select
+            ariaLabel={t('leaderboard.admin.pickPeriodKey')}
+            value={previewKey}
+            options={[
+              { value: '', label: t('leaderboard.admin.currentPeriod') },
+              ...periodOptions
+                .filter((p) => !p.current)
+                .map((p) => ({ value: p.periodKey, label: `${periodLabel(p)} (${p.counts[previewBoard]})` })),
+            ]}
+            onChange={setPreviewKey}
+          />
         </div>
+        {previewData?.periodKey && (
+          <p className="mt-2 text-xs text-neutral-500">{previewData.periodKey}</p>
+        )}
 
         {previewError && <p className="mt-2 text-sm text-down">{previewError}</p>}
 
@@ -632,7 +701,8 @@ export default function GamificationPanel() {
                   <th className="py-1.5 pr-4 font-medium">{t('leaderboard.admin.colIdentity')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colAccount')}</th>
                   <th className="py-1.5 pr-4 font-medium">{t(`leaderboard.colScore.${previewBoard}`)}</th>
-                  <th className="py-1.5 font-medium">{t('leaderboard.colSample')}</th>
+                  <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colSample')}</th>
+                  <th className="py-1.5 font-medium">{t('leaderboard.admin.colHistory')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -666,7 +736,18 @@ export default function GamificationPanel() {
                       )}
                     </td>
                     <td className="num py-1.5 pr-4 text-neutral-100">{fmtScorePct(row.score)}</td>
-                    <td className="num py-1.5 text-neutral-500">{row.sample}</td>
+                    <td className="num py-1.5 pr-4 text-neutral-500">{row.sample}</td>
+                    <td className="py-1.5">
+                      {row.userId && (
+                        <button
+                          type="button"
+                          className="text-prism-300 hover:text-prism-200"
+                          onClick={() => openHistory(row.userId!)}
+                        >
+                          {t('leaderboard.admin.viewHistory')}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -674,6 +755,69 @@ export default function GamificationPanel() {
           </div>
         ) : (
           !previewError && <p className="mt-4 text-sm text-neutral-400">{t('leaderboard.empty')}</p>
+        )}
+
+        {(history || historyLoading || historyError) && (
+          <div className="mt-5 rounded-lg border border-white/5 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h4 className="text-sm font-semibold text-neutral-100">
+                {history
+                  ? t('leaderboard.admin.historyTitle', { name: history.displayName })
+                  : t('leaderboard.admin.colHistory')}
+              </h4>
+              <button type="button" className="text-xs text-neutral-400 hover:text-neutral-200" onClick={closeHistory}>
+                {t('leaderboard.admin.closeHistory')}
+              </button>
+            </div>
+            {history && (
+              <p className="mt-1 font-mono text-[11px] text-neutral-500">
+                <Copyable text={history.email} label={t('supportDesk.copy.email')} />
+              </p>
+            )}
+            {historyError && <p className="mt-2 text-sm text-down">{historyError}</p>}
+            {historyLoading ? (
+              <div className="mt-3 space-y-2" aria-busy="true">
+                <SkeletonLine width="100%" />
+                <SkeletonLine width="100%" />
+              </div>
+            ) : history && history.entries.length > 0 ? (
+              <div className="mt-3 max-h-96 overflow-auto">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="text-neutral-500">
+                      <th className="py-1.5 pr-4 font-medium">{t('leaderboard.admin.colPeriod')}</th>
+                      <th className="py-1.5 pr-4 font-medium">{t('leaderboard.admin.colBoard')}</th>
+                      <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colAccount')}</th>
+                      <th className="py-1.5 pr-4 font-medium">{t('leaderboard.colRank')}</th>
+                      <th className="py-1.5 pr-4 font-medium">{t(`leaderboard.colScore.return_pct`)} / {t(`leaderboard.colScore.win_rate`)}</th>
+                      <th className="py-1.5 font-medium">{t('leaderboard.colSample')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.entries.map((e) => (
+                      <tr key={`${e.periodKey}:${e.board}:${e.login}`} className="border-t border-white/5">
+                        <td className="num py-1.5 pr-4 text-neutral-300">
+                          {e.periodKey}
+                          <span className="ml-1.5 text-neutral-500">{t(`leaderboard.periods.${e.kind}`)}</span>
+                        </td>
+                        <td className="py-1.5 pr-4 text-neutral-300">{t(`leaderboard.boards.${e.board}`)}</td>
+                        <td className="num py-1.5 pr-4 text-neutral-400">{e.login}</td>
+                        <td className="num py-1.5 pr-4 text-neutral-100">
+                          {e.rank}
+                          <span className="text-neutral-500"> / {e.total}</span>
+                        </td>
+                        <td className="num py-1.5 pr-4 text-neutral-100">{fmtScorePct(e.score)}</td>
+                        <td className="num py-1.5 text-neutral-500">{e.sample ?? '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              history && <p className="mt-3 text-sm text-neutral-400">{t('leaderboard.admin.historyEmpty')}</p>
+            )}
+            <p className="mt-3 text-[11px] text-neutral-500">{t('leaderboard.admin.historyHint')}</p>
+          </div>
         )}
       </div>
 

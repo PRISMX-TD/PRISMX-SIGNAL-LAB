@@ -1739,7 +1739,17 @@
       "colIdentity": "Danh tính thật",
       "pickPeriod": "Chọn kỳ",
       "selfReported": "Tự khai báo",
-      "selfReportedHint": "Trạng thái tiền thật của tài khoản này do bridge trên máy người dùng tự báo, chưa được xác minh bởi nhóm tài khoản của sàn hay quy tắc admin. Nên kiểm tra ngẫu nhiên."
+      "selfReportedHint": "Trạng thái tiền thật của tài khoản này do bridge trên máy người dùng tự báo, chưa được xác minh bởi nhóm tài khoản của sàn hay quy tắc admin. Nên kiểm tra ngẫu nhiên.",
+      "pickPeriodKey": "Chọn đợt",
+      "currentPeriod": "Kỳ này",
+      "colHistory": "Lịch sử",
+      "viewHistory": "Xem",
+      "historyTitle": "Lịch sử bảng tuần / tháng của {{name}}",
+      "historyEmpty": "Người dùng này chưa từng lên bảng tuần hoặc bảng tháng.",
+      "colPeriod": "Kỳ",
+      "colBoard": "Bảng",
+      "closeHistory": "Đóng",
+      "historyHint": "Thứ hạng cuối của mỗi kỳ được giữ lại sau khi kỳ kết thúc; dùng ô chọn đợt ở trên để xem lại toàn bộ bảng cũ."
     }
   },
   "competition": {
