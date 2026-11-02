@@ -9,7 +9,7 @@
 // stay in sync per account; logged out (guest preview) there is no favorites tab
 // and no star. The selected tab is also a pref (tabKey tells the two places apart).
 // Only categories that currently have symbols get a tab.
-import { useCallback, useMemo, type MouseEvent } from 'react'
+import { useCallback, useMemo, useRef, type MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../store/auth'
 import { usePrefs } from '../../store/prefs'
@@ -28,9 +28,16 @@ export function useFavoriteSymbols() {
     [raw],
   )
   const favSet = useMemo(() => new Set(favorites), [favorites])
+  // 连点两颗星时第二次点击还在上一帧的闭包里：从 ref 取最新一份再改，免得后一次把前一次覆盖掉。
+  // Two quick taps land before a re-render; read the latest list from a ref so the second doesn't undo the first.
+  const latestRef = useRef(favorites)
+  latestRef.current = favorites
   const toggle = useCallback((sym: string) => {
-    setPref(NS, 'favorites', favSet.has(sym) ? favorites.filter((s) => s !== sym) : [...favorites, sym])
-  }, [favSet, favorites, setPref])
+    const cur = latestRef.current
+    const next = cur.includes(sym) ? cur.filter((s) => s !== sym) : [...cur, sym]
+    latestRef.current = next
+    setPref(NS, 'favorites', next)
+  }, [setPref])
   return { enabled: isAuthed, favSet, toggle }
 }
 
@@ -114,4 +121,20 @@ function StarIcon({ filled, size }: { filled: boolean; size: number }) {
       <path d="M12 3.5l2.6 5.3 5.9.9-4.25 4.1 1 5.85L12 16.9l-5.25 2.75 1-5.85L3.5 9.7l5.9-.9z" />
     </svg>
   )
+}
+
+// 仪表盘「多周期趋势」轮播的品种池：有自选就只轮播自选；没有（或未登录）就只放
+// 外汇和商品——指数、加密货币默认不进轮播。当前有活跃信号的品种仍会由
+// useFocusEntries 追加进来，否则「可执行信号」「其他活跃信号」会丢掉那些信号。
+// The dashboard trend carousel's symbol pool: favorites only when there are any;
+// otherwise (or logged out) forex + commodities only. Symbols with a live signal are
+// still appended by useFocusEntries, or the executable / other-signal cards would lose them.
+const DEFAULT_HERO_CATEGORIES = new Set<SymbolCategory>(['forex', 'commodity'])
+
+export function useHeroSymbols(activeSymbols: string[]): string[] {
+  const { enabled, favSet } = useFavoriteSymbols()
+  return useMemo(() => {
+    const favs = enabled ? activeSymbols.filter((s) => favSet.has(s)) : []
+    return favs.length > 0 ? favs : activeSymbols.filter((s) => DEFAULT_HERO_CATEGORIES.has(symbolCategory(s)))
+  }, [activeSymbols, enabled, favSet])
 }

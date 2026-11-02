@@ -25,6 +25,7 @@ import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
+import { useHeroSymbols } from '../components/signals/SymbolTabs'
 import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
 import { ClockTtlRing } from '../components/signals/TtlRing'
 import { useBucketedNow, useFocusEntries } from '../components/signals/hooks'
@@ -103,7 +104,8 @@ const GuestDashboard: FC<{ data: GuestPreviewPayload; competition: CompetitionSu
   const { t } = useTranslation()
   const analysis = useGuestAnalysis()
   const now = useBucketedNow(10_000)
-  const focusEntries = useFocusEntries(data.active, now, data.symbols)
+  const heroSymbols = useHeroSymbols(data.symbols)
+  const focusEntries = useFocusEntries(data.active, now, heroSymbols)
   const [focusIdx, setFocusIdx] = useState(0)
   const idx = Math.min(focusIdx, Math.max(0, focusEntries.length - 1))
   const cur = focusEntries[idx]

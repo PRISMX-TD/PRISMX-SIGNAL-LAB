@@ -14,6 +14,7 @@ import SignalHero from '../components/signals/SignalHero'
 import SignalExec from '../components/signals/SignalExec'
 import SignalOthers from '../components/signals/SignalOthers'
 import QuotesTable from '../components/signals/QuotesTable'
+import { useHeroSymbols } from '../components/signals/SymbolTabs'
 import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
 import Toast from '../components/Toast'
@@ -52,7 +53,10 @@ export default function DashboardPage() {
     () => [...signals, ...strategySignals.map((s) => strategySignalToDisplay(s, t('strategy.myStrategyBadge')))],
     [signals, strategySignals, t]
   )
-  const focusEntries = useFocusEntries(combinedSignals, now, activeSymbols)
+  // 轮播只放自选（没有自选时只放外汇 + 商品），见 useHeroSymbols
+  // The carousel shows favorites only (forex + commodities when there are none), see useHeroSymbols
+  const heroSymbols = useHeroSymbols(activeSymbols)
+  const focusEntries = useFocusEntries(combinedSignals, now, heroSymbols)
   const { toast, placeOrder, placeStrategyOrder } = useOrderPlacement()
 
   const [focusIdx, setFocusIdx] = useState(0)

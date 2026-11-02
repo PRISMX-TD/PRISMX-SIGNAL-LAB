@@ -784,3 +784,15 @@
 .fav-star.on { color: var(--gold); opacity: 1; }
 .fav-star:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 0; opacity: 1; }
 .dash-quotes .qt-sym-cell .fav-star { margin-right: -4px; }
+
+/* 多周期趋势标题不许折行：轮播品种一多，右侧指示条（每段 24px）会把标题挤成一列竖字
+   （2026-11-02 用户截到）。标题固定一行，指示条那一侧可收缩，每段最窄 10px。
+   The trend heading never wraps: with many carousel symbols the 24px segments squeezed
+   it into a vertical column (seen 2026-11-02). The heading stays on one line; the
+   indicator side shrinks instead, down to 10px per segment. */
+.hero-heading { white-space: nowrap; flex-shrink: 0; }
+.hero-header-row > .ml-auto { min-width: 0; }
+.hero-segs { min-width: 0; }
+.hero-seg { flex: 0 1 24px; min-width: 10px; }
+.hero-seg.on { flex: 0 0 34px; }
+.hero-seg::before { max-width: calc(100% - 4px); }
