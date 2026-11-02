@@ -592,7 +592,7 @@ describe('谁操作与小标签 / actor and chips', () => {
     const a = (type: ActivityItem['actor']['type'], name: string | null = null, email: string | null = null) =>
       actorLabel(item('admin.other', {}, { actor: { type, id: name ? 'x' : null, name, email } }), zh)
     expect(a('self')).toBe('本人')
-    expect(a('auto')).toBe('自动仓管')
+    expect(a('auto')).toBe('智能风控')
     expect(a('broker')).toBe('券商（MT5）')
     expect(a('admin', '运营小王', 'ops@x.com')).toBe('管理员 运营小王')
     expect(a('admin', null, 'ops@x.com')).toBe('管理员 ops@x.com')
