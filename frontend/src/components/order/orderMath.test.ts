@@ -152,6 +152,14 @@ describe('clampLots', () => {
     expect(clampLots(0.137, 'WTI')).toBeCloseTo(0.1, 10)
     expect(clampLots(1.55, 'WTI')).toBeCloseTo(1.5, 10)
   })
+
+  it('指数一律 0.1 起、步长 0.1 / indices: min 0.1, step 0.1', () => {
+    for (const s of ['US500', 'US500.s', 'NAS100', 'GER40', 'JP225']) {
+      expect(clampLots(0.01, s)).toBeCloseTo(0.1, 10)
+      expect(clampLots(0.37, s)).toBeCloseTo(0.3, 10)
+      expect(normalizeVolume('', s)).toBe('0.1')
+    }
+  })
 })
 
 describe('normalizeVolume', () => {

@@ -45,6 +45,8 @@ naming drift harmless.
 """
 from __future__ import annotations
 
+import re
+
 # 每组是"同一个品种的所有已知写法"。组内顺序无意义——匹配是集合语义。
 # 与 EA 的 GetAliasCandidates（ea/PRISMX_MarketFeed.mq5）覆盖同一组品种，但两边
 # 各自维护：EA 那份解决的是"券商把它叫什么"（用于 SymbolSelect），这份解决的是
@@ -128,10 +130,31 @@ _BROKER_NAME: dict[str, str] = {
 # 0.01 for everything else. An off-step volume is not rejected by MT5 — it becomes an
 # order that can never fill and blocks every later close on that position. Mirrors
 # LOT_STEP in the frontend; the gateway holds the authoritative per-symbol check.
+#
+# 2026-11-02 负责人确认：**指数类**一律 0.1 起、步长 0.1。指数不逐个登记，按代码前缀认
+# （EA 会陆续加新指数）；_INDEX_PREFIXES 与前端 utils/symbolCategory.ts 的 INDEX 是同一
+# 张表，改一边要改另一边。
+# Indices (owner, 2026-11-02): min 0.1, step 0.1, recognized by code prefix rather than
+# listed one by one; _INDEX_PREFIXES mirrors INDEX in the frontend's utils/symbolCategory.ts.
 _LOT_STEP: dict[str, float] = {
     "WTI": 0.1,
 }
+_INDEX_LOT_STEP = 0.1
 _DEFAULT_LOT_STEP = 0.01
+_INDEX_PREFIXES: tuple[str, ...] = (
+    "US500", "US30", "US100", "USTEC", "NAS100", "NDX", "NQ", "SPX", "SP500", "DJ30", "DJI", "DOW", "US2000", "RUSSELL",
+    "GER40", "GER30", "DE40", "DE30", "DAX", "UK100", "FTSE", "FRA40", "CAC", "EU50", "EUSTX50", "STOXX50", "ESP35", "IBEX",
+    "ITA40", "NETH25", "SWI20", "JP225", "JPN225", "NIKKEI", "N225", "HK50", "HSI", "HK33", "CHINA50", "CN50", "CHINAH",
+    "AUS200", "ASX200", "SG30", "IND50", "NIFTY", "TWIX", "KOSPI", "VIX", "USDX", "DXY",
+)
+
+
+def is_index_symbol(symbol: str | None) -> bool:
+    """是否指数品种（按代码前缀，先去券商后缀）。"""
+    if not symbol:
+        return False
+    base = re.split(r"[._\-#]", broker_symbol(symbol.strip().upper()))[0]
+    return base.startswith(_INDEX_PREFIXES)
 
 
 def lot_step(symbol: str | None) -> float:
@@ -139,7 +162,9 @@ def lot_step(symbol: str | None) -> float:
     if not symbol:
         return _DEFAULT_LOT_STEP
     base = broker_symbol(symbol.strip().upper()).split(".")[0]
-    return _LOT_STEP.get(base, _DEFAULT_LOT_STEP)
+    if base in _LOT_STEP:
+        return _LOT_STEP[base]
+    return _INDEX_LOT_STEP if is_index_symbol(symbol) else _DEFAULT_LOT_STEP
 
 
 def min_lot(symbol: str | None) -> float:

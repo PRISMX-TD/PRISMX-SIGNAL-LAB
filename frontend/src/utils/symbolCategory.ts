@@ -29,6 +29,10 @@ const COMMODITY = [
   'COPPER', 'XCU', 'HG', 'ALU', 'ZINC', 'NICKEL',
   'COFFEE', 'COCOA', 'SUGAR', 'COTTON', 'CORN', 'WHEAT', 'SOYBEAN', 'SOY',
 ]
+// 指数还决定手数步长（0.1，见 api/utils.ts lotStep）；后端 symbol_aliases.py 的
+// _INDEX_PREFIXES 是这张表的副本，增删要两边一起改。
+// Indices also get a 0.1 lot step (api/utils.ts lotStep); the backend's _INDEX_PREFIXES
+// in symbol_aliases.py is a copy of this list — change both together.
 const INDEX = [
   'US500', 'US30', 'US100', 'USTEC', 'NAS100', 'NDX', 'NQ', 'SPX', 'SP500', 'DJ30', 'DJI', 'DOW', 'US2000', 'RUSSELL',
   'GER40', 'GER30', 'DE40', 'DE30', 'DAX', 'UK100', 'FTSE', 'FRA40', 'CAC', 'EU50', 'EUSTX50', 'STOXX50', 'ESP35', 'IBEX',

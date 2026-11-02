@@ -1,5 +1,6 @@
 // 通用工具 / Common utilities
 import i18n from '../i18n'
+import { symbolCategory } from '../utils/symbolCategory'
 
 // 生成幂等下单 ID / generate idempotent client order id
 export function clientOrderId(): string {
@@ -505,14 +506,23 @@ export function roundLots(n: number): number {
 // and then blocks every later close on that position. This table is the fallback; the
 // gateway validates against the broker's real symbol table. Its job is to stop the
 // mistake at the input box.
+//
+// 2026-11-02 负责人确认：**指数类**（US500 / NAS100 / GER40 …）一律 0.1 起、步长 0.1。
+// 指数不逐个登记，按 utils/symbolCategory.ts 的分类规则认（EA 会陆续加新指数）；
+// 后端 symbol_aliases.py 的 _INDEX_PREFIXES 是同一份前缀表，改一边要改另一边。
+// Indices (per the owner, 2026-11-02): min 0.1, step 0.1 — recognized by the category
+// rules in utils/symbolCategory.ts rather than listed one by one; the backend's
+// _INDEX_PREFIXES mirrors that prefix list.
 const LOT_STEP: Record<string, number> = {
   WTI: 0.1,
 }
+const INDEX_LOT_STEP = 0.1
 const DEFAULT_LOT_STEP = 0.01
 
 export function lotStep(symbol: string | null | undefined): number {
   if (!symbol) return DEFAULT_LOT_STEP
-  return LOT_STEP[baseSymbol(symbol)] ?? DEFAULT_LOT_STEP
+  const base = baseSymbol(symbol)
+  return LOT_STEP[base] ?? (symbolCategory(base) === 'index' ? INDEX_LOT_STEP : DEFAULT_LOT_STEP)
 }
 
 /** 该品种的最小手数：步长比 0.01 粗时，最小手数就是步长本身。 */

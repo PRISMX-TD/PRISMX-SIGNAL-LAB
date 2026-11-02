@@ -40,6 +40,18 @@ def test_lot_step_is_per_symbol():
     assert min_lot("XAUUSD") == 0.01
 
 
+def test_indices_step_and_min_are_0_1():
+    """负责人 2026-11-02：指数一律 0.1 起、步长 0.1，按代码前缀认（含券商后缀）。"""
+    for name in ("US500", "US500.s", "US500.cash", "NAS100", "US30", "GER40", "JP225", "HK50", "UK100"):
+        assert lot_step(name) == 0.1, name
+        assert min_lot(name) == 0.1, name
+    assert not is_volume_on_step(0.05, "US500")
+    assert is_volume_on_step(0.3, "US500")
+    # 外汇 / 加密不受影响 / forex and crypto unaffected
+    assert lot_step("USDJPY") == 0.01
+    assert lot_step("ETHUSD") == 0.01
+
+
 @pytest.mark.parametrize("vol", [0.01, 0.02, 0.03, 0.1, 0.25, 1.0, 2.5, 10.0])
 def test_multiples_of_step_pass(vol):
     assert is_volume_on_step(vol, "XAUUSD")
