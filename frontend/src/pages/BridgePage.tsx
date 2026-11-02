@@ -15,6 +15,7 @@ import type { MT5Account } from '../api/types'
 import Toast from '../components/Toast'
 import { EmailVerifyInline } from '../components/EmailVerifyNotice'
 import { useAuth } from '../store/auth'
+import { copyToClipboard } from '../components/Copyable'
 
 export default function BridgePage() {
   const { t } = useTranslation()
@@ -73,7 +74,7 @@ export default function BridgePage() {
 
   const copyToken = async () => {
     if (!apiToken) return
-    await navigator.clipboard.writeText(apiToken)
+    if (!(await copyToClipboard(apiToken))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

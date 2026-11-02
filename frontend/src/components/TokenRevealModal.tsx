@@ -5,6 +5,7 @@ import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useDialogA11y } from '../utils/useDialogA11y'
+import { copyToClipboard } from './Copyable'
 
 interface Props {
   token: string
@@ -23,7 +24,7 @@ export default function TokenRevealModal({ token, onClose }: Props) {
   useDialogA11y(sheetRef, onClose, { closeOnEscape: false })
 
   const copy = async () => {
-    await navigator.clipboard.writeText(token)
+    if (!(await copyToClipboard(token))) return
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }

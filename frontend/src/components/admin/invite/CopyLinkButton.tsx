@@ -8,20 +8,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { InviteLink } from '../../../api/types'
 import { agentCompetitionUrl, inviteUrl, promoLinkUrl } from '../../../utils/promoLinkUrl'
+import { copyToClipboard } from '../../Copyable'
 import { linkKind } from './inviteLinkLogic'
 
-// navigator.clipboard 在非安全上下文整体不存在（同步抛 TypeError 而不是返回被拒绝的
-// promise），所以整段包在 try 里（照 UpgradePage 的处理）。
-// navigator.clipboard is absent entirely outside secure contexts and throws
-// synchronously — hence the whole call sits inside the try.
-export async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text)
-    return true
-  } catch {
-    return false
-  }
-}
+// App 的安卓 WebView 会拒绝 navigator.clipboard.writeText，交给带 execCommand 兜底的 copyToClipboard。
+// The App's Android WebView rejects navigator.clipboard.writeText; copyToClipboard falls back to execCommand.
+export const copyText = copyToClipboard
 
 export default function CopyLinkButton({ link, onFail }: { link: InviteLink; onFail: () => void }) {
   const { t } = useTranslation()

@@ -49,6 +49,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { SkeletonLine } from '../components/Skeleton'
+import { copyToClipboard } from '../components/Copyable'
 import AgentCustomersPanel from '../components/agent/AgentCustomersPanel'
 import AgentHero from '../components/agent/AgentHero'
 import AgentOverviewPanel from '../components/agent/AgentOverviewPanel'
@@ -216,16 +217,11 @@ export default function AgentPage() {
   // Each button shows its own copied/failed state, keyed `${which}:${id}`.
   const copy = async (l: AgentLink, which: 'invite' | 'comp') => {
     const key = `${which}:${l.id}`
-    try {
-      // navigator.clipboard 在非安全上下文整体不存在（同步抛），整段包在 try 里。
-      // navigator.clipboard is absent outside secure contexts and throws synchronously.
-      await navigator.clipboard.writeText(which === 'invite' ? inviteUrl(l.code) : agentCompetitionUrl(l.code))
-      setCopiedId(key)
-      setTimeout(() => setCopiedId(null), 2000)
-    } catch {
-      setCopiedId(`err:${key}`)
-      setTimeout(() => setCopiedId(null), 2500)
-    }
+    // App 的安卓 WebView 会拒绝 navigator.clipboard.writeText，必须走带 execCommand 兜底的 copyToClipboard。
+    // The App's Android WebView rejects navigator.clipboard.writeText; copyToClipboard falls back to execCommand.
+    const ok = await copyToClipboard(which === 'invite' ? inviteUrl(l.code) : agentCompetitionUrl(l.code))
+    setCopiedId(ok ? key : `err:${key}`)
+    setTimeout(() => setCopiedId(null), ok ? 2000 : 2500)
   }
 
   const copyLabel = (l: AgentLink, which: 'invite' | 'comp') => {

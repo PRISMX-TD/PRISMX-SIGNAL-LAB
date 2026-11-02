@@ -8,6 +8,7 @@ import { paymentApi, userApi } from "../api/client";
 import { useDocumentTitle } from "../utils/useDocumentTitle";
 import { localizeApiError, fmtDate, parseTime } from "../api/utils";
 import type { TrialStatus } from "../api/types";
+import { copyToClipboard } from "../components/Copyable";
 
 type Plan = { id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string };
 type SaleInfo = { percent: number; badge: string; end_at: string; monthly: number; yearly: number } | null;
@@ -376,16 +377,12 @@ export default function UpgradePage() {
   };
 
   const copyAddress = async (addr: string) => {
-    try {
-      // navigator.clipboard 在非 HTTPS 环境下整体不存在，那是同步抛 TypeError
-      // 而不是返回被拒绝的 promise，所以整段都要包在 try 里。
-      // navigator.clipboard is absent entirely outside secure contexts, and
-      // that throws synchronously rather than rejecting — hence the whole
-      // thing sits inside the try.
-      await navigator.clipboard.writeText(addr);
+    // App 的安卓 WebView 会拒绝 navigator.clipboard.writeText，copyToClipboard 带 execCommand 兜底。
+    // The App's Android WebView rejects navigator.clipboard.writeText; copyToClipboard falls back to execCommand.
+    if (await copyToClipboard(addr)) {
       setCopyState("ok");
       setTimeout(() => setCopyState("idle"), 2000);
-    } catch {
+    } else {
       setCopyState("fail");
       setTimeout(() => setCopyState("idle"), 4000);
     }
