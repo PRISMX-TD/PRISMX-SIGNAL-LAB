@@ -116,7 +116,15 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
         </div>
       </div>
 
-      {symbols.length > 0 && <SymbolTabBar tabs={tabs} tab={tab} onChange={setTab} className="hidden sm:flex mb-3" />}
+      {/* 显隐放在外层：.sym-tabs 自带 display:flex（非 layer 样式），会盖掉 Tailwind 的 hidden，
+          手机上本该藏起来的标签条曾照样露出来。
+          Visibility lives on a wrapper: .sym-tabs sets display:flex as unlayered CSS, which beats
+          Tailwind's `hidden`, so the tab bar used to show on phones anyway. */}
+      {symbols.length > 0 && (
+        <div className="hidden sm:block mb-3">
+          <SymbolTabBar tabs={tabs} tab={tab} onChange={setTab} />
+        </div>
+      )}
 
       {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
       <MobileQuoteRow focusSym={focusSym} mt5Online={mt5Online} />

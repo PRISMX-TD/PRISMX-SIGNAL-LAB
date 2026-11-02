@@ -509,7 +509,7 @@ export default function AchievementsPage() {
   return (
     <div className="ach space-y-8">
       {/* ── 陈列台 / stage ────────────────────────────────────── */}
-      <section className="ach-stage" aria-labelledby="ach-title">
+      <section className="ach-stage ach-stage-text-first" aria-labelledby="ach-title">
         <div className="ach-stage-l">
           <h2 id="ach-title" className="ach-title">
             <span className="ach-lv num">L{me.level}</span>

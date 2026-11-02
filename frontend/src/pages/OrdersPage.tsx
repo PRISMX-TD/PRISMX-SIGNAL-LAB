@@ -807,7 +807,6 @@ export default function OrdersPage() {
               </button>
             )}
           </div>
-          {!isPhone && <p className="ord-p">{t('orders.positionsScopeHint')}</p>}
           {/* 首帧持仓还没到时是骨架，不是「暂无持仓」：见 live.tsx 的 positionsLoaded。
               Skeleton, not "no positions", until the first frame; see positionsLoaded. */}
           {visiblePositions.length === 0 && !positionsLoaded ? (
@@ -833,7 +832,6 @@ export default function OrdersPage() {
               ))}
             </div>
           )}
-          {isPhone && <p className="ord-p ord-p-after">{t('orders.positionsScopeHint')}</p>}
 
           {confirmCloseAll && (
             <ConfirmModal

@@ -81,6 +81,9 @@ function NavItem({ to, label, match }: { to: string; label: string; match?: stri
   )
 }
 
+// 竞技场（GrowthHub）下的四页 / the four pages under the arena (GrowthHub)
+const ARENA_PATHS = ['/achievements', '/leaderboard', '/competitions', '/lucky']
+
 // 底部 Tab 图标 / bottom tab icons
 function TabIcon({ name }: { name: string }) {
   const c = 'h-5 w-5'
@@ -466,39 +469,21 @@ export default function Layout() {
     // the App.tsx route; the PRO gate lives in-page/backend, so the nav entry
     // no longer needs admin status.
     { to: '/strategies', icon: 'strategies', label: t('nav.strategies') },
-    // 成就页：仅当 gamificationVisible 为真才露出入口（内测期普通用户不可见，
-    // 管理员恒可见——见 backend gamification.py 的 _check_visible）。直接打
-    // URL 仍能进（AchievementsPage 自己兜底 403），这里只藏入口。
-    // Achievements: the entry appears only when gamificationVisible is true
-    // (hidden from regular users during the beta window, always visible to
-    // admins — see the backend's gamification.py _check_visible). Direct URL
-    // access still works (AchievementsPage handles its own 403); this only
-    // hides the entry point.
-    ...(user?.gamificationVisible
-      ? [{ to: '/achievements', icon: 'achievements', label: t('gamification.title') }]
-      : []),
-    // 排行榜：独立于 gamificationVisible 的另一个内测开关（见后端
-    // GamificationSettings.leaderboardVisible），入口判断先例同上一条。
-    // Leaderboard: gated on its own beta switch, separate from
-    // gamificationVisible (see the backend's
-    // GamificationSettings.leaderboardVisible); same entry-hiding precedent
-    // as the achievements item above.
-    ...(user?.leaderboardVisible
-      ? [{ to: '/leaderboard', icon: 'leaderboard', label: t('leaderboard.title') }]
-      : []),
-    // 比赛：又一个独立于 gamificationVisible/leaderboardVisible 的内测开关
-    // （见后端 GamificationSettings.competitionsVisible），入口判断先例同上两条。
-    // Competitions: another beta switch independent of
-    // gamificationVisible/leaderboardVisible (see the backend's
-    // GamificationSettings.competitionsVisible); same entry-hiding precedent
-    // as the two items above.
-    ...(user?.competitionsVisible
-      ? [{ to: '/competitions', icon: 'competitions', label: t('competition.title') }]
-      : []),
-    // 幸运轮盘：第四个内测开关 luckyWheelVisible（图标暂复用比赛的旗帜）。
-    // Lucky wheel: the fourth beta switch, luckyWheelVisible (reuses the competitions flag icon).
-    ...(user?.luckyWheelVisible
-      ? [{ to: '/lucky', icon: 'competitions', label: t('lucky.title') }]
+    // 竞技场（2026-11-02 起）：等级勋章 / 排行榜 / 交易比赛 / 幸运轮盘合成一个入口，
+    // 与电脑顶栏同一套判断——四个内测开关任一打开即露出，落到第一个开着的页，
+    // 四页之间靠 GrowthHub 的页签切换。直接打 URL 仍能进（各页自己兜底 403）。
+    // Arena (since 2026-11-02): achievements / leaderboard / competitions / lucky
+    // wheel merged into one entry, same checks as the desktop top nav — shown when
+    // any of the four beta switches is on, landing on the first open page; the
+    // GrowthHub tabs switch between them. Direct URLs still work (each page
+    // handles its own 403).
+    ...(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible || user?.luckyWheelVisible
+      ? [{
+          to: user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : '/lucky',
+          icon: 'achievements',
+          label: t('nav.growth'),
+          match: ARENA_PATHS,
+        }]
       : []),
     // 代理页：按 /auth/me 下发的 isAgent 露入口（见 User.isAgent），入口判断先例同上。
     // Agent view: shown off the isAgent flag from /auth/me; same entry-hiding precedent.
@@ -507,7 +492,9 @@ export default function Layout() {
     ...(isAdmin ? [{ to: '/admin', icon: 'admin', label: t('nav.admin') }] : []),
   ]
   // 前缀也算：客服后台、管理控制台的子页面都在各自路径之下 / prefix counts too: both consoles have sub-pages
-  const moreActive = moreItems.some((m) => location.pathname === m.to || location.pathname.startsWith(`${m.to}/`))
+  const isOn = (m: { to: string; match?: string[] }) =>
+    (m.match ?? [m.to]).some((p) => location.pathname === p || location.pathname.startsWith(`${p}/`))
+  const moreActive = moreItems.some(isOn)
 
   // 「其他」面板打开时：返回手势关闭面板而非切换页面 / back gesture closes the sheet
   //
@@ -816,7 +803,7 @@ export default function Layout() {
                 <NavItem
                   to={user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : '/lucky'}
                   label={t('nav.growth')}
-                  match={['/achievements', '/leaderboard', '/competitions', '/lucky']}
+                  match={ARENA_PATHS}
                 />
               )}
             </nav>
@@ -1032,7 +1019,7 @@ export default function Layout() {
                   <NavLink
                     key={it.to}
                     to={it.to}
-                    className={({ isActive }) => `lg-sheet-item ${isActive ? 'on' : ''}`}
+                    className={({ isActive }) => `lg-sheet-item ${isActive || ('match' in it && isOn(it)) ? 'on' : ''}`}
                     // 点的就是当前页：路径不变，上面「路由切换时关闭」不会触发，面板原样挂着，
                     // 像是点了没反应。直接收起，且不做同址导航（那会 replace 掉面板的返回占位）。
                     // Tapping the current page: the path doesn't change, so the close-on-navigation
@@ -1040,7 +1027,7 @@ export default function Layout() {
                     // Close it, and skip the same-path navigation (it would replace the sheet's
                     // back placeholder).
                     onClick={(e) => {
-                      if (location.pathname === it.to) {
+                      if (location.pathname === it.to || ('match' in it && isOn(it))) {
                         e.preventDefault()
                         setMoreOpen(false)
                       }

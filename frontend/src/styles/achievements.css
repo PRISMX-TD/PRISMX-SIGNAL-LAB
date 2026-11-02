@@ -724,6 +724,10 @@
   .ach-stage { grid-template-columns: 1fr; gap: 10px; min-height: 0; padding: 18px 18px 22px; }
   /* 手机：勋章先出场，文字在后 / phones: the badge leads, the text follows */
   .ach-pedestal { order: -1; }
+  /* 2026-11-02 起成就页手机版改回文字（等级与统计）在前、勋章舞台在后；首页演示仍勋章在前。
+     Since 2026-11-02 the achievements page on phones puts the text (level + stats) first and the
+     badge stage second; the landing-page demo keeps the badge first. */
+  .ach-stage-text-first .ach-pedestal { order: 0; }
   .ach-stage-l { padding-top: 4px; }
   .ach-stats > div { padding-right: 10px; }
   .ach-stats > div + div { padding-left: 10px; }
