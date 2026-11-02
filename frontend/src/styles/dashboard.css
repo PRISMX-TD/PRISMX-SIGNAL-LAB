@@ -734,3 +734,53 @@
   .dash-tk-track.is-loop .dash-tk-run { animation: none; }
   .dash-tk-copy[aria-hidden] { display: none; }
 }
+
+/* ── 品种分类标签 + 自选星标（仪表盘行情卡与图表页左栏共用，见 SymbolTabs.tsx）──
+   Symbol category tabs + favorite star (shared by the quotes card and the charts watchlist). */
+.sym-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+.sym-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.sym-tabs button:hover { color: var(--text); }
+.sym-tabs button.on { background: var(--surface); color: #fff; box-shadow: inset 0 0 0 1px var(--line-hi); }
+.sym-tabs button:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 1px; }
+
+.fav-star {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0.55;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+.fav-star:hover { opacity: 1; color: var(--text); }
+.fav-star.on { color: var(--gold); opacity: 1; }
+.fav-star:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 0; opacity: 1; }
+.dash-quotes .qt-sym-cell .fav-star { margin-right: -4px; }

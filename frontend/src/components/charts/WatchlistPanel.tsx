@@ -15,6 +15,7 @@ import { useTranslation } from 'react-i18next'
 import { useGlobalQuotes } from '../../store/live'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
+import { FavoriteStar, SymbolTabBar, useSymbolTabs } from '../signals/SymbolTabs'
 
 interface Props {
   symbols: string[]
@@ -35,6 +36,9 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, c
   // spares the charts page's top level.
   const quotes = useGlobalQuotes()
   const [query, setQuery] = useState('')
+  // 分类标签 + 自选（见 SymbolTabs）；搜索时不看标签，在全部品种里找。
+  // Category tabs + favorites (see SymbolTabs); a search ignores the tab and looks through all symbols.
+  const { tabs, tab, setTab, visible, favEnabled, favSet, toggleFavorite } = useSymbolTabs(symbols, 'watchlistTab')
   // 每个品种上一次的中间价（判断涨跌）与最近 40 笔中间价（画迷你走势）。
   // Per-symbol previous mid (tick direction) and the last 40 mids (sparkline).
   const prevRef = useRef<Record<string, number>>({})
@@ -87,7 +91,12 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, c
 
   const filtered = query.trim()
     ? symbols.filter((s) => s.toUpperCase().includes(query.trim().toUpperCase()))
-    : symbols
+    : visible
+  const emptyText = symbols.length === 0
+    ? t('charts.watchlist.loading')
+    : query.trim()
+      ? t('charts.watchlist.noMatch')
+      : tab === 'fav' ? t('signals.symbolTabs.favEmpty') : t('signals.symbolTabs.empty')
 
   return (
     <div className={`term-col-inner ${className}`}>
@@ -103,9 +112,10 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, c
           aria-label={String(t('charts.watchlist.searchLabel'))}
         />
       </div>
+      {symbols.length > 0 && !query.trim() && <SymbolTabBar tabs={tabs} tab={tab} onChange={setTab} className="term-wl-tabs" />}
       <div className="term-wl no-sb" role="listbox">
         {filtered.length === 0 ? (
-          <div className="term-wl-empty">{symbols.length === 0 ? t('charts.watchlist.loading') : t('charts.watchlist.noMatch')}</div>
+          <div className="term-wl-empty">{emptyText}</div>
         ) : (
           filtered.map((sym) => {
             const q = quotes[sym]
@@ -113,23 +123,30 @@ export default function WatchlistPanel({ symbols, active, onSelect, digitsFor, c
             const mid = q ? q.bid : null
             const dir = dirs[sym]
             const meta = symbolMeta(sym)
+            // 行里要放星标按钮，按钮不能嵌套，所以行本身改成 div + 键盘可达。
+            // The row now holds a star button and buttons can't nest, so the row is a keyboard-reachable div.
             return (
-              <button
+              <div
                 key={sym}
-                type="button"
                 role="option"
+                tabIndex={0}
                 aria-selected={sym === active}
                 onClick={() => onSelect(sym)}
-                className={`term-wr ${sym === active ? 'on' : ''}`}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(sym) }
+                }}
+                className={`term-wr ${favEnabled ? 'has-fav' : ''} ${sym === active ? 'on' : ''}`}
               >
                 <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                 <span>
                   <span className="term-wr-sym block">{sym}</span>
-                  <span className="term-wr-nm block">{displaySymbol(sym)}</span>
+                  <span className="term-wr-nm block">{t(`signals.symbolNames.${sym}`, { defaultValue: displaySymbol(sym) })}</span>
                 </span>
                 <Spark points={histRef.current[sym] ?? []} dir={dir} />
                 <span className={`term-wr-px ${dir ?? ''}`}>{mid == null ? '—' : mid.toFixed(digits)}</span>
-              </button>
+                {favEnabled && <FavoriteStar on={favSet.has(sym)} onToggle={() => toggleFavorite(sym)} symbol={sym} />}
+              </div>
             )
           })
         )}

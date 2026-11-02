@@ -137,7 +137,19 @@
     "filterStrategy": "Strategy",
     "filterActive": "Filtered by symbol / strategy — only some signals are shown",
     "clearFilters": "Clear filters",
-    "noneForFilter": "No recent signals match the current filters"
+    "noneForFilter": "No recent signals match the current filters",
+    "symbolTabs": {
+      "all": "All",
+      "fav": "Favorites",
+      "forex": "Forex",
+      "commodity": "Commodities",
+      "index": "Indices",
+      "crypto": "Crypto",
+      "favEmpty": "No favorites yet — tap ☆ next to a symbol to add one",
+      "empty": "No symbols in this category",
+      "addFav": "Add {{symbol}} to favorites",
+      "removeFav": "Remove {{symbol}} from favorites"
+    }
   },
   "order": {
     "volume": "Volume (Lots)",
@@ -495,7 +507,7 @@
       "change": "Chg"
     },
     "watchlist": {
-      "title": "Watchlist",
+      "title": "Markets",
       "searchPlaceholder": "Search symbol…",
       "searchLabel": "Search symbol",
       "loading": "Loading…",

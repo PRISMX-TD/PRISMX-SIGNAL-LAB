@@ -137,7 +137,19 @@
     "filterStrategy": "Chiến lược",
     "filterActive": "Đang lọc theo mã / chiến lược, chỉ hiển thị một phần tín hiệu",
     "clearFilters": "Xóa bộ lọc",
-    "noneForFilter": "Không có tín hiệu gần đây khớp bộ lọc"
+    "noneForFilter": "Không có tín hiệu gần đây khớp bộ lọc",
+    "symbolTabs": {
+      "all": "Tất cả",
+      "fav": "Yêu thích",
+      "forex": "Ngoại hối",
+      "commodity": "Hàng hóa",
+      "index": "Chỉ số",
+      "crypto": "Tiền mã hóa",
+      "favEmpty": "Chưa có mã yêu thích — chạm ☆ cạnh mã để thêm",
+      "empty": "Danh mục này chưa có mã nào",
+      "addFav": "Thêm {{symbol}} vào yêu thích",
+      "removeFav": "Bỏ {{symbol}} khỏi yêu thích"
+    }
   },
   "order": {
     "volume": "Khối lượng (lot)",
@@ -495,7 +507,7 @@
       "change": "Thay đổi"
     },
     "watchlist": {
-      "title": "Danh sách theo dõi",
+      "title": "Thị trường",
       "searchPlaceholder": "Tìm mã giao dịch…",
       "searchLabel": "Tìm mã giao dịch",
       "loading": "Đang tải…",

@@ -137,7 +137,19 @@
     "filterStrategy": "策略",
     "filterActive": "已按品种 / 策略筛选，只显示部分信号",
     "clearFilters": "清除筛选",
-    "noneForFilter": "当前筛选下近期没有信号"
+    "noneForFilter": "当前筛选下近期没有信号",
+    "symbolTabs": {
+      "all": "全部",
+      "fav": "自选",
+      "forex": "外汇",
+      "commodity": "商品",
+      "index": "指数",
+      "crypto": "加密货币",
+      "favEmpty": "还没有自选品种，点品种旁的 ☆ 添加",
+      "empty": "这个分类暂无品种",
+      "addFav": "把 {{symbol}} 加入自选",
+      "removeFav": "把 {{symbol}} 移出自选"
+    }
   },
   "order": {
     "volume": "手数（Lots）",
@@ -495,7 +507,7 @@
       "change": "涨跌"
     },
     "watchlist": {
-      "title": "自选",
+      "title": "行情",
       "searchPlaceholder": "搜索品种…",
       "searchLabel": "搜索品种",
       "loading": "加载中…",

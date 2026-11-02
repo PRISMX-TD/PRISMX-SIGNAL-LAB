@@ -137,7 +137,19 @@
     "filterStrategy": "戦略",
     "filterActive": "銘柄 / 戦略で絞り込み中、一部のシグナルのみ表示",
     "clearFilters": "絞り込みを解除",
-    "noneForFilter": "現在の条件に合う最近のシグナルはありません"
+    "noneForFilter": "現在の条件に合う最近のシグナルはありません",
+    "symbolTabs": {
+      "all": "すべて",
+      "fav": "お気に入り",
+      "forex": "FX",
+      "commodity": "商品",
+      "index": "指数",
+      "crypto": "暗号資産",
+      "favEmpty": "お気に入りはまだありません。銘柄の ☆ をタップして追加",
+      "empty": "このカテゴリに銘柄はありません",
+      "addFav": "{{symbol}} をお気に入りに追加",
+      "removeFav": "{{symbol}} をお気に入りから削除"
+    }
   },
   "order": {
     "volume": "数量（ロット）",
@@ -495,7 +507,7 @@
       "change": "前日比"
     },
     "watchlist": {
-      "title": "ウォッチリスト",
+      "title": "マーケット",
       "searchPlaceholder": "銘柄を検索…",
       "searchLabel": "銘柄を検索",
       "loading": "読み込み中…",

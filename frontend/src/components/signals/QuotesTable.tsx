@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useGlobalQuote } from '../../store/live'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
+import { FavoriteStar, SymbolTabBar, useSymbolTabs } from './SymbolTabs'
 
 interface Props {
   symbols: string[]        // 当前活跃品种（来自 useLive().activeSymbols）/ currently active symbols
@@ -57,7 +58,13 @@ const MobileQuoteRow: FC<{ focusSym: string | undefined; mt5Online: boolean }> =
 
 // 桌面端的一行：自己订阅自己的品种，memo 保证父级重渲染时未变的行不动。
 // One desktop row: subscribes to its own symbol; memo keeps unchanged rows still when the parent renders.
-const QuoteRow = memo(function QuoteRow({ sym, focus }: { sym: string; focus: boolean }) {
+// fav 为 null 表示不显示星标（未登录）/ fav null = no star (logged out)
+const QuoteRow = memo(function QuoteRow({ sym, focus, fav, onToggleFav }: {
+  sym: string
+  focus: boolean
+  fav: boolean | null
+  onToggleFav: (sym: string) => void
+}) {
   const { t } = useTranslation()
   const { letter, color, ink } = symbolMeta(sym)
   const q = useGlobalQuote(sym)
@@ -70,6 +77,7 @@ const QuoteRow = memo(function QuoteRow({ sym, focus }: { sym: string; focus: bo
     <tr className={focus ? 'focus' : undefined}>
       <td>
         <div className="qt-sym-cell">
+          {fav != null && <FavoriteStar on={fav} onToggle={() => onToggleFav(sym)} symbol={displaySymbol(sym)} />}
           <div className="qt-sym-ava" style={{ background: color + '33', color: ink }}>{letter}</div>
           <div className="nm">
             <b className="flex items-center gap-1.5">
@@ -91,6 +99,9 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
 
   // 手机端单行报价：优先用焦点品种，找不到则用第一个活跃品种 / mobile: focus symbol or fallback
   const focusSym = (focusSymbol && symbols.includes(focusSymbol)) ? focusSymbol : symbols[0]
+  // 分类标签 + 自选只作用于桌面表格；手机端那一行始终跟焦点品种走
+  // Tabs + favorites apply to the desktop table only; the mobile row always follows the focus symbol
+  const { tabs, tab, setTab, visible, favEnabled, favSet, toggleFavorite } = useSymbolTabs(symbols, 'quotesTab')
 
   return (
     <section className="card glass dash-quotes p-4 sm:p-6">
@@ -104,6 +115,8 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
           </span>
         </div>
       </div>
+
+      {symbols.length > 0 && <SymbolTabBar tabs={tabs} tab={tab} onChange={setTab} className="hidden sm:flex mb-3" />}
 
       {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
       <MobileQuoteRow focusSym={focusSym} mt5Online={mt5Online} />
@@ -121,8 +134,20 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
           <tbody>
             {symbols.length === 0 ? (
               <tr><td colSpan={3} className="text-center text-sm text-neutral-500 py-4">{t('common.loading')}</td></tr>
+            ) : visible.length === 0 ? (
+              <tr><td colSpan={3} className="text-center text-sm text-neutral-500 py-6">
+                {tab === 'fav' ? t('signals.symbolTabs.favEmpty') : t('signals.symbolTabs.empty')}
+              </td></tr>
             ) : (
-              symbols.map((sym) => <QuoteRow key={sym} sym={sym} focus={sym === focusSym} />)
+              visible.map((sym) => (
+                <QuoteRow
+                  key={sym}
+                  sym={sym}
+                  focus={sym === focusSym}
+                  fav={favEnabled ? favSet.has(sym) : null}
+                  onToggleFav={toggleFavorite}
+                />
+              ))
             )}
           </tbody>
         </table>

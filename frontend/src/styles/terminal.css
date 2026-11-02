@@ -1557,3 +1557,16 @@
 .chart-set-pick { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2, var(--text)); }
 .chart-set-pick .ind-dot { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px rgba(255, 255, 255, 0.22); }
 .chart-set-custom em { margin-left: auto; font-style: normal; font-size: 11.5px; color: var(--text-3); }
+
+/* 自选栏：分类标签 + 星标列。有星标时缩窄迷你走势、多一列 22px。
+   Watchlist tabs + star column: with stars the sparkline narrows and a 22px column is added. */
+/* 左栏只有 248px，六个标签一行放不下：换行而不是横向滚动，免得最后一个被藏起来。
+   The 248px column cannot fit six tabs on one line: wrap instead of scrolling so none hides. */
+.term-wl-tabs { flex-wrap: wrap; row-gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.term-wr.has-fav {
+  grid-template-columns: 24px minmax(0, 1fr) 36px auto 22px;
+  gap: 0 7px;
+  padding-right: 6px;
+}
+.term-wr.has-fav .term-wr-spark { width: 36px; }
+.term-wr:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
