@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from app.models import ClosedTrade, Order
-from app.services.symbol_aliases import symbol_match_set
+from app.services.symbol_aliases import is_index_symbol, symbol_match_set
 # 相对导入而不是 `from app.services.gamification import periods`：本模块由包的
 # __init__ 在 periods 之前导入，走包属性那条路会撞上"包还没初始化完"。
 # Relative import: __init__ imports this module before periods, so going through
@@ -36,7 +36,14 @@ REAL = 2
 # the winning-hand thresholds. It is the only anomalous spec among the platform's
 # symbols (gold 100 oz, silver 5000 oz, BTC 1 all match convention), hence a
 # per-symbol table rather than a general notional conversion.
+#
+# 2026-11-02 负责人定案：**指数**与原油同样 ÷10（指数下单本来就是 0.1 起、步长 0.1，
+# 见 symbol_aliases.lot_step）。指数不逐个登记，按 is_index_symbol 的前缀规则认，
+# EA 新加的指数自动生效。
+# Indices are weighted 0.1 like crude (owner, 2026-11-02; they also trade in 0.1-lot
+# steps), recognized by is_index_symbol's prefix rules rather than listed one by one.
 LOT_WEIGHTS = {"WTI": 0.1}
+INDEX_LOT_WEIGHT = 0.1
 
 
 def lot_weight(symbol: str | None) -> float:
@@ -47,6 +54,8 @@ def lot_weight(symbol: str | None) -> float:
     for canon, w in LOT_WEIGHTS.items():
         if root in symbol_match_set(canon):
             return w
+    if is_index_symbol(root):
+        return INDEX_LOT_WEIGHT
     return 1.0
 
 

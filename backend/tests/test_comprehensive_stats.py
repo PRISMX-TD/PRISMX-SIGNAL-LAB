@@ -114,8 +114,16 @@ def test_lot_weight_table():
     assert lot_weight("XTIUSD.pc") == 0.1
     assert lot_weight("XAUUSD") == 1.0
     assert lot_weight("XAUUSD.s") == 1.0
-    assert lot_weight("BRENT") == 1.0          # 不在表里的一律 1（用户定案只折 WTI）
+    assert lot_weight("BRENT") == 1.0          # 不在表里的一律 1（用户定案只折 WTI 和指数）
     assert lot_weight(None) == 1.0 and lot_weight("") == 1.0
+
+
+def test_lot_weight_indices_count_one_tenth():
+    """负责人 2026-11-02：指数与原油一样 ÷10，带券商后缀也一样。"""
+    for name in ("US500", "US500.s", "us500.cash", "NAS100", "US30", "GER40", "JP225", "HK50"):
+        assert lot_weight(name) == 0.1, name
+    assert lot_weight("EURUSD") == 1.0
+    assert lot_weight("BTCUSD") == 1.0
 
 
 def test_wti_lots_weighted_in_comprehensive_and_lifetime(db_session):
