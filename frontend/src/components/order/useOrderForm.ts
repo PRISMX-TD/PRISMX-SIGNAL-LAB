@@ -237,6 +237,21 @@ export function useOrderForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastVolume])
 
+  // 换品种时按新品种重新规整手数：以前框里还显示 0.01，提交时才被 clampLots 收成 0.1
+  // （指数 / 原油），按钮上写 0.1、框里写 0.01，看起来像下错了单（2026-11-02 用户截到）。
+  // 回到用户上次自己定的手数再按新品种吸附——黄金 0.01 → 指数 0.1 → 再切回黄金仍是 0.01。
+  // On a symbol switch, re-fit the volume to the new symbol: the field used to keep showing
+  // 0.01 while submit clamped it to 0.1 (indices / WTI). Start from the user's remembered
+  // lots and snap for the new symbol, so gold 0.01 → index 0.1 → back to gold 0.01.
+  const prevSymbolRef = useRef(symbol)
+  useEffect(() => {
+    if (prevSymbolRef.current === symbol) return
+    prevSymbolRef.current = symbol
+    if (sizeMode !== 'quick') return
+    setVolumeState((cur) => defaultVolume(lastVolume ?? cur, symbol))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol])
+
   // ---- 止损止盈 / SL & TP -----------------------------------------------------
   const [sl, setSl] = useState(() => (initialStopLoss != null ? String(initialStopLoss) : ''))
   const [tp, setTp] = useState(() => (initialTakeProfit != null ? String(initialTakeProfit) : ''))
