@@ -4337,8 +4337,7 @@
       "rateLimited": "Too many uploads, please try again later",
       "noStorage": "Image upload is unavailable right now; please describe it in text"
     },
-    "staffLabel": "Signal Lab Support",
-    "staffName": "Signal Lab Support · {{name}}"
+    "staffLabel": "Signal Lab Support"
   },
   "dashboard": {
     "sessionWinrate": {

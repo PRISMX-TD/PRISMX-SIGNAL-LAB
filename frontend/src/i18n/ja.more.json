@@ -1516,8 +1516,7 @@
       "rateLimited": "アップロードが多すぎます。しばらくしてからお試しください",
       "noStorage": "現在、画像をアップロードできません。文章でご説明ください"
     },
-    "staffLabel": "Signal Lab サポート",
-    "staffName": "Signal Lab サポート · {{name}}"
+    "staffLabel": "Signal Lab サポート"
   },
   "dashboard": {
     "sessionWinrate": {

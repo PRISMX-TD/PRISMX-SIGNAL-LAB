@@ -138,7 +138,9 @@ def _reply_out(r: TicketReply, viewer_is_admin: bool, urls: dict[str, str] | Non
         authorId=r.author_id,
         authorEmail=_author_email(r.author, viewer_is_admin, role),
         authorRole=role,
-        authorName=r.author.nickname if role in STAFF_ROLES else None,
+        # 用户只看到「Signal Lab 客服」，工作人员昵称只给工作人员看。
+        # Users only see "Signal Lab Support"; staff nicknames go to staff viewers only.
+        authorName=r.author.nickname if role in STAFF_ROLES and viewer_is_admin else None,
         internal=bool(r.internal),
         body=r.body,
         images=[urls[k] for k in keys if k in urls] if urls else [],

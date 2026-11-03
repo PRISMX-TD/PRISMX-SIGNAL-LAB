@@ -77,10 +77,9 @@ function MetaChips({ category, priority, t }: { category: TicketCategory; priori
   )
 }
 
-function Message({ authorEmail, authorRole, authorName, body, images, imageCount, createdAt, index, t }: {
+function Message({ authorEmail, authorRole, body, images, imageCount, createdAt, index, t }: {
   authorEmail: string
   authorRole: string
-  authorName?: string | null
   body: string
   images?: string[]
   imageCount?: number
@@ -88,17 +87,12 @@ function Message({ authorEmail, authorRole, authorName, body, images, imageCount
   index: number
   t: ReturnType<typeof useTranslation>['t']
 }) {
-  // 客服与管理员的回复一律显示成「Signal Lab 客服 · 昵称」（rev 41）：用户不需要分辨谁是客服、
-  // 谁是管理员，后端也不给用户下发工作人员邮箱。没有昵称时只写「Signal Lab 客服」。
-  // Support and admin replies both read "Signal Lab Support · nickname" (rev 41): users needn't
-  // tell the two apart, and staff emails are never sent to users. Without a nickname it is just
-  // "Signal Lab Support".
+  // 客服与管理员的回复一律只显示「Signal Lab 客服」：用户看不到是哪位客服回的，
+  // 后端也不给用户下发工作人员的邮箱和昵称。
+  // Support and admin replies all read just "Signal Lab Support": users never see which staff
+  // member replied, and the backend sends them neither staff emails nor nicknames.
   const isAdmin = authorRole !== 'user'
-  const name = isAdmin
-    ? authorName
-      ? t('tickets.staffName', { name: authorName })
-      : t('tickets.staffLabel')
-    : authorEmail || t('tickets.me')
+  const name = isAdmin ? t('tickets.staffLabel') : authorEmail || t('tickets.me')
   return (
     <div className={`sup-msg-row${isAdmin ? ' staff' : ''}`} style={{ '--i': index } as React.CSSProperties}>
       <span className="sup-ava" aria-hidden="true">{initial(name)}</span>
@@ -308,7 +302,7 @@ export default function SupportPage() {
               <p className="sup-thread-empty">{t('tickets.empty')}</p>
             ) : (
               ticket.replies.map((r, i) => (
-                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} authorName={r.authorName} body={r.body}
+                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body}
                   images={r.images} imageCount={r.imageCount} createdAt={r.createdAt} t={t} />
               ))
             )}

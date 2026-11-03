@@ -1516,8 +1516,7 @@
       "rateLimited": "Tải lên quá nhiều, vui lòng thử lại sau",
       "noStorage": "Hiện không thể tải ảnh lên, vui lòng mô tả bằng văn bản"
     },
-    "staffLabel": "Hỗ trợ Signal Lab",
-    "staffName": "Hỗ trợ Signal Lab · {{name}}"
+    "staffLabel": "Hỗ trợ Signal Lab"
   },
   "dashboard": {
     "sessionWinrate": {

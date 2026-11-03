@@ -4326,8 +4326,7 @@
       "rateLimited": "上传太频繁，请稍后再试",
       "noStorage": "暂时无法上传图片，请改用文字描述"
     },
-    "staffLabel": "Signal Lab 客服",
-    "staffName": "Signal Lab 客服 · {{name}}"
+    "staffLabel": "Signal Lab 客服"
   },
   "dashboard": {
     "sessionWinrate": {

@@ -1516,8 +1516,7 @@
       "rateLimited": "อัปโหลดถี่เกินไป โปรดลองใหม่ภายหลัง",
       "noStorage": "ขณะนี้ไม่สามารถอัปโหลดรูปภาพได้ โปรดอธิบายเป็นข้อความแทน"
     },
-    "staffLabel": "ฝ่ายบริการ Signal Lab",
-    "staffName": "ฝ่ายบริการ Signal Lab · {{name}}"
+    "staffLabel": "ฝ่ายบริการ Signal Lab"
   },
   "dashboard": {
     "sessionWinrate": {

@@ -1691,8 +1691,8 @@ export interface TicketReply {
   authorId: string
   authorEmail: string
   authorRole: 'user' | 'support' | 'admin'
-  // 工作人员昵称（用户侧显示「Signal Lab 客服 · 昵称」）；用户本人的回复为 null。
-  // Staff nickname (users see "Signal Lab Support · nickname"); null on user replies.
+  // 工作人员昵称：只下发给工作人员视角（用户侧一律只显示「Signal Lab 客服」）；用户本人的回复为 null。
+  // Staff nickname, sent to staff viewers only (users just see "Signal Lab Support"); null on user replies.
   authorName?: string | null
   // 内部备注：只有工作人员视角会收到 / internal note: only ever sent to staff
   internal?: boolean

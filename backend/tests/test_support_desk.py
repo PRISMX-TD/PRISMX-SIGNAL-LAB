@@ -307,7 +307,8 @@ def test_internal_notes_never_reach_user_endpoints(client, db, people):
     detail = client.get(f"/api/tickets/{t.id}", headers=hu).json()
     assert "SECRET NOTE" not in str(detail)
     staff_reply = [x for x in detail["replies"] if x["authorRole"] == "support"]
-    assert staff_reply and staff_reply[0]["authorEmail"] == "" and staff_reply[0]["authorName"] == "Inn"
+    assert staff_reply and staff_reply[0]["authorEmail"] == "" and staff_reply[0]["authorName"] is None
+    assert "Inn" not in str(detail)
     assert detail["assigneeId"] is None
     lst = client.get("/api/tickets", headers=hu).json()
     assert "SECRET NOTE" not in str(lst) and lst[0]["latestReply"]["body"] == "公开回复"
