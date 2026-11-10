@@ -504,6 +504,54 @@ def _commit_keep_loaded(db: Session, order: Order) -> None:
         set_committed_value(order, "updated_at", ua.replace(tzinfo=None))
 
 
+# 成交后要立刻刷新持仓快照的动作：开仓、平仓、改止损止盈都会改持仓表里的行。
+# Actions whose fill changes a row of the positions table.
+_POSITION_ACTIONS = frozenset({"ORDER", "CLOSE", "MODIFY"})
+
+
+def _after_gateway_result(db: Session, order: Order) -> None:
+    """网关回话落库之后的收尾：成交了就马上推一帧持仓快照；挂单类动作清掉
+    "这个账号没有挂单"的标记，让下一次挂单读取一定真去读。
+
+    以前成交后前端要等开平仓事件快拍或 2 秒慢拍才看到仓位，网关查询通道一忙就是好几秒
+    （2026-11-11）。现在下单请求所在的 worker 直接读一次（priority）并推。提交即返回，
+    不拖住下单响应；任何异常只记日志——这是锦上添花，绝不能把一笔成功的单变成报错。
+    After the result is stored: push a positions snapshot right away for a fill, and
+    clear the "no pending orders" mark for pending-order actions. Fire and forget; any
+    failure is logged and swallowed — it must never turn a successful order into an error.
+    """
+    try:
+        from app.services.pending_orders import (
+            forget_no_pending,
+            gateway_logins,
+            submit_to_main_loop,
+        )
+
+        if "PENDING" in (order.action or ""):
+            forget_no_pending(order.mt5_login)
+        if order.status != "FILLED" or order.action not in _POSITION_ACTIONS:
+            return
+        # 只在服务进程里（主循环已捕获）提交；单测 / 脚本没有主循环时 submit_to_main_loop
+        # 会就地同步跑，平白多一次网关读，这里直接跳过。
+        # Only inside the server (main loop captured); without one submit_to_main_loop
+        # would run it inline, an extra gateway read for tests and scripts.
+        from app.services import gateway_client
+
+        loop = gateway_client._main_loop
+        if loop is None or loop.is_closed():
+            return
+        logins = gateway_logins(db, order.user_id)
+        if not logins:
+            return
+        from app.services.gateway_snapshot import push_positions_now
+
+        submit_to_main_loop(
+            push_positions_now(order.user_id, logins), "POSITIONS 即时快照"
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("成交后即时刷新持仓失败 user=%s", order.user_id)
+
+
 def try_gateway_execute(
     db: Session, order: Order, account: MT5Account | None = None
 ) -> dict | None:
@@ -780,6 +828,7 @@ def try_gateway_execute(
             order.action, order.client_order_id, order.mt5_login,
             order.status, rsp.deal, rsp.order, rsp.elapsed_ms, rsp.dealer_ms,
         )
+        _after_gateway_result(db, order)
         return order_update_payload(order)
 
     except Exception as e:

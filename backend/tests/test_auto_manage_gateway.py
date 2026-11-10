@@ -394,6 +394,14 @@ def test_executes_without_deadlock_in_production_concurrency_shape(
     finally:
         # 循环已关闭，留着会污染后续用例
         gateway_client._main_loop = None
+        # 主循环在时，改单成交会顺手推一帧即时持仓快照（gateway_snapshot），写进
+        # connection_manager 的进程内快照；测试用户 id 会复用，不清会被下一条用例的
+        # auto_manage 当成网关那一路的持仓读到。
+        # With a main loop the fill also pushes an instant positions snapshot into the
+        # manager's in-process store; test user ids recur, so clear it for the next test.
+        from app.services.connection_manager import manager
+        manager._local("positions").pop(uid, None)
+        manager._local_at.pop(uid, None)
 
     assert created == 1
     assert gateway_http.calls[0][0] == "/trade/modify"

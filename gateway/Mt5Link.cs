@@ -9,9 +9,11 @@
 //| 的,串行不会成为瓶颈,换来的是不会踩内存问题。                    |
 //+------------------------------------------------------------------+
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using MetaQuotes.MT5CommonAPI;
 using MetaQuotes.MT5ManagerAPI;
@@ -643,6 +645,111 @@ namespace Prismx.Mt5Gateway
         public double Volume;
     }
 
+    //+------------------------------------------------------------------+
+    //| 全局锁占用记录:谁拿着、从什么时候起                              |
+    //+------------------------------------------------------------------+
+    // 2026-11-01 / 11-10 全局锁被一次挂住的 MT5 调用攥了 180 秒、触发自愈重启共 5 次,
+    // 日志里只有"拿不到锁",看不出是哪个调用。现在每次拿到 _gate 都记下调用处
+    // (方法名:行号)、线程和时刻;探测拿不到锁、自愈退出时把它打出来,锁占用超过
+    // GateSlowHoldMs 的在释放时也记一条。
+    // Who holds the global lock and since when. Five 180s self-heal restarts on 11-01 and
+    // 11-10 logged only "lock unobtainable"; every acquire of _gate now records the call
+    // site, thread and time, logged by the probe / self-heal and on slow releases.
+    internal sealed class GateTrace
+    {
+        /// <summary>占用超过这么久,释放时记一条 WARN。/ Holds longer than this are logged on release.</summary>
+        public const int GateSlowHoldMs = 1000;
+
+        private sealed class Holder
+        {
+            public readonly string Site;
+            public readonly int ThreadId;
+            public readonly int Since;
+
+            public Holder(string site, int threadId, int since)
+            {
+                Site = site;
+                ThreadId = threadId;
+                Since = since;
+            }
+        }
+
+        // 只由持锁线程改写;其它线程(探测、自愈)只读这个引用,不碰 _depth。
+        // Written only by the thread holding the lock; other threads only read the reference.
+        private volatile Holder _holder;
+        private int _depth;
+
+        public void Acquired(string member, int line)
+        {
+            if (_depth++ == 0)
+                _holder = new Holder(member + ":" + line,
+                    Thread.CurrentThread.ManagedThreadId, Environment.TickCount);
+        }
+
+        public void Releasing()
+        {
+            if (_depth <= 0 || --_depth > 0)
+                return;
+
+            Holder h = _holder;
+            _holder = null;
+
+            if (h == null)
+                return;
+
+            int heldMs = unchecked(Environment.TickCount - h.Since);
+            if (heldMs >= GateSlowHoldMs)
+            {
+                try { Log.Warn("全局锁占用偏久 {0} 毫秒:{1}(线程 {2})", heldMs, h.Site, h.ThreadId); }
+                catch { }
+            }
+        }
+
+        /// <summary>当前占用者的描述,给日志用。/ Current holder, for logs.</summary>
+        public string Describe()
+        {
+            Holder h = _holder;
+            if (h == null)
+                return "占用者未记录";
+
+            return string.Format("占用者 {0}(线程 {1},已占 {2} 毫秒)",
+                h.Site, h.ThreadId, unchecked(Environment.TickCount - h.Since));
+        }
+    }
+
+    /// <summary>
+    /// 代替 lock (_gate):进锁时记下调用处,出锁时清掉。trace 为 null 时就是普通的 lock。
+    /// Replacement for lock (_gate) that records the call site; a plain lock when trace is null.
+    /// </summary>
+    internal struct GateScope : IDisposable
+    {
+        private readonly object _lock;
+        private readonly GateTrace _trace;
+
+        public GateScope(object lockObj, GateTrace trace, string member, int line)
+        {
+            _lock = lockObj;
+            _trace = trace;
+            Monitor.Enter(lockObj);
+
+            if (trace != null)
+                trace.Acquired(member, line);
+        }
+
+        public void Dispose()
+        {
+            try
+            {
+                if (_trace != null)
+                    _trace.Releasing();
+            }
+            finally
+            {
+                Monitor.Exit(_lock);
+            }
+        }
+    }
+
     internal sealed class Mt5Link : IDisposable
     {
         // 重连时 ConnectOnce 在 _gate 里最长攥这么久。没有缩短:带 pump 的首次同步在
@@ -655,6 +762,37 @@ namespace Prismx.Mt5Gateway
 
         private readonly Config _cfg;
         private readonly object _gate = new object();
+        private readonly GateTrace _gateTrace = new GateTrace();
+
+        /// <summary>拿 _gate 并记下调用处。用法:using (EnterGate()) { ... },等同 lock (_gate)。
+        /// Takes _gate and records the call site; same as lock (_gate).</summary>
+        private GateScope EnterGate([CallerMemberName] string member = "",
+            [CallerLineNumber] int line = 0)
+        {
+            return new GateScope(_gate, _gateTrace, member, line);
+        }
+
+        /// <summary>给 *On(m, gate, ...) 这类既跑交易连接也跑查询通道的方法用:
+        /// 只有传进来的是 _gate 才记录。/ For the *On helpers shared with read channels:
+        /// records only when the lock is _gate.</summary>
+        private GateScope EnterGateOf(object gate, [CallerMemberName] string member = "",
+            [CallerLineNumber] int line = 0)
+        {
+            return new GateScope(gate, ReferenceEquals(gate, _gate) ? _gateTrace : null, member, line);
+        }
+
+        /// <summary>Monitor.TryEnter(_gate) 成功后调。/ Call after a successful TryEnter on _gate.</summary>
+        private void NoteGateAcquired([CallerMemberName] string member = "",
+            [CallerLineNumber] int line = 0)
+        {
+            _gateTrace.Acquired(member, line);
+        }
+
+        /// <summary>Monitor.Exit(_gate) 之前调。/ Call right before Monitor.Exit(_gate).</summary>
+        private void NoteGateReleasing()
+        {
+            _gateTrace.Releasing();
+        }
 
         // 已加进 Selected 列表的品种,避免重复调用 SelectedAdd
         private readonly HashSet<string> _selected =
@@ -717,8 +855,14 @@ namespace Prismx.Mt5Gateway
         private volatile bool _dealerActive;
 
         // 缓存: auto-resolve symbol suffix per (group, baseSymbol)。带 TTL,见下。
-        private readonly Dictionary<string, TimedString> _symbolCache =
-            new Dictionary<string, TimedString>(StringComparer.OrdinalIgnoreCase);
+        // 这几份缓存改成 ConcurrentDictionary(2026-11-11):命中时不必进 _gate——以前账号检查、
+        // 品种解析、手数校验即使全命中缓存也要先排 _gate,锁被别的调用占着时一笔单要干等几秒
+        // (日志里的「账号可交易检查偏慢 1.5~15 秒」)。未命中照旧在 _gate 里读 MT5。
+        // These caches are ConcurrentDictionary (2026-11-11) so a hit needs no _gate: the
+        // account check, symbol resolve and lot check used to queue on _gate even when fully
+        // cached, waiting seconds behind other holders. Misses still read MT5 under _gate.
+        private readonly ConcurrentDictionary<string, TimedString> _symbolCache =
+            new ConcurrentDictionary<string, TimedString>(StringComparer.OrdinalIgnoreCase);
 
         // 缓存: user's group per login。
         //
@@ -731,8 +875,8 @@ namespace Prismx.Mt5Gateway
         // to another group, the stale group name makes *every* order fail until the
         // gateway restarts. A 5-minute TTL bounds that window; both are also
         // cleared on reconnect, when a group change is most likely to have happened.
-        private readonly Dictionary<ulong, TimedString> _groupCache =
-            new Dictionary<ulong, TimedString>();
+        private readonly ConcurrentDictionary<ulong, TimedString> _groupCache =
+            new ConcurrentDictionary<ulong, TimedString>();
 
         private const int ResolveCacheTtlMs = 5 * 60 * 1000;
 
@@ -756,8 +900,8 @@ namespace Prismx.Mt5Gateway
         // to hit MT5 under _gate each time. These values rarely change; caching
         // saves a round trip and — more importantly — reduces _gate contention,
         // since that lock serialises every MT5 call. Cleared on reconnect.
-        private readonly Dictionary<string, SymbolLimits> _limitsCache =
-            new Dictionary<string, SymbolLimits>(StringComparer.OrdinalIgnoreCase);
+        private readonly ConcurrentDictionary<string, SymbolLimits> _limitsCache =
+            new ConcurrentDictionary<string, SymbolLimits>(StringComparer.OrdinalIgnoreCase);
 
         // 缓存:交易前的账号校验结果(账号是否存在 + 组是否在白名单)。
         //
@@ -770,8 +914,8 @@ namespace Prismx.Mt5Gateway
         // _groupCache this MUST expire: the whitelist is a security boundary, so
         // a permanent entry would keep letting an account trade after the broker
         // moved it out of an allowed group, until the gateway restarts.
-        private readonly Dictionary<ulong, TradableEntry> _tradableCache =
-            new Dictionary<ulong, TradableEntry>();
+        private readonly ConcurrentDictionary<ulong, TradableEntry> _tradableCache =
+            new ConcurrentDictionary<ulong, TradableEntry>();
 
         private const int TradableCacheTtlMs = 60000;
 
@@ -873,7 +1017,7 @@ namespace Prismx.Mt5Gateway
         private MTRetCode TryStartDealer(string reason)
         {
             MTRetCode res;
-            lock (_gate)
+            using (EnterGate())
             {
                 res = _manager.DealerStart();
             }
@@ -999,7 +1143,7 @@ namespace Prismx.Mt5Gateway
         {
             int added = 0;
 
-            lock (_gate)
+            using (EnterGate())
             {
                 foreach (string s in symbols)
                 {
@@ -1031,7 +1175,7 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     // 托管 sink 内部持有原生指针,构造后必须先 RegisterSink,
                     // 否则传进去的是空指针,订阅会返回 MT_RET_ERR_PARAMS。
@@ -1085,7 +1229,7 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     // 与 PositionSink 相同的陷阱:托管 sink 内部持有原生指针,构造后
                     // 必须先 RegisterSink,否则传进去的是空指针,订阅会返回
@@ -1136,7 +1280,7 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     OrderSink sink = new OrderSink();
                     MTRetCode reg = sink.RegisterSink();
@@ -1213,6 +1357,8 @@ namespace Prismx.Mt5Gateway
                 if (!Monitor.TryEnter(_gate, 0))
                     return;
 
+                NoteGateAcquired();
+
                 try
                 {
                     if (_manager == null)
@@ -1261,6 +1407,7 @@ namespace Prismx.Mt5Gateway
                 }
                 finally
                 {
+                    NoteGateReleasing();
                     Monitor.Exit(_gate);
                 }
 
@@ -1438,7 +1585,7 @@ namespace Prismx.Mt5Gateway
 
         private MTRetCode ConnectOnce()
         {
-            lock (_gate)
+            using (EnterGate())
             {
                 // 只订阅需要的数据,不用 PUMP_MODE_FULL:
                 // 全量推送会带来大量无用流量和内存占用。
@@ -1562,9 +1709,12 @@ namespace Prismx.Mt5Gateway
             // not block forever here; a real hang is SelfHealLoop's job.
             if (!Monitor.TryEnter(_gate, ProbeGateWaitMs))
             {
-                Log.Warn("存活探测:全局锁 {0} 毫秒内拿不到,本次跳过", ProbeGateWaitMs);
+                Log.Warn("存活探测:全局锁 {0} 毫秒内拿不到,本次跳过;{1}", ProbeGateWaitMs,
+                    _gateTrace.Describe());
                 return null;
             }
+
+            NoteGateAcquired();
 
             try
             {
@@ -1603,6 +1753,7 @@ namespace Prismx.Mt5Gateway
             }
             finally
             {
+                NoteGateReleasing();
                 Monitor.Exit(_gate);
             }
         }
@@ -1633,7 +1784,7 @@ namespace Prismx.Mt5Gateway
             // have changed symbol config or account groups while we were
             // down, and stale values would pass checks that should fail.
             List<string> reselect;
-            lock (_gate)
+            using (EnterGate())
             {
                 _selected.Clear();
                 _limitsCache.Clear();
@@ -1680,7 +1831,7 @@ namespace Prismx.Mt5Gateway
         /// whether the old channel still counts as started, so a bare Start may fail.</summary>
         private void RestartDealer(string reason)
         {
-            lock (_gate)
+            using (EnterGate())
             {
                 try { _manager.DealerStop(); }
                 catch { }
@@ -1795,7 +1946,8 @@ namespace Prismx.Mt5Gateway
             string why = null;
 
             if (GateBlockedSec >= GateStuckExitSec)
-                why = string.Format("全局锁已 {0} 秒拿不到(某个 MT5 调用挂住了)", GateBlockedSec);
+                why = string.Format("全局锁已 {0} 秒拿不到(某个 MT5 调用挂住了;{1})",
+                    GateBlockedSec, _gateTrace.Describe());
             else if (DegradedSec >= DegradedExitSec)
                 why = string.Format("已连续 {0} 分钟无法交易(connected={1} dealerActive={2})",
                     DegradedSec / 60, _connected, _dealerActive);
@@ -1807,7 +1959,56 @@ namespace Prismx.Mt5Gateway
             try { Log.Error("自愈:{0},退出进程,由计划任务重新拉起", why); }
             catch { }
 
+            RequestTaskRestartAfterExit();
+
             Environment.Exit(3);
+        }
+
+        /// <summary>计划任务名,与 install-service.ps1 的 $TaskName 一致。/ Must match install-service.ps1.</summary>
+        private const string ScheduledTaskName = "PRISMX-Gateway";
+
+        /// <summary>
+        /// 自愈退出前,起一个独立的 powershell:等本进程退出后立刻 Start-ScheduledTask。
+        /// 以前全靠计划任务的"失败后 1 分钟重启"(任务计划程序允许的最小间隔),11-10 三次
+        /// 自愈每次都多停了约 80 秒,8800 端口没人听,后端只能回"连不上"。新进程仍由计划
+        /// 任务拉起(MultipleInstances=IgnoreNew、-Stop 杀进程这些都照旧);这一步失败也
+        /// 无妨,1 分钟后的失败重启和 2 分钟看门狗还在。
+        /// Before a self-heal exit, spawn a detached powershell that waits for this process
+        /// to exit and then starts the scheduled task at once. Relying on the task's
+        /// restart-on-failure (1 minute, Task Scheduler's minimum) left port 8800 dark for
+        /// ~80s on each of the three 11-10 restarts. The new process is still task-owned;
+        /// if this fails, the 1-minute restart and the 2-minute watchdog remain.
+        /// </summary>
+        private static void RequestTaskRestartAfterExit()
+        {
+            try
+            {
+                int pid = Process.GetCurrentProcess().Id;
+                string script = string.Format(CultureInfo.InvariantCulture,
+                    "Wait-Process -Id {0} -Timeout 60 -ErrorAction SilentlyContinue; "
+                    + "Start-Sleep -Milliseconds 500; "
+                    + "Start-ScheduledTask -TaskName '{1}'",
+                    pid, ScheduledTaskName);
+
+                ProcessStartInfo psi = new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command \""
+                        + script + "\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WorkingDirectory = Environment.SystemDirectory
+                };
+
+                using (Process.Start(psi)) { }
+
+                Log.Info("自愈:已请求计划任务 {0} 在本进程退出后立即重新拉起", ScheduledTaskName);
+            }
+            catch (Exception ex)
+            {
+                try { Log.Warn("自愈:请求立即重启失败,等计划任务 1 分钟后的失败重启:{0}", ex.Message); }
+                catch { }
+            }
         }
 
         /// <summary>重连退避的上限(秒)。原来是 30:断一次连、连两三次没连上,下一次
@@ -2001,7 +2202,7 @@ namespace Prismx.Mt5Gateway
                 // Tear down the old session first. The half-open path only lowers the
                 // flag; connecting over a live SDK session may fail forever or "succeed"
                 // onto the same dead socket.
-                lock (_gate)
+                using (EnterGate())
                 {
                     try { _manager.Disconnect(); }
                     catch { }
@@ -2049,7 +2250,7 @@ namespace Prismx.Mt5Gateway
         //+------------------------------------------------------------------+
         public MTRetCode CheckPassword(ulong login, string password)
         {
-            lock (_gate)
+            using (EnterGate())
             {
                 return _manager.UserPasswordCheck(
                     CIMTUser.EnUsersPasswords.USER_PASS_MAIN,
@@ -2218,6 +2419,8 @@ namespace Prismx.Mt5Gateway
             if (!Monitor.TryEnter(_gate, 50))
                 return false;
 
+            NoteGateAcquired();
+
             try
             {
                 return FillStaticFromPumpLocked(login, info);
@@ -2228,6 +2431,7 @@ namespace Prismx.Mt5Gateway
             }
             finally
             {
+                NoteGateReleasing();
                 Monitor.Exit(_gate);
             }
         }
@@ -2279,6 +2483,8 @@ namespace Prismx.Mt5Gateway
             System.Collections.Generic.List<ulong> needUsers)
         {
             bool gotGate = IsConnected && Monitor.TryEnter(_gate, 50);
+            if (gotGate)
+                NoteGateAcquired();
 
             try
             {
@@ -2303,7 +2509,10 @@ namespace Prismx.Mt5Gateway
             finally
             {
                 if (gotGate)
+                {
+                    NoteGateReleasing();
                     Monitor.Exit(_gate);
+                }
             }
         }
 
@@ -2317,7 +2526,7 @@ namespace Prismx.Mt5Gateway
             // Local static fields first, before this connection lock is taken.
             bool haveStatic = allowLocalStatic && TryLocalUserStatic(login, info);
 
-            lock (gate)
+            using (EnterGateOf(gate))
             {
                 if (!haveStatic)
                 {
@@ -2380,7 +2589,20 @@ namespace Prismx.Mt5Gateway
         {
             int now = Environment.TickCount;
 
-            lock (_gate)
+            // 命中缓存不进 _gate。/ A cache hit skips _gate.
+            TradableEntry fast;
+            if (_tradableCache.TryGetValue(login, out fast))
+            {
+                int fastAge = unchecked(now - fast.AtTickCount);
+                if (fastAge >= 0 && fastAge < TradableCacheTtlMs)
+                {
+                    group = fast.Group;
+                    res = fast.Res;
+                    return fast.Exists;
+                }
+            }
+
+            using (EnterGate())
             {
                 TradableEntry hit;
                 if (_tradableCache.TryGetValue(login, out hit))
@@ -2421,7 +2643,8 @@ namespace Prismx.Mt5Gateway
                 }
                 else
                 {
-                    _tradableCache.Remove(login);
+                    TradableEntry dropped;
+                    _tradableCache.TryRemove(login, out dropped);
                 }
 
                 // 顺手喂给 ResolveSymbol 的组缓存:同一笔开仓紧接着就要按组解析品种,
@@ -2559,6 +2782,8 @@ namespace Prismx.Mt5Gateway
             // Local pump: a memory read. Only a 50ms try on _gate; busy means go to the server.
             if (IsConnected && _manager != null && Monitor.TryEnter(_gate, 50))
             {
+                NoteGateAcquired();
+
                 try
                 {
                     using (CIMTUser user = _manager.UserCreate())
@@ -2587,6 +2812,7 @@ namespace Prismx.Mt5Gateway
                 }
                 finally
                 {
+                    NoteGateReleasing();
                     Monitor.Exit(_gate);
                 }
             }
@@ -2635,7 +2861,7 @@ namespace Prismx.Mt5Gateway
         private bool RequestGroupsOn(CIMTManagerAPI m, object gate, List<ulong> miss,
             Dictionary<ulong, string> groups, int now, out MTRetCode res)
         {
-            lock (gate)
+            using (EnterGateOf(gate))
             {
                 using (CIMTUserArray ua = m.UserCreateArray())
                 {
@@ -2730,7 +2956,7 @@ namespace Prismx.Mt5Gateway
             snap = new PositionSnapshot();
             fromPump = false;
 
-            lock (_gate)
+            using (EnterGate())
             {
                 if (!forceServer)
                 {
@@ -2828,7 +3054,7 @@ namespace Prismx.Mt5Gateway
 
         private PositionInfo[] GetPositionsOn(CIMTManagerAPI m, object gate, ulong login, out MTRetCode res)
         {
-            lock (gate)
+            using (EnterGateOf(gate))
             {
                 using (CIMTPositionArray arr = m.PositionCreateArray())
                 {
@@ -2931,7 +3157,7 @@ namespace Prismx.Mt5Gateway
 
         private OrderInfo[] GetOrdersOn(CIMTManagerAPI m, object gate, ulong login, out MTRetCode res)
         {
-            lock (gate)
+            using (EnterGateOf(gate))
             {
                 using (CIMTOrderArray arr = m.OrderCreateArray())
                 {
@@ -3044,7 +3270,7 @@ namespace Prismx.Mt5Gateway
 
         private DealInfo[] GetDealsOn(CIMTManagerAPI m, object gate, ulong login, long fromUnix, long toUnix, out MTRetCode res)
         {
-            lock (gate)
+            using (EnterGateOf(gate))
             {
                 using (CIMTDealArray arr = m.DealCreateArray())
                 {
@@ -3446,7 +3672,7 @@ namespace Prismx.Mt5Gateway
             if (dealTicket == 0)
                 return 0;
 
-            lock (_gate)
+            using (EnterGate())
             {
                 using (CIMTDealArray arr = _manager.DealCreateArray())
                 {
@@ -3473,7 +3699,22 @@ namespace Prismx.Mt5Gateway
         //+------------------------------------------------------------------+
         public string ResolveSymbol(ulong login, string baseSymbol)
         {
-            lock (_gate)
+            // 组与品种都命中缓存时不进 _gate(正常开仓几乎总是这样:前一步账号检查已填好组)。
+            // Both group and symbol cached (the usual case): no _gate.
+            TimedString fastGroup;
+            if (_groupCache.TryGetValue(login, out fastGroup) && Fresh(fastGroup))
+            {
+                if (fastGroup.Value == null || fastGroup.Value.Length == 0)
+                    return baseSymbol;
+
+                TimedString fastSym;
+                if (_symbolCache.TryGetValue(
+                        fastGroup.Value.ToUpperInvariant() + "|" + baseSymbol.ToUpperInvariant(),
+                        out fastSym) && Fresh(fastSym))
+                    return fastSym.Value;
+            }
+
+            using (EnterGate())
             {
                 // --- 1. lookup group ---
                 string group = GroupForLogin(login);
@@ -3572,13 +3813,11 @@ namespace Prismx.Mt5Gateway
             if (group.Length == 0)
                 return false;
 
-            lock (_gate)
-            {
-                TimedString cached;
-                return _symbolCache.TryGetValue(
-                           group.ToUpperInvariant() + "|" + baseSymbol.ToUpperInvariant(), out cached)
-                       && Fresh(cached) && cached.Missing;
-            }
+            // 纯缓存读,ConcurrentDictionary 不需要 _gate。/ Pure cache read, no _gate needed.
+            TimedString cached;
+            return _symbolCache.TryGetValue(
+                       group.ToUpperInvariant() + "|" + baseSymbol.ToUpperInvariant(), out cached)
+                   && Fresh(cached) && cached.Missing;
         }
 
         private static TradeResult SymbolMissingResult(string group, string baseSymbol)
@@ -3673,7 +3912,7 @@ namespace Prismx.Mt5Gateway
 
             for (int attempt = 0; ; attempt++)
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     if (attempt == 0 && _selected.Add(symbol))
                     {
@@ -3731,7 +3970,7 @@ namespace Prismx.Mt5Gateway
 
             List<string> names = new List<string>();
 
-            lock (_gate)
+            using (EnterGate())
             {
                 // 枚举内存里的品种表(连接时已订阅 PUMP_MODE_SYMBOLS)。
                 // 不用 SymbolRequestArray:它的 mask/group 匹配语义不好把握,
@@ -3764,7 +4003,7 @@ namespace Prismx.Mt5Gateway
         /// <summary>品种表总数。用于判断品种数据是否已同步。</summary>
         public uint SymbolTotal()
         {
-            lock (_gate)
+            using (EnterGate())
             {
                 return _manager.SymbolTotal();
             }
@@ -3818,7 +4057,11 @@ namespace Prismx.Mt5Gateway
         /// </summary>
         private string GroupForLogin(ulong login)
         {
-            lock (_gate)
+            TimedString fastHit;
+            if (_groupCache.TryGetValue(login, out fastHit) && Fresh(fastHit))
+                return fastHit.Value;
+
+            using (EnterGate())
             {
                 TimedString hit;
                 if (_groupCache.TryGetValue(login, out hit) && Fresh(hit))
@@ -3879,7 +4122,18 @@ namespace Prismx.Mt5Gateway
             string groupKey = string.IsNullOrEmpty(group) ? "" : group.ToUpperInvariant();
             string cacheKey = groupKey + "|" + symbol.ToUpperInvariant();
 
-            lock (_gate)
+            // 命中缓存不进 _gate。/ A cache hit skips _gate.
+            SymbolLimits fastLim;
+            if (_limitsCache.TryGetValue(cacheKey, out fastLim))
+            {
+                volMin = fastLim.VolMin;
+                volMax = fastLim.VolMax;
+                volStep = fastLim.VolStep;
+                fillFlags = fastLim.FillFlags;
+                return true;
+            }
+
+            using (EnterGate())
             {
                 SymbolLimits hit;
                 if (_limitsCache.TryGetValue(cacheKey, out hit))
@@ -3994,7 +4248,7 @@ namespace Prismx.Mt5Gateway
                 return false;
             }
 
-            lock (_gate)
+            using (EnterGate())
             {
                 string group = login != 0 ? GroupForLogin(login) : "";
                 string resolved = login != 0 ? ResolveSymbol(login, symbol) : symbol;
@@ -4083,7 +4337,7 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     using (CIMTConSymbol sym = _manager.SymbolCreate())
                     {
@@ -5285,7 +5539,7 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     using (CIMTPositionArray arr = _manager.PositionCreateArray())
                     {
@@ -5950,7 +6204,7 @@ namespace Prismx.Mt5Gateway
             info = null;
             login = 0;
 
-            lock (_gate)
+            using (EnterGate())
             {
                 using (CIMTOrderArray arr = _manager.OrderCreateArray())
                 {
@@ -6017,7 +6271,7 @@ namespace Prismx.Mt5Gateway
                 uint requestId;
                 MTRetCode res;
 
-                lock (_gate)
+                using (EnterGate())
                 {
                     request = _manager.RequestCreate();
                     result = _manager.RequestCreate();
@@ -6115,7 +6369,7 @@ namespace Prismx.Mt5Gateway
                     res == MTRetCode.MT_RET_REQUEST_DONE_PARTIAL ||
                     res == MTRetCode.MT_RET_REQUEST_PLACED)
                 {
-                    lock (_gate)
+                    using (EnterGate())
                     {
                         return new TradeResult
                         {
@@ -6133,7 +6387,7 @@ namespace Prismx.Mt5Gateway
                 }
 
                 string comment;
-                lock (_gate)
+                using (EnterGate())
                 {
                     comment = result.ResultComment() ?? "";
                 }
@@ -6147,7 +6401,7 @@ namespace Prismx.Mt5Gateway
             {
                 // 先退订,确保原生层不再**发起**新的回调。
                 // First unsubscribe so the native layer starts no new callbacks.
-                lock (_gate)
+                using (EnterGate())
                 {
                     if (sink != null)
                     {
@@ -6175,7 +6429,7 @@ namespace Prismx.Mt5Gateway
                     sink.ReleaseWait();
                 }
 
-                lock (_gate)
+                using (EnterGate())
                 {
                     if (request != null) request.Dispose();
                     if (result != null) result.Dispose();
@@ -6238,7 +6492,7 @@ namespace Prismx.Mt5Gateway
 
             if (_manager != null)
             {
-                lock (_gate)
+                using (EnterGate())
                 {
                     _manager.DealerStop();
 

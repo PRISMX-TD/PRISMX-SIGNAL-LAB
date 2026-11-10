@@ -18,6 +18,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.models import MT5Account
+from app.services import shared_state
 from app.services.connection_manager import manager
 from app.services.gateway_binding import not_removed
 from app.services.gateway_client import get_pending_orders as gw_get_pending_orders
@@ -93,7 +94,59 @@ def gateway_logins(db: Session, user_id: str) -> list[str]:
     ]
 
 
-async def push_gateway_pending_orders(user_id: str, logins: list[str]) -> None:
+# 「这个账号没有挂单」的标记（共享存储，所有 worker 一致）。周期轮询遇到有标记的账号
+# 不去读，直接当空列表——网关账号没有 MT5 客户端，挂单只可能由本平台下，而本平台的挂单
+# 类动作都会先清掉标记（gateway_execute._after_gateway_result）。标记有 TTL，到期照样
+# 重读一次兜底。以前每 5 秒给每个在线账号读一次 /orders，绝大多数账号根本没有挂单，
+# 把网关 2 条查询通道占满（日志里成片的 read_busy），连带成交后的持仓刷新也排不上
+# （2026-11-11）。
+# "No pending orders on this login" mark, shared across workers. The poll skips marked
+# logins and treats them as empty: a gateway account has no MT5 client, so only this
+# platform places pending orders, and every such action clears the mark. The TTL forces
+# a periodic re-read anyway. Polling /orders for every login every 5s saturated the
+# gateway's two query channels and starved the post-fill position reads.
+NO_PENDING_RECHECK_SECONDS = 30
+
+
+def _no_pending_key(login: str) -> str:
+    return f"gw:no_pending:{login}"
+
+
+def forget_no_pending(login: str | None) -> None:
+    """挂单类动作之后调用：下一次挂单读取一定真去读。/ Force the next read."""
+    if not login:
+        return
+    try:
+        shared_state.kv_delete(_no_pending_key(str(login)))
+    except Exception:  # noqa: BLE001
+        logger.debug("清除无挂单标记失败 login=%s", login, exc_info=True)
+
+
+def _known_no_pending(logins: list[str]) -> set[str]:
+    out: set[str] = set()
+    for lg in logins:
+        try:
+            if shared_state.kv_get(_no_pending_key(lg)):
+                out.add(lg)
+        except Exception:  # noqa: BLE001 — 读不到就当不知道，照常去读 / unknown = read
+            continue
+    return out
+
+
+def _note_pending_reads(results: dict[str, list[dict]]) -> None:
+    for lg, rows in results.items():
+        try:
+            if rows:
+                shared_state.kv_delete(_no_pending_key(lg))
+            else:
+                shared_state.kv_set(_no_pending_key(lg), "1", ttl=NO_PENDING_RECHECK_SECONDS)
+        except Exception:  # noqa: BLE001
+            continue
+
+
+async def push_gateway_pending_orders(
+    user_id: str, logins: list[str], skip_known_empty: bool = False
+) -> None:
     """读齐该用户**全部** gateway 账号的挂单并推一帧。
 
     必须读齐再推：PENDING_ORDERS 是整表替换，只推刚操作过的那个账号会让同一
@@ -106,23 +159,33 @@ async def push_gateway_pending_orders(user_id: str, logins: list[str]) -> None:
     """
     if not logins:
         return
+    # 周期轮询（skip_known_empty）才跳过已知没有挂单的账号；挂单动作后的即时刷新一律真读。
+    # Only the periodic poll skips known-empty logins; the post-action refresh always reads.
+    skipped: set[str] = set()
+    if skip_known_empty:
+        skipped = await asyncio.to_thread(_known_no_pending, list(logins))
+    to_read = [lg for lg in logins if lg not in skipped]
     # 多账号并行读（以前逐个串行，N 个账号就是 N 倍网关往返）。return_exceptions 是为了
     # 让「任一失败整帧不推」的语义不被某个账号的异常打断：先收齐，再统一检查。
     # Read all accounts in parallel (was serial: N accounts = N gateway round trips).
     # return_exceptions keeps the "any failure cancels the whole frame" rule intact:
     # collect everything first, then check.
     results = await asyncio.gather(
-        *(read_gateway_pending_orders(login) for login in logins), return_exceptions=True
+        *(read_gateway_pending_orders(login) for login in to_read), return_exceptions=True
     )
     rows: list[dict] = []
-    for res in results:
+    per_login: dict[str, list[dict]] = {}
+    for login, res in zip(to_read, results):
         if isinstance(res, BaseException):
             logger.warning("Gateway 挂单读取异常，本帧不推 / pending read raised, frame skipped: %s", res)
             return
         got, ok = res
         if not ok:
             return
+        per_login[login] = got
         rows.extend(got)
+    if per_login:
+        await asyncio.to_thread(_note_pending_reads, per_login)
     await manager.push_pending_orders(user_id, rows, source="gateway")
 
 

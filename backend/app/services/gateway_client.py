@@ -533,9 +533,22 @@ def _parse_deal(d: dict) -> DealRsp:
     )
 
 
-async def get_positions(login: int, timeout: float = READ_TIMEOUT) -> tuple[list[PositionRsp], str]:
-    """读取持仓列表。返回 (列表, 错误信息)。"""
-    data = await _post("/positions", {"login": login}, timeout=timeout)
+async def get_positions(
+    login: int, timeout: float = READ_TIMEOUT, priority: bool = False
+) -> tuple[list[PositionRsp], str]:
+    """读取持仓列表。返回 (列表, 错误信息)。
+
+    priority=True：成交后 / 开平仓事件后要马上推给用户的那次读。网关查询通道全忙时
+    允许改走交易连接，不回 read_busy（gateway HandlePositions，2026-11-11）。周期轮询
+    不要带它。旧网关不认这个字段，照旧可能回 read_busy，调用方自己重试。
+    priority=True marks the read pushed to the user right after a fill or position
+    event: the gateway may use its trading link instead of answering read_busy. Never
+    set it for periodic polls. An older gateway ignores the field; callers retry.
+    """
+    body: dict = {"login": login}
+    if priority:
+        body["priority"] = True
+    data = await _post("/positions", body, timeout=timeout)
     if not data.get("ok"):
         return [], data.get("error", "unknown")
     return [_parse_position(p) for p in data.get("positions", [])], ""

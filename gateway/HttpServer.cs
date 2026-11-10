@@ -819,9 +819,20 @@ namespace Prismx.Mt5Gateway
                 return;
             }
 
+            // priority=true:成交后、开平仓事件后那一次"马上要推给用户"的读。查询通道全忙时
+            // 允许改走交易连接(一次 PositionRequest),而不是回 read_busy 让后端放弃即时推送、
+            // 等下一轮轮询——那正是"成交了但仓位几秒后才出现"的原因(2026-11-11)。周期轮询
+            // 不带这个标志,照旧不溢到交易连接。
+            // priority=true marks the read right after a fill / position event that is
+            // pushed to the user at once: when every query channel is busy it may use the
+            // trading link (one PositionRequest) instead of answering read_busy, which made
+            // the backend drop the instant push and wait for the next poll. Periodic polls
+            // don't set it and still never spill.
+            bool priority = body.GetBool("priority");
+
             MTRetCode res;
             bool readBusy;
-            PositionInfo[] list = _link.GetPositions(login, out res, out readBusy, false);
+            PositionInfo[] list = _link.GetPositions(login, out res, out readBusy, priority);
 
             if (list == null && readBusy)
             {

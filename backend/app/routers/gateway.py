@@ -52,6 +52,11 @@ from app.services.pending_orders import push_gateway_pending_orders
 from app.services.plans import max_mt5_accounts, plan_slot_rows
 from app.services.settings_store import get_account_type_settings
 from app.services import shared_state
+from app.services.gateway_snapshot import (
+    priority_read_after,
+    read_positions_priority,
+    record_priority_read,
+)
 # 余额推送与 bridge 共用同一份去重状态（_last_pushed_balances），所以直接复用
 # bridge 里的函数，而不是各自维护一套——两套状态会互相覆盖对方的余额。
 # bridge 不导入 gateway，这个方向不会形成循环导入。
@@ -1724,6 +1729,10 @@ async def gateway_positions_loop() -> None:
     # Logins confirmed flat. Only an actual empty poll adds one; an ADD event
     # removes it. Lets the slow tick skip accounts with nothing to refresh.
     known_flat: set[str] = set()
+    # 本拍慢拍开始读的墙钟时刻（批量预取之前记）。与即时快照的读开始时刻比，决定推不推。
+    # Wall-clock start of the current slow tick's reads (taken before the batch prefetch);
+    # compared with the latest instant snapshot to decide whether to push.
+    tick_wall: dict[str, float] = {"at": 0.0}
 
     # 订阅是否活着。快拍每次调用都会更新它：
     #   - True：可以信任事件，慢拍能安全跳过空仓账号
@@ -2060,20 +2069,33 @@ async def gateway_positions_loop() -> None:
         Must push all accounts, not just the one that fired: the POSITIONS message
         is a whole-user snapshot, so a partial push would wipe the other accounts.
         """
-        data: list[dict] = []
+        # 即时读（priority + 短重试，2026-11-11）：以前用周期读的接口，网关查询通道被
+        # 周期读占满时回 read_busy，这次即时推送就整次放弃、等慢拍——"成交了但仓位几秒
+        # 后才出现"就是这么来的。多账号并发读，不再逐个串行。
+        # Priority reads with a short retry (2026-11-11): the plain read got read_busy
+        # whenever the query channels were saturated and the instant push was dropped.
+        # Logins are read concurrently instead of one by one.
+        started = time.time()
         for lg in logins:
             last_positions_read[lg] = time.monotonic()
-            rows, ok = await _read_positions(lg)
-            if not ok:
+        results = await asyncio.gather(
+            *(read_positions_priority(lg) for lg in logins), return_exceptions=True
+        )
+        data: list[dict] = []
+        for lg, res in zip(logins, results):
+            if isinstance(res, BaseException) or not res[1]:
                 # 某个账号读失败：放弃这次即时推送，交给慢拍。
                 # 硬推一个不完整的快照会让前端短暂丢行，比晚一点更糟。
                 return
+            rows = res[0]
             if rows:
                 known_flat.discard(lg)
             else:
                 known_flat.add(lg)
             data.extend(rows)
 
+        # 先记时间戳再推（见 gateway_snapshot.push_positions_now）。/ Stamp before pushing.
+        await asyncio.to_thread(record_priority_read, user_id, started)
         await manager.push_positions(user_id, data, source="gateway")
 
         # 平仓那一刻余额已经变了。这里顺手把已知余额再推一次，让账户卡片的
@@ -2217,6 +2239,9 @@ async def gateway_positions_loop() -> None:
         Users are independent so this runs concurrently, but a single user's steps
         stay serial: the funds refresh and close scan share throttle timestamps.
         """
+        # 进来时就记下本拍的读开始时刻：卡住的用户跑进下一拍也还按自己那拍比。
+        # Captured on entry so a user that runs late still compares against its own tick.
+        read_wall = tick_wall["at"]
         async with sem:
             now = time.monotonic()
             data: list[dict] = []
@@ -2328,7 +2353,14 @@ async def gateway_positions_loop() -> None:
             # Same path as /bridge/positions: cache the snapshot, attach per-login
             # floating P/L, skip unchanged ticks. The gateway funds refresh runs
             # every 15s, which would leave the account card behind.
-            await manager.push_positions(user_id, data, source="gateway")
+            #
+            # 这一拍的读若早于最近一次即时快照（成交 / 开平仓事件后推的那帧），手里的数据
+            # 可能是成交前的：不推，免得刚出现的仓位被盖掉又冒出来。下一拍照常推。
+            # If this tick's read began before the latest instant snapshot (pushed right
+            # after a fill or position event), the data may predate the fill: skip the
+            # push so the new position doesn't flicker out. The next tick pushes as usual.
+            if not await asyncio.to_thread(priority_read_after, user_id, read_wall):
+                await manager.push_positions(user_id, data, source="gateway")
 
             # --- 挂单快照 ---
             # 单独一趟、单独节奏，不搭持仓那趟车：上面的循环会跳过"已确认空仓"的
@@ -2337,7 +2369,7 @@ async def gateway_positions_loop() -> None:
             # to be flat, yet a flat account can still hold pending orders.
             if now - last_pending_scan.get(user_id, 0.0) >= GATEWAY_PENDING_INTERVAL:
                 last_pending_scan[user_id] = now
-                await push_gateway_pending_orders(user_id, logins)
+                await push_gateway_pending_orders(user_id, logins, skip_known_empty=True)
 
             # 余额变化时推 ACCOUNTS_STATUS，让账户卡片不必等前端 5 秒轮询。
             # 用只管余额的那个函数：gateway 账号没有心跳，不能参与在线状态判定。
@@ -2652,6 +2684,7 @@ async def gateway_positions_loop() -> None:
                     # GATEWAY_TICK_WAIT and a stuck user carries on in the background
                     # instead of holding everyone else. Failures are contained in _run_user.
                     eligible = [(uid, lg) for uid, lg in targets if uid not in users_in_flight]
+                    tick_wall["at"] = time.time()
                     # 上一拍没用完的预取结果作废：它只属于取回它的那一拍。
                     # Leftovers from the previous tick are dropped; they belong to that tick.
                     for kind in prefetch:
