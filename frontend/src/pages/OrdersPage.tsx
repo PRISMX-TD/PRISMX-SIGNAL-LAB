@@ -28,6 +28,7 @@ import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions, useAccountFunds, useAccountAdj } from '../store/live'
 import { liveEquity } from '../store/accountsStatus'
+import { useLivePositions } from '../store/livePositions'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
 import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
@@ -124,7 +125,12 @@ export default function OrdersPage() {
   // Gateway rows don't store a company; the account bar's broker falls back to
   // the partner broker name, matching the bind page.
   const { name: brokerName } = usePartnerBroker()
-  const positions = usePositions()
+  const serverPositions = usePositions()
+  // 两帧持仓推送之间按实时报价推算浮盈和现价（见 store/livePositions）。卡片、汇总、净值
+  // 全用这一份，三处数字永远对得上。
+  // Between positions frames, profit and price follow live quotes (store/livePositions).
+  // Cards, summary and equity all read this one list so they always agree.
+  const positions = useLivePositions(serverPositions)
   // 净值 = 余额 + 实时浮盈 + adj（gateway 账号），随持仓每拍一起动，见 liveEquity。
   // 以前直接显示库里的净值：15 秒才刷一次、页面 60 秒才拉一次，和旁边每 2 秒一推的
   // 浮盈对不上（用户截图：余额 21,555.92 + 浮盈 756 ≠ 净值 20,283.92）。
@@ -133,7 +139,19 @@ export default function OrdersPage() {
   // with the 2-second floating P/L beside it.
   const accountFunds = useAccountFunds()
   const accountAdj = useAccountAdj()
-  const equityOf = (a: MT5Account) => liveEquity(a, accountFunds[a.login] ?? 0, accountAdj[a.login])
+  // 推算出来的浮盈与服务器那一帧的差，按账号累加到 accountFunds 上，净值跟着跳价走。
+  // The live-vs-frame P/L difference per login, added onto accountFunds so equity ticks too.
+  const liveFloatDelta = useMemo(() => {
+    const out: Record<string, number> = {}
+    if (positions === serverPositions) return out
+    positions.forEach((p, i) => {
+      const d = p.profit - serverPositions[i].profit
+      if (d !== 0 && p.login != null) out[p.login] = (out[p.login] ?? 0) + d
+    })
+    return out
+  }, [positions, serverPositions])
+  const equityOf = (a: MT5Account) =>
+    liveEquity(a, (accountFunds[a.login] ?? 0) + (liveFloatDelta[a.login] ?? 0), accountAdj[a.login])
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
   const [cancellingId, setCancellingId] = useState<string | null>(null)

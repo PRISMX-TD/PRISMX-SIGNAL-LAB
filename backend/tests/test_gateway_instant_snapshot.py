@@ -56,7 +56,11 @@ def pushed(monkeypatch):
     async def _push_pending(user_id, rows, source="bridge"):
         out.append((user_id, list(rows)))
 
+    async def _push_to_client(user_id, message):
+        out.append((user_id, message))
+
     monkeypatch.setattr(gateway_snapshot.manager, "push_positions", _push_positions)
+    monkeypatch.setattr(gateway_snapshot.manager, "push_to_client", _push_to_client)
     monkeypatch.setattr(pending_orders.manager, "push_pending_orders", _push_pending)
     return out
 
@@ -96,7 +100,6 @@ def test_push_now_pushes_all_logins_and_stamps(gw, pushed):
     ]
     before = time.time()
     assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001", "500002"]))
-    assert len(pushed) == 1
     assert sorted(r["ticket"] for r in pushed[0][1]) == [1, 2]
     # 比即时读早开始的周期读不推；之后开始的照推。
     assert gateway_snapshot.priority_read_after("u1", before - 1.0)
@@ -124,7 +127,7 @@ def test_push_now_coalesces_concurrent_requests(gw, pushed):
     asyncio.run(_burst())
     # 第一次读 + 合并后的一次重跑，不是十次。/ One read plus one coalesced rerun.
     assert len([c for c in calls if c[0] == "/positions"]) == 2
-    assert len(pushed) == 2
+    assert len([p for p in pushed if isinstance(p[1], list)]) == 2
     assert gateway_snapshot._inflight == {}
 
 
@@ -159,3 +162,25 @@ def test_pending_poll_keeps_reading_logins_with_orders(gw, pushed):
         asyncio.run(pending_orders.push_gateway_pending_orders("u1", ["500001"], skip_known_empty=True))
     assert len([c for c in calls if c[0] == "/orders"]) == 2
     assert len(pushed[-1][1]) == 1
+
+
+def test_push_now_also_pushes_funds_with_adj(gw, pushed):
+    _, replies = gw
+    replies["/positions"] = [{"ok": True, "positions": [_pos(1)]}]
+    replies["/account"] = [{"ok": True, "login": 500001, "balance": 1000.0, "equity": 1000.5,
+                            "margin": 40.0, "marginFree": 960.5}]
+    assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"]))
+    # 持仓先推，资金紧跟：平仓后余额和浮盈同一刻对上。/ Positions first, funds right after.
+    assert isinstance(pushed[0][1], list)
+    msg = pushed[1][1]
+    assert msg["type"] == "ACCOUNT_FUNDS"
+    # adj = 净值 − 余额 − 浮盈(1.0)。/ adj = equity − balance − floating.
+    assert msg["data"] == {"500001": {"balance": 1000.0, "equity": 1000.5, "margin": 40.0, "adj": -0.5}}
+
+
+def test_push_now_skips_funds_when_account_read_fails(gw, pushed):
+    _, replies = gw
+    replies["/positions"] = [{"ok": True, "positions": [_pos(1)]}]
+    replies["/account"] = [{"ok": False, "error": "read_busy"}]
+    assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"]))
+    assert len(pushed) == 1 and isinstance(pushed[0][1], list)

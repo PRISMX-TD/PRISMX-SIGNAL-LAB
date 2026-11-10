@@ -26,6 +26,7 @@ import time
 
 from app.services import shared_state
 from app.services.connection_manager import manager
+from app.services.gateway_client import get_account as gw_get_account
 from app.services.gateway_client import get_positions as gw_get_positions
 
 logger = logging.getLogger("prismx.gateway.router")
@@ -100,6 +101,38 @@ async def read_positions_priority(login: str) -> tuple[list[dict], bool]:
     return [], False
 
 
+# 成交后顺带读资金的超时：读不到就交给慢拍（开平仓事件已让它下一拍就刷资金）。
+# Timeout for the post-fill funds read; on failure the slow tick (already told by the
+# position event to refresh funds next tick) covers it.
+FUNDS_READ_TIMEOUT = 5.0
+
+
+async def _read_funds(login: str):
+    try:
+        return await gw_get_account(int(login), timeout=FUNDS_READ_TIMEOUT)
+    except Exception:  # noqa: BLE001 — 资金读不到不影响持仓推送 / best effort
+        logger.debug("成交后资金读取失败 login=%s", login, exc_info=True)
+        return None
+
+
+def _funds_entry(rsp, rows: list[dict]) -> dict:
+    """与慢拍 _note_funds 同一口径：adj = 净值 − 余额 − 这批持仓浮盈之和。
+    Same basis as the slow tick's _note_funds."""
+    floating = 0.0
+    for r in rows:
+        v = r.get("profit")
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            floating += float(v)
+    balance = float(rsp.balance or 0.0)
+    equity = float(rsp.equity or 0.0)
+    return {
+        "balance": round(balance, 2),
+        "equity": round(equity, 2),
+        "margin": round(float(rsp.margin or 0.0), 2),
+        "adj": round(equity - balance - floating, 2),
+    }
+
+
 async def push_positions_now(user_id: str, logins: list[str]) -> bool:
     """读齐该用户全部 gateway 账号的持仓并立即推一帧 POSITIONS。返回是否推了。
 
@@ -116,15 +149,24 @@ async def push_positions_now(user_id: str, logins: list[str]) -> bool:
     try:
         while True:
             started = time.time()
-            results = await asyncio.gather(
+            # 持仓与资金一起读：平仓后浮盈一消失，余额要同一时刻跟上，否则净值会先掉
+            # 一截、等慢拍刷完资金再弹回来。
+            # Positions and funds are read together: once a closed trade's floating P/L
+            # disappears the balance must catch up at the same moment, or equity dips
+            # until the slow tick refreshes funds.
+            pos_task = asyncio.gather(
                 *(read_positions_priority(lg) for lg in logins), return_exceptions=True
             )
+            funds_task = asyncio.gather(*(_read_funds(lg) for lg in logins))
+            results, funds_rsps = await asyncio.gather(pos_task, funds_task)
             data: list[dict] = []
+            rows_by_login: dict[str, list[dict]] = {}
             complete = True
-            for res in results:
+            for lg, res in zip(logins, results):
                 if isinstance(res, BaseException) or not res[1]:
                     complete = False
                     break
+                rows_by_login[lg] = res[0]
                 data.extend(res[0])
             if complete:
                 # 先记时间戳再推：推出去之后才记，中间那一下比它旧的周期读还能挤进来。
@@ -132,6 +174,13 @@ async def push_positions_now(user_id: str, logins: list[str]) -> bool:
                 await asyncio.to_thread(record_priority_read, user_id, started)
                 await manager.push_positions(user_id, data, source="gateway")
                 pushed = True
+                funds = {
+                    lg: _funds_entry(rsp, rows_by_login[lg])
+                    for lg, rsp in zip(logins, funds_rsps)
+                    if rsp is not None
+                }
+                if funds:
+                    await manager.push_to_client(user_id, {"type": "ACCOUNT_FUNDS", "data": funds})
             if not _inflight.get(user_id):
                 break
             _inflight[user_id] = False
