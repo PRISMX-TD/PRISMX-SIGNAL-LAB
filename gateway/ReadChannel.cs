@@ -341,7 +341,14 @@ namespace Prismx.Mt5Gateway
         /// A holder past this is treated as stuck. A normal query takes a few hundred ms;
         /// a stuck one is usually sitting out a network timeout of ten-plus seconds.
         /// </summary>
-        private const int StuckHolderMs = 2000;
+        ///
+        /// 2026-11-11 由 2000 提到 8000:券商服务器一慢,普通查询就要 2~3 秒,按 2 秒算
+        /// "卡住"会让周期查询成批改道到交易连接的 _gate,把下单拖到 5 秒以上。真正的半开
+        /// 连接要等十几秒的网络超时,8 秒照样认得出来;2~8 秒之间算"忙",回 read_busy。
+        /// Raised from 2000 (2026-11-11): when the broker server is slow a normal query
+        /// takes 2-3 s, and calling that "stuck" rerouted polls onto the trading link and
+        /// pushed orders past 5 s. A real half-open link still shows up at 8 s.
+        private const int StuckHolderMs = 8000;
 
         /// <summary>
         /// 排队总时长上限,到点仍拿不到就退回交易连接。不设得更短(比如一次 250ms 就退):
@@ -402,6 +409,14 @@ namespace Prismx.Mt5Gateway
         /// </summary>
         public ReadChannel Acquire(out bool saturated)
         {
+            return Acquire(out saturated, AcquireMaxWaitMs);
+        }
+
+        /// <summary>同上,排队上限由调用方给(优先读多等一会儿,而不是改走交易连接)。
+        /// Same, with the caller's queueing cap (priority reads wait longer instead of
+        /// using the trading link).</summary>
+        public ReadChannel Acquire(out bool saturated, int maxWaitMs)
+        {
             saturated = false;
             int n = _channels.Length;
             if (n == 0)
@@ -434,7 +449,7 @@ namespace Prismx.Mt5Gateway
             // queries wait, never trades. A channel whose holder is stuck (sitting out a
             // network timeout) is skipped; if all are stuck, or the cap runs out, return
             // null so the caller falls back. This used to be an unbounded Monitor.Enter.
-            int deadline = unchecked(Environment.TickCount + AcquireMaxWaitMs);
+            int deadline = unchecked(Environment.TickCount + Math.Max(0, maxWaitMs));
 
             while (true)
             {

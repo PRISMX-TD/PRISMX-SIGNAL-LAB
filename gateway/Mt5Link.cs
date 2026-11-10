@@ -3018,9 +3018,27 @@ namespace Prismx.Mt5Gateway
         /// </summary>
         public PositionInfo[] GetPositions(ulong login, out MTRetCode res, out bool readBusy, bool allowSpill)
         {
+            return GetPositions(login, out res, out readBusy, allowSpill, false);
+        }
+
+        /// <summary>
+        /// 优先读的排队上限(毫秒)。优先读(成交后马上推给用户的那一次)不溢到交易连接——
+        /// 2026-11-11 实测,查询一挤上交易连接,同时段的下单就从 0.3 秒变成 5 秒;它改为在查询
+        /// 通道上多排一会儿,仍排不上就回 read_busy,后端短暂重试。
+        /// Queueing cap for priority reads. They no longer spill onto the trading link
+        /// (a read there pushed a concurrent order from 0.3 s to 5 s on 2026-11-11); they
+        /// queue longer on the query channels and answer read_busy if still none is free.
+        /// </summary>
+        private const int PriorityReadWaitMs = 3000;
+
+        public PositionInfo[] GetPositions(ulong login, out MTRetCode res, out bool readBusy, bool allowSpill,
+            bool priority)
+        {
             readBusy = false;
             bool saturated = false;
-            ReadChannel rc = _reads != null ? _reads.Acquire(out saturated) : null;
+            ReadChannel rc = _reads == null ? null
+                : priority ? _reads.Acquire(out saturated, PriorityReadWaitMs)
+                : _reads.Acquire(out saturated);
 
             if (rc == null && saturated && !allowSpill)
             {
