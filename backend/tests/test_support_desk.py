@@ -1236,3 +1236,24 @@ def test_support_search_is_rate_limited(client, db, people, monkeypatch):
                    for _ in range(4))
     finally:
         limiter.reset()
+
+
+def test_search_anomaly_alert_fires_below_the_rate_limit(client, db, people, monkeypatch):
+    """搜索告警阈值必须低于限流，否则永远不响；越线只发一次。
+    The search alert threshold must sit below the hard limit, and fires once on crossing."""
+    from limits import parse
+
+    from app.core.rate_limit import limiter
+
+    assert support_desk.SEARCH_ALERT_PER_HOUR < parse(support.SEARCH_RATE_LIMIT).amount
+    monkeypatch.setattr(support_desk, "SEARCH_ALERT_PER_HOUR", 2)
+    limiter.reset()
+    try:
+        h = _auth(people["outsourced"])
+        for i in range(5):
+            assert client.get("/api/support/search", params={"q": f"z{i}@x.com"}, headers=h).status_code == 200
+        alerts = db.query(UserNotification).filter(UserNotification.kind == "support_alert",
+                                                   UserNotification.user_id == people["admin"].id).all()
+        assert len(alerts) == 1 and "搜索" in (alerts[0].text or "")
+    finally:
+        limiter.reset()

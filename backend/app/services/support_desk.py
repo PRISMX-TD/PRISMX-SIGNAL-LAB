@@ -43,6 +43,11 @@ FOLLOW_UP_GOALS = ("open_mt5", "open_signallab", "renew", "activate_trial", "rev
 ACT_VIEW = "view_customer"
 ACT_REVEAL = "reveal_phone"
 ACT_SEARCH = "search"
+# 搜索的异常告警阈值（每小时）。搜索另有 60 次/小时的硬限流（routers/support.py
+# SEARCH_RATE_LIMIT），这里必须比它低，否则永远到不了（2026-11-10）。
+# Hourly alert threshold for searches; must stay below the 60/hour hard limit in
+# routers/support.py or it can never fire.
+SEARCH_ALERT_PER_HOUR = 40
 ACT_RESET_TRIAL = "reset_trial"
 ACT_COMP_DAYS = "comp_days"
 ACT_UNBIND = "unbind"
@@ -138,7 +143,7 @@ def user_label(user: User | None) -> str:
 
 
 def check_anomaly(db: Session, ctx: StaffCtx, kind: str) -> list[str]:
-    """单个客服 1 小时内查看完整电话 / 卡片超过阈值 → 通知 admin（只在**刚越线**那一次发，
+    """单个客服 1 小时内查看完整电话 / 卡片 / 搜索超过阈值 → 通知 admin（只在**刚越线**那一次发，
     不每次都发）。admin 自己不算。返回收到通知的 admin id（调用方 commit 后 flush_ws）。
     Alert admins when one agent crosses the hourly reveal / view threshold — once,
     on the crossing, not on every call. Admins themselves are exempt."""
@@ -147,7 +152,12 @@ def check_anomaly(db: Session, ctx: StaffCtx, kind: str) -> list[str]:
     from app.services.settings_store import get_support_settings
 
     s = get_support_settings(db)
-    threshold = s["support_alert_reveal_per_hour"] if kind == ACT_REVEAL else s["support_alert_views_per_hour"]
+    if kind == ACT_REVEAL:
+        threshold, what = s["support_alert_reveal_per_hour"], "查看完整电话 / phone reveals"
+    elif kind == ACT_SEARCH:
+        threshold, what = SEARCH_ALERT_PER_HOUR, "搜索 / searches"
+    else:
+        threshold, what = s["support_alert_views_per_hour"], "查看客户卡片 / card views"
     if threshold <= 0:
         return []
     # 先锁再数：并发请求按锁排队，每个事务都能看到前一个已提交的行，计数逐一递增，
@@ -159,7 +169,6 @@ def check_anomaly(db: Session, ctx: StaffCtx, kind: str) -> list[str]:
     n = count_actions(db, ctx.user.id, kind, utcnow() - timedelta(hours=1))
     if n != threshold + 1:
         return []
-    what = "查看完整电话 / phone reveals" if kind == ACT_REVEAL else "查看客户卡片 / card views"
     return notify(
         db, admin_ids(db), KIND_SUPPORT_ALERT,
         text=f"{user_label(ctx.user)} · {what} > {threshold}/h",
