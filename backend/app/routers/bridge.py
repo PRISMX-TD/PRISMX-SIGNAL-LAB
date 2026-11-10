@@ -2043,6 +2043,12 @@ TRADE_PRICE_MAX = 1e8
 TRADE_MONEY_MAX = 1e9
 
 
+def _as_utc(dt: datetime) -> datetime:
+    """库里的时间是无时区的 UTC，桥接报的带时区；比较前统一成带时区的 UTC。
+    DB datetimes are naive UTC, bridge ones are aware; normalise before comparing."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+
 class BridgeClosedTrade(BaseModel):
     """桥接程序上报的一笔 MT5 平仓成交（可能是部分平仓）。
     One MT5 closing deal reported by the bridge (may be a partial close)."""
@@ -2240,11 +2246,47 @@ def _trade_history_db_work(
             facts = platform_position_facts(db, user_id, leg.login, leg.positionTicket)
             if payload.get("openTime") is None and facts.get("open_time") is not None:
                 payload["openTime"] = facts["open_time"]
+            # 核对用平台记的开仓时间（有就用它）：桥接把开仓时间往前报能把行情区间撑大。
+            # 落库的 openTime 仍是桥接报的（展示用），只有核对不信它。
+            # The check uses the platform's open time when it has one: reporting an earlier
+            # openTime widens the candle range. The stored openTime stays the bridge's.
+            # 挂单没有平台开仓时间，就拿下单时刻给自报的开仓时间设下限（成交不会早于下单）。
+            # Pending-origin positions have no platform open time; floor the reported one
+            # with the placement time instead (a fill can't predate its order).
+            check_leg = payload
+            if facts.get("open_time") is not None:
+                check_leg = {**payload, "openTime": facts["open_time"]}
+            elif facts.get("placed_at") is not None and payload.get("openTime") is not None:
+                placed = _as_utc(facts["placed_at"])
+                if _as_utc(payload["openTime"]) < placed:
+                    check_leg = {**payload, "openTime": placed}
+            # 手数上限按整个仓位累计：同一仓位已核验的其他平仓腿要先扣掉，否则拆成多笔
+            # 部分平仓、每笔都报满手数，照样能把上限撑大。
+            # The lot cap is cumulative per position: other verified legs of the same
+            # position are subtracted, or splitting into many full-size "partial
+            # closes" would widen the bound again.
+            remaining = None
+            order_volume = facts.get("volume")
+            if order_volume is not None and order_volume > 0:
+                closed_before = (
+                    db.query(func.coalesce(func.sum(ClosedTrade.close_volume), 0.0))
+                    .filter(
+                        ClosedTrade.user_id == user_id,
+                        ClosedTrade.mt5_login == leg.login,
+                        ClosedTrade.position_ticket == leg.positionTicket,
+                        ClosedTrade.deal_ticket != leg.dealTicket,
+                        ClosedTrade.verified.is_(True),
+                    )
+                    .scalar()
+                    or 0.0
+                )
+                remaining = max(float(order_volume) - float(closed_before), 0.0)
             ok, basis = leg_profit_plausible(
-                db, payload,
+                db, check_leg,
                 account_currency=getattr(acct, "account_currency", None),
                 symbol_suffix=getattr(acct, "symbol_suffix", None),
                 expected_symbol=facts.get("symbol"),
+                expected_volume=remaining,
             )
             if not ok:
                 is_ours = False

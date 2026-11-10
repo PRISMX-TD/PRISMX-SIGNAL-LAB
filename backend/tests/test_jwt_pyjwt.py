@@ -34,7 +34,9 @@ def test_expired_and_foreign_tokens_are_rejected():
     )
     assert security.decode_token_payload(expired) is None
     foreign = jwt.encode({"sub": "u", "exp": datetime.now(timezone.utc) + timedelta(hours=1)},
-                         "someone-elses-secret", algorithm=settings.JWT_ALGORITHM)
+                         # ≥32 字节：PyJWT 2.10+ 对短 HMAC 密钥告警，pytest.ini 把告警当错误。
+                         # >=32 bytes: PyJWT 2.10+ warns on short HMAC keys (warnings are errors here).
+                         "someone-elses-secret-0123456789abcdef", algorithm=settings.JWT_ALGORITHM)
     assert security.decode_token_payload(foreign) is None
     assert security.decode_token_payload("not.a.jwt") is None
     assert security.decode_token_payload("") is None

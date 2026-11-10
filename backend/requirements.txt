@@ -7,20 +7,31 @@
 # Security refresh 2026-09-19. Kept inside fastapi's 0.115 patch line on purpose:
 # the deploy flow is git pull + pip install + restart on the server, and a problem
 # at the install step silently leaves a deploy on the old code.
-fastapi==0.115.14           # 0.115.0 带的 starlette<0.39 有 CVE-2024-47874；0.115.3 起要求 starlette>=0.40
+#
+# 安全更新 2026-11-10（Strix 扫描）：跳出 0.115 线——starlette 的 CVE-2026-54283（urlencoded
+# 表单无视 max_fields / max_part_size）只在 1.3.1 起修复，0.115 不接受 starlette 1.x。
+# 同批：python-multipart CVE-2026-42561 等（0.0.27 / 0.0.31 起修复）、PyJWT 2.9.0 一批 CVE。
+# 服务器 venv 是 Python 3.12（starlette 1.x 要求 >=3.11）；装包失败时 deploy.sh 会停在旧版本。
+# Security refresh 2026-11-10 (Strix scan): leaves the 0.115 line because starlette's
+# CVE-2026-54283 is fixed only from 1.3.1 and fastapi 0.115 won't take starlette 1.x.
+# fastapi 停在 0.136.3：0.137 起 include_router 不再把路由摊平进 app.routes（改成
+# _IncludedRouter），一批「挂载级守卫」测试靠遍历 app.routes 钉住 require_admin，会全部失明。
+# Held at 0.136.3: from 0.137 include_router stops flattening routes into app.routes,
+# which blinds the mount-guard tests that walk app.routes to pin require_admin.
+fastapi==0.136.3            # 0.115.0 带的 starlette<0.39 有 CVE-2024-47874；0.115.3 起要求 starlette>=0.40
 # starlette 本来是 fastapi 的传递依赖，这里显式钉住：CVE-2024-47874（multipart 表单
 # 无上限占内存 → 拒绝服务）的修复版本是 0.40.0，写出来才看得见这条下限是有意的。
 # Pinned explicitly although it's transitive: CVE-2024-47874 (unbounded
 # multipart/form-data memory use → DoS) is fixed in 0.40.0, and spelling the floor
 # out is the only way that floor stays visible.
-starlette==0.46.2
+starlette==1.10.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.34
 pydantic==2.9.2
 pydantic-settings==2.5.2
-PyJWT==2.9.0
+PyJWT==2.15.1
 bcrypt==4.2.0
-python-multipart==0.0.20    # CVE-2024-53981：畸形 multipart 边界触发过量日志与 CPU 占用，0.0.18 起修复
+python-multipart==0.0.33    # CVE-2026-42561 等 0.0.31 起全修；CVE-2024-53981：畸形 multipart 边界触发过量日志与 CPU 占用，0.0.18 起修复
 pandas==2.2.2
 numpy==1.26.4
 email-validator==2.2.0

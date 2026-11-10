@@ -114,6 +114,17 @@ def platform_position_facts(db: Session, user_id: str, login: str, position_tick
         # symbol 不是兜底列（_FALLBACK_COLS 不含它），只给桥接合理性核对比对品种用。
         # symbol is not a fallback column; the bridge plausibility check compares against it.
         "symbol": opening.symbol,
+        # volume 也不是兜底列：开仓单手数（桥接回执已改写成实际成交手数），给合理性核对
+        # 卡平仓腿手数用——否则上限按腿自报的 closeVolume 放大，伪造腿也能「已核验」。
+        # volume isn't a fallback column either: the opening order's lots (a bridge
+        # receipt rewrites it to the executed lots), so the plausibility check can cap
+        # the leg's self-reported closeVolume instead of scaling its bound by it.
+        "volume": opening.volume,
+        # 下单时刻：挂单的成交时刻没记（open_time 为空），但成交不可能早于下单，合理性核对
+        # 拿它给桥接自报的开仓时间设下限。/ When the order was placed: a pending order's fill
+        # time isn't recorded, but it can't predate placement, so the check floors the
+        # bridge's openTime with it.
+        "placed_at": opening.created_at,
         "open_price": opening.filled_price,
         "open_time": opening.created_at if opening.action == "ORDER" else None,
         "sl": opening.sl or None,
@@ -495,18 +506,33 @@ def leg_profit_plausible(
     account_currency: str | None = None,
     symbol_suffix: str | None = None,
     expected_symbol: str | None = None,
+    expected_volume: float | None = None,
 ) -> tuple[bool, str]:
     """桥接平仓腿的盈亏是否可信。返回 (是否可信, 依据)：'range'（行情区间）/ 'symbol'
-    （品种和平台订单对不上）/ 'none'（无从核对：只放行亏损和很小的盈利）。
-    `expected_symbol`：平台开仓单记的品种（服务端事实）；给了就必须对得上。
+    （品种和平台订单对不上）/ 'volume'（平仓手数超过平台开仓单手数）/ 'none'（无从核对：
+    只放行亏损和很小的盈利）。
+    `expected_symbol` / `expected_volume`：平台开仓单记的品种与手数（服务端事实）；给了就
+    必须对得上 / 不能超过——行情上限按腿的手数放大，手数不卡住，上限就等于桥接自己定。
     Whether a bridge leg's P&L is plausible: (ok, basis) with basis 'range' (candle
-    bound), 'symbol' (doesn't match the platform order's symbol) or 'none' (nothing
-    to check against -> only losses and tiny gains pass)."""
+    bound), 'symbol' (doesn't match the platform order's symbol), 'volume' (closes
+    more lots than the platform order opened) or 'none' (nothing to check against ->
+    only losses and tiny gains pass). The candle bound scales with the leg's volume,
+    so an uncapped volume would let the bridge pick its own bound."""
     profit = leg.get("profit")
     if not isinstance(profit, (int, float)) or not math.isfinite(profit):
         return False, "range"
     if expected_symbol and _base_symbol(leg.get("symbol") or "", symbol_suffix) != _base_symbol(expected_symbol):
         return False, "symbol"
+    if expected_volume is not None:
+        # 0 = 这个仓位的手数已被已核验的腿平完，再来的腿一律不可信。
+        # 0 means verified legs already closed the whole position.
+        try:
+            close_volume = abs(float(leg.get("closeVolume") or 0.0))
+        except (TypeError, ValueError):
+            return False, "volume"
+        # 浮点手数（0.1 + 0.2）留一点余量。/ Small slack for float lot sums.
+        if close_volume > float(expected_volume) * (1 + 1e-6) + 1e-9:
+            return False, "volume"
     try:
         bound = max_plausible_profit(
             db, leg, account_currency=account_currency, symbol_suffix=symbol_suffix

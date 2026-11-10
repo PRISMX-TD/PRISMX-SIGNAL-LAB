@@ -789,6 +789,21 @@ def admin_update_ticket(
     if not ticket:
         raise HTTPException(status_code=404, detail="工单不存在 / Ticket not found")
     old_status, old_priority = ticket.status, ticket.priority
+    if (
+        body.category
+        and body.category != ticket.category
+        and "follow_up" in (body.category, ticket.category)
+        and not ctx.is_admin
+    ):
+        # 「客服来信」不算工单相关（support._has_ticket），改出这个分类会让客户对全体客服永久
+        # 可见、跟进收回也无效；改进来则会让真工单的提交人从客服视野里消失。只有管理员能动。
+        # follow_up letters don't count as ticket-related (support._has_ticket): moving a
+        # ticket out of it would keep the lead visible to every agent after the follow-up
+        # ends, and moving one in would hide a real submitter. Admins only.
+        raise HTTPException(
+            status_code=403,
+            detail="只有管理员可以修改「客服来信」分类 / Only admins can change the follow-up category",
+        )
     if body.status:
         ticket.status = body.status
     if body.priority:

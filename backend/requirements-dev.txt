@@ -2,3 +2,6 @@
 -r requirements.txt
 pytest
 httpx
+# starlette 1.x 的 TestClient 改用 httpx2，只装 httpx 会在 import 时报弃用警告（pytest.ini 把警告当错误）。
+# starlette 1.x's TestClient wants httpx2; plain httpx raises a deprecation warning on import.
+httpx2

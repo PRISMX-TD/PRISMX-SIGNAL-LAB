@@ -306,6 +306,64 @@ def test_missing_open_time_is_filled_from_platform_order(db_session):
     assert got == {1: False, 2: True}
 
 
+def test_leg_volume_is_capped_by_platform_order(db_session):
+    """行情上限按腿的手数放大：手数报成 10000 不能把伪造盈利撑成「已核验」（Strix vuln-0004）。
+    The bound scales with the leg's lots; reporting 10000 lots on a 1-lot order must not
+    turn a forged profit into a verified one. Real partial closes still verify."""
+    u = _attributed_setup(db_session, "pl-vol@t.co")
+    _candles(db_session)
+    _trade_history_db_work(db_session, u.id, [_forged(profit=9_990_000.0, closeVolume=10000.0, dealTicket=1)])
+    _trade_history_db_work(db_session, u.id, [_forged(profit=300.0, closeVolume=0.6, dealTicket=2)])
+    _trade_history_db_work(db_session, u.id, [_forged(profit=100.0, closeVolume=0.4, dealTicket=3)])
+    got = {r.deal_ticket: r.verified for r in db_session.query(ClosedTrade).filter_by(user_id=u.id)}
+    assert got == {1: False, 2: True, 3: True}
+
+
+def test_leg_volume_cap_is_cumulative_per_position(db_session):
+    """拆成多笔「部分平仓」也不行：同一仓位已核验的腿先扣掉，1 手的单最多核验 1 手。
+    Splitting into several partial closes doesn't help: verified legs of the same
+    position count against the opening order's lots."""
+    u = _attributed_setup(db_session, "pl-cum@t.co")
+    _candles(db_session)
+    for i, vol in enumerate((0.6, 0.4, 0.5), start=1):
+        _trade_history_db_work(db_session, u.id, [_forged(profit=50.0, closeVolume=vol, dealTicket=i)])
+    got = {r.deal_ticket: r.verified for r in db_session.query(ClosedTrade).filter_by(user_id=u.id)}
+    assert got == {1: True, 2: True, 3: False}
+
+
+def test_pending_origin_open_time_is_floored_at_placement(db_session):
+    """挂单开的仓没有平台开仓时间：自报的开仓时间早于下单时刻，核对按下单时刻算。
+    A pending-origin position has no platform open time; a reported openTime before
+    the order was placed is floored at placement."""
+    u = _attributed_setup(db_session, "pl-pend@t.co")
+    db_session.query(Order).filter_by(user_id=u.id).update({"action": "PENDING", "status": "PLACED"})
+    db_session.commit()
+    _candles(db_session)
+    early = T_OPEN - timedelta(hours=1)
+    db_session.add(Candle(symbol="XAUUSD", interval="1", t=int(early.timestamp()),
+                          o=2000.0, h=2200.0, l=1800.0, c=2000.0, v=1))
+    db_session.commit()
+    _trade_history_db_work(db_session, u.id, [_forged(profit=10_000.0, closeVolume=1.0, dealTicket=1,
+                                                      openTime=early)])
+    assert db_session.query(ClosedTrade).filter_by(user_id=u.id, deal_ticket=1).one().verified is False
+
+
+def test_check_uses_platform_open_time_not_the_bridges(db_session):
+    """桥接把开仓时间往前报、圈进一根大波动 K 线，也撑不大上限：核对用平台记的开仓时间。
+    An earlier self-reported openTime that would pull in a wide candle doesn't widen the
+    bound; the check uses the platform's open time. The stored openTime stays as sent."""
+    u = _attributed_setup(db_session, "pl-otw@t.co")
+    _candles(db_session)
+    early = T_OPEN - timedelta(hours=1)
+    db_session.add(Candle(symbol="XAUUSD", interval="1", t=int(early.timestamp()),
+                          o=2000.0, h=2200.0, l=1800.0, c=2000.0, v=1))
+    db_session.commit()
+    _trade_history_db_work(db_session, u.id, [_forged(profit=10_000.0, closeVolume=1.0, dealTicket=1,
+                                                      openTime=early)])
+    row = db_session.query(ClosedTrade).filter_by(user_id=u.id, deal_ticket=1).one()
+    assert row.verified is False
+
+
 def test_leg_symbol_must_match_platform_order(db_session):
     """不能把黄金单报成 BTC 去借它的大波动把上限撑大。/ No symbol swap to widen the bound."""
     u = _attributed_setup(db_session, "pl-sym@t.co")

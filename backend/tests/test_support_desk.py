@@ -594,6 +594,32 @@ def test_message_creates_follow_up_ticket(client, db, people):
     assert mine[0]["category"] == "follow_up" and mine[0]["latestReply"]["authorEmail"] == ""
 
 
+def test_support_cannot_move_tickets_in_or_out_of_follow_up(client, db, people):
+    """客服把「客服来信」改成普通分类，客户就算「工单相关」，跟进收回后仍对全体客服可见；
+    反向改则能把真工单藏起来。两头都只许管理员动，别的分类客服照改。
+    A support agent turning a follow_up letter into a normal ticket would keep the lead
+    visible after the follow-up ends (Strix vuln-0003); the reverse hides a real ticket.
+    Both are admin-only; other category edits stay open to support."""
+    c, staff, admin = people["customer"], people["outsourced"], people["admin"]
+    _assign(db, admin, staff, c)
+    tid = client.post(f"/api/support/users/{c.id}/message", json={"title": "开户指引", "body": "您好"},
+                      headers=_auth(staff)).json()["ticket"]["id"]
+    r = client.patch(f"/api/admin/tickets/{tid}", json={"category": "account"}, headers=_auth(staff))
+    assert r.status_code == 403
+    assert db.get(Ticket, tid).category == "follow_up"
+
+    real = Ticket(user_id=c.id, title="入金", category="payment")
+    db.add(real)
+    db.commit()
+    h = _auth(people["internal"])
+    assert client.patch(f"/api/admin/tickets/{real.id}", json={"category": "follow_up"}, headers=h).status_code == 403
+    r = client.patch(f"/api/admin/tickets/{real.id}", json={"category": "claim"}, headers=h)
+    assert r.status_code == 200 and r.json()["category"] == "claim"
+
+    r = client.patch(f"/api/admin/tickets/{tid}", json={"category": "account"}, headers=_auth(admin))
+    assert r.status_code == 200 and r.json()["category"] == "account"
+
+
 def test_follow_up_notes_and_status(client, db, people):
     c, staff = people["customer"], people["internal"]
     fu = _assign(db, people["admin"], staff, c)
