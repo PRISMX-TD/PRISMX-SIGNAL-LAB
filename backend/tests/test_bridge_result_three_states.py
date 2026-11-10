@@ -164,3 +164,23 @@ def test_filled_still_stamps_trade_mode(db_session, monkeypatch):
 
     assert got.status == "FILLED"
     assert got.trade_mode == 1
+
+
+# ---- 成交手数不能超过下单手数 / executed volume is capped by the ordered lots -----------
+
+def test_reported_volume_cannot_exceed_ordered_volume(db_session):
+    """回执能把手数改小（部分成交），不能改大：开仓单手数是平仓腿合理性核对的上限，
+    让桥接报大就等于让它自己定上限（2026-11-10 Strix 扫描）。
+    A receipt may lower the volume (partial fill) but never raise it: the opening
+    order's lots cap closing legs in the plausibility check."""
+    big = _mk_order(db_session, "u-vol", "c-vol-1", "PENDING")
+    _result_db_work(db_session, "u-vol", BridgeResultRequest(
+        clientOrderId="c-vol-1", success=True, status="FILLED", mt5Ticket=9001, volume=1000.0))
+    db_session.refresh(big)
+    assert big.volume == 0.01
+
+    part = _mk_order(db_session, "u-vol", "c-vol-2", "PENDING")
+    _result_db_work(db_session, "u-vol", BridgeResultRequest(
+        clientOrderId="c-vol-2", success=True, status="FILLED", mt5Ticket=9002, volume=0.005))
+    db_session.refresh(part)
+    assert part.volume == 0.005

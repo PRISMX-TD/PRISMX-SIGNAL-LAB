@@ -266,6 +266,8 @@ _USER_FIELDS = (
     "role", "plan", "plan_expires_at", "plan_note", "invite_code",
     # rev 41 客服台：设客服 tier / 查看上限、客服重置试用 / rev 41 support desk fields
     "support_tier", "support_reveal_limit", "trial_used_at",
+    # 管理员清除「勿扰」标记（2026-11-10）/ admin clears the do-not-contact flag (2026-11-10)
+    "do_not_contact_at",
     # 代理层级（rev 50）：任命 / 改挂 / 撤销代理。值是上级邮箱，"-" = 一级，空 = 不是代理
     # agent hierarchy (rev 50): appoint / re-parent / revoke; upline email, "-" = top, blank = not an agent
     "agent_parent",

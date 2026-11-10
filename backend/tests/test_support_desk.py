@@ -1162,3 +1162,77 @@ def test_renew_goal_is_no_longer_offered(client, people):
     assert client.post(url, headers=_auth(admin), json={"userIds": [c.id], "assigneeId": inn.id, "goal": "renew"}).status_code == 422
     r = client.post(url, headers=_auth(admin), json={"userIds": [c.id], "assigneeId": inn.id, "goal": "other"})
     assert r.status_code == 200 and r.json()["created"][0]["goal"] == "other"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Strix 深度扫描 2026-11-10 / Strix deep scan 2026-11-10
+# ─────────────────────────────────────────────────────────────────────────────
+def test_support_cannot_reset_trial_of_self_or_staff(client, db, people):
+    staff, other = people["internal"], people["outsourced"]
+    staff.trial_used_at = _now()
+    other.trial_used_at = _now()
+    db.commit()
+    h = _auth(staff)
+    assert client.post(f"/api/support/users/{staff.id}/reset-trial", json={}, headers=h).status_code in (403, 404)
+    assert client.post(f"/api/support/users/{other.id}/reset-trial", json={}, headers=h).status_code in (403, 404)
+    db.refresh(staff)
+    db.refresh(other)
+    assert staff.trial_used_at is not None and other.trial_used_at is not None
+    # 管理员仍可以 / admins still can
+    assert client.post(f"/api/support/users/{staff.id}/reset-trial", json={},
+                       headers=_auth(people["admin"])).status_code == 200
+
+
+def test_do_not_contact_needs_own_follow_up_and_admin_can_clear(client, db, people):
+    c = people["customer"]
+    # 只有工单、没有跟进 → 客服不能标记 / ticket-only visibility is not enough
+    db.add(Ticket(user_id=c.id, title="问题", category="account"))
+    db.commit()
+    r = client.post(f"/api/support/users/{c.id}/do-not-contact", headers=_auth(people["outsourced"]))
+    assert r.status_code == 403
+    db.refresh(c)
+    assert c.do_not_contact_at is None
+    # 管理员标记再清除 / admin marks then clears
+    assert client.post(f"/api/support/users/{c.id}/do-not-contact", headers=_auth(people["admin"])).status_code == 200
+    db.refresh(c)
+    assert c.do_not_contact_at is not None
+    assert client.delete(f"/api/admin/support/users/{c.id}/do-not-contact", headers=_auth(people["internal"])).status_code == 403
+    r = client.delete(f"/api/admin/support/users/{c.id}/do-not-contact", headers=_auth(people["admin"]))
+    assert r.status_code == 200
+    db.refresh(c)
+    assert c.do_not_contact_at is None
+    assert db.query(AdminAuditLog).filter(AdminAuditLog.target_user_id == c.id,
+                                          AdminAuditLog.field == "do_not_contact_at").count() == 1
+
+
+def test_comp_days_capped_per_agent_across_customers(client, db, people):
+    staff = people["internal"]
+    h = _auth(staff)
+    applied = 0
+    for i in range(6):
+        u = _user(db, f"cust{i}@x.com", plan="FREE")
+        _assign(db, people["admin"], staff, u)
+        r = client.post(f"/api/support/users/{u.id}/comp-days", json={"days": 7, "reason": "补偿"}, headers=h)
+        assert r.status_code == 200
+        applied += r.json()["applied"] is True
+    # 30 天/24h 上限：前 4 次(28 天)直接生效，之后转审批 / 4×7=28 applied, rest go to approval
+    assert applied == 4
+    assert db.query(SupportRequest).filter(SupportRequest.status == "pending").count() == 2
+
+
+def test_support_search_is_rate_limited(client, db, people, monkeypatch):
+    from app.core.rate_limit import limiter
+
+    monkeypatch.setattr(support, "SEARCH_RATE_LIMIT", "3/hour")
+    limiter.reset()
+    try:
+        h = _auth(people["outsourced"])
+        codes = [client.get("/api/support/search", params={"q": f"x{i}@x.com"}, headers=h).status_code
+                 for i in range(4)]
+        assert codes == [200, 200, 200, 429]
+        # 管理员不受限 / admins are not limited
+        ha = _auth(people["admin"])
+        assert all(client.get("/api/support/search", params={"q": "y@x.com"}, headers=ha).status_code == 200
+                   for _ in range(4))
+    finally:
+        limiter.reset()

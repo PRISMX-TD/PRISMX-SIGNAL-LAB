@@ -400,6 +400,30 @@ if (-not (Test-Path $StateDir)) {
     catch { Write-Note "创建 $StateDir 失败:$($_.Exception.Message)" }
 }
 
+# 整个网关目录也要收紧:mt5gateway.exe 由 SYSTEM 运行,restart-gateway.ps1 会用 build.ps1
+# 现编 *.cs、看门狗每 2 分钟拉起一次 exe——目录要是普通用户可写(解压在盘根目录时默认
+# Authenticated Users 有修改权),换掉 exe / 源码 / DLL 就等于拿到 SYSTEM(2026-11-10 Strix
+# 扫描)。目录本身只留 SYSTEM / Administrators 完全控制、Users 读与执行,子项改为继承它;
+# 下面的循环再把 gateway.ini / logs / state 收到只剩 SYSTEM / Administrators。
+# 放在 C:\Users\Administrator\... 下时用户配置文件本来就挡住了普通用户,这一步是兜底。
+# The whole folder too: the exe runs as SYSTEM and restart-gateway.ps1 compiles *.cs, so a
+# user-writable folder (the default at a volume root) is a path to SYSTEM. The folder gets
+# SYSTEM / Administrators full + Users read & execute, children reset to inherit it; the
+# loop below then narrows gateway.ini / logs / state further.
+if ((Split-Path $GatewayDir -Parent) -and (Split-Path $GatewayDir -Leaf)) {
+    try {
+        & icacls.exe $GatewayDir /inheritance:r /grant:r "SYSTEM:(OI)(CI)(F)" "Administrators:(OI)(CI)(F)" "Users:(OI)(CI)(RX)" /C | Out-Null
+        $dirRc = $LASTEXITCODE
+        & icacls.exe (Join-Path $GatewayDir '*') /reset /T /C | Out-Null
+        if ($dirRc -eq 0 -and $LASTEXITCODE -eq 0) { Write-Ok "已收紧权限:$GatewayDir(SYSTEM / Administrators 完全控制,Users 只读)" }
+        else { Write-Note "icacls 返回 $dirRc / $LASTEXITCODE,请手工核对 $GatewayDir 的权限" }
+    } catch {
+        Write-Note "收紧 $GatewayDir 权限失败:$($_.Exception.Message)。请手工执行 icacls。"
+    }
+} else {
+    Write-Note "$GatewayDir 像是盘根目录,跳过目录级权限收紧;请把网关放进子目录"
+}
+
 foreach ($target in @($IniPath, (Join-Path $GatewayDir 'logs'), $StateDir)) {
     if (-not (Test-Path $target)) { continue }
     try {

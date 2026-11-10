@@ -31,6 +31,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limit import hit_limit
 from app.models import (
     FOLLOW_UP_ACTIVE_STATUSES,
     ActivityEvent,
@@ -395,6 +396,12 @@ def support_search(
     Exact lookup by email / user id / ticket id, returning only users the caller
     may see. No fuzzy matching, no browsing; every search is logged."""
     ctx = _ctx(staff)
+    # 精确搜索能当「这个完整邮箱是不是某位客户」的判定器（外包客服看到的邮箱是打码的），
+    # 所以按人限流，并和查看卡片一样计数告警（2026-11-10 Strix 扫描）。admin 不限。
+    # Exact search doubles as an oracle for masked emails, so it is rate-limited per agent
+    # and counted toward the same hourly alert as card views. Admins are exempt.
+    if not ctx.is_admin and not hit_limit(SEARCH_RATE_LIMIT, "support_search", ctx.user.id):
+        raise HTTPException(status_code=429, detail="搜索太频繁，请稍后再试 / Too many searches, try again later")
     term = q.strip()
     found: list[User] = []
     by_email = db.query(User).filter(func.lower(User.email) == term.lower()).first()
@@ -418,7 +425,9 @@ def support_search(
     desk.record_action(db, ctx.user.id, desk.ACT_SEARCH, None, {"hits": len(results)})
     # 搜索词可能是邮箱（个人信息），日志只留长度与是否命中 / log the term's length, not the term
     desk.log(db, ctx, activity_log.SUPPORT_SEARCH, data={"len": len(term), "hits": len(results)})
+    alerted = desk.check_anomaly(db, ctx, desk.ACT_SEARCH)
     db.commit()
+    desk.flush_ws(alerted)
     return {"results": results}
 
 
@@ -606,6 +615,15 @@ def support_reset_trial(
     per user, ever, across all agents; admins are unlimited and don't use it up."""
     ctx = _ctx(staff)
     user, _fu = _visible_user(db, ctx, user_id)
+    # 与补偿天数同一口径：客服不能给自己或其他工作人员重置——否则给自己开张工单就能
+    # 「看见」自己，再领一次 PRO 试用（2026-11-10 Strix 扫描）。
+    # Same policy as comp days: support can't reset themselves or other staff, or
+    # filing a ticket would make their own account visible and re-open the trial.
+    if not ctx.is_admin and (user.id == ctx.user.id or user.role in ("admin", "support")):
+        raise HTTPException(
+            status_code=403,
+            detail="工作人员账号的试用只有管理员能重置 / Only admins can reset a staff account's trial",
+        )
     if user.trial_used_at is None:
         raise HTTPException(status_code=400, detail="该用户还没用过试用 / Trial has not been used yet")
     if not ctx.is_admin and _support_reset_count(db, user.id) >= 1:
@@ -688,6 +706,35 @@ def _comp_days_used(db: Session, target_id: str, since: datetime) -> int:
     return total
 
 
+# 每位客服滚动 24 小时内「直接生效」的补偿天数总额。单用户上限只管一个人，一位客服给
+# 很多个提交过工单的账号各补 7 天就等于无限发 PRO（2026-11-10 Strix 扫描）；超过这个数
+# 改走管理员审批。30 天 ≈ 一天给 4 个人补满一周，正常客服日常够用。
+# Per-agent total of directly-applied comp days in a rolling 24 hours. The per-user cap
+# alone let one agent hand 7 days to any number of ticket submitters; beyond this the
+# grant goes to admin approval.
+COMP_DAYS_ACTOR_DAILY_MAX = 30
+
+# 客服精确搜索每人每小时上限（admin 不限）。/ Per-agent hourly cap on exact search (admins exempt).
+SEARCH_RATE_LIMIT = "60/hour"
+
+
+def _comp_days_granted_by(db: Session, actor_id: str, since: datetime) -> int:
+    """这位客服窗口内直接生效的补偿天数合计。/ Days this agent applied directly since `since`."""
+    total = 0
+    rows = (
+        db.query(SupportAction.data)
+        .filter(SupportAction.actor_id == actor_id, SupportAction.kind == desk.ACT_COMP_DAYS,
+                SupportAction.created_at >= since)
+        .all()
+    )
+    for (raw,) in rows:
+        try:
+            total += max(0, int((_loads(raw) or {}).get("days") or 0))
+        except (TypeError, ValueError):
+            continue
+    return total
+
+
 @router.post("/users/{user_id}/comp-days", response_model=dict)
 def support_comp_days(
     user_id: str,
@@ -714,6 +761,8 @@ def support_comp_days(
             user.id == ctx.user.id
             or user.role in ("admin", "support")
             or _comp_days_used(db, user.id, since) + body.days > cap
+            or _comp_days_granted_by(db, ctx.user.id, _now() - timedelta(days=1)) + body.days
+            > COMP_DAYS_ACTOR_DAILY_MAX
         )
     if needs_approval:
         req = SupportRequest(
@@ -743,7 +792,18 @@ def support_do_not_contact(user_id: str, db: Session = Depends(get_db), staff: S
     The user asked not to be contacted: set do_not_contact_at, close the active
     follow-up as no_interest, and block future assignments."""
     ctx = _ctx(staff)
-    user, _fu = _visible_user(db, ctx, user_id)
+    user, fu = _visible_user(db, ctx, user_id)
+    # 与「站内联系」同一口径：客服只能标自己正在跟进的用户（admin 不限）。原来只要用户提交
+    # 过工单，任何客服都能标，顺手把别的客服的跟进全收回，且没有撤销入口（2026-11-10 Strix
+    # 扫描）。工单里提出「别再联系」的，转给管理员标；管理员可在后台撤销。
+    # Same rule as messaging: support may only mark their own active follow-ups (admins:
+    # anyone). Previously any agent could mark any ticket submitter, revoking other
+    # agents' follow-ups with no way back. Admins can clear the flag.
+    if not ctx.is_admin and fu is None:
+        raise HTTPException(
+            status_code=403,
+            detail="只能标记自己正在跟进的用户，其他情况请联系管理员 / Only your active follow-ups; ask an admin otherwise",
+        )
     now = _now()
     if user.do_not_contact_at is None:
         user.do_not_contact_at = now
@@ -1442,6 +1502,21 @@ def _active_follow_ups(db: Session, ids: list[str]) -> list[FollowUp]:
         .filter(FollowUp.id.in_(ids), FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES))
         .all()
     )
+
+
+@admin_router.delete("/users/{user_id}/do-not-contact", response_model=dict)
+def admin_clear_do_not_contact(user_id: str, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """撤销「不再联系」（标错了 / 用户改主意）。只清标记，不恢复已收回的跟进，要跟进重新分配。
+    Clear the do-not-contact flag (marked by mistake / the user changed their mind).
+    Follow-ups it closed stay closed; reassign if needed."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在 / User not found")
+    if user.do_not_contact_at is not None:
+        log_change(db, admin.id, user.id, "do_not_contact_at", user.do_not_contact_at.isoformat(), None)
+        user.do_not_contact_at = None
+        db.commit()
+    return {"ok": True, "doNotContactAt": None}
 
 
 @admin_router.post("/follow-ups/revoke", response_model=dict)

@@ -1597,8 +1597,15 @@ def _result_db_work(db: Session, user_id: str, req: "BridgeResultRequest"):
     }
     # 真实成交手数覆盖下单时写的意向手数；老桥接不带就保持原值。
     # The executed volume replaces the intended one; older bridges omit it.
+    # 但不能超过下单时的手数（MT5 只会少成交、不会多成交）：开仓单手数是平仓腿合理性核对的
+    # 手数上限（closed_trade_store.platform_position_facts），放任桥接改大，等于让它自己定
+    # 上限——报 1000 手再伪造盈利就能「已核验」进榜（2026-11-10 Strix 扫描）。
+    # Never above the ordered lots (MT5 can under-fill, never over-fill): the opening
+    # order's volume caps closing legs in the P&L plausibility check, so letting the
+    # bridge raise it would let it pick its own bound.
     if req.volume is not None:
-        values["volume"] = req.volume
+        ordered = order.volume
+        values["volume"] = min(req.volume, ordered) if ordered and ordered > 0 else req.volume
     # 挂单挂出成功：票号同时写进 mt5_position。MT5 里挂单触发后生成的仓位沿用
     # 这张挂单的票号，所以现在记下来，等它成交再平仓时，平仓明细按仓位号归属
     # （order_payload.OPENED_POSITION）不用任何回填就能对上。
