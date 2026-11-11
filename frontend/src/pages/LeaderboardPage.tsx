@@ -33,6 +33,8 @@ import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
 import type { LeaderboardBoard, LeaderboardPayload, LeaderboardRow } from '../api/types'
 import { fmtScorePct, fmtUsd } from '../api/utils'
+import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
+import { compCard } from '../components/share/cardData'
 
 const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
 type Period = 'week' | 'month'
@@ -393,7 +395,7 @@ const MY_RANK_BAR_BOTTOM = 'calc(var(--app-tabbar, calc(env(safe-area-inset-bott
 // anchored near the end of the content box instead of the viewport bottom,
 // nowhere near the tab bar. Portaling to body escapes that ancestor so
 // fixed positions against the viewport again.
-function MyRankBarMobile({ data, board }: { data: LeaderboardPayload; board: LeaderboardBoard }) {
+function MyRankBarMobile({ data, board, onShare }: { data: LeaderboardPayload; board: LeaderboardBoard; onShare?: () => void }) {
   const { t } = useTranslation()
 
   if (data.me) {
@@ -416,6 +418,7 @@ function MyRankBarMobile({ data, board }: { data: LeaderboardPayload; board: Lea
           {fmtScore(board, data.me.score)}
         </b>
         {cta && <span className="ml-auto min-w-0 truncate text-right text-xs text-neutral-400">{cta}</span>}
+        {onShare && <ShareBtn onClick={onShare} className={cta ? '' : 'ml-auto'} />}
       </div>,
       document.body,
     )
@@ -457,7 +460,19 @@ function MyRankBarMobile({ data, board }: { data: LeaderboardPayload; board: Lea
 // hint) / unranked but with a baseline taken this period (a progress bar +
 // the baseline-gate echo) / unranked with no baseline at all (the previous
 // version's notRanked hint, unchanged).
-function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; board: LeaderboardBoard; rankThreshold: number }) {
+// 上榜者的分享按钮（收益榜才有：D 卡片固定标「收益」）。
+// Share button for ranked users (return board only: the D card labels its number as return).
+function ShareBtn({ onClick, className = '' }: { onClick: () => void; className?: string }) {
+  const { t } = useTranslation()
+  return (
+    <button type="button" onClick={onClick}
+      className={`shrink-0 rounded-full bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30 ${className}`}>
+      {t('share.button')}
+    </button>
+  )
+}
+
+function MyRankCard({ data, board, rankThreshold, onShare }: { data: LeaderboardPayload; board: LeaderboardBoard; rankThreshold: number; onShare?: () => void }) {
   const { t } = useTranslation()
 
   if (data.me) {
@@ -506,7 +521,12 @@ function MyRankCard({ data, board, rankThreshold }: { data: LeaderboardPayload; 
             <b className="num text-base font-semibold text-neutral-100">{data.me.login}</b>
           </div>
         </div>
-        {cta && <div className="max-w-[34ch] text-sm text-neutral-400 sm:text-right">{cta}</div>}
+        {(cta || onShare) && (
+          <div className="flex items-center gap-3 sm:justify-end">
+            {cta && <div className="max-w-[34ch] text-sm text-neutral-400 sm:text-right">{cta}</div>}
+            {onShare && <ShareBtn onClick={onShare} />}
+          </div>
+        )}
       </div>
     )
   }
@@ -606,11 +626,13 @@ function BoardBody({
   board,
   rankThreshold,
   minBaselineUsd,
+  onShare,
 }: {
   data: LeaderboardPayload
   board: LeaderboardBoard
   rankThreshold: number
   minBaselineUsd: number
+  onShare?: () => void
 }) {
   const { t } = useTranslation()
   const isReturn = board === 'return_pct'
@@ -686,8 +708,8 @@ function BoardBody({
         </>
       )}
 
-      <MyRankCard data={data} board={board} rankThreshold={rankThreshold} />
-      <MyRankBarMobile data={data} board={board} />
+      <MyRankCard data={data} board={board} rankThreshold={rankThreshold} onShare={onShare} />
+      <MyRankBarMobile data={data} board={board} onShare={onShare} />
     </>
   )
 }
@@ -809,7 +831,7 @@ function SegChoice<T extends string>({
 export default function LeaderboardPage() {
   const { t } = useTranslation()
   const [board, setBoard] = useState<LeaderboardBoard>('return_pct')
-  const [period, setPeriod] = useState<Period>('week')
+  const [period, setPeriod] = useState<Period>('month')
   // 按 (榜单, 周期) 缓存 payload：切回看过的组合零等待直接出内容并后台静默刷新；
   // 没看过的组合只把榜单主体换成骨架，页头 / 控件 / 榜规原地不动。
   // Payload cache keyed by (board, period): a seen combo renders instantly and
@@ -817,6 +839,7 @@ export default function LeaderboardPage() {
   // body for a skeleton while header / controls / gate chips stay in place.
   const [cache, setCache] = useState<Partial<Record<string, LeaderboardPayload>>>({})
   const [forbidden, setForbidden] = useState(false)
+  const [share, setShare] = useState<ShareSpec | null>(null)
   const key = `${board}:${period}`
   const data = cache[key]
 
@@ -870,6 +893,14 @@ export default function LeaderboardPage() {
   const isReturn = board === 'return_pct'
 
   const { year, week, month } = parsePeriodKey(periodSrc?.periodKey ?? '', period)
+  const periodLabel = period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })
+  // 上了收益榜的人可以把名次分享成卡片（同比赛名次卡，type D）。
+  // Ranked users on the return board can share their rank as a card (same D card as competitions).
+  const onShare = data?.me && isReturn
+    ? () => setShare({ type: 'D', variants: [{ key: key, label: '', input: { comp: compCard(
+        `${t('leaderboard.boards.return_pct')} · ${periodLabel}`, data.me!.rank, data.me!.score * 100,
+        Math.max(data.rows.length, data.me!.rank)) } }] })
+    : undefined
   const sealed = periodSrc?.sealAt ? Date.now() >= new Date(periodSrc.sealAt).getTime() : false
 
   // quantitative: true 的几条（笔数/本金/盈亏为正）手机端常显；false 的几条
@@ -906,6 +937,7 @@ export default function LeaderboardPage() {
     // needs clearance or the list's last rows end up trapped under it;
     // desktop keeps the original sm:pb-10 unchanged.
     <div className="space-y-6 pb-[76px] sm:pb-10">
+      <ShareSheet spec={share} onClose={() => setShare(null)} />
       <header className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
         <div>
           {periodSrc?.periodStart && periodSrc.periodEnd && (
@@ -1026,7 +1058,7 @@ export default function LeaderboardPage() {
         // Keyed by (board, period): switching combos fades the whole body in;
         // a background refresh of the same combo just updates data, no replay.
         <div key={key} className="content-fade space-y-6">
-          <BoardBody data={data} board={board} rankThreshold={rankThreshold[board]} minBaselineUsd={gates.minBaselineUsd} />
+          <BoardBody data={data} board={board} rankThreshold={rankThreshold[board]} minBaselineUsd={gates.minBaselineUsd} onShare={onShare} />
         </div>
       ) : (
         <BoardSkeleton />
