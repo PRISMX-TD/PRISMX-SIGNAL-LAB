@@ -412,13 +412,16 @@ namespace Prismx.Mt5Gateway
                     .Field("orderDeleteEvents", (uint)_link.OrderDeleteEvents)
                     .Field("ordersCompared", (uint)_link.OrdersCompared)
                     .Field("ordersSetMismatch", (uint)_link.OrdersSetMismatch)
-                    .Field("ordersFieldMismatch", (uint)_link.OrdersFieldMismatch)
-                 .EndObject();
+                    .Field("ordersFieldMismatch", (uint)_link.OrdersFieldMismatch);
 
                 // 下单路径(2026-11-11):四档状态、耗时分位、锁占用、在途数、核对、镜像。
-                // Order path (2026-11-11): state, latency percentiles, gate, in-flight,
-                // reconciliation, mirror.
+                // 必须写在顶层对象**里面**,EndObject 放在它之后——先关对象再写会产出非法
+                // JSON,后端探活解析失败,所有网关账户被判离线(2026-11-11 事故)。
+                // Order path (2026-11-11). Must be written inside the top-level object,
+                // before EndObject: closing first produced invalid JSON, the backend's
+                // liveness probe failed to parse it and every gateway account showed offline.
                 _link.DescribeOrderPath(j);
+                j.EndObject();
                 // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
                 // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),
                 // 等于把侦察素材白送给任何能连到端口的人。运维要查这两项,看启动日志

@@ -81,18 +81,41 @@ function Get-ListenAddress($iniPath) {
 # (Windows 10 1803 / Server 2019 起自带),没有就退回 WebClient。
 # 只看"进程起来了、HTTP 在答话":mt5Connected=false 不算失败——那多半是券商那头的事,
 # 回滚到旧版本也连不上,反而白白多停一次。
+# /health 必须是合法 JSON 且 ok=true 才算通过。只看能不能连上不够:2026-11-11 /health
+# 写出了非法 JSON(对象提前闭合),旧检查照样"通过",后端探活却解析失败,把所有网关账户
+# 判成离线约 20 分钟。不合法时记在 $script:HealthInvalid 里,失败提示据此说明原因。
+# /health must parse as JSON with ok=true. On 2026-11-11 it emitted invalid JSON, the
+# old check still "passed" while the backend's probe failed to parse it and showed every
+# gateway account offline for ~20 minutes.
+$script:HealthInvalid = $null
+function Confirm-HealthJson($body) {
+    if (-not $body) { return $null }
+    try {
+        $o = $body | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        $script:HealthInvalid = "返回内容不是合法 JSON(后端会因此把网关账户全部判为离线)"
+        return $null
+    }
+    if (-not ($o.ok -eq $true)) {
+        $script:HealthInvalid = "返回的 ok 不是 true"
+        return $null
+    }
+    $script:HealthInvalid = $null
+    return $body
+}
+
 function Get-Health($listen) {
     $url = "http://$listen/health"
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if ($curl) {
         $body = & $curl.Source -s -f -m 5 $url 2>$null
-        if ($LASTEXITCODE -eq 0 -and $body) { return ($body -join "") }
+        if ($LASTEXITCODE -eq 0 -and $body) { return Confirm-HealthJson ($body -join "") }
         return $null
     }
     try {
         $wc = New-Object System.Net.WebClient
         $wc.Encoding = [System.Text.Encoding]::UTF8
-        return $wc.DownloadString($url)
+        return Confirm-HealthJson ($wc.DownloadString($url))
     } catch {
         return $null
     }
@@ -102,7 +125,9 @@ function Wait-Health($listen, $tries, $intervalSec) {
     for ($i = 1; $i -le $tries; $i++) {
         $h = Get-Health $listen
         if ($h) { return $h }
-        Write-Host ("  健康检查第 {0}/{1} 次无响应,{2} 秒后重试..." -f $i, $tries, $intervalSec) -ForegroundColor DarkGray
+        $why = "无响应"
+        if ($script:HealthInvalid) { $why = $script:HealthInvalid }
+        Write-Host ("  健康检查第 {0}/{1} 次{2},{3} 秒后重试..." -f $i, $tries, $why, $intervalSec) -ForegroundColor DarkGray
         Start-Sleep -Seconds $intervalSec
     }
     return $null

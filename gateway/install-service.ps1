@@ -104,13 +104,44 @@ function Get-ListenAddress($iniPath) {
     return "$($listenHost):$port"
 }
 
+# /health 必须是合法 JSON 且 ok=true 才算通过。只看能不能连上不够:2026-11-11 /health
+# 写出了非法 JSON(对象提前闭合),旧检查照样"通过",后端探活却解析失败,把所有网关账户
+# 判成离线约 20 分钟。不合法时记在 $script:HealthInvalid 里,失败提示据此说明原因。
+# /health must parse as JSON with ok=true. On 2026-11-11 it emitted invalid JSON, the
+# old check still "passed" while the backend's probe failed to parse it and showed every
+# gateway account offline for ~20 minutes.
+$script:HealthInvalid = $null
+function Confirm-HealthJson($body) {
+    if (-not $body) { return $null }
+    try {
+        $o = $body | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        $script:HealthInvalid = "返回内容不是合法 JSON(后端会因此把网关账户全部判为离线)"
+        return $null
+    }
+    if (-not ($o.ok -eq $true)) {
+        $script:HealthInvalid = "返回的 ok 不是 true"
+        return $null
+    }
+    $script:HealthInvalid = $null
+    return $body
+}
+
 function Test-Health($listen) {
     try {
         $wc = New-Object System.Net.WebClient
         $wc.Encoding = [System.Text.Encoding]::UTF8
-        return $wc.DownloadString("http://$listen/health")
+        return Confirm-HealthJson ($wc.DownloadString("http://$listen/health"))
     } catch {
         return $null
+    }
+}
+
+function Write-HealthFailure($listen) {
+    if ($script:HealthInvalid) {
+        Write-Bad "健康检查失败:$listen/health 有响应,但$($script:HealthInvalid)"
+    } else {
+        Write-Bad "健康检查失败:$listen 无响应(按 gateway.ini 的 listen 探活)"
     }
 }
 
@@ -169,6 +200,7 @@ if ($Status) {
     }
     $health = Test-Health $Port
     if ($health) { Write-Ok "健康检查      : $health" }
+    elseif ($script:HealthInvalid) { Write-Bad "健康检查      : $Port/health 有响应,但$($script:HealthInvalid)" }
     else         { Write-Bad "健康检查      : $Port 无响应(按 gateway.ini 的 listen 探活)" }
     return
 }
@@ -252,7 +284,7 @@ if ($Start) {
             Write-Bad "注意:mt5Connected 不是 true,起来了但没连上券商。看 logs\ 下当天日志。"
         }
     } else {
-        Write-Bad "健康检查失败:$Port 无响应(按 gateway.ini 的 listen 探活)"
+        Write-HealthFailure $Port
         Write-Note "看日志:  Get-Content logs\gateway-$(Get-Date -Format yyyyMMdd).log -Tail 40"
         exit 1
     }
@@ -459,7 +491,7 @@ if ($health) {
         Write-Bad "注意:mt5Connected 不是 true,gateway 起来了但没连上券商。看 logs\ 下当天日志。"
     }
 } else {
-    Write-Bad "健康检查失败:$Port 无响应(按 gateway.ini 的 listen 探活)"
+    Write-HealthFailure $Port
     Write-Host ""
     Write-Host "排查:" -ForegroundColor Yellow
     Write-Host "  1. 看任务结果:  Get-ScheduledTaskInfo -TaskName $TaskName"
