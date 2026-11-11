@@ -4,6 +4,7 @@ const MAIN = 'https://api.prismxsignallab.com'
 const BACKUP = 'https://api.pmxsl.com'
 const THIRD = 'https://api.ljlhxhsys.com'
 const IP = 'https://43.134.110.47/_b'
+const HK_IP = 'https://124.156.167.169/_b'
 const DIRECT_MAIN = 'https://api2.prismxsignallab.com'
 const DIRECT = 'https://api2.pmxsl.com'
 
@@ -49,7 +50,7 @@ describe('apiBase failover', () => {
     stubStorage()
     const m = await load()
     expect(m.API_BASE).toBe(MAIN)
-    expect(m.API_CANDIDATES).toEqual([MAIN, BACKUP, THIRD, DIRECT_MAIN, DIRECT, IP])
+    expect(m.API_CANDIDATES).toEqual([MAIN, BACKUP, THIRD, DIRECT_MAIN, DIRECT, HK_IP, IP])
   })
 
   it('prefers the direct entries when the page is served from www2', async () => {
@@ -57,7 +58,7 @@ describe('apiBase failover', () => {
     vi.stubGlobal('location', { hostname: 'www2.prismxsignallab.com' })
     const m = await load()
     expect(m.API_BASE).toBe(DIRECT_MAIN)
-    expect(m.API_CANDIDATES).toEqual([DIRECT_MAIN, DIRECT, MAIN, BACKUP, THIRD, IP])
+    expect(m.API_CANDIDATES).toEqual([DIRECT_MAIN, DIRECT, MAIN, BACKUP, THIRD, HK_IP, IP])
   })
 
   it('falls back to the direct entry when both HK entries are blocked', async () => {
@@ -91,7 +92,7 @@ describe('apiBase failover', () => {
     vi.stubGlobal('location', { hostname: 'www.ljlhxhsys.com' })
     const m = await load()
     expect(m.API_BASE).toBe(THIRD)
-    expect(m.API_CANDIDATES).toEqual([THIRD, MAIN, BACKUP, DIRECT_MAIN, DIRECT, IP])
+    expect(m.API_CANDIDATES).toEqual([THIRD, MAIN, BACKUP, DIRECT_MAIN, DIRECT, HK_IP, IP])
   })
 
   it('falls back to the IP entry when every domain is blocked', async () => {
@@ -108,7 +109,24 @@ describe('apiBase failover', () => {
     vi.stubGlobal('location', { hostname: '43.134.110.47' })
     const m = await load()
     expect(m.API_BASE).toBe(IP)
-    expect(m.API_CANDIDATES).toEqual([IP, MAIN, BACKUP, THIRD, DIRECT_MAIN, DIRECT])
+    expect(m.API_CANDIDATES).toEqual([IP, HK_IP, MAIN, BACKUP, THIRD, DIRECT_MAIN, DIRECT])
+  })
+
+  it('prefers the HK IP entry over the SG IP when every domain is blocked', async () => {
+    const storage = stubStorage()
+    stubFetch([IP, HK_IP])
+    const m = await load()
+    await m.reportApiFailure()
+    expect(m.API_BASE).toBe(HK_IP)
+    expect(storage.get('prismx.apiBase')).toBe(HK_IP)
+  })
+
+  it('prefers the HK IP entry when the page is opened by the HK IP', async () => {
+    stubStorage()
+    vi.stubGlobal('location', { hostname: '124.156.167.169' })
+    const m = await load()
+    expect(m.API_BASE).toBe(HK_IP)
+    expect(m.API_CANDIDATES).toEqual([HK_IP, IP, MAIN, BACKUP, THIRD, DIRECT_MAIN, DIRECT])
   })
 
   it('picks by priority, not by who answers first', async () => {

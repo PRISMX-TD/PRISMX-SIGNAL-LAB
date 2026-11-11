@@ -523,6 +523,9 @@ class Settings(BaseSettings):
         # IP 网页入口（不用域名，泉州连新域名也拦；证书签给 IP 本身），见 ops/sg-direct。
         # IP web entry (no domain; Quanzhou blocks even fresh domains; cert issued to the IP).
         "https://43.134.110.47",
+        # 香港边缘节点的 IP 网页入口（2026-11-11，香港 IP 在泉州没被封），见 ops/hk-edge。
+        # HK edge IP web entry (the HK IP is not blocked in Quanzhou), see ops/hk-edge.
+        "https://124.156.167.169",
         # 直连网页入口（不经香港，香港节点 IP 被封的地区用），见 frontend/src/api/apiBase.ts。
         # Direct web entry (bypasses HK, for regions that block the HK edge IP); see apiBase.ts.
         "https://www2.prismxsignallab.com",

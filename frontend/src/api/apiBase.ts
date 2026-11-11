@@ -1,7 +1,7 @@
 // API 基础地址与多入口自动切换。
 //
 // 生产用 VITE_API_BASE 指向线上后端，开发留空走 Vite 代理（留空时本文件什么都不做）。
-// 后端有六个入口，都到同一个新加坡后端：
+// 后端有七个入口，都到同一个新加坡后端：
 //   · 主域名 api.prismxsignallab.com —— 大陆经香港边缘节点（ops/hk-edge），海外直连新加坡；
 //   · 备用域名 api.pmxsl.com —— 也经香港，防的是「主域名被拉黑」；
 //   · 第三域名 api.ljlhxhsys.com —— 也经香港，名字与平台毫无关联。2026-11-11 泉州（电信 / 移动）
@@ -14,6 +14,9 @@
 //     （指向新加坡也一样），只有不带我们域名的访问能通——没有名字可拉黑。永远排最后。
 //     路径前缀 /_b：同一个 IP 的 `/` 给网页（IP 直开的网页入口），后端挪到 /_b/ 下，nginx 去掉
 //     前缀再转发；所有调用方都是 `${API_BASE}/api…`、`/ws/client`、`/ops…` 这样拼，带前缀不影响。
+//   · 香港 IP 入口 https://124.156.167.169/_b —— 同样不用域名，经香港边缘转新加坡（ops/hk-edge 的
+//     default_server）。2026-11-11 泉州实测香港这台的 IP 没被封（封的只是名字），大陆走它比新加坡
+//     IP 快，所以两个 IP 入口里它在前。
 // 后端 CORS 与 vercel.json 的 CSP 全都已放行，任何页面（网站各域名、App 的 https://localhost）
 // 连哪一个都行。
 //
@@ -36,7 +39,7 @@
 // API base and automatic failover across entry points.
 //
 // Prod points VITE_API_BASE at the backend; dev leaves it empty for the Vite proxy (this module
-// then does nothing). Five entry points, all reaching the same Singapore backend:
+// then does nothing). Seven entry points, all reaching the same Singapore backend:
 //   · main api.prismxsignallab.com — via the HK edge in mainland China (ops/hk-edge), direct abroad;
 //   · backup api.pmxsl.com — also via HK; covers "the main domain is blacklisted";
 //   · third api.ljlhxhsys.com — also via HK, a name unrelated to the product. On 2026-11-11
@@ -52,6 +55,9 @@
 //     The /_b prefix: `/` on that IP serves the website (the IP web entry), so the backend moves
 //     under /_b/ and nginx strips it; every caller builds `${API_BASE}/api…`, `/ws/client`,
 //     `/ops…`, so the prefix changes nothing for them.
+//   · HK IP entry https://124.156.167.169/_b — no domain either, through the HK edge to SG (the
+//     default_server in ops/hk-edge). Quanzhou does not block the HK IP itself (tested 2026-11-11),
+//     and from the mainland it is faster than the SG IP, so it comes first of the two IP entries.
 // Backend CORS and the vercel.json CSP allow all of them, so any page may use any of them.
 //
 // Rules:
@@ -83,6 +89,8 @@ const DIRECT_BACKUP_BASE = `https://api2.${BACKUP_DOMAIN}`
 const DIRECT_WEB_HOSTS = [`www2.${MAIN_DOMAIN}`, `www2.${BACKUP_DOMAIN}`]
 const SG_IP = '43.134.110.47'
 const IP_BASE = `https://${SG_IP}/_b`
+const HK_IP = '124.156.167.169'
+const HK_IP_BASE = `https://${HK_IP}/_b`
 const STORAGE_KEY = 'prismx.apiBase'
 const PROBE_TIMEOUT_MS = 6_000
 const PROBE_COOLDOWN_MS = 30_000
@@ -120,13 +128,15 @@ const configured = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '')
 function candidateOrder(): string[] {
   const direct = [DIRECT_MAIN_BASE, DIRECT_BACKUP_BASE]
   const hk = [configured, BACKUP_BASE, THIRD_BASE]
-  if (pageHost() === SG_IP) return [IP_BASE, ...hk, ...direct]
-  if (DIRECT_WEB_HOSTS.includes(pageHost())) return [...direct, ...hk, IP_BASE]
+  const ips = [HK_IP_BASE, IP_BASE]
+  if (pageHost() === HK_IP) return [HK_IP_BASE, IP_BASE, ...hk, ...direct]
+  if (pageHost() === SG_IP) return [IP_BASE, HK_IP_BASE, ...hk, ...direct]
+  if (DIRECT_WEB_HOSTS.includes(pageHost())) return [...direct, ...hk, ...ips]
   // 页面所在域名的入口提前，其余顺序不变（Set 去重留第一次出现的位置）。
   // The page's own domain entry first, the rest in order (the Set keeps first occurrences).
-  if (onDomain(THIRD_DOMAIN)) return [THIRD_BASE, ...hk, ...direct, IP_BASE]
-  if (onDomain(BACKUP_DOMAIN)) return [BACKUP_BASE, ...hk, ...direct, IP_BASE]
-  return [...hk, ...direct, IP_BASE]
+  if (onDomain(THIRD_DOMAIN)) return [THIRD_BASE, ...hk, ...direct, ...ips]
+  if (onDomain(BACKUP_DOMAIN)) return [BACKUP_BASE, ...hk, ...direct, ...ips]
+  return [...hk, ...direct, ...ips]
 }
 
 // 按优先级排好的全部入口；开发期（configured 为空）只有空串，不切换。

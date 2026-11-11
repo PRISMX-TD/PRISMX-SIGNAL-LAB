@@ -1,0 +1,8 @@
+[Unit]
+Description=PRISMX HK edge IP certificate (lego, Let's Encrypt shortlived)
+Wants=network-online.target
+After=network-online.target nginx.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/prismx-ip-cert.sh
