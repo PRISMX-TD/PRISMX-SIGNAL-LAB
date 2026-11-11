@@ -1,5 +1,6 @@
-# 新加坡源站的「直连入口」（2026-11-11）：不经香港边缘节点，给封了香港 IP 的地区用
-# （泉州电信 / 移动封了 124.156.167.169，主备两个域名一起打不开）。
+# 新加坡源站的「直连入口」（2026-11-11）：不经香港边缘节点。当时以为泉州封了香港 IP 124.156.167.169，
+# 后来查清是按域名拦截（这几个 api2 / www2 名字在泉州一样被拦，香港 IP 没封），真正管用的是
+# IP 入口（prismx-ip）。这里留着给只拦了旧名字、或真封了香港 IP 的地区用。
 # 服务器上的位置：/etc/nginx/sites-available/prismx-direct，软链到 sites-enabled。
 # 原有的 /etc/nginx/sites-enabled/prismx（api.prismxsignallab.com）不动；出问题删掉软链即可回滚。
 #   · api2.prismxsignallab.com / api2.pmxsl.com：与 api.prismxsignallab.com 完全同一套转发；
@@ -7,7 +8,8 @@
 #   · www2.prismxsignallab.com：网页直连入口，转发到 Vercel（Host 用 www.prismxsignallab.com）。
 #   · 证书：prismx-direct（api2 + www2 主域名）、pmxsl-direct（api2.pmxsl.com 单独一张，
 #     不和主域名合签，证书上看不出两者是一家）。certbot --nginx 自动续期。
-# Direct entries on the SG origin, bypassing the HK edge, for regions that block the HK IP.
+# Direct entries on the SG origin, bypassing the HK edge (Quanzhou turned out to block by name, not
+# the HK IP; the IP entry prismx-ip is what works there). Kept for regions that block only old names.
 
 server {
     listen 80;

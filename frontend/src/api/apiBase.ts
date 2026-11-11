@@ -8,7 +8,8 @@
 //     按域名拉黑了前两个——连同它们的所有子域名，指向哪台服务器都一样；同一台服务器换个无关的
 //     名字就能打开。以后再被拉黑，就再买一个新域名加在这里。
 //   · 直连入口 api2.prismxsignallab.com、api2.pmxsl.com —— 不经香港、直接解析到新加坡源站，
-//     防的是「香港节点 IP 被封」。比香港慢，排在所有香港入口之后。
+//     原本防「香港节点 IP 被封」；泉州实测是按名字拦，这两个名字一样被拦（香港 IP 没封），
+//     留给只拦了旧名字的地区。比香港慢，排在所有香港入口之后。
 //   · IP 入口 https://43.134.110.47/_b —— 完全不用域名，直连新加坡源站，证书是签给 IP 本身的
 //     （Let's Encrypt 短期 IP 证书，ops/sg-direct）。2026-11-11 泉州连当天新买的第三域名也拦
 //     （指向新加坡也一样），只有不带我们域名的访问能通——没有名字可拉黑。永远排最后。
@@ -47,7 +48,8 @@
 //     whatever server they point at; the same server under an unrelated name opened fine. If this
 //     one is blacklisted too, buy another domain and add it here.
 //   · direct api2.prismxsignallab.com and api2.pmxsl.com — straight to the SG origin, no HK; cover
-//     "the HK edge IP is blocked". Slower than HK; after every HK entry.
+//     "the HK edge IP is blocked"; Quanzhou turned out to block by name (these names too, not the
+//     HK IP), so they help only where just the old names are blocked. Slower; after every HK entry.
 //   · IP entry https://43.134.110.47/_b — no domain at all, straight to the SG origin with a
 //     certificate issued to the IP itself (Let's Encrypt short-lived IP cert, ops/sg-direct). On
 //     2026-11-11 Quanzhou blocked even the third domain bought that day (pointed at SG too); only
