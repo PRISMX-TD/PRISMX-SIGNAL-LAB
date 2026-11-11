@@ -133,7 +133,16 @@ def _funds_entry(rsp, rows: list[dict]) -> dict:
     }
 
 
-async def push_positions_now(user_id: str, logins: list[str]) -> bool:
+async def _known_rows(login: str, positions) -> tuple[list[dict], bool]:
+    """网关回执里已带的持仓，转成与即时读同样的行。/ Reply positions as rows."""
+    from app.routers.gateway import _position_rows
+
+    return _position_rows(login, positions, "")
+
+
+async def push_positions_now(
+    user_id: str, logins: list[str], known: dict | None = None
+) -> bool:
     """读齐该用户全部 gateway 账号的持仓并立即推一帧 POSITIONS。返回是否推了。
 
     必须读齐再推（整表替换语义），任一账号读不到就不推，交给周期读——与事件快拍同一条规矩。
@@ -154,9 +163,17 @@ async def push_positions_now(user_id: str, logins: list[str]) -> bool:
             # Positions and funds are read together: once a closed trade's floating P/L
             # disappears the balance must catch up at the same moment, or equity dips
             # until the slow tick refreshes funds.
+            # known：网关回执已经带了的账号持仓（只用在第一轮；合并进来的下一轮重新读）。
+            # known: positions the gateway reply already carried (first pass only).
             pos_task = asyncio.gather(
-                *(read_positions_priority(lg) for lg in logins), return_exceptions=True
+                *(
+                    _known_rows(lg, known[lg]) if known and lg in known
+                    else read_positions_priority(lg)
+                    for lg in logins
+                ),
+                return_exceptions=True,
             )
+            known = None
             funds_task = asyncio.gather(*(_read_funds(lg) for lg in logins))
             results, funds_rsps = await asyncio.gather(pos_task, funds_task)
             data: list[dict] = []

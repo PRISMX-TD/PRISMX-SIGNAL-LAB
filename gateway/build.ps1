@@ -106,7 +106,13 @@ try {
         "Json.cs",
         "Log.cs",
         "Idempotency.cs",
-        "ReadChannel.cs"
+        "ReadChannel.cs",
+        "EventRing.cs",
+        "Mt5Link.Fast.cs",
+        "Mt5Link.Guard.cs",
+        "Mt5Link.Reconcile.cs",
+        "Mt5Link.Mirror.cs",
+        "Mt5Link.Metrics.cs"
     )
 
     & $csc /nologo /target:exe /platform:x64 /optimize+ "/out:$Out" `

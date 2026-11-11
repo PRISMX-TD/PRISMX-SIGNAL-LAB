@@ -9,6 +9,7 @@ Executes one order command over the gateway HTTP API. Moved out of
 routers/orders.py so services (auto-manage) stop importing a router module.
 """
 import logging
+import threading
 from datetime import datetime, timezone
 
 from sqlalchemy import inspect as sa_inspect
@@ -509,7 +510,7 @@ def _commit_keep_loaded(db: Session, order: Order) -> None:
 _POSITION_ACTIONS = frozenset({"ORDER", "CLOSE", "MODIFY"})
 
 
-def _after_gateway_result(db: Session, order: Order) -> None:
+def _after_gateway_result(db: Session, order: Order, rsp: TradeRsp | None = None) -> None:
     """网关回话落库之后的收尾：成交了就马上推一帧持仓快照；挂单类动作清掉
     "这个账号没有挂单"的标记，让下一次挂单读取一定真去读。
 
@@ -545,15 +546,74 @@ def _after_gateway_result(db: Session, order: Order) -> None:
             return
         from app.services.gateway_snapshot import push_positions_now
 
+        # 网关回执顺带了这个账号的最新持仓（2026-11-11）：这个账号就不必再读一次。
+        # The gateway attached this account's positions: skip re-reading that login.
+        known = None
+        if rsp is not None and rsp.positions is not None and order.mt5_login:
+            known = {str(order.mt5_login): rsp.positions}
+
         submit_to_main_loop(
-            push_positions_now(order.user_id, logins), "POSITIONS 即时快照"
+            push_positions_now(order.user_id, logins, known=known), "POSITIONS 即时快照"
         )
     except Exception:  # noqa: BLE001
         logger.exception("成交后即时刷新持仓失败 user=%s", order.user_id)
 
 
+# 每个用户同时在途的开仓/挂单上限（2026-11-11 架构优化）。一个人连点或脚本连发时，
+# 第 7 笔起直接回「未发出」，不去占网关的全局名额、不拖慢别人。平仓、改单、撤单
+# （含一键全平的每一笔）不受限：保护性的动作永远不该被自己的上限挡住。网关那边另有
+# 每账号 8 笔开仓的上限兜底。
+# Per-user cap on in-flight opens/pending placements (2026-11-11). From the 7th, answer
+# "not sent" instead of taking the gateway's global slots. Closes, modifies and cancels
+# (every close-all leg included) are never capped. The gateway caps opens per account too.
+USER_OPEN_INFLIGHT_CAP = 6
+_OPEN_ACTIONS = frozenset({"ORDER", "PENDING"})
+_user_open_inflight: dict[str, int] = {}
+_user_open_lock = threading.Lock()
+
+
+def _admit_user_open(user_id: str) -> bool:
+    with _user_open_lock:
+        n = _user_open_inflight.get(user_id, 0)
+        if n >= USER_OPEN_INFLIGHT_CAP:
+            return False
+        _user_open_inflight[user_id] = n + 1
+        return True
+
+
+def _release_user_open(user_id: str) -> None:
+    with _user_open_lock:
+        n = _user_open_inflight.get(user_id, 0) - 1
+        if n > 0:
+            _user_open_inflight[user_id] = n
+        else:
+            _user_open_inflight.pop(user_id, None)
+
+
+def user_open_inflight(user_id: str) -> int:
+    """当前在途数（测试与排查用）。/ Current in-flight count (tests, debugging)."""
+    with _user_open_lock:
+        return _user_open_inflight.get(user_id, 0)
+
+
 def try_gateway_execute(
     db: Session, order: Order, account: MT5Account | None = None
+) -> dict | None:
+    """如果是 gateway 来源账号，立即通过 gateway HTTP 执行订单。
+
+    外壳：负责归还每用户在途名额（见 USER_OPEN_INFLIGHT_CAP），正文在
+    _try_gateway_execute。/ Shell that returns the per-user slot; the body is below.
+    """
+    admitted: list[str] = []
+    try:
+        return _try_gateway_execute(db, order, account, admitted)
+    finally:
+        for uid in admitted:
+            _release_user_open(uid)
+
+
+def _try_gateway_execute(
+    db: Session, order: Order, account: MT5Account | None, admitted: list[str]
 ) -> dict | None:
     """如果是 gateway 来源账号，立即通过 gateway HTTP 执行订单。
     返回 ORDER_UPDATE 推送载荷，或 None（非 gateway 账号）。
@@ -638,6 +698,25 @@ def try_gateway_execute(
                 order.action, order.client_order_id, order.mt5_login, order.symbol,
             )
             return order_update_payload(order)
+
+    # 每用户在途开仓上限：超了直接回「未发出」，什么都没执行，可以放心重下。
+    # Per-user in-flight open cap: refuse as "not sent"; nothing ran, safe to retry.
+    if order.action in _OPEN_ACTIONS and order.user_id:
+        if not _admit_user_open(order.user_id):
+            order.status = "REJECTED"
+            order.message = (
+                f"你同时在处理的下单已达上限（{USER_OPEN_INFLIGHT_CAP} 笔），本次指令未发出，"
+                "请等前面的单出结果再下 / too many of your orders are in flight; "
+                "this one was NOT sent, please wait for the earlier ones"
+            )
+            db.commit()
+            db.refresh(order)
+            logger.warning(
+                "Gateway 下单被拒（用户在途已满 %d）: %s %s mt5=%s",
+                USER_OPEN_INFLIGHT_CAP, order.action, order.client_order_id, order.mt5_login,
+            )
+            return order_update_payload(order)
+        admitted.append(order.user_id)
 
     # 调网关之前先把事务结束掉，把数据库连接还回池里。否则这个会话会一直攥着一条
     # 连接等 dealer 回执（最长 65 秒，超时再问一次共 140 秒），而池子总共只有
@@ -828,7 +907,7 @@ def try_gateway_execute(
             order.action, order.client_order_id, order.mt5_login,
             order.status, rsp.deal, rsp.order, rsp.elapsed_ms, rsp.dealer_ms,
         )
-        _after_gateway_result(db, order)
+        _after_gateway_result(db, order, rsp)
         return order_update_payload(order)
 
     except Exception as e:

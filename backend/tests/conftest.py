@@ -157,6 +157,17 @@ def _market_hours_gate_off(monkeypatch):
     market_hours.clear_cache()
 
 
+@pytest.fixture(autouse=True)
+def _gateway_event_stream_off(monkeypatch):
+    """事件泵默认走旧的两个 drain 接口：已有用例都是替换 drain_* 来喂事件的，长轮询
+    /events 不能去连一个不存在的网关。专测事件流的用例（test_gateway_event_stream.py）
+    自己再打开。/ The event pump uses the old drain endpoints in tests (existing cases feed
+    events by patching drain_*); the stream's own tests re-enable it."""
+    from app.routers import gateway as gw
+    monkeypatch.setattr(gw, "GATEWAY_EVENT_STREAM_ENABLED", False)
+    yield
+
+
 def _autofill_signup_owner(session) -> None:
     """测试捷径：直接 `User(invite_code=链接码)` 造出来的人，按注册时的规则补上归属代理。
 

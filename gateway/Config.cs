@@ -93,6 +93,62 @@ namespace Prismx.Mt5Gateway
         // manager account to be logged in more than once.
         public int ReadChannels = 2;
 
+        // ---- 2026-11-11 下单架构优化(见 README「下单专线」一节)----
+        // ---- 2026-11-11 order-path work (README, "trading link does trading only") ----
+
+        // 查询通道 ≥ 2 条时,最后一条留给交易路径(下单后的确认、反查仓位号、核对止损、
+        // 读挂单、核对密码),周期查询不用它。/ With ≥2 channels, reserve the last one for
+        // the trade path; periodic polls never use it.
+        public bool HelperChannel = true;
+
+        // 查询通道被一次查询攥着超过这么久(毫秒)就换一条新的顶上;0 = 不换。
+        // Replace a query channel held by one query longer than this; 0 = never.
+        public int StuckChannelReplaceMs = 8000;
+
+        // 存活判断先看"有没有数据在进来"(报价推送、已收字节数),有就不做占锁的探测。
+        // Passive liveness first (ticks, bytes read); probe actively only without evidence.
+        public bool PassiveLiveness = true;
+
+        // 报价缓存:off = 不订阅;shadow = 订阅并只做对比计数;auto = 对比通过后自动启用(默认);
+        // on = 直接用。/ Tick cache: off / shadow (compare only) / auto (use once validated) / on.
+        public string TickCache = "auto";
+
+        // 休市判断结果缓存到这一分钟结束(最多 30 秒)。/ Cache market-hours verdicts per minute.
+        public bool SessionCache = true;
+
+        // 查询通道连上过之后,查询是否还允许改走交易连接(旧行为)。默认不允许。
+        // Whether reads may still spill onto the trading link once channels are up (old behaviour).
+        public bool ReadSpillToTrading = false;
+
+        // 全局锁被占超过这么久(毫秒),新交易直接回"繁忙、未发出";0 = 关。
+        // New trades fail fast as "busy, not sent" while the gate is held past this; 0 = off.
+        public int GateFailFastMs = 3000;
+
+        // 全局锁连续这么久(秒)拿不到就自愈重启;重连、重开 dealer 这类本来就慢的仍按 180 秒。
+        // Self-heal restart after the gate is unobtainable this long; reconnect-type holders keep 180s.
+        public int GateStuckExitSec = 20;
+
+        // 阶段 2:读接口改读交易连接本地副本(内存读)。默认全关,先看 /health 的影子对比。
+        // Phase 2: serve reads from the trading link's local mirror. Off until shadow
+        // comparison on /health looks clean.
+        public bool LocalOrders = false;
+        public bool LocalPositions = false;
+
+        // 阶段 4:并发规则。/ Phase 4: concurrency rules.
+        public int MaxInflightTrades = 64;          // 全网关同时在途的交易 / gateway-wide trades in flight
+        public int MaxOpenInflightPerAccount = 8;   // 每个账号同时在途的开仓 / opens in flight per account
+        public int TradeQueueWaitMs = 2000;         // 排队等空位的上限(开仓)/ queueing cap for opens
+        public int CloseQueueWaitMs = 3000;         // 平仓 / 改单排队上限 / queueing cap for closes and modifies
+        public bool AutoRetryRequotes = true;       // 重报价类拒绝自动重试(最多 2 次,0.5 秒内)/ retry requotes
+
+        // 在 comment 末尾加一个由 clientOrderId 算出的短码,结果未知时据此到服务器核对。
+        // Append a short code derived from clientOrderId to the comment for reconciliation.
+        public bool CommentCode = true;
+
+        // 断线时平仓/改止损排队等连接回来的上限(毫秒);0 = 不排队,直接回"重连中"。开仓从不排队。
+        // How long closes / stop changes wait for a reconnect; 0 = answer at once. Opens never wait.
+        public int QueueClosesOnDisconnectMs = 10000;
+
         public static Config Load(string path)
         {
             if (!File.Exists(path))
@@ -188,6 +244,29 @@ namespace Prismx.Mt5Gateway
                         cfg.IKnowWhatImDoing = val.Equals("true", StringComparison.OrdinalIgnoreCase)
                             || val == "1";
                         break;
+                    case "helper_channel": cfg.HelperChannel = ParseBool(val, cfg.HelperChannel); break;
+                    case "stuck_channel_replace_ms": cfg.StuckChannelReplaceMs = ParseInt(val, cfg.StuckChannelReplaceMs, 0, 120000); break;
+                    case "passive_liveness": cfg.PassiveLiveness = ParseBool(val, cfg.PassiveLiveness); break;
+                    case "tick_cache":
+                        {
+                            string t = val.Trim().ToLowerInvariant();
+                            if (t == "off" || t == "shadow" || t == "auto" || t == "on")
+                                cfg.TickCache = t;
+                        }
+                        break;
+                    case "session_cache": cfg.SessionCache = ParseBool(val, cfg.SessionCache); break;
+                    case "read_spill_to_trading": cfg.ReadSpillToTrading = ParseBool(val, cfg.ReadSpillToTrading); break;
+                    case "gate_fail_fast_ms": cfg.GateFailFastMs = ParseInt(val, cfg.GateFailFastMs, 0, 60000); break;
+                    case "gate_stuck_exit_sec": cfg.GateStuckExitSec = ParseInt(val, cfg.GateStuckExitSec, 10, 600); break;
+                    case "local_orders": cfg.LocalOrders = ParseBool(val, cfg.LocalOrders); break;
+                    case "local_positions": cfg.LocalPositions = ParseBool(val, cfg.LocalPositions); break;
+                    case "max_inflight_trades": cfg.MaxInflightTrades = ParseInt(val, cfg.MaxInflightTrades, 1, 1024); break;
+                    case "max_open_inflight_per_account": cfg.MaxOpenInflightPerAccount = ParseInt(val, cfg.MaxOpenInflightPerAccount, 1, 256); break;
+                    case "trade_queue_wait_ms": cfg.TradeQueueWaitMs = ParseInt(val, cfg.TradeQueueWaitMs, 0, 30000); break;
+                    case "close_queue_wait_ms": cfg.CloseQueueWaitMs = ParseInt(val, cfg.CloseQueueWaitMs, 0, 30000); break;
+                    case "auto_retry_requotes": cfg.AutoRetryRequotes = ParseBool(val, cfg.AutoRetryRequotes); break;
+                    case "comment_code": cfg.CommentCode = ParseBool(val, cfg.CommentCode); break;
+                    case "queue_closes_on_disconnect_ms": cfg.QueueClosesOnDisconnectMs = ParseInt(val, cfg.QueueClosesOnDisconnectMs, 0, 30000); break;
                     case "preselect_symbols":
                         cfg.PreselectSymbols.Clear();
                         foreach (string s in val.Split(','))
@@ -202,6 +281,25 @@ namespace Prismx.Mt5Gateway
 
             cfg.Validate();
             return cfg;
+        }
+
+        private static bool ParseBool(string val, bool fallback)
+        {
+            string t = (val ?? "").Trim().ToLowerInvariant();
+            if (t == "true" || t == "1" || t == "on" || t == "yes")
+                return true;
+            if (t == "false" || t == "0" || t == "off" || t == "no")
+                return false;
+            return fallback;
+        }
+
+        private static int ParseInt(string val, int fallback, int min, int max)
+        {
+            int v;
+            if (int.TryParse((val ?? "").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out v)
+                && v >= min && v <= max)
+                return v;
+            return fallback;
         }
 
         private void Validate()

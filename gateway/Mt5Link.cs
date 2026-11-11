@@ -168,6 +168,24 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        /// <summary>
+        /// 读回执里的成交号、订单号、价格、说明。与 Wait 读返回码一样只在本 sink 的锁里读,
+        /// 不进 _gate(2026-11-11:以前为读这几个字段要再排一次全局锁)。Wait 返回非超时之后调。
+        /// Reads the deal, order, price and comment from the answer under this sink's own
+        /// lock, as Wait reads the retcode — no _gate (2026-11-11; this used to queue on
+        /// the global lock once more). Call after Wait returned something other than a timeout.
+        /// </summary>
+        public void ReadResult(out ulong deal, out ulong order, out double price, out string comment)
+        {
+            lock (_lock)
+            {
+                deal = _result.ResultDeal();
+                order = _result.ResultOrder();
+                price = _result.ResultPrice();
+                comment = _result.ResultComment() ?? "";
+            }
+        }
+
         public MTRetCode Wait(int timeoutMs)
         {
             if (!_done.Wait(timeoutMs))
@@ -253,6 +271,7 @@ namespace Prismx.Mt5Gateway
             {
                 if (p == null) return;
                 Enqueue(p.Login(), p.Position(), "add");
+                PublishPosition(p, "add");
             }
             catch { }
         }
@@ -263,6 +282,7 @@ namespace Prismx.Mt5Gateway
             {
                 if (p == null) return;
                 Enqueue(p.Login(), p.Position(), "delete");
+                PublishPosition(p, "delete");
             }
             catch { }
         }
@@ -281,6 +301,39 @@ namespace Prismx.Mt5Gateway
         public override void OnPositionUpdate(CIMTPosition p)
         {
             System.Threading.Interlocked.Increment(ref _updateCount);
+
+            try
+            {
+                if (p != null)
+                    PublishPosition(p, "update");
+            }
+            catch { }
+        }
+
+        /// <summary>事件环(2026-11-11 阶段 3),由 Mt5Link 订阅时设置。/ The event ring, set on subscribe.</summary>
+        public EventRing Ring;
+
+        private void PublishPosition(CIMTPosition p, string action)
+        {
+            EventRing ring = Ring;
+            if (ring == null)
+                return;
+
+            ulong ticket = p.Position();
+            string symbol = p.Symbol();
+            bool buy = p.Action() == (uint)CIMTPosition.EnPositionAction.POSITION_BUY;
+            double volume = SMTMath.VolumeToDouble(p.Volume());
+            double open = p.PriceOpen(), sl = p.PriceSL(), tp = p.PriceTP();
+
+            ring.Publish("position", p.Login(), j => j
+                .Field("action", action)
+                .Field("ticket", ticket)
+                .Field("symbol", symbol)
+                .Field("side", buy ? "BUY" : "SELL")
+                .Field("volume", volume)
+                .Field("priceOpen", open)
+                .Field("stopLoss", sl)
+                .Field("takeProfit", tp));
         }
 
         /// <summary>收到过的 UPDATE 事件数。只用于 /health 诊断。</summary>
@@ -350,25 +403,65 @@ namespace Prismx.Mt5Gateway
 
         public override void OnOrderAdd(CIMTOrder o)
         {
-            try { System.Threading.Interlocked.Increment(ref _add); }
+            try
+            {
+                System.Threading.Interlocked.Increment(ref _add);
+                PublishOrder(o, "add");
+            }
             catch { }
         }
 
         public override void OnOrderUpdate(CIMTOrder o)
         {
-            try { System.Threading.Interlocked.Increment(ref _update); }
+            try
+            {
+                System.Threading.Interlocked.Increment(ref _update);
+                PublishOrder(o, "update");
+            }
             catch { }
         }
 
         public override void OnOrderDelete(CIMTOrder o)
         {
-            try { System.Threading.Interlocked.Increment(ref _delete); }
+            try
+            {
+                System.Threading.Interlocked.Increment(ref _delete);
+                PublishOrder(o, "delete");
+            }
             catch { }
         }
 
         public int AddCount { get { return _add; } }
         public int UpdateCount { get { return _update; } }
         public int DeleteCount { get { return _delete; } }
+
+        /// <summary>事件环(2026-11-11 阶段 3)。/ The event ring.</summary>
+        public EventRing Ring;
+
+        private void PublishOrder(CIMTOrder o, string action)
+        {
+            EventRing ring = Ring;
+            if (ring == null || o == null)
+                return;
+
+            ulong ticket = o.Order();
+            string symbol = o.Symbol();
+            uint type = (uint)o.Type();
+            uint state = (uint)o.State();
+            double volume = SMTMath.VolumeToDouble(o.VolumeCurrent());
+            double price = o.PriceOrder(), sl = o.PriceSL(), tp = o.PriceTP();
+
+            ring.Publish("order", o.Login(), j => j
+                .Field("action", action)
+                .Field("ticket", ticket)
+                .Field("symbol", symbol)
+                .Field("type", type)
+                .Field("state", state)
+                .Field("volume", volume)
+                .Field("price", price)
+                .Field("stopLoss", sl)
+                .Field("takeProfit", tp));
+        }
     }
 
     internal sealed class DealEvent
@@ -459,6 +552,7 @@ namespace Prismx.Mt5Gateway
                 if (d == null) return;
                 Enqueue(d.Login(), d.Deal(), d.PositionID());
                 RememberFill(d);
+                PublishDeal(d);
             }
             catch { }
         }
@@ -467,6 +561,34 @@ namespace Prismx.Mt5Gateway
         // Deals are facts on the ground; rewrites are rare and the fallback scan covers them.
         public override void OnDealUpdate(CIMTDeal d) { }
         public override void OnDealDelete(CIMTDeal d) { }
+
+        /// <summary>事件环(2026-11-11 阶段 3)。/ The event ring.</summary>
+        public EventRing Ring;
+
+        private void PublishDeal(CIMTDeal d)
+        {
+            EventRing ring = Ring;
+            if (ring == null)
+                return;
+
+            ulong deal = d.Deal(), order = d.Order(), position = d.PositionID();
+            uint action = d.Action(), entry = d.Entry();
+            string symbol = d.Symbol(), comment = d.Comment();
+            double volume = SMTMath.VolumeToDouble(d.Volume());
+            double price = d.Price(), profit = d.Profit();
+
+            ring.Publish("deal", d.Login(), j => j
+                .Field("deal", deal)
+                .Field("order", order)
+                .Field("position", position)
+                .Field("action", action)
+                .Field("entry", entry)
+                .Field("symbol", symbol)
+                .Field("volume", volume)
+                .Field("price", price)
+                .Field("profit", profit)
+                .Field("comment", comment));
+        }
 
         private void RememberFill(CIMTDeal d)
         {
@@ -630,6 +752,16 @@ namespace Prismx.Mt5Gateway
         // until stop-out. Callers seeing this flag must confirm the fill themselves.
         public bool Placed;
 
+        // 请求确实发到了券商、却没等到回执(超时或等待中断线)。只有这种才值得事后按
+        // comment 短码到服务器核对(见 Mt5Link.Reconcile.cs)。
+        // The request reached the broker but no answer came (timeout or a drop mid-wait).
+        // Only these are worth reconciling by the comment code afterwards.
+        public bool SentUnknown;
+
+        // 事后核对出的结论:"filled" / "not_filled",空 = 没核对过。
+        // Reconciliation verdict: "filled" / "not_filled", empty when never reconciled.
+        public string Resolved = "";
+
         public static TradeResult Fail(string retcode, string message)
         {
             return new TradeResult { Ok = false, Retcode = retcode, Message = message };
@@ -657,8 +789,13 @@ namespace Prismx.Mt5Gateway
     // site, thread and time, logged by the probe / self-heal and on slow releases.
     internal sealed class GateTrace
     {
-        /// <summary>占用超过这么久,释放时记一条 WARN。/ Holds longer than this are logged on release.</summary>
-        public const int GateSlowHoldMs = 1000;
+        /// <summary>
+        /// 占用超过这么久,释放时记一条 WARN。2026-11-11 由 1000 降到 200:下单专线上只该剩
+        /// 毫秒级的内存操作和发单,200ms 已经是异常。
+        /// Holds longer than this are logged on release. Lowered from 1000 on 2026-11-11:
+        /// only millisecond memory work and sends should remain on the trading link.
+        /// </summary>
+        public const int GateSlowHoldMs = 200;
 
         private sealed class Holder
         {
@@ -678,6 +815,8 @@ namespace Prismx.Mt5Gateway
         // Written only by the thread holding the lock; other threads only read the reference.
         private volatile Holder _holder;
         private int _depth;
+        private int _slowHolds;
+        private int _maxHoldMs;
 
         public void Acquired(string member, int line)
         {
@@ -698,11 +837,47 @@ namespace Prismx.Mt5Gateway
                 return;
 
             int heldMs = unchecked(Environment.TickCount - h.Since);
+            if (heldMs > _maxHoldMs)
+                _maxHoldMs = heldMs;
+
             if (heldMs >= GateSlowHoldMs)
             {
+                Interlocked.Increment(ref _slowHolds);
                 try { Log.Warn("全局锁占用偏久 {0} 毫秒:{1}(线程 {2})", heldMs, h.Site, h.ThreadId); }
                 catch { }
             }
+        }
+
+        /// <summary>当前占用者已占了多久(毫秒),没人占为 0。/ How long the current holder has held it.</summary>
+        public int HeldMs
+        {
+            get
+            {
+                Holder h = _holder;
+                return h == null ? 0 : Math.Max(0, unchecked(Environment.TickCount - h.Since));
+            }
+        }
+
+        /// <summary>当前占用者的调用处,没人占为 null。/ Current holder's call site.</summary>
+        public string Site
+        {
+            get
+            {
+                Holder h = _holder;
+                return h == null ? null : h.Site;
+            }
+        }
+
+        /// <summary>累计慢占用次数(≥ GateSlowHoldMs)。/ Slow holds so far.</summary>
+        public int SlowHolds
+        {
+            get { return Thread.VolatileRead(ref _slowHolds); }
+        }
+
+        /// <summary>进程启动以来最长的一次占用(毫秒)。/ Longest hold since start.</summary>
+        public int MaxHoldMs
+        {
+            get { return Thread.VolatileRead(ref _maxHoldMs); }
         }
 
         /// <summary>当前占用者的描述,给日志用。/ Current holder, for logs.</summary>
@@ -750,7 +925,7 @@ namespace Prismx.Mt5Gateway
         }
     }
 
-    internal sealed class Mt5Link : IDisposable
+    internal sealed partial class Mt5Link : IDisposable
     {
         // 重连时 ConnectOnce 在 _gate 里最长攥这么久。没有缩短:带 pump 的首次同步在
         // 券商慢时本来就要十几秒,缩了会把"慢但能连上"变成"永远连不上"。交易入口改成
@@ -978,6 +1153,7 @@ namespace Prismx.Mt5Gateway
                 _posSubscribed = false;
                 _dealSubscribed = false;
                 _ordSubscribed = false;
+                _tickSubscribed = false;
                 _needResubscribe = true;
 
                 // dealer 通道也随连接一起没了。以前这个标志断线后仍是 true,SDK 自己重连
@@ -993,6 +1169,14 @@ namespace Prismx.Mt5Gateway
                 // Wake them now as "outcome unknown" instead of each waiting 60s.
                 foreach (DealerSink s in _liveSinks.Keys)
                     s.CancelLinkDropped();
+
+                // 断线期间推送会丢:事件流里留个记号,后端恢复后整体重读。
+                // Pushes are lost while down: mark it so the backend resyncs afterwards.
+                if (_connected)
+                {
+                    try { Events.Publish("link", 0, j => j.Field("state", "down")); }
+                    catch { }
+                }
             }
 
             _connected = value;
@@ -1089,6 +1273,7 @@ namespace Prismx.Mt5Gateway
             SubscribePositions();
             SubscribeDeals();
             SubscribeOrders();
+            SubscribeTicks();
 
             // 配置里点名的品种在启动时就选上,进程起来后的第一笔单不等首个 tick。
             // Pre-select the configured symbols so the very first order after start
@@ -1158,6 +1343,7 @@ namespace Prismx.Mt5Gateway
                         continue;
                     }
 
+                    _selectedFast[s] = 0;
                     _everSelected.Add(s);
                     added++;
                 }
@@ -1180,6 +1366,7 @@ namespace Prismx.Mt5Gateway
                     // 托管 sink 内部持有原生指针,构造后必须先 RegisterSink,
                     // 否则传进去的是空指针,订阅会返回 MT_RET_ERR_PARAMS。
                     PositionSink sink = new PositionSink();
+                    sink.Ring = Events;
                     MTRetCode reg = sink.RegisterSink();
 
                     if (reg != MTRetCode.MT_RET_OK)
@@ -1237,6 +1424,7 @@ namespace Prismx.Mt5Gateway
                     // Same trap as PositionSink: the managed sink holds a native
                     // pointer and must be registered before subscribing.
                     DealSink sink = new DealSink();
+                    sink.Ring = Events;
                     MTRetCode reg = sink.RegisterSink();
 
                     if (reg != MTRetCode.MT_RET_OK)
@@ -1283,6 +1471,7 @@ namespace Prismx.Mt5Gateway
                 using (EnterGate())
                 {
                     OrderSink sink = new OrderSink();
+                    sink.Ring = Events;
                     MTRetCode reg = sink.RegisterSink();
 
                     if (reg != MTRetCode.MT_RET_OK)
@@ -1346,7 +1535,7 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
-                if (server == null || !_ordSubscribed || !_connected)
+                if (server == null || !_ordSubscribed || !_connected || _lastOrdersLocal)
                     return;
 
                 if (unchecked(Environment.TickCount - _ordSubscribedAt) < 30000)
@@ -1471,6 +1660,13 @@ namespace Prismx.Mt5Gateway
                 if (n <= 20 || n % 100 == 0)
                     Log.Warn("挂单本地 pump 与服务器结果不一致(第 {0} 次,仅计数,返回值仍以服务器为准):login={1} {2}",
                         n, login, detail);
+
+                // 强制开着本地读(local_orders=true)时,一有差异就停用 5 分钟;自动启用的
+                // 那种在差异计数 >0 后本来就不再启用。
+                // With local_orders forced on, a mismatch suspends local reads for 5 minutes;
+                // auto-enabled reads stop by themselves once a mismatch is counted.
+                if (_cfg.LocalOrders)
+                    SuspendMirror("挂单 " + detail);
             }
             catch
             {
@@ -1787,6 +1983,8 @@ namespace Prismx.Mt5Gateway
             using (EnterGate())
             {
                 _selected.Clear();
+                _selectedFast.Clear();
+                _sessionVerdicts.Clear();
                 _limitsCache.Clear();
                 _tradableCache.Clear();
                 _groupCache.Clear();
@@ -1823,6 +2021,12 @@ namespace Prismx.Mt5Gateway
             SubscribeDeals();
             _ordSubscribed = false;
             SubscribeOrders();
+            SubscribeTicks();
+
+            // 订阅重建好了:告诉事件流的读者整体重读一次(断线期间的推送已丢)。
+            // Subscriptions are back: tell event readers to resync (pushes were lost).
+            try { Events.Publish("link", 0, j => j.Field("state", "up").Field("reason", reason ?? "")); }
+            catch { }
         }
 
         /// <summary>重开 dealer 通道:先停(忽略结果)再启。SDK 自己重连时旧通道是否还
@@ -1945,7 +2149,13 @@ namespace Prismx.Mt5Gateway
 
             string why = null;
 
-            if (GateBlockedSec >= GateStuckExitSec)
+            // 2026-11-11:下单专线上只剩毫秒级的操作,锁连续 gate_stuck_exit_sec(默认 20 秒)
+            // 拿不到就是挂住了。重连、重开 dealer 这类本来就可能慢的占用者仍按 180 秒。
+            // Only millisecond work remains on the trading link, so gate_stuck_exit_sec
+            // (20s by default) means hung; reconnect-type holders keep the old 180s.
+            int stuckLimit = IsSlowSiteAllowed(_gateTrace.Site) ? GateStuckExitSec : _cfg.GateStuckExitSec;
+
+            if (GateBlockedSec >= stuckLimit)
                 why = string.Format("全局锁已 {0} 秒拿不到(某个 MT5 调用挂住了;{1})",
                     GateBlockedSec, _gateTrace.Describe());
             else if (DegradedSec >= DegradedExitSec)
@@ -2042,6 +2252,10 @@ namespace Prismx.Mt5Gateway
                 // 自愈检查不在这里做:见 SelfHealLoop。
                 // Self-heal lives on its own thread; see SelfHealLoop.
 
+                // dealer 请求的延后收尾:锁空着才做,不排队。/ Deferred dealer cleanup, only when free.
+                if (_connected)
+                    SweepDealerCleanup();
+
                 if (_stopping || _connected)
                 {
                     delaySec = 1;
@@ -2095,10 +2309,22 @@ namespace Prismx.Mt5Gateway
                             heartbeatTick = 0;
                             _probeRequested = false;
 
+                            // 被动判断(2026-11-11):最近有数据进来(报价推送、已收字节数在涨)
+                            // 就算活着,不做那次要占 _gate 的服务器往返——半开的连接不会有
+                            // 新数据进来。补探看最近 3 秒,定时探测看最近 15 秒;没有证据才主动探。
+                            // Passive check (2026-11-11): recent inbound data (tick pushes,
+                            // a moving bytes-read counter) means alive, skipping the
+                            // gate-holding round trip — a half-open link receives nothing.
+                            // A requested probe looks back 3s, a regular one 15s.
                             bool? probe;
                             if (!requested &&
                                 unchecked(Environment.TickCount - _lastRoundTripAt) < HeartbeatEverySec * 1000)
                                 probe = true;
+                            else if (PassiveAlive(requested ? 3000 : (HeartbeatEverySec + 5) * 1000))
+                            {
+                                probe = true;
+                                Interlocked.Increment(ref _passiveSkips);
+                            }
                             else
                                 probe = ProbeAlive();
 
@@ -2250,13 +2476,12 @@ namespace Prismx.Mt5Gateway
         //+------------------------------------------------------------------+
         public MTRetCode CheckPassword(ulong login, string password)
         {
-            using (EnterGate())
-            {
-                return _manager.UserPasswordCheck(
-                    CIMTUser.EnUsersPasswords.USER_PASS_MAIN,
-                    login,
-                    password);
-            }
+            // 服务器往返,走辅助通道,不占下单专线(2026-11-11)。
+            // A server round trip: runs on the helper channel, off the trading link.
+            return OnHelper("核对密码", m => m.UserPasswordCheck(
+                CIMTUser.EnUsersPasswords.USER_PASS_MAIN,
+                login,
+                password));
         }
 
         //+------------------------------------------------------------------+
@@ -2376,7 +2601,24 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
+            if (!TradingLinkReadAllowed())
+                return ReadUnavailable<AccountInfo>(out res, out readBusy);
+
+            Interlocked.Increment(ref _tradingLinkReads);
             return GetAccountOn(_manager, _gate, login, out res, allowLocalStatic);
+        }
+
+        /// <summary>
+        /// 查询通道都不可用、又不许改走交易连接时的统一结局:按"忙"回(HTTP 层回 503 read_busy,
+        /// 后端保留上一次的数据、稍后重试)。
+        /// The one outcome when no query channel is usable and the trading link is off
+        /// limits: answer busy (503 read_busy; the backend keeps its last data and retries).
+        /// </summary>
+        private static T ReadUnavailable<T>(out MTRetCode res, out bool readBusy) where T : class
+        {
+            res = MTRetCode.MT_RET_ERR_NETWORK;
+            readBusy = true;
+            return null;
         }
 
         /// <summary>某账号最近一次"从服务器读到"的改密时间与时刻。/ Last server-read password-change time.</summary>
@@ -2602,60 +2844,46 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
-            using (EnterGate())
+            // 不再整段攥着 _gate:本地 pump 只短暂进锁,本地没有才走辅助通道问服务器
+            // (2026-11-11)。缓存是并发字典,不需要锁保护。
+            // No longer held under _gate end to end: the local pump takes the lock briefly
+            // and a miss asks the server on the helper channel (2026-11-11). The caches are
+            // concurrent dictionaries and need no lock.
+            res = ReadUserGroup(login, out group);
+            bool exists = res == MTRetCode.MT_RET_OK;
+
+            // 只缓存确定的结论:查到了、或服务器明确答复"没有/无权"。网络、超时这类
+            // 临时错误不缓存——否则一次抖动会让这个账号整整 60 秒下不了单。
+            // Cache only definitive answers (found, or an explicit not-found / no
+            // rights). A transient network/timeout error must not lock the account
+            // out of trading for the full 60s TTL.
+            bool definitive = exists ||
+                res == MTRetCode.MT_RET_ERR_NOTFOUND ||
+                res == MTRetCode.MT_RET_ERR_PERMISSIONS;
+
+            if (definitive)
             {
-                TradableEntry hit;
-                if (_tradableCache.TryGetValue(login, out hit))
-                {
-                    // TickCount 会在约 49.7 天后回绕,unchecked 相减仍得到正确
-                    // 的时间差(补码运算),不需要特殊处理。
-                    // TickCount wraps after ~49.7 days; the unchecked subtraction
-                    // still yields the correct delta via two's complement.
-                    int age = unchecked(now - hit.AtTickCount);
-                    if (age >= 0 && age < TradableCacheTtlMs)
-                    {
-                        group = hit.Group;
-                        res = hit.Res;
-                        return hit.Exists;
-                    }
-                }
-
-                res = ReadUserGroup(login, out group);
-                bool exists = res == MTRetCode.MT_RET_OK;
-
-                // 只缓存确定的结论:查到了、或服务器明确答复"没有/无权"。网络、超时这类
-                // 临时错误不缓存——否则一次抖动会让这个账号整整 60 秒下不了单。
-                // Cache only definitive answers (found, or an explicit not-found / no
-                // rights). A transient network/timeout error must not lock the account
-                // out of trading for the full 60s TTL.
-                bool definitive = exists ||
-                    res == MTRetCode.MT_RET_ERR_NOTFOUND ||
-                    res == MTRetCode.MT_RET_ERR_PERMISSIONS;
-
-                if (definitive)
-                {
-                    TradableEntry entry;
-                    entry.Exists = exists;
-                    entry.Group = group;
-                    entry.Res = res;
-                    entry.AtTickCount = now;
-                    _tradableCache[login] = entry;
-                }
-                else
-                {
-                    TradableEntry dropped;
-                    _tradableCache.TryRemove(login, out dropped);
-                }
-
-                // 顺手喂给 ResolveSymbol 的组缓存:同一笔开仓紧接着就要按组解析品种,
-                // 没必要为同一个 login 再读一次。
-                // Also feed ResolveSymbol's group cache: the same order resolves the
-                // symbol by group right after this, no point reading the login twice.
-                if (exists)
-                    _groupCache[login] = new TimedString { Value = group, AtTickCount = now };
-
-                return exists;
+                TradableEntry entry;
+                entry.Exists = exists;
+                entry.Group = group;
+                entry.Res = res;
+                entry.AtTickCount = now;
+                _tradableCache[login] = entry;
             }
+            else
+            {
+                TradableEntry dropped;
+                _tradableCache.TryRemove(login, out dropped);
+            }
+
+            // 顺手喂给 ResolveSymbol 的组缓存:同一笔开仓紧接着就要按组解析品种,
+            // 没必要为同一个 login 再读一次。
+            // Also feed ResolveSymbol's group cache: the same order resolves the
+            // symbol by group right after this, no point reading the login twice.
+            if (exists)
+                _groupCache[login] = new TimedString { Value = group, AtTickCount = now };
+
+            return exists;
         }
 
         //+------------------------------------------------------------------+
@@ -2855,6 +3083,14 @@ namespace Prismx.Mt5Gateway
                     return false;
             }
 
+            if (!TradingLinkReadAllowed())
+            {
+                readBusy = true;
+                res = MTRetCode.MT_RET_ERR_NETWORK;
+                return false;
+            }
+
+            Interlocked.Increment(ref _tradingLinkReads);
             return RequestGroupsOn(_manager, _gate, miss, groups, now, out res);
         }
 
@@ -2907,14 +3143,14 @@ namespace Prismx.Mt5Gateway
         }
 
         /// <summary>
-        /// 读账号所在组。调用方须持有 _gate。
+        /// 读账号所在组。调用方**不**持有 _gate(2026-11-11 起本地读只短暂进锁,服务器读走辅助通道)。
         ///
         /// 先查本地 pump 库:连接时开了 PUMP_MODE_USERS,账号资料的改动(含换组)由
         /// 服务器主动推过来,所以 UserGet 是内存读,不发网络请求。本地没有(pump 还没
         /// 同步到、或 manager 无权看见这个账号)才退回 UserRequest 向服务器要一次——
         /// 无权看见的账号两边都是 NOTFOUND,行为与只走 UserRequest 时一致。
         ///
-        /// Reads the account's group; caller holds _gate. Local pump database first:
+        /// Reads the account's group; caller does NOT hold _gate. Local pump database first:
         /// PUMP_MODE_USERS is on and user changes (group moves included) are pushed,
         /// so UserGet is an in-memory read. Falls back to a UserRequest round trip
         /// only when the pump lacks the login (not yet synced, or not visible to this
@@ -2922,15 +3158,36 @@ namespace Prismx.Mt5Gateway
         /// </summary>
         private MTRetCode ReadUserGroup(ulong login, out string group)
         {
-            using (CIMTUser user = _manager.UserCreate())
+            // 本地 pump:内存读,只短暂进锁。/ Local pump: a memory read, brief lock.
+            using (EnterGate())
             {
-                MTRetCode r = _manager.UserGet(login, user);
-                if (r != MTRetCode.MT_RET_OK)
-                    r = _manager.UserRequest(login, user);
-
-                group = r == MTRetCode.MT_RET_OK ? (user.Group() ?? "") : "";
-                return r;
+                using (CIMTUser user = _manager.UserCreate())
+                {
+                    MTRetCode r = _manager.UserGet(login, user);
+                    if (r == MTRetCode.MT_RET_OK)
+                    {
+                        group = user.Group() ?? "";
+                        return r;
+                    }
+                }
             }
+
+            // 本地没有:服务器往返,走辅助通道,不占下单专线(2026-11-11)。
+            // Not in the pump: a server round trip on the helper channel (2026-11-11).
+            string g = "";
+            MTRetCode rr = OnHelper("读账号组", m =>
+            {
+                using (CIMTUser u = m.UserCreate())
+                {
+                    MTRetCode x = m.UserRequest(login, u);
+                    if (x == MTRetCode.MT_RET_OK)
+                        g = u.Group() ?? "";
+                    return x;
+                }
+            });
+
+            group = rr == MTRetCode.MT_RET_OK ? g : "";
+            return rr;
         }
 
         /// <summary>
@@ -2955,10 +3212,11 @@ namespace Prismx.Mt5Gateway
         {
             snap = new PositionSnapshot();
             fromPump = false;
+            res = MTRetCode.MT_RET_ERR_NOTFOUND;
 
-            using (EnterGate())
+            if (!forceServer)
             {
-                if (!forceServer)
+                using (EnterGate())
                 {
                     using (CIMTPosition p = _manager.PositionCreate())
                     {
@@ -2974,24 +3232,39 @@ namespace Prismx.Mt5Gateway
                         }
                     }
                 }
+            }
 
-                using (CIMTPositionArray arr = _manager.PositionCreateArray())
+            // 服务器往返:走辅助通道,不在下单专线上等(2026-11-11)。确认成交那两次重读、
+            // 手数过期后的重读都走这里——以前它们在 _gate 里各要一趟服务器往返。
+            // Server round trip on the helper channel, off the trading link (2026-11-11).
+            // The confirmation re-reads and the stale-volume re-read all land here; each
+            // used to cost a round trip under _gate.
+            PositionSnapshot found = new PositionSnapshot();
+            bool have = false;
+
+            res = OnHelper("重读仓位", m =>
+            {
+                using (CIMTPositionArray arr = m.PositionCreateArray())
                 {
-                    res = _manager.PositionRequestByTickets(new ulong[] { ticket }, arr);
-                    if (res != MTRetCode.MT_RET_OK)
-                        return false;
+                    MTRetCode r = m.PositionRequestByTickets(new ulong[] { ticket }, arr);
+                    if (r != MTRetCode.MT_RET_OK)
+                        return r;
 
                     CIMTPosition p = arr.Total() > 0 ? arr.Next(0) : null;
                     if (p == null)
-                    {
-                        res = MTRetCode.MT_RET_ERR_NOTFOUND;
-                        return false;
-                    }
+                        return MTRetCode.MT_RET_ERR_NOTFOUND;
 
-                    FillSnapshot(ref snap, p);
-                    return true;
+                    FillSnapshot(ref found, p);
+                    have = true;
+                    return MTRetCode.MT_RET_OK;
                 }
-            }
+            });
+
+            if (res != MTRetCode.MT_RET_OK || !have)
+                return false;
+
+            snap = found;
+            return true;
         }
 
         private static void FillSnapshot(ref PositionSnapshot snap, CIMTPosition p)
@@ -3035,6 +3308,15 @@ namespace Prismx.Mt5Gateway
             bool priority)
         {
             readBusy = false;
+
+            // 本地镜像(local_positions=true 时)。/ Local mirror when local_positions=true.
+            PositionInfo[] local;
+            if (TryLocalPositions(login, out local))
+            {
+                res = MTRetCode.MT_RET_OK;
+                return local;
+            }
+
             bool saturated = false;
             ReadChannel rc = _reads == null ? null
                 : priority ? _reads.Acquire(out saturated, PriorityReadWaitMs)
@@ -3053,7 +3335,11 @@ namespace Prismx.Mt5Gateway
                 {
                     PositionInfo[] r = GetPositionsOn(rc.Manager, rc.Gate, login, out res);
                     if (!IsLinkError(res))
+                    {
+                        if (res == MTRetCode.MT_RET_OK)
+                            ShadowComparePositions(login, r);
                         return r;
+                    }
                     rc.MarkBroken(res);
                 }
                 catch (Exception ex)
@@ -3067,6 +3353,10 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
+            if (!TradingLinkReadAllowed())
+                return ReadUnavailable<PositionInfo[]>(out res, out readBusy);
+
+            Interlocked.Increment(ref _tradingLinkReads);
             return GetPositionsOn(_manager, _gate, login, out res);
         }
 
@@ -3140,6 +3430,15 @@ namespace Prismx.Mt5Gateway
         public OrderInfo[] GetOrders(ulong login, out MTRetCode res, out bool readBusy, bool allowSpill)
         {
             readBusy = false;
+
+            // 本地镜像验证过就直接读内存(见 Mt5Link.Mirror.cs)。/ Local mirror when trusted.
+            OrderInfo[] local;
+            if (TryLocalOrders(login, out local))
+            {
+                res = MTRetCode.MT_RET_OK;
+                return local;
+            }
+
             bool saturated = false;
             ReadChannel rc = _reads != null ? _reads.Acquire(out saturated) : null;
 
@@ -3170,6 +3469,10 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
+            if (!TradingLinkReadAllowed())
+                return ReadUnavailable<OrderInfo[]>(out res, out readBusy);
+
+            Interlocked.Increment(ref _tradingLinkReads);
             return GetOrdersOn(_manager, _gate, login, out res);
         }
 
@@ -3283,6 +3586,10 @@ namespace Prismx.Mt5Gateway
                 }
             }
 
+            if (!TradingLinkReadAllowed())
+                return ReadUnavailable<DealInfo[]>(out res, out readBusy);
+
+            Interlocked.Increment(ref _tradingLinkReads);
             return GetDealsOn(_manager, _gate, login, fromUnix, toUnix, out res);
         }
 
@@ -3690,23 +3997,26 @@ namespace Prismx.Mt5Gateway
             if (dealTicket == 0)
                 return 0;
 
-            using (EnterGate())
+            // 服务器往返,走辅助通道(2026-11-11)。/ Server round trip on the helper channel.
+            ulong position = 0;
+            OnHelper("反查仓位号", m =>
             {
-                using (CIMTDealArray arr = _manager.DealCreateArray())
+                using (CIMTDealArray arr = m.DealCreateArray())
                 {
                     if (arr == null)
-                        return 0;
+                        return MTRetCode.MT_RET_ERR_MEM;
 
-                    MTRetCode res = _manager.DealRequestByTickets(
-                        new ulong[] { dealTicket }, arr);
-
-                    if (res != MTRetCode.MT_RET_OK || arr.Total() == 0)
-                        return 0;
+                    MTRetCode r = m.DealRequestByTickets(new ulong[] { dealTicket }, arr);
+                    if (r != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                        return r;
 
                     CIMTDeal d = arr.Next(0);
-                    return d == null ? 0 : d.PositionID();
+                    position = d == null ? 0 : d.PositionID();
+                    return r;
                 }
-            }
+            });
+
+            return position;
         }
 
         //+------------------------------------------------------------------+
@@ -3732,10 +4042,12 @@ namespace Prismx.Mt5Gateway
                     return fastSym.Value;
             }
 
+            // --- 1. lookup group ---
+            // 在 _gate 外取:本地没有时它要走辅助通道。/ Outside _gate: it may use the helper channel.
+            string group = GroupForLogin(login);
+
             using (EnterGate())
             {
-                // --- 1. lookup group ---
-                string group = GroupForLogin(login);
 
                 if (group.Length == 0)
                     return baseSymbol;
@@ -3923,6 +4235,14 @@ namespace Prismx.Mt5Gateway
                 return false;
             }
 
+            // 报价缓存命中:不进锁(2026-11-11,见 Mt5Link.Fast.cs)。
+            // Tick cache hit: no lock (2026-11-11, see Mt5Link.Fast.cs).
+            if (TryCachedQuote(symbol, out bid, out ask))
+            {
+                res = MTRetCode.MT_RET_OK;
+                return true;
+            }
+
             res = MTRetCode.MT_RET_ERR_NOTFOUND;
 
             bool justSelected = false;
@@ -3951,6 +4271,7 @@ namespace Prismx.Mt5Gateway
                         }
                         else
                         {
+                            _selectedFast[symbol] = 0;
                             _everSelected.Add(symbol);
                             justSelected = true;
                         }
@@ -3963,8 +4284,14 @@ namespace Prismx.Mt5Gateway
                     {
                         bid = tick.bid;
                         ask = tick.ask;
-                        return true;
                     }
+                }
+
+                if (bid > 0 || ask > 0)
+                {
+                    // 锁外做影子对比,只计数。/ Shadow comparison outside the lock, counting only.
+                    ShadowCompareTick(symbol, bid, ask);
+                    return true;
                 }
 
                 if (attempt == 0)
@@ -4079,23 +4406,17 @@ namespace Prismx.Mt5Gateway
             if (_groupCache.TryGetValue(login, out fastHit) && Fresh(fastHit))
                 return fastHit.Value;
 
-            using (EnterGate())
-            {
-                TimedString hit;
-                if (_groupCache.TryGetValue(login, out hit) && Fresh(hit))
-                    return hit.Value;
+            // 本地 pump 优先,见 ReadUserGroup;不在 _gate 里调它(它自己会短暂进锁,
+            // 本地没有时还要走辅助通道)。正常开仓路径走不到这里:前一步的
+            // CheckAccountGroup 已经把组填进缓存了。
+            // Pump first (see ReadUserGroup), called outside _gate since it may go to the
+            // helper channel. The normal open path rarely gets here.
+            string group;
+            if (ReadUserGroup(login, out group) != MTRetCode.MT_RET_OK)
+                return "";
 
-                // 本地 pump 库优先,见 ReadUserGroup。正常开仓路径走不到这里:
-                // HandleOpen 前一步的 CheckAccountGroup 已经把组填进缓存了。
-                // Pump first (see ReadUserGroup). The normal open path rarely gets
-                // here: CheckAccountGroup one step earlier already filled the cache.
-                string group;
-                if (ReadUserGroup(login, out group) != MTRetCode.MT_RET_OK)
-                    return "";
-
-                _groupCache[login] = new TimedString { Value = group, AtTickCount = Environment.TickCount };
-                return group;
-            }
+            _groupCache[login] = new TimedString { Value = group, AtTickCount = Environment.TickCount };
+            return group;
         }
 
         /// <summary>
@@ -4266,10 +4587,13 @@ namespace Prismx.Mt5Gateway
                 return false;
             }
 
+            // 在 _gate 外取组和品种名:本地没有时要走辅助通道。
+            // Group and symbol outside _gate: a miss goes to the helper channel.
+            string group = login != 0 ? GroupForLogin(login) : "";
+            string resolved = login != 0 ? ResolveSymbol(login, symbol) : symbol;
+
             using (EnterGate())
             {
-                string group = login != 0 ? GroupForLogin(login) : "";
-                string resolved = login != 0 ? ResolveSymbol(login, symbol) : symbol;
 
                 using (CIMTConSymbol sym = _manager.SymbolCreate())
                 {
@@ -4353,8 +4677,19 @@ namespace Prismx.Mt5Gateway
 
         private string ClosedReasonCore(string symbol, string group, bool manage)
         {
+            // 结果缓存到这一分钟结束(2026-11-11):以前每笔单都要进锁读一遍品种配置、
+            // 时段和假日表。/ Verdict cached to the end of the minute (2026-11-11): every
+            // order used to read symbol config, sessions and holidays under the lock.
+            string key = SessionKey(symbol, group, manage);
+            string cached;
+            if (TryCachedVerdict(key, out cached))
+                return cached;
+
             try
             {
+                long serverTime = 0;
+                string verdict = null;
+
                 using (EnterGate())
                 {
                     using (CIMTConSymbol sym = _manager.SymbolCreate())
@@ -4367,33 +4702,13 @@ namespace Prismx.Mt5Gateway
                             return null;
 
                         SymbolSessionInfo info = BuildSessionInfoLocked(sym, symbol, group, manage);
-
-                        if (info.OpenNow || info.ServerTime <= 0)
-                            return null;
-
-                        if (manage)
-                        {
-                            if (info.TradeMode == (int)CIMTConSymbol.EnTradeMode.TRADE_DISABLED)
-                                return null;
-                        }
-                        else if (info.TradeMode == (int)CIMTConSymbol.EnTradeMode.TRADE_DISABLED
-                            || info.TradeMode == (int)CIMTConSymbol.EnTradeMode.TRADE_CLOSEONLY)
-                            return "该品种当前禁止开仓(券商 TradeMode 限制) / trading disabled for this symbol";
-
-                        if (!info.SessionsKnown)
-                            return null;
-
-                        string when = "";
-
-                        if (info.NextOpenUtc > 0)
-                        {
-                            DateTime next = UnixEpoch.AddSeconds(info.NextOpenUtc).AddHours(8);
-                            when = ",预计 " + next.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture) + " (UTC+8) 开盘";
-                        }
-
-                        return "该品种休市中,不能下单" + when + " / market closed for this symbol";
+                        serverTime = info.ServerTime;
+                        verdict = SessionVerdictFrom(info, manage);
                     }
                 }
+
+                StoreVerdict(key, verdict, serverTime);
+                return verdict;
             }
             catch (Exception ex)
             {
@@ -4401,6 +4716,34 @@ namespace Prismx.Mt5Gateway
                 Log.Warn("交易时段判定出错,已跳过:{0} -> {1}", symbol, ex.Message);
                 return null;
             }
+        }
+
+        private static string SessionVerdictFrom(SymbolSessionInfo info, bool manage)
+        {
+            if (info.OpenNow || info.ServerTime <= 0)
+                return null;
+
+            if (manage)
+            {
+                if (info.TradeMode == (int)CIMTConSymbol.EnTradeMode.TRADE_DISABLED)
+                    return null;
+            }
+            else if (info.TradeMode == (int)CIMTConSymbol.EnTradeMode.TRADE_DISABLED
+                || info.TradeMode == (int)CIMTConSymbol.EnTradeMode.TRADE_CLOSEONLY)
+                return "该品种当前禁止开仓(券商 TradeMode 限制) / trading disabled for this symbol";
+
+            if (!info.SessionsKnown)
+                return null;
+
+            string when = "";
+
+            if (info.NextOpenUtc > 0)
+            {
+                DateTime next = UnixEpoch.AddSeconds(info.NextOpenUtc).AddHours(8);
+                when = ",预计 " + next.ToString("MM-dd HH:mm", CultureInfo.InvariantCulture) + " (UTC+8) 开盘";
+            }
+
+            return "该品种休市中,不能下单" + when + " / market closed for this symbol";
         }
 
         private List<HolidayRule> ReadHolidaysLocked()
@@ -4704,7 +5047,7 @@ namespace Prismx.Mt5Gateway
         /// the server silently dropped the levels, and a lost stop-loss means
         /// an unprotected position.
         /// </summary>
-        public TradeResult OpenPosition(ulong login, string symbol, bool isBuy, double lots,
+        private TradeResult OpenPositionUnguarded(ulong login, string symbol, bool isBuy, double lots,
             double stopLoss, double takeProfit, string tag)
         {
             // 连接不在就不去排 _gate,见 LinkDownResult。/ Don't queue on _gate; see LinkDownResult.
@@ -4720,6 +5063,43 @@ namespace Prismx.Mt5Gateway
         /// <summary>发单前置步骤合计超过这个毫秒数就记一行分段耗时。
         /// Log the per-step breakdown when the pre-send steps exceed this.</summary>
         internal const int PrepSlowLogMs = 100;
+
+        /// <summary>发一次开仓 dealer 请求(SL/TP 随单)。/ One open request, levels attached.</summary>
+        private TradeResult SendOpenRequest(ulong login, string symbol, bool isBuy, double lots,
+            double price, bool wantLevels, double stopLoss, double takeProfit, string tag)
+        {
+            return SendDealerRequest(req =>
+            {
+                req.Login(login);
+                req.Action(CIMTRequest.EnTradeActions.TA_DEALER_POS_EXECUTE);
+                req.Type(isBuy ? CIMTOrder.EnOrderType.OP_BUY : CIMTOrder.EnOrderType.OP_SELL);
+                req.Volume(SMTMath.VolumeToInt(lots));
+                req.Symbol(symbol);
+                req.PriceOrder(price);
+                req.Comment(BuildComment(tag));
+
+                // SL/TP 随开仓请求一起发。只设非 0 的那一侧,并对应置 CHANGED 标志:
+                // 没要求的一侧不该被当成「改成 0」。
+                if (wantLevels)
+                {
+                    CIMTRequest.EnTradeActionFlags flags = 0;
+
+                    if (stopLoss > 0)
+                    {
+                        req.PriceSL(stopLoss);
+                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL;
+                    }
+
+                    if (takeProfit > 0)
+                    {
+                        req.PriceTP(takeProfit);
+                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP;
+                    }
+
+                    req.Flags(flags);
+                }
+            });
+        }
 
         private TradeResult OpenPositionCore(ulong login, string symbol, bool isBuy, double lots,
             double stopLoss, double takeProfit, string tag)
@@ -4798,36 +5178,23 @@ namespace Prismx.Mt5Gateway
 
             bool wantLevels = stopLoss > 0 || takeProfit > 0;
 
-            TradeResult r = SendDealerRequest(req =>
+            // 重报价类拒绝(价格变了/没价/太频繁)换新价重发,最多 2 次,见 RetryRequotes。
+            // Requote-type rejections are re-sent at a fresh price; see RetryRequotes.
+            TradeResult r = RetryRequotes("开仓", attempt =>
             {
-                req.Login(login);
-                req.Action(CIMTRequest.EnTradeActions.TA_DEALER_POS_EXECUTE);
-                req.Type(isBuy ? CIMTOrder.EnOrderType.OP_BUY : CIMTOrder.EnOrderType.OP_SELL);
-                req.Volume(SMTMath.VolumeToInt(lots));
-                req.Symbol(symbol);
-                req.PriceOrder(price);
-                req.Comment(BuildComment(tag));
-
-                // SL/TP 随开仓请求一起发。只设非 0 的那一侧,并对应置 CHANGED 标志:
-                // 没要求的一侧不该被当成「改成 0」。
-                if (wantLevels)
+                if (attempt > 0)
                 {
-                    CIMTRequest.EnTradeActionFlags flags = 0;
-
-                    if (stopLoss > 0)
+                    double b2, a2;
+                    MTRetCode q2;
+                    if (GetQuote(symbol, out b2, out a2, out q2))
                     {
-                        req.PriceSL(stopLoss);
-                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_SL;
+                        double p2 = isBuy ? a2 : b2;
+                        if (p2 > 0)
+                            price = p2;
                     }
-
-                    if (takeProfit > 0)
-                    {
-                        req.PriceTP(takeProfit);
-                        flags |= CIMTRequest.EnTradeActionFlags.TA_FLAG_CHANGED_TP;
-                    }
-
-                    req.Flags(flags);
                 }
+
+                return SendOpenRequest(login, symbol, isBuy, lots, price, wantLevels, stopLoss, takeProfit, tag);
             });
 
             // SL/TP 无效导致整单被拒时,去掉 SL/TP 重发,把开仓和设止损的成败解耦。
@@ -4968,7 +5335,7 @@ namespace Prismx.Mt5Gateway
 
                     // 这里的 0 是「没要求这一侧」,不是「清除」——翻译成 null。
                     // A 0 here means "not requested", not "clear": pass null.
-                    TradeResult m = ModifyPosition(login, ticket,
+                    TradeResult m = ModifyPositionUnguarded(login, ticket,
                         stopLoss > 0 ? (double?)stopLoss : null,
                         takeProfit > 0 ? (double?)takeProfit : null);
 
@@ -5316,7 +5683,7 @@ namespace Prismx.Mt5Gateway
                 + "nothing was sent to the broker");
         }
 
-        public TradeResult ClosePosition(ulong login, ulong ticket, double lots, string tag)
+        private TradeResult ClosePositionUnguarded(ulong login, ulong ticket, double lots, string tag)
         {
             if (!_connected)
                 return LinkDownResult();
@@ -5431,6 +5798,13 @@ namespace Prismx.Mt5Gateway
         }
 
         private TradeResult SendClose(ulong login, ulong ticket, PositionSnapshot pos, double lots, string tag)
+        {
+            // 重报价类拒绝换新价重发(SendCloseOnce 每次自己取价)。见 RetryRequotes。
+            // Requote-type rejections re-send at a fresh price; see RetryRequotes.
+            return RetryRequotes("平仓", attempt => SendCloseOnce(login, ticket, pos, lots, tag));
+        }
+
+        private TradeResult SendCloseOnce(ulong login, ulong ticket, PositionSnapshot pos, double lots, string tag)
         {
             string symbol = pos.Symbol;
             bool posIsBuy = pos.IsBuy;
@@ -5557,38 +5931,71 @@ namespace Prismx.Mt5Gateway
         {
             try
             {
+                double sl = 0, tp = 0;
+                string symbol = null;
+                bool have = false;
+
+                // 先看本地 pump(内存读)。/ Local pump first (memory read).
                 using (EnterGate())
                 {
-                    using (CIMTPositionArray arr = _manager.PositionCreateArray())
+                    using (CIMTPosition p = _manager.PositionCreate())
                     {
-                        MTRetCode rres = _manager.PositionRequestByTickets(new ulong[] { ticket }, arr);
-
-                        if (rres != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                        if (p != null && _manager.PositionGetByTicket(ticket, p) == MTRetCode.MT_RET_OK)
                         {
-                            Log.Warn("核对仓位 #{0} 的 SL/TP 时读不到仓位({1}),按未生效处理并补发改单",
-                                ticket, rres);
-                            return false;
+                            sl = p.PriceSL();
+                            tp = p.PriceTP();
+                            symbol = p.Symbol();
+                            have = true;
                         }
+                    }
+                }
+
+                uint digits = 0;
+                if (have)
+                    digits = SymbolDigits(symbol);
+
+                // 本地已经对得上就不必问服务器;本地没有、或本地说没落上(本地可能还没收到
+                // 改动),再走辅助通道问服务器一次(2026-11-11 起不在下单专线上做)。
+                // A local match settles it. Missing locally, or locally unmatched (the pump
+                // may lag), ask the server once on the helper channel (off the trading link
+                // since 2026-11-11).
+                if (have && LevelsMatch(sl, tp, stopLoss, takeProfit,
+                        LevelTolerance(digits, stopLoss > 0 ? stopLoss : takeProfit)))
+                    return true;
+
+                have = false;
+                MTRetCode rres = OnHelper("核对止损止盈", m =>
+                {
+                    using (CIMTPositionArray arr = m.PositionCreateArray())
+                    {
+                        MTRetCode r = m.PositionRequestByTickets(new ulong[] { ticket }, arr);
+                        if (r != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                            return r == MTRetCode.MT_RET_OK ? MTRetCode.MT_RET_ERR_NOTFOUND : r;
 
                         CIMTPosition p = arr.Next(0);
                         if (p == null)
-                        {
-                            Log.Warn("核对仓位 #{0} 的 SL/TP 时拿到空记录,按未生效处理并补发改单", ticket);
-                            return false;
-                        }
+                            return MTRetCode.MT_RET_ERR_NOTFOUND;
 
-                        // 容差按品种精度推算:digits 拿不到时退回一个宽松的相对值
-                        uint digits = 0;
-                        using (CIMTConSymbol sym = _manager.SymbolCreate())
-                        {
-                            if (_manager.SymbolGet(p.Symbol(), sym) == MTRetCode.MT_RET_OK)
-                                digits = sym.Digits();
-                        }
-
-                        return LevelsMatch(p.PriceSL(), p.PriceTP(), stopLoss, takeProfit,
-                            LevelTolerance(digits, stopLoss > 0 ? stopLoss : takeProfit));
+                        sl = p.PriceSL();
+                        tp = p.PriceTP();
+                        symbol = p.Symbol();
+                        have = true;
+                        return r;
                     }
+                });
+
+                if (!have)
+                {
+                    Log.Warn("核对仓位 #{0} 的 SL/TP 时读不到仓位({1}),按未生效处理并补发改单",
+                        ticket, rres);
+                    return false;
                 }
+
+                if (digits == 0)
+                    digits = SymbolDigits(symbol);
+
+                return LevelsMatch(sl, tp, stopLoss, takeProfit,
+                    LevelTolerance(digits, stopLoss > 0 ? stopLoss : takeProfit));
             }
             catch (Exception ex)
             {
@@ -5597,6 +6004,24 @@ namespace Prismx.Mt5Gateway
                 Log.Warn("核对仓位 SL/TP 失败,按未生效处理并补发改单:{0}", ex.Message);
                 return false;
             }
+        }
+
+        /// <summary>品种精度(本地品种表,内存读);读不到为 0。/ Symbol digits from the local table, 0 if unknown.</summary>
+        private uint SymbolDigits(string symbol)
+        {
+            if (string.IsNullOrEmpty(symbol))
+                return 0;
+
+            using (EnterGate())
+            {
+                using (CIMTConSymbol sym = _manager.SymbolCreate())
+                {
+                    if (_manager.SymbolGet(symbol, sym) == MTRetCode.MT_RET_OK)
+                        return sym.Digits();
+                }
+            }
+
+            return 0;
         }
 
         //+------------------------------------------------------------------+
@@ -5616,7 +6041,7 @@ namespace Prismx.Mt5Gateway
         //| wiped the take-profit. "Keep" mirrors OpenPositionCore: no        |
         //| CHANGED flag for that side, so the server leaves it alone.        |
         //+------------------------------------------------------------------+
-        public TradeResult ModifyPosition(ulong login, ulong ticket,
+        private TradeResult ModifyPositionUnguarded(ulong login, ulong ticket,
             double? stopLoss, double? takeProfit)
         {
             if (!_connected)
@@ -5705,7 +6130,7 @@ namespace Prismx.Mt5Gateway
         //| (there is no fill to confirm — running ConfirmOpen here would     |
         //| turn a successful placement into a reported failure).             |
         //+------------------------------------------------------------------+
-        public TradeResult PlacePending(ulong login, string symbol,
+        private TradeResult PlacePendingUnguarded(ulong login, string symbol,
             CIMTOrder.EnOrderType orderType, double lots, double price,
             double stopLoss, double takeProfit, string tag)
         {
@@ -6027,7 +6452,7 @@ namespace Prismx.Mt5Gateway
         //| a trigger price has no "clear", so 0 reads as absent). With nothing      |
         //| specified no dealer request goes out.                                    |
         //+------------------------------------------------------------------+
-        public TradeResult ModifyPending(ulong login, ulong ticket,
+        private TradeResult ModifyPendingUnguarded(ulong login, ulong ticket,
             double? price, double? stopLoss, double? takeProfit)
         {
             if (!_connected)
@@ -6166,7 +6591,7 @@ namespace Prismx.Mt5Gateway
         //| expired or was cancelled — answered here rather than after a      |
         //| wasted dealer round trip.                                         |
         //+------------------------------------------------------------------+
-        public TradeResult CancelPending(ulong login, ulong ticket)
+        private TradeResult CancelPendingUnguarded(ulong login, ulong ticket)
         {
             if (!_connected)
                 return LinkDownResult();
@@ -6222,42 +6647,70 @@ namespace Prismx.Mt5Gateway
             info = null;
             login = 0;
 
+            // 先看本地 pump(PUMP_MODE_ORDERS,内存读)——只在本地挂单已被验证可信时
+            // (见 LocalOrdersTrusted):撤单/改挂单要拿它的价格和手数去发请求。
+            // Local pump first (memory read), only once local orders are proven
+            // trustworthy (see LocalOrdersTrusted): cancel/modify send its price and volume.
+            if (LocalOrdersTrusted)
             using (EnterGate())
             {
-                using (CIMTOrderArray arr = _manager.OrderCreateArray())
+                using (CIMTOrder o = _manager.OrderCreate())
                 {
-                    res = _manager.OrderRequestByTickets(new ulong[] { ticket }, arr);
-
-                    if (res != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                    if (o != null && _manager.OrderGet(ticket, o) == MTRetCode.MT_RET_OK)
                     {
-                        if (res == MTRetCode.MT_RET_OK)
-                            res = MTRetCode.MT_RET_ERR_NOTFOUND;
-                        return false;
+                        login = o.Login();
+                        info = ToOrderInfo(o);
+                        res = MTRetCode.MT_RET_OK;
+                        return true;
                     }
-
-                    CIMTOrder o = arr.Next(0);
-
-                    if (o == null)
-                    {
-                        res = MTRetCode.MT_RET_ERR_NOTFOUND;
-                        return false;
-                    }
-
-                    login = o.Login();
-                    info = new OrderInfo
-                    {
-                        Ticket = o.Order(),
-                        Symbol = o.Symbol(),
-                        Type = o.Type(),
-                        Volume = SMTMath.VolumeToDouble(o.VolumeCurrent()),
-                        PriceOrder = o.PriceOrder(),
-                        StopLoss = o.PriceSL(),
-                        TakeProfit = o.PriceTP(),
-                        Comment = o.Comment()
-                    };
-                    return true;
                 }
             }
+
+            // 本地没有:服务器往返,走辅助通道(2026-11-11)。
+            // Not in the pump: a server round trip on the helper channel (2026-11-11).
+            OrderInfo found = null;
+            ulong foundLogin = 0;
+
+            res = OnHelper("读挂单", m =>
+            {
+                using (CIMTOrderArray arr = m.OrderCreateArray())
+                {
+                    MTRetCode r = m.OrderRequestByTickets(new ulong[] { ticket }, arr);
+
+                    if (r != MTRetCode.MT_RET_OK || arr.Total() == 0)
+                        return r == MTRetCode.MT_RET_OK ? MTRetCode.MT_RET_ERR_NOTFOUND : r;
+
+                    CIMTOrder o = arr.Next(0);
+                    if (o == null)
+                        return MTRetCode.MT_RET_ERR_NOTFOUND;
+
+                    foundLogin = o.Login();
+                    found = ToOrderInfo(o);
+                    return r;
+                }
+            });
+
+            if (res != MTRetCode.MT_RET_OK || found == null)
+                return false;
+
+            info = found;
+            login = foundLogin;
+            return true;
+        }
+
+        private static OrderInfo ToOrderInfo(CIMTOrder o)
+        {
+            return new OrderInfo
+            {
+                Ticket = o.Order(),
+                Symbol = o.Symbol(),
+                Type = o.Type(),
+                Volume = SMTMath.VolumeToDouble(o.VolumeCurrent()),
+                PriceOrder = o.PriceOrder(),
+                StopLoss = o.PriceSL(),
+                TakeProfit = o.PriceTP(),
+                Comment = o.Comment()
+            };
         }
 
         //+------------------------------------------------------------------+
@@ -6289,8 +6742,31 @@ namespace Prismx.Mt5Gateway
                 uint requestId;
                 MTRetCode res;
 
-                using (EnterGate())
+                // 拿锁最多等 gate_fail_fast_ms(默认 3 秒):拿不到说明锁被别的调用攥住了,
+                // 这时什么都还没发出去,直接回"繁忙、未发出",不让这笔单陪着干等。
+                // Wait at most gate_fail_fast_ms for the lock: failing that, nothing has
+                // been sent, so answer "busy, not sent" instead of waiting along.
+                int failFast = EffectiveFailFastMs;
+                if (failFast > 0)
                 {
+                    if (!Monitor.TryEnter(_gate, failFast))
+                        return GateBusyResult(_gateTrace.HeldMs);
+                }
+                else
+                {
+                    Monitor.Enter(_gate);
+                }
+
+                NoteGateAcquired();
+
+                try
+                {
+                    // 上几笔单留下的收尾(退订回调、释放请求对象)顺手在这里做掉,
+                    // 每笔单因此只进一次锁。见 DeferDealerCleanup。
+                    // Finish earlier orders' cleanup here (unsubscribe, dispose), so each
+                    // order enters the lock once. See DeferDealerCleanup.
+                    DrainDealerCleanupLocked();
+
                     request = _manager.RequestCreate();
                     result = _manager.RequestCreate();
 
@@ -6310,6 +6786,11 @@ namespace Prismx.Mt5Gateway
 
                     res = _manager.DealerSend(request, sink, out requestId);
                 }
+                finally
+                {
+                    NoteGateReleasing();
+                    Monitor.Exit(_gate);
+                }
 
                 if (res != MTRetCode.MT_RET_OK)
                     return TradeResult.Fail(res.ToString(), "DealerSend 失败");
@@ -6321,93 +6802,69 @@ namespace Prismx.Mt5Gateway
                 Stopwatch dsw = Stopwatch.StartNew();
                 res = sink.Wait(_cfg.DealerTimeoutMs);
                 long dealerMs = dsw.ElapsedMilliseconds;
+                NoteDealerMs(dealerMs);
 
                 // 超时或等待中断线:请求**已经发出去了**,券商那边可能已经成交。以前回的是
                 // 普通失败码 MT_RET_REQUEST_TIMEOUT,后端把它落成 REJECTED("被拒绝"),用户
                 // 于是换一个新 clientOrderId 重下——真仓里就多一笔。改回"已发出、结果未知",
                 // 后端落 FAILED 并提示先核对持仓。
                 // Timed out or the link dropped mid-wait: the request *was sent* and may
-                // have filled. The plain MT_RET_REQUEST_TIMEOUT used to land as REJECTED,
-                // inviting a re-place under a new clientOrderId — a duplicate position.
-                // Report "sent, outcome unknown" so the backend records FAILED.
+                // have filled. Report "sent, outcome unknown" so the backend records FAILED.
                 if (res == MTRetCode.MT_RET_REQUEST_TIMEOUT)
                 {
                     bool dropped = sink.LinkDropped;
                     Log.Warn("dealer 请求 {0} {1},未收到答复,结果未知", requestId,
                         dropped ? "等待中连接断开" : "超时");
 
-                    // 请 watchdog 立刻补探一次:dealer 不答往往就是连接半开的第一个信号,
-                    // 不必等下一个定时探测。断线叫醒的那种,标志留到连回来之后再探。
+                    // 请 watchdog 立刻补探一次:dealer 不答往往就是连接半开的第一个信号。
                     // Ask the watchdog to probe now: a silent dealer is often the first
-                    // sign of a half-open link. After a drop it fires once reconnected.
+                    // sign of a half-open link.
                     _probeRequested = true;
 
                     TradeResult unknown = TradeResult.Fail(PlacedUnconfirmed,
                         (dropped ? "等待成交回执时与 MT5 的连接断开" : "等待成交回执超时")
                         + ",这笔指令可能已经执行。请先核对持仓与成交记录,不要直接重下。");
                     unknown.DealerMs = dealerMs;
+                    unknown.SentUnknown = true;
                     return unknown;
                 }
 
-                // 收到了回执(不论成交与否):这条连接此刻确实能和服务器往返,
-                // 这一周期的定时探测可以省掉。
-                // An answer arrived, fill or not: the link round-trips right now, so
-                // this period's regular probe can be skipped.
+                // 收到了回执(不论成交与否):这条连接此刻确实能和服务器往返。
+                // An answer arrived, fill or not: the link round-trips right now.
                 _lastRoundTripAt = Environment.TickCount;
 
-                // 请求被退回队列:通常是服务器上另有 dealer 插件在处理同一队列,
-                // 或该品种当时取不到价。这不是成交,要当失败处理。
                 if (res == MTRetCode.MT_RET_REQUEST_RETURN ||
                     res == MTRetCode.MT_RET_REQUEST_REQUOTE_RETURN)
                 {
                     Log.Warn("dealer 请求 {0} 被退回队列({1}),未成交", requestId, res);
                 }
 
-                // MT_RET_REQUEST_PLACED 也是成功。
-                //
-                // 这个返回码的意思是"请求已被系统接受、订单已建立",不同券商的执行
-                // 模式决定回哪一个:即时执行通常回 DONE,市价执行(Market Execution)
-                // 会先回 PLACED,成交紧随其后。以前只认 DONE/DONE_PARTIAL,于是真仓
-                // 首单出现了最糟的一种失败形态——**仓位已经开出来了,前端却报"下单被
-                // 拒绝"**。用户看到失败会去重下,结果是重复开仓;后端那边这笔又被记成
-                // REJECTED,orders 表里没有 FILLED 记录,平仓明细的仓位号归属也跟着丢。
-                //
-                // 这条路径只发 OP_BUY/OP_SELL 市价单(TA_DEALER_POS_EXECUTE),不会产生
-                // 挂单,所以 PLACED 在这里没有"已挂单但未成交"的歧义。
-                //
-                // MT_RET_REQUEST_PLACED means the request was accepted and the order
-                // created. Instant-execution servers answer DONE; market-execution
-                // ones answer PLACED first and fill right after. Accepting only DONE
-                // produced the worst failure shape on the first live order: the
-                // position was open while the UI said "rejected", inviting a duplicate
-                // submit and leaving the backend with a REJECTED row for a filled
-                // trade. This path only ever sends market orders, so PLACED carries no
-                // "pending, unfilled" ambiguity here.
+                // 回执字段在 sink 自己的锁里读,不再为此进 _gate。
+                // Answer fields are read under the sink's own lock, not _gate.
+                ulong deal, order;
+                double price;
+                string comment;
+                sink.ReadResult(out deal, out order, out price, out comment);
+
+                // MT_RET_REQUEST_PLACED 也是成功(市价执行模式先回 PLACED,成交紧随其后);
+                // 是否真成交由调用方确认,见 TradeResult.Placed。
+                // PLACED counts as success (market execution answers PLACED first);
+                // callers confirm the fill, see TradeResult.Placed.
                 if (res == MTRetCode.MT_RET_REQUEST_DONE ||
                     res == MTRetCode.MT_RET_REQUEST_DONE_PARTIAL ||
                     res == MTRetCode.MT_RET_REQUEST_PLACED)
                 {
-                    using (EnterGate())
+                    return new TradeResult
                     {
-                        return new TradeResult
-                        {
-                            Ok = true,
-                            Retcode = res.ToString(),
-                            Deal = result.ResultDeal(),
-                            Order = result.ResultOrder(),
-                            Price = result.ResultPrice(),
-                            Message = result.ResultComment() ?? "",
-                            DealerMs = dealerMs,
-                            // PLACED 要调用方再确认一次,见 TradeResult.Placed。
-                            Placed = res == MTRetCode.MT_RET_REQUEST_PLACED
-                        };
-                    }
-                }
-
-                string comment;
-                using (EnterGate())
-                {
-                    comment = result.ResultComment() ?? "";
+                        Ok = true,
+                        Retcode = res.ToString(),
+                        Deal = deal,
+                        Order = order,
+                        Price = price,
+                        Message = comment,
+                        DealerMs = dealerMs,
+                        Placed = res == MTRetCode.MT_RET_REQUEST_PLACED
+                    };
                 }
 
                 TradeResult failed = TradeResult.Fail(res.ToString(),
@@ -6417,45 +6874,91 @@ namespace Prismx.Mt5Gateway
             }
             finally
             {
-                // 先退订,确保原生层不再**发起**新的回调。
-                // First unsubscribe so the native layer starts no new callbacks.
-                using (EnterGate())
-                {
-                    if (sink != null)
-                    {
-                        try { _manager.DealerUnsubscribe(sink); }
-                        catch { }
-                    }
-                }
-
-                // 再弃用 sink。这一步会等已经进入回调的那一次执行完——DealerUnsubscribe
-                // 并不保证这件事,而超时路径正是"回执在路上"的典型时刻。不这么做,
-                // 下面的 Dispose 就可能让原生回调写进已释放的托管对象:进程级
-                // AccessViolation,catch 不住,所有在途下单一起中断。
-                // 放在 _gate 之外:Abandon 可能要等回调跑完,而回调里会写日志、不该
-                // 让它和这把全局锁纠缠在一起。
-                // Then abandon the sink, which waits out any callback already running —
-                // something DealerUnsubscribe does not guarantee. Done outside _gate so
-                // waiting for a callback never interleaves with the global lock.
+                // 先弃用 sink:这一步会等已经进入回调的那一次执行完,之后回调再也不碰回执
+                // 对象。退订和释放挪到下一次进锁时做(DeferDealerCleanup),sink 在那之前
+                // 一直被队列引用着,原生层不会回调到已回收的对象上。
+                // Abandon first: this waits out any running callback, after which no
+                // callback touches the answer object. Unsubscribe and dispose move to the
+                // next lock entry (DeferDealerCleanup); the queue keeps the sink alive
+                // until then, so the native layer never calls into a collected object.
                 if (sink != null)
                 {
                     byte ignoredByte;
                     _liveSinks.TryRemove(sink, out ignoredByte);
                     sink.Abandon();
-                    // Abandon 之后回调再也不碰这个句柄,可以放心释放(见 ReleaseWait 说明)。
-                    // Safe once abandoned: no callback touches the handle any more.
                     sink.ReleaseWait();
                 }
 
-                using (EnterGate())
-                {
-                    if (request != null) request.Dispose();
-                    if (result != null) result.Dispose();
-                }
+                DeferDealerCleanup(sink, request, result);
+            }
+        }
 
-                // sink 被原生层持有,GC 不知道。必须显式保活到用完为止,
-                // 否则可能在等回执的过程中被回收,回调打到已释放的对象上。
-                GC.KeepAlive(sink);
+        private sealed class DealerLeftover
+        {
+            public DealerSink Sink;
+            public CIMTRequest Request;
+            public CIMTRequest Result;
+        }
+
+        private readonly ConcurrentQueue<DealerLeftover> _dealerCleanup = new ConcurrentQueue<DealerLeftover>();
+
+        /// <summary>
+        /// 一笔 dealer 请求用完后的退订与释放,排到下一次进 _gate 时做(下一笔单的发单锁里,
+        /// 或 watchdog 每秒一次的空闲清理)。以前每笔单回执到达后还要再进三次锁做这些事,
+        /// 券商一慢、单一多,这三次排队就叠在下单时间上。
+        /// Unsubscribe-and-dispose after a dealer request is queued for the next _gate
+        /// entry (the next order's send, or the watchdog's once-a-second idle sweep).
+        /// Each order used to enter the lock three more times after its answer for this.
+        /// </summary>
+        private void DeferDealerCleanup(DealerSink sink, CIMTRequest request, CIMTRequest result)
+        {
+            if (sink == null && request == null && result == null)
+                return;
+
+            _dealerCleanup.Enqueue(new DealerLeftover { Sink = sink, Request = request, Result = result });
+        }
+
+        /// <summary>调用方持有 _gate。/ Caller holds _gate.</summary>
+        private void DrainDealerCleanupLocked()
+        {
+            DealerLeftover x;
+            int n = 0;
+
+            // 一次最多清 64 条,别让某一笔单替前面几百笔收尾。/ At most 64 per pass.
+            while (n++ < 64 && _dealerCleanup.TryDequeue(out x))
+            {
+                try
+                {
+                    if (x.Sink != null && _manager != null)
+                        _manager.DealerUnsubscribe(x.Sink);
+                }
+                catch { }
+
+                try { if (x.Request != null) x.Request.Dispose(); }
+                catch { }
+
+                try { if (x.Result != null) x.Result.Dispose(); }
+                catch { }
+
+                GC.KeepAlive(x.Sink);
+            }
+        }
+
+        /// <summary>watchdog 每秒调:锁空着才清,不排队。/ Watchdog sweep: only when the lock is free.</summary>
+        private void SweepDealerCleanup()
+        {
+            if (_dealerCleanup.IsEmpty || !Monitor.TryEnter(_gate, 0))
+                return;
+
+            NoteGateAcquired();
+            try
+            {
+                DrainDealerCleanupLocked();
+            }
+            finally
+            {
+                NoteGateReleasing();
+                Monitor.Exit(_gate);
             }
         }
 
@@ -6495,6 +6998,18 @@ namespace Prismx.Mt5Gateway
                 ? _cfg.CommentPrefix
                 : _cfg.CommentPrefix + "-" + tag;
 
+            // 结果未知时靠 comment 末尾的短码到服务器核对(Mt5Link.Guard.cs)。短码要留全,
+            // 超长就截前面那段。后端只按前缀认来源,后缀不影响。
+            // The trailing code lets an unknown outcome be reconciled (Mt5Link.Guard.cs).
+            // Keep it whole and trim the front part instead. The backend matches prefixes only.
+            string code = _commentCode;
+            if (!string.IsNullOrEmpty(code))
+            {
+                string suffix = "-" + code;
+                int room = 31 - suffix.Length;
+                return (c.Length > room ? c.Substring(0, room) : c) + suffix;
+            }
+
             return c.Length > 31 ? c.Substring(0, 31) : c;
         }
 
@@ -6512,6 +7027,15 @@ namespace Prismx.Mt5Gateway
             {
                 using (EnterGate())
                 {
+                    try { DrainDealerCleanupLocked(); }
+                    catch { }
+
+                    if (_tickSink != null)
+                    {
+                        try { _manager.TickUnsubscribe(_tickSink); }
+                        catch { }
+                    }
+
                     _manager.DealerStop();
 
                     if (_sink != null)

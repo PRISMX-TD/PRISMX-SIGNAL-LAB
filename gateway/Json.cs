@@ -28,6 +28,16 @@ namespace Prismx.Mt5Gateway
             return this;
         }
 
+        /// <summary>带名字的嵌套对象。/ A named nested object.</summary>
+        public JsonWriter BeginObject(string name)
+        {
+            Separate();
+            WriteName(name);
+            _sb.Append('{');
+            _needComma = false;
+            return this;
+        }
+
         public JsonWriter EndObject()
         {
             _sb.Append('}');
@@ -94,6 +104,27 @@ namespace Prismx.Mt5Gateway
             else
                 _sb.Append(value.ToString("R", CultureInfo.InvariantCulture));
 
+            _needComma = true;
+            return this;
+        }
+
+        /// <summary>有符号整数(可为负)。单独起名,免得改变已有 int 参数的重载选择。
+        /// A signed integer; separately named so existing int arguments keep their overload.</summary>
+        public JsonWriter FieldLong(string name, long value)
+        {
+            Separate();
+            WriteName(name);
+            _sb.Append(value.ToString(CultureInfo.InvariantCulture));
+            _needComma = true;
+            return this;
+        }
+
+        /// <summary>把一段已经写好的 JSON 当作数组元素原样放进去。
+        /// Append an already-rendered JSON value as an array element.</summary>
+        public JsonWriter RawElement(string json)
+        {
+            Separate();
+            _sb.Append(json);
             _needComma = true;
             return this;
         }

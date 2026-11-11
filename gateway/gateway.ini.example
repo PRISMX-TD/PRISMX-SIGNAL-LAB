@@ -73,6 +73,55 @@ http_max_concurrent = 256
 # 通常用不到 4,先看 readBusyCount 再决定。
 read_channels = 2
 
+# ---- 2026-11-11 下单架构优化(全部有默认值,不写就是推荐值)----
+# 详见 README「下单专线只跑下单」一节。改完重启,看 /health 的 orderPath。
+
+# 查询通道 ≥ 2 条时,最后一条留给交易路径(下单后的确认、反查、核对),周期查询不用它。
+# helper_channel = true
+
+# 查询通道被一次查询攥着超过这么久(毫秒)就换一条新的顶上;0 = 不换。
+# stuck_channel_replace_ms = 8000
+
+# 存活判断先看"有没有数据在进来",有就不做占锁的探测。
+# passive_liveness = true
+
+# 报价缓存:off / shadow(只对比)/ auto(对比通过后自动启用)/ on。
+# tick_cache = auto
+
+# 休市判断结果按分钟缓存。
+# session_cache = true
+
+# 查询通道连上过之后,查询还能不能改走交易连接(旧行为)。保持 false。
+# read_spill_to_trading = false
+
+# 交易锁被占超过这么久(毫秒),新交易直接回"繁忙、未发出";0 = 关。
+# gate_fail_fast_ms = 3000
+
+# 交易锁连续这么久(秒)拿不到就自愈重启;重连类操作仍按 180 秒。
+# gate_stuck_exit_sec = 20
+
+# 挂单/持仓改读本地镜像(内存读)。挂单在影子对比 ≥100 次且 0 差异后会自动启用;
+# 持仓只在这里设 true 时启用(先看 /health 的 orderPath.mirror.positionsMismatch)。
+# local_orders = false
+# local_positions = false
+
+# 全网关同时在途的交易上限 / 每个账号同时在途的开仓上限。
+# max_inflight_trades = 64
+# max_open_inflight_per_account = 8
+
+# 排不上名额时最多等多久(毫秒):开仓 / 平仓与改单。超时回"繁忙、未发出"。
+# trade_queue_wait_ms = 2000
+# close_queue_wait_ms = 3000
+
+# 重报价类拒绝(价格变了/没价/太频繁)自动换新价重发,最多 2 次、0.5 秒内。
+# auto_retry_requotes = true
+
+# comment 末尾加一个由 clientOrderId 算出的短码,结果未知时据此到服务器核对。
+# comment_code = true
+
+# 断线时平仓/改单/撤单排队等连接回来的上限(毫秒);0 = 直接回"重连中"。开仓从不排队。
+# queue_closes_on_disconnect_ms = 10000
+
 # 显式解除两条启动检查(allowed_groups 为空、listen 不是回环却没配 allowed_ips)。
 # 这两条各自都是最后一道闸,只在临时排障时打开,别长期留着。
 # i_know_what_im_doing = true

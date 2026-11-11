@@ -589,6 +589,16 @@ GATEWAY_POSITIONS_INTERVAL = 2.0
 # 负责。这里快的是「仓位出现/消失」，不是「浮盈跳动」。
 GATEWAY_EVENT_POLL_INTERVAL = 0.25
 
+# 事件流长轮询（2026-11-11 架构优化阶段 3）：网关支持 GET /events 时改用它——有事件
+# 立刻返回、没有就挂着等，开平仓从「最多晚 0.25 秒」变成「到达即处理」，空闲时也
+# 不再每秒 4 个请求。等待上限必须小于消费权续期周期（10 秒）。网关不支持或某一拍
+# 读失败，这一拍自动退回旧的两个 drain 接口。
+# Long-poll the gateway's /events when available: events are handled on arrival and
+# idle traffic drops from 4 requests/s. The wait stays below the 10s lease renewal.
+# Unsupported or failed polls fall back to the old drain endpoints for that beat.
+GATEWAY_EVENT_STREAM_ENABLED = True
+GATEWAY_EVENT_STREAM_WAIT_MS = 5000
+
 # gateway 轮询循环里 (user_id, login) 映射的缓存时长（见 gateway_positions_loop 的
 # accounts_cache）。绑定/解绑/撤销会主动失效，这个 TTL 只兜其它不经那几处的改动
 # （例如管理端直接改库）。/ TTL of the loop's cached (user_id, login) mapping;
@@ -1423,7 +1433,12 @@ async def gateway_positions_loop() -> None:
     from app.services.auto_manage import GatewayPositions, auto_manage_user_ids, evaluate_positions
     from app.services.connection_manager import manager
     from app.services.trade_performance import mark_positions_seen
-    from app.services.gateway_client import drain_deal_events, drain_position_events
+    from app.services.gateway_client import (
+        drain_deal_events,
+        drain_position_events,
+        events_stream_available,
+        poll_events,
+    )
 
     # ----- 共享状态与辅助函数 -----
 
@@ -1745,6 +1760,9 @@ async def gateway_positions_loop() -> None:
     # Tracked separately from the position subscription: the broker may grant one
     # and not the other, and this one decides the fallback scan interval.
     deal_subscription_state = {"alive": False}
+    # 事件流游标：None = 还没对齐（首次、或网关重启后），下一拍先取当前 head、不回放积压。
+    # Event-stream cursor; None means "align to head first" without replaying backlog.
+    event_stream: dict = {"cursor": None, "instance": ""}
 
     # 正在扫描平仓明细的 login。快拍 0.25 秒一拍、慢拍 2 秒一拍，收到成交事件时
     # 两边可能同时想扫同一个账号；重复扫不会写坏数据（唯一约束去重），但会白白
@@ -2476,7 +2494,23 @@ async def gateway_positions_loop() -> None:
                 # or not anyone is online, while the offline funds sweep keeps moving
                 # balances. Skipping it left offline closes to a 15-min window (or a
                 # dropped event) once someone reconnected — booked as cash flows.
-                if not await manager.connected_user_ids_async():
+                polled = None
+                if GATEWAY_EVENT_STREAM_ENABLED and events_stream_available():
+                    polled = await _poll_event_stream()
+
+                if polled is not None:
+                    events, subscribed = polled.position_events, polled.subscribed
+                    deal_logins, deal_subscribed = polled.deal_logins, polled.deal_subscribed
+                    if polled.resync:
+                        # 中间可能漏了事件：空仓集合不再可信，慢拍全量重读一遍。
+                        # Events may have been missed: distrust known_flat, re-read all.
+                        known_flat.clear()
+                    for r in polled.resolved:
+                        logger.info(
+                            "Gateway 事后核对出结论 login=%s %s clientOrderId=%s -> %s",
+                            r.get("login"), r.get("kind"), r.get("clientOrderId"), r.get("resolved"),
+                        )
+                elif not await manager.connected_user_ids_async():
                     events, subscribed = [], subscription_state["alive"]
                     deal_logins, deal_subscribed = await drain_deal_events()
                 else:
@@ -2622,8 +2656,43 @@ async def gateway_positions_loop() -> None:
                 raise
             except Exception:
                 logger.exception("gateway 事件快拍异常")
+                polled = None
 
-            await asyncio.sleep(GATEWAY_EVENT_POLL_INTERVAL)
+            # 长轮询本身已经等过了，拿到事件就立刻进下一拍；退回旧接口时照旧 0.25 秒一拍。
+            # The long poll already waited; only the drain fallback sleeps between beats.
+            await asyncio.sleep(0 if polled is not None else GATEWAY_EVENT_POLL_INTERVAL)
+
+    async def _poll_event_stream():
+        """读一次事件流；None 表示这一拍要退回旧接口。/ One stream read; None = fall back."""
+        if event_stream["cursor"] is None:
+            # 对齐：游标给一个比任何编号都大的数，网关回 resync 和当前 head，不回放积压
+            # （积压期间的变化由 resync → 慢拍全量重读兜住）。
+            # Align: an over-large cursor makes the gateway answer resync + head without
+            # replaying the backlog; the resync's full re-read covers that gap.
+            polled = await poll_events(1 << 62, 0)
+            if polled is None:
+                return None
+            event_stream["cursor"] = polled.head
+            event_stream["instance"] = polled.instance
+            polled.resync = True
+            polled.position_events, polled.deal_logins, polled.resolved = [], [], []
+            return polled
+
+        polled = await poll_events(event_stream["cursor"], GATEWAY_EVENT_STREAM_WAIT_MS)
+        if polled is None:
+            return None
+
+        if polled.instance != event_stream["instance"]:
+            # 网关重启过：旧游标没有意义，下一拍重新对齐；这一拍按 resync 处理。
+            # The gateway restarted: realign next beat, treat this one as a resync.
+            logger.info("Gateway 事件流实例变化（网关重启），重新对齐游标")
+            event_stream["cursor"] = None
+            polled.resync = True
+            polled.position_events, polled.deal_logins, polled.resolved = [], [], []
+            return polled
+
+        event_stream["cursor"] = polled.head
+        return polled
 
     # 快拍与慢拍并行。快拍负责「仓位出现/消失」的即时性，慢拍负责浮盈刷新、
     # 资金刷新、平仓明细落库这些周期性工作。

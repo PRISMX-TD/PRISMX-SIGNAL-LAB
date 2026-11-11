@@ -162,6 +162,16 @@ class TradeRsp:
     # Returned by the gateway since 2026-09-14; logged only. Older gateways omit them.
     elapsed_ms: int = 0
     dealer_ms: int = 0
+    # 2026-11-11 起：结果未知后网关事后核对出的结论（"filled" / "not_filled"，空 = 没核对过），
+    # 以及"繁忙、未发出"标记（网关锁被占或排队满，什么都没执行，可以放心重下）。
+    # Since 2026-11-11: the gateway's reconciled verdict for a once-unknown outcome, and
+    # the "busy, nothing sent" flag (always safe to retry).
+    resolved: str = ""
+    not_sent: bool = False
+    # 成交后网关顺带回来的该账号最新持仓（本地 pump，已确认反映这笔成交）。None = 没带，
+    # 调用方照旧自己去读。/ The account's positions right after the fill, attached by the
+    # gateway only when they already reflect it; None means read them yourself.
+    positions: Optional[list] = None
 
 
 @dataclass
@@ -628,6 +638,114 @@ async def drain_position_events() -> tuple[list[PositionEvent], bool]:
     return events, bool(data.get("subscribed"))
 
 
+@dataclass
+class EventsPoll:
+    """GET /events 长轮询的一次结果（2026-11-11 架构优化阶段 3）。
+
+    position_events / deal_logins 与旧的两个 drain 接口口径一致，调用方原样复用
+    处理逻辑；resync=True 表示中间可能漏了事件（网关重启、游标被覆盖、连接起落），
+    调用方应当按"订阅刚掉过"处理一次。
+
+    One long-poll result. position_events / deal_logins match the old drain
+    endpoints so the caller's handling is unchanged; resync means events may have
+    been missed and the caller should treat it like a subscription blip.
+    """
+
+    instance: str
+    head: int
+    resync: bool
+    subscribed: bool
+    deal_subscribed: bool
+    position_events: list
+    deal_logins: list
+    resolved: list
+
+
+# 网关不支持 /events（旧版本回 404）时记下来，10 分钟内不再试，退回旧的两个 drain。
+# A gateway without /events (404) is remembered for 10 minutes; callers fall back.
+_events_unsupported_until = 0.0
+EVENTS_UNSUPPORTED_RECHECK = 600.0
+
+
+def events_stream_available() -> bool:
+    return time.monotonic() >= _events_unsupported_until
+
+
+async def poll_events(cursor: int, wait_ms: int) -> Optional[EventsPoll]:
+    """长轮询 GET /events。没有新事件时网关挂住最多 wait_ms 毫秒再回。
+
+    返回 None：网关不支持（404，记 10 分钟）或这次读失败——调用方本拍退回旧的
+    drain 接口，不丢事件（旧队列在网关里一直照常积累）。
+
+    Returns None when the gateway lacks /events (remembered for 10 minutes) or the
+    read failed; the caller then uses the old drain endpoints for this beat, which
+    keep accumulating in the gateway regardless, so nothing is lost.
+    """
+    global _events_unsupported_until
+
+    url = settings.GATEWAY_URL.rstrip("/") + "/events"
+    params = {"cursor": str(max(0, int(cursor))), "wait": str(max(0, int(wait_ms))), "max": "1000"}
+    timeout = httpx.Timeout(wait_ms / 1000.0 + 5.0)
+
+    try:
+        if _client is not None:
+            resp = await _client.get(url, headers=_headers(), params=params, timeout=timeout)
+        else:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.get(url, headers=_headers(), params=params)
+
+        if resp.status_code == 404:
+            _events_unsupported_until = time.monotonic() + EVENTS_UNSUPPORTED_RECHECK
+            logger.info("Gateway 不支持 /events，退回旧事件接口（%.0f 秒后再试）",
+                        EVENTS_UNSUPPORTED_RECHECK)
+            return None
+
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        logger.debug("Gateway 事件流读取失败: %s", e)
+        return None
+
+    if not data.get("ok"):
+        return None
+
+    pos_events: list[PositionEvent] = []
+    deal_logins: list[int] = []
+    seen_deal: set[int] = set()
+    resolved: list[dict] = []
+    resync = bool(data.get("resync"))
+
+    for e in data.get("events", []) or []:
+        kind = e.get("type", "")
+        login = int(e.get("login", 0) or 0)
+
+        if kind == "position":
+            action = e.get("action", "")
+            if login and action in ("add", "delete"):
+                pos_events.append(PositionEvent(login=login, ticket=int(e.get("ticket", 0) or 0),
+                                                action=action))
+        elif kind == "deal":
+            if login and login not in seen_deal:
+                seen_deal.add(login)
+                deal_logins.append(login)
+        elif kind == "link":
+            # 断线期间的推送已经丢了：按 resync 处理。/ Pushes were lost while down.
+            resync = True
+        elif kind == "trade_resolved":
+            resolved.append(e)
+
+    return EventsPoll(
+        instance=str(data.get("instance", "")),
+        head=int(data.get("head", 0) or 0),
+        resync=resync,
+        subscribed=bool(data.get("subscribed")),
+        deal_subscribed=bool(data.get("dealSubscribed")),
+        position_events=pos_events,
+        deal_logins=deal_logins,
+        resolved=resolved,
+    )
+
+
 async def drain_deal_events() -> tuple[list[int], bool]:
     """取走 gateway 订阅积压的成交事件。返回 (发生了成交的 login 列表, 订阅是否可用)。
 
@@ -911,6 +1029,12 @@ def _trade_rsp(data: dict) -> TradeRsp:
         error=str(data.get("error", "") or ""),
         elapsed_ms=int(data.get("elapsedMs", 0) or 0),
         dealer_ms=int(data.get("dealerMs", 0) or 0),
+        resolved=str(data.get("resolved", "") or ""),
+        not_sent=bool(data.get("notSent", False)),
+        positions=(
+            [_parse_position(p) for p in data["positions"]]
+            if isinstance(data.get("positions"), list) else None
+        ),
     )
 
 

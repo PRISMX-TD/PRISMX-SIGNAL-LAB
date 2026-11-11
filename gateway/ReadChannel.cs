@@ -98,6 +98,32 @@ namespace Prismx.Mt5Gateway
         /// under Gate so Acquire can tell a stuck holder from a busy one.</summary>
         internal volatile int HeldSince;
 
+        /// <summary>有查询正攥着这条通道(Acquire 置、Release 清)。/ A query holds this channel.</summary>
+        internal volatile bool Busy;
+
+        /// <summary>
+        /// 被判卡死、已从池里换下:不再接新查询,攥着它的那次查询放手后由 ReadPool 关掉。
+        /// Swapped out of the pool as stuck: takes no new queries and is closed by
+        /// ReadPool once the query holding it lets go.
+        /// </summary>
+        internal volatile bool Abandoned;
+
+        /// <summary>保留给交易路径(下单确认、密码核对等)的辅助通道。/ Reserved helper channel.</summary>
+        internal bool IsHelper;
+
+        internal int Id
+        {
+            get { return _id; }
+        }
+
+        /// <summary>换下这条通道:立刻不算"已连接",谁也不会再挑到它。
+        /// Retire this channel: it stops counting as connected at once.</summary>
+        internal void Abandon()
+        {
+            Abandoned = true;
+            _connected = false;
+        }
+
         public ReadChannel(Config cfg, int id)
         {
             _cfg = cfg;
@@ -133,6 +159,9 @@ namespace Prismx.Mt5Gateway
         /// </summary>
         public void Maintain()
         {
+            if (Abandoned)
+                return;
+
             if (_connected)
             {
                 ProbeIfIdle();
@@ -210,6 +239,7 @@ namespace Prismx.Mt5Gateway
                 return;
 
             HeldSince = Environment.TickCount;
+            Busy = true;
 
             try
             {
@@ -236,6 +266,7 @@ namespace Prismx.Mt5Gateway
             }
             finally
             {
+                Busy = false;
                 Monitor.Exit(Gate);
             }
         }
@@ -322,50 +353,56 @@ namespace Prismx.Mt5Gateway
     /// </summary>
     internal sealed class ReadPool : IDisposable
     {
+        private readonly Config _cfg;
         private readonly ReadChannel[] _channels;
         private int _rr;
 
         /// <summary>
         /// 都忙时每条通道每次试等的时长。原来是 Monitor.Enter 无限期等:一条通道卡在
-        /// 一次网络超时里(半开时每个查询要等满 SDK 的超时),排在它后面的查询就跟着
-        /// 一起等,直到后端 15 秒读超时。
-        /// Per-attempt wait on a busy channel. This used to be an unbounded Monitor.Enter:
-        /// with a channel stuck in a network timeout, every query queued behind it waited
-        /// until the backend's 15s read timeout.
+        /// 一次网络超时里,排在它后面的查询就跟着一起等,直到后端 15 秒读超时。
+        /// Per-attempt wait on a busy channel (this used to be an unbounded Monitor.Enter).
         /// </summary>
         private const int AcquireSliceMs = 250;
 
         /// <summary>
-        /// 持锁者攥着一条通道超过这么久,就当它卡住了,不再在它上面等。正常一次查询是
-        /// 几百毫秒;卡住的往往是等满十几秒的网络超时。
-        /// A holder past this is treated as stuck. A normal query takes a few hundred ms;
-        /// a stuck one is usually sitting out a network timeout of ten-plus seconds.
+        /// 持锁者攥着一条通道超过这么久,就当它卡住了,不再在它上面等。2026-11-11 由 2000 提到
+        /// 8000:券商一慢普通查询就要 2~3 秒,真正的半开连接要等十几秒的网络超时。
+        /// A holder past this is treated as stuck (raised from 2000 on 2026-11-11: a slow
+        /// broker makes normal queries take 2-3 s; a half-open link sits out 10 s+).
         /// </summary>
-        ///
-        /// 2026-11-11 由 2000 提到 8000:券商服务器一慢,普通查询就要 2~3 秒,按 2 秒算
-        /// "卡住"会让周期查询成批改道到交易连接的 _gate,把下单拖到 5 秒以上。真正的半开
-        /// 连接要等十几秒的网络超时,8 秒照样认得出来;2~8 秒之间算"忙",回 read_busy。
-        /// Raised from 2000 (2026-11-11): when the broker server is slow a normal query
-        /// takes 2-3 s, and calling that "stuck" rerouted polls onto the trading link and
-        /// pushed orders past 5 s. A real half-open link still shows up at 8 s.
         private const int StuckHolderMs = 8000;
 
-        /// <summary>
-        /// 排队总时长上限,到点仍拿不到就退回交易连接。不设得更短(比如一次 250ms 就退):
-        /// 查询一多就会成批涌到交易连接的 _gate 上和下单抢锁——查询通道存在的全部意义
-        /// 就是不让这件事发生。所以"忙"只让查询多等一会儿,"卡住"才让它改道。
-        /// Overall queueing cap before falling back. Not shorter (e.g. give up after one
-        /// 250ms try): a query burst would then spill onto the trading link's _gate and
-        /// contend with orders — the very thing these channels exist to prevent. Busy
-        /// means wait a little longer; only stuck means reroute.
-        /// </summary>
+        /// <summary>排队总时长上限,到点仍拿不到就回"忙"。/ Overall queueing cap.</summary>
         private const int AcquireMaxWaitMs = 1500;
+
+        /// <summary>
+        /// 同时"换下来、还没关掉"的卡死通道最多几条。每换一条就多一个到券商的登录,
+        /// 券商对同一 manager 账号的并发登录有上限,不能无限换。
+        /// At most this many retired-but-not-yet-closed channels at once: each swap is one
+        /// more broker login, and brokers cap concurrent logins per manager.
+        /// </summary>
+        private const int MaxAbandoned = 2;
+
+        private int _abandoned;
+        private int _replacedTotal;
+        private volatile bool _everConnected;
+
+        /// <summary>辅助通道在数组里的下标;-1 = 没有单独保留(只有一条通道,或 helper_channel=false)。
+        /// Index of the reserved helper channel, -1 when none is reserved.</summary>
+        private readonly int _helper;
 
         public ReadPool(Config cfg)
         {
+            _cfg = cfg;
             _channels = new ReadChannel[Math.Max(0, cfg.ReadChannels)];
             for (int i = 0; i < _channels.Length; i++)
                 _channels[i] = new ReadChannel(cfg, i + 1);
+
+            // 至少两条才单独留一条给交易路径:只有一条时留了,周期查询就没得用了。
+            // Reserve one only with two or more; a lone channel must serve the polls too.
+            _helper = cfg.HelperChannel && _channels.Length >= 2 ? _channels.Length - 1 : -1;
+            if (_helper >= 0)
+                _channels[_helper].IsHelper = true;
         }
 
         public int Count
@@ -385,37 +422,131 @@ namespace Prismx.Mt5Gateway
             }
         }
 
+        /// <summary>是否曾经有任何一条通道连上过。连上过之后,查询一律不再溢到交易连接。
+        /// Whether any channel has ever connected; after that, reads never spill onto the
+        /// trading link.</summary>
+        public bool EverConnected
+        {
+            get { return _everConnected; }
+        }
+
+        public bool HasHelper
+        {
+            get { return _helper >= 0; }
+        }
+
+        /// <summary>累计换下的卡死通道条数,/health 用。/ Stuck channels replaced so far.</summary>
+        public int ReplacedTotal
+        {
+            get { return Thread.VolatileRead(ref _replacedTotal); }
+        }
+
         public void Maintain()
         {
-            foreach (ReadChannel c in _channels)
+            for (int i = 0; i < _channels.Length; i++)
             {
-                try { c.Maintain(); }
+                try
+                {
+                    ReplaceIfStuck(i, _channels[i]);
+                    _channels[i].Maintain();
+
+                    if (_channels[i].IsConnected)
+                        _everConnected = true;
+                }
                 catch { }
             }
         }
 
         /// <summary>
+        /// 一条通道被一次查询攥着超过 stuck_channel_replace_ms(默认 8 秒),多半是卡在一次
+        /// 网络超时里:不等它,直接换一条新的顶上,旧的那条放手后再关(SDK 对象不能在别的
+        /// 线程正用着时关掉)。同时换下未关的最多 MaxAbandoned 条。
+        /// A channel held by one query past stuck_channel_replace_ms is most likely sitting
+        /// out a network timeout: put a fresh one in its slot and close the old one once its
+        /// holder lets go (an SDK object cannot be torn down while another thread uses it).
+        /// </summary>
+        private void ReplaceIfStuck(int slot, ReadChannel c)
+        {
+            int limit = _cfg.StuckChannelReplaceMs;
+            if (limit <= 0 || !c.Busy || c.Abandoned)
+                return;
+
+            int held = unchecked(Environment.TickCount - c.HeldSince);
+            if (held < limit)
+                return;
+
+            if (Interlocked.Increment(ref _abandoned) > MaxAbandoned)
+            {
+                Interlocked.Decrement(ref _abandoned);
+                return;
+            }
+
+            ReadChannel fresh = new ReadChannel(_cfg, c.Id);
+            fresh.IsHelper = c.IsHelper;
+            c.Abandon();
+            _channels[slot] = fresh;
+            Interlocked.Increment(ref _replacedTotal);
+
+            Log.Warn("查询通道 #{0} 被一次查询攥了 {1} 毫秒,判定卡死,已换一条新连接顶上(旧连接放手后关闭)",
+                c.Id, held);
+        }
+
+        /// <summary>
         /// 拿到一条已连接的查询通道并持有它的锁;调用方用完必须 Release。null = 没有可用的。
-        /// saturated=true 只在"有连着的通道、也没被卡住,但排队等满上限仍全忙"时给出:
-        /// 调用方(读接口)据此回 503 read_busy,不再把这次查询溢到交易连接的 _gate 上和
-        /// 下单抢锁。没配/没连上/连着的全被卡住(半开)时 saturated=false,调用方照旧退回
-        /// 交易连接——那是"通道坏了"而不是"通道忙",数据不能因此断。
-        /// Returns a connected channel with its lock held (Release it), or null.
-        /// saturated is true only when channels are connected and healthy but all stayed
-        /// busy for the whole wait cap: the read endpoint then answers 503 read_busy
-        /// instead of spilling the query onto the trading link's _gate, where it would
-        /// contend with orders. Not configured / not connected / all stuck (half-open)
-        /// leaves saturated false and the caller falls back as before.
+        /// saturated=true 只在"有连着的通道、也没被卡住,但排队等满上限仍全忙"时给出,
+        /// 调用方据此回 503 read_busy。辅助通道不参与周期查询。
+        /// Returns a connected channel with its lock held (Release it), or null. saturated
+        /// is true only when healthy channels stayed busy for the whole wait cap. The helper
+        /// channel never serves the periodic polls.
         /// </summary>
         public ReadChannel Acquire(out bool saturated)
         {
             return Acquire(out saturated, AcquireMaxWaitMs);
         }
 
-        /// <summary>同上,排队上限由调用方给(优先读多等一会儿,而不是改走交易连接)。
-        /// Same, with the caller's queueing cap (priority reads wait longer instead of
-        /// using the trading link).</summary>
         public ReadChannel Acquire(out bool saturated, int maxWaitMs)
+        {
+            return AcquireAmong(out saturated, maxWaitMs, false);
+        }
+
+        /// <summary>
+        /// 给交易路径用(下单后的确认、反查仓位号、核对止损、读挂单、核对密码):先用保留的
+        /// 辅助通道,它没连上/卡住了再去普通通道里排。null = 都不可用。
+        /// For the trade path (post-send confirmation, position-id lookup, SL/TP check,
+        /// pending-order read, password check): the reserved helper first, then the
+        /// ordinary channels if it is down or stuck. null when none is usable.
+        /// </summary>
+        public ReadChannel AcquireHelper(int maxWaitMs)
+        {
+            bool ignored;
+
+            if (_helper >= 0)
+            {
+                ReadChannel h = _channels[_helper];
+                bool stuck = h.Busy && unchecked(Environment.TickCount - h.HeldSince) >= StuckHolderMs;
+
+                if (h.IsConnected && !stuck
+                    && Monitor.TryEnter(h.Gate, Math.Max(0, Math.Min(maxWaitMs, 1000))))
+                {
+                    if (h.IsConnected && h.Manager != null && !h.Abandoned)
+                    {
+                        Take(h);
+                        return h;
+                    }
+                    Monitor.Exit(h.Gate);
+                }
+            }
+
+            return AcquireAmong(out ignored, maxWaitMs, true);
+        }
+
+        private static void Take(ReadChannel c)
+        {
+            c.HeldSince = Environment.TickCount;
+            c.Busy = true;
+        }
+
+        private ReadChannel AcquireAmong(out bool saturated, int maxWaitMs, bool includeHelper)
         {
             saturated = false;
             int n = _channels.Length;
@@ -427,28 +558,27 @@ namespace Prismx.Mt5Gateway
             // 先找空闲的 / an idle one first
             for (int k = 0; k < n; k++)
             {
-                ReadChannel c = _channels[(start + k) % n];
+                int idx = (start + k) % n;
+                if (idx == _helper && !includeHelper)
+                    continue;
+
+                ReadChannel c = _channels[idx];
                 if (!c.IsConnected)
                     continue;
 
                 if (Monitor.TryEnter(c.Gate))
                 {
-                    if (c.IsConnected && c.Manager != null)
+                    if (c.IsConnected && c.Manager != null && !c.Abandoned)
                     {
-                        c.HeldSince = Environment.TickCount;
+                        Take(c);
                         return c;
                     }
                     Monitor.Exit(c.Gate);
                 }
             }
 
-            // 都忙:在已连接的通道上轮流限时等。排队只拖慢查询,不影响交易。持锁者攥得太久
-            // (卡在一次网络超时里)的通道不再等它;连着的全都卡住、或者等满上限,就返回
-            // null 让调用方退回交易连接。以前这里是 Monitor.Enter 无限期等。
-            // All busy: take turns waiting on connected channels with a timeout — only
-            // queries wait, never trades. A channel whose holder is stuck (sitting out a
-            // network timeout) is skipped; if all are stuck, or the cap runs out, return
-            // null so the caller falls back. This used to be an unbounded Monitor.Enter.
+            // 都忙:在已连接的通道上轮流限时等;卡住的不等;等满上限回"忙"。
+            // All busy: take turns waiting with a timeout; skip stuck ones; give up at the cap.
             int deadline = unchecked(Environment.TickCount + Math.Max(0, maxWaitMs));
 
             while (true)
@@ -457,19 +587,21 @@ namespace Prismx.Mt5Gateway
 
                 for (int k = 0; k < n; k++)
                 {
-                    ReadChannel c = _channels[(start + k) % n];
+                    int idx = (start + k) % n;
+                    if (idx == _helper && !includeHelper)
+                        continue;
+
+                    ReadChannel c = _channels[idx];
                     if (!c.IsConnected)
                         continue;
 
-                    if (unchecked(Environment.TickCount - c.HeldSince) >= StuckHolderMs)
+                    if (c.Busy && unchecked(Environment.TickCount - c.HeldSince) >= StuckHolderMs)
                     {
-                        // 看上去卡住了,但也可能恰好刚放掉:不等,只试一下。
-                        // Looks stuck, but may have just been released: try, don't wait.
                         if (Monitor.TryEnter(c.Gate))
                         {
-                            if (c.IsConnected && c.Manager != null)
+                            if (c.IsConnected && c.Manager != null && !c.Abandoned)
                             {
-                                c.HeldSince = Environment.TickCount;
+                                Take(c);
                                 return c;
                             }
                             Monitor.Exit(c.Gate);
@@ -488,9 +620,9 @@ namespace Prismx.Mt5Gateway
 
                     if (Monitor.TryEnter(c.Gate, Math.Min(AcquireSliceMs, left)))
                     {
-                        if (c.IsConnected && c.Manager != null)
+                        if (c.IsConnected && c.Manager != null && !c.Abandoned)
                         {
-                            c.HeldSince = Environment.TickCount;
+                            Take(c);
                             return c;
                         }
                         Monitor.Exit(c.Gate);
@@ -509,10 +641,40 @@ namespace Prismx.Mt5Gateway
         {
             // 仍连着说明这次查询没有撞上网络类错误(那种调用方会先 MarkBroken),
             // 记一次成功往返,空闲探测就不必再发。
-            // Still connected means no network-class error (the caller would have
-            // called MarkBroken first): record a round trip so the idle probe stays quiet.
+            // Still connected means no network-class error: record a round trip.
             c.NoteReleased();
+            c.Busy = false;
             Monitor.Exit(c.Gate);
+
+            // 已被换下的卡死通道:攥着它的查询终于回来了,现在可以关掉。
+            // A retired stuck channel whose holder finally returned: close it now.
+            if (c.Abandoned)
+            {
+                ThreadPool.QueueUserWorkItem(_ =>
+                {
+                    try { c.Dispose(); }
+                    catch { }
+                    Interlocked.Decrement(ref _abandoned);
+                });
+            }
+        }
+
+        /// <summary>每条通道的状态,给 /health。/ Per-channel state for /health.</summary>
+        public void Describe(JsonWriter j)
+        {
+            int now = Environment.TickCount;
+            j.BeginArray("readChannelStates");
+            foreach (ReadChannel c in _channels)
+            {
+                j.BeginObject()
+                    .Field("id", (uint)c.Id)
+                    .Field("helper", c.IsHelper)
+                    .Field("connected", c.IsConnected)
+                    .Field("busy", c.Busy)
+                    .Field("heldMs", (uint)(c.Busy ? Math.Max(0, unchecked(now - c.HeldSince)) : 0))
+                 .EndObject();
+            }
+            j.EndArray();
         }
 
         public void Dispose()

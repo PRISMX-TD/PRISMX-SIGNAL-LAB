@@ -55,6 +55,13 @@ namespace Prismx.Mt5Gateway
             _link = link;
             _tokenBytes = Encoding.UTF8.GetBytes(cfg.ApiToken);
             _listener.Prefixes.Add(cfg.ListenPrefix);
+
+            // 结果未知的单子事后核对出结论时,改写幂等记录:后端拿同一个 clientOrderId
+            // 再问,就拿到真实结果(见 Mt5Link.Reconcile.cs)。
+            // A reconciled verdict rewrites the idempotency record, so a same-id re-ask
+            // gets the real outcome (see Mt5Link.Reconcile.cs).
+            _link.TradeResolved += (login, kind, clientOrderId, r) =>
+                _idem.Complete(IdempotencyCache.Key(login, kind, clientOrderId), r);
         }
 
         /// <summary>clientOrderId 上限,与 /trade/result 一致。/ Same cap as /trade/result.</summary>
@@ -97,6 +104,9 @@ namespace Prismx.Mt5Gateway
             // 高峰时到底慢在网关里还是慢在券商那边(dealer 那一段另有 dealerMs)。
             // Whole-trade wall time, one line per trade; the dealer leg is logged
             // separately as dealerMs, so the rest is time spent inside the gateway.
+            // 上一个请求异常退出时可能留下没用掉的持仓快照,先清掉。/ Drop any leftover.
+            _replyPositions = null;
+
             Func<TradeResult> timedRun = run;
             run = () =>
             {
@@ -404,6 +414,11 @@ namespace Prismx.Mt5Gateway
                     .Field("ordersSetMismatch", (uint)_link.OrdersSetMismatch)
                     .Field("ordersFieldMismatch", (uint)_link.OrdersFieldMismatch)
                  .EndObject();
+
+                // 下单路径(2026-11-11):四档状态、耗时分位、锁占用、在途数、核对、镜像。
+                // Order path (2026-11-11): state, latency percentiles, gate, in-flight,
+                // reconciliation, mirror.
+                _link.DescribeOrderPath(j);
                 // 这里刻意不报 server 与 managerLogin。/health 是唯一不鉴权的接口,
                 // 而那两个字段恰好是攻击 manager 账号所需的两个前提(接入地址 + 登录号),
                 // 等于把侦察素材白送给任何能连到端口的人。运维要查这两项,看启动日志
@@ -493,6 +508,9 @@ namespace Prismx.Mt5Gateway
                     return;
                 case "/position-events":
                     HandlePositionEvents(ctx, method);
+                    return;
+                case "/events":
+                    HandleEvents(ctx, method);
                     return;
                 case "/orders":
                     RequirePost(ctx, method, HandleOrders);
@@ -905,6 +923,63 @@ namespace Prismx.Mt5Gateway
                     .Field("action", e.Action)
                  .EndObject();
             }
+
+            j.EndArray().EndObject();
+            WriteJson(ctx, 200, j.ToString());
+        }
+
+        //+------------------------------------------------------------------+
+        //| GET /events?cursor=N&wait=20000&max=500  事件流长轮询(2026-11-11) |
+        //|                                                                  |
+        //| 成交、仓位、挂单变动、连接起落、核对结论,按 seq 顺序。cursor=上次 |
+        //| 回的 head;没有新事件就挂着等到 wait(最多 25 秒)。resync=true 或  |
+        //| instance 变了:后端整体重读一次再从 head 接着跟。和旧的            |
+        //| /position-events、/deal-events 并存,互不影响。                   |
+        //|                                                                  |
+        //| Long-poll event stream. Pass the last head as cursor; resync or a |
+        //| changed instance means re-read everything and continue from head.|
+        //| Runs alongside the old drain endpoints without affecting them.   |
+        //+------------------------------------------------------------------+
+        private void HandleEvents(HttpListenerContext ctx, string method)
+        {
+            if (method != "GET")
+            {
+                WriteError(ctx, 405, "method_not_allowed", "只接受 GET");
+                return;
+            }
+
+            System.Collections.Specialized.NameValueCollection q = ctx.Request.QueryString;
+            long cursor;
+            int wait, max;
+
+            if (!long.TryParse(q["cursor"] ?? "0", out cursor) || cursor < 0)
+                cursor = 0;
+            if (!int.TryParse(q["wait"] ?? "0", out wait))
+                wait = 0;
+            if (!int.TryParse(q["max"] ?? "500", out max))
+                max = 500;
+
+            wait = Math.Max(0, Math.Min(25000, wait));
+            max = Math.Max(1, Math.Min(2000, max));
+
+            long head;
+            bool resync;
+            System.Collections.Generic.List<string> events =
+                _link.Events.Read(cursor, max, wait, out head, out resync);
+
+            JsonWriter j = new JsonWriter();
+            j.BeginObject()
+                .Field("ok", true)
+                .Field("instance", EventRing.InstanceId)
+                .Field("resync", resync)
+                .FieldLong("head", head)
+                .Field("connected", _link.IsConnected)
+                .Field("subscribed", _link.PositionSubscribed)
+                .Field("dealSubscribed", _link.DealSubscribed)
+                .BeginArray("events");
+
+            foreach (string e in events)
+                j.RawElement(e);
 
             j.EndArray().EndObject();
             WriteJson(ctx, 200, j.ToString());
@@ -1535,7 +1610,7 @@ namespace Prismx.Mt5Gateway
             ExecuteIdempotent(ctx, login, "open", body.GetString("clientOrderId"), delegate
             {
                 TradeResult r = _link.OpenPosition(login, symbol, side == "BUY", volume,
-                    stopLoss, takeProfit, tag);
+                    stopLoss, takeProfit, tag, body.GetString("clientOrderId"));
 
                 // 两个耗时并排打:总耗时减 dealer 等待就是网关自己花的时间(取价、
                 // 反查、核对),一眼能看出"慢"在哪一侧。
@@ -1544,6 +1619,12 @@ namespace Prismx.Mt5Gateway
                 Log.Info("开仓 login={0} {1} {2} {3} 手 -> {4} {5} 耗时 {6}ms(其中 dealer {7}ms)",
                     login, symbol, side, volume, r.Ok ? "成交" : "失败", r.Retcode,
                     r.ElapsedMs, r.DealerMs);
+
+                // 回执顺带这个账号的最新持仓(本地 pump,内存读),只在它已经包含这笔新仓位时
+                // 才带——后端拿到就直接推给页面,不必再读一次。/ Attach the account's positions
+                // when the local pump already shows the new one; the backend pushes them as is.
+                if (r.Ok && !r.Placed && r.Position != 0)
+                    _replyPositions = _link.PositionsForReply(login, r.Position, 0);
 
                 return r;
             });
@@ -1583,10 +1664,16 @@ namespace Prismx.Mt5Gateway
             // Closes are guarded too: a duplicated partial close closes twice.
             ExecuteIdempotent(ctx, login, "close", body.GetString("clientOrderId"), delegate
             {
-                TradeResult r = _link.ClosePosition(login, ticket, closeVolume, closeTag);
+                TradeResult r = _link.ClosePosition(login, ticket, closeVolume, closeTag,
+                    body.GetString("clientOrderId"));
 
                 Log.Info("平仓 login={0} ticket={1} -> {2} {3} 耗时 {4}ms(其中 dealer {5}ms)",
                     login, ticket, r.Ok ? "成交" : "失败", r.Retcode, r.ElapsedMs, r.DealerMs);
+
+                // 全平成功:本地 pump 里这张仓位已经没了才带持仓(部分平仓不带,手数变化
+                // 判断不了新旧)。/ Full close only, and only once the pump no longer has it.
+                if (r.Ok && !r.Placed && closeVolume <= 0)
+                    _replyPositions = _link.PositionsForReply(login, 0, ticket);
 
                 return r;
             });
@@ -1695,7 +1782,7 @@ namespace Prismx.Mt5Gateway
             ExecuteIdempotent(ctx, login, "pending", body.GetString("clientOrderId"), delegate
             {
                 TradeResult r = _link.PlacePending(login, symbol, orderType, volume, price,
-                    stopLoss, takeProfit, tag);
+                    stopLoss, takeProfit, tag, body.GetString("clientOrderId"));
 
                 Log.Info("挂单 login={0} {1} {2} {3} 手 @ {4} -> {5} {6} 耗时 {7}ms(其中 dealer {8}ms)",
                     login, symbol, orderType, volume, price, r.Ok ? "已挂" : "失败", r.Retcode,
@@ -1838,6 +1925,23 @@ namespace Prismx.Mt5Gateway
             if (_link.IsConnected)
                 return false;
 
+            // 平仓、改单、撤单、改挂单:断线时先排队等连接回来(最多
+            // queue_closes_on_disconnect_ms,默认 10 秒),回来了照常执行。开仓/挂单不排队:
+            // 行情十秒后可能已经完全不同,让用户自己决定要不要重下。
+            // Close-type actions wait up to queue_closes_on_disconnect_ms for the link and
+            // then run normally. Opens never queue: ten seconds later the market may differ.
+            bool closeType = action == "close" || action == "modify" || action == "cancel"
+                || action == "modify-pending";
+
+            if (closeType && _cfg.QueueClosesOnDisconnectMs > 0)
+            {
+                Log.Info("{0} 遇到断线,排队等连接恢复(最多 {1} 毫秒)login={2}", action,
+                    _cfg.QueueClosesOnDisconnectMs, login);
+
+                if (_link.WaitForLinkUp(_cfg.QueueClosesOnDisconnectMs))
+                    return false;
+            }
+
             if (clientOrderId.Length > 0)
             {
                 string key = IdempotencyCache.Key(login, action, clientOrderId);
@@ -1935,8 +2039,17 @@ namespace Prismx.Mt5Gateway
             return true;
         }
 
+        /// <summary>本线程这一笔交易要随回执带上的持仓(见 Mt5Link.PositionsForReply);用一次就清。
+        /// Positions to attach to this thread's trade reply; cleared once used.</summary>
+        [ThreadStatic]
+        private static PositionInfo[] _replyPositions;
+
         private void WriteTradeResult(HttpListenerContext ctx, TradeResult r, bool replayed)
         {
+            // 回放的是旧结果,不配带"现在"的持仓。/ A replay must not carry current positions.
+            PositionInfo[] positions = replayed ? null : _replyPositions;
+            _replyPositions = null;
+
             JsonWriter j = new JsonWriter();
             j.BeginObject()
                 .Field("ok", r.Ok)
@@ -1961,7 +2074,39 @@ namespace Prismx.Mt5Gateway
                 // result carries the numbers from the original execution.
                 .Field("elapsedMs", (ulong)Math.Max(0, r.ElapsedMs))
                 .Field("dealerMs", (ulong)Math.Max(0, r.DealerMs))
-             .EndObject();
+                // 结果未知后事后核对出的结论:filled / not_filled,没核对过为空。
+                // Reconciled verdict for a once-unknown outcome; empty when never reconciled.
+                .Field("resolved", r.Resolved ?? "")
+                // 这次是不是"繁忙、未发出"(锁被占、排队满):后端据此可以放心让用户重试。
+                // Whether this was "busy, nothing sent", which is always safe to retry.
+                .Field("notSent", r.Retcode == Mt5Link.GatewayBusyRetcode);
+
+            // 2026-11-11:成交后的最新持仓(只在确定已经反映这笔成交时才有,见 PositionsForReply)。
+            // 字段与 /positions 相同;没有这个字段时后端照旧自己去读。
+            // Latest positions after the fill, same shape as /positions; when absent the
+            // backend reads them itself as before.
+            if (positions != null)
+            {
+                j.BeginArray("positions");
+                foreach (PositionInfo p in positions)
+                {
+                    j.BeginObject()
+                        .Field("ticket", p.Ticket)
+                        .Field("symbol", p.Symbol)
+                        .Field("side", p.Side)
+                        .Field("volume", p.Volume)
+                        .Field("priceOpen", p.PriceOpen)
+                        .Field("priceCurrent", p.PriceCurrent)
+                        .Field("stopLoss", p.StopLoss)
+                        .Field("takeProfit", p.TakeProfit)
+                        .Field("profit", p.Profit)
+                        .Field("comment", p.Comment)
+                     .EndObject();
+                }
+                j.EndArray();
+            }
+
+            j.EndObject();
 
             // 交易被拒是业务结果而非服务故障,统一用 200 返回,
             // 让后端只看 ok 字段做判断。
