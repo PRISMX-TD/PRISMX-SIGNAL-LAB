@@ -12,7 +12,7 @@
 // 设计上刻意保守，因为一个坏掉的 Service Worker 能把整个站点缓存死：
 //
 // 1. **只缓存离线页本身**（以及它需要的图标），不缓存 /assets/ 下带 hash 的
-//    构建产物。那些文件由 Vercel 的 CDN 负责，且文件名随内容变化天然安全；
+//    构建产物（2026-11-11 起有例外：只在网络失败时兜底用，见下方 ASSET_CACHE）。那些文件由 Vercel 的 CDN 负责，且文件名随内容变化天然安全；
 //    在 SW 里再缓存一层只会多一个「用户拿到旧版本」的失效路径，收益却很小。
 // 2. **导航请求一律 network-first**，只有网络真的失败才回落到离线页。绝不
 //    cache-first：那会让用户在有网的情况下看到缓存的旧页面。
@@ -59,6 +59,63 @@ const OFFLINE_URL = "/offline.html"
 const APP_SHELL_URL = "/app.html"
 const SHELL = [OFFLINE_URL, "/icons/icon-192.png"]
 
+// 2026-11-11 补充：/assets/ 下带 hash 的构建产物也进缓存，但**只在网络失败时才用**。
+// 起因：泉州等地按域名拦截我们的网站（换新域名也拦），已装 PWA 的 iOS 用户打开图标时导航失败、
+// 回落到缓存的壳，可壳引用的 JS/CSS 只在浏览器 HTTP 缓存里——iOS 常清掉，于是白屏。壳能起来，
+// 前端就会按 apiBase.ts 自动换到 IP 入口继续用。所以：
+//   · 仍是 network-first：在线时永远走网络、拿最新文件，缓存只是失败后的兜底，不会把人钉在旧版；
+//   · 每次成功拿到的 /assets/ 文件顺手存一份（懒加载的页面分块也就跟着进来了），
+//     刷新壳时把壳里直接引用的那些预先拉齐；
+//   · 只存 JS / CSS / 字体等非 HTML 响应（Vercel 对不存在的 /assets/ 会回 app.html，不能存）；
+//   · 条目上限 ASSET_MAX，超了按存入先后删最旧的，旧版本的文件自然被挤掉。
+// Added 2026-11-11: hashed /assets/ files are cached too, but **only used when the network
+// fails**. Quanzhou and similar regions block our site by domain (fresh domains too); an
+// installed iOS PWA then falls back to the cached shell, whose JS/CSS lived only in the HTTP
+// cache that iOS often clears — blank screen. Once the shell boots, the frontend switches to the
+// IP entry by itself (apiBase.ts). Network-first stays: online users always get fresh files.
+// Every successful /assets/ response is stored (lazy chunks included) and the shell's direct
+// references are prefetched when the shell refreshes; HTML responses are never stored (Vercel
+// answers missing /assets/ with app.html); capped at ASSET_MAX, oldest first out.
+const ASSET_CACHE = "prismx-assets-v1"
+const ASSET_MAX = 400
+
+function isStorableAsset(res) {
+  if (!res || !res.ok || res.redirected) return false
+  return !(res.headers.get("content-type") || "").includes("text/html")
+}
+
+function trimAssets() {
+  return caches.open(ASSET_CACHE).then((c) =>
+    c.keys().then((keys) => {
+      const extra = keys.length - ASSET_MAX
+      if (extra <= 0) return
+      return Promise.all(keys.slice(0, extra).map((k) => c.delete(k)))
+    })
+  )
+}
+
+// 把壳里直接引用的 /assets/ 文件拉进缓存（已有的跳过）。失败不影响任何流程。
+// Prefetch the /assets/ files the shell references directly (skipping cached ones).
+function cacheShellAssets(html) {
+  const urls = Array.from(new Set(html.match(/\/assets\/[^"'\s)]+/g) || []))
+  return caches
+    .open(ASSET_CACHE)
+    .then((c) =>
+      Promise.all(
+        urls.map((u) =>
+          c.match(u).then((hit) => {
+            if (hit) return
+            return fetch(u)
+              .then((res) => (isStorableAsset(res) ? c.put(u, res) : undefined))
+              .catch(() => {})
+          })
+        )
+      )
+    )
+    .then(trimAssets)
+    .catch(() => {})
+}
+
 // 拉一份最新的 SPA 壳进缓存。失败不影响任何流程（离线时最多少一个兜底）。
 // Fetch a fresh SPA shell into the cache. Failure changes nothing else.
 function cacheAppShell() {
@@ -68,7 +125,12 @@ function cacheAppShell() {
       // A redirected (e.g. captive portal) or non-HTML response must not become the shell
       if (!res || !res.ok || res.redirected) return
       if (!(res.headers.get("content-type") || "").includes("text/html")) return
-      return caches.open(CACHE).then((c) => c.put(APP_SHELL_URL, res))
+      const copy = res.clone()
+      return caches
+        .open(CACHE)
+        .then((c) => c.put(APP_SHELL_URL, res))
+        .then(() => copy.text())
+        .then(cacheShellAssets)
     })
     .catch(() => {})
 }
@@ -110,7 +172,9 @@ self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((names) => Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n))))
+      .then((names) =>
+        Promise.all(names.filter((n) => n !== CACHE && n !== ASSET_CACHE).map((n) => caches.delete(n)))
+      )
       // 导航预加载：SW 被系统杀掉后，下一次导航要先把 SW 冷启动起来才能发请求——
       // 开了它，浏览器在启动 SW 的同时就把导航请求发出去，fetch 里用 preloadResponse
       // 接住，省掉「等 SW 启动」那一段串行（老手机上是几十到几百毫秒）。
@@ -138,9 +202,39 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   const req = event.request
-  // 只管页面导航。其余请求（API / WS / 静态资源）一概不碰——不调用
+  // 本站 /assets/ 构建产物：network-first，成功就顺手存一份，失败才回缓存（见顶部 2026-11-11）。
+  // Same-origin /assets/: network-first, store on success, cache only on failure (see top).
+  if (req.method === "GET" && req.mode !== "navigate") {
+    const url = new URL(req.url)
+    if (url.origin === self.location.origin && url.pathname.startsWith("/assets/")) {
+      event.respondWith(
+        fetch(req)
+          .then((res) => {
+            if (isStorableAsset(res)) {
+              const copy = res.clone()
+              event.waitUntil(
+                caches
+                  .open(ASSET_CACHE)
+                  .then((c) => c.put(url.pathname, copy))
+                  .then(trimAssets)
+                  .catch(() => {})
+              )
+            }
+            return res
+          })
+          .catch((err) =>
+            caches.match(url.pathname, { cacheName: ASSET_CACHE }).then((hit) => {
+              if (hit) return hit
+              throw err
+            })
+          )
+      )
+      return
+    }
+  }
+  // 其余只管页面导航。API / WS / 图片等一概不碰——不调用
   // respondWith 就等于把它们交回浏览器原生处理。
-  // Navigations only. Everything else (API / WS / static assets) is left alone —
+  // Otherwise navigations only. API / WS / images are left alone —
   // not calling respondWith hands the request back to the browser untouched.
   if (req.mode !== "navigate") return
   event.respondWith(

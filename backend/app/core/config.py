@@ -516,6 +516,17 @@ class Settings(BaseSettings):
         # Backup domain (for when the main one is blocked in mainland China), served via the HK edge.
         "https://pmxsl.com",
         "https://www.pmxsl.com",
+        # 第三域名（2026-11-11 泉州按域名拉黑了前两个），经香港边缘节点。
+        # Third domain (Quanzhou blacklisted the first two by name on 2026-11-11), via the HK edge.
+        "https://ljlhxhsys.com",
+        "https://www.ljlhxhsys.com",
+        # IP 网页入口（不用域名，泉州连新域名也拦；证书签给 IP 本身），见 ops/sg-direct。
+        # IP web entry (no domain; Quanzhou blocks even fresh domains; cert issued to the IP).
+        "https://43.134.110.47",
+        # 直连网页入口（不经香港，香港节点 IP 被封的地区用），见 frontend/src/api/apiBase.ts。
+        # Direct web entry (bypasses HK, for regions that block the HK edge IP); see apiBase.ts.
+        "https://www2.prismxsignallab.com",
+        "https://www2.pmxsl.com",
         # Android App（Capacitor WebView）的页面 origin。App 出厂自带完整前端，
         # 不是加载线上网站，所以它对后端而言是一个独立的跨域来源；不放行则 App 内
         # 所有接口调用都会被 CORS 拦下。鉴权走 Bearer 头而非 cookie，放行不引入

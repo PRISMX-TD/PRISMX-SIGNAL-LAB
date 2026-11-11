@@ -1,0 +1,79 @@
+# 新加坡源站的「IP 入口」（2026-11-11）：完全不用域名，证书签给 IP 本身。
+# 泉州按域名拦截——连当天新买、指向新加坡的第三域名也拦——只有不带我们域名的访问能通。
+# 服务器上：/etc/nginx/sites-available/prismx-ip，软链到 sites-enabled。回滚 = 删软链 + reload。
+#   · 证书：Let's Encrypt 短期 IP 证书（shortlived，约 6 天），lego HTTP-01 + webroot
+#     /var/www/acme，prismx-ip-cert.timer 每 12 小时检查、过半寿命就续，续了 reload nginx。
+#   · 这里是 443 / 80 的 default_server：不带 SNI（直接用 IP 访问）的连接只能落到默认 server，
+#     证书也只能从这里出。带 SNI 的 api.prismxsignallab.com（香港边缘回源、海外用户）仍按
+#     server_name 命中原来的 prismx 站点，不受影响。
+#   · /_b/ → 后端（去掉前缀）：前端的 IP 入口是 https://43.134.110.47/_b（src/api/apiBase.ts）；
+#     /_b/ops/ → 看门狗 8790。/api/、/ws/ 也直接转后端，兼容以前按 IP 直连的调用方。
+#   · 其余 → Vercel（Host www.prismxsignallab.com）：IP 直开的网页入口。
+# IP entry on the SG origin: no domain, certificate issued to the IP. See frontend apiBase.ts.
+
+server {
+    listen 80 default_server;
+    server_name _;
+    location /.well-known/acme-challenge/ {
+        root /var/www/acme;
+    }
+    location / {
+        return 404;
+    }
+}
+
+server {
+    listen 443 ssl default_server;
+    server_name _;
+    ssl_certificate /etc/lego/certificates/sg-ip.crt;
+    ssl_certificate_key /etc/lego/certificates/sg-ip.key;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+    client_max_body_size 5m;
+
+    location /_b/ {
+        proxy_pass http://127.0.0.1:8000/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+    location /_b/ops/ {
+        proxy_pass http://127.0.0.1:8790/ops/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 30s;
+        client_max_body_size 4k;
+    }
+    location ~ ^/(api|ws)/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+    include snippets/prismx-updates.conf;
+    include snippets/prismx-ops.conf;
+
+    location / {
+        proxy_pass https://76.76.21.21;
+        proxy_http_version 1.1;
+        proxy_set_header Host www.prismxsignallab.com;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_ssl_server_name on;
+        proxy_ssl_name www.prismxsignallab.com;
+        proxy_connect_timeout 10s;
+        proxy_redirect https://www.prismxsignallab.com/ /;
+    }
+}

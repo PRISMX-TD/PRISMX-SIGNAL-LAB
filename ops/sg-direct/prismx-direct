@@ -1,0 +1,87 @@
+# 新加坡源站的「直连入口」（2026-11-11）：不经香港边缘节点，给封了香港 IP 的地区用
+# （泉州电信 / 移动封了 124.156.167.169，主备两个域名一起打不开）。
+# 服务器上的位置：/etc/nginx/sites-available/prismx-direct，软链到 sites-enabled。
+# 原有的 /etc/nginx/sites-enabled/prismx（api.prismxsignallab.com）不动；出问题删掉软链即可回滚。
+#   · api2.prismxsignallab.com / api2.pmxsl.com：与 api.prismxsignallab.com 完全同一套转发；
+#     前端 src/api/apiBase.ts 把它们排在两个香港入口之后。
+#   · www2.prismxsignallab.com：网页直连入口，转发到 Vercel（Host 用 www.prismxsignallab.com）。
+#   · 证书：prismx-direct（api2 + www2 主域名）、pmxsl-direct（api2.pmxsl.com 单独一张，
+#     不和主域名合签，证书上看不出两者是一家）。certbot --nginx 自动续期。
+# Direct entries on the SG origin, bypassing the HK edge, for regions that block the HK IP.
+
+server {
+    listen 80;
+    server_name api2.prismxsignallab.com www2.prismxsignallab.com api2.pmxsl.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name api2.prismxsignallab.com;
+    ssl_certificate /etc/letsencrypt/live/prismx-direct/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/prismx-direct/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 5m;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+    include snippets/prismx-updates.conf;
+    include snippets/prismx-ops.conf;
+}
+
+server {
+    listen 443 ssl;
+    server_name api2.pmxsl.com;
+    ssl_certificate /etc/letsencrypt/live/pmxsl-direct/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/pmxsl-direct/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    client_max_body_size 5m;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+    include snippets/prismx-updates.conf;
+    include snippets/prismx-ops.conf;
+}
+
+server {
+    listen 443 ssl;
+    server_name www2.prismxsignallab.com;
+    ssl_certificate /etc/letsencrypt/live/prismx-direct/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/prismx-direct/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location / {
+        proxy_pass https://76.76.21.21;
+        proxy_http_version 1.1;
+        proxy_set_header Host www.prismxsignallab.com;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_ssl_server_name on;
+        proxy_ssl_name www.prismxsignallab.com;
+        proxy_connect_timeout 10s;
+        proxy_redirect https://www.prismxsignallab.com/ /;
+    }
+}

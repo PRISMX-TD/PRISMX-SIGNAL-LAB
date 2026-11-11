@@ -28,4 +28,7 @@ issue() {
 rc=0
 issue prismx-edge -d api.prismxsignallab.com -d prismxsignallab.com -d www.prismxsignallab.com || rc=1
 issue pmxsl-edge -d api.pmxsl.com -d pmxsl.com -d www.pmxsl.com || rc=1
+# 第三个域名（2026-11-11）：泉州按域名拉黑了前两个，换一个毫无关联的名字。同样单独一张。
+# Third domain (2026-11-11): Quanzhou blacklisted the first two by name. Own cert as well.
+issue ljl-edge -d api.ljlhxhsys.com -d www.ljlhxhsys.com || rc=1
 exit $rc
