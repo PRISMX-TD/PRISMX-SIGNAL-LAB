@@ -220,3 +220,109 @@ describe('apiBase failover', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 })
+
+describe('admin entry list', () => {
+  const NEW = 'https://5.6.7.8/_b'
+  const NEW2 = 'https://api.fresh.com'
+
+  beforeEach(() => {
+    vi.stubEnv('VITE_API_BASE', MAIN)
+    vi.stubGlobal('location', { hostname: 'localhost' })
+  })
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+  })
+
+  // 入口列表接口回 body；其余同 stubFetch。
+  // The entries endpoint answers `body`; everything else as stubFetch.
+  function stubWithEntries(up: string[], body: unknown) {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.endsWith('/api/site/entries')) return new Response(JSON.stringify(body), { status: 200 })
+      if (up.some((b) => url === `${b}/`)) return new Response('{"status":"ok"}', { status: 200 })
+      throw new TypeError('Failed to fetch')
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('puts stored admin entries first and keeps every built-in entry after them', async () => {
+    stubStorage({ 'prismx.apiEntries': JSON.stringify([NEW]) })
+    const m = await load()
+    expect(m.API_CANDIDATES).toEqual([NEW, MAIN, BACKUP, THIRD, DIRECT_MAIN, DIRECT, HK_IP, IP])
+  })
+
+  it('ignores a corrupted or unsafe stored list', async () => {
+    stubStorage({ 'prismx.apiEntries': JSON.stringify(['http://plain.com', 'javascript:x', 7]) })
+    const m = await load()
+    expect(m.API_CANDIDATES[0]).toBe(MAIN)
+    stubStorage({ 'prismx.apiEntries': '{not json' })
+    const m2 = await load()
+    expect(m2.API_CANDIDATES[0]).toBe(MAIN)
+  })
+
+  it('keeps the page own entry first when opened from an IP', async () => {
+    stubStorage({ 'prismx.apiEntries': JSON.stringify([NEW]) })
+    vi.stubGlobal('location', { hostname: '124.156.167.169' })
+    const m = await load()
+    expect(m.API_CANDIDATES.slice(0, 4)).toEqual([HK_IP, NEW, IP, MAIN])
+  })
+
+  it('fetches the list, drops invalid entries, stores it and re-ranks', async () => {
+    const storage = stubStorage()
+    stubWithEntries([MAIN], { entries: [NEW, 'http://bad.com', NEW2] })
+    const m = await load()
+    await m.refreshEntries()
+    expect(m.API_CANDIDATES.slice(0, 3)).toEqual([NEW, NEW2, MAIN])
+    expect(JSON.parse(storage.get('prismx.apiEntries') ?? '[]')).toEqual([NEW, NEW2])
+  })
+
+  it('an empty list from the server clears the stored one', async () => {
+    const storage = stubStorage({ 'prismx.apiEntries': JSON.stringify([NEW]) })
+    stubWithEntries([MAIN], { entries: [] })
+    const m = await load()
+    await m.refreshEntries()
+    expect(m.API_CANDIDATES[0]).toBe(MAIN)
+    expect(storage.has('prismx.apiEntries')).toBe(false)
+  })
+
+  it('a malformed response changes nothing', async () => {
+    const storage = stubStorage({ 'prismx.apiEntries': JSON.stringify([NEW]) })
+    stubWithEntries([MAIN], { nope: true })
+    const m = await load()
+    await m.refreshEntries()
+    expect(m.API_CANDIDATES[0]).toBe(NEW)
+    expect(storage.has('prismx.apiEntries')).toBe(true)
+  })
+
+  it('fails over to an admin entry when every built-in entry is blocked', async () => {
+    stubStorage({ 'prismx.apiEntries': JSON.stringify([NEW]), 'prismx.apiBase': IP })
+    stubFetch([NEW])
+    const m = await load()
+    expect(m.API_BASE).toBe(IP)
+    await m.reportApiFailure()
+    expect(m.API_BASE).toBe(NEW)
+  })
+
+  it('fetches the list on its own about 20 seconds after start', async () => {
+    vi.useFakeTimers()
+    try {
+      stubStorage()
+      const fetchMock = stubWithEntries([MAIN], { entries: [NEW] })
+      const m = await load()
+      await vi.advanceTimersByTimeAsync(20_000)
+      expect(fetchMock).toHaveBeenCalledWith(`${MAIN}/api/site/entries`, expect.anything())
+      expect(m.API_CANDIDATES[0]).toBe(NEW)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('sanitizeEntries keeps https bases only, deduped and capped at 20', async () => {
+    const m = await load()
+    const many = Array.from({ length: 30 }, (_, i) => `https://h${i}.com`)
+    expect(m.sanitizeEntries(many)).toHaveLength(20)
+    expect(m.sanitizeEntries([NEW, NEW, 'https://a.com/', 'https://u@a.com', 'https://a.com?x=1'])).toEqual([NEW])
+    expect(m.sanitizeEntries('nope')).toEqual([])
+  })
+})

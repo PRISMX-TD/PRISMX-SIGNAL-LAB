@@ -32,7 +32,7 @@ from app.services import gateway_client, shared_state
 from app.services.background import request_restart as request_loop_restart
 from app.services.gamification.competitions import refresh_comp_board
 from app.core.database import SessionLocal
-from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminGuestPreviewIn, AdminGuestPreviewOut, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.schemas import AdminTraderLevelsOut, AdminTraderLevelUsersOut, AdminPotentialCustomersOut, AdminBrokerSettings, AdminBulkUserUpdate, AdminCandleSettings, AdminEmailGateSettings, AdminGuestPreviewIn, AdminGuestPreviewOut, AdminOverviewOut, AdminPageStatsOut, AdminPricingSettings, AdminStrategyCostEntry, AdminStrategyCosts, AdminStrategySettings, AdminSocialSettings, AdminApiEntries, AdminStrategyWinRateOut, AdminTrialSettings, AdminWinrateSettings, AdminWinrateSettingsIn, AdminWinrateStrategyOut, AdminUserDisableIn, AdminUserOut, AdminUserUpdate, PageDayPointOut, PageStatOut, PlatformStrategyListOut, PlatformStrategyOut
 from app.services.deps import require_admin
 from app.services.guest_preview import funnel_rows as guest_preview_funnel_rows
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
@@ -42,6 +42,9 @@ from app.services.admin_trader_levels import DEFAULT_USER_LIMIT, LEVEL_COUNT, le
 from app.services.pagination import PAGE_SIZE_DEFAULT, PAGE_SIZE_MAX, resolve_range_or_422
 from app.services.stats_time import day_start_utc, local_day, today as stats_today
 from app.services.settings_store import (
+    get_api_entries,
+    invalidate_api_entries_cache,
+    save_api_entries,
     get_broker_settings,
     get_candle_settings,
     get_email_gate_settings,
@@ -1397,6 +1400,33 @@ def put_email_gate(
     db.commit()
     invalidate_email_gate_cache()
     return get_email_gate(db, admin)
+
+
+# ---------- 后端入口列表 / API entry list（2026-11-11） ----------
+
+@router.get("/api-entries", response_model=AdminApiEntries)
+def get_admin_api_entries(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """读取管理员追加的后端入口列表。Read the admin-added API entry list."""
+    return AdminApiEntries(entries=get_api_entries(db))
+
+
+@router.put("/api-entries", response_model=AdminApiEntries)
+def put_admin_api_entries(
+    body: AdminApiEntries,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """保存后端入口列表。客户端在还能连上时定期拉取，被封时切到这里的新入口。
+    Save the API entry list; clients fetch it while still connected and fail over to it."""
+    old = {"entries": get_api_entries(db)}
+    save_api_entries(db, body.entries)
+    _log_settings_diff(db, admin.id, "api_entries", old, {"entries": body.entries})
+    db.commit()
+    invalidate_api_entries_cache()
+    return get_admin_api_entries(db, admin)
 
 
 # ---------- 官方社交主页 / official social links ----------

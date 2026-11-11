@@ -84,6 +84,8 @@ describe('request(): network layer', () => {
     const calls: string[] = []
     vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
       if (url.endsWith('/')) return Promise.resolve(probeAnswer(url, [BACKUP]))
+      // 入口列表在启动 20 秒后后台拉一次，不算业务请求。/ The background entry-list fetch isn't a business request.
+      if (url.endsWith('/api/site/entries')) return Promise.reject(new TypeError('Failed to fetch'))
       calls.push(url)
       return new Promise<Response>((_res, rej) => {
         init?.signal?.addEventListener('abort', () => rej(abortError()))

@@ -20,6 +20,7 @@ import { localizeApiError } from '../../api/utils'
 import Switch from '../Switch'
 import NumberInput from '../NumberInput'
 import GuestPreviewSection from './GuestPreviewSection'
+import ApiEntriesSection from './ApiEntriesSection'
 import { SkeletonLine } from '../Skeleton'
 import { useToast } from '../../utils/useToast'
 import type {
@@ -518,6 +519,9 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
           </button>
         </div>
       )}
+
+      {/* 备用入口（被封时的新入口）/ extra API entries for blocked regions */}
+      <ApiEntriesSection onError={onSectionError} onSaved={() => showToast('ok', t('admin.saved'))} />
 
     </div>
   )

@@ -23,6 +23,7 @@ Without a reachable Redis it degrades to the plain 30s TTL.
 """
 import json
 import logging
+import re
 import threading
 import time
 
@@ -626,6 +627,83 @@ def save_social_settings(db, data: dict) -> None:
     merged = _load_social_from_db(db)
     merged.update(data)
     set_setting(db, "social", merged)
+
+
+# ---------- 后端入口列表 / API entry list（2026-11-11） ----------
+#
+# 前端内置了一组入口（域名、直连、两个 IP，见 frontend/src/api/apiBase.ts）。这里是管理员
+# 在后台追加的「新入口」：App / 网页在还能连上的时候定期拉一份记在本地，某个入口被封时就能
+# 切到管理员事先加上的新 IP / 新域名——不用发版本、不用热更新。只存 https 基址（无查询串、
+# 无结尾斜杠），按管理员排的顺序；前端始终把内置入口接在后面，列表写坏了也丢不了内置的。
+# The admin-maintained extra API bases. Clients fetch this while they can still connect and
+# keep it locally, so when an entry gets blocked they can move to a new IP / domain the admin
+# added beforehand — no release, no hot update. https bases only (no query, no trailing slash),
+# in admin order; the client always appends its built-in entries, so a bad list cannot lose them.
+API_ENTRIES_MAX = 20
+_API_ENTRY_RE = re.compile(
+    r"^https://(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*)"
+    r"(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~-]+)*$"
+)
+
+
+def normalize_api_entry(value) -> str | None:
+    """规范化一个入口基址；不合格返回 None。去掉首尾空白与结尾斜杠，只认 https、主机名或
+    IPv4、可选端口与路径前缀（如 /_b），不许查询串 / 片段 / 用户名。
+    Normalise one API base, or None if invalid: trimmed, trailing slashes dropped; https only,
+    hostname or IPv4, optional port and path prefix (e.g. /_b); no query, fragment or userinfo."""
+    if not isinstance(value, str):
+        return None
+    v = value.strip().rstrip("/")
+    if not v or len(v) > 200 or not _API_ENTRY_RE.match(v):
+        return None
+    return v
+
+
+def normalize_api_entries(values) -> list[str]:
+    """逐个规范化、去重（保留第一次出现的位置）、截到上限；不合格的丢弃。
+    Normalise each, dedupe keeping first occurrences, cap at the limit; invalid ones dropped."""
+    out: list[str] = []
+    for item in values if isinstance(values, list) else []:
+        v = normalize_api_entry(item)
+        if v and v not in out:
+            out.append(v)
+        if len(out) >= API_ENTRIES_MAX:
+            break
+    return out
+
+
+_api_entries_cache = _TtlCache()
+
+
+def invalidate_api_entries_cache() -> None:
+    _api_entries_cache.invalidate()
+
+
+def _load_api_entries_from_db(db) -> dict:
+    """读入口列表；读的时候再过一遍校验（写入路径不止管理端一条，坏值当没填）。
+    Read the entry list, re-validated on read (fail closed on anything unrecognised)."""
+    row = db.query(PlatformSetting).filter(PlatformSetting.key == "api_entries").first()
+    entries: list[str] = []
+    if row:
+        try:
+            stored = json.loads(row.value)
+            if isinstance(stored, dict):
+                entries = normalize_api_entries(stored.get("entries"))
+        except (ValueError, TypeError):
+            logger.warning("platform_settings: invalid JSON for api_entries, using empty list")
+    return {"entries": entries}
+
+
+def get_api_entries(db) -> list[str]:
+    """读取管理员追加的入口列表（独立缓存）。Read the admin-added entry list (its own cache)."""
+    data = _api_entries_cache.get(db, _load_api_entries_from_db)
+    return list(data["entries"])
+
+
+def save_api_entries(db, entries: list[str]) -> None:
+    """写入入口列表（不提交，调用方 commit 后 invalidate）。
+    Write the entry list (no commit; caller commits then invalidates)."""
+    set_setting(db, "api_entries", {"entries": normalize_api_entries(entries)})
 
 
 # 游客预览（2026-10-09）：开着时，未登录访客打开首页看到的是带锁的仪表盘（价位抹除、

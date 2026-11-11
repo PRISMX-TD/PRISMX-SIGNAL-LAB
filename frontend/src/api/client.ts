@@ -1781,6 +1781,12 @@ export const adminApi = {
         method: 'PUT',
         body: JSON.stringify({ enabled }),
       }),
+    getApiEntries: () => request<{ entries: string[] }>('/admin/api-entries'),
+    updateApiEntries: (payload: { entries: string[] }) =>
+      request<{ entries: string[] }>('/admin/api-entries', {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }),
     getSocial: () => request<AdminSocialSettings>('/admin/social'),
     updateSocial: (payload: AdminSocialSettings) =>
       request<AdminSocialSettings>('/admin/social', {

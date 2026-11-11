@@ -17,7 +17,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.services.settings_store import get_guest_preview_settings, get_social_settings
+from app.services.settings_store import get_api_entries, get_guest_preview_settings, get_social_settings
 
 router = APIRouter(prefix="/site", tags=["site"])
 
@@ -44,6 +44,18 @@ def get_social_links(db: Session = Depends(get_db)):
         "telegram": s["telegram_url"],
     }
     return {k: v for k, v in mapping.items() if v}
+
+
+@router.get("/entries", response_model=dict)
+def get_site_entries(db: Session = Depends(get_db)):
+    """管理员追加的后端入口（2026-11-11）。App / 网页在能连上时定期拉取并记在本地，排在
+    内置入口前面；某个入口被（按域名或 IP）封了，就能切到管理员事先加上的新入口，不用发版。
+    公开、不鉴权：这些地址本来就写在前端代码里，不是秘密。
+    Admin-added API bases (2026-11-11). Clients fetch this while connected, keep it locally and
+    try it ahead of their built-in entries, so a blocked entry can be replaced without a release.
+    Public, no auth: these addresses ship in the frontend anyway and are not secret.
+    """
+    return {"entries": get_api_entries(db)}
 
 
 @router.get("/config", response_model=dict)

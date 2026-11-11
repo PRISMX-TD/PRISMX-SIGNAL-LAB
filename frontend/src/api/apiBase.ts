@@ -35,6 +35,17 @@
 //   · API_BASE 是 `export let`：ES 模块的导出是活绑定，切换后所有 import 它的模块
 //     下一次读取就是新值（REST、WebSocket 重连、遥测都不用改调用方式）。
 //
+// 管理员追加的入口（2026-11-11）：后台「运营设置 → 备用入口」填的地址，从 GET /api/site/entries
+// 拉（启动 20 秒后、之后每 6 小时，能连上的时候），存 localStorage 的 prismx.apiEntries，排在
+// 内置入口前面（页面自己的入口仍在最前）。现有名字和 IP 都被封时，事先加好的新入口不用发版本
+// 就能接上；但只对拉到过列表的客户端有效，新入口也得先在服务器上搭好。注意网页 / PWA 受
+// vercel.json 的 CSP 限制：新主机还要加进 connect-src 才能连（App 没有 CSP，不受影响）。
+//
+// Admin-added entries (2026-11-11): fetched from GET /api/site/entries (20 s after start, then
+// every 6 h while reachable), stored in localStorage prismx.apiEntries and tried ahead of the
+// built-ins (the page's own entry still first). Only clients that fetched the list benefit; the
+// web/PWA additionally needs the new host in vercel.json's CSP connect-src (the App has no CSP).
+//
 // 单独成一个无依赖的小模块：clientErrorReport 在出错路径上也要用，不能拖进整个 client。
 //
 // API base and automatic failover across entry points.
@@ -94,6 +105,12 @@ const IP_BASE = `https://${SG_IP}/_b`
 const HK_IP = '124.156.167.169'
 const HK_IP_BASE = `https://${HK_IP}/_b`
 const STORAGE_KEY = 'prismx.apiBase'
+// 管理员在后台追加的入口（GET /api/site/entries），能连上时拉取、记在本地。
+// Admin-added entries (GET /api/site/entries), fetched while connected and kept locally.
+const ENTRIES_KEY = 'prismx.apiEntries'
+const ENTRIES_MAX = 20
+const ENTRIES_FIRST_MS = 20_000
+const ENTRIES_EVERY_MS = 6 * 60 * 60_000
 const PROBE_TIMEOUT_MS = 6_000
 const PROBE_COOLDOWN_MS = 30_000
 const RECHECK_FIRST_MS = 15_000
@@ -127,6 +144,42 @@ function writeStored(base: string) {
 
 const configured = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/\/$/, '')
 
+// 只认 https 基址：主机名或 IPv4、可选端口与路径前缀，无查询串 / 片段 / 结尾斜杠（与后端
+// settings_store.normalize_api_entry 同一条规则）。本地存的值也过一遍：坏了就当没有。
+// https bases only — hostname or IPv4, optional port and path prefix, no query / fragment /
+// trailing slash (same rule as the backend's normalize_api_entry). Stored values are re-checked.
+const ENTRY_RE =
+  /^https:\/\/[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*(?::[0-9]{1,5})?(?:\/[A-Za-z0-9._~-]+)*$/
+
+export function sanitizeEntries(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  const out: string[] = []
+  for (const item of value) {
+    if (typeof item !== 'string' || item.length > 200 || !ENTRY_RE.test(item)) continue
+    if (!out.includes(item)) out.push(item)
+    if (out.length >= ENTRIES_MAX) break
+  }
+  return out
+}
+
+function readEntries(): string[] {
+  try {
+    const raw = localStorage.getItem(ENTRIES_KEY)
+    return raw ? sanitizeEntries(JSON.parse(raw)) : []
+  } catch {
+    return []
+  }
+}
+
+function writeEntries(entries: string[]) {
+  try {
+    if (entries.length) localStorage.setItem(ENTRIES_KEY, JSON.stringify(entries))
+    else localStorage.removeItem(ENTRIES_KEY)
+  } catch {
+    // 记不住就下次再拉。/ Can't persist: fetched again next time.
+  }
+}
+
 function candidateOrder(): string[] {
   const direct = [DIRECT_MAIN_BASE, DIRECT_BACKUP_BASE]
   const hk = [configured, BACKUP_BASE, THIRD_BASE]
@@ -141,9 +194,23 @@ function candidateOrder(): string[] {
   return [...hk, ...direct, ...ips]
 }
 
-// 按优先级排好的全部入口；开发期（configured 为空）只有空串，不切换。
-// All entry points in priority order; in dev (configured empty) just '' and no failover.
-export const API_CANDIDATES: readonly string[] = !configured ? [''] : [...new Set(candidateOrder())]
+// 合并顺序：页面不是从主域名打开时，页面自己那个入口仍排第一（同源最稳）；然后是管理员追加的
+// 入口（管理员排的顺序，新 IP 可以排在被封的旧入口前面）；最后接上全部内置入口——列表写坏了
+// 或被清空，也丢不了内置的。
+// Merge order: when the page isn't on the main domain its own entry stays first (same origin is
+// the safest); then the admin-added entries in admin order (a new IP can go ahead of a blocked
+// one); then every built-in entry, so a bad or empty list never loses them.
+function mergeCandidates(extra: readonly string[]): string[] {
+  const builtin = candidateOrder()
+  const own = builtin[0] !== configured ? [builtin[0]] : []
+  return [...new Set([...own, ...extra, ...builtin])]
+}
+
+// 按优先级排好的全部入口；开发期（configured 为空）只有空串，不切换。`let`：拉到新列表后
+// 整个换掉（ES 模块活绑定，导入方下次读就是新的）。
+// All entry points in priority order; in dev (configured empty) just '' and no failover. `let`
+// so a fetched list replaces it (live binding: importers see the new array on their next read).
+export let API_CANDIDATES: readonly string[] = !configured ? [''] : mergeCandidates(readEntries())
 
 function initialBase(): string {
   const stored = readStored()
@@ -233,6 +300,42 @@ async function recheck() {
 }
 
 scheduleRecheck(RECHECK_FIRST_MS)
+
+// 从当前入口拉一次管理员的入口列表；变了就记下并重排候选。失败（断网、旧后端没有这个接口、
+// 返回不是合法列表）一律静默，下一轮再来。
+// Fetch the admin entry list from the current base; if it changed, persist and re-rank the
+// candidates. Any failure (offline, an old backend without the endpoint, a malformed body) is
+// silent and retried next round.
+export async function refreshEntries(): Promise<void> {
+  if (!configured) return
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), PROBE_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${API_BASE}/api/site/entries`, { signal: controller.signal, cache: 'no-store' })
+    if (!res.ok) return
+    const body: unknown = await res.json()
+    const raw = body && typeof body === 'object' ? (body as { entries?: unknown }).entries : undefined
+    if (!Array.isArray(raw)) return
+    const entries = sanitizeEntries(raw)
+    if (JSON.stringify(entries) === JSON.stringify(readEntries())) return
+    writeEntries(entries)
+    API_CANDIDATES = mergeCandidates(entries)
+    scheduleRecheck(RECHECK_EVERY_MS)
+  } catch {
+    // 下一轮再拉。/ Retry next round.
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function scheduleEntries(delay: number) {
+  if (!configured) return
+  setTimeout(() => {
+    void refreshEntries().finally(() => scheduleEntries(ENTRIES_EVERY_MS))
+  }, delay)
+}
+
+scheduleEntries(ENTRIES_FIRST_MS)
 
 // 报告一次网络层失败，按需切换入口。返回的 Promise 在探测结束后 resolve（从不 reject），
 // 调用方可以 await 它再重试，也可以不管。

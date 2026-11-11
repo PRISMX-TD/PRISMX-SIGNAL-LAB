@@ -954,6 +954,31 @@ class AdminSocialSettings(BaseModel):
         return v
 
 
+class AdminApiEntries(BaseModel):
+    """管理员追加的后端入口列表（2026-11-11）：https 基址，按顺序，最多 20 个。
+    写入时逐个校验，有一个不合格就整份拒绝（不悄悄丢掉，管理员要知道哪行写错了）。
+    Admin-added API bases (2026-11-11): https bases in order, at most 20. Each is validated on
+    write and one bad line rejects the whole list (nothing silently dropped)."""
+
+    entries: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("entries")
+    @classmethod
+    def _valid_entries(cls, v: list[str]) -> list[str]:
+        from app.services.settings_store import normalize_api_entry
+
+        out: list[str] = []
+        for item in v:
+            if not (item or "").strip():
+                continue
+            n = normalize_api_entry(item)
+            if n is None:
+                raise ValueError(f"入口地址不合格（只能是 https://主机[:端口][/路径]）/ invalid entry: {item[:80]}")
+            if n not in out:
+                out.append(n)
+        return out
+
+
 class AdminEmailGateSettings(BaseModel):
     """一次性邮箱闸门设置（管理后台读写用同一形状）。
 
