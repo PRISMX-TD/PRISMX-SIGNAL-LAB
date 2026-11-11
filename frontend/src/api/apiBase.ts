@@ -329,7 +329,11 @@ export async function refreshEntries(): Promise<void> {
 }
 
 function scheduleEntries(delay: number) {
-  if (!configured) return
+  // 只在浏览器 / App 里排：构建时的预渲染（Node 里 import 这个模块）若排上这个永不停的定时器，
+  // 进程就退不出去，Vercel 与 App 打包会一直卡在 prerender。
+  // Browser/App only: in the build-time prerender (Node imports this module) this never-ending
+  // timer would keep the process alive and hang Vercel and the App build at prerender.
+  if (!configured || typeof window === 'undefined') return
   setTimeout(() => {
     void refreshEntries().finally(() => scheduleEntries(ENTRIES_EVERY_MS))
   }, delay)

@@ -304,11 +304,25 @@ describe('admin entry list', () => {
     expect(m.API_BASE).toBe(NEW)
   })
 
+  it('never schedules the fetch outside a browser (build-time prerender must exit)', async () => {
+    vi.useFakeTimers()
+    try {
+      stubStorage()
+      const fetchMock = stubWithEntries([MAIN], { entries: [NEW] })
+      await load()
+      await vi.advanceTimersByTimeAsync(7 * 3600_000)
+      expect(fetchMock).not.toHaveBeenCalledWith(`${MAIN}/api/site/entries`, expect.anything())
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('fetches the list on its own about 20 seconds after start', async () => {
     vi.useFakeTimers()
     try {
       stubStorage()
       const fetchMock = stubWithEntries([MAIN], { entries: [NEW] })
+      vi.stubGlobal('window', {})
       const m = await load()
       await vi.advanceTimersByTimeAsync(20_000)
       expect(fetchMock).toHaveBeenCalledWith(`${MAIN}/api/site/entries`, expect.anything())
