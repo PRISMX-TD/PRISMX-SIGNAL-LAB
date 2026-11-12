@@ -48,7 +48,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import EmailCampaign, EmailDelivery, EmailOptOut, User
+from app.models import AgentNode, EmailCampaign, EmailDelivery, EmailOptOut, User
 from app.services import email_signature, mailer
 
 logger = logging.getLogger("prismx.email_broadcast")
@@ -483,7 +483,12 @@ def picker_query(db: Session, q: str | None, plan: str, active_within_days: int 
     # Called directly (tests) this is FastAPI's Query default, so only accept a string.
     if isinstance(agent, str) and agent:
         if agent == "none":
-            query = query.filter(User.agent_user_id.is_(None))
+            # 推荐官本人通常也没有上级归属，但他们不是「无推荐官的客户」——一并排除。
+            # Ambassadors usually have no owner either, but they are not "unowned customers".
+            query = query.filter(
+                User.agent_user_id.is_(None),
+                ~exists().where(AgentNode.user_id == User.id),
+            )
         else:
             query = query.filter(User.agent_user_id == agent)
     if sort == "active":
