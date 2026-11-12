@@ -33,8 +33,11 @@ import Switch from "./Switch"
 import { FestivalEmptyMini, FestivalTopper } from "../festival/FestivalDecor"
 
 type Status = "off" | "on" | "attention"
-const PANEL_ITEMS = 5
-const PANEL_MESSAGES = 4
+// 面板分「消息 / 公告」两页，每页可见约 3 条，其余在列表里下滑（.nb-list 限高）。
+// Two tabs (messages / announcements); ~3 rows visible, the rest scroll inside .nb-list.
+const PANEL_ITEMS = 20
+const PANEL_MESSAGES = 20
+type Tab = "messages" | "announcements"
 
 // 日期格式化改用 api/utils 的 fmtDayShort（本文件原来自带一份）。
 // 差别在于时区：原来那份走 toLocaleDateString(undefined, …)，即**浏览器本地时区**，
@@ -53,6 +56,7 @@ export default function NotificationBell() {
   const isZh = !!i18n.language?.startsWith("zh")
   const { announcementTick, notificationTick } = useLive()
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<Tab>("messages")
   // 弹层不是全屏遮罩，理论上打开时还能点穿到别的导航链接——useBackToClose
   // 内部已经对"打开期间发生了别的真实导航"这种情况做了防护（不会误把那次
   // 导航撤销掉），所以这里可以放心接入，划返回时先收起弹层而不是离开页面。
@@ -142,6 +146,9 @@ export default function NotificationBell() {
   }, [notificationTick])
   useEffect(() => {
     if (open) {
+      // 打开时落到有未读的那一页；都没有就停在消息页。
+      // Open on whichever tab has unread; messages otherwise.
+      setTab(feedUnread === 0 && unread > 0 ? "announcements" : "messages")
       loadAnns()
       loadFeed()
     }
@@ -330,72 +337,103 @@ export default function NotificationBell() {
             )}
           </div>
 
-          {feed.length > 0 && (
-            <section aria-label={t("notifPanel.messages")}>
-              <div className="nb-sec-head">
-                <span className="cap">{t("notifPanel.messages")}</span>
-                <button type="button" className="nb-readall" onClick={handleClearFeed} disabled={clearing}>
-                  {t("notifPanel.clearMessages")}
-                </button>
-              </div>
-              {feed.map((n) => (
-                <Link
-                  key={n.id}
-                  to={n.link || "/support"}
-                  onClick={() => followFeedItem(n)}
-                  className={`nb-ann${n.read ? "" : " unread"}`}
+          <div className="nb-tabs" role="tablist">
+            {(["messages", "announcements"] as const).map((k) => {
+              const n = k === "messages" ? feedUnread : unread
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === k}
+                  className={tab === k ? "on" : ""}
+                  onClick={() => setTab(k)}
                 >
-                  <i className="nb-ann-dot" aria-hidden="true" />
-                  <span className="nb-ann-main">
-                    <span className="nb-ann-title">
-                      <b>{t(`notifFeed.${n.kind}`)}</b>
-                    </span>
-                    {n.text && <span className="nb-ann-sum">{n.text}</span>}
-                  </span>
-                  <time className="num" dateTime={n.createdAt}>{fmtDayShort(n.createdAt)}</time>
+                  {t(`notifPanel.${k}`)}
+                  {n > 0 && <span className="num">{n > 99 ? "99+" : n}</span>}
+                </button>
+              )
+            })}
+            <span className="nb-tabs-act">
+              {tab === "messages" ? (
+                feed.length > 0 && (
+                  <button type="button" className="nb-readall" onClick={handleClearFeed} disabled={clearing}>
+                    {t("notifPanel.clearMessages")}
+                  </button>
+                )
+              ) : (
+                <Link to="/announcements" onClick={() => setOpen(false)}>
+                  {t("notifPanel.allAnnouncements")} →
                 </Link>
-              ))}
+              )}
+            </span>
+          </div>
+
+          {tab === "messages" ? (
+            <section role="tabpanel" aria-label={t("notifPanel.messages")}>
+              {feed.length === 0 ? (
+                <p className="nb-empty">
+                  <FestivalEmptyMini />
+                  {t("notifPanel.noMessages")}
+                </p>
+              ) : (
+                <div className="nb-list">
+                  {feed.map((n) => (
+                    <Link
+                      key={n.id}
+                      to={n.link || "/support"}
+                      onClick={() => followFeedItem(n)}
+                      className={`nb-ann${n.read ? "" : " unread"}`}
+                    >
+                      <i className="nb-ann-dot" aria-hidden="true" />
+                      <span className="nb-ann-main">
+                        <span className="nb-ann-title">
+                          <b>{t(`notifFeed.${n.kind}`)}</b>
+                        </span>
+                        {n.text && <span className="nb-ann-sum">{n.text}</span>}
+                      </span>
+                      <time className="num" dateTime={n.createdAt}>{fmtDayShort(n.createdAt)}</time>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </section>
+          ) : (
+            <section role="tabpanel" aria-label={t("notifPanel.announcements")}>
+              {anns == null ? (
+                <div className="nb-skel" aria-hidden="true">
+                  <span className="skeleton" style={{ display: "block", width: "60%", height: 12 }} />
+                  <span className="skeleton" style={{ display: "block", width: "85%", height: 10 }} />
+                </div>
+              ) : shown.length === 0 ? (
+                <p className="nb-empty">
+                  <FestivalEmptyMini />
+                  {t("notifPanel.noAnnouncements")}
+                </p>
+              ) : (
+                <div className="nb-list">
+                  {shown.map((a) => (
+                    <Link
+                      key={a.id}
+                      to={`/announcements/${a.id}`}
+                      onClick={() => setOpen(false)}
+                      className={`nb-ann${a.read ? "" : " unread"}`}
+                    >
+                      <i className="nb-ann-dot" aria-hidden="true" />
+                      <span className="nb-ann-main">
+                        <span className="nb-ann-title">
+                          {a.pinned && <span className="ann-pin">{t("announcements.pinned")}</span>}
+                          <b>{pick(a.titleZh, a.titleEn)}</b>
+                        </span>
+                        {(a.summaryZh || a.summaryEn) && <span className="nb-ann-sum">{pick(a.summaryZh, a.summaryEn)}</span>}
+                      </span>
+                      <time className="num" dateTime={a.publishedAt ?? undefined}>{fmtDayShort(a.publishedAt)}</time>
+                    </Link>
+                  ))}
+                </div>
+              )}
             </section>
           )}
-
-          <section aria-label={t("notifPanel.announcements")}>
-            <div className="nb-sec-head">
-              <span className="cap">{t("notifPanel.announcements")}</span>
-              <Link to="/announcements" onClick={() => setOpen(false)}>
-                {t("notifPanel.allAnnouncements")} →
-              </Link>
-            </div>
-            {anns == null ? (
-              <div className="nb-skel" aria-hidden="true">
-                <span className="skeleton" style={{ display: "block", width: "60%", height: 12 }} />
-                <span className="skeleton" style={{ display: "block", width: "85%", height: 10 }} />
-              </div>
-            ) : shown.length === 0 ? (
-              <p className="nb-empty">
-                <FestivalEmptyMini />
-                {t("notifPanel.noAnnouncements")}
-              </p>
-            ) : (
-              shown.map((a) => (
-                <Link
-                  key={a.id}
-                  to={`/announcements/${a.id}`}
-                  onClick={() => setOpen(false)}
-                  className={`nb-ann${a.read ? "" : " unread"}`}
-                >
-                  <i className="nb-ann-dot" aria-hidden="true" />
-                  <span className="nb-ann-main">
-                    <span className="nb-ann-title">
-                      {a.pinned && <span className="ann-pin">{t("announcements.pinned")}</span>}
-                      <b>{pick(a.titleZh, a.titleEn)}</b>
-                    </span>
-                    {(a.summaryZh || a.summaryEn) && <span className="nb-ann-sum">{pick(a.summaryZh, a.summaryEn)}</span>}
-                  </span>
-                  <time className="num" dateTime={a.publishedAt ?? undefined}>{fmtDayShort(a.publishedAt)}</time>
-                </Link>
-              ))
-            )}
-          </section>
 
           <section className="nb-push" aria-label={t("notifPanel.push")}>
             <div className="nb-push-row">

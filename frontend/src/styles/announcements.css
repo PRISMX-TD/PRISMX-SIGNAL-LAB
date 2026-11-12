@@ -105,6 +105,50 @@
   letter-spacing: 0.08em;
   color: var(--text-3);
 }
+.nb-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 16px 10px;
+}
+.nb-tabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.nb-tabs > button.on { background: var(--surface-2); color: #fff; }
+.nb-tabs > button .num {
+  min-width: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--purple-hi);
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+}
+.nb-tabs-act { margin-left: auto; }
+.nb-tabs-act a {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--purple-hi);
+  text-decoration: none;
+}
+/* 约 3 行可见（每行 ~61px），多出的在框内下滑 / ~3 rows visible, rest scrolls */
+.nb-list {
+  max-height: 186px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
 .nb-sec-head {
   display: flex;
   align-items: center;
