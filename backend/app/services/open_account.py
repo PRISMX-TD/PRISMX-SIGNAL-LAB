@@ -114,27 +114,31 @@ def resolve_open_account_url(db: Session, comp: Competition, codes: list[str]) -
     return resolve_open_account(db, comp, codes)[1]
 
 
-def resolve_open_account_for_user(db: Session, comp: Competition, user: User) -> str | None:
-    """已登录用户点「开户」该去哪：归属代理名下活跃、填了开户链接的链接——来源链接正好是
-    其中一条就用它，否则取最早建的那条；归属代理没有就用比赛的。按归属而不是按来源找：
-    来源链接后来转了手，他也还是原代理的客户（设计 2026-10-27 R7）。
-    A signed-in user's target: an active link of their owning agent carrying a
-    URL — their source link if it is one, else the oldest; otherwise the
-    competition's. Ownership, not source, decides (a transferred source link
-    doesn't move the customer)."""
-    if user.agent_user_id:
-        links = (
-            db.query(InviteLink)
-            .filter(
-                InviteLink.owner_user_id == user.agent_user_id,
-                InviteLink.is_active.is_(True),
-                InviteLink.deleted_at.is_(None),
-                InviteLink.open_account_url.isnot(None),
-            )
-            .order_by(InviteLink.created_at)
-            .all()
+def agent_open_account_url(db: Session, user: User) -> str | None:
+    """用户归属代理名下活跃、填了开户链接的链接——来源链接正好是其中一条就用它，否则取最早
+    建的那条；没有则 None。按归属而不是按来源找：来源链接后来转了手，他也还是原代理的客户
+    （设计 2026-10-27 R7）。比赛「开户」与绑定 MT5 页的合作券商开户链接共用。
+    The owning agent's active link carrying a URL — the user's source link if it
+    is one, else the oldest; None if none. Ownership, not source, decides.
+    Shared by the competition "open account" button and the MT5 bind page."""
+    if not user.agent_user_id:
+        return None
+    links = (
+        db.query(InviteLink)
+        .filter(
+            InviteLink.owner_user_id == user.agent_user_id,
+            InviteLink.is_active.is_(True),
+            InviteLink.deleted_at.is_(None),
+            InviteLink.open_account_url.isnot(None),
         )
-        mine = next((l for l in links if l.code == user.invite_code), None) or (links[0] if links else None)
-        if mine is not None:
-            return mine.open_account_url
-    return comp.open_account_url
+        .order_by(InviteLink.created_at)
+        .all()
+    )
+    mine = next((l for l in links if l.code == user.invite_code), None) or (links[0] if links else None)
+    return mine.open_account_url if mine is not None else None
+
+
+def resolve_open_account_for_user(db: Session, comp: Competition, user: User) -> str | None:
+    """已登录用户点比赛「开户」：归属代理的开户链接，没有就用比赛的。
+    A signed-in user's competition target: their agent's URL, else the competition's."""
+    return agent_open_account_url(db, user) or comp.open_account_url

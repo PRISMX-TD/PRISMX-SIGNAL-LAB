@@ -405,3 +405,19 @@ def test_in_app_detail_resolves_by_users_invite_code(db_session, monkeypatch):
     theirs = get_competition(request=None, comp_id=comp.id, db=db_session, user=plain)
     assert theirs["openAccountUrl"] == COMP_URL
     assert theirs["openAccountFromAgent"] is False
+
+
+# ---------- 绑定 MT5 页的合作券商开户链接 / bind page partner-broker link ----------
+
+def test_bind_page_referral_url_uses_agent_link(db_session, monkeypatch):
+    from app.routers import bridge
+    from app.routers.bridge import list_accounts
+
+    monkeypatch.setattr(bridge, "get_broker_settings", lambda db: {"broker_referral_url": COMP_URL})
+    link, agent = _agent_link(db_session, "agnt2345", url=AGENT_URL)
+    mine = _mk_user(db_session, "c1@x.io", agent_user_id=agent.id, invite_code="agnt2345")
+    other = _mk_user(db_session, "c2@x.io")
+    assert list_accounts(user=mine, db=db_session)["brokerLock"]["referralUrl"] == AGENT_URL
+    assert list_accounts(user=other, db=db_session)["brokerLock"]["referralUrl"] == COMP_URL
+    link.open_account_url = None; db_session.commit()
+    assert list_accounts(user=mine, db=db_session)["brokerLock"]["referralUrl"] == COMP_URL

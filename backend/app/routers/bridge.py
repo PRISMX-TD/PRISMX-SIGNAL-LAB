@@ -33,6 +33,7 @@ from app.services.deps import ONLINE_WINDOW, disabled_account_error, get_current
 from app.services.gateway_binding import (
     bind_event_data, is_removed, is_revoked, log_unbind, mark_removed, not_removed, restore_removed,
 )
+from app.services.open_account import agent_open_account_url
 from app.services.plans import max_mt5_accounts, plan_slot_rows, shown_account_limit
 from app.services.push_dispatch import (
     EVENT_BRIDGE_OFFLINE,
@@ -2455,7 +2456,9 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
         "brokerLock": {
             "enabled": bool(broker.get("broker_lock_enabled")),
             "displayName": broker.get("broker_display_name") or "",
-            "referralUrl": broker.get("broker_referral_url") or "",
+            # 归属推荐官填了自己的 MC 开户链接就用它，否则后台统一的券商推荐链接。
+            # The owning ambassador's own MC link when set, else the admin referral URL.
+            "referralUrl": agent_open_account_url(db, user) or broker.get("broker_referral_url") or "",
         },
     }
 
