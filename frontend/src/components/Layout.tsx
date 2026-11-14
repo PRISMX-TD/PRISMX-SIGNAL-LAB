@@ -766,7 +766,7 @@ export default function Layout() {
                 <div className="font-display text-[17px] font-bold tracking-[-0.015em] text-white">
                   Signal Lab
                 </div>
-                <div className="text-[10px] font-medium uppercase tracking-[0.16em] text-neutral-500">
+                <div className="text-xs font-medium text-neutral-500">
                   by PRISMX
                 </div>
               </div>

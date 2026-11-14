@@ -20,12 +20,12 @@
 .cmp-list { display: flex; flex-direction: column; gap: 36px; }
 .cmp-kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 0; font-size: 12px; color: #a1a1aa; }
 .cmp-kicker > span + span { margin-left: 14px; padding-left: 14px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
-.cmp-status-tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.cmp-status-tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
 .cmp-live-dot {
   display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 999px;
   background: currentColor; vertical-align: middle; animation: cmp-breathe 2s ease-in-out infinite;
 }
-.cmp-you { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 999px; background: rgba(110, 66, 255, 0.25); color: #b9a6ff; font-size: 10px; font-weight: 600; vertical-align: middle; }
+.cmp-you { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 10px; background: rgba(110, 66, 255, 0.25); color: #b9a6ff; font-size: 12px; font-weight: 600; vertical-align: middle; }
 
 /* 头版 / front page */
 .cmp-hero {
@@ -34,27 +34,27 @@
 }
 .cmp-ghost {
   position: absolute; z-index: -1; right: -8px; top: -18px; pointer-events: none; user-select: none;
-  font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 190px; font-weight: 900; line-height: 1;
+  font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 190px; font-weight: 500; line-height: 1;
   letter-spacing: -0.06em; color: transparent; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.09);
 }
 .cmp-bug {
   position: absolute; right: 0; top: 10px; display: flex; align-items: center; gap: 14px;
-  padding: 8px 8px 8px 16px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 999px;
+  padding: 8px 8px 8px 16px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 10px;
   background: rgba(8, 8, 11, 0.7); font-size: 12px; color: #a1a1aa;
 }
-.cmp-bug b { padding: 6px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.06); font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: #f4f4f5; }
+.cmp-bug b { padding: 6px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: #f4f4f5; }
 .cmp-hero-name {
   margin: 14px 0 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 76px; font-weight: 900; line-height: 0.95; letter-spacing: -0.045em; color: #f4f4f5; text-wrap: balance;
+  font-size: 76px; font-weight: 500; line-height: 0.95; letter-spacing: -0.045em; color: #f4f4f5; text-wrap: balance;
 }
 .cmp-hero-name.is-detail { font-size: 46px; letter-spacing: -0.035em; line-height: 1; }
 .cmp-hero-sub { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 40px; margin-top: 18px; }
 .cmp-hero-prize { font-size: 13px; color: #f0e2c0; max-width: 52ch; }
-.cmp-hero-prize small { display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #c9a24a; }
+.cmp-hero-prize small { display: block; margin-bottom: 4px; font-size: 12px; color: #c9a24a; }
 .cmp-hero-when { font-size: 12px; color: #71717a; }
 .cmp-hero-cta {
   margin-left: auto; padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d;
-  font-size: 13px; font-weight: 700; transition: transform var(--dur-base) var(--ease-out);
+  font-size: 13px; font-weight: 500; transition: transform var(--dur-base) var(--ease-out);
 }
 .cmp-hero:hover .cmp-hero-cta { transform: translateY(-1px); }
 .cmp-hero:active .cmp-hero-cta { transform: translateY(0) scale(0.98); }
@@ -69,7 +69,7 @@
 
 /* 栏目 + 行 / column + rows */
 .cmp-sec { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 36px; }
-.cmp-sec h4 { margin: 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 20px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
+.cmp-sec h4 { margin: 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 20px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
 .cmp-sec h4 small { display: block; margin-top: 8px; font-family: var(--font-body, inherit); font-size: 12px; font-weight: 400; line-height: 1.5; color: #71717a; }
 .cmp-row {
   display: grid; grid-template-columns: minmax(0, 1fr) 200px 160px; align-items: center; gap: 24px;
@@ -78,20 +78,20 @@
 }
 .cmp-sec > div > .cmp-row:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 @media (hover: hover) { .cmp-row:hover { background: rgba(255, 255, 255, 0.025); } }
-.cmp-row-name { display: block; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 22px; font-weight: 800; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
+.cmp-row-name { display: block; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 22px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
 .cmp-row-meta { margin-top: 4px; font-size: 12px; color: #71717a; }
 .cmp-row-cd { text-align: right; }
-.cmp-row-cd small { display: block; font-size: 11px; color: #71717a; }
-.cmp-row-cd b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; color: #f4f4f5; }
+.cmp-row-cd small { display: block; font-size: 12px; color: #71717a; }
+.cmp-row-cd b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; color: #f4f4f5; }
 .cmp-row-score { font-size: 22px !important; }
 .cmp-champ { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.cmp-champ b { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; color: #f4f4f5; }
-.cmp-champ small { display: block; margin-top: 1px; font-size: 11px; color: #71717a; }
+.cmp-champ b { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; color: #f4f4f5; }
+.cmp-champ small { display: block; margin-top: 1px; font-size: 12px; color: #71717a; }
 .cmp-champ-none { font-size: 13px; color: #a1a1aa; }
 
 /* 详情 / detail */
 .cmp-detail { display: flex; flex-direction: column; gap: 26px; }
-.cmp-back { align-self: flex-start; font-size: 12px; color: #71717a; transition: color var(--dur-base) var(--ease-out); }
+.cmp-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 12px; color: #71717a; transition: color var(--dur-base) var(--ease-out); }
 .cmp-back:hover { color: #e4e4e7; }
 .cmp-split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 48px; align-items: start; }
 .cmp-side { padding-right: 40px; border-right: 1px solid rgba(255, 255, 255, 0.08); }
@@ -104,20 +104,20 @@
 .cmp-clock { display: flex; gap: 14px; margin-top: 26px; }
 .cmp-clock > div { flex: 1; padding: 14px 0 12px; border-top: 2px solid #f4f4f5; }
 .cmp-clock > div.is-wide { flex: none; width: 100%; }
-.cmp-clock b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 44px; font-weight: 900; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
+.cmp-clock b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 44px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
 .cmp-clock b.is-text { font-size: 22px; letter-spacing: -0.02em; }
-.cmp-clock span { font-size: 11px; color: #71717a; }
+.cmp-clock span { font-size: 12px; color: #71717a; }
 .cmp-mine { margin-top: 28px; padding: 16px 18px; border: 1px solid rgba(110, 66, 255, 0.35); border-radius: 12px; background: rgba(110, 66, 255, 0.12); }
-.cmp-mine > small { font-size: 11px; letter-spacing: 0.1em; color: #b9a6ff; }
+.cmp-mine > small { font-size: 12px; letter-spacing: 0.1em; color: #b9a6ff; }
 .cmp-mine-row { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
 .cmp-mine-row + .cmp-mine-row { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .cmp-mine-row.is-dq { opacity: 0.6; }
-.cmp-mine-row > b { flex: none; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 40px; font-weight: 900; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
+.cmp-mine-row > b { flex: none; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
 .cmp-mine-row > span { min-width: 0; }
 .cmp-mine-row > span > span { display: block; font-size: 13px; color: #e4e4e7; }
-.cmp-mine-row > span > small { display: block; font-size: 11px; color: #a1a1aa; }
+.cmp-mine-row > span > small { display: block; font-size: 12px; color: #a1a1aa; }
 .cmp-mine-row.is-dq small { color: var(--down); }
-.cmp-mine-score { margin-left: auto; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 700; }
+.cmp-mine-score { margin-left: auto; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 500; }
 .cmp-facts { display: grid; gap: 8px; margin: 26px 0 0; font-size: 12.5px; }
 .cmp-facts > div { display: flex; gap: 14px; }
 .cmp-facts dt { flex: none; width: 64px; color: #71717a; }
@@ -125,12 +125,12 @@
 .cmp-facts dd.is-prize { color: #f0e2c0; font-weight: 600; }
 .cmp-enroll { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 22px; font-size: 13px; color: #a1a1aa; }
 .cmp-enroll p { margin: 0; }
-.cmp-btn { padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d; font-size: 13px; font-weight: 700; transition: transform var(--dur-base) var(--ease-out); }
+.cmp-btn { padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d; font-size: 13px; font-weight: 500; transition: transform var(--dur-base) var(--ease-out); }
 .cmp-btn:hover { transform: translateY(-1px); } .cmp-btn:active { transform: scale(0.98); }
 .cmp-btn-ghost { padding: 11px 18px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; color: #e4e4e7; font-size: 13px; font-weight: 600; }
 .cmp-btn-ghost:hover { border-color: rgba(255, 255, 255, 0.3); }
 .cmp-ladder-h { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; }
-.cmp-ladder-h h3 { margin: 0; font-size: 13px; font-weight: 700; color: #f4f4f5; }
+.cmp-ladder-h h3 { margin: 0; font-size: 13px; font-weight: 500; color: #f4f4f5; }
 .cmp-ladder-h > span:last-child { margin-left: auto; font-size: 12px; color: #52525b; }
 .cmp-ladder { margin: 0; padding: 0; list-style: none; }
 .cmp-ladder li {
@@ -140,20 +140,20 @@
 .cmp-ladder li:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .cmp-ladder li.is-self { margin: 0 -14px; padding-left: 14px; padding-right: 14px; background: linear-gradient(90deg, rgba(110, 66, 255, 0.14), transparent 60%); }
 .cmp-ladder-rank {
-  font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 54px; font-weight: 900; line-height: 1; letter-spacing: -0.05em;
+  font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 54px; font-weight: 500; line-height: 1; letter-spacing: -0.05em;
   color: transparent; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.28);
 }
 .cmp-ladder li:first-child .cmp-ladder-rank { color: #c9a24a; -webkit-text-stroke: 0; }
 .cmp-ladder-who { min-width: 0; }
-.cmp-ladder-who b { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 700; color: #f4f4f5; }
-.cmp-ladder-who > span { display: block; margin-top: 2px; font-size: 11.5px; color: #71717a; }
+.cmp-ladder-who b { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 500; color: #f4f4f5; }
+.cmp-ladder-who > span { display: block; margin-top: 2px; font-size: 12px; color: #71717a; }
 .cmp-ladder-bar { display: block; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--up), rgb(var(--up-rgb) / 0.15)); }
 .cmp-ladder-bar.is-neg { background: linear-gradient(90deg, var(--down), rgba(240, 78, 90, 0.15)); }
-.cmp-ladder-score { text-align: right; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; }
+.cmp-ladder-score { text-align: right; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
 .cmp-empty { display: grid; place-items: center; padding: 44px 20px; border: 1px dashed rgba(255, 255, 255, 0.10); border-radius: 16px; }
 .cmp-empty p { margin: 0; font-size: 13px; color: #a1a1aa; }
 .cmp-rules { margin: 22px 0 0; padding: 0 0 0 16px; list-style: disc; }
-.cmp-rules li { font-size: 11.5px; line-height: 1.8; color: #52525b; }
+.cmp-rules li { font-size: 12px; line-height: 1.8; color: #52525b; }
 
 @keyframes cmp-breathe { 50% { opacity: 0.35; } }
 @keyframes cmp-tick { to { transform: translateX(-100%); } }
@@ -197,16 +197,24 @@
   max-width: 100%;
   background: var(--nest);
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 10px;
   overflow-x: auto;
   scrollbar-width: none;
 }
 .seg-tabs::-webkit-scrollbar { display: none; }
+/* 右侧还有内容时（utils/useOverflowHint 打上 data-more）右边缘渐隐，提示能往左滑；
+   放得下时不渐隐。2026-11-15 起。
+   While more content sits to the right (data-more from utils/useOverflowHint) the
+   right edge fades as a swipe cue; nothing fades when it all fits. Since 2026-11-15. */
+.seg-tabs[data-more] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
 .seg-tabs button {
   height: 32px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -367,17 +375,17 @@
    「模拟·虚拟资金」标与内置浏览器提示用琥珀色：它们是风险/限制说明，不是品牌强调。
    Reuses the in-app detail skeleton; adds only the public-only pieces. The demo badge and
    in-app-browser hint are amber: they are caveats, not brand emphasis. */
-.pcp-badge { display: inline-flex; margin-bottom: 12px; padding: 4px 10px; border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 999px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; }
+.pcp-badge { display: inline-flex; margin-bottom: 12px; padding: 4px 10px; border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
 .pcp-meta { margin-top: 14px; font-size: 13px; color: #a1a1aa; }
 .pcp-stale { margin-top: 12px; font-size: 12px; color: #fcd34d; }
-.pcp-snap { margin-top: 10px; font-size: 11px; color: #71717a; }
+.pcp-snap { margin-top: 10px; font-size: 12px; color: #71717a; }
 .pcp-rules { margin-top: 24px; }
-.pcp-rules h3 { margin: 0 0 8px; font-size: 13px; font-weight: 700; color: #f4f4f5; }
+.pcp-rules h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: #f4f4f5; }
 .pcp-risk { margin-top: 18px; font-size: 12px; line-height: 1.6; color: #71717a; }
-.pcp-steps-h { font-weight: 700; color: #f4f4f5; }
+.pcp-steps-h { font-weight: 500; color: #f4f4f5; }
 .pcp-steps { display: grid; gap: 4px; margin: 0; padding-left: 1.2em; list-style: decimal; color: #d4d4d8; }
 .pcp-cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
-.pcp-hint { font-size: 11px; color: #71717a; }
+.pcp-hint { font-size: 12px; color: #71717a; }
 .pcp-link { font-size: 12px; color: #c4b5fd; }
 .pcp-link:hover { color: #ddd6fe; }
 .pcp-inapp { margin-bottom: 16px; padding: 10px 14px; border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 10px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 12px; line-height: 1.6; }
@@ -385,14 +393,14 @@
 /* ── 站内：参赛准备清单 / 报名后引导 / 公开昵称开关 ──
    In-app: entry checklist, post-entry guidance, public-name toggle. */
 .cmp-prep { width: 100%; margin-top: 4px; }
-.cmp-prep h4 { margin: 0 0 10px; font-size: 11px; letter-spacing: 0.1em; color: #b9a6ff; }
+.cmp-prep h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.1em; color: #b9a6ff; }
 .cmp-prep ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .cmp-prep li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
-.cmp-prep-mark { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 999px; font-size: 11px; color: #a1a1aa; }
+.cmp-prep-mark { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 999px; font-size: 12px; color: #a1a1aa; }
 .cmp-prep li.is-done .cmp-prep-mark { border-color: transparent; background: rgba(110, 66, 255, 0.35); color: #ede9fe; }
 .cmp-prep-label { display: block; color: #e4e4e7; }
 .cmp-prep li.is-done .cmp-prep-label { color: #71717a; }
-.cmp-prep-sub { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; color: #a1a1aa; }
+.cmp-prep-sub { display: block; margin-top: 3px; font-size: 12px; line-height: 1.5; color: #a1a1aa; }
 .cmp-prep-act { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: #c4b5fd; }
 .cmp-prep-act:hover { color: #ddd6fe; }
 .cmp-next { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: #a1a1aa; }

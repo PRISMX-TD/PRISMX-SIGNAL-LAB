@@ -94,7 +94,7 @@ export default function DisableUserModal({ email, busy, onConfirm, onCancel }: P
           // pasted text that is still too long once whitespace is collapsed.
           maxLength={DISABLE_REASON_MAX}
         />
-        <div className="mt-1 text-right text-[11px] text-neutral-500">
+        <div className="mt-1 text-right text-xs text-neutral-500">
           {(reason?.length ?? 0)}/{DISABLE_REASON_MAX}
         </div>
         {/* 这句话解释的是"为什么必填"，不是"你忘了填"——写完原因的人不该再看到

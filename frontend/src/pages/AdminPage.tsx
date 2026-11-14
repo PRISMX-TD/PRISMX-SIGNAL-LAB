@@ -364,7 +364,7 @@ function AdminConsole({ section }: { section: AdminSection }) {
                 onClick={() => setQuickSearch(true)}
               >
                 {t('admin.quickSearch.button')}
-                <kbd className="ml-1.5 hidden rounded border border-white/15 px-1 font-mono text-[10px] text-neutral-500 sm:inline">Ctrl K</kbd>
+                <kbd className="ml-1.5 hidden rounded border border-white/15 px-1 font-mono text-xs text-neutral-500 sm:inline">Ctrl K</kbd>
               </button>
             </div>
             {sections.length > 1 && (

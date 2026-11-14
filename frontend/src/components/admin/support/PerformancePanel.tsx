@@ -53,7 +53,7 @@ export default function PerformancePanel({ onToast }: { onToast: (kind: 'ok' | '
         <div className="glass overflow-x-auto p-0">
           <table className="w-full min-w-[860px] text-left text-sm">
             <thead>
-              <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
+              <tr className="border-b border-white/10 text-xs text-neutral-500">
                 <th className="px-3 py-3 font-medium">{t('admin.support.perf.staff')}</th>
                 <th className="px-3 py-3 text-right font-medium">{t('admin.support.perf.assigned')}</th>
                 <th className="px-3 py-3 text-right font-medium">{t('admin.support.perf.contacted')}</th>
@@ -71,7 +71,7 @@ export default function PerformancePanel({ onToast }: { onToast: (kind: 'ok' | '
                 <tr key={r.staffId} className="border-b border-white/5 last:border-0">
                   <td className="px-3 py-2.5">
                     <div className="text-xs font-medium text-neutral-200">{r.nickname || r.email}</div>
-                    <div className="text-[11px] text-neutral-500">{r.role === 'admin' ? t('supportDesk.role.admin') : t(`admin.support.tier.${r.tier}`)}</div>
+                    <div className="text-xs text-neutral-500">{r.role === 'admin' ? t('supportDesk.role.admin') : t(`admin.support.tier.${r.tier}`)}</div>
                   </td>
                   {[r.assigned, r.contacted, r.interested, r.convertedFollowUps, ...CONVERSION_KINDS.map((k) => r.conversions[k] ?? 0)].map((n, i) => (
                     <td key={i} className="num px-3 py-2.5 text-right text-xs text-neutral-200">{n}</td>

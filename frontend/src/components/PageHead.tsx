@@ -46,7 +46,9 @@ interface Props {
   className?: string
 }
 
-function BackChevron() {
+// 也给不走 PageHead 的返回链接用（个人主页、比赛详情、登录页），全站只有这一种返回箭头。
+// Also used by back links that don't go through PageHead, so the app has one back arrow.
+export function BackChevron() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
   )
@@ -70,7 +72,7 @@ export default function PageHead({ title, subtitle, count, countUnit, badge, act
         ))}
         {title != null && <Tag className="font-display">
           <span className="page-head-name">{title}</span>
-          {count != null && (
+          {count != null && count !== 0 && (
             <span className="page-head-count">
               <b className="num">{count}</b>
               {countUnit && <span>{countUnit}</span>}

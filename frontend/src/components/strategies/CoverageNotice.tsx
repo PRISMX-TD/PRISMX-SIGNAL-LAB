@@ -79,7 +79,7 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
         })}
       </div>
       {coverage.earliestT != null && coverage.latestT != null && (
-        <div className="mt-1.5 font-mono text-[11px] opacity-90">
+        <div className="mt-1.5 font-mono text-xs opacity-90">
           {t('strategy.coverageRange', {
             from: fmtDate(new Date(coverage.earliestT * 1000).toISOString()),
             to: fmtDate(new Date(coverage.latestT * 1000).toISOString()),

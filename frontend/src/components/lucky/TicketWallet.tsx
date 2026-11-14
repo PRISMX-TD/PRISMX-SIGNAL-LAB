@@ -11,19 +11,19 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LuckyTicketBatchPublic } from '../../api/luckyTypes'
-import { fmtDayShort, parseTime } from '../../api/utils'
+import { fmtDayShort, fmtStamp, parseTime } from '../../api/utils'
 
 const SHOWN = 3
 
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
-/** 装饰序号「№ 2210·01」：发放日 + 月（北京时间，与旁边的发放日期一致）+ 第几批。
- *  Decorative serial: issue day + month (Beijing time, matching the date line beside it) + batch position. */
+/** 装饰序号「№ 1022·01」：发放月 + 日（北京时间，与旁边的发放日期一致）+ 第几批。
+ *  Decorative serial: issue month + day (Beijing time, matching the date line beside it) + batch position. */
 export function ticketSerial(issuedAt: string, index: number): string {
   const d = parseTime(issuedAt)
   const dm = !d || Number.isNaN(d.getTime())
     ? '0000'
-    : d.toLocaleDateString('en-GB', { timeZone: 'Asia/Shanghai', day: '2-digit', month: '2-digit' }).replace(/\D/g, '')
+    : fmtStamp(d, { year: 'never' }).replace(/\D/g, '')
   return `№ ${dm}·${pad2(index + 1)}`
 }
 

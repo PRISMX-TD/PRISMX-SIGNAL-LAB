@@ -23,6 +23,7 @@
 // of a raw API error (same pattern as AchievementsPage).
 import type { CSSProperties } from 'react'
 import { useEffect, useState } from 'react'
+import { useOverflowHint } from '../utils/useOverflowHint'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import ProfileLink from '../components/ProfileLink'
@@ -32,7 +33,7 @@ import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
 import type { LeaderboardBoard, LeaderboardPayload, LeaderboardRow } from '../api/types'
-import { fmtScorePct, fmtUsd } from '../api/utils'
+import { fmtScorePct, fmtStamp, fmtUsd } from '../api/utils'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
 import { compCard } from '../components/share/cardData'
 
@@ -84,16 +85,8 @@ const fmtScoreSigned = (v: number): string => `${v > 0 ? '+' : ''}${(v * 100).to
 // the backend actually computed. snapshotAt ("last refreshed") is the
 // exception: it's an intuitive "how recent" cue, not a boundary, so local
 // time reads more naturally there.
-const fmtUtcShortDate = (iso: string): string => {
-  const d = new Date(iso)
-  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
-}
-const fmtUtcClock = (iso: string): string => {
-  const d = new Date(iso)
-  const hh = String(d.getUTCHours()).padStart(2, '0')
-  const mm = String(d.getUTCMinutes()).padStart(2, '0')
-  return `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${hh}:${mm} UTC`
-}
+const fmtUtcShortDate = (iso: string): string => fmtStamp(new Date(iso), { tz: 'UTC', year: 'never' })
+const fmtUtcClock = (iso: string): string => `${fmtStamp(new Date(iso), { tz: 'UTC', year: 'never', clock: 'hm' })} UTC`
 const fmtLocalClock = (iso: string): string =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
@@ -203,7 +196,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
               <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={20} />
             )}
             {row.isSelf && (
-              <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
+              <span className="tag shrink-0 bg-prism-600/25 text-xs text-prism-300">{t('leaderboard.youTag')}</span>
             )}
             {/* 手机端把账户号并进同一行，省一行竖直空间；桌面端仍走下面单独一行。
                 账户号已由后端打码（自己那行才是全的，见 LeaderboardRow）。
@@ -259,7 +252,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
               {row.displayName}
             </ProfileLink>
             {row.isSelf && (
-              <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
+              <span className="tag shrink-0 bg-prism-600/25 text-xs text-prism-300">{t('leaderboard.youTag')}</span>
             )}
           </div>
         </div>
@@ -358,7 +351,7 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
               {row.displayName}
             </ProfileLink>
             {row.isSelf && (
-              <span className="tag shrink-0 bg-prism-600/25 text-[11px] text-prism-300">{t('leaderboard.youTag')}</span>
+              <span className="tag shrink-0 bg-prism-600/25 text-xs text-prism-300">{t('leaderboard.youTag')}</span>
             )}
           </div>
         </div>
@@ -466,7 +459,7 @@ function ShareBtn({ onClick, className = '' }: { onClick: () => void; className?
   const { t } = useTranslation()
   return (
     <button type="button" onClick={onClick}
-      className={`shrink-0 rounded-full bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30 ${className}`}>
+      className={`shrink-0 rounded-[10px] bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30 ${className}`}>
       {t('share.button')}
     </button>
   )
@@ -494,7 +487,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
         <div className="flex items-center gap-3">
           <RankCoin rank={data.me.rank} size={44} />
           <div>
-            <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</div>
+            <div className="text-xs text-neutral-500">{t('leaderboard.myRank')}</div>
             <div className="num font-display text-[28px] font-extrabold leading-tight tracking-tight text-neutral-100">
               #{data.me.rank}
             </div>
@@ -509,7 +502,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
             the original flex-wrap row. */}
         <div className="grid grid-cols-2 gap-4 sm:flex sm:flex-wrap sm:gap-6">
           <div>
-            <span className="block text-[11px] uppercase tracking-wider text-neutral-500">
+            <span className="block text-xs text-neutral-500">
               {t(`leaderboard.colScore.${board}`)}
             </span>
             <b className={`num text-base font-semibold ${scoreColorClass(board, data.me.score)}`}>
@@ -517,7 +510,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
             </b>
           </div>
           <div>
-            <span className="block text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.colAccount')}</span>
+            <span className="block text-xs text-neutral-500">{t('leaderboard.colAccount')}</span>
             <b className="num text-base font-semibold text-neutral-100">{data.me.login}</b>
           </div>
         </div>
@@ -540,7 +533,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
       // (with a bottom progress line); this card only shows at ≥ 640px.
       <div className="lb-my-rank glass hidden gap-3 p-[18px_22px] sm:grid sm:grid-cols-[auto_1fr] sm:gap-[22px]">
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</div>
+          <div className="text-xs text-neutral-500">{t('leaderboard.myRank')}</div>
           <div className="font-display text-[28px] font-extrabold leading-tight tracking-tight text-neutral-500">
             {t('leaderboard.notRankedShort')}
           </div>
@@ -561,7 +554,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
             />
           </div>
           {data.periodStart && (
-            <p className="mt-2 text-[11px] text-neutral-600">
+            <p className="mt-2 text-xs text-neutral-600">
               {t('leaderboard.progressNote', { time: fmtUtcClock(data.periodStart) })}
             </p>
           )}
@@ -572,7 +565,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
 
   return (
     <div className="lb-my-rank glass flex flex-wrap items-center justify-between gap-3 p-4">
-      <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500">{t('leaderboard.myRank')}</span>
+      <span className="text-xs font-semibold text-neutral-500">{t('leaderboard.myRank')}</span>
       <span className="text-sm text-neutral-400">{t('leaderboard.notRanked', { n: rankThreshold })}</span>
     </div>
   )
@@ -694,7 +687,7 @@ function BoardBody({
               ≥ 640px: the original header row + ListRow, untouched. */}
           {listRows.length > 0 && (
             <section className="glass hidden overflow-hidden p-0 sm:block">
-              <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-[11px] uppercase tracking-wider text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px]">
+              <div className="grid grid-cols-[40px_minmax(0,1fr)_84px] gap-2 px-3 pb-2 pt-2.5 text-xs text-neutral-500 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px]">
                 <span>{t('leaderboard.colRank')}</span>
                 <span>{t('leaderboard.colTrader')}</span>
                 <span className="hidden md:block">{t('leaderboard.colAccount')}</span>
@@ -803,8 +796,9 @@ function SegChoice<T extends string>({
     const group = e.currentTarget
     group.querySelectorAll<HTMLButtonElement>('button')[next]?.focus()
   }
+  const hintRef = useOverflowHint<HTMLDivElement>()
   return (
-    <div className={`seg-tabs ${className}`} role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
+    <div ref={hintRef} className={`seg-tabs ${className}`} role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
       {options.map((o) => (
         <button
           key={o}
@@ -981,7 +975,7 @@ export default function LeaderboardPage() {
                     <span className="text-neutral-500"> UTC</span>
                   </span>
                 </span>
-                <span className="chip inline-flex items-center gap-1.5 border border-white/10 px-2 py-1 text-[11px] text-neutral-300">
+                <span className="chip inline-flex items-center gap-1.5 border border-white/10 px-2 py-1 text-xs text-neutral-300">
                   <i
                     aria-hidden
                     className={`h-1.5 w-1.5 rounded-full ${sealed ? 'bg-neutral-500' : 'bg-up shadow-[0_0_0_3px_rgb(var(--up-rgb)/0.15)]'}`}
@@ -1034,22 +1028,22 @@ export default function LeaderboardPage() {
         </div>
       </header>
 
-      <div className="lb-gates -mx-4 flex flex-nowrap gap-2 overflow-x-auto px-4 no-scrollbar sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
-        {!anyPayload &&
-          [120, 96, 132].map((w) => (
-            <span key={w} className="lb-skel shrink-0">
-              <SkeletonBlock width={w} height={26} radius={999} />
-            </span>
-          ))}
-        {anyPayload &&
-          gateChips.map((chip) => (
-          <span
-            key={chip.text}
-            className={`chip shrink-0 border border-white/10 bg-white/[0.04] h-[26px] px-2.5 text-[11px] text-neutral-400 sm:h-auto sm:px-2 sm:py-1 sm:text-xs ${chip.quantitative ? '' : 'hidden sm:inline-flex'}`}
-          >
-            {chip.text}
+      {/* 门槛：2026-11-15 起合成一行灰字说明，不再是一排描边胶囊（几个胶囊讲的是同一条
+          规则，泰语下还会被截出屏幕）。手机只显示量化的几条，桌面全部显示。
+          Gates: since 2026-11-15 one grey line instead of a row of outlined pills
+          (several pills for one rule, and Thai pushed them off-screen). Phones show only
+          the quantitative entries; desktop shows all of them. */}
+      <div className="lb-gates text-xs leading-relaxed text-neutral-500">
+        {!anyPayload ? (
+          <span className="lb-skel inline-block">
+            <SkeletonBlock width={220} height={14} radius={4} />
           </span>
-        ))}
+        ) : (
+          <>
+            <span className="sm:hidden">{gateChips.filter((c) => c.quantitative).map((c) => c.text).join(' · ')}</span>
+            <span className="hidden sm:inline">{gateChips.map((c) => c.text).join(' · ')}</span>
+          </>
+        )}
       </div>
 
       {data ? (

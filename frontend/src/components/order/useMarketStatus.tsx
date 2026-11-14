@@ -16,7 +16,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../../api/client'
 import type { MarketStatus } from '../../api/types'
-import { parseTime } from '../../api/utils'
+import { fmtStamp, parseTime } from '../../api/utils'
 
 // 表单打开期间定期复查：休市 → 开盘的那一刻不用关掉重开。
 // Re-check while the form is open so the open moment doesn't need a reopen.
@@ -35,13 +35,7 @@ export interface MarketState {
 function reopenLabel(iso: string | null | undefined): string {
   const d = parseTime(iso)
   if (!d) return ''
-  return d.toLocaleString('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }) + ' UTC+8'
+  return fmtStamp(d, { clock: 'hm' }) + ' UTC+8'
 }
 
 export function useMarketStatus(symbol: string): MarketState {

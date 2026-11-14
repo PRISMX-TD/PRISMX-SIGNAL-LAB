@@ -28,7 +28,7 @@
   gap: 8px 14px;
   font-size: 26px;
   line-height: 1.1;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .page-head-name {
@@ -40,17 +40,20 @@
   gap: 6px;
 }
 /* 计数：页头里唯一的彩度。--purple-hi 对 --bg 约 5.4:1，过 AA。
-   The count is the head's only chroma; --purple-hi on --bg is ~5.4:1. */
+   2026-11-15 起从 26px 缩到 15px 常规体：和标题一样大时「0」也像一个标题。
+   为 0 时 PageHead 不渲染它。
+   The count is the head's only chroma; --purple-hi on --bg is ~5.4:1.
+   Since 2026-11-15 it drops from 26px to 15px regular: at title size even a "0"
+   read like a headline. PageHead skips it when it is 0. */
 .page-head-count b {
-  font-size: 26px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: 400;
   color: var(--purple-hi);
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 .page-head-count span {
   font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 0.08em;
+  font-weight: 400;
   color: var(--text-3);
 }
 /* 标题后的小标签（.tag / .chip）按基线对齐后略微下沉，抬回 2px。

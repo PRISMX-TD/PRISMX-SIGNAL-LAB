@@ -50,7 +50,7 @@ const TICKET_WORD: Record<string, string> = {
 
 export function TicketStatus({ status, label }: { status: string; label: string }) {
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1.5 text-[11px] font-medium ${TICKET_WORD[status] ?? 'text-neutral-500'}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1.5 text-xs font-medium ${TICKET_WORD[status] ?? 'text-neutral-500'}`}>
       <i className={`h-1.5 w-1.5 rounded-full ${TICKET_DOT[status] ?? 'bg-neutral-500'}`} aria-hidden="true" />
       {label}
     </span>

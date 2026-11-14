@@ -383,7 +383,7 @@ function StrategyEditor({
           Step 1 · market: name, symbol (single), interval (single) */}
       <div className={step === 0 ? 'mt-5' : 'hidden'}>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.name')}</span>
+          <span className="text-xs text-neutral-500">{t('strategy.name')}</span>
           <input
             type="text"
             className="input"
@@ -408,7 +408,7 @@ function StrategyEditor({
         <p className="mt-3 text-xs leading-relaxed text-neutral-500">{t('strategy.singlePairHint')}</p>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="draft-symbol-label">
+          <span className="text-xs text-neutral-500" id="draft-symbol-label">
             {t('strategy.symbolLabel')}
           </span>
           {/* 一组互斥选项用 radiogroup 语义，读屏能播报"n 项中的第 m 项"以及当前选中
@@ -437,7 +437,7 @@ function StrategyEditor({
                   className={segBtn(on, !fed)}
                 >
                   {displaySymbol(sym)}
-                  {!fed && <span className="ml-1 text-[10px]">· {t('strategy.symbolNotFedShort')}</span>}
+                  {!fed && <span className="ml-1 text-xs">· {t('strategy.symbolNotFedShort')}</span>}
                 </button>
               )
             })}
@@ -445,7 +445,7 @@ function StrategyEditor({
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="draft-interval-label">
+          <span className="text-xs text-neutral-500" id="draft-interval-label">
             {t('strategy.intervalLabel')}
           </span>
           {/* 可选周期来自 usages 目录，不是前端常量：后端加减一档周期时这里跟着变。
@@ -511,7 +511,7 @@ function StrategyEditor({
       <div className={step === 2 ? 'mt-5' : 'hidden'}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.stopLossMethod')}</span>
+            <span className="text-xs text-neutral-500">{t('strategy.stopLossMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {(['percent', 'steps', 'atr'] as const).map((m) => (
                 <button
@@ -544,7 +544,7 @@ function StrategyEditor({
             <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('strategy.stopLossHint')}</p>
           </div>
           <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
-            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.takeProfitMethod')}</span>
+            <span className="text-xs text-neutral-500">{t('strategy.takeProfitMethod')}</span>
             <div className="mt-1.5 flex flex-wrap gap-2">
               {(['rr', 'percent', 'steps', 'atr'] as const).map((m) => (
                 <button
@@ -589,7 +589,7 @@ function StrategyEditor({
         </div>
 
         <div className="mt-4 flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.oneTradeAtATime')}</span>
+          <span className="text-xs text-neutral-500">{t('strategy.oneTradeAtATime')}</span>
           <div className="flex flex-wrap gap-2">
             <button
               type="button"

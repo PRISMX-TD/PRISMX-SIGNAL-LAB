@@ -756,7 +756,7 @@ export default function UsersPanel({
                           <div className={`truncate font-mono text-xs ${u.nickname ? 'text-neutral-400' : 'text-neutral-100'}`}>
                             <Copyable text={u.email} label={t('supportDesk.copy.email')} />
                           </div>
-                          <div className="mt-1 flex items-center gap-2 whitespace-nowrap text-[11px] text-neutral-500">
+                          <div className="mt-1 flex items-center gap-2 whitespace-nowrap text-xs text-neutral-500">
                             {/* 手机号：存量用户为空，用「-」而不是留白，否则看起来像渲染坏了。
                                 Empty for grandfathered users; a dash, not blank space. */}
                             <span className="font-mono text-neutral-400">
@@ -805,9 +805,9 @@ export default function UsersPanel({
                           The reason is clamped with the full text in the title. */}
                       {disabled && (
                         <div className="mt-2 max-w-[200px] space-y-0.5">
-                          <div className="text-[11px] text-neutral-500">{fmtTime(u.disabledAt)}</div>
+                          <div className="text-xs text-neutral-500">{fmtTime(u.disabledAt)}</div>
                           {u.disabledReason && (
-                            <div className="truncate text-[11px] text-neutral-400" title={u.disabledReason}>
+                            <div className="truncate text-xs text-neutral-400" title={u.disabledReason}>
                               {u.disabledReason}
                             </div>
                           )}
@@ -878,9 +878,9 @@ export default function UsersPanel({
                       )}
                       {/* 归属代理：代理本人显示「代理」标，他的位置在「代理」分区里看。
                           Owning agent; agents themselves get a tag (their place is in the Agents section). */}
-                      <div className="mt-1 text-[11px]">
+                      <div className="mt-1 text-xs">
                         {u.isAgent ? (
-                          <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-prism-200">{t('admin.agentTag')}</span>
+                          <span className="rounded-[10px] bg-prism-500/15 px-1.5 py-0.5 text-prism-200">{t('admin.agentTag')}</span>
                         ) : u.agentUserId ? (
                           <span className="text-neutral-300">
                             {t('admin.colAgent')}:{' '}
@@ -895,7 +895,7 @@ export default function UsersPanel({
                         MT5 count under last active: both are read-only "is this person using it" facts. */}
                     <td className="whitespace-nowrap text-xs">
                       <div className="num text-neutral-300" title={fmtTime(u.lastActiveAt)}>{shortStamp(u.lastActiveAt)}</div>
-                      <div className="mt-1 text-[11px] text-neutral-500">
+                      <div className="mt-1 text-xs text-neutral-500">
                         {t('admin.colMt5Count')} <span className="num text-neutral-300">{u.mt5AccountCount}</span>
                       </div>
                     </td>

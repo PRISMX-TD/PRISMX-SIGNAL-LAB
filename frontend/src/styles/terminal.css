@@ -88,12 +88,12 @@
 .term-ph h3 {
   margin: 0;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .term-ph span {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
 }
@@ -117,7 +117,7 @@
   height: 32px;
   padding: 0 12px 0 32px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--text);
   font: inherit;
@@ -157,9 +157,9 @@
   width: 2px;
   background: var(--purple-hi);
 }
-.term-wr .sym-ava { width: 24px; height: 24px; font-size: 9px; }
+.term-wr .sym-ava { width: 24px; height: 24px; font-size: 12px; }
 .term-wr-sym { font: 600 12.5px/1.1 "JetBrains Mono", ui-monospace, monospace; color: #fff; }
-.term-wr-nm { margin-top: 2px; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-wr-nm { margin-top: 2px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 迷你走势：页面打开后收到的报价序列，不是日线——没数据时空着，不编。
    Sparkline of the ticks received since the page opened, not a daily series;
    stays blank until there is data rather than inventing any. */
@@ -193,16 +193,16 @@
   font: inherit;
   text-align: left;
 }
-.term-qs-id .sym-ava { width: 30px; height: 30px; font-size: 10.5px; }
+.term-qs-id .sym-ava { width: 30px; height: 30px; font-size: 12px; }
 .term-qs-id h2 {
   margin: 0;
   font-size: 17px;
   line-height: 1.1;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.01em;
   color: #fff;
 }
-.term-qs-id p { margin: 2px 0 0; font-size: 11px; color: var(--text-3); }
+.term-qs-id p { margin: 2px 0 0; font-size: 12px; color: var(--text-3); }
 .term-qs-px {
   display: flex;
   align-items: center;
@@ -228,7 +228,7 @@
   gap: 2px;
   font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
 }
-.term-chg small { font-family: inherit; font-size: 10.5px; color: var(--text-3); font-family: var(--sans, inherit); }
+.term-chg small { font-family: inherit; font-size: 12px; color: var(--text-3); font-family: var(--sans, inherit); }
 .term-chg.up { color: var(--up); }
 .term-chg.down { color: var(--down); }
 .term-qs-st {
@@ -241,9 +241,7 @@
 }
 .term-st { white-space: nowrap; }
 .term-st .k {
-  font: 500 10px/1 "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
 }
 .term-st .v {
@@ -262,9 +260,7 @@
   gap: 8px;
   margin-left: auto;
   padding: 0 18px;
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -363,7 +359,7 @@
   flex-shrink: 0;
   gap: 2px;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
 }
 .term-tf button {
@@ -371,10 +367,10 @@
   min-width: 34px;
   padding: 0 9px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
-  font: 500 11.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
@@ -394,11 +390,11 @@
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -407,11 +403,11 @@
 }
 .term-tbr-btn:hover { color: #fff; }
 .term-tbr-btn b {
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface-2);
   color: var(--text-2);
   display: inline-grid;
@@ -452,7 +448,7 @@
   z-index: 5;
   pointer-events: none;
   padding: 1px 0 2px;
-  font: 600 11px/14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: 600 12px/14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   text-align: center;
   color: #fff;
@@ -467,7 +463,7 @@
   align-items: center;
   gap: 4px 12px;
   pointer-events: none;
-  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -500,7 +496,7 @@
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -515,15 +511,15 @@
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface-2);
   color: var(--text-3);
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
 }
 .term-dk-tab.on b { background: var(--purple); color: #fff; }
 .term-dk-sum {
   margin-left: auto;
-  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -539,11 +535,11 @@
   height: 26px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   box-shadow: inset 0 0 0 1px rgb(var(--down-rgb) / 0.4);
   color: var(--down);
-  font: 600 11.5px inherit;
+  font: 600 12px inherit;
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
@@ -577,9 +573,7 @@
 }
 .term-pr .k {
   margin-bottom: 4px;
-  font: 500 9.5px/1 "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
 }
 .term-pr .v {
@@ -597,8 +591,8 @@
   align-items: center;
   height: 18px;
   padding: 0 7px;
-  border-radius: 999px;
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  border-radius: 10px;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   white-space: nowrap;
 }
 .term-tag.buy { background: var(--up-bg); color: var(--up); }
@@ -616,11 +610,11 @@
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface-2);
   color: var(--text-2);
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
@@ -651,7 +645,7 @@
   gap: 6px;
   height: 24px;
   padding: 0 8px;
-  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--mid);
   white-space: nowrap;
 }
@@ -683,14 +677,14 @@
   background: var(--surface);
 }
 .term-pr-xg { display: flex; flex-direction: column; gap: 6px; }
-.term-pr-xk { font-size: 11px; color: var(--text-3); }
+.term-pr-xk { font-size: 12px; color: var(--text-3); }
 .term-pr-xr { display: flex; align-items: center; gap: 6px; }
 .term-pr-inp {
   width: 96px;
   height: 30px;
   padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
   color: var(--text);
   font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
@@ -704,7 +698,7 @@
   height: 30px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--purple);
   color: #fff;
   font: inherit;
@@ -715,7 +709,7 @@
 }
 .term-pr-btn:hover:not(:disabled) { background: var(--purple-vivid); }
 .term-pr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.term-pr-warn { font-size: 11px; color: var(--down); }
+.term-pr-warn { font-size: 12px; color: var(--down); }
 
 /* ── 下单票 / order ticket ── */
 .term-tk {
@@ -766,9 +760,7 @@
 .term-side button:last-of-type { border-radius: 0 var(--r-panel) var(--r-panel) 0; }
 .term-side button:active { transform: scale(0.985); }
 .term-side .lab {
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
 }
 .term-side .px {
@@ -790,10 +782,10 @@
   gap: 4px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--bg);
   box-shadow: inset 0 0 0 1px var(--line-hi);
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-2);
   pointer-events: none;
   white-space: nowrap;
@@ -804,7 +796,7 @@
   justify-content: space-between;
   align-items: baseline;
   margin: 18px 0 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .term-fk b { font-weight: 500; color: var(--text-2); }
@@ -812,18 +804,18 @@
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
 }
 .term-mode button {
   height: 20px;
   padding: 0 9px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
 }
@@ -832,7 +824,7 @@
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) 36px;
   height: 40px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
   overflow: hidden;
 }
@@ -863,10 +855,10 @@
 .term-pre button {
   height: 26px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
-  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line);
   transition: color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
@@ -881,7 +873,7 @@
   height: 36px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
   color: #fff;
   font: 500 13px "JetBrains Mono", ui-monospace, monospace;
@@ -895,7 +887,7 @@
 .term-fh {
   margin-top: 5px;
   padding-left: 12px;
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
   min-height: 13px;
 }
@@ -922,7 +914,7 @@
 .term-lr.em { height: 36px; }
 .term-lr.em span { color: var(--text-2); }
 .term-lr.em b { font-size: 14px; }
-.term-warn { margin: 10px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--gold); }
+.term-warn { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--gold); }
 .term-cta {
   display: flex;
   align-items: center;
@@ -932,7 +924,7 @@
   height: 46px;
   margin-top: 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--up);
   color: #0b0b0e;
   font: 600 14px var(--sans, inherit);
@@ -960,14 +952,14 @@
   border-top-color: #0b0b0e;
   animation: term-spin 0.7s linear infinite;
 }
-.term-ctah { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--text-3); text-align: center; }
+.term-ctah { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-3); text-align: center; }
 .term-receipt { margin: 8px 0 0; font-size: 12px; text-align: center; }
 .term-receipt.ok { color: var(--up); }
 .term-receipt.error { color: var(--down); }
 .term-receipt.info { color: var(--text-2); }
 .term-receipt .px {
   margin-left: 6px;
-  font: 500 11px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
@@ -987,9 +979,7 @@
   margin-top: 4px;
 }
 .term-acg .k {
-  font: 500 9.5px/1 "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+  font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
 }
 .term-acg .v {
@@ -998,7 +988,7 @@
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.term-acg .v small { margin-left: 4px; font-size: 10.5px; color: var(--text-3); }
+.term-acg .v small { margin-left: 4px; font-size: 12px; color: var(--text-3); }
 .term-acg .v.up { color: var(--up); }
 .term-acg .v.down { color: var(--down); }
 .term-acm {
@@ -1006,7 +996,7 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: 12px;
-  font: 500 10.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
 }
 .term-acm .ok { display: inline-flex; align-items: center; gap: 6px; color: var(--up); }
@@ -1041,8 +1031,8 @@
   .term-qs-px { order: 3; }
   .term-qs-st .term-st.term-st--desk { display: none; }
   .term-qs-st .term-st { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
-  .term-qs-st .term-st .k { font-size: 9px; letter-spacing: 0.04em; }
-  .term-qs-st .term-st .v { margin-top: 0; font-size: 11px; }
+  .term-qs-st .term-st .k { font-size: 12px; letter-spacing: 0.04em; }
+  .term-qs-st .term-st .v { margin-top: 0; font-size: 12px; }
   /* 第二行：左边约 2/3 是画线横条（右缘渐隐提示还能往左滑），右边「指标」+ 设置齿轮。
      Row 2: the draw bar on the left ~2/3 (a right-edge fade hints it scrolls), Indicators + gear on the right. */
   .term-qs-tools {
@@ -1071,7 +1061,7 @@
   .term-big .pip { font-size: 25px; }
 }
 @media (max-width: 1023px) {
-  .term-st .k { font-size: 9px; }
+  .term-st .k { font-size: 12px; }
   .term-st .v { margin-top: 4px; font-size: 12px; }
   .term-qs-live { display: none; }
   .term-cv { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) 40px auto; }
@@ -1117,10 +1107,10 @@
   .term-mbar button:active { transform: scale(0.98); }
   .term-mbar .sell { background: var(--down-bg); color: var(--down); }
   .term-mbar .buy { background: var(--up-bg); color: var(--up); }
-  .term-mbar .lab { font: 500 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.1em; text-transform: uppercase; }
+  .term-mbar .lab { font: 500 12px "JetBrains Mono", ui-monospace, monospace; }
   .term-mbar .px { font: 500 16px "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
   .term-mbar .px b { font-size: 20px; font-weight: 600; }
-  .term-mbar .sp { font: 500 10.5px/1.3 "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); text-align: center; }
+  .term-mbar .sp { font: 500 12px/1.3 "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); text-align: center; }
   .term-mbar .sp b { display: block; font-size: 12px; font-weight: 500; color: var(--text-2); }
 
   /* 抽屉：自选 / 下单票 / 持仓。盖在全站底栏之上。
@@ -1170,7 +1160,7 @@
   .term-sheet-pref {
     display: flex; align-items: center; gap: 8px; flex: none;
     margin-left: auto; margin-right: 10px;
-    font: 500 11.5px/1 "JetBrains Mono", ui-monospace, monospace;
+    font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
     color: var(--text-3);
     cursor: pointer;
   }
@@ -1271,8 +1261,8 @@
   padding: 16px 20px 14px;
   border-bottom: 1px solid var(--line);
 }
-.ind-hd h3 { margin: 0; font-size: 16px; font-weight: 700; color: #fff; }
-.ind-n { margin-left: -4px; font: 500 11px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); white-space: nowrap; }
+.ind-hd h3 { margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
+.ind-n { margin-left: -4px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); white-space: nowrap; }
 .ind-srch { position: relative; margin-left: auto; width: 240px; }
 .ind-srch svg { position: absolute; left: 12px; top: 9px; color: var(--text-3); pointer-events: none; }
 .ind-srch input {
@@ -1280,7 +1270,7 @@
   height: 32px;
   padding: 0 12px 0 32px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
   color: var(--text);
   font: inherit;
@@ -1308,16 +1298,16 @@
 /* 目录 / catalog */
 .ind-cat { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
 .ind-tpl { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.ind-tpl .k { width: 100%; margin-bottom: 2px; font: 500 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.ind-tpl .k { width: 100%; margin-bottom: 2px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
 .ind-tpl button {
   height: 26px;
   padding: 0 11px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-2);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line-hi);
@@ -1327,8 +1317,8 @@
 .ind-tpl button.on { background: var(--purple); color: #fff; box-shadow: none; }
 .ind-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 12px; }
 .ind-grp { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 14px 4px; }
-.ind-grp b { font-size: 11.5px; font-weight: 600; color: var(--text-2); }
-.ind-grp span { font: 500 10.5px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
+.ind-grp b { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.ind-grp span { font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
 .ind-it {
   position: relative;
   display: grid;
@@ -1349,20 +1339,20 @@
   border-radius: 6px;
   background: var(--nest);
   color: var(--text-2);
-  font: 600 9.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 600 12px "JetBrains Mono", ui-monospace, monospace;
   letter-spacing: 0.04em;
 }
 .ind-it.on .ind-ab { background: var(--purple); color: #fff; }
-.ind-ab.lg { width: 44px; height: 30px; font-size: 11px; flex-shrink: 0; }
+.ind-ab.lg { width: 44px; height: 30px; font-size: 12px; flex-shrink: 0; }
 .ind-txt { min-width: 0; }
 .ind-txt .nm { display: block; font-size: 13px; font-weight: 500; line-height: 1.2; color: #fff; }
-.ind-txt .ds { display: block; margin-top: 2px; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ind-txt .ds { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 编辑器 / editor */
 .ind-ed { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .ind-ed-hd { display: flex; align-items: flex-start; gap: 14px; padding: 18px 22px 0; }
 .ind-ed-t { flex: 1; min-width: 0; }
-.ind-ed-hd h4 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; font-weight: 700; color: #fff; }
+.ind-ed-hd h4 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; font-weight: 500; color: #fff; }
 .ind-ed-hd p { margin: 4px 0 0; max-width: 52ch; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
 .ind-ed-hd .switch { margin-top: 4px; }
 .ind-tag {
@@ -1370,31 +1360,29 @@
   align-items: center;
   height: 18px;
   padding: 0 7px;
-  border-radius: 999px;
-  font: 500 10px "JetBrains Mono", ui-monospace, monospace;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  border-radius: 10px;
+  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
   color: var(--text-3);
   box-shadow: inset 0 0 0 1px var(--line-hi);
 }
 .ind-prev { position: relative; flex-shrink: 0; height: 150px; margin: 16px 22px 0; border-radius: var(--r-panel); background: var(--bg); overflow: hidden; }
 .ind-prev canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; display: block; }
-.ind-prev-lg { position: absolute; left: 12px; top: 10px; display: flex; gap: 12px; font: 500 10.5px "JetBrains Mono", ui-monospace, monospace; color: var(--text-2); }
+.ind-prev-lg { position: absolute; left: 12px; top: 10px; display: flex; gap: 12px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-2); }
 .ind-prev-lg i { display: inline-block; width: 10px; height: 2px; margin-right: 5px; border-radius: 1px; vertical-align: middle; }
-.ind-prev-cap { position: absolute; right: 12px; bottom: 8px; font: 500 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+.ind-prev-cap { position: absolute; right: 12px; bottom: 8px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
 .ind-prev-empty { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; font-size: 12px; color: var(--text-3); }
 .ind-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 22px 18px; }
 .ind-sec { margin-top: 18px; }
-.ind-sec .k { margin-bottom: 10px; font: 500 10px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.ind-sec .k { margin-bottom: 10px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
 .ind-params { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; }
 .ind-f { display: flex; flex-direction: column; gap: 6px; }
-.ind-f .l { font-size: 11.5px; color: var(--text-3); white-space: nowrap; }
+.ind-f .l { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .ind-in {
   width: 72px;
   height: 34px;
   padding: 0 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
   color: #fff;
   font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
@@ -1431,12 +1419,12 @@
   background: var(--surface-2);
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--line-hi);
 }
-.ind-seg { display: inline-flex; gap: 2px; height: 34px; padding: 3px; border-radius: 999px; background: var(--nest); }
+.ind-seg { display: inline-flex; gap: 2px; height: 34px; padding: 3px; border-radius: 10px; background: var(--nest); }
 .ind-seg button {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -1446,7 +1434,7 @@
 }
 .ind-seg button.on { background: var(--nest-hi); color: #fff; }
 .ind-lines { display: flex; flex-wrap: wrap; gap: 8px; }
-.ind-line { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 6px 0 2px; border-radius: 999px; background: var(--nest); }
+.ind-line { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 6px 0 2px; border-radius: 10px; background: var(--nest); }
 .ind-line .ind-in { width: 56px; height: 32px; background: transparent; box-shadow: none; }
 .ind-line .ind-in:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
 .ind-line .ind-dot { box-shadow: 0 0 0 2px var(--nest), 0 0 0 3px rgba(255, 255, 255, 0.22); }
@@ -1462,7 +1450,7 @@
   height: 38px;
   padding: 0 14px;
   border: 1px dashed var(--line-hi);
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -1472,15 +1460,15 @@
 }
 .ind-add:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
 .ind-add:disabled { opacity: 0.3; cursor: not-allowed; }
-.ind-disc { margin: 0 14px 6px; padding: 6px 9px; border-radius: 6px; font-size: 10.5px; line-height: 1.5; color: var(--text-3); background: color-mix(in srgb, #facc15 7%, transparent); border: 1px solid color-mix(in srgb, #facc15 22%, transparent); }
-.ind-disc.ed { margin: 12px 22px 0; font-size: 11px; }
-.ind-hint { margin: 16px 0 0; max-width: 60ch; font-size: 11.5px; line-height: 1.55; color: var(--text-3); }
+.ind-disc { margin: 0 14px 6px; padding: 6px 9px; border-radius: 6px; font-size: 12px; line-height: 1.5; color: var(--text-3); background: color-mix(in srgb, #facc15 7%, transparent); border: 1px solid color-mix(in srgb, #facc15 22%, transparent); }
+.ind-disc.ed { margin: 12px 22px 0; font-size: 12px; }
+.ind-hint { margin: 16px 0 0; max-width: 60ch; font-size: 12px; line-height: 1.55; color: var(--text-3); }
 .ind-ft { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 14px 22px 18px; border-top: 1px solid var(--line); }
 .ind-btn {
   height: 38px;
   padding: 0 18px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -1492,7 +1480,7 @@
 .ind-btn:hover { color: #fff; }
 .ind-btn.primary { margin-left: auto; padding: 0 26px; background: var(--purple); color: #fff; box-shadow: none; }
 .ind-btn.primary:hover { background: var(--purple-vivid); }
-.ind-en { display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; font: 500 11px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
+.ind-en { display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
 .ind-en span { display: inline-flex; align-items: center; gap: 5px; }
 .ind-en i { width: 8px; height: 8px; border-radius: 50%; }
 
@@ -1550,13 +1538,13 @@
 .chart-set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .chart-set-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .chart-set b { font-weight: 600; color: #fff; }
-.chart-set small { font-size: 11.5px; color: var(--text-3); }
+.chart-set small { font-size: 12px; color: var(--text-3); }
 .chart-set-sec { display: flex; flex-direction: column; gap: 10px; }
 .chart-set-sec .ind-seg { align-self: flex-start; }
 .chart-set-custom { display: flex; align-items: center; gap: 16px; }
 .chart-set-pick { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2, var(--text)); }
 .chart-set-pick .ind-dot { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px rgba(255, 255, 255, 0.22); }
-.chart-set-custom em { margin-left: auto; font-style: normal; font-size: 11.5px; color: var(--text-3); }
+.chart-set-custom em { margin-left: auto; font-style: normal; font-size: 12px; color: var(--text-3); }
 
 /* 自选栏：分类标签 + 星标列。有星标时缩窄迷你走势、多一列 22px。
    Watchlist tabs + star column: with stars the sparkline narrows and a 22px column is added. */

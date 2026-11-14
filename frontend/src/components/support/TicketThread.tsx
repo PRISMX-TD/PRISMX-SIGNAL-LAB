@@ -295,11 +295,11 @@ export default function TicketThread({
               <span className="w-7 shrink-0">{!grouped && <Avatar name={name} size={28} tone={tone} />}</span>
               <div className={`flex min-w-0 max-w-[85%] flex-col sm:max-w-[72%] ${fromStaff ? 'items-end' : 'items-start'}`}>
                 {!grouped && (
-                  <div className={`mb-1 flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-[11px] text-neutral-500 ${fromStaff ? 'justify-end' : ''}`}>
+                  <div className={`mb-1 flex max-w-full flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-xs text-neutral-500 ${fromStaff ? 'justify-end' : ''}`}>
                     <span className="max-w-full truncate font-medium text-neutral-300">{name}</span>
                     {fromStaff && <span>{t(`supportDesk.role.${r.authorRole}`)}</span>}
                     {r.internal && (
-                      <span className="rounded-full bg-amber-400/15 px-1.5 py-px text-[10px] font-semibold text-amber-200">{t('supportDesk.thread.internalTag')}</span>
+                      <span className="rounded-[10px] bg-amber-400/15 px-1.5 py-px text-xs font-semibold text-amber-200">{t('supportDesk.thread.internalTag')}</span>
                     )}
                     <span className="num">{fmtClock(r.createdAt)}</span>
                   </div>
@@ -384,7 +384,7 @@ export default function TicketThread({
               <SaveTemplateButton body={text} admin={me.isAdmin} onSaved={loadTemplates} onToast={onToast} />
             </span>
           )}
-          <span className="hidden pb-2 text-[11px] text-neutral-500 lg:inline">{t('supportDesk.thread.sendHint')}</span>
+          <span className="hidden pb-2 text-xs text-neutral-500 lg:inline">{t('supportDesk.thread.sendHint')}</span>
           <button
             type="button"
             onClick={() => void send()}
@@ -396,7 +396,7 @@ export default function TicketThread({
           </button>
         </div>
       </div>
-      {internal && <p className="mt-2 px-1 text-[11px] text-amber-300/90">{t('supportDesk.thread.internalHint')}</p>}
+      {internal && <p className="mt-2 px-1 text-xs text-amber-300/90">{t('supportDesk.thread.internalHint')}</p>}
     </div>
   )
 

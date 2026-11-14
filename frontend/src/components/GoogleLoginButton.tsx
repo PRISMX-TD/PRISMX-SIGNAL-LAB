@@ -220,7 +220,7 @@ export default function GoogleLoginButton({ onCredential, onError }: Props) {
           be a lie. The line below is the information the user actually needs. */}
       <div
         aria-hidden
-        className={`flex h-11 w-full items-center justify-center gap-2.5 rounded-full border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-neutral-100 transition ${
+        className={`flex h-11 w-full items-center justify-center gap-2.5 rounded-[10px] border border-white/15 bg-white/[0.06] px-4 text-sm font-medium text-neutral-100 transition ${
           unavailable ? 'opacity-40' : 'hover:border-white/25 hover:bg-white/[0.1]'
         }`}
       >

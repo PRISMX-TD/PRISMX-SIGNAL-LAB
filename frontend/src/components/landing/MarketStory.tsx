@@ -376,7 +376,7 @@ export default function MarketStory() {
             beats 1-4 take one rule each ── */}
         <div className={`story-panel panel-l ${active === 0 ? 'on' : ''}`} data-panel="mkt0">
           <div className="panel-inner">
-            <p className="text-[12px] uppercase tracking-[0.16em] text-prism-400">{t('landing.wrEyebrow')}</p>
+            <p className="text-[12px] text-prism-400">{t('landing.wrEyebrow')}</p>
             <h2 className="mt-4 max-w-[16ch] font-display-xl fs-fluid [--fs-min:1.9rem] [--fs-vw:4.8vw] [--fs-max:3.1rem] text-white">
               {t('landing.wrTitle')}
             </h2>

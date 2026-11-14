@@ -64,7 +64,7 @@ export default function SessionFilterField({ value, onChange }: SessionFilterFie
 
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.sessionFilter')}</span>
+      <span className="text-xs text-neutral-500">{t('strategy.sessionFilter')}</span>
       <div className="flex flex-wrap gap-2">
         <button type="button" aria-pressed={!on} onClick={() => setOn(false)} className={segBtn(!on)}>
           {t('strategy.sessionFilterOff')}
@@ -78,7 +78,7 @@ export default function SessionFilterField({ value, onChange }: SessionFilterFie
         <div className="mt-1.5 rounded-lg border border-white/10 bg-white/[0.02] p-3">
           <div className="flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-neutral-500">{t('strategy.sessionFrom')}</span>
+              <span className="text-xs text-neutral-500">{t('strategy.sessionFrom')}</span>
               <Select
                 value={String(start)}
                 // 剔除 end：start == end 会被后端当成"没设过滤"，不能让它被选出来。
@@ -90,7 +90,7 @@ export default function SessionFilterField({ value, onChange }: SessionFilterFie
             </label>
             <span className="pb-2 text-xs text-neutral-500">—</span>
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] uppercase tracking-wide text-neutral-500">{t('strategy.sessionTo')}</span>
+              <span className="text-xs text-neutral-500">{t('strategy.sessionTo')}</span>
               <Select
                 value={String(end)}
                 options={HOURS.filter((h) => h !== start).map((h) => ({ value: String(h), label: hourLabel(h) }))}

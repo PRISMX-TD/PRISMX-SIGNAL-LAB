@@ -58,6 +58,17 @@ function CheckIcon() {
   );
 }
 
+function DashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
+      <path d="M6 12h12" />
+    </svg>
+  );
+}
+
+// FREE 档不支持的项在各语言里统一写成「—」。/ Unsupported FREE items are "—" in every language.
+const NOT_IN_FREE = "—";
+
 // 未完成支付的本地持久化：用户扫码转账后切走/刷新/锁屏太久回来，页面状态
 // 全在内存里会直接丢回选套餐页——此时 USDT 可能已经转出去了，界面却像是
 // 要重新下单。存一份到 localStorage，挂载时用它先恢复界面，再用真实状态核实。
@@ -488,7 +499,7 @@ export default function UpgradePage() {
             <button className={chosenPlan === "pro_yearly" ? "on" : ""} onClick={() => setChosenPlan("pro_yearly")}>
               {t("upgrade.yearly")}
               {!sale && yearlyDiscountPct != null && yearlyDiscountPct > 0 && (
-                <span className="ml-1.5 text-[10px] font-bold text-prism-300">-{yearlyDiscountPct}%</span>
+                <span className="ml-1.5 text-xs font-bold text-prism-300">-{yearlyDiscountPct}%</span>
               )}
             </button>
           </div>
@@ -561,47 +572,49 @@ export default function UpgradePage() {
             </div>
             <div className="my-5 h-px bg-white/10" />
             <ul className="flex flex-col gap-3">
-              {FEATURES.map((f) => (
-                <li key={f.key} className="flex items-start gap-3 text-sm">
-                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white/5 text-neutral-500">
-                    <span className="text-xs">·</span>
-                  </span>
-                  <span className="text-neutral-400">
-                    <span className="text-neutral-300">{t(`upgrade.${f.key}`)}</span>
-                    <span className="text-neutral-500"> — {t(`upgrade.${f.free}`)}</span>
-                  </span>
-                </li>
-              ))}
+              {/* 2026-11-15 起不支持的项前面是横线图标、整行灰字，不再拼「 — 值」——值本身就是
+                  「—」，以前显示成「一键下单 — —」。
+                  Since 2026-11-15 an unsupported item gets a dash icon and an all-grey row
+                  instead of " — value"; the value itself is "—", which used to render as
+                  "One-tap orders — —". */}
+              {FEATURES.map((f) => {
+                const free = t(`upgrade.${f.free}`)
+                const no = free === NOT_IN_FREE
+                return (
+                  <li key={f.key} className="flex items-start gap-3 text-sm">
+                    <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-white/5 text-neutral-500">
+                      {no ? <DashIcon /> : <span className="text-xs">·</span>}
+                    </span>
+                    {no ? (
+                      <span className="text-neutral-500">{t(`upgrade.${f.key}`)}</span>
+                    ) : (
+                      <span className="text-neutral-400">
+                        <span className="text-neutral-300">{t(`upgrade.${f.key}`)}</span>
+                        <span className="text-neutral-500"> · {free}</span>
+                      </span>
+                    )}
+                  </li>
+                )
+              })}
             </ul>
           </div>
 
-          {/* PRO 卡：实色紫面，与落地页定价区同一种材质。
-              此前是「玻璃卡 + 紫色描边 + 内联 40px 紫色外发光」三层叠加来表示推荐。
-              三种手段说同一件事，而其中的外发光正是这次重做要清掉的语言。实色面
-              一次就说清了，且它与落地页的 PRO 面完全一致——用户从落地页走到这里
-              看到的是同一个东西。
-              PRO card: a solid violet plane, the same material as the landing page's
-              pricing section. It used to stack three devices to say "recommended" —
-              a glass card, a violet ring, and an inline 40px violet outer glow — one
-              of which is exactly the vocabulary being removed. A flat fill says it
-              once, and it matches the landing page's PRO plane exactly, so a user
-              arriving from there sees the same object. */}
-          <div className="relative flex flex-col rounded-card bg-prism-600 p-7">
+          {/* PRO 卡：2026-11-15 起是深紫底（#1E1744）+ 半透明紫细线，与落地页定价区同一种材质。
+              之前的整块实色紫让整卡像一块广告，比页面上的主操作还抢眼；深紫底上白字对比度
+              更高，仍一眼认得出是品牌卡。不发光。
+              PRO card: since 2026-11-15 a deep violet fill (#1E1744) with a translucent
+              violet hairline, the same material as the landing page. The old solid violet
+              plane read as an ad and outshouted the primary action; white on the deep fill
+              has more contrast and the card is still recognisably the brand. No glow. */}
+          <div className="relative flex flex-col rounded-card bg-[#1E1744] shadow-[inset_0_0_0_1px_rgba(146,132,255,0.45)] p-7">
             <div className="relative flex items-center justify-between">
               <span className="font-display text-lg font-bold text-white">{t("upgrade.planPro")}</span>
-              <span className="tag bg-white/15 text-white">
+              <span className="tag bg-[rgba(146,132,255,0.24)] text-[#e2dcff]">
                 {isPro ? t("upgrade.currentPlan") : t("upgrade.mostPopular")}
               </span>
             </div>
-            {/* 卡片底色变成实色紫之后，卡内所有文字必须整体反相：原来的 neutral-400 /
-                prism-300 是为深灰底调的，压在 #5A22EE 上对比度只有 1.5:1 左右，基本
-                读不出来。这里全部换成白色的不同透明度档位——白 100% 主信息、白 75%
-                次要、白 25% 分隔线，全部过 AA。
-                Once the card fill became solid violet, every string inside had to be
-                inverted: the previous neutral-400 / prism-300 tones were tuned for a
-                dark grey fill and score roughly 1.5:1 on #5A22EE, i.e. unreadable.
-                They are now steps of white — 100% for primary, 75% for secondary,
-                25% for rules — all of which pass AA on this fill. */}
+            {/* 卡内文字全部用白色的不同透明度档位：白 100% 主信息、白 85% 次要；在深紫底上都过 AA。
+                Text inside the card is steps of white (100% primary, 85% secondary), all AA on the deep fill. */}
             <div className="relative mt-4 h-[70px]">
               <div className="flex items-baseline gap-2">
                 <span className="num text-[2.5rem] font-semibold leading-none text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
@@ -616,7 +629,7 @@ export default function UpgradePage() {
                   : t("upgrade.proTagline")}
               </p>
             </div>
-            <div className="relative my-5 h-px bg-white/25" />
+            <div className="relative my-5 h-px bg-[rgba(146,132,255,0.22)]" />
             <ul className="relative flex flex-col gap-3">
               {FEATURES.map((f) => (
                 <li key={f.key} className="flex items-start gap-3 text-sm">
@@ -680,9 +693,9 @@ export default function UpgradePage() {
                     )}
                     <div className="flex items-center gap-1.5">
                       <span className="font-display text-sm font-bold text-neutral-100">USDT</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${active ? "bg-prism-600/30 text-prism-200" : "bg-white/5 text-neutral-400"}`}>{meta.label}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${active ? "bg-prism-600/30 text-prism-200" : "bg-white/5 text-neutral-400"}`}>{meta.label}</span>
                     </div>
-                    <span className={`mt-1 text-[11px] ${isTrc ? "text-prism-300" : "text-neutral-500"}`}>{isTrc ? t("upgrade.recommended") : meta.note}</span>
+                    <span className={`mt-1 text-xs ${isTrc ? "text-prism-300" : "text-neutral-500"}`}>{isTrc ? t("upgrade.recommended") : meta.note}</span>
                   </button>
                 );
               })}
@@ -694,7 +707,7 @@ export default function UpgradePage() {
             {/* 总价行 / total row */}
             <div className="relative flex items-end justify-between">
               <div>
-                <div className="text-xs font-medium uppercase tracking-wider text-neutral-500">{t("upgrade.totalDue")}</div>
+                <div className="text-xs font-medium text-neutral-500">{t("upgrade.totalDue")}</div>
                 <div className="mt-1 text-xs text-neutral-500">
                   {chosenPlan === "pro_yearly" ? t("upgrade.yearly") : t("upgrade.monthly")} · USDT {USDT_META[chosenCoin]?.label ?? ""}
                 </div>
@@ -743,7 +756,7 @@ export default function UpgradePage() {
         {remaining !== null && (
           <div className="mt-6 flex justify-center">
             <div className={`inline-flex items-center gap-2.5 rounded-pill px-4 py-2 ring-1 ${expired ? "bg-down/10 ring-down/40" : "bg-amber-400/10 ring-amber-400/30"}`}>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">{t("upgrade.timeLeft")}</span>
+              <span className="text-xs font-bold text-neutral-400">{t("upgrade.timeLeft")}</span>
               <span className={`font-mono text-lg font-bold ${expired ? "text-down" : "text-amber-300"}`}>
                 {expired ? "0:00" : fmtCountdown(remaining)}
               </span>
@@ -769,7 +782,7 @@ export default function UpgradePage() {
 
             {/* 金额卡 / amount card */}
             <div className="glass mt-4 p-6 text-center">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500">{t("upgrade.sendAmount")}</div>
+              <div className="text-xs font-bold text-neutral-500">{t("upgrade.sendAmount")}</div>
               <div className="mt-2 break-all font-display text-3xl font-black text-white">{state.payAmount}</div>
               <div className="mt-3 inline-flex items-center gap-1.5 rounded-pill bg-prism-600/15 px-3 py-1 ring-1 ring-prism-500/30">
                 <span className="text-sm font-bold text-neutral-100">USDT</span>
@@ -796,7 +809,7 @@ export default function UpgradePage() {
 
             {/* 地址卡 / address card */}
             <div className="glass mt-4 p-6">
-              <div className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-500">
+              <div className="text-xs font-bold text-neutral-500">
                 {t("upgrade.sendTo")} · <span className="text-prism-300">{meta.label}</span>
               </div>
               <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-neutral-200">

@@ -153,11 +153,16 @@
      白 #fff 压在 #5A22EE 上对比度 ≈ 8.4:1，远超 AA。
      Primary: flat brand violet, white label. No gradient, no outer glow.
      #fff on #5A22EE is ~8.4:1, comfortably past AA. */
+  /* 圆角写在这里而不只写在 .btn 上：55 处只用了 btn-primary / btn-brand、没带 .btn，
+     以前是直角（下载页、桥接页「复制」、后台「保存」）。
+     The radius lives here, not only on .btn: 55 call sites use btn-primary /
+     btn-brand without .btn and used to render square-cornered. */
   .btn-primary,
   .btn-brand {
     background: var(--purple);
     color: #fff;
     border-color: var(--purple);
+    border-radius: var(--r-md);
   }
   .btn-primary:hover:not(:disabled),
   .btn-brand:hover:not(:disabled) {
@@ -287,7 +292,7 @@
     height: 28px;
     padding: 0 12px;
     border: none;
-    border-radius: 999px;
+    border-radius: 10px;
     background: transparent;
     color: var(--text-3);
     font: inherit;
@@ -447,7 +452,7 @@
   }
   .stance-word {
     font-size: 40px;
-    font-weight: 700;
+    font-weight: 500;
     line-height: 1.05;
     letter-spacing: 0.03em;
     display: flex;
@@ -468,7 +473,7 @@
   .stance-word.bear,
   .stance-word.neutral {
     font-variation-settings: "wdth" 112;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: -0.03em;
     text-shadow: none;
     animation: none;
@@ -497,7 +502,7 @@
     padding: 3px;
     background: var(--nest);
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: 10px;
     flex-wrap: nowrap;
     overflow-x: auto;
     max-width: 100%;
@@ -505,9 +510,9 @@
   .tf-row::-webkit-scrollbar { display: none; }
   .tf-tag {
     padding: 4px 12px;
-    border-radius: 999px;
+    border-radius: 10px;
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 500;
     font-family: "JetBrains Mono", monospace;
     background: transparent;
     color: var(--up);
@@ -572,7 +577,7 @@
   }
   .view-all-btn {
     height: 42px;
-    border-radius: 999px;
+    border-radius: 10px;
     border: 1px solid var(--line);
     background: var(--nest);
     color: var(--text-2);
@@ -600,7 +605,7 @@
   }
   .card-head h3 {
     font-size: 15px;
-    font-weight: 700;
+    font-weight: 500;
     color: #fff;
     margin: 0;
   }
@@ -675,9 +680,9 @@
     display: grid;
     place-items: center;
     font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 12px;
     letter-spacing: -0.02em;
-    font-weight: 700;
+    font-weight: 500;
   }
   /* 身份芯片的小号变体：信号卡、持仓卡、订单表里跟在品种名前面。
      34px 的报价表版本在这些密度下太大，26px 是能装下三个字符的下限。
@@ -691,9 +696,9 @@
     display: grid;
     place-items: center;
     font-family: "JetBrains Mono", ui-monospace, monospace;
-    font-size: 10px;
+    font-size: 12px;
     letter-spacing: -0.02em;
-    font-weight: 700;
+    font-weight: 500;
   }
 
   .qt-sym-cell .nm b {
@@ -702,13 +707,13 @@
     color: #fff;
   }
   .qt-sym-cell .nm span {
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-3);
     white-space: nowrap;
   }
   .qt-price {
     font-size: 15px;
-    font-weight: 700;
+    font-weight: 500;
     color: #fff;
     transition: color 0.15s;
   }
@@ -866,7 +871,7 @@
     height: 30px;
     padding: 0 16px;
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: 10px;
     background: var(--nest);
     color: var(--text-3);
     font: inherit;
@@ -894,7 +899,7 @@
     height: 30px;
     padding: 0 12px;
     border: 1px solid var(--line);
-    border-radius: 999px;
+    border-radius: 10px;
     background: var(--nest);
     color: #fff;
     font: inherit;

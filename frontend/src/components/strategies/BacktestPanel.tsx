@@ -333,34 +333,34 @@ interface SummaryGridProps {
 function SummaryGrid({ summary, compare, compareLabel }: SummaryGridProps) {
   const { t } = useTranslation()
   const sub = (text: string) =>
-    compare ? <div className="mt-0.5 text-[10px] text-neutral-500">{compareLabel} {text}</div> : null
+    compare ? <div className="mt-0.5 text-xs text-neutral-500">{compareLabel} {text}</div> : null
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-neutral-500">{t('simulator.finalEquity')}</div>
+        <div className="text-xs text-neutral-500">{t('simulator.finalEquity')}</div>
         <div className="num mt-1 text-lg font-bold text-neutral-100">${fmtMoney(summary.finalEquity)}</div>
         {compare && sub(`$${fmtMoney(compare.finalEquity)}`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-neutral-500">{t('simulator.returnPct')}</div>
+        <div className="text-xs text-neutral-500">{t('simulator.returnPct')}</div>
         <div className={`num mt-1 text-lg font-bold ${summary.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
           {summary.returnPct >= 0 ? '+' : ''}{summary.returnPct.toFixed(2)}%
         </div>
         {compare && sub(`${compare.returnPct >= 0 ? '+' : ''}${compare.returnPct.toFixed(2)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-neutral-500">{t('simulator.maxDrawdown')}</div>
+        <div className="text-xs text-neutral-500">{t('simulator.maxDrawdown')}</div>
         <div className="num mt-1 text-lg font-bold text-down">-{summary.maxDrawdownPct.toFixed(2)}%</div>
         {compare && sub(`-${compare.maxDrawdownPct.toFixed(2)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-neutral-500">{t('simulator.maxLossStreak')}</div>
+        <div className="text-xs text-neutral-500">{t('simulator.maxLossStreak')}</div>
         <div className="num mt-1 text-lg font-bold text-down">{summary.maxLossStreak}</div>
         {compare && sub(String(compare.maxLossStreak))}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-neutral-500">{t('simulator.winRate')}</div>
+        <div className="text-xs text-neutral-500">{t('simulator.winRate')}</div>
         <div className="num mt-1 text-lg font-bold text-neutral-100">
           {summary.winRate == null ? '-' : `${Math.round(summary.winRate * 100)}%`}
           <span className="ml-1.5 text-xs font-normal text-neutral-500">{summary.wins}/{summary.wins + summary.losses}</span>
@@ -368,7 +368,7 @@ function SummaryGrid({ summary, compare, compareLabel }: SummaryGridProps) {
         {compare && sub(compare.winRate == null ? '-' : `${Math.round(compare.winRate * 100)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-        <div className="text-[11px] text-neutral-500">{t('simulator.avgRr')}</div>
+        <div className="text-xs text-neutral-500">{t('simulator.avgRr')}</div>
         <div className="num mt-1 text-lg font-bold text-neutral-100">{summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}</div>
         {compare && sub(compare.avgRr == null ? '-' : `${compare.avgRr.toFixed(2)}R`)}
       </div>
@@ -393,11 +393,11 @@ function SampleSectionView({ title, section }: SampleSectionViewProps) {
     <div className="rounded-lg border border-white/10 bg-white/[0.02] p-3">
       <div className="flex flex-wrap items-baseline gap-2">
         <h5 className="text-xs font-semibold text-neutral-200">{title}</h5>
-        <span className="text-[11px] text-neutral-500">
+        <span className="text-xs text-neutral-500">
           {t('strategy.btSampleMeta', { bars: section.barsUsed, trades: resolved })}
         </span>
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-[11px]">
+      <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-xs">
         <div>
           <div className="text-neutral-500">{t('simulator.winRate')}</div>
           <div className="mt-0.5 text-neutral-100">{section.summary.winRate == null ? '-' : `${Math.round(section.summary.winRate * 100)}%`}</div>
@@ -594,7 +594,7 @@ export default function BacktestPanel({
 
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="bt-range-label">{t('simulator.range')}</span>
+          <span className="text-xs text-neutral-500" id="bt-range-label">{t('simulator.range')}</span>
           <div className="flex flex-wrap gap-2" role="radiogroup" aria-labelledby="bt-range-label">
             {DAY_CHOICES.map((d) => (
               <button key={d} type="button" role="radio" aria-checked={days === d} onClick={() => setDays(d)} className={segBtn(days === d)}>{d}</button>
@@ -602,12 +602,12 @@ export default function BacktestPanel({
           </div>
         </div>
         <label className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.risk')} · {riskPct.toFixed(1)}%</span>
+          <span className="text-xs text-neutral-500">{t('simulator.risk')} · {riskPct.toFixed(1)}%</span>
           <input type="range" min={0.1} max={3} step={0.1} value={riskPct} onChange={(e) => setRiskPct(parseFloat(e.target.value))} className="w-full accent-prism-500" />
         </label>
         <NumberField label={t('simulator.capital')} value={capital} min={1} max={1e9} isFloat={false} onChange={setCapital} />
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] uppercase tracking-wide text-neutral-500" id="bt-mode-label">{t('simulator.mode')}</span>
+          <span className="text-xs text-neutral-500" id="bt-mode-label">{t('simulator.mode')}</span>
           <div className="flex gap-2" role="radiogroup" aria-labelledby="bt-mode-label">
             <button type="button" role="radio" aria-checked={mode === 'compound'} onClick={() => setMode('compound')} className={segBtn(mode === 'compound')}>{t('simulator.modeCompound')}</button>
             <button type="button" role="radio" aria-checked={mode === 'flat'} onClick={() => setMode('flat')} className={segBtn(mode === 'flat')}>{t('simulator.modeFlat')}</button>
@@ -636,7 +636,7 @@ export default function BacktestPanel({
         <div className="mt-5 border-t border-white/10 pt-4">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h4 className="text-sm font-semibold text-neutral-200">{t('strategy.resultsTitle')}</h4>
-            <span className="text-[11px] text-neutral-500">
+            <span className="text-xs text-neutral-500">
               {t('strategy.btScope', { bars: result.barsUsed, requested: result.requestedDays })}
               {result.cached && ` · ${t('strategy.btCached')}`}
             </span>
@@ -658,7 +658,7 @@ export default function BacktestPanel({
                 {t('strategy.btShowWithoutCosts')}
               </label>
             </div>
-            <p className="mt-1.5 text-[11px] leading-relaxed text-neutral-500">{t('strategy.btCostHint')}</p>
+            <p className="mt-1.5 text-xs leading-relaxed text-neutral-500">{t('strategy.btCostHint')}</p>
           </div>
 
           <div className="mt-3">
@@ -699,7 +699,7 @@ export default function BacktestPanel({
               <p className="text-xs leading-relaxed text-amber-200">{t('strategy.openPositionNotice', { count: result.openPositions.length })}</p>
               <div className="mt-2 flex flex-col gap-1">
                 {result.openPositions.map((p, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] text-amber-100/90">
+                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-amber-100/90">
                     <span className={`tag ${p.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                       {p.side === 'BUY' ? t('common.buy') : t('common.sell')}
                     </span>
@@ -730,7 +730,7 @@ export default function BacktestPanel({
                   want to check what the triggers were reading. */}
               {availableOverlays.length > 0 && (
                 <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] p-3">
-                  <p className="text-[11px] uppercase tracking-wide text-neutral-500">{t('strategy.overlayTitle')}</p>
+                  <p className="text-xs text-neutral-500">{t('strategy.overlayTitle')}</p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {availableOverlays.map((ov) => {
                       const on = shownOverlayIds.includes(ov.id)
@@ -785,7 +785,7 @@ export default function BacktestPanel({
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
+                    <tr className="border-b border-white/10 text-left text-xs text-neutral-500">
                       <th scope="col" className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
                       <th scope="col" className="px-3 py-2 font-medium">{t('orders.colSide')}</th>
                       <th scope="col" className="px-3 py-2 font-medium">{t('simulator.result')}</th>

@@ -103,7 +103,7 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
           <div className="dh-perf">
             <RadialGauge value={pct} color="var(--up)" size={88} strokeWidth={10}>
               <b className="num font-bold text-white text-2xl">{pct}%</b>
-              <span className="mt-0.5 text-center text-[10px] leading-tight text-neutral-500">
+              <span className="mt-0.5 text-center text-xs leading-tight text-neutral-500">
                 {t('winrate.resolvedCount', { n: data!.totalResolved })}
               </span>
             </RadialGauge>
@@ -141,7 +141,7 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
           win rate itself has data yet. */}
       {gwr && (
         <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2.5">
-          <div className="flex items-center justify-between text-[11px]">
+          <div className="flex items-center justify-between text-xs">
             <span className="text-neutral-500">{t('gamification.winRateCard.combined')}</span>
             <span className="num font-semibold text-neutral-200">
               {gwrPct != null ? `${gwrPct}%` : '—'}
@@ -157,7 +157,7 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
               the above apply. isMaxLevel/metNext come pre-computed from the
               backend, not inferred client-side via level >= 6 or
               gapPct === 0 (see the types.ts comment). */}
-          <div className="mt-1 flex items-center justify-between gap-2 text-[10px] text-neutral-500">
+          <div className="mt-1 flex items-center justify-between gap-2 text-xs text-neutral-500">
             <span>{t('winrate.resolvedCount', { n: gwr.trades })}</span>
             {gwr.isMaxLevel ? (
               <span>{t('gamification.maxLevel')}</span>
@@ -171,7 +171,7 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
               <span>{t('gamification.remainingToNext', { count: gwr.remainingToNext })}</span>
             ) : null}
           </div>
-          <Link to="/achievements" className="mt-1.5 block text-right text-[10px] text-prism-300 hover:text-prism-200">
+          <Link to="/achievements" className="mt-1.5 block text-right text-xs text-prism-300 hover:text-prism-200">
             {t('gamification.title')} ›
           </Link>
         </div>

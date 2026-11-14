@@ -92,28 +92,34 @@ export default function NotifDeviceBanner() {
     setDismissed(true)
   }
 
+  // 2026-11-15 起是一张普通卡片：卡片底、13px 常规灰字、静态琥珀点。手机上文字独占
+  // 一行、按钮落到下方——以前按钮挤在文字右边，中文折 7 行，越南语几乎一行一个词。
+  // Since 2026-11-15 a plain card: surface, 13px regular grey, a static amber dot.
+  // On phones the text takes the full row and the buttons drop below it; they used
+  // to sit beside the text, folding Chinese into 7 lines and Vietnamese into one
+  // word per line.
   return (
-    <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-xs text-amber-300">
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-amber-400" />
+    <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] text-[var(--text-2)]">
+      <div className="flex min-w-0 flex-[1_1_100%] items-start gap-2 sm:flex-[1_1_0%]">
+        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
         <span className="leading-relaxed">
           {t(deviceHint?.key ?? PUSH_ENV_HINT_KEYS[env] ?? "account.notifUnsupported")}
         </span>
       </div>
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2 pl-3.5 sm:pl-0">
         {deviceHint?.action && (
           <button
             type="button"
             onClick={onFix}
             disabled={busy}
-            className="rounded-lg bg-amber-400/30 px-2.5 py-1 font-semibold text-amber-100 transition hover:bg-amber-400/40 disabled:opacity-50"
+            className="rounded-lg bg-[var(--purple)] px-3 py-1.5 text-xs font-medium text-white transition hover:bg-[var(--purple-vivid)] disabled:opacity-50"
           >
             {t(deviceHint.action === "enable" ? "account.notifEnableHere" : "account.notifRetryHere")}
           </button>
         )}
         <Link
           to="/account#notifications"
-          className="rounded-lg bg-amber-400/20 px-2.5 py-1 font-semibold text-amber-200 transition hover:bg-amber-400/30"
+          className="rounded-lg bg-[var(--nest)] px-3 py-1.5 text-xs font-medium text-[var(--text)] transition hover:bg-[var(--nest-hi)]"
         >
           {t("notifPanel.fullSettings")}
         </Link>
@@ -121,7 +127,7 @@ export default function NotifDeviceBanner() {
           type="button"
           onClick={onDismiss}
           aria-label={t("common.close")}
-          className="text-amber-400/70 hover:text-amber-300"
+          className="ml-1 text-[var(--text-3)] hover:text-[var(--text)]"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
             <path d="M18 6L6 18M6 6l12 12" />

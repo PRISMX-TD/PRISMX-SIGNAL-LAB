@@ -342,7 +342,7 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
                   onChange={(n) => setPricing({ ...pricing, proMonthlyPrice: n })}
                 />
               </div>
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
+              <p className="mt-1 text-xs text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.proYearlyPrice')}</label>
@@ -354,7 +354,7 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
                   onChange={(n) => setPricing({ ...pricing, proYearlyPrice: n })}
                 />
               </div>
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
+              <p className="mt-1 text-xs text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.salePercent')}</label>
@@ -369,7 +369,7 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
                 />
                 <span className="text-neutral-400">%</span>
               </div>
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.salePercentHint')}</p>
+              <p className="mt-1 text-xs text-neutral-500">{t('admin.salePercentHint')}</p>
             </div>
             <div>
               <label className="label">{t('admin.saleBadge')}</label>
@@ -381,7 +381,7 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
                 placeholder="SUMMER"
                 maxLength={32}
               />
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.saleBadgeHint')}</p>
+              <p className="mt-1 text-xs text-neutral-500">{t('admin.saleBadgeHint')}</p>
             </div>
           </div>
           {pricing.saleEnabled && (

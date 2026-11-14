@@ -50,7 +50,7 @@ function FailedCard({ message, onRetry }: { message: string; onRetry: () => void
   return (
     <div className="glass mb-5 flex items-center justify-between gap-3 p-4 text-xs">
       <span className="text-down">{t('admin.overview.loadFailed')}{message ? `：${message}` : ''}</span>
-      <button type="button" onClick={onRetry} className="rounded-full bg-white/10 px-3 py-1 text-neutral-100 ring-1 ring-white/20">
+      <button type="button" onClick={onRetry} className="rounded-[10px] bg-white/10 px-3 py-1 text-neutral-100 ring-1 ring-white/20">
         {t('admin.overview.retry')}
       </button>
     </div>

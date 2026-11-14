@@ -75,7 +75,7 @@ export default function UserQuickSearch({ onPick, onClose }: { onPick: (userId: 
           }
         }}
       />
-      <p className="mt-2 text-[11px] text-neutral-500">{t('admin.quickSearch.hint')}</p>
+      <p className="mt-2 text-xs text-neutral-500">{t('admin.quickSearch.hint')}</p>
       <div className="mt-3 min-h-[120px]">
         {q.trim().length < 2 ? (
           <p className="py-6 text-center text-xs text-neutral-500">{t('admin.quickSearch.typeMore')}</p>
@@ -94,7 +94,7 @@ export default function UserQuickSearch({ onPick, onClose }: { onPick: (userId: 
                   <Avatar name={u.nickname || u.email} size={30} tone={u.role === 'user' ? 'neutral' : 'staff'} />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] font-medium text-neutral-50">{u.nickname || u.email}</span>
-                    <span className="block truncate font-mono text-[11px] text-neutral-500">
+                    <span className="block truncate font-mono text-xs text-neutral-500">
                       {u.email}
                       {u.phone ? ` · ${u.phone}` : ''}
                     </span>

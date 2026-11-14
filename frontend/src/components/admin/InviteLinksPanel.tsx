@@ -285,7 +285,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
                 <col className="w-44" />
               </colgroup>
               <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wide text-neutral-500">
+                <tr className="border-b border-white/10 text-xs text-neutral-500">
                   <th className="px-4 py-3 font-medium">{t('admin.invite.colLink')}</th>
                   <th className="px-4 py-3 font-medium">{t('admin.invite.colClicks')}</th>
                   <th className="px-4 py-3 font-medium">{t('admin.invite.colRegistrations')}</th>
@@ -308,7 +308,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
                     <td className="px-4 py-3">
                       <span className="num text-neutral-200">{l.registrations}</span>
                       {linkKind(l) === 'competition' && (
-                        <div className="text-[11px] text-neutral-500">{t('admin.invite.entriesN', { n: l.entries })}</div>
+                        <div className="text-xs text-neutral-500">{t('admin.invite.entriesN', { n: l.entries })}</div>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -336,23 +336,23 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
                 <LinkTitle l={l} />
                 <div className="mt-3 grid grid-cols-3 gap-3">
                   <div>
-                    <p className="text-[11px] text-neutral-500">{t('admin.invite.colClicks')}</p>
+                    <p className="text-xs text-neutral-500">{t('admin.invite.colClicks')}</p>
                     <p className="num text-lg text-neutral-100">{l.clicks}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-neutral-500">{t('admin.invite.colRegistrations')}</p>
+                    <p className="text-xs text-neutral-500">{t('admin.invite.colRegistrations')}</p>
                     <p className="num text-lg text-neutral-100">{l.registrations}</p>
                   </div>
                   {linkKind(l) === 'competition' && (
                     <div>
-                      <p className="text-[11px] text-neutral-500">{t('admin.competitionPromo.step.entries')}</p>
+                      <p className="text-xs text-neutral-500">{t('admin.competitionPromo.step.entries')}</p>
                       <p className="num text-lg text-neutral-100">{l.entries}</p>
                     </div>
                   )}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <StatusCell l={l} globalTrialEnabled={globalTrialEnabled} />
-                  <span className="text-[11px] text-neutral-500">{fmtTime(l.createdAt)}</span>
+                  <span className="text-xs text-neutral-500">{fmtTime(l.createdAt)}</span>
                 </div>
                 <div className="mt-3 flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
                   <CopyLinkButton link={l} onFail={copyFailed} />
@@ -456,11 +456,11 @@ function LinkTitle({ l }: { l: InviteLink }) {
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="truncate font-semibold text-neutral-100">{l.label}</span>
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${kindBadgeClass(kind)}`}>
+        <span className={`rounded-[10px] px-1.5 py-0.5 text-xs ${kindBadgeClass(kind)}`}>
           {t(`admin.invite.kind.${kind}`)}
         </span>
         {l.channel && (
-          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-400">{l.channel}</span>
+          <span className="rounded-[10px] border border-white/10 px-1.5 py-0.5 text-xs text-neutral-400">{l.channel}</span>
         )}
       </div>
       <div className="mt-0.5 truncate text-xs text-neutral-500">{sub || <span className="num">{l.code}</span>}</div>
@@ -481,7 +481,7 @@ function StatusCell({ l, globalTrialEnabled }: { l: InviteLink; globalTrialEnabl
       </span>
       {l.grantsTrial && (
         <span
-          className={`rounded-full bg-prism-500/20 px-1.5 py-0.5 text-[10px] text-prism-200 ${globalTrialEnabled ? '' : 'opacity-50'}`}
+          className={`rounded-[10px] bg-prism-500/20 px-1.5 py-0.5 text-xs text-prism-200 ${globalTrialEnabled ? '' : 'opacity-50'}`}
           title={globalTrialEnabled ? undefined : t('admin.invite.grantsTrialBlocked')}
         >
           {t('admin.invite.trialTag')}

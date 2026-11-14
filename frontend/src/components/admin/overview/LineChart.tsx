@@ -90,9 +90,9 @@ export default function LineChart({
           className="pointer-events-none absolute top-0 z-10 min-w-[9rem] rounded-lg border border-white/10 bg-ink-900/95 p-2.5 shadow-xl"
           style={hoverRatio > 0.5 ? { right: `${100 - hoverRatio * 100}%`, marginRight: 8 } : { left: `${hoverRatio * 100}%`, marginLeft: 8 }}
         >
-          <p className="mb-1.5 text-[10px] text-neutral-400">{dates[hover]}</p>
+          <p className="mb-1.5 text-xs text-neutral-400">{dates[hover]}</p>
           {lines.map((line) => (
-            <p key={line.key} className="flex items-center gap-2 text-[11px] leading-5">
+            <p key={line.key} className="flex items-center gap-2 text-xs leading-5">
               <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: line.color }} />
               <span className="flex-1 truncate text-neutral-300">{line.label}</span>
               <span className="tabular-nums text-neutral-100">{format(line.values[hover])}</span>
@@ -101,7 +101,7 @@ export default function LineChart({
         </div>
       )}
 
-      <div className="mt-1 flex justify-between text-[10px] text-neutral-500">
+      <div className="mt-1 flex justify-between text-xs text-neutral-500">
         <span>{dates[0]}</span>
         {peakLabel && <span className="tabular-nums">{peakLabel(format(yMax))}</span>}
         <span>{dates[dates.length - 1]}</span>
@@ -109,7 +109,7 @@ export default function LineChart({
 
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
         {lines.map((line) => (
-          <span key={line.key} className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+          <span key={line.key} className="flex items-center gap-1.5 text-xs text-neutral-400">
             <i className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: line.color }} />
             {line.label}
           </span>

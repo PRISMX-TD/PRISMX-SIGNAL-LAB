@@ -45,14 +45,7 @@ export function localizeApiError(message: string): string {
 export function fmtTime(iso: string | null | undefined): string {
   const d = parseTime(iso)
   if (!d) return '-'
-  return d.toLocaleString('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }) + ' UTC+8'
+  return fmtStamp(d, { clock: 'hms' }) + ' UTC+8'
 }
 
 // 格式化为含年月日的完整日期时间（用于订阅到期等需要明确年份的场景）
@@ -60,14 +53,58 @@ export function fmtTime(iso: string | null | undefined): string {
 export function fmtDate(iso: string | null | undefined): string {
   const d = parseTime(iso)
   if (!d) return '-'
-  return d.toLocaleString('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }) + ' UTC+8'
+  return fmtStamp(d, { year: 'always', clock: 'hm' }) + ' UTC+8'
+}
+
+// ---------- 全站唯一的日期写法 / the one way the app writes a date ----------
+//
+// 2026-11-15 之前同一个应用里有 11/08/2026（日/月/年）、11/1、16/11、2026/11/15、
+// 01/12/2026, 00:29 和 2026-11-08 好几种写法，11/08 很容易被读成 11 月 8 日。现在只有
+// 一种：yyyy-mm-dd，本年内省略年份写 mm-dd；时刻 24 小时制。年份是否相同按**渲染用的
+// 那个时区**判断（见 fmtDayShort 下面的说明）。
+// Before 2026-11-15 the app wrote 11/08/2026 (d/m/y), 11/1, 16/11, 2026/11/15,
+// "01/12/2026, 00:29" and 2026-11-08, and 11/08 read as 8 November. Now there is
+// one form: yyyy-mm-dd, mm-dd within the current year, 24-hour clock. "Same year"
+// is judged in the zone the date is rendered in.
+export const SITE_TZ = 'Asia/Shanghai'
+
+type StampParts = { year: string; month: string; day: string; hour: string; minute: string; second: string }
+const partsFmts = new Map<string, Intl.DateTimeFormat>()
+function stampParts(d: Date, tz: string): StampParts {
+  let f = partsFmts.get(tz)
+  if (!f) {
+    // hourCycle h23：部分引擎在 hour12:false 下把午夜写成 24:00。
+    // hourCycle h23: some engines render midnight as 24:00 under hour12:false.
+    f = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    })
+    partsFmts.set(tz, f)
+  }
+  const o: Record<string, string> = {}
+  for (const p of f.formatToParts(d)) o[p.type] = p.value
+  return o as StampParts
+}
+
+export interface StampOpts {
+  /** always：总带年份；auto（默认）：本年内省略；never：不带。/ always, auto (default: omit within this year), never */
+  year?: 'always' | 'auto' | 'never'
+  /** none（默认）/ hm / hms */
+  clock?: 'none' | 'hm' | 'hms'
+  /** 默认 UTC+8；榜单周期边界用 'UTC'。/ Defaults to UTC+8; board period bounds pass 'UTC'. */
+  tz?: string
+  /** 判断"本年"用的当前时刻，测试注入用。/ The "now" used for the same-year test; injectable for tests. */
+  now?: Date
+}
+
+/** 2026-11-15 · 11-15 · 11-15 14:05 · 2026-11-15 14:05:09；无效日期返回空串。/ '' for an invalid date. */
+export function fmtStamp(d: Date, { year = 'auto', clock = 'none', tz = SITE_TZ, now }: StampOpts = {}): string {
+  if (Number.isNaN(d.getTime())) return ''
+  const p = stampParts(d, tz)
+  const withYear = year === 'always' || (year === 'auto' && p.year !== stampParts(now ?? new Date(), tz).year)
+  let out = `${withYear ? `${p.year}-` : ''}${p.month}-${p.day}`
+  if (clock !== 'none') out += ` ${p.hour}:${p.minute}${clock === 'hms' ? `:${p.second}` : ''}`
+  return out
 }
 
 // 解析后端时间为带时区的 Date / parse backend time as a tz-aware Date
@@ -107,12 +144,7 @@ export function fmtDay(iso: string | null | undefined, fallback?: string): strin
   const parsed = parseTime(iso)
   if (fallback !== undefined && (!parsed || Number.isNaN(parsed.getTime()))) return fallback
   const d = parsed ?? new Date(NaN)
-  return d.toLocaleDateString('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  })
+  return Number.isNaN(d.getTime()) ? 'Invalid Date' : fmtStamp(d, { year: 'always' })
 }
 
 // 同年省略年份的短日期，外加"没有值就返回空串"——列表里的日期列（通知铃铛、
@@ -134,14 +166,7 @@ export function fmtDay(iso: string | null | undefined, fallback?: string): strin
 export function fmtDayShort(iso: string | null | undefined): string {
   const d = parseTime(iso)
   if (!d || Number.isNaN(d.getTime())) return ''
-  const yearIn = (x: Date) => x.toLocaleDateString('en-GB', { timeZone: 'Asia/Shanghai', year: 'numeric' })
-  const sameYear = yearIn(d) === yearIn(new Date())
-  return d.toLocaleDateString(
-    'en-GB',
-    sameYear
-      ? { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit' }
-      : { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' },
-  )
+  return fmtStamp(d)
 }
 // ---------- 数字格式化（榜单 / 成就 / 比赛 / 现金流规则共用） ----------
 //

@@ -61,7 +61,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
 function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="sd-fact">
-      <div className="truncate text-[11px] text-neutral-500">{label}</div>
+      <div className="truncate text-xs text-neutral-500">{label}</div>
       <div className="mt-1 truncate text-[13px] font-medium text-neutral-100">{value}</div>
     </div>
   )
@@ -240,7 +240,7 @@ export default function CustomerCard({
     <div className={`sticky top-0 z-10 ${wide ? 'sd-well -mx-1 px-1 pb-3 pt-0' : 'bg-[var(--surface)]'}`}>
       <div
         role="note"
-        className={`flex items-start gap-2 text-[11px] leading-relaxed text-amber-100/90 ${
+        className={`flex items-start gap-2 text-xs leading-relaxed text-amber-100/90 ${
           wide
             ? 'rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] px-4 py-2.5'
             : 'border-b border-amber-400/20 bg-amber-400/[0.07] px-5 py-2.5'
@@ -321,13 +321,13 @@ export default function CustomerCard({
           type="button"
           onClick={() => void reveal()}
           disabled={revealing}
-          className="rounded-full border border-[var(--line-hi)] px-2.5 py-0.5 text-[11px] text-[var(--purple-hi)] transition hover:bg-white/[0.05] disabled:opacity-50"
+          className="rounded-[10px] border border-[var(--line-hi)] px-2.5 py-0.5 text-xs text-[var(--purple-hi)] transition hover:bg-white/[0.05] disabled:opacity-50"
         >
           {revealing ? t('common.loading') : t('supportDesk.card.reveal')}
         </button>
       )}
       {c.phoneMasked && !phone && revealLeft != null && (
-        <span className="text-[11px] text-neutral-500">{t('supportDesk.card.revealLeft', { n: revealLeft })}</span>
+        <span className="text-xs text-neutral-500">{t('supportDesk.card.revealLeft', { n: revealLeft })}</span>
       )}
     </span>
   )
@@ -336,7 +336,7 @@ export default function CustomerCard({
     null,
     <div className="space-y-5">
       <div>
-        <h4 className="mb-2.5 text-[11px] font-medium text-neutral-500">{t('supportDesk.card.groupContact')}</h4>
+        <h4 className="mb-2.5 text-xs font-medium text-neutral-500">{t('supportDesk.card.groupContact')}</h4>
         <Rows>
           <Row label={t('supportDesk.card.email')}>
             <span className="break-all font-mono">
@@ -348,7 +348,7 @@ export default function CustomerCard({
         </Rows>
       </div>
       <div>
-        <h4 className="mb-2.5 text-[11px] font-medium text-neutral-500">{t('supportDesk.card.groupAccount')}</h4>
+        <h4 className="mb-2.5 text-xs font-medium text-neutral-500">{t('supportDesk.card.groupAccount')}</h4>
         <Rows>
           <Row label={t('supportDesk.card.trialUsed')}>{c.trialUsed ? t('supportDesk.yes') : t('supportDesk.no')}</Row>
           {c.competitions.length > 0 && <Row label={t('supportDesk.card.competitions')}>{c.competitions.map((x) => x.name).join(' · ')}</Row>}
@@ -380,7 +380,7 @@ export default function CustomerCard({
                   {a.real ? t('supportDesk.card.real') : t('supportDesk.card.demo')}
                 </Tag>
               )}
-              <span className={`ml-auto inline-flex items-center gap-1.5 text-[11px] ${a.online ? 'text-[var(--up)]' : 'text-neutral-500'}`}>
+              <span className={`ml-auto inline-flex items-center gap-1.5 text-xs ${a.online ? 'text-[var(--up)]' : 'text-neutral-500'}`}>
                 <i className={`h-1.5 w-1.5 rounded-full ${a.online ? 'bg-[var(--up)]' : 'bg-neutral-600'}`} aria-hidden="true" />
                 {a.online ? t('common.online') : t('common.offline')}
               </span>
@@ -414,7 +414,7 @@ export default function CustomerCard({
         </div>
         {fu.note && (
           <div className="mb-4 rounded-xl border-l-2 border-[var(--purple-hi)] bg-white/[0.025] px-3.5 py-2.5">
-            <div className="mb-0.5 text-[11px] text-neutral-500">{t('supportDesk.card.assignNote')}</div>
+            <div className="mb-0.5 text-xs text-neutral-500">{t('supportDesk.card.assignNote')}</div>
             <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-neutral-200">{fu.note}</p>
           </div>
         )}
@@ -461,7 +461,7 @@ export default function CustomerCard({
             aria-label={t('supportDesk.card.notes')}
           />
           <div className="flex items-center gap-3 px-3 pb-3">
-            <p className="min-w-0 flex-1 text-[11px] leading-snug text-neutral-500">{t('supportDesk.card.appendOnly')}</p>
+            <p className="min-w-0 flex-1 text-xs leading-snug text-neutral-500">{t('supportDesk.card.appendOnly')}</p>
             <button type="button" className="btn btn-primary h-8 shrink-0 px-4 text-xs" disabled={saving || !noteText.trim()} onClick={() => void addNote()}>
               {t('supportDesk.card.addNote')}
             </button>
@@ -469,7 +469,7 @@ export default function CustomerCard({
         </div>
 
         {/* 记录时间线，新的在上 / note timeline, newest first */}
-        <h4 className="mb-3 mt-6 text-[11px] font-medium text-neutral-500">{t('supportDesk.card.notes')}</h4>
+        <h4 className="mb-3 mt-6 text-xs font-medium text-neutral-500">{t('supportDesk.card.notes')}</h4>
         {card.notes.length === 0 ? (
           <p className="text-xs text-neutral-500">{t('supportDesk.card.noNotes')}</p>
         ) : (
@@ -479,9 +479,9 @@ export default function CustomerCard({
                 <span className="absolute -left-[34px] top-0 ring-4 ring-[var(--surface)] rounded-full">
                   <Avatar name={n.authorName} size={26} tone="staff" />
                 </span>
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-neutral-500">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-neutral-500">
                   <span className="font-medium text-neutral-200">{n.authorName || '-'}</span>
-                  <span className="rounded-full bg-white/[0.06] px-1.5 py-px text-neutral-400">{t(`supportDesk.channel.${n.channel}`)}</span>
+                  <span className="rounded-[10px] bg-white/[0.06] px-1.5 py-px text-neutral-400">{t(`supportDesk.channel.${n.channel}`)}</span>
                   <span className="num ml-auto">{fmtDate(n.createdAt)}</span>
                 </div>
                 <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-neutral-200">{n.content}</p>
@@ -510,7 +510,7 @@ export default function CustomerCard({
       {!c.doNotContact && (
         <button
           type="button"
-          className="mt-4 w-full rounded-full border border-[rgb(var(--down-rgb)/0.3)] px-3 py-2 text-xs font-medium text-[var(--down)] transition hover:bg-[var(--down-bg)]"
+          className="mt-4 w-full rounded-[10px] border border-[rgb(var(--down-rgb)/0.3)] px-3 py-2 text-xs font-medium text-[var(--down)] transition hover:bg-[var(--down-bg)]"
           onClick={() => setDncConfirm(true)}
         >
           {t('supportDesk.card.dnc')}
@@ -542,7 +542,7 @@ export default function CustomerCard({
               >
                 <span className={`min-w-0 flex-1 truncate ${current ? 'font-medium text-neutral-50' : 'text-neutral-200'}`}>{tk.title}</span>
                 <TicketStatus status={tk.status} label={t(`tickets.status.${tk.status}`)} />
-                <span className="num w-10 shrink-0 text-right text-[11px] text-neutral-500">{fmtListTime(tk.updatedAt)}</span>
+                <span className="num w-10 shrink-0 text-right text-xs text-neutral-500">{fmtListTime(tk.updatedAt)}</span>
               </button>
             </li>
           )

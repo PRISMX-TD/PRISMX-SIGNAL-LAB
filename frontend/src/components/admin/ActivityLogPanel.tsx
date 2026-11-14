@@ -493,7 +493,7 @@ export default function ActivityLogPanel({
               ariaLabel={t('admin.log.staffFilter')}
               options={[{ value: '', label: t('admin.log.staffAll') }, ...staffOptions]}
             />
-            {staffFilter && <span className="text-[11px] text-neutral-500">{t('admin.log.staffHint')}</span>}
+            {staffFilter && <span className="text-xs text-neutral-500">{t('admin.log.staffHint')}</span>}
           </div>
         )}
 
@@ -520,19 +520,19 @@ export default function ActivityLogPanel({
         )}
 
         {/* 输入纯数字时当场说明怎么查（title 提示在手机上看不到）/ said in place: title tooltips never show on phones */}
-        {isLoginQuery(search) && <p className="-mt-1 text-[11px] text-neutral-500">{t('admin.log.searchDigits')}</p>}
+        {isLoginQuery(search) && <p className="-mt-1 text-xs text-neutral-500">{t('admin.log.searchDigits')}</p>}
 
         {chips.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {chips.map((c) => (
-              <span key={c.key} className="inline-flex max-w-full items-center gap-1 rounded-full bg-prism-600/15 py-0.5 pl-2.5 pr-1 text-xs text-prism-200">
+              <span key={c.key} className="inline-flex max-w-full items-center gap-1 rounded-[10px] bg-prism-600/15 py-0.5 pl-2.5 pr-1 text-xs text-prism-200">
                 <span className="truncate">{c.label}</span>
                 <button
                   type="button"
                   onClick={c.clear}
                   aria-label={t('admin.log.chip.remove')}
                   title={t('admin.log.chip.remove')}
-                  className="rounded-full px-1.5 leading-none text-prism-200/80 transition hover:bg-white/10 hover:text-white"
+                  className="rounded-[10px] px-1.5 leading-none text-prism-200/80 transition hover:bg-white/10 hover:text-white"
                 >
                   ×
                 </button>
@@ -553,7 +553,7 @@ export default function ActivityLogPanel({
           <button
             type="button"
             onClick={refreshNow}
-            className="pointer-events-auto mt-1 rounded-full bg-prism-600 px-4 py-1.5 text-xs font-semibold text-white shadow-lg transition hover:bg-prism-500"
+            className="pointer-events-auto mt-1 rounded-[10px] bg-prism-600 px-4 py-1.5 text-xs font-semibold text-white shadow-lg transition hover:bg-prism-500"
           >
             {t('admin.log.newRecords')}
           </button>
@@ -590,7 +590,7 @@ export default function ActivityLogPanel({
         // (which would break sticky).
         <div className="rounded-[var(--r-lg)] bg-[color:var(--surface)]">
           {!isPhone && (
-            <div className={`${DESKTOP_GRID} border-b border-white/10 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-neutral-500`}>
+            <div className={`${DESKTOP_GRID} border-b border-white/10 px-4 py-2.5 text-xs font-medium text-neutral-500`}>
               <span>{t('admin.log.col.time')}</span>
               <span>{t('admin.log.col.user')}</span>
               <span>{t('admin.log.col.account')}</span>

@@ -95,7 +95,7 @@ export function TicketMetaEditor({
       />
       <button
         type="button"
-        className="rounded-full border border-[var(--line-hi)] px-2.5 py-1 text-[11px] text-neutral-300 transition hover:bg-white/[0.05]"
+        className="rounded-[10px] border border-[var(--line-hi)] px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-white/[0.05]"
         onClick={() => {
           setTitle(ticket.title)
           setEditing(true)
@@ -148,7 +148,7 @@ export function SaveTemplateButton({
 
   if (!open) {
     return (
-      <button type="button" className="text-[11px] font-medium text-[var(--purple-hi)] hover:underline" onClick={() => setOpen(true)}>
+      <button type="button" className="text-xs font-medium text-[var(--purple-hi)] hover:underline" onClick={() => setOpen(true)}>
         {t('supportDesk.ticketEdit.saveTemplate')}
       </button>
     )
@@ -156,7 +156,7 @@ export function SaveTemplateButton({
   return (
     <span className="inline-flex items-center gap-1.5">
       <input
-        className="h-7 w-40 rounded-lg border border-[var(--line-hi)] bg-transparent px-2 text-[11px] text-neutral-100 outline-none placeholder:text-neutral-500"
+        className="h-7 w-40 rounded-lg border border-[var(--line-hi)] bg-transparent px-2 text-xs text-neutral-100 outline-none placeholder:text-neutral-500"
         placeholder={t('supportDesk.ticketEdit.templateTitle')}
         aria-label={t('supportDesk.ticketEdit.templateTitle')}
         maxLength={100}
@@ -171,10 +171,10 @@ export function SaveTemplateButton({
           if (e.key === 'Escape') setOpen(false)
         }}
       />
-      <button type="button" className="text-[11px] font-semibold text-[var(--purple-hi)] disabled:opacity-50" disabled={busy || !title.trim()} onClick={() => void save()}>
+      <button type="button" className="text-xs font-semibold text-[var(--purple-hi)] disabled:opacity-50" disabled={busy || !title.trim()} onClick={() => void save()}>
         {t('supportDesk.ticketEdit.save')}
       </button>
-      <button type="button" className="text-[11px] text-neutral-500" onClick={() => setOpen(false)}>
+      <button type="button" className="text-xs text-neutral-500" onClick={() => setOpen(false)}>
         {t('supportDesk.ticketEdit.cancel')}
       </button>
     </span>

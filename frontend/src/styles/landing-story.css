@@ -388,7 +388,7 @@
 }
 .pc-head b {
   font-size: calc(var(--cq) * 3.9);
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--text);
 }
@@ -445,7 +445,7 @@
   display: flex;
   gap: calc(var(--cq) * 1);
   padding: calc(var(--cq) * 2.4);
-  border-radius: 999px;
+  border-radius: 10px;
   overflow: hidden;
   background: rgba(16, 16, 18, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -462,7 +462,7 @@
   align-items: center;
   gap: calc(var(--cq) * 1.1);
   padding: calc(var(--cq) * 4) 0 calc(var(--cq) * 3.6);
-  border-radius: 999px;
+  border-radius: 10px;
   color: var(--text-3);
   font-size: calc(var(--cq) * 2.9);
   font-weight: 600;
@@ -650,13 +650,13 @@
   color: #d9ceff;
   padding: calc(var(--cq) * 0.8) calc(var(--cq) * 2.6);
   border: 1px solid rgba(139, 108, 255, 0.55);
-  border-radius: 999px;
+  border-radius: 10px;
   background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.32), rgba(110, 66, 255, 0.06) 70%);
 }
 .rk-title b {
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
   font-size: calc(var(--cq) * 8.4);
-  font-weight: 800;
+  font-weight: 500;
   line-height: 1.05;
   letter-spacing: -0.02em;
   color: #f4f4f5;
@@ -760,7 +760,7 @@
   color: #71717a;
 }
 .rk-rail .on b { color: #a1a1aa; }
-.rk-rail .cur b { color: #f4f4f5; font-weight: 700; }
+.rk-rail .cur b { color: #f4f4f5; font-weight: 500; }
 
 /* ── 幕 0 的真机版式 / scene 0 on real devices ──
    全出血时文案面板从下方压上来（面板高度随文案折行变化，375 宽实测顶边 399、
@@ -899,7 +899,7 @@
 .js-tick {
   height: 20px;
   width: 3px;
-  border-radius: 999px;
+  border-radius: 10px;
 }
 
 /* ══════════════════════════════════════════════
@@ -1245,7 +1245,7 @@
     height: 16px;
     width: 3px;
     flex: none;
-    border-radius: 999px;
+    border-radius: 10px;
   }
 
   /* .story-panel 与 .story-ticks 是叙事区与判定幕**共用**的类。上一版把它们直接
@@ -1303,7 +1303,7 @@
     bottom: 14px;
     margin: 0;
     padding: 0 5vw;
-    font-size: 10px;
+    font-size: 12px;
     text-align: left;
     z-index: 3;
   }

@@ -49,19 +49,19 @@ export function Mt5List({ accounts }: { accounts: AgentMT5Account[] }) {
               {a.login}
             </span>
             <span
-              className={`rounded-full px-1.5 py-0.5 text-[11px] ${
+              className={`rounded-[10px] px-1.5 py-0.5 text-xs ${
                 a.accountType === 'real' && a.connected ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'
               }`}
             >
               {t(a.accountType ? MT5_TYPE_KEY[a.accountType] : 'agent.mt5Unknown')}
             </span>
             {!a.connected && (
-              <span className="rounded-full bg-white/5 px-1.5 py-0.5 text-[11px] text-neutral-400">
+              <span className="rounded-[10px] bg-white/5 px-1.5 py-0.5 text-xs text-neutral-400">
                 {t('agent.mt5None')}
               </span>
             )}
           </div>
-          {a.server && <p className="break-words text-[11px] text-neutral-500">{a.server}</p>}
+          {a.server && <p className="break-words text-xs text-neutral-500">{a.server}</p>}
         </li>
       ))}
     </ul>

@@ -17,7 +17,7 @@ export default function IntervalSeg({ value, onChange, variant = 'seg' }: {
           <button
             key={iv.code}
             onClick={() => onChange(iv.code)}
-            className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+            className={`rounded-md px-2 py-1 text-xs font-medium transition ${
               value === iv.code
                 ? 'bg-prism-600/40 text-prism-200'
                 : 'text-neutral-400 hover:text-neutral-100'

@@ -30,7 +30,7 @@
   height: 36px;
   padding: 0 14px 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line-hi);
   color: var(--text-2);
@@ -60,7 +60,7 @@
 }
 .ord-acct.on .ord-acct-dot { background: #fff; }
 .ord-acct-bal {
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.7;
 }
 
@@ -80,12 +80,12 @@
 .ord-h h4 {
   margin: 0;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .ord-h span {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .ord-p {
@@ -107,7 +107,7 @@
   height: 30px;
   padding: 0 12px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--text-3);
@@ -118,7 +118,7 @@
 }
 .ord-chip b {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
@@ -134,9 +134,7 @@
 }
 .ord-chip.on b { color: rgba(255, 255, 255, 0.72); }
 .ord-k {
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12px;
   color: var(--text-3);
 }
 
@@ -195,7 +193,7 @@
 }
 .ord-day-n {
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.04em;
   color: var(--text-3);
@@ -363,11 +361,9 @@
   border: 1.5px solid currentColor;
   border-radius: 4px;
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1;
   font-weight: 500;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
   white-space: nowrap;
   transform: rotate(-4deg);
   opacity: 0.9;
@@ -382,7 +378,7 @@
 }
 .ord-stamp .zh {
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: none;
 }
@@ -443,7 +439,7 @@
 }
 .ord-cell { padding: 14px 0; }
 .ord-cell .ord-k {
-  font-size: 10.5px;
+  font-size: 12px;
 }
 .ord-cell .ord-v {
   display: flex;
@@ -456,7 +452,7 @@
 .ord-cell .ord-v.sans { font-family: inherit; }
 .ord-cell .ord-v small {
   font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 400;
   color: var(--text-3);
 }
@@ -467,7 +463,7 @@
   gap: 6px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
   font-size: 12px;
   font-weight: 500;
@@ -499,7 +495,7 @@
 .ord-sec h3 {
   margin: 0;
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .ord-sec-sum {
@@ -527,7 +523,7 @@
   height: 30px;
   padding: 0 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   box-shadow: inset 0 0 0 1px rgb(var(--down-rgb) / 0.4);
   color: var(--down);
@@ -576,7 +572,7 @@
   margin: 0 0 0 -8px;
   padding: 0 8px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -755,7 +751,7 @@
 .pos-mc-hd .sym-ava {
   width: 32px;
   height: 32px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .pos-mc-id { min-width: 0; }
 .pos-mc-sym {
@@ -779,7 +775,7 @@
 .pos-mc-sub small {
   margin-left: 2px;
   font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
 }
 .pos-mc-pnl {
   display: flex;
@@ -795,7 +791,7 @@
   font-weight: 600;
   letter-spacing: -0.01em;
 }
-.pos-mc-pnl small { font-size: 11px; opacity: 0.85; }
+.pos-mc-pnl small { font-size: 12px; opacity: 0.85; }
 
 /* 价格轨 / the price rail */
 .pos-mc-rail { margin-top: 14px; }
@@ -912,7 +908,7 @@
   max-width: 100%;
   height: 4px;
   margin-top: 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   overflow: hidden;
 }
 .ord-tug i {
@@ -992,7 +988,7 @@
   gap: 8px;
   margin: 0;
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .ord-lrow p {
@@ -1008,11 +1004,11 @@
   align-items: center;
   height: 20px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--purple);
   color: #fff;
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.12em;
 }

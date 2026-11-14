@@ -53,7 +53,7 @@ export function ChipList({ chips, className = '' }: { chips: Chip[]; className?:
   return (
     <span className={`inline-flex flex-wrap gap-1 align-middle ${className}`}>
       {chips.map((c) => (
-        <span key={c.key} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium ${CHIP_CLS[c.tone]}`}>
+        <span key={c.key} className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${CHIP_CLS[c.tone]}`}>
           {c.label}
         </span>
       ))}
@@ -89,7 +89,7 @@ export function UserCell({ item, onUser }: { item: ActivityItem; onUser?: (u: Ac
   const body = (
     <>
       {u.nickname && <span className="block break-words text-xs font-semibold text-neutral-100">{u.nickname}</span>}
-      <span className="block break-all font-mono text-[11px] leading-snug text-neutral-400">{u.email ?? t('admin.log.user.noEmail')}</span>
+      <span className="block break-all font-mono text-xs leading-snug text-neutral-400">{u.email ?? t('admin.log.user.noEmail')}</span>
     </>
   )
   if (!onUser) return <span className="block min-w-0">{body}</span>
@@ -117,13 +117,13 @@ export function AccountTags({ item }: { item: ActivityItem }) {
   return (
     <>
       {a.channel && (
-        <span className="rounded bg-white/5 px-1 py-px text-[10px] text-neutral-400">{t(`admin.log.acct.${a.channel}`)}</span>
+        <span className="rounded bg-white/5 px-1 py-px text-xs text-neutral-400">{t(`admin.log.acct.${a.channel}`)}</span>
       )}
-      {a.demo === true && <span className="rounded bg-white/5 px-1 py-px text-[10px] text-neutral-500">{t('admin.log.acct.demo')}</span>}
+      {a.demo === true && <span className="rounded bg-white/5 px-1 py-px text-xs text-neutral-500">{t('admin.log.acct.demo')}</span>}
       {a.removed === true && (
-        <span className="rounded bg-white/10 px-1 py-px text-[10px] text-neutral-300">{t('admin.log.acct.removed')}</span>
+        <span className="rounded bg-white/10 px-1 py-px text-xs text-neutral-300">{t('admin.log.acct.removed')}</span>
       )}
-      {a.revoked === true && <span className="rounded bg-amber-400/15 px-1 py-px text-[10px] text-amber-300">{t('admin.log.acct.revoked')}</span>}
+      {a.revoked === true && <span className="rounded bg-amber-400/15 px-1 py-px text-xs text-amber-300">{t('admin.log.acct.revoked')}</span>}
     </>
   )
 }
@@ -172,7 +172,7 @@ function ExpandToggle({ item, expanded, onToggle }: { item: ActivityItem; expand
       type="button"
       onClick={stop(onToggle)}
       aria-expanded={expanded}
-      className="mt-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-prism-200 transition hover:bg-white/5"
+      className="mt-1 rounded px-1.5 py-0.5 text-xs font-medium text-prism-200 transition hover:bg-white/5"
     >
       {expanded ? t('admin.log.collapse') : t('admin.log.expand', { n: item.children.length })}
     </button>
@@ -275,7 +275,7 @@ export function PhoneCard({
         item.abnormal ? 'shadow-[inset_2px_0_0_rgb(var(--down-rgb)/0.7)]' : ''
       }`}
     >
-      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-neutral-500">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
         <CatDot cat={item.cat} />
         <span className="num" title={timeTitle(item, t)}>{bjClock(item.ts)}</span>
         <span>·</span>
@@ -285,7 +285,7 @@ export function PhoneCard({
       <button type="button" onClick={stop(() => handlers.onOpen(item))} className="mt-1 block w-full text-left text-sm leading-relaxed text-neutral-100">
         <Sentence parts={r.parts} />
       </button>
-      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-neutral-500">
+      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-neutral-500">
         {who.map((node, i) => (
           <span key={i} className="inline-flex items-center gap-1.5">
             {i > 0 && <span aria-hidden>·</span>}

@@ -166,7 +166,7 @@ export default function ClosedTradesList({ trades, onShare }: Props) {
         {!row.detailed && <span className="text-amber-400/80">{t('orders.closed.legacy')}</span>}
         {onShare && (
           <button type="button" onClick={(e) => { e.stopPropagation(); onShare(row) }}
-            className="ml-auto inline-flex items-center gap-1 rounded-full bg-prism-600/20 px-2.5 py-0.5 font-semibold text-prism-300 transition hover:bg-prism-600/30">
+            className="ml-auto inline-flex items-center gap-1 rounded-[10px] bg-prism-600/20 px-2.5 py-0.5 font-semibold text-prism-300 transition hover:bg-prism-600/30">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
             {t('share.button')}
           </button>
@@ -204,7 +204,7 @@ export default function ClosedTradesList({ trades, onShare }: Props) {
           <div className="mt-3 hidden overflow-x-auto md:block">
             <table className="w-full min-w-[1080px] text-sm">
               <thead>
-                <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
+                <tr className="border-b border-white/10 text-left text-xs text-neutral-500">
                   <th className="px-2 py-2 font-medium">{t('orders.closed.openTime')}</th>
                   <th className="px-2 py-2 font-medium">{t('orders.closed.position')}</th>
                   <th className="px-2 py-2 font-medium">{t('orders.colSymbol')}</th>

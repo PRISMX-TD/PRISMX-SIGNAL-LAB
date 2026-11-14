@@ -62,7 +62,7 @@ export default function VerifyEmailPage() {
           <div className="mb-8">
             <Logo size={44} />
             <h1 className="mt-5 font-display-xl text-[2rem] text-white">Signal Lab</h1>
-            <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-500">by PRISMX</p>
+            <p className="mt-1.5 text-xs font-medium text-neutral-500">by PRISMX</p>
           </div>
 
           <div className="glass animate-fade-in-up p-6" aria-live="polite">

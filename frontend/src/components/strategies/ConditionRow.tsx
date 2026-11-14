@@ -69,7 +69,7 @@ export default function ConditionRow({ condition, indicators, onChange, onRemove
       <div className="flex items-start gap-2">
         <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-start">
           <div className="flex flex-col gap-1 sm:w-36 sm:shrink-0">
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">{t('strategy.condIndicator')}</span>
+            <span className="text-xs text-neutral-500">{t('strategy.condIndicator')}</span>
             <Select
               className="w-full"
               value={condition.indicator}
@@ -78,7 +78,7 @@ export default function ConditionRow({ condition, indicators, onChange, onRemove
             />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-wide text-neutral-500">{t('strategy.condUsage')}</span>
+            <span className="text-xs text-neutral-500">{t('strategy.condUsage')}</span>
             <Select
               className="w-full"
               value={condition.usage}
@@ -91,7 +91,7 @@ export default function ConditionRow({ condition, indicators, onChange, onRemove
                 both sides. Unlabelled, users assume the short side gets
                 inverted. */}
             {usage && usage.mirror === null && (
-              <span className="text-[11px] text-neutral-500">{t('strategy.condBothDirections')}</span>
+              <span className="text-xs text-neutral-500">{t('strategy.condBothDirections')}</span>
             )}
           </div>
         </div>
@@ -209,7 +209,7 @@ function ParamField({
   if (spec.kind === 'enum') {
     return (
       <div className="flex flex-col gap-1">
-        <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>
+        <span className="text-xs text-neutral-500">{label}</span>
         <Select
           className="w-28"
           value={String(value ?? spec.default)}
@@ -223,7 +223,7 @@ function ParamField({
   const step = spec.kind === 'int' ? 1 : 0.1
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-neutral-500">
+      <span className="text-xs text-neutral-500">
         {label}
         {spec.min != null && spec.max != null && (
           <span className="ml-1 normal-case text-neutral-500">{`${spec.min}–${spec.max}`}</span>

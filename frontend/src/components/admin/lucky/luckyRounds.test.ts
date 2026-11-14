@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { LuckyPhase, LuckyRoundAdmin } from '../../../api/luckyTypes'
 import {
   deleteNameMatches, endsInPast, fromLocalInput, keepSelection, replaceRound, roundFormProblem, roundPatch,
@@ -38,7 +38,13 @@ describe('luckyRounds time inputs', () => {
     const v = toLocalInput('2026-11-01T04:30:00')
     expect(v).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
     expect(fromLocalInput(v)).toBe('2026-11-01T04:30:00.000Z')
-    expect(shown(v)).toBe('01/11, 12:30:00 UTC+8')
+    // fmtTime 本年内省略年份；钉住"现在"，测试不随年份漂移。/ fmtTime omits the year within the current year; pin "now".
+    vi.useFakeTimers({ now: new Date('2026-11-15T00:00:00Z'), toFake: ['Date'] })
+    try {
+      expect(shown(v)).toBe('11-01 12:30:00 UTC+8')
+    } finally {
+      vi.useRealTimers()
+    }
   })
   it('handles empty / invalid values', () => {
     expect(toLocalInput(null)).toBe('')

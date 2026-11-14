@@ -39,18 +39,11 @@
 export default function AuroraBackground() {
   return (
     <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden" aria-hidden="true">
-      {/* 结构网格：46px 步进，白色 3.5% 透明度。够淡到不与任何前景争对比，
-          又够实到让空白区域有一个尺度参照。
-          Structural grid: 46px step at 3.5% white. Faint enough never to compete
-          with foreground contrast, present enough to give empty regions a scale
-          reference. */}
-      <div className="absolute inset-0 bg-prism-grid bg-[size:46px_46px]" />
-
-      {/* 顶端渐隐：让网格在页面顶部溶掉，避免第一屏出现一条突兀的网格起始边。
-          Top fade so the grid dissolves at the page head instead of showing a
-          hard starting edge in the first viewport. */}
-      <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-ink-950 to-transparent" />
-
+      {/* 2026-11-15 起去掉了 46px 结构网格（连同顶端渐隐）：卡片、图表都有自己的网格，
+          三层叠在一起像方格纸。层次只靠卡片灰阶和细线。
+          Since 2026-11-15 the 46px structural grid (and its top fade) is gone: cards
+          and charts carry their own grids, and three layers of them read as graph
+          paper. Depth comes from card greys and hairlines only. */}
       {/* 品牌签名：光谱线。一条 1px 发丝线裂成三条微偏移色带——棱镜色散的平面化
           表达。整个 App 只在这一处出现。
           Brand signature: the spectral rule, a 1px hairline splitting into three

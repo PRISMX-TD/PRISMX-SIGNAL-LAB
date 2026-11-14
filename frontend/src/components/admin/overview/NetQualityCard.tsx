@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
 import type { AdminNetQuality } from '../../../api/types'
-import { localizeApiError } from '../../../api/utils'
+import { fmtStamp, localizeApiError } from '../../../api/utils'
 import { SkeletonLine } from '../../Skeleton'
 
 const REFRESH_MS = 30_000
@@ -93,7 +93,7 @@ export default function NetQualityCard() {
           <div className="mb-1 flex h-24 items-end gap-[3px]">
             {hours.map((h) => {
               const n = h.good + h.fair + h.poor
-              const title = `${new Date(h.hour).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit' })}  ` +
+              const title = `${fmtStamp(new Date(h.hour), { year: 'never', clock: 'hm' })}  ` +
                 `${t('admin.netQuality.avg')} ${h.avgRtt ?? '—'}ms · ${t('admin.netQuality.poor')} ${n ? Math.round((h.poor / n) * 100) : 0}% · ` +
                 `${t('admin.netQuality.disconnectsShort')} ${h.disconnects}`
               return (
@@ -107,7 +107,7 @@ export default function NetQualityCard() {
               )
             })}
           </div>
-          <div className="mb-5 flex justify-between text-[10px] text-neutral-500">
+          <div className="mb-5 flex justify-between text-xs text-neutral-500">
             <span>-24h</span><span>{t('admin.netQuality.now')}</span>
           </div>
 

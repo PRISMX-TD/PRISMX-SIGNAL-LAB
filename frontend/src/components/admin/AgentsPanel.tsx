@@ -160,7 +160,7 @@ export default function AgentsPanel() {
       >
         <p className="flex flex-wrap items-center gap-1.5 text-sm text-neutral-100">
           <span className="truncate">{nameOf(n)}</span>
-          <span className="rounded-full bg-prism-500/15 px-1.5 py-0.5 text-[11px] text-prism-200">
+          <span className="rounded-[10px] bg-prism-500/15 px-1.5 py-0.5 text-xs text-prism-200">
             {t('admin.invite.tree.level', { n: n.level })}
           </span>
           <span className="ml-auto flex items-center gap-3">
@@ -200,7 +200,7 @@ export default function AgentsPanel() {
           </span>
         </p>
         {n.nickname && <p className="num break-all text-xs text-neutral-400"><Copyable text={n.email} label={t('supportDesk.copy.email')} /></p>}
-        <p className="mt-1 text-[11px] text-neutral-500">
+        <p className="mt-1 text-xs text-neutral-500">
           {t('admin.invite.tree.counts', { direct: n.directCustomers, total: n.teamCustomers })}
           {' · '}
           {n.links.length === 0
@@ -286,7 +286,7 @@ export default function AgentsPanel() {
               {t('admin.invite.tree.save')}
             </button>
           </div>
-          <p className="mt-1.5 max-w-sm text-[11px] leading-snug text-neutral-500">{t('admin.invite.tree.maxDepthHint')}</p>
+          <p className="mt-1.5 max-w-sm text-xs leading-snug text-neutral-500">{t('admin.invite.tree.maxDepthHint')}</p>
         </div>
         <button
           type="button"
@@ -476,7 +476,7 @@ function AppointForm({
         <label className="label">{t('admin.agents.parent')}</label>
         <Select value={parent} onChange={setParent} ariaLabel={t('admin.agents.parent')} options={parentOptions} />
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-neutral-500">{t('admin.agents.appointHint')}</p>
+      <p className="mt-2 text-xs leading-snug text-neutral-500">{t('admin.agents.appointHint')}</p>
 
       <div className="mt-3 flex gap-2">
         <button

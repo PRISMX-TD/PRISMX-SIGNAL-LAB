@@ -32,7 +32,7 @@ export default function ChannelField({
             type="button"
             disabled={disabled}
             onClick={() => onChange(c)}
-            className={`rounded-full px-2 py-0.5 text-[11px] transition disabled:opacity-40 ${
+            className={`rounded-[10px] px-2 py-0.5 text-xs transition disabled:opacity-40 ${
               value.trim() === c ? 'bg-prism-500/20 text-prism-200' : 'bg-white/5 text-neutral-400 hover:text-neutral-100'
             }`}
           >

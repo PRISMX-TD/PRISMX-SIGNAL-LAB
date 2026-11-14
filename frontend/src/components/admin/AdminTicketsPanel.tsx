@@ -276,7 +276,7 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                 <div key={r.id} className={`flex gap-2.5 ${fromStaff ? 'flex-row-reverse' : ''}`}>
                   <Avatar name={name} size={28} tone={r.internal ? 'note' : fromStaff ? 'staff' : 'neutral'} />
                   <div className={`flex min-w-0 max-w-[85%] flex-col sm:max-w-[72%] ${fromStaff ? 'items-end' : 'items-start'}`}>
-                    <div className={`mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-[11px] text-neutral-500 ${fromStaff ? 'justify-end' : ''}`}>
+                    <div className={`mb-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 px-1 text-xs text-neutral-500 ${fromStaff ? 'justify-end' : ''}`}>
                       <span className="max-w-full truncate font-medium text-neutral-300">{name}</span>
                       {fromStaff && <span className="adm-pill is-brand">{r.authorRole === 'support' ? t('supportDesk.role.support') : t('admin.staff')}</span>}
                       {/* 内部备注（rev 41）：用户永远看不到 / internal notes (rev 41): never user-visible */}
@@ -447,7 +447,7 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                   </OpenUserButton>
                   <span className="min-w-0">
                     <span className="block truncate text-[14px] font-medium text-neutral-50">{ticket.title}</span>
-                    <span className="mt-0.5 block truncate font-mono text-[11px] text-neutral-500">
+                    <span className="mt-0.5 block truncate font-mono text-xs text-neutral-500">
                       {ticket.userEmail ? <Copyable text={ticket.userEmail} label={t('supportDesk.copy.email')} /> : '-'}
                     </span>
                     {ticket.latestReply && (
@@ -463,12 +463,12 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                       <span className={`adm-pill ${PRIORITY_PILL[ticket.priority] ?? ''}`}>{t(`tickets.priority.${ticket.priority}`)}</span>
                     </span>
                     {ticket.assigneeName && (
-                      <span className="max-w-[160px] truncate text-[11px] text-neutral-500">
+                      <span className="max-w-[160px] truncate text-xs text-neutral-500">
                         {t('supportDesk.queue.assignedTo', { name: ticket.assigneeName })}
                       </span>
                     )}
                     {/* fmtDay 固定 UTC+8 / fmtDay pins UTC+8 */}
-                    <span className="num text-[11px] text-neutral-500">{fmtDay(ticket.updatedAt)}</span>
+                    <span className="num text-xs text-neutral-500">{fmtDay(ticket.updatedAt)}</span>
                   </span>
                 </button>
               </li>

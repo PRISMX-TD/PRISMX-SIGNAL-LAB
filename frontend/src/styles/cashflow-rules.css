@@ -30,7 +30,7 @@
 .cf-rules .t {
   display: block;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-2);
 }
 .cf-rules[open] .t {
@@ -110,7 +110,7 @@
 .cf-case-r {
   flex: none;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--up);
 }
 .cf-case-s,
@@ -199,7 +199,7 @@
 }
 .cf-rules.is-plain .h {
   margin-top: 2px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
 }
 .cf-rules.is-plain .chev {
@@ -241,7 +241,7 @@
 .cf-rules.is-plain .cf-case-s,
 .cf-rules.is-plain .cf-case-w,
 .cf-rules.is-plain .cf-notes li {
-  font-size: 11.5px;
+  font-size: 12px;
 }
 .cf-rules.is-plain .cf-notes {
   margin-top: 14px;

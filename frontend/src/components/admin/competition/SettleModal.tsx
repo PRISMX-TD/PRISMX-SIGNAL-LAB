@@ -88,7 +88,7 @@ export default function SettleModal({
                     <span className="num text-neutral-300">#{f.rank ?? '—'}</span>
                     <span className="num text-neutral-200">{f.login}</span>
                     {f.displayName && <span className="text-neutral-400">{f.displayName}</span>}
-                    {f.top && <span className="tag bg-down/20 text-[10px] text-down">{t('admin.competitionPromo.settleTop')}</span>}
+                    {f.top && <span className="tag bg-down/20 text-xs text-down">{t('admin.competitionPromo.settleTop')}</span>}
                     <FlagKinds kinds={f.kinds} />
                   </div>
                   {f.detail && <p className="mt-1 text-neutral-500">{formatFlagDetail(f.detail)}</p>}

@@ -18,7 +18,7 @@ import { useSearchParams } from 'react-router-dom'
 import { ticketApi } from '../api/client'
 import Select from '../components/Select'
 import { TicketImageGrid, TicketImagePicker, useTicketImages } from '../components/TicketImages'
-import { fmtDayShort, parseTime } from '../api/utils'
+import { fmtDayShort, fmtStamp, parseTime } from '../api/utils'
 import type { Ticket, TicketCategory, TicketListItem, TicketPriority, TicketStatus } from '../api/types'
 
 type View = 'list' | 'form' | { ticket: Ticket }
@@ -40,16 +40,10 @@ const fmtDay = fmtDayShort
 // fmtDate (carries the year and a UTC+8 suffix, too long on a run of bubbles)
 // fits. The zone is still pinned to Asia/Shanghai like everywhere else; it used
 // to be undefined, i.e. whatever the browser says.
-function fmtStamp(iso: string): string {
+function fmtBubble(iso: string): string {
   const d = parseTime(iso)
   if (!d || Number.isNaN(d.getTime())) return ''
-  return d.toLocaleString('en-GB', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return fmtStamp(d, { clock: 'hm' })
 }
 function initial(email: string): string {
   return (email.trim()[0] || '?').toUpperCase()
@@ -99,7 +93,7 @@ function Message({ authorEmail, authorRole, body, images, imageCount, createdAt,
       <div className="min-w-0">
         <div className="sup-msg-meta">
           <span className="name">{name}</span>
-          <span className="time num">{fmtStamp(createdAt)}</span>
+          <span className="time num">{fmtBubble(createdAt)}</span>
         </div>
         {body && <p className="sup-msg-body selectable">{body}</p>}
         <TicketImageGrid urls={images} count={imageCount} />
@@ -287,7 +281,7 @@ export default function SupportPage() {
           as="h1"
           title={ticket.title}
           badge={<StatusWord status={ticket.status} badge t={t} />}
-          subtitle={<>{ticket.userEmail} &middot; {t('tickets.openedAt')} <span className="num">{fmtStamp(ticket.createdAt)}</span></>}
+          subtitle={<>{ticket.userEmail} &middot; {t('tickets.openedAt')} <span className="num">{fmtBubble(ticket.createdAt)}</span></>}
           actions={<div className="sup-head-chips"><MetaChips category={ticket.category} priority={ticket.priority} t={t} /></div>}
           back={backToList}
         />

@@ -714,14 +714,14 @@ export default function CompetitionsPanel() {
                             })()}
                           {c.name}
                           {c.publicView && (
-                            <span className="tag bg-prism-500/15 text-[10px] text-prism-200">
+                            <span className="tag bg-prism-500/15 text-xs text-prism-200">
                               {t('admin.competitionPromo.publicTag')}
                             </span>
                           )}
                         </span>
                       </td>
                       <td className="py-1.5 pr-4">
-                        <span className={`tag text-[10px] ${STATUS_TAG_CLASS[c.status]}`}>
+                        <span className={`tag text-xs ${STATUS_TAG_CLASS[c.status]}`}>
                           {t(`competition.status.${STATUS_LABEL_KEY[c.status]}`)}
                         </span>
                       </td>
@@ -736,7 +736,7 @@ export default function CompetitionsPanel() {
                           {next && (
                             <button
                               type="button"
-                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-xs disabled:opacity-40"
                               disabled={advancingId === c.id}
                               onClick={() => (c.status === 'running' ? setPendingAction({ kind: 'end', comp: c }) : advance(c))}
                             >
@@ -748,7 +748,7 @@ export default function CompetitionsPanel() {
                           {c.status === 'running' && (
                             <button
                               type="button"
-                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-xs disabled:opacity-40"
                               disabled={refreshingId === c.id}
                               onClick={() => refreshBoard(c)}
                             >
@@ -771,13 +771,13 @@ export default function CompetitionsPanel() {
                             return (
                               <span className="inline-flex items-center gap-1.5">
                                 {waiting && (
-                                  <span className="text-[10px] text-neutral-500">
+                                  <span className="text-xs text-neutral-500">
                                     {t('competition.admin.settleWait')}
                                   </span>
                                 )}
                                 <button
                                   type="button"
-                                  className="btn-primary whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                                  className="btn-primary whitespace-nowrap px-2.5 py-1 text-xs disabled:opacity-40"
                                   disabled={settlingId === c.id || waiting}
                                   title={waiting ? t('competition.admin.settleWait') : undefined}
                                   onClick={() => setPendingAction({ kind: 'settle', comp: c })}
@@ -793,7 +793,7 @@ export default function CompetitionsPanel() {
                               awarded by a settled competition are not revoked. */}
                           <button
                             type="button"
-                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] text-down disabled:opacity-40"
+                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-xs text-down disabled:opacity-40"
                             disabled={deletingId === c.id}
                             onClick={() => setPendingAction({ kind: 'delete', comp: c })}
                           >
@@ -856,7 +856,7 @@ export default function CompetitionsPanel() {
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               maxLength={DESC_MAX}
             />
-            <p className={`mt-1 text-right text-[11px] num ${form.description.length >= DESC_MAX ? 'text-red-400' : 'text-neutral-500'}`}>
+            <p className={`mt-1 text-right text-xs num ${form.description.length >= DESC_MAX ? 'text-red-400' : 'text-neutral-500'}`}>
               {form.description.length} / {DESC_MAX}
             </p>
           </div>
@@ -1035,7 +1035,7 @@ export default function CompetitionsPanel() {
                 maxLength={500}
                 onChange={(e) => setForm({ ...form, openAccountUrl: e.target.value })}
               />
-              <p className="mt-1 text-[11px] text-neutral-500">{t('admin.competitionPromo.openAccountUrlHint')}</p>
+              <p className="mt-1 text-xs text-neutral-500">{t('admin.competitionPromo.openAccountUrlHint')}</p>
             </div>
             {publicIssues.length > 0 && (
               <ul className="space-y-0.5 text-xs text-red-400">
@@ -1044,7 +1044,7 @@ export default function CompetitionsPanel() {
                 ))}
               </ul>
             )}
-            {fieldsLocked && <p className="text-[11px] text-neutral-500">{t('admin.competitionPromo.editableHint')}</p>}
+            {fieldsLocked && <p className="text-xs text-neutral-500">{t('admin.competitionPromo.editableHint')}</p>}
           </fieldset>
 
           {formError && <p className="text-sm text-down">{formError}</p>}
@@ -1114,15 +1114,15 @@ export default function CompetitionsPanel() {
                       <td className="max-w-[180px] py-1.5 pr-4">
                         <div className="truncate text-neutral-100">{p.nickname ? <Copyable text={p.nickname} label={t('supportDesk.copy.nickname')} /> : '—'}</div>
                         {p.nameHidden && (
-                          <span className="tag bg-white/5 text-[10px] text-neutral-400">
+                          <span className="tag bg-white/5 text-xs text-neutral-400">
                             {t('admin.competitionPromo.nameHiddenTag')}
                           </span>
                         )}
-                        <div className="truncate font-mono text-[11px] text-neutral-500">{p.email ? <Copyable text={p.email} label={t('supportDesk.copy.email')} /> : '—'}</div>
+                        <div className="truncate font-mono text-xs text-neutral-500">{p.email ? <Copyable text={p.email} label={t('supportDesk.copy.email')} /> : '—'}</div>
                       </td>
                       <td className="py-1.5 pr-4">
                         <div className="num text-neutral-300"><Copyable text={p.login} label={t('supportDesk.copy.account')} /></div>
-                        <div className="text-[10px]">
+                        <div className="text-xs">
                           {p.accountRevoked ? (
                             <span className="text-down">{t('competition.admin.participants.unbound')}</span>
                           ) : p.accountOnline ? (
@@ -1142,7 +1142,7 @@ export default function CompetitionsPanel() {
                       </td>
                       <td className="py-1.5 pr-4">
                         <div className="num text-neutral-200">{fmtBal(p.balance)}</div>
-                        <div className="num text-[11px] text-neutral-500">
+                        <div className="num text-xs text-neutral-500">
                           {t('competition.admin.participants.equity')} {fmtBal(p.equity)}
                         </div>
                       </td>
@@ -1167,13 +1167,13 @@ export default function CompetitionsPanel() {
                       <td className="py-1.5 pr-4">
                         {p.disqualified ? (
                           <span
-                            className="tag bg-down/15 text-[10px] text-down"
+                            className="tag bg-down/15 text-xs text-down"
                             title={p.disqualifyReason ?? undefined}
                           >
                             {t('competition.disqualified')}
                           </span>
                         ) : (
-                          <span className="tag bg-white/5 text-[10px] text-neutral-400">—</span>
+                          <span className="tag bg-white/5 text-xs text-neutral-400">—</span>
                         )}
                       </td>
                       <td className="py-1.5">
@@ -1181,7 +1181,7 @@ export default function CompetitionsPanel() {
                           {p.disqualified ? (
                             <button
                               type="button"
-                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                              className="btn-ghost whitespace-nowrap px-2.5 py-1 text-xs disabled:opacity-40"
                               disabled={savingParticipantId === p.id}
                               onClick={() => restore(p)}
                             >
@@ -1190,7 +1190,7 @@ export default function CompetitionsPanel() {
                           ) : (
                             <div className="flex items-center gap-1.5">
                               <input
-                                className="input w-32 py-1 text-[11px]"
+                                className="input w-32 py-1 text-xs"
                                 placeholder={t('competition.admin.disqualifyReason')}
                                 value={reasonDrafts[p.id] ?? ''}
                                 onChange={(e) =>
@@ -1199,7 +1199,7 @@ export default function CompetitionsPanel() {
                               />
                               <button
                                 type="button"
-                                className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                                className="btn-ghost whitespace-nowrap px-2.5 py-1 text-xs disabled:opacity-40"
                                 disabled={savingParticipantId === p.id}
                                 onClick={() => disqualify(p)}
                               >
@@ -1211,7 +1211,7 @@ export default function CompetitionsPanel() {
                           )}
                           <button
                             type="button"
-                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-[11px] disabled:opacity-40"
+                            className="btn-ghost whitespace-nowrap px-2.5 py-1 text-xs disabled:opacity-40"
                             disabled={savingParticipantId === p.id}
                             onClick={() => toggleNameHidden(p)}
                           >
@@ -1334,14 +1334,14 @@ function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
   const k = 'competition.admin.participants.status'
   const sample =
     p.sample != null ? (
-      <div className="num text-[11px] text-neutral-500">
+      <div className="num text-xs text-neutral-500">
         {t(`${k}.sample`, { n: p.sample, min: p.minTrades ?? '—' })}
       </div>
     ) : null
   // 资金进出超标：不影响计分（分母固定为报名本金），只提示管理员人工复核。
   // Cash flow over the flag line: doesn't affect scoring, just asks for a review.
   const review = p.cashflowFlagged ? (
-    <div className="text-[11px] text-amber-400">{t(`${k}.review`)}</div>
+    <div className="text-xs text-amber-400">{t(`${k}.review`)}</div>
   ) : null
   switch (p.status) {
     case 'ranked':

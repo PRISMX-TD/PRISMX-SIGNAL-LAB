@@ -72,7 +72,7 @@
     "getStarted": "Get Started Free",
     "heroTitle1": "From the climb",
     "heroTitle2": "to the crown",
-    "heroSubtitle": "Smart signals, trade review and competitive ranking in one place. Define what your trader rank is worth: every live trade placed through the platform counts toward your level, your badges and your standing.",
+    "heroSubtitle": "Strategy signals, trade review and competitive ranking in one place. Define what your trader rank is worth: every live trade placed through the platform counts toward your level, your badges and your standing.",
     "ctaPrimary": "Sign up free, start climbing",
     "ctaSecondary": "See how ranks work",
     "scrollCue": "Scroll to watch one trade become rank",
@@ -247,7 +247,7 @@
     "notifIosTooOld": "This iOS version doesn't support web push notifications. Update to iOS 16.4 or later and try again.",
     "notifPermissionBlocked": "Notification permission was denied and must be re-enabled in system settings. iPhone/iPad: Settings → Notifications → Signal Lab. Android Chrome: browser menu → Settings → Site settings → Notifications.",
     "notifDeviceFailed": "Enabled. This device cannot reach the push server right now, so background notifications may not arrive; it recovers automatically once it can.",
-    "notifDeviceNotAllowed": "Notifications are on for your account, but this device hasn't allowed them yet. Tap \"Enable here\" and choose \"Allow\" in the system prompt so this device can receive pushes.",
+    "notifDeviceNotAllowed": "This device hasn't allowed notifications yet. Tap \"Enable here\", then choose \"Allow\".",
     "notifEnableHere": "Enable here",
     "notifRetryHere": "Retry",
     "notifDeviceEnabled": "Push notifications are now on for this device."

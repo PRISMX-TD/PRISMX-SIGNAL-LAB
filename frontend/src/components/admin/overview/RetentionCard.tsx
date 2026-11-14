@@ -31,7 +31,7 @@ export default function RetentionCard({
               <div className="num mt-1 font-display text-2xl font-bold text-neutral-50">
                 {p.rate === null ? '—' : `${Math.round(p.rate * 100)}%`}
               </div>
-              <div className="mt-1 text-[11px] text-neutral-500">
+              <div className="mt-1 text-xs text-neutral-500">
                 {p.cohortSize === 0
                   ? t('admin.overview.retention.emptyCohort')
                   : t('admin.overview.retention.cohort', { from: p.cohortFrom, to: p.cohortTo, n: p.cohortSize })}

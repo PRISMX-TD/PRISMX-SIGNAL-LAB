@@ -555,7 +555,7 @@ export default function PhoneStory() {
           {/* 示例声明：合规信息，放在手机外的正下方，不叠在屏幕上。
               Sample-data disclaimer: compliance text below the phone, never
               overlaid on the screen. */}
-          <p className="mt-4 text-center text-[11px] text-neutral-500">{t('landing.shCaption')}</p>
+          <p className="mt-4 text-center text-xs text-neutral-500">{t('landing.shCaption')}</p>
         </div>
 
         {/* ── Hero 面板（含 CTA，唯一可点面板）/ hero panel, the only interactive one ── */}

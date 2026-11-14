@@ -90,7 +90,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
                     type="button"
                     onClick={toggleList}
                     aria-expanded={listOpen}
-                    className="ml-2 text-[10px] text-prism-300 underline-offset-2 hover:underline"
+                    className="ml-2 text-xs text-prism-300 underline-offset-2 hover:underline"
                   >
                     {listOpen ? t('admin.overview.funnel.listHide') : t('admin.overview.funnel.listToggle')}
                   </button>
@@ -104,7 +104,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
               </div>
               <span className="text-right tabular-nums text-neutral-100">
                 {n}
-                {prev !== null && <span className="ml-1 text-[10px] text-neutral-500">{pct(n, prev)}</span>}
+                {prev !== null && <span className="ml-1 text-xs text-neutral-500">{pct(n, prev)}</span>}
               </span>
             </li>
           )
@@ -122,7 +122,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
           )}
           {list && (
             <>
-              <p className="mb-2 text-[11px] leading-5 text-neutral-500">
+              <p className="mb-2 text-xs leading-5 text-neutral-500">
                 {t('admin.overview.funnel.listNote', {
                   days: list.windowDays,
                   min: list.minActiveDays,
@@ -157,7 +157,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
                           <tr key={u.id} className="border-t border-white/5">
                             <td className="py-1.5">
                               <span className="text-neutral-200">{u.email}</span>
-                              {u.nickname && <span className="ml-2 text-[10px] text-neutral-500">{u.nickname}</span>}
+                              {u.nickname && <span className="ml-2 text-xs text-neutral-500">{u.nickname}</span>}
                             </td>
                             <td className="py-1.5 text-neutral-400">{u.phone || '—'}</td>
                             <td className="py-1.5 tabular-nums text-neutral-400">{fmtTime(u.createdAt)}</td>
@@ -169,7 +169,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
                     </table>
                   </div>
                   {list.total > list.users.length && (
-                    <p className="mt-2 text-[11px] text-neutral-500">
+                    <p className="mt-2 text-xs text-neutral-500">
                       {t('admin.overview.funnel.listTruncated', { total: list.total, shown: list.users.length })}
                     </p>
                   )}
@@ -197,7 +197,7 @@ export default function FunnelCard({ funnel }: { funnel: { overall: AdminFunnelS
                   <td key={s} className="py-1.5 text-right tabular-nums text-neutral-200">
                     {w[s]}
                     {s !== 'registered' && (
-                      <span className="ml-1 text-[10px] text-neutral-500">{pct(w[s], weekBase(s, w))}</span>
+                      <span className="ml-1 text-xs text-neutral-500">{pct(w[s], weekBase(s, w))}</span>
                     )}
                   </td>
                 ))}

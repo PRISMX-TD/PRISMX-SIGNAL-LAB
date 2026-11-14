@@ -78,7 +78,7 @@ export default function InviteLinkEditDrawer({
       title={t('admin.invite.editTitle')}
       onClose={onClose}
       badge={
-        <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${kindBadgeClass(kind)}`}>
+        <span className={`rounded-[10px] px-1.5 py-0.5 text-xs ${kindBadgeClass(kind)}`}>
           {t(`admin.invite.kind.${kind}`)}
         </span>
       }
@@ -114,7 +114,7 @@ export default function InviteLinkEditDrawer({
               aria-invalid={openUrlInvalid || undefined}
               onChange={(e) => setOpenUrl(e.target.value)}
             />
-            <p className={`mt-1 text-[11px] leading-snug ${openUrlInvalid ? 'text-down' : 'text-neutral-500'}`}>
+            <p className={`mt-1 text-xs leading-snug ${openUrlInvalid ? 'text-down' : 'text-neutral-500'}`}>
               {t(openUrlInvalid ? 'admin.invite.openAccountUrlInvalid' : 'admin.invite.openAccountUrlHint')}
             </p>
           </div>
@@ -157,7 +157,7 @@ export default function InviteLinkEditDrawer({
           <Switch checked={link.grantsTrial} busy={busy} onChange={() => onToggleTrial()} />
         </div>
         {!globalTrialEnabled && (
-          <p className="text-[11px] leading-snug text-neutral-500">{t('admin.invite.grantsTrialBlocked')}</p>
+          <p className="text-xs leading-snug text-neutral-500">{t('admin.invite.grantsTrialBlocked')}</p>
         )}
         <div className="flex items-center justify-between gap-3">
           <span className="text-sm text-neutral-300">{t('admin.invite.fieldActive')}</span>
@@ -178,12 +178,12 @@ export default function InviteLinkEditDrawer({
             {owner ? (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span
-                  className="inline-flex items-center gap-1 rounded-full bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
+                  className="inline-flex items-center gap-1 rounded-[10px] bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
                   title={owner.email}
                 >
                   {owner.nickname || owner.email}
                   {owner.level != null && (
-                    <span className="text-[10px] text-prism-300/80">{t('admin.invite.tree.level', { n: owner.level })}</span>
+                    <span className="text-xs text-prism-300/80">{t('admin.invite.tree.level', { n: owner.level })}</span>
                   )}
                 </span>
                 <button

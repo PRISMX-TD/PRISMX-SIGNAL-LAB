@@ -39,7 +39,7 @@ export default function GeoDistributionCard() {
   const retry = useCallback(() => setNonce((n) => n + 1), [])
 
   const pill = (active: boolean) =>
-    `rounded-full px-3 py-1 text-[11px] transition ${
+    `rounded-[10px] px-3 py-1 text-xs transition ${
       active ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'
     }`
 
@@ -77,7 +77,7 @@ export default function GeoDistributionCard() {
       {data && (
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-[3fr_2fr]">
           <div>
-            <div className="mb-2 flex items-center justify-between text-[11px] text-neutral-500">
+            <div className="mb-2 flex items-center justify-between text-xs text-neutral-500">
               {mapMode === 'cn' ? (
                 <button type="button" onClick={() => setMapMode('world')} className="text-prism-300 hover:underline">
                   ← {t('admin.overview.geo.backToWorld')}
@@ -118,7 +118,7 @@ export default function GeoDistributionCard() {
                 </li>
               ))}
             </ol>
-            <p className="mt-3 text-[11px] text-neutral-500">{t('admin.overview.geo.unknown', { count: unknownCount(data) })}</p>
+            <p className="mt-3 text-xs text-neutral-500">{t('admin.overview.geo.unknown', { count: unknownCount(data) })}</p>
           </div>
         </div>
       )}

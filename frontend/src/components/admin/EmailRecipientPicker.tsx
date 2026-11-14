@@ -213,7 +213,7 @@ export default function EmailRecipientPicker({
       <div className="flex flex-wrap items-center gap-2 rounded-lg bg-white/5 px-3 py-2 text-sm">
         <span className="font-medium text-neutral-100">{t('admin.email.pickedCount', { n: pickedCount })}</span>
         {pickedEntries.slice(0, 8).map(([id, email]) => (
-          <span key={id} className="inline-flex items-center gap-1 rounded-full bg-prism-600/20 px-2 py-0.5 text-xs text-prism-200">
+          <span key={id} className="inline-flex items-center gap-1 rounded-[10px] bg-prism-600/20 px-2 py-0.5 text-xs text-prism-200">
             {email || t('admin.email.pickedFromUsers')}
             <button type="button" className="text-prism-300 hover:text-white" aria-label={t('admin.bulkClear')} onClick={() => unpick(id)}>
               ×

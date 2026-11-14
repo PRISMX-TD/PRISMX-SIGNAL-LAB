@@ -57,7 +57,7 @@
 
 /* ── 搜索框与弹出层 / search field and popover ── */
 .sd-search {
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--surface);
   transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
@@ -82,7 +82,7 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
 }
 .sd-seg > button {
@@ -90,7 +90,7 @@
   min-width: 0;
   height: 30px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
@@ -220,7 +220,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .sd-day::before,
@@ -254,7 +254,7 @@
   align-items: center;
   height: 30px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 500;

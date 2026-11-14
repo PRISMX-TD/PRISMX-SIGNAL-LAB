@@ -21,6 +21,7 @@
 // actions) → scope note → auto-manage. Branching via useIsPhone;
 // desktop keeps the head pills, the ledger strip and the position cards.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useOverflowHint } from '../utils/useOverflowHint'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useLocation } from 'react-router-dom'
@@ -154,6 +155,7 @@ export default function OrdersPage() {
     liveEquity(a, (accountFunds[a.login] ?? 0) + (liveFloatDelta[a.login] ?? 0), accountAdj[a.login])
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
+  const tabsHintRef = useOverflowHint<HTMLDivElement>()
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
   const [statusF, setStatusF] = useState<StatusFilter>('ALL')
@@ -691,7 +693,7 @@ export default function OrdersPage() {
       )}
 
       {/* Tab 导航 / tab navigation */}
-      <div className="seg-tabs mb-4 md:mb-6" role="tablist">
+      <div ref={tabsHintRef} className="seg-tabs mb-4 md:mb-6" role="tablist">
         {TABS.map((key) => (
           <button
             key={key}
@@ -886,7 +888,7 @@ export default function OrdersPage() {
           {monthVariants.length > 0 && (
             <div className="mt-3 flex justify-end">
               <button type="button" onClick={() => setShare({ type: 'C', variants: monthVariants, enhance: monthEnhance })}
-                className="inline-flex items-center gap-1.5 rounded-full bg-prism-600/20 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
+                className="inline-flex items-center gap-1.5 rounded-[10px] bg-prism-600/20 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
                 {t('share.monthButton')}
               </button>

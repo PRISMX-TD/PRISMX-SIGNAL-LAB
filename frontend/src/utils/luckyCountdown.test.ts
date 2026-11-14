@@ -27,11 +27,11 @@ describe('countdownParts', () => {
 
 describe('fmtWindow', () => {
   it('shows both ends in UTC+8, day first, without seconds', () => {
-    expect(fmtWindow('2026-10-21T07:00:00', '2026-10-29T07:30:00Z')).toBe('21/10 15:00 ～ 29/10 15:30 UTC+8')
+    expect(fmtWindow('2026-10-21T07:00:00', '2026-10-29T07:30:00Z')).toBe('10-21 15:00 ～ 10-29 15:30 UTC+8')
   })
 
   it('rolls past midnight into the next UTC+8 day as 00:00', () => {
-    expect(fmtWindow('2026-10-21T16:00:00Z', '2026-10-21T16:05:00Z')).toBe('22/10 00:00 ～ 22/10 00:05 UTC+8')
+    expect(fmtWindow('2026-10-21T16:00:00Z', '2026-10-21T16:05:00Z')).toBe('10-22 00:00 ～ 10-22 00:05 UTC+8')
   })
 
   it('shows a dash for a missing or broken end', () => {

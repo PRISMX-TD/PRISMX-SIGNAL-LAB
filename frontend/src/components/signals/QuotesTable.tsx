@@ -35,20 +35,20 @@ const MobileQuoteRow: FC<{ focusSym: string | undefined; mt5Online: boolean }> =
     <div className="qt-mobile-row sm:hidden">
       <div className="flex items-center gap-2">
         <b className="text-sm font-bold text-white">{focusSym ? displaySymbol(focusSym) : '-'}</b>
-        {focusQ?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed')}</span>}
+        {focusQ?.closed && <span className="tag bg-white/5 text-neutral-400 text-xs">{t('signals.focus.marketClosed')}</span>}
         <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
       </div>
       <div className="flex items-center gap-5 ml-auto">
         <div className="text-center">
-          <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.bid')}</div>
+          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.quotes.bid')}</div>
           <span className="num font-bold text-sm" style={{ color: 'var(--up)' }}>{focusAsk}</span>
         </div>
         <div className="text-center">
-          <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.spread')}</div>
+          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.quotes.spread')}</div>
           <span className="num text-xs text-neutral-400">{spread}</span>
         </div>
         <div className="text-center">
-          <div className="text-[10px] text-neutral-500 mb-0.5">{t('signals.quotes.ask')}</div>
+          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.quotes.ask')}</div>
           <span className="num font-bold text-sm" style={{ color: 'var(--down)' }}>{focusBid}</span>
         </div>
       </div>
@@ -82,7 +82,7 @@ const QuoteRow = memo(function QuoteRow({ sym, focus, fav, onToggleFav }: {
           <div className="nm">
             <b className="flex items-center gap-1.5">
               {displaySymbol(sym)}
-              {q?.closed && <span className="tag bg-white/5 text-neutral-400 text-[10px]">{t('signals.focus.marketClosed')}</span>}
+              {q?.closed && <span className="tag bg-white/5 text-neutral-400 text-xs">{t('signals.focus.marketClosed')}</span>}
             </b>
             <span>{t(`signals.symbolNames.${sym}`, { defaultValue: '' })}</span>
           </div>

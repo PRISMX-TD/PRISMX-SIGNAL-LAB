@@ -65,7 +65,7 @@ export function OpenUserButton({ userId, children, className = '' }: { userId: s
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0 rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2">
-      <div className="truncate text-[11px] text-neutral-500">{label}</div>
+      <div className="truncate text-xs text-neutral-500">{label}</div>
       <div className="mt-0.5 truncate text-[13px] font-medium text-neutral-100">{children}</div>
     </div>
   )
@@ -250,7 +250,7 @@ export function UserOverviewBody({ userId, compact = false }: { userId: string; 
                   {a.real != null && (
                     <span className={`adm-pill ${a.real ? 'is-up' : ''}`}>{a.real ? t('admin.userDrawer.real') : t('admin.userDrawer.demo')}</span>
                   )}
-                  <span className={`ml-auto text-[11px] ${a.online ? 'text-[var(--up)]' : 'text-neutral-500'}`}>
+                  <span className={`ml-auto text-xs ${a.online ? 'text-[var(--up)]' : 'text-neutral-500'}`}>
                     {a.online ? t('admin.userDrawer.online') : t('admin.userDrawer.offline')}
                   </span>
                 </div>
@@ -291,7 +291,7 @@ export function UserOverviewBody({ userId, compact = false }: { userId: string; 
                   <Copyable text={ip.ip} />
                 </span>
                 {ip.place && <span className="text-neutral-400">{ip.place}</span>}
-                <span className="num ml-auto text-[11px] text-neutral-500">{fmtDate(ip.lastSeenAt)}</span>
+                <span className="num ml-auto text-xs text-neutral-500">{fmtDate(ip.lastSeenAt)}</span>
               </li>
             ))}
           </ul>

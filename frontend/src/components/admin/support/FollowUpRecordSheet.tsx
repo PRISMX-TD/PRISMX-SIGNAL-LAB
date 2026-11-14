@@ -213,7 +213,7 @@ export default function FollowUpRecordSheet({
 
           {fu?.note && (
             <figure className="border-l-2 border-[var(--purple-hi)] pl-4">
-              <figcaption className="text-[11px] text-neutral-500">
+              <figcaption className="text-xs text-neutral-500">
                 {t('admin.support.progress.assignNote')}
                 {fu.assignedByName ? ` · ${fu.assignedByName}` : ''}
               </figcaption>
@@ -236,7 +236,7 @@ export default function FollowUpRecordSheet({
                     <li key={`n-${it.note.id}`}>
                       <Avatar name={it.note.authorName} size={28} tone="staff" />
                       <div className="adm-tl-note">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-neutral-500">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
                           <span className="font-medium text-neutral-200">{it.note.authorName || t('admin.support.progress.someone')}</span>
                           <span>{t(`supportDesk.channel.${it.note.channel}`)}</span>
                           {it.note.outcome && <span className="adm-pill">{it.note.outcome}</span>}
@@ -249,7 +249,7 @@ export default function FollowUpRecordSheet({
                     <li key={`e-${it.ev.id}`}>
                       <span className={`adm-tl-dot ${dotTone(it.ev.action)}`} aria-hidden="true"><i /></span>
                       <p className="min-w-0 flex-1 pt-0.5 text-xs leading-relaxed text-neutral-400">{evText(it.ev)}</p>
-                      <span className="num shrink-0 pt-0.5 text-[11px] text-neutral-600">{fmtStamp(it.ev.at)}</span>
+                      <span className="num shrink-0 pt-0.5 text-xs text-neutral-600">{fmtStamp(it.ev.at)}</span>
                     </li>
                   ),
                 )}
@@ -268,7 +268,7 @@ export default function FollowUpRecordSheet({
                       {t(`supportDesk.conversions.status.${c.status}`)}
                     </span>
                     {c.source === 'manual' && <span className="adm-pill">{t('supportDesk.conversions.manual')}</span>}
-                    <span className="num ml-auto text-[11px] text-neutral-500">{fmtStamp(c.createdAt)}</span>
+                    <span className="num ml-auto text-xs text-neutral-500">{fmtStamp(c.createdAt)}</span>
                   </li>
                 ))}
               </ul>

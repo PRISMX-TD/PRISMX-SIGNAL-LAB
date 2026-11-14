@@ -1,6 +1,7 @@
 // 信号面板页：信号网格 + 返回仪表盘 + 平台策略介绍
 // Signals page: signal grid + back to dashboard + platform strategies guide
 import { useCallback, useMemo, useRef, useState } from 'react'
+import { useOverflowHint } from '../utils/useOverflowHint'
 import { useTranslation } from 'react-i18next'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../store/auth'
@@ -59,6 +60,7 @@ export default function SignalsPage() {
   // would unmount it before the user ever sees that their order was accepted. A ref, not
   // state: the flag only travels between callbacks and would cost a render as state.
   const placedRef = useRef(false)
+  const tabsHintRef = useOverflowHint<HTMLDivElement>()
   // 下单弹窗是全屏的，手机上划返回应该先关掉弹窗、而不是直接退出信号面板页
   // （见 useBackToClose 的说明）。/ The order modal is full-screen; on
   // mobile, swiping back should close it first rather than exiting the
@@ -137,7 +139,7 @@ export default function SignalsPage() {
         </button>
 
         {/* 标签页切换 / Tab switcher */}
-        <div className="seg-tabs mb-5">
+        <div ref={tabsHintRef} className="seg-tabs mb-5">
           <button
             type="button"
             onClick={() => setActiveTab('signals')}

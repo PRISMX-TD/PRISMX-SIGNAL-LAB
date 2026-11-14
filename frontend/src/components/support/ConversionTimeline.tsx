@@ -26,16 +26,16 @@ export default function ConversionTimeline({ items }: { items: SupportConversion
               {t(`supportDesk.conversions.kind.${c.kind}`)}
             </span>
             {c.status !== 'confirmed' && (
-              <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-neutral-400">{t(`supportDesk.conversions.status.${c.status}`)}</span>
+              <span className="rounded-[10px] bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">{t(`supportDesk.conversions.status.${c.status}`)}</span>
             )}
             {c.source === 'manual' && (
-              <span className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-neutral-400">{t('supportDesk.conversions.manual')}</span>
+              <span className="rounded-[10px] bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">{t('supportDesk.conversions.manual')}</span>
             )}
             {c.creditedToMe && (
-              <span className="rounded-full bg-[rgb(var(--purple-rgb)/0.22)] px-1.5 py-0.5 text-[10px] text-[var(--purple-hi)]">{t('supportDesk.conversions.mine')}</span>
+              <span className="rounded-[10px] bg-[rgb(var(--purple-rgb)/0.22)] px-1.5 py-0.5 text-xs text-[var(--purple-hi)]">{t('supportDesk.conversions.mine')}</span>
             )}
           </div>
-          <div className="num text-[11px] text-neutral-500">{fmtDate(c.createdAt)}</div>
+          <div className="num text-xs text-neutral-500">{fmtDate(c.createdAt)}</div>
         </li>
       ))}
     </ol>

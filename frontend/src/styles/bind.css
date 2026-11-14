@@ -48,13 +48,13 @@
   display: grid;
   place-items: center;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.02em;
 }
 .bind-broker-id h3 {
   font-size: 20px;
   line-height: 1.15;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .bind-broker-id p {
@@ -97,7 +97,7 @@
   min-width: 0;
 }
 .bind-field label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -105,14 +105,14 @@
 .bind-field .input {
   height: 48px;
   padding: 0 18px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 15px;
 }
 .bind-submit {
   grid-column: 1 / -1;
   height: 48px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
 }
 /* 未验证邮箱的提示与提交按钮同宽，横跨两列 / the unverified-email notice spans both columns */
 .bind-verify {
@@ -148,13 +148,13 @@
 }
 .bind-accts-head h3 {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .bind-accts-head b {
   font-size: 20px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--purple-hi);
 }
 .bind-acct {
@@ -179,7 +179,7 @@
 .bind-acct-id .login b {
   font-size: 20px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .bind-acct-id .who {
@@ -196,7 +196,7 @@
 }
 .bind-acct .k {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -206,13 +206,13 @@
   margin-top: 6px;
   font-size: 17px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
   white-space: nowrap;
 }
 .bind-acct .v small {
   margin-left: 6px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
 }
@@ -243,7 +243,7 @@
 .bind-unbind {
   height: 36px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line-hi);
   background: transparent;
   color: var(--text-2);
@@ -285,7 +285,7 @@
 .bind-bridge .t {
   display: block;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-2);
 }
 .bind-bridge[open] .t {
@@ -321,7 +321,7 @@
 .bind-bridge-body h3 {
   font-size: 17px;
   line-height: 1.2;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .bind-bridge-body p {

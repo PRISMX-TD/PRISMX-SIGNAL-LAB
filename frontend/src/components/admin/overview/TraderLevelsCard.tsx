@@ -110,7 +110,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                       type="button"
                       onClick={() => toggle(row.level)}
                       aria-expanded={open}
-                      className="ml-2 text-[10px] text-prism-300 underline-offset-2 hover:underline"
+                      className="ml-2 text-xs text-prism-300 underline-offset-2 hover:underline"
                     >
                       {open ? t('admin.overview.levels.listHide') : t('admin.overview.levels.listToggle')}
                     </button>
@@ -121,7 +121,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                   <span className="text-right tabular-nums text-neutral-100">
                     {row.total}
                     {row.reachedInRange > 0 && (
-                      <span className="ml-1 text-[10px] text-up">+{row.reachedInRange}</span>
+                      <span className="ml-1 text-xs text-up">+{row.reachedInRange}</span>
                     )}
                   </span>
                 </div>
@@ -135,7 +135,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                           type="button"
                           aria-pressed={scope === s}
                           onClick={() => switchScope(s)}
-                          className={`rounded-full px-3 py-1 text-[11px] transition ${
+                          className={`rounded-[10px] px-3 py-1 text-xs transition ${
                             scope === s
                               ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40'
                               : 'text-neutral-400 hover:text-neutral-200'
@@ -155,7 +155,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                     )}
                     {list && !listLoading && (
                       <>
-                        <p className="mb-2 text-[11px] leading-5 text-neutral-500">
+                        <p className="mb-2 text-xs leading-5 text-neutral-500">
                           {scope === 'all'
                             ? t('admin.overview.levels.noteAll', { level: levelName(list.key) })
                             : t('admin.overview.levels.noteRange', {
@@ -183,7 +183,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                                     <tr key={u.id} className="border-t border-white/5">
                                       <td className="py-1.5">
                                         <span className="text-neutral-200"><Copyable text={u.email} label={t('supportDesk.copy.email')} /></span>
-                                        {u.nickname && <span className="ml-2 text-[10px] text-neutral-500">{u.nickname}</span>}
+                                        {u.nickname && <span className="ml-2 text-xs text-neutral-500">{u.nickname}</span>}
                                       </td>
                                       <td className="py-1.5 text-neutral-400">{u.phone ? <Copyable text={u.phone} label={t('supportDesk.copy.phone')} /> : '—'}</td>
                                       <td className="py-1.5 tabular-nums text-neutral-200">{fmtTime(u.reachedAt)}</td>
@@ -198,7 +198,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                               </table>
                             </div>
                             {list.total > list.users.length && (
-                              <p className="mt-2 text-[11px] text-neutral-500">
+                              <p className="mt-2 text-xs text-neutral-500">
                                 {t('admin.overview.levels.truncated', { total: list.total, shown: list.users.length })}
                               </p>
                             )}

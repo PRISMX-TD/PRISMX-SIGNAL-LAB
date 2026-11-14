@@ -70,15 +70,15 @@ export function RoundFormSheet({ round, onClose, onDone }: {
             <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.startsAt')}</span>
             <input type="datetime-local" className="input w-full" value={f.start}
               disabled={editing && round?.phase !== 'upcoming'} onChange={(e) => set({ start: e.target.value })} />
-            {shown(f.start) && <span className="mt-1 block text-[11px] text-neutral-500">{t('admin.lucky.userSees', { time: shown(f.start) })}</span>}
+            {shown(f.start) && <span className="mt-1 block text-xs text-neutral-500">{t('admin.lucky.userSees', { time: shown(f.start) })}</span>}
           </label>
           <label className="block min-w-0">
             <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.endsAt')}</span>
             <input type="datetime-local" className="input w-full" value={f.end} onChange={(e) => set({ end: e.target.value })} />
-            {shown(f.end) && <span className="mt-1 block text-[11px] text-neutral-500">{t('admin.lucky.userSees', { time: shown(f.end) })}</span>}
+            {shown(f.end) && <span className="mt-1 block text-xs text-neutral-500">{t('admin.lucky.userSees', { time: shown(f.end) })}</span>}
           </label>
         </div>
-        {editing && round?.phase !== 'upcoming' && <p className="text-[11px] text-neutral-500">{t('admin.lucky.round.startLocked')}</p>}
+        {editing && round?.phase !== 'upcoming' && <p className="text-xs text-neutral-500">{t('admin.lucky.round.startLocked')}</p>}
         {editing && endsInPast(f.end, Date.now()) && <p className="text-xs text-amber-300">{t('admin.lucky.round.endNowWarn')}</p>}
         <div>
           <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.mode.label')}</span>

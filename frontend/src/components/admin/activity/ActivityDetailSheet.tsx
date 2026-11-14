@@ -149,7 +149,7 @@ export function changeCells(kind: string, raw: Raw | null | undefined, params: R
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="mt-5">
-      <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">{title}</h4>
+      <h4 className="mb-2 text-xs font-semibold text-neutral-500">{title}</h4>
       {children}
     </section>
   )
@@ -262,7 +262,7 @@ export default function ActivityDetailSheet({
             ),
           )}
         </dl>
-        {moneyShown && <p className="mt-2 text-[11px] text-neutral-500">{t('admin.log.detail.currencyNote')}</p>}
+        {moneyShown && <p className="mt-2 text-xs text-neutral-500">{t('admin.log.detail.currencyNote')}</p>}
       </Section>
 
       {(user || it.user) && (
@@ -346,7 +346,7 @@ export default function ActivityDetailSheet({
                       current ? 'bg-prism-400' : 'bg-neutral-600'
                     }`}
                   />
-                  <div className="num text-[11px] text-neutral-500">{bjFull(s.at ?? s.ts)}</div>
+                  <div className="num text-xs text-neutral-500">{bjFull(s.at ?? s.ts)}</div>
                   <div className={`text-sm leading-relaxed ${current ? 'text-neutral-100' : 'text-neutral-300'}`}>
                     <Sentence parts={renderEvent(s, t).parts} /> <ChipList chips={chipsFor(s, t)} />
                   </div>
@@ -401,7 +401,7 @@ export default function ActivityDetailSheet({
           <ul className="divide-y divide-white/5 rounded-lg border border-white/5">
             {it.children.map((c) => (
               <li key={c.key} className="grid grid-cols-[64px_minmax(0,1fr)] gap-x-3 px-3 py-2">
-                <span className="num pt-0.5 text-[11px] text-neutral-500">{bjClock(c.at ?? c.ts)}</span>
+                <span className="num pt-0.5 text-xs text-neutral-500">{bjClock(c.at ?? c.ts)}</span>
                 <div className="min-w-0 text-sm leading-relaxed text-neutral-200">
                   <Sentence parts={renderEvent(c, t).parts} /> <ChipList chips={chipsFor(c, t)} />
                   {it.kind === 'admin.bulk_edit' && c.user && (

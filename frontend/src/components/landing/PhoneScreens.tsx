@@ -190,7 +190,7 @@ function MiniSignalCard({
         </div>
         <div className="text-right">
           <div className="sig-rr num text-[calc(var(--cq)*4.4)] font-bold leading-none text-up">{rr}</div>
-          <div className="mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*2.9)] uppercase text-neutral-500">{t('landing.scrRr')}</div>
+          <div className="mt-[calc(var(--cq)*0.8)] text-[calc(var(--cq)*2.9)] text-neutral-500">{t('landing.scrRr')}</div>
         </div>
       </div>
 
@@ -566,7 +566,7 @@ export function ScreenBoard({ t, on }: { t: T; on: boolean }) {
       <div className="js-toast mt-auto flex items-center gap-[calc(var(--cq)*3)] rounded-[calc(var(--cq)*3)] border border-prism-400/40 bg-prism-600/20 px-[calc(var(--cq)*3.4)] py-[calc(var(--cq)*2.6)]">
         <span className="cq-svg w-[calc(var(--cq)*10)] flex-none"><BadgeIcon id="board_return" tier={1} earned /></span>
         <div className="min-w-0">
-          <div className="text-[calc(var(--cq)*2.6)] uppercase tracking-[0.14em] text-prism-300">{t('landing.scrToast')}</div>
+          <div className="text-[calc(var(--cq)*2.6)] text-prism-300">{t('landing.scrToast')}</div>
           <b className="block truncate text-[calc(var(--cq)*3.6)] font-bold text-white">{t('landing.scrToastBadge')}</b>
         </div>
       </div>

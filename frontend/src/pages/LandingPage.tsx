@@ -253,8 +253,10 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
           </button>
         </div>
 
-        {/* PRO：实色紫面 / solid pigment plane */}
-        <div className="reveal reveal-d1 relative flex flex-col rounded-card bg-prism-600 p-7 lg:col-span-7">
+        {/* PRO：深紫底 + 半透明紫细线（2026-11-15 起，与升级页同一种材质；原来是整块实色紫）。
+            Deep violet fill + translucent violet hairline since 2026-11-15, matching the
+            upgrade page; it used to be a solid violet plane. */}
+        <div className="reveal reveal-d1 relative flex flex-col rounded-card bg-[#1E1744] shadow-[inset_0_0_0_1px_rgba(146,132,255,0.45)] p-7 lg:col-span-7">
           <FestivalTopper kind="card" />
           {/* 试用横幅：贯穿卡顶的实色金条。第一版是价格下方的白药丸，反馈是
               「不明显」——它和卡内其它元素同宽同层级，扫视时不占任何优先级。
@@ -306,7 +308,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             </div>
           )}
 
-          <ul className="mt-8 grid gap-3.5 border-t border-white/25 pt-7 sm:grid-cols-2 sm:gap-x-8">
+          <ul className="mt-8 grid gap-3.5 border-t border-[rgba(146,132,255,0.22)] pt-7 sm:grid-cols-2 sm:gap-x-8">
             {proFeatures.map((k) => (
               <li key={k} className="text-[13px] leading-relaxed text-white/85">
                 {t(`landing.${k}`)}
@@ -314,11 +316,11 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             ))}
           </ul>
 
-          {/* PRO 面上的按钮必须白底紫字：紫底紫字不可读。/ White fill, violet
-              label: the highest contrast available on this plane. */}
+          {/* 卡面改成深紫后，主操作回到全站统一的实心紫按钮。/ On the deep violet card the
+              primary action goes back to the site-wide solid violet button. */}
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn mt-8 h-11 w-full bg-white text-[13px] font-semibold text-prism-700 hover:bg-white/90"
+            className="btn mt-8 h-11 w-full bg-[var(--purple)] text-[13px] font-medium text-white hover:bg-[var(--purple-vivid)]"
           >
             {trial
               ? inviteDays
@@ -381,7 +383,7 @@ function Foot({ t }: { t: T }) {
             <Logo size={28} />
             <span className="font-display text-[15px] font-bold tracking-tight text-white">Signal Lab</span>
           </div>
-          <p className="mt-3 text-[12px] uppercase tracking-[0.14em] text-neutral-500">by PRISMX</p>
+          <p className="mt-3 text-[12px] text-neutral-500">by PRISMX</p>
           {/* 社交入口放在品牌栏下方，不进上面的导航区：这几个链接是把人带出站的，
               而页脚导航（#pricing / #faq）承担的是最后一次把人拉回转化路径。
               两者挨着会互相稀释。一个都没配时组件自己不渲染。
@@ -407,7 +409,7 @@ function Foot({ t }: { t: T }) {
         {/* 条款与政策：<Link> 而不是 <a href>，SPA 内路由不触发整页刷新。
             Terms via <Link>, not <a href>: same-SPA routes, no full reload. */}
         <div className="md:col-span-2">
-          <p className="text-[12px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerLegal')}</p>
+          <p className="text-[12px] text-neutral-500">{t('landing.footerLegal')}</p>
           <ul className="mt-2.5 space-y-0.5">
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <li key={d}>
@@ -426,7 +428,7 @@ function Foot({ t }: { t: T }) {
             Gated by SUPPORT_EMAIL; empty hides the column (see config/site.ts). */}
         {SUPPORT_EMAIL && (
           <div className="col-span-2 md:col-span-3">
-            <p className="text-[12px] uppercase tracking-[0.14em] text-neutral-500">{t('landing.footerSupport')}</p>
+            <p className="text-[12px] text-neutral-500">{t('landing.footerSupport')}</p>
             <p className="mt-4 text-[13px] leading-relaxed text-neutral-500">{t('landing.footerSupportBody')}</p>
             <a
               href={`mailto:${SUPPORT_EMAIL}`}

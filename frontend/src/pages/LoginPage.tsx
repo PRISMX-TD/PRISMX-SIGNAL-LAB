@@ -15,6 +15,7 @@ import GoogleLoginButton from '../components/GoogleLoginButton'
 import PhoneField, { dialCodeOf, type PhoneValue } from '../components/PhoneField'
 import { DEFAULT_DIAL_ISO } from '../data/dialCodes'
 import { trackSignupFromHome } from '../guest/homeMode'
+import { BackChevron } from '../components/PageHead'
 
 export default function LoginPage() {
   const { t } = useTranslation()
@@ -143,7 +144,7 @@ export default function LoginPage() {
           don't respond" report. */}
       <div className="absolute left-4 top-[calc(1rem+env(safe-area-inset-top))] z-20">
         <Link to="/" className="chip transition hover:border-prism-500/50 hover:text-neutral-100">
-          <span aria-hidden>←</span> Signal Lab
+          <BackChevron /> Signal Lab
         </Link>
       </div>
       <div className="absolute right-4 top-[calc(1rem+env(safe-area-inset-top))] z-20">
@@ -169,7 +170,7 @@ export default function LoginPage() {
           <div className="mb-8">
             <Logo size={44} />
             <h1 className="mt-5 font-display-xl text-[2rem] text-white">Signal Lab</h1>
-            <p className="mt-1.5 text-[11px] font-medium uppercase tracking-[0.16em] text-neutral-500">by PRISMX</p>
+            <p className="mt-1.5 text-xs font-medium text-neutral-500">by PRISMX</p>
             <p className="mt-4 max-w-xs text-[13px] leading-relaxed text-neutral-400">{t('auth.tagline')}</p>
           </div>
 
@@ -326,7 +327,7 @@ export default function LoginPage() {
               <>
                 <div className="my-5 flex items-center gap-3">
                   <span className="h-px flex-1 bg-white/10" />
-                  <span className="text-xs uppercase tracking-widest text-neutral-500">{t('auth.or')}</span>
+                  <span className="text-xs text-neutral-500">{t('auth.or')}</span>
                   <span className="h-px flex-1 bg-white/10" />
                 </div>
 

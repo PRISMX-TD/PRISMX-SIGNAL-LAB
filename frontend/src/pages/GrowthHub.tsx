@@ -28,6 +28,7 @@ import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import { useAuth } from '../store/auth'
 import PageHead from '../components/PageHead'
+import { useOverflowHint } from '../utils/useOverflowHint'
 
 export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions' | 'lucky'
 
@@ -46,6 +47,7 @@ export default function GrowthHub({ tab, children }: { tab: GrowthTab; children:
   // 一个是亮的。The current page stays in the strip even when its switch is
   // off; otherwise the user is on a page no tab lights up for.
   const visible = TABS.filter((x) => x.key === tab || !!user?.[x.flag])
+  const tabsHintRef = useOverflowHint<HTMLDivElement>()
 
   return (
     <div className="mx-auto max-w-[1100px]">
@@ -53,7 +55,7 @@ export default function GrowthHub({ tab, children }: { tab: GrowthTab; children:
         as="h1"
         title={t('nav.growth')}
         actions={visible.length > 1 ? (
-          <div className="seg-tabs w-full sm:w-fit" role="tablist" aria-label={t('nav.growth')}>
+          <div ref={tabsHintRef} className="seg-tabs w-full sm:w-fit" role="tablist" aria-label={t('nav.growth')}>
             {visible.map((x) => (
               <button
                 key={x.key}

@@ -295,7 +295,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
       <section>
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
           <h3 className="text-[15px] font-semibold text-neutral-100">{t('admin.support.progress.agentsTitle')}</h3>
-          <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500" aria-hidden="true">
+          <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500" aria-hidden="true">
             {FOLLOW_UP_STAFF_STATUSES.map((s) => (
               <li key={s} className="inline-flex items-center gap-1.5">
                 <i className={`h-1.5 w-1.5 rounded-full ${SOLID[s]}`} />
@@ -460,13 +460,13 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                             >
                               {f.nickname || f.email || '—'}
                             </button>
-                            <div className="max-w-[200px] truncate font-mono text-[11px] text-neutral-500"><Copyable text={f.email} label={t('supportDesk.copy.email')} /></div>
+                            <div className="max-w-[200px] truncate font-mono text-xs text-neutral-500"><Copyable text={f.email} label={t('supportDesk.copy.email')} /></div>
                           </div>
                         </div>
                       </td>
                       <td>
                         <div className="text-xs text-neutral-200">{f.assigneeName || '—'}</div>
-                        <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-[11px] text-neutral-500">
+                        <div className="mt-1 flex items-center gap-1.5 whitespace-nowrap text-xs text-neutral-500">
                           {t(`supportDesk.goal.${f.goal}`)}
                           {f.priority === 'high' && <Tag tone={FU_PRIORITY_TONE.high}>{t('supportDesk.priority.high')}</Tag>}
                         </div>
@@ -502,7 +502,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                         <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-neutral-100">{f.nickname || f.email || '—'}</span>
                         <Tag tone={FU_STATUS_TONE[f.status]}>{t(`supportDesk.status.${f.status}`)}</Tag>
                       </span>
-                      <span className="mt-0.5 block truncate text-[11px] text-neutral-500">
+                      <span className="mt-0.5 block truncate text-xs text-neutral-500">
                         {f.assigneeName || '—'} · {t(`supportDesk.goal.${f.goal}`)}
                       </span>
                       <span className="mt-2.5 block">
@@ -633,14 +633,14 @@ function AgentCard({
         <Avatar name={row.nickname || row.email} size={36} tone="staff" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[13px] font-semibold text-neutral-100">{row.nickname || row.email}</span>
-          <span className="mt-0.5 block truncate text-[11px] text-neutral-500">
+          <span className="mt-0.5 block truncate text-xs text-neutral-500">
             {row.role === 'admin' ? t('admin.support.role.admin') : t(`admin.support.tier.${row.tier}`)}
             {row.disabled ? ` · ${t('admin.support.progress.disabled')}` : ''}
           </span>
         </span>
         <span className="shrink-0 text-right">
           <span className="num block text-[26px] font-semibold leading-none tracking-tight text-neutral-50">{row.active}</span>
-          <span className="mt-1 block text-[11px] text-neutral-500">{t('admin.support.progress.activeLabel')}</span>
+          <span className="mt-1 block text-xs text-neutral-500">{t('admin.support.progress.activeLabel')}</span>
         </span>
       </span>
       <span className="adm-stack" aria-hidden="true">
@@ -648,7 +648,7 @@ function AgentCard({
           <i key={x.s} className={SOLID[x.s]} style={{ flexGrow: x.n, flexBasis: 0 }} />
         ))}
       </span>
-      <span className="flex items-center gap-2 text-[11px] text-neutral-500">
+      <span className="flex items-center gap-2 text-xs text-neutral-500">
         <span className="truncate">
           {t('admin.support.progress.notes7d', { n: row.notes7d })}
           {' · '}
@@ -667,7 +667,7 @@ function LatestNote({ f, ago, idle }: { f: FollowUp; ago: (iso: string | null | 
       {f.lastNote ? (
         <>
           <p className="line-clamp-2 break-words text-[12.5px] leading-relaxed text-neutral-300">{f.lastNote.content}</p>
-          <p className="mt-1 truncate text-[11px] text-neutral-500">
+          <p className="mt-1 truncate text-xs text-neutral-500">
             {t(`supportDesk.channel.${f.lastNote.channel}`)} · {f.lastNote.authorName || '—'} · {ago(f.lastNoteAt)}
           </p>
         </>

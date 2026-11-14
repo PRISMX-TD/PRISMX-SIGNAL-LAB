@@ -75,7 +75,7 @@
 .sig-card .sym-ava {
   width: 36px;
   height: 36px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .sig-card-id {
   flex: 1;
@@ -93,7 +93,7 @@
 .sig-card-sym b {
   font-size: 26px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
   white-space: nowrap;
 }
@@ -123,12 +123,12 @@
   display: block;
   font-size: 20px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
 }
 .sig-card-rr span {
   display: block;
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -159,7 +159,7 @@
    Captions: 0.08em tracking at 500; tracking rather than uppercase, since
    nearly every caption here is Chinese and text-transform does nothing. */
 .sig-ladder-row .cap {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -167,7 +167,7 @@
 .sig-ladder-row b {
   font-size: 15px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -186,7 +186,7 @@
 .sig-ladder-bar {
   position: relative;
   height: 6px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
 }
 .sig-ladder-bar i {
@@ -198,7 +198,7 @@
 .sig-ladder-bar .risk {
   left: 0;
   width: calc(var(--risk, 50%) - 3px);
-  border-radius: 999px 0 0 999px;
+  border-radius: 10px 0 0 999px;
   background: var(--down);
 }
 .sig-ladder-bar .reward {
@@ -231,9 +231,18 @@
 }
 .sig-ttl {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 22px 10px;
   min-width: 0;
+  /* 只留一行高：说明字放不下时整块折到第二行，被裁掉，只剩环和时间。2026-11-15 起——
+     以前「剩余时效」在英 / 日 / 越语下会在窄卡里折成 2–3 行。文字仍在无障碍树里。
+     One row tall: when the caption doesn't fit it wraps to a second row, which is
+     clipped, leaving the ring and the time. Since 2026-11-15; the caption used to
+     fold into 2–3 lines in English, Japanese and Vietnamese on narrow cards. It
+     stays in the accessibility tree. */
+  height: 22px;
+  overflow: hidden;
 }
 .sig-ttl svg {
   flex: none;
@@ -250,14 +259,15 @@
 .sig-ttl b {
   font-size: 17px;
   line-height: 1;
-  font-weight: 700;
+  white-space: nowrap;
+  font-weight: 500;
   color: #fff;
   transition: color var(--dur-base) var(--ease-out);
 }
 .sig-ttl span {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.08em;
+  white-space: nowrap;
   color: var(--text-3);
 }
 /* 剩余不足 2 分钟：环与数字一起转跌色。 / Under two minutes: ring and digits go down-tone. */
@@ -272,17 +282,17 @@
 }
 .sig-result b {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 .sig-result span {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .sig-cta {
   height: 40px;
   padding: 0 24px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
   flex: none;
 }
 .sig-card.is-expired .sig-cta:disabled {

@@ -202,8 +202,10 @@ export default {
       // 若整体下移一档（sm→12、xs→11），全站正文会小一号——那不是这次要做的事。
       // Named steps snap to the *nearest* rung, not one rung down: the point is
       // to reduce how many sizes exist, not to shrink the whole UI.
+      // 2026-11-15 起 2xs 并到 12px：正文最小 12px，10px 在手机上读不清。
+      // Since 2026-11-15 2xs folds into 12px: body text bottoms out at 12px.
       fontSize: {
-        '2xs': ['10px', '1.35'],
+        '2xs': ['12px', '1.35'],
         xs: ['12px', '1.35'],
         sm: ['13px', '1.4'],
         base: ['15px', '1.45'],
@@ -243,13 +245,18 @@ export default {
       // 在这里重定义 semibold 与 extrabold，所有 font-semibold / font-extrabold
       // 调用点一起走，不用改 TSX。
       // Redefining semibold/extrabold collapses every call site at once.
+      //
+      // 2026-11-15 起 bold / extrabold / black 也落到 500：层级只靠字号和灰阶，
+      // 粗体会让每个标题和价格都在喊。样式表里的 700–900 同步改成 500。
+      // Since 2026-11-15 bold / extrabold / black land on 500 too: hierarchy comes
+      // from size and grey steps, not weight. The stylesheets' 700–900 follow.
       fontWeight: {
         normal: '400',
         medium: '500',
         semibold: '500',
-        bold: '700',
-        extrabold: '700',
-        black: '700',
+        bold: '500',
+        extrabold: '500',
+        black: '500',
       },
 
       // 圆角：四档 / four steps — 8 内嵌格 · 14 小浮层 · 24 卡片 · 999 控件。
@@ -257,8 +264,10 @@ export default {
       // 控件都改成药丸之后合并成一档，腾出来的位置给「小浮层」（下拉菜单）——
       // 那是落到生产代码时才发现的一档，样本里没有这类元素。
       // 与 index.css 的 --r-tile / --r-panel / --r-lg / --r-xs 保持同值。
+      // 2026-11-15 起控件不再是胶囊：pill 与 --r-xs / --r-md 一起改成 10px。
+      // Since 2026-11-15 controls stop being capsules: pill, --r-xs and --r-md move to 10px.
       borderRadius: {
-        pill: '999px',
+        pill: '10px',
         inner: '8px',
         card: '24px',
         panel: '24px',

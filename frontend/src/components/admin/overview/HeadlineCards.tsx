@@ -9,11 +9,11 @@ import type { AdminOverviewHeadline, Compare } from '../../../api/types'
 // Delta caption vs the previous period; "—" when the previous value is 0.
 export function DeltaBadge({ current, previous }: Compare) {
   const { t } = useTranslation()
-  if (previous === 0) return <span className="text-[11px] text-neutral-500">{t('admin.overview.delta.none')}</span>
+  if (previous === 0) return <span className="text-xs text-neutral-500">{t('admin.overview.delta.none')}</span>
   const pct = Math.round(((current - previous) / previous) * 100)
   const cls = pct > 0 ? 'text-up' : pct < 0 ? 'text-down' : 'text-neutral-400'
   const sign = pct > 0 ? '+' : ''
-  return <span className={`text-[11px] tabular-nums ${cls}`}>{t('admin.overview.delta.vsPrev', { pct: `${sign}${pct}%` })}</span>
+  return <span className={`text-xs tabular-nums ${cls}`}>{t('admin.overview.delta.vsPrev', { pct: `${sign}${pct}%` })}</span>
 }
 
 // live：今日活跃前面亮一个小绿点，表示这个数是实时的，不跟上面选的范围。

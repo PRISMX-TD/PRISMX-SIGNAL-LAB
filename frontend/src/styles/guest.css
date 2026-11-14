@@ -40,7 +40,7 @@
 .gst-hdr-cta {
   height: 36px;
   padding: 0 16px;
-  font-weight: 700;
+  font-weight: 500;
 }
 @media (max-width: 380px) {
   .gst-hdr-cta { padding: 0 12px; font-size: 12px; }
@@ -64,11 +64,11 @@
   align-items: center;
   gap: 6px;
   padding: 2px 9px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgb(var(--purple-hi-rgb) / 0.16);
   color: var(--purple-hi);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
 }
 .gst-banner-tag i,
 .gst-sticky-info i,
@@ -83,7 +83,7 @@
   color: var(--text-3);
 }
 .gst-banner-cta {
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
   text-decoration: underline;
   text-decoration-color: rgb(var(--purple-hi-rgb) / 0.6);
@@ -106,7 +106,7 @@
 }
 .gst-recent-head h3 {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .gst-recent-stats {
@@ -117,7 +117,7 @@
   font-size: 12px;
   color: var(--text-3);
 }
-.gst-recent-stats b { font-size: 12px; font-weight: 700; }
+.gst-recent-stats b { font-size: 12px; font-weight: 500; }
 .gst-recent-list {
   margin-top: 12px;
 }
@@ -137,7 +137,7 @@
 .gst-recent-sym .chip { transform: scale(0.9); transform-origin: left center; }
 .gst-recent-ago {
   margin-left: auto;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .gst-recent-px {
@@ -145,17 +145,17 @@
   flex-wrap: wrap;
   gap: 2px 10px;
   margin-top: 3px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-2);
 }
 .gst-result {
   flex: none;
   min-width: 52px;
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   text-align: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
 }
 .gst-result.is-tp { background: var(--up-bg); color: var(--up); }
 .gst-result.is-sl { background: var(--down-bg); color: var(--down); }
@@ -215,7 +215,7 @@
   height: 42px;
   padding: 0 18px;
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 /* ── 新信号提示 / new-signal toast ── */
@@ -267,7 +267,7 @@
 }
 .gst-nudge b { display: block; padding-right: 20px; font-size: 15px; color: #fff; }
 .gst-nudge p { margin-top: 6px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
-.gst-nudge .btn { width: 100%; margin-top: 14px; height: 40px; font-weight: 700; }
+.gst-nudge .btn { width: 100%; margin-top: 14px; height: 40px; font-weight: 500; }
 .gst-nudge-x {
   position: absolute;
   top: 10px;
@@ -348,7 +348,7 @@
 .gst-gate-title {
   margin-top: 10px;
   font-size: 21px;
-  font-weight: 800;
+  font-weight: 500;
   line-height: 1.3;
   letter-spacing: -0.01em;
   color: #fff;
@@ -378,7 +378,7 @@
 .gst-ticket-rr {
   margin-left: auto;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--up);
 }
 .gst-ticket-px {
@@ -396,11 +396,11 @@
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .gst-ticket-px > div > span:first-child {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
 }
@@ -459,7 +459,7 @@
   height: 50px;
   margin-top: 18px;
   font-size: 16px;
-  font-weight: 800;
+  font-weight: 500;
   border-radius: 14px;
 }
 .gst-gate-note {

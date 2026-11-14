@@ -2,7 +2,7 @@
 // 会按本机时区解析、差出几小时。
 // Lucky-wheel countdown: backend datetimes are naive UTC without a `Z`, so go through parseTime —
 // `new Date(iso)` would read them in the device's timezone and be off by hours.
-import { parseTime } from '../api/utils'
+import { fmtStamp, parseTime } from '../api/utils'
 
 export type Countdown = { d: number; h: number; m: number; s: number; done: boolean }
 
@@ -19,16 +19,15 @@ export function countdownParts(to: string | null | undefined, nowMs: number): Co
   }
 }
 
-// 开放时间段：「21/10 15:00 ～ 29/10 15:00 UTC+8」。日月顺序与全站 fmtTime 一致（en-GB），只是去掉秒、
+// 开放时间段：「10-21 15:00 ～ 10-29 15:00 UTC+8」。写法与全站 fmtStamp 一致（月-日），不带年份和秒、
 // 只在末尾标一次时区，放在标题下面不至于折成三行。
-// The open window as "21/10 15:00 ～ 29/10 15:00 UTC+8": day/month order matches the site's fmtTime (en-GB),
-// minus the seconds and with the zone labelled once, so it fits under the title without wrapping three times.
+// The open window as "10-21 15:00 ～ 10-29 15:00 UTC+8": the site's fmtStamp form (month-day) without
+// year or seconds, the zone labelled once, so it fits under the title without wrapping three times.
 export function fmtWindow(from: string | null | undefined, to: string | null | undefined): string {
   const one = (iso: string | null | undefined) => {
     const d = parseTime(iso)
     if (!d || Number.isNaN(d.getTime())) return '-'
-    return d.toLocaleString('en-GB', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })
-      .replace(',', '')
+    return fmtStamp(d, { year: 'never', clock: 'hm' })
   }
   return `${one(from)} ～ ${one(to)} UTC+8`
 }

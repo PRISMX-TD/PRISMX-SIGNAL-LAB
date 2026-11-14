@@ -287,19 +287,23 @@ export function useChartEngine(
 
     const chart = createChart(el, {
       layout: {
-        background: { type: ColorType.Solid, color: 'rgba(10, 7, 16, 1)' },
+        // 2026-11-15 起画布 = 页面底色 #09090B，网格 4.5% 白、边框用通用细线色；以前是偏紫的
+        // #0A0710 配紫色网格，和页面接不上。/ Since 2026-11-15 the canvas is the page colour
+        // #09090B with a 4.5% white grid and the shared hairline; it used to be a violet-tinted
+        // #0A0710 with violet grid lines that didn't meet the page.
+        background: { type: ColorType.Solid, color: '#09090b' },
         textColor: '#94a3b8',
         // 关闭库自带的 TradingView 署名 logo；Apache-2.0 许可要求的署名改用免责声明旁的
         // 文字链接满足。/ Attribution handled by the text link next to the disclaimer.
         attributionLogo: false,
       },
       grid: {
-        vertLines: { color: 'rgba(139, 70, 255, 0.08)' },
-        horzLines: { color: 'rgba(139, 70, 255, 0.08)' },
+        vertLines: { color: 'rgba(255, 255, 255, 0.045)' },
+        horzLines: { color: 'rgba(255, 255, 255, 0.045)' },
       },
-      rightPriceScale: { borderColor: 'rgba(139, 70, 255, 0.15)' },
+      rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.07)' },
       timeScale: {
-        borderColor: 'rgba(139, 70, 255, 0.15)',
+        borderColor: 'rgba(255, 255, 255, 0.07)',
         timeVisible: true,
         secondsVisible: false,
         // 最新 K 线右侧预留空白，便于把趋势线 / 斐波那契画到未来区域。

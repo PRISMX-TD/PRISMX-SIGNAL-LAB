@@ -26,7 +26,7 @@ export default function StrategyUsageCard({ rows }: { rows: AdminStrategyUsage[]
           <tbody>
             {rows.map((r) => (
               <tr key={r.template} className="border-t border-white/5">
-                <td className="py-1.5 text-neutral-200">{name(r.template)}<code className="ml-2 text-[10px] text-neutral-500">{r.template}</code></td>
+                <td className="py-1.5 text-neutral-200">{name(r.template)}<code className="ml-2 text-xs text-neutral-500">{r.template}</code></td>
                 <td className="py-1.5 text-right tabular-nums text-neutral-200">{r.users}</td>
                 <td className="py-1.5 text-right tabular-nums text-neutral-200">{r.enabledUsers}</td>
               </tr>

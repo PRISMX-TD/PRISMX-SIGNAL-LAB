@@ -58,15 +58,15 @@ export default function UserIpSheet({ userId, userLabel, onClose, onPickUser }: 
                 <span className="font-mono text-neutral-100">{r.ip}</span>
                 <span className="text-neutral-400">{region(r) ?? t('admin.users.ip.unknownRegion')}</span>
               </div>
-              <div className="mt-1 text-[11px] text-neutral-500">
+              <div className="mt-1 text-xs text-neutral-500">
                 {t('admin.users.ip.firstSeen', { time: fmtTime(r.firstSeenAt) })} · {t('admin.users.ip.lastSeen', { time: fmtTime(r.lastSeenAt) })}
               </div>
               {r.otherUsers > 0 ? (
-                <button type="button" onClick={() => toggle(r.ip)} aria-expanded={openIp === r.ip} className="mt-1 text-[11px] text-amber-300 hover:underline">
+                <button type="button" onClick={() => toggle(r.ip)} aria-expanded={openIp === r.ip} className="mt-1 text-xs text-amber-300 hover:underline">
                   {openIp === r.ip ? t('admin.users.ip.hideOthers') : t('admin.users.ip.others', { count: r.otherUsers })}
                 </button>
               ) : (
-                <div className="mt-1 text-[11px] text-neutral-600">{t('admin.users.ip.noOthers')}</div>
+                <div className="mt-1 text-xs text-neutral-600">{t('admin.users.ip.noOthers')}</div>
               )}
               {openIp === r.ip && (
                 <div className="mt-2 border-t border-white/10 pt-2">
@@ -90,7 +90,7 @@ export default function UserIpSheet({ userId, userLabel, onClose, onPickUser }: 
           ))}
         </ul>
       )}
-      <p className="mt-4 text-[11px] text-neutral-500">{t('admin.users.ip.note')}</p>
+      <p className="mt-4 text-xs text-neutral-500">{t('admin.users.ip.note')}</p>
     </AdminSheet>
   )
 }

@@ -261,7 +261,7 @@ export default function BindPage() {
                 <div className="bind-acct-id">
                   <div className="login">
                     <b className="num">{a.login}</b>
-                    <span className="tag bg-prism-600/20 text-prism-300 text-[10px]">{t('bind.gw.tag')}</span>
+                    <span className="tag bg-prism-600/20 text-prism-300 text-xs">{t('bind.gw.tag')}</span>
                   </div>
                   <div className="who">
                     <span>{a.accountName || '—'}</span>

@@ -22,7 +22,7 @@
 }
 .guide-spec .cap {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -32,7 +32,7 @@
   margin-top: 8px;
   font-size: 15px;
   line-height: 1.2;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .guide-spec.rr b {
@@ -53,22 +53,22 @@
 .guide-syms .sym-ava {
   width: 30px;
   height: 30px;
-  font-size: 10px;
+  font-size: 12px;
 }
 /* 周期轨道：与仪表盘 .tf-row 同形。/ Timeframe track, shaped like .tf-row. */
 .guide-tfs {
   display: flex;
   width: fit-content;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
   border: 1px solid var(--line);
 }
 .guide-tf {
   padding: 4px 12px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-2);
 }
 .guide-tf + .guide-tf {
@@ -149,7 +149,7 @@
 .guide-row-main h3 {
   font-size: 26px;
   line-height: 1.1;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .guide-row-main p {
@@ -257,7 +257,7 @@
   gap: 10px;
 }
 .guide-aside-grp > .cap {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -286,7 +286,7 @@
   margin-top: 40px;
   font-size: 20px;
   line-height: 1.2;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .guide-article > .guide-h:first-child,
@@ -378,7 +378,7 @@
 }
 .guide-pager .cap {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -388,7 +388,7 @@
   margin-top: 8px;
   font-size: 17px;
   line-height: 1.2;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 

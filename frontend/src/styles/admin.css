@@ -141,10 +141,10 @@
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--mid-bg);
   color: var(--mid);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
 }
@@ -169,7 +169,7 @@
   gap: 7px;
   height: 36px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   font-size: 13px;
   font-weight: 500;
@@ -382,7 +382,7 @@
   gap: 10px;
   height: 40px;
   padding: 0 4px 0 16px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--nest);
   color: var(--text-3);
@@ -410,7 +410,7 @@
   flex: none;
   height: 32px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--purple);
   font-size: 12px;
   font-weight: 500;
@@ -522,9 +522,9 @@
   align-items: center;
   height: 22px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgb(255 255 255 / 0.06);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
   white-space: nowrap;
@@ -551,7 +551,7 @@
 }
 
 .adm-link-btn {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--purple-hi);
   white-space: nowrap;
@@ -569,7 +569,7 @@
 .adm-input {
   height: 32px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   background: var(--nest);
   font: inherit;
@@ -597,7 +597,7 @@
   justify-content: center;
   height: 32px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line-hi);
   background: transparent;
   font-size: 12px;
@@ -667,13 +667,13 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
 }
 .adm-seg > button {
   height: 30px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
@@ -807,7 +807,7 @@
 
 .adm-toast {
   max-width: 28rem;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid transparent;
   background: var(--surface-2);
   padding: 8px 16px;
@@ -878,7 +878,7 @@
 /* 共用的分段按钮（utils/segBtn）在控制台里换成胶囊：与 .adm-seg 同一套选中态。
    The shared segmented buttons (utils/segBtn) become pills here, same selected state as .adm-seg. */
 .adm-body .seg-btn {
-  border-radius: 999px;
+  border-radius: 10px;
   border-color: var(--line);
   background: transparent;
   padding: 6px 14px;
@@ -959,7 +959,7 @@
   gap: 2px;
   height: 6px;
   overflow: hidden;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
 }
 .adm-stack > i {
@@ -974,7 +974,7 @@
   gap: 6px;
   height: 28px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 500;
@@ -992,7 +992,7 @@
   color: var(--text);
 }
 .adm-chip .num {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 
@@ -1024,7 +1024,7 @@
   background: var(--surface-2);
 }
 .adm-facts dt {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text-3);
 }
 .adm-facts dd {

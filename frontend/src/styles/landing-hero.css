@@ -5,11 +5,9 @@
    Section headings and captions were two different treatments of small type;
    they now share one. */
 .sec-h-title {
-  font-size: 11px;
-  letter-spacing: 0.12em;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
-  text-transform: uppercase;
 }
 
 /* 报价表限宽：606px 的容器里内容只占约 420px，品种名钉在最左、价格甩到
@@ -173,14 +171,14 @@
   }
   .tf-tag {
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: 12px;
     gap: 2px;
   }
 }
 @media (max-width: 360px) {
   .tf-tag {
     padding: 4px 6px;
-    font-size: 10px;
+    font-size: 12px;
   }
 }
 

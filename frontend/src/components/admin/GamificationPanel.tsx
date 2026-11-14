@@ -45,7 +45,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { adminApi } from '../../api/client'
-import { localizeApiError, fmtScorePct, fmtProgressNum } from '../../api/utils'
+import { localizeApiError, fmtScorePct, fmtProgressNum, fmtStamp } from '../../api/utils'
 import { fmtPct } from '../winrate/shared'
 import { SkeletonLine } from '../Skeleton'
 import BadgeIcon from '../badges/BadgeIcon'
@@ -78,12 +78,12 @@ type PreviewPeriod = 'week' | 'month'
 const PREVIEW_PERIODS: PreviewPeriod[] = ['week', 'month']
 const PREVIEW_BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
 
-// 期数下拉的文案：「2026-W44 · 10/26–11/1」。end 是开区间，显示时退一天；按 UTC，
+// 期数下拉的文案：「2026-W44 · 10-26–11-01」。end 是开区间，显示时退一天；按 UTC，
 // 与周期 key 的切法一致（services/gamification/periods.py）。
-// Issue label "2026-W44 · 10/26–11/1"; end is exclusive so step back a day; UTC,
+// Issue label "2026-W44 · 10-26–11-01"; end is exclusive so step back a day; UTC,
 // the same calendar the period keys are cut on.
 function periodLabel(p: AdminLeaderboardPeriod): string {
-  const md = (d: Date) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`
+  const md = (d: Date) => fmtStamp(d, { tz: 'UTC', year: 'never' })
   const start = new Date(p.start)
   const last = new Date(new Date(p.end).getTime() - 86_400_000)
   return `${p.periodKey} · ${md(start)}–${md(last)}`
@@ -149,15 +149,15 @@ function CompactTask({ task, t }: { task: GamificationTask; t: TFunction }) {
       {task.done ? (
         <CheckIcon />
       ) : isWinrate && task.state ? (
-        <span className={`tag shrink-0 text-[10px] ${taskStateTagClass(task.state)}`}>
+        <span className={`tag shrink-0 text-xs ${taskStateTagClass(task.state)}`}>
           {t(`gamification.taskState.${task.state}`)}
         </span>
       ) : task.progressTarget != null ? (
-        <span className="num shrink-0 text-[10px] text-neutral-500">
+        <span className="num shrink-0 text-xs text-neutral-500">
           {fmtProgressNum(task.progressNow ?? 0)}/{fmtProgressNum(task.progressTarget)}
         </span>
       ) : (
-        <span className="tag shrink-0 bg-white/[0.03] text-[10px] text-neutral-500">—</span>
+        <span className="tag shrink-0 bg-white/[0.03] text-xs text-neutral-500">—</span>
       )}
     </li>
   )
@@ -538,7 +538,7 @@ export default function GamificationPanel() {
               offLabel={t('gamification.admin.visibleOff')}
               onChange={togglePublicEnabled}
             />
-            <p className="-mt-1 text-[11px] text-neutral-500">{t('admin.competitionPromo.publicSwitchHint')}</p>
+            <p className="-mt-1 text-xs text-neutral-500">{t('admin.competitionPromo.publicSwitchHint')}</p>
             {pendingOpen && (
               <ConfirmModal
                 center
@@ -715,7 +715,7 @@ export default function GamificationPanel() {
                         Admins see the real identity (backend sends it with reveal=True):
                         raw nickname first, email when no nickname is set, falling back to
                         the display name only if both are absent. */}
-                    <td className="py-1.5 pr-4 font-mono text-[11px] text-neutral-400">
+                    <td className="py-1.5 pr-4 font-mono text-xs text-neutral-400">
                       <span className="block truncate">{row.nickname || row.email || row.displayName}</span>
                       {row.nickname && row.email && (
                         <span className="block truncate text-neutral-600"><Copyable text={row.email} label={t('supportDesk.copy.email')} /></span>
@@ -728,7 +728,7 @@ export default function GamificationPanel() {
                           bridge (not verified by broker group / admin rule) get a tag. */}
                       {row.tradeModeSource === 'self' && (
                         <span
-                          className="ml-1.5 rounded border border-amber-400/40 px-1 py-px text-[10px] font-medium text-amber-300"
+                          className="ml-1.5 rounded border border-amber-400/40 px-1 py-px text-xs font-medium text-amber-300"
                           title={t('leaderboard.admin.selfReportedHint')}
                         >
                           {t('leaderboard.admin.selfReported')}
@@ -770,7 +770,7 @@ export default function GamificationPanel() {
               </button>
             </div>
             {history && (
-              <p className="mt-1 font-mono text-[11px] text-neutral-500">
+              <p className="mt-1 font-mono text-xs text-neutral-500">
                 <Copyable text={history.email} label={t('supportDesk.copy.email')} />
               </p>
             )}
@@ -816,7 +816,7 @@ export default function GamificationPanel() {
             ) : (
               history && <p className="mt-3 text-sm text-neutral-400">{t('leaderboard.admin.historyEmpty')}</p>
             )}
-            <p className="mt-3 text-[11px] text-neutral-500">{t('leaderboard.admin.historyHint')}</p>
+            <p className="mt-3 text-xs text-neutral-500">{t('leaderboard.admin.historyHint')}</p>
           </div>
         )}
       </div>
@@ -850,8 +850,8 @@ export default function GamificationPanel() {
                 >
                   <span className="truncate font-mono text-xs">{u.email}</span>
                   <span className="flex shrink-0 items-center gap-2">
-                    <span className="tag bg-white/5 text-[11px] text-neutral-400">{u.role}</span>
-                    <span className="tag bg-white/5 text-[11px] text-neutral-400">{u.plan}</span>
+                    <span className="tag bg-white/5 text-xs text-neutral-400">{u.role}</span>
+                    <span className="tag bg-white/5 text-xs text-neutral-400">{u.plan}</span>
                   </span>
                 </button>
               </li>
@@ -882,7 +882,7 @@ export default function GamificationPanel() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {selected.groups.map((group) => (
                 <div key={group.group} className="rounded-lg bg-white/[0.02] p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+                  <p className="text-xs font-semibold text-neutral-500">
                     {t(`gamification.groups.${group.group}`)}
                   </p>
                   <ul className="mt-2 space-y-1.5">
@@ -896,7 +896,7 @@ export default function GamificationPanel() {
 
             {/* 勋章墙缩略 / badge wall thumbnails */}
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+              <p className="text-xs font-semibold text-neutral-500">
                 {t('gamification.badgeWall')}
               </p>
               <div className="mt-2 grid grid-cols-6 gap-2 sm:grid-cols-8 md:grid-cols-10">

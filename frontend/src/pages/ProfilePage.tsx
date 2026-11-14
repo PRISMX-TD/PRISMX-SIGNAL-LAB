@@ -23,6 +23,7 @@ import BadgeIcon from '../components/badges/BadgeIcon'
 import MedalTilt from '../components/badges/MedalTilt'
 import { materialOf } from '../components/badges/medal'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
+import { BackChevron } from '../components/PageHead'
 
 const TIERS = [1, 2, 3] as const
 
@@ -62,7 +63,8 @@ export default function ProfilePage() {
 
   const back = (
     <button type="button" onClick={() => navigate(-1)} className="pf-back">
-      ← {t('publicProfile.back')}
+      <BackChevron />
+      {t('publicProfile.back')}
     </button>
   )
 

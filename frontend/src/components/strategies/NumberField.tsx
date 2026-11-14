@@ -37,7 +37,7 @@ export function NumberField({ label, value, min = 1, max = 500, isFloat = false,
 
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-neutral-500">{label}</span>
+      <span className="text-xs text-neutral-500">{label}</span>
       {/* type="text" + inputMode，不用 type="number"。
           number 类型会对"还没打完"的中间态做值净化：`2.` 不是合法的浮点字面量，
           `.value` 直接报成空串。于是用户想把 2 改成 2.5，按下小数点的那一拍

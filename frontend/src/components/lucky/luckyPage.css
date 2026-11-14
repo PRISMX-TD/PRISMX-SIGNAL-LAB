@@ -57,7 +57,7 @@
   height: 36px;
   padding: 0 14px;
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
   color: var(--text-2);
   font-size: 13px;
@@ -82,19 +82,19 @@
   text-overflow: ellipsis;
 }
 .lk-round-soon {
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.7;
 }
 .lk-round-badge {
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--lk-accent);
   color: var(--lk-accent-ink);
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 20px;
   text-align: center;
 }
@@ -152,7 +152,7 @@
 .lk-title {
   font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 26px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.15;
   letter-spacing: -0.02em;
   color: var(--text);
@@ -189,13 +189,13 @@
 .lk-cd-cell b {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.1;
   color: var(--text);
 }
 .lk-cd-cell i {
   font-style: normal;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-3);
 }
 
@@ -420,7 +420,7 @@
   margin-left: 4px;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text);
 }
 .lk-sound {
@@ -471,7 +471,7 @@
 .lk-panel-title {
   font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text);
 }
 .lk-panel-aux,
@@ -661,11 +661,9 @@
   overflow: hidden;
   margin-bottom: 4px;
   font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 12px;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
   white-space: nowrap;
   color: var(--tk-kicker);
 }
@@ -707,7 +705,7 @@
 .lk-ticket-date {
   margin-top: 1px;
   font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   line-height: 15px;
   letter-spacing: 0.02em;
@@ -773,7 +771,7 @@
   display: block;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 26px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1;
   letter-spacing: -0.02em;
   white-space: nowrap;
@@ -918,10 +916,10 @@
 .lk-tag {
   flex: none;
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--nest);
   color: var(--text-2);
-  font-size: 11px;
+  font-size: 12px;
 }
 .lk-tag.is-pro {
   background: rgb(var(--purple-rgb) / 0.22);
@@ -948,7 +946,7 @@
   flex: none;
   margin-left: 12px;
   padding: 4px 10px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgb(var(--gold-rgb) / 0.16);
   box-shadow: inset 0 0 0 1px rgb(var(--gold-rgb) / 0.3);
   color: var(--gold);
@@ -980,7 +978,7 @@
 }
 .lk-closed-title {
   font-size: 17px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text);
 }
 .lk-closed-sub {
@@ -1061,7 +1059,7 @@
 .lk-reveal-title {
   font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
   font-size: 26px;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.2;
   letter-spacing: -0.02em;
   color: var(--text);
@@ -1095,7 +1093,7 @@
 .lk-btn {
   width: 100%;
   height: 44px;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 14px;
   font-weight: 500;
 }

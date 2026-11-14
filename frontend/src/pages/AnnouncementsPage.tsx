@@ -8,15 +8,12 @@ import { useTranslation } from 'react-i18next'
 import PageHead from '../components/PageHead'
 import { announcementApi, notificationApi } from '../api/client'
 import { useLive } from '../store/live'
-import { localizeApiError, parseTime } from '../api/utils'
+import { fmtDayShort, localizeApiError } from '../api/utils'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import type { Announcement } from '../api/types'
 
 export function fmtAnnDay(iso: string | null): string {
-  const d = iso ? parseTime(iso) : null
-  if (!d) return ''
-  const sameYear = d.getFullYear() === new Date().getFullYear()
-  return d.toLocaleDateString(undefined, sameYear ? { month: '2-digit', day: '2-digit' } : { year: 'numeric', month: '2-digit', day: '2-digit' })
+  return fmtDayShort(iso)
 }
 
 export default function AnnouncementsPage() {

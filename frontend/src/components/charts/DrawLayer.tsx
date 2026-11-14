@@ -310,7 +310,7 @@ class DrawPrimitive {
 
     const paintHandle = (cx: number, cy: number) => {
       if (!selected || this.locked) return
-      ctx.fillStyle = '#0a0710'; ctx.strokeStyle = '#ffffff'
+      ctx.fillStyle = '#09090b'; ctx.strokeStyle = '#ffffff'
       ctx.lineWidth = 1.5; ctx.setLineDash([])
       ctx.beginPath()
       ctx.rect(cx - handleSz / 2, cy - handleSz / 2, handleSz, handleSz)

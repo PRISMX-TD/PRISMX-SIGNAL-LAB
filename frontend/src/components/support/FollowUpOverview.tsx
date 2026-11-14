@@ -85,7 +85,7 @@ export default function FollowUpOverview({
             disabled={x.n === 0}
             className="sd-fact text-left transition hover:border-[var(--line-hi)] hover:bg-white/[0.05] disabled:cursor-default disabled:opacity-50 disabled:hover:border-[var(--line)] disabled:hover:bg-white/[0.03]"
           >
-            <span className="flex items-center gap-2 text-[11px] text-neutral-400">
+            <span className="flex items-center gap-2 text-xs text-neutral-400">
               <i className={`h-2 w-2 rounded-full ${SOLID[x.s]}`} aria-hidden="true" />
               {t(`supportDesk.status.${x.s}`)}
             </span>

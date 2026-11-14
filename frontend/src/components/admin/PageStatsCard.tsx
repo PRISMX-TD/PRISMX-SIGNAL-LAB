@@ -69,7 +69,7 @@ export default function PageStatsCard({ stats, loading }: { stats: AdminPageStat
           <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label={t('admin.pageStats.metricLabel')}>
             {METRICS.map((key) => (
               <button key={key} type="button" role="tab" aria-selected={metric === key} onClick={() => setMetric(key)}
-                className={`rounded-full px-3 py-1 text-xs transition ${metric === key ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
+                className={`rounded-[10px] px-3 py-1 text-xs transition ${metric === key ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 {t(`admin.pageStats.metric.${key}`)}
               </button>
             ))}
@@ -98,7 +98,7 @@ export default function PageStatsCard({ stats, loading }: { stats: AdminPageStat
                   <tr key={p.path} className="border-t border-white/5">
                     <td className="py-1.5">
                       <span className="text-neutral-200">{pageName(p.path)}</span>
-                      <code className="ml-2 text-[10px] text-neutral-500">{p.path}</code>
+                      <code className="ml-2 text-xs text-neutral-500">{p.path}</code>
                     </td>
                     <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.visitors}</td>
                     <td className="py-1.5 text-right tabular-nums text-neutral-200">{p.views}</td>

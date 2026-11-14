@@ -19,6 +19,7 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
 import { adminApi, ApiHttpError, opsApi } from '../../api/client'
+import { fmtStamp } from '../../api/utils'
 import type {
   AdminSystemStatus, CapacityInfo, CapacityMetricKey, HealthComponent, HealthLevel, HealthLoopRow, OpsBudget,
   OpsHistoryItem, OpsStatus,
@@ -223,7 +224,7 @@ function LoopError({ message, className }: { message: string; className: string 
       <summary className={`cursor-pointer list-none hover:underline [&::-webkit-details-marker]:hidden ${className}`}>
         {t(`admin.health.loopTable.errorKind.${loopErrorKind(message)}`)}
       </summary>
-      <div className="mt-1 break-all text-[10px] leading-snug text-neutral-600">{message}</div>
+      <div className="mt-1 break-all text-xs leading-snug text-neutral-600">{message}</div>
     </details>
   )
 }
@@ -314,7 +315,7 @@ function CapacityCard({ c }: { c: CapacityInfo }) {
         <span className="text-sm font-semibold text-white">{t('admin.health.capacity.title')}</span>
         <span className={`ml-auto text-xs font-medium ${TEXT[c.level]}`}>{t(`admin.health.capacity.level.${c.level}`)}</span>
       </div>
-      <p className="mt-1 text-[11px] text-neutral-500">{t('admin.health.capacity.subtitle')}</p>
+      <p className="mt-1 text-xs text-neutral-500">{t('admin.health.capacity.subtitle')}</p>
 
       <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         {CAPACITY_METRICS.map(({ key }) => {
@@ -330,10 +331,10 @@ function CapacityCard({ c }: { c: CapacityInfo }) {
                 <div className={`h-full ${BAR[m.level]}`} style={{ width: `${m.fillPct}%` }} />
                 <div className="absolute top-0 h-full w-px bg-amber-300/80" style={{ left: `${m.warnPct}%` }} />
               </div>
-              <p className="mt-2 text-[11px] tabular-nums text-neutral-400">
+              <p className="mt-2 text-xs tabular-nums text-neutral-400">
                 {t('admin.health.capacity.meter', { now: n(m.now), today: n(m.today), week: n(m.week) })}
               </p>
-              <p className="text-[11px] tabular-nums text-neutral-500">
+              <p className="text-xs tabular-nums text-neutral-500">
                 {t('admin.health.capacity.limits', { warn: m.warn.toLocaleString(), down: m.down.toLocaleString() })}
               </p>
             </div>
@@ -474,7 +475,7 @@ function RestartModal({ kind, budget, onClose, onDone }: {
             placeholder={t('admin.health.actions.passwordPlaceholder')}
             className="input mt-1 w-full"
           />
-          <p className="mt-1 text-[11px] text-neutral-500">{t('admin.health.actions.passwordHint')}</p>
+          <p className="mt-1 text-xs text-neutral-500">{t('admin.health.actions.passwordHint')}</p>
           {error && <p className="mt-2 text-xs text-down" role="alert">{error}</p>}
           <div className="mt-5 flex gap-3">
             <button type="button" onClick={onClose} disabled={busy} className="btn-ghost flex-1 py-2 text-sm">
@@ -514,7 +515,7 @@ function OpsHistoryList({ ops }: { ops: OpsStatus | null }) {
         <ul className="divide-y divide-white/5 text-xs">
           {items.map((h, i) => (
             <li key={`${h.at}-${i}`} className="flex flex-wrap gap-x-3 gap-y-0.5 py-2">
-              <span className="num text-neutral-500">{new Date(h.at * 1000).toLocaleString()}</span>
+              <span className="num text-neutral-500">{fmtStamp(new Date(h.at * 1000), { clock: 'hms' })}</span>
               <span className="text-neutral-200">{h.source === 'auto' ? t('admin.health.history.auto') : h.operator}</span>
               <span className="text-neutral-300">{t(`admin.health.history.action.${h.action}`)}</span>
               <span className={h.result === 'ok' || h.result === 'started' ? 'text-up' : 'text-amber-300'}>{resultText(h.result)}</span>
@@ -557,7 +558,7 @@ function LoopTable({ rows, onRestart, onRefreshCompetitions, busy }: {
               <tr key={r.name} className="align-top">
                 <td className="py-2 pr-3 text-neutral-200">
                   {label === nameKey ? r.name : label}
-                  <div className="text-[10px] text-neutral-600">{r.name}</div>
+                  <div className="text-xs text-neutral-600">{r.name}</div>
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3">
                   <span className="flex items-center gap-1.5">
@@ -596,7 +597,7 @@ function LoopTable({ rows, onRestart, onRefreshCompetitions, busy }: {
           })}
         </tbody>
       </table>
-      <p className="mt-3 text-[11px] text-neutral-500">{t('admin.health.loopTable.errorHint')}</p>
+      <p className="mt-3 text-xs text-neutral-500">{t('admin.health.loopTable.errorHint')}</p>
     </div>
   )
 }
@@ -612,7 +613,7 @@ function Runbook() {
           <li key={id} className="py-3 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-start gap-2">
               <span className="text-sm text-neutral-100">{t(`admin.health.runbook.items.${id}.q`)}</span>
-              <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${TAG_CLS[tag]}`}>
+              <span className={`ml-auto shrink-0 rounded-[10px] px-2 py-0.5 text-xs font-medium ${TAG_CLS[tag]}`}>
                 {t(`admin.health.runbook.tag.${tag}`)}
               </span>
             </div>
@@ -744,7 +745,7 @@ export default function SystemStatusPanel() {
             <p className="mt-1 text-xs text-neutral-500">{t('admin.health.subtitle')}</p>
           </div>
           {overall && (
-            <span className={`flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium ${BORDER[overall]} ${TEXT[overall]}`}>
+            <span className={`flex items-center gap-2 rounded-[10px] border px-3 py-1 text-sm font-medium ${BORDER[overall]} ${TEXT[overall]}`}>
               <Light level={overall} />
               {t(`admin.health.overall.${overall}`)}
             </span>

@@ -119,6 +119,42 @@ export default function BridgePage() {
     }
   }
 
+  // 手机卡片与桌面表格共用的三块 / pieces shared by the phone cards and the desktop table
+  const statusTag = (a: MT5Account) => (
+    <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
+      {a.online ? t('common.online') : t('common.offline')}
+    </span>
+  )
+  const suffixEditor = (a: MT5Account) => (
+    <div className="flex items-center gap-1.5">
+      <input
+        className="input h-7 w-20 font-mono text-xs"
+        placeholder={t('bind.suffixPlaceholder')}
+        value={suffixDrafts[a.login] ?? ''}
+        onChange={(e) => setSuffixDrafts((prev) => ({ ...prev, [a.login]: e.target.value }))}
+      />
+      <button
+        onClick={() => saveSuffix(a.login)}
+        disabled={savingLogin === a.login}
+        className="btn-ghost px-2 py-1 text-xs disabled:opacity-50"
+      >
+        {savedLogin === a.login ? t('bind.saved') : t('common.save')}
+      </button>
+    </div>
+  )
+  // 删除：灰色文字按钮，悬停才变红；以前是每行一个红色实心块。点了走确认框。
+  // Delete: a grey text button that turns red on hover (it was a red block on every row); confirms first.
+  const deleteButton = (a: MT5Account) => (
+    <button
+      onClick={() => setDeleteTarget(a)}
+      disabled={a.online}
+      title={a.online ? t('bind.deleteNeedOffline') : t('bind.deleteAccount')}
+      className="px-1 py-1 text-xs text-neutral-500 transition hover:text-down disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:text-neutral-500"
+    >
+      {t('common.delete')}
+    </button>
+  )
+
   return (
     <div>
       <PageHead
@@ -147,16 +183,48 @@ export default function BridgePage() {
                 {t('bind.accountQuotaReached')}
               </p>
             )}
-            {/* whitespace-nowrap：窄屏下保持列宽由内容决定、外层横向滚动，
-                表头不被挤成竖排（与 /bind 的直连账号表同一处理）。
-                whitespace-nowrap: on narrow screens columns keep their content
-                width and the wrapper scrolls, headers never squeeze into
-                vertical stacks (same treatment as the /bind table). */}
-            <div className="overflow-x-auto">
+            {/* 2026-11-15 起手机上每个账户一张卡：以前 7 列表格在手机上只露出前 3 列，余额、
+                状态、删除要横滑才看得到，也没有任何提示。删除是灰色文字按钮，点了仍走下面的
+                确认框。桌面保留表格。
+                Since 2026-11-15 each account is a card on phones: the 7-column table showed
+                only its first 3 columns there, with balance, status and delete behind an
+                unhinted sideways scroll. Delete is a grey text button that still goes through
+                the confirm dialog below. Desktop keeps the table. */}
+            <ul className="flex flex-col gap-2 sm:hidden">
+              {bridgeAccounts.map((a) => (
+                <li key={a.login} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-sm text-neutral-100">{a.login}</div>
+                      <div className="mt-0.5 truncate text-xs text-neutral-500">
+                        {[a.accountName, a.company].filter(Boolean).join(' · ') || '—'}
+                      </div>
+                    </div>
+                    {statusTag(a)}
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <dt className="text-neutral-500">{t('bind.balance')}</dt>
+                      <dd className="mt-0.5 font-mono text-sm text-neutral-200">{a.balance != null ? a.balance.toFixed(2) : '—'}</dd>
+                    </div>
+                    <div>
+                      <dt className="text-neutral-500">{t('bind.equity')}</dt>
+                      <dd className="mt-0.5 font-mono text-sm text-neutral-200">{a.equity != null ? a.equity.toFixed(2) : '—'}</dd>
+                    </div>
+                  </dl>
+                  <div className="mt-3 flex items-center gap-2 border-t border-white/[0.06] pt-3">
+                    <span className="text-xs text-neutral-500">{t('bind.suffixLabel')}</span>
+                    {suffixEditor(a)}
+                    <span className="ml-auto">{deleteButton(a)}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <div className="hidden overflow-x-auto sm:block">
               <table className="w-full whitespace-nowrap text-sm">
                 <thead>
-                  <tr className="text-left text-xs uppercase tracking-wider text-neutral-500">
-                    <th className="px-3 py-2">Login</th>
+                  <tr className="text-left text-xs text-neutral-500">
+                    <th className="px-3 py-2">{t('orders.acct.login')}</th>
                     <th className="px-3 py-2">{t('bind.accountName')}</th>
                     <th className="px-3 py-2">{t('bind.company')}</th>
                     <th className="px-3 py-2 text-right">{t('bind.balance')}</th>
@@ -178,40 +246,9 @@ export default function BridgePage() {
                       <td className="px-3 py-2 text-right font-mono text-neutral-200">
                         {a.equity != null ? a.equity.toFixed(2) : '—'}
                       </td>
-                      <td className="px-3 py-2 text-center">
-                        <span className={`tag ${a.online ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-500'}`}>
-                          {a.online ? t('common.online') : t('common.offline')}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <input
-                            className="input h-7 w-20 font-mono text-xs"
-                            placeholder={t('bind.suffixPlaceholder')}
-                            value={suffixDrafts[a.login] ?? ''}
-                            onChange={(e) =>
-                              setSuffixDrafts((prev) => ({ ...prev, [a.login]: e.target.value }))
-                            }
-                          />
-                          <button
-                            onClick={() => saveSuffix(a.login)}
-                            disabled={savingLogin === a.login}
-                            className="btn-ghost px-2 py-1 text-[11px] disabled:opacity-50"
-                          >
-                            {savedLogin === a.login ? t('bind.saved') : t('common.save')}
-                          </button>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <button
-                          onClick={() => setDeleteTarget(a)}
-                          disabled={a.online}
-                          title={a.online ? t('bind.deleteNeedOffline') : t('bind.deleteAccount')}
-                          className="rounded-lg border border-down/30 bg-down/5 px-2 py-1 text-[11px] font-medium text-down transition hover:bg-down/15 disabled:cursor-not-allowed disabled:opacity-30"
-                        >
-                          {t('common.delete')}
-                        </button>
-                      </td>
+                      <td className="px-3 py-2 text-center">{statusTag(a)}</td>
+                      <td className="px-3 py-2">{suffixEditor(a)}</td>
+                      <td className="px-3 py-2 text-center">{deleteButton(a)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -60,7 +60,7 @@ function CapitalField({ value, onChange }: { value: number; onChange: (v: number
 
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.capital')}</span>
+      <span className="text-xs text-neutral-500">{t('simulator.capital')}</span>
       <input
         type="number"
         className="input"
@@ -116,7 +116,7 @@ function EquityCurve({ points, capital }: { points: Array<{ equity: number }>; c
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      <div className="mt-1 text-right text-[11px] text-neutral-500">
+      <div className="mt-1 text-right text-xs text-neutral-500">
         {t('simulator.baseline')}: ${fmtMoney(capital)}
       </div>
     </div>
@@ -187,7 +187,7 @@ export default function SimulatorPage() {
           <CapitalField value={capital} onChange={setCapital} />
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-neutral-500">
+            <span className="text-xs text-neutral-500">
               {t('simulator.risk')} · <b className="num text-prism-300">{risk.toFixed(1)}%</b>
             </span>
             <input
@@ -202,7 +202,7 @@ export default function SimulatorPage() {
           </label>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.range')}</span>
+            <span className="text-xs text-neutral-500">{t('simulator.range')}</span>
             <div className="flex flex-wrap gap-2">
               {DAYS_OPTIONS.map((d) => (
                 <button key={d} onClick={() => setDays(d)} className={segBtn(days === d)}>
@@ -213,7 +213,7 @@ export default function SimulatorPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] uppercase tracking-wide text-neutral-500">{t('simulator.mode')}</span>
+            <span className="text-xs text-neutral-500">{t('simulator.mode')}</span>
             <div className="flex flex-wrap gap-2">
               <button onClick={() => setMode('compound')} className={segBtn(mode === 'compound')}>
                 {t('simulator.modeCompound')}
@@ -250,11 +250,11 @@ export default function SimulatorPage() {
           <section className={`glass mb-5 p-5 transition-opacity ${loading ? 'opacity-60' : ''}`}>
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-neutral-500">{t('simulator.finalEquity')}</div>
+                <div className="text-xs text-neutral-500">{t('simulator.finalEquity')}</div>
                 <div className="num mt-1 text-xl font-bold text-neutral-100">${fmtMoney(summary.finalEquity)}</div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-neutral-500">{t('simulator.returnPct')}</div>
+                <div className="text-xs text-neutral-500">{t('simulator.returnPct')}</div>
                 <div className={`num mt-1 text-xl font-bold ${summary.returnPct >= 0 ? 'text-up' : 'text-down'}`}>
                   {summary.returnPct >= 0 ? '+' : ''}{summary.returnPct.toFixed(2)}%
                 </div>
@@ -265,15 +265,15 @@ export default function SimulatorPage() {
                   prominent as the return — showing them at equal weight is the
                   entire point of this page. Never de-emphasize them. */}
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-neutral-500">{t('simulator.maxDrawdown')}</div>
+                <div className="text-xs text-neutral-500">{t('simulator.maxDrawdown')}</div>
                 <div className="num mt-1 text-xl font-bold text-down">-{summary.maxDrawdownPct.toFixed(2)}%</div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-neutral-500">{t('simulator.maxLossStreak')}</div>
+                <div className="text-xs text-neutral-500">{t('simulator.maxLossStreak')}</div>
                 <div className="num mt-1 text-xl font-bold text-down">{summary.maxLossStreak}</div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-neutral-500">{t('simulator.winRate')}</div>
+                <div className="text-xs text-neutral-500">{t('simulator.winRate')}</div>
                 <div className="num mt-1 text-xl font-bold text-neutral-100">
                   {summary.winRate == null ? '-' : `${Math.round(summary.winRate * 100)}%`}
                   <span className="ml-1.5 text-xs font-normal text-neutral-500">
@@ -282,14 +282,14 @@ export default function SimulatorPage() {
                 </div>
               </div>
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
-                <div className="text-[11px] text-neutral-500">{t('simulator.avgRr')}</div>
+                <div className="text-xs text-neutral-500">{t('simulator.avgRr')}</div>
                 <div className="num mt-1 text-xl font-bold text-neutral-100">
                   {summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}
                 </div>
               </div>
             </div>
             {summary.skipped > 0 && (
-              <p className="mt-3 text-[11px] text-neutral-500">{t('simulator.skipped', { n: summary.skipped })}</p>
+              <p className="mt-3 text-xs text-neutral-500">{t('simulator.skipped', { n: summary.skipped })}</p>
             )}
           </section>
 
@@ -306,7 +306,7 @@ export default function SimulatorPage() {
             <div className="mt-3 overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-white/10 text-left text-xs uppercase tracking-wider text-neutral-500">
+                  <tr className="border-b border-white/10 text-left text-xs text-neutral-500">
                     <th className="px-3 py-2 font-medium">{t('orders.colTime')}</th>
                     <th className="px-3 py-2 font-medium">{t('orders.colSymbol')}</th>
                     <th className="px-3 py-2 font-medium">{t('orders.colSide')}</th>

@@ -69,7 +69,7 @@
 .stg-flow-lead h3 {
   font-size: 20px;
   line-height: 1.15;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-flow-lead p {
@@ -113,7 +113,7 @@
   display: grid;
   place-items: center;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--purple-hi);
 }
 .stg-step b {
@@ -121,7 +121,7 @@
   padding-top: 8px;
   font-size: 15px;
   line-height: 1.3;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-step p {
@@ -145,13 +145,13 @@
 }
 .stg-sec-head h3 {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-sec-head b {
   font-size: 20px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--purple-hi);
 }
 .stg-sec-head .aux {
@@ -165,7 +165,7 @@
   justify-content: center;
   height: 36px;
   padding: 0 16px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line-hi);
   background: transparent;
   color: var(--text-2);
@@ -211,7 +211,7 @@
 .stg-row .sym-ava {
   width: 36px;
   height: 36px;
-  font-size: 11px;
+  font-size: 12px;
 }
 .stg-row-name {
   min-width: 0;
@@ -278,7 +278,7 @@
 }
 .stg-perf .k {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -288,7 +288,7 @@
   margin-top: 6px;
   font-size: 17px;
   line-height: 1;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
   white-space: nowrap;
 }
@@ -300,7 +300,7 @@
 }
 .stg-perf .v small {
   margin-left: 2px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
 }
@@ -382,7 +382,7 @@
   white-space: nowrap;
 }
 .stg-sig-time .k {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -406,7 +406,7 @@
   align-items: center;
   height: 36px;
   padding: 0 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 500;
@@ -431,13 +431,13 @@
 .stg-picker-head h3 {
   font-size: 20px;
   line-height: 1.15;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-picker h4 {
   margin-top: 24px;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-picker-hint {
@@ -494,7 +494,7 @@
 .stg-preset-top b {
   font-size: 15px;
   line-height: 1.3;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-preset-top span {
@@ -526,7 +526,7 @@
 .stg-blank b {
   display: block;
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-blank p {
@@ -551,7 +551,7 @@
   gap: 8px;
   height: 36px;
   padding: 0 14px 0 8px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 1px solid var(--line-hi);
   background: transparent;
   color: var(--text-2);
@@ -570,8 +570,8 @@
   place-items: center;
   background: var(--nest-hi);
   color: var(--text-3);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
 }
 .stg-stepbtn:hover:not(:disabled) {
   color: #fff;
@@ -604,7 +604,7 @@
   margin-top: 24px;
 }
 .stg-step-head .cap {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
   color: var(--text-3);
@@ -613,7 +613,7 @@
   margin-top: 6px;
   font-size: 20px;
   line-height: 1.15;
-  font-weight: 700;
+  font-weight: 500;
   color: #fff;
 }
 .stg-step-head p {

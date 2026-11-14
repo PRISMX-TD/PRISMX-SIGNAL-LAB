@@ -37,6 +37,7 @@ import {
 import { SkeletonPage } from '../components/Skeleton'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
+import { BackChevron } from '../components/PageHead'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
 import { compCard, compPublicLink } from '../components/share/cardData'
 import { bugReadout, clockOf, countdownOf, fmtRange, statusTagKey } from '../components/competition/compClock'
@@ -584,7 +585,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
               : t('competition.err.retry')}
         </p>
         {kind === 'notFound' && (
-          <button type="button" onClick={onBack} className="cmp-back">← {t('competition.backToList')}</button>
+          <button type="button" onClick={onBack} className="cmp-back"><BackChevron />{t('competition.backToList')}</button>
         )}
         {kind === 'retry' && (
           <button type="button" onClick={() => setAttempt((n) => n + 1)} className="cmp-btn-ghost">
@@ -633,7 +634,8 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
     <div className="cmp-detail">
       <ShareSheet spec={share} onClose={() => setShare(null)} />
       <button type="button" onClick={onBack} className="cmp-back">
-        ← {t('competition.backToList')}
+        <BackChevron />
+        {t('competition.backToList')}
       </button>
 
       {/* ── 转播台式详情：左 380px 侧栏（赛名、大钟、你的名次、事实、报名动作），
@@ -680,7 +682,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
                           detail.name, entry.finalRank!, (entry.finalScore ?? row?.score ?? 0) * 100,
                           detail.participants ?? detail.board.rows.length,
                           detail.publicView ? compPublicLink(detail.id) : undefined) } }] })}
-                        className="ml-2 shrink-0 rounded-full bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
+                        className="ml-2 shrink-0 rounded-[10px] bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
                         {t('share.button')}
                       </button>
                     )}

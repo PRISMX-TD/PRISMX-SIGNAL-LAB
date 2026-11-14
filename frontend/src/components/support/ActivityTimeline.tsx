@@ -118,19 +118,19 @@ export default function ActivityTimeline({
                 )}
                 {'chips' in l &&
                   l.chips?.map((c) => (
-                    <span key={c} className="rounded-full bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-neutral-400">
+                    <span key={c} className="rounded-[10px] bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">
                       {c}
                     </span>
                   ))}
               </div>
-              {'sub' in l && l.sub && <div className="mt-0.5 text-[11px] text-neutral-400">{l.sub}</div>}
-              <div className="num text-[11px] text-neutral-500">{fmtDate(it.at)}</div>
+              {'sub' in l && l.sub && <div className="mt-0.5 text-xs text-neutral-400">{l.sub}</div>}
+              <div className="num text-xs text-neutral-500">{fmtDate(it.at)}</div>
             </li>
           )
         })}
       </ol>
       {items.length > initial && (
-        <button type="button" className="mt-3 text-[11px] font-medium text-[var(--purple-hi)] hover:underline" onClick={() => setAll((v) => !v)}>
+        <button type="button" className="mt-3 text-xs font-medium text-[var(--purple-hi)] hover:underline" onClick={() => setAll((v) => !v)}>
           {all ? t('supportDesk.activity.less') : t('supportDesk.activity.more', { n: items.length })}
         </button>
       )}

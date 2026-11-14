@@ -330,7 +330,7 @@ class PosPrimitive {
     const bx = placeLabel(taken, y - bh / 2, y + bh / 2, w, bw)
     taken.push({ x: bx, w: bw, top: y - bh / 2, bottom: y + bh / 2 })
     ctx.globalAlpha = 1
-    ctx.fillStyle = 'rgba(10, 7, 16, 0.82)'
+    ctx.fillStyle = 'rgba(9, 9, 11, 0.82)'
     ctx.fillRect(bx, y - bh / 2, bw, bh)
     ctx.strokeStyle = color
     ctx.lineWidth = 1

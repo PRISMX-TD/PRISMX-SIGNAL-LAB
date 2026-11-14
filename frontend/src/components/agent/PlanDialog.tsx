@@ -116,7 +116,7 @@ export default function PlanDialog<U extends AgentLinkUser>({
           </div>
         )}
 
-        <p className="mt-4 text-[11px] uppercase tracking-wide text-neutral-500">{t('agent.plan.extend')}</p>
+        <p className="mt-4 text-xs text-neutral-500">{t('agent.plan.extend')}</p>
         <div className="mt-2 grid grid-cols-3 gap-2">
           {EXTEND_OPTIONS.map((days) => (
             <button
@@ -130,7 +130,7 @@ export default function PlanDialog<U extends AgentLinkUser>({
             </button>
           ))}
         </div>
-        <p className="mt-2 text-[11px] leading-relaxed text-neutral-500">{t('agent.plan.extendHint')}</p>
+        <p className="mt-2 text-xs leading-relaxed text-neutral-500">{t('agent.plan.extendHint')}</p>
 
         <div className="mt-5 flex items-center justify-between gap-3 border-t border-white/10 pt-4">
           <button

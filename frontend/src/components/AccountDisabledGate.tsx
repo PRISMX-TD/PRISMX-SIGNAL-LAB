@@ -71,7 +71,7 @@ export default function AccountDisabledGate() {
             renders when the backend sent no reason — no empty frame. */}
         {reason && (
           <div className="mt-4 rounded-xl border border-down/30 bg-down/10 px-4 py-3">
-            <div className="text-[11px] uppercase tracking-wide text-neutral-400">
+            <div className="text-xs text-neutral-400">
               {t('accountDisabled.reasonLabel')}
             </div>
             <p className="mt-1 break-words text-sm leading-relaxed text-neutral-100">{reason}</p>

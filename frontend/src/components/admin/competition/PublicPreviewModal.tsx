@@ -77,7 +77,7 @@ export default function PublicPreviewModal({ compId, onClose }: { compId: string
             )}
           </div>
           {data.snapshotAt && (
-            <p className="text-[11px] text-neutral-500">
+            <p className="text-xs text-neutral-500">
               {t('admin.competitionPromo.snapshotAt', { time: fmtTime(data.snapshotAt) })}
             </p>
           )}

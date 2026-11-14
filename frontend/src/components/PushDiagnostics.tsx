@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { pushApi } from "../api/client"
+import { fmtStamp } from "../api/utils"
 import { getPushDiag, type PushDiagStep } from "../utils/pushDiag"
 import { detectPushEnv, isStandalone } from "../utils/pushEnv"
 
@@ -141,7 +142,7 @@ export default function PushDiagnostics() {
         ch.port1.onmessage = (ev) => {
           if (!alive) return
           const ts = ev.data?.lastPushAt
-          setLastPush(ts ? new Date(ts).toLocaleString() : t("account.notifDiagNever"))
+          setLastPush(ts ? fmtStamp(new Date(ts), { clock: "hms" }) : t("account.notifDiagNever"))
         }
         ctrl.postMessage({ type: "PING_PUSH_HEARTBEAT" }, [ch.port2])
         // SW 存在但不回消息也有可能（版本不匹配、消息处理器异常）。给一个超时，

@@ -94,7 +94,7 @@
   .font-display-xl {
     font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
     font-variation-settings: "wdth" 118;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: -0.035em;
     line-height: 0.94;
   }

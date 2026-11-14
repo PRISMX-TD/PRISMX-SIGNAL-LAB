@@ -219,8 +219,10 @@
      describing two numbers. 24 is the correct one: the concentric derivation above
      lands on 24 - 16 = 8, which is exactly --r-tile, whereas 26 would give 10, the
      very value this scale replaced.) */
-  --r-xs: 999px;
-  --r-md: 999px;
+  /* 2026-11-15 起控件从胶囊改成圆角矩形：小件 8、控件 10。
+     Since 2026-11-15 controls are rounded rectangles, not capsules: 8 small, 10 controls. */
+  --r-xs: 8px;
+  --r-md: 10px;
   --r-lg: 24px;
   --r-xl: 24px;
   /* 内嵌格专用（原来没有这一档，内嵌格借用 --r-md）。

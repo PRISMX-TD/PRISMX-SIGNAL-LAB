@@ -218,10 +218,8 @@
   margin-top: 18px;
 }
 .pf-comps-h {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
   color: var(--text-3);
 }
 

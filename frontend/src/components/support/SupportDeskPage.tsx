@@ -217,7 +217,7 @@ export default function SupportDeskPage() {
         />
         <button
           type="submit"
-          className="h-8 shrink-0 rounded-full bg-[var(--nest)] px-3.5 text-xs font-medium text-neutral-200 transition hover:bg-[var(--nest-hi)] disabled:opacity-40"
+          className="h-8 shrink-0 rounded-[10px] bg-[var(--nest)] px-3.5 text-xs font-medium text-neutral-200 transition hover:bg-[var(--nest-hi)] disabled:opacity-40"
           disabled={searching || !search.trim()}
         >
           {searching ? t('common.loading') : t('supportDesk.search.go')}
@@ -242,9 +242,9 @@ export default function SupportDeskPage() {
                     <Avatar name={u.nickname || u.email} size={30} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[13px] font-medium text-neutral-100">{u.nickname || t('supportDesk.card.noNickname')}</span>
-                      <span className="block truncate font-mono text-[11px] text-neutral-500">{u.email || '-'}</span>
+                      <span className="block truncate font-mono text-xs text-neutral-500">{u.email || '-'}</span>
                     </span>
-                    <span className="shrink-0 text-[11px] font-medium text-neutral-400">{u.plan}</span>
+                    <span className="shrink-0 text-xs font-medium text-neutral-400">{u.plan}</span>
                   </button>
                 </li>
               ))}
@@ -268,7 +268,7 @@ export default function SupportDeskPage() {
                 <h1 className="font-display text-[22px] font-semibold leading-tight tracking-tight text-neutral-50">{t('supportDesk.title')}</h1>
                 <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
                   <span className="truncate text-neutral-300">{me.nickname || me.email}</span>
-                  <span className="rounded-full border border-[var(--line-hi)] px-2 py-px text-[11px] text-neutral-400">{tierLabel}</span>
+                  <span className="rounded-[10px] border border-[var(--line-hi)] px-2 py-px text-xs text-neutral-400">{tierLabel}</span>
                   {revealLeft != null && <span>{t('supportDesk.card.revealLeft', { n: revealLeft })}</span>}
                 </p>
               </div>
@@ -286,7 +286,7 @@ export default function SupportDeskPage() {
                 <span>{tab.label}</span>
                 {tab.badge && (
                   <span
-                    className={`num rounded-full px-1.5 py-px text-[11px] font-semibold ${
+                    className={`num rounded-[10px] px-1.5 py-px text-xs font-semibold ${
                       tab.warm ? 'bg-[var(--mid-bg)] text-[var(--mid)]' : 'bg-white/[0.06] text-neutral-400'
                     }`}
                     title={tab.badgeLabel}
@@ -309,7 +309,7 @@ export default function SupportDeskPage() {
           <div className="pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-4" style={{ top: 'calc(var(--app-hdr, 65px) + 12px)' }}>
             <div
               role="status"
-              className={`sd-toast pointer-events-auto max-w-md rounded-full border bg-[var(--surface-2)] px-4 py-2 text-[13px] font-medium shadow-[0_12px_32px_rgb(0_0_0/0.45)] ${
+              className={`sd-toast pointer-events-auto max-w-md rounded-[10px] border bg-[var(--surface-2)] px-4 py-2 text-[13px] font-medium shadow-[0_12px_32px_rgb(0_0_0/0.45)] ${
                 toast.kind === 'err' ? 'border-[rgb(var(--down-rgb)/0.45)] text-[var(--down)]' : 'border-[rgb(var(--up-rgb)/0.45)] text-[var(--up)]'
               }`}
             >

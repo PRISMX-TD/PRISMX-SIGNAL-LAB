@@ -136,7 +136,7 @@
   position: relative;
   height: 3px;
   margin-top: 14px;
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.08);
 }
 .tk-fill {
@@ -146,7 +146,7 @@
   bottom: 0;
   left: 0;
   width: calc(var(--pct, 0) * 100%);
-  border-radius: 999px;
+  border-radius: 10px;
   background: linear-gradient(90deg, var(--purple-hi), var(--purple-vivid));
   animation: tk-grow 0.9s var(--ease-out) both;
   animation-delay: calc(var(--i, 0) * 60ms + 150ms);
@@ -163,7 +163,7 @@
 }
 .tk-hint {
   margin-top: 8px;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 15px;
   color: #71717a;
 }
@@ -244,7 +244,7 @@
   gap: 14px;
   margin: 14px 0 0;
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-weight: 800;
+  font-weight: 500;
   font-size: 40px;
   line-height: 1.02;
   letter-spacing: -0.02em;
@@ -313,12 +313,12 @@
   display: block;
   margin-top: 9px;
   text-align: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   color: #71717a;
 }
 .ach-rail .on b { color: #a1a1aa; }
-.ach-rail .cur b { color: #f4f4f5; font-weight: 700; }
+.ach-rail .cur b { color: #f4f4f5; font-weight: 500; }
 /* 链条变成可点：按钮只是把点和字裹起来撑满整格，不带任何自己的视觉——
    .on / .cur 的配色规则都括在 li 上，用的是后代选择器，套一层按钮照常命中。
    （不用 display:contents：产物语法下限是 Chrome 70，那一代它会把按钮从无障碍树里拿掉。）
@@ -368,7 +368,7 @@
 }
 .ach-stats > div { flex: 1; min-width: 0; padding-right: 16px; }
 .ach-stats > div + div { padding-left: 16px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
-.ach-stats small { display: block; font-size: 11px; color: #71717a; letter-spacing: 0.04em; }
+.ach-stats small { display: block; font-size: 12px; color: #71717a; letter-spacing: 0.04em; }
 .ach-stats strong { display: block; margin-top: 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: #f4f4f5; }
 .ach-stats strong span { font-size: 14px; font-weight: 500; color: #71717a; }
 .ach-link {
@@ -376,7 +376,7 @@
   padding: 0;
   border: 0;
   background: none;
-  font-size: 11px;
+  font-size: 12px;
   color: #a1a1aa;
   text-decoration: underline dotted;
   text-underline-offset: 3px;
@@ -542,9 +542,9 @@
 .ach-cap-btn {
   padding: 3px 10px;
   border: 1px solid rgba(139, 108, 255, 0.45);
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgba(110, 66, 255, 0.16);
-  font-size: 11px;
+  font-size: 12px;
   color: #d9ceff;
   cursor: pointer;
 }
@@ -553,15 +553,15 @@
 .ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: rgba(139, 108, 255, 0.45); transition: background var(--dur-base), transform var(--dur-base); }
 .ach-slots i.cur { background: var(--purple-soft); transform: scale(1.25); }
 .ach-slots i.empty { background: transparent; border: 1px solid rgba(255, 255, 255, 0.25); }
-.ach-swipe-hint { display: none; margin-top: 4px; font-size: 10.5px; color: #52525b; }
+.ach-swipe-hint { display: none; margin-top: 4px; font-size: 12px; color: #52525b; }
 .ach-gyro-btn {
   display: none;
   margin: 8px auto 0;
   padding: 5px 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgba(255, 255, 255, 0.05);
-  font-size: 11px;
+  font-size: 12px;
   color: #a1a1aa;
   cursor: pointer;
 }
@@ -583,7 +583,7 @@
   font-weight: 500;
   color: #71717a;
 }
-.ach-sec-h h3 b { margin-right: 10px; font-size: 15px; font-weight: 700; color: #f4f4f5; }
+.ach-sec-h h3 b { margin-right: 10px; font-size: 15px; font-weight: 500; color: #f4f4f5; }
 .ach-sec-h .r { font-size: 12px; color: #71717a; }
 .ach-sec-h .r b { font-weight: 600; color: #f4f4f5; }
 .ach .tk-grid { margin-top: 14px; }
@@ -595,11 +595,11 @@
 .ach-s-special::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(184, 150, 78, 0.14), transparent 70%); }
 .ach-s-limited::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.16), transparent 70%); }
 .ach-shelf-h { position: relative; display: flex; align-items: baseline; justify-content: space-between; }
-.ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 700; color: #f4f4f5; }
-.ach-shelf-h h4 span { margin-left: 10px; font-size: 11px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
+.ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 500; color: #f4f4f5; }
+.ach-shelf-h h4 span { margin-left: 10px; font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
 .ach-shelf-h .r { font-size: 12px; color: #71717a; }
 .ach-shelf-h .r b { color: #a1a1aa; font-weight: 600; }
-.ach-closes { display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.02em; color: #b9846a; }
+.ach-closes { display: block; margin-top: 4px; font-size: 12px; letter-spacing: 0.02em; color: #b9846a; }
 .ach-row {
   position: relative;
   display: grid;
@@ -669,37 +669,37 @@
 .ach-tiers i.t1.on { background: #C18A55; }
 .ach-tiers i.t2.on { background: #D5D9E2; }
 .ach-tiers i.t3.on { background: #E4BE6A; box-shadow: 0 0 6px rgba(228, 190, 106, 0.6); }
-.ach-tiers small { margin-left: 4px; font-size: 10.5px; color: #a1a1aa; }
+.ach-tiers small { margin-left: 4px; font-size: 12px; color: #a1a1aa; }
 .ach-item.ghost .ach-tiers small { color: #71717a; }
 /* 详情层的三档阶梯 / the detail layer's tier ladder */
 .ach-ladder { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .ach-ladder li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); opacity: 0.55; text-align: left; }
 .ach-ladder li.on { opacity: 1; background: rgba(255, 255, 255, 0.06); }
-.ach-ladder li b { display: block; font-size: 13px; font-weight: 700; color: #f4f4f5; }
-.ach-ladder li > div > span { display: block; margin-top: 1px; font-size: 11.5px; line-height: 1.4; color: #a1a1aa; }
-.ach-ladder li small { font-size: 11px; color: #71717a; white-space: nowrap; }
-.ach-ladder-check { margin-left: 6px; font-size: 11px; color: var(--up); }
+.ach-ladder li b { display: block; font-size: 13px; font-weight: 500; color: #f4f4f5; }
+.ach-ladder li > div > span { display: block; margin-top: 1px; font-size: 12px; line-height: 1.4; color: #a1a1aa; }
+.ach-ladder li small { font-size: 12px; color: #71717a; white-space: nowrap; }
+.ach-ladder-check { margin-left: 6px; font-size: 12px; color: var(--up); }
 .ach-item.ghost .ach-name { color: #a1a1aa; }
-.ach-meta { margin-top: 3px; max-width: 160px; font-size: 11px; line-height: 1.35; color: #71717a; }
-.ach-own { margin-top: 6px; font-size: 10.5px; color: #71717a; }
+.ach-meta { margin-top: 3px; max-width: 160px; font-size: 12px; line-height: 1.35; color: #71717a; }
+.ach-own { margin-top: 6px; font-size: 12px; color: #71717a; }
 /* 勋章进度条：瓦片上「下一档」下面一条 3px 细条，详情阶梯里未到的档一条。
    与顶部任务瓦片的 .tk-track 同一视觉语言（同高、同圆角、同渐变）。
    Badge progress: a 3px bar under the tile's next-tier line and in unreached
    ladder rows; same visual language as the task tiles' .tk-track. */
 .ach-prog { display: block; width: 100%; }
 .ach-prog.compact { max-width: 160px; margin: 6px auto 0; }
-.ach-prog-track { display: block; position: relative; height: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.ach-prog-fill { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: calc(var(--pct, 0) * 100%); border-radius: 999px; background: linear-gradient(90deg, var(--purple-hi), var(--purple-vivid)); transition: width 0.5s var(--ease-out); }
-.ach-prog-label { display: block; margin-top: 4px; font-size: 10.5px; line-height: 1.3; color: #71717a; text-align: right; }
+.ach-prog-track { display: block; position: relative; height: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.ach-prog-fill { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: calc(var(--pct, 0) * 100%); border-radius: 10px; background: linear-gradient(90deg, var(--purple-hi), var(--purple-vivid)); transition: width 0.5s var(--ease-out); }
+.ach-prog-label { display: block; margin-top: 4px; font-size: 12px; line-height: 1.3; color: #71717a; text-align: right; }
 .ach-prog.compact .ach-prog-label { text-align: center; }
 .ach-ladder .ach-prog { margin-top: 5px; }
 .ach-ladder .ach-prog-label { text-align: left; }
 .ach-eq { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 5px; margin-top: 8px; }
 .ach-eq button, .ach-eq span {
-  font-size: 10.5px;
+  font-size: 12px;
   line-height: 1;
   padding: 5px 9px;
-  border-radius: 999px;
+  border-radius: 10px;
   border: 0;
   background: rgba(255, 255, 255, 0.06);
   color: #a1a1aa;
@@ -744,7 +744,7 @@
   .ach-cone { width: 320px; height: 250px; opacity: 0.55; }
   .ach-floor { width: 260px; bottom: 62px; }
   .ach-floorline { display: none; }
-  .ach-rail b { font-size: 10px; }
+  .ach-rail b { font-size: 12px; }
   .ach-stats strong { font-size: 18px; }
   .ach-shelf { padding: 12px 10px 14px; }
   .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }

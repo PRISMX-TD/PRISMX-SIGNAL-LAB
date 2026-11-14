@@ -172,12 +172,12 @@ export default function CompetitionPromoSection({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-semibold text-neutral-100">{l.label}</span>
                       {l.channel && (
-                        <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-400">
+                        <span className="rounded-[10px] border border-white/10 px-1.5 py-0.5 text-xs text-neutral-400">
                           {l.channel}
                         </span>
                       )}
                     </div>
-                    <div className="num truncate text-[11px] text-neutral-500" title={promoLinkUrl(l)}>
+                    <div className="num truncate text-xs text-neutral-500" title={promoLinkUrl(l)}>
                       {promoLinkUrl(l)}
                     </div>
                   </td>
@@ -239,7 +239,7 @@ export default function CompetitionPromoSection({
                   <tr key={row.code} className="border-t border-white/5">
                     <td className="py-1.5 pr-4 text-neutral-200">
                       {row.label}
-                      {row.channel && <span className="ml-1.5 text-[10px] text-neutral-500">{row.channel}</span>}
+                      {row.channel && <span className="ml-1.5 text-xs text-neutral-500">{row.channel}</span>}
                     </td>
                     {FUNNEL_STEPS.map((s) => (
                       <td key={s} className="num py-1.5 pr-4 text-neutral-300">

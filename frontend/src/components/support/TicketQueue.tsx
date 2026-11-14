@@ -143,7 +143,7 @@ export default function TicketQueue({
                         >
                           {r.title}
                         </span>
-                        <span className="num shrink-0 text-[11px] text-neutral-500">{fmtListTime(r.updatedAt)}</span>
+                        <span className="num shrink-0 text-xs text-neutral-500">{fmtListTime(r.updatedAt)}</span>
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-neutral-400">{r.userEmail || '-'}</span>
                       {r.latestReply && (
@@ -154,22 +154,22 @@ export default function TicketQueue({
                       )}
                       <span className="mt-2 flex items-center gap-2.5">
                         <TicketStatus status={r.status} label={t(`tickets.status.${r.status}`)} />
-                        <span className="truncate text-[11px] text-neutral-500">{t(`tickets.category.${r.category}`)}</span>
+                        <span className="truncate text-xs text-neutral-500">{t(`tickets.category.${r.category}`)}</span>
                         {r.priority === 'urgent' && (
-                          <span className="shrink-0 rounded-full bg-[var(--down-bg)] px-1.5 py-px text-[10px] font-semibold text-[var(--down)]">
+                          <span className="shrink-0 rounded-[10px] bg-[var(--down-bg)] px-1.5 py-px text-xs font-semibold text-[var(--down)]">
                             {t('tickets.priority.urgent')}
                           </span>
                         )}
                         {mine ? (
-                          <span className="ml-auto shrink-0 rounded-full bg-[rgb(var(--purple-rgb)/0.22)] px-2 py-px text-[10px] font-semibold text-[var(--purple-hi)]">
+                          <span className="ml-auto shrink-0 rounded-[10px] bg-[rgb(var(--purple-rgb)/0.22)] px-2 py-px text-xs font-semibold text-[var(--purple-hi)]">
                             {t('supportDesk.queue.me')}
                           </span>
                         ) : r.assigneeId ? (
-                          <span className="ml-auto min-w-0 truncate text-[11px] text-neutral-500">
+                          <span className="ml-auto min-w-0 truncate text-xs text-neutral-500">
                             {t('supportDesk.queue.assignedTo', { name: r.assigneeName || '-' })}
                           </span>
                         ) : awaiting ? (
-                          <span className="ml-auto shrink-0 rounded-full bg-[var(--mid-bg)] px-2 py-px text-[10px] font-semibold text-[var(--mid)]">
+                          <span className="ml-auto shrink-0 rounded-[10px] bg-[var(--mid-bg)] px-2 py-px text-xs font-semibold text-[var(--mid)]">
                             {t('supportDesk.queue.unassignedTag')}
                           </span>
                         ) : null}

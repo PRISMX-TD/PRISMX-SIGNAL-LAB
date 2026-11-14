@@ -58,12 +58,12 @@ export default function FollowUpList({
       type="button"
       aria-pressed={filter === key}
       onClick={() => onFilter(key)}
-      className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium transition ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] px-2.5 text-xs font-medium transition ${
         filter === key ? 'bg-[var(--surface-2)] text-neutral-100 shadow-[inset_0_0_0_1px_var(--line-hi)]' : 'text-neutral-500 hover:text-neutral-200'
       }`}
     >
       {label}
-      <span className="num text-[10px] text-neutral-500">{n}</span>
+      <span className="num text-xs text-neutral-500">{n}</span>
     </button>
   )
 
@@ -73,11 +73,11 @@ export default function FollowUpList({
         <div className="sd-seg" role="group" aria-label={t('supportDesk.tab.followUps')}>
           <button type="button" aria-pressed={mode === 'customers'} onClick={() => onMode('customers')} className={mode === 'customers' ? 'is-on' : ''}>
             {t('supportDesk.followUps.tabCustomers')}
-            <span className="num ml-1.5 text-[11px] text-neutral-500">{total}</span>
+            <span className="num ml-1.5 text-xs text-neutral-500">{total}</span>
           </button>
           <button type="button" aria-pressed={mode === 'requests'} onClick={() => onMode('requests')} className={mode === 'requests' ? 'is-on' : ''}>
             {t('supportDesk.requests.title')}
-            {pendingReq > 0 && <span className="num ml-1.5 text-[11px] text-amber-300">{pendingReq}</span>}
+            {pendingReq > 0 && <span className="num ml-1.5 text-xs text-amber-300">{pendingReq}</span>}
           </button>
         </div>
         {mode === 'customers' && items.length > 0 && (
@@ -119,7 +119,7 @@ export default function FollowUpList({
                     </span>
                     <span className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
                       <span className="min-w-0 flex-1 truncate text-neutral-400">{r.targetName || t('supportDesk.card.noNickname')}</span>
-                      <span className="num shrink-0 text-[11px]">{fmtListTime(r.createdAt)}</span>
+                      <span className="num shrink-0 text-xs">{fmtListTime(r.createdAt)}</span>
                     </span>
                     {r.note && <span className="mt-1 block truncate text-xs text-neutral-500">{r.note}</span>}
                   </button>
@@ -160,7 +160,7 @@ export default function FollowUpList({
                       <span className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
                         <span className="min-w-0 flex-1 truncate text-neutral-400">{t(`supportDesk.goal.${f.goal}`)}</span>
                         {f.priority === 'high' && <Tag tone={FU_PRIORITY_TONE.high}>{t('supportDesk.priority.high')}</Tag>}
-                        <span className="num shrink-0 text-[11px]">{fmtListTime(f.createdAt)}</span>
+                        <span className="num shrink-0 text-xs">{fmtListTime(f.createdAt)}</span>
                       </span>
                       {f.note && <span className="mt-1 block truncate text-xs text-neutral-500">{f.note}</span>}
                     </span>

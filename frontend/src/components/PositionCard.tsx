@@ -305,7 +305,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         // 实时截掉超出该品种步长的小数位，多余的位数根本打不进去。
         onChange={(e) => setCloseVol(limitLotInput(e.target.value, p.symbol))}
       />
-      <p className="text-[11px] text-neutral-500">
+      <p className="text-xs text-neutral-500">
         {t('positions.lotStepHint', { step, min: minVol })}
       </p>
       <div className="flex gap-2">

@@ -24,7 +24,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { announcementApi } from '../api/client'
-import { localizeApiError, parseTime } from '../api/utils'
+import { fmtStamp as fmtSiteStamp, localizeApiError, parseTime } from '../api/utils'
 import { safeHttpUrl } from '../utils/safeUrl'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
 import RichText from '../components/RichText'
@@ -34,7 +34,7 @@ import type { Announcement } from '../api/types'
 
 function fmtStamp(iso: string | null): string {
   const d = iso ? parseTime(iso) : null
-  return d ? d.toLocaleString(undefined, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''
+  return d ? fmtSiteStamp(d, { clock: 'hm' }) : ''
 }
 
 export default function AnnouncementPage() {
