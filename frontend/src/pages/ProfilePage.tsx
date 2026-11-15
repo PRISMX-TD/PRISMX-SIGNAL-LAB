@@ -24,6 +24,7 @@ import MedalTilt from '../components/badges/MedalTilt'
 import { materialOf } from '../components/badges/medal'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import { BackChevron } from '../components/PageHead'
+import { EMPTY } from '../utils/format'
 
 const TIERS = [1, 2, 3] as const
 
@@ -33,7 +34,7 @@ function fmtPct(score: number, signed: boolean): string {
 }
 
 function fmtMonth(iso: string | null): string {
-  if (!iso) return '—'
+  if (!iso) return EMPTY
   return iso.replace('-', '/')
 }
 
@@ -127,7 +128,7 @@ export default function ProfilePage() {
             same time. The string now exists in both JSON files and the
             defaultValue is gone: a genuinely missing key should show. */}
         {data.equippedBadges.length > 0 && (
-          <div className="pf-equipped" aria-label={t('gamification.equipSlots.title')}>
+          <div className="pf-equipped" role="group" aria-label={t('gamification.equipSlots.title')}>
             {data.equippedBadges.map((b, i) => (
               <MedalTilt key={b.id} ariaLabel={t(`gamification.badges.${b.id}.name`)} className={i === 0 ? 'is-main' : ''}>
                 <BadgeIcon id={b.id} tier={b.tier} earned size={i === 0 ? 104 : 72} spin={i === 0} />
@@ -155,7 +156,7 @@ export default function ProfilePage() {
                   <BadgeIcon id={b.id} tier={b.tier} earned size={92} />
                   <b className="ach-name">{t(`gamification.badges.${b.id}.name`)}</b>
                   {tiered && (
-                    <span className="ach-tiers" aria-label={t(`gamification.tier.${b.tier}`)}>
+                    <span className="ach-tiers">
                       {TIERS.map((tier) => (
                         <i key={tier} className={`t${tier} ${b.tier >= tier ? 'on' : ''}`} aria-hidden />
                       ))}
@@ -213,7 +214,7 @@ export default function ProfilePage() {
                   <b className="num">#{c.finalRank}</b>
                   <span className="truncate">{c.name}</span>
                   <span className="num pf-login">{c.login}</span>
-                  <em className="num">{c.finalScore != null ? fmtPct(c.finalScore, true) : '—'}</em>
+                  <em className="num">{c.finalScore != null ? fmtPct(c.finalScore, true) : EMPTY}</em>
                 </li>
               ))}
             </ul>
@@ -233,7 +234,7 @@ export default function ProfilePage() {
           <div className="pf-stats">
             <div className="pf-stat">
               <span>{t('publicProfile.winRate')}</span>
-              <b className="num">{stats.winRate == null ? '—' : (stats.winRate * 100).toFixed(1) + '%'}</b>
+              <b className="num">{stats.winRate == null ? EMPTY : (stats.winRate * 100).toFixed(1) + '%'}</b>
             </div>
             <div className="pf-stat">
               <span>{t('publicProfile.trades')}</span>

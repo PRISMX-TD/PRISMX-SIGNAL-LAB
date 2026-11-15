@@ -13,9 +13,11 @@ import TokenRevealModal from '../components/TokenRevealModal'
 import { useBackToClose } from '../utils/useBackToClose'
 import type { MT5Account } from '../api/types'
 import Toast from '../components/Toast'
+import { useToastState } from '../utils/useToastState'
 import { EmailVerifyInline } from '../components/EmailVerifyNotice'
 import { useAuth } from '../store/auth'
 import { copyToClipboard } from '../components/Copyable'
+import { EMPTY } from '../utils/format'
 
 export default function BridgePage() {
   const { t } = useTranslation()
@@ -33,7 +35,7 @@ export default function BridgePage() {
 
   const [apiToken, setApiToken] = useState<string | null>(null)
   const [revealToken, setRevealToken] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'err'>('idle')
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false)
   const [resetting, setResetting] = useState(false)
 
@@ -43,7 +45,7 @@ export default function BridgePage() {
   const [savedLogin, setSavedLogin] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<MT5Account | null>(null)
   const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState('')
+  const { toast, showToast } = useToastState()
 
   // Bridge 上报的账号（Gateway 直连的账号在 /bind 主页管理）
   // Bridge-reported accounts (gateway-direct ones are managed on /bind).
@@ -51,10 +53,7 @@ export default function BridgePage() {
 
   useBackToClose(resetConfirmOpen, () => setResetConfirmOpen(false))
   useBackToClose(revealToken != null, () => setRevealToken(null))
-  useBackToClose(deleteTarget != null, () => {
-    setDeleteTarget(null)
-    setDeleteError('')
-  })
+  useBackToClose(deleteTarget != null, () => setDeleteTarget(null))
 
   useEffect(() => {
     eaApi.getToken().then((res) => setApiToken(res.apiToken)).catch(() => {})
@@ -72,11 +71,13 @@ export default function BridgePage() {
     })
   }, [accounts])
 
+  // 复制失败要说出来（安卓 WebView 会拒绝剪贴板），同 TokenRevealModal / AgentPage。
+  // Say when the copy fails (Android WebViews can refuse the clipboard).
   const copyToken = async () => {
     if (!apiToken) return
-    if (!(await copyToClipboard(apiToken))) return
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const ok = await copyToClipboard(apiToken)
+    setCopyState(ok ? 'ok' : 'err')
+    setTimeout(() => setCopyState('idle'), ok ? 2000 : 2500)
   }
 
   const resetToken = async () => {
@@ -106,14 +107,12 @@ export default function BridgePage() {
   const confirmDelete = async () => {
     if (!deleteTarget) return
     setDeleting(true)
-    setDeleteError('')
     try {
       await accountApi.remove(deleteTarget.login, deleteTarget.server)
       setDeleteTarget(null)
       refreshAll()
     } catch (e) {
-      setDeleteError(e instanceof Error ? localizeApiError(e.message) : 'error')
-      setTimeout(() => setDeleteError(''), 4000)
+      showToast(e instanceof Error ? localizeApiError(e.message) : t('common.error'), 'error')
     } finally {
       setDeleting(false)
     }
@@ -171,7 +170,7 @@ export default function BridgePage() {
               <h3 className="font-display text-lg font-semibold text-neutral-100">
                 {t('bind.accountsTitle')}
               </h3>
-              <span className={`tag text-xs ${atAccountLimit ? 'bg-amber-500/15 text-amber-400' : 'bg-white/5 text-neutral-400'}`}>
+              <span className={`tag text-xs ${atAccountLimit ? 'bg-warn/15 text-warn' : 'bg-white/5 text-neutral-400'}`}>
                 {accountLimit == null
                   ? t('bind.accountQuotaUnlimited', { n: accounts.length })
                   : t('bind.accountQuota', { n: accounts.length, max: accountLimit })}
@@ -179,7 +178,7 @@ export default function BridgePage() {
             </div>
             <p className="mb-4 text-xs text-neutral-500">{t('bind.accountsHint')}</p>
             {atAccountLimit && (
-              <p className="mb-4 rounded-lg border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-300">
+              <p className="mb-4 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2 text-xs text-warn">
                 {t('bind.accountQuotaReached')}
               </p>
             )}
@@ -192,12 +191,12 @@ export default function BridgePage() {
                 the confirm dialog below. Desktop keeps the table. */}
             <ul className="flex flex-col gap-2 sm:hidden">
               {bridgeAccounts.map((a) => (
-                <li key={a.login} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3.5">
+                <li key={a.login} className="rounded-panel border border-white/[0.07] bg-white/[0.02] p-3.5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="font-mono text-sm text-neutral-100">{a.login}</div>
                       <div className="mt-0.5 truncate text-xs text-neutral-500">
-                        {[a.accountName, a.company].filter(Boolean).join(' · ') || '—'}
+                        {[a.accountName, a.company].filter(Boolean).join(' · ') || EMPTY}
                       </div>
                     </div>
                     {statusTag(a)}
@@ -205,11 +204,11 @@ export default function BridgePage() {
                   <dl className="mt-3 grid grid-cols-2 gap-3 text-xs">
                     <div>
                       <dt className="text-neutral-500">{t('bind.balance')}</dt>
-                      <dd className="mt-0.5 font-mono text-sm text-neutral-200">{a.balance != null ? a.balance.toFixed(2) : '—'}</dd>
+                      <dd className="mt-0.5 font-mono text-sm text-neutral-200">{a.balance != null ? a.balance.toFixed(2) : EMPTY}</dd>
                     </div>
                     <div>
                       <dt className="text-neutral-500">{t('bind.equity')}</dt>
-                      <dd className="mt-0.5 font-mono text-sm text-neutral-200">{a.equity != null ? a.equity.toFixed(2) : '—'}</dd>
+                      <dd className="mt-0.5 font-mono text-sm text-neutral-200">{a.equity != null ? a.equity.toFixed(2) : EMPTY}</dd>
                     </div>
                   </dl>
                   <div className="mt-3 flex items-center gap-2 border-t border-white/[0.06] pt-3">
@@ -238,13 +237,13 @@ export default function BridgePage() {
                   {bridgeAccounts.map((a) => (
                     <tr key={a.login} className="border-t border-white/5">
                       <td className="px-3 py-2 font-mono text-neutral-100">{a.login}</td>
-                      <td className="px-3 py-2 text-neutral-300">{a.accountName || '—'}</td>
-                      <td className="px-3 py-2 text-neutral-400">{a.company || '—'}</td>
+                      <td className="px-3 py-2 text-neutral-300">{a.accountName || EMPTY}</td>
+                      <td className="px-3 py-2 text-neutral-400">{a.company || EMPTY}</td>
                       <td className="px-3 py-2 text-right font-mono text-neutral-200">
-                        {a.balance != null ? a.balance.toFixed(2) : '—'}
+                        {a.balance != null ? a.balance.toFixed(2) : EMPTY}
                       </td>
                       <td className="px-3 py-2 text-right font-mono text-neutral-200">
-                        {a.equity != null ? a.equity.toFixed(2) : '—'}
+                        {a.equity != null ? a.equity.toFixed(2) : EMPTY}
                       </td>
                       <td className="px-3 py-2 text-center">{statusTag(a)}</td>
                       <td className="px-3 py-2">{suffixEditor(a)}</td>
@@ -262,9 +261,9 @@ export default function BridgePage() {
             {t('bind.tokenTitle')}
           </h3>
           <p className="mb-4 text-xs text-neutral-500">{t('bind.tokenHint')}</p>
-          <div className="mb-3 flex items-center gap-2 rounded-xl border border-prism-600/30 bg-prism-600/5 p-3">
+          <div className="mb-3 flex items-center gap-2 rounded-panel border border-prism-600/30 bg-prism-600/5 p-3">
             {apiToken ? (
-              <code className="flex-1 break-all font-mono text-sm text-prism-300">{apiToken}</code>
+              <code className="flex-1 break-all font-mono text-sm text-prism-300 select-all">{apiToken}</code>
             ) : (
               <span className="flex-1 text-xs leading-relaxed text-neutral-400">
                 {neverConnected ? t('bind.tokenNeverGenerated') : t('bind.tokenHidden')}
@@ -272,7 +271,7 @@ export default function BridgePage() {
             )}
           </div>
           {apiToken && (
-            <p className="mb-3 text-xs leading-relaxed text-amber-400/90">{t('bind.tokenJustOnce')}</p>
+            <p className="mb-3 text-xs leading-relaxed text-warn/90">{t('bind.tokenJustOnce')}</p>
           )}
           {emailUnverified ? (
             <EmailVerifyInline reason="bind" />
@@ -285,18 +284,21 @@ export default function BridgePage() {
               {resetting ? t('common.loading') : t('bind.generateToken')}
             </button>
           ) : (
-            <div className="flex gap-3">
-              <button
-                onClick={copyToken}
-                disabled={!apiToken}
-                className="btn-primary flex-1 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {copied ? t('common.copied') : t('common.copy')}
-              </button>
-              <button onClick={() => setResetConfirmOpen(true)} className="btn-ghost flex-1 py-2 text-sm">
-                {t('bind.resetToken')}
-              </button>
-            </div>
+            <>
+              <div className="flex gap-3">
+                <button
+                  onClick={copyToken}
+                  disabled={!apiToken}
+                  className="btn-primary flex-1 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {copyState === 'ok' ? t('common.copied') : copyState === 'err' ? t('bind.tokenCopyFailed') : t('common.copy')}
+                </button>
+                <button onClick={() => setResetConfirmOpen(true)} className="btn-ghost flex-1 py-2 text-sm">
+                  {t('bind.resetToken')}
+                </button>
+              </div>
+              <span className="sr-only" role="status">{copyState === 'err' ? t('bind.tokenCopyFailed') : ''}</span>
+            </>
           )}
         </div>
 
@@ -353,11 +355,11 @@ export default function BridgePage() {
           danger
           busy={deleting}
           onConfirm={confirmDelete}
-          onCancel={() => { setDeleteTarget(null); setDeleteError('') }}
+          onCancel={() => setDeleteTarget(null)}
         />
       )}
-      {deleteError && (
-        <Toast kind="error" message={deleteError} />
+      {toast && (
+        <Toast key={toast.id} toast={toast} />
       )}
     </div>
   )

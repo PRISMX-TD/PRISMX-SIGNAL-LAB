@@ -40,7 +40,7 @@ export default function FaqPage() {
         <h1 className="font-display text-[clamp(1.75rem,4vw,2.5rem)] font-bold leading-tight text-neutral-50">
           {t('faqPage.title')}
         </h1>
-        <p className="mt-6 text-[15px] leading-relaxed text-neutral-300">{t('faqPage.intro')}</p>
+        <p className="mt-6 max-w-[65ch] text-pretty text-base leading-relaxed text-neutral-300">{t('faqPage.intro')}</p>
 
         <div className="mt-9 space-y-8">
           {FAQ_KEYS.map((k, i) => (
@@ -49,7 +49,7 @@ export default function FaqPage() {
                 <span className="mr-2 font-mono text-sm text-prism-400">{i + 1}.</span>
                 {t(k.q)}
               </h2>
-              <p className="mt-3 text-[15px] leading-relaxed text-neutral-400">{t(k.a)}</p>
+              <p className="mt-3 max-w-[65ch] text-pretty text-base leading-relaxed text-neutral-400">{t(k.a)}</p>
             </section>
           ))}
         </div>

@@ -19,10 +19,11 @@
 // of ~420px. Like the head's selector it is page-wide context, so it sits above
 // the tab bar and is shared by all three tabs. Styled by .ord-mast-* in
 // styles/orders.css.
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { MT5Account } from '../api/types'
 import { formatMarginLevel } from './order/orderMath'
+import { EMPTY } from '../utils/format'
 
 interface Props {
   accounts: MT5Account[]
@@ -39,7 +40,7 @@ interface Props {
 }
 
 const money2 = (n: number | null | undefined): string =>
-  n == null ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  n == null ? EMPTY : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 function Chevron() {
   return (
@@ -55,23 +56,30 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
   const up = floating >= 0
   const ccy = active.accountCurrency
   const equity = equityOf(active)
+  const switchHintId = useId()
 
   return (
     <section className="ord-mast" aria-label={t('orders.acct.section')}>
+      {/* 不给按钮 aria-label：它会整个替换按钮内容，读屏就只剩「切换账户」，在线状态、
+          登录号、券商全丢。名字由内容组成，「切换账户」作为补充说明挂 aria-describedby。
+          No aria-label on the button: it would replace the content, leaving only "switch
+          account" and dropping the online state, login and broker. The content is the
+          name; "switch account" becomes the description. */}
       <button
         type="button"
         className="ord-mast-sw"
         aria-expanded={switchable ? open : undefined}
-        aria-label={switchable ? t('orders.mast.switch') : undefined}
+        aria-describedby={switchable ? switchHintId : undefined}
         disabled={!switchable}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className={`ord-mast-dot ${active.online ? 'on' : ''}`} />
+        <span className={`ord-mast-dot ${active.online ? 'on' : ''}`} aria-hidden="true" />
         <span className="sr-only">{active.online ? t('common.online') : t('common.offline')}</span>
         <span className="ord-mast-login">{active.login}</span>
         {broker && <span className="ord-mast-broker">{broker}</span>}
         {switchable && <span className={`ord-mast-chev ${open ? 'open' : ''}`}><Chevron /></span>}
       </button>
+      {switchable && <span id={switchHintId} hidden>{t('orders.mast.switch')}</span>}
 
       {open && switchable && (
         <div className="ord-mast-list" role="listbox" aria-label={t('orders.mast.switch')}>
@@ -84,7 +92,8 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
               className={`ord-mast-opt ${a.login === active.login ? 'on' : ''}`}
               onClick={() => { onChoose(a.login); setOpen(false) }}
             >
-              <span className={`ord-mast-dot ${a.online ? 'on' : ''}`} />
+              <span className={`ord-mast-dot ${a.online ? 'on' : ''}`} aria-hidden="true" />
+              <span className="sr-only">{a.online ? t('common.online') : t('common.offline')}</span>
               <span className="ord-mast-opt-login">{a.login}</span>
               <span className="ord-mast-opt-name">{a.accountName || a.company || a.server || ''}</span>
               <span className="ord-mast-opt-eq">{money2(equityOf(a))}</span>
@@ -112,7 +121,7 @@ export default function AccountMast({ accounts, active, onChoose, floating, brok
         </span>
         <span>
           <span className="ord-k">{t('account.leverage')}</span>
-          <b>{active.leverage ? `1:${active.leverage}` : '—'}</b>
+          <b>{active.leverage ? `1:${active.leverage}` : EMPTY}</b>
         </span>
         {/* 保证金比例（净值 / 已用保证金，MT5 的「预付款比例」）。口径是整个 MT5
             账号，和左边那个只算本平台开仓的浮动盈亏不同——保证金由券商按全账号收。

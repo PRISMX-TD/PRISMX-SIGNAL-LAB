@@ -65,7 +65,7 @@ export default function StrategyCard({
         : `${Math.round(performance.winRate! * 100)}%`
 
   return (
-    <div className="stg-row" style={{ '--i': index } as CSSProperties}>
+    <div className="stg-row" style={{ '--i': Math.min(index, 5) } as CSSProperties}>
       <div className="stg-row-top">
         <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }} aria-hidden="true">{meta.letter}</span>
         <div className="stg-row-name">

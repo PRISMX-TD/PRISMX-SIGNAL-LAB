@@ -8,6 +8,7 @@ import type { TFunction } from 'i18next'
 import { fmtDay, parseTime } from '../../api/utils'
 import { fmtCountdown, regState } from '../../utils/competitionTime'
 import type { CompetitionSummary } from '../../api/types'
+import { EMPTY } from '../../utils/format'
 
 // 时钟与标签只读这几个字段；公开载荷（PublicCompetition）与站内概览都满足。
 // The clock and tag read only these fields; both the public payload and the in-app summary satisfy it.
@@ -104,7 +105,7 @@ export function statusTagKey(c: CompTiming, nowMs: number): string {
 // closing dates use it too) it is out of scope here, so the suffix goes on this
 // call site.
 export const fmtRange = (c: Pick<CompetitionSummary, 'startsAt' | 'endsAt'>) =>
-  `${c.startsAt ? fmtDay(c.startsAt) : '—'} → ${c.endsAt ? fmtDay(c.endsAt) : '—'} UTC+8`
+  `${c.startsAt ? fmtDay(c.startsAt) : EMPTY} → ${c.endsAt ? fmtDay(c.endsAt) : EMPTY} UTC+8`
 
 // 转播角标的读数：固定 DD:HH:MM，不足一天也补 00，读数的位置和宽度永远不变。
 // The broadcast bug's readout: always DD:HH:MM, zero-padded under a day, so the

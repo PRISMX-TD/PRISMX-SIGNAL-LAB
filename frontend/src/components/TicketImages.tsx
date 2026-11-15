@@ -12,11 +12,14 @@
 // styles/support.css. Uploads start on selection rather than on Send — a screenshot is a few
 // hundred KB and is long done by the time the text is written. A failed upload is removed with
 // the reason shown: a red-framed leftover would leave users unsure whether it gets sent.
-import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { ApiHttpError, ticketApi } from '../api/client'
 import { useBackToClose } from '../utils/useBackToClose'
+import { LIGHTBOX_ZOOM, DOUBLE_TAP_MS, TAP_SLOP, clampPan, isDoubleTap, panLimit, zoomPanAt, type Tap } from '../utils/lightboxZoom'
+import { releaseVelocity, rubberBand, shouldDismissSheet, type DragSample } from '../utils/useSheetDrag'
+import { useDialogA11y } from '../utils/useDialogA11y'
 import { shrinkImage } from './admin/shrinkImage'
 
 // 与后端 schemas._TicketMessage 的 images max_length 一致 / matches the backend's per-message cap
@@ -250,20 +253,186 @@ function Thumb({ url, onOpen }: { url: string; onOpen: () => void }) {
   )
 }
 
+interface LightboxDrag {
+  id: number
+  sx: number
+  sy: number
+  ox: number
+  oy: number
+  mode: 'tap' | 'pan' | 'swipe'
+  samples: DragSample[]
+}
+
 function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
   const { t } = useTranslation()
   useBackToClose(true, onClose)
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc、Tab、焦点进出走 useDialogA11y 的栈：灯箱开在客服抽屉里时，一下 Esc 只关灯箱。
+  // Escape/Tab/focus via useDialogA11y's stack: inside the support drawer one Escape
+  // closes only the lightbox.
+  const boxRef = useRef<HTMLDivElement>(null)
+  useDialogA11y(boxRef, onClose)
+  // 灯箱手势：双击（双点）在点到的位置放大到 2 倍、再双击还原；放大时拖动平移，平移不出图片
+  // 边界；原大时往下拖关闭（与底部弹层同一套判定，utils/useSheetDrag）。全站缩放是锁死的
+  // （index.html 的 user-scalable=no、main.tsx 的 gesturestart），截图里的小字只能在这里放大看。
+  // 原大时单击图片仍是关闭，但要等 300ms 确认不是双击；放大时单击不做事，免得平移中误关。
+  // Lightbox gestures: double-tap zooms to 2× at the tapped point and double-tap again
+  // restores; while zoomed a drag pans, clamped to the image's edges; at 1× a downward drag
+  // closes (the bottom-sheet rules from utils/useSheetDrag). Zoom is locked app-wide
+  // (user-scalable=no in index.html, gesturestart in main.tsx), so this is the only place
+  // to enlarge small text in a screenshot. At 1× a single tap on the image still closes,
+  // after 300ms to rule out a double-tap; while zoomed a single tap does nothing, so
+  // panning never closes it by accident.
+  const imgRef = useRef<HTMLImageElement>(null)
+  const bgRef = useRef<HTMLDivElement>(null)
+  const [zoomed, setZoomed] = useState(false)
+  const view = useRef({ s: 1, x: 0, y: 0 })
+  const drag = useRef<LightboxDrag | null>(null)
+  const lastTap = useRef<Tap | null>(null)
+  const tapTimer = useRef(0)
+  const exitTimer = useRef(0)
+  const sawPointer = useRef(false)
+  useEffect(() => () => {
+    window.clearTimeout(tapTimer.current)
+    window.clearTimeout(exitTimer.current)
+  }, [])
+  const reduced = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const paint = (transition: string) => {
+    const img = imgRef.current
+    if (!img) return
+    const v = view.current
+    img.style.transition = transition
+    img.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.s})`
+  }
+  const limitOf = (img: HTMLImageElement, s: number) =>
+    panLimit({ w: img.offsetWidth, h: img.offsetHeight }, { w: window.innerWidth, h: window.innerHeight }, s)
+  const toggleZoom = (px: number, py: number) => {
+    const img = imgRef.current
+    if (!img) return
+    if (view.current.s > 1) {
+      view.current = { s: 1, x: 0, y: 0 }
+      setZoomed(false)
+    } else {
+      const r = img.getBoundingClientRect()
+      const at = zoomPanAt(px, py, r.left + r.width / 2, r.top + r.height / 2, LIGHTBOX_ZOOM)
+      view.current = { s: LIGHTBOX_ZOOM, ...clampPan(at.x, at.y, limitOf(img, LIGHTBOX_ZOOM)) }
+      setZoomed(true)
+    }
+    paint(reduced() ? 'none' : 'transform var(--dur-base) var(--ease-out)')
+  }
+  const fadeBg = (opacity: string, transition: string) => {
+    const bg = bgRef.current
+    if (!bg) return
+    bg.style.transition = transition
+    bg.style.opacity = opacity
+  }
+  const settle = () => {
+    view.current = { s: 1, x: 0, y: 0 }
+    paint(reduced() ? 'none' : 'transform var(--dur-base) var(--ease-out)')
+    fadeBg('', reduced() ? 'none' : 'opacity var(--dur-base) var(--ease-out)')
+  }
+  // 下拉甩走：图片顺势下落淡出、背景淡出，--dur-fast（140ms）后真正关闭。减弱动效直接关。
+  // Swiped away: the image drops and fades with the backdrop, then closes after --dur-fast
+  // (140ms). Reduced motion closes at once.
+  const flingOut = () => {
+    if (reduced()) { onClose(); return }
+    const img = imgRef.current
+    if (img) {
+      img.style.transition = 'transform var(--dur-fast) var(--ease-in), opacity var(--dur-fast) var(--ease-in)'
+      img.style.transform = `translate(0px, ${view.current.y + 160}px) scale(1)`
+      img.style.opacity = '0'
+    }
+    fadeBg('0', 'opacity var(--dur-fast) var(--ease-in)')
+    exitTimer.current = window.setTimeout(onClose, 140)
+  }
+  const onPointerDown = (e: ReactPointerEvent<HTMLImageElement>) => {
+    sawPointer.current = true
+    if (drag.current || !e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    const v = view.current
+    drag.current = { id: e.pointerId, sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, mode: 'tap', samples: [{ y: e.clientY, t: e.timeStamp }] }
+  }
+  const onPointerMove = (e: ReactPointerEvent<HTMLImageElement>) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    const dx = e.clientX - d.sx
+    const dy = e.clientY - d.sy
+    if (d.mode === 'tap') {
+      if (Math.hypot(dx, dy) < TAP_SLOP) return
+      if (view.current.s > 1) d.mode = 'pan'
+      else if (Math.abs(dy) > Math.abs(dx)) d.mode = 'swipe'
+      else { drag.current = null; return }
+      // 开始拖了：上一次单击排着的关闭作废。/ A drag began: cancel the close queued by the last tap.
+      window.clearTimeout(tapTimer.current)
+      lastTap.current = null
+      e.currentTarget.setPointerCapture(e.pointerId)
+    }
+    if (d.mode === 'pan') {
+      view.current = { s: view.current.s, ...clampPan(d.ox + dx, d.oy + dy, limitOf(e.currentTarget, view.current.s)) }
+      paint('none')
+      return
+    }
+    const y = rubberBand(dy)
+    view.current = { s: 1, x: 0, y }
+    paint('none')
+    d.samples.push({ y: e.clientY, t: e.timeStamp })
+    if (d.samples.length > 6) d.samples.shift()
+    const h = e.currentTarget.offsetHeight
+    fadeBg(String(h > 0 ? Math.max(0, 1 - Math.max(0, y) / h) : 1), 'none')
+  }
+  const onPointerUp = (e: ReactPointerEvent<HTMLImageElement>) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    drag.current = null
+    if (d.mode === 'pan') return
+    if (d.mode === 'swipe') {
+      d.samples.push({ y: e.clientY, t: e.timeStamp })
+      if (shouldDismissSheet(view.current.y, releaseVelocity(d.samples), e.currentTarget.offsetHeight)) flingOut()
+      else settle()
+      return
+    }
+    const tap = { x: e.clientX, y: e.clientY, t: e.timeStamp }
+    window.clearTimeout(tapTimer.current)
+    if (isDoubleTap(lastTap.current, tap)) {
+      lastTap.current = null
+      toggleZoom(tap.x, tap.y)
+      return
+    }
+    lastTap.current = tap
+    if (view.current.s === 1) tapTimer.current = window.setTimeout(onClose, DOUBLE_TAP_MS)
+  }
+  // 系统取消（返回手势、来电）：下拉中的弹回，不关。/ System cancel: a swipe in progress settles, never closes.
+  const onPointerCancel = (e: ReactPointerEvent<HTMLImageElement>) => {
+    const d = drag.current
+    if (!d || e.pointerId !== d.id) return
+    drag.current = null
+    if (d.mode === 'swipe') settle()
+  }
   // 挂到 body：卡片带 backdrop-filter，fixed 定位在它里面会相对卡片而不是视口。
   // Portalled to body: the cards use backdrop-filter, which would make position: fixed
   // resolve against the card instead of the viewport.
   return createPortal(
-    <div className="sup-lightbox" role="dialog" aria-modal="true" aria-label={t('tickets.images.view')} onClick={onClose}>
-      <img src={url} alt="" />
+    <div ref={boxRef} className="sup-lightbox" role="dialog" aria-modal="true" aria-label={t('tickets.images.view')} tabIndex={-1} onClick={onClose}>
+      {/* 背景单独一层：下拉关闭时只让背景变淡，不能连图一起淡。点背景仍冒泡到外层、立即关闭。
+          The backdrop is its own layer so a swipe-down fades it without fading the image.
+          Taps on it still bubble to the outer layer and close at once. */}
+      <div ref={bgRef} className="sup-lightbox-bg" aria-hidden="true" />
+      {/* 图片上的点按交给上面的指针逻辑（单击延迟关闭、双击放大），不再冒泡到外层直接关。
+          没有指针事件的老浏览器（iOS 12）照旧：点图片就关。
+          Taps on the image go to the pointer logic above (delayed close, double-tap zoom)
+          instead of bubbling up to close. Browsers without pointer events (iOS 12) keep
+          the old behaviour: a tap on the image closes. */}
+      <img
+        ref={imgRef}
+        src={url}
+        alt=""
+        draggable={false}
+        className={zoomed ? 'zoomed' : undefined}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
+        onClick={(e) => { e.stopPropagation(); if (!sawPointer.current) onClose() }}
+      />
       <button type="button" className="sup-lightbox-x" onClick={onClose} aria-label={t('common.close')}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>

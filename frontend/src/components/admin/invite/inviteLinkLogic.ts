@@ -129,7 +129,7 @@ export function normalizeChannel(raw: string): string | null {
 const KIND_BADGE_CLASS: Record<InviteLinkKind, string> = {
   agent: 'bg-prism-500/15 text-prism-200',
   platform: 'bg-white/5 text-neutral-300',
-  competition: 'bg-amber-400/15 text-amber-300',
+  competition: 'bg-warn/15 text-warn',
 }
 
 export function kindBadgeClass(kind: InviteLinkKind): string {

@@ -16,6 +16,7 @@ import { fmtPx, priceDecimals, riskFraction, rrTone, type FocusState } from './S
 import { symbolMeta } from '../../utils/symbolMeta'
 import { ClockTtlRing } from './TtlRing'
 import LockedPx, { LockIcon } from './LockedPx'
+import { EMPTY } from '../../utils/format'
 
 interface OtherEntry {
   symbol: string
@@ -66,21 +67,32 @@ const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
           const px = (v: number | null, k: string) =>
             locked ? <LockedPx symbol={sig.symbol} seed={`${sig.id}:${k}`} /> : fmtPx(v, decimals)
 
+          // 整张卡可点（放进主信号卡），但卡里还有「下单」按钮，按钮不能嵌套，所以卡本身不改成
+          // <button>：品种名是一个真按钮，它的 ::after 铺满整张卡（dashboard.css 的 .dh-mini-open），
+          // 「下单」按钮抬到它上面。按压反馈是 components-cards.css 的 .sig-mini-card:active（压深底色）。
+          // The whole card is clickable (focus it in the main signal card), but it also holds the
+          // Trade button and buttons can't nest, so the card stays a div: the symbol name is a real
+          // button whose ::after covers the card (.dh-mini-open in dashboard.css) and the Trade
+          // button sits above it. Press feedback is .sig-mini-card:active in components-cards.css
+          // (darker fill).
           return (
             <div
               key={sig.id}
-              className="sig-mini-card dh-mini cursor-pointer"
-              onClick={() => onFocus(idx)}
+              className="sig-mini-card dh-mini"
             >
               <div className="dh-mini-top">
                 <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                 <div className="sym">
-                  <b className="font-display">{displaySymbol(symbol)}</b>
+                  <b className="font-display">
+                    <button type="button" className="dh-mini-open" onClick={() => onFocus(idx)} aria-label={`${displaySymbol(symbol)} ${sideTag}`}>
+                      {displaySymbol(symbol)}
+                    </button>
+                  </b>
                   <span>{sig.indicator || t('signals.indicatorNone')}</span>
                 </div>
                 <span className={`chip shrink-0 ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>
                 <div className="rr">
-                  <b className={`num ${rrTone(rrVal)}`}>{rrVal != null ? `1:${rrVal.toFixed(2)}` : '-'}</b>
+                  <b className={`num ${rrTone(rrVal)}`}>{rrVal != null ? `1:${rrVal.toFixed(2)}` : EMPTY}</b>
                   <span>{t('signals.focus.rrLabel')}</span>
                 </div>
               </div>
@@ -106,7 +118,7 @@ const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
                 <ClockTtlRing expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
                 <button
                   onClick={(e) => { e.stopPropagation(); onTrade(sig) }}
-                  className="btn btn-primary dh-mini-cta"
+                  className={`btn btn-primary dh-mini-cta${locked ? ' has-icon' : ''}`}
                   data-signal-id={sig.id}
                 >
                   {locked && <LockIcon size={13} />}

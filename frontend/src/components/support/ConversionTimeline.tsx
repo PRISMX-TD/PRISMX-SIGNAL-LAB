@@ -9,7 +9,7 @@ import type { SupportConversion } from '../../api/supportTypes'
 
 const DOT: Record<string, string> = {
   confirmed: 'bg-up',
-  pending_review: 'bg-amber-400',
+  pending_review: 'bg-warn',
   rejected: 'bg-neutral-600',
 }
 
@@ -26,13 +26,13 @@ export default function ConversionTimeline({ items }: { items: SupportConversion
               {t(`supportDesk.conversions.kind.${c.kind}`)}
             </span>
             {c.status !== 'confirmed' && (
-              <span className="rounded-[10px] bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">{t(`supportDesk.conversions.status.${c.status}`)}</span>
+              <span className="rounded-control bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">{t(`supportDesk.conversions.status.${c.status}`)}</span>
             )}
             {c.source === 'manual' && (
-              <span className="rounded-[10px] bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">{t('supportDesk.conversions.manual')}</span>
+              <span className="rounded-control bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">{t('supportDesk.conversions.manual')}</span>
             )}
             {c.creditedToMe && (
-              <span className="rounded-[10px] bg-[rgb(var(--purple-rgb)/0.22)] px-1.5 py-0.5 text-xs text-[var(--purple-hi)]">{t('supportDesk.conversions.mine')}</span>
+              <span className="rounded-control bg-[rgb(var(--purple-rgb)/0.22)] px-1.5 py-0.5 text-xs text-[var(--purple-hi)]">{t('supportDesk.conversions.mine')}</span>
             )}
           </div>
           <div className="num text-xs text-neutral-500">{fmtDate(c.createdAt)}</div>

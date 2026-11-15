@@ -90,7 +90,7 @@ export function useMarketClosedBlock(symbol: string): { banner: ReactNode; error
   const text = useMarketClosedText(state)
   if (!state.closed) return null
   return {
-    banner: <div className="mb-3 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-sm text-amber-200">{text}</div>,
+    banner: <div className="mb-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">{text}</div>,
     error: text,
   }
 }

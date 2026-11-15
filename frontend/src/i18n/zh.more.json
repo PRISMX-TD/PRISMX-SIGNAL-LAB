@@ -12,7 +12,8 @@
     "buy": "买入",
     "sell": "卖出",
     "noChange": "不修改",
-    "error": "操作失败，请重试"
+    "error": "操作失败，请重试",
+    "processing": "处理中…"
   },
   "auth": {
     "completeTitle": "完善资料",
@@ -93,8 +94,6 @@
       "ask": "买价"
     },
     "quotes": {
-      "bid": "买价",
-      "ask": "卖价",
       "spread": "点差"
     },
     "symbolNames": {
@@ -112,7 +111,7 @@
       "latest": "最新",
       "expiry": "到期时间"
     },
-    "indicatorNone": "未标注指标",
+    "indicatorNone": "未标注策略",
     "colEntry": "入场",
     "colSl": "止损",
     "colTp": "止盈",
@@ -153,6 +152,9 @@
   },
   "order": {
     "volume": "手数（Lots）",
+    "volumeInvalid": "手数无效：请输入不小于该品种最小手数的数字",
+    "volumeDec": "减少手数",
+    "volumeInc": "增加手数",
     "account": "账户",
     "estMargin": "预估保证金占用",
     "currentPrice": "现价",
@@ -165,7 +167,7 @@
     "riskPct": "风险",
     "riskNeedsSl": "先设置止损才能按风险百分比计算手数",
     "riskUnsupportedPair": "该品种暂不支持按风险百分比估算手数，请手动填写手数",
-    "riskBelowMinLot": "按所选风险%算出的手数低于该品种最小手数，用最小手数实际风险会更高——请放宽风险%、收紧止损或手动填写手数",
+    "riskBelowMinLot": "按所选风险%算出的手数低于该品种最小手数，用最小手数实际风险会更高。请放宽风险%、收紧止损或手动填写手数",
     "slWrongSide": "止损价与现价方向不对",
     "slTooClose": "止损离现价太近（至少 0.05%），已禁止下单",
     "tpWrongSide": "止盈价与现价方向不对",
@@ -177,9 +179,10 @@
     "riskNote": "以 MT5 实际成交价为准，5 分钟未执行自动取消。仅为信号工具，不构成投资建议。",
     "submitting": "提交中…",
     "submitted": "已提交，等待成交回执…",
+    "confirmAria": "确认下单：{{side}} {{symbol}} {{volume}} 手",
     "filled": "已成交 @ {{price}}",
     "rejected": "下单被拒绝：{{msg}}",
-    "ackTimeout": "暂未收到回执，请在订单页查看最新状态",
+    "ackTimeout": "暂未收到回执，请到「交易」页查看最新状态",
     "timeoutNote": "指令若在 5 分钟内未被执行（如桥接程序离线），将自动取消，不会在之后按过时价格成交。本平台仅提供信号工具，不构成投资建议，交易风险自负。",
     "noBridge": "尚未连接 MT5。前往「连接 MT5」填入账号和密码即可直接连接，无需安装任何程序。",
     "allOffline": "已连接的 MT5 账户当前都已离线。请前往「连接 MT5」查看连接状态后重试。",
@@ -203,7 +206,7 @@
   },
   "account": {
     "title": "账户详情",
-    "loadError": "加载账户信息失败",
+    "loadError": "账户信息没有加载出来，请检查网络后刷新页面",
     "neverExpires": "永不过期",
     "planTrialTag": "PRO（试用）",
     "balance": "余额",
@@ -233,7 +236,7 @@
     "notifWindowHint": "跨零点的时段（如 22:00 至 07:00）按隔夜处理；时段外产生的通知不会补发。时区取自本设备：{{tz}}",
     "notifProcessing": "处理中…",
     "autoTitle": "智能风控",
-    "autoHint": "以 R 为单位设定规则（R = 开仓时的止损距离）。例如浮盈达到 1R 时自动把止损移到入场价。仅作用于通过 PRISMX 下单开出的仓位，手动开的仓不受影响；开仓时未设止损的仓位无法计算 R，会被跳过。所有自动指令都会出现在订单页，全程可追溯。",
+    "autoHint": "以 R 为单位设定规则（R = 开仓时的止损距离）。例如浮盈达到 1R 时自动把止损移到入场价。仅作用于通过 PRISMX 下单开出的仓位，手动开的仓不受影响；开仓时未设止损的仓位无法计算 R，会被跳过。所有自动指令都会出现在「交易」页，全程可追溯。",
     "autoUpgradeRequired": "智能风控为 PRO 专属功能，升级后即可解锁",
     "autoPausedNotPro": "你之前开启的智能风控目前已暂停：当前不是 PRO，系统不会自动移动止损或分批止盈，持仓的止损止盈需要你自己管理。升级 PRO 后按原有设置自动恢复。",
     "autoEnable": "启用智能风控",
@@ -245,7 +248,10 @@
     "autoPtpFraction": "平仓比例",
     "autoScopeNote": "止损只会朝有利方向移动，绝不放大风险。指令经由桥接程序在你的 MT5 上执行，桥接离线时不会有任何动作。",
     "autoSaved": "智能风控设置已保存",
-    "autoSaveError": "保存失败",
+    "autoSaveError": "规则没有保存，请检查网络后重试",
+    "autoSaveChanges": "保存更改",
+    "autoSaving": "保存中…",
+    "autoUnsaved": "有改动还没保存",
     "notifDiagTitle": "推送诊断",
     "notifDiagEnv": "运行环境",
     "notifDiagStandalone": "以独立应用模式启动",
@@ -301,6 +307,7 @@
     "footer": "UTC+8 · 数据源自平台自有喂价，仅供参考",
     "empty": "图表数据加载中或暂不可用…",
     "stale": "数据延迟",
+    "quotesDown": "行情已断开",
     "openPositions": "持仓",
     "sheetTicket": "快速下单",
     "tools": "画线工具",
@@ -482,6 +489,7 @@
       "solid": "实线",
       "dashed": "虚线",
       "dotted": "点线",
+      "lineWidth": "线宽 {{w}}px",
       "hint": "选好工具后在图表上绘制；光标模式下可选中、拖动或删除。支持磁吸/锁定/撤销。"
     },
     "posmark": {
@@ -499,8 +507,8 @@
       "exit": "退出全屏"
     },
     "symhead": {
-      "bid": "买价",
-      "ask": "卖价",
+      "bid": "卖价",
+      "ask": "买价",
       "spread": "点差",
       "high": "日内高",
       "low": "日内低",
@@ -533,15 +541,15 @@
       "offline": "账户离线，先连接桥接程序",
       "submitting": "提交中…",
       "place": "{{side}} · {{volume}} 手",
-      "invalidVolume": "手数无效",
+      "invalidVolume": "手数无效：请输入不小于该品种最小手数的数字",
       "submitted": "已提交，等待回执",
-      "placeFailed": "下单失败",
+      "placeFailed": "下单失败：券商没有返回原因。请先在「持仓」「挂单」页签确认没有成交，再重试",
       "points": "点",
       "spreadUnit": "点差",
       "waitingFill": "等待券商回执",
       "filledAt": "已成交 @ {{price}}",
       "accepted": "已受理，等待桥接执行",
-      "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在订单页。",
+      "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在「交易」页。",
       "entryMode": "入场方式",
       "entry": {
         "MARKET": "市价",
@@ -573,6 +581,8 @@
       "orders": "挂单",
       "noPositions": "暂无持仓",
       "noOrders": "暂无挂单",
+      "noPositionsHint": "用下单票下单，成交后持仓会出现在这里。",
+      "noOrdersHint": "在下单票的入场方式里选「限价」或「止损」即可挂单。",
       "colEntry": "开仓价",
       "colCurrent": "现价",
       "colSl": "止损",
@@ -591,12 +601,12 @@
       "slTpWrong": "方向填反了：买单止损须低于现价、止盈须高于现价",
       "closeSent": "平仓指令已发出",
       "partialCloseSent": "部分平仓指令已发出",
-      "closeFailed": "平仓失败",
+      "closeFailed": "平仓失败：券商没有返回原因。请确认持仓列表里这笔仓位还在，再重试",
       "modifySent": "改止损止盈指令已发出",
-      "modifyFailed": "改单失败",
+      "modifyFailed": "改单失败：券商没有返回原因。请核对价位后重试",
       "cancelSent": "已撤销挂单",
-      "cancelFailed": "撤销失败",
-      "confirmCloseTitle": "全部平仓",
+      "cancelFailed": "撤销失败：券商没有返回原因。请确认挂单列表里这张单还在，再重试",
+      "confirmCloseTitle": "平掉这张仓位？",
       "closing": "平仓中",
       "closed": "已平仓 @ {{price}}",
       "partialClosed": "已平掉 {{lots}} 手 @ {{price}}",
@@ -734,21 +744,29 @@
     "am": {
       "be": {
         "pre": "浮盈达到",
-        "post": "R 时，把止损移到开仓价"
+        "post": "R 时，把止损移到开仓价",
+        "trigger": "保本触发浮盈（R）"
       },
       "trail": {
         "pre": "浮盈达到",
         "mid": "R 后启动，止损跟随",
-        "post": "R"
+        "post": "R",
+        "trigger": "追踪止损启动浮盈（R）",
+        "distance": "追踪止损距离（R）"
       },
       "ptp": {
         "pre": "到达",
         "mid": "R 先落袋",
-        "post": "%，剩余部分交给追踪止损"
+        "post": "%，剩余部分交给追踪止损",
+        "trigger": "分批止盈触发位（R）",
+        "fraction": "分批止盈平仓比例（%）"
       }
     },
     "autoManageScopeHint": "以下设置对你绑定的全部 MT5 账号生效，不随上方选中的账号变化。",
     "noPositions": "暂无持仓",
+    "noPositionsHint": "跟单或手动下单成交后，持仓会实时出现在这里，可以在这里平仓、改止损止盈。",
+    "goSignals": "去信号面板",
+    "goCharts": "去行情图表",
     "summary": {
       "positions": "持仓数",
       "totalPnl": "总浮动盈亏"
@@ -763,7 +781,12 @@
     "pageInfo": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "cancelSent": "撤销请求已发出",
     "cancelling": "撤单中…",
-    "proExclusive": "PRO专属",
+    "cancelConfirm": {
+      "title": "撤销这笔待执行的订单？",
+      "confirm": "撤单",
+      "keep": "保留"
+    },
+    "proExclusive": "PRO 专属",
     "tab": {
       "positions": "持仓",
       "performance": "历史",
@@ -779,19 +802,19 @@
     "current": "现价",
     "sl": "止损",
     "tp": "止盈",
-    "closeAll": "全平",
+    "closeAll": "平仓",
     "partialClose": "部分平仓",
     "editSlTp": "改止损止盈",
-    "closeVolume": "平仓手数",
+    "closeVolume": "平仓手数（最多 {{max}}）",
     "confirmClose": "确认平仓",
     "confirmModify": "确认修改",
     "closeSent": "平仓指令已发出，等待执行回执…",
     "modifySent": "改单指令已发出，等待执行回执…",
-    "invalidVolume": "平仓手数无效",
+    "invalidVolume": "平仓手数无效：需在最小手数到持仓手数之间，并符合该品种的手数步长",
     "clearHint": "0 = 清除",
-    "closeAllConfirmTitle": "确认全部平仓",
+    "closeAllConfirmTitle": "平掉这张仓位？",
     "closed": "已平仓 @ {{price}}",
-    "closeFailed": "平仓失败",
+    "closeFailed": "平仓失败：券商没有返回原因。请确认持仓列表里这笔仓位还在，再重试",
     "modified": "止损止盈已更新",
     "closeAllConfirm": "确认平掉 {{symbol}} 的全部 {{volume}} 手持仓？此操作不可撤销。",
     "lotStepHint": "步长 {{step}} 手，最小 {{min}} 手"
@@ -825,6 +848,7 @@
     "generateToken": "生成 Token",
     "tokenJustOnce": "请立即复制保存：刷新或离开页面后将无法再次查看此 Token。",
     "tokenSavedClose": "已保存，关闭",
+    "tokenCopyFailed": "复制失败，请手动选中 Token 复制",
     "resetToken": "重置 Token",
     "resetConfirm": "重置后旧 Token 立即失效，正在运行的桥接程序需要重新填入新 Token，否则会连接失败。确定重置？",
     "suffixTitle": "品种后缀",
@@ -883,7 +907,7 @@
     "b1Title": "免安装直连",
     "b1Desc": "不用下载桥接程序，也不用租 VPS。你的电脑关机时，信号照样在服务器端执行。",
     "b2Title": "免费 PRO",
-    "b2Desc": "实时信号、一键下单、智能风控、不限 MT5 账户数量——PRO 权益全部解锁。",
+    "b2Desc": "实时信号、一键下单、智能风控、不限 MT5 账户数量，PRO 权益全部解锁。",
     "b3Title": "实盘 / 模拟都支持",
     "b3Desc": "先用模拟账户熟悉整套流程，想清楚了再切实盘，操作方式完全一样。",
     "cta": "立即开户",
@@ -906,10 +930,12 @@
     "save20": "省 20%",
     "perMonth": "约 ${{price}} / 月",
     "payButton": "用加密货币支付 {{price}}",
+    "payCreating": "正在生成付款地址…",
     "alreadyPro": "你已经是 PRO 了",
     "trialTitle": "免费试用 PRO",
     "trialDesc": "免费体验 {{n}} 天完整 PRO 权益，无需付款，到期自动恢复 FREE，不自动扣费。每个账号仅限一次。",
     "trialCta": "开始免费试用",
+    "trialClaiming": "正在开通试用…",
     "trialStarted": "试用已开始，PRO 权益有效至 {{date}}",
     "trialActiveNotice": "你正在试用 PRO（至 {{date}}）。现在订阅，付费时长从付款日起算。",
     "payTitle": "请支付",
@@ -1028,7 +1054,7 @@
     "g4Title": "4. 填入 Token 并连接",
     "g4Desc": "打开桥接程序，把 Token 粘贴进去，点击「连接」。状态变为在线后，即可在信号面板一键下单。",
     "notesTitle": "注意事项",
-    "n1": "点击窗口的关闭按钮会最小化到系统托盘并继续在后台运行；要彻底退出，请在托盘图标右键选择「退出」——退出后将无法接收和执行交易指令。",
+    "n1": "点击窗口的关闭按钮会最小化到系统托盘并继续在后台运行；要彻底退出，请在托盘图标右键选择「退出」。退出后将无法接收和执行交易指令。",
     "n2": "请在已登录 MT5 的同一台电脑上运行桥接程序。",
     "n3": "需要在 MT5 中启用「允许算法交易」，否则下单会被终端拒绝。",
     "n4": "API Token 等同密码，切勿分享给他人；如怀疑泄露，可在「连接 MT5」页面随时重置。",
@@ -1096,6 +1122,7 @@
       "endNow": "结束",
       "confirmEnd": "结束后这一期所有未使用的抽奖券会作废，确定？",
       "confirmEndRound": "现在结束「{{name}}」？这一期所有未使用的抽奖券会作废。",
+      "endTitle": "结束这一期？",
       "voided": "已作废 {{n}} 张未使用的券",
       "phase": {
         "upcoming": "未开始",
@@ -1134,6 +1161,8 @@
       "colorAuto": "自动配色",
       "colorReset": "恢复自动",
       "confirmLeave": "奖项有未保存的改动，离开会丢失，确定？",
+      "leaveTitle": "放弃未保存的改动？",
+      "leave": "放弃改动",
       "remove": "删除",
       "moveUp": "上移",
       "addSlot": "+ 添加一格",
@@ -1350,6 +1379,7 @@
       },
       "abnormal": "只看异常",
       "abnormalHint": "失败、结果未知、止损没设上、爆仓、授权失效、退款、停用账号、结果更正",
+      "abnormalTag": "异常",
       "date": {
         "label": "日期",
         "all": "不限日期",
@@ -2655,6 +2685,7 @@
       "channelAll": "全部渠道",
       "channelNone": "未设渠道",
       "channelFilter": "按渠道筛选",
+      "kindFilter": "按类型筛选",
       "channelPlaceholder": "渠道，如 FB广告（可留空）",
       "searchPlaceholder": "搜标记 / 码 / 推荐官名",
       "showInactive": "显示已停用",
@@ -3852,7 +3883,7 @@
     "title": "历史信号回放",
     "entry": "如果你跟了 ›",
     "adminOnly": "仅管理员可见 · 内部试用",
-    "subtitle": "用平台全部历史真实信号与既有客观判定结果回放：如果每单都跟，净值曲线长什么样——包括亏损段。",
+    "subtitle": "用平台全部历史真实信号与既有客观判定结果回放：如果每单都跟，净值曲线长什么样，包括亏损段。",
     "capital": "初始本金 (USD)",
     "risk": "单笔风险 %",
     "range": "时间范围",
@@ -3882,7 +3913,7 @@
   },
   "strategy": {
     "title": "自定义策略",
-    "subtitle": "从模板选一个、调好参数，用真实历史行情回测，满意再启用——启用后只要满足条件就会给你发一条只有你自己能看到的信号。",
+    "subtitle": "从模板选一个、调好参数，用真实历史行情回测，满意再启用。启用后只要满足条件就会给你发一条只有你自己能看到的信号。",
     "proOnlyHint": "自定义策略是 PRO 专属功能",
     "myStrategies": "我的策略",
     "myStrategyBadge": "我的策略",
@@ -3967,7 +3998,7 @@
     "btSampleMeta": "{{bars}} 根 K 线 · {{trades}} 笔已判定",
     "overfitWinRateDrop": "过拟合风险：样本外胜率比样本内低了 15 个百分点以上。这套参数很可能只是拟合了前 70% 那段行情。",
     "overfitReturnFlip": "过拟合风险：样本内是盈利的，样本外转为亏损。这套参数很可能只是拟合了前 70% 那段行情。",
-    "overfitNotEvaluated": "样本不足，未做过拟合判定——任一段的已判定交易少于 10 笔时，胜率差异属于噪声。",
+    "overfitNotEvaluated": "样本不足，未做过拟合判定：任一段的已判定交易少于 10 笔时，胜率差异属于噪声。",
     "overfitClear": "样本外表现与样本内相近，未触发过拟合判定。",
     "resultTimeout": "超时平仓",
     "nameplaceholderCustom": "自定义策略",
@@ -4008,15 +4039,15 @@
     "presetLoaded": "已载入预设，可直接修改",
     "template": "策略模板",
     "templateMaTrend": "均线趋势",
-    "templateMaTrendDesc": "价格上穿 EMA20 时买入，下穿时卖出——最基础的趋势跟随。",
+    "templateMaTrendDesc": "价格上穿 EMA20 时买入，下穿时卖出。最基础的趋势跟随。",
     "templateMacdCross": "MACD 金叉死叉",
-    "templateMacdCrossDesc": "MACD 上穿信号线买入，下穿卖出——最经典的动量确认信号。",
+    "templateMacdCrossDesc": "MACD 上穿信号线买入，下穿卖出。最经典的动量确认信号。",
     "templateRsiReversal": "RSI 超买超卖反转",
-    "templateRsiReversalDesc": "RSI 上穿超卖阈值时买入，下穿超买阈值时卖出——博反转。",
+    "templateRsiReversalDesc": "RSI 上穿超卖阈值时买入，下穿超买阈值时卖出。博反转。",
     "templateBollingerBreakout": "布林带突破",
-    "templateBollingerBreakoutDesc": "收盘价突破上轨买入，跌破下轨卖出——博突破后的延续。",
+    "templateBollingerBreakoutDesc": "收盘价突破上轨买入，跌破下轨卖出。博突破后的延续。",
     "templateDonchianBreakout": "唐奇安通道突破",
-    "templateDonchianBreakoutDesc": "价格创出最近 N 根 K 线的新高买入，新低卖出——经典的海龟交易法核心规则。",
+    "templateDonchianBreakoutDesc": "价格创出最近 N 根 K 线的新高买入，新低卖出。经典的海龟交易法核心规则。",
     "templateMacdRsiCombo": "MACD + RSI 共振",
     "templateMacdRsiComboDesc": "MACD 在零轴上方定方向，同时 RSI 未进入超买区，避免追高。",
     "symbol": "品种",
@@ -4057,7 +4088,7 @@
     "oneTradeAtATimeOffHint": "不管上一笔是否已经平仓，只要满足入场条件就会触发新信号。",
     "runBacktest": "运行回测",
     "backtesting": "回测中…",
-    "openPositionNotice": "策略还有 {{count}} 笔信号目前仍是「持仓中」——一直没有摸到止损或止盈，所以没计入下方的交易统计。这不代表策略没有触发信号，只是这些还没等到结果（关闭「一次一单」时同一时间可以有好几笔各自独立还没出结果，下面逐一列出）；历史数据积累得更久后重新回测，通常就能看到完整的交易记录了。",
+    "openPositionNotice": "策略还有 {{count}} 笔信号目前仍是「持仓中」：一直没有摸到止损或止盈，所以没计入下方的交易统计。这不代表策略没有触发信号，只是这些还没等到结果（关闭「一次一单」时同一时间可以有好几笔各自独立还没出结果，下面逐一列出）；历史数据积累得更久后重新回测，通常就能看到完整的交易记录了。",
     "resultsTitle": "回测结果",
     "chartTitle": "K 线走势与交易点位",
     "overlayTitle": "指标叠加",
@@ -4072,8 +4103,9 @@
     "disable": "停用",
     "delete": "删除",
     "deleteConfirm": "确定删除这个策略吗？已停用的历史信号不受影响。",
+    "toggleFailed": "「{{name}}」没有切换成功，已恢复原状。",
     "mySignals": "我的策略信号",
-    "noSignals": "还没有触发过任何信号——策略启用后满足条件会自动出现在这里",
+    "noSignals": "还没有触发过任何信号。策略启用后满足条件会自动出现在这里",
     "clearSignals": "清空",
     "clearSignalsConfirm": "确定清空全部已触发的策略信号历史吗？不影响策略本身的启用状态，仪表盘和信号面板页也会一并清空。",
     "oneClickOrder": "一键下单",
@@ -4096,7 +4128,7 @@
     "s1Title": "开好 {{name}} 账户",
     "s1Desc": "已有账户可以跳过。满足条件可以免费开通 PRO 使用权限。",
     "s2Title": "填账号密码，直接连接",
-    "s2Desc": "在「连接 MT5」页面输入 MT5 账号和密码，验证通过即完成连接——不用装桥接，也不用租 VPS。",
+    "s2Desc": "在「连接 MT5」页面输入 MT5 账号和密码，验证通过即完成连接。不用装桥接，也不用租 VPS。",
     "s3Title": "回信号面板下单",
     "s3Desc": "账户状态变为在线后，信号面板的一键下单会直接打到你的 MT5 执行。",
     "bridgeNote": "用的是 {{name}} 以外的券商？那就需要在自己的电脑上常驻运行 PRISMX 桥接程序。",
@@ -4293,6 +4325,7 @@
       "closed": "已关闭"
     },
     "reply": "回复",
+    "sending": "发送中…",
     "replyPlaceholder": "输入回复内容…",
     "reopen": "重开工单",
     "closedWarning": "此工单已关闭。回复将自动重开工单。",
@@ -4508,7 +4541,7 @@
     "colSample": "笔数",
     "empty": "本期暂无上榜账户",
     "myRank": "我的名次",
-    "notRanked": "本期未上榜——需本期 ≥{{n}} 笔完整平仓且达到门槛",
+    "notRanked": "本期未上榜：需本期 ≥{{n}} 笔完整平仓且达到门槛",
     "notRankedShort": "未上榜",
     "sampleCount": "{{n}} 笔",
     "periodWeek": "{{year}} 年 · 第 {{week}} 周",
@@ -4520,7 +4553,7 @@
     "progressCount": "本期已完成 {{s}} / {{n}} 笔完整平仓",
     "progressBaselineOk": "本金 {{usd}} USD 已达门槛",
     "progressBaselineLow": "本金 {{usd}} USD，还差 {{gap}} USD 达到门槛",
-    "progressNote": "分子只算基线拍照之后平掉的仓位——本期基线拍于 {{time}}。",
+    "progressNote": "分子只算基线拍照之后平掉的仓位。本期基线拍于 {{time}}。",
     "emptyHeading": "本期还没有人上榜",
     "emptyBody": "基线在期初（{{time}}）拍下，之后平掉的仓位才计入。达到 ≥{{n}} 笔且本金 ≥{{usd}} USD 的账户会在下一次刷新时出现。",
     "lastRefresh": "上次刷新 {{time}}",
@@ -4631,7 +4664,7 @@
     "regNotOpen": "报名尚未开始",
     "regClosed": "报名已截止",
     "rules": {
-      "scoringFrom": "报名后的成绩才计入——开赛前报名从开赛起计分，开赛后报名从报名时刻起计分。只算计分起点之后下的单：之前就开着的仓位（包括提前挂好、之后才触发的挂单）不论盈亏都不计入",
+      "scoringFrom": "报名后的成绩才计入：开赛前报名从开赛起计分，开赛后报名从报名时刻起计分。只算计分起点之后下的单：之前就开着的仓位（包括提前挂好、之后才触发的挂单）不论盈亏都不计入",
       "minSamples": "达到所选口径的笔数门槛（与常设榜一致）才有名次",
       "final": "实时榜仅供参考，最终名次与奖品发放以终审结果为准"
     },
@@ -4816,7 +4849,7 @@
       "lead": "收益率 = 比赛期间在本平台下单的盈亏合计 ÷ 报名时的账户资金。",
       "platformOnly": "只计入通过本平台下的单；在 MT5 里自己下的单不计入成绩。",
       "fixedBase": "分母固定为报名时的资金：比赛期间入金、出金，都不会改变它，也不会让你掉榜。",
-      "openAtEnd": "比赛结束时还没平仓的平台单，按结束那一刻的浮动盈亏计入成绩——拿着亏损单不平，躲不过计分。",
+      "openAtEnd": "比赛结束时还没平仓的平台单，按结束那一刻的浮动盈亏计入成绩。拿着亏损单不平，躲不过计分。",
       "review": "出入金或平台外交易金额较大的账户，会由管理员人工复核；有违规行为的可能被取消资格。",
       "entryExact": "报名时账户资金须正好 {{usd}} USD。",
       "entryFloor": "报名时账户资金须不低于 {{usd}} USD。",
@@ -4842,13 +4875,13 @@
       "t": "持仓当中提款",
       "s": "开仓时 1 万 → 中途提走 9000 → 平仓赚 500",
       "r": "5%",
-      "w": "按开仓那一刻的 1 万算——取「钱多的那一刻」，中途搬钱改变不了成绩。"
+      "w": "按开仓那一刻的 1 万算：取「钱多的那一刻」，中途搬钱改变不了成绩。"
     },
     "case4": {
       "t": "持仓当中入金",
       "s": "开仓时 1000 → 中途加到 1 万 → 平仓赚 500",
       "r": "5%",
-      "w": "按平仓那一刻的 1 万算——同样取「钱多的那一刻」，入金不会让收益率变好看。"
+      "w": "按平仓那一刻的 1 万算：同样取「钱多的那一刻」，入金不会让收益率变好看。"
     },
     "noteSmall": "小额变动不算出金：手续费、隔夜利息这类零头不会被当成提款，只有同时超过 100 USD 和账户资金 5% 的减少才会被识别为出金。",
     "floor": {
@@ -4884,7 +4917,7 @@
         "w": "单子算在平仓那一期，用那一期的本金；之前的浮盈浮亏一起算进来。"
       }
     },
-    "noteCeiling": "本场账户资金高于 {{usd}} USD 时不参与排名——报名后入金超过上限同样不计。",
+    "noteCeiling": "本场账户资金高于 {{usd}} USD 时不参与排名。报名后入金超过上限同样不计。",
     "noteExact": "本场只接受资金正好 {{usd}} USD 的账户；报名后出入金让资金偏离这个数的，不参与排名。",
     "noteWinRate": "胜率榜完全不受出入金影响：它只看你赢了几笔、输了几笔。",
     "noteSealedBoard": "周期结束后成绩就封存了，之后再怎么出入金、怎么交易，都不会改动已经结束的排名。",
@@ -5018,8 +5051,8 @@
           "sub": "连接你的 MT5，持仓、挂单、成交回执实时同步。"
         },
         "growth": {
-          "title": "注册后解锁成长体系",
-          "sub": "段位、勋章、排行榜、交易比赛——每一笔实盘单都在为你记账。"
+          "title": "注册后解锁竞技场",
+          "sub": "段位、勋章、排行榜、交易比赛。每一笔实盘单都在为你记账。"
         },
         "analysis": {
           "title": "注册后查看完整策略分析",
@@ -5042,7 +5075,7 @@
         "sub": "每一条信号的入场、止损、止盈和最终判定，全部可查。"
       },
       "exit": {
-        "title": "先别走——现在有 {{n}} 条信号正在进行",
+        "title": "先别走，现在有 {{n}} 条信号正在进行",
         "sub": "注册只要 30 秒，别让下一条信号再从眼前溜走。",
         "next": "后最近一条失效"
       },
@@ -5125,6 +5158,7 @@
       "sendHint": "Ctrl + Enter 发送",
       "internalHint": "内部备注只有客服和管理员看得到，不会通知用户。",
       "internalPlaceholder": "写给同事的备注（用户看不到）",
+      "savingNote": "保存中…",
       "saveNote": "保存备注"
     },
     "followUps": {

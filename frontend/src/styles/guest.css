@@ -36,7 +36,9 @@
   height: 11px;
   opacity: 0.45;
 }
-.gst-nav-item:hover .gst-nav-lock { opacity: 0.8; }
+@media (hover: hover) and (pointer: fine) {
+  .gst-nav-item:hover .gst-nav-lock { opacity: 0.8; }
+}
 .gst-hdr-cta {
   height: 36px;
   padding: 0 16px;
@@ -64,7 +66,7 @@
   align-items: center;
   gap: 6px;
   padding: 2px 9px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgb(var(--purple-hi-rgb) / 0.16);
   color: var(--purple-hi);
   font-size: 12px;
@@ -84,12 +86,14 @@
 }
 .gst-banner-cta {
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   text-decoration: underline;
   text-decoration-color: rgb(var(--purple-hi-rgb) / 0.6);
   text-underline-offset: 3px;
 }
-.gst-banner-cta:hover { color: var(--purple-hi); }
+@media (hover: hover) and (pointer: fine) {
+  .gst-banner-cta:hover { color: var(--purple-hi); }
+}
 
 /* ── 最近结算 / recently settled ── */
 .gst-recent {
@@ -107,7 +111,7 @@
 .gst-recent-head h3 {
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .gst-recent-stats {
   display: flex;
@@ -133,7 +137,7 @@
   align-items: center;
   gap: 8px;
 }
-.gst-recent-sym b { font-size: 14px; color: #fff; }
+.gst-recent-sym b { font-size: 15px; color: var(--text-strong); }
 .gst-recent-sym .chip { transform: scale(0.9); transform-origin: left center; }
 .gst-recent-ago {
   margin-left: auto;
@@ -152,7 +156,7 @@
   flex: none;
   min-width: 52px;
   padding: 3px 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   text-align: center;
   font-size: 12px;
   font-weight: 500;
@@ -171,11 +175,13 @@
   border-radius: var(--r-md);
   border: 1px dashed rgb(var(--purple-hi-rgb) / 0.35);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--purple-hi);
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.gst-recent-foot:hover { background: rgb(var(--purple-rgb) / 0.1); }
+@media (hover: hover) and (pointer: fine) {
+  .gst-recent-foot:hover { background: rgb(var(--purple-rgb) / 0.1); }
+}
 
 /* ── 手机吸底条 / mobile sticky bar ── */
 .gst-sticky {
@@ -188,7 +194,7 @@
   align-items: center;
   gap: 12px;
   padding: 10px 10px 10px 16px;
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   border: 1px solid rgb(var(--purple-hi-rgb) / 0.25);
   background: rgba(20, 20, 26, 0.94);
   backdrop-filter: blur(14px);
@@ -204,7 +210,7 @@
   align-items: center;
   gap: 7px;
   font-size: 13px;
-  color: #fff;
+  color: var(--text-strong);
 }
 .gst-sticky-next .sig-ttl {
   margin-top: 2px;
@@ -214,7 +220,7 @@
 .gst-sticky .btn {
   height: 42px;
   padding: 0 18px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
 }
 
@@ -229,14 +235,14 @@
   gap: 10px;
   max-width: calc(100vw - 32px);
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   border: 1px solid rgb(var(--purple-hi-rgb) / 0.4);
   background: rgba(27, 27, 33, 0.97);
   box-shadow: 0 14px 40px rgba(0, 0, 0, 0.5);
   text-align: left;
-  animation: gst-drop 0.4s var(--ease-out);
+  animation: gst-toast-in var(--dur-fast) var(--ease-out) backwards;
 }
-.gst-toast b { display: block; font-size: 14px; color: #fff; }
+.gst-toast b { display: block; font-size: 15px; color: var(--text-strong); }
 .gst-toast small { display: block; margin-top: 2px; font-size: 12px; color: var(--purple-hi); }
 .gst-toast-bolt {
   display: grid;
@@ -246,8 +252,10 @@
   border-radius: 50%;
   background: rgb(var(--purple-rgb) / 0.25);
 }
-@keyframes gst-drop {
-  from { opacity: 0; transform: translateY(-10px); }
+/* 与站内 toast 同一配方：140ms 从 96% 放大淡入，不位移。
+   Same recipe as the app toast: a 140ms scale-in from 96%, no travel. */
+@keyframes gst-toast-in {
+  from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: none; }
 }
 
@@ -259,13 +267,13 @@
   z-index: var(--z-sticky);
   width: 300px;
   padding: 18px;
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   border: 1px solid rgb(var(--purple-hi-rgb) / 0.3);
   background: rgba(27, 27, 33, 0.97);
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
-  animation: gst-rise 0.45s var(--ease-out);
+  animation: gst-rise var(--dur-medium) var(--ease-out) backwards;
 }
-.gst-nudge b { display: block; padding-right: 20px; font-size: 15px; color: #fff; }
+.gst-nudge b { display: block; padding-right: 20px; font-size: 15px; color: var(--text-strong); }
 .gst-nudge p { margin-top: 6px; font-size: 13px; line-height: 1.55; color: var(--text-2); }
 .gst-nudge .btn { width: 100%; margin-top: 14px; height: 40px; font-weight: 500; }
 .gst-nudge-x {
@@ -300,9 +308,7 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgba(5, 5, 8, 0.78);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: var(--scrim);
   animation: gst-fade 0.2s var(--ease-out);
 }
 @media (min-width: 640px) {
@@ -315,17 +321,17 @@
   max-height: calc(100dvh - 24px);
   overflow-y: auto;
   padding: 28px 24px calc(22px + env(safe-area-inset-bottom));
-  border-radius: 24px 24px 0 0;
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
   border: 1px solid rgb(var(--purple-hi-rgb) / 0.22);
   background:
     radial-gradient(120% 60% at 50% 0%, rgb(var(--purple-rgb) / 0.22), transparent 60%),
     var(--surface);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
   text-align: center;
-  animation: gst-rise 0.32s var(--ease-out);
+  animation: gst-rise var(--dur-medium) var(--ease-out) backwards;
 }
 @media (min-width: 640px) {
-  .gst-gate { border-radius: 24px; padding-bottom: 24px; }
+  .gst-gate { border-radius: var(--r-lg); padding-bottom: 24px; }
 }
 .gst-gate:focus { outline: none; }
 .gst-gate-x {
@@ -340,23 +346,25 @@
   color: var(--text-3);
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.gst-gate-x:hover { background: var(--nest); color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .gst-gate-x:hover { background: var(--nest); color: var(--text-strong); }
+}
 .gst-gate-mark {
   display: flex;
   justify-content: center;
 }
 .gst-gate-title {
   margin-top: 10px;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 500;
   line-height: 1.3;
   letter-spacing: -0.01em;
-  color: #fff;
+  color: var(--text-strong);
 }
 .gst-gate-sub {
   margin: 8px auto 0;
   max-width: 360px;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.6;
   color: var(--text-2);
 }
@@ -364,7 +372,7 @@
 .gst-ticket {
   margin-top: 16px;
   padding: 14px;
-  border-radius: 16px;
+  border-radius: var(--r-panel);
   border: 1px solid var(--line-hi);
   background: var(--nest);
   text-align: left;
@@ -374,7 +382,7 @@
   align-items: center;
   gap: 8px;
 }
-.gst-ticket-top b { font-size: 16px; color: #fff; }
+.gst-ticket-top b { font-size: 16px; color: var(--text-strong); }
 .gst-ticket-rr {
   margin-left: auto;
   font-size: 15px;
@@ -393,11 +401,11 @@
   align-items: center;
   gap: 4px;
   padding: 8px 4px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, 0.03);
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .gst-ticket-px > div > span:first-child {
   font-size: 12px;
@@ -431,7 +439,7 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  font-size: 14px;
+  font-size: 15px;
   color: var(--text);
 }
 .gst-gate-perks svg {
@@ -445,14 +453,14 @@
   gap: 12px;
   margin-top: 18px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   border: 1px solid rgb(var(--gold-rgb) / 0.35);
   background: linear-gradient(100deg, rgb(var(--gold-rgb) / 0.14), rgb(var(--gold-rgb) / 0.04));
   color: var(--gold);
   text-align: left;
 }
 .gst-gate-offer svg { flex: none; }
-.gst-gate-offer b { display: block; font-size: 14px; color: #fff; }
+.gst-gate-offer b { display: block; font-size: 15px; color: var(--text-strong); }
 .gst-gate-offer span { display: block; margin-top: 2px; font-size: 12px; color: var(--text-2); }
 .gst-gate-cta {
   width: 100%;
@@ -460,7 +468,7 @@
   margin-top: 18px;
   font-size: 16px;
   font-weight: 500;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
 }
 .gst-gate-note {
   margin-top: 8px;
@@ -483,7 +491,9 @@
   color: var(--text-2);
   transition: color var(--dur-fast) var(--ease-out);
 }
-.gst-gate-links button:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .gst-gate-links button:hover { color: var(--text-strong); }
+}
 .gst-gate-social {
   display: flex;
   align-items: center;

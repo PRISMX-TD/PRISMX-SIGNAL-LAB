@@ -4,23 +4,42 @@ import { useTranslation } from 'react-i18next'
 import { orderApi } from '../../api/client'
 import { localizeApiError } from '../../api/utils'
 import { useLive } from '../../store/live'
-import type { OrderEntryType, Signal } from '../../api/types'
+import type { Order, OrderEntryType, Signal } from '../../api/types'
+import { useToastState } from '../../utils/useToastState'
+import { OrderRejectedError } from '../order/orderRejected'
 import {
   NEW_HIGHLIGHT_MS,
   effectiveStatus,
   type FocusEntry,
   type FocusState,
 } from './SignalView'
+import { APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT, isAppHidden } from '../../utils/appVisibility'
+import { EMPTY } from '../../utils/format'
 
 // ---------- 下单 + 回执提示 / order placement + receipt toasts ----------
 
-export interface OrderToast {
-  msg: string
-  kind: 'success' | 'error' | 'info'
-}
-
 // 等待回执的兜底时长：正常回执 WS 几秒内就到 / fallback window; WS receipts arrive in seconds
 const RECEIPT_FALLBACK_MS = 20000
+
+/** submitOrder 的可选行为 / optional submitOrder behaviour */
+export interface SubmitOrderOptions {
+  // true：券商当场拒单（REJECTED）或结果未知（FAILED）时不弹 toast，改为抛 OrderRejectedError。
+  // 滑动确认弹窗（OrderSheet）的两条路径（placeOrder、placeStrategyOrder）固定传 true：弹窗
+  // 自己在回执卡里报错，再弹一条 toast 就是同一件事说两遍。图表页的 placeManualOrder 不传，
+  // 它拿返回值渲染就地回执。
+  // true: on an on-the-spot REJECTED / FAILED, throw OrderRejectedError instead of toasting.
+  // The two OrderSheet paths (placeOrder, placeStrategyOrder) always pass it: the sheet reports
+  // the failure in its receipt card, and a toast on top says the same thing twice. The charts
+  // page's placeManualOrder does not; it renders an inline receipt from the return value.
+  throwOnReject?: boolean
+  // true：不弹这一笔的即时结果 toast（成交 / 挂出 / 被拒 / 已提交），调用方自己就地报。PENDING
+  // 的单仍登记等回执，稍后到达的结果照常弹 toast。图表页下单票用它：按钮下面有自己的就地回执，
+  // 再在屏幕正中弹一条就是同一件事说两遍。
+  // true: skip the immediate result toast; the caller reports it in place. PENDING orders still
+  // register, and their later result still toasts. The charts ticket uses it: it has its own
+  // inline receipt under the button, and a centred toast would say the same thing twice.
+  silent?: boolean
+}
 
 /**
  * 下单 + 等待真实回执的共享逻辑（Dashboard 与信号页共用）。
@@ -32,8 +51,7 @@ const RECEIPT_FALLBACK_MS = 20000
 export function useOrderPlacement() {
   const { t } = useTranslation()
   const { orders, upsertOrder } = useLive()
-  const [toast, setToast] = useState<OrderToast | null>(null)
-  const toastTimer = useRef<number | undefined>(undefined)
+  const { toast, showToast } = useToastState()
   // 正在等待回执的订单 id 集合。两件事必须这样：
   // ① 是**集合**不是单个 id：终端下单票允许连续下多单（成功即 rotateOrderId），
   //    以前第二笔一提交就把第一笔的 id 覆盖掉，第一笔的成交/被拒提示永远不出现，
@@ -66,18 +84,11 @@ export function useOrderPlacement() {
 
   useEffect(
     () => () => {
-      if (toastTimer.current) window.clearTimeout(toastTimer.current)
       for (const timer of fallbackTimers.current.values()) window.clearTimeout(timer)
       fallbackTimers.current.clear()
     },
     []
   )
-
-  const showToast = useCallback((msg: string, kind: OrderToast['kind'] = 'success', ms = 3000) => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ msg, kind })
-    toastTimer.current = window.setTimeout(() => setToast(null), ms)
-  }, [])
 
   // 监听 live orders：等待中的订单到达终态即提示 / watch live orders for the terminal state
   useEffect(() => {
@@ -86,14 +97,37 @@ export function useOrderPlacement() {
       const o = orders.find((x) => x.id === id)
       if (!o) continue
       if (o.status === 'PLACED') {
-        if (settle(id)) showToast(t('order.pendingPlaced', { price: o.price ?? '-' }), 'success')
+        if (settle(id)) showToast(t('order.pendingPlaced', { price: o.price ?? EMPTY }), 'success')
       } else if (o.status === 'FILLED') {
-        if (settle(id)) showToast(t('order.filled', { price: o.filledPrice ?? '-' }), 'success')
+        if (settle(id)) showToast(t('order.filled', { price: o.filledPrice ?? EMPTY }), 'success')
       } else if (o.status === 'REJECTED' || o.status === 'FAILED') {
-        if (settle(id)) showToast(t('order.rejected', { msg: o.message ? localizeApiError(o.message) : '-' }), 'error')
+        if (settle(id)) showToast(t('order.rejected', { msg: o.message ? localizeApiError(o.message) : EMPTY }), 'error')
       }
     }
   }, [orders, pendingIds, settle, showToast, t])
+
+  // 一笔刚拿到结果的单按状态报成一条 toast。submitOrder 内部用它；图表页在 silent 下单后，
+  // 手机抽屉切到持仓、下单票随之卸载时也用它补报（就地回执跟着票一起没了）。
+  // Report a just-answered order as one toast. submitOrder uses it; the charts page calls it
+  // after a silent order when the mobile sheet switches away and unmounts the ticket, taking
+  // its inline receipt with it.
+  const reportPlaced = useCallback((placed: Order) => {
+    if (placed.status === 'PLACED') {
+      // 挂单挂出成功。这一支必须排在 FILLED 之前、而且不能并进去：挂单还没
+      // 成交，说"已成交"会让用户以为仓位已经建立。
+      // A placed pending order. Kept ahead of and apart from FILLED: nothing has
+      // traded, and saying it has makes the user believe a position exists.
+      showToast(t('order.pendingPlaced', { price: placed.price ?? EMPTY }), 'success')
+    } else if (placed.status === 'FILLED') {
+      showToast(t('order.filled', { price: placed.filledPrice ?? EMPTY }), 'success')
+    } else if (placed.status === 'REJECTED' || placed.status === 'FAILED') {
+      showToast(t('order.rejected', { msg: placed.message ? localizeApiError(placed.message) : EMPTY }), 'error')
+    } else {
+      // 停留时长按种类走 useToastState 的 TOAST_MS（info 4 秒）。
+      // Duration comes from TOAST_MS in useToastState (info: 4s).
+      showToast(t('order.submitted'), 'info')
+    }
+  }, [showToast, t])
 
   // 下单 + 等待回执的共享核心；signalId 为 null 即手动下单（图表页）。
   // clientOrderId 由下单弹窗持有并在重试间保持不变（一个弹窗=一笔下单意图），
@@ -119,7 +153,7 @@ export function useOrderPlacement() {
       price?: number | null
       source?: 'STRATEGY' | null
       reverse?: boolean
-    }) => {
+    }, opts: SubmitOrderOptions = {}) => {
       // API 错误向上抛给下单弹窗展示 / API errors propagate to the modal
       const placed = await orderApi.place(payload)
       // 不再重拉 /orders：POST 已把这一条订单整条返回，直接并入本地列表（upsertOrder 带防回退，
@@ -128,31 +162,25 @@ export function useOrderPlacement() {
       // list (upsertOrder is regress-safe: a WS terminal state is never overwritten by this
       // PENDING receipt); positions / pending orders ride the WS.
       upsertOrder(placed)
+      const answered = placed.status === 'PLACED' || placed.status === 'FILLED'
+        || placed.status === 'REJECTED' || placed.status === 'FAILED'
+      // 滑动确认弹窗的路径：抛错，让 OrderSheet 走错误回执，不弹 toast（见 SubmitOrderOptions）。
+      // The slide-to-confirm path throws so OrderSheet shows its error receipt; no toast.
+      if ((placed.status === 'REJECTED' || placed.status === 'FAILED') && opts.throwOnReject) {
+        throw new OrderRejectedError(placed)
+      }
+      // silent：调用方自己就地报结果（图表页下单票），这里不再弹同一句（见 SubmitOrderOptions）。
+      // silent: the caller reports the result in place (charts ticket); don't repeat it here.
+      if (!opts.silent) reportPlaced(placed)
       // 把回执原样交回调用方：图表页的下单票要按 FILLED / PENDING / REJECTED 在按钮
       // 下面就地给出不同的回执（成交价、耗时），而不是只有一句"已提交"。
       // Hand the receipt back to the caller: the charts ticket renders a
       // status-specific inline receipt (fill price, elapsed) under the button.
-      if (placed.status === 'PLACED') {
-        // 挂单挂出成功。这一支必须排在 FILLED 之前、而且不能并进去：挂单还没
-        // 成交，说"已成交"会让用户以为仓位已经建立。
-        // A placed pending order. Kept ahead of and apart from FILLED: nothing has
-        // traded, and saying it has makes the user believe a position exists.
-        showToast(t('order.pendingPlaced', { price: placed.price ?? '-' }), 'success')
-        return placed
-      }
-      if (placed.status === 'FILLED') {
-        showToast(t('order.filled', { price: placed.filledPrice ?? '-' }), 'success')
-        return placed
-      }
-      if (placed.status === 'REJECTED' || placed.status === 'FAILED') {
-        showToast(t('order.rejected', { msg: placed.message ? localizeApiError(placed.message) : '-' }), 'error')
-        return placed
-      }
-      // 4 秒，不是原来的 8 秒。那个 8 秒是为「贴在底部、半透明、容易错过」配的补偿
-      // ——提示现在在屏幕正中且是实色，读到它用不了两秒，再压八秒就只剩碍眼。
-      // 4s, down from 8. The 8 compensated for a translucent strip at the bottom edge
-      // that was easy to miss; a centred opaque card is read in under two.
-      showToast(t('order.submitted'), 'info', 4000)
+      if (answered) return placed
+      // 还没结果（PENDING）：登记等回执。silent 也照样登记：稍后到达的成交 / 被拒是异步结果，
+      // 那时下单票上的就地回执早已消失，toast 是它唯一的回音。
+      // No result yet (PENDING): register for the receipt. Silent callers register too: the
+      // fill or rejection arrives later, after the ticket's inline receipt is gone.
       if (!pendingRef.current.has(placed.id)) {
         pendingRef.current.add(placed.id)
         setPendingIds((prev) => [...prev, placed.id])
@@ -166,7 +194,7 @@ export function useOrderPlacement() {
       fallbackTimers.current.set(placed.id, timer)
       return placed
     },
-    [upsertOrder, settle, showToast, t]
+    [upsertOrder, settle, showToast, reportPlaced, t]
   )
 
   const placeOrder = useCallback(
@@ -192,7 +220,7 @@ export function useOrderPlacement() {
         takeProfit,
         clientOrderId,
         ...(reverse ? { reverse: true } : {}),
-      }),
+      }, { throwOnReject: true }),
     [submitOrder]
   )
 
@@ -209,11 +237,12 @@ export function useOrderPlacement() {
       takeProfit: number | null,
       clientOrderId: string,
       orderType: OrderEntryType = 'MARKET',
-      price: number | null = null
+      price: number | null = null,
+      opts: SubmitOrderOptions = {},
     ) => submitOrder({
       signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit, clientOrderId,
       orderType, price,
-    }),
+    }, opts),
     [submitOrder]
   )
 
@@ -232,7 +261,7 @@ export function useOrderPlacement() {
     ) => submitOrder({
       signalId: null, symbol, side, volume, mt5Login, stopLoss, takeProfit, clientOrderId,
       source: 'STRATEGY',
-    }),
+    }, { throwOnReject: true }),
     [submitOrder]
   )
 
@@ -240,7 +269,7 @@ export function useOrderPlacement() {
   // submitOrder），需要复用同一套 toast 展示。/ Exposed so the terminal's
   // positions/orders dock (which calls orderApi.close/cancel directly, not via
   // submitOrder) can surface feedback through the same toast.
-  return { toast, placeOrder, placeManualOrder, placeStrategyOrder, showToast }
+  return { toast, placeOrder, placeManualOrder, placeStrategyOrder, showToast, reportPlaced }
 }
 
 // 每秒滴答的当前时间，用于实时倒计时 / a per-second ticking clock for live countdowns
@@ -284,25 +313,68 @@ export function useBucketedNow(bucketMs: number): number {
 // ---------- 全局共享秒级时钟 / global shared per-second clock ----------
 // 单一定时器 + 订阅：只让订阅的叶子节点（如倒计时）重渲染，而不是整个列表；
 // 无订阅者时自动停表，避免空转。
+// 页面或 App 在后台时也停表（isAppHidden：document.hidden 或 App 壳的
+// apppack:background）。看不见的倒计时以前每秒照样唤醒 JS、让 React 重渲染；App 锁屏
+// 时 WebView 不暂停定时器，白白耗电。回到前台立刻补走一格再重新起表，数字不会停在
+// 离开的那一秒。第一个订阅者到来时先把时间刷新：停表期间 clockNow 没在走，不刷新的话
+// 刚挂上的倒计时会先显示离开那一刻的时间，一秒后才跳对。
 // One interval + subscribers: only subscribed leaves (e.g. countdowns) re-render,
 // not the whole list; the timer stops when nobody is listening.
+// It also stops while the page or app is in the background (isAppHidden: document.hidden
+// or the App shell's apppack:background). Invisible countdowns used to wake JS and
+// re-render every second, and a locked phone's WebView doesn't pause timers. Back in the
+// foreground it ticks at once and restarts, so the digits never sit on the second you left.
+// The first subscriber refreshes the time: clockNow is frozen while stopped, and without
+// the refresh a freshly mounted countdown would show the moment you left for a second
+// before jumping to the right value.
 let clockNow = Date.now()
 const clockSubs = new Set<() => void>()
 let clockTimer: number | undefined
 
-function subscribeClock(cb: () => void): () => void {
-  clockSubs.add(cb)
-  if (clockTimer == null) {
-    clockTimer = window.setInterval(() => {
-      clockNow = Date.now()
-      clockSubs.forEach((fn) => fn())
-    }, 1000)
+function tickClock() {
+  clockNow = Date.now()
+  clockSubs.forEach((fn) => fn())
+}
+
+function startClock() {
+  if (clockTimer == null) clockTimer = window.setInterval(tickClock, 1000)
+}
+
+function stopClock() {
+  if (clockTimer != null) {
+    window.clearInterval(clockTimer)
+    clockTimer = undefined
   }
+}
+
+// 前后台切换时调用：后台停表；回到前台且还有订阅者时，先补走一格再起表。
+// Called on every foreground / background change: stop in the background; back in front
+// with subscribers, tick once immediately and restart.
+function syncClockVisibility() {
+  if (isAppHidden()) {
+    stopClock()
+  } else if (clockSubs.size > 0 && clockTimer == null) {
+    tickClock()
+    startClock()
+  }
+}
+
+function subscribeClock(cb: () => void): () => void {
+  if (clockSubs.size === 0) {
+    document.addEventListener('visibilitychange', syncClockVisibility)
+    window.addEventListener(APP_BACKGROUND_EVENT, syncClockVisibility)
+    window.addEventListener(APP_FOREGROUND_EVENT, syncClockVisibility)
+    clockNow = Date.now()
+  }
+  clockSubs.add(cb)
+  if (!isAppHidden()) startClock()
   return () => {
     clockSubs.delete(cb)
-    if (clockSubs.size === 0 && clockTimer != null) {
-      window.clearInterval(clockTimer)
-      clockTimer = undefined
+    if (clockSubs.size === 0) {
+      stopClock()
+      document.removeEventListener('visibilitychange', syncClockVisibility)
+      window.removeEventListener(APP_BACKGROUND_EVENT, syncClockVisibility)
+      window.removeEventListener(APP_FOREGROUND_EVENT, syncClockVisibility)
     }
   }
 }

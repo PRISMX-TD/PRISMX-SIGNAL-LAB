@@ -95,7 +95,7 @@ export function TicketMetaEditor({
       />
       <button
         type="button"
-        className="rounded-[10px] border border-[var(--line-hi)] px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-white/[0.05]"
+        className="rounded-control border border-[var(--line-hi)] px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-white/[0.05]"
         onClick={() => {
           setTitle(ticket.title)
           setEditing(true)

@@ -39,19 +39,22 @@
      Padding equals the card radius (24) so the corners read concentric. */
   padding: 24px;
 }
-/* 进场：逐张 45ms 错开，最多错到第 9 张（≈360ms），之后同时出现。
-   整页已经有 .content-fade，这里的错开让牌面按顺序落桌，读起来像一条正在
-   刷新的流水，而不是一块整体贴上来的图。
-   Entrance: staggered 45ms per card, capped at the 9th (~360ms). The page
-   already fades in as a whole; the stagger lands cards in sequence, reading as
-   a feed that is arriving rather than a block pasted on. */
+/* 进场：只给带 .is-in 的牌（SignalGrid 决定：本次会话第一次显示网格时全部带上，之后
+   只有挂载后才到的新信号带上）。逐张 30ms 错开，最多错到第 6 张（--i 封顶 5，
+   ≈150ms），之后同时出现。牌面按顺序落桌，读起来像一条正在刷新的流水；但只播一次，
+   回到这一页、改筛选时牌直接出现。填充用 backwards：结束后不留 transform。
+   Entrance only for cards with .is-in (SignalGrid sets it on every card the first
+   time the grid shows this session, then only on signals that arrive after mount).
+   Staggered 30ms per card, capped at the 6th (--i max 5, ~150ms). Cards land in
+   sequence like an arriving feed, but only once: returning to the page or changing a
+   filter shows them at once. backwards fill so no transform lingers. */
 @keyframes sig-card-in {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }
 }
-.sig-grid > .sig-card {
-  animation: sig-card-in var(--dur-slow) var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 45ms);
+.sig-grid > .sig-card.is-in {
+  animation: sig-card-in var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 /* 新到的牌：1px 边转品牌紫，6 秒后由 .glass 自带的 border-color 过渡褪回。
    紫色在牌面上只被允许以一条边出现（见 components-cards.css 的 .glass-neon）。
@@ -94,7 +97,7 @@
   font-size: 26px;
   line-height: 1;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   white-space: nowrap;
 }
 .sig-card-meta {
@@ -176,7 +179,7 @@
 .sig-ladder-row .tp b { color: var(--up); }
 .sig-ladder-row .en b {
   font-size: 26px;
-  color: #fff;
+  color: var(--text-strong);
 }
 /* 风险｜回报尺。--risk 是分割点（由组件按风险/(风险+回报) 算出，夹在 8–92%）。
    两段各让出 3px，刻度线 2px 落在中间的空隙上；轨道底色 --nest 在空隙处露出。
@@ -186,7 +189,7 @@
 .sig-ladder-bar {
   position: relative;
   height: 6px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
 }
 .sig-ladder-bar i {
@@ -195,10 +198,16 @@
   bottom: 0;
   display: block;
 }
+/* 左端两角都写 999px，与右段的 0 999px 999px 0 镜像。原来写 10px 0 0 999px：两角
+   竖向相加 1009 远超 6px 条高，浏览器把所有角按 6/1009 缩小，左上角接近直角、
+   左下角接近半圆，左端是歪的。
+   Both left corners are 999px, mirroring the reward segment. The old 10px/999px pair
+   summed to 1009 against a 6px bar, so every radius was scaled by 6/1009: a near-square
+   top-left and a near-round bottom-left. */
 .sig-ladder-bar .risk {
   left: 0;
   width: calc(var(--risk, 50%) - 3px);
-  border-radius: 10px 0 0 999px;
+  border-radius: 999px 0 0 999px;
   background: var(--down);
 }
 .sig-ladder-bar .reward {
@@ -250,18 +259,24 @@
 .sig-ttl .ring-track {
   stroke: var(--line-hi);
 }
-/* 弧长每秒变一次，1s 线性过渡把它连成连续的转动。
-   The arc updates once a second; a 1s linear transition turns steps into a sweep. */
+/* 弧长每秒直接跳到新值，不加过渡：10 分钟走完 56.5px 的周长，每秒只变 0.094px，
+   台阶本身就看不见；而 1s 的 stroke-dashoffset 过渡会让每个圆环一直处在动画中，
+   这个属性不能只走合成，每帧都要重绘。只保留进入「不足 2 分钟」时的颜色过渡。
+   The arc jumps to its new value each second with no transition: the 56.5px
+   circumference drains over 10 minutes, 0.094px a second, so the steps are invisible.
+   A 1s stroke-dashoffset transition kept every ring animating permanently, and that
+   property can't be composited, so it repainted every frame. Only the colour change
+   into the under-two-minutes state keeps a transition. */
 .sig-ttl .ring-fill {
   stroke: var(--purple-hi);
-  transition: stroke-dashoffset 1s linear, stroke var(--dur-base) var(--ease-out);
+  transition: stroke var(--dur-base) var(--ease-out);
 }
 .sig-ttl b {
   font-size: 17px;
   line-height: 1;
   white-space: nowrap;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   transition: color var(--dur-base) var(--ease-out);
 }
 .sig-ttl span {
@@ -291,7 +306,7 @@
 .sig-cta {
   height: 40px;
   padding: 0 24px;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   flex: none;
 }
@@ -316,12 +331,12 @@
     font-size: 20px;
   }
   .sig-ladder-row b {
-    font-size: 14px;
+    font-size: 15px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sig-grid > .sig-card {
+  .sig-grid > .sig-card.is-in {
     animation: none;
   }
   .sig-ttl .ring-fill {

@@ -28,19 +28,19 @@
 }
 .tk-ring svg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
 .tk-ring-arc {
-  transition: stroke-dashoffset 0.9s var(--ease-out);
-  animation: tk-ring-in 1s var(--ease-out) both;
+  transition: stroke-dashoffset var(--dur-slow) var(--ease-out);
+  animation: tk-ring-in var(--dur-slow) var(--ease-out) backwards;
 }
 .tk-ring-num {
   position: relative;
   font-size: 12px;
   font-weight: 600;
-  color: #f4f4f5;
+  color: var(--text-strong);
   letter-spacing: -0.01em;
 }
 .tk-ring-num span {
   font-weight: 500;
-  color: #71717a;
+  color: var(--text-3);
 }
 
 .tk-grid {
@@ -54,15 +54,15 @@
   display: flex;
   flex-direction: column;
   padding: 14px 14px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.025);
-  animation: tk-in 0.45s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 60ms);
+  animation: tk-in var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 .tk-active {
-  border-color: rgba(110, 66, 255, 0.4);
-  background: linear-gradient(180deg, rgba(110, 66, 255, 0.10), rgba(110, 66, 255, 0.03));
+  border-color: rgb(var(--purple-vivid-rgb) / 0.4);
+  background: linear-gradient(180deg, rgb(var(--purple-vivid-rgb) / 0.10), rgb(var(--purple-vivid-rgb) / 0.03));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 .tk-done {
@@ -88,20 +88,20 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  color: #71717a;
+  color: var(--text-3);
 }
 .tk-dot {
   width: 10px;
   height: 10px;
   border-radius: 999px;
   border: 2px solid var(--purple-hi);
-  box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16);
+  box-shadow: 0 0 0 3px rgb(var(--purple-vivid-rgb) / 0.16);
   animation: tk-breathe 2.4s ease-in-out infinite;
 }
 .tk-locked .tk-status { opacity: 0.55; }
 .tk-value {
   font-size: 12px;
-  color: #71717a;
+  color: var(--text-3);
   white-space: nowrap;
 }
 .tk-value b {
@@ -114,9 +114,9 @@
 .tk-title {
   margin-top: 12px;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 20px;
-  color: #f4f4f5;
+  color: var(--text-strong);
   letter-spacing: -0.01em;
 }
 .tk-done .tk-title { color: #d4d4d8; }
@@ -125,7 +125,7 @@
   margin-top: 3px;
   font-size: 12px;
   line-height: 17px;
-  color: #71717a;
+  color: var(--text-3);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -136,7 +136,7 @@
   position: relative;
   height: 3px;
   margin-top: 14px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, 0.08);
 }
 .tk-fill {
@@ -146,10 +146,10 @@
   bottom: 0;
   left: 0;
   width: calc(var(--pct, 0) * 100%);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: linear-gradient(90deg, var(--purple-hi), var(--purple-vivid));
-  animation: tk-grow 0.9s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 60ms + 150ms);
+  animation: tk-grow var(--dur-slow) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms + 150ms);
 }
 .tk-locked .tk-fill { background: rgba(255, 255, 255, 0.22); }
 .tk-tick {
@@ -165,7 +165,7 @@
   margin-top: 8px;
   font-size: 12px;
   line-height: 15px;
-  color: #71717a;
+  color: var(--text-3);
 }
 
 @keyframes tk-in {
@@ -180,14 +180,14 @@
   from { stroke-dashoffset: 113.1; }
 }
 @keyframes tk-breathe {
-  0%, 100% { box-shadow: 0 0 0 3px rgba(110, 66, 255, 0.16); }
-  50% { box-shadow: 0 0 0 5px rgba(110, 66, 255, 0.06); }
+  0%, 100% { box-shadow: 0 0 0 3px rgb(var(--purple-vivid-rgb) / 0.16); }
+  50% { box-shadow: 0 0 0 5px rgb(var(--purple-vivid-rgb) / 0.06); }
 }
 /* 手机：两列小瓦片，不然四五块整块叠成一长条 / mobile: two compact columns instead of a tall stack */
 @media (max-width: 639px) {
   .tk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .tk-tile { padding: 12px; border-radius: 12px; }
-  .tk-title { margin-top: 10px; font-size: 14px; }
+  .tk-tile { padding: 12px; border-radius: var(--r-md); }
+  .tk-title { margin-top: 10px; font-size: 15px; }
   .tk-track { margin-top: 12px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -213,8 +213,8 @@
   align-items: center;
   min-height: 420px;
   padding: 34px 36px 30px;
-  border-radius: 24px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
   background: #050507;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 30px 80px -30px rgba(0, 0, 0, 0.8);
   overflow: hidden;
@@ -228,8 +228,8 @@
   left: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 60% 70% at 70% 8%, rgba(110, 66, 255, 0.22), transparent 60%),
-    radial-gradient(ellipse 50% 40% at 20% 100%, rgba(110, 66, 255, 0.06), transparent 70%);
+    radial-gradient(ellipse 60% 70% at 70% 8%, rgb(var(--purple-vivid-rgb) / 0.22), transparent 60%),
+    radial-gradient(ellipse 50% 40% at 20% 100%, rgb(var(--purple-vivid-rgb) / 0.06), transparent 70%);
   animation: ach-aurora 14s ease-in-out infinite alternate;
 }
 .ach-stage-l { position: relative; min-width: 0; }
@@ -248,8 +248,14 @@
   font-size: 40px;
   line-height: 1.02;
   letter-spacing: -0.02em;
-  color: #f4f4f5;
+  color: var(--text-strong);
   text-wrap: balance;
+}
+/* 中文 / 日文 / 泰文标题不收字距。 / CJK / Thai titles keep zero tracking. */
+:lang(zh) .ach-title,
+:lang(ja) .ach-title,
+:lang(th) .ach-title {
+  letter-spacing: 0;
 }
 .ach-lv {
   display: inline-grid;
@@ -257,14 +263,14 @@
   width: 44px;
   height: 44px;
   border-radius: 999px;
-  border: 1px solid rgba(139, 108, 255, 0.55);
-  background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.35), rgba(110, 66, 255, 0.08) 70%);
-  font-size: 14px;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.55);
+  background: radial-gradient(circle at 35% 30%, rgb(var(--purple-hi-rgb) / 0.35), rgb(var(--purple-vivid-rgb) / 0.08) 70%);
+  font-size: 15px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: #d9ceff;
 }
-.ach-sub { margin: 12px 0 0; font-size: 14px; color: #a1a1aa; }
+.ach-sub { margin: 12px 0 0; font-size: 13px; color: #a1a1aa; }
 
 .ach-rail {
   position: relative;
@@ -297,7 +303,7 @@
 .ach-rail .on i {
   background: var(--purple-vivid);
   border-color: var(--purple-hi);
-  box-shadow: 0 0 0 4px rgba(110, 66, 255, 0.18);
+  box-shadow: 0 0 0 4px rgb(var(--purple-vivid-rgb) / 0.18);
 }
 .ach-rail .cur i::after {
   content: "";
@@ -315,10 +321,10 @@
   text-align: center;
   font-size: 12px;
   font-weight: 500;
-  color: #71717a;
+  color: var(--text-3);
 }
 .ach-rail .on b { color: #a1a1aa; }
-.ach-rail .cur b { color: #f4f4f5; font-weight: 500; }
+.ach-rail .cur b { color: var(--text-strong); font-weight: 500; }
 /* 链条变成可点：按钮只是把点和字裹起来撑满整格，不带任何自己的视觉——
    .on / .cur 的配色规则都括在 li 上，用的是后代选择器，套一层按钮照常命中。
    （不用 display:contents：产物语法下限是 Chrome 70，那一代它会把按钮从无障碍树里拿掉。）
@@ -341,8 +347,10 @@
 /* 手指/鼠标停上去时只把字提亮，不动点——点的颜色是「达没达到」的事实，
    不能被悬停态覆写。/ Hover only lifts the label; the dot's colour states a
    fact (reached or not) and must not be overwritten by a hover style. */
-.ach-rail-btn:hover b { color: #f4f4f5; }
-.ach-rail-btn:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 4px; border-radius: 10px; }
+@media (hover: hover) and (pointer: fine) {
+  .ach-rail-btn:hover b { color: var(--text-strong); }
+}
+.ach-rail-btn:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 4px; border-radius: var(--r-md); }
 /* 正在回看的那一级：点外面一圈紫环。与 .cur 的白心不冲突——一个说「你在哪」、
    一个说「你在看哪」，可以同时落在同一颗点上。
    The level being reviewed gets a violet halo, which coexists with .cur's white pip:
@@ -353,8 +361,8 @@
    box-shadow rather than outline: outline only follows border-radius from Chrome 94
    / Safari 16.4, and the build floor is Chrome 70, where an old WebView would draw a
    square around the dot. Bigger and brighter than .on's halo so it reads at this size. */
-.ach-rail .sel i { box-shadow: 0 0 0 5px rgba(110, 66, 255, 0.5); }
-.ach-rail .sel b { color: #f4f4f5; }
+.ach-rail .sel i { box-shadow: 0 0 0 5px rgb(var(--purple-vivid-rgb) / 0.5); }
+.ach-rail .sel b { color: var(--text-strong); }
 
 /* 关卡标题行右侧：返回链接 + 进度环。/ Right side of the stage heading. */
 .ach-stage-r { display: flex; align-items: center; gap: 14px; }
@@ -364,13 +372,13 @@
   display: flex;
   margin-top: 26px;
   padding-top: 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid var(--line);
 }
 .ach-stats > div { flex: 1; min-width: 0; padding-right: 16px; }
-.ach-stats > div + div { padding-left: 16px; border-left: 1px solid rgba(255, 255, 255, 0.07); }
-.ach-stats small { display: block; font-size: 12px; color: #71717a; letter-spacing: 0.04em; }
-.ach-stats strong { display: block; margin-top: 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; color: #f4f4f5; }
-.ach-stats strong span { font-size: 14px; font-weight: 500; color: #71717a; }
+.ach-stats > div + div { padding-left: 16px; border-left: 1px solid var(--line); }
+.ach-stats small { display: block; font-size: 12px; color: var(--text-3); letter-spacing: 0.04em; }
+.ach-stats strong { display: block; margin-top: 4px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; color: var(--text-strong); }
+.ach-stats strong span { font-size: 13px; font-weight: 500; color: var(--text-3); }
 .ach-link {
   margin-top: 4px;
   padding: 0;
@@ -382,7 +390,9 @@
   text-underline-offset: 3px;
   cursor: pointer;
 }
-.ach-link:hover { color: #f4f4f5; }
+@media (hover: hover) and (pointer: fine) {
+  .ach-link:hover { color: var(--text-strong); }
+}
 
 .ach-pedestal {
   position: relative;
@@ -421,7 +431,7 @@
   height: 70px;
   transform: translateX(-50%);
   border-radius: 50%;
-  background: radial-gradient(ellipse at center, rgba(139, 108, 255, 0.38), rgba(110, 66, 255, 0.12) 45%, transparent 72%);
+  background: radial-gradient(ellipse at center, rgb(var(--purple-hi-rgb) / 0.38), rgb(var(--purple-vivid-rgb) / 0.12) 45%, transparent 72%);
   filter: blur(6px);
 }
 .ach-floorline {
@@ -503,14 +513,14 @@
   height: 300px;
   bottom: -80px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  background: radial-gradient(circle, rgba(139, 108, 255, 0.10), rgba(255, 255, 255, 0.02) 55%, transparent 70%);
-  box-shadow: inset 0 0 40px rgba(110, 66, 255, 0.10), 0 0 0 1px rgba(0, 0, 0, 0.5);
+  background: radial-gradient(circle, rgb(var(--purple-hi-rgb) / 0.10), rgba(255, 255, 255, 0.02) 55%, transparent 70%);
+  box-shadow: inset 0 0 40px rgb(var(--purple-vivid-rgb) / 0.10), 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 .ach-plinth-inner {
   width: 210px;
   height: 210px;
   bottom: -35px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--line);
   background: radial-gradient(circle, rgba(0, 0, 0, 0.35), rgba(0, 0, 0, 0.12) 60%, transparent 75%);
 }
 /* 空位：虚线圈占着位置，邀请去戴 / empty slot: a dashed ring holding the place */
@@ -536,21 +546,21 @@
   bottom: 0;
   text-align: center;
   font-size: 12px;
-  color: #71717a;
+  color: var(--text-3);
 }
-.ach-cap b { display: block; margin-bottom: 3px; font-size: 15px; font-weight: 600; color: #f4f4f5; }
+.ach-cap b { display: block; margin-bottom: 3px; font-size: 15px; font-weight: 500; color: var(--text-strong); }
 .ach-cap-btn {
   padding: 3px 10px;
-  border: 1px solid rgba(139, 108, 255, 0.45);
-  border-radius: 10px;
-  background: rgba(110, 66, 255, 0.16);
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.45);
+  border-radius: var(--r-md);
+  background: rgb(var(--purple-vivid-rgb) / 0.16);
   font-size: 12px;
   color: #d9ceff;
   cursor: pointer;
 }
 .ach-cap-btn:disabled { opacity: 0.5; cursor: default; }
 .ach-slots { display: inline-flex; gap: 6px; margin-left: 10px; vertical-align: middle; }
-.ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: rgba(139, 108, 255, 0.45); transition: background var(--dur-base), transform var(--dur-base); }
+.ach-slots i { width: 6px; height: 6px; border-radius: 999px; background: rgb(var(--purple-hi-rgb) / 0.45); transition: background var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out); }
 .ach-slots i.cur { background: var(--purple-soft); transform: scale(1.25); }
 .ach-slots i.empty { background: transparent; border: 1px solid rgba(255, 255, 255, 0.25); }
 .ach-swipe-hint { display: none; margin-top: 4px; font-size: 12px; color: #52525b; }
@@ -559,7 +569,7 @@
   margin: 8px auto 0;
   padding: 5px 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, 0.05);
   font-size: 12px;
   color: #a1a1aa;
@@ -581,23 +591,23 @@
   margin: 0;
   font-size: 12px;
   font-weight: 500;
-  color: #71717a;
+  color: var(--text-3);
 }
-.ach-sec-h h3 b { margin-right: 10px; font-size: 15px; font-weight: 500; color: #f4f4f5; }
-.ach-sec-h .r { font-size: 12px; color: #71717a; }
-.ach-sec-h .r b { font-weight: 600; color: #f4f4f5; }
+.ach-sec-h h3 b { margin-right: 10px; font-size: 15px; font-weight: 500; color: var(--text-strong); }
+.ach-sec-h .r { font-size: 12px; color: var(--text-3); }
+.ach-sec-h .r b { font-weight: 600; color: var(--text-strong); }
 .ach .tk-grid { margin-top: 14px; }
 
 .ach-vault { display: flex; flex-direction: column; gap: 22px; }
-.ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: 18px; }
+.ach-shelf { position: relative; padding: 14px 18px 18px; border-radius: var(--r-panel); }
 .ach-shelf::before { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: inherit; pointer-events: none; }
 .ach-s-tiered::before { background: radial-gradient(ellipse 70% 110% at 50% 110%, rgba(201, 162, 74, 0.12), transparent 70%); }
 .ach-s-special::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(184, 150, 78, 0.14), transparent 70%); }
 .ach-s-limited::before { background: radial-gradient(ellipse 60% 110% at 50% 110%, rgba(156, 47, 47, 0.16), transparent 70%); }
 .ach-shelf-h { position: relative; display: flex; align-items: baseline; justify-content: space-between; }
-.ach-shelf-h h4 { margin: 0; font-size: 14px; font-weight: 500; color: #f4f4f5; }
-.ach-shelf-h h4 span { margin-left: 10px; font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: #71717a; }
-.ach-shelf-h .r { font-size: 12px; color: #71717a; }
+.ach-shelf-h h4 { margin: 0; font-size: 15px; font-weight: 500; color: var(--text-strong); }
+.ach-shelf-h h4 span { margin-left: 10px; font-size: 12px; font-weight: 500; letter-spacing: 0.04em; color: var(--text-3); }
+.ach-shelf-h .r { font-size: 12px; color: var(--text-3); }
 .ach-shelf-h .r b { color: #a1a1aa; font-weight: 600; }
 .ach-closes { display: block; margin-top: 4px; font-size: 12px; letter-spacing: 0.02em; color: #b9846a; }
 .ach-row {
@@ -626,10 +636,10 @@
   align-items: center;
   text-align: center;
   padding: 14px 8px 22px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   transition: transform var(--dur-base) var(--ease-out);
 }
-@media (hover: hover) { .ach-item:hover { transform: translateY(-4px); } }
+@media (hover: hover) and (pointer: fine) { .ach-item:hover { transform: translateY(-4px); } }
 .ach-glow {
   position: absolute;
   left: 50%;
@@ -662,35 +672,42 @@
   border: 1px dashed rgba(255, 255, 255, 0.14);
   pointer-events: none;
 }
-.ach-name { margin-top: 10px; font-size: 13px; font-weight: 600; color: #f4f4f5; }
+.ach-name { margin-top: 10px; font-size: 13px; font-weight: 500; color: var(--text-strong); }
 /* 三档指示：三粒小点 铜 / 银 / 金，到了的点亮。/ Tier pips: bronze / silver / gold, lit when reached. */
 .ach-tiers { display: inline-flex; align-items: center; gap: 4px; margin-top: 5px; }
 .ach-tiers i { width: 7px; height: 7px; border-radius: 999px; background: rgba(255, 255, 255, 0.10); }
 .ach-tiers i.t1.on { background: #C18A55; }
 .ach-tiers i.t2.on { background: #D5D9E2; }
-.ach-tiers i.t3.on { background: #E4BE6A; box-shadow: 0 0 6px rgba(228, 190, 106, 0.6); }
+.ach-tiers i.t3.on { background: #E4BE6A; }
 .ach-tiers small { margin-left: 4px; font-size: 12px; color: #a1a1aa; }
-.ach-item.ghost .ach-tiers small { color: #71717a; }
+.ach-item.ghost .ach-tiers small { color: var(--text-3); }
 /* 详情层的三档阶梯 / the detail layer's tier ladder */
 .ach-ladder { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
-.ach-ladder li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, 0.03); opacity: 0.55; text-align: left; }
+.ach-ladder li { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 8px 10px; border-radius: var(--r-md); background: rgba(255, 255, 255, 0.03); opacity: 0.55; text-align: left; }
 .ach-ladder li.on { opacity: 1; background: rgba(255, 255, 255, 0.06); }
-.ach-ladder li b { display: block; font-size: 13px; font-weight: 500; color: #f4f4f5; }
+.ach-ladder li b { display: block; font-size: 13px; font-weight: 500; color: var(--text-strong); }
 .ach-ladder li > div > span { display: block; margin-top: 1px; font-size: 12px; line-height: 1.4; color: #a1a1aa; }
-.ach-ladder li small { font-size: 12px; color: #71717a; white-space: nowrap; }
+.ach-ladder li small { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .ach-ladder-check { margin-left: 6px; font-size: 12px; color: var(--up); }
 .ach-item.ghost .ach-name { color: #a1a1aa; }
-.ach-meta { margin-top: 3px; max-width: 160px; font-size: 12px; line-height: 1.35; color: #71717a; }
-.ach-own { margin-top: 6px; font-size: 12px; color: #71717a; }
+.ach-meta { margin-top: 3px; max-width: 160px; font-size: 12px; line-height: 1.35; color: var(--text-3); }
+.ach-own { margin-top: 6px; font-size: 12px; color: var(--text-3); }
 /* 勋章进度条：瓦片上「下一档」下面一条 3px 细条，详情阶梯里未到的档一条。
    与顶部任务瓦片的 .tk-track 同一视觉语言（同高、同圆角、同渐变）。
    Badge progress: a 3px bar under the tile's next-tier line and in unreached
    ladder rows; same visual language as the task tiles' .tk-track. */
 .ach-prog { display: block; width: 100%; }
 .ach-prog.compact { max-width: 160px; margin: 6px auto 0; }
-.ach-prog-track { display: block; position: relative; height: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
-.ach-prog-fill { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: calc(var(--pct, 0) * 100%); border-radius: 10px; background: linear-gradient(90deg, var(--purple-hi), var(--purple-vivid)); transition: width 0.5s var(--ease-out); }
-.ach-prog-label { display: block; margin-top: 4px; font-size: 12px; line-height: 1.3; color: #71717a; text-align: right; }
+.ach-prog-track { display: block; position: relative; height: 3px; border-radius: var(--r-md); background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+/* 进度只动 transform：填充条画满轨道，scaleX(--pct) 从左边缩放；以前过渡 width，每次
+   进度变化都要逐帧重排。渐变随元素一起缩放，观感不变；3px 高的圆角缩放时横向被压扁，
+   这个尺寸看不出。
+   Progress moves by transform only: the fill spans the track and scaleX(--pct) scales it
+   from the left; it used to transition width, relaying out every frame on each change.
+   The gradient scales with it, so it looks the same; the corner squash at 3px tall is
+   invisible. */
+.ach-prog-fill { position: absolute; top: 0; right: 0; bottom: 0; left: 0; border-radius: var(--r-md); background: linear-gradient(90deg, var(--purple-hi), var(--purple-vivid)); transform: scaleX(var(--pct, 0)); transform-origin: left center; transition: transform var(--dur-slow) var(--ease-out); }
+.ach-prog-label { display: block; margin-top: 4px; font-size: 12px; line-height: 1.3; color: var(--text-3); text-align: right; }
 .ach-prog.compact .ach-prog-label { text-align: center; }
 .ach-ladder .ach-prog { margin-top: 5px; }
 .ach-ladder .ach-prog-label { text-align: left; }
@@ -699,16 +716,18 @@
   font-size: 12px;
   line-height: 1;
   padding: 5px 9px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 0;
   background: rgba(255, 255, 255, 0.06);
   color: #a1a1aa;
   cursor: pointer;
   transition: background var(--dur-base) var(--ease-out);
 }
-.ach-eq button:hover { background: rgba(255, 255, 255, 0.10); color: #f4f4f5; }
+@media (hover: hover) and (pointer: fine) {
+  .ach-eq button:hover { background: rgba(255, 255, 255, 0.10); color: var(--text-strong); }
+}
 .ach-eq button:disabled { opacity: 0.5; cursor: default; }
-.ach-eq .on { background: rgba(110, 66, 255, 0.22); color: #d9ceff; }
+.ach-eq .on { background: rgb(var(--purple-vivid-rgb) / 0.22); color: #d9ceff; }
 .ach-eq .static { cursor: default; }
 
 @keyframes ach-aurora { from { transform: translateX(-2%) scale(1); } to { transform: translateX(2%) scale(1.06); } }
@@ -745,11 +764,11 @@
   .ach-floor { width: 260px; bottom: 62px; }
   .ach-floorline { display: none; }
   .ach-rail b { font-size: 12px; }
-  .ach-stats strong { font-size: 18px; }
+  .ach-stats strong { font-size: 17px; }
   .ach-shelf { padding: 12px 10px 14px; }
   .ach-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (prefers-reduced-motion: reduce) {
   .ach-stage::before, .ach-cone, .ach-3d-c .ach-sway { animation: none; }
-  .ach-scene, .ach-3d { transition: none; }
+  .ach-scene, .ach-3d, .ach-prog-fill { transition: none; }
 }

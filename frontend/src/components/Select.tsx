@@ -12,8 +12,9 @@
 // The menu is portaled to <body> and positioned with fixed coordinates from the
 // trigger's bounding rect, so it isn't clipped by any overflow:hidden/auto
 // ancestor (e.g. inside the order ticket / seamless grid panel).
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import { initialIndex, nextIndex } from './selectKeys'
 
 export interface SelectOption {
   value: string
@@ -61,6 +62,17 @@ export default function Select({
   const menuRef = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number; width: number } | null>(null)
   const current = options.find((o) => o.value === value)
+  // 键盘：roving tabindex——菜单里只有「高亮项」tabIndex=0，焦点真的移进菜单。不用
+  // aria-activedescendant：菜单 portal 到 body，与触发器不在一棵子树，真焦点更简单可靠。
+  // Keyboard: roving tabindex — only the highlighted option has tabIndex=0 and real focus
+  // moves into the menu. Not aria-activedescendant: the menu is portalled to body, away
+  // from the trigger, so moving real focus is simpler and more robust.
+  const [active, setActive] = useState(0)
+  const optRefs = useRef<(HTMLButtonElement | null)[]>([])
+  const listId = useId()
+  const triggerId = useId()
+  const selectedIdx = options.findIndex((o) => o.value === value)
+  const menuShown = open && pos != null
 
   // 依据触发器的屏幕坐标计算菜单位置（fixed 定位，跟随视口）。
   // Compute the menu position from the trigger's screen rect (fixed to viewport).
@@ -119,37 +131,104 @@ export default function Select({
 
   useEffect(() => {
     if (!open) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
     // 视口滚动/尺寸变化时重新定位（capture 捕获所有祖先滚动容器的滚动）。
     // Reposition on scroll/resize (capture catches scrolling in any ancestor).
-    const onReflow = () => place()
-    window.addEventListener('keydown', onKey)
+    // 合帧：一帧里可能来好几个滚动事件（捕获阶段连菜单自己列表的滚动也收），每帧最多
+    // 重算一次位置，免得每个事件都 setState 重渲染一次。
+    // Coalesced: a frame can deliver several scroll events (the capture phase also catches
+    // the menu's own list scrolling); reposition at most once per frame instead of a
+    // setState re-render per event.
+    let raf = 0
+    const onReflow = () => {
+      if (!raf) raf = window.requestAnimationFrame(() => { raf = 0; place() })
+    }
     window.addEventListener('resize', onReflow)
     window.addEventListener('scroll', onReflow, true)
     return () => {
-      window.removeEventListener('keydown', onKey)
       window.removeEventListener('resize', onReflow)
       window.removeEventListener('scroll', onReflow, true)
+      if (raf) window.cancelAnimationFrame(raf)
     }
   }, [open])
 
+  // 菜单出现、或高亮项变了，就把焦点放到高亮项上（菜单在 place() 算出坐标后才渲染，
+  // 所以看 menuShown 而不是 open）。scrollIntoView 让长列表里的选中项进入视野。
+  // Focus the highlighted option when the menu appears or the highlight moves (the menu
+  // only renders once place() has coordinates, hence menuShown rather than open).
+  useEffect(() => {
+    if (!menuShown) return
+    const el = optRefs.current[active]
+    if (!el) return
+    el.focus({ preventScroll: true })
+    el.scrollIntoView({ block: 'nearest' })
+  }, [menuShown, active])
+
+  const openMenu = () => {
+    setActive(initialIndex(selectedIdx, options.length))
+    setOpen(true)
+  }
+  // 关闭时焦点还给触发器：选项随菜单卸载，焦点否则会掉到 <body>，下一次 Tab 从页首开始。
+  // Return focus to the trigger on close: the options unmount with the menu, and focus
+  // would otherwise fall to <body> and the next Tab would restart at the top of the page.
+  const close = () => {
+    setOpen(false)
+    triggerRef.current?.focus({ preventScroll: true })
+  }
+  const choose = (v: string) => {
+    onChange(v)
+    close()
+  }
+  const onTriggerKey = (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      e.preventDefault()
+      openMenu()
+    }
+  }
+  const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    // Esc / Tab：收起并回到触发器。stopPropagation 让外层弹窗（useDialogA11y 的 document
+    // 监听）收不到这一下，否则下拉和弹窗会一起关。
+    // Escape / Tab close and return to the trigger. stopPropagation keeps an enclosing
+    // dialog (useDialogA11y listens on document) from closing too.
+    if (e.key === 'Escape' || e.key === 'Tab') {
+      e.preventDefault()
+      e.stopPropagation()
+      close()
+      return
+    }
+    const next = nextIndex(e.key, active, options.length)
+    if (next == null) return
+    e.preventDefault()
+    setActive(next)
+  }
+
   return (
     <div ref={rootRef} className={`select-picker ${className}`}>
-      <button ref={triggerRef} type="button" className="select-trigger" onClick={() => setOpen((v) => !v)}
-              title={current?.label ?? value} aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open}>
+      <button ref={triggerRef} id={triggerId} type="button" className="select-trigger"
+              onClick={() => (open ? close() : openMenu())}
+              onKeyDown={onTriggerKey}
+              title={current?.label ?? value}
+              // 有 ariaLabel 时把当前值拼进名字：aria-label 会替换按钮内容，否则读屏只念
+              // 「品种 按钮」，听不到选的是什么。没传就用可见文字（当前值）当名字，同以前。
+              // With ariaLabel, append the current value: aria-label replaces the button's
+              // content, so otherwise only "Symbol, button" is read. Without it the visible
+              // value stays the name, as before.
+              aria-label={ariaLabel ? `${ariaLabel}: ${current?.label ?? value}` : undefined}
+              aria-haspopup="listbox" aria-expanded={open} aria-controls={menuShown ? listId : undefined}>
         <span>{current?.short ?? current?.label ?? value}</span>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : undefined }}>
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : undefined }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
       {open && pos && createPortal(
         <>
-          <div className="select-backdrop" onClick={() => setOpen(false)} />
+          <div className="select-backdrop" onClick={close} />
           <div
             className={`select-menu ${openUpward ? 'up' : ''}`}
             ref={menuRef}
+            id={listId}
+            role="listbox"
+            {...(ariaLabel ? { 'aria-label': ariaLabel } : { 'aria-labelledby': triggerId })}
+            onKeyDown={onMenuKey}
             style={{
               left: pos.left,
               // 至少与触发器同宽，内容更宽时自己撑开。原本写死 width: pos.width，
@@ -169,16 +248,25 @@ export default function Select({
                 : { top: pos.top + 4 }),
             }}
           >
-            {options.map((o) => (
-              <button
-                type="button"
-                key={o.value}
-                className={`select-opt ${o.value === value ? 'active' : ''}`}
-                onClick={() => { onChange(o.value); setOpen(false) }}
-              >
-                {o.label}
-              </button>
-            ))}
+            {options.map((o, i) => {
+              const selected = o.value === value
+              return (
+                <button
+                  type="button"
+                  key={o.value}
+                  id={`${listId}-opt-${i}`}
+                  ref={(el) => { optRefs.current[i] = el }}
+                  role="option"
+                  aria-selected={selected}
+                  tabIndex={i === active ? 0 : -1}
+                  className={`select-opt ${selected ? 'active' : ''}`}
+                  onFocus={() => setActive(i)}
+                  onClick={() => choose(o.value)}
+                >
+                  {o.label}
+                </button>
+              )
+            })}
           </div>
         </>,
         document.body,

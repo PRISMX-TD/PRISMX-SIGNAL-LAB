@@ -11,7 +11,7 @@ import { keepIfEqual } from './keepIfEqual'
 import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
-import { isAppHidden, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT } from '../utils/appVisibility'
+import { isAppHidden, onForeground, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT } from '../utils/appVisibility'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { upsertOrderList } from './orderMerge'
 import { pickBootstrapSection } from './bootstrapMerge'
@@ -129,10 +129,6 @@ const LiveContext = createContext<LiveContextValue | null>(null)
 // 高频推送的报价与持仓单独放各自的 Context，避免它们变化时把只关心信号/账号的
 // 组件也一起重渲染。/ Quotes & positions get their own contexts so their frequent
 // updates don't re-render components that only care about signals/accounts.
-// 按交易商账户区分的报价（桥接上报），下单确认页用：login -> {symbol: Quote}。
-// Per-broker-account quotes (bridge-reported), used by the order-confirmation
-// pages: login -> {symbol: Quote}.
-const QuotesContext = createContext<Record<string, Record<string, Quote>>>({})
 // 全站统一展示报价（EA 推送，不区分账户）：symbol -> Quote。
 // Site-wide display quotes (EA-pushed, not account-scoped): symbol -> Quote.
 const GlobalQuotesContext = createContext<Record<string, Quote>>({})
@@ -188,6 +184,16 @@ function createSnapshotStore<T>(initial: T): SnapshotStore<T> {
   }
 }
 const GlobalQuotesStoreContext = createContext<SnapshotStore<Record<string, Quote>>>(createSnapshotStore({}))
+// 按交易商账户区分的报价（桥接上报，下单弹窗用）：login -> {symbol: Quote}。同样走外部
+// store 而不是 Context：以前整份放在 QuotesContext 里，任何账户任何品种跳一下价（每
+// 0.5 秒一帧），所有 useQuotes() 的组件都整个重渲染——策略页在顶层订阅它，于是整页
+// 每 0.5 秒重画一次。现在调用方只订阅自己那一个 (login, symbol)。
+// Per-broker-account quotes (bridge-reported, used by the order modals): login ->
+// {symbol: Quote}. Also an external store rather than a context: as QuotesContext, any
+// account's symbol ticking (a frame every 0.5 s) re-rendered every useQuotes() consumer,
+// and the strategies page subscribed at its top level, repainting the whole page every
+// 0.5 s. Callers now subscribe to their own (login, symbol) only.
+const AccountQuotesStoreContext = createContext<SnapshotStore<Record<string, Record<string, Quote>>>>(createSnapshotStore({}))
 
 // 挂载后多久还没连上 WS 就当作断线提示（不再要求「曾经连上过」）。
 // How long after mount a never-connected socket counts as disconnected.
@@ -311,7 +317,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const [positionsLoaded, setPositionsLoaded] = useState(false)
   const [accountFunds, setAccountFunds] = useState<Record<string, number>>({})
   const [accountAdj, setAccountAdj] = useState<Record<string, number>>({})
-  const [quotes, setQuotes] = useState<Record<string, Record<string, Quote>>>({})
+  // 按账户报价只进外部 store（见 AccountQuotesStoreContext），不进 state：本组件从不按它渲染。
+  // Per-account quotes live only in the external store (see AccountQuotesStoreContext), not
+  // in state: this component never renders from them.
+  const [accountQuotesStore] = useState(() => createSnapshotStore<Record<string, Record<string, Quote>>>({}))
   const [globalQuotes, setGlobalQuotes] = useState<Record<string, Quote>>({})
   const [trends, setTrends] = useState<Record<string, Trend>>({})
   const [activeSymbols, setActiveSymbols] = useState<string[]>([])
@@ -618,6 +627,28 @@ export function LiveProvider({ children }: { children: ReactNode }) {
     { immediate: false },
   )
 
+  // 持仓帧：App 在后台时不应用，只记住最新一帧，回前台立刻补上。与 QUOTES 的后台丢帧
+  // 同一思路，但持仓不能直接丢：回前台后不保证马上又来一帧，丢了就可能停在旧状态上
+  // （例如后台期间刚平掉的仓还显示着）。首帧照收，positionsLoaded 才会翻成 true。
+  // Positions frames: while backgrounded they aren't applied, only the latest is kept and
+  // it is applied the moment we return. Same idea as QUOTES' background drop, but
+  // positions can't simply be dropped: another frame isn't guaranteed right after the
+  // return, so a dropped one could leave a stale state (a position closed while away
+  // still showing). The first frame is always applied so positionsLoaded flips.
+  const gotPositions = useRef(false)
+  const stashedPositions = useRef<{ data: Position[]; funds: Record<string, number> } | null>(null)
+  const applyPositions = useCallback((data: Position[], funds: Record<string, number>) => {
+    setPositions((prev) => keepIfEqual(prev, data))
+    setPositionsLoaded(true)
+    setAccountFunds((prev) => keepIfEqual(prev, funds))
+  }, [])
+  useEffect(() => onForeground(() => {
+    const s = stashedPositions.current
+    if (!s) return
+    stashedPositions.current = null
+    applyPositions(s.data, s.funds)
+  }, 0), [applyPositions])
+
   const handleMessage = useCallback((msg: WSMessage) => {
     switch (msg.type) {
       case 'SIGNAL_NEW':
@@ -661,8 +692,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       }
       case 'POSITIONS': {
-        setPositions((prev) => keepIfEqual(prev, (msg.data as Position[]) || []))
-        setPositionsLoaded(true)
+        const data = (msg.data as Position[]) || []
         // funds 与 data 同拍，账户卡片因此能和持仓表用同一份浮盈。
         // 整表替换而非合并：后端只下发"有持仓的账号"，合并会让已平完仓的账号
         // 停在旧浮盈上。
@@ -675,7 +705,16 @@ export function LiveProvider({ children }: { children: ReactNode }) {
           if (!f?.login || typeof f.profit !== 'number') continue
           nextFunds[f.login] = f.profit
         }
-        setAccountFunds((prev) => keepIfEqual(prev, nextFunds))
+        // App 在后台：只记下最新一帧，回前台由上面的 onForeground 补上；首帧照收。
+        // Backgrounded: keep only the latest frame, applied on return by the onForeground
+        // above; the first frame is always applied.
+        if (gotPositions.current && isAppHidden()) {
+          stashedPositions.current = { data, funds: nextFunds }
+          break
+        }
+        gotPositions.current = true
+        stashedPositions.current = null
+        applyPositions(data, nextFunds)
         break
       }
       case 'PENDING_ORDERS': {
@@ -699,14 +738,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // after returning picks up. Only dropped once a first snapshot has been taken.
         if (gotAccountQuotes.current && isAppHidden()) break
         gotAccountQuotes.current = true
-        setQuotes((prev) => {
-          const next = { ...prev }
-          for (const q of list) {
-            if (!q.login) continue
-            next[q.login] = { ...next[q.login], [q.symbol]: q }
-          }
-          return next
-        })
+        const next = { ...accountQuotesStore.get() }
+        for (const q of list) {
+          if (!q.login) continue
+          next[q.login] = { ...next[q.login], [q.symbol]: q }
+        }
+        accountQuotesStore.set(next)
         break
       }
       case 'GLOBAL_QUOTES': {
@@ -783,7 +820,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         break
       }
     }
-  }, [applyRemotePrefs])
+  }, [applyRemotePrefs, accountQuotesStore, applyPositions])
 
   const wsConnected = useClientSocket(handleMessage)
   wsConnectedRef.current = wsConnected
@@ -932,13 +969,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         <PendingOrdersContext.Provider value={pendingOrders}>
           <AccountFundsContext.Provider value={accountFunds}>
           <AccountAdjContext.Provider value={accountAdj}>
-            <QuotesContext.Provider value={quotes}>
+            <AccountQuotesStoreContext.Provider value={accountQuotesStore}>
               <GlobalQuotesContext.Provider value={globalQuotes}>
                 <GlobalQuotesStoreContext.Provider value={globalQuotesStore}>
                   {children}
                 </GlobalQuotesStoreContext.Provider>
               </GlobalQuotesContext.Provider>
-            </QuotesContext.Provider>
+            </AccountQuotesStoreContext.Provider>
           </AccountAdjContext.Provider>
           </AccountFundsContext.Provider>
         </PendingOrdersContext.Provider>
@@ -998,10 +1035,30 @@ export function useLive() {
   return ctx
 }
 
-// 只订阅按交易商账户区分的报价（下单确认页用），避免因信号/账号变化而重渲染
-// Subscribe to per-broker-account quotes only (order-confirmation pages)
-export function useQuotes() {
-  return useContext(QuotesContext)
+// 只订阅某个交易商账户的某一个品种的报价（下单弹窗用）：别的账户、别的品种跳价不会让
+// 调用方重渲染。QUOTES 合并时只替换收到的那几条，没收到的保持同一个引用。
+// Subscribe to one broker account's quote for one symbol (order modals): other accounts'
+// or symbols' ticks don't re-render the caller. QUOTES merges replace only the entries
+// received, so the rest keep their reference.
+export function useAccountQuote(login: string | null | undefined, symbol: string | null | undefined): Quote | undefined {
+  const store = useContext(AccountQuotesStoreContext)
+  const get = useCallback(() => (login && symbol ? store.get()[login]?.[symbol] : undefined), [store, login, symbol])
+  return useSyncExternalStore(store.subscribe, get, get)
+}
+
+// 从按账户报价里派生一个**原始值**（数字 / 字符串 / 布尔）并只在它变化时重渲染。
+// 与 useGlobalQuotesSelect 同一约束：选择器必须返回原始值，每次新造对象会死循环。
+// Derive a primitive from the per-account quotes and re-render only when it changes.
+// Same rule as useGlobalQuotesSelect: the selector must return a primitive; a fresh
+// object each call would make useSyncExternalStore loop.
+export function useAccountQuotesSelect<T extends string | number | boolean | null | undefined>(
+  select: (quotesByAccount: Record<string, Record<string, Quote>>) => T,
+): T {
+  const store = useContext(AccountQuotesStoreContext)
+  const selectRef = useRef(select)
+  selectRef.current = select
+  const get = useCallback(() => selectRef.current(store.get()), [store])
+  return useSyncExternalStore(store.subscribe, get, get)
 }
 
 // 只订阅全站统一展示报价（EA 推送），避免因信号/账号变化而重渲染
@@ -1040,6 +1097,16 @@ export function useGlobalQuotesSelect<T extends string | number | boolean | null
 // Read the current site-wide quotes at call time without subscribing (for callbacks).
 export function useGlobalQuotesPeek(): () => Record<string, Quote> {
   return useContext(GlobalQuotesStoreContext).get
+}
+
+// 全站报价 store 的 subscribe 本身（引用永远不变）：给需要「每一帧都看一眼、自己决定
+// 通知谁」的消费方用，比如自选表的跳价簿（components/charts/watchTicks.ts）。普通组件
+// 用 useGlobalQuote / useGlobalQuotesSelect。
+// The site-wide quote store's subscribe itself (stable identity), for consumers that look at
+// every frame and decide whom to notify, such as the watchlist's tick book
+// (components/charts/watchTicks.ts). Ordinary components use useGlobalQuote / useGlobalQuotesSelect.
+export function useGlobalQuotesSubscribe(): (cb: () => void) => () => void {
+  return useContext(GlobalQuotesStoreContext).subscribe
 }
 
 // 只订阅持仓 / subscribe to positions only

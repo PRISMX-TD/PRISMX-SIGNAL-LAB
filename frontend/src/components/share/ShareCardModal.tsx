@@ -63,7 +63,7 @@ function CardPreview({ css, html, scale }: { css: string; html: string; scale: n
   )
 }
 
-const BTN = 'inline-flex h-12 items-center justify-center gap-2 rounded-[10px] px-5 text-[15px] font-semibold tracking-wide transition active:scale-[0.97] disabled:cursor-wait disabled:opacity-70'
+const BTN = 'inline-flex h-12 items-center justify-center gap-2 rounded-control px-5 text-base font-semibold tracking-wide transition active:scale-[0.96] motion-reduce:active:scale-100 disabled:cursor-wait disabled:opacity-70'
 const PRIMARY = 'bg-prism-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,.18)] hover:bg-prism-500'
 const SECONDARY = 'border border-white/15 bg-white/[0.04] text-neutral-100 hover:border-white/25 hover:bg-white/[0.08]'
 const ico = { width: 18, height: 18, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
@@ -245,7 +245,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
   const scale = Math.max(0.6, Math.min(1, (Math.min(window.innerWidth || 480, 480) - 64) / CARD_W))
 
   return createPortal(
-    <div className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm"
+    <div className="fixed inset-0 z-modal flex items-center justify-center overflow-y-auto scrim p-4"
       // 弹层可能叠在别的弹层里（勋章详情）：React 事件会沿组件树冒泡穿过 portal，这里截住，免得连底下那层一起关掉。
       // May be stacked inside another modal (badge detail): React events bubble through portals, so stop here.
       onClick={(e) => { e.stopPropagation(); onClose() }}>
@@ -266,7 +266,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
           <div className="mb-3 flex gap-2" role="group">
             {variants.map((v) => (
               <button key={v.key} type="button" aria-pressed={v.key === variant?.key} onClick={() => setVariantKey(v.key)}
-                className={`rounded-[10px] px-3 py-1.5 text-xs font-semibold transition ${v.key === variant?.key ? 'bg-prism-600 text-white' : 'bg-white/5 text-neutral-300 hover:bg-white/10'}`}>
+                className={`rounded-control px-3 py-1.5 text-xs font-semibold transition ${v.key === variant?.key ? 'bg-prism-600 text-white' : 'bg-white/5 text-neutral-300 hover:bg-white/10'}`}>
                 {v.label}
               </button>
             ))}
@@ -274,8 +274,13 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
         )}
 
         <div className="relative">
+          {/* 生成好的图要能长按存到相册（下方提示就是这么说的）：body 继承下来的 -webkit-touch-callout: none
+              在这张图上改回 default，iOS 才会弹「存储到照片」。
+              The finished image must be long-pressable to save (the hint below says so): the
+              -webkit-touch-callout: none inherited from body is reset to default here, or iOS
+              shows no "Save to Photos". */}
           {result && showImage
-            ? <img src={result.url} alt={t(`share.title.${type}`)} className="mx-auto block rounded-[22px]" style={{ width: CARD_W * scale, height: CARD_H * scale }} />
+            ? <img src={result.url} alt={t(`share.title.${type}`)} className="mx-auto block rounded-[22px]" style={{ width: CARD_W * scale, height: CARD_H * scale, WebkitTouchCallout: 'default' }} />
             : <CardPreview css={card.css} html={card.html} scale={scale} />}
         </div>
         {result && showImage && <p className="mt-2 text-center text-xs text-neutral-400">{t('share.longPress')}</p>}
@@ -285,7 +290,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
           <div className="flex flex-wrap gap-2" role="group" aria-label={t('share.style')}>
             {CARD_STYLES.map((s) => (
               <button key={s} type="button" aria-pressed={s === style} onClick={() => pickStyle(s)}
-                className={`rounded-[10px] px-3.5 py-1.5 text-xs font-semibold transition ${s === style ? 'bg-prism-600 text-white' : 'bg-white/5 text-neutral-300 hover:bg-white/10'}`}>
+                className={`rounded-control px-3.5 py-1.5 text-xs font-semibold transition ${s === style ? 'bg-prism-600 text-white' : 'bg-white/5 text-neutral-300 hover:bg-white/10'}`}>
                 {t(`share.styles.${s}`)}
               </button>
             ))}

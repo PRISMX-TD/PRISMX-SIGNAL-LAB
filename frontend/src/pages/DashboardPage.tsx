@@ -23,11 +23,21 @@ import { useBucketedNow, useFocusEntries, useOrderPlacement } from '../component
 import { trendStance, strategySignalToDisplay, type DisplaySignal, type TrendStance } from '../components/signals/SignalView'
 import type { FocusState } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
+import { usePresence, SHEET_EXIT_MS } from '../utils/usePresence'
+import { useDelayedFlag } from '../utils/useDelayedFlag'
 
 export default function DashboardPage() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { signals, strategySignals, anyOnline, accounts, loaded, trends, activeSymbols } = useLive()
+  // 骨架延迟 200ms 出现、出现后至少停 400ms（utils/useDelayedFlag）。/ Flicker-guarded skeleton.
+  const showSkel = useDelayedFlag(!loaded)
+  // 只有这次挂载里真的显示过骨架，内容才淡入：loaded 来自全局 store，第一次加载后一直是
+  // true，从别的 tab 切回来时数据早就在了，再淡入一次只是让人多等。
+  // Fade the content in only if this mount actually showed the skeleton: `loaded` is a
+  // global store flag that stays true after the first load, so coming back from another
+  // tab the data is already there and a fade would only add a wait.
+  const [cameFromSkeleton] = useState(!loaded)
   // 顶层不再订阅任何报价：QuotesTable 的每一行、SlideOrderModal 各自订阅自己要的那份，
   // 报价每 0.5 秒一帧只重画跳价的格子，不再让整个仪表盘（含 memo 过的子组件）重渲染。
   // No quote subscription at the top level any more: each QuotesTable row and SlideOrderModal
@@ -87,6 +97,13 @@ export default function DashboardPage() {
   // cancel jumped to the orders page. A back swipe means "get me out", so no
   // navigation on the user's behalf there.
   useBackToClose(activeSignal != null, () => { placedRef.current = false; setActiveSignal(null) })
+  // 下单弹窗关闭后多留 240ms 播退场，所有关闭途径都走这里。/ The order sheet stays 240ms after closing for its exit; every close path comes through here.
+  // 弹窗按信号 id 加 key：退场途中点开另一条信号时要换一个全新的实例，否则上一条的止损止盈、
+  // 正反向与幂等单号会留在新弹窗里（这些都只在挂载时初始化）。
+  // The modal is keyed by signal id: opening another signal mid-exit must get a fresh
+  // instance, or the previous signal's SL/TP, direction and idempotency id (all set only
+  // on mount) would carry into the new one.
+  const orderPresence = usePresence(activeSignal, SHEET_EXIT_MS)
 
   const idx = Math.min(focusIdx, Math.max(0, focusEntries.length - 1))
   const cur = focusEntries[idx]
@@ -116,7 +133,11 @@ export default function DashboardPage() {
   const goSignals = useCallback(() => navigate('/app'), [navigate])
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string, reverse = false) => {
-    if (!activeSignal) return
+    // 抛错而不是 return，理由见 SignalsPage.tsx 同名函数的注释：提前 return 也算 resolve，
+    // OrderSheet 会为一笔根本没发出的单渲染「已提交」回执。
+    // Throw rather than return; see SignalsPage.tsx's matching comment. An early return
+    // resolves, and OrderSheet renders a "submitted" receipt for an order never sent.
+    if (!activeSignal) throw new Error(String(t('common.error')))
     const sig = activeSignal
     // 不在这里关弹窗，理由见 SignalsPage.tsx 同名函数的注释。
     // Don't close the modal here — see SignalsPage.tsx's matching comment.
@@ -140,6 +161,7 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-[1520px] mx-auto">
+      <h1 className="sr-only">{t('nav.dashboard')}</h1>
       <NotifDeviceBanner />
       {/* 引导卡放在仪表盘最上面：这是登录后的落点，新用户第一眼就该看到「下一步
           做什么」，而不是先滚过一屏空卡片。绑好账号后自动消失。
@@ -153,10 +175,10 @@ export default function DashboardPage() {
           registration, upcoming or running; otherwise takes no space. */}
       <CompetitionMarquee />
       <LuckyTicketsCard />
-      {!loaded ? (
+      {showSkel ? (
         <SkeletonPage cards={3} />
-      ) : (
-        <div className="dash-grid content-fade">
+      ) : !loaded ? null : (
+        <div className={cameFromSkeleton ? 'dash-grid content-fade' : 'dash-grid'}>
           {cur ? (
             <>
               <div className="dash-col-1">
@@ -190,8 +212,8 @@ export default function DashboardPage() {
           )}
         </div>
       )}
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} onCancel={closeTrade} onConfirm={handleConfirm} />}
-      {toast && <Toast kind={toast.kind} message={toast.msg} />}
+      {orderPresence.shown && <SlideOrderModal key={`${orderPresence.shown.id}:${orderPresence.openSeq}`} signal={orderPresence.shown} accounts={accounts} onCancel={closeTrade} onConfirm={handleConfirm} closing={orderPresence.closing} />}
+      {toast && <Toast key={toast.id} toast={toast} />}
     </div>
   )
 }

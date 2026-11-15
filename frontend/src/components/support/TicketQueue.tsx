@@ -112,7 +112,7 @@ export default function TicketQueue({
           </ul>
         ) : rows.length === 0 ? (
           <div className="flex flex-col items-center px-8 py-16 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--nest)] text-neutral-500">
+            <span className="flex h-12 w-12 items-center justify-center rounded-card bg-[var(--nest)] text-neutral-500">
               <IconInbox size={20} />
             </span>
             <p className="mt-3 text-sm font-medium text-neutral-200">{t('supportDesk.queue.emptyTitle')}</p>
@@ -126,7 +126,7 @@ export default function TicketQueue({
               // 已关闭的不再标「待回复」/ closed tickets never read as awaiting reply
               const awaiting = !r.assigneeId && r.status !== 'closed'
               return (
-                <li key={r.id} className="sd-rise border-b border-[var(--line)]" style={{ ['--i' as string]: Math.min(i, 12) }}>
+                <li key={r.id} className="sd-rise border-b border-[var(--line)]" style={{ ['--i' as string]: Math.min(i, 5) }}>
                   <button
                     type="button"
                     onClick={() => onSelect(r.id)}
@@ -137,7 +137,7 @@ export default function TicketQueue({
                     <span className="min-w-0 flex-1">
                       <span className="flex items-baseline gap-2">
                         <span
-                          className={`min-w-0 flex-1 truncate text-[13px] ${
+                          className={`min-w-0 flex-1 truncate text-sm ${
                             awaiting || sel ? 'font-semibold text-neutral-50' : 'font-medium text-neutral-200'
                           }`}
                         >
@@ -156,12 +156,12 @@ export default function TicketQueue({
                         <TicketStatus status={r.status} label={t(`tickets.status.${r.status}`)} />
                         <span className="truncate text-xs text-neutral-500">{t(`tickets.category.${r.category}`)}</span>
                         {r.priority === 'urgent' && (
-                          <span className="shrink-0 rounded-[10px] bg-[var(--down-bg)] px-1.5 py-px text-xs font-semibold text-[var(--down)]">
+                          <span className="shrink-0 rounded-control bg-[var(--down-bg)] px-1.5 py-px text-xs font-semibold text-[var(--down)]">
                             {t('tickets.priority.urgent')}
                           </span>
                         )}
                         {mine ? (
-                          <span className="ml-auto shrink-0 rounded-[10px] bg-[rgb(var(--purple-rgb)/0.22)] px-2 py-px text-xs font-semibold text-[var(--purple-hi)]">
+                          <span className="ml-auto shrink-0 rounded-control bg-[rgb(var(--purple-rgb)/0.22)] px-2 py-px text-xs font-semibold text-[var(--purple-hi)]">
                             {t('supportDesk.queue.me')}
                           </span>
                         ) : r.assigneeId ? (
@@ -169,7 +169,7 @@ export default function TicketQueue({
                             {t('supportDesk.queue.assignedTo', { name: r.assigneeName || '-' })}
                           </span>
                         ) : awaiting ? (
-                          <span className="ml-auto shrink-0 rounded-[10px] bg-[var(--mid-bg)] px-2 py-px text-xs font-semibold text-[var(--mid)]">
+                          <span className="ml-auto shrink-0 rounded-control bg-[var(--mid-bg)] px-2 py-px text-xs font-semibold text-[var(--mid)]">
                             {t('supportDesk.queue.unassignedTag')}
                           </span>
                         ) : null}

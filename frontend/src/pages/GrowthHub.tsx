@@ -29,6 +29,7 @@ import type { ReactNode } from 'react'
 import { useAuth } from '../store/auth'
 import PageHead from '../components/PageHead'
 import { useOverflowHint } from '../utils/useOverflowHint'
+import { onRovingFocusKeyDown } from '../utils/rovingTabs'
 
 export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions' | 'lucky'
 
@@ -55,13 +56,14 @@ export default function GrowthHub({ tab, children }: { tab: GrowthTab; children:
         as="h1"
         title={t('nav.growth')}
         actions={visible.length > 1 ? (
-          <div ref={tabsHintRef} className="seg-tabs w-full sm:w-fit" role="tablist" aria-label={t('nav.growth')}>
+          <div ref={tabsHintRef} className="seg-tabs w-full sm:w-fit" role="tablist" aria-label={t('nav.growth')} onKeyDown={onRovingFocusKeyDown}>
             {visible.map((x) => (
               <button
                 key={x.key}
                 type="button"
                 role="tab"
                 aria-selected={x.key === tab}
+                tabIndex={x.key === tab ? 0 : -1}
                 onClick={() => {
                   if (x.key !== tab) navigate(x.to)
                 }}

@@ -99,9 +99,9 @@ export default function NotifDeviceBanner() {
   // to sit beside the text, folding Chinese into 7 lines and Vietnamese into one
   // word per line.
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-[13px] text-[var(--text-2)]">
+    <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-3 rounded-panel border border-[var(--line)] bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text-2)]">
       <div className="flex min-w-0 flex-[1_1_100%] items-start gap-2 sm:flex-[1_1_0%]">
-        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+        <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
         <span className="leading-relaxed">
           {t(deviceHint?.key ?? PUSH_ENV_HINT_KEYS[env] ?? "account.notifUnsupported")}
         </span>

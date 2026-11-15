@@ -44,7 +44,7 @@
   flex: none;
   border-radius: 50%;
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
   display: grid;
   place-items: center;
   font-size: 13px;
@@ -55,7 +55,7 @@
   font-size: 20px;
   line-height: 1.15;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .bind-broker-id p {
   margin-top: 4px;
@@ -105,7 +105,7 @@
 .bind-field .input {
   height: 48px;
   padding: 0 18px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-size: 15px;
 }
 .bind-submit {
@@ -133,7 +133,7 @@
 }
 .bind-msg.err { background: var(--down-bg); color: var(--down); }
 .bind-msg.ok { background: var(--up-bg); color: var(--up); }
-.bind-msg.warn { background: var(--mid-bg); color: var(--mid); }
+.bind-msg.warn { background: var(--warn-bg); color: var(--warn); }
 
 /* ── 已绑定账号：账本行 / bound accounts as ledger rows ── */
 .bind-accts {
@@ -149,7 +149,7 @@
 .bind-accts-head h3 {
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .bind-accts-head b {
   font-size: 20px;
@@ -163,7 +163,7 @@
   gap: 16px 24px;
   align-items: center;
   padding: 20px 28px;
-  animation: fade-in-up 0.45s var(--ease-out) both;
+  animation: fade-in-up var(--dur-base) var(--ease-out) backwards;
 }
 .bind-acct + .bind-acct {
   border-top: 1px solid var(--line);
@@ -180,7 +180,7 @@
   font-size: 20px;
   line-height: 1;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .bind-acct-id .who {
   margin-top: 6px;
@@ -207,7 +207,7 @@
   font-size: 17px;
   line-height: 1;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   white-space: nowrap;
 }
 .bind-acct .v small {
@@ -236,14 +236,14 @@
 .bind-state.on { color: var(--up); }
 .bind-state.on i { background: var(--up); animation: breathe 2.4s ease-in-out infinite; }
 .bind-state.off { color: var(--text-3); }
-.bind-state.warn { color: var(--mid); }
-.bind-state.warn i { background: var(--mid); }
+.bind-state.warn { color: var(--warn); }
+.bind-state.warn i { background: var(--warn); }
 /* 解绑：安静的描边药丸，悬停才转跌色——它是破坏性操作，但不该在每一行都喊。
    Unbind: a quiet outlined pill that turns down-tone only on hover. */
 .bind-unbind {
   height: 36px;
   padding: 0 16px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line-hi);
   background: transparent;
   color: var(--text-2);
@@ -254,9 +254,11 @@
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.bind-unbind:hover {
-  color: var(--down);
-  border-color: var(--down);
+@media (hover: hover) and (pointer: fine) {
+  .bind-unbind:hover {
+    color: var(--down);
+    border-color: var(--down);
+  }
 }
 .bind-unbind:active {
   transform: translateY(1px);
@@ -279,8 +281,10 @@
 .bind-bridge summary::-webkit-details-marker {
   display: none;
 }
-.bind-bridge summary:hover {
-  background: var(--surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .bind-bridge summary:hover {
+    background: var(--surface-2);
+  }
 }
 .bind-bridge .t {
   display: block;
@@ -289,7 +293,7 @@
   color: var(--text-2);
 }
 .bind-bridge[open] .t {
-  color: #fff;
+  color: var(--text-strong);
 }
 .bind-bridge .h {
   display: block;
@@ -312,7 +316,7 @@
   transform: rotate(180deg);
   background: var(--purple);
   border-color: transparent;
-  color: #fff;
+  color: var(--text-strong);
 }
 .bind-bridge-body {
   border-top: 1px solid var(--line);
@@ -322,7 +326,7 @@
   font-size: 17px;
   line-height: 1.2;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .bind-bridge-body p {
   margin-top: 6px;
@@ -366,8 +370,10 @@
   color: var(--text-3);
   text-decoration: none;
 }
-.bind-bridge-cta .guide:hover {
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .bind-bridge-cta .guide:hover {
+    color: var(--text-strong);
+  }
 }
 .bind-platform {
   margin-top: 12px;

@@ -56,10 +56,10 @@
 }
 .adm-rail-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.01em;
   line-height: 1.25;
-  color: #fafafa;
+  color: var(--text-strong);
 }
 .adm-rail-sub {
   margin-top: 2px;
@@ -83,20 +83,21 @@
   gap: 12px;
   height: 42px;
   padding: 0 12px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   font-size: 14px;
   font-weight: 500;
   color: var(--text-3);
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.adm-rail-item:hover {
-  background: rgb(255 255 255 / 0.03);
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-rail-item:hover {
+    background: rgb(255 255 255 / 0.03);
+    color: var(--text-2);
+  }
 }
 .adm-rail-item.is-active {
   background: var(--nest);
-  color: #fafafa;
-  font-weight: 600;
+  color: var(--text-strong);
 }
 .adm-rail-item.is-active svg {
   color: var(--purple-hi);
@@ -122,14 +123,16 @@
   gap: 10px;
   height: 36px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-size: 12px;
   color: var(--text-3);
   transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
-.adm-rail-link:hover {
-  color: var(--text-2);
-  background: rgb(255 255 255 / 0.03);
+@media (hover: hover) and (pointer: fine) {
+  .adm-rail-link:hover {
+    color: var(--text-2);
+    background: rgb(255 255 255 / 0.03);
+  }
 }
 
 /* 角标：要处理的数（没人接的工单、待审批），橙色——与客服后台页头的待回复角标一致。
@@ -141,7 +144,7 @@
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--mid-bg);
   color: var(--mid);
   font-size: 12px;
@@ -169,7 +172,7 @@
   gap: 7px;
   height: 36px;
   padding: 0 14px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   font-size: 13px;
   font-weight: 500;
@@ -180,7 +183,7 @@
 .adm-strip-item.is-active {
   border-color: var(--line-hi);
   background: var(--surface-2);
-  color: #fafafa;
+  color: var(--text-strong);
 }
 .adm-strip-item.is-active svg {
   color: var(--purple-hi);
@@ -192,10 +195,10 @@
 }
 .adm-title {
   font-size: 30px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.15;
   letter-spacing: -0.025em;
-  color: #fafafa;
+  color: var(--text-strong);
 }
 .adm-desc {
   margin-top: 8px;
@@ -229,12 +232,13 @@
   white-space: nowrap;
   transition: color var(--dur-fast) var(--ease-out);
 }
-.adm-tab:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-tab:hover {
+    color: var(--text-2);
+  }
 }
 .adm-tab.is-active {
-  color: #fafafa;
-  font-weight: 600;
+  color: var(--text-strong);
 }
 .adm-tab.is-active::after {
   content: '';
@@ -247,9 +251,14 @@
   background: var(--purple-hi);
 }
 
-/* 换分区时内容淡入一次：表达「这是另一块内容了」/ content fades in once per section: "this is something else now" */
+/* 换分区时内容淡入一次：表达「这是另一块内容了」。只动透明度、140ms：管理员一天要在
+   分区之间来回切很多次，上浮加 0.45s 的版本每次都让人等；backwards 填充，结束后不留
+   transform（否则里面的抽屉、浮层会被它当成包含块）。
+   Content fades in once per section: "this is something else now". Opacity only,
+   140ms: admins switch sections many times a day and the 0.45s rise made every switch
+   wait. backwards fill so no transform lingers to capture fixed drawers and popovers. */
 .adm-enter {
-  animation: adm-rise var(--dur-slow) var(--ease-out) both;
+  animation: adm-fade var(--dur-fast) var(--ease-out) backwards;
 }
 
 /* ── 面 / planes ── */
@@ -351,7 +360,7 @@
   line-height: 1;
   font-weight: 600;
   letter-spacing: -0.03em;
-  color: #fafafa;
+  color: var(--text-strong);
 }
 .adm-kpi-foot {
   margin-top: 8px;
@@ -382,7 +391,7 @@
   gap: 10px;
   height: 40px;
   padding: 0 4px 0 16px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: var(--nest);
   color: var(--text-3);
@@ -410,15 +419,17 @@
   flex: none;
   height: 32px;
   padding: 0 14px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--purple);
   font-size: 12px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.adm-search-go:hover {
-  background: var(--purple-vivid);
+@media (hover: hover) and (pointer: fine) {
+  .adm-search-go:hover {
+    background: var(--purple-vivid);
+  }
 }
 .adm-filter {
   display: inline-flex;
@@ -486,8 +497,10 @@
 .adm-table tbody tr {
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.adm-table tbody tr:hover {
-  background: rgb(255 255 255 / 0.018);
+@media (hover: hover) and (pointer: fine) {
+  .adm-table tbody tr:hover {
+    background: rgb(255 255 255 / 0.018);
+  }
 }
 .adm-table tbody tr.is-sel {
   background: rgb(var(--purple-rgb) / 0.08);
@@ -522,7 +535,7 @@
   align-items: center;
   height: 22px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgb(255 255 255 / 0.06);
   font-size: 12px;
   font-weight: 500;
@@ -552,15 +565,17 @@
 
 .adm-link-btn {
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--purple-hi);
   white-space: nowrap;
   transition: color var(--dur-fast) var(--ease-out);
 }
-.adm-link-btn:hover {
-  color: rgb(var(--purple-soft-rgb));
-  text-decoration: underline;
-  text-underline-offset: 3px;
+@media (hover: hover) and (pointer: fine) {
+  .adm-link-btn:hover {
+    color: rgb(var(--purple-soft-rgb));
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
 }
 .adm-link-btn:disabled {
   opacity: 0.5;
@@ -569,7 +584,7 @@
 .adm-input {
   height: 32px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: var(--nest);
   font: inherit;
@@ -584,6 +599,9 @@
 .adm-input:focus {
   border-color: var(--purple-hi);
   background: var(--surface-2);
+  /* 透明轮廓：压掉全局外圈，高对比模式下仍可见（同 .input:focus）。
+     Transparent outline: no double ring, still visible in forced colors (as .input:focus). */
+  outline: 2px solid transparent;
 }
 .adm-input[type='date']::-webkit-calendar-picker-indicator {
   filter: invert(0.7);
@@ -597,7 +615,7 @@
   justify-content: center;
   height: 32px;
   padding: 0 14px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line-hi);
   background: transparent;
   font-size: 12px;
@@ -606,9 +624,11 @@
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.adm-btn:hover:not(:disabled) {
-  background: var(--nest);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .adm-btn:hover:not(:disabled) {
+    background: var(--nest);
+    color: var(--text);
+  }
 }
 .adm-btn:active:not(:disabled) {
   transform: translateY(1px);
@@ -617,17 +637,21 @@
   border-color: transparent;
   color: var(--text-3);
 }
-.adm-btn.is-quiet:hover:not(:disabled) {
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .adm-btn.is-quiet:hover:not(:disabled) {
+    color: var(--text);
+  }
 }
 .adm-btn.is-primary {
   border-color: var(--purple);
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
 }
-.adm-btn.is-primary:hover:not(:disabled) {
-  border-color: var(--purple-vivid);
-  background: var(--purple-vivid);
+@media (hover: hover) and (pointer: fine) {
+  .adm-btn.is-primary:hover:not(:disabled) {
+    border-color: var(--purple-vivid);
+    background: var(--purple-vivid);
+  }
 }
 /* 停用的主按钮退成中性描边：用户表每行都有一个「保存」，二十个暗紫块排成一列是噪音；
    只有改过的那一行亮紫色。
@@ -658,30 +682,35 @@
   color: var(--text-3);
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.adm-icon-btn:hover {
-  background: var(--nest);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .adm-icon-btn:hover {
+    background: var(--nest);
+    color: var(--text);
+  }
 }
 
 .adm-seg {
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
 }
 .adm-seg > button {
   height: 30px;
   padding: 0 14px;
-  border-radius: 10px;
+  /* 同心：轨道 10 − 内边距 3 = 7（轨道无边框）。/ Concentric: 10 − 3 = 7 (no track border). */
+  border-radius: 7px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.adm-seg > button:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-seg > button:hover {
+    color: var(--text-2);
+  }
 }
 .adm-seg > button.is-on {
   background: var(--surface-2);
@@ -692,12 +721,14 @@
 .adm-row {
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.adm-row:hover {
-  background: rgb(255 255 255 / 0.025);
+@media (hover: hover) and (pointer: fine) {
+  .adm-row:hover {
+    background: rgb(255 255 255 / 0.025);
+  }
 }
 
 .adm-composer {
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   border: 1px solid var(--line-hi);
   background: var(--surface);
   transition: border-color var(--dur-fast) var(--ease-out);
@@ -732,10 +763,15 @@
   color: var(--text-3);
 }
 
-/* 列表逐行淡入：只在首次出现时，表达「这批是新载入的」/ rows fade in once: "this batch just loaded" */
+/* 列表逐行淡入：只在这次挂载里列表第一次出现时（组件用 useFirstReveal 决定是否挂上
+   这个 class），表达「这批是新载入的」；翻页、筛选、重新加载不再重播。每行 30ms，
+   --i 封顶 5。
+   Rows fade in only the first time the list appears in this mount (the component
+   decides via useFirstReveal), saying "this batch just loaded"; page flips, filters
+   and reloads don't replay it. 30ms per row, --i capped at 5. */
 .adm-rise {
-  animation: adm-rise 0.36s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 22ms);
+  animation: adm-rise var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 
 /* ── 批量操作坞 / bulk dock ── */
@@ -758,7 +794,7 @@
   gap: 10px 16px;
   max-width: min(1240px, 100%);
   padding: 10px 10px 10px 20px;
-  border-radius: 22px;
+  border-radius: var(--r-lg);
   border: 1px solid var(--line-hi);
   background: var(--surface-2);
   box-shadow: 0 24px 64px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.35);
@@ -775,7 +811,7 @@
 .adm-dock-count .num {
   font-size: 18px;
   font-weight: 600;
-  color: #fafafa;
+  color: var(--text-strong);
 }
 .adm-dock-sep {
   width: 1px;
@@ -797,7 +833,7 @@
 }
 @media (max-width: 639px) {
   .adm-dock {
-    border-radius: 20px;
+    border-radius: var(--r-lg);
     padding: 12px;
   }
   .adm-dock-sep {
@@ -807,14 +843,16 @@
 
 .adm-toast {
   max-width: 28rem;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid transparent;
   background: var(--surface-2);
   padding: 8px 16px;
   font-size: 13px;
   font-weight: 500;
   box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
-  animation: adm-rise var(--dur-base) var(--ease-out) both;
+  /* 与站内 toast 同一配方：140ms 从 96% 放大淡入，不位移。
+     Same recipe as the app toast: a 140ms scale-in from 96%, no travel. */
+  animation: adm-toast-in var(--dur-fast) var(--ease-out) backwards;
 }
 .adm-toast.is-ok {
   border-color: rgb(var(--up-rgb) / 0.45);
@@ -832,9 +870,10 @@
    The dozen panels were written at different times: three card-title styles, some uppercase table
    heads. Under .adm-body they converge: no hover lift on cards, one title size and weight, one
    dimmed header band, one hairline row rule. Visual only, no layout changes. */
-.adm-body .glass:not(.cursor-pointer):hover {
-  background: var(--surface);
-}
+/* 「卡片不随 hover 提亮」已由 components-cards.css 的全局规则保证（只有可点的卡才提亮），
+   这里不再单独压回去。
+   "No hover lift on cards" is now global (components-cards.css lifts only clickable
+   cards), so this override is gone. */
 .adm-body .glass,
 .adm-body .panel {
   border-radius: var(--r-lg);
@@ -845,16 +884,16 @@
 .adm-body h3.font-display.text-base {
   font-size: 16px;
   line-height: 24px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.01em;
-  color: #f4f4f5;
+  color: var(--text-strong);
 }
 .adm-body .glass h2.text-sm.font-semibold,
 .adm-body .glass h3.text-sm.font-semibold {
   font-size: 15px;
   line-height: 22px;
   letter-spacing: -0.005em;
-  color: #f4f4f5;
+  color: var(--text-strong);
 }
 
 /* 旧表格：表头压暗成一条带子，去掉大写与字距，行线统一 / legacy tables: one dimmed header band */
@@ -871,22 +910,26 @@
 .adm-body table:not(.adm-table) tbody tr {
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.adm-body table:not(.adm-table) tbody tr:hover {
-  background: rgb(255 255 255 / 0.018);
+@media (hover: hover) and (pointer: fine) {
+  .adm-body table:not(.adm-table) tbody tr:hover {
+    background: rgb(255 255 255 / 0.018);
+  }
 }
 
 /* 共用的分段按钮（utils/segBtn）在控制台里换成胶囊：与 .adm-seg 同一套选中态。
    The shared segmented buttons (utils/segBtn) become pills here, same selected state as .adm-seg. */
 .adm-body .seg-btn {
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border-color: var(--line);
   background: transparent;
   padding: 6px 14px;
   color: var(--text-3);
 }
-.adm-body .seg-btn:hover {
-  background: var(--nest);
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-body .seg-btn:hover {
+    background: var(--nest);
+    color: var(--text-2);
+  }
 }
 .adm-body .seg-btn.is-on {
   border-color: var(--line-hi);
@@ -916,8 +959,10 @@
   text-align: left;
   transition: background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
-.adm-kpi-btn:hover:not(:disabled) {
-  background: var(--surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-kpi-btn:hover:not(:disabled) {
+    background: var(--surface-2);
+  }
 }
 .adm-kpi-btn.is-on {
   background: var(--surface-2);
@@ -936,14 +981,16 @@
   flex-direction: column;
   gap: 14px;
   padding: 16px 18px;
-  border-radius: 20px;
+  border-radius: var(--r-lg);
   border: 1px solid transparent;
   background: var(--surface);
   text-align: left;
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
-.adm-agent:hover {
-  background: var(--surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-agent:hover {
+    background: var(--surface-2);
+  }
 }
 .adm-agent.is-on {
   border-color: var(--purple-hi);
@@ -959,7 +1006,7 @@
   gap: 2px;
   height: 6px;
   overflow: hidden;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
 }
 .adm-stack > i {
@@ -974,7 +1021,7 @@
   gap: 6px;
   height: 28px;
   padding: 0 11px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 500;
@@ -982,9 +1029,11 @@
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.adm-chip:hover {
-  border-color: var(--line-hi);
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .adm-chip:hover {
+    border-color: var(--line-hi);
+    color: var(--text-2);
+  }
 }
 .adm-chip.is-on {
   border-color: var(--line-hi);
@@ -1000,9 +1049,11 @@
   border-color: rgb(var(--down-rgb) / 0.4);
   color: var(--down);
 }
-.adm-btn.is-danger:hover:not(:disabled) {
-  background: var(--down-bg);
-  color: var(--down);
+@media (hover: hover) and (pointer: fine) {
+  .adm-btn.is-danger:hover:not(:disabled) {
+    background: var(--down-bg);
+    color: var(--down);
+  }
 }
 
 .adm-facts {
@@ -1010,7 +1061,7 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   background: var(--line);
 }
 @media (min-width: 640px) {
@@ -1084,7 +1135,7 @@
 .adm-tl-note {
   min-width: 0;
   flex: 1;
-  border-radius: 16px;
+  border-radius: var(--r-panel);
   background: var(--surface-2);
   padding: 11px 14px 12px;
 }
@@ -1093,8 +1144,15 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
+@keyframes adm-fade {
+  from { opacity: 0; }
+}
 @keyframes adm-dock-in {
   from { opacity: 0; transform: translateY(16px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes adm-toast-in {
+  from { opacity: 0; transform: scale(0.96); }
   to { opacity: 1; transform: none; }
 }
 

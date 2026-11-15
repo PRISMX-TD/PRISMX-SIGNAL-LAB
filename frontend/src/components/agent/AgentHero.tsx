@@ -205,7 +205,7 @@ export default function AgentHero({
             <div className="agt-stats-rule bg-spectral-rule" aria-hidden="true" />
             <dl className="agt-stats-row">
               {figures.rest.map((f, i) => (
-                <div key={f.label} style={{ '--i': i } as React.CSSProperties}>
+                <div key={f.label} style={{ '--i': Math.min(i, 5) } as React.CSSProperties}>
                   <dt>{f.label}</dt>
                   <dd className="num">
                     <CountUp value={f.value} />

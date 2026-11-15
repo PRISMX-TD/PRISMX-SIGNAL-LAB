@@ -26,7 +26,7 @@
 // Nothing renders with no such competition, the entry gated off for this user
 // (competitionsVisible: the backend answers 403 for regular users when it's off,
 // so we don't ask), or a failed request.
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useNavigate } from 'react-router-dom'
 import type { TFunction } from 'i18next'
@@ -94,6 +94,7 @@ export default function CompetitionMarquee({ items }: { items?: CompetitionSumma
   const now = useNowTicker()
   const trackRef = useRef<HTMLDivElement>(null)
   const copyRef = useRef<HTMLDivElement>(null)
+  const sectionRef = useRef<HTMLElement>(null)
   // loop=null：还没量过（先按静止排版量一次，避免首帧先滚再停的闪动）。
   // loop=null: not measured yet (measure the static layout first so the first frame
   // never starts scrolling and then stops).
@@ -140,6 +141,25 @@ export default function CompetitionMarquee({ items }: { items?: CompetitionSumma
     ro.observe(track)
     ro.observe(copy)
     return () => ro.disconnect()
+  }, [hasItems])
+
+  // 跑马灯滚出视口就暂停（.is-offscreen → animation-play-state: paused，见 dashboard.css）：
+  // 仪表盘往下翻以后它还在合成器上一直滚、一直出帧。回到视口从停下的位置接着滚。没有
+  // IntersectionObserver 的老内核（Safari 12.0）照旧一直滚。
+  // Pause the ticker once it scrolls out of view (.is-offscreen → animation-play-state:
+  // paused, see dashboard.css): after scrolling down the dashboard it kept rolling on the
+  // compositor, producing frames for nothing. Back in view it resumes where it stopped.
+  // Engines without IntersectionObserver (Safari 12.0) keep scrolling as before.
+  const [offscreen, setOffscreen] = useState(false)
+  useEffect(() => {
+    const el = sectionRef.current
+    if (!hasItems || !el || typeof IntersectionObserver === 'undefined') return
+    const io = new IntersectionObserver((entries) => {
+      const last = entries[entries.length - 1]
+      if (last) setOffscreen(!last.isIntersecting)
+    })
+    io.observe(el)
+    return () => io.disconnect()
   }, [hasItems])
 
   if (!hasItems) return null
@@ -194,7 +214,7 @@ export default function CompetitionMarquee({ items }: { items?: CompetitionSumma
   )
 
   return (
-    <section className="dash-tk content-fade" aria-label={t('competition.title')}>
+    <section ref={sectionRef} className={`dash-tk content-fade${offscreen ? ' is-offscreen' : ''}`} aria-label={t('competition.title')}>
       <Link to="/competitions" className="dash-tk-label">
         {/* 有比赛正在进行时才亮直播灯：它表达的是真实状态，不是装饰。
             The live light only shows while a competition is running: it states a

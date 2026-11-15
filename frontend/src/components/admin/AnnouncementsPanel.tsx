@@ -256,7 +256,7 @@ export default function AnnouncementsPanel() {
               {t('admin.announcements.translateToZh')}
             </button>
           </div>
-          {translateOk === false && <p className="mb-3 text-xs text-amber-300">{t('admin.announcements.translateNotConfigured')}</p>}
+          {translateOk === false && <p className="mb-3 text-xs text-warn">{t('admin.announcements.translateNotConfigured')}</p>}
 
           {/* 语言页签：标题、摘要、正文一起换。并排双语看着齐全，写的时候是在两列
               之间来回跳。/ One language tab for title, summary and body together:
@@ -370,7 +370,7 @@ export default function AnnouncementsPanel() {
                 {(a.summaryZh || a.summaryEn) && <div className="mt-0.5 truncate text-xs text-neutral-500">{a.summaryZh || a.summaryEn}</div>}
               </div>
               {a.pinned && <span className="tag bg-prism-600/20 text-prism-200">{t('admin.announcements.pinned')}</span>}
-              {a.popup && <span className="tag bg-amber-400/15 text-amber-300">{t('admin.announcements.popupTag')}</span>}
+              {a.popup && <span className="tag bg-warn/15 text-warn">{t('admin.announcements.popupTag')}</span>}
               <span className={`tag ${a.published ? 'bg-up/15 text-up' : 'bg-white/5 text-neutral-400'}`}>
                 {a.published ? t('admin.announcements.published') : t('admin.announcements.draft')}
               </span>

@@ -30,22 +30,24 @@
   height: 36px;
   padding: 0 14px 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line-hi);
   color: var(--text-2);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.ord-acct:hover { color: var(--text); }
+@media (hover: hover) and (pointer: fine) {
+  .ord-acct:hover { color: var(--text); }
+}
 .ord-acct:active { transform: translateY(1px); }
 .ord-acct.on {
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
   box-shadow: none;
 }
 .ord-acct-dot {
@@ -67,7 +69,7 @@
 /* ── 通用：区块标题 / 状态药丸 ── */
 .ord-block {
   margin-top: 40px;
-  padding-top: 30px;
+  padding-top: 32px;
   border-top: 1px solid var(--line);
 }
 .ord-h {
@@ -81,17 +83,17 @@
   margin: 0;
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ord-h span {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-3);
 }
 .ord-p {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   max-width: 60ch;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--text-3);
 }
@@ -107,7 +109,7 @@
   height: 30px;
   padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--text-3);
@@ -117,19 +119,21 @@
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 .ord-chip b {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
-.ord-chip:hover {
-  color: var(--text-2);
-  box-shadow: inset 0 0 0 1px var(--line-hi);
+@media (hover: hover) and (pointer: fine) {
+  .ord-chip:hover {
+    color: var(--text-2);
+    box-shadow: inset 0 0 0 1px var(--line-hi);
+  }
 }
 .ord-chip.on {
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
   box-shadow: none;
 }
 .ord-chip.on b { color: rgba(255, 255, 255, 0.72); }
@@ -143,7 +147,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 12px;
+  gap: 12px 12px;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--line);
 }
@@ -157,11 +161,11 @@
 .ord-tb-r .input {
   width: auto;
   height: 32px;
-  padding: 0 14px;
-  font-size: 12.5px;
+  padding: 0 16px;
+  font-size: 13px;
 }
 .ord-tb-r input[type="date"].input {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
 }
 .ord-tb-dates {
@@ -179,7 +183,7 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin: 22px 4px 10px;
+  margin: 24px 4px 12px;
 }
 .ord-day-d {
   font-size: 13px;
@@ -192,7 +196,7 @@
   color: var(--text-3);
 }
 .ord-day-n {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.04em;
@@ -201,7 +205,7 @@
 .ord-slips {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 /* ── 回执单 / the receipt slip ──
@@ -218,10 +222,20 @@
   background: var(--surface);
   border-radius: var(--r-panel);
   transition: background-color var(--dur-base) var(--ease-out);
-  animation: ord-in 0.5s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 45ms);
 }
-.ord-slip:hover { background: var(--surface-2); }
+/* 进场只给带 .is-in 的单（OrdersPage 用 useFirstReveal 决定：本次会话第一次看到回执单时）。
+   翻页、切回交易页、实时新单直接出现。每张 30ms，--i 封顶 5；backwards 填充，结束后
+   不留 opacity / transform。
+   Entrance only for slips with .is-in (OrdersPage decides via useFirstReveal: the first
+   time slips show this session). Page flips, returning and live orders appear at once.
+   30ms per slip, --i capped at 5; backwards fill leaves no opacity / transform behind. */
+.ord-slip.is-in {
+  animation: ord-in var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+@media (hover: hover) and (pointer: fine) {
+  .ord-slip:hover { background: var(--surface-2); }
+}
 .ord-slip[data-status="CANCELLED"] > * { opacity: 0.6; }
 .ord-stub {
   grid-area: stub;
@@ -248,7 +262,7 @@
 .ord-stub::before { top: -6px; }
 .ord-stub::after { bottom: -6px; }
 .ord-stub-t {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 15px;
   line-height: 1;
   font-weight: 500;
@@ -264,13 +278,13 @@
 .ord-body {
   grid-area: body;
   min-width: 0;
-  padding: 12px 18px;
+  padding: 12px 20px;
 }
 .ord-ident {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
 }
 .ord-rev {
@@ -278,31 +292,31 @@
   color: #f5c451;
 }
 .ord-name {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ord-zh {
   font-size: 12px;
   color: var(--text-3);
 }
 .ord-vol {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
 .ord-vol small {
-  margin-left: 3px;
+  margin-left: 4px;
   font-family: inherit;
   font-size: 12px;
   font-weight: 400;
   color: var(--text-3);
 }
 .ord-msg {
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 12px;
   color: var(--text-3);
   overflow-wrap: anywhere;
@@ -316,8 +330,8 @@
 .ord-price { grid-area: price; }
 .ord-tk { grid-area: tk; }
 .ord-v {
-  margin-top: 5px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  margin-top: 4px;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   line-height: 1;
   color: var(--text);
@@ -333,7 +347,7 @@
   color: var(--text-2);
 }
 .ord-tk .ord-v {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-2);
 }
 .ord-v.none { color: var(--text-3); }
@@ -356,11 +370,11 @@
 .ord-stamp {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 9px;
+  gap: 8px;
+  padding: 4px 8px;
   border: 1.5px solid currentColor;
   border-radius: 4px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1;
   font-weight: 500;
@@ -382,7 +396,9 @@
   letter-spacing: 0.06em;
   text-transform: none;
 }
-.ord-slip:hover .ord-stamp { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .ord-slip:hover .ord-stamp { opacity: 1; }
+}
 .ord-slip[data-status="FILLED"] .ord-stamp { color: var(--up); }
 .ord-slip[data-status="PENDING"] .ord-stamp {
   color: var(--mid);
@@ -398,34 +414,49 @@
 
 /* 加载 / 空 / loading & empty */
 .ord-slip.skel { animation: none; }
-.ord-slip.skel:hover { background: var(--surface); }
+@media (hover: hover) and (pointer: fine) {
+  .ord-slip.skel:hover { background: var(--surface); }
+}
 .ord-ghost {
   display: grid;
   grid-template-columns: 106px minmax(0, 1fr);
-  margin-top: 22px;
+  margin-top: 24px;
   border: 1px dashed var(--line-hi);
   border-radius: var(--r-panel);
 }
 .ord-ghost-t {
-  padding: 18px 14px 18px 18px;
+  padding: 20px 16px 20px 20px;
   border-right: 1px dashed var(--line-hi);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 500;
   color: var(--text-3);
 }
-.ord-ghost-b { padding: 18px 20px; }
+.ord-ghost-b { padding: 20px 20px; }
 .ord-ghost-b b {
   display: block;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-2);
 }
 .ord-ghost-b p {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   max-width: 44ch;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--text-3);
+}
+/* 空持仓的两个入口。并排用 margin-left 而不是 flex gap（Chrome 84 才支持）；上下内边距把
+   热区撑高一些。/ The empty-positions links: side by side via margin-left, not flex gap
+   (Chrome 84+); vertical padding enlarges the tap area. */
+.ord-ghost-links a {
+  display: inline-block;
+  padding: 8px 0;
+  font-weight: 500;
+  color: var(--purple-hi);
+}
+.ord-ghost-links a + a { margin-left: 16px; }
+@media (hover: hover) and (pointer: fine) {
+  .ord-ghost-links a:hover { text-decoration: underline; }
 }
 
 /* ── 持仓与账户：账本条 / account strip ── */
@@ -433,11 +464,11 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0 40px;
-  padding: 6px 0;
+  padding: 8px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
-.ord-cell { padding: 14px 0; }
+.ord-cell { padding: 16px 0; }
 .ord-cell .ord-k {
   font-size: 12px;
 }
@@ -445,7 +476,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 15px;
   font-weight: 500;
 }
@@ -460,10 +491,10 @@
 .ord-pill-off {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
   font-size: 12px;
   font-weight: 500;
@@ -490,22 +521,22 @@
   justify-content: space-between;
   align-items: baseline;
   gap: 16px;
-  margin: 30px 0 6px;
+  margin: 32px 0 8px;
 }
 .ord-sec h3 {
   margin: 0;
   font-size: 17px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ord-sec-sum {
   display: flex;
-  gap: 18px;
+  gap: 20px;
   font-size: 12px;
   color: var(--text-3);
 }
 .ord-sec-sum b {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -523,19 +554,21 @@
   height: 30px;
   padding: 0 14px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   box-shadow: inset 0 0 0 1px rgb(var(--down-rgb) / 0.4);
   color: var(--down);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.ord-closeall:hover:not(:disabled) {
-  background: rgb(var(--down-rgb) / 0.14);
-  color: var(--down);
+@media (hover: hover) and (pointer: fine) {
+  .ord-closeall:hover:not(:disabled) {
+    background: rgb(var(--down-rgb) / 0.14);
+    color: var(--down);
+  }
 }
 .ord-closeall:active:not(:disabled) { transform: translateY(1px); }
 .ord-closeall:disabled { opacity: 0.5; cursor: default; }
@@ -543,7 +576,7 @@
 /* ── 持仓区标题里的计数 / count in the section title ── */
 .ord-sec-n {
   margin-left: 8px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 15px;
   font-weight: 500;
   color: var(--purple-hi);
@@ -572,7 +605,7 @@
   margin: 0 0 0 -8px;
   padding: 0 8px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -582,19 +615,27 @@
 }
 .ord-mast-sw:not(:disabled):active { background: var(--nest); }
 .ord-mast-sw:disabled { cursor: default; }
+/* 在线 = 实心绿点，离线 = 空心圈：形状不同，不靠红绿也分得出。用 border 而不是
+   inset box-shadow 画圈：Windows 高对比度会丢掉 box-shadow，border 会被系统色重绘。
+   Online = solid green dot, offline = hollow ring, so the two differ in shape, not only
+   colour. The ring is a border, not an inset box-shadow: forced-colors drops shadows
+   but repaints borders. */
 .ord-mast-dot {
   flex: none;
+  box-sizing: border-box;
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--text-3);
+  border: 1.5px solid var(--text-3);
+  background: transparent;
 }
 .ord-mast-dot.on {
+  border-color: var(--up);
   background: var(--up);
   animation: breathe 2.4s ease-in-out infinite;
 }
 .ord-mast-login {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -623,7 +664,7 @@
    Account list expands inline below the switcher, one row per account. No
    popover: .page-enter's transform hijacks fixed positioning; inline is safest. */
 .ord-mast-list {
-  margin: 6px 0 14px;
+  margin: 8px 0 16px;
   padding: 4px 0;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
@@ -633,9 +674,9 @@
   display: grid;
   grid-template-columns: 6px auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 10px 2px;
+  padding: 12px 4px;
   border: 0;
   background: transparent;
   color: var(--text-2);
@@ -648,7 +689,7 @@
 .ord-mast-opt:active { background: var(--nest); }
 .ord-mast-opt.on .ord-mast-opt-login { color: var(--purple-hi); }
 .ord-mast-opt-login {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text);
@@ -661,8 +702,8 @@
   font-size: 12px;
 }
 .ord-mast-opt-eq {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   color: var(--text-2);
 }
@@ -675,14 +716,14 @@
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-top: 2px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  margin-top: 4px;
+  font-family: var(--font-mono);
   font-size: 34px;
   line-height: 1.05;
   font-weight: 600;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ord-mast-eq small {
   font-family: Archivo, "Noto Sans SC", system-ui, sans-serif;
@@ -694,23 +735,23 @@
 .ord-mast-facts {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 22px;
+  gap: 8px 24px;
   margin-top: 12px;
 }
 .ord-mast-facts > span {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
 }
 .ord-mast-facts b {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: 15px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
 .ord-mast-name {
-  margin-top: 10px;
+  margin-top: 12px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -723,7 +764,7 @@
    品种 + 方向 / 手数·单号，右侧盈亏大字）；下面一条「价格轨」代替四格表——轨道两端
    是止损与止盈（按价格低→高排，做空时止盈在左），轨上一个点是现价，入场到现价那段
    按盈亏着色；轨上方一行「入场 → 现价」。一眼看出离止损止盈各多远。止损止盈缺一
-   个就退回 2×2 四格。卡面用 --surface、14px 圆角，卡与卡 10px。
+   个就退回 2×2 四格。卡面用 --surface、24px 圆角（--r-lg），卡与卡 12px。
    Still a card (the product owner asked for cards; the row shape is gone), re-laid
    for phones: header line, then a price rail instead of the 2×2 grid — SL and TP at
    the ends (sorted low→high, so a short puts TP on the left), a dot for the current
@@ -731,11 +772,14 @@
    Falls back to the grid when SL or TP is missing. */
 .pos-mlist {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   margin-top: 6px;
 }
 .pos-mc {
-  padding: 14px 14px 12px;
+  /* 内边距 16：圆角 24 − 16 = 8，正好是卡内操作按钮（.pos-act，rounded-lg）的圆角，内外同心。
+     16px padding: radius 24 − 16 = 8, exactly the radius of the action buttons inside
+     (.pos-act, rounded-lg), so the inner and outer corners are concentric. */
+  padding: 16px;
   /* 与全站卡片同一档（.glass 用 --r-lg），不要 --r-panel 那档——负责人一眼看出不齐 /
      same step as every other card (.glass uses --r-lg); the panel step read as off */
   border-radius: var(--r-lg);
@@ -760,14 +804,14 @@
   gap: 8px;
 }
 .pos-mc-sym b {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-strong);
 }
 .pos-mc-sub {
   margin-top: 3px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
@@ -782,7 +826,7 @@
   flex-direction: column;
   align-items: flex-end;
   gap: 2px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .pos-mc-pnl b {
@@ -813,7 +857,7 @@
 .pos-mc-path b,
 .pos-mc-ends b,
 .pos-mc-grid b {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
@@ -823,7 +867,7 @@
 .pos-mc-arr {
   flex: 1;
   text-align: center;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-3);
   opacity: 0.7;
@@ -885,30 +929,30 @@
   justify-content: space-between;
   align-items: flex-end;
   gap: 16px 32px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .ord-perf-wrn {
   margin-top: 12px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 34px;
   line-height: 1;
   font-weight: 500;
   letter-spacing: -0.02em;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ord-perf-wrn small {
-  margin-left: 2px;
+  margin-left: 4px;
   font-size: 16px;
   color: var(--text-2);
 }
 .ord-tug {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   width: 200px;
   max-width: 100%;
   height: 4px;
-  margin-top: 14px;
-  border-radius: 10px;
+  margin-top: 16px;
+  border-radius: var(--r-md);
   overflow: hidden;
 }
 .ord-tug i {
@@ -919,7 +963,7 @@
 }
 .ord-perf-rec {
   margin-top: 8px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text-3);
@@ -932,7 +976,7 @@
 .ord-perf-scope {
   margin: 0;
   max-width: 44ch;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--text-3);
 }
@@ -963,9 +1007,9 @@
    off, the three rules dim but stay editable so values survive a toggle. */
 .ord-lrow {
   display: grid;
-  gap: 22px;
-  margin-top: 34px;
-  padding: 30px 0 6px;
+  gap: 24px;
+  margin-top: 36px;
+  padding: 32px 0 8px;
   border-top: 1px solid var(--line);
 }
 @media (min-width: 1024px) {
@@ -989,7 +1033,7 @@
   margin: 0;
   font-size: 17px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ord-lrow p {
   margin: 8px 0 0;
@@ -1004,13 +1048,13 @@
   align-items: center;
   height: 20px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--purple);
-  color: #fff;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-strong);
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.04em;
 }
 .ord-pro.off {
   background: transparent;
@@ -1038,11 +1082,11 @@
   color: var(--text);
 }
 .ord-rule-master .ord-rule-k {
-  font-size: 14px;
-  color: #fff;
+  font-size: 15px;
+  color: var(--text-strong);
 }
 .ord-rule-d {
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 12px;
   line-height: 1.9;
   color: var(--text-3);
@@ -1054,12 +1098,12 @@
   display: inline-block;
   width: 60px;
   height: 26px;
-  margin: 0 5px;
+  margin: 0 4px;
   padding: 0 8px;
   vertical-align: middle;
   text-align: center;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: 13px;
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -1073,8 +1117,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 14px;
-  padding-top: 18px;
+  gap: 16px;
+  padding-top: 20px;
 }
 .ord-rule-msg {
   margin: 0;
@@ -1092,8 +1136,8 @@
   .ord-head { margin-bottom: 16px; }
   .ord-head .page-head-title p { display: none; }
   .ord-sec {
-    margin: 22px 0 10px;
-    gap: 2px 14px;
+    margin: 24px 0 12px;
+    gap: 4px 16px;
   }
   .ord-sec h3 { font-size: 16px; }
   /* 手机上把热区抬到 36px：桌面的 30px 在手指下太窄，而这一行在 375px
@@ -1173,13 +1217,13 @@
     z-index: 1;
   }
   .ord-stamp { transform: rotate(-3deg); }
-  .ord-body { padding: 14px 16px 4px; }
+  .ord-body { padding: 16px 16px 4px; }
   .ord-price,
   .ord-tk {
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    padding: 8px 16px 14px;
+    gap: 12px;
+    padding: 8px 16px 16px;
     text-align: left;
   }
   .ord-tk {
@@ -1189,7 +1233,7 @@
   .ord-v { margin-top: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .ord-slip,
+  .ord-slip.is-in,
   .ord-tug i,
   .ord-stamp.land,
   .ord-acct.online .ord-acct-dot,
@@ -1199,5 +1243,29 @@
   .pos-mc,
   .ord-slip[data-status="PENDING"] .ord-stamp {
     animation: none;
+  }
+}
+
+/* 触屏：状态芯片 30→36。桌面树里芯片会换行，行距 6px 时上下两行的 44px 热区重叠；
+   行距加到 8px（36 + 8 = 44），两行热区正好相接。手机上芯片是一条横滑条
+   （overflow-x:auto 会裁掉带子），上下各补 4px 内边距，用负外边距抵消。
+   Touch: status chips 30→36. In the desktop tree they wrap, and at a 6px row gap
+   the 44px hit areas of two rows overlap; an 8px gap (36 + 8 = 44) makes them meet.
+   On phones the chips are a horizontal scroller that would clip the band, so it
+   gets 4px padding top and bottom, cancelled by a negative margin. */
+@media (hover: none) and (pointer: coarse) {
+  .ord-chips {
+    row-gap: 8px;
+  }
+  .ord-chip {
+    height: 36px;
+  }
+}
+@media (hover: none) and (pointer: coarse) and (max-width: 767px) {
+  .ord-chips {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    margin-top: -4px;
+    margin-bottom: -4px;
   }
 }

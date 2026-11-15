@@ -718,7 +718,7 @@ export default function GamificationPanel() {
                     <td className="py-1.5 pr-4 font-mono text-xs text-neutral-400">
                       <span className="block truncate">{row.nickname || row.email || row.displayName}</span>
                       {row.nickname && row.email && (
-                        <span className="block truncate text-neutral-600"><Copyable text={row.email} label={t('supportDesk.copy.email')} /></span>
+                        <span className="block truncate text-neutral-500"><Copyable text={row.email} label={t('supportDesk.copy.email')} /></span>
                       )}
                     </td>
                     <td className="num py-1.5 pr-4 text-neutral-400">
@@ -728,7 +728,7 @@ export default function GamificationPanel() {
                           bridge (not verified by broker group / admin rule) get a tag. */}
                       {row.tradeModeSource === 'self' && (
                         <span
-                          className="ml-1.5 rounded border border-amber-400/40 px-1 py-px text-xs font-medium text-amber-300"
+                          className="ml-1.5 rounded border border-warn/40 px-1 py-px text-xs font-medium text-warn"
                           title={t('leaderboard.admin.selfReportedHint')}
                         >
                           {t('leaderboard.admin.selfReported')}

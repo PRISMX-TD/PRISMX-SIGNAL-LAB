@@ -64,9 +64,9 @@ export function OpenUserButton({ userId, children, className = '' }: { userId: s
 
 function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="min-w-0 rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2">
+    <div className="min-w-0 rounded-panel border border-[var(--line)] bg-white/[0.02] px-3 py-2">
       <div className="truncate text-xs text-neutral-500">{label}</div>
-      <div className="mt-0.5 truncate text-[13px] font-medium text-neutral-100">{children}</div>
+      <div className="mt-0.5 truncate text-sm font-medium text-neutral-100">{children}</div>
     </div>
   )
 }
@@ -75,7 +75,7 @@ function Section({ title, extra, children }: { title: string; extra?: ReactNode;
   return (
     <section className="border-t border-[var(--line)] pt-4">
       <div className="mb-3 flex items-center gap-2">
-        <h4 className="text-[13px] font-semibold text-neutral-100">{title}</h4>
+        <h4 className="text-sm font-semibold text-neutral-100">{title}</h4>
         {extra && <div className="ml-auto">{extra}</div>}
       </div>
       {children}
@@ -195,7 +195,7 @@ export function UserOverviewBody({ userId, compact = false }: { userId: string; 
         </Fact>
       </div>
       {u.planNote && (
-        <p className="rounded-xl border-l-2 border-[var(--purple-hi)] bg-white/[0.025] px-3 py-2 text-xs text-neutral-300">
+        <p className="rounded-panel border border-[var(--line)] bg-white/[0.02] px-3 py-2 text-xs text-neutral-300">
           <span className="mr-1 text-neutral-500">{t('admin.userDrawer.note')}</span>
           <Copyable text={u.planNote} />
         </p>
@@ -242,9 +242,9 @@ export function UserOverviewBody({ userId, compact = false }: { userId: string; 
         ) : (
           <ul className="grid gap-2">
             {c.mt5Accounts.map((a) => (
-              <li key={a.id} className="rounded-xl border border-[var(--line)] bg-white/[0.02] px-3 py-2.5 text-xs">
+              <li key={a.id} className="rounded-panel border border-[var(--line)] bg-white/[0.02] px-3 py-2.5 text-xs">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-mono text-[13px] font-medium text-neutral-100">
+                  <span className="font-mono text-sm font-medium text-neutral-100">
                     <Copyable text={a.login} label={t('supportDesk.copy.account')} />
                   </span>
                   {a.real != null && (

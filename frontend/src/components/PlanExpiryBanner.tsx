@@ -147,11 +147,11 @@ export default function PlanExpiryBanner() {
 
   const urgent = variant === 'expired' || days <= 2
   const tone = urgent
-    ? 'border-amber-400/30 bg-amber-400/10 text-amber-300'
+    ? 'border-warn/30 bg-warn/10 text-warn'
     : 'border-prism-500/25 bg-prism-600/10 text-prism-200'
-  const dot = urgent ? 'bg-amber-400' : 'bg-prism-400'
+  const dot = urgent ? 'bg-warn' : 'bg-prism-400'
   const btn = urgent
-    ? 'bg-amber-400/20 text-amber-100 hover:bg-amber-400/30'
+    ? 'bg-warn/20 text-warn hover:bg-warn/30'
     : 'bg-prism-500/25 text-prism-100 hover:bg-prism-500/35'
 
   const headline =
@@ -174,7 +174,7 @@ export default function PlanExpiryBanner() {
 
   return (
     <div className={`mx-auto w-full max-w-7xl px-4 pt-4 sm:px-6`}>
-      <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-2.5 text-xs ${tone}`}>
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 rounded-panel border px-4 py-2.5 text-xs ${tone}`}>
         <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot} ${urgent ? 'animate-pulse' : ''}`} />
         <span className="font-semibold">{headline}</span>
         <span className="min-w-0 leading-relaxed opacity-80">
@@ -188,7 +188,7 @@ export default function PlanExpiryBanner() {
             type="button"
             onClick={onDismiss}
             aria-label={t('planExpiry.dismiss')}
-            className="opacity-60 transition hover:opacity-100"
+            className="hit-40 inline-flex h-6 w-6 items-center justify-center rounded-lg opacity-60 transition hover:opacity-100"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
               <path d="M18 6L6 18M6 6l12 12" />

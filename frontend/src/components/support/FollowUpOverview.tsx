@@ -10,7 +10,7 @@ import { IconUsers } from './deskIcons'
 
 // 比例条与格子上的状态色（实色），与标签同一套色相 / solid status colours, same hues as the labels
 const SOLID: Record<FollowUpStaffStatus, string> = {
-  pending: 'bg-amber-400',
+  pending: 'bg-warn',
   contacted: 'bg-blue-400',
   interested: 'bg-[var(--purple-hi)]',
   converted: 'bg-[var(--up)]',
@@ -47,10 +47,10 @@ export default function FollowUpOverview({
   if (total === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center px-8 py-16 text-center">
-        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--nest)] text-neutral-400">
+        <span className="flex h-14 w-14 items-center justify-center rounded-card bg-[var(--nest)] text-neutral-400">
           <IconUsers size={24} />
         </span>
-        <p className="mt-4 font-display text-[15px] font-semibold text-neutral-100">{t('supportDesk.followUps.empty')}</p>
+        <p className="mt-4 font-display text-base font-semibold text-neutral-100">{t('supportDesk.followUps.empty')}</p>
         <p className="mt-1.5 max-w-[20rem] text-xs leading-relaxed text-neutral-500">{t('supportDesk.followUps.emptyHint')}</p>
       </div>
     )
@@ -89,14 +89,14 @@ export default function FollowUpOverview({
               <i className={`h-2 w-2 rounded-full ${SOLID[x.s]}`} aria-hidden="true" />
               {t(`supportDesk.status.${x.s}`)}
             </span>
-            <span className="num mt-2 block text-[26px] font-semibold leading-none text-neutral-50">{x.n}</span>
+            <span className="num mt-2 block text-2xl font-semibold leading-none text-neutral-50">{x.n}</span>
           </button>
         ))}
       </div>
 
       {byGoal.length > 0 && (
         <div className="mt-9">
-          <h3 className="text-[13px] font-semibold text-neutral-100">{t('supportDesk.card.goal')}</h3>
+          <h3 className="text-sm font-semibold text-neutral-100">{t('supportDesk.card.goal')}</h3>
           <ul className="mt-3 space-y-3">
             {byGoal.map((x) => (
               <li key={x.g} className="grid grid-cols-[minmax(0,10rem)_minmax(0,1fr)_2.5rem] items-center gap-3 text-xs">

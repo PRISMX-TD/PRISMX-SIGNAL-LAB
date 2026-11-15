@@ -61,8 +61,18 @@
   right: 0;
   bottom: 0;
   left: 0;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.1);
+  /* 12 = 滑块半径 10 + 四边留白 2：圆滑块在两端时与轨道端头同心。正好是轨道高 24 的一半，
+     所以轨道是完整的胶囊；851cd84d 的「控件 10px」只管矩形控件，圆的东西保持圆。
+     12 = knob radius 10 + 2px inset, so the round knob sits concentric with the track
+     ends. That is half the 24px height, a full capsule; the 10px control radius from
+     851cd84d covers rectangular controls, and round things stay round. */
+  border-radius: 12px;
+  /* 关闭态轨道对周围 ≥3:1（WCAG 1.4.11）：0.35 的白叠在 --surface / --surface-2 / --bg
+     上分别 3.22 / 3.17 / 3.13:1；原来 0.1 只有 1.3 左右。白滑块对轨道 5.32:1。
+     The off track clears 3:1 against its surroundings (WCAG 1.4.11): white at 0.35 is
+     3.22 / 3.17 / 3.13:1 on --surface / --surface-2 / --bg; the old 0.1 was about 1.3.
+     The white knob is 5.32:1 against the track. */
+  background: rgba(255, 255, 255, 0.35);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   transition: background var(--dur-base) var(--ease-out);
 }
@@ -90,8 +100,24 @@
 .switch input:disabled ~ .switch-knob {
   opacity: 0.6;
 }
-.switch input:focus-visible ~ .switch-track {
+/* input 是透明的，焦点只能画在轨道上。先用 :focus 画环（所有内核都认），再用
+   :focus:not(:focus-visible) 在鼠标 / 手指点按时撤掉。Chrome 86 以前不认 :focus-visible，
+   只会丢掉第二条，环照样出现；以前只写了 :focus-visible，旧内核上全站 39 个开关聚焦时
+   什么都不显示。透明轮廓给 Windows 高对比模式（那里不画 box-shadow）。撤环时 box-shadow
+   回到轨道自己的值（见上面 .switch-track）。
+   The input is transparent, so focus is drawn on the track. :focus draws it on every
+   engine; :focus:not(:focus-visible) removes it for pointer focus. Engines without
+   :focus-visible (Chrome < 86) drop only the second rule, so the ring still shows; the old
+   :focus-visible-only rule showed nothing there on all 39 switches. The transparent outline
+   is for forced-colors mode. The reset restores the track's own box-shadow. */
+.switch input:focus ~ .switch-track {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--purple-hi);
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.switch input:focus:not(:focus-visible) ~ .switch-track {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  outline: none;
 }
 @media (hover: none) and (pointer: coarse) {
   .switch input {
@@ -104,5 +130,55 @@
   .switch-track,
   .switch-knob {
     transition: none;
+  }
+}
+/* Windows 高对比模式（forced-colors）：背景色一律被换成 Canvas，box-shadow 不画。
+   开关的轨道和滑块全靠背景色，原样进去整个开关就消失了（input 本身是透明的）。这里
+   用边框画轨道、用系统前景色画滑块；滑块和打开态轨道要 forced-color-adjust: none，
+   不然它们的背景也会被换掉。打开态轨道填 Highlight，与系统自己的开关一致。打开态
+   轨道关掉了强制配色，焦点轮廓也就不会被系统换色（计划 011 给的是透明轮廓），所以
+   这里单独给一条 Highlight 轮廓。规则放在本文件末尾而不是 layer-base.css：那里的规则
+   排在整张样式表最前面，会被上面同权重的 .switch-knob { background: #fff } 压回去。
+   Windows High Contrast (forced-colors) replaces every background with Canvas and drops
+   box-shadow. The track and knob are nothing but backgrounds, so the switch vanished (the
+   input itself is transparent). Here the track gets a border and the knob a system
+   foreground colour; the knob and the on-track need forced-color-adjust: none or their
+   backgrounds are replaced too. On, the track fills with Highlight like the system's own
+   toggles. With forced colours off on that track the focus outline is not recoloured
+   either (plan 011 gives a transparent one), so a Highlight outline is set here. These
+   rules live at the end of this file, not in layer-base.css: that file sits first in the
+   cascade and would lose to the equal-specificity .switch-knob { background: #fff } above. */
+@media (forced-colors: active) {
+  .switch-track {
+    border: 1px solid CanvasText;
+  }
+  .switch-knob {
+    forced-color-adjust: none;
+    background: CanvasText;
+  }
+  .switch input:checked ~ .switch-track {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+  }
+  .switch input:checked ~ .switch-knob {
+    background: HighlightText;
+  }
+  .switch input:disabled ~ .switch-track {
+    border-color: GrayText;
+  }
+  .switch input:disabled ~ .switch-knob {
+    background: GrayText;
+  }
+  .switch input:checked:disabled ~ .switch-track {
+    border-color: GrayText;
+    background: GrayText;
+  }
+  .switch input:checked:disabled ~ .switch-knob {
+    background: Canvas;
+  }
+  .switch input:focus-visible ~ .switch-track {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
   }
 }

@@ -11,6 +11,8 @@ import type { DayStats } from './SymbolHeader'
 import type { IndicatorId } from './indicatorCatalog'
 import { baseSymbol } from '../../api/utils'
 import { DAY_TZ_OFFSET_SEC } from '../../utils/indicators'
+import { DOWN_COLOR, UP_COLOR } from './canvasColors'
+import { EMPTY } from '../../utils/format'
 
 // 价格精度的**兜底**表，不是真源。真源是券商随报价上报的 Quote.digits（桥接
 // v1.3.23 起按账户报价携带，EA 全站报价也带），走 priceDigits() 取。
@@ -215,13 +217,14 @@ export const HISTORY_PREFETCH_BARS = 200
 // subtracting an epoch timestamp from it can never be small.
 export const FOLLOW_LIVE_SLACK_BARS = 3
 
-// 涨跌配色默认值（与 SignalView 的 FOCUS_DOT 一致）。2026-10-11 起 K 线颜色可由用户
-// 改（见 CandleColors），这两个常量只是「绿涨红跌」方案的取值与兜底。
-// Default up/down colors (match SignalView's FOCUS_DOT). Since 2026-10-11 the
-// candle colors are user-configurable (see CandleColors); these are the
-// green-up scheme's values and the fallback.
-export const UP_COLOR = '#2ee07e'
-export const DOWN_COLOR = '#ff4d67'
+// 涨跌配色默认值：画布色板，取值见 canvasColors.ts（读 tokens.css 的 --up-canvas /
+// --down-canvas）。2026-10-11 起 K 线颜色可由用户改（见 CandleColors），这两个常量是
+// 「绿涨红跌」方案的取值与兜底。（原注释说「与 SignalView 的 FOCUS_DOT 一致」，而
+// FOCUS_DOT 的涨跌是 var(--up) / var(--down)，从来不是这两个值，已删。）
+// Default up/down colours: the canvas palette from canvasColors.ts (tokens.css
+// --up-canvas / --down-canvas). Since 2026-10-11 candle colours are user-configurable
+// (see CandleColors); these are the green-up scheme's values and the fallback.
+export { DOWN_COLOR, UP_COLOR }
 
 // ---------- K 线配色 / candle colors ----------
 // 两套预设：绿涨红跌（国际习惯，默认）与红涨绿跌（国内习惯）；也可以自选涨色 / 跌色。
@@ -348,7 +351,7 @@ export function toHistPoints(
 
 // 数字格式化：null 显示为占位符 / format a number for the legend; null renders as a placeholder
 export function fmtLegendNum(v: number | null | undefined, digits: number): string {
-  return v == null ? '—' : v.toFixed(digits)
+  return v == null ? EMPTY : v.toFixed(digits)
 }
 
 // 从 K 线窗口算行情头的日内高低 + 涨跌幅，按自然日（UTC+8，与图表坐标轴

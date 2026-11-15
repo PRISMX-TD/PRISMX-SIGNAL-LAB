@@ -25,12 +25,15 @@
 
 /* ═════════════ 与设计样本对齐的剩余几条 ═════════════ */
 
-/* 样本 24：报价表整行可悬停——列表从「表格」变成「可点的行」。 */
+/* 样本 24 曾让报价表整行可悬停，想把表格变成「可点的行」，但点击从来没接上：
+   QuotesTable.tsx 的 <tr> 没有 onClick。悬停底色在承诺一个不存在的操作，平板上
+   点一下还会粘住，所以去掉；过渡留给 .focus 行的底色变化。
+   Sample 24 made whole quote rows hoverable to read as clickable rows, but no click
+   was ever wired (the <tr> in QuotesTable.tsx has no onClick). The tint promised an
+   action that does not exist and stuck after a tap on tablets, so it is gone; the
+   transition stays for the .focus row. */
 .qt-table tbody tr {
   transition: background-color var(--dur-fast) var(--ease-out);
-}
-.qt-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.025);
 }
 
 /* ⚠ 注意：从这里到「多周期轨道」那一节之前，本文件管的**不是落地页**。
@@ -49,6 +52,8 @@
    它们排在那些页面样式之后。搬到「该在的位置」（如 components-controls.css，第 28 位）
    会让它们反过来被业务页覆盖，那是一次无法靠读代码验证的全站视觉变更。先把边界
    标出来，真要搬需要逐条回归。
+   （2026-11 起触摸热区的 ::after 带子已并入 layer-base.css；这里只剩按下反馈、
+   ≤1023px 的 Tab 高度与筛选栏内边距。）
 
    WARNING: from here down to the multi-timeframe section, this file is not about the
    landing page. These rules (press feedback and mobile tap targets for .seg-pill,
@@ -62,6 +67,8 @@
    leaderboard). So a file named "landing hero" outranks all of them and has the
    final say over these controls' tap targets, tab heights and press feedback.
    Editing this block changes the orders, signals and leaderboard pages too.
+   (Since 2026-11 the ::after tap bands live in layer-base.css; what remains here
+   is press feedback, the ≤1023px tab height and the filter-bar padding.)
    They were not moved because moving them necessarily changes the outcome: these
    rules work precisely because they come after those page stylesheets. Relocating
    them to where they belong (components-controls.css, position 28) would invert
@@ -70,16 +77,18 @@
    regression. */
 
 /* 样本 80–84：按下反馈。
-   全站 42 条 :hover、16 条 :active——手机上 hover 根本不触发，:active 是
-   用户唯一能得到的反馈，而最常按的那几个控件一条都没有。
-   Touch has no hover; :active is the only feedback a phone user gets. */
+   触屏上 :hover 会在点按时触发并粘住（不是「不触发」），所以 hover 一律加
+   (hover: hover) and (pointer: fine) 门槛，触屏的反馈只靠这里的 :active。
+   On touch a tap triggers :hover and it sticks (it does not "never fire"), so
+   every hover is gated to (hover: hover) and (pointer: fine) and touch feedback
+   comes from the :active rules here. */
 .seg-pill button,
 .filter-cycle,
 .seg-tabs button,
 .view-all-btn,
 .lg-tab,
 .hero-arrow-btn {
-  transition: transform 0.09s var(--ease-out),
+  transition: transform var(--dur-fast) var(--ease-out),
               background-color var(--dur-fast) var(--ease-out),
               border-color var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out);
@@ -103,38 +112,23 @@
   }
 }
 
-/* 样本 70–72：触摸热区扩张（视觉上完全不可见）。
-   实测手机视口下几乎每个可点元素都偏小：跟单按钮 60×34、筛选 67×30、
-   页内 Tab 84×32。WCAG 2.2 AA（2.5.8）的门槛是 24×24，这些过得去，但
-   低于所有移动端 HIG 的 44px。
-   做法是盖一层 44px 高的透明伪元素，只扩热区、不改布局也不改 DOM，
-   而且**只在纵向扩**——这些控件都是横向排列的，纵向扩不会吃掉邻居的点击。
-   A transparent 44px band expands the tap target without touching layout. */
+/* 样本 70–72 的触摸热区带子（::after）已于 2026-11 并入 layer-base.css 的
+   「触摸目标」块，按 (hover: none) and (pointer: coarse) 生效，这里不再重复。
+   留在这里的三条会改布局，必须排在业务页样式之后（见文件头的警告），所以不搬。
+   The tap-target bands (::after) moved to the touch-targets block in
+   layer-base.css in 2026-11 and apply on (hover: none) and (pointer: coarse).
+   The three rules left here change layout and must stay after the page
+   stylesheets (see the warning at the top of this file), so they stay put. */
 @media (max-width: 1023px) {
-  .seg-pill button,
-  .filter-cycle,
-  .seg-tabs button,
-  .view-all-btn {
-    position: relative;
-  }
-  .seg-pill button::after,
-  .filter-cycle::after,
-  .seg-tabs button::after,
-  .view-all-btn::after {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
-    height: 44px;
-    transform: translateY(-50%);
-  }
   /* 筛选栏是 overflow-x:auto（窄屏横滑），而 auto 会建立裁剪上下文——
      伪元素超出容器盒的部分会被直接裁掉，热区扩张在这里会完全失效。
      给容器补上下内边距，把 44px 的带子装进裁剪盒里。
-     overflow-x:auto clips the pseudo-element; padding makes room for it. */
+     不用 padding-block 简写：它要 Chrome 87，老 WebView 上整条失效。
+     overflow-x:auto clips the pseudo-element; padding makes room for it.
+     Not padding-block: the shorthand needs Chrome 87 and was ignored on old WebViews. */
   .sig-filters {
-    padding-block: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
   }
   /* .seg-tabs 是带边框的胶囊环，不能用 padding-block:8px 装热区带——那会让
      环上下 8px / 左右 3px，36px 的按钮悬在 54px 的胶囊里（排行榜/订单/信号

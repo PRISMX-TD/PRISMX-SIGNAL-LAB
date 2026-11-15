@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next'
 import type { AdminPageStats } from '../../api/types'
 import { SkeletonLine } from '../Skeleton'
 import LineChart, { SERIES_COLORS } from './overview/LineChart'
+import { onRovingKeyDown } from '../../utils/rovingTabs'
 
 // 三个指标量纲差太多，一次只画一个 / three metrics, wildly different scales: one at a time
 type Metric = 'visitors' | 'views' | 'avgSeconds'
@@ -66,10 +67,10 @@ export default function PageStatsCard({ stats, loading }: { stats: AdminPageStat
         <p className="py-3 text-sm text-neutral-500">{t('admin.pageStats.empty')}</p>
       ) : (
         <>
-          <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label={t('admin.pageStats.metricLabel')}>
+          <div className="mb-3 flex flex-wrap gap-1.5" role="tablist" aria-label={t('admin.pageStats.metricLabel')} onKeyDown={onRovingKeyDown}>
             {METRICS.map((key) => (
-              <button key={key} type="button" role="tab" aria-selected={metric === key} onClick={() => setMetric(key)}
-                className={`rounded-[10px] px-3 py-1 text-xs transition ${metric === key ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
+              <button key={key} type="button" role="tab" aria-selected={metric === key} tabIndex={metric === key ? 0 : -1} onClick={() => setMetric(key)}
+                className={`rounded-control px-3 py-1 text-xs transition ${metric === key ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'}`}>
                 {t(`admin.pageStats.metric.${key}`)}
               </button>
             ))}

@@ -17,7 +17,9 @@ import { LOCALE_TAG, currentLang } from '../i18n'
 import PageHead from '../components/PageHead'
 import PrizeSlip from '../components/lucky/PrizeSlip'
 import { wonDraws } from '../utils/luckyView'
+import { onRovingKeyDown } from '../utils/rovingTabs'
 import '../components/lucky/luckyPrizes.css'
+import { EMPTY } from '../utils/format'
 
 type Filter = 'all' | 'pending' | 'submitted' | 'done' | 'cancelled'
 const FILTERS: Filter[] = ['all', 'pending', 'submitted', 'done', 'cancelled']
@@ -69,7 +71,7 @@ export default function LuckyPrizesPage() {
         const wd = key ? at.toLocaleDateString(locale, { timeZone: TZ, weekday: 'short' }) : ''
         g = key === today ? { key, label: t('orders.day.today'), sub: `${md} ${wd}`, items: [] }
           : key === yesterday ? { key, label: t('orders.day.yesterday'), sub: `${md} ${wd}`, items: [] }
-            : { key, label: md || '—', sub: wd, items: [] }
+            : { key, label: md || EMPTY, sub: wd, items: [] }
         out.push(g)
       }
       g.items.push(d)
@@ -95,9 +97,9 @@ export default function LuckyPrizesPage() {
         </div>
       ) : (
         <>
-          <div className="lkp-chips" role="tablist" aria-label={t('lucky.myPrizes')}>
+          <div className="lkp-chips" role="tablist" aria-label={t('lucky.myPrizes')} onKeyDown={onRovingKeyDown}>
             {FILTERS.map((f) => (
-              <button key={f} type="button" role="tab" aria-selected={filter === f} onClick={() => setFilter(f)}
+              <button key={f} type="button" role="tab" aria-selected={filter === f} tabIndex={filter === f ? 0 : -1} onClick={() => setFilter(f)}
                 className={`lkp-chip ${filter === f ? 'on' : ''}`}>
                 {f === 'all' ? t('signals.all') : f === 'done' ? t('lucky.filterDone') : t(`lucky.status.${f}`)}
                 <b>{counts[f]}</b>

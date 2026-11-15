@@ -210,7 +210,7 @@ export default function InviteLinksPanel({ globalTrialEnabled = false }: { globa
 
       {/* ② 工具栏 / toolbar */}
       <div className="glass mb-4 flex flex-wrap items-center gap-3 p-4">
-        <div className="flex flex-wrap gap-1.5" role="group">
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('admin.invite.kindFilter')}>
           {KIND_FILTERS.map((k) => (
             <button
               key={k}
@@ -456,11 +456,11 @@ function LinkTitle({ l }: { l: InviteLink }) {
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="truncate font-semibold text-neutral-100">{l.label}</span>
-        <span className={`rounded-[10px] px-1.5 py-0.5 text-xs ${kindBadgeClass(kind)}`}>
+        <span className={`rounded-control px-1.5 py-0.5 text-xs ${kindBadgeClass(kind)}`}>
           {t(`admin.invite.kind.${kind}`)}
         </span>
         {l.channel && (
-          <span className="rounded-[10px] border border-white/10 px-1.5 py-0.5 text-xs text-neutral-400">{l.channel}</span>
+          <span className="rounded-control border border-white/10 px-1.5 py-0.5 text-xs text-neutral-400">{l.channel}</span>
         )}
       </div>
       <div className="mt-0.5 truncate text-xs text-neutral-500">{sub || <span className="num">{l.code}</span>}</div>
@@ -481,7 +481,7 @@ function StatusCell({ l, globalTrialEnabled }: { l: InviteLink; globalTrialEnabl
       </span>
       {l.grantsTrial && (
         <span
-          className={`rounded-[10px] bg-prism-500/20 px-1.5 py-0.5 text-xs text-prism-200 ${globalTrialEnabled ? '' : 'opacity-50'}`}
+          className={`rounded-control bg-prism-500/20 px-1.5 py-0.5 text-xs text-prism-200 ${globalTrialEnabled ? '' : 'opacity-50'}`}
           title={globalTrialEnabled ? undefined : t('admin.invite.grantsTrialBlocked')}
         >
           {t('admin.invite.trialTag')}

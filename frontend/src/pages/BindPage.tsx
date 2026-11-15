@@ -35,6 +35,7 @@ import { useAuth } from '../store/auth'
 import { readCompIntent, resumeCompIntent } from '../utils/compIntent'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/bind.css'
+import { EMPTY } from '../utils/format'
 
 // 券商字母标：英文名取每个词的首字母（最多两个），中文名取前两个字。
 // Broker monogram: initials of up to two words for Latin names, first two
@@ -51,7 +52,7 @@ function brokerInitials(name: string): string {
 // 金额两位小数带千分位，与订单页的账本条同一种写法。
 // Money with two decimals and thousands separators, as on the orders ledger.
 const money2 = (n: number | null | undefined): string =>
-  n == null ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  n == null ? EMPTY : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function BindPage() {
   const { t, i18n } = useTranslation()
@@ -257,14 +258,14 @@ export default function BindPage() {
               <b className="num">{gatewayAccounts.length}</b>
             </div>
             {gatewayAccounts.map((a, i) => (
-              <div key={a.login} className="bind-acct" style={{ animationDelay: `${Math.min(i, 6) * 50}ms` }}>
+              <div key={a.login} className="bind-acct" style={{ animationDelay: `${Math.min(i, 5) * 30}ms` }}>
                 <div className="bind-acct-id">
                   <div className="login">
                     <b className="num">{a.login}</b>
                     <span className="tag bg-prism-600/20 text-prism-300 text-xs">{t('bind.gw.tag')}</span>
                   </div>
                   <div className="who">
-                    <span>{a.accountName || '—'}</span>
+                    <span>{a.accountName || EMPTY}</span>
                     {' '}
                     {a.company || brokerName}
                   </div>
@@ -279,7 +280,7 @@ export default function BindPage() {
                 </div>
                 <div>
                   <span className="k">{t('bind.leverage')}</span>
-                  <span className="v num">{a.leverage ? `1:${a.leverage}` : '—'}</span>
+                  <span className="v num">{a.leverage ? `1:${a.leverage}` : EMPTY}</span>
                 </div>
                 {/* 需重新验证要盖过在线/离线：被撤销的账号在后端本来就判离线，只显示一个
                     灰色「离线」会让用户以为等一会儿就好，而它永远不会自己好。

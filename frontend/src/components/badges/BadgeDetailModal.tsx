@@ -51,7 +51,7 @@ export default function BadgeDetailModal({ badge, population, onClose }: Props) 
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-overlay flex items-center justify-center scrim p-6"
       onClick={onClose}
     >
       <div

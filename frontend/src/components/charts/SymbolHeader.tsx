@@ -5,7 +5,7 @@
 // 高低与涨跌幅由 ChartsPage 从已加载的 K 线窗口算出后传入（dayStats）。
 // 大价格用外汇的「大手 + 点位」写法：1.16 小 · 23 大 · 8 上标（见 splitPrice）。
 // 手机端压成两行：第一行 品种（可点，弹自选抽屉）· 点差/日内高低（竖排小字）· 大价格；
-// 第二行是可左右滑动的画线横条 + 指标 / 设置按钮，BID / ASK 交给底部交易条。
+// 第二行是可左右滑动的画线横条 + 指标 / 设置按钮，卖价 / 买价交给底部交易条。
 // The strip docked above the chart: symbol + big price + bid/ask/spread/day
 // range + live state. Bid/ask come from the site-wide quote feed; day stats
 // are computed by ChartsPage from the loaded candle window. The big price uses
@@ -19,6 +19,7 @@ import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { useClock } from '../signals/hooks'
 import { INTERVALS } from './chartConfig'
+import { EMPTY } from '../../utils/format'
 
 export interface DayStats {
   high: number
@@ -41,12 +42,15 @@ interface Props {
   // 无实时报价时的兜底价（最新收盘价）/ fallback price when no live quote (latest close)
   fallbackPrice: number
   stale: boolean
+  // WebSocket 断线：报价停在最后一跳。大价格与 BID / ASK 变灰，右端状态写「行情已断开」。
+  // WebSocket lost: quotes freeze at the last tick; headline and BID / ASK grey out and the status says so.
+  quotesDown?: boolean
   // 手机端点品种名打开自选抽屉 / mobile: tapping the symbol opens the watchlist sheet
   onSymbolClick?: () => void
 }
 
 function fmt(v: number | null | undefined, digits: number): string {
-  return v == null || !Number.isFinite(v) ? '—' : v.toFixed(digits)
+  return v == null || !Number.isFinite(v) ? EMPTY : v.toFixed(digits)
 }
 
 // 大手 / 点位 / 末位：5 位价（1.16238）→ 1.16 · 23 · 8；3 位价（153.305）→ 153. · 30 · 5；
@@ -74,7 +78,7 @@ function Clock() {
   return <>{new Date(now).toLocaleTimeString('en-GB', { hour12: false, timeZone: 'Asia/Shanghai' })}</>
 }
 
-export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits, dayStats, fallbackPrice, stale, onSymbolClick }: Props) {
+export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits, dayStats, fallbackPrice, stale, quotesDown = false, onSymbolClick }: Props) {
   const { t } = useTranslation()
   // 点差按最小价位单位（point）计：(ask - bid) × 10^digits，四舍五入。
   // Spread in points: (ask - bid) × 10^digits, rounded.
@@ -84,7 +88,7 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
       : null
   const changePct = dayStats?.changePct ?? null
   const up = changePct != null && changePct >= 0
-  const changeStr = changePct == null ? '—' : `${up ? '+' : ''}${(changePct * 100).toFixed(2)}%`
+  const changeStr = changePct == null ? EMPTY : `${up ? '+' : ''}${(changePct * 100).toFixed(2)}%`
   const bidStr = fmt(bid ?? (fallbackPrice || null), digits)
   const askStr = fmt(ask ?? (fallbackPrice || null), digits)
   // 大字用买价 bid（MT5 惯例，K 线也按 bid 画），与图表最新价标签、下单 SELL 价一致。
@@ -97,12 +101,12 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
   const ivLabel = INTERVALS.find((iv) => iv.code === interval)?.label ?? interval
 
   return (
-    <div className="term-qs">
+    <div className={`term-qs ${quotesDown ? 'quotes-down' : ''}`}>
       <button type="button" className="term-qs-id" onClick={onSymbolClick} aria-label={String(t('charts.watchlist.title'))}>
         <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
         <div>
           <h2>
-            {symbol || '—'}
+            {symbol || EMPTY}
             <svg className="lg:hidden" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
           </h2>
           <p>{symbol ? `${displaySymbol(symbol)} · ${ivLabel}` : ''}</p>
@@ -117,7 +121,7 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
               {parts.pip && <span className="pip">{parts.pip}</span>}
               {parts.sup && <sup>{parts.sup}</sup>}
             </>
-          ) : '—'}
+          ) : EMPTY}
         </div>
         <div className={`term-chg ${changePct == null ? '' : up ? 'up' : 'down'}`}>
           <span>{changeStr}</span>
@@ -126,29 +130,32 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
       </div>
 
       <div className="term-qs-st no-sb">
-        {/* 配色跟下单票的连体按钮走：卖（bid）红、买（ask）绿——同一个页面上报价条
-            和下单票的颜色以前恰好相反（报价条 bid 绿 ask 红），仪表盘的报价表
-            （QuotesTable）也是 bid 红 ask 绿，三处里只有这里是反的。
-            （标签措辞本身的口径问题另议，见审计 T-52：那要产品先定「买价 = ask
-            还是 bid」，这里只对齐颜色，不动取值与文案。）
-            Colors follow the ticket's conjoined buttons — sell (bid) red, buy
-            (ask) green. This strip was the only place with the inverse; the
-            dashboard's quotes table already matched the ticket. The label wording
-            is a separate, product-level question (audit T-52) and is untouched. */}
-        {/* 手机上底部交易条已经大字显示卖价 / 买价，这里的 BID / ASK 只在桌面显示。
-            On mobile the bottom trade bar already shows sell / buy, so BID / ASK are desktop-only. */}
+        {/* 配色与措辞都跟下单票的连体按钮走：卖（bid）红、标「卖价 / Sell」，买（ask）绿、
+            标「买价 / Buy」。审计 T-52 的口径问题按仪表盘报价表与下单票的用户视角定案：
+            买价 = 用户买入的价格 = ask。此前这里中文把 bid 叫「买价」（经纪商视角），
+            同一个红色数字换个页面就换了名字。
+            Colour and wording both follow the ticket's conjoined buttons: sell (bid) is red
+            and reads "Sell", buy (ask) is green and reads "Buy". Audit T-52 is settled on the
+            user's perspective already used by the dashboard quotes table and the ticket
+            (buy price = what the user pays = ask); this strip used to call the bid "买价"
+            (the broker's view), so the same red number changed name between pages. */}
+        {/* 手机上底部交易条已经大字显示卖价 / 买价，这里的卖价 / 买价只在桌面显示。
+            On mobile the bottom trade bar already shows sell / buy, so these two are desktop-only. */}
         <Stat k={String(t('charts.symhead.bid'))} v={bidStr} tone="down" desktopOnly />
         <Stat k={String(t('charts.symhead.ask'))} v={askStr} tone="up" desktopOnly />
-        <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? '—' : String(spread)} />
+        <Stat k={String(t('charts.symhead.spread'))} v={spread == null ? EMPTY : String(spread)} />
         <Stat k={String(t('charts.symhead.high'))} v={fmt(dayStats?.high, digits)} />
         <Stat k={String(t('charts.symhead.low'))} v={fmt(dayStats?.low, digits)} />
       </div>
 
       {tools && <div className="term-qs-tools lg:hidden">{tools}</div>}
 
-      <div className={`term-qs-live ${stale ? 'stale' : ''}`}>
+      {/* 断线优先于「数据延迟」：stale 来自 K 线轮询，与 WebSocket 无关；以前断线时这里照样写 Live、绿点照样呼吸。
+          A disconnect outranks "data delayed": stale comes from the candle poll, not the WebSocket, so a
+          dropped socket used to leave this reading "Live" with the green dot still breathing. */}
+      <div className={`term-qs-live ${quotesDown ? 'off' : stale ? 'stale' : ''}`}>
         <i />
-        {stale ? t('charts.stale') : 'Live'} · UTC+8 <Clock />
+        {quotesDown ? t('charts.quotesDown') : stale ? t('charts.stale') : 'Live'} · UTC+8 <Clock />
       </div>
     </div>
   )

@@ -10,6 +10,7 @@ import { announcementApi, notificationApi } from '../api/client'
 import { useLive } from '../store/live'
 import { fmtDayShort, localizeApiError } from '../api/utils'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
+import { appTitle } from '../utils/routeTitle'
 import type { Announcement } from '../api/types'
 
 export function fmtAnnDay(iso: string | null): string {
@@ -22,7 +23,7 @@ export default function AnnouncementsPage() {
   // Admin content is stored in zh + en only: the zh UI reads zh, every other UI reads en.
   const isZh = !!i18n.language?.startsWith('zh')
   const pick = (zh: string, en: string) => (isZh ? zh || en : en || zh)
-  useDocumentTitle(t('announcements.title'))
+  useDocumentTitle(appTitle(t('announcements.title')))
   const [items, setItems] = useState<Announcement[] | null>(null)
   const [unread, setUnread] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -115,7 +116,7 @@ export default function AnnouncementsPage() {
               key={a.id}
               to={`/announcements/${a.id}`}
               className={`ann-row${a.read ? '' : ' unread'}`}
-              style={{ '--i': i } as React.CSSProperties}
+              style={{ '--i': Math.min(i, 5) } as React.CSSProperties}
             >
               <i className="ann-row-dot" aria-hidden="true" />
               <span className="ann-row-main">

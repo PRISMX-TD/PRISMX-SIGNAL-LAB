@@ -160,7 +160,7 @@ export default function AgentsPanel() {
       >
         <p className="flex flex-wrap items-center gap-1.5 text-sm text-neutral-100">
           <span className="truncate">{nameOf(n)}</span>
-          <span className="rounded-[10px] bg-prism-500/15 px-1.5 py-0.5 text-xs text-prism-200">
+          <span className="rounded-control bg-prism-500/15 px-1.5 py-0.5 text-xs text-prism-200">
             {t('admin.invite.tree.level', { n: n.level })}
           </span>
           <span className="ml-auto flex items-center gap-3">

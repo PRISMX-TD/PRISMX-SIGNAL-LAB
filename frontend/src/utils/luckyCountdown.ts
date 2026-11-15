@@ -3,6 +3,7 @@
 // Lucky-wheel countdown: backend datetimes are naive UTC without a `Z`, so go through parseTime —
 // `new Date(iso)` would read them in the device's timezone and be off by hours.
 import { fmtStamp, parseTime } from '../api/utils'
+import { EMPTY } from './format'
 
 export type Countdown = { d: number; h: number; m: number; s: number; done: boolean }
 
@@ -26,7 +27,7 @@ export function countdownParts(to: string | null | undefined, nowMs: number): Co
 export function fmtWindow(from: string | null | undefined, to: string | null | undefined): string {
   const one = (iso: string | null | undefined) => {
     const d = parseTime(iso)
-    if (!d || Number.isNaN(d.getTime())) return '-'
+    if (!d || Number.isNaN(d.getTime())) return EMPTY
     return fmtStamp(d, { year: 'never', clock: 'hm' })
   }
   return `${one(from)} ～ ${one(to)} UTC+8`

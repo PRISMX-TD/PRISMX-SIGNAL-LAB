@@ -88,7 +88,7 @@ export default function SessionFilterField({ value, onChange }: SessionFilterFie
                 className="w-28"
               />
             </label>
-            <span className="pb-2 text-xs text-neutral-500">—</span>
+            <span className="pb-2 text-xs text-neutral-500">–</span>
             <label className="flex flex-col gap-1">
               <span className="text-xs text-neutral-500">{t('strategy.sessionTo')}</span>
               <Select

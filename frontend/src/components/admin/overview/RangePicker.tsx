@@ -45,19 +45,19 @@ export default function RangePicker({ value, onChange, look = 'pills', trailing 
   const canApply = customOpen && !!from && !!to && error === null
 
   const pill = (active: boolean) =>
-    `rounded-[10px] px-3 py-1 text-xs transition ${active ? 'bg-white/10 text-neutral-100 ring-1 ring-white/20' : 'text-neutral-500 hover:text-neutral-300'}`
+    `rounded-control px-3 py-1 text-xs transition ${active ? 'bg-white/10 text-neutral-100 ring-1 ring-white/20' : 'text-neutral-500 hover:text-neutral-300'}`
 
   const presetActive = (p: OverviewRangePreset) => !customOpen && value.kind === 'preset' && value.preset === p
 
   const customPanel = customOpen && (
     <div className={look === 'seg' ? 'adm-range-custom' : 'flex flex-wrap items-center gap-2'}>
       <input type="date" value={from} max={todayIso()} onChange={(e) => setFrom(e.target.value)} aria-label={t('admin.overview.range.from')}
-             className={look === 'seg' ? 'adm-input' : 'rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-neutral-100'} />
+             className={look === 'seg' ? 'adm-input' : 'rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-neutral-100'} />
       <span className="text-xs text-neutral-500">–</span>
       <input type="date" value={to} max={todayIso()} onChange={(e) => setTo(e.target.value)} aria-label={t('admin.overview.range.to')}
-             className={look === 'seg' ? 'adm-input' : 'rounded-md border border-white/10 bg-white/5 px-2 py-1 text-xs text-neutral-100'} />
+             className={look === 'seg' ? 'adm-input' : 'rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-neutral-100'} />
       <button type="button" disabled={!canApply} onClick={() => onChange({ kind: 'custom', from, to })}
-              className={look === 'seg' ? 'adm-btn is-primary' : 'rounded-[10px] bg-prism-500/25 px-3 py-1 text-xs text-prism-100 ring-1 ring-prism-400/40 disabled:cursor-not-allowed disabled:opacity-40'}>
+              className={look === 'seg' ? 'adm-btn is-primary' : 'rounded-control bg-prism-500/25 px-3 py-1 text-xs text-prism-100 ring-1 ring-prism-400/40 disabled:cursor-not-allowed disabled:opacity-40'}>
         {t('admin.overview.range.apply')}
       </button>
       {error && error !== 'incomplete' && <span className="text-xs text-down">{t(`admin.overview.range.error.${error}`)}</span>}

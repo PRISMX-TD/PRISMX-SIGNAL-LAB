@@ -14,6 +14,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../store/auth'
 import { usePrefs } from '../../store/prefs'
 import { SYMBOL_CATEGORIES, symbolCategory, type SymbolCategory } from '../../utils/symbolCategory'
+import { onRovingKeyDown } from '../../utils/rovingTabs'
 
 export type SymbolTab = 'all' | 'fav' | Exclude<SymbolCategory, 'other'>
 
@@ -78,13 +79,14 @@ export function SymbolTabBar({ tabs, tab, onChange, className = '' }: {
 }) {
   const { t } = useTranslation()
   return (
-    <div className={`sym-tabs no-sb ${className}`} role="tablist">
+    <div className={`sym-tabs no-sb ${className}`} role="tablist" onKeyDown={onRovingKeyDown}>
       {tabs.map((k) => (
         <button
           key={k}
           type="button"
           role="tab"
           aria-selected={k === tab}
+          tabIndex={k === tab ? 0 : -1}
           className={k === tab ? 'on' : undefined}
           onClick={() => onChange(k)}
         >

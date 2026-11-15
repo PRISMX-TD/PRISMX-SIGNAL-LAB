@@ -5,7 +5,7 @@
 // The invite-link edit drawer (§5.4). Every write goes through the panel (which owns the
 // single busyId gate); every button here disables on busy — see the panel's note on why
 // the disabled state must mirror what the handlers do.
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import AdminSheet from '../AdminSheet'
 import Switch from '../../Switch'
@@ -51,6 +51,9 @@ export default function InviteLinkEditDrawer({
   const [label, setLabel] = useState(link.label)
   const [channel, setChannel] = useState(link.channel ?? '')
   const [openUrl, setOpenUrl] = useState(link.openAccountUrl ?? '')
+  const trialLabelId = useId()
+  const trialHintId = useId()
+  const activeLabelId = useId()
 
   // 保存成功后后端回来的新值同步回草稿；只在这几个值变化时重置——开关 / 代理的写操作
   // 也会换掉 link 对象，但不该冲掉正在输入的标记。
@@ -78,7 +81,7 @@ export default function InviteLinkEditDrawer({
       title={t('admin.invite.editTitle')}
       onClose={onClose}
       badge={
-        <span className={`rounded-[10px] px-1.5 py-0.5 text-xs ${kindBadgeClass(kind)}`}>
+        <span className={`rounded-control px-1.5 py-0.5 text-xs ${kindBadgeClass(kind)}`}>
           {t(`admin.invite.kind.${kind}`)}
         </span>
       }
@@ -151,17 +154,23 @@ export default function InviteLinkEditDrawer({
             settings. The toggle still works — the intent takes effect once the global
             switch opens. */}
         <div className="flex items-center justify-between gap-3">
-          <span className={`text-sm ${globalTrialEnabled ? 'text-neutral-300' : 'text-neutral-500'}`}>
+          <span id={trialLabelId} className={`text-sm ${globalTrialEnabled ? 'text-neutral-300' : 'text-neutral-500'}`}>
             {t('admin.invite.fieldGrantsTrial')}
           </span>
-          <Switch checked={link.grantsTrial} busy={busy} onChange={() => onToggleTrial()} />
+          <Switch
+            checked={link.grantsTrial}
+            busy={busy}
+            onChange={() => onToggleTrial()}
+            aria-labelledby={trialLabelId}
+            aria-describedby={globalTrialEnabled ? undefined : trialHintId}
+          />
         </div>
         {!globalTrialEnabled && (
-          <p className="text-xs leading-snug text-neutral-500">{t('admin.invite.grantsTrialBlocked')}</p>
+          <p id={trialHintId} className="text-xs leading-snug text-neutral-500">{t('admin.invite.grantsTrialBlocked')}</p>
         )}
         <div className="flex items-center justify-between gap-3">
-          <span className="text-sm text-neutral-300">{t('admin.invite.fieldActive')}</span>
-          <Switch checked={link.isActive} busy={busy} onChange={() => onToggleActive()} />
+          <span id={activeLabelId} className="text-sm text-neutral-300">{t('admin.invite.fieldActive')}</span>
+          <Switch checked={link.isActive} busy={busy} onChange={() => onToggleActive()} aria-labelledby={activeLabelId} />
         </div>
       </div>
 
@@ -178,7 +187,7 @@ export default function InviteLinkEditDrawer({
             {owner ? (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span
-                  className="inline-flex items-center gap-1 rounded-[10px] bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
+                  className="inline-flex items-center gap-1 rounded-control bg-prism-500/15 px-2 py-0.5 text-xs text-prism-200"
                   title={owner.email}
                 >
                   {owner.nickname || owner.email}

@@ -33,6 +33,7 @@ import {
   cheerKey, isWheelClosed, openRounds, pickRound, readLastRound, revealCopy, withTicketsLeft, writeLastRound, type Outcome,
 } from '../utils/luckyView'
 import { newRequestId } from '../utils/luckyWheel'
+import { onRovingKeyDown } from '../utils/rovingTabs'
 import '../components/lucky/luckyPage.css'
 
 function useCountdown(to: string | undefined) {
@@ -235,16 +236,19 @@ export default function LuckyPage() {
   return (
     <div className="lk" data-fest={festival ?? undefined}>
       {rounds.length > 1 && (
-        <div role="tablist" aria-label={t('lucky.rounds')} className="lk-rounds">
+        <div role="tablist" aria-label={t('lucky.rounds')} className="lk-rounds" onKeyDown={onRovingKeyDown}>
           {rounds.map((r) => {
             const on = r.round.id === round.id
             return (
-              <button key={r.round.id} type="button" role="tab" aria-selected={on} disabled={spinning && !on}
+              <button key={r.round.id} type="button" role="tab" aria-selected={on} tabIndex={on ? 0 : -1} disabled={spinning && !on}
                 onClick={() => select(r.round.id)} className={`lk-round ${on ? 'is-on' : ''}`}>
                 <span className="lk-round-name">{r.round.name}</span>
                 {r.round.phase === 'upcoming' && <span className="lk-round-soon">{t('lucky.notStarted')}</span>}
                 {r.tickets.unused > 0 && (
-                  <span className="lk-round-badge" aria-label={t('lucky.ticketsBadge', { n: r.tickets.unused })}>{r.tickets.unused}</span>
+                  <span className="lk-round-badge">
+                    <span aria-hidden="true">{r.tickets.unused}</span>
+                    <span className="sr-only">{t('lucky.ticketsBadge', { n: r.tickets.unused })}</span>
+                  </span>
                 )}
               </button>
             )

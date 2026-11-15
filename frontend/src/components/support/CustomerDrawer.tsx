@@ -31,7 +31,7 @@ export default function CustomerDrawer({
   // portal 到 body：页面里任何带 transform / filter 的祖先都会成为 fixed 的包含块
   // Portalled to body: any transformed / filtered ancestor would otherwise contain `fixed`
   return createPortal(
-    <div className="sd-scrim fixed inset-0 z-[60] flex justify-end bg-black/55" onClick={onClose}>
+    <div className="sd-scrim fixed inset-0 z-modal flex justify-end scrim" onClick={onClose}>
       <div
         ref={ref}
         role="dialog"

@@ -102,8 +102,8 @@ export default function SystemSettingsPanel() {
           <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.candleHistoryTitle')}</h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
-              <label className="label">{t('admin.candleM1Retention')}</label>
-              <NumberInput
+              <label className="label" htmlFor="sys-m1-retention">{t('admin.candleM1Retention')}</label>
+              <NumberInput id="sys-m1-retention"
                 integer
                 min={1}
                 max={365}
@@ -128,8 +128,8 @@ export default function SystemSettingsPanel() {
           <h3 className="mb-4 font-display text-lg font-semibold text-neutral-100">{t('admin.strategyPlatformTitle')}</h3>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
-              <label className="label">{t('admin.strategyMaxPerUser')}</label>
-              <NumberInput
+              <label className="label" htmlFor="sys-strategy-max">{t('admin.strategyMaxPerUser')}</label>
+              <NumberInput id="sys-strategy-max"
                 integer
                 min={1}
                 max={50}

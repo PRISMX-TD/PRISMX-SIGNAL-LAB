@@ -35,6 +35,6 @@ describe('fmtWindow', () => {
   })
 
   it('shows a dash for a missing or broken end', () => {
-    expect(fmtWindow(null, 'nope')).toBe('- ～ - UTC+8')
+    expect(fmtWindow(null, 'nope')).toBe('– ～ – UTC+8')
   })
 })

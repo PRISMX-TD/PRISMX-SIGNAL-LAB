@@ -35,7 +35,12 @@ import { PRO_ONLY } from '../components/charts/indicatorCatalog'
 import { useLive } from '../store/live'
 import { useOrderPlacement } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
-import { useLastAccount } from '../utils/useLastAccount'
+import { usePresence, SHEET_EXIT_MS } from '../utils/usePresence'
+import { useScrollLock } from '../utils/scrollLock'
+import { useSheetDrag } from '../utils/useSheetDrag'
+import { useDialogA11y } from '../utils/useDialogA11y'
+import { pickDefaultAccount, useLastAccount } from '../utils/useLastAccount'
+import { useMediaQuery } from '../utils/useMediaQuery'
 import {
   DEFAULT_INDICATOR_SETTINGS,
   mergeIndicatorSettings,
@@ -72,6 +77,7 @@ import {
 import { readStorage } from '../utils/safeStorage'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/terminal.css'
+import { EMPTY } from '../utils/format'
 
 // IndicatorFlags 原本定义在这里，IndicatorSettingsModal 等按老路径引用；保留再导出。
 // IndicatorFlags used to be defined here; re-exported so old import paths keep working.
@@ -289,10 +295,10 @@ export default function ChartsPage() {
   )
 
   // 手机端抽屉：自选 / 下单票 / 持仓，一次只开一个；tradeSide 记住从交易条的哪一侧
-  // 点进来。桌面（lg+）三栏常驻，抽屉不渲染（CSS 里 ≥1024 直接 display:none）。
+  // 点进来。桌面（lg+）三栏常驻，抽屉不挂载（见下方 isDesktop）。
   // Mobile sheets: watchlist / ticket / positions, one at a time; tradeSide
   // remembers which side of the trade bar opened the ticket. Desktop shows the
-  // three columns and the sheets are display:none at ≥1024.
+  // three columns and never mounts the sheets (see isDesktop below).
   const [sheet, setSheet] = useState<Sheet>(null)
   // 下单回来之后要判断「当时是不是从抽屉里下的」，必须读**那一刻**的值而不是渲染
   // 闭包里的：等回执期间用户完全可能自己把抽屉关了，那就不该再替他弹开。
@@ -311,6 +317,24 @@ export default function ChartsPage() {
   useBackToClose(settingsOpen, () => setSettingsOpen(false))
   useBackToClose(sheet != null, () => setSheet(null))
 
+  // 桌面三栏 / 手机「图表 + 抽屉」的分界，与 terminal.css 的 1024px 断点同一条线。
+  // 两边互相看不见的部分不再挂载：手机上的左右栏与停靠区，桌面上的交易条与抽屉。
+  // display:none 只是不画，组件照样订阅报价与持仓、每一跳都重渲染。桌面上点报价条
+  // 的品种名也不再打开那个看不见的自选抽屉（以前会多压一条返回记录，第一次「返回」
+  // 什么都不发生）。
+  // The desktop three-column / phone chart-plus-sheets split, on the same 1024px line as
+  // terminal.css. What one side can't see is no longer mounted: the side columns and dock
+  // on phones, the trade bar and sheets on desktop. display:none only skips painting; the
+  // components still subscribed to quotes and positions and re-rendered on every tick.
+  // Clicking the symbol name on desktop no longer opens that invisible watchlist sheet
+  // either (it pushed a back-history entry, so the first Back did nothing visible).
+  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  // 视口从手机宽度变到桌面宽度（平板转屏、拖宽窗口）时收起开着的抽屉。
+  // Crossing to desktop width (tablet rotation, widening the window) closes an open sheet.
+  useEffect(() => {
+    if (isDesktop) setSheet(null)
+  }, [isDesktop])
+
   // 手机端全屏模式（CSS 全屏 + 原生 Fullscreen API + 横屏锁定）与全屏工具栏拖动
   // Mobile fullscreen + floating toolbar drag: see useChartFullscreen
   const {
@@ -318,8 +342,35 @@ export default function ChartsPage() {
     fsToolbarRef, fsToolbarPos, onFsToolbarPointerDown, onFsToolbarPointerMove, onFsToolbarPointerUp,
   } = useChartFullscreen(containerRef)
 
-  const { accounts, activeSymbols, orders } = useLive()
-  const { toast, placeManualOrder, showToast } = useOrderPlacement()
+  // 手机抽屉的键盘与读屏：Esc 关、Tab 困住、焦点进出（utils/useDialogA11y）。抽屉在本组件里
+  // 条件渲染，所以传 open。ref 不能叫 sheetRef——下面已有一个存 sheet 状态值的 sheetRef。
+  // Keyboard/screen reader for the mobile sheet (utils/useDialogA11y). The sheet is
+  // rendered conditionally here, hence `open`. Not named sheetRef: that one already
+  // exists below and holds the sheet state value.
+  const termSheetRef = useRef<HTMLDivElement>(null)
+  const termSheetTitleId = 'term-sheet-title'
+  useDialogA11y(termSheetRef, () => setSheet(null), { open: sheet != null && !isFullscreen })
+  // 手机抽屉：关闭后多留 240ms 播退场（usePresence，内容按留下来的值渲染，退场途中不会变空）；
+  // 打开期间锁页面滚动；把手与抽屉头可下拉关闭，正文不起拖。指标库同样有退场。
+  // Phone sheets: kept 240ms after closing for the exit (usePresence; the content renders
+  // from the kept value so it doesn't blank mid-exit); page scroll is locked while open;
+  // the handle and header drag it down to close, the body never starts a drag. The
+  // indicator library gets the same exit.
+  const termSheet = usePresence(sheet != null && !isFullscreen && !isDesktop ? sheet : null, SHEET_EXIT_MS)
+  const shownSheet = termSheet.shown
+  const termScrimRef = useRef<HTMLDivElement>(null)
+  const termDrag = useSheetDrag({ sheetRef: termSheetRef, scrimRef: termScrimRef, onDismiss: () => setSheet(null), ignore: '.term-sheet-body' })
+  useScrollLock(sheet != null && !isFullscreen && !isDesktop)
+  const indDialog = usePresence(settingsOpen ? true : null, SHEET_EXIT_MS)
+
+  // 断线状态往下传给报价条、自选、交易条、下单票：信号页的下单弹窗断线时会直说，图表页以前
+  // 四处价格照常显示、报价条还写着 Live。布尔值只在断开 / 恢复时变，memo 的下单票不会因此多渲染。
+  // The disconnect flag goes down to the quote strip, watchlist, trade bar and ticket: the
+  // signals page's order sheet says so when disconnected, while this page kept showing four sets
+  // of prices and "Live". A boolean that only flips on disconnect / reconnect, so the memo'd
+  // ticket doesn't re-render for it otherwise.
+  const { accounts, activeSymbols, orders, wsDisconnected } = useLive()
+  const { toast, placeManualOrder, showToast, reportPlaced } = useOrderPlacement()
 
   // 每个品种的价格轴小数位：**优先用券商随报价上报的 digits**，拿不到才退回
   // chartConfig 里那张兜底表。这条链一路喂给报价条、下单票、自选表、持仓面板与
@@ -375,6 +426,26 @@ export default function ChartsPage() {
   useEffect(() => {
     if (selectedLogin && !accounts.some((a) => a.login === selectedLogin)) setSelectedLogin('')
   }, [accounts, selectedLogin])
+
+  // 选中（或记住）的账户掉线时，把选择挪到一个在线账户上。这件事以前由桌面右栏的
+  // 下单票顺手完成（useOrderForm 的兜底 effect 会回调 onSelectLogin），手机上那张票
+  // 虽然看不见但一直挂着。现在手机不挂那张票，兜底提到这一层，账户条、图上持仓线和
+  // 持仓抽屉照旧跟着在线账户走。规则与 useOrderForm 一致：只在有在线账户时才挪，
+  // 挑法是 pickDefaultAccount（记住的账户在线就用它，否则第一个在线的），不写记忆。
+  // 桌面上下单票仍会做同样的事，两边写入的是同一个值。
+  // When the selected (or remembered) account goes offline, move the pick to an online one.
+  // The desktop ticket used to do this as a side effect (useOrderForm's fallback effect calls
+  // onSelectLogin), and on phones that ticket was mounted, just invisible. Phones no longer
+  // mount it, so the fallback lives here and the account strip, on-chart position lines and
+  // positions sheet keep following an online account. Same rule as useOrderForm: only when an
+  // online account exists, chosen by pickDefaultAccount, never remembered. On desktop the
+  // ticket still does the same and both write the same value.
+  useEffect(() => {
+    if (!effectiveLogin) return
+    const online = accounts.filter((a) => a.online)
+    if (online.length === 0 || online.some((a) => a.login === effectiveLogin)) return
+    setSelectedLogin(pickDefaultAccount(online, lastLogin))
+  }, [accounts, effectiveLogin, lastLogin])
 
   // 按选中账户过滤持仓/挂单：多账户时才过滤，单账户或数据没带 login 时照旧全展示，
   // 避免误伤。/ Filter positions/orders by the selected account — only when there
@@ -525,7 +596,7 @@ export default function ChartsPage() {
   // paging / polling → useChartData. The chart is never hidden any more, so the
   // refit key only changes on entering/leaving fullscreen (a real resize).
   const engine = useChartEngine(containerRef, shownIndicators, indicatorSettings, isFullscreen, candleColors, markerText)
-  const { chartRef, seriesRef, getBarTimes, legend, paneOffsets, drawReady } = engine
+  const { chartRef, seriesRef, getBarTimes, legendStore, paneOffsets, drawReady } = engine
   const liveBidRef = useRef<number | null>(null)
   const dataKeyRef = useRef('')
   const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
@@ -565,7 +636,9 @@ export default function ChartsPage() {
   // A stable place callback: OrderTicket is memoized and an inline arrow would defeat it.
   const onPlace = useCallback<ComponentProps<typeof OrderTicket>['onPlace']>(
       async (side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price) => {
-        const placed = await placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price)
+        // silent：下单票按钮下面有就地回执，不在屏幕正中再弹同一句（见 hooks.ts 的 SubmitOrderOptions）。
+        // silent: the ticket shows an inline receipt under its button; no centred repeat.
+        const placed = await placeManualOrder(symbol, side, volume, mt5Login, stopLoss, takeProfit, coid, orderType, price, { silent: true })
         // 只在「这一单是从手机的下单抽屉里下的」时才切。判据就是抽屉当时开在
         // trade 上——桌面右栏下单时 sheet 恒为 null，绝不会误触发（桌面本来就
         // 三栏全见，也没有「切过去」这回事）。
@@ -580,10 +653,16 @@ export default function ChartsPage() {
         // inline receipt under the ticket, which says why. Switching hides the reason
         // and shows a positions list that gained nothing.
         const settled = placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')
-        if (afterPlaceOpen && !settled && sheetRef.current === 'trade') setSheet('positions')
+        if (afterPlaceOpen && !settled && sheetRef.current === 'trade') {
+          setSheet('positions')
+          // 抽屉切到持仓，下单票卸载，就地回执也跟着没了：这时补一条 toast，否则这一单没有任何回音。
+          // Switching the sheet unmounts the ticket and its inline receipt; toast instead, or the
+          // order would get no echo at all.
+          reportPlaced(placed)
+        }
         return placed
       },
-      [placeManualOrder, symbol, afterPlaceOpen],
+      [placeManualOrder, reportPlaced, symbol, afterPlaceOpen],
   )
 
   // 下单票自己订阅报价（按账户 + 当前品种的全站报价），这里不再传。
@@ -599,23 +678,28 @@ export default function ChartsPage() {
       onSelectLogin={setSelectedLogin}
       initialSide={initialSide}
       onPlace={onPlace}
+      quotesDown={wsDisconnected}
     />
   )
 
   return (
     <div className="term-shell">
+      <h1 className="sr-only">{t('nav.charts')}</h1>
       {/* 左栏：自选（桌面常驻；手机从报价条的品种名点开抽屉）
           Left column: watchlist (desktop; on mobile it opens as a sheet from the quote strip) */}
-      <aside className="term-col term-col-left">
-        <div className="term-ph"><h3>{t('charts.watchlist.title')}</h3><span>{activeSymbols.length}</span></div>
-        <WatchlistPanel
-          className="flex min-h-0 flex-1 flex-col"
-          symbols={activeSymbols}
-          active={symbol}
-          onSelect={setSymbol}
-          digitsFor={digitsFor}
-        />
-      </aside>
+      {isDesktop && (
+        <aside className="term-col term-col-left">
+          <div className="term-ph"><h3>{t('charts.watchlist.title')}</h3><span>{activeSymbols.length}</span></div>
+          <WatchlistPanel
+            className="flex min-h-0 flex-1 flex-col"
+            symbols={activeSymbols}
+            active={symbol}
+            onSelect={setSymbol}
+            digitsFor={digitsFor}
+            quotesDown={wsDisconnected}
+          />
+        </aside>
+      )}
 
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
@@ -628,7 +712,8 @@ export default function ChartsPage() {
             dayStats={dayStats}
             fallbackPrice={lastPrice}
             stale={stale}
-            onSymbolClick={openWatchlistSheet}
+            quotesDown={wsDisconnected}
+            onSymbolClick={isDesktop ? undefined : openWatchlistSheet}
             tools={mobileTools}
           />
         )}
@@ -670,14 +755,26 @@ export default function ChartsPage() {
           )}
 
           {/* 图表容器：无缝，填满网格剩余高度。/ Chart container: seamless, fills the grid. */}
-          <div className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''}`}>
+          {/* tabIndex 让图表本身能拿到焦点：点一下图表焦点就落到这里，画线的单键快捷键
+              （DrawLayer 里的 1-8、Delete）只在焦点处于图表区时生效；键盘用户也能 Tab 到
+              图表再用这些键。role="group" 加名字，读屏进来时报「行情图表，分组」。
+              tabIndex makes the chart itself focusable: a click on the chart lands focus
+              here, and DrawLayer's single-key shortcuts (1-8, Delete) only act while focus
+              is in the chart area; keyboard users can Tab to the chart and use them too.
+              role="group" with a name, so a screen reader says "Charts, group" on entry. */}
+          <div
+            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''}`}
+            tabIndex={0}
+            role="group"
+            aria-label={t('nav.charts')}
+          >
             {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
             <button
               type="button"
               onClick={isFullscreen ? exitFullscreen : enterFullscreen}
               aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
               title={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
-              className="lg:hidden absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-md border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-90"
+              className="hit-44 lg:hidden absolute top-2 right-2 z-30 flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-ink-900/70 text-neutral-300 backdrop-blur-sm transition hover:text-white hover:border-white/20 active:scale-[0.96] motion-reduce:active:scale-100"
             >
               {isFullscreen ? (
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -745,7 +842,7 @@ export default function ChartsPage() {
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
 
             {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
-            <IndicatorLegends indicators={shownIndicators} indicatorSettings={indicatorSettings} legend={legend} paneOffsets={paneOffsets} decimals={decimals} />
+            <IndicatorLegends indicators={shownIndicators} indicatorSettings={indicatorSettings} legendStore={legendStore} paneOffsets={paneOffsets} decimals={decimals} />
 
             {/* 全屏态悬浮画线工具栏（可拖移）*/}
             {isFullscreen && drawReady && (
@@ -766,7 +863,7 @@ export default function ChartsPage() {
         </div>
 
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
-        {!isFullscreen && (
+        {isDesktop && !isFullscreen && (
           <div className="hidden lg:flex lg:flex-shrink-0 lg:flex-col">
             <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
           </div>
@@ -774,44 +871,49 @@ export default function ChartsPage() {
 
         {/* 手机端底部交易条：卖 | 点差 | 买，点开下单票抽屉
             Mobile trade bar: sell | spread | buy, opens the ticket sheet */}
-        {!isFullscreen && (
-          <MobileTradeBar symbol={symbol} decimals={decimals} lastPrice={lastPrice} onTrade={openTrade} />
+        {!isDesktop && !isFullscreen && (
+          <MobileTradeBar symbol={symbol} decimals={decimals} lastPrice={lastPrice} onTrade={openTrade} quotesDown={wsDisconnected} />
         )}
       </section>
 
       {/* 右栏：下单票 + 账户条（桌面常驻）。票占剩余高度并可内部滚动，账户条钉底。
           Right column: ticket + account strip (desktop). The ticket takes the
           remaining height and scrolls internally; the strip stays pinned at the bottom. */}
-      <aside className="term-col term-col-right">
-        <div className="term-ph"><h3>{t('charts.ticket.title')}</h3><span>{symbol || '—'}</span></div>
-        {ticket()}
-        <AccountSummary account={activeAccount} />
-      </aside>
+      {isDesktop && (
+        <aside className="term-col term-col-right">
+          <div className="term-ph"><h3>{t('charts.ticket.title')}</h3><span>{symbol || EMPTY}</span></div>
+          {ticket()}
+          <AccountSummary account={activeAccount} />
+        </aside>
+      )}
 
       {/* 手机端抽屉：走 portal 挂到 body——页面切换动画（.page-enter）会给 <main>
           造一个层叠上下文，抽屉留在里面的话 z-index 再高也压不过全站底栏（z-40）。
           Mobile sheets are portalled to body: the page-enter animation gives
           <main> its own stacking context, inside which no z-index beats the app
           tab bar (z-40). */}
-      {sheet && !isFullscreen && createPortal(
+      {shownSheet && createPortal(
         <>
-          <div className="term-scrim" onClick={() => setSheet(null)} />
-          <div className="term-sheet" role="dialog" aria-modal="true">
+          <div ref={termScrimRef} className={`term-scrim${termSheet.closing ? ' closing' : ''}`} onClick={() => setSheet(null)} />
+          <div ref={termSheetRef} className={`term-sheet${termSheet.closing ? ' closing' : ''}`} role="dialog" aria-modal="true" aria-labelledby={termSheetTitleId} tabIndex={-1} {...termDrag}>
+            {/* 把手：拖拽区的一部分（见 terminal.css .term-sheet-grab）。
+                The handle is part of the drag zone (see .term-sheet-grab in terminal.css). */}
+            <div className="term-sheet-grab" aria-hidden="true" />
             {/* 抽屉头：标题与副信息靠左成一组，右侧是关闭按钮——抽屉本身没有别的退出手势
                 提示，点遮罩关闭对不少用户并不显然。
                 Sheet head: title and meta grouped on the left, a close button on the right —
                 the sheet offers no other visible way out, and tapping the scrim isn't obvious. */}
             <div className="term-ph term-sheet-ph">
               <div className="term-sheet-ttl">
-                <h3>{sheet === 'watchlist' ? t('charts.watchlist.title') : sheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
-                <span>{sheet === 'watchlist' ? activeSymbols.length : sheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : <PositionsCount scopeLogin={scopeLogin} />}</span>
+                <h3 id={termSheetTitleId}>{shownSheet === 'watchlist' ? t('charts.watchlist.title') : shownSheet === 'trade' ? t('charts.sheetTicket') : t('charts.openPositions')}</h3>
+                <span>{shownSheet === 'watchlist' ? activeSymbols.length : shownSheet === 'trade' ? `${symbol} · ${activeAccount ? `#${activeAccount.login}` : ''}` : <PositionsCount scopeLogin={scopeLogin} />}</span>
               </div>
               {/* 「下单后自动打开」就放在它自己弹出来的这张抽屉的抬头里：嫌它烦的人
                   正好在这儿，不用去设置页里找一个自己都不知道叫什么的开关。
                   The "open after placing" switch sits in the header of the sheet that
                   does the popping — whoever is annoyed by it is already looking here,
                   instead of hunting a settings page for a name they don't know. */}
-              {sheet === 'positions' && (
+              {shownSheet === 'positions' && (
                 <label className="term-sheet-pref">
                   <span>{t('charts.autoOpenAfterPlace')}</span>
                   <Switch checked={afterPlaceOpen} onChange={setAfterPlaceOpen} aria-label={String(t('charts.autoOpenAfterPlace'))} />
@@ -822,22 +924,23 @@ export default function ChartsPage() {
               </button>
             </div>
             <div className="term-sheet-body no-sb">
-              {sheet === 'watchlist' && (
+              {shownSheet === 'watchlist' && (
                 <WatchlistPanel
                   className="flex min-h-0 flex-1 flex-col"
                   symbols={activeSymbols}
                   active={symbol}
                   onSelect={pickFromSheet}
                   digitsFor={digitsFor}
+                  quotesDown={wsDisconnected}
                 />
               )}
-              {sheet === 'trade' && (
+              {shownSheet === 'trade' && (
                 <>
                   {ticket(tradeSide)}
                   <AccountSummary account={activeAccount} />
                 </>
               )}
-              {sheet === 'positions' && (
+              {shownSheet === 'positions' && (
                 <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
               )}
             </div>
@@ -846,8 +949,9 @@ export default function ChartsPage() {
         document.body,
       )}
 
-      {settingsOpen && (
+      {indDialog.shown && (
         <IndicatorSettingsModal
+          closing={indDialog.closing}
           indicators={shownIndicators}
           isPro={isPro}
           onToggle={toggleIndicator}
@@ -860,7 +964,7 @@ export default function ChartsPage() {
       )}
 
       {toast && (
-        <Toast kind={toast.kind} message={toast.msg} />
+        <Toast key={toast.id} toast={toast} />
       )}
     </div>
   )
@@ -869,23 +973,27 @@ export default function ChartsPage() {
 // 手机端底部交易条：卖 | 点差 | 买。自己订阅当前品种的报价，跳价只重画这一条。
 // Mobile trade bar: sell | spread | buy. Subscribes to the active symbol's quote itself,
 // so a tick repaints just this bar.
-function MobileTradeBar({ symbol, decimals, lastPrice, onTrade }: {
+function MobileTradeBar({ symbol, decimals, lastPrice, onTrade, quotesDown }: {
   symbol: string
   decimals: number
   lastPrice: number
   onTrade: (side: Side) => void
+  quotesDown: boolean
 }) {
   const { t } = useTranslation()
   const q = useGlobalQuote(symbol)
-  const px = (v: number | null | undefined) => (v != null ? v.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : '—')
+  const px = (v: number | null | undefined) => (v != null ? v.toFixed(decimals) : lastPrice ? lastPrice.toFixed(decimals) : EMPTY)
   const spreadPts = q && q.ask >= q.bid ? Math.round((q.ask - q.bid) * Math.pow(10, decimals)) : null
   return (
-    <div className="term-mbar">
+    <div className={`term-mbar ${quotesDown ? 'quotes-down' : ''}`}>
+      {/* 手机上报价条的状态位是隐藏的（terminal.css 里 .term-qs-live 在 ≤1023px 不显示），断线只能写在这里。
+          The quote strip's status is hidden on phones (.term-qs-live at ≤1023px), so the disconnect is stated here. */}
+      {quotesDown && <p className="term-mbar-down">{t('charts.quotesDown')}</p>}
       <button type="button" className="sell" onClick={() => onTrade('SELL')}>
         <span className="lab">{t('charts.ticket.sell')}</span>
         <span className="px"><PipText s={px(q?.bid)} /></span>
       </button>
-      <div className="sp">{t('charts.ticket.spreadUnit')}<b>{spreadPts ?? '—'}</b></div>
+      <div className="sp">{t('charts.ticket.spreadUnit')}<b>{spreadPts ?? EMPTY}</b></div>
       <button type="button" className="buy" onClick={() => onTrade('BUY')}>
         <span className="lab">{t('charts.ticket.buy')}</span>
         <span className="px"><PipText s={px(q?.ask)} /></span>
@@ -896,6 +1004,6 @@ function MobileTradeBar({ symbol, decimals, lastPrice, onTrade }: {
 
 // 价格末两位加粗（点位）/ bold the last two digits (the pips)
 function PipText({ s }: { s: string }) {
-  if (s.length < 3 || s === '—') return <>{s}</>
+  if (s.length < 3 || s === EMPTY) return <>{s}</>
   return <>{s.slice(0, -2)}<b>{s.slice(-2)}</b></>
 }

@@ -37,12 +37,13 @@
   color: var(--text-3);
   transition: color var(--dur-fast) var(--ease-out);
 }
-.sd-tab:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .sd-tab:hover {
+    color: var(--text-2);
+  }
 }
 .sd-tab.is-active {
   color: var(--text);
-  font-weight: 600;
 }
 .sd-tab.is-active::after {
   content: '';
@@ -57,7 +58,7 @@
 
 /* ── 搜索框与弹出层 / search field and popover ── */
 .sd-search {
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: var(--surface);
   transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
@@ -70,10 +71,10 @@
   filter: invert(0.6);
 }
 .sd-pop {
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   border: 1px solid var(--line-hi);
-  background: var(--surface-2);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 0.45);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float);
   animation: sd-fade-in var(--dur-fast) var(--ease-out) both;
 }
 
@@ -82,7 +83,7 @@
   display: flex;
   gap: 2px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
 }
 .sd-seg > button {
@@ -90,15 +91,18 @@
   min-width: 0;
   height: 30px;
   padding: 0 10px;
-  border-radius: 10px;
+  /* 同心：轨道 10 − 内边距 3 = 7（轨道无边框）。/ Concentric: 10 − 3 = 7 (no track border). */
+  border-radius: 7px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.sd-seg > button:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .sd-seg > button:hover {
+    color: var(--text-2);
+  }
 }
 .sd-seg > button.is-on {
   background: var(--surface-2);
@@ -110,8 +114,10 @@
 .sd-row {
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.sd-row:hover {
-  background: rgba(255, 255, 255, 0.025);
+@media (hover: hover) and (pointer: fine) {
+  .sd-row:hover {
+    background: rgba(255, 255, 255, 0.025);
+  }
 }
 .sd-row.is-sel {
   background: var(--surface-2);
@@ -129,8 +135,8 @@
 
 /* 列表逐行淡入：只在首次出现时，表达「这批是新载入的」/ rows fade in once, saying "this batch just loaded" */
 .sd-rise {
-  animation: sd-rise 0.36s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 24ms);
+  animation: sd-rise var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 
 .sd-icon-btn {
@@ -144,15 +150,17 @@
   color: var(--text-2);
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.sd-icon-btn:hover {
-  background: var(--nest);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .sd-icon-btn:hover {
+    background: var(--nest);
+    color: var(--text);
+  }
 }
 
 /* ── 回复框：一块整面，顶上是「回复 / 内部备注」标签，底下是工具条 ──
    composer: one plane, reply / internal tabs on top, toolbar at the bottom */
 .sd-composer {
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   border: 1px solid var(--line-hi);
   background: var(--surface);
   transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
@@ -192,8 +200,10 @@
   color: var(--text-3);
   transition: color var(--dur-fast) var(--ease-out);
 }
-.sd-mode:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .sd-mode:hover {
+    color: var(--text-2);
+  }
 }
 .sd-mode.is-on {
   color: var(--text);
@@ -234,7 +244,7 @@
 /* ── 客户资料里的小格子 / customer fact tiles ── */
 .sd-fact {
   min-width: 0;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--line);
   padding: 10px 12px;
@@ -242,7 +252,7 @@
 
 /* 宽版客户工作区的分块 / blocks in the wide customer workspace */
 .sd-block {
-  border-radius: 20px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   border: 1px solid var(--line);
   padding: 20px;
@@ -254,16 +264,18 @@
   align-items: center;
   height: 30px;
   padding: 0 12px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.sd-label:hover:not(:disabled) {
-  border-color: var(--line-hi);
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .sd-label:hover:not(:disabled) {
+    border-color: var(--line-hi);
+    color: var(--text-2);
+  }
 }
 .sd-label.is-on {
   border-color: currentColor;
@@ -275,7 +287,7 @@
   align-items: center;
   min-height: 40px;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.02);
   font-size: 12px;
@@ -284,10 +296,12 @@
   text-align: left;
   transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.sd-action:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: var(--line-hi);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .sd-action:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--line-hi);
+    color: var(--text);
+  }
 }
 .sd-action:active {
   transform: translateY(1px);
@@ -301,8 +315,10 @@
   animation: sd-slide-in var(--dur-base) var(--ease-out) both;
 }
 
+/* 与站内 toast 同一配方：140ms 从 96% 放大淡入，不位移。
+   Same recipe as the app toast: a 140ms scale-in from 96%, no travel. */
 .sd-toast {
-  animation: sd-rise var(--dur-base) var(--ease-out) both;
+  animation: sd-toast-in var(--dur-fast) var(--ease-out) backwards;
 }
 
 @keyframes sd-fade-in {
@@ -316,6 +332,10 @@
 @keyframes sd-slide-in {
   from { transform: translateX(28px); opacity: 0; }
   to { transform: none; opacity: 1; }
+}
+@keyframes sd-toast-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

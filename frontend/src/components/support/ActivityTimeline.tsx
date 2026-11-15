@@ -12,7 +12,7 @@ import type { UserActivityItem } from '../../api/supportTypes'
 
 const DOT: Record<UserActivityItem['kind'], string> = {
   signup: 'bg-neutral-500',
-  comp: 'bg-amber-400',
+  comp: 'bg-warn',
   lucky: 'bg-pink-400',
   payment: 'bg-up',
   plan: 'bg-[var(--purple-hi)]',
@@ -108,17 +108,17 @@ export default function ActivityTimeline({
           return (
             <li key={`${it.kind}-${it.at}-${i}`} className="relative">
               <span className={`absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-[var(--surface)] ${DOT[it.kind]}`} aria-hidden="true" />
-              <div className="flex flex-wrap items-center gap-1.5 text-[13px] leading-snug">
+              <div className="flex flex-wrap items-center gap-1.5 text-sm leading-snug">
                 {ticketId && onOpenTicket ? (
                   <button type="button" className="text-left text-neutral-100 underline-offset-2 hover:underline" onClick={() => onOpenTicket(ticketId)}>
                     {l.main}
                   </button>
                 ) : (
-                  <span className={'strong' in l && l.strong ? 'font-semibold text-amber-200' : 'text-neutral-100'}>{l.main}</span>
+                  <span className={'strong' in l && l.strong ? 'font-semibold text-warn' : 'text-neutral-100'}>{l.main}</span>
                 )}
                 {'chips' in l &&
                   l.chips?.map((c) => (
-                    <span key={c} className="rounded-[10px] bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">
+                    <span key={c} className="rounded-control bg-white/[0.06] px-1.5 py-0.5 text-xs text-neutral-400">
                       {c}
                     </span>
                   ))}

@@ -154,7 +154,7 @@ export default function SupportDeskPage() {
 
   if (meErr) {
     return (
-      <div className="glass mx-auto max-w-md rounded-3xl p-8 text-center text-sm">
+      <div className="glass mx-auto max-w-md rounded-card p-8 text-center text-sm">
         <p className="text-down">{meErr}</p>
         <button type="button" className="btn btn-ghost mt-4 h-9 px-5 text-xs" onClick={loadMe}>
           {t('supportDesk.retry')}
@@ -204,7 +204,7 @@ export default function SupportDeskPage() {
       <form onSubmit={runSearch} className="sd-search flex h-10 items-center gap-2 pl-4 pr-1">
         <span className="text-neutral-500"><IconSearch size={15} /></span>
         <input
-          className="min-w-0 flex-1 bg-transparent text-[13px] text-neutral-100 outline-none placeholder:text-neutral-500"
+          className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
           type="search"
           value={search}
           onChange={(e) => {
@@ -217,13 +217,15 @@ export default function SupportDeskPage() {
         />
         <button
           type="submit"
-          className="h-8 shrink-0 rounded-[10px] bg-[var(--nest)] px-3.5 text-xs font-medium text-neutral-200 transition hover:bg-[var(--nest-hi)] disabled:opacity-40"
+          className="h-8 shrink-0 rounded-control bg-[var(--nest)] px-3.5 text-xs font-medium text-neutral-200 transition hover:bg-[var(--nest-hi)] disabled:opacity-40"
           disabled={searching || !search.trim()}
         >
           {searching ? t('common.loading') : t('supportDesk.search.go')}
         </button>
       </form>
       {results && (
+        // z-40 刻意低于客服水印（--z-watermark 65），不换成 z-menu：搜索结果列着客户昵称和邮箱，截图要带着水印
+        // z-40 stays below the support watermark (65) on purpose, not z-menu: results list customer names and emails, so screenshots must carry the watermark
         <div className="sd-pop absolute inset-x-0 top-full z-40 mt-2 max-h-[60vh] overflow-y-auto p-1.5">
           {results.length === 0 ? (
             <p className="px-3 py-4 text-center text-xs text-neutral-500">{t('supportDesk.search.none')}</p>
@@ -237,11 +239,11 @@ export default function SupportDeskPage() {
                       setResults(null)
                       openCustomer(u.id)
                     }}
-                    className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition hover:bg-white/[0.05]"
+                    className="flex w-full items-center gap-3 rounded-panel px-2.5 py-2 text-left transition hover:bg-white/[0.05]"
                   >
                     <Avatar name={u.nickname || u.email} size={30} />
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13px] font-medium text-neutral-100">{u.nickname || t('supportDesk.card.noNickname')}</span>
+                      <span className="block truncate text-sm font-medium text-neutral-100">{u.nickname || t('supportDesk.card.noNickname')}</span>
                       <span className="block truncate font-mono text-xs text-neutral-500">{u.email || '-'}</span>
                     </span>
                     <span className="shrink-0 text-xs font-medium text-neutral-400">{u.plan}</span>
@@ -268,7 +270,7 @@ export default function SupportDeskPage() {
                 <h1 className="font-display text-[22px] font-semibold leading-tight tracking-tight text-neutral-50">{t('supportDesk.title')}</h1>
                 <p className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
                   <span className="truncate text-neutral-300">{me.nickname || me.email}</span>
-                  <span className="rounded-[10px] border border-[var(--line-hi)] px-2 py-px text-xs text-neutral-400">{tierLabel}</span>
+                  <span className="rounded-control border border-[var(--line-hi)] px-2 py-px text-xs text-neutral-400">{tierLabel}</span>
                   {revealLeft != null && <span>{t('supportDesk.card.revealLeft', { n: revealLeft })}</span>}
                 </p>
               </div>
@@ -286,13 +288,13 @@ export default function SupportDeskPage() {
                 <span>{tab.label}</span>
                 {tab.badge && (
                   <span
-                    className={`num rounded-[10px] px-1.5 py-px text-xs font-semibold ${
+                    className={`num rounded-control px-1.5 py-px text-xs font-semibold ${
                       tab.warm ? 'bg-[var(--mid-bg)] text-[var(--mid)]' : 'bg-white/[0.06] text-neutral-400'
                     }`}
                     title={tab.badgeLabel}
-                    aria-label={tab.badgeLabel}
                   >
-                    {tab.badge}
+                    <span aria-hidden="true">{tab.badge}</span>
+                    {tab.badgeLabel && <span className="sr-only">{tab.badgeLabel}</span>}
                   </span>
                 )}
               </NavLink>
@@ -306,10 +308,10 @@ export default function SupportDeskPage() {
           workspace, and results of actions inside the drawer stay visible. */}
       {toast &&
         createPortal(
-          <div className="pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-4" style={{ top: 'calc(var(--app-hdr, 65px) + 12px)' }}>
+          <div className="pointer-events-none fixed inset-x-0 z-toast flex justify-center px-4" style={{ top: 'calc(var(--app-hdr, 65px) + 12px)' }}>
             <div
               role="status"
-              className={`sd-toast pointer-events-auto max-w-md rounded-[10px] border bg-[var(--surface-2)] px-4 py-2 text-[13px] font-medium shadow-[0_12px_32px_rgb(0_0_0/0.45)] ${
+              className={`sd-toast pointer-events-auto max-w-md rounded-control border bg-[var(--surface-2)] px-4 py-2 text-sm font-medium shadow-[0_12px_32px_rgb(0_0_0/0.45)] ${
                 toast.kind === 'err' ? 'border-[rgb(var(--down-rgb)/0.45)] text-[var(--down)]' : 'border-[rgb(var(--up-rgb)/0.45)] text-[var(--up)]'
               }`}
             >

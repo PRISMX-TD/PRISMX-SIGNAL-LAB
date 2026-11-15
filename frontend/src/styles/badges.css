@@ -16,11 +16,22 @@
   display: inline-block;
   transform-style: preserve-3d;
   transition: transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  will-change: transform;
   cursor: pointer;
   border: 0;
   background: transparent;
   padding: 0;
+}
+/* will-change 只在指针悬停 / 按住时加（MedalTilt 在 pointerenter 时给 .is-tilting，
+   pointerleave 时撤掉）。勋章墙一屏几十枚，常驻 will-change 等于常驻几十个合成层的显存，
+   而同一时刻只有指针下那一枚在倾斜。这一条不影响任何视觉，上面「照抄设计稿」的时长、
+   缓动、关键帧都没动。
+   will-change only while a pointer is over / pressing the medal (MedalTilt adds
+   .is-tilting on pointerenter and removes it on pointerleave). The badge wall shows
+   dozens per screen; a permanent will-change kept dozens of compositor layers in GPU
+   memory while only the medal under the pointer ever tilts. Purely non-visual: the
+   ported durations, easings and keyframes above are untouched. */
+.medal-tilt.is-tilting {
+  will-change: transform;
 }
 .medal-tilt svg {
   display: block;
@@ -38,8 +49,10 @@
   background: radial-gradient(circle at var(--lx, 30%) var(--ly, 25%), rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.06) 32%, transparent 58%);
   mix-blend-mode: screen;
 }
-.medal-tilt:hover .medal-light {
-  opacity: 1;
+@media (hover: hover) and (pointer: fine) {
+  .medal-tilt:hover .medal-light {
+    opacity: 1;
+  }
 }
 .medal-tilt.no-transition {
   transition: none;

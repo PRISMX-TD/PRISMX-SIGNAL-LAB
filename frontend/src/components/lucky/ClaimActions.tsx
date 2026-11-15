@@ -62,7 +62,7 @@ export function ClaimForm({ draw, claim, submitClassName = 'btn-primary px-4 py-
   return (
     <div className="space-y-2">
       {draw.prize.claimHint && <p className="lk-note">{draw.prize.claimHint}</p>}
-      <textarea className="input w-full py-2 text-sm" style={{ borderRadius: 14 }} rows={3} maxLength={1000} value={text}
+      <textarea className="input w-full py-2 text-sm" style={{ borderRadius: 'var(--r-panel)' }} rows={3} maxLength={1000} value={text}
         aria-label={t('lucky.submitClaim')} onChange={(e) => setText(e.target.value)} />
       {/* 有「取消」时两个按钮靠右，揭晓卡里照旧靠左 / with a cancel both sit right; the reveal card keeps left */}
       <div className={`flex items-center space-x-2 ${onCancel ? 'justify-end' : ''}`}>

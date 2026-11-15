@@ -19,13 +19,13 @@
 // components/strategies/ — they used to be crammed into this file's 1321 lines,
 // which adding a condition editor plus cost/out-of-sample views would have made
 // unmanageable.
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import PageHead from '../components/PageHead'
 import { useTranslation } from 'react-i18next'
 import { segBtn } from '../utils/segBtn'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../store/auth'
-import { useLive, useQuotes } from '../store/live'
+import { useLive } from '../store/live'
 import { strategyApi } from '../api/client'
 import { displaySymbol, localizeApiError } from '../api/utils'
 import type {
@@ -57,7 +57,9 @@ import {
 import { useOrderPlacement } from '../components/signals/hooks'
 import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
 import { useBackToClose } from '../utils/useBackToClose'
+import { usePresence, SHEET_EXIT_MS } from '../utils/usePresence'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
+import { appTitle } from '../utils/routeTitle'
 import { TEMPLATE_LABEL_KEYS } from '../utils/strategyTemplates'
 import Toast from '../components/Toast'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
@@ -489,7 +491,7 @@ function StrategyEditor({
             unsaid, the user assumes their original conditions survived and only
             finds out after saving. */}
         {draft.legacyRules && (
-          <p className="mt-2 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-xs text-amber-200/90">
+          <p className="mt-2 rounded-lg border border-warn/20 bg-warn/5 px-3 py-2 text-xs text-warn/90">
             {t('strategy.legacyRulesReset')}
           </p>
         )}
@@ -729,7 +731,7 @@ function StrategyEditor({
         </div>
       </div>
 
-      {stepError && <p className="mt-3 text-sm text-amber-200" role="alert">{stepError}</p>}
+      {stepError && <p className="mt-3 text-sm text-warn" role="alert">{stepError}</p>}
       {saveError && <p className="mt-3 text-sm text-down" role="alert">{saveError}</p>}
 
       {/* 导航条：前三步只有"下一步"，保存按钮只在最后一步出现——中途就能保存会让
@@ -795,7 +797,6 @@ export default function StrategiesPage() {
   const { t } = useTranslation()
   const { user } = useAuth()
   const { accounts, activeSymbols, refreshAll, wsConnected } = useLive()
-  const quotesByAccount = useQuotes()
   const { toast, placeStrategyOrder } = useOrderPlacement()
 
   const [strategies, setStrategies] = useState<UserStrategy[]>([])
@@ -846,6 +847,15 @@ export default function StrategiesPage() {
   // 打开「新建」时先进预设选择，选完才进编辑器 / show the preset picker first
   const [picking, setPicking] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<UserStrategy | null>(null)
+  // 删除进行中（确认框转忙碌态、关不掉）与删除失败的原因（留在确认框里，可以再点一次）。
+  // Delete in flight (the confirm goes busy and can't be dismissed) and why it failed (kept in
+  // the confirm so the user can try again).
+  const [deleting, setDeleting] = useState(false)
+  const [deleteErr, setDeleteErr] = useState<string | null>(null)
+  // 启用 / 停用失败时列表上方的一行说明。/ The line above the list when enable / disable fails.
+  const [toggleErr, setToggleErr] = useState<string | null>(null)
+  // 切换请求还没回来的策略 id（见 toggleEnabled）。/ Strategy ids with a toggle in flight.
+  const togglingRef = useRef(new Set<string>())
   const [orderTarget, setOrderTarget] = useState<StrategySignal | null>(null)
   const [clearingSignals, setClearingSignals] = useState(false)
   const [confirmClearSignals, setConfirmClearSignals] = useState(false)
@@ -857,6 +867,9 @@ export default function StrategiesPage() {
   useBackToClose(picking, () => setPicking(false))
   useBackToClose(deleteTarget != null, () => setDeleteTarget(null))
   useBackToClose(orderTarget != null, () => setOrderTarget(null))
+  // 下单弹窗关闭后多留 240ms 播退场。/ The order sheet stays 240ms after closing for its exit.
+  // 按信号 id 加 key 的理由见 DashboardPage 同一处。/ Keyed by signal id: see the same spot in DashboardPage.
+  const orderPresence = usePresence(orderTarget, SHEET_EXIT_MS)
   useBackToClose(confirmClearSignals, () => setConfirmClearSignals(false))
 
   const isPro = user?.plan === 'PRO'
@@ -943,7 +956,7 @@ export default function StrategiesPage() {
     await Promise.all([list, signals, symbols, templates, usages])
   }, [])
 
-  useDocumentTitle(t('strategy.title'))
+  useDocumentTitle(appTitle(t('strategy.title')))
   useEffect(() => { load() }, [load])
 
   // 绩效逐个策略拉取（端点是 /{id}/performance，没有批量形态）。失败的那个静默跳过，
@@ -1056,16 +1069,53 @@ export default function StrategiesPage() {
     setBacktestWinRates((prev) => ({ ...prev, [strategyId ?? NEW_DRAFT_KEY]: rate }))
   }
 
+  // 未命名策略的显示名（按模板），卡片与切换失败的提示共用。/ Unnamed strategies' display name, shared.
+  const fallbackNameOf = (s: UserStrategy) => (s.template ? t(TEMPLATE_LABEL_KEYS[s.template]) : t('strategy.nameplaceholderCustom'))
+
+  // 启用 / 停用：先乐观地翻转，再落库；失败就只把这一条翻回去，并在列表上方说明原因。
+  // 同一条策略的请求没回来之前再点会被忽略：两个相反的请求可能乱序到达，最后落库的
+  // 就不是屏幕上显示的那个状态。
+  // Enable / disable: flip optimistically, then persist; on failure flip just that one back and
+  // say why above the list. Taps on the same strategy while its request is in flight are
+  // ignored: two opposite requests can land out of order and leave the server disagreeing
+  // with the screen.
   const toggleEnabled = async (s: UserStrategy) => {
-    const updated = await strategyApi.update(s.id, { enabled: !s.enabled })
-    setStrategies((prev) => prev.map((p) => (p.id === s.id ? updated : p)))
+    if (togglingRef.current.has(s.id)) return
+    togglingRef.current.add(s.id)
+    const next = !s.enabled
+    setToggleErr(null)
+    setStrategies((prev) => prev.map((p) => (p.id === s.id ? { ...p, enabled: next } : p)))
+    try {
+      const updated = await strategyApi.update(s.id, { enabled: next })
+      setStrategies((prev) => prev.map((p) => (p.id === s.id ? updated : p)))
+    } catch (err: unknown) {
+      setStrategies((prev) => prev.map((p) => (p.id === s.id ? { ...p, enabled: s.enabled } : p)))
+      const detail = err instanceof Error ? localizeApiError(err.message) : ''
+      setToggleErr(`${t('strategy.toggleFailed', { name: s.name?.trim() || fallbackNameOf(s) })}${detail ? ` ${detail}` : ''}`)
+    } finally {
+      togglingRef.current.delete(s.id)
+    }
   }
 
+  // 删除不做乐观：确认框转忙碌态等结果；失败把原因留在确认框里，用户可以再点一次或取消。
+  // 以前没有 try/catch，失败时确认框停着没有任何反应，按钮还能一直点。
+  // Delete is not optimistic: the confirm goes busy until the result; a failure stays in the
+  // confirm so the user can retry or cancel. There was no try/catch, so a failure left the
+  // dialog sitting there with no reaction and the button still live.
   const confirmDelete = async () => {
-    if (!deleteTarget) return
-    await strategyApi.remove(deleteTarget.id)
-    setStrategies((prev) => prev.filter((p) => p.id !== deleteTarget.id))
-    setDeleteTarget(null)
+    if (!deleteTarget || deleting) return
+    const target = deleteTarget
+    setDeleting(true)
+    setDeleteErr(null)
+    try {
+      await strategyApi.remove(target.id)
+      setStrategies((prev) => prev.filter((p) => p.id !== target.id))
+      setDeleteTarget(null)
+    } catch (err: unknown) {
+      setDeleteErr(err instanceof Error ? localizeApiError(err.message) : t('common.error'))
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const doClearSignals = async () => {
@@ -1174,6 +1224,11 @@ export default function StrategiesPage() {
           <h3>{t('strategy.myStrategies')}</h3>
           {strategiesLoaded && !listError && <b className="num">{strategies.length}</b>}
         </div>
+        {toggleErr && (
+          <div className="stg-msg err stg-msgrow" role="alert">
+            {toggleErr}
+          </div>
+        )}
 
         {/* 四态而非两态：未加载显示骨架，失败说明原因，加载完为空才说"还没有策略"。
             把"未加载"与"空"合并会让新用户先看到一次误报的空状态。
@@ -1205,10 +1260,10 @@ export default function StrategiesPage() {
               strategy={s}
               performance={performance[s.id] ?? null}
               backtestWinRate={backtestWinRates[s.id] ?? null}
-              fallbackName={s.template ? t(TEMPLATE_LABEL_KEYS[s.template]) : t('strategy.nameplaceholderCustom')}
+              fallbackName={fallbackNameOf(s)}
               onEdit={() => openEditDraft(s)}
               onToggle={() => toggleEnabled(s)}
-              onDelete={() => setDeleteTarget(s)}
+              onDelete={() => { setDeleteErr(null); setDeleteTarget(s) }}
             />
           ))
         )}
@@ -1303,27 +1358,31 @@ export default function StrategiesPage() {
           title={t('strategy.delete')}
           message={t('strategy.deleteConfirm')}
           danger
+          busy={deleting}
           onConfirm={confirmDelete}
           onCancel={() => setDeleteTarget(null)}
-        />
+        >
+          {deleteErr && <p className="mt-3 text-sm text-down" role="alert">{deleteErr}</p>}
+        </ConfirmModal>
       )}
 
-      {orderTarget && (
+      {orderPresence.shown && (
         <ChartOrderModal
-          symbol={orderTarget.symbol}
-          side={orderTarget.side}
+          key={`${orderPresence.shown.id}:${orderPresence.openSeq}`}
+          symbol={orderPresence.shown.symbol}
+          side={orderPresence.shown.side}
           accounts={accounts}
-          quotesByAccount={quotesByAccount}
-          refPrice={orderTarget.entry}
-          initialStopLoss={orderTarget.stopLoss}
-          initialTakeProfit={orderTarget.takeProfit}
+          refPrice={orderPresence.shown.entry}
+          initialStopLoss={orderPresence.shown.stopLoss}
+          initialTakeProfit={orderPresence.shown.takeProfit}
+          closing={orderPresence.closing}
           onCancel={() => setOrderTarget(null)}
           onConfirm={handleOrderConfirm}
         />
       )}
 
       {toast && (
-        <Toast kind={toast.kind} message={toast.msg} />
+        <Toast key={toast.id} toast={toast} />
       )}
     </div>
   )

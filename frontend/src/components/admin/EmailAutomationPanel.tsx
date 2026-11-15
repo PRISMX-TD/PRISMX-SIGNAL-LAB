@@ -29,6 +29,7 @@ import { useToast } from '../../utils/useToast'
 import ConfirmModal from '../ConfirmModal'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
+import Switch from '../Switch'
 import { EmailBodyField, useDebounced } from './EmailPanel'
 import { MIN_DELAY, PRESETS, TRIGGER_ORDER } from './emailAutomationTemplates'
 
@@ -203,12 +204,12 @@ export default function EmailAutomationPanel() {
         </div>
       )}
       {status && !status.configured && (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-200">
+        <div className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
           {t('admin.email.notConfigured')}
         </div>
       )}
       {list?.pause && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-200">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
           <span className="flex-1">
             {pauseText(list.pause.reason)} {t('admin.emailAuto.pause.until', { time: fmtTime(list.pause.until) })}
           </span>
@@ -282,21 +283,12 @@ export default function EmailAutomationPanel() {
                 {list.rules.map((r) => (
                   <tr key={r.id} className="border-b border-white/5 align-top last:border-0">
                     <td className="px-4 py-2.5">
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={r.enabled}
-                        aria-label={t('admin.emailAuto.colEnabled')}
+                      <Switch
+                        checked={r.enabled}
                         disabled={!!busy}
-                        onClick={() => setConfirm({ kind: r.enabled ? 'disable' : 'enable', rule: r })}
-                        className={`relative h-5 w-9 rounded-full transition-colors disabled:opacity-40 ${
-                          r.enabled ? 'bg-prism-500' : 'bg-white/15'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${r.enabled ? 'left-[18px]' : 'left-0.5'}`}
-                        />
-                      </button>
+                        onChange={() => setConfirm({ kind: r.enabled ? 'disable' : 'enable', rule: r })}
+                        aria-label={t('admin.emailAuto.colEnabled')}
+                      />
                     </td>
                     <td className="max-w-[340px] px-4 py-2.5">
                       <div className="truncate text-neutral-100" title={r.name}>{r.name}</div>
@@ -700,7 +692,7 @@ function RuleEditor({
                 <button
                   key={v}
                   type="button"
-                  className="rounded-md bg-white/5 px-2 py-0.5 font-mono text-xs text-prism-200 hover:bg-white/10"
+                  className="rounded-lg bg-white/5 px-2 py-0.5 font-mono text-xs text-prism-200 hover:bg-white/10"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => insertVariable(v)}
                 >
@@ -711,7 +703,7 @@ function RuleEditor({
             <p className="mt-1 text-xs text-neutral-500">{t('admin.emailAuto.variablesHint')}</p>
           </div>
           <p className="text-xs text-neutral-500">{t('admin.email.formatHint')}</p>
-          {conditionChanged && <p className="text-xs text-amber-300">{t('admin.emailAuto.conditionChangedWarn')}</p>}
+          {conditionChanged && <p className="text-xs text-warn">{t('admin.emailAuto.conditionChangedWarn')}</p>}
         </div>
 
         <div className="mt-4 flex flex-wrap justify-end gap-3">

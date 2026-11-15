@@ -172,7 +172,7 @@ export default function CompetitionPromoSection({
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-semibold text-neutral-100">{l.label}</span>
                       {l.channel && (
-                        <span className="rounded-[10px] border border-white/10 px-1.5 py-0.5 text-xs text-neutral-400">
+                        <span className="rounded-control border border-white/10 px-1.5 py-0.5 text-xs text-neutral-400">
                           {l.channel}
                         </span>
                       )}
@@ -185,7 +185,7 @@ export default function CompetitionPromoSection({
                   <td className="num py-1.5 pr-4 text-neutral-200">{l.registrations}</td>
                   <td className="num py-1.5 pr-4 text-neutral-200">{l.entries}</td>
                   <td className="py-1.5 pr-4">
-                    <Switch checked={l.isActive} busy={busyId === l.id} disabled={busyId !== null} onChange={() => void toggleActive(l)} />
+                    <Switch checked={l.isActive} busy={busyId === l.id} disabled={busyId !== null} onChange={() => void toggleActive(l)} aria-label={`${t('admin.competitionPromo.colActive')}: ${l.label}`} />
                   </td>
                   <td className="py-1.5">
                     <CopyLinkButton link={l} onFail={copyFailed} />

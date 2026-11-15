@@ -20,36 +20,45 @@
                 background-color var(--dur-base) var(--ease-out);
   }
 
-  /* hover 不再靠描边——描边已经透明了。改成面提亮一档。
-     Hover lifts the surface instead of the (now transparent) stroke. */
-  .glass:hover,
-  .panel:hover {
-    background: var(--surface-2);
+  /* hover 提亮只给真能点的卡：<a> / <button> 卡、带 cursor-pointer 或 lift 的卡，
+     而且只给鼠标。以前所有 .glass / .card / .glass-neon 一律提亮：弹窗、铃铛面板、
+     不可点的列表卡在鼠标经过时都会变色，像在说「能点」；持仓卡还会从 --surface-3 变暗；
+     手机上点一下更会粘住。
+     每个 @media 块只放一条规则：.card 与 .glass-neon 用 @apply glass 复制这里的规则，
+     同一个块里有几条含 .glass 的规则，Tailwind 就会把整个块复制几遍。
+     Hover lifts only cards that are actually clickable (<a>/<button> cards, or cards
+     marked cursor-pointer / lift), and only for mice. Lifting every .glass/.card/
+     .glass-neon made dialogs, the bell panel and non-clickable list cards change colour
+     under the mouse, promising a click that does nothing, darkened the position card,
+     and stuck after a tap on touch.
+     One rule per @media block: .card and .glass-neon @apply glass, and Tailwind copies
+     a whole media block once for every .glass rule inside it. */
+  @media (hover: hover) and (pointer: fine) {
+    a.glass:hover,
+    button.glass:hover,
+    .glass.cursor-pointer:hover,
+    .glass.lift:hover {
+      background: var(--surface-2);
+    }
   }
-
   /* hover 上浮：位移压到 1px。3–4px 的上浮在密集列表里会让整页「跳动」。
      Hover lift capped at 1px: 3–4px lifts make a dense list feel jittery. */
-  .glass.lift:hover {
-    background: var(--surface-2);
-    transform: translateY(-1px);
+  @media (hover: hover) and (pointer: fine) {
+    .glass.lift:hover {
+      transform: translateY(-1px);
+    }
   }
 
   .card {
     @apply glass;
   }
 
-  /* 悬停时描边转为品牌紫。这是紫色在卡片上唯一被允许的出场方式：
-     一条 1px 的边，不是一团光。
-     Hover turns the hairline violet. This is the only way violet is allowed to
-     appear on a card: a 1px edge, not a halo. */
+  /* 历史类名：现在与 .glass 完全相同（经 @apply 复制，包括上面的可点卡 hover）。
+     保留是因为持仓卡（PositionCard）还在用它。
+     Legacy name: identical to .glass now (copied via @apply, including the
+     clickable-card hover above). Kept because PositionCard still uses it. */
   .glass-neon {
     @apply glass;
-  }
-  /* 卡片外轮廓已取消，紫色描边无处可挂——hover 改成面提亮，与 .glass 一致。
-     With the card outline gone there is no stroke to tint; hover lifts the
-     surface instead, matching .glass. */
-  .glass-neon:hover {
-    background: var(--surface-2);
   }
 
   /* ── 持仓卡：嵌在卡里的卡，需要自己的面 ──
@@ -64,16 +73,26 @@
      Nested cards need their own surface, not a stroke: adding one line where the
      whole system layers by surface reads as bolted on. */
   .pos-card {
-    background: #2c2c34;
+    background: var(--surface-3);
   }
   /* 面抬高之后，压在**半透明色块**上的东西会掉出 AA（卖出芯片 4.13、
      品种芯片 4.13）——芯片自己那层 14% 红底才是主要贡献者，把面调暗救不回来。
      自定义属性会继承，所以这张卡就是一个「局部面」上下文：它自己的语义色跟着
      它自己的面走，卡外的一切不受影响。
-     Custom properties inherit, so the card is its own surface context. */
+     覆盖的是三元组：卡里的 Tailwind 类（text-down、bg-down/15、text-neutral-500）读的是
+     --down-rgb / --text-3-rgb；:root 上的 --down、--down-bg 是在 :root 算好再继承下来的，
+     所以也要在这里重新声明，才会用上新的三元组。只写 --down 时，上面这些全都没生效。
+     Custom properties inherit, so the card is its own surface context.
+     The triplets are what get overridden: the Tailwind classes in the card (text-down,
+     bg-down/15, text-neutral-500) read --down-rgb / --text-3-rgb, and --down / --down-bg
+     are resolved on :root before they inherit, so they are re-declared here to pick up
+     the new triplet. With only --down overridden, none of it took effect. */
   .pos-card {
-    --down: #ff8090;
-    --text-3: #b0b0ba;
+    --down-rgb: var(--down-hi-rgb);
+    --down: rgb(var(--down-rgb));
+    --down-bg: rgb(var(--down-rgb) / 0.13);
+    --text-3-rgb: 176 176 186;
+    --text-3: rgb(var(--text-3-rgb));
   }
   /* 卡内按钮改成**下沉**（比面暗），不是上浮：容器的面亮了，控件凹进去才对，
      上浮是给深底容器用的。顺带把「平仓」从 4.28 提到 6.3——往亮的方向补只会
@@ -160,45 +179,67 @@
   .btn-primary,
   .btn-brand {
     background: var(--purple);
-    color: #fff;
+    color: var(--text-strong);
     border-color: var(--purple);
     border-radius: var(--r-md);
   }
-  .btn-primary:hover:not(:disabled),
-  .btn-brand:hover:not(:disabled) {
-    background: var(--purple-vivid);
-    border-color: var(--purple-vivid);
+  @media (hover: hover) and (pointer: fine) {
+    .btn-primary:hover:not(:disabled),
+    .btn-brand:hover:not(:disabled) {
+      background: var(--purple-vivid);
+      border-color: var(--purple-vivid);
+    }
   }
 
+  /* 边框宽度、线型、圆角写在这里而不只靠 .btn：111 处 btn-ghost 里有 77 处没带 .btn，
+     Tailwind preflight 的 border-width: 0 让它们成了没有边框的直角文字块（全站确认框的
+     「取消」、持仓卡的「返回」都是）。和上面 .btn-primary 补圆角是同一个问题。
+     Width, style and radius live here, not only on .btn: 77 of the 111 btn-ghost call
+     sites have no .btn, and preflight's border-width: 0 left them borderless and square
+     (every confirm dialog's cancel, the position card's back). Same fix as .btn-primary. */
   .btn-ghost {
     background: transparent;
     color: var(--text-2);
+    border-width: 1px;
+    border-style: solid;
     border-color: var(--line);
+    border-radius: var(--r-md);
   }
-  .btn-ghost:hover:not(:disabled) {
-    background: var(--nest);
-    border-color: var(--line-hi);
-    color: var(--text);
+  @media (hover: hover) and (pointer: fine) {
+    .btn-ghost:hover:not(:disabled) {
+      background: var(--nest);
+      border-color: var(--line-hi);
+      color: var(--text);
+    }
   }
 
   /* 次级按钮：实心中性面，用于「与主操作同等重要但不同方向」的选择。
+     边框与圆角同 .btn-ghost 的理由：5 处里 3 处没带 .btn。
      Secondary: solid neutral fill, for choices as important as the primary
-     action but pointing elsewhere. */
+     action but pointing elsewhere. Border and radius for the same reason as
+     .btn-ghost: 3 of its 5 call sites have no .btn. */
   .btn-secondary {
     background: var(--nest);
     color: var(--text);
+    border-width: 1px;
+    border-style: solid;
     border-color: var(--line);
+    border-radius: var(--r-md);
   }
-  .btn-secondary:hover:not(:disabled) {
-    background: var(--nest-hi);
-    border-color: var(--line-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--nest-hi);
+      border-color: var(--line-hi);
+    }
   }
 
   /* ═════════════ 输入 / input ═════════════ */
   .input {
     width: 100%;
     border-radius: var(--r-md);
-    border: 1px solid var(--line);
+    /* 控件专用边界线，对比度见 tokens.css 的 --line-control。
+       Control edge token; contrast figures next to --line-control in tokens.css. */
+    border: 1px solid var(--line-control);
     background: var(--nest);
     padding: 8px 16px;
     color: var(--text);
@@ -208,10 +249,12 @@
                 background-color var(--dur-fast) var(--ease-out);
     outline: none;
   }
-  /* 占位符必须仍然可读：--text-3 (#71717A) 压在 --nest (#16161A) 上约 4.6:1，
-     过 AA。上一版更暗，在户外屏幕上基本消失。
-     Placeholders must stay legible: --text-3 (#71717A) on --nest (#16161A) is
-     ~4.6:1, past AA. The previous value was darker and vanished outdoors. */
+  /* 占位符必须仍然可读：--text-3 (#9C9CA6) 压在 --nest (#272730) 上约 5.4:1，
+     过 AA。上一版更暗，在户外屏幕上基本消失。（2026-11-15 订正：这里原来写的是
+     两个早已退役的值 #71717A / #16161A。）
+     Placeholders must stay legible: --text-3 (#9C9CA6) on --nest (#272730) is
+     ~5.4:1, past AA. The previous value was darker and vanished outdoors.
+     (Corrected 2026-11-15: this used to quote the retired #71717A / #16161A.) */
   .input::placeholder {
     color: var(--text-3);
   }
@@ -222,6 +265,12 @@
        Focus ring is a 1px solid expansion, not a 3px violet haze — haze is the
        glow vocabulary being removed. */
     box-shadow: 0 0 0 1px var(--purple-hi);
+    /* 自己已经有紫边，压掉全局的 2px 外圈，免得叠成三道环。用透明而不是 none：
+       Windows 高对比模式会把透明轮廓画出来，而那里 box-shadow 不显示。
+       The field draws its own ring, so the global 2px outline is suppressed to avoid
+       a triple ring. Transparent rather than none: forced-colors mode paints a
+       transparent outline, while it drops box-shadow. */
+    outline: 2px solid transparent;
   }
   .input:disabled {
     opacity: 0.5;
@@ -238,7 +287,7 @@
     display: inline-flex;
     align-items: center;
     padding: 4px 8px;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-tile);
     font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -249,7 +298,7 @@
     align-items: center;
     gap: 4px;
     padding: 4px 8px;
-    border-radius: var(--r-xs);
+    border-radius: var(--r-tile);
     font-size: 12px;
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -292,7 +341,8 @@
     height: 28px;
     padding: 0 12px;
     border: none;
-    border-radius: 10px;
+    /* 同心：轨道 var(--r-md) 10 − 边框 1 − 内边距 4 = 5。/ Concentric: 10 − 1 − 4 = 5. */
+    border-radius: 5px;
     background: transparent;
     color: var(--text-3);
     font: inherit;
@@ -302,15 +352,17 @@
     transition: background-color var(--dur-fast) var(--ease-out),
                 color var(--dur-fast) var(--ease-out);
   }
-  .seg button:hover {
-    color: var(--text-2);
+  @media (hover: hover) and (pointer: fine) {
+    .seg button:hover {
+      color: var(--text-2);
+    }
   }
   /* 激活态：实色紫。原本是紫色渐变，渐变在 28px 高的小控件上完全看不出来，
      只是白白多一层绘制。/ Active: flat violet. It used to be a gradient, which
      is invisible at 28px and costs an extra paint for nothing. */
   .seg button.on {
     background: var(--purple);
-    color: #fff;
+    color: var(--text-strong);
   }
 
   /* ═════════════ 文字强调 / emphasised text ═════════════
@@ -337,15 +389,12 @@
   }
 
   /* ═════════════ 动画 / animations ═════════════ */
-  .animate-breathe {
-    animation: breathe 2.4s ease-in-out infinite;
-  }
-  .animate-fade-in-up {
-    animation: fade-in-up 0.45s var(--ease-out) both;
-  }
-  .animate-spin {
-    animation: spin 0.8s linear infinite;
-  }
+  /* .animate-breathe / .animate-fade-in-up / .animate-spin 由 Tailwind 工具类生成
+     （见 tailwind.config.js 的 animation）。这里以前各有一份，但本文件在
+     @layer components 里，排在 utilities 之前，写了也永远被覆盖，所以不再写。
+     These utilities come from Tailwind (tailwind.config.js animation). Copies used to
+     live here, but this file is in @layer components, ahead of utilities, so they
+     were always overridden. */
   /* 全局减少动态：所有无限循环一律停掉，进场动画退化为直接可见。
      Global reduced-motion: every infinite loop stops and enter animations
      collapse to their final state. */
@@ -381,8 +430,18 @@
      门槛是 24×24）。改成 24×26 的透明按钮，可见的那道细条由 ::before 画，
      再叠一层 44px 的纵向热区。同一份 DOM，只是「看得见的形状」不再等于
      「可点的范围」。
+     当前项变长只动 transform：所有按钮一样宽，细条画满按钮，未选中时 scaleX(0.667)
+     （24px 按钮上约 16px），当前项 scaleX(1)（24px）。以前当前项按钮从 24px 过渡到
+     34px、细条从 16px 过渡到 26px，每切一次整排连同标题行要逐帧重排 0.32 秒；曲线
+     也从过冲的 spring 换成 --ease-out（过冲只留给滑动确认和底部弹层，见 tokens.css）。
      The visible mark and the tap target are separated: the button is a
-     transparent 24×26 box with the bar drawn by ::before, plus a 44px band. */
+     transparent 24×26 box with the bar drawn by ::before, plus a 44px band.
+     The current item lengthens by transform only: every button is the same width,
+     the bar fills it at scaleX(0.667) when inactive (about 16px on a 24px button) and
+     scaleX(1) (24px) when current. The current button used to transition from 24px to
+     34px and its bar from 16px to 26px, relaying out the row and the heading line for
+     0.32 s on every switch; the curve also moves from the overshooting spring to
+     --ease-out (overshoot is reserved for slide-to-confirm and sheets, see tokens.css). */
   .hero-seg {
     position: relative;
     width: 24px;
@@ -394,16 +453,16 @@
     display: grid;
     place-items: center;
     cursor: pointer;
-    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1);
     -webkit-tap-highlight-color: transparent;
   }
   .hero-seg::before {
     content: "";
-    width: 16px;
+    width: 100%;
     height: 3px;
     border-radius: 2px;
     background: rgba(255, 255, 255, 0.22);
-    transition: width 0.32s cubic-bezier(0.34, 1.4, 0.64, 1), background 0.28s ease;
+    transform: scaleX(0.667);
+    transition: transform var(--dur-base) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   }
   .hero-seg::after {
     content: "";
@@ -414,15 +473,19 @@
     height: 44px;
     transform: translateY(-50%);
   }
-  .hero-seg:hover::before {
-    background: rgba(255, 255, 255, 0.36);
-  }
-  .hero-seg.on {
-    width: 34px;
+  @media (hover: hover) and (pointer: fine) {
+    .hero-seg:hover::before {
+      background: rgba(255, 255, 255, 0.36);
+    }
   }
   .hero-seg.on::before {
-    width: 26px;
+    transform: scaleX(1);
     background: var(--purple-hi);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-seg::before {
+      transition: none;
+    }
   }
   /* 桌面端左右箭头：无按钮背景，纯图标点击；手机端隐藏（靠滑动切换即可）
      Desktop prev/next arrows: no button background, icon-only; hidden on
@@ -436,15 +499,20 @@
     border: none;
     color: var(--text-3);
     cursor: pointer;
-    transition: color 0.2s ease, transform 0.15s ease;
     -webkit-tap-highlight-color: transparent;
   }
-  .hero-arrow-btn:hover {
-    color: #fff;
+  @media (hover: hover) and (pointer: fine) {
+    .hero-arrow-btn:hover {
+      color: var(--text-strong);
+    }
   }
-  .hero-arrow-btn:active {
-    transform: scale(0.88);
-  }
+  /* .hero-arrow-btn、.view-all-btn、.seg-pill button、.filter-cycle 的过渡与按下缩放都在
+     landing-hero.css（普通 CSS，层叠在所有页面样式之后，理由见那里 36-70 行的注释）。
+     本文件在 @layer components 里，写在这里的过渡 / :active 永远被它覆盖，所以不写。
+     Transitions and press scale for .hero-arrow-btn, .view-all-btn, .seg-pill button
+     and .filter-cycle live in landing-hero.css (plain CSS, after every page sheet; see
+     its comment at lines 36-70). This file is in @layer components, so any transition
+     or :active written here is always overridden; don't add them here. */
   @media (min-width: 640px) {
     .hero-arrow-btn {
       display: flex;
@@ -478,6 +546,19 @@
     text-shadow: none;
     animation: none;
   }
+  /* 中文 / 日文 / 泰文的「看多 / 看空」不收字距：方块字本来就没有字间空隙可收。
+     CJK / Thai stance words keep zero tracking: square glyphs have no gap to tighten. */
+  :lang(zh) .stance-word.bull,
+  :lang(zh) .stance-word.bear,
+  :lang(zh) .stance-word.neutral,
+  :lang(ja) .stance-word.bull,
+  :lang(ja) .stance-word.bear,
+  :lang(ja) .stance-word.neutral,
+  :lang(th) .stance-word.bull,
+  :lang(th) .stance-word.bear,
+  :lang(th) .stance-word.neutral {
+    letter-spacing: 0;
+  }
   .stance-word.bull {
     color: var(--up);
   }
@@ -502,7 +583,7 @@
     padding: 3px;
     background: var(--nest);
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--r-md);
     flex-wrap: nowrap;
     overflow-x: auto;
     max-width: 100%;
@@ -510,10 +591,10 @@
   .tf-row::-webkit-scrollbar { display: none; }
   .tf-tag {
     padding: 4px 12px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     font-size: 12px;
     font-weight: 500;
-    font-family: "JetBrains Mono", monospace;
+    font-family: var(--font-mono);
     background: transparent;
     color: var(--up);
     border: 0;
@@ -534,7 +615,7 @@
     color: var(--text-2);
   }
   .tf-tag .d {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
   }
   .tf-tag.up .d {
     color: var(--up);
@@ -575,9 +656,15 @@
   .sig-mini-card + .sig-mini-card {
     border-top: 1px solid var(--line);
   }
+  /* 看板上的信号小卡整卡可点（SignalOthers.tsx），但它是列表里的一行：按下压深底色，不缩放。
+     The dashboard's mini signal card is clickable as a whole (SignalOthers.tsx), but
+     it is a row in a list: press darkens the fill instead of scaling. */
+  .sig-mini-card:active {
+    background: var(--nest);
+  }
   .view-all-btn {
     height: 42px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     border: 1px solid var(--line);
     background: var(--nest);
     color: var(--text-2);
@@ -589,11 +676,12 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    transition: border-color 0.2s, color 0.2s;
   }
-  .view-all-btn:hover {
-    color: #fff;
-    border-color: var(--line-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .view-all-btn:hover {
+      color: var(--text-strong);
+      border-color: var(--line-hi);
+    }
   }
 
   /* ── 卡片标题行 / card header ── */
@@ -606,7 +694,7 @@
   .card-head h3 {
     font-size: 15px;
     font-weight: 500;
-    color: #fff;
+    color: var(--text-strong);
     margin: 0;
   }
   .card-head .aux {
@@ -653,16 +741,13 @@
   .qt-table td {
     padding: 12px 0;
     text-align: right;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-top: 1px solid var(--line);
   }
   .qt-table td:first-child {
     text-align: left;
   }
   .qt-table tbody tr {
-    transition: background 0.2s;
-  }
-  .qt-table tbody tr:hover {
-    background: rgba(90, 34, 238, 0.07);
+    transition: background var(--dur-fast) var(--ease-out);
   }
   .qt-sym-cell {
     display: flex;
@@ -679,7 +764,7 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     letter-spacing: -0.02em;
     font-weight: 500;
@@ -695,7 +780,7 @@
     flex-shrink: 0;
     display: grid;
     place-items: center;
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     letter-spacing: -0.02em;
     font-weight: 500;
@@ -704,7 +789,7 @@
   .qt-sym-cell .nm b {
     display: block;
     font-size: 13px;
-    color: #fff;
+    color: var(--text-strong);
   }
   .qt-sym-cell .nm span {
     font-size: 12px;
@@ -714,8 +799,7 @@
   .qt-price {
     font-size: 15px;
     font-weight: 500;
-    color: #fff;
-    transition: color 0.15s;
+    color: var(--text-strong);
   }
 
   /* ── 仪表盘网格 / dashboard grid ──
@@ -815,20 +899,22 @@
     margin-bottom: 14px;
     padding: 8px 12px;
     border-radius: var(--r-tile);
-    background: rgba(90, 34, 238, 0.12);
-    font-size: 12.5px;
+    background: rgb(var(--purple-rgb) / 0.12);
+    font-size: 13px;
     color: var(--text-2);
   }
   .sig-filter-note button {
     flex-shrink: 0;
     border: 0;
     background: transparent;
-    color: #c4b5fd;
+    color: var(--purple-pale);
     font: inherit;
-    font-weight: 600;
+    font-weight: 500;
     cursor: pointer;
   }
-  .sig-filter-note button:hover { color: #fff; }
+  @media (hover: hover) and (pointer: fine) {
+    .sig-filter-note button:hover { color: var(--text-strong); }
+  }
   .sig-filters .fsep {
     width: 1px;
     height: 18px;
@@ -855,7 +941,7 @@
   .sig-symbol-select.on .select-trigger {
     background: var(--purple);
     border-color: transparent;
-    color: #fff;
+    color: var(--text-strong);
   }
   .sig-symbol-select.on .select-trigger svg {
     color: rgba(255, 255, 255, 0.85);
@@ -871,7 +957,7 @@
     height: 30px;
     padding: 0 16px;
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--r-md);
     background: var(--nest);
     color: var(--text-3);
     font: inherit;
@@ -880,16 +966,17 @@
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: all 0.2s;
   }
-  .seg-pill button:hover {
-    color: var(--text-2);
-    border-color: var(--line-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .seg-pill button:hover {
+      color: var(--text-2);
+      border-color: var(--line-hi);
+    }
   }
   .seg-pill button.on {
     background: var(--purple);
     border-color: transparent;
-    color: #fff;
+    color: var(--text-strong);
   }
   /* 手机端循环筛选按钮：仅显示当前值，点击切换 / mobile cycle filter button */
   .filter-cycle {
@@ -899,16 +986,15 @@
     height: 30px;
     padding: 0 12px;
     border: 1px solid var(--line);
-    border-radius: 10px;
+    border-radius: var(--r-md);
     background: var(--nest);
-    color: #fff;
+    color: var(--text-strong);
     font: inherit;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: all 0.2s;
   }
   .filter-cycle svg {
     color: var(--text-3);
@@ -955,7 +1041,7 @@
   position: relative;
   opacity: 0.55;
   pointer-events: none;
-  transition: opacity 0.2s ease-out;
+  transition: opacity var(--dur-base) var(--ease-out);
 }
 .pos-card.closing::after,
 .pos-mc.closing::after {
@@ -972,4 +1058,38 @@
 @keyframes pos-closing-sweep { from { background-position: -40% 0; } to { background-position: 140% 0; } }
 @media (prefers-reduced-motion: reduce) {
   .pos-card.closing::after, .pos-mc.closing::after { animation: none; }
+}
+
+/* 触屏上可输入的框一律 16px。iOS Safari 聚焦字号小于 16px 的输入框会自动放大页面，
+   现在只靠 index.html 的 maximum-scale=1.0 / user-scalable=no 加 main.tsx 的手势监听
+   压住（产品决定，这里不动）；index.html 的注释也写明输入框仍需 >=16px，而样式里是
+   12.5 / 13px。字号到位以后，那把缩放锁以后可以放开，也不会带回聚焦跳动。
+   只对 (hover: none) and (pointer: coarse) 生效，桌面密度不变。区号选择器
+   .phone-dial-select 不是输入框，但它的规则注释写明要和旁边的 .input 对齐，所以一起放大。
+   用 !important：这些字号分散在 Tailwind 工具类（text-sm / text-xs，输出在本文件之后）
+   和按需加载的页面样式里（terminal.css、orders.css、agent.css，加载得更晚，
+   .ord-rule-in.input 这类选择器权重还更高），不加就会被盖掉。
+   On touch devices every text field renders at 16px. iOS Safari zooms the page when an
+   input under 16px takes focus; today only index.html's maximum-scale=1.0 /
+   user-scalable=no plus the gesture listeners in main.tsx hold that down (a product
+   decision, untouched here), and index.html's own comment says inputs still need >=16px
+   while the stylesheets use 12.5 / 13px. With the size in place the zoom lock could later
+   be relaxed without bringing the focus jump back. Scoped to (hover: none) and
+   (pointer: coarse) so desktop density is unchanged. The dial-code trigger is not an input,
+   but its rule says it must line up with the .input beside it, so it scales too.
+   !important because these sizes live in Tailwind utilities (text-sm / text-xs, emitted
+   after this file) and in lazily loaded page CSS (terminal.css, orders.css, agent.css,
+   loaded later and sometimes more specific, e.g. .ord-rule-in.input). */
+@media (hover: none) and (pointer: coarse) {
+  input.input,
+  textarea.input,
+  input.touch-16,
+  .term-inp,
+  .term-wls input,
+  .term-pr-inp,
+  .ind-srch input,
+  .ind-in,
+  .phone-dial-select .select-trigger {
+    font-size: 16px !important;
+  }
 }

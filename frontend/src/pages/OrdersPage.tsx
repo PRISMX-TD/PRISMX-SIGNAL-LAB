@@ -22,9 +22,9 @@
 // desktop keeps the head pills, the ledger strip and the position cards.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useOverflowHint } from '../utils/useOverflowHint'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useLocation } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import Pager from '../components/Pager'
 import { useAuth } from '../store/auth'
 import { useLive, usePositions, useAccountFunds, useAccountAdj } from '../store/live'
@@ -32,10 +32,12 @@ import { liveEquity } from '../store/accountsStatus'
 import { useLivePositions } from '../store/livePositions'
 import { usePrefs } from '../store/prefs'
 import { orderApi } from '../api/client'
+import { useFirstReveal } from '../utils/useFirstReveal'
 import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
 import { LOCALE_TAG, currentLang } from '../i18n'
 import type { ClosedTrade, MT5Account, Order, OrderStatus, Position } from '../api/types'
 import Toast from '../components/Toast'
+import { useToastState } from '../utils/useToastState'
 import ConfirmModal from '../components/ConfirmModal'
 import PositionCard from '../components/PositionCard'
 import PerformanceSummary from '../components/PerformanceSummary'
@@ -54,8 +56,10 @@ import { symbolMeta } from '../utils/symbolMeta'
 import { formatMarginLevel } from '../components/order/orderMath'
 import { readStorage, writeStorage } from '../utils/safeStorage'
 import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
+import { onRovingKeyDown } from '../utils/rovingTabs'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/orders.css'
+import { EMPTY } from '../utils/format'
 
 type StatusFilter = 'ALL' | OrderStatus
 const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 'FAILED', 'CANCELLED']
@@ -116,16 +120,41 @@ const positionKey = (p: Position, i: number): string =>
   p.ticket != null ? `t${p.ticket}` : `${p.login ?? ''}-${p.symbol}-${p.side}-${p.entryPrice ?? ''}-${i}`
 
 const money2 = (n: number | null | undefined): string =>
-  n == null ? '—' : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  n == null ? EMPTY : n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function OrdersPage() {
-  const { t, i18n } = useTranslation()
-  const { user, refreshUser } = useAuth()
-  const { orders, accounts, upsertOrder, positionsLoaded, closedTradeTick, wsConnected } = useLive()
-  // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
-  // Gateway rows don't store a company; the account bar's broker falls back to
-  // the partner broker name, matching the bind page.
-  const { name: brokerName } = usePartnerBroker()
+// 订单页里随行情跳动的那一块：手机账户抬头、页签条（原样透传）、「持仓」页签。
+// 实时持仓（useLivePositions，0.3 秒一拍）、浮盈与净值的订阅全在这里，跳价只重渲染
+// 这个组件；订单页本身（页头、操作记录的筛选条与分页、已平仓明细、绩效区）不再跟着
+// 每一拍重画。以前这些 hook 挂在 OrdersPage 顶层，停在「操作记录」页签时整页照样每
+// 300ms 重渲染一次。
+// 页签条和引导卡由父级建好、作为节点传进来：这里每拍重渲染时它们是同一个 React 元素，
+// React 直接跳过。卡片、汇总与净值仍然读同一份实时持仓（useLivePositions 只有这一个
+// 实例），三处数字永远对得上。一键平仓的状态也搬到这里，因为它只作用于这份列表。
+// The part of the Orders page that moves with the market: the phone masthead, the tab bar
+// (passed through untouched) and the positions tab. Live positions (useLivePositions, a 0.3s
+// beat), floating P/L and equity are subscribed here, so a tick re-renders only this
+// component; the page itself (head, activity filters and pager, closed trades, performance)
+// no longer repaints on every beat. Those hooks used to sit at OrdersPage's top level, so even
+// the Activity tab re-rendered the whole page every 300ms.
+// The tab bar and the onboarding card are built by the parent and passed in as nodes: across
+// tick re-renders they are the same React elements, so React skips them. Cards, summary and
+// equity still read the one live list (this is the only useLivePositions instance), so the
+// three numbers always agree. Close-all state lives here too, since it acts on this list only.
+function LiveBook({ tab, isPhone, accounts, activeAccount, selectedLogin, chooseLogin, brokerName, accountLabel, showToast, tabsNav, onboarding }: {
+  tab: OrdersTab
+  isPhone: boolean
+  accounts: MT5Account[]
+  activeAccount: MT5Account | undefined
+  selectedLogin: string | null
+  chooseLogin: (login: string) => void
+  brokerName: string
+  accountLabel: string
+  showToast: (msg: string, kind?: 'success' | 'error' | 'info') => void
+  tabsNav: ReactNode
+  onboarding: ReactNode
+}) {
+  const { t } = useTranslation()
+  const { upsertOrder, positionsLoaded } = useLive()
   const serverPositions = usePositions()
   // 两帧持仓推送之间按实时报价推算浮盈和现价（见 store/livePositions）。卡片、汇总、净值
   // 全用这一份，三处数字永远对得上。
@@ -153,8 +182,293 @@ export default function OrdersPage() {
   }, [positions, serverPositions])
   const equityOf = (a: MT5Account) =>
     liveEquity(a, (accountFunds[a.login] ?? 0) + (liveFloatDelta[a.login] ?? 0), accountAdj[a.login])
-  const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' | 'info' } | null>(null)
-  const toastTimer = useRef<number | undefined>(undefined)
+
+  // 持仓也跟着页头的账号走。position.login 可能缺失（旧记录），此时不显示在
+  // 单账号视角下，避免把别的账号的仓位算进汇总。
+  // Positions follow the header's account too. position.login can be missing
+  // on older records; those are left out of the single-account view rather than
+  // risk counting another account's exposure in the summary.
+  const visiblePositions = useMemo(
+    () => (selectedLogin ? positions.filter((p) => String(p.login ?? '') === String(selectedLogin)) : positions),
+    [positions, selectedLogin],
+  )
+
+  // 持仓汇总 / positions summary
+  const posSummary = useMemo(() => {
+    let pnl = 0
+    let buy = 0
+    let sell = 0
+    for (const p of visiblePositions) {
+      pnl += p.profit
+      if (p.side === 'BUY') buy += 1
+      else sell += 1
+    }
+    return { pnl, buy, sell, total: visiblePositions.length }
+  }, [visiblePositions])
+
+  // 一键平仓。一个请求就干完，不在这里循环调 /orders/close：循环会在页面被切走
+  // 时半途而废，还共用下单那个按 IP 的限流桶，仓位多时可能只平掉一半。
+  // 接口回的是“已受理”而不是“已成交”：成交随持仓推送把卡拿掉，与单张平仓同一套体感。
+  // One request instead of a loop over /orders/close, which a page switch would
+  // abandon and which shares the per-IP order rate-limit bucket. The response
+  // acknowledges acceptance; fills arrive over the positions feed as usual.
+  const [confirmCloseAll, setConfirmCloseAll] = useState(false)
+  const [closingAll, setClosingAll] = useState(false)
+  // 一键平仓涉及的那些仓位：卡片进入「平仓中」，直到持仓推送把它们拿掉。兜底计时从
+  // 请求**返回**起算（与 PositionCard 自己的平仓同一规则），到点仍在的卡放开。
+  // The positions a close-all covers: their cards show "closing" until the feed
+  // removes them. The release timer runs from the request's *return* (the same rule
+  // as PositionCard's own close); cards still there when it fires are released.
+  const [bulkClosing, setBulkClosing] = useState<ReadonlySet<number>>(() => new Set())
+  const bulkTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => { if (bulkTimer.current) window.clearTimeout(bulkTimer.current) }, [])
+  useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
+  // 确认框开着时最后一笔仓位没了（止损止盈触发、自动仓管、另一台设备平掉）：
+  // 把框收掉，别让用户对着一个“平掉 0 笔持仓”的问题按确认。
+  // Dismiss the dialog if the last position goes while it's open (a stop firing,
+  // auto-management, another device) rather than asking to close nothing.
+  useEffect(() => {
+    if (visiblePositions.length === 0) setConfirmCloseAll(false)
+  }, [visiblePositions.length])
+
+  const doCloseAll = async () => {
+    setConfirmCloseAll(false)
+    setClosingAll(true)
+    if (bulkTimer.current) window.clearTimeout(bulkTimer.current)
+    setBulkClosing(new Set(visiblePositions.map((p) => p.ticket).filter((tk): tk is number => !!tk)))
+    try {
+      const res = await orderApi.closeAll({
+        clientOrderId: clientOrderId(),
+        mt5Login: selectedLogin ?? null,
+      })
+      // 把排队的 PENDING 平仓行立刻显示出来 / show the queued PENDING close rows at once
+      res.orders?.forEach(upsertOrder)
+      if (res.queued > 0) showToast(t('orders.closeAll.sent', { count: res.queued }), 'info')
+      else showToast(t('orders.closeAll.busy'), 'info')
+      bulkTimer.current = window.setTimeout(() => setBulkClosing(new Set()), 12000)
+    } catch (e) {
+      setBulkClosing(new Set())
+      showToast(e instanceof Error ? localizeApiError(e.message) : t('orders.closeAll.failed'), 'error')
+    } finally {
+      setClosingAll(false)
+    }
+  }
+
+  return (
+    <>
+      {/* 手机版账户抬头：替代页头药丸 + 账本条，三个页签共用 /
+          phone masthead: replaces the head pills and the ledger strip; shared by all tabs */}
+      {isPhone && activeAccount && (
+        <AccountMast
+          accounts={accounts}
+          active={activeAccount}
+          onChoose={chooseLogin}
+          floating={posSummary.pnl}
+          equityOf={equityOf}
+          brokerName={brokerName}
+        />
+      )}
+
+      {tabsNav}
+
+      {tab === 'positions' && (
+        <>
+          {/* 一个账号都没绑时，这个 Tab 原本只剩「暂无持仓」和一张用不了的自动
+              仓管卡，账户横条因为 activeAccount 为 undefined 干脆不渲染——页面
+              等于什么都没说。引导卡补上「下一步做什么」。
+              With no account bound this tab was just "no open positions" plus an
+              auto-manage card they can't use, and the account bar didn't render at
+              all (activeAccount is undefined) — the page said nothing. The
+              onboarding card supplies the next step. */}
+          {onboarding}
+
+          {/* 账户账本条（桌面）：详细的账号管理在 /account 页，这里只回答"这个账号现在
+              什么状态"。两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、
+              净值、杠杆、保证金比例；bridge 账号原来多带的 "@server" 后缀去掉，券商列
+              已经回答了"这是哪家"。手机上这些都在页头下的账户抬头里，不再重复。
+              Account ledger strip (desktop): detailed account management lives on
+              /account; this only answers "how is this account doing". Both connection
+              types show one identical info set; the bridge-only "@server" suffix is
+              gone because the broker column already answers "which broker". On phones
+              the same facts live in the masthead under the head, so nothing repeats. */}
+          {!isPhone && activeAccount && (
+            <div className="ord-strip">
+              <div className="ord-cell">
+                <div className="ord-k">{t('orders.acct.login')}</div>
+                <div className="ord-v">
+                  {activeAccount.login}
+                  <span className={activeAccount.online ? 'ord-pill-on' : 'ord-pill-off'}>
+                    {activeAccount.online ? t('common.online') : t('common.offline')}
+                  </span>
+                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('bind.accountName')}</div>
+                <div className="ord-v sans">{activeAccount.accountName || EMPTY}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('bind.company')}</div>
+                <div className="ord-v sans">{activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : EMPTY)}</div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.balance')}</div>
+                <div className="ord-v">
+                  {money2(activeAccount.balance)}
+                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
+                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.equity')}</div>
+                <div className="ord-v">
+                  {money2(equityOf(activeAccount))}
+                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
+                </div>
+              </div>
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.leverage')}</div>
+                <div className="ord-v">{activeAccount.leverage ? `1:${activeAccount.leverage}` : EMPTY}</div>
+              </div>
+              {/* 保证金比例 = 净值 / 已用保证金，就是 MT5 终端状态栏里的「预付款比例」。
+                  这一格算的是**整个 MT5 账号**（含用户在终端手开的仓），不是上面
+                  「当前持仓」那份只统计本平台开仓的口径——保证金是券商按全账号收的，
+                  只算一部分等于报一个券商根本不认的数。空仓或还没刷到值时显示「—」。
+                  Margin level (equity / margin) as shown in the MT5 status bar. Unlike
+                  the positions list above, this covers the whole MT5 account including
+                  manually opened trades — margin is charged account-wide, so a partial
+                  figure would be one the broker doesn't recognise. Em dash when flat or
+                  not yet refreshed. */}
+              <div className="ord-cell">
+                <div className="ord-k">{t('account.marginLevel')}</div>
+                <div className="ord-v">{formatMarginLevel(equityOf(activeAccount), activeAccount.margin)}</div>
+              </div>
+            </div>
+          )}
+
+          {/* 持仓概览 / positions overview。手机上总浮动盈亏已在抬头里，这里只留
+              持仓数与买卖各几笔；作用范围小字压到列表之后——先看到单子再读解释。
+              On phones the floating total already sits in the masthead, so the
+              section head keeps only the count and the buy/sell split, and the
+              scope note follows the list — positions before explanation. */}
+          <div className="ord-sec">
+            <h3>
+              {t('orders.positions')}
+              {isPhone && visiblePositions.length > 0 && <span className="ord-sec-n">{posSummary.total}</span>}
+            </h3>
+            {visiblePositions.length > 0 && (
+              <div className="ord-sec-sum">
+                {!isPhone && <span>{t('orders.summary.positions')} <b>{posSummary.total}</b></span>}
+                <span>
+                  {t('common.buy')} <b className="text-up">{posSummary.buy}</b>
+                  {' '}/{' '}
+                  {t('common.sell')} <b className="text-down">{posSummary.sell}</b>
+                </span>
+                {!isPhone && (
+                  <span>
+                    {t('orders.summary.totalPnl')}{' '}
+                    <b className={posSummary.pnl >= 0 ? 'text-up' : 'text-down'}>
+                      {posSummary.pnl >= 0 ? '+' : ''}
+                      {posSummary.pnl.toFixed(2)}
+                    </b>
+                  </span>
+                )}
+              </div>
+            )}
+            {/* 全部平仓：与它作用的那些仓位同一个标题行，有仓才出现。不做成主按钮：
+                这是个不可撤销且一次动很多张仓的动作，应该好找、但不应该比单张卡上的平仓更显眼。
+                Close-all sits on the same heading row as the positions it acts on and
+                only exists when there are any. Deliberately not a primary button: it
+                is irreversible and touches many positions, so it should be easy to
+                find but never louder than the per-card close. */}
+            {visiblePositions.length > 0 && (
+              <button
+                type="button"
+                className="ord-closeall"
+                disabled={closingAll}
+                aria-busy={closingAll || undefined}
+                onClick={() => setConfirmCloseAll(true)}
+              >
+                {closingAll ? `${t('charts.dock.closing')}…` : t('orders.closeAll.btn')}
+              </button>
+            )}
+          </div>
+          {/* 首帧持仓还没到时是骨架，不是「暂无持仓」：见 live.tsx 的 positionsLoaded。
+              Skeleton, not "no positions", until the first frame; see positionsLoaded. */}
+          {visiblePositions.length === 0 && !positionsLoaded ? (
+            <div className={isPhone ? 'pos-mlist' : 'mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'} aria-busy="true">
+              {[0, 1].map((i) => (
+                <div key={i} className="skeleton" style={{ height: isPhone ? 168 : 190, borderRadius: 'var(--r-lg)' }} aria-hidden="true" />
+              ))}
+            </div>
+          ) : visiblePositions.length === 0 ? (
+            // 与订单页签的空状态同形（.ord-ghost），并给两个入口：空列表要告诉人下一步去哪。
+            // Same shape as the orders tab's empty state (.ord-ghost), plus two ways forward.
+            <div className="ord-ghost">
+              <div className="ord-ghost-t">0.00</div>
+              <div className="ord-ghost-b">
+                <b>{t('orders.noPositions')}</b>
+                <p>{t('orders.noPositionsHint')}</p>
+                <p className="ord-ghost-links">
+                  <Link to="/app">{t('orders.goSignals')} →</Link>
+                  <Link to="/charts">{t('orders.goCharts')} →</Link>
+                </p>
+              </div>
+            </div>
+          ) : isPhone ? (
+            <div className="pos-mlist">
+              {visiblePositions.map((p, i) => (
+                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} mobile
+                              externalClosing={p.ticket != null && bulkClosing.has(p.ticket)} />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {visiblePositions.map((p, i) => (
+                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast}
+                              externalClosing={p.ticket != null && bulkClosing.has(p.ticket)} />
+              ))}
+            </div>
+          )}
+
+          {confirmCloseAll && (
+            <ConfirmModal
+              title={t('orders.closeAll.title')}
+              message={t('orders.closeAll.msg', {
+                account: accountLabel || (selectedLogin ?? ''),
+                count: visiblePositions.length,
+                pnl: `${posSummary.pnl >= 0 ? '+' : ''}${posSummary.pnl.toFixed(2)}`,
+              })}
+              confirmLabel={t('orders.closeAll.confirm')}
+              danger
+              busy={closingAll}
+              onConfirm={doCloseAll}
+              onCancel={() => setConfirmCloseAll(false)}
+            />
+          )}
+        </>
+      )}
+    </>
+  )
+}
+
+export default function OrdersPage() {
+  const { t, i18n } = useTranslation()
+  const { user, refreshUser } = useAuth()
+  const { orders, accounts, upsertOrder, closedTradeTick, wsConnected } = useLive()
+  // gateway 账号不落库券商名，账户横条的券商列回落到合作券商名（与绑定页一致）
+  // Gateway rows don't store a company; the account bar's broker falls back to
+  // the partner broker name, matching the bind page.
+  const { name: brokerName } = usePartnerBroker()
+  // 停留时长按种类（成功 3 秒 / 信息 4 秒 / 错误 6 秒），见 utils/useToastState。
+  // showToast 是稳定引用（useCallback []）：它作为 onActionDone 传给每张持仓卡，PositionCard
+  // 已 memo，每次渲染换一个新函数会让所有卡跟着重渲染。
+  // 平仓 / 改单 / 撤单只可能改变订单行：回执由各动作直接 upsertOrder 并入本地列表，
+  // 持仓与挂单随 WS 推送，这里不再重拉 /orders。
+  // Durations per kind (success 3s / info 4s / error 6s), see utils/useToastState.
+  // showToast is stable (useCallback []): it goes to every position card as onActionDone and
+  // PositionCard is memoized, so a fresh function per render would re-render every card.
+  // Close / modify / cancel can only change order rows: each action merges its receipt with
+  // upsertOrder, positions and pending orders ride the WS, so no /orders refetch here.
+  const { toast, showToast } = useToastState()
   const tabsHintRef = useOverflowHint<HTMLDivElement>()
   const [cancellingId, setCancellingId] = useState<string | null>(null)
 
@@ -356,39 +670,6 @@ export default function OrdersPage() {
   const monthEnhance = async (inp: { month?: import('../components/share/cardData').MonthCard }) =>
     inp.month ? { month: await loadMonthOfficial(selectedLogin ?? undefined, inp.month).catch(() => inp.month!) } : inp
 
-  // 持仓也跟着页头的账号走。position.login 可能缺失（旧记录），此时不显示在
-  // 单账号视角下，避免把别的账号的仓位算进汇总。
-  // Positions follow the header's account too. position.login can be missing
-  // on older records; those are left out of the single-account view rather than
-  // risk counting another account's exposure in the summary.
-  const visiblePositions = useMemo(
-    () => (selectedLogin ? positions.filter((p) => String(p.login ?? '') === String(selectedLogin)) : positions),
-    [positions, selectedLogin],
-  )
-
-  const showToast = (msg: string, kind: 'success' | 'error' | 'info' = 'success') => {
-    if (toastTimer.current) window.clearTimeout(toastTimer.current)
-    setToast({ msg, kind })
-    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
-    // 平仓 / 改单 / 撤单只可能改变订单行：回执由各动作直接 upsertOrder 并入本地列表，
-    // 持仓与挂单随 WS 推送，这里不再重拉 /orders。
-    // Close / modify / cancel can only change order rows: each action merges its receipt with
-    // upsertOrder, positions and pending orders ride the WS, so no /orders refetch here.
-  }
-
-  // 持仓汇总 / positions summary
-  const posSummary = useMemo(() => {
-    let pnl = 0
-    let buy = 0
-    let sell = 0
-    for (const p of visiblePositions) {
-      pnl += p.profit
-      if (p.side === 'BUY') buy += 1
-      else sell += 1
-    }
-    return { pnl, buy, sell, total: visiblePositions.length }
-  }, [visiblePositions])
-
   // 品种搜索框按用户看到的名字来，BTCUSD 展示成 BTCUSDT 后，搜索框也得认
   // "BTCUSDT" 才能搜出那些行，不能只匹配后端原始的 BTCUSD 字符串。
   // The symbol search box should match what the user actually sees — now
@@ -443,6 +724,12 @@ export default function OrdersPage() {
     ? filteredOrders
     : filteredOrders.slice(safePage * ORDERS_PAGE_SIZE, safePage * ORDERS_PAGE_SIZE + ORDERS_PAGE_SIZE)
   const pageTotal = dateFilterActive ? serverTotal : filteredOrders.length
+  // 回执单只在这次打开 App 后第一次出现时错峰进场；翻页、切回交易页、实时推来的新单都
+  // 直接出现。新单的「新」由印章动画表达（.ord-stamp.land），不靠整张单进场。
+  // Slips stagger in only the first time they appear this app session; page flips,
+  // returning to the tab and live-pushed orders appear at once. A new order's "new"
+  // is carried by the stamp animation (.ord-stamp.land), not a slip entrance.
+  const slipReveal = useFirstReveal(visibleOrders.length > 0, 'orders-slips')
 
   // 回执单按日分组（UTC+8）：今天 / 昨天 / MM-DD 周几。
   // Slips grouped by day (UTC+8): today / yesterday / MM-DD weekday.
@@ -499,7 +786,7 @@ export default function OrdersPage() {
       upsertOrder(res)
       showToast(t('orders.cancelSent'), 'info')
     } catch (e) {
-      showToast(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
+      showToast(e instanceof Error ? localizeApiError(e.message) : t('charts.dock.cancelFailed'), 'error')
     } finally {
       setCancellingId(null)
     }
@@ -508,54 +795,6 @@ export default function OrdersPage() {
   const accountLabel = activeAccount
     ? `${activeAccount.login} · ${activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '')}`.replace(/ · $/, '')
     : ''
-
-  // 一键平仓。一个请求就干完，不在这里循环调 /orders/close：循环会在页面被切走
-  // 时半途而废，还共用下单那个按 IP 的限流桶，仓位多时可能只平掉一半。
-  // 接口回的是“已受理”而不是“已成交”：成交随持仓推送把卡拿掉，与单张平仓同一套体感。
-  // One request instead of a loop over /orders/close, which a page switch would
-  // abandon and which shares the per-IP order rate-limit bucket. The response
-  // acknowledges acceptance; fills arrive over the positions feed as usual.
-  const [confirmCloseAll, setConfirmCloseAll] = useState(false)
-  const [closingAll, setClosingAll] = useState(false)
-  // 一键平仓涉及的那些仓位：卡片进入「平仓中」，直到持仓推送把它们拿掉。兜底计时从
-  // 请求**返回**起算（与 PositionCard 自己的平仓同一规则），到点仍在的卡放开。
-  // The positions a close-all covers: their cards show "closing" until the feed
-  // removes them. The release timer runs from the request's *return* (the same rule
-  // as PositionCard's own close); cards still there when it fires are released.
-  const [bulkClosing, setBulkClosing] = useState<ReadonlySet<number>>(() => new Set())
-  const bulkTimer = useRef<number | undefined>(undefined)
-  useEffect(() => () => { if (bulkTimer.current) window.clearTimeout(bulkTimer.current) }, [])
-  useBackToClose(confirmCloseAll, () => setConfirmCloseAll(false))
-  // 确认框开着时最后一笔仓位没了（止损止盈触发、自动仓管、另一台设备平掉）：
-  // 把框收掉，别让用户对着一个“平掉 0 笔持仓”的问题按确认。
-  // Dismiss the dialog if the last position goes while it's open (a stop firing,
-  // auto-management, another device) rather than asking to close nothing.
-  useEffect(() => {
-    if (visiblePositions.length === 0) setConfirmCloseAll(false)
-  }, [visiblePositions.length])
-
-  const doCloseAll = async () => {
-    setConfirmCloseAll(false)
-    setClosingAll(true)
-    if (bulkTimer.current) window.clearTimeout(bulkTimer.current)
-    setBulkClosing(new Set(visiblePositions.map((p) => p.ticket).filter((tk): tk is number => !!tk)))
-    try {
-      const res = await orderApi.closeAll({
-        clientOrderId: clientOrderId(),
-        mt5Login: selectedLogin ?? null,
-      })
-      // 把排队的 PENDING 平仓行立刻显示出来 / show the queued PENDING close rows at once
-      res.orders?.forEach(upsertOrder)
-      if (res.queued > 0) showToast(t('orders.closeAll.sent', { count: res.queued }), 'info')
-      else showToast(t('orders.closeAll.busy'), 'info')
-      bulkTimer.current = window.setTimeout(() => setBulkClosing(new Set()), 12000)
-    } catch (e) {
-      setBulkClosing(new Set())
-      showToast(e instanceof Error ? localizeApiError(e.message) : t('orders.closeAll.failed'), 'error')
-    } finally {
-      setClosingAll(false)
-    }
-  }
 
   // 一张回执单 / one receipt slip
   const renderSlip = (o: Order, i: number) => {
@@ -570,7 +809,7 @@ export default function OrdersPage() {
     const msg = o.message ? localizeApiError(o.message) : o.status === 'PENDING' ? t('orders.awaitingReceipt') : null
     const price = o.filledPrice != null ? priceParts(o.filledPrice) : null
     return (
-      <article key={o.id} className="ord-slip" data-status={o.status} style={{ '--i': i } as CSSProperties}>
+      <article key={o.id} className={`ord-slip${slipReveal ? ' is-in' : ''}`} data-status={o.status} style={{ '--i': Math.min(i, 5) } as CSSProperties}>
         <div className="ord-stub">
           <div className="ord-stub-t">{clockOf(o.createdAt)}</div>
           {/* 本地库里有少量旧行 action 是 'OPEN'（不在 OrderAction 枚举里），
@@ -601,12 +840,12 @@ export default function OrdersPage() {
         <div className="ord-price">
           <div className="ord-k">{t('orders.colPrice')}</div>
           <div className={`ord-v ${price ? '' : 'none'}`}>
-            {price ? <>{price.int}{price.frac != null && <>.<span className="frac">{price.frac}</span></>}</> : '—'}
+            {price ? <>{price.int}{price.frac != null && <>.<span className="frac">{price.frac}</span></>}</> : EMPTY}
           </div>
         </div>
         <div className="ord-tk">
           <div className="ord-k">{t('orders.colTicket')}</div>
-          <div className={`ord-v ${o.mt5Ticket ? '' : 'none'}`}>{o.mt5Ticket ? `#${o.mt5Ticket}` : '—'}</div>
+          <div className={`ord-v ${o.mt5Ticket ? '' : 'none'}`}>{o.mt5Ticket ? `#${o.mt5Ticket}` : EMPTY}</div>
         </div>
         <div className="ord-stampcell">
           {o.status === 'PENDING' && (
@@ -614,7 +853,7 @@ export default function OrdersPage() {
               type="button"
               onClick={() => setConfirmCancel(o)}
               disabled={cancellingId === o.id}
-              className="btn rounded-pill border border-down/40 bg-down/10 text-down hover:bg-down/20"
+              className="btn rounded-control border border-down/40 bg-down/10 text-down hover:bg-down/20"
             >
               {cancellingId === o.id ? t('orders.cancelling') : t('common.cancel')}
             </button>
@@ -648,8 +887,32 @@ export default function OrdersPage() {
     </div>
   )
 
+  // 页签条在这里建好、作为节点交给 LiveBook：LiveBook 随行情重渲染时它是同一个元素，
+  // React 直接跳过，不会每 0.3 秒重建四个按钮。
+  // The tab bar is built here and handed to LiveBook as a node: when LiveBook re-renders
+  // with the market it is the same element, so React skips it instead of rebuilding four
+  // buttons every 0.3s.
+  // Tab 导航 / tab navigation
+  const tabsNav = (
+    <div ref={tabsHintRef} className="seg-tabs mb-4 md:mb-6" role="tablist" onKeyDown={onRovingKeyDown}>
+      {TABS.map((key) => (
+        <button
+          key={key}
+          role="tab"
+          aria-selected={tab === key}
+          tabIndex={tab === key ? 0 : -1}
+          onClick={() => setTab(key)}
+          className={tab === key ? 'on' : ''}
+        >
+          {t(`orders.tab.${key}`)}
+        </button>
+      ))}
+    </div>
+  )
+
   return (
     <div>
+      <h1 className="sr-only">{t('nav.orders')}</h1>
       {/* 页头：全站统一的 PageHead，右侧是全页统一的账号切换器。原来这页自带一套
           「等宽大写眉题 + 42px 标题 + 光谱线」，2026-09-08 统一掉。
           Page head: the site-wide PageHead with the page-wide account switcher on
@@ -660,13 +923,14 @@ export default function OrdersPage() {
       {!isPhone && accounts.length > 1 && <PageHead
         className="ord-head"
         actions={(
-          <div className="ord-accts" role="tablist">
+          <div className="ord-accts" role="tablist" onKeyDown={onRovingKeyDown}>
             {accounts.map((a) => (
               <button
                 key={a.login}
                 type="button"
                 role="tab"
                 aria-selected={a.login === selectedLogin}
+                tabIndex={a.login === selectedLogin ? 0 : -1}
                 onClick={() => chooseLogin(a.login)}
                 className={`ord-acct ${a.login === selectedLogin ? 'on' : ''} ${a.online ? 'online' : ''}`}
               >
@@ -679,197 +943,19 @@ export default function OrdersPage() {
         )}
       />}
 
-      {/* 手机版账户抬头：替代页头药丸 + 账本条，三个页签共用 /
-          phone masthead: replaces the head pills and the ledger strip; shared by all tabs */}
-      {isPhone && activeAccount && (
-        <AccountMast
-          accounts={accounts}
-          active={activeAccount}
-          onChoose={chooseLogin}
-          floating={posSummary.pnl}
-          equityOf={equityOf}
-          brokerName={brokerName}
-        />
-      )}
-
-      {/* Tab 导航 / tab navigation */}
-      <div ref={tabsHintRef} className="seg-tabs mb-4 md:mb-6" role="tablist">
-        {TABS.map((key) => (
-          <button
-            key={key}
-            role="tab"
-            aria-selected={tab === key}
-            onClick={() => setTab(key)}
-            className={tab === key ? 'on' : ''}
-          >
-            {t(`orders.tab.${key}`)}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'positions' && (
-        <>
-          {/* 一个账号都没绑时，这个 Tab 原本只剩「暂无持仓」和一张用不了的自动
-              仓管卡，账户横条因为 activeAccount 为 undefined 干脆不渲染——页面
-              等于什么都没说。引导卡补上「下一步做什么」。
-              With no account bound this tab was just "no open positions" plus an
-              auto-manage card they can't use, and the account bar didn't render at
-              all (activeAccount is undefined) — the page said nothing. The
-              onboarding card supplies the next step. */}
-          <OnboardingCard />
-
-          {/* 账户账本条（桌面）：详细的账号管理在 /account 页，这里只回答"这个账号现在
-              什么状态"。两种连接方式展示同一组信息：登录号、状态、账户名、券商、余额、
-              净值、杠杆、保证金比例；bridge 账号原来多带的 "@server" 后缀去掉，券商列
-              已经回答了"这是哪家"。手机上这些都在页头下的账户抬头里，不再重复。
-              Account ledger strip (desktop): detailed account management lives on
-              /account; this only answers "how is this account doing". Both connection
-              types show one identical info set; the bridge-only "@server" suffix is
-              gone because the broker column already answers "which broker". On phones
-              the same facts live in the masthead under the head, so nothing repeats. */}
-          {!isPhone && activeAccount && (
-            <div className="ord-strip">
-              <div className="ord-cell">
-                <div className="ord-k">{t('orders.acct.login')}</div>
-                <div className="ord-v">
-                  {activeAccount.login}
-                  <span className={activeAccount.online ? 'ord-pill-on' : 'ord-pill-off'}>
-                    {activeAccount.online ? t('common.online') : t('common.offline')}
-                  </span>
-                </div>
-              </div>
-              <div className="ord-cell">
-                <div className="ord-k">{t('bind.accountName')}</div>
-                <div className="ord-v sans">{activeAccount.accountName || '—'}</div>
-              </div>
-              <div className="ord-cell">
-                <div className="ord-k">{t('bind.company')}</div>
-                <div className="ord-v sans">{activeAccount.company || (activeAccount.source === 'gateway' ? brokerName : '—')}</div>
-              </div>
-              <div className="ord-cell">
-                <div className="ord-k">{t('account.balance')}</div>
-                <div className="ord-v">
-                  {money2(activeAccount.balance)}
-                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
-                </div>
-              </div>
-              <div className="ord-cell">
-                <div className="ord-k">{t('account.equity')}</div>
-                <div className="ord-v">
-                  {money2(equityOf(activeAccount))}
-                  {activeAccount.accountCurrency && <small>{activeAccount.accountCurrency}</small>}
-                </div>
-              </div>
-              <div className="ord-cell">
-                <div className="ord-k">{t('account.leverage')}</div>
-                <div className="ord-v">{activeAccount.leverage ? `1:${activeAccount.leverage}` : '—'}</div>
-              </div>
-              {/* 保证金比例 = 净值 / 已用保证金，就是 MT5 终端状态栏里的「预付款比例」。
-                  这一格算的是**整个 MT5 账号**（含用户在终端手开的仓），不是上面
-                  「当前持仓」那份只统计本平台开仓的口径——保证金是券商按全账号收的，
-                  只算一部分等于报一个券商根本不认的数。空仓或还没刷到值时显示「—」。
-                  Margin level (equity / margin) as shown in the MT5 status bar. Unlike
-                  the positions list above, this covers the whole MT5 account including
-                  manually opened trades — margin is charged account-wide, so a partial
-                  figure would be one the broker doesn't recognise. Em dash when flat or
-                  not yet refreshed. */}
-              <div className="ord-cell">
-                <div className="ord-k">{t('account.marginLevel')}</div>
-                <div className="ord-v">{formatMarginLevel(equityOf(activeAccount), activeAccount.margin)}</div>
-              </div>
-            </div>
-          )}
-
-          {/* 持仓概览 / positions overview。手机上总浮动盈亏已在抬头里，这里只留
-              持仓数与买卖各几笔；作用范围小字压到列表之后——先看到单子再读解释。
-              On phones the floating total already sits in the masthead, so the
-              section head keeps only the count and the buy/sell split, and the
-              scope note follows the list — positions before explanation. */}
-          <div className="ord-sec">
-            <h3>
-              {t('orders.positions')}
-              {isPhone && visiblePositions.length > 0 && <span className="ord-sec-n">{posSummary.total}</span>}
-            </h3>
-            {visiblePositions.length > 0 && (
-              <div className="ord-sec-sum">
-                {!isPhone && <span>{t('orders.summary.positions')} <b>{posSummary.total}</b></span>}
-                <span>
-                  {t('common.buy')} <b className="text-up">{posSummary.buy}</b>
-                  {' '}/{' '}
-                  {t('common.sell')} <b className="text-down">{posSummary.sell}</b>
-                </span>
-                {!isPhone && (
-                  <span>
-                    {t('orders.summary.totalPnl')}{' '}
-                    <b className={posSummary.pnl >= 0 ? 'text-up' : 'text-down'}>
-                      {posSummary.pnl >= 0 ? '+' : ''}
-                      {posSummary.pnl.toFixed(2)}
-                    </b>
-                  </span>
-                )}
-              </div>
-            )}
-            {/* 全部平仓：与它作用的那些仓位同一个标题行，有仓才出现。不做成主按钮：
-                这是个不可撤销且一次动很多张仓的动作，应该好找、但不应该比单张卡上的平仓更显眼。
-                Close-all sits on the same heading row as the positions it acts on and
-                only exists when there are any. Deliberately not a primary button: it
-                is irreversible and touches many positions, so it should be easy to
-                find but never louder than the per-card close. */}
-            {visiblePositions.length > 0 && (
-              <button
-                type="button"
-                className="ord-closeall"
-                disabled={closingAll}
-                aria-busy={closingAll || undefined}
-                onClick={() => setConfirmCloseAll(true)}
-              >
-                {closingAll ? `${t('charts.dock.closing')}…` : t('orders.closeAll.btn')}
-              </button>
-            )}
-          </div>
-          {/* 首帧持仓还没到时是骨架，不是「暂无持仓」：见 live.tsx 的 positionsLoaded。
-              Skeleton, not "no positions", until the first frame; see positionsLoaded. */}
-          {visiblePositions.length === 0 && !positionsLoaded ? (
-            <div className={isPhone ? 'pos-mlist' : 'mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'} aria-busy="true">
-              {[0, 1].map((i) => (
-                <div key={i} className="skeleton" style={{ height: isPhone ? 168 : 190, borderRadius: 16 }} aria-hidden="true" />
-              ))}
-            </div>
-          ) : visiblePositions.length === 0 ? (
-            <p className="py-8 text-sm text-neutral-500">{t('orders.noPositions')}</p>
-          ) : isPhone ? (
-            <div className="pos-mlist">
-              {visiblePositions.map((p, i) => (
-                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast} mobile
-                              externalClosing={p.ticket != null && bulkClosing.has(p.ticket)} />
-              ))}
-            </div>
-          ) : (
-            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {visiblePositions.map((p, i) => (
-                <PositionCard key={positionKey(p, i)} position={p} onActionDone={showToast}
-                              externalClosing={p.ticket != null && bulkClosing.has(p.ticket)} />
-              ))}
-            </div>
-          )}
-
-          {confirmCloseAll && (
-            <ConfirmModal
-              title={t('orders.closeAll.title')}
-              message={t('orders.closeAll.msg', {
-                account: accountLabel || (selectedLogin ?? ''),
-                count: visiblePositions.length,
-                pnl: `${posSummary.pnl >= 0 ? '+' : ''}${posSummary.pnl.toFixed(2)}`,
-              })}
-              confirmLabel={t('orders.closeAll.confirm')}
-              danger
-              busy={closingAll}
-              onConfirm={doCloseAll}
-              onCancel={() => setConfirmCloseAll(false)}
-            />
-          )}
-        </>
-      )}
+      <LiveBook
+        tab={tab}
+        isPhone={isPhone}
+        accounts={accounts}
+        activeAccount={activeAccount}
+        selectedLogin={selectedLogin}
+        chooseLogin={chooseLogin}
+        brokerName={brokerName}
+        accountLabel={accountLabel}
+        showToast={showToast}
+        tabsNav={tabsNav}
+        onboarding={<OnboardingCard />}
+      />
 
       {/* 智能风控（原自动仓位管理）：每用户一条的全局配置（AutoManageSettings 的 user_id
           上有 unique 约束），不跟随账号选择器，所以保留作用范围说明。
@@ -888,7 +974,7 @@ export default function OrdersPage() {
           {monthVariants.length > 0 && (
             <div className="mt-3 flex justify-end">
               <button type="button" onClick={() => setShare({ type: 'C', variants: monthVariants, enhance: monthEnhance })}
-                className="inline-flex items-center gap-1.5 rounded-[10px] bg-prism-600/20 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
+                className="inline-flex items-center gap-1.5 rounded-control bg-prism-600/20 px-3 py-1.5 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
                 {t('share.monthButton')}
               </button>
@@ -905,13 +991,14 @@ export default function OrdersPage() {
         <>
           {/* 筛选条：状态芯片（带计数）+ 品种 + 日期区间 / filter bar */}
           <div className="ord-tb">
-            <div className="ord-chips" role="tablist" aria-label={t('orders.filterStatus')}>
+            <div className="ord-chips" role="tablist" aria-label={t('orders.filterStatus')} onKeyDown={onRovingKeyDown}>
               {STATUS_FILTERS.map((s) => (
                 <button
                   key={s}
                   type="button"
                   role="tab"
                   aria-selected={statusF === s}
+                  tabIndex={statusF === s ? 0 : -1}
                   onClick={() => setStatusF(s)}
                   // 日期筛选下后端只回当前这一页（orderApi.list 不接受 status /
                   // symbol 参数），再在这 10 条上本地过滤就会出现「页面上只剩 2 行、
@@ -1004,17 +1091,25 @@ export default function OrdersPage() {
               </div>
             </div>
           ) : (
-            dayGroups.map((g, gi) => (
-              <div key={g.key}>
-                <div className="ord-day">
-                  <div className="ord-day-d">{g.label}<span>{g.sub}</span></div>
-                  <div className="ord-day-n">{t('orders.day.count', { n: g.items.length })}</div>
+            dayGroups.map((g, gi) => {
+              // 错峰序号跨日期组连续往下数（renderSlip 里再封顶 5）。以前是 gi × 10 + i：
+              // 第二组从第 10 位起算，第三组要等 900ms 才开始出现。
+              // The stagger index runs on across day groups (capped at 5 in renderSlip). It
+              // used to be gi × 10 + i: the second group started at slot 10 and the third
+              // waited 900ms before appearing.
+              const start = dayGroups.slice(0, gi).reduce((n, x) => n + x.items.length, 0)
+              return (
+                <div key={g.key}>
+                  <div className="ord-day">
+                    <div className="ord-day-d">{g.label}<span>{g.sub}</span></div>
+                    <div className="ord-day-n">{t('orders.day.count', { n: g.items.length })}</div>
+                  </div>
+                  <div className="ord-slips">
+                    {g.items.map((o, i) => renderSlip(o, start + i))}
+                  </div>
                 </div>
-                <div className="ord-slips">
-                  {g.items.map((o, i) => renderSlip(o, gi * ORDERS_PAGE_SIZE + i))}
-                </div>
-              </div>
-            ))
+              )
+            })
           )}
 
           {/* 分页：每页 10 条。不设日期筛选时在实时集合上本地翻页（新单即时可见）；
@@ -1038,12 +1133,17 @@ export default function OrdersPage() {
 
       {confirmCancel && (
         <ConfirmModal
-          title={t('common.cancel')}
+          // 标题问一句、确认写动词、放弃写「保留」：以前三处都是「取消 / 关闭」，用户分不清
+          // 按哪个才是撤单。被撤的是 PENDING（待执行）的平台指令，不是券商挂单，所以不叫「挂单」。
+          // A question for the title, a verb to confirm, "keep" to back out: all three used to
+          // read cancel / close and nobody could tell which one cancelled the order. This is a
+          // PENDING platform order, not a broker pending order, hence no "pending order" wording.
+          title={t('orders.cancelConfirm.title')}
           // 把要撤的那一单原样复述一遍（品种 · 方向 手数 · 单号），不另造文案。
           // Restate what's about to be cancelled; no new copy invented.
           message={`${displaySymbol(confirmCancel.symbol)} · ${confirmCancel.side === 'BUY' ? t('common.buy') : t('common.sell')} ${fmtLots(confirmCancel.volume)}${confirmCancel.mt5Ticket ? ` · #${confirmCancel.mt5Ticket}` : ''}`}
-          confirmLabel={t('common.cancel')}
-          cancelLabel={t('common.close')}
+          confirmLabel={t('orders.cancelConfirm.confirm')}
+          cancelLabel={t('orders.cancelConfirm.keep')}
           danger
           busy={cancellingId === confirmCancel.id}
           onConfirm={() => {
@@ -1055,7 +1155,7 @@ export default function OrdersPage() {
         />
       )}
 
-      {toast && <Toast kind={toast.kind} message={toast.msg} />}
+      {toast && <Toast key={toast.id} toast={toast} />}
     </div>
   )
 }

@@ -13,17 +13,18 @@
     right: 0;
     bottom: 0;
     left: 0;
-    z-index: 80;
+    z-index: var(--z-sheet);
     /* 遮罩底色去紫、加深：这是下单确认弹窗的背景，它的职责是把注意力从页面
-       上摘下来，不是给页面加一层紫色滤镜。
+       上摘下来，不是给页面加一层紫色滤镜。全站遮罩同一个 var(--scrim)，不加
+       backdrop-filter（理由见 tokens.css「浮层与遮罩」）。
        Scrim de-tinted and deepened: this backs the order-confirmation dialog and
-       its job is to lift attention off the page, not to tint the page violet. */
-    background: rgba(9, 9, 11, 0.72);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+       its job is to lift attention off the page, not to tint the page violet. Every
+       scrim shares var(--scrim) with no backdrop-filter (see "floating surfaces and
+       scrims" in tokens.css). */
+    background: var(--scrim);
     display: grid;
     place-items: center;
-    animation: lg-fade 0.2s ease;
+    animation: lg-fade var(--dur-base) var(--ease-out);
   }
   /* 下单确认面板改为实色。这是全站风险最高的一次交互——用户在这里确认真金
      白银的仓位——半透明面意味着背后的行情数字会从面板下方透出来，与面板上
@@ -39,11 +40,57 @@
     max-width: calc(100vw - 32px);
     max-height: 90vh;
     overflow-y: auto;
+    /* 滚到头不再把滚动传给背后的页面（也不触发下拉刷新 / 边缘光晕）。
+       Scrolling past the end no longer chains to the page behind (or triggers
+       pull-to-refresh / the edge glow). */
+    overscroll-behavior: contain;
     background: var(--surface);
     border: 1px solid var(--line-hi);
-    border-radius: var(--r-xl);
+    border-radius: var(--r-lg);
     padding: 24px;
     box-shadow: 0 24px 64px -16px rgba(0, 0, 0, 0.8);
+  }
+  /* 退场：只有 OrderSheet 会挂 .closing（ConfirmModal、AdminSheet 等也用 .slide-overlay，
+     不受影响）。桌面是居中弹窗，整层淡出；手机另外让弹层滑回底部（components-controls.css
+     的 639px 块）。
+     Exit: only OrderSheet sets .closing (ConfirmModal, AdminSheet and others also use
+     .slide-overlay and are unaffected). On desktop the centred dialog fades as one layer;
+     phones also slide the sheet down (the 639px block in components-controls.css). */
+  .slide-overlay.closing {
+    animation: none;
+    opacity: 0;
+    transition: opacity var(--dur-base) var(--ease-in);
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .slide-overlay.closing {
+      transition: opacity var(--dur-fast) var(--ease-in);
+    }
+  }
+  /* 桌面（≥640px）是居中弹窗：从 97% 放大到原尺寸并淡入，像是从页面上浮起来，而不是
+     遮罩还在淡入、面板已经整块出现；不位移。手机端是贴底弹层，上滑写在
+     components-controls.css 的 639px 块里，两段宽度不重叠。用 backwards 不用 both：
+     播完就不再挂着 transform，弹窗里 position: fixed 的账户菜单遮罩（.slide-acct-backdrop）
+     才会照常相对视口定位。
+     On desktop (≥640px) this is a centred dialog: it scales up from 97% while fading in,
+     so it lifts off the page instead of appearing whole while the scrim is still fading;
+     no travel. On phones it is a bottom sheet whose slide-up lives in the 639px block of
+     components-controls.css; the two width ranges don't overlap. backwards rather than
+     both: once it has played no transform is left behind, so the fixed account-menu
+     backdrop inside (.slide-acct-backdrop) stays positioned against the viewport. */
+  @media (min-width: 640px) {
+    .slide-sheet {
+      animation: sheet-pop var(--dur-base) var(--ease-out) backwards;
+    }
+  }
+  @media (min-width: 640px) and (prefers-reduced-motion: reduce) {
+    .slide-sheet {
+      animation: none;
+    }
+  }
+  @keyframes sheet-pop {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: none; }
   }
   .slide-sheet-head {
     text-align: center;
@@ -59,8 +106,15 @@
     font-weight: 500;
   }
   /* 正向 / 反向信号切换（信号下单弹窗头部）。反向选中时用琥珀色，一眼看出是在反着做。
+     正向选中刻意用中性面（--nest-hi），不用主选择的实色紫：正向是默认、不需要提醒的
+     状态；如果它也是紫色，反向的琥珀就只像「换了一种颜色」，警示被冲淡。同一个弹窗里
+     「手数 / 风险」是实色紫，因为那是每次都要主动做的主选择（见 tokens.css「选中态分三种」）。
      Forward / reverse switch in the signal order head; amber when reversed so it reads
-     at a glance that this trade goes against the signal. */
+     at a glance that this trade goes against the signal. Forward is deliberately neutral
+     (--nest-hi) rather than the solid violet of primary selections: it is the default and
+     needs no emphasis, and a violet forward would make the amber reverse read as just
+     another colour. The lots / risk switch in the same sheet is solid violet because it is
+     a primary choice made every time. */
   .slide-dir {
     display: flex;
     gap: 2px;
@@ -68,7 +122,7 @@
     max-width: 280px;
     margin: 12px auto 0;
     padding: 3px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     background: var(--nest);
     border: 1px solid var(--line);
   }
@@ -76,16 +130,17 @@
     flex: 1;
     height: 30px;
     border: 0;
-    border-radius: 10px;
+    /* 同心：轨道 10 − 边框 1 − 内边距 3 = 6。/ Concentric: 10 − 1 − 3 = 6. */
+    border-radius: var(--r-thumb);
     background: transparent;
     color: var(--text-3);
     font: inherit;
-    font-size: 12.5px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
-    transition: background var(--dur-fast), color var(--dur-fast);
+    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
-  .slide-dir button.on { background: var(--nest-hi); color: #fff; }
+  .slide-dir button.on { background: var(--nest-hi); color: var(--text-strong); }
   .slide-dir.rev button.on { background: rgba(245, 165, 36, 0.2); color: #f5c451; }
   .slide-dir-note {
     margin: 8px auto 0;
@@ -99,7 +154,6 @@
     margin-top: 16px;
     border-radius: var(--r-tile);
     background: var(--nest);
-    border: 1px solid var(--line);
     padding: 4px 16px;
   }
   .slide-row {
@@ -110,14 +164,14 @@
     font-size: 13px;
   }
   .slide-row + .slide-row {
-    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    border-top: 1px solid var(--line);
   }
   .slide-row .k {
     color: var(--text-2);
   }
   .slide-row .v {
     font-weight: 500;
-    color: #fff;
+    color: var(--text-strong);
   }
   .slide-row .v i {
     font-style: normal;
@@ -141,21 +195,30 @@
     display: grid;
     place-items: center;
     line-height: 1;
-    transition: transform 0.25s cubic-bezier(0.34, 1.45, 0.64, 1), border-color 0.2s;
+    transition: transform var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
   }
-  .stepper button:hover {
-    border-color: var(--purple-hi);
-    color: var(--purple-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .stepper button:hover {
+      border-color: var(--purple-hi);
+      color: var(--purple-hi);
+    }
   }
+  /* 手数要连按好几下：按压只缩到 0.96、不回弹。以前是 0.88 + 过冲曲线，每按一下都弹
+     一次，按到第五下就晕了。
+     Lot steps get tapped several times in a row: press to 0.96 with no rebound. It
+     used to be 0.88 on an overshoot curve, bouncing on every tap. */
   .stepper button:active {
-    transform: scale(0.88);
+    transform: scale(0.96);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .stepper button:active { transform: none; }
   }
   .stepper .lot-val {
     font-size: 17px;
     font-weight: 500;
     min-width: 52px;
     text-align: center;
-    color: #fff;
+    color: var(--text-strong);
   }
   .stepper .lot-input {
     width: 52px;
@@ -164,8 +227,18 @@
     outline: none;
     padding: 0;
   }
+  /* 手数框没有边框和底色，上面那条 outline: none（0,2,0）又压过了全局焦点环（0,1,1），
+     聚焦时只剩数字变紫。补回一圈轮廓，圆角与控件同一档。文本框聚焦就是要打字，
+     所以用 :focus（旧内核也认），不用 :focus-visible。
+     The volume field has no border or fill, and the outline: none above (0,2,0) beats
+     the global ring (0,1,1), so focus was only a colour change. Restore an outline at
+     the control radius. A focused text field always means typing, so :focus, which old
+     engines support, rather than :focus-visible. */
   .stepper .lot-input:focus {
     color: var(--purple-hi);
+    outline: 2px solid var(--purple-hi);
+    outline-offset: 2px;
+    border-radius: var(--r-tile);
   }
   .slide-row-acct {
     position: relative;
@@ -179,21 +252,24 @@
     gap: 8px;
     background: var(--nest-hi);
     border: 1px solid var(--line-hi);
-    border-radius: 10px;
-    padding: 4px 8px;
+    border-radius: var(--r-md);
+    /* 箭头一侧少 2px，见 .select-trigger。/ Chevron side gets 2px less, see .select-trigger. */
+    padding: 4px 6px 4px 8px;
     font-size: 13px;
     font-weight: 500;
-    color: #fff;
+    color: var(--text-strong);
     cursor: pointer;
     max-width: 190px;
   }
-  .slide-acct-trigger:hover {
-    border-color: var(--purple-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .slide-acct-trigger:hover {
+      border-color: var(--purple-hi);
+    }
   }
   .slide-acct-trigger svg {
     flex-shrink: 0;
     color: var(--text-3);
-    transition: transform 0.15s;
+    transition: transform var(--dur-fast) var(--ease-out);
   }
   .slide-acct-backdrop {
     position: fixed;
@@ -211,11 +287,12 @@
     min-width: 220px;
     max-height: 220px;
     overflow-y: auto;
-    background: #17171d;
+    background: var(--surface-float);
     border: 1px solid var(--line-hi);
     border-radius: var(--r-panel);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-    padding: 4px;
+    box-shadow: var(--shadow-float);
+    /* 14 − 6 = 8：菜单项是 --r-tile，内外同心。/ 14 − 6 = 8: options are --r-tile, concentric with the shell. */
+    padding: 6px;
   }
   .slide-acct-opt {
     display: flex;
@@ -230,11 +307,13 @@
     cursor: pointer;
     text-align: left;
   }
-  .slide-acct-opt:hover {
-    background: var(--nest-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .slide-acct-opt:hover {
+      background: var(--nest-hi);
+    }
   }
   .slide-acct-opt.active {
-    background: rgba(90, 34, 238, 0.14);
+    background: var(--option-active-bg);
   }
   .slide-acct-opt .opt-login {
     display: flex;
@@ -242,22 +321,35 @@
     gap: 8px;
     font-size: 13px;
     font-weight: 500;
-    color: #fff;
+    color: var(--text-strong);
   }
   /* 账号在线状态点。列表会保留本次弹窗期间掉线的账号（见 useStickyOnlineAccounts），
      靠这个点区分，而不是把它从列表里抽走——抽走会让下拉在用户手指底下重排。
      Online dot: the list keeps accounts that dropped offline during the modal, and
      this marks them instead of yanking the row out from under the cursor. */
+  /* 离线 = 空心圈 + 整行变暗 + 「离线」二字，不只靠颜色（同 orders.css 的 .ord-mast-dot）。
+     Offline = hollow ring + dimmed row + an "Offline" word, not colour alone. */
   .slide-acct-opt .opt-dot {
     flex-shrink: 0;
+    box-sizing: border-box;
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    background: var(--text-3);
+    border: 1.5px solid var(--text-3);
+    background: transparent;
   }
   .slide-acct-opt .opt-dot.on {
+    border-color: var(--up, #2fe6a0);
     background: var(--up, #2fe6a0);
     box-shadow: none;
+  }
+  .slide-acct-opt.off .opt-login {
+    color: var(--text-3);
+  }
+  .slide-acct-opt .opt-off {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-3);
   }
   .slide-acct-opt .opt-equity {
     font-size: 12px;
@@ -266,7 +358,7 @@
 
   /* 手机号区号下拉。
      Select 原本是给图表页那些紧凑面板做的（30.8px 高、8px 圆角、12.5px 字），
-     直接放进认证表单会比旁边的 .input（43px 高、12px 圆角、14px 字）矮一大截，
+     直接放进认证表单会比旁边的 .input（43px 高、12px 圆角、13px 字）矮一大截，
      两个框并排时一眼就能看出没对齐。这里把它对齐到 .input 的度量。
      触发器只显示国旗 + 区号（见 PhoneField 的 short 字段），所以宽度不用留给国名。
      Select is sized for the charts page's compact panels; next to an auth-form
@@ -279,8 +371,8 @@
   .phone-dial-select .select-trigger {
     height: 43px;
     padding: 10px 12px;
-    border-radius: 10px;
-    font-size: 14px;
+    border-radius: var(--r-md);
+    font-size: 13px;
     white-space: nowrap;
   }
 }
@@ -297,7 +389,7 @@
   .stepper button {
     width: 44px;
     height: 44px;
-    font-size: 18px;
+    font-size: 17px;
   }
   .slide-chip {
     min-width: 44px;

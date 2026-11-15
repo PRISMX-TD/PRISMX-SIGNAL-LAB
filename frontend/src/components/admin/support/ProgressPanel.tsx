@@ -34,6 +34,7 @@ import { SkeletonLine } from '../../Skeleton'
 import { Avatar, FU_PRIORITY_TONE, FU_STATUS_TONE, Tag, errText } from '../../support/supportUi'
 import FollowUpRecordSheet from './FollowUpRecordSheet'
 import Copyable from '../../Copyable'
+import { useFirstReveal } from '../../../utils/useFirstReveal'
 
 const PAGE = 50
 const DAY_MS = 86_400_000
@@ -44,7 +45,7 @@ const CLOSED_STATUSES: FollowUpStatus[] = ['revoked', 'expired']
 
 // 分布条与图例的实色，与标签同一套色相 / solid colours for the bar and legend, same hues as the labels
 const SOLID: Record<FollowUpStatus, string> = {
-  pending: 'bg-amber-400',
+  pending: 'bg-warn',
   contacted: 'bg-blue-400',
   interested: 'bg-[var(--purple-hi)]',
   converted: 'bg-[var(--up)]',
@@ -84,6 +85,10 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
   const [total, setTotal] = useState(0)
   const [dist, setDist] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(false)
+  // 跟进行与客服卡片只在这次挂载里第一次出现时进场；翻页、换筛选直接出现。
+  // Follow-up rows and agent cards animate only the first time they appear in this mount.
+  const rowsReveal = useFirstReveal(rows !== null)
+  const agentsReveal = useFirstReveal(progress !== null)
   const ctrlRef = useRef<AbortController | null>(null)
 
   const [sel, setSel] = useState<Set<string>>(new Set())
@@ -266,7 +271,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
           onClick={() => pickLabel(label === 'pending' ? '' : 'pending')}
         >
           <span className="adm-kpi-label">
-            <i className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+            <i className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
             {t('admin.support.progress.kpiPending')}
           </span>
           <span className="adm-kpi-value num">{totals ? totals.pending : '—'}</span>
@@ -294,7 +299,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
       {/* ② 客服 / agents */}
       <section>
         <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <h3 className="text-[15px] font-semibold text-neutral-100">{t('admin.support.progress.agentsTitle')}</h3>
+          <h3 className="text-base font-semibold text-neutral-100">{t('admin.support.progress.agentsTitle')}</h3>
           <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500" aria-hidden="true">
             {FOLLOW_UP_STAFF_STATUSES.map((s) => (
               <li key={s} className="inline-flex items-center gap-1.5">
@@ -322,6 +327,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                 key={a.staffId}
                 row={a}
                 index={i}
+                rise={agentsReveal}
                 on={agent === a.staffId}
                 onPick={() => setAgent(agent === a.staffId ? '' : a.staffId)}
                 ago={ago}
@@ -392,7 +398,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
             ))}
           {staleOnly && (
             <button type="button" className="adm-chip is-on" aria-pressed="true" onClick={() => setStaleOnly(false)}>
-              <i className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden="true" />
+              <i className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true" />
               {t('admin.support.progress.staleOnly')}
               <span aria-hidden="true">×</span>
             </button>
@@ -432,8 +438,8 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                   {rows.map((f, i) => (
                     <tr
                       key={f.id}
-                      className={`adm-rise cursor-pointer ${sel.has(f.id) ? 'is-sel' : ''}`}
-                      style={{ ['--i' as string]: Math.min(i, 14) }}
+                      className={`${rowsReveal ? 'adm-rise ' : ''}cursor-pointer ${sel.has(f.id) ? 'is-sel' : ''}`}
+                      style={rowsReveal ? { ['--i' as string]: Math.min(i, 5) } : undefined}
                       onClick={() => setOpenId(f.id)}
                     >
                       <td className="adm-th-check" onClick={(e) => e.stopPropagation()}>
@@ -452,7 +458,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                           <div className="min-w-0">
                             <button
                               type="button"
-                              className="block max-w-[200px] truncate text-left text-[13px] font-medium text-neutral-100 hover:text-white"
+                              className="block max-w-[200px] truncate text-left text-sm font-medium text-neutral-100 hover:text-white"
                               onClick={(e) => {
                                 e.stopPropagation()
                                 setOpenId(f.id)
@@ -486,7 +492,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
             {/* 手机：一行一张 / phones: one card per row */}
             <ul className={`space-y-2 md:hidden ${loading ? 'opacity-60' : ''}`}>
               {rows.map((f, i) => (
-                <li key={f.id} className="adm-rise" style={{ ['--i' as string]: Math.min(i, 14) }}>
+                <li key={f.id} className={rowsReveal ? 'adm-rise' : undefined} style={rowsReveal ? { ['--i' as string]: Math.min(i, 5) } : undefined}>
                   <div className={`adm-card flex gap-3 !p-4 ${sel.has(f.id) ? 'ring-1 ring-[var(--purple-hi)]' : ''}`}>
                     {f.active && (
                       <input
@@ -499,7 +505,7 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
                     )}
                     <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpenId(f.id)}>
                       <span className="flex items-center gap-2">
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-neutral-100">{f.nickname || f.email || '—'}</span>
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-neutral-100">{f.nickname || f.email || '—'}</span>
                         <Tag tone={FU_STATUS_TONE[f.status]}>{t(`supportDesk.status.${f.status}`)}</Tag>
                       </span>
                       <span className="mt-0.5 block truncate text-xs text-neutral-500">
@@ -609,12 +615,14 @@ export default function ProgressPanel({ onToast }: { onToast: (kind: 'ok' | 'err
 function AgentCard({
   row,
   index,
+  rise,
   on,
   onPick,
   ago,
 }: {
   row: SupportProgressRow
   index: number
+  rise: boolean
   on: boolean
   onPick: () => void
   ago: (iso: string | null | undefined) => string
@@ -626,20 +634,20 @@ function AgentCard({
       type="button"
       onClick={onPick}
       aria-pressed={on}
-      className={`adm-agent adm-rise ${on ? 'is-on' : ''} ${row.disabled ? 'is-off' : ''}`}
-      style={{ ['--i' as string]: Math.min(index, 12) }}
+      className={`adm-agent${rise ? ' adm-rise' : ''} ${on ? 'is-on' : ''} ${row.disabled ? 'is-off' : ''}`}
+      style={rise ? { ['--i' as string]: Math.min(index, 5) } : undefined}
     >
       <span className="flex items-center gap-3">
         <Avatar name={row.nickname || row.email} size={36} tone="staff" />
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-semibold text-neutral-100">{row.nickname || row.email}</span>
+          <span className="block truncate text-sm font-semibold text-neutral-100">{row.nickname || row.email}</span>
           <span className="mt-0.5 block truncate text-xs text-neutral-500">
             {row.role === 'admin' ? t('admin.support.role.admin') : t(`admin.support.tier.${row.tier}`)}
             {row.disabled ? ` · ${t('admin.support.progress.disabled')}` : ''}
           </span>
         </span>
         <span className="shrink-0 text-right">
-          <span className="num block text-[26px] font-semibold leading-none tracking-tight text-neutral-50">{row.active}</span>
+          <span className="num block text-2xl font-semibold leading-none tracking-tight text-neutral-50">{row.active}</span>
           <span className="mt-1 block text-xs text-neutral-500">{t('admin.support.progress.activeLabel')}</span>
         </span>
       </span>

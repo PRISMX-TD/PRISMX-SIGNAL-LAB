@@ -86,7 +86,7 @@ export default function ActionMenu({
         {t('supportDesk.actions.reason')}
         {!required && ` ${t('supportDesk.actions.optional')}`}
       </span>
-      <textarea className="input min-h-[64px] w-full rounded-xl py-2 text-sm leading-relaxed" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
+      <textarea className="input min-h-[64px] w-full rounded-panel py-2 text-sm leading-relaxed" value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} />
     </label>
   )
 
@@ -179,7 +179,7 @@ export default function ActionMenu({
             <input type="number" min={1} max={365} inputMode="numeric" className="input w-32" value={days} onChange={(e) => setDays(e.target.value)} />
           </label>
           {!me.isAdmin && daysNum > me.settings.compDaysMax && (
-            <p className="text-xs text-amber-300">{t('supportDesk.actions.compDaysOverCap')}</p>
+            <p className="text-xs text-warn">{t('supportDesk.actions.compDaysOverCap')}</p>
           )}
           {reasonField(true)}
         </DeskModal>
@@ -201,7 +201,7 @@ export default function ActionMenu({
         >
           <p className="text-neutral-300">{t('supportDesk.actions.messageBody')}</p>
           <input className="input w-full" placeholder={t('supportDesk.actions.messageTitle')} maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea className="input min-h-[120px] w-full rounded-xl py-2 text-sm leading-relaxed" placeholder={t('supportDesk.actions.messageText')} maxLength={5000} value={body} onChange={(e) => setBody(e.target.value)} />
+          <textarea className="input min-h-[120px] w-full rounded-panel py-2 text-sm leading-relaxed" placeholder={t('supportDesk.actions.messageText')} maxLength={5000} value={body} onChange={(e) => setBody(e.target.value)} />
         </DeskModal>
       )}
 

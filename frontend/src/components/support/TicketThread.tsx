@@ -195,7 +195,7 @@ export default function TicketThread({
       <div className="flex items-start gap-2.5">
         {leading}
         <div className="min-w-0 flex-1">
-          <h2 className="line-clamp-2 font-display text-[17px] font-semibold leading-snug text-neutral-50">{ticket.title}</h2>
+          <h2 className="line-clamp-2 font-display text-lg font-semibold leading-snug text-neutral-50">{ticket.title}</h2>
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-neutral-500">
             <span className="inline-flex min-w-0 max-w-full items-center gap-1.5">
               <Avatar name={ticket.userEmail} size={18} />
@@ -299,18 +299,18 @@ export default function TicketThread({
                     <span className="max-w-full truncate font-medium text-neutral-300">{name}</span>
                     {fromStaff && <span>{t(`supportDesk.role.${r.authorRole}`)}</span>}
                     {r.internal && (
-                      <span className="rounded-[10px] bg-amber-400/15 px-1.5 py-px text-xs font-semibold text-amber-200">{t('supportDesk.thread.internalTag')}</span>
+                      <span className="rounded-control bg-warn/15 px-1.5 py-px text-xs font-semibold text-warn">{t('supportDesk.thread.internalTag')}</span>
                     )}
                     <span className="num">{fmtClock(r.createdAt)}</span>
                   </div>
                 )}
                 <div
-                  className={`rounded-[18px] px-3.5 py-2.5 ${
+                  className={`rounded-panel px-3.5 py-2.5 ${
                     r.internal
-                      ? 'rounded-tr-md border border-dashed border-amber-400/45 bg-amber-400/[0.07]'
+                      ? 'rounded-tr-lg border border-dashed border-warn/45 bg-warn/[0.07]'
                       : fromStaff
-                        ? 'rounded-tr-md border border-[rgb(var(--purple-rgb)/0.38)] bg-[rgb(var(--purple-rgb)/0.2)]'
-                        : 'rounded-tl-md bg-[var(--surface-2)]'
+                        ? 'rounded-tr-lg border border-[rgb(var(--purple-rgb)/0.38)] bg-[rgb(var(--purple-rgb)/0.2)]'
+                        : 'rounded-tl-lg bg-[var(--surface-2)]'
                   }`}
                   title={grouped ? fmtClock(r.createdAt) : undefined}
                 >
@@ -388,15 +388,15 @@ export default function TicketThread({
           <button
             type="button"
             onClick={() => void send()}
-            className={`btn h-9 shrink-0 gap-1.5 px-4 text-xs ${internal ? 'border-amber-400/40 bg-amber-400/20 text-amber-100 hover:bg-amber-400/30' : 'btn-primary'}`}
+            className={`btn h-9 shrink-0 gap-1.5 px-4 text-xs ${internal ? 'border-warn/40 bg-warn/20 text-warn hover:bg-warn/30' : 'btn-primary'}`}
             disabled={!canSend}
           >
             <IconSend size={14} />
-            {sending ? t('common.loading') : images.uploading ? t('tickets.images.uploading') : internal ? t('supportDesk.thread.saveNote') : t('tickets.reply')}
+            {sending ? (internal ? t('supportDesk.thread.savingNote') : t('tickets.sending')) : images.uploading ? t('tickets.images.uploading') : internal ? t('supportDesk.thread.saveNote') : t('tickets.reply')}
           </button>
         </div>
       </div>
-      {internal && <p className="mt-2 px-1 text-xs text-amber-300/90">{t('supportDesk.thread.internalHint')}</p>}
+      {internal && <p className="mt-2 px-1 text-xs text-warn/90">{t('supportDesk.thread.internalHint')}</p>}
     </div>
   )
 

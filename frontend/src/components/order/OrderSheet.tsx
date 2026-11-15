@@ -18,11 +18,14 @@ import { displaySymbol, localizeApiError } from '../../api/utils'
 import { useLive } from '../../store/live'
 import { useBackToClose } from '../../utils/useBackToClose'
 import { useDialogA11y } from '../../utils/useDialogA11y'
+import { useScrollLock } from '../../utils/scrollLock'
 import OrderConnectNotice from '../OrderConnectNotice'
 import SlideToConfirm from './SlideToConfirm'
 import { quickLots, QUICK_RISK_PCTS, formatMoney, sanitizeDecimal } from './orderMath'
 import type { OrderForm } from './useOrderForm'
+import { OrderRejectedError } from './orderRejected'
 import { useVisualViewportVars } from './useVisualViewportVars'
+import { EMPTY } from '../../utils/format'
 
 // 提交后多久还没回执就提示「券商响应较慢，请勿重复下单」。直连账号的下单请求最长
 // 要等约 160 秒（api/client.ts 的 TRADE_TIMEOUT_MS），而人盯着转圈超过几秒就会开始
@@ -82,14 +85,21 @@ interface Props {
   tpPlaceholder?: string
   onCancel: () => void
   onConfirm: OrderConfirm
+  /** 退场中（调用方的 usePresence）：外层挂 .closing 播退场 / exiting: .closing plays the exit */
+  closing?: boolean
 }
 
+// 选中态用全站主选择的实色紫（见 tokens.css「选中态分三种」），与图表页下单面板的
+// .term-mode / .term-pre 一致。中性不行：未选中的 bg-white/5 压在弹窗底上几乎就是中性选中色。
+// Selected uses the solid violet of primary selections (tokens.css), matching the chart
+// ticket's .term-mode / .term-pre. Neutral would not read: unselected bg-white/5 on the sheet
+// is already almost the neutral selected tone.
 const segBtn = (on: boolean) =>
-  `px-2.5 py-1 rounded-md text-xs font-medium border ${on ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-400'}`
+  `slide-seg px-2.5 py-1 rounded-lg text-xs font-medium border ${on ? 'border-prism-600 bg-prism-600 text-white' : 'border-white/10 bg-white/5 text-neutral-400'}`
 const chipBtn = (on: boolean) =>
-  `px-2 py-0.5 rounded-md border text-xs font-mono ${on ? 'border-prism-500/60 bg-prism-600/20 text-prism-200' : 'border-white/10 bg-white/5 text-neutral-300'}`
+  `px-2 py-0.5 rounded-lg border text-xs font-mono ${on ? 'border-prism-600 bg-prism-600 text-white' : 'border-white/10 bg-white/5 text-neutral-300'}`
 
-export default function OrderSheet({ form, symbol, totalAccounts, priceText, headExtra, blocked, slPlaceholder = 'SL', tpPlaceholder = 'TP', onCancel, onConfirm }: Props) {
+export default function OrderSheet({ form, symbol, totalAccounts, priceText, headExtra, blocked, slPlaceholder = 'SL', tpPlaceholder = 'TP', onCancel, onConfirm, closing = false }: Props) {
   const { t } = useTranslation()
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
@@ -152,18 +162,39 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   useBackToClose(acctMenuOpen, () => setAcctMenuOpen(false))
 
   // role / 焦点陷阱 / 焦点还回。Esc 不交给它：下面那个自带 submitting 守卫的监听已经在管
-  // （提交中不许关），两处都处理会在提交中被关掉。
+  // （提交中不许关），两处都处理会在提交中被关掉。退场一开始就收手（open: !closing）：焦点
+  // 立刻还给打开者，不困在一个正在淡出、点不到的弹窗里。
   // role + focus trap + focus restore. Escape stays with the listener below, which
   // guards against closing mid-submit; letting both handle it would defeat that guard.
+  // It lets go as soon as the exit starts (open: !closing): focus returns to the opener
+  // at once instead of staying trapped in a fading, unclickable dialog.
   const sheetRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
-  useDialogA11y(sheetRef, guardedCancel, { closeOnEscape: false })
+  const slTpErrId = useId()
+  const acctListId = useId()
+  const acctTriggerRef = useRef<HTMLButtonElement>(null)
+  const acctMenuRef = useRef<HTMLDivElement>(null)
+  useDialogA11y(sheetRef, guardedCancel, { closeOnEscape: false, open: !closing })
+  // 打开期间锁页面滚动（锁的是 html，见 utils/scrollLock）；退场开始就放开。
+  // Lock page scroll while open (html, see utils/scrollLock); release once the exit starts.
+  useScrollLock(!closing)
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !inFlightRef.current) onCancelRef.current() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  // 账户菜单打开后把焦点放到当前选中的那一项（listbox 弹层的约定），方向键从这里开始走。
+  // 鼠标点开时这次程序聚焦不会显示焦点环（:focus-visible 的启发式），只有键盘用户看得到。
+  // When the account menu opens, focus the selected option (listbox popup convention) so the
+  // arrow keys start from there. A mouse-opened menu shows no ring for this programmatic focus.
+  useEffect(() => {
+    if (!acctMenuOpen) return
+    const menu = acctMenuRef.current
+    const sel = menu?.querySelector<HTMLButtonElement>('[aria-selected="true"]') ?? menu?.querySelector<HTMLButtonElement>('[role="option"]')
+    sel?.focus({ preventScroll: true })
+  }, [acctMenuOpen])
 
   const { isBuy, selected, accounts } = form
   // 风险模式算不出合法手数时不能提交：手数框里留着的是上一次的值，提交就是按一个
@@ -176,7 +207,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
     if (form.slTpInvalid) { setError(t('order.slTpInvalid')); return }
     if (form.riskBelowMinLot) { setError(t('order.riskBelowMinLot')); return }
     const vol = form.parsedVolume
-    if (vol == null) { setError(t('order.volume')); return }
+    if (vol == null) { setError(t('order.volumeInvalid')); return }
     setReceipt('waiting')
     setSubmitting(true)
     setError('')
@@ -187,19 +218,35 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
       later(() => onCancelRef.current(), 2000)
     } catch (err) {
       setReceipt('error')
-      setError(err instanceof Error ? localizeApiError(err.message) : 'error')
-      // 报错后立刻把滑动条放回来（以前要干等 2 秒才能重试）。幂等号在失败时不轮换，立即重试
-      // 是安全的；错误回执卡保留到下一次滑动开始（handleSubmit 开头会重置为 'waiting'）。
+      if (err instanceof OrderRejectedError) {
+        // 券商给了结果但不是成功：REJECTED（确定没执行）或 FAILED（结果未知）。文字与以前那条
+        // toast 一字不差，只是挪进回执卡，不再两处各说一遍。
+        // 幂等号：REJECTED 必须换号。后端按 clientOrderId 去重（orders.py 的幂等检查），同号
+        // 重试只会把这条 REJECTED 原样退回，永远不会再向券商发单。FAILED 不换：那一单可能已经
+        // 成交，重试必须让后端认出是同一笔。
+        // The broker answered, but not with a success: REJECTED (certainly not executed) or
+        // FAILED (unknown). Same text the old toast used, moved into the receipt card.
+        // Idempotency key: REJECTED must rotate, because the backend dedupes by clientOrderId and
+        // a same-key retry just returns this REJECTED row without sending anything. FAILED keeps
+        // the key: it may have executed, and a retry must be recognised as the same order.
+        setError(t('order.rejected', { msg: err.message ? localizeApiError(err.message) : EMPTY }))
+        if (err.order.status === 'REJECTED') form.rotateOrderId()
+      } else {
+        setError(err instanceof Error ? localizeApiError(err.message) : t('common.error'))
+      }
+      // 报错后立刻把滑动条放回来（以前要干等 2 秒才能重试）。网络错误 / 结果未知时幂等号不轮换，
+      // 立即重试是安全的；错误回执卡保留到下一次滑动开始（handleSubmit 开头会重置为 'waiting'）。
       // Bring the slider back at once after an error (it used to wait 2s to allow a retry). The
-      // idempotency id isn't rotated on failure so an immediate retry is safe; the error receipt
-      // card stays until the next slide starts (handleSubmit resets it to 'waiting').
+      // idempotency id isn't rotated on a network error or unknown outcome, so an immediate retry
+      // is safe; the error receipt card stays until the next slide starts (handleSubmit resets it
+      // to 'waiting').
       setSubmitting(false)
     }
   }
 
   const symLetter = (symbol[0] ?? '?').toUpperCase()
   const tone = isBuy ? 'var(--up)' : 'var(--down)'
-  const avaBg = isBuy ? 'rgba(46,224,126,0.15)' : 'rgba(255,77,103,0.15)'
+  const avaBg = isBuy ? 'rgb(var(--up-rgb) / 0.15)' : 'rgb(var(--down-rgb) / 0.15)'
   // 头部价格标签：拿到实时报价（且连接在线）才叫「现价」；否则 priceText 其实是信号
   // 入场价 / 图表最后收盘价，叫「参考价」才诚实。
   // Head price label: "current price" only with a live quote over a live socket;
@@ -210,7 +257,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   // 包含块，导致弹窗相对内容区而非视口定位。/ Portal to body: the .page-enter wrapper's
   // transform would become the containing block for fixed and mislocate the modal.
   return createPortal(
-    <div ref={overlayRef} className="slide-overlay" onClick={guardedCancel}>
+    <div ref={overlayRef} className={`slide-overlay${closing ? ' closing' : ''}`} onClick={guardedCancel}>
       {closeLocked && <BackBlocker key={backGen} onBack={() => setBackGen((g) => g + 1)} />}
       <div ref={sheetRef} className="slide-sheet" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} aria-busy={inFlight || undefined} tabIndex={-1}>
         <button className="slide-cancel-x" onClick={guardedCancel} disabled={closeLocked} aria-label={t('common.close')}>
@@ -242,27 +289,72 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           {accounts.length > 1 && (
             <div className="slide-row slide-row-acct">
               <span className="k">{t('order.account')}</span>
-              <div className="slide-acct-picker">
-                <button type="button" className="slide-acct-trigger" onClick={() => setAcctMenuOpen((v) => !v)}>
+              {/* 键盘：菜单打开时 ↑↓ / Home / End 在选项间移动；Esc 与 Tab 只收起菜单、焦点回触发按钮。
+                  Esc 必须 stopPropagation：本弹窗挂在 body 上（Portal），React 在 body 上分发，
+                  这里拦住后上面 window 上那个「Esc 关整个下单弹窗」的监听就收不到。
+                  Keyboard: arrows / Home / End move between options while the menu is open; Escape and
+                  Tab only close the menu and return focus to the trigger. Escape must stop propagation:
+                  the sheet is portalled to body, React dispatches there, so stopping it keeps the window
+                  listener above (which closes the whole order sheet) from seeing it. */}
+              <div
+                className="slide-acct-picker"
+                onKeyDown={(e) => {
+                  if (!acctMenuOpen) return
+                  if (e.key === 'Escape' || e.key === 'Tab') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    setAcctMenuOpen(false)
+                    acctTriggerRef.current?.focus()
+                    return
+                  }
+                  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Home' && e.key !== 'End') return
+                  const opts = Array.from(acctMenuRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]') ?? [])
+                  if (opts.length === 0) return
+                  e.preventDefault()
+                  const cur = opts.indexOf(document.activeElement as HTMLButtonElement)
+                  const next =
+                    e.key === 'Home' ? 0
+                    : e.key === 'End' ? opts.length - 1
+                    : e.key === 'ArrowDown' ? Math.min(opts.length - 1, cur + 1)
+                    : Math.max(0, cur - 1)
+                  opts[next].focus()
+                }}
+              >
+                <button
+                  ref={acctTriggerRef}
+                  type="button"
+                  className="slide-acct-trigger"
+                  onClick={() => setAcctMenuOpen((v) => !v)}
+                  aria-haspopup="listbox"
+                  aria-expanded={acctMenuOpen}
+                  aria-controls={acctMenuOpen ? acctListId : undefined}
+                  aria-label={`${t('order.account')}: ${selected?.login ?? ''}${selected?.accountName ? ` · ${selected.accountName}` : ''}`}
+                >
                   <span>{selected?.login}{selected?.accountName ? ` · ${selected.accountName}` : ''}</span>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ transform: acctMenuOpen ? 'rotate(180deg)' : undefined }}><path d="M6 9l6 6 6-6" /></svg>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ transform: acctMenuOpen ? 'rotate(180deg)' : undefined }}><path d="M6 9l6 6 6-6" /></svg>
                 </button>
                 {acctMenuOpen && (
                   <>
-                    <div className="slide-acct-backdrop" onClick={() => setAcctMenuOpen(false)} />
-                    <div className="slide-acct-menu">
+                    <div className="slide-acct-backdrop" onClick={() => { setAcctMenuOpen(false); acctTriggerRef.current?.focus() }} />
+                    <div ref={acctMenuRef} id={acctListId} className="slide-acct-menu" role="listbox" aria-label={t('order.account')}>
                       {accounts.map((a) => (
                         <button
                           type="button"
                           key={a.login}
-                          className={`slide-acct-opt ${a.login === form.login ? 'active' : ''}`}
-                          onClick={() => { form.chooseLogin(a.login); setAcctMenuOpen(false) }}
+                          role="option"
+                          aria-selected={a.login === form.login}
+                          tabIndex={-1}
+                          className={`slide-acct-opt ${a.login === form.login ? 'active' : ''}${a.online ? '' : ' off'}`}
+                          onClick={() => { form.chooseLogin(a.login); setAcctMenuOpen(false); acctTriggerRef.current?.focus() }}
                         >
                           <span className="opt-login">
                             {/* 列表会保留本次弹窗里掉线的账号（见 useStickyOnlineAccounts），状态必须标出来。
-                                The list keeps accounts that went offline mid-modal, so their state has to show. */}
-                            <i className={`opt-dot ${a.online ? 'on' : ''}`} />
+                                形状（空心圈）+ 变暗 + 「离线」二字，不只靠颜色。
+                                The list keeps accounts that went offline mid-modal, so their state has to show:
+                                shape (hollow ring) + dimming + the word, not colour alone. */}
+                            <i className={`opt-dot ${a.online ? 'on' : ''}`} aria-hidden="true" />
                             {a.login}{a.accountName ? ` · ${a.accountName}` : ''}
+                            {!a.online && <span className="opt-off">{t('common.offline')}</span>}
                           </span>
                           <span className="opt-equity num">{formatMoney(a.equity)} {a.accountCurrency ?? ''}</span>
                         </button>
@@ -283,23 +375,24 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           )}
           <div className="slide-row">
             <span className="k">{t('order.sizeMode')}</span>
-            <div className="flex gap-1.5">
-              <button type="button" onClick={() => form.setSizeMode('quick')} className={segBtn(form.sizeMode === 'quick')}>{t('order.sizeModeLots')}</button>
-              <button type="button" onClick={() => form.setSizeMode('risk')} className={segBtn(form.sizeMode === 'risk')}>{t('order.sizeModeRisk')}</button>
+            <div className="flex gap-1.5" role="group" aria-label={t('order.sizeMode')}>
+              <button type="button" onClick={() => form.setSizeMode('quick')} aria-pressed={form.sizeMode === 'quick'} className={segBtn(form.sizeMode === 'quick')}>{t('order.sizeModeLots')}</button>
+              <button type="button" onClick={() => form.setSizeMode('risk')} aria-pressed={form.sizeMode === 'risk'} className={segBtn(form.sizeMode === 'risk')}>{t('order.sizeModeRisk')}</button>
             </div>
           </div>
           <div className="slide-row">
             <span className="k">{t('order.volume')}</span>
             <span className="stepper">
-              <button type="button" onClick={() => form.stepLot(-1)} aria-label="−">−</button>
+              <button type="button" onClick={() => form.stepLot(-1)} aria-label={t('order.volumeDec')}>−</button>
               <input
                 className="lot-val num lot-input"
+                aria-label={t('order.volume')}
                 value={form.volume}
                 inputMode="decimal"
                 onChange={(e) => form.typeVolume(e.target.value)}
                 onBlur={form.blurVolume}
               />
-              <button type="button" onClick={() => form.stepLot(1)} aria-label="+">+</button>
+              <button type="button" onClick={() => form.stepLot(1)} aria-label={t('order.volumeInc')}>+</button>
             </span>
           </div>
           {form.sizeMode === 'quick' ? (
@@ -307,7 +400,7 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
               <span className="k" />
               <div className="flex gap-1.5">
                 {quickLots(symbol).map((q) => (
-                  <button type="button" key={q} onClick={() => form.setVolume(q.toFixed(2))} className="slide-chip px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-neutral-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
+                  <button type="button" key={q} onClick={() => form.setVolume(q.toFixed(2))} className="slide-chip px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 text-xs text-neutral-300 hover:border-prism-500/50 hover:text-prism-300 font-mono">
                     {q.toFixed(2)}
                   </button>
                 ))}
@@ -316,9 +409,9 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           ) : (
             <div className="slide-row">
               <span className="k">{t('order.riskPct')}</span>
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5" role="group" aria-label={t('order.riskPct')}>
                 {QUICK_RISK_PCTS.map((p) => (
-                  <button type="button" key={p} onClick={() => form.setRiskPct(String(p))} className={`slide-chip ${chipBtn(form.riskPct === String(p))}`}>{p}%</button>
+                  <button type="button" key={p} onClick={() => form.setRiskPct(String(p))} aria-pressed={form.riskPct === String(p)} className={`slide-chip ${chipBtn(form.riskPct === String(p))}`}>{p}%</button>
                 ))}
               </div>
             </div>
@@ -326,19 +419,19 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           {form.riskNeedsSl && (
             <div className="slide-row">
               <span className="k" />
-              <span className="text-xs text-amber-400/90">{t('order.riskNeedsSl')}</span>
+              <span className="text-xs text-warn/90">{t('order.riskNeedsSl')}</span>
             </div>
           )}
           {form.riskUnsupported && (
             <div className="slide-row">
               <span className="k" />
-              <span className="text-xs text-amber-400/90">{t('order.riskUnsupportedPair')}</span>
+              <span className="text-xs text-warn/90">{t('order.riskUnsupportedPair')}</span>
             </div>
           )}
           {form.riskBelowMinLot && (
             <div className="slide-row">
               <span className="k" />
-              <span className="text-xs text-amber-400/90">{t('order.riskBelowMinLot')}</span>
+              <span className="text-xs text-warn/90">{t('order.riskBelowMinLot')}</span>
             </div>
           )}
           <div className="slide-row">
@@ -350,15 +443,15 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
                   Values go through sanitizeDecimal before hitting state so full-width
                   digits, comma decimals and stray dots are understood rather than left
                   for parseFloat to misread. */}
-              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-down text-right ${form.slInvalid ? 'border-down' : 'border-down/40'}`} value={form.sl} inputMode="decimal" onChange={(e) => form.setSl(sanitizeDecimal(e.target.value))} placeholder={slPlaceholder} />
-              <i className="text-neutral-500">/</i>
-              <input className={`h-8 w-[90px] rounded-lg bg-white/5 border px-2 text-sm num text-up text-right ${form.tpInvalid ? 'border-down' : 'border-up/40'}`} value={form.tp} inputMode="decimal" onChange={(e) => form.setTp(sanitizeDecimal(e.target.value))} placeholder={tpPlaceholder} />
+              <input className={`h-8 w-[112px] rounded-lg bg-white/5 border px-2 text-sm touch-16 num text-down text-right ${form.slInvalid ? 'border-down' : 'border-down/70'}`} value={form.sl} inputMode="decimal" onChange={(e) => form.setSl(sanitizeDecimal(e.target.value))} placeholder={slPlaceholder} aria-label={t('signals.colSl')} aria-invalid={form.slInvalid || undefined} aria-describedby={form.slInvalid ? slTpErrId : undefined} />
+              <i className="text-neutral-500" aria-hidden="true">/</i>
+              <input className={`h-8 w-[112px] rounded-lg bg-white/5 border px-2 text-sm touch-16 num text-up text-right ${form.tpInvalid ? 'border-down' : 'border-up/70'}`} value={form.tp} inputMode="decimal" onChange={(e) => form.setTp(sanitizeDecimal(e.target.value))} placeholder={tpPlaceholder} aria-label={t('signals.colTp')} aria-invalid={form.tpInvalid || undefined} aria-describedby={form.tpInvalid && !form.slInvalid ? slTpErrId : undefined} />
             </div>
           </div>
           {form.slTpInvalid && (
             <div className="slide-row">
               <span className="k" />
-              <span className="text-xs text-down">{form.slTooClose ? t('order.slTooClose') : form.slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}</span>
+              <span id={slTpErrId} className="text-xs text-down">{form.slTooClose ? t('order.slTooClose') : form.slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}</span>
             </div>
           )}
           {form.estMargin != null && (
@@ -389,20 +482,35 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
 
         {!form.hasAccounts && <OrderConnectNotice neverConnected={totalAccounts === 0} />}
         {form.hasAccounts && blocked?.banner}
-        {error && (
-          <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">{error}</div>
+        {/* 回执卡已经在报错时（receipt === 'error'），同一句不再在上面红条里重复一遍。红条只留给
+            还没提交就被拦下的校验错误（信号过期、止损止盈不合法等）。
+            When the receipt card already shows the error, don't repeat it in this banner; the
+            banner is for validation stops that never reached a submit. */}
+        {error && receipt !== 'error' && (
+          <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">{error}</div>
         )}
 
         {receipt && (
           <div className="receipt-card">
-            <div className={`receipt-line ${receipt === 'ok' ? 'ok' : 'wait'}`}>
+            {/* 「提交中 → 已提交 / 被拒原因」都走这一行的 status 播报：这一行从「提交中」起就在，只是
+                文字后变，读屏器读得可靠。上面的红色错误条在 receipt==='error' 时不渲染（同一句不说两遍），
+                被拒原因只在这里，所以不再对读屏隐藏。也不另调 announce()：这一行在弹窗里面，认 aria-modal
+                的读屏器也读得到；弹窗外的播报区再说一遍就成了两遍（这条路径没有 toast，见 hooks.ts 的
+                throwOnReject）。
+                "Submitting → submitted / rejection reason" are all announced by this line's status role:
+                it exists from "submitting" on and only its text changes, so it is read reliably. The red
+                banner above is not rendered when receipt === 'error' (said once), so the reason lives only
+                here and is no longer hidden from screen readers. No separate announce() either: this line
+                is inside the dialog, so screen readers honouring aria-modal still reach it, and the live
+                region outside would make it twice (this path has no toast; see throwOnReject in hooks.ts). */}
+            <div className={`receipt-line ${receipt === 'ok' ? 'ok' : receipt === 'error' ? 'err' : 'wait'}`} role="status">
               {receipt === 'waiting' && <><span className="spinner" />{t('order.submitting')}</>}
               {/* 提交成功那一刻订单几乎总是还是 PENDING（真正成交要等桥接执行 + 回执），
                   所以这里如实写"已提交"，成交 / 拒绝由页面级 toast（监听 WS ORDER_UPDATE）稍后报告。
                   The order is still PENDING the instant submit resolves; the honest label is
                   "submitted", and the fill/reject arrives via the page-level toast. */}
               {receipt === 'ok' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>{t('order.submitted')}</>}
-              {receipt === 'error' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round"><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>{error || t('order.rejected', { msg: '' })}</>}
+              {receipt === 'error' && <><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg><span>{error || t('order.rejected', { msg: '' })}</span></>}
             </div>
             {receipt === 'waiting' && slow && (
               <p className="slide-slow" role="status">{t(canLeave ? 'order.slowBrokerLeave' : 'order.slowBroker')}</p>
@@ -410,7 +518,16 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
           </div>
         )}
 
-        {!submitting && canSubmit && <SlideToConfirm disabled={submitting} onConfirm={handleSubmit} />}
+        {/* label 给读屏 / 开关控制用：说清楚这一下会下什么单，而不是只念「滑动确认」。
+            label is for screen readers and switch users: it names the order this
+            press places, not just "slide to confirm". */}
+        {!submitting && canSubmit && (
+          <SlideToConfirm
+            disabled={submitting}
+            onConfirm={handleSubmit}
+            label={String(t('order.confirmAria', { side: isBuy ? t('common.buy') : t('common.sell'), symbol: displaySymbol(symbol), volume: form.volume }))}
+          />
+        )}
 
         {/* 请求在路上时不给「关闭」：见 guardedCancel。/ No close while in flight; see guardedCancel. */}
         {receipt && !inFlight && (

@@ -18,7 +18,7 @@ export default function Watermark({ text }: { text: string }) {
     <div
       aria-hidden="true"
       data-testid="support-watermark"
-      className="pointer-events-none fixed inset-0 z-[65] select-none"
+      className="pointer-events-none fixed inset-0 z-watermark select-none"
       style={{ backgroundImage: bg, backgroundRepeat: 'repeat' }}
     />
   )

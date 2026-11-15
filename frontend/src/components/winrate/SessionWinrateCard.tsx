@@ -120,7 +120,7 @@ const SessionWinrateCard: FC<{ preset?: AdminStrategyWinRate | null; presetLoadi
   return (
     <section className="card glass dash-overview dh-session p-[18px] sm:p-6">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-[15px] font-bold text-white">{t('dashboard.sessionWinrate.title')}</h3>
+        <h3 className="text-base font-bold text-white">{t('dashboard.sessionWinrate.title')}</h3>
         {!loading && !empty && (
           <Link to="/app?tab=analysis" className="dh-link">
             {t('winrate.viewDetail')}

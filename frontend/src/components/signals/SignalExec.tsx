@@ -31,6 +31,7 @@ import { fmtIssueClock, fmtPx, priceDecimals, riskFraction, rrTone } from './Sig
 import { symbolMeta } from '../../utils/symbolMeta'
 import { ClockTtlRing } from './TtlRing'
 import LockedPx, { LockIcon } from './LockedPx'
+import { EMPTY } from '../../utils/format'
 
 interface Props {
   signal: Signal | null
@@ -75,11 +76,11 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
           className="sym-ava"
           style={meta ? { background: meta.color + '33', color: meta.ink } : { background: 'var(--nest)', color: 'var(--text-3)' }}
         >
-          {meta ? meta.letter : '-'}
+          {meta ? meta.letter : EMPTY}
         </span>
         <div className="min-w-0">
           <div className="dh-exec-sym">
-            <b className="font-display">{signal ? displaySymbol(signal.symbol) : '-'}</b>
+            <b className="font-display">{signal ? displaySymbol(signal.symbol) : EMPTY}</b>
             {signal && <span className={`chip ${isBuy ? 'chip-buy' : 'chip-sell'}`}>{sideTag}</span>}
           </div>
           <div className="dh-exec-by">
@@ -94,7 +95,7 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
           take-profit value below it. */}
       <div className="dh-entry">
         <span className="dh-cap">{t('signals.colEntry')}</span>
-        <b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:e`} /> : fmtPx(signal.entry, decimals)) : '-'}</b>
+        <b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:e`} /> : fmtPx(signal.entry, decimals)) : EMPTY}</b>
       </div>
 
       {/* 止损｜盈亏比｜止盈 + 风险｜回报尺。盈亏比放正中间：它正下方那根尺画的就是这个数。
@@ -102,12 +103,12 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
           right below it is that number drawn to scale. */}
       <div className="dh-ladder">
         <div className="row">
-          <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:sl`} /> : fmtPx(signal.stopLoss, decimals)) : '-'}</b></div>
+          <div className="lv sl"><span className="dh-cap">{t('signals.colSl')}</span><b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:sl`} /> : fmtPx(signal.stopLoss, decimals)) : EMPTY}</b></div>
           <div className="lv rr">
             <span className="dh-cap">{t('signals.focus.rrLabel')}</span>
-            <b className={`num ${rrTone(rrVal)}`}>{rrVal != null ? `1:${rrVal.toFixed(2)}` : '-'}</b>
+            <b className={`num ${rrTone(rrVal)}`}>{rrVal != null ? `1:${rrVal.toFixed(2)}` : EMPTY}</b>
           </div>
-          <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:tp`} /> : fmtPx(signal.takeProfit, decimals)) : '-'}</b></div>
+          <div className="lv tp"><span className="dh-cap">{t('signals.colTp')}</span><b className="num">{signal ? (locked ? <LockedPx symbol={signal.symbol} seed={`${signal.id}:tp`} /> : fmtPx(signal.takeProfit, decimals)) : EMPTY}</b></div>
         </div>
         <div
           className={`sig-ladder-bar${riskFrac == null ? ' none' : ''}`}

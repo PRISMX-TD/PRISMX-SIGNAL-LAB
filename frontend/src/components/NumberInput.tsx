@@ -22,18 +22,23 @@
 // an unparseable entry reverts. type="text" + inputMode, because type="number"
 // reports `2.` as an empty value and swallows the decimal point.
 import { useEffect, useRef, useState } from 'react'
+import type { InputHTMLAttributes } from 'react'
 
-interface Props {
+// 其余原生属性（id、aria-describedby、aria-invalid、disabled、placeholder……）原样转发给 <input>，
+// 这样管理页的 <label htmlFor> 能关联上。本组件自己管的几项从类型里剔掉，调用方传不进来。
+// Other native attributes (id, aria-describedby, aria-invalid, disabled, placeholder, ...) are
+// forwarded to the <input> so admin labels can point at it via htmlFor. The ones this component
+// owns are omitted from the type so a caller cannot override them.
+type Props = Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'type' | 'value' | 'defaultValue' | 'onChange' | 'min' | 'max' | 'inputMode' | 'onFocus' | 'onBlur' | 'onKeyDown'
+> & {
   value: number
   onChange: (n: number) => void
   min?: number
   max?: number
   /** 只允许整数 / integers only */
   integer?: boolean
-  className?: string
-  disabled?: boolean
-  placeholder?: string
-  'aria-label'?: string
 }
 
 export default function NumberInput({
@@ -43,9 +48,7 @@ export default function NumberInput({
   max = Infinity,
   integer = false,
   className = 'input',
-  disabled,
-  placeholder,
-  'aria-label': ariaLabel,
+  ...rest
 }: Props) {
   const parse = (s: string) => (integer ? parseInt(s, 10) : parseFloat(s))
   const [text, setText] = useState(String(value))
@@ -72,13 +75,11 @@ export default function NumberInput({
 
   return (
     <input
+      {...rest}
       type="text"
       inputMode={integer ? 'numeric' : 'decimal'}
       className={className}
       value={text}
-      disabled={disabled}
-      placeholder={placeholder}
-      aria-label={ariaLabel}
       onChange={(e) => {
         const pattern = integer ? (allowNeg ? /[^0-9-]/g : /[^0-9]/g) : allowNeg ? /[^0-9.-]/g : /[^0-9.]/g
         const s = e.target.value.replace(pattern, '')

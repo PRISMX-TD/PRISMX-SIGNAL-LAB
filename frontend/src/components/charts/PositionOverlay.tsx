@@ -28,7 +28,7 @@ import { useTranslation } from 'react-i18next'
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type {
   IChartApi, ISeriesApi, IPrimitivePaneView, IPrimitivePaneRenderer,
-  AutoscaleInfo, Logical, HandleScrollOptions,
+  AutoscaleInfo, Logical, HandleScrollOptions, MouseEventParams,
 } from 'lightweight-charts'
 import type { PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
@@ -36,18 +36,33 @@ import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
 import { checkPendingPrice, checkSlTp } from '../order/orderMath'
 import { isChartAlive } from './chartLifecycle'
 import { DRAG_LOCK_SCROLL, scrollAfterDrag } from './chartConfig'
+import { DOWN_COLOR, UP_COLOR } from './canvasColors'
+import { EMPTY } from '../../utils/format'
 
 // 触摸屏放宽命中容差（手指没有像素级精度）/ looser hit tolerance on touch screens
 const isTouchDevice = typeof window !== 'undefined'
   && (window.matchMedia?.('(pointer: coarse)').matches ?? false)
 const TOL = isTouchDevice ? 14 : 6
 
-// 画布调色板是这一层自己的，与 tokens.css 的 --up/--down 刻意不同源：canvas 读不到
-// CSS 变量，而这几条线画在 K 线上，饱和度要比卡片上的数据色更高才压得住。
-// The canvas palette is local on purpose: canvas cannot read CSS variables, and these
-// lines sit on top of candles where they need more saturation than the card tokens.
-const UP_COLOR = '#2ee07e'
-const DOWN_COLOR = '#ff4d67'
+// 起拖阈值：按下后竖向走出这么远才算拖。没有它，鼠标单击一下线、或平移时从线附近起手，
+// 松手价已经偏了几个像素，就会弹出一个用户没选过价的改单确认。
+// Drag threshold: the pointer must travel this far vertically before a drag starts.
+// Without it a plain click on a line, or a pan that starts near one, ends a few pixels
+// off and pops a modify confirm with a price nobody chose.
+const DRAG_SLOP_MOUSE = 4
+const DRAG_SLOP_TOUCH = 8
+
+// 触摸、以及粗指针设备上的笔，都没有「悬停」。这类指针改走「点一下选中」。
+// Touch, and a pen on a coarse-pointer device, have no hover; they use tap-to-select.
+const isTouchLike = (pointerType: string) => pointerType === 'touch' || (pointerType === 'pen' && isTouchDevice)
+
+// 涨跌线用画布色板（canvasColors.ts，读 tokens.css 的 --up-canvas / --down-canvas），
+// 比卡片上的 --up / --down 饱和度更高，画在 K 线上才压得住。canvas 解析不了 var()，
+// 但 JS 读得到 CSS 变量的值，所以真源仍在 tokens.css。入场线的青色是这一层独有的。
+// Up/down lines use the canvas palette (canvasColors.ts, from --up-canvas /
+// --down-canvas), more saturated than the card tokens so they hold over candles.
+// Canvas cannot parse var(), but JS can read the value, so tokens.css stays the
+// source. The cyan entry colour is local to this layer.
 const ENTRY_COLOR = '#22d3ee'
 
 // 挂单用另一套：触发价琥珀色（与持仓的青色入场线一眼分开），止损止盈保持红/绿的
@@ -76,6 +91,16 @@ const DASH_PENDING = [2, 4]
 // Real top/bottom rather than "centre y + fixed height", because the legend is a
 // wrapping DOM element whose height depends on how many overlays are on.
 interface LabelBox { x: number; w: number; top: number; bottom: number }
+
+// 图例相对覆盖层的让位框，四周留 4px：标签紧贴着图例也一样难读。图例没有尺寸（不可见）时返回 null。
+// The legend's box relative to the overlay, with 4px of air (touching is as bad as
+// overlapping); null when the legend has no size.
+function measureLegendBox(host: HTMLElement, el: HTMLElement): LabelBox | null {
+  const hr = host.getBoundingClientRect()
+  const r = el.getBoundingClientRect()
+  if (r.width === 0 || r.height === 0) return null
+  return { x: r.left - hr.left - 4, w: r.width + 8, top: r.top - hr.top - 4, bottom: r.bottom - hr.top + 4 }
+}
 
 const LABEL_H = 15
 const LABEL_X0 = 6
@@ -149,6 +174,7 @@ interface LineHit {
   ticket: number
   kind: LineKind
   dist: number
+  price: number
 }
 
 interface Marker {
@@ -414,13 +440,24 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   // 拖拽中的线与其当前价位（未提交），以及已提交待回执的乐观值。
   // The line being dragged plus its uncommitted price, and optimistic values
   // for modifies that are submitted but not yet reported back by the bridge.
-  const dragRef = useRef<{ key: string; scope: LineScope; ticket: number; kind: LineKind; price: number } | null>(null)
+  // grab：线相对按下点的像素差，拖动时一直加回去，线不会跳到手指下。startY / slop / active：
+  // 过了起拖阈值才算真拖。pointerId：只认按下的那根手指。
+  // grab: the line's pixel offset from the press point, re-added on every move so the
+  // line never jumps under the finger. startY / slop / active: only a move past the
+  // threshold is a real drag. pointerId: only the pointer that pressed counts.
+  const dragRef = useRef<{ key: string; scope: LineScope; ticket: number; kind: LineKind; price: number; grab: number; startY: number; slop: number; active: boolean; pointerId: number } | null>(null)
   // 拖线前图表的 handleScroll，松手（或拖到一半被隐藏）时原样还回去，见 scrollAfterDrag。
   // The chart's handleScroll before the drag, restored verbatim on release (or hide mid-drag).
   const scrollBeforeDragRef = useRef<HandleScrollOptions | boolean | null>(null)
   const [dragKey, setDragKey] = useState<string | null>(null)
   const [dragPrice, setDragPrice] = useState<number | null>(null)
   const [hovered, setHovered] = useState<string | null>(null)
+  // 手指点选中的那条线（覆盖层在选中期间接管指针），以及最近一次按下是不是触摸——
+  // subscribeClick 的回调里拿不到 pointerType。
+  // The line selected by a tap (the overlay keeps the pointer while it is selected), and
+  // whether the latest press was touch: subscribeClick's callback has no pointerType.
+  const touchSelRef = useRef<string | null>(null)
+  const lastTouchRef = useRef(false)
   const [pending, setPending] = useState<Record<string, { price: number; at: number }>>({})
 
   // 拖拽松手后待确认的改单信息；确认框显示期间线停在拖到的位置，取消则弹回。
@@ -544,19 +581,33 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   // but declaring it first spares the reader from having to verify that.
   const overlayRef = useRef<HTMLDivElement>(null)
 
-  // 主图指标图例的让位框。每帧现测而不是缓存起来：图例的宽度随指标数值的位数
-  // 变（4279.40 → 967.4 就窄一截），高度随开了几个指标换行而变，任何"变了再测"
-  // 的写法都得盯住这两件事；而这里一帧只读一个元素的 rect，且是在 canvas 的绘制
-  // 回调里——布局此刻已经是干净的，不会触发重排。
+  // 主图指标图例的让位框。图例的宽度随指标数值的位数变（4279.40 → 967.4 就窄一截），
+  // 高度随开了几个指标换行而变，所以要跟着它的尺寸走。以前是在 canvas 的绘制回调里
+  // 每帧现测两次 getBoundingClientRect，理由是「此刻布局是干净的、不会触发重排」——
+  // 拖十字线时这不成立：图例的新数值刚在同一帧里写进 DOM，绘制回调一读 rect 就是一次
+  // 强制同步重排，一秒几十次。现在用 ResizeObserver 盯图例尺寸：它的回调在浏览器排完版
+  // 之后才跑，在那里量一次、存起来，绘制回调只读缓存；量到新框就 requestUpdate，让
+  // 标签重新避让。只需要盯尺寸：图例和覆盖层都贴着同一个父容器的左上角（见
+  // terminal.css 的 .term-legend.main），两者的相对位置不会变。
   // 元素引用缓存着，只有它从 DOM 上掉了才重新查（关掉全部主图指标时会掉）。
+  // 没有 ResizeObserver 的老内核退回每帧现测（原来的做法）。
   //
-  // Measured per frame rather than cached: the legend's width tracks the digit count of
-  // the indicator values and its height tracks how many overlays wrap onto a second row,
-  // so any "re-measure when it changes" scheme has to watch both. This reads one
-  // element's rect per frame inside the canvas paint callback, where layout is already
-  // clean, so it forces no reflow. The element reference is cached and only re-queried
-  // once it leaves the DOM (which happens when every main overlay is switched off).
+  // The main legend's dodge box. Its width tracks the digit count of the indicator values
+  // and its height tracks how many overlays wrap, so it must follow the legend's size. It
+  // used to be measured per frame (two getBoundingClientRect calls) inside the canvas paint
+  // callback on the grounds that layout is clean there. During a crosshair drag it is not:
+  // the legend's new text was committed earlier in the same frame, so the read forced a
+  // synchronous layout dozens of times a second. A ResizeObserver now watches the legend's
+  // size; its callback runs after the browser's own layout, so the box is measured there and
+  // cached, the paint callback only reads the cache, and a new box requests a repaint so the
+  // labels re-dodge. Size is all that needs watching: the legend and the overlay hang off the
+  // same parent's top-left corner (see .term-legend.main in terminal.css), so their offset
+  // never changes. The element reference is re-queried only once it leaves the DOM (which
+  // happens when every main overlay is switched off). Engines without ResizeObserver fall
+  // back to measuring per frame, as before.
   const legendElRef = useRef<HTMLElement | null>(null)
+  const legendBoxRef = useRef<LabelBox | null>(null)
+  const legendRoRef = useRef<ResizeObserver | null>(null)
   const readLegendBox = useCallback((): LabelBox | null => {
     const host = overlayRef.current
     if (!host) return null
@@ -564,13 +615,16 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     if (!el || !el.isConnected) {
       el = (host.parentElement?.querySelector('.term-legend.main') as HTMLElement | null) ?? null
       legendElRef.current = el
+      legendBoxRef.current = el ? measureLegendBox(host, el) : null
+      const ro = legendRoRef.current
+      if (ro) {
+        ro.disconnect()
+        if (el) ro.observe(el)
+      }
     }
     if (!el) return null
-    const hr = host.getBoundingClientRect()
-    const r = el.getBoundingClientRect()
-    if (r.width === 0 || r.height === 0) return null
-    // 四周留 4px：标签紧贴着图例也一样难读。/ 4px of air; touching is as bad as overlapping.
-    return { x: r.left - hr.left - 4, w: r.width + 8, top: r.top - hr.top - 4, bottom: r.bottom - hr.top + 4 }
+    if (!legendRoRef.current) return measureLegendBox(host, el)
+    return legendBoxRef.current
   }, [])
 
   // primitive 每帧读这份快照 / the primitive reads this snapshot each frame
@@ -603,6 +657,25 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     primRef.current?.requestUpdate()
   }, [markers, symPending, digits, hovered, dragKey])
 
+  // 盯主图图例的尺寸：变了就重量让位框并重绘（见上面 readLegendBox 的说明）。
+  // Watch the main legend's size: on change, re-measure the dodge box and repaint (see readLegendBox above).
+  useEffect(() => {
+    if (!visible || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => {
+      const host = overlayRef.current
+      const el = legendElRef.current
+      legendBoxRef.current = host && el && el.isConnected ? measureLegendBox(host, el) : null
+      primRef.current?.requestUpdate()
+    })
+    legendRoRef.current = ro
+    const el = legendElRef.current
+    if (el && el.isConnected) ro.observe(el)
+    return () => {
+      ro.disconnect()
+      legendRoRef.current = null
+    }
+  }, [visible])
+
   // ──── 命中判定 / hit testing ────
   const markersRef = useRef<Marker[]>(markers)
   markersRef.current = markers
@@ -621,7 +694,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
       if (ly == null) return
       const dist = Math.abs(y - ly)
       if (dist <= TOL && (!best || dist < best.dist)) {
-        best = { key: keyOf(scope, ticket, kind), scope, ticket, kind, dist }
+        best = { key: keyOf(scope, ticket, kind), scope, ticket, kind, dist, price }
       }
     }
     for (const m of markersRef.current) {
@@ -670,24 +743,73 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
       setHovered(h ? h.key : null)
     }
     const onHover = (e: PointerEvent) => {
-      last = { x: e.clientX, y: e.clientY }
       // 拖拽中要立刻放行指针事件，不能等到下一帧才把 pointerEvents 切成 auto。
       // Mid-drag the overlay must claim pointer events immediately, not next frame.
       if (dragRef.current) { el.style.pointerEvents = 'auto'; return }
+      // 触摸没有悬停：手指平移图表时擦过一条线，不能把覆盖层武装起来，否则它带着
+      // touch-none 留在那里，下一次在任何地方平移都会落到它身上、图表纹丝不动。
+      // Touch has no hover: a pan that brushes a line must not arm the overlay, or it
+      // stays armed with touch-none and the next pan anywhere lands on it and does nothing.
+      if (isTouchLike(e.pointerType)) return
+      last = { x: e.clientX, y: e.clientY }
       if (frame === 0) frame = window.requestAnimationFrame(evaluate)
     }
+    const onPress = (e: PointerEvent) => { lastTouchRef.current = isTouchLike(e.pointerType) }
+    // 冒泡期：在 React 挂在根节点上的 onPointerUp 之后才跑，这时 dragRef 已经清空。
+    // 触摸抬起后，不在拖、也没有点选中的线，就把覆盖层还给图表。
+    // Bubble phase: runs after React's root-level onPointerUp, when dragRef is already
+    // cleared. After a touch lifts with no drag and no tap selection, hand the pointer
+    // back to the chart.
+    const onRelease = (e: PointerEvent) => {
+      if (!isTouchLike(e.pointerType) || dragRef.current || touchSelRef.current) return
+      el.style.pointerEvents = 'none'
+    }
     window.addEventListener('pointermove', onHover, true)
+    window.addEventListener('pointerdown', onPress, true)
+    window.addEventListener('pointerup', onRelease)
+    window.addEventListener('pointercancel', onRelease)
     return () => {
       window.removeEventListener('pointermove', onHover, true)
+      window.removeEventListener('pointerdown', onPress, true)
+      window.removeEventListener('pointerup', onRelease)
+      window.removeEventListener('pointercancel', onRelease)
       if (frame !== 0) window.cancelAnimationFrame(frame)
     }
   }, [hitLine, visible])
+
+  // 触摸选中：点一下线 = 选中它（高亮 + 覆盖层接管指针），下一次按在这条线上才开始拖；
+  // 点到别处取消选中（onDown 里没命中的那一支）。鼠标仍走上面的悬停判定。坐标用
+  // sourceEvent 的 clientY 减覆盖层的 top，与 onDown 同一坐标系。
+  // Tap to select: a tap on a line selects it (highlight + the overlay takes the
+  // pointer); the next press on that line drags it; a press elsewhere deselects (the
+  // miss branch in onDown). Mouse keeps the hover path above. sourceEvent.clientY minus
+  // the overlay's top is the same coordinate space onDown uses.
+  useEffect(() => {
+    if (!visible) return
+    const onClick = (p: MouseEventParams) => {
+      if (!lastTouchRef.current || p.paneIndex !== 0) return
+      const el = overlayRef.current
+      const src = p.sourceEvent
+      if (!el || !src) return
+      const h = hitLine(src.clientY - el.getBoundingClientRect().top)
+      if (!h) return
+      touchSelRef.current = h.key
+      el.style.pointerEvents = 'auto'
+      setHovered(h.key)
+    }
+    chart.subscribeClick(onClick)
+    return () => {
+      if (!isChartAlive(chart)) return
+      chart.unsubscribeClick(onClick)
+    }
+  }, [chart, hitLine, visible])
 
   // 隐藏时清掉悬停态，免得再显示出来时还留着上次的高亮。
   // Clear hover state when hidden so re-showing doesn't keep a stale highlight.
   useEffect(() => {
     if (!visible) {
       setHovered(null)
+      touchSelRef.current = null
       // 拖到一半被隐藏：onUp 不会再来，这里把图表的拖动平移还回去，否则会一直关着。
       // Hidden mid-drag: onUp won't fire, so give the chart its drag-pan back here.
       const before = scrollBeforeDragRef.current
@@ -763,19 +885,32 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
   }, [chart])
 
   const onDown = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    // 只认第一根手指与鼠标左键；已经在拖时来的任何按下都不理。
+    // Primary pointer and left mouse button only; any press during a drag is ignored.
+    if (!e.isPrimary || dragRef.current) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     const el = overlayRef.current
     if (!el) return
     const r = el.getBoundingClientRect()
     const y = e.clientY - r.top
     const h = hitLine(y)
-    if (!h) return
-    const price = series.coordinateToPrice(y) as number | null
-    if (price == null) return
+    if (!h) {
+      // 点选过一条线、这一下按空了 = 取消选中；覆盖层由 window 上的 pointerup 监听撤掉。
+      // A press that misses after a tap selection deselects; the window pointerup
+      // listener then hands the pointer back to the chart.
+      if (touchSelRef.current) { touchSelRef.current = null; setHovered(null) }
+      return
+    }
+    const lineY = series.priceToCoordinate(h.price) as number | null
+    if (lineY == null) return
     e.preventDefault()
     el.setPointerCapture(e.pointerId)
-    dragRef.current = { key: h.key, scope: h.scope, ticket: h.ticket, kind: h.kind, price }
-    setDragKey(h.key)
-    setDragPrice(price)
+    dragRef.current = {
+      key: h.key, scope: h.scope, ticket: h.ticket, kind: h.kind, price: h.price,
+      grab: lineY - y, startY: y,
+      slop: isTouchLike(e.pointerType) ? DRAG_SLOP_TOUCH : DRAG_SLOP_MOUSE,
+      active: false, pointerId: e.pointerId,
+    }
     // 拖线期间关掉图表自身的拖动平移，否则同一次按压会连带把图表也拖走。
     // Disable the chart's own drag-pan while dragging a line, otherwise the
     // same press would pan the chart along with it.
@@ -795,19 +930,10 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     chart.applyOptions({ handleScroll: scrollAfterDrag(before) })
   }, [chart])
 
-  const onMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
-    const drag = dragRef.current
-    if (!drag) return
-    const el = overlayRef.current
-    if (!el) return
-    const y = clampY(e.clientY - el.getBoundingClientRect().top)
-    const price = series.coordinateToPrice(y) as number | null
-    if (price == null) return
-    drag.price = price
-    setDragPrice(price)
-  }, [clampY, series])
-
-  const onUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+  // 结束拖动的公共部分：放掉捕获、用 restoreScroll 把图表平移原样还回去（踩坑 #221）、清拖动态。
+  // Shared end-of-drag: release capture, give the chart its pan back via restoreScroll
+  // (pitfall #221), clear the drag state.
+  const endDrag = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     dragRef.current = null
     if (overlayRef.current?.hasPointerCapture?.(e.pointerId)) {
@@ -816,7 +942,38 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
     restoreScroll()
     setDragKey(null)
     setDragPrice(null)
-    if (!drag) return
+    return drag
+  }, [restoreScroll])
+
+  const onMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || e.pointerId !== drag.pointerId) return
+    const el = overlayRef.current
+    if (!el) return
+    const rawY = e.clientY - el.getBoundingClientRect().top
+    if (!drag.active) {
+      if (Math.abs(rawY - drag.startY) < drag.slop) return
+      drag.active = true
+      setDragKey(drag.key)
+    }
+    const y = clampY(rawY + drag.grab)
+    const price = series.coordinateToPrice(y) as number | null
+    if (price == null) return
+    drag.price = price
+    setDragPrice(price)
+  }, [clampY, series])
+
+  const onUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    const cur = dragRef.current
+    if (cur && e.pointerId !== cur.pointerId) return   // 第二根手指抬起 / a second finger lifting
+    const drag = endDrag(e)
+    // 触摸拖完一次就取消选中，覆盖层随后由 window 上的 pointerup 监听撤掉接管。
+    // A finished touch drag drops the selection; the window pointerup listener then
+    // hands the pointer back to the chart.
+    if (drag?.active && isTouchLike(e.pointerType)) { touchSelRef.current = null; setHovered(null) }
+    // 没过起拖阈值：只是点了一下线，线没动，不弹确认。
+    // Below the threshold it was a tap: the line did not move, so no confirm.
+    if (!drag || !drag.active) return
 
     // 按品种精度取整：拖出来的价格是任意小数，直接发过去 MT5 也会自己截断，
     // 不如前端先规整，让线的落点和提示里的数字一致。
@@ -877,7 +1034,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
           refPrice ?? null, refPrice ?? null,
         )
         if (err) {
-          onToast(String(t(err, { price: refPrice != null ? refPrice.toFixed(digits) : '—' })), 'error')
+          onToast(String(t(err, { price: refPrice != null ? refPrice.toFixed(digits) : EMPTY })), 'error')
           return
         }
       }
@@ -923,7 +1080,16 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
 
     // 弹出确认框而非直接发送 —— 避免误拖 / show confirm dialog instead of sending immediately
     setConfirmState({ key: drag.key, scope: 'pos', ticket: drag.ticket, kind: drag.kind, newPrice: next, marker: m })
-  }, [restoreScroll, exactDigits, refPrice, digits, onToast, t])
+  }, [endDrag, exactDigits, refPrice, digits, onToast, t])
+
+  // 系统取消（边缘返回手势、掌心误触、来电）：只还原，永远不弹改单确认，那个价是拖到一半的。
+  // A system cancel (edge back gesture, palm, incoming call) only restores; it never opens
+  // the modify confirm, because that price is a half-finished drag.
+  const onCancel = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    const cur = dragRef.current
+    if (cur && e.pointerId !== cur.pointerId) return
+    endDrag(e)
+  }, [endDrag])
 
   // 用户确认改单 / user confirms the modify
   const handleConfirm = useCallback(async () => {
@@ -1011,7 +1177,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
           type: String(t(`order.pending.type.${o.type}`)),
           ticket: String(confirmState.ticket),
           kind: kindLabel(confirmState.kind),
-          from: from != null && from > 0 ? from.toFixed(digits) : '—',
+          from: from != null && from > 0 ? from.toFixed(digits) : EMPTY,
           to: confirmState.newPrice.toFixed(digits),
         })),
       }
@@ -1025,7 +1191,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
         side: m.pos.side === 'BUY' ? String(t('charts.dock.buy')) : String(t('charts.dock.sell')),
         ticket: String(confirmState.ticket),
         kind: kindLabel(confirmState.kind),
-        from: from != null ? from.toFixed(digits) : '—',
+        from: from != null ? from.toFixed(digits) : EMPTY,
         to: confirmState.newPrice.toFixed(digits),
       })),
     }
@@ -1047,7 +1213,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
-        onPointerCancel={onUp}
+        onPointerCancel={onCancel}
       />
 
       {/* 拖拽松手后的确认弹窗 / confirmation dialog after releasing a dragged line */}
@@ -1055,7 +1221,7 @@ export default function PositionOverlay({ chart, series, positions, pendingOrder
         <div className="absolute inset-0 z-20 flex items-center justify-center bg-transparent">
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
           <div
-            className="pointer-events-auto rounded-xl border border-white/10 bg-ink-900/95 p-4 shadow-prism backdrop-blur-md"
+            className="pointer-events-auto rounded-panel float-panel p-4"
             style={{ minWidth: 280 }}
             onKeyDown={(e) => { if (e.key === 'Escape') handleCancelConfirm() }}
           >

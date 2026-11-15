@@ -54,7 +54,7 @@ function CompetitionDescModal({ title, text, onClose, t }: { title: string; text
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm sm:p-6"
+      className="fixed inset-0 z-overlay flex items-center justify-center scrim p-4 sm:p-6"
       onClick={onClose}
     >
       <div

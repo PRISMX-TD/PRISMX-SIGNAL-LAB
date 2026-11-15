@@ -56,7 +56,7 @@ export default function LinkQrCode({ url, filename }: { url: string; filename: s
 
   return (
     <div className="flex items-center gap-4">
-      <div className="shrink-0 rounded-xl bg-white p-1.5">
+      <div className="shrink-0 rounded-panel bg-white p-1.5">
         <QRCodeSVG value={url} size={128} level="M" marginSize={2} bgColor="#ffffff" fgColor="#000000" />
       </div>
       <QRCodeSVG

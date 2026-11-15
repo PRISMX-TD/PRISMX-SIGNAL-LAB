@@ -333,33 +333,33 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
           </div>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div>
-              <label className="label">{t('admin.proMonthlyPrice')}</label>
+              <label className="label" htmlFor="ops-pro-monthly">{t('admin.proMonthlyPrice')}</label>
               <div className="flex items-center gap-1">
                 <span className="text-neutral-400">$</span>
-                <NumberInput
+                <NumberInput id="ops-pro-monthly" aria-describedby="ops-pro-monthly-hint"
                   min={0}
                   value={pricing.proMonthlyPrice}
                   onChange={(n) => setPricing({ ...pricing, proMonthlyPrice: n })}
                 />
               </div>
-              <p className="mt-1 text-xs text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
+              <p id="ops-pro-monthly-hint" className="mt-1 text-xs text-neutral-500">{t('admin.proMonthlyPriceHint')}</p>
             </div>
             <div>
-              <label className="label">{t('admin.proYearlyPrice')}</label>
+              <label className="label" htmlFor="ops-pro-yearly">{t('admin.proYearlyPrice')}</label>
               <div className="flex items-center gap-1">
                 <span className="text-neutral-400">$</span>
-                <NumberInput
+                <NumberInput id="ops-pro-yearly" aria-describedby="ops-pro-yearly-hint"
                   min={0}
                   value={pricing.proYearlyPrice}
                   onChange={(n) => setPricing({ ...pricing, proYearlyPrice: n })}
                 />
               </div>
-              <p className="mt-1 text-xs text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
+              <p id="ops-pro-yearly-hint" className="mt-1 text-xs text-neutral-500">{t('admin.proYearlyPriceHint')}</p>
             </div>
             <div>
-              <label className="label">{t('admin.salePercent')}</label>
+              <label className="label" htmlFor="ops-sale-percent">{t('admin.salePercent')}</label>
               <div className="flex items-center gap-1">
-                <NumberInput
+                <NumberInput id="ops-sale-percent" aria-describedby="ops-sale-percent-hint"
                   integer
                   min={0}
                   max={100}
@@ -369,11 +369,11 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
                 />
                 <span className="text-neutral-400">%</span>
               </div>
-              <p className="mt-1 text-xs text-neutral-500">{t('admin.salePercentHint')}</p>
+              <p id="ops-sale-percent-hint" className="mt-1 text-xs text-neutral-500">{t('admin.salePercentHint')}</p>
             </div>
             <div>
-              <label className="label">{t('admin.saleBadge')}</label>
-              <input
+              <label className="label" htmlFor="ops-sale-badge">{t('admin.saleBadge')}</label>
+              <input id="ops-sale-badge" aria-describedby="ops-sale-badge-hint"
                 className="input"
                 value={pricing.saleBadge}
                 onChange={(e) => setPricing({ ...pricing, saleBadge: e.target.value })}
@@ -381,7 +381,7 @@ export default function OpsSettingsPanel({ onTrialSaved }: Props) {
                 placeholder="SUMMER"
                 maxLength={32}
               />
-              <p className="mt-1 text-xs text-neutral-500">{t('admin.saleBadgeHint')}</p>
+              <p id="ops-sale-badge-hint" className="mt-1 text-xs text-neutral-500">{t('admin.saleBadgeHint')}</p>
             </div>
           </div>
           {pricing.saleEnabled && (

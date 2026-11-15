@@ -37,7 +37,7 @@ type Layout = 'rail' | 'wide'
 
 // 跟进状态标签选中时的字色（边框跟 currentColor）/ text colour of a selected follow-up label (border follows)
 const LABEL_ON: Record<FollowUpStaffStatus, string> = {
-  pending: 'text-amber-300 bg-amber-400/10',
+  pending: 'text-warn bg-warn/10',
   contacted: 'text-blue-300 bg-blue-400/10',
   interested: 'text-[var(--purple-hi)] bg-[rgb(var(--purple-rgb)/0.14)]',
   converted: 'text-[var(--up)] bg-[var(--up-bg)]',
@@ -62,7 +62,7 @@ function Fact({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="sd-fact">
       <div className="truncate text-xs text-neutral-500">{label}</div>
-      <div className="mt-1 truncate text-[13px] font-medium text-neutral-100">{value}</div>
+      <div className="mt-1 truncate text-sm font-medium text-neutral-100">{value}</div>
     </div>
   )
 }
@@ -227,7 +227,7 @@ export default function CustomerCard({
     <section key={key ?? title ?? undefined} className={wide ? 'sd-block' : 'border-t border-[var(--line)] px-5 py-5'}>
       {title && (
         <div className="mb-3.5 flex items-center gap-2">
-          <h3 className="text-[13px] font-semibold text-neutral-100">{title}</h3>
+          <h3 className="text-sm font-semibold text-neutral-100">{title}</h3>
           {extra && <div className="ml-auto flex items-center gap-1.5">{extra}</div>}
         </div>
       )}
@@ -240,15 +240,15 @@ export default function CustomerCard({
     <div className={`sticky top-0 z-10 ${wide ? 'sd-well -mx-1 px-1 pb-3 pt-0' : 'bg-[var(--surface)]'}`}>
       <div
         role="note"
-        className={`flex items-start gap-2 text-xs leading-relaxed text-amber-100/90 ${
+        className={`flex items-start gap-2 text-xs leading-relaxed text-warn/90 ${
           wide
-            ? 'rounded-2xl border border-amber-400/25 bg-amber-400/[0.07] px-4 py-2.5'
-            : 'border-b border-amber-400/20 bg-amber-400/[0.07] px-5 py-2.5'
+            ? 'rounded-card border border-warn/25 bg-warn/[0.07] px-4 py-2.5'
+            : 'border-b border-warn/20 bg-warn/[0.07] px-5 py-2.5'
         }`}
       >
-        <span className="mt-px text-amber-300"><IconShield size={14} /></span>
+        <span className="mt-px text-warn"><IconShield size={14} /></span>
         <p>
-          <b className="mr-1 font-semibold text-amber-200">{t('supportDesk.card.complianceTitle')}</b>
+          <b className="mr-1 font-semibold text-warn">{t('supportDesk.card.complianceTitle')}</b>
           {t('supportDesk.card.compliance')}
         </p>
       </div>
@@ -262,7 +262,7 @@ export default function CustomerCard({
         {c.plan}
         {c.planIsTrial ? ` · ${t('supportDesk.card.trial')}` : ''}
       </Tag>
-      <Tag tone={c.emailVerified ? 'bg-[var(--up-bg)] text-[var(--up)]' : 'bg-amber-400/15 text-amber-300'}>
+      <Tag tone={c.emailVerified ? 'bg-[var(--up-bg)] text-[var(--up)]' : 'bg-warn/15 text-warn'}>
         {c.emailVerified ? t('supportDesk.card.verified') : t('supportDesk.card.unverified')}
       </Tag>
       {c.disabled && <Tag tone="bg-[var(--down-bg)] text-[var(--down)]">{t('supportDesk.card.disabled')}</Tag>}
@@ -271,7 +271,7 @@ export default function CustomerCard({
   )
 
   const openAccountBtn = c.openAccountUrl && (
-    <button type="button" className={`btn btn-primary h-10 px-5 text-[13px] ${wide ? '' : 'w-full'}`} onClick={() => void copyOpenAccount()}>
+    <button type="button" className={`btn btn-primary h-10 px-5 text-sm ${wide ? '' : 'w-full'}`} onClick={() => void copyOpenAccount()}>
       {t('supportDesk.card.copyOpenAccount')}
     </button>
   )
@@ -295,7 +295,7 @@ export default function CustomerCard({
     <div className="flex items-start gap-3.5">
       <Avatar name={c.nickname || c.email} size={wide ? 52 : 44} />
       <div className="min-w-0 flex-1">
-        <h2 className={`truncate font-display font-semibold leading-tight text-neutral-50 ${wide ? 'text-xl' : 'text-[17px]'}`}>
+        <h2 className={`truncate font-display font-semibold leading-tight text-neutral-50 ${wide ? 'text-xl' : 'text-lg'}`}>
           {c.nickname ? <Copyable text={c.nickname} label={t('supportDesk.copy.nickname')} /> : t('supportDesk.card.noNickname')}
         </h2>
         <p className="mt-0.5 truncate font-mono text-xs text-neutral-500">
@@ -321,7 +321,7 @@ export default function CustomerCard({
           type="button"
           onClick={() => void reveal()}
           disabled={revealing}
-          className="rounded-[10px] border border-[var(--line-hi)] px-2.5 py-0.5 text-xs text-[var(--purple-hi)] transition hover:bg-white/[0.05] disabled:opacity-50"
+          className="rounded-control border border-[var(--line-hi)] px-2.5 py-0.5 text-xs text-[var(--purple-hi)] transition hover:bg-white/[0.05] disabled:opacity-50"
         >
           {revealing ? t('common.loading') : t('supportDesk.card.reveal')}
         </button>
@@ -369,9 +369,9 @@ export default function CustomerCard({
     ) : (
       <ul className="grid gap-2">
         {c.mt5Accounts.map((a) => (
-          <li key={a.id} className="rounded-2xl border border-[var(--line)] bg-white/[0.02] px-3.5 py-3 text-xs">
+          <li key={a.id} className="rounded-card border border-[var(--line)] bg-white/[0.02] px-3.5 py-3 text-xs">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="font-mono text-[13px] font-medium text-neutral-100">
+              <span className="font-mono text-sm font-medium text-neutral-100">
                 {/* 内部客服只有后 4 位，复制没用 / internal agents only see the last 4 */}
                 {a.login && !a.login.startsWith('*') ? <Copyable text={a.login} label={t('supportDesk.copy.account')} /> : a.login || t('supportDesk.card.bound')}
               </span>
@@ -413,7 +413,7 @@ export default function CustomerCard({
           <span className="font-medium text-neutral-100">{t(`supportDesk.goal.${fu.goal}`)}</span>
         </div>
         {fu.note && (
-          <div className="mb-4 rounded-xl border-l-2 border-[var(--purple-hi)] bg-white/[0.025] px-3.5 py-2.5">
+          <div className="mb-4 rounded-panel border border-[var(--line)] bg-white/[0.02] px-3.5 py-2.5">
             <div className="mb-0.5 text-xs text-neutral-500">{t('supportDesk.card.assignNote')}</div>
             <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-neutral-200">{fu.note}</p>
           </div>
@@ -481,10 +481,10 @@ export default function CustomerCard({
                 </span>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-neutral-500">
                   <span className="font-medium text-neutral-200">{n.authorName || '-'}</span>
-                  <span className="rounded-[10px] bg-white/[0.06] px-1.5 py-px text-neutral-400">{t(`supportDesk.channel.${n.channel}`)}</span>
+                  <span className="rounded-control bg-white/[0.06] px-1.5 py-px text-neutral-400">{t(`supportDesk.channel.${n.channel}`)}</span>
                   <span className="num ml-auto">{fmtDate(n.createdAt)}</span>
                 </div>
-                <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-neutral-200">{n.content}</p>
+                <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-200">{n.content}</p>
                 {n.outcome && (
                   <p className="mt-1.5 text-xs text-neutral-400">
                     <span className="text-neutral-500">{t('supportDesk.card.outcome')}</span> · {n.outcome}
@@ -510,7 +510,7 @@ export default function CustomerCard({
       {!c.doNotContact && (
         <button
           type="button"
-          className="mt-4 w-full rounded-[10px] border border-[rgb(var(--down-rgb)/0.3)] px-3 py-2 text-xs font-medium text-[var(--down)] transition hover:bg-[var(--down-bg)]"
+          className="mt-4 w-full rounded-control border border-[rgb(var(--down-rgb)/0.3)] px-3 py-2 text-xs font-medium text-[var(--down)] transition hover:bg-[var(--down-bg)]"
           onClick={() => setDncConfirm(true)}
         >
           {t('supportDesk.card.dnc')}
@@ -536,7 +536,7 @@ export default function CustomerCard({
                 type="button"
                 disabled={!onOpenTicket || current}
                 onClick={() => onOpenTicket?.(tk.id)}
-                className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left text-xs transition ${
+                className={`flex w-full items-center gap-2.5 rounded-panel px-2 py-2 text-left text-xs transition ${
                   current ? 'bg-white/[0.05]' : 'hover:bg-white/[0.04] disabled:hover:bg-transparent'
                 }`}
               >

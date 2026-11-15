@@ -476,11 +476,19 @@ export class ParticleField {
     // not drop a 33.3 ms cadence to 20 fps). dt still integrates the real gap, so
     // speeds are unchanged.
     const gap = this.opts.maxFps ? 1000 / this.opts.maxFps - 2 : 0
+    // dt 上限：默认 50ms（掉帧时粒子不会一下跳太远）。限帧比 30fps 更低时放宽到 1.5 个
+    // 帧间隔，否则 15fps 的正常节拍（约 66ms）每帧都被截到 50ms，粒子整体慢四分之一。
+    // 30fps 及不限帧时算出来仍是 0.05，行为不变。
+    // dt cap: 50 ms by default (a dropped frame never makes particles leap). Below
+    // 30 fps it widens to 1.5 frame intervals, or every normal 15 fps beat (~66 ms)
+    // would be clipped to 50 ms and everything would drift a quarter slower. At 30 fps
+    // or uncapped it still comes out at 0.05, so nothing changes there.
+    const maxDt = Math.max(0.05, (gap * 1.5) / 1000)
     const loop = (now: number) => {
       if (!this.running) return
       this.raf = requestAnimationFrame(loop)
       if (gap && now - this.last < gap) return
-      const dt = Math.min(0.05, (now - this.last) / 1000)
+      const dt = Math.min(maxDt, (now - this.last) / 1000)
       this.last = now
       this.step(dt)
       this.draw()

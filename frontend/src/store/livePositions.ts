@@ -86,6 +86,28 @@ export function livePosition(
   return { ...p, profit, currentPrice }
 }
 
+/** 上一拍算出的同一张单 / the same position as computed on the previous beat */
+export interface LiveMemo {
+  src: Position
+  live: Position
+}
+
+/**
+ * 推算结果若与上一拍完全相同（同一帧里的同一张单，浮盈和现价都没变），返回上一拍的对象。
+ * 节拍是「任一持仓品种跳价」就重算全部持仓，没跳价的那些单以前每拍都拿到一个数字相同的
+ * 新对象，订单页的持仓卡（memo）因此每拍全部重渲染。
+ * Returns the previous beat's object when nothing changed (same frame object, same profit
+ * and price). A beat recomputes every position whenever any held symbol ticks, so positions
+ * on quiet symbols used to get a fresh, identical object each beat and every memoized card
+ * on the Orders page re-rendered.
+ */
+export function reuseLive(prev: LiveMemo | undefined, src: Position, live: Position): Position {
+  if (prev && prev.src === src && prev.live.profit === live.profit && prev.live.currentPrice === live.currentPrice) {
+    return prev.live
+  }
+  return live
+}
+
 /**
  * 把持仓表换成"随实时报价走"的版本。每次服务器推来新的一帧，锚点重设、k 重新校准。
  * Returns the positions moved by live quotes; each server frame resets anchors and k.
@@ -95,6 +117,9 @@ export function useLivePositions(positions: Position[]): Position[] {
   const kByTicket = useRef<Map<string, number>>(new Map())
   const anchors = useRef<Map<string, QuoteAnchor>>(new Map())
   const [tick, setTick] = useState(0)
+  // 上一拍每张单推算出的对象（按 livePosKey），供 reuseLive 复用。
+  // Last beat's computed object per position (by livePosKey), for reuseLive.
+  const lastLive = useRef<Map<string, LiveMemo>>(new Map())
 
   // 新的一帧：记下此刻的报价当锚点，并用服务器数据校准 k。
   // A new frame: anchor at the current quotes and calibrate k from the server's data.
@@ -138,6 +163,7 @@ export function useLivePositions(positions: Position[]): Position[] {
   return useMemo(() => {
     void tick
     const quotes = peek()
+    const nextLive = new Map<string, LiveMemo>()
     let changed = false
     const out = frame.map((p) => {
       const sym = baseSymbol(p.symbol)
@@ -147,10 +173,16 @@ export function useLivePositions(positions: Position[]): Position[] {
       if (q && !anchors.current.has(sym) && q.bid > 0 && q.ask > 0) {
         anchors.current.set(sym, { bid: q.bid, ask: q.ask })
       }
-      const live = livePosition(p, q, anchors.current.get(sym), kByTicket.current.get(livePosKey(p)) ?? null)
-      if (live !== p) changed = true
+      const key = livePosKey(p)
+      let live = livePosition(p, q, anchors.current.get(sym), kByTicket.current.get(key) ?? null)
+      if (live !== p) {
+        live = reuseLive(lastLive.current.get(key), p, live)
+        nextLive.set(key, { src: p, live })
+        changed = true
+      }
       return live
     })
+    lastLive.current = nextLive
     return changed ? out : frame
   }, [frame, tick, peek])
 }

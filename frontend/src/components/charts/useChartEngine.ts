@@ -39,6 +39,7 @@ import {
 import { markChartDisposed } from './chartLifecycle'
 import { ZonePrimitive, type BarStrip, type ZoneRect } from './zonePrimitive'
 import { EMPTY_LEGEND, toHistPoints, type CandleColors, type IndicatorFlags, type LegendValues } from './chartConfig'
+import { createLegendStore } from './legendStore'
 
 type LineApi = ISeriesApi<'Line'>
 type HistApi = ISeriesApi<'Histogram'>
@@ -112,14 +113,19 @@ export function useChartEngine(
   // Cached "latest value" legend used while the crosshair isn't hovering.
   const latestLegendRef = useRef<LegendValues>(EMPTY_LEGEND)
   // 当前是否正悬停/触摸拖动十字准线（由 onCrosshairMove 维护）。每 2 秒一次的报价
-  // 轮询会调用 recomputeIndicators()，若它无条件 setLegend(latest)，会把用户正悬停
+  // 轮询会调用 recomputeIndicators()，若它无条件 legendStore.set(latest)，会把用户正悬停
   // 的历史值每 2 秒打回"最新值"——所以只在不悬停时更新图例。
   // Whether the crosshair is hovering. The 2s quote poll calls
-  // recomputeIndicators(); an unconditional setLegend there would stomp the
+  // recomputeIndicators(); an unconditional legendStore.set there would stomp the
   // hovered value every 2s, so the legend only updates while not hovering.
   const hoveringRef = useRef(false)
 
-  const [legend, setLegend] = useState<LegendValues>(EMPTY_LEGEND)
+  // 图例数值放在外部 store 里，不放 state：引擎挂在 ChartsPage 顶层，这里的 state
+  // 一变整页都要重渲染，而十字线一秒能改几十次。订阅方只有 IndicatorLegends（见 legendStore.ts）。
+  // Legend values live in an external store, not state: this hook runs at ChartsPage's top
+  // level, so a state change here re-renders the whole page, and the crosshair changes it
+  // dozens of times a second. IndicatorLegends is the only subscriber (see legendStore.ts).
+  const [legendStore] = useState(() => createLegendStore())
   // 各已开启副图 pane 的顶部像素偏移，供图例定位；由 applyPaneHeights 算出。
   // Top pixel offset of each enabled sub-pane, for legend positioning.
   const [paneOffsets, setPaneOffsets] = useState<Partial<Record<IndicatorId, number>>>({})
@@ -239,8 +245,8 @@ export function useChartEngine(
     markersRef.current?.setMarkers(marks)
     zonesRef.current?.setZones(zones, strips)
     latestLegendRef.current = next
-    if (!hoveringRef.current) setLegend(next)
-  }, [])
+    if (!hoveringRef.current) legendStore.set(next)
+  }, [legendStore])
 
   // 按容器高度重新分配各 pane：主图至少 40%，副图按各自的高度档（小 / 中 / 大）
   // 加权分剩余部分，每个不低于 60px；同时记下每个副图的顶部偏移供图例定位
@@ -351,7 +357,7 @@ export function useChartEngine(
     const onCrosshairMove: Parameters<typeof chart.subscribeCrosshairMove>[0] = (param) => {
       if (param.time == null) {
         hoveringRef.current = false
-        setLegend(latestLegendRef.current)
+        legendStore.set(latestLegendRef.current)
         return
       }
       hoveringRef.current = true
@@ -367,7 +373,7 @@ export function useChartEngine(
       }
       for (const id of MAIN_IDS) { const h = mainRef.current[id]; if (h) collect(id, h) }
       for (const id of SUB_IDS) { const e = subRef.current[id]; if (e) collect(id, e.handles) }
-      setLegend(next)
+      legendStore.set(next)
     }
     chart.subscribeCrosshairMove(onCrosshairMove)
 
@@ -387,6 +393,7 @@ export function useChartEngine(
     return () => {
       ro.disconnect()
       chart.unsubscribeCrosshairMove(onCrosshairMove)
+      legendStore.dispose()
       chart.remove()
       // 登记销毁：子组件的 cleanup 在本函数之后才跑，它们要靠这个标记跳过 detachPrimitive。
       // Mark disposed so child cleanups (run after this) skip detachPrimitive.
@@ -529,7 +536,7 @@ export function useChartEngine(
   return {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef, getBarTimes,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef,
-    legend, paneOffsets, drawReady,
+    legendStore, paneOffsets, drawReady,
     recomputeIndicators, applyPaneHeights,
   }
 }

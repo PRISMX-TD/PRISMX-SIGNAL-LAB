@@ -53,7 +53,7 @@ export default function DisableUserModal({ email, busy, onConfirm, onCancel }: P
   const reason = normalizeDisableReason(raw)
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm" onClick={onCancel}>
+    <div className="fixed inset-0 z-overlay flex items-center justify-center scrim p-6" onClick={onCancel}>
       <div
         ref={sheetRef}
         className="glass-card w-full max-w-sm p-6"
@@ -112,7 +112,7 @@ export default function DisableUserModal({ email, busy, onConfirm, onCancel }: P
           <button
             onClick={() => reason && onConfirm(reason)}
             disabled={busy || !reason}
-            className="flex-1 rounded-xl border border-down/40 bg-down/15 py-2 text-sm font-semibold text-down transition hover:bg-down/25 disabled:opacity-50"
+            className="flex-1 rounded-panel border border-down/40 bg-down/15 py-2 text-sm font-semibold text-down transition hover:bg-down/25 disabled:opacity-50"
           >
             {t('admin.disableConfirm')}
           </button>

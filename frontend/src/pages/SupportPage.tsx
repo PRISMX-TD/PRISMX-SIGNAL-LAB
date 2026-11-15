@@ -107,6 +107,18 @@ export default function SupportPage() {
   const [view, setView] = useState<View>('list')
   const [tickets, setTickets] = useState<TicketListItem[]>([])
   const [loading, setLoading] = useState(true)
+  // 打开一张工单时记下当时已有几条回复：这几条按顺序错峰进场（封顶第 6 条）；之后发出去或
+  // 刷新进来的新回复直接在末尾淡入，不用排在前面所有回复的错峰后面（以前第 21 条要等 0.8s）。
+  // 在渲染期间按工单 id 变化重设，是 React 文档里「根据 props 调整 state」的写法。
+  // When a ticket opens, remember how many replies it had: those stagger in (capped at
+  // the 6th); replies sent or refreshed in later fade in at the end at once instead of
+  // queueing behind the whole stagger (the 21st used to wait 0.8s). Resetting during
+  // render when the ticket id changes is React's "adjust state on prop change" pattern.
+  const openTicketId = typeof view === 'object' ? view.ticket.id : null
+  const [threadBase, setThreadBase] = useState<{ id: string | null; n: number }>({ id: null, n: 0 })
+  if (openTicketId !== threadBase.id) {
+    setThreadBase({ id: openTicketId, n: typeof view === 'object' ? view.ticket.replies.length : 0 })
+  }
 
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState<TicketCategory>('technical')
@@ -296,7 +308,7 @@ export default function SupportPage() {
               <p className="sup-thread-empty">{t('tickets.empty')}</p>
             ) : (
               ticket.replies.map((r, i) => (
-                <Message key={r.id} index={i} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body}
+                <Message key={r.id} index={i < threadBase.n ? Math.min(i, 5) : 0} authorEmail={r.authorEmail} authorRole={r.authorRole} body={r.body}
                   images={r.images} imageCount={r.imageCount} createdAt={r.createdAt} t={t} />
               ))
             )}
@@ -371,7 +383,7 @@ export default function SupportPage() {
               key={ticket.id}
               type="button"
               className="sup-row"
-              style={{ '--i': i } as React.CSSProperties}
+              style={{ '--i': Math.min(i, 5) } as React.CSSProperties}
               onClick={async () => {
                 try { setView({ ticket: await ticketApi.get(ticket.id) }) } catch { showError(t('common.error')) }
               }}
@@ -402,7 +414,7 @@ export default function SupportPage() {
           filing a ticket is this page's main path, and the community links answer
           "where else, if that didn't work" — surfacing them first would push
           people off a tracked channel onto an untracked one. */}
-      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/[0.06] pt-5 text-[13px] text-neutral-500">
+      <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-white/[0.06] pt-5 text-sm text-neutral-500">
         <span>{t('social.findUs')}</span>
         <SocialLinks size={17} />
       </div>

@@ -158,7 +158,7 @@ export default function StrategyAnalysis() {
              style={{ background: 'var(--down-bg)', color: 'var(--down)' }} role="alert">
           <span>{t('signals.analysis.error', { message: error })}</span>
           <button type="button" onClick={() => setAttempt((n) => n + 1)}
-                  className="rounded-[10px] border border-current px-3 py-1 text-xs transition active:scale-[0.97]">
+                  className="rounded-control border border-current px-3 py-1 text-xs transition active:scale-[0.96] motion-reduce:active:scale-100">
             {t('signals.analysis.retry')}
           </button>
         </div>

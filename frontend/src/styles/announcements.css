@@ -29,16 +29,30 @@
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.nb-btn:hover,
+/* 悬停比「已打开」弱一档：只提亮图标与描边、不铺底；门槛块放在 .open 之前，
+   同权重时 .open 赢。手机上点开再关掉面板，按钮不会停在「已打开」的样子。
+   Hover is one step weaker than .open (icon and stroke, no fill) and sits before
+   .open so .open wins at equal specificity. On touch, closing the panel no longer
+   leaves the button looking open. */
+@media (hover: hover) and (pointer: fine) {
+  .nb-btn:hover {
+    color: var(--text-2);
+    border-color: var(--line-hi);
+  }
+}
 .nb-btn.open {
-  color: #fff;
+  color: var(--text-strong);
   border-color: var(--line-hi);
   background: var(--nest);
 }
 .nb-btn.on { color: var(--text-2); }
-.nb-btn.attention { color: var(--mid); }
+.nb-btn:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .nb-btn:active { transform: none; }
+}
+.nb-btn.attention { color: var(--warn); }
 /* 状态点（无未读时）/ status dot (when nothing is unread) */
 .nb-dot {
   position: absolute;
@@ -51,7 +65,7 @@
   border: 2px solid var(--bg);
   box-sizing: content-box;
 }
-.nb-btn.attention .nb-dot { background: var(--mid); }
+.nb-btn.attention .nb-dot { background: var(--warn); }
 /* 未读数：品牌紫实色小药丸，压过状态点 / unread count: flat violet pill, wins over the dot */
 .nb-count {
   position: absolute;
@@ -60,9 +74,9 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
   font-size: 12px;
   line-height: 18px;
   font-weight: 500;
@@ -75,12 +89,23 @@
   position: absolute;
   right: 0;
   top: calc(100% + 10px);
-  z-index: 40;
+  z-index: var(--z-menu);
   width: 360px;
   padding: 0;
   overflow: hidden;
-  border-color: var(--line);
-  animation: fade-in-up 0.24s var(--ease-out) both;
+  /* 浮层材质（见 tokens.css「浮层与遮罩」）。原来挂着 .card.glass，和身下的卡片
+     同色，只靠一条 --line 发丝线分开。打开时不再做动画，与用户菜单、语言菜单、下拉框
+     一致：每天开几十次的面板，动画是负担；原来的 fade-in-up 还是从下往上，和面板从
+     铃铛向下展开的方向相反。
+     Floating material (see "floating surfaces and scrims" in tokens.css). It used to
+     wear .card.glass, the same colour as the cards beneath, separated only by a
+     --line hairline. It no longer animates on open, like the user menu, the language
+     menu and the selects: a panel opened dozens of times a day pays for every frame,
+     and the old fade-in-up rose from below while the panel drops from the bell. */
+  border: 1px solid var(--line-hi);
+  border-radius: var(--r-lg);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float);
 }
 .nb-head {
   display: flex;
@@ -91,7 +116,7 @@
 .nb-head h3 {
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .nb-head b {
   font-size: 17px;
@@ -105,11 +130,21 @@
   letter-spacing: 0.08em;
   color: var(--text-3);
 }
+/* 页签行：左边 tablist，右边动作（见 NotificationBell 的说明）。原来 .nb-tabs 一层同时
+   管页签和动作，现在页签单独成组，行的内边距挪到外层，.nb-tabs 只管页签之间的间距；
+   .nb-tabs > button 这些规则照样命中。
+   Tab row: the tablist on the left, the action on the right (see NotificationBell). The
+   row padding moves to the outer wrapper and .nb-tabs keeps only the spacing between
+   tabs; the .nb-tabs > button rules still match. */
+.nb-tabs-row {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 10px;
+}
 .nb-tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 16px 10px;
 }
 .nb-tabs > button {
   display: inline-flex;
@@ -117,20 +152,20 @@
   gap: 6px;
   padding: 6px 10px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--r-tile);
   background: transparent;
   color: var(--text-3);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
-.nb-tabs > button.on { background: var(--surface-2); color: #fff; }
+.nb-tabs > button.on { background: var(--nest-hi); color: var(--text-strong); }
 .nb-tabs > button .num {
   min-width: 16px;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: var(--r-tile);
   background: var(--purple-hi);
-  color: #fff;
+  color: var(--text-strong);
   font-size: 12px;
   line-height: 16px;
   text-align: center;
@@ -168,7 +203,9 @@
   color: var(--purple-hi);
   text-decoration: none;
 }
-.nb-sec-head a:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .nb-sec-head a:hover { color: var(--text-strong); }
+}
 .nb-ann {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
@@ -180,7 +217,9 @@
   text-decoration: none;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.nb-ann:hover { background: var(--surface-2); }
+@media (hover: hover) and (pointer: fine) {
+  .nb-ann:hover { background: var(--nest-hi); }
+}
 .nb-ann-dot {
   width: 8px;
   height: 8px;
@@ -208,7 +247,7 @@
 }
 .nb-ann.unread .nb-ann-title b {
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .nb-ann-sum {
   display: block;
@@ -230,6 +269,15 @@
   padding: 8px 20px 16px;
   font-size: 13px;
   color: var(--text-3);
+}
+/* 失败态里的「重试」跟在文字后面：.nb-readall 自带的 margin-left: auto 在段落里不起作用。
+   The retry button follows the text inline; .nb-readall's margin-left: auto does nothing in a paragraph. */
+.nb-empty .nb-readall { margin-left: 8px; }
+/* 一键已读 / 清空回滚时的一行说明。/ The note shown when mark-all-read / clear rolls back. */
+.nb-act-err {
+  margin: -4px 20px 8px;
+  font-size: 12px;
+  color: var(--down);
 }
 .nb-skel {
   display: grid;
@@ -263,7 +311,6 @@
   gap: 8px;
   padding: 14px 20px 18px;
   border-top: 1px solid var(--line);
-  background: var(--surface-2);
 }
 .nb-push-row {
   display: flex;
@@ -284,12 +331,14 @@
   text-decoration: none;
   white-space: nowrap;
 }
-.nb-push-row a:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .nb-push-row a:hover { color: var(--text-strong); }
+}
 .nb-push p {
   font-size: 12px;
   line-height: 1.5;
 }
-.nb-push p.warn { color: var(--mid); }
+.nb-push p.warn { color: var(--warn); }
 .nb-push p.err { color: var(--down); }
 
 /* ── 列表页 / list page ── */
@@ -310,11 +359,13 @@
   color: inherit;
   text-decoration: none;
   transition: background-color var(--dur-fast) var(--ease-out);
-  animation: fade-in-up 0.45s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 40ms);
+  animation: fade-in-up var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 .ann-row + .ann-row { border-top: 1px solid var(--line); }
-.ann-row:hover { background: var(--surface-2); }
+@media (hover: hover) and (pointer: fine) {
+  .ann-row:hover { background: var(--surface-2); }
+}
 .ann-row-dot {
   width: 8px;
   height: 8px;
@@ -333,7 +384,7 @@
   font-size: 15px;
   line-height: 1.3;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -362,7 +413,9 @@
   color: var(--text-3);
   transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.ann-row:hover .chev { color: #fff; transform: translateX(2px); }
+@media (hover: hover) and (pointer: fine) {
+  .ann-row:hover .chev { color: var(--text-strong); transform: translateX(2px); }
+}
 .ann-empty {
   display: flex;
   flex-direction: column;
@@ -372,7 +425,7 @@
   text-align: center;
 }
 .ann-empty svg { width: 40px; height: 40px; margin-bottom: 8px; color: var(--text-3); }
-.ann-empty b { font-size: 15px; font-weight: 500; color: #fff; }
+.ann-empty b { font-size: 15px; font-weight: 500; color: var(--text-strong); }
 .ann-empty p { font-size: 13px; color: var(--text-3); max-width: 44ch; }
 .ann-skel {
   display: grid;
@@ -444,19 +497,20 @@
 .ann-rich p {
   margin: 0 0 14px;
   line-height: 1.8;
+  text-wrap: pretty;
 }
 .ann-rich h2 {
   margin: 32px 0 12px;
   font-size: 20px;
   line-height: 1.3;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .ann-rich h3 {
   margin: 26px 0 10px;
   font-size: 17px;
   line-height: 1.4;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text);
 }
 .ann-rich > :first-child { margin-top: 0; }
@@ -468,8 +522,13 @@
    it sits in: an element's own color rule always beats a colour inherited from its
    parent, regardless of specificity, so hard-coding one here would turn a bold
    word inside a red highlight grey. --rich-strong comes down the inheritance chain
-   from the colour class instead. */
-.ann-rich strong {
+   from the colour class instead.
+   b 也算：编辑器里点「加粗」时浏览器先插入 <b>，归一化成 <strong> 之前也要看得出来
+   （全局 b 已是 500，不提亮就和正文没有区别）。
+   b counts too: the editor's Bold inserts <b> before it is normalised to <strong>, and
+   with the global b at 500 it would otherwise look like body copy. */
+.ann-rich strong,
+.ann-rich b {
   font-weight: 500;
   color: var(--rich-strong, var(--text));
 }
@@ -482,7 +541,9 @@
   text-underline-offset: 3px;
   overflow-wrap: anywhere;
 }
-.ann-rich a:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .ann-rich a:hover { color: var(--text-strong); }
+}
 .ann-rich blockquote {
   margin: 18px 0;
   padding: 2px 0 2px 16px;
@@ -527,7 +588,7 @@
   left: 0;
   top: 0;
   font-variant-numeric: tabular-nums;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--purple-hi);
 }
 .ann-rich-rule {
@@ -563,12 +624,12 @@
 }
 .ann-rich .ta-center { text-align: center; }
 .ann-rich .ta-right { text-align: right; }
-.ann-rich .c-hi { color: #fff; --rich-strong: #fff; }
+.ann-rich .c-hi { color: var(--text-strong); --rich-strong: #fff; }
 .ann-rich .c-dim { color: var(--text-3); --rich-strong: var(--text-3); }
 .ann-rich .c-violet { color: var(--purple-hi); --rich-strong: var(--purple-hi); }
 .ann-rich .c-up { color: var(--up); --rich-strong: var(--up); }
 .ann-rich .c-down { color: var(--down); --rich-strong: var(--down); }
-.ann-rich .c-amber { color: var(--mid); --rich-strong: var(--mid); }
+.ann-rich .c-amber { color: var(--warn); --rich-strong: var(--warn); }
 .ann-detail .guide-pager {
   margin-top: 48px;
 }
@@ -613,7 +674,7 @@
   margin-left: auto;
   padding: 3px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--r-tile);
   background: transparent;
   font-size: 12px;
   font-weight: 500;
@@ -621,9 +682,11 @@
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
-.nb-readall:hover:not(:disabled) {
-  color: #fff;
-  border-color: var(--line-hi);
+@media (hover: hover) and (pointer: fine) {
+  .nb-readall:hover:not(:disabled) {
+    color: var(--text-strong);
+    border-color: var(--line-hi);
+  }
 }
 .nb-readall:disabled { opacity: 0.5; cursor: default; }
 
@@ -647,13 +710,11 @@
   bottom: 0;
   left: 0;
   /* 80 与下单确认弹窗（.slide-overlay）同层：两者不会同时出现，而 80 已经在
-     顶栏（40）与铃铛面板之上。
+     顶栏（--z-nav 30）与铃铛面板之上。
      Same layer as the order-confirmation scrim (.slide-overlay): they never
-     coexist, and 80 already clears the top bar (40) and the bell panel. */
-  z-index: 80;
-  background: rgba(9, 9, 11, 0.74);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+     coexist, and 80 already clears the top bar (--z-nav 30) and the bell panel. */
+  z-index: var(--z-sheet);
+  background: var(--scrim);
   display: grid;
   place-items: center;
   padding: 20px;
@@ -663,29 +724,17 @@
   position: relative;
   width: 100%;
   max-width: 400px;
-  /* 卡片本身不画背景也不裁剪：光晕要溢出到卡外去。可见的那张卡是 .ann-pop-art。
-     The card paints nothing and clips nothing — the halo has to spill past its
-     edges. The visible card is .ann-pop-art. */
-  animation: ann-pop-in 0.52s var(--spring) both;
-}
-/* 卡背后一团很淡的品牌色光，缓慢呼吸。不是描边发光——它在卡的下面、糊得看不出
-   形状，只负责让这张卡从背景里浮起来。
-   A faint brand-tinted glow behind the card, breathing slowly. Not an outline
-   glow: it sits behind, blurred past recognition, and only lifts the card off the
-   background. */
-.ann-pop::before {
-  content: "";
-  position: absolute;
-  top: -12%;
-  right: -8%;
-  bottom: -12%;
-  left: -8%;
-  z-index: -1;
-  border-radius: 50%;
-  background: radial-gradient(58% 55% at 50% 48%, rgba(110, 66, 255, 0.4), transparent 72%);
-  filter: blur(46px);
-  animation: ann-pop-halo 7s var(--ease-in-out) infinite;
-  pointer-events: none;
+  /* 卡片本身不画背景，可见的那张卡是 .ann-pop-art（它自己裁剪圆角）。
+     进场：0.3s 减速、从 0.97 放大并上移 8px。原来是 0.52s 弹簧过冲加 1.4° 旋转，
+     背后还有一团无限呼吸的紫色光晕；这条弹窗是开 App 时不请自来的打断，不是用户
+     触发的庆祝时刻，过冲、旋转和发光都在替它抢注意力。
+     The card paints nothing; the visible card is .ann-pop-art, which clips its own
+     corners. Enter: 0.3s decelerating, scaling from 0.97 and rising 8px. It used to
+     be a 0.52s overshooting spring with a 1.4deg rotation over an endlessly
+     breathing violet halo; this popup is an unrequested interruption on app open,
+     not a celebration the user triggered, and overshoot, rotation and glow all
+     shouted on its behalf. */
+  animation: ann-pop-in var(--dur-medium) var(--ease-out) backwards;
 }
 /* 整张图都可以点。这个容器刻意不可聚焦：键盘用户 Tab 到里面那颗真按钮，走的是
    同一个动作，不必为鼠标的便利再造一个焦点位。
@@ -708,11 +757,9 @@
   min-height: 248px;
   overflow: hidden;
   border-radius: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--line-hi);
   background: #0b0b0f;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
-    0 32px 70px -24px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 32px 70px -24px rgba(0, 0, 0, 0.8);
   cursor: pointer;
 }
 .ann-pop-wash {
@@ -741,7 +788,9 @@
   object-fit: contain;
   transition: transform 0.6s var(--ease-out);
 }
-.ann-pop-art:hover .ann-pop-photo { transform: scale(1.035); }
+@media (hover: hover) and (pointer: fine) {
+  .ann-pop-art:hover .ann-pop-photo { transform: scale(1.035); }
+}
 .ann-pop-veil {
   position: absolute;
   left: 0;
@@ -768,22 +817,29 @@
   gap: 7px;
   padding: 10px 18px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--purple-vivid);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.22);
   font-size: 13px;
-  font-weight: 600;
-  color: #fff;
+  font-weight: 500;
+  color: var(--text-strong);
   cursor: pointer;
   transition:
     background-color var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
-.ann-pop-cta:hover { background: var(--purple-hi); }
-.ann-pop-cta:active { transform: translateY(1px) scale(0.985); }
+@media (hover: hover) and (pointer: fine) {
+  .ann-pop-cta:hover { background: var(--purple-hi); }
+}
+.ann-pop-cta:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .ann-pop-cta:active { transform: none; }
+}
 .ann-pop-cta svg { transition: transform var(--dur-base) var(--ease-out); }
-.ann-pop-cta:hover svg { transform: translateX(3px); }
+@media (hover: hover) and (pointer: fine) {
+  .ann-pop-cta:hover svg { transform: translateX(3px); }
+}
 .ann-pop-snooze {
   margin-left: auto;
   padding: 6px 1px;
@@ -797,9 +853,11 @@
     color var(--dur-fast) var(--ease-out),
     border-color var(--dur-fast) var(--ease-out);
 }
-.ann-pop-snooze:hover:not(:disabled) {
-  color: #fff;
-  border-bottom-color: rgba(255, 255, 255, 0.35);
+@media (hover: hover) and (pointer: fine) {
+  .ann-pop-snooze:hover:not(:disabled) {
+    color: var(--text-strong);
+    border-bottom-color: rgba(255, 255, 255, 0.35);
+  }
 }
 .ann-pop-snooze:disabled { opacity: 0.5; cursor: default; }
 .ann-pop-x {
@@ -828,25 +886,23 @@
     background-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
-.ann-pop-x:hover {
-  background: rgba(10, 10, 14, 0.78);
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .ann-pop-x:hover {
+    background: rgba(10, 10, 14, 0.78);
+    color: var(--text-strong);
+  }
 }
 @keyframes ann-pop-veil-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
 @keyframes ann-pop-in {
-  from { opacity: 0; transform: translateY(24px) scale(0.94) rotate(-1.4deg); }
-  to { opacity: 1; transform: translateY(0) scale(1) rotate(0deg); }
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: none; }
 }
 @keyframes ann-pop-rise {
   from { opacity: 0; transform: translateY(12px); }
   to { opacity: 1; transform: translateY(0); }
-}
-@keyframes ann-pop-halo {
-  0%, 100% { opacity: 0.6; transform: scale(1); }
-  50% { opacity: 0.9; transform: scale(1.07); }
 }
 @media (max-width: 639px) {
   .ann-pop-bar {
@@ -856,11 +912,9 @@
   .ann-pop-photo { max-height: min(56vh, 460px); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .nb-panel,
   .ann-row,
   .ann-pop-overlay,
   .ann-pop,
-  .ann-pop::before,
   .ann-pop-bar,
   .ann-pop-x { animation: none; }
   .ann-pop-art:hover .ann-pop-photo { transform: none; }
@@ -880,7 +934,7 @@
    every control its own indicator dot. */
 .rte {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgb(255 255 255 / 0.02);
   overflow: hidden;
 }
@@ -901,7 +955,7 @@
   height: 28px;
   padding: 0 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--r-tile);
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -910,9 +964,11 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.rte-btn:hover:not(:disabled) {
-  background: rgb(255 255 255 / 0.08);
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .rte-btn:hover:not(:disabled) {
+    background: rgb(255 255 255 / 0.08);
+    color: var(--text-strong);
+  }
 }
 .rte-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .rte-sep {
@@ -925,7 +981,7 @@
   height: 28px;
   padding: 0 6px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: var(--r-tile);
   background: var(--bg);
   color: var(--text-2);
   font: inherit;
@@ -947,7 +1003,9 @@
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-out);
 }
-.rte-swatch:hover { transform: scale(1.15); }
+@media (hover: hover) and (pointer: fine) {
+  .rte-swatch:hover { transform: scale(1.15); }
+}
 .rte-spin {
   width: 13px;
   height: 13px;
@@ -983,7 +1041,11 @@
   padding: 14px 16px;
   outline: none;
 }
-.rte-input:focus-visible { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+/* 用 :focus 而不是 :focus-visible：可编辑区一聚焦就是要打字，新内核里两者等价；
+   而 Chrome 86 以前不认 :focus-visible，整条被丢，编辑区聚焦时什么都不显示。
+   :focus, not :focus-visible: a focused editor always means typing, so the two are
+   equivalent on new engines, and Chrome < 86 dropped the :focus-visible rule entirely. */
+.rte-input:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 /* 编辑区里的图片给一条淡边、并压到 360px 以内：淡边是为了看清图的边界，限高是因为
    一张 1600×2400 的竖版海报在正文里是完整展示的，但在编辑框里会顶出一千多像素，
    管理员要为了改图下面那行字滚半天。这是编辑区与发布页唯一一处刻意的不一致，

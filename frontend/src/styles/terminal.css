@@ -89,10 +89,10 @@
   margin: 0;
   font-size: 13px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .term-ph span {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
   color: var(--text-3);
@@ -102,7 +102,7 @@
 .term-wls {
   position: relative;
   flex-shrink: 0;
-  padding: 10px 12px;
+  padding: 12px 12px;
   border-bottom: 1px solid var(--line);
 }
 .term-wls svg {
@@ -117,17 +117,26 @@
   height: 32px;
   padding: 0 12px 0 32px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
   color: var(--text);
   font: inherit;
-  font-size: 12.5px;
-  box-shadow: inset 0 0 0 1px var(--line);
+  font-size: 13px;
+  box-shadow: inset 0 0 0 1px var(--line-control);
   outline: none;
 }
-.term-wls input:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+/* 焦点靠 box-shadow 内描边；再加一条透明轮廓：普通模式看不见，Windows 高对比模式会把它
+   画出来（那里 box-shadow 被去掉）。下面 .term-pr-inp / .term-inp / .ind-srch / .ind-in 同理。
+   Focus is the inset box-shadow; the transparent outline is invisible normally but painted
+   in forced-colors mode, which drops box-shadow. Same for the inputs further down. */
+.term-wls input:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 .term-wl { flex: 1; min-height: 0; overflow-y: auto; }
-.term-wl-empty { padding: 20px 12px; font-size: 12.5px; color: var(--text-3); text-align: center; }
+.term-wl-empty { padding: 20px 12px; font-size: 12px; color: var(--text-3); text-align: center; }
+/* gap 10、左内边距 14 不吸附到 4 的倍数（计划 039 E4 例外）：248px 左栏里每一像素都
+   算给品种代码列，BTCUSD 配六位整数价格时只剩 1px 余量，吸到 12 / 16 就开始出省略号。
+   gap 10 and the 14px left padding stay off the 4px grid (a plan 039 E4 exception): in
+   the 248px column every pixel goes to the symbol column, and BTCUSD beside a six-digit
+   price has about 1px to spare, so 12 / 16 would start truncating it. */
 .term-wr {
   position: relative;
   display: grid;
@@ -146,7 +155,16 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.term-wr:hover, .term-wr.on { background: var(--surface); }
+/* 悬停只给 3% 白底，比选中行（--surface + 左缘紫条）弱一档；门槛块在前，.on 同权重后写赢。
+   Hover is a 3% white wash, one step under the selected row; .on comes after and wins. */
+@media (hover: hover) and (pointer: fine) {
+  .term-wr:hover { background: rgba(255, 255, 255, 0.03); }
+}
+.term-wr.on { background: var(--surface); }
+/* 自选行整行可点：按下压深一档底色，不缩放（整行缩放会让相邻行之间露缝）。
+   A watchlist row is clickable across its full width: press darkens the fill one step
+   rather than scaling (a scaled row would open gaps against its neighbours). */
+.term-wr:active { background: var(--nest); }
 /* 选中态：左缘一道 2px 紫墨，不用渐变。/ Selected: a 2px violet ink bar, no gradient. */
 .term-wr.on::before {
   content: "";
@@ -158,21 +176,63 @@
   background: var(--purple-hi);
 }
 .term-wr .sym-ava { width: 24px; height: 24px; font-size: 12px; }
-.term-wr-sym { font: 600 12.5px/1.1 "JetBrains Mono", ui-monospace, monospace; color: #fff; }
-.term-wr-nm { margin-top: 2px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.term-wr-sym { font: 600 13px/1.1 var(--font-mono); color: var(--text-strong); }
+.term-wr-nm { margin-top: 4px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* 迷你走势：页面打开后收到的报价序列，不是日线——没数据时空着，不编。
    Sparkline of the ticks received since the page opened, not a daily series;
    stays blank until there is data rather than inventing any. */
 .term-wr-spark { width: 52px; height: 20px; display: block; }
+/* 跳动色：变成涨 / 跌色时立刻生效（transition: none 写在 .up / .down 上，进入这两个
+   状态时不过渡），回到中性色时用 0.45s 慢慢褪。以前双向都是 0.4s：一秒好几跳时颜色
+   一直停在灰和红绿之间，看不出方向。
+   Tick colour: turning up / down applies at once (transition: none on .up / .down,
+   so entering those states doesn't animate), and fading back to neutral takes 0.45s.
+   Both directions used to take 0.4s, so with several ticks a second the colour sat
+   halfway between grey and red/green and the direction was unreadable. */
 .term-wr-px {
-  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 13px var(--font-mono);
   color: var(--text);
   text-align: right;
   font-variant-numeric: tabular-nums;
-  transition: color 0.4s;
+  transition: color var(--dur-slow) var(--ease-out);
 }
-.term-wr-px.up { color: var(--up); }
-.term-wr-px.down { color: var(--down); }
+.term-wr-px.up { color: var(--up); transition: none; }
+.term-wr-px.down { color: var(--down); transition: none; }
+/* 涨跌除了颜色再给一个形状：红绿色弱分不出这一跳往哪走。平盘时三角仍占位
+   （visibility: hidden），数字不会随涨跌左右跳。content 写两遍：第二条带空的替代
+   文本，读屏不念「黑色上三角」；旧内核不认这个语法会丢掉第二条、留下第一条。
+   Direction gets a shape as well as a colour (red/green colour blindness). The glyph
+   keeps its slot when flat (visibility: hidden) so the number never shifts. content is
+   declared twice: the second form carries empty alt text so screen readers skip the
+   triangle; older engines drop it and keep the first. */
+.term-wr-px::before {
+  content: "▲";
+  content: "▲" / "";
+  display: inline-block;
+  margin-right: 4px;
+  font-size: 8px;
+  vertical-align: 1px;
+  visibility: hidden;
+}
+.term-wr-px.up::before {
+  visibility: visible;
+  color: var(--up);
+}
+.term-wr-px.down::before {
+  content: "▼";
+  content: "▼" / "";
+  visibility: visible;
+  color: var(--down);
+}
+/* 行情断开（WebSocket 断线）：自选价格退到 --text-3，涨跌色一并去掉，跳动方向已经没有意义；
+   列表上方一行说明，颜色与下单弹窗 / 下单票里的断线黄条一致（--mid）。
+   Quotes down (WebSocket lost): watchlist prices fall back to --text-3 and drop the tick colour,
+   which no longer means anything; a line above the list says so, in the strip's --mid. */
+.term-col-inner.quotes-down .term-wr-px { color: var(--text-3); }
+/* 断线时涨跌三角也收起（仍占位，数字不动），理由同上：方向已经没有意义。
+   The direction triangle hides too while quotes are down (slot kept), for the same reason. */
+.term-col-inner.quotes-down .term-wr-px::before { visibility: hidden; }
+.term-wl-down { margin: 0; padding: 8px 12px; font-size: 12px; line-height: 1.5; color: var(--mid); }
 
 /* ── 报价条 / quote strip ── */
 .term-qs {
@@ -185,7 +245,7 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 18px;
+  padding: 0 20px;
   border: 0;
   border-right: 1px solid var(--line);
   background: transparent;
@@ -200,14 +260,14 @@
   line-height: 1.1;
   font-weight: 500;
   letter-spacing: -0.01em;
-  color: #fff;
+  color: var(--text-strong);
 }
-.term-qs-id p { margin: 2px 0 0; font-size: 12px; color: var(--text-3); }
+.term-qs-id p { margin: 4px 0 0; font-size: 12px; color: var(--text-3); }
 .term-qs-px {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 18px;
+  gap: 16px;
+  padding: 0 20px;
   border-right: 1px solid var(--line);
 }
 /* 大手 + 点位：外汇报价的写法，点位（倒数第 2、3 位）放大，最后一位上标。
@@ -215,38 +275,40 @@
 .term-big {
   display: inline-flex;
   align-items: baseline;
-  font: 500 30px/1 "JetBrains Mono", ui-monospace, monospace;
+  font: 500 30px/1 var(--font-mono);
   letter-spacing: -0.03em;
-  color: #fff;
+  color: var(--text-strong);
   font-variant-numeric: tabular-nums;
 }
 .term-big .pip { font-size: 38px; font-weight: 600; }
-.term-big sup { margin-left: 2px; font-size: 14px; color: var(--text-2); transform: translateY(-6px); }
+.term-big sup { margin-left: 4px; font-size: 14px; color: var(--text-2); transform: translateY(-6px); }
 .term-chg {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  gap: 4px;
+  font: 500 13px var(--font-mono);
 }
-.term-chg small { font-family: inherit; font-size: 12px; color: var(--text-3); font-family: var(--sans, inherit); }
+.term-chg small { font-family: inherit; font-size: 12px; color: var(--text-3); }
 .term-chg.up { color: var(--up); }
 .term-chg.down { color: var(--down); }
 .term-qs-st {
   display: flex;
   align-items: center;
-  gap: 26px;
+  gap: 28px;
   padding: 0 20px;
   min-width: 0;
   overflow-x: auto;
 }
 .term-st { white-space: nowrap; }
+/* 标签是文字（余额、卖价、止损……），走正文无衬线栈；只有会跳动的数字留在等宽栈。
+   Labels are words, so they use the body sans stack; only changing numbers stay mono. */
 .term-st .k {
-  font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px/1 var(--font-sans);
   color: var(--text-3);
 }
 .term-st .v {
-  margin-top: 6px;
-  font: 500 13.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  margin-top: 8px;
+  font: 500 13px/1 var(--font-mono);
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -259,8 +321,8 @@
   align-items: center;
   gap: 8px;
   margin-left: auto;
-  padding: 0 18px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  padding: 0 20px;
+  font: 500 12px var(--font-mono);
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -271,8 +333,16 @@
   background: var(--up);
   animation: breathe 2.4s ease-in-out infinite;
 }
-.term-qs-live.stale { color: var(--gold); }
-.term-qs-live.stale i { background: var(--gold); animation: none; }
+.term-qs-live.stale { color: var(--warn); }
+.term-qs-live.stale i { background: var(--warn); animation: none; }
+/* 行情断开：大价格与 BID / ASK 退到 --text-3；右端状态改写「行情已断开」，点和字用 --mid，点不呼吸。
+   Quotes down: headline and BID / ASK fall back to --text-3; the status reads "quotes disconnected"
+   in --mid with a still dot. */
+.term-qs.quotes-down .term-big,
+.term-qs.quotes-down .term-big sup,
+.term-qs.quotes-down .term-st--desk .v { color: var(--text-3); }
+.term-qs-live.off { color: var(--mid); }
+.term-qs-live.off i { background: var(--mid); animation: none; }
 
 /* ── 图表区：左竖轨 + 工具条 + 画布 / chart area ── */
 .term-cv {
@@ -287,7 +357,7 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   padding: 8px 0;
   min-height: 0;
   overflow-y: auto;
@@ -295,7 +365,7 @@
 }
 .term-rail hr {
   width: 18px;
-  margin: 6px 0;
+  margin: 8px 0;
   border: 0;
   border-top: 1px solid var(--line);
 }
@@ -312,20 +382,22 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.term-tool-btn:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+@media (hover: hover) and (pointer: fine) {
+  .term-tool-btn:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+}
 .term-tool-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.term-tool-btn.on { color: #fff; background: var(--purple); }
-.term-tool-btn.warn.on { color: #0b0b0e; background: var(--gold); }
+.term-tool-btn.on { color: var(--text-strong); background: var(--purple); }
+.term-tool-btn.warn.on { color: var(--bg); background: var(--warn); }
 .term-color-dot {
   width: 12px;
   height: 12px;
   flex-shrink: 0;
-  margin: 3px 0;
+  margin: 4px 0;
   border: 0;
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
   cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast);
+  transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .term-color-dot.on { box-shadow: 0 0 0 2px #fff; transform: scale(1.15); }
 .term-toolbar-divider { width: 1px; height: 18px; flex-shrink: 0; background: var(--line); }
@@ -335,7 +407,7 @@
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   touch-action: pan-x;
@@ -345,6 +417,14 @@
 .term-tools-strip .term-color-dot { width: 15px; height: 15px; margin: 0 4px; }
 .term-tools-strip .term-toolbar-divider { margin: 0 4px; }
 .term-tools-strip::after { content: ""; flex: 0 0 12px; }
+/* 右侧还有工具时（utils/useOverflowHint 打上 data-more）右缘渐隐，提示能往左滑；滑到头
+   不渐隐。与 .seg-tabs（competitions.css）同一做法。
+   While tools sit off to the right (data-more from utils/useOverflowHint) the right edge
+   fades as a swipe cue; nothing fades at the end. Same as .seg-tabs (competitions.css). */
+.term-tools-strip[data-more] {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
 
 .term-tb {
   display: flex;
@@ -359,7 +439,7 @@
   flex-shrink: 0;
   gap: 2px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
 }
 .term-tf button {
@@ -367,15 +447,19 @@
   min-width: 34px;
   padding: 0 9px;
   border: 0;
-  border-radius: 10px;
+  /* 同心：轨道 10 − 内边距 3 = 7（轨道无边框）。/ Concentric: 10 − 3 = 7 (no track border). */
+  border-radius: 7px;
   background: transparent;
   color: var(--text-3);
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.term-tf button:hover { color: var(--text); }
-.term-tf button.on { background: var(--purple); color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .term-tf button:hover { color: var(--text); }
+}
+.term-tf button.on { background: var(--purple); color: var(--text-strong); }
+.term-tf button:active { transform: scale(0.96); }
 .term-tbr {
   display: flex;
   align-items: center;
@@ -390,7 +474,7 @@
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -399,15 +483,18 @@
   white-space: nowrap;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line-hi);
-  transition: color var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.term-tbr-btn:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .term-tbr-btn:hover { color: var(--text-strong); }
+}
+.term-tbr-btn:active { transform: scale(0.96); }
 .term-tbr-btn b {
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
   color: var(--text-2);
   display: inline-grid;
@@ -416,9 +503,11 @@
 .term-tbr .term-tool-btn { width: 26px; height: 26px; box-shadow: inset 0 0 0 1px var(--line-hi); }
 .term-tbr .term-tool-btn.on { box-shadow: none; }
 /* 手机「持仓」入口：紫底实色，一眼认出。/ Mobile positions entry: solid violet. */
-.term-tbr-btn--pos { background: var(--purple); color: #fff; box-shadow: none; }
-.term-tbr-btn--pos:hover { background: var(--purple-vivid); }
-.term-tbr-btn--pos b { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.term-tbr-btn--pos { background: var(--purple); color: var(--text-strong); box-shadow: none; }
+@media (hover: hover) and (pointer: fine) {
+  .term-tbr-btn--pos:hover { background: var(--purple-vivid); }
+}
+.term-tbr-btn--pos b { background: rgba(255, 255, 255, 0.22); color: var(--text-strong); }
 
 /* 图表容器：无边框无圆角，K 线自带底色。/ Chart container: seamless. */
 .term-chart {
@@ -427,6 +516,14 @@
   min-width: 0;
   overflow: hidden;
 }
+/* 图表容器可聚焦（见 ChartsPage 里 tabIndex 的说明）。全局 [tabindex]:focus-visible 的环
+   往外偏 2px，会压到上面的工具条和下面的停靠栏上；这里贴着边画（偏移 0）。鼠标点图表
+   不会出环（:focus-visible 只对键盘聚焦生效）。
+   The chart container is focusable (see the tabIndex note in ChartsPage). The global
+   [tabindex]:focus-visible ring sits 2px outside, over the toolbar above and the dock
+   below; here it hugs the edge (offset 0). A mouse click shows no ring (:focus-visible
+   matches keyboard focus only). */
+.term-chart:focus-visible { outline-offset: 0; }
 .term-chart-empty {
   position: absolute;
   top: 0;
@@ -444,14 +541,17 @@
    Bar-close countdown under the last-price label; width = price-scale width (set by BarCountdown). */
 .term-countdown {
   position: absolute;
+  /* 纵向位置由 BarCountdown 写 transform: translateY（只合成、不重排），这里钉在顶边作原点。
+     BarCountdown sets the vertical position as transform: translateY (composite only, no layout); top: 0 is the origin. */
+  top: 0;
   right: 0;
   z-index: 5;
   pointer-events: none;
-  padding: 1px 0 2px;
+  padding: 1px 0 4px;
   font: 600 12px/14px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
   text-align: center;
-  color: #fff;
+  color: var(--text-strong);
   opacity: 0.85;
 }
 /* 指标图例：裸等宽字，不套模糊药丸。/ Indicator legends: plain mono, no blurred pill. */
@@ -463,7 +563,7 @@
   align-items: center;
   gap: 4px 12px;
   pointer-events: none;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -489,6 +589,17 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--line);
 }
+/* 页签组（tablist）只装两个页签；合计和全部平仓在它外面，仍是 .term-dk-tabs 的直接
+   子项，靠 .term-dk-sum 的 margin-left:auto 推到右边。页签之间用 margin，不新增
+   flex gap（Chrome 84 以下不认）。
+   The tablist holds just the two tabs; the sum and close-all stay direct children of
+   .term-dk-tabs, pushed right by .term-dk-sum's margin-left:auto. Margin between the
+   tabs rather than another flex gap (Chrome < 84 ignores it). */
+.term-dk-tablist {
+  display: flex;
+  align-items: center;
+}
+.term-dk-tablist .term-dk-tab + .term-dk-tab { margin-left: 2px; }
 .term-dk-tab {
   display: inline-flex;
   align-items: center;
@@ -496,7 +607,7 @@
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -504,26 +615,26 @@
   font-weight: 500;
   cursor: pointer;
 }
-.term-dk-tab.on { color: #fff; background: var(--surface); }
+.term-dk-tab.on { color: var(--text-strong); background: var(--surface); }
 .term-dk-tab b {
   display: inline-grid;
   place-items: center;
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
   color: var(--text-3);
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
 }
-.term-dk-tab.on b { background: var(--purple); color: #fff; }
+.term-dk-tab.on b { background: var(--purple); color: var(--text-strong); }
 .term-dk-sum {
   margin-left: auto;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--text-3);
   white-space: nowrap;
 }
-.term-dk-sum b { margin-left: 6px; font-size: 12px; font-weight: 500; }
+.term-dk-sum b { margin-left: 8px; font-size: 12px; font-weight: 500; }
 /* 全部平仓：停靠头最右端。发丝线 + 跌色文字，悬停才上色——与订单页那一个
    同一套分寸感：不可撤销、一次动很多张仓，要好找，但不能比行内那个平仓更抢眼。
    靠 .term-dk-sum 的 margin-left:auto 把这一组推到右边，两者渲染条件相同。
@@ -531,25 +642,30 @@
    text, filling only on hover — same restraint as the orders page's button. It rides
    the sum's margin-left:auto; both render under the same condition. */
 .term-dk-closeall {
-  margin-left: 10px;
+  margin-left: 12px;
   height: 26px;
   padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   box-shadow: inset 0 0 0 1px rgb(var(--down-rgb) / 0.4);
   color: var(--down);
-  font: 600 12px inherit;
   font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.term-dk-closeall:hover:not(:disabled) { background: rgb(var(--down-rgb) / 0.14); }
+@media (hover: hover) and (pointer: fine) {
+  .term-dk-closeall:hover:not(:disabled) { background: rgb(var(--down-rgb) / 0.14); }
+}
 .term-dk-closeall:active:not(:disabled) { transform: translateY(1px); }
 .term-dk-closeall:disabled { opacity: 0.5; cursor: default; }
 .term-dk-body { flex: 1; min-height: 0; overflow: auto; }
-.term-dk-empty { padding: 22px 12px; text-align: center; font-size: 12.5px; color: var(--text-3); }
+.term-dk-empty { padding: 24px 12px; text-align: center; font-size: 12px; color: var(--text-3); }
+.term-dk-empty b { display: block; font-weight: 500; color: var(--text-2); }
+.term-dk-empty span { display: block; max-width: 40ch; margin: 4px auto 0; font-size: 12px; }
 /* 持仓行：一行一仓，发丝线分隔。/ One position per hairline row. */
 .term-pr {
   display: grid;
@@ -559,9 +675,21 @@
   min-height: 48px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line);
-  animation: term-in 0.45s var(--ease-out) both;
 }
-.term-pr:hover, .term-pr.open { background: var(--surface); }
+/* 进场只给带 .is-in 的行（PositionsDock 用 useFirstReveal 决定：本次会话第一次拿到持仓时），
+   错峰延迟由行内 animationDelay 给（每行 30ms，封顶第 6 行）。以前每次切页签整列重播、
+   错峰不封顶；而且 both 填充把 opacity: 1 一直压在行上，.closing 的压暗从不生效。
+   Entrance only for rows with .is-in (PositionsDock decides via useFirstReveal: the
+   first time positions arrive this session); the inline animationDelay staggers 30ms
+   per row up to the 6th. It used to replay on every tab switch with no cap, and its
+   `both` fill pinned opacity: 1 on the row so .closing never dimmed. */
+.term-pr.is-in {
+  animation: term-in var(--dur-base) var(--ease-out) backwards;
+}
+@media (hover: hover) and (pointer: fine) {
+  .term-pr:hover { background: rgba(255, 255, 255, 0.03); }
+}
+.term-pr.open { background: var(--surface); }
 .term-pr.pend { grid-template-columns: minmax(0, 1.4fr) auto auto; justify-content: space-between; }
 /* 真实挂单行（.q）比「指令在路上」那行多三格：触发价 / 止损 / 止盈。
    上面那条三列的模板放不下，多出来的格子会折到第二行去。
@@ -573,11 +701,11 @@
 }
 .term-pr .k {
   margin-bottom: 4px;
-  font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px/1 var(--font-sans);
   color: var(--text-3);
 }
 .term-pr .v {
-  font: 500 12.5px/1 "JetBrains Mono", ui-monospace, monospace;
+  font: 500 13px/1 var(--font-mono);
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -585,21 +713,21 @@
 .term-pr .v.down { color: var(--down); }
 .term-pr-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .term-pr-id .sym-ava { width: 20px; height: 20px; font-size: 8px; }
-.term-pr-id b { font: 600 12.5px "JetBrains Mono", ui-monospace, monospace; color: #fff; }
+.term-pr-id b { font: 600 13px var(--font-mono); color: var(--text-strong); }
 .term-tag {
   display: inline-flex;
   align-items: center;
   height: 18px;
-  padding: 0 7px;
-  border-radius: 10px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  font: 500 12px var(--font-sans);
   white-space: nowrap;
 }
 .term-tag.buy { background: var(--up-bg); color: var(--up); }
 .term-tag.sell { background: var(--down-bg); color: var(--down); }
 .term-tag.pending { background: var(--mid-bg); color: var(--mid); }
 .term-pnl {
-  font: 500 14px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 15px var(--font-mono);
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
@@ -610,7 +738,7 @@
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface-2);
   color: var(--text-2);
   font: inherit;
@@ -619,9 +747,11 @@
   white-space: nowrap;
   cursor: pointer;
 }
-.term-pa button:hover:not(:disabled) { color: #fff; background: var(--nest-hi); }
+@media (hover: hover) and (pointer: fine) {
+  .term-pa button:hover:not(:disabled) { color: var(--text-strong); background: var(--nest-hi); }
+}
 .term-pa button.warn { color: var(--down); }
-.term-pa button.on { background: var(--purple); color: #fff; }
+.term-pa button.on { background: var(--purple); color: var(--text-strong); }
 .term-pa button:disabled { opacity: 0.4; cursor: not-allowed; }
 /* 平仓中：行压暗、动作换成一枚转圈的"平仓中"、底边一道来回扫的细光。点下去的
    那一刻就进入这个态，不等接口——之后行随持仓推送消失。/ Closing: dimmed row, a
@@ -642,10 +772,10 @@
 .term-closing {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   height: 24px;
   padding: 0 8px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--mid);
   white-space: nowrap;
 }
@@ -657,13 +787,17 @@
   border-top-color: var(--mid);
   animation: term-spin 0.7s linear infinite;
 }
-/* 新成交的仓位行：进场动画之外再闪一下底色，让"仓位已经开出来了"被看见。
-   首屏加载进来的行不闪（见 PositionsDock 的 FRESH_GRACE_MS）。/ A freshly filled
-   row flashes its background once on top of the entrance; initial-load rows don't. */
-.term-pr.fresh { animation: term-in 0.45s var(--ease-out) both, term-flash 1.4s var(--ease-out) both; }
+/* 新成交的仓位行：底色闪一下，让"仓位已经开出来了"被看见。不再叠进场位移：.fresh 是
+   挂载后下一帧才加上的，这时行已经可见，再从透明重播一次会闪。首屏加载进来的行不闪
+   （见 PositionsDock 的 FRESH_GRACE_MS）。只变底色、不算运动，减少动效时保留。
+   A freshly filled row flashes its background once. No entrance on top: .fresh lands a
+   frame after mount, when the row is already visible, so replaying a fade from
+   transparent would flicker. Initial-load rows don't flash (FRESH_GRACE_MS). A colour
+   change rather than motion, so it stays under reduced motion. */
+.term-pr.fresh { animation: term-flash 1.4s var(--ease-out) backwards; }
 /* 有悬停能力的设备才把操作藏到悬停；触屏一直显示。
    Hide actions until hover only where hover exists; touch shows them always. */
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .term-pr .term-pa { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
   .term-pr:hover .term-pa, .term-pr.open .term-pa, .term-pr:focus-within .term-pa, .term-pr.closing .term-pa { opacity: 1; }
 }
@@ -671,43 +805,55 @@
 .term-pr-x {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px 28px;
-  padding: 12px 16px 14px;
+  gap: 16px 28px;
+  padding: 12px 16px 16px;
   border-bottom: 1px solid var(--line);
   background: var(--surface);
 }
-.term-pr-xg { display: flex; flex-direction: column; gap: 6px; }
+.term-pr-xg { display: flex; flex-direction: column; gap: 8px; }
 .term-pr-xk { font-size: 12px; color: var(--text-3); }
-.term-pr-xr { display: flex; align-items: center; gap: 6px; }
+.term-pr-xr { display: flex; align-items: center; gap: 8px; }
 .term-pr-inp {
   width: 96px;
   height: 30px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
   color: var(--text);
-  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 13px var(--font-mono);
   text-align: right;
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1px var(--line-control);
 }
-.term-pr-inp:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.term-pr-inp:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 .term-pr-inp.bad { box-shadow: inset 0 0 0 1px var(--down); }
+/* 触屏上这个框是 16px 字（见 components-cards.css 末尾的触屏输入框规则）。96px 宽、
+   左右各 10px 内边距只放得下约 7.9 个等宽字符，BTC 的价格（如 104250.50，9 位）会被截。
+   触屏放宽到 112px，约 9.6 个字符。外层 .term-pr-x 是可换行的 flex，放宽不会挤坏一行。
+   On touch this field renders 16px text (see the touch input rule at the end of
+   components-cards.css). At 96px with 10px padding it holds about 7.9 monospace
+   characters and clips a BTC price such as 104250.50 (9). Touch widens it to 112px, about
+   9.6 characters; the parent .term-pr-x is a wrapping flex row, so nothing gets squeezed. */
+@media (hover: none) and (pointer: coarse) {
+  .term-pr-inp { width: 112px; }
+}
 .term-pr-btn {
   height: 30px;
   padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
   font: inherit;
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
 }
-.term-pr-btn:hover:not(:disabled) { background: var(--purple-vivid); }
+@media (hover: hover) and (pointer: fine) {
+  .term-pr-btn:hover:not(:disabled) { background: var(--purple-vivid); }
+}
 .term-pr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .term-pr-warn { font-size: 12px; color: var(--down); }
 
@@ -718,13 +864,13 @@
   overflow-y: auto;
   padding: 0 16px 16px;
 }
-.term-acct-select { display: block; margin-top: 14px; }
+.term-acct-select { display: block; margin-top: 16px; }
 .term-acct-select .select-trigger {
   height: 34px;
   padding: 0 12px;
   background: var(--surface);
   border: 0;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--text-2);
 }
 .term-side {
@@ -745,7 +891,7 @@
   color: inherit;
   font: inherit;
   cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast);
+  transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 /* 必须是 -of-type 而不是 -child：点差徽记那个 <span> 就挂在 .term-side 里，且排在
    两个按钮之后，于是有点差时买入按钮不是 :last-child——右侧圆角整个不生效，连体
@@ -756,22 +902,29 @@
    radius silently never applied — rounded on the left, square on the right. Without a
    spread the span isn't rendered and it looked fine, which is why this only showed up
    against live quotes. */
-.term-side button:first-of-type { border-radius: var(--r-panel) 0 0 var(--r-panel); }
-.term-side button:last-of-type { border-radius: 0 var(--r-panel) var(--r-panel) 0; }
-.term-side button:active { transform: scale(0.985); }
+.term-side button:first-of-type { border-radius: var(--r-md) 0 0 var(--r-md); }
+.term-side button:last-of-type { border-radius: 0 var(--r-md) var(--r-md) 0; }
+.term-side button:active { transform: scale(0.96); }
 .term-side .lab {
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-sans);
   color: var(--text-3);
 }
 .term-side .px {
-  font: 500 17px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 17px var(--font-mono);
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
-.term-side .px b { font-size: 21px; font-weight: 600; }
+.term-side .px b { font-size: 20px; font-weight: 600; }
 .term-side button.sell.on { background: var(--down); }
 .term-side button.buy.on { background: var(--up); }
-.term-side button.on .lab, .term-side button.on .px { color: #0b0b0e; }
+.term-side button.on .lab, .term-side button.on .px { color: var(--bg); }
+/* 行情断开：没选中一侧的价格退到 --text-3；选中一侧是实色底，灰字在上面看不清，改成半透明。
+   提示条保留它自带的 12px 上边距：.term-tk 没有上内边距，票里第一个元素都靠自己的上边距和栏头隔开。
+   Quotes down: the unselected side's price falls back to --text-3; the selected side sits on a
+   solid fill where grey would be unreadable, so it fades to half opacity instead. The strip keeps
+   its own 12px top margin: .term-tk has no top padding, so the first item spaces itself from the header. */
+.term-tk.quotes-down .term-side button:not(.on) .px { color: var(--text-3); }
+.term-tk.quotes-down .term-side button.on .px { opacity: 0.5; }
 .term-spread {
   position: absolute;
   left: 50%;
@@ -782,10 +935,10 @@
   gap: 4px;
   height: 22px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--bg);
   box-shadow: inset 0 0 0 1px var(--line-hi);
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--text-2);
   pointer-events: none;
   white-space: nowrap;
@@ -795,7 +948,7 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  margin: 18px 0 6px;
+  margin: 20px 0 8px;
   font-size: 12px;
   color: var(--text-3);
 }
@@ -804,14 +957,15 @@
   display: inline-flex;
   gap: 2px;
   padding: 2px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
 }
 .term-mode button {
   height: 20px;
   padding: 0 9px;
   border: 0;
-  border-radius: 10px;
+  /* 同心：轨道 10 − 内边距 2 = 8（轨道无边框）。/ Concentric: 10 − 2 = 8 (no track border). */
+  border-radius: 8px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -819,12 +973,15 @@
   font-weight: 500;
   cursor: pointer;
 }
-.term-mode button.on { background: var(--nest-hi); color: #fff; }
+/* 手数 / 风险是主选择：实色紫，与旁边的 .term-pre、.term-tf 以及信号下单弹窗的同一个控件一致。
+   Lots / risk is a primary selection: solid violet, matching .term-pre, .term-tf and the
+   same control in the signal order sheet. */
+.term-mode button.on { background: var(--purple); color: var(--text-strong); }
 .term-step {
   display: grid;
   grid-template-columns: 36px minmax(0, 1fr) 36px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
   overflow: hidden;
 }
@@ -832,20 +989,37 @@
   border: 0;
   background: transparent;
   color: var(--text-2);
-  font: 500 18px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 17px var(--font-mono);
   cursor: pointer;
 }
-.term-step button:hover { background: var(--surface-2); color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .term-step button:hover { background: var(--surface-2); color: var(--text-strong); }
+}
 .term-step input {
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #fff;
-  font: 500 16px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-strong);
+  font: 500 16px var(--font-mono);
   text-align: center;
   outline: none;
   font-variant-numeric: tabular-nums;
 }
+/* 手数框聚焦时画一圈 1px 内描边，与旁边 .term-inp:focus 同一种写法。
+   不用 .term-step:focus-within 包住整条：Chrome 和安卓 WebView 点 +/- 时按钮会拿到焦点，
+   整条步进器的框会在每次点按后一直留着。透明轮廓给 Windows 高对比模式。
+   The volume field gets a 1px inset ring on focus, like the neighbouring .term-inp.
+   Not .term-step:focus-within: Chrome and Android WebView focus the +/- buttons on tap,
+   which would leave the whole stepper framed after every press. The transparent outline
+   is for forced-colors mode. */
+.term-step input:focus {
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--purple-hi);
+  outline: 2px solid transparent;
+}
+/* 容器 overflow: hidden 会裁掉按钮向外 2px 的键盘焦点环，改成往里收。
+   The container's overflow: hidden clips the buttons' outer ring; draw it inside. */
+.term-step button:focus-visible { outline-offset: -2px; }
 .term-pre {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -855,39 +1029,41 @@
 .term-pre button {
   height: 26px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-3);
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line);
   transition: color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
-.term-pre button:hover { color: var(--text); box-shadow: inset 0 0 0 1px var(--line-hi); }
-.term-pre button.on { color: #fff; background: var(--purple); box-shadow: none; }
+@media (hover: hover) and (pointer: fine) {
+  .term-pre button:hover { color: var(--text); box-shadow: inset 0 0 0 1px var(--line-hi); }
+}
+.term-pre button.on { color: var(--text-strong); background: var(--purple); box-shadow: none; }
 .term-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .term-fld { display: flex; flex-direction: column; min-width: 0; }
-.term-fld .term-fk { margin: 14px 0 6px; }
+.term-fld .term-fk { margin: 16px 0 8px; }
 .term-inp {
   width: 100%;
   height: 36px;
   padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
-  color: #fff;
-  font: 500 13px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-strong);
+  font: 500 13px var(--font-mono);
   outline: none;
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1px var(--line-control);
   font-variant-numeric: tabular-nums;
 }
 .term-inp::placeholder { color: var(--text-3); }
-.term-inp:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.term-inp:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 .term-inp.bad { box-shadow: inset 0 0 0 1px var(--down); }
 .term-fh {
-  margin-top: 5px;
+  margin-top: 4px;
   padding-left: 12px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--text-3);
   min-height: 13px;
 }
@@ -904,7 +1080,7 @@
   color: var(--text-3);
 }
 .term-lr b {
-  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 13px var(--font-mono);
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -913,31 +1089,39 @@
 .term-lr b.down { color: var(--down); }
 .term-lr.em { height: 36px; }
 .term-lr.em span { color: var(--text-2); }
-.term-lr.em b { font-size: 14px; }
-.term-warn { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--gold); }
+.term-lr.em b { font-size: 15px; }
+.term-warn { margin: 12px 0 0; font-size: 12px; line-height: 1.5; color: var(--warn); }
 .term-cta {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   height: 46px;
-  margin-top: 14px;
+  margin-top: 16px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--up);
-  color: #0b0b0e;
-  font: 600 14px var(--sans, inherit);
+  color: var(--bg);
+  /* --sans 从未定义，回退成 font 简写里的 inherit 会让整条声明失效；拆成长写法。
+     --sans was never defined and its inherit fallback voided the shorthand; longhands instead. */
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
-  transition: transform var(--dur-fast), filter var(--dur-fast);
+  transition: transform var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out);
 }
 .term-cta.sell { background: var(--down); }
 .term-cta .px {
-  font: 500 13px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 13px var(--font-mono);
   opacity: 0.8;
   font-variant-numeric: tabular-nums;
 }
-.term-cta:hover:not(:disabled) { filter: brightness(1.06); }
+/* 下单按钮是实色底，同上用半透明表示「这个价已过时」。/ Solid CTA: fade the stale price, as above. */
+.term-tk.quotes-down .term-cta .px { opacity: 0.5; }
+@media (hover: hover) and (pointer: fine) {
+  .term-cta:hover:not(:disabled) { filter: brightness(1.06); }
+}
 .term-cta:active:not(:disabled) { transform: translateY(1px); }
 .term-cta:disabled { opacity: 0.45; cursor: not-allowed; }
 /* 等回执中：按钮不再是"变灰的禁用态"，而是保持本色、转圈 + 跑秒。用户看到的是
@@ -948,8 +1132,8 @@
   width: 14px;
   height: 14px;
   border-radius: 50%;
-  border: 2px solid rgba(11, 11, 14, 0.25);
-  border-top-color: #0b0b0e;
+  border: 2px solid rgb(var(--bg-rgb) / 0.25);
+  border-top-color: var(--bg);
   animation: term-spin 0.7s linear infinite;
 }
 .term-ctah { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--text-3); text-align: center; }
@@ -958,8 +1142,8 @@
 .term-receipt.error { color: var(--down); }
 .term-receipt.info { color: var(--text-2); }
 .term-receipt .px {
-  margin-left: 6px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  margin-left: 8px;
+  font: 500 12px var(--font-mono);
   opacity: 0.7;
   font-variant-numeric: tabular-nums;
 }
@@ -967,24 +1151,24 @@
 /* ── 账户条 / account ── */
 .term-ac {
   flex-shrink: 0;
-  padding: 10px 16px 14px;
+  padding: 12px 16px 16px;
   border-top: 1px solid var(--line);
 }
 .term-ac .term-ph { height: 30px; padding: 0; border: 0; }
-.term-ac-empty { margin: 6px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+.term-ac-empty { margin: 8px 0 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
 .term-acg {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px 16px;
+  gap: 12px 16px;
   margin-top: 4px;
 }
 .term-acg .k {
-  font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px/1 var(--font-sans);
   color: var(--text-3);
 }
 .term-acg .v {
-  margin-top: 5px;
-  font: 500 14px/1 "JetBrains Mono", ui-monospace, monospace;
+  margin-top: 4px;
+  font: 500 15px/1 var(--font-mono);
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
@@ -996,10 +1180,10 @@
   justify-content: space-between;
   gap: 8px;
   margin-top: 12px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 500 12px var(--font-mono);
   color: var(--text-3);
 }
-.term-acm .ok { display: inline-flex; align-items: center; gap: 6px; color: var(--up); }
+.term-acm .ok { display: inline-flex; align-items: center; gap: 8px; color: var(--up); }
 .term-acm .ok::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 
 /* ── 手机 / mobile ── */
@@ -1010,9 +1194,9 @@
   .term-qs-id > div { min-width: 0; }
   .term-qs-id p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .term-qs-id .sym-ava { display: none; }
-  .term-qs-id h2 { display: flex; align-items: center; gap: 6px; }
+  .term-qs-id h2 { display: flex; align-items: center; gap: 8px; }
   .term-qs-id h2 svg { color: var(--text-3); }
-  .term-qs-px { flex-direction: column; align-items: flex-end; gap: 2px; padding: 10px 16px 0; border-right: 0; }
+  .term-qs-px { flex-direction: column; align-items: flex-end; gap: 4px; padding: 12px 16px 0; border-right: 0; }
   .term-big { font-size: 24px; }
   .term-big .pip { font-size: 30px; }
   .term-big sup { font-size: 12px; }
@@ -1026,7 +1210,7 @@
   .term-qs-px { flex: 1 1 0; }
   .term-qs-st {
     order: 2; flex: none; flex-direction: column; align-items: stretch; justify-content: center;
-    gap: 3px; padding: 12px 10px 0; overflow: visible;
+    gap: 4px; padding: 12px 12px 0; overflow: visible;
   }
   .term-qs-px { order: 3; }
   .term-qs-st .term-st.term-st--desk { display: none; }
@@ -1049,13 +1233,13 @@
     padding-left: 8px; border-left: 1px solid var(--line);
   }
   .term-qs-acts .term-tbr-btn { height: 30px; padding: 0 11px; gap: 5px; font-size: 12px; }
-  .term-qs-acts .term-tool-btn { width: 30px; height: 30px; box-shadow: inset 0 0 0 1px var(--line-hi); border-radius: 999px; }
+  .term-qs-acts .term-tool-btn { width: 30px; height: 30px; box-shadow: inset 0 0 0 1px var(--line-hi); border-radius: var(--r-tile); }
   .term-qs-acts .term-tool-btn.on { box-shadow: none; }
 }
 /* 320 宽的小屏（老 iPhone SE）：大价格收一号，品种名、统计、8 位价格才能同排放下。
    320px phones (first-gen iPhone SE): one size down on the price so symbol, stats and an 8-digit price share the row. */
 @media (max-width: 340px) {
-  .term-qs-px { padding: 10px 12px 0 0; }
+  .term-qs-px { padding: 12px 12px 0 0; }
   .term-qs-st { padding-left: 8px; padding-right: 8px; }
   .term-big { font-size: 20px; }
   .term-big .pip { font-size: 25px; }
@@ -1084,7 +1268,9 @@
     flex-shrink: 0;
     /* 兜底：万一壳仍比屏幕高，交易条压在底栏（z-40）之上，买卖至少永远点得到。
        Safety net: if the shell still overruns, the trade bar stacks above the tab bar
-       (z-40) so buy / sell stay tappable no matter what. */
+       (z-40) so buy / sell stay tappable no matter what.
+       （41 = --z-sticky + 1，刻意写字面量：z-index 里不用 calc()，见 tokens.css 层级刻度。）
+       (41 = --z-sticky + 1, literal on purpose: no calc() in z-index, see the scale in tokens.css.) */
     position: relative;
     z-index: 41;
     padding: 8px 12px;
@@ -1099,19 +1285,23 @@
     gap: 2px;
     height: 52px;
     border: 0;
-    border-radius: var(--r-panel);
+    border-radius: var(--r-md);
     font: inherit;
     cursor: pointer;
-    transition: transform var(--dur-fast);
+    transition: transform var(--dur-fast) var(--ease-out);
   }
-  .term-mbar button:active { transform: scale(0.98); }
+  .term-mbar button:active { transform: scale(0.96); }
   .term-mbar .sell { background: var(--down-bg); color: var(--down); }
   .term-mbar .buy { background: var(--up-bg); color: var(--up); }
-  .term-mbar .lab { font: 500 12px "JetBrains Mono", ui-monospace, monospace; }
-  .term-mbar .px { font: 500 16px "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .term-mbar .lab { font: 500 12px var(--font-sans); }
+  .term-mbar .px { font: 500 16px var(--font-mono); font-variant-numeric: tabular-nums; }
   .term-mbar .px b { font-size: 20px; font-weight: 600; }
-  .term-mbar .sp { font: 500 12px/1.3 "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); text-align: center; }
+  .term-mbar .sp { font: 500 12px/1.3 var(--font-mono); color: var(--text-3); text-align: center; }
   .term-mbar .sp b { display: block; font-size: 12px; font-weight: 500; color: var(--text-2); }
+  /* 行情断开：交易条第一行横跨三列写明；卖 / 买价格退到 --text-3（按钮是浅色调底，不是实色）。
+     Quotes down: a full-width first row says so; prices fall back to --text-3 (tinted, not solid, buttons). */
+  .term-mbar-down { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.4; text-align: center; color: var(--mid); }
+  .term-mbar.quotes-down .px { color: var(--text-3); }
 
   /* 抽屉：自选 / 下单票 / 持仓。盖在全站底栏之上。
      Sheets: watchlist / ticket / positions, above the app tab bar. */
@@ -1122,8 +1312,8 @@
     right: 0;
     bottom: 0;
     left: 0;
-    z-index: 44;
-    background: rgba(0, 0, 0, 0.55);
+    z-index: var(--z-drawer);
+    background: var(--scrim);
     animation: term-fade 0.25s var(--ease-out) both;
   }
   .term-sheet {
@@ -1133,34 +1323,47 @@
     left: 0;
     right: 0;
     bottom: 0;
-    z-index: 45;
+    z-index: var(--z-drawer);
     max-height: 88dvh;
     padding-bottom: env(safe-area-inset-bottom, 0px);
     border-radius: var(--r-lg) var(--r-lg) 0 0;
     background: var(--surface);
-    animation: term-sheet-in 0.32s var(--ease-out) both;
+    animation: term-sheet-in var(--dur-medium) var(--ease-out) both;
   }
-  .term-sheet::before {
-    content: "";
+  /* 把手：真实元素而不是 ::before，因为它是拖拽区的一部分，要 touch-action: none
+     （伪元素上的 touch-action 不可靠）。上 12px + 4px 的条，与指标库 .ind-dlg::before
+     和站内其他底部抽屉的把手一致（计划 039 E4 起都是 12）。
+     The handle is a real element instead of ::before because it is part of the drag
+     zone and needs touch-action: none (unreliable on a pseudo-element). 12px above a
+     4px bar, matching .ind-dlg::before and the other bottom sheets (12 since plan 039 E4). */
+  .term-sheet-grab {
     flex-shrink: 0;
+    height: 16px;
+    padding-top: 12px;
+    touch-action: none;
+    cursor: grab;
+  }
+  .term-sheet-grab::before {
+    content: "";
+    display: block;
     width: 36px;
     height: 4px;
-    margin: 10px auto 0;
+    margin: 0 auto;
     border-radius: 2px;
     background: var(--line-hi);
   }
   .term-sheet .term-ph { height: 40px; padding: 0 16px; border: 0; }
   /* 抽屉头：左侧标题 + 副信息一组，右侧 32px 圆形关闭键。
      Sheet head: title + meta grouped left, a 32px round close button right. */
-  .term-sheet-ph { height: 48px; padding: 0 12px 0 16px; }
-  .term-sheet-ttl { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .term-sheet-ph { height: 48px; padding: 0 12px 0 16px; touch-action: none; }
+  .term-sheet-ttl { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
   .term-sheet-ttl span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* 抽屉抬头里的偏好开关：文字 + Switch，挤在标题与关闭按钮之间。
      Preference switch in the sheet header, between the title and the close button. */
   .term-sheet-pref {
     display: flex; align-items: center; gap: 8px; flex: none;
-    margin-left: auto; margin-right: 10px;
-    font: 500 12px/1 "JetBrains Mono", ui-monospace, monospace;
+    margin-left: auto; margin-right: 12px;
+    font: 500 12px/1 var(--font-mono);
     color: var(--text-3);
     cursor: pointer;
   }
@@ -1168,21 +1371,21 @@
     display: grid; place-items: center; flex: none;
     width: 32px; height: 32px; border-radius: 50%;
     border: 1px solid var(--line); background: var(--nest); color: var(--text-2);
-    cursor: pointer; transition: color var(--dur-fast), background-color var(--dur-fast);
+    cursor: pointer; transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   }
-  .term-sheet-x:active { color: #fff; background: var(--nest-hi); }
-  .term-sheet-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; }
+  .term-sheet-x:active { color: var(--text-strong); background: var(--nest-hi); }
+  .term-sheet-body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   /* 抽屉里的面用再抬一档，与抽屉底色分开。/ Inner planes step up once more. */
   .term-sheet .term-wls input, .term-sheet .term-side button, .term-sheet .term-step,
   .term-sheet .term-inp, .term-sheet .term-mode, .term-sheet .term-acct-select .select-trigger,
-  .term-sheet .term-pr:hover, .term-sheet .term-pr.open, .term-sheet .term-pr-x, .term-sheet .term-dk-tab.on { background: var(--nest); }
+  .term-sheet .term-pr.open, .term-sheet .term-pr-x, .term-sheet .term-dk-tab.on { background: var(--nest); }
   /* 抽屉里手指操作：把全部平仓的热区抬高一档（头本身 38px，30 放得下）。
      Bigger touch target for close-all inside the sheet (the head is 38px). */
-  .term-sheet .term-dk-closeall { height: 30px; padding: 0 14px; }
+  .term-sheet .term-dk-closeall { height: 30px; padding: 0 16px; }
   .term-sheet .term-side button.sell.on { background: var(--down); }
   .term-sheet .term-side button.buy.on { background: var(--up); }
   .term-sheet .term-spread { background: var(--surface); }
-  .term-sheet .term-wr:hover, .term-sheet .term-wr.on { background: var(--nest); }
+  .term-sheet .term-wr.on { background: var(--nest); }
   .term-sheet .term-wl { max-height: 60dvh; }
   /* 抽屉里整体滚动，票不再自己内滚——否则下单按钮会被账户条截一半。
      Inside the sheet the body scrolls as a whole; a self-scrolling ticket would leave the CTA half-hidden. */
@@ -1195,7 +1398,7 @@
   .term-pr {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-areas: "id id id pnl" "e c sl tp" "pa pa pa pa";
-    gap: 10px 8px;
+    gap: 12px 8px;
     padding: 12px 16px;
   }
   .term-pr-id { grid-area: id; }
@@ -1218,8 +1421,36 @@
 @keyframes term-flash { from { background-color: var(--up-bg); } to { background-color: transparent; } }
 @keyframes term-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes term-sheet-in { from { transform: translateY(100%); } to { transform: none; } }
+/* 抽屉退场：ChartsPage 用 usePresence 让抽屉在关闭后多留 240ms 并挂 .closing。0.24s 比
+   0.3s 的入场快一档，退场用 --ease-in；拖拽甩走时行内样式优先，从松手的位置接着走。
+   Sheet exit: ChartsPage keeps the sheet 240ms after closing with .closing. 0.24s is one
+   step faster than the 0.3s entrance and exits use --ease-in; after a fling the inline
+   styles win and it continues from the release point. */
+.term-sheet.closing {
+  animation: none;
+  transform: translateY(100%);
+  transition: transform var(--dur-base) var(--ease-in);
+  pointer-events: none;
+}
+.term-scrim.closing {
+  animation: none;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-in);
+  pointer-events: none;
+}
 @media (prefers-reduced-motion: reduce) {
-  .term-pr, .term-scrim, .term-sheet { animation: none; }
+  .term-pr.is-in { animation: none; }
+  /* 减弱动效不等于没有动效：抽屉与遮罩改成透明度淡入淡出，不再滑动（以前是直接 none，
+     瞬间出现）。
+     Reduced motion is not no motion: the sheet and scrim fade instead of sliding (they
+     used to be animation: none and simply appeared). */
+  .term-scrim, .term-sheet { animation: term-fade var(--dur-fast) var(--ease-out) both; }
+  .term-sheet.closing, .term-scrim.closing {
+    animation: none;
+    transform: none;
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease-in);
+  }
   .term-qs-live i { animation: none; }
   .term-pr.closing::after, .term-closing i, .term-cta-spin { animation: none; }
 }
@@ -1235,11 +1466,11 @@
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 80;
+  z-index: var(--z-sheet);
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(9, 9, 11, 0.62);
+  background: var(--scrim);
   animation: term-fade 0.22s var(--ease-out) both;
 }
 .ind-dlg {
@@ -1253,16 +1484,25 @@
   overflow: hidden;
   animation: term-in 0.3s var(--ease-out) both;
 }
+/* 指标库退场：桌面是居中弹窗，整层淡出；手机另外让抽屉滑回底部（767px 块）。
+   Indicator library exit: the centred desktop dialog fades as one layer; phones also
+   slide the sheet down (the 767px block). */
+.ind-overlay.closing {
+  animation: none;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-in);
+  pointer-events: none;
+}
 .ind-hd {
   grid-column: 1 / 3;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 20px 14px;
+  gap: 16px;
+  padding: 16px 20px 16px;
   border-bottom: 1px solid var(--line);
 }
-.ind-hd h3 { margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
-.ind-n { margin-left: -4px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); white-space: nowrap; }
+.ind-hd h3 { margin: 0; font-size: 16px; font-weight: 500; color: var(--text-strong); }
+.ind-n { margin-left: -4px; font: 500 12px var(--font-mono); color: var(--text-3); white-space: nowrap; }
 .ind-srch { position: relative; margin-left: auto; width: 240px; }
 .ind-srch svg { position: absolute; left: 12px; top: 9px; color: var(--text-3); pointer-events: none; }
 .ind-srch input {
@@ -1270,15 +1510,15 @@
   height: 32px;
   padding: 0 12px 0 32px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
   color: var(--text);
   font: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   outline: 0;
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1px var(--line-control);
 }
-.ind-srch input:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.ind-srch input:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 .ind-close, .ind-back {
   display: grid;
   place-items: center;
@@ -1292,18 +1532,20 @@
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line-hi);
 }
-.ind-close:hover, .ind-back:hover { color: #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .ind-close:hover, .ind-back:hover { color: var(--text-strong); }
+}
 .ind-back { display: none; }
 
 /* 目录 / catalog */
 .ind-cat { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
-.ind-tpl { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.ind-tpl .k { width: 100%; margin-bottom: 2px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
+.ind-tpl { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.ind-tpl .k { width: 100%; margin-bottom: 4px; font: 500 12px var(--font-sans); color: var(--text-3); }
 .ind-tpl button {
   height: 26px;
-  padding: 0 11px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -1311,87 +1553,92 @@
   font-weight: 500;
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line-hi);
-  transition: color var(--dur-fast), background-color var(--dur-fast);
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
-.ind-tpl button:hover { color: #fff; }
-.ind-tpl button.on { background: var(--purple); color: #fff; box-shadow: none; }
+@media (hover: hover) and (pointer: fine) {
+  .ind-tpl button:hover { color: var(--text-strong); }
+}
+.ind-tpl button.on { background: var(--purple); color: var(--text-strong); box-shadow: none; }
 .ind-list { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 12px; }
-.ind-grp { display: flex; justify-content: space-between; align-items: baseline; padding: 14px 14px 4px; }
-.ind-grp b { font-size: 12px; font-weight: 600; color: var(--text-2); }
-.ind-grp span { font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
+.ind-grp { display: flex; justify-content: space-between; align-items: baseline; padding: 16px 16px 4px; }
+.ind-grp b { font-size: 12px; font-weight: 500; color: var(--text-2); }
+.ind-grp span { font: 500 12px var(--font-mono); color: var(--text-3); }
 .ind-it {
   position: relative;
   display: grid;
   grid-template-columns: 38px minmax(0, 1fr) 44px;
-  gap: 0 10px;
+  gap: 0 12px;
   align-items: center;
-  padding: 8px 14px;
+  padding: 8px 16px;
   cursor: pointer;
-  transition: background-color var(--dur-fast);
+  transition: background-color var(--dur-fast) var(--ease-out);
 }
-.ind-it:hover, .ind-it.sel { background: var(--surface-2); }
+@media (hover: hover) and (pointer: fine) {
+  .ind-it:hover { background: rgba(255, 255, 255, 0.03); }
+}
+.ind-it.sel { background: var(--surface-2); }
 .ind-it.sel::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--purple-hi); }
 .ind-it:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
 .ind-ab {
   display: grid;
   place-items: center;
   height: 24px;
-  border-radius: 6px;
+  border-radius: var(--r-tile);
   background: var(--nest);
   color: var(--text-2);
-  font: 600 12px "JetBrains Mono", ui-monospace, monospace;
+  font: 600 12px var(--font-mono);
   letter-spacing: 0.04em;
 }
-.ind-it.on .ind-ab { background: var(--purple); color: #fff; }
+.ind-it.on .ind-ab { background: var(--purple); color: var(--text-strong); }
 .ind-ab.lg { width: 44px; height: 30px; font-size: 12px; flex-shrink: 0; }
 .ind-txt { min-width: 0; }
-.ind-txt .nm { display: block; font-size: 13px; font-weight: 500; line-height: 1.2; color: #fff; }
-.ind-txt .ds { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ind-txt .nm { display: block; font-size: 13px; font-weight: 500; line-height: 1.2; color: var(--text-strong); }
+.ind-txt .ds { display: block; margin-top: 4px; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 编辑器 / editor */
 .ind-ed { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
-.ind-ed-hd { display: flex; align-items: flex-start; gap: 14px; padding: 18px 22px 0; }
+.ind-ed-hd { display: flex; align-items: flex-start; gap: 16px; padding: 20px 24px 0; }
 .ind-ed-t { flex: 1; min-width: 0; }
-.ind-ed-hd h4 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; font-weight: 500; color: #fff; }
-.ind-ed-hd p { margin: 4px 0 0; max-width: 52ch; font-size: 12.5px; line-height: 1.5; color: var(--text-3); }
+.ind-ed-hd h4 { display: flex; align-items: center; gap: 12px; margin: 0; font-size: 17px; font-weight: 500; color: var(--text-strong); }
+.ind-ed-hd p { margin: 4px 0 0; max-width: 52ch; font-size: 12px; line-height: 1.5; color: var(--text-3); }
 .ind-ed-hd .switch { margin-top: 4px; }
 .ind-tag {
   display: inline-flex;
   align-items: center;
   height: 18px;
-  padding: 0 7px;
-  border-radius: 10px;
-  font: 500 12px "JetBrains Mono", ui-monospace, monospace;
+  padding: 0 8px;
+  border-radius: var(--r-md);
+  font: 500 12px var(--font-mono);
   color: var(--text-3);
   box-shadow: inset 0 0 0 1px var(--line-hi);
 }
-.ind-prev { position: relative; flex-shrink: 0; height: 150px; margin: 16px 22px 0; border-radius: var(--r-panel); background: var(--bg); overflow: hidden; }
+.ind-prev { position: relative; flex-shrink: 0; height: 150px; margin: 16px 24px 0; border-radius: var(--r-panel); background: var(--bg); overflow: hidden; }
 .ind-prev canvas { position: absolute; top: 0; right: 0; bottom: 0; left: 0; width: 100%; height: 100%; display: block; }
-.ind-prev-lg { position: absolute; left: 12px; top: 10px; display: flex; gap: 12px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-2); }
-.ind-prev-lg i { display: inline-block; width: 10px; height: 2px; margin-right: 5px; border-radius: 1px; vertical-align: middle; }
-.ind-prev-cap { position: absolute; right: 12px; bottom: 8px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
+.ind-prev-lg { position: absolute; left: 12px; top: 10px; display: flex; gap: 12px; font: 500 12px var(--font-mono); color: var(--text-2); }
+.ind-prev-lg i { display: inline-block; width: 10px; height: 2px; margin-right: 4px; border-radius: 1px; vertical-align: middle; }
+.ind-prev-cap { position: absolute; right: 12px; bottom: 8px; font: 500 12px var(--font-mono); color: var(--text-3); }
 .ind-prev-empty { position: absolute; top: 0; right: 0; bottom: 0; left: 0; display: grid; place-items: center; font-size: 12px; color: var(--text-3); }
-.ind-body { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 22px 18px; }
-.ind-sec { margin-top: 18px; }
-.ind-sec .k { margin-bottom: 10px; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
-.ind-params { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 18px; }
-.ind-f { display: flex; flex-direction: column; gap: 6px; }
+.ind-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 24px 20px; }
+.ind-sec { margin-top: 20px; }
+.ind-sec .k { margin-bottom: 12px; font: 500 12px var(--font-sans); color: var(--text-3); }
+.ind-params { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; }
+.ind-f { display: flex; flex-direction: column; gap: 8px; }
 .ind-f .l { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .ind-in {
   width: 72px;
   height: 34px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
-  color: #fff;
-  font: 500 12.5px "JetBrains Mono", ui-monospace, monospace;
+  color: var(--text-strong);
+  font: 500 13px var(--font-mono);
   text-align: center;
   outline: 0;
-  box-shadow: inset 0 0 0 1px var(--line);
+  box-shadow: inset 0 0 0 1px var(--line-control);
   font-variant-numeric: tabular-nums;
 }
-.ind-in:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.ind-in:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 .ind-cp { position: relative; display: inline-flex; align-items: center; height: 34px; }
 .ind-dot {
   width: 22px;
@@ -1401,11 +1648,21 @@
   border-radius: 50%;
   cursor: pointer;
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px rgba(255, 255, 255, 0.22);
-  transition: box-shadow var(--dur-fast);
+  transition: box-shadow var(--dur-fast) var(--ease-out);
 }
-.ind-dot:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px rgba(255, 255, 255, 0.5); }
+@media (hover: hover) and (pointer: fine) {
+  .ind-dot:hover { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px rgba(255, 255, 255, 0.5); }
+}
 .ind-dot.sm { width: 20px; height: 20px; box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px transparent; }
-.ind-dot.sm.on, .ind-dot.sm:hover { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px #fff; }
+/* 悬停是半透明白圈（与 .ind-dot:hover 同一档），选中才是实白圈。
+   Hover is a half-white ring (same step as .ind-dot:hover); only the selected dot gets solid white. */
+@media (hover: hover) and (pointer: fine) {
+  .ind-dot.sm:hover { box-shadow: 0 0 0 2px var(--surface-float), 0 0 0 3px rgba(255, 255, 255, 0.5); }
+}
+/* 小色点只出现在取色弹层 .ind-pal 里：内圈 2px 用弹层底色，看起来是一道缝。
+   The small dots live only in the .ind-pal popover: the 2px inner ring uses its fill so it reads as a gap. */
+.ind-dot.sm.on { box-shadow: 0 0 0 2px var(--surface-float), 0 0 0 3px #fff; }
+/* 取色弹层与 .chart-set 等浮层同一种材质（021）。/ Same floating material as .chart-set (021). */
 .ind-pal {
   position: absolute;
   left: 0;
@@ -1413,18 +1670,19 @@
   z-index: 2;
   display: grid;
   grid-template-columns: repeat(5, 20px);
-  gap: 10px;
+  gap: 12px;
   padding: 12px;
   border-radius: var(--r-panel);
-  background: var(--surface-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--line-hi);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
 }
-.ind-seg { display: inline-flex; gap: 2px; height: 34px; padding: 3px; border-radius: 10px; background: var(--nest); }
+.ind-seg { display: inline-flex; gap: 4px; height: 34px; padding: 3px; border-radius: var(--r-md); background: var(--nest); }
 .ind-seg button {
   height: 28px;
   padding: 0 12px;
   border: 0;
-  border-radius: 10px;
+  /* 同心：轨道 10 − 内边距 3 = 7（轨道无边框）。/ Concentric: 10 − 3 = 7 (no track border). */
+  border-radius: 7px;
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -1432,25 +1690,30 @@
   font-weight: 500;
   cursor: pointer;
 }
-.ind-seg button.on { background: var(--nest-hi); color: #fff; }
+.ind-seg button.on { background: var(--nest-hi); color: var(--text-strong); }
 .ind-lines { display: flex; flex-wrap: wrap; gap: 8px; }
-.ind-line { display: inline-flex; align-items: center; gap: 6px; height: 38px; padding: 0 6px 0 2px; border-radius: 10px; background: var(--nest); }
+.ind-line { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 8px 0 4px; border-radius: var(--r-md); background: var(--nest); }
 .ind-line .ind-in { width: 56px; height: 32px; background: transparent; box-shadow: none; }
 .ind-line .ind-in:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
 .ind-line .ind-dot { box-shadow: 0 0 0 2px var(--nest), 0 0 0 3px rgba(255, 255, 255, 0.22); }
 .ind-line .ind-dot.sm { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px transparent; }
-.ind-line .ind-dot.sm.on, .ind-line .ind-dot.sm:hover { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px #fff; }
+@media (hover: hover) and (pointer: fine) {
+  .ind-line .ind-dot.sm:hover { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px rgba(255, 255, 255, 0.5); }
+}
+.ind-line .ind-dot.sm.on { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px #fff; }
 .ind-x { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 999px; background: transparent; color: var(--text-3); cursor: pointer; }
-.ind-x:hover:not(:disabled) { color: var(--down); }
+@media (hover: hover) and (pointer: fine) {
+  .ind-x:hover:not(:disabled) { color: var(--down); }
+}
 .ind-x:disabled { opacity: 0.3; cursor: not-allowed; }
 .ind-add {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   height: 38px;
-  padding: 0 14px;
+  padding: 0 16px;
   border: 1px dashed var(--line-hi);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -1458,17 +1721,21 @@
   font-weight: 500;
   cursor: pointer;
 }
-.ind-add:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
+@media (hover: hover) and (pointer: fine) {
+  .ind-add:hover:not(:disabled) { color: var(--text); border-color: var(--text-3); }
+}
 .ind-add:disabled { opacity: 0.3; cursor: not-allowed; }
-.ind-disc { margin: 0 14px 6px; padding: 6px 9px; border-radius: 6px; font-size: 12px; line-height: 1.5; color: var(--text-3); background: color-mix(in srgb, #facc15 7%, transparent); border: 1px solid color-mix(in srgb, #facc15 22%, transparent); }
-.ind-disc.ed { margin: 12px 22px 0; font-size: 12px; }
+/* 免责框用告警色 --warn 的三元组加透明度（Chrome 65+ 就认）。最早写的是 Chrome 111+ 才认的混色函数，后来改成等值的黄色 rgba，现在并入告警色。
+   Disclaimer box on the --warn triplet with alpha (Chrome 65+). It began as a Chrome 111+ mix function, became an equal yellow rgba, and now joins the warning tone. */
+.ind-disc { margin: 0 16px 8px; padding: 8px 8px; border-radius: var(--r-tile); font-size: 12px; line-height: 1.5; color: var(--text-3); background: rgb(var(--warn-rgb) / 0.07); border: 1px solid rgb(var(--warn-rgb) / 0.22); }
+.ind-disc.ed { margin: 12px 24px 0; font-size: 12px; }
 .ind-hint { margin: 16px 0 0; max-width: 60ch; font-size: 12px; line-height: 1.55; color: var(--text-3); }
-.ind-ft { display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding: 14px 22px 18px; border-top: 1px solid var(--line); }
+.ind-ft { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 16px 24px 20px; border-top: 1px solid var(--line); }
 .ind-btn {
   height: 38px;
-  padding: 0 18px;
+  padding: 0 20px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -1477,11 +1744,15 @@
   cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--line-hi);
 }
-.ind-btn:hover { color: #fff; }
-.ind-btn.primary { margin-left: auto; padding: 0 26px; background: var(--purple); color: #fff; box-shadow: none; }
-.ind-btn.primary:hover { background: var(--purple-vivid); }
-.ind-en { display: flex; flex-wrap: wrap; gap: 10px; min-width: 0; font: 500 12px "JetBrains Mono", ui-monospace, monospace; color: var(--text-3); }
-.ind-en span { display: inline-flex; align-items: center; gap: 5px; }
+@media (hover: hover) and (pointer: fine) {
+  .ind-btn:hover { color: var(--text-strong); }
+}
+.ind-btn.primary { margin-left: auto; padding: 0 28px; background: var(--purple); color: var(--text-strong); box-shadow: none; }
+@media (hover: hover) and (pointer: fine) {
+  .ind-btn.primary:hover { background: var(--purple-vivid); }
+}
+.ind-en { display: flex; flex-wrap: wrap; gap: 12px; min-width: 0; font: 500 12px var(--font-mono); color: var(--text-3); }
+.ind-en span { display: inline-flex; align-items: center; gap: 4px; }
 .ind-en i { width: 8px; height: 8px; border-radius: 50%; }
 
 @media (max-width: 767px) {
@@ -1493,10 +1764,15 @@
     height: auto;
     max-height: 92dvh;
     border-radius: var(--r-lg) var(--r-lg) 0 0;
-    animation: term-sheet-in 0.32s var(--ease-out) both;
+    animation: term-sheet-in var(--dur-medium) var(--ease-out) both;
   }
-  .ind-dlg::before { content: ""; grid-column: 1; width: 36px; height: 4px; margin: 10px auto 0; border-radius: 2px; background: var(--line-hi); }
-  .ind-hd { grid-column: 1; flex-wrap: wrap; gap: 10px; padding: 10px 16px 12px; }
+  .ind-dlg::before { content: ""; grid-column: 1; width: 36px; height: 4px; margin: 12px auto 0; border-radius: 2px; background: var(--line-hi); }
+  .ind-overlay.closing .ind-dlg {
+    animation: none;
+    transform: translateY(100%);
+    transition: transform var(--dur-base) var(--ease-in);
+  }
+  .ind-hd { grid-column: 1; flex-wrap: wrap; gap: 12px; padding: 12px 16px 12px; }
   /* 搜索框在窄屏独占第二行（order 3），关闭键留在第一行——但它按文档流排在计数之后，
      会紧贴着「已开 3 / 15」而不是靠右。这里把它推到行尾：靠右是关闭键唯一该在的位置，
      手指也只在那一侧。桌面端 .ind-srch 自带 margin-left:auto，本来就把它顶到了右端。
@@ -1512,34 +1788,43 @@
   .ind-dlg.edit .ind-cat, .ind-dlg.edit .ind-srch, .ind-dlg.edit .ind-n { display: none; }
   .ind-dlg.edit .ind-ed { display: flex; }
   .ind-dlg.edit .ind-back { display: grid; }
-  .ind-it { padding: 10px 16px; }
-  .ind-ed-hd { padding: 14px 16px 0; }
-  .ind-prev { height: 130px; margin: 14px 16px 0; }
+  .ind-it { padding: 12px 16px; }
+  .ind-ed-hd { padding: 16px 16px 0; }
+  .ind-prev { height: 130px; margin: 16px 16px 0; }
   .ind-body { padding: 0 16px 16px; }
   .ind-ft { padding: 12px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
   .ind-en { display: none; }
 }
 
+/* 减弱动效：指标库不位移（桌面的 6px 上移、手机的上滑），改淡入；退场只剩整层淡出。
+   Reduced motion: the indicator library drops its travel (6px rise on desktop, slide-up
+   on phones) and fades in; the exit is just the outer fade. */
+@media (prefers-reduced-motion: reduce) {
+  .ind-dlg { animation: term-fade var(--dur-fast) var(--ease-out) both; }
+  .ind-overlay.closing { transition: opacity var(--dur-fast) var(--ease-in); }
+  .ind-overlay.closing .ind-dlg { transform: none; transition: none; }
+}
+
 /* 图表设置菜单（齿轮）：倒计时开关 + K 线颜色。/ Chart settings menu: countdown switch + candle colors. */
 .chart-set {
   position: fixed;
-  z-index: 90;
+  z-index: var(--z-menu);
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 14px;
+  gap: 16px;
+  padding: 16px;
   border-radius: var(--r-panel);
-  background: var(--surface-2);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5), inset 0 0 0 1px var(--line-hi);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
   font-size: 13px;
   color: var(--text);
-  animation: term-fade 0.16s var(--ease-out) both;
+  animation: term-fade var(--dur-fast) var(--ease-out) backwards;
 }
 .chart-set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.chart-set-row > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.chart-set b { font-weight: 600; color: #fff; }
+.chart-set-row > span { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.chart-set b { font-weight: 500; color: var(--text-strong); }
 .chart-set small { font-size: 12px; color: var(--text-3); }
-.chart-set-sec { display: flex; flex-direction: column; gap: 10px; }
+.chart-set-sec { display: flex; flex-direction: column; gap: 12px; }
 .chart-set-sec .ind-seg { align-self: flex-start; }
 .chart-set-custom { display: flex; align-items: center; gap: 16px; }
 .chart-set-pick { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2, var(--text)); }
@@ -1557,4 +1842,74 @@
   padding-right: 6px;
 }
 .term-wr.has-fav .term-wr-spark { width: 36px; }
-.term-wr:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
+/* 选品种按钮：外观就是品种代码（.term-wr-sym 的字体与颜色），::after 铺满整行 .term-wr
+   （它本身 position: relative），点行任何位置都是它。焦点环从按钮挪到 ::after，框住整行，
+   与原来整行聚焦时的样子一致（换位置，不是删掉）。星标抬到 ::after 之上，单独可点。
+   The pick button looks like the symbol code (.term-wr-sym font and colour); its ::after covers
+   the whole .term-wr row (already position: relative), so a click anywhere lands on it. The
+   focus ring moves from the button to the ::after and frames the row exactly as the old focused
+   row did (relocated, not removed). The star sits above the ::after and stays clickable. */
+.term-wr-pick { padding: 0; border: 0; background: none; text-align: left; cursor: pointer; }
+.term-wr-pick::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+.term-wr-pick:focus-visible { outline: none; }
+.term-wr-pick:focus-visible::after { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
+.term-wr .fav-star { position: relative; z-index: 1; }
+
+/* 图表页按压的减少动效：放在文件末尾，才能压过写在手机媒体查询里、位置更靠后的
+   .term-mbar button:active。
+   Reduced motion for the chart page's press scales. It sits at the end of the file so
+   it outranks .term-mbar button:active, which lives later in a phone media query. */
+@media (prefers-reduced-motion: reduce) {
+  .term-side button:active,
+  .term-mbar button:active,
+  .term-tf button:active,
+  .term-tbr-btn:active {
+    transform: none;
+  }
+}
+
+/* 触屏尺寸（热区本身在 layer-base.css 的触摸目标块）。
+   · 自选栏标签是换行排列的，行距 4px 时上下两行的 44px 带子会重叠 8px；行距加到 12px
+     （32 + 12 = 44），两行带子正好相接。.sym-tabs 在 dashboard.css 给的负外边距这里不要。
+   · 星标列 22→32，右内边距 6→2，只从品种名那一列让出 6px。
+   · 下单方式 / 手数模式按钮 20px 低于 WCAG 的 24px 下限，触屏抬到 28px；快捷手数 26→32，
+     上方 6px 就是步进器，44 的带子每边外扩 6px 正好相接。
+   Touch sizes (the hit areas live in layer-base.css).
+   · The watchlist tabs wrap; at a 4px row gap the 44px bands of two rows overlap by
+     8px, so the gap becomes 12px (32 + 12 = 44) and the bands meet. Drop the negative
+     margin .sym-tabs gets in dashboard.css.
+   · Star column 22→32, right padding 6→2: only 6px comes out of the symbol column.
+   · The entry/size mode buttons (20px) are below WCAG's 24px floor: 28px on touch.
+     Quick lots 26→32: the stepper is 6px above, and a 44px band reaches exactly to it. */
+@media (hover: none) and (pointer: coarse) {
+  .term-wl-tabs {
+    margin-top: 0;
+    margin-bottom: 0;
+    row-gap: 12px;
+  }
+  .term-wr.has-fav {
+    grid-template-columns: 24px minmax(0, 1fr) 36px auto 32px;
+    padding-right: 2px;
+  }
+  .term-mode button {
+    height: 28px;
+  }
+  .term-pre button {
+    height: 32px;
+  }
+}
+
+/* Windows 高对比模式：下面五个输入框的边界是 inset box-shadow 画的，那个模式不画
+   box-shadow，框就只剩一块和页面一样的 Canvas，看不出哪里能输入。补一条真边框。
+   Windows High Contrast: these five inputs draw their edge with an inset box-shadow,
+   which that mode drops, leaving a Canvas block indistinguishable from the page. Add a
+   real border. */
+@media (forced-colors: active) {
+  .term-wls input,
+  .term-pr-inp,
+  .term-inp,
+  .ind-srch input,
+  .ind-in {
+    border: 1px solid CanvasText;
+  }
+}

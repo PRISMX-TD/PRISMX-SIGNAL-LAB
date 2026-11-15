@@ -46,10 +46,10 @@ export default function MobileStickyCta() {
            A solid bar with a hairline top edge, not a floating rounded glass card.
            A sticky bar's job is to stay tappable, and translucency just lets the
            table figures underneath bleed into the button label. */
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-white/[0.09] bg-ink-950/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur-md sm:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-sticky border-t border-white/[0.09] bg-ink-950/95 p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] backdrop-blur-md sm:hidden">
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-primary h-11 w-full text-[13px]"
+            className="btn btn-primary h-11 w-full text-sm"
           >
             {t('landing.ctaButton')}
           </button>

@@ -29,7 +29,7 @@
 // 判定为 4.49（不过 AA）的 #8B6CFF，而 `--purple-hi` 早已抬到 #9284FF。
 //
 // 现在凡是**两边都有**的颜色，这里一律用下面的 `token()` 去读 CSS 变量，本文件
-// 不再存值。只有 Tailwind 单独用得到的色阶（prism 的 50/100/200/700/800/950、
+// 不再存值。只有 Tailwind 单独用得到的色阶（prism 的 50/100/700/800/950、
 // ink 的中间档、neutral.400）才留十六进制——它们没有 CSS 变量对应物，不构成双轨。
 //
 // Colour's single source of truth is src/styles/tokens.css, not this file.
@@ -53,6 +53,14 @@ const token = (name) => ({ opacityValue }) =>
   opacityValue === undefined ? `rgb(var(${name}))` : `rgb(var(${name}) / ${opacityValue})`
 
 export default {
+  // hover: / group-hover: / peer-hover: 只在真有鼠标的设备上生效。触屏（Android
+  // WebView、iOS）点一下会触发 :hover 并且一直粘到下一次点别处，不加门槛的话
+  // 点过的按钮会停在高亮状态。编译结果是 @media (hover: hover) and (pointer: fine)，
+  // 手写 CSS 里的 :hover 用同一个条件（见 styles/layer-base.css 的按下反馈注释）。
+  // hover variants apply only on devices with a real mouse. On touch a tap triggers
+  // :hover and it sticks until the next tap elsewhere. Compiles to
+  // @media (hover: hover) and (pointer: fine); hand-written CSS uses the same query.
+  future: { hoverOnlyWhenSupported: true },
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
@@ -75,6 +83,14 @@ export default {
         // Both keys are the floor for secondary/tertiary text. They move up with
         // the surface, and now match --text-2 / --text-3 exactly.
         neutral: {
+          // 100 / 200 原本落在 Tailwind stock 值（#F5F5F5 / #E5E5E5），一个比 `text-white`
+          // （= --text #EDEDF0）亮半档、一个暗半档，全站 347 处。2026-11-15 改读令牌：
+          // 100 = 强调白（--text-strong），200 = 正文白（--text）。
+          // 100 / 200 were stock (#F5F5F5 / #E5E5E5), half a step either side of
+          // `text-white` (--text) across 347 call sites. Now 100 = --text-strong,
+          // 200 = --text.
+          100: token('--text-strong-rgb'),
+          200: token('--text-rgb'),
           300: token('--text-2-rgb'),
           // 400 没有 CSS 变量对应物（--text-2 与 --text-3 之间那一档只有 Tailwind
           // 用得到），留十六进制。/ No token twin; Tailwind-only rung.
@@ -99,13 +115,13 @@ export default {
         // violet so it reads as a spot colour, not a framework default. 600 is
         // the primary pigment (buttons, filled fields); 400 is the accent text
         // tone on dark (~5.4:1 against #09090B, passes AA).
-        // 有 CSS 变量对应物的四档走 token()，其余色阶是 Tailwind 独有的，留值。
-        // The four rungs that also exist as tokens read them; the rest are
+        // 有 CSS 变量对应物的六档走 token()，其余色阶是 Tailwind 独有的，留值。
+        // The six rungs that also exist as tokens read them; the rest are
         // Tailwind-exclusive and keep their literals.
         prism: {
           50: '#F2EDFF',
           100: '#E3D9FF',
-          200: '#C8B6FF',
+          200: token('--purple-pale-rgb'),
           300: token('--purple-soft-rgb'),
           400: token('--purple-hi-rgb'),
           500: token('--purple-vivid-rgb'),
@@ -152,9 +168,15 @@ export default {
         // was in use. Adding the keys gives those literals somewhere to go.
         mid: token('--mid-rgb'),
         gold: token('--gold-rgb'),
-
-        card: 'rgba(255,255,255,0.04)',
-        line: 'rgba(255,255,255,0.08)',
+        // 告警色（= tokens.css --warn）。提醒 / 待处理 / 过期一律用 warn，amber-* 已退役。
+        // Warning tone (= --warn). Every notice uses warn; amber-* is retired.
+        warn: token('--warn-rgb'),
+        // 强调白（= --text-strong #FFF）。`text-white` 读的是 --text，是正文色不是强调。
+        // Emphasis white (= --text-strong). `text-white` is body text (--text), not emphasis.
+        strong: token('--text-strong-rgb'),
+        // 发丝线（= --line）。原来写死 0.08，与 --line 的 0.07 差一档；card 键 0 处使用，已删。
+        // Hairline (= --line); it was a hard-coded 0.08. The unused card key was removed.
+        line: 'var(--line)',
       },
 
       fontFamily: {
@@ -180,7 +202,9 @@ export default {
         // in mainland China). Noto Sans SC deliberately not bundled; system CJK.
         display: ['Archivo', '"Noto Sans SC"', '"Noto Sans CJK SC"', '"Source Han Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
         sans: ['Archivo', '"Noto Sans SC"', '"Noto Sans CJK SC"', '"Source Han Sans SC"', '"PingFang SC"', '"Microsoft YaHei"', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+        // 等宽栈的唯一来源是 tokens.css 的 --font-mono（补了中文字体，见那里的注释）。
+        // The mono stack lives in tokens.css (--font-mono, with CJK faces); read it, don't copy it.
+        mono: ['var(--font-mono)'],
       },
 
       // ── 字号阶梯：九档 / nine steps ──
@@ -250,6 +274,22 @@ export default {
       // 粗体会让每个标题和价格都在喊。样式表里的 700–900 同步改成 500。
       // Since 2026-11-15 bold / extrabold / black land on 500 too: hierarchy comes
       // from size and grey steps, not weight. The stylesheets' 700–900 follow.
+      //
+      // 样式表里的 600 也收到 500（计划 030）。例外只有两类：JetBrains Mono 里只放数字或
+      // 拉丁代码的规则（价格、盈亏、计数、品种代码）保留 600，它们不会落到系统中文字体，
+      // 600 渲染的就是字体自带的半粗；节日美术和顶栏 LIVE / JOIN 金属字是装饰图形。
+      // 可能出现中文的文字一律 500：微软雅黑只有 Regular / Bold，600 会直接跳成全粗。
+      // The stylesheets' 600 went to 500 as well (plan 030). Two exceptions only:
+      // JetBrains Mono rules holding nothing but digits or Latin codes (prices, P/L,
+      // counts, symbols) keep 600, since they never fall back to a CJK face and 600
+      // renders the font's own semibold; festival art and the top-bar LIVE / JOIN
+      // metal word are decoration. Anything that may hold Chinese is 500: Microsoft
+      // YaHei has only Regular and Bold, so 600 jumps straight to Bold.
+      //
+      // 裸 <b> / <strong> 的浏览器默认是 bold（700），不走这里；layer-base.css 里另有一条
+      // b, strong { font-weight: 500 } 把它们也收到同一档。
+      // Bare <b> / <strong> default to bold (700) in the UA sheet and never touch this
+      // scale; layer-base.css sets b, strong { font-weight: 500 } to match.
       fontWeight: {
         normal: '400',
         medium: '500',
@@ -259,28 +299,52 @@ export default {
         black: '500',
       },
 
-      // 圆角：四档 / four steps — 8 内嵌格 · 14 小浮层 · 24 卡片 · 999 控件。
-      // 上一版是 6/10/14/20 四档但语义不同（小件/控件/卡片/大面板）：小件和
-      // 控件都改成药丸之后合并成一档，腾出来的位置给「小浮层」（下拉菜单）——
-      // 那是落到生产代码时才发现的一档，样本里没有这类元素。
-      // 与 index.css 的 --r-tile / --r-panel / --r-lg / --r-xs 保持同值。
-      // 2026-11-15 起控件不再是胶囊：pill 与 --r-xs / --r-md 一起改成 10px。
-      // Since 2026-11-15 controls stop being capsules: pill, --r-xs and --r-md move to 10px.
+      // ── 圆角：真源在 tokens.css，这里只读变量 / radius: tokens.css is the source ──
+      // ⚠ Tailwind 的键名与 CSS 变量名**不同名**，按这张表对照：
+      //   rounded-lg      = --r-tile   8   内嵌格 / 小件
+      //   rounded-control = --r-md    10   控件（按钮 / 输入 / 分段）
+      //   rounded-panel   = --r-panel 14   小浮层
+      //   rounded-card    = --r-lg    24   卡片 / 抽屉 / 弹窗
+      //   rounded         = 4px（Tailwind 默认，只给 ≤20px 高的行内标记）
+      // md / xl / 2xl 三个 stock 键仍然覆盖，只是兜底：不覆盖的话 rounded-md 会回到
+      // stock 的 6px、rounded-xl 回到 12px，又多出两个刻度外的值。新代码不要用这三个键。
+      // 2026-11-15 收口：此前 8px 有五个名字（--r-xs / --r-tile / rounded-md / rounded-lg /
+      // rounded-inner），rounded-panel 是 24 而 var(--r-panel) 是 14；pill / inner / float
+      // 三个键已删，调用点改成上表的名字。
+      // Tailwind key names differ from the CSS variables; use the table above.
+      // md / xl / 2xl stay overridden only as guards (stock would give 6px / 12px,
+      // two more off-scale values); new code should not use them. Consolidated
+      // 2026-11-15: 8px used to have five names and rounded-panel (24) disagreed
+      // with var(--r-panel) (14); pill / inner / float were removed.
       borderRadius: {
-        pill: '10px',
-        inner: '8px',
-        card: '24px',
-        panel: '24px',
-        float: '14px',
-        // Tailwind 自带的三档也拉到同一套上：代码里 rounded-md 用了 39 次
-        // （6px）、rounded-xl 29 次（12px）、rounded-2xl 2 次（16px），全都
-        // 落在四档之外。rounded-lg 本身就是 8px，正好等于内嵌格档，不用动；
-        // rounded-full 是 9999px，等同药丸。
-        // The stock steps join the same scale; rounded-lg already equals the
-        // tile step and rounded-full already equals the pill.
-        md: '8px',
-        xl: '14px',
-        '2xl': '24px',
+        lg: 'var(--r-tile)',
+        control: 'var(--r-md)',
+        panel: 'var(--r-panel)',
+        card: 'var(--r-lg)',
+        md: 'var(--r-tile)',
+        xl: 'var(--r-panel)',
+        '2xl': 'var(--r-lg)',
+      },
+
+      // ── 层级：真源在 tokens.css 的 --z-*，这里只读变量 / z-index reads tokens.css ──
+      // TSX 里写 z-nav / z-overlay / z-menu …，不要再写 z-50 / z-[70] 这种裸数。
+      // z-0 / z-10 / z-20（组件内部层序）照旧用 Tailwind 自带的。
+      // Use z-nav / z-overlay / z-menu … in TSX instead of bare z-50 / z-[70];
+      // z-0 / z-10 / z-20 (within-component order) stay stock.
+      zIndex: {
+        nav: 'var(--z-nav)',
+        sticky: 'var(--z-sticky)',
+        drawer: 'var(--z-drawer)',
+        overlay: 'var(--z-overlay)',
+        modal: 'var(--z-modal)',
+        watermark: 'var(--z-watermark)',
+        alert: 'var(--z-alert)',
+        sheet: 'var(--z-sheet)',
+        lightbox: 'var(--z-lightbox)',
+        menu: 'var(--z-menu)',
+        gate: 'var(--z-gate)',
+        toast: 'var(--z-toast)',
+        tip: 'var(--z-tip)',
       },
 
       // 阴影表达**高度**，不表达发光。全部中性、无彩色扩散半径。
@@ -316,7 +380,22 @@ export default {
         // three micro-offset bands — dispersion expressed as flat print, no
         // WebGL and no emission.
         'spectral-rule':
-          'linear-gradient(90deg, transparent, rgba(139,108,255,0.9) 18%, rgba(237,237,240,0.9) 50%, rgba(90,34,238,0.9) 82%, transparent)',
+          'linear-gradient(90deg, transparent, rgb(var(--purple-hi-rgb) / 0.9) 18%, rgb(var(--text-rgb) / 0.9) 50%, rgb(var(--purple-rgb) / 0.9) 82%, transparent)',
+      },
+
+      // 让 `transition` / `transition-colors` 等工具类默认走项目的动效 token，而不是
+      // Tailwind 自带的 150ms + cubic-bezier(0.4, 0, 0.2, 1)。全站一百多处裸 `transition`
+      // 原来是另一条曲线，和 CSS 里的 var(--ease-out) 并存两套手感。显式写了
+      // duration-* / ease-* 的地方不受影响。
+      // Make `transition` / `transition-colors` and friends default to the project's
+      // motion tokens instead of Tailwind's own 150ms + cubic-bezier(0.4, 0, 0.2, 1).
+      // The 100+ bare `transition` call sites ran a second curve next to the CSS
+      // var(--ease-out). Explicit duration-* / ease-* classes still win.
+      transitionDuration: {
+        DEFAULT: 'var(--dur-fast)',
+      },
+      transitionTimingFunction: {
+        DEFAULT: 'var(--ease-out)',
       },
 
       keyframes: {
@@ -327,20 +406,16 @@ export default {
         // and the skeleton shimmer. Removed: float / float-slow / drift /
         // gradient-x / marquee — unmotivated "make it move" decoration and the
         // most expensive source of continuous repaint on mobile.
-        'fade-in-up': {
-          '0%': { opacity: '0', transform: 'translateY(10px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        fadein: {
-          '0%': { opacity: '0', transform: 'translateY(10px)' },
-          '100%': { opacity: '1', transform: 'translateY(0)' },
-        },
-        // 实时状态指示：只在真的有「在线/推流中」语义的地方用。
-        // Live-state indicator: only where "online / streaming" is a real state.
-        breathe: {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.45' },
-        },
+        //
+        // fade-in-up 和 breathe 的帧只在 src/styles/keyframes.css 里定义一次。以前这里
+        // 也有一份（位移 10px、呼吸低点 0.45），但 keyframes.css 在层叠里排在后面，
+        // 实际生效的一直是它（8px、0.35），改这里不会有任何效果。下面的 animation
+        // 只引用名字，Tailwind 找不到同名帧时不生成 @keyframes，直接沿用 keyframes.css。
+        // fade-in-up and breathe frames live once, in src/styles/keyframes.css. A copy
+        // used to sit here (10px travel, 0.45 low point), but keyframes.css comes later
+        // in the cascade, so its 8px / 0.35 always won and editing this copy did nothing.
+        // The animations below reference the names only; with no frames here Tailwind
+        // emits no @keyframes and the keyframes.css ones apply.
         shimmer: {
           '0%': { transform: 'translateX(-150%)' },
           '100%': { transform: 'translateX(150%)' },
@@ -348,8 +423,14 @@ export default {
       },
 
       animation: {
-        'fade-in-up': 'fade-in-up 0.45s cubic-bezier(0.22, 1, 0.36, 1) both',
-        fadein: 'fadein 0.6s cubic-bezier(0.22, 1, 0.36, 1) both',
+        // 填充用 backwards 而不是 both：结束后不再施加最后一帧。最后一帧本来就等于
+        // 元素自身样式，看起来一样；但 both 会让残留的 transform 把元素变成
+        // position: fixed 子元素的包含块，还会压住之后的 opacity 状态样式。
+        // backwards, not both: once finished, the last frame is no longer applied. It
+        // equals the element's own style so nothing looks different, but with both
+        // the lingering transform makes the element the containing block for
+        // position: fixed descendants and overrides later opacity state styles.
+        'fade-in-up': 'fade-in-up var(--dur-slow) var(--ease-out) backwards',
         breathe: 'breathe 2.4s ease-in-out infinite',
         shimmer: 'shimmer 1.8s ease-in-out infinite',
       },

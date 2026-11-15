@@ -6,8 +6,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { FAIR_MS, GOOD_MS, jitter, latestRtt, netLevel, useNetQuality } from '../store/netQuality'
+import { usePopoverEscape } from '../utils/usePopoverEscape'
+import { EMPTY } from '../utils/format'
 
-const LEVEL_COLOR = ['text-down', 'text-down', 'text-orange-400', 'text-amber-300', 'text-up'] as const
+const LEVEL_COLOR = ['text-down', 'text-down', 'text-orange-400', 'text-warn', 'text-up'] as const
 
 function Bars({ level, connecting }: { level: number; connecting: boolean }) {
   return (
@@ -34,6 +36,8 @@ export default function SignalIndicator() {
   const [open, setOpen] = useState(false)
   const [, tick] = useState(0)
   const rootRef = useRef<HTMLDivElement>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  usePopoverEscape(open, () => setOpen(false), btnRef, rootRef)
 
   const level = netLevel(q)
   const rtt = latestRtt(q)
@@ -68,30 +72,32 @@ export default function SignalIndicator() {
   return (
     <div ref={rootRef} className="nb">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={`${t('netSignal.title')}: ${quality}`}
         aria-expanded={open}
-        className={`flex items-center gap-1.5 rounded-inner border border-white/10 px-2 py-1.5 transition-colors hover:border-white/20 ${color}`}
+        aria-haspopup="dialog"
+        className={`flex items-center gap-1.5 rounded-lg border border-white/10 px-2 py-1.5 transition-colors hover:border-white/20 ${color}`}
       >
         <Bars level={connecting ? 4 : level} connecting={connecting} />
         {/* 桌面宽屏才显示数字；手机只留格子 / number only on wide screens */}
         {q.state === 'online' && rtt != null && (
-          <span className="num hidden text-xs lg:inline">{rtt}ms</span>
+          <span className="num hidden text-xs lg:inline">{rtt} ms</span>
         )}
       </button>
 
       {open && (
-        <div className="card glass nb-panel" role="dialog" aria-label={t('netSignal.title')} style={{ width: 280 }}>
+        <div className="nb-panel" role="dialog" aria-label={t('netSignal.title')} style={{ width: 280 }}>
           <div className="p-4">
             <div className="mb-2 flex items-center gap-2">
               <span className={color}><Bars level={connecting ? 4 : level} connecting={connecting} /></span>
               <h3 className="text-base font-semibold text-neutral-100">{t('netSignal.title')}</h3>
               <span className={`ml-auto text-sm font-medium ${color}`}>{quality}</span>
             </div>
-            <Row k={t('netSignal.latency')} v={q.state === 'online' && rtt != null ? `${rtt} ms` : '—'} />
-            <Row k={t('netSignal.jitter')} v={q.state === 'online' && jit != null ? `±${jit} ms` : '—'} />
-            <Row k={t('netSignal.lastData')} v={ago == null ? '—' : t('netSignal.secondsAgo', { n: ago })} />
+            <Row k={t('netSignal.latency')} v={q.state === 'online' && rtt != null ? `${rtt} ms` : EMPTY} />
+            <Row k={t('netSignal.jitter')} v={q.state === 'online' && jit != null ? `±${jit} ms` : EMPTY} />
+            <Row k={t('netSignal.lastData')} v={ago == null ? EMPTY : t('netSignal.secondsAgo', { n: ago })} />
             <Row k={t('netSignal.reconnects')} v={String(q.reconnects)} />
             <p className="mt-3 text-xs leading-relaxed text-neutral-500">
               {t('netSignal.hint', { good: GOOD_MS, fair: FAIR_MS })}

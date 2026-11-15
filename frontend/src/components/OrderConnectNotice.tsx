@@ -82,7 +82,7 @@ export default function OrderConnectNotice({
       <p className="leading-relaxed">{neverConnected ? t('order.noBridge') : t('order.allOffline')}</p>
       <a
         href={to}
-        className="mt-1.5 inline-block rounded-md bg-down/20 px-2.5 py-1 text-xs font-semibold transition hover:bg-down/30"
+        className="mt-1.5 inline-block rounded-lg bg-down/20 px-2.5 py-1 text-xs font-semibold transition hover:bg-down/30"
       >
         {cta} →
       </a>

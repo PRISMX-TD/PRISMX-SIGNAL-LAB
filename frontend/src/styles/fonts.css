@@ -125,3 +125,21 @@ html:lang(vi) .font-sans,
 html:lang(vi) .font-display {
   font-family: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
 }
+/* tokens.css 的 --font-sans / --font-mono 默认是中文栈；图表页标签和所有等宽元素用的是
+   这两个变量，不走上面的 body / .font-sans 规则，所以同样按语言换掉。html:lang() 比
+   :root 优先级高，和文件先后无关。等宽栈仍以 JetBrains Mono 开头，后面换成该语言的字体。
+   The tokens.css stacks default to Chinese; chart labels and every mono element read the
+   variables rather than the body / .font-sans rules above, so swap them per language too.
+   html:lang() outranks :root regardless of file order. */
+html:lang(ja) {
+  --font-sans: "Archivo", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", "Yu Gothic", Meiryo, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Hiragino Sans", "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", Meiryo, monospace;
+}
+html:lang(th) {
+  --font-sans: "Archivo", "Noto Sans Thai", "Noto Sans Thai UI", Thonburi, "Leelawadee UI", Tahoma, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Noto Sans Thai", "Noto Sans Thai UI", Thonburi, "Leelawadee UI", Tahoma, monospace;
+}
+html:lang(vi) {
+  --font-sans: "Archivo", system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "Segoe UI", Roboto, "Noto Sans", Arial, monospace;
+}

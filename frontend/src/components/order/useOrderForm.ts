@@ -20,6 +20,7 @@ import type { MT5Account, OrderEntryType, PendingType, Quote } from '../../api/t
 import { brokerSymbol, limitLotInput, clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
 import { useLastVolume } from '../../utils/useLastVolume'
+import { useAccountQuote } from '../../store/live'
 import {
   canSizeByRisk,
   checkPendingPrice,
@@ -44,8 +45,6 @@ export interface UseOrderFormArgs {
   side: Side
   /** 可选账户（调用方已按自己的规则过滤）/ candidate accounts, pre-filtered by the caller */
   accounts: MT5Account[]
-  /** 按交易商账户区分的报价：login -> {symbol: Quote} / per-account quotes */
-  quotesByAccount: Record<string, Record<string, Quote>>
   /** 选中账户没有该品种报价时的兜底报价（全站 EA 推送）/ site-wide fallback quote */
   fallbackQuote?: Quote
   /** 连报价都没有时的参考价（图表最新价 / 信号入场价）/ last-resort reference price */
@@ -125,7 +124,7 @@ export interface OrderForm {
 }
 
 export function useOrderForm({
-  symbol, side, accounts, quotesByAccount, fallbackQuote, refPrice,
+  symbol, side, accounts, fallbackQuote, refPrice,
   initialStopLoss, initialTakeProfit, login: controlledLogin, onLoginChange,
 }: UseOrderFormArgs): OrderForm {
   const isBuy = side === 'BUY'
@@ -154,10 +153,14 @@ export function useOrderForm({
 
   // ---- 报价与参考价 / quote & reference ---------------------------------------
   // 按账户报价按券商品种名（BTCUSD）键入，信号名可能是 BTCUSDT：两个名字都查一遍。
+  // 只订阅选中账户的这两个键（useAccountQuote），别的账户 / 品种跳价不会让表单重渲染。
   // Per-account quotes are keyed by the broker's name (BTCUSD); the signal may
-  // say BTCUSDT, so try both spellings.
-  const accountQuotes = selected ? quotesByAccount[selected.login] : undefined
-  const quote = accountQuotes?.[symbol] || accountQuotes?.[brokerSymbol(symbol)] || fallbackQuote
+  // say BTCUSDT, so try both spellings. Only these two keys of the selected account
+  // are subscribed (useAccountQuote), so other accounts' or symbols' ticks don't
+  // re-render the form.
+  const exactQuote = useAccountQuote(selected?.login, symbol)
+  const brokerQuote = useAccountQuote(selected?.login, brokerSymbol(symbol))
+  const quote = exactQuote || brokerQuote || fallbackQuote
   const ref = refPrice != null && refPrice > 0 ? refPrice : null
   const bid = quote?.bid ?? ref
   const ask = quote?.ask ?? ref

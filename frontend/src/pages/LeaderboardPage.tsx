@@ -27,15 +27,16 @@ import { useOverflowHint } from '../utils/useOverflowHint'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import ProfileLink from '../components/ProfileLink'
-import { gamificationApi } from '../api/client'
+import { ApiHttpError, gamificationApi } from '../api/client'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
 import BadgeIcon from '../components/badges/BadgeIcon'
 import RankCoin from '../components/badges/RankCoin'
 import CashflowRules from '../components/CashflowRules'
 import type { LeaderboardBoard, LeaderboardPayload, LeaderboardRow } from '../api/types'
-import { fmtScorePct, fmtStamp, fmtUsd } from '../api/utils'
+import { fmtScorePct, fmtStamp, fmtUsd, localizeApiError } from '../api/utils'
 import ShareSheet, { type ShareSpec } from '../components/share/ShareSheet'
 import { compCard } from '../components/share/cardData'
+import { onRovingKeyDown } from '../utils/rovingTabs'
 
 const BOARDS: LeaderboardBoard[] = ['return_pct', 'win_rate']
 type Period = 'week' | 'month'
@@ -134,36 +135,36 @@ const PODIUM_TINT: Record<number, string> = {
   3: 'radial-gradient(circle at 20% 0%, rgba(184,118,63,.18), transparent 55%)',
 }
 
-// 生长动画：首帧宽度 0，挂载后的下一帧过渡到目标宽度——双 rAF 确保浏览器先
-// 画出 0% 那一帧，否则初次 setState 和挂载合并成一帧，过渡不会播放。
-// prefers-reduced-motion 用户由 motion-reduce:transition-none 直接跳过整个
-// 过渡（首帧即目标宽度，不会经历"从 0 长出来"的观感）。
-// Grow-in: renders at 0 width, transitions to the target on the next frame —
-// double rAF makes sure the browser paints the 0% frame first, or the
-// initial setState collapses into the mount frame and the transition never
-// plays. prefers-reduced-motion users skip the transition via
-// motion-reduce:transition-none (first frame is already the target width).
-function useGrowWidth(targetPct: number): number {
-  const [w, setW] = useState(0)
-  useEffect(() => {
-    let raf2 = 0
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => setW(targetPct))
-    })
-    return () => {
-      cancelAnimationFrame(raf1)
-      cancelAnimationFrame(raf2)
-    }
-  }, [targetPct])
-  return w
-}
-
-function GrowBar({ pct, className, style }: { pct: number; className?: string; style?: CSSProperties }) {
-  const w = useGrowWidth(Math.max(0, Math.min(100, pct)))
+// 生长动画：条按目标宽度直接渲染（静态 width），进场时由 .grow-x 做一次 scaleX(0 → 1)
+// （winrate.css，var(--dur-slow) + var(--ease-out)）：只动 transform、不动 width，不触发
+// 布局，与策略分析页的拔河条（TugBar.tsx）同一做法。以前是双 rAF 把 width 从 0 过渡到
+// 目标值，二十来条同时长、每一帧整张榜都要重排，每条还多一次 setState 重渲染。
+// 收益榜负值那半边从中线向左长，所以 origin="right" 时把 transform-origin 换到右边。
+// 后台刷新（同榜同周期）不重新挂载，条宽直接跳到新值、不播动画；切榜 / 切周期会
+// 重新挂载，生长动画照常。prefers-reduced-motion 由 winrate.css 的
+// `.grow-x { animation: none; }` 处理（直接就是最终宽度）。
+// Grow-in: the bar renders at its target width (static width) and .grow-x plays one
+// scaleX(0 → 1) entrance (winrate.css, var(--dur-slow) + var(--ease-out)): transform
+// only, never width, so no layout; the same technique as the strategy page's tug bar
+// (TugBar.tsx). It used to transition width from 0 via a double rAF, relaying out the
+// whole board every frame with twenty-odd bars growing at once, plus one extra setState
+// render per bar. Negative return bars grow leftward from the centre line, so
+// origin="right" moves the transform origin to the right edge. A background refresh
+// (same board, same period) doesn't remount: the width jumps to the new value with no
+// animation; switching board / period remounts and the grow-in plays.
+// prefers-reduced-motion is handled by `.grow-x { animation: none; }` in winrate.css
+// (the final width straight away).
+function GrowBar({ pct, className, style, origin = 'left' }: {
+  pct: number
+  className?: string
+  style?: CSSProperties
+  origin?: 'left' | 'right'
+}) {
+  const w = Math.max(0, Math.min(100, pct))
   return (
     <div
-      className={`transition-[width] duration-700 ease-out motion-reduce:transition-none ${className ?? ''}`}
-      style={{ ...style, width: `${w}%` }}
+      className={`grow-x ${className ?? ''}`}
+      style={{ ...style, width: `${w}%`, transformOrigin: origin === 'right' ? 'right center' : undefined }}
     />
   )
 }
@@ -177,7 +178,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
 
   return (
     <article
-      className={`lb-podium-card glass relative overflow-hidden rounded-[20px] px-[22px] pb-[18px] ${big ? 'pt-[30px]' : 'pt-[22px]'} ${row.rank === 1 ? 'order-first md:order-none' : ''}`}
+      className={`lb-podium-card glass relative overflow-hidden rounded-card px-[22px] pb-[18px] ${big ? 'pt-[30px]' : 'pt-[22px]'} ${row.rank === 1 ? 'order-first md:order-none' : ''}`}
     >
       <div
         aria-hidden
@@ -189,7 +190,7 @@ function PodiumCard({ row, board, maxAbs }: { row: LeaderboardRow; board: Leader
         <RankCoin rank={row.rank} size={big ? 64 : 52} className="hidden sm:block" />
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <ProfileLink profileId={row.profileId} className="min-w-0 flex-1 truncate text-[15px] font-semibold text-neutral-100 sm:flex-initial">
+            <ProfileLink profileId={row.profileId} className="min-w-0 flex-1 truncate text-base font-semibold text-neutral-100 sm:flex-initial">
               {row.displayName}
             </ProfileLink>
             {row.equippedBadge && (
@@ -239,7 +240,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
       className={`lb-row relative grid grid-cols-[40px_minmax(0,1fr)_84px] items-center gap-2 border-t border-white/[0.08] px-3 py-3 md:grid-cols-[56px_minmax(0,1.4fr)_120px_minmax(0,1.2fr)] md:gap-3 md:px-[18px] ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
     >
       {row.isSelf && <span aria-hidden className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r-[3px] bg-prism-400" />}
-      <span className={`num text-[15px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
+      <span className={`num text-base ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
         {String(row.rank).padStart(2, '0')}
       </span>
       <div className="flex min-w-0 items-center gap-2">
@@ -257,7 +258,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
           </div>
         </div>
       </div>
-      <span className="num hidden text-[13px] text-neutral-500 md:block">{row.login}</span>
+      <span className="num hidden text-sm text-neutral-500 md:block">{row.login}</span>
       <div className="hidden items-center gap-3 md:flex">
         <b className={`num min-w-[64px] text-right text-sm font-semibold ${scoreColorClass(board, row.score)}`}>
           {fmtScore(board, row.score)}
@@ -268,6 +269,7 @@ function ListRow({ row, board, maxAbs }: { row: LeaderboardRow; board: Leaderboa
             <GrowBar
               pct={halfPct}
               className={`absolute inset-y-0 rounded-full opacity-85 ${row.score >= 0 ? 'left-1/2' : 'right-1/2'}`}
+              origin={row.score >= 0 ? 'left' : 'right'}
               style={{ background: `rgb(var(${barTone}))` }}
             />
           ) : (
@@ -312,13 +314,13 @@ function PodiumColumnMobile({ row, board, center }: { row: LeaderboardRow; board
       )}
       <RankCoin rank={row.rank} size={center ? 48 : 38} />
       <div className="flex w-full min-w-0 items-center justify-center gap-1">
-        <ProfileLink profileId={row.profileId} className="min-w-0 flex-1 truncate text-[12px] font-semibold text-neutral-100">{row.displayName}</ProfileLink>
+        <ProfileLink profileId={row.profileId} className="min-w-0 flex-1 truncate text-xs font-semibold text-neutral-100">{row.displayName}</ProfileLink>
         {row.equippedBadge && (
           <BadgeIcon id={row.equippedBadge} tier={row.equippedBadgeTier ?? 0} earned size={14} className="shrink-0" />
         )}
       </div>
       <b
-        className={`num font-display font-extrabold leading-none tracking-tight ${center ? 'text-[22px]' : 'text-[17px]'} ${scoreColorClass(board, row.score)}`}
+        className={`num font-display font-extrabold leading-none tracking-tight ${center ? 'text-xl' : 'text-lg'} ${scoreColorClass(board, row.score)}`}
       >
         {fmtScore(board, row.score)}
       </b>
@@ -338,7 +340,7 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
       className={`relative grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2 py-2.5 ${row.isSelf ? 'bg-prism-600/[0.07]' : ''}`}
     >
       {row.isSelf && <span aria-hidden className="absolute bottom-1 left-0 top-1 w-[3px] rounded-r-[3px] bg-prism-400" />}
-      <span className={`num text-[13px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
+      <span className={`num text-sm ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-400'}`}>
         {String(row.rank).padStart(2, '0')}
       </span>
       <div className="flex min-w-0 items-center gap-2">
@@ -347,7 +349,7 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
         )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <ProfileLink profileId={row.profileId} className={`truncate text-[13px] ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
+            <ProfileLink profileId={row.profileId} className={`truncate text-sm ${row.isSelf ? 'font-semibold text-neutral-100' : 'text-neutral-200'}`}>
               {row.displayName}
             </ProfileLink>
             {row.isSelf && (
@@ -356,24 +358,29 @@ function ListRowMobile({ row, board }: { row: LeaderboardRow; board: Leaderboard
           </div>
         </div>
       </div>
-      <b className={`num text-right text-[13px] font-semibold ${scoreColorClass(board, row.score)}`}>{fmtScore(board, row.score)}</b>
+      <b className={`num text-right text-sm font-semibold ${scoreColorClass(board, row.score)}`}>{fmtScore(board, row.score)}</b>
     </div>
   )
 }
 
-// 名次栏钉在底栏上方：背景/模糊照抄 .lg-tabbar-inner 的例外做法——它也是常驻
-// 悬浮在滚动内容之上的一层，模糊在这里同样"有功能"（见 index.css 该组件的
-// 注释）。bottom 读 Layout 实测的底栏占位 --app-tabbar（底栏顶边到屏幕底边，
-// 含 12px 悬浮间距与手势条安全区）再加 10px 间隙。此前写死 100px + 安全区，
-// 底栏因字体/行高变高时名次栏就压到它上面；回落值只在变量未设时用。
-// The rank bar pinned above the tab bar: background/blur copies the one
-// exception at .lg-tabbar-inner — it's also a persistent layer floating over
-// scrolling content, so blur is functional there too (see that rule's own
-// comment in index.css). `bottom` reads Layout's measured tab-bar footprint,
-// --app-tabbar (bar top edge to screen bottom, 12px float gap and gesture-bar
-// safe area included), plus a 10px clearance. It used to hard-code 100px plus
-// the inset, so a taller bar (font / line-height) overlapped it; the fallback
-// only applies when the variable is unset.
+// 名次栏钉在底栏上方，用不透明实色（bg-ink-950），不用背景模糊。它以前照抄底栏
+// .lg-tabbar-inner 的玻璃，但那块玻璃是按要求「只在这一个元素上破例」（见
+// components-controls.css 该规则的注释）；名次栏离底栏只有 10px，两层
+// backdrop-filter 叠在一起，每帧滚动都要各模糊一遍，安卓低端机上掉帧。
+// 1px 白色细边保留，用来和底栏的玻璃区分。bottom 读 Layout 实测的底栏占位
+// --app-tabbar（底栏顶边到屏幕底边，含 12px 悬浮间距与手势条安全区）再加 10px
+// 间隙。此前写死 100px + 安全区，底栏因字体/行高变高时名次栏就压到它上面；
+// 回落值只在变量未设时用。
+// The rank bar pinned above the tab bar is an opaque solid fill (bg-ink-950), no
+// backdrop blur. It used to copy .lg-tabbar-inner's glass, but that glass is the
+// single exception kept on request ("only on this one element", see that rule's
+// comment in components-controls.css); 10px above the tab bar, the two stacked
+// backdrop-filters each re-blurred on every scroll frame, dropping frames on
+// low-end Android. The 1px white hairline stays to set it apart from the glass bar.
+// `bottom` reads Layout's measured tab-bar footprint, --app-tabbar (bar top edge to
+// screen bottom, 12px float gap and gesture-bar safe area included), plus a 10px
+// clearance. It used to hard-code 100px plus the inset, so a taller bar (font /
+// line-height) overlapped it; the fallback only applies when the variable is unset.
 const MY_RANK_BAR_BOTTOM = 'calc(var(--app-tabbar, calc(env(safe-area-inset-bottom, 0px) + 90px)) + 10px)'
 
 // 用 Portal 挂到 body：页面内容外层 .page-enter 有 transform 动画（见
@@ -402,7 +409,7 @@ function MyRankBarMobile({ data, board, onShare }: { data: LeaderboardPayload; b
     }
     return createPortal(
       <div
-        className="lb-mine-m fixed inset-x-3 z-20 flex h-14 items-center gap-2 rounded-[16px] border border-white/[0.14] bg-ink-950/85 px-3 backdrop-blur-lg sm:hidden"
+        className="lb-mine-m fixed inset-x-3 z-20 flex h-14 items-center gap-2 rounded-panel border border-white/[0.14] bg-ink-950 px-3 sm:hidden"
         style={{ bottom: MY_RANK_BAR_BOTTOM }}
       >
         <RankCoin rank={data.me.rank} size={32} />
@@ -423,7 +430,7 @@ function MyRankBarMobile({ data, board, onShare }: { data: LeaderboardPayload; b
     const pct = Math.max(0, Math.min(100, (p.sample / Math.max(1, p.minTrades)) * 100))
     return createPortal(
       <div
-        className="lb-mine-m fixed inset-x-3 z-20 overflow-hidden rounded-[16px] border border-white/[0.14] bg-ink-950/85 backdrop-blur-lg sm:hidden"
+        className="lb-mine-m fixed inset-x-3 z-20 overflow-hidden rounded-panel border border-white/[0.14] bg-ink-950 sm:hidden"
         style={{ bottom: MY_RANK_BAR_BOTTOM }}
       >
         <div className="flex h-14 items-center gap-2 px-3">
@@ -459,7 +466,7 @@ function ShareBtn({ onClick, className = '' }: { onClick: () => void; className?
   const { t } = useTranslation()
   return (
     <button type="button" onClick={onClick}
-      className={`shrink-0 rounded-[10px] bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30 ${className}`}>
+      className={`shrink-0 rounded-control bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30 ${className}`}>
       {t('share.button')}
     </button>
   )
@@ -554,7 +561,7 @@ function MyRankCard({ data, board, rankThreshold, onShare }: { data: Leaderboard
             />
           </div>
           {data.periodStart && (
-            <p className="mt-2 text-xs text-neutral-600">
+            <p className="mt-2 text-xs text-neutral-500">
               {t('leaderboard.progressNote', { time: fmtUtcClock(data.periodStart) })}
             </p>
           )}
@@ -781,24 +788,13 @@ function SegChoice<T extends string>({
   renderLabel: (v: T) => string
   className?: string
 }) {
-  const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const i = options.indexOf(value)
-    let next = -1
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % options.length
-    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + options.length) % options.length
-    else if (e.key === 'Home') next = 0
-    else if (e.key === 'End') next = options.length - 1
-    if (next < 0) return
-    e.preventDefault()
-    onChange(options[next])
-    // 焦点跟着选中项走，否则下一次箭头键会从旧位置起算。
-    // Focus follows the selection, or the next arrow key would start from the old one.
-    const group = e.currentTarget
-    group.querySelectorAll<HTMLButtonElement>('button')[next]?.focus()
-  }
+  // 方向键处理与全站页签共用 src/utils/rovingTabs.ts（行为与原来这段内联实现一致，
+  // 只多了一条：带 Alt / Ctrl / Meta 的组合键不再被吞掉）。
+  // Arrow-key handling is shared with every tab strip via src/utils/rovingTabs.ts (same
+  // behaviour as the inline version it replaces, except Alt / Ctrl / Meta chords now pass through).
   const hintRef = useOverflowHint<HTMLDivElement>()
   return (
-    <div ref={hintRef} className={`seg-tabs ${className}`} role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
+    <div ref={hintRef} className={`seg-tabs ${className}`} role="radiogroup" aria-label={label} onKeyDown={onRovingKeyDown}>
       {options.map((o) => (
         <button
           key={o}
@@ -833,6 +829,11 @@ export default function LeaderboardPage() {
   // body for a skeleton while header / controls / gate chips stay in place.
   const [cache, setCache] = useState<Partial<Record<string, LeaderboardPayload>>>({})
   const [forbidden, setForbidden] = useState(false)
+  // 没缓存过的组合拉取失败（非 403）：主体换成「没有加载出来」+ 重试；缓存过的组合刷新失败照旧显示缓存。
+  // An unseen combo failing (not 403) swaps the body for "couldn't load" + retry; a cached combo's
+  // failed background refresh keeps showing the cache.
+  const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [share, setShare] = useState<ShareSpec | null>(null)
   const key = `${board}:${period}`
   const data = cache[key]
@@ -840,24 +841,23 @@ export default function LeaderboardPage() {
   useEffect(() => {
     let cancelled = false
     const k = `${board}:${period}`
+    setLoadErr(null)
     gamificationApi
       .leaderboard(board, period)
       .then((res) => {
         if (!cancelled) setCache((c) => ({ ...c, [k]: res }))
       })
-      .catch(() => {
-        // 唯一预期的失败是入口理论上已隐藏、用户直接打 URL 撞上 403——不细分
-        // 错误类型，统一退化成内测提示（同 AchievementsPage）。
-        // The one expected failure is someone hitting a URL whose entry is
-        // already hidden and getting a 403 — not worth distinguishing error
-        // kinds; everything degrades to the same beta hint (same as
-        // AchievementsPage).
-        if (!cancelled) setForbidden(true)
+      .catch((err: unknown) => {
+        if (cancelled) return
+        // 只有 403 退化成内测提示（理由见 AchievementsPage 同一处）；其余失败交给下面的重试卡。
+        // Only a 403 degrades to the beta hint (see AchievementsPage); anything else gets the retry card.
+        if (err instanceof ApiHttpError && err.status === 403) setForbidden(true)
+        else setLoadErr(err instanceof Error ? localizeApiError(err.message) : '')
       })
     return () => {
       cancelled = true
     }
-  }, [board, period])
+  }, [board, period, reloadKey])
 
   if (forbidden) {
     return (
@@ -938,7 +938,7 @@ export default function LeaderboardPage() {
             <>
               {/* ≥ 640px：原样不动。桌面这行一像素不改。
                   ≥ 640px: unchanged verbatim — pixel-identical to before. */}
-              <div className="mt-2 hidden flex-wrap items-center gap-x-3.5 gap-y-2 text-[13px] text-neutral-400 sm:flex">
+              <div className="mt-2 hidden flex-wrap items-center gap-x-3.5 gap-y-2 text-sm text-neutral-400 sm:flex">
                 <span className="font-semibold text-neutral-100">
                   {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
                 </span>
@@ -966,7 +966,7 @@ export default function LeaderboardPage() {
                   doesn't fit, unlike the desktop version's always-segmented
                   layout. */}
               <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 sm:hidden">
-                <span className="text-[13px] text-neutral-400">
+                <span className="text-sm text-neutral-400">
                   {period === 'week' ? t('leaderboard.periodWeek', { year, week }) : t('leaderboard.periodMonth', { year, month })}
                   <span className="text-neutral-600"> · </span>
                   <span className="num">
@@ -1053,6 +1053,14 @@ export default function LeaderboardPage() {
         // a background refresh of the same combo just updates data, no replay.
         <div key={key} className="content-fade space-y-6">
           <BoardBody data={data} board={board} rankThreshold={rankThreshold[board]} minBaselineUsd={gates.minBaselineUsd} onShare={onShare} />
+        </div>
+      ) : loadErr != null ? (
+        <div className="card glass p-6 text-center text-sm text-neutral-400" role="alert">
+          <p>{t('common.loadFailed')}</p>
+          {loadErr && <p className="mt-1 text-xs text-neutral-500">{loadErr}</p>}
+          <button type="button" className="btn btn-ghost mt-4 h-9 px-4 text-sm" onClick={() => setReloadKey((k) => k + 1)}>
+            {t('common.retry')}
+          </button>
         </div>
       ) : (
         <BoardSkeleton />

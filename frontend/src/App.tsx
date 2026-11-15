@@ -182,6 +182,36 @@ const APP_ROUTE_PAGES: Record<string, HasPreload> = {
 // 登录后空闲时预取：外壳 + 底栏四个常用 Tab。/ Prefetched on idle after login: shell + main tabs.
 const PREFETCH_AFTER_LOGIN: HasPreload[] = [Layout, DashboardPage, SignalsPage, ChartsPage, OrdersPage]
 
+// 「其他」面板里各入口对应的页面（键是面板里的路径，见 Layout.tsx 的 moreItems）。面板一
+// 打开就预取当前用户看得见的那几项，手指落到某一格时 chunk 多半已经到了。客服台、管理
+// 控制台不在表里：只有员工用、包又最大，不值得为每个打开面板的人预取。
+// Pages behind the More sheet's entries, keyed by the sheet's paths (see moreItems in
+// Layout.tsx). Opening the sheet prefetches the entries this user can see, so the chunk
+// has usually landed by the time a finger reaches a tile. The support desk and admin
+// console are left out: staff-only and the largest chunks, not worth prefetching for
+// everyone who opens the sheet.
+const MORE_SHEET_PAGES: Record<string, HasPreload> = {
+  '/bind': BindPage,
+  '/account': AccountPage,
+  '/app-download': AppDownloadPage,
+  '/support': SupportPage,
+  '/announcements': AnnouncementsPage,
+  '/upgrade': UpgradePage,
+  '/strategies': StrategiesPage,
+  '/achievements': AchievementsPage,
+  '/leaderboard': LeaderboardPage,
+  '/competitions': CompetitionsPage,
+  '/lucky': LuckyPage,
+  '/agent': AgentPage,
+}
+
+// 省流量 / 2G 不预取；重复打开面板不会重复下载（preload 自己记着进行中的 Promise）。
+// Skipped on Save-Data / 2G; reopening the sheet never refetches (preload keeps its promise).
+function prefetchMoreSheet(paths: string[]) {
+  if (shouldSkipPrefetch()) return
+  for (const p of paths) void MORE_SHEET_PAGES[p]?.preload().catch(() => {})
+}
+
 /**
  * 首次 render 之前调用（main.tsx）。公开页返回「该页 chunk 已就绪」的 Promise，调用方
  * 应当 await；其余情况立即 resolve，只在后台并行预热 Layout 与目标页 chunk——app.html
@@ -531,7 +561,7 @@ export default function App() {
             <Route
               element={
                 <Protected>
-                  <Layout />
+                  <Layout onMoreOpen={prefetchMoreSheet} />
                 </Protected>
               }
             >

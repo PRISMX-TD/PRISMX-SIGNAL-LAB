@@ -5,10 +5,13 @@
    equipped badges on the right, hairline-divided sections below. The badge
    wall reuses the achievements page's .ach-row / .ach-item; only the page's
    own scaffolding lives here. */
+/* 不再自带进场：这一层就是整页，Layout 的路由容器（.page-enter）已经给每次导航淡入一次，
+   再上浮一次就是两段进场。
+   No entrance of its own: this is the whole page, and Layout's route wrapper
+   (.page-enter) already fades every navigation in; rising again stacks two entrances. */
 .pf {
   max-width: 1100px;
   margin: 0 auto;
-  animation: acct-in 0.5s var(--ease-out) both;
 }
 .pf-back {
   display: inline-flex;
@@ -23,8 +26,10 @@
   color: var(--text-3);
   cursor: pointer;
 }
-.pf-back:hover {
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .pf-back:hover {
+    color: var(--text);
+  }
 }
 
 /* ── 陈列台 / stage ── */
@@ -46,7 +51,7 @@
   gap: 12px;
   margin-top: 8px;
   font-size: clamp(30px, 4vw, 48px);
-  color: #fff;
+  color: var(--text-strong);
   overflow-wrap: anywhere;
 }
 .pf-you {
@@ -54,8 +59,8 @@
   align-items: center;
   height: 24px;
   padding: 0 10px;
-  border-radius: var(--r-xs);
-  background: rgba(90, 34, 238, 0.25);
+  border-radius: var(--r-tile);
+  background: rgb(var(--purple-rgb) / 0.25);
   font-family: "Archivo", "Noto Sans SC", system-ui, sans-serif;
   font-variation-settings: "wdth" 100;
   font-size: 12px;
@@ -82,13 +87,13 @@
   gap: 6px;
   height: 26px;
   padding: 0 10px;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-tile);
   background: var(--nest);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--text);
 }
 .pf-lv b {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-weight: 500;
   color: var(--purple-hi);
 }
@@ -139,7 +144,7 @@
 }
 .pf-private {
   font-size: 12px;
-  color: #e0a83c;
+  color: var(--warn);
 }
 
 /* 榜单四格 / four standings tiles */
@@ -157,7 +162,7 @@
 .pf-tile {
   min-height: 96px;
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   background: var(--surface);
 }
 .pf-tile-h {
@@ -196,7 +201,7 @@
 }
 .pf-entries b {
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .pf-entries span {
   color: var(--text-3);
@@ -232,7 +237,7 @@
 }
 .pf-stat {
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   background: var(--surface);
 }
 .pf-stat span {
@@ -243,9 +248,9 @@
 .pf-stat b {
   display: block;
   margin-top: 6px;
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 @media (max-width: 639px) {
   .pf-stats {
@@ -262,10 +267,4 @@
 }
 .pf-empty p {
   margin: 0 0 10px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .pf {
-    animation: none;
-  }
 }

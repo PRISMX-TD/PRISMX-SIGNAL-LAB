@@ -15,11 +15,13 @@ import { adminApi } from '../../../api/client'
 import type { LuckyRoundAdmin } from '../../../api/luckyTypes'
 import { fmtTime, localizeApiError } from '../../../api/utils'
 import Switch from '../../Switch'
+import ConfirmModal from '../../ConfirmModal'
 import LuckyDrawsTab from './LuckyDrawsTab'
 import LuckyIssueTab from './LuckyIssueTab'
 import { DeleteRoundSheet, RoundFormSheet } from './LuckyRoundSheets'
 import LuckySettingsTab from './LuckySettingsTab'
 import { keepSelection, replaceRound, roundKpis, splitRounds, usedRatio } from './luckyRounds'
+import { onRovingFocusKeyDown } from '../../../utils/rovingTabs'
 import './luckyAdmin.css'
 
 type Tab = 'prizes' | 'issue' | 'draws' | 'pending'
@@ -43,6 +45,11 @@ export default function LuckyWheelPanel() {
   const [sheet, setSheet] = useState<Sheet>(null)
   const [showEnded, setShowEnded] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  // 两个待确认动作：离开有未保存改动的奖品页（存的是确认后要执行的那一步）、立即结束某一期。
+  // Two pending confirms: leaving unsaved prize edits (holding the step to run once confirmed),
+  // and ending a round now.
+  const [leaveFn, setLeaveFn] = useState<(() => void) | null>(null)
+  const [endTarget, setEndTarget] = useState<LuckyRoundAdmin | null>(null)
   const errText = useCallback((e: unknown) => (e instanceof Error ? localizeApiError(e.message) : t('common.error')), [t])
 
   const reload = useCallback(() => {
@@ -57,7 +64,8 @@ export default function LuckyWheelPanel() {
   // 奖品设置有未保存的改动时，切页签 / 换期前确认（卸载设置页改动就丢了）。
   // Unsaved prize edits are lost when the settings tab unmounts, so confirm before switching tab or round.
   const guard = (fn: () => void) => {
-    if (tab === 'prizes' && dirty && !window.confirm(t('admin.lucky.confirmLeave'))) return
+    // 包一层箭头：setState 收到函数会把它当更新器调用。/ Wrapped: setState would call a bare function as an updater.
+    if (tab === 'prizes' && dirty) { setLeaveFn(() => fn); return }
     fn()
   }
   const update = (r: LuckyRoundAdmin & { voided?: number }) => setRounds((xs) => replaceRound(xs ?? [], r))
@@ -68,7 +76,6 @@ export default function LuckyWheelPanel() {
     try { update(await adminApi.luckySetRoundVisible(r.id, v)) } catch (e) { setErr(errText(e)) } finally { setBusyId(null) }
   }
   const endRound = async (r: LuckyRoundAdmin) => {
-    if (!window.confirm(t('admin.lucky.confirmEndRound', { name: r.name }))) return
     setBusyId(r.id); setErr(''); setMsg('')
     try {
       const next = await adminApi.luckyEndRound(r.id)
@@ -117,7 +124,7 @@ export default function LuckyWheelPanel() {
                 <button type="button" className="lka-act" onClick={() => setSheet({ kind: 'edit', round: r })}>
                   {t('admin.lucky.round.edit')}</button>
                 <button type="button" className="lka-act is-warn" disabled={busyId === r.id}
-                  onClick={() => void endRound(r)}>{t('admin.lucky.endNow')}</button>
+                  onClick={() => setEndTarget(r)}>{t('admin.lucky.endNow')}</button>
               </>
             )}
             <button type="button" className="lka-act is-down" onClick={() => setSheet({ kind: 'delete', round: r })}>
@@ -148,7 +155,7 @@ export default function LuckyWheelPanel() {
         <button type="button" className={`adm-kpi adm-kpi-btn ${activeTab === 'pending' ? 'is-on' : ''}`}
           aria-pressed={activeTab === 'pending'} onClick={() => goTab('pending')}>
           <span className="adm-kpi-label">
-            {pending > 0 && <i className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden />}
+            {pending > 0 && <i className="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden />}
             {t('admin.lucky.kpi.pending')}
           </span>
           <span className={`adm-kpi-value num ${pending > 0 ? 'is-warn' : ''}`}>{pending}</span>
@@ -184,9 +191,9 @@ export default function LuckyWheelPanel() {
 
       <div>
         {selected && <h3 className="lka-sel-name">{selected.name}</h3>}
-        <div className="adm-tabs lka-tabs no-scrollbar" role="tablist">
+        <div className="adm-tabs lka-tabs no-scrollbar" role="tablist" onKeyDown={onRovingFocusKeyDown}>
           {roundTabs.map((k) => (
-            <button key={k} type="button" role="tab" aria-selected={activeTab === k} className={`adm-tab ${activeTab === k ? 'is-active' : ''}`}
+            <button key={k} type="button" role="tab" aria-selected={activeTab === k} tabIndex={activeTab === k ? 0 : -1} className={`adm-tab ${activeTab === k ? 'is-active' : ''}`}
               onClick={() => goTab(k)}>
               {t(`admin.lucky.tab.${k}`)}
               {k === 'pending' && pending > 0 && <span className="adm-pill is-warn num">{pending}</span>}
@@ -225,6 +232,36 @@ export default function LuckyWheelPanel() {
           setMsg(t('admin.lucky.del.done', d))
           reload()
         }} />
+      )}
+      {leaveFn && (
+        <ConfirmModal
+          center
+          title={t('admin.lucky.leaveTitle')}
+          message={t('admin.lucky.confirmLeave')}
+          confirmLabel={t('admin.lucky.leave')}
+          danger
+          onCancel={() => setLeaveFn(null)}
+          onConfirm={() => {
+            const fn = leaveFn
+            setLeaveFn(null)
+            fn()
+          }}
+        />
+      )}
+      {endTarget && (
+        <ConfirmModal
+          center
+          title={t('admin.lucky.endTitle')}
+          message={t('admin.lucky.confirmEndRound', { name: endTarget.name })}
+          confirmLabel={t('admin.lucky.endNow')}
+          danger
+          onCancel={() => setEndTarget(null)}
+          onConfirm={() => {
+            const r = endTarget
+            setEndTarget(null)
+            void endRound(r)
+          }}
+        />
       )}
     </div>
   )

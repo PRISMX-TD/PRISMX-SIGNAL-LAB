@@ -29,7 +29,7 @@
   font-size: 26px;
   line-height: 1.1;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .page-head-name {
   text-wrap: balance;
@@ -87,8 +87,10 @@
   align-self: flex-start;
   transition: color var(--dur-fast) var(--ease-out);
 }
-.page-head-back:hover {
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .page-head-back:hover {
+    color: var(--text-strong);
+  }
 }
 .page-head-actions {
   display: flex;

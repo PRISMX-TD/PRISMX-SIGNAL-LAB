@@ -87,7 +87,7 @@ export default function AppDownloadPage() {
               alt=""
               width={64}
               height={64}
-              className="h-16 w-16 rounded-2xl border border-white/10 shadow-prism"
+              className="h-16 w-16 rounded-card border border-white/10 shadow-prism"
             />
             <h1 className="mt-6 font-display text-3xl font-semibold leading-tight tracking-tight text-neutral-50 sm:text-4xl">
               {t('appDownload.title')}
@@ -102,7 +102,7 @@ export default function AppDownloadPage() {
                 download={APP_FILENAME}
                 onClick={onDownload}
                 aria-disabled={busy || undefined}
-                className={`btn-primary inline-flex items-center gap-2 whitespace-nowrap px-7 py-3.5 text-base transition active:scale-[0.98] ${busy ? 'pointer-events-none opacity-60' : ''}`}
+                className={`btn-primary inline-flex items-center gap-2 whitespace-nowrap px-7 py-3.5 text-base transition active:scale-[0.96] motion-reduce:active:scale-100 ${busy ? 'pointer-events-none opacity-60' : ''}`}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -129,7 +129,7 @@ export default function AppDownloadPage() {
                   </div>
                 )}
                 {statusText && (
-                  <p className={`text-sm leading-relaxed ${failed ? 'text-amber-200' : 'text-neutral-400'}`}>{statusText}</p>
+                  <p className={`text-sm leading-relaxed ${failed ? 'text-warn' : 'text-neutral-400'}`}>{statusText}</p>
                 )}
                 {(failed === 'network' || failed === 'install') && (
                   // 不带 onClick：交给系统浏览器下载，与旧安装包同一条路。
@@ -142,14 +142,14 @@ export default function AppDownloadPage() {
             )}
 
             {isIOS && (
-              <p className="mt-4 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-sm text-amber-200">
+              <p className="mt-4 rounded-panel border border-warn/30 bg-warn/10 px-4 py-3 text-sm text-warn">
                 {t('appDownload.iosNotice')}
               </p>
             )}
           </div>
 
-          <div className="hidden flex-col items-center rounded-2xl border border-white/10 bg-white/[0.03] p-6 lg:flex">
-            <div className="rounded-xl bg-white p-3">
+          <div className="hidden flex-col items-center rounded-card border border-white/10 bg-white/[0.03] p-6 lg:flex">
+            <div className="rounded-panel bg-white p-3">
               <QRCodeSVG value={APP_DOWNLOAD_URL} size={160} level="M" />
             </div>
             <div className="mt-4 text-sm font-medium text-neutral-200">{t('appDownload.scanTitle')}</div>
@@ -174,8 +174,15 @@ export default function AppDownloadPage() {
           </ol>
         </section>
 
-        <section className="glass border-l-2 border-amber-400/50 p-6">
-          <h2 className="mb-3 font-display text-lg font-semibold text-neutral-100">{t('appDownload.notesTitle')}</h2>
+        <section className="rounded-card bg-warn/10 p-6">
+          <h2 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-neutral-100">
+            <svg className="shrink-0 text-warn" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            {t('appDownload.notesTitle')}
+          </h2>
           <ul className="space-y-2.5">
             {notes.map((n, i) => (
               <li key={i} className="text-sm leading-relaxed text-neutral-300">{n}</li>

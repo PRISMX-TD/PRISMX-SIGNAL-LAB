@@ -126,7 +126,7 @@ export default function CompleteProfilePage() {
               )}
 
               {error && (
-                <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">
+                <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">
                   {error}
                 </div>
               )}

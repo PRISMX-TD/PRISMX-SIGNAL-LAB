@@ -1,6 +1,7 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from 'react'
+import { createContext, useContext, useLayoutEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import { createBrowserHistory, type BrowserHistory } from '@remix-run/router'
 import { Router } from 'react-router-dom'
+import { useDelayedFlag } from '../utils/useDelayedFlag'
 
 // BrowserRouter 的等价物，多做一件事：把「路由切换还没完成」暴露出来。
 //
@@ -55,26 +56,20 @@ export function NavPendingRouter({ children }: { children: ReactNode }) {
 }
 
 // 顶部细进度条。延迟 150ms 才出现：chunk 已在缓存里的切换（绝大多数，含 App 内）
-// 不闪；慢的那次立刻有「在走」的反馈。pointer-events-none，绝不挡点击。
+// 不闪；慢的那次立刻有「在走」的反馈。出现后至少停 400ms，不会刚冒头就消失。
+// pointer-events-none，绝不挡点击。
 // Thin top bar. Shows after 150ms so cached switches (most of them, and all of them in
-// the app) never flash it; a slow one gets feedback right away. Never intercepts taps.
+// the app) never flash it; a slow one gets feedback right away. Once shown it stays at
+// least 400ms instead of blinking out. Never intercepts taps.
 export function NavPendingBar() {
   const pending = useNavPending()
-  const [show, setShow] = useState(false)
-  useEffect(() => {
-    if (!pending) {
-      setShow(false)
-      return
-    }
-    const t = window.setTimeout(() => setShow(true), 150)
-    return () => window.clearTimeout(t)
-  }, [pending])
+  const show = useDelayedFlag(pending, { delay: 150, minVisible: 400 })
   if (!show) return null
   return (
     <div
       role="progressbar"
       aria-busy="true"
-      className="pointer-events-none fixed inset-x-0 z-[9999] h-0.5 overflow-hidden bg-prism-500/15"
+      className="pointer-events-none fixed inset-x-0 z-tip h-0.5 overflow-hidden bg-prism-500/15"
       style={{ top: 'env(safe-area-inset-top, 0px)' }}
     >
       <div className="h-full w-1/3 animate-shimmer bg-prism-400" />

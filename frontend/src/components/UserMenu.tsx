@@ -10,10 +10,11 @@
 // collapse into a dropdown, freeing room for the high-frequency nav — English
 // labels run longer than Chinese ones, so without this the desktop nav
 // overflows the viewport in English.
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import { useBackToClose } from "../utils/useBackToClose"
+import { usePopoverEscape } from "../utils/usePopoverEscape"
 import { FestivalTopper } from "../festival/FestivalDecor"
 
 export default function UserMenu({
@@ -53,6 +54,14 @@ export default function UserMenu({
   // useBackToClose's comment; NotificationBell gets the same treatment).
   useBackToClose(open, () => setOpen(false))
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
+  const panelId = useId()
+  // 键盘：Esc 收起并把焦点还给头像按钮（见 utils/usePopoverEscape）。面板里全是导航
+  // 链接，按 Disclosure 模式处理：不加 role="menu"——那会要求方向键漫游，读屏也不再念「链接」。
+  // Keyboard: Escape closes and refocuses the avatar (utils/usePopoverEscape). The panel
+  // is all navigation links, so it follows the Disclosure pattern: no role="menu", which
+  // would demand arrow-key roving and stop screen readers announcing "link".
+  usePopoverEscape(open, () => setOpen(false), btnRef, rootRef)
 
   useEffect(() => {
     if (!open) return
@@ -71,9 +80,12 @@ export default function UserMenu({
   return (
     <div ref={rootRef} className="relative">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={t("nav.account")}
+        aria-expanded={open}
+        aria-controls={open ? panelId : undefined}
         className="relative flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-prism-600/20 text-sm font-semibold text-prism-200 transition hover:bg-prism-600/30"
       >
         {initial}
@@ -81,7 +93,7 @@ export default function UserMenu({
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-64 rounded-xl border border-white/10 bg-ink-900/95 p-2 shadow-prism backdrop-blur-xl">
+        <div id={panelId} className="absolute right-0 z-menu mt-2 w-64 rounded-panel float-panel p-1.5">
           {email && (
             <div className="truncate px-3 py-2 text-xs text-neutral-500">{email}</div>
           )}

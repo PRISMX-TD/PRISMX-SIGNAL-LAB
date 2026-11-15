@@ -88,8 +88,8 @@ export function EmailVerifyBanner() {
 
   return (
     <div className="mx-auto w-full max-w-7xl px-4 pt-4 sm:px-6">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-xs text-amber-300">
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-panel border border-warn/30 bg-warn/10 px-4 py-2.5 text-xs text-warn">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" />
         <span className="font-semibold">{t('emailVerify.bannerTitle')}</span>
         <span className="min-w-0 break-words leading-relaxed opacity-80">
           {t('emailVerify.bannerBody', { email: user?.email ?? '' })}
@@ -100,7 +100,7 @@ export function EmailVerifyBanner() {
             type="button"
             onClick={resend}
             disabled={disabled}
-            className="rounded-lg bg-amber-400/20 px-2.5 py-1 font-semibold text-amber-100 transition hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
+            className="rounded-lg bg-warn/20 px-2.5 py-1 font-semibold text-warn transition hover:bg-warn/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {label}
           </button>
@@ -117,7 +117,7 @@ export function EmailVerifyInline({ reason, className = '' }: { reason: 'bind' |
   const { resend, msg, label, disabled } = useResend()
 
   return (
-    <div className={`rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-xs leading-relaxed text-amber-300 ${className}`}>
+    <div className={`rounded-panel border border-warn/30 bg-warn/10 px-4 py-3 text-xs leading-relaxed text-warn ${className}`}>
       <p className="font-semibold">
         {reason === 'bind' ? t('emailVerify.inlineBind') : t('emailVerify.inlineTrial')}
       </p>
@@ -127,7 +127,7 @@ export function EmailVerifyInline({ reason, className = '' }: { reason: 'bind' |
           type="button"
           onClick={resend}
           disabled={disabled}
-          className="rounded-lg bg-amber-400/20 px-2.5 py-1 font-semibold text-amber-100 transition hover:bg-amber-400/30 disabled:cursor-not-allowed disabled:opacity-60"
+          className="rounded-lg bg-warn/20 px-2.5 py-1 font-semibold text-warn transition hover:bg-warn/30 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {label}
         </button>

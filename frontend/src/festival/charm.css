@@ -63,8 +63,8 @@
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
   mask-image: linear-gradient(90deg, transparent, #000 10px, #000 calc(100% - 10px), transparent);
 }
-/* 悬停：小饰轻轻跳一下（积雪不跳）。/ hover: the charm gives a small hop (snow does not) */
-@media (prefers-reduced-motion: no-preference) {
+/* 悬停：小饰轻轻跳一下（积雪不跳），只给鼠标。/ hover: the charm gives a small hop (snow does not), mice only */
+@media (prefers-reduced-motion: no-preference) and (hover: hover) and (pointer: fine) {
   [data-festival] .btn-primary:hover::before,
   [data-festival] .btn-ghost:hover::before,
   [data-festival] .btn-secondary:hover::before,

@@ -85,10 +85,10 @@ export default function TicketsView({ ctx }: { ctx: DeskCtx }) {
   // ---- 桌面 / desktop ----
   const idle = (
     <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-      <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[var(--nest)] text-neutral-400">
+      <span className="flex h-14 w-14 items-center justify-center rounded-card bg-[var(--nest)] text-neutral-400">
         <IconInbox size={24} />
       </span>
-      <p className="mt-4 font-display text-[15px] font-semibold text-neutral-100">{t('supportDesk.queue.pickTitle')}</p>
+      <p className="mt-4 font-display text-base font-semibold text-neutral-100">{t('supportDesk.queue.pickTitle')}</p>
       <p className="mt-1.5 max-w-[19rem] text-xs leading-relaxed text-neutral-500">{t('supportDesk.queue.pickHint')}</p>
     </div>
   )
@@ -117,7 +117,7 @@ export default function TicketsView({ ctx }: { ctx: DeskCtx }) {
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center px-8 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--nest)] text-neutral-500">
+              <span className="flex h-12 w-12 items-center justify-center rounded-card bg-[var(--nest)] text-neutral-500">
                 <IconUser size={20} />
               </span>
               <p className="mt-3 max-w-[15rem] text-xs leading-relaxed text-neutral-500">

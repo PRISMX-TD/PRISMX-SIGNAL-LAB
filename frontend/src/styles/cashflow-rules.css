@@ -24,22 +24,24 @@
 .cf-rules summary::-webkit-details-marker {
   display: none;
 }
-.cf-rules summary:hover {
-  background: var(--surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .cf-rules summary:hover {
+    background: var(--surface-2);
+  }
 }
 .cf-rules .t {
   display: block;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   color: var(--text-2);
 }
 .cf-rules[open] .t {
-  color: #fff;
+  color: var(--text-strong);
 }
 .cf-rules .h {
   display: block;
   margin-top: 3px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-3);
 }
 .cf-rules .chev {
@@ -59,7 +61,7 @@
   transform: rotate(180deg);
   background: var(--purple);
   border-color: transparent;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .cf-body {
@@ -68,20 +70,24 @@
 }
 .cf-lead {
   max-width: 62ch;
-  font-size: 13.5px;
-  line-height: 1.75;
+  font-size: 15px;
+  line-height: 1.6;
   color: var(--text-2);
 }
-/* 核心公式单独成条：这是整块唯一需要被记住的一句话，给它一条紫色左边界当锚点。
-   The one sentence worth remembering gets a violet rule as its anchor. */
+/* 核心公式单独成块：这是整块唯一需要被记住的一句话，用一块 --nest 内嵌格托住它，
+   不用彩色左边界——那条紫线只是装饰，内嵌格的面本身就能把它和上下文分开。
+   The one sentence worth remembering sits on a --nest tile rather than behind a
+   violet rule: the stripe was decoration, and the tile's own surface already sets
+   it apart from the text around it. */
 .cf-formula {
   margin-top: 12px;
-  border-left: 2px solid var(--purple);
-  padding: 2px 0 2px 12px;
-  font-size: 13.5px;
-  line-height: 1.7;
-  font-weight: 600;
-  color: #fff;
+  padding: 10px 12px;
+  border-radius: var(--r-tile);
+  background: var(--nest);
+  font-size: 15px;
+  line-height: 1.6;
+  font-weight: 500;
+  color: var(--text-strong);
 }
 
 .cf-cases {
@@ -103,8 +109,8 @@
   gap: 16px;
 }
 .cf-case-t {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   color: var(--text-2);
 }
 .cf-case-r {
@@ -115,8 +121,8 @@
 }
 .cf-case-s,
 .cf-case-w {
-  font-size: 12.5px;
-  line-height: 1.65;
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--text-3);
 }
 .cf-case-s {
@@ -127,9 +133,9 @@
    Each example group (capital floor / cash flows) gets a small heading; "not counted" is muted, not green. */
 .cf-sub {
   margin: 22px 0 0;
-  font-size: 12.5px;
-  font-weight: 600;
-  color: #fff;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-strong);
 }
 .cf-sub + .cf-cases {
   margin-top: 8px;
@@ -145,8 +151,8 @@
 }
 .cf-notes li {
   max-width: 74ch;
-  font-size: 12px;
-  line-height: 1.8;
+  font-size: 15px;
+  line-height: 1.6;
   color: var(--text-3);
 }
 
@@ -168,11 +174,11 @@
 }
 
 /* ── 安静版（.is-plain，比赛详情用）───────────────────────────────────────
-   比赛详情右栏的规则清单是 11.5px 灰字 + 发丝线，卡片形态在那里比周围重出一
+   比赛详情右栏的规则清单是 12px 灰字 + 发丝线，卡片形态在那里比周围重出一
    个量级。这一档把面、圆钮、内边距全撤掉，只留一条上边线和一个小箭头，字号
    往清单那边靠：它读起来是"规则的第四条，可以点开"，不是掉进去的另一个组件。
    Quiet register for the competition detail's right column, whose rule list is
-   11.5px muted text on hairlines. Surface, round button and padding are dropped
+   12px muted text on hairlines. Surface, round button and padding are dropped
    for one top rule and a small caret, with type scaled toward that list: it
    reads as a fourth, expandable rule rather than a foreign component. */
 .cf-rules.is-plain {
@@ -186,15 +192,17 @@
   padding: 12px 0;
   gap: 12px;
 }
-.cf-rules.is-plain summary:hover {
-  background: none;
-}
-.cf-rules.is-plain summary:hover .t {
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .cf-rules.is-plain summary:hover {
+    background: none;
+  }
+  .cf-rules.is-plain summary:hover .t {
+    color: var(--text-strong);
+  }
 }
 .cf-rules.is-plain .t {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   transition: color var(--dur-fast) var(--ease-out);
 }
 .cf-rules.is-plain .h {
@@ -216,12 +224,12 @@
   padding: 0 0 4px;
 }
 .cf-rules.is-plain .cf-lead {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.8;
 }
 .cf-rules.is-plain .cf-formula {
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
 }
 .cf-rules.is-plain .cf-cases {
   margin-top: 16px;
@@ -233,15 +241,16 @@
   border-bottom: 0;
 }
 .cf-rules.is-plain .cf-case-t {
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .cf-rules.is-plain .cf-case-r {
-  font-size: 13.5px;
+  font-size: 13px;
 }
 .cf-rules.is-plain .cf-case-s,
 .cf-rules.is-plain .cf-case-w,
 .cf-rules.is-plain .cf-notes li {
   font-size: 12px;
+  line-height: 1.8;
 }
 .cf-rules.is-plain .cf-notes {
   margin-top: 14px;

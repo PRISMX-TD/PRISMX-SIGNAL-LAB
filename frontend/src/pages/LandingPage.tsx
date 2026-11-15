@@ -49,6 +49,7 @@ import { usePublicLang } from '../seo/PublicShell'
 // Story styles ship with the landing page only, not in the global stylesheet.
 import '../styles/landing-story.css'
 import { localePath } from '../seo/meta'
+import { EMPTY } from '../utils/format'
 
 type T = (k: string, opts?: Record<string, unknown>) => string
 
@@ -84,7 +85,7 @@ function Heading({ title, subtitle }: { title: string; subtitle?: string }) {
   return (
     <div className="reveal max-w-3xl">
       <h2 className="font-display-xl fs-fluid [--fs-min:1.75rem] [--fs-vw:3.6vw] [--fs-max:2.5rem] text-white">{title}</h2>
-      {subtitle && <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-neutral-400">{subtitle}</p>}
+      {subtitle && <p className="mt-4 max-w-[52ch] text-base leading-relaxed text-neutral-400">{subtitle}</p>}
     </div>
   )
 }
@@ -123,7 +124,7 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
           top and iOS's status bar is transparent; without this the logo and nav
           sit under the notch/Dynamic Island and taps get swallowed. */}
       <header
-        className={`fixed inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)] transition-colors duration-200 ${
+        className={`fixed inset-x-0 top-0 z-nav pt-[env(safe-area-inset-top)] transition-colors duration-200 ${
           solid ? 'border-b border-white/[0.07] bg-ink-950/85 backdrop-blur-md' : 'border-b border-transparent'
         }`}
       >
@@ -132,12 +133,12 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
         <div className={`${SHELL} flex h-16 items-center gap-8`}>
           <a href="#top" className="flex shrink-0 items-center gap-2.5">
             <Logo size={30} />
-            <span className="font-display text-[15px] font-bold tracking-tight text-white">Signal Lab</span>
+            <span className="font-display text-base font-bold tracking-tight text-white">Signal Lab</span>
           </a>
 
           <nav className="hidden items-center gap-7 lg:flex">
             {links.map((l) => (
-              <a key={l.h} href={l.h} className="text-[13px] text-neutral-400 transition-colors hover:text-white">
+              <a key={l.h} href={l.h} className="text-sm text-neutral-400 transition-colors hover:text-white">
                 {t(`landing.${l.k}`)}
               </a>
             ))}
@@ -147,11 +148,11 @@ function Navbar({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigate
             <PublicLanguageToggle />
             <a
               href="/login"
-              className="hidden text-[13px] text-neutral-400 transition-colors hover:text-white sm:block"
+              className="hidden text-sm text-neutral-400 transition-colors hover:text-white sm:block"
             >
               {t('landing.signIn')}
             </a>
-            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary relative h-10 px-4 text-[13px] lg:h-9">
+            <button onClick={() => navigate('/login?mode=register')} className="btn btn-primary relative h-10 px-4 text-sm lg:h-9">
               {t('landing.getStarted')}
               {/* 顶栏按钮下面是滚动的内容：不挂会垂下去的装饰。/ nothing hangs from the header button */}
               <FestivalTopper kind="button" hang={false} />
@@ -232,14 +233,14 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
         {/* FREE */}
         <div className="reveal flex flex-col rounded-card border border-white/[0.09] p-7 lg:col-span-5">
           <div className="flex items-baseline justify-between gap-3">
-            <span className="font-display text-[20px] font-bold text-white">{t('landing.prFreeName')}</span>
-            <span className="text-[12px] text-neutral-500">{t('landing.prFreeTag')}</span>
+            <span className="font-display text-xl font-bold text-white">{t('landing.prFreeName')}</span>
+            <span className="text-xs text-neutral-500">{t('landing.prFreeTag')}</span>
           </div>
           <div className="num mt-5 text-[2.5rem] font-semibold leading-none text-white">$0</div>
 
           <ul className="mt-8 space-y-3.5 border-t border-white/[0.07] pt-7">
             {freeFeatures.map((k) => (
-              <li key={k} className="text-[13px] leading-relaxed text-neutral-400">
+              <li key={k} className="text-sm leading-relaxed text-neutral-400">
                 {t(`landing.${k}`)}
               </li>
             ))}
@@ -247,7 +248,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
 
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-ghost mt-auto h-11 w-full text-[13px]"
+            className="btn btn-ghost mt-auto h-11 w-full text-sm"
           >
             {t('landing.getStarted')}
           </button>
@@ -270,7 +271,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
               what scanning eyes pick up first. Gold is used nowhere else on the
               page. */}
           {trial && (
-            <div className="-mx-7 -mt-7 mb-6 flex items-center justify-center gap-2 rounded-t-card bg-gold px-7 py-3 text-[14px] font-bold text-ink-950">
+            <div className="-mx-7 -mt-7 mb-6 flex items-center justify-center gap-2 rounded-t-card bg-gold px-7 py-3 text-base font-bold text-ink-950">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                 <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
               </svg>
@@ -278,8 +279,8 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             </div>
           )}
           <div className="flex items-baseline justify-between gap-3">
-            <span className="font-display text-[20px] font-bold text-white">{t('landing.prProName')}</span>
-            <span className="text-[12px] text-white/85">{t('landing.prProTag')}</span>
+            <span className="font-display text-xl font-bold text-white">{t('landing.prProName')}</span>
+            <span className="text-xs text-white/85">{t('landing.prProTag')}</span>
           </div>
           {/* 价格位是定价卡上眼睛落点的第一站——试用开着时它必须说 $0，
               而不是让 $49 继续当主角、旁边贴个补丁。原价降级成一行划掉的
@@ -296,21 +297,21 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
             <div className="mt-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="num text-[2.5rem] font-semibold leading-none text-white">$0</span>
               {monthlyPrice != null && (
-                <span className="text-[13px] text-white/70 line-through">{t('landing.prTrialList', { price: monthlyPrice })}</span>
+                <span className="text-sm text-white/70 line-through">{t('landing.prTrialList', { price: monthlyPrice })}</span>
               )}
             </div>
           ) : (
             <div className="mt-5 flex items-baseline gap-2">
               <span className="num text-[2.5rem] font-semibold leading-none text-white">
-                {monthlyPrice != null ? `$${monthlyPrice}` : '—'}
+                {monthlyPrice != null ? `$${monthlyPrice}` : EMPTY}
               </span>
-              <span className="text-[13px] text-white/85">/{t('landing.prPerMonth')}</span>
+              <span className="text-sm text-white/85">/{t('landing.prPerMonth')}</span>
             </div>
           )}
 
           <ul className="mt-8 grid gap-3.5 border-t border-[rgba(146,132,255,0.22)] pt-7 sm:grid-cols-2 sm:gap-x-8">
             {proFeatures.map((k) => (
-              <li key={k} className="text-[13px] leading-relaxed text-white/85">
+              <li key={k} className="text-sm leading-relaxed text-white/85">
                 {t(`landing.${k}`)}
               </li>
             ))}
@@ -320,7 +321,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
               primary action goes back to the site-wide solid violet button. */}
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn mt-8 h-11 w-full bg-[var(--purple)] text-[13px] font-medium text-white hover:bg-[var(--purple-vivid)]"
+            className="btn mt-8 h-11 w-full bg-[var(--purple)] text-sm font-medium text-white hover:bg-[var(--purple-vivid)]"
           >
             {trial
               ? inviteDays
@@ -331,7 +332,7 @@ function Pricing({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavigat
         </div>
       </div>
 
-      <p className="reveal mt-6 text-[12px] leading-relaxed text-neutral-500">{t('landing.prNote')}</p>
+      <p className="reveal mt-6 text-xs leading-relaxed text-neutral-500">{t('landing.prNote')}</p>
     </section>
   )
 }
@@ -347,17 +348,17 @@ function ClosingCta({ t, navigate }: { t: T; navigate: ReturnType<typeof useNavi
       <div className="reveal grid grid-cols-1 items-end gap-10 lg:grid-cols-12">
         <div className="lg:col-span-7">
           <h2 className="font-display-xl fs-fluid [--fs-min:2rem] [--fs-vw:4.4vw] [--fs-max:3.25rem] text-white">{t('landing.ctaTitle')}</h2>
-          <p className="mt-5 max-w-[46ch] text-[15px] leading-relaxed text-neutral-400">{t('landing.ctaSubtitle')}</p>
+          <p className="mt-5 max-w-[46ch] text-base leading-relaxed text-neutral-400">{t('landing.ctaSubtitle')}</p>
         </div>
         <div className="lg:col-span-4 lg:col-start-9">
           <button
             onClick={() => navigate('/login?mode=register')}
-            className="btn btn-primary relative h-12 w-full px-8 text-[15px]"
+            className="btn btn-primary relative h-12 w-full px-8 text-base"
           >
             {t('landing.ctaButton')}
             <FestivalTopper kind="button" />
           </button>
-          <p className="mt-3 text-[12px] text-neutral-500">{t('landing.ctaNote')}</p>
+          <p className="mt-3 text-xs text-neutral-500">{t('landing.ctaNote')}</p>
         </div>
       </div>
     </section>
@@ -381,9 +382,9 @@ function Foot({ t }: { t: T }) {
         <div className="col-span-2 md:col-span-4">
           <div className="flex items-center gap-2.5">
             <Logo size={28} />
-            <span className="font-display text-[15px] font-bold tracking-tight text-white">Signal Lab</span>
+            <span className="font-display text-base font-bold tracking-tight text-white">Signal Lab</span>
           </div>
-          <p className="mt-3 text-[12px] text-neutral-500">by PRISMX</p>
+          <p className="mt-3 text-xs text-neutral-500">by PRISMX</p>
           {/* 社交入口放在品牌栏下方，不进上面的导航区：这几个链接是把人带出站的，
               而页脚导航（#pricing / #faq）承担的是最后一次把人拉回转化路径。
               两者挨着会互相稀释。一个都没配时组件自己不渲染。
@@ -398,7 +399,7 @@ function Foot({ t }: { t: T }) {
           <ul className="space-y-0.5">
             {links.map((l) => (
               <li key={l.h}>
-                <a href={l.h} className="block py-2.5 text-[13px] text-neutral-400 transition-colors hover:text-white">
+                <a href={l.h} className="block py-2.5 text-sm text-neutral-400 transition-colors hover:text-white">
                   {t(`landing.${l.k}`)}
                 </a>
               </li>
@@ -409,13 +410,13 @@ function Foot({ t }: { t: T }) {
         {/* 条款与政策：<Link> 而不是 <a href>，SPA 内路由不触发整页刷新。
             Terms via <Link>, not <a href>: same-SPA routes, no full reload. */}
         <div className="md:col-span-2">
-          <p className="text-[12px] text-neutral-500">{t('landing.footerLegal')}</p>
+          <p className="text-xs text-neutral-500">{t('landing.footerLegal')}</p>
           <ul className="mt-2.5 space-y-0.5">
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <li key={d}>
                 <Link
                   to={localePath(lang, `/${d}`)}
-                  className="block py-2.5 text-[13px] text-neutral-400 transition-colors hover:text-white"
+                  className="block py-2.5 text-sm text-neutral-400 transition-colors hover:text-white"
                 >
                   {t(`legal.${d}.title`)}
                 </Link>
@@ -428,11 +429,11 @@ function Foot({ t }: { t: T }) {
             Gated by SUPPORT_EMAIL; empty hides the column (see config/site.ts). */}
         {SUPPORT_EMAIL && (
           <div className="col-span-2 md:col-span-3">
-            <p className="text-[12px] text-neutral-500">{t('landing.footerSupport')}</p>
-            <p className="mt-4 text-[13px] leading-relaxed text-neutral-500">{t('landing.footerSupportBody')}</p>
+            <p className="text-xs text-neutral-500">{t('landing.footerSupport')}</p>
+            <p className="mt-4 text-sm leading-relaxed text-neutral-500">{t('landing.footerSupportBody')}</p>
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
-              className="mt-1 inline-block py-2 text-[13px] text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
+              className="mt-1 inline-block py-2 text-sm text-prism-400 underline underline-offset-4 transition-colors hover:text-prism-300"
             >
               {SUPPORT_EMAIL}
             </a>
@@ -441,8 +442,8 @@ function Foot({ t }: { t: T }) {
       </div>
 
       <div className={`${SHELL} border-t border-white/[0.07] py-8`}>
-        <p className="max-w-[92ch] text-[12px] leading-relaxed text-neutral-500">{t('landing.footerRisk')}</p>
-        <p className="mt-5 text-[12px] text-neutral-500">
+        <p className="max-w-[92ch] text-xs leading-relaxed text-neutral-500">{t('landing.footerRisk')}</p>
+        <p className="mt-5 text-xs text-neutral-500">
           © {new Date().getFullYear()} PRISMX · {t('landing.footerRights')}
         </p>
       </div>
@@ -514,7 +515,7 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
 
       {/* ── 进阶：成就页陈列台 / climb: the achievements stage ── */}
       <div className="ach reveal mt-12">
-        <h3 className="mb-4 text-[13px] font-semibold text-neutral-400">{t('landing.ggClimb')}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-neutral-400">{t('landing.ggClimb')}</h3>
         <div className="ach-stage">
           {/* 节日角饰挂在陈列台卡片的右上角里：卡片的圆角和上沿是真实的边，丝线、松枝、
               彩带都从这条边上出来（卡片裁掉超出的部分）。分区本身的上沿看不见，挂在那里
@@ -565,7 +566,7 @@ function GrowthStage({ t, navigate }: { t: T; navigate: ReturnType<typeof useNav
 
       {/* ── 加冕：比赛页转播台 / crown: the competitions broadcast desk ── */}
       <div className="reveal mt-16">
-        <h3 className="mb-4 text-[13px] font-semibold text-neutral-400">{t('landing.ggCrown')}</h3>
+        <h3 className="mb-4 text-sm font-semibold text-neutral-400">{t('landing.ggCrown')}</h3>
         <button type="button" onClick={() => navigate('/login?mode=register')} className="cmp-hero">
           <span className="cmp-ghost" aria-hidden>LIVE</span>
           <span className="cmp-bug">

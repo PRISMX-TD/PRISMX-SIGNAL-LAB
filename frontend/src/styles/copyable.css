@@ -4,12 +4,28 @@
   border-radius: 4px;
   text-decoration: underline dotted transparent;
   text-underline-offset: 3px;
-  transition: text-decoration-color 0.15s, background-color 0.15s;
+  transition: text-decoration-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
-.cpy:hover,
-.cpy:focus-visible {
-  text-decoration-color: rgb(var(--purple-rgb, 139 92 246) / 0.8);
-  background-color: rgb(255 255 255 / 0.04);
+/* 悬停单独一条并加门槛：以前和 :focus-visible 写在同一个列表里，旧内核不认
+   :focus-visible 就把整条丢掉，连悬停也没了；触屏上 hover 会粘住，只给鼠标。
+   Hover gets its own rule, gated to mice: it used to share a list with :focus-visible,
+   so old engines dropped both, and on touch a tapped hover sticks. */
+@media (hover: hover) and (pointer: fine) {
+  .cpy:hover {
+    text-decoration-color: rgb(var(--purple-rgb, 139 92 246) / 0.8);
+    background-color: rgb(255 255 255 / 0.04);
+  }
+}
+/* 键盘焦点用真正的紫色轮廓：4% 底色加虚线下划线太弱，看不出焦点停在哪。
+   :focus 画、:focus:not(:focus-visible) 撤，鼠标点击不出环；旧内核只丢第二条，环照样有。
+   Keyboard focus gets a real violet outline; a 4% tint and a dotted underline were too
+   faint to find. :focus draws it, :focus:not(:focus-visible) removes it for clicks; old
+   engines drop only the second rule. */
+.cpy:focus {
+  outline: 2px solid var(--purple-hi);
+  outline-offset: 2px;
+}
+.cpy:focus:not(:focus-visible) {
   outline: none;
 }
 .cpy:active {
@@ -18,27 +34,32 @@
 
 .cpy-tip {
   position: fixed;
-  z-index: 120;
+  z-index: var(--z-tip);
   transform: translate(-50%, calc(-100% - 6px));
   padding: 3px 9px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.5;
   white-space: nowrap;
-  color: #fff;
+  color: var(--text-strong);
   background: rgb(var(--purple-rgb, 139 92 246));
   box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
   pointer-events: none;
-  animation: cpy-tip 1.2s ease forwards;
+  animation: cpy-tip 1.2s var(--ease-out) forwards;
 }
 .cpy-tip.is-err {
   background: var(--down, #ef4444);
 }
+/* 0→12% 进场（约 144ms，ease-out）；90→100% 退场（约 120ms，ease-in）。退场比进场短，
+   提示走的时候不拖。关键帧上的 animation-timing-function 作用于从这一帧到下一帧那一段。
+   0→12% enters (~144ms, ease-out); 90→100% exits (~120ms, ease-in), shorter than the
+   enter so the tip doesn't linger. A keyframe's timing function governs the segment
+   from that keyframe to the next. */
 @keyframes cpy-tip {
   0% { opacity: 0; transform: translate(-50%, calc(-100% + 2px)); }
   12% { opacity: 1; transform: translate(-50%, calc(-100% - 6px)); }
-  80% { opacity: 1; }
+  90% { opacity: 1; transform: translate(-50%, calc(-100% - 6px)); animation-timing-function: var(--ease-in); }
   100% { opacity: 0; transform: translate(-50%, calc(-100% - 10px)); }
 }
 @media (prefers-reduced-motion: reduce) {

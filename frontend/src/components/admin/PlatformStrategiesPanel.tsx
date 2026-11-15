@@ -232,7 +232,7 @@ export default function PlatformStrategiesPanel() {
         >
           {saving ? '...' : t('common.save')}
         </button>
-        {dirty && <span className="text-xs text-amber-300">{t('admin.strategyGuide.unsaved')}</span>}
+        {dirty && <span className="text-xs text-warn">{t('admin.strategyGuide.unsaved')}</span>}
       </div>
 
       {items.length === 0 ? (
@@ -327,8 +327,8 @@ export default function PlatformStrategiesPanel() {
                       content, so an admin can move it into the body and clear it;
                       it is no longer an entry point for new content. */}
                   {(s.detailZh || s.detailEn) && (
-                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-                      <p className="mb-2 text-xs text-amber-200/80">
+                    <div className="rounded-lg border border-warn/30 bg-warn/5 p-3">
+                      <p className="mb-2 text-xs text-warn/80">
                         {t('admin.strategyGuide.legacyDetailHint')}
                       </p>
                       <div className="grid gap-3 sm:grid-cols-2">

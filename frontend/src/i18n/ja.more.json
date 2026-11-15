@@ -12,7 +12,8 @@
     "buy": "BUY",
     "sell": "SELL",
     "noChange": "変更なし",
-    "error": "操作に失敗しました。もう一度お試しください"
+    "error": "操作に失敗しました。もう一度お試しください",
+    "processing": "処理中…"
   },
   "auth": {
     "completeTitle": "プロフィールの登録",
@@ -60,12 +61,12 @@
     "resultStale": "追跡が中断されたため勝率の集計対象外",
     "resultPending": "結果待ち",
     "proSawFirst": "PROユーザーは10分早く受信しました",
-    "trade": "取引",
+    "trade": "注文する",
     "filterSymbol": "銘柄",
     "sortBy": "並び替え",
     "all": "すべて",
     "focus": {
-      "backToDashboard": "ダッシュボードに戻る",
+      "backToDashboard": "ホームに戻る",
       "prev": "前のシグナル",
       "next": "次のシグナル",
       "heading": "マルチタイムフレームのトレンド判断",
@@ -93,8 +94,6 @@
       "ask": "Buy"
     },
     "quotes": {
-      "bid": "Bid",
-      "ask": "Ask",
       "spread": "スプレッド"
     },
     "symbolNames": {
@@ -112,7 +111,7 @@
       "latest": "新着順",
       "expiry": "期限順"
     },
-    "indicatorNone": "インジケーターなし",
+    "indicatorNone": "戦略なし",
     "colEntry": "エントリー",
     "colSl": "SL",
     "colTp": "TP",
@@ -153,12 +152,15 @@
   },
   "order": {
     "volume": "数量（ロット）",
+    "volumeInvalid": "数量が無効です：この銘柄の最小ロット以上の数値を入力してください",
+    "volumeDec": "数量を減らす",
+    "volumeInc": "数量を増やす",
     "account": "口座",
     "estMargin": "必要証拠金（目安）",
     "currentPrice": "現在値",
     "refPrice": "参考価格",
     "slowBroker": "ブローカーの応答が遅れています。注文を再送しないでください",
-    "slowBrokerLeave": "ブローカーの応答が遅れています。注文を再送しないでください。閉じて、後で「注文」ページで結果を確認できます",
+    "slowBrokerLeave": "ブローカーの応答が遅れています。注文を再送しないでください。閉じて、後で「取引」ページで結果を確認できます",
     "sizeMode": "数量指定",
     "sizeModeLots": "ロット",
     "sizeModeRisk": "リスク %",
@@ -177,9 +179,10 @@
     "riskNote": "MT5ブローカーの価格で約定します。5分以内に執行されない場合は自動キャンセルされます。シグナルツールであり、投資助言ではありません。",
     "submitting": "送信中…",
     "submitted": "送信しました。約定確認を待っています…",
+    "confirmAria": "注文を確定：{{side}} {{symbol}} {{volume}} ロット",
     "filled": "約定 @ {{price}}",
     "rejected": "注文が拒否されました：{{msg}}",
-    "ackTimeout": "まだ応答がありません。最新の状況は注文ページでご確認ください",
+    "ackTimeout": "まだ応答がありません。最新の状況は「取引」ページでご確認ください",
     "timeoutNote": "5分以内に執行されない場合（Bridgeがオフラインなど）、注文は自動でキャンセルされ、後から古い価格で約定することはありません。当プラットフォームはシグナルツールのみを提供しており、投資助言ではありません。お取引はご自身の判断と責任で行ってください。",
     "noBridge": "MT5がまだ連携されていません。「MT5口座を連携」でログインIDとパスワードを入力してください。インストールは不要です。",
     "allOffline": "連携済みのMT5口座がすべてオフラインです。「MT5口座を連携」ページで状態を確認してから再試行してください。",
@@ -203,7 +206,7 @@
   },
   "account": {
     "title": "アカウント",
-    "loadError": "アカウント情報の読み込みに失敗しました",
+    "loadError": "アカウント情報を読み込めませんでした。通信状態を確認してページを再読み込みしてください",
     "neverExpires": "無期限",
     "planTrialTag": "PRO（トライアル）",
     "balance": "残高",
@@ -233,7 +236,7 @@
     "notifWindowHint": "日付をまたぐ範囲（例：22:00〜07:00）は翌朝まで有効です。時間帯外の通知は再送されずスキップされます。タイムゾーン（この端末）：{{tz}}",
     "notifProcessing": "処理中…",
     "autoTitle": "スマートリスク管理",
-    "autoHint": "ルールはR単位で設定します（R = 新規注文時の損切り幅）。例：利益が1Rに達したら損切りを建値に移動。PRISMX経由で建てたポジションにのみ適用され、手動の取引には一切触れません。損切りなしで建てたポジションはRが定義されないため対象外です。自動で送信した指示はすべて注文ページに記録され、追跡できます。",
+    "autoHint": "ルールはR単位で設定します（R = 新規注文時の損切り幅）。例：利益が1Rに達したら損切りを建値に移動。PRISMX経由で建てたポジションにのみ適用され、手動の取引には一切触れません。損切りなしで建てたポジションはRが定義されないため対象外です。自動で送信した指示はすべて「取引」ページに記録され、追跡できます。",
     "autoUpgradeRequired": "ポジション自動管理はPRO機能です。アップグレードで利用できます",
     "autoPausedNotPro": "設定済みのポジション自動管理は現在停止中です。PROではないため、ストップロスの自動移動や部分利確は行われません。ポジションのSL/TPはご自身で管理してください。PROにアップグレードすると保存済みの設定で自動的に再開します。",
     "autoEnable": "ポジション自動管理を有効にする",
@@ -245,7 +248,10 @@
     "autoPtpFraction": "決済",
     "autoScopeNote": "損切りは有利な方向にのみ移動し、リスクが広がることはありません。指示はBridge経由でお使いのMT5で執行され、Bridgeがオフラインの間は何も実行されません。",
     "autoSaved": "自動管理の設定を保存しました",
-    "autoSaveError": "保存に失敗しました",
+    "autoSaveError": "ルールを保存できませんでした。通信状態を確認して、もう一度お試しください",
+    "autoSaveChanges": "変更を保存",
+    "autoSaving": "保存中…",
+    "autoUnsaved": "未保存の変更があります",
     "notifDiagTitle": "プッシュ通知の診断",
     "notifDiagEnv": "環境",
     "notifDiagStandalone": "スタンドアロンアプリとして起動",
@@ -301,6 +307,7 @@
     "footer": "UTC+8 · データはプラットフォーム配信によるもので、参考情報です",
     "empty": "チャートデータを読み込み中、または一時的に利用できません…",
     "stale": "データ遅延",
+    "quotesDown": "レート切断中",
     "openPositions": "ポジション",
     "sheetTicket": "クイック注文",
     "tools": "描画ツール",
@@ -482,6 +489,7 @@
       "solid": "実線",
       "dashed": "破線",
       "dotted": "点線",
+      "lineWidth": "線の太さ {{w}}px",
       "hint": "ツールを選んでチャートに描画します。カーソルモードでは描画の選択・移動・削除ができます。マグネット / ロック / 元に戻すに対応。"
     },
     "posmark": {
@@ -499,8 +507,8 @@
       "exit": "全画面表示を終了"
     },
     "symhead": {
-      "bid": "Bid",
-      "ask": "Ask",
+      "bid": "Sell",
+      "ask": "Buy",
       "spread": "スプレッド",
       "high": "高値",
       "low": "安値",
@@ -533,15 +541,15 @@
       "offline": "口座がオフラインです。先にBridgeを接続してください",
       "submitting": "送信中…",
       "place": "{{side}} · {{volume}} ロット",
-      "invalidVolume": "数量が無効です",
+      "invalidVolume": "数量が無効です：この銘柄の最小ロット以上の数値を入力してください",
       "submitted": "送信しました。確認待ち",
-      "placeFailed": "注文に失敗しました",
+      "placeFailed": "注文に失敗しました：ブローカーから理由が返されませんでした。「ポジション」「注文」タブで約定していないことを確認してから、もう一度お試しください",
       "points": "ポイント",
       "spreadUnit": "スプレッド",
       "waitingFill": "ブローカーの応答待ち",
       "filledAt": "約定 @ {{price}}",
       "accepted": "受付済み。Bridgeでの執行待ち",
-      "footnote": "成行注文はPRISMX Bridge経由でMT5に送信され、結果は注文ページに記録されます。",
+      "footnote": "成行注文はPRISMX Bridge経由でMT5に送信され、結果は「取引」ページに記録されます。",
       "entryMode": "執行方法",
       "entry": {
         "MARKET": "成行",
@@ -573,6 +581,8 @@
       "orders": "注文",
       "noPositions": "保有ポジションはありません",
       "noOrders": "待機中の注文はありません",
+      "noPositionsHint": "注文チケットから注文すると、約定したポジションがここに表示されます。",
+      "noOrdersHint": "注文チケットの執行方法で「指値」か「逆指値」を選ぶと予約注文を出せます。",
       "colEntry": "約定価格",
       "colCurrent": "現在値",
       "colSl": "SL",
@@ -591,12 +601,12 @@
       "slTpWrong": "位置が逆です：買いの場合、SLは現在値より下、TPは上に設定してください",
       "closeSent": "決済注文を送信しました",
       "partialCloseSent": "一部決済注文を送信しました",
-      "closeFailed": "決済に失敗しました",
+      "closeFailed": "決済に失敗しました：ブローカーから理由が返されませんでした。ポジションが一覧に残っているか確認してから、もう一度お試しください",
       "modifySent": "SL/TP変更を送信しました",
-      "modifyFailed": "変更に失敗しました",
+      "modifyFailed": "変更に失敗しました：ブローカーから理由が返されませんでした。価格を確認してから、もう一度お試しください",
       "cancelSent": "注文を取消しました",
-      "cancelFailed": "取消に失敗しました",
-      "confirmCloseTitle": "全決済",
+      "cancelFailed": "取消に失敗しました：ブローカーから理由が返されませんでした。注文が一覧に残っているか確認してから、もう一度お試しください",
+      "confirmCloseTitle": "このポジションを決済しますか？",
       "closing": "決済中",
       "closed": "決済 @ {{price}}",
       "partialClosed": "{{lots}} ロット決済 @ {{price}}",
@@ -734,21 +744,29 @@
     "am": {
       "be": {
         "pre": "含み益が",
-        "post": "Rに達したら、損切りを建値に移動"
+        "post": "Rに達したら、損切りを建値に移動",
+        "trigger": "建値ストップの発動ライン（R）"
       },
       "trail": {
         "pre": "利益が",
         "mid": "Rに達したら開始し、損切りを",
-        "post": "Rの幅で追従"
+        "post": "Rの幅で追従",
+        "trigger": "トレーリングストップの開始ライン（R）",
+        "distance": "トレーリングストップの幅（R）"
       },
       "ptp": {
         "pre": "利益が",
         "mid": "Rに達したら",
-        "post": "%を利確し、残りはトレーリングストップで保有"
+        "post": "%を利確し、残りはトレーリングストップで保有",
+        "trigger": "部分利確の発動ライン（R）",
+        "fraction": "部分利確の割合（%）"
       }
     },
     "autoManageScopeHint": "この設定は連携済みのすべてのMT5口座に適用され、上で選択した口座によって変わることはありません。",
     "noPositions": "保有ポジションはありません",
+    "noPositionsHint": "シグナルや手動の注文が約定すると、ポジションがここにリアルタイムで表示され、決済や損切り・利確の変更ができます。",
+    "goSignals": "シグナルへ",
+    "goCharts": "チャートへ",
     "summary": {
       "positions": "ポジション",
       "totalPnl": "合計損益"
@@ -763,6 +781,11 @@
     "pageInfo": "{{page}} / {{totalPages}} ページ · 全{{total}}件",
     "cancelSent": "取消リクエストを送信しました",
     "cancelling": "取消中…",
+    "cancelConfirm": {
+      "title": "この注文を取り消しますか？",
+      "confirm": "注文を取消",
+      "keep": "残す"
+    },
     "proExclusive": "PRO限定",
     "tab": {
       "positions": "ポジション",
@@ -779,19 +802,19 @@
     "current": "現在値",
     "sl": "SL",
     "tp": "TP",
-    "closeAll": "全決済",
+    "closeAll": "決済",
     "partialClose": "一部決済",
     "editSlTp": "SL/TPを変更",
-    "closeVolume": "決済数量",
+    "closeVolume": "決済数量（最大 {{max}}）",
     "confirmClose": "決済を確定",
     "confirmModify": "確定",
     "closeSent": "決済指示を送信しました。結果を待っています…",
     "modifySent": "変更指示を送信しました。結果を待っています…",
-    "invalidVolume": "決済数量が無効です",
+    "invalidVolume": "決済数量が無効です：最小ロットから保有数量までの範囲で、この銘柄のロット刻みに合わせて入力してください",
     "clearHint": "0 = 解除",
-    "closeAllConfirmTitle": "全決済の確認",
+    "closeAllConfirmTitle": "このポジションを決済しますか？",
     "closed": "決済 @ {{price}}",
-    "closeFailed": "決済に失敗しました",
+    "closeFailed": "決済に失敗しました：ブローカーから理由が返されませんでした。ポジションが一覧に残っているか確認してから、もう一度お試しください",
     "modified": "SL/TPを更新しました",
     "closeAllConfirm": "{{symbol}}の{{volume}}ロットをすべて決済しますか？この操作は元に戻せません。",
     "lotStepHint": "{{step}}ロット単位、最小{{min}}"
@@ -825,6 +848,7 @@
     "generateToken": "トークンを生成",
     "tokenJustOnce": "今すぐコピーして保管してください。ページを更新・移動すると再表示できません。",
     "tokenSavedClose": "保存したので閉じる",
+    "tokenCopyFailed": "コピーに失敗しました。トークンを選択して手動でコピーしてください",
     "resetToken": "トークンを再発行",
     "resetConfirm": "再発行すると古いトークンは直ちに無効になります。起動中のBridgeアプリは新しいトークンに更新しないと接続できなくなります。再発行しますか？",
     "suffixTitle": "銘柄サフィックス",
@@ -906,10 +930,12 @@
     "save20": "20%お得",
     "perMonth": "月あたり約${{price}}",
     "payButton": "暗号資産で{{price}}を支払う",
+    "payCreating": "支払い情報を作成中…",
     "alreadyPro": "すでにPRO会員です",
     "trialTitle": "PRO無料トライアル",
     "trialDesc": "PROの全機能を{{n}}日間無料でお試しいただけます。支払いは不要で、終了後は自動的にFREEに戻り、料金が発生することは一切ありません。トライアルは1アカウントにつき1回限りです。",
     "trialCta": "無料トライアルを開始",
+    "trialClaiming": "トライアルを開始しています…",
     "trialStarted": "トライアルを開始しました。PROは{{date}}まで有効です",
     "trialActiveNotice": "現在PROトライアル中です（{{date}}まで）。今すぐ購読すると、有料期間はお支払い日から開始します。",
     "payTitle": "送金",
@@ -924,7 +950,7 @@
     "paymentRefunded": "この注文は返金済みのため、メンバーシップは付与されていません。ご不明な点は注文IDを添えてサポートまでお問い合わせください。",
     "successTitle": "PROにアップグレードしました",
     "successDesc": "PRO会員になりました。すべての機能が利用可能です。",
-    "goDashboard": "ダッシュボードへ",
+    "goDashboard": "ホームへ",
     "errorTitle": "問題が発生しました",
     "retry": "再試行",
     "nav": "アップグレード",
@@ -1258,10 +1284,11 @@
     "disable": "無効化",
     "delete": "削除",
     "deleteConfirm": "この戦略を削除しますか？すでに発生したシグナルには影響しません。",
+    "toggleFailed": "「{{name}}」を切り替えられませんでした。元の状態に戻しました。",
     "mySignals": "マイ戦略のシグナル",
     "noSignals": "まだシグナルはありません。戦略を有効化すると、条件に合ったシグナルがここに自動表示されます",
     "clearSignals": "クリア",
-    "clearSignalsConfirm": "発生したシグナルの履歴をすべてクリアしますか？戦略の有効・無効には影響しません。ダッシュボードとシグナルページの表示もクリアされます。",
+    "clearSignalsConfirm": "発生したシグナルの履歴をすべてクリアしますか？戦略の有効・無効には影響しません。ホームとシグナルページの表示もクリアされます。",
     "oneClickOrder": "ワンクリック注文",
     "signalExpired": "期限切れ",
     "signalTriggeredAt": "発生日時",
@@ -1479,6 +1506,7 @@
       "closed": "完了"
     },
     "reply": "返信",
+    "sending": "送信中…",
     "replyPlaceholder": "返信を入力…",
     "reopen": "チケットを再開",
     "closedWarning": "このチケットは完了しています。返信すると再開されます。",
@@ -1653,7 +1681,7 @@
     },
     "stage": {
       "backToCurrent": "現在のステージに戻る",
-      "startPoint": "登録時に付与 — このレベルにステージはありません",
+      "startPoint": "登録時に付与：このレベルにステージはありません",
       "vault": "バッジ保管庫",
       "vaultHint": "ブロンズ・シルバー・ゴールドの段階バッジ8種・特別バッジと期間限定バッジは別枠・未獲得のバッジは輪郭と条件を表示",
       "nth": "ステージ{{n}}",
@@ -1705,7 +1733,7 @@
     "atTop": "現在1位です",
     "progressCount": "今期の全決済 {{s}} / {{n}}回",
     "progressBaselineOk": "基準額{{usd}} USDは条件をクリアしています",
-    "progressBaselineLow": "基準額{{usd}} USD — 条件まであと{{gap}} USD",
+    "progressBaselineLow": "基準額{{usd}} USD：条件まであと{{gap}} USD",
     "progressNote": "基準スナップショット以降に決済されたポジションのみ集計されます。今期の基準は{{time}}に取得しました。",
     "emptyHeading": "今期はまだ誰もランクインしていません",
     "emptyBody": "基準は期間開始時（{{time}}）に取得され、それ以降に決済されたポジションのみ集計されます。取引{{n}}回以上かつ基準額{{usd}} USDを満たした口座は、次回更新時に表示されます。",
@@ -2204,8 +2232,8 @@
           "sub": "MT5 を接続すると、ポジション・待機注文・約定がリアルタイムで同期されます。"
         },
         "growth": {
-          "title": "登録して成長システムを解除",
-          "sub": "ランク・バッジ・ランキング・トレード大会 — すべての実取引が記録されます。"
+          "title": "登録してアリーナのロックを解除",
+          "sub": "ランク・バッジ・ランキング・トレード大会。すべての実取引が記録されます。"
         },
         "analysis": {
           "title": "登録して戦略分析をすべて表示",
@@ -2228,7 +2256,7 @@
         "sub": "すべてのシグナルのエントリー・損切り・利確と最終判定を確認できます。"
       },
       "exit": {
-        "title": "ちょっと待って — 今 {{n}} 件のシグナルが進行中です",
+        "title": "ちょっと待って、今 {{n}} 件のシグナルが進行中です",
         "sub": "登録はわずか30秒。次のシグナルを見逃さないでください。",
         "next": "で次のシグナルが失効"
       },
@@ -2311,6 +2339,7 @@
       "sendHint": "Ctrl + Enter で送信",
       "internalHint": "社内メモはサポートと管理者のみ閲覧でき、ユーザーには通知されません。",
       "internalPlaceholder": "同僚向けのメモ（ユーザーには非表示）",
+      "savingNote": "保存中…",
       "saveNote": "メモを保存"
     },
     "followUps": {

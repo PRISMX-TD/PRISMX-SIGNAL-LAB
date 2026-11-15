@@ -44,6 +44,7 @@ import CompClock from '../components/competition/CompClockView'
 import CompFacts from '../components/competition/CompFacts'
 import CompetitionDesc from '../components/competition/CompetitionDesc'
 import { statusTagKey } from '../components/competition/compClock'
+import { EMPTY } from '../utils/format'
 
 const POLL_MS = 60_000
 const refOrUndef = () => readRef() ?? undefined
@@ -166,18 +167,18 @@ function PublicFrame({ lang, onLang, compId, children }: {
   }
   return (
     <div className="min-h-screen bg-ink-950 text-neutral-200">
-      <header className="fixed inset-x-0 top-0 z-50 border-b border-white/[0.07] bg-ink-950/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
+      <header className="fixed inset-x-0 top-0 z-nav border-b border-white/[0.07] bg-ink-950/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-[1100px] items-center gap-3 px-4 sm:px-6">
           <Link to="/" className="flex min-w-0 items-center gap-2.5">
             <Logo size={28} />
-            <span className="hidden font-display text-[15px] font-bold tracking-tight text-white sm:inline">Signal Lab</span>
+            <span className="hidden font-display text-base font-bold tracking-tight text-white sm:inline">Signal Lab</span>
           </Link>
           <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-3">
             <LanguageMenu value={lang} onChoose={onLang} />
-            <Link to="/login" className="px-1.5 text-[13px] text-neutral-400 transition-colors hover:text-white">
+            <Link to="/login" className="px-1.5 text-sm text-neutral-400 transition-colors hover:text-white">
               {t('landing.signIn')}
             </Link>
-            <Link to="/login?mode=register" onClick={onRegister} className="btn btn-primary h-9 px-3.5 text-[13px]">
+            <Link to="/login?mode=register" onClick={onRegister} className="btn btn-primary h-9 px-3.5 text-sm">
               {t('competition.pub.signUp')}
             </Link>
           </div>
@@ -188,7 +189,7 @@ function PublicFrame({ lang, onLang, compId, children }: {
         {children}
       </main>
       <footer className="border-t border-white/[0.07]">
-        <div className="mx-auto flex max-w-[1100px] flex-col gap-3 px-4 py-8 text-[12px] text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <div className="mx-auto flex max-w-[1100px] flex-col gap-3 px-4 py-8 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <nav className="flex flex-wrap gap-x-5 gap-y-2">
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <Link key={d} to={localePath(legal, `/${d}`)} className="transition-colors hover:text-white">
@@ -383,7 +384,7 @@ function PublicCta({ c, nowMs, t }: { c: PublicCompetition; nowMs: number; t: TF
 
   return (
     <div className="cmp-enroll pcp-cta">
-      {cta.kind === 'notOpen' && <p>{t('competition.pub.notOpen', { time: cta.opensAt ? fmtDate(cta.opensAt) : '—' })}</p>}
+      {cta.kind === 'notOpen' && <p>{t('competition.pub.notOpen', { time: cta.opensAt ? fmtDate(cta.opensAt) : EMPTY })}</p>}
       <p className="pcp-steps-h">{t('competition.pub.stepsTitle')}</p>
       <ol className="pcp-steps">
         <li>{t('competition.pub.step1')}</li>

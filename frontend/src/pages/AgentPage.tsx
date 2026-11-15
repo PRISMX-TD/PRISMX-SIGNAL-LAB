@@ -74,7 +74,9 @@ import {
 import { IconCheck, IconChevron, IconCopy, IconInfo } from '../components/agent/agentIcons'
 import { agentCompetitionUrl, inviteUrl } from '../utils/promoLinkUrl'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
+import { appTitle } from '../utils/routeTitle'
 import type { AgentLink, AgentLinkUser, AgentLinkUsers, AgentTeam } from '../api/types'
+import { onRovingFocusKeyDown } from '../utils/rovingTabs'
 import '../styles/agent.css'
 
 const PAGE_SIZE = 50
@@ -84,7 +86,7 @@ const TABS: Tab[] = ['links', 'team', 'customers']
 
 export default function AgentPage() {
   const { t } = useTranslation()
-  useDocumentTitle(t('agent.title'))
+  useDocumentTitle(appTitle(t('agent.title')))
 
   const [links, setLinks] = useState<AgentLink[] | null>(null)
   // 我在代理树上的位置（rev 47）：决定能不能写、页签里的团队与客户。加载失败就当只读，
@@ -262,7 +264,7 @@ export default function AgentPage() {
           its tab's content: links; downline ambassadors; all customers = team customers
           plus the downline ambassadors themselves (exactly who the list holds). */}
       {team?.isAgent && (
-        <div className="agt-tabs" role="tablist">
+        <div className="agt-tabs" role="tablist" onKeyDown={onRovingFocusKeyDown}>
           {TABS.map((k, i) => {
             const self = team.nodes.find((n) => n.isSelf)
             const downline = Math.max(0, team.nodes.length - 1)
@@ -274,6 +276,7 @@ export default function AgentPage() {
                 type="button"
                 role="tab"
                 aria-selected={tab === k}
+                tabIndex={tab === k ? 0 : -1}
                 className={`agt-tab${tab === k ? ' is-on' : ''}`}
                 onClick={() => switchTab(k)}
               >
@@ -371,7 +374,7 @@ export default function AgentPage() {
                       }
                     }}
                     className={`agt-link${pickable ? ' is-pickable' : ''}${active ? ' is-active' : ''}`}
-                    style={{ '--i': i } as React.CSSProperties}
+                    style={{ '--i': Math.min(i, 5) } as React.CSSProperties}
                   >
                     <div className="agt-link-body">
                       <div className="agt-link-main">

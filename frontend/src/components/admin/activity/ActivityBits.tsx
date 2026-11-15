@@ -14,14 +14,14 @@ import { bjClock, bjFull } from './time'
 // One colour per category, kept clear of red / green, which belong to P/L and problems.
 export const CAT_DOT: Record<ActivityCat, string> = {
   account: 'bg-sky-400',
-  mt5: 'bg-amber-300',
+  mt5: 'bg-warn',
   trade: 'bg-prism-400',
   admin: 'bg-neutral-400',
 }
 
 const CHIP_CLS: Record<Chip['tone'], string> = {
   bad: 'bg-down/15 text-down',
-  warn: 'bg-amber-400/15 text-amber-300',
+  warn: 'bg-warn/15 text-warn',
   info: 'bg-sky-400/15 text-sky-300',
   muted: 'bg-white/5 text-neutral-400',
 }
@@ -59,6 +59,16 @@ export function ChipList({ chips, className = '' }: { chips: Chip[]; className?:
       ))}
     </span>
   )
+}
+
+// 异常行一定带一个字：行底色已经染红，但颜色不能单独表达状态（色弱、灰度截图里都看不出来）。
+// 已经有「失败 / 结果未知 / 无止损 / 强平 / 授权失效」这类红、黄小标签的，不再重复加「异常」。
+// An abnormal row always carries a word: the red tint alone cannot carry the state (it is
+// lost to colour blindness and greyscale screenshots). Rows that already show a bad / warn
+// chip such as Failed, No stop loss or Stop-out do not get a second "Problem" chip.
+function withAbnormal(item: ActivityItem, chips: Chip[], label: string): Chip[] {
+  if (!item.abnormal || chips.some((c) => c.tone === 'bad' || c.tone === 'warn')) return chips
+  return [{ key: 'abnormal', label, tone: 'bad' }, ...chips]
 }
 
 export function CatDot({ cat, className = '' }: { cat: ActivityCat; className?: string }) {
@@ -123,7 +133,7 @@ export function AccountTags({ item }: { item: ActivityItem }) {
       {a.removed === true && (
         <span className="rounded bg-white/10 px-1 py-px text-xs text-neutral-300">{t('admin.log.acct.removed')}</span>
       )}
-      {a.revoked === true && <span className="rounded bg-amber-400/15 px-1 py-px text-xs text-amber-300">{t('admin.log.acct.revoked')}</span>}
+      {a.revoked === true && <span className="rounded bg-warn/15 px-1 py-px text-xs text-warn">{t('admin.log.acct.revoked')}</span>}
     </>
   )
 }
@@ -131,7 +141,7 @@ export function AccountTags({ item }: { item: ActivityItem }) {
 export function AccountCell({ item, onLogin }: { item: ActivityItem; onLogin?: (login: string) => void }) {
   const { t } = useTranslation()
   const login = item.login
-  if (!login) return <span className="text-xs text-neutral-600">—</span>
+  if (!login) return <span className="text-xs text-neutral-500">—</span>
   const removed = item.account?.removed === true
   const body = (
     <span className="flex flex-wrap items-center gap-1">
@@ -201,9 +211,9 @@ export function DesktopRow({
   return (
     <div
       onClick={() => handlers.onOpen(item)}
-      className={`${DESKTOP_GRID} cursor-pointer border-b border-white/5 px-4 py-2.5 text-sm transition hover:bg-white/[0.03] ${
-        child ? 'bg-white/[0.015]' : ''
-      } ${item.abnormal ? 'shadow-[inset_2px_0_0_rgb(var(--down-rgb)/0.7)]' : ''}`}
+      className={`${DESKTOP_GRID} cursor-pointer border-b border-white/5 px-4 py-2.5 text-sm transition ${
+        item.abnormal ? 'bg-down/5 hover:bg-down/10' : `hover:bg-white/[0.03] ${child ? 'bg-white/[0.015]' : ''}`
+      }`}
     >
       <div className="num pt-0.5 text-xs text-neutral-400" title={timeTitle(item, t)}>
         {bjClock(item.ts)}
@@ -225,7 +235,7 @@ export function DesktopRow({
             <button type="button" onClick={stop(() => handlers.onOpen(item))} className="text-left leading-relaxed text-neutral-100">
               <Sentence parts={r.parts} />
             </button>{' '}
-            <ChipList chips={chipsFor(item, t)} />
+            <ChipList chips={withAbnormal(item, chipsFor(item, t), t('admin.log.abnormalTag'))} />
             {!child && onToggle && <ExpandToggle item={item} expanded={expanded} onToggle={onToggle} />}
           </div>
         </div>
@@ -262,7 +272,7 @@ export function PhoneCard({
   if (item.login) {
     who.push(
       <span key="l" className="inline-flex flex-wrap items-center gap-1">
-        <span className={`num font-mono ${item.account?.removed ? 'text-neutral-600' : ''}`}>{item.login}</span>
+        <span className={`num font-mono ${item.account?.removed ? 'text-neutral-500' : ''}`}>{item.login}</span>
         <AccountTags item={item} />
       </span>,
     )
@@ -272,7 +282,7 @@ export function PhoneCard({
     <div
       onClick={() => handlers.onOpen(item)}
       className={`cursor-pointer border-b border-white/5 py-3 ${child ? 'ml-3 border-l border-l-white/10 pl-3 pr-3' : 'px-3'} ${
-        item.abnormal ? 'shadow-[inset_2px_0_0_rgb(var(--down-rgb)/0.7)]' : ''
+        item.abnormal ? 'bg-down/5' : ''
       }`}
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-neutral-500">
@@ -280,7 +290,7 @@ export function PhoneCard({
         <span className="num" title={timeTitle(item, t)}>{bjClock(item.ts)}</span>
         <span>·</span>
         <span>{t(`admin.log.cat.${item.cat}`)}</span>
-        <ChipList chips={chipsFor(item, t)} />
+        <ChipList chips={withAbnormal(item, chipsFor(item, t), t('admin.log.abnormalTag'))} />
       </div>
       <button type="button" onClick={stop(() => handlers.onOpen(item))} className="mt-1 block w-full text-left text-sm leading-relaxed text-neutral-100">
         <Sentence parts={r.parts} />

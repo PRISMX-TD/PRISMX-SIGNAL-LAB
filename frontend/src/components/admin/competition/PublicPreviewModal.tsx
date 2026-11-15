@@ -73,7 +73,7 @@ export default function PublicPreviewModal({ compId, onClose }: { compId: string
                 {href}
               </a>
             ) : (
-              <span className="text-amber-400">{t('admin.competitionPromo.notSet')}</span>
+              <span className="text-warn">{t('admin.competitionPromo.notSet')}</span>
             )}
           </div>
           {data.snapshotAt && (

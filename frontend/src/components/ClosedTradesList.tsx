@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 import Pager from './Pager'
 import { displaySymbol, fmtLots, fmtTime, roundLots } from '../api/utils'
 import type { ClosedTrade } from '../api/types'
+import { EMPTY } from '../utils/format'
 
 const PAGE_SIZE = 10
 
@@ -129,7 +130,7 @@ function groupPositions(trades: ClosedTrade[]): PositionRow[] {
   return rows
 }
 
-const DASH = '—'
+const DASH = EMPTY
 const money = (n: number | null | undefined): string => (n == null ? DASH : `${n > 0 ? '+' : ''}${n.toFixed(2)}`)
 const price = (n: number | null | undefined): string => (n == null ? DASH : String(n))
 const pnlClass = (n: number | null | undefined): string => (n == null ? 'text-neutral-500' : n >= 0 ? 'text-up' : 'text-down')
@@ -163,10 +164,10 @@ export default function ClosedTradesList({ trades, onShare }: Props) {
         <span>{t('orders.closed.position')} <b className="font-mono text-neutral-200">#{row.positionTicket}</b></span>
         <span>{t('orders.closed.reasonLabel')} <b className="text-neutral-200">{reasonLabel(row.reason)}</b></span>
         <span>{t('orders.closed.comment')} <b className="font-mono text-neutral-200">{row.comment ?? DASH}</b></span>
-        {!row.detailed && <span className="text-amber-400/80">{t('orders.closed.legacy')}</span>}
+        {!row.detailed && <span className="text-warn/80">{t('orders.closed.legacy')}</span>}
         {onShare && (
           <button type="button" onClick={(e) => { e.stopPropagation(); onShare(row) }}
-            className="ml-auto inline-flex items-center gap-1 rounded-[10px] bg-prism-600/20 px-2.5 py-0.5 font-semibold text-prism-300 transition hover:bg-prism-600/30">
+            className="ml-auto inline-flex items-center gap-1 rounded-control bg-prism-600/20 px-2.5 py-0.5 font-semibold text-prism-300 transition hover:bg-prism-600/30">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" /><path d="M16 6l-4-4-4 4" /><path d="M12 2v13" /></svg>
             {t('share.button')}
           </button>
@@ -231,7 +232,21 @@ export default function ClosedTradesList({ trades, onShare }: Props) {
                         className={`cursor-pointer border-b border-white/5 transition hover:bg-white/[0.03] ${expanded ? 'bg-white/[0.03]' : ''}`}
                         onClick={() => toggle(row.key)}
                       >
-                        <td className="whitespace-nowrap px-2 py-2 text-neutral-400">{row.openTime ? fmtTime(row.openTime) : DASH}</td>
+                        {/* 与下面手机卡片同一个道理：整行可点是给鼠标的，键盘和读屏要一个真按钮，
+                            放在第一格，aria-expanded 说明它能展开。stopPropagation 免得行的 onClick 再切一次。
+                            Same reasoning as the phone card below: the row click is for the mouse;
+                            keyboard and screen-reader users get a real button in the first cell, with
+                            aria-expanded. stopPropagation keeps the row's onClick from toggling twice. */}
+                        <td className="whitespace-nowrap px-2 py-2 text-neutral-400">
+                          <button
+                            type="button"
+                            aria-expanded={expanded}
+                            className="whitespace-nowrap text-left"
+                            onClick={(e) => { e.stopPropagation(); toggle(row.key) }}
+                          >
+                            {row.openTime ? fmtTime(row.openTime) : DASH}
+                          </button>
+                        </td>
                         <td className="px-2 py-2 font-mono text-neutral-400">{row.positionTicket}</td>
                         <td className="px-2 py-2 font-mono text-neutral-100">{displaySymbol(row.symbol)}</td>
                         <td className="px-2 py-2">{sideTag(row.side)}</td>
@@ -246,7 +261,7 @@ export default function ClosedTradesList({ trades, onShare }: Props) {
                         <td className={`px-2 py-2 text-right font-mono ${pnlClass(row.gross)}`}>{money(row.gross)}</td>
                         <td className={`px-2 py-2 text-right font-mono font-semibold ${pnlClass(row.net)}`}>{money(row.net)}</td>
                         <td className="px-1 py-2 text-center text-neutral-500">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`inline transition-transform ${expanded ? 'rotate-180' : ''}`}><path d="M6 9l6 6 6-6" /></svg>
+                          <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`inline transition-transform ${expanded ? 'rotate-180' : ''}`}><path d="M6 9l6 6 6-6" /></svg>
                         </td>
                       </tr>
                       {expanded && (

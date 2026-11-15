@@ -75,19 +75,19 @@ export function watchdogComponent(ops: OpsStatus | null, opsError: string | null
 
 const DOT: Record<HealthLevel, string> = {
   ok: 'bg-up',
-  warn: 'bg-amber-300',
+  warn: 'bg-warn',
   down: 'bg-down',
   idle: 'bg-neutral-500',
 }
 const TEXT: Record<HealthLevel, string> = {
   ok: 'text-up',
-  warn: 'text-amber-300',
+  warn: 'text-warn',
   down: 'text-down',
   idle: 'text-neutral-400',
 }
 const BORDER: Record<HealthLevel, string> = {
   ok: 'border-white/10',
-  warn: 'border-amber-300/40',
+  warn: 'border-warn/40',
   down: 'border-down/50',
   idle: 'border-white/10',
 }
@@ -114,7 +114,7 @@ const RUNBOOK: { id: string; tag: RunbookTag }[] = [
 const TAG_CLS: Record<RunbookTag, string> = {
   wait: 'bg-white/10 text-neutral-300',
   admin: 'bg-up/15 text-up',
-  rex: 'bg-amber-300/15 text-amber-300',
+  rex: 'bg-warn/15 text-warn',
   stop: 'bg-down/20 text-down',
 }
 
@@ -224,7 +224,7 @@ function LoopError({ message, className }: { message: string; className: string 
       <summary className={`cursor-pointer list-none hover:underline [&::-webkit-details-marker]:hidden ${className}`}>
         {t(`admin.health.loopTable.errorKind.${loopErrorKind(message)}`)}
       </summary>
-      <div className="mt-1 break-all text-xs leading-snug text-neutral-600">{message}</div>
+      <div className="mt-1 break-all text-xs leading-snug text-neutral-500">{message}</div>
     </details>
   )
 }
@@ -242,7 +242,7 @@ function ComponentCard({ k, c, children }: { k: ComponentKey; c: HealthComponent
   const { t } = useTranslation()
   const facts = factsLine(t, k, c)
   return (
-    <div className={`flex flex-col rounded-inner border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
+    <div className={`flex flex-col rounded-lg border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
       <div className="flex items-center gap-2">
         <Light level={c.level} />
         <span className="text-sm font-semibold text-white">{t(`admin.health.comp.${k}.name`)}</span>
@@ -301,7 +301,7 @@ export function capacityMeter(c: CapacityInfo, key: CapacityMetricKey): Capacity
   }
 }
 
-const BAR: Record<HealthLevel, string> = { ok: 'bg-up', warn: 'bg-amber-300', down: 'bg-down', idle: 'bg-white/20' }
+const BAR: Record<HealthLevel, string> = { ok: 'bg-up', warn: 'bg-warn', down: 'bg-down', idle: 'bg-white/20' }
 
 function CapacityCard({ c }: { c: CapacityInfo }) {
   const { t } = useTranslation()
@@ -309,7 +309,7 @@ function CapacityCard({ c }: { c: CapacityInfo }) {
   const reasons = c.reasons ?? []
   const advice = (c.advice ?? []).filter((a) => ['server', 'database', 'gatewayChannels', 'bridgeClient', 'surge'].includes(a))
   return (
-    <div className={`mb-5 rounded-inner border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
+    <div className={`mb-5 rounded-lg border bg-white/[0.02] p-4 ${BORDER[c.level]}`}>
       <div className="flex flex-wrap items-center gap-2">
         <Light level={c.level} />
         <span className="text-sm font-semibold text-white">{t('admin.health.capacity.title')}</span>
@@ -329,7 +329,7 @@ function CapacityCard({ c }: { c: CapacityInfo }) {
               </div>
               <div className="relative mt-2 h-1.5 overflow-hidden rounded-full bg-white/10" aria-hidden="true">
                 <div className={`h-full ${BAR[m.level]}`} style={{ width: `${m.fillPct}%` }} />
-                <div className="absolute top-0 h-full w-px bg-amber-300/80" style={{ left: `${m.warnPct}%` }} />
+                <div className="absolute top-0 h-full w-px bg-warn/80" style={{ left: `${m.warnPct}%` }} />
               </div>
               <p className="mt-2 text-xs tabular-nums text-neutral-400">
                 {t('admin.health.capacity.meter', { now: n(m.now), today: n(m.today), week: n(m.week) })}
@@ -453,7 +453,7 @@ function RestartModal({ kind, budget, onClose, onDone }: {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm" onClick={() => { if (!busy) onClose() }}>
+    <div className="fixed inset-0 z-overlay flex items-center justify-center scrim p-6" onClick={() => { if (!busy) onClose() }}>
       <div ref={sheetRef} className="glass-card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()}
         role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <h3 id={titleId} className="text-lg font-bold text-white">{t(`admin.health.actions.${kind}Title`)}</h3>
@@ -482,7 +482,7 @@ function RestartModal({ kind, budget, onClose, onDone }: {
               {t('common.cancel')}
             </button>
             <button type="submit" disabled={busy || !password}
-              className="flex-1 rounded-xl border border-down/40 bg-down/15 py-2 text-sm font-semibold text-down transition hover:bg-down/25 disabled:opacity-50">
+              className="flex-1 rounded-panel border border-down/40 bg-down/15 py-2 text-sm font-semibold text-down transition hover:bg-down/25 disabled:opacity-50">
               {busy ? t('admin.health.loading') : t('admin.health.actions.confirmRestart')}
             </button>
           </div>
@@ -518,7 +518,7 @@ function OpsHistoryList({ ops }: { ops: OpsStatus | null }) {
               <span className="num text-neutral-500">{fmtStamp(new Date(h.at * 1000), { clock: 'hms' })}</span>
               <span className="text-neutral-200">{h.source === 'auto' ? t('admin.health.history.auto') : h.operator}</span>
               <span className="text-neutral-300">{t(`admin.health.history.action.${h.action}`)}</span>
-              <span className={h.result === 'ok' || h.result === 'started' ? 'text-up' : 'text-amber-300'}>{resultText(h.result)}</span>
+              <span className={h.result === 'ok' || h.result === 'started' ? 'text-up' : 'text-warn'}>{resultText(h.result)}</span>
             </li>
           ))}
         </ul>
@@ -558,7 +558,7 @@ function LoopTable({ rows, onRestart, onRefreshCompetitions, busy }: {
               <tr key={r.name} className="align-top">
                 <td className="py-2 pr-3 text-neutral-200">
                   {label === nameKey ? r.name : label}
-                  <div className="text-xs text-neutral-600">{r.name}</div>
+                  <div className="text-xs text-neutral-500">{r.name}</div>
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3">
                   <span className="flex items-center gap-1.5">
@@ -613,7 +613,7 @@ function Runbook() {
           <li key={id} className="py-3 first:pt-0 last:pb-0">
             <div className="flex flex-wrap items-start gap-2">
               <span className="text-sm text-neutral-100">{t(`admin.health.runbook.items.${id}.q`)}</span>
-              <span className={`ml-auto shrink-0 rounded-[10px] px-2 py-0.5 text-xs font-medium ${TAG_CLS[tag]}`}>
+              <span className={`ml-auto shrink-0 rounded-control px-2 py-0.5 text-xs font-medium ${TAG_CLS[tag]}`}>
                 {t(`admin.health.runbook.tag.${tag}`)}
               </span>
             </div>
@@ -745,7 +745,7 @@ export default function SystemStatusPanel() {
             <p className="mt-1 text-xs text-neutral-500">{t('admin.health.subtitle')}</p>
           </div>
           {overall && (
-            <span className={`flex items-center gap-2 rounded-[10px] border px-3 py-1 text-sm font-medium ${BORDER[overall]} ${TEXT[overall]}`}>
+            <span className={`flex items-center gap-2 rounded-control border px-3 py-1 text-sm font-medium ${BORDER[overall]} ${TEXT[overall]}`}>
               <Light level={overall} />
               {t(`admin.health.overall.${overall}`)}
             </span>
@@ -765,7 +765,7 @@ export default function SystemStatusPanel() {
       </div>
 
       {notice && (
-        <div className={`mb-5 flex items-start gap-3 rounded-inner border p-3 text-sm ${
+        <div className={`mb-5 flex items-start gap-3 rounded-lg border p-3 text-sm ${
           notice.ok ? 'border-up/40 bg-up/10 text-up' : 'border-down/40 bg-down/10 text-down'}`} role="status">
           <span className="flex-1">{notice.text}</span>
           <button type="button" onClick={() => setNotice(null)} className="text-xs text-neutral-400 hover:text-neutral-200">✕</button>
@@ -773,7 +773,7 @@ export default function SystemStatusPanel() {
       )}
 
       {unreachable !== null && (
-        <div className="mb-5 rounded-inner border border-down/50 bg-down/10 p-4" role="alert">
+        <div className="mb-5 rounded-lg border border-down/50 bg-down/10 p-4" role="alert">
           <div className="flex items-center gap-2">
             <Light level="down" />
             <span className="text-sm font-semibold text-down">{t('admin.health.unreachable.title')}</span>

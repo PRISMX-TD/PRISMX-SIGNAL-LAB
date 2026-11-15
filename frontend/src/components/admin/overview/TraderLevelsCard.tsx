@@ -135,7 +135,7 @@ export default function TraderLevelsCard({ range }: { range: RangeState }) {
                           type="button"
                           aria-pressed={scope === s}
                           onClick={() => switchScope(s)}
-                          className={`rounded-[10px] px-3 py-1 text-xs transition ${
+                          className={`rounded-control px-3 py-1 text-xs transition ${
                             scope === s
                               ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40'
                               : 'text-neutral-400 hover:text-neutral-200'

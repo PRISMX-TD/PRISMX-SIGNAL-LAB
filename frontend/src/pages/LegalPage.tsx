@@ -82,7 +82,7 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
           {t('legal.lastUpdated')} {LEGAL_UPDATED}
         </p>
 
-        <p className="mt-6 text-[15px] leading-relaxed text-neutral-300">{t(`legal.${doc}.intro`)}</p>
+        <p className="mt-6 max-w-[65ch] text-pretty text-base leading-relaxed text-neutral-300">{t(`legal.${doc}.intro`)}</p>
 
         <div className="mt-9 space-y-8">
           {safeSections.map((s, i) => (
@@ -93,7 +93,7 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
               </h2>
               <div className="mt-3 space-y-3">
                 {s.p.map((para, j) => (
-                  <p key={j} className="text-[15px] leading-relaxed text-neutral-400">
+                  <p key={j} className="max-w-[65ch] text-pretty text-base leading-relaxed text-neutral-400">
                     {para}
                   </p>
                 ))}
@@ -113,11 +113,11 @@ export default function LegalPage({ doc }: { doc: LegalDoc }) {
             better no address than one that can't receive mail. The translations
             stay in i18n, so restoring the address restores the block. */}
         {SUPPORT_EMAIL && (
-          <section className="mt-12 rounded-xl border border-white/10 bg-white/[0.03] p-5">
+          <section className="mt-12 rounded-panel border border-white/10 bg-white/[0.03] p-5">
             <h2 className="font-display text-base font-semibold text-neutral-100">
               {t('legal.contactTitle')}
             </h2>
-            <p className="mt-2 text-sm leading-relaxed text-neutral-400">{t('legal.contactBody')}</p>
+            <p className="mt-2 max-w-[65ch] text-pretty text-sm leading-relaxed text-neutral-400">{t('legal.contactBody')}</p>
             <a
               href={`mailto:${SUPPORT_EMAIL}`}
               className="mt-3 inline-block font-mono text-sm text-prism-300 underline underline-offset-4 transition hover:text-prism-200"

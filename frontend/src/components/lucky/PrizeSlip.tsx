@@ -40,7 +40,7 @@ export default function PrizeSlip({ draw, index, onChange, navigate }: {
     : draw.adminNote
 
   return (
-    <article className="lkp-slip" data-status={status} style={{ '--i': index } as CSSProperties}>
+    <article className="lkp-slip" data-status={status} style={{ '--i': Math.min(index, 5) } as CSSProperties}>
       <div className="lkp-stub">
         <div className="lkp-stub-t">{clockOf(draw.createdAt)}</div>
         {draw.roundName && <div className="lkp-stub-a" title={draw.roundName}>{draw.roundName}</div>}

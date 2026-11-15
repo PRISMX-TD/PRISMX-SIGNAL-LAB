@@ -29,7 +29,7 @@ const LockedPx: FC<{ symbol: string; seed: string }> = ({ symbol, seed }) => {
   const rnd = seeded(seed)
   const fake = shape.replace(/\d/g, (_, i: number) => String(i === 0 ? 1 + Math.floor(rnd() * 9) : Math.floor(rnd() * 10)))
   return (
-    <span className="px-locked" title={t('guest.lockedPrice')} aria-label={t('guest.lockedPrice')}>
+    <span className="px-locked" role="img" title={t('guest.lockedPrice')} aria-label={t('guest.lockedPrice')}>
       <span className="px-locked-blur" aria-hidden>{fake}</span>
       <svg className="px-locked-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <rect x="5" y="11" width="14" height="10" rx="2" />

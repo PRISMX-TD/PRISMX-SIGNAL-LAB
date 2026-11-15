@@ -24,13 +24,14 @@
 // Mark-all-read does not count as opening — that press clears a badge and must not
 // silently retire a campaign nobody looked at (the backend splits the two kinds of
 // read by announcement_reads.source).
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { announcementApi } from '../api/client'
 import type { AnnouncementPopup as PopupData } from '../api/types'
 import { useBackToClose } from '../utils/useBackToClose'
+import { useDialogA11y } from '../utils/useDialogA11y'
 
 // 本次会话已经按掉的那条。sessionStorage 在无痕窗口 / 禁用站点数据时可能直接抛，
 // 读写都得包起来——拿不到存储只是"下次再弹一次"，不该让整个弹窗渲染不出来。
@@ -125,14 +126,13 @@ export default function AnnouncementPopup() {
 
   useBackToClose(visible, close)
 
-  useEffect(() => {
-    if (!visible) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [visible, data])
+  // Esc、Tab 困住、焦点进出交给 useDialogA11y。初始焦点给容器而不是「查看详情」：这是
+  // 不请自来的弹窗，焦点不该一落下就停在一个会跳页的按钮上；读屏先念出标题。
+  // Escape, Tab trap and focus in/out via useDialogA11y. Initial focus goes to the
+  // container, not "see details": an unsolicited popup should not land focus on a
+  // navigating control, and screen readers announce the title first.
+  const popRef = useRef<HTMLDivElement>(null)
+  useDialogA11y(popRef, close, { open: visible && !!data, initialFocus: 'container' })
 
   if (!visible || !data) return null
 
@@ -163,7 +163,7 @@ export default function AnnouncementPopup() {
 
   return createPortal(
     <div className="ann-pop-overlay" onClick={close}>
-      <div className="ann-pop" role="dialog" aria-modal="true" aria-label={title || t('announcements.title')}>
+      <div ref={popRef} className="ann-pop" role="dialog" aria-modal="true" aria-label={title || t('announcements.title')} tabIndex={-1}>
         {/* 整张图可点，但这个容器刻意不是 button、也不可聚焦：里面那颗「查看详情」
             才是真控件，键盘用户 Tab 到它、走同一个动作。做成嵌套 button 既是非法
             HTML，也会给键盘多出一个什么都不多做的焦点位。

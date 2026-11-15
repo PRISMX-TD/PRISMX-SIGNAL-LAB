@@ -28,6 +28,7 @@ import { OpenUserButton, useUserDrawer } from './users/UserOverview'
 import { downloadUsersCsv } from './users/usersCsv'
 import { attributionOptions } from './invite/inviteLinkLogic'
 import { isUserDisabled } from './userStatus'
+import { useFirstReveal } from '../../utils/useFirstReveal'
 
 const PLAN_OPTIONS: UserPlan[] = ['FREE', 'PRO']
 // support = 客服（rev 41，设计 2026-10-17 §2）/ support = support-desk agent (rev 41)
@@ -112,6 +113,9 @@ export default function UsersPanel({
   // Current user-table page, zero-based to match components/Pager's contract.
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(true)
+  // 用户行只在这次挂载里第一次加载完时进场；翻页、搜索直接出现。
+  // User rows animate only after the first load of this mount; paging and search show them at once.
+  const rowsReveal = useFirstReveal(!loading)
   // ?q=<邮箱>：操作日志详情里的「打开用户资料」、后端通知里的 /admin?tab=users&q=… 都带着它进来。
   // 只在挂载时读一次，读完从地址栏抹掉（同工单深链），免得管理员清掉搜索后一刷新又被带回来。
   // ?q=<email> arrives from the activity drawer's "open user" and backend notifications
@@ -727,8 +731,8 @@ export default function UsersPanel({
                   // on it", disabled is what it *is*. An edited-but-unsaved row gets a violet edge.
                   <tr
                     key={u.id}
-                    className={`adm-rise ${disabled ? 'is-disabled' : selected ? 'is-sel' : ''} ${dirty ? 'is-dirty' : ''}`}
-                    style={{ ['--i' as string]: Math.min(i, 12) }}
+                    className={`${rowsReveal ? 'adm-rise ' : ''}${disabled ? 'is-disabled' : selected ? 'is-sel' : ''} ${dirty ? 'is-dirty' : ''}`}
+                    style={rowsReveal ? { ['--i' as string]: Math.min(i, 5) } : undefined}
                   >
                     <td className="adm-th-check">
                       <input
@@ -749,7 +753,7 @@ export default function UsersPanel({
                         <div className="min-w-0 max-w-[196px]">
                           {/* 昵称：没设过就不占行 / nickname: omitted when unset */}
                           {u.nickname && (
-                            <div className="truncate text-[13px] font-semibold text-neutral-50">
+                            <div className="truncate text-sm font-semibold text-neutral-50">
                               <Copyable text={u.nickname} label={t('supportDesk.copy.nickname')} />
                             </div>
                           )}
@@ -874,20 +878,20 @@ export default function UsersPanel({
                       {u.inviteCode ? (
                         <span className="text-neutral-200" title={u.inviteCode}>{linkLabel(u.inviteCode)}</span>
                       ) : (
-                        <span className="text-neutral-600">{t('admin.inviteNone')}</span>
+                        <span className="text-neutral-500">{t('admin.inviteNone')}</span>
                       )}
                       {/* 归属代理：代理本人显示「代理」标，他的位置在「代理」分区里看。
                           Owning agent; agents themselves get a tag (their place is in the Agents section). */}
                       <div className="mt-1 text-xs">
                         {u.isAgent ? (
-                          <span className="rounded-[10px] bg-prism-500/15 px-1.5 py-0.5 text-prism-200">{t('admin.agentTag')}</span>
+                          <span className="rounded-control bg-prism-500/15 px-1.5 py-0.5 text-prism-200">{t('admin.agentTag')}</span>
                         ) : u.agentUserId ? (
                           <span className="text-neutral-300">
                             {t('admin.colAgent')}:{' '}
                             {u.agentEmail ? <Copyable text={u.agentEmail} label={t('supportDesk.copy.email')} /> : agentLabel(u.agentUserId)}
                           </span>
                         ) : (
-                          <span className="text-neutral-600">{t('admin.agentNone')}</span>
+                          <span className="text-neutral-500">{t('admin.agentNone')}</span>
                         )}
                       </div>
                     </td>

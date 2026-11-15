@@ -130,7 +130,7 @@ export default function GeoMap({ mode, countries, provinces, lang, onPickChina }
       </svg>
       {hover && (
         <div
-          className="pointer-events-none absolute z-10 rounded bg-black/80 px-2 py-1 text-xs text-white"
+          className="pointer-events-none absolute z-10 rounded float-panel px-2 py-1 text-xs text-white"
           style={{ left: hover.x + 12, top: hover.y + 12 }}
         >
           {t('admin.overview.geo.tooltip', { name: hover.name, count: hover.count })}

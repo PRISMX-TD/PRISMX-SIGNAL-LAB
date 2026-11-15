@@ -11,15 +11,17 @@
 // this component owns layout and the inline receipt only. The head (title +
 // symbol) is rendered by the caller: the pane head on desktop, the sheet
 // handle row on mobile. Accounts are a plain online filter here.
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from '../Select'
 import type { MT5Account, Order, OrderEntryType } from '../../api/types'
-import { useGlobalQuote, useQuotes } from '../../store/live'
+import { useGlobalQuote } from '../../store/live'
 import { localizeApiError, lotDecimals } from '../../api/utils'
 import { quickLots, QUICK_RISK_PCTS, formatMoney } from '../order/orderMath'
 import { useOrderForm, type Side } from '../order/useOrderForm'
 import { useMarketClosedText, useMarketStatus } from '../order/useMarketStatus'
+import { announce } from '../../utils/announce'
+import { EMPTY } from '../../utils/format'
 
 interface Props {
   symbol: string
@@ -46,43 +48,49 @@ interface Props {
   onSelectLogin?: (login: string) => void
   // 手机端从交易条的哪一侧点进来 / which side of the mobile trade bar opened this
   initialSide?: Side
+  // WebSocket 断线：由 ChartsPage 从 useLive 读出传入（本组件是 memo，不自己订阅整个 live 上下文）。
+  // WebSocket lost: read from useLive by ChartsPage (this memo'd component doesn't subscribe to the whole live context).
+  quotesDown?: boolean
   className?: string
 }
 
-// 从 since 起每 100ms 走一格的已用时间（毫秒）。下单按钮在等回执期间显示它：
-// 一个在走的数字比静止的"提交中…"更能说明程序没卡住，而且事后回执里的耗时就是它。
-// Elapsed ms since `since`, ticking every 100ms while non-null. Shown on the CTA
-// while waiting for the fill: a moving number reads as "working", not "stuck".
-function useElapsedMs(since: number | null): number {
+// 等回执期间按钮上跑的秒数，单独成一个叶子组件：每 100ms 只重渲染这一个 <span>。
+// 以前计时器（useElapsedMs）挂在整张下单票上，等回执的那一两秒里表单计算、风险预览、
+// 账户下拉每秒重渲染十次。一个在走的数字比静止的"提交中…"更能说明程序没卡住，
+// 而且事后回执里的耗时就是它。写法同 SymbolHeader 的 Clock。
+// The seconds ticking on the CTA while waiting for the fill, as its own leaf: every
+// 100ms only this <span> re-renders. The timer (useElapsedMs) used to live on the whole
+// ticket, re-rendering the form maths, risk preview and account picker ten times a
+// second while waiting. A moving number reads as "working", not "stuck". Same shape as
+// SymbolHeader's Clock.
+function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    if (since == null) return
-    setNow(Date.now())
     const id = window.setInterval(() => setNow(Date.now()), 100)
     return () => window.clearInterval(id)
-  }, [since])
-  return since == null ? 0 : Math.max(0, now - since)
+  }, [])
+  return <span className="px">{(Math.max(0, now - since) / 1000).toFixed(1)}s</span>
 }
 
 type Receipt = { kind: 'ok' | 'error' | 'info'; msg: string; detail?: string }
 
 // 价格末两位加粗：交易员盯的是点位，不是大手。/ Bold the last two digits: the pips.
 function PipPrice({ v, digits }: { v: number | null; digits: number }) {
-  if (v == null) return <span className="px">—</span>
+  if (v == null) return <span className="px">{EMPTY}</span>
   const s = v.toFixed(digits)
   if (digits < 2) return <span className="px">{s}</span>
   return <span className="px">{s.slice(0, -2)}<b>{s.slice(-2)}</b></span>
 }
 
 function OrderTicket({
-  symbol, accounts, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', className = '',
+  symbol, accounts, refPrice, digits, onPlace, selectedLogin, onSelectLogin, initialSide = 'BUY', quotesDown = false, className = '',
 }: Props) {
   const { t } = useTranslation()
-  // 按交易商账户区分的报价：login -> {symbol: Quote}（下单参考价用选中账户的），在这里自己订阅
-  // （useQuotes）——图表页不在顶层读报价，见 ChartsPage「高频数据下放」。
-  // Per-account quotes: login -> {symbol: Quote} (entry price uses the selected account's),
-  // subscribed here (useQuotes); the charts page doesn't read quotes at its top level.
-  const quotesByAccount = useQuotes()
+  // 按交易商账户区分的报价（下单参考价用选中账户的）由 useOrderForm 按选中账户、按品种
+  // 自己订阅——图表页不在顶层读报价，见 ChartsPage「高频数据下放」。
+  // Per-account quotes (the entry price uses the selected account's) are subscribed inside
+  // useOrderForm, for the selected account and symbol only; the charts page doesn't read
+  // quotes at its top level.
   // 全站统一报价（EA 推送）：选中账户没有该品种报价时的兜底 bid/ask。只按 symbol 订阅那一条
   // （useGlobalQuote），其它品种跳价不会牵动这张票。
   // Site-wide quote (EA-pushed): fallback bid/ask when the account has none. Only this
@@ -93,7 +101,6 @@ function OrderTicket({
   const form = useOrderForm({
     symbol, side,
     accounts: onlineAccounts,
-    quotesByAccount,
     fallbackQuote: globalQuote,
     refPrice,
     login: selectedLogin,
@@ -103,8 +110,24 @@ function OrderTicket({
   const [submitting, setSubmitting] = useState(false)
   // 本次提交发出的时刻；等回执期间按钮上跑秒 / when this submit went out; the CTA ticks while waiting
   const [sentAt, setSentAt] = useState<number | null>(null)
-  const elapsedMs = useElapsedMs(sentAt)
   const [receipt, setReceipt] = useState<Receipt | null>(null)
+  // 就地回执的自动清除定时器，一个 ref 持有。每次换回执先清掉上一次的：以前三个裸
+  // setTimeout 从不清，连下两单时第一单的 4 秒定时器会把第二单刚出现的回执提前抹掉；
+  // 抽屉切走、票卸载后它们也还在跑。回执同时写进 live region（图表页这条路径不弹 toast）。
+  // The inline receipt's auto-clear timer, held in a ref and cleared before every new
+  // receipt: three bare setTimeouts used to let order one's 4s timer wipe order two's fresh
+  // receipt, and kept running after the sheet unmounted the ticket. The receipt is also
+  // announced (this path no longer toasts).
+  const receiptTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(receiptTimer.current), [])
+  const showReceipt = (r: Receipt | null, ms?: number) => {
+    window.clearTimeout(receiptTimer.current)
+    receiptTimer.current = undefined
+    setReceipt(r)
+    if (!r) return
+    announce(r.detail ? `${r.msg} ${r.detail}` : r.msg, r.kind === 'error' ? 'assertive' : 'polite')
+    if (ms != null) receiptTimer.current = window.setTimeout(() => setReceipt(null), ms)
+  }
 
   // 风险模式算不出合法手数时不能提交（见 OrderSheet 同名判断）
   // Block submit when risk sizing can't produce a legal lot (same rule as OrderSheet)
@@ -120,23 +143,27 @@ function OrderTicket({
   const submit = async () => {
     const vol = form.parsedVolume
     if (vol == null) {
-      setReceipt({ kind: 'error', msg: String(t('charts.ticket.invalidVolume')) })
+      showReceipt({ kind: 'error', msg: String(t('charts.ticket.invalidVolume')) })
       return
     }
     const startedAt = Date.now()
     setSubmitting(true)
     setSentAt(startedAt)
-    setReceipt(null)
+    showReceipt(null)
     try {
-      // 幂等号在成功前固定不变：失败后再点一次复用同一个号，"已收单但没收到回执"
-      // 不会变成两笔。成功后换新号，下一单是新的。
-      // The idempotency key stays fixed until a success, so a retry after "received
-      // but no receipt" can't double-place; rotated after success for the next order.
+      // 幂等号：请求抛错（网络错误、超时，结果不明）时走 catch，不换号，再点一次复用同一个号，
+      // "已收单但没收到回执"不会变成两笔。拿到结果后，只有 FAILED（结果未知，可能已执行）不换号；
+      // 成功和 REJECTED（确定没执行）都换号。REJECTED 不换的话，后端按幂等号把那条 REJECTED
+      // 原样退回，重试永远发不出去。
+      // Idempotency key: a thrown request (network error, timeout) lands in catch and keeps the
+      // key, so a "received but no receipt" retry can't double-place. With a result in hand,
+      // only FAILED (unknown, may have executed) keeps it; successes and REJECTED (certainly not
+      // executed) rotate. Keeping it on REJECTED made the backend hand back the same REJECTED row.
       const placed = await onPlace(
         side, vol, form.login || null, form.slNum, form.tpNum, form.orderId,
         form.entryType, form.entryType === 'MARKET' ? null : form.priceNum,
       )
-      form.rotateOrderId()
+      if (!placed || placed.status !== 'FAILED') form.rotateOrderId()
       const secs = `${((Date.now() - startedAt) / 1000).toFixed(1)}s`
       // 回执按状态分三种：网关账号当场成交给成交价和耗时；桥接账号后端只是收单，
       // 说"已受理"而不是"已成交"；被拒直接给原因。以前三种情况都是同一句"已提交"。
@@ -146,28 +173,25 @@ function OrderTicket({
         // 「已挂出」不是「已成交」：挂单要等触发才有仓位，说成交会让用户以为
         // 仓位已经建立。/ "Placed" is not "filled": there is no position until it
         // triggers, and saying otherwise makes the user manage one that isn't there.
-        const px = placed.price != null ? placed.price.toFixed(digits) : '—'
-        setReceipt({ kind: 'ok', msg: String(t('charts.ticket.pendingPlaced', { price: px })), detail: secs })
-        setTimeout(() => setReceipt(null), 4000)
+        const px = placed.price != null ? placed.price.toFixed(digits) : EMPTY
+        showReceipt({ kind: 'ok', msg: String(t('charts.ticket.pendingPlaced', { price: px })), detail: secs }, 4000)
       } else if (placed && placed.status === 'FILLED') {
-        const px = placed.filledPrice != null ? placed.filledPrice.toFixed(digits) : '—'
-        setReceipt({ kind: 'ok', msg: String(t('charts.ticket.filledAt', { price: px })), detail: secs })
-        setTimeout(() => setReceipt(null), 4000)
+        const px = placed.filledPrice != null ? placed.filledPrice.toFixed(digits) : EMPTY
+        showReceipt({ kind: 'ok', msg: String(t('charts.ticket.filledAt', { price: px })), detail: secs }, 4000)
       } else if (placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')) {
-        setReceipt({ kind: 'error', msg: placed.message ? localizeApiError(placed.message) : String(t('charts.ticket.placeFailed')) })
+        showReceipt({ kind: 'error', msg: placed.message ? localizeApiError(placed.message) : String(t('charts.ticket.placeFailed')) })
       } else {
-        setReceipt({ kind: 'info', msg: String(t('charts.ticket.accepted')) })
-        setTimeout(() => setReceipt(null), 6000)
+        showReceipt({ kind: 'info', msg: String(t('charts.ticket.accepted')) }, 6000)
       }
     } catch (e) {
-      setReceipt({ kind: 'error', msg: e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')) })
+      showReceipt({ kind: 'error', msg: e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')) })
     } finally {
       setSubmitting(false)
       setSentAt(null)
     }
   }
 
-  const money = (v: number | null | undefined) => formatMoney(v, '—')
+  const money = (v: number | null | undefined) => formatMoney(v, EMPTY)
   const rr = form.riskPreview
   // 点差与止损/止盈距离都按最小价位（point）计，与报价条同一单位。
   // Spread and SL/TP distances in points, the same unit as the quote strip.
@@ -194,7 +218,19 @@ function OrderTicket({
   const lotD = lotDecimals(symbol)
 
   return (
-    <div className={`term-tk no-sb ${className}`}>
+    <div className={`term-tk no-sb ${quotesDown ? 'quotes-down' : ''} ${className}`}>
+      {/* 断线提示：与下单弹窗 OrderSheet 里 wsDisconnected 那一条同一段标记。OrderSheet 不因断线
+          拦提交（它的 canSubmit 不看 wsDisconnected），这里照抄，只把状态说清楚。以前这张票完全不看
+          断线，下单按钮上照样写「@ 价格」。
+          The same strip as OrderSheet's wsDisconnected one. OrderSheet does not block submit on a
+          disconnect (its canSubmit ignores wsDisconnected), so neither does this; it only says so.
+          The ticket used to ignore the disconnect and kept printing "@ price" on the CTA. */}
+      {quotesDown && (
+        <div className="slide-ws-warn" role="status">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5" aria-hidden="true"><path d="M12 9v4M12 17h.01" /><path d="M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
+          <span>{t('connStatus.reconnecting')}</span>
+        </div>
+      )}
       {onlineAccounts.length > 1 && (
         <Select
           className="term-acct-select"
@@ -223,13 +259,19 @@ function OrderTicket({
       {/* 入场方式：市价立刻成交，限价/止损在触发价上等着 / entry mode */}
       <div className="term-fk">
         <span>{t('charts.ticket.entryMode')}</span>
-        <span className="term-mode" role="tablist">
+        {/* 这两组（入场方式、下面的手数 / 风险）是同一张票上的模式开关，不是页签：下方
+            没有对应的面板，切的是这张票自己的字段。用 role="group" + aria-pressed，读屏念
+            「切换按钮，已按下」，不再宣告「标签 1/3」。
+            These two groups (entry mode here, lots / risk below) are mode switches on the
+            same ticket, not tabs: there is no panel beneath, they change this ticket's own
+            fields. role="group" + aria-pressed, so a screen reader says "toggle button,
+            pressed" instead of "tab 1 of 3". */}
+        <span className="term-mode" role="group" aria-label={String(t('charts.ticket.entryMode'))}>
           {(['MARKET', 'LIMIT', 'STOP'] as OrderEntryType[]).map((m) => (
             <button
               key={m}
               type="button"
-              role="tab"
-              aria-selected={form.entryType === m}
+              aria-pressed={form.entryType === m}
               className={form.entryType === m ? 'on' : ''}
               onClick={() => form.setEntryType(m)}
             >
@@ -245,7 +287,7 @@ function OrderTicket({
             className={`term-inp ${form.priceError ? 'bad' : ''}`}
             value={form.price}
             inputMode="decimal"
-            placeholder="—"
+            placeholder={EMPTY}
             aria-label={String(t('charts.ticket.triggerPrice'))}
             onChange={(e) => form.setPrice(e.target.value.replace(/[^0-9.]/g, ''))}
           />
@@ -256,20 +298,20 @@ function OrderTicket({
       )}
       {form.priceError && (
         <p className="term-warn">
-          {t(form.priceError, { price: marketRef != null ? marketRef.toFixed(digits) : '—' })}
+          {t(form.priceError, { price: marketRef != null ? marketRef.toFixed(digits) : EMPTY })}
         </p>
       )}
 
       {/* 手数 + 模式 / volume + size mode */}
       <div className="term-fk">
         <span>{t('charts.ticket.volume')}</span>
-        <span className="term-mode" role="tablist">
-          <button type="button" role="tab" aria-selected={form.sizeMode === 'quick'} className={form.sizeMode === 'quick' ? 'on' : ''} onClick={() => form.setSizeMode('quick')}>{t('charts.ticket.sizeLots')}</button>
-          <button type="button" role="tab" aria-selected={form.sizeMode === 'risk'} className={form.sizeMode === 'risk' ? 'on' : ''} onClick={() => form.setSizeMode('risk')}>{t('charts.ticket.sizeRisk')}</button>
+        <span className="term-mode" role="group" aria-label={String(t('charts.ticket.volume'))}>
+          <button type="button" aria-pressed={form.sizeMode === 'quick'} className={form.sizeMode === 'quick' ? 'on' : ''} onClick={() => form.setSizeMode('quick')}>{t('charts.ticket.sizeLots')}</button>
+          <button type="button" aria-pressed={form.sizeMode === 'risk'} className={form.sizeMode === 'risk' ? 'on' : ''} onClick={() => form.setSizeMode('risk')}>{t('charts.ticket.sizeRisk')}</button>
         </span>
       </div>
       <div className="term-step">
-        <button type="button" aria-label="−" onClick={() => form.stepLot(-1)}>−</button>
+        <button type="button" aria-label={String(t('order.volumeDec'))} onClick={() => form.stepLot(-1)}>−</button>
         <input
           className="num"
           value={form.volume}
@@ -278,7 +320,7 @@ function OrderTicket({
           onChange={(e) => form.typeVolume(e.target.value)}
           onBlur={form.blurVolume}
         />
-        <button type="button" aria-label="+" onClick={() => form.stepLot(1)}>+</button>
+        <button type="button" aria-label={String(t('order.volumeInc'))} onClick={() => form.stepLot(1)}>+</button>
       </div>
       {form.sizeMode === 'quick' ? (
         <div className="term-pre">
@@ -311,12 +353,12 @@ function OrderTicket({
       <div className="term-two">
         <label className="term-fld">
           <span className="term-fk"><span>{t('charts.ticket.sl')}</span></span>
-          <input className={`term-inp ${form.slInvalid ? 'bad' : ''}`} value={form.sl} inputMode="decimal" placeholder="—" onChange={(e) => form.setSl(e.target.value.replace(/[^0-9.]/g, ''))} />
+          <input className={`term-inp ${form.slInvalid ? 'bad' : ''}`} value={form.sl} inputMode="decimal" placeholder={EMPTY} onChange={(e) => form.setSl(e.target.value.replace(/[^0-9.]/g, ''))} />
           <span className="term-fh">{slPts != null && <><span className="down">−{slPts} {t('charts.ticket.points')}</span> · 1.0 R</>}</span>
         </label>
         <label className="term-fld">
           <span className="term-fk"><span>{t('charts.ticket.tp')}</span></span>
-          <input className={`term-inp ${form.tpInvalid ? 'bad' : ''}`} value={form.tp} inputMode="decimal" placeholder="—" onChange={(e) => form.setTp(e.target.value.replace(/[^0-9.]/g, ''))} />
+          <input className={`term-inp ${form.tpInvalid ? 'bad' : ''}`} value={form.tp} inputMode="decimal" placeholder={EMPTY} onChange={(e) => form.setTp(e.target.value.replace(/[^0-9.]/g, ''))} />
           <span className="term-fh">{tpPts != null && <><span className="up">+{tpPts} {t('charts.ticket.points')}</span>{rMult != null && ` · ${rMult.toFixed(1)} R`}</>}</span>
         </label>
       </div>
@@ -324,10 +366,10 @@ function OrderTicket({
 
       {/* 风险账本 / risk ledger */}
       <div className="term-led">
-        <div className="term-lr"><span>{t('charts.ticket.riskAmount')}</span><b className={rr?.riskUsd != null ? 'down' : ''}>{rr?.riskUsd != null ? <>−{money(rr.riskUsd)}<small>{ccy}</small></> : '—'}</b></div>
-        <div className="term-lr"><span>{t('charts.ticket.potentialProfit')}</span><b className={rr?.rewardUsd != null ? 'up' : ''}>{rr?.rewardUsd != null ? <>+{money(rr.rewardUsd)}<small>{ccy}</small></> : '—'}</b></div>
-        <div className="term-lr"><span>{t('charts.ticket.requiredMargin')}</span><b>{form.estMargin != null ? <>≈ {money(form.estMargin)}<small>{ccy}</small></> : '—'}</b></div>
-        <div className="term-lr em"><span>{t('charts.ticket.rr')}</span><b>{rr?.rr != null ? `1 : ${rr.rr.toFixed(1)}` : '—'}</b></div>
+        <div className="term-lr"><span>{t('charts.ticket.riskAmount')}</span><b className={rr?.riskUsd != null ? 'down' : ''}>{rr?.riskUsd != null ? <>−{money(rr.riskUsd)}<small>{ccy}</small></> : EMPTY}</b></div>
+        <div className="term-lr"><span>{t('charts.ticket.potentialProfit')}</span><b className={rr?.rewardUsd != null ? 'up' : ''}>{rr?.rewardUsd != null ? <>+{money(rr.rewardUsd)}<small>{ccy}</small></> : EMPTY}</b></div>
+        <div className="term-lr"><span>{t('charts.ticket.requiredMargin')}</span><b>{form.estMargin != null ? <>≈ {money(form.estMargin)}<small>{ccy}</small></> : EMPTY}</b></div>
+        <div className="term-lr em"><span>{t('charts.ticket.rr')}</span><b>{rr?.rr != null ? `1 : ${rr.rr.toFixed(1)}` : EMPTY}</b></div>
       </div>
 
       {!form.hasAccounts && (
@@ -340,7 +382,7 @@ function OrderTicket({
           <>
             <span className="term-cta-spin" aria-hidden="true" />
             {t('charts.ticket.waitingFill')}
-            <span className="px">{(elapsedMs / 1000).toFixed(1)}s</span>
+            {sentAt != null && <Elapsed key={sentAt} since={sentAt} />}
           </>
         ) : (
           <>

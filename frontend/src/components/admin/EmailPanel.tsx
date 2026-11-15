@@ -132,7 +132,7 @@ export function EmailBodyField({
       <textarea
         ref={areaRef}
         aria-label={label}
-        className="input min-h-[160px] w-full rounded-xl py-2 text-sm leading-relaxed"
+        className="input min-h-[160px] w-full rounded-panel py-2 text-sm leading-relaxed"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         maxLength={20000}
@@ -368,7 +368,7 @@ export default function EmailPanel({
       )}
 
       {status && !status.configured && (
-        <div className="mb-4 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-200">
+        <div className="mb-4 rounded-lg border border-warn/40 bg-warn/10 px-4 py-2.5 text-sm text-warn">
           {t('admin.email.notConfigured')}
         </div>
       )}
@@ -494,7 +494,7 @@ export default function EmailPanel({
               <label className="mt-2 block">
                 <span className="mb-1 block text-xs text-neutral-400">{t('admin.email.pasteEmails')}</span>
                 <textarea
-                  className="input min-h-[80px] w-full rounded-xl py-2 text-sm"
+                  className="input min-h-[80px] w-full rounded-panel py-2 text-sm"
                   value={emailsText}
                   onChange={(e) => setEmailsText(e.target.value)}
                   placeholder="a@example.com, b@example.com"
@@ -604,7 +604,7 @@ export default function EmailPanel({
                         .join(' · ')}
                     </div>
                   </td>
-                  <td className={`px-4 py-2.5 text-xs ${c.status === 'paused' ? 'text-amber-300' : 'text-neutral-300'}`}>
+                  <td className={`px-4 py-2.5 text-xs ${c.status === 'paused' ? 'text-warn' : 'text-neutral-300'}`}>
                     {statusText(c)}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5">

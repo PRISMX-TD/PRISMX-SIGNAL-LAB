@@ -3,6 +3,7 @@
 import type { TFunction } from 'i18next'
 import { fmtDate } from '../../api/utils'
 import { clockOf, type CompTiming } from './compClock'
+import { EMPTY } from '../../utils/format'
 
 export default function CompClock({ c, nowMs, t }: { c: CompTiming; nowMs: number; t: TFunction }) {
   const clock = clockOf(c, nowMs, t)
@@ -20,7 +21,7 @@ export default function CompClock({ c, nowMs, t }: { c: CompTiming; nowMs: numbe
         })
       ) : (
         <div className="is-wide">
-          <b className="num is-text">{clock ? t('competition.cd.soon') : c.endsAt ? fmtDate(c.endsAt) : '—'}</b>
+          <b className="num is-text">{clock ? t('competition.cd.soon') : c.endsAt ? fmtDate(c.endsAt) : EMPTY}</b>
           <span>{clock ? clock.label : t('competition.ends')}</span>
         </div>
       )}

@@ -10,6 +10,7 @@
 // bubbles up to trigger the row.
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { EMPTY } from '../utils/format'
 import '../styles/copyable.css'
 
 // 剪贴板：优先 Clipboard API；不可用时（非安全上下文、部分安卓 WebView）退回隐藏 textarea + execCommand。
@@ -70,7 +71,9 @@ export default function Copyable({
 }) {
   const { t } = useTranslation()
   const value = (text ?? '').trim()
-  if (!value || value === '-') return <span className={className}>{children ?? text}</span>
+  // 空值占位符不给复制：老的 '-' 和 utils/format.ts 的 EMPTY（'–'）都算
+  // Placeholders are not copyable: the old '-' and EMPTY ('–') from utils/format.ts
+  if (!value || value === '-' || value === EMPTY) return <span className={className}>{children ?? text}</span>
 
   const copy = async (e: MouseEvent<HTMLElement> | KeyboardEvent<HTMLElement>) => {
     e.preventDefault()

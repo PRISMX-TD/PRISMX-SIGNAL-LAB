@@ -399,7 +399,7 @@ function AdminConsole({ section }: { section: AdminSection }) {
           drawers and the bulk dock. */}
       {toast &&
         createPortal(
-          <div className="pointer-events-none fixed inset-x-0 z-[80] flex justify-center px-4" style={{ top: 'calc(var(--app-hdr, 65px) + 12px)' }}>
+          <div className="pointer-events-none fixed inset-x-0 z-toast flex justify-center px-4" style={{ top: 'calc(var(--app-hdr, 65px) + 12px)' }}>
             <div role="status" className={`adm-toast pointer-events-auto ${toast.kind === 'err' ? 'is-err' : 'is-ok'}`}>
               {toast.text}
             </div>

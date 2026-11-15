@@ -17,6 +17,7 @@ import { fmtTime, localizeApiError } from '../../../api/utils'
 import { newRequestId } from '../../../utils/luckyWheel'
 import { clampCount, limitProblem, merge, periodValid, tierProblem, totals, type DupMode, type IssueLine } from './luckyIssue'
 import Copyable from '../../Copyable'
+import ConfirmModal from '../../ConfirmModal'
 
 type Mode = 'comp' | 'board' | 'manual'
 type PeriodKind = 'week' | 'month' | 'custom'
@@ -61,6 +62,9 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [batches, setBatches] = useState<LuckyBatch[]>([])
+  // 待确认的动作（发放 / 收回），站内 ConfirmModal 而不是浏览器原生 confirm()，同 CompetitionsPanel。
+  // Pending action (issue / revoke), confirmed in-app rather than the browser's native confirm(), as in CompetitionsPanel.
+  const [pendingAction, setPendingAction] = useState<{ kind: 'issue' } | { kind: 'revoke'; batch: LuckyBatch } | null>(null)
   const searchSeq = useRef(0)
   const loadBatches = () => adminApi.luckyBatches(round.id).then((r) => setBatches(r.batches))
   useEffect(() => {
@@ -96,6 +100,18 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
     userId: u.id, email: u.email, nickname: u.nickname ?? null, rank: null, count: 1,
     source: 'manual', sourceRef: null, label: t('admin.lucky.issue.manual'),
   }], dupMode))
+  const doIssue = () => run(async () => {
+    const r = await adminApi.luckyIssue({ roundId: round.id, reason: reason.trim(), requestId, items: list.map((x) => ({
+      userId: x.userId, count: x.count, source: x.source, sourceRef: x.sourceRef, rank: x.rank })) })
+    setMsg(t('admin.lucky.issue.done', { users: r.userCount, tickets: r.ticketCount }))
+    setList([]); setReason(''); setRequestId(newRequestId()); onIssued()
+    await loadBatches().catch(() => {})
+  })
+  const doRevoke = (b: LuckyBatch) => run(async () => {
+    const r = await adminApi.luckyRevoke({ batchId: b.id, roundId: round.id })
+    setMsg(t('admin.lucky.issue.revoked', { n: r.revoked })); onIssued()
+    await loadBatches().catch(() => {})
+  })
 
   return (
     <div className="lka-issue space-y-4">
@@ -266,14 +282,7 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
           {over && <span className="adm-pill is-down">{t(`admin.lucky.issue.err.${over}`)}</span>}
           <button type="button" className="adm-btn is-primary ml-auto"
             disabled={busy || !reason.trim() || !list.length || over !== null}
-            onClick={() => run(async () => {
-              if (!window.confirm(t('admin.lucky.issue.confirmAsk', tot))) return
-              const r = await adminApi.luckyIssue({ roundId: round.id, reason: reason.trim(), requestId, items: list.map((x) => ({
-                userId: x.userId, count: x.count, source: x.source, sourceRef: x.sourceRef, rank: x.rank })) })
-              setMsg(t('admin.lucky.issue.done', { users: r.userCount, tickets: r.ticketCount }))
-              setList([]); setReason(''); setRequestId(newRequestId()); onIssued()
-              await loadBatches().catch(() => {})
-            })}>{t('admin.lucky.issue.confirm')}</button>
+            onClick={() => setPendingAction({ kind: 'issue' })}>{t('admin.lucky.issue.confirm')}</button>
         </div>
         {msg && <p className="lka-note mt-3" role="status">{msg}</p>}
       </section>
@@ -303,12 +312,7 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
                     <td className="num whitespace-nowrap text-neutral-300">{b.used} / {b.ticketCount}</td>
                     <td className="text-right">
                       <button type="button" className="adm-btn" disabled={busy}
-                        onClick={() => run(async () => {
-                          if (!window.confirm(t('admin.lucky.issue.revokeAsk', { reason: b.reason }))) return
-                          const r = await adminApi.luckyRevoke({ batchId: b.id, roundId: round.id })
-                          setMsg(t('admin.lucky.issue.revoked', { n: r.revoked })); onIssued()
-                          await loadBatches().catch(() => {})
-                        })}>
+                        onClick={() => setPendingAction({ kind: 'revoke', batch: b })}>
                         {t('admin.lucky.issue.revoke')}</button>
                     </td>
                   </tr>
@@ -318,6 +322,24 @@ export default function LuckyIssueTab({ round, onIssued }: { round: LuckyRoundAd
           </div>
         )}
       </section>
+      {pendingAction && (
+        <ConfirmModal
+          center
+          title={pendingAction.kind === 'issue' ? t('admin.lucky.issue.confirm') : t('admin.lucky.issue.revoke')}
+          message={pendingAction.kind === 'issue'
+            ? t('admin.lucky.issue.confirmAsk', tot)
+            : t('admin.lucky.issue.revokeAsk', { reason: pendingAction.batch.reason })}
+          confirmLabel={pendingAction.kind === 'issue' ? t('admin.lucky.issue.confirm') : t('admin.lucky.issue.revoke')}
+          danger={pendingAction.kind === 'revoke'}
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => {
+            const c = pendingAction
+            setPendingAction(null)
+            if (c.kind === 'issue') void doIssue()
+            else void doRevoke(c.batch)
+          }}
+        />
+      )}
     </div>
   )
 }

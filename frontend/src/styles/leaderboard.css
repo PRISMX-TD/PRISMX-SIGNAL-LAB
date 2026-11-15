@@ -21,7 +21,7 @@
 .lb-skel {
   animation: lb-skel-in 0.2s var(--ease-out) 0.15s both;
 }
-@media (hover: hover) {
+@media (hover: hover) and (pointer: fine) {
   .lb-podium-card:hover {
     transform: translateY(-4px);
   }

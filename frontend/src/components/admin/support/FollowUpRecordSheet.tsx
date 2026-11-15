@@ -212,23 +212,23 @@ export default function FollowUpRecordSheet({
           )}
 
           {fu?.note && (
-            <figure className="border-l-2 border-[var(--purple-hi)] pl-4">
+            <figure className="rounded-panel bg-[var(--surface-2)] px-3.5 py-2.5">
               <figcaption className="text-xs text-neutral-500">
                 {t('admin.support.progress.assignNote')}
                 {fu.assignedByName ? ` · ${fu.assignedByName}` : ''}
               </figcaption>
-              <blockquote className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-neutral-200">{fu.note}</blockquote>
+              <blockquote className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-200">{fu.note}</blockquote>
             </figure>
           )}
 
           {/* 跟进动态 / activity */}
           <section>
-            <h4 className="mb-3 text-[13px] font-semibold text-neutral-100">
+            <h4 className="mb-3 text-sm font-semibold text-neutral-100">
               {t('admin.support.progress.timeline')}
               {rec.notes.length > 0 && <span className="num ml-2 text-xs font-normal text-neutral-500">{rec.notes.length}</span>}
             </h4>
             {items.length === 0 ? (
-              <p className="rounded-2xl bg-[var(--surface-2)] px-4 py-6 text-center text-xs text-neutral-500">{t('admin.support.progress.timelineEmpty')}</p>
+              <p className="rounded-card bg-[var(--surface-2)] px-4 py-6 text-center text-xs text-neutral-500">{t('admin.support.progress.timelineEmpty')}</p>
             ) : (
               <ol className="adm-tl">
                 {items.map((it) =>
@@ -242,14 +242,14 @@ export default function FollowUpRecordSheet({
                           {it.note.outcome && <span className="adm-pill">{it.note.outcome}</span>}
                           <span className="num ml-auto">{fmtStamp(it.note.createdAt)}</span>
                         </div>
-                        <p className="mt-1.5 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-neutral-200">{it.note.content}</p>
+                        <p className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-relaxed text-neutral-200">{it.note.content}</p>
                       </div>
                     </li>
                   ) : (
                     <li key={`e-${it.ev.id}`}>
                       <span className={`adm-tl-dot ${dotTone(it.ev.action)}`} aria-hidden="true"><i /></span>
                       <p className="min-w-0 flex-1 pt-0.5 text-xs leading-relaxed text-neutral-400">{evText(it.ev)}</p>
-                      <span className="num shrink-0 pt-0.5 text-xs text-neutral-600">{fmtStamp(it.ev.at)}</span>
+                      <span className="num shrink-0 pt-0.5 text-xs text-neutral-500">{fmtStamp(it.ev.at)}</span>
                     </li>
                   ),
                 )}
@@ -259,10 +259,10 @@ export default function FollowUpRecordSheet({
 
           {rec.conversions.length > 0 && (
             <section>
-              <h4 className="mb-3 text-[13px] font-semibold text-neutral-100">{t('admin.support.progress.conversions')}</h4>
+              <h4 className="mb-3 text-sm font-semibold text-neutral-100">{t('admin.support.progress.conversions')}</h4>
               <ul className="space-y-1.5">
                 {rec.conversions.map((c) => (
-                  <li key={c.id} className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-2)] px-3.5 py-2.5 text-xs">
+                  <li key={c.id} className="flex flex-wrap items-center gap-2 rounded-panel bg-[var(--surface-2)] px-3.5 py-2.5 text-xs">
                     <span className="font-medium text-neutral-200">{t(`supportDesk.conversions.kind.${c.kind}`)}</span>
                     <span className={`adm-pill ${c.status === 'confirmed' ? 'is-up' : c.status === 'rejected' ? 'is-down' : 'is-warn'}`}>
                       {t(`supportDesk.conversions.status.${c.status}`)}
@@ -279,7 +279,7 @@ export default function FollowUpRecordSheet({
           {fu &&
             (fu.active ? (
               <section className="border-t border-[var(--line)] pt-5">
-                <h4 className="mb-3 text-[13px] font-semibold text-neutral-100">{t('admin.support.progress.actionsTitle')}</h4>
+                <h4 className="mb-3 text-sm font-semibold text-neutral-100">{t('admin.support.progress.actionsTitle')}</h4>
                 <div className="flex flex-wrap items-center gap-2">
                   <Select
                     value={reassignTo}

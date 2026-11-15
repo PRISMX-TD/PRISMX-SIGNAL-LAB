@@ -28,7 +28,7 @@
   display: grid;
   gap: 28px;
   align-items: end;
-  animation: acct-in 0.5s var(--ease-out) both;
+  animation: acct-in var(--dur-medium) var(--ease-out) backwards;
 }
 @media (min-width: 1024px) {
   .acct-hero {
@@ -43,7 +43,7 @@
    overflow-wrap guards an overlong email local-part. */
 .acct-name {
   font-size: clamp(32px, 4.2vw, 52px);
-  color: #fff;
+  color: var(--text-strong);
   overflow-wrap: anywhere;
 }
 .acct-meta {
@@ -56,7 +56,7 @@
   color: var(--text-2);
 }
 .acct-meta-email {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text-2);
   overflow-wrap: anywhere;
@@ -71,7 +71,7 @@
 /* ── 身份牌 / plate ── */
 .acct-plate-wrap {
   perspective: 900px;
-  animation: acct-in 0.6s var(--ease-out) 0.08s both;
+  animation: acct-in var(--dur-slow) var(--ease-out) 0.08s backwards;
 }
 @media (min-width: 1024px) {
   .acct-plate-wrap {
@@ -161,8 +161,10 @@
     transparent 60%
   );
 }
-.acct-plate:hover .acct-plate-light {
-  opacity: 1;
+@media (hover: hover) and (pointer: fine) {
+  .acct-plate:hover .acct-plate-light {
+    opacity: 1;
+  }
 }
 .acct-plate-top,
 .acct-plate-bottom {
@@ -178,7 +180,7 @@
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-3);
 }
@@ -193,15 +195,15 @@
   align-items: center;
   height: 24px;
   padding: 0 10px;
-  border-radius: var(--r-xs);
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  border-radius: var(--r-tile);
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
 }
 .acct-plan.pro {
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
 }
 .acct-plan.free {
   background: var(--nest);
@@ -216,9 +218,9 @@
   background-image: linear-gradient(
     90deg,
     transparent,
-    rgba(139, 108, 255, 0.9) 18%,
-    rgba(237, 237, 240, 0.9) 50%,
-    rgba(90, 34, 238, 0.9) 82%,
+    rgb(var(--purple-hi-rgb) / 0.9) 18%,
+    rgb(var(--text-rgb) / 0.9) 50%,
+    rgb(var(--purple-rgb) / 0.9) 82%,
     transparent
   );
 }
@@ -235,7 +237,7 @@
 }
 .acct-plate-v {
   margin-top: 4px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   font-size: 13px;
   color: var(--text);
@@ -273,8 +275,8 @@
   gap: 20px;
   padding: 32px 0;
   border-top: 1px solid var(--line);
-  animation: acct-in 0.5s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 80ms + 120ms);
+  animation: acct-in var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms + 120ms);
 }
 @media (min-width: 1024px) {
   .acct-row {
@@ -286,7 +288,7 @@
 .acct-row-h {
   font-size: 17px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .acct-row-p {
   margin-top: 6px;
@@ -301,8 +303,10 @@
   font-size: 13px;
   color: var(--purple-hi);
 }
-.acct-row-link:hover {
-  text-decoration: underline;
+@media (hover: hover) and (pointer: fine) {
+  .acct-row-link:hover {
+    text-decoration: underline;
+  }
 }
 .acct-row-body {
   min-width: 0;
@@ -393,7 +397,7 @@
 .acct-master-t {
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .acct-master-s {
   display: inline-flex;
@@ -423,7 +427,7 @@
   color: var(--text-3);
 }
 .acct-hint.warn {
-  color: #e0a83c;
+  color: var(--warn);
 }
 /* 「在本机开启 / 重试」：跟在琥珀色提示后面的就地修复按钮。账户页与顶栏铃铛共用。
    Inline fix action after the amber hint; shared by the account page and the bell panel. */
@@ -431,18 +435,21 @@
   display: inline-block;
   margin-left: 6px;
   padding: 2px 9px;
-  border: 1px solid rgba(224, 168, 60, 0.45);
-  border-radius: 8px;
-  background: rgba(224, 168, 60, 0.14);
+  border: 1px solid rgb(var(--warn-rgb) / 0.45);
+  border-radius: var(--r-tile);
+  background: rgb(var(--warn-rgb) / 0.14);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.6;
-  color: #f0c060;
+  /* 字与边框、底同源（计划 039 C 期把边框和底换成了 --warn） / text shares the border and fill's --warn */
+  color: var(--warn);
   cursor: pointer;
   white-space: nowrap;
 }
-.notif-fix-btn:hover:not(:disabled) {
-  background: rgba(224, 168, 60, 0.24);
+@media (hover: hover) and (pointer: fine) {
+  .notif-fix-btn:hover:not(:disabled) {
+    background: rgb(var(--warn-rgb) / 0.24);
+  }
 }
 .notif-fix-btn:disabled { opacity: 0.5; cursor: default; }
 
@@ -461,11 +468,13 @@
   gap: 12px;
   margin-bottom: 12px;
 }
+/* 0.14em 在中文上读成一个个散开的字；0.04em 只留一点呼吸。
+   0.14em reads as scattered characters in Chinese; 0.04em keeps a little air. */
 .acct-group-h .sec-h-title {
-  letter-spacing: 0.14em;
+  letter-spacing: 0.04em;
 }
 .acct-group-n {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-3);
 }
@@ -487,7 +496,7 @@
   height: 32px;
   padding: 0 14px;
   border: 0;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-tile);
   background: var(--nest);
   box-shadow: inset 0 0 0 1px var(--line);
   color: var(--text-2);
@@ -502,21 +511,25 @@
     box-shadow var(--dur-fast) var(--ease-out),
     transform var(--dur-fast) var(--ease-out);
 }
-.acct-chip:hover:not(:disabled) {
-  background: var(--nest-hi);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .acct-chip:hover:not(:disabled) {
+    background: var(--nest-hi);
+    color: var(--text);
+  }
 }
 .acct-chip:active:not(:disabled) {
   transform: scale(0.97);
 }
 .acct-chip[aria-pressed="true"] {
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
   box-shadow: none;
 }
-.acct-chip[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--purple-vivid);
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .acct-chip[aria-pressed="true"]:hover:not(:disabled) {
+    background: var(--purple-vivid);
+    color: var(--text-strong);
+  }
 }
 .acct-chip[data-included="true"] {
   background: transparent;
@@ -589,7 +602,7 @@
   width: 112px;
   height: 36px;
   padding: 0 12px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 .acct-window-to {
@@ -615,7 +628,7 @@
   display: flex;
   justify-content: space-between;
   margin-top: 6px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text-3);
 }

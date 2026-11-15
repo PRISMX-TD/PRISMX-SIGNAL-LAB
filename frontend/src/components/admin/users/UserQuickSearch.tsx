@@ -89,11 +89,11 @@ export default function UserQuickSearch({ onPick, onClose }: { onPick: (userId: 
                   type="button"
                   onMouseEnter={() => setActive(i)}
                   onClick={() => pick(u)}
-                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${i === active ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}`}
+                  className={`flex w-full items-center gap-3 rounded-panel px-3 py-2 text-left transition ${i === active ? 'bg-white/[0.06]' : 'hover:bg-white/[0.04]'}`}
                 >
                   <Avatar name={u.nickname || u.email} size={30} tone={u.role === 'user' ? 'neutral' : 'staff'} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium text-neutral-50">{u.nickname || u.email}</span>
+                    <span className="block truncate text-sm font-medium text-neutral-50">{u.nickname || u.email}</span>
                     <span className="block truncate font-mono text-xs text-neutral-500">
                       {u.email}
                       {u.phone ? ` · ${u.phone}` : ''}

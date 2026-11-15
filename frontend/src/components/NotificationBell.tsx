@@ -28,9 +28,12 @@ import { detectPushEnv, deviceNotifHint } from "../utils/pushEnv"
 import { useDeviceSubState } from "../utils/pushDeviceState"
 import { disableNotifications, enableNotifications, ENABLE_ERROR_KEYS, NotifEnableError } from "../utils/notifications"
 import { useBackToClose } from "../utils/useBackToClose"
+import { usePopoverEscape } from "../utils/usePopoverEscape"
 import { getSharedNotifPrefs, invalidateSharedNotifPrefs, updateSharedNotifPrefs } from "../utils/notifPrefsShared"
 import Switch from "./Switch"
 import { FestivalEmptyMini, FestivalTopper } from "../festival/FestivalDecor"
+import { onRovingKeyDown } from "../utils/rovingTabs"
+import ConfirmModal from "./ConfirmModal"
 
 type Status = "off" | "on" | "attention"
 // 面板分「消息 / 公告」两页，每页可见约 3 条，其余在列表里下滑（.nb-list 限高）。
@@ -73,11 +76,22 @@ export default function NotificationBell() {
   const [note, setNote] = useState<string | null>(null)
   const [anns, setAnns] = useState<Announcement[] | null>(null)
   const [unread, setUnread] = useState(0)
-  const [feed, setFeed] = useState<NotificationFeedItem[]>([])
+  // null = 还没拉到过（画骨架），与公告一致。以前初值是 []，「还在加载」「加载失败」都显示成「暂无消息」。
+  // null = never fetched (skeleton), like announcements. It used to start as [], so "still
+  // loading" and "failed" both read as "no messages".
+  const [feed, setFeed] = useState<NotificationFeedItem[] | null>(null)
   const [feedUnread, setFeedUnread] = useState(0)
+  // 拉取失败的标记：列表还是 null 时显示「没有加载出来」+ 重试；已有列表时保留旧列表，不打断。
+  // Fetch-failed flags: with no list yet show "couldn't load" + retry; with a list, keep it quietly.
+  const [feedFailed, setFeedFailed] = useState(false)
+  const [annsFailed, setAnnsFailed] = useState(false)
+  // 一键已读 / 清空失败回滚时的一行说明。/ One-line note when mark-all-read / clear rolls back.
+  const [actionErr, setActionErr] = useState<string | null>(null)
+  const [confirmClear, setConfirmClear] = useState(false)
   const [readingAll, setReadingAll] = useState(false)
   const [clearing, setClearing] = useState(false)
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const btnRef = useRef<HTMLButtonElement | null>(null)
 
   // 共享读取：挂载时与 Layout / NotifDeviceBanner 的同一请求合并（utils/notifPrefsShared）。
   // Shared read, deduped with Layout's and NotifDeviceBanner's on mount.
@@ -114,10 +128,13 @@ export default function NotificationBell() {
         if (seq !== annsSeq.current) return
         setAnns(res.items)
         setUnread(res.unreadCount)
+        setAnnsFailed(false)
       })
       .catch(() => {
         if (seq !== annsSeq.current) return
-        setAnns((prev) => prev ?? [])
+        // 不再把失败设成 []（那会显示「暂无公告」）：列表保持原样，只记下失败。
+        // No longer turned into [] (which read "no announcements"): keep the list, note the failure.
+        setAnnsFailed(true)
       })
   }
   const loadFeed = () => {
@@ -128,8 +145,12 @@ export default function NotificationBell() {
         if (seq !== feedSeq.current) return
         setFeed(res.items)
         setFeedUnread(res.unreadCount)
+        setFeedFailed(false)
       })
-      .catch(() => {})
+      .catch(() => {
+        if (seq !== feedSeq.current) return
+        setFeedFailed(true)
+      })
   }
 
   useEffect(() => {
@@ -151,18 +172,34 @@ export default function NotificationBell() {
       setTab(feedUnread === 0 && unread > 0 ? "announcements" : "messages")
       loadAnns()
       loadFeed()
+    } else {
+      setActionErr(null)
     }
   }, [open])
 
   // 面板打开时：点击外部关闭 / close on outside click while the panel is open
+  // 清空确认框开着时不挂这个监听：确认框 portal 在 body 上，点它会被当成「点了外部」把面板关掉。
+  // Not while the clear-confirm dialog is up: it is portalled to body, so tapping it would
+  // count as an outside click and close the panel.
   useEffect(() => {
-    if (!open) return
+    if (!open || confirmClear) return
     const onClick = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
     }
     document.addEventListener("mousedown", onClick)
     return () => document.removeEventListener("mousedown", onClick)
-  }, [open])
+  }, [open, confirmClear])
+  // 手机划返回先关确认框，再关面板（openStack 后开的先关，见 useBackToClose）。
+  // A back swipe closes the confirm first, then the panel (see useBackToClose's openStack).
+  useBackToClose(confirmClear, () => setConfirmClear(false))
+  // Esc 收起并把焦点还给铃铛（见 utils/usePopoverEscape）。确认框开着时让开：这个监听在捕获阶段
+  // 并拦下事件，不让开的话 Esc 会关掉面板、确认框却留在屏幕上；让开后 Esc 由确认框自己的
+  // useDialogA11y 处理，先关确认框，再按一次才关面板。
+  // Escape closes and refocuses the bell (see utils/usePopoverEscape). Stands aside while the
+  // confirm is up: this listener runs in the capture phase and stops the event, so it would
+  // close the panel and leave the confirm on screen; the confirm's own useDialogA11y handles
+  // that Escape, and the next one closes the panel.
+  usePopoverEscape(open && !confirmClear, () => setOpen(false), btnRef, rootRef)
 
   const env = detectPushEnv()
   const deviceState = useDeviceSubState()
@@ -252,13 +289,17 @@ export default function NotificationBell() {
   async function handleReadAll() {
     if (readingAll) return
     setReadingAll(true)
+    setActionErr(null)
     setUnread(0)
     setFeedUnread(0)
     setAnns((prev) => (prev ? prev.map((a) => ({ ...a, read: true })) : prev))
-    setFeed((prev) => prev.map((n) => ({ ...n, read: true })))
+    setFeed((prev) => (prev ? prev.map((n) => ({ ...n, read: true })) : prev))
     try {
       await notificationApi.readAll()
     } catch {
+      // 回滚要说一声：不然未读数字悄悄冒回来，用户以为自己没点上。
+      // Say so on rollback: otherwise the unread count quietly returns and the user thinks the tap missed.
+      setActionErr(t("notifPanel.actionFailed"))
       loadAnns()
       loadFeed()
     } finally {
@@ -266,17 +307,19 @@ export default function NotificationBell() {
     }
   }
 
-  // 清空消息：确认后乐观清掉列表再落库，失败就重拉。只动「消息」段，公告不受影响。
-  // Clear messages: confirm, clear optimistically, persist; refetch on failure.
+  // 清空消息：站内确认框确认后乐观清掉列表再落库，失败就重拉并说明。只动「消息」段，公告不受影响。
+  // Clear messages: confirm in-app, clear optimistically, persist; on failure refetch and say so.
   // Only the feed — announcements are untouched.
   async function handleClearFeed() {
-    if (clearing || !window.confirm(t("notifPanel.clearConfirm"))) return
+    if (clearing) return
     setClearing(true)
+    setActionErr(null)
     setFeed([])
     setFeedUnread(0)
     try {
       await notificationApi.clearFeed()
     } catch {
+      setActionErr(t("notifPanel.actionFailed"))
       loadFeed()
     } finally {
       setClearing(false)
@@ -290,7 +333,7 @@ export default function NotificationBell() {
   const followFeedItem = (item: NotificationFeedItem) => {
     setOpen(false)
     if (item.read) return
-    setFeed((prev) => prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)))
+    setFeed((prev) => (prev ? prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)) : prev))
     setFeedUnread((n) => Math.max(0, n - 1))
     void notificationApi.markFeedRead(item.id).catch(() => {})
   }
@@ -302,10 +345,15 @@ export default function NotificationBell() {
   return (
     <div ref={rootRef} className="nb">
       <button
+        ref={btnRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={t("notifPanel.title")}
+        // 有未读时名字里带上数量：aria-label 会整个替换按钮内容，下面那个数字读屏念不到。
+        // Include the count in the name: aria-label replaces the button's content, so the
+        // number below is never read on its own.
+        aria-label={totalUnread > 0 ? t("notifPanel.bellLabel", { n: totalUnread }) : t("notifPanel.title")}
         aria-expanded={open}
+        aria-haspopup="dialog"
         className={`nb-btn ${status}${open ? " open" : ""}`}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -313,7 +361,7 @@ export default function NotificationBell() {
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
         {totalUnread > 0 ? (
-          <span className="nb-count num">{totalUnread > 9 ? "9+" : totalUnread}</span>
+          <span className="nb-count num" aria-hidden="true">{totalUnread > 9 ? "9+" : totalUnread}</span>
         ) : (
           status !== "off" && <i className="nb-dot" aria-hidden="true" />
         )}
@@ -321,7 +369,7 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="card glass nb-panel" role="dialog" aria-label={t("notifPanel.title")}>
+        <div className="nb-panel" role="dialog" aria-label={t("notifPanel.title")}>
           <div className="nb-head">
             <h3>{t("notifPanel.title")}</h3>
             {totalUnread > 0 && (
@@ -336,28 +384,39 @@ export default function NotificationBell() {
               </button>
             )}
           </div>
+          {actionErr && <p className="nb-act-err" role="alert">{actionErr}</p>}
 
-          <div className="nb-tabs" role="tablist">
-            {(["messages", "announcements"] as const).map((k) => {
-              const n = k === "messages" ? feedUnread : unread
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  role="tab"
-                  aria-selected={tab === k}
-                  className={tab === k ? "on" : ""}
-                  onClick={() => setTab(k)}
-                >
-                  {t(`notifPanel.${k}`)}
-                  {n > 0 && <span className="num">{n > 99 ? "99+" : n}</span>}
-                </button>
-              )
-            })}
+          {/* 页签行：左边两个页签（tablist），右边是当前页签的动作（清空消息 / 全部公告）。
+              动作放在 tablist 外面：ARIA 规定 tablist 只能装 tab（axe 报 aria-required-children），
+              按钮或链接混在里面，读屏会把它当成页签组的一部分念。
+              Tab row: the two tabs (the tablist) on the left, the current tab's action
+              (clear messages / all announcements) on the right. The action sits outside the
+              tablist: ARIA lets a tablist own only tabs (axe: aria-required-children), and a
+              button or link inside it is read as part of the tab group. */}
+          <div className="nb-tabs-row">
+            <div className="nb-tabs" role="tablist" onKeyDown={onRovingKeyDown}>
+              {(["messages", "announcements"] as const).map((k) => {
+                const n = k === "messages" ? feedUnread : unread
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    role="tab"
+                    aria-selected={tab === k}
+                    tabIndex={tab === k ? 0 : -1}
+                    className={tab === k ? "on" : ""}
+                    onClick={() => setTab(k)}
+                  >
+                    {t(`notifPanel.${k}`)}
+                    {n > 0 && <span className="num">{n > 99 ? "99+" : n}</span>}
+                  </button>
+                )
+              })}
+            </div>
             <span className="nb-tabs-act">
               {tab === "messages" ? (
-                feed.length > 0 && (
-                  <button type="button" className="nb-readall" onClick={handleClearFeed} disabled={clearing}>
+                feed != null && feed.length > 0 && (
+                  <button type="button" className="nb-readall" onClick={() => setConfirmClear(true)} disabled={clearing}>
                     {t("notifPanel.clearMessages")}
                   </button>
                 )
@@ -371,7 +430,19 @@ export default function NotificationBell() {
 
           {tab === "messages" ? (
             <section role="tabpanel" aria-label={t("notifPanel.messages")}>
-              {feed.length === 0 ? (
+              {feed == null ? (
+                feedFailed ? (
+                  <p className="nb-empty" role="alert">
+                    {t("common.loadFailed")}
+                    <button type="button" className="nb-readall" onClick={loadFeed}>{t("common.retry")}</button>
+                  </p>
+                ) : (
+                  <div className="nb-skel" aria-hidden="true">
+                    <span className="skeleton" style={{ display: "block", width: "60%", height: 12 }} />
+                    <span className="skeleton" style={{ display: "block", width: "85%", height: 10 }} />
+                  </div>
+                )
+              ) : feed.length === 0 ? (
                 <p className="nb-empty">
                   <FestivalEmptyMini />
                   {t("notifPanel.noMessages")}
@@ -388,6 +459,7 @@ export default function NotificationBell() {
                       <i className="nb-ann-dot" aria-hidden="true" />
                       <span className="nb-ann-main">
                         <span className="nb-ann-title">
+                          {!n.read && <span className="sr-only">{t("notifPanel.unread")}</span>}
                           <b>{t(`notifFeed.${n.kind}`)}</b>
                         </span>
                         {n.text && <span className="nb-ann-sum">{n.text}</span>}
@@ -401,10 +473,17 @@ export default function NotificationBell() {
           ) : (
             <section role="tabpanel" aria-label={t("notifPanel.announcements")}>
               {anns == null ? (
-                <div className="nb-skel" aria-hidden="true">
-                  <span className="skeleton" style={{ display: "block", width: "60%", height: 12 }} />
-                  <span className="skeleton" style={{ display: "block", width: "85%", height: 10 }} />
-                </div>
+                annsFailed ? (
+                  <p className="nb-empty" role="alert">
+                    {t("common.loadFailed")}
+                    <button type="button" className="nb-readall" onClick={loadAnns}>{t("common.retry")}</button>
+                  </p>
+                ) : (
+                  <div className="nb-skel" aria-hidden="true">
+                    <span className="skeleton" style={{ display: "block", width: "60%", height: 12 }} />
+                    <span className="skeleton" style={{ display: "block", width: "85%", height: 10 }} />
+                  </div>
+                )
               ) : shown.length === 0 ? (
                 <p className="nb-empty">
                   <FestivalEmptyMini />
@@ -422,6 +501,7 @@ export default function NotificationBell() {
                       <i className="nb-ann-dot" aria-hidden="true" />
                       <span className="nb-ann-main">
                         <span className="nb-ann-title">
+                          {!a.read && <span className="sr-only">{t("notifPanel.unread")}</span>}
                           {a.pinned && <span className="ann-pin">{t("announcements.pinned")}</span>}
                           <b>{pick(a.titleZh, a.titleEn)}</b>
                         </span>
@@ -463,6 +543,19 @@ export default function NotificationBell() {
             {note && !deviceHint && <p className="warn">{note}</p>}
           </section>
         </div>
+      )}
+      {confirmClear && (
+        <ConfirmModal
+          title={t("notifPanel.clearTitle")}
+          message={t("notifPanel.clearConfirm")}
+          confirmLabel={t("notifPanel.clearMessages")}
+          danger
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={() => {
+            setConfirmClear(false)
+            void handleClearFeed()
+          }}
+        />
       )}
     </div>
   )

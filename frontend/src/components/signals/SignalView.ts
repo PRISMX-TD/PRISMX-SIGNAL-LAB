@@ -1,6 +1,7 @@
 // 信号面板共享常量与纯函数 / shared constants & pure helpers for the signals panel
 import type { Signal, SignalResult, StrategySignal, Trend } from '../../api/types'
 import { calcCountdown, parseTime } from '../../api/utils'
+import { EMPTY } from '../../utils/format'
 
 // 个人策略信号在 UI 上混进普通信号流展示（同样的卡片、同样按时间排位），
 // 不再单独开一块区域；strategySignal 标记只用于下单时选择提交路径（不带
@@ -113,7 +114,7 @@ export function priceDecimals(entry: number | null, sl: number | null, tp: numbe
   return Math.max(decimalsOf(entry), decimalsOf(sl), decimalsOf(tp))
 }
 export function fmtPx(v: number | null, decimals: number): string {
-  if (v == null || !Number.isFinite(v)) return '-'
+  if (v == null || !Number.isFinite(v)) return EMPTY
   return v.toFixed(decimals)
 }
 
@@ -137,7 +138,7 @@ export function riskFraction(riskPrice: number, rewardPrice: number): number | n
 // the strategy name, and a ten-minute ticket needs no date or zone suffix.
 export function fmtIssueClock(iso: string | null | undefined): string {
   const d = parseTime(iso)
-  if (!d || Number.isNaN(d.getTime())) return '-'
+  if (!d || Number.isNaN(d.getTime())) return EMPTY
   return d.toLocaleTimeString('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
@@ -173,7 +174,7 @@ export function resultLabel(result: SignalResult, t: (key: string) => string): s
   }
 }
 
-export const FOCUS_DOT: Record<FocusState, string> = { WATCH: '#94a3b8', LONG: 'var(--up)', SHORT: 'var(--down)' }
+export const FOCUS_DOT: Record<FocusState, string> = { WATCH: 'var(--text-3)', LONG: 'var(--up)', SHORT: 'var(--down)' }
 
 // 多周期趋势要展示的固定周期顺序 / fixed order of timeframes shown in the trend widget
 export const TREND_TFS = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4'] as const

@@ -12,7 +12,7 @@ import type { CSSProperties } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { gamificationApi, userApi } from '../api/client'
+import { ApiHttpError, gamificationApi, userApi } from '../api/client'
 import { localizeApiError, fmtDate, fmtProgressNum, fmtOwnerPct } from '../api/utils'
 import { fmtPct } from '../components/winrate/shared'
 import { SkeletonBlock, SkeletonLine } from '../components/Skeleton'
@@ -25,6 +25,8 @@ import { materialOf } from '../components/badges/medal'
 import { BadgeProgressBar } from '../components/badges/BadgeProgressBar'
 import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
 import { readJson, writeJson } from '../utils/safeStorage'
+import { useDelayedFlag } from '../utils/useDelayedFlag'
+import { EMPTY } from '../utils/format'
 
 // 勋章库分三层：进阶勋章（各有铜 / 银 / 金三档）、特殊勋章（无档位）、绝版勋章
 // （窗口关闭后永久停发），严格按接口的 shelf 字段分组，空层不渲染。
@@ -170,7 +172,7 @@ function TaskValue({ task, t }: { task: GamificationTask; t: TFunction }) {
     case 'winrate':
       return (
         <>
-          <b>{task.currentWinRate != null ? fmtPct(task.currentWinRate) : '—'}</b>
+          <b>{task.currentWinRate != null ? fmtPct(task.currentWinRate) : EMPTY}</b>
           <span> / {fmtPct(target)}</span>
         </>
       )
@@ -242,7 +244,7 @@ function TaskTile({ task, index, t }: { task: GamificationTask; index: number; t
   const visual = taskVisual(task)
   const pct = taskPct(task)
   const { title, cond } = splitTaskName(t(`gamification.tasks.${task.id}`))
-  const style = { '--i': index, '--pct': pct } as CSSProperties
+  const style = { '--i': Math.min(index, 5), '--pct': pct } as CSSProperties
   return (
     <li className={`tk-tile tk-${visual}`} style={style}>
       <div className="tk-tile-top">
@@ -338,6 +340,10 @@ export default function AchievementsPage() {
   const [me, setMe] = useState<GamificationMe | null>(null)
   const [loading, setLoading] = useState(true)
   const [forbidden, setForbidden] = useState(false)
+  // 非 403 的失败（超时、断网、5xx）：显示「没有加载出来」+ 重试，而不是「未开放」。
+  // A non-403 failure (timeout, offline, 5xx) shows "couldn't load" + retry, not "not available".
+  const [loadErr, setLoadErr] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [showBreakdown, setShowBreakdown] = useState(false)
   const [equipping, setEquipping] = useState<string | null>(null)
   const [equipMsg, setEquipMsg] = useState<string | null>(null)
@@ -360,18 +366,22 @@ export default function AchievementsPage() {
 
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
+    setLoadErr(null)
     gamificationApi
       .me()
       .then((res) => {
         if (!cancelled) setMe(res)
       })
-      .catch(() => {
-        // 唯一预期的失败就是入口理论上已隐藏、用户直接打 URL 撞上 403——
-        // 不细分错误类型，统一退化成内测提示。
-        // The one expected failure is someone hitting a URL whose entry is
-        // already hidden and getting a 403 — not worth distinguishing error
-        // kinds; everything degrades to the same beta hint.
-        if (!cancelled) setForbidden(true)
+      .catch((err: unknown) => {
+        if (cancelled) return
+        // 只有 403 是「入口已隐藏、用户直接打 URL」，退化成内测提示。超时和断网（大陆网络、手机
+        // 信号差时最常见）以前也落到这里，用户看到「未开放」以为功能下线了，还没有重试的办法。
+        // Only a 403 means "entry hidden, URL typed directly" and degrades to the beta hint.
+        // Timeouts and offline errors (the common case on mainland or weak mobile networks) used
+        // to land here too, telling users the feature was gone, with no way to retry.
+        if (err instanceof ApiHttpError && err.status === 403) setForbidden(true)
+        else setLoadErr(err instanceof Error ? localizeApiError(err.message) : '')
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -379,7 +389,7 @@ export default function AchievementsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadKey])
 
   useEffect(() => {
     if (!me || mintCheckedRef.current) return
@@ -435,7 +445,7 @@ export default function AchievementsPage() {
       await userApi.updateProfile({ equippedBadges: next })
     } catch (err) {
       setMe(prev)
-      setEquipMsg(err instanceof Error ? localizeApiError(err.message) : t('account.notifError'))
+      setEquipMsg(err instanceof Error ? localizeApiError(err.message) : t('common.error'))
     } finally {
       setEquipping(null)
     }
@@ -460,7 +470,24 @@ export default function AchievementsPage() {
     void writeEquipped([badgeId, ...me.equippedBadges.filter((id) => id !== badgeId)], badgeId)
   }
 
-  if (loading) return <PageSkeleton />
+  // 骨架延迟 200ms 出现、出现后至少停 400ms（见 utils/useDelayedFlag）。
+  // The skeleton appears after 200ms and then stays at least 400ms (see utils/useDelayedFlag).
+  const showSkel = useDelayedFlag(loading)
+  if (loading || showSkel) return showSkel ? <PageSkeleton /> : null
+
+  if (loadErr != null && !me) {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center">
+        <div className="card glass p-6 text-center text-sm text-neutral-400" role="alert">
+          <p>{t('common.loadFailed')}</p>
+          {loadErr && <p className="mt-1 text-xs text-neutral-500">{loadErr}</p>}
+          <button type="button" className="btn btn-ghost mt-4 h-9 px-4 text-sm" onClick={() => setReloadKey((k) => k + 1)}>
+            {t('common.retry')}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (forbidden || !me) {
     return (
@@ -582,7 +609,7 @@ export default function AchievementsPage() {
                 <span className="hidden sm:inline">{t('gamification.winRateCard.combined')}</span>
                 <span className="sm:hidden">{t('gamification.winRateCard.combinedShort')}</span>
               </small>
-              <strong className="num text-up">{me.winRate.value != null ? fmtPct(me.winRate.value) : '—'}</strong>
+              <strong className="num text-up">{me.winRate.value != null ? fmtPct(me.winRate.value) : EMPTY}</strong>
               {me.winRate.perLogin.length > 0 && (
                 <button type="button" className="ach-link" onClick={() => setShowBreakdown((v) => !v)}>
                   {t('gamification.winRateCard.breakdown')}
@@ -635,7 +662,7 @@ export default function AchievementsPage() {
                     <td className="num py-1.5 pr-4 text-neutral-300">{row.trades}</td>
                     <td className="num py-1.5 pr-4 text-neutral-300">{row.wins}</td>
                     <td className="num py-1.5 pr-4 text-neutral-300">
-                      {row.winRate != null ? fmtPct(row.winRate) : '—'}
+                      {row.winRate != null ? fmtPct(row.winRate) : EMPTY}
                     </td>
                     <td className="num py-1.5 text-neutral-500">{row.excluded}</td>
                   </tr>
@@ -735,7 +762,7 @@ export default function AchievementsPage() {
                       </MedalTilt>
                       <b className="ach-name">{t(`gamification.badges.${b.id}.name`)}</b>
                       {tiered && (
-                        <span className="ach-tiers" aria-label={b.tier > 0 ? t(`gamification.tier.${b.tier}`) : t('gamification.notEarned')}>
+                        <span className="ach-tiers">
                           {TIERS.map((tier) => (
                             <i key={tier} className={`t${tier} ${b.tier >= tier ? 'on' : ''}`} aria-hidden />
                           ))}

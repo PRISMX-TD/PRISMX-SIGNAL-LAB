@@ -132,15 +132,15 @@ export default function AssignPanel({
               options={FOLLOW_UP_PRIORITIES.map((p) => ({ value: p, label: t(`supportDesk.priority.${p}`) }))} />
           </label>
         </div>
-        <textarea className="input min-h-[64px] w-full rounded-xl py-2 text-sm leading-relaxed" maxLength={2000} placeholder={t('admin.support.assign.notePlaceholder')}
+        <textarea className="input min-h-[64px] w-full rounded-panel py-2 text-sm leading-relaxed" maxLength={2000} placeholder={t('admin.support.assign.notePlaceholder')}
           value={note} onChange={(e) => setNote(e.target.value)} />
         {counts && (
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="tag bg-up/15 text-up">{t('admin.support.assign.willAssign', { n: counts.ok })}</span>
             {counts.dnc > 0 && <span className="tag bg-down/15 text-down">{t('admin.support.assign.skipDnc', { n: counts.dnc })}</span>}
-            {counts.active > 0 && <span className="tag bg-amber-400/15 text-amber-300">{t('admin.support.assign.skipActive', { n: counts.active })}</span>}
+            {counts.active > 0 && <span className="tag bg-warn/15 text-warn">{t('admin.support.assign.skipActive', { n: counts.active })}</span>}
             {counts.staff > 0 && <span className="tag bg-white/5 text-neutral-400">{t('admin.support.assign.skipStaff', { n: counts.staff })}</span>}
-            {counts.opted > 0 && <span className="tag bg-amber-400/15 text-amber-300">{t('admin.support.assign.optedOut', { n: counts.opted })}</span>}
+            {counts.opted > 0 && <span className="tag bg-warn/15 text-warn">{t('admin.support.assign.optedOut', { n: counts.opted })}</span>}
           </div>
         )}
         {counts && counts.opted > 0 && (

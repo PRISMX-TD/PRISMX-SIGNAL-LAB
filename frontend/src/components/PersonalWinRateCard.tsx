@@ -10,6 +10,7 @@ import type { GamificationWinRateSummary, PersonalWinRate } from '../api/types'
 import { useAuth } from '../store/auth'
 import { useLive } from '../store/live'
 import RadialGauge from './RadialGauge'
+import { EMPTY } from '../utils/format'
 
 interface Props {
   /** 外层挂的类名，目前只用于仪表盘的手机端排序（见 .dash-personal）。
@@ -68,9 +69,9 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
   const gwrPct = gwr?.winRate != null ? Math.round(gwr.winRate * 100) : null
 
   return (
-    <section className={`card glass p-[18px] sm:p-6${className ? ` ${className}` : ''}`}>
+    <section className={`card glass p-5 sm:p-6${className ? ` ${className}` : ''}`}>
       <div className="flex items-center justify-between gap-3">
-        <h3 className="font-bold text-white text-[15px]">
+        <h3 className="font-bold text-white text-base">
           {t('winrate.personalTitle')}
         </h3>
         <Link to="/orders" className="dh-link">
@@ -144,7 +145,7 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
           <div className="flex items-center justify-between text-xs">
             <span className="text-neutral-500">{t('gamification.winRateCard.combined')}</span>
             <span className="num font-semibold text-neutral-200">
-              {gwrPct != null ? `${gwrPct}%` : '—'}
+              {gwrPct != null ? `${gwrPct}%` : EMPTY}
             </span>
           </div>
           {/* 优先级：满级 > 下一关有胜率门槛（已达标/还差多少）> 下一关无胜率

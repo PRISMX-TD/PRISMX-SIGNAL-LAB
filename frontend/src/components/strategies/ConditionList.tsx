@@ -65,7 +65,7 @@ export default function ConditionList({
   const atCap = conditions.length >= maxConditions
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.01] p-2.5">
+    <div className="rounded-panel border border-white/10 bg-white/[0.01] p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-neutral-500">{t('strategy.condLogic')}</span>
         <Select
@@ -115,7 +115,7 @@ export default function ConditionList({
           {t('strategy.condAdd')}
         </button>
         {atCap && (
-          <span className="text-xs text-amber-200/80">{t('strategy.condLimit', { max: maxConditions })}</span>
+          <span className="text-xs text-warn/80">{t('strategy.condLimit', { max: maxConditions })}</span>
         )}
       </div>
     </div>

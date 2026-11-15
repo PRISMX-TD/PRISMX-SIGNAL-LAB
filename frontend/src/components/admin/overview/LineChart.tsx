@@ -87,7 +87,7 @@ export default function LineChart({
 
       {hover !== null && (
         <div
-          className="pointer-events-none absolute top-0 z-10 min-w-[9rem] rounded-lg border border-white/10 bg-ink-900/95 p-2.5 shadow-xl"
+          className="pointer-events-none absolute top-0 z-10 min-w-[9rem] rounded-lg float-panel p-2.5"
           style={hoverRatio > 0.5 ? { right: `${100 - hoverRatio * 100}%`, marginRight: 8 } : { left: `${hoverRatio * 100}%`, marginLeft: 8 }}
         >
           <p className="mb-1.5 text-xs text-neutral-400">{dates[hover]}</p>

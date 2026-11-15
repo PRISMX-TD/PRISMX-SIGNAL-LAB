@@ -66,6 +66,6 @@ describe('bugReadout / fmtRange', () => {
     expect(bugReadout([{ unit: 'd', value: 12 }, { unit: 'h', value: 0 }, { unit: 'm', value: 9 }])).toBe('12:00:09')
   })
   it('renders a dash for a missing end and tags the zone', () => {
-    expect(fmtRange({ startsAt: null, endsAt: null })).toBe('— → — UTC+8')
+    expect(fmtRange({ startsAt: null, endsAt: null })).toBe('– → – UTC+8')
   })
 })

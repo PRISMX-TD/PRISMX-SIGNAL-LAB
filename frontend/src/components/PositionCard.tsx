@@ -15,7 +15,7 @@
 // between them with the entry→current span tinted by P&L. Falls back to the grid
 // when SL or TP is missing. A row-per-position shape was tried and the product
 // owner asked for cards (2026-09-11).
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 import { orderApi } from '../api/client'
@@ -28,6 +28,7 @@ import { createIdempotencyKeys } from '../utils/idempotencyKeys'
 import { useLive } from '../store/live'
 import { symbolMeta } from '../utils/symbolMeta'
 import { sanitizeDecimal } from './order/orderMath'
+import { EMPTY } from '../utils/format'
 
 interface Props {
   position: Position
@@ -46,7 +47,7 @@ type Mode = 'view' | 'close' | 'modify'
 // releasing the card (lost receipt / bridge offline).
 const CLOSING_RELEASE_MS = 12000
 
-export default function PositionCard({ position: p, onActionDone, mobile = false, externalClosing = false }: Props) {
+function PositionCard({ position: p, onActionDone, mobile = false, externalClosing = false }: Props) {
   const { t } = useTranslation()
   const [mode, setMode] = useState<Mode>('view')
   const [busy, setBusy] = useState(false)
@@ -99,6 +100,13 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   const minVol = minLot(p.symbol)
   const [sl, setSl] = useState(p.stopLoss ? String(p.stopLoss) : '')
   const [tp, setTp] = useState(p.takeProfit ? String(p.takeProfit) : '')
+  // 同一页可能有几十张持仓卡，id 必须每张唯一，所以用 useId 而不是写死。
+  // A page can hold dozens of position cards, so ids come from useId rather than literals.
+  const closeVolId = useId()
+  const closeHintId = useId()
+  const slId = useId()
+  const tpId = useId()
+  const slTpErrId = useId()
 
   const isBuy = p.side === 'BUY'
   const profitUp = p.profit >= 0
@@ -129,7 +137,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       : null
 
   const fmt = (n?: number | null) =>
-    n == null ? '—' : n.toLocaleString(undefined, { maximumFractionDigits: 5 })
+    n == null ? EMPTY : n.toLocaleString(undefined, { maximumFractionDigits: 5 })
 
   const doClose = async (full: boolean) => {
     if (!p.ticket) return
@@ -174,7 +182,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       // Gateway fills synchronously (show the price); bridge merely accepts. The
       // card stays dimmed until the positions feed removes or updates it.
       if (res.status === 'FILLED') {
-        onActionDone?.(t('positions.closed', { price: res.filledPrice != null ? res.filledPrice : '—' }), 'success')
+        onActionDone?.(t('positions.closed', { price: res.filledPrice != null ? res.filledPrice : EMPTY }), 'success')
         if (!full) releaseNow()
         else releaseLater()
       } else if (res.status === 'REJECTED' || res.status === 'FAILED') {
@@ -188,7 +196,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     } catch (e) {
       if (!answered) idemKeys.afterThrow(idemKey, e)
       releaseNow()
-      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
+      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : t('positions.closeFailed'), 'error')
     }
   }
 
@@ -215,12 +223,12 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       idemKeys.settle(idemKey)
       upsertOrder(res)
       if (res.status === 'FILLED') onActionDone?.(t('positions.modified'), 'success')
-      else if (res.status === 'REJECTED' || res.status === 'FAILED') onActionDone?.(res.message ? localizeApiError(res.message) : 'error', 'error')
+      else if (res.status === 'REJECTED' || res.status === 'FAILED') onActionDone?.(res.message ? localizeApiError(res.message) : t('charts.dock.modifyFailed'), 'error')
       else onActionDone?.(t('positions.modifySent'), 'info')
       setMode('view')
     } catch (e) {
       if (!answered) idemKeys.afterThrow(idemKey, e)
-      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : 'error', 'error')
+      onActionDone?.(e instanceof Error ? localizeApiError(e.message) : t('charts.dock.modifyFailed'), 'error')
     } finally {
       setBusy(false)
     }
@@ -248,9 +256,9 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   // 平仓进行中：三个按钮换成一行「平仓中…」，让人知道点过了、正在处理，而不是只看到
   // 一张变灰的卡。/ While closing, the three buttons give way to a "closing…" line so
   // the user can tell the tap registered and is being handled, not just a greyed card.
-  // pos-acts / pos-act：手机上把热区抬到 44px、红色「全部平仓」与其余两个拉开
+  // pos-acts / pos-act：手机上把热区抬到 44px、红色「平仓」与其余两个拉开
   // （orders.css 的手机段），桌面不变。/ Phone-only 44px targets and extra space
-  // after the red close-all (orders.css phone block); desktop unchanged.
+  // after the red close-position button (orders.css phone block); desktop unchanged.
   const actions = canAct && mode === 'view' && (isClosing ? (
     <div className="pos-acts-closing mt-3 flex items-center justify-center gap-2 rounded-lg border border-white/10 py-1.5 text-xs font-medium text-neutral-300" role="status">
       <span className="spinner" aria-hidden="true" />
@@ -261,21 +269,21 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
       <button
         onClick={() => setConfirmCloseAll(true)}
         disabled={busy}
-        className="pos-act pos-act-danger flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50"
+        className="pos-act pos-act-danger flex-1 rounded-lg border border-down/40 bg-down/10 py-1.5 text-xs font-medium text-down transition hover:bg-down/20 disabled:opacity-50 active:scale-[0.96] motion-reduce:active:scale-100"
       >
         {t('positions.closeAll')}
       </button>
       <button
         onClick={() => openForm('close')}
         disabled={busy}
-        className="pos-act flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50"
+        className="pos-act flex-1 rounded-lg border border-white/10 bg-white/[0.04] py-1.5 text-xs font-medium text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-50 active:scale-[0.96] motion-reduce:active:scale-100"
       >
         {t('positions.partialClose')}
       </button>
       <button
         onClick={() => openForm('modify')}
         disabled={busy}
-        className="pos-act flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50"
+        className="pos-act flex-1 rounded-lg border border-prism-600/40 bg-prism-600/10 py-1.5 text-xs font-medium text-prism-300 transition hover:bg-prism-600/20 disabled:opacity-50 active:scale-[0.96] motion-reduce:active:scale-100"
       >
         {t('positions.editSlTp')}
       </button>
@@ -283,11 +291,13 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   ))
 
   const closeForm = canAct && mode === 'close' && !isClosing && (
-    <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
-      <label className="text-xs text-neutral-400">
-        {t('positions.closeVolume')} (max {fmtLots(p.volume)})
+    <div className="mt-3 space-y-2">
+      <label className="text-xs text-neutral-400" htmlFor={closeVolId}>
+        {t('positions.closeVolume', { max: fmtLots(p.volume) })}
       </label>
       <input
+        id={closeVolId}
+        aria-describedby={closeHintId}
         type="text"
         inputMode="decimal"
         className="input font-mono text-sm"
@@ -305,7 +315,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         // 实时截掉超出该品种步长的小数位，多余的位数根本打不进去。
         onChange={(e) => setCloseVol(limitLotInput(e.target.value, p.symbol))}
       />
-      <p className="text-xs text-neutral-500">
+      <p id={closeHintId} className="text-xs text-neutral-500">
         {t('positions.lotStepHint', { step, min: minVol })}
       </p>
       <div className="flex gap-2">
@@ -324,33 +334,39 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   )
 
   const modifyForm = canAct && mode === 'modify' && !isClosing && (
-    <div className="mt-3 space-y-2 rounded-lg border border-white/10 bg-ink-950/40 p-3">
+    <div className="mt-3 space-y-2">
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-xs text-down">{t('positions.sl')}</label>
+          <label className="text-xs text-down" htmlFor={slId}>{t('positions.sl')}</label>
           <input
+            id={slId}
             type="text"
             inputMode="decimal"
             className={`input font-mono text-sm ${slInvalid ? 'border-down' : ''}`}
             placeholder={t('positions.clearHint')}
             value={sl}
             onChange={(e) => setSl(sanitizeDecimal(e.target.value))}
+            aria-invalid={slInvalid || undefined}
+            aria-describedby={slInvalid ? slTpErrId : undefined}
           />
         </div>
         <div>
-          <label className="text-xs text-up">{t('positions.tp')}</label>
+          <label className="text-xs text-up" htmlFor={tpId}>{t('positions.tp')}</label>
           <input
+            id={tpId}
             type="text"
             inputMode="decimal"
             className={`input font-mono text-sm ${tpInvalid ? 'border-down' : ''}`}
             placeholder={t('positions.clearHint')}
             value={tp}
             onChange={(e) => setTp(sanitizeDecimal(e.target.value))}
+            aria-invalid={tpInvalid || undefined}
+            aria-describedby={tpInvalid && !slInvalid ? slTpErrId : undefined}
           />
         </div>
       </div>
       {(slInvalid || tpInvalid) && (
-        <p className="text-xs text-down">
+        <p id={slTpErrId} className="text-xs text-down">
           {slInvalid ? t('order.slWrongSide') : t('order.tpWrongSide')}
         </p>
       )}
@@ -382,7 +398,7 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
   )
 
   const sideTag = (
-    <span className={`tag ${isBuy ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
+    <span className={`tag ${isBuy ? 'bg-[var(--up-bg)] text-up' : 'bg-[var(--down-bg)] text-down'}`}>
       {isBuy ? t('common.buy') : t('common.sell')}
     </span>
   )
@@ -456,8 +472,8 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
           <div className="pos-mc-grid">
             <span><span className="ord-k">{t('positions.entry')}</span><b>{fmt(p.entryPrice)}</b></span>
             <span><span className="ord-k">{t('positions.current')}</span><b>{fmt(p.currentPrice)}</b></span>
-            <span><span className="ord-k">{t('positions.sl')}</span><b className="text-down">{p.stopLoss ? fmt(p.stopLoss) : '—'}</b></span>
-            <span><span className="ord-k">{t('positions.tp')}</span><b className="text-up">{p.takeProfit ? fmt(p.takeProfit) : '—'}</b></span>
+            <span><span className="ord-k">{t('positions.sl')}</span><b className="text-down">{p.stopLoss ? fmt(p.stopLoss) : EMPTY}</b></span>
+            <span><span className="ord-k">{t('positions.tp')}</span><b className="text-up">{p.takeProfit ? fmt(p.takeProfit) : EMPTY}</b></span>
           </div>
         )}
 
@@ -511,11 +527,11 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
         </div>
         <div className="flex justify-between">
           <span className="text-neutral-500">{t('positions.sl')}</span>
-          <span className="font-mono text-down">{p.stopLoss ? fmt(p.stopLoss) : '—'}</span>
+          <span className="font-mono text-down">{p.stopLoss ? fmt(p.stopLoss) : EMPTY}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-neutral-500">{t('positions.tp')}</span>
-          <span className="font-mono text-up">{p.takeProfit ? fmt(p.takeProfit) : '—'}</span>
+          <span className="font-mono text-up">{p.takeProfit ? fmt(p.takeProfit) : EMPTY}</span>
         </div>
       </div>
 
@@ -526,3 +542,11 @@ export default function PositionCard({ position: p, onActionDone, mobile = false
     </div>
   )
 }
+
+// memo：订单页的持仓列表随行情约 0.3 秒重算一次，没跳价那张单拿到的是同一个
+// position 对象（见 store/livePositions 的 reuseLive），onActionDone 也是稳定引用，
+// 这张卡就不重渲染。卡内自己的编辑态 / 计时器不受影响。
+// memo: the Orders page recomputes its positions about every 0.3s; a position whose symbol
+// didn't tick keeps the same object (see reuseLive in store/livePositions) and onActionDone
+// is stable, so the card skips the render. The card's own edit state and timers are unaffected.
+export default memo(PositionCard)

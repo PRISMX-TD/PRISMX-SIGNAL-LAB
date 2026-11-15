@@ -525,14 +525,14 @@ export default function ActivityLogPanel({
         {chips.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             {chips.map((c) => (
-              <span key={c.key} className="inline-flex max-w-full items-center gap-1 rounded-[10px] bg-prism-600/15 py-0.5 pl-2.5 pr-1 text-xs text-prism-200">
+              <span key={c.key} className="inline-flex max-w-full items-center gap-1 rounded-control bg-prism-600/15 py-0.5 pl-2.5 pr-1 text-xs text-prism-200">
                 <span className="truncate">{c.label}</span>
                 <button
                   type="button"
                   onClick={c.clear}
                   aria-label={t('admin.log.chip.remove')}
                   title={t('admin.log.chip.remove')}
-                  className="rounded-[10px] px-1.5 leading-none text-prism-200/80 transition hover:bg-white/10 hover:text-white"
+                  className="rounded-control px-1.5 leading-none text-prism-200/80 transition hover:bg-white/10 hover:text-white"
                 >
                   ×
                 </button>
@@ -553,7 +553,7 @@ export default function ActivityLogPanel({
           <button
             type="button"
             onClick={refreshNow}
-            className="pointer-events-auto mt-1 rounded-[10px] bg-prism-600 px-4 py-1.5 text-xs font-semibold text-white shadow-lg transition hover:bg-prism-500"
+            className="pointer-events-auto mt-1 rounded-control bg-prism-600 px-4 py-1.5 text-xs font-semibold text-white shadow-lg transition hover:bg-prism-500"
           >
             {t('admin.log.newRecords')}
           </button>
@@ -588,7 +588,7 @@ export default function ActivityLogPanel({
         // 不用 .glass：它悬停换底色，吸顶的日期行就和底色对不上了；也不加 overflow——会让吸顶失效。
         // Not .glass (its hover tint would mismatch the sticky separators) and no overflow
         // (which would break sticky).
-        <div className="rounded-[var(--r-lg)] bg-[color:var(--surface)]">
+        <div className="rounded-card bg-[color:var(--surface)]">
           {!isPhone && (
             <div className={`${DESKTOP_GRID} border-b border-white/10 px-4 py-2.5 text-xs font-medium text-neutral-500`}>
               <span>{t('admin.log.col.time')}</span>

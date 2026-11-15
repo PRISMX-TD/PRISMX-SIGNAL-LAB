@@ -171,7 +171,7 @@ export default function LoginPage() {
             <Logo size={44} />
             <h1 className="mt-5 font-display-xl text-[2rem] text-white">Signal Lab</h1>
             <p className="mt-1.5 text-xs font-medium text-neutral-500">by PRISMX</p>
-            <p className="mt-4 max-w-xs text-[13px] leading-relaxed text-neutral-400">{t('auth.tagline')}</p>
+            <p className="mt-4 max-w-xs text-sm leading-relaxed text-neutral-400">{t('auth.tagline')}</p>
           </div>
 
           <div className="glass animate-fade-in-up p-6">
@@ -204,7 +204,7 @@ export default function LoginPage() {
                 and a literal hex here is the block left behind when the theme
                 moves. */}
             {mode === 'register' && inviteTrialDays !== null && (
-              <div className="mb-4 flex items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2.5 text-[13px] font-semibold text-gold">
+              <div className="mb-4 flex items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 px-3 py-2.5 text-sm font-semibold text-gold">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z" />
                 </svg>
@@ -214,10 +214,12 @@ export default function LoginPage() {
 
             <form onSubmit={onSubmit} className="space-y-4">
               <div>
-                <label className="label">{t('auth.email')}</label>
+                <label className="label" htmlFor="login-email">{t('auth.email')}</label>
                 <input
+                  id="login-email"
                   type="email"
                   required
+                  autoComplete="email"
                   className="input"
                   placeholder={t('auth.emailPlaceholder')}
                   value={email}
@@ -231,11 +233,16 @@ export default function LoginPage() {
                 />
               </div>
               <div>
-                <label className="label">{t('auth.password')}</label>
+                <label className="label" htmlFor="login-password">{t('auth.password')}</label>
                 <div className="relative">
                   <input
+                    id="login-password"
                     type={showPassword ? 'text' : 'password'}
                     required
+                    // 登录填已存的密码、注册生成新密码：密码管理器靠这个区分「填」还是「建议新密码」。
+                    // Sign-in fills a saved password, sign-up suggests a new one: password managers
+                    // tell the two apart by this token.
+                    autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
                     // 注册要求密码至少 8 位（与后端一致）；不加限制时短密码会被
                     // 后端 422 拒绝，错误信息还会显示得很难懂。
                     // Registration requires ≥8 chars (matches the backend);
@@ -277,7 +284,7 @@ export default function LoginPage() {
               )}
 
               {error && (
-                <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">
+                <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">
                   {error}
                   {emailFix && (
                     <button
@@ -319,7 +326,7 @@ export default function LoginPage() {
               // In-app browser: no GoogleLoginButton (the GIS script never loads), just the hint.
               <p
                 role="note"
-                className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-[13px] leading-relaxed text-neutral-300"
+                className="mt-5 rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2.5 text-sm leading-relaxed text-neutral-300"
               >
                 {t('auth.inAppBrowserHint')}
               </p>

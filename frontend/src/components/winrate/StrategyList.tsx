@@ -107,7 +107,7 @@ function StrategyCard({ row, index, open, onToggle, data, now, cardSymbol, onSym
     <article
       aria-label={name}
       className={`card glass animate-fade-in-up overflow-hidden wr-card${open ? ' open' : ''}`}
-      style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}
+      style={{ animationDelay: `${Math.min(index, 5) * 30}ms` }}
     >
       {/* ⚠ 开合按钮**铺满整行、垫在内容底下**，而不是把内容包进按钮里。
           卡片上多了一个品种下拉，而下拉本身是个 `<button>`——嵌在开合用的
@@ -137,7 +137,7 @@ function StrategyCard({ row, index, open, onToggle, data, now, cardSymbol, onSym
           // offset, but this button fills the card and an outside ring is clipped
           // by the article's overflow-hidden. Inset 3px and follow the card radius
           // so the corners survive too.
-          className="peer absolute inset-0 z-0 w-full rounded-[24px] focus-visible:outline-offset-[-3px]"
+          className="peer absolute inset-0 z-0 w-full rounded-card focus-visible:outline-offset-[-3px]"
         >
           <span className="sr-only">
             {open ? t('admin.winrate.strategies.collapse') : t('admin.winrate.strategies.expand')}｜{name}

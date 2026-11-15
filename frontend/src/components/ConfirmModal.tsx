@@ -42,10 +42,11 @@ export default function ConfirmModal({
   // renderer's job (useBackToClose), per the existing convention.
   const sheetRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
+  const msgId = useId()
   useDialogA11y(sheetRef, () => { if (!busy) onCancel() })
 
   const overlayClass = center
-    ? 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-6'
+    ? 'fixed inset-0 z-overlay flex items-center justify-center scrim p-6'
     : 'slide-overlay'
   // 非 center 分支的宽度用 Tailwind 的 sm: 前缀，不要用内联 style——.slide-sheet
   // 的移动端媒体查询（<640px 变成贴底全宽抽屉）是纯类选择器，内联 style 优先级
@@ -71,8 +72,12 @@ export default function ConfirmModal({
   // and shrinks the overlay's inset:0 to that one card instead of the viewport —
   // an off-center dialog with the blur confined to a small area. The .page-enter
   // wrapper's transform does the same (see SlideOrderModal/ChartOrderModal).
+  // 提交中点遮罩不关：Esc 与「取消」本来就挡着，只有遮罩漏了，一点就把正在提交的确认框
+  // 关掉，用户以为取消了，动作其实照常执行。
+  // A backdrop tap does nothing while busy: Escape and Cancel already respected busy, the
+  // backdrop didn't, so one tap closed a dialog whose action was still going through.
   return createPortal(
-    <div className={overlayClass} onClick={onCancel}>
+    <div className={overlayClass} onClick={() => { if (!busy) onCancel() }}>
       <div
         ref={sheetRef}
         className={sheetClass}
@@ -80,10 +85,11 @@ export default function ConfirmModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={msgId}
         tabIndex={-1}
       >
-        <h3 id={titleId} className="text-lg font-bold text-white">{title}</h3>
-        <p className="mt-3 text-sm leading-relaxed text-neutral-300">{message}</p>
+        <h3 id={titleId} className="text-lg font-bold text-white text-balance">{title}</h3>
+        <p id={msgId} className="mt-3 text-sm leading-relaxed text-neutral-300">{message}</p>
         {children}
         <div className="mt-5 flex gap-3">
           <button onClick={onCancel} disabled={busy} className="btn-ghost flex-1 py-2 text-sm">
@@ -92,7 +98,7 @@ export default function ConfirmModal({
           <button
             onClick={onConfirm}
             disabled={busy}
-            className={`flex-1 rounded-xl py-2 text-sm font-semibold transition disabled:opacity-50 ${
+            className={`flex-1 rounded-control py-2 text-sm font-semibold transition disabled:opacity-50 ${
               danger
                 ? 'border border-down/40 bg-down/15 text-down hover:bg-down/25'
                 : 'btn-primary'

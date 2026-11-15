@@ -1,6 +1,6 @@
 // 主布局：顶部导航 + 内容区 + 移动端底部 Tab 栏
 // Main layout: top nav + content + mobile bottom tab bar.
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { LiveProvider, useLive } from '../store/live'
@@ -23,10 +23,16 @@ import UserMenu from './UserMenu'
 import AuroraBackground from './AuroraBackground'
 import ConfirmModal from './ConfirmModal'
 import AnnouncementPopup from './AnnouncementPopup'
+import LiveRegions from './LiveRegions'
 import { useBackToClose } from '../utils/useBackToClose'
+import { usePresence, SHEET_EXIT_MS } from '../utils/usePresence'
+import { useScrollLock } from '../utils/scrollLock'
+import { useSheetDrag } from '../utils/useSheetDrag'
+import { useDialogA11y } from '../utils/useDialogA11y'
 import { reportPageView } from '../utils/pageTracking'
 import { onForeground } from '../utils/appVisibility'
 import CompetitionNavBadge from './CompetitionNavBadge'
+import { PAGE_OWNED, appTitle, routeTitleKey } from '../utils/routeTitle'
 
 // 桌面主导航项。选中态此前是一条「紫 → 青」的渐变下划线：那条青色是全站唯一
 // 出现青的地方，一个孤立的第二品牌色，而两点渐变在 2px 高、几十像素宽的横条上
@@ -83,6 +89,10 @@ function NavItem({ to, label, match }: { to: string; label: string; match?: stri
 
 // 竞技场（GrowthHub）下的四页 / the four pages under the arena (GrowthHub)
 const ARENA_PATHS = ['/achievements', '/leaderboard', '/competitions', '/lucky']
+// 切换时不播整页淡入的路由：底部 4 个主 tab + 竞技场 4 页（理由见下面 page-enter 那段注释）。
+// Routes that switch with no page fade: the 4 bottom tabs + the 4 arena pages (see the
+// page-enter comment below for why).
+const INSTANT_ROUTES = ['/app', '/charts', '/dashboard', '/orders', ...ARENA_PATHS]
 
 // 底部 Tab 图标 / bottom tab icons
 function TabIcon({ name }: { name: string }) {
@@ -249,7 +259,7 @@ function TabItem({ to, icon, label }: { to: string; icon: string; label: string 
       <span className="lg-ico">
         <TabIcon name={icon} />
       </span>
-      <span className="leading-none">{label}</span>
+      <span className="lg-tab-label leading-none">{label}</span>
       {/* 只在选中的那个 Tab 上显示（见 festival.css）。/ shown on the active tab only */}
       <FestivalTopper kind="mini" />
     </NavLink>
@@ -308,7 +318,7 @@ function ConnectionBanner() {
 
   if (backendUnreachable) {
     return (
-      <div className={`${base} border-down/30 bg-down/10 text-down`} role="status">
+      <div className={`${base} conn-banner-down border-down/30 text-down`} role="status">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-down" />
         <span>{t('connStatus.backendDown')}</span>
         <span className="opacity-75">{t('connStatus.backendDownHint')}</span>
@@ -316,7 +326,7 @@ function ConnectionBanner() {
           type="button"
           onClick={retry}
           disabled={retrying}
-          className="rounded-md bg-down/20 px-2 py-0.5 font-semibold transition hover:bg-down/30 disabled:opacity-50"
+          className="rounded-lg bg-down/20 px-2 py-0.5 font-semibold transition hover:bg-down/30 disabled:opacity-50"
         >
           {retrying ? t('common.loading') : t('connStatus.retry')}
         </button>
@@ -326,8 +336,8 @@ function ConnectionBanner() {
 
   if (wsDisconnected) {
     return (
-      <div className={`${base} border-amber-400/30 bg-amber-400/10 text-amber-300`} role="status">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+      <div className={`${base} conn-banner-warn border-warn/30 text-warn`} role="status">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" />
         {t('connStatus.reconnecting')}
       </div>
     )
@@ -336,7 +346,12 @@ function ConnectionBanner() {
   return null
 }
 
-export default function Layout() {
+// onMoreOpen：「其他」面板打开时回调，参数是面板里当前显示的入口路径；App.tsx 传入去预取
+// 对应页面。Layout 不直接引用各页面的懒加载对象，那会让 Layout 反过来 import App.tsx。
+// onMoreOpen: called when the More sheet opens, with the paths of the entries it shows;
+// App.tsx passes it to prefetch those pages. Layout doesn't reference the lazy page objects
+// itself, which would mean importing App.tsx back.
+export default function Layout({ onMoreOpen }: { onMoreOpen?: (paths: string[]) => void }) {
   const { t } = useTranslation()
   const { user, logout } = useAuth()
   const navigate = useNavigate()
@@ -403,35 +418,70 @@ export default function Layout() {
   const hdrEl = useRef<HTMLElement | null>(null)
   const tabbarEl = useRef<HTMLElement | null>(null)
   const chromeRO = useRef<ResizeObserver | null>(null)
-  const measureChrome = useCallback(() => {
-    const root = document.documentElement
-    const vh = window.visualViewport?.height ?? window.innerHeight
-    root.style.setProperty('--app-vh', `${Math.round(vh)}px`)
+  // 上一次写进根元素的三个值，以及等着执行的那一帧。根上的自定义属性全站继承，写一次
+  // 可能让整棵树重算样式，所以值没变就不写；软键盘动画期间 visualViewport 的 resize
+  // 每帧都来，resize / orientationchange 也会连发，这些都合到下一帧只测一次。
+  // The three values last written to the root, and the pending frame. Custom properties
+  // on the root are inherited site-wide, so a write can restyle the whole tree; an
+  // unchanged value is not written. visualViewport fires resize every frame during the
+  // keyboard animation and resize / orientationchange come in bursts; those are merged
+  // into one measurement on the next frame.
+  const chromeLast = useRef({ vh: '', hdr: '', tabbar: '' })
+  const chromeRaf = useRef(0)
+  // 立即测量：先把三次几何读取做完，再写；写之后不再读，避免强制同步布局。ResizeObserver
+  // 回调、ref 回调和挂载时用它（ResizeObserver 本身已按帧批处理，回调里布局是干净的）。
+  // Measure now: all three geometry reads first, then the writes, and no read after a
+  // write, so layout is never forced. Used by the ResizeObserver callback, the ref
+  // callbacks and mount (ResizeObserver already batches per frame, layout is clean there).
+  const measureChromeNow = useCallback(() => {
+    if (chromeRaf.current) {
+      cancelAnimationFrame(chromeRaf.current)
+      chromeRaf.current = 0
+    }
+    const vh = `${Math.round(window.visualViewport?.height ?? window.innerHeight)}px`
     const h = hdrEl.current?.getBoundingClientRect()
-    if (h && h.height > 0) root.style.setProperty('--app-hdr', `${Math.round(h.bottom)}px`)
     const b = tabbarEl.current?.getBoundingClientRect()
-    const occupied = b && b.height > 0 ? Math.max(0, Math.round(window.innerHeight - b.top)) : 0
-    root.style.setProperty('--app-tabbar', `${occupied}px`)
+    const hdr = h && h.height > 0 ? `${Math.round(h.bottom)}px` : null
+    const tabbar = `${b && b.height > 0 ? Math.max(0, Math.round(window.innerHeight - b.top)) : 0}px`
+    const root = document.documentElement
+    const last = chromeLast.current
+    if (vh !== last.vh) {
+      root.style.setProperty('--app-vh', vh)
+      last.vh = vh
+    }
+    if (hdr !== null && hdr !== last.hdr) {
+      root.style.setProperty('--app-hdr', hdr)
+      last.hdr = hdr
+    }
+    if (tabbar !== last.tabbar) {
+      root.style.setProperty('--app-tabbar', tabbar)
+      last.tabbar = tabbar
+    }
   }, [])
+  // 合帧测量：同一帧里来多少次事件都只在下一帧测一次。
+  // Coalesced: however many events arrive within a frame, measure once on the next one.
+  const measureChrome = useCallback(() => {
+    if (!chromeRaf.current) chromeRaf.current = requestAnimationFrame(measureChromeNow)
+  }, [measureChromeNow])
   const observeChrome = useCallback(() => {
     chromeRO.current?.disconnect()
     if (typeof ResizeObserver === 'undefined') return
-    const ro = new ResizeObserver(measureChrome)
+    const ro = new ResizeObserver(measureChromeNow)
     // border-box：顶栏的安全区是 padding，content-box 不变就不会触发。
     // border-box: the header's safe-area inset is padding; content-box alone would never fire.
     if (hdrEl.current) ro.observe(hdrEl.current, { box: 'border-box' })
     if (tabbarEl.current) ro.observe(tabbarEl.current, { box: 'border-box' })
     chromeRO.current = ro
-  }, [measureChrome])
-  const setHdrRef = useCallback((el: HTMLElement | null) => { hdrEl.current = el; observeChrome(); measureChrome() }, [observeChrome, measureChrome])
-  const setTabbarRef = useCallback((el: HTMLElement | null) => { tabbarEl.current = el; observeChrome(); measureChrome() }, [observeChrome, measureChrome])
+  }, [measureChromeNow])
+  const setHdrRef = useCallback((el: HTMLElement | null) => { hdrEl.current = el; observeChrome(); measureChromeNow() }, [observeChrome, measureChromeNow])
+  const setTabbarRef = useCallback((el: HTMLElement | null) => { tabbarEl.current = el; observeChrome(); measureChromeNow() }, [observeChrome, measureChromeNow])
   useEffect(() => {
     // 观察器在这里（再）建一次：StrictMode 的 mount → cleanup → mount 会把回调 ref 建好的
     // 观察器断开，不重建就永远收不到尺寸变化。
     // (Re)create the observer here: StrictMode's mount → cleanup → mount disconnects the one
     // the callback refs built, and without rebuilding it no size change is ever delivered.
     observeChrome()
-    measureChrome()
+    measureChromeNow()
     // 网页字体到位后底栏高度会变一次 / the bar's height shifts once web fonts land
     document.fonts?.ready.then(measureChrome).catch(() => {})
     window.addEventListener('resize', measureChrome)
@@ -442,12 +492,19 @@ export default function Layout() {
       window.removeEventListener('resize', measureChrome)
       window.removeEventListener('orientationchange', measureChrome)
       window.visualViewport?.removeEventListener('resize', measureChrome)
+      if (chromeRaf.current) {
+        cancelAnimationFrame(chromeRaf.current)
+        chromeRaf.current = 0
+      }
       const root = document.documentElement
       root.style.removeProperty('--app-vh')
       root.style.removeProperty('--app-hdr')
       root.style.removeProperty('--app-tabbar')
+      // 属性删了，记忆也清空：StrictMode 重新挂载时必须重新写一遍。
+      // Properties removed, so forget them: a StrictMode remount must write them again.
+      chromeLast.current = { vh: '', hdr: '', tabbar: '' }
     }
-  }, [observeChrome, measureChrome])
+  }, [observeChrome, measureChrome, measureChromeNow])
 
   // 手机底部 4 个主入口，其余收进「其他」/ 4 primary mobile tabs, the rest go under "More"
   const mobileTabs = [
@@ -520,6 +577,71 @@ export default function Layout() {
 
   // 路由切换时自动关闭面板 / close the sheet on navigation
   useEffect(() => { setMoreOpen(false) }, [location.pathname])
+  // 「更多」抽屉：Esc 关、Tab 困住、焦点进出（utils/useDialogA11y）。它不 portal，渲染在
+  // #root 里，dialogStack 因此不会给 #root 加 aria-hidden。
+  // "More" sheet: Escape, Tab trap, focus in/out. It is not portalled (it lives inside
+  // #root), so dialogStack leaves #root un-hidden.
+  const moreSheetRef = useRef<HTMLDivElement>(null)
+  useDialogA11y(moreSheetRef, () => setMoreOpen(false), { open: moreOpen })
+  // 「其他」面板：关闭后多留 240ms 播退场（usePresence）；打开期间锁页面滚动；把手行可下拉
+  // 关闭（useSheetDrag，遮罩随进度变淡）。
+  // "More" sheet: stays 240ms after closing for the exit (usePresence); page scroll is
+  // locked while open; the handle row drags it down to close (useSheetDrag, the scrim
+  // fading with progress).
+  const moreSheet = usePresence(moreOpen ? true : null, SHEET_EXIT_MS)
+  const moreScrimRef = useRef<HTMLDivElement>(null)
+  const moreDrag = useSheetDrag({ sheetRef: moreSheetRef, scrimRef: moreScrimRef, onDismiss: () => setMoreOpen(false) })
+  useScrollLock(moreOpen)
+
+  // 标签页标题：Layout 按 routeTitle.ts 的表给每个路由一个默认标题；表里标成 PAGE_OWNED 的
+  // 页面自己调 useDocumentTitle，这里不写。用 useLayoutEffect 而不是 useEffect：同一次提交里
+  // 所有 layout effect 先于所有普通 effect 执行，useDocumentTitle 是普通 effect，所以就算哪个
+  // 页面加了 useDocumentTitle 却忘了改表，换页时也是页面后写、页面赢。
+  // Tab title: Layout gives each route a default from routeTitle.ts; PAGE_OWNED routes set their
+  // own via useDocumentTitle and are left alone. useLayoutEffect, not useEffect: in one commit every
+  // layout effect runs before every passive effect, and useDocumentTitle is passive, so even a page
+  // that adds useDocumentTitle without updating the table still writes last and wins on navigation.
+  useLayoutEffect(() => {
+    const key = routeTitleKey(location.pathname)
+    if (key === PAGE_OWNED) return
+    document.title = appTitle(key ? t(key) : null)
+  }, [location.pathname, t])
+
+  // 换页后把焦点交给新页面：有可见的 <h1> 就给 <h1>，否则给 <main>。读屏随即念出页面标题，
+  // 键盘用户下一次 Tab 从内容开始，而不是停在刚点的导航上。三种情况不动：
+  // · 首次加载（prevPath 为 null）：别从地址栏抢焦点；
+  // · 客服后台 / 管理台内部切子页（与下面 .page-enter 的 key 同一口径，按一个页面算）；
+  // · 页面自己已经把焦点放进内容区（autoFocus 的输入框），或开着别的模态弹窗。「更多」抽屉
+  //   例外：它会被上面那个 effect 随换页关掉，焦点留在里面只会跟着抽屉一起消失。
+  // After navigation hand focus to the new page: its visible <h1> if any, else <main>. Screen
+  // readers announce the page title and the next Tab starts in the content instead of on the nav
+  // item just pressed. Left alone: the first load (prevPath null; don't steal from the address
+  // bar); sub-page switches inside the support desk / admin console (same rule as the
+  // .page-enter key below: one page); and when the page already focused something in the
+  // content (an autoFocus input) or another modal is open. The "More" sheet is the exception:
+  // the effect above closes it on navigation, so focus left inside would vanish with it.
+  const mainRef = useRef<HTMLElement>(null)
+  const prevPathRef = useRef<string | null>(null)
+  useEffect(() => {
+    const pageKey = (p: string) =>
+      p === '/support-desk' || p.startsWith('/support-desk/') ? '/support-desk'
+      : p === '/admin' || p.startsWith('/admin/') ? '/admin'
+      : p
+    const prev = prevPathRef.current
+    prevPathRef.current = location.pathname
+    if (prev === null || pageKey(prev) === pageKey(location.pathname)) return
+    const main = mainRef.current
+    if (!main) return
+    const active = document.activeElement
+    if (active && active !== document.body) {
+      if (main.contains(active)) return
+      if (active.closest('[aria-modal="true"]') && !active.closest('.lg-sheet')) return
+    }
+    const h1 = main.querySelector('h1')
+    const target: HTMLElement = h1 && h1.getClientRects().length > 0 ? h1 : main
+    if (target !== main && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1')
+    target.focus({ preventScroll: true })
+  }, [location.pathname])
 
   // 页面停留上报：Layout 是全部受保护路由的共同父组件，所以这一处就覆盖了所有
   // 需要统计的页面。计时起点存在 ref 里而不是 state——它每次路由切换都要重置，
@@ -724,13 +846,30 @@ export default function Layout() {
           Verified in dist/assets/*.css: the @supports block follows every min-h
           utility. */}
       <div className="relative flex min-h-screen supports-[min-height:100dvh]:min-h-[100dvh] flex-col">
+        {/* 跳转链接：外壳里第一个可聚焦元素，平时藏在视口上方，Tab 聚焦时落下来（.skip-link）。
+            不用 href 跳锚点：BrowserRouter 下点 #main-content 会改地址栏、多一条历史记录，
+            在 App 里还会被返回键守卫当成一次导航。直接把焦点交给 <main>。
+            Skip link: the shell's first focusable element, parked above the viewport until it gets
+            keyboard focus (.skip-link). No hash jump: under BrowserRouter a #main-content link
+            rewrites the URL and adds a history entry the app's back guard would treat as a
+            navigation, so focus is handed to <main> directly. */}
+        <a
+          href="#main-content"
+          className="skip-link"
+          onClick={(e) => {
+            e.preventDefault()
+            mainRef.current?.focus()
+          }}
+        >
+          {t('nav.skipToMain')}
+        </a>
         <AuroraBackground />
         {!isTerminal && <FestivalAmbient />}
         {/* pt-[env(safe-area-inset-top)]：iOS 的 apple-mobile-web-app-status-bar-style
             是 black-translucent（见 index.html），意味着状态栏是透明的，页面内容
             天然延伸到刘海/灵动岛下面——不加这段内边距，logo/导航就会被系统状态栏
             盖住甚至挡住点击（灵动岛区域系统会截获触摸）。header 背景本身贴着物理
-            顶部（sticky top-0），所以撑开的这段高度用同一层模糊背景盖住状态栏，
+            顶部（sticky top-0），所以撑开的这段高度用同一层实色背景盖住状态栏，
             视觉上是连续的一整条，而不是露出一段黑边。
             pt-[env(safe-area-inset-top)]: iOS's apple-mobile-web-app-status-bar-style
             is black-translucent (see index.html), meaning the status bar is
@@ -738,17 +877,28 @@ export default function Layout() {
             Island — without this padding the logo/nav sit under the system status
             bar and can even have taps swallowed by the Dynamic Island's touch
             capture. The header background itself still hugs the physical top
-            (sticky top-0), so the added height is covered by the same blurred
+            (sticky top-0), so the added height is covered by the same solid
             background, reading as one continuous bar rather than a bare strip. */}
-        {/* 顶栏是固定悬浮层，底下真的有内容滚过，所以它保留背景模糊——这是全站
-            仅存的三处 backdrop-filter 之一。不透明度从 0.60 提到 0.88：0.60 太透，
-            滚动时下方的报价数字会从导航文字后面穿过去，两层数字互相干扰。
-            The header is a fixed overlay with real content scrolling beneath it, so
-            it keeps its backdrop blur — one of only three surviving backdrop-filter
-            uses in the app. Opacity raised from 0.60 to 0.88: at 0.60 the live
-            quotes underneath bled through the nav labels while scrolling and the
-            two layers of figures interfered. */}
-        <header ref={setHdrRef} className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/90 pt-[env(safe-area-inset-top)] backdrop-blur-lg">
+        {/* 顶栏是不透明实色（bg-ink-950），不再用背景模糊。原先是 90% 不透明 +
+            backdrop-blur-lg：底下只透出一成，肉眼几乎分不出和实色的差别，代价却是
+            每一帧滚动都要把顶栏下面那条内容重新模糊一遍，安卓低端机上这是滚动掉帧
+            的常见来源。改成 95% 不模糊也不行：剩下那 5% 是清晰的，报价数字会在导航
+            文字后面隐约穿过。全站常驻的模糊现在只剩底栏 .lg-tabbar-inner（按要求保留
+            的唯一例外）。去掉 backdrop-filter 后顶栏不再是 fixed 后代的包含块：
+            <640px 时 .nb-panel 是 position: fixed，改为相对视口定位；顶栏本来就贴着
+            视口顶边、全宽，位置不变。
+            The header is an opaque solid fill (bg-ink-950) with no backdrop blur. It was
+            90% opaque plus backdrop-blur-lg: only a tenth showed through, visually almost
+            indistinguishable from solid, yet every scroll frame re-blurred the strip of
+            content beneath it, a common cause of scroll jank on low-end Android. 95%
+            without blur doesn't work either: the remaining 5% is sharp and the quotes
+            ghost through behind the nav labels. The only persistent blur left is the tab
+            bar's .lg-tabbar-inner (the one exception kept on request). Without
+            backdrop-filter the header is no longer the containing block for fixed
+            descendants: below 640px .nb-panel is position: fixed and now resolves
+            against the viewport; the header already sits flush with the viewport top at
+            full width, so nothing moves. */}
+        <header ref={setHdrRef} className="sticky top-0 z-nav border-b border-white/[0.07] bg-ink-950 pt-[env(safe-area-inset-top)]">
           <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
             <div className="flex items-center gap-2.5">
               <Logo size={40} />
@@ -763,7 +913,7 @@ export default function Layout() {
                     already open enough, and positive tracking scattered "Signal Lab"
                     into loose individual letters that read as a logotype rather than
                     a product name. */}
-                <div className="font-display text-[17px] font-bold tracking-[-0.015em] text-white">
+                <div className="font-display text-lg leading-tight font-bold tracking-[-0.015em] text-white">
                   Signal Lab
                 </div>
                 <div className="text-xs font-medium text-neutral-500">
@@ -788,7 +938,7 @@ export default function Layout() {
                 gets the mobile bottom tab bar (a fixed grid built for narrow
                 screens, which just doesn't overflow) instead of a cramped
                 horizontal nav. */}
-            <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex lg:gap-2">
+            <nav className="hidden flex-1 items-center justify-center gap-1 lg:flex lg:gap-2" aria-label={t('nav.primary')}>
               <NavItem to="/dashboard" label={t('nav.dashboard')} />
               <NavItem to="/app" label={t('nav.signals')} />
               <NavItem to="/charts" label={t('nav.charts')} />
@@ -881,22 +1031,20 @@ export default function Layout() {
             below forces a scrollbar onto a page that should not scroll. The terms and
             support links remain reachable from every other page. */}
         <main
+          id="main-content"
+          ref={mainRef}
+          tabIndex={-1}
           className={`w-full flex-1 ${
             isTerminal
               ? 'p-0'
-              // pb-24 → .clears-tabbar：那个 96px 正是被 footer 否掉的那个写死值
-              // （见下方 footer 的注释）——全面屏手机的手势条加底栏本体已经超过它。
-              // 这里同一个文件里既有实测值又有被否掉的常量，是最容易在下一次改动
-              // 里复活的那种不一致。sm:pb-6 保留：≥640px 时底栏离手仍远，且
-              // Tailwind 的 utilities 层压得过 components 层里的 .clears-tabbar。
-              // pb-24 → .clears-tabbar: that 96px is the exact hard-coded number
-              // the footer already rejected (see its comment below) — on
-              // gesture-nav phones the bar plus safe area exceeds it. Having the
-              // measured value and the rejected constant side by side in one file
-              // is the kind of inconsistency that comes back on the next edit.
-              // sm:pb-6 stays: above 640px the bar is well clear, and Tailwind's
-              // utilities layer outranks .clears-tabbar in the components layer.
-              : `mx-auto ${isWorkspace ? 'max-w-[1600px]' : 'max-w-7xl'} px-4 pt-6 sm:px-6 clears-tabbar sm:pb-6`
+              // 主区只留 24px（pb-6）：清底栏的事归页脚。非终端页一定渲染页脚（见下方
+              // footer，同样以 !isTerminal 为条件），它自己带 .clears-tabbar；主区再带
+              // 一份，手机上内容和页脚之间就会空出两个底栏的高度。
+              // The main area keeps only 24px (pb-6); clearing the tab bar is the
+              // footer's job. The footer always renders on non-terminal pages (same
+              // !isTerminal condition below) and carries .clears-tabbar itself; a second
+              // copy here left two tab bars of empty space above the footer on phones.
+              : `mx-auto ${isWorkspace ? 'max-w-[1600px]' : 'max-w-7xl'} px-4 pt-6 sm:px-6 pb-6`
           }`}
         >
           {/* 节日问候卡：放在路由切换容器之外，换页不重播。行情终端全屏，不放。
@@ -923,16 +1071,23 @@ export default function Layout() {
               </div>
             }
           >
-            {/* key=pathname 让每次导航都重挂载这层容器，触发一次 page-enter 柔和
-                淡入——切换页面不再是硬弹出现。减少动态偏好下 CSS 会自动跳过动画。
-                key=pathname remounts this wrapper on every navigation, replaying
-                the page-enter fade so switching pages no longer hard-pops. CSS
-                skips the animation under reduced-motion. */}
+            {/* key=pathname 让每次导航都重挂载这层容器。底部主 tab 与竞技场页签之间切换
+                （INSTANT_ROUTES）直接出现：这是全站最高频的导航，一天点上百次，每次都等一段
+                淡入就是「慢」，而这几页自己的列表和骨架已经有进场。其余页面播一次 140ms 的
+                纯透明度淡入（.page-enter，见 motion.css），不带位移。减少动态偏好下 CSS 跳过。
+                key=pathname remounts this wrapper on every navigation. Switching between the
+                bottom tabs and the arena tabs (INSTANT_ROUTES) shows the page at once: it is
+                the most frequent navigation in the app, and those pages' own lists and
+                skeletons already animate. Other routes get a 140ms opacity-only fade
+                (.page-enter, motion.css), no travel. CSS skips it under reduced motion. */}
             {/* 客服后台的子页面（工单 / 跟进、选中的工单）都在 /support-desk/ 之下，按一个页面算：
                 切工单不该重挂载整页、重新请求身份、再淡入一次。
                 The console's sub-routes count as one page: switching tickets must not
                 remount it, refetch identity and replay the fade. */}
-            <div key={isSupportDesk ? '/support-desk' : isAdminConsole ? '/admin' : location.pathname} className="page-enter">
+            <div
+              key={isSupportDesk ? '/support-desk' : isAdminConsole ? '/admin' : location.pathname}
+              className={INSTANT_ROUTES.includes(location.pathname) ? undefined : 'page-enter'}
+            >
               <Outlet />
             </div>
           </Suspense>
@@ -965,7 +1120,7 @@ export default function Layout() {
               slate → neutral: slate is a blue-tinted grey from a different family than
               this system's neutral zinc greys, and the two read as mismatched
               temperatures side by side. Unified on neutral throughout. */}
-          <div className="relative flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[12px] text-neutral-500">
+          <div className="relative flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-xs text-neutral-500">
             <FestivalGround sit />
             <span>© {new Date().getFullYear()} PRISMX</span>
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
@@ -990,7 +1145,7 @@ export default function Layout() {
         )}
 
         {/* 移动端底部导航栏 / mobile bottom nav */}
-        <nav ref={setTabbarRef} className="lg-tabbar lg:hidden">
+        <nav ref={setTabbarRef} className="lg-tabbar lg:hidden" aria-label={t('nav.primary')}>
           <div className="lg-tabbar-inner">
             {mobileTabs.map((tab) => (
               <TabItem key={tab.to} to={tab.to} icon={tab.icon} label={tab.label} />
@@ -998,22 +1153,41 @@ export default function Layout() {
             <button
               type="button"
               className={`lg-tab ${moreActive ? 'on' : ''}`}
-              onClick={() => setMoreOpen(true)}
+              onClick={() => {
+                setMoreOpen(true)
+                onMoreOpen?.(moreItems.map((it) => it.to))
+              }}
               aria-label={t('nav.more')}
+              aria-haspopup="dialog"
+              aria-expanded={moreOpen}
             >
               <span className="lg-ico">
                 <TabIcon name="more" />
               </span>
-              <span className="leading-none">{t('nav.more')}</span>
+              <span className="lg-tab-label leading-none">{t('nav.more')}</span>
             </button>
           </div>
         </nav>
 
-        {/* 「其他」弹出面板 / "More" bottom sheet */}
-        {moreOpen && (
-          <div className="lg-sheet-overlay lg:hidden" onClick={() => setMoreOpen(false)}>
-            <div className="lg-sheet" onClick={(e) => e.stopPropagation()}>
-              <div className="lg-sheet-handle" />
+        {/* 「其他」弹出面板 / "More" bottom sheet
+            遮罩是独立的一层（拖动时单独变淡），只有顶部把手行起拖。
+            The scrim is its own layer (it fades on its own during a drag); only the
+            handle row starts a drag. */}
+        {moreSheet.shown && (
+          <div className={`lg-sheet-overlay lg:hidden${moreSheet.closing ? ' closing' : ''}`}>
+            <div ref={moreScrimRef} className="lg-sheet-scrim" onClick={() => setMoreOpen(false)} />
+            <div
+              ref={moreSheetRef}
+              className="lg-sheet"
+              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={t('nav.more')}
+              tabIndex={-1}
+            >
+              <div className="lg-sheet-grab" {...moreDrag}>
+                <div className="lg-sheet-handle" />
+              </div>
               <div className="lg-sheet-grid">
                 {moreItems.map((it) => (
                   <NavLink
@@ -1061,6 +1235,7 @@ export default function Layout() {
         )}
 
         <AnnouncementPopup />
+        <LiveRegions />
       </div>
     </LiveProvider>
   )

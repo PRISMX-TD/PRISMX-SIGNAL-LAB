@@ -1,4 +1,9 @@
-/* ── 全局 keyframes ── */
+/* ── 全局 keyframes ──
+   fade-in-up、breathe 只在这里定义：tailwind.config.js 的 animate-fade-in-up /
+   animate-breathe 只引用名字，不再自带一份帧。要改位移或呼吸深浅就改这里。
+   fade-in-up and breathe are defined only here: Tailwind's animate-fade-in-up /
+   animate-breathe reference the names and carry no frames of their own. Change the
+   travel or the pulse depth here. */
 @keyframes breathe {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
@@ -20,6 +25,22 @@
    The toast fades in with a slight scale from where it already is; sliding in from an
    edge would make the eye chase the motion before it can read the words. */
 @keyframes toast-in {
-  from { opacity: 0; transform: translate(-50%, -50%) scale(0.94); }
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+/* 退场：原地缩一点点淡出，幅度（0.98）比进场小，走得安静。
+   Exit: shrink in place by less than the enter (0.98), so leaving is quiet. */
+@keyframes toast-out {
+  from { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  to { opacity: 0; transform: translate(-50%, -50%) scale(0.98); }
+}
+/* 减少动效用：只有透明度，位置仍由 .toast 的 translate(-50%, -50%) 固定在正中。
+   Reduced-motion variants: opacity only; .toast's own translate keeps it centred. */
+@keyframes toast-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes toast-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }

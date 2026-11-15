@@ -59,7 +59,7 @@ export default function CoverageNotice({ coverage, requestedDays, loading }: Cov
   const toneClass = bad
     ? 'border-down/30 bg-down/5 text-down'
     : short
-      ? 'border-amber-400/20 bg-amber-400/5 text-amber-200'
+      ? 'border-warn/20 bg-warn/5 text-warn'
       : 'border-white/10 bg-white/[0.02] text-neutral-400'
 
   return (

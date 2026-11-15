@@ -15,7 +15,7 @@ export const TICKET_PRIORITY_TONE: Record<string, string> = {
 }
 
 export const FU_STATUS_TONE: Record<FollowUpStatus, string> = {
-  pending: 'bg-amber-400/15 text-amber-300',
+  pending: 'bg-warn/15 text-warn',
   contacted: 'bg-blue-400/15 text-blue-300',
   interested: 'bg-prism-600/20 text-prism-200',
   converted: 'bg-up/15 text-up',
@@ -61,7 +61,7 @@ export function TicketStatus({ status, label }: { status: string; label: string 
 export function Avatar({ name, size = 32, tone = 'neutral' }: { name: string | null | undefined; size?: number; tone?: 'neutral' | 'staff' | 'note' }) {
   const ch = Array.from((name || '').trim())[0]
   const cls =
-    tone === 'staff' ? 'bg-[var(--purple)] text-white' : tone === 'note' ? 'bg-amber-400/20 text-amber-200' : 'bg-[var(--nest)] text-neutral-300'
+    tone === 'staff' ? 'bg-[var(--purple)] text-white' : tone === 'note' ? 'bg-warn/20 text-warn' : 'bg-[var(--nest)] text-neutral-300'
   return (
     <span
       aria-hidden="true"
@@ -155,21 +155,23 @@ export function DeskModal({
   useDialogA11y(ref, () => { if (!busy) onClose() })
   // portal 到 body：.glass 卡片的 backdrop-filter 会成为 fixed 的包含块（同 ConfirmModal）
   // Portalled to body: a .glass card's backdrop-filter would contain `fixed` (as in ConfirmModal)
+  // 提交中（busy）遮罩和「取消」都不关框，与 Esc 一致（同 ConfirmModal）。
+  // While busy neither the backdrop nor Cancel closes it, matching Escape (as in ConfirmModal).
   return createPortal(
-    <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-alert flex items-end justify-center scrim p-0 sm:items-center sm:p-4" onClick={() => { if (!busy) onClose() }}>
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="glass max-h-[90vh] w-full overflow-y-auto rounded-b-none p-6 sm:max-w-md sm:rounded-b-[var(--r-lg)]"
+        className="glass max-h-[90vh] w-full overflow-y-auto rounded-b-none p-6 sm:max-w-md sm:rounded-b-card"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-4 font-display text-[17px] font-semibold text-neutral-50">{title}</h3>
+        <h3 className="mb-4 font-display text-lg font-semibold text-neutral-50">{title}</h3>
         <div className="space-y-3 text-sm">{children}</div>
         <div className="mt-5 flex justify-end gap-2 pb-[env(safe-area-inset-bottom)]">
-          <button type="button" className="btn btn-ghost h-10 px-5 text-sm" onClick={onClose}>
+          <button type="button" className="btn btn-ghost h-10 px-5 text-sm" disabled={busy} onClick={onClose}>
             {t('common.cancel')}
           </button>
           <button
@@ -180,7 +182,7 @@ export function DeskModal({
             disabled={busy || disabled}
             onClick={onConfirm}
           >
-            {busy ? t('common.loading') : confirmLabel ?? t('common.confirm')}
+            {busy ? t('common.processing') : confirmLabel ?? t('common.confirm')}
           </button>
         </div>
       </div>

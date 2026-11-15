@@ -1,6 +1,7 @@
 // 通用工具 / Common utilities
 import i18n from '../i18n'
 import { symbolCategory } from '../utils/symbolCategory'
+import { EMPTY } from '../utils/format'
 
 // 生成幂等下单 ID / generate idempotent client order id
 export function clientOrderId(): string {
@@ -44,7 +45,7 @@ export function localizeApiError(message: string): string {
 // still applies; only the fixed timezone being shown has changed.
 export function fmtTime(iso: string | null | undefined): string {
   const d = parseTime(iso)
-  if (!d) return '-'
+  if (!d) return EMPTY
   return fmtStamp(d, { clock: 'hms' }) + ' UTC+8'
 }
 
@@ -52,7 +53,7 @@ export function fmtTime(iso: string | null | undefined): string {
 // Format with full date incl. year (for subscription expiry etc. where the year matters).
 export function fmtDate(iso: string | null | undefined): string {
   const d = parseTime(iso)
-  if (!d) return '-'
+  if (!d) return EMPTY
   return fmtStamp(d, { year: 'always', clock: 'hm' }) + ' UTC+8'
 }
 
@@ -608,6 +609,6 @@ export function snapLot(n: number, symbol?: string | null): number {
 }
 
 export function fmtLots(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return '—'
+  if (n == null || !Number.isFinite(n)) return EMPTY
   return roundLots(n).toLocaleString('en-US', { maximumFractionDigits: 3 })
 }

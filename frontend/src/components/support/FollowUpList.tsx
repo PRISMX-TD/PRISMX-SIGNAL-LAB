@@ -16,7 +16,7 @@ export type FuFilter = 'all' | FollowUpStaffStatus
 export type FuMode = 'customers' | 'requests'
 
 const REQ_TONE: Record<string, string> = {
-  pending: 'bg-amber-400/15 text-amber-300',
+  pending: 'bg-warn/15 text-warn',
   approved: 'bg-[var(--up-bg)] text-[var(--up)]',
   rejected: 'bg-[var(--down-bg)] text-[var(--down)]',
 }
@@ -58,7 +58,7 @@ export default function FollowUpList({
       type="button"
       aria-pressed={filter === key}
       onClick={() => onFilter(key)}
-      className={`inline-flex h-7 items-center gap-1.5 rounded-[10px] px-2.5 text-xs font-medium transition ${
+      className={`inline-flex h-7 items-center gap-1.5 rounded-control px-2.5 text-xs font-medium transition ${
         filter === key ? 'bg-[var(--surface-2)] text-neutral-100 shadow-[inset_0_0_0_1px_var(--line-hi)]' : 'text-neutral-500 hover:text-neutral-200'
       }`}
     >
@@ -77,7 +77,7 @@ export default function FollowUpList({
           </button>
           <button type="button" aria-pressed={mode === 'requests'} onClick={() => onMode('requests')} className={mode === 'requests' ? 'is-on' : ''}>
             {t('supportDesk.requests.title')}
-            {pendingReq > 0 && <span className="num ml-1.5 text-xs text-amber-300">{pendingReq}</span>}
+            {pendingReq > 0 && <span className="num ml-1.5 text-xs text-warn">{pendingReq}</span>}
           </button>
         </div>
         {mode === 'customers' && items.length > 0 && (
@@ -107,14 +107,14 @@ export default function FollowUpList({
           ) : (
             <ul>
               {requests.map((r, i) => (
-                <li key={r.id} className="sd-rise border-b border-[var(--line)]" style={{ ['--i' as string]: Math.min(i, 12) }}>
+                <li key={r.id} className="sd-rise border-b border-[var(--line)]" style={{ ['--i' as string]: Math.min(i, 5) }}>
                   <button
                     type="button"
                     onClick={() => onSelect(r.targetUserId)}
                     className={`sd-row relative w-full px-4 py-3.5 text-left ${selectedUserId === r.targetUserId ? 'is-sel' : ''}`}
                   >
                     <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-neutral-100">{t(`supportDesk.requests.kind.${r.kind}`)}</span>
+                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-neutral-100">{t(`supportDesk.requests.kind.${r.kind}`)}</span>
                       <Tag tone={REQ_TONE[r.status] ?? ''}>{t(`supportDesk.requests.status.${r.status}`)}</Tag>
                     </span>
                     <span className="mt-1 flex items-center gap-2 text-xs text-neutral-500">
@@ -129,7 +129,7 @@ export default function FollowUpList({
           )
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center px-8 py-16 text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--nest)] text-neutral-500">
+            <span className="flex h-12 w-12 items-center justify-center rounded-card bg-[var(--nest)] text-neutral-500">
               <IconUsers size={20} />
             </span>
             <p className="mt-3 text-sm font-medium text-neutral-200">{t('supportDesk.followUps.empty')}</p>
@@ -142,7 +142,7 @@ export default function FollowUpList({
             {shown.map((f, i) => {
               const sel = selectedUserId === f.userId
               return (
-                <li key={f.id} className="sd-rise border-b border-[var(--line)]" style={{ ['--i' as string]: Math.min(i, 12) }}>
+                <li key={f.id} className="sd-rise border-b border-[var(--line)]" style={{ ['--i' as string]: Math.min(i, 5) }}>
                   <button
                     type="button"
                     onClick={() => onSelect(f.userId)}
@@ -152,7 +152,7 @@ export default function FollowUpList({
                     <Avatar name={f.nickname || f.email} size={34} />
                     <span className="min-w-0 flex-1">
                       <span className="flex items-center gap-2">
-                        <span className={`min-w-0 flex-1 truncate text-[13px] ${sel ? 'font-semibold text-neutral-50' : 'font-medium text-neutral-100'}`}>
+                        <span className={`min-w-0 flex-1 truncate text-sm ${sel ? 'font-semibold text-neutral-50' : 'font-medium text-neutral-100'}`}>
                           {f.nickname || t('supportDesk.card.noNickname')}
                         </span>
                         <Tag tone={FU_STATUS_TONE[f.status]}>{t(`supportDesk.status.${f.status}`)}</Tag>

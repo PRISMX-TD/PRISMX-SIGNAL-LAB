@@ -89,7 +89,7 @@ export default function InviteLinkCreateDrawer({
               ...(comps ?? []).map((c) => ({ value: c.id, label: c.name })),
             ]}
           />
-          {compsError && <p className="mt-1 text-xs text-amber-400">{t('admin.invite.compsLoadError')}</p>}
+          {compsError && <p className="mt-1 text-xs text-warn">{t('admin.invite.compsLoadError')}</p>}
           {competitionId && (
             <p className="mt-1 text-xs leading-snug text-neutral-500">{t('admin.invite.competitionHint')}</p>
           )}

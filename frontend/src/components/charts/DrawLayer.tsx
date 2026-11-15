@@ -11,7 +11,7 @@ import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type {
   IChartApi, ISeriesApi, UTCTimestamp, IPrimitivePaneView,
   IPrimitivePaneRenderer, PrimitiveHoveredItem, AutoscaleInfo,
-  Logical, PrimitivePaneViewZOrder,
+  Logical, PrimitivePaneViewZOrder, MouseEventParams,
 } from 'lightweight-charts'
 import { usePrefs } from '../../store/prefs'
 import ConfirmModal from '../ConfirmModal'
@@ -64,12 +64,22 @@ const TOL_DESKTOP = 12
 const TOL_MOBILE = 24
 const HANDLE_DESKTOP = 10
 const HANDLE_MOBILE = 20
+// 挪线 / 拉手柄的起拖阈值：点一下选中、手指按住时的自然抖动都不该把线挪走。
+// Move / handle drag threshold: a tap to select, or a resting finger's jitter, must not move the line.
+const DRAG_SLOP_MOUSE = 6
+const DRAG_SLOP_TOUCH = 10
+// 长按出菜单：手指偏离起点超过这么远才算「在拖」、取消长按。
+// Long-press: only a finger that strays this far from its start cancels the timer.
+const LONG_PRESS_SLOP = 10
 const UNDO_MAX = 30
 const COLORS = ['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451']
 const LINE_WIDTHS = [1, 2, 3, 4]
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1]
 
 const isTouchDevice = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0)
+// 触摸、以及粗指针设备上的笔，都没有「悬停」，改走「点一下选中」（见 subscribeClick）。
+// Touch, and a pen on a coarse-pointer device, have no hover; they use tap-to-select.
+const isTouchLike = (pointerType: string) => pointerType === 'touch' || (pointerType === 'pen' && isTouchDevice)
 
 const uid = () => 'dw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 
@@ -501,10 +511,25 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
   const selectedRef = useRef<string | null>(selectedId)
   const drawingsRef = useRef<Drawing[]>([])
   const stayInDrawRef = useRef(false)
-  const dragRef = useRef<{ mode: 'create'; type: DrawType; startX: number; startY: number } | { mode: 'move'; id: string; startX: number; startY: number; origPts: Point[] } | { mode: 'handle'; id: string; handle: number; origPts: Point[] } | null>(null)
+  // pointerId：只认按下的那根手指。slop / active：move 与 handle 过了起拖阈值才算真拖。
+  // pointerId: only the pressing pointer counts. slop / active: a move or handle drag
+  // only starts once past the threshold.
+  const dragRef = useRef<
+    | { mode: 'create'; type: DrawType; startX: number; startY: number; pointerId: number }
+    | { mode: 'move'; id: string; startX: number; startY: number; origPts: Point[]; pointerId: number; slop: number; active: boolean }
+    | { mode: 'handle'; id: string; handle: number; startX: number; startY: number; origPts: Point[]; pointerId: number; slop: number; active: boolean }
+    | null
+  >(null)
   const appliedRef = useRef(''); const symRef = useRef(symbol)
   const lastClickRef = useRef<{ id: string; time: number } | null>(null)
   const tempPrimRef = useRef<DrawPrimitive | null>(null)
+  // 选中是手指点出来的：选中期间交互层保持接管指针（下一次按在线上就能拖）。
+  // lastTouchRef：最近一次按下是不是触摸，subscribeClick 的回调里拿不到 pointerType。
+  // The selection came from a tap: while it lasts the layer keeps the pointer so the next
+  // press on the line drags it. lastTouchRef: whether the latest press was touch, since
+  // subscribeClick's callback has no pointerType.
+  const touchSelRef = useRef(false)
+  const lastTouchRef = useRef(false)
 
   toolRef.current = tool; colorRef.current = color
   selectedRef.current = selectedId; drawingsRef.current = drawings; stayInDrawRef.current = stayInDraw
@@ -793,18 +818,45 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
   }, [hitSingle])
 
   // chart click subscription for cursor-mode selection
+  // 触摸没有悬停，交互层平时不接管指针，手指点到画线时点击落在图表上：在这里做一次画线
+  // 命中，选中它，并让交互层在选中期间接管（下一次按在线上就能拖 / 拉手柄 / 长按出菜单）。
+  // 坐标用 sourceEvent 减交互层的 rect，与 onDown 的 localXY 同一坐标系。
+  // Touch has no hover, so the layer is not armed and a tap on a drawing lands on the
+  // chart: hit-test drawings here, select the hit, and keep the layer armed while it is
+  // selected (the next press drags / resizes / long-presses it). sourceEvent minus the
+  // layer's rect is the same space localXY uses in onDown.
   useEffect(() => {
-    const onClick = (p: any) => {
+    const onClick = (p: MouseEventParams) => {
       if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
       if (!p.hoveredObjectId && !p.point) {
         setSelectedId(null); setPropsPanel(null)
+        return
       }
+      if (!lastTouchRef.current || p.paneIndex !== 0) return
+      const el = overlayRef.current
+      const src = p.sourceEvent
+      if (!el || !src) return
+      const r = el.getBoundingClientRect()
+      const hit = hitDrawing(src.clientX - r.left, src.clientY - r.top, true)
+      if (!hit) return
+      touchSelRef.current = true
+      el.style.pointerEvents = 'auto'
+      setSelectedId(hit.id); setPropsPanel({ drawingId: hit.id })
     }
     chart.subscribeClick(onClick)
     return () => chart.unsubscribeClick(onClick)
-  }, [chart])
+  }, [chart, hitDrawing])
 
   const onDown = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    // 第二根手指：画到一半就作废这一笔（否则临时线留在图上成了「幽灵线」）；挪动 / 拉手柄
+    // 时不理它，继续只跟第一根手指（onMove / onUp / onCancel 按 pointerId 过滤）。
+    // A second finger voids a stroke in progress (else its temp line is left behind as a
+    // ghost); during a move / handle drag it is ignored and the first finger keeps control
+    // (onMove / onUp / onCancel filter by pointerId).
+    if (!e.isPrimary) {
+      if (dragRef.current?.mode === 'create') { dragRef.current = null; removeTempPrim() }
+      return
+    }
     let { x, y } = localXY(e)
     const cur = toolRef.current
     // 抓住指针：交互层只有 inset-1.5 那么大，不捕获的话指针一拖出这个矩形，
@@ -853,13 +905,15 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
       const tempPrim = new DrawPrimitive(tempD, digits)
       tempPrimRef.current = tempPrim
       series.attachPrimitive(tempPrim as any)
-      dragRef.current = { mode: 'create', type: dtype, startX: x, startY: y }
+      dragRef.current = { mode: 'create', type: dtype, startX: x, startY: y, pointerId: e.pointerId }
       return
     }
 
     // cursor mode
     const h = hitDrawing(x, y, true)
+    const slop = isTouchLike(e.pointerType) ? DRAG_SLOP_TOUCH : DRAG_SLOP_MOUSE
     if (h) {
+      touchSelRef.current = isTouchLike(e.pointerType)
       if (h.locked) {
         setSelectedId(h.id); setPropsPanel({ drawingId: h.id })
         const now = Date.now()
@@ -874,7 +928,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
       // check handle hit first
       const hi = hitHandle(h, x, y)
       if (hi >= 0) {
-        dragRef.current = { mode: 'handle', id: h.id, handle: hi, origPts: h.pts.map((p) => ({ t: p.t, p: p.p })) }
+        dragRef.current = { mode: 'handle', id: h.id, handle: hi, startX: x, startY: y, origPts: h.pts.map((p) => ({ t: p.t, p: p.p })), pointerId: e.pointerId, slop, active: false }
         return
       }
       const now = Date.now()
@@ -883,16 +937,25 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
       }
       lastClickRef.current = { id: h.id, time: now }
       setSelectedId(h.id); setPropsPanel({ drawingId: h.id })
-      dragRef.current = { mode: 'move', id: h.id, startX: x, startY: y, origPts: h.pts.map((p) => ({ t: p.t, p: p.p })) }
+      dragRef.current = { mode: 'move', id: h.id, startX: x, startY: y, origPts: h.pts.map((p) => ({ t: p.t, p: p.p })), pointerId: e.pointerId, slop, active: false }
     } else {
+      touchSelRef.current = false
       setSelectedId(null); setPropsPanel(null)
     }
-  }, [chart, series, commit, hitDrawing, hitHandle, digits])
+  }, [chart, series, commit, hitDrawing, hitHandle, digits, removeTempPrim])
 
   const onMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
-    if (!drag) return
+    if (!drag || e.pointerId !== drag.pointerId) return
     const { x, y } = localXY(e)
+    // 起拖阈值：挪线 / 拉手柄要先走出 slop（鼠标 6px、手指 10px）。过了阈值后仍按原始按下点
+    // 1:1 跟随，线停在手指按住它的位置上。
+    // Threshold: a move / handle drag waits until the pointer leaves the slop (6px mouse,
+    // 10px touch); after that it tracks 1:1 from the original press point.
+    if (drag.mode !== 'create' && !drag.active) {
+      if (Math.hypot(x - drag.startX, y - drag.startY) < drag.slop) return
+      drag.active = true
+    }
 
     if (drag.mode === 'create') {
       const temp = tempPrimRef.current
@@ -952,6 +1015,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
 
   const onUp = useCallback((e?: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
+    if (drag && e && e.pointerId !== drag.pointerId) return   // 第二根手指抬起 / a second finger lifting
     dragRef.current = null
     if (e && e.currentTarget.hasPointerCapture?.(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
@@ -1012,6 +1076,20 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
     }
   }, [chart, series, commit, removeTempPrim])
 
+  // 系统取消（边缘返回手势、掌心误触、来电）：放弃这一笔。画到一半的临时线移除；挪动 / 拉手柄中
+  // 的画线按 drawingsRef 原样画回去（拖动中从没 commit 过），不提交、不压撤销栈。
+  // A system cancel (edge back gesture, palm, incoming call) abandons the stroke: a
+  // half-drawn temp line is removed; a drawing mid move / resize is repainted from
+  // drawingsRef (never committed during the drag). Nothing is committed or pushed to undo.
+  const onCancel = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (drag && e.pointerId !== drag.pointerId) return
+    dragRef.current = null
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    removeTempPrim()
+    if (drag && drag.mode !== 'create') syncPrims(drawingsRef.current)
+  }, [removeTempPrim, syncPrims])
+
   // ──── 右键菜单点击外部关闭 / context-menu click-outside ────
   useEffect(() => {
     if (!ctxMenu) return
@@ -1021,26 +1099,45 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
   }, [ctxMenu])
 
   // 手机长按 / mobile long-press
+  // 手指偏离起点超过 LONG_PRESS_SLOP 才取消：按住不动时也有亚像素抖动，以前任何一次
+  // touchmove 都取消，长按几乎出不来。touchcancel（系统接管手势）同样取消。
+  // Only a finger that strays past LONG_PRESS_SLOP cancels: a resting finger still jitters,
+  // and cancelling on any touchmove made the long-press nearly impossible. touchcancel
+  // (the system taking the gesture) cancels too.
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!isTouchDevice) return
     const el = overlayRef.current; if (!el) return
+    let sx = 0, sy = 0
+    const clear = () => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null } }
     const onStart = (e: TouchEvent) => {
+      clear()
       if (e.touches.length !== 1) return
       const touch = e.touches[0]
+      sx = touch.clientX; sy = touch.clientY
       longPressTimer.current = setTimeout(() => {
+        longPressTimer.current = null
         if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
         const r = el.getBoundingClientRect()
-        const x = touch.clientX - r.left, y = touch.clientY - r.top
-        const hit = hitDrawing(x, y, true)
-        if (hit) { setSelectedId(hit.id); setCtxMenu({ x: touch.clientX, y: touch.clientY, drawingId: hit.id }) }
+        const hit = hitDrawing(sx - r.left, sy - r.top, true)
+        if (hit) { setSelectedId(hit.id); setCtxMenu({ x: sx, y: sy, drawingId: hit.id }) }
       }, 500)
     }
-    const onEnd = () => { if (longPressTimer.current) { clearTimeout(longPressTimer.current); longPressTimer.current = null } }
+    const onMoveTouch = (e: TouchEvent) => {
+      const touch = e.touches[0]
+      if (!touch || Math.hypot(touch.clientX - sx, touch.clientY - sy) > LONG_PRESS_SLOP) clear()
+    }
     el.addEventListener('touchstart', onStart, { passive: true })
-    el.addEventListener('touchend', onEnd, { passive: true })
-    el.addEventListener('touchmove', onEnd, { passive: true })
-    return () => { el.removeEventListener('touchstart', onStart); el.removeEventListener('touchend', onEnd); el.removeEventListener('touchmove', onEnd) }
+    el.addEventListener('touchmove', onMoveTouch, { passive: true })
+    el.addEventListener('touchend', clear, { passive: true })
+    el.addEventListener('touchcancel', clear, { passive: true })
+    return () => {
+      clear()
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchmove', onMoveTouch)
+      el.removeEventListener('touchend', clear)
+      el.removeEventListener('touchcancel', clear)
+    }
   }, [hitDrawing])
 
   // ──── 键盘 / keyboard ────
@@ -1055,6 +1152,27 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
       if (!el) return false
       return !!el.closest?.('input,textarea,select,[contenteditable="true"]')
     }
+    // 单键快捷键（1-8 换工具、Delete / Backspace 删选中的画线）只在焦点落在图表区里时
+    // 生效。图表区 = .term-cv（画线竖轨 + 工具条 + 图表）；ChartsPage 给图表容器加了
+    // tabIndex，点一下图表焦点就进来了。以前挂在 window 上全页生效：在自选栏、下单票的
+    // 按钮上按一下数字就悄悄换了画线工具，选中画线后在别处按退格会把画线删掉（WCAG
+    // 2.1.4 单字符快捷键）。数字分支原来只排除 input / textarea / select，漏了
+    // contenteditable，现在和别的分支一样用 inTextField。Esc 和 Ctrl+Z 不受这条限制：
+    // Esc 只是取消，Ctrl+Z 带修饰键。
+    // Single-key shortcuts (1-8 pick a tool, Delete / Backspace remove the selected
+    // drawing) only act while focus is inside the chart area: .term-cv (draw rail +
+    // toolbar + chart); ChartsPage gives the chart container a tabIndex, so one click on
+    // the chart brings focus in. They used to listen page-wide on window: a digit pressed
+    // on a watchlist or ticket button silently switched the drawing tool, and Backspace
+    // elsewhere deleted the selected drawing (WCAG 2.1.4, character key shortcuts). The
+    // digit branch excluded only input / textarea / select and missed contenteditable; it
+    // now uses inTextField like the other branches. Esc and Ctrl+Z are not gated: Esc only
+    // cancels, Ctrl+Z carries a modifier.
+    const inChartArea = (): boolean => {
+      const scope = host.closest('.term-cv') || host.parentElement
+      const active = document.activeElement
+      return !!scope && !!active && scope.contains(active)
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (dragRef.current) { dragRef.current = null; removeTempPrim() }
@@ -1064,16 +1182,16 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
         e.preventDefault()
         if (e.shiftKey) redo(); else undo()
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedRef.current) {
-        if (inTextField(e.target)) return
+        if (inTextField(e.target) || !inChartArea()) return
         commit(drawingsRef.current.filter((d) => d.id !== selectedRef.current))
         setSelectedId(null); setPropsPanel(null)
-      } else if (!(e.target as HTMLElement)?.closest?.('input,textarea,select') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      } else if (!inTextField(e.target) && inChartArea() && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const map: Record<string, Tool> = { '1': 'cursor', '2': 'trend', '3': 'hline', '4': 'vline', '5': 'rect', '6': 'fib', '7': 'ray', '8': 'crossline' }
         if (map[e.key]) { setTool(map[e.key]); setSelectedId(null) }
       }
     }
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)
-  }, [commit, undo, redo, removeTempPrim])
+  }, [commit, undo, redo, removeTempPrim, host])
 
   // ──── 悬停光标样式 + 动态 pointer-events / hover cursor + dynamic pointer-events ────
   // 叠加层默认不接管指针事件(pointer-events: none),只有真的"有事可做"时
@@ -1126,7 +1244,6 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
       }
     }
     const onHover = (e: PointerEvent) => {
-      last = { x: e.clientX, y: e.clientY }
       // 拖拽中 / 画图工具激活时必须立刻接管指针，不能等到下一帧才切 auto。
       // Mid-drag or with a tool active, the layer must claim the pointer at once.
       if (dragRef.current || (toolRef.current !== 'cursor' && toolRef.current !== 'cross')) {
@@ -1134,11 +1251,34 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
         if (!dragRef.current) setCursorStyle('crosshair')
         return
       }
+      // 触摸没有悬停：平移时擦过画线不能武装交互层（否则它带着 touch-none 留在那里，下一次
+      // 平移被吃掉）。触摸改走 subscribeClick 里的「点一下选中」。
+      // Touch has no hover: a pan brushing a drawing must not arm the layer (it would stay
+      // armed with touch-none and eat the next pan). Touch uses tap-to-select instead.
+      if (isTouchLike(e.pointerType)) return
+      last = { x: e.clientX, y: e.clientY }
       if (frame === 0) frame = window.requestAnimationFrame(evaluate)
     }
+    const onPress = (e: PointerEvent) => { lastTouchRef.current = isTouchLike(e.pointerType) }
+    // 冒泡期：在 React 挂在根节点上的 onPointerUp 之后才跑，这时 dragRef 已经清空。触摸抬起后，
+    // 不在拖、没有激活画图工具、也没有点选中的画线，就把交互层还给图表。
+    // Bubble phase: runs after React's root-level onPointerUp, when dragRef is cleared.
+    // After a touch lifts with no drag, no active tool and no tap selection, hand the
+    // pointer back to the chart.
+    const onRelease = (e: PointerEvent) => {
+      if (!isTouchLike(e.pointerType) || dragRef.current || touchSelRef.current) return
+      if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
+      el.style.pointerEvents = 'none'
+    }
     window.addEventListener('pointermove', onHover, true)
+    window.addEventListener('pointerdown', onPress, true)
+    window.addEventListener('pointerup', onRelease)
+    window.addEventListener('pointercancel', onRelease)
     return () => {
       window.removeEventListener('pointermove', onHover, true)
+      window.removeEventListener('pointerdown', onPress, true)
+      window.removeEventListener('pointerup', onRelease)
+      window.removeEventListener('pointercancel', onRelease)
       if (frame !== 0) window.cancelAnimationFrame(frame)
     }
   }, [hitDrawing, hitHandle])
@@ -1154,6 +1294,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
     else { el.style.pointerEvents = 'none'; setCursorStyle('') }
   }, [tool])
 
+  // 选中被别的路径清掉（Esc、删除、属性面板、撤销、切工具）时，手指点选带来的接管也一并撤掉，
+  // 否则交互层继续 touch-none 盖着图表，下一次平移会被吃掉。
+  // When the selection is cleared some other way (Escape, delete, the props panel, undo,
+  // a tool switch), drop the tap-selection arming too, or the layer keeps covering the
+  // chart with touch-none and eats the next pan.
+  useEffect(() => {
+    if (selectedId) return
+    touchSelRef.current = false
+    const el = overlayRef.current
+    if (el && !dragRef.current && (toolRef.current === 'cursor' || toolRef.current === 'cross')) el.style.pointerEvents = 'none'
+  }, [selectedId])
+
   return (
     <>
       {/* 叠加交互层 / transparent interaction layer */}
@@ -1161,7 +1313,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
         ref={overlayRef}
         className="pointer-events-none absolute inset-1.5 z-10 touch-none"
         style={{ display: visible ? '' : 'none', cursor: cursorStyle || (tool !== 'cursor' && tool !== 'cross' ? 'crosshair' : 'default') }}
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}
         onContextMenu={(e) => {
           e.preventDefault()
           if (tool !== 'cursor' && tool !== 'cross') return
@@ -1180,37 +1332,46 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
 
       {/* 浮动属性栏 */}
       {propsPanel && selectedId && (() => { const d = drawings.find((dw) => dw.id === selectedId); if (!d) return null; return (
-        <div className={`absolute right-3 top-3 z-30 flex items-center gap-1.5 rounded-lg border border-white/10 bg-ink-900/90 px-2 py-1.5 backdrop-blur shadow-lg sm:gap-2.5 sm:px-3 sm:py-2.5`}>
+        <div className={`absolute right-3 top-3 z-30 flex items-center gap-1 rounded-lg float-panel px-2 py-1.5 sm:gap-2.5 sm:px-3 sm:py-2.5`}>
           {LINE_WIDTHS.map((w) => (
             <button key={w} type="button" title={`${w}px`} onClick={() => applyLineWidth(w)}
-              className={`flex items-center justify-center rounded border transition sm:w-7 sm:h-7 ${(d.lineWidth || 1) === w ? 'border-prism-500/60 bg-prism-600/25' : 'border-white/10 hover:border-white/20'}`}
-              style={{ width: isTouchDevice ? 20 : 28, height: isTouchDevice ? 20 : 28 }}
-            ><span style={{ display: 'block', width: w * 4 + 4, height: w, background: d.color, borderRadius: 1 }} /></button>
+              aria-label={String(t('charts.draw.lineWidth', { w }))}
+              aria-pressed={(d.lineWidth || 1) === w}
+              className={`term-dl-btn flex items-center justify-center rounded border transition sm:w-7 sm:h-7 ${(d.lineWidth || 1) === w ? 'border-prism-500/60 bg-prism-600/25' : 'border-white/10 hover:border-white/20'}`}
+              style={{ width: 28, height: 28 }}
+            ><span aria-hidden="true" style={{ display: 'block', width: w * 4 + 4, height: w, background: d.color, borderRadius: 1 }} /></button>
           ))}
           <span className="w-px h-5 sm:h-6 bg-white/10" />
           {(['solid', 'dashed', 'dotted'] as const).map((s) => (
             <button key={s} type="button" title={String(t(`charts.draw.${s}`))} onClick={() => applyLineStyle(s)}
-              className={`flex items-center justify-center rounded border transition ${(d.lineStyle || 'solid') === s ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 text-neutral-500 hover:text-neutral-300'}`}
-              style={{ height: isTouchDevice ? 20 : 26, width: isTouchDevice ? 28 : 36, fontSize: isTouchDevice ? 9 : 12 }}
-            >{s === 'solid' ? '━━' : s === 'dashed' ? '┅┅' : '┅'}</button>
+              aria-label={String(t(`charts.draw.${s}`))}
+              aria-pressed={(d.lineStyle || 'solid') === s}
+              className={`term-dl-btn flex items-center justify-center rounded border transition ${(d.lineStyle || 'solid') === s ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 text-neutral-500 hover:text-neutral-300'}`}
+              style={{ height: isTouchDevice ? 28 : 26, width: isTouchDevice ? 32 : 36, fontSize: isTouchDevice ? 10 : 12 }}
+            ><span aria-hidden="true">{s === 'solid' ? '━━' : s === 'dashed' ? '┅┅' : '┅'}</span></button>
           ))}
           <span className="w-px h-5 sm:h-6 bg-white/10" />
           <button type="button" onClick={toggleLock}
-            className={`rounded border px-1.5 transition sm:px-2 ${d.locked ? 'border-amber-400/60 text-amber-300' : 'border-white/10 text-neutral-400 hover:text-neutral-100'}`}
-            style={{ height: isTouchDevice ? 20 : 26, fontSize: isTouchDevice ? 10 : 12 }}
+            title={String(t('charts.draw.lock'))}
+            aria-label={String(t('charts.draw.lock'))}
+            aria-pressed={!!d.locked}
+            className={`term-dl-btn rounded border px-1.5 transition sm:px-2 ${d.locked ? 'border-warn/60 text-warn' : 'border-white/10 text-neutral-400 hover:text-neutral-100'}`}
+            style={{ height: isTouchDevice ? 28 : 26, minWidth: 28, fontSize: isTouchDevice ? 10 : 12 }}
           >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" />{d.locked && <line x1="12" y1="15" x2="12" y2="17" />}</svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" />{d.locked && <line x1="12" y1="15" x2="12" y2="17" />}</svg>
           </button>
           <button type="button" onClick={deleteSelected}
-            className="rounded border border-white/10 px-1.5 text-neutral-400 hover:text-down sm:px-2"
-            style={{ height: isTouchDevice ? 20 : 26, fontSize: isTouchDevice ? 10 : 12 }}
-          ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg></button>
+            title={String(t('charts.draw.delete'))}
+            aria-label={String(t('charts.draw.delete'))}
+            className="term-dl-btn rounded border border-white/10 px-1.5 text-neutral-400 hover:text-down sm:px-2"
+            style={{ height: isTouchDevice ? 28 : 26, minWidth: 28, fontSize: isTouchDevice ? 10 : 12 }}
+          ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14" /></svg></button>
         </div>
       )})()}
 
       {/* 右键菜单 */}
       {ctxMenu && (
-        <div className="fixed z-50 min-w-[140px] rounded-lg border border-white/10 bg-ink-900/95 p-1 shadow-xl backdrop-blur" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
+        <div className="fixed z-menu min-w-[140px] rounded-lg float-panel p-1" style={{ left: ctxMenu.x, top: ctxMenu.y }} onClick={(e) => e.stopPropagation()}>
           <button onClick={() => { const d = drawings.find((dw) => dw.id === ctxMenu.drawingId); if (d) commit(drawings.map((dw) => dw.id === ctxMenu.drawingId ? { ...dw, locked: !dw.locked } : dw)); setCtxMenu(null) }}
             className="flex w-full items-center gap-2 rounded px-3 py-1.5 text-xs text-neutral-300 hover:bg-white/10"
           ><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg> {drawings.find((d) => d.id === ctxMenu.drawingId)?.locked ? t('charts.draw.unlock') : t('charts.draw.lock')}</button>

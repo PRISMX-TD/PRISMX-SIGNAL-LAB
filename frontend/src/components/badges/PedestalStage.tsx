@@ -14,12 +14,18 @@ import { useTranslation } from 'react-i18next'
 import BadgeIcon from './BadgeIcon'
 import MedalTilt from './MedalTilt'
 import type { GamificationBadge } from '../../api/types'
+import { swipeCommits, type SwipeRule } from '../../utils/swipe'
 
 type Slot = 'l' | 'c' | 'r'
-// 横向位移超过这个值才算一次滑动（否则是点按，交给 MedalTilt 的 onClick 开详情）。
-// Horizontal travel beyond this counts as a swipe (otherwise it is a tap, left to
-// MedalTilt's onClick to open the detail layer).
+// 横向位移达到这个值、或短促一甩（至少 10px 且平均快于 0.3 px/ms）才算一次滑动（否则是
+// 点按，交给 MedalTilt 的 onClick 开详情）。
+// Horizontal travel of this much, or a short flick (at least 10px, faster than 0.3 px/ms
+// on average), counts as a swipe (otherwise it is a tap, left to MedalTilt's onClick to
+// open the detail layer).
 const SWIPE_PX = 36
+const PEDESTAL_SWIPE: SwipeRule = { distance: SWIPE_PX, flickMin: 10, flickVelocity: 0.3 }
+// 横向走出这么远才捕获指针。/ Horizontal travel before the pointer is captured.
+const CAPTURE_PX = 8
 // 勋章的 SVG 一律按桌面 C 位尺寸渲染，副戴与手机用 CSS 缩放——转盘转动时尺寸
 // 用 transform 过渡，不重画 SVG。
 // Badges always render at the desktop centre size; sides and phones scale via CSS,
@@ -148,7 +154,7 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
   const n = badges.length
   const [front, setFront] = useState(0)
   const pedRef = useRef<HTMLDivElement>(null)
-  const dragRef = useRef<{ x: number; y: number } | null>(null)
+  const dragRef = useRef<{ x: number; y: number; t: number; id: number; captured: boolean } | null>(null)
   const swipedRef = useRef(false)
   const [gyro, setGyro] = useState<GyroState>('idle')
 
@@ -202,22 +208,40 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
   const frontBadge = badges[front] ?? null
   const frontIsDefault = frontBadge != null && frontBadge.id === defaultId
 
-  // 滑动：记下按下点，抬起时看横向位移。滑动过的那一次抬起会连带一个 click，
+  // 滑动：记下按下点，抬起时看横向位移与速度。滑动过的那一次抬起会连带一个 click，
   // 在捕获阶段拦掉，免得转盘转完还弹出详情层。
-  // Swipe: remember the pointer-down point and read the horizontal travel on release.
-  // A release that ended a swipe also emits a click — intercepted in the capture
+  // 横向走出 8px 才 setPointerCapture：按下就捕获的话，抬起时的 click 会派发给 .ach-trio
+  // （按下与抬起目标的共同祖先），勋章按钮收不到，点勋章开详情就坏了。捕获之后，手指或鼠标
+  // 拖出转盘区再松开，这次滑动照样算数。
+  // Swipe: remember the pointer-down point and read the horizontal travel and speed on
+  // release. A release that ended a swipe also emits a click — intercepted in the capture
   // phase so the detail layer doesn't pop after a rotation.
+  // The pointer is captured only after 8px of horizontal travel: capturing on down would
+  // send the release's click to .ach-trio (the common ancestor of the down and up targets),
+  // so the badge button would never get it and tap-to-open would break. Once captured, a
+  // finger or mouse that leaves the turntable before releasing still counts.
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
-    dragRef.current = { x: e.clientX, y: e.clientY }
+    if (!e.isPrimary) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    dragRef.current = { x: e.clientX, y: e.clientY, t: e.timeStamp, id: e.pointerId, captured: false }
     swipedRef.current = false
+  }
+  function onPointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = dragRef.current
+    if (!d || d.captured || e.pointerId !== d.id) return
+    const dx = e.clientX - d.x
+    if (Math.abs(dx) < CAPTURE_PX || Math.abs(dx) <= Math.abs(e.clientY - d.y)) return
+    d.captured = true
+    e.currentTarget.setPointerCapture(e.pointerId)
   }
   function onPointerUp(e: ReactPointerEvent<HTMLDivElement>) {
     const start = dragRef.current
+    if (!start || e.pointerId !== start.id) return
     dragRef.current = null
-    if (!start || n <= 1) return
+    if (n <= 1) return
     const dx = e.clientX - start.x
     const dy = e.clientY - start.y
-    if (Math.abs(dx) < SWIPE_PX || Math.abs(dx) < Math.abs(dy)) return
+    if (!swipeCommits(dx, dy, e.timeStamp - start.t, PEDESTAL_SWIPE)) return
     swipedRef.current = true
     // 向左滑 = 右边那枚转到正面 / swipe left = the right-hand badge comes to the front
     setFront((f) => (dx < 0 ? (f + 1) % n : (f - 1 + n) % n))
@@ -244,6 +268,7 @@ export default function PedestalStage({ badges, defaultId, busy, onOpen, onMakeD
         <div
           className="ach-trio"
           onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={() => { dragRef.current = null }}
           onClickCapture={onClickCapture}

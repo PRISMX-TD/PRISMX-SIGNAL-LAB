@@ -39,6 +39,7 @@ import {
   IndicatorList, RiskRewardFigure, SpecFact, StrategyDetail, SymbolChips, TimeframeTrack, pick,
 } from '../components/strategyGuide'
 import { SkeletonPage } from '../components/Skeleton'
+import { useDelayedFlag } from '../utils/useDelayedFlag'
 import type { PlatformStrategy } from '../api/types'
 
 export default function StrategyGuidePage() {
@@ -77,11 +78,12 @@ export default function StrategyGuidePage() {
   useEffect(() => {
     window.scrollTo({ top: 0 })
   }, [id])
+  const showSkel = useDelayedFlag(loading)
 
-  if (loading) {
+  if (loading || showSkel) {
     return (
       <div className="guide-detail">
-        <SkeletonPage cards={2} />
+        {showSkel && <SkeletonPage cards={2} />}
       </div>
     )
   }

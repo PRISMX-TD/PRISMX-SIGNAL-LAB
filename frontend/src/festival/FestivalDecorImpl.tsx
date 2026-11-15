@@ -29,9 +29,11 @@ function q(el: Element, sel: string): Element[] {
   return Array.prototype.slice.call(el.querySelectorAll(sel))
 }
 
-// 入场：GSAP 播完后加 .fa-live，CSS 待机循环接手。减少动效时直接给定格画面。
-// Entrance: once GSAP finishes, .fa-live hands over to the CSS idle loops.
-// Reduced motion gets the final frame straight away.
+// 入场：GSAP 播完后加 .fa-live，CSS 待机循环接手（循环只播 15-18 秒左右就停，见
+// festival.css 待机循环那段注释）。减少动效时直接给定格画面。
+// Entrance: once GSAP finishes, .fa-live hands over to the CSS idle loops (which stop
+// after roughly 15-18 s, see the idle-loop comment in festival.css). Reduced motion
+// gets the final frame straight away.
 function useEntrance(
   ref: React.RefObject<HTMLElement>,
   key: FestivalKey | null,
@@ -379,6 +381,35 @@ const AMBIENT: Record<FestivalKey, { effects: Effect[]; density: number }> = {
   newyear: { effects: ['glitter'], density: 0.55 },
 }
 
+// 低端机判定，与 LandingSpaceLayer.tsx 的 skipWebGLSpace 同一条规则：≤2 核、或 ≤2GB
+// 内存、或 ≤4 核且 ≤4GB。取不到的信息（Safari 没有 deviceMemory）不算低端。
+// Low-end check, the same rule as skipWebGLSpace in LandingSpaceLayer.tsx: ≤2 cores,
+// or ≤2 GB memory, or ≤4 cores and ≤4 GB. Missing info (Safari has no deviceMemory)
+// never counts as low-end.
+function isLowEndDevice(): boolean {
+  try {
+    const nav = navigator as unknown as { hardwareConcurrency?: number; deviceMemory?: number }
+    const cores = nav.hardwareConcurrency
+    const mem = nav.deviceMemory
+    if (typeof cores === 'number' && cores > 0 && cores <= 2) return true
+    if (typeof mem === 'number' && mem > 0 && mem <= 2) return true
+    return typeof cores === 'number' && typeof mem === 'number' && cores > 0 && mem > 0 && cores <= 4 && mem <= 4
+  } catch {
+    return false
+  }
+}
+
+// 低端机上背景粒子降到 15fps：雪、花瓣本来就飘得慢，15fps 看着仍是连续的，绘制量减半。
+// Low-end devices draw the ambient particles at 15 fps: snow and petals drift slowly
+// enough that 15 fps still reads as continuous, at half the drawing work.
+const LOW_END_FPS = 15
+// 多久没有任何输入就让粒子停在当前画面（见 FestivalAmbient 里的说明）。
+// How long without any input before the particles freeze in place (see FestivalAmbient).
+const AMBIENT_IDLE_MS = 8000
+// 算作「有人在用」的输入。touchstart 给没有 Pointer Events 的 Safari 12 用。
+// Inputs that count as activity. touchstart covers Safari 12, which has no Pointer Events.
+const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'touchstart', 'keydown', 'wheel'] as const
+
 export function FestivalAmbient() {
   const f = useFestivalOptional()
   const key = f ? f.festival : null
@@ -388,8 +419,10 @@ export function FestivalAmbient() {
   useEffect(() => {
     if (!key || reduced || !canvas.current) return
     // 手机（窄屏或触屏）限 30fps；≤4 核的弱机 DPR 限 1、粒子再减四成——氛围还在，只是更省。
+    // 低端机（isLowEndDevice）再降到 15fps。
     // Phones (narrow or touch) cap at 30 fps; weak devices (≤4 cores) cap DPR at 1
-    // and drop another 40% of particles: the mood stays, the cost goes down.
+    // and drop another 40% of particles: the mood stays, the cost goes down. Low-end
+    // devices (isLowEndDevice) go further, to 15 fps.
     const prof = particleProfile()
     const cfg = AMBIENT[key]
     const pf = new ParticleField(canvas.current, {
@@ -397,18 +430,52 @@ export function FestivalAmbient() {
       density: cfg.density * (prof.weak ? 0.6 : 1),
       lite: prof.phone || prof.weak,
       region: { x0: 0, x1: 1 },
-      maxFps: prof.maxFps,
+      maxFps: isLowEndDevice() ? LOW_END_FPS : prof.maxFps,
       maxDpr: prof.maxDpr,
     })
     // 滚动期间暂停：粒子层全屏重绘，跟滚动抢同一帧；停手 180ms 后接着飘。
     // 页面切到后台也停。捕获阶段监听 document，内层滚动容器的滚动也算。
+    // 8 秒没有任何输入也停，粒子停在当前位置；下一次输入（点、移、按键、滚轮、滚动、
+    // 回到前台）立刻接着飘。人停下来读内容时，背景没必要一直全屏重绘。
     // Paused while scrolling (a full-screen repaint competes with the scroll for
     // the same frame) and resumed 180 ms after it stops; also paused while the
     // page is hidden. Listening on document in the capture phase catches inner
-    // scroll containers too.
+    // scroll containers too. Also paused after 8 s without any input, freezing the
+    // particles where they are; the next input (pointer, key, wheel, scroll, coming
+    // back to the foreground) resumes them at once. Someone reading doesn't need a
+    // full-screen repaint behind the text.
     let scrolling = 0
-    const sync = () => (document.hidden || scrolling ? pf.stop() : pf.start())
+    let idle = false
+    let lastActive = Date.now()
+    let idleTimer = 0
+    const sync = () => (document.hidden || scrolling || idle ? pf.stop() : pf.start())
+    const checkIdle = () => {
+      const left = AMBIENT_IDLE_MS - (Date.now() - lastActive)
+      if (left > 0) {
+        idleTimer = window.setTimeout(checkIdle, left)
+        return
+      }
+      idleTimer = 0
+      idle = true
+      sync()
+    }
+    // 记一次输入；原本处于空闲就重新计时并返回 true（调用方据此决定要不要 sync）。
+    // 非空闲时只更新时间戳，不动计时器：pointermove 每秒几十次，不能每次都重设定时器。
+    // Record input; if we were idle, re-arm the timer and return true (callers sync on
+    // it). While active only the timestamp moves: pointermove fires dozens of times a
+    // second and must not reset a timer each time.
+    const wake = () => {
+      lastActive = Date.now()
+      if (!idle) return false
+      idle = false
+      idleTimer = window.setTimeout(checkIdle, AMBIENT_IDLE_MS)
+      return true
+    }
+    const onActivity = () => {
+      if (wake()) sync()
+    }
     const onScroll = () => {
+      wake()
       if (!scrolling) pf.stop()
       window.clearTimeout(scrolling)
       scrolling = window.setTimeout(() => {
@@ -416,13 +483,21 @@ export function FestivalAmbient() {
         sync()
       }, 180)
     }
-    document.addEventListener('visibilitychange', sync)
+    const onVisibility = () => {
+      if (!document.hidden) wake()
+      sync()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
     document.addEventListener('scroll', onScroll, { capture: true, passive: true })
+    for (const type of ACTIVITY_EVENTS) document.addEventListener(type, onActivity, { capture: true, passive: true })
+    idleTimer = window.setTimeout(checkIdle, AMBIENT_IDLE_MS)
     sync()
     return () => {
-      document.removeEventListener('visibilitychange', sync)
+      document.removeEventListener('visibilitychange', onVisibility)
       document.removeEventListener('scroll', onScroll, { capture: true })
+      for (const type of ACTIVITY_EVENTS) document.removeEventListener(type, onActivity, { capture: true })
       window.clearTimeout(scrolling)
+      window.clearTimeout(idleTimer)
       pf.destroy()
     }
   }, [key, reduced, f && f.replay])

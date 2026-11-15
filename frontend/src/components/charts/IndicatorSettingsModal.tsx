@@ -26,6 +26,8 @@ import {
   type IndicatorId,
 } from './indicatorCatalog'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { useScrollLock } from '../../utils/scrollLock'
+import { useDialogA11y } from '../../utils/useDialogA11y'
 import { useNavigate } from 'react-router-dom'
 
 interface Props {
@@ -38,6 +40,8 @@ interface Props {
   settings: IndicatorSettings
   onChange: (next: IndicatorSettings) => void
   onClose: () => void
+  /** 退场中（ChartsPage 的 usePresence）：外层挂 .closing 播退场 / exiting: .closing plays the exit */
+  closing?: boolean
 }
 
 const PREVIEW_BARS = 120
@@ -287,7 +291,7 @@ function Preview({ id, settings, getCandles }: { id: IndicatorId; settings: Indi
   )
 }
 
-export default function IndicatorSettingsModal({ indicators, isPro, onToggle: rawToggle, onSetIndicators, getCandles, settings, onChange, onClose }: Props) {
+export default function IndicatorSettingsModal({ indicators, isPro, onToggle: rawToggle, onSetIndicators, getCandles, settings, onChange, onClose, closing = false }: Props) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const locked = (id: IndicatorId) => !isPro && PRO_ONLY.has(id)
@@ -300,12 +304,18 @@ export default function IndicatorSettingsModal({ indicators, isPro, onToggle: ra
   const [query, setQuery] = useState('')
   const [mobileEdit, setMobileEdit] = useState(false)
   useBackToClose(mobileEdit, () => setMobileEdit(false))
+  // 打开期间锁页面滚动；退场开始就放开。/ Lock page scroll while open; release once the exit starts.
+  useScrollLock(!closing)
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
+  // Esc、Tab 困住、焦点进出（utils/useDialogA11y）。初始焦点给容器：第一个可见控件是
+  // 搜索框，手机上自动聚焦会弹出软键盘盖住半个弹窗。退场一开始就收手（open: !closing），
+  // 与滚动锁同一时刻：焦点立刻还给打开者，不困在一个正在淡出、点不到的弹窗里。
+  // Escape, Tab trap, focus in/out (utils/useDialogA11y). Initial focus on the container:
+  // the first visible control is the search box, and focusing it opens the soft keyboard.
+  // It lets go as soon as the exit starts (open: !closing), together with the scroll lock:
+  // focus returns to the opener at once instead of staying trapped in a fading dialog.
+  const dlgRef = useRef<HTMLDivElement>(null)
+  useDialogA11y(dlgRef, onClose, { initialFocus: 'container', open: !closing })
 
   const name = (id: IndicatorId) => String(t(`charts.indicators.${id}`))
   const q = query.trim().toLowerCase()
@@ -334,8 +344,8 @@ export default function IndicatorSettingsModal({ indicators, isPro, onToggle: ra
   const lbl = (key: string) => String(t(`charts.indicators.${key}`))
 
   return createPortal(
-    <div className="ind-overlay" onClick={onClose}>
-      <div className={`ind-dlg ${mobileEdit ? 'edit' : ''}`} role="dialog" aria-modal="true" aria-label={String(t('charts.indicators.settingsTitle'))} onClick={(e) => e.stopPropagation()}>
+    <div className={`ind-overlay${closing ? ' closing' : ''}`} onClick={onClose}>
+      <div ref={dlgRef} className={`ind-dlg ${mobileEdit ? 'edit' : ''}`} role="dialog" aria-modal="true" aria-label={String(t('charts.indicators.settingsTitle'))} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="ind-hd">
           <button type="button" className="ind-back" onClick={() => setMobileEdit(false)} aria-label={String(t('charts.indicators.back'))}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>

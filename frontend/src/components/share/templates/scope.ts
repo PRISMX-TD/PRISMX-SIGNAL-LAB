@@ -202,7 +202,7 @@ window.SL = window.SL || {};
   const css = `
 .sl-scope{position:relative;width:360px;height:450px;overflow:hidden;border-radius:22px;background:#07060B;color:#F2F0F8;font-family:${CJK};-webkit-font-smoothing:antialiased;box-sizing:border-box;isolation:isolate}
 .sl-scope *{box-sizing:border-box}
-.sl-scope .scope-bg{position:absolute;inset:0;pointer-events:none}
+.sl-scope .scope-bg{position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none}
 .sl-scope .scope-sig{position:absolute;left:0;top:0;overflow:visible}
 .sl-scope .scope-n{font-family:${NUM};font-variant-numeric:tabular-nums;font-weight:600;letter-spacing:.01em}
 .sl-scope .scope-brand{position:absolute;left:24px;top:24px;display:flex;align-items:center;gap:8px}

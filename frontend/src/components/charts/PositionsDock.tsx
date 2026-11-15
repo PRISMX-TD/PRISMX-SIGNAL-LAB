@@ -22,6 +22,9 @@ import { checkSlTp } from '../order/orderMath'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { createIdempotencyKeys } from '../../utils/idempotencyKeys'
 import ConfirmModal from '../ConfirmModal'
+import { onRovingKeyDown } from '../../utils/rovingTabs'
+import { useFirstReveal } from '../../utils/useFirstReveal'
+import { EMPTY } from '../../utils/format'
 
 interface Props {
   positions: Position[]
@@ -120,6 +123,12 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
   const [fresh, setFresh] = useState<Record<number, true>>({})
   const seenTickets = useRef<Set<number> | null>(null)
   const mountedAt = useRef(Date.now())
+  // 行进场只在这次打开 App 后第一次拿到持仓时错峰；之后切「持仓 / 挂单」页签、切回图表页、
+  // 推送来新行都直接出现（新成交的行另有底色闪一下，见 .term-pr.fresh）。
+  // Rows stagger in only the first time positions arrive this app session; tab switches,
+  // returning to the chart and pushed rows appear at once (a fresh fill still flashes its
+  // background, see .term-pr.fresh).
+  const rowReveal = useFirstReveal(positionsLoaded, 'positions-dock')
 
   // 高亮 / 平仓中兜底都靠 setTimeout，id 以前没人收着，切页签或关抽屉把组件卸载
   // 之后它们照样会 setFresh / setClosing。React 18 不报错，但持仓多时就是一串悬挂
@@ -279,7 +288,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
       inFlightTickets.current.delete(ticket)
       markClosing(ticket, p.volume, partial)
       if (res.status === 'FILLED') {
-        const px = res.filledPrice != null ? res.filledPrice.toFixed(digitsFor(p.symbol)) : '—'
+        const px = res.filledPrice != null ? res.filledPrice.toFixed(digitsFor(p.symbol)) : EMPTY
         onToast(
           partial
             ? String(t('charts.dock.partialClosed', { lots: volume, price: px }))
@@ -416,7 +425,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
     }
   }
 
-  const fmt = (n: number | null | undefined, digits: number) => (n == null ? '—' : n.toFixed(digits))
+  const fmt = (n: number | null | undefined, digits: number) => (n == null ? EMPTY : n.toFixed(digits))
   const Cell = ({ k, v, tone, area }: { k: string; v: string; tone?: 'up' | 'down'; area: string }) => (
     <div className={area}>
       <div className="k">{k}</div>
@@ -426,13 +435,20 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
 
   return (
     <div className={`term-dock ${className}`}>
-      <div className="term-dk-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === 'positions'} className={`term-dk-tab ${tab === 'positions' ? 'on' : ''}`} onClick={() => setTab('positions')}>
-          {t('charts.dock.positions')} <b>{positions.length}</b>
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'orders'} className={`term-dk-tab ${tab === 'orders' ? 'on' : ''}`} onClick={() => setTab('orders')}>
-          {t('charts.dock.orders')} <b>{pendingOrders.length + inFlight.length}</b>
-        </button>
+      <div className="term-dk-tabs">
+        {/* 两个页签单独包一层 tablist：右边的浮动盈亏合计和「全部平仓」不是页签，ARIA 规定
+            tablist 只能装 tab，按钮混在里面会被读屏当成页签组的一部分念。
+            The two tabs get their own tablist: the P&L sum and close-all on the right are
+            not tabs; ARIA lets a tablist own only tabs, and a button inside it is read as
+            part of the tab group. */}
+        <div className="term-dk-tablist" role="tablist" onKeyDown={onRovingKeyDown}>
+          <button type="button" role="tab" aria-selected={tab === 'positions'} tabIndex={tab === 'positions' ? 0 : -1} className={`term-dk-tab ${tab === 'positions' ? 'on' : ''}`} onClick={() => setTab('positions')}>
+            {t('charts.dock.positions')} <b>{positions.length}</b>
+          </button>
+          <button type="button" role="tab" aria-selected={tab === 'orders'} tabIndex={tab === 'orders' ? 0 : -1} className={`term-dk-tab ${tab === 'orders' ? 'on' : ''}`} onClick={() => setTab('orders')}>
+            {t('charts.dock.orders')} <b>{pendingOrders.length + inFlight.length}</b>
+          </button>
+        </div>
         {positions.length > 0 && (
           <span className="term-dk-sum">
             {t('charts.dock.colPnl')}
@@ -469,7 +485,10 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
               ))}
             </div>
           ) : positions.length === 0 ? (
-            <div className="term-dk-empty">{t('charts.dock.noPositions')}</div>
+            <div className="term-dk-empty">
+              <b>{t('charts.dock.noPositions')}</b>
+              <span>{t('charts.dock.noPositionsHint')}</span>
+            </div>
           ) : (
             positions.map((p, i) => {
               const d = digitsFor(p.symbol)
@@ -520,7 +539,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 // and the typed values onto a different position when the feed
                 // reorders.
                 <Fragment key={p.ticket ?? `${p.symbol}-${p.side}-${p.entryPrice ?? i}`}>
-                  <div className={`term-pr ${isOpen ? 'open' : ''} ${isClosing ? 'closing' : ''} ${isFresh ? 'fresh' : ''}`} style={{ animationDelay: `${i * 40}ms` }}>
+                  <div className={`term-pr${rowReveal ? ' is-in' : ''} ${isOpen ? 'open' : ''} ${isClosing ? 'closing' : ''} ${isFresh ? 'fresh' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(i, 5) * 30}ms` } : undefined}>
                     <div className="term-pr-id">
                       <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                       <b>{displaySymbol(p.symbol)}</b>
@@ -528,8 +547,8 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                     </div>
                     <Cell area="c-e" k={String(t('charts.dock.colEntry'))} v={fmt(p.entryPrice, d)} />
                     <Cell area="c-c" k={String(t('charts.dock.colCurrent'))} v={fmt(p.currentPrice, d)} />
-                    <Cell area="c-sl" k={String(t('charts.dock.colSl'))} v={p.stopLoss ? fmt(p.stopLoss, d) : '—'} tone={p.stopLoss ? 'down' : undefined} />
-                    <Cell area="c-tp" k={String(t('charts.dock.colTp'))} v={p.takeProfit ? fmt(p.takeProfit, d) : '—'} tone={p.takeProfit ? 'up' : undefined} />
+                    <Cell area="c-sl" k={String(t('charts.dock.colSl'))} v={p.stopLoss ? fmt(p.stopLoss, d) : EMPTY} tone={p.stopLoss ? 'down' : undefined} />
+                    <Cell area="c-tp" k={String(t('charts.dock.colTp'))} v={p.takeProfit ? fmt(p.takeProfit, d) : EMPTY} tone={p.takeProfit ? 'up' : undefined} />
                     <div className={`term-pnl pnl ${up ? 'up' : 'down'}`}>{up ? '+' : ''}{p.profit.toFixed(2)}</div>
                     <div className="term-pa">
                       {isClosing ? (
@@ -615,7 +634,10 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
             })
           )
         ) : pendingOrders.length === 0 && inFlight.length === 0 ? (
-          <div className="term-dk-empty">{t('charts.dock.noOrders')}</div>
+          <div className="term-dk-empty">
+            <b>{t('charts.dock.noOrders')}</b>
+            <span>{t('charts.dock.noOrdersHint')}</span>
+          </div>
         ) : (
           <>
             {/* 券商那边真实挂着的挂单：有触发价、有止损止盈，撤单会真的发指令过去。
@@ -626,7 +648,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
               const isBuy = o.side === 'BUY'
               const d = digitsFor(o.symbol)
               return (
-                <div key={`q-${o.login ?? ''}-${o.ticket}`} className="term-pr pend q" style={{ animationDelay: `${i * 40}ms` }}>
+                <div key={`q-${o.login ?? ''}-${o.ticket}`} className={`term-pr pend q${rowReveal ? ' is-in' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(i, 5) * 30}ms` } : undefined}>
                   <div className="term-pr-id">
                     <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                     <b>{displaySymbol(o.symbol)}</b>
@@ -635,8 +657,8 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                     </span>
                   </div>
                   <Cell k={String(t('charts.dock.triggerPrice'))} v={fmt(o.price, d)} area="c-en" />
-                  <Cell k={String(t('charts.ticket.sl'))} v={o.stopLoss ? fmt(o.stopLoss, d) : '—'} area="c-sl" />
-                  <Cell k={String(t('charts.ticket.tp'))} v={o.takeProfit ? fmt(o.takeProfit, d) : '—'} area="c-tp" />
+                  <Cell k={String(t('charts.ticket.sl'))} v={o.stopLoss ? fmt(o.stopLoss, d) : EMPTY} area="c-sl" />
+                  <Cell k={String(t('charts.ticket.tp'))} v={o.takeProfit ? fmt(o.takeProfit, d) : EMPTY} area="c-tp" />
                   <div className="term-pa">
                     <button type="button" className="warn" disabled={busyId === `q-${o.ticket}`} onClick={() => setPending({ kind: 'cancelPending', order: o })}>
                       {t('charts.dock.cancel')}
@@ -654,7 +676,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
               const meta = symbolMeta(o.symbol)
               const isBuy = o.side === 'BUY'
               return (
-                <div key={o.id} className="term-pr pend" style={{ animationDelay: `${(pendingOrders.length + i) * 40}ms` }}>
+                <div key={o.id} className={`term-pr pend${rowReveal ? ' is-in' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(pendingOrders.length + i, 5) * 30}ms` } : undefined}>
                   <div className="term-pr-id">
                     <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                     <b>{displaySymbol(o.symbol)}</b>
@@ -675,10 +697,11 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
 
       {pending && (() => {
         const sideOf = (side: string) => String(side === 'BUY' ? t('charts.dock.buy') : t('charts.dock.sell'))
-        // 五种危险动作共用一个确认框；文案全部由既有键拼出，不新造字符串。
-        // （原来是一条四层嵌套三元，加到五种就读不动了，改成提前返回。）
-        // One dialog for all five dangerous actions, worded from existing keys.
-        const view = ((): { title: string; message: string; label: string; busyId: string } => {
+        // 五种危险动作共用一个确认框；撤单两种用 orders.cancelConfirm.*（与交易页撤单框同一组键），
+        // 其余由既有键拼出。（原来是一条四层嵌套三元，加到五种就读不动了，改成提前返回。）
+        // One dialog for all five dangerous actions; the two cancels use orders.cancelConfirm.*
+        // (shared with the Trade page's cancel dialog), the rest are worded from existing keys.
+        const view = ((): { title: string; message: string; label: string; busyId: string; keep?: string } => {
           if (pending.kind === 'closeAll') {
             return {
               title: String(t('orders.closeAll.title')),
@@ -724,16 +747,20 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 volume: pending.order.volume,
                 price: fmt(pending.order.price, digitsFor(pending.order.symbol)),
               })),
-              label: String(t('charts.dock.cancel')),
+              label: String(t('orders.cancelConfirm.confirm')),
               busyId: `q-${pending.order.ticket}`,
+              keep: String(t('orders.cancelConfirm.keep')),
             }
           }
           if (pending.kind === 'cancel') {
+            // 与交易页撤单框同一套文案（问题式标题 + 「撤单」+「保留」），理由见 OrdersPage 那处注释。
+            // Same wording as the Orders page cancel dialog; see the comment there.
             return {
-              title: String(t('charts.dock.cancel')),
+              title: String(t('orders.cancelConfirm.title')),
               message: `${displaySymbol(pending.order.symbol)} · ${sideOf(pending.order.side)} ${pending.order.volume}`,
-              label: String(t('charts.dock.cancel')),
+              label: String(t('orders.cancelConfirm.confirm')),
               busyId: `o-${pending.order.id}`,
+              keep: String(t('orders.cancelConfirm.keep')),
             }
           }
           return {
@@ -753,8 +780,8 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 side: sideOf(pending.position.side),
                 ticket: String(pending.position.ticket ?? ''),
                 kind: String(leg === 'sl' ? t('charts.ticket.sl') : t('charts.ticket.tp')),
-                from: String((leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit) ?? '—'),
-                to: '—',
+                from: String((leg === 'sl' ? pending.position.stopLoss : pending.position.takeProfit) ?? EMPTY),
+                to: EMPTY,
               })))
               .join(' · '),
             label: String(t('charts.dock.modify')),
@@ -766,6 +793,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
             title={view.title}
             message={view.message}
             confirmLabel={view.label}
+            cancelLabel={view.keep}
             danger
             busy={busyId === view.busyId}
             onConfirm={() => {

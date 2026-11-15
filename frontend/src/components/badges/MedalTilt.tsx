@@ -55,6 +55,15 @@ export default function MedalTilt({ children, onClick, ariaLabel, className }: P
     el.style.setProperty('--ly', `${(pending.y / pending.h * 100).toFixed(1)}%`)
   }
 
+  // 指针进来才提升合成层（.is-tilting → will-change，见 badges.css），离开就撤。
+  // 减弱动效时不倾斜，也就不必建层。
+  // Promote the layer only once a pointer is in (.is-tilting → will-change, see
+  // badges.css) and drop it on leave. Reduced motion never tilts, so no layer either.
+  function onPointerEnter() {
+    if (reducedRef.current) return
+    elRef.current?.classList.add('is-tilting')
+  }
+
   function onPointerMove(e: React.PointerEvent<HTMLDivElement | HTMLButtonElement>) {
     if (reducedRef.current) return
     const el = elRef.current
@@ -69,6 +78,7 @@ export default function MedalTilt({ children, onClick, ariaLabel, className }: P
     const el = elRef.current
     if (!el) return
     el.classList.remove('no-transition')
+    el.classList.remove('is-tilting')
     el.style.transform = ''
   }
 
@@ -89,6 +99,7 @@ export default function MedalTilt({ children, onClick, ariaLabel, className }: P
         className={classes}
         aria-label={ariaLabel}
         onClick={onClick}
+        onPointerEnter={onPointerEnter}
         onPointerMove={onPointerMove}
         onPointerLeave={onPointerLeave}
       >
@@ -98,7 +109,7 @@ export default function MedalTilt({ children, onClick, ariaLabel, className }: P
   }
 
   return (
-    <div ref={setRef} className={classes} aria-label={ariaLabel} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
+    <div ref={setRef} className={classes} role="img" aria-label={ariaLabel} onPointerEnter={onPointerEnter} onPointerMove={onPointerMove} onPointerLeave={onPointerLeave}>
       {content}
     </div>
   )

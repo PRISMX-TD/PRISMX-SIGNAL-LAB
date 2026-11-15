@@ -33,7 +33,7 @@
        Chinese, so all Chinese fell back to the system PingFang/YaHei and
        mismatched the adjacent Latin in weight, apparent size and baseline.
        Declaring the SC face explicitly aligns the two weight axes. */
-    font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-family: var(--font-sans);
     font-size: 13px;
     min-height: 100vh;
     /* 必须用 clip 而不是 hidden：hidden 会让 overflow-y 计算为 auto，把 body 变成
@@ -82,7 +82,7 @@
      One variable family covering both registers costs one fewer font request
      than adding a separate display face. */
   .font-display {
-    font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-family: var(--font-sans);
     font-variation-settings: "wdth" 112;
     letter-spacing: -0.018em;
   }
@@ -92,26 +92,79 @@
      sizes tracking must go more negative or the gaps scale linearly with the
      type and the line reads loose. */
   .font-display-xl {
-    font-family: "Archivo", "Noto Sans SC", "Noto Sans CJK SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    font-family: var(--font-sans);
     font-variation-settings: "wdth" 118;
     font-weight: 500;
     letter-spacing: -0.035em;
     line-height: 0.94;
   }
+  /* 中文 / 日文 / 泰文界面：大标题放宽行高、字距归零。上面的 0.94 行高和负字距是按
+     拉丁字母调的；汉字撑满整个字身框，0.94 下折行的两行上下贴住，负字距把方块字挤在
+     一起。:lang() 读 <html lang>，i18n/index.ts 的 applyHtmlLang 写成 zh-CN / ja-JP /
+     th-TH，:lang(zh) 也匹配 zh-CN 与 index.html 的初值 zh。
+     CJK / Thai UI: looser leading and zero tracking on display headings. The 0.94 and
+     negative tracking above were tuned for Latin; CJK glyphs fill the em box, so two
+     wrapped lines touch at 0.94 and negative tracking jams the squares together.
+     :lang() reads <html lang>, which applyHtmlLang sets to zh-CN / ja-JP / th-TH. */
+  :lang(zh) .font-display-xl,
+  :lang(ja) .font-display-xl,
+  :lang(th) .font-display-xl {
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+  :lang(zh) .font-display,
+  :lang(ja) .font-display,
+  :lang(th) .font-display {
+    letter-spacing: 0;
+  }
+  /* 仪表盘英雄卡的品种代号永远是拉丁字母（XAUUSD）且单行，保留原紧排，
+     否则中文界面下英雄卡比英文界面高一截。
+     The dashboard hero's symbol is always Latin and single-line; keep the tight
+     setting so the hero is the same height in every language. */
+  .dh-hero-sym b.font-display-xl {
+    line-height: 0.94;
+    letter-spacing: -0.035em;
+  }
 
   /* 数字等宽 / tabular numbers */
   .num {
-    font-family: "JetBrains Mono", ui-monospace, monospace;
+    font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
     letter-spacing: -0.01em;
+  }
+
+  /* 裸 <b> / <strong> 统一成 500（计划 030 追加）。Tailwind preflight 给的是 bolder，
+     在 500 的正文里算出来是 700；中文落到微软雅黑这类只有 Regular / Bold 两档的系统
+     字体，700 就是全粗，比周围按政策写 500 的文字重一大截（全站约 89 处不带类名的
+     <b>）。要突出的地方靠颜色或字号，不靠字重。这条写在 preflight 之后，同为 (0,0,1)
+     靠先后顺序压过 bolder；任何带类名、又写了字重的规则（.tk-value b、
+     .term-side .px b、font-semibold 等字重工具类）优先级都比它高，仍按自己写的字重走。
+     只挂了 .num、text-up 这类不管字重的类名的 <b> 照样落到 500。
+     Bare <b> / <strong> render at 500 (plan 030 addendum). Tailwind's preflight sets
+     bolder, which computes to 700 inside 500 text; for Chinese that lands on a system
+     face such as Microsoft YaHei with only Regular and Bold, so it shows in full Bold,
+     well above the 500 around it (about 89 unclassed <b> across the app). Emphasis
+     comes from colour or size, not weight. It sits after preflight, so at the same
+     (0,0,1) it beats bolder by source order; any class-bearing rule that sets a weight
+     (.tk-value b, .term-side .px b, weight utilities like font-semibold) outranks it
+     and keeps its own. A <b> carrying only weight-neutral classes such as .num or
+     text-up still gets 500. */
+  b,
+  strong {
+    font-weight: 500;
   }
 
   /* 键盘焦点环全局可见 / visible keyboard focus ring everywhere
      input / select / textarea 补进来：原来只覆盖 button / a / [tabindex]，
      而订单页的筛选器用的是裸 <select> 和 <input type=date>，拿不到系统的
      紫色焦点环，只能吃浏览器默认样式。
+     这里不设 border-radius：这条规则权重 (0,1,1)，高于 .btn / .input / rounded-*
+     这类单类名，以前写的 2px 会让所有控件一聚焦就变成直角。轮廓会跟着元素自己的圆角走。
      Form controls added: the Orders filter bar uses bare <select> and
-     <input type="date">, which fell through to the UA default ring. */
+     <input type="date">, which fell through to the UA default ring.
+     No border-radius here: at (0,1,1) this rule outranks single-class radii
+     (.btn, .input, rounded-*), so the old 2px squared every control on focus.
+     The outline follows the element's own radius. */
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
@@ -120,7 +173,42 @@
   [tabindex]:focus-visible {
     outline: 2px solid var(--purple-hi);
     outline-offset: 2px;
-    border-radius: 2px;
+  }
+
+  /* 换页时程序聚焦的目标（Layout 把焦点交给 <main> 或页面 <h1>）不画焦点环。
+     它们不是可操作控件：焦点放在那里只是为了让读屏从新页面开始念、下一次 Tab 从内容开始。
+     每次点导航后整块内容区或标题外面套一圈紫框，看上去像出了故障。只作用于 tabindex="-1"
+     的这两种元素，任何真正的控件仍然走上面的焦点环。用 :focus 而不是 :focus-visible，
+     并且不和 :focus-visible 写在同一个列表里（旧内核不认识它会让整条规则失效）。
+     The programmatic navigation targets (Layout focuses <main> or the page <h1>) get no ring.
+     They are not controls: focus sits there only so screen readers start on the new page and
+     the next Tab starts in the content. A violet frame around the whole content area or the
+     title after every nav tap reads as a glitch. Scoped to these two tabindex="-1" elements;
+     every real control keeps the ring above. :focus, not :focus-visible, and kept out of any
+     list with :focus-visible (old engines would void the whole rule). */
+  main[tabindex="-1"]:focus,
+  main h1[tabindex="-1"]:focus {
+    outline: none;
+  }
+
+  /* 跳转链接：平时停在视口上方，键盘聚焦时落到左上角。top 用 safe-area 让它躲开刘海。
+     Skip link: parked above the viewport, drops to the top-left on keyboard focus; the
+     safe-area offset keeps it clear of the notch. */
+  .skip-link {
+    position: absolute;
+    left: 16px;
+    top: -100px;
+    z-index: var(--z-toast);
+    padding: 10px 16px;
+    border: 1px solid var(--line-hi);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .skip-link:focus {
+    top: calc(env(safe-area-inset-top) + 8px);
   }
 
   /* ═════════════ 图标描边 / icon stroke ═════════════
@@ -145,24 +233,82 @@
      做法是盖一层 44px 高的透明伪元素，只扩热区、不改布局也不改 DOM，
      且**只在纵向扩**——这些控件都是横向排列的，纵向扩不会吃掉邻居的点击。
      Invisible 44px-tall hit areas, expanded vertically only so neighbours in a
-     row keep their own taps. */
+     row keep their own taps.
+
+     2026-11 补漏：订单页、图表页、下单弹窗、铃铛面板里十几个 20–31px 的控件没在
+     列表里，全部补上；热区规则统一收在这一块（landing-hero.css 那份重复的已删），
+     要改可见尺寸的写在各自文件的触屏块里。.chip/.tag 只给真正可点的 <button>/<a>：
+     全站 61 处 .tag 全是 <span>，带子只会盖住上下 12px 内别的按钮。
+     三条规矩：两个热区不许重叠（放不下 44 就取不重叠的最大值）；容器若 overflow
+     裁剪，就给容器补内边距并用负外边距抵消；本层是 @layer base，优先级最低，
+     任何页面样式改了这些控件的 position 或 ::after 都会盖掉这里，加控件前先 grep。
+     2026-11 audit: a dozen 20–31px controls on the orders page, charts page, order
+     sheet and bell panel were missing; all hit-area rules now live here (the duplicate
+     in landing-hero.css is gone), and visible size changes live in each control's own
+     file. .chip/.tag only get a band on a real <button>/<a>: all 61 .tag uses are
+     spans whose band only covered other buttons within 12px. Rules: two hit areas
+     never overlap (take the largest non-overlapping size); a clipping container gets
+     padding plus a cancelling negative margin; this is @layer base, so any page rule
+     touching these controls' position or ::after wins — grep before adding one. */
   @media (hover: none) and (pointer: coarse) {
+    /* ① 纵向带：横排的控件，只在纵向扩到 44px。
+       Vertical band: controls laid out in a row, expanded vertically to 44px. */
     .btn,
-    .chip,
-    .tag,
+    button.chip,
+    a.chip,
+    button.tag,
+    a.tag,
     .seg button,
     .seg-pill button,
+    .seg-tabs button,
     .filter-cycle,
-    .view-all-btn {
+    .view-all-btn,
+    .pos-act,
+    .ord-acct,
+    .ord-chip,
+    .ord-closeall,
+    .ord-mast-sw,
+    .sym-tabs button,
+    .select-trigger,
+    .slide-dir button,
+    .slide-acct-trigger,
+    .slide-seg,
+    .term-tf button,
+    .term-pa button,
+    .term-dk-tab,
+    .term-mode button,
+    .term-pre button,
+    .term-dl-btn,
+    .nb-tabs > button {
       position: relative;
     }
     .btn::after,
-    .chip::after,
-    .tag::after,
+    button.chip::after,
+    a.chip::after,
+    button.tag::after,
+    a.tag::after,
     .seg button::after,
     .seg-pill button::after,
+    .seg-tabs button::after,
     .filter-cycle::after,
-    .view-all-btn::after {
+    .view-all-btn::after,
+    .pos-act::after,
+    .ord-acct::after,
+    .ord-chip::after,
+    .ord-closeall::after,
+    .ord-mast-sw::after,
+    .sym-tabs button::after,
+    .select-trigger::after,
+    .slide-dir button::after,
+    .slide-acct-trigger::after,
+    .slide-seg::after,
+    .term-tf button::after,
+    .term-pa button::after,
+    .term-dk-tab::after,
+    .term-mode button::after,
+    .term-pre button::after,
+    .term-dl-btn::after,
+    .nb-tabs > button::after {
       content: "";
       position: absolute;
       left: 0;
@@ -172,12 +318,109 @@
       transform: translateY(-50%);
       border-radius: inherit;
     }
+    /* 放不下 44 的两处收矮，免得伸进邻居：坞标签条只有 38px 高，再高就进了下方
+       第一行持仓的操作按钮；下单票的模式切换下方 6px 就是手数步进器。
+       Two spots that cannot fit 44 without touching a neighbour: the dock tab
+       strip is 38px tall (any taller reaches the first row's action buttons), and
+       the ticket's mode switch sits 6px above the lot stepper. */
+    .term-dk-tab::after {
+      height: 38px;
+    }
+    .term-mode button::after {
+      height: 40px;
+    }
+
+    /* ② 文字型按钮（返回、清空）：纵向 44px，左右各再外扩 8px。
+       Text-only buttons (back, clear): 44px tall plus 8px on each side. */
+    .page-head-back,
+    .sig-filter-note button {
+      position: relative;
+    }
+    .page-head-back::after,
+    .sig-filter-note button::after {
+      content: "";
+      position: absolute;
+      left: -8px;
+      right: -8px;
+      top: 50%;
+      height: 44px;
+      transform: translateY(-50%);
+    }
+
+    /* ③ 方形小按钮（关闭、删除、星标）：居中的正方形热区。不设圆角——浏览器按圆角
+       做命中测试，圆形热区会把四个角让出去。.slide-cancel-x 与带 .hit-44 的全屏开关
+       本身是 position:absolute（components 层 / Tailwind 工具类，都高于本层），同样
+       能当伪元素的定位容器，所以不进下面的 relative 列表。
+       Small square buttons (close, remove, star): a centred square hit area. No
+       radius: hit testing follows border-radius, so a round area would give the
+       corners away. .slide-cancel-x and the .hit-44 fullscreen toggle are already
+       position:absolute (components layer / Tailwind utility, both above this
+       layer), which anchors the pseudo-element just as well. */
+    .term-sheet-x,
+    .ind-x,
+    .fav-star,
+    .hit-40,
+    .hit-44 {
+      position: relative;
+    }
+    .slide-cancel-x::after,
+    .term-sheet-x::after,
+    .hit-44::after,
+    .ind-x::after,
+    .fav-star::after,
+    .hit-40::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 44px;
+      height: 44px;
+      transform: translate(-50%, -50%);
+    }
+    /* 左右邻居只隔 6–8px 的三处取 40：.ind-x 左侧 6px 是颜色点，星标在自选行里
+       左侧 7px 是价格，到期横幅的关闭键左侧 8px 是续费链接。
+       40 where the neighbour is 6–8px away: the colour dot left of .ind-x, the price
+       left of the watchlist star, the renew link left of the banner's dismiss. */
+    .ind-x::after,
+    .fav-star::after,
+    .hit-40::after {
+      width: 40px;
+      height: 40px;
+    }
+
+    /* ④ 底栏：Tab 之间 4px、四周 8px 的空隙点了没反应。热区上下吃掉底栏内边距，
+       左右各占一半间隙（2px），首尾两个再吃掉外侧的 8px。
+       Tab bar: the 4px gaps and 8px padding were dead. Each tab's area takes the
+       bar padding above and below, half of each gap (2px), and the outer 8px at
+       the two ends. */
+    .lg-tab {
+      position: relative;
+    }
+    .lg-tab::after {
+      content: "";
+      position: absolute;
+      top: -8px;
+      bottom: -8px;
+      left: -2px;
+      right: -2px;
+    }
+    .lg-tab:first-child::after {
+      left: -8px;
+    }
+    .lg-tab:last-child::after {
+      right: -8px;
+    }
   }
 
   /* ═════════════ 按下反馈 / press feedback ═════════════
-     全站 42 条 :hover 只配了 16 条 :active。手机上 hover 根本不触发，
-     :active 是用户唯一能拿到的反馈，而最常按的那几个控件一条都没有。
-     On touch hover never fires, so :active is the only feedback there is. */
+     手机上 :hover 不是「不触发」，而是点一下就触发、并且一直粘到下一次点别处
+     （Android WebView 与 iOS 都这样）。所以全站的 :hover 都放在
+     @media (hover: hover) and (pointer: fine) 里只给鼠标，触屏的按下反馈只靠
+     :active，最常按的这几个控件必须有它。
+     On touch, :hover does not "never fire": a tap triggers it and it sticks until
+     the next tap elsewhere (Android WebView and iOS alike). So every :hover lives
+     inside @media (hover: hover) and (pointer: fine), for mice only, and touch
+     feedback comes from :active alone, which the most-pressed controls must have. */
   .seg button:active,
   .seg-pill button:active,
   .filter-cycle:active,
@@ -214,6 +457,6 @@
 
   ::selection {
     background: var(--purple);
-    color: #fff;
+    color: var(--text-strong);
   }
 }

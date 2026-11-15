@@ -110,9 +110,11 @@
 .card-hover {
   transition: border-color var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out);
 }
-.card-hover:hover {
-  transform: translateY(-1px);
-  border-color: var(--line-hi);
+@media (hover: hover) and (pointer: fine) {
+  .card-hover:hover {
+    transform: translateY(-1px);
+    border-color: var(--line-hi);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .card-hover:hover { transform: none; }
@@ -130,15 +132,18 @@
 .glass-card {
   position: relative;
   border-radius: var(--r-lg);
-  border: 1px solid var(--line);
+  /* 现在只用在弹窗上，压在 var(--scrim) 之上：遮罩不再模糊之后，弹窗边缘要自己立得住，
+     所以用浮层的 --line-hi 亮边；面仍是 --surface（弹窗里的格子和输入框按它调过），
+     不加投影（暗底上投影落在遮罩里看不见）。
+     Now used only for dialogs, over var(--scrim): with the scrim no longer blurred
+     the dialog edge has to hold on its own, so it takes the floating --line-hi edge.
+     The surface stays --surface (the tiles and inputs inside were tuned on it) and
+     there is no shadow (on a dark ground it disappears into the scrim). */
+  border: 1px solid var(--line-hi);
   background: var(--surface);
   box-shadow: none;
   transition: border-color var(--dur-base) var(--ease-out), background-color var(--dur-base) var(--ease-out);
 }
-.glass-card:hover {
-  border-color: var(--line-hi);
-  background: var(--surface-2);
-}
-@media (prefers-reduced-motion: reduce) {
-  .glass-card:hover { transform: none; }
-}
+/* .glass-card 只用在弹窗上，弹窗整块随鼠标变色没有意义，所以没有 hover。
+   .glass-card is used only for dialogs; a dialog changing colour under the mouse
+   means nothing, so it has no hover. */

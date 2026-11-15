@@ -190,7 +190,7 @@ function NumParam({ spec, value, onChange, label, step }: {
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
       aria-label={label}
-      className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm text-neutral-100 outline-none transition focus:border-prism-400/50"
+      className="w-24 rounded-lg border border-white/10 bg-white/5 px-2 py-1.5 text-sm touch-16 text-neutral-100 outline-none transition focus:border-prism-400/50"
     />
   )
 }

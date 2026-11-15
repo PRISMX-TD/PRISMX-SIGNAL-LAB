@@ -8,6 +8,7 @@
 import { Fragment, type RefObject } from 'react'
 import type { DrawLayerHandle, Tool } from './DrawLayer'
 import { ToolList } from './chartConfig'
+import { useOverflowHint } from '../../utils/useOverflowHint'
 
 export function DrawToolIcon({ tool }: { tool: Tool }) {
   switch (tool) {
@@ -51,9 +52,13 @@ export default function DrawToolsRow({
   // 画线层挂上之前 ref 还是空的，此时按「可见」画，免得眼睛按钮闪一下高亮。
   // Before the draw layer mounts the ref is null; treat drawings as visible so the eye doesn't flash on.
   const visible = dl?.visible ?? true
+  // 手机横条右侧还有工具时打上 data-more，CSS 在右缘渐隐提示能往左滑；竖轨不需要。
+  // The phone strip gets data-more while tools sit off to the right, and CSS fades the
+  // right edge as a swipe cue; the vertical rail doesn't need it.
+  const hintRef = useOverflowHint<HTMLDivElement>()
 
   return (
-    <div className={rail ? 'term-rail no-sb' : 'term-tools-strip no-sb'} aria-label={String(t('charts.draw.tools'))}>
+    <div ref={rail ? undefined : hintRef} className={rail ? 'term-rail no-sb' : 'term-tools-strip no-sb'} role="group" aria-label={String(t('charts.draw.tools'))}>
       {(ToolList as Tool[]).map((toolName) => (
         <Fragment key={toolName}>
           <button

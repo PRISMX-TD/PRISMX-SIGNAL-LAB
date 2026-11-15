@@ -182,7 +182,7 @@ export default function PushDiagnostics() {
   }
 
   return (
-    <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+    <div className="mt-4 rounded-panel border border-white/10 bg-white/[0.02] p-3">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -204,7 +204,7 @@ export default function PushDiagnostics() {
                     ? "text-neutral-300"
                     : p.ok
                       ? "text-emerald-400"
-                      : "text-amber-400"
+                      : "text-warn"
                 }
               >
                 {p.value}

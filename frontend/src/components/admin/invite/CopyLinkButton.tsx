@@ -69,7 +69,7 @@ export default function CopyLinkButton({ link, onFail }: { link: InviteLink; onF
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-20 mt-1 w-40 rounded-xl border border-white/10 bg-[var(--surface-2)] p-1 shadow-xl"
+          className="absolute right-0 top-full z-20 mt-1 w-40 rounded-panel float-panel p-1.5"
         >
           <button
             type="button"

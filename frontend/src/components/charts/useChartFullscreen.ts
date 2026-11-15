@@ -10,7 +10,20 @@ export function useChartFullscreen(containerRef: RefObject<HTMLDivElement>) {
   // Mobile fullscreen: chart fills the entire viewport, drawing toolbar floats & is draggable
   const [isFullscreen, setIsFullscreen] = useState(false)
   const fsToolbarRef = useRef<HTMLDivElement>(null)
-  const fsDragRef = useRef<{ startX: number; startY: number; left: number; top: number } | null>(null)
+  // 拖动中的状态全在 ref 里：哪根手指、起点、按下时的位置、可拖范围、当前位置。
+  // Drag state lives in a ref: which pointer, the start point, the position at
+  // pointerdown, the clamp range and the current position.
+  const fsDragRef = useRef<{
+    pointerId: number
+    startX: number
+    startY: number
+    left: number
+    top: number
+    maxX: number
+    maxY: number
+    x: number
+    y: number
+  } | null>(null)
   const [fsToolbarPos, setFsToolbarPos] = useState<{ left: number; top: number } | null>(null)
 
   // CSS 全屏 + 原生 Fullscreen API（横屏锁定需要后者才能生效）。
@@ -92,48 +105,76 @@ export function useChartFullscreen(containerRef: RefObject<HTMLDivElement>) {
   // （即拖动把手本身，e.currentTarget），否则 pointermove 不会被捕获路由回来，
   // 表现为"很难拖动"。初始位置用 getBoundingClientRect 相对父容器换算，避免从
   // bottom 定位切到 top 定位时的跳变。
+  // 拖动过程中不走 React：每个 pointermove 只改工具栏自己的 transform（只合成、不重排），
+  // 松手时才把最终位置写进 state，整页只重渲染这一次。以前每个 move 都 setState
+  // （整个图表页重渲染）再写 left / top（每帧重排），工具栏还带毛玻璃，主线程一忙就跟不上手指。
+  // 只认按下的那根手指：第二根手指碰到把手不会抢走拖动。
   // Drag: setPointerCapture must live on the element that actually listens
   // (the handle, e.currentTarget), otherwise pointermove isn't routed back —
   // which felt like "hard to drag". The start offset is derived from
   // getBoundingClientRect relative to the parent so switching from bottom- to
   // top-anchoring doesn't jump.
+  // Moves bypass React: each pointermove writes only the toolbar's own transform
+  // (composite, no layout) and the final position is committed to state once, on release.
+  // Every move used to setState (re-rendering the whole charts page) and write left/top
+  // (a layout per frame) on a backdrop-blurred toolbar, which fell behind the finger
+  // whenever the main thread was busy. Only the pointer that started the drag counts.
   const onFsToolbarPointerDown = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const el = fsToolbarRef.current
-    if (!el) return
+    const parent = el?.offsetParent as HTMLElement | null | undefined
+    if (!el || !parent || !e.isPrimary) return
     e.preventDefault()
     e.currentTarget.setPointerCapture(e.pointerId)
-    const parent = el.offsetParent as HTMLElement | null
-    const pr = parent?.getBoundingClientRect()
+    const pr = parent.getBoundingClientRect()
     const r = el.getBoundingClientRect()
+    const left = r.left - pr.left
+    const top = r.top - pr.top
     fsDragRef.current = {
+      pointerId: e.pointerId,
       startX: e.clientX,
       startY: e.clientY,
-      left: r.left - (pr?.left ?? 0),
-      top: r.top - (pr?.top ?? 0),
+      left,
+      top,
+      // 可拖范围按下时量一次：拖动中父容器和工具栏的尺寸都不会变，move 里不必再读布局。
+      // Clamp range measured once at pointerdown: neither size changes mid-drag, so moves read no layout.
+      maxX: parent.clientWidth - el.offsetWidth,
+      maxY: parent.clientHeight - el.offsetHeight,
+      x: left,
+      y: top,
     }
+    // 马上要开始 transform 动画：此刻提层，松手撤掉（just-in-time，不常驻）。
+    // A transform animation is about to start: promote now, release on pointerup (never left on).
+    el.style.willChange = 'transform'
   }, [])
 
   const onFsToolbarPointerMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
-    if (!fsDragRef.current) return
-    const dx = e.clientX - fsDragRef.current.startX
-    const dy = e.clientY - fsDragRef.current.startY
+    const d = fsDragRef.current
     const el = fsToolbarRef.current
-    if (!el) return
-    const parent = el.offsetParent as HTMLElement | null
-    if (!parent) return
-    const maxX = parent.clientWidth - el.offsetWidth
-    const maxY = parent.clientHeight - el.offsetHeight
-    setFsToolbarPos({
-      left: Math.max(0, Math.min(fsDragRef.current.left + dx, maxX)),
-      top: Math.max(0, Math.min(fsDragRef.current.top + dy, maxY)),
-    })
+    if (!d || !el || e.pointerId !== d.pointerId) return
+    d.x = Math.max(0, Math.min(d.left + e.clientX - d.startX, d.maxX))
+    d.y = Math.max(0, Math.min(d.top + e.clientY - d.startY, d.maxY))
+    el.style.transform = `translate3d(${d.x - d.left}px, ${d.y - d.top}px, 0)`
   }, [])
 
   const onFsToolbarPointerUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
+    const d = fsDragRef.current
+    if (d && e.pointerId !== d.pointerId) return
     fsDragRef.current = null
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId)
     }
+    const el = fsToolbarRef.current
+    if (!d || !el) return
+    // pointerup 是离散事件，下面这次 setState 在本帧绘制之前就提交：清掉 transform
+    // 与写入 left / top 落在同一帧里，工具栏不会闪回原位。
+    // pointerup is a discrete event, so the setState below commits before this frame
+    // paints: clearing the transform and applying left/top land in the same frame, no flash back.
+    el.style.transform = ''
+    el.style.willChange = ''
+    // 没挪动（只是点了一下把手）：不写 state，工具栏保持原来的锚定方式。
+    // No movement (a tap on the handle): no state write, the toolbar keeps its anchoring.
+    if (d.x === d.left && d.y === d.top) return
+    setFsToolbarPos({ left: d.x, top: d.y })
   }, [])
 
   return {

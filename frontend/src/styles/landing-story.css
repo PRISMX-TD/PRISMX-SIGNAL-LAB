@@ -379,7 +379,7 @@
   align-items: center;
   gap: calc(var(--cq) * 2.2);
   padding-bottom: calc(var(--cq) * 3);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  border-bottom: 1px solid var(--line);
 }
 .pc-head img {
   width: calc(var(--cq) * 6.5);
@@ -445,7 +445,7 @@
   display: flex;
   gap: calc(var(--cq) * 1);
   padding: calc(var(--cq) * 2.4);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   overflow: hidden;
   background: rgba(16, 16, 18, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -462,10 +462,10 @@
   align-items: center;
   gap: calc(var(--cq) * 1.1);
   padding: calc(var(--cq) * 4) 0 calc(var(--cq) * 3.6);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   color: var(--text-3);
   font-size: calc(var(--cq) * 2.9);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1;
   transition: background-color 0.35s var(--ease-out), color 0.35s var(--ease-out);
 }
@@ -474,7 +474,7 @@
   height: calc(var(--cq) * 5.4);
 }
 .pc-tab.on {
-  color: #fff;
+  color: var(--text-strong);
   background: var(--purple);
 }
 
@@ -585,7 +585,7 @@
   width: calc(var(--cq) * 74);
   height: calc(var(--cq) * 86);
   transform: translateX(-50%);
-  background: radial-gradient(ellipse 50% 62% at 50% 0%, rgba(110, 66, 255, 0.22), transparent 72%);
+  background: radial-gradient(ellipse 50% 62% at 50% 0%, rgb(var(--purple-vivid-rgb) / 0.22), transparent 72%);
   clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);
   pointer-events: none;
 }
@@ -597,7 +597,7 @@
   height: calc(var(--cq) * 11);
   transform: translateX(-50%);
   border-radius: 50%;
-  background: radial-gradient(ellipse at 50% 50%, rgba(110, 66, 255, 0.26), transparent 70%);
+  background: radial-gradient(ellipse at 50% 50%, rgb(var(--purple-vivid-rgb) / 0.26), transparent 70%);
   pointer-events: none;
 }
 .rk-side {
@@ -649,9 +649,9 @@
   letter-spacing: 0.16em;
   color: #d9ceff;
   padding: calc(var(--cq) * 0.8) calc(var(--cq) * 2.6);
-  border: 1px solid rgba(139, 108, 255, 0.55);
-  border-radius: 10px;
-  background: radial-gradient(circle at 35% 30%, rgba(139, 108, 255, 0.32), rgba(110, 66, 255, 0.06) 70%);
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.55);
+  border-radius: var(--r-md);
+  background: radial-gradient(circle at 35% 30%, rgb(var(--purple-hi-rgb) / 0.32), rgb(var(--purple-vivid-rgb) / 0.06) 70%);
 }
 .rk-title b {
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
@@ -659,7 +659,7 @@
   font-weight: 500;
   line-height: 1.05;
   letter-spacing: -0.02em;
-  color: #f4f4f5;
+  color: var(--text-strong);
 }
 .rk-sub { font-size: calc(var(--cq) * 3); color: #8f8c9e; }
 
@@ -679,16 +679,16 @@
   overflow: hidden;
 }
 .rk-plaque > div { min-width: 0; padding: calc(var(--cq) * 3.6) calc(var(--cq) * 4) calc(var(--cq) * 3.4); }
-.rk-plaque > div:nth-child(odd) { border-right: 1px solid rgba(255, 255, 255, 0.08); }
-.rk-plaque > div:nth-child(n + 3) { border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.rk-plaque dt { font-size: calc(var(--cq) * 2.6); letter-spacing: 0.06em; color: #71717a; }
+.rk-plaque > div:nth-child(odd) { border-right: 1px solid var(--line); }
+.rk-plaque > div:nth-child(n + 3) { border-top: 1px solid var(--line); }
+.rk-plaque dt { font-size: calc(var(--cq) * 2.6); letter-spacing: 0.06em; color: var(--text-3); }
 .rk-plaque dd {
   margin: calc(var(--cq) * 1.2) 0 0;
   font-size: calc(var(--cq) * 6.4);
   font-weight: 600;
   line-height: 1;
   letter-spacing: -0.02em;
-  color: #f4f4f5;
+  color: var(--text-strong);
 }
 .rk-plaque dd small { margin-left: calc(var(--cq) * 0.8); font-size: calc(var(--cq) * 2.8); font-weight: 500; letter-spacing: 0; color: #a1a1aa; }
 .rk-plaque::after {
@@ -740,7 +740,7 @@
   background: #0d0d11;
   border: 1px solid rgba(255, 255, 255, 0.16);
 }
-.rk-rail .on i { background: #6e42ff; border-color: #8b6cff; }
+.rk-rail .on i { background: var(--purple-vivid); border-color: var(--purple-hi); }
 .rk-rail .cur i::after {
   content: "";
   position: absolute;
@@ -757,10 +757,10 @@
   text-align: center;
   font-size: calc(var(--cq) * 2.6);
   font-weight: 500;
-  color: #71717a;
+  color: var(--text-3);
 }
 .rk-rail .on b { color: #a1a1aa; }
-.rk-rail .cur b { color: #f4f4f5; font-weight: 500; }
+.rk-rail .cur b { color: var(--text-strong); font-weight: 500; }
 
 /* ── 幕 0 的真机版式 / scene 0 on real devices ──
    全出血时文案面板从下方压上来（面板高度随文案折行变化，375 宽实测顶边 399、
@@ -899,7 +899,7 @@
 .js-tick {
   height: 20px;
   width: 3px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
 }
 
 /* ══════════════════════════════════════════════
@@ -1245,7 +1245,7 @@
     height: 16px;
     width: 3px;
     flex: none;
-    border-radius: 10px;
+    border-radius: var(--r-md);
   }
 
   /* .story-panel 与 .story-ticks 是叙事区与判定幕**共用**的类。上一版把它们直接
@@ -1706,7 +1706,7 @@
   font-family: inherit;
 }
 .mkt-wall .tnum {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 .cnd-up { fill: var(--up); }
 .cnd-dn { fill: var(--down); }

@@ -13,8 +13,11 @@ import SlideOrderModal from '../components/SlideOrderModal'
 import { useOrderPlacement } from '../components/signals/hooks'
 import { strategySignalToDisplay, type DisplaySignal } from '../components/signals/SignalView'
 import { useBackToClose } from '../utils/useBackToClose'
+import { usePresence, SHEET_EXIT_MS } from '../utils/usePresence'
+import { useDelayedFlag } from '../utils/useDelayedFlag'
 import PlatformStrategiesGuide from '../components/PlatformStrategiesGuide'
 import StrategyAnalysis from '../components/winrate/StrategyAnalysis'
+import { onRovingKeyDown } from '../utils/rovingTabs'
 
 type SignalsTab = 'signals' | 'strategies' | 'analysis'
 
@@ -23,6 +26,8 @@ export default function SignalsPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { signals, strategySignals, accounts, activeSymbols, loaded } = useLive()
+  // 骨架延迟 200ms 出现、出现后至少停 400ms（utils/useDelayedFlag）。/ Flicker-guarded skeleton.
+  const showSkel = useDelayedFlag(!loaded)
   // 页签放在 URL 的 ?tab= 上，不放 useState：仪表盘的「当前时段胜率」卡要能直接
   // 跳到「策略分析」（/app?tab=analysis），页签只活在组件里就跳不过来。顺带这一
   // 页也变得可分享、可收藏。用 replace 换页签——切页签不该在浏览器历史里堆一层，
@@ -68,6 +73,9 @@ export default function SignalsPage() {
   // 划返回关闭也清掉「刚下过单」的标记，理由见 DashboardPage 同一处的注释。
   // A back-swipe close clears the "just placed" flag too; see DashboardPage.
   useBackToClose(activeSignal != null, () => { placedRef.current = false; setActiveSignal(null) })
+  // 下单弹窗关闭后多留 240ms 播退场，所有关闭途径都走这里。/ The order sheet stays 240ms after closing for its exit; every close path comes through here.
+  // 按信号 id 加 key 的理由见 DashboardPage 同一处。/ Keyed by signal id: see the same spot in DashboardPage.
+  const orderPresence = usePresence(activeSignal, SHEET_EXIT_MS)
   const { toast, placeOrder, placeStrategyOrder } = useOrderPlacement()
 
   // 个人策略信号混进普通信号网格一起展示——同样的卡片、按时间统一排序，
@@ -126,22 +134,30 @@ export default function SignalsPage() {
 
   return (
     <div className="max-w-[1520px] mx-auto">
+      <h1 className="sr-only">{t('nav.signals')}</h1>
       {/* 加载态只换数据区：返回链接与三个页签不依赖任何数据，跟着骨架一起闪掉是
           "加载态把已经能渲染的壳也拿掉"——全站约定是页头 / 控件常驻。StrategiesPage
           的分区加载（各请求各自落地、各自结束加载态）就是这个写法。
           Only the data area swaps to a skeleton: the back link and the three tabs
           depend on no data, and blanking them too violates the site rule that the
           head and controls stay put while data loads. */}
-      <div className="content-fade">
+      <div>
         <button onClick={() => navigate('/dashboard')} className="mb-4 hidden sm:flex items-center gap-1.5 text-sm text-neutral-400 hover:text-white transition-colors">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
           {t('signals.focus.backToDashboard')}
         </button>
 
-        {/* 标签页切换 / Tab switcher */}
-        <div ref={tabsHintRef} className="seg-tabs mb-5">
+        {/* 标签页切换 / Tab switcher
+            tablist + tab + tabpanel 成套：切的是整块内容，与订单页的页签同一写法。
+            A full tablist/tab/tabpanel set: these switch the whole content area. */}
+        <div ref={tabsHintRef} className="seg-tabs mb-5" role="tablist" onKeyDown={onRovingKeyDown}>
           <button
             type="button"
+            role="tab"
+            id="signals-tab-signals"
+            aria-selected={activeTab === 'signals'}
+            tabIndex={activeTab === 'signals' ? 0 : -1}
+            aria-controls="signals-panel"
             onClick={() => setActiveTab('signals')}
             className={activeTab === 'signals' ? 'on' : ''}
           >
@@ -149,6 +165,11 @@ export default function SignalsPage() {
           </button>
           <button
             type="button"
+            role="tab"
+            id="signals-tab-strategies"
+            aria-selected={activeTab === 'strategies'}
+            tabIndex={activeTab === 'strategies' ? 0 : -1}
+            aria-controls="signals-panel"
             onClick={() => setActiveTab('strategies')}
             className={activeTab === 'strategies' ? 'on' : ''}
           >
@@ -160,6 +181,11 @@ export default function SignalsPage() {
               strategies, filtered server-side. */}
           <button
             type="button"
+            role="tab"
+            id="signals-tab-analysis"
+            aria-selected={activeTab === 'analysis'}
+            tabIndex={activeTab === 'analysis' ? 0 : -1}
+            aria-controls="signals-panel"
             onClick={() => setActiveTab('analysis')}
             className={activeTab === 'analysis' ? 'on' : ''}
           >
@@ -167,19 +193,21 @@ export default function SignalsPage() {
           </button>
         </div>
 
-        {!loaded && activeTab === 'signals' ? (
-          <SkeletonPage cards={3} />
-        ) : activeTab === 'signals' ? (
-          <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan}
-                      activeSymbols={activeSymbols} />
-        ) : activeTab === 'strategies' ? (
-          <PlatformStrategiesGuide />
-        ) : (
-          <StrategyAnalysis />
-        )}
+        <div role="tabpanel" id="signals-panel" aria-labelledby={`signals-tab-${activeTab}`}>
+          {showSkel && activeTab === 'signals' ? (
+            <SkeletonPage cards={3} />
+          ) : !loaded && activeTab === 'signals' ? null : activeTab === 'signals' ? (
+            <SignalGrid signals={combinedSignals} onTrade={openTrade} userPlan={user?.plan}
+                        activeSymbols={activeSymbols} />
+          ) : activeTab === 'strategies' ? (
+            <PlatformStrategiesGuide />
+          ) : (
+            <StrategyAnalysis />
+          )}
+        </div>
       </div>
-      {activeSignal && <SlideOrderModal signal={activeSignal} accounts={accounts} onCancel={closeTrade} onConfirm={handleConfirm} />}
-      {toast && <Toast kind={toast.kind} message={toast.msg} />}
+      {orderPresence.shown && <SlideOrderModal key={`${orderPresence.shown.id}:${orderPresence.openSeq}`} signal={orderPresence.shown} accounts={accounts} onCancel={closeTrade} onConfirm={handleConfirm} closing={orderPresence.closing} />}
+      {toast && <Toast key={toast.id} toast={toast} />}
     </div>
   )
 }

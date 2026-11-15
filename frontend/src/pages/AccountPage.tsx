@@ -29,6 +29,7 @@ import {
   enableNotifications,
   NotifEnableError,
 } from "../utils/notifications"
+import { EMPTY } from "../utils/format"
 
 type AccountInfo = Awaited<ReturnType<typeof userApi.me>>
 
@@ -695,16 +696,16 @@ export default function AccountPage() {
             <div className="acct-plate-cols">
               <div className="min-w-0">
                 <div className="acct-plate-k">{t("account.plateMemberSince")}</div>
-                <div className="acct-plate-v">{fmtDay(info.createdAt, "—")}</div>
+                <div className="acct-plate-v">{fmtDay(info.createdAt, EMPTY)}</div>
               </div>
               <div className="min-w-0">
                 <div className="acct-plate-k">{t("account.plateValidThru")}</div>
                 <div className="acct-plate-v">
                   {isPro
                     ? info.planExpiresAt
-                      ? fmtDay(info.planExpiresAt, "—")
+                      ? fmtDay(info.planExpiresAt, EMPTY)
                       : t("account.neverExpires")
-                    : "—"}
+                    : EMPTY}
                 </div>
               </div>
               {/* 等级称号只在游戏化对该用户可见且后端算出了等级时才印；否则这一列
@@ -833,7 +834,7 @@ export default function AccountPage() {
               </div>
               <div className="acct-strength-l">
                 <span>{t("account.pwStrengthLabel")}</span>
-                <b>{strength === 0 ? "—" : t(`account.pwStrength.${strength}`)}</b>
+                <b>{strength === 0 ? EMPTY : t(`account.pwStrength.${strength}`)}</b>
               </div>
             </div>
             )}

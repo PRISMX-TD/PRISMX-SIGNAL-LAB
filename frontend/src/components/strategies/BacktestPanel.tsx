@@ -37,6 +37,7 @@ import {
   type UTCTimestamp,
 } from 'lightweight-charts'
 import { strategyApi } from '../../api/client'
+import { DOWN_COLOR, UP_COLOR } from '../charts/canvasColors'
 import { bollinger, closes, donchianHigh, donchianLow, ema, macd, rsi, sma } from '../../utils/indicators'
 import { deriveOverlays, overlayColor, type DerivedOverlay } from './conditionOverlays'
 import { fmtDate, localizeApiError, fmtMoney } from '../../api/utils'
@@ -55,9 +56,8 @@ import type {
   StrategySampleSection,
   TakeProfitMethod,
 } from '../../api/types'
+import { EMPTY } from '../../utils/format'
 
-const UP_COLOR = '#22c55e'
-const DOWN_COLOR = '#ef4444'
 const PENDING_COLOR = '#fbbf24'
 const TRADE_PAGE_SIZE = 20
 
@@ -117,6 +117,17 @@ function BacktestChart({ bars, trades, openPositions, overlays, colorOf }: Backt
       },
       localization: { timeFormatter: fmtChartTime },
       crosshair: { mode: 0 },
+      // 这张图嵌在长长的回测结果页中间：手指竖滑要滚页面（vertTouchDrag: false，库会把竖向拖动
+      // 当成页面滚动放行），桌面滚轮也要滚页面（mouseWheel: false）；横拖平移、双指缩放、
+      // 拖坐标轴缩放照旧。以前全用库的默认值，手机上页面滚不过这张图，桌面滚轮一经过图就被
+      // 吃掉。
+      // This chart sits in the middle of a long results page: a vertical finger drag must
+      // scroll the page (vertTouchDrag: false makes the library hand it to the page) and so
+      // must the desktop wheel (mouseWheel: false); horizontal drag, pinch and axis-drag
+      // scaling still work. It used library defaults before, so on phones the page could
+      // not scroll past the chart and on desktop the wheel got swallowed over it.
+      handleScroll: { vertTouchDrag: false, mouseWheel: false, horzTouchDrag: true, pressedMouseMove: true },
+      handleScale: { mouseWheel: false, pinch: true, axisPressedMouseMove: true },
       // 故意建成一个明显偏小的占位尺寸：lightweight-charts 在这类环境下，若
       // resize() 的目标尺寸与创建时相同会被当成没变化直接跳过，canvas 位图分辨率
       // 永远刷不到位。留一个必然不同的占位值，下面第一次 resize 才会真正生效。
@@ -362,15 +373,15 @@ function SummaryGrid({ summary, compare, compareLabel }: SummaryGridProps) {
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
         <div className="text-xs text-neutral-500">{t('simulator.winRate')}</div>
         <div className="num mt-1 text-lg font-bold text-neutral-100">
-          {summary.winRate == null ? '-' : `${Math.round(summary.winRate * 100)}%`}
+          {summary.winRate == null ? EMPTY : `${Math.round(summary.winRate * 100)}%`}
           <span className="ml-1.5 text-xs font-normal text-neutral-500">{summary.wins}/{summary.wins + summary.losses}</span>
         </div>
-        {compare && sub(compare.winRate == null ? '-' : `${Math.round(compare.winRate * 100)}%`)}
+        {compare && sub(compare.winRate == null ? EMPTY : `${Math.round(compare.winRate * 100)}%`)}
       </div>
       <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
         <div className="text-xs text-neutral-500">{t('simulator.avgRr')}</div>
-        <div className="num mt-1 text-lg font-bold text-neutral-100">{summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}</div>
-        {compare && sub(compare.avgRr == null ? '-' : `${compare.avgRr.toFixed(2)}R`)}
+        <div className="num mt-1 text-lg font-bold text-neutral-100">{summary.avgRr == null ? EMPTY : `${summary.avgRr.toFixed(2)}R`}</div>
+        {compare && sub(compare.avgRr == null ? EMPTY : `${compare.avgRr.toFixed(2)}R`)}
       </div>
     </div>
   )
@@ -400,7 +411,7 @@ function SampleSectionView({ title, section }: SampleSectionViewProps) {
       <div className="mt-2 grid grid-cols-3 gap-2 font-mono text-xs">
         <div>
           <div className="text-neutral-500">{t('simulator.winRate')}</div>
-          <div className="mt-0.5 text-neutral-100">{section.summary.winRate == null ? '-' : `${Math.round(section.summary.winRate * 100)}%`}</div>
+          <div className="mt-0.5 text-neutral-100">{section.summary.winRate == null ? EMPTY : `${Math.round(section.summary.winRate * 100)}%`}</div>
         </div>
         <div>
           <div className="text-neutral-500">{t('simulator.returnPct')}</div>
@@ -410,7 +421,7 @@ function SampleSectionView({ title, section }: SampleSectionViewProps) {
         </div>
         <div>
           <div className="text-neutral-500">{t('simulator.avgRr')}</div>
-          <div className="mt-0.5 text-neutral-100">{section.summary.avgRr == null ? '-' : `${section.summary.avgRr.toFixed(2)}R`}</div>
+          <div className="mt-0.5 text-neutral-100">{section.summary.avgRr == null ? EMPTY : `${section.summary.avgRr.toFixed(2)}R`}</div>
         </div>
       </div>
     </div>
@@ -622,7 +633,7 @@ export default function BacktestPanel({
       {error && <p className="mt-3 text-sm text-down" role="alert">{error}</p>}
 
       {result?.insufficientData && (
-        <p className="mt-3 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3 text-xs text-amber-200" role="alert">
+        <p className="mt-3 rounded-lg border border-warn/20 bg-warn/5 p-3 text-xs text-warn" role="alert">
           {t('strategy.btInsufficient', { bars: result.barsUsed, requested: result.requestedDays })}
         </p>
       )}
@@ -695,11 +706,11 @@ export default function BacktestPanel({
           </div>
 
           {result.openPositions.length > 0 && (
-            <div className="mt-5 rounded-lg border border-amber-400/20 bg-amber-400/5 p-3">
-              <p className="text-xs leading-relaxed text-amber-200">{t('strategy.openPositionNotice', { count: result.openPositions.length })}</p>
+            <div className="mt-5 rounded-lg border border-warn/20 bg-warn/5 p-3">
+              <p className="text-xs leading-relaxed text-warn">{t('strategy.openPositionNotice', { count: result.openPositions.length })}</p>
               <div className="mt-2 flex flex-col gap-1">
                 {result.openPositions.map((p, i) => (
-                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-amber-100/90">
+                  <div key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-xs text-warn/90">
                     <span className={`tag ${p.side === 'BUY' ? 'bg-up/15 text-up' : 'bg-down/15 text-down'}`}>
                       {p.side === 'BUY' ? t('common.buy') : t('common.sell')}
                     </span>
@@ -740,7 +751,7 @@ export default function BacktestPanel({
                           type="button"
                           onClick={() => toggleOverlay(ov.id)}
                           aria-pressed={on}
-                          className={`flex items-center gap-1.5 rounded-pill border px-2.5 py-1 text-xs transition ${
+                          className={`flex items-center gap-1.5 rounded-control border px-2.5 py-1 text-xs transition ${
                             on
                               ? 'border-white/20 bg-white/10 text-neutral-100'
                               : 'border-white/10 bg-white/[0.02] text-neutral-400 hover:text-neutral-200'

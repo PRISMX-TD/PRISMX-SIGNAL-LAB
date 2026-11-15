@@ -11,6 +11,7 @@ import { adminApi } from '../../../api/client'
 import type { LuckyRoundAdmin } from '../../../api/luckyTypes'
 import { localizeApiError } from '../../../api/utils'
 import AdminSheet from '../AdminSheet'
+import ConfirmModal from '../../ConfirmModal'
 import LuckyModeOptions from './LuckyModeOptions'
 import {
   NAME_MAX, deleteNameMatches, endsInPast, fromLocalInput, roundFormProblem, roundPatch, shown, toLocalInput, type RoundForm,
@@ -36,12 +37,20 @@ export function RoundFormSheet({ round, onClose, onDone }: {
     : defaults())
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [confirmEnd, setConfirmEnd] = useState(false)
   const editing = !!round
   const problem = roundFormProblem(f, Date.now(), editing)
   const set = (p: Partial<RoundForm>) => setF((x) => ({ ...x, ...p }))
 
-  const submit = async () => {
+  const submit = async (confirmed = false) => {
     if (busy || problem) return
+    // 结束时间改到过去 = 立即结束（作废未用券）：先弹站内确认框，确认后带 confirmed 再进来。
+    // Moving the end into the past ends the round (voiding unused tickets): confirm in-app first,
+    // then come back in with confirmed.
+    if (round && !confirmed) {
+      const pre = roundPatch(round, f)
+      if (pre?.endsAt && endsInPast(f.end, Date.now())) { setConfirmEnd(true); return }
+    }
     setBusy(true); setErr('')
     try {
       if (!round) {
@@ -50,7 +59,6 @@ export function RoundFormSheet({ round, onClose, onDone }: {
       }
       const patch = roundPatch(round, f)
       if (!patch) { onClose(); return }
-      if (patch.endsAt && endsInPast(f.end, Date.now()) && !window.confirm(t('admin.lucky.confirmEnd'))) return
       onDone(await adminApi.luckyUpdateRound(round.id, patch))
     } catch (e) {
       setErr(e instanceof Error ? localizeApiError(e.message) : t('common.error'))
@@ -79,7 +87,7 @@ export function RoundFormSheet({ round, onClose, onDone }: {
           </label>
         </div>
         {editing && round?.phase !== 'upcoming' && <p className="text-xs text-neutral-500">{t('admin.lucky.round.startLocked')}</p>}
-        {editing && endsInPast(f.end, Date.now()) && <p className="text-xs text-amber-300">{t('admin.lucky.round.endNowWarn')}</p>}
+        {editing && endsInPast(f.end, Date.now()) && <p className="text-xs text-warn">{t('admin.lucky.round.endNowWarn')}</p>}
         <div>
           <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.mode.label')}</span>
           {editing ? (
@@ -89,14 +97,29 @@ export function RoundFormSheet({ round, onClose, onDone }: {
             <LuckyModeOptions value={f.mode} onChange={(m) => set({ mode: m })} />
           )}
         </div>
-        {problem && problem !== 'name' && <p className="text-xs text-amber-300">{t(`admin.lucky.round.err.${problem}`)}</p>}
+        {problem && problem !== 'name' && <p className="text-xs text-warn">{t(`admin.lucky.round.err.${problem}`)}</p>}
         {err && <p className="text-xs text-down" role="alert">{err}</p>}
         <div className="grid grid-cols-2 gap-3 pt-1">
           <button type="button" className="adm-btn" onClick={onClose}>{t('common.cancel')}</button>
-          <button type="button" className="adm-btn is-primary" disabled={busy || !!problem} onClick={submit}>
+          <button type="button" className="adm-btn is-primary" disabled={busy || !!problem} onClick={() => void submit()}>
             {t(editing ? 'admin.lucky.round.save' : 'admin.lucky.round.create')}</button>
         </div>
       </div>
+      {confirmEnd && (
+        // 在抽屉里，所以用非 center 版（同为 slide-overlay，后挂载的在上面，见 AdminSheet 注释）。
+        // Inside a sheet, so the non-centred variant (see AdminSheet's comment).
+        <ConfirmModal
+          title={t('admin.lucky.endTitle')}
+          message={t('admin.lucky.confirmEnd')}
+          confirmLabel={t('admin.lucky.endNow')}
+          danger
+          onCancel={() => setConfirmEnd(false)}
+          onConfirm={() => {
+            setConfirmEnd(false)
+            void submit(true)
+          }}
+        />
+      )}
     </AdminSheet>
   )
 }
@@ -122,7 +145,7 @@ export function DeleteRoundSheet({ round, onClose, onDeleted }: {
         </ul>
         <p className="text-xs text-neutral-500">{t('admin.lucky.del.keeps')}</p>
         {round.stats.pendingClaims > 0 && (
-          <p className="text-xs text-amber-300">{t('admin.lucky.del.pendingWarn', { n: round.stats.pendingClaims })}</p>
+          <p className="text-xs text-warn">{t('admin.lucky.del.pendingWarn', { n: round.stats.pendingClaims })}</p>
         )}
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-400">{t('admin.lucky.del.typeName')}</span>

@@ -120,11 +120,11 @@ export default function PartnerBrokerCard({
 
   if (variant === 'compact') {
     return (
-      <section className={`glass relative overflow-hidden p-5 ring-1 ring-amber-400/25 ${className}`}>
+      <section className={`glass relative overflow-hidden p-5 ring-1 ring-gold/25 ${className}`}>
         <div className="relative flex flex-wrap items-center justify-between gap-4">
           <div className="min-w-[16rem] flex-1">
-            <span className="chip bg-amber-400/15 text-amber-200 ring-1 ring-amber-400/30">
-              <span className="h-1.5 w-1.5 rounded-full bg-amber-300 animate-breathe" />
+            <span className="chip bg-gold/15 text-gold ring-1 ring-gold/30">
+              <span className="h-1.5 w-1.5 rounded-full bg-gold animate-breathe" />
               {t('partner.badge')}
             </span>
             <h3 className="mt-3 font-display text-lg font-bold text-neutral-50">
@@ -155,18 +155,18 @@ export default function PartnerBrokerCard({
   }
 
   return (
-    <section className={`glass relative overflow-hidden p-6 ring-1 ring-amber-400/25 sm:p-7 ${className}`}>
+    <section className={`glass relative overflow-hidden p-6 ring-1 ring-gold/25 sm:p-7 ${className}`}>
       {/* 双色光晕：金色点「福利」，紫色把这张卡拉回品牌色系，免得像块广告贴片。
           Two-tone glow: gold reads as "bonus", purple ties the card back to the
           brand palette so it doesn't look like a pasted-in ad. */}
 
 
       <div className="relative text-center sm:text-left">
-        <span className="chip bg-amber-400/15 text-amber-200 ring-1 ring-amber-400/30">
-          <span className="h-1.5 w-1.5 rounded-full bg-amber-300 animate-breathe" />
+        <span className="chip bg-gold/15 text-gold ring-1 ring-gold/30">
+          <span className="h-1.5 w-1.5 rounded-full bg-gold animate-breathe" />
           {t('partner.badge')}
         </span>
-        <h3 className="mt-4 font-display text-2xl font-black leading-tight tracking-tight text-neutral-50 sm:text-[26px]">
+        <h3 className="mt-4 font-display text-2xl font-black leading-tight tracking-tight text-neutral-50 sm:text-2xl">
           {t('partner.title', { name })}
         </h3>
         <p className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-neutral-400 sm:mx-0">
@@ -176,8 +176,8 @@ export default function PartnerBrokerCard({
 
       <ul className="relative mt-6 grid gap-3 sm:grid-cols-3">
         {BULLETS.map(({ key, Icon }) => (
-          <li key={key} className="rounded-xl border border-white/10 bg-white/[0.04] p-4 transition hover:border-amber-400/25">
-            <div className="flex items-center gap-2 text-amber-200">
+          <li key={key} className="rounded-panel border border-white/10 bg-white/[0.04] p-4 transition hover:border-gold/25">
+            <div className="flex items-center gap-2 text-gold">
               <Icon />
               <span className="font-display text-sm font-semibold text-neutral-100">{t(`partner.${key}Title`)}</span>
             </div>
@@ -191,7 +191,7 @@ export default function PartnerBrokerCard({
           href={url}
           target="_blank"
           rel={linkRel}
-          className="btn btn-primary group h-12 flex-1 px-6 text-[15px] sm:flex-none"
+          className="btn btn-primary group h-12 flex-1 px-6 text-base sm:flex-none"
         >
           {t('partner.cta')}
           <span className="transition group-hover:translate-x-0.5"><ExternalIcon /></span>

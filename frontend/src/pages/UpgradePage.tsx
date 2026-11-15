@@ -6,9 +6,11 @@ import { EmailVerifyInline } from "../components/EmailVerifyNotice";
 import { useAuth } from "../store/auth";
 import { paymentApi, userApi } from "../api/client";
 import { useDocumentTitle } from "../utils/useDocumentTitle";
+import { appTitle } from "../utils/routeTitle";
 import { localizeApiError, fmtDate, parseTime } from "../api/utils";
 import type { TrialStatus } from "../api/types";
 import { copyToClipboard } from "../components/Copyable";
+import { EMPTY } from "../utils/format";
 
 type Plan = { id: string; name: string; price_usd: number; original_price_usd?: number | null; days: number; tag?: string };
 type SaleInfo = { percent: number; badge: string; end_at: string; monthly: number; yearly: number } | null;
@@ -110,7 +112,7 @@ export default function UpgradePage() {
   const { t } = useTranslation();
   const { user, refreshUser } = useAuth();
 
-  useDocumentTitle(t("upgrade.title"));
+  useDocumentTitle(appTitle(t("upgrade.title")));
 
   const [plans, setPlans] = useState<Plan[]>([]);
   const [sale, setSale] = useState<SaleInfo>(null);
@@ -477,7 +479,7 @@ export default function UpgradePage() {
           <h1 className="font-display-xl text-[clamp(1.9rem,4vw,2.5rem)] text-white">
             {t("upgrade.title")}
           </h1>
-          <p className="mt-4 max-w-lg text-[15px] leading-relaxed text-neutral-400">
+          <p className="mt-4 max-w-lg text-base leading-relaxed text-neutral-400">
             {t("upgrade.subtitle")}
           </p>
         </div>
@@ -531,7 +533,10 @@ export default function UpgradePage() {
                 className="btn-primary mt-4 w-full py-2.5 disabled:opacity-60"
               >
                 {claimingTrial ? (
-                  <span className="mx-auto h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                  <span className="inline-flex items-center justify-center">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+                    <span className="ml-2">{t("upgrade.trialClaiming")}</span>
+                  </span>
                 ) : (
                   t("upgrade.trialCta")
                 )}
@@ -617,7 +622,7 @@ export default function UpgradePage() {
                 Text inside the card is steps of white (100% primary, 85% secondary), all AA on the deep fill. */}
             <div className="relative mt-4 h-[70px]">
               <div className="flex items-baseline gap-2">
-                <span className="num text-[2.5rem] font-semibold leading-none text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? "—"}</span>
+                <span className="num text-[2.5rem] font-semibold leading-none text-white">${selectedPlan?.price_usd ?? monthly?.price_usd ?? EMPTY}</span>
                 {selectedPlan?.original_price_usd != null && selectedPlan.original_price_usd !== selectedPlan.price_usd && (
                   <span className="num text-lg text-white/75 line-through">${selectedPlan.original_price_usd}</span>
                 )}
@@ -659,7 +664,7 @@ export default function UpgradePage() {
                 subscribing now starts paid time from the payment date, not
                 stacked on top of remaining trial days (matches the backend rule) */}
             {user?.planIsTrial && user?.plan === "PRO" && (
-              <div className="relative mb-6 rounded-inner border border-amber-400/20 bg-amber-400/5 p-3.5 text-xs leading-relaxed text-amber-200/90">
+              <div className="relative mb-6 rounded-lg border border-warn/20 bg-warn/5 p-3.5 text-xs leading-relaxed text-warn/90">
                 {t("upgrade.trialActiveNotice", { date: fmtDate(planExpiresAt) })}
               </div>
             )}
@@ -680,7 +685,7 @@ export default function UpgradePage() {
                   <button
                     key={code}
                     onClick={() => setChosenCoin(code)}
-                    className={`relative flex flex-col items-start rounded-inner border p-3 text-left transition ${
+                    className={`relative flex flex-col items-start rounded-lg border p-3 text-left transition ${
                       active
                         ? "border-prism-500/70 bg-prism-600/10 ring-1 ring-prism-500/40"
                         : "border-line bg-black/20 hover:border-prism-500/40 hover:bg-white/5"
@@ -713,7 +718,7 @@ export default function UpgradePage() {
                 </div>
               </div>
               <div className="text-right">
-                <span className="font-display text-3xl font-black text-white">${selectedPlan?.price_usd ?? "—"}</span>
+                <span className="font-display text-3xl font-black text-white">${selectedPlan?.price_usd ?? EMPTY}</span>
                 <span className="ml-1 text-sm text-neutral-400">USDT</span>
               </div>
             </div>
@@ -722,10 +727,14 @@ export default function UpgradePage() {
             <button
               onClick={handlePay}
               disabled={loading || !selectedPlan}
-              data-fd-plain className="btn-primary relative mt-6 flex w-full items-center justify-center gap-2 py-3.5 text-base disabled:opacity-60"
+              data-fd-plain className="btn-primary relative mt-6 flex w-full items-center justify-center py-3.5 text-base disabled:opacity-60"
             >
               {loading ? (
-                <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+                <>
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" />
+                  {/* ml-2 而不是靠按钮的 flex gap：gap 在 Chrome 84 以下不生效。 / ml-2, not the button's flex gap (Chrome < 84). */}
+                  <span className="ml-2">{t("upgrade.payCreating")}</span>
+                </>
               ) : (
                 t("upgrade.payButton", { price: selectedPlan ? `$${selectedPlan.price_usd}` : "" })
               )}
@@ -755,9 +764,9 @@ export default function UpgradePage() {
         {/* 倒计时 / countdown */}
         {remaining !== null && (
           <div className="mt-6 flex justify-center">
-            <div className={`inline-flex items-center gap-2.5 rounded-pill px-4 py-2 ring-1 ${expired ? "bg-down/10 ring-down/40" : "bg-amber-400/10 ring-amber-400/30"}`}>
+            <div className={`inline-flex items-center gap-2.5 rounded-control px-4 py-2 ring-1 ${expired ? "bg-down/10 ring-down/40" : "bg-warn/10 ring-warn/30"}`}>
               <span className="text-xs font-bold text-neutral-400">{t("upgrade.timeLeft")}</span>
-              <span className={`font-mono text-lg font-bold ${expired ? "text-down" : "text-amber-300"}`}>
+              <span className={`font-mono text-lg font-bold ${expired ? "text-down" : "text-warn"}`}>
                 {expired ? "0:00" : fmtCountdown(remaining)}
               </span>
             </div>
@@ -784,12 +793,12 @@ export default function UpgradePage() {
             <div className="glass mt-4 p-6 text-center">
               <div className="text-xs font-bold text-neutral-500">{t("upgrade.sendAmount")}</div>
               <div className="mt-2 break-all font-display text-3xl font-black text-white">{state.payAmount}</div>
-              <div className="mt-3 inline-flex items-center gap-1.5 rounded-pill bg-prism-600/15 px-3 py-1 ring-1 ring-prism-500/30">
+              <div className="mt-3 inline-flex items-center gap-1.5 rounded-control bg-prism-600/15 px-3 py-1 ring-1 ring-prism-500/30">
                 <span className="text-sm font-bold text-neutral-100">USDT</span>
                 <span className="text-xs font-bold text-prism-300">{meta.label}</span>
               </div>
               <div className="mt-3 text-xs text-neutral-500">≈ ${state.amountUsd} USD</div>
-              <div className="mt-2.5 text-xs leading-relaxed text-amber-300/90">{t("upgrade.amountExact")}</div>
+              <div className="mt-2.5 text-xs leading-relaxed text-warn/90">{t("upgrade.amountExact")}</div>
             </div>
 
             {/* 部分到账提示：转账已收到一部分但不够，还没到终态（过期/失败），
@@ -797,8 +806,8 @@ export default function UpgradePage() {
                 funds arrived but not enough, still not terminal (expired/
                 failed) — the funds aren't lost, sending the remainder finishes it. */}
             {actuallyPaid != null && actuallyPaid > 0 && actuallyPaid < state.payAmount && (
-              <div className="glass mt-4 border border-amber-400/30 bg-amber-400/5 p-4 text-center">
-                <p className="text-sm font-semibold text-amber-200">
+              <div className="glass mt-4 border border-warn/30 bg-warn/5 p-4 text-center">
+                <p className="text-sm font-semibold text-warn">
                   {t("upgrade.partialPaymentNotice", {
                     paid: actuallyPaid,
                     remaining: (state.payAmount - actuallyPaid).toFixed(6).replace(/0+$/, "").replace(/\.$/, ""),
@@ -812,7 +821,7 @@ export default function UpgradePage() {
               <div className="text-xs font-bold text-neutral-500">
                 {t("upgrade.sendTo")} · <span className="text-prism-300">{meta.label}</span>
               </div>
-              <div className="mt-3 break-all rounded-inner border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-neutral-200">
+              <div className="mt-3 break-all rounded-lg border border-line bg-black/20 p-3.5 font-mono text-sm leading-relaxed text-neutral-200">
                 {state.payAddress}
               </div>
               <button
@@ -828,14 +837,14 @@ export default function UpgradePage() {
             </div>
 
             {/* 截图提示 / screenshot tip */}
-            <div className="mt-4 flex items-start gap-2.5 rounded-inner border border-sky-400/20 bg-sky-400/5 p-3.5">
+            <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-sky-400/20 bg-sky-400/5 p-3.5">
               <span className="text-base leading-tight">📸</span>
               <span className="text-xs leading-relaxed text-neutral-400">{t("upgrade.screenshotTip")}</span>
             </div>
 
             {/* 轮询提示 / polling hint */}
             <div className="mt-6 flex items-center justify-center gap-2.5 text-sm text-neutral-400">
-              <span className="h-2 w-2 rounded-full bg-amber-400 animate-breathe" />
+              <span className="h-2 w-2 rounded-full bg-warn animate-breathe" />
               {t("upgrade.pollingHint")}
             </div>
 
@@ -881,8 +890,8 @@ export default function UpgradePage() {
         <h1 className="mt-6 font-display text-2xl font-black text-neutral-50">{t("upgrade.errorTitle")}</h1>
         <p className="mx-auto mt-3 max-w-sm break-words text-sm leading-relaxed text-neutral-400">{state.msg}</p>
         {hasPartial && (
-          <div className="glass mx-auto mt-5 max-w-sm border border-amber-400/30 bg-amber-400/5 p-4 text-left">
-            <p className="text-sm leading-relaxed text-amber-200">
+          <div className="glass mx-auto mt-5 max-w-sm border border-warn/30 bg-warn/5 p-4 text-left">
+            <p className="text-sm leading-relaxed text-warn">
               {t("upgrade.partialPaymentExpiredNotice", {
                 paid: state.partialAmount,
                 currency: (USDT_META[state.payCurrency ?? ""] ?? { label: (state.payCurrency ?? "").toUpperCase() }).label,

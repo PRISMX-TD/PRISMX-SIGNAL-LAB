@@ -571,20 +571,20 @@ export default function PhoneStory() {
               <span className="block text-white">{t('landing.heroTitle1')}</span>
               <span className="mt-1 block text-prism-400">{t('landing.heroTitle2')}</span>
             </h1>
-            <p className="mt-5 max-w-[44ch] text-[13px] leading-relaxed text-neutral-400 sm:max-w-[58ch] sm:text-[15px] lg:text-[17px]">
+            <p className="mt-5 max-w-[44ch] text-sm leading-relaxed text-neutral-400 sm:max-w-[58ch] sm:text-base lg:text-lg">
               {t('landing.heroSubtitle')}
             </p>
             <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3">
               <button
                 onClick={() => navigate('/login?mode=register')}
-                className="btn btn-primary relative h-11 px-6 text-[13px] sm:h-12 sm:px-7 sm:text-[15px] lg:h-[52px] lg:px-8 lg:text-[17px]"
+                className="btn btn-primary relative h-11 px-6 text-sm sm:h-12 sm:px-7 sm:text-base lg:h-[52px] lg:px-8 lg:text-lg"
               >
                 {t('landing.ctaPrimary')}
                 <FestivalTopper kind="button" />
               </button>
               <a
                 href="#rank"
-                className="inline-block py-2 text-[13px] lg:text-[15px] text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
+                className="inline-block py-2 text-sm lg:text-base text-neutral-400 underline decoration-white/20 underline-offset-[6px] transition-colors hover:text-white hover:decoration-white/60"
               >
                 {t('landing.ctaSecondary')}
               </a>
@@ -618,11 +618,11 @@ export default function PhoneStory() {
             data-panel={p.id}
           >
             <div className="panel-inner">
-              <p className="text-[13px] leading-relaxed text-neutral-500">{t(`landing.${p.pain}`)}</p>
+              <p className="text-sm leading-relaxed text-neutral-500">{t(`landing.${p.pain}`)}</p>
               <h2 className="mt-3 font-display-xl fs-fluid [--fs-min:1.75rem] [--fs-vw:4.6vw] [--fs-max:2.1rem] text-white">
                 {t(`landing.${p.title}`)}
               </h2>
-              <p className="mt-3 max-w-[46ch] text-[13px] leading-relaxed text-neutral-400 sm:text-[13px]">
+              <p className="mt-3 max-w-[46ch] text-sm leading-relaxed text-neutral-400 sm:text-sm">
                 {t(`landing.${p.desc}`)}
               </p>
             </div>

@@ -24,6 +24,8 @@ import {
   SIDE_COLORS, VERDICT_BG, VERDICT_COLOR,
   bandOf, fmtClock, fmtPct, isRated, verdictOf,
 } from './shared'
+import { onRovingKeyDown } from '../../utils/rovingTabs'
+import { EMPTY } from '../../utils/format'
 
 function Block({ title, hint, children, className = '' }: {
   title: string; hint?: string; children: React.ReactNode
@@ -53,7 +55,7 @@ function RateRow({ label, dotColor, bucket }: {
   const kind = verdictOf(bucket)
   const hasRate = isRated(kind) && bucket.winRate !== null
   const aria = t('admin.winrate.aria.tug', {
-    label, tp: bucket.hitTp, sl: bucket.hitSl, rate: hasRate ? fmtPct(bucket.winRate!) : '—',
+    label, tp: bucket.hitTp, sl: bucket.hitSl, rate: hasRate ? fmtPct(bucket.winRate!) : EMPTY,
   })
   return (
     <div className="wr-rate-row">
@@ -63,7 +65,7 @@ function RateRow({ label, dotColor, bucket }: {
           <span className="txt">{label}</span>
         </span>
         <span className="pct num" style={{ color: VERDICT_COLOR[kind] }}>
-          {hasRate ? fmtPct(bucket.winRate!) : '—'}
+          {hasRate ? fmtPct(bucket.winRate!) : EMPTY}
         </span>
       </div>
       {bucket.resolved > 0 && (
@@ -105,7 +107,7 @@ function HourGrid({ hourly, now }: { hourly: HourOutcome[]; now: Date }) {
           return (
             <span key={s.localMinutes} className="wr-hour off">
               <span className="h num">{label}</span>
-              <span className="p num">—</span>
+              <span className="p num">{EMPTY}</span>
             </span>
           )
         }
@@ -218,13 +220,13 @@ export default function StrategyDetail({ row, days, now, defaultSymbol }: {
       <div className="wr-detail-intro">
         <span>{t('admin.winrate.detail.intro')}</span>
         {row.symbols.length > 0 && (
-          <div className="seg-pill flex-wrap" role="tablist">
-            <button type="button" role="tab" aria-selected={effectiveTab === 'all'}
+          <div className="seg-pill flex-wrap" role="tablist" onKeyDown={onRovingKeyDown}>
+            <button type="button" role="tab" aria-selected={effectiveTab === 'all'} tabIndex={effectiveTab === 'all' ? 0 : -1}
                     onClick={() => setSymbolTab('all')} className={effectiveTab === 'all' ? 'on' : ''}>
               {t('admin.winrate.detail.allSymbols')}
             </button>
             {row.symbols.map((s) => (
-              <button key={s.symbol} type="button" role="tab" aria-selected={effectiveTab === s.symbol}
+              <button key={s.symbol} type="button" role="tab" aria-selected={effectiveTab === s.symbol} tabIndex={effectiveTab === s.symbol ? 0 : -1}
                       onClick={() => setSymbolTab(s.symbol)} className={`num${effectiveTab === s.symbol ? ' on' : ''}`}>
                 {s.symbol}
               </button>

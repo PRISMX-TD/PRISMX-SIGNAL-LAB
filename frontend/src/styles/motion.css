@@ -2,17 +2,29 @@
    全局流畅度优化 / global smoothness polish
    ══════════════════════════════════════════════ */
 
-/* 页面切换柔和淡入：路由变化时内容不再"硬弹"出现，而是快速上浮淡入，
-   让每次导航都有一致的、轻盈的呈现节奏（在 Layout 里按 pathname 重挂载触发）。
-   Soft page-enter on route change: content rises + fades in instead of hard-
-   popping, giving every navigation a consistent, light rhythm (re-triggered by
-   remounting on pathname in Layout). */
+/* 页面切换淡入：非主 tab 的路由变化时，内容用 140ms 纯透明度淡入，替代硬弹出现
+   （在 Layout 里按 pathname 重挂载触发；底部主 tab 与竞技场页签之间切换不播，见
+   Layout 的 INSTANT_ROUTES）。
+   以前是 0.34s 上浮 6px + both 填充：每点一次底部 tab 都要等三分之一秒，再叠上页面
+   自己的骨架淡入和列表错峰，切一次要一秒多才稳；而且 both 让 transform 在动画结束后
+   一直生效，整页成了 position: fixed 子元素的包含块和层叠上下文（全屏图表盖不住底栏，
+   多处弹层不得不 portal 到 body，见 OrderSheet / ChartsPage / LeaderboardPage 的注释）。
+   现在只动透明度，填充用 backwards：结束后不留任何样式。
+   Page fade: non-tab route changes fade content in over 140ms, opacity only, instead
+   of hard-popping (re-triggered by remounting on pathname in Layout; switches between
+   the bottom tabs and the arena tabs skip it, see INSTANT_ROUTES in Layout).
+   It used to be a 0.34s 6px rise with `both` fill: every bottom-tab tap waited a third
+   of a second on top of the page's own skeleton fade and list stagger, so a switch
+   took over a second to settle; and `both` kept the transform applied after the end,
+   making the page a containing block and stacking context for position: fixed
+   descendants (the fullscreen chart sat under the tab bar; sheets had to be portalled
+   to body, see the OrderSheet / ChartsPage / LeaderboardPage comments). Now opacity
+   only with `backwards` fill: nothing stays applied once it ends. */
 @keyframes page-enter {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; }
 }
 .page-enter {
-  animation: page-enter 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: page-enter var(--dur-fast) var(--ease-out) backwards;
 }
 
 /* 滚动体验：阻断滚动链导致的回弹抖动 + iOS 惯性滚动，内部滚动区更跟手。
@@ -112,25 +124,22 @@ body {
   border-radius: var(--r-lg);
 }
 
-/* 内容淡入：数据/异步内容就绪时统一上浮淡入，替代硬弹出。
-   Content fade: async/resolved content rises + fades in instead of hard-popping. */
+/* 内容淡入：数据/异步内容就绪时上浮淡入，替代硬弹出。只用在真正晚到的内容上
+   （骨架换成内容、按需展开的区块）；常驻的页头、页签不要包在里面，否则每次进页面
+   都要等它。填充用 backwards，理由同上面的 .page-enter。
+   Content fade: async content rises and fades in instead of hard-popping. Use it only
+   on content that genuinely arrives late (skeleton to content, on-demand sections);
+   never wrap always-present heads or tabs in it. backwards fill, same reason as
+   .page-enter above. */
 @keyframes content-fade {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: none; }
 }
 .content-fade {
-  animation: content-fade var(--dur-slow) var(--ease-out) both;
-}
-
-/* 统一 tap 反馈：可点卡片/标签/胶囊按下时轻微回弹，触感一致。
-   Unified tap feedback: clickable cards/tabs/chips dip slightly on press. */
-.card-hover:active {
-  transform: scale(0.98);
-  transition: transform var(--dur-fast) var(--ease-out);
+  animation: content-fade var(--dur-base) var(--ease-out) backwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after { animation: none !important; }
   .content-fade { animation: none !important; }
-  .card-hover:active { transform: none; }
 }

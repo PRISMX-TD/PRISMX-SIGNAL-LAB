@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Position } from '../api/types'
-import { impliedK, livePosition, tableK } from './livePositions'
+import { impliedK, livePosition, reuseLive, tableK } from './livePositions'
 
 const gold = (over: Partial<Position> = {}): Position => ({
   ticket: 1, symbol: 'XAUUSD.s', side: 'BUY', volume: 0.01,
@@ -54,5 +54,30 @@ describe('livePosition', () => {
     expect(livePosition(p, { bid: 4025, ask: 4025.3 }, anchor, null)).toBe(p)
     expect(livePosition(p, { bid: 4025, ask: 4025.3, closed: true }, anchor, 1)).toBe(p)
     expect(livePosition(p, { bid: 4500, ask: 4500.3 }, anchor, 1)).toBe(p)
+  })
+})
+
+describe('reuseLive', () => {
+  it('同一帧、数字没变时复用上一拍的对象 / reuses the previous object when nothing changed', () => {
+    const src = gold()
+    const prevLive = { ...src, profit: 3.01, currentPrice: 4024.07 }
+    const next = { ...src, profit: 3.01, currentPrice: 4024.07 }
+    expect(reuseLive({ src, live: prevLive }, src, next)).toBe(prevLive)
+  })
+  it('浮盈变了就用新对象 / a changed profit gets the new object', () => {
+    const src = gold()
+    const prevLive = { ...src, profit: 3.01 }
+    const next = { ...src, profit: 3.02 }
+    expect(reuseLive({ src, live: prevLive }, src, next)).toBe(next)
+  })
+  it('新的一帧不复用旧帧的对象 / a new frame never reuses an object from the old one', () => {
+    const src = gold()
+    const prevLive = { ...src, profit: 3.01 }
+    const next = { ...gold(), profit: 3.01 }
+    expect(reuseLive({ src, live: prevLive }, gold(), next)).toBe(next)
+  })
+  it('没有上一拍时原样返回 / without a previous beat the input is returned', () => {
+    const live = gold()
+    expect(reuseLive(undefined, gold(), live)).toBe(live)
   })
 })

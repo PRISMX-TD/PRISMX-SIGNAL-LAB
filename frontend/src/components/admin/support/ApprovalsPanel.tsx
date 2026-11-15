@@ -106,7 +106,7 @@ export default function ApprovalsPanel({ onToast }: { onToast: (kind: 'ok' | 'er
             <div key={c.id} className="glass flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
               <div className="min-w-0 flex-1 text-xs">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="tag bg-amber-400/15 text-amber-300">{t(`supportDesk.conversions.kind.${c.kind}`)}</span>
+                  <span className="tag bg-warn/15 text-warn">{t(`supportDesk.conversions.kind.${c.kind}`)}</span>
                   <span className="text-neutral-300">{c.userName || c.userId}</span>
                   {c.creditedName && <span className="text-neutral-500">{t('admin.support.approvals.credited', { name: c.creditedName })}</span>}
                   <span className="num text-neutral-500">{fmtTime(c.createdAt)}</span>
@@ -132,7 +132,7 @@ export default function ApprovalsPanel({ onToast }: { onToast: (kind: 'ok' | 'er
           onConfirm={() => void submit()}
         >
           <p className="text-neutral-300">{review.approve ? t('admin.support.approvals.approveBody') : t('admin.support.approvals.rejectBody')}</p>
-          <textarea className="input min-h-[64px] w-full rounded-xl py-2 text-sm leading-relaxed" maxLength={1000} placeholder={t('admin.support.approvals.notePlaceholder')}
+          <textarea className="input min-h-[64px] w-full rounded-panel py-2 text-sm leading-relaxed" maxLength={1000} placeholder={t('admin.support.approvals.notePlaceholder')}
             value={note} onChange={(e) => setNote(e.target.value)} />
         </DeskModal>
       )}

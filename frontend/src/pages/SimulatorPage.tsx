@@ -26,7 +26,9 @@ import { simulateApi } from '../api/client'
 import { displaySymbol, fmtTime, localizeApiError, fmtMoney } from '../api/utils'
 import { SkeletonLine } from '../components/Skeleton'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
+import { appTitle } from '../utils/routeTitle'
 import type { SimulateResult } from '../api/types'
+import { EMPTY } from '../utils/format'
 
 const DAYS_OPTIONS = [30, 90, 180] as const
 const PAGE_SIZE = 20
@@ -137,7 +139,7 @@ export default function SimulatorPage() {
   const [page, setPage] = useState(0)
   const reqIdRef = useRef(0)
 
-  useDocumentTitle(t('simulator.title'))
+  useDocumentTitle(appTitle(t('simulator.title')))
 
   const run = useCallback(async () => {
     const id = ++reqIdRef.current
@@ -177,7 +179,7 @@ export default function SimulatorPage() {
       <PageHead
         as="h1"
         title={t('simulator.title')}
-        badge={<span className="tag bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30">{t('simulator.adminOnly')}</span>}
+        badge={<span className="tag bg-warn/15 text-warn ring-1 ring-warn/30">{t('simulator.adminOnly')}</span>}
         subtitle={t('simulator.subtitle')}
       />
 
@@ -202,10 +204,10 @@ export default function SimulatorPage() {
           </label>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-neutral-500">{t('simulator.range')}</span>
-            <div className="flex flex-wrap gap-2">
+            <span id="sim-range-label" className="text-xs text-neutral-500">{t('simulator.range')}</span>
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="sim-range-label">
               {DAYS_OPTIONS.map((d) => (
-                <button key={d} onClick={() => setDays(d)} className={segBtn(days === d)}>
+                <button key={d} type="button" aria-pressed={days === d} onClick={() => setDays(d)} className={segBtn(days === d)}>
                   {t(`simulator.days${d}`)}
                 </button>
               ))}
@@ -213,12 +215,12 @@ export default function SimulatorPage() {
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-xs text-neutral-500">{t('simulator.mode')}</span>
-            <div className="flex flex-wrap gap-2">
-              <button onClick={() => setMode('compound')} className={segBtn(mode === 'compound')}>
+            <span id="sim-mode-label" className="text-xs text-neutral-500">{t('simulator.mode')}</span>
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="sim-mode-label">
+              <button type="button" aria-pressed={mode === 'compound'} onClick={() => setMode('compound')} className={segBtn(mode === 'compound')}>
                 {t('simulator.modeCompound')}
               </button>
-              <button onClick={() => setMode('flat')} className={segBtn(mode === 'flat')}>
+              <button type="button" aria-pressed={mode === 'flat'} onClick={() => setMode('flat')} className={segBtn(mode === 'flat')}>
                 {t('simulator.modeFlat')}
               </button>
             </div>
@@ -241,7 +243,7 @@ export default function SimulatorPage() {
         <>
           {/* 净值归零横幅 / wipeout banner */}
           {summary.busted && (
-            <div className="mb-5 rounded-inner border border-down/30 bg-down/10 p-3.5 text-sm text-down">
+            <div className="mb-5 rounded-lg border border-down/30 bg-down/10 p-3.5 text-sm text-down">
               {t('simulator.busted')}
             </div>
           )}
@@ -275,7 +277,7 @@ export default function SimulatorPage() {
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
                 <div className="text-xs text-neutral-500">{t('simulator.winRate')}</div>
                 <div className="num mt-1 text-xl font-bold text-neutral-100">
-                  {summary.winRate == null ? '-' : `${Math.round(summary.winRate * 100)}%`}
+                  {summary.winRate == null ? EMPTY : `${Math.round(summary.winRate * 100)}%`}
                   <span className="ml-1.5 text-xs font-normal text-neutral-500">
                     {summary.wins}/{summary.wins + summary.losses}
                   </span>
@@ -284,7 +286,7 @@ export default function SimulatorPage() {
               <div className="rounded-lg bg-white/[0.03] px-3 py-2.5">
                 <div className="text-xs text-neutral-500">{t('simulator.avgRr')}</div>
                 <div className="num mt-1 text-xl font-bold text-neutral-100">
-                  {summary.avgRr == null ? '-' : `${summary.avgRr.toFixed(2)}R`}
+                  {summary.avgRr == null ? EMPTY : `${summary.avgRr.toFixed(2)}R`}
                 </div>
               </div>
             </div>

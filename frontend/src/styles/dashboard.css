@@ -40,13 +40,13 @@
 .dh-hero-sym {
   display: flex;
   align-items: baseline;
-  gap: 14px;
+  gap: 16px;
   flex-wrap: wrap;
   min-width: 0;
 }
 .dh-hero-sym b {
   font-size: 40px;
-  color: #fff;
+  color: var(--text-strong);
 }
 .dh-hero-sym .cn {
   font-size: 17px;
@@ -120,7 +120,7 @@
 .dh-senti-bar {
   position: relative;
   height: 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
   overflow: hidden;
 }
@@ -130,10 +130,16 @@
   bottom: 0;
   display: block;
 }
+/* 左端两角都写 999px，与右段的 0 999px 999px 0 镜像。原来写 10px 0 0 999px：两角
+   竖向相加 1009 远超 8px 条高，浏览器把所有角按 8/1009 缩小，左上角接近直角、
+   左下角接近半圆，左端是歪的。
+   Both left corners are 999px, mirroring the reward segment. The old 10px/999px pair
+   summed to 1009 against an 8px bar, so every radius was scaled by 8/1009: a near-square
+   top-left and a near-round bottom-left. */
 .dh-senti-bar .a {
   left: 0;
   width: calc(var(--long, 50%) - 2px);
-  border-radius: 10px 0 0 999px;
+  border-radius: 999px 0 0 999px;
   background: var(--up);
 }
 .dh-senti-bar .b {
@@ -165,7 +171,7 @@
   gap: 8px;
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   white-space: nowrap;
 }
 .dh-exec-head h3 svg {
@@ -192,7 +198,7 @@
 .dh-exec-sym b {
   font-size: 26px;
   line-height: 1;
-  color: #fff;
+  color: var(--text-strong);
   white-space: nowrap;
 }
 .dh-exec-by {
@@ -229,7 +235,7 @@
 .dh-entry b {
   font-size: 32px;
   line-height: 1;
-  color: #fff;
+  color: var(--text-strong);
   white-space: nowrap;
 }
 .dh-ladder {
@@ -258,7 +264,7 @@
 }
 .dh-ladder .lv b {
   display: block;
-  margin-top: 6px;
+  margin-top: 8px;
   font-size: 17px;
   line-height: 1;
   white-space: nowrap;
@@ -267,7 +273,7 @@
 .dh-ladder .lv.tp { text-align: right; }
 .dh-ladder .sl b { color: var(--down); }
 .dh-ladder .tp b { color: var(--up); }
-.dh-ladder .en b { color: #fff; }
+.dh-ladder .en b { color: var(--text-strong); }
 .dh-ladder .sig-ladder-bar {
   margin-top: 12px;
 }
@@ -286,10 +292,10 @@
 .dh-others-head h3 {
   display: inline-flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .dh-others-head h3 b {
   font-size: 20px;
@@ -297,6 +303,7 @@
   color: var(--purple-hi);
 }
 .dh-mini {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -305,7 +312,7 @@
 .dh-mini-top {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
 }
 .dh-mini-top .sym-ava {
   width: 32px;
@@ -318,11 +325,11 @@
   display: block;
   font-size: 20px;
   line-height: 1;
-  color: #fff;
+  color: var(--text-strong);
 }
 .dh-mini-top .sym span {
   display: block;
-  margin-top: 5px;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
@@ -342,7 +349,7 @@
 }
 .dh-mini-top .rr span {
   display: block;
-  margin-top: 5px;
+  margin-top: 4px;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.08em;
@@ -352,7 +359,7 @@
   margin-top: 0;
 }
 .dh-mini .dh-ladder .lv b {
-  font-size: 14px;
+  font-size: 15px;
 }
 .dh-mini .dh-ladder .en b {
   font-size: 20px;
@@ -364,24 +371,44 @@
   gap: 12px;
 }
 .dh-mini-cta {
+  position: relative;
+  z-index: 1;
   height: 36px;
   padding: 0 20px;
   font-size: 13px;
   font-weight: 500;
 }
+/* 品种名按钮：外观完全继承品种名；::after 铺满整张 .dh-mini，点卡片任何位置都是它。
+   焦点环从按钮本身挪到 ::after 上，框住整张卡（不是删掉，是换位置）。
+   「下单」按钮 z-index: 1 盖在 ::after 上，单独可点。
+   The symbol button inherits the symbol's look; its ::after covers the whole .dh-mini so a
+   click anywhere lands on it. The focus ring moves from the button to the ::after so it frames
+   the card (relocated, not removed). The Trade button (z-index: 1) sits above and stays clickable. */
+.dh-mini-open {
+  padding: 0; border: 0; background: none; color: inherit; font: inherit;
+  letter-spacing: inherit; line-height: inherit; text-align: inherit; cursor: pointer;
+}
+.dh-mini-open::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; left: 0; }
+.dh-mini-open:focus-visible { outline: none; }
+.dh-mini-open:focus-visible::after { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
+
+/* 锁定时文字前有锁图标：图标一侧少 2px（同 .ord-acct）。没有图标时保持对称 20px。
+   With the lock icon in front, the icon side gets 2px less (as .ord-acct does); without
+   it the padding stays a symmetric 20px. */
+.dh-mini-cta.has-icon { padding-left: 18px; }
 
 /* ── 实时行情 / live quotes ── */
 .dash-quotes .qt-table th {
   font-size: 12px;
   letter-spacing: 0.08em;
-  padding-bottom: 10px;
+  padding-bottom: 12px;
 }
 .dash-quotes .qt-sym-ava {
   width: 30px;
   height: 30px;
 }
 .dash-quotes .qt-sym-cell {
-  gap: 10px;
+  gap: 12px;
 }
 .dash-quotes .qt-sym-cell .nm b {
   font-size: 15px;
@@ -389,17 +416,14 @@
 }
 .dash-quotes .qt-sym-cell .nm span {
   display: block;
-  margin-top: 3px;
+  margin-top: 4px;
   font-size: 12px;
 }
 .dash-quotes .qt-price {
   font-size: 17px;
 }
-/* 悬停从紫色 7% 改成中性 3%：紫只留给按钮、计数与链接。
-   Hover goes neutral; violet stays reserved for buttons, counts and links. */
-.dash-quotes .qt-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.03);
-}
+/* 报价表行不可点（QuotesTable.tsx 的 <tr> 没有 onClick），所以没有悬停底色，见 landing-hero.css 的说明。
+   Quote rows are not clickable, so they have no hover tint; see landing-hero.css. */
 /* 焦点品种那一行：一层从左淡出的微亮底，和英雄卡对上。
    The focus symbol's row carries a faint left-to-right tint, matching the hero. */
 .dash-quotes .qt-table tbody tr.focus {
@@ -418,15 +442,17 @@
   white-space: nowrap;
   transition: color var(--dur-fast) var(--ease-out);
 }
-.dh-link:hover {
-  color: #fff;
+@media (hover: hover) and (pointer: fine) {
+  .dh-link:hover {
+    color: var(--text-strong);
+  }
 }
 /* 最高 / 最低时段：紧凑三行，钟点段 · 胜率，胜率右对齐。
    Best / worst hours: three compact rows, hour range · rate, rate right-aligned. */
 .dh-hours {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   margin-top: 8px;
 }
 .dh-hours li {
@@ -434,18 +460,18 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: baseline;
   gap: 12px;
-  padding: 3px 10px;
+  padding: 4px 12px;
   line-height: 20px;
-  border-radius: 8px;
+  border-radius: var(--r-tile);
   background: rgba(255, 255, 255, 0.03);
 }
 .dh-hours .h {
   font-size: 13px;
-  font-weight: 600;
-  color: #fff;
+  font-weight: 500;
+  color: var(--text-strong);
 }
 .dh-hours .r {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 500;
   text-align: right;
 }
@@ -515,11 +541,11 @@
   .dh-tf .tf-tag {
     height: 36px;
     font-size: 13px;
-    gap: 6px;
+    gap: 8px;
     padding: 0 4px;
   }
   .dh-exec {
-    padding: 18px 20px 20px;
+    padding: 20px;
   }
   .dh-entry b {
     font-size: 26px;
@@ -536,25 +562,22 @@
    比赛页头版跑马灯（.cmp-ticker）的仪表盘版：左边固定「交易比赛」入口（有比赛进行
    时亮直播灯），中间每场一段滚动——状态芯片、展示字体赛名，进行中时接前三名
    （名次用展示字体，第一名金色，成绩按正负绿红，变了就闪），右边箭头进比赛页。
-   面与卡片一致（--surface、无描边），只加一束极淡的白色聚光；段与段之间一枚小菱形。
+   面与卡片一致（--surface、无描边、无聚光和内高光）；段与段之间一枚小菱形。
    The dashboard edition of the competitions page's front-page ticker
    (.cmp-ticker): a fixed "Competitions" entry on the left (with a live light while
    anything runs), one scrolling segment per competition in the middle (status
    chip, name in the display face, then the top three while running: ranks in the
    display face, #1 in gold, scores green/red by sign and flashing on change), an
    arrow to the competitions page on the right. Same surface as the cards
-   (--surface, no outline) plus one faint white spotlight; a small diamond between
-   segments. */
+   (--surface, no outline, no spotlight or inset highlight); a small diamond
+   between segments. */
 .dash-tk {
   display: flex;
   align-items: stretch;
   height: 52px;
   margin-bottom: 20px;
   border-radius: var(--r-lg);
-  background:
-    radial-gradient(50% 240% at 0% 0%, rgba(255, 255, 255, 0.05), transparent 60%),
-    var(--surface);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  background: var(--surface);
   overflow: hidden;
 }
 .dash-tk-label {
@@ -568,11 +591,13 @@
   font-size: 13px;
   font-weight: 500;
   letter-spacing: -0.01em;
-  color: #f4f4f5;
+  color: var(--text-strong);
   white-space: nowrap;
   transition: background var(--dur-base, 0.24s) var(--ease-out, ease-out);
 }
-.dash-tk-label:hover { background: var(--surface-2); }
+@media (hover: hover) and (pointer: fine) {
+  .dash-tk-label:hover { background: var(--surface-2); }
+}
 .dash-tk-live {
   position: relative;
   width: 7px;
@@ -583,7 +608,10 @@
 .dash-tk-live::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  top: -4px;
+  right: -4px;
+  bottom: -4px;
+  left: -4px;
   border-radius: inherit;
   border: 1px solid var(--up);
   opacity: 0;
@@ -605,8 +633,31 @@
 .dash-tk-track.is-loop .dash-tk-run {
   animation: dash-tk-tick 40s linear infinite;
 }
-.dash-tk-track:hover .dash-tk-run,
-.dash-tk-run:focus-within {
+/* 键盘聚焦到跑马灯里的链接时暂停。选择器要有三个类的优先级并写在上面那条 animation
+   简写之后：原来只有 .dash-tk-run:focus-within（两个类），被简写重置回 running，循环模式下
+   聚焦从来没停过。
+   Pause while a link inside has keyboard focus. Needs three-class weight and must follow
+   the animation shorthand above; the old two-class .dash-tk-run:focus-within lost to the
+   shorthand, so the loop never paused on focus. */
+.dash-tk-track .dash-tk-run:focus-within {
+  animation-play-state: paused;
+}
+/* 悬停暂停只给鼠标：触屏上点一下会让跑马灯一直停着。
+   Hover-pause is mouse-only: on touch one tap froze the ticker indefinitely. */
+@media (hover: hover) and (pointer: fine) {
+  .dash-tk-track:hover .dash-tk-run {
+    animation-play-state: paused;
+  }
+}
+/* 滚出视口时暂停（CompetitionMarquee 给 .is-offscreen）：合成器动画在屏幕外也每帧出图，
+   GPU 不能休眠。必须写在上面那条 animation 简写之后：简写会把 animation-play-state
+   重置成 running，两条选择器都是三个类的优先级，靠先后取胜。
+   Paused while out of view (CompetitionMarquee sets .is-offscreen): a compositor
+   animation keeps producing frames off screen and the GPU never idles. It must come
+   after the animation shorthand above: the shorthand resets animation-play-state to
+   running and both selectors weigh three classes, so source order decides. */
+.dash-tk.is-offscreen .dash-tk-run,
+.dash-tk.is-offscreen .dash-tk-live::after {
   animation-play-state: paused;
 }
 .dash-tk-copy {
@@ -622,7 +673,7 @@
   gap: 18px;
   height: 100%;
   padding: 0 30px 0 20px;
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -645,24 +696,31 @@
 .dash-tk-track:not(.is-loop) .dash-tk-seg:last-child::after { display: none; }
 .dash-tk-tag {
   padding: 2px 9px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-size: 12px;
   font-weight: 500;
   background: rgba(255, 255, 255, 0.07);
   color: var(--text-2);
 }
 .dash-tk-seg.is-running .dash-tk-tag { background: var(--up-bg); color: var(--up); }
-.dash-tk-seg.is-regOpen .dash-tk-tag { background: rgb(var(--purple-hi-rgb) / 0.16); color: var(--purple-hi); }
+/* 「报名中」12px 字：--purple-hi 压在 0.16 的同色底上只有 4.47:1，比赛条左上角高光处
+   3.89:1，不到 4.5。换成更亮的 --purple-soft、底降到 0.12：5.39:1，高光处 4.68:1。
+   "Registration open", 12px: --purple-hi on its own 0.16 tint was 4.47:1, 3.89:1 under the
+   ticker's top-left highlight, short of 4.5. The lighter --purple-soft on a 0.12 tint
+   gives 5.39:1, 4.68:1 under the highlight. */
+.dash-tk-seg.is-regOpen .dash-tk-tag { background: rgb(var(--purple-hi-rgb) / 0.12); color: var(--purple-soft); }
 .dash-tk-name {
   margin-left: -6px;
   font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 500;
   letter-spacing: -0.015em;
-  color: #f4f4f5;
+  color: var(--text-strong);
   transition: color var(--dur-base, 0.24s) var(--ease-out, ease-out);
 }
-.dash-tk-seg:hover .dash-tk-name { color: var(--purple-hi); }
+@media (hover: hover) and (pointer: fine) {
+  .dash-tk-seg:hover .dash-tk-name { color: var(--purple-hi); }
+}
 .dash-tk-seg:focus-visible {
   outline: 2px solid var(--purple-hi);
   outline-offset: -6px;
@@ -686,7 +744,7 @@
 .dash-tk-rank > b {
   padding: 1px 5px;
   margin: 0 -5px;
-  border-radius: 6px;
+  border-radius: var(--r-tile);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   animation: dash-tk-flash 1.6s var(--ease-out, ease-out);
@@ -694,7 +752,7 @@
 .dash-tk-rank > b.is-up { color: var(--up); --tk-flash: rgb(var(--up-rgb) / 0.22); }
 .dash-tk-rank > b.is-down { color: var(--down); --tk-flash: rgb(var(--down-rgb) / 0.22); }
 .dash-tk-meta b {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
 }
 .dash-tk-more {
@@ -707,9 +765,13 @@
   color: var(--text-3);
   transition: color var(--dur-base, 0.24s) var(--ease-out, ease-out), background var(--dur-base, 0.24s) var(--ease-out, ease-out);
 }
-.dash-tk-more:hover { background: var(--surface-2); color: #f4f4f5; }
+@media (hover: hover) and (pointer: fine) {
+  .dash-tk-more:hover { background: var(--surface-2); color: var(--text-strong); }
+}
 .dash-tk-more svg { transition: transform var(--dur-base, 0.24s) var(--ease-out, ease-out); }
-.dash-tk-more:hover svg { transform: translateX(2px); }
+@media (hover: hover) and (pointer: fine) {
+  .dash-tk-more:hover svg { transform: translateX(2px); }
+}
 @keyframes dash-tk-tick {
   to { transform: translateX(-50%); }
 }
@@ -723,9 +785,9 @@
 }
 @media (max-width: 767px) {
   .dash-tk { height: 46px; margin-bottom: 16px; }
-  .dash-tk-label { padding: 0 12px 0 16px; font-size: 12.5px; }
+  .dash-tk-label { padding: 0 12px 0 16px; font-size: 13px; }
   .dash-tk-seg { gap: 14px; padding: 0 24px 0 16px; }
-  .dash-tk-name { font-size: 14px; }
+  .dash-tk-name { font-size: 15px; }
   .dash-tk-more { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -751,19 +813,23 @@
   height: 26px;
   padding: 0 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: transparent;
   color: var(--text-3);
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.sym-tabs button:hover { color: var(--text); }
-.sym-tabs button.on { background: var(--surface); color: #fff; box-shadow: inset 0 0 0 1px var(--line-hi); }
-.sym-tabs button:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 1px; }
+@media (hover: hover) and (pointer: fine) {
+  .sym-tabs button:hover { color: var(--text); }
+}
+.sym-tabs button.on { background: var(--surface); color: var(--text-strong); box-shadow: inset 0 0 0 1px var(--line-hi); }
+/* 轨道是 overflow-x: auto，向外的环上下会被裁掉，改成往里收。
+   The track scrolls (overflow-x: auto) and clips an outer ring; draw it inside. */
+.sym-tabs button:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
 
 .fav-star {
   display: grid;
@@ -776,23 +842,72 @@
   border-radius: 6px;
   background: transparent;
   color: var(--text-3);
-  opacity: 0.55;
+  /* 未收藏的星是图形控件，对底色要 ≥3:1：0.55 时只有 2.90:1（--bg）/ 2.83:1（--surface），
+     0.8 时 4.98 / 4.51。悬停仍升到 1 并换成 --text，区别照样看得出。
+     An unstarred star is a graphical control and needs 3:1: at 0.55 it was 2.90:1 (--bg) /
+     2.83:1 (--surface), at 0.8 it is 4.98 / 4.51. Hover still lifts to 1 and switches to
+     --text, so the change stays visible. */
+  opacity: 0.8;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+  transition: color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.fav-star:hover { opacity: 1; color: var(--text); }
+@media (hover: hover) and (pointer: fine) {
+  .fav-star:hover { opacity: 1; color: var(--text); }
+}
 .fav-star.on { color: var(--gold); opacity: 1; }
 .fav-star:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 0; opacity: 1; }
 .dash-quotes .qt-sym-cell .fav-star { margin-right: -4px; }
+/* 触屏：分类标签 26→32、星标 22→32（图标仍 14px）。热区本身在 layer-base.css；
+   .sym-tabs 是 overflow-x:auto，会把带子裁掉，所以上下各补 6px 内边距（44−32=12），
+   再用同样大小的负外边距抵消，版面只因按钮变高而变。
+   Touch: tabs 26→32, star 22→32 (icon stays 14px). The hit areas live in
+   layer-base.css; .sym-tabs scrolls (overflow-x:auto) and would clip the band, so
+   it gets 6px padding top and bottom (44−32=12) cancelled by an equal negative
+   margin; only the taller buttons move the layout. */
+@media (hover: none) and (pointer: coarse) {
+  .sym-tabs {
+    padding-top: 6px;
+    padding-bottom: 6px;
+    margin-top: -6px;
+    margin-bottom: -6px;
+  }
+  .sym-tabs button {
+    height: 32px;
+  }
+  .fav-star {
+    width: 32px;
+    height: 32px;
+  }
+}
+/* 品种页签与自选星是手机上最常点的两个小控件，按下给 0.96 的缩放（触屏上 hover 被门槛挡掉，
+   :active 是唯一的反馈）。
+   Symbol tabs and the favourite star are the most-tapped small controls on phones;
+   press scales to 0.96 (hover is gated off on touch, :active is the only feedback). */
+.sym-tabs button:active,
+.fav-star:active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sym-tabs button:active,
+  .fav-star:active {
+    transform: none;
+  }
+}
 
 /* 多周期趋势标题不许折行：轮播品种一多，右侧指示条（每段 24px）会把标题挤成一列竖字
    （2026-11-02 用户截到）。标题固定一行，指示条那一侧可收缩，每段最窄 10px。
+   当前那一段不收缩、保持 24px，挤的时候也看得清；它不再比其它段宽（以前 34px），
+   不挤时切换完全不触发布局，挤的时候也只是一次性重排、没有逐帧过渡（细条长短靠
+   transform，见 components-cards.css 的 .hero-seg）。
    The trend heading never wraps: with many carousel symbols the 24px segments squeezed
    it into a vertical column (seen 2026-11-02). The heading stays on one line; the
-   indicator side shrinks instead, down to 10px per segment. */
+   indicator side shrinks instead, down to 10px per segment. The current segment doesn't
+   shrink and stays at 24px so it reads even when crowded; it is no longer wider than the
+   rest (it was 34px), so switching causes no layout at all when uncrowded and a single
+   relayout, never a per-frame transition, when crowded (the bar length is a transform,
+   see .hero-seg in components-cards.css). */
 .hero-heading { white-space: nowrap; flex-shrink: 0; }
 .hero-header-row > .ml-auto { min-width: 0; }
 .hero-segs { min-width: 0; }
 .hero-seg { flex: 0 1 24px; min-width: 10px; }
-.hero-seg.on { flex: 0 0 34px; }
-.hero-seg::before { max-width: calc(100% - 4px); }
+.hero-seg.on { flex: 0 0 24px; }

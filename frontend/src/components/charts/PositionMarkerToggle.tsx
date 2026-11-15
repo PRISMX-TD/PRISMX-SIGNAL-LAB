@@ -25,7 +25,7 @@ export default function PositionMarkerToggle({
       aria-pressed={on}
       onClick={onToggle}
       className={compact
-        ? `flex h-6 w-6 items-center justify-center rounded-md border transition ${on ? 'border-prism-500/60 bg-prism-600/25 text-prism-200' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`
+        ? `flex h-6 w-6 items-center justify-center rounded-lg border transition ${on ? 'border-prism-600 bg-prism-600 text-white' : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'}`
         : `term-tool-btn ${on ? 'on' : ''}`}
     >
       <svg width={compact ? 11 : 13} height={compact ? 11 : 13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

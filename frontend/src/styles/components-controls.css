@@ -21,9 +21,11 @@
     left: 50%;
     top: 50%;
     transform: translate(-50%, -50%);
-    /* 全站最高：底部抽屉、确认框、全屏图表工具栏都在它之下（现存最高是 z-[70]）。
-       Above everything: the highest z-index in use elsewhere is 70. */
-    z-index: 90;
+    /* 全局提示档（--z-toast 90）：底部抽屉、灯箱、下拉菜单、停用遮罩都在它之下，
+       只有复制气泡（--z-tip）更高。层级刻度见 tokens.css。
+       The toast tier (--z-toast 90): sheets, the lightbox, menus and the disabled
+       gate all sit below; only the copy tip (--z-tip) is higher. See tokens.css. */
+    z-index: var(--z-toast);
     pointer-events: none;
     display: flex;
     align-items: center;
@@ -34,10 +36,25 @@
     border-radius: var(--r-panel);
     border: 1px solid var(--line-hi);
     background: var(--surface-2);
-    box-shadow: 0 20px 56px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(0 0 0 / 0.3);
-    font: 500 14px/1.45 inherit;
+    box-shadow: 0 20px 56px rgb(0 0 0 / 0.6);
+    /* 不能写 font: 500 14px/1.45 inherit：inherit 不能出现在 font 简写里，
+       整条声明会被丢掉（以前就是这样，toast 一直是 body 的 13px）。
+       inherit is not allowed inside the font shorthand; the whole declaration
+       was being dropped and the toast fell back to body's 13px. */
+    font-size: 14px;
+    line-height: 1.45;
+    font-weight: 500;
     color: var(--text);
-    animation: toast-in 0.22s var(--ease-out) both;
+    /* 进场 140ms ease-out；到点加 .leaving 播 100ms ease-in 退场：退场比进场快，提示走的时候
+       不该再拖住视线。用关键帧可以：每条提示按 id 重新挂载，进场不会被打断，换一条就重播。
+       Enter 140ms ease-out; .leaving plays a 100ms ease-in exit, faster than the enter.
+       Keyframes are fine: each toast re-mounts by id, so an enter is never interrupted. */
+    animation: toast-in var(--dur-fast) var(--ease-out) both;
+  }
+  /* 0.1s 必须与 utils/useToastState.ts 的 TOAST_EXIT_MS 一致（tokens.css 没有这一档）。
+     0.1s must match TOAST_EXIT_MS in utils/useToastState.ts (no token for this step). */
+  .toast.leaving {
+    animation: toast-out 0.1s var(--ease-in) both;
   }
   .toast-ic { flex: none; }
   /* 语义只由图标与描边承担，文字保持白色高对比——旧版把文字也染成色相，正是读不清
@@ -52,8 +69,11 @@
      button-fill tone and all but disappears as a 50% border on a dark surface. */
   .toast.info { border-color: rgb(var(--purple-hi-rgb) / 0.5); }
   .toast.info .toast-ic { color: var(--purple-hi); }
+  /* 减少动效：保留淡入淡出（透明度是反馈，不是位移），去掉缩放。
+     Reduced motion keeps the fade (opacity is feedback, not travel) and drops the scale. */
   @media (prefers-reduced-motion: reduce) {
-    .toast { animation: none; }
+    .toast { animation-name: toast-fade-in; }
+    .toast.leaving { animation-name: toast-fade-out; }
   }
 
   /* ── 通用自定义下拉（替代原生 select）/ generic custom dropdown ── */
@@ -70,16 +90,26 @@
     min-width: 84px;
     background: var(--nest);
     border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 4px 8px;
+    border-radius: var(--r-md);
+    /* 右侧是下拉箭头：图标的视觉边界比盒子小，同样 8px 读起来更空，所以箭头一侧少 2px（同 .ord-acct）。
+       The chevron sits on the right and reads emptier than text at the same 8px, so that side gets 2px less (as .ord-acct does). */
+    padding: 4px 6px 4px 8px;
     font: inherit;
     font-size: 13px;
     color: var(--text);
     cursor: pointer;
-    transition: border-color 0.15s;
+    transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
   }
-  .select-trigger:hover {
-    border-color: var(--line-hi);
+  @media (hover: hover) and (pointer: fine) {
+    .select-trigger:hover {
+      border-color: var(--line-hi);
+    }
+  }
+  /* 下拉触发器是输入框式的控件：按下压亮一档底色，不缩放（缩放一个输入框读起来像抖动）。
+     The trigger is field-like: press lifts the fill one step instead of scaling (a
+     scaled field reads as a jitter). */
+  .select-trigger:active {
+    background: var(--nest-hi);
   }
   /* 密排表格里的下拉：选项都是 user/admin/FREE/PRO 这类短词，84px 的通用下限是
      为长文本留的余量，在管理端用户表那种十列并排的地方每个下拉都白占 20px。
@@ -102,7 +132,7 @@
   .select-trigger svg {
     flex-shrink: 0;
     color: var(--text-3);
-    transition: transform 0.15s;
+    transition: transform var(--dur-fast) var(--ease-out);
   }
   /* 触发按钮的文字超出容器宽度时省略号截断（如很长的交易商账户名）；flex 子项
      默认按内容撑开、不会自动收缩，必须显式 min-width: 0 才会让 ellipsis 生效。
@@ -130,8 +160,33 @@
     right: 0;
     bottom: 0;
     left: 0;
-    z-index: 86;
+    z-index: var(--z-menu);
   }
+  /* 浮层材质（令牌见 tokens.css「浮层与遮罩」）：TSX 里的菜单、提示框、右键菜单
+     加 .float-panel，不再各自拼 border-white/10 + bg-ink-900/95 + shadow-* +
+     backdrop-blur-*。只管面、边、影；圆角、内边距、层级仍由调用方决定。
+     Floating material (tokens under "floating surfaces and scrims" in tokens.css):
+     TSX menus, tooltips and context menus add .float-panel instead of each
+     assembling border-white/10 + bg-ink-900/95 + shadow-* + backdrop-blur-*. It
+     sets surface, edge and shadow only; radius, padding and z-index stay with the
+     caller. */
+  .float-panel {
+    border: 1px solid var(--line-hi);
+    background: var(--surface-float);
+    box-shadow: var(--shadow-float);
+  }
+  /* 遮罩：TSX 里自己写的全屏遮罩加 .scrim，替换 bg-black/50…/80 + backdrop-blur-sm。
+     Scrim: hand-written full-screen TSX scrims add .scrim in place of
+     bg-black/50…/80 + backdrop-blur-sm. */
+  .scrim { background: var(--scrim); }
+  /* 断线 / 重连横幅是吸顶的：色调仍是 10%，但叠在实色 --bg 上，滚动的内容不会从
+     横幅下面透出来跟横幅上的字叠在一起。重连用 --mid（与 039 的 --warn 同值）。
+     The disconnect / reconnect banners are sticky: the tint stays at 10% but sits
+     on an opaque --bg, so content scrolling underneath no longer shows through and
+     collides with the banner text. Reconnecting uses --mid (same value as 039's
+     --warn). */
+  .conn-banner-down { background: linear-gradient(rgb(var(--down-rgb) / 0.1), rgb(var(--down-rgb) / 0.1)), var(--bg); }
+  .conn-banner-warn { background: linear-gradient(rgb(var(--mid-rgb) / 0.1), rgb(var(--mid-rgb) / 0.1)), var(--bg); }
   /* portal 到 <body>，用 fixed 定位（left/top/width/bottom 由组件按触发器坐标
      内联注入），因此这里不再写死 top/left，避免被祖先 overflow 裁切。
      Portaled to <body> with fixed positioning (left/top/width/bottom injected
@@ -139,14 +194,15 @@
      here — this is what escapes ancestor overflow clipping. */
   .select-menu {
     position: fixed;
-    z-index: 87;
+    z-index: var(--z-menu);
     max-height: 240px;
     overflow-y: auto;
-    background: #17171d;
+    background: var(--surface-float);
     border: 1px solid var(--line-hi);
     border-radius: var(--r-panel);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
-    padding: 4px;
+    box-shadow: var(--shadow-float);
+    /* 14 − 6 = 8：菜单项是 --r-tile，内外同心。/ 14 − 6 = 8: options are --r-tile, concentric with the shell. */
+    padding: 6px;
   }
   .select-opt {
     display: block;
@@ -162,13 +218,27 @@
     text-align: left;
     white-space: nowrap;
   }
-  .select-opt:hover {
-    background: var(--nest-hi);
-    color: #fff;
+  @media (hover: hover) and (pointer: fine) {
+    .select-opt:hover {
+      background: var(--nest-hi);
+      color: var(--text-strong);
+    }
   }
   .select-opt.active {
-    background: rgba(90, 34, 238, 0.18);
-    color: #fff;
+    background: var(--option-active-bg);
+    color: var(--text-strong);
+  }
+  /* 键盘在选项间移动时：焦点环往里收 2px（菜单 overflow-y:auto + 4px 内边距会裁掉外扩
+     4px 的全局环），底色与 hover 相同，看得出键盘停在哪一项。单独成一条规则，不和别的
+     选择器写进同一个逗号列表：旧内核不认识 :focus-visible 会把整条作废。
+     Keyboard focus inside the menu: pull the ring in by 2px (the menu's overflow-y:auto
+     and 4px padding clip the global 4px-outset ring) and reuse the hover fill so the
+     current option is obvious. Kept as its own rule: an engine without :focus-visible
+     would void a whole comma list. */
+  .select-opt:focus-visible {
+    outline-offset: -2px;
+    background: var(--nest-hi);
+    color: var(--text-strong);
   }
   /* 多选菜单（MultiSelect）：每项前一个小勾选框。/ Multi-select rows get a small checkbox. */
   .select-menu.multi { max-height: 320px; }
@@ -181,7 +251,7 @@
     flex-shrink: 0;
     border-radius: 4px;
     box-shadow: inset 0 0 0 1.5px var(--line-hi);
-    color: #fff;
+    color: var(--text-strong);
   }
   .select-check.on { background: var(--purple); box-shadow: none; }
 
@@ -195,18 +265,28 @@
     align-items: center;
     overflow: hidden;
     user-select: none;
-    touch-action: none;
+    /* 轨道放行竖向滚动，只有滑块是 none（见 SlideToConfirm.tsx 文件头）。以前整条轨道
+       都是 none，手指落在空白处滚不动弹窗。
+       The track lets vertical scrolling through; only the knob is none. The whole
+       track used to be none, so a finger on its empty part could not scroll. */
+    touch-action: pan-y;
     margin-top: 16px;
   }
+  /* 填充层满宽，用 scaleX 表示进度：拖动时每帧改 width 会重排，transform 只走合成；
+     和滑块用同一条过渡，回弹时两者同步，不再一前一后。
+     The fill is full width and shows progress with scaleX: changing width every
+     move forces layout, a transform stays on the compositor. It shares the knob's
+     transition so both spring back together instead of one trailing the other. */
   .slide-track-fill {
     position: absolute;
     left: 0;
     top: 0;
     bottom: 0;
-    width: 0;
-    background: rgba(90, 34, 238, 0.28);
-    transition: width 0.24s cubic-bezier(0.22, 1, 0.36, 1);
-    will-change: width;
+    width: 100%;
+    background: rgb(var(--purple-rgb) / 0.28);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform var(--dur-base) var(--ease-out);
   }
   .slide-track-label {
     position: absolute;
@@ -219,32 +299,60 @@
     font-size: 13px;
     color: var(--text-2);
     font-weight: 500;
+    transition: opacity var(--dur-base) var(--ease-out);
   }
+  /* 滑轨高 56（含上下各 1px 边），滑块 46：上下内缩 (54 − 46) / 2 = 4，左右也取 4。
+     SlideToConfirm.tsx 的 KNOB = 56 按「滑块 46 + 两侧各 4 + 两条 1px 边」算行程，
+     不用改：起点内缩 4、终点内缩 4。（原来左边 5px，起点 5、终点 3、上下 4。）
+     Track 56 tall incl. 1px borders, knob 46: 4px inset top and bottom, so 4 on the
+     sides too. KNOB = 56 in SlideToConfirm.tsx already budgets 46 + 2×4 + 2×1, so the
+     travel needs no change. (It was left: 5px: 5 at start, 3 at the end, 4 vertically.) */
   .slide-knob {
     position: absolute;
     z-index: 2;
     top: 50%;
-    left: 5px;
+    left: 4px;
     transform: translateY(-50%);
     width: 46px;
     height: 46px;
     border-radius: 999px;
-    background: var(--purple);
-    color: #fff;
-    display: grid;
-    place-items: center;
+    color: var(--text-strong);
     cursor: grab;
-    box-shadow: none;
-    transition: transform 0.24s cubic-bezier(0.22, 1, 0.36, 1), background 0.2s, box-shadow 0.2s;
+    transition: transform var(--dur-base) var(--ease-out);
     will-change: transform;
     touch-action: none;
+  }
+  /* 全局焦点环（layer-base.css:115-124）把 border-radius 改成 2px，会把圆滑块压成方块，
+     这里单独还原。不和别的选择器写成一组：旧内核不认 :focus-visible 会让整组规则作废。
+     The global focus rule sets border-radius: 2px and would square the round knob;
+     restore it here, on its own, because an old engine drops a whole selector list
+     that contains :focus-visible. */
+  .slide-knob:focus-visible {
+    border-radius: 999px;
   }
   .slide-knob:active {
     cursor: grabbing;
   }
+  /* 真正画出来的紫色圆。「快到了」的放大只能放在这一层：.slide-knob 自己的 transform
+     每一帧都被 JS 写成 translate(...)。
+     The visible disc. The "almost there" swell has to live on this layer because
+     the knob's own transform is rewritten by JS on every move. */
+  .slide-knob-face {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--purple);
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .slide-knob.near .slide-knob-face {
+    transform: scale(1.06);
+  }
   /* 拖动中关闭过渡，让滑块与手指 1:1 实时跟随 / no transition while dragging → 1:1 finger tracking */
   .slide-track.dragging .slide-knob,
-  .slide-track.dragging .slide-track-fill {
+  .slide-track.dragging .slide-track-fill,
+  .slide-track.dragging .slide-track-label {
     transition: none;
   }
   .slide-track.done {
@@ -252,15 +360,35 @@
   }
   .slide-track.done .slide-track-fill {
     background: rgb(var(--up-rgb) / 0.16);
-    width: 100% !important;
+    transform: scaleX(1) !important;
   }
-  .slide-track.done .slide-knob {
-    background: linear-gradient(130deg, #16a866, #35c97a);
-    box-shadow: none;
+  .slide-track.done .slide-knob-face {
+    background: var(--up);
   }
+  /* 减弱动效：回弹改为瞬间归位，不做「快到了」的放大。提示文字的淡出只是透明度，保留。
+     Reduced motion: the snap-back is instant and the swell is dropped. The label
+     fade is opacity only, so it stays. */
+  @media (prefers-reduced-motion: reduce) {
+    .slide-knob,
+    .slide-track-fill,
+    .slide-knob-face {
+      transition: none;
+    }
+    .slide-knob.near .slide-knob-face {
+      transform: none;
+    }
+  }
+  /* 回执卡：240ms ease-out 浮现，不过冲（以前 0.45s 带 1.45 过冲）。backwards 填充，结束后
+     不留 transform。减少动效时换成同时长的纯透明度淡入，仍然看得出「结果出来了」。
+     Receipt card: 240ms ease-out, no overshoot (it was 0.45s on a 1.45 overshoot).
+     backwards fill leaves no transform. Under reduced motion it becomes an
+     opacity-only fade of the same length, so the result still registers. */
   .receipt-card {
     margin-top: 12px;
-    animation: pop 0.45s cubic-bezier(0.34, 1.45, 0.64, 1);
+    animation: pop var(--dur-base) var(--ease-out) backwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .receipt-card { animation-name: lg-fade; }
   }
   .receipt-line {
     display: flex;
@@ -271,7 +399,7 @@
     font-size: 13px;
   }
   .receipt-line.wait {
-    background: rgba(90, 34, 238, 0.14);
+    background: rgb(var(--purple-rgb) / 0.14);
     color: var(--purple-hi);
   }
   .receipt-line.ok {
@@ -280,18 +408,26 @@
     font-weight: 500;
     border: 1px solid rgb(var(--up-rgb) / 0.3);
   }
+  /* 下单被拒 / 结果未知：以前落在 .wait 上，紫底紫字，看起来像还在提交。
+     Rejected / unknown: it used to fall through to .wait and read as still submitting. */
+  .receipt-line.err {
+    background: var(--down-bg);
+    color: var(--down);
+    font-weight: 500;
+    border: 1px solid rgb(var(--down-rgb) / 0.3);
+  }
   .spinner {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    border: 2px solid rgba(139, 108, 255, 0.3);
+    border: 2px solid rgb(var(--purple-hi-rgb) / 0.3);
     border-top-color: var(--purple-hi);
     animation: spin 0.8s linear infinite;
   }
   .slide-cancel-x {
     position: absolute;
-    top: 15px;
-    right: 15px;
+    top: 12px;
+    right: 12px;
     width: 30px;
     height: 30px;
     border-radius: 50%;
@@ -362,7 +498,7 @@
     left: 12px;
     right: 12px;
     bottom: calc(env(safe-area-inset-bottom) + 12px);
-    z-index: 40;
+    z-index: var(--z-sticky);
   }
   /* ── 停在底栏之上 / sitting above the tab bar ──
      凡是要停在手机底栏上方的东西（footer 的下留白、toast、榜单名次栏、桥接更新提示）
@@ -394,7 +530,9 @@
     gap: 4px;
     padding: 8px;
     /* 圆角对齐卡片的 24：底栏是全站唯一还停在旧值（18）的容器。
-       内边距同时抹平横竖差，同心圆角才成立（26 − 8 = 18，见 .lg-tab）。 */
+       内边距四边同为 8，同心圆角才成立：24 − 1（边框）− 8 = 15，见 .lg-tab。
+       Radius matches the cards' 24. Even 8px padding is what makes the concentric
+       radius work: 24 − 1 (border) − 8 = 15, see .lg-tab. */
     border-radius: var(--r-lg);
     /* ── 液态玻璃（按要求恢复，并做到位）──
        这里先前被改成实色面，理由是「设计系统不用玻璃」。现在按要求改回玻璃，
@@ -428,22 +566,40 @@
       -webkit-backdrop-filter: blur(24px) saturate(180%);
     }
   }
+  /* 系统要求降低透明度时（浏览器报 prefers-reduced-transparency: reduce），底栏换成
+     实色 --surface，与不支持 backdrop-filter 时的回落同一思路。玻璃仍是默认值（上面
+     的注释写明这是按要求保留的唯一例外），只在用户明确不要透明时让路。不认这个媒体
+     特性的内核整块跳过，保持玻璃。
+     When the system asks for reduced transparency (prefers-reduced-transparency: reduce),
+     the tab bar becomes a solid --surface, the same idea as the no-backdrop-filter
+     fallback. Glass stays the default (the comment above records it as the one exception
+     kept on request) and only steps aside when the user has said no to transparency.
+     Engines that don't know the feature skip the block and keep the glass. */
+  @media (prefers-reduced-transparency: reduce) {
+    .lg-tabbar-inner {
+      background: var(--surface);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
   .lg-tab {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 4px;
     padding: 8px 0 8px;
-    /* 同心圆角：底栏 24 − 内边距 8 = 16。
+    /* 同心圆角：底栏 24 − 底栏边框 1 − 内边距 8 = 15（以前写 16，漏减了 1px 边框）。
        这里**不能**用药丸：Tab 的盒子是 67×54（长宽比 1.22），999px 已经超过
        短边的一半，整块会被压成椭圆疙瘩，跟同屏所有卡片的形状语言都不搭。
        药丸只在「宽而扁」的形状上才读作药丸。
        Not a pill: at 67×54 a 999px radius exceeds half the short side and the
        box collapses into an ellipse. Pills only read as pills on wide, short
-       shapes. Concentric instead: 24 - 8 = 16. */
-    border-radius: 16px;
+       shapes. Concentric instead: 24 - 1 (border) - 8 = 15; the old 16 forgot
+       the border. */
+    border-radius: 15px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--text-3);
@@ -453,12 +609,12 @@
     line-height: 1;
     cursor: pointer;
     transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out),
-                transform 0.09s var(--ease-out);
+                transform var(--dur-fast) var(--ease-out);
     -webkit-tap-highlight-color: transparent;
   }
-  /* 手机上 hover 永不触发，:active 是用户唯一能拿到的反馈。全站 42 条 :hover
-     只配了 16 条 :active，而底栏这种最常按的控件一条都没有。
-     On touch, hover never fires and :active is the only feedback there is. */
+  /* 触屏上 :hover 会在点按时触发并粘住，所以底栏不写 hover，按下反馈只靠 :active。
+     On touch a tap triggers :hover and it sticks, so the tab bar has no hover and
+     relies on :active for press feedback. */
   .lg-tab:active {
     transform: scale(0.96);
   }
@@ -470,6 +626,24 @@
     place-items: center;
     height: 26px;
   }
+  /* Tab 文字只占一行：放不下就显示省略号，不折成两行把整条底栏撑高（日文
+     「ダッシュボード」12px 约 84px，375px 宽的屏上每个 Tab 只有约 62px）。上下各 4px
+     内边距再用负外边距抵掉：overflow: hidden 要裁出省略号，但不能把泰文、越南文
+     叠在字母上方的声调符号也裁掉。.lg-tab 的 min-width: 0 让 Tab 可以比文字窄，
+     否则 nowrap 会把 Tab 撑宽。
+     Tab labels stay on one line and ellipsize instead of wrapping and growing the
+     whole bar (Japanese ダッシュボード is ~84px at 12px against ~62px per tab on a
+     375px screen). The 4px padding cancelled by a negative margin lets overflow:
+     hidden clip the ellipsis without clipping Thai and Vietnamese marks stacked
+     above the letters. min-width: 0 on .lg-tab lets a tab shrink below its text. */
+  .lg-tab-label {
+    max-width: 100%;
+    padding: 4px;
+    margin: -4px 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
   /* 激活态：实色品牌紫。原本是一层「紫→淡紫」的斜向半透明渐变加白色内高光，
      在半透明底栏上会与背后滚过的内容混色，选中项的位置随内容漂移。实色一填，
      选中态在任何背景上都是同一个样子。
@@ -478,47 +652,73 @@
      underneath the translucent bar — so the selected item visibly shifted colour
      as the page moved. A flat fill looks identical over any background. */
   .lg-tab.on {
-    color: #fff;
+    color: var(--text-strong);
     background: var(--purple);
     border-color: var(--purple);
     box-shadow: none;
   }
 
-  /* 「其他」弹出面板 / "More" liquid-glass sheet */
+  /* 「其他」弹出面板 / "More" liquid-glass sheet
+     外层只负责定位；遮罩拆成独立的 .lg-sheet-scrim：下拉面板时遮罩要随进度单独变淡，
+     改外层的 opacity 会把面板一起变淡。
+     The outer layer only positions. The scrim is its own .lg-sheet-scrim because a drag
+     fades the scrim with progress, and fading the outer layer would fade the sheet too. */
   .lg-sheet-overlay {
     position: fixed;
     top: 0;
     right: 0;
     bottom: 0;
     left: 0;
-    z-index: 50;
+    z-index: var(--z-overlay);
     display: flex;
     align-items: flex-end;
-    background: rgba(0, 0, 0, 0.42);
-    -webkit-backdrop-filter: blur(3px);
-    backdrop-filter: blur(3px);
-    animation: lg-fade 0.2s ease;
+  }
+  .lg-sheet-scrim {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    background: var(--scrim);
+    animation: lg-fade var(--dur-base) var(--ease-out);
   }
   /* 面板本身改为实色：它上面是导航项文字，背后是整页内容，半透明只会让两层
      文字互相干扰。遮罩层负责「隔开」，面板负责「承载」，各司其职。
      The sheet itself is opaque: it carries navigation labels over a full page of
      content, and translucency just makes two layers of text interfere. The scrim
-     separates, the sheet holds content — one job each. */
+     separates, the sheet holds content — one job each.
+     position: relative：遮罩是绝对定位，面板不定位的话会被画在遮罩下面。
+     position: relative: the scrim is absolutely positioned and would paint over an
+     unpositioned sheet. */
   .lg-sheet {
+    position: relative;
     width: 100%;
     padding: 8px 16px calc(env(safe-area-inset-bottom) + 16px);
-    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
     background: var(--surface);
     border-top: 1px solid var(--line-hi);
     box-shadow: 0 -12px 40px -12px rgba(0, 0, 0, 0.7);
-    animation: lg-slide-up 0.3s var(--ease-out);
+    animation: lg-slide-up var(--dur-medium) var(--ease-out);
+  }
+  /* 拖动区：整条把手行（满宽、32px 高），比 40×4 的把手本身好按得多。负外边距抵掉面板的
+     内边距，几何与原来一致：把手离面板顶 12px，下方留 16px。touch-action: none，否则浏览器
+     会把竖向拖动当成滚动接走、发 pointercancel。
+     The drag zone is the whole handle row (full width, 32px tall), far easier to hit than
+     the 40×4 handle. Negative margins cancel the sheet padding so the geometry is
+     unchanged: the handle sits 12px from the top with 16px below. touch-action: none, or
+     the browser claims the vertical drag as a scroll and sends pointercancel. */
+  .lg-sheet-grab {
+    margin: -8px -16px 0;
+    padding: 12px 16px 16px;
+    touch-action: none;
+    cursor: grab;
   }
   .lg-sheet-handle {
     width: 40px;
     height: 4px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     background: rgba(255, 255, 255, 0.28);
-    margin: 4px auto 16px;
+    margin: 0 auto;
   }
   .lg-sheet-grid {
     display: grid;
@@ -537,38 +737,62 @@
     align-items: center;
     gap: 8px;
     padding: 16px 8px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.06);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+    border-radius: var(--r-tile);
+    /* 实色内嵌格：面板是 --surface，格子用 --nest 抬一档。原来是 6% 白的半透明底 + 10% 白
+       描边 + 顶部内高光，叠出「玻璃」质感，和全站「靠面不靠线」的分层不是一套。透明描边
+       保住盒子尺寸，也让 .on 能给边上色。
+       Flat nested tile: the sheet is --surface and the tile sits one step up on --nest.
+       It used to stack a 6% white wash, a 10% white stroke and a top inset highlight, a
+       glass look outside the system's surfaces-not-lines layering. The transparent border
+       keeps the box size and still lets .on colour the edge. */
+    background: var(--nest);
+    border: 1px solid transparent;
     color: var(--text-2);
     font-size: 12px;
     font-weight: 500;
     text-align: center;
-    transition: background 0.25s, color 0.25s, border-color 0.25s;
+    transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
   }
   .lg-sheet-item svg {
     width: 22px;
     height: 22px;
   }
+  /* 当前页：与底栏 .lg-tab.on 同一种实色紫、同一组声明（理由见那里的注释）。
+     Current page: the same solid violet and the same declarations as .lg-tab.on (see the
+     note there). */
   .lg-sheet-item.on {
-    color: #fff;
-    background: linear-gradient(158deg, rgba(180, 120, 255, 0.34), rgba(90, 34, 238, 0.24));
-    border-color: rgba(255, 255, 255, 0.22);
+    color: var(--text-strong);
+    background: var(--purple);
+    border-color: var(--purple);
+    box-shadow: none;
+  }
+  /* 「其他」面板的入口：按下压亮底色。点下去就跳页、面板随之关闭，缩放来不及被看见，
+     底色变化在按下那一刻就能看到。
+     Entries in the "More" sheet: press lifts the fill. A tap navigates and closes the
+     sheet at once, too fast for a scale to register; a fill change shows on contact. */
+  .lg-sheet-item:active {
+    background: var(--nest-hi);
   }
   .lg-sheet-logout {
     width: 100%;
     margin-top: 12px;
     padding: 12px;
-    border-radius: 10px;
+    border-radius: var(--r-md);
     background: rgb(var(--down-rgb) / 0.12);
     border: 1px solid rgb(var(--down-rgb) / 0.32);
-    color: #ff8095;
+    color: var(--down-hi);
     font: inherit;
     font-size: 13px;
     font-weight: 500;
     cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out);
     -webkit-tap-highlight-color: transparent;
+  }
+  .lg-sheet-logout:active {
+    transform: scale(0.96);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lg-sheet-logout:active { transform: none; }
   }
   @keyframes lg-slide-up {
     from { transform: translateY(100%); }
@@ -577,6 +801,43 @@
   @keyframes lg-fade {
     from { opacity: 0; }
     to { opacity: 1; }
+  }
+  /* 退场：所有关闭途径（遮罩、返回手势、路由切换、拖拽甩走）最后都是 setMoreOpen(false)，
+     usePresence 让面板多留 240ms 并给外层挂 .closing：面板滑出、遮罩淡出，0.24s 比 0.3s 的
+     入场快一档，退场用 --ease-in。拖拽甩走时 useSheetDrag 已写好行内 transform /
+     transition，行内优先，从松手的位置接着走。
+     Exit: every close path (scrim, back gesture, navigation, a drag fling) ends in
+     setMoreOpen(false); usePresence keeps the sheet 240ms longer with .closing on the
+     outer layer: the sheet slides out, the scrim fades, 0.24s is one step faster than the
+     0.3s entrance, and exits use --ease-in. After a fling useSheetDrag has already written
+     inline transform / transition, which win, so it continues from the release point. */
+  .lg-sheet-overlay.closing {
+    pointer-events: none;
+  }
+  .lg-sheet-overlay.closing .lg-sheet {
+    animation: none;
+    transform: translateY(100%);
+    transition: transform var(--dur-base) var(--ease-in);
+  }
+  .lg-sheet-overlay.closing .lg-sheet-scrim {
+    animation: none;
+    opacity: 0;
+    transition: opacity var(--dur-base) var(--ease-in);
+  }
+  /* 减弱动效：不滑，进出都是 --dur-fast 的淡入淡出。
+     Reduced motion: no travel; in and out are --dur-fast fades. */
+  @media (prefers-reduced-motion: reduce) {
+    .lg-sheet,
+    .lg-sheet-scrim {
+      animation: lg-fade var(--dur-fast) var(--ease-out);
+    }
+    .lg-sheet-overlay.closing .lg-sheet,
+    .lg-sheet-overlay.closing .lg-sheet-scrim {
+      animation: none;
+      transform: none;
+      opacity: 0;
+      transition: opacity var(--dur-fast) var(--ease-in);
+    }
   }
 
   /* ══════════════════════════════════════════════
@@ -603,7 +864,7 @@
     right: 0 !important;
     bottom: 0 !important;
     left: 0 !important;
-    z-index: 60 !important;
+    z-index: var(--z-modal) !important;
     /* 100dvh 要 Chrome 108；更老的 WebView 先吃 100vh / 100dvh needs Chrome 108 */
     height: 100vh !important;
     height: 100dvh !important;
@@ -611,7 +872,7 @@
     border-radius: 0 !important;
     margin: 0 !important;
     padding: 6px !important;
-    background: #080510 !important;
+    background: var(--bg) !important;
   }
 
   /* 全屏态悬浮画线工具栏 */
@@ -623,7 +884,7 @@
     align-items: stretch;
     gap: 4px;
     padding: 8px 8px 8px;
-    border-radius: 14px;
+    border-radius: var(--r-panel);
     background: rgba(16, 16, 18, 0.92);
     backdrop-filter: blur(18px);
     -webkit-backdrop-filter: blur(18px);
@@ -643,8 +904,8 @@
     min-height: 22px;
     margin: -4px -4px 4px;
     padding: 4px 0;
-    border-radius: 8px;
-    color: #fff;
+    border-radius: var(--r-tile);
+    color: var(--text-strong);
     cursor: grab;
     touch-action: none;
   }
@@ -757,12 +1018,22 @@
       /* 底部多留 12px：全面屏手势条附近误触会把滑块甩掉。
          Extra 12px so the slider sits clear of the gesture bar. */
       padding: 20px 16px calc(28px + env(safe-area-inset-bottom));
-      /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效——桌面居中弹窗
-         用位移动画会显得突兀，desktop 那份只保留上面 overlay 的淡入。
-         Only layer the slide-up here, where it's actually a bottom sheet — a
-         translateY entrance on a centered desktop dialog would look odd; the
-         desktop version keeps just the overlay fade above. */
-      animation: lg-slide-up 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+      /* 只在真正贴底成为 bottom sheet 的手机端才叠加上滑动效。桌面居中弹窗不位移，
+         只做轻微的放大淡入（components-order-sheet.css 的 sheet-pop）。
+         Only layer the slide-up here, where it's actually a bottom sheet. The centred
+         desktop dialog doesn't travel; it gets a slight scale-in instead (sheet-pop in
+         components-order-sheet.css). */
+      animation: lg-slide-up var(--dur-medium) var(--ease-out);
+    }
+    /* 退场：手机端是贴底弹层，关闭时滑回底部；外层 .slide-overlay.closing 同时整体淡出
+       （components-order-sheet.css）。只有 OrderSheet 会挂 .closing。
+       Exit: on phones this is a bottom sheet and slides back down while the outer
+       .slide-overlay.closing fades (components-order-sheet.css). Only OrderSheet sets
+       .closing. */
+    .slide-overlay.closing .slide-sheet {
+      animation: none;
+      transform: translateY(100%);
+      transition: transform var(--dur-base) var(--ease-in);
     }
 
     /* ── 信号卡三列保持不变（手机端也放得下）── */
@@ -790,6 +1061,18 @@
     /* ── 按钮全宽 / full-width btn ── */
     .view-all-btn {
       width: 100%;
+    }
+  }
+  /* 减弱动效：手机端下单弹层不滑，改淡入；退场只剩外层的淡出。
+     Reduced motion: the phone order sheet fades in instead of sliding; the exit is
+     just the outer fade. */
+  @media (max-width: 639px) and (prefers-reduced-motion: reduce) {
+    .slide-sheet {
+      animation: lg-fade var(--dur-fast) var(--ease-out);
+    }
+    .slide-overlay.closing .slide-sheet {
+      transform: none;
+      transition: none;
     }
   }
 }

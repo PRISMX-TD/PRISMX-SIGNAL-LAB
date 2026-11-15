@@ -25,9 +25,22 @@
 // because this line is the only echo of the action just taken. `pointer-events: none`
 // is what makes centre acceptable — it blocks the view, never the hands, so the chart
 // stays draggable underneath for the few seconds it shows.
+//
+// 停留时长、退场、读屏播报（2026-11 起）：时长按种类走 utils/useToastState 的 TOAST_MS；到点
+// 先加 .leaving 播 100ms 退场再卸载；调用点用 key={toast.id}，换一条就重新挂载、重播进场。
+// 播报不靠这块板子自己的 role="status"（它随文字一起挂载，读屏器常常跳过），而是写进 Layout
+// 里常驻的 live region（utils/announce.ts），所以这里 aria-hidden，避免同一句读两遍。
+//
+// Duration, exit and announcing (since 2026-11): durations come from TOAST_MS in
+// utils/useToastState; when time is up the toast gets .leaving for a 100ms exit, then unmounts;
+// call sites key it by toast.id so a replacement re-mounts and replays the enter. Announcing
+// goes through the always-mounted live regions in Layout (utils/announce.ts), not a
+// role="status" on this card, which mounts with its text and is often skipped; hence
+// aria-hidden here, so the line is not read twice.
+import { useEffect } from 'react'
 import { createPortal } from 'react-dom'
-
-export type ToastKind = 'success' | 'error' | 'info'
+import { announce } from '../utils/announce'
+import type { ToastItem, ToastKind } from '../utils/useToastState'
 
 const ICONS: Record<ToastKind, JSX.Element> = {
   // 对勾 / 感叹 / 信息。图标承担"这是好消息还是坏消息"，文字因此可以保持白色高对比，
@@ -39,7 +52,13 @@ const ICONS: Record<ToastKind, JSX.Element> = {
   info: <><path d="M12 11v6" /><path d="M12 7h.01" /><circle cx="12" cy="12" r="9" /></>,
 }
 
-export default function Toast({ kind, message }: { kind: ToastKind; message: string }) {
+export default function Toast({ toast }: { toast: ToastItem }) {
+  const { id, kind, msg, leaving } = toast
+  // 每条提示（每个 id）播报一次；错误打断当前朗读，其余排队。
+  // Announce once per toast (per id); errors interrupt, the rest queue.
+  useEffect(() => {
+    announce(msg, kind === 'error' ? 'assertive' : 'polite')
+  }, [id, kind, msg])
   // portal 到 body：六个调用点里有一半渲染在自己页面的某个 relative/overflow 容器中，
   // 留在原地的话 fixed 会被祖先的 transform / filter 挟持成相对定位（图表页的抽屉就
   // 带 transform），提示会跑到容器里而不是屏幕正中。
@@ -47,13 +66,13 @@ export default function Toast({ kind, message }: { kind: ToastKind; message: str
   // ancestor, which would re-root `fixed` to that ancestor and land the toast inside a
   // panel instead of the screen's centre.
   return createPortal(
-    <div className={`toast ${kind}`} role="status" aria-live="polite">
+    <div className={`toast ${kind}${leaving ? ' leaving' : ''}`} aria-hidden="true">
       <svg className="toast-ic" width="18" height="18" viewBox="0 0 24 24" fill="none"
            stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
            aria-hidden="true">
         {ICONS[kind]}
       </svg>
-      <span>{message}</span>
+      <span>{msg}</span>
     </div>,
     document.body,
   )

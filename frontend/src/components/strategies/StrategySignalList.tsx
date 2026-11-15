@@ -53,7 +53,7 @@ export default function StrategySignalList({ signals, now, onOrder }: StrategySi
           <div
             key={sig.id}
             className={`stg-sig${actionable ? '' : ' off'}`}
-            style={{ '--i': i } as CSSProperties}
+            style={{ '--i': Math.min(i, 5) } as CSSProperties}
           >
             <span className={`chip ${sig.side === 'BUY' ? 'chip-buy' : 'chip-sell'}`}>
               {sig.side === 'BUY' ? t('common.buy') : t('common.sell')}

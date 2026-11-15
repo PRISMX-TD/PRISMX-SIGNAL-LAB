@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import Switch from '../Switch'
 import { ColorDot } from './IndicatorSettingsModal'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { usePopoverEscape } from '../../utils/usePopoverEscape'
 import {
   CANDLE_COLOR_PRESETS, CANDLE_SCHEMES, candleSchemeOf, type CandleColors, type CandleScheme,
 } from './chartConfig'
@@ -63,14 +64,12 @@ export default function ChartSettingsMenu({
       if (menuRef.current?.contains(n) || btnRef.current?.contains(n)) return
       setOpen(false)
     }
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     document.addEventListener('pointerdown', onDown)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('pointerdown', onDown)
-      document.removeEventListener('keydown', onKey)
-    }
+    return () => document.removeEventListener('pointerdown', onDown)
   }, [open])
+  // Esc 收起并把焦点还给齿轮（菜单 portal 到 body，不在按钮旁边，丢了焦点更难找回）。
+  // Escape closes and refocuses the gear (the menu is portalled away from the button).
+  usePopoverEscape(open, () => setOpen(false), btnRef, menuRef)
 
   const scheme = candleSchemeOf(candleColors)
   const label = String(t('charts.settings.title'))
@@ -87,6 +86,7 @@ export default function ChartSettingsMenu({
         title={label}
         aria-label={label}
         aria-expanded={open}
+        aria-haspopup="dialog"
         onClick={() => setOpen((v) => !v)}
         className={`term-tool-btn ${open ? 'on' : ''}`}
       >

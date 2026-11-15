@@ -71,6 +71,9 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
   const [autoCfg, setAutoCfg] = useState<AutoManageSettings | null>(null)
   const [autoSaving, setAutoSaving] = useState(false)
   const [autoMsg, setAutoMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null)
+  // 服务器最后确认的那一份（读取成功或保存成功时更新），用来判断有没有没保存的改动。
+  // The last config the server confirmed (on read or save), to tell whether edits are unsaved.
+  const [savedCfg, setSavedCfg] = useState<AutoManageSettings | null>(null)
 
   // 读取失败要进错误态并给「重试」：以前 catch 吞掉之后 autoCfg 永远是 null，
   // 这块就永远是骨架屏——看起来像「还在加载」，其实早就失败了。
@@ -80,7 +83,7 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
   const [loadFailed, setLoadFailed] = useState(false)
   const load = useCallback(() => {
     setLoadFailed(false)
-    automationApi.getSettings().then(setAutoCfg).catch(() => setLoadFailed(true))
+    automationApi.getSettings().then((s) => { setAutoCfg(s); setSavedCfg(s) }).catch(() => setLoadFailed(true))
   }, [])
   // 非 PRO 也读一次：PRO 到期 / 试用结束的用户总开关可能还存着「开」，后端却已不再
   // 执行，只给一句通用的「升级解锁」会让他以为止损还在被自动管理。读失败就退回通用提示。
@@ -89,7 +92,7 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
   // believing their stops are still managed. A failed read falls back to the upsell.
   useEffect(() => {
     if (isPro) load()
-    else automationApi.getSettings().then(setAutoCfg).catch(() => {})
+    else automationApi.getSettings().then((s) => { setAutoCfg(s); setSavedCfg(s) }).catch(() => {})
   }, [isPro, load])
 
   async function saveAutoCfg() {
@@ -99,6 +102,7 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
     try {
       const updated = await automationApi.putSettings(autoCfg)
       setAutoCfg(updated)
+      setSavedCfg(updated)
       setAutoMsg({ kind: 'ok', text: t('account.autoSaved') })
     } catch (err: unknown) {
       setAutoMsg({
@@ -110,11 +114,29 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
     }
   }
 
+  // 任何改动都清掉上一句「已保存 / 保存失败」：那句话说的是上一个版本。以前它一直挂着，
+  // 用户改完以为已经生效，直接离开。
+  // Any edit clears the last "saved / failed" line: it described the previous version. It used
+  // to linger, so users edited, read "saved", and left with nothing applied.
+  const edit = (patch: Partial<AutoManageSettings>) => {
+    setAutoCfg((c) => (c ? { ...c, ...patch } : c))
+    setAutoMsg(null)
+  }
+  // 逐字段与服务器那份比较（全是布尔和数字）；改回原值就不算改动。
+  // Field-by-field against the server copy (all booleans and numbers); reverting counts as clean.
+  const dirty = autoCfg != null && savedCfg != null
+    && (Object.keys(autoCfg) as (keyof AutoManageSettings)[]).some((k) => autoCfg[k] !== savedCfg[k])
+
   // 文本缓冲在 NumberInput 里：以前直接绑数字，手机上删空的那一拍就变成 0，删不掉。
   // NumberInput keeps the text buffer; binding the number made the field un-clearable.
-  const num = (value: number, onChange: (n: number) => void, min: number, max: number, integer = false) => (
+  // 句中嵌的数字框没有可见标签（前后文字就是标签），读屏只会念「编辑框」，所以每个框带一个
+  // 完整的 aria-label，说清楚是哪条规则的哪个数、单位是什么。
+  // The inline fields have no visible label (the sentence around them is the label), so a screen
+  // reader would only say "edit"; each gets a full aria-label naming the rule, the value and its unit.
+  const num = (label: string, value: number, onChange: (n: number) => void, min: number, max: number, integer = false) => (
     <NumberInput
       className="input ord-rule-in"
+      aria-label={label}
       value={value}
       onChange={onChange}
       min={min}
@@ -138,7 +160,7 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
         {!isPro ? (
           <p className="ord-rule-up" role={autoCfg?.enabled ? 'status' : undefined}>
             {autoCfg?.enabled ? (
-              <span className="text-amber-400">{t('account.autoPausedNotPro')}</span>
+              <span className="text-warn">{t('account.autoPausedNotPro')}</span>
             ) : (
               t('account.autoUpgradeRequired')
             )}{' '}
@@ -166,17 +188,17 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
               name={t('account.autoEnable')}
               desc={t('account.autoScopeNote')}
               on={autoCfg.enabled}
-              onToggle={(v) => setAutoCfg({ ...autoCfg, enabled: v })}
+              onToggle={(v) => edit({ enabled: v })}
             />
             <div className="ord-rules" data-off={!autoCfg.enabled || undefined}>
               <Rule
                 name={t('account.autoBe')}
                 on={autoCfg.beEnabled}
-                onToggle={(v) => setAutoCfg({ ...autoCfg, beEnabled: v })}
+                onToggle={(v) => edit({ beEnabled: v })}
                 desc={
                   <>
                     {t('orders.am.be.pre')}
-                    {num(autoCfg.beTriggerR, (n) => setAutoCfg({ ...autoCfg, beTriggerR: n }), 0.1, 10)}
+                    {num(t('orders.am.be.trigger'), autoCfg.beTriggerR,(n) => edit({ beTriggerR: n }), 0.1, 10)}
                     {t('orders.am.be.post')}
                   </>
                 }
@@ -184,13 +206,13 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
               <Rule
                 name={t('account.autoTrail')}
                 on={autoCfg.trailEnabled}
-                onToggle={(v) => setAutoCfg({ ...autoCfg, trailEnabled: v })}
+                onToggle={(v) => edit({ trailEnabled: v })}
                 desc={
                   <>
                     {t('orders.am.trail.pre')}
-                    {num(autoCfg.trailTriggerR, (n) => setAutoCfg({ ...autoCfg, trailTriggerR: n }), 0.1, 10)}
+                    {num(t('orders.am.trail.trigger'), autoCfg.trailTriggerR,(n) => edit({ trailTriggerR: n }), 0.1, 10)}
                     {t('orders.am.trail.mid')}
-                    {num(autoCfg.trailDistanceR, (n) => setAutoCfg({ ...autoCfg, trailDistanceR: n }), 0.1, 10)}
+                    {num(t('orders.am.trail.distance'), autoCfg.trailDistanceR,(n) => edit({ trailDistanceR: n }), 0.1, 10)}
                     {t('orders.am.trail.post')}
                   </>
                 }
@@ -198,13 +220,13 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
               <Rule
                 name={t('account.autoPtp')}
                 on={autoCfg.ptpEnabled}
-                onToggle={(v) => setAutoCfg({ ...autoCfg, ptpEnabled: v })}
+                onToggle={(v) => edit({ ptpEnabled: v })}
                 desc={
                   <>
                     {t('orders.am.ptp.pre')}
-                    {num(autoCfg.ptpTriggerR, (n) => setAutoCfg({ ...autoCfg, ptpTriggerR: n }), 0.1, 10)}
+                    {num(t('orders.am.ptp.trigger'), autoCfg.ptpTriggerR,(n) => edit({ ptpTriggerR: n }), 0.1, 10)}
                     {t('orders.am.ptp.mid')}
-                    {num(Math.round(autoCfg.ptpFraction * 100), (n) => setAutoCfg({ ...autoCfg, ptpFraction: n / 100 }), 10, 90, true)}
+                    {num(t('orders.am.ptp.fraction'), Math.round(autoCfg.ptpFraction * 100),(n) => edit({ ptpFraction: n / 100 }), 10, 90, true)}
                     {t('orders.am.ptp.post')}
                   </>
                 }
@@ -213,15 +235,24 @@ export default function AutoManageCard({ isPro, scopeHint }: Props) {
             <div className="ord-rule-foot">
               <button
                 onClick={saveAutoCfg}
-                disabled={autoSaving}
+                disabled={autoSaving || !dirty}
                 data-fd-plain
                 className="btn-primary px-5 py-2 text-sm disabled:opacity-40"
               >
-                {autoSaving ? t('common.loading') : t('common.save')}
+                {autoSaving ? t('account.autoSaving') : t('account.autoSaveChanges')}
               </button>
-              {autoMsg && (
-                <p className={`ord-rule-msg ${autoMsg.kind === 'err' ? 'text-down' : 'text-up'}`}>{autoMsg.text}</p>
-              )}
+              {autoMsg ? (
+                <p
+                  className={`ord-rule-msg ${autoMsg.kind === 'err' ? 'text-down' : 'text-up'}`}
+                  role={autoMsg.kind === 'err' ? 'alert' : 'status'}
+                >
+                  {autoMsg.text}
+                </p>
+              ) : dirty ? (
+                // 有没保存的改动：占用同一个消息位，替代以前一直挂着的「已保存」。
+                // Unsaved edits take the same message slot the stale "saved" line used to hold.
+                <p className="ord-rule-msg text-mid">{t('account.autoUnsaved')}</p>
+              ) : null}
             </div>
           </>
         )}

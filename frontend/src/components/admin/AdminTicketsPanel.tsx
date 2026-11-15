@@ -23,6 +23,7 @@ import { useAuth } from '../../store/auth'
 import { Avatar, TicketStatus } from '../support/supportUi'
 import { SaveTemplateButton, TICKET_CATEGORIES, TicketMetaEditor, fillTemplate } from '../support/ticketTools'
 import { OpenUserButton, UserOverviewBody, useUserDrawer } from './users/UserOverview'
+import { useFirstReveal } from '../../utils/useFirstReveal'
 
 const STATUSES: TicketStatusValue[] = ['open', 'in_progress', 'closed']
 const PRIORITIES: TicketPriority[] = ['low', 'normal', 'urgent']
@@ -42,6 +43,9 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
   const [templates, setTemplates] = useState<SupportTemplate[]>([])
   const drawer = useUserDrawer()
   const [loading, setLoading] = useState(true)
+  // 行进场只在这次挂载里第一次加载完时播；之后换筛选重新加载，行直接出现。
+  // Rows animate in only after the first load of this mount; later filtered reloads show them at once.
+  const rowsReveal = useFirstReveal(!loading)
   const [statusFilter, setStatusFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('')
   const [detail, setDetail] = useState<Ticket | null>(null)
@@ -288,12 +292,12 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
                       <span className="num">{fmtDate(r.createdAt)}</span>
                     </div>
                     <div
-                      className={`rounded-[18px] px-3.5 py-2.5 ${
+                      className={`rounded-panel px-3.5 py-2.5 ${
                         r.internal
-                          ? 'rounded-tr-md border border-dashed border-amber-400/45 bg-amber-400/[0.07]'
+                          ? 'rounded-tr-lg border border-dashed border-warn/45 bg-warn/[0.07]'
                           : fromStaff
-                            ? 'rounded-tr-md border border-[rgb(var(--purple-rgb)/0.38)] bg-[rgb(var(--purple-rgb)/0.2)]'
-                            : 'rounded-tl-md bg-[var(--surface-2)]'
+                            ? 'rounded-tr-lg border border-[rgb(var(--purple-rgb)/0.38)] bg-[rgb(var(--purple-rgb)/0.2)]'
+                            : 'rounded-tl-lg bg-[var(--surface-2)]'
                       }`}
                     >
                       {r.body && (
@@ -436,7 +440,7 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
         ) : (
           <ul className="divide-y divide-[var(--line)]">
             {tickets.map((ticket, i) => (
-              <li key={ticket.id} className="adm-rise" style={{ ['--i' as string]: Math.min(i, 12) }}>
+              <li key={ticket.id} className={rowsReveal ? 'adm-rise' : undefined} style={rowsReveal ? { ['--i' as string]: Math.min(i, 5) } : undefined}>
                 <button
                   type="button"
                   onClick={() => void openDetail(ticket.id)}

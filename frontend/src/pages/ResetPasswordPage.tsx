@@ -120,9 +120,10 @@ export default function ResetPasswordPage() {
                 <p className="mt-2 mb-5 text-sm leading-relaxed text-neutral-400">{t('auth.resetSubtitle')}</p>
                 <form onSubmit={submitNewPassword} className="space-y-4">
                   <div>
-                    <label className="label">{t('auth.newPassword')}</label>
+                    <label className="label" htmlFor="reset-password">{t('auth.newPassword')}</label>
                     <div className="relative">
                       <input
+                        id="reset-password"
                         className="input pr-11"
                         type={showPassword ? 'text' : 'password'}
                         autoComplete="new-password"
@@ -153,8 +154,9 @@ export default function ResetPasswordPage() {
                     </div>
                   </div>
                   <div>
-                    <label className="label">{t('auth.confirmPassword')}</label>
+                    <label className="label" htmlFor="reset-confirm">{t('auth.confirmPassword')}</label>
                     <input
+                      id="reset-confirm"
                       className="input"
                       type={showPassword ? 'text' : 'password'}
                       autoComplete="new-password"
@@ -167,7 +169,7 @@ export default function ResetPasswordPage() {
                     />
                   </div>
                   {error && (
-                    <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">
+                    <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">
                       {error}
                     </div>
                   )}
@@ -186,8 +188,9 @@ export default function ResetPasswordPage() {
                 <p className="mt-2 mb-5 text-sm leading-relaxed text-neutral-400">{t('auth.forgotSubtitle')}</p>
                 <form onSubmit={requestLink} className="space-y-4">
                   <div>
-                    <label className="label">{t('auth.email')}</label>
+                    <label className="label" htmlFor="reset-email">{t('auth.email')}</label>
                     <input
+                      id="reset-email"
                       className="input"
                       type="email"
                       autoComplete="email"
@@ -198,7 +201,7 @@ export default function ResetPasswordPage() {
                     />
                   </div>
                   {error && (
-                    <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down">
+                    <div className="rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="alert">
                       {error}
                     </div>
                   )}

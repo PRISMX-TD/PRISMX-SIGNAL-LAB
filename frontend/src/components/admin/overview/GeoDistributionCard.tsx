@@ -39,7 +39,7 @@ export default function GeoDistributionCard() {
   const retry = useCallback(() => setNonce((n) => n + 1), [])
 
   const pill = (active: boolean) =>
-    `rounded-[10px] px-3 py-1 text-xs transition ${
+    `rounded-control px-3 py-1 text-xs transition ${
       active ? 'bg-prism-500/25 text-prism-100 ring-1 ring-prism-400/40' : 'text-neutral-400 hover:text-neutral-200'
     }`
 

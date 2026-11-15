@@ -62,7 +62,7 @@
 .sup-status.badge {
   height: 26px;
   padding: 0 12px 0 10px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line-hi);
 }
 
@@ -85,14 +85,16 @@
   text-align: left;
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out);
-  animation: fade-in-up 0.45s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 40ms);
+  animation: fade-in-up var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 .sup-row + .sup-row {
   border-top: 1px solid var(--line);
 }
-.sup-row:hover {
-  background: var(--surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .sup-row:hover {
+    background: var(--surface-2);
+  }
 }
 .sup-row:active {
   background: var(--nest);
@@ -105,7 +107,7 @@
   font-size: 15px;
   line-height: 1.3;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -145,9 +147,11 @@
   color: var(--text-3);
   transition: color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
-.sup-row:hover .sup-chev {
-  color: #fff;
-  transform: translateX(2px);
+@media (hover: hover) and (pointer: fine) {
+  .sup-row:hover .sup-chev {
+    color: var(--text-strong);
+    transform: translateX(2px);
+  }
 }
 
 /* 骨架：与行同形，三行。/ Skeleton: row-shaped, three of them. */
@@ -155,8 +159,10 @@
   cursor: default;
   animation: none;
 }
-.sup-row.skel:hover {
-  background: transparent;
+@media (hover: hover) and (pointer: fine) {
+  .sup-row.skel:hover {
+    background: transparent;
+  }
 }
 .sup-row.skel .skeleton {
   height: 12px;
@@ -182,7 +188,7 @@
 .sup-empty b {
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .sup-empty p {
   font-size: 13px;
@@ -240,13 +246,13 @@
 .sup-field .input {
   height: 48px;
   padding: 0 18px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-size: 15px;
 }
 .sup-field .select-lg .select-trigger {
   height: 48px;
   padding: 0 18px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   font-size: 15px;
 }
 /* 文本域：药丸圆角在多行框上会吃掉首行，改用面板圆角 14。
@@ -286,7 +292,7 @@
 .sup-thread-head h3 {
   font-size: 15px;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
 }
 .sup-thread-head b {
   font-size: 20px;
@@ -305,8 +311,8 @@
   grid-template-columns: 36px minmax(0, 1fr);
   gap: 14px;
   padding: 20px 28px;
-  animation: fade-in-up 0.45s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 40ms);
+  animation: fade-in-up var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 .sup-msg-row + .sup-msg-row {
   border-top: 1px solid var(--line);
@@ -330,7 +336,7 @@
 }
 .sup-msg-row.staff .sup-ava {
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
 }
 .sup-msg-meta {
   display: flex;
@@ -352,7 +358,7 @@
 .sup-msg-meta .staff {
   height: 20px;
   padding: 0 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line-hi);
   font-size: 12px;
   font-weight: 500;
@@ -425,7 +431,7 @@
   position: relative;
   width: 72px;
   height: 72px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   overflow: hidden;
   border: 1px solid var(--line-hi);
   background: var(--surface);
@@ -462,10 +468,12 @@
   height: 22px;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.62);
-  color: #fff;
+  color: var(--text-strong);
 }
-.sup-attach-x:hover {
-  background: rgba(0, 0, 0, 0.85);
+@media (hover: hover) and (pointer: fine) {
+  .sup-attach-x:hover {
+    background: rgba(0, 0, 0, 0.85);
+  }
 }
 .sup-attach-bar {
   display: flex;
@@ -479,15 +487,17 @@
   gap: 6px;
   height: 34px;
   padding: 0 14px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   border: 1px solid var(--line-hi);
   font-size: 13px;
   color: var(--text-2);
-  transition: background-color 0.15s, color 0.15s;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.sup-attach-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .sup-attach-btn:hover:not(:disabled) {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+  }
 }
 .sup-attach-btn:disabled {
   opacity: 0.45;
@@ -512,7 +522,7 @@
   width: 120px;
   height: 120px;
   padding: 0;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   overflow: hidden;
   border: 1px solid var(--line-hi);
   background: var(--surface);
@@ -531,29 +541,52 @@
 /* 85：盖过底部抽屉与确认框（80），让出全站 toast（90）。四边分开写而不用 inset：老 WebView 不认。
    85: above sheets and dialogs (80), below the site-wide toast (90). Four offsets instead of
    inset, which older WebViews don't support. */
+/* 背景挪到 .sup-lightbox-bg：下拉关闭时只让背景变淡。touch-action: none：图上的拖动
+   （平移、下拉）都由脚本处理，也挡住背后的页面跟着滚。
+   The backdrop moved to .sup-lightbox-bg so a swipe-down fades only it. touch-action:
+   none: drags on the image (pan, swipe-down) are scripted, and the page behind no longer
+   scrolls along. */
 .sup-lightbox {
   position: fixed;
   top: 0;
   right: 0;
   bottom: 0;
   left: 0;
-  z-index: 85;
+  z-index: var(--z-lightbox);
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.88);
+  touch-action: none;
   cursor: zoom-out;
-  animation: sup-fade 0.15s ease-out;
+  animation: sup-fade var(--dur-fast) var(--ease-out);
 }
 @keyframes sup-fade {
   from { opacity: 0; }
 }
+.sup-lightbox-bg {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  /* 全站遮罩里唯一不用 var(--scrim) 的：这是看图的灯箱，照片要压在近黑上才读得清。
+     The one scrim that does not use var(--scrim): this is a photo lightbox, and a
+     photo reads best on near-black. */
+  background: rgba(0, 0, 0, 0.88);
+}
+/* position: relative：背景层是绝对定位，图片不定位的话会被画在背景下面。
+   position: relative: the backdrop is absolutely positioned and would paint over an
+   unpositioned image. */
 .sup-lightbox img {
+  position: relative;
   max-width: 100%;
   max-height: calc(100vh - 48px);
   max-height: calc(100dvh - 48px);
-  border-radius: 8px;
+  border-radius: var(--r-tile);
   object-fit: contain;
+}
+.sup-lightbox img.zoomed {
+  cursor: grab;
 }
 .sup-lightbox-x {
   position: fixed;
@@ -565,7 +598,7 @@
   height: 40px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.12);
-  color: #fff;
+  color: var(--text-strong);
 }
 
 @media (min-width: 1024px) {

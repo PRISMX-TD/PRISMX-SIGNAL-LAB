@@ -45,6 +45,7 @@ import {
   planExpiryText,
 } from './customerCells'
 import type { AgentTeam, AgentTreeUser, AgentTreeUsers } from '../../api/types'
+import { EMPTY } from '../../utils/format'
 
 const PAGE_SIZE = 50
 
@@ -162,7 +163,7 @@ export default function AgentCustomersPanel({
         </span>
       </span>
     ) : (
-      <span className="agt-dim">—</span>
+      <span className="agt-dim">{EMPTY}</span>
     )
 
   const agentBadge = (u: AgentTreeUser) =>

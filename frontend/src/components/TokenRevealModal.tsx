@@ -14,7 +14,7 @@ interface Props {
 
 export default function TokenRevealModal({ token, onClose }: Props) {
   const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
+  const [copyState, setCopyState] = useState<'idle' | 'ok' | 'err'>('idle')
   // 只补 role / 焦点陷阱，**不**让 Esc 关：唯一的关闭按钮语义是"我已保存 token"，Esc
   // 一键跳过这个确认就违背了弹窗存在的目的。
   // role + focus trap only; Escape deliberately does NOT close — the sole close
@@ -23,10 +23,14 @@ export default function TokenRevealModal({ token, onClose }: Props) {
   const titleId = useId()
   useDialogA11y(sheetRef, onClose, { closeOnEscape: false })
 
+  // 复制失败必须说出来：安卓 WebView 会拒绝剪贴板，而这个 Token 关掉弹窗后就再也看不到
+  // 了。按钮字换成「复制失败，请手动选中」，与 AgentPage 的复制按钮同一做法。
+  // A failed copy must say so: Android WebViews can refuse the clipboard and this token
+  // is never shown again after closing. Same pattern as AgentPage's copy buttons.
   const copy = async () => {
-    if (!(await copyToClipboard(token))) return
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    const ok = await copyToClipboard(token)
+    setCopyState(ok ? 'ok' : 'err')
+    setTimeout(() => setCopyState('idle'), ok ? 2000 : 2500)
   }
 
   // portal 到 body：调用点在 .glass 卡片里，backdrop-filter / transform 会劫持
@@ -39,25 +43,26 @@ export default function TokenRevealModal({ token, onClose }: Props) {
     <div className="slide-overlay">
       <div ref={sheetRef} className="slide-sheet sm:w-[420px]" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
         <div className="flex flex-col items-center text-center">
-          <div className="mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-prism-600/15 text-prism-300">
+          <div className="mb-3 grid h-12 w-12 place-items-center rounded-card bg-prism-600/15 text-prism-300">
             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="11" width="18" height="10" rx="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
             </svg>
           </div>
           <h3 id={titleId} className="text-lg font-bold text-white">{t('bind.tokenTitle')}</h3>
-          <p className="mt-1 text-sm text-amber-400/90">{t('bind.tokenJustOnce')}</p>
+          <p className="mt-1 text-sm text-warn/90">{t('bind.tokenJustOnce')}</p>
         </div>
 
-        <div className="mt-4 break-all rounded-xl border border-prism-600/40 bg-prism-600/10 p-4 text-center font-mono text-base font-semibold text-prism-200">
+        <div className="mt-4 break-all rounded-panel border border-prism-600/40 bg-prism-600/10 p-4 text-center font-mono text-base font-semibold text-prism-200 select-all">
           {token}
         </div>
 
         <div className="mt-4 flex gap-3">
           <button onClick={copy} className="btn-primary flex-1 py-2.5 text-sm">
-            {copied ? t('common.copied') : t('common.copy')}
+            {copyState === 'ok' ? t('common.copied') : copyState === 'err' ? t('bind.tokenCopyFailed') : t('common.copy')}
           </button>
         </div>
+        <span className="sr-only" role="status">{copyState === 'err' ? t('bind.tokenCopyFailed') : ''}</span>
         <button onClick={onClose} className="btn-ghost mt-3 w-full py-2 text-sm">
           {t('bind.tokenSavedClose')}
         </button>

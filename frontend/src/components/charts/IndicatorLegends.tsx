@@ -4,17 +4,23 @@
 // Indicator legends: one line for every enabled main-pane overlay plus one per
 // sub-pane, positioned at each pane's top (offsets from applyPaneHeights). Driven
 // by the catalog's series specs: abbreviation + line label + value, in line color.
+import { memo } from 'react'
 import type { IndicatorSettings } from './indicatorSettings'
 import { INDICATOR_META, MAIN_IDS, SUB_IDS, legendDigits, seriesSpecs, type IndicatorId } from './indicatorCatalog'
-import { fmtLegendNum, type IndicatorFlags, type LegendValues } from './chartConfig'
+import { fmtLegendNum, type IndicatorFlags } from './chartConfig'
+import { useLegend, type LegendStore } from './legendStore'
 
-export default function IndicatorLegends({ indicators, indicatorSettings, legend, paneOffsets, decimals }: {
+function IndicatorLegends({ indicators, indicatorSettings, legendStore, paneOffsets, decimals }: {
   indicators: IndicatorFlags
   indicatorSettings: IndicatorSettings
-  legend: LegendValues
+  legendStore: LegendStore
   paneOffsets: Partial<Record<IndicatorId, number>>
   decimals: number
 }) {
+  // 图例数值自己订阅（见 legendStore.ts）：十字线拖动只重渲染这里，不牵动图表页。
+  // Subscribes to the legend values itself (see legendStore.ts): crosshair drags
+  // re-render only this component, not the charts page.
+  const legend = useLegend(legendStore)
   const items = (id: IndicatorId) => {
     const digits = legendDigits(id, decimals)
     const row = legend[id] ?? {}
@@ -56,3 +62,7 @@ export default function IndicatorLegends({ indicators, indicatorSettings, legend
     </>
   )
 }
+
+// memo：父级（ChartsPage）因别的原因重渲染时，指标开关 / 设置 / pane 偏移都没变就不重画。
+// memo: when ChartsPage re-renders for other reasons, unchanged flags / settings / offsets skip this.
+export default memo(IndicatorLegends)

@@ -9,7 +9,7 @@ export default function FlagKinds({ kinds }: { kinds: string[] }) {
   return (
     <span className="inline-flex flex-wrap gap-1">
       {kinds.map((k) => (
-        <span key={k} className="tag bg-amber-400/15 text-xs text-amber-300">
+        <span key={k} className="tag bg-warn/15 text-xs text-warn">
           {t(`admin.competitionPromo.flagKind.${k}`, { defaultValue: k })}
         </span>
       ))}

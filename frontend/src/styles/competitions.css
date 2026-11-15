@@ -20,17 +20,17 @@
 .cmp-list { display: flex; flex-direction: column; gap: 36px; }
 .cmp-kicker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 0; font-size: 12px; color: #a1a1aa; }
 .cmp-kicker > span + span { margin-left: 14px; padding-left: 14px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
-.cmp-status-tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+.cmp-status-tag { display: inline-flex; align-items: center; padding: 3px 10px; border-radius: var(--r-md); font-size: 12px; font-weight: 500; }
 .cmp-live-dot {
   display: inline-block; width: 5px; height: 5px; margin-right: 6px; border-radius: 999px;
   background: currentColor; vertical-align: middle; animation: cmp-breathe 2s ease-in-out infinite;
 }
-.cmp-you { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: 10px; background: rgba(110, 66, 255, 0.25); color: #b9a6ff; font-size: 12px; font-weight: 600; vertical-align: middle; }
+.cmp-you { display: inline-block; margin-left: 8px; padding: 2px 7px; border-radius: var(--r-md); background: rgb(var(--purple-vivid-rgb) / 0.25); color: var(--purple-pale); font-size: 12px; font-weight: 500; vertical-align: middle; }
 
 /* 头版 / front page */
 .cmp-hero {
   position: relative; isolation: isolate; display: block; width: 100%; padding: 8px 0 0; text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08); overflow: hidden;
+  border-bottom: 1px solid var(--line); overflow: hidden;
 }
 .cmp-ghost {
   position: absolute; z-index: -1; right: -8px; top: -18px; pointer-events: none; user-select: none;
@@ -39,118 +39,159 @@
 }
 .cmp-bug {
   position: absolute; right: 0; top: 10px; display: flex; align-items: center; gap: 14px;
-  padding: 8px 8px 8px 16px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 10px;
+  padding: 8px 8px 8px 16px; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: var(--r-md);
   background: rgba(8, 8, 11, 0.7); font-size: 12px; color: #a1a1aa;
 }
-.cmp-bug b { padding: 6px 12px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); font-size: 15px; font-weight: 600; letter-spacing: 0.04em; color: #f4f4f5; }
+.cmp-bug b { padding: 6px 12px; border-radius: var(--r-md); background: rgba(255, 255, 255, 0.06); font-size: 15px; font-weight: 500; letter-spacing: 0.04em; color: var(--text-strong); }
 .cmp-hero-name {
   margin: 14px 0 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif;
-  font-size: 76px; font-weight: 500; line-height: 0.95; letter-spacing: -0.045em; color: #f4f4f5; text-wrap: balance;
+  font-size: 76px; font-weight: 500; line-height: 0.95; letter-spacing: -0.045em; color: var(--text-strong); text-wrap: balance;
 }
 .cmp-hero-name.is-detail { font-size: 46px; letter-spacing: -0.035em; line-height: 1; }
+/* 赛事名可能是中文且会折行：中文界面字距归零、行高放到 1.15，否则两行汉字上下贴住。
+   Competition names may be CJK and wrap: zero tracking and 1.15 leading so lines don't touch. */
+:lang(zh) .cmp-hero-name, :lang(ja) .cmp-hero-name, :lang(th) .cmp-hero-name { letter-spacing: 0; line-height: 1.15; }
+:lang(zh) .cmp-hero-name.is-detail, :lang(ja) .cmp-hero-name.is-detail, :lang(th) .cmp-hero-name.is-detail { letter-spacing: 0; line-height: 1.15; }
 .cmp-hero-sub { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px 40px; margin-top: 18px; }
 .cmp-hero-prize { font-size: 13px; color: #f0e2c0; max-width: 52ch; }
 .cmp-hero-prize small { display: block; margin-bottom: 4px; font-size: 12px; color: #c9a24a; }
-.cmp-hero-when { font-size: 12px; color: #71717a; }
+.cmp-hero-when { font-size: 12px; color: var(--text-3); }
 .cmp-hero-cta {
-  margin-left: auto; padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d;
+  margin-left: auto; padding: 12px 20px; border-radius: var(--r-md); background: #f4f4f5; color: #0a0a0d;
   font-size: 13px; font-weight: 500; transition: transform var(--dur-base) var(--ease-out);
 }
-.cmp-hero:hover .cmp-hero-cta { transform: translateY(-1px); }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-hero:hover .cmp-hero-cta { transform: translateY(-1px); }
+}
 .cmp-hero:active .cmp-hero-cta { transform: translateY(0) scale(0.98); }
+/* 比赛页头版标题里的真按钮（CompetitionsPage 的 LiveHero）：外观完全继承标题；::after 铺满整张
+   .cmp-hero（它本身 position: relative + isolation: isolate），点卡片任何位置都落在这个按钮上，
+   :hover / :active 照旧作用在 .cmp-hero 上（按钮是它的后代）。跑马灯那层抬到 ::after 之上并
+   pointer-events: none，只有里面的选手名链接接收点击（ProfileLink 自己 stopPropagation），
+   空白处仍点穿到按钮。抬的是 .cmp-ticker 本身而不是里面的 div：.cmp-ticker 有 mask-image，
+   自成层叠上下文、按 z-index 0 排在 ::after 下面，只抬里面的 div 出不了这一层，选手名会被
+   ::after 盖住点不到。只挂在 .cmp-hero-card 上：落地页的 .cmp-hero 仍是 <button>，不受影响。
+   The real button inside the competitions-page hero title: it inherits the heading's look; its
+   ::after covers the whole .cmp-hero (position: relative + isolation: isolate already), so a
+   click anywhere lands on it, and :hover / :active on .cmp-hero still apply (the button is a
+   descendant). The ticker layer is lifted above ::after with pointer-events: none so only the
+   player-name links take clicks (ProfileLink stops propagation) and the gaps fall through to the
+   button. .cmp-ticker itself is lifted, not its inner div: its mask-image makes it a stacking
+   context painted at z-index 0 under ::after, so a z-index on the inner div never escapes it and
+   the player names would sit under ::after. Scoped to .cmp-hero-card: the landing page's
+   .cmp-hero is still a <button>. */
+.cmp-hero-link {
+  padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit;
+  text-align: inherit; cursor: pointer;
+}
+.cmp-hero-link::after { content: ''; position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 1; }
+.cmp-hero-card .cmp-ticker { position: relative; z-index: 2; pointer-events: none; }
+.cmp-hero-card .cmp-ticker a { pointer-events: auto; }
 .cmp-ticker {
   display: flex; align-items: center; height: 38px; margin-top: 22px; overflow: hidden; white-space: nowrap;
-  border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; color: #a1a1aa;
+  border-top: 1px solid var(--line); font-size: 12px; color: #a1a1aa;
   mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent);
 }
 .cmp-ticker > div { display: flex; gap: 40px; padding-right: 40px; animation: cmp-tick 28s linear infinite; }
-.cmp-ticker b { color: #f4f4f5; font-weight: 600; }
+.cmp-ticker b { color: var(--text-strong); font-weight: 500; }
 .cmp-ticker .num { font-size: 12px; font-weight: 600; }
 
 /* 栏目 + 行 / column + rows */
 .cmp-sec { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 36px; }
-.cmp-sec h4 { margin: 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 20px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
-.cmp-sec h4 small { display: block; margin-top: 8px; font-family: var(--font-body, inherit); font-size: 12px; font-weight: 400; line-height: 1.5; color: #71717a; }
+.cmp-sec h4 { margin: 0; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 20px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; color: var(--text-strong); }
+.cmp-sec h4 small { display: block; margin-top: 8px; font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1.5; color: var(--text-3); }
 .cmp-row {
   display: grid; grid-template-columns: minmax(0, 1fr) 200px 160px; align-items: center; gap: 24px;
-  width: 100%; padding: 18px 8px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  width: 100%; padding: 18px 8px; text-align: left; border-bottom: 1px solid var(--line);
   transition: background-color var(--dur-base) var(--ease-out);
 }
-.cmp-sec > div > .cmp-row:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
-@media (hover: hover) { .cmp-row:hover { background: rgba(255, 255, 255, 0.025); } }
-.cmp-row-name { display: block; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 22px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; color: #f4f4f5; }
-.cmp-row-meta { margin-top: 4px; font-size: 12px; color: #71717a; }
+.cmp-sec > div > .cmp-row:first-child { border-top: 1px solid var(--line); }
+@media (hover: hover) and (pointer: fine) { .cmp-row:hover { background: rgba(255, 255, 255, 0.025); } }
+.cmp-row-name { display: block; font-family: var(--font-display, 'Archivo'), 'Noto Sans SC', sans-serif; font-size: 20px; font-weight: 500; line-height: 1.1; letter-spacing: -0.02em; color: var(--text-strong); }
+.cmp-row-meta { margin-top: 4px; font-size: 12px; color: var(--text-3); }
 .cmp-row-cd { text-align: right; }
-.cmp-row-cd small { display: block; font-size: 12px; color: #71717a; }
-.cmp-row-cd b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; color: #f4f4f5; }
-.cmp-row-score { font-size: 22px !important; }
+.cmp-row-cd small { display: block; font-size: 12px; color: var(--text-3); }
+.cmp-row-cd b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 500; letter-spacing: -0.02em; color: var(--text-strong); }
+.cmp-row-score { font-size: 20px !important; }
 .cmp-champ { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.cmp-champ b { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; color: #f4f4f5; }
-.cmp-champ small { display: block; margin-top: 1px; font-size: 12px; color: #71717a; }
+.cmp-champ b { display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 500; color: var(--text-strong); }
+.cmp-champ small { display: block; margin-top: 1px; font-size: 12px; color: var(--text-3); }
 .cmp-champ-none { font-size: 13px; color: #a1a1aa; }
 
 /* 详情 / detail */
 .cmp-detail { display: flex; flex-direction: column; gap: 26px; }
-.cmp-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 12px; color: #71717a; transition: color var(--dur-base) var(--ease-out); }
-.cmp-back:hover { color: #e4e4e7; }
+.cmp-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; font-size: 12px; color: var(--text-3); transition: color var(--dur-base) var(--ease-out); }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-back:hover { color: #e4e4e7; }
+}
 .cmp-split { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 48px; align-items: start; }
-.cmp-side { padding-right: 40px; border-right: 1px solid rgba(255, 255, 255, 0.08); }
+.cmp-side { padding-right: 40px; border-right: 1px solid var(--line); }
 /* 保留后台填写时的换行和空行 */
 .cmp-desc { margin: 14px 0 0; font-size: 13px; line-height: 1.7; color: #a1a1aa; white-space: pre-line; overflow-wrap: anywhere; }
 .cmp-desc.is-clamped { max-height: 15em; overflow: hidden; }
 .cmp-desc.is-overflowing { -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent); }
-.cmp-desc-more { margin-top: 6px; font-size: 12px; font-weight: 600; color: #a78bfa; transition: color var(--dur-base) var(--ease-out); }
-.cmp-desc-more:hover { color: #c4b5fd; }
+.cmp-desc-more { margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--purple-hi); transition: color var(--dur-base) var(--ease-out); }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-desc-more:hover { color: var(--purple-pale); }
+}
 .cmp-clock { display: flex; gap: 14px; margin-top: 26px; }
-.cmp-clock > div { flex: 1; padding: 14px 0 12px; border-top: 2px solid #f4f4f5; }
+.cmp-clock > div { flex: 1; padding: 14px 0 12px; border-top: 1px solid var(--line-hi); }
 .cmp-clock > div.is-wide { flex: none; width: 100%; }
-.cmp-clock b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 44px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
-.cmp-clock b.is-text { font-size: 22px; letter-spacing: -0.02em; }
-.cmp-clock span { font-size: 12px; color: #71717a; }
-.cmp-mine { margin-top: 28px; padding: 16px 18px; border: 1px solid rgba(110, 66, 255, 0.35); border-radius: 12px; background: rgba(110, 66, 255, 0.12); }
-.cmp-mine > small { font-size: 12px; letter-spacing: 0.1em; color: #b9a6ff; }
+.cmp-clock b { display: block; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 44px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; color: var(--text-strong); }
+.cmp-clock b.is-text { font-size: 20px; letter-spacing: -0.02em; }
+.cmp-clock span { font-size: 12px; color: var(--text-3); }
+.cmp-mine { margin-top: 28px; padding: 16px 18px; border: 1px solid rgb(var(--purple-vivid-rgb) / 0.35); border-radius: var(--r-md); background: rgb(var(--purple-vivid-rgb) / 0.12); }
+.cmp-mine > small { font-size: 12px; letter-spacing: 0.1em; color: var(--purple-pale); }
 .cmp-mine-row { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
-.cmp-mine-row + .cmp-mine-row { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.cmp-mine-row + .cmp-mine-row { padding-top: 10px; border-top: 1px solid var(--line); }
 .cmp-mine-row.is-dq { opacity: 0.6; }
-.cmp-mine-row > b { flex: none; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; color: #f4f4f5; }
+.cmp-mine-row > b { flex: none; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 40px; font-weight: 500; line-height: 1; letter-spacing: -0.04em; color: var(--text-strong); }
 .cmp-mine-row > span { min-width: 0; }
 .cmp-mine-row > span > span { display: block; font-size: 13px; color: #e4e4e7; }
 .cmp-mine-row > span > small { display: block; font-size: 12px; color: #a1a1aa; }
 .cmp-mine-row.is-dq small { color: var(--down); }
 .cmp-mine-score { margin-left: auto; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 20px; font-weight: 500; }
-.cmp-facts { display: grid; gap: 8px; margin: 26px 0 0; font-size: 12.5px; }
+.cmp-facts { display: grid; gap: 8px; margin: 26px 0 0; font-size: 13px; }
 .cmp-facts > div { display: flex; gap: 14px; }
-.cmp-facts dt { flex: none; width: 64px; color: #71717a; }
+.cmp-facts dt { flex: none; width: 64px; color: var(--text-3); }
 .cmp-facts dd { margin: 0; color: #d4d4d8; }
-.cmp-facts dd.is-prize { color: #f0e2c0; font-weight: 600; }
+.cmp-facts dd.is-prize { color: #f0e2c0; font-weight: 500; }
 .cmp-enroll { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin-top: 22px; font-size: 13px; color: #a1a1aa; }
 .cmp-enroll p { margin: 0; }
-.cmp-btn { padding: 12px 20px; border-radius: 10px; background: #f4f4f5; color: #0a0a0d; font-size: 13px; font-weight: 500; transition: transform var(--dur-base) var(--ease-out); }
-.cmp-btn:hover { transform: translateY(-1px); } .cmp-btn:active { transform: scale(0.98); }
-.cmp-btn-ghost { padding: 11px 18px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 10px; color: #e4e4e7; font-size: 13px; font-weight: 600; }
-.cmp-btn-ghost:hover { border-color: rgba(255, 255, 255, 0.3); }
+.cmp-btn { padding: 12px 20px; border-radius: var(--r-md); background: #f4f4f5; color: #0a0a0d; font-size: 13px; font-weight: 500; transition: transform var(--dur-base) var(--ease-out); }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-btn:hover { transform: translateY(-1px); }
+}
+.cmp-btn:active { transform: scale(0.96); }
+@media (prefers-reduced-motion: reduce) {
+  .cmp-btn:active { transform: none; }
+}
+.cmp-btn-ghost { padding: 11px 18px; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: var(--r-md); color: #e4e4e7; font-size: 13px; font-weight: 500; }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-btn-ghost:hover { border-color: rgba(255, 255, 255, 0.3); }
+}
 .cmp-ladder-h { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; }
-.cmp-ladder-h h3 { margin: 0; font-size: 13px; font-weight: 500; color: #f4f4f5; }
+.cmp-ladder-h h3 { margin: 0; font-size: 13px; font-weight: 500; color: var(--text-strong); }
 .cmp-ladder-h > span:last-child { margin-left: auto; font-size: 12px; color: #52525b; }
 .cmp-ladder { margin: 0; padding: 0; list-style: none; }
 .cmp-ladder li {
   position: relative; display: grid; grid-template-columns: 110px minmax(0, 1fr) 120px 150px; align-items: center; gap: 18px;
-  padding: 16px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 16px 0; border-bottom: 1px solid var(--line);
 }
-.cmp-ladder li:first-child { border-top: 1px solid rgba(255, 255, 255, 0.08); }
-.cmp-ladder li.is-self { margin: 0 -14px; padding-left: 14px; padding-right: 14px; background: linear-gradient(90deg, rgba(110, 66, 255, 0.14), transparent 60%); }
+.cmp-ladder li:first-child { border-top: 1px solid var(--line); }
+.cmp-ladder li.is-self { margin: 0 -14px; padding-left: 14px; padding-right: 14px; background: linear-gradient(90deg, rgb(var(--purple-vivid-rgb) / 0.14), transparent 60%); }
 .cmp-ladder-rank {
   font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 54px; font-weight: 500; line-height: 1; letter-spacing: -0.05em;
   color: transparent; -webkit-text-stroke: 1px rgba(255, 255, 255, 0.28);
 }
 .cmp-ladder li:first-child .cmp-ladder-rank { color: #c9a24a; -webkit-text-stroke: 0; }
 .cmp-ladder-who { min-width: 0; }
-.cmp-ladder-who b { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 500; color: #f4f4f5; }
-.cmp-ladder-who > span { display: block; margin-top: 2px; font-size: 12px; color: #71717a; }
+.cmp-ladder-who b { display: flex; align-items: center; gap: 6px; font-size: 16px; font-weight: 500; color: var(--text-strong); }
+.cmp-ladder-who > span { display: block; margin-top: 2px; font-size: 12px; color: var(--text-3); }
 .cmp-ladder-bar { display: block; height: 2px; border-radius: 2px; background: linear-gradient(90deg, var(--up), rgb(var(--up-rgb) / 0.15)); }
 .cmp-ladder-bar.is-neg { background: linear-gradient(90deg, var(--down), rgba(240, 78, 90, 0.15)); }
-.cmp-ladder-score { text-align: right; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
-.cmp-empty { display: grid; place-items: center; padding: 44px 20px; border: 1px dashed rgba(255, 255, 255, 0.10); border-radius: 16px; }
+.cmp-ladder-score { text-align: right; font-family: var(--font-display, 'Archivo'), sans-serif; font-size: 26px; font-weight: 500; letter-spacing: -0.02em; }
+.cmp-empty { display: grid; place-items: center; padding: 44px 20px; border: 1px dashed rgba(255, 255, 255, 0.10); border-radius: var(--r-panel); }
 .cmp-empty p { margin: 0; font-size: 13px; color: #a1a1aa; }
 .cmp-rules { margin: 22px 0 0; padding: 0 0 0 16px; list-style: disc; }
 .cmp-rules li { font-size: 12px; line-height: 1.8; color: #52525b; }
@@ -171,12 +212,12 @@
   .cmp-row > .cmp-status-tag { grid-column: 2; grid-row: 1; justify-self: end; }
   .cmp-row-cd { grid-column: 1 / -1; text-align: left; }
   .cmp-row-cd small { display: inline; margin-right: 8px; }
-  .cmp-row-cd b { display: inline; font-size: 18px; }
-  .cmp-row-name { font-size: 19px; }
+  .cmp-row-cd b { display: inline; font-size: 17px; }
+  .cmp-row-name { font-size: 20px; }
   .cmp-champ { grid-column: 1 / -1; }
   .cmp-row-honor .cmp-row-cd { grid-column: 2; grid-row: 1; text-align: right; }
   .cmp-split { grid-template-columns: 1fr; gap: 28px; }
-  .cmp-side { padding-right: 0; padding-bottom: 24px; border-right: 0; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .cmp-side { padding-right: 0; padding-bottom: 24px; border-right: 0; border-bottom: 1px solid var(--line); }
   .cmp-clock b { font-size: 38px; }
   .cmp-ladder li { grid-template-columns: 64px minmax(0, 1fr) auto; gap: 12px; padding: 14px 0; }
   .cmp-ladder li.is-self { margin: 0 -8px; padding-left: 8px; padding-right: 8px; }
@@ -197,7 +238,7 @@
   max-width: 100%;
   background: var(--nest);
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -214,7 +255,8 @@
   height: 32px;
   padding: 0 16px;
   border: 0;
-  border-radius: 10px;
+  /* 同心：轨道 10 − 边框 1 − 内边距 3 = 6。/ Concentric: 10 − 1 − 3 = 6. */
+  border-radius: var(--r-thumb);
   background: transparent;
   color: var(--text-3);
   font: inherit;
@@ -225,13 +267,20 @@
   cursor: pointer;
   transition: background-color var(--dur-fast) var(--ease-out),
               color var(--dur-fast) var(--ease-out),
-              transform 0.09s var(--ease-out);
+              transform var(--dur-fast) var(--ease-out);
 }
-.seg-tabs button:hover { color: var(--text-2); }
+@media (hover: hover) and (pointer: fine) {
+  .seg-tabs button:hover { color: var(--text-2); }
+}
 .seg-tabs button.on {
   background: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
 }
+/* 轨道 overflow-x: auto、内边距只有 3px，右缘还有渐隐遮罩，向外 2px 的焦点环会被裁掉或淡掉，
+   改成往里收。单独一条，不和别的选择器写进同一个列表（旧内核不认 :focus-visible 会丢整条）。
+   The track scrolls with only 3px padding and a fade mask on the right, which clips or fades
+   an outer ring, so draw it inside. Its own rule, so old engines drop only this one. */
+.seg-tabs button:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: -2px; }
 .seg-tabs button:active { transform: scale(0.96); }
 @media (prefers-reduced-motion: reduce) {
   .seg-tabs button:active { transform: none; }
@@ -258,7 +307,7 @@
   gap: 2px;
   padding: 3px 13px 4px;
   border: 1px solid rgb(var(--nl-edge) / 0.35);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background:
     radial-gradient(120% 90% at 50% 0%, rgb(var(--nl-glow) / 0.35), transparent 70%),
     rgba(255, 255, 255, 0.02);
@@ -272,22 +321,37 @@
   --nl-ramp: linear-gradient(180deg, #fffaf0 0%, #ffe7b0 36%, #f2c063 62%, #b97a1e 100%);
   --nl-accent: #f5c66b;
 }
-.cmp-navlive:hover {
-  border-color: rgb(var(--nl-edge) / 0.7);
-  box-shadow: 0 0 18px rgb(var(--nl-glow) / 0.45);
-  transform: translateY(-1px);
+@media (hover: hover) and (pointer: fine) {
+  .cmp-navlive:hover {
+    border-color: rgb(var(--nl-edge) / 0.7);
+    box-shadow: 0 0 18px rgb(var(--nl-glow) / 0.45);
+    transform: translateY(-1px);
+  }
 }
 .cmp-navlive:focus-visible { outline: 2px solid rgb(var(--nl-edge)); outline-offset: 2px; }
 .cmp-navlive-top { display: inline-flex; align-items: center; gap: 6px; }
 .cmp-navlive-top b {
   font-family: var(--font-display, 'Archivo'), sans-serif;
   font-size: 20px;
-  font-weight: 900;
+  /* Archivo 可变字体只到 800（fonts.css 的 font-weight: 400 800），写 900 实际渲染的就是 800。
+     LIVE / JOIN 是只有拉丁字母的金属字，算装饰图形，不受全站 500 的约束。
+     Archivo is variable up to 800 (font-weight: 400 800 in fonts.css), so 900 already
+     rendered as 800. LIVE / JOIN is a Latin-only metal word, decoration rather than
+     text hierarchy, so the site-wide 500 does not apply. */
+  font-weight: 800;
   font-style: italic;
   font-variation-settings: 'wdth' 118;
   letter-spacing: -0.01em;
-  /* 金属感：竖向明暗渐变，叠一条斜向高光做扫光。
-     Metallic: a vertical light-to-dark ramp under a diagonal highlight that sweeps. */
+  /* 金属感：竖向明暗渐变，叠一条斜向高光做扫光。扫光只播 3 次（约 11 秒）就停：
+     background-position 动画不走合成器，叠着 drop-shadow 每帧都要重绘 + 重算滤镜，
+     而徽标挂在顶栏、整个会话都不卸载，无限循环等于一直在烧电。起止两处的高光都在
+     文字框外，停下那一刻没有跳变；停下后 drop-shadow 是静态的，只算一次。
+     Metallic: a vertical light-to-dark ramp under a diagonal highlight that sweeps.
+     The sweep plays 3 times (about 11 s) and stops: background-position isn't
+     composited, so with the drop-shadow every frame was a repaint plus a filter pass,
+     and the badge lives in the header for the whole session. Both ends of the sweep
+     sit outside the text box, so stopping never jumps; once still, the drop-shadow is
+     static and computed once. */
   background:
     linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.95) 50%, transparent 65%) -150% 0 / 200% 100% no-repeat,
     var(--nl-ramp);
@@ -296,7 +360,7 @@
   color: transparent;
   filter: drop-shadow(0 0 6px rgb(var(--nl-glow) / 0.55));
   padding-right: 2px; /* 斜体最后一个字母右侧被裁 / italic tail would clip */
-  animation: cmp-navlive-shine 3.6s var(--ease-out, ease-out) infinite;
+  animation: cmp-navlive-shine 3.6s var(--ease-out, ease-out) 3;
 }
 .cmp-navlive-dot {
   position: relative;
@@ -309,16 +373,23 @@
 .cmp-navlive-dot::after {
   content: "";
   position: absolute;
-  inset: -4px;
+  top: -4px;
+  right: -4px;
+  bottom: -4px;
+  left: -4px;
   border-radius: inherit;
   border: 1px solid var(--nl-accent);
   opacity: 0;
   animation: cmp-navlive-ping 2.4s var(--ease-out, ease-out) infinite;
 }
+/* 下行是本地化短语（比赛进行中 / On now），不是大写眉题：12px、500、不加字距。
+   原来 10.5px、700、0.08em，雅黑下是全粗，笔画挤成一团，字距只是把汉字拆散。
+   The lower line is a localized phrase, not an all-caps eyebrow: 12px, 500, no
+   tracking. At 10.5px / 700 / 0.08em YaHei set it in full Bold with the strokes
+   running together, and the tracking only pulled the characters apart. */
 .cmp-navlive-sub {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--nl-accent);
 }
 @keyframes cmp-navlive-shine {
@@ -346,16 +417,27 @@
 .cmp-navlive.is-mini {
   gap: 1px;
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--r-tile);
 }
 .cmp-navlive.is-mini .cmp-navlive-top b {
   font-size: 12px;
   font-variation-settings: 'wdth' 100;
   padding-right: 1px;
 }
-.cmp-navlive.is-mini .cmp-navlive-sub {
-  font-size: 9px;
-  letter-spacing: 0.02em;
+/* 迷你版下行和电脑版一样是 12px（原来 9px，手机上认不出字）。12px 下中文、日文三个字
+   约 36px，放得进约 50px 的徽标；英文用户本来就读得懂上行的 LIVE / JOIN，不必再垫
+   一行；泰文、越南文的短词在 12px 下约 46–50px，加上内边距超出预算，会把左边字标挤到
+   换行，所以这三种语言的迷你版只留上行。完整说明仍在 aria-label 里。
+   The mini lower line is 12px like the desktop one (it was 9px, unreadable on a
+   phone). Three Chinese or Japanese characters come to about 36px and fit the ~50px
+   badge. English readers already read LIVE / JOIN, so they need no second line; the
+   Thai and Vietnamese words run about 46–50px at 12px, which with padding overflows
+   the budget and wraps the wordmark, so those three languages show the top line only.
+   The full wording stays in the aria-label. */
+:lang(en) .cmp-navlive.is-mini .cmp-navlive-sub,
+:lang(th) .cmp-navlive.is-mini .cmp-navlive-sub,
+:lang(vi) .cmp-navlive.is-mini .cmp-navlive-sub {
+  display: none;
 }
 .cmp-navlive.is-mini:hover { transform: none; }
 /* 极窄屏兜底：< 375px 时（典型是 360px 的安卓机）迷你徽标 + 信号 + 多账户「已连接 ×N」
@@ -375,33 +457,37 @@
    「模拟·虚拟资金」标与内置浏览器提示用琥珀色：它们是风险/限制说明，不是品牌强调。
    Reuses the in-app detail skeleton; adds only the public-only pieces. The demo badge and
    in-app-browser hint are amber: they are caveats, not brand emphasis. */
-.pcp-badge { display: inline-flex; margin-bottom: 12px; padding: 4px 10px; border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+.pcp-badge { display: inline-flex; margin-bottom: 12px; padding: 4px 10px; border: 1px solid rgb(var(--warn-rgb) / 0.35); border-radius: var(--r-md); background: rgb(var(--warn-rgb) / 0.08); color: var(--warn); font-size: 12px; font-weight: 500; letter-spacing: 0.04em; }
 .pcp-meta { margin-top: 14px; font-size: 13px; color: #a1a1aa; }
-.pcp-stale { margin-top: 12px; font-size: 12px; color: #fcd34d; }
-.pcp-snap { margin-top: 10px; font-size: 12px; color: #71717a; }
+.pcp-stale { margin-top: 12px; font-size: 12px; color: var(--warn); }
+.pcp-snap { margin-top: 10px; font-size: 12px; color: var(--text-3); }
 .pcp-rules { margin-top: 24px; }
-.pcp-rules h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: #f4f4f5; }
-.pcp-risk { margin-top: 18px; font-size: 12px; line-height: 1.6; color: #71717a; }
-.pcp-steps-h { font-weight: 500; color: #f4f4f5; }
+.pcp-rules h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--text-strong); }
+.pcp-risk { margin-top: 18px; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+.pcp-steps-h { font-weight: 500; color: var(--text-strong); }
 .pcp-steps { display: grid; gap: 4px; margin: 0; padding-left: 1.2em; list-style: decimal; color: #d4d4d8; }
 .pcp-cta-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 6px; }
-.pcp-hint { font-size: 12px; color: #71717a; }
-.pcp-link { font-size: 12px; color: #c4b5fd; }
-.pcp-link:hover { color: #ddd6fe; }
-.pcp-inapp { margin-bottom: 16px; padding: 10px 14px; border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 10px; background: rgba(251, 191, 36, 0.08); color: #fde68a; font-size: 12px; line-height: 1.6; }
+.pcp-hint { font-size: 12px; color: var(--text-3); }
+.pcp-link { font-size: 12px; color: var(--purple-pale); }
+@media (hover: hover) and (pointer: fine) {
+  .pcp-link:hover { color: var(--text-strong); }
+}
+.pcp-inapp { margin-bottom: 16px; padding: 10px 14px; border: 1px solid rgb(var(--warn-rgb) / 0.3); border-radius: var(--r-md); background: rgb(var(--warn-rgb) / 0.08); color: var(--warn); font-size: 12px; line-height: 1.6; }
 
 /* ── 站内：参赛准备清单 / 报名后引导 / 公开昵称开关 ──
    In-app: entry checklist, post-entry guidance, public-name toggle. */
 .cmp-prep { width: 100%; margin-top: 4px; }
-.cmp-prep h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.1em; color: #b9a6ff; }
+.cmp-prep h4 { margin: 0 0 10px; font-size: 12px; letter-spacing: 0.1em; color: var(--purple-pale); }
 .cmp-prep ol { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
 .cmp-prep li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; align-items: start; }
 .cmp-prep-mark { display: grid; place-items: center; width: 20px; height: 20px; border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 999px; font-size: 12px; color: #a1a1aa; }
-.cmp-prep li.is-done .cmp-prep-mark { border-color: transparent; background: rgba(110, 66, 255, 0.35); color: #ede9fe; }
+.cmp-prep li.is-done .cmp-prep-mark { border-color: transparent; background: rgb(var(--purple-vivid-rgb) / 0.35); color: #ede9fe; }
 .cmp-prep-label { display: block; color: #e4e4e7; }
-.cmp-prep li.is-done .cmp-prep-label { color: #71717a; }
+.cmp-prep li.is-done .cmp-prep-label { color: var(--text-3); }
 .cmp-prep-sub { display: block; margin-top: 3px; font-size: 12px; line-height: 1.5; color: #a1a1aa; }
-.cmp-prep-act { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 600; color: #c4b5fd; }
-.cmp-prep-act:hover { color: #ddd6fe; }
+.cmp-prep-act { display: inline-block; margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--purple-pale); }
+@media (hover: hover) and (pointer: fine) {
+  .cmp-prep-act:hover { color: var(--text-strong); }
+}
 .cmp-next { display: grid; gap: 6px; margin-top: 14px; font-size: 12px; color: #a1a1aa; }
 .cmp-pubname { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #d4d4d8; }

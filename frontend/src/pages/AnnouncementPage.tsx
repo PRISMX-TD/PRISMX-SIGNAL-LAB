@@ -27,9 +27,11 @@ import { announcementApi } from '../api/client'
 import { fmtStamp as fmtSiteStamp, localizeApiError, parseTime } from '../api/utils'
 import { safeHttpUrl } from '../utils/safeUrl'
 import { useDocumentTitle } from '../utils/useDocumentTitle'
+import { appTitle } from '../utils/routeTitle'
 import RichText from '../components/RichText'
 import { announcementRichBody, imageSizeProps } from '../utils/richText'
 import { SkeletonPage } from '../components/Skeleton'
+import { useDelayedFlag } from '../utils/useDelayedFlag'
 import type { Announcement } from '../api/types'
 
 function fmtStamp(iso: string | null): string {
@@ -69,12 +71,13 @@ export default function AnnouncementPage() {
   }, [id])
 
   const title = item ? pick(item.titleZh, item.titleEn) : ''
-  useDocumentTitle(title || t('announcements.title'))
+  useDocumentTitle(appTitle(title || t('announcements.title')))
+  const showSkel = useDelayedFlag(loading)
 
-  if (loading) {
+  if (loading || showSkel) {
     return (
       <div className="ann-detail">
-        <SkeletonPage cards={2} />
+        {showSkel && <SkeletonPage cards={2} />}
       </div>
     )
   }

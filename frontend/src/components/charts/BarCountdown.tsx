@@ -1,13 +1,20 @@
 // K 线收线倒计时：贴在价格轴最新价标签正下方的一小块（如 08:42），和 TradingView 一样。
 // 每 250ms 直接改 DOM（不走 React 状态）：既要跟秒走，又要跟着价格轴缩放、拖动时最新价
-// 标签的位置走，而这些都不会触发 React 渲染；一秒四次写两个样式值的代价可以忽略。
+// 标签的位置走，而这些都不会触发 React 渲染。每个值都先和上次写进去的比，变了才写：
+// 文字一秒才变一次，位置只在缩放 / 拖动 / 跳价时变，大多数 tick 一个值都不写。纵向
+// 位置用 transform: translateY 而不是 top：top 每写一次都要重排，transform 只需合成。
 // 时间用服务器校准过的时钟（utils/serverClock），手机时间不准也不会跳。
 // 数据延迟（休市 / 断流）时不显示——那时「还有几秒收线」是假的。
 // Bar-close countdown: a small tag right under the last-price label on the price
 // axis (e.g. 08:42), like TradingView. Updated every 250ms by writing to the DOM
 // directly: it must follow both the clock and the label's position as the price
-// scale zooms or pans, none of which re-render React. Uses the server-calibrated
-// clock (utils/serverClock). Hidden while the feed is stale (closed market / outage).
+// scale zooms or pans, none of which re-render React. Every value is compared with
+// the last one written and written only when it changed: the text changes once a
+// second and the position only on zoom / pan / a price move, so most ticks write
+// nothing. The vertical position is transform: translateY rather than top, because
+// top forces layout on every write while a transform only composites. Uses the
+// server-calibrated clock (utils/serverClock). Hidden while the feed is stale
+// (closed market / outage).
 import { useEffect, useRef } from 'react'
 import type { IChartApi, ISeriesApi } from 'lightweight-charts'
 import type { Candle } from '../../api/types'
@@ -35,7 +42,19 @@ export default function BarCountdown({ chart, series, interval, candlesRef, colo
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const hide = () => { el.style.display = 'none' }
+    // 上一次写进 DOM 的值，相同就跳过。effect 重跑（换周期 / 换配色 / 数据恢复）时清零，第一次一定写。
+    // Values last written to the DOM; equal writes are skipped. Reset whenever the effect
+    // re-runs (interval, colours, feed recovery), so the first tick always writes.
+    let lastText = ''
+    let lastTop = NaN
+    let lastWidth = NaN
+    let lastBg = ''
+    let shown = el.style.display !== 'none'
+    const hide = () => {
+      if (!shown) return
+      el.style.display = 'none'
+      shown = false
+    }
     if (stale) { hide(); return }
     const tick = () => {
       if (!isChartAlive(chart)) return hide()
@@ -47,11 +66,14 @@ export default function BarCountdown({ chart, series, interval, candlesRef, colo
       const paneH = chart.panes()[0]?.getHeight() ?? 0
       const scaleW = chart.priceScale('right').width()
       if (sec == null || y == null || scaleW <= 0 || y < 0 || y + LABEL_HALF_PX + 14 > paneH) return hide()
-      el.textContent = fmtCountdown(sec)
-      el.style.top = `${Math.round(y + LABEL_HALF_PX)}px`
-      el.style.width = `${scaleW}px`
-      el.style.background = last.c >= last.o ? colors.up : colors.down
-      el.style.display = 'block'
+      const text = fmtCountdown(sec)
+      if (text !== lastText) { el.textContent = text; lastText = text }
+      const top = Math.round(y + LABEL_HALF_PX)
+      if (top !== lastTop) { el.style.transform = `translateY(${top}px)`; lastTop = top }
+      if (scaleW !== lastWidth) { el.style.width = `${scaleW}px`; lastWidth = scaleW }
+      const bg = last.c >= last.o ? colors.up : colors.down
+      if (bg !== lastBg) { el.style.background = bg; lastBg = bg }
+      if (!shown) { el.style.display = 'block'; shown = true }
     }
     tick()
     const id = window.setInterval(tick, TICK_MS)

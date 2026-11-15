@@ -13,7 +13,7 @@ import { SkeletonLine } from '../../Skeleton'
 const REFRESH_MS = 30_000
 const SEG = [
   { k: 'good', cls: 'bg-up' },
-  { k: 'fair', cls: 'bg-amber-300' },
+  { k: 'fair', cls: 'bg-warn' },
   { k: 'poor', cls: 'bg-orange-400' },
   { k: 'unknown', cls: 'bg-neutral-600' },
 ] as const
@@ -43,7 +43,7 @@ export default function NetQualityCard() {
   const conn24 = hours.reduce((n, h) => n + h.connects, 0)
 
   const Stat = ({ label, value }: { label: string; value: string }) => (
-    <div className="rounded-inner border border-white/10 px-3 py-2">
+    <div className="rounded-lg border border-white/10 px-3 py-2">
       <div className="text-xs text-neutral-500">{label}</div>
       <div className="num mt-0.5 text-lg font-semibold text-white">{value}</div>
     </div>

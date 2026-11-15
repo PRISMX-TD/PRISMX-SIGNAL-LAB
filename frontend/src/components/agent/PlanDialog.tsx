@@ -11,12 +11,13 @@
 // caps a single change at 60 days — a text field would just earn a 422. A year
 // takes six clicks; the friction is the point. Never-expiring members are an
 // admin's manual grant and are refused (the row's button is disabled too).
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { agentApi } from '../../api/client'
 import { fmtDate, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
+import { useDialogA11y } from '../../utils/useDialogA11y'
 import ConfirmModal from '../ConfirmModal'
 import type { AgentLinkUser, AgentPlanChange } from '../../api/types'
 
@@ -58,6 +59,13 @@ export default function PlanDialog<U extends AgentLinkUser>({
   // entirely; every other full-screen dialog on the site wires up this hook (see
   // Layout.tsx's logout confirmation).
   useBackToClose(true, onClose)
+  // 键盘与读屏（utils/useDialogA11y）。初始焦点给容器：第一个按钮「延长 7 天」一按 Enter
+  // 就提交，不能让焦点一落下就停在它上面。提交中不许 Esc 关（同 ConfirmModal）。
+  // Keyboard/screen reader. Initial focus on the container: the first button ("extend
+  // 7 days") submits on Enter. Escape is ignored while busy (same as ConfirmModal).
+  const dlgRef = useRef<HTMLDivElement>(null)
+  const titleId = useId()
+  useDialogA11y(dlgRef, () => { if (!busy) onClose() }, { initialFocus: 'container' })
 
   const submit = async (body: AgentPlanChange) => {
     setBusy(true)
@@ -92,11 +100,11 @@ export default function PlanDialog<U extends AgentLinkUser>({
     // the whole PlanDialog with it.
     <>
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-overlay flex items-center justify-center scrim p-6"
       onClick={onClose}
     >
-      <div className="glass-card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <h3 className="font-display text-base text-neutral-100">{t('agent.plan.title')}</h3>
+      <div ref={dlgRef} className="glass-card w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
+        <h3 id={titleId} className="font-display text-base text-neutral-100">{t('agent.plan.title')}</h3>
         <p className="num mt-1 break-all text-xs text-neutral-400">{user.email}</p>
         {/* FREE 没有到期日可言，别把「不限期」那句套上去——那是给管理员手动开的
             不限期 PRO 用的，套在免费用户身上会读成"他是永久会员"。

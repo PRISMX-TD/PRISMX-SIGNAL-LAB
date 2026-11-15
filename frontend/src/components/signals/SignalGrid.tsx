@@ -1,6 +1,6 @@
 // 信号面板独立视图：看板页头 + 筛选器 + 信号牌面网格
 // Signal panel view: board head + filters + signal card grid
-import { type CSSProperties, type FC, memo, useState, useEffect, useMemo } from 'react'
+import { type CSSProperties, type FC, memo, useState, useEffect, useMemo, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../../store/prefs'
@@ -15,6 +15,8 @@ import { useClock, useNewSignalIds } from './hooks'
 import { symbolMeta } from '../../utils/symbolMeta'
 import FestivalEmpty from '../../festival/FestivalEmpty'
 import { FestivalBurst } from '../../festival/FestivalDecor'
+import { useFirstReveal } from '../../utils/useFirstReveal'
+import { EMPTY } from '../../utils/format'
 
 interface Props {
   signals: Signal[]
@@ -116,6 +118,20 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
   // entrance move, fading back after 6s — peripheral vision tells the reader
   // which card is new without comparing timestamps.
   const newIds = useNewSignalIds(signals)
+
+  // 进场动画只在两种情况下播：这次打开 App 后第一次看到网格（逐张错峰），以及网格挂上
+  // 之后才到的新信号（单张、不错峰）。挂载时就在的牌在之后的每次进页面、改筛选时直接
+  // 出现。「挂载后才到」用挂载那一刻的 id 集合判断，而不是 newIds：newIds 在 effect 里
+  // 算，晚一帧才有，牌会先出现再闪一下重播。
+  // Enter animations play in two cases only: the first time the grid shows in this app
+  // session (staggered), and signals that arrive after the grid mounted (one card, no
+  // stagger). Cards present at mount appear at once on later visits and filter changes.
+  // "Arrived after mount" is judged against the ids present at mount, not newIds: newIds
+  // is computed in an effect, a frame late, so the card would show and then re-animate.
+  const intro = useFirstReveal(true, 'signal-grid')
+  const mountIdsRef = useRef<Set<string> | null>(null)
+  if (mountIdsRef.current === null) mountIdsRef.current = new Set(signals.map((s) => s.id))
+  const mountIds = mountIdsRef.current
 
   // 这批信号里**实际出现过**的品种，而不是一份写死的清单：写死的话，某个品种
   // 停发信号之后它还挂在下拉里，选中只会得到一张空网格。
@@ -334,9 +350,9 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           <div className="fgroup">
             <span className="fk">{t('signals.sortBy')}</span>
             {/* 桌面：药丸；手机：点击循环 / desktop pills, mobile tap-to-cycle */}
-            <div className="seg-pill hidden sm:flex">
-              <button className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
-              <button className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
+            <div className="seg-pill hidden sm:flex" role="group" aria-label={t('signals.sortBy')}>
+              <button type="button" aria-pressed={sortF === 'latest'} className={sortF === 'latest' ? 'on' : ''} onClick={() => setSortF('latest')}>{t('signals.sort.latest')}</button>
+              <button type="button" aria-pressed={sortF === 'expiry'} className={sortF === 'expiry' ? 'on' : ''} onClick={() => setSortF('expiry')}>{t('signals.sort.expiry')}</button>
             </div>
             <button className="filter-cycle flex sm:hidden" onClick={cycleSort}>
               <span>{sortLabel}</span>
@@ -349,7 +365,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
 
       {/* FREE 用户提醒：升级看实时信号 / FREE tier notice: upgrade for live signals */}
       {isFree && (
-        <div className="mb-5 rounded-xl border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-neutral-300">
+        <div className="mb-5 rounded-panel border border-prism-400/30 bg-prism-500/10 px-4 py-3 text-sm text-neutral-300">
           {t('upgrade.freeBanner')}{" "}
           <Link to="/upgrade" className="font-semibold text-prism-400 underline hover:text-prism-300">
             {t('nav.upgrade')}
@@ -404,15 +420,16 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
           // 价格阶梯的分割点见 SignalView.riskFraction：止损永远在左、止盈在右。
           // The ladder split lives in SignalView.riskFraction: SL left, TP right.
           const riskFrac = oRr ? riskFraction(oRr.riskPrice, oRr.rewardPrice) : null
+          const atMount = mountIds.has(sig.id)
           const style = {
-            '--i': Math.min(idx, 8),
+            '--i': intro && atMount ? Math.min(idx, 5) : 0,
             ...(riskFrac != null ? { '--risk': `${(riskFrac * 100).toFixed(1)}%` } : {}),
           } as CSSProperties
 
           return (
             <article
               key={sig.id}
-              className={`card glass sig-card${newIds.has(sig.id) ? ' is-new' : ''}${isExpired ? ' is-expired' : ''}`}
+              className={`card glass sig-card${intro || !atMount ? ' is-in' : ''}${newIds.has(sig.id) ? ' is-new' : ''}${isExpired ? ' is-expired' : ''}`}
               style={style}
             >
               {/* 新信号进场：节日期间从右上角迸一小把节日碎片，牌面本身不动。
@@ -447,7 +464,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
                 </div>
                 <div className="sig-card-rr">
                   <b className={`num ${rrTone(oRr?.rr ?? null)}`}>
-                    {oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : '-'}
+                    {oRr?.rr != null ? `1:${oRr.rr.toFixed(2)}` : EMPTY}
                   </b>
                   <span>{t('signals.focus.rrLabel')}</span>
                 </div>

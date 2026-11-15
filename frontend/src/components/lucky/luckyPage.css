@@ -57,15 +57,17 @@
   height: 36px;
   padding: 0 14px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--surface);
   color: var(--text-2);
   font-size: 13px;
   transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
-.lk-round:hover:not(:disabled) {
-  background: var(--surface-2);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .lk-round:hover:not(:disabled) {
+    background: var(--surface-2);
+    color: var(--text);
+  }
 }
 .lk-round:disabled {
   opacity: 0.4;
@@ -73,7 +75,7 @@
 .lk-round.is-on {
   background: var(--purple);
   border-color: var(--purple);
-  color: #fff;
+  color: var(--text-strong);
 }
 .lk-round-name {
   max-width: 11rem;
@@ -89,10 +91,10 @@
   min-width: 20px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--lk-accent);
   color: var(--lk-accent-ink);
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 500;
   line-height: 20px;
@@ -157,6 +159,13 @@
   letter-spacing: -0.02em;
   color: var(--text);
   word-break: break-word;
+  text-wrap: balance;
+}
+/* 中文 / 日文 / 泰文标题不收字距。 / CJK / Thai titles keep zero tracking. */
+:lang(zh) .lk-title,
+:lang(ja) .lk-title,
+:lang(th) .lk-title {
+  letter-spacing: 0;
 }
 .lk-window {
   margin-top: 6px;
@@ -183,11 +192,11 @@
   flex-direction: column;
   align-items: center;
   padding: 6px 8px 5px;
-  border-radius: 8px;
+  border-radius: var(--r-tile);
   background: var(--nest);
 }
 .lk-cd-cell b {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 17px;
   font-weight: 500;
   line-height: 1.1;
@@ -418,7 +427,7 @@
 .lk-left b {
   display: inline-block;
   margin-left: 4px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 17px;
   font-weight: 500;
   color: var(--text);
@@ -437,9 +446,11 @@
 .lk-sound.is-on {
   color: var(--text-2);
 }
-.lk-sound:hover {
-  background: var(--nest);
-  color: var(--text);
+@media (hover: hover) and (pointer: fine) {
+  .lk-sound:hover {
+    background: var(--nest);
+    color: var(--text);
+  }
 }
 .lk-void {
   margin-top: 12px;
@@ -684,8 +695,8 @@
   margin: -2px 0;
   padding: 2px 0;
   font-family: Archivo, 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 19px;
   letter-spacing: 0.01em;
   color: var(--text);
@@ -769,7 +780,7 @@
   position: relative;
   z-index: 1;
   display: block;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 26px;
   font-weight: 500;
   line-height: 1;
@@ -813,7 +824,7 @@
   z-index: 1;
   top: 50%;
   right: 4px;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 8px;
   font-weight: 500;
   line-height: 10px;
@@ -856,7 +867,7 @@
   margin-top: 12px;
   padding: 0;
   border: 1px dashed rgba(146, 132, 255, 0.26);
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgba(146, 132, 255, 0.04);
   font-size: 12px;
   font-weight: 500;
@@ -867,10 +878,12 @@
 .lk-more svg {
   margin-left: 6px;
 }
-.lk-more:hover {
-  border-color: rgba(146, 132, 255, 0.45);
-  background: rgba(146, 132, 255, 0.08);
-  color: var(--purple-soft);
+@media (hover: hover) and (pointer: fine) {
+  .lk-more:hover {
+    border-color: rgba(146, 132, 255, 0.45);
+    background: rgba(146, 132, 255, 0.08);
+    color: var(--purple-soft);
+  }
 }
 
 /* 奖品 / prizes */
@@ -916,7 +929,7 @@
 .lk-tag {
   flex: none;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: var(--nest);
   color: var(--text-2);
   font-size: 12px;
@@ -935,7 +948,9 @@
   text-decoration: none;
   transition: background-color var(--dur-base) var(--ease-out);
 }
-.lk-entry:hover { background: var(--surface-2); }
+@media (hover: hover) and (pointer: fine) {
+  .lk-entry:hover { background: var(--surface-2); }
+}
 .lk-entry-main { flex: 1; min-width: 0; }
 .lk-entry-sub {
   margin-top: 4px;
@@ -946,12 +961,12 @@
   flex: none;
   margin-left: 12px;
   padding: 4px 10px;
-  border-radius: 10px;
+  border-radius: var(--r-md);
   background: rgb(var(--gold-rgb) / 0.16);
   box-shadow: inset 0 0 0 1px rgb(var(--gold-rgb) / 0.3);
   color: var(--gold);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 .lk-entry-chev {
@@ -960,7 +975,9 @@
   color: var(--text-3);
   transition: transform var(--dur-fast) var(--ease-out);
 }
-.lk-entry:hover .lk-entry-chev { transform: translateX(2px); color: var(--text-2); }
+@media (hover: hover) and (pointer: fine) {
+  .lk-entry:hover .lk-entry-chev { transform: translateX(2px); color: var(--text-2); }
+}
 
 /* 关闭 / 加载 / closed and loading */
 .lk-closed {
@@ -1013,7 +1030,7 @@
   align-items: center;
   justify-content: center;
   padding: 16px;
-  background: rgba(9, 9, 11, 0.74);
+  background: var(--scrim);
 }
 .lk-reveal {
   position: relative;
@@ -1023,7 +1040,7 @@
   max-height: 90vh;
   overflow-y: auto;
   padding: 32px 24px 24px;
-  border-radius: 24px;
+  border-radius: var(--r-lg);
   background: var(--surface);
   text-align: center;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), 0 30px 80px -20px rgba(0, 0, 0, 0.9);
@@ -1065,6 +1082,12 @@
   color: var(--text);
   word-break: break-word;
 }
+/* 中文 / 日文 / 泰文标题不收字距。 / CJK / Thai titles keep zero tracking. */
+:lang(zh) .lk-reveal-title,
+:lang(ja) .lk-reveal-title,
+:lang(th) .lk-reveal-title {
+  letter-spacing: 0;
+}
 .lk-reveal-sub {
   margin-top: 8px;
   font-size: 13px;
@@ -1081,7 +1104,7 @@
 .lk-reveal-claim {
   margin-top: 18px;
   padding: 14px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   background: var(--nest);
   text-align: left;
 }
@@ -1093,8 +1116,8 @@
 .lk-btn {
   width: 100%;
   height: 44px;
-  border-radius: 10px;
-  font-size: 14px;
+  border-radius: var(--r-md);
+  font-size: 15px;
   font-weight: 500;
 }
 
@@ -1289,7 +1312,7 @@
 @keyframes lk-bump {
   0% {
     transform: scale(1.32);
-    color: #ffffff;
+    color: var(--text-strong);
   }
   100% {
     transform: none;

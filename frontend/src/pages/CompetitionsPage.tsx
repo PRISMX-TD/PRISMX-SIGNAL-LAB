@@ -55,6 +55,7 @@ import type {
   LeaderboardPayload,
   MT5Account,
 } from '../api/types'
+import { EMPTY } from '../utils/format'
 
 const LIST_GROUPS: Array<keyof CompetitionListGrouped> = ['running', 'upcoming', 'finished']
 
@@ -93,8 +94,17 @@ function LiveHero({
       <span>{t('competition.ticker.live')}</span>
     </>
   )
+  // 整张头版可点，但标题必须是真标题：<button> 里的 <h3> 会丢掉标题语义（按钮的子元素是
+  // 展示性的），读屏把一整卡的文字当按钮名念，按标题跳转也跳不到这场比赛。现在外层是普通
+  // div，标题里放一个真按钮，按钮的 ::after 铺满整张卡（见 competitions.css 的
+  // .cmp-hero-link），点卡片任何位置仍然进入比赛，Tab 只停一次、念出赛名。
+  // The whole card stays clickable, but the title must be a real heading: an <h3> inside a
+  // <button> loses its heading role (button children are presentational), the whole card's text
+  // becomes the button name, and jumping by heading never lands here. The wrapper is now a plain
+  // div and the heading holds a real button whose ::after covers the card (.cmp-hero-link in
+  // competitions.css), so a click anywhere still opens the competition and Tab stops once.
   return (
-    <button type="button" onClick={onClick} className="cmp-hero">
+    <div className="cmp-hero cmp-hero-card">
       <span className="cmp-ghost" aria-hidden>LIVE</span>
       {clock && (
         <span className="cmp-bug">
@@ -103,7 +113,9 @@ function LiveHero({
         </span>
       )}
       <StatusLine c={c} tagKey={statusTagKey(c, nowMs)} t={t} />
-      <h3 className="cmp-hero-name">{c.name}</h3>
+      <h3 className="cmp-hero-name">
+        <button type="button" onClick={onClick} className="cmp-hero-link">{c.name}</button>
+      </h3>
       <div className="cmp-hero-sub">
         {c.prizeNote && (
           <span className="cmp-hero-prize">
@@ -117,7 +129,7 @@ function LiveHero({
       <div className="cmp-ticker" aria-hidden>
         <div>{ticker}{ticker}</div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -148,7 +160,7 @@ function UpcomingRow({
         {t(`competition.status.${tagKey}`)}
       </span>
       <div className="cmp-row-cd">
-        {cd ? (<><small>{cd.label}</small><b>{cd.value}</b></>) : <b className="num">{c.startsAt ? fmtDay(c.startsAt) : '—'}</b>}
+        {cd ? (<><small>{cd.label}</small><b className="num">{cd.value}</b></>) : <b className="num">{c.startsAt ? fmtDay(c.startsAt) : EMPTY}</b>}
       </div>
     </button>
   )
@@ -326,7 +338,7 @@ function AccountPickerModal({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-overlay flex items-center justify-center scrim p-6"
       onClick={onCancel}
     >
       <div
@@ -340,7 +352,7 @@ function AccountPickerModal({
       >
         <h3 id={titleId} className="text-lg font-bold text-white">{t('competition.pickAccount')}</h3>
         <p className="mt-2 text-xs text-neutral-500">{t(track === 'demo' ? 'competition.pickAccountHintDemo' : 'competition.pickAccountHint')}</p>
-        {publicNotice && <p className="mt-2 text-xs leading-relaxed text-amber-300">{t('competition.publicNotice')}</p>}
+        {publicNotice && <p className="mt-2 text-xs leading-relaxed text-warn">{t('competition.publicNotice')}</p>}
         <div className="mt-4 max-h-64 space-y-2 overflow-y-auto">
           {accounts.map((a) => (
             <button
@@ -659,7 +671,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
                 const rank = entry.finalRank ?? row?.rank ?? null
                 return (
                   <div key={entry.login} className={`cmp-mine-row ${entry.disqualified ? 'is-dq' : ''}`}>
-                    <b className="num">{rank != null ? `#${rank}` : '—'}</b>
+                    <b className="num">{rank != null ? `#${rank}` : EMPTY}</b>
                     <span>
                       <span className="num">{entry.login}</span>
                       <small>
@@ -682,7 +694,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
                           detail.name, entry.finalRank!, (entry.finalScore ?? row?.score ?? 0) * 100,
                           detail.participants ?? detail.board.rows.length,
                           detail.publicView ? compPublicLink(detail.id) : undefined) } }] })}
-                        className="ml-2 shrink-0 rounded-[10px] bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
+                        className="ml-2 shrink-0 rounded-control bg-prism-600/20 px-2.5 py-1 text-xs font-semibold text-prism-300 transition hover:bg-prism-600/30">
                         {t('share.button')}
                       </button>
                     )}
@@ -773,7 +785,7 @@ function DetailView({ id, onBack, t }: { id: string; onBack: () => void; t: TFun
         <main className="min-w-0">
           <div className="cmp-ladder-h">
             <h3>{boardHeading}</h3>
-            {detail.pendingSettle && <span className="text-amber-300">{t('competition.pendingSettle')}</span>}
+            {detail.pendingSettle && <span className="text-warn">{t('competition.pendingSettle')}</span>}
             <span className="num">{detail.board.rows.length}</span>
           </div>
           <Ladder rows={boardLadderRows(detail.board)} emptyText={t('leaderboard.empty')} youTag={t('leaderboard.youTag')} />

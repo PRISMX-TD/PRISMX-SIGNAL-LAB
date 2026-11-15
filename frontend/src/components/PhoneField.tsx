@@ -13,6 +13,7 @@
 // wrong, and because it mirrors the API shape: the frontend never assembles
 // E.164 itself, since stripping a national trunk zero requires knowing where the
 // dial code ends (see backend/app/services/phone.py).
+import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import Select from './Select'
 import { DIAL_CODES, flagOf } from '../data/dialCodes'
@@ -42,6 +43,9 @@ export default function PhoneField({
 }) {
   const { t, i18n } = useTranslation()
   const zh = i18n.language?.startsWith('zh')
+  // 注册页与补录页共用本组件，useId 保证 id 不撞。/ Shared component, so ids come from useId.
+  const inputId = useId()
+  const hintId = useId()
 
   const options = DIAL_CODES.map((d) => ({
     value: d.iso,
@@ -56,15 +60,17 @@ export default function PhoneField({
 
   return (
     <div>
-      <label className="label">{t('auth.phone')}</label>
+      <label className="label" htmlFor={inputId}>{t('auth.phone')}</label>
       <div className="flex gap-2">
         <Select
           className="phone-dial-select"
           value={value.iso}
           options={options}
           onChange={(iso) => onChange({ ...value, iso })}
+          ariaLabel={t('auth.dialCode')}
         />
         <input
+          id={inputId}
           type="tel"
           required={required}
           autoFocus={autoFocus}
@@ -78,9 +84,10 @@ export default function PhoneField({
           onChange={(e) => onChange({ ...value, national: e.target.value.replace(/[^\d\s\-()]/g, '') })}
           inputMode="numeric"
           autoComplete="tel-national"
+          aria-describedby={hintId}
         />
       </div>
-      <p className="mt-1.5 text-xs text-neutral-500">{t('auth.phoneHint')}</p>
+      <p id={hintId} className="mt-1.5 text-xs text-neutral-500">{t('auth.phoneHint')}</p>
     </div>
   )
 }

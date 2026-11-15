@@ -16,6 +16,7 @@
 import { useTranslation } from 'react-i18next'
 import type { MT5Account } from '../../api/types'
 import { useAccountAdj, useAccountFunds } from '../../store/live'
+import { EMPTY } from '../../utils/format'
 
 interface Props {
   account: MT5Account | null
@@ -23,7 +24,7 @@ interface Props {
 }
 
 function money(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return '—'
+  if (v == null || !Number.isFinite(v)) return EMPTY
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
@@ -86,12 +87,12 @@ export default function AccountSummary({ account, className = '' }: Props) {
             <div>
               <div className="k">{t('charts.account.floating')}</div>
               <div className={`v ${floating == null ? '' : floating >= 0 ? 'up' : 'down'}`}>
-                {floating == null ? '—' : `${floating >= 0 ? '+' : ''}${money(floating)}`}
+                {floating == null ? EMPTY : `${floating >= 0 ? '+' : ''}${money(floating)}`}
               </div>
             </div>
             <div>
               <div className="k">{t('charts.account.leverageK')}</div>
-              <div className="v">{account.leverage ? `1:${account.leverage}` : '—'}</div>
+              <div className="v">{account.leverage ? `1:${account.leverage}` : EMPTY}</div>
             </div>
           </div>
           <div className="term-acm">

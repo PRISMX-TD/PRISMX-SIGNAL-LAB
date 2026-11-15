@@ -691,7 +691,7 @@ export default function CompetitionsPanel() {
                                 <button
                                   type="button"
                                   className={`text-sm leading-none transition disabled:opacity-30 ${
-                                    featured ? 'text-amber-300' : 'text-neutral-600 hover:text-amber-300'
+                                    featured ? 'text-gold' : 'text-neutral-500 hover:text-gold'
                                   }`}
                                   disabled={savingFeatured || blocked}
                                   title={
@@ -712,7 +712,22 @@ export default function CompetitionsPanel() {
                                 </button>
                               )
                             })()}
-                          {c.name}
+                          {/* 整行可点是给鼠标的；比赛名是键盘 / 读屏的入口（操作列里没有「编辑」按钮）。
+                              aria-current 标出正在编辑的那场，代替只靠背景色的选中态。
+                              The row click is for the mouse; the name is the keyboard / screen-reader way in
+                              (the action column has no Edit button). aria-current marks the competition being
+                              edited instead of the background tint alone. */}
+                          <button
+                            type="button"
+                            className="text-left hover:underline"
+                            aria-current={selectedId === c.id ? 'true' : undefined}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              selectRow(c)
+                            }}
+                          >
+                            {c.name}
+                          </button>
                           {c.publicView && (
                             <span className="tag bg-prism-500/15 text-xs text-prism-200">
                               {t('admin.competitionPromo.publicTag')}
@@ -843,15 +858,15 @@ export default function CompetitionsPanel() {
             <label className="label">{t('competition.admin.fields.description')}</label>
             {/* 上限原来是 2000：完整赛规一粘贴，超出部分被浏览器静默丢掉，前台弹窗看着像
                 「被截断」。后端这一列是 Text，不限长；这里放宽到 DESC_MAX 并显示字数，
-                贴满了一眼能看出来。rounded-2xl 盖掉 .input 的胶囊圆角——多行文本框用
+                贴满了一眼能看出来。rounded-card 盖掉 .input 的胶囊圆角——多行文本框用
                 胶囊形，四角会被切掉一大块。
                 The cap used to be 2000: pasting full rules silently dropped the overflow,
                 which read as a "truncated" dialog on the page. The column is Text (no
                 length limit); widen to DESC_MAX and show a counter so a full box is
-                obvious. rounded-2xl overrides .input's pill radius, which clips the
+                obvious. rounded-card overrides .input's pill radius, which clips the
                 corners of a multi-line box. */}
             <textarea
-              className="input min-h-[160px] w-full resize-y rounded-2xl"
+              className="input min-h-[160px] w-full resize-y rounded-card"
               value={form.description}
               onChange={(e) => setForm({ ...form, description: e.target.value })}
               maxLength={DESC_MAX}
@@ -1009,10 +1024,10 @@ export default function CompetitionsPanel() {
               总开关没开时提示一句——否则管理员开了这里却看到 404，只会以为坏了。
               Public promotion (§1.7): saved with the form, editable after draft. The
               global-switch hint saves an admin from reading a 404 as a bug. */}
-          <fieldset className="space-y-3 rounded-2xl border border-white/10 p-4">
+          <fieldset className="space-y-3 rounded-card border border-white/10 p-4">
             <legend className="px-1 text-sm font-semibold text-neutral-200">{t('admin.competitionPromo.title')}</legend>
             {gSettings && !gSettings.competitionsPublicEnabled && (
-              <p className="text-xs text-amber-400">{t('admin.competitionPromo.globalOff')}</p>
+              <p className="text-xs text-warn">{t('admin.competitionPromo.globalOff')}</p>
             )}
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -1148,7 +1163,7 @@ export default function CompetitionsPanel() {
                       </td>
                       <td
                         className={`num py-1.5 pr-4 ${
-                          p.cashflowFlagged ? 'text-amber-400' : 'text-neutral-500'
+                          p.cashflowFlagged ? 'text-warn' : 'text-neutral-500'
                         }`}
                       >
                         {p.netCashflow == null
@@ -1341,7 +1356,7 @@ function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
   // 资金进出超标：不影响计分（分母固定为报名本金），只提示管理员人工复核。
   // Cash flow over the flag line: doesn't affect scoring, just asks for a review.
   const review = p.cashflowFlagged ? (
-    <div className="text-xs text-amber-400">{t(`${k}.review`)}</div>
+    <div className="text-xs text-warn">{t(`${k}.review`)}</div>
   ) : null
   switch (p.status) {
     case 'ranked':
@@ -1359,7 +1374,7 @@ function ParticipantLive({ p }: { p: ParticipantAdminRow }) {
     case 'no_baseline':
       return (
         <>
-          <div className="text-amber-400">{t(`${k}.${p.status}`)}</div>
+          <div className="text-warn">{t(`${k}.${p.status}`)}</div>
           {sample}
           {review}
         </>

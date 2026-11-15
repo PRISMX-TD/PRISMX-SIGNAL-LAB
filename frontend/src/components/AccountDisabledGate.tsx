@@ -48,12 +48,15 @@ export default function AccountDisabledGate() {
   // or a transform (cards, the page-transition wrapper) become the containing
   // block for fixed positioning and would shrink inset-0 to their own box.
   return createPortal(
-    // z-[70]：要盖在 ConfirmModal（z-50）与页头之上。被停用时任何操作都已经
-    // 没有意义，包括他点开一半的那个确认框。
-    // z-[70]: above ConfirmModal (z-50) and the header. Once disabled, nothing
-    // underneath can still be acted on — including a half-open confirm dialog.
+    // z-gate（89）：盖住一切可操作的层：页头、确认框、底部抽屉（80）、下拉菜单（87），
+    // 只让 toast 与复制气泡在上面。被停用时任何操作都已经没有意义，包括用户点开一半的
+    // 那个下单抽屉。（此前是 70，抽屉与菜单反而压在遮罩上面。）
+    // z-gate (89): above every actionable layer (header, dialogs, sheets at 80,
+    // menus at 87); only the toast and copy tip sit higher. Once disabled, nothing
+    // underneath can still be acted on, including a half-open order sheet. (It was
+    // 70, which left sheets and menus on top of the gate.)
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-gate flex items-center justify-center scrim p-6"
       role="alertdialog"
       aria-modal="true"
       aria-labelledby="account-disabled-title"
@@ -70,7 +73,7 @@ export default function AccountDisabledGate() {
             that differs per person, and inline it reads as boilerplate. Nothing
             renders when the backend sent no reason — no empty frame. */}
         {reason && (
-          <div className="mt-4 rounded-xl border border-down/30 bg-down/10 px-4 py-3">
+          <div className="mt-4 rounded-panel border border-down/30 bg-down/10 px-4 py-3">
             <div className="text-xs text-neutral-400">
               {t('accountDisabled.reasonLabel')}
             </div>

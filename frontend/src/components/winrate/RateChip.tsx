@@ -13,6 +13,11 @@
 // amber 40-50%, red below 40%; see verdictOf in shared.ts). Spans throughout:
 // the strategy card renders these inside a <button>, which allows phrasing
 // content only. Styled by .rate-chip in winrate.css.
+//
+// 读屏：判定词放在 sr-only 里（span 上的 aria-label 读屏不认）。可见符号刻意不加，
+// 理由见 StrategyDetail.tsx 判定格的注释（产品要求去掉判定图形）。
+// Screen readers get the verdict from an sr-only span (aria-label on a span is
+// ignored). No visible glyph on purpose — see the verdict-cell note in StrategyDetail.tsx.
 import { useTranslation } from 'react-i18next'
 import { VERDICT_BG, VERDICT_COLOR, fmtPct, type VerdictKind } from './shared'
 
@@ -24,22 +29,31 @@ export default function RateChip({ kind, name, rate, size = 'md', aria }: {
   aria?: string
 }) {
   const { t } = useTranslation()
-  // 判定词并进无障碍名。芯片上判定**只剩颜色**，而颜色对读屏器根本不存在——
-  // 不并进来，用读屏器的人只会听到"22:00 67.7%"，拿不到"高于一半"这一维。
-  // 视觉上零成本：aria-label 不渲染。
-  // The verdict word joins the accessible name. On a chip the verdict is carried
-  // by colour alone, and colour does not exist for a screen reader — without this
-  // such a reader hears "22:00 67.7%" and never learns which band it is in. Costs
-  // nothing visually: aria-label is not rendered.
-  const label = `${aria ?? `${name} ${fmtPct(rate)}`} · ${t(`admin.winrate.verdict.${kind}`)}`
+  // 判定词进读屏。芯片上判定**只剩颜色**，而颜色对读屏器根本不存在——不补上，用读屏器
+  // 的人只会听到"22:00 67.7%"，拿不到"高于一半"这一维。原来写在 span 的 aria-label 上，
+  // 但无角色的 span 上 aria-label 读屏不认，所以改成 sr-only 文字；视觉上同样零成本。
+  // The verdict reaches screen readers. On a chip it is carried by colour alone, which
+  // does not exist for a screen reader. It used to sit in aria-label on the span, which
+  // screen readers ignore on a role-less element, so it is now sr-only text instead.
+  const verdict = t(`admin.winrate.verdict.${kind}`)
   return (
     <span
       className={`rate-chip${size === 'sm' ? ' sm' : ''}`}
       style={{ background: VERDICT_BG[kind], color: VERDICT_COLOR[kind] }}
-      aria-label={label}
     >
-      <span className="n num">{name}</span>
-      <span className="r num">{fmtPct(rate)}</span>
+      {aria ? (
+        <>
+          <span className="n num" aria-hidden="true">{name}</span>
+          <span className="r num" aria-hidden="true">{fmtPct(rate)}</span>
+          <span className="sr-only">{`${aria} · ${verdict}`}</span>
+        </>
+      ) : (
+        <>
+          <span className="n num">{name}</span>
+          <span className="r num">{fmtPct(rate)}</span>
+          <span className="sr-only">{` · ${verdict}`}</span>
+        </>
+      )}
     </span>
   )
 }

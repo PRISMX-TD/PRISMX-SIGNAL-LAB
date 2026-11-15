@@ -57,13 +57,15 @@ const GuestHeader: FC<{ competition: CompetitionSummary | null; onRegister: () =
   const badge = competition
     ? { running: competition.status === 'running' ? [competition] : [], upcoming: competition.status === 'running' ? [] : [competition] }
     : null
+  // 与站内顶栏一致：不透明实色、不模糊，理由见 Layout.tsx 的 header 注释。
+  // Same as the in-app header: opaque, no blur; see the comment on Layout.tsx's header.
   return (
-    <header className="sticky top-0 z-30 border-b border-white/[0.07] bg-ink-950/90 pt-[env(safe-area-inset-top)] backdrop-blur-lg">
+    <header className="sticky top-0 z-nav border-b border-white/[0.07] bg-ink-950 pt-[env(safe-area-inset-top)]">
       <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:gap-4 sm:px-6">
         <div className="flex items-center gap-2.5">
           <Logo size={40} />
           <div className="hdr-wordmark leading-tight">
-            <div className="font-display text-[17px] font-bold tracking-[-0.015em] text-white">Signal Lab</div>
+            <div className="font-display text-lg leading-tight font-bold tracking-[-0.015em] text-white">Signal Lab</div>
             <div className="text-xs font-medium text-neutral-500">by PRISMX</div>
           </div>
         </div>
@@ -246,7 +248,7 @@ export default function GuestPreview({ onUnavailable }: { onUnavailable?: () => 
         </main>
 
         <footer className="mx-auto w-full max-w-7xl px-4 pb-28 sm:px-6 lg:pb-6" data-guest-allow>
-          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-[12px] text-neutral-500">
+          <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 border-t border-white/[0.06] pt-5 text-xs text-neutral-500">
             <span>© {new Date().getFullYear()} PRISMX</span>
             {(['terms', 'privacy', 'risk'] as const).map((d) => (
               <a key={d} href={`/${d}`} className="transition-colors hover:text-neutral-300">{t(`legal.${d}.title`)}</a>

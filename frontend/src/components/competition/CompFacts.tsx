@@ -3,6 +3,7 @@
 import type { TFunction } from 'i18next'
 import { fmtDate, fmtDay } from '../../api/utils'
 import type { CompetitionSummary } from '../../api/types'
+import { EMPTY } from '../../utils/format'
 
 export default function CompFacts({ c, t }: {
   c: Pick<CompetitionSummary, 'prizeNote' | 'startsAt' | 'endsAt' | 'enrollment' | 'regOpensAt' | 'regClosesAt'>
@@ -18,17 +19,17 @@ export default function CompFacts({ c, t }: {
       )}
       <div>
         <dt>{t('competition.starts')}</dt>
-        <dd className="num">{c.startsAt ? fmtDate(c.startsAt) : '—'}</dd>
+        <dd className="num">{c.startsAt ? fmtDate(c.startsAt) : EMPTY}</dd>
       </div>
       <div>
         <dt>{t('competition.ends')}</dt>
-        <dd className="num">{c.endsAt ? fmtDate(c.endsAt) : '—'}</dd>
+        <dd className="num">{c.endsAt ? fmtDate(c.endsAt) : EMPTY}</dd>
       </div>
       {c.enrollment === 'signup' && (
         <div>
           <dt>{t('competition.regWindow')}</dt>
           <dd className="num">
-            {c.regOpensAt ? fmtDay(c.regOpensAt) : '—'} – {c.regClosesAt ? fmtDay(c.regClosesAt) : '—'}
+            {c.regOpensAt ? fmtDay(c.regOpensAt) : EMPTY} – {c.regClosesAt ? fmtDay(c.regClosesAt) : EMPTY}
           </dd>
         </div>
       )}

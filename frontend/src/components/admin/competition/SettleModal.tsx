@@ -68,7 +68,7 @@ export default function SettleModal({
           </div>
         ) : error ? (
           <div className="space-y-2">
-            <p className="text-sm text-amber-400">{t('admin.competitionPromo.settleLoadError', { msg: error })}</p>
+            <p className="text-sm text-warn">{t('admin.competitionPromo.settleLoadError', { msg: error })}</p>
             <button type="button" className="btn-ghost px-3 py-1 text-xs" onClick={() => setAttempt((n) => n + 1)}>
               {t('admin.competitionPromo.retry')}
             </button>

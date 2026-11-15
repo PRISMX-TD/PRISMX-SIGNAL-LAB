@@ -49,13 +49,13 @@
 .agt-hero-head {
   grid-area: head;
   min-width: 0;
-  animation: agt-rise 0.6s var(--ease-out) both;
+  animation: agt-rise var(--dur-medium) var(--ease-out) backwards;
 }
 .agt-hero-head h1 {
   font-size: 30px;
   line-height: 1.1;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   letter-spacing: -0.01em;
 }
 .agt-hero-head p {
@@ -80,7 +80,7 @@
   width: 100%;
   max-width: 400px;
   perspective: 1100px;
-  animation: agt-card-in 0.9s var(--ease-out) 0.05s both;
+  animation: agt-card-in var(--dur-slow) var(--ease-out) 0.05s backwards;
 }
 .agt-card {
   --rx: 0deg;
@@ -185,7 +185,7 @@
   object-fit: contain;
 }
 .agt-card-brand > span {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.24em;
@@ -238,8 +238,8 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 15px;
-  font-weight: 600;
-  color: #fff;
+  font-weight: 500;
+  color: var(--text-strong);
 }
 .agt-card-since {
   margin-top: 3px;
@@ -302,14 +302,14 @@
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  animation: agt-rise 0.6s var(--ease-out) 0.12s both;
+  animation: agt-rise var(--dur-medium) var(--ease-out) 0.06s backwards;
 }
 .agt-stats-lead b {
   margin-right: 14px;
   font-size: 56px;
   line-height: 1;
   font-weight: 500;
-  color: #fff;
+  color: var(--text-strong);
   letter-spacing: -0.03em;
 }
 .agt-stats-lead > span {
@@ -329,8 +329,8 @@
 .agt-stats-row > div {
   min-width: 0;
   padding: 16px 16px 0 0;
-  animation: agt-rise 0.6s var(--ease-out) both;
-  animation-delay: calc(0.2s + var(--i, 0) * 0.06s);
+  animation: agt-rise var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(0.2s + var(--i, 0) * 30ms);
 }
 .agt-stats-row dt {
   overflow: hidden;
@@ -341,7 +341,7 @@
 }
 .agt-stats-row dd {
   margin: 6px 0 0;
-  font-size: 24px;
+  font-size: 26px;
   line-height: 1.1;
   font-weight: 600;
   color: var(--text);
@@ -398,12 +398,14 @@
     background-color var(--dur-fast) var(--ease-out),
     color var(--dur-fast) var(--ease-out);
 }
-.agt-tab:hover {
-  color: var(--text-2);
-  background-color: #16161c;
+@media (hover: hover) and (pointer: fine) {
+  .agt-tab:hover {
+    color: var(--text-2);
+    background-color: #16161c;
+  }
 }
 .agt-tab.is-on {
-  color: #fff;
+  color: var(--text-strong);
   background:
     radial-gradient(120% 140% at 0% 0%, rgb(var(--purple-rgb) / 0.2), rgb(var(--purple-rgb) / 0) 60%),
     var(--surface);
@@ -445,7 +447,7 @@
   min-width: 0;
   overflow: hidden;
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.3;
   white-space: nowrap;
   text-overflow: ellipsis;
@@ -454,7 +456,7 @@
   flex-shrink: 0;
   margin-left: 8px;
   padding: 1px 8px;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-tile);
   font-size: 12px;
   font-weight: 600;
   line-height: 18px;
@@ -469,7 +471,7 @@
   display: block;
   margin-top: 4px;
   overflow: hidden;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--text-3);
   white-space: nowrap;
@@ -482,7 +484,7 @@
 @media (max-width: 639px) {
   .agt-tabs {
     margin-bottom: 20px;
-    border-radius: 18px;
+    border-radius: var(--r-panel);
   }
   .agt-tab {
     padding: 12px 12px 14px;
@@ -496,7 +498,7 @@
   }
   .agt-tab-label {
     display: -webkit-box;
-    font-size: 14px;
+    font-size: 15px;
     white-space: normal;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -514,7 +516,11 @@
   }
 }
 .agt-panel {
-  animation: agt-rise 0.45s var(--ease-out) both;
+  /* 每次切页签都会重挂载（AgentPage 里按页签给 key），是高频动作：只做一次很短的淡入，
+     表达「换了一块内容」，不上浮。
+     Remounted on every tab switch (keyed per tab in AgentPage), a frequent action: a
+     short fade says "different content now", without the rise. */
+  animation: agt-fade var(--dur-fast) var(--ease-out) backwards;
 }
 
 /* ── 分区标题 / section heads ──
@@ -541,14 +547,14 @@
   font-size: 20px;
   font-weight: 500;
   line-height: 1.3;
-  color: #fff;
+  color: var(--text-strong);
   letter-spacing: -0.01em;
 }
 .agt-sec-count {
   margin-left: 10px;
   padding: 0 9px;
-  border-radius: var(--r-xs);
-  font-size: 12.5px;
+  border-radius: var(--r-tile);
+  font-size: 13px;
   font-weight: 600;
   line-height: 22px;
   color: var(--purple-soft);
@@ -556,7 +562,7 @@
 }
 .agt-sec-sub {
   margin-top: 4px;
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--text-3);
 }
@@ -604,7 +610,7 @@
   margin-bottom: 16px;
 }
 .agt-toolbar-count {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--text-3);
 }
 /* 下拉与搜索框同高。/ The dropdown matches the search box height. */
@@ -633,7 +639,7 @@
   align-items: flex-start;
   margin-bottom: 16px;
   padding: 14px 16px;
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   background: rgb(var(--purple-rgb) / 0.07);
   box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.16);
 }
@@ -642,7 +648,7 @@
   color: var(--purple-hi);
 }
 .agt-callout p {
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.65;
   color: var(--text-2);
 }
@@ -682,14 +688,16 @@
     var(--surface);
   box-shadow: inset 0 0 0 1px var(--line);
   transition: box-shadow var(--dur-base) var(--ease-out);
-  animation: agt-rise 0.55s var(--ease-out) both;
-  animation-delay: calc(var(--i, 0) * 0.06s);
+  animation: agt-rise var(--dur-base) var(--ease-out) backwards;
+  animation-delay: calc(var(--i, 0) * 30ms);
 }
 .agt-link.is-pickable {
   cursor: pointer;
 }
-.agt-link.is-pickable:hover {
-  box-shadow: inset 0 0 0 1px var(--line-hi);
+@media (hover: hover) and (pointer: fine) {
+  .agt-link.is-pickable:hover {
+    box-shadow: inset 0 0 0 1px var(--line-hi);
+  }
 }
 .agt-link.is-active,
 .agt-link.is-active:hover {
@@ -723,15 +731,15 @@
   white-space: nowrap;
   text-overflow: ellipsis;
   font-size: 15px;
-  font-weight: 600;
-  color: #fff;
+  font-weight: 500;
+  color: var(--text-strong);
 }
 .agt-chip {
   display: inline-flex;
   flex-shrink: 0;
   align-items: center;
   padding: 3px 10px;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-tile);
   font-size: 12px;
   color: var(--text-3);
   background: rgba(255, 255, 255, 0.05);
@@ -768,7 +776,7 @@
   line-height: 1.1;
   font-weight: 500;
   letter-spacing: 0.12em;
-  color: #fff;
+  color: var(--text-strong);
 }
 .agt-link.is-active .agt-link-code-value {
   color: var(--purple-hi);
@@ -829,7 +837,7 @@
 }
 .agt-link-stats dd {
   margin: 4px 0 0;
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1.1;
   font-weight: 600;
   color: var(--text);
@@ -890,7 +898,7 @@
     padding: 0;
     overflow: hidden;
     border-top: 0;
-    border-radius: 18px;
+    border-radius: var(--r-panel);
     background: var(--line);
   }
   .agt-links.is-single .agt-link-stats > div {
@@ -915,12 +923,12 @@
 .agt-open-title {
   display: block;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-2);
 }
 .agt-open-current {
   margin-top: 4px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text);
   word-break: break-all;
 }
@@ -946,12 +954,12 @@
 }
 .agt-open-form .input {
   height: 40px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .agt-open-form .btn {
   height: 40px;
   padding: 0 16px;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .agt-open-msg {
   margin-top: 6px;
@@ -978,15 +986,15 @@
 /* 「数据口径说明」折叠框。/ The "how these are counted" fold. */
 .agt-fine {
   margin-top: 16px;
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   box-shadow: inset 0 0 0 1px var(--line);
 }
 .agt-fine > summary {
   display: flex;
   align-items: center;
   padding: 13px 16px;
-  border-radius: 18px;
-  font-size: 12.5px;
+  border-radius: var(--r-panel);
+  font-size: 12px;
   color: var(--text-3);
   list-style: none;
   cursor: pointer;
@@ -996,8 +1004,10 @@
 .agt-fine > summary::-webkit-details-marker {
   display: none;
 }
-.agt-fine > summary:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .agt-fine > summary:hover {
+    color: var(--text-2);
+  }
 }
 .agt-fine > summary > svg {
   margin-right: 8px;
@@ -1047,19 +1057,23 @@
 }
 .agt-range [role='group'] > button {
   padding: 6px 12px;
-  border-radius: var(--r-xs);
-  font-size: 12.5px;
+  border-radius: var(--r-tile);
+  font-size: 12px;
   color: var(--text-3);
   background: transparent;
   box-shadow: none;
 }
-.agt-range [role='group'] > button:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .agt-range [role='group'] > button:hover {
+    color: var(--text-2);
+  }
 }
+/* 上面说的「紫色油墨」就是实色：24% 半透明底加淡紫描边不是油墨（见 tokens.css「选中态分三种」）。
+   "Violet ink" above means a solid fill; a 24% wash with a faint ring is not ink. */
 .agt-range [role='group'] > button[aria-pressed='true'] {
-  color: #fff;
-  background: rgb(var(--purple-rgb) / 0.24);
-  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.4);
+  color: var(--text-strong);
+  background: var(--purple);
+  box-shadow: none;
 }
 .agt-kpis {
   display: grid;
@@ -1110,9 +1124,9 @@
   padding: 20px 22px 18px;
 }
 .agt-chart h3 {
-  font-size: 14px;
-  font-weight: 600;
-  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-strong);
 }
 .agt-chart > p {
   margin: 4px 0 14px;
@@ -1176,8 +1190,10 @@
 .agt-table tbody tr {
   transition: background-color var(--dur-fast) var(--ease-out);
 }
-.agt-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.022);
+@media (hover: hover) and (pointer: fine) {
+  .agt-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.022);
+  }
 }
 .agt-table .is-small {
   font-size: 12px;
@@ -1234,7 +1250,7 @@
   width: 34px;
   height: 34px;
   margin-right: 12px;
-  font-size: 13.5px;
+  font-size: 13px;
 }
 .agt-person.is-sm .agt-avatar {
   width: 28px;
@@ -1249,8 +1265,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   line-height: 1.4;
   color: var(--text);
 }
@@ -1277,7 +1293,7 @@
 }
 .agt-tag {
   padding: 2px 8px;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-tile);
   font-size: 12px;
   font-weight: 500;
   line-height: 1.4;
@@ -1293,9 +1309,9 @@
 .agt-plan {
   display: inline-block;
   padding: 0 8px;
-  border-radius: var(--r-xs);
+  border-radius: var(--r-tile);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 20px;
   letter-spacing: 0.06em;
   color: var(--text-3);
@@ -1410,7 +1426,7 @@
   grid-gap: 12px 14px;
   margin: 14px 0 0;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--r-panel);
   background: rgba(255, 255, 255, 0.025);
 }
 .agt-fact {
@@ -1425,7 +1441,7 @@
 }
 .agt-fact dd {
   margin: 4px 0 0;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-2);
   word-break: break-word;
 }
@@ -1598,10 +1614,10 @@
 .agt-node {
   position: relative;
   padding: 14px;
-  border-radius: 18px;
+  border-radius: var(--r-panel);
   background: var(--surface);
   box-shadow: inset 0 0 0 1px var(--line);
-  animation: agt-rise 0.5s var(--ease-out) both;
+  animation: agt-rise var(--dur-base) var(--ease-out) backwards;
 }
 .agt-node.is-self {
   background:
@@ -1628,7 +1644,7 @@
    Your own avatar wears a holographic foil ring, the same foil as the card seal; the
    child selector keeps it off the client avatars listed inside your card. */
 .agt-node.is-self > .agt-node-row > .agt-avatar {
-  color: #fff;
+  color: var(--text-strong);
   background:
     linear-gradient(#1d1b26, #1d1b26) padding-box,
     conic-gradient(#7a63f0, #b7a6ff, #e6deff, #9fd0f2, #7c5cf6, #c99cf6, #f2dcfb, #a48fff, #7a63f0) border-box;
@@ -1644,8 +1660,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  font-size: 14.5px;
-  font-weight: 600;
+  font-size: 15px;
+  font-weight: 500;
   line-height: 1.4;
   color: var(--text);
 }
@@ -1696,7 +1712,7 @@
 }
 .agt-node-stats dd {
   margin: 4px 0 0;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.15;
   font-weight: 600;
   color: var(--text);
@@ -1716,7 +1732,7 @@
   height: 36px;
   padding: 0 14px;
   gap: 0;
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .agt-node-actions .btn svg {
   margin-left: 6px;
@@ -1724,10 +1740,12 @@
 .agt-node-actions .btn.is-danger {
   color: var(--down);
 }
-.agt-node-actions .btn.is-danger:hover:not(:disabled) {
-  color: var(--down);
-  background: var(--down-bg);
-  border-color: rgb(var(--down-rgb) / 0.35);
+@media (hover: hover) and (pointer: fine) {
+  .agt-node-actions .btn.is-danger:hover:not(:disabled) {
+    color: var(--down);
+    background: var(--down-bg);
+    border-color: rgb(var(--down-rgb) / 0.35);
+  }
 }
 .agt-node-toggle {
   display: flex;
@@ -1737,15 +1755,17 @@
   padding: 12px 0 0;
   border: 0;
   border-top: 1px solid var(--line);
-  font-size: 12.5px;
+  font-size: 12px;
   text-align: left;
   color: var(--text-3);
   background: none;
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-out);
 }
-.agt-node-toggle:hover {
-  color: var(--text-2);
+@media (hover: hover) and (pointer: fine) {
+  .agt-node-toggle:hover {
+    color: var(--text-2);
+  }
 }
 .agt-node-toggle > svg {
   margin-left: auto;
@@ -1878,7 +1898,7 @@
 .agt-client {
   min-width: 0;
   padding: 10px 12px;
-  border-radius: 12px;
+  border-radius: var(--r-md);
   background: rgba(255, 255, 255, 0.03);
 }
 /* 768 以下套餐与最近活跃排在名字下面，放不下就折行；间距全用外边距（Chrome 70 不认 flex gap），
@@ -1940,14 +1960,16 @@
   display: inline-flex;
   align-items: center;
   margin-top: 10px;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--purple-hi);
   background: none;
   border: 0;
   cursor: pointer;
 }
-.agt-clients-more:hover {
-  color: var(--purple-soft);
+@media (hover: hover) and (pointer: fine) {
+  .agt-clients-more:hover {
+    color: var(--purple-soft);
+  }
 }
 .agt-clients-more svg {
   margin-left: 6px;
@@ -1989,6 +2011,10 @@
   to {
     transform: translateX(330%) skewX(-12deg);
   }
+}
+@keyframes agt-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .agt-hero-head,

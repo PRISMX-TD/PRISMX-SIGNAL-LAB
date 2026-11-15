@@ -11,6 +11,7 @@
 // once. No React here — state orchestration lives in useOrderForm.ts.
 import type { OrderEntryType, PendingType, Quote } from '../../api/types'
 import { contractSize, isBelowMinLot, lotStep, minLot, rawVolumeByRisk, roundLots, suggestVolumeByRisk, usdMarginBasis } from '../../api/utils'
+import { EMPTY } from '../../utils/format'
 
 const QUICK_LOTS_BASE = [0.01, 0.1, 0.5, 1.0]
 export const QUICK_RISK_PCTS = [0.5, 1, 2, 3]
@@ -349,7 +350,7 @@ export function riskBelowMinLot(symbol: string, equity: number | null | undefine
   return isBelowMinLot(rawLotsForRisk(symbol, equity, riskPctRaw, slNum, entryRef, spec), symbol)
 }
 
-export function formatMoney(n?: number | null, dash = '-'): string {
+export function formatMoney(n?: number | null, dash = EMPTY): string {
   return n == null ? dash : n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 }
 
@@ -382,7 +383,7 @@ export function marginLevel(equity?: number | null, margin?: number | null): num
  * single points matter, same as the MT5 terminal. Above that (only reachable when
  * all but flat: 0.01 lot of gold yields ~465,000%) the decimals are pure noise and
  * blow out the cell width, so it rounds. The leading digits agree either way. */
-export function formatMarginLevel(equity?: number | null, margin?: number | null, dash = '—'): string {
+export function formatMarginLevel(equity?: number | null, margin?: number | null, dash = EMPTY): string {
   const lvl = marginLevel(equity, margin)
   if (lvl == null) return dash
   const digits = lvl < 1000 ? 2 : 0

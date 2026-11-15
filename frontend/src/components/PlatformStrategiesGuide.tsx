@@ -42,6 +42,7 @@ import { SkeletonBlock } from './Skeleton'
 import PageHead from './PageHead'
 import type { PlatformStrategy } from '../api/types'
 import { safeHttpUrl } from '../utils/safeUrl'
+import { imageDims } from '../utils/richText'
 
 export default function PlatformStrategiesGuide() {
   const { t, i18n } = useTranslation()
@@ -113,8 +114,16 @@ export default function PlatformStrategiesGuide() {
                 to={`/app/strategy/${s.id}`}
                 className={`card glass guide-row${img ? ' has-img' : ''}`}
               >
+                {/* 有 # 片段尺寸（上传端写入）时带上 width/height，图片到达前就按比例占位，
+                    手机上卡片不会在图到达时突然变高。桌面端 CSS 写死了宽高，属性不起作用；
+                    老图 / 外链没有尺寸，原样渲染。同 StrategyGuidePage 的配图。
+                    With a fragment size (written by the uploader), width/height reserve the
+                    box by aspect ratio before the image arrives, so the card doesn't jump
+                    taller on phones when it lands. On desktop the CSS fixes both dimensions
+                    and the attributes do nothing; old images / external links have no size
+                    and render as before. Same as StrategyGuidePage's hero. */}
                 {img && (
-                  <img src={img} alt="" loading="lazy" className="guide-row-img" />
+                  <img src={img} alt="" loading="lazy" className="guide-row-img" {...(imageDims(img) ?? {})} />
                 )}
                 <div className="guide-row-main">
                   <h3 className="font-display">{name}</h3>

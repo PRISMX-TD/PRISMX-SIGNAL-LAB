@@ -10,9 +10,11 @@
 import { memo, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useGlobalQuote } from '../../store/live'
+import { useMediaQuery } from '../../utils/useMediaQuery'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { FavoriteStar, SymbolTabBar, useSymbolTabs } from './SymbolTabs'
+import { EMPTY } from '../../utils/format'
 
 interface Props {
   symbols: string[]        // 当前活跃品种（来自 useLive().activeSymbols）/ currently active symbols
@@ -25,31 +27,32 @@ const MobileQuoteRow: FC<{ focusSym: string | undefined; mt5Online: boolean }> =
   const { t } = useTranslation()
   const focusQ = useGlobalQuote(focusSym)
   const focusDigits = focusQ?.digits ?? 5
-  const focusBid = focusQ?.bid != null ? focusQ.bid.toFixed(focusDigits) : '-'
-  const focusAsk = focusQ?.ask != null ? focusQ.ask.toFixed(focusDigits) : '-'
+  const focusBid = focusQ?.bid != null ? focusQ.bid.toFixed(focusDigits) : EMPTY
+  const focusAsk = focusQ?.ask != null ? focusQ.ask.toFixed(focusDigits) : EMPTY
   // 点差取整，不带小数点 / spread rounded to an integer, no decimals
   const spread = (focusQ?.bid != null && focusQ?.ask != null)
     ? String(Math.round((focusQ.ask - focusQ.bid) * Math.pow(10, focusDigits)))
-    : '-'
+    : EMPTY
   return (
     <div className="qt-mobile-row sm:hidden">
       <div className="flex items-center gap-2">
-        <b className="text-sm font-bold text-white">{focusSym ? displaySymbol(focusSym) : '-'}</b>
+        <b className="text-sm font-bold text-white">{focusSym ? displaySymbol(focusSym) : EMPTY}</b>
         {focusQ?.closed && <span className="tag bg-white/5 text-neutral-400 text-xs">{t('signals.focus.marketClosed')}</span>}
-        <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
+        <span className={`box-border inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'border-[1.5px] border-neutral-400 bg-transparent'}`} aria-hidden="true" />
+        <span className="sr-only">{mt5Online ? t('connStatus.online') : t('connStatus.offline')}</span>
       </div>
       <div className="flex items-center gap-5 ml-auto">
         <div className="text-center">
-          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.quotes.bid')}</div>
-          <span className="num font-bold text-sm" style={{ color: 'var(--up)' }}>{focusAsk}</span>
+          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.focus.bid')}</div>
+          <span className="num font-bold text-sm" style={{ color: 'var(--down)' }}>{focusBid}</span>
         </div>
         <div className="text-center">
           <div className="text-xs text-neutral-500 mb-0.5">{t('signals.quotes.spread')}</div>
           <span className="num text-xs text-neutral-400">{spread}</span>
         </div>
         <div className="text-center">
-          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.quotes.ask')}</div>
-          <span className="num font-bold text-sm" style={{ color: 'var(--down)' }}>{focusBid}</span>
+          <div className="text-xs text-neutral-500 mb-0.5">{t('signals.focus.ask')}</div>
+          <span className="num font-bold text-sm" style={{ color: 'var(--up)' }}>{focusAsk}</span>
         </div>
       </div>
     </div>
@@ -88,8 +91,8 @@ const QuoteRow = memo(function QuoteRow({ sym, focus, fav, onToggleFav }: {
           </div>
         </div>
       </td>
-      <td><span className="qt-price num" style={{ color: 'var(--down)' }}>{bid ?? '-'}</span></td>
-      <td><span className="qt-price num" style={{ color: 'var(--up)' }}>{ask ?? '-'}</span></td>
+      <td><span className="qt-price num" style={{ color: 'var(--down)' }}>{bid ?? EMPTY}</span></td>
+      <td><span className="qt-price num" style={{ color: 'var(--up)' }}>{ask ?? EMPTY}</span></td>
     </tr>
   )
 })
@@ -102,12 +105,20 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
   // 分类标签 + 自选只作用于桌面表格；手机端那一行始终跟焦点品种走
   // Tabs + favorites apply to the desktop table only; the mobile row always follows the focus symbol
   const { tabs, tab, setTab, visible, favEnabled, favSet, toggleFavorite } = useSymbolTabs(symbols, 'quotesTab')
+  // 手机单行和桌面整表只挂其中一个（断点同 Tailwind 的 sm = 640px）。两者以前都挂着、
+  // 靠 CSS 藏起一半：手机上整张表的每一行照样订阅自己的品种、跳价就重渲染，桌面上
+  // 看不见的单行也一样。下面的 sm:hidden / hidden sm:block 类名保留，作第二道保险。
+  // Mount only one of the phone row and the desktop table (breakpoint = Tailwind sm, 640px).
+  // Both used to be mounted with CSS hiding one: on phones every row of the invisible table
+  // still subscribed to its symbol and re-rendered on ticks, and the hidden phone row did the
+  // same on desktop. The sm:hidden / hidden sm:block classes stay as a second guard.
+  const isSm = useMediaQuery('(min-width: 640px)')
 
   return (
-    <section className="card glass dash-quotes p-4 sm:p-6">
+    <section className="card glass dash-quotes p-5 sm:p-6">
       {/* 标题栏（仅桌面）：左「实时行情报价」右 MT5 状态 / title bar, desktop only */}
       <div className="hidden sm:flex items-center justify-between mb-4">
-        <h3 className="text-[15px] font-bold text-white">{t('signals.focus.quotesHeading')}</h3>
+        <h3 className="text-base font-bold text-white">{t('signals.focus.quotesHeading')}</h3>
         <div className="flex items-center gap-2 text-xs">
           <span className={`inline-block w-[7px] h-[7px] rounded-full ${mt5Online ? 'bg-up animate-breathe' : 'bg-neutral-500'}`} />
           <span className={`font-semibold ${mt5Online ? 'text-up' : 'text-neutral-500'}`}>
@@ -126,10 +137,11 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
         </div>
       )}
 
-      {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 买价/点差/卖价 / mobile: minimal single-row quote ── */}
-      <MobileQuoteRow focusSym={focusSym} mt5Online={mt5Online} />
+      {/* ── 手机端：极简单行报价，品种代号 + 状态点 + 卖价/点差/买价（与图表交易条同序）/ mobile: minimal single-row quote, sell / spread / buy like the chart trade bar ── */}
+      {!isSm && <MobileQuoteRow focusSym={focusSym} mt5Online={mt5Online} />}
 
       {/* ── 桌面端：完整报价表 / desktop: full table ── */}
+      {isSm && (
       <div className="qt-table-wrap hidden sm:block">
         <table className="qt-table">
           <thead>
@@ -160,6 +172,7 @@ const QuotesTable: FC<Props> = ({ symbols, mt5Online, focusSymbol }) => {
           </tbody>
         </table>
       </div>
+      )}
     </section>
   )
 }
