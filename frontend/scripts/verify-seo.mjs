@@ -50,7 +50,9 @@ const PAGES = [
   ['risk/index.html', '/risk', 'zh-CN', '风险披露', '风险披露'],
   ['en/risk/index.html', '/en/risk', 'en', 'Risk Disclosure', 'Risk Disclosure'],
   ['faq/index.html', '/faq', 'zh-CN', '常见问题', '常见问题'],
-  ['en/faq/index.html', '/en/faq', 'en', 'Frequently Asked', 'FAQ'],
+  // 英文标题 2026-11-15 起是句首大写（faq.title = "Frequently asked questions"）
+  // English headings are sentence case since 2026-11-15 (faq.title = "Frequently asked questions")
+  ['en/faq/index.html', '/en/faq', 'en', 'Frequently asked', 'FAQ'],
 ]
 
 for (const [file, path, htmlLang, bodyText, titleText] of PAGES) {
