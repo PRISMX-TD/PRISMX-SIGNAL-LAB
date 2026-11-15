@@ -747,6 +747,11 @@
      Since 2026-11-02 the achievements page on phones puts the text (level + stats) first and the
      badge stage second; the landing-page demo keeps the badge first. */
   .ach-stage-text-first .ach-pedestal { order: 0; }
+  /* 2026-11-15 起手机上关卡区（磨砺等）进舞台、接在统计之后，勋章陈列台挪到舞台下面（见 AchievementsPage）。
+     position:relative 让瓦片压在 ::before 的极光之上。
+     Since 2026-11-15 phones put the stage tasks inside the stage after the stats and move the badge
+     pedestal below the stage (see AchievementsPage). position:relative keeps the tiles above the ::before aurora. */
+  .ach-stage-tasks { position: relative; min-width: 0; margin-top: 10px; padding-top: 18px; border-top: 1px solid var(--line); }
   .ach-stage-l { padding-top: 4px; }
   .ach-stats > div { padding-right: 10px; }
   .ach-stats > div + div { padding-left: 10px; }

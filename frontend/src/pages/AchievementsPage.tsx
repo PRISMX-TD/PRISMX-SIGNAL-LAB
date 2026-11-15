@@ -26,6 +26,7 @@ import { BadgeProgressBar } from '../components/badges/BadgeProgressBar'
 import type { GamificationBadge, GamificationMe, GamificationTask } from '../api/types'
 import { readJson, writeJson } from '../utils/safeStorage'
 import { useDelayedFlag } from '../utils/useDelayedFlag'
+import { useIsPhone } from '../utils/useMediaQuery'
 import { EMPTY } from '../utils/format'
 
 // 勋章库分三层：进阶勋章（各有铜 / 银 / 金三档）、特殊勋章（无档位）、绝版勋章
@@ -355,6 +356,9 @@ export default function AchievementsPage() {
   // stage). Deliberately not persisted: reviewing an old stage is a one-off
   // curiosity, and the next visit should land back on "what do I do now".
   const [viewLevel, setViewLevel] = useState<number | null>(null)
+  // 手机上关卡区与勋章陈列台对调位置（见下方 return）。
+  // On phones the stage tasks and the badge pedestal swap places (see the return below).
+  const isPhone = useIsPhone()
   // 只在数据第一次到达时判定一次「哪些勋章要放铸造动画」——之后佩戴/取消
   // 佩戴触发的 setMe 会换新的 badges 数组引用，但不该重新判定一遍（不然乐观
   // 更新一次佩戴态就重放一次铸造动画）。
@@ -533,6 +537,72 @@ export default function AchievementsPage() {
     .map((id) => me.badges.find((b) => b.id === id))
     .filter((b): b is GamificationBadge => b != null)
 
+  // 勋章陈列台与关卡区各自成块：桌面上陈列台在舞台右栏、关卡区在舞台下面；
+  // 手机上两者对调——关卡区放进舞台（等级与统计之后），陈列台挪到舞台下面。
+  // The pedestal and the stage tasks are standalone blocks: on desktop the pedestal
+  // is the stage's right column and the tasks sit below the stage; on phones they
+  // swap — the tasks go inside the stage (after level + stats), the pedestal below it.
+  const pedestal = (
+    <PedestalStage
+      badges={equippedBadges}
+      defaultId={me.equippedBadge}
+      busy={equipping != null}
+      onOpen={setDetailBadge}
+      onMakeDefault={makeDefault}
+    />
+  )
+  const hasStageTasks = shownGroup != null || shownLevel === 1
+  const stageTasks = (
+    <>
+      {/* ── 关卡（默认是下一关，点链条可回看旧关）/ stage ───────────── */}
+      {shownGroup && (
+        <section aria-labelledby="ach-stage-title">
+          <div className="ach-sec-h">
+            <h3 id="ach-stage-title">
+              <b>{t(`gamification.groups.${shownGroup.group}`)}</b>
+              {t('gamification.stage.nth', { n: (shownLevel ?? 1) - 1 })} · {t('gamification.stage.toward', { title: t(`gamification.titles.${LEVEL_KEYS[(shownLevel ?? 1) - 1]}`) })}
+            </h3>
+            <div className="ach-stage-r">
+              {canReturn && (
+                <button type="button" className="ach-link" onClick={() => setViewLevel(null)}>
+                  {t('gamification.stage.backToCurrent')}
+                </button>
+              )}
+              <StageRing done={shownDone} total={shownGroup.tasks.length} />
+            </div>
+          </div>
+          <ul className="tk-grid">
+            {shownGroup.tasks.map((task, i) => (
+              <TaskTile key={task.id} task={task} index={i} t={t} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 入门（L1）没有关卡：注册就是这一级。点到它时不能什么都不发生——
+          那会像按钮坏了，而不是「这一级本来就没有关卡」。
+          Level 1 has no stage — signing up is the level. Clicking it must say so
+          rather than do nothing, which would read as a broken button. */}
+      {shownLevel === 1 && (
+        <section aria-labelledby="ach-origin-title">
+          <div className="ach-sec-h">
+            <h3 id="ach-origin-title">
+              <b>{t(`gamification.titles.${LEVEL_KEYS[0]}`)}</b>
+              {t('gamification.stage.startPoint')}
+            </h3>
+            {canReturn && (
+              <div className="ach-stage-r">
+                <button type="button" className="ach-link" onClick={() => setViewLevel(null)}>
+                  {t('gamification.stage.backToCurrent')}
+                </button>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </>
+  )
+
   return (
     <div className="ach space-y-8">
       {/* ── 陈列台 / stage ────────────────────────────────────── */}
@@ -627,13 +697,9 @@ export default function AchievementsPage() {
           </div>
         </div>
 
-        <PedestalStage
-          badges={equippedBadges}
-          defaultId={me.equippedBadge}
-          busy={equipping != null}
-          onOpen={setDetailBadge}
-          onMakeDefault={makeDefault}
-        />
+        {isPhone
+          ? hasStageTasks && <div className="ach-stage-tasks">{stageTasks}</div>
+          : pedestal}
       </section>
 
       {/* 综合胜率构成：从陈列台的「构成」按钮展开，独立一块，不挤进舞台。
@@ -673,52 +739,10 @@ export default function AchievementsPage() {
         </section>
       )}
 
-      {/* ── 关卡（默认是下一关，点链条可回看旧关）/ stage ───────────── */}
-      {shownGroup && (
-        <section aria-labelledby="ach-stage-title">
-          <div className="ach-sec-h">
-            <h3 id="ach-stage-title">
-              <b>{t(`gamification.groups.${shownGroup.group}`)}</b>
-              {t('gamification.stage.nth', { n: (shownLevel ?? 1) - 1 })} · {t('gamification.stage.toward', { title: t(`gamification.titles.${LEVEL_KEYS[(shownLevel ?? 1) - 1]}`) })}
-            </h3>
-            <div className="ach-stage-r">
-              {canReturn && (
-                <button type="button" className="ach-link" onClick={() => setViewLevel(null)}>
-                  {t('gamification.stage.backToCurrent')}
-                </button>
-              )}
-              <StageRing done={shownDone} total={shownGroup.tasks.length} />
-            </div>
-          </div>
-          <ul className="tk-grid">
-            {shownGroup.tasks.map((task, i) => (
-              <TaskTile key={task.id} task={task} index={i} t={t} />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {/* 入门（L1）没有关卡：注册就是这一级。点到它时不能什么都不发生——
-          那会像按钮坏了，而不是「这一级本来就没有关卡」。
-          Level 1 has no stage — signing up is the level. Clicking it must say so
-          rather than do nothing, which would read as a broken button. */}
-      {shownLevel === 1 && (
-        <section aria-labelledby="ach-origin-title">
-          <div className="ach-sec-h">
-            <h3 id="ach-origin-title">
-              <b>{t(`gamification.titles.${LEVEL_KEYS[0]}`)}</b>
-              {t('gamification.stage.startPoint')}
-            </h3>
-            {canReturn && (
-              <div className="ach-stage-r">
-                <button type="button" className="ach-link" onClick={() => setViewLevel(null)}>
-                  {t('gamification.stage.backToCurrent')}
-                </button>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+      {/* 桌面：关卡区在舞台下面；手机：它进了舞台，这里换成勋章陈列台。
+          Desktop: the stage tasks sit below the stage; phones: they moved into
+          the stage, so the badge pedestal takes this slot instead. */}
+      {isPhone ? pedestal : stageTasks}
 
       {/* ── 勋章库 / vault ────────────────────────────────────── */}
       <section className="ach-vault" aria-labelledby="ach-vault-title">
