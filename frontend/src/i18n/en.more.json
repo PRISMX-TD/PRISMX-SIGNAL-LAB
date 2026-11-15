@@ -3278,6 +3278,12 @@
       "agent": "Ambassador",
       "agentAll": "All ambassadors",
       "agentNone": "No ambassador",
+      "assigned": "Assigned to support",
+      "assignedOpt": {
+        "any": "Assigned: any",
+        "yes": "Assigned to support",
+        "no": "Not assigned"
+      },
       "pickedCount": "{{n}} selected",
       "pickedFromUsers": "From Users tab",
       "pickedMore": "…and {{n}} more",

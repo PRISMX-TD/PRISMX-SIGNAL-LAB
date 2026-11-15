@@ -6,6 +6,9 @@
 // marketing) are listed with their status but cannot be ticked — "found but not
 // selectable" explains itself, "not found" does not. The selection (id → email)
 // lives in the parent, so paging or changing filters never drops it.
+// 客服「分配跟进」复用这张表时多一个「是否已分配客服」筛选（assignedFilter），群发邮件里不显示。
+// The support assign tab reuses this table with an extra "assigned to support" filter
+// (assignedFilter); the email broadcast does not show it.
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi, isAbortError } from '../../api/client'
@@ -13,13 +16,14 @@ import { fmtDay, localizeApiError } from '../../api/utils'
 import Pager from '../Pager'
 import Select from '../Select'
 import { SkeletonLine } from '../Skeleton'
-import type { EmailAudiencePlan, EmailKind, EmailPickerQuery, EmailPickerUser } from '../../api/types'
+import type { EmailAudiencePlan, EmailKind, EmailPickerAssigned, EmailPickerQuery, EmailPickerUser } from '../../api/types'
 
 // 与后端 EMAIL_LIST_MAX 一致 / matches the backend EMAIL_LIST_MAX
 export const PICK_MAX = 2000
 const PAGE_SIZE = 20
 const PLAN_FILTERS: EmailAudiencePlan[] = ['all', 'FREE', 'PRO', 'TRIAL', 'PAID']
 const ACTIVITY_OPTIONS = ['', 'active7', 'active30', 'active90', 'inactive30', 'inactive90'] as const
+const ASSIGNED_OPTIONS: EmailPickerAssigned[] = ['', 'yes', 'no']
 type Activity = (typeof ACTIVITY_OPTIONS)[number]
 // 选中的人：id → 邮箱（从用户管理带过来的只有 id，邮箱为空串）
 // Selection: id → email (users carried over from the Users tab have an empty email)
@@ -36,6 +40,8 @@ export default function EmailRecipientPicker({
   picked,
   onChange,
   onError,
+  assignedFilter = false,
+  reloadKey = 0,
 }: {
   kind: EmailKind
   picked: Picked
@@ -43,6 +49,11 @@ export default function EmailRecipientPicker({
   // functional updates, so rapid clicks each build on the latest selection
   onChange: (update: (prev: Picked) => Picked) => void
   onError: (text: string) => void
+  // 显示「是否已分配客服」筛选（只有客服「分配跟进」用）/ show the assigned-to-support filter (assign tab only)
+  assignedFilter?: boolean
+  // 变了就按当前条件重新拉一遍（例如刚分配完，「未分配」里的人应当消失）
+  // bump to reload with the current filters (e.g. after assigning, "not assigned" must drop them)
+  reloadKey?: number
 }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
@@ -51,6 +62,7 @@ export default function EmailRecipientPicker({
   const [activity, setActivity] = useState<Activity>('')
   const [sort, setSort] = useState<'created' | 'active'>('created')
   const [agent, setAgent] = useState('')
+  const [assigned, setAssigned] = useState<EmailPickerAssigned>('')
   const [agents, setAgents] = useState<Array<{ id: string; nickname: string | null; email: string }>>([])
   const [page, setPage] = useState(0)
   const [rows, setRows] = useState<EmailPickerUser[]>([])
@@ -63,12 +75,12 @@ export default function EmailRecipientPicker({
     const id = window.setTimeout(() => setQ(search), 300)
     return () => window.clearTimeout(id)
   }, [search])
-  useEffect(() => setPage(0), [q, plan, activity, sort, agent])
+  useEffect(() => setPage(0), [q, plan, activity, sort, agent, assigned])
   useEffect(() => {
     adminApi.emailPickerAgents().then((r) => setAgents(r.agents)).catch(() => {})
   }, [])
 
-  const query: EmailPickerQuery = { q, plan, sort, agent, ...activityFields(activity) }
+  const query: EmailPickerQuery = { q, plan, sort, agent, assigned, ...activityFields(activity) }
 
   useEffect(() => {
     const ctrl = new AbortController()
@@ -86,7 +98,7 @@ export default function EmailRecipientPicker({
         if (!ctrl.signal.aborted) setLoading(false)
       })
     return () => ctrl.abort()
-  }, [q, plan, activity, sort, agent, page])
+  }, [q, plan, activity, sort, agent, assigned, page, reloadKey])
 
   const selectable = (u: EmailPickerUser) => !u.disabled && !(kind === 'marketing' && u.optedOut)
   const pickedCount = Object.keys(picked).length
@@ -198,6 +210,14 @@ export default function EmailRecipientPicker({
             ...agents.map((a) => ({ value: a.id, label: a.nickname || a.email })),
           ]}
         />
+        {assignedFilter && (
+          <Select
+            value={assigned}
+            onChange={(v) => setAssigned(v as EmailPickerAssigned)}
+            ariaLabel={t('admin.email.assigned')}
+            options={ASSIGNED_OPTIONS.map((a) => ({ value: a, label: t(`admin.email.assignedOpt.${a || 'any'}`) }))}
+          />
+        )}
         <Select
           value={sort}
           onChange={(v) => setSort(v as 'created' | 'active')}

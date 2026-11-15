@@ -1,8 +1,8 @@
-// 跟进分配（设计 §5.2 / §7.2）：选人（复用群发邮件的选人表：搜索 / 套餐 / 活跃度筛选、跨页保留勾选）
+// 跟进分配（设计 §5.2 / §7.2）：选人（复用群发邮件的选人表：搜索 / 套餐 / 活跃度 / 推荐官 / 是否已分配客服筛选、跨页保留勾选）
 // + 分配表单，分配前先预检，把「要求勿扰 / 已有进行中跟进 / 工作人员」（会被跳过）与「退订推广邮件」
 // （默认跳过，可勾选仍分配）说清楚。现有跟进的查看与收回 / 改派 / 延期在「跟进进度」（ProgressPanel）。
 // Follow-up assignment (design §5.2 / §7.2): pick users (the email picker, reused: search / plan /
-// activity filters, selection survives paging) plus the assign form, with a pre-flight that spells
+// activity / ambassador / assigned-to-support filters, selection survives paging) plus the assign form, with a pre-flight that spells
 // out who will be skipped (do-not-contact / active follow-up / staff) and who is skipped by default
 // (email opt-outs, includable). Existing follow-ups — viewing, revoke / reassign / extend — live in
 // the progress section (ProgressPanel).
@@ -42,6 +42,8 @@ export default function AssignPanel({
   const [blockers, setBlockers] = useState<AssignBlocker[] | null>(null)
   const [assigning, setAssigning] = useState(false)
   const [confirm, setConfirm] = useState(false)
+  // 分配成功后让选人表重拉，「未分配客服」里刚分配的人随即消失 / reload the picker after assigning
+  const [pickerReload, setPickerReload] = useState(0)
 
   useEffect(() => {
     if (presetUserIds.length) onPresetCleared()
@@ -97,6 +99,7 @@ export default function AssignPanel({
       onToast('ok', t('admin.support.assign.done', { created: r.created.length, skipped: r.skipped.length }))
       setPicked({})
       setNote('')
+      setPickerReload((n) => n + 1)
     } catch (err) {
       onToast('err', errText(err, t('admin.saveError')))
     } finally {
@@ -110,7 +113,14 @@ export default function AssignPanel({
     <div className="space-y-5">
       <section className="glass space-y-3 p-4">
         <h3 className="text-sm font-semibold text-neutral-200">{t('admin.support.assign.pickTitle')}</h3>
-        <EmailRecipientPicker kind="notice" picked={picked} onChange={setPicked} onError={(text) => onToast('err', text)} />
+        <EmailRecipientPicker
+          kind="notice"
+          picked={picked}
+          onChange={setPicked}
+          onError={(text) => onToast('err', text)}
+          assignedFilter
+          reloadKey={pickerReload}
+        />
       </section>
 
       <section className="glass space-y-3 p-4">

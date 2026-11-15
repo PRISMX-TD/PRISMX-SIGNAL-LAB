@@ -3268,6 +3268,12 @@
       "agent": "推荐官",
       "agentAll": "全部推荐官",
       "agentNone": "无推荐官",
+      "assigned": "是否已分配客服",
+      "assignedOpt": {
+        "any": "分配：不限",
+        "yes": "已分配客服",
+        "no": "未分配客服"
+      },
       "pickedCount": "已选 {{n}} 人",
       "pickedFromUsers": "从用户管理带入",
       "pickedMore": "…还有 {{n}} 人",

@@ -754,6 +754,62 @@ def test_picker_agent_filter(client, db, people):
     assert via.id not in none and people["customer"].id in none
 
 
+def test_picker_assigned_filter(client, db, people):
+    """已分配 = 有进行中的跟进（含已转化），收回 / 过期的不算；列表总数与「选中全部」同口径。
+    assigned=yes means an active follow-up (converted included); revoked / expired don't
+    count; the list total and select-all agree."""
+    admin, staff, customer = people["admin"], people["internal"], people["customer"]
+    converted = _user(db, "conv@x.com")
+    revoked = _user(db, "rev@x.com")
+    expired = _user(db, "exp@x.com")
+    never = _user(db, "never@x.com")
+
+    def assign(user, status="pending"):
+        fu = _assign(db, admin, staff, user)
+        if status != "pending":
+            fu.status = status
+            if status in ("revoked", "expired"):
+                fu.closed_at = _now()
+            db.commit()
+
+    assign(customer)
+    assign(converted, "converted")
+    assign(expired, "expired")
+    # 收回后又重新分配：两条记录、一条进行中，只算一次 / revoked then reassigned: counted once
+    assign(revoked, "revoked")
+    assign(revoked)
+    # 只有收回过的人 / someone whose only follow-up was revoked
+    revoked_only = _user(db, "revonly@x.com")
+    assign(revoked_only, "revoked")
+    ha = _auth(admin)
+
+    def listed(**params):
+        r = client.get("/api/admin/emails/users", params={"limit": 100, **params}, headers=ha)
+        assert r.status_code == 200
+        body = r.json()
+        ids = [u["id"] for u in body["users"]]
+        assert len(ids) == len(set(ids)) == body["total"]
+        return set(ids)
+
+    def select_all(**params):
+        r = client.get("/api/admin/emails/users/all", params={"kind": "notice", **params}, headers=ha)
+        assert r.status_code == 200
+        return {u["id"] for u in r.json()["users"]}
+
+    yes = listed(assigned="yes")
+    assert yes == {customer.id, converted.id, revoked.id}
+    no = listed(assigned="no")
+    assert {expired.id, never.id, revoked_only.id} <= no and not (no & yes)
+    assert yes | no == listed()
+    assert select_all(assigned="yes") == yes
+    assert select_all(assigned="no") == no
+    # 与其他条件叠加 / combines with the other filters
+    assert listed(assigned="yes", q="conv") == {converted.id}
+    assert listed(assigned="no", q="conv") == set()
+    # 非法值拒绝 / invalid values are rejected
+    assert client.get("/api/admin/emails/users", params={"assigned": "maybe"}, headers=ha).status_code == 422
+
+
 def test_unreachable_stays_active(client, db, people):
     fu = _assign(db, people["admin"], people["internal"], people["customer"])
     r = client.patch(f"/api/support/follow-ups/{fu.id}", json={"status": "unreachable"}, headers=_auth(people["internal"]))

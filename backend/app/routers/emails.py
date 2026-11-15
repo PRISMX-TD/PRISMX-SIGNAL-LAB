@@ -118,6 +118,8 @@ def email_audience(body: EmailAudienceQueryIn, db: Session = Depends(get_db)):
 
 _PlanFilter = Literal["all", "FREE", "PRO", "TRIAL", "PAID"]
 _SortKey = Literal["created", "active"]
+# 是否已分配客服跟进：yes / no，不传 = 不限 / follow-up filter: yes / no, omitted = any
+_AssignedFilter = Literal["yes", "no"]
 
 
 @admin_router.get("/users", response_model=EmailPickerListOut)
@@ -128,12 +130,13 @@ def picker_users(
     inactive_for_days: int | None = Query(default=None, alias="inactiveForDays", ge=1, le=3650),
     sort: _SortKey = Query(default="created"),
     agent: str | None = Query(default=None, max_length=64),
+    assigned: _AssignedFilter | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
     """「指定用户」的选人列表：带详情分页返回，停用 / 退订的人也列出来但标明状态。"""
-    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, sort, agent)
+    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, sort, agent, assigned)
     total = query.count()
     rows = query.offset(offset).limit(limit).all()
     ids = [u.id for u in rows]
@@ -190,10 +193,11 @@ def picker_select_all(
     active_within_days: int | None = Query(default=None, alias="activeWithinDays", ge=1, le=3650),
     inactive_for_days: int | None = Query(default=None, alias="inactiveForDays", ge=1, le=3650),
     agent: str | None = Query(default=None, max_length=64),
+    assigned: _AssignedFilter | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """「选中全部搜索结果」：只返回按这次邮件类型真正收得到的人，最多 EMAIL_LIST_MAX 个。"""
-    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, agent=agent).filter(User.disabled_at.is_(None))
+    query = eb.picker_query(db, q, plan, active_within_days, inactive_for_days, agent=agent, assigned=assigned).filter(User.disabled_at.is_(None))
     if kind != eb.KIND_NOTICE:
         query = query.filter(~eb._opted_out_clause())
     rows = query.with_entities(User.id, User.email).limit(EMAIL_LIST_MAX + 1).all()

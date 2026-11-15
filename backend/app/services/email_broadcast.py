@@ -48,7 +48,15 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models import AgentNode, EmailCampaign, EmailDelivery, EmailOptOut, User
+from app.models import (
+    FOLLOW_UP_ACTIVE_STATUSES,
+    AgentNode,
+    EmailCampaign,
+    EmailDelivery,
+    EmailOptOut,
+    FollowUp,
+    User,
+)
 from app.services import email_signature, mailer
 
 logger = logging.getLogger("prismx.email_broadcast")
@@ -442,8 +450,10 @@ def _like_escape(value: str) -> str:
 
 
 def picker_query(db: Session, q: str | None, plan: str, active_within_days: int | None,
-                 inactive_for_days: int | None, sort: str = "created", agent: str | None = None):
-    """「指定用户」选人列表的查询：搜索（邮箱 / 昵称 / 手机号）+ 等级 + 活跃度。
+                 inactive_for_days: int | None, sort: str = "created", agent: str | None = None,
+                 assigned: str | None = None):
+    """「指定用户」选人列表的查询：搜索（邮箱 / 昵称 / 手机号）+ 等级 + 活跃度 + 推荐官
+    + 是否已分配客服跟进。
 
     **不**在这里排除停用和退订的人——选人列表要让管理员看得见他们（标出状态、
     不给勾），否则「我明明搜得到这个人，为什么列表里没有」没法解释。真正发送时
@@ -491,6 +501,18 @@ def picker_query(db: Session, q: str | None, plan: str, active_within_days: int 
             )
         else:
             query = query.filter(User.agent_user_id == agent)
+    # 跟进分配筛选（客服「分配跟进」用）：yes = 有一条进行中的跟进（含已转化 / 无意向 / 联系不上，
+    # 与分配预检的「已有进行中跟进」同一口径），no = 没有（从没分配过，或之前的都已收回 / 过期）。
+    # 每人同时最多一条进行中（uq_follow_ups_active_user），EXISTS 不会让行数翻倍。
+    # Follow-up filter (support "assign" tab): yes = has an active follow-up (same
+    # statuses the assign pre-check treats as active), no = none (never assigned,
+    # or every earlier one was revoked / expired). EXISTS keeps one row per user.
+    if assigned in ("yes", "no"):
+        active_fu = exists().where(
+            FollowUp.user_id == User.id,
+            FollowUp.status.in_(FOLLOW_UP_ACTIVE_STATUSES),
+        )
+        query = query.filter(active_fu if assigned == "yes" else ~active_fu)
     if sort == "active":
         # 从没活跃过的排最后 / never-active users go last
         query = query.order_by(User.last_active_at.is_(None), User.last_active_at.desc(), User.created_at.desc())

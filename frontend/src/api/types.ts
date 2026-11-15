@@ -2552,7 +2552,12 @@ export interface EmailPickerQuery {
   sort: 'created' | 'active'
   // '' = 不限；'none' = 无代理；其余 = 代理的用户 id / '' any, 'none' no agent, else an agent's user id
   agent?: string
+  // 是否已分配客服跟进（只有「分配跟进」用）：'' 不限 / 'yes' 有进行中的跟进 / 'no' 没有
+  // Follow-up assignment (assign tab only): '' any / 'yes' has an active follow-up / 'no' none
+  assigned?: EmailPickerAssigned
 }
+
+export type EmailPickerAssigned = '' | 'yes' | 'no'
 
 export interface EmailStatus {
   configured: boolean

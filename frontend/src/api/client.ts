@@ -1467,6 +1467,7 @@ function pickerQs(query: EmailPickerQuery, extra: Record<string, string>): strin
   if (query.activeWithinDays) qs.set('activeWithinDays', String(query.activeWithinDays))
   if (query.inactiveForDays) qs.set('inactiveForDays', String(query.inactiveForDays))
   if (query.agent) qs.set('agent', query.agent)
+  if (query.assigned) qs.set('assigned', query.assigned)
   return qs.toString()
 }
 
