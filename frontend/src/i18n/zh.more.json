@@ -246,7 +246,7 @@
     "autoTriggerAt": "浮盈达到",
     "autoTrailDistance": "跟随距离",
     "autoPtpFraction": "平仓比例",
-    "autoScopeNote": "止损只会朝有利方向移动，绝不放大风险。指令经由桥接程序在你的 MT5 上执行，桥接离线时不会有任何动作。",
+    "autoScopeNote": "止损只会朝有利方向移动，绝不放大风险。直连账户由服务器自动执行；桥接账户要桥接程序在线才会执行。",
     "autoSaved": "智能风控设置已保存",
     "autoSaveError": "规则没有保存，请检查网络后重试",
     "autoSaveChanges": "保存更改",
@@ -537,8 +537,9 @@
       "potentialProfit": "潜在盈利",
       "rr": "盈亏比",
       "requiredMargin": "所需保证金",
-      "noBridge": "未连接 MT5，先连接 PRISMX Bridge",
+      "noBridge": "还没有可下单的 MT5 账户，先去绑定一个",
       "offline": "账户离线，先连接桥接程序",
+      "offlineGateway": "账户暂时连不上券商，请稍后再试",
       "submitting": "提交中…",
       "place": "{{side}} · {{volume}} 手",
       "invalidVolume": "手数无效：请输入不小于该品种最小手数的数字",
@@ -549,7 +550,8 @@
       "waitingFill": "等待券商回执",
       "filledAt": "已成交 @ {{price}}",
       "accepted": "已受理，等待桥接执行",
-      "footnote": "市价单，经 PRISMX Bridge 送达 MT5，回执落在「交易」页。",
+      "acceptedGateway": "已受理，正在发往券商",
+      "footnote": "市价单，直接送达你的 MT5 账户，回执落在「交易」页。",
       "entryMode": "入场方式",
       "entry": {
         "MARKET": "市价",
@@ -614,6 +616,9 @@
       "confirmCloseMsg": "确认平掉 {{symbol}} {{side}} {{volume}} 手？",
       "triggerPrice": "触发价",
       "cancelPendingTitle": "撤销挂单",
+      "modifyPendingHead": "改触发价 / 止损 / 止盈（止损止盈留空即清除）",
+      "pendingModified": "挂单已修改",
+      "pendingModifySent": "改挂单指令已发出",
       "cancelPendingMsg": "确认撤销 {{symbol}} {{type}} {{volume}} 手 @ {{price}}？撤销后不可恢复。"
     },
     "autoOpenAfterPlace": "下单后自动打开",
@@ -730,6 +735,13 @@
       "FAILED": "失败",
       "CANCELLED": "已撤销"
     },
+    "statusDone": {
+      "CLOSE": "已平仓",
+      "MODIFY": "已修改",
+      "MODIFY_PENDING": "已修改",
+      "CANCEL_PENDING": "已撤销"
+    },
+    "fullClose": "全部",
     "positions": "当前持仓",
     "positionsScopeHint": "仅显示经 PRISMX 下单开出的仓位；在 MT5 客户端手动开的仓不会出现在这里，也不会被这里的操作影响。",
     "closeAll": {

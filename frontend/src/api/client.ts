@@ -730,7 +730,11 @@ export interface BootstrapResponse {
 // 初始化跑两遍，不记的话就发两次。/ Remember the first-load bootstrap per token for a few seconds:
 // StrictMode runs render-phase initializers twice in development.
 let firstLoad: { token: string | null; at: number; p: Promise<BootstrapResponse> } | null = null
-const FIRST_LOAD_REUSE_MS = 10_000
+// 30 秒：首屏请求现在在入口（App.tsx 的 bootPreload）就发出，比 LiveProvider 挂上早一整个
+// 外壳 chunk 的下载时间；弱网下那段可能超过 10 秒，复用窗口要盖住它，否则会再发一次。
+// 30s: the first load now leaves from the entry (bootPreload in App.tsx), a whole shell-chunk
+// download ahead of LiveProvider; on a weak network that gap can pass 10s.
+const FIRST_LOAD_REUSE_MS = 30_000
 export const bootstrapApi = {
   get: () => request<BootstrapResponse>('/bootstrap'),
   // 首屏：同一个请求顺带拿回其它组件的首屏数据，登记成预取（见 prefetch.ts）。必须在渲染阶段

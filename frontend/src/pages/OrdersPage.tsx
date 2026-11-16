@@ -76,6 +76,15 @@ const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 
 // Four since 2026-11-02: positions / history / log / smart risk — smart risk
 // (formerly auto position management) moved out of the positions tab.
 type OrdersTab = 'positions' | 'performance' | 'activity' | 'risk'
+// 非开仓指令成功时的印章代码（后端都记作 FILLED，见 renderSlip）。
+// Stamp code for a successful non-opening command (all stored as FILLED; see renderSlip).
+const DONE_STAMP: Partial<Record<string, string>> = {
+  CLOSE: 'CLOSED',
+  MODIFY: 'MODIFIED',
+  MODIFY_PENDING: 'MODIFIED',
+  CANCEL_PENDING: 'CANCELLED',
+}
+
 const TAB_STORAGE_KEY = 'prismx.orders.tab'
 const TABS: OrdersTab[] = ['positions', 'performance', 'activity', 'risk']
 
@@ -804,7 +813,16 @@ export default function OrdersPage() {
     // 后端将来若加了新状态，前端没跟上时显示原始状态码，而不是把 i18n 键名打出来。
     // If the backend adds a status the frontend hasn't caught up with, show the raw
     // code rather than printing the i18n key path.
-    const statusLabel = t(`orders.status.${o.status}`, { defaultValue: o.status })
+    const act = o.action ?? 'ORDER'
+    // 平仓 / 改单 / 撤挂单成功在后端也记作 FILLED，但对用户来说那不是「成交」——撤掉一张
+    // 挂单显示「已成交」会让人以为它触发了（体验报告 M4）。按动作换成各自的完成语。
+    // A successful close / modify / cancel is stored as FILLED too, but "filled" misleads
+    // there — a cancelled pending order reading "Filled" looks triggered (QA report M4).
+    const doneCode = o.status === 'FILLED' ? DONE_STAMP[act] : undefined
+    const stamp = doneCode ?? o.status
+    const statusLabel = doneCode
+      ? t(`orders.statusDone.${act}`, { defaultValue: doneCode })
+      : t(`orders.status.${o.status}`, { defaultValue: o.status })
     const bad = o.status === 'REJECTED' || o.status === 'FAILED'
     const msg = o.message ? localizeApiError(o.message) : o.status === 'PENDING' ? t('orders.awaitingReceipt') : null
     const price = o.filledPrice != null ? priceParts(o.filledPrice) : null
@@ -833,7 +851,13 @@ export default function OrdersPage() {
             {o.reverse && (
               <span className="tag ord-rev" title={t('orders.reverseHint')}>{t('orders.reverse')}</span>
             )}
-            <span className="ord-vol">{fmtLots(o.volume)}<small>{t('positions.lots')}</small></span>
+            {/* 全平 / 改单 / 撤挂单的指令行不带手数（存的是 0），不再显示「0 手」。
+                Full-close / modify / cancel rows carry no volume (stored as 0): no "0 lots". */}
+            {o.volume > 0 ? (
+              <span className="ord-vol">{fmtLots(o.volume)}<small>{t('positions.lots')}</small></span>
+            ) : act === 'CLOSE' ? (
+              <span className="ord-vol">{t('orders.fullClose')}</span>
+            ) : null}
           </div>
           {msg && <div className={`ord-msg ${bad ? 'bad' : ''}`}>{msg}</div>}
         </div>
@@ -859,8 +883,8 @@ export default function OrdersPage() {
             </button>
           )}
           <span key={o.status} className={`ord-stamp ${landed.has(o.id) ? 'land' : ''}`}>
-            {o.status}
-            {statusLabel.toUpperCase() !== o.status && (
+            {stamp}
+            {statusLabel.toUpperCase() !== stamp && (
               <>
                 <i />
                 <span className="zh">{statusLabel}</span>

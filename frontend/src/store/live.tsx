@@ -15,6 +15,7 @@ import { isAppHidden, onForeground, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT }
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { upsertOrderList } from './orderMerge'
 import { pickBootstrapSection } from './bootstrapMerge'
+import { createOverlay, overlayRows, rowFromReceipt, rowKey, OPTIMISTIC_TTL_MS, type SlTp } from './optimisticRows'
 
 // refreshAll 的可选项：重连 / 回前台的整份重拉不必再拉 /quotes 与 /symbols——WS 鉴权成功
 // 后服务端会补推同一份全站报价，GLOBAL_QUOTES 分支也会把新品种补进活跃列表。
@@ -59,6 +60,13 @@ interface LiveContextValue {
   // 把接口回执里的订单并入本地列表（不再整份重拉 /orders）；带防回退，见 orderMerge.ts。
   // Merge an order from an API receipt into the local list (no full /orders refetch); regress-safe, see orderMerge.ts.
   upsertOrder: (order: Order) => void
+  // 交易回执先画进持仓 / 挂单（见 optimisticRows.ts）：开仓成交、挂单挂出就先加一行，
+  // 全平成交、撤挂单成功就先拿掉一行，服务器的下一帧对上了再以它为准。
+  // Draw a trade receipt into positions / pending orders before the server frame confirms
+  // it (see optimisticRows.ts): fills and placed pending orders add a row; a full close or
+  // a cancelled pending order removes one.
+  applyReceipt: (order: Order, sltp?: SlTp) => void
+  dropRow: (kind: 'position' | 'pending', row: { ticket?: number | null; login?: string | null }) => void
   // 只重拉订单列表。平仓 / 改单 / 撤单之后用它，不用 refreshAll：那些动作只可能
   // 改变订单行，持仓与挂单随 WS 推送更新，没必要为一次撤单打七个接口。
   // Refetch just the order list. Used after close / modify / cancel instead of
@@ -637,11 +645,68 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // still showing). The first frame is always applied so positionsLoaded flips.
   const gotPositions = useRef(false)
   const stashedPositions = useRef<{ data: Position[]; funds: Record<string, number> } | null>(null)
+  // 服务器最近一帧的原样数据 + 叠加层（见 optimisticRows.ts）。state 里放的是两者合成后的结果。
+  // The server's latest frames as sent, plus the optimistic overlays; state holds the merge.
+  const serverPositions = useRef<Position[]>([])
+  const serverPending = useRef<PendingOrder[]>([])
+  const posOverlay = useRef(createOverlay<Position>())
+  const pendOverlay = useRef(createOverlay<PendingOrder>())
   const applyPositions = useCallback((data: Position[], funds: Record<string, number>) => {
-    setPositions((prev) => keepIfEqual(prev, data))
+    serverPositions.current = data
+    const merged = overlayRows(data, posOverlay.current, Date.now())
+    setPositions((prev) => keepIfEqual(prev, merged))
     setPositionsLoaded(true)
     setAccountFunds((prev) => keepIfEqual(prev, funds))
   }, [])
+  const applyPending = useCallback((data: PendingOrder[]) => {
+    serverPending.current = data
+    const merged = overlayRows(data, pendOverlay.current, Date.now())
+    setPendingOrders((prev) => keepIfEqual(prev, merged))
+  }, [])
+  // 叠加层变了（加 / 减一行，或到期）就拿服务器最近一帧重新合一次。
+  // Re-merge against the latest server frames whenever the overlay changes or expires.
+  const overlayTimer = useRef<number | undefined>(undefined)
+  const remerge = useCallback(() => {
+    const now = Date.now()
+    const pos = overlayRows(serverPositions.current, posOverlay.current, now)
+    const pend = overlayRows(serverPending.current, pendOverlay.current, now)
+    setPositions((prev) => keepIfEqual(prev, pos))
+    setPendingOrders((prev) => keepIfEqual(prev, pend))
+    window.clearTimeout(overlayTimer.current)
+    overlayTimer.current = undefined
+    const live = posOverlay.current.added.size + posOverlay.current.removed.size
+      + pendOverlay.current.added.size + pendOverlay.current.removed.size
+    if (live > 0) overlayTimer.current = window.setTimeout(() => remergeRef.current(), OPTIMISTIC_TTL_MS + 50)
+  }, [])
+  const remergeRef = useRef(remerge)
+  remergeRef.current = remerge
+  useEffect(() => () => window.clearTimeout(overlayTimer.current), [])
+  const applyReceipt = useCallback((order: Order, sltp?: SlTp) => {
+    const r = rowFromReceipt(order, sltp)
+    if (!r) return
+    const key = rowKey(r.row)
+    if (!key) return
+    if (r.kind === 'position') {
+      if (serverPositions.current.some((p) => rowKey(p) === key)) return
+      posOverlay.current.added.set(key, { item: r.row, at: Date.now() })
+    } else {
+      if (serverPending.current.some((p) => rowKey(p) === key)) return
+      pendOverlay.current.added.set(key, { item: r.row, at: Date.now() })
+    }
+    remerge()
+  }, [remerge])
+  const dropRow = useCallback((kind: 'position' | 'pending', row: { ticket?: number | null; login?: string | null }) => {
+    const key = rowKey(row)
+    if (!key) return
+    const ov = kind === 'position' ? posOverlay.current : pendOverlay.current
+    // 还没被服务器确认过的乐观行：直接撤掉就是了 / an unconfirmed optimistic row just goes
+    if (ov.added.delete(key)) {
+      remerge()
+      return
+    }
+    ov.removed.set(key, Date.now())
+    remerge()
+  }, [remerge])
   useEffect(() => onForeground(() => {
     const s = stashedPositions.current
     if (!s) return
@@ -723,7 +788,7 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         // 现有列表而不是清空。/ Whole-table replace, same as POSITIONS. The frame only
         // arrives when a channel actually reported, so an old bridge that reports no
         // pending orders leaves the list alone instead of blanking it.
-        setPendingOrders((prev) => keepIfEqual(prev, (msg.data as PendingOrder[]) || []))
+        applyPending((msg.data as PendingOrder[]) || [])
         break
       }
       case 'QUOTES': {
@@ -955,11 +1020,11 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LiveContextValue>(
     () => ({
       signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-      anyOnline, onlineAccounts, refreshAll, upsertOrder, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
+      anyOnline, onlineAccounts, refreshAll, upsertOrder, applyReceipt, dropRow, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
       backendUnreachable, closedTradeTick, announcementTick, notificationTick, refreshNotifications,
     }),
     [signals, strategySignals, orders, trends, activeSymbols, accounts, accountLimit, brokerLock, loaded,
-     anyOnline, onlineAccounts, refreshAll, upsertOrder, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
+     anyOnline, onlineAccounts, refreshAll, upsertOrder, applyReceipt, dropRow, refreshOrders, positionsLoaded, wsConnected, wsDisconnected,
      backendUnreachable, closedTradeTick, announcementTick, notificationTick, refreshNotifications]
   )
 
@@ -1010,7 +1075,7 @@ export function StaticLiveProvider({
     () => ({
       signals, strategySignals: [], orders: [], trends, activeSymbols, accounts: [], accountLimit: null,
       brokerLock: null, loaded: true, anyOnline: true, onlineAccounts: [], refreshAll: noopAsync,
-      upsertOrder: noop, refreshOrders: noopAsync, positionsLoaded: true, wsConnected: true,
+      upsertOrder: noop, applyReceipt: noop, dropRow: noop, refreshOrders: noopAsync, positionsLoaded: true, wsConnected: true,
       wsDisconnected: false, backendUnreachable: false, closedTradeTick: 0, announcementTick: 0,
       notificationTick: 0, refreshNotifications: noop,
     }),

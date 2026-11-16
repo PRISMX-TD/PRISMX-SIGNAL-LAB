@@ -84,8 +84,11 @@ def test_extras_match_standalone_endpoints(db_session, monkeypatch):
     assert set(ex) == {
         "/orders", "/auth/me", "/orders/winrate",
         "/announcements/popup", "/notifications/feed?limit=4", "/sentiment",
-        "/notifications/prefs", "/announcements", "/site/social", "/signals/strategy-analysis",
+        "/notifications/prefs", "/announcements", "/site/social",
     }
+    # 策略分析不再随首屏下发（2026-11-16，体验报告 M7）：只有仪表盘的一张卡用它。
+    # Strategy analysis no longer ships with the first screen (QA report M7).
+    assert "/signals/strategy-analysis" not in ex
     assert ex["/orders"] == jsonable_encoder(orders.list_orders(
         limit=100, offset=0, since=None, until=None, login=None, user=u, db=db_session))
     assert ex["/orders/winrate"] == jsonable_encoder(orders.order_winrate(login=None, user=u, db=db_session))
@@ -97,14 +100,12 @@ def test_extras_match_standalone_endpoints(db_session, monkeypatch):
     assert ex["/announcements/popup"] == jsonable_encoder(announcements.get_popup_announcement(db=db_session, user=u))
     assert ex["/sentiment"] == jsonable_encoder(sentiment.get_sentiment(user_id=u.id))
     from app.routers import site
-    from app.schemas import AdminStrategyWinRateOut, AnnouncementListOut
+    from app.schemas import AnnouncementListOut
     prefs = notifications.get_prefs(db=db_session, current_user=u)
     assert ex["/notifications/prefs"] == jsonable_encoder(notifications.NotificationPrefsOut.model_validate(prefs) if not isinstance(prefs, notifications.NotificationPrefsOut) else prefs)
     ann = announcements.list_announcements(db=db_session, user=u, limit=100)
     assert ex["/announcements"] == jsonable_encoder(AnnouncementListOut.model_validate(ann) if not isinstance(ann, AnnouncementListOut) else ann)
     assert ex["/site/social"] == jsonable_encoder(site.get_social_links(db=db_session))
-    sa = signals.strategy_analysis(_user=u, db=db_session)
-    assert ex["/signals/strategy-analysis"] == jsonable_encoder(AdminStrategyWinRateOut.model_validate(sa) if not isinstance(sa, AdminStrategyWinRateOut) else sa)
 
 
 def test_extras_failure_only_drops_that_entry(db_session, monkeypatch):

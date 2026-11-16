@@ -19,7 +19,10 @@ bridge.list_accounts，趋势走 10 秒共享缓存，报价/品种是纯内存�
 某一段失败时该段为 null 并列入 failed，其余照常返回——前端对 failed 里的段回退到逐个请求，
 不能因为 bootstrap 局部失败就判「后端不可达」（live.tsx 的 setBackendUnreachable 依赖
 signals/accounts 各自的成败）。带 ?extras=1 时另有 "extras"：{前端请求路径: 响应}，见下方 extras 一节
-（订单、me、胜率、公告、通知、情绪、社交链接、策略分析）；策略信号（仅管理员）不在本接口内。
+（订单、me、胜率、公告、通知、情绪、社交链接）；策略信号（仅管理员）不在本接口内。
+策略分析（/signals/strategy-analysis）2026-11-16 移出 extras：它占整个响应的三分之二（实测
+119 KB 里的 79 KB），而只有仪表盘的时段胜率卡用它——打开图表 / 订单页的人白下载，仪表盘上它
+也排在账户与信号之后，拖着整个首屏一起等不值得。现在由那张卡自己单独请求（体验报告 M7）。
 
 One read-only request for the Dashboard's base data. refreshAll fans out several calls
 and each pays a get_current_user (a users-table query plus a pooled connection). The
@@ -31,9 +34,12 @@ byte-identical to its standalone endpoint. A failing section is null and named i
 `failed`; the client falls back to the individual request for those and must not
 conclude "backend unreachable" from a partial failure. With ?extras=1 an "extras" map
 {frontend request path: response} adds orders, me, win rates, announcements,
-notifications, sentiment, social links and the strategy analysis (see the extras section below); strategy signals (admin
-only) are not included.
+notifications, sentiment and social links (see the extras section below); strategy signals (admin
+only) are not included. The strategy analysis left extras on 2026-11-16: two thirds of the
+response (79 of 119 KB) for one below-the-fold dashboard card, downloaded even on pages
+that never show it; the card now requests it on its own (QA report M7).
 """
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends
@@ -52,7 +58,7 @@ from app.routers import sentiment as sentiment_router
 from app.routers import signals as signals_router
 from app.routers import trends as trends_router
 from app.routers import site as site_router
-from app.schemas import AdminStrategyWinRateOut, AnnouncementListOut, AnnouncementPopupOut, NotificationFeedOut
+from app.schemas import AnnouncementListOut, AnnouncementPopupOut, NotificationFeedOut
 from app.services import quotes_store
 from app.services.deps import get_current_user
 
@@ -128,8 +134,6 @@ def _extra_sections(user: User, db: Session) -> dict:
         ("/announcements", lambda: _encode(
             announcements_router.list_announcements(db=db, user=user, limit=100), AnnouncementListOut)),
         ("/site/social", lambda: _encode(site_router.get_social_links(db=db))),
-        ("/signals/strategy-analysis", lambda: _encode(
-            signals_router.strategy_analysis(_user=user, db=db), AdminStrategyWinRateOut)),
     ):
         try:
             extras[path] = fn()
@@ -139,26 +143,47 @@ def _extra_sections(user: User, db: Session) -> dict:
     return extras
 
 
+def _db_sections(user: User, db: Session, extras: bool) -> tuple[dict, list[str]]:
+    """所有 DB 段在同一个线程、同一个会话里跑完（一次线程切换，一条连接）。
+    Every DB section in one thread on one session: one hop, one pooled connection."""
+    out, failed = _sync_sections(user, db)
+    if extras:
+        out["extras"] = _extra_sections(user, db)
+    return out, failed
+
+
+async def _gather_sections(user: User, db: Session, extras: bool):
+    async def _safe(name: str, coro, wrap: str):
+        try:
+            return {wrap: await coro}
+        except Exception:  # noqa: BLE001
+            logger.exception("bootstrap section failed: %s", name)
+            return None
+
+    return await asyncio.gather(
+        run_in_threadpool(_db_sections, user, db, extras),
+        _safe("quotes", quotes_store.get_all_async(), "quotes"),
+        _safe("symbols", quotes_store.get_active_symbols_async(), "symbols"),
+    )
+
+
 @router.get("", response_model=dict)
 async def get_bootstrap(
     extras: bool = False,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    out, failed = await run_in_threadpool(_sync_sections, user, db)
-    if extras:
-        out["extras"] = await run_in_threadpool(_extra_sections, user, db)
-    try:
-        out["quotes"] = {"quotes": await quotes_store.get_all_async()}
-    except Exception:  # noqa: BLE001
-        logger.exception("bootstrap section failed: quotes")
-        out["quotes"] = None
+    # 报价 / 品种是内存（或 Redis）读，与 DB 段并行，不再排在它们后面（体验报告 M7）。
+    # DB 段之间刻意不并行：那要多借连接，几百人同时打开时正是连接池最紧的时候。
+    # Quotes / symbols are memory (or Redis) reads and now run alongside the DB sections
+    # instead of after them (QA report M7). The DB sections stay serial on purpose: running
+    # them in parallel would borrow more pooled connections exactly when the pool is tightest.
+    (out, failed), quotes, symbols = await _gather_sections(user, db, extras)
+    out["quotes"] = quotes
+    out["symbols"] = symbols
+    if quotes is None:
         failed.append("quotes")
-    try:
-        out["symbols"] = {"symbols": await quotes_store.get_active_symbols_async()}
-    except Exception:  # noqa: BLE001
-        logger.exception("bootstrap section failed: symbols")
-        out["symbols"] = None
+    if symbols is None:
         failed.append("symbols")
     out["failed"] = failed
     return out

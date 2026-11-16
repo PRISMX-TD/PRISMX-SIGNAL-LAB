@@ -300,6 +300,10 @@ export default function ChartsPage() {
   // remembers which side of the trade bar opened the ticket. Desktop shows the
   // three columns and never mounts the sheets (see isDesktop below).
   const [sheet, setSheet] = useState<Sheet>(null)
+  // 抽屉里的持仓停靠区打开时落在哪个页签：下的是挂单就直接看挂单（体验报告 M3），其余
+  // 一律从持仓开始。/ Which dock tab the sheet opens on: a pending order lands on the
+  // orders tab (QA report M3); everything else starts on positions.
+  const [sheetDockTab, setSheetDockTab] = useState<'positions' | 'orders'>('positions')
   // 下单回来之后要判断「当时是不是从抽屉里下的」，必须读**那一刻**的值而不是渲染
   // 闭包里的：等回执期间用户完全可能自己把抽屉关了，那就不该再替他弹开。
   // Read at callback time, not from the render closure: the user can close the sheet
@@ -654,6 +658,7 @@ export default function ChartsPage() {
         // and shows a positions list that gained nothing.
         const settled = placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')
         if (afterPlaceOpen && !settled && sheetRef.current === 'trade') {
+          setSheetDockTab(placed?.action === 'PENDING' ? 'orders' : 'positions')
           setSheet('positions')
           // 抽屉切到持仓，下单票卸载，就地回执也跟着没了：这时补一条 toast，否则这一单没有任何回音。
           // Switching the sheet unmounts the ticket and its inline receipt; toast instead, or the
@@ -732,7 +737,7 @@ export default function ChartsPage() {
             <div className="term-tb">
               <IntervalSeg value={interval} onChange={setIntervalCode} />
               <div className="term-tbr">
-                <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => setSheet('positions')}>
+                <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => { setSheetDockTab('positions'); setSheet('positions') }}>
                   {t('charts.openPositions')} <b><PositionsCount scopeLogin={scopeLogin} /></b>
                 </button>
                 {/* 持仓标记 / 设置 / 指标：手机端搬到报价条第二行（mobileTools），这里只在桌面显示。
@@ -941,7 +946,7 @@ export default function ChartsPage() {
                 </>
               )}
               {shownSheet === 'positions' && (
-                <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
+                <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} initialTab={sheetDockTab} />
               )}
             </div>
           </div>

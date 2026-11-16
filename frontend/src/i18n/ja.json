@@ -243,6 +243,7 @@
     "inAppBrowserHint": "アプリ内ブラウザではGoogleログインを利用できません。右上の「···」から「ブラウザで開く」を選ぶか、メールアドレスで登録してください。"
   },
   "order": {
+    "symbolNotOffered": "この口座タイプでは {{symbol}} を取引できません。別の銘柄か口座を選んでください",
     "slideToConfirm": "スライドして確定"
   },
   "account": {

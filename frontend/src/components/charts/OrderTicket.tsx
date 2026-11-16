@@ -137,7 +137,7 @@ function OrderTicket({
   const market = useMarketStatus(symbol)
   const marketClosedText = useMarketClosedText(market)
   const canSubmit = form.hasAccounts && !form.slTpInvalid && form.priceError == null && !submitting
-    && !form.riskBelowMinLot && !market.closed
+    && !form.riskBelowMinLot && !market.closed && !form.symbolBlocked
   const ccy = selected?.accountCurrency ?? ''
 
   const submit = async () => {
@@ -181,7 +181,9 @@ function OrderTicket({
       } else if (placed && (placed.status === 'REJECTED' || placed.status === 'FAILED')) {
         showReceipt({ kind: 'error', msg: placed.message ? localizeApiError(placed.message) : String(t('charts.ticket.placeFailed')) })
       } else {
-        showReceipt({ kind: 'info', msg: String(t('charts.ticket.accepted')) }, 6000)
+        // 直连账户不经桥接，别让用户去等一个不存在的桥接程序（体验报告 M5）。
+        // A direct-linked account has no bridge to wait for (QA report M5).
+        showReceipt({ kind: 'info', msg: String(t(form.selected?.source === 'gateway' ? 'charts.ticket.acceptedGateway' : 'charts.ticket.accepted')) }, 6000)
       }
     } catch (e) {
       showReceipt({ kind: 'error', msg: e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')) })
@@ -373,9 +375,15 @@ function OrderTicket({
       </div>
 
       {!form.hasAccounts && (
-        <p className="term-warn">{accounts.length === 0 ? t('charts.ticket.noBridge') : t('charts.ticket.offline')}</p>
+        <p className="term-warn">{accounts.length === 0 ? t('charts.ticket.noBridge')
+          : accounts.every((a) => a.source === 'gateway') ? t('charts.ticket.offlineGateway') : t('charts.ticket.offline')}</p>
       )}
       {market.closed && <p className="term-warn">{marketClosedText}</p>}
+      {/* 选中账号所在组没开通这个品种：滑之前就说清楚，别等券商拒（体验报告 H2）。品种名跟抬头
+          一样用券商名（BTCUSD），不换成信号侧的 BTCUSDT。
+          The selected account's group doesn't offer the symbol: say so before sending. Named
+          the broker's way, as the ticket header is. */}
+      {form.symbolBlocked && <p className="term-warn">{t('order.symbolNotOffered', { symbol })}</p>}
 
       <button type="button" className={`term-cta ${isBuy ? 'buy' : 'sell'} ${submitting ? 'busy' : ''}`} disabled={!canSubmit} onClick={submit}>
         {submitting ? (

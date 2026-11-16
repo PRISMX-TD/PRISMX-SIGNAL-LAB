@@ -243,6 +243,7 @@
     "inAppBrowserHint": "You're in an in-app browser, where Google sign-in doesn't work. Tap the ··· menu and choose “Open in browser”, or sign up with your email."
   },
   "order": {
+    "symbolNotOffered": "{{symbol}} isn't available for this account type. Pick another symbol or account.",
     "slideToConfirm": "Slide to confirm"
   },
   "account": {

@@ -246,7 +246,7 @@
     "autoTriggerAt": "Trigger at",
     "autoTrailDistance": "trail distance",
     "autoPtpFraction": "close",
-    "autoScopeNote": "The stop only ever moves in your favor. Risk is never widened. Commands execute on your MT5 via the bridge; nothing happens while the bridge is offline.",
+    "autoScopeNote": "The stop only ever moves in your favor. Risk is never widened. Direct-linked accounts are handled by the server; bridge accounts need the bridge online.",
     "autoSaved": "Auto-management settings saved",
     "autoSaveError": "Your rules weren’t saved. Check your connection and try again",
     "autoSaveChanges": "Save changes",
@@ -537,8 +537,9 @@
       "potentialProfit": "Potential profit",
       "rr": "Risk/Reward",
       "requiredMargin": "Required margin",
-      "noBridge": "MT5 not connected: connect PRISMX Bridge first",
+      "noBridge": "No MT5 account to trade with yet. Link one first",
       "offline": "Account offline: connect the bridge first",
+      "offlineGateway": "The account can't reach the broker right now. Try again shortly",
       "submitting": "Submitting…",
       "place": "{{side}} · {{volume}} lots",
       "invalidVolume": "Invalid volume: enter at least the symbol’s minimum lot",
@@ -549,7 +550,8 @@
       "waitingFill": "Waiting for the broker",
       "filledAt": "Filled @ {{price}}",
       "accepted": "Accepted, waiting for the bridge to execute",
-      "footnote": "Market order, delivered to MT5 via PRISMX Bridge; the receipt lands on the Trade page.",
+      "acceptedGateway": "Accepted, on its way to the broker",
+      "footnote": "Market order, sent straight to your MT5 account; the receipt lands on the Trade page.",
       "entryMode": "Entry",
       "entry": {
         "MARKET": "Market",
@@ -614,6 +616,9 @@
       "confirmCloseMsg": "Close {{symbol}} {{side}} {{volume}} lots?",
       "triggerPrice": "Trigger",
       "cancelPendingTitle": "Cancel pending order",
+      "modifyPendingHead": "Edit trigger / SL / TP (blank SL or TP clears it)",
+      "pendingModified": "Pending order updated",
+      "pendingModifySent": "Pending-order change sent",
       "cancelPendingMsg": "Cancel {{symbol}} {{type}} {{volume}} lots @ {{price}}? This cannot be undone."
     },
     "autoOpenAfterPlace": "Open after placing",
@@ -730,6 +735,13 @@
       "FAILED": "Failed",
       "CANCELLED": "Cancelled"
     },
+    "statusDone": {
+      "CLOSE": "Closed",
+      "MODIFY": "Modified",
+      "MODIFY_PENDING": "Modified",
+      "CANCEL_PENDING": "Cancelled"
+    },
+    "fullClose": "All",
     "positions": "Open positions",
     "positionsScopeHint": "Only shows positions opened via PRISMX orders; positions you open manually in the MT5 client never appear here and are never affected by actions here.",
     "closeAll": {

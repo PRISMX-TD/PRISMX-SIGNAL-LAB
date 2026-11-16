@@ -856,6 +856,20 @@
 }
 .term-pr-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .term-pr-warn { font-size: 12px; color: var(--down); }
+/* 挂单「管理」是三格加一个按钮（持仓那边是两格）：手机 390 宽一行放不下（112×3 + 按钮 > 358），
+   按钮会被挤出屏幕。改成自动排列的网格：宽处一行四格；窄处三格一行，按钮落到第二行。
+   输入框不跟着缩，BTC 的价格照样放得下（见上面 112px 那条）。
+   The pending-order panel has three fields plus a button (positions have two). At 390px
+   wide they overflow and push the button off-screen; an auto-filling grid keeps four cells
+   on a row where there is room and drops the button to a second row on a phone, without
+   shrinking the fields below a BTC price. */
+.term-pr-xg--fill { flex: 1 1 100%; min-width: 0; }
+.term-pr-xr--grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  max-width: 480px;
+}
+.term-pr-xr--grid .term-pr-inp { width: 100%; min-width: 0; }
 
 /* ── 下单票 / order ticket ── */
 .term-tk {

@@ -17,13 +17,14 @@
 // online for the docked ticket) — that difference is intentional.
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MT5Account, OrderEntryType, PendingType, Quote } from '../../api/types'
-import { brokerSymbol, limitLotInput, clientOrderId } from '../../api/utils'
+import { accountLacksSymbol, brokerSymbol, limitLotInput, clientOrderId } from '../../api/utils'
 import { pickDefaultAccount, useLastAccount } from '../../utils/useLastAccount'
 import { useLastVolume } from '../../utils/useLastVolume'
 import { useAccountQuote } from '../../store/live'
 import {
   canSizeByRisk,
   checkPendingPrice,
+  defaultPendingPrice,
   checkSlTp,
   pendingTypeOf,
   clampLots,
@@ -63,6 +64,8 @@ export interface OrderForm {
   hasAccounts: boolean
   login: string
   selected: MT5Account | null
+  /** 选中账号所在的券商组没开通这个品种（体验报告 H2）/ the selected account's group lacks the symbol */
+  symbolBlocked: boolean
   /** 用户主动选择：会记忆 / explicit pick, remembered */
   chooseLogin: (login: string) => void
   quote: Quote | undefined
@@ -168,20 +171,38 @@ export function useOrderForm({
 
   // ---- 下单方式与触发价 / entry mode & trigger price ---------------------------
   const [entryType, setEntryTypeState] = useState<OrderEntryType>('MARKET')
-  const [price, setPrice] = useState('')
+  const [price, setPriceState] = useState('')
   const priceNum = parseOptionalNumber(price)
-  // 切到挂单时把触发价预填成当前市价：用户接下来要做的是「把它改到想挂的位置」，
-  // 从一个空框开始等于要求他先抄一遍现价。切回市价不清空——来回切一下不该丢掉
-  // 刚填的价格。/ Prefill the trigger with the current market when switching to a
-  // pending mode: the next thing the user does is nudge it, and an empty field would
-  // make them copy the current price by hand first. Switching back to MARKET keeps
-  // the value, so toggling twice doesn't discard what was typed.
+  // 触发价是不是我们预填的（用户还没动过）。预填的值在换挂单类型 / 换买卖方向时跟着换到
+  // 合法的一侧；用户自己填过的绝不覆盖。/ Whether the trigger is our prefill (untouched by
+  // the user): a prefill follows type / side changes to the valid side; a typed value is
+  // never overwritten.
+  const autoPrice = useRef(false)
+  const setPrice = (v: string) => { autoPrice.current = false; setPriceState(v) }
+  // 切到挂单时预填一个离现价一小步、落在合法一侧的触发价（见 defaultPendingPrice）：用户
+  // 接下来要做的是「把它改到想挂的位置」，空框等于要他先抄一遍现价，而直接填现价一定是
+  // 非法的（体验报告 M1）。切回市价不清空——来回切一下不该丢掉刚填的价格。
+  // Prefill a trigger a small step from the market on the valid side when switching to a
+  // pending mode (see defaultPendingPrice); the market price itself is never valid there
+  // (QA report M1). Switching back to MARKET keeps the value.
+  const prefillPrice = (t: OrderEntryType, buy: boolean) => {
+    const p = defaultPendingPrice(t, buy, bid, ask, quote?.digits)
+    if (p == null) return
+    autoPrice.current = true
+    setPriceState(String(p))
+  }
   const setEntryType = (t: OrderEntryType) => {
     setEntryTypeState(t)
-    if (t !== 'MARKET' && price.trim() === '' && marketRef != null) {
-      setPrice(marketRef.toString())
-    }
+    if (t !== 'MARKET' && (price.trim() === '' || autoPrice.current)) prefillPrice(t, isBuy)
   }
+  // 买卖方向换了：预填的触发价跟着换到合法的那一侧。/ Side flipped: move a prefill too.
+  const lastSide = useRef(isBuy)
+  useEffect(() => {
+    if (lastSide.current === isBuy) return
+    lastSide.current = isBuy
+    if (entryType !== 'MARKET' && autoPrice.current) prefillPrice(entryType, isBuy)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a side flip re-prefills
+  }, [isBuy])
   const pendingType = pendingTypeOf(isBuy, entryType)
   const priceError = checkPendingPrice(entryType, isBuy, priceNum, bid, ask)
 
@@ -320,6 +341,7 @@ export function useOrderForm({
 
   return {
     isBuy, accounts, hasAccounts: accounts.length > 0, login, selected, chooseLogin,
+    symbolBlocked: accountLacksSymbol(selected, symbol),
     quote, bid, ask, entryRef,
     entryType, setEntryType, price, setPrice, priceNum, priceError, pendingType,
     volume, setVolume, typeVolume, blurVolume, stepLot, parsedVolume,

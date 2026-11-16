@@ -246,7 +246,7 @@
     "autoTriggerAt": "発動条件",
     "autoTrailDistance": "追従幅",
     "autoPtpFraction": "決済",
-    "autoScopeNote": "損切りは有利な方向にのみ移動し、リスクが広がることはありません。指示はBridge経由でお使いのMT5で執行され、Bridgeがオフラインの間は何も実行されません。",
+    "autoScopeNote": "損切りは有利な方向にのみ移動し、リスクが広がることはありません。直結口座はサーバーが自動で執行し、Bridge口座はBridgeがオンラインのときに執行されます。",
     "autoSaved": "自動管理の設定を保存しました",
     "autoSaveError": "ルールを保存できませんでした。通信状態を確認して、もう一度お試しください",
     "autoSaveChanges": "変更を保存",
@@ -537,8 +537,9 @@
       "potentialProfit": "想定利益",
       "rr": "リスクリワード",
       "requiredMargin": "必要証拠金",
-      "noBridge": "MT5未連携です。先にPRISMX Bridgeを接続してください",
+      "noBridge": "取引できるMT5口座がまだありません。先に口座を連携してください",
       "offline": "口座がオフラインです。先にBridgeを接続してください",
+      "offlineGateway": "口座が一時的にブローカーへ接続できません。しばらくしてからお試しください",
       "submitting": "送信中…",
       "place": "{{side}} · {{volume}} ロット",
       "invalidVolume": "数量が無効です：この銘柄の最小ロット以上の数値を入力してください",
@@ -549,7 +550,8 @@
       "waitingFill": "ブローカーの応答待ち",
       "filledAt": "約定 @ {{price}}",
       "accepted": "受付済み。Bridgeでの執行待ち",
-      "footnote": "成行注文はPRISMX Bridge経由でMT5に送信され、結果は「取引」ページに記録されます。",
+      "acceptedGateway": "受付済み。ブローカーへ送信中",
+      "footnote": "成行注文はお使いのMT5口座に直接送信され、結果は「取引」ページに記録されます。",
       "entryMode": "執行方法",
       "entry": {
         "MARKET": "成行",
@@ -614,6 +616,9 @@
       "confirmCloseMsg": "{{symbol}} {{side}} {{volume}} ロットを決済しますか？",
       "triggerPrice": "トリガー",
       "cancelPendingTitle": "注文の取消",
+      "modifyPendingHead": "トリガー価格・SL・TPを変更（SL/TPは空欄で解除）",
+      "pendingModified": "待機注文を変更しました",
+      "pendingModifySent": "待機注文の変更を送信しました",
       "cancelPendingMsg": "{{symbol}} {{type}} {{volume}} ロット @ {{price}} を取消しますか？この操作は元に戻せません。"
     },
     "autoOpenAfterPlace": "発注後に開く",
@@ -730,6 +735,13 @@
       "FAILED": "失敗",
       "CANCELLED": "取消済み"
     },
+    "statusDone": {
+      "CLOSE": "決済済み",
+      "MODIFY": "変更済み",
+      "MODIFY_PENDING": "変更済み",
+      "CANCEL_PENDING": "取消済み"
+    },
+    "fullClose": "全量",
     "positions": "保有ポジション",
     "positionsScopeHint": "PRISMXから発注したポジションのみ表示されます。MT5クライアントで手動で建てたポジションはここに表示されず、ここでの操作の影響も受けません。",
     "closeAll": {

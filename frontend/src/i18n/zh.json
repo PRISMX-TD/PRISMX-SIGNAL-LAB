@@ -243,6 +243,7 @@
     "inAppBrowserHint": "当前是 App 内置浏览器，无法使用 Google 登录。请点右上角「···」选择「在浏览器中打开」，或直接用邮箱注册。"
   },
   "order": {
+    "symbolNotOffered": "当前账户类型没有开通 {{symbol}}，换一个品种或换一个账户再下单",
     "slideToConfirm": "滑动确认下单"
   },
   "account": {

@@ -12,6 +12,7 @@ import { calcRiskReward, displaySymbol, parseTime } from '../../api/utils'
 import { effectiveStatus, fmtIssueClock, fmtPx, priceDecimals, resultLabel, resultTone, riskFraction, rrTone, type DisplaySignal } from './SignalView'
 import TtlRing from './TtlRing'
 import { useClock, useNewSignalIds } from './hooks'
+import { useSteadyList } from './useSteadyList'
 import { symbolMeta } from '../../utils/symbolMeta'
 import FestivalEmpty from '../../festival/FestivalEmpty'
 import { FestivalBurst } from '../../festival/FestivalDecor'
@@ -294,6 +295,13 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
     }
     return list
   }, [signals, effectiveSymbols, effectiveStrategies, sortF, isFree])
+  // 新信号 / 到期信号不在手指底下挪动列表（体验报告 H3，见 useSteadyList）。改筛选、改排序
+  // 是用户自己要的变化，立即生效。/ Data-driven arrivals and removals wait until the user's
+  // hands are still; filter and sort changes are the user's own and apply at once.
+  const { items: shown, recentlyShifted } = useSteadyList(
+    filtered,
+    `${sortF}|${effectiveSymbols.join(',')}|${effectiveStrategies.join(',')}`,
+  )
 
   return (
     <div>
@@ -387,7 +395,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
 
       {/* Signal grid */}
       <div className="sig-grid">
-        {filtered.length === 0 && (
+        {shown.length === 0 && (
           // 选了具体品种却筛不出东西，和整个面板本来就空，是两回事：前者要说清楚
           // 「这个品种现在没有信号」，不然读者会以为筛选器坏了。
           // Filtering to a symbol with no hits is not the same as an empty panel:
@@ -403,7 +411,7 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
             )}
           </div>
         )}
-        {filtered.map((sig, idx) => {
+        {shown.map((sig, idx) => {
           const oRr = calcRiskReward(sig.symbol, sig.entry, sig.stopLoss, sig.takeProfit)
           const isBuy = sig.side === 'BUY'
           // FREE 用户是这个网格里唯一会看到 EXPIRED 信号的人(PRO 已在上面被过滤掉)；
@@ -515,7 +523,10 @@ const SignalGrid: FC<Props> = ({ signals, onTrade, userPlan, activeSymbols }) =>
                   <Countdown expireAt={sig.expireAt} label={t('signals.focus.remainingTtl')} />
                 )}
                 <button
-                  onClick={() => !isExpired && onTrade(sig)}
+                  // 列表刚挪过一下（新信号插进来 / 有信号到期）就按下的那一下不认：多半本来要点的
+                  // 是被挤开的那一张。/ A tap right after the list shifted most likely meant the
+                  // card that just moved away; ignore it.
+                  onClick={() => !isExpired && !recentlyShifted() && onTrade(sig)}
                   disabled={isExpired}
                   className={`btn sig-cta ${isExpired ? 'btn-secondary' : 'btn-primary'}`}
                 >

@@ -93,7 +93,7 @@ function PositionCard({ position: p, onActionDone, mobile = false, externalClosi
   // Idempotency ids for close / modify: reused only when no response was received.
   const [idemKeys] = useState(createIdempotencyKeys)
   // 回执并入本地订单列表，不再整页重拉 /orders / merge the receipt locally instead of refetching /orders
-  const { upsertOrder } = useLive()
+  const { upsertOrder, dropRow } = useLive()
   // 手数步长按品种取（原油 0.1，其余 0.01）：步长决定输入框的 step/min，
   // 也决定失焦时往下吸附到哪一档。/ Per-symbol lot step drives the input.
   const step = lotStep(p.symbol)
@@ -184,7 +184,11 @@ function PositionCard({ position: p, onActionDone, mobile = false, externalClosi
       if (res.status === 'FILLED') {
         onActionDone?.(t('positions.closed', { price: res.filledPrice != null ? res.filledPrice : EMPTY }), 'success')
         if (!full) releaseNow()
-        else releaseLater()
+        else {
+          // 全平当场成交：卡片立刻拿掉，不等下一帧持仓推送。/ A filled full close drops the card now.
+          dropRow('position', p)
+          releaseLater()
+        }
       } else if (res.status === 'REJECTED' || res.status === 'FAILED') {
         releaseNow()
         onActionDone?.(res.message ? localizeApiError(res.message) : t('positions.closeFailed'), 'error')

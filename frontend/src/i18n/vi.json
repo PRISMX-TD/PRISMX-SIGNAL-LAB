@@ -243,6 +243,7 @@
     "inAppBrowserHint": "Bạn đang dùng trình duyệt trong ứng dụng, nơi không thể đăng nhập bằng Google. Nhấn menu ··· và chọn “Mở trong trình duyệt”, hoặc đăng ký bằng email."
   },
   "order": {
+    "symbolNotOffered": "Loại tài khoản này không giao dịch được {{symbol}}. Hãy chọn mã khác hoặc tài khoản khác.",
     "slideToConfirm": "Trượt để xác nhận"
   },
   "account": {

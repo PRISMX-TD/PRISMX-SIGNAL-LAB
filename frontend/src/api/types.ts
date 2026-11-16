@@ -1152,6 +1152,11 @@ export interface MT5Account {
   // determined. Consumers must treat unknown as "not real", never
   // default-allow (e.g. the competition registration picker).
   tradeMode?: number | null
+  // 这个账号所在券商组已知做不了的品种（券商基础名，如 BTCUSD），后端从网关的「组没有
+  // 开通」拒单里学来。下单票据此提前说明并禁用下单，见 accountLacksSymbol。
+  // Symbols the account's broker group is known not to offer (broker base names), learned
+  // by the backend from gateway rejections; tickets warn and disable up front.
+  blockedSymbols?: string[]
 }
 
 export interface Quote {

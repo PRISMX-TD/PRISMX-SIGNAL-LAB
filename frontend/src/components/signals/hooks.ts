@@ -50,7 +50,7 @@ export interface SubmitOrderOptions {
  */
 export function useOrderPlacement() {
   const { t } = useTranslation()
-  const { orders, upsertOrder } = useLive()
+  const { orders, upsertOrder, applyReceipt } = useLive()
   const { toast, showToast } = useToastState()
   // 正在等待回执的订单 id 集合。两件事必须这样：
   // ① 是**集合**不是单个 id：终端下单票允许连续下多单（成功即 rotateOrderId），
@@ -162,6 +162,9 @@ export function useOrderPlacement() {
       // list (upsertOrder is regress-safe: a WS terminal state is never overwritten by this
       // PENDING receipt); positions / pending orders ride the WS.
       upsertOrder(placed)
+      // 网关当场成交 / 挂出：持仓或挂单先画出来，不等下一帧推送（见 optimisticRows.ts）。
+      // A gateway fill / placement draws its row now instead of waiting for the next push.
+      applyReceipt(placed, { stopLoss: payload.stopLoss, takeProfit: payload.takeProfit })
       const answered = placed.status === 'PLACED' || placed.status === 'FILLED'
         || placed.status === 'REJECTED' || placed.status === 'FAILED'
       // 滑动确认弹窗的路径：抛错，让 OrderSheet 走错误回执，不弹 toast（见 SubmitOrderOptions）。
@@ -194,7 +197,7 @@ export function useOrderPlacement() {
       fallbackTimers.current.set(placed.id, timer)
       return placed
     },
-    [upsertOrder, settle, showToast, reportPlaced, t]
+    [upsertOrder, applyReceipt, settle, showToast, reportPlaced, t]
   )
 
   const placeOrder = useCallback(

@@ -1571,6 +1571,11 @@ class MT5AccountOut(BaseModel):
     # (see services/account_type.py). Consumers (e.g. the competition
     # registration picker) must treat None as "not real", never default-allow.
     tradeMode: int | None = None
+    # 这个账号所在的券商组已知做不了的品种（券商基础名，如 BTCUSD），从网关的「组没有
+    # 开通」拒单里学来（services/symbol_availability.py）。下单票据此提前说明并禁用下单。
+    # Symbols this account's broker group is known not to offer (broker base names),
+    # learned from the gateway's rejections; the order ticket warns and disables up front.
+    blockedSymbols: list[str] = []
 
 
 class AccountSuffixRequest(BaseModel):

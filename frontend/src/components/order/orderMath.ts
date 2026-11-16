@@ -145,6 +145,37 @@ export function pendingTypeOf(isBuy: boolean, entryType: OrderEntryType): Pendin
  * no quote available nothing is judged: better to let the server decide than to block
  * a valid order over a missing local price.
  */
+// 挂单触发价的默认值离现价多远（占价格比例）：黄金 2650 时约 2.65，EURUSD 约 11 点。
+// How far the default trigger sits from the market, as a fraction of price.
+export const PENDING_DEFAULT_OFFSET_PCT = 0.001
+
+/**
+ * 切到限价 / 止损挂单时预填的触发价（体验报告 M1）。以前预填的是现价本身，而挂单价必须
+ * 严格在现价的某一侧，于是一切过去就是红字、按钮点了没反应。现在离现价一小步、落在这种
+ * 挂单要求的那一侧，并且往远离现价的方向取整，取整不会把它拉回现价上。
+ * The trigger prefilled on switching to a limit / stop (QA report M1). It used to be the
+ * market price itself, which is never valid for a pending order; now it sits a small step
+ * away on the side this order type requires, rounded away from the market.
+ */
+export function defaultPendingPrice(
+  entryType: OrderEntryType,
+  isBuy: boolean,
+  bid: number | null,
+  ask: number | null,
+  digits?: number | null,
+): number | null {
+  if (entryType === 'MARKET') return null
+  const ref = isBuy ? ask : bid
+  if (ref == null || !(ref > 0)) return null
+  const d = digits != null && digits >= 0 ? digits : Math.min(5, (String(ref).split('.')[1] ?? '').length)
+  const factor = 10 ** d
+  const off = Math.max(1 / factor, ref * PENDING_DEFAULT_OFFSET_PCT)
+  const wantAbove = isBuy ? entryType === 'STOP' : entryType === 'LIMIT'
+  const raw = wantAbove ? ref + off : ref - off
+  const rounded = wantAbove ? Math.ceil(raw * factor - 1e-9) / factor : Math.floor(raw * factor + 1e-9) / factor
+  return Number(rounded.toFixed(d))
+}
+
 export function checkPendingPrice(
   entryType: OrderEntryType,
   isBuy: boolean,

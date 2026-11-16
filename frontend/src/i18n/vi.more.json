@@ -246,7 +246,7 @@
     "autoTriggerAt": "Kích hoạt tại",
     "autoTrailDistance": "khoảng cách trailing",
     "autoPtpFraction": "đóng",
-    "autoScopeNote": "SL chỉ dời theo hướng có lợi cho bạn. Rủi ro không bao giờ bị nới rộng. Lệnh được thực thi trên MT5 của bạn qua Bridge; khi Bridge ngoại tuyến sẽ không có gì xảy ra.",
+    "autoScopeNote": "SL chỉ dời theo hướng có lợi cho bạn. Rủi ro không bao giờ bị nới rộng. Tài khoản kết nối trực tiếp do máy chủ thực thi; tài khoản Bridge cần Bridge trực tuyến.",
     "autoSaved": "Đã lưu cài đặt quản lý tự động",
     "autoSaveError": "Chưa lưu được quy tắc. Kiểm tra kết nối rồi thử lại",
     "autoSaveChanges": "Lưu thay đổi",
@@ -537,8 +537,9 @@
       "potentialProfit": "Lợi nhuận tiềm năng",
       "rr": "Tỷ lệ R:R",
       "requiredMargin": "Ký quỹ cần thiết",
-      "noBridge": "Chưa kết nối MT5: hãy kết nối PRISMX Bridge trước",
+      "noBridge": "Chưa có tài khoản MT5 để giao dịch. Hãy liên kết một tài khoản trước",
       "offline": "Tài khoản ngoại tuyến: hãy kết nối Bridge trước",
+      "offlineGateway": "Tài khoản tạm thời không kết nối được sàn, vui lòng thử lại sau",
       "submitting": "Đang gửi…",
       "place": "{{side}} · {{volume}} lot",
       "invalidVolume": "Khối lượng không hợp lệ: nhập số không nhỏ hơn lot tối thiểu của mã này",
@@ -549,7 +550,8 @@
       "waitingFill": "Đang chờ sàn",
       "filledAt": "Đã khớp @ {{price}}",
       "accepted": "Đã tiếp nhận, đang chờ Bridge thực thi",
-      "footnote": "Lệnh thị trường, được gửi tới MT5 qua PRISMX Bridge; phản hồi hiển thị ở trang Giao dịch.",
+      "acceptedGateway": "Đã tiếp nhận, đang gửi tới sàn",
+      "footnote": "Lệnh thị trường, được gửi thẳng tới tài khoản MT5 của bạn; phản hồi hiển thị ở trang Giao dịch.",
       "entryMode": "Kiểu vào lệnh",
       "entry": {
         "MARKET": "Thị trường",
@@ -614,6 +616,9 @@
       "confirmCloseMsg": "Đóng {{symbol}} {{side}} {{volume}} lot?",
       "triggerPrice": "Giá kích hoạt",
       "cancelPendingTitle": "Hủy lệnh chờ",
+      "modifyPendingHead": "Sửa giá kích hoạt / SL / TP (để trống SL hoặc TP để xóa)",
+      "pendingModified": "Đã sửa lệnh chờ",
+      "pendingModifySent": "Đã gửi yêu cầu sửa lệnh chờ",
       "cancelPendingMsg": "Hủy {{symbol}} {{type}} {{volume}} lot @ {{price}}? Không thể hoàn tác."
     },
     "autoOpenAfterPlace": "Mở sau khi đặt lệnh",
@@ -730,6 +735,13 @@
       "FAILED": "Thất bại",
       "CANCELLED": "Đã hủy"
     },
+    "statusDone": {
+      "CLOSE": "Đã đóng",
+      "MODIFY": "Đã sửa",
+      "MODIFY_PENDING": "Đã sửa",
+      "CANCEL_PENDING": "Đã hủy"
+    },
+    "fullClose": "Toàn bộ",
     "positions": "Vị thế đang mở",
     "positionsScopeHint": "Chỉ hiển thị vị thế mở qua lệnh PRISMX; vị thế bạn mở thủ công trên MT5 sẽ không bao giờ xuất hiện ở đây và không bị ảnh hưởng bởi thao tác tại đây.",
     "closeAll": {

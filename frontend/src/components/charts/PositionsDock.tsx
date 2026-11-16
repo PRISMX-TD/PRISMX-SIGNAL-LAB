@@ -22,6 +22,7 @@ import { checkSlTp } from '../order/orderMath'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { createIdempotencyKeys } from '../../utils/idempotencyKeys'
 import ConfirmModal from '../ConfirmModal'
+import PendingEditor, { type PendingEdit } from './PendingEditor'
 import { onRovingKeyDown } from '../../utils/rovingTabs'
 import { useFirstReveal } from '../../utils/useFirstReveal'
 import { EMPTY } from '../../utils/format'
@@ -49,6 +50,8 @@ interface Props {
   // the button closes positions that aren't on screen.
   mt5Login?: string | null
   accountLabel?: string
+  // 打开时落在哪个页签（手机抽屉下完挂单直接看挂单）/ the tab to open on
+  initialTab?: Tab
 }
 
 type Tab = 'positions' | 'orders'
@@ -91,20 +94,22 @@ const FRESH_GRACE_MS = 3000
 // Sentinel busyId for the in-flight close-all (other values are p-<ticket> / o-<id>).
 const CLOSE_ALL_ID = 'close-all'
 
-function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '' }: Props) {
+function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, className = '', mt5Login = null, accountLabel = '', initialTab = 'positions' }: Props) {
   const { t } = useTranslation()
   // 首帧持仓还没到时显示骨架而不是「暂无持仓」，见 live.tsx 的 positionsLoaded。
   // Skeleton rather than "no positions" until the first frame; see positionsLoaded.
-  const { positionsLoaded, upsertOrder } = useLive()
+  const { positionsLoaded, upsertOrder, dropRow } = useLive()
   // 平仓 / 改单 / 撤挂单的幂等号：只在「没拿到任何响应」时复用，见 idempotencyKeys.ts。
   // Idempotency ids for close / modify / cancel-pending: reused only when no response arrived.
   const [idemKeys] = useState(createIdempotencyKeys)
-  const [tab, setTab] = useState<Tab>('positions')
+  const [tab, setTab] = useState<Tab>(initialTab)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [pending, setPending] = useState<Pending | null>(null)
   // 展开做部分平仓 / 改止损止盈的仓位 ticket，及其表单值 / expanded position for
   // partial-close / modify, plus its form values
   const [expanded, setExpanded] = useState<number | null>(null)
+  // 展开改价的挂单 ticket（体验报告 M2）/ the pending order whose edit panel is open
+  const [expandedQ, setExpandedQ] = useState<number | null>(null)
   const [form, setForm] = useState<{ vol: string; sl: string; tp: string }>({ vol: '', sl: '', tp: '' })
   // 展开那一刻填进表单的值。用来区分"用户改过这一格"与"还是打开时那个快照"：
   // 桥接推来新的止损止盈后，没被用户碰过的格子要跟着更新，否则用户只改止盈按下
@@ -288,6 +293,8 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
       inFlightTickets.current.delete(ticket)
       markClosing(ticket, p.volume, partial)
       if (res.status === 'FILLED') {
+        // 全平当场成交：行立刻拿掉，不等下一帧持仓推送。/ A filled full close drops the row now.
+        if (!partial) dropRow('position', p)
         const px = res.filledPrice != null ? res.filledPrice.toFixed(digitsFor(p.symbol)) : EMPTY
         onToast(
           partial
@@ -391,6 +398,37 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
     }
   }
 
+  // 改一张真实的 MT5 挂单（触发价 / 止损 / 止盈，只发改了的项）。/ Modify a real pending
+  // order: trigger / SL / TP, only the changed fields are sent.
+  const modifyPendingOrder = async (o: PendingOrder, edit: PendingEdit) => {
+    setBusyId(`q-${o.ticket}`)
+    const idemKey = `modp:${o.ticket}:${edit.price ?? ''}:${edit.stopLoss ?? ''}:${edit.takeProfit ?? ''}`
+    let answered = false
+    try {
+      const res = await orderApi.modifyPending({
+        clientOrderId: idemKeys.acquire(idemKey),
+        ticket: o.ticket,
+        symbol: o.symbol,
+        mt5Login: o.login ?? null,
+        ...edit,
+      })
+      answered = true
+      idemKeys.settle(idemKey)
+      upsertOrder(res)
+      if (res.status === 'REJECTED' || res.status === 'FAILED') {
+        onToast(res.message ? localizeApiError(res.message) : String(t('charts.dock.modifyFailed')), 'error')
+      } else {
+        onToast(String(t(res.status === 'FILLED' ? 'charts.dock.pendingModified' : 'charts.dock.pendingModifySent')), res.status === 'FILLED' ? 'success' : 'info')
+        setExpandedQ(null)
+      }
+    } catch (e) {
+      if (!answered) idemKeys.afterThrow(idemKey, e)
+      onToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.dock.modifyFailed')), 'error')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   // 撤一张真实的 MT5 挂单。走 orderApi.cancelPending（发指令到券商），不是
   // orderApi.cancel（只作废平台指令行）——两者名字像，作用完全不同。
   // Cancel a real MT5 pending order via orderApi.cancelPending, which sends a command
@@ -415,6 +453,8 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
       if (res.status === 'REJECTED' || res.status === 'FAILED') {
         onToast(res.message ? localizeApiError(res.message) : String(t('charts.dock.cancelFailed')), 'error')
       } else {
+        // 网关当场撤掉了：行立刻拿掉，不等下一拍挂单快照。/ Cancelled on the spot: drop the row now.
+        if (res.status === 'FILLED') dropRow('pending', o)
         onToast(String(t('charts.dock.cancelSent')), 'info')
       }
     } catch (e) {
@@ -647,8 +687,11 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
               const meta = symbolMeta(o.symbol)
               const isBuy = o.side === 'BUY'
               const d = digitsFor(o.symbol)
+              const qBusy = busyId === `q-${o.ticket}`
+              const qOpen = expandedQ === o.ticket
               return (
-                <div key={`q-${o.login ?? ''}-${o.ticket}`} className={`term-pr pend q${rowReveal ? ' is-in' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(i, 5) * 30}ms` } : undefined}>
+                <Fragment key={`q-${o.login ?? ''}-${o.ticket}`}>
+                <div className={`term-pr pend q${rowReveal ? ' is-in' : ''} ${qOpen ? 'open' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(i, 5) * 30}ms` } : undefined}>
                   <div className="term-pr-id">
                     <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
                     <b>{displaySymbol(o.symbol)}</b>
@@ -660,11 +703,26 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                   <Cell k={String(t('charts.ticket.sl'))} v={o.stopLoss ? fmt(o.stopLoss, d) : EMPTY} area="c-sl" />
                   <Cell k={String(t('charts.ticket.tp'))} v={o.takeProfit ? fmt(o.takeProfit, d) : EMPTY} area="c-tp" />
                   <div className="term-pa">
-                    <button type="button" className="warn" disabled={busyId === `q-${o.ticket}`} onClick={() => setPending({ kind: 'cancelPending', order: o })}>
+                    <button type="button" className="warn" disabled={qBusy} onClick={() => setPending({ kind: 'cancelPending', order: o })}>
                       {t('charts.dock.cancel')}
+                    </button>
+                    <button type="button" className={qOpen ? 'on' : ''} aria-expanded={qOpen} disabled={qBusy} onClick={() => setExpandedQ(qOpen ? null : o.ticket)}>
+                      {t('charts.dock.manage')}
                     </button>
                   </div>
                 </div>
+                {qOpen && (
+                  // key 带上现值：快照把价位改了（拖线改单、别的设备）就用新值重开表单。
+                  // Keyed by the current levels so a changed snapshot reopens the form fresh.
+                  <PendingEditor
+                    key={`${o.price}:${o.stopLoss ?? ''}:${o.takeProfit ?? ''}`}
+                    order={o}
+                    digits={d}
+                    busy={qBusy}
+                    onSubmit={(edit) => void modifyPendingOrder(o, edit)}
+                  />
+                )}
+                </Fragment>
               )
             })}
             {/* 平台指令在路上（还没到券商）。与上面那组分开，因为「撤」的含义不同：

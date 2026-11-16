@@ -28,7 +28,9 @@ export const PREFETCH_PATHS: ReadonlySet<string> = new Set([
   '/notifications/prefs',
   '/announcements',
   '/site/social',
-  '/signals/strategy-analysis',
+  // '/signals/strategy-analysis' 2026-11-16 移出（体验报告 M7）：79 KB、只有仪表盘一张卡用，
+  // 不再拖着首屏一起等，见 backend/app/routers/bootstrap.py。
+  // Removed 2026-11-16 (QA report M7): 79 KB for one dashboard card; see bootstrap.py.
 ])
 
 const TTL_MS = 15_000

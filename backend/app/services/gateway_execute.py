@@ -38,6 +38,7 @@ from app.services.order_payload import (
     order_update_payload,
 )
 from app.services.symbol_aliases import broker_symbol
+from app.services.symbol_availability import friendly_message, note_blocked, parse_gateway_missing
 
 # 日志名沿用 prismx.orders：运维按它 grep 网关执行日志，搬文件不该改日志面貌。
 # Keeps the prismx.orders logger name so existing log greps still match.
@@ -351,7 +352,16 @@ def apply_trade_result(order: Order, rsp: TradeRsp) -> None:
         order.message = _failure_message(rsp)
     else:
         order.status = "REJECTED"
-        order.message = _failure_message(rsp)
+        # 账号所在组没开通这个品种：换成一句人话（不带错误码和组名），并记下这个组，
+        # 之后同组的账号在下单票上就会被提前拦住（见 symbol_availability.py）。
+        # The account's group doesn't offer the symbol: plain words instead of the code
+        # and group name, and remember the group so its accounts are warned up front.
+        missing = parse_gateway_missing(rsp.message)
+        if missing:
+            note_blocked(*missing)
+            order.message = friendly_message(missing[1])
+        else:
+            order.message = _failure_message(rsp)
 
 
 # 一次网关交易调用的时限（秒）。dealer 回执最长 60 秒（gateway.ini 的

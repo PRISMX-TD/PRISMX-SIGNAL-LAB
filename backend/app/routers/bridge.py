@@ -55,6 +55,7 @@ from app.services.settings_store import (
     server_matches_broker,
 )
 from app.services.symbol_aliases import broker_symbol
+from app.services.symbol_availability import blocked_symbols
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
 from app.services.trade_performance import invalidate_trade_caches, known_position_ids, mark_positions_seen
 
@@ -2422,6 +2423,8 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
         .order_by(MT5Account.login.asc())
         .all()
     )
+    # 每个组只查一次（缓存命中时是纯内存读）/ one lookup per group (memory read when cached)
+    blocked = {r.mt5_group: blocked_symbols(db, r.mt5_group) for r in rows if r.mt5_group}
     accounts = [
         MT5AccountOut(
             login=r.login,
@@ -2440,6 +2443,7 @@ def list_accounts(user: User = Depends(get_current_user), db: Session = Depends(
             needsReverify=is_revoked(r),
             revokedReason=r.revoked_reason,
             tradeMode=r.trade_mode,
+            blockedSymbols=blocked.get(r.mt5_group, []) if r.mt5_group else [],
         )
         for r in rows
     ]

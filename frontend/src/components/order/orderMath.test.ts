@@ -19,7 +19,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { checkPendingPrice, checkSlTp, clampLots, normalizeVolume, parseOptionalNumber, pendingTypeOf, riskBelowMinLot, sanitizeDecimal, suggestVolumeForRisk } from './orderMath'
+import { checkPendingPrice, checkSlTp, defaultPendingPrice, clampLots, normalizeVolume, parseOptionalNumber, pendingTypeOf, riskBelowMinLot, sanitizeDecimal, suggestVolumeForRisk } from './orderMath'
 import { isBelowMinLot, rawVolumeByRisk, suggestVolumeByRisk } from '../../api/utils'
 
 // ---------------------------------------------------------------------------
@@ -197,6 +197,32 @@ describe('pendingTypeOf', () => {
 
   it('市价单没有挂单类型', () => {
     expect(pendingTypeOf(true, 'MARKET')).toBeNull()
+  })
+})
+
+describe('defaultPendingPrice', () => {
+  const BID = 3300
+  const ASK = 3300.4
+
+  it('四种挂单的预填价都直接合法（体验报告 M1：以前预填现价，一切过去就是红字）', () => {
+    for (const isBuy of [true, false]) {
+      for (const t of ['LIMIT', 'STOP'] as const) {
+        const p = defaultPendingPrice(t, isBuy, BID, ASK, 2)
+        expect(p).not.toBeNull()
+        expect(checkPendingPrice(t, isBuy, p, BID, ASK)).toBeNull()
+      }
+    }
+  })
+
+  it('离现价约 0.1%，按报价精度往远离现价的方向取整', () => {
+    expect(defaultPendingPrice('LIMIT', true, BID, ASK, 2)).toBe(3297.09)
+    expect(defaultPendingPrice('STOP', true, BID, ASK, 2)).toBe(3303.71)
+    expect(defaultPendingPrice('LIMIT', false, 1.08, 1.08012, 5)).toBe(1.08108)
+  })
+
+  it('市价单或没有报价时不预填', () => {
+    expect(defaultPendingPrice('MARKET', true, BID, ASK)).toBeNull()
+    expect(defaultPendingPrice('LIMIT', true, null, null)).toBeNull()
   })
 })
 

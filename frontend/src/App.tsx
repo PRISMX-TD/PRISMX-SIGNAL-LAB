@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { lazyRetry } from './utils/lazyRetry'
 import { onIdle, shouldSkipPrefetch } from './utils/idle'
-import { getToken } from './api/client'
+import { bootstrapApi, getToken } from './api/client'
 import { ensureMoreLocale, i18nReady, storedLang, syncLanguage } from './i18n'
 import { isHomeRoot, langFromPath, pageFromPath, type PageId } from './seo/meta'
 import {
@@ -164,6 +164,9 @@ const PUBLIC_PAGE_COMPONENTS: Record<PageId, HasPreload> = {
 }
 
 // 登录后直达时顺手并行拉的页面（精确路径）。/ Pages warmed on direct entry (exact paths).
+// 已登录也会停留、但不在 Layout 里的路由（见下方路由表）。/ Routes outside Layout a signed-in user can sit on.
+const OUTSIDE_LAYOUT = new Set(['/login', '/forgot-password', '/reset-password', '/verify-email', '/complete-profile'])
+
 const APP_ROUTE_PAGES: Record<string, HasPreload> = {
   '/dashboard': DashboardPage,
   '/app': SignalsPage,
@@ -261,6 +264,15 @@ export function bootPreload(pathname: string): Promise<void> {
   }
   if (authed) {
     const target = pub ? '/dashboard' : pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+    // 首屏数据现在就发，与外壳 chunk 的下载并行：以前要等 Layout 下载、渲染到 LiveProvider
+    // 才发出（体验报告 M6）。LiveProvider 里同一个 firstLoad 会复用这一次（按 token 记住）。
+    // Start the first-screen data now, alongside the shell chunk download; it used to wait
+    // for Layout to load and render LiveProvider (QA report M6). LiveProvider's firstLoad
+    // reuses this one (remembered per token).
+    // 登录流程里那几页（验证邮箱、补资料、改密码）不套 Layout，用不上它，不发。
+    // The sign-in flow pages (verify email, complete profile, password reset) sit outside
+    // Layout and never use it.
+    if (!OUTSIDE_LAYOUT.has(target)) void bootstrapApi.firstLoad().catch(() => {})
     void Layout.preload().catch(() => {})
     void APP_ROUTE_PAGES[target]?.preload().catch(() => {})
   } else if (pathname === '/login') {

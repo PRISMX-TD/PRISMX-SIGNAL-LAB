@@ -21,6 +21,10 @@ export function clientOrderId(): string {
 // so an ordinary English message that happens to contain " / " (a fraction, a
 // path) isn't mistakenly split. Falls back to the raw string otherwise.
 export function localizeApiError(message: string): string {
+  // 网关「组没有开通」的旧原文（2026-11-16 之前落库的拒单）：带错误码和组名，换成人话。
+  // The gateway's old raw "group doesn't offer X" wording (rows stored before 2026-11-16).
+  const missing = /所在组\([^)]*\)\s*没有开通\s*([A-Za-z0-9]+)/.exec(message)
+  if (missing) return String(i18n.t('order.symbolNotOffered', { symbol: displaySymbol(missing[1]) }))
   const idx = message.indexOf(' / ')
   if (idx === -1) return message
   const zhPart = message.slice(0, idx).trim()
@@ -270,6 +274,13 @@ export function brokerSymbol(symbol: string): string {
 // so every per-symbol table below accepts signal-side and broker-side names alike.
 export function baseSymbol(symbol: string): string {
   return brokerSymbol(symbol.toUpperCase().replace(/[._-].*$/, ''))
+}
+
+// 这个账号做不了这个品种吗（所在券商组没开通，见 MT5Account.blockedSymbols）。
+// Whether the account's broker group is known not to offer the symbol.
+export function accountLacksSymbol(acc: { blockedSymbols?: string[] } | null | undefined, symbol: string): boolean {
+  const list = acc?.blockedSymbols
+  return !!list && list.length > 0 && list.includes(baseSymbol(symbol))
 }
 
 // 展示名映射：MT5/信号引擎/桥接上下行全程用的都是 BTCUSD（这是 MT5 上实际的

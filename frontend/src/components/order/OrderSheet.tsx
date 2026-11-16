@@ -99,7 +99,7 @@ const segBtn = (on: boolean) =>
 const chipBtn = (on: boolean) =>
   `px-2 py-0.5 rounded-lg border text-xs font-mono ${on ? 'border-prism-600 bg-prism-600 text-white' : 'border-white/10 bg-white/5 text-neutral-300'}`
 
-export default function OrderSheet({ form, symbol, totalAccounts, priceText, headExtra, blocked, slPlaceholder = 'SL', tpPlaceholder = 'TP', onCancel, onConfirm, closing = false }: Props) {
+export default function OrderSheet({ form, symbol, totalAccounts, priceText, headExtra, blocked: callerBlocked, slPlaceholder = 'SL', tpPlaceholder = 'TP', onCancel, onConfirm, closing = false }: Props) {
   const { t } = useTranslation()
   const [submitting, setSubmitting] = useState(false)
   const [receipt, setReceipt] = useState<'waiting' | 'ok' | 'error' | null>(null)
@@ -197,6 +197,15 @@ export default function OrderSheet({ form, symbol, totalAccounts, priceText, hea
   }, [acctMenuOpen])
 
   const { isBuy, selected, accounts } = form
+  // 选中账号做不了这个品种（所在组没开通）：与「信号到期 / 休市」同一套拦法，横幅说明、
+  // 滑块禁用。调用方传进来的 blocked 优先（到期 / 休市对任何账号都成立）。
+  // The selected account can't trade this symbol: blocked like expiry / closed market, with
+  // a banner and a disabled slide. The caller's own block wins (it holds for every account).
+  const symbolBlock = form.symbolBlocked ? {
+    banner: <div className="mb-3 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down" role="note">{t('order.symbolNotOffered', { symbol: displaySymbol(symbol) })}</div>,
+    error: String(t('order.symbolNotOffered', { symbol: displaySymbol(symbol) })),
+  } : null
+  const blocked = callerBlocked ?? symbolBlock
   // 风险模式算不出合法手数时不能提交：手数框里留着的是上一次的值，提交就是按一个
   // 用户没选的风险下单。/ When risk sizing can't produce a legal lot, block submit — the
   // volume box still holds a previous value, i.e. a risk the user never chose.
