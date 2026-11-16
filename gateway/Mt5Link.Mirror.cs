@@ -339,9 +339,24 @@ namespace Prismx.Mt5Gateway
         /// 成交回执顺带的持仓(本地 pump 内存读)。只有确定已经反映这笔成交时才返回:
         /// mustHave(开仓的新仓位号)必须在、mustLack(全平的仓位号)必须不在;否则 null,
         /// 后端照旧自己去读——宁可不带,也不带一份会把新仓位"闪掉"的旧表。
+        ///
+        /// 开仓最多等 150ms(仓位事件几乎总是和成交事件一起到,实际不等)。全平只看一眼、
+        /// 不等(2026-11-16):从生产订单的耗时反推,全平的仓位删除事件经常比 dealer 回执
+        /// 晚到(近几天多在 0~100ms,11-13 那天几乎每笔都超过 150ms)。原来在这里睡着等,
+        /// 每笔全平的回执(连同一键平仓的每一笔)就晚这么久,而且这段时间在上面打的"耗时"
+        /// 日志之后,日志里看不出来。等不到本来也是回 null、后端自己读一次;现在只是不先
+        /// 等。页面在回执到达时就已经把这一行拿掉了。
+        ///
         /// Positions for the trade reply, from the local pump. Returned only when they
         /// already reflect this fill (mustHave present, mustLack absent); otherwise null
         /// and the backend reads as before — better nothing than a stale table.
+        /// An open waits up to 150ms (its position event nearly always lands with the
+        /// fill). A full close takes one look and never waits: judging by production
+        /// order timings its delete event often trails the dealer answer (0-100ms on
+        /// recent days, over 150ms for nearly every close on 11-13), and sleeping here
+        /// delayed every full close's reply (each close-all leg included) by that much —
+        /// after the logged elapsed time, so the logs never showed it. A miss already
+        /// meant null and a backend read; it just no longer waits first.
         /// </summary>
         public PositionInfo[] PositionsForReply(ulong login, ulong mustHave, ulong mustLack)
         {
@@ -350,8 +365,11 @@ namespace Prismx.Mt5Gateway
                 if (!_posSubscribed || !_connected)
                     return null;
 
-                // 仓位事件可能比成交事件晚到一点,最多再等 150ms。/ Allow 150ms for the pump.
-                for (int attempt = 0; attempt < 4; attempt++)
+                // 开仓:仓位事件可能比成交事件晚到一点,最多再等 150ms。全平:只读一次。
+                // Opens allow the pump 150ms; a full close reads once.
+                int attempts = mustHave != 0 ? 4 : 1;
+
+                for (int attempt = 0; attempt < attempts; attempt++)
                 {
                     if (attempt > 0)
                         Thread.Sleep(50);
