@@ -42,7 +42,11 @@ _GATEWAY_MISSING = re.compile(r"所在组\((?P<group>[^)]*)\)\s*没有开通\s*(
 
 _lock = threading.Lock()
 _blocked: dict[str, set[str]] = {}
-_loaded_at = 0.0
+# None = 还没从库里读过。不能用 0 当「没读过」：time.monotonic() 在 Linux 上从开机算起，
+# 机器刚开机不到 CACHE_TTL_SECONDS 时 `monotonic() - 0` 还没过期，就一直不读库。
+# None = never loaded. 0 can't mean that: monotonic() counts from boot on Linux, so within
+# CACHE_TTL_SECONDS of a reboot `monotonic() - 0` looks fresh and the table is never read.
+_loaded_at: float | None = None
 
 
 def canonical_symbol(symbol: str | None) -> str:
@@ -112,7 +116,7 @@ def blocked_symbols(db: Session, group: str | None) -> list[str]:
     g = _group_key(group)
     if not g:
         return []
-    if time.monotonic() - _loaded_at > CACHE_TTL_SECONDS:
+    if _loaded_at is None or time.monotonic() - _loaded_at > CACHE_TTL_SECONDS:
         try:
             _reload(db)
         except Exception:  # noqa: BLE001 — 提示是锦上添花，读不到就当没有，过一个周期再试
@@ -131,4 +135,4 @@ def reset_cache() -> None:
     global _blocked, _loaded_at
     with _lock:
         _blocked = {}
-        _loaded_at = 0.0
+        _loaded_at = None

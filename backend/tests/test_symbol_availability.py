@@ -93,3 +93,15 @@ def test_account_list_ships_blocked_symbols_for_the_whole_group(db_session):
     res = list_accounts(user=b, db=db_session)
     by_login = {x["login"]: x["blockedSymbols"] for x in res["accounts"]}
     assert by_login == {"700002": ["BTCUSD"], "700003": []}
+
+
+def test_reads_the_table_right_after_boot(db_session, monkeypatch):
+    """monotonic() 在 Linux 上从开机算起：开机不到 CACHE_TTL_SECONDS 也必须读库（CI 机器就是这样）。
+
+    monotonic() counts from boot on Linux; a machine up for less than the TTL must still load.
+    """
+    monkeypatch.setattr(sa.time, "monotonic", lambda: 5.0)
+    u = _user(db_session, "h2c@t.co")
+    _acct(db_session, u, "700010", "demo\\STD-USD")
+    _order(db_session, u, "700010", "BTCUSD", "REJECTED", "MT_RET_ERR_NOTFOUND: " + RAW)
+    assert sa.blocked_symbols(db_session, "demo\\STD-USD") == ["BTCUSD"]
