@@ -182,7 +182,7 @@ def test_user_open_cap_is_thread_safe():
 def test_wrapper_releases_slot_even_when_body_raises(monkeypatch):
     uid = "cap-user-raise"
 
-    def body(db, order, account, admitted):
+    def body(db, order, account, admitted, logins=None):
         assert ge._admit_user_open(uid)
         admitted.append(uid)
         raise RuntimeError("boom")

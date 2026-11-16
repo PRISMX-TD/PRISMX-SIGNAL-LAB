@@ -406,7 +406,7 @@ def test_gateway_batch_closes_run_in_parallel(tmp_path, monkeypatch):
     seen_threads = set()
     lock = threading.Lock()
 
-    def fake_execute(sess, order):
+    def fake_execute(sess, order, **_kw):
         with lock:
             seen_threads.add(threading.get_ident())
         _time.sleep(0.3)

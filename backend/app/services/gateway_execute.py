@@ -491,18 +491,31 @@ def _restore_columns(order: Order, values: dict) -> None:
         set_committed_value(order, key, value)
 
 
-def _commit_keep_loaded(db: Session, order: Order) -> None:
+def _naive_utc(order: Order, key: str) -> None:
+    value = sa_inspect(order).dict.get(key)
+    if value is not None and value.tzinfo is not None:
+        set_committed_value(order, key, value.replace(tzinfo=None))
+
+
+def commit_keep_loaded(db: Session, *orders: Order) -> None:
     """提交并保持订单字段已加载，省掉紧跟着的 db.refresh 那次 SELECT。
 
     Order 的列全是 Python 侧默认值（id / created_at / updated_at 的 default、onupdate），
     flush 之后内存里就是最终值；expire_on_commit 默认会把它们全作废，于是原先要 refresh
-    再读一遍。这里临时关掉作废（与调网关前那次 commit 同一写法）。updated_at 的
-    onupdate 写进内存的是带时区的时间，库里读回来是不带时区的——统一成不带时区，保持
+    再读一遍。这里临时关掉作废（与调网关前那次 commit 同一写法）。created_at / updated_at
+    的默认值写进内存的是带时区的时间，库里读回来是不带时区的——统一成不带时区，保持
     推送/响应载荷与原先 refresh 后的形状一致。
-    Commit while keeping the order's fields loaded, saving the refresh SELECT. All Order
+
+    会话里其它已加载的对象（当前用户、账号行）也跟着不作废：下单这条路上它们在提交之后
+    只被读 id / 来源这类不会变的字段，原先每次提交后各补一条 SELECT（2026-11-16 下单提速）。
+
+    Commit while keeping the orders' fields loaded, saving the refresh SELECT. All Order
     columns use Python-side defaults so the in-memory values are final after flush; only
-    expire_on_commit would discard them. updated_at is written aware in memory but reads
-    back naive — normalised to naive so payloads keep their previous shape.
+    expire_on_commit would discard them. created_at / updated_at are written aware in
+    memory but read back naive — normalised to naive so payloads keep the shape a refresh
+    gave them. Other loaded objects in the session (the user, account rows) stay loaded
+    too: on the order path they are only read for fields that do not change, and each
+    used to cost a SELECT after every commit.
     """
     prev = db.expire_on_commit
     db.expire_on_commit = False
@@ -510,9 +523,42 @@ def _commit_keep_loaded(db: Session, order: Order) -> None:
         db.commit()
     finally:
         db.expire_on_commit = prev
-    ua = order.updated_at
-    if ua is not None and ua.tzinfo is not None:
-        set_committed_value(order, "updated_at", ua.replace(tzinfo=None))
+    for order in orders:
+        _naive_utc(order, "created_at")
+        _naive_utc(order, "updated_at")
+
+
+# 旧名，本文件内部沿用 / the old private name, still used inside this module
+_commit_keep_loaded = commit_keep_loaded
+
+
+def is_gateway_target(order: Order, account: MT5Account | None) -> bool:
+    """account 是不是这条指令要打过去的 gateway 账号（归属、登录号、来源三样都对）。
+    Whether account is the gateway account this command targets."""
+    return (
+        account is not None
+        and account.user_id == order.user_id
+        and account.login == order.mt5_login
+        and account.source == "gateway"
+    )
+
+
+def mark_delivered(order: Order) -> None:
+    """把指令标成「已下发」（不提交）。gateway 指令落库后立刻就发，所以调用方可以在
+    INSERT 之前就标上，省掉调网关前单独那次 UPDATE + COMMIT；撤单接口只认这个标记。
+    Mark the command delivered (no commit). A gateway command is sent right after it is
+    stored, so callers may set this before the INSERT and save the separate UPDATE +
+    COMMIT ahead of the gateway call; the cancel endpoint keys on this flag."""
+    order.delivered = True
+    order.delivered_at = datetime.now(timezone.utc)
+
+
+def _unmark_delivered(order: Order) -> None:
+    """没发出去就被本地拒掉的指令：把提前标上的「已下发」撤回，与原先落库的样子一致。
+    A command refused locally before sending: undo an early delivered mark."""
+    if order.delivered:
+        order.delivered = False
+        order.delivered_at = None
 
 
 # 成交后要立刻刷新持仓快照的动作：开仓、平仓、改止损止盈都会改持仓表里的行。
@@ -520,23 +566,54 @@ def _commit_keep_loaded(db: Session, order: Order) -> None:
 _POSITION_ACTIONS = frozenset({"ORDER", "CLOSE", "MODIFY"})
 
 
-def _after_gateway_result(db: Session, order: Order, rsp: TradeRsp | None = None) -> None:
+def _live_gateway_logins(user_id: str) -> list[str]:
+    """该用户的 gateway 账号（自己开一个短会话）。/ The user's gateway logins, own short session."""
+    from app.core.database import SessionLocal
+    from app.services.pending_orders import gateway_logins
+
+    db = SessionLocal()
+    try:
+        return gateway_logins(db, user_id)
+    finally:
+        db.close()
+
+
+async def _push_positions_after_fill(user_id: str, known: dict | None) -> None:
+    """查出该用户的 gateway 账号再推即时快照。查库放在线程里，不在下单响应的路上。
+    Look up the user's gateway logins, then push the snapshot; the lookup runs in a
+    thread, off the order's response path."""
+    import asyncio
+
+    from app.services.gateway_snapshot import push_positions_now
+
+    logins = await asyncio.to_thread(_live_gateway_logins, user_id)
+    if logins:
+        await push_positions_now(user_id, logins, known=known)
+
+
+def _after_gateway_result(
+    db: Session, order: Order, rsp: TradeRsp | None = None, logins: list[str] | None = None
+) -> None:
     """网关回话落库之后的收尾：成交了就马上推一帧持仓快照；挂单类动作清掉
     "这个账号没有挂单"的标记，让下一次挂单读取一定真去读。
 
     以前成交后前端要等开平仓事件快拍或 2 秒慢拍才看到仓位，网关查询通道一忙就是好几秒
     （2026-11-11）。现在下单请求所在的 worker 直接读一次（priority）并推。提交即返回，
     不拖住下单响应；任何异常只记日志——这是锦上添花，绝不能把一笔成功的单变成报错。
+
+    logins：调用方手里已经有该用户的 gateway 账号列表就传进来（开仓、一键平仓）；不传
+    就在推送协程里另查，那次查库不在下单响应的路上（2026-11-16：原先在这里同步查，每笔
+    成交多 2 次往返，还让会话攥着一条连接到请求结束）。
     After the result is stored: push a positions snapshot right away for a fill, and
     clear the "no pending orders" mark for pending-order actions. Fire and forget; any
     failure is logged and swallowed — it must never turn a successful order into an error.
+    logins: pass the user's gateway logins when the caller already has them (opens,
+    close-all); otherwise the push coroutine looks them up off the response path (it
+    used to be a synchronous query here: two round trips per fill, and the session held
+    a connection until the request ended).
     """
     try:
-        from app.services.pending_orders import (
-            forget_no_pending,
-            gateway_logins,
-            submit_to_main_loop,
-        )
+        from app.services.pending_orders import forget_no_pending, submit_to_main_loop
 
         if "PENDING" in (order.action or ""):
             forget_no_pending(order.mt5_login)
@@ -551,10 +628,8 @@ def _after_gateway_result(db: Session, order: Order, rsp: TradeRsp | None = None
         loop = gateway_client._main_loop
         if loop is None or loop.is_closed():
             return
-        logins = gateway_logins(db, order.user_id)
-        if not logins:
+        if logins is not None and not logins:
             return
-        from app.services.gateway_snapshot import push_positions_now
 
         # 网关回执顺带了这个账号的最新持仓（2026-11-11）：这个账号就不必再读一次。
         # The gateway attached this account's positions: skip re-reading that login.
@@ -562,9 +637,13 @@ def _after_gateway_result(db: Session, order: Order, rsp: TradeRsp | None = None
         if rsp is not None and rsp.positions is not None and order.mt5_login:
             known = {str(order.mt5_login): rsp.positions}
 
-        submit_to_main_loop(
-            push_positions_now(order.user_id, logins, known=known), "POSITIONS 即时快照"
-        )
+        if logins is None:
+            coro = _push_positions_after_fill(order.user_id, known)
+        else:
+            from app.services.gateway_snapshot import push_positions_now
+
+            coro = push_positions_now(order.user_id, list(logins), known=known)
+        submit_to_main_loop(coro, "POSITIONS 即时快照")
     except Exception:  # noqa: BLE001
         logger.exception("成交后即时刷新持仓失败 user=%s", order.user_id)
 
@@ -607,23 +686,30 @@ def user_open_inflight(user_id: str) -> int:
 
 
 def try_gateway_execute(
-    db: Session, order: Order, account: MT5Account | None = None
+    db: Session, order: Order, account: MT5Account | None = None,
+    logins: list[str] | None = None,
 ) -> dict | None:
     """如果是 gateway 来源账号，立即通过 gateway HTTP 执行订单。
 
     外壳：负责归还每用户在途名额（见 USER_OPEN_INFLIGHT_CAP），正文在
     _try_gateway_execute。/ Shell that returns the per-user slot; the body is below.
+
+    account：调用方已经查到的目标账号行（不传就按 order.mt5_login 查一次）。
+    logins：调用方已经有的该用户 gateway 账号列表，成交后推持仓用（见 _after_gateway_result）。
+    account: the target row when the caller already loaded it. logins: the user's
+    gateway logins when the caller has them, for the post-fill positions push.
     """
     admitted: list[str] = []
     try:
-        return _try_gateway_execute(db, order, account, admitted)
+        return _try_gateway_execute(db, order, account, admitted, logins)
     finally:
         for uid in admitted:
             _release_user_open(uid)
 
 
 def _try_gateway_execute(
-    db: Session, order: Order, account: MT5Account | None, admitted: list[str]
+    db: Session, order: Order, account: MT5Account | None, admitted: list[str],
+    logins: list[str] | None = None,
 ) -> dict | None:
     """如果是 gateway 来源账号，立即通过 gateway HTTP 执行订单。
     返回 ORDER_UPDATE 推送载荷，或 None（非 gateway 账号）。
@@ -638,11 +724,7 @@ def _try_gateway_execute(
         # The caller already loaded this row: skip the lookup, but re-verify owner,
         # login and source; a row that is not this order's gateway account means
         # "not a gateway order".
-        if (
-            account.user_id != order.user_id
-            or account.login != order.mt5_login
-            or account.source != "gateway"
-        ):
+        if not is_gateway_target(order, account):
             return None
     else:
         account = gateway_account(db, order.mt5_login, order.user_id)
@@ -669,6 +751,7 @@ def _try_gateway_execute(
             "账号连接已失效（密码已变更），请重新验证 / "
             "account link revoked (password changed), please verify again"
         )
+        _unmark_delivered(order)
         db.commit()
         db.refresh(order)
         logger.warning(
@@ -701,6 +784,7 @@ def _try_gateway_execute(
         if closed is not None:
             order.status = "REJECTED"
             order.message = market_hours.closed_message(closed)
+            _unmark_delivered(order)
             db.commit()
             db.refresh(order)
             logger.info(
@@ -719,6 +803,7 @@ def _try_gateway_execute(
                 "请等前面的单出结果再下 / too many of your orders are in flight; "
                 "this one was NOT sent, please wait for the earlier ones"
             )
+            _unmark_delivered(order)
             db.commit()
             db.refresh(order)
             logger.warning(
@@ -758,8 +843,14 @@ def _try_gateway_execute(
     # by id to FILLED — the very window fixed for the bridge on 2026-09-19. Now cancel
     # returns 409; the stale void still applies via is_stale_pending (created_at), far
     # beyond the gateway's 140s worst case.
-    order.delivered = True
-    order.delivered_at = datetime.now(timezone.utc)
+    #
+    # 调用方（下单 / 平仓 / 改单的路由、一键平仓的批次）可以在落库时就标好：那样这里既
+    # 没有要写的东西、也没有开着的事务，下面的 commit 不碰数据库，省掉 3 次往返。
+    # Callers (the order routes, a close-all batch) may have marked it when storing the
+    # row: then nothing is dirty and no transaction is open, the commit below never
+    # touches the database, and three round trips are saved.
+    if not order.delivered:
+        mark_delivered(order)
     prev_expire = db.expire_on_commit
     db.expire_on_commit = False
     try:
@@ -917,7 +1008,7 @@ def _try_gateway_execute(
             order.action, order.client_order_id, order.mt5_login,
             order.status, rsp.deal, rsp.order, rsp.elapsed_ms, rsp.dealer_ms,
         )
-        _after_gateway_result(db, order, rsp)
+        _after_gateway_result(db, order, rsp, logins)
         return order_update_payload(order)
 
     except Exception as e:

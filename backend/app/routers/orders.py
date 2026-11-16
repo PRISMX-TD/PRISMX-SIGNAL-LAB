@@ -40,7 +40,14 @@ from app.services.gateway_binding import not_removed
 # Gateway execution and order payload helpers live in services now; auto-manage
 # and routers/bridge import them directly instead of this router. The
 # underscored aliases below are for this file's own call sites only.
-from app.services.gateway_execute import apply_trade_result, gateway_account, try_gateway_execute as _try_gateway_execute
+from app.services.gateway_execute import (
+    apply_trade_result,
+    commit_keep_loaded,
+    gateway_account,
+    is_gateway_target,
+    mark_delivered,
+    try_gateway_execute as _try_gateway_execute,
+)
 from app.services.gateway_client import (
     TradeRsp,
     get_trade_result as gw_trade_result,
@@ -314,7 +321,17 @@ def place_order(
         mt5_login=req.mt5Login or (target_acc.login if target_acc else None),
         status="PENDING",
     )
-    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    # 成交后要给该用户的全部 gateway 账号推一帧持仓：账号行就在手里，趁现在算好，
+    # 网关执行完就不必再查一次。口径与 pending_orders.gateway_logins 相同（未撤销；
+    # accounts 本身已排除软删）。
+    # The post-fill positions push covers all of the user's gateway logins. The rows
+    # are already loaded, so work the list out now instead of querying after the fill.
+    # Same rule as pending_orders.gateway_logins (not revoked; removed rows are already
+    # excluded from accounts).
+    gw_logins = [a.login for a in accounts if a.source == "gateway" and a.revoked_at is None]
+    result, created = _commit_order_or_existing(
+        db, order, user.id, req.clientOrderId, account=target_acc
+    )
     # 并发撞上同一 clientOrderId：那笔已经存在（且已经或正在被执行），直接把它返回。
     # 绝不能拿被回滚掉的 order 再去调网关——见 _commit_order_or_existing 的说明。
     # Lost the race on this clientOrderId: the order already exists and is already
@@ -325,7 +342,7 @@ def place_order(
     # Gateway 账号实时执行，不走 bridge 轮询
     # 已经查到的目标账号行直接交给网关执行（它会自己复核 source == "gateway"）。
     # Hand the already-loaded target row to the gateway executor (it re-checks the source).
-    gw_payload = _try_gateway_execute(db, order, account=target_acc)
+    gw_payload = _try_gateway_execute(db, order, account=target_acc, logins=gw_logins)
     if gw_payload is not None:
         # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
         # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
@@ -335,7 +352,7 @@ def place_order(
         # replaces by order id, so ordering doesn't matter.
         submit_to_main_loop(manager.push_to_client(user.id, gw_payload), "ORDER_UPDATE")
         if order.action == "PENDING":
-            _refresh_pending_after(db, order)
+            _refresh_pending_after(db, order, gw_logins)
         return _serialize(order)
 
     return result
@@ -466,10 +483,22 @@ def cancel_order(
 
 
 def _commit_order_or_existing(
-    db: Session, order: Order, user_id: str, client_order_id: str
+    db: Session, order: Order, user_id: str, client_order_id: str,
+    account: MT5Account | None = None,
 ) -> tuple[dict, bool]:
     """提交新订单；若与并发请求撞上同一 clientOrderId 的唯一约束，回滚后
     返回那个已存在的订单而非把 500 抛给客户端。
+
+    account：调用方已经查到的目标账号行。它正是这条指令要打过去的 gateway 账号时，
+    落库这一刻就把指令标成「已下发」（见 gateway_execute.mark_delivered）：紧接着就调
+    网关，不必为这个标记再单独 UPDATE + COMMIT 一次。桥接账号、没传账号行的照旧不标，
+    由桥接轮询 / 网关执行自己去标。
+
+    account: the target row when the caller already loaded it. If it is the gateway
+    account this command goes to, the command is stored already marked delivered (see
+    gateway_execute.mark_delivered) — the gateway call follows immediately, so the
+    flag needs no UPDATE + COMMIT of its own. Bridge accounts, or no row, are left for
+    the bridge poll / the gateway executor to mark as before.
 
     返回 (载荷, created)。**created 必须被调用方检查**：撞约束那条路径 `db.rollback()`
     之后，传进来的 `order` 变回 transient（没有主键、不在 session 里），此时
@@ -489,9 +518,16 @@ def _commit_order_or_existing(
     `db.refresh()` on it raises InvalidRequestError, turning a concurrent retry
     into a 500 that invites yet another retry.
     """
+    if is_gateway_target(order, account):
+        mark_delivered(order)
     db.add(order)
     try:
-        db.commit()
+        # 提交后不再 refresh：订单的列都是 Python 侧默认值，内存里已是最终值；用户与
+        # 账号行也保持已加载，后面读 user.id、账号来源不会再各查一次（2026-11-16）。
+        # No refresh after the commit: every Order column has a Python-side default, so
+        # memory already holds the final values; the user and account rows stay loaded
+        # too, so reading user.id or the account's source later costs no query.
+        commit_keep_loaded(db, order)
     except IntegrityError:
         db.rollback()
         existing = (
@@ -502,7 +538,6 @@ def _commit_order_or_existing(
         if existing:
             return _serialize(existing), False
         raise
-    db.refresh(order)
     # 落库成功就叫醒长轮询中的桥接（gateway 账号的单也会叫一声，桥接那边查一次
     # 发现没有自己的指令就继续等，代价可忽略）。
     # Wake a long-polling bridge as soon as the row is committed.
@@ -850,7 +885,9 @@ def list_closed_trades(
     return out
 
 
-def _refresh_pending_after(db: Session, order: Order) -> None:
+def _refresh_pending_after(
+    db: Session, order: Order, logins: list[str] | None = None,
+) -> None:
     """挂单 / 撤挂单执行完之后，立刻重推一帧挂单快照。
 
     不等 gateway 慢拍那 5 秒：用户刚按下的动作要马上在「挂单」页签里看得见，
@@ -866,7 +903,10 @@ def _refresh_pending_after(db: Session, order: Order) -> None:
     successful placement into an error.
     """
     try:
-        logins = gateway_logins(db, order.user_id)
+        # 调用方已经有账号列表（挂单下单时那次账号查询）就不再查一遍。
+        # Skip the query when the caller already has the list (placing a pending order).
+        if logins is None:
+            logins = gateway_logins(db, order.user_id)
         if logins:
             # 提交即返回，不等网关读完：这帧快照是锦上添花，慢了/失败了都不该拖住响应。
             # Fire and forget: the snapshot is a courtesy, never worth delaying the response.
@@ -973,6 +1013,7 @@ def _over_plan_account_limit(
 
 def _assert_manage_market_open(
     db: Session, user_id: str, mt5_login: str | None, symbol: str | None,
+    account: MT5Account | None = None,
 ) -> None:
     """平仓 / 改单 / 改挂单 / 撤挂单落库前的休市闸门（审计 A2），只管 gateway 账号。
 
@@ -982,10 +1023,17 @@ def _assert_manage_market_open(
     persisted (audit A2), gateway accounts only: the gateway sends dealer requests,
     which MT5 parks in a closed session, while the bridge's terminal refuses them at
     once. Same 409 text as an open; close-only symbols pass.
+
+    account：归属校验时已经查到的那一行（_assert_account_owned 的返回值）。是这个登录号
+    的行就直接用，不再查第二遍。
+    account: the row the ownership check already loaded; reused when it is this login's.
     """
     if not settings.MARKET_HOURS_GATE or not mt5_login:
         return
-    acc = gateway_account(db, mt5_login, user_id)
+    if account is not None and account.login == mt5_login and account.user_id == user_id:
+        acc = account if account.source == "gateway" else None
+    else:
+        acc = gateway_account(db, mt5_login, user_id)
     if acc is None:
         return
     try:
@@ -995,12 +1043,19 @@ def _assert_manage_market_open(
     market_hours.assert_market_open_for_manage(symbol, login)
 
 
-def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> None:
-    """校验目标账号归属当前用户（指定 mt5Login 时）。
-    Verify the target account belongs to the current user (when mt5Login given).
+def _assert_account_owned(
+    db: Session, user_id: str, mt5_login: str | None,
+) -> MT5Account | None:
+    """校验目标账号归属当前用户（指定 mt5Login 时），并把查到的那一行还给调用方。
+
+    返回账号行（没指定 mt5Login 时 None）。平仓 / 改单这几条路后面还要用同一行两次
+    （休市闸门、网关执行），以前各查一遍，一笔单 3 次 mt5_accounts（2026-11-16）。
+    Verify the target account belongs to the current user (when mt5Login given) and
+    return the row (None when no login was named). The manage paths need the same row
+    twice more (market-hours gate, gateway execution); each used to query it again.
     """
     if not mt5_login:
-        return
+        return None
     acc = (
         db.query(MT5Account)
         .filter(MT5Account.user_id == user_id, MT5Account.login == mt5_login, not_removed())
@@ -1008,6 +1063,7 @@ def _assert_account_owned(db: Session, user_id: str, mt5_login: str | None) -> N
     )
     if acc is None:
         raise HTTPException(status_code=404, detail="账号不存在或不属于当前用户 / Account not found")
+    return acc
 
 
 @router.post("/close", response_model=OrderOut)
@@ -1022,7 +1078,7 @@ def close_position(
     Close a position (incl. partial): persist a CLOSE command for the bridge.
     """
     # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
-    _assert_account_owned(db, user.id, req.mt5Login)
+    account = _assert_account_owned(db, user.id, req.mt5Login)
 
     # 部分平仓手数不得低于单笔最小手数（省略或 0 表示全平，不受此限）。
     # 否则一笔拆不开的小额平仓会被下发、再由 MT5 拒绝，白白回执一条报错。
@@ -1057,7 +1113,7 @@ def close_position(
         return _serialize(existing)
 
     mt5_login = _require_close_login(db, user.id, req.mt5Login)
-    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol, account)
     # 平仓前的仓位手数：操作日志判断「全平还是部分平」只能靠它（桥接回执会把 volume
     # 改写成实际成交手数）。放在幂等早返回之后，重放不读快照；读不到留空，不挡单。
     # The position's volume before the close — the only reliable "full or partial"
@@ -1076,11 +1132,17 @@ def close_position(
         pos_volume=before.get("volume") if before else None,
         status="PENDING",
     )
-    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(
+        db, order, user.id, req.clientOrderId, account=account
+    )
     if not created:
         return result
 
-    gw_payload = _try_gateway_execute(db, order)
+    # 归属校验时查到的那一行直接交给网关执行（它会复核是不是本单的 gateway 账号；
+    # 没带 mt5Login 时为 None，照旧按 order.mt5_login 查）。
+    # Hand over the row the ownership check loaded (re-verified inside; None when
+    # no mt5Login was sent, which falls back to the lookup by order.mt5_login).
+    gw_payload = _try_gateway_execute(db, order, account=account)
     if gw_payload is not None:
         # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
         # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
@@ -1110,7 +1172,7 @@ def modify_pending_order(
     all the way down). 0 clears SL/TP; a trigger price has no "clear" and the schema
     already refuses 0.
     """
-    _assert_account_owned(db, user.id, req.mt5Login)
+    account = _assert_account_owned(db, user.id, req.mt5Login)
 
     # 方向校验需要知道这是买单还是卖单，而这条指令里没有 side——它只认票号。
     # 从当初下这张挂单的那条记录上把方向找回来：平台只显示自己挂的单，所以正常
@@ -1157,7 +1219,7 @@ def modify_pending_order(
         return _serialize(existing)
 
     mt5_login = _require_close_login(db, user.id, req.mt5Login)
-    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol, account)
     order = Order(
         user_id=user.id,
         client_order_id=req.clientOrderId,
@@ -1174,11 +1236,17 @@ def modify_pending_order(
         mt5_login=mt5_login,
         status="PENDING",
     )
-    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(
+        db, order, user.id, req.clientOrderId, account=account
+    )
     if not created:
         return result
 
-    gw_payload = _try_gateway_execute(db, order)
+    # 归属校验时查到的那一行直接交给网关执行（它会复核是不是本单的 gateway 账号；
+    # 没带 mt5Login 时为 None，照旧按 order.mt5_login 查）。
+    # Hand over the row the ownership check loaded (re-verified inside; None when
+    # no mt5Login was sent, which falls back to the lookup by order.mt5_login).
+    gw_payload = _try_gateway_execute(db, order, account=account)
     if gw_payload is not None:
         # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
         # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
@@ -1210,7 +1278,7 @@ def cancel_pending_order(
     platform command row without ever reaching the broker. This removes an order
     that already lives at the broker, addressed by its broker ticket.
     """
-    _assert_account_owned(db, user.id, req.mt5Login)
+    account = _assert_account_owned(db, user.id, req.mt5Login)
 
     # 幂等：同一 clientOrderId 只撤一次 / idempotency by clientOrderId
     existing = (
@@ -1222,7 +1290,7 @@ def cancel_pending_order(
         return _serialize(existing)
 
     mt5_login = _require_close_login(db, user.id, req.mt5Login)
-    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol, account)
     order = Order(
         user_id=user.id,
         client_order_id=req.clientOrderId,
@@ -1240,11 +1308,17 @@ def cancel_pending_order(
         mt5_login=mt5_login,
         status="PENDING",
     )
-    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(
+        db, order, user.id, req.clientOrderId, account=account
+    )
     if not created:
         return result
 
-    gw_payload = _try_gateway_execute(db, order)
+    # 归属校验时查到的那一行直接交给网关执行（它会复核是不是本单的 gateway 账号；
+    # 没带 mt5Login 时为 None，照旧按 order.mt5_login 查）。
+    # Hand over the row the ownership check loaded (re-verified inside; None when
+    # no mt5Login was sent, which falls back to the lookup by order.mt5_login).
+    gw_payload = _try_gateway_execute(db, order, account=account)
     if gw_payload is not None:
         # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
         # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端
@@ -1358,7 +1432,7 @@ def modify_position(
     Modify a position's SL/TP: persist a MODIFY command for the bridge.
     """
     # 校验目标账号归属，防止越权操控他人/不存在账号 / verify account ownership
-    _assert_account_owned(db, user.id, req.mt5Login)
+    account = _assert_account_owned(db, user.id, req.mt5Login)
 
     # 止损止盈方向校验：两者都非 0 时买单必须 SL<TP、卖单 SL>TP（0 表示清除该侧）。
     # SL/TP direction check (0 means "clear that side" and is skipped).
@@ -1373,7 +1447,7 @@ def modify_position(
         return _serialize(existing)
 
     mt5_login = _require_close_login(db, user.id, req.mt5Login)
-    _assert_manage_market_open(db, user.id, mt5_login, req.symbol)
+    _assert_manage_market_open(db, user.id, mt5_login, req.symbol, account)
     # 改单前的止损 / 止盈（0 = 原来没有），操作日志据此把「止损改为 X」说成「设置 / 移动 /
     # 移除止损」；顺带记下仓位手数。放在幂等早返回之后，重放不读快照；读不到留空，不挡单。
     # The SL / TP before this modify (0 = none), letting the activity log say "set /
@@ -1397,11 +1471,17 @@ def modify_position(
         pos_volume=before.get("volume") if before else None,
         status="PENDING",
     )
-    result, created = _commit_order_or_existing(db, order, user.id, req.clientOrderId)
+    result, created = _commit_order_or_existing(
+        db, order, user.id, req.clientOrderId, account=account
+    )
     if not created:
         return result
 
-    gw_payload = _try_gateway_execute(db, order)
+    # 归属校验时查到的那一行直接交给网关执行（它会复核是不是本单的 gateway 账号；
+    # 没带 mt5Login 时为 None，照旧按 order.mt5_login 查）。
+    # Hand over the row the ownership check loaded (re-verified inside; None when
+    # no mt5Login was sent, which falls back to the lookup by order.mt5_login).
+    gw_payload = _try_gateway_execute(db, order, account=account)
     if gw_payload is not None:
         # 不再阻塞等主循环推完 WS、也不再多做一次 SELECT 刷新：try_gateway_execute
         # 收尾时订单字段已是最终值。ORDER_UPDATE 可能晚于本次 HTTP 响应到达——前端

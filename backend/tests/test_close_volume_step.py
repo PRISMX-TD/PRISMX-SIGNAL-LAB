@@ -105,7 +105,7 @@ def _close(db, monkeypatch, volume, symbol="XAUUSD"):
 
     monkeypatch.setattr(rate_limit.limiter, "enabled", False)
     # 闸门测的是"发不发得出去"，网关那一跳不参与。
-    monkeypatch.setattr(orders, "_try_gateway_execute", lambda _db, _o: None)
+    monkeypatch.setattr(orders, "_try_gateway_execute", lambda _db, _o, **_kw: None)
 
     req = orders.ClosePositionRequest(
         mt5Login=LOGIN, ticket=36109204, symbol=symbol, side="SELL",

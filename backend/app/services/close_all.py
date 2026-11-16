@@ -34,9 +34,11 @@ is idempotent.
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.models import MT5Account, Order
 from app.services import activity_log
@@ -44,8 +46,13 @@ from app.services.gateway_binding import not_removed
 
 logger = logging.getLogger("prismx.close_all")
 
-# 一次"全部平仓"里同时发往网关的平仓笔数上限 / closes sent to the gateway at once per batch
-CLOSE_ALL_PARALLEL = 16
+# 一次"全部平仓"里同时发往网关的平仓笔数上限。网关全局同时在途 64 笔（gateway.ini 的
+# max_inflight_trades），这里取一半：一个人的一键平仓最多占一半名额，剩下的留给其他
+# 用户的单。2026-11-16 从 16 调到 32——48 笔的批次原来要排 3 轮，现在 2 轮。
+# Closes sent to the gateway at once per batch. The gateway allows 64 trades in flight
+# overall (max_inflight_trades); half of that keeps the other half free for everyone
+# else. Raised from 16 on 2026-11-16: a 48-leg batch took three waves, now two.
+CLOSE_ALL_PARALLEL = 32
 
 # 一次"全部平仓"最多排多少笔（审计 A2）。正常用户远到不了；超出的这次不排，再按一次即可。
 # 防的是一份被塞满的持仓快照把一个请求放大成成千上万条指令与网关调用。
@@ -366,9 +373,15 @@ def queue(
     # Activity log, riding this commit as its last step (dedupe-keyed, see
     # _log_batch). Nothing queued — a replay included — returned above and logs nothing.
     _log_batch(db, user_id, batch, created, skipped)
-    db.commit()
-    for o in created:
-        db.refresh(o)
+    # 提交后不逐条 refresh（2026-11-16）：订单的列都是 Python 侧默认值，内存里已是最终值。
+    # 原来每笔一条 SELECT，48 笔就是 0.28 秒——这段时间里接口还没返回，网关那边一笔都
+    # 还没发出去。
+    # No per-row refresh after the commit: every Order column has a Python-side default,
+    # so memory already holds the final values. It used to cost one SELECT per leg, 0.28s
+    # for 48 legs, during which the endpoint had not answered and nothing had been sent.
+    from app.services.gateway_execute import commit_keep_loaded
+
+    commit_keep_loaded(db, *created)
     return batch, created, skipped
 
 
@@ -383,6 +396,85 @@ def gateway_logins(db: Session, user_id: str) -> set[str]:
         )
         .all()
     }
+
+
+def _prepare_gateway_legs(
+    user_id: str, order_ids: list[str],
+) -> tuple[list[Order], dict[str, MT5Account], list[str]]:
+    """后台执行的准备：一个会话里把整批要用的东西一次取齐，并把这批指令标成「已下发」。
+
+    返回 (待执行的指令, login → gateway 账号行, 该用户未撤销的 gateway 登录号)。三样都
+    已经脱离会话、字段全在内存里，之后各线程只读不查。
+
+    为什么集中做（2026-11-16）：原来每笔平仓各自开会话，发网关之前要查订单、查账号、
+    UPDATE delivered、COMMIT，成交后还要再查一次账号列表——一笔 12 次数据库往返。16 条
+    线程同时这么干，连接池（8 + 4 条）一下就被抢空，后面的线程排队、溢出连接现连现拆，
+    线程收到上一笔结果后平均要 0.19 秒才把下一笔发出去。集中之后：整批 5 次往返，每笔
+    只剩写回结果那 4 次。
+
+    「已下发」在这里一次标完，而不是每笔发出前各标一次：排在后面几轮的指令会早标几百
+    毫秒。撤单接口本来就撤不到它们（落库后马上就在执行），进程中途被杀时两种标法都是
+    5 分钟后按「结果未知」作废，没有区别。
+
+    Preparation for the off-request execution: one session loads everything the batch
+    needs and marks its commands delivered. Returns (commands to run, login → gateway
+    account row, the user's live gateway logins), all detached with their fields in
+    memory, so the worker threads only read.
+
+    Why in one place: each close used to open its own session and, before reaching the
+    gateway, load the order, load the account, UPDATE delivered and COMMIT, then query
+    the account list again after the fill — twelve round trips per leg. Sixteen threads
+    doing that at once drained the pool (8 + 4), queued behind it and kept opening
+    overflow connections; a thread took 0.19s on average from one result to its next
+    send. Now the batch costs five round trips up front and each leg only the four of
+    its result write-back. Marking delivered in bulk stamps later waves a few hundred
+    ms early, which changes nothing: they were never cancellable, and a killed process
+    leaves them to the same "outcome unknown" void either way.
+    """
+    from app.core.database import SessionLocal
+    from app.services.gateway_execute import commit_keep_loaded
+
+    if not order_ids:
+        return [], {}, []
+    db = SessionLocal()
+    try:
+        orders = (
+            db.query(Order)
+            .filter(Order.id.in_(order_ids), Order.user_id == user_id, Order.status == "PENDING")
+            .all()
+        )
+        rows = (
+            db.query(MT5Account)
+            .filter(MT5Account.user_id == user_id, MT5Account.source == "gateway", not_removed())
+            .all()
+        )
+        accounts = {r.login: r for r in rows}
+        # 与 pending_orders.gateway_logins 同一口径：未撤销的才读持仓。
+        # Same rule as pending_orders.gateway_logins: only unrevoked logins are read.
+        logins = [r.login for r in rows if r.revoked_at is None]
+
+        todo = [o.id for o in orders if not o.delivered]
+        if todo:
+            # 一条 UPDATE，不走 ORM 的逐行 flush（psycopg2 的 executemany 是一行一次往返）。
+            # One UPDATE rather than a per-row ORM flush (psycopg2 executemany is one
+            # round trip per row).
+            now = datetime.now(timezone.utc)
+            db.query(Order).filter(Order.id.in_(todo), Order.status == "PENDING").update(
+                {Order.delivered: True, Order.delivered_at: now}, synchronize_session=False
+            )
+            for o in orders:
+                if not o.delivered:
+                    set_committed_value(o, "delivered", True)
+                    set_committed_value(o, "delivered_at", now)
+        commit_keep_loaded(db)
+        # 按落库顺序发（先排的先平），与原来按 order_ids 顺序一致。
+        # Send in queueing order, as the id list was.
+        rank = {oid: i for i, oid in enumerate(order_ids)}
+        orders.sort(key=lambda o: rank.get(o.id, len(rank)))
+        db.expunge_all()
+        return orders, accounts, logins
+    finally:
+        db.close()
 
 
 def execute_gateway_batch(user_id: str, batch: str, order_ids: list[str]) -> None:
@@ -407,31 +499,50 @@ def execute_gateway_batch(user_id: str, batch: str, order_ids: list[str]) -> Non
     from app.core.database import SessionLocal
     from app.services import gateway_execute
     from app.services.connection_manager import manager
-    from app.services.gateway_client import run_on_main_loop
+    from app.services.pending_orders import submit_to_main_loop
 
-    def _one(order_id: str) -> None:
-        # 每笔一个自己的会话：Session 不能跨线程共用。
-        # One session per close — a Session must not be shared across threads.
+    try:
+        orders, accounts, logins = _prepare_gateway_legs(user_id, order_ids)
+    except Exception:
+        # 准备失败（数据库一时连不上）：这批指令留在 PENDING，5 分钟后按「结果未知」
+        # 作废并发汇总——与进程中途被杀同一个兜底。
+        # Preparation failed (database briefly unreachable): the commands stay PENDING
+        # and the stale sweep voids them as "outcome unknown", as for a killed process.
+        logger.exception("close_all: 批次准备失败 (user=%s batch=%s)", user_id, batch)
+        orders, accounts, logins = [], {}, []
+
+    def _one(order: Order) -> None:
+        # 每笔一个自己的会话：Session 不能跨线程共用。指令对象是准备阶段取好的（已脱离
+        # 那个会话），挂到本会话上不发任何语句；一笔指令只会被一条线程碰。
+        # One session per close — a Session must not be shared across threads. The
+        # command object was loaded during preparation (detached); attaching it here
+        # emits nothing, and each command is touched by exactly one thread.
+        payload = None
         db = SessionLocal()
         try:
-            order = db.query(Order).filter(Order.id == order_id).first()
-            if order is None or order.status != "PENDING":
-                return
+            db.add(order)
             try:
-                payload = gateway_execute.try_gateway_execute(db, order)
+                payload = gateway_execute.try_gateway_execute(
+                    db, order, account=accounts.get(order.mt5_login), logins=logins
+                )
             except Exception:
                 logger.exception(
                     "close_all: gateway 执行失败 (user=%s cmd=%s)", user_id, order.client_order_id
                 )
                 return
-            if payload is None:
-                return
-            try:
-                run_on_main_loop(manager.push_to_client(user_id, payload), timeout=5.0)
-            except Exception:
-                logger.warning("close_all: ORDER_UPDATE 推送失败 (cmd=%s)", order.client_order_id)
         finally:
             db.close()
+        if payload is None:
+            return
+        # 提交即返回，不等主循环推完（原来每笔最多等 5 秒，线程和它的数据库连接都被
+        # 占着）：ORDER_UPDATE 之间没有先后依赖，前端按订单 id 整条替换。
+        # Fire and forget instead of waiting for the main loop (it used to block up to
+        # 5s per leg, holding the thread and its database connection): ORDER_UPDATE
+        # frames do not depend on each other, the frontend replaces by order id.
+        try:
+            submit_to_main_loop(manager.push_to_client(user_id, payload), "ORDER_UPDATE")
+        except Exception:
+            logger.warning("close_all: ORDER_UPDATE 推送失败 (cmd=%s)", order.client_order_id)
 
     # 并行平仓：以前逐笔串行，十笔仓位的最后一笔要等前面九笔的 dealer 回执都回来
     # 才发出去——行情快的时候这几秒就是滑点。各笔互不相干（不同仓位、各自的
@@ -441,10 +552,10 @@ def execute_gateway_batch(user_id: str, batch: str, order_ids: list[str]) -> Non
     # closes are independent (own position, own clientOrderId) and the gateway
     # handles hundreds at once.
     try:
-        if order_ids:
-            workers = min(CLOSE_ALL_PARALLEL, len(order_ids))
+        if orders:
+            workers = min(CLOSE_ALL_PARALLEL, len(orders))
             with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="close-all") as pool:
-                list(pool.map(_one, order_ids))
+                list(pool.map(_one, orders))
     except Exception:
         logger.exception("close_all: 批次执行异常 (user=%s batch=%s)", user_id, batch)
 
