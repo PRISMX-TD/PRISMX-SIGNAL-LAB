@@ -80,6 +80,7 @@
       "communitySentiment": "Community sentiment",
       "tfRail": "Timeframes",
       "noExecutable": "No executable signal · strategy engine watching",
+      "execEmpty": "The strategy engine is watching. New signals appear here the moment they fire.",
       "remainingTtl": "Time left",
       "otherActive": "Other active signals",
       "rrLabel": "R:R",

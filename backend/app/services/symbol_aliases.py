@@ -220,3 +220,31 @@ def broker_symbol(symbol: str) -> str:
     if len(s) > 4 and s.endswith("USDT"):
         return s[:-1]
     return symbol
+
+
+def display_symbol(symbol: str | None) -> str:
+    """给用户看的品种名：去掉券商后缀（XAUUSD.s → XAUUSD），其余原样。
+
+    平仓 / 改单 / 自动仓管的指令行里存的是持仓上的 MT5 品种名，带着账号组的后缀；开仓
+    行存的是图表上不带后缀的名字。推送通知的标题原来直接用存的那个名字，同一笔交易先
+    收到「订单已成交 XAUUSD」、平仓时又收到「订单已成交 XAUUSD.s」（2026-11-16 体验报告 L5）。
+    前端的 displaySymbol 是同一条规则。
+
+    只用于**显示**。绝不能拿它的返回值去下单、查价或匹配持仓——那些地方要的是带后缀
+    的原名。只去后缀、不改名（不做 broker_symbol 那类 BTCUSDT → BTCUSD）。以分隔符开头
+    的名字（#AAPL）切完是空的，原样返回。
+
+    The symbol name shown to users: the broker suffix dropped (XAUUSD.s → XAUUSD),
+    nothing else changed. Close / modify / auto-management command rows store the
+    position's MT5 name with the account group's suffix while open rows store the
+    chart's bare name, so push titles read "filled XAUUSD" and later "filled XAUUSD.s"
+    for one trade. Same rule as the frontend's displaySymbol. Display only: never feed
+    the result into order placement, quote lookups or position matching, which need
+    the suffixed original. No renames (unlike broker_symbol). A name that starts with
+    a separator (#AAPL) would strip to nothing and is returned unchanged.
+    """
+    raw = (symbol or "").strip()
+    for i, ch in enumerate(raw):
+        if ch in "._-#":
+            return raw[:i] or raw
+    return raw

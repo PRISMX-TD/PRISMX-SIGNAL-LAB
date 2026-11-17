@@ -293,12 +293,30 @@ export function accountLacksSymbol(acc: { blockedSymbols?: string[] } | null | u
 // string — but users know it as "BTCUSDT". Only convert at render sites;
 // never feed the converted value back into order placement, quote lookups,
 // or i18n key names, which still only recognize BTCUSD.
+//
+// 2026-11-16（体验报告 L5）：券商后缀也在这里去掉。持仓、平仓 / 改单 / 撤单记录、已平仓明细的
+// 品种名来自 MT5，带着账号组的后缀（XAUUSD.s）；图表、下单票、开仓记录用的是不带后缀的名字。
+// 原来这个函数除了比特币一律原样返回，于是同一笔交易在日志里先叫 XAUUSD、后叫 XAUUSD.s。
+// 只去后缀，不做 brokerSymbol 那类改名（USOIL → WTI、ETHUSDT → ETHUSD）：信号页按这里的
+// 返回值做筛选和去重，改了名已保存的筛选就对不上了。粘在一起的后缀（XAUUSDm）不处理——
+// 分不清它和 UKOil 这类本名，切错了比留着更难看。
+// It also drops the broker suffix. Positions, close / modify / cancel records and closed
+// trades carry MT5's name with the account group's suffix (XAUUSD.s) while the chart, the
+// ticket and open records use the bare name; this function used to return everything but
+// bitcoin unchanged, so one trade read XAUUSD and then XAUUSD.s in the same log. Suffix
+// only — none of brokerSymbol's renames (USOIL → WTI, ETHUSDT → ETHUSD), because the
+// signals page filters and de-duplicates on this value. A glued suffix (XAUUSDm) is left
+// alone: it cannot be told from a real name like UKOil.
 const SYMBOL_DISPLAY_NAMES: Record<string, string> = {
   BTCUSD: 'BTCUSDT',
 }
 
 export function displaySymbol(symbol: string): string {
-  return SYMBOL_DISPLAY_NAMES[baseSymbol(symbol)] ?? symbol
+  const mapped = SYMBOL_DISPLAY_NAMES[baseSymbol(symbol)]
+  if (mapped) return mapped
+  // 以分隔符开头的名字（#AAPL）切完是空的，那就原样返回。
+  // A name that starts with a separator (#AAPL) would strip to nothing; keep it as is.
+  return symbol.trim().replace(/[._\-#].*$/, '') || symbol
 }
 
 // 每手合约规模（标的单位数）——**兜底表**。桥接 v1.3.23 起按账户报价自带券商真实

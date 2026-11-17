@@ -57,7 +57,14 @@ export const SYMBOL_META: Record<string, { letter: string; color: string; ink: s
 export const DEFAULT_SYMBOL_META = { color: '#a5a5b0', ink: '#c2c2cc' }
 
 export function symbolMeta(sym: string): { letter: string; color: string; ink: string } {
+  const hit = SYMBOL_META[sym]
+  if (hit) return hit
+  // 持仓、平仓 / 改单记录里的品种名带券商后缀（XAUUSD.s）：按去掉后缀的名字再查一次，
+  // 否则黄金在持仓卡片上拿到的是中性灰，和图表、信号页的金色对不上（2026-11-16 体验报告 L5）。
+  // Positions and close / modify records carry the broker suffix (XAUUSD.s): look the bare
+  // name up too, or gold gets the neutral chip there while the chart and signals show gold.
+  const bare = sym.toUpperCase().replace(/[._\-#].*$/, '')
   // 兜底同样给三个字符：未知品种取代码前三位，与已知品种同构。
   // Unknown symbols also get three characters, matching the known ones.
-  return SYMBOL_META[sym] ?? { letter: (sym.slice(0, 3) || '?').toUpperCase(), ...DEFAULT_SYMBOL_META }
+  return SYMBOL_META[bare] ?? { letter: ((bare || sym).slice(0, 3) || '?').toUpperCase(), ...DEFAULT_SYMBOL_META }
 }

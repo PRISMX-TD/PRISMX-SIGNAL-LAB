@@ -1364,14 +1364,37 @@ export const gamificationApi = {
 // 403 = 内测未开放（见 gamification.admin.competitionsSwitch）。
 // Trading competitions (Phase 3): user-facing public list/detail/register.
 // 403 = beta not yet open (see gamification.admin.competitionsSwitch).
+// 比赛列表几秒内的调用共用同一个请求（2026-11-16 体验报告 L2）：导航角标和首页跑马灯各自轮询，
+// 挂载和回前台时在同一毫秒各发一次，内容完全相同。按 token 记，失败就清掉（不让一次失败被后面
+// 几秒的调用复用），报名、改昵称显示之后也清掉（下一次要拿到新的状态）。
+// Calls within a few seconds share one request (QA report L2): the nav badge and the home
+// marquee each poll the list and fired in the same millisecond on mount and on return to the
+// foreground. Keyed by token; dropped on failure (a failed attempt is never reused) and after
+// registering or changing the public-name setting (the next read must see the new state).
+const COMPETITION_LIST_SHARE_MS = 3_000
+let competitionListShared: { token: string | null; at: number; p: Promise<CompetitionListGrouped> } | null = null
+const dropCompetitionListShared = () => {
+  competitionListShared = null
+}
 export const competitionApi = {
-  list: () => request<CompetitionListGrouped>('/competitions'),
+  list: (): Promise<CompetitionListGrouped> => {
+    const token = getToken()
+    const hit = competitionListShared
+    if (hit && hit.token === token && Date.now() - hit.at < COMPETITION_LIST_SHARE_MS) return hit.p
+    const p = request<CompetitionListGrouped>('/competitions')
+    const entry = { token, at: Date.now(), p }
+    competitionListShared = entry
+    p.catch(() => {
+      if (competitionListShared === entry) competitionListShared = null
+    })
+    return p
+  },
   detail: (id: string) => request<CompetitionDetail>(`/competitions/${encodeURIComponent(id)}`),
   register: (id: string, mt5Login: string) =>
     request<CompetitionRegisterResult>(`/competitions/${encodeURIComponent(id)}/register`, {
       method: 'POST',
       body: JSON.stringify({ mt5Login }),
-    }),
+    }).finally(dropCompetitionListShared),
   // 本人在公开比赛页上是否显示昵称（设计 §1.8）：报名公开比赛时默认 true；公开开关打开前就
   // 报名的人为 null（匿名），可在这里自己打开。
   // Whether my nickname shows on the public page (spec §1.8): true by default when entering
@@ -1380,7 +1403,7 @@ export const competitionApi = {
     request<unknown>(`/competitions/${encodeURIComponent(id)}/entries/${encodeURIComponent(login)}/public-name`, {
       method: 'PATCH',
       body: JSON.stringify({ show }),
-    }),
+    }).finally(dropCompetitionListShared),
 }
 
 // 工单 / Tickets

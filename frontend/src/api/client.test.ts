@@ -522,3 +522,81 @@ describe('request(): first-screen prefetch', () => {
     expect(calls.some((u) => u.endsWith('/api/auth/me'))).toBe(true)
   })
 })
+
+// 比赛列表几秒内共用一个请求（2026-11-16 体验报告 L2）：导航角标和首页跑马灯在同一毫秒各调一次。
+// The competition list is shared for a few seconds (QA report L2): the nav badge and the home
+// marquee each call it in the same millisecond.
+describe('competitionApi.list: shared within a few seconds', () => {
+  const LIST = { running: [], upcoming: [], finished: [] }
+  const isList = (u: string) => u.endsWith('/api/competitions')
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-16T10:00:00Z'))
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('同时调两次只发一个请求；过了窗口再调才发第二个', async () => {
+    const { api } = await load()
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      return json(LIST)
+    }))
+    const [a, b] = await Promise.all([api.competitionApi.list(), api.competitionApi.list()])
+    expect(a).toEqual(LIST)
+    expect(b).toBe(a)
+    expect(calls.filter(isList)).toHaveLength(1)
+    vi.setSystemTime(new Date('2026-11-16T10:00:02Z'))
+    await api.competitionApi.list()
+    expect(calls.filter(isList)).toHaveLength(1)
+    vi.setSystemTime(new Date('2026-11-16T10:00:04Z'))
+    await api.competitionApi.list()
+    expect(calls.filter(isList)).toHaveLength(2)
+  })
+
+  it('失败的那次不被复用：下一次调用重新发', async () => {
+    const { api } = await load()
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (!isList(url)) return json({})
+      n += 1
+      return n === 1 ? json({ detail: 'boom' }, 500) : json(LIST)
+    }))
+    await expect(api.competitionApi.list()).rejects.toBeTruthy()
+    await expect(api.competitionApi.list()).resolves.toEqual(LIST)
+    expect(n).toBe(2)
+  })
+
+  it('报名之后立刻再读要拿到新的一份', async () => {
+    const { api } = await load()
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      return json(isList(url) ? LIST : { ok: true })
+    }))
+    await api.competitionApi.list()
+    await api.competitionApi.register('c1', '100959')
+    await api.competitionApi.list()
+    expect(calls.filter(isList)).toHaveLength(2)
+  })
+
+  it('换了登录账号不复用上一个账号的结果', async () => {
+    const { api } = await load()
+    stubWindowStorage()
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push(url)
+      return json(LIST)
+    }))
+    api.setToken('tok-a')
+    await api.competitionApi.list()
+    api.setToken('tok-b')
+    await api.competitionApi.list()
+    expect(calls.filter(isList)).toHaveLength(2)
+  })
+})

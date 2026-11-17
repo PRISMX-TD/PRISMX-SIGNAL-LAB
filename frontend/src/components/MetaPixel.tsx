@@ -48,12 +48,19 @@ export default function MetaPixel() {
     // code's stub queues calls, but under a blocker even the stub is gone — guard
     // or every navigation throws.
     if (typeof window.fbq !== 'function') return
-    // 敏感页（重置 / 验证令牌、后台、工单……）不发：fbevents 会把含查询串的完整地址
-    // 一起发给 Meta。清单见 utils/pixelPrivacy.ts（index.html 的基础代码用同一份）。
+    // 只有公开页、登录 / 注册页和升级页发（2026-11-16 起是白名单）：登录后的工作页面不在投放
+    // 漏斗里；重置 / 验证令牌、后台、工单这些敏感页更不能发——fbevents 会把含查询串的完整
+    // 地址一起发给 Meta。清单见 utils/pixelPrivacy.ts（index.html 的基础代码用同一份）。
     // 这里从不显式传 URL；fbevents 自带的 pushState 自动上报已在 index.html 里关掉。
-    // Sensitive pages are skipped: fbevents sends the full URL, query string included.
-    // We never pass a URL explicitly; fbevents' own pushState tracking is disabled in
-    // index.html so this is the only SPA PageView source.
+    // 注意：这一次页面加载如果落在名单外的页面上（比如直接打开图表页），index.html 根本
+    // 不装像素，之后在站内走到升级页也不会补发——那不是广告带来的会话。
+    // Only public pages, login / sign-up and the upgrade page report (an allowlist since
+    // 2026-11-16): signed-in working pages are outside the ad funnel, and sensitive pages
+    // must never report because fbevents sends the full URL, query string included. We
+    // never pass a URL explicitly; fbevents' own pushState tracking is disabled in
+    // index.html so this is the only SPA PageView source. If this page load started on a
+    // page outside the list (say the charts page), index.html installed no pixel at all,
+    // so a later in-app visit to the upgrade page is not reported either.
     if (isPixelBlocked(pathname, search)) return
     window.fbq('track', 'PageView')
   }, [pathname, search])

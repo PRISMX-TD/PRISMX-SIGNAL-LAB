@@ -16,7 +16,7 @@ import {
   withHashes,
 } from './check-csp-hashes.mjs'
 import { SHELL_PRELOAD_SCRIPT, shellPreloadDataTag } from './inline-scripts.mjs'
-import { PIXEL_BLOCKED_PATHS } from '../src/utils/pixelPrivacy.ts'
+import { PIXEL_ALLOWED_PATHS } from '../src/utils/pixelPrivacy.ts'
 
 const indexHtml = readFileSync(join(FRONTEND_ROOT, 'index.html'), 'utf8')
 
@@ -75,17 +75,19 @@ describe('CSP script-src', () => {
   })
 })
 
-describe('Meta Pixel 敏感页清单 / pixel denylist', () => {
-  it('index.html 内联清单与 PIXEL_BLOCKED_PATHS 一致 / index.html copy matches PIXEL_BLOCKED_PATHS', () => {
-    const m = /\/\*PIXEL_BLOCKED_PATHS\*\/(\[[^\]]*\])/.exec(indexHtml)
+describe('Meta Pixel 上报页清单 / pixel allowlist', () => {
+  it('index.html 内联清单与 PIXEL_ALLOWED_PATHS 一致 / index.html copy matches PIXEL_ALLOWED_PATHS', () => {
+    const m = /\/\*PIXEL_ALLOWED_PATHS\*\/(\[[^\]]*\])/.exec(indexHtml)
     expect(m).not.toBeNull()
     const inline = JSON.parse(m[1].replace(/'/g, '"'))
-    expect(inline).toEqual([...PIXEL_BLOCKED_PATHS])
+    expect(inline).toEqual([...PIXEL_ALLOWED_PATHS])
   })
 
-  it('清单检查在 fbq 安装之前 / the denylist check runs before fbq is installed', () => {
+  it('清单检查在 fbq 安装之前，不在名单就直接返回 / the allowlist check runs before fbq is installed', () => {
     const pixel = inlineScripts(indexHtml).find((s) => s.includes('fbq'))
-    expect(pixel.indexOf('PIXEL_BLOCKED_PATHS')).toBeLessThan(pixel.indexOf('n=f.fbq='))
+    expect(pixel.indexOf('PIXEL_ALLOWED_PATHS')).toBeLessThan(pixel.indexOf('n=f.fbq='))
+    expect(pixel.indexOf('if(!a)return')).toBeGreaterThan(pixel.indexOf('PIXEL_ALLOWED_PATHS'))
+    expect(pixel.indexOf('if(!a)return')).toBeLessThan(pixel.indexOf('n=f.fbq='))
     expect(pixel.indexOf('token=')).toBeLessThan(pixel.indexOf("n('init'"))
     expect(pixel).toContain('n.disablePushState=!0')
   })

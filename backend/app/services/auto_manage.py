@@ -48,7 +48,7 @@ from app.services.order_payload import OPENED_POSITION
 from app.services.plans import can_auto_manage
 from app.services.push_dispatch import EVENT_AUTO_MANAGE, dispatch_event_push
 from app.services.shared_cache import SharedVersion
-from app.services.symbol_aliases import lot_step, min_lot
+from app.services.symbol_aliases import display_symbol, lot_step, min_lot
 
 logger = logging.getLogger("prismx.auto_manage")
 
@@ -759,7 +759,7 @@ def _evaluate_positions_locked(
                 kind = "保本" if desired == entry else "追踪止损"
                 pending_pushes.append((
                     cmd,
-                    f"自动仓位管理：{symbol}",
+                    f"自动仓位管理：{display_symbol(symbol)}",
                     f"止损已自动移至 {desired:.5f}（{kind}）",
                 ))
 
@@ -809,7 +809,7 @@ def _evaluate_positions_locked(
                 pending_auto_tickets.add(ticket)
                 pending_pushes.append((
                     cmd,
-                    f"自动仓位管理：{symbol}",
+                    f"自动仓位管理：{display_symbol(symbol)}",
                     f"已自动分批止盈 {close_vol} 手",
                 ))
 

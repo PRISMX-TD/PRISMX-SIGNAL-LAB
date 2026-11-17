@@ -177,6 +177,12 @@
 .dh-exec-head h3 svg {
   color: var(--purple-hi);
 }
+/* 空状态的那一句话：只在手机显示（见下面的手机断点），桌面保留整副骨架、卡片高度不变。
+   The empty state's one line: phones only (see the mobile block); desktop keeps the full
+   skeleton so the card's height never changes. */
+.dh-exec-empty {
+  display: none;
+}
 .dh-exec-id {
   display: flex;
   align-items: flex-start;
@@ -546,6 +552,24 @@
   }
   .dh-exec {
     padding: 20px;
+  }
+  /* 没有可执行信号：手机上只留标题和一句话，把首屏让给下面的行情和胜率
+     （体验报告 L6：原来一副全是「—」的骨架加禁用按钮，占掉大半屏）。
+     No executable signal: on phones keep just the title and one line, giving the first
+     screen back to the quotes and win-rate cards below. */
+  .dh-exec--empty .sig-ttl,
+  .dh-exec--empty .dh-exec-id,
+  .dh-exec--empty .dh-entry,
+  .dh-exec--empty .dh-ladder,
+  .dh-exec--empty .dh-exec-cta {
+    display: none;
+  }
+  .dh-exec--empty .dh-exec-empty {
+    display: block;
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-2);
   }
   .dh-entry b {
     font-size: 26px;

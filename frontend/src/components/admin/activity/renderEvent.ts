@@ -29,6 +29,7 @@
 // fails tsc.
 import type { TFunction } from 'i18next'
 import type { ActivityItem, ActivityPerson, ActivityTag } from '../../../api/types'
+import { displaySymbol } from '../../../api/utils'
 import { resolvePriceDigits } from '../../charts/chartConfig'
 import { bjDate, bjDateTime, bjDayKey, bjHm } from './time'
 
@@ -146,7 +147,12 @@ function sideLabel(t: TFunction, side: unknown): string | null {
 /** 「XAUUSD 买单 0.10 手」：哪一项没有就省掉哪一项。/ "XAUUSD buy 0.10 lots", omitting what's missing. */
 function subj(t: TFunction, sym: unknown, side: unknown, vol: unknown): string {
   const v = num(vol)
-  return [str(sym), sideLabel(t, side), v != null ? t('admin.log.x.lots', { v: fmtLots(v) }) : null].filter(Boolean).join(' ')
+  // 品种名去掉券商后缀再显示：平仓 / 改单 / 已平仓事件带的是 MT5 的名字（XAUUSD.s），开仓带的是
+  // 不带后缀的，同一笔交易前后两个名字（2026-11-16 体验报告 L5）。
+  // Shown without the broker suffix: close / modify / closed-trade events carry MT5's name
+  // (XAUUSD.s) while opens carry the bare one, so one trade read under two names.
+  const s = str(sym)
+  return [s ? displaySymbol(s) : s, sideLabel(t, side), v != null ? t('admin.log.x.lots', { v: fmtLots(v) }) : null].filter(Boolean).join(' ')
 }
 
 /** 句子骨架：head —— subject，tail1，tail2… / Skeleton: head — subject, tail1, tail2… */

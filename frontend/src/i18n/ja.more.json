@@ -80,6 +80,7 @@
       "communitySentiment": "コミュニティのセンチメント",
       "tfRail": "時間足",
       "noExecutable": "執行可能なシグナルなし · 戦略エンジン監視中",
+      "execEmpty": "戦略エンジンが監視中です。新しいシグナルは発生と同時にここに表示されます",
       "remainingTtl": "残り時間",
       "otherActive": "その他の有効なシグナル",
       "rrLabel": "R:R",

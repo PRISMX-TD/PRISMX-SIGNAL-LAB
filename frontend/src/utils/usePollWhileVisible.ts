@@ -1,12 +1,15 @@
-// 「前台才轮询 + 回前台立即补一次（2 秒去重）」的统一模板，取代各处手写的
+// 「前台才轮询 + 回前台补一次（数据超过 10 秒才补）」的统一模板，取代各处手写的
 // setInterval + visibilitychange + focus 三件套。
 //
 //   · 挂载 / deps 变化：立即 load（immediate:false 时不立即，行为与旧写法一致）。
 //   · 之后按 intervalMs 轮询，页面/App 在后台时跳过。intervalMs 可以是函数（例如 WS 在线
 //     3 分钟、断线 45 秒）：它在每次检查时现读，所以间隔变化**不需要**重跑 effect，
 //     也就不会在 WS 抖动时多打一次请求。检查粒度最长 10 秒，间隔变短最多晚 10 秒生效。
-//   · 回前台（focus / visibilitychange / apppack:foreground）：距上次 load 不足 2 秒就跳过。
-//     去重只罩住这条路径；deps 变化触发的 load（例如新平仓）不受影响。
+//   · 回前台（focus / visibilitychange / apppack:foreground）：距上次 load 不足 10 秒就跳过
+//     （FOREGROUND_REFETCH_AFTER_MS）。原来是 2 秒：电脑上每切回一次浏览器窗口，品种、账户、
+//     比赛、胜率这几个轮询就各重拉一遍，哪怕数据是几秒前刚拿到的（2026-11-16 体验报告 L3）。
+//     已经到期的轮询不靠这条路——定时器自己会在回前台后 0.1 秒内补上。
+//     这个门槛只罩住回前台这条路径；deps 变化触发的 load（例如新平仓）不受影响。
 //
 // One template for "poll only while visible + refetch on return (2s de-dupe)", replacing the
 // hand-written setInterval + visibilitychange + focus trio. Mount / deps change loads at once
@@ -14,12 +17,17 @@
 // while backgrounded. intervalMs may be a function (e.g. 3 min with WS up, 45 s without): it is
 // read on each check, so a change needs no effect re-run and a flapping WS causes no extra
 // request. Check granularity is at most 10s. Return-to-foreground skips if the last load was
-// under 2s ago; that de-dupe covers only this path — deps-triggered loads (e.g. a new close)
-// are never swallowed.
+// under 10s ago (FOREGROUND_REFETCH_AFTER_MS; it was 2s, so every switch back to the browser
+// window re-fetched symbols, accounts, competitions and win-rate even when seconds old). A poll
+// that is already due does not depend on this path: its own timer fires within 0.1s of the
+// return. The threshold covers only this path — deps-triggered loads (e.g. a new close) are
+// never swallowed.
 import { useEffect, useRef, type DependencyList } from 'react'
-import { isAppHidden, onForeground, FOREGROUND_DEDUPE_MS } from './appVisibility'
+import { isAppHidden, onForeground } from './appVisibility'
 
 export const POLL_CHECK_MAX_MS = 10_000
+/** 回前台时，数据比这更旧才重拉。/ On return to the foreground, refetch only data older than this. */
+export const FOREGROUND_REFETCH_AFTER_MS = 10_000
 
 export interface PollOptions {
   /** 挂载 / deps 变化时是否立即执行，默认 true / run immediately on mount or deps change (default true) */
@@ -58,7 +66,7 @@ export function startPolling(
   }
   schedule()
   const off = onForeground(() => {
-    if (Date.now() - lastAt < FOREGROUND_DEDUPE_MS) return
+    if (Date.now() - lastAt < FOREGROUND_REFETCH_AFTER_MS) return
     run()
   })
   return () => {

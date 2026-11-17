@@ -80,6 +80,7 @@
       "communitySentiment": "Tâm lý cộng đồng",
       "tfRail": "Khung thời gian",
       "noExecutable": "Chưa có tín hiệu vào lệnh · bộ máy chiến lược đang theo dõi",
+      "execEmpty": "Bộ máy chiến lược đang theo dõi. Tín hiệu mới sẽ hiện ở đây ngay khi xuất hiện.",
       "remainingTtl": "Thời gian còn lại",
       "otherActive": "Tín hiệu đang hiệu lực khác",
       "rrLabel": "R:R",

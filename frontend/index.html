@@ -81,24 +81,29 @@
       // is black-holed from mainland China and holding up window load); (2) fbevents.js
       // is injected on idle after load — init / PageView still enter the fbq queue here
       // and are flushed once the script lands. MetaPixel.tsx checks fbq before firing.
-      // ③ 2026-10-10：敏感页（重置密码 / 邮箱验证令牌、后台、工单……）连像素都不装——
-      //    fbevents 会把含查询串的完整地址发给 Meta。清单与 src/utils/pixelPrivacy.ts 的
-      //    PIXEL_BLOCKED_PATHS 一致（scripts/csp-hashes.test.mjs 校验）。disablePushState
-      //    关掉 fbevents 自带的 pushState 自动 PageView，路由补发只走 MetaPixel.tsx（它会跳过
-      //    这些页面）。
+      // ③ 只在公开页、登录 / 注册页和升级页装像素（2026-11-16 起是白名单，原来是 2026-10-10
+      //    加的敏感页黑名单）：登录后的工作页面不在投放漏斗里，不该每次打开都加载 fbevents.js；
+      //    重置密码 / 邮箱验证令牌、后台、工单这些敏感页不在名单里，自然也不装——fbevents 会把
+      //    含查询串的完整地址发给 Meta。清单与 src/utils/pixelPrivacy.ts 的 PIXEL_ALLOWED_PATHS
+      //    一致（scripts/csp-hashes.test.mjs 校验）。disablePushState 关掉 fbevents 自带的
+      //    pushState 自动 PageView，路由补发只走 MetaPixel.tsx（它按同一份名单判断）。
       // ⚠️ 改动这段内联脚本的任何字符（含注释）都会改变它的 sha256，必须重算 vercel.json
       //    的 CSP：node scripts/check-csp-hashes.mjs --write，否则线上整段脚本被 CSP 拦掉。
-      // (3) Since 2026-10-10 sensitive pages (reset / verify tokens, admin, tickets…) get no
-      // pixel at all, since fbevents sends the full URL incl. query string. The list mirrors
-      // PIXEL_BLOCKED_PATHS in src/utils/pixelPrivacy.ts (checked by scripts/csp-hashes.test.mjs).
-      // disablePushState turns off fbevents' own pushState PageViews so SPA PageViews come
-      // only from MetaPixel.tsx, which skips these pages. Any edit to this inline script
-      // (comments included) changes its sha256: run node scripts/check-csp-hashes.mjs --write.
+      // (3) The pixel is installed only on public pages, login / sign-up and the upgrade page
+      // (an allowlist since 2026-11-16; a denylist of sensitive pages before that). Signed-in
+      // working pages are outside the ad funnel and no longer load fbevents.js; sensitive pages
+      // (reset / verify tokens, admin, tickets…) are simply not listed, since fbevents sends the
+      // full URL incl. query string. The list mirrors PIXEL_ALLOWED_PATHS in
+      // src/utils/pixelPrivacy.ts (checked by scripts/csp-hashes.test.mjs). disablePushState
+      // turns off fbevents' own pushState PageViews so SPA PageViews come only from
+      // MetaPixel.tsx, which applies the same list. Any edit to this inline script (comments
+      // included) changes its sha256: run node scripts/check-csp-hashes.mjs --write.
       !function(f,b,e,v,n,t,s)
       {if(f.fbq)return;var h=location.hostname;
       if(!/(^|\.)prismxsignallab\.com$/.test(h)||h==='localhost'||f.Capacitor)return;
-      var p=location.pathname.toLowerCase().replace(/\/+$/,''),d=/*PIXEL_BLOCKED_PATHS*/['/reset-password','/forgot-password','/verify-email','/complete-profile','/unsubscribe','/admin','/agent','/support-desk','/simulator','/support','/account'];
-      for(var i=0;i<d.length;i++)if(p===d[i]||p.indexOf(d[i]+'/')===0)return;
+      var p=location.pathname.toLowerCase().replace(/\/+$/,''),d=/*PIXEL_ALLOWED_PATHS*/['/','/en','/intro','/login','/terms','/privacy','/risk','/faq','/c','/upgrade'],a=0;
+      for(var i=0;i<d.length;i++)if(d[i]==='/'?p==='':(p===d[i]||p.indexOf(d[i]+'/')===0))a=1;
+      if(!a)return;
       if(/[?&]token=/i.test(location.search))return;
       n=f.fbq=function(){n.callMethod?
       n.callMethod.apply(n,arguments):n.queue.push(arguments)};

@@ -106,8 +106,17 @@ export function useChartData(symbol: string, interval: string, digits: number, e
   // 切品种/周期：拉历史快照 + 起轮询最新价 / on symbol or interval change: fetch history + poll latest
   useEffect(() => {
     const series = seriesRef.current
-    if (!series || !symbol) return // symbol 为空说明 activeSymbols 还没校正出有效值，等下一轮
-                                    // empty symbol means activeSymbols hasn't resolved a valid value yet
+    // drawReady 还没翻 true 就先不拉（2026-11-16 体验报告 L4）。建图的 effect 先注册先执行，
+    // 它在同一拍里就把 series 放进了 ref、并 setDrawReady(true)；本 effect 紧跟着跑时 ref 已经
+    // 有值，但这一轮渲染里 drawReady 还是 false。原来只看 ref，于是这一轮拉一次、drawReady 翻
+    // true 后重跑又拉一次——首屏的 history?limit=50 和 latest?n=10 各发两遍，第一遍的结果还被丢掉。
+    // Wait for drawReady. The engine's build effect is registered first, so within the same
+    // commit it has already put the series in the ref and called setDrawReady(true); this
+    // effect then ran with the ref set but drawReady still false for that render. Checking only
+    // the ref made it fetch once here and again when drawReady flipped: history?limit=50 and
+    // latest?n=10 each went out twice on first load, the first pair's results thrown away.
+    if (!drawReady || !series || !symbol) return // symbol 为空说明 activeSymbols 还没校正出有效值，等下一轮
+                                                 // empty symbol means activeSymbols hasn't resolved a valid value yet
     let alive = true
     // 数据源：基础周期直通 chartApi；M30 / 月线由源周期（M15 / 日线）现场合成，见 derivedIntervals。
     // Data source: base intervals go straight to chartApi; M30 / monthly are built from

@@ -1,6 +1,6 @@
-// startPolling：前台才轮询、回前台 2 秒去重、间隔可随 WS 状态变化而不重跑。
-// startPolling: poll only in the foreground, 2s return de-dupe, interval that can change
-// with WS state without re-running anything.
+// startPolling：前台才轮询、回前台只补超过 10 秒的数据、间隔可随 WS 状态变化而不重跑。
+// startPolling: poll only in the foreground, refetch on return only when older than 10s,
+// interval that can change with WS state without re-running anything.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 class FakeDoc extends EventTarget {
@@ -61,17 +61,35 @@ describe('startPolling', () => {
     expect(load).toHaveBeenCalledTimes(1)
   })
 
-  it('回前台 focus + visibilitychange 双触发只拉一次；刚拉过（<2 秒）也跳过', async () => {
+  it('回前台 focus + visibilitychange 双触发只拉一次；数据不到 10 秒不重拉', async () => {
     const { poll, win, doc } = await setup()
     const load = vi.fn()
     poll.startPolling(load, 45_000, true) // 挂载时拉了一次 / loaded once on mount
-    vi.advanceTimersByTime(10_000)
+    vi.advanceTimersByTime(12_000)
     doc.dispatchEvent(new Event('visibilitychange'))
     win.dispatchEvent(new Event('focus'))
     expect(load).toHaveBeenCalledTimes(2)
-    // 刚拉过 2 秒内的回前台被吞 / a return within 2s of a load is swallowed
-    vi.advanceTimersByTime(1_000)
-    win.dispatchEvent(new Event('apppack:foreground'))
+    // 切出去 5 秒再回来：数据才 5 秒，不重拉（原来 2 秒以上就会再拉一遍）。
+    // Away for 5s: the data is 5s old, no refetch (it used to refetch past 2s).
+    vi.advanceTimersByTime(5_000)
+    win.dispatchEvent(new Event('focus'))
+    expect(load).toHaveBeenCalledTimes(2)
+    // 再过 6 秒（共 11 秒）回来：超过 10 秒，补一次。/ 11s old on the next return: refetch.
+    vi.advanceTimersByTime(6_000)
+    doc.dispatchEvent(new Event('visibilitychange'))
+    expect(load).toHaveBeenCalledTimes(3)
+  })
+
+  it('已经到期的轮询不靠回前台那条路：定时器自己补上', async () => {
+    const { poll, win } = await setup()
+    const load = vi.fn()
+    poll.startPolling(load, 5_000, true)
+    win.dispatchEvent(new Event('apppack:background'))
+    vi.advanceTimersByTime(7_000) // 后台 7 秒，5 秒的轮询已到期但被跳过 / due but skipped while hidden
+    expect(load).toHaveBeenCalledTimes(1)
+    win.dispatchEvent(new Event('apppack:foreground')) // 7 秒 < 10 秒，回前台这条路不拉
+    expect(load).toHaveBeenCalledTimes(1)
+    vi.advanceTimersByTime(150) // 定时器在 0.1 秒内补上 / the timer catches up within 0.1s
     expect(load).toHaveBeenCalledTimes(2)
   })
 

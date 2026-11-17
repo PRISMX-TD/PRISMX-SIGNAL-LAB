@@ -54,7 +54,7 @@ from app.services.settings_store import (
     get_broker_settings,
     server_matches_broker,
 )
-from app.services.symbol_aliases import broker_symbol
+from app.services.symbol_aliases import broker_symbol, display_symbol
 from app.services.symbol_availability import blocked_symbols
 from app.services.shared_cache import BRIDGE_AUTH_VERSION
 from app.services.trade_performance import invalidate_trade_caches, known_position_ids, mark_positions_seen
@@ -1710,6 +1710,10 @@ def _result_push_args(order: Order) -> tuple[str, str, str, str] | None:
     # (auto_manage.evaluate_positions), no need to notify the same action twice.
     if order.client_order_id.startswith(AUTO_PREFIX):
         return None
+    # 标题里的品种名去掉券商后缀：平仓 / 改单行存的是持仓上的 MT5 名字（XAUUSD.s）。
+    # The title shows the symbol without the broker suffix (close / modify rows store
+    # the position's MT5 name).
+    sym = display_symbol(order.symbol)
     if order.status == "PLACED":
         # 「已挂出」不是「已成交」，措辞必须分开：用户看到"成交"会以为仓位已经
         # 建立，从而按已有仓位去设止损、算风险，而实际上什么都还没发生。
@@ -1717,13 +1721,13 @@ def _result_push_args(order: Order) -> tuple[str, str, str, str] | None:
         # manage a position that does not exist yet.
         return (
             EVENT_ORDER_FILLED,
-            f"挂单已挂出 {order.symbol}",
+            f"挂单已挂出 {sym}",
             f"{order.side} {order.volume} 手 @ {order.price}｜触发后才会成交 / fills when triggered",
         )
     if order.status == "FILLED":
         return (
             EVENT_ORDER_FILLED,
-            f"订单已成交 {order.symbol}",
+            f"订单已成交 {sym}",
             f"{order.side} {order.volume} 手 @ {order.filled_price}",
         )
     if order.status == "FAILED":
@@ -1734,10 +1738,10 @@ def _result_push_args(order: Order) -> tuple[str, str, str, str] | None:
         # the order may already have filled and a retry doubles the position.
         return (
             EVENT_ORDER_REJECTED,
-            f"执行结果未确认 {order.symbol}",
+            f"执行结果未确认 {sym}",
             f"{order.message or '-'}｜请先在 MT5 核对持仓再决定是否重试 / verify the position before retrying",
         )
-    return (EVENT_ORDER_REJECTED, f"订单被拒绝 {order.symbol}", order.message or "-")
+    return (EVENT_ORDER_REJECTED, f"订单被拒绝 {sym}", order.message or "-")
 
 
 async def _result_followups(

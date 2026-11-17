@@ -23,6 +23,13 @@
 // Entry drops 40 → 32px (still the biggest figure), the CTA 48 → 44px.
 // With no signal the same skeleton shows "-" and a disabled button, so the card
 // never changes size.
+//
+// 2026-11-16（体验报告 L6）：上面那条只对桌面成立——桌面这张卡在右栏里，高度一变下面的卡
+// 就跟着跳。手机是单栏，没信号时这副全是「—」的骨架占掉大半屏，把下面的内容挤出首屏。
+// 所以手机上空状态收成「标题 + 一句话」，骨架和禁用的下单按钮都不画（样式见 dashboard.css
+// 的 .dh-exec--empty）；桌面不变。
+// On phones the empty card collapses to its title and one line: the all-dash skeleton took
+// most of the first screen there. Desktop keeps the skeleton so the column never jumps.
 import { memo, type CSSProperties, type FC } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
@@ -53,7 +60,7 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
   const meta = signal ? symbolMeta(signal.symbol) : null
 
   return (
-    <section className="card glass dash-exec dh-exec">
+    <section className={`card glass dash-exec dh-exec${signal ? '' : ' dh-exec--empty'}`}>
       {/* 牌头：标题 + 倒计时环 / head: title + countdown ring */}
       <div className="dh-exec-head">
         <h3>
@@ -68,6 +75,9 @@ const SignalExec: FC<Props> = ({ signal, onTrade }) => {
           <span className="sig-ttl"><b className="num">--:--</b></span>
         )}
       </div>
+      {/* 只在手机的空状态显示（桌面由 CSS 藏起），见文件头说明。
+          Shown only for the empty state on phones (hidden by CSS on desktop). */}
+      {!signal && <p className="dh-exec-empty">{t('signals.focus.execEmpty')}</p>}
 
       {/* 身份行：芯片 + 品种 + 方向；署名是策略名与发出时间
           Identity row: chip + symbol + side; byline is strategy and issue time */}
