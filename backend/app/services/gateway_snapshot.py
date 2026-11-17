@@ -286,8 +286,16 @@ async def push_positions_now(
         while True:
             reread = False
             started = time.time()
+            # 判「有没有被超过」从哪一刻算起：有回执持仓的第一轮从发单时刻算（见上面的说明）。
+            # 记给周期读看的时间戳仍用本轮真实的开始时刻：若也往前挪到发单时刻，发单之后、
+            # 成交之前开始的周期读（手里是成交前的持仓）就不再被挡住，推出去盖掉新仓位。
+            # Where the overtaken check counts from: send time for a first pass with reply
+            # rows (see above). The stamp for the periodic read keeps the real pass start:
+            # moved back to the send time, a periodic read begun between send and fill (holding
+            # pre-fill rows) would no longer be held back and could overwrite the new frame.
+            check_from = started
             if known and known_since is not None:
-                started = min(started, known_since)
+                check_from = min(started, known_since)
             # 持仓与资金一起读：平仓后浮盈一消失，余额要同一时刻跟上，否则净值会先掉
             # 一截、等慢拍刷完资金再弹回来。
             # Positions and funds are read together: once a closed trade's floating P/L
@@ -317,7 +325,7 @@ async def push_positions_now(
                 data.extend(res[0])
             if complete:
                 funds_rows: dict[str, list[dict]] | None = rows_by_login
-                if await asyncio.to_thread(positions_pushed_after, user_id, started):
+                if await asyncio.to_thread(positions_pushed_after, user_id, check_from):
                     # 等资金的这段时间里别的路已经推过一帧：手里这份不推（见上面的说明）。
                     # Another path pushed while this pass waited: drop these rows.
                     funds_rows = await _latest_rows_by_login(user_id, logins)

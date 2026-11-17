@@ -373,3 +373,20 @@ def test_without_known_since_the_pass_start_still_applies(gw, pushed, monkeypatc
 
 def _funds_obj():
     return _funds(1000.0, 1000.0)
+
+
+def test_known_since_does_not_move_the_periodic_stamp_back(gw, pushed, monkeypatch):
+    """known_since 只管「有没有被超过」的判断。记给周期读的时间戳仍是本轮真实开始时刻：
+    发单之后、成交之前开始的周期读拿着成交前的持仓，必须仍被挡住（2026-11-17 复审）。"""
+    sent_at = time.time() - 1.0
+    periodic_read_began = sent_at + 0.2  # 成交前开始的周期读 / a periodic read begun before the fill
+
+    async def _funds(login):
+        return _funds_obj()
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds)
+    known = {"500001": _reply_positions(2, 3)}
+    asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known, known_since=sent_at))
+
+    assert _position_frames(pushed) == [[2, 3]]
+    assert not gateway_snapshot.claim_periodic_push("u1", periodic_read_began, changed=True)
