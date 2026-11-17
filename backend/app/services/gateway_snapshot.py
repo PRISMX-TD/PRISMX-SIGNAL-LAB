@@ -133,6 +133,24 @@ def _funds_entry(rsp, rows: list[dict]) -> dict:
     }
 
 
+async def _latest_rows_by_login(user_id: str, logins: list[str]) -> dict[str, list[dict]] | None:
+    """已经推出去的最新那份持仓（跨 worker 的共享快照），按账号分好。读不到返回 None。
+    The latest snapshot already pushed (shared across workers), grouped by login; None
+    when it cannot be read."""
+    try:
+        rows = await manager.get_positions_shared_async(user_id)
+    except Exception:  # noqa: BLE001 — 读不到只是这次不推资金 / only this funds push is lost
+        logger.debug("读共享持仓快照失败 user=%s", user_id, exc_info=True)
+        return None
+    out: dict[str, list[dict]] = {lg: [] for lg in logins}
+    for r in rows or []:
+        if isinstance(r, dict):
+            lg = str(r.get("login") or "")
+            if lg in out:
+                out[lg].append(r)
+    return out
+
+
 async def _known_rows(login: str, positions) -> tuple[list[dict], bool]:
     """网关回执里已带的持仓，转成与即时读同样的行。/ Reply positions as rows."""
     from app.routers.gateway import _position_rows
@@ -147,7 +165,23 @@ async def push_positions_now(
 
     必须读齐再推（整表替换语义），任一账号读不到就不推，交给周期读——与事件快拍同一条规矩。
     Read every gateway login of the user and push one POSITIONS frame at once; any
-    failed read cancels the push (whole-table replace), leaving it to the poll."""
+    failed read cancels the push (whole-table replace), leaving it to the poll.
+
+    推之前再看一眼有没有被别人超过（2026-11-16）。持仓是这一轮**开始**时的样子（回执里
+    带的，或刚读的），却要等资金读完（约 0.2 秒）才推出去。这段时间里另一路——领导
+    worker 的开平仓事件快拍——可能已经推了一帧更新的：一键平仓 5 笔时，第一笔回执带回
+    「还剩 4 笔」，等它推出去时事件快拍早已推过「0 笔」，页面上持仓数就从 0 闪回 4 再
+    回到 0。所以共享时间戳比本轮开始时刻晚时，这一轮的持仓不推、也不盖时间戳；资金照
+    推，浮盈改按已经推出去的那份持仓算。
+
+    Before pushing, check whether this pass has been overtaken. The rows are as of the
+    pass's start (attached to the reply, or just read) yet go out only after the funds
+    read (~0.2s). Meanwhile the other path — the leader worker's position-event snapshot
+    — may have pushed a newer frame: on a five-leg close-all the first reply carried
+    "four left", and by the time it went out the event snapshot had already pushed
+    "none", so the count flickered 0 → 4 → 0. When the shared stamp is later than this
+    pass's start, the rows are neither pushed nor stamped; funds still go out, with the
+    floating P/L taken from the snapshot that was pushed."""
     if not logins:
         return False
     if user_id in _inflight:
@@ -186,18 +220,27 @@ async def push_positions_now(
                 rows_by_login[lg] = res[0]
                 data.extend(res[0])
             if complete:
-                # 先记时间戳再推：推出去之后才记，中间那一下比它旧的周期读还能挤进来。
-                # Stamp before pushing so an older poll can't slip in between.
-                await asyncio.to_thread(record_priority_read, user_id, started)
-                await manager.push_positions(user_id, data, source="gateway")
-                pushed = True
-                funds = {
-                    lg: _funds_entry(rsp, rows_by_login[lg])
-                    for lg, rsp in zip(logins, funds_rsps)
-                    if rsp is not None
-                }
-                if funds:
-                    await manager.push_to_client(user_id, {"type": "ACCOUNT_FUNDS", "data": funds})
+                funds_rows: dict[str, list[dict]] | None = rows_by_login
+                if await asyncio.to_thread(priority_read_after, user_id, started):
+                    # 已经有一帧比这一轮新的推出去了：手里这份不推（见上面的说明）。
+                    # A newer frame is already out: drop these rows (see the docstring).
+                    funds_rows = await _latest_rows_by_login(user_id, logins)
+                else:
+                    # 先记时间戳再推：推出去之后才记，中间那一下比它旧的周期读还能挤进来。
+                    # Stamp before pushing so an older poll can't slip in between.
+                    await asyncio.to_thread(record_priority_read, user_id, started)
+                    await manager.push_positions(user_id, data, source="gateway")
+                    pushed = True
+                if funds_rows is not None:
+                    funds = {
+                        lg: _funds_entry(rsp, funds_rows.get(lg, []))
+                        for lg, rsp in zip(logins, funds_rsps)
+                        if rsp is not None
+                    }
+                    if funds:
+                        await manager.push_to_client(
+                            user_id, {"type": "ACCOUNT_FUNDS", "data": funds}
+                        )
             if not _inflight.get(user_id):
                 break
             _inflight[user_id] = False

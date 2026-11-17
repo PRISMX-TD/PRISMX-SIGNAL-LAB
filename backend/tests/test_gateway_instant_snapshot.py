@@ -184,3 +184,100 @@ def test_push_now_skips_funds_when_account_read_fails(gw, pushed):
     replies["/account"] = [{"ok": False, "error": "read_busy"}]
     assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"]))
     assert len(pushed) == 1 and isinstance(pushed[0][1], list)
+
+
+# ---------- 旧的一帧不能盖掉新的（2026-11-16 一键平仓持仓数 0 → 4 → 0）----------
+# ---------- an older frame must not overwrite a newer one ----------
+
+
+def _reply_positions(*tickets: int):
+    """网关回执里带的持仓，解析成 push_positions_now 的 known 用的样子。"""
+    return gateway_client._trade_rsp({"ok": True, "positions": [_pos(t) for t in tickets]}).positions
+
+
+def _funds(balance: float, equity: float):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(balance=balance, equity=equity, margin=0.0)
+
+
+def test_push_now_drops_rows_overtaken_by_a_newer_frame(gw, pushed, monkeypatch):
+    """一键平仓 5 笔：第一笔的回执带回「还剩 4 笔」，这份要等资金读完（约 0.2 秒）才推。
+    这期间事件快拍已经推了「0 笔」。旧的这份不能再推出去，否则持仓数从 0 闪回 4。
+    资金照推，浮盈按已经推出去的那份（空仓）算，不按手里过期的 4 笔算。"""
+    newer = time.time() + 5.0
+
+    async def _slow_funds(login):
+        # 等资金的这段时间里，另一路推了一帧更新的。/ Meanwhile the other path pushed.
+        gateway_snapshot.record_priority_read("u1", newer)
+        return _funds(1000.0, 1000.0)
+
+    async def _latest(user_id):
+        return []
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _slow_funds)
+    monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _latest)
+
+    known = {"500001": _reply_positions(2, 3, 4, 5)}
+    assert not asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
+
+    assert [p for p in pushed if isinstance(p[1], list)] == []
+    funds = [p[1] for p in pushed if isinstance(p[1], dict) and p[1].get("type") == "ACCOUNT_FUNDS"]
+    # adj = 净值 − 余额 − 浮盈；浮盈是 0（空仓），不是过期那 4 笔的 4.0。
+    assert funds == [{"type": "ACCOUNT_FUNDS", "data": {
+        "500001": {"balance": 1000.0, "equity": 1000.0, "margin": 0.0, "adj": 0.0}}}]
+    # 时间戳没有被这一轮的旧时刻盖回去。/ The stamp was not moved back.
+    assert gateway_snapshot.priority_read_after("u1", newer - 1.0)
+
+
+def test_push_now_skips_funds_when_the_newer_snapshot_cannot_be_read(gw, pushed, monkeypatch):
+    """被超过、又读不到已推出去的那份：这一轮什么都不推（资金交给慢拍），也不报错。"""
+
+    async def _slow_funds(login):
+        gateway_snapshot.record_priority_read("u1", time.time() + 5.0)
+        return _funds(1000.0, 1001.0)
+
+    async def _boom(user_id):
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _slow_funds)
+    monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _boom)
+
+    known = {"500001": _reply_positions(2)}
+    assert not asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
+    assert pushed == []
+
+
+def test_push_now_reruns_fresh_after_dropping_overtaken_rows(gw, pushed, monkeypatch):
+    """被超过的那一轮不推；期间又有别的成交来过（合并成「再来一轮」），下一轮重新读、照常推。"""
+    calls, replies = gw
+    replies["/positions"] = [{"ok": True, "positions": []}]
+    rounds = {"n": 0}
+
+    async def _funds_then_rerun(login):
+        rounds["n"] += 1
+        if rounds["n"] == 1:
+            gateway_snapshot.record_priority_read("u1", time.time())
+            # 同一用户的另一笔成交这时到了：只记一笔「跑完再来一次」。
+            assert not await gateway_snapshot.push_positions_now("u1", ["500001"])
+        return _funds(1000.0, 1000.0)
+
+    async def _latest(user_id):
+        return []
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds_then_rerun)
+    monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _latest)
+
+    # 把「本轮开始时刻」往前拨一点，保证第一轮确实早于上面记的那一刻。
+    real_time = time.time
+    ticks = iter([real_time() - 10.0])
+    monkeypatch.setattr(gateway_snapshot.time, "time", lambda: next(ticks, None) or real_time())
+
+    known = {"500001": _reply_positions(2, 3, 4, 5)}
+    assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
+
+    frames = [p[1] for p in pushed if isinstance(p[1], list)]
+    assert frames == [[]]          # 只有重新读的那一帧（空仓），过期的 4 笔没有推
+    assert len([c for c in calls if c[0] == "/positions"]) == 1
+    assert rounds["n"] == 2
+    assert gateway_snapshot._inflight == {}
