@@ -10,6 +10,9 @@
 //     比赛、胜率这几个轮询就各重拉一遍，哪怕数据是几秒前刚拿到的（2026-11-16 体验报告 L3）。
 //     已经到期的轮询不靠这条路——定时器自己会在回前台后 0.1 秒内补上。
 //     这个门槛只罩住回前台这条路径；deps 变化触发的 load（例如新平仓）不受影响。
+//     上一次加载失败了就不设门槛：load 返回 Promise 且它 reject 时记下「失败」，回前台立刻
+//     重拉（2026-11-17：门槛从 2 秒放宽到 10 秒后，断网失败的那一次要等下一轮——胜率和已平仓
+//     明细最长 3 分钟——才补）。要用这条，load 把请求的 Promise 返回出来，失败时 rethrow。
 //
 // One template for "poll only while visible + refetch on return (2s de-dupe)", replacing the
 // hand-written setInterval + visibilitychange + focus trio. Mount / deps change loads at once
@@ -21,7 +24,10 @@
 // window re-fetched symbols, accounts, competitions and win-rate even when seconds old). A poll
 // that is already due does not depend on this path: its own timer fires within 0.1s of the
 // return. The threshold covers only this path — deps-triggered loads (e.g. a new close) are
-// never swallowed.
+// never swallowed. No threshold after a failed load: when load returns a Promise that rejects,
+// the failure is noted and the return refetches at once (after the threshold went from 2s to
+// 10s, a load that failed offline otherwise waited for the next cycle — up to 3 minutes for the
+// win rate and closed trades). To use it, return the request's Promise and rethrow on failure.
 import { useEffect, useRef, type DependencyList } from 'react'
 import { isAppHidden, onForeground } from './appVisibility'
 
@@ -38,17 +44,34 @@ export interface PollOptions {
 
 /** 与 React 无关的核心，便于单测。返回停止函数。/ React-free core for unit tests; returns stop. */
 export function startPolling(
-  load: () => void,
+  load: () => unknown,
   intervalMs: number | (() => number),
   immediate = true,
 ): () => void {
   let stopped = false
   let lastAt = Date.now()
+  // 最近一次加载失败了（load 返回的 Promise reject）。只影响回前台：失败后定时器照常按间隔走，
+  // 不会在断网时每 0.1 秒重试一次。
+  // The latest load failed (its returned Promise rejected). Only the return-to-foreground path
+  // looks at it; the timer keeps its interval, so an outage never turns into a 0.1s retry loop.
+  let failed = false
+  let seq = 0
   let timer: ReturnType<typeof setTimeout> | undefined
   const currentMs = () => (typeof intervalMs === 'function' ? intervalMs() : intervalMs)
   const run = () => {
     lastAt = Date.now()
-    load()
+    const mine = ++seq
+    const r = load()
+    if (r && typeof (r as PromiseLike<unknown>).then === 'function') {
+      // 只认最新一次的结果：慢的旧请求晚到，不能盖掉新请求的成败。
+      // Only the latest load's outcome counts; a slow older one landing late must not override it.
+      ;(r as PromiseLike<unknown>).then(
+        () => { if (mine === seq) failed = false },
+        () => { if (mine === seq) failed = true },
+      )
+    } else {
+      failed = false
+    }
   }
   if (immediate) run()
   const schedule = () => {
@@ -66,7 +89,7 @@ export function startPolling(
   }
   schedule()
   const off = onForeground(() => {
-    if (Date.now() - lastAt < FOREGROUND_REFETCH_AFTER_MS) return
+    if (!failed && Date.now() - lastAt < FOREGROUND_REFETCH_AFTER_MS) return
     run()
   })
   return () => {
@@ -79,7 +102,9 @@ export function startPolling(
 export function usePollWhileVisible(
   // isCurrent()：这一轮 effect 是否仍有效（卸载 / deps 变化后为 false），用来丢掉过期响应。
   // isCurrent(): whether this effect run is still live (false after unmount / deps change).
-  load: (isCurrent: () => boolean) => void,
+  // 返回请求的 Promise（失败时 reject）可让回前台在上次失败后立刻重拉，见文件头。
+  // Returning the request's Promise (rejecting on failure) lets a return retry a failed load.
+  load: (isCurrent: () => boolean) => unknown,
   intervalMs: number | (() => number),
   deps: DependencyList,
   opts: PollOptions = {},

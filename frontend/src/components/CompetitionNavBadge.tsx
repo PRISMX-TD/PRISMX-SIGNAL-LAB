@@ -99,14 +99,15 @@ export default function CompetitionNavBadge({ preset }: { preset?: BadgeData | n
 
   usePollWhileVisible(
     (isCurrent) => {
-      competitionApi.list()
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return competitionApi.list()
         .then((r) => {
           if (!isCurrent()) return
           const next = { running: r.running, upcoming: r.upcoming }
           setData(next)
           writeJson(CACHE_KEY, { at: Date.now(), data: next })
         })
-        .catch(() => {})
     },
     POLL_MS,
     [visible],

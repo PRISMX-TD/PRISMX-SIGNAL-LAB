@@ -280,7 +280,7 @@ def test_post_fill_push_uses_the_logins_it_is_given(db_session, main_loop, monke
     done = threading.Event()
     seen: list[tuple] = []
 
-    async def _push(user_id, logins, known=None):
+    async def _push(user_id, logins, known=None, known_since=None):
         seen.append((user_id, list(logins), known))
         done.set()
 
@@ -322,7 +322,7 @@ def test_post_fill_push_looks_logins_up_off_the_request_session(tmp_path, main_l
     done = threading.Event()
     seen: list[tuple] = []
 
-    async def _push(user_id, logins, known=None):
+    async def _push(user_id, logins, known=None, known_since=None):
         seen.append((user_id, list(logins), known))
         done.set()
 
@@ -479,3 +479,89 @@ def test_gateway_batch_survives_a_failed_preparation(file_db, gateway, monkeypat
     check = Session()
     assert all(o.status == "PENDING" for o in close_all.batch_orders(check, "u1", batch))
     check.close()
+
+
+# ---------- 2026-11-17 全面测试的审查项 / follow-ups from the 2026-11-17 review ----------
+
+def test_post_fill_push_carries_the_send_time(db_session, main_loop, monkeypatch):
+    """回执带的持仓随「指令发出的时刻」一起交给即时快照（known_since）。"""
+    from app.services import gateway_snapshot
+
+    done = threading.Event()
+    seen: list = []
+
+    async def _push(user_id, logins, known=None, known_since=None):
+        seen.append(known_since)
+        done.set()
+
+    monkeypatch.setattr(gateway_snapshot, "push_positions_now", _push)
+    gateway_execute._after_gateway_result(db_session, _filled_close(), _rsp([]), [GW], sent_at=123.5)
+
+    assert done.wait(5)
+    assert seen == [123.5]
+
+
+def test_failed_local_rejection_still_clears_the_delivered_mark(db_session, gateway, monkeypatch):
+    """本地拒单写不进去（这里让写 REJECTED 的那次提交失败）：至少把「已下发」撤回——行留在
+    PENDING、可以撤，过期时按「没发出」作废；原错误照旧抛出。"""
+    from sqlalchemy.exc import OperationalError
+
+    user = _user(db_session, revoked=True)
+    real_commit = gateway_execute.commit_keep_loaded
+    attempts = {"n": 0}
+
+    def _flaky(db, *orders):
+        attempts["n"] += 1
+        raise OperationalError("COMMIT", {}, Exception("connection dropped"))
+
+    monkeypatch.setattr(gateway_execute, "commit_keep_loaded", _flaky)
+    with pytest.raises(OperationalError):
+        _close(db_session, user)
+    monkeypatch.setattr(gateway_execute, "commit_keep_loaded", real_commit)
+
+    assert gateway.calls == []
+    assert attempts["n"] >= 1
+    db_session.rollback()
+    row = db_session.query(Order).filter(Order.client_order_id == "co_close").one()
+    assert row.status == "PENDING"
+    assert not row.delivered and row.delivered_at is None
+
+
+def test_late_close_all_leg_is_not_sent_once_voided(file_db, gateway, monkeypatch):
+    """准备完很久才轮到的那一笔（券商卡住、后几批在排队）：发之前复查，已被作废的不再发。
+    门槛调成 -1 秒，等于每笔都「轮到得晚」。"""
+    Session, _engine = file_db
+    batch, ids = _queue(Session, 3)
+    real = close_all._prepare_gateway_legs
+
+    def _prepare_then_void(user_id, order_ids):
+        out = real(user_id, order_ids)
+        # 准备完之后，第二笔被过期清理作废 / after preparation the stale sweep voids leg two
+        db = Session()
+        db.query(Order).filter(Order.id == ids[1]).update({Order.status: "CANCELLED"})
+        db.commit()
+        db.close()
+        return out
+
+    monkeypatch.setattr(close_all, "_prepare_gateway_legs", _prepare_then_void)
+    monkeypatch.setattr(close_all, "CLOSE_ALL_RECHECK_AFTER_S", -1.0)
+
+    close_all.execute_gateway_batch("u1", batch, ids)
+
+    sent = sorted(c[1]["ticket"] for c in gateway.calls)
+    assert sent == [7000, 7002]
+    check = Session()
+    assert check.query(Order).filter(Order.id == ids[1]).one().status == "CANCELLED"
+    check.close()
+
+
+def test_prompt_close_all_legs_skip_the_recheck(file_db, gateway):
+    """正常一批几百毫秒发完：不复查，每笔不多一条语句。"""
+    Session, engine = file_db
+    batch, ids = _queue(Session, 3)
+    sql = _Sql(engine)
+
+    close_all.execute_gateway_batch("u1", batch, ids)
+
+    assert len(gateway.calls) == 3
+    assert sql.count("SELECT", "SELECT orders.status AS orders_status FROM") == 0

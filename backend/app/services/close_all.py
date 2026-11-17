@@ -32,6 +32,7 @@ and 500 the whole batch — the batch is greppable at ack time, and a client ret
 is idempotent.
 """
 import logging
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -53,6 +54,15 @@ logger = logging.getLogger("prismx.close_all")
 # overall (max_inflight_trades); half of that keeps the other half free for everyone
 # else. Raised from 16 on 2026-11-16: a 48-leg batch took three waves, now two.
 CLOSE_ALL_PARALLEL = 32
+# 准备完过了这么久才轮到的那一笔，发之前再看一眼它还是不是 PENDING（2026-11-17 审查）。
+# 正常一批几百毫秒发完，用不着；超过 32 笔、券商又卡住时，后几批要等前面的跑完（单笔最坏
+# 140 秒），期间它可能已被过期清理作废、用户也被告知「超时」——再发出去就是一笔多余的平仓。
+# A leg whose turn comes this long after preparation re-reads its status before sending.
+# A normal batch is out in a few hundred ms and never needs it; past 32 legs with a stuck
+# broker, later waves wait for earlier calls (140s worst case each), by which time the
+# stale sweep may have voided the leg and told the user it timed out — sending it then is
+# a stray close.
+CLOSE_ALL_RECHECK_AFTER_S = 15.0
 
 # 一次"全部平仓"最多排多少笔（审计 A2）。正常用户远到不了；超出的这次不排，再按一次即可。
 # 防的是一份被塞满的持仓快照把一个请求放大成成千上万条指令与网关调用。
@@ -510,6 +520,7 @@ def execute_gateway_batch(user_id: str, batch: str, order_ids: list[str]) -> Non
         # and the stale sweep voids them as "outcome unknown", as for a killed process.
         logger.exception("close_all: 批次准备失败 (user=%s batch=%s)", user_id, batch)
         orders, accounts, logins = [], {}, []
+    prepared_at = time.monotonic()
 
     def _one(order: Order) -> None:
         # 每笔一个自己的会话：Session 不能跨线程共用。指令对象是准备阶段取好的（已脱离
@@ -520,6 +531,21 @@ def execute_gateway_batch(user_id: str, batch: str, order_ids: list[str]) -> Non
         payload = None
         db = SessionLocal()
         try:
+            if time.monotonic() - prepared_at > CLOSE_ALL_RECHECK_AFTER_S:
+                try:
+                    status = db.query(Order.status).filter(Order.id == order.id).scalar()
+                    db.commit()
+                except Exception:  # noqa: BLE001 — 查不到就照原样发 / unreadable: send as before
+                    db.rollback()
+                    logger.warning("close_all: 复查状态失败，照常发出 (cmd=%s)", order.client_order_id,
+                                   exc_info=True)
+                    status = "PENDING"
+                if status != "PENDING":
+                    logger.warning(
+                        "close_all: 轮到发送时指令已是 %s，不再发出 (user=%s cmd=%s)",
+                        status, user_id, order.client_order_id,
+                    )
+                    return
             db.add(order)
             try:
                 payload = gateway_execute.try_gateway_execute(

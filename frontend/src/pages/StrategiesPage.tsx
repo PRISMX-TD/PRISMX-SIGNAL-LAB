@@ -998,7 +998,9 @@ export default function StrategiesPage() {
   // the WS up, 45 s without (same cadence as the win-rate card, see winratePollMs).
   usePollWhileVisible(
     (isCurrent) => {
-      strategyApi.signals(20).then((r) => { if (isCurrent()) setSignals(r.signals) }).catch(() => {})
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return strategyApi.signals(20).then((r) => { if (isCurrent()) setSignals(r.signals) })
     },
     () => winratePollMs(wsConnected),
     [],

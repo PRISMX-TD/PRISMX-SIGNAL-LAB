@@ -593,7 +593,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // shell); refetches on return to the foreground (2s de-dupe).
   usePollWhileVisible(
     () => {
-      symbolApi.list().then((r) => setActiveSymbols((prev) => keepIfEqual(prev, r.symbols || []))).catch(() => {})
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return symbolApi.list().then((r) => setActiveSymbols((prev) => keepIfEqual(prev, r.symbols || [])))
     },
     SYMBOLS_POLL_MS,
     [],
@@ -616,16 +618,17 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const accountFailStreak = useRef(0)
   const wsConnectedRef = useRef(false)
   const pollAccounts = useCallback(() => {
-    accountApi
+    return accountApi
       .list()
       .then((r) => {
         accountFailStreak.current = 0
         setBackendUnreachable(false)
         setAccounts((prev) => keepIfEqual(prev, r.accounts))
       })
-      .catch(() => {
+      .catch((e) => {
         accountFailStreak.current += 1
         if (accountFailStreak.current >= ACCOUNTS_FAIL_THRESHOLD) setBackendUnreachable(true)
+        throw e
       })
   }, [])
   usePollWhileVisible(
@@ -893,7 +896,9 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   // On a WS drop poll accounts at once; the interval falls back to 15s (read via the ref).
   const prevWsConnected = useRef(false)
   useEffect(() => {
-    if (prevWsConnected.current && !wsConnected) pollAccounts()
+    // 失败已在 pollAccounts 里计数；这里没人等结果，吞掉免得成为未处理的 rejection。
+    // The failure is already counted inside pollAccounts; nobody awaits it here, so swallow it.
+    if (prevWsConnected.current && !wsConnected) pollAccounts().catch(() => {})
     prevWsConnected.current = wsConnected
   }, [wsConnected, pollAccounts])
 

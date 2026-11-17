@@ -44,9 +44,11 @@ export default function PerformanceSummary({ login, accountLabel }: Props) {
   // Interval follows the WS (3 min up, 45s down), 2s return de-dupe; see usePollWhileVisible.
   usePollWhileVisible(
     (isCurrent) => {
-      orderApi.winrate(login)
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return orderApi.winrate(login)
         .then((r) => { if (isCurrent()) { setData(r); setFailed(false) } })
-        .catch(() => { if (isCurrent()) setFailed(true) })
+        .catch((e) => { if (isCurrent()) setFailed(true); throw e })
     },
     () => winratePollMs(wsConnected),
     [login, closedTradeTick, retryTick],

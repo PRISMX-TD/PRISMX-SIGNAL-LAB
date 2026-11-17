@@ -85,9 +85,14 @@ export function useGuestPreviewData(onUnavailable: () => void): GuestPreviewPayl
   unavailable.current = onUnavailable
   usePollWhileVisible(
     (isCurrent) => {
-      publicGetJson<RawPayload>('/public/preview')
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return publicGetJson<RawPayload>('/public/preview')
         .then((raw) => { if (isCurrent()) setData((prev) => merge(raw, prev)) })
-        .catch((err) => { if (isCurrent() && err instanceof PublicHttpError && err.status === 404) unavailable.current() })
+        .catch((err) => {
+          if (isCurrent() && err instanceof PublicHttpError && err.status === 404) unavailable.current()
+          throw err
+        })
     },
     POLL_MS,
     [],

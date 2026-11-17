@@ -329,3 +329,47 @@ def test_periodic_push_claim(gw):
     marked = time.time()
     assert not gateway_snapshot.claim_periodic_push("u2", t0, changed=True)
     assert not gateway_snapshot.positions_pushed_after("u2", marked + 0.5)
+
+
+def test_reply_rows_count_from_when_the_command_was_sent(gw, pushed, monkeypatch):
+    """回执带的持仓是网关回执那一刻的样子，比这一轮开始得早。事件快拍在「指令发出之后、本轮
+    开始之前」推了一帧：按本轮开始时刻比会漏判，过期的回执持仓又推出去（2026-11-17 审查）。
+    给了 known_since 就从发单时刻算起，这份不推，重新读一轮。"""
+    _, replies = gw
+    replies["/positions"] = [{"ok": True, "positions": []}]
+    sent_at = time.time() - 1.0
+    # 事件快拍在发单之后、本轮开始之前推过 / pushed after the send, before this pass began
+    gateway_snapshot.record_positions_pushed("u1")
+
+    async def _funds(login):
+        return _funds_obj()
+
+    async def _latest(user_id):
+        return []
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds)
+    monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _latest)
+
+    known = {"500001": _reply_positions(2, 3)}
+    asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known, known_since=sent_at))
+
+    assert _position_frames(pushed) == [[]]
+
+
+def test_without_known_since_the_pass_start_still_applies(gw, pushed, monkeypatch):
+    """不给 known_since（周期读、事件快拍那几路）：照旧按本轮开始时刻判，之前推过的帧不算。"""
+    gateway_snapshot.record_positions_pushed("u1")
+    time.sleep(0.01)
+
+    async def _funds(login):
+        return _funds_obj()
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds)
+    known = {"500001": _reply_positions(2, 3)}
+    asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
+
+    assert _position_frames(pushed) == [[2, 3]]
+
+
+def _funds_obj():
+    return _funds(1000.0, 1000.0)

@@ -80,6 +80,55 @@ describe('startPolling', () => {
     expect(load).toHaveBeenCalledTimes(3)
   })
 
+  it('上一次加载失败：回前台不受 10 秒门槛限制，立刻重拉 / a failed load is retried on return', async () => {
+    const { poll, win } = await setup()
+    let fail = true
+    const load = vi.fn(() => (fail ? Promise.reject(new Error('offline')) : Promise.resolve()))
+    poll.startPolling(load, 180_000, true)
+    await vi.advanceTimersByTimeAsync(0) // 让 rejection 落地 / let the rejection settle
+    win.dispatchEvent(new Event('apppack:background'))
+    vi.advanceTimersByTime(3_000)
+    fail = false
+    win.dispatchEvent(new Event('apppack:foreground')) // 才 3 秒，但上次失败了 / 3s old, but it failed
+    expect(load).toHaveBeenCalledTimes(2)
+    await vi.advanceTimersByTimeAsync(0)
+    // 这次成功了：门槛恢复。/ Succeeded this time: the threshold applies again.
+    win.dispatchEvent(new Event('apppack:background'))
+    vi.advanceTimersByTime(3_000)
+    win.dispatchEvent(new Event('apppack:foreground'))
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
+  it('失败不会让定时器加快：断网时仍按间隔重试 / a failure never speeds up the timer', async () => {
+    const { poll } = await setup()
+    const load = vi.fn(() => Promise.reject(new Error('offline')))
+    poll.startPolling(load, 45_000, true)
+    await vi.advanceTimersByTimeAsync(44_000)
+    expect(load).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
+  it('慢的旧请求晚到失败，不盖掉新请求的成功 / a late older failure does not override a newer success', async () => {
+    const { poll, win } = await setup()
+    let rejectOld: (e: Error) => void = () => {}
+    const calls: number[] = []
+    const load = vi.fn(() => {
+      calls.push(calls.length)
+      if (calls.length === 1) return new Promise<void>((_, rej) => { rejectOld = rej })
+      return Promise.resolve()
+    })
+    poll.startPolling(load, 45_000, true)
+    await vi.advanceTimersByTimeAsync(45_000) // 第二次（成功）/ second load, succeeds
+    expect(load).toHaveBeenCalledTimes(2)
+    rejectOld(new Error('late'))
+    await vi.advanceTimersByTimeAsync(0)
+    win.dispatchEvent(new Event('apppack:background'))
+    vi.advanceTimersByTime(3_000)
+    win.dispatchEvent(new Event('apppack:foreground'))
+    expect(load).toHaveBeenCalledTimes(2)
+  })
+
   it('已经到期的轮询不靠回前台那条路：定时器自己补上', async () => {
     const { poll, win } = await setup()
     const load = vi.fn()

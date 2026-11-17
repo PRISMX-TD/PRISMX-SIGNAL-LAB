@@ -239,7 +239,9 @@ function CompetitionView({ compId }: { compId: string }) {
   // Poll only while running and visible (usePollWhileVisible pauses in the background and catches up on return).
   usePollWhileVisible(
     (isCurrent) => {
-      publicCompetitionApi.detail(compId).then(
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return publicCompetitionApi.detail(compId).then(
         (d) => {
           if (!isCurrent()) return
           setData(d)
@@ -247,6 +249,7 @@ function CompetitionView({ compId }: { compId: string }) {
         },
         (e) => {
           if (isCurrent()) setError(classifyPublicError(e))
+          throw e
         },
       )
     },

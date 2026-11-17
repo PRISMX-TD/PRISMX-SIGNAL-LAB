@@ -33,7 +33,9 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
   // interval follows the WS (3 min up, 45s down).
   usePollWhileVisible(
     (isCurrent) => {
-      orderApi.winrate().then((r) => { if (isCurrent()) setData(r) }).catch(() => {})
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return orderApi.winrate().then((r) => { if (isCurrent()) setData(r) })
     },
     () => winratePollMs(wsConnected),
     // closedTradeTick：后端刚记下新平仓，立刻重拉，胜率不落后于下方的明细列表。
@@ -58,7 +60,7 @@ export default function PersonalWinRateCard({ className = '' }: Props) {
   }, [gwrEnabled])
   usePollWhileVisible(
     (isCurrent) => {
-      gamificationApi.winrateSummary().then((r) => { if (isCurrent()) setGwr(r) }).catch(() => {})
+      return gamificationApi.winrateSummary().then((r) => { if (isCurrent()) setGwr(r) })
     },
     () => winratePollMs(wsConnected),
     [],

@@ -103,12 +103,13 @@ export default function CompetitionMarquee({ items }: { items?: CompetitionSumma
 
   usePollWhileVisible(
     (isCurrent) => {
-      competitionApi.list()
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return competitionApi.list()
         .then((r) => { if (isCurrent()) setList([...r.running, ...r.upcoming]) })
         // 失败就保持上一次的内容（首次失败即为空、不渲染），不在仪表盘上报错。
         // On failure keep what we had (empty on a first failure, so nothing
         // renders); never surface an error on the dashboard.
-        .catch(() => {})
     },
     // 间隔在每次检查时现读，有比赛开赛后下一轮就切到每分钟，不必重跑 effect。
     // Read on each check, so once a competition starts the next cycle is per-minute

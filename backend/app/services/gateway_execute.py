@@ -10,6 +10,7 @@ routers/orders.py so services (auto-manage) stop importing a router module.
 """
 import logging
 import threading
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy import inspect as sa_inspect
@@ -561,6 +562,43 @@ def _unmark_delivered(order: Order) -> None:
         order.delivered_at = None
 
 
+def _reject_before_send(db: Session, order: Order, message: str) -> None:
+    """没发往网关就在本地拒掉：落成 REJECTED，并撤回落库时提前标上的「已下发」。
+
+    写库失败（2026-11-17 审查）：开仓落库那一刻就标了「已下发」，这里若写不进去，行会停在
+    「PENDING + 已下发」——什么都没发出，用户却撤不掉（撤单接口按「已下发」回 409），5 分钟后
+    还会按「结果未知，请核对持仓」作废。所以可重试的错误先重试；仍失败就单独把「已下发」撤回
+    （行留在 PENDING，可以撤，过期按「没发出」作废），然后照旧抛出。
+    Refuse locally without sending: record REJECTED and undo the delivered mark set when
+    the row was stored. If that write fails, the row would sit PENDING + delivered —
+    nothing sent, yet uncancellable (cancel answers 409 for delivered rows) and voided five
+    minutes later as "outcome unknown". So retryable errors are retried; if it still
+    fails, the delivered mark alone is cleared (the row stays PENDING, cancellable, and is
+    voided as never sent), then the error is raised as before."""
+    ident = (order.action, order.client_order_id, order.mt5_login)
+    order_id = order.id
+
+    def _write() -> None:
+        order.status = "REJECTED"
+        order.message = message
+        _unmark_delivered(order)
+        commit_keep_loaded(db, order)
+
+    try:
+        _write_with_retry(db, ident, _write)
+    except Exception:
+        db.rollback()
+        try:
+            db.query(Order).filter(Order.id == order_id, Order.status == "PENDING").update(
+                {Order.delivered: False, Order.delivered_at: None}, synchronize_session=False
+            )
+            db.commit()
+        except Exception:  # noqa: BLE001 — 尽力而为；原错误照旧抛出 / best effort
+            db.rollback()
+            logger.error("本地拒单写库失败，「已下发」也没能撤回: %s %s mt5=%s", *ident)
+        raise
+
+
 # 成交后要立刻刷新持仓快照的动作：开仓、平仓、改止损止盈都会改持仓表里的行。
 # Actions whose fill changes a row of the positions table.
 _POSITION_ACTIONS = frozenset({"ORDER", "CLOSE", "MODIFY"})
@@ -578,7 +616,9 @@ def _live_gateway_logins(user_id: str) -> list[str]:
         db.close()
 
 
-async def _push_positions_after_fill(user_id: str, known: dict | None) -> None:
+async def _push_positions_after_fill(
+    user_id: str, known: dict | None, known_since: float | None = None
+) -> None:
     """查出该用户的 gateway 账号再推即时快照。查库放在线程里，不在下单响应的路上。
     Look up the user's gateway logins, then push the snapshot; the lookup runs in a
     thread, off the order's response path."""
@@ -588,11 +628,15 @@ async def _push_positions_after_fill(user_id: str, known: dict | None) -> None:
 
     logins = await asyncio.to_thread(_live_gateway_logins, user_id)
     if logins:
-        await push_positions_now(user_id, logins, known=known)
+        await push_positions_now(user_id, logins, known=known, known_since=known_since)
 
 
 def _after_gateway_result(
-    db: Session, order: Order, rsp: TradeRsp | None = None, logins: list[str] | None = None
+    db: Session,
+    order: Order,
+    rsp: TradeRsp | None = None,
+    logins: list[str] | None = None,
+    sent_at: float | None = None,
 ) -> None:
     """网关回话落库之后的收尾：成交了就马上推一帧持仓快照；挂单类动作清掉
     "这个账号没有挂单"的标记，让下一次挂单读取一定真去读。
@@ -611,6 +655,10 @@ def _after_gateway_result(
     close-all); otherwise the push coroutine looks them up off the response path (it
     used to be a synchronous query here: two round trips per fill, and the session held
     a connection until the request ended).
+
+    sent_at：这笔指令发往网关的时刻，回执带的持仓随它交给 push_positions_now（known_since）。
+    sent_at: when the command went to the gateway; passed on with the reply's positions
+    (known_since in push_positions_now).
     """
     try:
         from app.services.pending_orders import forget_no_pending, submit_to_main_loop
@@ -638,11 +686,11 @@ def _after_gateway_result(
             known = {str(order.mt5_login): rsp.positions}
 
         if logins is None:
-            coro = _push_positions_after_fill(order.user_id, known)
+            coro = _push_positions_after_fill(order.user_id, known, sent_at)
         else:
             from app.services.gateway_snapshot import push_positions_now
 
-            coro = push_positions_now(order.user_id, list(logins), known=known)
+            coro = push_positions_now(order.user_id, list(logins), known=known, known_since=sent_at)
         submit_to_main_loop(coro, "POSITIONS 即时快照")
     except Exception:  # noqa: BLE001
         logger.exception("成交后即时刷新持仓失败 user=%s", order.user_id)
@@ -746,14 +794,11 @@ def _try_gateway_execute(
     # branch on order status, and raising would disrupt sibling commands in the
     # same auto-manage batch.
     if is_revoked(account):
-        order.status = "REJECTED"
-        order.message = (
+        _reject_before_send(
+            db, order,
             "账号连接已失效（密码已变更），请重新验证 / "
-            "account link revoked (password changed), please verify again"
+            "account link revoked (password changed), please verify again",
         )
-        _unmark_delivered(order)
-        db.commit()
-        db.refresh(order)
         logger.warning(
             "Gateway 下单被拒（绑定已撤销）: %s %s mt5=%s",
             order.action, order.client_order_id, order.mt5_login,
@@ -782,11 +827,7 @@ def _try_gateway_execute(
                            exc_info=True)
             closed = None
         if closed is not None:
-            order.status = "REJECTED"
-            order.message = market_hours.closed_message(closed)
-            _unmark_delivered(order)
-            db.commit()
-            db.refresh(order)
+            _reject_before_send(db, order, market_hours.closed_message(closed))
             logger.info(
                 "Gateway %s 休市拒绝: %s mt5=%s symbol=%s",
                 order.action, order.client_order_id, order.mt5_login, order.symbol,
@@ -797,15 +838,12 @@ def _try_gateway_execute(
     # Per-user in-flight open cap: refuse as "not sent"; nothing ran, safe to retry.
     if order.action in _OPEN_ACTIONS and order.user_id:
         if not _admit_user_open(order.user_id):
-            order.status = "REJECTED"
-            order.message = (
+            _reject_before_send(
+                db, order,
                 f"你同时在处理的下单已达上限（{USER_OPEN_INFLIGHT_CAP} 笔），本次指令未发出，"
                 "请等前面的单出结果再下 / too many of your orders are in flight; "
-                "this one was NOT sent, please wait for the earlier ones"
+                "this one was NOT sent, please wait for the earlier ones",
             )
-            _unmark_delivered(order)
-            db.commit()
-            db.refresh(order)
             logger.warning(
                 "Gateway 下单被拒（用户在途已满 %d）: %s %s mt5=%s",
                 USER_OPEN_INFLIGHT_CAP, order.action, order.client_order_id, order.mt5_login,
@@ -881,6 +919,12 @@ def _try_gateway_execute(
         ):
             order.trade_mode = account_trade_mode
 
+    # 发单时刻（墙钟）：回执里带的持仓不会比它更早，成交后推持仓时据此判断有没有被别的帧
+    # 超过（见 gateway_snapshot.push_positions_now 的 known_since）。
+    # When the command went out (wall clock): the positions attached to the reply are no
+    # older than this; the post-fill push uses it to tell whether another frame overtook
+    # them (see known_since in gateway_snapshot.push_positions_now).
+    sent_at = time.time()
     try:
         if order.action == "ORDER":
             # 发给 gateway 的是券商基础名：order.symbol 存的是信号侧写法
@@ -1008,7 +1052,7 @@ def _try_gateway_execute(
             order.action, order.client_order_id, order.mt5_login,
             order.status, rsp.deal, rsp.order, rsp.elapsed_ms, rsp.dealer_ms,
         )
-        _after_gateway_result(db, order, rsp, logins)
+        _after_gateway_result(db, order, rsp, logins, sent_at=sent_at)
         return order_update_payload(order)
 
     except Exception as e:

@@ -226,7 +226,10 @@ async def _known_rows(login: str, positions) -> tuple[list[dict], bool]:
 
 
 async def push_positions_now(
-    user_id: str, logins: list[str], known: dict | None = None
+    user_id: str,
+    logins: list[str],
+    known: dict | None = None,
+    known_since: float | None = None,
 ) -> bool:
     """读齐该用户全部 gateway 账号的持仓并立即推一帧 POSITIONS。返回是否推了。
 
@@ -257,7 +260,18 @@ async def push_positions_now(
     that function). When overtaken: the rows are neither pushed nor stamped; funds still
     go out, with floating P/L taken from the snapshot that was pushed; then one fresh pass
     re-reads, so what stays on screen is newly read. If that pass is overtaken too, only
-    funds go out: another path is evidently keeping the positions current."""
+    funds go out: another path is evidently keeping the positions current.
+
+    known_since（2026-11-17）：回执带来的持仓（known）是网关**回执那一刻**的本地状态，比这一轮
+    开始得早——中间隔着写回结果、排进主循环，几十毫秒。这段时间里推出去的帧，按本轮开始
+    时刻比会漏判，过期的回执持仓就又推出去了。所以有 known 的第一轮从「指令发出的时刻」算起：
+    那之后推出去的任何一帧都可能比回执新。判宽了只是多读一轮，判窄了就是闪回。
+    known_since (2026-11-17): rows attached to a reply (known) are the gateway's local
+    state at reply time, earlier than this pass's start by the write-back and the hop to
+    the main loop (tens of ms). A frame pushed in that gap escaped the check and the stale
+    reply rows went out after it. So the first pass with known rows counts from when the
+    command was sent: any frame pushed after that may be newer than the reply. Erring wide
+    costs one extra read; erring narrow is a flicker."""
     if not logins:
         return False
     if user_id in _inflight:
@@ -272,6 +286,8 @@ async def push_positions_now(
         while True:
             reread = False
             started = time.time()
+            if known and known_since is not None:
+                started = min(started, known_since)
             # 持仓与资金一起读：平仓后浮盈一消失，余额要同一时刻跟上，否则净值会先掉
             # 一截、等慢拍刷完资金再弹回来。
             # Positions and funds are read together: once a closed trade's floating P/L

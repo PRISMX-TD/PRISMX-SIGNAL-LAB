@@ -61,8 +61,7 @@ import { onRovingKeyDown } from '../utils/rovingTabs'
 import '../styles/orders.css'
 import { EMPTY } from '../utils/format'
 
-type StatusFilter = 'ALL' | OrderStatus
-const STATUS_FILTERS: StatusFilter[] = ['ALL', 'PENDING', 'FILLED', 'REJECTED', 'FAILED', 'CANCELLED']
+import { orderLogBucket, visibleStatusFilters, type StatusFilter } from '../utils/orderLogBucket'
 
 // 页面分三个 Tab：实时（持仓与账户）、回顾（绩效分析）、查询（操作记录）。
 // 三者节奏完全不同，摊在一条滚动线上会让页面过长；分开后每屏只回答一个问题。
@@ -633,9 +632,11 @@ export default function OrdersPage() {
   }, [tab])
   usePollWhileVisible(
     (isCurrent) => {
-      orderApi.closedTrades()
+      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
+      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
+      return orderApi.closedTrades()
         .then((r) => { if (isCurrent()) setTrades(r.trades) })
-        .catch(() => { if (isCurrent()) setTrades((prev) => prev ?? []) })
+        .catch((e) => { if (isCurrent()) setTrades((prev) => prev ?? []); throw e })
     },
     () => winratePollMs(wsConnected),
     // closedTradeTick 变化 = 后端刚记下新平仓，立刻重拉（不受 2 秒回前台去重影响）。
@@ -690,7 +691,7 @@ export default function OrdersPage() {
 
   const filteredOrders = useMemo(() => {
     return baseOrders.filter((o) => {
-      if (statusF !== 'ALL' && o.status !== statusF) return false
+      if (statusF !== 'ALL' && orderLogBucket(o) !== statusF) return false
       return matchesSymbol(o)
     })
   }, [baseOrders, statusF, symbolQuery])
@@ -706,7 +707,8 @@ export default function OrdersPage() {
     for (const o of baseOrders) {
       if (!matchesSymbol(o)) continue
       c.ALL = (c.ALL ?? 0) + 1
-      c[o.status] = (c[o.status] ?? 0) + 1
+      const b = orderLogBucket(o)
+      c[b] = (c[b] ?? 0) + 1
     }
     return c
   }, [baseOrders, symbolQuery, dateFilterActive])
@@ -826,6 +828,11 @@ export default function OrdersPage() {
     const bad = o.status === 'REJECTED' || o.status === 'FAILED'
     const msg = o.message ? localizeApiError(o.message) : o.status === 'PENDING' ? t('orders.awaitingReceipt') : null
     const price = o.filledPrice != null ? priceParts(o.filledPrice) : null
+    // 改持仓的止损止盈没有自己的成交单号（库里记 0），回执上显示被改的那笔持仓的单号，
+    // 与改挂单、撤挂单一致，不再是「–」。
+    // A position SL/TP change has no deal ticket of its own (stored as 0): show the ticket of
+    // the position it changed, as modify / cancel pending already do, instead of "–".
+    const slipTicket = o.mt5Ticket || (act === 'MODIFY' ? o.ticket : null) || null
     return (
       <article key={o.id} className={`ord-slip${slipReveal ? ' is-in' : ''}`} data-status={o.status} style={{ '--i': Math.min(i, 5) } as CSSProperties}>
         <div className="ord-stub">
@@ -869,7 +876,7 @@ export default function OrdersPage() {
         </div>
         <div className="ord-tk">
           <div className="ord-k">{t('orders.colTicket')}</div>
-          <div className={`ord-v ${o.mt5Ticket ? '' : 'none'}`}>{o.mt5Ticket ? `#${o.mt5Ticket}` : EMPTY}</div>
+          <div className={`ord-v ${slipTicket ? '' : 'none'}`}>{slipTicket ? `#${slipTicket}` : EMPTY}</div>
         </div>
         <div className="ord-stampcell">
           {o.status === 'PENDING' && (
@@ -1016,7 +1023,7 @@ export default function OrdersPage() {
           {/* 筛选条：状态芯片（带计数）+ 品种 + 日期区间 / filter bar */}
           <div className="ord-tb">
             <div className="ord-chips" role="tablist" aria-label={t('orders.filterStatus')} onKeyDown={onRovingKeyDown}>
-              {STATUS_FILTERS.map((s) => (
+              {visibleStatusFilters(statusCounts, statusF).map((s) => (
                 <button
                   key={s}
                   type="button"
