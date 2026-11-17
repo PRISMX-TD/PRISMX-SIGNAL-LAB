@@ -54,11 +54,78 @@ def _stamp_key(user_id: str) -> str:
     return f"gw:prio_pos:{user_id}"
 
 
+def _pushed_key(user_id: str) -> str:
+    return f"gw:pos_pushed:{user_id}"
+
+
+def record_positions_pushed(user_id: str) -> None:
+    """记下「此刻有一帧网关持仓要推出去了」（跨 worker 可见）。见 positions_pushed_after。
+    Note that a gateway positions frame is going out now (visible to every worker)."""
+    try:
+        shared_state.kv_set(_pushed_key(user_id), repr(time.time()), ttl=PRIORITY_STAMP_TTL)
+    except Exception:  # noqa: BLE001 — 记不下只是少了防覆盖，不影响推送 / best effort
+        logger.debug("持仓推送时间戳写入失败 user=%s", user_id, exc_info=True)
+
+
+def positions_pushed_after(user_id: str, since: float) -> bool:
+    """`since`（墙钟秒）之后，有没有别的一帧网关持仓推出去过。同步函数，异步调用方丢线程池。
+
+    为什么要有这个、而不是只比「读开始的时刻」（priority_read_after）：读开始得早不等于数据
+    旧。开平仓事件快拍的读是去券商服务器问的，一来一回 0.15 秒，拿回来的是**它到达服务器
+    那一刻**的状态；成交回执里带的持仓却是回执那一刻的本地状态。一键平仓时事件快拍比第一笔
+    回执的那一轮还早几毫秒开始读，读回来的却是六笔全平之后的空表——按读开始时刻比，它反而
+    显得「更旧」，于是挡不住后面那份过期的「还剩 5 笔」（2026-11-17 线上复测）。所以改问
+    一个不会判错的问题：我等资金的这段时间里，有没有别人推过。
+
+    Whether another gateway positions frame went out after `since` (wall clock). Comparing
+    read *start* times (priority_read_after) is not enough: a read that starts earlier can
+    carry newer data. The position-event snapshot asks the broker's server, a 0.15s round
+    trip, and returns the state as of when it reached the server, while the rows attached
+    to a trade reply are the local state at reply time. On a close-all the event snapshot
+    started a few ms before the first reply's pass yet came back with the empty table that
+    followed all six closes; judged by start time it looked older and did not stop the
+    stale "five left" behind it. So ask the question that cannot be misjudged: did anyone
+    else push while this pass was waiting for funds.
+    """
+    try:
+        raw = shared_state.kv_get(_pushed_key(user_id))
+    except Exception:  # noqa: BLE001
+        return False
+    if not raw:
+        return False
+    try:
+        return float(raw) > since
+    except (TypeError, ValueError):
+        return False
+
+
 def record_priority_read(user_id: str, started: float) -> None:
+    """即时快照（成交后那一路、开平仓事件快拍）推之前调用：记下这次读的开始时刻（周期读据此
+    不推比它早开始的数据），同时记下「此刻有一帧要推出去了」。
+    Called by the instant snapshots right before pushing: records the read's start (older
+    periodic reads then stay quiet) and that a frame is going out now."""
     try:
         shared_state.kv_set(_stamp_key(user_id), repr(started), ttl=PRIORITY_STAMP_TTL)
     except Exception:  # noqa: BLE001 — 记不下只是少了防覆盖，不影响推送 / best effort
         logger.debug("即时快照时间戳写入失败 user=%s", user_id, exc_info=True)
+    record_positions_pushed(user_id)
+
+
+def claim_periodic_push(user_id: str, read_started: float, changed: bool) -> bool:
+    """周期读推之前调用：这份数据能不能推。比最近一次即时快照的读开始得早就不推（手里可能是
+    成交前的）。能推、而且这一帧的仓位增减了（changed）时，记一笔「有一帧推出去了」——事件
+    订阅不可用时，成交后那一路靠它知道自己手里的持仓已经被盖过。只是浮盈在变的帧不记，
+    省一次写，也免得让成交后那一路白白多读一轮。同步函数。
+    Called by the periodic read before pushing: False when its read began before the latest
+    instant snapshot (the data may predate the fill). When it may push and the set of
+    positions changed, it records that a frame went out, which is how the post-fill pass
+    learns it has been overtaken while the event subscription is down. Frames that only
+    move floating P/L are not recorded."""
+    if priority_read_after(user_id, read_started):
+        return False
+    if changed:
+        record_positions_pushed(user_id)
+    return True
 
 
 def priority_read_after(user_id: str, started: float) -> bool:
@@ -167,21 +234,30 @@ async def push_positions_now(
     Read every gateway login of the user and push one POSITIONS frame at once; any
     failed read cancels the push (whole-table replace), leaving it to the poll.
 
-    推之前再看一眼有没有被别人超过（2026-11-16）。持仓是这一轮**开始**时的样子（回执里
-    带的，或刚读的），却要等资金读完（约 0.2 秒）才推出去。这段时间里另一路——领导
-    worker 的开平仓事件快拍——可能已经推了一帧更新的：一键平仓 5 笔时，第一笔回执带回
-    「还剩 4 笔」，等它推出去时事件快拍早已推过「0 笔」，页面上持仓数就从 0 闪回 4 再
-    回到 0。所以共享时间戳比本轮开始时刻晚时，这一轮的持仓不推、也不盖时间戳；资金照
-    推，浮盈改按已经推出去的那份持仓算。
+    推之前再看一眼有没有被别人超过（2026-11-16，11-17 改判据）。持仓是这一轮**开始**时
+    的样子（回执里带的，或刚读的），却要等资金读完（0.2~0.3 秒）才推出去。这段时间里另一
+    路——领导 worker 的开平仓事件快拍，或周期读——可能已经推了一帧更新的：一键平仓时第一
+    笔回执带回「还剩 5 笔」，等它推出去时事件快拍早已推过「0 笔」，页面上持仓数就从 0 闪
+    回 5 再回到 0。
+
+    判据是「本轮开始之后有没有别的帧推出去过」（positions_pushed_after），不是比读开始的
+    时刻——后者会判错，原因见那个函数的说明。被超过时：这一轮的持仓不推、也不盖时间戳；
+    资金照推，浮盈按已经推出去的那份持仓算；然后重新读一轮（只多读这一次），保证最后留在
+    页面上的是新读的。重读的那一轮又被超过，就只推资金——说明别的路一直在推，持仓交给它。
 
     Before pushing, check whether this pass has been overtaken. The rows are as of the
     pass's start (attached to the reply, or just read) yet go out only after the funds
-    read (~0.2s). Meanwhile the other path — the leader worker's position-event snapshot
-    — may have pushed a newer frame: on a five-leg close-all the first reply carried
-    "four left", and by the time it went out the event snapshot had already pushed
-    "none", so the count flickered 0 → 4 → 0. When the shared stamp is later than this
-    pass's start, the rows are neither pushed nor stamped; funds still go out, with the
-    floating P/L taken from the snapshot that was pushed."""
+    read (0.2-0.3s). Meanwhile another path — the leader worker's position-event snapshot
+    or the periodic read — may have pushed a newer frame: on a close-all the first reply
+    carried "five left", and by the time it went out the event snapshot had already
+    pushed "none", so the count flickered 0 → 5 → 0.
+
+    The test is "did any other frame go out since this pass started"
+    (positions_pushed_after), not a comparison of read start times, which misjudges (see
+    that function). When overtaken: the rows are neither pushed nor stamped; funds still
+    go out, with floating P/L taken from the snapshot that was pushed; then one fresh pass
+    re-reads, so what stays on screen is newly read. If that pass is overtaken too, only
+    funds go out: another path is evidently keeping the positions current."""
     if not logins:
         return False
     if user_id in _inflight:
@@ -189,8 +265,12 @@ async def push_positions_now(
         return False
     _inflight[user_id] = False
     pushed = False
+    # 被超过后只补读一轮：别的路一直在推时，不跟它无休止地抢。
+    # One catch-up re-read after being overtaken; never chase a path that keeps pushing.
+    reread_left = 1
     try:
         while True:
+            reread = False
             started = time.time()
             # 持仓与资金一起读：平仓后浮盈一消失，余额要同一时刻跟上，否则净值会先掉
             # 一截、等慢拍刷完资金再弹回来。
@@ -221,10 +301,13 @@ async def push_positions_now(
                 data.extend(res[0])
             if complete:
                 funds_rows: dict[str, list[dict]] | None = rows_by_login
-                if await asyncio.to_thread(priority_read_after, user_id, started):
-                    # 已经有一帧比这一轮新的推出去了：手里这份不推（见上面的说明）。
-                    # A newer frame is already out: drop these rows (see the docstring).
+                if await asyncio.to_thread(positions_pushed_after, user_id, started):
+                    # 等资金的这段时间里别的路已经推过一帧：手里这份不推（见上面的说明）。
+                    # Another path pushed while this pass waited: drop these rows.
                     funds_rows = await _latest_rows_by_login(user_id, logins)
+                    if reread_left > 0:
+                        reread_left -= 1
+                        reread = True
                 else:
                     # 先记时间戳再推：推出去之后才记，中间那一下比它旧的周期读还能挤进来。
                     # Stamp before pushing so an older poll can't slip in between.
@@ -241,7 +324,7 @@ async def push_positions_now(
                         await manager.push_to_client(
                             user_id, {"type": "ACCOUNT_FUNDS", "data": funds}
                         )
-            if not _inflight.get(user_id):
+            if not reread and not _inflight.get(user_id):
                 break
             _inflight[user_id] = False
     finally:

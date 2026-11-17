@@ -53,7 +53,7 @@ from app.services.plans import max_mt5_accounts, plan_slot_rows
 from app.services.settings_store import get_account_type_settings
 from app.services import shared_state
 from app.services.gateway_snapshot import (
-    priority_read_after,
+    claim_periodic_push,
     read_positions_priority,
     record_priority_read,
 )
@@ -1748,6 +1748,11 @@ async def gateway_positions_loop() -> None:
     # Wall-clock start of the current slow tick's reads (taken before the batch prefetch);
     # compared with the latest instant snapshot to decide whether to push.
     tick_wall: dict[str, float] = {"at": 0.0}
+    # 每个用户上一次由周期读推出去的那帧里有哪些仓位（login, ticket）。仓位增减了才记一笔
+    # 「有一帧推出去了」（见 gateway_snapshot.claim_periodic_push）。
+    # The (login, ticket) set of each user's last periodic frame; only a change in the set
+    # is recorded as "a frame went out" (see gateway_snapshot.claim_periodic_push).
+    last_tick_tickets: dict[str, frozenset] = {}
 
     # 订阅是否活着。快拍每次调用都会更新它：
     #   - True：可以信任事件，慢拍能安全跳过空仓账号
@@ -2377,7 +2382,10 @@ async def gateway_positions_loop() -> None:
             # If this tick's read began before the latest instant snapshot (pushed right
             # after a fill or position event), the data may predate the fill: skip the
             # push so the new position doesn't flicker out. The next tick pushes as usual.
-            if not await asyncio.to_thread(priority_read_after, user_id, read_wall):
+            tickets = frozenset((str(r.get("login")), r.get("ticket")) for r in data)
+            changed = last_tick_tickets.get(user_id) != tickets
+            if await asyncio.to_thread(claim_periodic_push, user_id, read_wall, changed):
+                last_tick_tickets[user_id] = tickets
                 await manager.push_positions(user_id, data, source="gateway")
 
             # --- 挂单快照 ---

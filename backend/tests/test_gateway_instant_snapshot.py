@@ -186,8 +186,19 @@ def test_push_now_skips_funds_when_account_read_fails(gw, pushed):
     assert len(pushed) == 1 and isinstance(pushed[0][1], list)
 
 
-# ---------- 旧的一帧不能盖掉新的（2026-11-16 一键平仓持仓数 0 → 4 → 0）----------
+# ---------- 旧的一帧不能盖掉新的（一键平仓持仓数 6 → 0 → 5 → 0）----------
 # ---------- an older frame must not overwrite a newer one ----------
+#
+# 成交后那一路手里的持仓是这一轮开始时的样子，却要等资金读完才推。这期间别的路（开平仓
+# 事件快拍、周期读）推过一帧，手里这份就可能已经过期。2026-11-16 的第一版修复比的是「读
+# 开始的时刻」，线上没挡住：事件快拍比回执这一轮**更早**开始读，读回来的却是**更新**的
+# 状态（它去券商服务器读，到达时六笔已全平）。所以判据改成「我等的这段时间里有没有别的帧
+# 推出去过」。
+# The post-fill pass holds rows from its start until the funds read returns; if another
+# path pushed in between, they may be stale. The first fix (2026-11-16) compared read
+# start times and failed in production: the event snapshot started reading earlier than
+# the reply's pass yet returned newer state. The test is now "did any other frame go out
+# while this pass waited".
 
 
 def _reply_positions(*tickets: int):
@@ -201,46 +212,88 @@ def _funds(balance: float, equity: float):
     return SimpleNamespace(balance=balance, equity=equity, margin=0.0)
 
 
-def test_push_now_drops_rows_overtaken_by_a_newer_frame(gw, pushed, monkeypatch):
-    """一键平仓 5 笔：第一笔的回执带回「还剩 4 笔」，这份要等资金读完（约 0.2 秒）才推。
-    这期间事件快拍已经推了「0 笔」。旧的这份不能再推出去，否则持仓数从 0 闪回 4。
-    资金照推，浮盈按已经推出去的那份（空仓）算，不按手里过期的 4 笔算。"""
-    newer = time.time() + 5.0
+def _position_frames(pushed) -> list[list[int]]:
+    return [sorted(r["ticket"] for r in p[1]) for p in pushed if isinstance(p[1], list)]
 
-    async def _slow_funds(login):
-        # 等资金的这段时间里，另一路推了一帧更新的。/ Meanwhile the other path pushed.
-        gateway_snapshot.record_priority_read("u1", newer)
+
+def _funds_frames(pushed) -> list[dict]:
+    return [p[1]["data"] for p in pushed if isinstance(p[1], dict) and p[1].get("type") == "ACCOUNT_FUNDS"]
+
+
+def test_rows_overtaken_by_a_frame_whose_read_started_earlier_are_dropped(gw, pushed, monkeypatch):
+    """线上那一次的原样：一键平仓 6 笔，第一笔的回执带回「还剩 5 笔」。事件快拍的读比这一轮
+    早几毫秒开始，却在这一轮等资金的时候推出了「0 笔」。过期的 5 笔不能再推；随后重新读一轮，
+    留在页面上的是新读的。资金两次都推，第一次的浮盈按已经推出去的那份（空仓）算。"""
+    _, replies = gw
+    replies["/positions"] = [{"ok": True, "positions": []}]
+    rounds = {"n": 0}
+
+    async def _funds_while_event_snapshot_pushes(login):
+        rounds["n"] += 1
+        if rounds["n"] == 1:
+            await asyncio.sleep(0.05)
+            # 事件快拍：读开始得比本轮还早，现在才推。/ Its read began before this pass.
+            gateway_snapshot.record_priority_read("u1", time.time() - 10.0)
         return _funds(1000.0, 1000.0)
 
     async def _latest(user_id):
         return []
 
-    monkeypatch.setattr(gateway_snapshot, "_read_funds", _slow_funds)
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds_while_event_snapshot_pushes)
     monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _latest)
 
-    known = {"500001": _reply_positions(2, 3, 4, 5)}
+    known = {"500001": _reply_positions(2, 3, 4, 5, 6)}
+    assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
+
+    assert _position_frames(pushed) == [[]]      # 只有重新读的那一帧，过期的 5 笔没有推
+    # adj = 净值 − 余额 − 浮盈；两次浮盈都是 0，没有按过期那 5 笔的 5.0 算。
+    assert _funds_frames(pushed) == [
+        {"500001": {"balance": 1000.0, "equity": 1000.0, "margin": 0.0, "adj": 0.0}},
+        {"500001": {"balance": 1000.0, "equity": 1000.0, "margin": 0.0, "adj": 0.0}},
+    ]
+    assert rounds["n"] == 2
+    assert gateway_snapshot._inflight == {}
+
+
+def test_never_chases_a_path_that_keeps_pushing(gw, pushed, monkeypatch):
+    """被超过后只补读一轮。补读的那一轮又被超过：持仓交给一直在推的那条路，这里只推资金。"""
+    calls, _ = gw
+    rounds = {"n": 0}
+
+    async def _funds_overtaken_every_time(login):
+        rounds["n"] += 1
+        await asyncio.sleep(0.05)
+        gateway_snapshot.record_positions_pushed("u1")
+        return _funds(1000.0, 1001.0)
+
+    async def _latest(user_id):
+        return [{"login": "500001", "ticket": 9, "profit": 1.0}]
+
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds_overtaken_every_time)
+    monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _latest)
+
+    known = {"500001": _reply_positions(2, 3)}
     assert not asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
 
-    assert [p for p in pushed if isinstance(p[1], list)] == []
-    funds = [p[1] for p in pushed if isinstance(p[1], dict) and p[1].get("type") == "ACCOUNT_FUNDS"]
-    # adj = 净值 − 余额 − 浮盈；浮盈是 0（空仓），不是过期那 4 笔的 4.0。
-    assert funds == [{"type": "ACCOUNT_FUNDS", "data": {
-        "500001": {"balance": 1000.0, "equity": 1000.0, "margin": 0.0, "adj": 0.0}}}]
-    # 时间戳没有被这一轮的旧时刻盖回去。/ The stamp was not moved back.
-    assert gateway_snapshot.priority_read_after("u1", newer - 1.0)
+    assert _position_frames(pushed) == []
+    assert rounds["n"] == 2                                        # 1 轮 + 补读 1 轮，不再多
+    assert len([c for c in calls if c[0] == "/positions"]) == 1
+    assert len(_funds_frames(pushed)) == 2
+    assert gateway_snapshot._inflight == {}
 
 
-def test_push_now_skips_funds_when_the_newer_snapshot_cannot_be_read(gw, pushed, monkeypatch):
+def test_overtaken_and_snapshot_unreadable_pushes_nothing(gw, pushed, monkeypatch):
     """被超过、又读不到已推出去的那份：这一轮什么都不推（资金交给慢拍），也不报错。"""
 
-    async def _slow_funds(login):
-        gateway_snapshot.record_priority_read("u1", time.time() + 5.0)
+    async def _funds_overtaken_every_time(login):
+        await asyncio.sleep(0.05)
+        gateway_snapshot.record_positions_pushed("u1")
         return _funds(1000.0, 1001.0)
 
     async def _boom(user_id):
         raise RuntimeError("redis down")
 
-    monkeypatch.setattr(gateway_snapshot, "_read_funds", _slow_funds)
+    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds_overtaken_every_time)
     monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _boom)
 
     known = {"500001": _reply_positions(2)}
@@ -248,36 +301,31 @@ def test_push_now_skips_funds_when_the_newer_snapshot_cannot_be_read(gw, pushed,
     assert pushed == []
 
 
-def test_push_now_reruns_fresh_after_dropping_overtaken_rows(gw, pushed, monkeypatch):
-    """被超过的那一轮不推；期间又有别的成交来过（合并成「再来一轮」），下一轮重新读、照常推。"""
-    calls, replies = gw
-    replies["/positions"] = [{"ok": True, "positions": []}]
-    rounds = {"n": 0}
+def test_own_push_does_not_count_as_being_overtaken(gw, pushed):
+    """自己上一轮推的那一帧不算「被别人超过」：合并进来的下一轮照常推。"""
+    calls, _ = gw
 
-    async def _funds_then_rerun(login):
-        rounds["n"] += 1
-        if rounds["n"] == 1:
-            gateway_snapshot.record_priority_read("u1", time.time())
-            # 同一用户的另一笔成交这时到了：只记一笔「跑完再来一次」。
-            assert not await gateway_snapshot.push_positions_now("u1", ["500001"])
-        return _funds(1000.0, 1000.0)
+    async def _burst():
+        await asyncio.gather(*(gateway_snapshot.push_positions_now("u1", ["500001"]) for _ in range(5)))
 
-    async def _latest(user_id):
-        return []
+    asyncio.run(_burst())
+    assert len(_position_frames(pushed)) == 2
+    assert len([c for c in calls if c[0] == "/positions"]) == 2
 
-    monkeypatch.setattr(gateway_snapshot, "_read_funds", _funds_then_rerun)
-    monkeypatch.setattr(gateway_snapshot.manager, "get_positions_shared_async", _latest)
 
-    # 把「本轮开始时刻」往前拨一点，保证第一轮确实早于上面记的那一刻。
-    real_time = time.time
-    ticks = iter([real_time() - 10.0])
-    monkeypatch.setattr(gateway_snapshot.time, "time", lambda: next(ticks, None) or real_time())
-
-    known = {"500001": _reply_positions(2, 3, 4, 5)}
-    assert asyncio.run(gateway_snapshot.push_positions_now("u1", ["500001"], known=known))
-
-    frames = [p[1] for p in pushed if isinstance(p[1], list)]
-    assert frames == [[]]          # 只有重新读的那一帧（空仓），过期的 4 笔没有推
-    assert len([c for c in calls if c[0] == "/positions"]) == 1
-    assert rounds["n"] == 2
-    assert gateway_snapshot._inflight == {}
+def test_periodic_push_claim(gw):
+    """周期读：比最近一次即时快照早开始读就不推；能推且仓位增减了才记「有一帧推出去了」。"""
+    t0 = time.time()
+    # 仓位没变的帧不记 / a frame that only moves floating P/L is not recorded
+    assert gateway_snapshot.claim_periodic_push("u1", t0, changed=False)
+    assert not gateway_snapshot.positions_pushed_after("u1", t0 - 1.0)
+    # 仓位增减了：记一笔 / a change in the set of positions is recorded
+    assert gateway_snapshot.claim_periodic_push("u1", t0, changed=True)
+    assert gateway_snapshot.positions_pushed_after("u1", t0 - 1.0)
+    assert not gateway_snapshot.positions_pushed_after("u1", time.time() + 1.0)
+    assert not gateway_snapshot.positions_pushed_after("someone-else", t0 - 1.0)
+    # 即时快照的读比这一拍晚开始：这一拍不推，也不记
+    gateway_snapshot.record_priority_read("u2", t0 + 5.0)
+    marked = time.time()
+    assert not gateway_snapshot.claim_periodic_push("u2", t0, changed=True)
+    assert not gateway_snapshot.positions_pushed_after("u2", marked + 0.5)
