@@ -16,6 +16,12 @@ import { errText } from './supportUi'
 
 export const TICKET_CATEGORIES: TicketCategory[] = ['account', 'payment', 'claim', 'technical', 'feature', 'follow_up']
 
+// 改分类下拉里能选的分类：客服看不到 follow_up（只有管理员能改进改出，见 TicketMetaEditor）。
+// Categories offered when editing a ticket: agents don't get follow_up (admins only).
+export function editableCategories(canEditFollowUp: boolean): TicketCategory[] {
+  return canEditFollowUp ? TICKET_CATEGORIES : TICKET_CATEGORIES.filter((c) => c !== 'follow_up')
+}
+
 export function fillTemplate(body: string, ticket: Pick<Ticket, 'userEmail' | 'title' | 'userNickname'> | null): string {
   if (!ticket) return body
   const nickname = ticket.userNickname || (ticket.userEmail || '').split('@')[0] || ''
@@ -30,11 +36,17 @@ export function TicketMetaEditor({
   onSaved,
   onToast,
   inputClass = 'adm-input',
+  canEditFollowUp = false,
 }: {
   ticket: Ticket
   onSaved: (next: Ticket) => void
   onToast: (kind: 'ok' | 'err', text: string) => void
   inputClass?: string
+  // 「客服来信」(follow_up) 分类只有管理员能改进改出（后端 PATCH /admin/tickets/{id} 对客服回 403）。
+  // 客服这边不给这个选项；本来就是客服来信的工单，分类下拉直接锁住。
+  // Only admins may move a ticket into or out of follow_up (the backend 403s agents), so agents
+  // don't get that option, and a ticket that already is one has its category locked.
+  canEditFollowUp?: boolean
 }) {
   const { t } = useTranslation()
   const [editing, setEditing] = useState(false)
@@ -86,13 +98,19 @@ export function TicketMetaEditor({
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <Select
-        value={ticket.category}
-        onChange={(v) => v !== ticket.category && void patch({ category: v as TicketCategory }, t('supportDesk.ticketEdit.categorySaved'))}
-        className="select-tight"
-        ariaLabel={t('supportDesk.ticketEdit.category')}
-        options={TICKET_CATEGORIES.map((c) => ({ value: c, label: t(`tickets.category.${c}`) }))}
-      />
+      {!canEditFollowUp && ticket.category === 'follow_up' ? (
+        <span className="rounded-control border border-[var(--line)] px-2.5 py-1 text-neutral-400">
+          {t('tickets.category.follow_up')}
+        </span>
+      ) : (
+        <Select
+          value={ticket.category}
+          onChange={(v) => v !== ticket.category && void patch({ category: v as TicketCategory }, t('supportDesk.ticketEdit.categorySaved'))}
+          className="select-tight"
+          ariaLabel={t('supportDesk.ticketEdit.category')}
+          options={editableCategories(canEditFollowUp).map((c) => ({ value: c, label: t(`tickets.category.${c}`) }))}
+        />
+      )}
       <button
         type="button"
         className="rounded-control border border-[var(--line-hi)] px-2.5 py-1 text-xs text-neutral-300 transition hover:bg-white/[0.05]"

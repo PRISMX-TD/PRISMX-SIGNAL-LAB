@@ -83,7 +83,7 @@ def test_extras_match_standalone_endpoints(db_session, monkeypatch):
     ex = out["extras"]
     assert set(ex) == {
         "/orders", "/auth/me", "/orders/winrate",
-        "/announcements/popup", "/notifications/feed?limit=4", "/sentiment",
+        "/announcements/popup", "/notifications/feed?limit=20", "/sentiment",
         "/notifications/prefs", "/announcements", "/site/social",
     }
     # 策略分析不再随首屏下发（2026-11-16，体验报告 M7）：只有仪表盘的一张卡用它。
@@ -95,8 +95,8 @@ def test_extras_match_standalone_endpoints(db_session, monkeypatch):
     me = account.get_account(db=db_session, current_user=u)
     assert ex["/auth/me"] == jsonable_encoder(account.AccountInfoOut.model_validate(me) if not isinstance(me, account.AccountInfoOut) else me)
     assert ex["/auth/me"]["email"] == "bs@t.co"
-    feed = notifications.notification_feed(limit=4, db=db_session, current_user=u)
-    assert ex["/notifications/feed?limit=4"] == jsonable_encoder(NotificationFeedOut.model_validate(feed) if not isinstance(feed, NotificationFeedOut) else feed)
+    feed = notifications.notification_feed(limit=20, db=db_session, current_user=u)
+    assert ex["/notifications/feed?limit=20"] == jsonable_encoder(NotificationFeedOut.model_validate(feed) if not isinstance(feed, NotificationFeedOut) else feed)
     assert ex["/announcements/popup"] == jsonable_encoder(announcements.get_popup_announcement(db=db_session, user=u))
     assert ex["/sentiment"] == jsonable_encoder(sentiment.get_sentiment(user_id=u.id))
     from app.routers import site

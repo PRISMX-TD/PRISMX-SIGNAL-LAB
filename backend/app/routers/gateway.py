@@ -53,6 +53,7 @@ from app.services.plans import max_mt5_accounts, plan_slot_rows
 from app.services.settings_store import get_account_type_settings
 from app.services import shared_state
 from app.services.gateway_snapshot import (
+    position_rows,
     claim_periodic_push,
     read_positions_priority,
     record_priority_read,
@@ -1382,36 +1383,9 @@ async def _read_positions(login: str) -> tuple[list[dict], bool]:
     return _position_rows(login, positions, err)
 
 
-def _position_rows(login: str, positions, err: str) -> tuple[list[dict], bool]:
-    """_read_positions 的映射与日志部分，单人读与批量预取共用一份。
-    The mapping half of _read_positions, shared by the per-login read and batch prefetch."""
-    if err:
-        # read_busy = 网关读通道全忙、主动放弃本次读取，属预期过载信号（gateway_client
-        # 已限频告警），沿用上一帧即可，不再每拍一条 warning。
-        # read_busy is the gateway declining under load (gateway_client already logs it,
-        # rate-limited); the previous frame stands, so no per-tick warning here.
-        if err == "read_busy":
-            logger.debug("Gateway 持仓读取跳过(read_busy) login=%s", login)
-        else:
-            logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
-        return [], False
-
-    return [
-        {
-            "ticket": p.ticket,
-            "symbol": p.symbol,
-            "side": p.side,
-            "volume": p.volume,
-            "profit": p.profit,
-            "entryPrice": p.price_open,
-            "currentPrice": p.price_current,
-            "stopLoss": p.stop_loss,
-            "takeProfit": p.take_profit,
-            "login": login,
-            "comment": p.comment,
-        }
-        for p in positions
-    ], True
+# 映射在 services/gateway_snapshot.position_rows（即时读、回执带回的持仓也用）。
+# The mapping lives in services/gateway_snapshot.position_rows (priority reads and reply rows use it too).
+_position_rows = position_rows
 
 
 async def gateway_positions_loop() -> None:

@@ -2,7 +2,8 @@
 <#
     PRISMX gateway 看门狗(跑在 Windows VPS 上,由计划任务 PRISMX-Watchdog 以 SYSTEM 常驻)。
 
-    gateway 自己已经会处理两种卡死(全局锁 3 分钟拿不到、连续 15 分钟不能交易 → 自己退出),
+    gateway 自己已经会处理两种卡死(全局锁拿不到:普通下单操作 20 秒(gateway.ini 的 gate_stuck_exit_sec)、
+    重连这类本来就慢的操作 180 秒;连续 15 分钟不能交易 → 自己退出),
     计划任务 PRISMX-Gateway 也会在进程消失后 1~2 分钟内拉起。这个脚本只补它们看不到的:
 
       会自动动手的:

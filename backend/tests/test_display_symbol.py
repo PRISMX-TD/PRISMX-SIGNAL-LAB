@@ -22,7 +22,11 @@ from app.services.symbol_aliases import display_symbol
     ("XAUUSD", "XAUUSD"),
     ("EURUSD_r", "EURUSD"),
     ("US30-cash", "US30"),
-    ("BTCUSD#", "BTCUSD"),
+    # 比特币跟前端一样统一叫 BTCUSDT / bitcoin reads BTCUSDT, same as the frontend
+    ("BTCUSD#", "BTCUSDT"),
+    ("BTCUSD.s", "BTCUSDT"),
+    ("BTCUSD", "BTCUSDT"),
+    ("ETHUSD.s", "ETHUSD"),
     (" XAUUSD.s ", "XAUUSD"),
     # 只去后缀、不改名：信号侧的 BTCUSDT 还是 BTCUSDT / suffix only, no renames
     ("BTCUSDT", "BTCUSDT"),

@@ -2083,7 +2083,10 @@ namespace Prismx.Mt5Gateway
         // In-flight requests are on disk in the idempotency store and replay as
         // "outcome unknown" after the restart — never executed twice.
 
-        /// <summary>全局锁连续这么久拿不到,判定为卡死。/ Global lock unobtainable this long = wedged.</summary>
+        /// <summary>重连、重开 dealer 这类本来就可能慢的占用者:全局锁连续这么久拿不到才判定为卡死。
+        /// 其余占用者用 gate_stuck_exit_sec(默认 20 秒),见 CheckSelfHeal。
+        /// For slow holders (reconnect, dealer restart) only: the lock unobtainable this long = wedged.
+        /// Everything else uses gate_stuck_exit_sec (20s by default); see CheckSelfHeal.</summary>
         private const int GateStuckExitSec = 180;
 
         /// <summary>连续这么久"没连上或 dealer 不可用",重启进程试试。券商真挂了时每 15 分钟

@@ -3,7 +3,8 @@
 // First-screen prefetch rules: allow-listed paths only, consumed once, bound to the token,
 // expiring, waits for an in-flight bootstrap, and a failed bootstrap means no prefetch.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { beginPrefetch, clearPrefetch, takePrefetched } from './prefetch'
+import bellSrc from '../components/NotificationBell.tsx?raw'
+import { PREFETCH_PATHS, beginPrefetch, clearPrefetch, takePrefetched } from './prefetch'
 
 afterEach(() => {
   clearPrefetch()
@@ -31,10 +32,18 @@ describe('prefetch', () => {
   })
 
   it('ignores paths outside the allow-list, including other query strings', async () => {
-    beginPrefetch(Promise.resolve({ '/admin/users': {}, '/notifications/feed?limit=4': { items: [] } }), 'tok')
+    beginPrefetch(Promise.resolve({ '/admin/users': {}, '/notifications/feed?limit=20': { items: [] } }), 'tok')
     expect(await takePrefetched('/admin/users', 'tok')).toBeNull()
-    expect(await takePrefetched('/notifications/feed?limit=20', 'tok')).toBeNull()
-    expect(await takePrefetched('/notifications/feed?limit=4', 'tok')).toEqual({ data: { items: [] } })
+    expect(await takePrefetched('/notifications/feed?limit=4', 'tok')).toBeNull()
+    expect(await takePrefetched('/notifications/feed?limit=20', 'tok')).toEqual({ data: { items: [] } })
+  })
+
+  it('prefetches the notification feed with the same limit the bell asks for', () => {
+    // 2026-11-18：曾经预取 4 条而铃铛要 20 条，预取从没命中过。两边要一起改。
+    // 2026-11-18: the prefetch used 4 while the bell asked for 20, so it never hit. Change both together.
+    const n = /const PANEL_MESSAGES = (\d+)/.exec(bellSrc)?.[1]
+    expect(n).toBeTruthy()
+    expect(PREFETCH_PATHS.has(`/notifications/feed?limit=${n}`)).toBe(true)
   })
 
   it('expires after 15 seconds', async () => {

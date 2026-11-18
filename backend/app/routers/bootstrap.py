@@ -104,7 +104,7 @@ def _sync_sections(user: User, db: Session) -> tuple[dict, list[str]]:
 # response; a failing one is simply omitted and the frontend requests it as usual. Older
 # frontends don't send the flag and get the old response. Only endpoints without a rate
 # limit are included: folding in an IP-limited one would bypass its limit.
-NOTIFICATION_PANEL_LIMIT = 4  # frontend NotificationBell PANEL_MESSAGES
+NOTIFICATION_PANEL_LIMIT = 20  # 必须等于前端 NotificationBell 的 PANEL_MESSAGES，否则预取永远命中不了 / must equal the frontend PANEL_MESSAGES or the prefetch never hits
 
 
 def _encode(value, model=None):

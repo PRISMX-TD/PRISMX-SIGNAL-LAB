@@ -171,7 +171,7 @@ def _spin_once(db, user, round_id, request_id, now, rand_below) -> LuckyDraw:
     if miss:
         return d
     if p.kind == KIND_PRO_DAYS:
-        from app.routers.support import apply_comp_days
+        from app.services.support_desk import apply_comp_days
         # 中奖是用户本人触发的，不是管理员动作：审计写 plan:lucky_* 专用字段，操作日志整族跳过
         # （产品决定：抽奖不进操作日志）。
         # The win is the user's own doing, not an admin action: audit under the dedicated

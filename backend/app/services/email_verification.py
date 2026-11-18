@@ -2,7 +2,7 @@
 
 软拦截：没验证的用户照样能登录、能看，只有绑定 MT5 与领 PRO 试用要求先验证
 （守门在 services/deps.require_verified_email）。验证通过时顺手补发注册那一刻
-扣下的邀请试用（routers/invite.grant_deferred_invite_trial）。
+扣下的邀请试用（services/invite_trial.grant_deferred_invite_trial）。
 
 和找回密码共用的约定：库里只存令牌哈希；发信走 mailer，失败不抛；收件地址不进
 日志。不同的是验证**幂等**——同一个链接点两次都算成功（见 EmailVerificationToken
@@ -130,7 +130,7 @@ def mark_verified(db: Session, user: User, *, method: str | None = None) -> None
     # 在模块顶部导入路由会形成循环。
     # Deferred: importing routers.invite at module load pulls in routers.admin
     # and the service layer would import-cycle through it.
-    from app.routers.invite import grant_deferred_invite_trial
+    from app.services.invite_trial import grant_deferred_invite_trial
 
     user.email_verified_at = _now()
     grant_deferred_invite_trial(db, user)

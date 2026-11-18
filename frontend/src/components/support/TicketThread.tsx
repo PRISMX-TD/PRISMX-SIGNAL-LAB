@@ -220,7 +220,7 @@ export default function TicketThread({
       </div>
 
       <div className="mt-2.5">
-        <TicketMetaEditor ticket={ticket} onSaved={(next) => { setTicket(next); onChanged() }} onToast={onToast} inputClass="h-8 rounded-lg border border-[var(--line-hi)] bg-transparent px-2.5 text-xs text-neutral-100 outline-none" />
+        <TicketMetaEditor canEditFollowUp={me.isAdmin} ticket={ticket} onSaved={(next) => { setTicket(next); onChanged() }} onToast={onToast} inputClass="h-8 rounded-lg border border-[var(--line-hi)] bg-transparent px-2.5 text-xs text-neutral-100 outline-none" />
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">

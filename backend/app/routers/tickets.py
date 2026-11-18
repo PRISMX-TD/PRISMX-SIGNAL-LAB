@@ -53,6 +53,13 @@ from app.services.notification_feed import (
     create_notification,
     notify_ws,
 )
+# 新工单 / 用户追问时给工作人员的站内通知在 services/ticket_notify（幸运轮盘申领工单也用）。
+# Staff notifications for new tickets and user replies live in services/ticket_notify (lucky claims use them too).
+from app.services.ticket_notify import (
+    notify_staff_new_ticket as _notify_admins_new_ticket,
+    notify_staff_ticket_reply as _notify_admins_ticket_reply,
+    staff_link as _staff_link,
+)
 
 logger = logging.getLogger("prismx.tickets")
 
@@ -185,88 +192,6 @@ def _ticket_out(ticket: Ticket, replies: list[TicketReply], viewer_is_admin: boo
         assigneeName=_assignee_name(db, ticket) if viewer_is_admin else None,
         userNickname=user.nickname if viewer_is_admin else None,
     )
-
-
-def _staff_targets(db: Session, ticket: Ticket, exclude: str) -> list[tuple[str, str]]:
-    """工单通知的工作人员收件人 (id, role)：已指派 → 指派人 + 全体 admin；未指派 → admin + 全部
-    在岗客服（未停用）。
-    Staff recipients for ticket notifications: assignee + admins when assigned,
-    otherwise admins plus every on-duty (enabled) support agent."""
-    q = db.query(User.id, User.role).filter(User.disabled_at.is_(None))
-    if ticket.assignee_id:
-        rows = q.filter((User.role == "admin") | (User.id == ticket.assignee_id)).all()
-    else:
-        rows = q.filter(User.role.in_(STAFF_ROLES)).all()
-    return [(r[0], r[1]) for r in rows if r[0] != exclude]
-
-
-def _staff_link(role: str, ticket_id: str) -> str:
-    if role == "admin":
-        return f"/admin?tab=tickets&ticket={ticket_id}"
-    return f"/support-desk?ticket={ticket_id}"
-
-
-def _notify_admins_new_ticket(db: Session, ticket: Ticket, submitter: User) -> list[str]:
-    """新工单落地时给每位管理员写一条站内通知，返回收到通知的管理员 id。
-
-    不发系统推送：管理员是少数几个人，工单也不是分秒必争的事，往每个管理员的
-    每台设备推一条只会把后台的日常变成噪音。铃铛里留一条就够——他们本来就常开
-    着后台。提交者自己是管理员时不通知自己。
-
-    Write one in-app notification per admin when a ticket lands, returning the
-    ids notified. No tray push: admins are a handful of people and a ticket isn't
-    time-critical, so fanning out to every device of every admin would only turn
-    routine work into noise — a bell entry is enough for people who keep the
-    console open anyway. A submitter who is themselves an admin isn't notified.
-    """
-    # rev 41：收件人从「全体管理员」扩成「管理员 + 在岗客服」（已指派的只通知指派人 + 管理员）。
-    # rev 41: recipients widen from admins to admins + on-duty support (assignee + admins once assigned).
-    targets = _staff_targets(db, ticket, submitter.id)
-    for staff_id, role in targets:
-        create_notification(
-            db,
-            staff_id,
-            KIND_TICKET_NEW,
-            text=ticket.title,
-            link=_staff_link(role, ticket.id),
-            ref_id=ticket.id,
-        )
-    return [t[0] for t in targets]
-
-
-def _notify_admins_ticket_reply(db: Session, ticket: Ticket, author: User) -> list[str]:
-    """用户追加回复时给每位管理员写一条站内通知，返回收到通知的管理员 id。
-
-    为什么必须有：新工单会通知全体管理员（_notify_admins_new_ticket），但用户在
-    已有工单里追问就完全静默。管理端列表按 updated_at 倒序，而追加一条 reply
-    **不会**触发 Ticket 行的 onupdate（那个 onupdate 只在 Ticket 自己被 UPDATE 时
-    生效），所以那条工单连往上冒都不会——用户回了话，管理员这边没有任何变化。
-    这两件事要一起修，只修一件仍然看不见（排序修了但没人知道要去看，通知修了
-    但点进列表还是在第二页）。
-
-    复用 KIND_TICKET_REPLY：这条通知对管理员的意思就是"工单有新回复"，与管理员
-    回复时发给用户的那条同一件事、方向相反。link 指向后台的工单详情。
-    不发系统推送，理由同 _notify_admins_new_ticket。
-
-    Notify every admin when a user adds a reply. New tickets already fan out, but
-    a follow-up on an existing ticket was silent — and since the admin list is
-    ordered by updated_at while appending a reply does not touch the Ticket row
-    (its onupdate only fires on an UPDATE of Ticket itself), the ticket did not
-    even float to the top. Both halves have to be fixed together or the user's
-    reply stays invisible either way. Reuses KIND_TICKET_REPLY: to an admin this
-    means exactly "the ticket has a new reply", same event, other direction.
-    """
-    targets = _staff_targets(db, ticket, author.id)
-    for staff_id, role in targets:
-        create_notification(
-            db,
-            staff_id,
-            KIND_TICKET_REPLY,
-            text=ticket.title,
-            link=_staff_link(role, ticket.id),
-            ref_id=ticket.id,
-        )
-    return [t[0] for t in targets]
 
 
 def _latest_reply(ticket: Ticket, viewer_is_admin: bool) -> TicketReplyOut | None:
@@ -783,7 +708,9 @@ def admin_update_ticket(
     db: Session = Depends(get_db),
     admin: StaffCtx = Depends(require_staff),
 ):
-    """仅修改 status / priority（不回复）。/ Change status/priority only, no reply."""
+    """不回复，只改工单的状态、优先级、分类、标题（客服也能用；「客服来信」分类只有管理员能改进改出）。
+    / Change status, priority, category or title without replying (agents too; only admins
+    may move a ticket into or out of follow_up)."""
     ctx = _staff(admin)
     ticket = db.query(Ticket).filter(Ticket.id == ticket_id).first()
     if not ticket:

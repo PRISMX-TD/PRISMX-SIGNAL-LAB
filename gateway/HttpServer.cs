@@ -385,8 +385,10 @@ namespace Prismx.Mt5Gateway
                     // server-reread fallback in ClosePosition is what keeps closes working.
                     .Field("positionUpdateEvents", (uint)_link.PositionUpdateEvents)
                     // 自愈用的两个计时:全局锁多久没拿到、连续多久不能交易。到阈值
-                    // (180 秒 / 15 分钟)网关会自己退出重启,见 Mt5Link.CheckSelfHeal。
-                    // Self-heal timers; past 180s / 15min the gateway restarts itself.
+                    // (锁:普通操作 gate_stuck_exit_sec 默认 20 秒、重连类慢操作 180 秒;不能交易 15 分钟)
+                    // 网关会自己退出重启,见 Mt5Link.CheckSelfHeal。
+                    // Self-heal timers; past the limit (lock: gate_stuck_exit_sec, 20s by default, or
+                    // 180s for slow reconnect-type holders; 15min unable to trade) the gateway restarts itself.
                     .Field("gateBlockedSec", (uint)_link.GateBlockedSec)
                     .Field("degradedSec", (uint)_link.DegradedSec)
                     // 查询通道:配了几条、连上几条。连上的少于配置的,查询部分回到了交易连接上。
@@ -1514,6 +1516,22 @@ namespace Prismx.Mt5Gateway
             {
                 WriteError(ctx, 400, "bad_request", "symbol 必填");
                 return;
+            }
+
+            // 组白名单,同 /positions:带了 login 但不在白名单(或不存在)时,当作没带 login,
+            // 按品种表读通用时段。回包里的 group 字段因此不会泄露任意账号所在的组,
+            // 不在白名单与不存在的账号回得一模一样(2026-11-18 审计)。
+            // allowed_groups, as for /positions: a login outside the whitelist (or missing)
+            // is treated as no login, so the reply's group field never reveals an arbitrary
+            // account's group and disallowed looks exactly like missing.
+            if (login != 0)
+            {
+                bool allowed;
+                if (!CheckReadAllowed(ctx, login, out allowed))
+                    return;
+
+                if (!allowed)
+                    login = 0;
             }
 
             Mt5Link.SymbolSessionInfo info;

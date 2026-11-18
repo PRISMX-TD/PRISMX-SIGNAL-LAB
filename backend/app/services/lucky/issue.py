@@ -45,7 +45,7 @@ def resolve_ranks(db: Session, src) -> list[dict]:
     else:
         if not src.board or not src.period:
             raise HTTPException(400, "要选榜单和周期 / Pick a board and period")
-        from app.routers.gamification import resolve_period_key
+        from app.services.gamification.periods import resolve_period_key
         board, key = src.board, resolve_period_key(src.period)
         source, ref, label = SRC_BOARD, f"{src.board}:{key}", f"{src.board} {key}"
     top = max(t.toRank for t in src.tiers)

@@ -238,9 +238,9 @@
     "notifProcessing": "Processing…",
     "autoTitle": "Smart risk",
     "autoHint": "Rules are set in R units (R = the stop distance at open). E.g. move the stop to entry once the trade is up 1R. Applies only to positions opened through PRISMX. Manual trades are never touched; positions opened without a stop have no defined R and are skipped. Every automated command shows up on the Trade page, fully traceable.",
-    "autoUpgradeRequired": "Auto position management is a PRO feature. Upgrade to unlock",
-    "autoPausedNotPro": "Your auto position management is paused: without PRO, stops are not moved and no partial profits are taken. Manage your positions' SL/TP yourself. Upgrade to PRO and it resumes with your saved settings.",
-    "autoEnable": "Enable auto position management",
+    "autoUpgradeRequired": "Smart risk is a PRO feature. Upgrade to unlock",
+    "autoPausedNotPro": "Your Smart risk is paused: without PRO, stops are not moved and no partial profits are taken. Manage your positions' SL/TP yourself. Upgrade to PRO and it resumes with your saved settings.",
+    "autoEnable": "Enable Smart risk",
     "autoBe": "Auto break-even",
     "autoTrail": "Trailing stop",
     "autoPtp": "Partial take-profit",
@@ -248,7 +248,7 @@
     "autoTrailDistance": "trail distance",
     "autoPtpFraction": "close",
     "autoScopeNote": "The stop only ever moves in your favor. Risk is never widened. Direct-linked accounts are handled by the server; bridge accounts need the bridge online.",
-    "autoSaved": "Auto-management settings saved",
+    "autoSaved": "Smart risk settings saved",
     "autoSaveError": "Your rules weren’t saved. Check your connection and try again",
     "autoSaveChanges": "Save changes",
     "autoSaving": "Saving…",
@@ -920,7 +920,7 @@
     "b1Title": "No software to install",
     "b1Desc": "No bridge app, no VPS to rent. Signals still execute server-side while your own computer is switched off.",
     "b2Title": "PRO, free",
-    "b2Desc": "Real-time signals, one-click orders, automatic position management and unlimited MT5 accounts, every PRO feature unlocked.",
+    "b2Desc": "Real-time signals, one-click orders, Smart risk and unlimited MT5 accounts, every PRO feature unlocked.",
     "b3Title": "Live or demo",
     "b3Desc": "Learn the whole flow on a demo account and switch to live when you're ready. It works exactly the same either way.",
     "cta": "Open an account",
@@ -933,7 +933,7 @@
   },
   "upgrade": {
     "title": "Upgrade to PRO",
-    "subtitle": "Live signals, unlimited MT5 accounts, auto position management and push notifications",
+    "subtitle": "Live signals, unlimited MT5 accounts, Smart risk and push notifications",
     "choosePlan": "Choose plan",
     "chooseCoin": "Pay with USDT",
     "recommended": "Recommended · lowest fee",
@@ -1491,7 +1491,7 @@
       "actor": {
         "self": "User",
         "system": "System",
-        "auto": "Auto-manage",
+        "auto": "Smart risk",
         "broker": "Broker (MT5)",
         "admin": "Admin {{name}}",
         "agent": "Ambassador {{name}}",
@@ -1749,7 +1749,7 @@
           "support": "Support"
         },
         "autoField": {
-          "enabled": "auto-manage",
+          "enabled": "Smart risk",
           "beenabled": "break-even",
           "betriggerr": "break-even trigger",
           "trailenabled": "trailing stop",
@@ -1981,17 +1981,17 @@
           "cleared_tp": "take profit cleared"
         },
         "autosl": {
-          "unknown": "Auto-manage adjusted the stop loss",
+          "unknown": "Smart risk adjusted the stop loss",
           "trailN": "Auto trailing stop, {{n}} moves: {{a}} → {{b}}",
           "trailNTo": "Auto trailing stop, {{n}} moves, now {{b}}",
-          "multi": "Auto-manage moved the stop loss {{n}} times: {{a}} → {{b}}",
-          "multiTo": "Auto-manage moved the stop loss {{n}} times, now {{b}}",
+          "multi": "Smart risk moved the stop loss {{n}} times: {{a}} → {{b}}",
+          "multiTo": "Smart risk moved the stop loss {{n}} times, now {{b}}",
           "be": "Auto break-even: stop loss moved to entry {{v}}",
           "restore": "Auto restored the stop loss at {{v}} after it was cleared",
           "trail": "Auto trailing stop {{a}} → {{b}}",
           "trailTo": "Auto trailing stop, moved to {{b}}",
-          "move": "Auto-manage moved the stop loss {{a}} → {{b}}",
-          "set": "Auto-manage set the stop loss to {{b}}"
+          "move": "Smart risk moved the stop loss {{a}} → {{b}}",
+          "set": "Smart risk set the stop loss to {{b}}"
         },
         "otherTrade": "Other trade instruction",
         "closeAll_one": "Close all: {{count}} position",
@@ -2010,8 +2010,8 @@
         "stopoutGroup_one": "Stopped out: {{count}} position closed at once",
         "stopoutGroup_other": "Stopped out: {{count}} positions closed at once",
         "autoSettings": {
-          "head": "Changed auto-manage settings: ",
-          "none": "Saved auto-manage settings (no change)"
+          "head": "Changed Smart risk settings: ",
+          "none": "Saved Smart risk settings (no change)"
         },
         "userPlan": {
           "head": "Changed membership: ",
@@ -2227,7 +2227,7 @@
         "auto": {
           "partial_tp": "Auto partial take-profit",
           "sl": "Auto stop move",
-          "settings": "Auto-manage settings"
+          "settings": "Smart risk settings"
         },
         "sltp": {
           "modify": "Stop / target change"

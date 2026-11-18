@@ -16,9 +16,15 @@ answer different questions and need not agree with each other, but each must be
 internally consistent, so the day cut lives in day_key/today here rather than
 being re-spelled as strftime("%Y-%m-%d") elsewhere.
 """
+import re
 from datetime import date, datetime, timedelta, timezone
 
+from fastapi import HTTPException
+
 RECOMPUTE_GRACE_HOURS = 48
+
+# 自然周 / 自然月 key 的形状（2026-W07、2026-02）。/ Shape of a calendar week / month key.
+PERIOD_KEY_RE = re.compile(r"^\d{4}-W\d{2}$|^\d{4}-\d{2}$")
 
 
 def _utc(dt: datetime) -> datetime:
@@ -101,3 +107,24 @@ def active_period_keys(now: datetime) -> list[str]:
         if end <= now < end + grace:
             keys.append(k)
     return keys
+
+
+def resolve_period_key(period: str) -> str:
+    """"week"/"month" → 以当前 UTC 时间算出的进行中周期 key；显式 key 校验格式与存在性
+    （已封存历史周期只能这样访问，快照只读）。坏值 400。
+    正则只校验形状：2026-13、2026-00、2026-W60 形状合法但不是真实周期，下游
+    period_bounds 会抛 ValueError（→500），这里提前转成 400。
+    "week"/"month" → the running period key (from the current UTC time); an explicit key is
+    checked for shape and existence. Bad input → 400. The regex only checks shape, so
+    2026-13 / 2026-00 / 2026-W60 would pass it and make period_bounds raise (→500)."""
+    if period == "week":
+        return week_key(datetime.now(timezone.utc))
+    if period == "month":
+        return month_key(datetime.now(timezone.utc))
+    if not PERIOD_KEY_RE.match(period or ""):
+        raise HTTPException(400, "周期格式错误 / Invalid period")
+    try:
+        period_bounds(period)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "周期不存在 / Invalid period") from None
+    return period

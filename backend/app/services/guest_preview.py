@@ -25,9 +25,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import GuestPreviewFunnelDaily, Signal
-from app.routers import signals as signals_router
-from app.routers import trends as trends_router
-from app.services import quotes_store, sentiment_store, shared_cache
+from app.services import public_feeds, quotes_store, sentiment_store, shared_cache
 
 logger = logging.getLogger("prismx.guest_preview")
 
@@ -88,11 +86,7 @@ def _still_active(sig: dict, now: datetime) -> bool:
 
 
 def _signal_list(db: Session, realtime: bool) -> list[dict]:
-    key = shared_cache.SIGNAL_LIST_KEY_REALTIME if realtime else shared_cache.SIGNAL_LIST_KEY_FREE
-    payload = shared_cache.cached_json(
-        key, signals_router._LIST_CACHE_SECONDS,
-        lambda: signals_router._list_signals_payload(db, realtime))
-    return list(payload.get("signals") or [])
+    return list(public_feeds.cached_signal_list(db, realtime).get("signals") or [])
 
 
 def _recent_stats(db: Session, now: datetime) -> dict:
@@ -114,7 +108,7 @@ def _compute(db: Session) -> dict:
     now = datetime.now(timezone.utc)
     active = [mask_signal(s) for s in _signal_list(db, True) if _still_active(s, now)]
     recent = _signal_list(db, False)[:RECENT_LIMIT]
-    trends = trends_router.list_trends(user=None, db=db).get("trends") or []
+    trends = public_feeds.cached_trends(db).get("trends") or []
     senti = sentiment_store.get_sentiment() or {}
     return {
         "symbols": quotes_store.get_active_symbols(),
@@ -139,7 +133,7 @@ def build_analysis_payload(db: Session) -> dict:
     as the signed-in /signals/strategy-analysis (published strategies only). Its own endpoint,
     fetched once per page — it is far larger than the live snapshot and must not ride the
     4-second poll."""
-    return signals_router.strategy_analysis(_user=None, db=db)
+    return public_feeds.cached_strategy_analysis(db)
 
 
 def record_event(db: Session, mode: str, step: str, day: str | None = None) -> bool:

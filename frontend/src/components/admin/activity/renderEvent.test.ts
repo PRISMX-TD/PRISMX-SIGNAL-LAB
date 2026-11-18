@@ -177,7 +177,7 @@ describe('交易句子 / trading sentences', () => {
     const restore = item('auto.sl', { mode: 'restore', sym: 'XAUUSD', side: 'BUY', sl: 2390, prev_sl: null, moves: 1 })
     expect(renderEvent(restore, zh).text).toBe('止损被清掉后，自动补回止损 2390.00 —— XAUUSD 买单')
     const legacy = item('auto.sl', { mode: null, sym: 'XAUUSD', side: 'BUY', sl: 2390, prev_sl: null, moves: 1 })
-    expect(renderEvent(legacy, en).text).toBe('Auto-manage set the stop loss to 2390.00 — XAUUSD buy')
+    expect(renderEvent(legacy, en).text).toBe('Smart risk set the stop loss to 2390.00 — XAUUSD buy')
   })
 
   it('订单状态的结构化说明进句子，失败 / 未知靠小标签 / notes go in the sentence, fail / unknown are chips', () => {

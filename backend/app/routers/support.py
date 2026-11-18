@@ -22,16 +22,17 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Literal
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.rate_limit import hit_limit
+from app.core.strategy_limits import user_limiter
 from app.models import (
     FOLLOW_UP_ACTIVE_STATUSES,
     ActivityEvent,
@@ -70,6 +71,16 @@ from app.services.user_activity import recent_activity
 logger = logging.getLogger("prismx.support")
 
 router = APIRouter(prefix="/support", tags=["support"])
+
+# 客服写操作按用户限流（2026-11-18 审计补上：这个模块原来一个都没有）。正常值班远远碰不到；
+# 只防账号被盗或脚本出错时无限刷。发信 / 重发验证邮件会真的发邮件、推送，单独再收紧。
+# reveal-phone 另有每日查看上限（support_reveal_limit），这里只是外面再加一道频率闸。
+# Per-user limits on support writes (added by the 2026-11-18 audit; the module had none).
+# Far above normal shift use; they only stop a stolen account or a runaway script. Sending
+# a message / resending verification really sends mail and pushes, so those are tighter.
+RATE_LIMIT_SUPPORT_WRITE = "30/minute;600/hour"
+RATE_LIMIT_SUPPORT_SEND = "10/minute;100/hour"
+
 admin_router = APIRouter(prefix="/admin/support", tags=["admin-support"], dependencies=[Depends(require_admin)])
 
 # 客服接口列表单页上限（设计 §8）/ page cap for support lists (design §8)
@@ -485,7 +496,13 @@ def support_customer(user_id: str, db: Session = Depends(get_db), staff: StaffCt
 
 
 @router.post("/users/{user_id}/reveal-phone", response_model=dict)
-def support_reveal_phone(user_id: str, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)):
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
+def support_reveal_phone(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db),
+    staff: StaffCtx = Depends(require_staff),
+):
     """查看完整电话：返回完整号码并记日志。外包计入每日上限，超限 429（设计 §2.3 / §8）。
     Reveal the full phone number (logged). Outsourced agents count against a daily
     cap and get 429 once it is used up."""
@@ -518,7 +535,9 @@ def support_reveal_phone(user_id: str, db: Session = Depends(get_db), staff: Sta
 
 
 @router.post("/users/{user_id}/resend-verification", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_SEND)
 def support_resend_verification(
+    request: Request,
     user_id: str,
     background: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -546,7 +565,9 @@ def support_resend_verification(
 
 
 @router.post("/users/{user_id}/mt5/{account_id}/unbind", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_unbind_mt5(
+    request: Request,
     user_id: str,
     account_id: str,
     body: UnbindIn,
@@ -603,7 +624,9 @@ def _support_reset_count(db: Session, user_id: str) -> int:
 
 
 @router.post("/users/{user_id}/reset-trial", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_reset_trial(
+    request: Request,
     user_id: str,
     body: ReasonIn,
     db: Session = Depends(get_db),
@@ -643,34 +666,9 @@ def support_reset_trial(
     return {"ok": True}
 
 
-def apply_comp_days(db: Session, actor_id: str, user: User, days: int,
-                    audit_fields: tuple[str, str] | None = None) -> datetime | None:
-    """补偿天数落到用户上：PRO 有到期 → 从 max(到期, 现在) 往后加；FREE → 升 PRO、从现在起算；
-    永久 PRO → 400。审计写 plan / plan_expires_at（admin_user_id = 操作者）。不提交。
-    audit_fields = (等级字段, 到期字段)：默认就是上面那一对；幸运轮盘中奖由用户本人触发，写成
-    plan:lucky_* 专用字段，操作日志按这个前缀整族跳过，不会显示成「管理员改了会员」。
-    Apply compensation days: extend a PRO expiry from max(expiry, now); upgrade FREE
-    to PRO from now; permanent PRO -> 400. Audited as plan / plan_expires_at.
-    audit_fields = (plan field, expiry field), defaulting to that pair; a lucky-wheel win is
-    triggered by the user themself, so it writes dedicated plan:lucky_* fields that the activity
-    log skips — it must not read as an admin editing a plan."""
-    plan_field, exp_field = audit_fields or ("plan", "plan_expires_at")
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    if user.plan == "PRO" and user.plan_expires_at is None:
-        raise HTTPException(status_code=400, detail="该用户已是永久会员 / User already has permanent PRO")
-    base = now
-    if user.plan == "PRO":
-        cur = desk.naive(user.plan_expires_at)
-        if cur is not None and cur > base:
-            base = cur
-    new_exp = base + timedelta(days=days)
-    if user.plan != "PRO":
-        log_change(db, actor_id, user.id, plan_field, user.plan, "PRO")
-        user.plan = "PRO"
-        user.plan_is_trial = False
-    log_change(db, actor_id, user.id, exp_field, user.plan_expires_at, new_exp)
-    user.plan_expires_at = new_exp
-    return new_exp
+# 补偿天数怎么落到用户上，在 services/support_desk.apply_comp_days（幸运轮盘中奖也用）。
+# How comp days land on a user lives in services/support_desk.apply_comp_days (lucky-wheel wins use it too).
+apply_comp_days = desk.apply_comp_days
 
 
 # 补偿天数的累计窗口：客服直接生效的额度按「同一用户、最近 N 天」累计，不是按单次请求算——
@@ -736,7 +734,9 @@ def _comp_days_granted_by(db: Session, actor_id: str, since: datetime) -> int:
 
 
 @router.post("/users/{user_id}/comp-days", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_comp_days(
+    request: Request,
     user_id: str,
     body: CompDaysIn,
     db: Session = Depends(get_db),
@@ -787,10 +787,18 @@ def support_comp_days(
 
 
 @router.post("/users/{user_id}/do-not-contact", response_model=dict)
-def support_do_not_contact(user_id: str, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)):
-    """用户要求不再联系：置 users.do_not_contact_at，当前跟进转 no_interest，以后拦截分配。
-    The user asked not to be contacted: set do_not_contact_at, close the active
-    follow-up as no_interest, and block future assignments."""
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
+def support_do_not_contact(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db),
+    staff: StaffCtx = Depends(require_staff),
+):
+    """用户要求不再联系：置 users.do_not_contact_at，把这个用户所有进行中的跟进关掉（status=revoked），
+    以后拦截分配。客服只能标自己正在跟进的用户（admin 不限），管理员可在后台撤销。
+    The user asked not to be contacted: set do_not_contact_at, close every active
+    follow-up for them (status revoked) and block future assignments. Agents may only
+    mark their own active follow-ups (admins: anyone); admins can clear the flag."""
     ctx = _ctx(staff)
     user, fu = _visible_user(db, ctx, user_id)
     # 与「站内联系」同一口径：客服只能标自己正在跟进的用户（admin 不限）。原来只要用户提交
@@ -825,7 +833,9 @@ def support_do_not_contact(user_id: str, db: Session = Depends(get_db), staff: S
 
 
 @router.post("/users/{user_id}/message", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_SEND)
 def support_message(
+    request: Request,
     user_id: str,
     body: MessageIn,
     db: Session = Depends(get_db),
@@ -874,7 +884,9 @@ def support_message(
 
 
 @router.post("/users/{user_id}/follow-up-request", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_follow_up_request(
+    request: Request,
     user_id: str,
     body: FollowUpRequestIn,
     db: Session = Depends(get_db),
@@ -897,7 +909,9 @@ def support_follow_up_request(
 
 
 @router.post("/users/{user_id}/conversion-request", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_conversion_request(
+    request: Request,
     user_id: str,
     body: ConversionRequestIn,
     db: Session = Depends(get_db),
@@ -984,7 +998,9 @@ def support_follow_up_detail(fu_id: str, db: Session = Depends(get_db), staff: S
 
 
 @router.patch("/follow-ups/{fu_id}", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_follow_up_patch(
+    request: Request,
     fu_id: str,
     body: FollowUpPatchIn,
     db: Session = Depends(get_db),
@@ -1018,7 +1034,9 @@ def support_follow_up_patch(
 
 
 @router.post("/follow-ups/{fu_id}/notes", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_follow_up_note(
+    request: Request,
     fu_id: str,
     body: FollowUpNoteIn,
     db: Session = Depends(get_db),
@@ -1064,7 +1082,10 @@ def _require_template_writer(ctx: StaffCtx) -> None:
 
 
 @router.post("/templates", response_model=dict)
-def support_template_create(body: TemplateIn, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)):
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
+def support_template_create(
+    request: Request,
+    body: TemplateIn, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)):
     """内部客服新建快捷回复 / internal agents add a canned reply."""
     ctx = _ctx(staff)
     _require_template_writer(ctx)
@@ -1075,7 +1096,9 @@ def support_template_create(body: TemplateIn, db: Session = Depends(get_db), sta
 
 
 @router.patch("/templates/{tpl_id}", response_model=dict)
+@user_limiter.limit(RATE_LIMIT_SUPPORT_WRITE)
 def support_template_patch(
+    request: Request,
     tpl_id: str, body: TemplatePatchIn, db: Session = Depends(get_db), staff: StaffCtx = Depends(require_staff)
 ):
     """内部客服修改快捷回复 / internal agents edit a canned reply."""
@@ -1222,10 +1245,10 @@ def admin_follow_up_check(body: CheckIn, db: Session = Depends(get_db)):
 @admin_router.post("/follow-ups", response_model=dict)
 def admin_follow_up_assign(body: AssignIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """批量分配跟进。排除：用户不存在、工作人员本人、已要求勿扰、已有进行中跟进；退订推广邮件的
-    默认排除，includeOptedOut=true 才分配。截止默认 = 现在 + support_follow_up_days。
+    默认排除，includeOptedOut=true 才分配。默认不设截止，传了 expiresAt 才有。
     Bulk-assign follow-ups. Excluded: missing users, staff, do-not-contact, an
-    existing active follow-up; email opt-outs unless includeOptedOut. The default
-    deadline is now + support_follow_up_days."""
+    existing active follow-up; email opt-outs unless includeOptedOut. No deadline
+    by default; one is set only when expiresAt is given."""
     ctx = _admin_ctx(admin)
     assignee = _active_staff(db, body.assigneeId)
     ids = list(dict.fromkeys(body.userIds))

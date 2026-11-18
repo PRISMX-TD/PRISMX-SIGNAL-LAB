@@ -23,7 +23,7 @@ export const PREFETCH_PATHS: ReadonlySet<string> = new Set([
   '/auth/me',
   '/orders/winrate',
   '/announcements/popup',
-  '/notifications/feed?limit=4', // NotificationBell PANEL_MESSAGES
+  '/notifications/feed?limit=20', // 必须等于 NotificationBell 的 PANEL_MESSAGES / must equal NotificationBell PANEL_MESSAGES
   '/sentiment',
   '/notifications/prefs',
   '/announcements',

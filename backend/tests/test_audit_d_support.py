@@ -161,6 +161,13 @@ def test_admin_comp_days_stay_uncapped(client, db, people):
 # ─────────────────────────────────────────────────────────────────────────────
 # 查看电话每日上限的并发 / reveal-phone daily cap under concurrency
 # ─────────────────────────────────────────────────────────────────────────────
+def _request():
+    """直接调用带限流装饰器的端点要传一个真的 Request / a real Request for the rate-limited endpoint."""
+    from starlette.requests import Request
+    return Request({"type": "http", "method": "POST", "path": "/api/support", "headers": [],
+                    "client": ("127.0.0.1", 1), "query_string": b"", "server": ("t", 80), "scheme": "http"})
+
+
 def test_concurrent_reveals_cannot_exceed_daily_cap(tmp_path, monkeypatch):
     """两个请求同时进来、上限 1：只能有一个拿到完整号码。
 
@@ -219,7 +226,7 @@ def test_concurrent_reveals_cannot_exceed_daily_cap(tmp_path, monkeypatch):
         sess = Session()
         try:
             ctx = staff_ctx_for(sess.get(User, agent_id))
-            results.append(support.support_reveal_phone(customer_id, db=sess, staff=ctx))
+            results.append(support.support_reveal_phone(_request(), customer_id, db=sess, staff=ctx))
         except Exception as exc:  # 429 counts as a result
             sess.rollback()
             results.append(exc)

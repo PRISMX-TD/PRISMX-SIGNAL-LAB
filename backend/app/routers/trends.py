@@ -1,12 +1,10 @@
 """多周期趋势路由 / Multi-timeframe trends router."""
-import json
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.models import Trend, User
-from app.services import shared_cache
+from app.models import User
+from app.services import public_feeds
 from app.services.deps import get_current_user
 
 router = APIRouter(prefix="/trends", tags=["trends"])
@@ -26,26 +24,8 @@ def list_trends(
     reads + per-row json.loads become one. TTL-only invalidation — the webhook does not
     delete the key every 5s (that would only add pointless Redis writes).
     """
-    return shared_cache.cached_json(TRENDS_CACHE_KEY, TRENDS_CACHE_TTL, lambda: _load_trends(db))
+    return public_feeds.cached_trends(db)
 
 
-TRENDS_CACHE_KEY = "trends:list"
-TRENDS_CACHE_TTL = 10
-
-
-def _load_trends(db: Session) -> dict:
-    rows = db.query(Trend).all()
-    trends = []
-    for r in rows:
-        try:
-            tf_map = json.loads(r.timeframes or "{}")
-        except (ValueError, TypeError):
-            tf_map = {}
-        trends.append(
-            {
-                "symbol": r.symbol,
-                "timeframes": tf_map,
-                "updatedAt": r.updated_at.isoformat() if r.updated_at else None,
-            }
-        )
-    return {"trends": trends}
+# 算法与缓存键在 services/public_feeds（游客预览也用）。/ Logic and cache key live in services/public_feeds.
+TRENDS_CACHE_KEY = public_feeds.TRENDS_CACHE_KEY

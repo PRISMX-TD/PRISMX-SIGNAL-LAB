@@ -1,23 +1,19 @@
 """信号路由 / Signals router."""
-import hashlib
-import json
 import threading
 import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models import EXTERNAL_SIGNAL_SOURCES, Signal, User
-from app.schemas import AdminStrategyWinRateOut, PlatformStrategyListOut, PlatformStrategyOut, SignalOut
-from app.services import shared_cache
+from app.schemas import AdminStrategyWinRateOut, PlatformStrategyListOut, PlatformStrategyOut
+from app.services import public_feeds, shared_cache
 from app.services.deps import get_current_user, require_admin
 from app.services.plans import is_realtime_plan
 from app.services.settings_store import get_platform_strategies, get_winrate_settings
-from app.services.strategy_winrate import compute_strategy_session_winrate
 from app.utils.timeutil import aware as _aware
 
 router = APIRouter(prefix="/signals", tags=["signals"])
@@ -44,9 +40,7 @@ router = APIRouter(prefix="/signals", tags=["signals"])
 # rate 60s, strategy analysis 60s keyed by the published list so
 # an admin edit switches keys at once. Payloads are cached JSON-encoded, byte
 # for byte what FastAPI would emit; on a Redis error shared_cache just computes.
-_LIST_CACHE_SECONDS = 10
 _WINRATE_CACHE_SECONDS = 60
-_ANALYSIS_CACHE_SECONDS = 60
 
 
 @router.get("", response_model=dict)
@@ -75,45 +69,12 @@ def list_signals(
     matching the sweep's own cadence, with the WS SIGNAL_EXPIRED push already
     covering timeliness for connected clients.
     """
-    realtime = is_realtime_plan(user.plan)
-    key = shared_cache.SIGNAL_LIST_KEY_REALTIME if realtime else shared_cache.SIGNAL_LIST_KEY_FREE
-    return shared_cache.cached_json(key, _LIST_CACHE_SECONDS, lambda: _list_signals_payload(db, realtime))
+    return public_feeds.cached_signal_list(db, is_realtime_plan(user.plan))
 
 
-def _list_signals_payload(db: Session, realtime: bool) -> dict:
-    """信号列表负载（不含任何按用户个性化的字段，所以可以按等级共享缓存）。
-    The list payload; nothing in it is per-user, so it is cached per tier."""
-    query = db.query(Signal)
-    if not realtime:
-        query = query.filter(Signal.status == "EXPIRED")
-    rows = query.order_by(Signal.created_at.desc()).limit(50).all()
-    signals = [
-        SignalOut(
-            id=s.id,
-            symbol=s.symbol,
-            side=s.side,
-            entry=s.entry,
-            stopLoss=s.stop_loss,
-            takeProfit=s.take_profit,
-            indicator=s.indicator,
-            status=s.status,
-            createdAt=s.created_at,
-            expireAt=s.expire_at,
-            result=s.result or "PENDING",
-            resolvedAt=s.resolved_at,
-        )
-        for s in rows
-    ]
-    return jsonable_encoder({"signals": signals})
-
-
-# 用户端「策略分析」的窗口，与管理端设置页的 WINRATE_PUBLIC_DAYS 同值。
-# 两处必须一致：管理员按设置页上的胜率决定公不公开，用户看到的得是同一个窗口
-# 算出来的，否则勾选依据与展示结果对不上。
-# The user-facing analysis window, equal to the admin settings page's
-# WINRATE_PUBLIC_DAYS. They must match: an admin publishes based on the number on
-# that page, so users have to be seeing the same window.
-ANALYSIS_DAYS = 30
+# 列表负载、策略分析的算法与缓存键在 services/public_feeds（游客预览也用）。
+# The list payload and strategy analysis live in services/public_feeds (the guest preview uses them too).
+ANALYSIS_DAYS = public_feeds.ANALYSIS_DAYS
 
 
 @router.get("/strategy-analysis", response_model=AdminStrategyWinRateOut)
@@ -143,21 +104,7 @@ def strategy_analysis(
     admin page and the user page cannot contradict each other. The only
     difference is the dependency — `get_current_user` here, `require_admin` there.
     """
-    public = get_winrate_settings(db)["public_strategies"]
-    # 公开名单进键：管理员改了名单就换一把键，新名单立即生效。取排序后的摘要，
-    # 顺序不同的同一名单共用一份，名单里的任意字符也不会混进键名。
-    # The published list is part of the key, so editing it switches keys at once.
-    key = "signals:analysis:" + hashlib.sha1(
-        json.dumps(sorted(public), ensure_ascii=False).encode("utf-8")).hexdigest()
-    return shared_cache.cached_json(
-        key, _ANALYSIS_CACHE_SECONDS,
-        # hide_live：还能下单的信号不进统计，否则按品种、按方向的 pending 计数会把它泄露给
-        # FREE（2026-10-26 审计，见 compute_strategy_session_winrate）。
-        # hide_live: still-tradeable signals stay out, or per-symbol / per-side pending
-        # counts would leak them to FREE (2026-10-26 audit).
-        lambda: jsonable_encoder(
-            compute_strategy_session_winrate(db, ANALYSIS_DAYS, only_strategies=public, hide_live=True)),
-    )
+    return public_feeds.cached_strategy_analysis(db)
 
 
 @router.get("/strategy-names", response_model=dict)

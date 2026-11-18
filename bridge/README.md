@@ -185,7 +185,7 @@ sig = key.sign(manifest)   # 签原始字节，不是十六进制字符串
   打包下子进程起不来，改成了单进程）。单终端场景保持附着不重连。
 - `PRISMX-Bridge.spec`：PyInstaller 打包配置（onefile / 无 UPX），**入库、手工维护**（见上）。
 - `release_sign.py`：发版签名脚本（见上）。
-- `tests/`：`python -m pytest tests`（2026-10-18 共 144 条：142 通过、2 跳过；2026-10-08 时为 134 条）。七个测试文件分别覆盖本地配置的加密语义（`test_config_storage.py`）、执行三态 FILLED / REJECTED / FAILED（`test_execution_three_states.py`）、
+- `tests/`：`python -m pytest tests`（2026-11-18 共 144 条全部通过；2026-10-18 时 144 条：142 通过、2 跳过；2026-10-08 时为 134 条）。七个测试文件分别覆盖本地配置的加密语义（`test_config_storage.py`）、执行三态 FILLED / REJECTED / FAILED（`test_execution_three_states.py`）、
   重发指令的二次确认（`test_redelivery_reconfirm.py`）、报价独立线程与状态循环分段拿锁（`test_quote_thread_and_lock_split.py`，1.4.6）、减负与退避（`test_load_and_resilience.py`，1.4.7）、
   引擎交接与下单防护（`test_engine_handover_and_order_guards.py`，1.4.8）、自更新验签（`test_update_verification.py`）。
 

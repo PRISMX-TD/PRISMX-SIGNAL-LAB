@@ -241,7 +241,7 @@ export default function AdminTicketsPanel({ onToast }: { onToast: (kind: 'ok' | 
               </span>
             </div>
             <div className="mt-3">
-              <TicketMetaEditor ticket={detail} onSaved={(next) => { setDetail(next); void load() }} onToast={onToast} />
+              <TicketMetaEditor canEditFollowUp ticket={detail} onSaved={(next) => { setDetail(next); void load() }} onToast={onToast} />
             </div>
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <div className="adm-seg w-max" role="group" aria-label={t('tickets.admin.colStatus')}>

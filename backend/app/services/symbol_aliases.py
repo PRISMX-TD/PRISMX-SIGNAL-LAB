@@ -231,7 +231,7 @@ def display_symbol(symbol: str | None) -> str:
     前端的 displaySymbol 是同一条规则。
 
     只用于**显示**。绝不能拿它的返回值去下单、查价或匹配持仓——那些地方要的是带后缀
-    的原名。只去后缀、不改名（不做 broker_symbol 那类 BTCUSDT → BTCUSD）。以分隔符开头
+    的原名。只去后缀，不做 broker_symbol 那类改名；唯一例外是比特币统一显示成 BTCUSDT（见下）。以分隔符开头
     的名字（#AAPL）切完是空的，原样返回。
 
     The symbol name shown to users: the broker suffix dropped (XAUUSD.s → XAUUSD),
@@ -240,11 +240,20 @@ def display_symbol(symbol: str | None) -> str:
     chart's bare name, so push titles read "filled XAUUSD" and later "filled XAUUSD.s"
     for one trade. Same rule as the frontend's displaySymbol. Display only: never feed
     the result into order placement, quote lookups or position matching, which need
-    the suffixed original. No renames (unlike broker_symbol). A name that starts with
+    the suffixed original. No renames except bitcoin, always shown as BTCUSDT (see below). A name that starts with
     a separator (#AAPL) would strip to nothing and is returned unchanged.
     """
     raw = (symbol or "").strip()
+    shown = raw
     for i, ch in enumerate(raw):
         if ch in "._-#":
-            return raw[:i] or raw
-    return raw
+            shown = raw[:i] or raw
+            break
+    # 唯一的改名：比特币对用户一律叫 BTCUSDT（信号、图表都这么叫），跟前端 api/utils.ts 的
+    # SYMBOL_DISPLAY_NAMES 同一张表。原来推送里写 BTCUSD、页面上写 BTCUSDT（2026-11-18 审计）。
+    # The one rename: bitcoin is always BTCUSDT to users (signals and chart use it), the
+    # same table as the frontend's SYMBOL_DISPLAY_NAMES; pushes used to say BTCUSD.
+    return _DISPLAY_NAMES.get(broker_symbol(shown.upper()), shown)
+
+
+_DISPLAY_NAMES: dict[str, str] = {"BTCUSD": "BTCUSDT"}

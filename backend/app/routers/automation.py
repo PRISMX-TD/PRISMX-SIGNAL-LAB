@@ -115,7 +115,7 @@ def put_settings(
     if body.enabled and not can_auto_manage(user.plan):
         raise HTTPException(
             status_code=403,
-            detail="自动仓位管理为 PRO 专属功能，请升级解锁 / Auto position management is PRO-only; upgrade to unlock",
+            detail="智能风控为 PRO 专属功能，请升级解锁 / Smart risk is PRO-only; upgrade to unlock",
         )
     row = _get_or_create(db, user.id)
     # 操作日志要的是「改了哪几项、从多少改成多少」：赋值前按出参的样子拍一份快照，赋值后

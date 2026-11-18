@@ -145,19 +145,50 @@ def priority_read_after(user_id: str, started: float) -> bool:
         return False
 
 
+def position_rows(login: str, positions, err: str) -> tuple[list[dict], bool]:
+    """网关持仓 → 推送用的行（含读失败时的日志），周期读、批量预取、即时读、回执带回的持仓共用一份。
+    键名必须与桥接上报一致，见 routers/gateway._read_positions 的说明。
+    Gateway positions -> push rows (plus the read-failure log), shared by the periodic read,
+    batch prefetch, priority reads and reply positions. Key names must match the bridge
+    payload; see routers/gateway._read_positions."""
+    if err:
+        # read_busy = 网关读通道全忙、主动放弃本次读取，属预期过载信号（gateway_client
+        # 已限频告警），沿用上一帧即可，不再每拍一条 warning。
+        # read_busy is the gateway declining under load (gateway_client already logs it,
+        # rate-limited); the previous frame stands, so no per-tick warning here.
+        if err == "read_busy":
+            logger.debug("Gateway 持仓读取跳过(read_busy) login=%s", login)
+        else:
+            logger.warning("Gateway 持仓读取失败 login=%s: %s", login, err)
+        return [], False
+
+    return [
+        {
+            "ticket": p.ticket,
+            "symbol": p.symbol,
+            "side": p.side,
+            "volume": p.volume,
+            "profit": p.profit,
+            "entryPrice": p.price_open,
+            "currentPrice": p.price_current,
+            "stopLoss": p.stop_loss,
+            "takeProfit": p.take_profit,
+            "login": login,
+            "comment": p.comment,
+        }
+        for p in positions
+    ], True
+
+
 async def read_positions_priority(login: str) -> tuple[list[dict], bool]:
     """带 priority、短重试地读一个账号的持仓，转成推送用的行。
     Read one login's positions as a priority read with a short retry."""
-    # 映射在 routers.gateway 里（与周期读共用一份），延迟导入避免循环依赖。
-    # The row mapping lives in routers.gateway (shared with the poll); lazy import.
-    from app.routers.gateway import _position_rows
-
     for attempt in range(PRIORITY_READ_ATTEMPTS):
         positions, err = await gw_get_positions(
             int(login), timeout=PRIORITY_READ_TIMEOUT, priority=True
         )
         if not err:
-            return _position_rows(login, positions, "")
+            return position_rows(login, positions, "")
         # 连不上 / 超时：重试也没用，交给周期读。只对"忙"类错误重试。
         # Connection errors won't fix themselves in 200ms; retry only "busy"-type errors.
         if err in ("connect_failed", "timeout"):
@@ -220,9 +251,7 @@ async def _latest_rows_by_login(user_id: str, logins: list[str]) -> dict[str, li
 
 async def _known_rows(login: str, positions) -> tuple[list[dict], bool]:
     """网关回执里已带的持仓，转成与即时读同样的行。/ Reply positions as rows."""
-    from app.routers.gateway import _position_rows
-
-    return _position_rows(login, positions, "")
+    return position_rows(login, positions, "")
 
 
 async def push_positions_now(

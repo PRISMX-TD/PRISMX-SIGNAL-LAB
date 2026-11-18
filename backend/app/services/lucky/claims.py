@@ -66,8 +66,8 @@ def open_ticket(db: Session, user: User, draw_id: str) -> tuple[LuckyDraw, list[
     db.flush()
     db.add(TicketReply(ticket_id=t.id, author_id=user.id, author_role="user",
                        body=f"奖品：{name}\n中奖时间：{d.created_at:%Y-%m-%d %H:%M} UTC\n记录号：{d.id}"))
-    from app.routers.tickets import _notify_admins_new_ticket
-    admin_ids = _notify_admins_new_ticket(db, t, user)
+    from app.services.ticket_notify import notify_staff_new_ticket
+    admin_ids = notify_staff_new_ticket(db, t, user)
     d.support_ticket_id = t.id
     d.fulfillment_status = F_SUBMITTED
     return d, admin_ids

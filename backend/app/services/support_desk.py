@@ -14,6 +14,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
@@ -21,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from app.core.database import SessionLocal
 from app.models import FOLLOW_UP_ACTIVE_STATUSES, FollowUp, SupportAction, Ticket, User
 from app.services import activity_log
+from app.services.audit import log_change
 from app.services.deps import StaffCtx
 from app.services.notification_feed import (
     KIND_SUPPORT_ALERT,
@@ -295,3 +297,33 @@ async def support_desk_loop() -> None:
         except Exception:
             logger.exception("support_desk_loop error")
         await asyncio.sleep(SWEEP_INTERVAL_SECONDS)
+
+
+def apply_comp_days(db: Session, actor_id: str, user: User, days: int,
+                    audit_fields: tuple[str, str] | None = None) -> datetime | None:
+    """补偿天数落到用户上：PRO 有到期 → 从 max(到期, 现在) 往后加；FREE → 升 PRO、从现在起算；
+    永久 PRO → 400。审计写 plan / plan_expires_at（admin_user_id = 操作者）。不提交。
+    audit_fields = (等级字段, 到期字段)：默认就是上面那一对；幸运轮盘中奖由用户本人触发，写成
+    plan:lucky_* 专用字段，操作日志按这个前缀整族跳过，不会显示成「管理员改了会员」。
+    Apply compensation days: extend a PRO expiry from max(expiry, now); upgrade FREE
+    to PRO from now; permanent PRO -> 400. Audited as plan / plan_expires_at.
+    audit_fields = (plan field, expiry field), defaulting to that pair; a lucky-wheel win is
+    triggered by the user themself, so it writes dedicated plan:lucky_* fields that the activity
+    log skips — it must not read as an admin editing a plan."""
+    plan_field, exp_field = audit_fields or ("plan", "plan_expires_at")
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if user.plan == "PRO" and user.plan_expires_at is None:
+        raise HTTPException(status_code=400, detail="该用户已是永久会员 / User already has permanent PRO")
+    base = now
+    if user.plan == "PRO":
+        cur = naive(user.plan_expires_at)
+        if cur is not None and cur > base:
+            base = cur
+    new_exp = base + timedelta(days=days)
+    if user.plan != "PRO":
+        log_change(db, actor_id, user.id, plan_field, user.plan, "PRO")
+        user.plan = "PRO"
+        user.plan_is_trial = False
+    log_change(db, actor_id, user.id, exp_field, user.plan_expires_at, new_exp)
+    user.plan_expires_at = new_exp
+    return new_exp

@@ -42,7 +42,10 @@ LEADERBOARD_BOARDS = ("return_pct", "win_rate")
 # recompute; this only bounds changes that don't trigger one (a ranked user's
 # nickname or equipped badge).
 _BOARD_CACHE_SECONDS = 60
-_PERIOD_KEY_RE = re.compile(r"^\d{4}-W\d{2}$|^\d{4}-\d{2}$")
+# 形状校验与 week/month → 当期 key 的解析在 services/gamification/periods（幸运轮盘按名次发券也用）。
+# Shape check and week/month resolution live in services/gamification/periods (lucky issue uses them too).
+_PERIOD_KEY_RE = periods.PERIOD_KEY_RE
+resolve_period_key = periods.resolve_period_key
 
 logger = logging.getLogger("prismx.gamification")
 
@@ -85,27 +88,6 @@ def require_leaderboard_visible(db: Session = Depends(get_db),
                                  user: User = Depends(get_current_user)) -> User:
     _check_leaderboard_visible(db, user)
     return user
-
-
-def resolve_period_key(period: str) -> str:
-    """"week"/"month" → 以当前 UTC 时间算出的进行中周期 key；显式 key 校验格式与存在性
-    （已封存历史周期只能这样访问，快照只读）。坏值 400。
-    正则只校验形状：2026-13、2026-00、2026-W60 形状合法但不是真实周期，下游
-    period_bounds 会抛 ValueError（→500），这里提前转成 400。
-    "week"/"month" → the running period key (from the current UTC time); an explicit key is
-    checked for shape and existence. Bad input → 400. The regex only checks shape, so
-    2026-13 / 2026-00 / 2026-W60 would pass it and make period_bounds raise (→500)."""
-    if period == "week":
-        return periods.week_key(datetime.now(timezone.utc))
-    if period == "month":
-        return periods.month_key(datetime.now(timezone.utc))
-    if not _PERIOD_KEY_RE.match(period or ""):
-        raise HTTPException(400, "周期格式错误 / Invalid period")
-    try:
-        periods.period_bounds(period)
-    except (ValueError, TypeError):
-        raise HTTPException(400, "周期不存在 / Invalid period") from None
-    return period
 
 
 def build_leaderboard_payload(db: Session, viewer: User, board: str, period: str,
