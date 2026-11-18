@@ -625,9 +625,9 @@ class NotificationPref(Base):
     # auto_manage / bridge_offline / strategy_signal。与上面的指标类别是两套
     # 独立的白名单——指标类别只管"新信号推送该不该发"，这个字段管"账户/交易
     # 事件该不该推"。
-    # 语义约定：NULL = 用户从未配置过（读取方按"默认开启事件"处理，但
-    # badge_awarded 除外——它默认不推，见 push_dispatch.EVENT_BADGE_AWARDED
-    # 在 _parse_event_types 里的排除逻辑），"[]" = 用户明确全部取消。因此新行
+    # 语义约定：NULL = 用户从未配置过（push_dispatch._parse_event_types 按全部
+    # 事件开启处理；2026-09-07 起账户 / 交易 / 成就事件在 ALWAYS_ON_EVENTS 里，
+    # 派发时不看这份白名单，实际只约束 strategy_signal），"[]" = 用户明确全部取消。因此新行
     # 默认 NULL 而不是 "[]"——产品要求这些提醒对新用户默认开启，同时保留老
     # 用户明确关掉的选择。下面列出的具体事件名只是举例，可能滞后于
     # push_dispatch.EVENT_TYPES 的实际清单。
@@ -635,9 +635,10 @@ class NotificationPref(Base):
     # / auto_manage / bridge_offline / strategy_signal. A separate whitelist
     # from the indicator categories above — those gate "should a new-signal
     # push fire", this gates "should an account/trading-event push fire".
-    # Semantics: NULL = never configured (readers treat it as "default-on
-    # events" — except badge_awarded, which defaults off; see the
-    # EVENT_BADGE_AWARDED exclusion in push_dispatch._parse_event_types),
+    # Semantics: NULL = never configured (push_dispatch._parse_event_types treats
+    # it as all events on; since 2026-09-07 account / trading / achievement events
+    # are in ALWAYS_ON_EVENTS and dispatch ignores this list for them, so it only
+    # constrains strategy_signal),
     # "[]" = explicitly opted out of everything. New rows therefore default to
     # NULL rather than "[]" — the product wants these alerts on by default
     # while preserving an explicit opt-out. The enumerated event names above

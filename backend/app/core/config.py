@@ -151,24 +151,28 @@ class Settings(BaseSettings):
 
     # 限流 / Rate limiting（默认值，可用环境变量覆盖）。
     # Rate limits (defaults; overridable via env).
-    # 限流计数的存储后端。留空 = 进程内内存，单实例部署适用。多实例部署必须指向
-    # Redis（如 redis://127.0.0.1:6379/0），否则每个实例各算各的，限流被实例数
-    # 等比稀释。/ Storage backend for rate-limit counters. Empty = in-process
-    # memory (single instance only); multi-instance deployments must point this
-    # at Redis or the effective limit is multiplied by the instance count.
+    # 老写法，只是 REDIS_URL 的回落：shared_state.redis_url() 取「REDIS_URL 优先，
+    # 没配才用这个」，两个限流器和其余共享状态都从那里取，没有代码直接读它。新部署
+    # 只配 REDIS_URL。/ Legacy setting, now only a fallback for REDIS_URL:
+    # shared_state.redis_url() returns REDIS_URL first, else this; both rate
+    # limiters and all other shared state read from there and nothing reads this
+    # directly. New deployments set REDIS_URL only.
     RATE_LIMIT_STORAGE_URI: str = ""
     # 跨进程共享状态的 Redis（如 redis://127.0.0.1:6379/0）。留空 = 单 worker，全部
     # 状态在进程内存里，行为与从前完全一致。配上之后：限流计数、登录 / MT5 验证
     # 锁定、回测并发闸门、/me 判定节流、后台循环只由一个 worker 跑（其余待命）、
     # WebSocket 推送跨 worker 转发、EA 喂进来的报价与 K 线——全部走 Redis，这时才
-    # 可以开多个 worker（见 services/shared_state.py）。RATE_LIMIT_STORAGE_URI 单独
-    # 配也行（老写法，只管 slowapi），两者都配以 REDIS_URL 为准。
+    # 可以开多个 worker（见 services/shared_state.py）。只配 RATE_LIMIT_STORAGE_URI
+    # （老写法）时 redis_url() 回落到它，上面这些同样走 Redis；但多 worker 启动闸只认
+    # REDIS_URL（见文件末尾）。两者都配以 REDIS_URL 为准。
     # Redis for cross-process shared state. Empty = single worker, everything
     # in-process exactly as before. Set it and rate limits, lockouts, the backtest
     # gate, the /me throttle, background-loop leadership, WebSocket fan-out and the
     # EA market stores all go through Redis — only then may several workers run
-    # (see services/shared_state.py). RATE_LIMIT_STORAGE_URI alone still works for
-    # slowapi only; REDIS_URL wins when both are set.
+    # (see services/shared_state.py). With only RATE_LIMIT_STORAGE_URI (the older
+    # form) set, redis_url() falls back to it and all of the above uses Redis too,
+    # but the multi-worker startup gate checks REDIS_URL only (end of this file).
+    # REDIS_URL wins when both are set.
     REDIS_URL: str = ""
     RATE_LIMIT_LOGIN: str = "10/minute"
     RATE_LIMIT_REGISTER: str = "5/minute"
@@ -1019,7 +1023,7 @@ def detect_worker_count(argv: list[str], env: dict) -> int | None:
 
 # 限流、登录锁定、MT5 验证锁定、回测并发闸门与回测缓存全部是进程内状态
 # （core/rate_limit.py 的 _failures、core/strategy_limits.py 的 _running 与
-# _cache，以及 slowapi 在 RATE_LIMIT_STORAGE_URI 为空时的内存计数）。多开一个
+# _cache，以及 slowapi 在没配 Redis 时的内存计数）。多开一个
 # worker，这些防护就各自独立计数：配置成 8 次/5 分钟的登录失败锁定，在 4 个
 # worker 下实际要打满 32 次才锁——而且不会报错、不会有日志，防护静默减半到某个
 # 分数，没有任何人会发现。
@@ -1032,7 +1036,7 @@ def detect_worker_count(argv: list[str], env: dict) -> int | None:
 # concurrency gate and the backtest cache are all in-process state
 # (_failures in core/rate_limit.py, _running and _cache in
 # core/strategy_limits.py, and slowapi's in-memory counters when
-# RATE_LIMIT_STORAGE_URI is empty). Add a worker and each of these counts
+# no Redis is configured). Add a worker and each of these counts
 # independently: a lockout configured as 8 failures per 5 minutes really takes 32
 # across 4 workers — with no error and nothing logged, the protection silently
 # divides by the worker count and no one finds out.
@@ -1044,11 +1048,13 @@ def detect_worker_count(argv: list[str], env: dict) -> int | None:
 _WORKER_COUNT = detect_worker_count(sys.argv, os.environ)
 
 # 2026-09-06 起：配了 REDIS_URL 就全部走 Redis（见 services/shared_state.py），多
-# worker 才是受支持的部署；只配 RATE_LIMIT_STORAGE_URI（老写法）仍只覆盖 slowapi，
-# 锁定 / 闸门 / 循环 / 推送 / 行情还在进程内，多 worker 照样拒绝。
+# worker 才是受支持的部署。只配 RATE_LIMIT_STORAGE_URI（老写法）时 redis_url() 会
+# 回落到它、共享状态其实也进了 Redis，但这道闸只认 REDIS_URL，多 worker 照样拒绝
+# ——要多 worker 就配 REDIS_URL。
 # Since 2026-09-06 REDIS_URL moves every piece of shared state to Redis and makes
-# multi-worker a supported deployment; RATE_LIMIT_STORAGE_URI alone (the older
-# form) covers slowapi only, so multi-worker is still refused.
+# multi-worker a supported deployment. With only RATE_LIMIT_STORAGE_URI (the older
+# form) set, redis_url() falls back to it and shared state does use Redis, but
+# this gate checks REDIS_URL only, so multi-worker is still refused — set REDIS_URL.
 if (
     settings.ENV.lower() == "production"
     and _WORKER_COUNT is not None
