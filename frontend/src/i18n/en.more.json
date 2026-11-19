@@ -4940,6 +4940,12 @@
         "r": "Still counted",
         "w": "Losses don't change capital, so later trades still count."
       },
+      "case6": {
+        "t": "Withdrawing below the floor after you qualify",
+        "s": "Counted on {{usd}}, then withdraw down to {{low}} and keep trading",
+        "r": "Still counted",
+        "w": "Later wins and losses are measured on the pre-withdrawal {{usd}}; a withdrawal can't freeze your result."
+      },
       "case5": {
         "t": "Trades across weeks or months",
         "s": "Opened last week, closed this week",

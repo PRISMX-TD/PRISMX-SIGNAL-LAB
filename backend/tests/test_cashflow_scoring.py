@@ -199,6 +199,30 @@ def test_skipped_profit_joins_later_denominators_losses_do_not():
     assert position_capitals(b, [(mon, mon, 10.0), (mon, T0 + timedelta(hours=5), 1.0)], 100.0) == [None, None]
 
 
+def test_positions_after_withdrawing_below_floor_still_count():
+    """计入过之后出金跌破门槛：之后的单（赚、亏都算）照常计入，分母沿用最近一笔正常计入单的
+    分母（606370 的 11 月月榜：出金 500 后 W47 亏光，月榜仍挂着 +87%，2026-11-19）。
+    Once counted, a withdrawal below the floor no longer hides later positions: wins and
+    losses count on the last regularly counted denominator."""
+    # 本金 1000，周二出金 900（本金 100 < 门槛 500）/ capital 1000, Tuesday withdraws 900
+    b = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=1000.0, adjust=-900.0,
+                       taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", -900.0]]')
+    mon, wed, thu = T0 + timedelta(hours=1), T0 + timedelta(days=2), T0 + timedelta(days=3)
+    resolved = [(mon, mon, 300.0), (wed, wed, -250.0), (thu, thu, 40.0)]
+    assert position_capitals(b, resolved, 500.0) == [1000.0, 1000.0, 1000.0]
+    assert return_score(b, resolved, 500.0) == ((300.0 - 250.0 + 40.0) / 1000.0, 3)
+    # 本金被出成负数（出的比入的多，提走了盈利）同样适用 / capital driven negative too
+    neg = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=400.0, adjust=-500.0,
+                         taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", -500.0]]')
+    assert position_capitals(neg, [(mon, mon, 300.0), (wed, wed, -250.0)], 100.0) == [400.0, 400.0]
+    # 从没计入过的账户不受影响：门槛下先亏仍不计 / never-counted accounts are unchanged
+    assert position_capitals(b, [(wed, wed, -250.0)], 500.0) == [None]
+    # 超上限跳过的（比赛那种上限）不在此列 / ceiling skips are not affected
+    up = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=1000.0, adjust=5000.0,
+                        taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", 5000.0]]')
+    assert position_capitals(up, [(mon, mon, 10.0), (wed, wed, -50.0)], 500.0, 2000.0) == [1000.0, None]
+
+
 def test_trade_gate_counts_only_positions_above_floor(db_session):
     """本金达标的只有 4 笔（< 5 笔门槛）：周一那 5 笔不能凑数，不入收益榜。
     Only 4 in-range positions (< the 5-trade gate): Monday's 5 can't pad the count."""

@@ -2104,6 +2104,12 @@
         "r": "Vẫn tính",
         "w": "Thua lỗ không làm thay đổi vốn, nên các lệnh sau vẫn được tính."
       },
+      "case6": {
+        "t": "Rút xuống dưới ngưỡng sau khi đã đạt",
+        "s": "Đã được tính với vốn {{usd}}, sau đó rút còn {{low}} và tiếp tục giao dịch",
+        "r": "Vẫn tính",
+        "w": "Lãi và lỗ sau đó được tính trên vốn trước khi rút {{usd}}; rút tiền không thể giữ nguyên thành tích."
+      },
       "case5": {
         "t": "Lệnh qua tuần hoặc qua tháng",
         "s": "Mở tuần trước, đóng tuần này",

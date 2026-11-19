@@ -228,12 +228,40 @@ def position_capitals(b, resolved, min_baseline: float,
     positions closed by its close: that money was in the account, and without it a
     profitable sub-floor run followed by a top-up and a wipe-out showed −137%. Losses
     aren't deducted so a shrunken denominator can't be farmed — this only ever makes
-    returns more conservative."""
+    returns more conservative.
+
+    ③ 出金跌破门槛之后的单照常计入（2026-11-19）：本期已经有计入的单（平仓时刻不晚于这一笔），
+       之后因出金让入金本金跌到门槛以下（或 ≤0），这之后的单（赚的、亏的都算）不再跳过，分母
+       沿用最近一笔正常计入单的分母。以前这些单整笔消失：赚够了把本金出到门槛下，之后怎么亏
+       月榜都不动（606370 的 11 月月榜：11-13 出 500、W47 亏光，月榜仍是 W46 的 +87%）。
+       沿用的分母是出金前的本金，比账户里实际的钱多，赚的单只会被摊薄，刷不了收益率；只算亏
+       不算赚又会把真实结果算得比实际更差（同一账户只算亏是 −128%，实际净亏约是本金的一倍）。
+       本金跌破门槛只可能来自出金（本金不含盈亏），所以「之前计入过、现在低于门槛」就是这个
+       情形；从没达标过的账户（门槛下先做、再补入金）不受影响，仍走 ①②。
+    (3) Positions after a withdrawal below the floor keep counting (2026-11-19): once the
+    period has a counted position (closed by this one's close), a later position skipped
+    for low capital (below the floor or <= 0), win or loss, counts on the most recent
+    regularly counted denominator. Otherwise withdrawing below the floor froze the score
+    against any later loss. That denominator is the pre-withdrawal capital, larger than
+    the money actually in the account, so wins are diluted, never inflated; counting
+    losses only would overstate the damage. Capital excludes P&L, so only a withdrawal can
+    drop a counted account below the floor; never-counted accounts still follow (1)(2)."""
     gates = [position_denominator(b, o, c) for o, c, _p in resolved]
     # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不计：NaN 过得了区间判断。
     # A non-finite capital (a stale NaN balance) is skipped like <= 0; NaN would pass the range check.
     ok = [math.isfinite(g) and g > 0 and baseline_in_range(g, min_baseline, max_baseline) for g in gates]
-    skipped = sorted((c, p) for (_o, c, p), k in zip(resolved, ok) if not k)
+    order = sorted(range(len(resolved)), key=lambda j: resolved[j][1])
+    # ③ 先认出「出金跌破门槛之后」的单：按平仓顺序，前面已有正常计入的单，这一笔本金偏低。
+    # (3) first: in close order, a low-capital position after a regularly counted one.
+    late = [False] * len(resolved)
+    seen_ok = False
+    for i in order:
+        if ok[i]:
+            seen_ok = True
+        elif (seen_ok and math.isfinite(resolved[i][2]) and math.isfinite(gates[i])
+              and (gates[i] <= 0 or gates[i] < min_baseline - BASELINE_EPS)):
+            late[i] = True
+    skipped = sorted((c, p) for (_o, c, p), k, lt in zip(resolved, ok, late) if not k and not lt)
     times = [c for c, _p in skipped]
     prefix = [0.0]
     for _c, p in skipped:
@@ -244,6 +272,12 @@ def position_capitals(b, resolved, min_baseline: float,
             out.append(None)
             continue
         out.append(g + max(0.0, prefix[bisect_right(times, c)]))
+    last_denom = None
+    for i in order:
+        if ok[i]:
+            last_denom = out[i]
+        elif late[i]:
+            out[i] = last_denom
     return out
 
 

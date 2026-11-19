@@ -41,7 +41,9 @@ import { useTranslation } from 'react-i18next'
 import { fmtUsd } from '../api/utils'
 
 const CASES = [1, 2, 3, 4] as const
-const FLOOR_CASES = [1, 2, 3, 4, 5] as const
+// case6（计入之后提款到门槛以下，2026-11-19）紧跟 case4「计入之后亏了」，跨期那条留在最后。
+// case6 (withdrawing below the floor after qualifying, 2026-11-19) sits next to case4.
+const FLOOR_CASES = [1, 2, 3, 4, 6, 5] as const
 
 export default function CashflowRules({
   minBaselineUsd,
