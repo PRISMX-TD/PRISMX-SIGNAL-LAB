@@ -2052,7 +2052,7 @@
     "title": "Cách tính lợi nhuận",
     "hint": "Vốn chỉ tính tiền nạp · lệnh khi vốn chưa đủ ngưỡng không được tính",
     "lead": "Lợi nhuận = tiền lãi của các lệnh được tính ÷ vốn. Bảng tuần và bảng tháng giống nhau.",
-    "formula": "Vốn = số dư đầu kỳ + tiền nạp trong kỳ − tiền rút trong kỳ (lãi lỗ giao dịch không tính là vốn)",
+    "formula": "Vốn = số dư đầu kỳ + tiền nạp trong kỳ − tiền rút trong kỳ (tiền rút trước hết trừ vào lãi trong kỳ, phần vượt mới giảm vốn; lãi lỗ giao dịch không tính là vốn)",
     "case1": {
       "t": "Lãi rồi rút",
       "s": "Vốn 10,000 → lãi 1,000 → rút 9,000",
@@ -2076,6 +2076,12 @@
       "s": "1,000 lúc mở → nạp lên 10,000 → đóng lãi 500",
       "r": "5%",
       "w": "Tính trên 10,000 lúc đóng: vẫn lấy thời điểm lớn hơn, nên nạp tiền không làm tỷ suất đẹp hơn."
+    },
+    "case5": {
+      "t": "Rút gần hết sau khi có lãi",
+      "s": "10.000 → lãi 1.000 → rút 9.900 → lãi thêm 110",
+      "r": "10%",
+      "w": "Khoản rút trừ vào 1.000 tiền lãi trước, nên vốn tính theo 1.100 còn trong tài khoản: rút vốn ra không làm tỷ suất lợi nhuận đẹp hơn."
     },
     "noteSmall": "Khoản giảm nhỏ không tính là rút tiền: hoa hồng, swap và các khoản lặt vặt tương tự được bỏ qua. Chỉ tính là rút khi khoản giảm vượt cả 100 USD và 5% vốn tài khoản.",
     "floor": {

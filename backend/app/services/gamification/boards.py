@@ -208,6 +208,34 @@ def baseline_in_range(capital: float, min_baseline: float, max_baseline: float |
     return max_baseline is None or capital <= max_baseline + BASELINE_EPS
 
 
+def _profit_first_capital(b, resolved):
+    """返回 t -> 本金 的函数，与 capital_at 相同，只是每笔出金先抵本期已平仓（平仓时刻不晚于
+    出金时刻）的累计盈利、超出部分才减本金；被前面出金抵掉的盈利不能重复用。累计为亏损时
+    不抵（出金整笔减本金，与以前相同）。见 position_capitals ④。
+    Like capital_at, but each withdrawal first consumes this period's realized profit
+    (positions closed by then, not already consumed); only the excess reduces principal."""
+    flows = _flows(b)
+    base = float(b.baseline) + float(b.adjust or 0.0) - sum(a for _, a in flows)
+    events = sorted((_aware(c), p) for _o, c, p in resolved if math.isfinite(p))
+    eff: list[tuple[datetime, float]] = []
+    cum = consumed = 0.0
+    k = 0
+    for at, a in flows:
+        while k < len(events) and events[k][0] <= at:
+            cum += events[k][1]
+            k += 1
+        if a < 0:
+            use = min(max(0.0, cum - consumed), -a)
+            consumed += use
+            a += use
+        eff.append((at, a))
+    times = [t for t, _a in eff]
+    prefix = [0.0]
+    for _t, a in eff:
+        prefix.append(prefix[-1] + a)
+    return lambda t: base + prefix[bisect_right(times, _aware(t))]
+
+
 def position_capitals(b, resolved, min_baseline: float,
                       max_baseline: float | None = None) -> list[float | None]:
     """收益榜给每笔仓位用的本金，与 resolved 一一对应；None = 这笔不计入。
@@ -245,8 +273,20 @@ def position_capitals(b, resolved, min_baseline: float,
     against any later loss. That denominator is the pre-withdrawal capital, larger than
     the money actually in the account, so wins are diluted, never inflated; counting
     losses only would overstate the damage. Capital excludes P&L, so only a withdrawal can
-    drop a counted account below the floor; never-counted accounts still follow (1)(2)."""
-    gates = [position_denominator(b, o, c) for o, c, _p in resolved]
+    drop a counted account below the floor; never-counted accounts still follow (1)(2).
+
+    ④ 出金先算提走本期赚的钱（2026-11-19，`_profit_first_capital`）：以前出金一律从本金里
+       扣——1 万本金赚 1000、提走 9900，本金只剩 100（≥ 门槛 100），可账上还有 1100，之后
+       赚 110 被算成 +110%（实际 10%）。现在这笔出金先抵掉本期已平仓的累计盈利（1000），
+       只有超出的 8900 才减本金，本金 = 1100，与账上的钱一致。本金只会比原来大（更保守），
+       而且永远不超过净入金——赚的钱照样凑不了门槛。
+    (4) Withdrawals consume this period's realized profit first (2026-11-19): charging them
+    all to principal let "earn 1000 on 10000, withdraw 9900" leave principal at 100 while
+    1100 stayed in the account, so a later +110 read as +110%. Only the part beyond the
+    realized profit (closed by the withdrawal) reduces principal now. Principal only grows
+    versus before (more conservative) and never exceeds net deposits."""
+    cap_at = _profit_first_capital(b, resolved)
+    gates = [max(cap_at(o), cap_at(c)) for o, c, _p in resolved]
     # 非有限的本金（库里残留的 NaN 余额）与 ≤0 同样不计：NaN 过得了区间判断。
     # A non-finite capital (a stale NaN balance) is skipped like <= 0; NaN would pass the range check.
     ok = [math.isfinite(g) and g > 0 and baseline_in_range(g, min_baseline, max_baseline) for g in gates]

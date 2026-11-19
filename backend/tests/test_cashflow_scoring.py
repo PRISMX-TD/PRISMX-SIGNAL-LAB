@@ -211,16 +211,44 @@ def test_positions_after_withdrawing_below_floor_still_count():
     resolved = [(mon, mon, 300.0), (wed, wed, -250.0), (thu, thu, 40.0)]
     assert position_capitals(b, resolved, 500.0) == [1000.0, 1000.0, 1000.0]
     assert return_score(b, resolved, 500.0) == ((300.0 - 250.0 + 40.0) / 1000.0, 3)
-    # 本金被出成负数（出的比入的多，提走了盈利）同样适用 / capital driven negative too
+    # 出的比入的多（提走了盈利）：先抵盈利 300，本金 = 400 − 200 = 200，正是账上的钱（④）
+    # withdrawing more than deposited: profit first, principal 200 = the money left (4)
     neg = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=400.0, adjust=-500.0,
                          taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", -500.0]]')
-    assert position_capitals(neg, [(mon, mon, 300.0), (wed, wed, -250.0)], 100.0) == [400.0, 400.0]
+    assert position_capitals(neg, [(mon, mon, 300.0), (wed, wed, -250.0)], 100.0) == [400.0, 200.0]
+    # 抵完盈利仍跌破门槛 → ③：分母沿用 400 / still below the floor after that → (3) keeps 400
+    assert position_capitals(neg, [(mon, mon, 300.0), (wed, wed, -250.0)], 300.0) == [400.0, 400.0]
     # 从没计入过的账户不受影响：门槛下先亏仍不计 / never-counted accounts are unchanged
     assert position_capitals(b, [(wed, wed, -250.0)], 500.0) == [None]
     # 超上限跳过的（比赛那种上限）不在此列 / ceiling skips are not affected
     up = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=1000.0, adjust=5000.0,
                         taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", 5000.0]]')
     assert position_capitals(up, [(mon, mon, 10.0), (wed, wed, -50.0)], 500.0, 2000.0) == [1000.0, None]
+
+
+def test_withdrawal_consumes_period_profit_first():
+    """赚了钱再出金：出金先抵本期已实现盈利，超出部分才减本金（2026-11-19）。
+    1 万赚 1000、提走 9900 → 本金 1100（账上的钱），之后赚 110 是 10%，不是按 100 算的 110%。
+    A withdrawal consumes realized profit first: 10000 + 1000 profit, withdraw 9900 →
+    principal 1100, so a later +110 is 10%, not 110% on 100."""
+    b = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=10000.0, adjust=-9900.0,
+                       taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", -9900.0]]')
+    mon, wed = T0 + timedelta(hours=1), T0 + timedelta(days=2)
+    resolved = [(mon, mon, 1000.0), (wed, wed, 110.0)]
+    assert position_capitals(b, resolved, 100.0) == [10000.0, 1100.0]
+    assert return_score(b, resolved, 100.0) == (1000.0 / 10000.0 + 110.0 / 1100.0, 2)
+    # 盈利只能抵一次：两笔出金共 600，盈利 500 → 本金 10000 − 100 / profit is consumed once
+    two = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=10000.0, adjust=-600.0,
+                         taken_at=T0, flows='[["2026-09-01T10:00:00+00:00", -300.0], '
+                                            '["2026-09-01T12:00:00+00:00", -300.0]]')
+    assert position_capitals(two, [(mon, mon, 500.0), (wed, wed, 1.0)], 100.0)[1] == 9900.0
+    # 出金之后才平仓的盈利不抵：本金 100 / profit closed after the withdrawal doesn't count
+    assert position_capitals(b, [(wed, wed, 1000.0)], 100.0) == [100.0]
+    assert position_capitals(b, [(wed, wed, 1000.0)], 500.0) == [None]
+    # 本期累计亏损时出金整笔减本金（与以前相同）/ with a net loss the whole withdrawal hits principal
+    lost = PeriodBaseline(user_id="u", mt5_login="A", period_key=PK, baseline=10000.0, adjust=-4000.0,
+                          taken_at=T0, flows='[["2026-09-01T12:00:00+00:00", -4000.0]]')
+    assert position_capitals(lost, [(mon, mon, -5000.0), (wed, wed, 10.0)], 100.0) == [10000.0, 6000.0]
 
 
 def test_trade_gate_counts_only_positions_above_floor(db_session):

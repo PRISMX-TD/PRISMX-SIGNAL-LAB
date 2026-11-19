@@ -4888,7 +4888,7 @@
     "title": "How returns are calculated",
     "hint": "Capital counts deposits only · trades below the floor don't count",
     "lead": "Return = profit from counted trades ÷ capital. Weekly and monthly boards work the same way.",
-    "formula": "Capital = balance at period start + deposits − withdrawals this period (trading profit and loss never count as capital)",
+    "formula": "Capital = balance at period start + deposits − withdrawals this period (a withdrawal first takes this period's trading profit, only the rest reduces capital; trading profit and loss never count as capital)",
     "case1": {
       "t": "Earn, then withdraw",
       "s": "10,000 capital → earn 1,000 → withdraw 9,000",
@@ -4912,6 +4912,12 @@
       "s": "1,000 at open → top up to 10,000 → close for 500",
       "r": "5%",
       "w": "Scored on the 10,000 it closed with: the larger moment again, so a deposit can't make the return look better."
+    },
+    "case5": {
+      "t": "Withdraw most of it after a profit",
+      "s": "10,000 → earn 1,000 → withdraw 9,900 → earn 110",
+      "r": "10%",
+      "w": "The withdrawal takes the 1,000 profit first, so capital is the 1,100 left in the account: withdrawing capital can't inflate the return."
     },
     "noteSmall": "Small drops aren't withdrawals: commission, swap and similar odds and ends are ignored. A drop counts as a withdrawal only when it exceeds both 100 USD and 5% of the account's capital.",
     "floor": {
