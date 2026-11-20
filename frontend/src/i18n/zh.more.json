@@ -3955,7 +3955,10 @@
         "above": "高于",
         "inline": "符合",
         "below": "低于"
-      }
+      },
+      "syncWeek": "同步这一周",
+      "impactFilter": "影响",
+      "emptyWeek": "这一周没有数据。点右侧「同步这一周」从 Narwhal 拉取。"
     }
   },
   "simulator": {

@@ -3966,7 +3966,10 @@
         "above": "Above",
         "inline": "In line",
         "below": "Below"
-      }
+      },
+      "syncWeek": "Sync this week",
+      "impactFilter": "Impact",
+      "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal."
     }
   },
   "simulator": {

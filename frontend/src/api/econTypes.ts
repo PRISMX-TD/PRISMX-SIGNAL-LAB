@@ -35,6 +35,8 @@ export type EconValue = {
   actual?: number | string | null
   consensus?: number | string | null
   previous?: number | string | null
+  /** 这一项自己的重要度（0–3）/ this figure's own importance */
+  importance?: number
 }
 
 export type EconImpact = { asset: string; direction: 'bullish' | 'bearish' | 'neutral'; strength: 'strong' | 'medium' | 'weak' }

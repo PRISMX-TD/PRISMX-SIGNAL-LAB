@@ -20,38 +20,53 @@ CURRENCY = {
 
 NONE, LOW, MEDIUM, HIGH = 0, 1, 2, 3
 
-# 各国的高重要度指标 / high-importance measures per country
+# 重要度尽量对齐 Forex Factory 的红 / 橙 / 黄（2026-11-20 按 FF 当周页面和常见分级逐项对照）。
+# 按国家逐项列：同一个指标在不同国家分量不同（例如瑞士工业产出是黄、美国 CPI 是红）。
+# 表里没有的一律「低」（黄）。
+# Importance follows Forex Factory's red / orange / yellow, per country (the same measure weighs
+# differently by country). Anything not listed is low (yellow).
 _HIGH: dict[str, set[str]] = {
     "USA": {"nonfarm_payrolls_change", "unemployment_rate", "average_hourly_earnings_mom", "cpi_mom", "cpi_yoy",
-            "core_cpi_mom", "core_cpi_yoy", "core_pce_price_index_mom", "core_pce_price_index_yoy", "gdp_qoq",
-            "gdp_qoq_annualized", "retail_sales_mom", "retail_sales_control_group_mom", "ism_manufacturing_pmi",
-            "ism_services_pmi"},
-    "EMU": {"cpi_yoy", "core_cpi_yoy", "hicp_yoy", "core_hicp_yoy", "gdp_qoq"},
-    "GBR": {"cpi_yoy", "core_cpi_yoy", "gdp_qoq", "gdp_mom", "unemployment_rate", "average_earnings_total_pay_yoy",
-            "average_earnings_regular_pay_yoy", "retail_sales_mom"},
-    "JPN": {"core_cpi_yoy", "cpi_yoy", "gdp_qoq"},
-    "CAN": {"cpi_mom", "cpi_yoy", "cpi_median_yoy", "cpi_trim_yoy", "employment_change", "unemployment_rate",
-            "gdp_mom", "retail_sales_mom"},
-    "AUS": {"employment_change", "unemployment_rate", "cpi_yoy", "cpi_mom", "cpi_trim_yoy", "cpi_trim_qoq", "gdp_qoq"},
-    "NZL": {"cpi_qoq", "cpi_yoy", "gdp_qoq", "unemployment_rate"},
-    "CHE": {"cpi_yoy"},
-    "CHN": {"gdp_yoy", "cpi_yoy"},
+            "core_cpi_mom", "core_pce_price_index_mom", "gdp_qoq", "gdp_qoq_annualized", "retail_sales_mom",
+            "retail_sales_ex_autos_mom", "ism_manufacturing_pmi", "ism_services_pmi", "job_openings",
+            "producer_prices_mom", "core_producer_price_change_mom"},
+    "EMU": set(),
+    "DEU": set(),
+    "GBR": {"cpi_yoy", "gdp_mom", "gdp_3m"},
+    "JPN": set(),
+    "CAN": {"cpi_mom", "cpi_median_yoy", "cpi_trim_yoy", "employment_change", "unemployment_rate",
+            "retail_sales_mom", "retail_sales_ex_autos_mom"},
+    "AUS": {"employment_change", "unemployment_rate", "cpi_yoy", "cpi_qoq", "cpi_trim_qoq", "cpi_trim_yoy", "gdp_qoq"},
+    "NZL": {"cpi_qoq", "employment_qoq", "unemployment_rate", "gdp_qoq", "inflation_expectations"},
+    "CHE": set(),
+    "CHN": set(),
 }
 
-# 任何关注国家的中等重要度指标 / medium-importance measures for any watched country
-_MEDIUM: set[str] = {
-    "initial_claims", "continuing_claims", "manufacturing_pmi", "services_pmi", "composite_pmi",
-    "philly_fed_manufacturing", "empire_state_manufacturing", "consumer_sentiment_michigan",
-    "inflation_expectations_1y", "consumer_confidence_index", "consumer_confidence", "zew_economic_sentiment",
-    "ifo_business_climate", "producer_price_change_mom", "core_producer_price_change_mom", "producer_prices_mom",
-    "producer_output_prices_mom", "durable_goods_orders_mom", "core_capital_goods_orders_mom",
-    "industrial_production_mom", "industrial_production_yoy", "retail_sales_yoy", "retail_sales_ex_autos_mom",
-    "trade_balance", "goods_trade_balance", "unemployment_rate", "employment_change", "cpi_mom", "cpi_yoy",
-    "core_cpi_mom", "core_cpi_yoy", "hicp_yoy", "hicp_mom", "gdp_qoq", "gdp_yoy", "wage_price_index_qoq",
-    "new_home_sales", "housing_starts", "building_permits", "pending_home_sales_mom", "existing_home_sales",
-    "job_openings", "adp_employment_change", "loan_prime_rate_1y", "loan_prime_rate_5y",
-    "fixed_asset_investment_ytd_yoy", "claimant_count_change", "average_earnings_total_pay_yoy", "pce_price_index_yoy",
+_MEDIUM_BY_COUNTRY: dict[str, set[str]] = {
+    "USA": {"initial_claims", "philly_fed_manufacturing", "empire_state_manufacturing", "consumer_sentiment_michigan",
+            "inflation_expectations_1y", "consumer_confidence_index", "consumer_confidence", "durable_goods_orders_mom",
+            "durable_goods_orders_ex_transport_mom", "core_cpi_yoy", "core_pce_price_index_yoy", "pce_price_index_mom",
+            "personal_spending_mom", "personal_income_mom", "adp_employment_change", "manufacturing_pmi",
+            "services_pmi", "new_home_sales", "existing_home_sales", "pending_home_sales_mom", "building_permits",
+            "employment_cost_index_qoq", "average_hourly_earnings_yoy"},
+    "EMU": {"cpi_yoy", "core_cpi_yoy", "hicp_yoy", "gdp_qoq", "manufacturing_pmi", "services_pmi",
+            "zew_economic_sentiment"},
+    "DEU": {"cpi_mom", "hicp_mom", "manufacturing_pmi", "services_pmi", "ifo_business_climate", "zew_economic_sentiment",
+            "employment_change"},
+    "GBR": {"claimant_count_change", "average_earnings_total_pay_yoy", "retail_sales_mom", "manufacturing_pmi",
+            "services_pmi", "core_cpi_yoy", "gdp_qoq", "unemployment_rate"},
+    "JPN": {"core_cpi_yoy", "core_cpi_tokyo_yoy", "gdp_qoq"},
+    "CAN": {"cpi_common_yoy", "gdp_mom", "ivey_pmi", "core_cpi_mom"},
+    "AUS": {"wage_price_index_qoq", "cpi_mom", "retail_sales_mom", "capital_expenditure_qoq"},
+    "NZL": {"anz_business_confidence", "retail_sales_qoq", "labour_cost_index_qoq"},
+    "CHE": {"cpi_mom", "gdp_qoq"},
+    "CHN": {"manufacturing_pmi_official", "non_manufacturing_pmi_official", "manufacturing_pmi", "services_pmi",
+            "cpi_yoy", "gdp_yoy", "industrial_production_yoy", "retail_sales_yoy", "exports_yoy"},
 }
+
+# 央行相关、没有数值的发布按名称判断 / central-bank items without figures, by name
+_CB_HIGH_WORDS = ("decision", "statement", "press conference", "vote")
+_CB_MEDIUM_WORDS = ("minutes", "report", "speech")
 
 # 同等重要度下谁当「主指标」：越靠前越优先 / tie-break for the primary figure, earlier wins
 _PRIORITY = [
@@ -74,7 +89,7 @@ def measure_importance(country: str, family: str | None, measure: str) -> int:
         return HIGH
     if measure in _HIGH.get(country, set()):
         return HIGH
-    if measure in _MEDIUM:
+    if measure in _MEDIUM_BY_COUNTRY.get(country, set()):
         return MEDIUM
     return LOW
 
@@ -86,9 +101,12 @@ def release_importance(country: str, family: str | None, name: str, values: list
         return max(measure_importance(country, family, str(v.get("measure") or "")) for v in values)
     lowered = (name or "").lower()
     if family == "policy_rate":
-        if "meeting" in lowered or "decision" in lowered:
+        # 美联储纪要在 FF 是红的，其它央行纪要是橙 / FOMC minutes are red on FF, other minutes orange
+        if "minutes" in lowered and country == "USA":
             return HIGH
-        if "minutes" in lowered or "press conference" in lowered or "report" in lowered:
+        if any(w in lowered for w in _CB_HIGH_WORDS):
+            return HIGH
+        if any(w in lowered for w in _CB_MEDIUM_WORDS):
             return MEDIUM
         return LOW
     return NONE if "positioning" in lowered else LOW

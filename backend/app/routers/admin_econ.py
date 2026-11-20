@@ -68,12 +68,20 @@ def econ_save_settings(body: EconSettingsIn, db: Session = Depends(get_db), admi
 
 
 @router.post("/sync")
-async def econ_sync_now(admin: User = Depends(require_admin)):
+async def econ_sync_now(
+    start: date | None = None,
+    days: int = Query(7, ge=1, le=14),
+    admin: User = Depends(require_admin),
+):
     """立即同步一次（总开关关着也能用，用来试数据源）。约 2–3 次 Narwhal 调用。
-    Sync once now (works with the switch off, for trying the source). About 2–3 Narwhal calls."""
+    带 start 时只同步 [start, start+days)（小日历选中的那一周），否则同步默认窗口。
+    Sync once now (works with the switch off). With start, only [start, start+days) is synced."""
     if not narwhal.configured():
         raise HTTPException(400, "未配置 NARWHAL_API_KEY / NARWHAL_API_KEY is not set")
-    out = await run_in_threadpool(loop.run_once, True)
+    if start is not None:
+        out = await run_in_threadpool(loop.sync_range, start, start + timedelta(days=days - 1))
+    else:
+        out = await run_in_threadpool(loop.run_once, True)
     if out.get("error"):
         raise HTTPException(502, out["error"])
     return out
@@ -81,7 +89,10 @@ async def econ_sync_now(admin: User = Depends(require_admin)):
 
 def _group_payload(key: str, rows: list[EconRelease], preview: EconPreview | None) -> dict:
     first = rows[0]
-    values = store.merged_values(rows)
+    # 每个数值带自己的重要度（像 Forex Factory 一样逐行显示）/ per-figure importance, shown per row
+    family_of = {v["measure"]: r.family for r in rows for v in store.values_of(r)}
+    values = [{**v, "importance": rules.measure_importance(first.country, family_of.get(v["measure"]), v["measure"])}
+              for v in store.merged_values(rows)]
     primary, _ = previews._group_primary(first.country, rows)
     primary_measure = preview.primary_measure if preview and preview.primary_measure else (
         primary.get("measure") if primary else None)

@@ -1505,7 +1505,11 @@ export const adminApi = {
   econStatus: () => request<EconStatus>('/admin/econ/status'),
   econSaveSettings: (patch: Partial<EconSettings>) =>
     request<EconSettings>('/admin/econ/settings', { method: 'PUT', body: JSON.stringify(patch) }),
-  econSync: () => request<Record<string, unknown>>('/admin/econ/sync', { method: 'POST' }),
+  econSync: (start?: string, days?: number) =>
+    request<Record<string, unknown>>(
+      `/admin/econ/sync${start ? `?${new URLSearchParams({ start, days: String(days ?? 7) })}` : ''}`,
+      { method: 'POST' },
+    ),
   econCalendar: (start: string | null, days: number, minImportance: number) =>
     request<{ start: string; days: number; items: EconGroup[] }>(
       `/admin/econ/calendar?${new URLSearchParams({ ...(start ? { start } : {}), days: String(days), minImportance: String(minImportance) })}`,

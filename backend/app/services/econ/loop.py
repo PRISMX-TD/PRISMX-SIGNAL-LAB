@@ -50,6 +50,32 @@ def full_sync(db, cfg: dict, now: datetime) -> dict:
     return stats
 
 
+def sync_range(start, end) -> dict:
+    """管理员在小日历上选了某一周、手动同步那一周（阻塞，放线程池）。约 2–3 次调用。
+    Sync an arbitrary week the admin picked on the mini calendar (blocking). About 2–3 calls."""
+    db = SessionLocal()
+    try:
+        cfg = store.get_settings(db)
+        now = store.utcnow()
+        try:
+            res = narwhal.fetch_calendar(cfg["countries"], start, end)
+        except narwhal.NarwhalError as exc:
+            store.update_status(lastError=str(exc)[:300], lastErrorAt=now.isoformat() + "Z")
+            return {"error": str(exc)}
+        stats = store.upsert_releases(db, res.releases, now)
+        db.commit()
+        stats["outcomes"] = previews.apply_outcomes(db, stats["actualGroups"], now)
+        db.commit()
+        fields = {"lastSyncAt": now.isoformat() + "Z", "lastSyncCalls": res.calls, "lastSyncSeen": stats["seen"],
+                  "lastError": None, "lastErrorAt": None}
+        if res.balance is not None:
+            fields["balance"] = res.balance
+        store.update_status(**fields)
+        return {"sync": stats}
+    finally:
+        db.close()
+
+
 def due_checks(db, cfg: dict, now: datetime) -> list[EconRelease]:
     """到了补查时刻、还没有公布值、带数值的发布。/ Releases due for a re-check that still lack an actual."""
     rows = (db.query(EconRelease)

@@ -3,7 +3,7 @@
 Economic calendar (rev 52): rules, upsert and merge, preview generation and validation, outcomes,
 re-checks, the loop switch and the admin endpoints. No outbound request: both clients are stubbed."""
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
@@ -89,8 +89,18 @@ def test_importance_table():
     assert rules.release_importance("USA", "labour", "Jobless claims",
                                     [{"measure": "initial_claims"}]) == rules.MEDIUM
     assert rules.release_importance("USA", "housing", "Mortgage rates", [{"measure": "mortgage_rate_30y"}]) == rules.LOW
-    assert rules.release_importance("EMU", "policy_rate", "Monetary council meeting", []) == rules.HIGH
-    assert rules.release_importance("GBR", "policy_rate", "Central bank speech", []) == rules.LOW
+    # 对齐 Forex Factory：欧银非货币会议低，央行讲话橙，美联储纪要红、其它纪要橙
+    # Aligned with Forex Factory: ECB non-monetary meeting low, speeches orange, FOMC minutes red
+    assert rules.release_importance("EMU", "policy_rate", "Monetary council meeting", []) == rules.LOW
+    assert rules.release_importance("GBR", "policy_rate", "Central bank speech", []) == rules.MEDIUM
+    assert rules.release_importance("USA", "policy_rate", "Monetary policy minutes", []) == rules.HIGH
+    assert rules.release_importance("GBR", "policy_rate", "Monetary policy minutes", []) == rules.MEDIUM
+    assert rules.release_importance("GBR", "policy_rate", "Monetary policy vote", []) == rules.HIGH
+    # 同一指标按国家分级：瑞士工业产出黄、加拿大 PPI 黄 / per-country: CHF industrial output and CAD PPI are low
+    assert rules.release_importance("CHE", "activity", "Industrial production",
+                                    [{"measure": "industrial_production_yoy"}]) == rules.LOW
+    assert rules.release_importance("CAN", "prices", "Producer prices", [{"measure": "producer_prices_mom"}]) == rules.LOW
+    assert rules.release_importance("CAN", "prices", "Consumer prices", [{"measure": "cpi_common_yoy"}]) == rules.MEDIUM
     assert rules.release_importance("USA", "activity", "Futures positioning", []) == rules.NONE
     # 利率决议带数值也是高 / a rate decision with a figure is high
     assert rules.release_importance("AUS", "policy_rate", "Rate decision", [{"measure": "cash_rate"}]) == rules.HIGH
@@ -287,6 +297,25 @@ def test_full_sync_then_checks_after_release(enabled, monkeypatch):
     row = db.get(EconRelease, "r1")
     assert row.has_actual and row.check_stage == 0
     assert store.get_status()["balance"] == 9.5
+
+
+def test_sync_range_fetches_only_the_picked_week(enabled, monkeypatch):
+    db = enabled
+    seen = []
+    monkeypatch.setattr(narwhal, "fetch_calendar", _fake_fetch([[_release("r1", values=RETAIL)]], seen))
+    start = date(2026, 11, 8)
+    out = loop.sync_range(start, start + timedelta(days=6))
+    assert out["sync"]["seen"] == 1 and seen[0][1:] == (start, date(2026, 11, 14))
+    assert db.get(EconRelease, "r1") is not None and store.get_status()["balance"] == 9.5
+
+
+def test_calendar_values_carry_per_row_importance(enabled):
+    db = enabled
+    store.upsert_releases(db, [_release("r1", values=RETAIL)], NOW)
+    db.commit()
+    g = admin_econ.econ_calendar(start=NOW.date(), days=1, minImportance=rules.LOW, db=db, admin=_admin(db))["items"][0]
+    imp = {v["measure"]: v["importance"] for v in g["values"]}
+    assert imp["retail_sales_mom"] == rules.HIGH and imp["retail_sales_yoy"] == rules.LOW
 
 
 def test_check_stage_advances_while_actual_is_missing(enabled, monkeypatch):
