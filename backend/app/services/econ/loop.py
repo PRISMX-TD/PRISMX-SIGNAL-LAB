@@ -139,7 +139,7 @@ def run_week_job(lo: datetime, hi: datetime) -> dict:
     store.update_status(weekJob=job)
     try:
         cfg = store.get_settings(db)
-        groups = previews.due_groups(db, cfg, now, lo=lo, hi=hi)
+        groups = previews.due_groups(db, cfg, now, lo=lo, hi=hi, retry_failed=True)
         job["total"] = len(groups)
         store.update_status(weekJob=dict(job))
         for key, rows in groups:

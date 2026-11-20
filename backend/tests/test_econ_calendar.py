@@ -477,3 +477,68 @@ def test_admin_generate_week_rejects_a_second_job(enabled, monkeypatch):
     with pytest.raises(HTTPException) as e:
         _asyncio.run(admin_econ.econ_generate_week(start=NOW.date(), days=7, admin=None))
     assert e.value.status_code == 409
+
+
+# ---- DeepSeek 客户端：截断 / 空回复 / 限流都要重试 / client retries truncation, empty replies, 429 ----
+
+class _Resp:
+    def __init__(self, status=200, content="", finish="stop"):
+        self.status_code = status
+        self._p = {"model": "deepseek-flash", "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                   "choices": [{"finish_reason": finish, "message": {"content": content}}]}
+        self.text = ""
+
+    def json(self):
+        return self._p
+
+
+def _script(monkeypatch, responses):
+    sent = []
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        sent.append(json)
+        return responses.pop(0)
+    monkeypatch.setattr(deepseek.httpx, "post", fake_post)
+    monkeypatch.setattr(deepseek.time, "sleep", lambda s: None)
+    monkeypatch.setattr(deepseek.settings, "DEEPSEEK_API_KEY", "sk-test")
+    return sent
+
+
+def test_deepseek_truncated_reply_retries_with_double_budget(monkeypatch):
+    sent = _script(monkeypatch, [_Resp(content="", finish="length"), _Resp(content='{"a": 1}')])
+    reply = deepseek.chat_json("sys json", "u")
+    assert reply.data == {"a": 1} and reply.tokens_out == 10
+    assert sent[0]["max_tokens"] == deepseek.DEFAULT_MAX_TOKENS and sent[1]["max_tokens"] == 2 * deepseek.DEFAULT_MAX_TOKENS
+
+
+def test_deepseek_empty_rate_limited_and_fenced_replies_recover(monkeypatch):
+    _script(monkeypatch, [_Resp(content="   "), _Resp(status=429), _Resp(status=503),
+                          _Resp(content='```json\n{"ok": true}\n```')])
+    assert deepseek.chat_json("sys json", "u").data == {"ok": True}
+
+
+def test_deepseek_gives_up_after_all_attempts_and_fails_fast_on_bad_key(monkeypatch):
+    _script(monkeypatch, [_Resp(content="") for _ in range(deepseek.ATTEMPTS)])
+    with pytest.raises(deepseek.DeepSeekError, match="empty reply"):
+        deepseek.chat_json("sys json", "u")
+    sent = _script(monkeypatch, [_Resp(status=401)])
+    with pytest.raises(deepseek.DeepSeekError, match="key"):
+        deepseek.chat_json("sys json", "u")
+    assert len(sent) == 1
+
+
+def test_week_job_retries_groups_that_failed_three_times(enabled, monkeypatch):
+    db = enabled
+    store.upsert_releases(db, [_release("r1", values=RETAIL)], NOW)
+    db.commit()
+
+    def boom(*a, **k):
+        raise deepseek.DeepSeekError("empty reply")
+    monkeypatch.setattr(deepseek, "chat_json", boom)
+    for _ in range(3):
+        previews.generate(db, "USA|2026-11-20T15:00", db.query(EconRelease).all(), NOW)
+        db.commit()
+    assert previews.due_groups(db, store.get_settings(db), NOW) == []   # 自动循环不再试 / auto loop gives up
+    _stub_llm(monkeypatch)
+    lo = datetime.combine(NOW.date(), datetime.min.time())
+    assert loop.run_week_job(lo, lo + timedelta(days=1))["done"] == 1

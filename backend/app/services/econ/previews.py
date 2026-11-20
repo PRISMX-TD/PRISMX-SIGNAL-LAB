@@ -220,7 +220,7 @@ def horizon_end(now: datetime) -> datetime:
 
 
 def due_groups(db: Session, cfg: dict, now: datetime, lo: datetime | None = None, hi: datetime | None = None,
-               ) -> list[tuple[str, list[EconRelease]]]:
+               retry_failed: bool = False) -> list[tuple[str, list[EconRelease]]]:
     """需要（重新）写预案的组，按公布时间先后。默认是从现在到自动窗口的上限（高峰时段只看 6 小时内）；
     管理员手动生成某一周时传 lo / hi，已公布的组也照写（测试用）。
     Groups needing a (new) preview, soonest first. By default now → the auto horizon (6h during peak);
@@ -247,7 +247,9 @@ def due_groups(db: Session, cfg: dict, now: datetime, lo: datetime | None = None
             continue
         sig = _signature(basis, members)
         p = existing.get(key)
-        if p is not None and p.consensus_sig == sig and (p.status == "ok" or p.attempts >= MAX_ATTEMPTS):
+        # 管理员手动生成时，之前失败满 3 次的也再试 / an admin run retries groups that failed 3 times
+        if p is not None and p.consensus_sig == sig and (
+                p.status == "ok" or (p.attempts >= MAX_ATTEMPTS and not retry_failed)):
             continue
         out.append((key, members))
     return out
