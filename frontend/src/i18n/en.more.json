@@ -3972,7 +3972,7 @@
       "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal.",
       "background": "Context",
       "watch": "Watch",
-      "previewPending": "Waiting: once the master switch under Settings is on, it is written within 7 days of release.",
+      "previewPending": "Not written yet: use “Generate this week”, or turn on the master switch and it is written automatically.",
       "whyNoPreview": {
         "noConsensus": "No consensus and no previous value, so no preview.",
         "low": "Low-impact (yellow) items get no preview.",
@@ -4006,7 +4006,12 @@
           "inline": "Flat",
           "below": "Below prev."
         }
-      }
+      },
+      "generateWeek": "Generate this week",
+      "generating": "Generating {{done}}/{{total}}…",
+      "generateHint": "Orange and red only; cached previews with an unchanged consensus are skipped. One model call per group, bound by the daily cap. From Friday the system also writes the whole next week.",
+      "genDone": "Week generated: {{done}} written, {{failed}} failed.",
+      "genCapHit": "Daily model cap reached after {{done}} groups. Raise the cap in Settings and run again."
     }
   },
   "simulator": {

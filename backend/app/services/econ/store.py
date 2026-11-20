@@ -90,6 +90,13 @@ _status: dict = {}
 
 
 def update_status(**fields) -> None:
+    # 先并上共享缓存里的最新状态：后台循环在领导 worker、手动整周任务可能在别的 worker，
+    # 各写各的本地副本会互相覆盖（例如今日模型调用次数）。
+    # Merge with the shared copy first: the loop runs on the leader worker and an admin week job may
+    # run on another, so writing a local copy would clobber the other's fields (e.g. today's LLM count).
+    shared = shared_cache.get_json(STATUS_KEY)
+    if isinstance(shared, dict):
+        _status.update(shared)
     _status.update(fields)
     shared_cache.set_json(STATUS_KEY, _status, STATUS_TTL)
 

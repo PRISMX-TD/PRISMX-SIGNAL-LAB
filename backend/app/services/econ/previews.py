@@ -31,8 +31,11 @@ Asset = Literal["USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "NZD", "CNY", "
                 "SPX", "NDX", "DJI", "DAX", "N225", "HSI", "BTC", "ETH"]
 
 MAX_ATTEMPTS = 3
-# 提前 7 天就写好缓存（预期值变了会自动重写），后台打开哪一周都能看到；不提供手动生成。
-# Written up to 7 days ahead and cached (rewritten when the consensus changes); no manual trigger.
+# 提前 7 天就写好缓存（预期值变了会自动重写）；周五起再往后放到下一整周的周六，
+# 保证周末前下一周的预案全部写好。管理员也可以手动生成任意一周（测试阶段用）。
+# Written up to 7 days ahead and cached (rewritten when the consensus changes); from Friday the
+# window stretches to the end of next week so the whole next week is ready before the weekend.
+# Admins can also generate any week by hand (testing phase).
 HORIZON = timedelta(days=7)
 # 预案格式版本：改了提示词 / 字段就加一，旧预案会在下一轮自动按新格式重写。
 # Preview format version: bump when the prompt or fields change and old previews are rewritten.
@@ -204,14 +207,32 @@ def build_prompt_input(country: str, at: datetime, rows: list[EconRelease], prim
     }
 
 
-def due_groups(db: Session, cfg: dict, now: datetime) -> list[tuple[str, list[EconRelease]]]:
-    """需要（重新）写预案的组，按公布时间先后。/ Groups needing a (new) preview, soonest first."""
-    horizon = PEAK_HORIZON if _is_peak(now) else HORIZON
-    rows = (db.query(EconRelease)
-            .filter(EconRelease.at.isnot(None), EconRelease.at > now, EconRelease.at <= now + horizon,
-                    EconRelease.status == "scheduled", EconRelease.group_key.isnot(None),
-                    EconRelease.country.in_(cfg["countries"]))
-            .order_by(EconRelease.at).all())
+def horizon_end(now: datetime) -> datetime:
+    """自动写预案的时间上限：平时 7 天；周五、周六、周日放到下一整周（周日开始）结束再多一天
+    （本地时区可能比 UTC 晚一天）。
+    How far ahead previews are written: 7 days, or from Friday to Sunday the end of next week
+    (weeks start on Sunday) plus a day for the local-time offset."""
+    end = now + HORIZON
+    if now.weekday() >= 4:   # 周五 / Friday onward
+        next_sunday = now.date() + timedelta(days=(6 - now.weekday()) % 7)
+        end = max(end, datetime.combine(next_sunday + timedelta(days=8), datetime.min.time()))
+    return end
+
+
+def due_groups(db: Session, cfg: dict, now: datetime, lo: datetime | None = None, hi: datetime | None = None,
+               ) -> list[tuple[str, list[EconRelease]]]:
+    """需要（重新）写预案的组，按公布时间先后。默认是从现在到自动窗口的上限（高峰时段只看 6 小时内）；
+    管理员手动生成某一周时传 lo / hi，已公布的组也照写（测试用）。
+    Groups needing a (new) preview, soonest first. By default now → the auto horizon (6h during peak);
+    an admin-triggered week passes lo / hi and released groups are written too (for testing)."""
+    q = db.query(EconRelease).filter(EconRelease.at.isnot(None), EconRelease.group_key.isnot(None),
+                                     EconRelease.country.in_(cfg["countries"]), EconRelease.status != "cancelled")
+    if lo is None:
+        end = now + PEAK_HORIZON if _is_peak(now) else horizon_end(now)
+        q = q.filter(EconRelease.at > now, EconRelease.at <= end, EconRelease.status == "scheduled")
+    else:
+        q = q.filter(EconRelease.at >= lo, EconRelease.at < hi)
+    rows = q.order_by(EconRelease.at).all()
     groups: dict[str, list[EconRelease]] = {}
     for r in rows:
         groups.setdefault(r.group_key, []).append(r)

@@ -114,8 +114,58 @@ def run_checks(db, cfg: dict, now: datetime) -> dict:
     return {"checked": len(due), "calls": calls}
 
 
+WEEK_JOB_STALE = timedelta(minutes=30)
+
+
+def week_job_running(now: datetime | None = None) -> bool:
+    """管理员手动生成的整周任务还在跑吗（30 分钟没结束当作已死）。
+    Is an admin-triggered week job still running (treated as dead after 30 min)."""
+    job = store.get_status().get("weekJob") or {}
+    if not job.get("running"):
+        return False
+    started = store._parse_at(job.get("startedAt"))
+    return started is not None and (now or store.utcnow()) - started < WEEK_JOB_STALE
+
+
+def run_week_job(lo: datetime, hi: datetime) -> dict:
+    """管理员点「生成这一周预案」：把 [lo, hi) 里该写的组逐个写完（阻塞，放线程池）。
+    进度写进状态 weekJob，前端轮询。仍受每日调用上限约束。
+    Admin "generate this week": write every due group in [lo, hi) one by one (blocking). Progress goes
+    to status.weekJob for the page to poll. Still bound by the daily cap."""
+    db = SessionLocal()
+    now = store.utcnow()
+    job = {"running": True, "startedAt": now.isoformat() + "Z", "from": lo.isoformat() + "Z",
+           "to": hi.isoformat() + "Z", "total": 0, "done": 0, "failed": 0, "capHit": False}
+    store.update_status(weekJob=job)
+    try:
+        cfg = store.get_settings(db)
+        groups = previews.due_groups(db, cfg, now, lo=lo, hi=hi)
+        job["total"] = len(groups)
+        store.update_status(weekJob=dict(job))
+        for key, rows in groups:
+            if store.llm_calls_today() >= cfg["dailyLlmCap"]:
+                job["capHit"] = True
+                break
+            p = previews.generate(db, key, rows, store.utcnow())
+            db.commit()
+            job["done" if p.status == "ok" else "failed"] += 1
+            store.update_status(weekJob=dict(job))
+        return job
+    except Exception as exc:   # 任务失败也要把 running 关掉 / always clear running
+        logger.exception("econ week job failed")
+        job["error"] = str(exc)[:300]
+        return job
+    finally:
+        job["running"] = False
+        job["finishedAt"] = store.utcnow().isoformat() + "Z"
+        store.update_status(weekJob=dict(job))
+        db.close()
+
+
 def run_previews(db, cfg: dict, now: datetime) -> int:
     if not cfg["previews"] or not deepseek.configured():
+        return 0
+    if week_job_running(now):   # 手动整周任务在写，别抢同一批组 / the admin week job is writing these
         return 0
     written = 0
     for key, rows in previews.due_groups(db, cfg, now)[:PREVIEWS_PER_PASS]:

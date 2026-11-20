@@ -3961,7 +3961,7 @@
       "emptyWeek": "这一周没有数据。点右侧「同步这一周」从 Narwhal 拉取。",
       "background": "背景",
       "watch": "关注",
-      "previewPending": "等待自动生成：打开「设置」里的总开关后，公布前 7 天内会自动写好。",
+      "previewPending": "等待生成：点右侧「生成这一周预案」，或打开总开关后系统会自动写好。",
       "whyNoPreview": {
         "noConsensus": "这组既没有预期值也没有前值，不写预案。",
         "low": "黄色（低影响）数据不写预案。",
@@ -3995,7 +3995,12 @@
           "inline": "持平",
           "below": "低于前值"
         }
-      }
+      },
+      "generateWeek": "生成这一周预案",
+      "generating": "生成中 {{done}}/{{total}}…",
+      "generateHint": "只写橙色和红色，已写好且预期值没变的会跳过。每组一次模型调用，受每日上限约束。周五起系统也会自动写好下一整周。",
+      "genDone": "这一周的预案生成完了：成功 {{done}} 组，失败 {{failed}} 组。",
+      "genCapHit": "已到每日模型调用上限，先写了 {{done}} 组。可在「设置」里调高上限后再点一次。"
     }
   },
   "simulator": {

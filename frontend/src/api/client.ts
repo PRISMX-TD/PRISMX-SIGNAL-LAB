@@ -1514,6 +1514,11 @@ export const adminApi = {
     request<{ start: string; days: number; items: EconGroup[] }>(
       `/admin/econ/calendar?${new URLSearchParams({ ...(start ? { start } : {}), days: String(days), minImportance: String(minImportance) })}`,
     ),
+  econGenerateWeek: (start: string, days: number) =>
+    request<{ started: boolean }>(
+      `/admin/econ/previews/generate-week?${new URLSearchParams({ start, days: String(days) })}`,
+      { method: 'POST' },
+    ),
   econRegenerate: (groupKey: string) =>
     request<EconGroup>('/admin/econ/previews/regenerate', { method: 'POST', body: JSON.stringify({ groupKey }) }),
   // 群发邮件。「发送」只把名单入队就返回，真正发信在后台循环里，进度靠 listEmails 轮询。

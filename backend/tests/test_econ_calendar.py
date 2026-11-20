@@ -420,3 +420,60 @@ def test_admin_settings_audit_and_validation(db_session):
 def test_admin_router_requires_admin():
     from app.services.deps import require_admin
     assert any(d.dependency is require_admin for d in admin_econ.router.dependencies)
+
+
+# ---- 手动整周生成 + 周五写下一整周 / admin week job + Friday covers next week ----
+
+def test_week_job_writes_every_due_group_in_range_including_released(enabled, monkeypatch):
+    db = enabled
+    calls = []
+    _stub_llm(monkeypatch, calls=calls)
+    past = NOW - timedelta(days=1)
+    store.upsert_releases(db, [
+        _release("old", at=past, status="published", values=[dict(v, actual="0.1") for v in RETAIL]),
+        _release("soon", country="CAN", values=RETAIL),
+        _release("far", country="GBR", at=NOW + timedelta(days=20), values=RETAIL),   # 范围外 / out of range
+    ], NOW)
+    db.commit()
+    lo = datetime.combine(NOW.date() - timedelta(days=2), datetime.min.time())
+    job = loop.run_week_job(lo, lo + timedelta(days=7))
+    assert job["total"] == 2 and job["done"] == 2 and job["running"] is False
+    assert store.get_status()["weekJob"]["done"] == 2 and not loop.week_job_running()
+    # 再跑一次全部命中缓存 / a second run is all cache hits
+    assert loop.run_week_job(lo, lo + timedelta(days=7))["total"] == 0 and len(calls) == 2
+
+
+def test_auto_loop_yields_while_week_job_runs(enabled, monkeypatch):
+    db = enabled
+    _stub_llm(monkeypatch)
+    store.upsert_releases(db, [_release("r1", values=RETAIL)], NOW)
+    db.commit()
+    store.update_status(weekJob={"running": True, "startedAt": NOW.isoformat() + "Z"})
+    assert loop.run_previews(db, store.get_settings(db), NOW) == 0
+    # 30 分钟还没结束的当作已死 / a job older than 30 min counts as dead
+    assert loop.run_previews(db, store.get_settings(db), NOW + timedelta(minutes=31)) == 1
+
+
+def test_friday_horizon_covers_the_whole_next_week():
+    fri = datetime(2026, 11, 20, 12, 0)            # 周五 / Friday
+    assert previews.horizon_end(fri) == datetime(2026, 11, 30)   # 下周日 22 日开始，到 28 日周六结束 + 1 天余量
+    wed = datetime(2026, 11, 18, 12, 0)
+    assert previews.horizon_end(wed) == wed + timedelta(days=7)
+
+
+def test_status_update_merges_other_workers_fields(monkeypatch):
+    from app.services import shared_cache
+    store.update_status(llmCalls=5, llmDay="x")
+    store._status.clear()     # 模拟另一个 worker：本地副本是空的 / another worker with an empty local copy
+    store.update_status(weekJob={"running": False})
+    st = store.get_status()
+    assert st["llmCalls"] == 5 and st["weekJob"] == {"running": False}
+
+
+def test_admin_generate_week_rejects_a_second_job(enabled, monkeypatch):
+    import asyncio as _asyncio
+    monkeypatch.setattr(deepseek, "configured", lambda: True)
+    store.update_status(weekJob={"running": True, "startedAt": store.utcnow().isoformat() + "Z"})
+    with pytest.raises(HTTPException) as e:
+        _asyncio.run(admin_econ.econ_generate_week(start=NOW.date(), days=7, admin=None))
+    assert e.value.status_code == 409

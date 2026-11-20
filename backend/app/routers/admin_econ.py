@@ -5,6 +5,7 @@ main 里 include 时挂 require_admin，这里每个接口也自己要 require_a
 Economic-calendar admin endpoints (admin-only for now): status, settings, sync now, the calendar
 list, regenerate a preview. Guarded by require_admin on include and per endpoint.
 """
+import asyncio
 import json
 from datetime import date, datetime, timedelta
 
@@ -154,6 +155,35 @@ def econ_calendar(
     items = [_group_payload(k, groups[k], prev.get(k)) for k in keys]
     items.sort(key=lambda g: (g["at"] or (g["date"] or "") + "T00:00", g["country"]))
     return {"start": start.isoformat(), "days": days, "items": items}
+
+
+@router.post("/previews/generate-week")
+async def econ_generate_week(
+    start: date,
+    days: int = Query(7, ge=1, le=14),
+    admin: User = Depends(require_admin),
+):
+    """测试阶段：管理员一键生成 [start, start+days) 里所有该写的预案（橙 / 红，已缓存且没变的跳过，
+    已公布的也写）。在后台跑，进度看 /status 里的 status.weekJob。每组一次模型调用，受每日上限约束。
+    Testing phase: write every due preview in [start, start+days) (orange/red; cached ones skipped,
+    released ones included). Runs in the background; progress in status.weekJob. Daily cap applies."""
+    if not deepseek.configured():
+        raise HTTPException(400, "未配置 DEEPSEEK_API_KEY / DEEPSEEK_API_KEY is not set")
+    if loop.week_job_running():
+        raise HTTPException(409, "已有一个生成任务在跑 / A generation job is already running")
+    lo = datetime.combine(start, datetime.min.time())
+    hi = lo + timedelta(days=days)
+    # 先标记 running，避免连点两次各起一个任务 / mark running first so a double click can't start two
+    store.update_status(weekJob={"running": True, "startedAt": store.utcnow().isoformat() + "Z",
+                                 "total": 0, "done": 0, "failed": 0})
+    task = asyncio.create_task(run_in_threadpool(loop.run_week_job, lo, hi))
+    _jobs.add(task)
+    task.add_done_callback(_jobs.discard)
+    return {"started": True}
+
+
+# 持有任务引用，防止被垃圾回收 / keep task references so they aren't garbage-collected
+_jobs: set = set()
 
 
 @router.post("/previews/regenerate")
