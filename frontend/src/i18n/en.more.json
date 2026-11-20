@@ -3968,7 +3968,7 @@
         "below": "Below"
       },
       "syncWeek": "Sync this week",
-      "impactFilter": "Impact",
+      "impactFilter": "Show impact",
       "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal.",
       "background": "Context",
       "watch": "Watch",
@@ -4011,7 +4011,13 @@
       "generating": "Generating {{done}}/{{total}}…",
       "generateHint": "Orange and red only; cached previews with an unchanged consensus are skipped. One model call per group, bound by the daily cap. From Friday the system also writes the whole next week.",
       "genDone": "Week generated: {{done}} written, {{failed}} failed.",
-      "genCapHit": "Daily model cap reached after {{done}} groups. Raise the cap in Settings and run again."
+      "genCapHit": "Daily model cap reached after {{done}} groups. Raise the cap in Settings and run again.",
+      "showAll": "Show all",
+      "level": {
+        "1": "Low",
+        "2": "Medium",
+        "3": "High"
+      }
     }
   },
   "simulator": {

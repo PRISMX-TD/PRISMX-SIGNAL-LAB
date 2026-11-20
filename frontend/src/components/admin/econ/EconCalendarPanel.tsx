@@ -13,6 +13,7 @@ import Switch from '../../Switch'
 import { segBtn } from '../../../utils/segBtn'
 import { useToast } from '../../../utils/useToast'
 
+const LEVELS_KEY = 'econ.impactLevels'
 const OUTCOMES: EconOutcome[] = ['above', 'inline', 'below']
 
 // ---- 日期工具（全部按浏览器本地时区）/ date helpers, all in the browser's local zone ----
@@ -104,7 +105,7 @@ function shownValues(g: EconGroup): EconValue[] {
 
 type Row = { label: string; v: EconValue | null; importance: number }
 
-function rowsOf(g: EconGroup, zh: boolean, minImp: number): Row[] {
+function rowsOf(g: EconGroup, zh: boolean, levels?: ReadonlySet<number>): Row[] {
   const c = g.preview?.status === 'ok' ? g.preview.content : null
   const values = shownValues(g)
   const rows: Row[] = values.length
@@ -120,7 +121,7 @@ function rowsOf(g: EconGroup, zh: boolean, minImp: number): Row[] {
           importance: g.importance,
         },
       ]
-  return rows.filter((r) => r.importance >= minImp)
+  return levels ? rows.filter((r) => levels.has(Math.max(1, r.importance))) : rows
 }
 
 function isPast(g: EconGroup, now: number): boolean {
@@ -236,7 +237,29 @@ export default function EconCalendarPanel() {
   const [status, setStatus] = useState<EconStatus | null>(null)
   const [items, setItems] = useState<EconGroup[]>([])
   const [week, setWeek] = useState(() => weekStartOf(new Date()))
-  const [minImp, setMinImp] = useState(1)
+  // 影响筛选：黄 / 橙 / 红各自开关（像 Forex Factory 的勾选），记在本机
+  // Impact filter: yellow / orange / red toggled independently (like FF's checkboxes), remembered locally
+  const [levels, setLevels] = useState<ReadonlySet<number>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(LEVELS_KEY) ?? 'null')
+      if (Array.isArray(saved) && saved.length) return new Set(saved.filter((n) => [1, 2, 3].includes(n)))
+    } catch {
+      /* 读不到就用默认 / fall back to the default */
+    }
+    return new Set([1, 2, 3])
+  })
+  const toggleLevel = (n: number) => {
+    const next = new Set(levels)
+    if (next.has(n)) next.delete(n)
+    else next.add(n)
+    if (!next.size) return // 至少留一个 / keep at least one
+    setLevels(next)
+    try {
+      localStorage.setItem(LEVELS_KEY, JSON.stringify([...next]))
+    } catch {
+      /* 存不了也没关系 / not critical */
+    }
+  }
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [countries, setCountries] = useState('')
@@ -349,12 +372,22 @@ export default function EconCalendarPanel() {
     for (const g of items) {
       const k = dayKey(g)
       if (!weekDays.has(k)) continue
-      const rows = rowsOf(g, zh, minImp)
+      const rows = rowsOf(g, zh, levels)
       if (!rows.length) continue
       m.set(k, [...(m.get(k) ?? []), { g, rows }])
     }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [items, weekDays, zh, minImp])
+  }, [items, weekDays, zh, levels])
+
+  // 这一周各影响级别有几项（不受筛选影响）/ items per impact level this week, ignoring the filter
+  const levelCounts = useMemo(() => {
+    const c: Record<number, number> = { 1: 0, 2: 0, 3: 0 }
+    for (const g of items) {
+      if (!weekDays.has(dayKey(g))) continue
+      for (const r of rowsOf(g, zh)) c[Math.max(1, Math.min(3, r.importance))] += 1
+    }
+    return c
+  }, [items, weekDays, zh])
 
   // 下一条将公布的（带具体时刻、还没到点的第一组）/ the next timed group still ahead
   const nextKey = useMemo(() => {
@@ -490,19 +523,54 @@ export default function EconCalendarPanel() {
         <aside className="space-y-2 lg:sticky lg:top-4 lg:w-60 lg:shrink-0">
           <MiniCalendar week={week} onPick={setWeek} lang={i18n.language} />
           <div className="glass space-y-2 rounded-2xl p-3 text-xs text-neutral-400">
-            <div>{t('admin.econ.impactFilter')}</div>
-            <div className="flex gap-1.5">
-              {[1, 2, 3].map((n) => (
+            <div className="flex items-center justify-between">
+              <span>{t('admin.econ.impactFilter')}</span>
+              {levels.size < 3 && (
                 <button
-                  key={n}
                   type="button"
-                  className={`${segBtn(minImp === n)} flex items-center gap-1`}
-                  onClick={() => setMinImp(n)}
+                  className="text-[11px] text-prism-300 hover:text-prism-200"
+                  onClick={() => {
+                    setLevels(new Set([1, 2, 3]))
+                    try {
+                      localStorage.removeItem(LEVELS_KEY)
+                    } catch {
+                      /* ignore */
+                    }
+                  }}
                 >
-                  <Impact n={n} />
-                  {n < 3 ? '+' : ''}
+                  {t('admin.econ.showAll')}
                 </button>
-              ))}
+              )}
+            </div>
+            <div className="space-y-1">
+              {[3, 2, 1].map((n) => {
+                const on = levels.has(n)
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    onClick={() => toggleLevel(n)}
+                    className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition ${
+                      on
+                        ? 'border-white/15 bg-white/[0.06] text-neutral-100'
+                        : 'border-transparent text-neutral-500 hover:bg-white/[0.03]'
+                    }`}
+                  >
+                    <span
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${
+                        on ? 'border-prism-400 bg-prism-500 text-white' : 'border-white/20'
+                      }`}
+                    >
+                      {on ? '✓' : ''}
+                    </span>
+                    <Impact n={n} />
+                    <span className="flex-1">{t(`admin.econ.level.${n}`)}</span>
+                    <span className="tabular-nums text-neutral-500">{levelCounts[n]}</span>
+                  </button>
+                )
+              })}
             </div>
             <button
               type="button"

@@ -3957,7 +3957,7 @@
         "below": "低于"
       },
       "syncWeek": "同步这一周",
-      "impactFilter": "影响",
+      "impactFilter": "显示影响",
       "emptyWeek": "这一周没有数据。点右侧「同步这一周」从 Narwhal 拉取。",
       "background": "背景",
       "watch": "关注",
@@ -4000,7 +4000,13 @@
       "generating": "生成中 {{done}}/{{total}}…",
       "generateHint": "只写橙色和红色，已写好且预期值没变的会跳过。每组一次模型调用，受每日上限约束。周五起系统也会自动写好下一整周。",
       "genDone": "这一周的预案生成完了：成功 {{done}} 组，失败 {{failed}} 组。",
-      "genCapHit": "已到每日模型调用上限，先写了 {{done}} 组。可在「设置」里调高上限后再点一次。"
+      "genCapHit": "已到每日模型调用上限，先写了 {{done}} 组。可在「设置」里调高上限后再点一次。",
+      "showAll": "全部显示",
+      "level": {
+        "1": "低影响",
+        "2": "中影响",
+        "3": "高影响"
+      }
     }
   },
   "simulator": {
