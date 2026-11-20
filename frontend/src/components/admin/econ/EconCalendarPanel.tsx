@@ -1,8 +1,9 @@
-// 管理控制台「财经日历」（2026-11-20，第一期只给管理员看）：数据源状态、开关和设置、立即同步、
-// 按日分组的日历，每组带公布值 / 预期 / 前值和 AI 写的三种情景预案，公布后高亮命中的那一种。
-// Admin "Economic calendar" (admin-only for now): source status, switch and settings, sync now,
-// and a day-grouped calendar whose groups carry figures and the three-scenario preview, with the
-// matched scenario highlighted once the actual lands.
+// 管理控制台「财经日历」（2026-11-20，第一期只给管理员看）：仿 Forex Factory 的紧凑表格——
+// 日期 / 时间 / 货币 / 影响 / 事件 / 公布 / 预期 / 前值，一行一个指标；点一行展开 AI 写的三种情景预案，
+// 公布后高亮命中的那一种。数据源状态和设置收在顶部一行，设置默认折叠。
+// Admin "Economic calendar" (admin-only for now): a compact Forex Factory-style table, one row per
+// figure; click a row for the three-scenario preview (the matched one highlighted once the actual
+// lands). Source status sits in one line on top; settings are collapsed by default.
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
@@ -18,7 +19,7 @@ const DAY_OPTIONS = [3, 7, 14]
 // Narwhal 的数值有时是字符串（"3.5"），先转成数字；转不了就原样显示。
 // Narwhal sometimes sends figures as strings ("3.5"); coerce, else show as-is.
 function fmtNum(raw: number | string | null | undefined, unit?: string | null): string {
-  if (raw === null || raw === undefined || raw === '') return '—'
+  if (raw === null || raw === undefined || raw === '') return ''
   const v = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(v)) return String(raw)
   const s = Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)))
@@ -33,13 +34,35 @@ function dayKey(g: EconGroup): string {
   return g.date ?? ''
 }
 
-function Stars({ n }: { n: number }) {
-  return (
-    <span className="font-mono text-xs tracking-tight" aria-label={`importance ${n}`}>
-      <span className={n >= 3 ? 'text-rose-400' : n >= 2 ? 'text-amber-300' : 'text-neutral-400'}>{'●'.repeat(n)}</span>
-      <span className="text-neutral-700">{'●'.repeat(Math.max(0, 3 - n))}</span>
-    </span>
-  )
+function fmtDay(day: string, lang: string): string {
+  const d = new Date(`${day}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return day
+  return d.toLocaleDateString(lang, { weekday: 'short', month: 'short', day: 'numeric' })
+}
+
+// 指标 id → 可读名：employment_change → Employment Change，cpi_yoy → CPI y/y
+// Measure id → readable name.
+const UPPER = new Set(['cpi', 'ppi', 'gdp', 'pmi', 'pce', 'hicp', 'ism', 'zew', 'ifo', 'nfp', 'rpi', 'uom', 'ecb', 'boe', 'boj'])
+const SUFFIX: Record<string, string> = { yoy: 'y/y', mom: 'm/m', qoq: 'q/q', ann: '(ann.)', sa: '(s.a.)' }
+function humanize(measure: string): string {
+  return measure
+    .split('_')
+    .map((w) => SUFFIX[w] ?? (UPPER.has(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+}
+
+// 表里列哪几项：有预期值的（Forex Factory 也只列有预测的），主指标排第一；都没有就只列主指标，
+// 再没有就一行发布名。/ Rows: measures with a consensus (primary first); else the primary; else the release name.
+function shownValues(g: EconGroup): EconValue[] {
+  const withCons = g.values.filter((v) => v.consensus !== null && v.consensus !== undefined && v.consensus !== '')
+  const primary = g.values.find((v) => v.measure === g.primaryMeasure)
+  const list = withCons.length ? withCons : primary ? [primary] : []
+  return [...list].sort((a, b) => (a.measure === g.primaryMeasure ? -1 : b.measure === g.primaryMeasure ? 1 : 0))
+}
+
+function Impact({ n }: { n: number }) {
+  const color = n >= 3 ? 'bg-rose-500' : n >= 2 ? 'bg-amber-400' : n >= 1 ? 'bg-yellow-200/60' : 'bg-neutral-600'
+  return <span className={`inline-block h-3.5 w-2.5 rounded-sm align-middle ${color}`} aria-label={`importance ${n}`} />
 }
 
 export default function EconCalendarPanel() {
@@ -57,6 +80,7 @@ export default function EconCalendarPanel() {
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [countries, setCountries] = useState('')
+  const [showSettings, setShowSettings] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -128,7 +152,7 @@ export default function EconCalendarPanel() {
   const cfg = st?.settings
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {toast && (
         <div
           className={`rounded-lg border px-3 py-2 text-sm ${
@@ -138,37 +162,42 @@ export default function EconCalendarPanel() {
           {toast.text}
         </div>
       )}
-      <section className="glass space-y-3 rounded-2xl p-4">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-neutral-400">
-          <span>
-            Narwhal:{' '}
-            <b className={st?.narwhalConfigured ? 'text-emerald-300' : 'text-rose-300'}>
-              {st?.narwhalConfigured ? t('admin.econ.keySet') : t('admin.econ.keyMissing')}
-            </b>
+
+      <section className="glass space-y-3 rounded-2xl px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
+          <span className={st?.narwhalConfigured && st?.deepseekConfigured ? 'text-emerald-300' : 'text-rose-300'}>
+            Narwhal {st?.narwhalConfigured ? '✓' : '✗'} · DeepSeek {st?.deepseekConfigured ? '✓' : '✗'}
           </span>
           <span>
-            DeepSeek:{' '}
-            <b className={st?.deepseekConfigured ? 'text-emerald-300' : 'text-rose-300'}>
-              {st?.deepseekConfigured ? t('admin.econ.keySet') : t('admin.econ.keyMissing')}
-            </b>
+            {t('admin.econ.balance')} <b className="tabular-nums text-neutral-200">{st?.status.balance ?? '—'}</b>
           </span>
           <span>
-            {t('admin.econ.balance')}: <b className="tabular-nums text-neutral-200">{st?.status.balance ?? '—'}</b>
-          </span>
-          <span>
-            {t('admin.econ.lastSync')}:{' '}
+            {t('admin.econ.lastSync')}{' '}
             <b className="tabular-nums text-neutral-200">
-              {st?.status.lastSyncAt ? new Date(st.status.lastSyncAt).toLocaleString() : '—'}
+              {st?.status.lastSyncAt ? new Date(st.status.lastSyncAt).toLocaleString([], { hour12: false }) : '—'}
             </b>
           </span>
           <span>
-            {t('admin.econ.llmToday')}:{' '}
+            {t('admin.econ.llmToday')}{' '}
             <b className="tabular-nums text-neutral-200">
-              {st?.llmCallsToday ?? 0} / {cfg?.dailyLlmCap ?? '—'}
+              {st?.llmCallsToday ?? 0}/{cfg?.dailyLlmCap ?? '—'}
             </b>
           </span>
-          <span>
-            {t('admin.econ.counts', { releases: st?.releases ?? 0, previews: st?.previews ?? 0 })}
+          <span className={cfg?.enabled ? 'text-emerald-300' : 'text-neutral-500'}>
+            {cfg?.enabled ? t('admin.econ.autoOn') : t('admin.econ.autoOff')}
+          </span>
+          <span className="ml-auto flex gap-2">
+            <button type="button" className={segBtn(showSettings)} onClick={() => setShowSettings((v) => !v)}>
+              {t('admin.econ.settings')}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-prism-500/50 bg-prism-600/20 px-3 py-1.5 text-xs font-medium text-prism-100 disabled:opacity-50"
+              disabled={busy === 'sync' || !st?.narwhalConfigured}
+              onClick={sync}
+            >
+              {busy === 'sync' ? t('admin.econ.syncing') : t('admin.econ.syncNow')}
+            </button>
           </span>
         </div>
         {st?.status.lastError && (
@@ -176,45 +205,47 @@ export default function EconCalendarPanel() {
             {t('admin.econ.lastError')}: {st.status.lastError}
           </p>
         )}
-        {cfg && (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
-            <label className="flex items-center gap-2">
-              <Switch checked={cfg.enabled} busy={busy === 'enabled'} onChange={(v) => save({ enabled: v }, 'enabled')} />
-              {t('admin.econ.enabled')}
-            </label>
-            <label className="flex items-center gap-2">
-              <Switch checked={cfg.previews} busy={busy === 'previews'} onChange={(v) => save({ previews: v }, 'previews')} />
-              {t('admin.econ.previews')}
-            </label>
+        {cfg && showSettings && (
+          <div className="space-y-3 border-t border-white/5 pt-3">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+              <label className="flex items-center gap-2">
+                <Switch checked={cfg.enabled} busy={busy === 'enabled'} onChange={(v) => save({ enabled: v }, 'enabled')} />
+                {t('admin.econ.enabled')}
+              </label>
+              <label className="flex items-center gap-2">
+                <Switch checked={cfg.previews} busy={busy === 'previews'} onChange={(v) => save({ previews: v }, 'previews')} />
+                {t('admin.econ.previews')}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-neutral-400">
+                {t('admin.econ.minImportance')}
+                {[1, 2, 3].map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={segBtn(cfg.previewMinImportance === n)}
+                    onClick={() => save({ previewMinImportance: n }, 'imp')}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </label>
+              <label className="flex items-center gap-2 text-xs text-neutral-400">
+                {t('admin.econ.dailyCap')}
+                <input
+                  type="number"
+                  min={0}
+                  max={2000}
+                  defaultValue={cfg.dailyLlmCap}
+                  key={cfg.dailyLlmCap}
+                  className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-neutral-100"
+                  onBlur={(e) => {
+                    const v = Number(e.target.value)
+                    if (Number.isFinite(v) && v !== cfg.dailyLlmCap) void save({ dailyLlmCap: v }, 'cap')
+                  }}
+                />
+              </label>
+            </div>
             <label className="flex items-center gap-2 text-xs text-neutral-400">
-              {t('admin.econ.minImportance')}
-              {[1, 2, 3].map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  className={segBtn(cfg.previewMinImportance === n)}
-                  onClick={() => save({ previewMinImportance: n }, 'imp')}
-                >
-                  {n}
-                </button>
-              ))}
-            </label>
-            <label className="flex items-center gap-2 text-xs text-neutral-400">
-              {t('admin.econ.dailyCap')}
-              <input
-                type="number"
-                min={0}
-                max={2000}
-                defaultValue={cfg.dailyLlmCap}
-                key={cfg.dailyLlmCap}
-                className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-neutral-100"
-                onBlur={(e) => {
-                  const v = Number(e.target.value)
-                  if (Number.isFinite(v) && v !== cfg.dailyLlmCap) void save({ dailyLlmCap: v }, 'cap')
-                }}
-              />
-            </label>
-            <label className="flex min-w-[16rem] flex-1 items-center gap-2 text-xs text-neutral-400">
               {t('admin.econ.countries')}
               <input
                 value={countries}
@@ -226,17 +257,9 @@ export default function EconCalendarPanel() {
                 className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-neutral-100"
               />
             </label>
-            <button
-              type="button"
-              className="rounded-lg border border-prism-500/50 bg-prism-600/20 px-3 py-1.5 text-xs font-medium text-prism-100 disabled:opacity-50"
-              disabled={busy === 'sync' || !st?.narwhalConfigured}
-              onClick={sync}
-            >
-              {busy === 'sync' ? t('admin.econ.syncing') : t('admin.econ.syncNow')}
-            </button>
+            <p className="text-xs text-neutral-500">{t('admin.econ.hint')}</p>
           </div>
         )}
-        <p className="text-xs text-neutral-500">{t('admin.econ.hint')}</p>
       </section>
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400">
@@ -256,18 +279,42 @@ export default function EconCalendarPanel() {
         </button>
       </div>
 
-      {!loading && items.length === 0 && (
+      {!loading && items.length === 0 ? (
         <p className="glass rounded-2xl p-6 text-center text-sm text-neutral-500">{t('admin.econ.empty')}</p>
+      ) : (
+        <div className="glass overflow-x-auto rounded-2xl">
+          <table className="w-full min-w-[680px] text-[13px]">
+            <thead>
+              <tr className="border-b border-white/10 text-left text-[11px] text-neutral-500">
+                <th className="w-28 px-3 py-2 font-normal">{t('admin.econ.date')}</th>
+                <th className="w-14 px-2 font-normal">{t('admin.econ.time')}</th>
+                <th className="w-12 px-2 font-normal">{t('admin.econ.currency')}</th>
+                <th className="w-12 px-2 font-normal">{t('admin.econ.impact')}</th>
+                <th className="px-2 font-normal">{t('admin.econ.event')}</th>
+                <th className="w-20 px-2 text-right font-normal">{t('admin.econ.actual')}</th>
+                <th className="w-20 px-2 text-right font-normal">{t('admin.econ.consensus')}</th>
+                <th className="w-20 px-2 text-right font-normal">{t('admin.econ.previous')}</th>
+                <th className="w-16 px-3 text-right font-normal">{t('admin.econ.previewCol')}</th>
+              </tr>
+            </thead>
+            {byDay.map(([day, groups]) => (
+              <tbody key={day} className="border-b border-white/10 last:border-b-0">
+                {groups.map((g, gi) => (
+                  <GroupRows
+                    key={g.key}
+                    g={g}
+                    zh={zh}
+                    dayLabel={gi === 0 ? fmtDay(day, i18n.language) : ''}
+                    busy={busy === `re:${g.key}`}
+                    canRegen={!!st?.deepseekConfigured}
+                    onRegen={() => regenerate(g.key)}
+                  />
+                ))}
+              </tbody>
+            ))}
+          </table>
+        </div>
       )}
-
-      {byDay.map(([day, groups]) => (
-        <section key={day} className="space-y-2">
-          <h3 className="px-1 text-xs font-semibold text-neutral-400">{day}</h3>
-          {groups.map((g) => (
-            <GroupCard key={g.key} g={g} zh={zh} busy={busy === `re:${g.key}`} canRegen={!!st?.deepseekConfigured} onRegen={() => regenerate(g.key)} />
-          ))}
-        </section>
-      ))}
 
       <p className="text-right text-[11px] text-neutral-600">
         Data by{' '}
@@ -279,112 +326,140 @@ export default function EconCalendarPanel() {
   )
 }
 
-function GroupCard({ g, zh, busy, canRegen, onRegen }: { g: EconGroup; zh: boolean; busy: boolean; canRegen: boolean; onRegen: () => void }) {
+function GroupRows({
+  g,
+  zh,
+  dayLabel,
+  busy,
+  canRegen,
+  onRegen,
+}: {
+  g: EconGroup
+  zh: boolean
+  dayLabel: string
+  busy: boolean
+  canRegen: boolean
+  onRegen: () => void
+}) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(g.importance >= 3)
+  const [open, setOpen] = useState(false)
   const c = g.preview?.status === 'ok' ? g.preview.content : null
-  const time = g.allDay || !g.at ? t('admin.econ.allDay') : new Date(g.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-  const title = c ? (zh ? c.title_zh : c.title_en) : [...new Set(g.releases.map((r) => r.name))].join(' · ')
-  const name = (v: EconValue) => (zh && c?.names_zh[v.measure]) || v.measure
+  const time =
+    g.allDay || !g.at
+      ? t('admin.econ.allDay')
+      : new Date(g.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+  const values = shownValues(g)
+  const rows: { label: string; v: EconValue | null }[] = values.length
+    ? values.map((v) => ({ label: (zh && c?.names_zh[v.measure]) || humanize(v.measure), v }))
+    : [{ label: (c && (zh ? c.title_zh : c.title_en)) || [...new Set(g.releases.map((r) => r.name))].join(' · '), v: null }]
 
   return (
-    <article className="glass rounded-2xl p-3">
-      <button type="button" className="flex w-full items-center gap-3 text-left" onClick={() => setOpen((o) => !o)}>
-        <span className="w-12 shrink-0 font-mono text-xs tabular-nums text-neutral-300">{time}</span>
-        <span className="w-10 shrink-0 font-mono text-xs text-neutral-400">{g.currency ?? g.country}</span>
-        <Stars n={g.importance} />
-        <span className="min-w-0 flex-1 truncate text-sm text-neutral-100">{title}</span>
-        {g.status === 'cancelled' && <span className="text-xs text-neutral-500">{t('admin.econ.cancelled')}</span>}
-        {g.outcome && (
-          <span className={`rounded-md px-2 py-0.5 text-xs ${g.outcome.outcome === 'inline' ? 'bg-white/10 text-neutral-300' : 'bg-prism-600/30 text-prism-100'}`}>
-            {t(`admin.econ.outcome.${g.outcome.outcome}`)}
-          </span>
-        )}
-        {!g.preview && g.importance >= 2 && <span className="text-xs text-neutral-600">{t('admin.econ.noPreview')}</span>}
-        {g.preview?.status === 'failed' && <span className="text-xs text-rose-300">{t('admin.econ.previewFailed')}</span>}
-      </button>
-
+    <>
+      {rows.map((r, i) => (
+        <tr
+          key={r.v?.measure ?? 'name'}
+          className={`cursor-pointer hover:bg-white/[0.03] ${i === 0 ? 'border-t border-white/5' : ''} ${
+            g.status === 'cancelled' ? 'opacity-40' : ''
+          }`}
+          onClick={() => setOpen((o) => !o)}
+        >
+          <td className="px-3 py-1.5 text-xs text-neutral-300">{i === 0 ? dayLabel : ''}</td>
+          <td className="px-2 py-1.5 font-mono text-xs tabular-nums text-neutral-400">{i === 0 ? time : ''}</td>
+          <td className="px-2 py-1.5 text-xs font-semibold text-neutral-300">{g.currency ?? g.country}</td>
+          <td className="px-2 py-1.5">
+            <Impact n={g.importance} />
+          </td>
+          <td className="px-2 py-1.5 text-neutral-100">{r.label}</td>
+          <td
+            className={`px-2 py-1.5 text-right tabular-nums ${
+              r.v?.measure === g.primaryMeasure ? 'font-semibold text-neutral-50' : 'text-neutral-200'
+            }`}
+          >
+            {r.v ? fmtNum(r.v.actual, r.v.unit) : ''}
+          </td>
+          <td className="px-2 py-1.5 text-right tabular-nums text-neutral-400">{r.v ? fmtNum(r.v.consensus, r.v.unit) : ''}</td>
+          <td className="px-2 py-1.5 text-right tabular-nums text-neutral-500">{r.v ? fmtNum(r.v.previous, r.v.unit) : ''}</td>
+          <td className="px-3 py-1.5 text-right text-xs">
+            {i === 0 &&
+              (c ? (
+                <span className="text-prism-200">
+                  {g.outcome ? t(`admin.econ.outcomeShort.${g.outcome.outcome}`) : '●'}
+                </span>
+              ) : g.preview?.status === 'failed' ? (
+                <span className="text-rose-300">!</span>
+              ) : (
+                <span className="text-neutral-700">—</span>
+              ))}
+          </td>
+        </tr>
+      ))}
       {open && (
-        <div className="mt-3 space-y-3 border-t border-white/5 pt-3">
-          {g.values.length > 0 && (
-            <table className="w-full text-xs">
-              <thead className="text-neutral-500">
-                <tr>
-                  <th className="py-1 text-left font-normal">{t('admin.econ.measure')}</th>
-                  <th className="text-right font-normal">{t('admin.econ.actual')}</th>
-                  <th className="text-right font-normal">{t('admin.econ.consensus')}</th>
-                  <th className="text-right font-normal">{t('admin.econ.previous')}</th>
-                </tr>
-              </thead>
-              <tbody className="tabular-nums">
-                {g.values.map((v) => (
-                  <tr key={v.measure} className={v.measure === g.primaryMeasure ? 'text-neutral-100' : 'text-neutral-400'}>
-                    <td className="py-0.5">
-                      {name(v)}
-                      {v.measure === g.primaryMeasure && <span className="ml-1 text-prism-300">★</span>}
-                    </td>
-                    <td className="text-right">{fmtNum(v.actual, v.unit)}</td>
-                    <td className="text-right">{fmtNum(v.consensus, v.unit)}</td>
-                    <td className="text-right">{fmtNum(v.previous, v.unit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-
-          {c && (
-            <div className="space-y-2">
-              <p className="text-sm text-neutral-300">{zh ? c.why_zh : c.why_en}</p>
-              {(zh ? c.focus_zh : c.focus_en) && <p className="text-xs text-neutral-500">{zh ? c.focus_zh : c.focus_en}</p>}
-              <div className="grid gap-2 sm:grid-cols-3">
-                {OUTCOMES.map((o) => {
-                  const s = c.scenarios[o]
-                  const hit = g.outcome?.outcome === o
-                  return (
-                    <div
-                      key={o}
-                      className={`rounded-xl border p-2.5 text-xs ${hit ? 'border-prism-500/60 bg-prism-600/15' : 'border-white/10 bg-white/[0.02]'} ${g.outcome && !hit ? 'opacity-50' : ''}`}
-                    >
-                      <div className="mb-1.5 font-medium text-neutral-200">{t(`admin.econ.outcome.${o}`)}</div>
-                      <div className="mb-1.5 flex flex-wrap gap-1">
-                        {s.impacts.map((i) => (
-                          <span
-                            key={i.asset}
-                            className={`rounded px-1.5 py-0.5 font-mono ${
-                              i.direction === 'bullish' ? 'bg-emerald-500/15 text-emerald-300' : i.direction === 'bearish' ? 'bg-rose-500/15 text-rose-300' : 'bg-white/10 text-neutral-400'
-                            }`}
-                          >
-                            {i.asset} {i.direction === 'bullish' ? '↑' : i.direction === 'bearish' ? '↓' : '–'}
-                            <span className="ml-1 opacity-70">{t(`admin.econ.strength.${i.strength}`)}</span>
-                          </span>
-                        ))}
+        <tr>
+          <td colSpan={9} className="bg-white/[0.02] px-4 py-3">
+            {c ? (
+              <div className="space-y-2">
+                <p className="text-sm text-neutral-200">{zh ? c.title_zh : c.title_en}</p>
+                <p className="text-xs text-neutral-400">{zh ? c.why_zh : c.why_en}</p>
+                <div className="grid gap-2 sm:grid-cols-3">
+                  {OUTCOMES.map((o) => {
+                    const s = c.scenarios[o]
+                    const hit = g.outcome?.outcome === o
+                    return (
+                      <div
+                        key={o}
+                        className={`rounded-lg border p-2 text-xs ${hit ? 'border-prism-500/60 bg-prism-600/15' : 'border-white/10'} ${
+                          g.outcome && !hit ? 'opacity-40' : ''
+                        }`}
+                      >
+                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+                          <span className="font-medium text-neutral-200">{t(`admin.econ.outcome.${o}`)}</span>
+                          {s.impacts.map((im) => (
+                            <span
+                              key={im.asset}
+                              className={`font-mono ${
+                                im.direction === 'bullish' ? 'text-emerald-300' : im.direction === 'bearish' ? 'text-rose-300' : 'text-neutral-500'
+                              }`}
+                            >
+                              {im.asset}
+                              {im.direction === 'bullish' ? '↑' : im.direction === 'bearish' ? '↓' : '–'}
+                              <span className="ml-0.5 text-neutral-500">{t(`admin.econ.strength.${im.strength}`)}</span>
+                            </span>
+                          ))}
+                        </div>
+                        <p className="text-neutral-400">{zh ? s.reason_zh : s.reason_en}</p>
                       </div>
-                      <p className="text-neutral-400">{zh ? s.reason_zh : s.reason_en}</p>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
+            ) : (
+              <p className="text-xs text-neutral-500">
+                {g.preview?.status === 'failed' ? g.preview.error : t('admin.econ.noPreview')}
+              </p>
+            )}
+            <div className="mt-2 flex items-center gap-3 text-[11px] text-neutral-600">
+              {g.preview?.model && (
+                <span>
+                  {g.preview.model} · {g.preview.tokensIn ?? 0}/{g.preview.tokensOut ?? 0} tokens
+                </span>
+              )}
+              {g.at && g.status !== 'cancelled' && (
+                <button
+                  type="button"
+                  className={`ml-auto ${segBtn(false, !canRegen || busy)}`}
+                  disabled={!canRegen || busy}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onRegen()
+                  }}
+                >
+                  {busy ? t('admin.econ.writing') : g.preview ? t('admin.econ.regenerate') : t('admin.econ.generate')}
+                </button>
+              )}
             </div>
-          )}
-
-          {g.preview?.status === 'failed' && g.preview.error && <p className="text-xs text-rose-300/80">{g.preview.error}</p>}
-
-          <div className="flex items-center gap-3 text-[11px] text-neutral-600">
-            {g.preview?.model && (
-              <span>
-                {g.preview.model} · {g.preview.tokensIn ?? 0}/{g.preview.tokensOut ?? 0} tokens
-                {g.preview.generatedAt && ` · ${new Date(g.preview.generatedAt).toLocaleString()}`}
-              </span>
-            )}
-            {g.indicative && <span>{t('admin.econ.indicative')}</span>}
-            {g.at && g.status !== 'cancelled' && (
-              <button type="button" className={`ml-auto ${segBtn(false, !canRegen || busy)}`} disabled={!canRegen || busy} onClick={onRegen}>
-                {busy ? t('admin.econ.writing') : g.preview ? t('admin.econ.regenerate') : t('admin.econ.generate')}
-              </button>
-            )}
-          </div>
-        </div>
+          </td>
+        </tr>
       )}
-    </article>
+    </>
   )
 }

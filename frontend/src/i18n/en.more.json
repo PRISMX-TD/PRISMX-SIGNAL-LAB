@@ -3952,6 +3952,20 @@
         "strong": "strong",
         "medium": "medium",
         "weak": "weak"
+      },
+      "autoOn": "Auto: on",
+      "autoOff": "Auto: off",
+      "settings": "Settings",
+      "date": "Date",
+      "time": "Time",
+      "currency": "Cur.",
+      "impact": "Impact",
+      "event": "Event",
+      "previewCol": "Preview",
+      "outcomeShort": {
+        "above": "Above",
+        "inline": "In line",
+        "below": "Below"
       }
     }
   },

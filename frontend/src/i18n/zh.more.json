@@ -3941,6 +3941,20 @@
         "strong": "强",
         "medium": "中",
         "weak": "弱"
+      },
+      "autoOn": "自动同步：开",
+      "autoOff": "自动同步：关",
+      "settings": "设置",
+      "date": "日期",
+      "time": "时间",
+      "currency": "货币",
+      "impact": "影响",
+      "event": "事件",
+      "previewCol": "预案",
+      "outcomeShort": {
+        "above": "高于",
+        "inline": "符合",
+        "below": "低于"
       }
     }
   },
