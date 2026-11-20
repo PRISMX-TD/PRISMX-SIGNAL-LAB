@@ -3972,7 +3972,12 @@
       "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal.",
       "background": "Context",
       "watch": "Watch",
-      "previewPending": "Previews are written automatically within 7 days of release (master switch on, orange and red only)."
+      "previewPending": "Waiting: once the master switch under Settings is on, it is written within 7 days of release.",
+      "whyNoPreview": {
+        "noConsensus": "No consensus for this group (Narwhal has none), so there is nothing to compare against and no preview.",
+        "low": "Low-impact (yellow) items get no preview.",
+        "past": "Already released; no preview was written before release."
+      }
     }
   },
   "simulator": {

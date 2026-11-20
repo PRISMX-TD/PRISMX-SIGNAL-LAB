@@ -3961,7 +3961,12 @@
       "emptyWeek": "这一周没有数据。点右侧「同步这一周」从 Narwhal 拉取。",
       "background": "背景",
       "watch": "关注",
-      "previewPending": "预案会在公布前 7 天内自动生成（需打开总开关，只写橙色和红色数据）。"
+      "previewPending": "等待自动生成：打开「设置」里的总开关后，公布前 7 天内会自动写好。",
+      "whyNoPreview": {
+        "noConsensus": "这组没有预期值（Narwhal 没提供），没法比较高于 / 低于预期，所以不写预案。",
+        "low": "黄色（低影响）数据不写预案。",
+        "past": "这组已经公布，公布前没有生成过预案。"
+      }
     }
   },
   "simulator": {

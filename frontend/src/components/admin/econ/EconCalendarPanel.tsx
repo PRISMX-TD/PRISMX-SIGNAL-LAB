@@ -611,7 +611,15 @@ function GroupRows({
               </div>
             ) : (
               <p className="text-xs text-neutral-500">
-                {g.preview?.status === 'failed' ? g.preview.error : t('admin.econ.previewPending')}
+                {g.preview?.status === 'failed'
+                  ? g.preview.error
+                  : !g.primaryMeasure
+                    ? t('admin.econ.whyNoPreview.noConsensus')
+                    : g.importance < 2
+                      ? t('admin.econ.whyNoPreview.low')
+                      : past
+                        ? t('admin.econ.whyNoPreview.past')
+                        : t('admin.econ.previewPending')}
               </p>
             )}
             <div className="mt-2 flex items-center gap-3 text-[11px] text-neutral-600">
