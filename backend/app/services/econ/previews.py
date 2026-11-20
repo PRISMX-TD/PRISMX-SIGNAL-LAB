@@ -31,7 +31,12 @@ Asset = Literal["USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "NZD", "CNY", "
                 "SPX", "NDX", "DJI", "DAX", "N225", "HSI", "BTC", "ETH"]
 
 MAX_ATTEMPTS = 3
-HORIZON = timedelta(hours=24)
+# 提前 7 天就写好缓存（预期值变了会自动重写），后台打开哪一周都能看到；不提供手动生成。
+# Written up to 7 days ahead and cached (rewritten when the consensus changes); no manual trigger.
+HORIZON = timedelta(days=7)
+# 预案格式版本：改了提示词 / 字段就加一，旧预案会在下一轮自动按新格式重写。
+# Preview format version: bump when the prompt or fields change and old previews are rewritten.
+PROMPT_VERSION = "v2"
 # DeepSeek 高峰时段（UTC，周一至周五 01–04、06–10）只写 6 小时内就要公布的组，其余等低谷。
 # During DeepSeek's peak hours only groups due within 6h are written; the rest wait for off-peak.
 PEAK_HORIZON = timedelta(hours=6)
@@ -45,8 +50,8 @@ class Impact(BaseModel):
 
 class Scenario(BaseModel):
     impacts: list[Impact] = Field(min_length=1, max_length=3)
-    reason_zh: str = Field(min_length=1, max_length=200)
-    reason_en: str = Field(min_length=1, max_length=400)
+    reason_zh: str = Field(min_length=1, max_length=240)
+    reason_en: str = Field(min_length=1, max_length=480)
 
     @field_validator("impacts")
     @classmethod
@@ -73,6 +78,10 @@ class PreviewContent(BaseModel):
     why_en: str = Field(min_length=1, max_length=600)
     focus_zh: str = Field(default="", max_length=200)
     focus_en: str = Field(default="", max_length=400)
+    background_zh: str = Field(default="", max_length=300)
+    background_en: str = Field(default="", max_length=600)
+    watch_zh: str = Field(default="", max_length=200)
+    watch_en: str = Field(default="", max_length=400)
     names_zh: dict[str, str] = Field(default_factory=dict)
     scenarios: Scenarios
 
@@ -94,6 +103,10 @@ Reply with ONLY a json object of exactly this shape:
   "why_en": "One or two sentences: what it is and why the market watches it",
   "focus_zh": "一句：组里哪一项最关键（可留空）",
   "focus_en": "One sentence: which figure in the group matters most (may be empty)",
+  "background_zh": "两到三句：前值和预期的差别说明市场在预期什么（加速 / 放缓 / 反弹），这组数据和央行政策路径的关系",
+  "background_en": "Two or three sentences: what the gap between previous and consensus says the market expects, and how this ties to the central bank's policy path",
+  "watch_zh": "一句：除了主指标，公布时还要看什么（核心项、分项、前值修正、与其它指标的背离）",
+  "watch_en": "One sentence: what else to check at release (core measure, components, revisions, divergence)",
   "names_zh": {"<measure id>": "该指标的简体中文名"},
   "scenarios": {
     "above":  {"impacts": [{"asset": "USD", "direction": "bullish", "strength": "medium"}], "reason_zh": "...", "reason_en": "..."},
@@ -107,7 +120,8 @@ Rules:
 - Each scenario lists 1 to 3 impacts. "asset" must be one of the codes in the input's "assets" list; never invent another. "direction" is bullish, bearish or neutral; "strength" is strong, medium or weak. The country's own currency should normally be the first impact.
 - "inline" usually means limited impact: prefer neutral or weak.
 - Describe tendencies only ("通常利多美元"), never certainties, price levels, targets, entries, stops or trading advice.
-- reason_zh at most 60 Chinese characters, reason_en at most 160 characters; why_zh at most 100 Chinese characters.
+- Be complete but concise. reason_zh at most 80 Chinese characters and should say WHY (the transmission: rate expectations, yields, risk appetite), reason_en at most 200 characters; why_zh at most 100 Chinese characters; background_zh at most 120 Chinese characters; watch_zh at most 70 Chinese characters.
+- Only use the figures given in the input. Do not invent numbers, dates, past releases or quotes; when you mention a number it must come from the input.
 - names_zh gives a short Simplified Chinese name for every measure id in the input figures.
 - Chinese text uses standard financial terms: 非农就业, 失业率, 消费者物价指数(CPI), 核心CPI, 生产者物价指数(PPI), 零售销售, 国内生产总值(GDP), 采购经理人指数(PMI), 初请失业金人数, 利率决议, 鹰派, 鸽派, 降息预期, 美债收益率.
 """
@@ -166,7 +180,7 @@ def due_groups(db: Session, cfg: dict, now: datetime) -> list[tuple[str, list[Ec
         primary, _ = _group_primary(members[0].country, members)
         if primary is None:
             continue
-        sig = rules.consensus_signature(store.merged_values(members))
+        sig = PROMPT_VERSION + "|" + rules.consensus_signature(store.merged_values(members))
         p = existing.get(key)
         if p is not None and p.consensus_sig == sig and (p.status == "ok" or p.attempts >= MAX_ATTEMPTS):
             continue
@@ -185,7 +199,7 @@ def generate(db: Session, key: str, rows: list[EconRelease], now: datetime) -> E
     country = rows[0].country
     at = rows[0].at
     primary, _family = _group_primary(country, rows)
-    sig = rules.consensus_signature(store.merged_values(rows))
+    sig = PROMPT_VERSION + "|" + rules.consensus_signature(store.merged_values(rows))
     p = db.query(EconPreview).filter(EconPreview.group_key == key).first()
     if p is None:
         p = EconPreview(group_key=key, country=country, at=at, attempts=0)

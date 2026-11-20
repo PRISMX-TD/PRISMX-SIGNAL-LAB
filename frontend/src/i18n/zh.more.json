@@ -3958,7 +3958,10 @@
       },
       "syncWeek": "同步这一周",
       "impactFilter": "影响",
-      "emptyWeek": "这一周没有数据。点右侧「同步这一周」从 Narwhal 拉取。"
+      "emptyWeek": "这一周没有数据。点右侧「同步这一周」从 Narwhal 拉取。",
+      "background": "背景",
+      "watch": "关注",
+      "previewPending": "预案会在公布前 7 天内自动生成（需打开总开关，只写橙色和红色数据）。"
     }
   },
   "simulator": {

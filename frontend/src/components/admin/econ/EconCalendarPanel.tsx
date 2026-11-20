@@ -96,7 +96,8 @@ function isPast(g: EconGroup, now: number): boolean {
 }
 
 function Impact({ n }: { n: number }) {
-  const color = n >= 3 ? 'bg-rose-500' : n >= 2 ? 'bg-amber-400' : n >= 1 ? 'bg-yellow-200/60' : 'bg-neutral-600'
+  // Forex Factory 的三色：黄 / 橙 / 红 / Forex Factory's yellow / orange / red
+  const color = n >= 3 ? 'bg-[#e8322b]' : n >= 2 ? 'bg-[#f7941d]' : n >= 1 ? 'bg-[#f5d90a]' : 'bg-neutral-600'
   return <span className={`inline-block h-3.5 w-2.5 rounded-sm align-middle ${color}`} aria-label={`importance ${n}`} />
 }
 
@@ -261,17 +262,6 @@ export default function EconCalendarPanel() {
     }
   }
 
-  const regenerate = async (key: string) => {
-    setBusy(`re:${key}`)
-    try {
-      const g = await adminApi.econRegenerate(key)
-      setItems((list) => list.map((x) => (x.key === key ? g : x)))
-    } catch (e) {
-      fail(e)
-    } finally {
-      setBusy(null)
-    }
-  }
 
   const weekDays = useMemo(() => new Set(Array.from({ length: 7 }, (_, i) => ymd(addDays(week, i)))), [week])
 
@@ -469,9 +459,6 @@ export default function EconCalendarPanel() {
                         showTime={gi === 0 || list[gi - 1].g.at !== g.at}
                         past={isPast(g, now)}
                         next={g.key === nextKey}
-                        busy={busy === `re:${g.key}`}
-                        canRegen={!!st?.deepseekConfigured}
-                        onRegen={() => regenerate(g.key)}
                       />
                     ))}
                   </tbody>
@@ -500,9 +487,6 @@ function GroupRows({
   showTime,
   past,
   next,
-  busy,
-  canRegen,
-  onRegen,
 }: {
   g: EconGroup
   rows: Row[]
@@ -511,9 +495,6 @@ function GroupRows({
   showTime: boolean
   past: boolean
   next: boolean
-  busy: boolean
-  canRegen: boolean
-  onRegen: () => void
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -550,7 +531,7 @@ function GroupRows({
             )}
           </td>
           <td className={`px-2 py-1.5 text-xs font-semibold text-neutral-300 ${tone}`}>{g.currency ?? g.country}</td>
-          <td className={`px-2 py-1.5 ${tone}`}>
+          <td className="px-2 py-1.5">
             <Impact n={r.importance} />
           </td>
           <td className={`px-2 py-1.5 text-neutral-100 ${tone}`}>{r.label}</td>
@@ -583,7 +564,19 @@ function GroupRows({
             {c ? (
               <div className="space-y-2">
                 <p className="text-sm text-neutral-200">{zh ? c.title_zh : c.title_en}</p>
-                <p className="text-xs text-neutral-400">{zh ? c.why_zh : c.why_en}</p>
+                <p className="text-xs leading-relaxed text-neutral-400">{zh ? c.why_zh : c.why_en}</p>
+                {(zh ? c.background_zh : c.background_en) && (
+                  <p className="text-xs leading-relaxed text-neutral-400">
+                    <span className="mr-1 text-neutral-500">{t('admin.econ.background')}</span>
+                    {zh ? c.background_zh : c.background_en}
+                  </p>
+                )}
+                {(zh ? c.watch_zh : c.watch_en) && (
+                  <p className="text-xs leading-relaxed text-neutral-400">
+                    <span className="mr-1 text-neutral-500">{t('admin.econ.watch')}</span>
+                    {zh ? c.watch_zh : c.watch_en}
+                  </p>
+                )}
                 <div className="grid gap-2 sm:grid-cols-3">
                   {OUTCOMES.map((o) => {
                     const s = c.scenarios[o]
@@ -618,7 +611,7 @@ function GroupRows({
               </div>
             ) : (
               <p className="text-xs text-neutral-500">
-                {g.preview?.status === 'failed' ? g.preview.error : t('admin.econ.noPreview')}
+                {g.preview?.status === 'failed' ? g.preview.error : t('admin.econ.previewPending')}
               </p>
             )}
             <div className="mt-2 flex items-center gap-3 text-[11px] text-neutral-600">
@@ -626,19 +619,6 @@ function GroupRows({
                 <span>
                   {g.preview.model} · {g.preview.tokensIn ?? 0}/{g.preview.tokensOut ?? 0} tokens
                 </span>
-              )}
-              {g.at && g.status !== 'cancelled' && (
-                <button
-                  type="button"
-                  className={`ml-auto ${segBtn(false, !canRegen || busy)}`}
-                  disabled={!canRegen || busy}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    onRegen()
-                  }}
-                >
-                  {busy ? t('admin.econ.writing') : g.preview ? t('admin.econ.regenerate') : t('admin.econ.generate')}
-                </button>
               )}
             </div>
           </td>

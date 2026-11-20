@@ -50,6 +50,10 @@ export type EconPreviewContent = {
   why_en: string
   focus_zh: string
   focus_en: string
+  background_zh?: string
+  background_en?: string
+  watch_zh?: string
+  watch_en?: string
   names_zh: Record<string, string>
   scenarios: Record<EconOutcome, EconScenario>
 }

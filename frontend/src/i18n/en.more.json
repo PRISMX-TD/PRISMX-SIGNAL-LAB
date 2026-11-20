@@ -3969,7 +3969,10 @@
       },
       "syncWeek": "Sync this week",
       "impactFilter": "Impact",
-      "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal."
+      "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal.",
+      "background": "Context",
+      "watch": "Watch",
+      "previewPending": "Previews are written automatically within 7 days of release (master switch on, orange and red only)."
     }
   },
   "simulator": {
