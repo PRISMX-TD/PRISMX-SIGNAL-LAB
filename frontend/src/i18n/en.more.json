@@ -3974,9 +3974,38 @@
       "watch": "Watch",
       "previewPending": "Waiting: once the master switch under Settings is on, it is written within 7 days of release.",
       "whyNoPreview": {
-        "noConsensus": "No consensus for this group (Narwhal has none), so there is nothing to compare against and no preview.",
+        "noConsensus": "No consensus and no previous value, so no preview.",
         "low": "Low-impact (yellow) items get no preview.",
         "past": "Already released; no preview was written before release."
+      },
+      "scenario": {
+        "consensus": {
+          "above": "Above consensus",
+          "inline": "In line",
+          "below": "Below consensus"
+        },
+        "previous": {
+          "above": "Above previous",
+          "inline": "Same as previous",
+          "below": "Below previous"
+        },
+        "none": {
+          "above": "Hawkish",
+          "inline": "Neutral",
+          "below": "Dovish"
+        }
+      },
+      "scenarioShort": {
+        "consensus": {
+          "above": "Above",
+          "inline": "In line",
+          "below": "Below"
+        },
+        "previous": {
+          "above": "Above prev.",
+          "inline": "Flat",
+          "below": "Below prev."
+        }
       }
     }
   },

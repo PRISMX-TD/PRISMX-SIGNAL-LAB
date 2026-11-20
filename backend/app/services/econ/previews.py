@@ -36,7 +36,7 @@ MAX_ATTEMPTS = 3
 HORIZON = timedelta(days=7)
 # 预案格式版本：改了提示词 / 字段就加一，旧预案会在下一轮自动按新格式重写。
 # Preview format version: bump when the prompt or fields change and old previews are rewritten.
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 # DeepSeek 高峰时段（UTC，周一至周五 01–04、06–10）只写 6 小时内就要公布的组，其余等低谷。
 # During DeepSeek's peak hours only groups due within 6h are written; the rest wait for off-peak.
 PEAK_HORIZON = timedelta(hours=6)
@@ -84,6 +84,11 @@ class PreviewContent(BaseModel):
     watch_en: str = Field(default="", max_length=400)
     names_zh: dict[str, str] = Field(default_factory=dict)
     scenarios: Scenarios
+    # 情景的比较对象（程序填，不由模型写）：consensus=对预期值，previous=对前值（没有预期值时），
+    # none=没有数值的央行事件（讲话、纪要、声明），三个情景是偏鹰 / 中性 / 偏鸽，不自动判定命中。
+    # What the scenarios compare against (set by the program): consensus, previous (no consensus),
+    # or none (figure-less central-bank events: hawkish / neutral / dovish, never auto-matched).
+    basis: Literal["consensus", "previous", "none"] = "consensus"
 
     @field_validator("names_zh")
     @classmethod
@@ -116,7 +121,11 @@ Reply with ONLY a json object of exactly this shape:
 }
 
 Rules:
-- "above" / "inline" / "below" mean the PRIMARY figure (named in the input) comes in above, in line with, or below its consensus. Work out yourself whether a higher number is good or bad for the economy (for example a higher unemployment rate or more jobless claims is bad).
+- The input's "basis" says what the three scenarios mean:
+  - "consensus": the PRIMARY figure (named in the input) comes in above, in line with, or below its consensus.
+  - "previous": there is no consensus, so the PRIMARY figure comes in above, roughly equal to, or below its PREVIOUS value. Say plainly in background_zh that no consensus is published and the comparison is against the previous value.
+  - "none": the event has no figures (a central-bank speech, minutes, statement, meeting or report). "above" means a more hawkish tone than expected, "inline" a neutral tone in line with expectations, "below" a more dovish tone. Use background_zh for what the market will listen for (rate path, inflation, growth, balance sheet), and watch_zh for the key signals. names_zh may be empty.
+- Work out yourself whether a higher number is good or bad for the economy (for example a higher unemployment rate or more jobless claims is bad).
 - Each scenario lists 1 to 3 impacts. "asset" must be one of the codes in the input's "assets" list; never invent another. "direction" is bullish, bearish or neutral; "strength" is strong, medium or weak. The country's own currency should normally be the first impact.
 - "inline" usually means limited impact: prefer neutral or weak.
 - Describe tendencies only ("通常利多美元"), never certainties, price levels, targets, entries, stops or trading advice.
@@ -143,7 +152,41 @@ def _group_primary(country: str, rows: list[EconRelease]) -> tuple[dict | None, 
     return best, best_family
 
 
-def build_prompt_input(country: str, at: datetime, rows: list[EconRelease], primary: dict) -> dict:
+def group_basis(country: str, rows: list[EconRelease]) -> tuple[str, dict | None]:
+    """这组预案的比较依据和主指标：有预期值→consensus；只有前值→previous（挑最重要、带前值的一项）；
+    一个数值都没有（讲话、纪要等）→none。有数值但连前值都没有的返回 (previous, None)，不写。
+    The basis and primary figure: consensus if any; else previous (most important figure with a previous
+    value); else none for figure-less events. Figures without even a previous value give (previous, None)."""
+    primary, _ = _group_primary(country, rows)
+    if primary is not None:
+        return "consensus", primary
+    values = store.merged_values(rows)
+    if not values:
+        return "none", None
+    family_of = {v["measure"]: r.family for r in rows for v in store.values_of(r)}
+    best, best_key = None, None
+    for i, v in enumerate(values):
+        if v.get("previous") in (None, ""):
+            continue
+        m = v["measure"]
+        key = (-rules.measure_importance(country, family_of.get(m), m), rules._RANK.get(m, 999), i)
+        if best_key is None or key < best_key:
+            best, best_key = v, key
+    return "previous", best
+
+
+def _signature(basis: str, rows: list[EconRelease]) -> str:
+    """缓存签名：格式版本 + 依据 + 预期值（none 的用发布名）；变了就重写。
+    Cache signature: format version + basis + consensus figures (release names for figure-less events)."""
+    if basis == "none":
+        body = ";".join(sorted({r.name for r in rows}))
+    else:
+        body = rules.consensus_signature(store.merged_values(rows))
+    return f"{PROMPT_VERSION}|{basis}|{body}"
+
+
+def build_prompt_input(country: str, at: datetime, rows: list[EconRelease], primary: dict,
+                       basis: str = "consensus") -> dict:
     figures = []
     for v in store.merged_values(rows):
         figures.append({k: v.get(k) for k in ("measure", "unit", "transformation", "consensus", "previous")
@@ -154,6 +197,7 @@ def build_prompt_input(country: str, at: datetime, rows: list[EconRelease], prim
         "release_time_utc": at.strftime("%Y-%m-%d %H:%M"),
         "releases": sorted({r.name for r in rows}),
         "period": next((r.period for r in rows if r.period), None),
+        "basis": basis,
         "primary_figure": primary.get("measure"),
         "figures": figures,
         "assets": ASSETS,
@@ -177,10 +221,10 @@ def due_groups(db: Session, cfg: dict, now: datetime) -> list[tuple[str, list[Ec
     for key, members in groups.items():
         if max(r.importance for r in members) < cfg["previewMinImportance"]:
             continue
-        primary, _ = _group_primary(members[0].country, members)
-        if primary is None:
+        basis, primary = group_basis(members[0].country, members)
+        if primary is None and basis != "none":
             continue
-        sig = PROMPT_VERSION + "|" + rules.consensus_signature(store.merged_values(members))
+        sig = _signature(basis, members)
         p = existing.get(key)
         if p is not None and p.consensus_sig == sig and (p.status == "ok" or p.attempts >= MAX_ATTEMPTS):
             continue
@@ -198,8 +242,8 @@ def generate(db: Session, key: str, rows: list[EconRelease], now: datetime) -> E
     Write one group's preview (caller commits). Failures are stored too and retried up to MAX_ATTEMPTS."""
     country = rows[0].country
     at = rows[0].at
-    primary, _family = _group_primary(country, rows)
-    sig = PROMPT_VERSION + "|" + rules.consensus_signature(store.merged_values(rows))
+    basis, primary = group_basis(country, rows)
+    sig = _signature(basis, rows)
     p = db.query(EconPreview).filter(EconPreview.group_key == key).first()
     if p is None:
         p = EconPreview(group_key=key, country=country, at=at, attempts=0)
@@ -210,7 +254,7 @@ def generate(db: Session, key: str, rows: list[EconRelease], now: datetime) -> E
     p.consensus_sig = sig
     p.primary_measure = primary.get("measure") if primary else None
     p.attempts = (p.attempts or 0) + 1
-    payload = build_prompt_input(country, at, rows, primary or {})
+    payload = build_prompt_input(country, at, rows, primary or {}, basis)
     try:
         reply = deepseek.chat_json(SYSTEM_PROMPT, json.dumps(payload, ensure_ascii=False))
     except deepseek.DeepSeekError as exc:
@@ -224,6 +268,7 @@ def generate(db: Session, key: str, rows: list[EconRelease], now: datetime) -> E
         p.status = "failed"
         p.error = f"校验未通过 / validation failed: {exc.errors()[:3]}"[:500]
         return p
+    content.basis = basis
     p.status, p.error = "ok", None
     p.content_json = content.model_dump_json()
     p.generated_at = now
@@ -241,11 +286,14 @@ def outcome_for(country: str, rows: list[EconRelease], primary_measure: str | No
         target, _ = _group_primary(country, rows)
     if target is None:
         return None
-    result = rules.compare(target.get("actual"), target.get("consensus"))
+    # 没有预期值时和前值比（预案依据是 previous）/ without a consensus, compare against the previous value
+    basis = "consensus" if target.get("consensus") not in (None, "") else "previous"
+    ref = target.get("consensus") if basis == "consensus" else target.get("previous")
+    result = rules.compare(target.get("actual"), ref)
     if result is None:
         return None
     return {"measure": target.get("measure"), "actual": target.get("actual"),
-            "consensus": target.get("consensus"), "outcome": result}
+            "consensus": ref, "outcome": result, "basis": basis}
 
 
 def apply_outcomes(db: Session, group_keys: list[str], now: datetime) -> int:

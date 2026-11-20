@@ -210,17 +210,37 @@ def test_invalid_model_output_is_stored_as_failed(enabled, monkeypatch, mutate):
     assert previews.due_groups(db, store.get_settings(db), NOW) == []
 
 
-def test_low_importance_and_no_consensus_get_no_preview(enabled):
+def test_low_importance_gets_no_preview_but_no_consensus_still_does(enabled, monkeypatch):
+    # 黄色不写；没有预期值的橙 / 红也写：有前值的对前值比，讲话这类按鹰 / 中 / 鸽写
+    # Yellow is skipped; orange/red without a consensus are still written (vs previous, or hawkish/dovish)
     db = enabled
+    calls = []
+    _stub_llm(monkeypatch, calls=calls)
     store.upsert_releases(db, [
         _release("low", name="Mortgage rates", family="housing",
                  values=[{"measure": "mortgage_rate_30y", "consensus": "6.1"}]),
         _release("nocons", country="GBR", name="Retail sales",
                  values=[{"measure": "retail_sales_mom", "previous": "0.1"}]),
-        _release("speech", country="EMU", name="Central bank speech", family="policy_rate"),
+        _release("speech", country="EMU", at=NOW + timedelta(hours=4), name="Central bank speech", family="policy_rate"),
     ], NOW)
     db.commit()
+    due = previews.due_groups(db, store.get_settings(db), NOW)
+    assert [k for k, _ in due] == ["GBR|2026-11-20T15:00", "EMU|2026-11-20T16:00"]
+    gbr = previews.generate(db, due[0][0], due[0][1], NOW)
+    speech = previews.generate(db, due[1][0], due[1][1], NOW)
+    db.commit()
+    assert calls[0]["basis"] == "previous" and calls[0]["primary_figure"] == "retail_sales_mom"
+    assert calls[1]["basis"] == "none"
+    assert json.loads(gbr.content_json)["basis"] == "previous" and json.loads(speech.content_json)["basis"] == "none"
+    # 写过就不再写 / cached afterwards
     assert previews.due_groups(db, store.get_settings(db), NOW) == []
+    # 公布后对前值判定 / once out, judged against the previous value
+    store.upsert_releases(db, [_release("nocons", country="GBR", name="Retail sales", status="published",
+                                        values=[{"measure": "retail_sales_mom", "previous": "0.1", "actual": "0.4"}])],
+                          NOW + timedelta(hours=4))
+    db.commit()
+    assert previews.apply_outcomes(db, ["GBR|2026-11-20T15:00", "EMU|2026-11-20T16:00"], NOW) == 1
+    assert db.query(EconPreview).filter(EconPreview.group_key == "GBR|2026-11-20T15:00").one().outcome == "above"
 
 
 def test_peak_hours_only_write_soon_groups(enabled):
