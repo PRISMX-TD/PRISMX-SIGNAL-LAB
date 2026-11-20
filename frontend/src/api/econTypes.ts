@@ -32,9 +32,9 @@ export type EconValue = {
   measure: string
   unit?: string | null
   transformation?: string | null
-  actual?: number | null
-  consensus?: number | null
-  previous?: number | null
+  actual?: number | string | null
+  consensus?: number | string | null
+  previous?: number | string | null
 }
 
 export type EconImpact = { asset: string; direction: 'bullish' | 'bearish' | 'neutral'; strength: 'strong' | 'medium' | 'weak' }
@@ -65,7 +65,7 @@ export type EconGroup = {
   releases: { id: string; name: string; period: string | null; status: string; actualSeenAt: string | null }[]
   values: EconValue[]
   primaryMeasure: string | null
-  outcome: { measure: string; actual: number; consensus: number; outcome: EconOutcome } | null
+  outcome: { measure: string; actual: number | string; consensus: number | string; outcome: EconOutcome } | null
   preview: {
     status: 'ok' | 'failed'
     content: EconPreviewContent | null

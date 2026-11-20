@@ -15,8 +15,12 @@ import { useToast } from '../../../utils/useToast'
 const OUTCOMES: EconOutcome[] = ['above', 'inline', 'below']
 const DAY_OPTIONS = [3, 7, 14]
 
-function fmtNum(v: number | null | undefined, unit?: string | null): string {
-  if (v === null || v === undefined) return '—'
+// Narwhal 的数值有时是字符串（"3.5"），先转成数字；转不了就原样显示。
+// Narwhal sometimes sends figures as strings ("3.5"); coerce, else show as-is.
+function fmtNum(raw: number | string | null | undefined, unit?: string | null): string {
+  if (raw === null || raw === undefined || raw === '') return '—'
+  const v = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(v)) return String(raw)
   const s = Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)))
   return unit === 'percent' || unit === '%' ? `${s}%` : s
 }
