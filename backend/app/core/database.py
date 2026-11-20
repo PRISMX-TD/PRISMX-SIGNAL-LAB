@@ -433,7 +433,11 @@ def _hash_legacy_api_tokens() -> None:
 #          上线后一律关闭，由管理员逐个打开；一级代理原来自带的改会员能力随之收回）。纯 ADD COLUMN + UPDATE。
 #          rev 51 — agents' plan right: agent_nodes.can_set_plan, existing rows FALSE
 #          (admins switch it on one by one; top-level agents lose the implicit right).
-CURRENT_SCHEMA_REV = 51
+# rev 52 — 财经日历（2026-11-20，第一期只给管理员）：新表 econ_releases、econ_previews（create_all
+#          建表建索引）。同 rev 44 / 45：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
+#          rev 52 — economic calendar: new tables econ_releases and econ_previews via create_all;
+#          no ADD COLUMN, no backfill.
+CURRENT_SCHEMA_REV = 52
 
 _SCHEMA_REV_KEY = "schema_rev"
 

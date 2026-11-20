@@ -1118,6 +1118,7 @@
         "ops": "Operations",
         "system": "System",
         "autoemail": "Automated email",
+        "econ": "Economic calendar",
         "luckywheel": "Lucky wheel",
         "agents": "Ambassadors"
       }
@@ -3907,6 +3908,51 @@
       "hint": "Ctrl + K opens this anywhere",
       "empty": "No matching users",
       "typeMore": "Type at least 2 characters"
+    },
+    "econ": {
+      "saved": "Saved",
+      "synced": "Sync done",
+      "keySet": "set",
+      "keyMissing": "missing",
+      "balance": "Narwhal balance",
+      "lastSync": "Last sync",
+      "llmToday": "Model calls today",
+      "counts": "{{releases}} releases · {{previews}} previews",
+      "lastError": "Last error",
+      "enabled": "Auto sync & previews (master switch)",
+      "previews": "Write previews",
+      "minImportance": "Preview min importance",
+      "dailyCap": "Daily model cap",
+      "countries": "Countries",
+      "syncNow": "Sync now",
+      "syncing": "Syncing…",
+      "hint": "Admin-only for now. With the switch off nothing is requested automatically; Sync now costs about 2–3 Narwhal calls. Previews describe tendencies only, not trading advice.",
+      "days": "{{n}} days",
+      "atLeast": "≥{{n}} stars",
+      "refresh": "Refresh",
+      "empty": "No data in this range. Try Sync now.",
+      "allDay": "All day",
+      "cancelled": "Cancelled",
+      "noPreview": "No preview",
+      "previewFailed": "Preview failed",
+      "measure": "Measure",
+      "actual": "Actual",
+      "consensus": "Consensus",
+      "previous": "Previous",
+      "indicative": "Time is indicative",
+      "writing": "Writing…",
+      "regenerate": "Rewrite preview",
+      "generate": "Write preview",
+      "outcome": {
+        "above": "Above consensus",
+        "inline": "In line",
+        "below": "Below consensus"
+      },
+      "strength": {
+        "strong": "strong",
+        "medium": "medium",
+        "weak": "weak"
+      }
     }
   },
   "simulator": {

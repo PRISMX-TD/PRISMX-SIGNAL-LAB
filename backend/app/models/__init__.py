@@ -2460,3 +2460,70 @@ class LuckyDraw(Base):
     # By-probability round landed on a slot whose stock is used up: the ticket is spent, but
     # nothing is granted and the used count stays put (rev 46).
     sold_out_miss = Column(Boolean, nullable=False, default=False)
+
+
+class EconRelease(Base):
+    """财经日历的一次发布（2026-11-20，rev 52），一行对应 Narwhal 的一个 release_id。
+    一次发布含一组数值（例如美国零售销售：月率、核心、对照组、年率），整组存在 values_json：
+    [{measure, unit, actual, consensus, previous, provisional, ...}]，原样保留 Narwhal 的字段。
+    时间一律 naive UTC；at 为空的是只给了日期的发布（全天）。importance 由我们自己的表算
+    （Narwhal 没有重要度）：0 无 / 1 低 / 2 中 / 3 高。
+    One economic-calendar release (2026-11-20, rev 52), one row per Narwhal release_id. A release
+    carries a group of figures kept as-is in values_json. Times are naive UTC; a null `at` is a
+    date-only release. importance comes from our own table (Narwhal has none): 0 none … 3 high."""
+    __tablename__ = "econ_releases"
+    __table_args__ = (Index("idx_econ_releases_at", "at"), Index("idx_econ_releases_group", "group_key"))
+
+    id = Column(String, primary_key=True)                 # Narwhal release_id
+    revision = Column(Integer, nullable=False, default=0)
+    country = Column(String, nullable=False)              # 三位代码，欧元区 EMU / ISO alpha-3, EMU for the euro area
+    currency = Column(String, nullable=True)
+    series_id = Column(String, nullable=True)
+    name = Column(String, nullable=False)                 # Narwhal 的英文名 / Narwhal's English name
+    family = Column(String, nullable=True)
+    topic = Column(String, nullable=True)
+    period = Column(String, nullable=True)
+    status = Column(String, nullable=False)               # scheduled / published / cancelled
+    at = Column(DateTime, nullable=True)
+    date = Column(String, nullable=True)                  # 只有日期时的 YYYY-MM-DD / date-only releases
+    indicative = Column(Boolean, nullable=False, default=False)   # 时间只是示意 / time is indicative
+    values_json = Column(Text, nullable=False, default="[]")
+    importance = Column(Integer, nullable=False, default=0)
+    # 同一时刻同一国家的发布合成一组写一份预案 / releases at the same moment in one country share a preview
+    group_key = Column(String, nullable=True)
+    has_actual = Column(Boolean, nullable=False, default=False)
+    actual_seen_at = Column(DateTime, nullable=True)      # 我们第一次看到公布值的时刻 / when we first saw an actual
+    check_stage = Column(Integer, nullable=False, default=0)   # 公布后补查进行到第几轮 / post-release re-check stage
+    fetched_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class EconPreview(Base):
+    """公布前的影响预案（rev 52）：一组发布（同国同时刻）一份。content_json 是校验过的结构化内容
+    （中英各一份，见 services/econ/previews.py 的 PreviewContent）。consensus_sig 记录生成时用的
+    预期值，预期值变了就重写。outcome_* 是公布后程序比较「主指标」公布值与预期值的结果，不调模型。
+    Pre-release impact preview (rev 52), one per release group. content_json is the validated
+    structured content (zh + en; PreviewContent in services/econ/previews.py). consensus_sig records
+    the consensus it was written against — a changed consensus triggers a rewrite. outcome_* is the
+    program's comparison of the primary figure against consensus after release; no model call."""
+    __tablename__ = "econ_previews"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    group_key = Column(String, nullable=False, unique=True)
+    country = Column(String, nullable=False)
+    at = Column(DateTime, nullable=False)
+    primary_measure = Column(String, nullable=True)
+    consensus_sig = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="pending")   # ok / failed
+    content_json = Column(Text, nullable=True)
+    error = Column(String, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    model = Column(String, nullable=True)
+    tokens_in = Column(Integer, nullable=True)
+    tokens_out = Column(Integer, nullable=True)
+    generated_at = Column(DateTime, nullable=True)
+    outcome = Column(String, nullable=True)               # above / inline / below
+    outcome_actual = Column(String, nullable=True)
+    outcome_consensus = Column(String, nullable=True)
+    outcome_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=_now)

@@ -25,6 +25,7 @@ import AnnouncementsPanel from '../components/admin/AnnouncementsPanel'
 import CompetitionsPanel from '../components/admin/CompetitionsPanel'
 import EmailAutomationPanel from '../components/admin/EmailAutomationPanel'
 import EmailPanel from '../components/admin/EmailPanel'
+import EconCalendarPanel from '../components/admin/econ/EconCalendarPanel'
 import GamificationPanel from '../components/admin/GamificationPanel'
 import InviteLinksPanel from '../components/admin/InviteLinksPanel'
 import LuckyWheelPanel from '../components/admin/lucky/LuckyWheelPanel'
@@ -263,6 +264,9 @@ function AdminConsole({ section }: { section: AdminSection }) {
       break
     case 'autoemail':
       content = <EmailAutomationPanel />
+      break
+    case 'econ':
+      content = <EconCalendarPanel />
       break
     case 'tickets':
       content = <AdminTicketsPanel onToast={showToast} />

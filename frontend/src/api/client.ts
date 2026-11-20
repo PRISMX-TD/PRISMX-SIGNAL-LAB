@@ -1,4 +1,5 @@
 // REST 客户端封装 / REST client wrapper
+import type { EconGroup, EconSettings, EconStatus } from './econTypes'
 import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, AdminLeaderboardPeriod, AdminBoardHistory, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
 import type { PendingCompetition } from './types'
@@ -1500,6 +1501,17 @@ function pickerQs(query: EmailPickerQuery, extra: Record<string, string>): strin
 
 // 管理后台 / Admin
 export const adminApi = {
+  // 财经日历（只给管理员，第一期）/ economic calendar (admin-only for now)
+  econStatus: () => request<EconStatus>('/admin/econ/status'),
+  econSaveSettings: (patch: Partial<EconSettings>) =>
+    request<EconSettings>('/admin/econ/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  econSync: () => request<Record<string, unknown>>('/admin/econ/sync', { method: 'POST' }),
+  econCalendar: (start: string | null, days: number, minImportance: number) =>
+    request<{ start: string; days: number; items: EconGroup[] }>(
+      `/admin/econ/calendar?${new URLSearchParams({ ...(start ? { start } : {}), days: String(days), minImportance: String(minImportance) })}`,
+    ),
+  econRegenerate: (groupKey: string) =>
+    request<EconGroup>('/admin/econ/previews/regenerate', { method: 'POST', body: JSON.stringify({ groupKey }) }),
   // 群发邮件。「发送」只把名单入队就返回，真正发信在后台循环里，进度靠 listEmails 轮询。
   // Broadcasts: sending only enqueues; the background loop delivers, poll listEmails for progress.
   emailStatus: () => request<EmailStatus>('/admin/emails/status'),

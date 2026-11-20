@@ -1118,6 +1118,7 @@
         "ops": "运营设置",
         "system": "系统参数",
         "autoemail": "自动邮件",
+        "econ": "财经日历",
         "luckywheel": "幸运轮盘",
         "agents": "推荐官"
       }
@@ -3896,6 +3897,51 @@
       "hint": "Ctrl + K 随时打开",
       "empty": "没有匹配的用户",
       "typeMore": "至少输入 2 个字"
+    },
+    "econ": {
+      "saved": "已保存",
+      "synced": "同步完成",
+      "keySet": "已配置",
+      "keyMissing": "未配置",
+      "balance": "Narwhal 余额",
+      "lastSync": "上次同步",
+      "llmToday": "今日模型调用",
+      "counts": "{{releases}} 条发布 · {{previews}} 份预案",
+      "lastError": "最近错误",
+      "enabled": "自动同步与预案（总开关）",
+      "previews": "写预案",
+      "minImportance": "预案最低重要度",
+      "dailyCap": "每日模型上限",
+      "countries": "国家",
+      "syncNow": "立即同步",
+      "syncing": "同步中…",
+      "hint": "第一期只在管理员页面可见。总开关关闭时不会自动请求；「立即同步」约消耗 2–3 次 Narwhal 调用。预案只描述倾向，不构成交易建议。",
+      "days": "{{n}} 天",
+      "atLeast": "≥{{n}} 星",
+      "refresh": "刷新",
+      "empty": "这段时间没有数据。先点「立即同步」。",
+      "allDay": "全天",
+      "cancelled": "已取消",
+      "noPreview": "暂无预案",
+      "previewFailed": "预案失败",
+      "measure": "指标",
+      "actual": "公布",
+      "consensus": "预期",
+      "previous": "前值",
+      "indicative": "时间为预估",
+      "writing": "生成中…",
+      "regenerate": "重写预案",
+      "generate": "生成预案",
+      "outcome": {
+        "above": "高于预期",
+        "inline": "符合预期",
+        "below": "低于预期"
+      },
+      "strength": {
+        "strong": "强",
+        "medium": "中",
+        "weak": "弱"
+      }
     }
   },
   "simulator": {

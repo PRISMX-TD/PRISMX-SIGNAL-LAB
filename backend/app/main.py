@@ -23,7 +23,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin, require_staff
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -39,6 +39,7 @@ from app.services.strategy.resolution import stale_strategy_signal_sweep_loop
 from app.services.background import BackgroundLoops
 from app.services.support_desk import support_desk_loop
 from app.services.lucky.sweep import lucky_wheel_loop
+from app.services.econ.loop import econ_calendar_loop
 from app.services import capacity, loop_health
 from app.services.connection_manager import manager
 
@@ -256,6 +257,8 @@ async def lifespan(app: FastAPI):
         "support_desk": support_desk_loop,
         # 幸运轮盘：到点作废未用券、结束前 24 小时提醒（60 秒）/ lucky wheel: void at end, 24h reminder
         "lucky_wheel": lucky_wheel_loop,
+        # 财经日历：同步日程、补查公布值、写预案（30 秒；总开关关着时什么都不发）/ economic calendar
+        "econ_calendar": econ_calendar_loop,
     })
     loops.launch()
     app.state.background_loops = loops
@@ -474,6 +477,8 @@ app.include_router(admin.router, prefix=settings.API_PREFIX, dependencies=[Depen
 # Activity log (read-only): guarded on the router and again at the mount.
 app.include_router(admin_activity.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(admin_geo.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
+# 财经日历（2026-11-20，第一期只给管理员）/ economic calendar, admin-only for now
+app.include_router(admin_econ.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(automation.router, prefix=settings.API_PREFIX)
 app.include_router(sentiment.router, prefix=settings.API_PREFIX)
 app.include_router(site.router, prefix=settings.API_PREFIX)
