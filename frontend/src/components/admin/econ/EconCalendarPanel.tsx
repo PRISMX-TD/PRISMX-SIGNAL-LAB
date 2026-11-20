@@ -482,7 +482,6 @@ export default function EconCalendarPanel() {
                 className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-neutral-100"
               />
             </label>
-            <p className="text-xs text-neutral-500">{t('admin.econ.hint')}</p>
           </div>
         )}
       </section>
@@ -523,7 +522,6 @@ export default function EconCalendarPanel() {
                 ? t('admin.econ.generating', { done: (job?.done ?? 0) + (job?.failed ?? 0), total: job?.total ?? 0 })
                 : t('admin.econ.generateWeek')}
             </button>
-            <p className="text-[11px] leading-relaxed text-neutral-500">{t('admin.econ.generateHint')}</p>
           </div>
         </aside>
 
@@ -586,18 +584,6 @@ export default function EconCalendarPanel() {
               </table>
             </div>
           )}
-
-          <p className="text-right text-[11px] text-neutral-600">
-            Data by{' '}
-            <a
-              href="https://narwhalapi.com"
-              target="_blank"
-              rel="noreferrer"
-              className="underline hover:text-neutral-400"
-            >
-              Narwhal API
-            </a>
-          </p>
         </div>
       </div>
     </div>
