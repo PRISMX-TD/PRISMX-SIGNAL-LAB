@@ -1,6 +1,7 @@
 // 财经日历的共用小工具：管理台日历页和仪表盘「今日财经」卡片都用。
 // Shared calendar helpers for the admin calendar and the dashboard today card.
 import type { EconGroup, EconValue } from '../../../api/econTypes'
+import { measureZh, releaseZh } from './econNamesZh'
 
 export function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -78,13 +79,17 @@ export function rowsOf(g: EconGroup, zh: boolean, levels?: ReadonlySet<number>):
   const values = shownValues(g)
   const rows: Row[] = values.length
     ? values.map((v) => ({
-        label: (zh && c?.names_zh[v.measure]) || humanize(v.measure),
+        // 中文界面：固定对照表优先（同一个指标处处同名），其次 AI 预案给的名字，最后英文
+        // Chinese UI: the fixed table first (one name everywhere), then the AI preview's name, then English
+        label: (zh && (measureZh(v.measure) || c?.names_zh[v.measure])) || humanize(v.measure),
         v,
         importance: v.importance ?? g.importance,
       }))
     : [
         {
-          label: (c && (zh ? c.title_zh : c.title_en)) || [...new Set(g.releases.map((r) => r.name))].join(' · '),
+          label:
+            (c && (zh ? c.title_zh : c.title_en)) ||
+            [...new Set(g.releases.map((r) => (zh && releaseZh(r.name)) || r.name))].join(' · '),
           v: null,
           importance: g.importance,
         },
