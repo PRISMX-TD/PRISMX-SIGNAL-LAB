@@ -120,11 +120,11 @@ def test_upsert_tracks_new_actuals_and_groups(db_session):
     db.commit()
     assert stats["new"] == 1 and stats["newActuals"] == 0
     row = db.get(EconRelease, "r1")
-    assert row.importance == rules.HIGH and row.currency == "USD" and row.group_key == "USA|2026-11-20T15:00"
+    assert row.importance == rules.HIGH and row.currency == "USD" and row.group_key == "USA|2026-11-20T15:00|retail-sales"
     published = [dict(v, actual="0.6") for v in RETAIL]
     stats = store.upsert_releases(db, [_release("r1", status="published", values=published)], NOW + timedelta(hours=3))
     db.commit()
-    assert stats["newActuals"] == 1 and stats["actualGroups"] == ["USA|2026-11-20T15:00"]
+    assert stats["newActuals"] == 1 and stats["actualGroups"] == ["USA|2026-11-20T15:00|retail-sales"]
     assert db.get(EconRelease, "r1").actual_seen_at == NOW + timedelta(hours=3)
     # 再来一遍不重复计 / a second pass does not count again
     stats = store.upsert_releases(db, [_release("r1", status="published", values=published)], NOW + timedelta(hours=4))
@@ -166,7 +166,7 @@ def test_generate_ok_and_validated(enabled, monkeypatch):
     store.upsert_releases(db, [_release("r1", values=RETAIL)], NOW)
     db.commit()
     groups = previews.due_groups(db, store.get_settings(db), NOW)
-    assert [k for k, _ in groups] == ["USA|2026-11-20T15:00"]
+    assert [k for k, _ in groups] == ["USA|2026-11-20T15:00|retail-sales"]
     p = previews.generate(db, *groups[0], NOW)
     db.commit()
     assert p.status == "ok" and p.primary_measure == "retail_sales_mom" and p.tokens_in == 900
@@ -182,7 +182,7 @@ def test_generate_ok_and_validated(enabled, monkeypatch):
     changed[1]["consensus"] = "0.3"
     store.upsert_releases(db, [_release("r1", values=changed)], NOW)
     db.commit()
-    assert [k for k, _ in previews.due_groups(db, store.get_settings(db), NOW)] == ["USA|2026-11-20T15:00"]
+    assert [k for k, _ in previews.due_groups(db, store.get_settings(db), NOW)] == ["USA|2026-11-20T15:00|retail-sales"]
 
 
 @pytest.mark.parametrize("mutate", [
@@ -225,7 +225,7 @@ def test_low_importance_gets_no_preview_but_no_consensus_still_does(enabled, mon
     ], NOW)
     db.commit()
     due = previews.due_groups(db, store.get_settings(db), NOW)
-    assert [k for k, _ in due] == ["GBR|2026-11-20T15:00", "EMU|2026-11-20T16:00"]
+    assert [k for k, _ in due] == ["GBR|2026-11-20T15:00|retail-sales", "EMU|2026-11-20T16:00|central-bank-speech"]
     gbr = previews.generate(db, due[0][0], due[0][1], NOW)
     speech = previews.generate(db, due[1][0], due[1][1], NOW)
     db.commit()
@@ -239,8 +239,8 @@ def test_low_importance_gets_no_preview_but_no_consensus_still_does(enabled, mon
                                         values=[{"measure": "retail_sales_mom", "previous": "0.1", "actual": "0.4"}])],
                           NOW + timedelta(hours=4))
     db.commit()
-    assert previews.apply_outcomes(db, ["GBR|2026-11-20T15:00", "EMU|2026-11-20T16:00"], NOW) == 1
-    assert db.query(EconPreview).filter(EconPreview.group_key == "GBR|2026-11-20T15:00").one().outcome == "above"
+    assert previews.apply_outcomes(db, ["GBR|2026-11-20T15:00|retail-sales", "EMU|2026-11-20T16:00|central-bank-speech"], NOW) == 1
+    assert db.query(EconPreview).filter(EconPreview.group_key == "GBR|2026-11-20T15:00|retail-sales").one().outcome == "above"
 
 
 def test_peak_hours_only_write_soon_groups(enabled):
@@ -250,7 +250,7 @@ def test_peak_hours_only_write_soon_groups(enabled):
                                _release("later", country="CAN", at=peak + timedelta(hours=12), values=RETAIL)], peak)
     db.commit()
     keys = [k for k, _ in previews.due_groups(db, store.get_settings(db), peak)]
-    assert keys == ["USA|2026-11-20T09:00"]
+    assert keys == ["USA|2026-11-20T09:00|retail-sales"]
 
 
 def test_outcome_is_stamped_without_a_model_call(enabled, monkeypatch):
@@ -397,13 +397,14 @@ def test_admin_calendar_groups_and_filters(enabled, monkeypatch):
     loop.run_previews(db, store.get_settings(db), NOW)
     admin = _admin(db)
     out = admin_econ.econ_calendar(start=NOW.date(), days=2, minImportance=rules.MEDIUM, db=db, admin=admin)
-    assert [g["key"] for g in out["items"]] == ["USA|2026-11-20T15:00"]
+    assert [g["key"] for g in out["items"]] == ["USA|2026-11-20T15:00|retail-sales"]
     g = out["items"][0]
-    assert g["importance"] == rules.HIGH and len(g["releases"]) == 2 and g["primaryMeasure"] == "retail_sales_mom"
+    # 同一时刻的库存是另一份报告，单独成组（黄色，被筛掉）/ inventories at the same moment is its own (low) group
+    assert g["importance"] == rules.HIGH and len(g["releases"]) == 1 and g["primaryMeasure"] == "retail_sales_mom"
     assert g["preview"]["status"] == "ok" and g["preview"]["content"]["title_zh"] == "美国10月零售销售"
     assert g["outcome"] is None
     everything = admin_econ.econ_calendar(start=NOW.date(), days=2, minImportance=rules.LOW, db=db, admin=admin)
-    assert len(everything["items"]) == 2
+    assert len(everything["items"]) == 3
 
 
 def test_admin_settings_audit_and_validation(db_session):
@@ -536,9 +537,36 @@ def test_week_job_retries_groups_that_failed_three_times(enabled, monkeypatch):
         raise deepseek.DeepSeekError("empty reply")
     monkeypatch.setattr(deepseek, "chat_json", boom)
     for _ in range(3):
-        previews.generate(db, "USA|2026-11-20T15:00", db.query(EconRelease).all(), NOW)
+        previews.generate(db, "USA|2026-11-20T15:00|retail-sales", db.query(EconRelease).all(), NOW)
         db.commit()
     assert previews.due_groups(db, store.get_settings(db), NOW) == []   # 自动循环不再试 / auto loop gives up
     _stub_llm(monkeypatch)
     lo = datetime.combine(NOW.date(), datetime.min.time())
     assert loop.run_week_job(lo, lo + timedelta(days=1))["done"] == 1
+
+
+# ---- 同一时刻按报告分组 / one moment split by report ----
+
+def test_same_moment_splits_by_report_but_merges_split_reports(db_session):
+    db = db_session
+    store.upsert_releases(db, [
+        _release("pce", name="Income and spending", family="prices",
+                 values=[{"measure": "core_pce_price_index_mom", "consensus": "0.3"}]),
+        _release("pce2", name="Income and spending", family="activity",
+                 values=[{"measure": "personal_spending_mom", "consensus": "0.4"}]),
+        _release("gdp", name="GDP", family="gdp", values=[{"measure": "gdp_qoq", "consensus": "3.4"}]),
+        _release("claims", name="Jobless claims", family="labour", values=[{"measure": "initial_claims", "consensus": "199"}]),
+        _release("au1", country="AUS", name="Employment statistics", family="labour",
+                 values=[{"measure": "employment_change", "consensus": "25"}]),
+        _release("au2", country="AUS", name="Unemployment", family="labour",
+                 values=[{"measure": "unemployment_rate", "consensus": "4.7"}]),
+        _release("pmi1", country="EMU", name="Manufacturing PMI", family="survey"),
+        _release("pmi2", country="EMU", name="Services PMI", family="survey"),
+    ], NOW)
+    db.commit()
+    keys = {r.id: r.group_key for r in db.query(EconRelease).all()}
+    t = "2026-11-20T15:00"
+    assert keys["pce"] == keys["pce2"] == f"USA|{t}|income-and-spending"
+    assert keys["gdp"] == f"USA|{t}|gdp" and keys["claims"] == f"USA|{t}|jobless-claims"
+    assert keys["au1"] == keys["au2"] == f"AUS|{t}|labour"
+    assert keys["pmi1"] == keys["pmi2"] == f"EMU|{t}|pmi"

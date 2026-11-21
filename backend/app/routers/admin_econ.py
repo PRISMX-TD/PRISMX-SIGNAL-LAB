@@ -32,7 +32,7 @@ class EconSettingsIn(BaseModel):
 
 
 class RegenerateIn(BaseModel):
-    groupKey: str = Field(min_length=5, max_length=64)
+    groupKey: str = Field(min_length=5, max_length=128)
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -148,7 +148,7 @@ def econ_calendar(
             .order_by(EconRelease.at, EconRelease.country).all())
     groups: dict[str, list[EconRelease]] = {}
     for r in rows:
-        key = r.group_key or f"{r.country}|{r.date}"
+        key = r.group_key or f"{r.country}|{r.date}|{store.report_slug(r.family, r.name)}"
         groups.setdefault(key, []).append(r)
     keys = [k for k, members in groups.items() if max(m.importance for m in members) >= minImportance]
     prev = {p.group_key: p for p in db.query(EconPreview).filter(EconPreview.group_key.in_(keys)).all()} if keys else {}

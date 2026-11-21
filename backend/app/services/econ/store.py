@@ -139,8 +139,31 @@ def _parse_at(raw) -> datetime | None:
     return dt
 
 
-def group_key(country: str, at: datetime | None) -> str | None:
-    return f"{country}|{at:%Y-%m-%dT%H:%M}" if at is not None else None
+def report_slug(family: str | None, name: str | None) -> str:
+    """同一时刻按「哪份报告」再分组（2026-11-21：美国 21:30 常同时出 PCE、GDP、耐用品、初请，
+    合成一份预案只讲得了一个主指标）。Narwhal 有时把同一份报告拆成几条发布，这里并回去：
+    就业类（初请除外）合成一份，利率决议 / 声明 / 会议合成一份，各类 PMI 合成一份，其余按发布名。
+    Split a moment's releases by report (US 08:30 ET often carries PCE, GDP, durables and claims at
+    once). Narwhal sometimes splits one report into several releases, so merge those back: labour
+    (except claims), rate decision / statement / meeting, and PMIs; everything else by release name."""
+    lowered = (name or "").lower()
+    if family == "labour" and "claims" not in lowered:
+        return "labour"
+    if family == "policy_rate" and any(w in lowered for w in ("decision", "statement", "meeting")):
+        return "rate-decision"
+    if "pmi" in lowered and "ism" not in lowered and "chicago" not in lowered:
+        return "pmi"
+    slug = "".join(c if c.isalnum() else "-" for c in lowered).strip("-")
+    while "--" in slug:
+        slug = slug.replace("--", "-")
+    return slug[:40] or "release"
+
+
+def group_key(country: str, at: datetime | None, family: str | None = None, name: str | None = None) -> str | None:
+    """国家 | 时刻 | 报告。/ country | moment | report."""
+    if at is None:
+        return None
+    return f"{country}|{at:%Y-%m-%dT%H:%M}|{report_slug(family, name)}"
 
 
 def values_of(row: EconRelease) -> list[dict]:
@@ -200,7 +223,7 @@ def upsert_releases(db: Session, releases: list[dict], now: datetime | None = No
         row.indicative = r.get("date_basis") == "indicative"
         row.values_json = json.dumps(values, ensure_ascii=False)
         row.importance = rules.release_importance(country, row.family, row.name, values)
-        row.group_key = group_key(country, at)
+        row.group_key = group_key(country, at, row.family, row.name)
         if has_actual and not row.has_actual:
             row.actual_seen_at = now
             stats["newActuals"] += 1
