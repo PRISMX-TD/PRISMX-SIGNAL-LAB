@@ -12,30 +12,13 @@ import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
 import { econApi } from '../../../api/client'
 import type { EconGroup } from '../../../api/econTypes'
-import { Impact, addDays, dayKey, fmtNum, isPast, rowsOf, ymd, type Row } from './econShared'
+import { Countdown, Impact, addDays, dayKey, filled, fmtNum, isPast, rowsOf, ymd, type Row } from './econShared'
 
 const MAX_ROWS = 7
 const REFRESH_MS = 5 * 60_000
 const SHOWN_LEVELS: ReadonlySet<number> = new Set([2, 3])
 
 type Entry = { g: EconGroup; row: Row; past: boolean }
-
-function filled(v: number | string | null | undefined): boolean {
-  return v !== null && v !== undefined && v !== ''
-}
-
-function Countdown({ to }: { to: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(id)
-  }, [])
-  const s = Math.max(0, Math.floor((to - now) / 1000))
-  const pad = (n: number) => String(n).padStart(2, '0')
-  const d = Math.floor(s / 86400)
-  const hms = `${pad(Math.floor((s % 86400) / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`
-  return <span className="num ml-auto text-[13px] font-semibold text-strong">{d > 0 ? `${d}d ${hms}` : hms}</span>
-}
 
 export default function EconTodayCard() {
   const { t, i18n } = useTranslation()
@@ -206,7 +189,11 @@ export default function EconTodayCard() {
         <div className="mt-2 flex items-center gap-2 rounded-md bg-[var(--nest)] px-2.5 py-2 text-xs text-neutral-300">
           <span>{view.nextCount > 1 ? t('econ.today.nextInMany', { n: view.nextCount }) : t('econ.today.nextIn')}</span>
           {/* key：换了下一项就重建倒计时 / remount when the next item changes */}
-          <Countdown key={view.nextAt} to={new Date(view.nextAt).getTime()} />
+          <Countdown
+            key={view.nextAt}
+            to={new Date(view.nextAt).getTime()}
+            className="num ml-auto text-[13px] font-semibold text-strong"
+          />
         </div>
       )}
     </section>

@@ -4,128 +4,19 @@
 // Admin "Economic calendar" (admin-only for now), Forex Factory style: a mini month calendar on the
 // side (click a week to see that week), one row per figure, past rows dimmed, an arrow on the next
 // release, and the three-scenario preview on click.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { adminApi, econApi } from '../../../api/client'
-import type { EconGroup, EconOutcome, EconStatus } from '../../../api/econTypes'
+import type { EconGroup, EconStatus } from '../../../api/econTypes'
 import { localizeApiError } from '../../../api/utils'
 import Switch from '../../Switch'
 import { segBtn } from '../../../utils/segBtn'
 import { useToast } from '../../../utils/useToast'
-import { Impact, addDays, dayKey, fmtNum, isPast, rowsOf, ymd, type Row } from './econShared'
+import EconWeekView from './EconWeekView'
+import { addDays, weekStartOf, ymd } from './econShared'
 
 const LEVELS_KEY = 'econ.impactLevels'
-const OUTCOMES: EconOutcome[] = ['above', 'inline', 'below']
-
-// ---- 日期工具（全部按浏览器本地时区）/ date helpers, all in the browser's local zone ----
-
-/** 这一周的周日（和 Forex Factory 一样周日开始）/ the Sunday that starts this week, like FF */
-function weekStartOf(d: Date): Date {
-  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-  return addDays(x, -x.getDay())
-}
-
-function fmtDay(day: string, lang: string): string {
-  const d = new Date(`${day}T00:00:00`)
-  if (Number.isNaN(d.getTime())) return day
-  return d.toLocaleDateString(lang, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
-// ---- 小月历 / mini month calendar ----
-
-function MiniCalendar({ week, onPick, lang }: { week: Date; onPick: (weekStart: Date) => void; lang: string }) {
-  const [month, setMonth] = useState(() => new Date(week.getFullYear(), week.getMonth(), 1))
-  useEffect(() => {
-    // 选中的周跑到别的月份时，月历跟过去 / follow the picked week into another month
-    const end = addDays(week, 6)
-    const inView = (d: Date) => d.getFullYear() === month.getFullYear() && d.getMonth() === month.getMonth()
-    if (!inView(week) && !inView(end)) setMonth(new Date(week.getFullYear(), week.getMonth(), 1))
-  }, [week, month])
-
-  const first = weekStartOf(month)
-  const weeks = Array.from({ length: 6 }, (_, i) => addDays(first, i * 7)).filter(
-    (w, i) => i < 4 || w.getMonth() === month.getMonth(),
-  )
-  const today = ymd(new Date())
-  const picked = ymd(week)
-  const dayNames = Array.from({ length: 7 }, (_, i) =>
-    addDays(first, i).toLocaleDateString(lang, { weekday: 'narrow' }),
-  )
-
-  return (
-    <div className="glass rounded-2xl p-3 text-xs">
-      <div className="mb-2 flex items-center justify-between">
-        <button
-          type="button"
-          className="rounded px-2 py-0.5 text-neutral-400 hover:bg-white/5 hover:text-neutral-100"
-          onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}
-          aria-label="previous month"
-        >
-          ‹
-        </button>
-        <span className="font-medium text-neutral-200">
-          {month.toLocaleDateString(lang, { year: 'numeric', month: 'long' })}
-        </span>
-        <button
-          type="button"
-          className="rounded px-2 py-0.5 text-neutral-400 hover:bg-white/5 hover:text-neutral-100"
-          onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}
-          aria-label="next month"
-        >
-          ›
-        </button>
-      </div>
-      <div className="grid grid-cols-7 text-center text-[10px] text-neutral-500">
-        {dayNames.map((n, i) => (
-          <span key={i} className="py-1">
-            {n}
-          </span>
-        ))}
-      </div>
-      {weeks.map((w) => {
-        const on = ymd(w) === picked
-        return (
-          <button
-            key={ymd(w)}
-            type="button"
-            onClick={() => onPick(w)}
-            className={`grid w-full grid-cols-7 rounded-md text-center tabular-nums transition ${
-              on ? 'bg-prism-600/30 text-prism-100' : 'hover:bg-white/5'
-            }`}
-          >
-            {Array.from({ length: 7 }, (_, i) => {
-              const d = addDays(w, i)
-              const other = d.getMonth() !== month.getMonth()
-              const isToday = ymd(d) === today
-              return (
-                <span
-                  key={i}
-                  className={`py-1 ${other ? 'text-neutral-600' : on ? '' : 'text-neutral-300'} ${
-                    isToday ? 'font-bold text-amber-300' : ''
-                  }`}
-                >
-                  {d.getDate()}
-                </span>
-              )
-            })}
-          </button>
-        )
-      })}
-      <button
-        type="button"
-        className="mt-2 w-full rounded-md py-1 text-neutral-400 hover:bg-white/5 hover:text-neutral-100"
-        onClick={() => onPick(weekStartOf(new Date()))}
-      >
-        ↺
-      </button>
-    </div>
-  )
-}
 
 // mode='user'：用户端的只读日历（/calendar）。同一张表和小月历，但不显示数据源状态、设置、
 // 同步和生成按钮，数据走用户端接口。设置只在管理台。
@@ -133,8 +24,7 @@ function MiniCalendar({ week, onPick, lang }: { week: Date; onPick: (weekStart: 
 // source status, settings, sync and generate controls, reading the user endpoint.
 export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' | 'user' }) {
   const isAdmin = mode === 'admin'
-  const { t, i18n } = useTranslation()
-  const zh = i18n.language.startsWith('zh')
+  const { t } = useTranslation()
   const { toast, showToast } = useToast()
   const fail = useCallback(
     (e: unknown) => showToast('err', e instanceof Error ? localizeApiError(e.message) : String(e)),
@@ -302,42 +192,8 @@ export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' |
     return () => window.clearInterval(id)
   }, [jobRunning, fetchStart, load, showToast, t])
 
-  const weekDays = useMemo(() => new Set(Array.from({ length: 7 }, (_, i) => ymd(addDays(week, i)))), [week])
-
-  const byDay = useMemo(() => {
-    const m = new Map<string, { g: EconGroup; rows: Row[] }[]>()
-    for (const g of items) {
-      const k = dayKey(g)
-      if (!weekDays.has(k)) continue
-      const rows = rowsOf(g, zh, levels)
-      if (!rows.length) continue
-      m.set(k, [...(m.get(k) ?? []), { g, rows }])
-    }
-    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
-  }, [items, weekDays, zh, levels])
-
-  // 这一周各影响级别有几项（不受筛选影响）/ items per impact level this week, ignoring the filter
-  const levelCounts = useMemo(() => {
-    const c: Record<number, number> = { 1: 0, 2: 0, 3: 0 }
-    for (const g of items) {
-      if (!weekDays.has(dayKey(g))) continue
-      for (const r of rowsOf(g, zh)) c[Math.max(1, Math.min(3, r.importance))] += 1
-    }
-    return c
-  }, [items, weekDays, zh])
-
-  // 下一条将公布的（带具体时刻、还没到点的第一组）/ the next timed group still ahead
-  const nextKey = useMemo(() => {
-    let best: EconGroup | null = null
-    for (const [, list] of byDay)
-      for (const { g } of list)
-        if (g.at && g.status !== 'cancelled' && new Date(g.at).getTime() > now && (!best || g.at < best.at!)) best = g
-    return best?.key ?? null
-  }, [byDay, now])
-
   const st = status
   const cfg = st?.settings
-  const weekLabel = `${addDays(week, 0).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })} – ${addDays(week, 6).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })}`
 
   return (
     <div className="space-y-3">
@@ -466,340 +322,43 @@ export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' |
         </section>
       )}
 
-      {/* 手机上用户先看到表格，小月历和筛选排在后面；管理台保持原顺序（按钮在上）
-          On phones users get the table first, the mini calendar and filter after it; admin keeps its order */}
-      <div className={`flex gap-3 lg:flex-row-reverse lg:items-start ${isAdmin ? 'flex-col' : 'flex-col-reverse'}`}>
-        <aside className="space-y-2 lg:sticky lg:top-4 lg:w-60 lg:shrink-0">
-          <MiniCalendar week={week} onPick={setWeek} lang={i18n.language} />
-          <div className="glass space-y-2 rounded-2xl p-3 text-xs text-neutral-400">
-            <div className="flex items-center justify-between">
-              <span>{t('econ.impactFilter')}</span>
-              {levels.size < 3 && (
-                <button
-                  type="button"
-                  className="text-[11px] text-prism-300 hover:text-prism-200"
-                  onClick={() => {
-                    setLevels(new Set([1, 2, 3]))
-                    try {
-                      localStorage.removeItem(LEVELS_KEY)
-                    } catch {
-                      /* ignore */
-                    }
-                  }}
-                >
-                  {t('econ.showAll')}
-                </button>
-              )}
-            </div>
-            <div className="space-y-1">
-              {[3, 2, 1].map((n) => {
-                const on = levels.has(n)
-                return (
-                  <button
-                    key={n}
-                    type="button"
-                    role="checkbox"
-                    aria-checked={on}
-                    onClick={() => toggleLevel(n)}
-                    className={`flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left transition ${
-                      on
-                        ? 'border-white/15 bg-white/[0.06] text-neutral-100'
-                        : 'border-transparent text-neutral-500 hover:bg-white/[0.03]'
-                    }`}
-                  >
-                    <span
-                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${
-                        on ? 'border-prism-400 bg-prism-500 text-white' : 'border-white/20'
-                      }`}
-                    >
-                      {on ? '✓' : ''}
-                    </span>
-                    <Impact n={n} />
-                    <span className="flex-1">{t(`econ.level.${n}`)}</span>
-                    <span className="tabular-nums text-neutral-500">{levelCounts[n]}</span>
-                  </button>
-                )
-              })}
-            </div>
-            {isAdmin && (
-              <>
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-prism-500/50 bg-prism-600/20 px-3 py-1.5 text-xs font-medium text-prism-100 disabled:opacity-50"
-                  disabled={busy === 'sync' || !st?.narwhalConfigured}
-                  onClick={sync}
-                >
-                  {busy === 'sync' ? t('admin.econ.syncing') : t('admin.econ.syncWeek')}
-                </button>
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-white/10 disabled:opacity-50"
-                  disabled={jobRunning || busy === 'gen' || !st?.deepseekConfigured}
-                  onClick={generateWeek}
-                >
-                  {jobRunning
-                    ? t('admin.econ.generating', {
-                        done: (job?.done ?? 0) + (job?.failed ?? 0),
-                        total: job?.total ?? 0,
-                      })
-                    : t('admin.econ.generateWeek')}
-                </button>
-              </>
-            )}
-          </div>
-        </aside>
-
-        <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex items-center gap-2 px-1 text-sm">
-            <button
-              type="button"
-              className={segBtn(false)}
-              onClick={() => setWeek(addDays(week, -7))}
-              aria-label="previous week"
-            >
-              ‹
-            </button>
-            <span className="font-medium tabular-nums text-neutral-200">{weekLabel}</span>
-            <button
-              type="button"
-              className={segBtn(false)}
-              onClick={() => setWeek(addDays(week, 7))}
-              aria-label="next week"
-            >
-              ›
-            </button>
-            {loading && <span className="text-xs text-neutral-500">…</span>}
-          </div>
-
-          {!loading && byDay.length === 0 ? (
-            <p className="glass rounded-2xl p-6 text-center text-sm text-neutral-500">
-              {t(isAdmin ? 'admin.econ.emptyWeek' : 'econ.emptyWeek')}
-            </p>
-          ) : (
-            <div className="glass overflow-x-auto rounded-2xl">
-              <table className="w-full min-w-[680px] text-[13px]">
-                <thead>
-                  <tr className="border-b border-white/10 text-left text-[11px] text-neutral-500">
-                    <th className="w-28 px-3 py-2 font-normal">{t('econ.date')}</th>
-                    <th className="w-16 px-2 font-normal">{t('econ.time')}</th>
-                    <th className="w-12 px-2 font-normal">{t('econ.currency')}</th>
-                    <th className="w-12 px-2 font-normal">{t('econ.impact')}</th>
-                    <th className="px-2 font-normal">{t('econ.event')}</th>
-                    <th className="w-20 px-2 text-right font-normal">{t('econ.actual')}</th>
-                    <th className="w-20 px-2 text-right font-normal">{t('econ.consensus')}</th>
-                    <th className="w-20 px-2 text-right font-normal">{t('econ.previous')}</th>
-                    <th className="w-16 px-3 text-right font-normal">{t('econ.previewCol')}</th>
-                  </tr>
-                </thead>
-                {byDay.map(([day, list]) => (
-                  <tbody key={day} className="border-b border-white/10 last:border-b-0">
-                    {list.map(({ g, rows }, gi) => (
-                      <GroupRows
-                        key={g.key}
-                        g={g}
-                        rows={rows}
-                        zh={zh}
-                        dayLabel={gi === 0 ? fmtDay(day, i18n.language) : ''}
-                        showTime={gi === 0 || list[gi - 1].g.at !== g.at}
-                        past={isPast(g, now)}
-                        next={g.key === nextKey}
-                        focused={g.key === focusKey}
-                        admin={isAdmin}
-                      />
-                    ))}
-                  </tbody>
-                ))}
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
+      <EconWeekView
+        week={week}
+        onWeek={setWeek}
+        items={items}
+        loading={loading}
+        now={now}
+        levels={levels}
+        onToggleLevel={toggleLevel}
+        focusKey={focusKey}
+        initialDay={params.get('day')}
+        admin={isAdmin}
+        emptyText={t(isAdmin ? 'admin.econ.emptyWeek' : 'econ.emptyWeek')}
+        adminActions={
+          isAdmin ? (
+            <>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-prism-500/50 bg-prism-600/20 px-3 py-1.5 text-xs font-medium text-prism-100 disabled:opacity-50"
+                disabled={busy === 'sync' || !st?.narwhalConfigured}
+                onClick={sync}
+              >
+                {busy === 'sync' ? t('admin.econ.syncing') : t('admin.econ.syncWeek')}
+              </button>
+              <button
+                type="button"
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-white/10 disabled:opacity-50"
+                disabled={jobRunning || busy === 'gen' || !st?.deepseekConfigured}
+                onClick={generateWeek}
+              >
+                {jobRunning
+                  ? t('admin.econ.generating', { done: (job?.done ?? 0) + (job?.failed ?? 0), total: job?.total ?? 0 })
+                  : t('admin.econ.generateWeek')}
+              </button>
+            </>
+          ) : undefined
+        }
+      />
     </div>
-  )
-}
-
-function GroupRows({
-  g,
-  rows,
-  zh,
-  dayLabel,
-  showTime,
-  past,
-  next,
-  focused,
-  admin,
-}: {
-  g: EconGroup
-  rows: Row[]
-  zh: boolean
-  dayLabel: string
-  showTime: boolean
-  past: boolean
-  next: boolean
-  focused: boolean
-  admin: boolean
-}) {
-  const { t } = useTranslation()
-  const [open, setOpen] = useState(focused)
-  const firstRow = useRef<HTMLTableRowElement>(null)
-  useEffect(() => {
-    if (focused) firstRow.current?.scrollIntoView({ block: 'center' })
-  }, [focused])
-  const c = g.preview?.status === 'ok' ? g.preview.content : null
-  const time =
-    g.allDay || !g.at
-      ? t('econ.allDay')
-      : new Date(g.at).toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false,
-        })
-  // 已经过去的整组变暗（和 FF 一样），下一条将公布的标箭头并加底色
-  // Past groups are dimmed (like FF); the next one gets an arrow and a tint.
-  const tone = g.status === 'cancelled' ? 'opacity-30' : past ? 'opacity-50' : ''
-
-  return (
-    <>
-      {rows.map((r, i) => (
-        <tr
-          key={r.v?.measure ?? 'name'}
-          ref={i === 0 ? firstRow : undefined}
-          className={`cursor-pointer hover:bg-white/[0.04] ${i === 0 ? 'border-t border-white/5' : ''} ${
-            next ? 'bg-amber-400/[0.06]' : ''
-          }`}
-          onClick={() => setOpen((o) => !o)}
-        >
-          <td className="px-3 py-1.5 text-xs text-neutral-300">{i === 0 ? dayLabel : ''}</td>
-          <td
-            className={`whitespace-nowrap px-2 py-1.5 font-mono text-xs tabular-nums ${next ? 'text-amber-300' : 'text-neutral-400'} ${tone}`}
-          >
-            {i === 0 && showTime ? (
-              <>
-                {next && <span className="mr-1">▶</span>}
-                {time}
-              </>
-            ) : i === 0 && next ? (
-              <span>▶</span>
-            ) : (
-              ''
-            )}
-          </td>
-          <td className={`px-2 py-1.5 text-xs font-semibold text-neutral-300 ${tone}`}>{g.currency ?? g.country}</td>
-          <td className="px-2 py-1.5">
-            <Impact n={r.importance} />
-          </td>
-          <td className={`px-2 py-1.5 text-neutral-100 ${tone}`}>{r.label}</td>
-          <td
-            className={`px-2 py-1.5 text-right tabular-nums ${
-              r.v?.measure === g.primaryMeasure ? 'font-semibold text-neutral-50' : 'text-neutral-200'
-            } ${tone}`}
-          >
-            {r.v ? fmtNum(r.v.actual, r.v.unit) : ''}
-          </td>
-          <td className={`px-2 py-1.5 text-right tabular-nums text-neutral-400 ${tone}`}>
-            {r.v ? fmtNum(r.v.consensus, r.v.unit) : ''}
-          </td>
-          <td className={`px-2 py-1.5 text-right tabular-nums text-neutral-500 ${tone}`}>
-            {r.v ? fmtNum(r.v.previous, r.v.unit) : ''}
-          </td>
-          <td className={`px-3 py-1.5 text-right text-xs ${tone}`}>
-            {i === 0 &&
-              (c ? (
-                <span className="text-prism-200">
-                  {g.outcome ? t(`econ.scenarioShort.${g.outcome.basis ?? 'consensus'}.${g.outcome.outcome}`) : '●'}
-                </span>
-              ) : g.preview?.status === 'failed' ? (
-                <span className="text-rose-300">!</span>
-              ) : (
-                <span className="text-neutral-700">—</span>
-              ))}
-          </td>
-        </tr>
-      ))}
-      {open && (
-        <tr>
-          <td colSpan={9} className="bg-white/[0.02] px-4 py-3">
-            {c ? (
-              <div className="space-y-2">
-                <p className="text-sm text-neutral-200">{zh ? c.title_zh : c.title_en}</p>
-                <p className="text-xs leading-relaxed text-neutral-400">{zh ? c.why_zh : c.why_en}</p>
-                {(zh ? c.background_zh : c.background_en) && (
-                  <p className="text-xs leading-relaxed text-neutral-400">
-                    <span className="mr-1 text-neutral-500">{t('econ.background')}</span>
-                    {zh ? c.background_zh : c.background_en}
-                  </p>
-                )}
-                {(zh ? c.watch_zh : c.watch_en) && (
-                  <p className="text-xs leading-relaxed text-neutral-400">
-                    <span className="mr-1 text-neutral-500">{t('econ.watch')}</span>
-                    {zh ? c.watch_zh : c.watch_en}
-                  </p>
-                )}
-                <div className="grid gap-2 sm:grid-cols-3">
-                  {OUTCOMES.map((o) => {
-                    const s = c.scenarios[o]
-                    const hit = g.outcome?.outcome === o
-                    return (
-                      <div
-                        key={o}
-                        className={`rounded-lg border p-2 text-xs ${hit ? 'border-prism-500/60 bg-prism-600/15' : 'border-white/10'} ${
-                          g.outcome && !hit ? 'opacity-40' : ''
-                        }`}
-                      >
-                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                          <span className="font-medium text-neutral-200">
-                            {t(`econ.scenario.${c.basis ?? 'consensus'}.${o}`)}
-                          </span>
-                          {s.impacts.map((im) => (
-                            <span
-                              key={im.asset}
-                              className={`font-mono ${
-                                im.direction === 'bullish'
-                                  ? 'text-emerald-300'
-                                  : im.direction === 'bearish'
-                                    ? 'text-rose-300'
-                                    : 'text-neutral-500'
-                              }`}
-                            >
-                              {im.asset}
-                              {im.direction === 'bullish' ? '↑' : im.direction === 'bearish' ? '↓' : '–'}
-                              <span className="ml-0.5 text-neutral-500">{t(`econ.strength.${im.strength}`)}</span>
-                            </span>
-                          ))}
-                        </div>
-                        <p className="text-neutral-400">{zh ? s.reason_zh : s.reason_en}</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-neutral-500">
-                {!admin
-                  ? t('econ.noPreview')
-                  : g.preview?.status === 'failed'
-                    ? g.preview.error
-                    : g.importance < 2
-                      ? t('admin.econ.whyNoPreview.low')
-                      : past
-                        ? t('admin.econ.whyNoPreview.past')
-                        : g.values.length > 0 &&
-                            !g.values.some((v) => (v.consensus ?? '') !== '' || (v.previous ?? '') !== '')
-                          ? t('admin.econ.whyNoPreview.noConsensus')
-                          : t('admin.econ.previewPending')}
-              </p>
-            )}
-            <div className="mt-2 flex items-center gap-3 text-[11px] text-neutral-600">
-              {!admin && c && <span>{t('econ.aiNote')}</span>}
-              {admin && g.preview?.model && (
-                <span>
-                  {g.preview.model} · {g.preview.tokensIn ?? 0}/{g.preview.tokensOut ?? 0} tokens
-                </span>
-              )}
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
   )
 }

@@ -5636,19 +5636,6 @@
         "below": "偏鸽"
       }
     },
-    "scenarioShort": {
-      "consensus": {
-        "above": "高于",
-        "inline": "符合",
-        "below": "低于"
-      },
-      "previous": {
-        "above": "高于前值",
-        "inline": "持平",
-        "below": "低于前值"
-      }
-    },
-    "showAll": "全部显示",
     "level": {
       "1": "低影响",
       "2": "中影响",
@@ -5656,6 +5643,10 @@
     },
     "noPreview": "暂无预案",
     "emptyWeek": "这一周没有数据。",
-    "aiNote": "预案由 AI 根据公开数据生成，仅供参考，不构成投资建议。"
+    "aiNote": "预案由 AI 根据公开数据生成，仅供参考，不构成投资建议。",
+    "thisWeek": "本周",
+    "emptyDay": "这一天没有符合筛选的数据。",
+    "countdownDays": "{{d}}天{{h}}小时",
+    "todayTag": "今天"
   }
 }

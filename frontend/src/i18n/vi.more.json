@@ -2752,19 +2752,6 @@
         "below": "Bồ câu"
       }
     },
-    "scenarioShort": {
-      "consensus": {
-        "above": "Cao hơn",
-        "inline": "Đúng",
-        "below": "Thấp hơn"
-      },
-      "previous": {
-        "above": "Cao hơn kỳ trước",
-        "inline": "Đi ngang",
-        "below": "Thấp hơn kỳ trước"
-      }
-    },
-    "showAll": "Hiện tất cả",
     "level": {
       "1": "Tác động thấp",
       "2": "Tác động vừa",
@@ -2772,6 +2759,10 @@
     },
     "noPreview": "Chưa có kịch bản",
     "emptyWeek": "Tuần này không có dữ liệu.",
-    "aiNote": "Kịch bản do AI tạo từ dữ liệu công khai, chỉ để tham khảo, không phải lời khuyên đầu tư."
+    "aiNote": "Kịch bản do AI tạo từ dữ liệu công khai, chỉ để tham khảo, không phải lời khuyên đầu tư.",
+    "thisWeek": "Tuần này",
+    "emptyDay": "Ngày này không có dữ liệu.",
+    "countdownDays": "{{d}} ngày {{h}} giờ",
+    "todayTag": "Hôm nay"
   }
 }

@@ -5647,19 +5647,6 @@
         "below": "Dovish"
       }
     },
-    "scenarioShort": {
-      "consensus": {
-        "above": "Above",
-        "inline": "In line",
-        "below": "Below"
-      },
-      "previous": {
-        "above": "Above prev.",
-        "inline": "Flat",
-        "below": "Below prev."
-      }
-    },
-    "showAll": "Show all",
     "level": {
       "1": "Low",
       "2": "Medium",
@@ -5667,6 +5654,10 @@
     },
     "noPreview": "No preview",
     "emptyWeek": "No releases this week.",
-    "aiNote": "Previews are AI-generated from public data, for reference only, and are not investment advice."
+    "aiNote": "Previews are AI-generated from public data, for reference only, and are not investment advice.",
+    "thisWeek": "This week",
+    "emptyDay": "No releases on this day.",
+    "countdownDays": "{{d}}d {{h}}h",
+    "todayTag": "Today"
   }
 }

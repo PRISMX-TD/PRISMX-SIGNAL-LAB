@@ -1,0 +1,759 @@
+/* 财经日历（.ec-*，2026-11-21 重做）。只由 components/admin/econ/EconWeekView.tsx import，
+   跟着日历页的懒加载 chunk 走，不进首屏 CSS。
+
+   上一版是一张最小宽度 680px 的表格：手机上要左右拖才能看到公布值，展开的预案塞在表格
+   单元格里也跟着被撑出屏幕。这一版不用表格，一行一个指标的网格：
+     手机：两行——时间 / 影响 + 货币 + 名称 / 公布值（或倒计时），第二行是预期与前值；
+           顶上一条七天的周条，一次只看一天，不用横向滚动。
+     电脑：同一套元素排成一行六列（时间 / 事件 / 公布 / 预期 / 前值 / 预案），整周按天分卡片。
+   颜色、圆角、动效全部取自 tokens.css；影响三色沿用 Forex Factory 的黄 / 橙 / 红（数据色）。
+
+   Economic calendar (.ec-*). Imported only by EconWeekView.tsx so it ships with the calendar's lazy
+   chunk. The previous version was a 680px-min table that forced sideways scrolling on phones and
+   dragged the expanded preview off-screen with it. This one is a grid list, one figure per row:
+   two lines on phones under a seven-day strip (one day at a time), one six-column line on desktop
+   with a card per day. Colours, radii and motion come from tokens.css. */
+
+.ec {
+  display: grid;
+  gap: 16px;
+  --ec-cols: 58px minmax(0, 1fr) 84px 84px 84px 84px;
+  --ec-imp-h: #e8322b;
+  --ec-imp-m: #f7941d;
+  --ec-imp-l: #f5d90a;
+}
+.ec-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ec-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── 工具条：翻周 + 影响筛选 / toolbar: week nav + impact filter ── */
+.ec-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+}
+.ec-week {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ec-week-label {
+  padding: 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ec-icon-btn,
+.ec-text-btn {
+  height: 32px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--text-2);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.ec-icon-btn {
+  width: 32px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  font-size: 17px;
+  line-height: 1;
+}
+.ec-text-btn {
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ec-icon-btn:active,
+.ec-text-btn:active,
+.ec-level:active,
+.ec-day:active {
+  transform: scale(0.97);
+}
+.ec-levels {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+/* 次级切换：亮起的是中性面，不用品牌紫（见 tokens.css「选中态分三种」）
+   A secondary switch: the lit state is a neutral plane, not brand violet. */
+.ec-level {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-hi);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.ec-level b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.ec-level.is-on {
+  border-color: transparent;
+  background: var(--surface);
+  color: var(--text);
+}
+.ec-level:not(.is-on) .ec-imp {
+  opacity: 0.35;
+}
+
+/* 影响色块 / impact block */
+.ec-imp {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--nest-hi);
+}
+.ec-imp.l3 {
+  background: var(--ec-imp-h);
+}
+.ec-imp.l2 {
+  background: var(--ec-imp-m);
+}
+.ec-imp.l1 {
+  background: var(--ec-imp-l);
+}
+
+/* ── 周条（手机）：七天，一次看一天 / week strip (phones): seven days, one at a time ── */
+.ec-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+.ec-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 0 7px;
+  border-radius: var(--r-md);
+  background: var(--surface);
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.ec-day .w {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.ec-day .n {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.ec-day .marks {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+}
+.ec-day .marks i {
+  width: 6px;
+  height: 6px;
+  border-radius: 2px;
+}
+.ec-day.is-past:not(.is-on) {
+  opacity: 0.55;
+}
+.ec-day.is-empty:not(.is-on) .n {
+  color: var(--text-3);
+}
+.ec-day.is-today:not(.is-on) .w {
+  color: var(--purple-hi);
+  font-weight: 600;
+}
+/* 主选择：实色品牌紫 + 白字 / primary selection: solid violet, white text */
+.ec-day.is-on {
+  background: var(--purple);
+}
+.ec-day.is-on .w,
+.ec-day.is-on .n {
+  color: #fff;
+}
+
+/* ── 一天一段 / one section per day ── */
+.ec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ec-daysec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ec-dayhead {
+  padding: 0 4px;
+}
+.ec-dayhead .t {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.ec-dayhead .col {
+  display: none;
+}
+.ec-dayhead h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.ec-dayhead .today {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--purple-hi);
+}
+.ec-card {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: 6px 0;
+  overflow: hidden;
+}
+.ec-empty {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: 36px 20px;
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-3);
+}
+.ec-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+}
+.ec-skel i {
+  display: block;
+  height: 34px;
+}
+
+/* ── 一组（一份报告）与它的行 / a group (one report) and its rows ── */
+.ec-group {
+  outline: none;
+}
+/* 不同时刻之间一条发丝线；同一时刻的几份报告不画线，靠行距分开
+   One hairline between moments; reports sharing a moment are separated by spacing only. */
+.ec-group.new-moment {
+  border-top: 1px solid var(--line);
+}
+.ec-group.can-open {
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.ec-group.can-open:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--purple-hi);
+}
+.ec-group.is-open {
+  background: var(--surface-2);
+}
+
+.ec-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: start;
+  padding: 9px 14px;
+}
+.ec-time {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  padding-top: 2px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ec-time .arrow {
+  width: 9px;
+  flex: none;
+  font-size: 8px;
+  color: var(--purple-hi);
+}
+.ec-main-cell {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-width: 0;
+}
+.ec-main-cell .ec-imp {
+  margin-top: 3px;
+}
+.ec-cur {
+  flex: none;
+  padding-top: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--text-3);
+}
+.ec-name {
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.ec-val {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: end;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ec-val.is-count {
+  font-size: 12px;
+  font-weight: 500;
+  padding-top: 2px;
+  color: var(--purple-hi);
+}
+.ec-sub {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-3);
+}
+.ec-kv .v {
+  margin-left: 5px;
+  font-family: var(--font-mono);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.ec-kv.is-empty {
+  display: none;
+}
+.ec-tag {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  align-self: center;
+  padding: 0 6px;
+  border-radius: 4px;
+  border: 1px solid rgb(var(--purple-hi-rgb) / 0.4);
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--purple-hi);
+  white-space: nowrap;
+}
+.ec-tag.is-hit {
+  border-color: transparent;
+  background: var(--option-active-bg);
+  color: var(--purple-pale);
+}
+.ec-tag.is-fail {
+  border-color: rgb(var(--down-rgb) / 0.4);
+  color: var(--down);
+}
+/* 没有数值的事件（讲话、会议）只有一行：预案标记挪到第一行右侧
+   Value-less events (speeches, meetings) are one line: the tag moves up beside the name. */
+.ec-row.is-bare .ec-tag {
+  grid-row: 1;
+  align-self: start;
+  margin-top: 1px;
+}
+
+/* 下一项：箭头 + 加重的时间和名称 / the next release: arrow, heavier time and name */
+.ec-row.is-next .ec-time {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.ec-row.is-next .ec-name {
+  color: var(--text-strong);
+  font-weight: 500;
+}
+/* 已公布：名称退后，公布值留在前面（过去的行里它才是要看的）
+   Published: the name steps back, the actual stays forward since it is what a past row is for. */
+.ec-row.is-past .ec-name,
+.ec-row.is-past .ec-kv .v {
+  color: var(--text-3);
+}
+.ec-row.is-past .ec-val {
+  color: var(--text);
+}
+.ec-row.is-past .ec-imp {
+  opacity: 0.7;
+}
+.ec-row.is-cancelled {
+  opacity: 0.35;
+}
+.ec-row.is-cancelled .ec-name {
+  text-decoration: line-through;
+}
+
+/* ── 展开的预案 / the expanded preview ── */
+.ec-panel {
+  margin: 2px 10px 10px;
+  padding: 14px;
+  border-radius: var(--r-panel);
+  background: var(--nest);
+  cursor: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-wrap: anywhere;
+}
+.ec-panel h4 {
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--text-strong);
+}
+.ec-panel p {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+.ec-panel p .k {
+  margin-right: 8px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.ec-scn {
+  display: grid;
+  gap: 8px;
+}
+.ec-sc {
+  padding: 10px 12px;
+  border-radius: var(--r-tile);
+  background: var(--nest-hi);
+}
+.ec-sc-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin-bottom: 4px;
+}
+.ec-sc-head b {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.ec-sc-head .imp {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.ec-sc-head .imp.up {
+  color: var(--up);
+}
+.ec-sc-head .imp.down {
+  color: var(--down);
+}
+.ec-sc-head .imp small {
+  margin-left: 3px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.ec-sc p {
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.ec-sc.is-hit {
+  background: var(--option-active-bg);
+  box-shadow: inset 0 0 0 1px rgb(var(--purple-hi-rgb) / 0.6);
+}
+.ec-sc.is-miss {
+  opacity: 0.45;
+}
+.ec-panel .foot {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+/* ── 小月历（电脑侧栏）/ mini month calendar (desktop aside) ── */
+.ec-cal {
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: 14px;
+  font-size: 12px;
+}
+.ec-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.ec-cal-head span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-strong);
+}
+.ec-cal-head button {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-tile);
+  color: var(--text-3);
+  font-size: 15px;
+}
+.ec-cal-names,
+.ec-cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  text-align: center;
+}
+.ec-cal-names {
+  font-size: 10px;
+  color: var(--text-3);
+  padding-bottom: 4px;
+}
+.ec-cal-week {
+  width: 100%;
+  border-radius: var(--r-tile);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.ec-cal-week span {
+  padding: 5px 0;
+}
+.ec-cal-week .other {
+  color: var(--text-3);
+  opacity: 0.55;
+}
+.ec-cal-week .today {
+  color: var(--purple-hi);
+  font-weight: 700;
+}
+.ec-cal-week.is-on {
+  background: var(--purple);
+  color: #fff;
+}
+.ec-cal-week.is-on .other,
+.ec-cal-week.is-on .today {
+  color: #fff;
+  opacity: 1;
+}
+.ec-admin-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface);
+  border-radius: var(--r-lg);
+  padding: 14px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ec-icon-btn:hover,
+  .ec-text-btn:hover,
+  .ec-day:not(.is-on):hover {
+    background: var(--surface-2);
+    color: var(--text-strong);
+  }
+  .ec-level:not(.is-on):hover {
+    color: var(--text);
+  }
+  .ec-group.can-open:hover {
+    background: var(--surface-2);
+  }
+  .ec-cal-head button:hover,
+  .ec-cal-week:not(.is-on):hover {
+    background: var(--nest);
+    color: var(--text-strong);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ec-panel {
+    animation: ec-panel-in var(--dur-base) var(--ease-out);
+  }
+}
+@keyframes ec-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+/* ── 手机 / 平板：一次只显示选中的那一天，用户端不显示小月历 ──
+   Phones and tablets: only the selected day is shown; the mini calendar is hidden for users. */
+@media (max-width: 1023px) {
+  .ec-daysec:not(.is-on) {
+    display: none;
+  }
+  .ec-aside.is-user {
+    display: none;
+  }
+}
+
+/* ── 电脑：整周、一行六列、侧栏小月历 / desktop: whole week, six columns, aside calendar ── */
+@media (min-width: 1024px) {
+  .ec {
+    grid-template-columns: minmax(0, 1fr) 248px;
+    align-items: start;
+    gap: 20px;
+  }
+  .ec-aside {
+    position: sticky;
+    top: 16px;
+  }
+  /* 筛选在 DOM 里排在周条后面（手机上的顺序），电脑上提到工具条右侧
+     The filter follows the strip in the DOM (phone order); on desktop it sits at the bar's right. */
+  .ec-main {
+    position: relative;
+  }
+  .ec-levels {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: auto;
+  }
+  .ec-level {
+    flex: none;
+  }
+  .ec-days,
+  .ec-empty.mobile-only {
+    display: none;
+  }
+  .ec-list {
+    gap: 20px;
+  }
+  /* 每天的标题行同时是列标题：日期占前两列，后四列写公布 / 预期 / 前值 / 预案
+     Each day's heading doubles as the column header: date over the first two columns. */
+  .ec-dayhead {
+    display: grid;
+    grid-template-columns: var(--ec-cols);
+    column-gap: 12px;
+    align-items: baseline;
+    padding: 0 18px;
+  }
+  .ec-dayhead .t {
+    grid-column: 1 / 3;
+  }
+  .ec-dayhead .col {
+    display: block;
+    text-align: right;
+    font-size: 11px;
+    color: var(--text-3);
+  }
+  .ec-row {
+    grid-template-columns: var(--ec-cols);
+    column-gap: 12px;
+    row-gap: 0;
+    align-items: baseline;
+    padding: 7px 18px;
+  }
+  .ec-time {
+    padding-top: 0;
+  }
+  .ec-main-cell {
+    align-items: baseline;
+  }
+  .ec-main-cell .ec-imp {
+    margin-top: 0;
+    align-self: center;
+  }
+  .ec-cur {
+    padding-top: 0;
+    width: 28px;
+  }
+  .ec-name {
+    font-size: 13.5px;
+  }
+  .ec-val {
+    font-size: 13.5px;
+  }
+  .ec-val.is-count {
+    padding-top: 0;
+  }
+  /* 第二行拆回两列：预期、前值各占一格，标签由表头承担
+     The second line dissolves into two cells; the header row carries the labels. */
+  .ec-sub {
+    display: contents;
+  }
+  .ec-kv {
+    grid-row: 1;
+    text-align: right;
+    font-size: 13px;
+  }
+  .ec-kv.c {
+    grid-column: 4;
+  }
+  .ec-kv.p {
+    grid-column: 5;
+  }
+  .ec-kv.is-empty {
+    display: block;
+  }
+  .ec-kv .k {
+    display: none;
+  }
+  .ec-kv .v {
+    margin-left: 0;
+  }
+  .ec-kv.p .v {
+    color: var(--text-3);
+  }
+  .ec-tag,
+  .ec-row.is-bare .ec-tag {
+    grid-column: 6;
+    grid-row: 1;
+    align-self: baseline;
+    margin-top: 0;
+  }
+  .ec-panel {
+    margin: 4px 12px 12px;
+    padding: 16px 18px;
+  }
+  .ec-panel p {
+    max-width: 92ch;
+  }
+  .ec-scn {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}

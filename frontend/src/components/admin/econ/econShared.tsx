@@ -1,5 +1,7 @@
 // 财经日历的共用小工具：管理台日历页和仪表盘「今日财经」卡片都用。
 // Shared calendar helpers for the admin calendar and the dashboard today card.
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { EconGroup, EconValue } from '../../../api/econTypes'
 import { measureZh, releaseZh } from './econNamesZh'
 
@@ -11,6 +13,36 @@ export function addDays(d: Date, n: number): Date {
   const x = new Date(d)
   x.setDate(x.getDate() + n)
   return x
+}
+
+/** 这一周的周日（和 Forex Factory 一样周日开始）/ the Sunday that starts this week, like FF */
+export function weekStartOf(d: Date): Date {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  return addDays(x, -x.getDay())
+}
+
+export function filled(v: number | string | null | undefined): boolean {
+  return v !== null && v !== undefined && v !== ''
+}
+
+/** 到某一时刻的倒计时，自己每秒走一次，不带动父组件重渲染。超过一天显示「几天几小时」。
+ *  Countdown to a moment; ticks on its own so the parent does not re-render. Days and hours past 24h. */
+export function Countdown({ to, className }: { to: number; className?: string }) {
+  const { t } = useTranslation()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const s = Math.max(0, Math.floor((to - now) / 1000))
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  return (
+    <span className={className}>
+      {d > 0 ? t('econ.countdownDays', { d, h }) : `${pad(h)}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`}
+    </span>
+  )
 }
 
 export function dayKey(g: EconGroup): string {
