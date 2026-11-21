@@ -3962,6 +3962,15 @@
       "impact": "Impact",
       "event": "Event",
       "previewCol": "Preview",
+      "today": {
+        "title": "Today's calendar",
+        "titleNext": "Next data day",
+        "full": "Full calendar",
+        "empty": "No orange or red releases in the next few days.",
+        "more": "{{n}} more in the calendar",
+        "nextIn": "Next release in",
+        "nextInMany": "Next release in ({{n}} at once)"
+      },
       "outcomeShort": {
         "above": "Above",
         "inline": "In line",

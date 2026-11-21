@@ -8,7 +8,7 @@
 // compact ticket (identity row, SL | entry | TP over the risk|reward rule,
 // countdown ring + pill CTA). The header moves inside the card; the count is one
 // violet tabular numeral.
-import { memo, type CSSProperties, type FC } from 'react'
+import { memo, type CSSProperties, type FC, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Signal } from '../../api/types'
 import { calcRiskReward, displaySymbol } from '../../api/utils'
@@ -30,9 +30,11 @@ interface Props {
   onTrade: (s: Signal) => void
   onFocus: (idx: number) => void
   onViewAll: () => void
+  /** 排在按钮下面的附加卡片（仪表盘的「今日财经」）/ extra card under the button */
+  children?: ReactNode
 }
 
-const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
+const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll, children }) => {
   const { t } = useTranslation()
 
   // 最多列 3 条，其余交给「其他活跃信号 ›」/ up to 3 rows; the rest live behind the button
@@ -137,6 +139,7 @@ const SignalOthers: FC<Props> = ({ entries, onTrade, onFocus, onViewAll }) => {
           <path d="M9 18l6-6-6-6" />
         </svg>
       </button>
+      {children}
     </section>
   )
 }

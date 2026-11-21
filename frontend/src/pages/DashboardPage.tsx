@@ -17,6 +17,7 @@ import QuotesTable from '../components/signals/QuotesTable'
 import { useHeroSymbols } from '../components/signals/SymbolTabs'
 import SessionWinrateCard from '../components/winrate/SessionWinrateCard'
 import PersonalWinRateCard from '../components/PersonalWinRateCard'
+import EconTodayCard from '../components/admin/econ/EconTodayCard'
 import Toast from '../components/Toast'
 import SlideOrderModal from '../components/SlideOrderModal'
 import { useBucketedNow, useFocusEntries, useOrderPlacement } from '../components/signals/hooks'
@@ -131,6 +132,11 @@ export default function DashboardPage() {
     if (placed) navigate('/orders', { state: { tab: 'positions' } })
   }
   const goSignals = useCallback(() => navigate('/app'), [navigate])
+  // 「今日财经」卡片排在第三栏「其他活跃信号」下面（只有管理员看得到，组件自己判断）。用 useMemo 固定
+  // 这个元素：SignalOthers 是 memo 的，每次渲染都新建一个子元素会让它白白重渲染。
+  // The today-calendar card sits under "other active signals" (admins only; the component checks).
+  // Memoised so the memoised SignalOthers does not re-render for a fresh child element each time.
+  const econCard = useMemo(() => <EconTodayCard />, [])
 
   const handleConfirm = async (volume: number, mt5Login: string | null, stopLoss: number | null, takeProfit: number | null, clientOrderId: string, reverse = false) => {
     // 抛错而不是 return，理由见 SignalsPage.tsx 同名函数的注释：提前 return 也算 resolve，
@@ -190,7 +196,7 @@ export default function DashboardPage() {
                 <SessionWinrateCard />
                 <PersonalWinRateCard className="dash-personal" />
               </div>
-              <SignalOthers entries={otherEntries} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals} />
+              <SignalOthers entries={otherEntries} onTrade={openTrade} onFocus={setFocusIdx} onViewAll={goSignals}>{econCard}</SignalOthers>
             </>
           ) : (
             <>
@@ -207,7 +213,10 @@ export default function DashboardPage() {
                 <SessionWinrateCard />
                 <PersonalWinRateCard className="dash-personal" />
               </div>
-              <section className="card glass dash-others p-4 flex items-center justify-center text-sm text-neutral-500">{t('signals.focus.noExecutable')}</section>
+              <div className="dash-others flex flex-col gap-5">
+                <section className="card glass p-4 flex items-center justify-center text-sm text-neutral-500">{t('signals.focus.noExecutable')}</section>
+                {econCard}
+              </div>
             </>
           )}
         </div>

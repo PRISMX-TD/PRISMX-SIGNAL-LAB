@@ -3951,6 +3951,15 @@
       "impact": "影响",
       "event": "事件",
       "previewCol": "预案",
+      "today": {
+        "title": "今日财经",
+        "titleNext": "下一个数据日",
+        "full": "完整日历",
+        "empty": "未来几天没有橙色或红色数据。",
+        "more": "还有 {{n}} 项，去日历看全部",
+        "nextIn": "距离下一项",
+        "nextInMany": "距离下一项（{{n}} 项同时）"
+      },
       "outcomeShort": {
         "above": "高于",
         "inline": "符合",

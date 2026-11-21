@@ -4,38 +4,26 @@
 // Admin "Economic calendar" (admin-only for now), Forex Factory style: a mini month calendar on the
 // side (click a week to see that week), one row per figure, past rows dimmed, an arrow on the next
 // release, and the three-scenario preview on click.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { adminApi } from '../../../api/client'
-import type { EconGroup, EconOutcome, EconStatus, EconValue } from '../../../api/econTypes'
+import type { EconGroup, EconOutcome, EconStatus } from '../../../api/econTypes'
 import { localizeApiError } from '../../../api/utils'
 import Switch from '../../Switch'
 import { segBtn } from '../../../utils/segBtn'
 import { useToast } from '../../../utils/useToast'
+import { Impact, addDays, dayKey, fmtNum, isPast, rowsOf, ymd, type Row } from './econShared'
 
 const LEVELS_KEY = 'econ.impactLevels'
 const OUTCOMES: EconOutcome[] = ['above', 'inline', 'below']
 
 // ---- 日期工具（全部按浏览器本地时区）/ date helpers, all in the browser's local zone ----
 
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function addDays(d: Date, n: number): Date {
-  const x = new Date(d)
-  x.setDate(x.getDate() + n)
-  return x
-}
-
 /** 这一周的周日（和 Forex Factory 一样周日开始）/ the Sunday that starts this week, like FF */
 function weekStartOf(d: Date): Date {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate())
   return addDays(x, -x.getDay())
-}
-
-function dayKey(g: EconGroup): string {
-  return g.at ? ymd(new Date(g.at)) : (g.date ?? '')
 }
 
 function fmtDay(day: string, lang: string): string {
@@ -46,93 +34,6 @@ function fmtDay(day: string, lang: string): string {
     month: 'short',
     day: 'numeric',
   })
-}
-
-// Narwhal 的数值有时是字符串（"3.5"），先转成数字；转不了就原样显示。
-// Narwhal sometimes sends figures as strings ("3.5"); coerce, else show as-is.
-function fmtNum(raw: number | string | null | undefined, unit?: string | null): string {
-  if (raw === null || raw === undefined || raw === '') return ''
-  const v = typeof raw === 'number' ? raw : Number(raw)
-  if (!Number.isFinite(v)) return String(raw)
-  const s = Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)))
-  return unit === 'percent' || unit === '%' ? `${s}%` : s
-}
-
-// 指标 id → 可读名：employment_change → Employment Change，cpi_yoy → CPI y/y
-// Measure id → readable name.
-const UPPER = new Set([
-  'cpi',
-  'ppi',
-  'gdp',
-  'pmi',
-  'pce',
-  'hicp',
-  'ism',
-  'zew',
-  'ifo',
-  'nfp',
-  'rpi',
-  'uom',
-  'anz',
-  'nab',
-  'kof',
-  'cbi',
-  'adp',
-])
-const SUFFIX: Record<string, string> = {
-  yoy: 'y/y',
-  mom: 'm/m',
-  qoq: 'q/q',
-  ann: '(ann.)',
-  sa: '(s.a.)',
-  '3m': '3m',
-}
-function humanize(measure: string): string {
-  return measure
-    .split('_')
-    .map((w) => SUFFIX[w] ?? (UPPER.has(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
-    .join(' ')
-}
-
-// 表里列哪几项：有预期值的（Forex Factory 也只列有预测的），主指标排第一；都没有就只列主指标，
-// 再没有就一行发布名。/ Rows: measures with a consensus (primary first); else the primary; else the release name.
-function shownValues(g: EconGroup): EconValue[] {
-  const withCons = g.values.filter((v) => v.consensus !== null && v.consensus !== undefined && v.consensus !== '')
-  const primary = g.values.find((v) => v.measure === g.primaryMeasure)
-  const list = withCons.length ? withCons : primary ? [primary] : []
-  return [...list].sort((a, b) => (a.measure === g.primaryMeasure ? -1 : b.measure === g.primaryMeasure ? 1 : 0))
-}
-
-type Row = { label: string; v: EconValue | null; importance: number }
-
-function rowsOf(g: EconGroup, zh: boolean, levels?: ReadonlySet<number>): Row[] {
-  const c = g.preview?.status === 'ok' ? g.preview.content : null
-  const values = shownValues(g)
-  const rows: Row[] = values.length
-    ? values.map((v) => ({
-        label: (zh && c?.names_zh[v.measure]) || humanize(v.measure),
-        v,
-        importance: v.importance ?? g.importance,
-      }))
-    : [
-        {
-          label: (c && (zh ? c.title_zh : c.title_en)) || [...new Set(g.releases.map((r) => r.name))].join(' · '),
-          v: null,
-          importance: g.importance,
-        },
-      ]
-  return levels ? rows.filter((r) => levels.has(Math.max(1, r.importance))) : rows
-}
-
-function isPast(g: EconGroup, now: number): boolean {
-  if (g.at) return new Date(g.at).getTime() <= now
-  return !!g.date && g.date < ymd(new Date(now))
-}
-
-function Impact({ n }: { n: number }) {
-  // Forex Factory 的三色：黄 / 橙 / 红 / Forex Factory's yellow / orange / red
-  const color = n >= 3 ? 'bg-[#e8322b]' : n >= 2 ? 'bg-[#f7941d]' : n >= 1 ? 'bg-[#f5d90a]' : 'bg-neutral-600'
-  return <span className={`inline-block h-3.5 w-2.5 rounded-sm align-middle ${color}`} aria-label={`importance ${n}`} />
 }
 
 // ---- 小月历 / mini month calendar ----
@@ -236,7 +137,14 @@ export default function EconCalendarPanel() {
   )
   const [status, setStatus] = useState<EconStatus | null>(null)
   const [items, setItems] = useState<EconGroup[]>([])
-  const [week, setWeek] = useState(() => weekStartOf(new Date()))
+  // 从仪表盘「今日财经」卡片点进来：?day= 决定打开哪一周，?focus= 是要展开并滚到的那一组
+  // Arriving from the dashboard card: ?day= picks the week, ?focus= is the group to open and scroll to
+  const [params] = useSearchParams()
+  const focusKey = params.get('focus')
+  const [week, setWeek] = useState(() => {
+    const d = new Date(`${params.get('day') ?? ''}T00:00:00`)
+    return weekStartOf(Number.isNaN(d.getTime()) ? new Date() : d)
+  })
   // 影响筛选：黄 / 橙 / 红各自开关（像 Forex Factory 的勾选），记在本机
   // Impact filter: yellow / orange / red toggled independently (like FF's checkboxes), remembered locally
   const [levels, setLevels] = useState<ReadonlySet<number>>(() => {
@@ -645,6 +553,7 @@ export default function EconCalendarPanel() {
                         showTime={gi === 0 || list[gi - 1].g.at !== g.at}
                         past={isPast(g, now)}
                         next={g.key === nextKey}
+                        focused={g.key === focusKey}
                       />
                     ))}
                   </tbody>
@@ -666,6 +575,7 @@ function GroupRows({
   showTime,
   past,
   next,
+  focused,
 }: {
   g: EconGroup
   rows: Row[]
@@ -674,9 +584,14 @@ function GroupRows({
   showTime: boolean
   past: boolean
   next: boolean
+  focused: boolean
 }) {
   const { t } = useTranslation()
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(focused)
+  const firstRow = useRef<HTMLTableRowElement>(null)
+  useEffect(() => {
+    if (focused) firstRow.current?.scrollIntoView({ block: 'center' })
+  }, [focused])
   const c = g.preview?.status === 'ok' ? g.preview.content : null
   const time =
     g.allDay || !g.at
@@ -695,6 +610,7 @@ function GroupRows({
       {rows.map((r, i) => (
         <tr
           key={r.v?.measure ?? 'name'}
+          ref={i === 0 ? firstRow : undefined}
           className={`cursor-pointer hover:bg-white/[0.04] ${i === 0 ? 'border-t border-white/5' : ''} ${
             next ? 'bg-amber-400/[0.06]' : ''
           }`}

@@ -1,0 +1,104 @@
+// 财经日历的共用小工具：管理台日历页和仪表盘「今日财经」卡片都用。
+// Shared calendar helpers for the admin calendar and the dashboard today card.
+import type { EconGroup, EconValue } from '../../../api/econTypes'
+
+export function ymd(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+export function addDays(d: Date, n: number): Date {
+  const x = new Date(d)
+  x.setDate(x.getDate() + n)
+  return x
+}
+
+export function dayKey(g: EconGroup): string {
+  return g.at ? ymd(new Date(g.at)) : (g.date ?? '')
+}
+
+// Narwhal 的数值有时是字符串（"3.5"），先转成数字；转不了就原样显示。
+// Narwhal sometimes sends figures as strings ("3.5"); coerce, else show as-is.
+export function fmtNum(raw: number | string | null | undefined, unit?: string | null): string {
+  if (raw === null || raw === undefined || raw === '') return ''
+  const v = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(v)) return String(raw)
+  const s = Number.isInteger(v) ? String(v) : String(Number(v.toFixed(4)))
+  return unit === 'percent' || unit === '%' ? `${s}%` : s
+}
+
+// 指标 id → 可读名：employment_change → Employment Change，cpi_yoy → CPI y/y
+// Measure id → readable name.
+const UPPER = new Set([
+  'cpi',
+  'ppi',
+  'gdp',
+  'pmi',
+  'pce',
+  'hicp',
+  'ism',
+  'zew',
+  'ifo',
+  'nfp',
+  'rpi',
+  'uom',
+  'anz',
+  'nab',
+  'kof',
+  'cbi',
+  'adp',
+])
+const SUFFIX: Record<string, string> = {
+  yoy: 'y/y',
+  mom: 'm/m',
+  qoq: 'q/q',
+  ann: '(ann.)',
+  sa: '(s.a.)',
+  '3m': '3m',
+}
+function humanize(measure: string): string {
+  return measure
+    .split('_')
+    .map((w) => SUFFIX[w] ?? (UPPER.has(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(' ')
+}
+
+// 表里列哪几项：有预期值的（Forex Factory 也只列有预测的），主指标排第一；都没有就只列主指标，
+// 再没有就一行发布名。/ Rows: measures with a consensus (primary first); else the primary; else the release name.
+function shownValues(g: EconGroup): EconValue[] {
+  const withCons = g.values.filter((v) => v.consensus !== null && v.consensus !== undefined && v.consensus !== '')
+  const primary = g.values.find((v) => v.measure === g.primaryMeasure)
+  const list = withCons.length ? withCons : primary ? [primary] : []
+  return [...list].sort((a, b) => (a.measure === g.primaryMeasure ? -1 : b.measure === g.primaryMeasure ? 1 : 0))
+}
+
+export type Row = { label: string; v: EconValue | null; importance: number }
+
+export function rowsOf(g: EconGroup, zh: boolean, levels?: ReadonlySet<number>): Row[] {
+  const c = g.preview?.status === 'ok' ? g.preview.content : null
+  const values = shownValues(g)
+  const rows: Row[] = values.length
+    ? values.map((v) => ({
+        label: (zh && c?.names_zh[v.measure]) || humanize(v.measure),
+        v,
+        importance: v.importance ?? g.importance,
+      }))
+    : [
+        {
+          label: (c && (zh ? c.title_zh : c.title_en)) || [...new Set(g.releases.map((r) => r.name))].join(' · '),
+          v: null,
+          importance: g.importance,
+        },
+      ]
+  return levels ? rows.filter((r) => levels.has(Math.max(1, r.importance))) : rows
+}
+
+export function isPast(g: EconGroup, now: number): boolean {
+  if (g.at) return new Date(g.at).getTime() <= now
+  return !!g.date && g.date < ymd(new Date(now))
+}
+
+export function Impact({ n }: { n: number }) {
+  // Forex Factory 的三色：黄 / 橙 / 红 / Forex Factory's yellow / orange / red
+  const color = n >= 3 ? 'bg-[#e8322b]' : n >= 2 ? 'bg-[#f7941d]' : n >= 1 ? 'bg-[#f5d90a]' : 'bg-neutral-600'
+  return <span className={`inline-block h-3.5 w-2.5 rounded-sm align-middle ${color}`} aria-label={`importance ${n}`} />
+}
