@@ -46,6 +46,7 @@ const TRACKED_PATHS = new Set([
   '/u/:publicId',
   '/announcements',
   '/announcements/:id',
+  '/calendar',
   '/support',
   '/upgrade',
   '/account',

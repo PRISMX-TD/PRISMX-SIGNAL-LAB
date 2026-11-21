@@ -1,18 +1,17 @@
-// 仪表盘「今日财经」卡片（2026-11-21）：放在第三栏「其他活跃信号」下面，只给管理员看
-// （财经日历第一期还没对用户开放）。列出今天的橙 / 红数据：已公布的变暗并显示结果，下一项带箭头
+// 仪表盘「今日财经」卡片（2026-11-21）：放在第三栏「其他活跃信号」下面，所有登录用户可见
+// （管理员在日历设置里关掉「对用户开放」时不显示）。列出今天的橙 / 红数据：已公布的变暗并显示结果，下一项带箭头
 // 和倒计时，有预案的带标记；点任意一行进完整日历并定位到那一条。今天没有数据时显示下一个有
 // 数据的日子。手机上只列还没公布的。
-// Dashboard "today's calendar" card, under "other active signals" in the third column; admins only
-// while the calendar is not public. Today's orange / red figures: published ones dimmed with their
+// Dashboard "today's calendar" card, under "other active signals" in the third column; for every signed-in
+// user (hidden while an admin has "open to users" switched off). Today's orange / red figures: published ones dimmed with their
 // result, an arrow and a countdown on the next, a tag where a preview exists; any row opens the full
 // calendar at that entry. With nothing today it shows the next day that has data. Phones list only
 // what is still ahead.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
-import { adminApi } from '../../../api/client'
+import { econApi } from '../../../api/client'
 import type { EconGroup } from '../../../api/econTypes'
-import { useAuth } from '../../../store/auth'
 import { Impact, addDays, dayKey, fmtNum, isPast, rowsOf, ymd, type Row } from './econShared'
 
 const MAX_ROWS = 7
@@ -40,21 +39,19 @@ function Countdown({ to }: { to: number }) {
 
 export default function EconTodayCard() {
   const { t, i18n } = useTranslation()
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
   const zh = i18n.language.startsWith('zh')
   const [items, setItems] = useState<EconGroup[] | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    if (!isAdmin) return
     let alive = true
     const load = async () => {
       try {
         // 后端按 UTC 日期切片：从昨天取 6 天，本地「今天」和接下来几天都在里面
         // The backend slices by UTC date; six days from yesterday cover local today and the days after
-        const cal = await adminApi.econCalendar(ymd(addDays(new Date(), -1)), 6, 2)
-        if (alive) setItems(cal.items)
+        const cal = await econApi.calendar(ymd(addDays(new Date(), -1)), 6, 2)
+        // 管理员关掉「对用户开放」时整张卡不显示 / hidden entirely while "open to users" is off
+        if (alive) setItems(cal.public ? cal.items : null)
       } catch {
         /* 仪表盘上不为这张卡报错，下一轮再试 / stay quiet on the dashboard, retry next round */
       }
@@ -65,14 +62,13 @@ export default function EconTodayCard() {
       alive = false
       window.clearInterval(id)
     }
-  }, [isAdmin])
+  }, [])
 
   // 半分钟走一次「现在」：到点后行变暗、箭头换到下一项 / dimming and the arrow follow the clock
   useEffect(() => {
-    if (!isAdmin) return
     const id = window.setInterval(() => setNow(Date.now()), 30_000)
     return () => window.clearInterval(id)
-  }, [isAdmin])
+  }, [])
 
   const view = useMemo(() => {
     if (!items) return null
@@ -103,37 +99,39 @@ export default function EconTodayCard() {
     }
   }, [items, now, zh])
 
-  if (!isAdmin || !view) return null
+  if (!view) return null
 
   const dayLabel = view.day
-    ? new Date(`${view.day}T00:00:00`).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric', weekday: 'short' })
+    ? new Date(`${view.day}T00:00:00`).toLocaleDateString(i18n.language, {
+        month: 'short',
+        day: 'numeric',
+        weekday: 'short',
+      })
     : ''
   const linkTo = (g?: EconGroup) =>
-    view.day
-      ? `/admin/econ?${new URLSearchParams({ day: view.day, ...(g ? { focus: g.key } : {}) })}`
-      : '/admin/econ'
+    view.day ? `/calendar?${new URLSearchParams({ day: view.day, ...(g ? { focus: g.key } : {}) })}` : '/calendar'
 
   return (
     <section className="card glass p-[18px] sm:p-6">
       <div className="flex items-baseline gap-2">
         <h3 className="text-base font-bold text-white">
-          {t(view.isToday || !view.day ? 'admin.econ.today.title' : 'admin.econ.today.titleNext')}
+          {t(view.isToday || !view.day ? 'econ.today.title' : 'econ.today.titleNext')}
         </h3>
         <span className="text-xs text-neutral-400">{dayLabel}</span>
         <Link to={linkTo()} className="dh-link ml-auto">
-          {t('admin.econ.today.full')} ›
+          {t('econ.today.full')} ›
         </Link>
       </div>
 
       {view.list.length === 0 ? (
-        <p className="mt-4 text-sm text-neutral-500">{t('admin.econ.today.empty')}</p>
+        <p className="mt-4 text-sm text-neutral-500">{t('econ.today.empty')}</p>
       ) : (
         <ul className="mt-2">
           {view.list.map(({ g, row, past }) => {
             const isNext = !past && !!view.nextAt && g.at === view.nextAt
             const time =
               g.allDay || !g.at
-                ? t('admin.econ.allDay')
+                ? t('econ.allDay')
                 : new Date(g.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
             const v = row.v
             return (
@@ -156,11 +154,13 @@ export default function EconTodayCard() {
                   <span
                     className={`truncate text-[13px] ${past ? 'text-neutral-500' : isNext ? 'font-semibold text-strong' : 'text-neutral-100'}`}
                   >
-                    <span className="num mr-1.5 text-[11px] font-medium text-neutral-400">{g.currency ?? g.country}</span>
+                    <span className="num mr-1.5 text-[11px] font-medium text-neutral-400">
+                      {g.currency ?? g.country}
+                    </span>
                     {row.label}
                     {!past && g.preview?.status === 'ok' && (
                       <span className="ml-1.5 rounded border border-prism-400/40 px-1 text-[10px] font-normal text-prism-400">
-                        {t('admin.econ.previewCol')}
+                        {t('econ.previewCol')}
                       </span>
                     )}
                   </span>
@@ -168,19 +168,21 @@ export default function EconTodayCard() {
                     <span className={`col-start-4 text-[11px] ${past ? 'text-neutral-500' : 'text-neutral-400'}`}>
                       {filled(v.actual) && (
                         <span className="mr-3">
-                          {t('admin.econ.actual')}{' '}
+                          {t('econ.actual')}{' '}
                           <b className="num font-medium text-neutral-200">{fmtNum(v.actual, v.unit)}</b>
                         </span>
                       )}
                       {filled(v.consensus) && (
                         <span className="mr-3">
-                          {t('admin.econ.consensus')}{' '}
-                          <b className={`num font-medium ${past ? '' : 'text-neutral-200'}`}>{fmtNum(v.consensus, v.unit)}</b>
+                          {t('econ.consensus')}{' '}
+                          <b className={`num font-medium ${past ? '' : 'text-neutral-200'}`}>
+                            {fmtNum(v.consensus, v.unit)}
+                          </b>
                         </span>
                       )}
                       {!filled(v.actual) && filled(v.previous) && (
                         <span>
-                          {t('admin.econ.previous')} <span className="num">{fmtNum(v.previous, v.unit)}</span>
+                          {t('econ.previous')} <span className="num">{fmtNum(v.previous, v.unit)}</span>
                         </span>
                       )}
                     </span>
@@ -194,17 +196,13 @@ export default function EconTodayCard() {
 
       {view.hidden > 0 && (
         <Link to={linkTo()} className="mt-1 block text-xs text-neutral-400 hover:text-strong">
-          {t('admin.econ.today.more', { n: view.hidden })}
+          {t('econ.today.more', { n: view.hidden })}
         </Link>
       )}
 
       {view.nextAt && (
         <div className="mt-2 flex items-center gap-2 rounded-md bg-[var(--nest)] px-2.5 py-2 text-xs text-neutral-300">
-          <span>
-            {view.nextCount > 1
-              ? t('admin.econ.today.nextInMany', { n: view.nextCount })
-              : t('admin.econ.today.nextIn')}
-          </span>
+          <span>{view.nextCount > 1 ? t('econ.today.nextInMany', { n: view.nextCount }) : t('econ.today.nextIn')}</span>
           {/* key：换了下一项就重建倒计时 / remount when the next item changes */}
           <Countdown key={view.nextAt} to={new Date(view.nextAt).getTime()} />
         </div>

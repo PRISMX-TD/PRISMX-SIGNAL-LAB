@@ -423,6 +423,55 @@ def test_admin_router_requires_admin():
     assert any(d.dependency is require_admin for d in admin_econ.router.dependencies)
 
 
+# ---- 用户端只读接口 / the read-only user endpoint ----
+
+def test_user_calendar_hides_admin_details_and_obeys_the_switch(enabled, monkeypatch):
+    from app.routers import econ
+    from app.services.deps import get_current_user
+    db = enabled
+    _stub_llm(monkeypatch)
+    monkeypatch.setattr(store, "utcnow", lambda: NOW)
+    econ.clear_cache()
+    store.upsert_releases(db, [
+        _release("r1", values=RETAIL),
+        _release("bad", at=NOW + timedelta(hours=4), name="Durable goods", values=[{"measure": "durable_goods_mom", "consensus": "0.5"}]),
+    ], NOW)
+    db.commit()
+    loop.run_previews(db, store.get_settings(db), NOW)
+    # 其中一份当作写失败的 / pretend one of them failed
+    bad_key = next(r.group_key for r in db.query(EconRelease).all() if r.id == "bad")
+    bad = db.query(EconPreview).filter(EconPreview.group_key == bad_key).first()
+    if bad is None:
+        bad = EconPreview(group_key=bad_key, country="USA", at=NOW + timedelta(hours=4))
+        db.add(bad)
+    bad.status, bad.error = "failed", "boom"
+    user = User(email="u@t.co", password_hash="x", api_token="tok-u")
+    db.add(user)
+    db.commit()
+
+    out = econ.econ_calendar(start=NOW.date(), days=2, minImportance=rules.LOW, db=db, user=user)
+    assert out["public"] is True
+    by_key = {g["key"]: g for g in out["items"]}
+    ok = by_key["USA|2026-11-20T15:00|retail-sales"]
+    # 只带正文：没有模型名、token、失败原因、发布 id / text only, no model, tokens, error or release ids
+    assert set(ok["preview"]) == {"status", "content"} and ok["preview"]["content"]["title_zh"]
+    assert set(ok["releases"][0]) == {"name", "period"}
+    assert by_key[bad_key]["preview"] is None
+    # 60 秒内同样的参数走缓存 / the same parameters within 60s come from the cache
+    assert econ.econ_calendar(start=NOW.date(), days=2, minImportance=rules.LOW, db=db, user=user) is out
+
+    store.save_settings(db, {"public": False})
+    db.commit()
+    econ.clear_cache()
+    closed = econ.econ_calendar(start=NOW.date(), days=2, minImportance=rules.LOW, db=db, user=user)
+    assert closed["public"] is False and closed["items"] == []
+    with pytest.raises(HTTPException):
+        econ.econ_calendar(start=NOW.date() + timedelta(days=400), days=2, minImportance=rules.LOW, db=db, user=user)
+    # 要登录，但不要求管理员 / needs a login, not an admin
+    route = next(r for r in econ.router.routes if r.path == "/econ/calendar")
+    assert any(d.call is get_current_user for d in route.dependant.dependencies)
+
+
 # ---- 手动整周生成 + 周五写下一整周 / admin week job + Friday covers next week ----
 
 def test_week_job_writes_every_due_group_in_range_including_released(enabled, monkeypatch):

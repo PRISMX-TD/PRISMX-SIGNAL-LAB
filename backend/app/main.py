@@ -23,7 +23,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin, require_staff
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -479,6 +479,9 @@ app.include_router(admin_activity.router, prefix=settings.API_PREFIX, dependenci
 app.include_router(admin_geo.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 # 财经日历（2026-11-20，第一期只给管理员）/ economic calendar, admin-only for now
 app.include_router(admin_econ.router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
+# 用户端只读日历（2026-11-21 对登录用户开放；设置、同步、生成预案仍只在管理接口）
+# Read-only calendar for signed-in users; settings, sync and generation stay on the admin router
+app.include_router(econ.router, prefix=settings.API_PREFIX)
 app.include_router(automation.router, prefix=settings.API_PREFIX)
 app.include_router(sentiment.router, prefix=settings.API_PREFIX)
 app.include_router(site.router, prefix=settings.API_PREFIX)

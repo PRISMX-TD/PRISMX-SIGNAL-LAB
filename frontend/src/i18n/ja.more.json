@@ -2706,5 +2706,72 @@
       "spinNow": "すぐ回す",
       "keep": "やった"
     }
+  },
+  "econ": {
+    "allDay": "終日",
+    "actual": "結果",
+    "consensus": "予想",
+    "previous": "前回",
+    "strength": {
+      "strong": "強",
+      "medium": "中",
+      "weak": "弱"
+    },
+    "date": "日付",
+    "time": "時刻",
+    "currency": "通貨",
+    "impact": "重要度",
+    "event": "指標",
+    "previewCol": "シナリオ",
+    "today": {
+      "title": "今日の経済指標",
+      "titleNext": "次の指標発表日",
+      "full": "カレンダー全体",
+      "empty": "今後数日、重要度が中以上の指標はありません。",
+      "more": "ほか {{n}} 件はカレンダーで確認",
+      "nextIn": "次の発表まで",
+      "nextInMany": "次の発表まで（{{n}} 件同時）"
+    },
+    "impactFilter": "表示する重要度",
+    "background": "背景",
+    "watch": "注目点",
+    "scenario": {
+      "consensus": {
+        "above": "予想を上回る",
+        "inline": "予想どおり",
+        "below": "予想を下回る"
+      },
+      "previous": {
+        "above": "前回を上回る",
+        "inline": "前回と同水準",
+        "below": "前回を下回る"
+      },
+      "none": {
+        "above": "タカ派",
+        "inline": "中立",
+        "below": "ハト派"
+      }
+    },
+    "scenarioShort": {
+      "consensus": {
+        "above": "上振れ",
+        "inline": "一致",
+        "below": "下振れ"
+      },
+      "previous": {
+        "above": "前回超",
+        "inline": "横ばい",
+        "below": "前回未満"
+      }
+    },
+    "showAll": "すべて表示",
+    "level": {
+      "1": "重要度 低",
+      "2": "重要度 中",
+      "3": "重要度 高"
+    },
+    "noPreview": "シナリオはありません",
+    "emptyWeek": "この週の指標はありません。",
+    "aiNote": "シナリオは公開データをもとに AI が作成した参考情報で、投資助言ではありません。"
   }
 }

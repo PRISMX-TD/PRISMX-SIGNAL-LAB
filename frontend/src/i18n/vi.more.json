@@ -2706,5 +2706,72 @@
       "spinNow": "Quay ngay",
       "keep": "Tuyệt"
     }
+  },
+  "econ": {
+    "allDay": "Cả ngày",
+    "actual": "Thực tế",
+    "consensus": "Dự báo",
+    "previous": "Kỳ trước",
+    "strength": {
+      "strong": "mạnh",
+      "medium": "vừa",
+      "weak": "yếu"
+    },
+    "date": "Ngày",
+    "time": "Giờ",
+    "currency": "Tiền tệ",
+    "impact": "Tác động",
+    "event": "Sự kiện",
+    "previewCol": "Kịch bản",
+    "today": {
+      "title": "Lịch kinh tế hôm nay",
+      "titleNext": "Ngày có dữ liệu tiếp theo",
+      "full": "Xem toàn bộ lịch",
+      "empty": "Vài ngày tới không có tin tác động vừa hoặc cao.",
+      "more": "Còn {{n}} mục, xem tất cả trong lịch",
+      "nextIn": "Tin tiếp theo sau",
+      "nextInMany": "Tin tiếp theo sau ({{n}} tin cùng lúc)"
+    },
+    "impactFilter": "Mức tác động hiển thị",
+    "background": "Bối cảnh",
+    "watch": "Điểm cần theo dõi",
+    "scenario": {
+      "consensus": {
+        "above": "Cao hơn dự báo",
+        "inline": "Đúng dự báo",
+        "below": "Thấp hơn dự báo"
+      },
+      "previous": {
+        "above": "Cao hơn kỳ trước",
+        "inline": "Bằng kỳ trước",
+        "below": "Thấp hơn kỳ trước"
+      },
+      "none": {
+        "above": "Diều hâu",
+        "inline": "Trung lập",
+        "below": "Bồ câu"
+      }
+    },
+    "scenarioShort": {
+      "consensus": {
+        "above": "Cao hơn",
+        "inline": "Đúng",
+        "below": "Thấp hơn"
+      },
+      "previous": {
+        "above": "Cao hơn kỳ trước",
+        "inline": "Đi ngang",
+        "below": "Thấp hơn kỳ trước"
+      }
+    },
+    "showAll": "Hiện tất cả",
+    "level": {
+      "1": "Tác động thấp",
+      "2": "Tác động vừa",
+      "3": "Tác động cao"
+    },
+    "noPreview": "Chưa có kịch bản",
+    "emptyWeek": "Tuần này không có dữ liệu.",
+    "aiNote": "Kịch bản do AI tạo từ dữ liệu công khai, chỉ để tham khảo, không phải lời khuyên đầu tư."
   }
 }

@@ -29,6 +29,7 @@ class EconSettingsIn(BaseModel):
     countries: list[str] | None = Field(default=None, max_length=50)
     previewMinImportance: int | None = Field(default=None, ge=rules.LOW, le=rules.HIGH)
     dailyLlmCap: int | None = Field(default=None, ge=0, le=2000)
+    public: bool | None = None
 
 
 class RegenerateIn(BaseModel):
@@ -128,17 +129,9 @@ def _group_payload(key: str, rows: list[EconRelease], preview: EconPreview | Non
     }
 
 
-@router.get("/calendar")
-def econ_calendar(
-    start: date | None = None,
-    days: int = Query(7, ge=1, le=14),
-    minImportance: int = Query(rules.LOW, ge=rules.NONE, le=rules.HIGH),
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    """按组列出 [start, start+days) 的发布（UTC 日期），带合并后的数值、主指标结果和预案。
-    Releases in [start, start+days) grouped, with merged figures, the primary result and the preview."""
-    start = start or (store.utcnow().date() - timedelta(days=1))
+def list_groups(db: Session, start: date, days: int, min_importance: int) -> list[dict]:
+    """[start, start+days)（UTC 日期）的发布按组列出。管理接口和用户接口共用。
+    Releases in [start, start+days) (UTC dates), grouped. Shared by the admin and the user endpoint."""
     lo = datetime.combine(start, datetime.min.time())
     hi = lo + timedelta(days=days)
     rows = (db.query(EconRelease)
@@ -150,11 +143,25 @@ def econ_calendar(
     for r in rows:
         key = r.group_key or f"{r.country}|{r.date}|{store.report_slug(r.family, r.name)}"
         groups.setdefault(key, []).append(r)
-    keys = [k for k, members in groups.items() if max(m.importance for m in members) >= minImportance]
+    keys = [k for k, members in groups.items() if max(m.importance for m in members) >= min_importance]
     prev = {p.group_key: p for p in db.query(EconPreview).filter(EconPreview.group_key.in_(keys)).all()} if keys else {}
     items = [_group_payload(k, groups[k], prev.get(k)) for k in keys]
     items.sort(key=lambda g: (g["at"] or (g["date"] or "") + "T00:00", g["country"]))
-    return {"start": start.isoformat(), "days": days, "items": items}
+    return items
+
+
+@router.get("/calendar")
+def econ_calendar(
+    start: date | None = None,
+    days: int = Query(7, ge=1, le=14),
+    minImportance: int = Query(rules.LOW, ge=rules.NONE, le=rules.HIGH),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """按组列出 [start, start+days) 的发布（UTC 日期），带合并后的数值、主指标结果和预案。
+    Releases in [start, start+days) grouped, with merged figures, the primary result and the preview."""
+    start = start or (store.utcnow().date() - timedelta(days=1))
+    return {"start": start.isoformat(), "days": days, "items": list_groups(db, start, days, minImportance)}
 
 
 @router.post("/previews/generate-week")

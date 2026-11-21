@@ -137,6 +137,7 @@ const AppDownloadPage = lazyPage(() => import('./pages/AppDownloadPage'), 'AppDo
 const SupportPage = lazyPage(() => import('./pages/SupportPage'), 'SupportPage')
 const StrategyGuidePage = lazyPage(() => import('./pages/StrategyGuidePage'), 'StrategyGuidePage')
 const AnnouncementsPage = lazyPage(() => import('./pages/AnnouncementsPage'), 'AnnouncementsPage')
+const CalendarPage = lazyPage(() => import('./pages/CalendarPage'), 'CalendarPage')
 const AnnouncementPage = lazyPage(() => import('./pages/AnnouncementPage'), 'AnnouncementPage')
 const CompleteProfilePage = lazyPage(() => import('./pages/CompleteProfilePage'), 'CompleteProfilePage')
 const AgentPage = lazyPage(() => import('./pages/AgentPage'), 'AgentPage')
@@ -180,6 +181,7 @@ const APP_ROUTE_PAGES: Record<string, HasPreload> = {
   '/app-download': AppDownloadPage,
   '/support': SupportPage,
   '/announcements': AnnouncementsPage,
+  '/calendar': CalendarPage,
 }
 
 // 登录后空闲时预取：外壳 + 底栏四个常用 Tab。/ Prefetched on idle after login: shell + main tabs.
@@ -199,6 +201,7 @@ const MORE_SHEET_PAGES: Record<string, HasPreload> = {
   '/app-download': AppDownloadPage,
   '/support': SupportPage,
   '/announcements': AnnouncementsPage,
+  '/calendar': CalendarPage,
   '/upgrade': UpgradePage,
   '/strategies': StrategiesPage,
   '/achievements': AchievementsPage,
@@ -655,6 +658,8 @@ export default function App() {
               <Route path="/app-download" element={<AppDownloadPage />} />
               <Route path="/support" element={<SupportPage />} />
               <Route path="/announcements" element={<AnnouncementsPage />} />
+              {/* 财经日历：2026-11-21 对登录用户开放（只读），设置在管理台 / read-only for users, settings in admin */}
+              <Route path="/calendar" element={<CalendarPage />} />
               <Route path="/announcements/:id" element={<AnnouncementPage />} />
               <Route
                 path="/agent"

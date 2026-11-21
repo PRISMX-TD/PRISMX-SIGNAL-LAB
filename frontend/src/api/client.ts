@@ -2106,6 +2106,15 @@ export const automationApi = {
 // 社区多空情绪：读后端缓存（数据源见后端 sentiment_store.py 说明）
 // Community sentiment: reads the backend's cache (data source documented in
 // the backend's sentiment_store.py)
+// 财经日历的用户端只读接口（设置、同步、生成预案在 adminApi.econ*）
+// Read-only calendar for signed-in users (settings, sync and generation live under adminApi.econ*)
+export const econApi = {
+  calendar: (start: string, days: number, minImportance: number) =>
+    request<{ public: boolean; start: string; days: number; items: EconGroup[] }>(
+      `/econ/calendar?${new URLSearchParams({ start, days: String(days), minImportance: String(minImportance) })}`,
+    ),
+}
+
 export const sentimentApi = {
   get: () =>
     request<{ sentiment: Record<string, SentimentRatio>; updatedAt: number | null; stale: boolean }>(

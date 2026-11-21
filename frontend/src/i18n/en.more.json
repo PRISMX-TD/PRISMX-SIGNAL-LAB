@@ -3931,14 +3931,9 @@
       "atLeast": "≥{{n}} stars",
       "refresh": "Refresh",
       "empty": "No data in this range. Try Sync now.",
-      "allDay": "All day",
       "cancelled": "Cancelled",
-      "noPreview": "No preview",
       "previewFailed": "Preview failed",
       "measure": "Measure",
-      "actual": "Actual",
-      "consensus": "Consensus",
-      "previous": "Previous",
       "indicative": "Time is indicative",
       "writing": "Writing…",
       "regenerate": "Rewrite preview",
@@ -3948,85 +3943,28 @@
         "inline": "In line",
         "below": "Below consensus"
       },
-      "strength": {
-        "strong": "strong",
-        "medium": "medium",
-        "weak": "weak"
-      },
       "autoOn": "Auto: on",
       "autoOff": "Auto: off",
       "settings": "Settings",
-      "date": "Date",
-      "time": "Time",
-      "currency": "Cur.",
-      "impact": "Impact",
-      "event": "Event",
-      "previewCol": "Preview",
-      "today": {
-        "title": "Today's calendar",
-        "titleNext": "Next data day",
-        "full": "Full calendar",
-        "empty": "No orange or red releases in the next few days.",
-        "more": "{{n}} more in the calendar",
-        "nextIn": "Next release in",
-        "nextInMany": "Next release in ({{n}} at once)"
-      },
       "outcomeShort": {
         "above": "Above",
         "inline": "In line",
         "below": "Below"
       },
       "syncWeek": "Sync this week",
-      "impactFilter": "Show impact",
       "emptyWeek": "No data for this week. Use “Sync this week” to pull it from Narwhal.",
-      "background": "Context",
-      "watch": "Watch",
       "previewPending": "Not written yet: use “Generate this week”, or turn on the master switch and it is written automatically.",
       "whyNoPreview": {
         "noConsensus": "No consensus and no previous value, so no preview.",
         "low": "Low-impact (yellow) items get no preview.",
         "past": "Already released; no preview was written before release."
       },
-      "scenario": {
-        "consensus": {
-          "above": "Above consensus",
-          "inline": "In line",
-          "below": "Below consensus"
-        },
-        "previous": {
-          "above": "Above previous",
-          "inline": "Same as previous",
-          "below": "Below previous"
-        },
-        "none": {
-          "above": "Hawkish",
-          "inline": "Neutral",
-          "below": "Dovish"
-        }
-      },
-      "scenarioShort": {
-        "consensus": {
-          "above": "Above",
-          "inline": "In line",
-          "below": "Below"
-        },
-        "previous": {
-          "above": "Above prev.",
-          "inline": "Flat",
-          "below": "Below prev."
-        }
-      },
       "generateWeek": "Generate this week",
       "generating": "Generating {{done}}/{{total}}…",
       "generateHint": "Orange and red only; cached previews with an unchanged consensus are skipped. One model call per group, bound by the daily cap. From Friday the system also writes the whole next week.",
       "genDone": "Week generated: {{done}} written, {{failed}} failed.",
       "genCapHit": "Daily model cap reached after {{done}} groups. Raise the cap in Settings and run again.",
-      "showAll": "Show all",
-      "level": {
-        "1": "Low",
-        "2": "Medium",
-        "3": "High"
-      }
+      "public": "Open to users (dashboard card and calendar page)"
     }
   },
   "simulator": {
@@ -5662,5 +5600,72 @@
       "spinNow": "Spin it now",
       "keep": "Awesome"
     }
+  },
+  "econ": {
+    "allDay": "All day",
+    "actual": "Actual",
+    "consensus": "Consensus",
+    "previous": "Previous",
+    "strength": {
+      "strong": "strong",
+      "medium": "medium",
+      "weak": "weak"
+    },
+    "date": "Date",
+    "time": "Time",
+    "currency": "Cur.",
+    "impact": "Impact",
+    "event": "Event",
+    "previewCol": "Preview",
+    "today": {
+      "title": "Today's calendar",
+      "titleNext": "Next data day",
+      "full": "Full calendar",
+      "empty": "No orange or red releases in the next few days.",
+      "more": "{{n}} more in the calendar",
+      "nextIn": "Next release in",
+      "nextInMany": "Next release in ({{n}} at once)"
+    },
+    "impactFilter": "Show impact",
+    "background": "Context",
+    "watch": "Watch",
+    "scenario": {
+      "consensus": {
+        "above": "Above consensus",
+        "inline": "In line",
+        "below": "Below consensus"
+      },
+      "previous": {
+        "above": "Above previous",
+        "inline": "Same as previous",
+        "below": "Below previous"
+      },
+      "none": {
+        "above": "Hawkish",
+        "inline": "Neutral",
+        "below": "Dovish"
+      }
+    },
+    "scenarioShort": {
+      "consensus": {
+        "above": "Above",
+        "inline": "In line",
+        "below": "Below"
+      },
+      "previous": {
+        "above": "Above prev.",
+        "inline": "Flat",
+        "below": "Below prev."
+      }
+    },
+    "showAll": "Show all",
+    "level": {
+      "1": "Low",
+      "2": "Medium",
+      "3": "High"
+    },
+    "noPreview": "No preview",
+    "emptyWeek": "No releases this week.",
+    "aiNote": "Previews are AI-generated from public data, for reference only, and are not investment advice."
   }
 }

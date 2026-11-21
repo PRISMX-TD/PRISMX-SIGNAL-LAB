@@ -31,6 +31,9 @@ SETTINGS_DEFAULTS: dict = {
     "previewMinImportance": rules.MEDIUM,
     # 每天最多调多少次模型（UTC 日）/ model calls per UTC day
     "dailyLlmCap": 120,
+    # 对用户开放（2026-11-21）：关掉后用户端接口返回空、仪表盘卡片和日历页不显示内容；管理台不受影响
+    # Open to users: off = the user endpoint returns nothing (card and page go empty); admin unaffected
+    "public": True,
 }
 
 STATUS_KEY = "econ:status"
@@ -43,7 +46,7 @@ def utcnow() -> datetime:
 
 def _clean_settings(stored: dict) -> dict:
     data = dict(SETTINGS_DEFAULTS)
-    for key in ("enabled", "previews"):
+    for key in ("enabled", "previews", "public"):
         if isinstance(stored.get(key), bool):
             data[key] = stored[key]
     countries = stored.get("countries")

@@ -7,6 +7,8 @@ export type EconSettings = {
   countries: string[]
   previewMinImportance: number
   dailyLlmCap: number
+  /** 对用户开放 / open to users */
+  public: boolean
 }
 
 export type EconStatus = {
@@ -88,11 +90,12 @@ export type EconGroup = {
   importance: number
   status: 'scheduled' | 'published' | 'cancelled'
   releases: {
-    id: string
     name: string
     period: string | null
-    status: string
-    actualSeenAt: string | null
+    /** 以下只有管理接口带 / admin endpoint only */
+    id?: string
+    status?: string
+    actualSeenAt?: string | null
   }[]
   values: EconValue[]
   primaryMeasure: string | null
@@ -106,11 +109,12 @@ export type EconGroup = {
   preview: {
     status: 'ok' | 'failed'
     content: EconPreviewContent | null
-    error: string | null
-    attempts: number
-    model: string | null
-    generatedAt: string | null
-    tokensIn: number | null
-    tokensOut: number | null
+    /** 以下只有管理接口带 / admin endpoint only */
+    error?: string | null
+    attempts?: number
+    model?: string | null
+    generatedAt?: string | null
+    tokensIn?: number | null
+    tokensOut?: number | null
   } | null
 }

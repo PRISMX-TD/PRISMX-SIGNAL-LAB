@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { adminApi } from '../../../api/client'
+import { adminApi, econApi } from '../../../api/client'
 import type { EconGroup, EconOutcome, EconStatus } from '../../../api/econTypes'
 import { localizeApiError } from '../../../api/utils'
 import Switch from '../../Switch'
@@ -127,7 +127,12 @@ function MiniCalendar({ week, onPick, lang }: { week: Date; onPick: (weekStart: 
   )
 }
 
-export default function EconCalendarPanel() {
+// mode='user'：用户端的只读日历（/calendar）。同一张表和小月历，但不显示数据源状态、设置、
+// 同步和生成按钮，数据走用户端接口。设置只在管理台。
+// mode='user' is the read-only calendar at /calendar: same table and mini calendar, without the
+// source status, settings, sync and generate controls, reading the user endpoint.
+export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' | 'user' }) {
+  const isAdmin = mode === 'admin'
   const { t, i18n } = useTranslation()
   const zh = i18n.language.startsWith('zh')
   const { toast, showToast } = useToast()
@@ -186,6 +191,10 @@ export default function EconCalendarPanel() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
+      if (!isAdmin) {
+        setItems((await econApi.calendar(fetchStart, 9, 1)).items)
+        return
+      }
       const [st, cal] = await Promise.all([adminApi.econStatus(), adminApi.econCalendar(fetchStart, 9, 1)])
       setStatus(st)
       setCountries(st.settings.countries.join(', '))
@@ -195,7 +204,7 @@ export default function EconCalendarPanel() {
     } finally {
       setLoading(false)
     }
-  }, [fetchStart, fail])
+  }, [fetchStart, fail, isAdmin])
 
   useEffect(() => {
     void load()
@@ -322,117 +331,129 @@ export default function EconCalendarPanel() {
         </div>
       )}
 
-      <section className="glass space-y-3 rounded-2xl px-3 py-2.5">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
-          <span className={st?.narwhalConfigured && st?.deepseekConfigured ? 'text-emerald-300' : 'text-rose-300'}>
-            Narwhal {st?.narwhalConfigured ? '✓' : '✗'} · DeepSeek {st?.deepseekConfigured ? '✓' : '✗'}
-          </span>
-          <span>
-            {t('admin.econ.balance')} <b className="tabular-nums text-neutral-200">{st?.status.balance ?? '—'}</b>
-          </span>
-          <span>
-            {t('admin.econ.lastSync')}{' '}
-            <b className="tabular-nums text-neutral-200">
-              {st?.status.lastSyncAt
-                ? new Date(st.status.lastSyncAt).toLocaleString([], {
-                    hour12: false,
-                  })
-                : '—'}
-            </b>
-          </span>
-          <span>
-            {t('admin.econ.llmToday')}{' '}
-            <b className="tabular-nums text-neutral-200">
-              {st?.llmCallsToday ?? 0}/{cfg?.dailyLlmCap ?? '—'}
-            </b>
-          </span>
-          <span className={cfg?.enabled ? 'text-emerald-300' : 'text-neutral-500'}>
-            {cfg?.enabled ? t('admin.econ.autoOn') : t('admin.econ.autoOff')}
-          </span>
-          <span className="ml-auto">
-            <button type="button" className={segBtn(showSettings)} onClick={() => setShowSettings((v) => !v)}>
-              {t('admin.econ.settings')}
-            </button>
-          </span>
-        </div>
-        {st?.status.lastError && (
-          <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
-            {t('admin.econ.lastError')}: {st.status.lastError}
-          </p>
-        )}
-        {cfg && showSettings && (
-          <div className="space-y-3 border-t border-white/5 pt-3">
-            <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
-              <label className="flex items-center gap-2">
-                <Switch
-                  checked={cfg.enabled}
-                  busy={busy === 'enabled'}
-                  onChange={(v) => save({ enabled: v }, 'enabled')}
-                />
-                {t('admin.econ.enabled')}
-              </label>
-              <label className="flex items-center gap-2">
-                <Switch
-                  checked={cfg.previews}
-                  busy={busy === 'previews'}
-                  onChange={(v) => save({ previews: v }, 'previews')}
-                />
-                {t('admin.econ.previews')}
-              </label>
+      {isAdmin && (
+        <section className="glass space-y-3 rounded-2xl px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-neutral-400">
+            <span className={st?.narwhalConfigured && st?.deepseekConfigured ? 'text-emerald-300' : 'text-rose-300'}>
+              Narwhal {st?.narwhalConfigured ? '✓' : '✗'} · DeepSeek {st?.deepseekConfigured ? '✓' : '✗'}
+            </span>
+            <span>
+              {t('admin.econ.balance')} <b className="tabular-nums text-neutral-200">{st?.status.balance ?? '—'}</b>
+            </span>
+            <span>
+              {t('admin.econ.lastSync')}{' '}
+              <b className="tabular-nums text-neutral-200">
+                {st?.status.lastSyncAt
+                  ? new Date(st.status.lastSyncAt).toLocaleString([], {
+                      hour12: false,
+                    })
+                  : '—'}
+              </b>
+            </span>
+            <span>
+              {t('admin.econ.llmToday')}{' '}
+              <b className="tabular-nums text-neutral-200">
+                {st?.llmCallsToday ?? 0}/{cfg?.dailyLlmCap ?? '—'}
+              </b>
+            </span>
+            <span className={cfg?.enabled ? 'text-emerald-300' : 'text-neutral-500'}>
+              {cfg?.enabled ? t('admin.econ.autoOn') : t('admin.econ.autoOff')}
+            </span>
+            <span className="ml-auto">
+              <button type="button" className={segBtn(showSettings)} onClick={() => setShowSettings((v) => !v)}>
+                {t('admin.econ.settings')}
+              </button>
+            </span>
+          </div>
+          {st?.status.lastError && (
+            <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
+              {t('admin.econ.lastError')}: {st.status.lastError}
+            </p>
+          )}
+          {cfg && showSettings && (
+            <div className="space-y-3 border-t border-white/5 pt-3">
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <Switch
+                    checked={cfg.enabled}
+                    busy={busy === 'enabled'}
+                    onChange={(v) => save({ enabled: v }, 'enabled')}
+                  />
+                  {t('admin.econ.enabled')}
+                </label>
+                <label className="flex items-center gap-2">
+                  <Switch
+                    checked={cfg.previews}
+                    busy={busy === 'previews'}
+                    onChange={(v) => save({ previews: v }, 'previews')}
+                  />
+                  {t('admin.econ.previews')}
+                </label>
+                <label className="flex items-center gap-2">
+                  <Switch
+                    checked={cfg.public}
+                    busy={busy === 'public'}
+                    onChange={(v) => save({ public: v }, 'public')}
+                  />
+                  {t('admin.econ.public')}
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-400">
+                  {t('admin.econ.minImportance')}
+                  {[1, 2, 3].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className={segBtn(cfg.previewMinImportance === n)}
+                      onClick={() => save({ previewMinImportance: n }, 'imp')}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </label>
+                <label className="flex items-center gap-2 text-xs text-neutral-400">
+                  {t('admin.econ.dailyCap')}
+                  <input
+                    type="number"
+                    min={0}
+                    max={2000}
+                    defaultValue={cfg.dailyLlmCap}
+                    key={cfg.dailyLlmCap}
+                    className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-neutral-100"
+                    onBlur={(e) => {
+                      const v = Number(e.target.value)
+                      if (Number.isFinite(v) && v !== cfg.dailyLlmCap) void save({ dailyLlmCap: v }, 'cap')
+                    }}
+                  />
+                </label>
+              </div>
               <label className="flex items-center gap-2 text-xs text-neutral-400">
-                {t('admin.econ.minImportance')}
-                {[1, 2, 3].map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    className={segBtn(cfg.previewMinImportance === n)}
-                    onClick={() => save({ previewMinImportance: n }, 'imp')}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </label>
-              <label className="flex items-center gap-2 text-xs text-neutral-400">
-                {t('admin.econ.dailyCap')}
+                {t('admin.econ.countries')}
                 <input
-                  type="number"
-                  min={0}
-                  max={2000}
-                  defaultValue={cfg.dailyLlmCap}
-                  key={cfg.dailyLlmCap}
-                  className="w-20 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-sm text-neutral-100"
-                  onBlur={(e) => {
-                    const v = Number(e.target.value)
-                    if (Number.isFinite(v) && v !== cfg.dailyLlmCap) void save({ dailyLlmCap: v }, 'cap')
+                  value={countries}
+                  onChange={(e) => setCountries(e.target.value)}
+                  onBlur={() => {
+                    const list = countries
+                      .split(/[,\s]+/)
+                      .map((c) => c.trim().toUpperCase())
+                      .filter(Boolean)
+                    if (list.join(',') !== cfg.countries.join(',')) void save({ countries: list }, 'countries')
                   }}
+                  className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-neutral-100"
                 />
               </label>
             </div>
-            <label className="flex items-center gap-2 text-xs text-neutral-400">
-              {t('admin.econ.countries')}
-              <input
-                value={countries}
-                onChange={(e) => setCountries(e.target.value)}
-                onBlur={() => {
-                  const list = countries
-                    .split(/[,\s]+/)
-                    .map((c) => c.trim().toUpperCase())
-                    .filter(Boolean)
-                  if (list.join(',') !== cfg.countries.join(',')) void save({ countries: list }, 'countries')
-                }}
-                className="flex-1 rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-mono text-xs text-neutral-100"
-              />
-            </label>
-          </div>
-        )}
-      </section>
+          )}
+        </section>
+      )}
 
-      <div className="flex flex-col gap-3 lg:flex-row-reverse lg:items-start">
+      {/* 手机上用户先看到表格，小月历和筛选排在后面；管理台保持原顺序（按钮在上）
+          On phones users get the table first, the mini calendar and filter after it; admin keeps its order */}
+      <div className={`flex gap-3 lg:flex-row-reverse lg:items-start ${isAdmin ? 'flex-col' : 'flex-col-reverse'}`}>
         <aside className="space-y-2 lg:sticky lg:top-4 lg:w-60 lg:shrink-0">
           <MiniCalendar week={week} onPick={setWeek} lang={i18n.language} />
           <div className="glass space-y-2 rounded-2xl p-3 text-xs text-neutral-400">
             <div className="flex items-center justify-between">
-              <span>{t('admin.econ.impactFilter')}</span>
+              <span>{t('econ.impactFilter')}</span>
               {levels.size < 3 && (
                 <button
                   type="button"
@@ -446,7 +467,7 @@ export default function EconCalendarPanel() {
                     }
                   }}
                 >
-                  {t('admin.econ.showAll')}
+                  {t('econ.showAll')}
                 </button>
               )}
             </div>
@@ -474,30 +495,37 @@ export default function EconCalendarPanel() {
                       {on ? '✓' : ''}
                     </span>
                     <Impact n={n} />
-                    <span className="flex-1">{t(`admin.econ.level.${n}`)}</span>
+                    <span className="flex-1">{t(`econ.level.${n}`)}</span>
                     <span className="tabular-nums text-neutral-500">{levelCounts[n]}</span>
                   </button>
                 )
               })}
             </div>
-            <button
-              type="button"
-              className="w-full rounded-lg border border-prism-500/50 bg-prism-600/20 px-3 py-1.5 text-xs font-medium text-prism-100 disabled:opacity-50"
-              disabled={busy === 'sync' || !st?.narwhalConfigured}
-              onClick={sync}
-            >
-              {busy === 'sync' ? t('admin.econ.syncing') : t('admin.econ.syncWeek')}
-            </button>
-            <button
-              type="button"
-              className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-white/10 disabled:opacity-50"
-              disabled={jobRunning || busy === 'gen' || !st?.deepseekConfigured}
-              onClick={generateWeek}
-            >
-              {jobRunning
-                ? t('admin.econ.generating', { done: (job?.done ?? 0) + (job?.failed ?? 0), total: job?.total ?? 0 })
-                : t('admin.econ.generateWeek')}
-            </button>
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-prism-500/50 bg-prism-600/20 px-3 py-1.5 text-xs font-medium text-prism-100 disabled:opacity-50"
+                  disabled={busy === 'sync' || !st?.narwhalConfigured}
+                  onClick={sync}
+                >
+                  {busy === 'sync' ? t('admin.econ.syncing') : t('admin.econ.syncWeek')}
+                </button>
+                <button
+                  type="button"
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-neutral-200 hover:bg-white/10 disabled:opacity-50"
+                  disabled={jobRunning || busy === 'gen' || !st?.deepseekConfigured}
+                  onClick={generateWeek}
+                >
+                  {jobRunning
+                    ? t('admin.econ.generating', {
+                        done: (job?.done ?? 0) + (job?.failed ?? 0),
+                        total: job?.total ?? 0,
+                      })
+                    : t('admin.econ.generateWeek')}
+                </button>
+              </>
+            )}
           </div>
         </aside>
 
@@ -524,21 +552,23 @@ export default function EconCalendarPanel() {
           </div>
 
           {!loading && byDay.length === 0 ? (
-            <p className="glass rounded-2xl p-6 text-center text-sm text-neutral-500">{t('admin.econ.emptyWeek')}</p>
+            <p className="glass rounded-2xl p-6 text-center text-sm text-neutral-500">
+              {t(isAdmin ? 'admin.econ.emptyWeek' : 'econ.emptyWeek')}
+            </p>
           ) : (
             <div className="glass overflow-x-auto rounded-2xl">
               <table className="w-full min-w-[680px] text-[13px]">
                 <thead>
                   <tr className="border-b border-white/10 text-left text-[11px] text-neutral-500">
-                    <th className="w-28 px-3 py-2 font-normal">{t('admin.econ.date')}</th>
-                    <th className="w-16 px-2 font-normal">{t('admin.econ.time')}</th>
-                    <th className="w-12 px-2 font-normal">{t('admin.econ.currency')}</th>
-                    <th className="w-12 px-2 font-normal">{t('admin.econ.impact')}</th>
-                    <th className="px-2 font-normal">{t('admin.econ.event')}</th>
-                    <th className="w-20 px-2 text-right font-normal">{t('admin.econ.actual')}</th>
-                    <th className="w-20 px-2 text-right font-normal">{t('admin.econ.consensus')}</th>
-                    <th className="w-20 px-2 text-right font-normal">{t('admin.econ.previous')}</th>
-                    <th className="w-16 px-3 text-right font-normal">{t('admin.econ.previewCol')}</th>
+                    <th className="w-28 px-3 py-2 font-normal">{t('econ.date')}</th>
+                    <th className="w-16 px-2 font-normal">{t('econ.time')}</th>
+                    <th className="w-12 px-2 font-normal">{t('econ.currency')}</th>
+                    <th className="w-12 px-2 font-normal">{t('econ.impact')}</th>
+                    <th className="px-2 font-normal">{t('econ.event')}</th>
+                    <th className="w-20 px-2 text-right font-normal">{t('econ.actual')}</th>
+                    <th className="w-20 px-2 text-right font-normal">{t('econ.consensus')}</th>
+                    <th className="w-20 px-2 text-right font-normal">{t('econ.previous')}</th>
+                    <th className="w-16 px-3 text-right font-normal">{t('econ.previewCol')}</th>
                   </tr>
                 </thead>
                 {byDay.map(([day, list]) => (
@@ -554,6 +584,7 @@ export default function EconCalendarPanel() {
                         past={isPast(g, now)}
                         next={g.key === nextKey}
                         focused={g.key === focusKey}
+                        admin={isAdmin}
                       />
                     ))}
                   </tbody>
@@ -576,6 +607,7 @@ function GroupRows({
   past,
   next,
   focused,
+  admin,
 }: {
   g: EconGroup
   rows: Row[]
@@ -585,6 +617,7 @@ function GroupRows({
   past: boolean
   next: boolean
   focused: boolean
+  admin: boolean
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(focused)
@@ -595,7 +628,7 @@ function GroupRows({
   const c = g.preview?.status === 'ok' ? g.preview.content : null
   const time =
     g.allDay || !g.at
-      ? t('admin.econ.allDay')
+      ? t('econ.allDay')
       : new Date(g.at).toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
@@ -653,9 +686,7 @@ function GroupRows({
             {i === 0 &&
               (c ? (
                 <span className="text-prism-200">
-                  {g.outcome
-                    ? t(`admin.econ.scenarioShort.${g.outcome.basis ?? 'consensus'}.${g.outcome.outcome}`)
-                    : '●'}
+                  {g.outcome ? t(`econ.scenarioShort.${g.outcome.basis ?? 'consensus'}.${g.outcome.outcome}`) : '●'}
                 </span>
               ) : g.preview?.status === 'failed' ? (
                 <span className="text-rose-300">!</span>
@@ -674,13 +705,13 @@ function GroupRows({
                 <p className="text-xs leading-relaxed text-neutral-400">{zh ? c.why_zh : c.why_en}</p>
                 {(zh ? c.background_zh : c.background_en) && (
                   <p className="text-xs leading-relaxed text-neutral-400">
-                    <span className="mr-1 text-neutral-500">{t('admin.econ.background')}</span>
+                    <span className="mr-1 text-neutral-500">{t('econ.background')}</span>
                     {zh ? c.background_zh : c.background_en}
                   </p>
                 )}
                 {(zh ? c.watch_zh : c.watch_en) && (
                   <p className="text-xs leading-relaxed text-neutral-400">
-                    <span className="mr-1 text-neutral-500">{t('admin.econ.watch')}</span>
+                    <span className="mr-1 text-neutral-500">{t('econ.watch')}</span>
                     {zh ? c.watch_zh : c.watch_en}
                   </p>
                 )}
@@ -697,7 +728,7 @@ function GroupRows({
                       >
                         <div className="mb-1 flex flex-wrap items-center gap-1.5">
                           <span className="font-medium text-neutral-200">
-                            {t(`admin.econ.scenario.${c.basis ?? 'consensus'}.${o}`)}
+                            {t(`econ.scenario.${c.basis ?? 'consensus'}.${o}`)}
                           </span>
                           {s.impacts.map((im) => (
                             <span
@@ -712,7 +743,7 @@ function GroupRows({
                             >
                               {im.asset}
                               {im.direction === 'bullish' ? '↑' : im.direction === 'bearish' ? '↓' : '–'}
-                              <span className="ml-0.5 text-neutral-500">{t(`admin.econ.strength.${im.strength}`)}</span>
+                              <span className="ml-0.5 text-neutral-500">{t(`econ.strength.${im.strength}`)}</span>
                             </span>
                           ))}
                         </div>
@@ -724,20 +755,23 @@ function GroupRows({
               </div>
             ) : (
               <p className="text-xs text-neutral-500">
-                {g.preview?.status === 'failed'
-                  ? g.preview.error
-                  : g.importance < 2
-                    ? t('admin.econ.whyNoPreview.low')
-                    : past
-                      ? t('admin.econ.whyNoPreview.past')
-                      : g.values.length > 0 &&
-                          !g.values.some((v) => (v.consensus ?? '') !== '' || (v.previous ?? '') !== '')
-                        ? t('admin.econ.whyNoPreview.noConsensus')
-                        : t('admin.econ.previewPending')}
+                {!admin
+                  ? t('econ.noPreview')
+                  : g.preview?.status === 'failed'
+                    ? g.preview.error
+                    : g.importance < 2
+                      ? t('admin.econ.whyNoPreview.low')
+                      : past
+                        ? t('admin.econ.whyNoPreview.past')
+                        : g.values.length > 0 &&
+                            !g.values.some((v) => (v.consensus ?? '') !== '' || (v.previous ?? '') !== '')
+                          ? t('admin.econ.whyNoPreview.noConsensus')
+                          : t('admin.econ.previewPending')}
               </p>
             )}
             <div className="mt-2 flex items-center gap-3 text-[11px] text-neutral-600">
-              {g.preview?.model && (
+              {!admin && c && <span>{t('econ.aiNote')}</span>}
+              {admin && g.preview?.model && (
                 <span>
                   {g.preview.model} · {g.preview.tokensIn ?? 0}/{g.preview.tokensOut ?? 0} tokens
                 </span>

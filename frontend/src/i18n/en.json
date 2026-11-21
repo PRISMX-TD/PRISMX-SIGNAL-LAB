@@ -52,7 +52,8 @@
     "agent": "Ambassador hub",
     "supportDesk": "Support console",
     "skipToMain": "Skip to main content",
-    "primary": "Main navigation"
+    "primary": "Main navigation",
+    "calendar": "Economic calendar"
   },
   "common": {
     "loading": "Loading…",
