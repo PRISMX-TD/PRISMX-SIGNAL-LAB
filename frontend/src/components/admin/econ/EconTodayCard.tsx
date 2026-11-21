@@ -1,7 +1,7 @@
 // 仪表盘「今日财经」卡片（2026-11-21）：放在第三栏「其他活跃信号」下面，所有登录用户可见
 // （管理员在日历设置里关掉「对用户开放」时不显示）。列出今天的橙 / 红数据：已公布的变暗并显示结果，下一项带箭头
 // 和倒计时，有预案的带标记；点任意一行进完整日历并定位到那一条。今天没有数据时显示下一个有
-// 数据的日子。手机上只列还没公布的。
+// 数据的日子；今天的都已公布时也切到下一个有数据的日子（2026-11-21）。手机上只列还没公布的。
 // Dashboard "today's calendar" card, under "other active signals" in the third column; for every signed-in
 // user (hidden while an admin has "open to users" switched off). Today's orange / red figures: published ones dimmed with their
 // result, an arrow and a countdown on the next, a tag where a preview exists; any row opens the full
@@ -65,7 +65,13 @@ export default function EconTodayCard() {
       const past = isPast(g, now)
       for (const row of rowsOf(g, zh, SHOWN_LEVELS)) byDay.set(day, [...(byDay.get(day) ?? []), { g, row, past }])
     }
-    const day = byDay.has(today) ? today : [...byDay.keys()].sort()[0]
+    // 今天还有没公布的就显示今天；今天的都已公布（或今天没有）就显示下一个有数据的日子。
+    // 后面都没有数据时才退回今天已公布的那些（只在电脑上看得到）。
+    // Today while something is still ahead today; once today is done (or empty), the next day with
+    // data. Only when nothing lies ahead at all do we fall back to today's published rows.
+    const todayAhead = (byDay.get(today) ?? []).some((e) => !e.past)
+    const later = [...byDay.keys()].filter((d) => d > today).sort()
+    const day = todayAhead ? today : (later[0] ?? (byDay.has(today) ? today : undefined))
     if (!day) return { day: null, isToday: false, list: [] as Entry[], hidden: 0, nextAt: null, nextCount: 0 }
     const all = byDay.get(day) ?? []
     // 行数有上限：先保住还没公布的，剩下的位置给最近公布的 / upcoming rows first, then the latest published
@@ -108,9 +114,14 @@ export default function EconTodayCard() {
         </Link>
       </div>
 
-      {view.list.length === 0 ? (
-        <p className="mt-4 text-sm text-neutral-500">{t('econ.today.empty')}</p>
-      ) : (
+      {view.list.length === 0 || view.list.every((e) => e.past) ? (
+        // 全部已公布时手机上那些行是藏着的，空白处放一句说明；电脑照常列出变灰的行
+        // When every row is published, phones hide them all, so show the empty line there instead
+        <p className={`mt-4 text-sm text-neutral-500 ${view.list.length ? 'md:hidden' : ''}`}>
+          {t('econ.today.empty')}
+        </p>
+      ) : null}
+      {view.list.length === 0 ? null : (
         <ul className="mt-2">
           {view.list.map(({ g, row, past }) => {
             const isNext = !past && !!view.nextAt && g.at === view.nextAt
