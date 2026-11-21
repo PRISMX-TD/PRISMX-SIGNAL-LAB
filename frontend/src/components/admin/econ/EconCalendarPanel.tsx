@@ -203,8 +203,28 @@ export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' |
       fail(e)
     } finally {
       setLoading(false)
+      setReady(true)
     }
   }, [fetchStart, fail, isAdmin])
+
+  // 周末打开时，这一周已经没有还没公布的橙 / 红数据了：自动翻到下一周。只在刚进来、地址里没指定
+  // 日期时做一次，之后用户自己翻周不再干预。
+  // Opened at the weekend with no orange / red release left this week: jump to next week. Once only,
+  // on arrival without a ?day=; the user's own week changes are left alone afterwards.
+  const [ready, setReady] = useState(false)
+  const autoWeek = useRef(!params.get('day'))
+  useEffect(() => {
+    if (!ready || !autoWeek.current) return
+    autoWeek.current = false
+    if (ymd(week) !== ymd(weekStartOf(new Date()))) return
+    const from = Date.now()
+    const to = addDays(week, 7).getTime()
+    const ahead = items.some((g) => {
+      const at = g.at ? new Date(g.at).getTime() : 0
+      return g.status !== 'cancelled' && g.importance >= 2 && at > from && at < to
+    })
+    if (!ahead) setWeek(addDays(week, 7))
+  }, [ready, items, week])
 
   useEffect(() => {
     void load()

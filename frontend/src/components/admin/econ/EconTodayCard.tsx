@@ -47,9 +47,11 @@ export default function EconTodayCard() {
     let alive = true
     const load = async () => {
       try {
-        // 后端按 UTC 日期切片：从昨天取 6 天，本地「今天」和接下来几天都在里面
-        // The backend slices by UTC date; six days from yesterday cover local today and the days after
-        const cal = await econApi.calendar(ymd(addDays(new Date(), -1)), 6, 2)
+        // 后端按 UTC 日期切片：从昨天取 10 天。本地「今天」在里面；周末这一周没数据了，也够得到
+        // 下一周的头几天，卡片就显示下一个有数据的日子
+        // The backend slices by UTC date; ten days from yesterday cover local today and, at the weekend
+        // when this week is done, the first days of next week, so the card shows the next day with data
+        const cal = await econApi.calendar(ymd(addDays(new Date(), -1)), 10, 2)
         // 管理员关掉「对用户开放」时整张卡不显示 / hidden entirely while "open to users" is off
         if (alive) setItems(cal.public ? cal.items : null)
       } catch {

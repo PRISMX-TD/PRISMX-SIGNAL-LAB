@@ -117,6 +117,7 @@ ALLOWED_PATHS = frozenset({
     "/u/:publicId",
     "/announcements",
     "/announcements/:id",
+    "/calendar",
     "/support",
     "/upgrade",
     "/account",

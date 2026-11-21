@@ -3051,6 +3051,7 @@
         "/u/:publicId": "他人主页",
         "/announcements": "公告列表",
         "/announcements/:id": "公告详情",
+        "/calendar": "财经日历",
         "/support": "客服工单",
         "/upgrade": "升级 PRO",
         "/account": "账户设置",
