@@ -131,7 +131,10 @@ def test_payload_shape_and_name_rules(db_session):
     assert out["openAccountUrl"] == "https://broker.example/open?a=1"
     assert out["snapshotAt"] is not None
     assert out["nextCompetitionId"] is None                          # running 不给「下一场」
-    flat = repr(out)
+    assert out["id"] == comp.id
+    # 比赛 id（随机 uuid）和快照时间（含微秒）是系统生成的，偶尔会碰巧含有「1001」，所以不参与泄露检查。
+    # The competition id (random uuid) and snapshot time (microseconds) can contain "1001" by chance; skip them.
+    flat = repr({k: v for k, v in out.items() if k not in ("id", "snapshotAt")})
     for leak in ("1001", "a@t.co", shown.id, "Bravo", "Charlie", "Echo"):
         assert leak not in flat, leak
 
