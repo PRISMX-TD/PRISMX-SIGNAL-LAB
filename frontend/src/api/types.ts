@@ -121,6 +121,8 @@ export interface User {
   // Lucky-wheel entry and this round's unused ticket count (from /account)
   luckyWheelVisible?: boolean
   luckyTickets?: number
+  // 交易报告 + 交易人格入口（2026-11-22）/ Trading report + persona entry
+  personaVisible?: boolean
   // 等级/称号（§7）：随 gamificationVisible 一起搭 refreshUser()（GET
   // /auth/me）这趟便车下发，用户菜单角标不用再单独请求 gamificationApi.me()。
   // 只有 gamificationVisible 为真时后端才会算，否则是 null——先例同上面三个
@@ -393,6 +395,8 @@ export interface AgentTeam {
   // May promote direct clients: every level but the last; top level promotes tree-wide.
   canPromote: boolean
   canSetPlan: boolean
+  // 管理员给的「看直属客户交易报告」权限（2026-11-22）。/ Admin-granted right to view direct customers' reports.
+  canViewReports?: boolean
   maxDepth: number
   nodes: AgentTeamNode[]
 }
@@ -425,6 +429,8 @@ export interface AdminAgentTreeNode {
   teamCustomers: number
   // rev 51：能不能在代理页改会员（只有管理员能开关）。/ May change plans on the agent page (admin-set).
   canSetPlan: boolean
+  // 能不能看直属客户的交易报告（2026-11-22，只有管理员能开关）。/ May view direct customers' reports (admin-set).
+  canViewReports?: boolean
   createdAt: string | null
 }
 
@@ -2133,6 +2139,10 @@ export interface GamificationSettings {
   // Win-rate profit gate: a principle by design (a high win rate isn't profit);
   // made configurable on 2026-09-04, default off.
   winrateRequireProfit: boolean
+  // 交易报告 + 交易人格（2026-11-22）：用户可见总开关、月底 AI 点评开关，默认都关。
+  // Trading report + persona: user switch and month-end AI comment switch, both off by default.
+  personaVisible?: boolean
+  personaAiComment?: boolean
   // 公开比赛页总开关（设计 §1.7）：关掉时所有 /c 页 404，出问题先关这里。默认 false。
   // Kill switch for public competition pages (design §1.7); off = every /c page 404s.
   competitionsPublicEnabled: boolean
@@ -2152,6 +2162,8 @@ export interface GamificationSettingsPatch {
   minTradesReturn?: number
   minTradesWinrate?: number
   winrateRequireProfit?: boolean
+  personaVisible?: boolean
+  personaAiComment?: boolean
   competitionsPublicEnabled?: boolean
   featuredCompetitionId?: string | null
 }

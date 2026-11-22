@@ -1653,7 +1653,8 @@
         "wholeGroup": "whole group saved",
         "agentParentChange": "ambassador upline {{a}} → {{b}}",
         "agentUserChange": "owning ambassador {{a}} → {{b}}",
-        "agentPlanRightChange": "plan right {{a}} → {{b}}"
+        "agentPlanRightChange": "plan right {{a}} → {{b}}",
+        "agentReportRightChange": "report right {{a}} → {{b}}"
       },
       "why": {
         "noMoney": "not enough margin",
@@ -1768,7 +1769,8 @@
           "invite_code": "source",
           "agent_parent": "ambassador upline",
           "agent_user": "owning ambassador",
-          "agent_plan_right": "plan right"
+          "agent_plan_right": "plan right",
+          "agent_report_right": "report right"
         },
         "setGroup": {
           "broker": "Partner broker lock",
@@ -3068,7 +3070,8 @@
         "/simulator": "Signal replay",
         "/agent": "Ambassador Hub",
         "/lucky": "Lucky wheel",
-        "/lucky/prizes": "My prizes"
+        "/lucky/prizes": "My prizes",
+        "/persona": "Trading persona"
       }
     },
     "searchPlaceholder": "Search by nickname, email or phone…",
@@ -3860,7 +3863,11 @@
       "planRight": "Can change plans",
       "planRightHint": "When on, they can grant or extend PRO for customers across their whole team on the Ambassador Hub (top-level ambassadors need it switched on here too). Only admins can change this.",
       "planRightOn": "Plan right switched on for {{name}}",
-      "planRightOff": "Plan right switched off for {{name}}"
+      "planRightOff": "Plan right switched off for {{name}}",
+      "reportRight": "Can view client reports",
+      "reportRightHint": "When on, they can view the trading report and persona of their direct clients on the Ambassador Hub (not clients of sub-ambassadors). Only admins can change this.",
+      "reportRightOn": "Report right switched on for {{name}}",
+      "reportRightOff": "Report right switched off for {{name}}"
     },
     "userDrawer": {
       "title": "User profile",
@@ -3966,6 +3973,11 @@
       "genDone": "Week generated: {{done}} written, {{failed}} failed.",
       "genCapHit": "Daily model cap reached after {{done}} groups. Raise the cap in Settings and run again.",
       "public": "Open to users (dashboard card and calendar page)"
+    },
+    "persona": {
+      "visible": "Trading persona open to users",
+      "aiComment": "AI comment on monthly reports",
+      "hint": "While off, only admins see the Persona page. The AI comment is written once per user when a month is archived and only receives anonymous figures (no e-mail, nickname or account)."
     }
   },
   "simulator": {
@@ -5659,5 +5671,307 @@
     "emptyDay": "No releases on this day.",
     "countdownDays": "{{d}}d {{h}}h",
     "todayTag": "Today"
+  },
+  "persona": {
+    "closed": "Trading persona is not open yet. Stay tuned.",
+    "note": "Counts only live trades placed on this platform · times in UTC",
+    "window": "Your persona is based on the last 90 days of live trades and is recalculated on the 1st of each month.",
+    "provisional": "First read · {{n}} trades, final at {{need}}",
+    "formal": "Final result · based on {{n}} trades",
+    "changed": "Last month: {{from}}",
+    "art": {
+      "label": "Art style",
+      "voxel": "Figure",
+      "poster": "Poster"
+    },
+    "share": {
+      "title": "Share your persona",
+      "button": "Share my persona",
+      "label": "My trading persona"
+    },
+    "family": {
+      "strategist": "Strategist",
+      "maverick": "Maverick",
+      "executor": "Executor",
+      "chaser": "Chaser"
+    },
+    "pole": {
+      "A": "Own calls",
+      "R": "Signal-led",
+      "X": "Holds on",
+      "G": "Guarded",
+      "L": "Slow",
+      "Q": "Fast",
+      "Z": "Hands-off",
+      "M": "Hands-on"
+    },
+    "axes": {
+      "title": "Four axes",
+      "judge": {
+        "name": "Judgement",
+        "help": "How many of your trades come from signals. Trading against a signal counts as your own call.",
+        "fact": "Signal-led {{p}}"
+      },
+      "risk": {
+        "name": "Risk",
+        "help": "Holding losers longer than winners and an average win smaller than the average loss both lean toward \"holds on\"; stop-outs cost points too.",
+        "fact": "Losers held {{r}}× as long · payoff {{p}}"
+      },
+      "tempo": {
+        "name": "Tempo",
+        "help": "How long each trade is held and how many times you trade per trading day.",
+        "fact": "Median hold {{m}} min · {{n}} a day"
+      },
+      "manage": {
+        "name": "Management",
+        "help": "The share of trades where you changed the stop or target yourself more than 2 minutes after opening. Automatic risk-control edits do not count.",
+        "fact": "Edited after entry {{p}}"
+      }
+    },
+    "report": {
+      "title": "Trading report",
+      "empty": "No closed trades this month yet.",
+      "live": "This month is in progress and updates live; the AI comment comes when the month is archived.",
+      "daysValue": "{{g}} / {{n}} days",
+      "openLosers": "{{n}} more open positions are in the red; they count as losses when the month is archived.",
+      "stat": {
+        "profit": "Net P&L",
+        "trades": "Trades",
+        "winRate": "Win rate",
+        "payoff": "Payoff ratio",
+        "score": "Overall score",
+        "days": "Green days",
+        "hold": "Median hold",
+        "drawdown": "Max drawdown"
+      }
+    },
+    "unit": {
+      "sec": "{{n}} s",
+      "min": "{{n}} min",
+      "hour": "{{n}} h"
+    },
+    "calendar": {
+      "title": "P&L calendar",
+      "trades": "{{n}} trades",
+      "utc": "UTC dates, closed trades only."
+    },
+    "weekday": {
+      "0": "Mon",
+      "1": "Tue",
+      "2": "Wed",
+      "3": "Thu",
+      "4": "Fri",
+      "5": "Sat",
+      "6": "Sun"
+    },
+    "badges": {
+      "title": "Badges this month",
+      "lightning": {
+        "name": "Lightning hands",
+        "desc": "Median hold under 2 minutes"
+      },
+      "multiSymbol": {
+        "name": "Multi-market",
+        "desc": "4+ symbols traded, none above 60%"
+      },
+      "contrarian": {
+        "name": "Contrarian",
+        "desc": "Over 10% of trades against the signal"
+      },
+      "stacker": {
+        "name": "Stacker",
+        "desc": "Over half the trades opened on top of a same-direction position"
+      },
+      "bull": {
+        "name": "Bull",
+        "desc": "Over 75% of trades are buys"
+      },
+      "bear": {
+        "name": "Bear",
+        "desc": "Over 75% of trades are sells"
+      },
+      "autopilot": {
+        "name": "Autopilot",
+        "desc": "Over half the trades used smart risk control"
+      },
+      "lotSteady": {
+        "name": "Steady size",
+        "desc": "Under 10% of trades sized 2× off your usual lot"
+      },
+      "lotWild": {
+        "name": "Wild size",
+        "desc": "Over 30% of trades sized 2× off your usual lot"
+      }
+    },
+    "break": {
+      "title": "Breakdown",
+      "trades": "Trades",
+      "winRate": "Win",
+      "profit": "P&L",
+      "symbol": {
+        "tab": "Symbol"
+      },
+      "session": {
+        "tab": "Session",
+        "asia": "Asia 00–07",
+        "europe": "Europe 07–12",
+        "overlap": "EU/US overlap 12–16",
+        "america": "Americas 16–21",
+        "late": "Late 21–24",
+        "note": "Sessions are in UTC, by opening time."
+      },
+      "weekday": {
+        "tab": "Weekday"
+      },
+      "hold": {
+        "tab": "Hold time",
+        "lt2m": "Under 2 min",
+        "m2to10": "2–10 min",
+        "m10to40": "10–40 min",
+        "m40to4h": "40 min–4 h",
+        "gt4h": "Over 4 h"
+      },
+      "source": {
+        "tab": "Source",
+        "signal": "Signal",
+        "reverse": "Against signal",
+        "strategy": "Strategy",
+        "chart": "Chart"
+      }
+    },
+    "tags": {
+      "title": "Auto tags",
+      "lead": "Tags the system puts on each trade by rule — no journal to write.",
+      "trades": "Tagged trades",
+      "open": "Open",
+      "more": "Show {{n}} more",
+      "less": "Show less",
+      "unprotected": {
+        "name": "No stop",
+        "desc": "No stop loss from open to close"
+      },
+      "heldLoser": {
+        "name": "Held loser",
+        "desc": "Closed at a loss after more than 3× your average winning hold"
+      },
+      "earlyExit": {
+        "name": "Early exit",
+        "desc": "Closed by hand in profit before the target, with less than half the target"
+      },
+      "movedStop": {
+        "name": "Moved stop",
+        "desc": "Stop moved toward a bigger loss, or removed"
+      },
+      "revenge": {
+        "name": "Revenge size",
+        "desc": "Opened within 30 min of a loss at 1.5× the previous size or more"
+      },
+      "stoppedOut": {
+        "name": "Stop-out",
+        "desc": "Closed by the system as a forced stop-out"
+      }
+    },
+    "side": {
+      "buy": "Buy",
+      "sell": "Sell"
+    },
+    "comment": {
+      "title": "AI comment",
+      "pending": "Written when the month is archived.",
+      "none": "No AI comment for this month."
+    },
+    "locked": {
+      "title": "A few more trades to unlock your trading persona",
+      "lead": "From your last 90 days of live trading, the system picks which of the 16 trading personas fits you best, and writes a trading report every month.",
+      "actions": "Trades in the last 90 days",
+      "days": "Days with trades",
+      "needMore": "Almost there — a few more trades and it unlocks.",
+      "actionHelp": "Orders on the same symbol and direction within 60 seconds count as one trade."
+    },
+    "demo": {
+      "title": "Go live to unlock your trading persona",
+      "lead": "The persona and monthly report use live trades only. Demo trades do not count.",
+      "cta": "Link a live account"
+    },
+    "client": {
+      "title": "{{name}}'s trading report",
+      "sub": "Read-only · your direct clients only",
+      "back": "Ambassador Hub",
+      "forbidden": "You don't have the right to view client reports, or this client is not your direct client.",
+      "locked": "This client hasn't unlocked a trading persona yet",
+      "demo": "This client has no live trades yet",
+      "button": "Report"
+    },
+    "gallery": {
+      "title": "The 16 trading personas",
+      "lead": "The four letters are judgement, risk, tempo and management. Tap one to read its line.",
+      "me": "You"
+    },
+    "types": {
+      "AGLZ": {
+        "title": "The Planner",
+        "say": "Place the order, go make tea, let it close on its own. The only risk: starting to think you can't be wrong."
+      },
+      "AGLM": {
+        "title": "The Helmsman",
+        "say": "You set the course and never let go of the wheel. The market hasn't moved and you've already moved the stop three times."
+      },
+      "AGQZ": {
+        "title": "The Clockmaker",
+        "say": "Enter, exit, next one — like clockwork. You're not trading, you're clocking in."
+      },
+      "AGQM": {
+        "title": "The Guerrilla",
+        "say": "Hit and run, and every hit gets two more touch-ups on the way out."
+      },
+      "AXLZ": {
+        "title": "The Rock",
+        "say": "\"It'll come back.\" Place it, stop looking, never cut a loser. So far the market has been kind to you."
+      },
+      "AXLM": {
+        "title": "The Negotiator",
+        "say": "When the stop gets close, you nudge it back a little. That's not a stop loss, that's haggling with the market."
+      },
+      "AXQZ": {
+        "title": "The Blade",
+        "say": "Ten small wins, one loss that pays them all back."
+      },
+      "AXQM": {
+        "title": "The Striker",
+        "say": "Hands faster than your head, always tweaking — but you can't bring yourself to cut the losers."
+      },
+      "RGLZ": {
+        "title": "The Officer",
+        "say": "You do exactly what the signal says and never touch it. But when did you last read a chart yourself?"
+      },
+      "RGLM": {
+        "title": "The Tuner",
+        "say": "Whatever stop and target the signal gives, you always give them another twist."
+      },
+      "RGQZ": {
+        "title": "The Stickler",
+        "say": "Lots of trades, no improvising, out on schedule. So steady someone should pay you a salary."
+      },
+      "RGQM": {
+        "title": "The Prober",
+        "say": "You follow, but never quite trust it: the stop gets twisted the moment you're in."
+      },
+      "RXLZ": {
+        "title": "The Half-Believer",
+        "say": "You trust the signal on direction and yourself on take-profit. You win pocket change and lose round numbers."
+      },
+      "RXLM": {
+        "title": "The Windrider",
+        "say": "You trust the signal's direction completely; its stop loss is up for negotiation."
+      },
+      "RXQZ": {
+        "title": "The Hitchhiker",
+        "say": "You hitch a ride on the signal and hop off after a small gain — but never hop off when it's losing."
+      },
+      "RXQM": {
+        "title": "The Surfer",
+        "say": "Lots of follows, lots of edits. A busy day, and your account didn't feel a thing."
+      }
+    }
   }
 }

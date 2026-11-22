@@ -67,6 +67,8 @@ class AccountInfoOut(BaseModel):
     # luckyTickets = unused tickets summed over the unended rounds this person can see.
     luckyWheelVisible: bool = False
     luckyTickets: int = 0
+    # 交易报告 + 交易人格（2026-11-22）：总开关打开或管理员。/ Trading report + persona: switch on, or admin.
+    personaVisible: bool = False
     nickname: str | None = None
     # 昵称是否还欠着。登录响应里也有同名字段，这里再下发一次是为了存量会话：
     # 强制上线时已经登录的人，本地缓存的 user 里根本没有这个键（undefined 即
@@ -215,6 +217,10 @@ def get_account(
         ),
         luckyWheelVisible=lucky_visible,
         luckyTickets=lucky_tickets,
+        personaVisible=(
+            True if current_user.role == "admin"
+            else bool(get_gamification_settings(db).get("persona_visible"))
+        ),
         nickname=current_user.nickname,
         needsNickname=not (current_user.nickname or "").strip(),
         nicknamePublic=bool(current_user.nickname_public),

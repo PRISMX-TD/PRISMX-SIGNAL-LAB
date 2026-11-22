@@ -353,6 +353,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // out kept the entry hidden with the switch on (hit on launch day, 2026-10-22).
           luckyWheelVisible: me.luckyWheelVisible,
           luckyTickets: me.luckyTickets,
+          personaVisible: me.personaVisible,
           // 等级/称号同样搭这趟车：后端只在 gamificationVisible 为真时算，
           // 否则是 null——UserMenu 的角标靠这两个字段渲染，不用再单独请求。
           // Level/title ride the same trip: the backend only computes these
@@ -390,6 +391,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           competitionsVisible: me.competitionsVisible,
           luckyWheelVisible: me.luckyWheelVisible,
           luckyTickets: me.luckyTickets,
+          personaVisible: me.personaVisible,
           gamificationLevel: me.gamificationLevel,
           gamificationTitle: me.gamificationTitle,
           needsNickname: me.needsNickname,

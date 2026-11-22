@@ -23,7 +23,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin, require_staff
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, persona, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -40,6 +40,7 @@ from app.services.background import BackgroundLoops
 from app.services.support_desk import support_desk_loop
 from app.services.lucky.sweep import lucky_wheel_loop
 from app.services.econ.loop import econ_calendar_loop
+from app.services.persona.loop import persona_loop
 from app.services import capacity, loop_health
 from app.services.connection_manager import manager
 
@@ -259,6 +260,8 @@ async def lifespan(app: FastAPI):
         "lucky_wheel": lucky_wheel_loop,
         # 财经日历：同步日程、补查公布值、写预案（30 秒；总开关关着时什么都不发）/ economic calendar
         "econ_calendar": econ_calendar_loop,
+        # 交易报告月底存档（10 分钟看一眼，每月 1 号存上个月）/ trading-report month-end archive
+        "persona": persona_loop,
     })
     loops.launch()
     app.state.background_loops = loops
@@ -536,6 +539,7 @@ app.include_router(emails.admin_router, prefix=settings.API_PREFIX, dependencies
 app.include_router(email_automations.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
 app.include_router(lucky_wheel.router, prefix=settings.API_PREFIX)
 app.include_router(lucky_wheel.admin_router, prefix=settings.API_PREFIX, dependencies=[Depends(require_admin)])
+app.include_router(persona.router, prefix=settings.API_PREFIX)
 # WebSocket 路由 / WebSocket routers
 app.include_router(ws.router)
 

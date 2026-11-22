@@ -968,6 +968,12 @@ GAMIFICATION_DEFAULTS: dict = {
     # Featured competition (design §1.3): used when it points at a publicly
     # viewable competition, otherwise one is picked automatically; None = auto.
     "featured_competition_id": None,
+    # 交易报告 + 交易人格（2026-11-22）：用户端总开关，默认关；管理员总能看到。
+    # Trading report + persona (2026-11-22): user-facing master switch, off by default; admins always see it.
+    "persona_visible": False,
+    # 月底存档时让 AI 写一段点评（只发匿名的汇总数字，不发账号、昵称、单号）；默认关，没配 ANTHROPIC_API_KEY 时也不写。
+    # AI comment written at month-end archive (anonymous aggregates only); off by default, skipped without ANTHROPIC_API_KEY.
+    "persona_ai_comment": False,
 }
 
 _gamification_cache = _TtlCache()

@@ -24,6 +24,11 @@ interface Props {
   // 可选：异步补全数据（例如拉 K 线画单笔的信号曲线），拿到前先用 variants 里的数据预览。
   // Optional async enrichment (e.g. candles for the trade's signal line); the preview uses variants until it lands.
   enhance?: (input: CardInput) => Promise<CardInput>
+  // 自带版式的卡（交易人格卡，2026-11-22）：不走四套模板、没有风格和隐藏金额选项，
+  // 导出、保存、分享仍走这里同一条路。build 拿到昵称，返回卡片的 CSS 与 HTML（图片须是 data URL）。
+  // A card with its own layout (the persona card): no template styles or privacy toggle, but the same
+  // export / save / share path. build gets the nickname and returns CSS + HTML (images as data URLs).
+  custom?: { title: string; fileStem: string; build: (nickname: string) => { css: string; html: string } }
   onClose: () => void
 }
 
@@ -71,7 +76,7 @@ const ShareIcon = () => <svg {...ico}><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 
 const SaveIcon = () => <svg {...ico}><path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M5 21h14" /></svg>
 const Spinner = () => <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" aria-hidden />
 
-export default function ShareCardModal({ type, variants, enhance, onClose }: Props) {
+export default function ShareCardModal({ type, variants, enhance, custom, onClose }: Props) {
   const { t, i18n } = useTranslation()
   const sheetRef = useRef<HTMLDivElement>(null)
   const titleId = useId()
@@ -101,9 +106,11 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
 
   const input = (variant && enhanced[variant.key]) || variant?.input || {}
   const value = type === 'A' ? input.trade?.pnl : type === 'C' ? input.month?.total : 1
-  const privacyAvailable = type === 'A' ? input.trade?.pct != null : type === 'C' ? input.month?.pct != null : false
+  const privacyAvailable = custom ? false : type === 'A' ? input.trade?.pct != null : type === 'C' ? input.month?.pct != null : false
+  const title = custom ? custom.title : t(`share.title.${type}`)
 
   const card = useMemo(() => {
+    if (custom) return custom.build(nickname)
     const data = buildEnvData(input, t, nickname)
     return renderCardHtml(style, type, data, {
       mode: (value ?? 0) >= 0 ? 'win' : 'loss',
@@ -111,7 +118,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
       medal: input.badge?.id ?? '',
       key: `sc${keyId}`,
     })
-  }, [input, t, nickname, style, type, value, privacy, privacyAvailable, keyId])
+  }, [custom, input, t, nickname, style, type, value, privacy, privacyAvailable, keyId])
 
   // 换了任何东西，之前生成的图就作废；随后在后台提前生成新图。iOS 的分享 / 下载要求「刚点过」的用户手势，
   // 点按钮时再花一秒生成，手势就过期了、按钮看起来没反应——所以预览一稳定就先生成好。
@@ -133,7 +140,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
     try { localStorage.setItem(STYLE_KEY, s) } catch { /* 隐私模式下写不进去，忽略 / ignore in private mode */ }
   }
 
-  const fileName = `signal-lab-${type.toLowerCase()}-${Date.now()}.png`
+  const fileName = `signal-lab-${custom ? custom.fileStem : type.toLowerCase()}-${Date.now()}.png`
   const generate = async () => {
     if (result) return result
     setBusy(true); setError(false)
@@ -260,7 +267,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
       >
         <button type="button" onClick={onClose} aria-label={t('share.close')}
           className="absolute right-4 top-3 text-2xl leading-none text-neutral-400 transition hover:text-neutral-200">×</button>
-        <h3 id={titleId} className="mb-4 pr-8 font-display text-lg font-bold text-white">{t(`share.title.${type}`)}</h3>
+        <h3 id={titleId} className="mb-4 pr-8 font-display text-lg font-bold text-white">{title}</h3>
 
         {variants.length > 1 && (
           <div className="mb-3 flex gap-2" role="group">
@@ -280,12 +287,12 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
               -webkit-touch-callout: none inherited from body is reset to default here, or iOS
               shows no "Save to Photos". */}
           {result && showImage
-            ? <img src={result.url} alt={t(`share.title.${type}`)} className="mx-auto block rounded-[22px]" style={{ width: CARD_W * scale, height: CARD_H * scale, WebkitTouchCallout: 'default' }} />
+            ? <img src={result.url} alt={title} className="mx-auto block rounded-[22px]" style={{ width: CARD_W * scale, height: CARD_H * scale, WebkitTouchCallout: 'default' }} />
             : <CardPreview css={card.css} html={card.html} scale={scale} />}
         </div>
         {result && showImage && <p className="mt-2 text-center text-xs text-neutral-400">{t('share.longPress')}</p>}
 
-        <div className="mt-4">
+        {!custom && <div className="mt-4">
           <div className="mb-2 text-xs text-neutral-400">{t('share.style')}</div>
           <div className="flex flex-wrap gap-2" role="group" aria-label={t('share.style')}>
             {CARD_STYLES.map((s) => (
@@ -295,7 +302,7 @@ export default function ShareCardModal({ type, variants, enhance, onClose }: Pro
               </button>
             ))}
           </div>
-        </div>
+        </div>}
 
         {privacyAvailable && (
           <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-neutral-300">

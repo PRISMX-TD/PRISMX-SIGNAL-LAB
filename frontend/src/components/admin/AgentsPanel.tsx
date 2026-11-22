@@ -149,6 +149,12 @@ export default function AgentsPanel() {
       t(enabled ? 'admin.agents.planRightOn' : 'admin.agents.planRightOff', { name: nameOf(n) }),
     )
 
+  const toggleReportRight = (n: AdminAgentTreeNode, enabled: boolean) =>
+    void run(
+      () => adminApi.setAgentReportRight(n.userId, enabled),
+      t(enabled ? 'admin.agents.reportRightOn' : 'admin.agents.reportRightOff', { name: nameOf(n) }),
+    )
+
   const depthNum = Number(depth)
   const depthValid = Number.isInteger(depthNum) && depthNum >= 1 && depthNum <= 20
 
@@ -175,6 +181,19 @@ export default function AgentsPanel() {
                 aria-label={t('admin.agents.planRight')}
               />
               {t('admin.agents.planRight')}
+            </label>
+            {/* 2026-11-22：看直属客户的交易报告，默认关。/ May view direct customers' trading reports, off by default. */}
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-xs text-neutral-300"
+              title={t('admin.agents.reportRightHint')}
+            >
+              <Switch
+                checked={!!n.canViewReports}
+                disabled={busy}
+                onChange={(v) => toggleReportRight(n, v)}
+                aria-label={t('admin.agents.reportRight')}
+              />
+              {t('admin.agents.reportRight')}
             </label>
             {moving?.userId !== n.userId && (
               <button

@@ -1725,6 +1725,9 @@ class AgentNode(Base):
     # off by default, independent of level; it goes away with the node on revoke.
     # server_default：迁移里的回填直接 INSERT 本表、不带这一列。/ Raw backfill INSERTs omit it.
     can_set_plan = Column(Boolean, nullable=False, default=False, server_default=text("FALSE"))
+    # rev 53：能不能看自己**直属**客户的交易报告与人格。只有管理员能开关，默认关（2026-11-22 产品决定）。
+    # rev 53: may view their direct customers' trading reports and personas. Admin-only, off by default.
+    can_view_reports = Column(Boolean, nullable=False, default=False, server_default=text("FALSE"))
 
 
 class UserTask(Base):
@@ -2527,3 +2530,47 @@ class EconPreview(Base):
     outcome_consensus = Column(String, nullable=True)
     outcome_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+class PersonaState(Base):
+    """交易人格的当前结果（2026-11-22，rev 53），每个用户一行。
+
+    人格不是实时算的：首次解锁那一刻算一次并存下来，之后每月 1 号重算（见 services/persona/loop.py）。
+    letters 是四个字母的代号（判断、风控、节奏、管理），axes_json 是四个主轴的数值，下次重算时
+    落在缓冲带里的主轴沿用这里的字母。provisional = 「初测」（算的时候不足 50 笔）。
+    One user's current trading persona (rev 53). Not live: computed once at first unlock and stored,
+    then recomputed on the 1st of each month. letters is the 4-letter code; axes_json the four axis
+    values; an axis landing in its buffer band keeps the letter stored here. provisional = the
+    first-look label (fewer than 50 positions when computed)."""
+    __tablename__ = "persona_states"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, unique=True, index=True)
+    code = Column(String, nullable=False)
+    axes_json = Column(Text, nullable=False, default="{}")
+    positions = Column(Integer, nullable=False, default=0)
+    provisional = Column(Boolean, nullable=False, default=True)
+    computed_at = Column(DateTime, nullable=False, default=_now)
+    created_at = Column(DateTime, default=_now)
+
+
+class PersonaReport(Base):
+    """一个用户一个月的交易报告存档（rev 53）。当月的报告实时算、不落库；每月 1 号把上个月存成一行，
+    之后不再改（除了补写 AI 评语）。period 是 UTC 月份 YYYY-MM；report_json 是整份报告（含当月人格）；
+    ai_comment_json 是 AI 评语（各语言一份），没开或没写成时为空。
+    One user's archived monthly trading report (rev 53). The current month is computed live and never
+    stored; on the 1st the previous month is frozen into one row. period is the UTC month YYYY-MM;
+    report_json the full report including that month's persona; ai_comment_json the AI note per
+    language, empty when switched off or not written."""
+    __tablename__ = "persona_reports"
+    __table_args__ = (UniqueConstraint("user_id", "period", name="uq_persona_report_user_period"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    period = Column(String, nullable=False)
+    code = Column(String, nullable=True)
+    report_json = Column(Text, nullable=False, default="{}")
+    ai_comment_json = Column(Text, nullable=True)
+    ai_status = Column(String, nullable=True)          # ok / failed / off
+    ai_model = Column(String, nullable=True)
+    archived_at = Column(DateTime, nullable=False, default=_now)

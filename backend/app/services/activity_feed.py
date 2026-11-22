@@ -277,6 +277,9 @@ _USER_FIELDS = (
     # 代理的改会员权限（rev 51）：on / off，只有管理员能改
     # an agent's plan right (rev 51): on / off, admin-only
     "agent_plan_right",
+    # 推荐官看直属客户交易报告的权限（2026-11-22）：on / off，只有管理员能改
+    # an ambassador's right to view direct customers' trading reports: on / off, admin-only
+    "agent_report_right",
 )
 _PLAN_FIELDS = frozenset({"plan", "plan_expires_at", "plan_note"})
 # 账户分类里的系统 / 本人行（与 _account_field_cond 的 SQL 一一对应）
@@ -2285,6 +2288,7 @@ def _audit_params(p: _Proto, ctx: _Ctx) -> dict:
             "agent_parent": _pair(ch, "agent_parent"),
             "agent_user": _pair(ch, "agent_user"),
             "agent_plan_right": _pair(ch, "agent_plan_right"),
+            "agent_report_right": _pair(ch, "agent_report_right"),
         }
     if kind == ADMIN_USER_DISABLE:
         old, new = _as_dict(ch["account:disable"][0]), _as_dict(ch["account:disable"][1])

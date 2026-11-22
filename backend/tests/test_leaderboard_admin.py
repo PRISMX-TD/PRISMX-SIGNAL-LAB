@@ -19,7 +19,8 @@ def test_settings_roundtrip_partial(db_session):
                  "competitionsVisible": False, "minBaselineUsd": 500.0,
                  "minTradesReturn": 5, "minTradesWinrate": 20,
                  "winrateRequireProfit": False,
-                 "competitionsPublicEnabled": False, "featuredCompetitionId": None}
+                 "competitionsPublicEnabled": False, "featuredCompetitionId": None,
+                 "personaVisible": False, "personaAiComment": False}
     admin_patch_settings(GamificationSettingsPatchIn(leaderboardVisible=True), db=db_session)
     invalidate_gamification_cache()
     got = get_gamification_settings(db_session)

@@ -1218,6 +1218,7 @@ def agent_team(db: Session, user: User) -> AgentTeamOut:
         canManage=top,
         canPromote=level < max_depth,
         canSetPlan=bool(me and me.can_set_plan),
+        canViewReports=bool(me and me.can_view_reports),
         maxDepth=max_depth,
         nodes=out,
     )
@@ -1444,6 +1445,7 @@ def admin_agent_tree(db: Session) -> AdminAgentTreeOut:
                 directCustomers=direct.get(n.user_id, 0),
                 teamCustomers=team.get(n.user_id, 0),
                 canSetPlan=bool(n.can_set_plan),
+                canViewReports=bool(n.can_view_reports),
                 createdAt=n.created_at,
             )
             for n in nodes
@@ -1465,6 +1467,25 @@ def admin_set_plan_right(db: Session, admin: User, user_id: str, body: AdminAgen
             "on" if node.can_set_plan else "off", "on" if body.enabled else "off",
         )
         node.can_set_plan = body.enabled
+        db.commit()
+        notify_ws(user_id)
+    return admin_agent_tree(db)
+
+
+def admin_set_report_right(db: Session, admin: User, user_id: str, body: AdminAgentPlanRight) -> AdminAgentTreeOut:
+    """管理员开 / 关一个推荐官「看直属客户交易报告」的权限（2026-11-22），默认关。只看直属客户，
+    下级推荐官的客户不在内；推荐官自己没有入口去开。审计字段 agent_report_right（on / off）。
+    Admin switches an ambassador's right to view direct customers' trading reports (off by default).
+    Direct customers only. Audited as agent_report_right (on / off) when it changes."""
+    node = node_of(db, user_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="推荐官不存在 / Ambassador not found")
+    if bool(node.can_view_reports) != body.enabled:
+        _log_change(
+            db, admin.id, user_id, "agent_report_right",
+            "on" if node.can_view_reports else "off", "on" if body.enabled else "off",
+        )
+        node.can_view_reports = body.enabled
         db.commit()
         notify_ws(user_id)
     return admin_agent_tree(db)
@@ -2083,6 +2104,16 @@ def put_agent_plan_right(
     admin: User = Depends(require_admin),
 ):
     return admin_set_plan_right(db, admin, user_id, body)
+
+
+@admin_agents_router.put("/{user_id}/report-right", response_model=AdminAgentTreeOut)
+def put_agent_report_right(
+    user_id: str,
+    body: AdminAgentPlanRight,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    return admin_set_report_right(db, admin, user_id, body)
 
 
 @admin_agents_router.post("/{user_id}/revoke", response_model=AdminAgentTreeOut)

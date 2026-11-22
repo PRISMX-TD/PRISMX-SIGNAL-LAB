@@ -947,6 +947,12 @@ const R: Record<ActivityKind, (c: Ctx) => Part[]> = {
       const side = (i: 0 | 1) => (str(right[i]) === 'on' ? t('admin.log.v.rightOn') : t('admin.log.v.rightOff'))
       items.push(t('admin.log.x.agentPlanRightChange', { a: side(0), b: side(1) }))
     }
+    // 推荐官看客户交易报告（rev 53）：on / off。/ An agent's report right (rev 53): on / off.
+    const reportRight = pairOf(p.agent_report_right)
+    if (reportRight) {
+      const side = (i: 0 | 1) => (str(reportRight[i]) === 'on' ? t('admin.log.v.rightOn') : t('admin.log.v.rightOff'))
+      items.push(t('admin.log.x.agentReportRightChange', { a: side(0), b: side(1) }))
+    }
     return [items.length ? listed(t, 'admin.log.ev.userEdit.head', items) : t('admin.log.ev.userEdit.none')]
   },
   'admin.user_disable': ({ t, p }) => {
@@ -1260,7 +1266,7 @@ export function kindName(kind: string, t: TFunction): string {
 }
 
 // ---------- 详情抽屉「修改前 / 修改后」表 / the drawer's before / after table ----------
-const USER_FIELDS = ['role', 'plan', 'plan_expires_at', 'plan_note', 'invite_code', 'agent_parent', 'agent_user', 'agent_plan_right']
+const USER_FIELDS = ['role', 'plan', 'plan_expires_at', 'plan_note', 'invite_code', 'agent_parent', 'agent_user', 'agent_plan_right', 'agent_report_right']
 // 审计字段名不带前缀时（列表行的 params.changes 里只有键名），按 kind 找标签表。
 // Bare field names (params.changes carry only the key) find their label table by kind.
 const BARE_TABLE: Partial<Record<string, string>> = {

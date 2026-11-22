@@ -390,6 +390,8 @@ class GamificationSettingsPatchIn(BaseModel):
     minTradesReturn: int | None = None
     minTradesWinrate: int | None = None
     winrateRequireProfit: bool | None = None
+    personaVisible: bool | None = None
+    personaAiComment: bool | None = None
     # 公开比赛（设计 §1.3/§1.7）：总开关与主推比赛 id（传 null 清空 = 自动挑选）。
     # Public competitions: master switch and featured id (null clears = automatic).
     competitionsPublicEnabled: bool | None = None
@@ -2272,6 +2274,9 @@ class AgentTeamOut(BaseModel):
     # rev 51：能不能给整支团队的客户改会员——管理员给的，与 canManage（一级才有）无关。
     # rev 51: may change plans for the whole team; granted by admins, independent of canManage.
     canSetPlan: bool = False
+    # 2026-11-22：能不能看直属客户的交易报告——管理员按人给，默认关。
+    # May view direct customers' trading reports; granted per ambassador by admins, off by default.
+    canViewReports: bool = False
     maxDepth: int
     nodes: list[AgentTeamNodeOut] = []
 
@@ -2319,6 +2324,7 @@ class AdminAgentTreeNodeOut(BaseModel):
     directCustomers: int = 0
     teamCustomers: int = 0
     canSetPlan: bool = False
+    canViewReports: bool = False
     createdAt: datetime | None = None
 
 

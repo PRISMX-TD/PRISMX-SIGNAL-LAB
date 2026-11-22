@@ -41,6 +41,7 @@ describe('isPixelBlocked', () => {
       '/achievements',
       '/lucky',
       '/lucky/prizes',
+      '/persona',
       '/bind',
       '/download',
       '/app-download',

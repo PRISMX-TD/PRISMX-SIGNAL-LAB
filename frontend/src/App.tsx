@@ -130,6 +130,7 @@ const LeaderboardPage = lazyPage(() => import('./pages/LeaderboardPage'), 'Leade
 const CompetitionsPage = lazyPage(() => import('./pages/CompetitionsPage'), 'CompetitionsPage')
 const LuckyPage = lazyPage(() => import('./pages/LuckyPage'), 'LuckyPage')
 const LuckyPrizesPage = lazyPage(() => import('./pages/LuckyPrizesPage'), 'LuckyPrizesPage')
+const PersonaPage = lazyPage(() => import('./pages/PersonaPage'), 'PersonaPage')
 const ProfilePage = lazyPage(() => import('./pages/ProfilePage'), 'ProfilePage')
 const LegalPage = lazyPage(() => import('./pages/LegalPage'), 'LegalPage', { core: true })
 const FaqPage = lazyPage(() => import('./pages/FaqPage'), 'FaqPage', { core: true })
@@ -208,6 +209,7 @@ const MORE_SHEET_PAGES: Record<string, HasPreload> = {
   '/leaderboard': LeaderboardPage,
   '/competitions': CompetitionsPage,
   '/lucky': LuckyPage,
+  '/persona': PersonaPage,
   '/agent': AgentPage,
 }
 
@@ -649,6 +651,12 @@ export default function App() {
                   Lucky wheel (rev 45): no route gate either; the page shows "not open" itself. */}
               <Route path="/lucky" element={<GrowthHub tab="lucky"><LuckyPage /></GrowthHub>} />
               <Route path="/lucky/prizes" element={<GrowthHub tab="lucky"><LuckyPrizesPage /></GrowthHub>} />
+              {/* 交易报告 + 交易人格（2026-11-22）：同样不做路由门控，开关未开时页面自己显示「暂未开放」。
+                  /persona/client 是推荐官看直属客户的报告（邮箱放在路由 state 里，不进网址）。
+                  Trading report + persona: no route gate; the page handles its own 403. /persona/client is an
+                  ambassador's view of a direct customer (the e-mail travels in router state, not the URL). */}
+              <Route path="/persona" element={<GrowthHub tab="persona"><PersonaPage /></GrowthHub>} />
+              <Route path="/persona/client" element={<PersonaPage mode="client" />} />
               {/* 公开主页（2026-09-07）：从榜面名字点进来；不套外壳，自带返回。
                   Public profile: reached from board names; no shell, carries its own back link. */}
               <Route path="/u/:publicId" element={<ProfilePage />} />

@@ -83,6 +83,7 @@ UNTRACKED_ROUTES = {
     "/support-desk/*": "客服内部工作台，只有客服和管理员能进，不是用户页面 / internal support desk, staff only",
     "/c": "公开比赛页（未登录）；页面访问上报要登录，匿名漏斗由 /api/public/competitions/event 统计 (promo_funnel_daily) / logged-out public competition page; page-view telemetry needs login, anonymous funnel is counted by /api/public/competitions/event",
     "/c/:compId": "同 /c / same as /c",
+    "/persona/client": "推荐官看直属客户的交易报告，只对开了查看权限的推荐官开放；和 /persona 是同一个页面，单独统计没有意义 / ambassador view of a direct client's report (granted agents only); same page as /persona",
     "*": "兜底重定向，不是页面",
 }
 

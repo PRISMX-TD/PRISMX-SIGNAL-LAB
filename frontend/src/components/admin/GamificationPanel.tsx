@@ -188,6 +188,7 @@ export default function GamificationPanel() {
   const [minTradesWinrateDraft, setMinTradesWinrateDraft] = useState('')
   const [savingTradeGates, setSavingTradeGates] = useState(false)
   const [savingWrProfit, setSavingWrProfit] = useState(false)
+  const [savingPersona, setSavingPersona] = useState<null | 'visible' | 'ai'>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -340,6 +341,20 @@ export default function GamificationPanel() {
   // 与三个可见性开关同一种交互。
   // The win-rate profit gate saves on toggle rather than via the Save button: it has
   // no draft state, matching how the three visibility switches behave.
+  // 交易报告 + 交易人格（2026-11-22）：两个开关都是点了即存，开关两个方向都不用确认。
+  // Trading report + persona: both switches save on toggle, no confirmation either way.
+  const togglePersona = async (field: 'personaVisible' | 'personaAiComment', next: boolean) => {
+    setSavingPersona(field === 'personaVisible' ? 'visible' : 'ai')
+    setSettingsError(null)
+    try {
+      setSettings(await adminApi.updateGamificationSettings({ [field]: next }))
+    } catch (err) {
+      setSettingsError(err instanceof Error ? localizeApiError(err.message) : 'Save failed')
+    } finally {
+      setSavingPersona(null)
+    }
+  }
+
   const toggleWrProfit = async (next: boolean) => {
     setSavingWrProfit(true)
     setSettingsError(null)
@@ -539,6 +554,23 @@ export default function GamificationPanel() {
               onChange={togglePublicEnabled}
             />
             <p className="-mt-1 text-xs text-neutral-500">{t('admin.competitionPromo.publicSwitchHint')}</p>
+            <SettingsToggleRow
+              label={t('admin.persona.visible')}
+              checked={!!settings?.personaVisible}
+              saving={savingPersona === 'visible'}
+              onLabel={t('gamification.admin.visibleOn')}
+              offLabel={t('gamification.admin.visibleOff')}
+              onChange={(v) => void togglePersona('personaVisible', v)}
+            />
+            <SettingsToggleRow
+              label={t('admin.persona.aiComment')}
+              checked={!!settings?.personaAiComment}
+              saving={savingPersona === 'ai'}
+              onLabel={t('gamification.admin.visibleOn')}
+              offLabel={t('gamification.admin.visibleOff')}
+              onChange={(v) => void togglePersona('personaAiComment', v)}
+            />
+            <p className="-mt-1 text-xs text-neutral-500">{t('admin.persona.hint')}</p>
             {pendingOpen && (
               <ConfirmModal
                 center

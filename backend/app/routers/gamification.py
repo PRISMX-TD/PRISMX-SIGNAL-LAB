@@ -954,6 +954,8 @@ _SETTINGS_KEY_MAP = {
     "winrate_require_profit": "winrateRequireProfit",
     "competitions_public_enabled": "competitionsPublicEnabled",
     "featured_competition_id": "featuredCompetitionId",
+    "persona_visible": "personaVisible",
+    "persona_ai_comment": "personaAiComment",
 }
 
 
@@ -1000,6 +1002,10 @@ def admin_patch_settings(body: GamificationSettingsPatchIn, db: Session = Depend
         patch["min_trades_winrate"] = int(body.minTradesWinrate)
     if "winrateRequireProfit" in sent:
         patch["winrate_require_profit"] = bool(body.winrateRequireProfit)
+    if "personaVisible" in sent:
+        patch["persona_visible"] = bool(body.personaVisible)
+    if "personaAiComment" in sent:
+        patch["persona_ai_comment"] = bool(body.personaAiComment)
     if "competitionsPublicEnabled" in sent:
         patch["competitions_public_enabled"] = bool(body.competitionsPublicEnabled)
     if "featuredCompetitionId" in sent:

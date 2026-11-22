@@ -60,6 +60,7 @@ LOOP_INTERVALS: dict[str, int] = {
     "support_desk": 300,            # 客服台跟进提醒 / 过期（rev 41）/ support-desk reminders
     "lucky_wheel": 60,              # 幸运轮盘作废 / 提醒（rev 45）/ lucky wheel void + reminder
     "econ_calendar": 30,            # 财经日历（rev 52）/ economic calendar
+    "persona": 600,                 # 交易报告月底存档（rev 53）/ trading-report archive
 }
 STALE_DEFAULT = 3600
 LOOP_ERROR_RECENT_SEC = 3600

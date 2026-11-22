@@ -437,7 +437,12 @@ def _hash_legacy_api_tokens() -> None:
 #          建表建索引）。同 rev 44 / 45：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
 #          rev 52 — economic calendar: new tables econ_releases and econ_previews via create_all;
 #          no ADD COLUMN, no backfill.
-CURRENT_SCHEMA_REV = 52
+# rev 53 — 交易人格与月度报告（2026-11-22）：新表 persona_states、persona_reports（create_all 建表），
+#          agent_nodes 加 can_view_reports（推荐官看直属客户报告的权限，存量回填 FALSE，管理员逐个打开）。
+#          rev 53 — trading persona and monthly reports: new tables persona_states and persona_reports
+#          via create_all; agent_nodes.can_view_reports (ambassadors viewing direct customers' reports),
+#          existing rows FALSE.
+CURRENT_SCHEMA_REV = 53
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1502,6 +1507,11 @@ def _migrate_columns() -> None:
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE agent_nodes ADD COLUMN can_set_plan BOOLEAN DEFAULT FALSE"))
                 conn.execute(text("UPDATE agent_nodes SET can_set_plan = FALSE WHERE can_set_plan IS NULL"))
+        # rev 53：推荐官看直属客户报告的权限，存量一律关。/ rev 53: report-view right, off for everyone.
+        if "can_view_reports" not in node_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE agent_nodes ADD COLUMN can_view_reports BOOLEAN DEFAULT FALSE"))
+                conn.execute(text("UPDATE agent_nodes SET can_view_reports = FALSE WHERE can_view_reports IS NULL"))
 
     # rev 22：公告的「弹窗展示」开关。存量公告一律不弹——这一列是新行为的入口，
     # 回填成 TRUE 等于给所有历史公告追发一轮弹窗。两张配套新表（user_notifications、

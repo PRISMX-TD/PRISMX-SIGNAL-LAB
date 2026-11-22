@@ -88,7 +88,7 @@ function NavItem({ to, label, match }: { to: string; label: string; match?: stri
 }
 
 // 竞技场（GrowthHub）下的四页 / the four pages under the arena (GrowthHub)
-const ARENA_PATHS = ['/achievements', '/leaderboard', '/competitions', '/lucky']
+const ARENA_PATHS = ['/achievements', '/leaderboard', '/competitions', '/lucky', '/persona']
 // 切换时不播整页淡入的路由：底部 4 个主 tab + 竞技场 4 页（理由见下面 page-enter 那段注释）。
 // Routes that switch with no page fade: the 4 bottom tabs + the 4 arena pages (see the
 // page-enter comment below for why).
@@ -542,9 +542,9 @@ export default function Layout({ onMoreOpen }: { onMoreOpen?: (paths: string[]) 
     // any of the four beta switches is on, landing on the first open page; the
     // GrowthHub tabs switch between them. Direct URLs still work (each page
     // handles its own 403).
-    ...(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible || user?.luckyWheelVisible
+    ...(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible || user?.luckyWheelVisible || user?.personaVisible
       ? [{
-          to: user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : '/lucky',
+          to: user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : user?.luckyWheelVisible ? '/lucky' : '/persona',
           icon: 'achievements',
           label: t('nav.growth'),
           match: ARENA_PATHS,
@@ -957,9 +957,9 @@ export default function Layout({ onMoreOpen }: { onMoreOpen?: (paths: string[]) 
                   leaderboard / competitions (2026-09-07), shown when any of the
                   three beta switches is on; custom strategies moved into the
                   user menu. */}
-              {(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible || user?.luckyWheelVisible) && (
+              {(user?.gamificationVisible || user?.leaderboardVisible || user?.competitionsVisible || user?.luckyWheelVisible || user?.personaVisible) && (
                 <NavItem
-                  to={user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : '/lucky'}
+                  to={user?.gamificationVisible ? '/achievements' : user?.leaderboardVisible ? '/leaderboard' : user?.competitionsVisible ? '/competitions' : user?.luckyWheelVisible ? '/lucky' : '/persona'}
                   label={t('nav.growth')}
                   match={ARENA_PATHS}
                 />

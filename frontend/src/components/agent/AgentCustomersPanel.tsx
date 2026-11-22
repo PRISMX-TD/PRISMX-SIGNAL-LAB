@@ -23,6 +23,7 @@
 // avatar too; phones get fact-grid cards.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import { agentApi } from '../../api/client'
 import { fmtDate, localizeApiError } from '../../api/utils'
 import { useBackToClose } from '../../utils/useBackToClose'
@@ -68,7 +69,11 @@ export default function AgentCustomersPanel({
   const directPromote = !canManage && team.canPromote
   const canPromoteRow = (u: AgentTreeUser) => !u.isAgent && (canManage || (directPromote && u.viaEmail === selfEmail))
   // 操作列：能升代理或能改会员就有。/ The action column shows when either write is allowed.
-  const hasActions = canManage || directPromote || canSetPlan
+  // 2026-11-22：管理员给了「看客户报告」就能看直属客户（来自 = 自己）的交易报告。
+  // With the admin-granted report right, direct customers (came through = self) get a report button.
+  const canViewReports = !!team.canViewReports
+  const navigate = useNavigate()
+  const hasActions = canManage || directPromote || canSetPlan || canViewReports
   const [offset, setOffset] = useState(0)
   const [page, setPage] = useState<AgentTreeUsers | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -204,6 +209,17 @@ export default function AgentCustomersPanel({
       </button>
     )
 
+  const reportButton = (u: AgentTreeUser) =>
+    canViewReports && !u.isAgent && u.viaEmail === selfEmail ? (
+      <button
+        type="button"
+        className="btn btn-ghost"
+        onClick={() => navigate('/persona/client', { state: { email: u.email, name: u.nickname || u.email } })}
+      >
+        {t('persona.client.button')}
+      </button>
+    ) : null
+
   return (
     <section>
       {/* 工具栏：搜索、按推荐官筛、人数，一条排完；手机上上下叠。
@@ -284,6 +300,7 @@ export default function AgentCustomersPanel({
                       {hasActions && (
                         <td className="is-act">
                           <div className="agt-row-acts">
+                            {reportButton(u)}
                             {planButton(u)}
                             {promoteButton(u)}
                           </div>
@@ -298,6 +315,7 @@ export default function AgentCustomersPanel({
               {page.users.map((u, i) => {
                 const plan = planButton(u)
                 const promo = promoteButton(u)
+                const report = reportButton(u)
                 return (
                   <li key={`${u.email}-${i}`} className="agt-mcard">
                     <div className="agt-mcard-top">
@@ -323,8 +341,9 @@ export default function AgentCustomersPanel({
                         <Mt5List accounts={u.mt5Accounts} />
                       </Fact>
                     </dl>
-                    {(plan || promo) && (
-                      <div className={`agt-mcard-acts${plan && promo ? ' has-two' : ''}`}>
+                    {(plan || promo || report) && (
+                      <div className={`agt-mcard-acts${[plan, promo, report].filter(Boolean).length > 1 ? ' has-two' : ''}`}>
+                        {report}
                         {plan}
                         {promo}
                       </div>

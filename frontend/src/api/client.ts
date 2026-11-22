@@ -10,6 +10,7 @@ import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailCont
 import type { EmailAutomation, EmailAutomationCondition, EmailAutomationEstimate, EmailAutomationInput, EmailAutomationList, EmailAutomationSend, EmailAutomationSendStatus, EmailAutomationTrigger } from './types'
 import type { ActivityDetail, ActivityPage, ActivityQuery } from './types'
 import type { AdminAgentTree, AgentTeam, AgentTreeUser, AgentTreeUsers } from './types'
+import type { PersonaClient, PersonaOverview, PersonaReport } from './personaTypes'
 import type { AdminUserOverview } from './supportTypes'
 import type { AdminFollowUpRecord, AssignBlocker, AssignInput, FollowUp, FollowUpChannel, FollowUpGoal, FollowUpNote, FollowUpStaffStatus, SupportCard, SupportConversion, SupportCustomer, SupportMe, SupportMember, SupportRequest, SupportSettings, SupportProgress, SupportStatsRow, SupportTemplate, SupportTier } from './supportTypes'
 import type { ConditionPayload, UsageCatalog } from '../components/strategies/conditionTypes'
@@ -1183,6 +1184,8 @@ export const userApi = {
       // Lucky wheel entry visibility + unused tickets summed over the open rounds this user can see (see backend account.lucky_flags).
       luckyWheelVisible: boolean
       luckyTickets: number
+      // 交易报告 + 交易人格（2026-11-22）：总开关或管理员。/ Trading report + persona: switch on, or admin.
+      personaVisible: boolean
       nickname: string | null
       // 是否还欠一个昵称（全员必填）。搭这趟车是为了强制上线时已经登录的会话——
       // 他们缓存的 user 里没有这个键，只有 refreshUser() 能补上（见后端注释）。
@@ -1439,6 +1442,17 @@ export const ticketApi = {
 
 // 幸运轮盘 v2（rev 46）：多期并行，抽奖要带 roundId；结果由后端决定，前端只播动画。
 // Lucky wheel v2 (rev 46): several rounds at once, so a spin names its round; the backend decides, the page animates.
+// 交易报告 + 交易人格（2026-11-22）。推荐官看直属客户用 POST + 邮箱（不把邮箱放进网址）。
+// Trading report + persona. Ambassadors read a direct customer's report by e-mail in a POST body.
+export const personaApi = {
+  me: () => request<PersonaOverview>('/persona/me'),
+  report: (period: string) => request<PersonaReport>(`/persona/me/report?period=${encodeURIComponent(period)}`),
+  client: (email: string) =>
+    request<PersonaOverview & { client: PersonaClient }>('/persona/client', { method: 'POST', body: JSON.stringify({ email }) }),
+  clientReport: (email: string, period: string) =>
+    request<{ client: PersonaClient; report: PersonaReport }>('/persona/client', { method: 'POST', body: JSON.stringify({ email, period }) }),
+}
+
 export const luckyApi = {
   state: () => request<LuckyState>('/lucky-wheel'),
   spin: (roundId: string, requestId: string) =>
@@ -1788,6 +1802,12 @@ export const adminApi = {
   // 开 / 关代理的改会员权限（rev 51，只有管理员能动）。/ Switch an agent's plan right (admin-only).
   setAgentPlanRight: (userId: string, enabled: boolean) =>
     request<AdminAgentTree>(`/admin/agents/${encodeURIComponent(userId)}/plan-right`, {
+      method: 'PUT',
+      body: JSON.stringify({ enabled }),
+    }),
+  // 开 / 关推荐官「看直属客户交易报告」的权限（2026-11-22，默认关）。/ Switch an ambassador's report right.
+  setAgentReportRight: (userId: string, enabled: boolean) =>
+    request<AdminAgentTree>(`/admin/agents/${encodeURIComponent(userId)}/report-right`, {
       method: 'PUT',
       body: JSON.stringify({ enabled }),
     }),

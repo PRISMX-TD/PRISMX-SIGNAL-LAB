@@ -2764,5 +2764,307 @@
     "emptyDay": "Ngày này không có dữ liệu.",
     "countdownDays": "{{d}} ngày {{h}} giờ",
     "todayTag": "Hôm nay"
+  },
+  "persona": {
+    "closed": "Tính cách giao dịch chưa mở. Hãy chờ nhé.",
+    "note": "Chỉ tính lệnh tài khoản thật đặt trên nền tảng này · giờ UTC",
+    "window": "Tính cách dựa trên lệnh tài khoản thật trong 90 ngày gần nhất, tính lại vào ngày 1 mỗi tháng.",
+    "provisional": "Kết quả sơ bộ · {{n}} lệnh, đủ {{need}} lệnh là chính thức",
+    "formal": "Kết quả chính thức · dựa trên {{n}} lệnh",
+    "changed": "Tháng trước: {{from}}",
+    "art": {
+      "label": "Phong cách minh họa",
+      "voxel": "Mô hình",
+      "poster": "Áp phích"
+    },
+    "share": {
+      "title": "Chia sẻ tính cách giao dịch",
+      "button": "Chia sẻ tính cách của tôi",
+      "label": "Tính cách giao dịch của tôi"
+    },
+    "family": {
+      "strategist": "Nhà chiến lược",
+      "maverick": "Kẻ xông pha",
+      "executor": "Người thực thi",
+      "chaser": "Người đuổi sáng"
+    },
+    "pole": {
+      "A": "Tự quyết",
+      "R": "Theo tín hiệu",
+      "X": "Gồng lỗ",
+      "G": "Giữ an toàn",
+      "L": "Chậm",
+      "Q": "Nhanh",
+      "Z": "Buông tay",
+      "M": "Bám màn hình"
+    },
+    "axes": {
+      "title": "Bốn trục",
+      "judge": {
+        "name": "Phán đoán",
+        "help": "Tỷ lệ lệnh đến từ tín hiệu. Lệnh ngược tín hiệu được tính là tự quyết.",
+        "fact": "Theo tín hiệu {{p}}"
+      },
+      "risk": {
+        "name": "Quản lý rủi ro",
+        "help": "Giữ lệnh lỗ lâu hơn lệnh lãi và lãi trung bình nhỏ hơn lỗ trung bình đều nghiêng về \"gồng lỗ\"; bị cưỡng chế đóng cũng bị trừ điểm.",
+        "fact": "Giữ lệnh lỗ gấp {{r}} lần lệnh lãi · tỷ lệ lãi/lỗ {{p}}"
+      },
+      "tempo": {
+        "name": "Nhịp độ",
+        "help": "Mỗi lệnh giữ bao lâu và mỗi ngày giao dịch vào lệnh mấy lần.",
+        "fact": "Giữ trung vị {{m}} phút · {{n}} lần/ngày"
+      },
+      "manage": {
+        "name": "Quản lý lệnh",
+        "help": "Tỷ lệ lệnh bạn tự sửa cắt lỗ hoặc chốt lời sau khi mở quá 2 phút. Không tính sửa đổi của hệ thống quản lý rủi ro tự động.",
+        "fact": "Sửa sau khi vào {{p}}"
+      }
+    },
+    "report": {
+      "title": "Báo cáo giao dịch",
+      "empty": "Tháng này chưa có lệnh đã đóng.",
+      "live": "Tháng này đang diễn ra, số liệu cập nhật trực tiếp; nhận xét AI có sau khi lưu cuối tháng.",
+      "daysValue": "{{g}} / {{n}} ngày",
+      "openLosers": "Còn {{n}} vị thế đang lỗ tạm thời, sẽ được tính là lỗ khi lưu cuối tháng.",
+      "stat": {
+        "profit": "Lãi/lỗ ròng",
+        "trades": "Số lệnh",
+        "winRate": "Tỷ lệ thắng",
+        "payoff": "Tỷ lệ lãi/lỗ",
+        "score": "Điểm tổng",
+        "days": "Ngày có lãi",
+        "hold": "Giữ trung vị",
+        "drawdown": "Sụt giảm tối đa"
+      }
+    },
+    "unit": {
+      "sec": "{{n}} giây",
+      "min": "{{n}} phút",
+      "hour": "{{n}} giờ"
+    },
+    "calendar": {
+      "title": "Lịch lãi lỗ",
+      "trades": "{{n}} lệnh",
+      "utc": "Theo ngày UTC, chỉ tính lệnh đã đóng."
+    },
+    "weekday": {
+      "0": "T2",
+      "1": "T3",
+      "2": "T4",
+      "3": "T5",
+      "4": "T6",
+      "5": "T7",
+      "6": "CN"
+    },
+    "badges": {
+      "title": "Huy hiệu tháng này",
+      "lightning": {
+        "name": "Tay chớp",
+        "desc": "Thời gian giữ trung vị dưới 2 phút"
+      },
+      "multiSymbol": {
+        "name": "Đa sản phẩm",
+        "desc": "Giao dịch từ 4 sản phẩm, sản phẩm nhiều nhất dưới 60%"
+      },
+      "contrarian": {
+        "name": "Đi ngược",
+        "desc": "Hơn 10% lệnh ngược tín hiệu"
+      },
+      "stacker": {
+        "name": "Chồng lệnh",
+        "desc": "Hơn nửa số lệnh mở thêm khi đang có vị thế cùng chiều"
+      },
+      "bull": {
+        "name": "Phe mua",
+        "desc": "Lệnh mua chiếm hơn 75%"
+      },
+      "bear": {
+        "name": "Phe bán",
+        "desc": "Lệnh bán chiếm hơn 75%"
+      },
+      "autopilot": {
+        "name": "Lái tự động",
+        "desc": "Hơn nửa số lệnh dùng quản lý rủi ro thông minh"
+      },
+      "lotSteady": {
+        "name": "Khối lượng ổn",
+        "desc": "Dưới 10% lệnh lệch khối lượng quen dùng từ 2 lần"
+      },
+      "lotWild": {
+        "name": "Khối lượng thất thường",
+        "desc": "Hơn 30% lệnh lệch khối lượng quen dùng từ 2 lần"
+      }
+    },
+    "break": {
+      "title": "Báo cáo phân loại",
+      "trades": "Lệnh",
+      "winRate": "Thắng",
+      "profit": "Lãi/lỗ",
+      "symbol": {
+        "tab": "Sản phẩm"
+      },
+      "session": {
+        "tab": "Phiên",
+        "asia": "Châu Á 00–07",
+        "europe": "Châu Âu 07–12",
+        "overlap": "Âu–Mỹ giao nhau 12–16",
+        "america": "Châu Mỹ 16–21",
+        "late": "Cuối ngày 21–24",
+        "note": "Phiên theo giờ UTC, tính theo giờ mở lệnh."
+      },
+      "weekday": {
+        "tab": "Thứ"
+      },
+      "hold": {
+        "tab": "Thời gian giữ",
+        "lt2m": "Dưới 2 phút",
+        "m2to10": "2–10 phút",
+        "m10to40": "10–40 phút",
+        "m40to4h": "40 phút–4 giờ",
+        "gt4h": "Trên 4 giờ"
+      },
+      "source": {
+        "tab": "Nguồn",
+        "signal": "Tín hiệu",
+        "reverse": "Ngược tín hiệu",
+        "strategy": "Chiến lược",
+        "chart": "Từ biểu đồ"
+      }
+    },
+    "tags": {
+      "title": "Nhãn tự động",
+      "lead": "Hệ thống tự gắn nhãn cho từng lệnh theo quy tắc, bạn không cần viết nhật ký.",
+      "trades": "Lệnh được gắn nhãn",
+      "open": "Chưa đóng",
+      "more": "Xem thêm {{n}} lệnh",
+      "less": "Thu gọn",
+      "unprotected": {
+        "name": "Không cắt lỗ",
+        "desc": "Từ lúc mở đến lúc đóng không đặt cắt lỗ"
+      },
+      "heldLoser": {
+        "name": "Gồng lỗ",
+        "desc": "Đóng lỗ, giữ lâu hơn 3 lần thời gian trung bình của lệnh lãi"
+      },
+      "earlyExit": {
+        "name": "Chạy sớm",
+        "desc": "Tự đóng khi đang lãi, chưa tới chốt lời, lãi chưa tới nửa mục tiêu"
+      },
+      "movedStop": {
+        "name": "Dời cắt lỗ",
+        "desc": "Dời cắt lỗ về phía lỗ thêm, hoặc gỡ bỏ"
+      },
+      "revenge": {
+        "name": "Gấp thếp sau lỗ",
+        "desc": "Mở lại trong 30 phút sau lệnh lỗ với khối lượng từ 1,5 lần lệnh trước"
+      },
+      "stoppedOut": {
+        "name": "Cưỡng chế đóng",
+        "desc": "Bị hệ thống cưỡng chế đóng vị thế"
+      }
+    },
+    "side": {
+      "buy": "Mua",
+      "sell": "Bán"
+    },
+    "comment": {
+      "title": "Nhận xét AI",
+      "pending": "Sẽ viết khi lưu cuối tháng.",
+      "none": "Tháng này không có nhận xét AI."
+    },
+    "locked": {
+      "title": "Giao dịch thêm vài lệnh để mở khóa tính cách giao dịch",
+      "lead": "Dựa trên giao dịch tài khoản thật trong 90 ngày gần nhất, hệ thống chọn ra tính cách giống bạn nhất trong 16 loại và viết báo cáo giao dịch mỗi tháng.",
+      "actions": "Số lần vào lệnh trong 90 ngày",
+      "days": "Số ngày có giao dịch",
+      "needMore": "Dữ liệu còn thiếu một chút, giao dịch thêm vài lệnh là mở khóa.",
+      "actionHelp": "Các lệnh cùng sản phẩm, cùng chiều trong vòng 60 giây được tính là một lần."
+    },
+    "demo": {
+      "title": "Mở tài khoản thật để mở khóa tính cách giao dịch",
+      "lead": "Tính cách giao dịch và báo cáo tháng chỉ tính lệnh tài khoản thật, không tính tài khoản demo.",
+      "cta": "Liên kết tài khoản thật"
+    },
+    "client": {
+      "title": "Báo cáo giao dịch của {{name}}",
+      "sub": "Chỉ xem · chỉ khách hàng trực tiếp của bạn",
+      "back": "Trung tâm Đại sứ",
+      "forbidden": "Bạn chưa có quyền xem báo cáo khách hàng, hoặc khách hàng này không phải khách trực tiếp của bạn.",
+      "locked": "Khách hàng này chưa mở khóa tính cách giao dịch",
+      "demo": "Khách hàng này chưa có giao dịch tài khoản thật",
+      "button": "Báo cáo"
+    },
+    "gallery": {
+      "title": "16 tính cách giao dịch",
+      "lead": "Bốn chữ cái lần lượt là phán đoán, quản lý rủi ro, nhịp độ và quản lý lệnh. Chạm để đọc một câu.",
+      "me": "Bạn"
+    },
+    "types": {
+      "AGLZ": {
+        "title": "Người Bày Cờ",
+        "say": "Đặt lệnh xong đi pha trà, đến lúc lệnh tự đóng. Rủi ro duy nhất là bắt đầu nghĩ mình không thể sai."
+      },
+      "AGLM": {
+        "title": "Người Cầm Lái",
+        "say": "Tự chọn hướng, tay không rời tay lái. Thị trường chưa nhúc nhích mà bạn đã dời cắt lỗ ba lần."
+      },
+      "AGQZ": {
+        "title": "Thợ Đồng Hồ",
+        "say": "Vào, ra, lệnh tiếp theo — như lên dây cót. Bạn không giao dịch, bạn đi làm."
+      },
+      "AGQM": {
+        "title": "Du Kích",
+        "say": "Bắn một phát rồi đổi chỗ, phát nào cũng quay lại bồi thêm hai cái."
+      },
+      "AXLZ": {
+        "title": "Tảng Đá",
+        "say": "\"Rồi sẽ hồi thôi\" — đặt xong là không nhìn, lỗ cũng không động. Đến giờ thị trường vẫn nể mặt bạn."
+      },
+      "AXLM": {
+        "title": "Nhà Đàm Phán",
+        "say": "Cắt lỗ sắp chạm là dời ra thêm chút. Đó không phải cắt lỗ, mà là mặc cả với thị trường."
+      },
+      "AXQZ": {
+        "title": "Tay Dao Nhanh",
+        "say": "Mười lần lãi nhỏ, một lần trả hết."
+      },
+      "AXQM": {
+        "title": "Tay Đấm Chớp",
+        "say": "Tay nhanh hơn đầu, sửa cũng chăm, nhưng mấy lệnh lỗ thì không nỡ cắt."
+      },
+      "RGLZ": {
+        "title": "Người Thi Hành",
+        "say": "Tín hiệu bảo gì làm nấy, đặt xong không đụng. Nhưng đã bao lâu bạn chưa tự xem biểu đồ?"
+      },
+      "RGLM": {
+        "title": "Thợ Tinh Chỉnh",
+        "say": "Cắt lỗ chốt lời tín hiệu đưa, bạn luôn phải vặn thêm hai cái."
+      },
+      "RGQZ": {
+        "title": "Người Kỷ Luật",
+        "say": "Theo nhiều, không thêm thắt, đến giờ là ra. Đều đến mức muốn trả lương cho bạn."
+      },
+      "RGQM": {
+        "title": "Người Thăm Dò",
+        "say": "Theo thì theo, nhưng không yên tâm: vừa vào lệnh đã vặn cắt lỗ."
+      },
+      "RXLZ": {
+        "title": "Người Nửa Tin",
+        "say": "Hướng thì tin tín hiệu, chốt lời thì tin mình. Kết quả lãi thì lẻ, lỗ thì chẵn."
+      },
+      "RXLM": {
+        "title": "Người Cưỡi Gió",
+        "say": "Hướng của tín hiệu bạn tin trọn, cắt lỗ của tín hiệu thì để bàn thêm."
+      },
+      "RXQZ": {
+        "title": "Khách Quá Giang",
+        "say": "Quá giang xe tín hiệu, lãi chút là xuống, lỗ thì lại không nỡ xuống."
+      },
+      "RXQM": {
+        "title": "Người Lướt Sóng",
+        "say": "Theo nhiều, sửa nhiều. Bận cả ngày, tài khoản bảo nó chẳng thấy gì."
+      }
+    }
   }
 }
