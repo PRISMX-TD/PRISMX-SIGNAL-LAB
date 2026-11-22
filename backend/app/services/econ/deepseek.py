@@ -5,12 +5,14 @@
   用 Pydantic 校验；提示词里必须出现「json」并给出示例。
 - 返回内容可能是空的（思考把 max_tokens 吃完、或服务端偶发），按 chat_json 的规则重试。
 - 排队时服务端会先发空行保持连接；我们不用流式，httpx 拿到的是完整响应，只设总超时。
-只送公开的财经数据，**不要把任何用户数据送进这条链路**（数据存放在中国境内，条款没写清 API 流量是否
-用于训练）。阻塞网络调用，调用方放线程池。
+只送公开的财经数据，以及交易报告月底点评用的**匿名统计数字**（services/persona/ai_comment.py，
+2026-11-22 用户决定）；**不要把能认出用户的数据送进这条链路**（邮箱、昵称、账号、单号、用户 id 都不行；
+数据存放在中国境内，条款没写清 API 流量是否用于训练）。阻塞网络调用，调用方放线程池。
 
 DeepSeek client (OpenAI-compatible), JSON mode only. Plain httpx, no SDK, like translate.py.
 JSON mode can't enforce a schema, so callers validate with Pydantic; the prompt must say "json";
-empty, truncated or non-JSON replies are retried (see chat_json). Only public market data goes here — never user data.
+empty, truncated or non-JSON replies are retried (see chat_json). Only public market data and the
+anonymous aggregates of the month-end trading-report comment go here — never anything that identifies a user.
 """
 import json
 import logging

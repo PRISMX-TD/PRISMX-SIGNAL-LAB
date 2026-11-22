@@ -853,9 +853,6 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: str = ""
     # anthropic 后端用的模型 / model for the anthropic provider
     TRANSLATE_MODEL: str = "claude-haiku-4-5-20251001"
-    # 交易报告月底 AI 点评用的模型（2026-11-22）；同样要 ANTHROPIC_API_KEY，后台另有开关（默认关）。
-    # Model for the month-end trading-report comment; also needs ANTHROPIC_API_KEY plus the admin switch.
-    PERSONA_AI_MODEL: str = "claude-opus-5-5"
 
     # 财经日历（2026-11-20，第一期只给管理员看）：日程与数值来自 Narwhal API，公布前的影响预案
     # 由 DeepSeek 生成。两个 key 都留空时整条功能不发任何外部请求；后台另有总开关（默认关）。
@@ -864,6 +861,9 @@ class Settings(BaseSettings):
     # API, pre-release impact previews written by DeepSeek. With both keys empty the feature sends
     # no outbound request at all; there is also an admin master switch (off by default). See
     # services/econ/.
+    # 交易报告的月底 AI 点评（2026-11-22）也用这把 DEEPSEEK_API_KEY，只发匿名统计数字，后台另有开关（默认关）。
+    # The month-end trading-report comment (services/persona/ai_comment.py) uses the same DeepSeek
+    # key with anonymous aggregates only, behind its own admin switch (off by default).
     NARWHAL_API_KEY: str = ""
     NARWHAL_API_BASE: str = "https://api.narwhalapi.com/v1"
     DEEPSEEK_API_KEY: str = ""

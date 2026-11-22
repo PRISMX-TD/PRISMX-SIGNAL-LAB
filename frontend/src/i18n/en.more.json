@@ -3979,7 +3979,7 @@
       "visible": "Open to users",
       "visibleHint": "While off, regular users don't see the Report tab on the Trade page and the API refuses them. Admins are not affected and always see it.",
       "aiComment": "AI comment on monthly reports",
-      "hint": "The AI comment is written once per user when a month is archived and only receives anonymous figures (no e-mail, nickname or account). Needs ANTHROPIC_API_KEY.",
+      "hint": "The AI comment is written once per user when a month is archived and only receives anonymous figures (no e-mail, nickname or account). Written by DeepSeek with the same DEEPSEEK_API_KEY as the economic calendar.",
       "aiOn": "On",
       "aiOff": "Off"
     }
