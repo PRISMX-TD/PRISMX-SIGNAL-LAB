@@ -805,7 +805,7 @@
       "performance": "History",
       "activity": "Log",
       "risk": "Smart risk",
-      "persona": "Persona"
+      "persona": "Report"
     },
     "reverse": "Reverse",
     "reverseHint": "Reverse-signal order: opposite side to the signal, TP and SL swapped"
@@ -3975,9 +3975,13 @@
       "public": "Open to users (dashboard card and calendar page)"
     },
     "persona": {
-      "visible": "Trading persona open to users",
+      "title": "Trading report",
+      "visible": "Open to users",
+      "visibleHint": "While off, regular users don't see the Report tab on the Trade page and the API refuses them. Admins are not affected and always see it.",
       "aiComment": "AI comment on monthly reports",
-      "hint": "While off, only admins see the Persona page. The AI comment is written once per user when a month is archived and only receives anonymous figures (no e-mail, nickname or account)."
+      "hint": "The AI comment is written once per user when a month is archived and only receives anonymous figures (no e-mail, nickname or account). Needs ANTHROPIC_API_KEY.",
+      "aiOn": "On",
+      "aiOff": "Off"
     }
   },
   "simulator": {
@@ -5673,7 +5677,7 @@
     "todayTag": "Today"
   },
   "persona": {
-    "closed": "Trading persona is not open yet. Stay tuned.",
+    "closed": "The trading report is not open yet. Stay tuned.",
     "note": "Counts only live trades placed on this platform · times in UTC",
     "window": "Your persona is based on the last 90 days of live trades and is recalculated on the 1st of each month.",
     "provisional": "First read · {{n}} trades, final at {{need}}",

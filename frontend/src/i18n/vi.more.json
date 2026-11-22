@@ -805,7 +805,7 @@
       "performance": "Lịch sử",
       "activity": "Nhật ký",
       "risk": "Quản lý rủi ro thông minh",
-      "persona": "Tính cách"
+      "persona": "Báo cáo"
     },
     "reverse": "Ngược",
     "reverseHint": "Lệnh ngược tín hiệu: ngược chiều tín hiệu, đã hoán đổi TP và SL"
@@ -2767,7 +2767,7 @@
     "todayTag": "Hôm nay"
   },
   "persona": {
-    "closed": "Tính cách giao dịch chưa mở. Hãy chờ nhé.",
+    "closed": "Báo cáo giao dịch chưa mở. Hãy chờ nhé.",
     "note": "Chỉ tính lệnh tài khoản thật đặt trên nền tảng này · giờ UTC",
     "window": "Tính cách dựa trên lệnh tài khoản thật trong 90 ngày gần nhất, tính lại vào ngày 1 mỗi tháng.",
     "provisional": "Kết quả sơ bộ · {{n}} lệnh, đủ {{need}} lệnh là chính thức",

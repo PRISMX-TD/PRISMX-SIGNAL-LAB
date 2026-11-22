@@ -554,23 +554,6 @@ export default function GamificationPanel() {
               onChange={togglePublicEnabled}
             />
             <p className="-mt-1 text-xs text-neutral-500">{t('admin.competitionPromo.publicSwitchHint')}</p>
-            <SettingsToggleRow
-              label={t('admin.persona.visible')}
-              checked={!!settings?.personaVisible}
-              saving={savingPersona === 'visible'}
-              onLabel={t('gamification.admin.visibleOn')}
-              offLabel={t('gamification.admin.visibleOff')}
-              onChange={(v) => void togglePersona('personaVisible', v)}
-            />
-            <SettingsToggleRow
-              label={t('admin.persona.aiComment')}
-              checked={!!settings?.personaAiComment}
-              saving={savingPersona === 'ai'}
-              onLabel={t('gamification.admin.visibleOn')}
-              offLabel={t('gamification.admin.visibleOff')}
-              onChange={(v) => void togglePersona('personaAiComment', v)}
-            />
-            <p className="-mt-1 text-xs text-neutral-500">{t('admin.persona.hint')}</p>
             {pendingOpen && (
               <ConfirmModal
                 center
@@ -679,6 +662,36 @@ export default function GamificationPanel() {
           </div>
         )}
         {settingsError && <p className="mt-2 text-sm text-down">{settingsError}</p>}
+      </div>
+
+      {/* 交易报告（2026-11-22）：在「交易」页的「交易报告」页签。开关只管普通用户，管理员一直看得到。
+          Trading report (the Orders page's report tab). The switch gates regular users only; admins always see it. */}
+      <div className="glass p-5">
+        <h3 className="font-display text-lg font-semibold text-neutral-100">{t('admin.persona.title')}</h3>
+        {settingsLoading ? (
+          <div className="mt-3 space-y-3"><SkeletonLine width="80%" /><SkeletonLine width="80%" /></div>
+        ) : (
+          <div className="mt-3 space-y-3">
+            <SettingsToggleRow
+              label={t('admin.persona.visible')}
+              checked={!!settings?.personaVisible}
+              saving={savingPersona === 'visible'}
+              onLabel={t('gamification.admin.visibleOn')}
+              offLabel={t('gamification.admin.visibleOff')}
+              onChange={(v) => void togglePersona('personaVisible', v)}
+            />
+            <p className="-mt-1 text-xs text-neutral-500">{t('admin.persona.visibleHint')}</p>
+            <SettingsToggleRow
+              label={t('admin.persona.aiComment')}
+              checked={!!settings?.personaAiComment}
+              saving={savingPersona === 'ai'}
+              onLabel={t('admin.persona.aiOn')}
+              offLabel={t('admin.persona.aiOff')}
+              onChange={(v) => void togglePersona('personaAiComment', v)}
+            />
+            <p className="-mt-1 text-xs text-neutral-500">{t('admin.persona.hint')}</p>
+          </div>
+        )}
       </div>
 
       {/* 榜单预览 / leaderboard preview */}
