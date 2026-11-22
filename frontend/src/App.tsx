@@ -209,7 +209,6 @@ const MORE_SHEET_PAGES: Record<string, HasPreload> = {
   '/leaderboard': LeaderboardPage,
   '/competitions': CompetitionsPage,
   '/lucky': LuckyPage,
-  '/persona': PersonaPage,
   '/agent': AgentPage,
 }
 
@@ -651,11 +650,11 @@ export default function App() {
                   Lucky wheel (rev 45): no route gate either; the page shows "not open" itself. */}
               <Route path="/lucky" element={<GrowthHub tab="lucky"><LuckyPage /></GrowthHub>} />
               <Route path="/lucky/prizes" element={<GrowthHub tab="lucky"><LuckyPrizesPage /></GrowthHub>} />
-              {/* 交易报告 + 交易人格（2026-11-22）：同样不做路由门控，开关未开时页面自己显示「暂未开放」。
-                  /persona/client 是推荐官看直属客户的报告（邮箱放在路由 state 里，不进网址）。
-                  Trading report + persona: no route gate; the page handles its own 403. /persona/client is an
-                  ambassador's view of a direct customer (the e-mail travels in router state, not the URL). */}
-              <Route path="/persona" element={<GrowthHub tab="persona"><PersonaPage /></GrowthHub>} />
+              {/* 交易报告 + 交易人格（2026-11-22）：是「交易」页的一个页签（OrdersPage 的 persona）。/persona 只是转过去的旧地址。
+                  /persona/client 是推荐官看直属客户的报告（邮箱放在路由 state 里，不进网址），页面自己处理 403。
+                  Trading report + persona is a tab of the Orders page; /persona just redirects there. /persona/client
+                  is an ambassador's view of a direct customer (e-mail in router state, not the URL). */}
+              <Route path="/persona" element={<Navigate to="/orders" replace state={{ tab: 'persona' }} />} />
               <Route path="/persona/client" element={<PersonaPage mode="client" />} />
               {/* 公开主页（2026-09-07）：从榜面名字点进来；不套外壳，自带返回。
                   Public profile: reached from board names; no shell, carries its own back link. */}

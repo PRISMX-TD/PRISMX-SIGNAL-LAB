@@ -804,7 +804,8 @@
       "positions": "Vị thế",
       "performance": "Lịch sử",
       "activity": "Nhật ký",
-      "risk": "Quản lý rủi ro thông minh"
+      "risk": "Quản lý rủi ro thông minh",
+      "persona": "Tính cách"
     },
     "reverse": "Ngược",
     "reverseHint": "Lệnh ngược tín hiệu: ngược chiều tín hiệu, đã hoán đổi TP và SL"
@@ -2997,7 +2998,7 @@
     },
     "gallery": {
       "title": "16 tính cách giao dịch",
-      "lead": "Bốn chữ cái lần lượt là phán đoán, quản lý rủi ro, nhịp độ và quản lý lệnh. Chạm để đọc một câu.",
+      "lead": "Chạm để đọc một câu.",
       "me": "Bạn"
     },
     "types": {
@@ -3065,6 +3066,10 @@
         "title": "Người Lướt Sóng",
         "say": "Theo nhiều, sửa nhiều. Bận cả ngày, tài khoản bảo nó chẳng thấy gì."
       }
+    },
+    "intro": {
+      "title": "Tính cách giao dịch được tính thế nào",
+      "how": "Hệ thống xem các lệnh tài khoản thật bạn đặt trên nền tảng này trong 90 ngày gần nhất, chọn một chữ cái cho mỗi trục — phán đoán, quản lý rủi ro, nhịp độ và quản lý lệnh — ghép thành mã bốn chữ, tổng cộng 16 loại. Tính lại vào ngày 1 mỗi tháng và là kết quả sơ bộ cho đến khi đủ 50 lệnh."
     }
   }
 }

@@ -31,15 +31,13 @@ import PageHead from '../components/PageHead'
 import { useOverflowHint } from '../utils/useOverflowHint'
 import { onRovingFocusKeyDown } from '../utils/rovingTabs'
 
-export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions' | 'lucky' | 'persona'
+export type GrowthTab = 'achievements' | 'leaderboard' | 'competitions' | 'lucky'
 
-const TABS: { key: GrowthTab; to: string; labelKey: string; flag: 'gamificationVisible' | 'leaderboardVisible' | 'competitionsVisible' | 'luckyWheelVisible' | 'personaVisible' }[] = [
+const TABS: { key: GrowthTab; to: string; labelKey: string; flag: 'gamificationVisible' | 'leaderboardVisible' | 'competitionsVisible' | 'luckyWheelVisible' }[] = [
   { key: 'achievements', to: '/achievements', labelKey: 'nav.growthBadges', flag: 'gamificationVisible' },
   { key: 'leaderboard', to: '/leaderboard', labelKey: 'leaderboard.title', flag: 'leaderboardVisible' },
   { key: 'competitions', to: '/competitions', labelKey: 'competition.title', flag: 'competitionsVisible' },
   { key: 'lucky', to: '/lucky', labelKey: 'lucky.title', flag: 'luckyWheelVisible' },
-  // 2026-11-22：交易报告 + 交易人格（开关 personaVisible）/ trading report + persona
-  { key: 'persona', to: '/persona', labelKey: 'persona.tab', flag: 'personaVisible' },
 ]
 
 export default function GrowthHub({ tab, children }: { tab: GrowthTab; children: ReactNode }) {

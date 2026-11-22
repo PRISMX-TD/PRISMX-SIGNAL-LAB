@@ -1,12 +1,12 @@
-// 交易报告 + 交易人格（/persona，竞技场第五个页签，2026-11-22）。
+// 交易报告 + 交易人格（2026-11-22）：「交易」页（OrdersPage）的第五个页签，/persona 转到那里。
 // 自上而下：人格卡（插画 + 称号 + 点评 + 四个主轴）→ 月份切换 → 本月成绩 → 盈亏日历 → 徽章 →
-// 分类报表 → 每笔单的标签 → AI 点评（只在存档月份）→ 16 种人格图鉴。
+// 分类报表 → 每笔单的标签 → AI 点评（只在存档月份）→ 「交易人格是怎么算的」（默认收起，里面是 16 种人格）。
 // 没下过实盘单：只给「开通实盘」的钩子；下过但不够数：给解锁进度。
 // mode="client"（/persona/client）是推荐官看直属客户：邮箱在路由 state 里，没有分享按钮。
 //
-// Trading report + persona (/persona, the arena's fifth tab). Top to bottom: persona card, month
-// picker, month stats, P&L calendar, badges, breakdowns, per-trade tags, AI comment (archived months
-// only) and the 16-type gallery. No real orders → a hook to go live; not enough yet → unlock progress.
+// Trading report + persona: the fifth tab of the Orders page (/persona redirects there). Top to
+// bottom: persona card, month picker, month stats, P&L calendar, badges, breakdowns, per-trade tags,
+// AI comment (archived months only) and a collapsed "how it works" section holding the 16 types. No real orders → a hook to go live; not enough yet → unlock progress.
 // mode="client" is an ambassador viewing a direct customer (e-mail in router state, no share).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -165,7 +165,7 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
       ) : (
         <DemoHero client={mode === 'client'} />
       )}
-      <Gallery current={persona?.code ?? null} style={style} />
+      <Intro current={persona?.code ?? null} style={style} />
       <p className="pr-note">{t('persona.note')}</p>
       <ShareSheet spec={share} onClose={() => setShare(null)} />
     </div>
@@ -531,13 +531,43 @@ function TagsPanel({ report }: { report: PersonaReport }) {
   )
 }
 
-// ---------------------------------------------------------------- 图鉴 / gallery
+// ---------------------------------------------------------------- 介绍 + 图鉴 / intro + gallery
+// 默认收起：怎么算、四个字母的意思、16 种人格都在里面。/ Collapsed by default: how it works,
+// what the four letters mean and all 16 personas.
+function Intro({ current, style }: { current: string | null; style: ArtStyle }) {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  return (
+    <section className="pr-sec pr-intro">
+      <button type="button" className="pr-intro-toggle" aria-expanded={open} aria-controls="pr-intro-body" onClick={() => setOpen((v) => !v)}>
+        <span>{t('persona.intro.title')}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div id="pr-intro-body" className="pr-intro-body">
+          <p className="pr-lead">{t('persona.intro.how')}</p>
+          <ul className="pr-legend">
+            {AXES.map((a) => (
+              <li key={a.key}>
+                <b>{t(`persona.axes.${a.key}.name`)}</b>
+                <span><i>{a.poles[0]}</i> {t(`persona.pole.${a.poles[0]}`)}</span>
+                <span><i>{a.poles[1]}</i> {t(`persona.pole.${a.poles[1]}`)}</span>
+              </li>
+            ))}
+          </ul>
+          <Gallery current={current} style={style} />
+        </div>
+      )}
+    </section>
+  )
+}
+
 function Gallery({ current, style }: { current: string | null; style: ArtStyle }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState<string | null>(null)
   return (
-    <section className="pr-sec" aria-labelledby="pr-gal-h">
-      <div className="pr-sec-head"><h2 id="pr-gal-h">{t('persona.gallery.title')}</h2></div>
+    <div className="pr-sec">
+      <h3 className="pr-h3">{t('persona.gallery.title')}</h3>
       <p className="pr-small">{t('persona.gallery.lead')}</p>
       <ul className="pr-gal">
         {PERSONA_CODES.map((code) => {
@@ -556,6 +586,6 @@ function Gallery({ current, style }: { current: string | null; style: ArtStyle }
           )
         })}
       </ul>
-    </section>
+    </div>
   )
 }

@@ -148,6 +148,18 @@
 .pr-prog-track { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .pr-prog-track span { display: block; height: 100%; border-radius: 3px; background: var(--purple); transition: width 400ms var(--ease-out); }
 
+/* ---------- 介绍（默认收起）/ intro (collapsed by default) ---------- */
+.pr-intro { border: 1px solid var(--line); border-radius: var(--r-panel); background: var(--surface); gap: 0; }
+.pr-intro-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 52px; padding: 0 18px;
+  border: 0; background: none; color: var(--text-strong); font-size: 15px; font-weight: 700; cursor: pointer; text-align: left; }
+.pr-intro-toggle svg { flex: none; color: var(--text-3); transition: transform var(--dur-fast) var(--ease-out); }
+.pr-intro-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.pr-intro-body { display: grid; gap: 16px; padding: 0 18px 18px; }
+.pr-legend { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pr-legend li { padding: 10px 12px; border-radius: var(--r-tile); background: var(--surface-2); display: grid; gap: 4px; font-size: 12px; color: var(--text-2); }
+.pr-legend b { font-size: 13px; color: var(--text-strong); }
+.pr-legend i { font-style: normal; font-family: var(--font-mono); font-weight: 700; color: var(--text-strong); margin-right: 4px; }
+
 /* ---------- 图鉴 / gallery ---------- */
 .pr-gal { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .pr-gal-i { --fam: #4F7BEA; --fam-deep: #16224C; border-radius: var(--r-panel); border: 1px solid var(--line); overflow: hidden;
@@ -168,11 +180,14 @@
   .pr-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pr-tags { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pr-gal { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pr-legend { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pr-intro-toggle { padding: 0 14px; }
+  .pr-intro-body { padding: 0 14px 14px; }
   .pr-axis-bar { grid-template-columns: 56px minmax(0, 1fr) 56px; }
   .pr-row { grid-template-columns: minmax(0, 1.2fr) 40px 46px minmax(0, 1.4fr); gap: 8px; }
   .pr-cal-c b { font-size: 9.5px; }
   .pr-card { padding: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pr-prog-track span, .pr-seg button { transition: none; }
+  .pr-prog-track span, .pr-seg button, .pr-intro-toggle svg { transition: none; }
 }

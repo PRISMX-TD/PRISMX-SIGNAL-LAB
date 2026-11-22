@@ -20,7 +20,9 @@
 // account name) → tabs → phone cards (PositionCard mobile: header + price rail +
 // actions) → scope note → auto-manage. Branching via useIsPhone;
 // desktop keeps the head pills, the ledger strip and the position cards.
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazyRetry } from '../utils/lazyRetry'
+import { SkeletonCard } from '../components/Skeleton'
 import { useOverflowHint } from '../utils/useOverflowHint'
 import type { CSSProperties, ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -74,7 +76,10 @@ import { orderLogBucket, visibleStatusFilters, type StatusFilter } from '../util
 // 从持仓页签底部拆出来单独成页。
 // Four since 2026-11-02: positions / history / log / smart risk — smart risk
 // (formerly auto position management) moved out of the positions tab.
-type OrdersTab = 'positions' | 'performance' | 'activity' | 'risk'
+// 2026-11-22 第五个：交易人格（交易报告 + 人格，开关 personaVisible 关着时不显示）。页面本身按需加载。
+// Fifth since 2026-11-22: trading persona (report + persona), hidden while personaVisible is off;
+// the page itself is loaded on demand.
+type OrdersTab = 'positions' | 'performance' | 'activity' | 'risk' | 'persona'
 // 非开仓指令成功时的印章代码（后端都记作 FILLED，见 renderSlip）。
 // Stamp code for a successful non-opening command (all stored as FILLED; see renderSlip).
 const DONE_STAMP: Partial<Record<string, string>> = {
@@ -85,7 +90,8 @@ const DONE_STAMP: Partial<Record<string, string>> = {
 }
 
 const TAB_STORAGE_KEY = 'prismx.orders.tab'
-const TABS: OrdersTab[] = ['positions', 'performance', 'activity', 'risk']
+const TABS: OrdersTab[] = ['positions', 'performance', 'activity', 'risk', 'persona']
+const PersonaPage = lazyRetry(() => import('./PersonaPage'), 'PersonaPage')
 
 // 时间全部按 UTC+8 显示，与 fmtTime 同一时区；没带时区的 ISO 串按 UTC 解。
 // All times render in UTC+8 like fmtTime; a zone-less ISO string is read as UTC.
@@ -548,11 +554,15 @@ export default function OrdersPage() {
   // how placing from a signal arrives). It overrides this entry only; later setTab calls
   // still persist normally, so a one-off jump never rewrites the user's standing choice.
   const jumpTab = (useLocation().state as { tab?: OrdersTab } | null)?.tab
+  const personaOn = !!user?.personaVisible
+  const tabs = useMemo(() => (personaOn ? TABS : TABS.filter((k) => k !== 'persona')), [personaOn])
   const [tab, setTab] = useState<OrdersTab>(() => {
-    if (jumpTab && TABS.includes(jumpTab)) return jumpTab
+    if (jumpTab && tabs.includes(jumpTab)) return jumpTab
     const saved = readStorage(TAB_STORAGE_KEY)
-    return TABS.includes(saved as OrdersTab) ? (saved as OrdersTab) : 'positions'
+    return tabs.includes(saved as OrdersTab) ? (saved as OrdersTab) : 'positions'
   })
+  // 开关被关掉时，停在交易人格页签上的人退回持仓。/ If the switch goes off, fall back to positions.
+  useEffect(() => { if (!tabs.includes(tab)) setTab('positions') }, [tabs, tab])
   useEffect(() => { writeStorage(TAB_STORAGE_KEY, tab) }, [tab])
 
   // 操作记录：每页 10 条。不设日期筛选时用 useLive().orders（WS 实时更新、秒级
@@ -926,7 +936,7 @@ export default function OrdersPage() {
   // Tab 导航 / tab navigation
   const tabsNav = (
     <div ref={tabsHintRef} className="seg-tabs mb-4 md:mb-6" role="tablist" onKeyDown={onRovingKeyDown}>
-      {TABS.map((key) => (
+      {tabs.map((key) => (
         <button
           key={key}
           role="tab"
@@ -994,6 +1004,14 @@ export default function OrdersPage() {
           AutoManageSettings.user_id) that does not follow the account selector, so the
           scope note stays. */}
       {tab === 'risk' && <AutoManageCard isPro={isPro} scopeHint={t('orders.autoManageScopeHint')} />}
+
+      {/* 交易人格：按用户算（全部实盘账号），不跟随页头的账号选择。
+          Trading persona: per user (all real accounts), independent of the account selector. */}
+      {tab === 'persona' && (
+        <Suspense fallback={<SkeletonCard />}>
+          <PersonaPage />
+        </Suspense>
+      )}
 
       {/* 绩效分析：净盈亏 / 胜率 / 品种盈亏 + 已平仓明细，都跟着页头选中的账号
           （纪律分已于 2026-09-07 整体撤销）/ Performance: net P&L, win rate, P&L by

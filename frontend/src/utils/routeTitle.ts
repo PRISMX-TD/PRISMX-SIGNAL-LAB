@@ -25,7 +25,7 @@ const ROUTE_TITLES: ReadonlyArray<readonly [string, string]> = [
   ['/leaderboard', 'nav.growth'],
   ['/competitions', 'nav.growth'],
   ['/lucky', 'nav.growth'],
-  ['/persona', 'nav.growth'],
+  ['/persona', 'nav.orders'],
   ['/account', 'nav.account'],
   ['/app-download', 'nav.appDownload'],
   ['/support', 'nav.support'],

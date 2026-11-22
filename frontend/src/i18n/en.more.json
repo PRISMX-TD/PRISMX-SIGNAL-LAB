@@ -804,7 +804,8 @@
       "positions": "Positions",
       "performance": "History",
       "activity": "Log",
-      "risk": "Smart risk"
+      "risk": "Smart risk",
+      "persona": "Persona"
     },
     "reverse": "Reverse",
     "reverseHint": "Reverse-signal order: opposite side to the signal, TP and SL swapped"
@@ -3070,8 +3071,7 @@
         "/simulator": "Signal replay",
         "/agent": "Ambassador Hub",
         "/lucky": "Lucky wheel",
-        "/lucky/prizes": "My prizes",
-        "/persona": "Trading persona"
+        "/lucky/prizes": "My prizes"
       }
     },
     "searchPlaceholder": "Search by nickname, email or phone…",
@@ -5904,7 +5904,7 @@
     },
     "gallery": {
       "title": "The 16 trading personas",
-      "lead": "The four letters are judgement, risk, tempo and management. Tap one to read its line.",
+      "lead": "Tap one to read its line.",
       "me": "You"
     },
     "types": {
@@ -5972,6 +5972,10 @@
         "title": "The Surfer",
         "say": "Lots of follows, lots of edits. A busy day, and your account didn't feel a thing."
       }
+    },
+    "intro": {
+      "title": "How the trading persona works",
+      "how": "We look at your live trades on this platform over the last 90 days and pick one letter on each of four axes — judgement, risk, tempo and management. The four letters make your code; there are 16 in all. It is recalculated on the 1st of each month and stays a first read until 50 trades."
     }
   }
 }
