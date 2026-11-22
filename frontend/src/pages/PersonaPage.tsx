@@ -1,14 +1,21 @@
 // 交易报告 + 交易人格（2026-11-22）：「交易」页（OrdersPage）的第五个页签，/persona 转到那里。
-// 自上而下：人格卡（插画 + 称号 + 点评 + 四个主轴）→ 月份切换 → 本月成绩 → 盈亏日历 → 徽章 →
-// 分类报表 → 每笔单的标签 → AI 点评（只在存档月份）→ 「交易人格是怎么算的」（默认收起，里面是 16 种人格）。
+// 自上而下：人格舞台（插画 + 称号 + 四个字母 + 点评，下面连着四个主轴）→ 月份切换 → 本月成绩
+// （大号净盈亏 + 累计曲线 + 评分表盘 + 一排数字）→ 盈亏日历 + 分类报表 → 每笔单的标签 → 徽章 +
+// AI 点评（只在存档月份）→ 「交易人格是怎么算的」（默认收起，里面是 16 种人格）。
 // 没下过实盘单：只给「开通实盘」的钩子；下过但不够数：给解锁进度。
 // mode="client"（/persona/client）是推荐官看直属客户：邮箱在路由 state 里，没有分享按钮。
+// 2026-11-22 视觉重做：动效只有进场一次（滚到才出现、数字滚动、曲线展开），没有常驻动画；
+// prefers-reduced-motion 下全部直接显示。
 //
 // Trading report + persona: the fifth tab of the Orders page (/persona redirects there). Top to
-// bottom: persona card, month picker, month stats, P&L calendar, badges, breakdowns, per-trade tags,
-// AI comment (archived months only) and a collapsed "how it works" section holding the 16 types. No real orders → a hook to go live; not enough yet → unlock progress.
-// mode="client" is an ambassador viewing a direct customer (e-mail in router state, no share).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+// bottom: persona stage (art, title, four letters, roast, with the four axes attached below), month
+// picker, month headline (big net P&L, cumulative curve, score gauge, stat rail), P&L calendar +
+// breakdowns, per-trade tags, badges + AI comment (archived months only) and a collapsed "how it
+// works" section holding the 16 types. No real orders → a hook to go live; not enough yet → unlock
+// progress. mode="client" is an ambassador viewing a direct customer (e-mail in router state, no
+// share). Motion is entrance-only (reveal on scroll, count-up, curve wipe); nothing loops, and
+// everything shows at once under prefers-reduced-motion.
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { personaApi } from '../api/client'
@@ -25,6 +32,7 @@ import '../components/persona/persona.css'
 
 type ClientState = { email?: string; name?: string } | null
 type BreakKey = 'symbol' | 'session' | 'weekday' | 'hold' | 'source'
+type T = (k: string, o?: Record<string, unknown>) => string
 const BREAKS: BreakKey[] = ['symbol', 'session', 'hold', 'weekday', 'source']
 const TAGS: PersonaTag[] = ['unprotected', 'heldLoser', 'earlyExit', 'movedStop', 'revenge', 'stoppedOut']
 const TAGGED_SHOWN = 8
@@ -36,7 +44,96 @@ const money = (v: number | null | undefined, sign = true) => {
 }
 const pct = (v: number | null | undefined, digits = 0) => (v == null || !Number.isFinite(v) ? EMPTY : `${(v * 100).toFixed(digits)}%`)
 const num = (v: number | null | undefined, digits = 2) => (v == null || !Number.isFinite(v) ? EMPTY : v.toFixed(digits))
-const tone = (v: number) => (v > 0 ? 'is-up' : v < 0 ? 'is-down' : '')
+const tone = (v: number | null | undefined) => (v == null ? '' : v > 0 ? 'is-up' : v < 0 ? 'is-down' : '')
+const reducedMotion = () => typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+
+// ---------------------------------------------------------------- 进场动效 / entrance motion
+// 滚到视口里才算「看见」，只触发一次。没有 IntersectionObserver 的环境直接算看见。
+// "Seen" once the element scrolls into view; environments without IntersectionObserver count as seen.
+function useSeen<E extends Element>(): [React.RefObject<E>, boolean] {
+  const ref = useRef<E>(null)
+  const [seen, setSeen] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || seen) return
+    if (typeof IntersectionObserver === 'undefined') { setSeen(true); return }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setSeen(true); io.disconnect() }
+    }, { rootMargin: '0px 0px -6% 0px' })
+    io.observe(el)
+    return () => io.disconnect()
+  }, [seen])
+  return [ref, seen]
+}
+
+function Rv({ i = 0, className = '', children }: { i?: number; className?: string; children: React.ReactNode }) {
+  const [ref, seen] = useSeen<HTMLDivElement>()
+  return (
+    <div ref={ref} className={`pr-rv ${seen ? 'is-in' : ''} ${className}`} style={{ '--i': i } as React.CSSProperties}>
+      {children}
+    </div>
+  )
+}
+
+// 金额从 0 滚到目标值（约 1 秒，先快后慢）。读屏器直接读最终值。
+// Counts a money value up from zero (~1 s, ease-out); screen readers get the final value.
+function CountMoney({ value, className = '' }: { value: number; className?: string }) {
+  const [ref, seen] = useSeen<HTMLElement>()
+  const [shown, setShown] = useState(0)
+  useEffect(() => {
+    if (!seen) return
+    if (!Number.isFinite(value) || reducedMotion()) { setShown(value); return }
+    let raf = 0
+    const t0 = performance.now()
+    const tick = (now: number) => {
+      const p = Math.min(1, (now - t0) / 1100)
+      setShown(p >= 1 ? value : value * (1 - Math.pow(1 - p, 4)))
+      if (p < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [seen, value])
+  return (
+    <b ref={ref} className={className} aria-label={money(value)}>
+      <span aria-hidden="true">{money(seen ? shown : 0)}</span>
+    </b>
+  )
+}
+
+// 鼠标在舞台上移动时，把位置（-1…1）写进 --tx / --ty，插画和背后的大字母跟着轻微错位。
+// 只在有鼠标的设备上开；不走 React 状态。/ Pointer position (-1…1) goes into --tx / --ty so
+// the art and the ghost letters shift slightly; mouse devices only, no React state.
+function useTilt<E extends HTMLElement>() {
+  const ref = useRef<E>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || reducedMotion() || !window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) return
+    let raf = 0
+    let x = 0
+    let y = 0
+    const apply = () => {
+      raf = 0
+      el.style.setProperty('--tx', x.toFixed(3))
+      el.style.setProperty('--ty', y.toFixed(3))
+    }
+    const queue = () => { if (!raf) raf = requestAnimationFrame(apply) }
+    const move = (e: PointerEvent) => {
+      const r = el.getBoundingClientRect()
+      x = ((e.clientX - r.left) / r.width - 0.5) * 2
+      y = ((e.clientY - r.top) / r.height - 0.5) * 2
+      queue()
+    }
+    const leave = () => { x = 0; y = 0; queue() }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerleave', leave)
+    return () => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerleave', leave)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [])
+  return ref
+}
 
 export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client' }) {
   const { t, i18n } = useTranslation()
@@ -129,22 +226,33 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
     return (
       <div className="pr" aria-busy="true">
         {head}
-        <div className="pr-hero is-skel"><div className="pr-art-box" /><div className="pr-hero-body"><SkeletonLine width="40%" /><SkeletonLine width="70%" /><SkeletonLine width="90%" /></div></div>
+        <div className="pr-slab">
+          <div className="pr-stage is-skel"><div className="pr-art-col"><div className="pr-art" /></div><div className="pr-stage-body"><SkeletonLine width="40%" /><SkeletonLine width="70%" /><SkeletonLine width="90%" /></div></div>
+        </div>
       </div>
     )
   }
 
+  // 家族色铺到整页：舞台、主轴、评分表盘、徽章都用它。/ The family colour tints the whole page.
+  const fam = persona ? FAMILY_COLOR[familyOf(persona.code)] : null
+  const famStyle = fam ? ({ '--fam': fam.main, '--fam-deep': fam.deep } as React.CSSProperties) : undefined
+
   return (
-    <div className="pr">
+    <div className="pr" style={famStyle}>
       {head}
       {overview.status === 'unlocked' && persona ? (
         <>
-          <PersonaHero persona={persona} style={style} onStyle={pickStyle} change={report?.change ?? null}
-            onShare={mode === 'self' ? openShare : undefined} sharing={sharing} />
-          <AxesPanel persona={persona} />
+          <div className="pr-slab">
+            <PersonaStage persona={persona} style={style} onStyle={pickStyle} change={report?.change ?? null}
+              onShare={mode === 'self' ? openShare : undefined} sharing={sharing} />
+            <Spectrum persona={persona} />
+          </div>
           <section className="pr-sec" aria-labelledby="pr-month-h">
-            <div className="pr-sec-head">
-              <h2 id="pr-month-h">{t('persona.report.title')}</h2>
+            <div className="pr-st-head">
+              <div>
+                <p className="pr-kicker">{t('persona.report.title')}</p>
+                <h2 id="pr-month-h" className="pr-st-month">{period ? monthLabel(period, i18n.language, 'long') : t('persona.report.title')}</h2>
+              </div>
               <div className="pr-months" role="tablist" aria-label={t('persona.report.title')} onKeyDown={onRovingKeyDown}>
                 {overview.months.map((m) => (
                   <button key={m} type="button" role="tab" aria-selected={m === period} tabIndex={m === period ? 0 : -1}
@@ -156,8 +264,8 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
             </div>
             {err && <p className="pr-err" role="alert">{err}</p>}
             {loadingMonth && !report ? (
-              <div className="pr-card"><SkeletonLine width="60%" /><SkeletonLine width="80%" /></div>
-            ) : report ? <MonthReport report={report} /> : null}
+              <div className="pr-slab pr-month-skel"><SkeletonLine width="30%" /><SkeletonLine width="60%" /><SkeletonLine width="80%" /></div>
+            ) : report ? <MonthReport key={report.period} report={report} /> : null}
           </section>
         </>
       ) : overview.status === 'locked' ? (
@@ -172,18 +280,30 @@ export default function PersonaPage({ mode = 'self' }: { mode?: 'self' | 'client
   )
 }
 
-function monthLabel(period: string, lang: string) {
-  const [y, m] = period.split('-').map(Number)
+function intlTag(lang: string) {
   const tag = LOCALE_TAG[currentLang()] ?? lang
+  return tag.startsWith('th') ? `${tag}-u-ca-gregory` : tag
+}
+
+function monthLabel(period: string, lang: string, month: 'short' | 'long' = 'short') {
+  const [y, m] = period.split('-').map(Number)
   try {
-    return new Intl.DateTimeFormat(tag.startsWith('th') ? `${tag}-u-ca-gregory` : tag, { year: 'numeric', month: 'short', timeZone: 'UTC' })
-      .format(new Date(Date.UTC(y, m - 1, 1)))
+    return new Intl.DateTimeFormat(intlTag(lang), { year: 'numeric', month, timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, 1)))
   } catch {
     return period
   }
 }
 
-// ---------------------------------------------------------------- 人格卡 / persona hero
+function dayLabel(period: string, day: number, lang: string) {
+  const [y, m] = period.split('-').map(Number)
+  try {
+    return new Intl.DateTimeFormat(intlTag(lang), { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(y, m - 1, day)))
+  } catch {
+    return `${m}-${day}`
+  }
+}
+
+// ---------------------------------------------------------------- 人格舞台 / persona stage
 function ArtSwitch({ style, onStyle }: { style: ArtStyle; onStyle: (s: ArtStyle) => void }) {
   const { t } = useTranslation()
   return (
@@ -197,25 +317,32 @@ function ArtSwitch({ style, onStyle }: { style: ArtStyle; onStyle: (s: ArtStyle)
   )
 }
 
-function PersonaHero({ persona, style, onStyle, change, onShare, sharing }: {
+function PersonaStage({ persona, style, onStyle, change, onShare, sharing }: {
   persona: Persona; style: ArtStyle; onStyle: (s: ArtStyle) => void; change: { from: string; to: string } | null
   onShare?: () => void; sharing: boolean
 }) {
   const { t } = useTranslation()
   const fam = familyOf(persona.code)
-  const c = FAMILY_COLOR[fam]
+  const tilt = useTilt<HTMLElement>()
   return (
-    <section className="pr-hero" style={{ '--fam': c.main, '--fam-deep': c.deep } as React.CSSProperties}>
+    <section ref={tilt} className={`pr-stage is-${style}`}>
+      <span className="pr-ghost" aria-hidden="true">{persona.code}</span>
       <div className="pr-art-col">
-        <div className="pr-art-box">
+        <div className="pr-art">
           <img src={artUrl(persona.code, style)} alt={t(`persona.types.${persona.code}.title`)} width={300} height={345} />
+          <span className="pr-glare" aria-hidden="true" />
         </div>
         <ArtSwitch style={style} onStyle={onStyle} />
       </div>
-      <div className="pr-hero-body">
-        <p className="pr-eyebrow"><span className="pr-dot" aria-hidden="true" />{t(`persona.family.${fam}`)}<span className="pr-code">{persona.code}</span></p>
+      <div className="pr-stage-body">
+        <p className="pr-eyebrow"><span className="pr-dot" aria-hidden="true" />{t(`persona.family.${fam}`)}</p>
         <h2 className="pr-title">{t(`persona.types.${persona.code}.title`)}</h2>
-        <p className="pr-traits">{AXES.map((a) => t(`persona.pole.${persona.axes[a.key]?.letter ?? a.poles[0]}`)).join(' · ')}</p>
+        <ul className="pr-dna" aria-label={persona.code}>
+          {AXES.map((a) => {
+            const letter = persona.axes[a.key]?.letter ?? a.poles[0]
+            return <li key={a.key}><b aria-hidden="true">{letter}</b><span>{t(`persona.pole.${letter}`)}</span></li>
+          })}
+        </ul>
         <blockquote className="pr-say">{t(`persona.types.${persona.code}.say`)}</blockquote>
         <div className="pr-meta">
           <span className={`pr-pill ${persona.provisional ? 'is-soft' : ''}`}>
@@ -225,55 +352,60 @@ function PersonaHero({ persona, style, onStyle, change, onShare, sharing }: {
             <span className="pr-pill is-soft">{t('persona.changed', { from: t(`persona.types.${change.from}.title`) })}</span>
           )}
         </div>
-        <p className="pr-small">{t('persona.window')}</p>
-        {onShare && (
-          <div className="pr-actions">
+        <div className="pr-actions">
+          {onShare && (
             <button type="button" className="btn-primary pr-btn" onClick={onShare} disabled={sharing}>
               {sharing ? t('share.generating') : t('persona.share.button')}
             </button>
-          </div>
-        )}
+          )}
+          <p className="pr-small">{t('persona.window')}</p>
+        </div>
       </div>
     </section>
   )
 }
 
-function AxesPanel({ persona }: { persona: Persona }) {
+// 四个主轴：每格一个大百分比（朝你那个字母偏了多少）+ 一条两端对拉的细条。
+// The four axes: a big percentage toward your letter plus a thin tug-of-war bar per cell.
+function Spectrum({ persona }: { persona: Persona }) {
   const { t } = useTranslation()
-  const c = FAMILY_COLOR[familyOf(persona.code)]
   return (
-    <section className="pr-sec" aria-labelledby="pr-axes-h">
-      <div className="pr-sec-head"><h2 id="pr-axes-h">{t('persona.axes.title')}</h2></div>
-      <div className="pr-card pr-axes">
-        {AXES.map((a) => {
+    <Rv className="pr-spectrum-wrap">
+      <h2 className="pr-sr">{t('persona.axes.title')}</h2>
+      <div className="pr-spectrum">
+        {AXES.map((a, i) => {
           const ax = persona.axes[a.key]
           const v = Math.max(0, Math.min(100, ax?.value ?? 50))
           const right = v >= 50
+          const letter = ax?.letter ?? (right ? a.poles[1] : a.poles[0])
+          const toward = Math.round(letter === a.poles[1] ? v : 100 - v)
           return (
-            <div key={a.key} className="pr-axis">
-              <div className="pr-axis-top">
-                <span className="pr-axis-name">{t(`persona.axes.${a.key}.name`)}</span>
-                <span className="pr-axis-fact">{axisFact(t, a.key, ax)}</span>
+            <div key={a.key} className="pr-ax" style={{ '--i': i } as React.CSSProperties}>
+              <span className="pr-ax-name">{t(`persona.axes.${a.key}.name`)}</span>
+              <div className="pr-ax-val">
+                <b className="pr-ax-pct">{toward}<small>%</small></b>
+                <span className="pr-ax-word">{t(`persona.pole.${letter}`)}</span>
               </div>
-              <div className="pr-axis-bar">
-                <span className={`pr-pole ${!right ? 'on' : ''}`}>{t(`persona.pole.${a.poles[0]}`)}</span>
-                <div className="pr-track" role="img" aria-label={`${t(`persona.pole.${a.poles[0]}`)} ${100 - Math.round(v)} / ${t(`persona.pole.${a.poles[1]}`)} ${Math.round(v)}`}>
-                  <span className="pr-mid" aria-hidden="true" />
-                  <span className="pr-fill" style={{ left: `${right ? 50 : v}%`, width: `${Math.max(Math.abs(v - 50), 1.5)}%`, background: c.main }} />
-                  <span className="pr-knob" style={{ left: `${v}%`, borderColor: c.main }} />
-                </div>
-                <span className={`pr-pole ${right ? 'on' : ''}`}>{t(`persona.pole.${a.poles[1]}`)}</span>
+              <div className="pr-track" role="img" aria-label={`${t(`persona.pole.${a.poles[0]}`)} ${100 - Math.round(v)} / ${t(`persona.pole.${a.poles[1]}`)} ${Math.round(v)}`}>
+                <span className="pr-mid" aria-hidden="true" />
+                <span className={`pr-fill ${right ? 'is-right' : 'is-left'}`} style={{ left: `${right ? 50 : v}%`, width: `${Math.max(Math.abs(v - 50), 1.5)}%` }} />
+                <span className="pr-knob" style={{ left: `${v}%` }} />
               </div>
-              <p className="pr-axis-help">{t(`persona.axes.${a.key}.help`)}</p>
+              <div className="pr-poles" aria-hidden="true">
+                <span className={!right ? 'on' : ''}>{t(`persona.pole.${a.poles[0]}`)}</span>
+                <span className={right ? 'on' : ''}>{t(`persona.pole.${a.poles[1]}`)}</span>
+              </div>
+              <p className="pr-ax-fact">{axisFact(t, a.key, ax)}</p>
+              <p className="pr-ax-help">{t(`persona.axes.${a.key}.help`)}</p>
             </div>
           )
         })}
       </div>
-    </section>
+    </Rv>
   )
 }
 
-function axisFact(t: (k: string, o?: Record<string, unknown>) => string, key: string, ax: Persona['axes'][keyof Persona['axes']] | undefined) {
+function axisFact(t: T, key: string, ax: Persona['axes'][keyof Persona['axes']] | undefined) {
   if (!ax) return ''
   if (key === 'judge') return t('persona.axes.judge.fact', { p: pct(ax.share) })
   if (key === 'risk') return t('persona.axes.risk.fact', { r: num(ax.holdRatio, 1), p: num(ax.payoff, 2) })
@@ -303,7 +435,8 @@ function TeaserArt() {
 function LockedHero({ progress, client }: { progress: PersonaProgress; client: boolean }) {
   const { t } = useTranslation()
   return (
-    <section className="pr-hook">
+    <section className="pr-slab pr-hook">
+      <span className="pr-ghost" aria-hidden="true">????</span>
       <TeaserArt />
       <div className="pr-hook-body">
         <h2 className="pr-title">{t(client ? 'persona.client.locked' : 'persona.locked.title')}</h2>
@@ -320,7 +453,8 @@ function LockedHero({ progress, client }: { progress: PersonaProgress; client: b
 function DemoHero({ client }: { client: boolean }) {
   const { t } = useTranslation()
   return (
-    <section className="pr-hook">
+    <section className="pr-slab pr-hook">
+      <span className="pr-ghost" aria-hidden="true">????</span>
       <TeaserArt />
       <div className="pr-hook-body">
         <h2 className="pr-title">{t(client ? 'persona.client.demo' : 'persona.demo.title')}</h2>
@@ -338,63 +472,166 @@ function MonthReport({ report }: { report: PersonaReport }) {
   const lang = (i18n.language || 'zh').slice(0, 2) as 'zh' | 'en' | 'ja' | 'th' | 'vi'
   const comment = report.comment ? (report.comment[lang] || report.comment.en || report.comment.zh) : null
   if (!s.trades) {
-    return <div className="pr-card pr-empty">{t('persona.report.empty')}</div>
+    return <div className="pr-slab pr-empty">{t('persona.report.empty')}</div>
   }
-  const tiles: { k: string; v: string; cls?: string }[] = [
-    { k: 'profit', v: money(s.profit), cls: tone(s.profit) },
-    { k: 'trades', v: String(s.trades) },
-    { k: 'winRate', v: pct(s.winRate) },
-    { k: 'payoff', v: num(s.payoff, 2) },
-    { k: 'score', v: s.score == null ? EMPTY : String(s.score) },
-    { k: 'days', v: t('persona.report.daysValue', { g: s.greenDays, n: s.tradingDays }) },
-    { k: 'hold', v: s.medianHoldMin == null ? EMPTY : fmtMinutes(t, s.medianHoldMin) },
+  const facts: { k: string; v: string; cls?: string }[] = [
+    { k: 'avgWin', v: money(s.avgWin), cls: tone(s.avgWin) },
+    { k: 'avgLoss', v: money(s.avgLoss == null ? null : -Math.abs(s.avgLoss)), cls: s.avgLoss ? 'is-down' : '' },
     { k: 'drawdown', v: money(-s.maxDrawdown, false), cls: s.maxDrawdown > 0 ? 'is-down' : '' },
   ]
+  const rail: { k: string; v: string; cls?: string }[] = [
+    { k: 'trades', v: String(s.trades) },
+    { k: 'payoff', v: num(s.payoff, 2) },
+    { k: 'days', v: t('persona.report.daysValue', { g: s.greenDays, n: s.tradingDays }) },
+    { k: 'hold', v: s.medianHoldMin == null ? EMPTY : fmtMinutes(t, s.medianHoldMin) },
+    { k: 'best', v: money(s.best), cls: tone(s.best) },
+    { k: 'worst', v: money(s.worst), cls: tone(s.worst) },
+  ]
+  const winShare = s.wins + s.losses ? s.wins / (s.wins + s.losses) : 0
   return (
     <div className="pr-month">
-      {report.live && <p className="pr-small">{t('persona.report.live')}</p>}
-      <div className="pr-tiles">
-        {tiles.map((x) => (
-          <div key={x.k} className="pr-tile">
-            <span>{t(`persona.report.stat.${x.k}`)}</span>
-            <b className={`num ${x.cls ?? ''}`}>{x.v}</b>
+      {report.live && <p className="pr-live"><span className="pr-live-dot" aria-hidden="true" />{t('persona.report.live')}</p>}
+
+      <Rv className={`pr-slab pr-headline ${s.profit > 0 ? 'tone-up' : s.profit < 0 ? 'tone-down' : ''}`}>
+        <div className="pr-pnl">
+          <span className="pr-k">{t('persona.report.stat.profit')}</span>
+          <CountMoney value={s.profit} className={`pr-pnl-num ${tone(s.profit)}`} />
+          <dl className="pr-facts">
+            {facts.map((x) => (
+              <div key={x.k}><dt>{t(`persona.report.stat.${x.k}`)}</dt><dd className={`num ${x.cls ?? ''}`}>{x.v}</dd></div>
+            ))}
+          </dl>
+          <Curve report={report} />
+        </div>
+        <div className="pr-score">
+          <ScoreRing score={s.score} label={t('persona.report.stat.score')} />
+          <div className="pr-wl">
+            <div className="pr-wl-top">
+              <span>{t('persona.report.stat.winRate')}</span>
+              <b className="num">{pct(s.winRate)}</b>
+            </div>
+            <div className="pr-wl-bar" aria-hidden="true">
+              <i className="is-win" style={{ flexGrow: Math.max(winShare, 0.02) }} />
+              <i className="is-loss" style={{ flexGrow: Math.max(1 - winShare, 0.02) }} />
+            </div>
+            <p className="pr-wl-sub">{t('persona.report.wl', { w: s.wins, l: s.losses })}</p>
           </div>
-        ))}
-      </div>
+        </div>
+        <dl className="pr-rail">
+          {rail.map((x) => (
+            <div key={x.k}><dt>{t(`persona.report.stat.${x.k}`)}</dt><dd className={`num ${x.cls ?? ''}`}>{x.v}</dd></div>
+          ))}
+        </dl>
+      </Rv>
       {report.openLosers > 0 && <p className="pr-small">{t('persona.report.openLosers', { n: report.openLosers })}</p>}
 
-      <Calendar report={report} />
+      <div className="pr-grid2">
+        <Rv className="pr-panel"><Calendar report={report} /></Rv>
+        <Rv className="pr-panel" i={1}><Breakdowns report={report} /></Rv>
+      </div>
 
-      {report.badges.length > 0 && (
-        <div className="pr-card">
-          <h3 className="pr-h3">{t('persona.badges.title')}</h3>
-          <ul className="pr-badges">
-            {report.badges.map((b) => (
-              <li key={b}><b>{t(`persona.badges.${b}.name`)}</b><span>{t(`persona.badges.${b}.desc`)}</span></li>
-            ))}
-          </ul>
-        </div>
-      )}
+      <Rv className="pr-panel"><TagsPanel report={report} /></Rv>
 
-      <Breakdowns report={report} />
-      <TagsPanel report={report} />
-
-      <div className="pr-card pr-comment">
-        <h3 className="pr-h3">{t('persona.comment.title')}</h3>
-        {comment ? <p>{comment}</p> : <p className="pr-small">{t(report.live ? 'persona.comment.pending' : 'persona.comment.none')}</p>}
+      <div className={report.badges.length > 0 ? 'pr-grid2' : 'pr-grid1'}>
+        {report.badges.length > 0 && (
+          <Rv className="pr-panel">
+            <h3 className="pr-h3">{t('persona.badges.title')}</h3>
+            <ul className="pr-badges">
+              {report.badges.map((b) => (
+                <li key={b}><b>{t(`persona.badges.${b}.name`)}</b><span>{t(`persona.badges.${b}.desc`)}</span></li>
+              ))}
+            </ul>
+          </Rv>
+        )}
+        <Rv className="pr-panel pr-comment" i={1}>
+          <h3 className="pr-h3">{t('persona.comment.title')}</h3>
+          {comment ? <blockquote>{comment}</blockquote> : <p className="pr-small">{t(report.live ? 'persona.comment.pending' : 'persona.comment.none')}</p>}
+        </Rv>
       </div>
     </div>
   )
 }
 
-function fmtMinutes(t: (k: string, o?: Record<string, unknown>) => string, m: number) {
+function fmtMinutes(t: T, m: number) {
   if (m < 1) return t('persona.unit.sec', { n: Math.max(1, Math.round(m * 60)) })
   if (m < 90) return t('persona.unit.min', { n: Math.round(m) })
   return t('persona.unit.hour', { n: (m / 60).toFixed(1) })
 }
 
-function Calendar({ report }: { report: PersonaReport }) {
+// 当月累计盈亏曲线：按 UTC 日把每天的已平仓盈亏累加，进行中的月份只画到今天。
+// Cumulative P&L of the month by UTC day (closed trades); a live month stops at today.
+function Curve({ report }: { report: PersonaReport }) {
   const { t } = useTranslation()
+  const gid = useId().replace(/[^a-zA-Z0-9]/g, '')
+  const model = useMemo(() => {
+    const [y, m] = report.period.split('-').map(Number)
+    const days = new Date(Date.UTC(y, m, 0)).getUTCDate()
+    const asOf = new Date(report.asOf)
+    const sameMonth = report.live && asOf.getUTCFullYear() === y && asOf.getUTCMonth() === m - 1
+    const last = sameMonth ? Math.max(1, asOf.getUTCDate()) : days
+    const byDay = new Map(report.calendar.map((d) => [Number(d.day.slice(8, 10)), d.profit]))
+    const pts: [number, number][] = [[0, 0]]
+    let cum = 0
+    for (let d = 1; d <= last; d++) {
+      cum += byDay.get(d) ?? 0
+      pts.push([d / days, cum])
+    }
+    const lo = Math.min(...pts.map((p) => p[1]))
+    const hi = Math.max(...pts.map((p) => p[1]))
+    const span = hi - lo || 1
+    const Y = (v: number) => 5 + (1 - (v - lo) / span) * 30
+    const line = pts.map(([f, v], i) => `${i ? 'L' : 'M'}${(f * 100).toFixed(2)} ${Y(v).toFixed(2)}`).join(' ')
+    const endX = pts[pts.length - 1][0] * 100
+    const y0 = Y(0)
+    return { line, area: `${line} L${endX.toFixed(2)} ${y0.toFixed(2)} L0 ${y0.toFixed(2)} Z`, y0, yTop: Y(hi), yBottom: Y(lo), endX, endY: Y(cum), up: cum >= 0, days }
+  }, [report])
+  const stroke = model.up ? 'rgb(var(--up-rgb))' : 'rgb(var(--down-rgb))'
+  return (
+    <figure className="pr-curve" role="img" aria-label={t('persona.report.curve')}>
+      <figcaption>{t('persona.report.curve')}</figcaption>
+      <div className="pr-curve-plot">
+        <svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id={gid} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1={model.up ? model.yTop : model.y0} y2={model.up ? model.y0 : model.yBottom}>
+              <stop offset="0" stopColor={stroke} stopOpacity={model.up ? 0.34 : 0} />
+              <stop offset="1" stopColor={stroke} stopOpacity={model.up ? 0 : 0.34} />
+            </linearGradient>
+          </defs>
+          <line className="pr-curve-zero" x1="0" x2="100" y1={model.y0} y2={model.y0} />
+          <path d={model.area} fill={`url(#${gid})`} />
+          <path className="pr-curve-line" d={model.line} stroke={stroke} />
+        </svg>
+        <span className="pr-curve-dot" style={{ left: `${model.endX}%`, top: `${(model.endY / 40) * 100}%`, background: stroke }} />
+      </div>
+      <div className="pr-curve-x" aria-hidden="true"><span>1</span><span>{Math.round(model.days / 2)}</span><span>{model.days}</span></div>
+    </figure>
+  )
+}
+
+// 综合评分表盘：四分之三圈，进场时从 0 转到分数。/ Three-quarter gauge that sweeps to the score.
+function ScoreRing({ score, label }: { score: number | null; label: string }) {
+  const R = 52
+  const C = 2 * Math.PI * R
+  const ARC = 0.75 * C
+  const len = score == null ? 0 : (ARC * Math.max(0, Math.min(100, score))) / 100
+  return (
+    <div className="pr-ring" role="img" aria-label={`${label} ${score ?? EMPTY} / 100`}
+      style={{ '--c': C.toFixed(1), '--len': len.toFixed(1) } as React.CSSProperties}>
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <circle className="pr-ring-track" cx="60" cy="60" r={R} strokeDasharray={`${ARC.toFixed(1)} ${C.toFixed(1)}`} />
+        <circle className="pr-ring-arc" cx="60" cy="60" r={R} />
+      </svg>
+      <div className="pr-ring-num" aria-hidden="true">
+        <b>{score ?? EMPTY}</b>
+        <span>/ 100</span>
+      </div>
+      <span className="pr-ring-label" aria-hidden="true">{label}</span>
+    </div>
+  )
+}
+
+function Calendar({ report }: { report: PersonaReport }) {
+  const { t, i18n } = useTranslation()
   const [y, m] = report.period.split('-').map(Number)
   const first = new Date(Date.UTC(y, m - 1, 1))
   const days = new Date(Date.UTC(y, m, 0)).getUTCDate()
@@ -403,8 +640,11 @@ function Calendar({ report }: { report: PersonaReport }) {
   const maxAbs = Math.max(1, ...report.calendar.map((d) => Math.abs(d.profit)))
   const cells: (number | null)[] = [...Array(lead).fill(null), ...Array.from({ length: days }, (_, i) => i + 1)]
   while (cells.length % 7) cells.push(null)
+  const sorted = [...report.calendar].sort((a, b) => b.profit - a.profit)
+  const bestDay = sorted.length && sorted[0].profit > 0 ? sorted[0] : null
+  const worstDay = sorted.length && sorted[sorted.length - 1].profit < 0 ? sorted[sorted.length - 1] : null
   return (
-    <div className="pr-card">
+    <>
       <h3 className="pr-h3">{t('persona.calendar.title')}</h3>
       <div className="pr-cal" role="grid" aria-label={t('persona.calendar.title')}>
         {[0, 1, 2, 3, 4, 5, 6].map((i) => <span key={`h${i}`} className="pr-cal-h" role="columnheader">{t(`persona.weekday.${i}`)}</span>)}
@@ -412,9 +652,10 @@ function Calendar({ report }: { report: PersonaReport }) {
           if (d == null) return <span key={i} className="pr-cal-c is-blank" role="gridcell" />
           const row = byDay.get(d)
           const a = row ? Math.min(1, Math.abs(row.profit) / maxAbs) : 0
-          const bg = row ? (row.profit >= 0 ? `rgb(var(--up-rgb) / ${0.12 + a * 0.45})` : `rgb(var(--down-rgb) / ${0.12 + a * 0.45})`) : undefined
+          const rgb = row ? (row.profit >= 0 ? 'var(--up-rgb)' : 'var(--down-rgb)') : ''
           return (
-            <span key={i} className={`pr-cal-c ${row ? 'has' : ''}`} role="gridcell" style={bg ? { background: bg } : undefined}
+            <span key={i} className={`pr-cal-c ${row ? 'has' : ''}`} role="gridcell"
+              style={row ? ({ background: `rgb(${rgb} / ${(0.14 + a * 0.5).toFixed(3)})`, '--cell': rgb } as React.CSSProperties) : undefined}
               title={row ? `${report.period}-${String(d).padStart(2, '0')} · ${money(row.profit)} · ${t('persona.calendar.trades', { n: row.trades })}` : undefined}>
               <i>{d}</i>
               {row && <b className="num">{shortMoney(row.profit)}</b>}
@@ -422,8 +663,18 @@ function Calendar({ report }: { report: PersonaReport }) {
           )
         })}
       </div>
+      {(bestDay || worstDay) && (
+        <dl className="pr-cal-peaks">
+          {bestDay && (
+            <div><dt>{t('persona.calendar.bestDay')}</dt><dd><b className="num is-up">{money(bestDay.profit)}</b><span>{dayLabel(report.period, Number(bestDay.day.slice(8, 10)), i18n.language)}</span></dd></div>
+          )}
+          {worstDay && (
+            <div><dt>{t('persona.calendar.worstDay')}</dt><dd><b className="num is-down">{money(worstDay.profit)}</b><span>{dayLabel(report.period, Number(worstDay.day.slice(8, 10)), i18n.language)}</span></dd></div>
+          )}
+        </dl>
+      )}
       <p className="pr-small">{t('persona.calendar.utc')}</p>
-    </div>
+    </>
   )
 }
 
@@ -433,7 +684,7 @@ const shortMoney = (v: number) => {
   return `${v < 0 ? '−' : '+'}${s}`
 }
 
-function bucketLabel(t: (k: string, o?: Record<string, unknown>) => string, key: BreakKey, b: PersonaBucket) {
+function bucketLabel(t: T, key: BreakKey, b: PersonaBucket) {
   if (key === 'symbol') return String(b.key)
   if (key === 'weekday') return t(`persona.weekday.${b.key}`)
   return t(`persona.break.${key}.${b.key}`)
@@ -445,9 +696,9 @@ function Breakdowns({ report }: { report: PersonaReport }) {
   const rows = report.breakdowns[tab] ?? []
   const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.profit)))
   return (
-    <div className="pr-card">
+    <>
       <h3 className="pr-h3">{t('persona.break.title')}</h3>
-      <div className="pr-seg is-wide" role="tablist" aria-label={t('persona.break.title')} onKeyDown={onRovingKeyDown}>
+      <div className="pr-tabs" role="tablist" aria-label={t('persona.break.title')} onKeyDown={onRovingKeyDown}>
         {BREAKS.map((k) => (
           <button key={k} type="button" role="tab" aria-selected={k === tab} tabIndex={k === tab ? 0 : -1} className={k === tab ? 'on' : ''} onClick={() => setTab(k)}>
             {t(`persona.break.${k}.tab`)}
@@ -462,19 +713,22 @@ function Breakdowns({ report }: { report: PersonaReport }) {
           <span role="columnheader">{t('persona.break.profit')}</span>
         </div>
         {rows.length === 0 ? <p className="pr-small">{t('persona.report.empty')}</p> : rows.map((r) => (
-          <div key={String(r.key)} className="pr-row" role="row">
+          <div key={`${tab}-${String(r.key)}`} className="pr-row" role="row">
             <span role="cell" className="pr-row-k">{bucketLabel(t, tab, r)}</span>
             <span role="cell" className="num">{r.trades}</span>
             <span role="cell" className="num">{pct(r.trades ? r.wins / r.trades : null)}</span>
             <span role="cell" className="pr-row-p">
-              <i className={r.profit >= 0 ? 'is-up' : 'is-down'} style={{ width: `${(Math.abs(r.profit) / maxAbs) * 100}%` }} aria-hidden="true" />
+              {/* 以中线为零：盈利往右、亏损往左。/ Zero in the middle: profit grows right, loss left. */}
+              <span className="pr-div" aria-hidden="true">
+                <i className={r.profit >= 0 ? 'is-up' : 'is-down'} style={{ width: `${(Math.abs(r.profit) / maxAbs) * 50}%` }} />
+              </span>
               <b className={`num ${tone(r.profit)}`}>{money(r.profit)}</b>
             </span>
           </div>
         ))}
       </div>
       {tab === 'session' && <p className="pr-small">{t('persona.break.session.note')}</p>}
-    </div>
+    </>
   )
 }
 
@@ -483,19 +737,23 @@ function TagsPanel({ report }: { report: PersonaReport }) {
   const [more, setMore] = useState(false)
   const list = more ? report.taggedTrades : report.taggedTrades.slice(0, TAGGED_SHOWN)
   const fmt = useMemo(() => new Intl.DateTimeFormat(LOCALE_TAG[currentLang()], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'UTC' }), [])
-  const listRef = useRef<HTMLUListElement>(null)
   return (
-    <div className="pr-card">
-      <h3 className="pr-h3">{t('persona.tags.title')}</h3>
-      <p className="pr-small">{t('persona.tags.lead')}</p>
+    <>
+      <div className="pr-panel-head">
+        <h3 className="pr-h3">{t('persona.tags.title')}</h3>
+        <p className="pr-small">{t('persona.tags.lead')}</p>
+      </div>
       <div className="pr-tags">
         {TAGS.map((k) => {
           const x = report.tags[k] ?? { count: 0, profit: 0 }
           return (
             <div key={k} className={`pr-tag ${x.count ? '' : 'is-zero'}`}>
-              <div className="pr-tag-top"><b>{t(`persona.tags.${k}.name`)}</b><span className="num">{x.count}</span></div>
-              <p>{t(`persona.tags.${k}.desc`)}</p>
-              {x.count > 0 && <span className={`num pr-tag-p ${tone(x.profit)}`}>{money(x.profit)}</span>}
+              <span className="pr-tag-n">{x.count}</span>
+              <div className="pr-tag-body">
+                <b>{t(`persona.tags.${k}.name`)}</b>
+                <p>{t(`persona.tags.${k}.desc`)}</p>
+                {x.count > 0 && <span className={`num pr-tag-p ${tone(x.profit)}`}>{money(x.profit)}</span>}
+              </div>
             </div>
           )
         })}
@@ -503,7 +761,7 @@ function TagsPanel({ report }: { report: PersonaReport }) {
       {report.taggedTrades.length > 0 && (
         <>
           <h4 className="pr-h4">{t('persona.tags.trades')}</h4>
-          <ul className="pr-trades" ref={listRef}>
+          <ul className="pr-trades">
             {list.map((x, i) => (
               <li key={`${x.closeAt}-${i}`}>
                 <div className="pr-trade-top">
@@ -527,7 +785,7 @@ function TagsPanel({ report }: { report: PersonaReport }) {
           )}
         </>
       )}
-    </div>
+    </>
   )
 }
 
@@ -538,7 +796,7 @@ function Intro({ current, style }: { current: string | null; style: ArtStyle }) 
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   return (
-    <section className="pr-sec pr-intro">
+    <section className="pr-intro">
       <button type="button" className="pr-intro-toggle" aria-expanded={open} aria-controls="pr-intro-body" onClick={() => setOpen((v) => !v)}>
         <span>{t('persona.intro.title')}</span>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>

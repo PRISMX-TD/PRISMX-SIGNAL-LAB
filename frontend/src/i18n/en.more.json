@@ -5738,6 +5738,8 @@
       "live": "This month is in progress and updates live; the AI comment comes when the month is archived.",
       "daysValue": "{{g}} / {{n}} days",
       "openLosers": "{{n}} more open positions are in the red; they count as losses when the month is archived.",
+      "wl": "{{w}} wins · {{l}} losses",
+      "curve": "Cumulative P&L this month",
       "stat": {
         "profit": "Net P&L",
         "trades": "Trades",
@@ -5746,7 +5748,11 @@
         "score": "Overall score",
         "days": "Green days",
         "hold": "Median hold",
-        "drawdown": "Max drawdown"
+        "drawdown": "Max drawdown",
+        "best": "Best trade",
+        "worst": "Worst trade",
+        "avgWin": "Average win",
+        "avgLoss": "Average loss"
       }
     },
     "unit": {
@@ -5757,7 +5763,9 @@
     "calendar": {
       "title": "P&L calendar",
       "trades": "{{n}} trades",
-      "utc": "UTC dates, closed trades only."
+      "utc": "UTC dates, closed trades only.",
+      "bestDay": "Best day",
+      "worstDay": "Worst day"
     },
     "weekday": {
       "0": "Mon",

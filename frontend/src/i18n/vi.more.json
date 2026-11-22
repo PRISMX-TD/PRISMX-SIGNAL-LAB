@@ -2828,6 +2828,8 @@
       "live": "Tháng này đang diễn ra, số liệu cập nhật trực tiếp; nhận xét AI có sau khi lưu cuối tháng.",
       "daysValue": "{{g}} / {{n}} ngày",
       "openLosers": "Còn {{n}} vị thế đang lỗ tạm thời, sẽ được tính là lỗ khi lưu cuối tháng.",
+      "wl": "{{w}} thắng · {{l}} thua",
+      "curve": "Lãi lỗ lũy kế trong tháng",
       "stat": {
         "profit": "Lãi/lỗ ròng",
         "trades": "Số lệnh",
@@ -2836,7 +2838,11 @@
         "score": "Điểm tổng",
         "days": "Ngày có lãi",
         "hold": "Giữ trung vị",
-        "drawdown": "Sụt giảm tối đa"
+        "drawdown": "Sụt giảm tối đa",
+        "best": "Lệnh lãi lớn nhất",
+        "worst": "Lệnh lỗ lớn nhất",
+        "avgWin": "Lãi trung bình mỗi lệnh",
+        "avgLoss": "Lỗ trung bình mỗi lệnh"
       }
     },
     "unit": {
@@ -2847,7 +2853,9 @@
     "calendar": {
       "title": "Lịch lãi lỗ",
       "trades": "{{n}} lệnh",
-      "utc": "Theo ngày UTC, chỉ tính lệnh đã đóng."
+      "utc": "Theo ngày UTC, chỉ tính lệnh đã đóng.",
+      "bestDay": "Ngày tốt nhất",
+      "worstDay": "Ngày tệ nhất"
     },
     "weekday": {
       "0": "T2",
