@@ -226,10 +226,12 @@
     "notifNoSymbols": "No symbols yet, run the signal engine first",
     "notifFilterHint": "A signal only notifies when both dimensions match, e.g. ticking \"AIFT + Gold\" only notifies for AIFT signals on gold. Tick \"All\" to leave that dimension unrestricted, which also auto-covers symbols added later.",
     "notifStrategyLabel": "By strategy",
+    "notifEconLabel": "Economic alerts",
     "notifSymbolLabel": "By symbol",
     "notifAll": "All",
     "notifEvent": {
-      "strategy_signal": "My strategy signals"
+      "strategy_signal": "My strategy signals",
+      "econ_alert": "30 min before red releases"
     },
     "notifWindowHeading": "Push hours",
     "notifWindowEnable": "Only push during these hours",
@@ -3972,7 +3974,8 @@
       "generateHint": "Orange and red only; cached previews with an unchanged consensus are skipped. One model call per group, bound by the daily cap. From Friday the system also writes the whole next week.",
       "genDone": "Week generated: {{done}} written, {{failed}} failed.",
       "genCapHit": "Daily model cap reached after {{done}} groups. Raise the cap in Settings and run again.",
-      "public": "Open to users (dashboard card and calendar page)"
+      "public": "Open to users (dashboard card and calendar page)",
+      "alerts": "Push 30 min before red releases (users can turn it off in notification settings)"
     },
     "persona": {
       "title": "Trading report",
@@ -5674,7 +5677,14 @@
     "thisWeek": "This week",
     "emptyDay": "No releases on this day.",
     "countdownDays": "{{d}}d {{h}}h",
-    "todayTag": "Today"
+    "todayTag": "Today",
+    "ticker": {
+      "high": "High impact",
+      "label": "Calendar",
+      "mixed": "Live",
+      "in": "Due in",
+      "awaiting": "Awaiting figure"
+    }
   },
   "persona": {
     "closed": "The trading report is not open yet. Stay tuned.",

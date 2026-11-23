@@ -621,7 +621,14 @@
 }
 @media (hover: hover) and (pointer: fine) {
   .dash-tk-label:hover { background: var(--surface-2); }
+  /* 两种段都有时标签不是链接 / with both kinds the label is not a link */
+  .dash-tk-label.is-static:hover { background: transparent; }
 }
+.dash-tk-label.is-static { cursor: default; }
+/* 财经日历红色数据：和日历里红色重要度标记同一个红（#e8322b），字亮一档保证 12px 可读。
+   Red calendar releases: the calendar's high-impact red, text one step lighter for 12px. */
+.dash-tk-seg.is-econ .dash-tk-tag { background: rgb(232 50 43 / 0.16); color: #ff6b63; }
+.dash-tk-time { margin-right: 8px; color: var(--text-2); font-size: 13px; }
 .dash-tk-live {
   position: relative;
   width: 7px;

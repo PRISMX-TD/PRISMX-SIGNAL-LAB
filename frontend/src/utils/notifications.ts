@@ -47,7 +47,15 @@ export const EVENT_STRATEGY_SIGNAL = "strategy_signal"
 // excludes it by default (opt-in, see push_dispatch.EVENT_BADGE_AWARDED), so
 // it must not join ACCOUNT_EVENT_TYPES and inherit that group's default-on story.
 const GAMIFICATION_EVENT_TYPES = ["badge_awarded"] as const
-export const EVENT_TYPES = [...ACCOUNT_EVENT_TYPES, EVENT_STRATEGY_SIGNAL, ...GAMIFICATION_EVENT_TYPES] as const
+// 财经日历红色数据提醒（2026-11-23，rev 54）：公布前 30 分钟推一条，默认开，可在设置里关。
+// Red economic-release alert (rev 54): one push 30 minutes ahead; on by default, can be switched off.
+export const EVENT_ECON_ALERT = "econ_alert"
+export const EVENT_TYPES = [
+  ...ACCOUNT_EVENT_TYPES,
+  EVENT_STRATEGY_SIGNAL,
+  ...GAMIFICATION_EVENT_TYPES,
+  EVENT_ECON_ALERT,
+] as const
 
 export type NotifPrefs = {
   enabled: boolean

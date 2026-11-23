@@ -23,6 +23,7 @@ import { useAuth } from "../store/auth"
 import { useBackToClose } from "../utils/useBackToClose"
 import {
   ALL_SENTINEL,
+  EVENT_ECON_ALERT,
   EVENT_STRATEGY_SIGNAL,
   ENABLE_ERROR_KEYS,
   disableNotifications,
@@ -1024,6 +1025,26 @@ export default function AccountPage() {
                     })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* 财经提醒：红色（高影响）数据公布前 30 分钟推一条；同一时刻的合成一条。默认开。
+                Economic alerts: one push 30 minutes before a red (high-impact) release, merged per moment. On by default. */}
+            {notifEnabled && (
+              <div className="acct-group">
+                <div className="acct-group-h">
+                  <span className="sec-h-title">{t("account.notifEconLabel")}</span>
+                </div>
+                <div className="acct-chips">
+                  <button
+                    type="button"
+                    className="acct-chip"
+                    aria-pressed={notifEvents.includes(EVENT_ECON_ALERT)}
+                    onClick={() => handleNotifEventToggle(EVENT_ECON_ALERT, !notifEvents.includes(EVENT_ECON_ALERT))}
+                  >
+                    {t("account.notifEvent.econ_alert")}
+                  </button>
+                </div>
               </div>
             )}
 

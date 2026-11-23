@@ -273,6 +273,14 @@ export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' |
                   />
                   {t('admin.econ.public')}
                 </label>
+                <label className="flex items-center gap-2">
+                  <Switch
+                    checked={cfg.alerts}
+                    busy={busy === 'alerts'}
+                    onChange={(v) => save({ alerts: v }, 'alerts')}
+                  />
+                  {t('admin.econ.alerts')}
+                </label>
                 <label className="flex items-center gap-2 text-xs text-neutral-400">
                   {t('admin.econ.minImportance')}
                   {[1, 2, 3].map((n) => (
@@ -352,7 +360,10 @@ export default function EconCalendarPanel({ mode = 'admin' }: { mode?: 'admin' |
                 onClick={generateWeek}
               >
                 {jobRunning
-                  ? t('admin.econ.generating', { done: (job?.done ?? 0) + (job?.failed ?? 0), total: job?.total ?? 0 })
+                  ? t('admin.econ.generating', {
+                      done: (job?.done ?? 0) + (job?.failed ?? 0),
+                      total: job?.total ?? 0,
+                    })
                   : t('admin.econ.generateWeek')}
               </button>
             </>

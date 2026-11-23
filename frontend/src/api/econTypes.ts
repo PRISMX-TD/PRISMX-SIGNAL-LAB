@@ -9,6 +9,8 @@ export type EconSettings = {
   dailyLlmCap: number
   /** 对用户开放 / open to users */
   public: boolean
+  /** 红色数据公布前 30 分钟推送（rev 54）/ push 30 min before red releases */
+  alerts: boolean
 }
 
 export type EconStatus = {

@@ -226,10 +226,12 @@
     "notifNoSymbols": "Chưa có mã giao dịch, hãy chạy công cụ tín hiệu trước",
     "notifFilterHint": "Tín hiệu chỉ được thông báo khi khớp cả hai tiêu chí, ví dụ chọn \"AIFT + Vàng\" thì chỉ báo tín hiệu AIFT trên vàng. Chọn \"Tất cả\" để không giới hạn tiêu chí đó, đồng thời tự động bao gồm các mã được thêm sau này.",
     "notifStrategyLabel": "Theo chiến lược",
+    "notifEconLabel": "Cảnh báo kinh tế",
     "notifSymbolLabel": "Theo mã giao dịch",
     "notifAll": "Tất cả",
     "notifEvent": {
-      "strategy_signal": "Tín hiệu từ chiến lược của tôi"
+      "strategy_signal": "Tín hiệu từ chiến lược của tôi",
+      "econ_alert": "30 phút trước tin đỏ"
     },
     "notifWindowHeading": "Khung giờ nhận thông báo",
     "notifWindowEnable": "Chỉ gửi thông báo trong khung giờ này",
@@ -2764,7 +2766,14 @@
     "thisWeek": "Tuần này",
     "emptyDay": "Ngày này không có dữ liệu.",
     "countdownDays": "{{d}} ngày {{h}} giờ",
-    "todayTag": "Hôm nay"
+    "todayTag": "Hôm nay",
+    "ticker": {
+      "high": "Tác động cao",
+      "label": "Lịch",
+      "mixed": "Tin nhanh",
+      "in": "Công bố sau",
+      "awaiting": "Chờ số liệu"
+    }
   },
   "persona": {
     "closed": "Báo cáo giao dịch chưa mở. Hãy chờ nhé.",

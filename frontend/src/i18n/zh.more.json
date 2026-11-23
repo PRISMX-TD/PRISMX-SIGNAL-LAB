@@ -226,10 +226,12 @@
     "notifNoSymbols": "暂无品种，信号引擎运行后将自动出现",
     "notifFilterHint": "策略与品种需同时命中才会推送，例如勾选「AIFT + 黄金」时只有 AIFT 发出的黄金信号才会通知。勾选「全部」则该维度不做限制，且后续新增的品种也会自动覆盖。",
     "notifStrategyLabel": "按策略",
+    "notifEconLabel": "财经提醒",
     "notifSymbolLabel": "按品种",
     "notifAll": "全部",
     "notifEvent": {
-      "strategy_signal": "我的策略信号"
+      "strategy_signal": "我的策略信号",
+      "econ_alert": "红色数据公布前 30 分钟"
     },
     "notifWindowHeading": "推送时段",
     "notifWindowEnable": "仅在指定时段推送",
@@ -3961,7 +3963,8 @@
       "generateHint": "只写橙色和红色，已写好且预期值没变的会跳过。每组一次模型调用，受每日上限约束。周五起系统也会自动写好下一整周。",
       "genDone": "这一周的预案生成完了：成功 {{done}} 组，失败 {{failed}} 组。",
       "genCapHit": "已到每日模型调用上限，先写了 {{done}} 组。可在「设置」里调高上限后再点一次。",
-      "public": "对用户开放（仪表盘卡片与日历页）"
+      "public": "对用户开放（仪表盘卡片与日历页）",
+      "alerts": "红色数据公布前 30 分钟推送（用户可在通知设置里关）"
     },
     "persona": {
       "title": "交易报告",
@@ -5663,7 +5666,14 @@
     "thisWeek": "本周",
     "emptyDay": "这一天没有符合筛选的数据。",
     "countdownDays": "{{d}}天{{h}}小时",
-    "todayTag": "今天"
+    "todayTag": "今天",
+    "ticker": {
+      "high": "高影响",
+      "label": "财经",
+      "mixed": "快讯",
+      "in": "距公布",
+      "awaiting": "等待公布"
+    }
   },
   "persona": {
     "closed": "交易报告还没开放，敬请期待。",

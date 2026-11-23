@@ -226,10 +226,12 @@
     "notifNoSymbols": "銘柄がまだありません。先にシグナルエンジンを実行してください",
     "notifFilterHint": "両方の条件に一致したシグナルのみ通知します。例：「AIFT + 金」を選ぶと、金のAIFTシグナルのみ通知されます。「すべて」を選ぶとその条件は制限なしとなり、後から追加された銘柄も自動で対象になります。",
     "notifStrategyLabel": "戦略別",
+    "notifEconLabel": "経済指標アラート",
     "notifSymbolLabel": "銘柄別",
     "notifAll": "すべて",
     "notifEvent": {
-      "strategy_signal": "マイ戦略のシグナル"
+      "strategy_signal": "マイ戦略のシグナル",
+      "econ_alert": "重要指標の発表 30 分前"
     },
     "notifWindowHeading": "通知時間帯",
     "notifWindowEnable": "指定した時間帯のみ通知する",
@@ -2764,7 +2766,14 @@
     "thisWeek": "今週",
     "emptyDay": "この日の指標はありません。",
     "countdownDays": "{{d}}日{{h}}時間",
-    "todayTag": "今日"
+    "todayTag": "今日",
+    "ticker": {
+      "high": "重要",
+      "label": "経済指標",
+      "mixed": "速報",
+      "in": "発表まで",
+      "awaiting": "発表待ち"
+    }
   },
   "persona": {
     "closed": "トレードレポートはまだ公開されていません。お楽しみに。",
