@@ -2497,6 +2497,8 @@ class EconRelease(Base):
     has_actual = Column(Boolean, nullable=False, default=False)
     actual_seen_at = Column(DateTime, nullable=True)      # 我们第一次看到公布值的时刻 / when we first saw an actual
     check_stage = Column(Integer, nullable=False, default=0)   # 公布后补查进行到第几轮 / post-release re-check stage
+    # 红色数据公布前推过提醒的时刻（rev 54），非空就不再推 / when the pre-release alert went out (rev 54)
+    alert_sent_at = Column(DateTime, nullable=True)
     fetched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
 

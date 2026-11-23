@@ -442,7 +442,12 @@ def _hash_legacy_api_tokens() -> None:
 #          rev 53 — trading persona and monthly reports: new tables persona_states and persona_reports
 #          via create_all; agent_nodes.can_view_reports (ambassadors viewing direct customers' reports),
 #          existing rows FALSE.
-CURRENT_SCHEMA_REV = 53
+# rev 54 — 财经日历红色数据提醒（2026-11-23）：econ_releases 加 alert_sent_at（推过提醒的时刻，防重推）；
+#          新推送事件 econ_alert 默认开：已经存过事件白名单的用户（非 NULL）一次性补进 econ_alert，
+#          只在库里版本 < 54 时跑。NULL 的本来就等于全开。
+#          rev 54 — red-release alerts: econ_releases.alert_sent_at; the new econ_alert push event is on by
+#          default, so stored (non-NULL) event whitelists get it appended once, only when the stored rev < 54.
+CURRENT_SCHEMA_REV = 54
 
 _SCHEMA_REV_KEY = "schema_rev"
 
@@ -1900,6 +1905,10 @@ def _migrate_columns() -> None:
     # rev 46: lucky wheel v2 — rebuild the 5 lucky tables empty. Only when the stored revision < 46.
     _reset_lucky_wheel_rev46(applied, is_postgres, inspector)
 
+    # rev 54：财经日历红色数据提醒——alert_sent_at 列 + 已存白名单补进 econ_alert。
+    # rev 54: red-release alerts — alert_sent_at column + econ_alert added to stored whitelists.
+    _migrate_econ_alerts_rev54(applied, datetime_type, inspector)
+
     # rev 47：代理层级——链接唯一代理的索引 + 存量代理回填一级节点。
     # rev 47: agent hierarchy — one-agent-per-link index + top-level nodes for existing agents.
     _migrate_agent_tree_rev47()
@@ -1989,6 +1998,38 @@ def _reset_lucky_wheel_rev46(applied: int | None, is_postgres: bool, insp=None) 
             conn.execute(text("DELETE FROM platform_settings WHERE key = 'lucky_wheel_visible'"))
         Base.metadata.create_all(bind=conn, tables=tables)
     logger.info("rev 46：幸运轮盘 5 张表已按新结构重建（清空），全站开关行已删除")
+
+
+def _migrate_econ_alerts_rev54(applied: int | None, datetime_type: str, insp=None) -> None:
+    """rev 54：① econ_releases 加 alert_sent_at（幂等，看列在不在）；② 通知偏好里已经存过事件白名单
+    （event_types 非 NULL）的行补进 econ_alert——这个事件默认开，而白名单语义下「没写」等于关。
+    ② 只在库里版本 < 54 时跑一次：之后用户自己关掉的不能被下次启动又打开。NULL 行不动（本来就等于全开）。
+    rev 54: ① econ_releases.alert_sent_at (idempotent, by column presence); ② append econ_alert to stored
+    (non-NULL) event whitelists — the event is on by default and "absent" means off in a whitelist. ② runs
+    once, only when the stored rev < 54, so a later opt-out is never re-enabled. NULL rows already mean all-on."""
+    import json as _json
+
+    insp = insp if insp is not None else inspect(engine)
+    names = set(insp.get_table_names())
+    if "econ_releases" in names and "alert_sent_at" not in {c["name"] for c in insp.get_columns("econ_releases")}:
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE econ_releases ADD COLUMN alert_sent_at {datetime_type}"))
+    if applied is None or applied >= 54 or "notification_prefs" not in names:
+        return
+    changed = 0
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT id, event_types FROM notification_prefs WHERE event_types IS NOT NULL")).all()
+        for pid, raw in rows:
+            try:
+                events = _json.loads(raw)
+            except (ValueError, TypeError):
+                continue
+            if not isinstance(events, list) or "econ_alert" in events:
+                continue
+            conn.execute(text("UPDATE notification_prefs SET event_types = :v WHERE id = :id"),
+                         {"v": _json.dumps(events + ["econ_alert"], ensure_ascii=False), "id": pid})
+            changed += 1
+    logger.info("rev 54：%d 行通知偏好补进 econ_alert", changed)
 
 
 def _migrate_follow_ups_rev42() -> None:

@@ -34,6 +34,9 @@ SETTINGS_DEFAULTS: dict = {
     # 对用户开放（2026-11-21）：关掉后用户端接口返回空、仪表盘卡片和日历页不显示内容；管理台不受影响
     # Open to users: off = the user endpoint returns nothing (card and page go empty); admin unaffected
     "public": True,
+    # 红色数据公布前 30 分钟推送提醒（2026-11-23，rev 54）；还要求对用户开放
+    # Push an alert 30 minutes before each red release (rev 54); also requires "public"
+    "alerts": True,
 }
 
 STATUS_KEY = "econ:status"
@@ -46,7 +49,7 @@ def utcnow() -> datetime:
 
 def _clean_settings(stored: dict) -> dict:
     data = dict(SETTINGS_DEFAULTS)
-    for key in ("enabled", "previews", "public"):
+    for key in ("enabled", "previews", "public", "alerts"):
         if isinstance(stored.get(key), bool):
             data[key] = stored[key]
     countries = stored.get("countries")

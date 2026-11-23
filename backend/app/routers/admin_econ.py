@@ -30,6 +30,7 @@ class EconSettingsIn(BaseModel):
     previewMinImportance: int | None = Field(default=None, ge=rules.LOW, le=rules.HIGH)
     dailyLlmCap: int | None = Field(default=None, ge=0, le=2000)
     public: bool | None = None
+    alerts: bool | None = None
 
 
 class RegenerateIn(BaseModel):

@@ -240,10 +240,17 @@ EVENT_SUPPORT_REMINDER = "support_reminder"
 # 幸运轮盘（rev 45）：收到抽奖券、券即将作废、奖品已发放 / 已取消。点开落到 /lucky。
 # Lucky wheel (rev 45): tickets received, tickets expiring, prize delivered / cancelled; opens /lucky.
 EVENT_LUCKY_WHEEL = "lucky_wheel"
+# 财经日历红色（高影响）数据公布前 30 分钟的提醒（rev 54）。用户可在通知设置里关掉，所以不进
+# ALWAYS_ON_EVENTS；默认开靠白名单语义：NULL = 全开，已存白名单的行由 rev 54 迁移补进这一项。
+# Red (high-impact) economic release alert 30 minutes ahead (rev 54). Users can switch it off, so it is
+# not in ALWAYS_ON_EVENTS; on by default via the whitelist: NULL means all on, and rev 54 appended it to
+# stored whitelists.
+EVENT_ECON_ALERT = "econ_alert"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
     EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER, EVENT_LUCKY_WHEEL,
+    EVENT_ECON_ALERT,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知
@@ -256,7 +263,7 @@ EVENT_TYPES = {
 # they are either things the user must act on or rare positive feedback, and
 # a per-event switch only added a way to turn them off by accident. The
 # whitelist now only governs strategy_signal, the one still user-toggled event.
-ALWAYS_ON_EVENTS = EVENT_TYPES - {EVENT_STRATEGY_SIGNAL}
+ALWAYS_ON_EVENTS = EVENT_TYPES - {EVENT_STRATEGY_SIGNAL, EVENT_ECON_ALERT}
 
 # 白名单哨兵值："不限"，命中任意取值（含此刻还不存在、以后才出现的品种/类别）。
 # Whitelist sentinel meaning "unrestricted" — matches any value, including
@@ -1351,6 +1358,42 @@ def dispatch_users_push(user_ids: list[str], event_type: str, title: str, body: 
         _prune_subscriptions([sub.id for sub, (_ok, stale) in zip(subs, results) if stale])
     except Exception:
         logger.exception("[push] dispatch_users_push error (event=%s, n=%d)", event_type, len(user_ids))
+
+
+def dispatch_broadcast_push(event_type: str, title: str, body: str, url: str, tag: str) -> int:
+    """给所有允许收这类事件的用户推同一条通知（财经日历红色数据提醒），判定与取订阅批量做完再发，
+    同公告那条；此刻在线的人另走 WebSocket 兜底。返回推成功的订阅数。同步阻塞，从线程池里调。
+    Push one message to every user allowed to receive this event (red economic-release alerts), with the
+    same bulk verdicts as the announcement push plus the WebSocket fallback for whoever is online. Returns
+    the number of subscriptions reached. Blocking — call it from the thread pool."""
+    if event_type not in EVENT_TYPES:
+        return 0
+    pem = settings.vapid_private_key
+    try:
+        db = SessionLocal()
+        try:
+            ws_targets = _bulk_prefs_allow(db, list(_online_user_ids()), event_type)
+            user_ids = [row[0] for row in db.query(PushSubscription.user_id).distinct().all()]                 if pem and settings.VAPID_PUBLIC_KEY else []
+            targets = _bulk_prefs_allow(db, user_ids, event_type) if user_ids else []
+            subs_by_user = _subs_by_user(db, targets) if targets else {}
+            subs = _snapshot(sub for uid in targets for sub in subs_by_user.get(uid, []))
+        finally:
+            db.close()
+        if ws_targets:
+            _ws_fallback(ws_targets, title, body, url=url, tag=tag)
+        if not subs:
+            return 0
+        payload = json.dumps({"title": title, "body": body, "icon": "/icons/icon-192.png",
+                              "tag": tag, "url": url}, ensure_ascii=False)
+        # 半小时后就过时了：高优先级、TTL 30 分钟，送不到就别送了。
+        # Stale in half an hour: high urgency and a 30-minute TTL — late delivery is worthless.
+        results = _send_all(subs, payload, pem, {"sub": settings.VAPID_SUBJECT},
+                            {"Urgency": "high", "TTL": str(1800)})
+        _prune_subscriptions([sub.id for sub, (_ok, stale) in zip(subs, results) if stale])
+        return sum(1 for ok, _stale in results if ok)
+    except Exception:
+        logger.exception("[push] dispatch_broadcast_push error (event=%s)", event_type)
+        return 0
 
 
 # ---------- 诊断用测试推送 / diagnostic test push ----------

@@ -7,6 +7,7 @@
 4. 写预案：未来 24 小时内的中高重要度组（DeepSeek 高峰时段只写 6 小时内的），每轮最多 3 组，
    受每日调用上限约束。
 5. 公布值到了：给预案记上命中的情景（不调模型）。
+6. 红色数据公布前 30 分钟推送提醒（2026-11-23，rev 54；还要求「对用户开放」和「提醒」两个开关）。
 
 Calendar loop (leader worker only), every 30s: hourly schedule sync, post-release re-checks at
 +2/+5/+15/+60 min, previews for the next 24h (6h during DeepSeek peak hours, at most 3 per pass,
@@ -14,15 +15,18 @@ under the daily cap), and outcome stamping when actuals land. With the switch of
 sends nothing.
 """
 import asyncio
+import json
 import logging
 import time
 from datetime import datetime, timedelta
+from urllib.parse import urlencode
 
 from starlette.concurrency import run_in_threadpool
 
 from app.core.database import SessionLocal
 from app.models import EconPreview, EconRelease
-from app.services.econ import deepseek, narwhal, previews, store
+from app.services import push_dispatch
+from app.services.econ import deepseek, narwhal, previews, rules, store
 
 logger = logging.getLogger("prismx.econ")
 
@@ -112,6 +116,70 @@ def run_checks(db, cfg: dict, now: datetime) -> dict:
         fields["balance"] = balance
     store.update_status(**fields)
     return {"checked": len(due), "calls": calls}
+
+
+# 红色数据提醒：公布前 30 分钟以内、还没推过的就推（2026-11-23，rev 54）。同一时刻的几条合成一条。
+# Red-release alerts: within 30 minutes of release and not yet sent; one push per moment.
+ALERT_LEAD = timedelta(minutes=30)
+ALERT_MIN_LEFT = timedelta(minutes=2)
+ALERT_MAX_NAMES = 3
+
+
+def _alert_name(row: EconRelease, previews_by_group: dict[str, EconPreview]) -> str:
+    """推送里一项的名字：有预案就用预案的中文标题（后端没有指标中文名表），否则 Narwhal 的英文名。
+    One item's name: the preview's Chinese title when there is one (the backend has no Chinese name
+    table), else Narwhal's English name."""
+    p = previews_by_group.get(row.group_key or "")
+    if p is not None and p.status == "ok" and p.content_json:
+        try:
+            title = json.loads(p.content_json).get("title_zh")
+        except (ValueError, TypeError, AttributeError):
+            title = None
+        if isinstance(title, str) and title.strip():
+            return title.strip()
+    return row.name
+
+
+def run_alerts(db, cfg: dict, now: datetime) -> dict:
+    """红色数据公布前的推送：先在库里记上 alert_sent_at 并提交，再发——发送失败也不会重推。
+    Pre-release push for red releases: alert_sent_at is committed before sending, so a failed send
+    never repeats."""
+    if not (cfg["alerts"] and cfg["public"]):
+        return {"sent": 0}
+    rows = (db.query(EconRelease)
+            .filter(EconRelease.at.isnot(None), EconRelease.at > now + ALERT_MIN_LEFT,
+                    EconRelease.at <= now + ALERT_LEAD, EconRelease.importance >= rules.HIGH,
+                    EconRelease.status == "scheduled", EconRelease.alert_sent_at.is_(None),
+                    EconRelease.country.in_(cfg["countries"]))
+            .order_by(EconRelease.at, EconRelease.country).all())
+    if not rows:
+        return {"sent": 0}
+    keys = {r.group_key for r in rows if r.group_key}
+    previews_by_group = {p.group_key: p for p in db.query(EconPreview).filter(EconPreview.group_key.in_(keys)).all()}         if keys else {}
+    moments: dict[datetime, list[EconRelease]] = {}
+    for r in rows:
+        moments.setdefault(r.at, []).append(r)
+        r.alert_sent_at = now
+    db.commit()
+    messages = []
+    for at, members in moments.items():
+        items: list[str] = []
+        for r in members:
+            label = f"{r.currency or r.country} {_alert_name(r, previews_by_group)}"
+            if label not in items:
+                items.append(label)
+        minutes = max(1, round((at - now).total_seconds() / 60))
+        body = "、".join(items[:ALERT_MAX_NAMES])
+        if len(items) > ALERT_MAX_NAMES:
+            body += f" 等 {len(items)} 项"
+        first = members[0]
+        url = "/calendar?" + urlencode({"day": at.date().isoformat(), "focus": first.group_key or ""})
+        messages.append((f"高影响数据 {minutes} 分钟后公布", body, url, f"prismx-econ-{at:%Y%m%d%H%M}"))
+    sent = 0
+    for title, body, url, tag in messages:
+        sent += push_dispatch.dispatch_broadcast_push(push_dispatch.EVENT_ECON_ALERT, title, body, url, tag)
+    store.update_status(lastAlertAt=now.isoformat() + "Z", lastAlertMoments=len(messages), lastAlertSubs=sent)
+    return {"moments": len(messages), "sent": sent}
 
 
 WEEK_JOB_STALE = timedelta(minutes=30)
@@ -217,6 +285,11 @@ def run_once(force_sync: bool = False) -> dict:
             logger.warning("econ narwhal error: %s", exc)
             out["error"] = str(exc)
         if cfg["enabled"]:
+            try:
+                out["alerts"] = run_alerts(db, cfg, now)
+            except Exception:   # 提醒出错不能挡住预案和命中记录 / alerts must not block the rest
+                db.rollback()
+                logger.exception("econ alerts failed")
             out["outcomes"] = stamp_pending_outcomes(db, now)
             out["previews"] = run_previews(db, cfg, now)
         return out

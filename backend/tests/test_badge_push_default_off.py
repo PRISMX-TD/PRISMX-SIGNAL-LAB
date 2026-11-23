@@ -32,7 +32,8 @@ def test_empty_list_still_all_off_for_the_whitelist():
 
 
 def test_always_on_events_are_everything_but_strategy_signal():
-    assert ALWAYS_ON_EVENTS == set(EVENT_TYPES) - {EVENT_STRATEGY_SIGNAL}
+    # 财经红色数据提醒（rev 54）也能在通知设置里关 / the econ alert (rev 54) can be switched off too
+    assert ALWAYS_ON_EVENTS == set(EVENT_TYPES) - {EVENT_STRATEGY_SIGNAL, "econ_alert"}
     assert EVENT_BADGE_AWARDED in ALWAYS_ON_EVENTS and EVENT_ORDER_FILLED in ALWAYS_ON_EVENTS
 
 
