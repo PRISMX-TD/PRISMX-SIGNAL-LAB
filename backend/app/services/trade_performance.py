@@ -174,6 +174,8 @@ WINDOW_DAYS = 365
 # 约 200 行 × 20 字段（几十 KB/用户），全站并发看订单页的用户数 × 几十 KB，Redis 里可忽略。
 # 账号解绑/重绑：`winrate:{uid}:all` 与 `closed:{uid}` 在增删账号处显式失效；带 login 的
 # 单账号键最长滞后一个 TTL。upsert_leg 的补列（enriched）也会失效。
+# closed-trades 只缓存最新一页（`closed:{uid}` 全部账号 / `closed:{uid}:{login}` 单账号）；
+# 翻页取的更早的页不缓存。
 # Per-user 60s caches for the two Orders-page polls; invalidated when a new close leg
 # lands. Memory bound: entries exist only for users on the orders page and each expires
 # after 60s; a closed-trades value is ~200 rows x 20 fields (tens of KB per user).
@@ -186,8 +188,10 @@ def winrate_cache_key(user_id: str, login: str | None) -> str:
     return f"winrate:{user_id}:{login or 'all'}"
 
 
-def closed_trades_cache_key(user_id: str) -> str:
-    return f"closed:{user_id}"
+def closed_trades_cache_key(user_id: str, login: str | None = None) -> str:
+    """已平仓明细最新一页的缓存键；带 login 是单账号那一份（订单页按账号取）。
+    Cache key for the newest closed-trades page; per account when login is given."""
+    return f"closed:{user_id}:{login}" if login else f"closed:{user_id}"
 
 
 def invalidate_trade_caches(user_id: str, logins=()) -> None:
@@ -196,7 +200,9 @@ def invalidate_trade_caches(user_id: str, logins=()) -> None:
     from app.services import shared_cache
 
     keys = [winrate_cache_key(user_id, None), closed_trades_cache_key(user_id)]
-    keys.extend(winrate_cache_key(user_id, lg) for lg in {str(x) for x in logins if x})
+    for lg in {str(x) for x in logins if x}:
+        keys.append(winrate_cache_key(user_id, lg))
+        keys.append(closed_trades_cache_key(user_id, lg))
     shared_cache.delete(*keys)
 
 

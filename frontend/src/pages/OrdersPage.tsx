@@ -37,7 +37,7 @@ import { orderApi } from '../api/client'
 import { useFirstReveal } from '../utils/useFirstReveal'
 import { baseSymbol, clientOrderId, displaySymbol, fmtLots, localizeApiError, parseTime } from '../api/utils'
 import { LOCALE_TAG, currentLang } from '../i18n'
-import type { ClosedTrade, MT5Account, Order, OrderStatus, Position } from '../api/types'
+import type { MT5Account, Order, OrderStatus, Position } from '../api/types'
 import Toast from '../components/Toast'
 import { useToastState } from '../utils/useToastState'
 import ConfirmModal from '../components/ConfirmModal'
@@ -57,7 +57,7 @@ import { usePartnerBroker } from '../components/PartnerBrokerCard'
 import { symbolMeta } from '../utils/symbolMeta'
 import { formatMarginLevel } from '../components/order/orderMath'
 import { readStorage, writeStorage } from '../utils/safeStorage'
-import { usePollWhileVisible, winratePollMs } from '../utils/usePollWhileVisible'
+import { useClosedTrades } from '../utils/useClosedTrades'
 import { onRovingKeyDown } from '../utils/rovingTabs'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/orders.css'
@@ -626,36 +626,26 @@ export default function OrdersPage() {
 
   // 已平仓明细一次拉全（接口不分页），按页头选中的账号在前端过滤——与胜率卡、
   // 纪律分用的是同一份数据源，所以数字和明细永远对得上。
-  // Closed trades are fetched in full (the endpoint isn't paginated) and
-  // filtered client-side by the header's account — the same data source the
-  // win-rate card uses, so the aggregates always agree
-  // with the records shown beneath them.
-  const [trades, setTrades] = useState<ClosedTrade[] | null>(null)
+  // 2026-11-24：已平仓明细按页头选中的账号向后端取、可以一直往前翻（utils/useClosedTrades）。
+  // 以前是一次取「所有账号合计最新 200 条」再在这里按账号筛，一个账号平仓多就把另一个账号
+  // 的记录挤掉。
+  // 只在「绩效」页签才拉：唯一的消费者是那个页签里的 ClosedTradesList，停在持仓页签却定时
+  // 拉已平仓明细纯属浪费。
+  // Closed trades are fetched for the header's account and paged with no cap
+  // (utils/useClosedTrades). They used to be the newest 200 legs across every account,
+  // filtered here, so a busy account crowded the others out. Only fetched while the
+  // Performance tab is showing — its ClosedTradesList is the sole consumer.
+  const closed = useClosedTrades(selectedLogin, {
+    enabled: tab === 'performance',
+    tick: closedTradeTick,
+    wsConnected,
+  })
+  const trades = closed.trades
 
-  // 只在「绩效」页签才拉：trades 唯一的消费者是那个页签里的 ClosedTradesList，停在持仓页签
-  // 却每 45 秒全量拉一次已平仓明细纯属浪费。离开页签就停轮询并把 trades 置空，下次进入重拉。
-  // Only fetched while the Performance tab is showing: trades' sole consumer is the
-  // ClosedTradesList in that tab, so a full closed-trades pull every 45s while parked on
-  // Positions is pure waste. Leaving the tab stops the poll and clears trades so re-entry refetches.
-  useEffect(() => {
-    if (tab !== 'performance') setTrades(null)
-  }, [tab])
-  usePollWhileVisible(
-    (isCurrent) => {
-      // 把 Promise 交回去：失败时 usePollWhileVisible 记下，回前台立刻重拉。
-      // Hand the Promise back: on failure usePollWhileVisible retries on return to the foreground.
-      return orderApi.closedTrades()
-        .then((r) => { if (isCurrent()) setTrades(r.trades) })
-        .catch((e) => { if (isCurrent()) setTrades((prev) => prev ?? []); throw e })
-    },
-    () => winratePollMs(wsConnected),
-    // closedTradeTick 变化 = 后端刚记下新平仓，立刻重拉（不受 2 秒回前台去重影响）。
-    // A bumped closedTradeTick means a new close just landed — refetch now (never swallowed by the
-    // 2s return-to-foreground de-dupe).
-    [closedTradeTick],
-    { enabled: tab === 'performance' },
-  )
-
+  // 后端已经按账号给了；这层筛选只为新旧版本交错的那一小段时间（新前端 + 还没更新的后端
+  // 会忽略 login 参数，返回全部账号）。
+  // The backend already scopes by account; this guards the deploy window where an older
+  // backend ignores `login` and returns every account.
   const visibleTrades = useMemo(() => {
     if (!trades) return trades
     return selectedLogin ? trades.filter((tr) => tr.mt5Login === selectedLogin) : trades
@@ -1029,7 +1019,15 @@ export default function OrdersPage() {
               </button>
             </div>
           )}
-          <ClosedTradesList trades={visibleTrades} onShare={shareTrade} />
+          <ClosedTradesList
+            trades={visibleTrades}
+            onShare={shareTrade}
+            resetKey={selectedLogin}
+            total={closed.totalPositions}
+            hasMore={closed.hasMore}
+            loadingMore={closed.loadingMore}
+            onLoadMore={closed.loadMore}
+          />
           <ShareSheet spec={share} onClose={() => setShare(null)} />
         </>
       )}

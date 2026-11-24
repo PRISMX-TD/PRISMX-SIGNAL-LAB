@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -813,13 +814,57 @@ def order_winrate(
     return out
 
 
+# 已平仓明细一页的平仓腿数 / closing legs per closed-trades page
+CLOSED_TRADES_PAGE = 200
+
+
+def _closed_cursor(closed_at: datetime, row_id: str) -> str:
+    return f"{closed_at.isoformat()}|{row_id}"
+
+
+def _parse_closed_cursor(cursor: str) -> tuple[datetime, str]:
+    """游标 = 上一页最后一条的「平仓时间|id」。只认本接口自己发出去的格式。
+    A cursor is the previous page's last row as "closed_at|id"."""
+    at, sep, row_id = cursor.partition("|")
+    try:
+        when = datetime.fromisoformat(at)
+    except ValueError:
+        when = None
+    if when is None or not sep or not row_id:
+        raise HTTPException(status_code=400, detail="翻页游标无效 / Invalid cursor")
+    if when.tzinfo is not None:
+        when = when.astimezone(timezone.utc).replace(tzinfo=None)
+    return when, row_id
+
+
 @router.get("/closed-trades", response_model=dict)
 def list_closed_trades(
+    login: str | None = None,
+    cursor: str | None = None,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """当前用户的真实平仓成交明细，最新在前，限定当前仍绑定的账号（已删除的
     旧账号不再出现；重新绑回后自动恢复，记录从不删除）。只有自己能看到自己的。
+
+    分页（2026-11-24）：以前固定取「所有账号合计最新 200 条」，前端再按账号筛，
+    一个账号平仓多就把另一个账号的记录挤出这 200 条——真实账号 166 条只显示得出 5 条。
+    现在：
+    - login：只取这一个账号（必须是自己名下的，否则 404）。不传 = 名下全部账号，
+      留给还没更新的旧客户端。
+    - cursor：上一页返回的 nextCursor，取更早的一页；不传 = 最新一页。
+    - 每页 CLOSED_TRADES_PAGE 条平仓腿，nextCursor 为 null 表示到头了。
+    - 一个仓位分批平仓时各腿可能跨页。本页出现的仓位，把它落在后面页里的腿也一并
+      带上，这样前端合成的每一行（手数 / 盈亏相加）从一开始就是完整的；下一页会再
+      返回这些腿，前端按 id 去重。
+    - 第一页带 totalPositions（该范围内的仓位总数），给分页器显示总页数。
+
+    Paged per account. The old fixed "newest 200 legs across every account" let
+    one busy account crowd another out of the window. `login` narrows to one
+    account, `cursor` (a previous `nextCursor`) fetches the next older page, and
+    `nextCursor` is null at the end. Legs of a position on this page that fall
+    on later pages are appended so each assembled row is complete from the
+    start; the client de-dupes by id. The first page carries `totalPositions`.
 
     与个人跟单胜率同一份数据源（ClosedTrade），但这里给出逐笔记录而非聚合
     数字——"透明度"承诺不能只停在一个百分比上，用户应该能看到构成这个百分比
@@ -835,25 +880,58 @@ def list_closed_trades(
     promise shouldn't stop at a single percentage; the user should be able to
     see every real fill that number is built from.
     """
-    key = closed_trades_cache_key(user.id)
-    hit = shared_cache.get_json(key)
-    if hit is not None:
-        return hit
+    cursor = cursor or None
+    before = _parse_closed_cursor(cursor) if cursor else None
+    # 只缓存最新一页（订单页轮询的就是它）；更早的页是用户翻到才取，不缓存。
+    # Only the newest page is cached (it is what the Orders page polls).
+    key = closed_trades_cache_key(user.id, login)
+    if before is None:
+        hit = shared_cache.get_json(key)
+        if hit is not None:
+            return hit
     bound = _bound_logins(db, user.id)
+    if login is not None and login not in bound:
+        raise HTTPException(status_code=404, detail="账号不存在 / Account not found")
     # 只取用到的列，不拉整行 ORM 对象 / only the columns actually serialised
     C = ClosedTrade
-    rows = (
-        db.query(
-            C.id, C.mt5_login, C.symbol, C.side, C.close_volume, C.close_price, C.profit,
-            C.position_ticket, C.deal_ticket, C.closed_at, C.open_time, C.open_price,
-            C.gross_profit, C.commission, C.swap, C.sl, C.tp, C.reason, C.comment,
-        )
-        .filter(C.user_id == user.id, C.mt5_login.in_(bound))
-        .order_by(C.closed_at.desc())
-        .limit(200)
-        .all()
+    cols = (
+        C.id, C.mt5_login, C.symbol, C.side, C.close_volume, C.close_price, C.profit,
+        C.position_ticket, C.deal_ticket, C.closed_at, C.open_time, C.open_price,
+        C.gross_profit, C.commission, C.swap, C.sl, C.tp, C.reason, C.comment,
     )
+    scope = (C.user_id == user.id, C.mt5_login.in_([login] if login is not None else bound))
+    # 排序带上 id：同一秒平掉的几条腿顺序固定，翻页才不会漏或重。
+    # id breaks ties so legs closed in the same second page deterministically.
+    newest_first = (C.closed_at.desc(), C.id.desc())
+
+    def older_than(at: datetime, row_id: str):
+        return or_(C.closed_at < at, and_(C.closed_at == at, C.id < row_id))
+
+    query = db.query(*cols).filter(*scope)
+    if before is not None:
+        query = query.filter(older_than(*before))
+    rows = query.order_by(*newest_first).limit(CLOSED_TRADES_PAGE + 1).all()
+    next_cursor = None
+    if len(rows) > CLOSED_TRADES_PAGE:
+        rows = rows[:CLOSED_TRADES_PAGE]
+        last = rows[-1]
+        next_cursor = _closed_cursor(last.closed_at, last.id)
+        # 本页仓位落在后面页里的腿。仓位号只在单个账号内唯一，所以按 (账号, 仓位号) 再筛一遍。
+        # Later-page legs of this page's positions; tickets are per-account, hence the pair check.
+        positions = {(r.mt5_login, r.position_ticket) for r in rows}
+        tail = (
+            db.query(*cols)
+            .filter(
+                *scope,
+                C.position_ticket.in_({ticket for _login, ticket in positions}),
+                older_than(last.closed_at, last.id),
+            )
+            .order_by(*newest_first)
+            .all()
+        )
+        rows.extend(r for r in tail if (r.mt5_login, r.position_ticket) in positions)
     out = {
+        "nextCursor": next_cursor,
         "trades": [
             {
                 "id": r.id,
@@ -881,7 +959,11 @@ def list_closed_trades(
             for r in rows
         ]
     }
-    shared_cache.set_json(key, out, TRADE_CACHE_TTL)
+    if before is None:
+        out["totalPositions"] = (
+            db.query(C.mt5_login, C.position_ticket).filter(*scope).distinct().count()
+        )
+        shared_cache.set_json(key, out, TRADE_CACHE_TTL)
     return out
 
 

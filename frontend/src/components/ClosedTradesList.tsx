@@ -8,6 +8,8 @@
 // 对应格子显示"—"，等通道回扫补齐后自动出现。
 //
 // 纯展示组件：数据获取与账号选择由 OrdersPage 持有，这里只负责渲染 + 分页。
+// 记录按账号分页取回（utils/useClosedTrades）：这里拿到的是已取回的部分，翻到末尾附近
+// 时通过 onLoadMore 要更早的一页，没有条数上限。
 //
 // Closed-trade history in MT5's "positions" layout: one row per position with
 // the same columns MT5 shows, expandable to the individual closing legs, deal
@@ -28,6 +30,16 @@ interface Props {
   trades: ClosedTrade[] | null // null = 加载中 / loading
   // 点「分享」时回调这一仓位（不传就不显示按钮）/ called with the position when Share is tapped (no button if omitted)
   onShare?: (row: PositionRow) => void
+  // ---- 按账号分页（2026-11-24，数据源见 utils/useClosedTrades）----
+  // trades 只是「已经取回来的那部分」，更早的记录翻到末尾附近时再取。
+  // `trades` is only what has been fetched so far; older legs load as the user nears the end.
+  /** 换了它就回到第一页（当前账号）/ changing it returns to page one (the current account) */
+  resetKey?: string | null
+  /** 该账号的仓位总数；还有没取回的记录时，页数按它算 / position count, used while more remain */
+  total?: number | null
+  hasMore?: boolean
+  loadingMore?: boolean
+  onLoadMore?: (manual?: boolean) => void
 }
 
 /** 一个仓位 = 同一账号同一仓位号下的全部平仓腿（最新在前）。
@@ -135,19 +147,68 @@ const money = (n: number | null | undefined): string => (n == null ? DASH : `${n
 const price = (n: number | null | undefined): string => (n == null ? DASH : String(n))
 const pnlClass = (n: number | null | undefined): string => (n == null ? 'text-neutral-500' : n >= 0 ? 'text-up' : 'text-down')
 
-export default function ClosedTradesList({ trades, onShare }: Props) {
+export default function ClosedTradesList({
+  trades, onShare, resetKey = null, total = null, hasMore = false, loadingMore = false, onLoadMore,
+}: Props) {
   const { t } = useTranslation()
   const [page, setPage] = useState(0)
   const [open, setOpen] = useState<string | null>(null)
+  // 用户在已加载的最后一页按了「下一页」，更早的那页还在路上：取回来就翻过去。
+  // Next was pressed on the last loaded page while the older page is still in flight.
+  const [pendingNext, setPendingNext] = useState(false)
 
   const rows = useMemo(() => groupPositions(trades ?? []), [trades])
 
-  // 记录集合变化（含账号切换）时回到第一页并收起展开 / reset on record-set change
-  useEffect(() => { setPage(0); setOpen(null) }, [trades])
+  // 换账号时回到第一页并收起展开。以前是跟着 trades 变——可轮询刷新、往前取更早的页都会
+  // 换一个数组，翻到第 5 页的人每次刷新都被弹回第 1 页。
+  // Reset on account switch only. Keying this on `trades` bounced the user back to page
+  // one on every poll refresh, and would on every older page loaded.
+  useEffect(() => { setPage(0); setOpen(null); setPendingNext(false) }, [resetKey])
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
-  const safePage = Math.min(page, totalPages - 1)
+  // loadedPages：手里已有的页数；totalPages：算上还没取回的，给分页器显示。
+  // loadedPages is what is in hand; totalPages includes what is still on the server.
+  const loadedPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
+  const safePage = Math.min(page, loadedPages - 1)
   const pageRows = rows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
+  const totalRows = hasMore ? Math.max(total ?? 0, rows.length) : rows.length
+  // 后端没给总数（或给少了）时也得让「下一页」按得动，否则已加载的末尾就成了死胡同。
+  // Without a usable total, still leave Next enabled so the loaded end is not a dead end.
+  const totalPages = hasMore && total == null
+    ? loadedPages + 1
+    : Math.max(loadedPages, Math.ceil(totalRows / PAGE_SIZE))
+
+  // 离已加载的末尾只剩一页时，悄悄把更早的一页取回来，正常翻页感觉不到停顿。
+  // Prefetch the next older page when within one page of the loaded end.
+  useEffect(() => {
+    if (hasMore && !loadingMore && safePage + 2 >= loadedPages) onLoadMore?.(false)
+  }, [hasMore, loadingMore, safePage, loadedPages, onLoadMore])
+
+  // 等的那页到了就翻过去；加载结束还是没有（失败 / 到头）就不等了。
+  // Advance once the awaited page arrives; stop waiting if the load ended without it.
+  useEffect(() => {
+    if (!pendingNext) return
+    if (safePage + 1 < loadedPages) {
+      setPage(safePage + 1)
+      setPendingNext(false)
+    } else if (!loadingMore) {
+      setPendingNext(false)
+    }
+  }, [pendingNext, safePage, loadedPages, loadingMore])
+
+  const goPrev = () => {
+    setPendingNext(false)
+    setPage(Math.max(0, safePage - 1))
+  }
+  const goNext = () => {
+    if (safePage + 1 < loadedPages) {
+      setPage(safePage + 1)
+      // 用户主动翻页：上次预取失败过的话，这里重试 / a manual page turn retries a failed prefetch
+      if (hasMore && safePage + 3 >= loadedPages) onLoadMore?.(true)
+    } else if (hasMore) {
+      setPendingNext(true)
+      onLoadMore?.(true)
+    }
+  }
 
   const reasonLabel = (r: string | null): string => (r ? t(`orders.closed.reason.${r}`, { defaultValue: r }) : DASH)
   const sideTag = (side: 'BUY' | 'SELL') => (
@@ -329,9 +390,10 @@ export default function ClosedTradesList({ trades, onShare }: Props) {
             <Pager
               page={safePage}
               totalPages={totalPages}
-              total={rows.length}
-              onPrev={() => setPage((p) => Math.max(0, p - 1))}
-              onNext={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+              total={totalRows}
+              onPrev={goPrev}
+              onNext={goNext}
+              loading={pendingNext && loadingMore}
             />
           )}
         </>

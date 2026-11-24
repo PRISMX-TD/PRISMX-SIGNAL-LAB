@@ -949,7 +949,19 @@ export const orderApi = {
   // login: narrow to one account (the Orders page's account tab); omitted scopes to all currently-bound accounts.
   winrate: (login?: string) =>
     request<PersonalWinRate>(`/orders/winrate${login ? `?login=${encodeURIComponent(login)}` : ''}`),
-  closedTrades: () => request<{ trades: ClosedTrade[] }>('/orders/closed-trades'),
+  // 已平仓明细，按账号分页：login 只取这一个账号；cursor 传上一页的 nextCursor 取更早的一页，
+  // 不传是最新一页（只有它带 totalPositions）。nextCursor 为 null = 到头了。
+  // Closed legs, paged per account: `cursor` (a previous nextCursor) fetches the next older page;
+  // the newest page alone carries totalPositions. A null nextCursor means the end.
+  closedTrades: (opts: { login?: string; cursor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (opts.login) qs.set('login', opts.login)
+    if (opts.cursor) qs.set('cursor', opts.cursor)
+    const q = qs.toString()
+    return request<{ trades: ClosedTrade[]; nextCursor?: string | null; totalPositions?: number }>(
+      `/orders/closed-trades${q ? `?${q}` : ''}`,
+    )
+  },
   // 某品种现在能不能下单（按 MT5 交易时段；休市时 nextOpenAt 是预计开盘时间）。
   // Whether the symbol can be traded now (MT5 trade sessions; nextOpenAt when closed).
   marketStatus: (symbol: string) =>
