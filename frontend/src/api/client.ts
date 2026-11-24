@@ -308,8 +308,9 @@ export interface ApiRequestInit extends RequestInit {
   /** 毫秒；0 或负数表示不设超时 / milliseconds; 0 or negative disables the timeout */
   requestTimeoutMs?: number
   /** 带幂等号（clientOrderId）的写请求：连接级失败（TypeError）时可安全重发一次，
-   *  后端按 clientOrderId 去重。 / Idempotent write (carries clientOrderId): safe to resend once
-   *  after a connection-level failure. */
+   *  后端按 clientOrderId 去重。登录也标这个：重发没有副作用。
+   *  Idempotent write (carries clientOrderId): safe to resend once after a connection-level
+   *  failure. Login sets it too — resending has no side effect. */
   idempotent?: boolean
   /** 显式指定本次请求用的 token（不读当前登录态）。登出时用旧 token 通知后端删推送订阅：
    *  那时本地 token 已清。 / Use this token instead of the current session's — logout uses it to
@@ -654,10 +655,18 @@ export const authApi = {
   // Resend the verification mail to the caller's own address (hourly cap → 429).
   resendVerification: () =>
     request<{ message: string }>('/auth/verify-email/resend', { method: 'POST' }),
+  // idempotent：登录重发一次没有副作用（不建数据，只是再验一次密码）。登录往往是被封地区 /
+  // 刚换网络的用户发出的第一个请求——原来连不上就直接把 "Failed to fetch" 抛给用户，要他
+  // 自己再点一次才用得上后台探测出来的入口；现在同一次点击里换入口重发。
+  // idempotent: resending a login has no side effect (nothing is created, the password is just
+  // checked again). Login is often the very first request from a blocked region or a network
+  // that just changed; it used to surface "Failed to fetch" and need a second tap to use the
+  // entry the background probe found. Now the same tap fails over and resends.
   login: (email: string, password: string) =>
     request<{ token: string; user: User }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
+      idempotent: true,
     }),
   google: (credential: string) =>
     request<{ token: string; user: User }>('/auth/google', {

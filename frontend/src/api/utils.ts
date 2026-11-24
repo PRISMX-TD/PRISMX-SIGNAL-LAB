@@ -20,7 +20,27 @@ export function clientOrderId(): string {
 // bilingual shape requires the first half to actually contain CJK characters,
 // so an ordinary English message that happens to contain " / " (a fraction, a
 // path) isn't mistakenly split. Falls back to the raw string otherwise.
+// 浏览器对「请求没发出去 / 没拿到任何响应」的原话：Chromium（含安卓 App 的 WebView）是
+// Failed to fetch，Firefox 是 NetworkError when attempting to fetch resource.，Safari 是
+// Load failed（旧版 The network connection was lost. 等）。整句匹配，不碰后端自己的报错。
+// The browsers' own wording for "the request never got a response": Chromium (the Android
+// App's WebView included) says Failed to fetch, Firefox NetworkError when attempting to fetch
+// resource., Safari Load failed (older: The network connection was lost.). Whole-string
+// matches only, so backend messages are never touched.
+const NETWORK_ERROR_RE =
+  /^(?:Failed to fetch|NetworkError when attempting to fetch resource\.?|Load failed|Network request failed|The network connection was lost\.?|The Internet connection appears to be offline\.?)$/i
+
+/** 这句报错是不是浏览器的「网络连不上」原话 / whether the message is a browser network-failure string */
+export function isNetworkErrorMessage(message: string): boolean {
+  return NETWORK_ERROR_RE.test(message.trim())
+}
+
 export function localizeApiError(message: string): string {
+  // 网络层失败：浏览器只给一句英文原话（2026-11-23 用户在 App 登录页看到的就是裸的
+  // "Failed to fetch"），换成界面语言的说明。
+  // Network-level failure: the browser only gives its own English wording (a user saw a bare
+  // "Failed to fetch" on the App's login page on 2026-11-23); say it in the UI language.
+  if (isNetworkErrorMessage(message)) return String(i18n.t('common.networkError'))
   // 网关「组没有开通」的旧原文（2026-11-16 之前落库的拒单）：带错误码和组名，换成人话。
   // The gateway's old raw "group doesn't offer X" wording (rows stored before 2026-11-16).
   const missing = /所在组\([^)]*\)\s*没有开通\s*([A-Za-z0-9]+)/.exec(message)

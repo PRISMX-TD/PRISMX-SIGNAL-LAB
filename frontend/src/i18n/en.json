@@ -62,6 +62,7 @@
     "close": "Close",
     "retry": "Retry",
     "loadFailed": "Couldn't load this",
+    "networkError": "Couldn't reach the server. Check your connection and try again",
     "errorBoundary": {
       "title": "Something went wrong on this page",
       "desc": "The page hit an error while rendering. Your account and positions are unaffected. Reload to continue.",

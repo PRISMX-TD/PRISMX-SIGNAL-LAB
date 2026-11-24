@@ -169,6 +169,56 @@ describe('request(): network layer', () => {
     expect(n).toBe(1)
   })
 
+  // 2026-11-23：用户在 App 登录页看到裸的 "Failed to fetch"。登录重发没有副作用，所以和
+  // 幂等写请求一样：探测出能用的入口就在同一次点击里重发。
+  // A user saw a bare "Failed to fetch" on the App's login page. Resending a login is
+  // harmless, so it behaves like an idempotent write: fail over and resend within the same tap.
+  it('登录遇到 TypeError 且探测切换了入口：同一次调用用新入口重发', async () => {
+    const { api, base } = await load()
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/')) return probeAnswer(url, [BACKUP])
+      urls.push(url)
+      if (url.startsWith(MAIN)) throw new TypeError('Failed to fetch')
+      return json({ token: 'T', user: { id: 'u1' } })
+    }))
+    const p = api.authApi.login('a@b.c', 'password1')
+    await vi.advanceTimersByTimeAsync(100)
+    await expect(p).resolves.toMatchObject({ token: 'T' })
+    expect(base.API_BASE).toBe(BACKUP)
+    expect(urls).toEqual([`${MAIN}/api/auth/login`, `${BACKUP}/api/auth/login`])
+  })
+
+  it('登录遇到 TypeError 且入口没切换：800ms 后重发一次，还不通才报错', async () => {
+    const { api } = await load()
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/')) throw new TypeError('down')
+      n += 1
+      throw new TypeError('Failed to fetch')
+    }))
+    const settled = api.authApi.login('a@b.c', 'password1').then(() => 'ok', (e: Error) => e.message)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(await settled).toBe('Failed to fetch')
+    expect(n).toBe(2)
+  })
+
+  it('注册不是幂等的：遇到 TypeError 不重发', async () => {
+    const { api } = await load()
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.endsWith('/')) return probeAnswer(url, [BACKUP])
+      n += 1
+      throw new TypeError('Failed to fetch')
+    }))
+    const settled = api.authApi
+      .register('a@b.c', 'password1', '+86', '13800000000')
+      .then(() => 'ok', (e: Error) => e.name)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(await settled).toBe('TypeError')
+    expect(n).toBe(1)
+  })
+
   it('HTTP 错误是「拿到了响应」：不重发，且 hasHttpResponse 为真', async () => {
     const { api } = await load()
     let n = 0

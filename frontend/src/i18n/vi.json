@@ -62,6 +62,7 @@
     "close": "Đóng",
     "retry": "Thử lại",
     "loadFailed": "Không tải được",
+    "networkError": "Không kết nối được máy chủ. Hãy kiểm tra mạng rồi thử lại",
     "errorBoundary": {
       "title": "Trang này gặp sự cố",
       "desc": "Trang bị lỗi khi hiển thị. Tài khoản và vị thế của bạn không bị ảnh hưởng. Tải lại để tiếp tục.",
