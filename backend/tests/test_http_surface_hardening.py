@@ -152,3 +152,20 @@ def test_vercel_preview_origins(origin, allowed):
     )
 
     assert (res.headers.get("access-control-allow-origin") == origin) is allowed
+
+
+def test_preview_regex_survives_env_regex():
+    """服务器 .env 里配了 CORS_ORIGIN_REGEX 也不能把预览放行盖掉（2026-11-25 线上就是这样漏的）。
+    A CORS_ORIGIN_REGEX in the server's .env must not override the preview allowance."""
+    import re
+
+    from app.core.config import settings
+    from app.main import cors_origin_regex
+
+    merged = cors_origin_regex(r"^https://fixed\.example\.com$", settings.CORS_PREVIEW_ORIGIN_REGEX)
+    rx = re.compile(merged)
+    assert rx.fullmatch("https://fixed.example.com")
+    assert rx.fullmatch("https://prismx-signal-abc-prism-xs-projects-40ae1c34.vercel.app")
+    assert not rx.fullmatch("https://evil.vercel.app")
+    assert cors_origin_regex(None, "") is None
+    assert cors_origin_regex("", settings.CORS_PREVIEW_ORIGIN_REGEX) == f"(?:{settings.CORS_PREVIEW_ORIGIN_REGEX})"
