@@ -478,6 +478,9 @@
   .pt-menu-item:hover { background: var(--pt-fill-hi); }
 }
 .pt-menu-item:active { background: var(--pt-sel); }
+/* 勾选项：勾只在开着时显示 / checkable items: the tick shows only when on */
+.pt-menu-item.pt-check > svg { opacity: 0; color: var(--purple-hi); }
+.pt-menu-item.pt-check.on > svg { opacity: 1; }
 
 /* ── 右侧面板 / side panel ── */
 .pt-panel {
@@ -584,6 +587,10 @@
   color: var(--text-3);
   font: 500 11.5px/1 var(--pt-font);
 }
+/* 列设置关掉的列不占格 / columns turned off in the list settings take no track */
+.pt-wl.no-tr .pt-wl-cols, .pt-wl.no-tr .pt-wr { grid-template-columns: minmax(0, 1fr) minmax(76px, auto) 24px; }
+.pt-wl.no-px .pt-wl-cols, .pt-wl.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 46px 24px; }
+.pt-wl.no-tr.no-px .pt-wl-cols, .pt-wl.no-tr.no-px .pt-wr { grid-template-columns: minmax(0, 1fr) 24px; }
 .pt-wl-cols .c-tr { text-align: center; }
 .pt-wl-cols .c-px { text-align: right; }
 .pt-wl-down { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin: 0; padding: 7px 12px; background: var(--mid-bg); color: var(--mid); font-size: 12px; }

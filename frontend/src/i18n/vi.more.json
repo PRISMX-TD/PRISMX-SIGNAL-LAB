@@ -1970,7 +1970,10 @@
         "symbol": "Mã",
         "trend": "Xu hướng",
         "last": "Giá",
-        "other": "Khác"
+        "other": "Khác",
+        "settings": "Cài đặt danh sách",
+        "showTrend": "Hiện xu hướng",
+        "showPrice": "Hiện giá"
       },
       "rail": {
         "secLines": "Đường xu hướng",

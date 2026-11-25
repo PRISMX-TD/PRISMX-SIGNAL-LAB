@@ -1970,7 +1970,10 @@
         "symbol": "Symbol",
         "trend": "Trend",
         "last": "Last",
-        "other": "Other"
+        "other": "Other",
+        "settings": "List settings",
+        "showTrend": "Show trend",
+        "showPrice": "Show price"
       },
       "rail": {
         "secLines": "Trend lines",

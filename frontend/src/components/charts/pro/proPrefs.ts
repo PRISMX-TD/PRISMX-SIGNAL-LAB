@@ -22,6 +22,9 @@ export interface ProPrefs {
   dockH: number
   // 专注模式：收起画线竖轨、右侧面板与交易面板 / focus mode: hide the rail, side panel and trading panel
   focus: boolean
+  // 自选表显示哪些列：趋势格、最新价 / which watchlist columns show: trend cells, last price
+  wlTrend: boolean
+  wlPrice: boolean
 }
 
 export const PANEL_MIN = 260
@@ -36,6 +39,8 @@ export const DEFAULT_PRO_PREFS: ProPrefs = {
   dockOpen: true,
   dockH: 220,
   focus: false,
+  wlTrend: true,
+  wlPrice: true,
 }
 
 const clamp = (v: unknown, d: number, lo: number, hi: number) =>
@@ -51,6 +56,8 @@ export function normalizeProPrefs(raw: unknown): ProPrefs {
     dockOpen: typeof r.dockOpen === 'boolean' ? r.dockOpen : d.dockOpen,
     dockH: clamp(r.dockH, d.dockH, DOCK_MIN, DOCK_MAX),
     focus: typeof r.focus === 'boolean' ? r.focus : d.focus,
+    wlTrend: typeof r.wlTrend === 'boolean' ? r.wlTrend : d.wlTrend,
+    wlPrice: typeof r.wlPrice === 'boolean' ? r.wlPrice : d.wlPrice,
   }
 }
 

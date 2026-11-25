@@ -1970,7 +1970,10 @@
         "symbol": "品种",
         "trend": "趋势",
         "last": "最新价",
-        "other": "其他"
+        "other": "其他",
+        "settings": "列表设置",
+        "showTrend": "显示趋势",
+        "showPrice": "显示报价"
       },
       "rail": {
         "secLines": "趋势线",

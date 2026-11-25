@@ -2,6 +2,7 @@
 //   分类胶囊（全部 / 自选 / 外汇 / 商品…，可切到筛选框）· 列头（商品 · 趋势 · 最新价）·
 //   「全部」下按分类分组，组头可折叠并显示数量 · 每行：圆形头像 + 代码、五格多周期趋势
 //   （M5 / M15 / M30 / H1 / H4，信号页同一份 trends 数据）、跳价闪色的价格、星标。
+// 顶部齿轮是列表设置：趋势列、报价列可各自关掉（存进专业版偏好 wlTrend / wlPrice）。
 // 键盘：焦点在列表里时 ↑ / ↓ 直接切换主图品种（TradingView 要点鼠标）。
 // 跳价与经典版一样走跳价簿（watchTicks）：每行只订阅自己的品种，面板本身不随报价重渲染。
 // The pro terminal's watchlist (a TradingView-style quote table replacing the classic card
@@ -22,7 +23,9 @@ import { SYMBOL_CATEGORIES, symbolCategory, type SymbolCategory } from '../../..
 import { EMPTY } from '../../../utils/format'
 import { FavoriteStar, useSymbolTabs } from '../../signals/SymbolTabs'
 import { createWatchTicks, type WatchTicks } from '../watchTicks'
-import { IcChevron, IcClose, IcSearch, IcWifiOff } from './icons'
+import ChartPopover from '../ChartPopover'
+import { IcCheck, IcChevron, IcClose, IcGear, IcSearch, IcWifiOff } from './icons'
+import { useProPrefs } from './proPrefs'
 
 interface Props {
   symbols: string[]
@@ -59,6 +62,13 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   const [shut, setShut] = useState<ReadonlySet<SymbolCategory>>(() => new Set())
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  // 列设置：趋势、报价可各自关掉（存进专业版偏好，跨设备跟着账户走）
+  // Column settings: trend and price can each be turned off (stored in the pro prefs)
+  const [prefs, setPrefs] = useProPrefs()
+  const showTrend = prefs.wlTrend
+  const showPrice = prefs.wlPrice
+  const gearRef = useRef<HTMLButtonElement>(null)
+  const [menu, setMenu] = useState(false)
 
   const q = query.trim().toUpperCase()
   const rows = q ? symbols.filter((s) => s.toUpperCase().includes(q) || displaySymbol(s).toUpperCase().includes(q)) : visible
@@ -116,6 +126,8 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
       trend={trends[sym]}
       digits={digitsFor(sym)}
       active={sym === active}
+      showTrend={showTrend}
+      showPrice={showPrice}
       favEnabled={favEnabled}
       fav={favSet.has(sym)}
       onSelect={onSelect}
@@ -124,7 +136,7 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   )
 
   return (
-    <div className={`pt-wl ${quotesDown ? 'down' : ''}`}>
+    <div className={`pt-wl ${quotesDown ? 'down' : ''} ${showTrend ? '' : 'no-tr'} ${showPrice ? '' : 'no-px'}`}>
       <div className="pt-wl-top">
         {searching ? (
           <label className="pt-wl-search">
@@ -157,13 +169,31 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
             <button type="button" className="pt-icon sm" onClick={() => setSearching(true)} title={tt('charts.watchlist.searchLabel')} aria-label={tt('charts.watchlist.searchLabel')}>
               <IcSearch size={14} />
             </button>
+            <button
+              ref={gearRef}
+              type="button"
+              className={`pt-icon sm ${menu ? 'on' : ''}`}
+              onClick={() => setMenu((v) => !v)}
+              title={tt('charts.pro.wl.settings')}
+              aria-label={tt('charts.pro.wl.settings')}
+              aria-haspopup="menu"
+              aria-expanded={menu}
+            >
+              <IcGear size={14} />
+            </button>
+            <ChartPopover open={menu} onClose={() => setMenu(false)} anchorRef={gearRef} width={200} align="end" label={tt('charts.pro.wl.settings')} className="pt-menu">
+              <div className="pt-menu-list" role="menu">
+                <CheckItem label={tt('charts.pro.wl.showTrend')} on={showTrend} onToggle={() => setPrefs({ wlTrend: !showTrend })} />
+                <CheckItem label={tt('charts.pro.wl.showPrice')} on={showPrice} onToggle={() => setPrefs({ wlPrice: !showPrice })} />
+              </div>
+            </ChartPopover>
           </>
         )}
       </div>
       <div className="pt-wl-cols" aria-hidden>
         <span>{tt('charts.pro.wl.symbol')}</span>
-        <span className="c-tr" title={TFS.join(' · ')}>{tt('charts.pro.wl.trend')}</span>
-        <span className="c-px">{tt('charts.pro.wl.last')}</span>
+        {showTrend && <span className="c-tr" title={TFS.join(' · ')}>{tt('charts.pro.wl.trend')}</span>}
+        {showPrice && <span className="c-px">{tt('charts.pro.wl.last')}</span>}
         <span />
       </div>
       {quotesDown && <p className="pt-wl-down"><IcWifiOff size={13} />{tt('charts.quotesDown')}</p>}
@@ -192,19 +222,31 @@ export default function ProWatchlist({ symbols, active, onSelect, digitsFor, quo
   )
 }
 
-const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, favEnabled, fav, onSelect, onToggleFav }: {
+function CheckItem({ label, on, onToggle }: { label: string; on: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" role="menuitemcheckbox" aria-checked={on} className={`pt-menu-item pt-check ${on ? 'on' : ''}`} onClick={onToggle}>
+      <span>{label}</span>
+      <IcCheck size={16} />
+    </button>
+  )
+}
+
+const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, showTrend, showPrice, favEnabled, fav, onSelect, onToggleFav }: {
   sym: string
   ticks: WatchTicks
   trend: Trend | undefined
   digits: number
   active: boolean
+  showTrend: boolean
+  showPrice: boolean
   favEnabled: boolean
   fav: boolean
   onSelect: (symbol: string) => void
   onToggleFav: (symbol: string) => void
 }) {
   const { t } = useTranslation()
-  const subscribe = useCallback((cb: () => void) => ticks.subscribe(sym, cb), [ticks, sym])
+  // 报价列关掉时不订阅跳价，行不再随报价重渲染 / with the price column off, skip tick subscriptions
+  const subscribe = useCallback((cb: () => void) => (showPrice ? ticks.subscribe(sym, cb) : () => {}), [ticks, sym, showPrice])
   const get = useCallback(() => ticks.get(sym), [ticks, sym])
   const { bid, dir } = useSyncExternalStore(subscribe, get, get)
   const meta = symbolMeta(sym)
@@ -219,13 +261,15 @@ const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, fav
           {sym}
         </button>
       </span>
-      <span className="pt-wr-tr" title={trendTip} aria-label={trendTip}>
-        {TFS.map((tf) => {
-          const d = tfs?.[tf]
-          return <i key={tf} className={d === 'UP' ? 'up' : d === 'DOWN' ? 'dn' : ''} />
-        })}
-      </span>
-      <span className={`pt-wr-px ${dir ?? ''}`}>{bid == null ? EMPTY : bid.toFixed(digits)}</span>
+      {showTrend && (
+        <span className="pt-wr-tr" title={trendTip} aria-label={trendTip}>
+          {TFS.map((tf) => {
+            const d = tfs?.[tf]
+            return <i key={tf} className={d === 'UP' ? 'up' : d === 'DOWN' ? 'dn' : ''} />
+          })}
+        </span>
+      )}
+      {showPrice && <span className={`pt-wr-px ${dir ?? ''}`}>{bid == null ? EMPTY : bid.toFixed(digits)}</span>}
       <span className="pt-wr-fav">{favEnabled && <FavoriteStar on={fav} onToggle={() => onToggleFav(sym)} symbol={sym} />}</span>
     </li>
   )
