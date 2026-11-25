@@ -1006,8 +1006,8 @@
         "align": "标签位置",
         "align_left": "靠左",
         "align_right": "靠右",
-        "executions": "成交标记",
-        "executionsHint": "在 K 线上标出开仓、平仓的位置",
+        "executions": "交易历史",
+        "executionsHint": "用虚线连接每笔交易的开仓点和平仓点",
         "buttons": "买卖按钮",
         "buttonsHint": "图例下方显示卖价 / 买价按钮（手机只在全屏时显示）",
         "oneClick": "一键下单",
@@ -1078,7 +1078,6 @@
     },
     "trade": {
       "pts": "点",
-      "execFills": "{{n}} 笔",
       "noAccount": "没有在线的交易账户，连上账户后才能在图上下单",
       "quotesDown": "行情连接中断，暂时不能下单",
       "oneClickOn": "一键下单已开启",

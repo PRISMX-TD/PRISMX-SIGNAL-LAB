@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  autoEntryType, barOf, canBreakeven, fmtSigned, groupExecutions, moveReadout, partialVolume, pointSize, stagedLegPrice,
+  autoEntryType, barOf, canBreakeven, fmtSigned, moveReadout, placeLegs, partialVolume, pointSize, stagedLegPrice,
 } from './tradeMath'
 
 describe('moveReadout', () => {
@@ -79,19 +79,19 @@ describe('executions', () => {
     expect(barOf(times, 250)).toBe(200)
     expect(barOf(times, 9999)).toBe(400)
   })
-  it('groups same bar + side with a volume-weighted price', () => {
-    const g = groupExecutions([
-      { t: 210, price: 10, side: 'BUY', kind: 'open', volume: 1 },
-      { t: 290, price: 13, side: 'BUY', kind: 'open', volume: 2 },
-      { t: 250, price: 12, side: 'SELL', kind: 'close', volume: 1, profit: 5 },
-      { t: 10, price: 12, side: 'SELL', kind: 'close', volume: 1 },
+  it('placeLegs maps both ends to bars and keeps open trades entry-only', () => {
+    const p = placeLegs([
+      { side: 'BUY', t1: 210, p1: 10, t2: 390, p2: 12, profit: 5 },
+      { side: 'SELL', t1: 250, p1: 11, t2: null, p2: null, profit: null },
+      { side: 'BUY', t1: 10, p1: 10, t2: 320, p2: 9, profit: -1 },
+      { side: 'BUY', t1: 10, p1: 10, t2: 20, p2: 9, profit: -1 },
+      { side: 'BUY', t1: 210, p1: 0, t2: 390, p2: 12, profit: 1 },
     ], times)
-    expect(g).toHaveLength(2)
-    const buy = g.find((x) => x.side === 'BUY')!
-    expect(buy.count).toBe(2)
-    expect(buy.volume).toBe(3)
-    expect(buy.price).toBeCloseTo(12)
-    expect(g.find((x) => x.side === 'SELL')!.profit).toBe(5)
+    expect(p).toEqual([
+      { side: 'BUY', b1: 200, p1: 10, b2: 300, p2: 12, profit: 5 },
+      { side: 'SELL', b1: 200, p1: 11, b2: null, p2: null, profit: null },
+      { side: 'BUY', b1: null, p1: 10, b2: 300, p2: 9, profit: -1 },
+    ])
   })
 })
 

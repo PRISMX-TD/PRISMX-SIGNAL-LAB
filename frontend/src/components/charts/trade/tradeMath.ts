@@ -99,26 +99,28 @@ export function canBreakeven(side: Side, entry: number, current: number | null |
   return side === 'BUY' ? current > entry : current < entry
 }
 
-export interface Execution {
-  /** 成交时间（秒）/ fill time in seconds */
-  t: number
-  price: number
-  /** 成交方向：开买单 / 平卖单都是 BUY / the deal's direction: opening a buy and closing a sell are both BUY */
+/** 一笔交易（或分批平仓的一腿）：开仓点 → 平仓点；还开着的仓位只有开仓点。
+ *  One trade (or one leg of a partial close): entry → exit; open positions have the entry only. */
+export interface TradeLeg {
+  /** 仓位方向 / position side */
   side: Side
-  kind: 'open' | 'close'
-  volume: number
-  profit?: number | null
+  /** 开仓时间（秒）与价位 / entry time (s) and price */
+  t1: number
+  p1: number
+  /** 平仓时间与价位，还没平为 null / exit time and price, null while open */
+  t2: number | null
+  p2: number | null
+  profit: number | null
 }
 
-export interface ExecGroup {
-  /** 所在 K 线的时间 / the bar it belongs to */
-  bar: number
+/** 落到 K 线上的交易：时间换成所在那根 K 线；比已加载的 K 线还早的一头为 null。
+ *  A trade placed on bars: times become their bars; an end older than the loaded bars is null. */
+export interface PlacedLeg {
   side: Side
-  /** 合并后的价位：按手数加权 / volume-weighted price of the group */
-  price: number
-  volume: number
-  count: number
-  kinds: Set<'open' | 'close'>
+  b1: number | null
+  p1: number
+  b2: number | null
+  p2: number | null
   profit: number | null
 }
 
@@ -134,32 +136,18 @@ export function barOf(times: readonly number[], t: number): number | null {
   return times[lo]
 }
 
-/**
- * 成交标记合并：同一根 K 线、同一方向的成交并成一个箭头，价位按手数加权、手数相加。
- * 太多箭头叠在一起反而什么都读不出来，TradingView 也是这样合并的。
- * Group executions: the same bar and direction become one arrow, with a volume-weighted
- * price and summed volume — stacked arrows read as nothing.
- */
-export function groupExecutions(execs: readonly Execution[], times: readonly number[]): ExecGroup[] {
-  const map = new Map<string, ExecGroup>()
-  for (const e of execs) {
-    if (!(e.price > 0) || !(e.volume > 0)) continue
-    const bar = barOf(times, e.t)
-    if (bar == null) continue
-    const k = `${bar}:${e.side}`
-    const g = map.get(k)
-    if (!g) {
-      map.set(k, { bar, side: e.side, price: e.price, volume: e.volume, count: 1, kinds: new Set([e.kind]), profit: e.profit ?? null })
-      continue
-    }
-    const vol = g.volume + e.volume
-    g.price = (g.price * g.volume + e.price * e.volume) / vol
-    g.volume = roundLots(vol)
-    g.count += 1
-    g.kinds.add(e.kind)
-    if (e.profit != null) g.profit = (g.profit ?? 0) + e.profit
+/** 交易落到 K 线上；价位无效、两头都落不到的丢掉。/ Place trades on bars; drop invalid or entirely unplaceable ones. */
+export function placeLegs(legs: readonly TradeLeg[], times: readonly number[]): PlacedLeg[] {
+  const out: PlacedLeg[] = []
+  for (const l of legs) {
+    if (!(l.p1 > 0)) continue
+    const closed = l.t2 != null && l.p2 != null && l.p2 > 0
+    const b1 = barOf(times, l.t1)
+    const b2 = closed ? barOf(times, l.t2 as number) : null
+    if (b1 == null && b2 == null) continue
+    out.push({ side: l.side, b1, p1: l.p1, b2, p2: closed ? l.p2 : null, profit: l.profit })
   }
-  return [...map.values()].sort((a, b) => a.bar - b.bar)
+  return out
 }
 
 /** 金额显示：带正负号、两位小数。/ Signed money with two decimals. */

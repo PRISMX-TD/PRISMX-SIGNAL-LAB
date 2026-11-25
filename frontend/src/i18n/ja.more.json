@@ -1006,8 +1006,8 @@
         "align": "ラベル位置",
         "align_left": "左",
         "align_right": "右",
-        "executions": "約定マーカー",
-        "executionsHint": "ローソク足に新規・決済の位置を表示",
+        "executions": "取引履歴",
+        "executionsHint": "各取引のエントリーと決済を点線で結ぶ",
         "buttons": "売買ボタン",
         "buttonsHint": "凡例の下に Bid / Ask ボタン（スマホは全画面時のみ）",
         "oneClick": "ワンクリック注文",
@@ -1078,7 +1078,6 @@
     },
     "trade": {
       "pts": "pt",
-      "execFills": "{{n}} 件",
       "noAccount": "オンラインの取引口座がありません。口座を接続するとチャートから注文できます",
       "quotesDown": "レート接続が切れています。注文できません",
       "oneClickOn": "ワンクリック注文 オン",

@@ -1006,8 +1006,8 @@
         "align": "Label position",
         "align_left": "Left",
         "align_right": "Right",
-        "executions": "Execution markers",
-        "executionsHint": "Mark opens and closes on the bars",
+        "executions": "Trade history",
+        "executionsHint": "Dashed lines join each trade's entry and exit",
         "buttons": "Buy / sell buttons",
         "buttonsHint": "Bid / ask buttons under the legend (phones: fullscreen only)",
         "oneClick": "One-click trading",
@@ -1078,7 +1078,6 @@
     },
     "trade": {
       "pts": "pts",
-      "execFills": "{{n}} fills",
       "noAccount": "No online trading account. Connect one to trade on the chart",
       "quotesDown": "Quotes disconnected, trading paused",
       "oneClickOn": "One-click trading on",

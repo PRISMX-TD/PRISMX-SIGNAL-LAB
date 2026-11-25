@@ -1006,8 +1006,8 @@
         "align": "Vị trí nhãn",
         "align_left": "Trái",
         "align_right": "Phải",
-        "executions": "Dấu khớp lệnh",
-        "executionsHint": "Đánh dấu điểm mở và đóng trên nến",
+        "executions": "Lịch sử giao dịch",
+        "executionsHint": "Nét đứt nối điểm vào và điểm ra của mỗi lệnh",
         "buttons": "Nút mua / bán",
         "buttonsHint": "Nút Bid / Ask dưới chú giải (điện thoại: chỉ khi toàn màn hình)",
         "oneClick": "Giao dịch một chạm",
@@ -1078,7 +1078,6 @@
     },
     "trade": {
       "pts": "điểm",
-      "execFills": "{{n}} lệnh",
       "noAccount": "Không có tài khoản giao dịch trực tuyến. Kết nối tài khoản để đặt lệnh trên biểu đồ",
       "quotesDown": "Mất kết nối giá, tạm dừng giao dịch",
       "oneClickOn": "Đang bật giao dịch một chạm",
