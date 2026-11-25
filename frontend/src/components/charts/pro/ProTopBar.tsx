@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../store/auth'
 import { useGlobalQuote } from '../../../store/live'
-import { symbolMeta } from '../../../utils/symbolMeta'
+import SymbolLogo from './SymbolLogo'
 import { displaySymbol } from '../../../api/utils'
 import { EMPTY } from '../../../utils/format'
 import ChartPopover from '../ChartPopover'
@@ -215,9 +215,9 @@ export function MenuItem({ icon, label, onClick, hint }: { icon: React.ReactNode
   )
 }
 
+// 和自选表同一套品种图标；尺寸由 .pt-ava 各处的 CSS 决定 / same logos as the watchlist; CSS sizes it
 export function SymAvatar({ symbol }: { symbol: string }) {
-  const meta = symbolMeta(symbol)
-  return <span className="pt-ava" style={{ background: meta.color + '2e', color: meta.ink }} aria-hidden>{meta.letter}</span>
+  return <SymbolLogo symbol={symbol} size={24} className="pt-ava" />
 }
 
 // 实时价：大字用 bid（与图上最新价、经典版报价条一致）+ 涨跌幅胶囊。只订阅当前品种一条报价。

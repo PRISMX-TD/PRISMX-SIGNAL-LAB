@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next'
 import type { ChartAlert } from '../../../api/types'
 import { useGlobalQuote } from '../../../store/live'
 import { displaySymbol, localizeApiError } from '../../../api/utils'
-import { symbolMeta } from '../../../utils/symbolMeta'
+import SymbolLogo from './SymbolLogo'
 import { EMPTY } from '../../../utils/format'
 import Switch from '../../Switch'
 import { splitPrice, type DayStats } from '../SymbolHeader'
@@ -152,13 +152,12 @@ export function ProDetails({ symbol, digits, dayStats, fallback, stale, down }: 
   const hi = dayStats?.high ?? null
   const lo = dayStats?.low ?? null
   const pos = bid != null && hi != null && lo != null && hi > lo ? Math.min(1, Math.max(0, (bid - lo) / (hi - lo))) : null
-  const meta = symbolMeta(symbol)
   const state = down ? 'off' : stale ? 'stale' : 'live'
   const f = (v: number | null) => (v == null ? EMPTY : v.toFixed(digits))
   return (
     <section className="pt-det" aria-label={tt('charts.pro.details')}>
       <div className="pt-det-hd">
-        <span className="pt-ava lg" style={{ background: meta.color + '2e', color: meta.ink }} aria-hidden>{meta.letter}</span>
+        <SymbolLogo symbol={symbol} size={40} className="pt-ava lg" />
         <div className="pt-det-id">
           <b>{symbol || EMPTY}</b>
           {symbol && displaySymbol(symbol) !== symbol && <small>{displaySymbol(symbol)}</small>}

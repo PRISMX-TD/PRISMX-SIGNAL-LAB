@@ -337,6 +337,8 @@
   font: 700 12px/1 var(--pt-font);
 }
 .pt-ava.lg { width: 40px; height: 40px; border-radius: 12px; font-size: 17px; }
+/* 图标是 SVG 圆形，自带形状 / the logo is a round SVG with its own shape */
+svg.pt-ava { display: block; border-radius: 0; }
 
 /* 价格与涨跌胶囊 / price and change capsule */
 .pt-px { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; }
