@@ -5,8 +5,9 @@
 // instance has its own inputs, styles, pane, price scale, timeframe and visibility.
 import type { Candle } from '../../../api/types'
 import type { MaType } from './math'
+import type { Profile, Tpo } from './math3'
 
-export type IndGroup = 'ma' | 'trend' | 'momentum' | 'volatility' | 'volume' | 'levels' | 'custom'
+export type IndGroup = 'ma' | 'trend' | 'momentum' | 'volatility' | 'volume' | 'levels' | 'patterns' | 'stats' | 'custom'
 
 export type SourceKind = 'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4' | 'hlcc4'
 export const SOURCE_KINDS: SourceKind[] = ['open', 'high', 'low', 'close', 'hl2', 'hlc3', 'ohlc4', 'hlcc4']
@@ -24,6 +25,8 @@ export type InputDef =
   | { key: string; kind: 'bool'; def: boolean }
   // 选项文案 charts.ind.opt.<option> / option labels charts.ind.opt.<option>
   | { key: string; kind: 'select'; def: string; options: string[] }
+  // 另一个品种（相关系数、价差）/ another symbol (correlation, spread)
+  | { key: string; kind: 'symbol'; def: string }
 
 export type PlotKind = 'line' | 'step' | 'hist' | 'columns' | 'area' | 'points' | 'cross'
 export type LineDash = 'solid' | 'dashed' | 'dotted'
@@ -71,6 +74,11 @@ export interface IndCtx {
   interval: string
   // 品种小数位 / symbol digits
   digits: number
+  // 当前品种 / the chart's symbol
+  symbol?: string
+  // 别的品种 / 周期的 K 线（异步取，没到时 null，到了会触发重算）
+  // Bars of another symbol / interval (fetched async; null until they arrive, which triggers a recompute)
+  other?: (symbol: string, interval: string) => Candle[] | null
 }
 
 // 计算结果：每条 plot 一列数组；另有可选的特殊输出（标记、区域、竖条、背景色）。
@@ -87,6 +95,22 @@ export interface IndExtras {
   strips?: { i: number; top: number; bottom: number; color: string }[]
   // 整列背景色（交易时段）/ full-height column backgrounds (sessions)
   bg?: (string | null)[]
+  // ── 第三批的图形（由 ind/shapePrimitive 画）。颜色可写 '#hex'、'up' / 'down'，或 'f:<填充 key>'（跟样式页
+  // 的填充色与透明度，填充关掉就不画）；文字以 'mk.' 开头的按 charts.ind.mk.* 翻译。K 线下标 i；i2 = -1 表示画到右边缘。
+  // ── Batch 3 shapes (drawn by ind/shapePrimitive). Colours: '#hex', 'up' / 'down', or 'f:<fill key>'
+  // (the style tab's fill colour and opacity; hidden fill = not drawn); texts starting 'mk.' are
+  // translated from charts.ind.mk.*. Bar index i; i2 = -1 means to the right edge.
+  rects?: { i1: number; i2: number; top: number; bottom: number; fill?: string; stroke?: string; dash?: LineDash; back?: boolean }[]
+  segs?: { i1: number; p1: number; i2: number; p2: number; color: string; width?: number; dash?: LineDash }[]
+  labels?: { i: number; p: number; text: string; color: string; bg?: string; align?: 'left' | 'right' | 'center'; pos?: 'above' | 'below' | 'middle' }[]
+  // 成交量分布：anchor 'left' 从区间左边往右长，'right' 从区间右边往左长；width = 占区间宽度的比例
+  // Volume profiles: anchor 'left' grows right from the range start, 'right' grows left from its end; width = share of the range
+  profiles?: { p: Profile; anchor: 'left' | 'right'; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string }[]
+  // 可见范围成交量分布：画的时候按当前可见的 K 线现算，贴在窗格右边 / visible-range profile, computed at draw time, docked right
+  vpVisible?: { rows: number; vaPct: number; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string }
+  tpos?: { t: Tpo; color: string; vaColor: string; poc: string; ib: string | null; letters: boolean }[]
+  table?: { pos: 'tl' | 'tr' | 'bl' | 'br'; rows: { k: string; v: string; color?: string }[] }
+  gauge?: { value: number | null; text: string; color: string }
 }
 
 export interface IndDef {

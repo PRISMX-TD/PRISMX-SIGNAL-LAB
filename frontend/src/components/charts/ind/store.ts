@@ -53,6 +53,7 @@ export function cleanInputs(type: string, raw: unknown): Inputs {
         break
       }
       case 'select': out[d.key] = typeof v === 'string' && d.options.includes(v) ? v : d.def; break
+      case 'symbol': out[d.key] = typeof v === 'string' && /^[A-Za-z0-9._#&-]{1,24}$/.test(v) ? v : d.def; break
     }
   }
   return out

@@ -52,6 +52,7 @@ export function instArgs(def: IndDef, inst: IndInstance, srcName: (v: string) =>
     if (d.key === 'offset' && v === 0) continue
     if (d.kind === 'int' || d.kind === 'float') parts.push(String(v))
     else if (d.kind === 'source') parts.push(srcName(String(v)))
+    else if (d.kind === 'symbol') parts.push(String(v))
   }
   return parts.join(' ')
 }

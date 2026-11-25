@@ -65,13 +65,15 @@ function Sel<T extends string>({ value, options, onChange, label }: { value: T; 
   )
 }
 
-export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, interval, candle, closing = false, onClose }: {
+export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, interval, candle, symbols = [], closing = false, onClose }: {
   uid: string
   layout: IndLayout
   onChange: (next: IndInstance) => void
   onSaveDefault: (inst: IndInstance) => void
   interval: string
   candle: CandleColors
+  // 「品种」输入的候选（当前在推的品种）/ choices for symbol inputs (symbols currently streaming)
+  symbols?: string[]
   closing?: boolean
   onClose: () => void
 }) {
@@ -122,6 +124,10 @@ export default function IndicatorEditor({ uid, layout, onChange, onSaveDefault, 
             return <Row key={d.key} label={label}><Switch checked={v === true} onChange={(x) => setInput(d.key, x)} aria-label={label} /></Row>
           case 'select':
             return <Row key={d.key} label={label}><Sel value={String(v)} label={label} onChange={(x) => setInput(d.key, x)} options={d.options.map((o) => ({ v: o, label: tt(`charts.ind.opt.${o}`, { defaultValue: o }) }))} /></Row>
+          case 'symbol': {
+            const opts = symbols.includes(String(v)) ? symbols : [String(v), ...symbols]
+            return <Row key={d.key} label={label}><Sel value={String(v)} label={label} onChange={(x) => setInput(d.key, x)} options={opts.map((o) => ({ v: o, label: o }))} /></Row>
+          }
           case 'ma':
             return <Row key={d.key} label={label}><Sel value={String(v)} label={label} onChange={(x) => setInput(d.key, x)} options={(d.options ?? ['sma', 'ema', 'wma', 'rma', 'hma', 'dema', 'tema', 'vwma', 'alma', 'lsma']).map((o) => ({ v: o, label: MA_LABEL[o] ?? o }))} /></Row>
           case 'source':

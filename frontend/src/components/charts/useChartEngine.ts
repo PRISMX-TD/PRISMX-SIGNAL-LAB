@@ -55,7 +55,9 @@ import { computeAll, maxFuture, visibleOnInterval, latestValue, type InstResult 
 import { defOf } from './ind/registry'
 import { fillStyle, hlineStyle, plotStyle, resolveColor } from './ind/style'
 import { IndFillPrimitive, type FillBetween, type FillBand } from './ind/fillPrimitive'
-import type { IndDef, IndInstance, IndPane, PlotKind } from './ind/types'
+import { EMPTY_SCENE, IndShapePrimitive, type ShapeScene } from './ind/shapePrimitive'
+import { otherBars, subscribeOtherBars } from './ind/otherBars'
+import type { IndDef, IndExtras, IndInstance, IndPane, PlotKind } from './ind/types'
 
 export type MainSeriesApi = ISeriesApi<'Custom', Time, MainBar | WhitespaceData<Time>, MainSeriesOptions, DeepPartial<MainSeriesOptions>>
 
@@ -68,6 +70,8 @@ interface InstHandle {
   // 填充层挂在哪条 series 上（没有线的实例挂在主序列上）/ series carrying the fill layer (main series for plotless ones)
   host: ISeriesApi<SeriesType> | null
   prim: IndFillPrimitive | null
+  // 第三批的图形层（箱体、分布、标签、表格、仪表）/ batch 3 shape layer
+  shp: IndShapePrimitive | null
   lines: IPriceLine[]
 }
 
@@ -100,6 +104,8 @@ export interface IndView {
   maxPane: string | null
   interval: string
   digits: number
+  // 当前品种（52 周高低、区间表现取本品种日线用）/ the chart's symbol (daily bars for 52w H/L, performance)
+  symbol: string
 }
 
 // 窗格在容器里的位置（图例、窗格按钮、拖指标换窗格都用）/ pane boxes inside the container
@@ -345,6 +351,44 @@ export function useChartEngine(
     return Array.from({ length: k }, (_, i) => times[n - 1] + step * (i + 1))
   }
 
+  // 第三批图形：把颜色（'f:<填充>'、'up' / 'down'、#hex）和文字（'mk.*'）解析好交给图形层；没有图形时返回 null。
+  // Batch 3 shapes: resolve colours ('f:<fill>', 'up' / 'down', #hex) and texts ('mk.*') for the shape layer; null when none.
+  const shapeScene = (inst: IndInstance, def: IndDef, x: IndExtras, bars: Candle[]): ShapeScene | null => {
+    if (!x.rects && !x.segs && !x.labels && !x.profiles && !x.vpVisible && !x.tpos && !x.table && !x.gauge) return null
+    const cc = candleColorsRef.current
+    const txt = markerTextRef.current
+    const col = (c?: string | null): string | null => {
+      if (!c) return null
+      if (c.startsWith('f:')) {
+        const f = def.fills?.find((k) => k.key === c.slice(2))
+        if (!f) return null
+        const fs = fillStyle(inst, f)
+        return fs.visible ? resolveColor(fs.color, cc, fs.opacity) : null
+      }
+      return resolveColor(c, cc, 100)
+    }
+    const clear = 'rgba(0,0,0,0)'
+    const tx = (t: string) => (t.startsWith('mk.') ? txt[t] ?? t.slice(3) : t)
+    const prof = <T extends { up: string; dn: string; vaUp: string; vaDn: string; poc: string }>(p: T): T =>
+      ({ ...p, up: col(p.up) ?? clear, dn: col(p.dn) ?? clear, vaUp: col(p.vaUp) ?? clear, vaDn: col(p.vaDn) ?? clear, poc: col(p.poc) ?? '' })
+    const pal = viewRef.current?.palette
+    return {
+      rects: (x.rects ?? []).flatMap((r) => {
+        const fill = col(r.fill) ?? undefined
+        const stroke = col(r.stroke) ?? undefined
+        return fill || stroke ? [{ ...r, fill, stroke }] : []
+      }),
+      segs: (x.segs ?? []).flatMap((g) => { const c = col(g.color); return c ? [{ ...g, color: c }] : [] }),
+      labels: (x.labels ?? []).flatMap((l) => { const c = col(l.color); return c ? [{ ...l, text: tx(l.text), color: c, bg: col(l.bg) ?? undefined }] : [] }),
+      profiles: (x.profiles ?? []).map(prof),
+      vp: x.vpVisible ? { ...prof(x.vpVisible), bars } : null,
+      tpos: (x.tpos ?? []).map((t) => ({ ...t, color: col(t.color) ?? clear, vaColor: col(t.vaColor) ?? clear, poc: col(t.poc) ?? clear, ib: col(t.ib) })),
+      table: x.table ? { pos: x.table.pos, rows: x.table.rows.map((r) => ({ k: tx(r.k), v: tx(r.v), color: col(r.color) ?? undefined })) } : null,
+      gauge: x.gauge ? { value: x.gauge.value, text: tx(x.gauge.text), color: col(x.gauge.color) ?? '#e4e4e7' } : null,
+      theme: pal ? { bg: resolveColor(pal.bg, cc, 92), text: pal.text, border: pal.border } : EMPTY_SCENE.theme,
+    }
+  }
+
   // 按当前 candlesRef 重算全部实例并写回，同时刷新图例的「最新值」。价格类图表（砖形等）横轴不是
   // 时间：指标改按图上的砖算（同 TradingView），否则原始 K 线的时间会混进时间轴、把砖撑开。
   // Recompute every instance and write the data back; refresh the latest-value legend. On
@@ -360,12 +404,13 @@ export function useChartEngine(
       resultsRef.current = new Map()
       markersRef.current?.setMarkers([])
       zonesRef.current?.setZones([], [])
+      handles.forEach((h) => { if (h.shp && h.shp.scene !== EMPTY_SCENE) h.shp.set(EMPTY_SCENE) })
       latestLegendRef.current = {}
       if (!hoveringRef.current) legendStore.set({})
       return
     }
     const list = iv.list.filter((i) => handles.has(i.uid))
-    const results = computeAll({ list, bars, interval: iv.interval, digits: iv.digits, priceBased: onBricks })
+    const results = computeAll({ list, bars, interval: iv.interval, digits: iv.digits, priceBased: onBricks, symbol: iv.symbol, other: otherBars })
     resultsRef.current = results
     const n = bars.length
     const times = bars.map((b) => b.t)
@@ -456,6 +501,11 @@ export function useChartEngine(
           : null
         h.prim.set(fills, bands, bg, !shown)
       }
+      if (h.shp) {
+        const scene = shown && !onBricks ? shapeScene(inst, def, r.extras, bars) : null
+        if (scene) h.shp.set(scene)
+        else if (h.shp.scene !== EMPTY_SCENE) h.shp.set(EMPTY_SCENE)
+      }
       if (!shown) continue
       // 标记、区域、竖条只能挂在主序列上 / markers, zones and strips live on the main series
       for (const m of r.extras.markers ?? []) {
@@ -475,6 +525,9 @@ export function useChartEngine(
   // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
   }, [legendStore])
   recomputeRef.current = recomputeIndicators
+
+  // 别的品种 / 日线到了就重算 / recompute when another symbol's or the daily bars arrive
+  useEffect(() => subscribeOtherBars(() => recomputeRef.current?.()), [])
 
   // 窗格高度：主图与各副图按权重分；折叠的固定 28px；最大化时其余全部折叠。
   // Pane heights: main and sub-panes split by weight; collapsed ones are 28px; a maximised pane
@@ -765,6 +818,7 @@ export function useChartEngine(
     // 拆 / tear down
     instRef.current.forEach((h) => {
       if (h.prim && h.host) { try { h.host.detachPrimitive(h.prim) } catch { /* 已随 series 删除 / gone with its series */ } }
+      if (h.shp && h.host) { try { h.host.detachPrimitive(h.shp) } catch { /* 同上 / same */ } }
       h.plots.forEach((p) => { try { chart.removeSeries(p.api) } catch { /* noop */ } })
     })
     instRef.current = new Map()
@@ -794,7 +848,9 @@ export function useChartEngine(
       const host: ISeriesApi<SeriesType> = plots[0]?.api ?? main
       const prim = new IndFillPrimitive()
       host.attachPrimitive(prim)
-      instRef.current.set(inst.uid, { uid: inst.uid, pane: pane === 0 ? 'main' : inst.pane, plots, host, prim, lines: [] })
+      const shp = new IndShapePrimitive()
+      host.attachPrimitive(shp)
+      instRef.current.set(inst.uid, { uid: inst.uid, pane: pane === 0 ? 'main' : inst.pane, plots, host, prim, shp, lines: [] })
     }
     chart.applyOptions({ leftPriceScale: { visible: anyLeft } })
     applyStyles()

@@ -4,9 +4,12 @@
 // indicator), multi-timeframe (aggregate the chart's bars to the higher timeframe, compute,
 // map back per bucket), shifts and visibility rules. Pure; never touches the chart library.
 import type { Candle } from '../../../api/types'
-import { brokerBucketStart, isBrokerAnchored, parseInterval } from '../intervals'
-import { brokerDay, brokerMonth, brokerWeek, defOf, priceSource } from './registry'
+import { parseInterval } from '../intervals'
+import { tfKeyFn } from './periods'
+import { defOf, priceSource } from './registry'
 import type { IndDef, IndExtras, IndInstance, IndOutput, VisKind } from './types'
+
+export { tfKeyFn }
 
 export interface InstResult {
   uid: string
@@ -28,19 +31,6 @@ export function approxSeconds(code: string): number {
   if (p.unit === 'D') return p.n * 86400
   if (p.unit === 'W') return p.n * 604800
   return p.n * 2592000
-}
-
-// 多周期的分桶键 / bucket key for a higher timeframe
-export function tfKeyFn(code: string): ((t: number) => number) | null {
-  const p = parseInterval(code)
-  if (!p) return null
-  if (p.unit === 'min') {
-    const len = p.n * 60
-    return isBrokerAnchored(p.n) ? (t) => brokerBucketStart(p.n, t) : (t) => Math.floor(t / len)
-  }
-  if (p.unit === 'D') return (t) => Math.floor(brokerDay(t) / p.n)
-  if (p.unit === 'W') return (t) => Math.floor(brokerWeek(t) / p.n)
-  return (t) => Math.floor(brokerMonth(t) / p.n)
 }
 
 // 该实例在这个周期下按「可见性」页的规则是否显示 / visibility-tab rule for this interval
@@ -99,9 +89,11 @@ export interface CalcInput {
   interval: string
   digits: number
   priceBased: boolean
+  symbol?: string
+  other?: (symbol: string, interval: string) => Candle[] | null
 }
 
-export function computeAll({ list, bars, interval, digits, priceBased }: CalcInput): Map<string, InstResult> {
+export function computeAll({ list, bars, interval, digits, priceBased, symbol, other }: CalcInput): Map<string, InstResult> {
   const byUid = new Map(list.map((i) => [i.uid, i]))
   const results = new Map<string, InstResult>()
   const busy = new Set<string>()
@@ -137,7 +129,7 @@ export function computeAll({ list, bars, interval, digits, priceBased }: CalcInp
     let extras: IndExtras = {}
     try {
       if (!tf) {
-        const raw = def.compute({ bars, interval, digits }, inst.inputs, chartSrc)
+        const raw = def.compute({ bars, interval, digits, symbol, other }, inst.inputs, chartSrc)
         extras = (raw.__x as IndExtras | undefined) ?? {}
         delete raw.__x
         out = raw as IndOutput
@@ -151,7 +143,7 @@ export function computeAll({ list, bars, interval, digits, priceBased }: CalcInp
           }
           return priceSource(agg.bars, v)
         }
-        const h = def.compute({ bars: agg.bars, interval: tf, digits }, inst.inputs, htfSrc)
+        const h = def.compute({ bars: agg.bars, interval: tf, digits, symbol, other }, inst.inputs, htfSrc)
         const wait = inst.tfWait === true
         out = {}
         for (const k of Object.keys(h)) {

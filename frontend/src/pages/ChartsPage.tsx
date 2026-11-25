@@ -66,6 +66,7 @@ import IntervalSeg from '../components/charts/IntervalSeg'
 import PaneLegends, { type LegendActions } from '../components/charts/ind/PaneLegends'
 import { useIndLayout } from '../components/charts/ind/useIndLayout'
 import { defOf } from '../components/charts/ind/registry'
+import { MK_KEYS } from '../components/charts/ind/registry3'
 import { addInstance, duplicateInstance, moveInstance, movePane, removeInstance, removePane, setPane, updateInstance } from '../components/charts/ind/store'
 import FullscreenToolbar from '../components/charts/FullscreenToolbar'
 import BarCountdown from '../components/charts/BarCountdown'
@@ -673,9 +674,14 @@ export default function ChartsPage() {
     () => (isPro ? indLayout.list : indLayout.list.filter((i) => !defOf(i.type)?.pro)),
     [indLayout.list, isPro],
   )
-  const markerText = useMemo(() => ({ buy: String(t('charts.indicators.buyMark')), sell: String(t('charts.indicators.sellMark')),
-    closeBuy: String(t('charts.indicators.closeBuyMark')), closeSell: String(t('charts.indicators.closeSellMark')),
-    slBuy: String(t('charts.indicators.slBuyMark')), slSell: String(t('charts.indicators.slSellMark')) }), [t])
+  // 指标标记文字：合作指标的买卖字样 + 第三批的形态名、表格行名等（charts.ind.mk.*，以 'mk.' 前缀查）
+  // Indicator marker texts: partner buy / sell words plus batch 3 pattern names, table rows etc. (charts.ind.mk.*, looked up as 'mk.<key>')
+  const markerText = useMemo(() => {
+    const extra = Object.fromEntries(MK_KEYS.map((k) => [`mk.${k}`, String(t(`charts.ind.mk.${k}`))]))
+    return { buy: String(t('charts.indicators.buyMark')), sell: String(t('charts.indicators.sellMark')),
+      closeBuy: String(t('charts.indicators.closeBuyMark')), closeSell: String(t('charts.indicators.closeSellMark')),
+      slBuy: String(t('charts.indicators.slBuyMark')), slSell: String(t('charts.indicators.slSellMark')), ...extra }
+  }, [t])
 
 
   // 图表实例、指标 series、图例、pane 高度 → useChartEngine；历史 / 翻页 / 轮询 → useChartData。
@@ -723,8 +729,8 @@ export default function ChartsPage() {
   const showTradeBtns = cprefs.trading.buttons && (isDesktop || isFullscreen)
 
   const indView = useMemo<IndView>(() => ({
-    list: shownList, panes: indLayout.panes, mainH: indLayout.mainH, maxPane, interval, digits: decimals,
-  }), [shownList, indLayout.panes, indLayout.mainH, maxPane, interval, decimals])
+    list: shownList, panes: indLayout.panes, mainH: indLayout.mainH, maxPane, interval, digits: decimals, symbol,
+  }), [shownList, indLayout.panes, indLayout.mainH, maxPane, interval, decimals, symbol])
   // 拖窗格分隔条后把像素高度存成权重（比例不变，换屏幕尺寸照样成立）
   // After a separator drag, store the pixel heights as weights (ratios survive other screen sizes)
   const onPaneResize = useCallback((mainPx: number, panes: Record<string, number>) => {
@@ -1402,6 +1408,7 @@ export default function ChartsPage() {
           layout={indLayout}
           interval={interval}
           candle={candleColors}
+          symbols={activeSymbols}
           onChange={(next) => updateInd((l) => updateInstance(l, next.uid, () => next))}
           onSaveDefault={(i) => updateInd((l) => ({ ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } }))}
           onClose={() => setEditUid(null)}

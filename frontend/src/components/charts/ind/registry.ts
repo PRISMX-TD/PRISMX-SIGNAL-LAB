@@ -1,14 +1,15 @@
-// 指标注册表（阶段 4 第一批 43 种 + 第二批 44 种）：每种指标的输入、默认样式、参考线、填充与计算。
+// 指标注册表（阶段 4 第一批 43 种 + 第二批 44 种；第三批 12 种在 registry3.ts）：每种指标的输入、默认样式、参考线、填充与计算。
 // 引擎、图例、添加对话框、设置对话框都只认这一份；加指标 = 这里加一项 + 五种语言的名字与说明。
 // 数学在 ./math.ts（TradingView 的公式口径）；四个合作作者的自定义指标沿用 utils/indicators.ts。
-// Indicator registry (phase 4: 43 kinds in batch 1 + 44 in batch 2): inputs, default styles, reference lines,
+// Indicator registry (phase 4: 43 kinds in batch 1 + 44 in batch 2; batch 3 adds 12 in registry3.ts): inputs, default styles, reference lines,
 // fills and compute for each. The engine, legend, add dialog and settings dialog all read
 // only this; adding one = an entry here + its name and description in five languages.
 // Math lives in ./math.ts (TradingView formulas); the four partner indicators keep using
 // utils/indicators.ts.
 import type { Candle } from '../../../api/types'
 import { kdj as kdjLegacy, parabolicSar, superTrend, xmaBand, maCandle, shenlong, wallZones } from '../../../utils/indicators'
-import { brokerOffsetSec, parseInterval } from '../intervals'
+import { parseInterval } from '../intervals'
+import { brokerDay, brokerMonth, brokerWeek, periodKeyOf } from './periods'
 import {
   ac, alma, ao, aroon, atr, bollinger, cci, dmi, donchian, envelope, fractals, ichimoku, keltner, ma, macd, mfi, mom, obv,
   pivots, roc, rsi, stdev, stoch, stochRsi, vwapAnchored, willr, zigzag, type MaType,
@@ -18,6 +19,7 @@ import {
   connorsRsi, coppock, crosses, dpo, efi, eom, fisher, histVol, kama, klinger, kst, linregChannel, massIndex, mcginley,
   netVolume, ppo, priceChannel, pvt, rvi, smi, trix, tsi, twap, ulcer, ultimate, volStop, volumeOsc, vortex, type StopOut,
 } from './math2'
+import { DEFS3 } from './registry3'
 import type { FillDef, HlineDef, IndDef, IndExtras, IndMarker, IndOutput, Inputs, InputDef, PlotDef } from './types'
 
 const num = (inp: Inputs, k: string) => Number(inp[k])
@@ -35,26 +37,6 @@ const line = (key: string, color: string, label = key, extra: Partial<PlotDef> =
 const hl = (key: string, value: number, label = String(value), color = '#787b86'): HlineDef => ({ key, value, color, dash: 'dashed', label })
 const fill = (key: string, a: string, b: string, color: string, opacity: number, label = 'background', colorB?: string): FillDef =>
   ({ key, a, b, color, opacity, label, colorB })
-
-// 券商日期（日序号）/ 周 / 月：枢轴点、VWAP 锚点、多周期都按券商服务器时间切。
-// Broker date (day number) / week / month: pivots, VWAP anchors and MTF all split on broker time.
-export const brokerDay = (t: number) => Math.floor((t + brokerOffsetSec(t)) / 86400)
-export const brokerWeek = (t: number) => Math.floor((brokerDay(t) + 3) / 7)
-export function brokerMonth(t: number): number {
-  const d = new Date(brokerDay(t) * 86400_000)
-  return d.getUTCFullYear() * 12 + d.getUTCMonth()
-}
-function periodKeyOf(kind: string, interval: string): (t: number) => number {
-  let k = kind
-  if (k === 'auto') {
-    const p = parseInterval(interval)
-    k = !p ? 'day' : p.unit === 'min' ? (p.n <= 15 ? 'day' : p.n <= 240 ? 'week' : 'month') : p.unit === 'D' ? 'month' : 'year'
-  }
-  if (k === 'week') return brokerWeek
-  if (k === 'month') return brokerMonth
-  if (k === 'year') return (t) => Math.floor(brokerMonth(t) / 12)
-  return brokerDay
-}
 
 // ── 交易时段（按城市本地时间，自动跟夏令时）/ sessions (city local time, DST-aware) ──
 const SESSIONS = [
@@ -862,9 +844,13 @@ function sigMarkers(sig: (number | null)[]): IndMarker[] {
   return out
 }
 
-export const IND_DEFS: ReadonlyMap<string, IndDef> = new Map(DEFS.map((d) => [d.id, d]))
-export const IND_IDS: string[] = DEFS.map((d) => d.id)
-export const IND_GROUPS = ['ma', 'trend', 'momentum', 'volatility', 'volume', 'levels', 'custom'] as const
+// 旧调用方从这里取券商日期函数 / older callers import the broker date helpers from here
+export { brokerDay, brokerMonth, brokerWeek }
+
+const ALL_DEFS = [...DEFS, ...DEFS3]
+export const IND_DEFS: ReadonlyMap<string, IndDef> = new Map(ALL_DEFS.map((d) => [d.id, d]))
+export const IND_IDS: string[] = ALL_DEFS.map((d) => d.id)
+export const IND_GROUPS = ['ma', 'trend', 'momentum', 'volatility', 'volume', 'levels', 'patterns', 'stats', 'custom'] as const
 
 export function defOf(type: string): IndDef | undefined {
   return IND_DEFS.get(type)
