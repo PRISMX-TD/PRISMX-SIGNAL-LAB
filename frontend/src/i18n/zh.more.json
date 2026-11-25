@@ -1078,6 +1078,7 @@
     },
     "trade": {
       "pts": "点",
+      "execFills": "{{n}} 笔",
       "noAccount": "没有在线的交易账户，连上账户后才能在图上下单",
       "quotesDown": "行情连接中断，暂时不能下单",
       "oneClickOn": "一键下单已开启",

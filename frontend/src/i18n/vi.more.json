@@ -1078,6 +1078,7 @@
     },
     "trade": {
       "pts": "điểm",
+      "execFills": "{{n}} lệnh",
       "noAccount": "Không có tài khoản giao dịch trực tuyến. Kết nối tài khoản để đặt lệnh trên biểu đồ",
       "quotesDown": "Mất kết nối giá, tạm dừng giao dịch",
       "oneClickOn": "Đang bật giao dịch một chạm",

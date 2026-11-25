@@ -1078,6 +1078,7 @@
     },
     "trade": {
       "pts": "pts",
+      "execFills": "{{n}} fills",
       "noAccount": "No online trading account. Connect one to trade on the chart",
       "quotesDown": "Quotes disconnected, trading paused",
       "oneClickOn": "One-click trading on",

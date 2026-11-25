@@ -1,5 +1,5 @@
 // 成交标记：开仓、平仓的箭头画在对应那根 K 线上（买入绿色朝上、在价位下方；卖出红色朝下、
-// 在价位上方），同一根 K 线同方向的合并成一个，旁边写手数（K 线够宽时）。数据：已平仓明细
+// 在价位上方），同一根 K 线同方向的合并成一个，旁边写手数（合并的写「合计手数 · N 笔」，K 线够宽时）。数据：已平仓明细
 // （开平两头都有时间和价格）+ 本页订单里还没平的开仓成交。价格类图表（砖形等）横轴不是时间，不画。
 // Execution markers: open / close arrows on their bars (buys green, pointing up, below the
 // price; sells red, pointing down, above it), merged per bar and direction, with the volume
@@ -7,6 +7,7 @@
 // plus the still-open fills from this page's orders. Price-based chart types have no time
 // axis and get none.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type { AutoscaleInfo, IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, Logical, Time } from 'lightweight-charts'
 import type { ClosedTrade, Order, Position } from '../../../api/types'
@@ -54,11 +55,13 @@ export function executionsFrom(symbol: string, closed: readonly ClosedTrade[], o
   return out
 }
 
-class ExecPrimitive {
+export class ExecPrimitive {
   private _series: MainSeriesApi | null = null
   private _chart: IChartApi | null = null
   private _ru: (() => void) | null = null
   groups: ExecGroup[] = []
+  /** 「N 笔」的本地化写法 / localized "N fills" */
+  fills: (n: number) => string = (n) => String(n)
   private _pv: IPrimitivePaneView
   constructor() {
     const renderer: IPrimitivePaneRenderer = {
@@ -115,7 +118,9 @@ class ExecPrimitive {
       if (spacing >= 7) {
         ctx.fillStyle = col
         ctx.textBaseline = up ? 'top' : 'bottom'
-        const label = g.count > 1 ? `${g.volume}×${g.count}` : String(g.volume)
+        // 合并组写「合计手数 · N 笔」：原来的「0.1×2」常被读成 0.2 手。
+        // Merged groups read "total lots · N fills": the old "0.1×2" was read as 0.2 lots.
+        const label = g.count > 1 ? `${g.volume} · ${this.fills(g.count)}` : String(g.volume)
         ctx.fillText(label, x, up ? base + 2 : base - 2)
       }
     }
@@ -137,6 +142,7 @@ interface Props {
 }
 
 export default function ExecutionMarkers({ chart, series, symbol, login, orders, positions, barTimes, dataKey, visible }: Props) {
+  const { t } = useTranslation()
   const [closed, setClosed] = useState<ClosedTrade[]>([])
   const primRef = useRef<ExecPrimitive | null>(null)
 
@@ -170,8 +176,9 @@ export default function ExecutionMarkers({ chart, series, symbol, login, orders,
     const prim = primRef.current
     if (!prim) return
     prim.groups = groupExecutions(execs, barTimes())
+    prim.fills = (n) => t('charts.trade.execFills', { n })
     prim.requestUpdate()
-  }, [execs, barTimes, dataKey, visible])
+  }, [execs, barTimes, dataKey, visible, t])
 
   return null
 }
