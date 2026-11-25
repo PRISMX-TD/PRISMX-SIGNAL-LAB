@@ -4,6 +4,7 @@ import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, AdminLeaderboardPeriod, AdminBoardHistory, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
 import type { PendingCompetition } from './types'
 import type { MarketStatus } from './types'
+import type { ChartDrawingSymbol, ChartDrawingsOut, ChartDrawingsSaved } from './types'
 import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
@@ -798,6 +799,21 @@ export const chartApi = {
       return r
     })
   },
+  // 图表画线（后端 rev 55）：每个品种单独存取，取代 prefs 的 chartDraw 命名空间。
+  // saveDrawings 是整组覆盖，空数组 = 删除；限制：单品种 ≤500 个、≤512KB，最多 300 个品种，
+  // 每分钟最多 60 次保存（调用方要防抖）。保存成功后后端推 WS CHART_DRAWINGS_UPDATE。
+  // Chart drawings (backend rev 55), stored per symbol, replacing the prefs chartDraw namespace.
+  // saveDrawings overwrites the whole array; an empty array deletes. Limits: ≤500 drawings and
+  // ≤512KB per symbol, at most 300 symbols, 60 saves a minute (callers should debounce). A
+  // successful save pushes WS CHART_DRAWINGS_UPDATE.
+  getDrawings: (symbol: string) =>
+    request<ChartDrawingsOut>(`/chart/drawings?symbol=${encodeURIComponent(symbol)}`),
+  saveDrawings: (symbol: string, drawings: unknown[]) =>
+    request<ChartDrawingsSaved>('/chart/drawings', {
+      method: 'PUT',
+      body: JSON.stringify({ symbol, drawings }),
+    }),
+  drawingSymbols: () => request<{ symbols: ChartDrawingSymbol[] }>('/chart/drawings/symbols'),
 }
 
 // 下单 / Orders

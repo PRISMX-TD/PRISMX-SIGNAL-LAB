@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BOUNDARY_SETTLE_MS, CANDLE_SCHEMES, DRAG_LOCK_SCROLL, scrollAfterDrag, DEFAULT_CANDLE_COLORS, POLL_MS, POLL_SLOW_MS, barCloseCountdownSec, barSpacingSeconds,
   candleSchemeOf, fmtCountdown, intervalSeconds, nextBoundaryPollDelayMs, normalizeCandleColors,
+  INTERVALS, isKnownInterval,
 } from './chartConfig'
 
 describe('chart poll cadence', () => {
@@ -37,6 +38,18 @@ describe('chart poll cadence', () => {
     expect(nextBoundaryPollDelayMs('240', Date.now())).toBeNull()
     expect(nextBoundaryPollDelayMs('D', Date.now())).toBeNull()
   })
+
+  it('自定义周期：整除 60 的按 epoch 对齐，其余（券商锚定）null', () => {
+    for (const [c, s] of [['2', 120], ['3', 180], ['4', 240], ['6', 360], ['10', 600], ['12', 720], ['20', 1200], ['30', 1800]] as const) {
+      expect(intervalSeconds(c)).toBe(s)
+    }
+    for (const c of ['7', '45', '90', '120', '720', '1440', '2D', 'W', 'M', '3M', 'X']) expect(intervalSeconds(c), c).toBeNull()
+    const t = Date.UTC(2026, 8, 29, 10, 3, 0)
+    expect(nextBoundaryPollDelayMs('10', t)).toBe(7 * 60_000 + BOUNDARY_SETTLE_MS)
+    expect(nextBoundaryPollDelayMs('45', t)).toBeNull()
+    expect(nextBoundaryPollDelayMs('120', t)).toBeNull()
+    expect(nextBoundaryPollDelayMs('W', t)).toBeNull()
+  })
 })
 
 describe('barSpacingSeconds', () => {
@@ -46,6 +59,32 @@ describe('barSpacingSeconds', () => {
     expect(barSpacingSeconds('240')).toBe(14400)
     expect(barSpacingSeconds('D')).toBe(86400)
     expect(barSpacingSeconds('W')).toBeNull()
+  })
+
+  it('自定义周期：所有分钟周期都有间距，多日 / 周 / 月没有', () => {
+    expect(barSpacingSeconds('7')).toBe(420)
+    expect(barSpacingSeconds('45')).toBe(2700)
+    expect(barSpacingSeconds('120')).toBe(7200)
+    expect(barSpacingSeconds('720')).toBe(43200)
+    expect(barSpacingSeconds('1440')).toBe(86400)
+    expect(barSpacingSeconds('2D')).toBeNull()
+    expect(barSpacingSeconds('2W')).toBeNull()
+    expect(barSpacingSeconds('3M')).toBeNull()
+    expect(barSpacingSeconds('X')).toBeNull()
+  })
+})
+
+describe('INTERVALS / 老的 8 个周期', () => {
+  it('代码与标签不变 / codes and labels unchanged', () => {
+    expect(INTERVALS).toEqual([
+      { code: '1', label: '1m' }, { code: '5', label: '5m' }, { code: '15', label: '15m' }, { code: '30', label: '30m' },
+      { code: '60', label: '1H' }, { code: '240', label: '4H' }, { code: 'D', label: '1D' }, { code: 'M', label: '1M' },
+    ])
+    for (const iv of INTERVALS) expect(isKnownInterval(iv.code)).toBe(true)
+    expect(isKnownInterval('45')).toBe(true)
+    expect(isKnownInterval('12M')).toBe(true)
+    expect(isKnownInterval('1439')).toBe(false)
+    expect(isKnownInterval(null)).toBe(false)
   })
 })
 
@@ -66,6 +105,23 @@ describe('bar-close countdown / K 线收线倒计时', () => {
     // 落后两根以上：休市 / 断档
     expect(barCloseCountdownSec('240', open - 3 * 14400, 1_700_000_000_000)).toBeNull()
     expect(barCloseCountdownSec('D', null, 1_700_000_000_000)).toBeNull()
+  })
+
+  it('自定义周期：epoch 对齐的按时钟，券商锚定的按最后一根推，7m 最后一桶在券商零点收', () => {
+    const utc = (y: number, mo: number, d: number, h = 0, mi = 0) => Date.UTC(y, mo - 1, d, h, mi)
+    // 10m：epoch 对齐 / epoch-aligned
+    expect(barCloseCountdownSec('10', null, utc(2026, 10, 14, 9, 3))).toBe(420)
+    // 45m：最后一根 21:00 UTC（夏令时券商零点），现在 21:30 → 还剩 15 分钟
+    expect(barCloseCountdownSec('45', utc(2026, 10, 13, 21) / 1000, utc(2026, 10, 13, 21, 30))).toBe(900)
+    // 2H：最后一根 21:00，现在 23:10（刚跨边界、新 bar 没到）→ 顺推到 01:00
+    expect(barCloseCountdownSec('120', utc(2026, 10, 13, 21) / 1000, utc(2026, 10, 13, 23, 10))).toBe(110 * 60)
+    // 7m：20:55 那桶只有 5 分钟，21:00 收 / the 20:55 bucket closes at broker midnight 21:00
+    expect(barCloseCountdownSec('7', utc(2026, 10, 13, 20, 55) / 1000, utc(2026, 10, 13, 20, 57))).toBe(180)
+    // 多日 / 周 / 月：不显示 / hidden
+    expect(barCloseCountdownSec('2D', utc(2026, 10, 13, 21) / 1000, utc(2026, 10, 14))).toBeNull()
+    expect(barCloseCountdownSec('W', utc(2026, 10, 13, 21) / 1000, utc(2026, 10, 14))).toBeNull()
+    expect(barCloseCountdownSec('3M', utc(2026, 10, 13, 21) / 1000, utc(2026, 10, 14))).toBeNull()
+    expect(barCloseCountdownSec('X', utc(2026, 10, 13, 21) / 1000, utc(2026, 10, 14))).toBeNull()
   })
 
   it('格式：一小时以内 mm:ss，以上 h:mm:ss', () => {

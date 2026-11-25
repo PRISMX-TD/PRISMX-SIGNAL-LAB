@@ -62,16 +62,35 @@ import IntervalSeg from '../components/charts/IntervalSeg'
 import IndicatorLegends from '../components/charts/IndicatorLegends'
 import FullscreenToolbar from '../components/charts/FullscreenToolbar'
 import BarCountdown from '../components/charts/BarCountdown'
-import ChartSettingsMenu from '../components/charts/ChartSettingsMenu'
+import ChartSettingsDialog from '../components/charts/ChartSettingsDialog'
+import IntervalMenu from '../components/charts/IntervalMenu'
+import ChartTypeMenu from '../components/charts/ChartTypeMenu'
+import ChartLegend from '../components/charts/ChartLegend'
+import ChartBottomBar, { RANGE_INTERVAL, rangeFrom, type RangeKey } from '../components/charts/ChartBottomBar'
+import GoToDateDialog from '../components/charts/GoToDateDialog'
+import ShortcutsDialog from '../components/charts/ShortcutsDialog'
+import QuickInput from '../components/charts/QuickInput'
+import ChartPriceLines from '../components/charts/ChartPriceLines'
+import MeasureOverlay from '../components/charts/MeasureOverlay'
+import BackToLatest from '../components/charts/BackToLatest'
+import ChartContextMenu, { type CtxState } from '../components/charts/ChartContextMenu'
+import { SessionBreaks } from '../components/charts/sessionBreaks'
+import { useChartHotkeys } from '../components/charts/useChartHotkeys'
+import { useChartPrefs } from '../components/charts/useChartPrefs'
+import { CHART_PALETTES, resolveChartTheme } from '../components/charts/chartTheme'
+import { makeTimeFormatters } from '../components/charts/chartTime'
+import { PRICE_BASED_TYPES, normalizeChartPrefs, type ScaleMode } from '../components/charts/chartPrefs'
+import { intervalKind, intervalLabel, isValidInterval } from '../components/charts/intervals'
+import { canCopyImage, composeScreenshot, copyScreenshot, saveScreenshot, type ShotResult } from '../components/charts/chartScreenshot'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
-import { useChartEngine } from '../components/charts/useChartEngine'
+import { useChartEngine, type ChartView } from '../components/charts/useChartEngine'
 import { useChartData, withLiveClose } from '../components/charts/useChartData'
 import { useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
 import type { Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
-  priceDigits, resolvePriceDigits, toLwPoint, intervalSeconds, MAX_CLIENT_BARS, type IndicatorFlags,
+  priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, type IndicatorFlags, INTERVALS,
   normalizeCandleColors, type CandleColors,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
@@ -84,6 +103,12 @@ import { EMPTY } from '../utils/format'
 export type { IndicatorFlags }
 
 type Sheet = 'watchlist' | 'trade' | 'positions' | null
+
+// charts.interval 只写旧 App 包也认识的 8 个代码（踩坑 #220：旧包把新代码发给后端得 400）；
+// 新代码（2m、45m、2H、1W…）只存在 chartv2.prefs.interval。
+// charts.interval only ever gets the 8 codes old App bundles know (pitfall #220: an old bundle
+// sent a new code to the backend and got 400); new codes live in chartv2.prefs.interval only.
+const LEGACY_INTERVALS: ReadonlySet<string> = new Set(INTERVALS.map((i) => i.code))
 
 // ── 高频数据下放 / high-frequency data pushed down ──────────────────────────────
 // 本页以前在顶层订阅全部报价（全站 + 按账户）、持仓与挂单：任何一个品种跳一下价、
@@ -153,6 +178,19 @@ function LiveSymbolHeader(props: Omit<ComponentProps<typeof SymbolHeader>, 'bid'
   return <SymbolHeader {...props} bid={q?.bid ?? null} ask={q?.ask ?? null} />
 }
 
+// 齿轮：打开图表设置弹窗（2026-11-25 起取代 ChartSettingsMenu 的小菜单）。
+// Gear: opens the chart settings dialog (replaces ChartSettingsMenu's popover since 2026-11-25).
+function GearButton({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <button type="button" title={label} aria-label={label} aria-haspopup="dialog" onClick={onClick} className="term-tool-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="12" cy="12" r="3" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      </svg>
+    </button>
+  )
+}
+
 // 实时 K 线收盘：券商 bid 一跳，最新一根的 close 立刻跟着动，并把 bid 留给轮询用。
 // 跨过 K 线边界后的第一跳直接在本地开新 bar（o=h=l=c=bid），不再等开盘后 ~3.3 秒的边界补拉
 // 才"卡一下"冒出来；零额外请求，随后的轮询按同一时间戳覆盖校正 O/H/L。只对按 epoch 对齐的
@@ -189,12 +227,10 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { sym
         // "jumped" into a normal candle when the poll landed.
         const o = last.c
         const bar = { t: openT, o, h: Math.max(o, bid), l: Math.min(o, bid), c: bid, v: 0 }
-        try { series.update(toLwPoint(bar)) } catch { return }
         arr.push(bar)
         if (arr.length > MAX_CLIENT_BARS) arr.shift()
-        const times = engine.barTimesRef.current
-        if (!times.length || times[times.length - 1] < openT) times.push(openT)
         engine.lastTimeRef.current = openT
+        engine.renderTail()
         engine.recomputeIndicators()
         if (engine.isFollowingLiveRef.current) engine.chartRef.current?.timeScale().scrollToRealTime()
         return
@@ -209,7 +245,7 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { sym
     const next = withLiveClose(last, bid)
     if (next.c === last.c && next.h === last.h && next.l === last.l) return
     arr[arr.length - 1] = next
-    try { series.update(toLwPoint(next)) } catch { /* series 正在切换 / series switching */ }
+    engine.renderTail()
   }, [bid, symbol, interval, engine, liveBidRef, dataKeyRef])
   return null
 }
@@ -243,6 +279,8 @@ export default function ChartsPage() {
   // Stored intervals are validated, so a stale code never strands the chart on an
   // interval nothing can serve.
   const [interval, setIntervalCode] = useState<string>(() => {
+    const v2 = normalizeChartPrefs(getPref<unknown>('chartv2', 'prefs', null), isValidInterval).interval
+    if (v2) return v2
     const cloud = getPref<string>('charts', 'interval', '')
     if (isKnownInterval(cloud)) return cloud
     const local = readStorage(INTERVAL_KEY)
@@ -482,8 +520,10 @@ export default function ChartsPage() {
     if (!loaded) return
     const cloudSym = getPref<string>('charts', 'symbol', '')
     if (cloudSym) setSymbol(cloudSym)
+    const v2Int = normalizeChartPrefs(getPref<unknown>('chartv2', 'prefs', null), isValidInterval).interval
     const cloudInt = getPref<string>('charts', 'interval', '')
-    if (isKnownInterval(cloudInt)) setIntervalCode(cloudInt)
+    if (v2Int) setIntervalCode(v2Int)
+    else if (isKnownInterval(cloudInt)) setIntervalCode(cloudInt)
     const cloudInd = getPref<Partial<IndicatorFlags> | null>('charts', 'indicators', null)
     if (cloudInd) setIndicatorsState({ ...DEFAULT_INDICATORS, ...cloudInd })
     const cloudSettings = getPref<Partial<IndicatorSettings> | null>('charts', 'indicatorSettings', null)
@@ -516,9 +556,14 @@ export default function ChartsPage() {
     setPref('charts', 'symbol', symbol)
   }, [symbol, setPref])
 
+  // 图表偏好 v2（图表类型、主题、时区、坐标、画布…）/ chart prefs v2
+  const [cprefs, updatePrefs, resetPrefs] = useChartPrefs()
   useEffect(() => {
-    setPref('charts', 'interval', interval)
-  }, [interval, setPref])
+    if (LEGACY_INTERVALS.has(interval)) setPref('charts', 'interval', interval)
+    // 云端偏好没回来之前不写 chartv2：防抖保存会拿默认值盖掉云端那份。
+    // Don't write chartv2 before the cloud prefs arrive: the debounced save would overwrite them with defaults.
+    if (loaded) updatePrefs((p) => (p.interval === interval ? p : { ...p, interval }))
+  }, [interval, setPref, loaded, updatePrefs])
 
   // 指标开关/参数落库：与 symbol/interval 同一套模式——setState 的更新函数
   // 只做纯粹的状态计算，落库放到单独的 effect 里对状态变化作出反应，绝不在
@@ -599,11 +644,185 @@ export default function ChartsPage() {
   // Chart instance / indicator series / legend / panes → useChartEngine; history /
   // paging / polling → useChartData. The chart is never hidden any more, so the
   // refit key only changes on entering/leaving fullscreen (a real resize).
-  const engine = useChartEngine(containerRef, shownIndicators, indicatorSettings, isFullscreen, candleColors, markerText)
+  // 引擎的外观输入：主题色板、时区时间格式、坐标模式、K 线部件……全部来自 chartv2。
+  // The engine's look: palette, timezone formatters, scale mode, candle parts… all from chartv2.
+  const { i18n } = useTranslation()
+  const lang = i18n.language || 'zh'
+  const systemDark = useMediaQuery('(prefers-color-scheme: dark)')
+  const themeName = resolveChartTheme(cprefs.theme, systemDark)
+  const palette = useMemo(() => {
+    const base = CHART_PALETTES[themeName]
+    return cprefs.canvas.bg ? { ...base, bg: cprefs.canvas.bg } : base
+  }, [themeName, cprefs.canvas.bg])
+  const ivKind = intervalKind(interval)
+  const timeFmt = useMemo(() => makeTimeFormatters(cprefs.timezone, ivKind, lang), [cprefs.timezone, ivKind, lang])
+  const watermark = cprefs.canvas.watermark && symbol ? `${symbol} · ${intervalLabel(interval)}` : null
+  const view = useMemo<ChartView>(() => ({
+    chartType: cprefs.chartType,
+    palette,
+    candle: cprefs.candle,
+    lineWidth: cprefs.lineWidth,
+    lineColor: cprefs.lineColor,
+    scaleMode: cprefs.scaleMode,
+    invertScale: cprefs.invertScale,
+    grid: cprefs.canvas.grid,
+    crosshair: cprefs.canvas.crosshair,
+    crossStyle: cprefs.canvas.crossStyle,
+    rightOffset: cprefs.canvas.rightOffset,
+    lastPrice: cprefs.lines.lastPrice,
+    indicatorLabels: cprefs.lines.indicatorLabels,
+    transform: cprefs.transform,
+    watermark,
+    time: timeFmt,
+  }), [cprefs.chartType, palette, cprefs.candle, cprefs.lineWidth, cprefs.lineColor, cprefs.scaleMode, cprefs.invertScale, cprefs.canvas.grid, cprefs.canvas.crosshair, cprefs.canvas.crossStyle, cprefs.canvas.rightOffset, cprefs.lines.lastPrice, cprefs.lines.indicatorLabels, cprefs.transform, watermark, timeFmt])
+  const priceBased = PRICE_BASED_TYPES.has(cprefs.chartType)
+
+  const engine = useChartEngine(containerRef, shownIndicators, indicatorSettings, isFullscreen, candleColors, markerText, view)
   const { chartRef, seriesRef, getBarTimes, legendStore, paneOffsets, drawReady } = engine
   const liveBidRef = useRef<number | null>(null)
   const dataKeyRef = useRef('')
-  const { hasData, stale, lastPrice, dayStats } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
+  const { hasData, stale, lastPrice, dayStats, ensureHistory } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
+
+  // ── 阶段 1 的图表交互 / phase-1 chart interactions ──
+  const cvRef = useRef<HTMLDivElement>(null)
+  const [chartSetOpen, setChartSetOpen] = useState(false)
+  const [gotoOpen, setGotoOpen] = useState(false)
+  const [keysOpen, setKeysOpen] = useState(false)
+  const [quick, setQuick] = useState<string | null>(null)
+  const [measureOn, setMeasureOn] = useState(false)
+  const [ctx, setCtx] = useState<CtxState | null>(null)
+  const [rangeBusy, setRangeBusy] = useState(false)
+  const chartBoxRef = useRef<HTMLDivElement>(null)
+  const focusChart = useCallback(() => { chartBoxRef.current?.focus({ preventScroll: true }) }, [])
+  const setFavIntervals = useCallback((codes: string[]) => updatePrefs({ favIntervals: codes }), [updatePrefs])
+  const setScaleMode = useCallback((m: ScaleMode) => updatePrefs({ scaleMode: m }), [updatePrefs])
+  const autoScale = useCallback(() => { chartRef.current?.priceScale('right').applyOptions({ autoScale: true }) }, [chartRef])
+  const resetView = useCallback(() => {
+    const c = chartRef.current
+    if (!c) return
+    c.timeScale().resetTimeScale()
+    c.priceScale('right').applyOptions({ autoScale: true })
+  }, [chartRef])
+
+  // 截图 / screenshot
+  const shotToast = useCallback((r: ShotResult) => {
+    if (r === 'saved') showToast(t('charts.shot.saved'), 'success')
+    else if (r === 'copied') showToast(t('charts.shot.copied'), 'success')
+    else if (r === 'unsupported') showToast(t('charts.shot.unsupported'), 'error')
+    else showToast(t('charts.shot.failed'), 'error')
+  }, [showToast, t])
+  const takeShot = useCallback(async (mode: 'save' | 'copy') => {
+    const c = chartRef.current
+    if (!c) return
+    const now = Math.floor(Date.now() / 1000)
+    const canvas = composeScreenshot(c, `${symbol} · ${intervalLabel(interval)} · ${timeFmt.crosshair(now as never)}`, palette.bg, palette.text)
+    const d = new Date()
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}_${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`
+    shotToast(mode === 'copy' ? await copyScreenshot(canvas) : await saveScreenshot(canvas, `${symbol}_${intervalLabel(interval)}_${stamp}`))
+  }, [chartRef, symbol, interval, timeFmt, palette, shotToast])
+
+  // 时间范围快捷键：先切到对应周期，等新数据到了再补历史、设可见范围。
+  // Range presets: switch to the matching interval, then once its data is in, page history
+  // as needed and set the visible range.
+  const pendingRangeRef = useRef<{ k: RangeKey; tries: number } | null>(null)
+  const [rangeTick, setRangeTick] = useState(0)
+  const applyRange = useCallback((k: RangeKey) => {
+    pendingRangeRef.current = { k, tries: 0 }
+    const iv = RANGE_INTERVAL[k]
+    if (iv !== interval) setIntervalCode(iv)
+    setRangeTick((x) => x + 1)
+  }, [interval])
+  useEffect(() => {
+    const job = pendingRangeRef.current
+    if (!job) return
+    const c = chartRef.current
+    if (!c || dataKeyRef.current !== `${symbol}|${interval}` || engine.candlesRef.current.length === 0) {
+      // 新周期的数据还没到：稍后再看（最多约 10 秒）/ new data not in yet: look again (≤ ~10s)
+      if (job.tries++ > 40) { pendingRangeRef.current = null; return }
+      const id = window.setTimeout(() => setRangeTick((x) => x + 1), 250)
+      return () => window.clearTimeout(id)
+    }
+    pendingRangeRef.current = null
+    const from = rangeFrom(job.k)
+    if (from == null) { c.timeScale().fitContent(); return }
+    let alive = true
+    setRangeBusy(true)
+    ensureHistory(from).finally(() => {
+      if (!alive) return
+      setRangeBusy(false)
+      const to = Math.floor(Date.now() / 1000)
+      try { chartRef.current?.timeScale().setVisibleRange({ from: from as never, to: to as never }) } catch { /* 无数据 / no data */ }
+    })
+    return () => { alive = false; setRangeBusy(false) }
+  }, [rangeTick, symbol, interval, hasData, chartRef, engine.candlesRef, ensureHistory])
+
+  // 跳转到日期：补够历史后把那一根放到屏幕中间。/ Go to date: page enough history, then centre that bar.
+  const goToTime = useCallback(async (ts: number) => {
+    setRangeBusy(true)
+    try { await ensureHistory(ts) } finally { setRangeBusy(false) }
+    const c = chartRef.current
+    if (!c) return
+    const times = engine.barTimesRef.current
+    if (times.length === 0) return
+    let lo = 0
+    let hi = times.length - 1
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (times[mid] < ts) lo = mid + 1; else hi = mid }
+    const ts2 = c.timeScale()
+    const r = ts2.getVisibleLogicalRange()
+    const half = r ? Math.max(10, (r.to - r.from) / 2) : 60
+    ts2.setVisibleLogicalRange({ from: lo - half, to: lo + half })
+    if (lo === 0 && times[0] > ts) showToast(t('charts.goto.earliest'), 'error')
+  }, [ensureHistory, chartRef, engine.barTimesRef, showToast, t])
+
+  // 键盘快捷键（列表见 ShortcutsDialog）/ keyboard shortcuts (listed in ShortcutsDialog)
+  useChartHotkeys(cvRef, {
+    quickInput: (c) => setQuick(c),
+    reset: resetView,
+    goto: () => setGotoOpen(true),
+    toggleLog: () => setScaleMode(cprefs.scaleMode === 1 ? 0 : 1),
+    togglePercent: () => setScaleMode(cprefs.scaleMode === 2 ? 0 : 2),
+    toggleInvert: () => updatePrefs({ invertScale: !cprefs.invertScale }),
+    scroll: (n) => { const ts = chartRef.current?.timeScale(); if (ts) ts.scrollToPosition(ts.scrollPosition() + n, false) },
+    zoom: (f) => {
+      const ts = chartRef.current?.timeScale()
+      if (!ts) return
+      ts.applyOptions({ barSpacing: Math.max(0.5, Math.min(60, ts.options().barSpacing * f)) })
+    },
+    screenshot: () => { void takeShot('save') },
+    help: () => setKeysOpen(true),
+  }, !isFullscreen)
+
+  // 交易日分隔线 primitive / session-break primitive
+  const breaksRef = useRef<SessionBreaks | null>(null)
+  const breaksOn = cprefs.lines.sessionBreaks && ivKind === 'intraday' && !priceBased
+  useEffect(() => {
+    const series = seriesRef.current
+    if (!drawReady || !series || !breaksOn) return
+    const sb = new SessionBreaks()
+    sb.enabled = true
+    sb.color = palette.sessionBreak
+    series.attachPrimitive(sb)
+    breaksRef.current = sb
+    return () => { try { series.detachPrimitive(sb) } catch { /* 图表已销毁 / chart gone */ } breaksRef.current = null }
+  }, [drawReady, seriesRef, breaksOn, palette.sessionBreak])
+
+  // 右键菜单（桌面）/ context menu (desktop)
+  const onChartContextMenu = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDesktop || e.defaultPrevented) return
+    const c = chartRef.current
+    const s = seriesRef.current
+    const host = containerRef.current
+    if (!c || !s || !host) return
+    e.preventDefault()
+    const r = host.getBoundingClientRect()
+    const x = e.clientX - r.left
+    const y = e.clientY - r.top
+    const zone = x > c.timeScale().width() ? 'price' : 'pane'
+    const price = s.coordinateToPrice(y)
+    setCtx({ x: e.clientX, y: e.clientY, zone, price: price == null ? null : Number(price) })
+  }, [isDesktop, chartRef, seriesRef])
+  const closeCtx = useCallback(() => setCtx(null), [])
+  const doneMeasure = useCallback(() => setMeasureOn(false), [])
 
   // 手机报价条第二行：左边约 2/3 是常驻的画线工具横条（左右滑动看全部工具），
   // 右边是「指标」和设置齿轮（设置里含显示持仓开关）。底部工具条只留周期与持仓，一行放得下。
@@ -620,14 +839,7 @@ export default function ChartsPage() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-6 4 4 8-9" /><path d="M3 21h18" /></svg>
           {t('charts.indicators.short')}
         </button>
-        <ChartSettingsMenu
-          showCountdown={showCountdown}
-          onShowCountdown={setShowCountdown}
-          candleColors={candleColors}
-          onCandleColors={changeCandleColors}
-          showPositions={showPositions}
-          onShowPositions={setShowPositions}
-        />
+        <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
       </div>
     </>
   )
@@ -723,19 +935,22 @@ export default function ChartsPage() {
           />
         )}
 
-        <div className="term-cv">
+        <div ref={cvRef} className={`term-cv ${isDesktop && !isFullscreen ? 'has-bb' : ''}`}>
           {/* 画线竖轨（桌面；全屏时换成悬浮工具栏）。引擎就绪前先占位，免得网格跳动。
               Draw rail (desktop; fullscreen uses the floating toolbar). A placeholder
               holds the column before the engine is ready so the grid doesn't jump. */}
           {!isFullscreen && (drawReady
-            ? <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
+            ? <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} measureOn={measureOn} onMeasure={() => setMeasureOn((v) => !v)} />
             : <div className="term-rail" />)}
 
           {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
               Toolbar: intervals left; positions (mobile) · pen (mobile) · markers · indicators right */}
           {!isFullscreen && (
             <div className="term-tb">
-              <IntervalSeg value={interval} onChange={setIntervalCode} />
+              <IntervalSeg value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />
+              <IntervalMenu value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
+              <span className="term-toolbar-divider" aria-hidden />
+              <ChartTypeMenu value={cprefs.chartType} onChange={(v) => updatePrefs({ chartType: v })} />
               <div className="term-tbr">
                 <button type="button" className="term-tbr-btn term-tbr-btn--pos lg:hidden" onClick={() => { setSheetDockTab('positions'); setSheet('positions') }}>
                   {t('charts.openPositions')} <b><PositionsCount scopeLogin={scopeLogin} /></b>
@@ -745,12 +960,10 @@ export default function ChartsPage() {
                     row (mobileTools); here they're desktop-only. */}
                 <div className="hidden lg:contents">
                   <PositionMarkerToggle on={showPositions} onToggle={() => setShowPositions((v) => !v)} t={t} />
-                  <ChartSettingsMenu
-                    showCountdown={showCountdown}
-                    onShowCountdown={setShowCountdown}
-                    candleColors={candleColors}
-                    onCandleColors={changeCandleColors}
-                  />
+                  <button type="button" className="term-tool-btn" onClick={() => void takeShot('save')} title={`${t('charts.shot.save')} (Ctrl+Alt+S)`} aria-label={String(t('charts.shot.save'))}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
+                  </button>
+                  <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
                   <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
                     {t('charts.indicators.button')}
                   </button>
@@ -760,18 +973,22 @@ export default function ChartsPage() {
           )}
 
           {/* 图表容器：无缝，填满网格剩余高度。/ Chart container: seamless, fills the grid. */}
-          {/* tabIndex 让图表本身能拿到焦点：点一下图表焦点就落到这里，画线的单键快捷键
-              （DrawLayer 里的 1-8、Delete）只在焦点处于图表区时生效；键盘用户也能 Tab 到
-              图表再用这些键。role="group" 加名字，读屏进来时报「行情图表，分组」。
+          {/* tabIndex 让图表本身能拿到焦点：点一下图表焦点就落到这里，图表快捷键（画线的
+              Alt+字母、Delete，快速输入的数字 / 字母，见 useChartHotkeys）只在焦点处于图表区时
+              生效；键盘用户也能 Tab 到图表再用这些键。role="group" 加名字，读屏进来时报「行情图表，分组」。
               tabIndex makes the chart itself focusable: a click on the chart lands focus
-              here, and DrawLayer's single-key shortcuts (1-8, Delete) only act while focus
-              is in the chart area; keyboard users can Tab to the chart and use them too.
+              here, and the chart shortcuts (DrawLayer's Alt+letter and Delete, quick input's
+              digits / letters, see useChartHotkeys) only act while focus is in the chart
+              area; keyboard users can Tab to the chart and use them too.
               role="group" with a name, so a screen reader says "Charts, group" on entry. */}
           <div
-            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''}`}
+            ref={chartBoxRef}
+            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''} ${cprefs.legend.title || cprefs.legend.ohlc || cprefs.legend.change || cprefs.legend.volume ? 'has-status' : ''} ${cprefs.legend.indicators ? '' : 'no-ind-legend'}`}
+            data-ctheme={themeName}
             tabIndex={0}
             role="group"
             aria-label={t('nav.charts')}
+            onContextMenu={onChartContextMenu}
           >
             {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
             <button
@@ -799,7 +1016,7 @@ export default function ChartsPage() {
             </button>
 
             {/* 全屏态时间周期切换：右上角横排 */}
-            {isFullscreen && <IntervalSeg variant="fullscreen" value={interval} onChange={setIntervalCode} />}
+            {isFullscreen && <IntervalSeg variant="fullscreen" value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />}
 
             <div ref={containerRef} className="h-full w-full" />
             {/* 持仓标记层：入场价/止损/止盈线 + 拖动改单。刻意排在画图层之前——两层
@@ -822,7 +1039,7 @@ export default function ChartsPage() {
                 onToast={showToast}
               />
             )}
-            {showCountdown && hasData && drawReady && chartRef.current && seriesRef.current && (
+            {showCountdown && !priceBased && hasData && drawReady && chartRef.current && seriesRef.current && (
               <BarCountdown
                 chart={chartRef.current}
                 series={seriesRef.current}
@@ -846,8 +1063,38 @@ export default function ChartsPage() {
             )}
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
 
+            {/* 主图状态行：品种 · 周期 · OHLC · 涨跌 / main status line */}
+            <ChartLegend store={engine.ohlcStore} symbol={symbol} interval={interval} chartType={cprefs.chartType} decimals={decimals} legend={cprefs.legend} colors={candleColors} />
             {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
             <IndicatorLegends indicators={shownIndicators} indicatorSettings={indicatorSettings} legendStore={legendStore} paneOffsets={paneOffsets} decimals={decimals} />
+
+            {drawReady && chartRef.current && seriesRef.current && (
+              <ChartPriceLines
+                chart={chartRef.current}
+                series={seriesRef.current}
+                symbol={symbol}
+                interval={interval}
+                candlesRef={engine.candlesRef}
+                palette={palette}
+                bidAsk={cprefs.lines.bidAsk}
+                highLow={cprefs.lines.highLow}
+                prevClose={cprefs.lines.prevClose && !priceBased}
+                labels={{ bid: String(t('charts.lines.bid')), ask: String(t('charts.lines.ask')), high: String(t('charts.lines.high')), low: String(t('charts.lines.low')), prev: String(t('charts.lines.prev')) }}
+              />
+            )}
+            {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
+              <MeasureOverlay chart={chartRef.current} series={seriesRef.current} host={containerRef.current} armed={measureOn} onDone={doneMeasure} decimals={decimals} barTimes={getBarTimes} colors={candleColors} />
+            )}
+            {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
+            {quick != null && (
+              <QuickInput
+                initial={quick}
+                symbols={activeSymbols}
+                onInterval={setIntervalCode}
+                onSymbol={setSymbol}
+                onClose={() => { setQuick(null); focusChart() }}
+              />
+            )}
 
             {/* 全屏态悬浮画线工具栏（可拖移）*/}
             {isFullscreen && drawReady && (
@@ -865,7 +1112,59 @@ export default function ChartsPage() {
             )}
           </div>
 
+          {isDesktop && !isFullscreen && (
+            <ChartBottomBar
+              timezone={cprefs.timezone}
+              onTimezone={(tz) => updatePrefs({ timezone: tz })}
+              scaleMode={cprefs.scaleMode}
+              onScaleMode={setScaleMode}
+              onAutoScale={autoScale}
+              onRange={applyRange}
+              onGoToDate={() => setGotoOpen(true)}
+              busy={rangeBusy}
+            />
+          )}
         </div>
+
+        {chartSetOpen && (
+          <ChartSettingsDialog
+            prefs={cprefs}
+            update={updatePrefs}
+            reset={resetPrefs}
+            candleColors={candleColors}
+            onCandleColors={changeCandleColors}
+            showCountdown={showCountdown}
+            onShowCountdown={setShowCountdown}
+            showPositions={showPositions}
+            onShowPositions={setShowPositions}
+            afterPlaceOpen={afterPlaceOpen}
+            onAfterPlaceOpen={setAfterPlaceOpen}
+            onClose={() => setChartSetOpen(false)}
+          />
+        )}
+        {gotoOpen && <GoToDateDialog timezone={cprefs.timezone} onGo={(ts) => { void goToTime(ts) }} onClose={() => { setGotoOpen(false); focusChart() }} />}
+        {keysOpen && <ShortcutsDialog onClose={() => { setKeysOpen(false); focusChart() }} />}
+        {ctx && (
+          <ChartContextMenu
+            state={ctx}
+            onClose={closeCtx}
+            decimals={decimals}
+            actions={{
+              reset: resetView,
+              copyPrice: (pr) => { void navigator.clipboard?.writeText(pr.toFixed(decimals)).then(() => showToast(t('charts.ctx.copied'), 'success')).catch(() => {}) },
+              goto: () => setGotoOpen(true),
+              screenshot: () => { void takeShot('save') },
+              copyShot: canCopyImage() ? () => { void takeShot('copy') } : null,
+              settings: () => setChartSetOpen(true),
+              help: () => setKeysOpen(true),
+              autoScale,
+              scaleMode: cprefs.scaleMode,
+              setScaleMode,
+              invert: cprefs.invertScale,
+              setInvert: (v) => updatePrefs({ invertScale: v }),
+            }}
+          />
+        )}
 
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
         {isDesktop && !isFullscreen && (

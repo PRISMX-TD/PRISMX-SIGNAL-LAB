@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { displaySymbol } from '../../api/utils'
 import { symbolMeta } from '../../utils/symbolMeta'
 import { useClock } from '../signals/hooks'
-import { INTERVALS } from './chartConfig'
+import { intervalLabel } from './intervals'
 import { EMPTY } from '../../utils/format'
 
 export interface DayStats {
@@ -98,7 +98,7 @@ export default function SymbolHeader({ symbol, interval, tools, bid, ask, digits
   const headline = bid ?? (fallbackPrice || null)
   const parts = splitPrice(headline, digits)
   const meta = symbolMeta(symbol)
-  const ivLabel = INTERVALS.find((iv) => iv.code === interval)?.label ?? interval
+  const ivLabel = intervalLabel(interval)
 
   return (
     <div className={`term-qs ${quotesDown ? 'quotes-down' : ''}`}>

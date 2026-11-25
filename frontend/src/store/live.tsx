@@ -11,6 +11,7 @@ import { keepIfEqual } from './keepIfEqual'
 import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
+import { emitChartDrawingsUpdate } from '../utils/chartDrawingsEvents'
 import { isAppHidden, onForeground, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT } from '../utils/appVisibility'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { upsertOrderList } from './orderMerge'
@@ -848,6 +849,18 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       case 'PREFS_UPDATE': {
         // 其它设备保存了偏好（如画线）：实时应用到本设备 / another device saved prefs (e.g. drawings)
         applyRemotePrefs((msg.data as Record<string, unknown>) || {})
+        break
+      }
+      case 'CHART_DRAWINGS_UPDATE': {
+        // 某品种的画线刚被保存（可能是本设备）：只转成 window 事件，画线层自己决定要不要重拉。
+        // A symbol's drawings were just saved (maybe by this device): re-dispatch as a window
+        // event; the drawing layer decides whether to refetch. See utils/chartDrawingsEvents.
+        const d = msg.data as { symbol?: unknown; updatedAt?: unknown } | undefined
+        if (!d || typeof d.symbol !== 'string') break
+        emitChartDrawingsUpdate({
+          symbol: d.symbol,
+          updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : null,
+        })
         break
       }
       case 'CLOSED_TRADE_NEW':

@@ -9,11 +9,14 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useSta
 import { useTranslation } from 'react-i18next'
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type {
-  IChartApi, ISeriesApi, UTCTimestamp, IPrimitivePaneView,
+  IChartApi, UTCTimestamp, IPrimitivePaneView,
   IPrimitivePaneRenderer, PrimitiveHoveredItem, AutoscaleInfo,
   Logical, PrimitivePaneViewZOrder, MouseEventParams,
 } from 'lightweight-charts'
+import type { MainSeriesApi } from './useChartEngine'
 import { usePrefs } from '../../store/prefs'
+import { chartApi } from '../../api/client'
+import { onChartDrawingsUpdate } from '../../utils/chartDrawingsEvents'
 import ConfirmModal from '../ConfirmModal'
 import { useBackToClose } from '../../utils/useBackToClose'
 import { isChartAlive } from './chartLifecycle'
@@ -42,7 +45,15 @@ export interface DrawLayerHandle {
   unlockAll: () => void
   undo: () => void
   redo: () => void
+  // 磁吸：画线时把点吸到 K 线的开高低收上（weak = 靠近才吸，strong = 总是吸）
+  // Magnet: snap points to the bar's OHLC while drawing (weak = when close, strong = always)
+  magnet: MagnetMode
+  setMagnet: (m: MagnetMode) => void
 }
+
+export type MagnetMode = 'off' | 'weak' | 'strong'
+const MAGNET_WEAK_PX = 18
+const SAVE_DEBOUNCE_MS = 800
 
 // 工具分组与竖排工具栏已随 hideToolbar 一起删除；工具由图表页的工具栏经 ref 切换。
 // Tool groups / the vertical toolbar were removed with hideToolbar; the page's own toolbar drives tools via the ref.
@@ -50,8 +61,12 @@ export interface DrawLayerHandle {
 // ──── 常量 / constants ────
 interface Point { t: number; p: number }
 interface Drawing { id: string; type: DrawType; pts: Point[]; color: string; locked?: boolean; lineWidth?: number; lineStyle?: 'solid' | 'dashed' | 'dotted' }
+// 每个品种最近一次的画线（本次会话内的内存缓存）：切回来先秒显示，再后台核对云端。
+// Latest drawings per symbol (in-memory for this session): shown at once on switching back,
+// then checked against the cloud in the background.
+const drawCache = new Map<string, Drawing[]>()
 interface Props {
-  chart: IChartApi; series: ISeriesApi<'Candlestick'>; host: HTMLDivElement; symbol: string; barTimes: () => number[]; digits?: number
+  chart: IChartApi; series: MainSeriesApi; host: HTMLDivElement; symbol: string; barTimes: () => number[]; digits?: number
   // 句柄上的状态（当前工具 / 选中 / 数量…）提交后通知外部工具栏重渲染。外部点按钮时页面会先于
   // 本组件重渲染、读到旧句柄，按下态就慢一拍；画完自动回到光标也不会反映到工具栏上。
   // Fires after the handle's state (tool / selection / counts…) commits, so external toolbars
@@ -179,7 +194,7 @@ class DrawPrimitive {
   pts: Point[]
 
   private _chart: IChartApi | null = null
-  private _series: ISeriesApi<'Candlestick'> | null = null
+  private _series: MainSeriesApi | null = null
   private _ru: (() => void) | null = null
   _pv: PaneViewImpl
   digits: number
@@ -197,7 +212,7 @@ class DrawPrimitive {
   }
 
   // ISeriesPrimitive lifecycle
-  attached(p: { chart: IChartApi; series: ISeriesApi<'Candlestick'>; requestUpdate: () => void }) {
+  attached(p: { chart: IChartApi; series: MainSeriesApi; requestUpdate: () => void }) {
     this._chart = p.chart
     this._series = p.series
     this._ru = p.requestUpdate
@@ -487,6 +502,15 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
   const [drawCount, setDrawCount] = useState(0)
   const [stayInDraw, setStayInDraw] = useState(false)
   const [visible, setVisible] = useState(true)
+  const visibleRef = useRef(true)
+  visibleRef.current = visible
+  const [magnet, setMagnetState] = useState<MagnetMode>(() => {
+    const m = getPref<string>('charts', 'drawMagnet', 'off')
+    return m === 'weak' || m === 'strong' ? m : 'off'
+  })
+  const magnetRef = useRef(magnet)
+  magnetRef.current = magnet
+  const setMagnet = useCallback((m: MagnetMode) => { setMagnetState(m); setPref('charts', 'drawMagnet', m) }, [setPref])
 
   // undo/redo
   const undoStackRef = useRef<Drawing[][]>([])
@@ -537,7 +561,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
   // ──── attach/detach primitives to/from series ────
   const syncPrims = useCallback((list: Drawing[]) => {
     const map = primsRef.current
-    const keep = new Set(list.map((d) => d.id))
+    // 「隐藏全部」：真正把 primitive 摘掉（以前只藏了交互层，线还画在图上）。
+    // "Hide all" really detaches the primitives (it used to hide only the interaction layer).
+    const keep = new Set(visibleRef.current ? list.map((d) => d.id) : [])
 
     // detach removed
     for (const [id, prim] of map) {
@@ -548,7 +574,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
     }
 
     // attach new or update existing
-    for (const d of list) {
+    for (const d of visibleRef.current ? list : []) {
       let prim = map.get(d.id)
       if (!prim) {
         prim = new DrawPrimitive(d, digits)
@@ -579,17 +605,49 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
     redoStackRef.current = []
   }, [])
 
+  // ──── 云端保存（rev 55 chart_drawings 表）/ cloud save (rev 55 chart_drawings table) ────
+  // 防抖后整组覆盖保存；lastSavedAtRef 记住自己最近一次保存的 updatedAt，WS 推回来的同一次
+  // 保存就不再重拉。切品种 / 卸载 / 退到后台时立即发出未保存的那份。
+  // Debounced whole-array save; lastSavedAtRef remembers our latest save's updatedAt so the WS
+  // echo of that save doesn't trigger a refetch. Pending saves flush on symbol switch /
+  // unmount / backgrounding.
+  const pendingRef = useRef<{ symbol: string; list: Drawing[] } | null>(null)
+  const saveTimerRef = useRef<number | undefined>(undefined)
+  const lastSavedAtRef = useRef<string | null>(null)
+  const flushSave = useCallback(() => {
+    window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = undefined
+    const job = pendingRef.current
+    if (!job) return
+    pendingRef.current = null
+    chartApi.saveDrawings(job.symbol, job.list)
+      .then((r) => { lastSavedAtRef.current = r.updatedAt ?? null })
+      .catch(() => { /* 下次改动会再存；本机缓存里还有 / the next edit saves again; the cache still has it */ })
+  }, [])
+  const scheduleSave = useCallback((sym: string, list: Drawing[]) => {
+    drawCache.set(sym, list)
+    pendingRef.current = { symbol: sym, list }
+    window.clearTimeout(saveTimerRef.current)
+    saveTimerRef.current = window.setTimeout(flushSave, SAVE_DEBOUNCE_MS)
+  }, [flushSave])
+  useEffect(() => {
+    const onHide = () => { if (document.visibilityState === 'hidden') flushSave() }
+    document.addEventListener('visibilitychange', onHide)
+    window.addEventListener('pagehide', flushSave)
+    return () => { document.removeEventListener('visibilitychange', onHide); window.removeEventListener('pagehide', flushSave); flushSave() }
+  }, [flushSave])
+
   const commitNoHistory = useCallback((next: Drawing[]) => {
     appliedRef.current = JSON.stringify(next)
     drawingsRef.current = next
     setDrawings(next); setDrawCount(next.length)
-    setPref('chartDraw', symbol, next)
+    scheduleSave(symbol, next)
     syncPrims(next)
     // refresh selected renderer states
     for (const [id, prim] of primsRef.current) {
       prim._pv._renderer._selected = id === selectedRef.current
     }
-  }, [setPref, symbol, syncPrims])
+  }, [scheduleSave, symbol, syncPrims])
 
   const commit = useCallback((next: Drawing[]) => {
     pushUndo(drawingsRef.current)
@@ -666,27 +724,84 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
     tool, setTool, color, setColor, selectedId, drawCount, lockedCount,
     stayInDraw, setStayInDraw, visible, setVisible,
     deleteSelected, clearAll, applyColor,
-    toggleLock, lockAll, unlockAll, undo, redo,
-  }), [tool, color, selectedId, drawCount, lockedCount, stayInDraw, visible, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo])
+    toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet,
+  }), [tool, color, selectedId, drawCount, lockedCount, stayInDraw, visible, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet])
   const onStateChangeRef = useRef(onStateChange)
   onStateChangeRef.current = onStateChange
-  useEffect(() => { onStateChangeRef.current?.() }, [tool, color, selectedId, drawCount, lockedCount, stayInDraw, visible])
+  useEffect(() => { onStateChangeRef.current?.() }, [tool, color, selectedId, drawCount, lockedCount, stayInDraw, visible, magnet])
+
+  // 显示 / 隐藏全部：重新对账 primitive；隐藏时顺带取消选中。
+  // Show / hide all: re-reconcile the primitives; hiding also clears the selection.
+  useEffect(() => {
+    if (!visible) { setSelectedId(null); setPropsPanel(null) }
+    syncPrims(drawingsRef.current)
+  }, [visible, syncPrims])
 
   // ──── 加载 / load ────
-  useEffect(() => {
-    const saved = getPref<Drawing[]>('chartDraw', symbol, [])
-    const arr = Array.isArray(saved) ? saved : []
+  // 2026-11-25 起画线存在 chart_drawings 表（每品种一行，GET/PUT /chart/drawings），不再放进
+  // prefs 的 chartDraw 命名空间——那份文档每次登录整份下发。先显示本机缓存（或旧 chartDraw
+  // 里的那份），再拉云端；云端还没有这一行而旧数据里有，就把旧数据搬上去（一次性迁移）。
+  // 旧 chartDraw 数据原样保留不删，旧 App 包仍读得到。
+  // Since 2026-11-25 drawings live in the chart_drawings table (a row per symbol, GET/PUT
+  // /chart/drawings) instead of the prefs chartDraw namespace, a document shipped whole on
+  // every login. Show the local cache (or the legacy chartDraw copy) first, then fetch the
+  // cloud; when the cloud has no row but the legacy data does, upload it (one-off migration).
+  // Legacy chartDraw data is left untouched so old App bundles still read it.
+  const legacyOf = useCallback((sym: string): Drawing[] => {
+    const saved = getPref<Drawing[]>('chartDraw', sym, [])
+    return Array.isArray(saved) ? saved : []
+  }, [getPref])
+  const legacyRef = useRef(legacyOf)
+  legacyRef.current = legacyOf
+  const applyList = useCallback((arr: Drawing[], resetSel: boolean) => {
     const json = JSON.stringify(arr)
-    if (symRef.current === symbol && json === appliedRef.current) return
-    symRef.current = symbol; appliedRef.current = json
-    setDrawings(arr); setDrawCount(arr.length); setSelectedId(null); setPropsPanel(null)
+    if (json === appliedRef.current) return
+    appliedRef.current = json
+    drawingsRef.current = arr
+    setDrawings(arr); setDrawCount(arr.length)
+    if (resetSel) { setSelectedId(null); setPropsPanel(null) }
+    syncPrims(arr)
+  }, [syncPrims])
+  const fetchCloud = useCallback((sym: string, migrate: boolean) => {
+    chartApi.getDrawings(sym).then((r) => {
+      if (symRef.current !== sym || pendingRef.current?.symbol === sym) return
+      const cloud = Array.isArray(r.drawings) ? (r.drawings as Drawing[]) : []
+      if (r.updatedAt == null && migrate) {
+        const legacy = legacyRef.current(sym)
+        if (legacy.length > 0) { scheduleSave(sym, legacy); flushSave(); applyList(legacy, false); return }
+      }
+      lastSavedAtRef.current = r.updatedAt ?? null
+      drawCache.set(sym, cloud)
+      applyList(cloud, false)
+    }).catch(() => { /* 离线 / 未登录：保持本机显示 / offline or signed out: keep the local copy */ })
+  }, [applyList, scheduleSave, flushSave])
+  const loadedSymRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (loadedSymRef.current === symbol) return
+    // 切品种前把上一个品种没存的发出去 / flush the previous symbol's pending save first
+    if (pendingRef.current && pendingRef.current.symbol !== symbol) flushSave()
+    loadedSymRef.current = symbol
+    symRef.current = symbol
+    undoStackRef.current = []; redoStackRef.current = []
+    const arr = drawCache.get(symbol) ?? legacyRef.current(symbol)
     // detach all then re-sync
     for (const [, prim] of primsRef.current) {
       try { series.detachPrimitive(prim as any) } catch { /* may already be detached */ }
     }
     primsRef.current.clear()
-    syncPrims(arr)
-  }, [symbol, getPref, series, syncPrims])
+    appliedRef.current = ''
+    applyList(arr, true)
+    // 品种列表还没到时 symbol 是空串，不去拉（后端会回 422）。
+    // symbol is '' until the symbol list arrives; don't fetch then (the backend would 422).
+    if (symbol) fetchCloud(symbol, !drawCache.has(symbol))
+  }, [symbol, series, applyList, fetchCloud, flushSave])
+  // 别的设备改了这个品种的画线：重拉（自己这次保存的回声跳过）。
+  // Another device changed this symbol's drawings: refetch (skip the echo of our own save).
+  useEffect(() => onChartDrawingsUpdate((d) => {
+    if (d.symbol !== symRef.current || d.updatedAt === lastSavedAtRef.current || pendingRef.current) return
+    if (dragRef.current) return
+    fetchCloud(d.symbol, false)
+  }), [fetchCloud])
 
   // 卸载时把所有 primitive 从 series 上摘掉。切品种那条路径早就 detach 了，唯独
   // 卸载没有——现在不暴雷只是因为父组件紧接着就 chart.remove() 把整张图连锅端了，
@@ -847,6 +962,32 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
     return () => chart.unsubscribeClick(onClick)
   }, [chart, hitDrawing])
 
+  // 磁吸：把 (x, y) 吸到最近一根 K 线的开高低收上。strong 总是吸（x 也对到 K 线中心），
+  // weak 只在离某个价位 MAGNET_WEAK_PX 以内时吸。
+  // Magnet: snap (x, y) to the nearest bar's OHLC. strong always snaps (x to the bar centre
+  // too); weak only within MAGNET_WEAK_PX of a level.
+  const snap = useCallback((x: number, y: number): { x: number; y: number } => {
+    const m = magnetRef.current
+    if (m === 'off') return { x, y }
+    const ts = chart.timeScale()
+    const lg = ts.coordinateToLogical(x)
+    if (lg == null) return { x, y }
+    const idx = Math.round(lg)
+    const bar = series.dataByIndex(idx) as { open?: number; high?: number; low?: number; close?: number } | null
+    if (!bar || bar.high == null || bar.low == null || bar.open == null || bar.close == null) return { x, y }
+    let best: number | null = null
+    let dist = Infinity
+    for (const p of [bar.open, bar.high, bar.low, bar.close]) {
+      const py = series.priceToCoordinate(p)
+      if (py == null) continue
+      const d = Math.abs(py - y)
+      if (d < dist) { dist = d; best = py }
+    }
+    if (best == null || (m === 'weak' && dist > MAGNET_WEAK_PX)) return { x, y }
+    const cx = ts.logicalToCoordinate(idx as Logical)
+    return { x: m === 'strong' && cx != null ? cx : x, y: best }
+  }, [chart, series])
+
   const onDown = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     // 第二根手指：画到一半就作废这一笔（否则临时线留在图上成了「幽灵线」）；挪动 / 拉手柄
     // 时不理它，继续只跟第一根手指（onMove / onUp / onCancel 按 pointerId 过滤）。
@@ -872,6 +1013,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
 
     // drawing tool active
     if (cur !== 'cursor' && cur !== 'cross') {
+      ;({ x, y } = snap(x, y))
       // single-click tools
       if (cur === 'hline' || cur === 'vline' || cur === 'crossline') {
         const p = series.coordinateToPrice(y) as number | null
@@ -942,12 +1084,13 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
       touchSelRef.current = false
       setSelectedId(null); setPropsPanel(null)
     }
-  }, [chart, series, commit, hitDrawing, hitHandle, digits, removeTempPrim])
+  }, [chart, series, commit, hitDrawing, hitHandle, digits, removeTempPrim, snap])
 
   const onMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     if (!drag || e.pointerId !== drag.pointerId) return
-    const { x, y } = localXY(e)
+    let { x, y } = localXY(e)
+    if (drag.mode !== 'move') ({ x, y } = snap(x, y))
     // 起拖阈值：挪线 / 拉手柄要先走出 slop（鼠标 6px、手指 10px）。过了阈值后仍按原始按下点
     // 1:1 跟随，线停在手指按住它的位置上。
     // Threshold: a move / handle drag waits until the pointer leaves the slop (6px mouse,
@@ -1011,7 +1154,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
         syncPrims(list.map((d) => d.id === drag.id ? { ...d, pts: newPts } : d))
       }
     }
-  }, [chart, series, syncPrims])
+  }, [chart, series, syncPrims, snap])
 
   const onUp = useCallback((e?: RPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
@@ -1185,9 +1328,16 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, onStateC
         if (inTextField(e.target) || !inChartArea()) return
         commit(drawingsRef.current.filter((d) => d.id !== selectedRef.current))
         setSelectedId(null); setPropsPanel(null)
-      } else if (!inTextField(e.target) && inChartArea() && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        const map: Record<string, Tool> = { '1': 'cursor', '2': 'trend', '3': 'hline', '4': 'vline', '5': 'rect', '6': 'fib', '7': 'ray', '8': 'crossline' }
-        if (map[e.key]) { setTool(map[e.key]); setSelectedId(null) }
+      } else if (!inTextField(e.target) && inChartArea() && e.altKey && !e.ctrlKey && !e.metaKey) {
+        // 2026-11-25 起同 TradingView：数字 / 字母键留给快速输入（周期 / 品种），画线工具改用
+        // Alt+字母。按 e.code 认键：Mac 上 Option 会把 e.key 变成特殊字符。
+        // Since 2026-11-25, as in TradingView: digits / letters go to quick input (interval /
+        // symbol) and tools use Alt+letter. Matched on e.code: Option changes e.key on a Mac.
+        const map: Record<string, Tool> = e.shiftKey
+          ? { KeyR: 'rect', KeyT: 'ray' }
+          : { KeyT: 'trend', KeyH: 'hline', KeyV: 'vline', KeyC: 'crossline', KeyF: 'fib' }
+        const tool = map[e.code]
+        if (tool) { e.preventDefault(); setTool(tool); setSelectedId(null) }
       }
     }
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey)

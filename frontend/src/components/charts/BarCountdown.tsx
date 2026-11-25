@@ -16,7 +16,8 @@
 // server-calibrated clock (utils/serverClock). Hidden while the feed is stale
 // (closed market / outage).
 import { useEffect, useRef } from 'react'
-import type { IChartApi, ISeriesApi } from 'lightweight-charts'
+import type { IChartApi } from 'lightweight-charts'
+import type { MainSeriesApi } from './useChartEngine'
 import type { Candle } from '../../api/types'
 import { serverNowMs } from '../../utils/serverClock'
 import { barCloseCountdownSec, fmtCountdown, type CandleColors } from './chartConfig'
@@ -29,7 +30,7 @@ const LABEL_HALF_PX = 9
 
 interface Props {
   chart: IChartApi
-  series: ISeriesApi<'Candlestick'>
+  series: MainSeriesApi
   interval: string
   candlesRef: { current: Candle[] }
   colors: CandleColors

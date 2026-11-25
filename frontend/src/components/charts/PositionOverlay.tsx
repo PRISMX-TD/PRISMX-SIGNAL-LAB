@@ -27,9 +27,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as
 import { useTranslation } from 'react-i18next'
 import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type {
-  IChartApi, ISeriesApi, IPrimitivePaneView, IPrimitivePaneRenderer,
+  IChartApi, IPrimitivePaneView, IPrimitivePaneRenderer,
   AutoscaleInfo, Logical, HandleScrollOptions, MouseEventParams,
 } from 'lightweight-charts'
+import type { MainSeriesApi } from './useChartEngine'
 import type { PendingOrder, Position } from '../../api/types'
 import { orderApi } from '../../api/client'
 import { baseSymbol, clientOrderId, localizeApiError } from '../../api/utils'
@@ -220,7 +221,7 @@ interface RenderModel {
 }
 
 class PosPrimitive {
-  private _series: ISeriesApi<'Candlestick'> | null = null
+  private _series: MainSeriesApi | null = null
   private _ru: (() => void) | null = null
   private _get: () => RenderModel
   _pv: PosPaneView
@@ -230,7 +231,7 @@ class PosPrimitive {
     this._pv = new PosPaneView(this)
   }
 
-  attached(p: { chart: IChartApi; series: ISeriesApi<'Candlestick'>; requestUpdate: () => void }) {
+  attached(p: { chart: IChartApi; series: MainSeriesApi; requestUpdate: () => void }) {
     this._series = p.series
     this._ru = p.requestUpdate
   }
@@ -312,7 +313,7 @@ class PosPrimitive {
   // One horizontal line + a left-side label (draggable ones thicken and show a
   // grip while hovered/dragged).
   private _line(
-    ctx: CanvasRenderingContext2D, w: number, series: ISeriesApi<'Candlestick'>,
+    ctx: CanvasRenderingContext2D, w: number, series: MainSeriesApi,
     price: number, color: string, label: string, dash: number[],
     hovered: boolean, dragging: boolean, draggable: boolean, taken: LabelBox[],
     h: number,
@@ -408,7 +409,7 @@ class PosRenderer implements IPrimitivePaneRenderer {
 // ──── 组件 / component ────
 interface Props {
   chart: IChartApi
-  series: ISeriesApi<'Candlestick'>
+  series: MainSeriesApi
   // 已按选中账户过滤好的持仓（ChartsPage 的 accountPositions）；本组件再按品种筛。
   // Positions already filtered by the selected account; filtered by symbol here.
   positions: Position[]

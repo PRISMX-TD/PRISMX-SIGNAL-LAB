@@ -3,7 +3,7 @@
 // Chart data: history snapshot on symbol/interval change, backward paging, the
 // latest-price poll, day stats and the stale flag. Moved out of ChartsPage
 // verbatim on 2026-09-06; every ref comes from useChartEngine.
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { chartApi } from '../../api/client'
 import type { Candle } from '../../api/types'
 import type { DayStats } from './SymbolHeader'
@@ -11,11 +11,10 @@ import {
   FOLLOW_LIVE_SLACK_BARS,
   HISTORY_FIRST_PAGE, HISTORY_PAGE_SIZE, HISTORY_PREFETCH_BARS, MAX_CLIENT_BARS, POLL_MS, POLL_SLOW_MS, STALE_MS, WS_FRESH_MS,
   BOUNDARY_RETRIES, BOUNDARY_RETRY_MS, nextBoundaryPollDelayMs, TAIL_REFILL_MIN_GAP_MS, barSpacingSeconds,
-  computeDayStats, toLwPoint,
+  computeDayStats,
 } from './chartConfig'
 import type { ChartEngine } from './useChartEngine'
-import { createChartFeed, fmtMonthTime } from './derivedIntervals'
-import { fmtChartTime } from '../../utils/chartSeries'
+import { createChartFeed } from './derivedIntervals'
 import { keepIfEqual } from '../../store/keepIfEqual'
 import { netQuality } from '../../store/netQuality'
 import { isAppHidden } from '../../utils/appVisibility'
@@ -58,8 +57,11 @@ export function useChartData(symbol: string, interval: string, digits: number, e
   const {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef, recomputeIndicators,
-    drawReady,
+    drawReady, renderAll, renderTail,
   } = engine
+  // 往左补一页历史（跳转到日期 / 范围快捷键用），由下面的大 effect 挂上。
+  // Load one older page (go-to-date / range shortcuts); installed by the effect below.
+  const loadOlderOnceRef = useRef<(() => Promise<boolean>) | null>(null)
 
   // 数据状态：加载中 / 有数据 / 空（该品种周期暂无数据）/延迟
   // data status: loading / has data / empty (no data for this symbol+interval) / stale
@@ -93,15 +95,6 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // 已就绪"的信号。/ drawReady is a dependency because the series only exists
     // once the engine has built the chart.
   }, [digits, drawReady, seriesRef])
-
-  // 时间标签跟周期走：月线显示「年-月」，其它周期沿用建图时的「日/月 时:分」。
-  // Time labels follow the interval: year-month on monthly, the engine's default otherwise.
-  useEffect(() => {
-    const chart = chartRef.current
-    if (!chart) return
-    const fmt = interval === 'M' ? fmtMonthTime : fmtChartTime
-    chart.applyOptions({ timeScale: { tickMarkFormatter: fmt }, localization: { timeFormatter: fmt } })
-  }, [interval, drawReady, chartRef])
 
   // 切品种/周期：拉历史快照 + 起轮询最新价 / on symbol or interval change: fetch history + poll latest
   useEffect(() => {
@@ -140,17 +133,20 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // Apply one bar to the chart, but only when its time >= the newest applied
     // time — otherwise lightweight-charts throws on an older time and the live
     // refresh stalls.
+    // 2026-11-25 起不再直接写 series：先并进 candlesRef，再交给引擎（renderTail 增量 /
+    // renderAll 全量，图表类型的变换在引擎里做）。更早到达的 bar 只并进 candlesRef。
+    // Since 2026-11-25 the series isn't written here: merge into candlesRef, then hand to
+    // the engine (renderTail incremental / renderAll full; chart-type transforms happen there).
+    // Earlier arrivals only merge into candlesRef.
     const applyBar = (b: Candle) => {
-      if (b.t < lastTimeRef.current) return
-      const point = toLwPoint(b)
-      // series 还没被 setData 初始化过时（history 返回空，例如该周期数据库里
-      // 尚无数据），update() 会静默失败，图表永远空着。用 setData 冷启动。
-      // Before setData has initialised the series (empty history, e.g. the
-      // database holds nothing for this interval yet), update() fails silently
-      // and the chart stays blank forever. Cold-start it with setData.
-      if (lastTimeRef.current === 0) series.setData([point])
-      else series.update(point)
+      if (b.t < lastTimeRef.current) { mergeCandle(b); return }
+      // series 还没有数据（history 返回空）时 update() 会静默失败，冷启动走全量。
+      // Before the series has data (empty history) update() fails silently; cold-start with a full render.
+      const cold = lastTimeRef.current === 0
+      mergeCandle(b)
       lastTimeRef.current = b.t
+      if (cold) renderAll()
+      else renderTail()
     }
 
     // 把一根 bar 合并进 candlesRef：相同时间戳覆盖（形成中的 bar），新时间戳
@@ -198,11 +194,10 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // 秒开：有快照先画出来。/ Instant paint from the snapshot when we have one.
     const snap = snapshotCache.get(snapKey)
     if (snap && snap.length > 0) {
-      series.setData(snap.map(toLwPoint))
+      candlesRef.current = snap.slice()
+      renderAll()
       if (dataKeyRef) dataKeyRef.current = snapKey
       lastTimeRef.current = snap[snap.length - 1].t
-      barTimesRef.current = snap.map((b) => b.t)
-      candlesRef.current = snap.slice()
       setLastPrice(snap[snap.length - 1].c)
       recomputeIndicators()
       setDayStats(dayStatsNow())
@@ -214,12 +209,11 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       if (!alive) return
       historyApplied = true
       if (r.bars.length > 0) {
-        series.setData(r.bars.map(toLwPoint))
+        candlesRef.current = r.bars.slice(-MAX_CLIENT_BARS)
+        renderAll()
         if (dataKeyRef) dataKeyRef.current = `${symbol}|${interval}`
         lastTimeRef.current = r.bars[r.bars.length - 1].t
         setLastPrice(r.bars[r.bars.length - 1].c)
-        barTimesRef.current = r.bars.map((b) => b.t)
-        candlesRef.current = r.bars.slice(-MAX_CLIENT_BARS)
         hasMoreHistoryRef.current = r.hasMore
         recomputeIndicators()
         setDayStats(dayStatsNow())
@@ -230,7 +224,8 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       } else {
         // 空历史：图上不再是旧品种的 K 线，标成本品种，让首跳报价之后的轮询冷启动。
         // Empty history: mark as this symbol so later data belongs to it.
-        series.setData([])
+        candlesRef.current = []
+        renderAll()
         if (dataKeyRef) dataKeyRef.current = `${symbol}|${interval}`
         hasMoreHistoryRef.current = false
         setHasData(false)
@@ -253,16 +248,16 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // times >= the last applied one and throws when prepending history.
     // The visible range is restored afterwards, otherwise the chart jumps back to
     // its default position and the scroll gesture feels broken.
-    const loadOlder = () => {
-      if (!alive || loadingOlderRef.current || !hasMoreHistoryRef.current) return
+    const loadOlder = (): Promise<boolean> => {
+      if (!alive || loadingOlderRef.current || !hasMoreHistoryRef.current) return Promise.resolve(false)
       const arr = candlesRef.current
-      if (arr.length === 0) return
+      if (arr.length === 0) return Promise.resolve(false)
       loadingOlderRef.current = true
       const before = arr[0].t
-      feed.history(HISTORY_PAGE_SIZE, before).then((r) => {
-        if (!alive) return
+      return feed.history(HISTORY_PAGE_SIZE, before).then((r) => {
+        if (!alive) return false
         hasMoreHistoryRef.current = r.hasMore
-        if (r.bars.length === 0) return
+        if (r.bars.length === 0) return false
         const range = chartRef.current?.timeScale().getVisibleLogicalRange()
         // 前置分页要保留**最早**的 MAX_CLIENT_BARS 根，不是最后那些。
         // 原来写的是 slice(-MAX)：缓存已经满 20000 根时，新取回来的一页会被整段
@@ -276,32 +271,38 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         // on every further drag. Shift by what was actually inserted.
         const merged = [...r.bars, ...candlesRef.current].slice(0, MAX_CLIENT_BARS)
         const inserted = merged.length - candlesRef.current.length
+        // 视窗按「图上多出来的根数」平移：变换后的图表（砖形等）与原始 K 线不一一对应。
+        // Shift the viewport by the displayed bars added: transformed types aren't 1:1 with candles.
+        const shownBefore = barTimesRef.current.length
         candlesRef.current = merged
-        barTimesRef.current = merged.map((b) => b.t)
-        series.setData(merged.map(toLwPoint))
+        renderAll()
+        const shift = barTimesRef.current.length - shownBefore
         recomputeIndicators()
         // 一根都没插进去 = 客户端缓存已满，再往左拉也放不下，停止预取。
         // Nothing fitted: the client cache is full, so stop prefetching.
         if (inserted <= 0) hasMoreHistoryRef.current = false
         // 往左插了 inserted 根，原来的逻辑下标整体右移同样的量。
         // Inserting `inserted` bars on the left shifts every logical index right.
-        if (range && inserted > 0) {
+        if (range && shift > 0) {
           chartRef.current?.timeScale().setVisibleLogicalRange({
-            from: range.from + inserted,
-            to: range.to + inserted,
+            from: range.from + shift,
+            to: range.to + shift,
           })
         }
+        return inserted > 0
       }).catch(() => {
         // 失败不置 hasMore=false：网络抖动不代表没有更早数据，下次拖动会再试。
         // Don't clear hasMore on failure: a network blip doesn't mean there's no
         // older data, and the next scroll will retry.
+        return false
       }).finally(() => {
         if (alive) loadingOlderRef.current = false
       })
     }
 
+    loadOlderOnceRef.current = loadOlder
     const onRangeChange = (range: { from: number; to: number } | null) => {
-      if (range && range.from < HISTORY_PREFETCH_BARS) loadOlder()
+      if (range && range.from < HISTORY_PREFETCH_BARS) void loadOlder()
       // 跟踪用户是否还贴在最新那根上：range.to 是**逻辑下标**，所以要和"总根数"
       // 比，不是和时间戳比。这里原先写的是 `lastTimeRef.current - range.to < 300`
       // ——左边是 epoch 秒（约 1.7e9）、右边是几十到几百的下标，差值恒为天文数字，
@@ -342,9 +343,8 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         const merged = [...candlesRef.current.filter((b) => b.t < firstT), ...r.bars].slice(-MAX_CLIENT_BARS)
         const range = chartRef.current?.timeScale().getVisibleLogicalRange()
         candlesRef.current = merged
-        barTimesRef.current = merged.map((b) => b.t)
         lastTimeRef.current = merged[merged.length - 1].t
-        series.setData(merged.map(toLwPoint))
+        renderAll()
         recomputeIndicators()
         setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
         if (isFollowingLiveRef.current) chartRef.current?.timeScale().scrollToRealTime()
@@ -375,12 +375,6 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         // Once a tick has opened the next bar locally, don't stamp the current bid onto the previous one.
         const bars = r.bars.map((b, i) => (i === r.bars.length - 1 && b.t >= lastTimeRef.current ? withLiveClose(b, liveBidRef?.current) : b))
         for (const b of bars) applyBar(b)
-        for (const b of bars) mergeCandle(b)
-        // 追加新出现的 bar 时间，保持 barTimesRef 与图表同步 / keep bar times in sync
-        for (const b of r.bars) {
-          const arr = barTimesRef.current
-          if (arr.length && b.t > arr[arr.length - 1]) arr.push(b.t)
-        }
         if (r.bars.length > 0) {
           setHasData(true)
           setLastPrice(bars[bars.length - 1].c)
@@ -465,6 +459,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
 
     return () => {
       alive = false
+      loadOlderOnceRef.current = null
       if (historyApplied || snap) saveSnapshot(snapKey, candlesRef.current)
       stopPolling()
       if (boundaryTimer !== undefined) window.clearTimeout(boundaryTimer)
@@ -481,7 +476,29 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // swap the call order (or delay chart creation until the container mounts)
     // and this silently returns, leaving a permanently blank page with no error
     // path. Re-running when drawReady flips is the explicit readiness signal.
-  }, [symbol, interval, drawReady, recomputeIndicators])
+  }, [symbol, interval, drawReady, recomputeIndicators, renderAll, renderTail])
 
-  return { hasData, stale, lastPrice, dayStats }
+  // 往左补历史直到 fromT（最多 maxPages 页），返回补完后最早一根的时间。
+  // 只在用户主动跳转日期 / 选时间范围时调用，平时不预取，省流量。
+  // Page left until fromT (at most maxPages pages); resolves with the earliest bar time.
+  // Only for explicit go-to-date / range picks — never prefetched, to save egress.
+  const ensureHistory = useCallback(async (fromT: number, maxPages = 10): Promise<number | null> => {
+    let pages = 0
+    let waits = 0
+    while (pages < maxPages && waits < 100) {
+      const arr = candlesRef.current
+      if (arr.length === 0) return null
+      if (arr[0].t <= fromT || !hasMoreHistoryRef.current) break
+      const load = loadOlderOnceRef.current
+      if (!load) break
+      // 正在翻页时等它结束再看 / wait out an in-flight page
+      if (loadingOlderRef.current) { waits++; await new Promise((r) => setTimeout(r, 150)); continue }
+      pages++
+      const ok = await load()
+      if (!ok) break
+    }
+    return candlesRef.current[0]?.t ?? null
+  }, [candlesRef, hasMoreHistoryRef, loadingOlderRef])
+
+  return { hasData, stale, lastPrice, dayStats, ensureHistory }
 }

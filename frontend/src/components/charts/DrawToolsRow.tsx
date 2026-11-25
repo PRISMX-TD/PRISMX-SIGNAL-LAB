@@ -35,16 +35,28 @@ export function DrawToolIcon({ tool }: { tool: Tool }) {
 
 const COLORS = ['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451']
 
+// 工具的快捷键提示（DrawLayer 里 Alt+字母）/ shortcut hints (Alt+letter in DrawLayer)
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
+const ALT = isMac ? '⌥' : 'Alt+'
+const TOOL_KEYS: Partial<Record<Tool, string>> = {
+  trend: `${ALT}T`, hline: `${ALT}H`, vline: `${ALT}V`, crossline: `${ALT}C`, fib: `${ALT}F`, rect: `${ALT}⇧R`, ray: `${ALT}⇧T`,
+}
+
 export default function DrawToolsRow({
   drawLayerRef,
   bumpDraw,
   t,
   variant = 'rail',
+  measureOn,
+  onMeasure,
 }: {
   drawLayerRef: RefObject<DrawLayerHandle>
   bumpDraw: () => void
   t: (key: string) => unknown
   variant?: 'rail' | 'strip'
+  // 测量（尺子）按钮：只有传了才显示 / the ruler button shows only when these are passed
+  measureOn?: boolean
+  onMeasure?: () => void
 }) {
   const rail = variant === 'rail'
   const Divider = () => (rail ? <hr /> : <span className="term-toolbar-divider" />)
@@ -52,6 +64,8 @@ export default function DrawToolsRow({
   // 画线层挂上之前 ref 还是空的，此时按「可见」画，免得眼睛按钮闪一下高亮。
   // Before the draw layer mounts the ref is null; treat drawings as visible so the eye doesn't flash on.
   const visible = dl?.visible ?? true
+  const magnet = dl?.magnet ?? 'off'
+  const allLocked = (dl?.drawCount ?? 0) > 0 && dl?.lockedCount === dl?.drawCount
   // 手机横条右侧还有工具时打上 data-more，CSS 在右缘渐隐提示能往左滑；竖轨不需要。
   // The phone strip gets data-more while tools sit off to the right, and CSS fades the
   // right edge as a swipe cue; the vertical rail doesn't need it.
@@ -63,7 +77,7 @@ export default function DrawToolsRow({
         <Fragment key={toolName}>
           <button
             type="button"
-            title={String(t(`charts.draw.${toolName}`))}
+            title={`${String(t(`charts.draw.${toolName}`))}${TOOL_KEYS[toolName] ? ` (${TOOL_KEYS[toolName]})` : ''}`}
             aria-label={String(t(`charts.draw.${toolName}`))}
             aria-pressed={dl?.tool === toolName}
             onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
@@ -75,6 +89,18 @@ export default function DrawToolsRow({
           {toolName === 'cross' && <Divider />}
         </Fragment>
       ))}
+      {onMeasure && (
+        <button
+          type="button"
+          title={`${String(t('charts.measure.title'))} (Shift+🖱)`}
+          aria-label={String(t('charts.measure.title'))}
+          aria-pressed={!!measureOn}
+          onClick={onMeasure}
+          className={`term-tool-btn ${measureOn ? 'on' : ''}`}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17L17 3l4 4L7 21z" /><path d="M7 13l2 2M10 10l2 2M13 7l2 2" /></svg>
+        </button>
+      )}
       <Divider />
       {COLORS.map((c) => (
         <button
@@ -117,6 +143,27 @@ export default function DrawToolsRow({
         className={`term-tool-btn ${dl?.stayInDraw ? 'on' : ''}`}
       >
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3l4 4-4 4" /><path d="M3 17l4 4-4 4" /><line x1="21" y1="7" x2="7" y2="21" /><line x1="7" y1="3" x2="21" y2="17" /></svg>
+      </button>
+      <button
+        type="button"
+        title={String(t(`charts.draw.magnet_${magnet}`))}
+        aria-label={String(t(`charts.draw.magnet_${magnet}`))}
+        aria-pressed={magnet !== 'off'}
+        onClick={() => { drawLayerRef.current?.setMagnet(magnet === 'off' ? 'weak' : magnet === 'weak' ? 'strong' : 'off'); bumpDraw() }}
+        className={`term-tool-btn ${magnet !== 'off' ? 'on' : ''}`}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={magnet === 'strong' ? 2.4 : 1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M6 3v8a6 6 0 0012 0V3" /><path d="M6 7h4M14 7h4" /><path d="M10 3v8a2 2 0 004 0V3" /></svg>
+      </button>
+      <button
+        type="button"
+        title={String(allLocked ? t('charts.draw.unlockAll') : t('charts.draw.lockAll'))}
+        aria-label={String(allLocked ? t('charts.draw.unlockAll') : t('charts.draw.lockAll'))}
+        aria-pressed={allLocked}
+        disabled={(dl?.drawCount ?? 0) === 0}
+        onClick={() => { if (allLocked) drawLayerRef.current?.unlockAll(); else drawLayerRef.current?.lockAll(); bumpDraw() }}
+        className={`term-tool-btn warn ${allLocked ? 'on' : ''}`}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" />{allLocked ? <path d="M8 11V7a4 4 0 018 0v4" /> : <path d="M8 11V7a4 4 0 017.8-1.2" />}</svg>
       </button>
       <button
         type="button"

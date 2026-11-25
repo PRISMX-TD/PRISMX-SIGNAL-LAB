@@ -1658,12 +1658,44 @@ export interface AccountFunds {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'ACCOUNT_FUNDS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'ACCOUNT_FUNDS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'CHART_DRAWINGS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
   data?: unknown
   // 仅 POSITIONS 携带 / only present on POSITIONS
   funds?: AccountFunds[]
   reason?: string
   userId?: string
+}
+
+// 图表画线（后端 rev 55，表 chart_drawings，每个用户每个品种一行）。画线对象在接口层是不透明的
+// unknown[]，具体结构由 DrawLayer 自己定。updatedAt 是 UTC ISO 字符串（毫秒），没有行时为 null。
+// Chart drawings (backend rev 55, table chart_drawings, one row per user and symbol). Drawing
+// objects are opaque unknown[] at the API layer; DrawLayer owns their shape. updatedAt is a UTC
+// ISO string (milliseconds), null when there is no row.
+export interface ChartDrawingsOut {
+  symbol: string
+  drawings: unknown[]
+  updatedAt: string | null
+}
+
+export interface ChartDrawingsSaved {
+  symbol: string
+  // 空数组 = 删除，此时为 null / null after an empty save (the row is deleted)
+  updatedAt: string | null
+}
+
+export interface ChartDrawingSymbol {
+  symbol: string
+  count: number
+  updatedAt: string | null
+}
+
+// WS CHART_DRAWINGS_UPDATE 的 data，也是 window 事件 prismx:chart-drawings-update 的 detail。
+// 不带画线本身：正开着这个品种的设备自己再 getDrawings 一次。
+// The data of WS CHART_DRAWINGS_UPDATE and the detail of the window event
+// prismx:chart-drawings-update. No drawings payload: a device showing that symbol refetches.
+export interface ChartDrawingsUpdate {
+  symbol: string
+  updatedAt: string | null
 }
 
 // 站内通知（铃铛面板的「消息」段）。标题不在数据里——按 kind 取 i18n 文案，
