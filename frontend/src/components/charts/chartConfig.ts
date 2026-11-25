@@ -7,7 +7,6 @@
 import type { HandleScrollOptions, UTCTimestamp } from 'lightweight-charts'
 import type { Candle, Quote } from '../../api/types'
 import type { DayStats } from './SymbolHeader'
-import type { IndicatorId } from './indicatorCatalog'
 import { baseSymbol } from '../../api/utils'
 import { DAY_TZ_OFFSET_SEC } from '../../utils/indicators'
 import { DOWN_COLOR, UP_COLOR } from './canvasColors'
@@ -327,26 +326,16 @@ export function fmtCountdown(sec: number): string {
   return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`
 }
 
-// ---------- 指标开关 / indicator toggles ----------
-// 2026-09-08 起键集合来自 indicatorCatalog（14 个），这里只保留类型与默认值。
-// Since 2026-09-08 the key set comes from indicatorCatalog (14 ids); only the
-// type and defaults live here.
-export type IndicatorFlags = Record<IndicatorId, boolean>
-export const DEFAULT_INDICATORS: IndicatorFlags = {
-  ma: false, ema: false, boll: false, donch: false, vwap: false, st: false, sar: false,
-  rsi: false, macd: false, kdj: false, cci: false, wr: false, atr: false,
-  volume: true, // 默认开：这一整轮 EA/后端改造就是为了喂出 volume，默认可见让效果立刻看得见
-  obv: false,
-  xmab: false,
-  macandle: false,
-  shenlong: false,
-  kpsq: false,
-}
+// ---------- 指标 / indicators ----------
+// 2026-11-25 阶段 4 起指标是实例列表，见 ind/（旧开关只在 ind/store.ts 的迁移里读一次）。
+// Since phase 4 indicators are an instance list, see ind/ (legacy toggles are only read once by
+// the migration in ind/store.ts).
 // 十字准线/触摸拖动悬停时展示的各指标"当前值"（按指标 → series key），不悬停时
 // 回退到最新一根的值（见 recomputeIndicators 与 subscribeCrosshairMove 的说明）。
 // The indicator values shown while hovering the crosshair (indicator → series
 // key → value); falls back to the latest bar's values when not hovering.
-export type LegendValues = Partial<Record<IndicatorId, Record<string, number | null>>>
+// 2026-11-25 阶段 4：键是指标实例 uid / phase 4: keyed by indicator instance uid
+export type LegendValues = Record<string, Record<string, number | null>>
 export const EMPTY_LEGEND: LegendValues = {}
 
 export function toLwPoint(b: Candle) {

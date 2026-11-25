@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import ChartDialog from '../ChartDialog'
 import Switch from '../../Switch'
-import { ColorDot } from '../IndicatorSettingsModal'
+import { ColorDot } from '../ColorDot'
 import {
   type Drawing, type DrawTemplate, type DrawType, type FibLevel, type VisGroup, PALETTE, LINE_WIDTHS, TOOL_META,
   levelsOf, fillOf, showLabelOf, fontSizeOf, takesText, hasLevels, isScreenAnchored, EMOJIS, DEFAULT_ACCOUNT, DEFAULT_RISK,

@@ -1,22 +1,20 @@
-// 图表引擎：lightweight-charts 实例、主图序列、主图/副图指标 series 的建与拆、指标重算、
-// pane 高度分配、图例数据。它持有所有 ref，页面与数据 hook 通过返回值使用。
-// 2026-09-06 从 pages/ChartsPage.tsx 搬出。2026-09-08 指标层泛化：不再为每个指标
-// 写一套 ref / effect，而是按 indicatorCatalog 的描述统一建 series、算数值、读图例
-// ——主图叠加按目录逐个对账（条数变了才重建，否则只改选项），副图按开关顺序
-// 整体拆掉重建（移除后空 pane 会被库自动删除，追加时用 panes().length 当下标）。
-// 2026-11-25 对标 TradingView（阶段 0/1）：主图从内置蜡烛序列换成常驻的自定义序列
-// （mainSeries.ts），图表类型只是 applyOptions；K 线经 barTransforms 变换（平均 K 线、
-// 砖形等）后再上图；画布颜色、坐标轴、十字线、水印都由 view（来自 chartv2 偏好）驱动。
-// 数据写入统一走 renderAll / renderTail：candlesRef 永远是原始 K 线，barTimesRef 永远是
-// 图上实际显示的时间（变换后可能不一一对应），画线层按它做时间 ⇄ 坐标换算。
-// Chart engine. Moved out of ChartsPage 2026-09-06; indicator layer generalised over
-// indicatorCatalog 2026-09-08. 2026-11-25 (TradingView parity, phases 0/1): the main series
-// is now one permanent custom series (mainSeries.ts) so a chart-type change is applyOptions;
-// bars pass through barTransforms (Heikin Ashi, Renko…) before reaching it; canvas colours,
-// scales, crosshair and watermark are driven by `view` (from the chartv2 prefs). All data
-// writes go through renderAll / renderTail: candlesRef always holds raw candles, barTimesRef
-// always holds the times actually on screen (not 1:1 once transformed), which the draw layer
-// uses for time ⇄ coordinate conversion.
+// 图表引擎：lightweight-charts 实例、主图序列、指标 series 的建与拆、指标重算、窗格高度、图例数据。
+// 它持有所有 ref，页面与数据 hook 通过返回值使用。
+// 2026-09-06 从 pages/ChartsPage.tsx 搬出。2026-11-25 对标 TradingView（阶段 0/1）：主图换成常驻的
+// 自定义序列（mainSeries.ts），图表类型只是 applyOptions；K 线经 barTransforms 变换后再上图；
+// 画布颜色、坐标轴、十字线、水印都由 view 驱动。数据写入统一走 renderAll / renderTail：candlesRef
+// 永远是原始 K 线，barTimesRef 永远是图上实际显示的时间，画线层按它做时间 ⇄ 坐标换算。
+// 2026-11-25 阶段 4：指标改成实例列表（ind/）。同一种指标可加多次；每个实例在主图或某个窗格，
+// 窗格顺序、高度、折叠、最大化由页面传入。结构（实例、所在窗格、线型、价格轴）一变就把指标
+// series 全部拆掉按窗格顺序重建——空窗格会被库自动删掉，按顺序追加正好得到想要的窗格下标；
+// 只改颜色 / 线宽 / 显隐时 applyOptions。
+// Chart engine. Moved out of ChartsPage 2026-09-06; main series became a permanent custom series
+// in phases 0/1 (2026-11-25). Phase 4 (2026-11-25): indicators are an instance list (ind/). A kind
+// can be added many times; each instance sits on the main pane or a sub-pane whose order, height,
+// collapsed / maximised state come from the page. Any structural change (instances, panes, plot
+// types, price scales) tears every indicator series down and rebuilds them pane by pane — the
+// library drops empty panes, so appending in order yields the intended pane indices; colour /
+// width / visibility changes are applyOptions.
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import {
   createChart,
@@ -25,7 +23,9 @@ import {
   CrosshairMode,
   LineStyle,
   LineSeries,
+  LineType,
   HistogramSeries,
+  AreaSeries,
   createSeriesMarkers,
   type ISeriesMarkersPluginApi,
   type ITextWatermarkPluginApi,
@@ -38,17 +38,12 @@ import {
   type LineWidth,
   type WhitespaceData,
   type DeepPartial,
+  type SeriesType,
 } from 'lightweight-charts'
 import type { Candle } from '../../api/types'
-import { toLinePoints } from '../../utils/chartSeries'
-import type { IndicatorSettings } from './indicatorSettings'
-import {
-  MAIN_IDS, SUB_IDS, PANE_SIZE_WEIGHT, computeIndicator, lineStyleOf, refLines, seriesSpecs,
-  type IndicatorId, type SeriesSpec,
-} from './indicatorCatalog'
 import { markChartDisposed } from './chartLifecycle'
 import { ZonePrimitive, type BarStrip, type ZoneRect } from './zonePrimitive'
-import { EMPTY_LEGEND, toHistPoints, type CandleColors, type IndicatorFlags, type LegendValues } from './chartConfig'
+import { EMPTY_LEGEND, type CandleColors, type LegendValues } from './chartConfig'
 import { createLegendStore } from './legendStore'
 import { createOhlcStore } from './ohlcStore'
 import { MainSeriesView, isCloseOnlyStyle, type MainBar, type MainSeriesOptions, type MainStyle } from './mainSeries'
@@ -56,13 +51,25 @@ import { runTransform, transformKindOf } from './chartTransform'
 import type { ChartPrefs, ChartType, CrosshairMode as CrossPref, GridMode, LineDash, ScaleMode } from './chartPrefs'
 import type { ChartPalette } from './chartTheme'
 import type { TimeFormatters } from './chartTime'
+import { computeAll, maxFuture, visibleOnInterval, latestValue, type InstResult } from './ind/compute'
+import { defOf } from './ind/registry'
+import { fillStyle, hlineStyle, plotStyle, resolveColor } from './ind/style'
+import { IndFillPrimitive, type FillBetween, type FillBand } from './ind/fillPrimitive'
+import type { IndDef, IndInstance, IndPane, PlotKind } from './ind/types'
 
 export type MainSeriesApi = ISeriesApi<'Custom', Time, MainBar | WhitespaceData<Time>, MainSeriesOptions, DeepPartial<MainSeriesOptions>>
 
-type LineApi = ISeriesApi<'Line'>
-type HistApi = ISeriesApi<'Histogram'>
-interface Handle { spec: SeriesSpec; api: LineApi | HistApi }
-interface SubEntry { handles: Handle[]; refLines: IPriceLine[] }
+type PlotApi = ISeriesApi<'Line'> | ISeriesApi<'Histogram'> | ISeriesApi<'Area'>
+interface PlotHandle { key: string; kind: PlotKind; api: PlotApi }
+interface InstHandle {
+  uid: string
+  pane: string
+  plots: PlotHandle[]
+  // 填充层挂在哪条 series 上（没有线的实例挂在主序列上）/ series carrying the fill layer (main series for plotless ones)
+  host: ISeriesApi<SeriesType> | null
+  prim: IndFillPrimitive | null
+  lines: IPriceLine[]
+}
 
 // 引擎的外观输入（全部来自 chartv2 偏好 + 主题色板）/ the engine's look inputs (chartv2 prefs + palette)
 export interface ChartView {
@@ -84,7 +91,25 @@ export interface ChartView {
   time: TimeFormatters
 }
 
+// 指标输入：已经按会员过滤过的实例列表、窗格、高度权重、当前最大化的窗格。
+// Indicator input: the instance list (already filtered by membership), panes, height weights, maximised pane.
+export interface IndView {
+  list: IndInstance[]
+  panes: IndPane[]
+  mainH: number
+  maxPane: string | null
+  interval: string
+  digits: number
+}
+
+// 窗格在容器里的位置（图例、窗格按钮、拖指标换窗格都用）/ pane boxes inside the container
+export type PaneBoxes = Record<string, { top: number; height: number }>
+
+// 用户拖窗格分隔条后回报新高度（像素）/ reported after the user drags a pane separator (px)
+export type PaneResize = (mainPx: number, panes: Record<string, number>) => void
+
 const DASH: Record<LineDash, LineStyle> = { solid: LineStyle.Solid, dashed: LineStyle.Dashed, dotted: LineStyle.Dotted }
+const COLLAPSED_PX = 28
 
 // 图表类型 → 主序列的绘制样式（平均 K 线 = 蜡烛 + 变换）/ chart type → main series style
 function styleOf(t: ChartType): MainStyle {
@@ -93,33 +118,40 @@ function styleOf(t: ChartType): MainStyle {
   return t as MainStyle
 }
 
-// 线型 series 的选项：颜色 / 线宽 / 虚实来自指标设置，SAR 走「只画点不画线」。
-// crosshairMarkerVisible:false 去掉十字准线悬停时每条线上的圆点（用户反馈是噪音）。
-// Line-series options from the indicator settings; SAR draws points only.
-// crosshairMarkerVisible:false removes the per-line hover dots (user feedback: noise).
-function lineOptions(spec: SeriesSpec, st: { width: number; dash: 'solid' | 'dashed' }, visible: boolean, labels: boolean) {
-  return {
-    color: spec.color,
-    lineWidth: st.width as LineWidth,
-    lineStyle: spec.dashed || st.dash === 'dashed' ? LineStyle.Dashed : LineStyle.Solid,
-    priceLineVisible: false,
-    // 价格轴上的指标数值标签（设置 → 坐标与线）/ indicator value labels on the price axis
-    lastValueVisible: labels,
-    crosshairMarkerVisible: false,
-    visible,
-    ...(spec.kind === 'points' ? { lineVisible: false, pointMarkersVisible: true, pointMarkersRadius: 1.8 } : { lineVisible: true, pointMarkersVisible: false }),
-  }
+function seriesTypeOf(kind: PlotKind) {
+  if (kind === 'hist' || kind === 'columns') return HistogramSeries
+  if (kind === 'area') return AreaSeries
+  return LineSeries
+}
+
+// 实例窗格 → 窗格下标。没有线的实例（分形、交易时段）只能在主图。
+// Instance pane → pane index. Plotless instances (fractals, sessions) live on the main pane only.
+function usedPanes(list: IndInstance[], panes: IndPane[]): IndPane[] {
+  return panes.filter((p) => list.some((i) => i.pane === p.id && (defOf(i.type)?.plots.length ?? 0) > 0))
+}
+
+function scaleIdOf(inst: IndInstance, def: IndDef): string {
+  const pin = inst.scale ?? (inst.pane === 'main' && !def.overlay ? 'none' : 'right')
+  if (pin === 'none') return `ind-${inst.uid}`
+  return pin
+}
+
+function priceFormatOf(inst: IndInstance, def: IndDef, digits: number) {
+  if (inst.precision != null) return { type: 'price' as const, precision: inst.precision, minMove: Math.pow(10, -inst.precision) }
+  if (def.digits === 'volume') return { type: 'volume' as const }
+  const p = def.digits === 'price' || def.digits == null ? digits : def.digits
+  return { type: 'price' as const, precision: p, minMove: Math.pow(10, -p) }
 }
 
 export function useChartEngine(
   containerRef: RefObject<HTMLDivElement>,
-  indicators: IndicatorFlags,
-  indicatorSettings: IndicatorSettings,
+  ind: IndView,
   refitKey: unknown,
   candleColors: CandleColors,
   // 指标信号标记的文字（做多 / 做空），由页面按当前语言传入 / marker texts, localized by the page
-  markerText: { buy: string; sell: string; closeBuy?: string; closeSell?: string; slBuy?: string; slSell?: string } = { buy: 'BUY', sell: 'SELL' },
+  markerText: Record<string, string> = { buy: 'BUY', sell: 'SELL' },
   view?: ChartView,
+  onPaneResize?: PaneResize,
 ) {
   const chartRef = useRef<IChartApi | null>(null)
   const seriesRef = useRef<MainSeriesApi | null>(null)
@@ -143,31 +175,29 @@ export function useChartEngine(
   // Full ascending OHLCV history — the sole input for indicator math and chart transforms.
   const candlesRef = useRef<Candle[]>([])
 
-  const mainRef = useRef<Partial<Record<IndicatorId, Handle[]>>>({})
-  const subRef = useRef<Partial<Record<IndicatorId, SubEntry>>>({})
+  const instRef = useRef<Map<string, InstHandle>>(new Map())
+  const resultsRef = useRef<Map<string, InstResult>>(new Map())
 
   const latestLegendRef = useRef<LegendValues>(EMPTY_LEGEND)
   const hoveringRef = useRef(false)
 
   const [legendStore] = useState(() => createLegendStore())
   const [ohlcStore] = useState(() => createOhlcStore())
-  const [paneOffsets, setPaneOffsets] = useState<Partial<Record<IndicatorId, number>>>({})
+  const [paneBoxes, setPaneBoxes] = useState<PaneBoxes>({})
   const [drawReady, setDrawReady] = useState(false)
 
-  const indicatorSettingsRef = useRef(indicatorSettings)
-  useEffect(() => {
-    indicatorSettingsRef.current = indicatorSettings
-  }, [indicatorSettings])
+  const indRef = useRef(ind)
+  indRef.current = ind
   const candleColorsRef = useRef(candleColors)
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null)
   const watermarkRef = useRef<ITextWatermarkPluginApi<Time> | null>(null)
-  const indicatorsRef = useRef(indicators)
   const zonesRef = useRef<ZonePrimitive | null>(null)
-  indicatorsRef.current = indicators
   const markerTextRef = useRef(markerText)
   markerTextRef.current = markerText
   const viewRef = useRef(view)
   viewRef.current = view
+  const onPaneResizeRef = useRef(onPaneResize)
+  onPaneResizeRef.current = onPaneResize
 
   // ──── 主图数据 / main-series data ────
   // 变换后的显示数据缓存（平均 K 线要靠上一根算下一根，增量更新用）。
@@ -251,10 +281,9 @@ export function useChartEngine(
       publishOhlc(shown)
       return
     }
-    // 价格类图表：每跳都可能改写最后几块砖，节流到每 300ms 一次全量。
-    // Price-based types: any tick may rewrite the last bricks; full redraw throttled to 300ms.
-    // 指标在价格类图表上按砖算，砖变了要跟着重算。
-    // On price-based types indicators run on the bricks, so recompute after the redraw.
+    // 价格类图表：每跳都可能改写最后几块砖，节流到每 300ms 一次全量；指标按砖算，跟着重算。
+    // Price-based types: any tick may rewrite the last bricks; full redraw throttled to 300ms,
+    // and indicators (computed on the bricks) follow.
     const full = () => { renderAll(); recomputeRef.current() }
     const since = performance.now() - lastFullRenderRef.current
     if (since >= 300) { full(); return }
@@ -262,110 +291,216 @@ export function useChartEngine(
   }, [renderAll, colorOf, publishOhlc])
   const recomputeRef = useRef<() => void>(() => {})
 
-  // 按当前 candlesRef 重算全部有 series 的指标并写回，同时刷新"最新值"图例缓存。
-  // 价格类图表（砖形、新价线、卡吉、点数图）横轴不是时间：指标改按图上的砖算（同 TradingView），
-  // 否则原始 K 线的时间点会混进时间轴，把砖之间撑出空档。
-  // Recompute every indicator that has series and refresh the latest-value legend.
-  // Price-based types (Renko, Line Break, Kagi, P&F) have no time x-axis: indicators run on the
-  // displayed bricks (as TradingView does); raw candle times would otherwise enter the time
-  // scale and open gaps between bricks.
-  const recomputeIndicators = useCallback(() => {
+  // ──── 指标 / indicators ────
+  const priceBasedNow = () => {
     const vt = viewRef.current?.chartType ?? 'candles'
-    const onBricks = transformKindOf(vt) !== 'none' && vt !== 'heikinAshi'
+    return transformKindOf(vt) !== 'none' && vt !== 'heikinAshi'
+  }
+
+  // 一个实例当前是否显示（自己隐藏、按周期的可见性规则）/ whether an instance shows right now
+  const instShown = (inst: IndInstance) => !inst.hidden && visibleOnInterval(inst, indRef.current.interval)
+
+  const plotOptions = useCallback((inst: IndInstance, def: IndDef, key: string) => {
+    const p = def.plots.find((x) => x.key === key)!
+    const st = plotStyle(inst, p)
+    const cc = candleColorsRef.current
+    const color = resolveColor(st.color, cc, st.opacity)
+    const labels = inst.labels ?? viewRef.current?.indicatorLabels ?? false
+    const common = {
+      visible: instShown(inst) && st.visible,
+      priceLineVisible: false,
+      lastValueVisible: labels,
+      priceScaleId: scaleIdOf(inst, def),
+      priceFormat: priceFormatOf(inst, def, indRef.current.digits),
+    }
+    if (st.kind === 'hist' || st.kind === 'columns') return { ...common, color }
+    if (st.kind === 'area') {
+      return { ...common, lineColor: color, topColor: resolveColor(st.color, cc, Math.min(st.opacity, 40)), bottomColor: resolveColor(st.color, cc, 2), lineWidth: st.width as LineWidth, lineStyle: DASH[st.dash], crosshairMarkerVisible: false }
+    }
+    const pts = st.kind === 'points' || st.kind === 'cross'
+    return {
+      ...common,
+      color,
+      lineWidth: st.width as LineWidth,
+      lineStyle: DASH[st.dash],
+      lineType: st.kind === 'step' ? LineType.WithSteps : LineType.Simple,
+      // 十字线悬停时不在每条线上画圆点（用户反馈是噪音）/ no per-line hover dots (user feedback: noise)
+      crosshairMarkerVisible: false,
+      lineVisible: !pts,
+      pointMarkersVisible: pts,
+      ...(pts ? { pointMarkersRadius: st.kind === 'cross' ? 1.6 + st.width * 0.4 : 1.4 + st.width * 0.4 } : {}),
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
+  }, [])
+
+  // 未来时间：一目云图这类往右平移的线要画到最新 K 线右边，按最近的 K 线间距往后推。
+  // Future times for plots shifted right (Ichimoku cloud), extrapolated from the recent bar spacing.
+  const futureTimes = (times: number[], k: number): number[] => {
+    if (k <= 0 || times.length < 2) return []
+    const n = times.length
+    const diffs: number[] = []
+    for (let i = Math.max(1, n - 12); i < n; i++) diffs.push(times[i] - times[i - 1])
+    diffs.sort((a, b) => a - b)
+    const step = Math.max(1, diffs[diffs.length >> 1])
+    return Array.from({ length: k }, (_, i) => times[n - 1] + step * (i + 1))
+  }
+
+  // 按当前 candlesRef 重算全部实例并写回，同时刷新图例的「最新值」。价格类图表（砖形等）横轴不是
+  // 时间：指标改按图上的砖算（同 TradingView），否则原始 K 线的时间会混进时间轴、把砖撑开。
+  // Recompute every instance and write the data back; refresh the latest-value legend. On
+  // price-based types (Renko…) indicators run on the bricks, as on TradingView.
+  const recomputeIndicators = useCallback(() => {
+    const onBricks = priceBasedNow()
     const bars: Candle[] = onBricks
       ? shownRef.current.map((b) => ({ t: b.time as number, o: b.open, h: b.high, l: b.low, c: b.close, v: b.volume ?? 0 }))
       : candlesRef.current
-    if (bars.length === 0) return
-    const times = bars.map((b) => b.t as UTCTimestamp)
-    const s = indicatorSettingsRef.current
+    const iv = indRef.current
+    const handles = instRef.current
+    if (bars.length === 0 || handles.size === 0) {
+      resultsRef.current = new Map()
+      markersRef.current?.setMarkers([])
+      zonesRef.current?.setZones([], [])
+      latestLegendRef.current = {}
+      if (!hoveringRef.current) legendStore.set({})
+      return
+    }
+    const list = iv.list.filter((i) => handles.has(i.uid))
+    const results = computeAll({ list, bars, interval: iv.interval, digits: iv.digits, priceBased: onBricks })
+    resultsRef.current = results
+    const n = bars.length
+    const times = bars.map((b) => b.t)
+    const fut = futureTimes(times, maxFuture(results))
+    const timeAt = (idx: number) => (idx < n ? times[idx] : fut[idx - n])
+    const cc = candleColorsRef.current
     const next: LegendValues = {}
     const marks: SeriesMarker<UTCTimestamp>[] = []
     const zones: ZoneRect[] = []
     const strips: BarStrip[] = []
-    const lastT = times[times.length - 1]
-    const feed = (id: IndicatorId, handles: Handle[]) => {
-      const out = computeIndicator(id, bars, s)
-      const sig = out.sig
-      if (out.resTop && indicatorsRef.current[id]) {
-        const c = s[id] as { resColor?: string; supColor?: string }
-        const push = (topK: string, botK: string, color: string) => out[topK]?.forEach((top, i) => {
-          const bot = out[botK]?.[i]
-          if (top != null && bot != null) zones.push({ from: times[i], to: lastT, top, bottom: bot, color })
-        })
-        push('resTop', 'resBot', c.resColor ?? '#2ee07e')
-        push('supTop', 'supBot', c.supColor ?? '#ff4d67')
-      }
-      if (out.chKind && indicatorsRef.current[id]) {
-        const c = s[id] as { upColor?: string; downColor?: string; sideColor?: string }
-        out.beltTop?.forEach((top, i) => {
-          const bot = out.beltBot?.[i]
-          if (top != null && bot != null) strips.push({ time: times[i], top, bottom: bot, color: '#555555' })
-        })
-        out.chKind.forEach((kind, i) => {
-          const top = out.chTop?.[i]
-          const bot = out.chBot?.[i]
-          if (kind == null || top == null || bot == null) return
-          strips.push({ time: times[i], top, bottom: bot, color: (kind > 0 ? c.upColor : kind < 0 ? c.downColor : c.sideColor) ?? '#6b7280' })
-        })
-      }
-      if (sig && indicatorsRef.current[id]) {
-        const c = s[id] as { buyColor?: string; sellColor?: string }
-        const txt = markerTextRef.current
-        sig.forEach((v, i) => {
-          if (v === 1) marks.push({ time: times[i], position: 'belowBar', shape: 'arrowUp', color: c.buyColor ?? '#facc15', text: txt.buy })
-          else if (v === -1) marks.push({ time: times[i], position: 'aboveBar', shape: 'arrowDown', color: c.sellColor ?? '#f472b6', text: txt.sell })
-          else if (v === 2) marks.push({ time: times[i], position: 'aboveBar', shape: 'circle', color: '#facc15', text: txt.closeBuy ?? '' })
-          else if (v === -2) marks.push({ time: times[i], position: 'belowBar', shape: 'circle', color: '#facc15', text: txt.closeSell ?? '' })
-          const slb = out.slBuy?.[i]
-          const sls = out.slSell?.[i]
-          if (slb != null) marks.push({ time: times[i], position: 'atPriceMiddle', price: slb, shape: 'square', color: c.buyColor ?? '#ff4d67', text: txt.slBuy ?? '' })
-          if (sls != null) marks.push({ time: times[i], position: 'atPriceMiddle', price: sls, shape: 'square', color: c.sellColor ?? '#2ee07e', text: txt.slSell ?? '' })
-        })
+    const lastT = times[n - 1] as UTCTimestamp
+    const txt = markerTextRef.current
+    for (const inst of list) {
+      const h = handles.get(inst.uid)!
+      const r = results.get(inst.uid)
+      if (!r) continue
+      const def = r.def
+      const shown = instShown(inst)
+      const fillColor = (c: string) => {
+        if (!c.startsWith('f:')) return c
+        const f = def.fills?.find((x) => x.key === c.slice(2))
+        return f ? fillStyle(inst, f).color : '#888888'
       }
       const row: Record<string, number | null> = {}
-      for (const h of handles) {
-        const values = out[h.spec.key] ?? []
-        if (h.spec.kind === 'hist') {
-          const api = h.api as HistApi
-          if (h.spec.histColor === 'candle') {
-            const up = (s[id] as { upColor?: string }).upColor ?? candleColorsRef.current.up
-            const down = (s[id] as { downColor?: string }).downColor ?? candleColorsRef.current.down
-            api.setData(bars.map((b, i) => ({ time: times[i], value: values[i] ?? 0, color: b.c >= b.o ? up : down })))
-          } else {
-            api.setData(toHistPoints(times, values, candleColorsRef.current.up, candleColorsRef.current.down))
+      for (const ph of h.plots) {
+        const p = def.plots.find((x) => x.key === ph.key)!
+        const st = plotStyle(inst, p)
+        const vals = r.out[ph.key] ?? []
+        const cIdx = r.out[`${ph.key}#c`]
+        const off = r.offsets[ph.key] ?? 0
+        const pal = st.colors.map((c) => resolveColor(c, cc, st.opacity))
+        const data: { time: UTCTimestamp; value?: number; color?: string }[] = []
+        let started = false
+        for (let i = 0; i < vals.length; i++) {
+          const idx = i + off
+          if (idx < 0 || idx >= n + fut.length) continue
+          const v = vals[i]
+          const t = timeAt(idx) as UTCTimestamp
+          if (v == null) {
+            if (p.gaps && started) data.push({ time: t })
+            continue
           }
-        } else {
-          const dirs = h.spec.dirKey ? out[h.spec.dirKey] : undefined
-          if (dirs) {
-            const up = h.spec.color
-            const dn = h.spec.downColor ?? up
-            const pts: { time: UTCTimestamp; value: number; color: string }[] = []
-            values.forEach((v, i) => { if (v != null) pts.push({ time: times[i], value: v, color: (dirs[i] ?? 1) < 0 ? dn : up }) })
-            ;(h.api as LineApi).setData(pts)
-          } else (h.api as LineApi).setData(toLinePoints(times, values, h.spec.gaps))
+          started = true
+          const ci = cIdx?.[i]
+          data.push(ci != null && pal.length ? { time: t, value: v, color: pal[ci] ?? pal[0] } : { time: t, value: v })
         }
-        row[h.spec.key] = values[values.length - 1] ?? null
+        try { (ph.api as ISeriesApi<'Line'>).setData(data as never) } catch { /* 切换中 / switching */ }
+        row[ph.key] = latestValue(r, ph.key, n)
       }
-      next[id] = row
-    }
-    for (const id of MAIN_IDS) {
-      const handles = mainRef.current[id]
-      if (handles) feed(id, handles)
-    }
-    for (const id of SUB_IDS) {
-      const entry = subRef.current[id]
-      if (entry) feed(id, entry.handles)
+      next[inst.uid] = row
+      // 参考线 / 填充 / 背景 / reference lines, fills, backgrounds
+      if (h.prim) {
+        const fills: FillBetween[] = []
+        const bands: FillBand[] = []
+        if (shown) {
+          for (const f of def.fills ?? []) {
+            if (!f.a || !f.b) continue
+            const fs = fillStyle(inst, f)
+            if (!fs.visible) continue
+            const color = resolveColor(fs.color, cc, fs.opacity)
+            const colorB = resolveColor(fs.colorB, cc, fs.opacity)
+            if (f.a.startsWith('h:') && f.b.startsWith('h:')) {
+              const ha = def.hlines?.find((x) => x.key === f.a.slice(2))
+              const hb = def.hlines?.find((x) => x.key === f.b.slice(2))
+              if (ha && hb) bands.push({ a: hlineStyle(inst, ha).value, b: hlineStyle(inst, hb).value, color })
+              continue
+            }
+            const pa = def.plots.find((x) => x.key === f.a)
+            const pb = def.plots.find((x) => x.key === f.b)
+            if (!pa || !pb || !plotStyle(inst, pa).visible || !plotStyle(inst, pb).visible) continue
+            const total = n + fut.length
+            const A = new Array<number | null>(total).fill(null)
+            const B = new Array<number | null>(total).fill(null)
+            const oa = r.offsets[f.a] ?? 0
+            const ob = r.offsets[f.b] ?? 0
+            const va = r.out[f.a] ?? []
+            const vb = r.out[f.b] ?? []
+            for (let i = 0; i < n; i++) {
+              if (i + oa >= 0 && i + oa < total) A[i + oa] = va[i] ?? null
+              if (i + ob >= 0 && i + ob < total) B[i + ob] = vb[i] ?? null
+            }
+            fills.push({ t: [...times, ...fut], a: A, b: B, color, colorB })
+          }
+        }
+        const bgKeys = r.extras.bg
+        const bg = shown && bgKeys && bgKeys.length === n
+          ? { t: times, color: bgKeys.map((k) => (k ? resolveColor(fillColor(`f:${k}`), cc, fillStyle(inst, def.fills!.find((x) => x.key === k)!).opacity) : null)) }
+          : null
+        h.prim.set(fills, bands, bg, !shown)
+      }
+      if (!shown) continue
+      // 标记、区域、竖条只能挂在主序列上 / markers, zones and strips live on the main series
+      for (const m of r.extras.markers ?? []) {
+        if (m.i < 0 || m.i >= n) continue
+        marks.push({ time: times[m.i] as UTCTimestamp, position: m.position, shape: m.shape, color: m.color, ...(m.price != null ? { price: m.price } : {}), text: m.text ? txt[m.text] ?? '' : '' } as SeriesMarker<UTCTimestamp>)
+      }
+      for (const z of r.extras.zones ?? []) if (z.i >= 0 && z.i < n) zones.push({ from: times[z.i] as UTCTimestamp, to: lastT, top: z.top, bottom: z.bottom, color: fillColor(z.color) })
+      for (const s of r.extras.strips ?? []) if (s.i >= 0 && s.i < n) strips.push({ time: times[s.i] as UTCTimestamp, top: s.top, bottom: s.bottom, color: fillColor(s.color) })
     }
     // 价格类图表上信号标记的时间对不上砖块，不画（TradingView 也不在砖形图上画信号）。
     // Signal markers don't line up with bricks on price-based types; skip them there.
-    const priceBased = transformKindOf(viewRef.current?.chartType ?? 'candles') !== 'none' && viewRef.current?.chartType !== 'heikinAshi'
     marks.sort((a, b) => a.time - b.time)
-    markersRef.current?.setMarkers(priceBased ? [] : marks)
-    zonesRef.current?.setZones(priceBased ? [] : zones, priceBased ? [] : strips)
+    markersRef.current?.setMarkers(onBricks ? [] : marks)
+    zonesRef.current?.setZones(onBricks ? [] : zones, onBricks ? [] : strips)
     latestLegendRef.current = next
     if (!hoveringRef.current) legendStore.set(next)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
   }, [legendStore])
   recomputeRef.current = recomputeIndicators
+
+  // 窗格高度：主图与各副图按权重分；折叠的固定 28px；最大化时其余全部折叠。
+  // Pane heights: main and sub-panes split by weight; collapsed ones are 28px; a maximised pane
+  // collapses all the others.
+  const appliedRef = useRef<{ main: number; panes: Record<string, number> } | null>(null)
+  const measurePanes = useCallback(() => {
+    const chart = chartRef.current
+    const host = containerRef.current
+    if (!chart || !host) return
+    const hostTop = host.getBoundingClientRect().top
+    const panes = chart.panes()
+    const iv = indRef.current
+    const used = usedPanes(iv.list.filter((i) => instRef.current.has(i.uid)), iv.panes)
+    const boxes: PaneBoxes = {}
+    const box = (idx: number) => {
+      const el = panes[idx]?.getHTMLElement()
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { top: Math.round(r.top - hostTop), height: Math.round(r.height) }
+    }
+    const m = box(0)
+    if (m) boxes.main = m
+    used.forEach((p, i) => { const b = box(i + 1); if (b) boxes[p.id] = b })
+    setPaneBoxes((prev) => (JSON.stringify(prev) === JSON.stringify(boxes) ? prev : boxes))
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
+  }, [])
 
   const applyPaneHeights = useCallback(() => {
     const chart = chartRef.current
@@ -373,32 +508,31 @@ export function useChartEngine(
     if (!chart || !host) return
     const panes = chart.panes()
     const total = host.clientHeight
-    const enabled = SUB_IDS.filter((id) => subRef.current[id])
-    if (panes.length <= 1 || total <= 0 || enabled.length === 0) {
-      setPaneOffsets({})
+    const iv = indRef.current
+    const used = usedPanes(iv.list.filter((i) => instRef.current.has(i.uid)), iv.panes)
+    if (panes.length <= 1 || total <= 0 || used.length === 0) {
+      appliedRef.current = null
+      requestAnimationFrame(measurePanes)
       return
     }
-    const s = indicatorSettingsRef.current
-    const weights = enabled.map((id) => PANE_SIZE_WEIGHT[(s[id] as { size?: 'sm' | 'md' | 'lg' }).size ?? 'md'])
-    const wsum = weights.reduce((a, b) => a + b, 0)
-    // 副图总占比随数量增长但封顶 60%，再按权重分；单个至少 60px。
-    // Sub-pane share grows with count, capped at 60%; then split by weight, ≥ 60px each.
-    const share = Math.min(0.6, 0.2 + 0.1 * enabled.length)
-    const subTotal = Math.max(total * share, enabled.length * 60)
-    const mainHeight = Math.max(total - subTotal, total * 0.4)
-    const avail = total - mainHeight
-    panes[0].setHeight(Math.floor(mainHeight))
-    let offset = Math.floor(mainHeight)
-    const offsets: Partial<Record<IndicatorId, number>> = {}
-    enabled.forEach((id, i) => {
-      const h = Math.max(60, Math.floor((avail * weights[i]) / wsum))
-      panes[i + 1]?.setHeight(h)
-      offsets[id] = offset
-      offset += h
-    })
-    setPaneOffsets(offsets)
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
-  }, [])
+    const max = iv.maxPane && (iv.maxPane === 'main' || used.some((p) => p.id === iv.maxPane)) ? iv.maxPane : null
+    const collapsed = (id: string) => (max ? id !== max : id !== 'main' && !!used.find((p) => p.id === id)?.collapsed)
+    const ids = ['main', ...used.map((p) => p.id)]
+    const weight = (id: string) => (id === 'main' ? iv.mainH : used.find((p) => p.id === id)?.h ?? 1)
+    const fixed = ids.filter(collapsed).length * COLLAPSED_PX
+    const flex = ids.filter((id) => !collapsed(id))
+    const wsum = flex.reduce((a, id) => a + weight(id), 0) || 1
+    const avail = Math.max(0, total - fixed - (ids.length - 1))
+    const px: Record<string, number> = {}
+    for (const id of ids) px[id] = collapsed(id) ? COLLAPSED_PX : Math.max(id === 'main' ? 80 : 40, Math.floor((avail * weight(id)) / wsum))
+    // 用伸缩系数而不是 setHeight：逐个 setHeight 会从相邻窗格借高度，前面设好的又被挤掉。
+    // 系数取像素值本身，按比例分配后正好是这些像素。
+    // Stretch factors rather than setHeight: setting heights one by one borrows from the
+    // neighbouring pane and undoes the earlier ones. Using the pixel values as factors yields them.
+    ids.forEach((id, i) => panes[i]?.setStretchFactor(px[id]))
+    appliedRef.current = { main: px.main, panes: Object.fromEntries(used.map((p) => [p.id, px[p.id]])) }
+    requestAnimationFrame(measurePanes)
+  }, [containerRef, measurePanes])
 
   // 建图（只建一次），容器尺寸变化时自适配 / build the chart once; auto-sizes with the container
   useEffect(() => {
@@ -410,15 +544,16 @@ export function useChartEngine(
       layout: {
         background: { type: ColorType.Solid, color: pal?.bg ?? '#09090b' },
         textColor: pal?.text ?? '#94a3b8',
-        // 关闭库自带的 logo；Apache-2.0 许可要求的署名在图表设置对话框底部（ChartSettingsDialog）。
-        // Library logo off; the Apache-2.0 attribution sits at the bottom of the chart settings dialog.
+        // 关闭库自带的 logo / library logo off
         attributionLogo: false,
+        panes: { separatorColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)', separatorHoverColor: 'rgba(124, 92, 255, 0.35)', enableResize: true },
       },
       grid: {
         vertLines: { color: pal?.grid ?? 'rgba(255, 255, 255, 0.045)' },
         horzLines: { color: pal?.grid ?? 'rgba(255, 255, 255, 0.045)' },
       },
       rightPriceScale: { borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)' },
+      leftPriceScale: { borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)', visible: false },
       timeScale: {
         borderColor: pal?.border ?? 'rgba(255, 255, 255, 0.07)',
         timeVisible: true,
@@ -460,18 +595,15 @@ export function useChartEngine(
         return
       }
       hoveringRef.current = true
-      const read = (api: LineApi | HistApi): number | null => {
-        const d = param.seriesData.get(api) as { value?: number } | undefined
-        return d?.value ?? null
-      }
       const next: LegendValues = {}
-      const collect = (id: IndicatorId, handles: Handle[]) => {
+      instRef.current.forEach((h) => {
         const row: Record<string, number | null> = {}
-        for (const h of handles) row[h.spec.key] = read(h.api)
-        next[id] = row
-      }
-      for (const id of MAIN_IDS) { const h = mainRef.current[id]; if (h) collect(id, h) }
-      for (const id of SUB_IDS) { const e = subRef.current[id]; if (e) collect(id, e.handles) }
+        for (const p of h.plots) {
+          const d = param.seriesData.get(p.api) as { value?: number } | undefined
+          row[p.key] = d?.value ?? null
+        }
+        next[h.uid] = row
+      })
       legendStore.set(next)
       const bar = param.seriesData.get(series) as MainBar | undefined
       if (bar && bar.close !== undefined) {
@@ -492,8 +624,30 @@ export function useChartEngine(
     })
     ro.observe(el)
 
+    // 用户拖了窗格分隔条：读回各窗格高度，交给页面存成新的权重。
+    // The user dragged a pane separator: read the heights back and let the page store new weights.
+    const onUp = () => {
+      requestAnimationFrame(() => {
+        const applied = appliedRef.current
+        const iv = indRef.current
+        if (!applied || iv.maxPane) return
+        const panes = chart.panes()
+        const used = usedPanes(iv.list.filter((i) => instRef.current.has(i.uid)), iv.panes)
+        const main = panes[0]?.getHeight() ?? applied.main
+        const now: Record<string, number> = {}
+        used.forEach((p, i) => { now[p.id] = panes[i + 1]?.getHeight() ?? applied.panes[p.id] })
+        const moved = Math.abs(main - applied.main) > 2 || used.some((p) => !p.collapsed && Math.abs(now[p.id] - applied.panes[p.id]) > 2)
+        if (!moved) return
+        appliedRef.current = { main, panes: now }
+        onPaneResizeRef.current?.(main, Object.fromEntries(used.filter((p) => !p.collapsed).map((p) => [p.id, now[p.id]])))
+        measurePanes()
+      })
+    }
+    el.addEventListener('pointerup', onUp)
+
     return () => {
       ro.disconnect()
+      el.removeEventListener('pointerup', onUp)
       chart.unsubscribeCrosshairMove(onCrosshairMove)
       window.clearTimeout(fullRenderTimerRef.current)
       legendStore.dispose()
@@ -505,8 +659,7 @@ export function useChartEngine(
       markersRef.current = null
       watermarkRef.current = null
       zonesRef.current = null
-      mainRef.current = {}
-      subRef.current = {}
+      instRef.current = new Map()
       setDrawReady(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- build the chart once
@@ -521,13 +674,14 @@ export function useChartEngine(
     const cross = view.crosshair
     const lineOpts = { color: pal.crosshair, style: DASH[view.crossStyle], labelBackgroundColor: pal.crossLabelBg, visible: cross !== 'hidden', labelVisible: true }
     chart.applyOptions({
-      layout: { background: { type: ColorType.Solid, color: pal.bg }, textColor: pal.text },
+      layout: { background: { type: ColorType.Solid, color: pal.bg }, textColor: pal.text, panes: { separatorColor: pal.border } },
       grid: {
         vertLines: { color: pal.grid, visible: view.grid === 'both' || view.grid === 'vert' },
         horzLines: { color: pal.grid, visible: view.grid === 'both' || view.grid === 'horz' },
       },
       crosshair: { mode: cross === 'magnet' ? CrosshairMode.Magnet : cross === 'hidden' ? CrosshairMode.Hidden : CrosshairMode.Normal, vertLine: lineOpts, horzLine: lineOpts },
       rightPriceScale: { borderColor: pal.border, mode: view.scaleMode, invertScale: view.invertScale },
+      leftPriceScale: { borderColor: pal.border },
       timeScale: { borderColor: pal.border, rightOffset: view.rightOffset, tickMarkFormatter: timeFmt.tick },
       localization: { timeFormatter: timeFmt.crosshair },
     })
@@ -554,17 +708,11 @@ export function useChartEngine(
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the listed fields are what the series reads
   }, [drawReady, view?.chartType, view?.candle.body, view?.candle.borders, view?.candle.wick, view?.lineColor, view?.lineWidth, view?.lastPrice])
 
-  // 换图表类型 / 变换参数：全量重画（数据形状变了）+ 指标重算（信号标记的显隐跟类型走）。
-  // 进出砖形 / 新价线 / 卡吉 / 点数图（或改它们的参数）时根数会变很多，原来的可见范围按旧根数算，
-  // 新数据会挤在最右边一小条：这时把视图重置到最后 150 根。
-  // Chart type / transform parameters: full redraw (data shape changed) + recompute. Entering or
-  // leaving renko / line break / kagi / P&F (or changing their parameters) changes the bar count a
-  // lot, and the old visible range would squeeze the new data into a sliver on the right, so the
-  // view resets to the last 150 bars.
-  // 根数很少（点数图常见只有几列）时 fitContent 会把它们摊在左边、每根宽得离谱：改成按 60 根的
-  // 宽度靠右放，和 TradingView 一样。
-  // With very few bars (P&F often has only a handful of columns) fitContent leaves them oddly wide
-  // on the left, so they are laid out at a 60-bar width aligned right instead, as TradingView does.
+  // 换图表类型 / 变换参数：全量重画 + 指标重算。进出砖形等价格类图表时根数会变很多，旧的可见范围
+  // 会把新数据挤在最右边，这时重置到最后 150 根；根数很少时按 60 根的宽度靠右放（同 TradingView）。
+  // Chart type / transform parameters: full redraw + recompute. Entering or leaving price-based
+  // types changes the bar count a lot, so the view resets to the last 150 bars; very few bars are
+  // laid out at a 60-bar width aligned right, as TradingView does.
   const shapeRef = useRef('')
   useEffect(() => {
     if (!seriesRef.current || candlesRef.current.length === 0) return
@@ -597,87 +745,112 @@ export function useChartEngine(
     })
   }, [drawReady, watermark, watermarkColor])
 
-  const indicatorLabels = view?.indicatorLabels ?? false
-  // 主图叠加对账 / reconcile main-pane overlays
+  // ── 指标结构：实例、所在窗格、线型、价格轴。变了就全部重建。──
+  // ── Indicator structure: instances, panes, plot kinds, price scales. Any change rebuilds all. ──
+  const structKey = (() => {
+    const used = usedPanes(ind.list, ind.panes)
+    return JSON.stringify([
+      used.map((p) => p.id),
+      ind.list.map((i) => {
+        const def = defOf(i.type)
+        if (!def) return null
+        return [i.uid, i.pane, scaleIdOf(i, def), def.plots.map((p) => plotStyle(i, p).kind)]
+      }),
+    ])
+  })()
   useEffect(() => {
     const chart = chartRef.current
-    if (!chart) return
-    for (const id of MAIN_IDS) {
-      const specs = seriesSpecs(id, indicatorSettings)
-      const st = lineStyleOf(id, indicatorSettings)
-      const existing = mainRef.current[id]
-      const same = existing && existing.length === specs.length && existing.every((h, i) => h.spec.kind === specs[i].kind)
-      if (!same) {
-        existing?.forEach((h) => chart.removeSeries(h.api))
-        mainRef.current[id] = specs.map((spec) => ({ spec, api: chart.addSeries(LineSeries, lineOptions(spec, st, indicators[id], indicatorLabels)) }))
-      } else {
-        existing.forEach((h, i) => { h.spec = specs[i]; (h.api as LineApi).applyOptions(lineOptions(specs[i], st, indicators[id], indicatorLabels)) })
-      }
+    const main = seriesRef.current
+    if (!chart || !main) return
+    // 拆 / tear down
+    instRef.current.forEach((h) => {
+      if (h.prim && h.host) { try { h.host.detachPrimitive(h.prim) } catch { /* 已随 series 删除 / gone with its series */ } }
+      h.plots.forEach((p) => { try { chart.removeSeries(p.api) } catch { /* noop */ } })
+    })
+    instRef.current = new Map()
+    const iv = indRef.current
+    const used = usedPanes(iv.list, iv.panes)
+    const order: { inst: IndInstance; pane: number }[] = []
+    for (const inst of iv.list) {
+      const def = defOf(inst.type)
+      if (!def) continue
+      if (inst.pane === 'main' || def.plots.length === 0 || !used.some((p) => p.id === inst.pane)) order.push({ inst, pane: 0 })
     }
-    recomputeIndicators()
-  }, [indicators, indicatorSettings, recomputeIndicators, indicatorLabels, drawReady])
-
-  // 副图开关 / sub-pane toggles
-  const subKey = SUB_IDS.map((id) => (indicators[id] ? id : '')).join(',')
-  useEffect(() => {
-    const chart = chartRef.current
-    if (!chart) return
-    const s = indicatorSettingsRef.current
-    for (const id of SUB_IDS) {
-      const e = subRef.current[id]
-      if (!e) continue
-      e.handles.forEach((h) => chart.removeSeries(h.api))
-      delete subRef.current[id]
-    }
-    for (const id of SUB_IDS) {
-      if (!indicators[id]) continue
-      const paneIndex = chart.panes().length
-      const st = lineStyleOf(id, s)
-      const handles: Handle[] = seriesSpecs(id, s).map((spec) => ({
-        spec,
-        api: spec.kind === 'hist'
-          ? chart.addSeries(HistogramSeries, { priceLineVisible: false, lastValueVisible: indicatorLabels, ...(id === 'volume' ? { priceFormat: { type: 'volume' as const } } : {}) }, paneIndex)
-          : chart.addSeries(LineSeries, lineOptions(spec, st, true, indicatorLabels), paneIndex),
-      }))
-      const firstLine = handles.find((h) => h.spec.kind === 'line')?.api as LineApi | undefined
-      const lines = firstLine ? refLines(id, s).map((r) => firstLine.createPriceLine({
-        price: r.value, color: 'rgba(148,163,184,0.5)', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: r.label,
-      })) : []
-      subRef.current[id] = { handles, refLines: lines }
-    }
-    applyPaneHeights()
-    recomputeIndicators()
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- subKey encodes exactly the toggles that matter
-  }, [subKey, applyPaneHeights, recomputeIndicators, drawReady])
-
-  // 参数 / 样式变化 / settings changes
-  useEffect(() => {
-    const s = indicatorSettings
-    for (const id of SUB_IDS) {
-      const e = subRef.current[id]
-      if (!e) continue
-      const st = lineStyleOf(id, s)
-      const specs = seriesSpecs(id, s)
-      e.handles.forEach((h, i) => {
-        const spec = specs[i] ?? h.spec
-        h.spec = spec
-        if (spec.kind !== 'hist') (h.api as LineApi).applyOptions(lineOptions(spec, st, true, indicatorLabels))
-        else (h.api as HistApi).applyOptions({ lastValueVisible: indicatorLabels })
+    used.forEach((p, k) => { for (const inst of iv.list) if (inst.pane === p.id && (defOf(inst.type)?.plots.length ?? 0) > 0) order.push({ inst, pane: k + 1 }) })
+    let anyLeft = false
+    for (const { inst, pane } of order) {
+      const def = defOf(inst.type)!
+      const plots: PlotHandle[] = def.plots.map((p) => {
+        const kind = plotStyle(inst, p).kind
+        const api = chart.addSeries(seriesTypeOf(kind) as typeof LineSeries, plotOptions(inst, def, p.key) as never, pane) as unknown as PlotApi
+        return { key: p.key, kind, api }
       })
-      const firstLine = e.handles.find((h) => h.spec.kind === 'line')?.api as LineApi | undefined
-      if (firstLine) {
-        e.refLines.forEach((pl) => firstLine.removePriceLine(pl))
-        e.refLines = refLines(id, s).map((r) => firstLine.createPriceLine({
-          price: r.value, color: 'rgba(148,163,184,0.5)', lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: r.label,
-        }))
+      if (scaleIdOf(inst, def) === 'none' || scaleIdOf(inst, def).startsWith('ind-')) {
+        // 自己的价格轴：叠在主图的副图指标贴底，占下面四分之一 / own scale: oscillators on main hug the bottom quarter
+        const first = plots[0]?.api
+        if (first) first.priceScale().applyOptions({ scaleMargins: inst.pane === 'main' && !def.overlay ? { top: 0.75, bottom: 0 } : { top: 0.1, bottom: 0.1 } })
       }
+      if (scaleIdOf(inst, def) === 'left') anyLeft = true
+      const host: ISeriesApi<SeriesType> = plots[0]?.api ?? main
+      const prim = new IndFillPrimitive()
+      host.attachPrimitive(prim)
+      instRef.current.set(inst.uid, { uid: inst.uid, pane: pane === 0 ? 'main' : inst.pane, plots, host, prim, lines: [] })
     }
+    chart.applyOptions({ leftPriceScale: { visible: anyLeft } })
+    applyStyles()
     applyPaneHeights()
     recomputeIndicators()
-  }, [indicatorSettings, applyPaneHeights, recomputeIndicators, indicatorLabels])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- structKey encodes exactly what forces a rebuild
+  }, [structKey, drawReady])
 
-  // 换 K 线颜色：改主序列选项并重画（每根 bar 自带最新价标签颜色）。
-  // Candle colours: update the main series and redraw (each bar carries its label colour).
+  // 只改样式：颜色、线宽、显隐、精度、参考线 / style-only updates: colours, widths, visibility, precision, hlines
+  const applyStyles = useCallback(() => {
+    const iv = indRef.current
+    for (const inst of iv.list) {
+      const h = instRef.current.get(inst.uid)
+      const def = defOf(inst.type)
+      if (!h || !def) continue
+      for (const p of h.plots) {
+        try { (p.api as ISeriesApi<'Line'>).applyOptions(plotOptions(inst, def, p.key) as never) } catch { /* noop */ }
+      }
+      const host = h.plots[0]?.api
+      if (host) {
+        h.lines.forEach((l) => { try { host.removePriceLine(l) } catch { /* noop */ } })
+        h.lines = []
+        if (instShown(inst)) {
+          // 不占价格轴（叠加在主图上）时参考线不在轴上标数字，免得和价格刻度混在一起
+          // With no price scale (overlaid on the main pane) hlines get no axis label, so they don't mix with price ticks
+          const onAxis = (inst.scale ?? (inst.pane === 'main' && !def.overlay ? 'none' : 'right')) !== 'none'
+          for (const hd of def.hlines ?? []) {
+            const st = hlineStyle(inst, hd)
+            if (!st.visible) continue
+            h.lines.push(host.createPriceLine({
+              price: st.value, color: resolveColor(st.color, candleColorsRef.current, st.opacity), lineWidth: 1, lineStyle: DASH[st.dash], axisLabelVisible: onAxis, title: '',
+            }))
+          }
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refs only
+  }, [plotOptions])
+
+  const indicatorLabels = view?.indicatorLabels ?? false
+  const styleKey = JSON.stringify(ind.list.map((i) => [i.styles, i.hidden, i.precision, i.labels, i.vis]))
+  useEffect(() => {
+    applyStyles()
+    recomputeIndicators()
+  }, [styleKey, indicatorLabels, ind.digits, ind.interval, applyStyles, recomputeIndicators])
+
+  // 输入变了只重算 / inputs changed: recompute only
+  const inputsKey = JSON.stringify(ind.list.map((i) => [i.inputs, i.tf, i.tfWait]))
+  useEffect(() => { recomputeIndicators() }, [inputsKey, recomputeIndicators])
+
+  // 窗格高度 / 折叠 / 最大化 / pane heights, collapse, maximise
+  const heightKey = JSON.stringify([ind.mainH, ind.panes, ind.maxPane])
+  useEffect(() => { applyPaneHeights() }, [heightKey, applyPaneHeights])
+
+  // 换 K 线颜色：改主序列选项并重画（每根 bar 自带最新价标签颜色）；跟随涨跌色的指标一起换。
+  // Candle colours: update the main series and redraw; indicators following up/down colours follow.
   const lineColorKey = view?.lineColor
   useEffect(() => {
     candleColorsRef.current = candleColors
@@ -687,12 +860,14 @@ export function useChartEngine(
       borderUpColor: candleColors.up, borderDownColor: candleColors.down,
     })
     if (candlesRef.current.length > 0) renderAll()
+    applyStyles()
     recomputeIndicators()
-  }, [candleColors, lineColorKey, renderAll, recomputeIndicators])
+  }, [candleColors, lineColorKey, renderAll, recomputeIndicators, applyStyles])
 
+  const markerKey = JSON.stringify(markerText)
   useEffect(() => {
     recomputeIndicators()
-  }, [markerText.buy, markerText.sell, markerText.closeBuy, markerText.closeSell, markerText.slBuy, markerText.slSell, recomputeIndicators])
+  }, [markerKey, recomputeIndicators])
 
   useEffect(() => {
     const el = containerRef.current
@@ -707,10 +882,12 @@ export function useChartEngine(
     return () => cancelAnimationFrame(raf)
   }, [refitKey, applyPaneHeights])
 
+  const getResults = useCallback(() => resultsRef.current, [])
+
   return {
     chartRef, seriesRef, candlesRef, lastTimeRef, barTimesRef, getBarTimes,
     loadingOlderRef, hasMoreHistoryRef, isFollowingLiveRef,
-    legendStore, ohlcStore, paneOffsets, drawReady,
+    legendStore, ohlcStore, paneBoxes, drawReady, getResults,
     recomputeIndicators, applyPaneHeights, renderAll, renderTail,
   }
 }

@@ -32,7 +32,6 @@ import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
 import { useAuth } from '../store/auth'
-import { PRO_ONLY } from '../components/charts/indicatorCatalog'
 import { useLive } from '../store/live'
 import { useOrderPlacement } from '../components/signals/hooks'
 import { useBackToClose } from '../utils/useBackToClose'
@@ -42,13 +41,9 @@ import { useSheetDrag } from '../utils/useSheetDrag'
 import { useDialogA11y } from '../utils/useDialogA11y'
 import { pickDefaultAccount, useLastAccount } from '../utils/useLastAccount'
 import { useMediaQuery } from '../utils/useMediaQuery'
-import {
-  DEFAULT_INDICATOR_SETTINGS,
-  mergeIndicatorSettings,
-  type IndicatorSettings,
-} from '../components/charts/indicatorSettings'
 import DrawLayer, { type DrawLayerHandle } from '../components/charts/DrawLayer'
-import IndicatorSettingsModal from '../components/charts/IndicatorSettingsModal'
+import IndicatorDialog from '../components/charts/ind/IndicatorDialog'
+import IndicatorEditor from '../components/charts/ind/IndicatorEditor'
 import Toast from '../components/Toast'
 import Switch from '../components/Switch'
 import SymbolHeader from '../components/charts/SymbolHeader'
@@ -68,7 +63,10 @@ import { brokerSymbol, clientOrderId, localizeApiError } from '../api/utils'
 import DrawToolsRow from '../components/charts/DrawToolsRow'
 import PositionMarkerToggle from '../components/charts/PositionMarkerToggle'
 import IntervalSeg from '../components/charts/IntervalSeg'
-import IndicatorLegends from '../components/charts/IndicatorLegends'
+import PaneLegends, { type LegendActions } from '../components/charts/ind/PaneLegends'
+import { useIndLayout } from '../components/charts/ind/useIndLayout'
+import { defOf } from '../components/charts/ind/registry'
+import { addInstance, duplicateInstance, moveInstance, movePane, removeInstance, removePane, setPane, updateInstance } from '../components/charts/ind/store'
 import FullscreenToolbar from '../components/charts/FullscreenToolbar'
 import BarCountdown from '../components/charts/BarCountdown'
 import ChartSettingsDialog from '../components/charts/ChartSettingsDialog'
@@ -92,14 +90,14 @@ import { PRICE_BASED_TYPES, normalizeChartPrefs, type ScaleMode } from '../compo
 import { intervalKind, intervalLabel, isValidInterval } from '../components/charts/intervals'
 import { canCopyImage, composeScreenshot, copyScreenshot, saveScreenshot, type ShotResult } from '../components/charts/chartScreenshot'
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
-import { useChartEngine, type ChartView } from '../components/charts/useChartEngine'
+import { useChartEngine, type ChartView, type IndView } from '../components/charts/useChartEngine'
 import { useChartData, withLiveClose } from '../components/charts/useChartData'
 import { useAccountQuotesSelect, useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
 import type { Order, Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
-  DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
-  priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, type IndicatorFlags, INTERVALS,
+  FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
+  priceDigits, resolvePriceDigits, intervalSeconds, MAX_CLIENT_BARS, INTERVALS,
   normalizeCandleColors, type CandleColors,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
@@ -107,9 +105,6 @@ import { readStorage } from '../utils/safeStorage'
 import '../styles/terminal.css'
 import { EMPTY } from '../utils/format'
 
-// IndicatorFlags 原本定义在这里，IndicatorSettingsModal 等按老路径引用；保留再导出。
-// IndicatorFlags used to be defined here; re-exported so old import paths keep working.
-export type { IndicatorFlags }
 
 type Sheet = 'watchlist' | 'trade' | 'positions' | null
 
@@ -321,13 +316,14 @@ export default function ChartsPage() {
   // 指标开关 + 参数：都跟随用户走，云端同步（见下方持久化 effect），与
   // 品种/周期无关。/ Indicator toggles + settings: follow the user, cloud
   // synced (see the persistence effects below); independent of symbol/interval.
-  const [indicators, setIndicatorsState] = useState<IndicatorFlags>(
-    () => ({ ...DEFAULT_INDICATORS, ...getPref<Partial<IndicatorFlags>>('charts', 'indicators', {}) })
-  )
-  const [indicatorSettings, setIndicatorSettingsState] = useState<IndicatorSettings>(() =>
-    mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, getPref<Partial<IndicatorSettings>>('charts', 'indicatorSettings', {}))
-  )
+  // 2026-11-25 阶段 4：指标是实例列表（chartv2 / ind），见 components/charts/ind/。
+  // Phase 4: indicators are an instance list (chartv2 / ind), see components/charts/ind/.
+  const [indLayout, updateInd] = useIndLayout()
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // 正在编辑设置的实例 / the instance whose settings dialog is open
+  const [editUid, setEditUid] = useState<string | null>(null)
+  // 最大化的窗格（不存盘）/ maximised pane (not persisted)
+  const [maxPane, setMaxPane] = useState<string | null>(null)
   // 外部画线工具栏（DrawToolsRow / FullscreenToolbar）改的是 DrawLayer 内部状态，
   // 经 ref 调用，不会让本页重渲染——按钮的按下态就不会跟着变。这个计数器只为
   // "踢一脚重渲染"存在，值本身没人读，所以只取 setter。
@@ -436,6 +432,8 @@ export default function ChartsPage() {
   const termDrag = useSheetDrag({ sheetRef: termSheetRef, scrimRef: termScrimRef, onDismiss: () => setSheet(null), ignore: '.term-sheet-body' })
   useScrollLock(sheet != null && !isFullscreen && !isDesktop)
   const indDialog = usePresence(settingsOpen ? true : null, SHEET_EXIT_MS)
+  const indEditor = usePresence(editUid, SHEET_EXIT_MS)
+  useBackToClose(editUid != null, () => setEditUid(null))
 
   // 断线状态往下传给报价条、自选、交易条、下单票：信号页的下单弹窗断线时会直说，图表页以前
   // 四处价格照常显示、报价条还写着 Live。布尔值只在断开 / 恢复时变，memo 的下单票不会因此多渲染。
@@ -564,10 +562,6 @@ export default function ChartsPage() {
     const cloudInt = getPref<string>('charts', 'interval', '')
     if (v2Int) setIntervalCode(v2Int)
     else if (isKnownInterval(cloudInt)) setIntervalCode(cloudInt)
-    const cloudInd = getPref<Partial<IndicatorFlags> | null>('charts', 'indicators', null)
-    if (cloudInd) setIndicatorsState({ ...DEFAULT_INDICATORS, ...cloudInd })
-    const cloudSettings = getPref<Partial<IndicatorSettings> | null>('charts', 'indicatorSettings', null)
-    if (cloudSettings) setIndicatorSettingsState(mergeIndicatorSettings(DEFAULT_INDICATOR_SETTINGS, cloudSettings))
     const cloudShowPos = getPref<boolean | null>('charts', 'showPositions', null)
     if (cloudShowPos != null) setShowPositions(cloudShowPos)
     const cloudCountdown = getPref<boolean | null>('charts', 'showCountdown', null)
@@ -620,14 +614,6 @@ export default function ChartsPage() {
   // warning, observed in testing to scramble the toggle state (clicking one
   // toggle also flipped others).
   useEffect(() => {
-    setPref('charts', 'indicators', indicators)
-  }, [indicators, setPref])
-
-  useEffect(() => {
-    setPref('charts', 'indicatorSettings', indicatorSettings)
-  }, [indicatorSettings, setPref])
-
-  useEffect(() => {
     setPref('charts', 'showPositions', showPositions)
   }, [showPositions, setPref])
 
@@ -648,9 +634,10 @@ export default function ChartsPage() {
   // Volume bars follow a candle color change: their colors are a separate indicator
   // setting, and leaving them would show volume in the opposite scheme to the candles.
   // They can still be tuned separately in the indicator panel afterwards.
+  // 阶段 4 起成交量默认色就是「跟随涨跌色」（'up' / 'down'），不用再同步。
+  // Since phase 4 the volume colours default to following the candle colours ('up' / 'down').
   const changeCandleColors = useCallback((c: CandleColors) => {
     setCandleColorsState(c)
-    setIndicatorSettingsState((prev) => ({ ...prev, volume: { ...prev.volume, upColor: c.up, downColor: c.down } }))
   }, [])
 
   // Pro 专属指标（MA 趋势蜡烛）：保存的开关原样保留（续费后自动恢复），但只有当前是 Pro
@@ -665,19 +652,14 @@ export default function ChartsPage() {
     const id = window.setInterval(() => refreshUser(), 5 * 60_000)
     return () => window.clearInterval(id)
   }, [refreshUser])
-  const shownIndicators = useMemo<IndicatorFlags>(() => {
-    if (isPro) return indicators
-    const out = { ...indicators }
-    PRO_ONLY.forEach((id) => { out[id] = false })
-    return out
-  }, [indicators, isPro])
+  const shownList = useMemo(
+    () => (isPro ? indLayout.list : indLayout.list.filter((i) => !defOf(i.type)?.pro)),
+    [indLayout.list, isPro],
+  )
   const markerText = useMemo(() => ({ buy: String(t('charts.indicators.buyMark')), sell: String(t('charts.indicators.sellMark')),
     closeBuy: String(t('charts.indicators.closeBuyMark')), closeSell: String(t('charts.indicators.closeSellMark')),
     slBuy: String(t('charts.indicators.slBuyMark')), slSell: String(t('charts.indicators.slSellMark')) }), [t])
 
-  const toggleIndicator = useCallback((key: keyof IndicatorFlags) => {
-    setIndicatorsState((prev) => ({ ...prev, [key]: !prev[key] }))
-  }, [])
 
   // 图表实例、指标 series、图例、pane 高度 → useChartEngine；历史 / 翻页 / 轮询 → useChartData。
   // 图表现在从不被藏起，refitKey 只在进出全屏时变（那两次容器尺寸确实变了）。
@@ -723,8 +705,33 @@ export default function ChartsPage() {
   // Buy / sell buttons: always on desktop; phones already have the bottom trade bar, so fullscreen only.
   const showTradeBtns = cprefs.trading.buttons && (isDesktop || isFullscreen)
 
-  const engine = useChartEngine(containerRef, shownIndicators, indicatorSettings, isFullscreen, candleColors, markerText, view)
-  const { chartRef, seriesRef, getBarTimes, legendStore, paneOffsets, drawReady } = engine
+  const indView = useMemo<IndView>(() => ({
+    list: shownList, panes: indLayout.panes, mainH: indLayout.mainH, maxPane, interval, digits: decimals,
+  }), [shownList, indLayout.panes, indLayout.mainH, maxPane, interval, decimals])
+  // 拖窗格分隔条后把像素高度存成权重（比例不变，换屏幕尺寸照样成立）
+  // After a separator drag, store the pixel heights as weights (ratios survive other screen sizes)
+  const onPaneResize = useCallback((mainPx: number, panes: Record<string, number>) => {
+    updateInd((l) => ({ ...l, mainH: Math.max(0.1, mainPx / 100), panes: l.panes.map((p) => (panes[p.id] != null ? { ...p, h: Math.max(0.1, panes[p.id] / 100) } : p)) }))
+  }, [updateInd])
+  const engine = useChartEngine(containerRef, indView, isFullscreen, candleColors, markerText, view, onPaneResize)
+  const { chartRef, seriesRef, getBarTimes, legendStore, paneBoxes, drawReady } = engine
+  const legendActions = useMemo<LegendActions>(() => ({
+    toggleHidden: (uid) => updateInd((l) => updateInstance(l, uid, (i) => ({ ...i, hidden: !i.hidden || undefined }))),
+    settings: (uid) => setEditUid(uid),
+    remove: (uid) => updateInd((l) => removeInstance(l, uid)),
+    duplicate: (uid) => updateInd((l) => duplicateInstance(l, uid)),
+    moveTo: (uid, target) => updateInd((l) => moveInstance(l, uid, target)),
+    scale: (uid, pin) => updateInd((l) => updateInstance(l, uid, { scale: pin })),
+    saveDefault: (uid) => updateInd((l) => {
+      const i = l.list.find((x) => x.uid === uid)
+      return i ? { ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } } : l
+    }),
+    paneMove: (id, dir) => updateInd((l) => movePane(l, id, dir)),
+    paneMax: (id) => setMaxPane(id),
+    paneCollapse: (id, collapsed) => updateInd((l) => setPane(l, id, { collapsed: collapsed || undefined })),
+    paneRemove: (id) => { updateInd((l) => removePane(l, id)); setMaxPane((m) => (m === id ? null : m)) },
+  }), [updateInd])
+  const addIndicator = useCallback((type: string) => { updateInd((l) => addInstance(l, type)?.layout ?? l) }, [updateInd])
   const liveBidRef = useRef<number | null>(null)
   const dataKeyRef = useRef('')
   const { hasData, stale, lastPrice, dayStats, ensureHistory } = useChartData(symbol, interval, decimals, engine, liveBidRef, dataKeyRef)
@@ -1053,7 +1060,7 @@ export default function ChartsPage() {
               role="group" with a name, so a screen reader says "Charts, group" on entry. */}
           <div
             ref={chartBoxRef}
-            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''} ${cprefs.legend.title || cprefs.legend.ohlc || cprefs.legend.change || cprefs.legend.volume ? 'has-status' : ''} ${cprefs.legend.indicators ? '' : 'no-ind-legend'} ${showTradeBtns ? 'has-tbtns' : ''}`}
+            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''} ${cprefs.legend.title || cprefs.legend.ohlc || cprefs.legend.change || cprefs.legend.volume ? 'has-status' : ''} ${cprefs.legend.indicators ? '' : 'no-ind-legend'} ${showTradeBtns ? 'has-tbtns' : ''} ${maxPane && maxPane !== 'main' && indLayout.panes.some((p) => p.id === maxPane) ? 'main-min' : ''}`}
             data-ctheme={themeName}
             tabIndex={0}
             role="group"
@@ -1167,7 +1174,8 @@ export default function ChartsPage() {
               <TradeButtons symbol={symbol} digits={decimals} login={tradeLogin} oneClick={cprefs.trading.oneClick} touch={!isDesktop} onPlace={chartPlace} quotesDown={wsDisconnected} />
             )}
             {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
-            <IndicatorLegends indicators={shownIndicators} indicatorSettings={indicatorSettings} legendStore={legendStore} paneOffsets={paneOffsets} decimals={decimals} />
+            <PaneLegends layout={indLayout} list={shownList} boxes={paneBoxes} legendStore={legendStore} digits={decimals} candle={candleColors}
+              axisW={chartRef.current ? chartRef.current.priceScale('right').width() : 56} maxPane={maxPane} actions={legendActions} showRows={cprefs.legend.indicators} />
 
             {drawReady && chartRef.current && seriesRef.current && (
               <ChartPriceLines
@@ -1360,16 +1368,26 @@ export default function ChartsPage() {
       )}
 
       {indDialog.shown && (
-        <IndicatorSettingsModal
+        <IndicatorDialog
           closing={indDialog.closing}
-          indicators={shownIndicators}
+          layout={indLayout}
+          update={updateInd}
           isPro={isPro}
-          onToggle={toggleIndicator}
-          onSetIndicators={setIndicatorsState}
-          getCandles={() => engine.candlesRef.current}
-          settings={indicatorSettings}
-          onChange={setIndicatorSettingsState}
+          onAdd={addIndicator}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {indEditor.shown && (
+        <IndicatorEditor
+          uid={indEditor.shown}
+          closing={indEditor.closing}
+          layout={indLayout}
+          interval={interval}
+          candle={candleColors}
+          onChange={(next) => updateInd((l) => updateInstance(l, next.uid, () => next))}
+          onSaveDefault={(i) => updateInd((l) => ({ ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } }))}
+          onClose={() => setEditUid(null)}
         />
       )}
 
