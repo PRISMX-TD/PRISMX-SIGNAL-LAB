@@ -447,7 +447,13 @@ def _hash_legacy_api_tokens() -> None:
 #          只在库里版本 < 54 时跑。NULL 的本来就等于全开。
 #          rev 54 — red-release alerts: econ_releases.alert_sent_at; the new econ_alert push event is on by
 #          default, so stored (non-NULL) event whitelists get it appended once, only when the stored rev < 54.
-CURRENT_SCHEMA_REV = 54
+# rev 55 — 图表画线单独成表（2026-11-25）：新表 chart_drawings（create_all 建表建索引，每个用户每个品种
+#          一行，唯一约束 (user_id, symbol)）。同 rev 52：无 ADD COLUMN、无回填（user_prefs 里 chartDraw
+#          命名空间的旧画线后端不搬，交给前端接入时处理）；+1 只为让老库走一次完整迁移。
+#          rev 55 — chart drawings get their own table: chart_drawings via create_all (one row per user
+#          and symbol, unique (user_id, symbol)). No ADD COLUMN, no backfill (old drawings in the
+#          user_prefs chartDraw namespace are not moved by the backend; left to the frontend wiring).
+CURRENT_SCHEMA_REV = 55
 
 _SCHEMA_REV_KEY = "schema_rev"
 
