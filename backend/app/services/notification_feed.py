@@ -59,6 +59,10 @@ KIND_LUCKY_TICKET = "lucky_ticket"
 KIND_LUCKY_EXPIRING = "lucky_ticket_expiring"
 KIND_LUCKY_DELIVERED = "lucky_prize_delivered"
 KIND_LUCKY_CANCELLED = "lucky_prize_cancelled"
+# 图表警报触发（rev 56）：text 是警报消息（用户写的，或前端按条件生成的默认文案），链接到 /charts 的
+# 对应品种。标题在前端 `notifFeed.chart_alert`（5 语）。
+# A chart alert went off (rev 56): text is the alert message, the link opens /charts on that symbol.
+KIND_CHART_ALERT = "chart_alert"
 
 # 单条文本的入库上限：text 来自用户自己填的工单标题（后端已限 200 字），这里再
 # 兜一道，避免将来别的来源塞进超长字符串。
