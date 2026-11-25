@@ -19,16 +19,18 @@ import type { CanvasRenderingTarget2D } from 'fancy-canvas'
 import type { AutoscaleInfo, IChartApi, IPrimitivePaneRenderer, IPrimitivePaneView, Logical, Time } from 'lightweight-charts'
 import type { ClosedTrade, Order, Position } from '../../../api/types'
 import { orderApi } from '../../../api/client'
-import { baseSymbol } from '../../../api/utils'
+import { baseSymbol, parseTime } from '../../../api/utils'
 import type { MainSeriesApi } from '../useChartEngine'
 import { isChartAlive } from '../chartLifecycle'
 import { DOWN_COLOR, UP_COLOR } from '../canvasColors'
 import { placeLegs, type PlacedLeg, type Side, type TradeLeg } from './tradeMath'
 
+// 后端时间是不带时区的 UTC 字符串，必须走 parseTime（补 Z）；直接 Date.parse 会按本地时间解析，
+// 北京时间下整条线往左偏 8 小时。/ Backend times are naive UTC: parseTime appends Z. Date.parse
+// would read them as local time and shift every line by the viewer's UTC offset.
 const ts = (iso: string | null | undefined): number | null => {
-  if (!iso) return null
-  const n = Date.parse(iso)
-  return Number.isFinite(n) ? Math.floor(n / 1000) : null
+  const n = parseTime(iso)?.getTime()
+  return n != null && Number.isFinite(n) ? Math.floor(n / 1000) : null
 }
 
 /** 已平仓明细 + 开仓成交 → 交易列表（只取本品种）/ closed trades + open fills → trades for the symbol */

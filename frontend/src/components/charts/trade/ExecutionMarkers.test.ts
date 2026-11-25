@@ -82,4 +82,10 @@ describe('tradeLegsFrom', () => {
       { side: 'SELL', t1: Date.parse('2026-11-25T11:00:00Z') / 1000, p1: 11, t2: null, p2: null, profit: null },
     ])
   })
+
+  it('reads naive backend timestamps as UTC, not local time', () => {
+    const legs = tradeLegsFrom('XAUUSD', [ct({ openTime: '2026-11-25T09:00:00', closedAt: '2026-11-25T10:00:00.123456' })], [], [])
+    expect(legs[0].t1).toBe(Date.parse('2026-11-25T09:00:00Z') / 1000)
+    expect(legs[0].t2).toBe(Math.floor(Date.parse('2026-11-25T10:00:00.123Z') / 1000))
+  })
 })
