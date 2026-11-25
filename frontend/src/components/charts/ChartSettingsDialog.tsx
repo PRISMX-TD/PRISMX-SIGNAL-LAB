@@ -208,17 +208,47 @@ export default function ChartSettingsDialog(p: Props) {
             </Row>
           </>
         )
-      case 'trading':
+      case 'trading': {
+        const tr = prefs.trading
+        const setTr = (patch: Partial<typeof tr>) => set('trading', { ...tr, ...patch })
         return (
           <>
             <Row label={tt('charts.settings.positions')} hint={tt('charts.settings.positionsHint')}>
               <Switch checked={p.showPositions} onChange={p.onShowPositions} aria-label={tt('charts.settings.positions')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.pending')}>
+              <Switch checked={tr.pending} onChange={(v) => setTr({ pending: v })} aria-label={tt('charts.cs.tr.pending')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.pnl')} hint={tt('charts.cs.tr.pnlHint')}>
+              <Switch checked={tr.pnl} onChange={(v) => setTr({ pnl: v })} aria-label={tt('charts.cs.tr.pnl')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.pnlUnit')}>
+              <Seg value={tr.pnlUnit} label={tt('charts.cs.tr.pnlUnit')} options={(['money', 'points', 'pct'] as const).map((v) => ({ v, label: tt(`charts.cs.tr.unit_${v}`) }))} onChange={(v) => setTr({ pnlUnit: v })} />
+            </Row>
+            <Row label={tt('charts.cs.tr.lineButtons')} hint={tt('charts.cs.tr.lineButtonsHint')}>
+              <Switch checked={tr.lineButtons} onChange={(v) => setTr({ lineButtons: v })} aria-label={tt('charts.cs.tr.lineButtons')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.align')}>
+              <Seg value={tr.align} label={tt('charts.cs.tr.align')} options={(['left', 'right'] as const).map((v) => ({ v, label: tt(`charts.cs.tr.align_${v}`) }))} onChange={(v) => setTr({ align: v })} />
+            </Row>
+            <Row label={tt('charts.cs.tr.executions')} hint={tt('charts.cs.tr.executionsHint')}>
+              <Switch checked={tr.executions} onChange={(v) => setTr({ executions: v })} aria-label={tt('charts.cs.tr.executions')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.buttons')} hint={tt('charts.cs.tr.buttonsHint')}>
+              <Switch checked={tr.buttons} onChange={(v) => setTr({ buttons: v })} aria-label={tt('charts.cs.tr.buttons')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.oneClick')} hint={tt('charts.cs.tr.oneClickHint')}>
+              <Switch checked={tr.oneClick} onChange={(v) => setTr({ oneClick: v })} aria-label={tt('charts.cs.tr.oneClick')} />
+            </Row>
+            <Row label={tt('charts.cs.tr.sound')}>
+              <Switch checked={tr.sound} onChange={(v) => setTr({ sound: v })} aria-label={tt('charts.cs.tr.sound')} />
             </Row>
             <Row label={tt('charts.cs.afterPlace')} hint={tt('charts.cs.afterPlaceHint')}>
               <Switch checked={p.afterPlaceOpen} onChange={p.onAfterPlaceOpen} aria-label={tt('charts.cs.afterPlace')} />
             </Row>
           </>
         )
+      }
     }
   })()
 

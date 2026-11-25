@@ -2521,3 +2521,296 @@
 .chart-presenter, .chart-presenter * { cursor: none !important; }
 /* 画线层的轻提示（图片太大等）/ drawing-layer notice (image too large, ...) */
 .draw-notice { position: absolute; left: 50%; bottom: 56px; z-index: var(--z-menu); max-width: calc(100% - 32px); padding: 8px 14px; border-radius: var(--r-tile); background: var(--surface-float); box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi); color: var(--text); font-size: 12px; transform: translateX(-50%); animation: term-fade var(--dur-fast) var(--ease-out) backwards; pointer-events: none; }
+
+/* ── 图表交易（阶段 3）/ chart trading (phase 3) ───────────────────────── */
+
+/* 买卖按钮：在标题行下方，指标图例往下让一行。
+   Buy / sell buttons sit under the title row; the indicator legend moves down one row. */
+.chart-tbtns {
+  position: absolute;
+  top: calc(8px + var(--status-h, 16px) + 6px);
+  left: 12px;
+  z-index: 21;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  pointer-events: auto;
+}
+.term-chart.has-tbtns .term-legend.main { top: calc(8px + var(--status-h, 16px) + 6px + 46px); }
+.chart-tbtns-row {
+  display: flex;
+  align-items: stretch;
+  height: 38px;
+  border-radius: var(--r-tile);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  overflow: hidden;
+}
+.chart-tbtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 84px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font: 500 13px var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.chart-tbtn small { font: 500 10px var(--font-sans); letter-spacing: 0.02em; }
+.chart-tbtn b { font-size: 16px; font-weight: 600; }
+.chart-tbtn.sell { color: var(--down); background: rgb(var(--down-rgb) / 0.1); }
+.chart-tbtn.buy { align-items: flex-end; color: var(--up); background: rgb(var(--up-rgb) / 0.1); }
+.chart-tbtn:disabled { opacity: 0.45; cursor: not-allowed; }
+@media (hover: hover) and (pointer: fine) {
+  .chart-tbtn.sell:not(:disabled):hover { background: rgb(var(--down-rgb) / 0.2); }
+  .chart-tbtn.buy:not(:disabled):hover { background: rgb(var(--up-rgb) / 0.2); }
+}
+.chart-tbtn:not(:disabled):active { filter: brightness(1.15); }
+.chart-tbtn-mid {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 58px;
+  border-inline: 1px solid var(--line);
+}
+.chart-tbtn-vol {
+  width: 100%;
+  height: 100%;
+  padding: 8px 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-strong);
+  font: 500 13px var(--font-mono);
+  text-align: center;
+  outline: 0;
+}
+.chart-tbtn-vol:focus-visible { background: var(--nest); }
+.chart-tbtn-spread {
+  position: absolute;
+  top: 2px;
+  left: 0;
+  right: 0;
+  font: 500 9px var(--font-mono);
+  color: var(--text-3);
+  text-align: center;
+  pointer-events: none;
+}
+.chart-tbtns-flag { padding: 1px 6px; border-radius: 4px; background: rgb(var(--down-rgb) / 0.14); color: var(--down); font-size: 10px; }
+.chart-tbtns-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 260px;
+  padding: 10px;
+  border-radius: var(--r-panel);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  color: var(--text);
+  font-size: 12px;
+  animation: term-fade var(--dur-fast) var(--ease-out) backwards;
+}
+.chart-tbtns-acts { display: flex; justify-content: flex-end; gap: 6px; }
+.chart-tbtns-acts button,
+.chart-closepop-go,
+.chart-draft-go {
+  height: 30px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-tile);
+  background: var(--nest);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chart-tbtns-confirm.buy .go,
+.chart-draft-go.buy { background: rgb(var(--up-rgb) / 0.9); color: #08120c; font-weight: 600; }
+.chart-tbtns-confirm.sell .go,
+.chart-draft-go.sell { background: rgb(var(--down-rgb) / 0.9); color: #1a070a; font-weight: 600; }
+.chart-tbtns-acts button:disabled,
+.chart-closepop-go:disabled,
+.chart-draft-go:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* 持仓线按钮的提示 / tooltip of the line buttons */
+.chart-trade-tip {
+  position: absolute;
+  z-index: 22;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  color: var(--text-strong);
+  font-size: 11px;
+  white-space: nowrap;
+  transform: translate(-50%, calc(-100% - 6px));
+  pointer-events: none;
+}
+
+/* 部分平仓小窗 / partial-close popover */
+.chart-closepop {
+  position: absolute;
+  z-index: 23;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 232px;
+  padding: 10px;
+  border-radius: var(--r-panel);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi);
+  color: var(--text);
+  font-size: 12px;
+  animation: term-fade var(--dur-fast) var(--ease-out) backwards;
+}
+.chart-closepop > b { color: var(--text-strong); font-weight: 500; }
+.chart-closepop-ratios { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.chart-closepop-ratios button {
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--nest);
+  color: var(--text-2);
+  font: 500 12px var(--font-mono);
+  cursor: pointer;
+}
+.chart-closepop-ratios button.on { background: rgb(var(--down-rgb) / 0.18); color: var(--down); }
+.chart-closepop-ratios button:disabled { opacity: 0.35; cursor: not-allowed; }
+.chart-closepop-go { background: rgb(var(--down-rgb) / 0.9); color: #1a070a; font-weight: 600; }
+
+/* 投影单面板：桌面在图右上（让开价格轴），手机贴底。
+   Projected-order panel: top right on desktop (clear of the price axis), docked at the bottom on phones. */
+.chart-draft {
+  position: absolute;
+  top: 10px;
+  right: 72px;
+  z-index: 23;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 250px;
+  max-height: calc(100% - 20px);
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: var(--r-panel);
+  background: var(--surface-float);
+  box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi), inset 3px 0 0 #a78bfa;
+  color: var(--text);
+  font-size: 12px;
+  animation: term-fade var(--dur-fast) var(--ease-out) backwards;
+}
+.chart-draft-head { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.chart-draft-head > b { flex: 1; color: var(--text-strong); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chart-draft-side { display: flex; padding: 2px; border-radius: 7px; background: var(--nest); }
+.chart-draft-side button {
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.chart-draft-side button.on.buy { background: rgb(var(--up-rgb) / 0.2); color: var(--up); }
+.chart-draft-side button.on.sell { background: rgb(var(--down-rgb) / 0.2); color: var(--down); }
+.chart-draft-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .chart-draft-x:hover { background: var(--nest); color: var(--text-strong); }
+  .chart-draft-side button:not(.on):hover { color: var(--text-strong); }
+}
+.chart-draft-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; color: var(--text-2); }
+.chart-draft-row input {
+  width: 120px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.32);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text-strong);
+  font: 500 12px var(--font-mono);
+  text-align: right;
+  outline: 0;
+}
+.chart-draft-row input:focus-visible { box-shadow: inset 0 0 0 1px rgb(167 139 250 / 0.7); }
+.chart-draft-vol { display: flex; align-items: center; gap: 2px; }
+.chart-draft-vol input { width: 64px; text-align: center; }
+.chart-draft-vol button {
+  width: 26px;
+  height: 28px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--nest);
+  color: var(--text-2);
+  font: 500 14px var(--font-mono);
+  cursor: pointer;
+}
+.chart-draft-leg { margin: -4px 0 2px; color: var(--text-3); font: 500 10.5px var(--font-mono); text-align: right; }
+.chart-draft-leg.bad { color: var(--down); }
+.chart-draft-sum { display: flex; flex-wrap: wrap; gap: 4px 10px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 11px; }
+.chart-draft-sum b { font: 600 11.5px var(--font-mono); color: var(--text-strong); }
+.chart-draft-sum b.up { color: var(--up); }
+.chart-draft-sum b.dn { color: var(--down); }
+.chart-draft-acct { color: var(--text-3); font-size: 11px; }
+.chart-draft-err { margin: 0; color: var(--down); font-size: 11.5px; line-height: 1.4; }
+.chart-draft-go { height: 34px; margin-top: 2px; font-size: 13px; }
+@media (max-width: 767px) {
+  .chart-draft { top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; max-height: calc(100% - 16px); }
+  .chart-closepop { width: min(232px, calc(100% - 16px)); }
+}
+
+/* 价格轴边跟着十字线的「+」和它的菜单 / the plus on the price-axis edge and its menu */
+.chart-plus {
+  position: absolute;
+  z-index: 21;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--surface-float);
+  box-shadow: inset 0 0 0 1px var(--line-hi);
+  color: var(--text-2);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .chart-plus:hover { background: #a78bfa; color: #120a24; box-shadow: none; }
+}
+.chart-ctx.chart-plus-menu { position: absolute; min-width: 200px; }
+.chart-ctx-item.up > span:first-child { color: var(--up); }
+.chart-ctx-item.dn > span:first-child { color: var(--down); }
+
+/* 多空仓位工具的「转为订单」/ the long-short tool to-order button */
+.draw-fbar-btn.draw-fbar-order { color: #a78bfa; }
+.draw-fbar-btn.draw-fbar-order small { color: inherit; }
+
+@media (max-width: 1023px) {
+  .chart-tbtn { min-width: 74px; padding: 0 8px; }
+  .chart-tbtn b { font-size: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chart-tbtns-confirm, .chart-closepop, .chart-draft { animation: none; }
+}

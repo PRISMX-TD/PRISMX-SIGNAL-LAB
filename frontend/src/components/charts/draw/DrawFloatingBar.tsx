@@ -16,6 +16,8 @@ interface Props {
   onReorder: (how: 'front' | 'back' | 'up' | 'down') => void
   onHide: () => void
   onTree: () => void
+  // 多空仓位工具：转成图上投影单 / long / short tool: turn into a projected order
+  onToOrder?: () => void
   t: (k: string, o?: Record<string, unknown>) => unknown
 }
 
@@ -52,7 +54,7 @@ export function ColorGrid({ value, onPick, t }: { value: string; onPick: (c: str
   )
 }
 
-export default function DrawFloatingBar({ drawings, onPatch, onSettings, onToggleLock, onClone, onDelete, onReorder, onHide, onTree, t }: Props) {
+export default function DrawFloatingBar({ drawings, onPatch, onSettings, onToggleLock, onClone, onDelete, onReorder, onHide, onTree, onToOrder, t }: Props) {
   const [menu, setMenu] = useState<'color' | 'width' | 'style' | 'more' | null>(null)
   const colorRef = useRef<HTMLButtonElement>(null)
   const widthRef = useRef<HTMLButtonElement>(null)
@@ -81,6 +83,12 @@ export default function DrawFloatingBar({ drawings, onPatch, onSettings, onToggl
             <StyleGlyph s={style} />
           </button>
         </>
+      )}
+      {onToOrder && (
+        <button type="button" className="draw-fbar-btn draw-fbar-order" title={tt('charts.trade.toOrder')} aria-label={tt('charts.trade.toOrder')} onClick={onToOrder}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12h12M12 6l6 6-6 6" /><path d="M20 5v14" /></svg>
+          <small>{tt('charts.trade.toOrderShort')}</small>
+        </button>
       )}
       <span className="draw-fbar-sep" />
       {drawings.length === 1 && (

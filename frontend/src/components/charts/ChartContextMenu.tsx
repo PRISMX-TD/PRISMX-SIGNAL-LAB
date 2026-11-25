@@ -25,6 +25,10 @@ export interface CtxActions {
   setScaleMode: (m: ScaleMode) => void
   invert: boolean
   setInvert: (v: boolean) => void
+  // 在这个价位开一张投影单（没有在线账户时为 null，菜单项不出现）与它的类型名。
+  // Open a projected order at this price (null without an online account) and its type name.
+  orderAt?: ((side: 'BUY' | 'SELL', price: number) => void) | null
+  orderLabel?: (side: 'BUY' | 'SELL', price: number) => string
 }
 
 export default function ChartContextMenu({ state, onClose, actions, decimals }: { state: CtxState; onClose: () => void; actions: CtxActions; decimals: number }) {
@@ -75,6 +79,13 @@ export default function ChartContextMenu({ state, onClose, actions, decimals }: 
         <>
           {item(String(t('charts.ctx.reset')), a.reset, { kbd: 'Alt+R' })}
           {state.price != null && item(String(t('charts.ctx.copyPrice', { p: state.price.toFixed(decimals) })), () => a.copyPrice(state.price!))}
+          {state.price != null && state.price > 0 && a.orderAt && a.orderLabel && (
+            <>
+              <hr />
+              {item(String(t('charts.trade.ctxOrder', { type: a.orderLabel('BUY', state.price), p: state.price.toFixed(decimals) })), () => a.orderAt!('BUY', state.price!))}
+              {item(String(t('charts.trade.ctxOrder', { type: a.orderLabel('SELL', state.price), p: state.price.toFixed(decimals) })), () => a.orderAt!('SELL', state.price!))}
+            </>
+          )}
           <hr />
           {item(String(t('charts.goto.title')), a.goto, { kbd: 'Alt+G' })}
           {item(String(t('charts.shot.save')), a.screenshot)}

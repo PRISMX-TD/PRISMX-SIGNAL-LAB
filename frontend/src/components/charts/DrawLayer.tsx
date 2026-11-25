@@ -100,6 +100,9 @@ interface Props {
   theme?: { bg: string; text: string }
   // 句柄上的状态提交后通知外部工具栏重渲染 / fires after the handle's state commits so toolbars re-render
   onStateChange?: () => void
+  // 多空仓位工具「转为订单」：按它的入场 / 止损 / 止盈开一张图上投影单（阶段 3）
+  // A long/short drawing's "to order": opens a projected order from its entry / SL / TP (phase 3)
+  onToOrder?: (o: { side: 'BUY' | 'SELL'; price: number; sl: number; tp: number }) => void
 }
 
 type Gesture =
@@ -111,7 +114,7 @@ type Gesture =
 
 interface Creating { d: Drawing; step: number }
 
-function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -1296,6 +1299,11 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
           onReorder={(how) => reorder(how)}
           onHide={() => { patchSelected({ hidden: true }); select([]) }}
           onTree={() => setTreeOpen(true)}
+          onToOrder={onToOrder && selDrawings.length === 1 && (selDrawings[0].type === 'long' || selDrawings[0].type === 'short') ? () => {
+            // 仓位工具的三个点：入场、目标（止盈）、止损 / the position tool's points: entry, target (TP), stop (SL)
+            const d = selDrawings[0]
+            onToOrder({ side: d.type === 'long' ? 'BUY' : 'SELL', price: d.pts[0].p, tp: d.pts[1].p, sl: d.pts[2].p })
+          } : undefined}
           t={t}
         />
       )}

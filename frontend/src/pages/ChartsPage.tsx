@@ -56,7 +56,15 @@ import WatchlistPanel from '../components/charts/WatchlistPanel'
 import AccountSummary from '../components/charts/AccountSummary'
 import OrderTicket from '../components/charts/OrderTicket'
 import PositionsDock from '../components/charts/PositionsDock'
-import PositionOverlay from '../components/charts/PositionOverlay'
+import PositionOverlay, { type DraftRequest } from '../components/charts/PositionOverlay'
+import TradeButtons from '../components/charts/trade/TradeButtons'
+import PlusOrderButton from '../components/charts/trade/PlusOrderButton'
+import ExecutionMarkers from '../components/charts/trade/ExecutionMarkers'
+import { useFillSound } from '../components/charts/trade/useFillSound'
+import { autoEntryType } from '../components/charts/trade/tradeMath'
+import type { ChartPlace } from '../components/charts/trade/useTradeActions'
+import type { SymbolSpec } from '../components/order/orderMath'
+import { brokerSymbol, clientOrderId, localizeApiError } from '../api/utils'
 import DrawToolsRow from '../components/charts/DrawToolsRow'
 import PositionMarkerToggle from '../components/charts/PositionMarkerToggle'
 import IntervalSeg from '../components/charts/IntervalSeg'
@@ -86,8 +94,8 @@ import { canCopyImage, composeScreenshot, copyScreenshot, saveScreenshot, type S
 import { useChartFullscreen } from '../components/charts/useChartFullscreen'
 import { useChartEngine, type ChartView } from '../components/charts/useChartEngine'
 import { useChartData, withLiveClose } from '../components/charts/useChartData'
-import { useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
-import type { Quote } from '../api/types'
+import { useAccountQuotesSelect, useGlobalQuote, useGlobalQuotesPeek, useGlobalQuotesSelect, usePendingOrders, usePositions } from '../store/live'
+import type { Order, Quote } from '../api/types'
 import type { Side } from '../components/order/useOrderForm'
 import {
   DEFAULT_INDICATORS, FALLBACK_DECIMALS, INTERVAL_KEY, SYMBOL_KEY, isKnownInterval,
@@ -154,11 +162,34 @@ function useScopedPendingOrders(scopeLogin: string | null) {
   )
 }
 
-type OverlayProps = Omit<ComponentProps<typeof PositionOverlay>, 'positions' | 'pendingOrders'> & { scopeLogin: string | null }
+// 下单账户这个品种的券商合约规格（拖动读数、盈亏换算用）。只订阅三个数拼成的字符串，跳价不重渲染。
+// The trading account's contract spec for the symbol (readouts, P/L maths). Subscribes to a
+// string of the three numbers only, so ticks don't re-render.
+function useSymbolSpec(login: string | null, symbol: string): SymbolSpec {
+  const key = useAccountQuotesSelect((m) => {
+    if (!login) return ''
+    const q = m[login]?.[symbol] ?? m[login]?.[brokerSymbol(symbol)]
+    return q && q.tickSize && q.tickValue ? `${q.contractSize ?? 0}|${q.tickSize}|${q.tickValue}` : ''
+  })
+  return useMemo(() => {
+    if (!key) return undefined
+    const [c, ts, tv] = key.split('|').map(Number)
+    return { contractSize: c > 0 ? c : undefined, tickSize: ts, tickValue: tv }
+  }, [key])
+}
+
+type OverlayProps = Omit<ComponentProps<typeof PositionOverlay>, 'positions' | 'pendingOrders' | 'spec'> & { scopeLogin: string | null }
 function LiveOverlay({ scopeLogin, ...rest }: OverlayProps) {
   const positions = useScopedPositions(scopeLogin)
   const pendingOrders = useScopedPendingOrders(scopeLogin)
-  return <PositionOverlay {...rest} positions={positions} pendingOrders={pendingOrders} />
+  const spec = useSymbolSpec(rest.login, rest.symbol)
+  return <PositionOverlay {...rest} spec={spec} positions={positions} pendingOrders={pendingOrders} />
+}
+
+type ExecProps = Omit<ComponentProps<typeof ExecutionMarkers>, 'positions'> & { scopeLogin: string | null }
+function LiveExecutions({ scopeLogin, ...rest }: ExecProps) {
+  const positions = useScopedPositions(scopeLogin)
+  return <ExecutionMarkers {...rest} positions={positions} />
 }
 
 type DockProps = Omit<ComponentProps<typeof PositionsDock>, 'positions' | 'pendingOrders'> & { scopeLogin: string | null }
@@ -505,6 +536,14 @@ export default function ChartsPage() {
     () => (multiAccount && activeAccount ? orders.filter((o) => String(o.mt5Login ?? '') === String(activeAccount.login)) : orders),
     [multiAccount, activeAccount, orders],
   )
+  // 图表交易（阶段 3）下单用的账户：选中的那个在线才用它，掉线就是没有（面板会说明）。
+  // The account chart trading places on (phase 3): the selected one when online, else none.
+  const tradeLogin = activeAccount?.online ? activeAccount.login : null
+  // 读一眼当前品种的买卖价，不订阅（回调里用）/ peek the symbol's bid / ask without subscribing
+  const quoteNow = useCallback(() => {
+    const q = peekQuotes()[symbol]
+    return { bid: q?.bid ?? null, ask: q?.ask ?? null }
+  }, [peekQuotes, symbol])
   // 停靠区「全部平仓」的作用范围，必须跟 accountPositions 一个口径：多账户才限定
   // 到选中账户，否则不限（null）——单账户或数据没带 login 时，列表本来就是全部。
   // 两者一旦不一致，那个按钮就会平掉屏幕上看不见的仓位。
@@ -680,6 +719,9 @@ export default function ChartsPage() {
     time: timeFmt,
   }), [cprefs.chartType, palette, cprefs.candle, cprefs.lineWidth, cprefs.lineColor, cprefs.scaleMode, cprefs.invertScale, cprefs.canvas.grid, cprefs.canvas.crosshair, cprefs.canvas.crossStyle, cprefs.canvas.rightOffset, cprefs.lines.lastPrice, cprefs.lines.indicatorLabels, cprefs.transform, watermark, timeFmt])
   const priceBased = PRICE_BASED_TYPES.has(cprefs.chartType)
+  // 买卖按钮：桌面常驻；手机平时底部已有交易条，只在全屏横屏时显示。
+  // Buy / sell buttons: always on desktop; phones already have the bottom trade bar, so fullscreen only.
+  const showTradeBtns = cprefs.trading.buttons && (isDesktop || isFullscreen)
 
   const engine = useChartEngine(containerRef, shownIndicators, indicatorSettings, isFullscreen, candleColors, markerText, view)
   const { chartRef, seriesRef, getBarTimes, legendStore, paneOffsets, drawReady } = engine
@@ -886,6 +928,30 @@ export default function ChartsPage() {
       [placeManualOrder, reportPlaced, symbol, afterPlaceOpen],
   )
 
+  // 图上发起的下单（反手、投影单、买卖按钮）：走同一个 placeManualOrder，结果照常弹提示。
+  // 接口报错在这里提示并返回 undefined，调用方当作没成功处理。
+  // Orders started on the chart (reverse, projected order, buy / sell buttons) share
+  // placeManualOrder and toast as usual. API errors are toasted here and come back undefined.
+  const chartPlace = useCallback<ChartPlace>(async (r): Promise<Order | void> => {
+    try {
+      return await placeManualOrder(symbol, r.side, r.volume, r.login, r.sl, r.tp, clientOrderId(), r.type, r.price)
+    } catch (e) {
+      showToast(e instanceof Error ? localizeApiError(e.message) : String(t('charts.ticket.placeFailed')), 'error')
+      return undefined
+    }
+  }, [placeManualOrder, showToast, symbol, t])
+
+  // 图上投影单：右键菜单、价格轴边的「+」、多空仓位工具的「转为订单」都从这里开一张。
+  // The projected order: opened from the context menu, the "+" button or a long/short drawing.
+  const [draftReq, setDraftReq] = useState<DraftRequest | null>(null)
+  const openDraft = useCallback((side: 'BUY' | 'SELL', price: number, sl?: number | null, tp?: number | null) => {
+    const f = exactDigits != null ? Math.pow(10, exactDigits) : null
+    const r = (v: number | null | undefined) => (v == null ? null : f != null ? Math.round(v * f) / f : v)
+    setShowPositions(true)
+    setDraftReq({ nonce: Date.now(), side, price: r(price) as number, sl: r(sl), tp: r(tp) })
+  }, [exactDigits])
+  useFillSound(accountOrders, symbol, cprefs.trading.sound)
+
   // 下单票自己订阅报价（按账户 + 当前品种的全站报价），这里不再传。
   // The ticket subscribes to its own quotes (per account + the symbol's site-wide one).
   const ticket = (initialSide?: Side) => (
@@ -987,7 +1053,7 @@ export default function ChartsPage() {
               role="group" with a name, so a screen reader says "Charts, group" on entry. */}
           <div
             ref={chartBoxRef}
-            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''} ${cprefs.legend.title || cprefs.legend.ohlc || cprefs.legend.change || cprefs.legend.volume ? 'has-status' : ''} ${cprefs.legend.indicators ? '' : 'no-ind-legend'}`}
+            className={`term-chart ${isFullscreen ? 'chart-fullscreen-container' : ''} ${cprefs.legend.title || cprefs.legend.ohlc || cprefs.legend.change || cprefs.legend.volume ? 'has-status' : ''} ${cprefs.legend.indicators ? '' : 'no-ind-legend'} ${showTradeBtns ? 'has-tbtns' : ''}`}
             data-ctheme={themeName}
             tabIndex={0}
             role="group"
@@ -1041,7 +1107,30 @@ export default function ChartsPage() {
                 refPrice={lastPrice}
                 visible={showPositions}
                 onToast={showToast}
+                trading={cprefs.trading}
+                balance={activeAccount?.balance ?? null}
+                currency={activeAccount?.accountCurrency ?? ''}
+                login={tradeLogin}
+                quote={quoteNow}
+                onPlace={chartPlace}
+                draftRequest={draftReq}
               />
+            )}
+            {drawReady && chartRef.current && seriesRef.current && cprefs.trading.executions && !priceBased && (
+              <LiveExecutions
+                chart={chartRef.current}
+                series={seriesRef.current}
+                scopeLogin={scopeLogin}
+                symbol={symbol}
+                login={activeAccount?.login ?? null}
+                orders={accountOrders}
+                barTimes={getBarTimes}
+                dataKey={`${interval}|${hasData}|${lastPrice}`}
+                visible={showPositions}
+              />
+            )}
+            {drawReady && chartRef.current && seriesRef.current && isDesktop && showPositions && tradeLogin && (
+              <PlusOrderButton chart={chartRef.current} series={seriesRef.current} digits={decimals} quote={quoteNow} onPick={openDraft} />
             )}
             {showCountdown && !priceBased && hasData && drawReady && chartRef.current && seriesRef.current && (
               <BarCountdown
@@ -1066,12 +1155,17 @@ export default function ChartsPage() {
                 fmtTime={drawFmtTime}
                 theme={drawTheme}
                 onStateChange={bumpDraw}
+                onToOrder={(o) => openDraft(o.side, o.price, o.sl, o.tp)}
               />
             )}
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
 
             {/* 主图状态行：品种 · 周期 · OHLC · 涨跌 / main status line */}
             <ChartLegend store={engine.ohlcStore} symbol={symbol} interval={interval} chartType={cprefs.chartType} decimals={decimals} legend={cprefs.legend} colors={candleColors} />
+            {/* 买卖按钮（桌面，或手机全屏横屏时）/ buy & sell buttons (desktop, or phone fullscreen) */}
+            {showTradeBtns && (
+              <TradeButtons symbol={symbol} digits={decimals} login={tradeLogin} oneClick={cprefs.trading.oneClick} touch={!isDesktop} onPlace={chartPlace} quotesDown={wsDisconnected} />
+            )}
             {/* 指标图例（主图叠加 + 各副图）/ indicator legends (main-pane overlays + each sub-pane) */}
             <IndicatorLegends indicators={shownIndicators} indicatorSettings={indicatorSettings} legendStore={legendStore} paneOffsets={paneOffsets} decimals={decimals} />
 
@@ -1169,6 +1263,11 @@ export default function ChartsPage() {
               setScaleMode,
               invert: cprefs.invertScale,
               setInvert: (v) => updatePrefs({ invertScale: v }),
+              orderAt: tradeLogin ? openDraft : null,
+              orderLabel: (side, price) => {
+                const q = quoteNow()
+                return String(t(`order.pending.type.${side}_${autoEntryType(side, price, q.bid, q.ask)}`))
+              },
             }}
           />
         )}

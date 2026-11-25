@@ -80,6 +80,30 @@ export interface ChartPrefs {
     pnfSource: 'close' | 'hl'
   }
   templates: { name: string; prefs: Partial<ChartPrefs> }[]
+  // 图表交易（阶段 3）：线上显示什么、按钮放哪、要不要一键下单。不进模板（模板只管外观）。
+  // Chart trading (phase 3): what the lines show, where buttons go, one-click. Not part of templates.
+  trading: TradingPrefs
+}
+
+export type PnlUnit = 'money' | 'points' | 'pct'
+export interface TradingPrefs {
+  // 持仓线标签上显示浮动盈亏；止损止盈线上显示到价时的盈亏 / P/L on position labels and at SL/TP
+  pnl: boolean
+  pnlUnit: PnlUnit
+  // 线上的平仓 / 反手 / 保本 / 拖出止盈止损按钮 / close / reverse / breakeven / drag-out buttons
+  lineButtons: boolean
+  // 挂单线 / pending order lines
+  pending: boolean
+  // 开平仓成交箭头 / open & close execution arrows
+  executions: boolean
+  // 图例下方的买卖按钮 / buy & sell buttons under the legend
+  buttons: boolean
+  // 一键下单：点买卖按钮直接按市价成交，不再确认 / one-click: buy/sell buttons fill at market without a confirm
+  oneClick: boolean
+  // 线上标签靠左还是靠右 / labels on the left or right
+  align: 'left' | 'right'
+  // 本品种成交时响一声 / a chime when an order on this symbol fills
+  sound: boolean
 }
 
 export const DEFAULT_FAV_INTERVALS = ['1', '5', '15', '30', '60', '240', 'D', 'M']
@@ -101,6 +125,7 @@ export const DEFAULT_CHART_PREFS: ChartPrefs = {
   canvas: { bg: null, grid: 'both', crosshair: 'normal', crossStyle: 'dashed', watermark: false, rightOffset: 8 },
   transform: { renkoBox: 0, renkoWicks: false, lineBreak: 3, kagiReversal: 0, pnfBox: 0, pnfReversal: 3, pnfSource: 'close' },
   templates: [],
+  trading: { pnl: true, pnlUnit: 'money', lineButtons: true, pending: true, executions: true, buttons: true, oneClick: false, align: 'right', sound: false },
 }
 
 const HEX = /^#[0-9a-fA-F]{6}$/
@@ -130,6 +155,8 @@ export function normalizeChartPrefs(raw: unknown, isInterval: (c: string) => boo
   const ln = obj(r.lines)
   const cv = obj(r.canvas)
   const tf = obj(r.transform)
+  const tr = obj(r.trading)
+  const dt = d.trading
   const favs = Array.isArray(r.favIntervals) ? r.favIntervals.filter((x): x is string => typeof x === 'string' && isInterval(x)).slice(0, 24) : d.favIntervals
   const tz = typeof r.timezone === 'string' && isValidTimezone(r.timezone) ? r.timezone : d.timezone
   const templates = Array.isArray(r.templates)
@@ -183,6 +210,17 @@ export function normalizeChartPrefs(raw: unknown, isInterval: (c: string) => boo
       pnfSource: pick(tf.pnfSource, ['close', 'hl'] as const, 'close'),
     },
     templates,
+    trading: {
+      pnl: bool(tr.pnl, dt.pnl),
+      pnlUnit: pick(tr.pnlUnit, ['money', 'points', 'pct'] as const, dt.pnlUnit),
+      lineButtons: bool(tr.lineButtons, dt.lineButtons),
+      pending: bool(tr.pending, dt.pending),
+      executions: bool(tr.executions, dt.executions),
+      buttons: bool(tr.buttons, dt.buttons),
+      oneClick: bool(tr.oneClick, dt.oneClick),
+      align: pick(tr.align, ['left', 'right'] as const, dt.align),
+      sound: bool(tr.sound, dt.sound),
+    },
   }
 }
 
