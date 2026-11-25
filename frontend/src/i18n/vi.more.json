@@ -1970,6 +1970,27 @@
         "trend": "Xu hướng",
         "last": "Giá",
         "other": "Khác"
+      },
+      "rail": {
+        "secLines": "Đường xu hướng",
+        "grpProjection": "Dự báo và đo lường",
+        "grpIcons": "Biểu tượng",
+        "zoomIn": "Phóng to",
+        "zoomInTip": "Phóng to: kéo ngang trên biểu đồ để phóng to đoạn đó (Esc để hủy)",
+        "zoomOut": "Thu nhỏ (về trước lần phóng to gần nhất)",
+        "magnet_weak": "Nam châm yếu",
+        "magnet_strong": "Nam châm mạnh",
+        "hide_drawings": "Ẩn hình vẽ",
+        "hide_indicators": "Ẩn chỉ báo",
+        "hide_positions": "Ẩn vị thế và lệnh",
+        "hide_all": "Ẩn tất cả",
+        "remove": "Xóa",
+        "remove_drawings": "Xóa hình vẽ",
+        "remove_indicators": "Xóa chỉ báo",
+        "remove_all": "Xóa hình vẽ và chỉ báo",
+        "removeConfirm_drawings": "Xóa toàn bộ {{d}} hình vẽ của mã này?",
+        "removeConfirm_indicators": "Xóa toàn bộ {{n}} chỉ báo trên biểu đồ?",
+        "removeConfirm_all": "Xóa toàn bộ {{d}} hình vẽ của mã này và {{n}} chỉ báo trên biểu đồ?"
       }
     }
   },

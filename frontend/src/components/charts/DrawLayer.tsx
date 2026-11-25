@@ -49,7 +49,8 @@ export interface DrawLayerHandle {
   visible: boolean
   setVisible: (v: boolean) => void
   deleteSelected: () => void
-  clearAll: () => void
+  // now = true：不弹确认直接清（调用方自己已确认过）/ now = true skips the confirm (the caller already asked)
+  clearAll: (now?: boolean) => void
   applyColor: (c: string) => void
   toggleLock: () => void
   lockAll: () => void
@@ -351,8 +352,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   }, [patchSelected])
   const lockAll = useCallback(() => { commit(drawingsRef.current.map((d) => ({ ...d, locked: true }))) }, [commit])
   const unlockAll = useCallback(() => { commit(drawingsRef.current.map((d) => ({ ...d, locked: false }))) }, [commit])
-  const clearAll = useCallback(() => { if (drawingsRef.current.length > 0) setConfirmOpen(true) }, [])
   const doClearAll = useCallback(() => { setConfirmOpen(false); commit([]); select([]) }, [commit, select])
+  const clearAll = useCallback((now?: boolean) => {
+    if (drawingsRef.current.length === 0) return
+    if (now) doClearAll()
+    else setConfirmOpen(true)
+  }, [doClearAll])
   const applyColor = useCallback((c: string) => {
     setColor(c)
     if (selRef.current.length) { patchSelected({ color: c }); return }

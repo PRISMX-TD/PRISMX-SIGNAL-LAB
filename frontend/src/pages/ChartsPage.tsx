@@ -27,7 +27,7 @@
 // watchlist / ticket / positions open as bottom sheets. The chart container is
 // always mounted — sheets overlay it, never unmount it.
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
-import type { Time } from 'lightweight-charts'
+import type { LogicalRange, Time } from 'lightweight-charts'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
@@ -121,6 +121,8 @@ import { useProPrefs, type ProLayout } from '../components/charts/pro/proPrefs'
 import ProTopBar from '../components/charts/pro/ProTopBar'
 import ProWidgets, { ProAlerts, ProDetails } from '../components/charts/pro/ProWidgets'
 import ProWatchlist from '../components/charts/pro/ProWatchlist'
+import ProDrawRail from '../components/charts/pro/ProDrawRail'
+import { ProZoomBox } from '../components/charts/pro/ProZoom'
 import ProCommand, { type ProAction, type ProCommandMode } from '../components/charts/pro/ProCommand'
 import { ProDock, ProIsland, ProTabBar, type IslandEvent, type ProTab } from '../components/charts/pro/ProChrome'
 import { IcBell, IcCamera, IcClassic, IcDock, IcExpand, IcFocus, IcFx, IcGear, IcKeyboard, IcList, IcPlus, IcSpark, IcTrade, IcCalendar } from '../components/charts/pro/icons'
@@ -995,6 +997,25 @@ export default function ChartsPage() {
   }, [isDesktop, chartRef, seriesRef])
   const closeCtx = useCallback(() => setCtx(null), [])
   const doneMeasure = useCallback(() => setMeasureOn(false), [])
+  // 专业版左栏：区域放大（每放大一次记下之前的范围，缩小逐级退回）、一键隐藏 / 删除全部指标
+  // Pro left bar: zoom-in area (each zoom remembers the previous range; zoom-out steps back) and
+  // hide / remove all indicators at once
+  const [zoomOn, setZoomOn] = useState(false)
+  const [zoomStack, setZoomStack] = useState<LogicalRange[]>([])
+  useEffect(() => { setZoomStack([]); setZoomOn(false) }, [symbol, interval])
+  const zoomOut = () => {
+    const prev = zoomStack[zoomStack.length - 1]
+    if (prev) chartRef.current?.timeScale().setVisibleLogicalRange(prev)
+    setZoomStack(zoomStack.slice(0, -1))
+  }
+  const indAllHidden = shownList.length > 0 && shownList.every((i) => i.hidden)
+  const hideAllIndicators = useCallback((hide: boolean) => {
+    updateInd((l) => ({ ...l, list: l.list.map((i) => ({ ...i, hidden: hide || undefined })) }))
+  }, [updateInd])
+  const removeAllIndicators = useCallback(() => {
+    updateInd((l) => l.list.reduce((acc, i) => removeInstance(acc, i.uid), l))
+    setMaxPane(null)
+  }, [updateInd])
 
   // 手机报价条第二行：左边约 2/3 是常驻的画线工具横条（左右滑动看全部工具），
   // 右边是「指标」和设置齿轮（设置里含显示持仓开关）。底部工具条只留周期与持仓，一行放得下。
@@ -1213,7 +1234,25 @@ export default function ChartsPage() {
               Draw rail (desktop; fullscreen uses the floating toolbar). A placeholder
               holds the column before the engine is ready so the grid doesn't jump. */}
           {!isFullscreen && (!pro || (isDesktop && !proPrefs.focus)) && (drawReady
-            ? <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} measureOn={measureOn} onMeasure={() => setMeasureOn((v) => !v)} />
+            ? (pro ? (
+              <ProDrawRail
+                drawLayerRef={drawLayerRef}
+                bumpDraw={bumpDraw}
+                t={t}
+                measureOn={measureOn}
+                onMeasure={() => { setZoomOn(false); setMeasureOn((v) => !v) }}
+                zoomOn={zoomOn}
+                onZoom={() => { setMeasureOn(false); setZoomOn((v) => !v) }}
+                canZoomOut={zoomStack.length > 0}
+                onZoomOut={zoomOut}
+                indCount={shownList.length}
+                indHidden={indAllHidden}
+                onHideIndicators={hideAllIndicators}
+                positionsShown={showPositions}
+                onShowPositions={setShowPositions}
+                onRemoveIndicators={removeAllIndicators}
+              />
+            ) : <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} measureOn={measureOn} onMeasure={() => setMeasureOn((v) => !v)} />)
             : <div className="term-rail" />)}
 
           {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
@@ -1417,6 +1456,14 @@ export default function ChartsPage() {
               <MeasureOverlay chart={chartRef.current} series={seriesRef.current} host={containerRef.current} armed={measureOn} onDone={doneMeasure} decimals={decimals} barTimes={getBarTimes} colors={candleColors} />
             )}
             {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
+            {pro && zoomOn && drawReady && (
+              <ProZoomBox
+                chartRef={chartRef}
+                hostRef={containerRef}
+                onZoom={(prev) => { setZoomStack((st) => [...st, prev]); setZoomOn(false) }}
+                onCancel={() => setZoomOn(false)}
+              />
+            )}
             {quick != null && (
               <QuickInput
                 initial={quick}

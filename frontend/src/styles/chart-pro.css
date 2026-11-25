@@ -21,7 +21,8 @@
 
 .term-shell.pt,
 .pt-cmd-ov,
-.chart-pop.pt-menu {
+.chart-pop.pt-menu,
+.ptr-fly {
   --pt-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Roboto, "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --pt-bar: #111115;
   --pt-hover: rgb(255 255 255 / 0.07);
@@ -73,11 +74,141 @@
 .pt.pt-focus .term-cv { grid-template-columns: minmax(0, 1fr); }
 .pt.pt-focus .term-bb { grid-column: 1; }
 .pt .term-rail { gap: 2px; padding: 6px 0; background: var(--bg); }
-/* 左画线栏：TradingView 式的 34px 方钮，选中是淡紫底 + 紫图标，不是整块实底
-   Draw rail: TradingView-style 34px square buttons; the active tool gets a violet tint, not a solid fill */
+
+/* ── 左画线栏（ProDrawRail，照 TradingView 左工具栏）──
+   52px 宽；按钮 38×36、图标 22px 细线；选中淡紫底 + 紫图标；鼠标移上去按钮右缘出现小箭头，
+   点箭头向右弹出整组（.ptr-fly）。
+   Left draw bar (ProDrawRail, after TradingView's left toolbar): 52px wide; 38×36 buttons with
+   22px thin icons; the active one tinted violet; on hover a small arrow appears on the button's
+   right edge and opens the group to the right (.ptr-fly). */
 @media (min-width: 1024px) {
-  .pt .term-rail .term-tool-btn { width: 34px; height: 32px; border-radius: 6px; color: var(--text-2); }
-  .pt .term-rail .term-tool-btn.on:not(.warn) { color: var(--purple-pale); background: rgb(var(--purple-rgb) / 0.18); }
+  .pt:not(.pt-focus) .term-cv { grid-template-columns: 52px minmax(0, 1fr); }
+}
+.ptr { gap: 2px; padding: 6px 0 8px; }
+.ptr hr { width: 30px; margin: 5px 0; border-top-color: var(--line-hi); }
+.ptr-grp { position: relative; display: flex; justify-content: center; flex-shrink: 0; width: 100%; }
+.ptr-btn {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 36px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.ptr-btn:disabled { opacity: 0.35; cursor: default; }
+.ptr-btn.on { color: var(--purple-pale); background: rgb(var(--purple-rgb) / 0.18); }
+.ptr-arrow {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.ptr-grp:hover .ptr-arrow,
+.ptr-grp.open .ptr-arrow,
+.ptr-arrow:focus-visible { opacity: 1; }
+.ptr-grp.open .ptr-arrow { color: var(--purple-pale); }
+.ptr-gap { flex: 1; min-height: 8px; }
+@media (hover: hover) and (pointer: fine) {
+  .ptr-btn:not(:disabled):not(.on):hover { color: var(--text-strong); background: var(--pt-hover); }
+  .ptr-btn.on:hover { background: rgb(var(--purple-rgb) / 0.26); }
+  .ptr-arrow:hover { color: var(--text-strong); background: var(--pt-hover); }
+}
+@media (hover: none) {
+  .ptr-arrow { opacity: 0.6; }
+}
+/* 向右弹出的整组工具 / the group flyout */
+.ptr-fly {
+  position: fixed;
+  z-index: 87;
+  min-width: 248px;
+  max-width: 320px;
+  padding: 6px 0;
+  overflow-y: auto;
+  border-radius: 8px;
+  background: #17171c;
+  box-shadow: 0 0 0 1px var(--line-hi), 0 14px 36px rgb(0 0 0 / 0.55);
+  animation: term-fade var(--dur-fast) var(--ease-out) backwards;
+}
+.ptr-sec { margin: 0; padding: 12px 14px 6px; color: var(--text-3); font: 600 11px/1 var(--pt-font); letter-spacing: 0.04em; text-transform: uppercase; }
+.ptr-sec.first { padding-top: 6px; }
+.ptr-row { position: relative; display: flex; align-items: center; }
+.ptr-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 36px 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: 400 13.5px/1 var(--pt-font);
+  text-align: left;
+  cursor: pointer;
+}
+.ptr-item:disabled { color: var(--text-3); cursor: default; }
+.ptr-item:disabled .ptr-ic { opacity: 0.5; }
+.ptr-ic { display: grid; place-items: center; flex-shrink: 0; width: 28px; color: var(--text-2); }
+.ptr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ptr-item kbd,
+.ptr-item small { flex-shrink: 0; color: var(--text-3); font: 500 11.5px/1 var(--pt-font); }
+.ptr-row.on .ptr-item { color: var(--purple-pale); background: rgb(var(--purple-rgb) / 0.14); }
+.ptr-row.on .ptr-ic { color: currentColor; }
+.ptr-check { flex-shrink: 0; color: var(--purple-pale); }
+.ptr-star {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  opacity: 0;
+  transform: translateY(-50%);
+  cursor: pointer;
+}
+.ptr-row:hover .ptr-star,
+.ptr-star.on,
+.ptr-star:focus-visible { opacity: 1; }
+.ptr-star.on { color: var(--gold); }
+@media (hover: hover) and (pointer: fine) {
+  .ptr-item:not(:disabled):hover { background: var(--pt-hover); }
+  .ptr-row.on .ptr-item:hover { background: rgb(var(--purple-rgb) / 0.2); }
+  .ptr-star:hover { color: var(--gold); background: var(--pt-fill-hi); }
+}
+@media (hover: none) {
+  .ptr-star { opacity: 1; }
+}
+/* 区域放大：拖出的一段时间 / zoom-in area: the dragged time span */
+.pt-zoom { position: absolute; inset: 0; z-index: 26; cursor: zoom-in; touch-action: none; }
+.pt-zoom i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-right: 1px solid rgb(var(--purple-rgb) / 0.7);
+  border-left: 1px solid rgb(var(--purple-rgb) / 0.7);
+  background: rgb(var(--purple-rgb) / 0.12);
+  pointer-events: none;
 }
 
 /* ── 通用控件 / shared controls ── */

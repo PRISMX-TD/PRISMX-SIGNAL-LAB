@@ -1970,6 +1970,27 @@
         "trend": "Trend",
         "last": "Last",
         "other": "Other"
+      },
+      "rail": {
+        "secLines": "Trend lines",
+        "grpProjection": "Prediction & measurement",
+        "grpIcons": "Icons",
+        "zoomIn": "Zoom in",
+        "zoomInTip": "Zoom in: drag across the chart to zoom into that span (Esc cancels)",
+        "zoomOut": "Zoom out (back to before the last zoom)",
+        "magnet_weak": "Weak magnet",
+        "magnet_strong": "Strong magnet",
+        "hide_drawings": "Hide drawings",
+        "hide_indicators": "Hide indicators",
+        "hide_positions": "Hide positions & orders",
+        "hide_all": "Hide all",
+        "remove": "Remove",
+        "remove_drawings": "Remove drawings",
+        "remove_indicators": "Remove indicators",
+        "remove_all": "Remove drawings & indicators",
+        "removeConfirm_drawings": "Remove all {{d}} drawings on this symbol?",
+        "removeConfirm_indicators": "Remove all {{n}} indicators from the chart?",
+        "removeConfirm_all": "Remove all {{d}} drawings on this symbol and the {{n}} indicators on the chart?"
       }
     }
   },

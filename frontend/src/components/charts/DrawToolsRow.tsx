@@ -13,9 +13,11 @@ import { usePrefs } from '../../store/prefs'
 import { CHART_PREFS_NS } from './useChartPrefs'
 import { useOverflowHint } from '../../utils/useOverflowHint'
 
-const S = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
+const BASE = { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const, 'aria-hidden': true }
 
-export function DrawToolIcon({ tool }: { tool: Tool }) {
+// size / sw：专业版左栏用更大、更细的线（TradingView 式）/ size / sw: the pro rail draws them larger and thinner (TradingView-like)
+export function DrawToolIcon({ tool, size, sw }: { tool: Tool; size?: number; sw?: number }) {
+  const S = size || sw ? { ...BASE, width: size ?? BASE.width, height: size ?? BASE.height, strokeWidth: sw ?? BASE.strokeWidth } : BASE
   switch (tool) {
     case 'cursor': return <svg {...S}><path d="M4 3l7 17 2.5-6.5L20 11 4 3z" /></svg>
     case 'cross': return <svg {...S}><line x1="12" y1="3" x2="12" y2="21" /><line x1="3" y1="12" x2="21" y2="12" /></svg>

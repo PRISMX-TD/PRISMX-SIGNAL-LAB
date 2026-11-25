@@ -1970,6 +1970,27 @@
         "trend": "趋势",
         "last": "最新价",
         "other": "其他"
+      },
+      "rail": {
+        "secLines": "趋势线",
+        "grpProjection": "预测与测量",
+        "grpIcons": "图标",
+        "zoomIn": "区域放大",
+        "zoomInTip": "区域放大：在图上横向拖出要放大的一段（Esc 取消）",
+        "zoomOut": "缩小（退回上一次放大前）",
+        "magnet_weak": "弱磁吸",
+        "magnet_strong": "强磁吸",
+        "hide_drawings": "隐藏画线",
+        "hide_indicators": "隐藏指标",
+        "hide_positions": "隐藏持仓与订单",
+        "hide_all": "全部隐藏",
+        "remove": "删除",
+        "remove_drawings": "删除画线",
+        "remove_indicators": "删除指标",
+        "remove_all": "删除画线与指标",
+        "removeConfirm_drawings": "删除当前品种的全部 {{d}} 个画线？",
+        "removeConfirm_indicators": "删除图上的全部 {{n}} 个指标？",
+        "removeConfirm_all": "删除当前品种的全部 {{d}} 个画线和图上的 {{n}} 个指标？"
       }
     }
   },
