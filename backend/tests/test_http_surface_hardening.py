@@ -127,3 +127,28 @@ def test_allowed_origins_still_work(origin):
 
     assert res.headers.get("access-control-allow-origin") == origin
     assert "access-control-allow-credentials" not in res.headers
+
+
+# 本项目自己的 Vercel 预览（分支部署）放行，别人的 *.vercel.app 不放行。
+# This project's own Vercel previews are allowed; other *.vercel.app origins are not.
+@pytest.mark.parametrize(
+    "origin, allowed",
+    [
+        ("https://prismx-signal-5ax9univ0-prism-xs-projects-40ae1c34.vercel.app", True),
+        ("https://prismx-signal-lab-git-feat-x-prism-xs-projects-40ae1c34.vercel.app", True),
+        ("https://prismx-signal-evil.vercel.app", False),
+        ("https://evil-prism-xs-projects-40ae1c34.vercel.app", False),
+        ("https://prismx-signal-x-prism-xs-projects-40ae1c34.vercel.app.evil.com", False),
+        ("http://prismx-signal-x-prism-xs-projects-40ae1c34.vercel.app", False),
+    ],
+)
+def test_vercel_preview_origins(origin, allowed):
+    from app.main import app
+
+    client = TestClient(app)
+    res = client.options(
+        "/api/health",
+        headers={"Origin": origin, "Access-Control-Request-Method": "GET"},
+    )
+
+    assert (res.headers.get("access-control-allow-origin") == origin) is allowed
