@@ -30,7 +30,7 @@
 // (4) invisible elements are skipped (focus() on display:none fails silently); (5) focus
 // is not pulled back on close if something else already moved it.
 import { useEffect, useRef, type RefObject } from 'react'
-import { isTopDialog, popDialog, pushDialog } from './dialogStack'
+import { isTopDialog, popDialog, pushDialog, settleFocus } from './dialogStack'
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
@@ -85,6 +85,7 @@ export function useDialogA11y(
     // descendant still holds focus).
     const target = initialFocus === 'container' ? root : focusables()[0] ?? root
     target.focus({ preventScroll: true })
+    settleFocus(root, document)
     const id = pushDialog(root)
 
     const onKey = (e: KeyboardEvent) => {

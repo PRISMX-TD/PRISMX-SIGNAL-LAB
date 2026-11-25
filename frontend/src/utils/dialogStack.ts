@@ -59,6 +59,32 @@ export function popDialog(id: number, app: AppRoot | null = appRoot()): void {
   sync(app)
 }
 
+/** 弹窗容器的最小接口；测试里传假对象。/ The slice of a dialog element we use; tests pass a fake. */
+export interface FocusTarget {
+  contains(other: unknown): boolean
+  focus(options?: FocusOptions): void
+  hasAttribute(name: string): boolean
+  setAttribute(name: string, value: string): void
+}
+
+/** 入栈前确认焦点已经离开 #root：先移焦点要是没成功（目标不可聚焦、进场动画里暂时不可见……），
+ *  退回到弹窗容器本身；还不行就把原来的焦点放掉。否则入栈给 #root 加 aria-hidden 时焦点还在
+ *  #root 里，Chrome 会拦下这次 aria-hidden 并在 console 报「Blocked aria-hidden…」，
+ *  读屏也照样能读到弹窗背后的页面。
+ *  Before pushing, make sure focus has left #root: if moving it in failed (target not
+ *  focusable, momentarily invisible during an enter animation…), fall back to the dialog
+ *  container; failing that, drop the old focus. Otherwise #root gets aria-hidden while it
+ *  still holds focus, Chrome blocks it with "Blocked aria-hidden…" in the console, and
+ *  screen readers still reach the page behind the dialog. */
+export function settleFocus(dialog: FocusTarget, doc: { activeElement: unknown }): void {
+  if (dialog.contains(doc.activeElement)) return
+  if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1')
+  dialog.focus({ preventScroll: true })
+  if (dialog.contains(doc.activeElement)) return
+  const active = doc.activeElement as { blur?: () => void } | null
+  active?.blur?.()
+}
+
 export function isTopDialog(id: number): boolean {
   return stack.length > 0 && stack[stack.length - 1].id === id
 }

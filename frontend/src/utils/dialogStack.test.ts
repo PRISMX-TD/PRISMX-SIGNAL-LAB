@@ -1,7 +1,7 @@
 // #root 显隐只由栈顶决定：栈顶在 #root 外 → aria-hidden；在 #root 里或栈空 → 撤掉。
 // #root visibility is decided by the top entry only.
 import { describe, expect, it } from 'vitest'
-import { isTopDialog, popDialog, pushDialog, type AppRoot } from './dialogStack'
+import { isTopDialog, popDialog, pushDialog, settleFocus, type AppRoot, type FocusTarget } from './dialogStack'
 
 function fakeApp(inside: unknown[]) {
   const attrs = new Map<string, string>()
@@ -67,5 +67,47 @@ describe('dialogStack', () => {
     const id = pushDialog({}, null)
     expect(() => popDialog(id, null)).not.toThrow()
     expect(() => popDialog(999999, null)).not.toThrow()
+  })
+})
+
+// 入栈前焦点必须已离开 #root（否则 Chrome 拦下 aria-hidden）/ focus must leave #root before the push
+describe('settleFocus', () => {
+  function fakeDialog(focusable: boolean, doc: { activeElement: unknown }) {
+    const attrs = new Map<string, string>()
+    const inner = {}
+    const dlg: FocusTarget = {
+      contains: (o) => o === dlg || o === inner,
+      focus: () => { if (focusable) doc.activeElement = dlg },
+      hasAttribute: (n) => attrs.has(n),
+      setAttribute: (n, v) => { attrs.set(n, v) },
+    }
+    return { dlg, inner, attrs }
+  }
+
+  it('leaves focus alone when it is already inside the dialog', () => {
+    const doc = { activeElement: null as unknown }
+    const { dlg, inner, attrs } = fakeDialog(true, doc)
+    doc.activeElement = inner
+    settleFocus(dlg, doc)
+    expect(doc.activeElement).toBe(inner)
+    expect(attrs.has('tabindex')).toBe(false)
+  })
+
+  it('falls back to the container when the first target did not take focus', () => {
+    let blurred = false
+    const doc = { activeElement: { blur: () => { blurred = true } } as unknown }
+    const { dlg, attrs } = fakeDialog(true, doc)
+    settleFocus(dlg, doc)
+    expect(doc.activeElement).toBe(dlg)
+    expect(attrs.get('tabindex')).toBe('-1')
+    expect(blurred).toBe(false)
+  })
+
+  it('drops the old focus when even the container cannot be focused', () => {
+    let blurred = false
+    const doc = { activeElement: { blur: () => { blurred = true } } as unknown }
+    const { dlg } = fakeDialog(false, doc)
+    settleFocus(dlg, doc)
+    expect(blurred).toBe(true)
   })
 })
