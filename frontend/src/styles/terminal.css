@@ -713,6 +713,8 @@
 .term-pr .v.down { color: var(--down); }
 .term-pr-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .term-pr-id .sym-ava { width: 20px; height: 20px; font-size: 8px; }
+/* 品种图标是 SVG 圆形，自带形状和底色 / the symbol logo is a round SVG with its own fill */
+.term-pr-id svg.sym-ava { display: block; border-radius: 0; background: none; }
 .term-pr-id b { font: 600 13px var(--font-mono); color: var(--text-strong); }
 .term-tag {
   display: inline-flex;

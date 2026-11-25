@@ -19,7 +19,7 @@ import { useLive } from '../../store/live'
 import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
 import { checkSlTp } from '../order/orderMath'
-import { symbolMeta } from '../../utils/symbolMeta'
+import SymbolLogo from './pro/SymbolLogo'
 import { createIdempotencyKeys } from '../../utils/idempotencyKeys'
 import ConfirmModal from '../ConfirmModal'
 import PendingEditor, { type PendingEdit } from './PendingEditor'
@@ -538,7 +538,6 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
               const busy = busyId === `p-${p.ticket}` || isClosing
               const isOpen = expanded === p.ticket && !!p.ticket && !isClosing
               const isFresh = !!p.ticket && !!fresh[p.ticket]
-              const meta = symbolMeta(p.symbol)
               // 部分平仓手数校验：[最小手数, 持仓量]，且必须落在该品种的步长上。
               // 步长按品种取（原油 0.1，其余 0.01）。非整数倍的手数会被券商收下却
               // 永不成交，并把这张仓位锁死，后续平仓全部被拒（见 isLotOnStep）。
@@ -581,7 +580,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 <Fragment key={p.ticket ?? `${p.symbol}-${p.side}-${p.entryPrice ?? i}`}>
                   <div className={`term-pr${rowReveal ? ' is-in' : ''} ${isOpen ? 'open' : ''} ${isClosing ? 'closing' : ''} ${isFresh ? 'fresh' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(i, 5) * 30}ms` } : undefined}>
                     <div className="term-pr-id">
-                      <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+                      <SymbolLogo symbol={p.symbol} size={20} className="sym-ava" />
                       <b>{displaySymbol(p.symbol)}</b>
                       <span className={`term-tag ${isBuy ? 'buy' : 'sell'}`}>{isBuy ? t('charts.dock.buy') : t('charts.dock.sell')} {p.volume.toFixed(2)}</span>
                     </div>
@@ -684,7 +683,6 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 Real orders resting at the broker: they carry a trigger price and
                 SL/TP, and cancelling one sends a command to the broker. */}
             {pendingOrders.map((o, i) => {
-              const meta = symbolMeta(o.symbol)
               const isBuy = o.side === 'BUY'
               const d = digitsFor(o.symbol)
               const qBusy = busyId === `q-${o.ticket}`
@@ -693,7 +691,7 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 <Fragment key={`q-${o.login ?? ''}-${o.ticket}`}>
                 <div className={`term-pr pend q${rowReveal ? ' is-in' : ''} ${qOpen ? 'open' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(i, 5) * 30}ms` } : undefined}>
                   <div className="term-pr-id">
-                    <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+                    <SymbolLogo symbol={o.symbol} size={20} className="sym-ava" />
                     <b>{displaySymbol(o.symbol)}</b>
                     <span className={`term-tag ${isBuy ? 'buy' : 'sell'}`}>
                       {t(`order.pending.type.${o.type}`)} {o.volume.toFixed(2)}
@@ -731,12 +729,11 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
                 means something else here: it only stops the dispatch, and nothing
                 exists at the broker yet either way. */}
             {inFlight.map((o, i) => {
-              const meta = symbolMeta(o.symbol)
               const isBuy = o.side === 'BUY'
               return (
                 <div key={o.id} className={`term-pr pend${rowReveal ? ' is-in' : ''}`} style={rowReveal ? { animationDelay: `${Math.min(pendingOrders.length + i, 5) * 30}ms` } : undefined}>
                   <div className="term-pr-id">
-                    <span className="sym-ava" style={{ background: meta.color + '33', color: meta.ink }}>{meta.letter}</span>
+                    <SymbolLogo symbol={o.symbol} size={20} className="sym-ava" />
                     <b>{displaySymbol(o.symbol)}</b>
                     <span className={`term-tag ${isBuy ? 'buy' : 'sell'}`}>{isBuy ? t('charts.dock.buy') : t('charts.dock.sell')} {o.volume.toFixed(2)}</span>
                   </div>
