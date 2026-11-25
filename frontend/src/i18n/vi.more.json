@@ -558,7 +558,6 @@
       "vis_d": "Ngày",
       "vis_w": "Tuần",
       "vis_M": "Tháng",
-      "saveDefault": "Lưu làm mặc định",
       "ok": "OK",
       "tab_style": "Kiểu",
       "tab_text": "Văn bản",
@@ -583,7 +582,8 @@
         "entry": "Giá vào",
         "point": "Điểm {{n}}",
         "width": "Độ rộng kênh"
-      }
+      },
+      "autoRemember": "Kiểu được tự động ghi nhớ và dùng lại khi vẽ công cụ này lần sau"
     },
     "posmark": {
       "show": "Hiện đánh dấu vị thế & lệnh chờ",

@@ -558,7 +558,6 @@
       "vis_d": "日",
       "vis_w": "周",
       "vis_M": "月",
-      "saveDefault": "存为默认",
       "ok": "确定",
       "tab_style": "样式",
       "tab_text": "文字",
@@ -583,7 +582,8 @@
         "entry": "开仓价",
         "point": "点 {{n}}",
         "width": "通道宽度"
-      }
+      },
+      "autoRemember": "样式会自动记住，下次画同一种工具直接沿用"
     },
     "posmark": {
       "show": "显示持仓与挂单标记",

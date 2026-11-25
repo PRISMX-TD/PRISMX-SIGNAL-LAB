@@ -312,10 +312,16 @@ export function useChartData(symbol: string, interval: string, digits: number, e
       // logical index, so it must be compared against the bar count — the old
       // code subtracted it from an epoch timestamp, which is never small, so
       // auto-follow silently switched itself off on the first range change.
+      // 往左拖、右边露出一大片空白（看未来区域）也不算跟随：以前只看了下限，这种情况每 2 秒
+      // 轮询都会 scrollToRealTime 把图拽回去（2026-11-25 用户截图）。上限 = 设置里的右侧留白 + 余量。
+      // Dragging left to show empty future space isn't "following" either: only the lower bound was
+      // checked, so every 2 s poll called scrollToRealTime and yanked the view back. Upper bound =
+      // the configured right margin plus slack.
       if (range && range.to != null) {
-        const barCount = candlesRef.current.length
+        const barCount = barTimesRef.current.length || candlesRef.current.length
+        const margin = chartRef.current?.timeScale().options().rightOffset ?? 0
         isFollowingLiveRef.current =
-          barCount === 0 || range.to >= barCount - FOLLOW_LIVE_SLACK_BARS
+          barCount === 0 || (range.to >= barCount - FOLLOW_LIVE_SLACK_BARS && range.to <= barCount - 1 + margin + FOLLOW_LIVE_SLACK_BARS)
       }
     }
     chartRef.current?.timeScale().subscribeVisibleLogicalRangeChange(onRangeChange)

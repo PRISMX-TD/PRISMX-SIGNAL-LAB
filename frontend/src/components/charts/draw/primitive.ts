@@ -52,6 +52,8 @@ export class DrawingsPrimitive {
   temp: Drawing | null = null
   selected = new Set<string>()
   hover: string | null = null
+  // 鼠标正压在悬停画线的第几个手柄上（-1 = 没有），那个手柄画实心 / handle under the mouse, painted solid
+  hoverHandle = -1
   marquee: { x1: number; y1: number; x2: number; y2: number } | null = null
   scene: DrawScene
 
@@ -148,7 +150,8 @@ export class DrawingsPrimitive {
     const env = this.env()
     if (!env) return null
     const list = this.list.filter((d) => visibleOn(d, this.scene.interval))
-    const r = handleROf(env) + (env.touch ? 6 : 3)
+    // 抓取范围比画出来的圆圈大一圈，手柄好抓 / the grab area is wider than the drawn circle
+    const r = handleROf(env) + (env.touch ? 10 : 5)
     let best: DrawHit | null = null
     for (let i = list.length - 1; i >= 0; i--) {
       const d = list[i]
@@ -203,7 +206,7 @@ export class DrawingsPrimitive {
       ctx.save()
       renderDrawing(ctx, d, px, env)
       ctx.restore()
-      if (showHandles) paintHandles(ctx, handlesOf(d, px, env), d, r, env.theme.bg)
+      if (showHandles) paintHandles(ctx, handlesOf(d, px, env), d, r, env.theme.bg, d.id === this.hover ? this.hoverHandle : -1)
     }
     for (const d of this.list) {
       if (!visibleOn(d, this.scene.interval)) continue
@@ -224,15 +227,16 @@ export class DrawingsPrimitive {
   }
 }
 
-function paintHandles(ctx: CanvasRenderingContext2D, hs: Px[], d: Drawing, r: number, bg: string) {
+function paintHandles(ctx: CanvasRenderingContext2D, hs: Px[], d: Drawing, r: number, bg: string, hot: number) {
   ctx.save()
   ctx.setLineDash([])
   ctx.lineWidth = 1.5
-  for (const p of hs) {
+  for (let i = 0; i < hs.length; i++) {
+    const p = hs[i]
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) continue
     ctx.beginPath()
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
-    ctx.fillStyle = d.locked ? '#64748b' : bg
+    ctx.arc(p.x, p.y, i === hot ? r + 1.5 : r, 0, Math.PI * 2)
+    ctx.fillStyle = d.locked ? '#64748b' : i === hot ? d.color : bg
     ctx.strokeStyle = d.locked ? '#94a3b8' : d.color
     ctx.fill()
     ctx.stroke()

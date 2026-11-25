@@ -20,7 +20,7 @@ import { CHART_PREFS_NS } from './useChartPrefs'
 import { registerBarTimes, xToTime, timeToX } from './draw/coords'
 import {
   type Drawing, type DrawType, type Tool, type MagnetMode, type Point, type StyleProps, type DrawTemplate,
-  TOOL_META, TOOL_HOTKEYS, COLORS, isDrawType, sanitizeDrawings, finishPoints, uid, styleOf,
+  TOOL_META, TOOL_HOTKEYS, COLORS, STYLE_KEYS, isDrawType, sanitizeDrawings, finishPoints, uid, styleOf,
 } from './draw/model'
 import { DrawingsPrimitive, type DrawScene } from './draw/primitive'
 import { anchorsOf, constrain45, inMarquee, dragHandle, type DrawLabels } from './draw/tools'
@@ -141,9 +141,24 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     setPref(CHART_PREFS_NS, 'drawFav', favorites.includes(tl) ? favorites.filter((x) => x !== tl) : [...favorites, tl])
   }, [favorites, setPref])
   const templates = useMemo(() => getPref<Record<string, DrawTemplate[]>>(CHART_PREFS_NS, 'drawTpl', {}) || {}, [getPref])
+  // 每种工具上次用的样式（颜色、线宽、斐波那契档位……），改了就自动记住，下次画同一种直接沿用
+  // Each tool's last-used style (colour, width, fib levels, ...), remembered on every edit and reused next time
   const defaults = useMemo(() => getPref<Record<string, StyleProps>>(CHART_PREFS_NS, 'drawDef', {}) || {}, [getPref])
   const defaultsRef = useRef(defaults)
   defaultsRef.current = defaults
+  const rememberStyles = useCallback((changed: Drawing[]) => {
+    const next = { ...defaultsRef.current }
+    let dirty = false
+    for (const d of changed) {
+      const st = styleOf(d)
+      if (JSON.stringify(next[d.type]) === JSON.stringify(st)) continue
+      next[d.type] = st
+      dirty = true
+    }
+    if (!dirty) return
+    defaultsRef.current = next
+    setPref(CHART_PREFS_NS, 'drawDef', next)
+  }, [setPref])
 
   // refs（指针回调里读最新值）/ refs read by pointer handlers
   const toolRef = useRef(tool); toolRef.current = tool
@@ -288,8 +303,14 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const patchSelected = useCallback((patch: Partial<Drawing>) => {
     const ids = new Set(selRef.current)
     if (!ids.size) return
-    commit(drawingsRef.current.map((d) => (ids.has(d.id) ? { ...d, ...patch } : d)))
-  }, [commit])
+    const next = drawingsRef.current.map((d) => (ids.has(d.id) ? { ...d, ...patch } : d))
+    commit(next)
+    // 改的是样式（不是锁定 / 隐藏）就记成这种工具的默认 / a style edit (not lock / hide) becomes the tool's default
+    if ((STYLE_KEYS as readonly string[]).some((k) => k in patch)) {
+      const seen = new Set<string>()
+      rememberStyles(next.filter((d) => ids.has(d.id) && !seen.has(d.type) && seen.add(d.type)))
+    }
+  }, [commit, rememberStyles])
   const deleteSelected = useCallback(() => {
     const ids = new Set(selRef.current)
     if (!ids.size) return
@@ -308,8 +329,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const doClearAll = useCallback(() => { setConfirmOpen(false); commit([]); select([]) }, [commit, select])
   const applyColor = useCallback((c: string) => {
     setColor(c)
-    if (selRef.current.length) patchSelected({ color: c })
-  }, [patchSelected])
+    if (selRef.current.length) { patchSelected({ color: c }); return }
+    // 没选中、手上拿着工具：这个颜色记给这种工具 / nothing selected with a tool armed: the colour goes to that tool
+    const cur = toolRef.current
+    if (isDrawType(cur)) {
+      const prev = defaultsRef.current[cur] ?? {}
+      if (prev.color !== c) {
+        const next = { ...defaultsRef.current, [cur]: { ...prev, color: c } }
+        defaultsRef.current = next
+        setPref(CHART_PREFS_NS, 'drawDef', next)
+      }
+    }
+  }, [patchSelected, setPref])
 
   // 平移一组画线的点（像素位移换回时间 / 价格）/ shift a drawing's points by a pixel delta
   const shiftPts = useCallback((d: Drawing, orig: Point[], dx: number, dy: number): Point[] => orig.map((pt) => {
@@ -364,13 +395,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
   }, [commit])
 
-  const setTool = useCallback((tl: Tool) => {
+  const setTool = useCallback((tl0: Tool) => {
+    // 再点一次正在用的画线工具 = 放下它回到光标 / picking the armed draw tool again puts it down
+    const tl: Tool = isDrawType(tl0) && tl0 === toolRef.current ? 'cursor' : tl0
     createRef.current = null
     gestureRef.current = null
     const p = primRef.current
     if (p) { p.temp = null; p.requestUpdate() }
+    toolRef.current = tl
     setToolState(tl)
     if (tl !== 'cursor' && tl !== 'cross') select([])
+    // 工具栏的颜色点跟着显示这种工具上次的颜色 / the rail's colour dots show this tool's last colour
+    if (isDrawType(tl)) { const c = defaultsRef.current[tl]?.color; if (c) setColor(c) }
   }, [select])
 
   // ──── 句柄 / handle ────
@@ -483,7 +519,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     p.requestUpdate()
   }, [])
   const newDrawing = useCallback((type: DrawType, pts: Point[]): Drawing => {
-    const base: Drawing = { ...(defaultsRef.current[type] ?? {}), id: uid(), type, pts, color: colorRef.current }
+    const last = defaultsRef.current[type] ?? {}
+    const base: Drawing = { ...last, id: uid(), type, pts, color: last.color || colorRef.current }
+    if (last.levels) base.levels = last.levels.map((lv) => ({ ...lv }))
     if (type === 'text') base.text = String(t('charts.draw.textDefault'))
     return base
   }, [t])
@@ -627,9 +665,24 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
   }, [cancelCreate, updateCreate, snap, toPoint, newDrawing, finishCreate, showTemp, select]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 交互层接管指针时图表收不到移动事件，十字光标会停住：这里替它跟上（画线 / 拉手柄时跟着磁吸后的点）
+  // While the layer holds the pointer the chart gets no moves and its crosshair freezes: drive it from
+  // here (following the magnet-snapped point while drawing / dragging a handle)
+  const syncCrosshair = useCallback((x: number, y: number) => {
+    if (!isChartAlive(chart)) return
+    const tt = chart.timeScale().coordinateToTime(x)
+    const pp = series.coordinateToPrice(y) as number | null
+    if (tt == null || pp == null || y > chart.paneSize(0).height) { chart.clearCrosshairPosition(); return }
+    chart.setCrosshairPosition(pp, tt, series as never)
+  }, [chart, series])
+
   const onMove = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const g = gestureRef.current
     const { x, y } = localXY(e)
+    if (!isTouchLike(e.pointerType)) {
+      const sp = createRef.current || g?.k === 'handle' ? snap(x, y) : { x, y }
+      syncCrosshair(sp.x, sp.y)
+    }
     // 没按着：两点点击 / 三点工具的悬停预览 / not pressed: hover preview while placing points
     if (!g) {
       if (createRef.current && createRef.current.step >= 0) updateCreate(x, y, e.shiftKey)
@@ -655,6 +708,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       if (Math.hypot(x - g.startX, y - g.startY) < g.slop) return
       g.active = true
       setDragging(true)
+      setCursorStyle(g.k === 'handle' ? 'grabbing' : 'move')
       // Ctrl+拖：先复制一份再拖副本 / Ctrl+drag clones first, then drags the copies
       if (g.k === 'move' && g.clone && g.ids.length) {
         const list = drawingsRef.current
@@ -675,7 +729,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
     const list = drawingsRef.current
     if (g.k === 'move') {
-      const dx = x - g.startX, dy = y - g.startY
+      let dx = x - g.startX, dy = y - g.startY
+      // Shift：只沿水平或垂直方向挪 / Shift: move along one axis only
+      if (e.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0 }
       const ids = new Set(g.ids)
       paint(list.map((d) => (ids.has(d.id) ? { ...d, pts: shiftPts(d, g.orig.get(d.id) ?? d.pts, dx, dy) } : d)))
       return
@@ -692,7 +748,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (!pt) return
     const pts = dragHandle(d, g.handle, pt, g.orig)
     paint(list.map((q) => (q.id === g.id ? { ...q, pts } : q)))
-  }, [updateCreate, pxOf, toPoint, showTemp, commit, select, paint, shiftPts, snap])
+  }, [updateCreate, pxOf, toPoint, showTemp, commit, select, paint, shiftPts, snap, syncCrosshair])
 
   const onUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const g = gestureRef.current
@@ -916,9 +972,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const el = overlayRef.current; if (!el) return
     let frame = 0
     let last: { x: number; y: number; ctrl: boolean } | null = null
-    const setHover = (id: string | null) => {
+    const setHover = (id: string | null, handle = -1) => {
       const p = primRef.current
-      if (p && p.hover !== id) { p.hover = id; p.requestUpdate() }
+      if (p && (p.hover !== id || p.hoverHandle !== handle)) { p.hover = id; p.hoverHandle = handle; p.requestUpdate() }
     }
     const evaluate = () => {
       frame = 0
@@ -930,7 +986,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       const x = p.x - r.left, y = p.y - r.top
       if (x < 0 || y < 0 || x > r.width || y > r.height) { el.style.pointerEvents = 'none'; setCursorStyle(''); setHover(null); return }
       const h = primRef.current?.hitAt(x, y) ?? null
-      setHover(h?.d.id ?? null)
+      setHover(h?.d.id ?? null, h?.handle ?? -1)
       if (h) {
         el.style.pointerEvents = 'auto'
         if (h.d.locked) setCursorStyle('pointer')
@@ -952,8 +1008,22 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       }
       if (isTouchLike(e.pointerType)) return
       last = { x: e.clientX, y: e.clientY, ctrl: e.ctrlKey || e.metaKey }
-      if (frame === 0) frame = window.requestAnimationFrame(evaluate)
+      // 同步判定（不等下一帧）：鼠标刚移到线上马上按下，也能抓到线，不会变成拖图表
+      // Evaluated synchronously (not next frame): a press right after reaching a line grabs the line, not the chart
+      if (frame !== 0) { window.cancelAnimationFrame(frame); frame = 0 }
+      evaluate()
     }
+    // 交互层接管时，滚轮照样交给图表缩放 / scrolling still zooms the chart while the layer holds the pointer
+    const onWheel = (e: WheelEvent) => {
+      if (el.style.pointerEvents !== 'auto') return
+      el.style.pointerEvents = 'none'
+      const under = document.elementFromPoint(e.clientX, e.clientY)
+      el.style.pointerEvents = 'auto'
+      if (!under || under === el || el.contains(under)) return
+      e.preventDefault()
+      under.dispatchEvent(new WheelEvent('wheel', e))
+    }
+    const onLeave = () => { if (!gestureRef.current && isChartAlive(chart)) chart.clearCrosshairPosition() }
     const onCtrl = (e: KeyboardEvent) => {
       if (e.key !== 'Control' && e.key !== 'Meta') return
       if (!last) return
@@ -972,7 +1042,11 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     window.addEventListener('pointercancel', onRelease)
     window.addEventListener('keydown', onCtrl)
     window.addEventListener('keyup', onCtrl)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    el.addEventListener('pointerleave', onLeave)
     return () => {
+      el.removeEventListener('wheel', onWheel)
+      el.removeEventListener('pointerleave', onLeave)
       window.removeEventListener('pointermove', onHover, true)
       window.removeEventListener('pointerdown', onPress, true)
       window.removeEventListener('pointerup', onRelease)
@@ -1005,9 +1079,11 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const applySettings = useCallback((d: Drawing) => {
     setSettings(null)
     const before = drawingsRef.current.find((q) => q.id === d.id)
-    if (before && JSON.stringify(before) !== JSON.stringify(d)) commit(drawingsRef.current.map((q) => (q.id === d.id ? d : q)))
-    else paint()
-  }, [commit, paint])
+    if (before && JSON.stringify(before) !== JSON.stringify(d)) {
+      commit(drawingsRef.current.map((q) => (q.id === d.id ? d : q)))
+      rememberStyles([d])
+    } else paint()
+  }, [commit, paint, rememberStyles])
   const cancelSettings = useCallback(() => { setSettings(null); paint() }, [paint])
   const saveTemplate = useCallback((type: DrawType, name: string, style: StyleProps) => {
     const list = (templates[type] ?? []).filter((x) => x.name !== name)
@@ -1016,10 +1092,6 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const deleteTemplate = useCallback((type: DrawType, name: string) => {
     setPref(CHART_PREFS_NS, 'drawTpl', { ...templates, [type]: (templates[type] ?? []).filter((x) => x.name !== name) })
   }, [templates, setPref])
-  const saveDefault = useCallback((type: DrawType, style: StyleProps) => {
-    const { color: _c, ...rest } = style
-    setPref(CHART_PREFS_NS, 'drawDef', { ...defaults, [type]: rest })
-  }, [defaults, setPref])
 
   // 收藏栏位置 / favourites bar position
   const favPos = getPref<{ x: number; y: number } | null>(CHART_PREFS_NS, 'drawFavPos', null)
@@ -1124,7 +1196,6 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
           onCancel={cancelSettings}
           onSaveTemplate={(name, d) => saveTemplate(d.type, name, styleOf(d))}
           onDeleteTemplate={(name) => deleteTemplate(settingsDrawing.type, name)}
-          onSaveDefault={(d) => saveDefault(d.type, styleOf(d))}
           t={t}
         />
       )}

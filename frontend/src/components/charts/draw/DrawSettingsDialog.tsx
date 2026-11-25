@@ -26,7 +26,6 @@ interface Props {
   onCancel: () => void
   onSaveTemplate: (name: string, d: Drawing) => void
   onDeleteTemplate: (name: string) => void
-  onSaveDefault: (d: Drawing) => void
   t: (k: string, o?: Record<string, unknown>) => unknown
 }
 
@@ -233,7 +232,7 @@ export default function DrawSettingsDialog(p: Props) {
       wide
       className="chart-cs"
       footer={<>
-        <button type="button" className="ind-btn" onClick={() => p.onSaveDefault(d)}>{tt('charts.draw.saveDefault')}</button>
+        <span className="draw-remember-hint">{tt('charts.draw.autoRemember')}</span>
         <button type="button" className="ind-btn primary" onClick={() => p.onApply(d)}>{tt('charts.draw.ok')}</button>
         <button type="button" className="ind-btn" onClick={p.onCancel}>{tt('common.cancel')}</button>
       </>}

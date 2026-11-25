@@ -558,7 +558,6 @@
       "vis_d": "Days",
       "vis_w": "Weeks",
       "vis_M": "Months",
-      "saveDefault": "Save as default",
       "ok": "OK",
       "tab_style": "Style",
       "tab_text": "Text",
@@ -583,7 +582,8 @@
         "entry": "Entry",
         "point": "Point {{n}}",
         "width": "Channel width"
-      }
+      },
+      "autoRemember": "Style is remembered and reused next time you draw this tool"
     },
     "posmark": {
       "show": "Show position & pending-order markers",

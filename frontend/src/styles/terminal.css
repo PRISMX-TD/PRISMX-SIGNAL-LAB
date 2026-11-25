@@ -2502,3 +2502,7 @@
 @media (prefers-reduced-motion: reduce) {
   .draw-fbar, .draw-tree { animation: none; }
 }
+
+/* 设置弹窗底部：样式自动记住的提示 / settings footer: auto-remember hint */
+.draw-remember-hint { font-size: 11px; color: var(--text-dim, #94a3b8); align-self: center; min-width: 0; }
+@media (max-width: 640px) { .draw-remember-hint { display: none; } }

@@ -11,7 +11,8 @@ export default function BackToLatest({ chart }: { chart: IChartApi }) {
   const [show, setShow] = useState(false)
   useEffect(() => {
     const ts = chart.timeScale()
-    const check = () => setShow(ts.scrollPosition() < -3)
+    // 往右空白区拖远了也出现（这时不再自动跟随）/ also when dragged far into the empty right side (no auto-follow then)
+    const check = () => { const pos = ts.scrollPosition(); setShow(pos < -3 || pos > ts.options().rightOffset + 3) }
     ts.subscribeVisibleLogicalRangeChange(check)
     check()
     return () => ts.unsubscribeVisibleLogicalRangeChange(check)
