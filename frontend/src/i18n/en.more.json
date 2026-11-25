@@ -1892,6 +1892,79 @@
         "max": "At most {{n}} alerts. Delete some finished ones first",
         "save": "Could not save, please try again"
       }
+    },
+    "pro": {
+      "name": "Pro Terminal",
+      "enter": "Pro Terminal",
+      "short": "Pro",
+      "enterTip": "Switch to the Pro Terminal: full-screen chart, command palette, adjustable panels",
+      "classic": "Classic",
+      "pro": "Pro",
+      "layout": "Layout",
+      "toClassic": "Back to Classic",
+      "menu": "Navigation",
+      "more": "More",
+      "interval": "Interval",
+      "alerts": "Alerts",
+      "focus": "Focus mode",
+      "focusOn": "Focus mode: chart only",
+      "focusOff": "Exit focus mode",
+      "panels": "Panels",
+      "dock": "Trading panel",
+      "resize": "Drag to resize the panel",
+      "resizeDock": "Drag to resize the trading panel",
+      "collapsePanel": "Collapse panel",
+      "details": "Symbol details",
+      "range": "Today's range",
+      "alertsActive": "{{n}} active",
+      "manage": "Manage",
+      "newAlert": "New",
+      "alertsEmpty": "No alerts yet",
+      "alertsEmptyHint": "Get notified when price hits a level, crosses a drawing or an indicator signals.",
+      "fired": "Fired {{n}}×",
+      "alertFired": "Alert triggered",
+      "offline": "Quotes disconnected, reconnecting…",
+      "w": {
+        "watch": "Watchlist",
+        "trade": "Trade",
+        "alerts": "Alerts"
+      },
+      "state": {
+        "live": "Live",
+        "stale": "Delayed",
+        "off": "Offline"
+      },
+      "tab": {
+        "watch": "Watchlist",
+        "draw": "Draw",
+        "ind": "Indicators",
+        "pos": "Positions",
+        "trade": "Trade"
+      },
+      "cmd": {
+        "open": "Search symbols, intervals, indicators or commands",
+        "symbolTip": "Change symbol",
+        "ph": "Search symbols, intervals (e.g. 3h), indicators or commands…",
+        "phSymbols": "Search symbols…",
+        "none": "Nothing found for \"{{q}}\"",
+        "current": "Current",
+        "move": "Select",
+        "run": "Run",
+        "close": "Close",
+        "g": {
+          "symbols": "Symbols",
+          "intervals": "Intervals",
+          "indicators": "Indicators",
+          "actions": "Commands"
+        },
+        "ivGroup": {
+          "minutes": "minutes",
+          "hours": "hours",
+          "days": "days",
+          "weeks": "weeks",
+          "months": "months"
+        }
+      }
     }
   },
   "winrate": {

@@ -114,6 +114,15 @@ import { useChartAlerts } from '../components/charts/alert/alertStore'
 import { onChartAlertFired } from '../utils/chartAlertEvents'
 import { useSearchParams } from 'react-router-dom'
 import { EMPTY } from '../utils/format'
+// 专业版终端：同一张图表的第二套外壳（见 components/charts/pro/ 与 styles/chart-pro.css）
+// The pro terminal: a second shell around the same chart (components/charts/pro/, styles/chart-pro.css)
+import '../styles/chart-pro.css'
+import { useProPrefs, type ProLayout } from '../components/charts/pro/proPrefs'
+import ProTopBar from '../components/charts/pro/ProTopBar'
+import ProWidgets, { ProAlerts, ProDetails } from '../components/charts/pro/ProWidgets'
+import ProCommand, { type ProAction, type ProCommandMode } from '../components/charts/pro/ProCommand'
+import { ProDock, ProIsland, ProTabBar, type IslandEvent, type ProTab } from '../components/charts/pro/ProChrome'
+import { IcBell, IcCamera, IcClassic, IcDock, IcExpand, IcFocus, IcFx, IcGear, IcKeyboard, IcList, IcPlus, IcSpark, IcTrade, IcCalendar } from '../components/charts/pro/icons'
 
 
 type Sheet = 'watchlist' | 'trade' | 'positions' | null
@@ -207,6 +216,11 @@ function LiveDock({ scopeLogin, ...rest }: DockProps) {
 // 只渲染持仓数的小叶子（工具条按钮 / 抽屉抬头）/ a leaf that renders just the count
 function PositionsCount({ scopeLogin }: { scopeLogin: string | null }) {
   return <>{useScopedPositions(scopeLogin).length}</>
+}
+// 专业版图标上的持仓数角标：0 时不画 / the pro icons' position-count badge, hidden at 0
+function PositionsBadge({ scopeLogin, className }: { scopeLogin: string | null; className: string }) {
+  const n = useScopedPositions(scopeLogin).length
+  return n > 0 ? <b className={className}>{n}</b> : null
 }
 
 // 报价条：只订阅当前品种那一条全站报价 / quote strip reading just the active symbol's quote
@@ -424,6 +438,40 @@ export default function ChartsPage() {
   // Clicking the symbol name on desktop no longer opens that invisible watchlist sheet
   // either (it pushed a back-history entry, so the first Back did nothing visible).
   const isDesktop = useMediaQuery('(min-width: 1024px)')
+  // 专业版终端开关（存在 chartv2 / pro，跨设备同步）。两套外壳共用同一个图表容器：
+  // 下面所有外壳部件都是「条件槽位」，图表容器在 React 树里的位置不变，切换时不会重建图表。
+  // The pro terminal switch (chartv2 / pro, synced). Both shells share one chart container:
+  // every shell part below is a conditional slot, so the container keeps its place in the
+  // React tree and switching never rebuilds the chart.
+  const [proPrefs, updatePro] = useProPrefs()
+  const pro = proPrefs.layout === 'pro'
+  const setLayout = useCallback((l: ProLayout) => updatePro({ layout: l }), [updatePro])
+  const [cmd, setCmd] = useState<ProCommandMode | null>(null)
+  const [proDraw, setProDraw] = useState(false)
+  useEffect(() => {
+    if (!pro) { setCmd(null); setProDraw(false); return }
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setCmd((m) => (m ? null : 'all'))
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [pro])
+  // 桌面专业版的全屏 = 浏览器全屏整个终端（手机仍走原来的图表横屏全屏）
+  // Desktop pro fullscreen = the browser's fullscreen on the whole terminal (phones keep the
+  // chart's landscape fullscreen)
+  const [docFs, setDocFs] = useState(false)
+  useEffect(() => {
+    const on = () => setDocFs(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', on)
+    return () => document.removeEventListener('fullscreenchange', on)
+  }, [])
+  const toggleDocFs = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen().catch(() => {})
+    else void document.documentElement.requestFullscreen?.().catch(() => {})
+  }, [])
   // 视口从手机宽度变到桌面宽度（平板转屏、拖宽窗口）时收起开着的抽屉。
   // Crossing to desktop width (tablet rotation, widening the window) closes an open sheet.
   useEffect(() => {
@@ -749,7 +797,9 @@ export default function ChartsPage() {
   const priceBased = PRICE_BASED_TYPES.has(cprefs.chartType)
   // 买卖按钮：桌面常驻；手机平时底部已有交易条，只在全屏横屏时显示。
   // Buy / sell buttons: always on desktop; phones already have the bottom trade bar, so fullscreen only.
-  const showTradeBtns = cprefs.trading.buttons && (isDesktop || isFullscreen)
+  // 专业版手机没有底部交易条（换成了标签栏），买卖按钮浮在图上。
+  // The pro phone layout has no bottom trade bar (a tab bar instead), so the buttons float on the chart.
+  const showTradeBtns = cprefs.trading.buttons && (isDesktop || isFullscreen || pro)
 
   const indView = useMemo<IndView>(() => ({
     list: shownList, panes: indLayout.panes, mainH: indLayout.mainH, maxPane, interval, digits: decimals, symbol,
@@ -804,7 +854,16 @@ export default function ChartsPage() {
   const activeAlertCount = useMemo(() => chartAlerts.filter((a) => a.status === 'active').length, [chartAlerts])
   const openAlert = useCallback((init: AlertInit) => { setCtx(null); setAlertInit(init) }, [])
   const alertBid = useCallback(() => quoteNow().bid, [quoteNow])
-  useEffect(() => onChartAlertFired((ev) => showToast(ev.message || ev.symbol, 'info')), [showToast])
+  // 专业版里触发提示走图表顶部的「灵动岛」，经典版照旧弹 toast。
+  // In the pro terminal a fire shows in the chart's top island; the classic layout keeps the toast.
+  const [island, setIsland] = useState<IslandEvent | null>(null)
+  const proRef = useRef(pro)
+  proRef.current = pro
+  useEffect(() => onChartAlertFired((ev) => {
+    if (proRef.current) setIsland({ id: Date.now(), symbol: ev.symbol, message: ev.message, price: ev.price ?? null })
+    else showToast(ev.message || ev.symbol, 'info')
+  }), [showToast])
+  const dismissIsland = useCallback(() => setIsland(null), [])
   const setFavIntervals = useCallback((codes: string[]) => updatePrefs({ favIntervals: codes }), [updatePrefs])
   const setScaleMode = useCallback((m: ScaleMode) => updatePrefs({ scaleMode: m }), [updatePrefs])
   const autoScale = useCallback(() => { chartRef.current?.priceScale('right').applyOptions({ autoScale: true }) }, [chartRef])
@@ -956,9 +1015,49 @@ export default function ChartsPage() {
           {activeAlertCount > 0 && <b>{activeAlertCount}</b>}
         </button>
         <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
+        <button type="button" onClick={() => setLayout('pro')} className="term-tbr-btn pt-entry" aria-label={String(t('charts.pro.enter'))} title={String(t('charts.pro.enter'))}>
+          <IcSpark size={13} />{t('charts.pro.short')}
+        </button>
       </div>
     </>
   )
+
+  // ── 专业版终端：命令面板动作、手机标签栏 / pro terminal: palette actions, phone tab bar ──
+  const pickSymbolPro = useCallback((s: string) => { setSymbol(s); focusChart() }, [focusChart])
+  const pickIntervalPro = useCallback((c: string) => { setIntervalCode(c); focusChart() }, [focusChart])
+  const addIndicatorPro = useCallback((id: string) => {
+    if (defOf(id)?.pro && !isPro) { setSettingsOpen(true); return }
+    addIndicator(id)
+  }, [addIndicator, isPro])
+  const closeCmd = useCallback(() => { setCmd(null); focusChart() }, [focusChart])
+  const toggleFocus = useCallback(() => updatePro((p) => ({ ...p, focus: !p.focus })), [updatePro])
+  const proActions = useMemo<ProAction[]>(() => {
+    const L = (k: string) => String(t(k))
+    const list: (ProAction | false)[] = [
+      { id: 'newAlert', label: L('charts.alert.new'), icon: <IcPlus size={15} />, hint: 'Alt+A', run: () => openAlert({ price: quoteNow().bid ?? undefined }) },
+      { id: 'alerts', label: L('charts.alert.manager'), icon: <IcBell size={15} />, run: () => setAlertMgrOpen(true) },
+      { id: 'ind', label: L('charts.indicators.button'), icon: <IcFx size={15} />, run: () => setSettingsOpen(true) },
+      { id: 'shot', label: L('charts.shot.save'), icon: <IcCamera size={15} />, hint: 'Ctrl+Alt+S', run: () => { void takeShot('save') } },
+      { id: 'goto', label: L('charts.goto.title'), icon: <IcCalendar size={15} />, run: () => setGotoOpen(true) },
+      { id: 'reset', label: L('charts.ctx.reset'), icon: <IcExpand size={15} />, run: resetView },
+      { id: 'settings', label: L('charts.settings.title'), icon: <IcGear size={15} />, run: () => setChartSetOpen(true) },
+      isDesktop && { id: 'watch', label: L('charts.pro.w.watch'), icon: <IcList size={15} />, run: () => updatePro({ widget: 'watch', focus: false }) },
+      isDesktop && { id: 'trade', label: L('charts.pro.w.trade'), icon: <IcTrade size={15} />, run: () => updatePro({ widget: 'trade', focus: false }) },
+      isDesktop && { id: 'dock', label: L('charts.pro.dock'), icon: <IcDock size={15} />, run: () => updatePro((p) => ({ ...p, dockOpen: !p.dockOpen, focus: false })) },
+      isDesktop && { id: 'focus', label: L('charts.pro.focus'), icon: <IcFocus size={15} />, run: toggleFocus },
+      { id: 'fs', label: L('charts.fullscreen.enter'), icon: <IcExpand size={15} />, run: isDesktop ? toggleDocFs : enterFullscreen },
+      isDesktop && { id: 'keys', label: L('charts.keys.title'), icon: <IcKeyboard size={15} />, hint: '?', run: () => setKeysOpen(true) },
+      { id: 'classic', label: L('charts.pro.toClassic'), icon: <IcClassic size={15} />, run: () => setLayout('classic') },
+    ]
+    return list.filter((a): a is ProAction => !!a)
+  }, [t, isDesktop, openAlert, quoteNow, takeShot, resetView, updatePro, toggleFocus, toggleDocFs, enterFullscreen, setLayout])
+  const proTab: ProTab | null = sheet === 'watchlist' ? 'watch' : sheet === 'positions' ? 'pos' : sheet === 'trade' ? 'trade' : settingsOpen ? 'ind' : proDraw ? 'draw' : null
+  const onProTab = useCallback((tab: ProTab) => {
+    if (tab === 'draw') { setProDraw((v) => !v); return }
+    if (tab === 'ind') { setSettingsOpen(true); return }
+    if (tab === 'pos') { setSheetDockTab('positions'); setSheet('positions'); return }
+    setSheet(tab === 'watch' ? 'watchlist' : 'trade')
+  }, [])
 
   const openTrade = useCallback((side: Side) => { setTradeSide(side); setSheet('trade') }, [])
   const openWatchlistSheet = useCallback(() => setSheet('watchlist'), [])
@@ -1040,11 +1139,44 @@ export default function ChartsPage() {
   )
 
   return (
-    <div className="term-shell">
+    <div
+      className={`term-shell ${pro ? `pt ${isDesktop ? 'pt-d' : 'pt-m'} ${proPrefs.focus && isDesktop ? 'pt-focus' : ''} ${proPrefs.widget && !(proPrefs.focus && isDesktop) ? 'has-panel' : ''}` : ''}`}
+      style={pro ? ({ '--pt-panel-w': `${proPrefs.panelW}px` } as React.CSSProperties) : undefined}
+    >
       <h1 className="sr-only">{t('nav.charts')}</h1>
+      {/* 专业版顶栏（经典版是全站顶栏 + 报价条 + 工具条）/ pro top bar (classic: site header + quote strip + toolbar) */}
+      {pro && !isFullscreen && (
+        <ProTopBar
+          desktop={isDesktop}
+          symbol={symbol}
+          interval={interval}
+          digits={decimals}
+          dayStats={dayStats}
+          fallbackPrice={lastPrice}
+          quotesDown={wsDisconnected}
+          favIntervals={cprefs.favIntervals}
+          onInterval={pickIntervalPro}
+          onFavIntervals={setFavIntervals}
+          chartType={cprefs.chartType}
+          onChartType={(v) => updatePrefs({ chartType: v })}
+          onIndicators={() => setSettingsOpen(true)}
+          onAlerts={() => (isDesktop ? updatePro({ widget: 'alerts', focus: false }) : setAlertMgrOpen(true))}
+          alertCount={activeAlertCount}
+          onCommand={() => setCmd('all')}
+          onSymbol={() => (isDesktop ? setCmd('symbols') : setSheet('watchlist'))}
+          onShot={() => { void takeShot('save') }}
+          onSettings={() => setChartSetOpen(true)}
+          onKeys={() => setKeysOpen(true)}
+          focus={proPrefs.focus}
+          onFocus={toggleFocus}
+          fullscreen={isDesktop ? docFs : isFullscreen}
+          onFullscreen={isDesktop ? toggleDocFs : enterFullscreen}
+          onLayout={setLayout}
+        />
+      )}
       {/* 左栏：自选（桌面常驻；手机从报价条的品种名点开抽屉）
           Left column: watchlist (desktop; on mobile it opens as a sheet from the quote strip) */}
-      {isDesktop && (
+      {isDesktop && !pro && (
         <aside className="term-col term-col-left">
           <div className="term-ph"><h3>{t('charts.watchlist.title')}</h3><span>{activeSymbols.length}</span></div>
           <WatchlistPanel
@@ -1061,7 +1193,7 @@ export default function ChartsPage() {
       {/* 中栏：报价条 + [竖轨 | 工具条 / 图表] + 持仓停靠 / center: quote strip + [rail | toolbar / chart] + dock */}
       <section className="term-center">
         <LiveBarSync symbol={symbol} interval={interval} engine={engine} liveBidRef={liveBidRef} dataKeyRef={dataKeyRef} />
-        {!isFullscreen && (
+        {!isFullscreen && !pro && (
           <LiveSymbolHeader
             symbol={symbol}
             interval={interval}
@@ -1079,13 +1211,13 @@ export default function ChartsPage() {
           {/* 画线竖轨（桌面；全屏时换成悬浮工具栏）。引擎就绪前先占位，免得网格跳动。
               Draw rail (desktop; fullscreen uses the floating toolbar). A placeholder
               holds the column before the engine is ready so the grid doesn't jump. */}
-          {!isFullscreen && (drawReady
+          {!isFullscreen && (!pro || (isDesktop && !proPrefs.focus)) && (drawReady
             ? <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} measureOn={measureOn} onMeasure={() => setMeasureOn((v) => !v)} />
             : <div className="term-rail" />)}
 
           {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
               Toolbar: intervals left; positions (mobile) · pen (mobile) · markers · indicators right */}
-          {!isFullscreen && (
+          {!isFullscreen && !pro && (
             <div className="term-tb">
               <IntervalSeg value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />
               <IntervalMenu value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
@@ -1111,6 +1243,10 @@ export default function ChartsPage() {
                   <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
                     {t('charts.indicators.button')}
                   </button>
+                  {/* 切到专业版终端 / switch to the pro terminal */}
+                  <button type="button" onClick={() => setLayout('pro')} className="term-tbr-btn pt-entry" title={String(t('charts.pro.enterTip'))}>
+                    <IcSpark size={13} />{t('charts.pro.enter')}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1134,8 +1270,11 @@ export default function ChartsPage() {
             aria-label={t('nav.charts')}
             onContextMenu={onChartContextMenu}
           >
-            {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏 */}
-            <button
+            {/* 全屏开关（仅手机端）：同一个按钮进出，进入自动横屏，退出恢复竖屏。
+                专业版手机从顶栏「更多」进入全屏，这里只留退出。
+                Phone fullscreen toggle; the pro phone layout enters from its top bar's More menu,
+                so here it only exits. */}
+            {(!pro || isFullscreen) && <button
               type="button"
               onClick={isFullscreen ? exitFullscreen : enterFullscreen}
               aria-label={isFullscreen ? t('charts.fullscreen.exit') : t('charts.fullscreen.enter')}
@@ -1157,7 +1296,7 @@ export default function ChartsPage() {
                   <line x1="3" y1="21" x2="10" y2="14" />
                 </svg>
               )}
-            </button>
+            </button>}
 
             {/* 全屏态时间周期切换：右上角横排 */}
             {isFullscreen && <IntervalSeg variant="fullscreen" value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />}
@@ -1301,6 +1440,17 @@ export default function ChartsPage() {
                 onTogglePositions={() => setShowPositions((v) => !v)}
               />
             )}
+
+            {/* 专业版：顶部灵动岛（断线 / 警报触发）+ 手机画线条（标签栏「画线」开合）
+                Pro: the top island (offline / alert fired) + the phone draw strip (tab bar "Draw") */}
+            {pro && !isFullscreen && (
+              <ProIsland down={wsDisconnected} event={island} digits={digitsFor} onOpen={() => (isDesktop ? updatePro({ widget: 'alerts', focus: false }) : setAlertMgrOpen(true))} onDismiss={dismissIsland} />
+            )}
+            {pro && !isDesktop && !isFullscreen && proDraw && drawReady && (
+              <div className="pt-drawbar no-sb">
+                <DrawToolsRow variant="strip" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
+              </div>
+            )}
           </div>
 
           {isDesktop && !isFullscreen && (
@@ -1388,23 +1538,61 @@ export default function ChartsPage() {
         )}
 
         {/* 持仓 / 挂单停靠（桌面；手机走底部抽屉）/ positions dock (desktop; mobile uses the sheet) */}
-        {isDesktop && !isFullscreen && (
+        {isDesktop && !isFullscreen && !pro && (
           <div className="hidden lg:flex lg:flex-shrink-0 lg:flex-col">
             <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
           </div>
         )}
+        {/* 专业版交易面板：可拖高、可从右侧图标栏收起 / pro trading panel: resizable, toggled from the strip */}
+        {pro && isDesktop && proPrefs.dockOpen && !proPrefs.focus && (
+          <ProDock height={proPrefs.dockH} onHeight={(h) => updatePro({ dockH: h })}>
+            <LiveDock scopeLogin={scopeLogin} orders={accountOrders} digitsFor={digitsFor} onToast={showToast} mt5Login={closeAllLogin} accountLabel={closeAllLabel} />
+          </ProDock>
+        )}
 
         {/* 手机端底部交易条：卖 | 点差 | 买，点开下单票抽屉
             Mobile trade bar: sell | spread | buy, opens the ticket sheet */}
-        {!isDesktop && !isFullscreen && (
+        {!isDesktop && !isFullscreen && !pro && (
           <MobileTradeBar symbol={symbol} decimals={decimals} lastPrice={lastPrice} onTrade={openTrade} quotesDown={wsDisconnected} />
         )}
+        {pro && !isDesktop && !isFullscreen && (
+          <ProTabBar active={proTab} onTab={onProTab} posBadge={<PositionsBadge scopeLogin={scopeLogin} className="pt-tab-badge" />} />
+        )}
       </section>
+
+      {/* 专业版右侧：面板 + 图标栏 / pro right side: panel + icon strip */}
+      {pro && isDesktop && (
+        <ProWidgets
+          widget={proPrefs.focus ? null : proPrefs.widget}
+          onWidget={(w) => updatePro({ widget: w, focus: false })}
+          width={proPrefs.panelW}
+          onWidth={(px) => updatePro({ panelW: px })}
+          watch={<WatchlistPanel className="flex min-h-0 flex-1 flex-col" symbols={activeSymbols} active={symbol} onSelect={pickSymbolPro} digitsFor={digitsFor} quotesDown={wsDisconnected} />}
+          details={<ProDetails symbol={symbol} digits={decimals} dayStats={dayStats} fallback={lastPrice} stale={stale} down={wsDisconnected} />}
+          trade={<>{ticket()}<AccountSummary account={activeAccount} /></>}
+          alerts={(
+            <ProAlerts
+              symbol={symbol}
+              bid={alertBid}
+              onNew={() => openAlert({ price: quoteNow().bid ?? undefined })}
+              onEdit={(a) => openAlert({ edit: a })}
+              onManage={() => setAlertMgrOpen(true)}
+              onPickSymbol={pickSymbolLoose}
+              onToast={showToast}
+            />
+          )}
+          alertCount={activeAlertCount}
+          onKeys={() => setKeysOpen(true)}
+          dockOpen={proPrefs.dockOpen && !proPrefs.focus}
+          onDock={() => updatePro((p) => ({ ...p, dockOpen: p.focus ? true : !p.dockOpen, focus: false }))}
+          posBadge={<PositionsBadge scopeLogin={scopeLogin} className="pt-strip-badge" />}
+        />
+      )}
 
       {/* 右栏：下单票 + 账户条（桌面常驻）。票占剩余高度并可内部滚动，账户条钉底。
           Right column: ticket + account strip (desktop). The ticket takes the
           remaining height and scrolls internally; the strip stays pinned at the bottom. */}
-      {isDesktop && (
+      {isDesktop && !pro && (
         <aside className="term-col term-col-right">
           <div className="term-ph"><h3>{t('charts.ticket.title')}</h3><span>{symbol || EMPTY}</span></div>
           {ticket()}
@@ -1496,6 +1684,22 @@ export default function ChartsPage() {
           onChange={(next) => updateInd((l) => updateInstance(l, next.uid, () => next))}
           onSaveDefault={(i) => updateInd((l) => ({ ...l, defaults: { ...l.defaults, [i.type]: { inputs: i.inputs, styles: i.styles } } }))}
           onClose={() => setEditUid(null)}
+        />
+      )}
+
+      {pro && (
+        <ProCommand
+          open={cmd != null}
+          mode={cmd ?? 'all'}
+          onClose={closeCmd}
+          symbols={activeSymbols}
+          activeSymbol={symbol}
+          interval={interval}
+          onSymbol={pickSymbolPro}
+          onInterval={pickIntervalPro}
+          onIndicator={addIndicatorPro}
+          isPro={isPro}
+          actions={proActions}
         />
       )}
 

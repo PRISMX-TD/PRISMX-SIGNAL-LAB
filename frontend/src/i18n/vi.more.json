@@ -1892,6 +1892,79 @@
         "max": "Tối đa {{n}} cảnh báo. Hãy xóa bớt các mục đã xong",
         "save": "Không lưu được, vui lòng thử lại"
       }
+    },
+    "pro": {
+      "name": "Terminal Pro",
+      "enter": "Terminal Pro",
+      "short": "Pro",
+      "enterTip": "Chuyển sang Terminal Pro: biểu đồ toàn màn hình, bảng lệnh, bảng điều chỉnh được",
+      "classic": "Cổ điển",
+      "pro": "Pro",
+      "layout": "Bố cục",
+      "toClassic": "Về giao diện cổ điển",
+      "menu": "Điều hướng",
+      "more": "Thêm",
+      "interval": "Khung thời gian",
+      "alerts": "Cảnh báo",
+      "focus": "Chế độ tập trung",
+      "focusOn": "Chế độ tập trung: chỉ biểu đồ",
+      "focusOff": "Thoát chế độ tập trung",
+      "panels": "Bảng",
+      "dock": "Bảng giao dịch",
+      "resize": "Kéo để chỉnh độ rộng bảng",
+      "resizeDock": "Kéo để chỉnh chiều cao bảng giao dịch",
+      "collapsePanel": "Thu gọn bảng",
+      "details": "Chi tiết mã",
+      "range": "Biên độ hôm nay",
+      "alertsActive": "{{n}} đang bật",
+      "manage": "Quản lý",
+      "newAlert": "Tạo mới",
+      "alertsEmpty": "Chưa có cảnh báo",
+      "alertsEmptyHint": "Nhận thông báo khi giá chạm mức, cắt đường vẽ hoặc chỉ báo phát tín hiệu.",
+      "fired": "Đã kích hoạt {{n}} lần",
+      "alertFired": "Cảnh báo đã kích hoạt",
+      "offline": "Mất kết nối giá, đang kết nối lại…",
+      "w": {
+        "watch": "Danh sách theo dõi",
+        "trade": "Giao dịch",
+        "alerts": "Cảnh báo"
+      },
+      "state": {
+        "live": "Trực tiếp",
+        "stale": "Trễ",
+        "off": "Ngoại tuyến"
+      },
+      "tab": {
+        "watch": "Theo dõi",
+        "draw": "Vẽ",
+        "ind": "Chỉ báo",
+        "pos": "Vị thế",
+        "trade": "Đặt lệnh"
+      },
+      "cmd": {
+        "open": "Tìm mã, khung thời gian, chỉ báo hoặc lệnh",
+        "symbolTip": "Đổi mã",
+        "ph": "Tìm mã, khung thời gian (vd 3h), chỉ báo hoặc lệnh…",
+        "phSymbols": "Tìm mã…",
+        "none": "Không tìm thấy \"{{q}}\"",
+        "current": "Hiện tại",
+        "move": "Chọn",
+        "run": "Thực hiện",
+        "close": "Đóng",
+        "g": {
+          "symbols": "Mã",
+          "intervals": "Khung thời gian",
+          "indicators": "Chỉ báo",
+          "actions": "Lệnh"
+        },
+        "ivGroup": {
+          "minutes": "phút",
+          "hours": "giờ",
+          "days": "ngày",
+          "weeks": "tuần",
+          "months": "tháng"
+        }
+      }
     }
   },
   "winrate": {

@@ -1892,6 +1892,79 @@
         "max": "最多 {{n}} 条警报，先删掉一些已结束的",
         "save": "保存失败，请稍后再试"
       }
+    },
+    "pro": {
+      "name": "专业版终端",
+      "enter": "专业版终端",
+      "short": "专业版",
+      "enterTip": "切换到专业版终端：全屏图表、命令面板、可调面板",
+      "classic": "经典版",
+      "pro": "专业版",
+      "layout": "界面",
+      "toClassic": "切回经典版",
+      "menu": "导航",
+      "more": "更多",
+      "interval": "周期",
+      "alerts": "警报",
+      "focus": "专注模式",
+      "focusOn": "专注模式：只留图表",
+      "focusOff": "退出专注模式",
+      "panels": "面板",
+      "dock": "交易面板",
+      "resize": "拖动调整面板宽度",
+      "resizeDock": "拖动调整交易面板高度",
+      "collapsePanel": "收起面板",
+      "details": "品种详情",
+      "range": "今日区间",
+      "alertsActive": "生效 {{n}} 条",
+      "manage": "管理",
+      "newAlert": "新建",
+      "alertsEmpty": "还没有警报",
+      "alertsEmptyHint": "价格到位、穿越画线或指标信号时提醒你。",
+      "fired": "已触发 {{n}} 次",
+      "alertFired": "警报已触发",
+      "offline": "行情连接中断，正在重连…",
+      "w": {
+        "watch": "自选",
+        "trade": "交易",
+        "alerts": "警报"
+      },
+      "state": {
+        "live": "实时",
+        "stale": "延迟",
+        "off": "离线"
+      },
+      "tab": {
+        "watch": "自选",
+        "draw": "画线",
+        "ind": "指标",
+        "pos": "持仓",
+        "trade": "下单"
+      },
+      "cmd": {
+        "open": "搜索品种、周期、指标或命令",
+        "symbolTip": "切换品种",
+        "ph": "搜索品种、周期（如 3h）、指标或命令…",
+        "phSymbols": "搜索品种…",
+        "none": "没有找到「{{q}}」",
+        "current": "当前",
+        "move": "选择",
+        "run": "执行",
+        "close": "关闭",
+        "g": {
+          "symbols": "品种",
+          "intervals": "周期",
+          "indicators": "指标",
+          "actions": "命令"
+        },
+        "ivGroup": {
+          "minutes": "分钟",
+          "hours": "小时",
+          "days": "日",
+          "weeks": "周",
+          "months": "月"
+        }
+      }
     }
   },
   "winrate": {
