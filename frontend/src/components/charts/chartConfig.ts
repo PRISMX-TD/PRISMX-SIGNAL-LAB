@@ -6,7 +6,6 @@
 // pages/ChartsPage.tsx on 2026-09-06 verbatim.
 import type { HandleScrollOptions, UTCTimestamp } from 'lightweight-charts'
 import type { Candle, Quote } from '../../api/types'
-import type { Tool } from './DrawLayer'
 import type { DayStats } from './SymbolHeader'
 import type { IndicatorId } from './indicatorCatalog'
 import { baseSymbol } from '../../api/utils'
@@ -100,8 +99,6 @@ export const INTERVALS: { code: string; label: string }[] =
 export function isKnownInterval(code: string | null | undefined): code is string {
   return isValidInterval(code)
 }
-
-export const ToolList: Tool[] = ['cursor', 'cross', 'trend', 'hline', 'vline', 'ray', 'crossline', 'rect', 'fib']
 
 // 向后兼容的 localStorage key / backward-compat localStorage keys
 export const INTERVAL_KEY = 'prismx.charts.interval'

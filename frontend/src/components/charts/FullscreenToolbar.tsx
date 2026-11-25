@@ -4,9 +4,8 @@
 // verbatim on 2026-09-06; drag logic lives in useChartFullscreen.
 import { useTranslation } from 'react-i18next'
 import type { PointerEvent as RPointerEvent, RefObject } from 'react'
-import type { DrawLayerHandle, Tool } from './DrawLayer'
-import { ToolList } from './chartConfig'
-import { DrawToolIcon } from './DrawToolsRow'
+import type { DrawLayerHandle } from './DrawLayer'
+import { DrawToolGroups } from './DrawToolsRow'
 import PositionMarkerToggle from './PositionMarkerToggle'
 
 export default function FullscreenToolbar({ toolbarRef, pos, onPointerDown, onPointerMove, onPointerUp, drawLayerRef, bumpDraw, showPositions, onTogglePositions }: {
@@ -46,22 +45,7 @@ export default function FullscreenToolbar({ toolbarRef, pos, onPointerDown, onPo
       </div>
       {/* 工具按钮 */}
       <div className="flex items-center gap-1">
-        {(ToolList as Tool[]).map((toolName) => (
-          <button
-            key={toolName}
-            type="button"
-            title={String(t(`charts.draw.${toolName}`))}
-            aria-label={String(t(`charts.draw.${toolName}`))}
-            onClick={() => { drawLayerRef.current?.setTool(toolName); bumpDraw() }}
-            className={`flex h-6 w-6 items-center justify-center rounded-lg border transition ${
-              drawLayerRef.current?.tool === toolName
-                ? 'border-prism-600 bg-prism-600 text-white'
-                : 'border-white/10 bg-ink-800/60 text-neutral-400 hover:text-neutral-100'
-            }`}
-          >
-            <DrawToolIcon tool={toolName} />
-          </button>
-        ))}
+        <DrawToolGroups drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} compact />
         <span className="mx-0.5 h-5 w-px bg-white/10" />
         {['#22d3ee', '#a78bfa', '#2ee07e', '#ff4d67', '#f5c451'].map((c) => (
           <button

@@ -27,6 +27,7 @@
 // watchlist / ticket / positions open as bottom sheets. The chart container is
 // always mounted — sheets overlay it, never unmount it.
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
+import type { Time } from 'lightweight-charts'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { usePrefs } from '../store/prefs'
@@ -656,6 +657,9 @@ export default function ChartsPage() {
   }, [themeName, cprefs.canvas.bg])
   const ivKind = intervalKind(interval)
   const timeFmt = useMemo(() => makeTimeFormatters(cprefs.timezone, ivKind, lang), [cprefs.timezone, ivKind, lang])
+  // 画线层：轴标签 / 坐标页签的时间格式与画布底色 / drawing layer: time labels and canvas colours
+  const drawFmtTime = useCallback((x: number) => timeFmt.crosshair(x as Time), [timeFmt])
+  const drawTheme = useMemo(() => ({ bg: palette.bg, text: palette.text }), [palette.bg, palette.text])
   const watermark = cprefs.canvas.watermark && symbol ? `${symbol} · ${intervalLabel(interval)}` : null
   const view = useMemo<ChartView>(() => ({
     chartType: cprefs.chartType,
@@ -1058,6 +1062,9 @@ export default function ChartsPage() {
                 symbol={symbol}
                 barTimes={getBarTimes}
                 digits={decimals}
+                interval={interval}
+                fmtTime={drawFmtTime}
+                theme={drawTheme}
                 onStateChange={bumpDraw}
               />
             )}
