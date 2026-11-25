@@ -1,6 +1,6 @@
 // 专业版终端的自选表（TradingView 式的行情表，取代经典版的卡片列表）：
 //   分类胶囊（全部 / 自选 / 外汇 / 商品…，可切到筛选框）· 列头（商品 · 趋势 · 最新价）·
-//   「全部」下按分类分组，组头可折叠并显示数量 · 每行：圆形头像 + 代码、五格多周期趋势
+//   「全部」下按分类分组，组头可折叠并显示数量 · 每行：品种图标（SymbolLogo：外汇双国旗、指数国旗 / 数字、商品与币种图形）+ 代码、五格多周期趋势
 //   （M5 / M15 / M30 / H1 / H4，信号页同一份 trends 数据）、跳价闪色的价格、星标。
 // 顶部齿轮是列表设置：趋势列、报价列可各自关掉（存进专业版偏好 wlTrend / wlPrice）。
 // 键盘：焦点在列表里时 ↑ / ↓ 直接切换主图品种（TradingView 要点鼠标）。
@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import type { Trend } from '../../../api/types'
 import { useGlobalQuotesPeek, useGlobalQuotesSubscribe, useLive } from '../../../store/live'
 import { displaySymbol } from '../../../api/utils'
-import { symbolMeta } from '../../../utils/symbolMeta'
+import SymbolLogo from './SymbolLogo'
 import { SYMBOL_CATEGORIES, symbolCategory, type SymbolCategory } from '../../../utils/symbolCategory'
 import { EMPTY } from '../../../utils/format'
 import { FavoriteStar, useSymbolTabs } from '../../signals/SymbolTabs'
@@ -249,14 +249,13 @@ const WatchRow = memo(function WatchRow({ sym, ticks, trend, digits, active, sho
   const subscribe = useCallback((cb: () => void) => (showPrice ? ticks.subscribe(sym, cb) : () => {}), [ticks, sym, showPrice])
   const get = useCallback(() => ticks.get(sym), [ticks, sym])
   const { bid, dir } = useSyncExternalStore(subscribe, get, get)
-  const meta = symbolMeta(sym)
   const name = String(t(`signals.symbolNames.${sym}`, { defaultValue: displaySymbol(sym) }))
   const tfs = trend?.timeframes
   const trendTip = tfs ? TFS.map((tf) => `${tf} ${tfs[tf] === 'UP' ? '↑' : tfs[tf] === 'DOWN' ? '↓' : '–'}`).join('  ') : undefined
   return (
     <li className={`pt-wr ${active ? 'on' : ''}`} data-sym={sym}>
       <span className="pt-wr-id">
-        <span className="pt-wr-ava" style={{ background: meta.color + '38', color: meta.ink }} aria-hidden>{meta.letter.slice(0, 1)}</span>
+        <SymbolLogo symbol={sym} className="pt-wr-ava" />
         <button type="button" className="pt-wr-pick" aria-current={active ? 'true' : undefined} onClick={() => onSelect(sym)} title={name !== sym ? name : undefined}>
           {sym}
         </button>

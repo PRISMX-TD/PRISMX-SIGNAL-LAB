@@ -633,7 +633,7 @@
   .pt-wr:not(.on):hover { background: var(--pt-hover); }
 }
 .pt-wr-id { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pt-wr-ava { display: grid; place-items: center; flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; font: 700 11px/1 var(--pt-font); }
+.pt-wr-ava { display: block; flex-shrink: 0; width: 20px; height: 20px; }
 .pt-wr-pick {
   min-width: 0;
   overflow: hidden;
