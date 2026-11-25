@@ -1964,6 +1964,12 @@
           "weeks": "weeks",
           "months": "months"
         }
+      },
+      "wl": {
+        "symbol": "Symbol",
+        "trend": "Trend",
+        "last": "Last",
+        "other": "Other"
       }
     }
   },

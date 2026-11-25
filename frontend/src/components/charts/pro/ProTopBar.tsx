@@ -1,10 +1,10 @@
-// 专业版终端顶栏。桌面一行：导航 · 品种（点开命令面板搜品种）· 实时价 · 周期分段 · 更多周期 ·
-// 图表类型 · 指标 · 警报 ┊ 搜索 · 截图 · 设置 · 专注 · 全屏 · 经典/专业切换。
+// 专业版终端顶栏。桌面一行（TradingView 式扁平工具栏）：导航 ┊ 品种（点开命令面板搜品种）┊
+// 常用周期 · 更多周期 ┊ 图表类型 ┊ 指标 · 警报 ……… 搜索 ┊ 设置 · 截图 · 专注 · 全屏 ┊ 经典版。
 // 手机两行（iOS 导航栏）：第一行 导航 · 品种与价格 · 警报 · 更多；第二行周期分段可横滑 + 图表类型 + 指标。
 // 跳价只重渲染价格那一小块（ProPrice 自己订阅当前品种报价）。
-// Pro terminal top bar. Desktop, one row: nav · symbol (opens the command palette on
-// symbols) · live price · interval segments · more intervals · chart type · indicators ·
-// alerts ┊ search · screenshot · settings · focus · fullscreen · classic/pro switch.
+// Pro terminal top bar. Desktop, one row (a TradingView-style flat toolbar): nav ┊ symbol
+// (opens the command palette on symbols) ┊ favourite intervals · more ┊ chart type ┊
+// indicators · alerts ……… search ┊ settings · screenshot · focus · fullscreen ┊ classic.
 // Phone, two rows (iOS nav bar): nav · symbol & price · alerts · more; then a sideways-
 // scrolling interval control + chart type + indicators. A tick repaints only ProPrice.
 import { useMemo, useRef, useState } from 'react'
@@ -65,49 +65,58 @@ export default function ProTopBar(p: Props) {
     const codes = p.favIntervals.includes(p.interval) ? p.favIntervals : [...p.favIntervals, p.interval]
     return codes.map((c) => ({ value: c, label: intervalLabel(c) }))
   }, [p.favIntervals, p.interval])
-  const layoutOptions = useMemo(() => [
-    { value: 'classic' as const, label: tt('charts.pro.classic') },
-    { value: 'pro' as const, label: tt('charts.pro.pro') },
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- tt changes with the language only
-  ], [t])
-
   if (!p.desktop) return <MobileBar {...p} ivOptions={ivOptions} />
 
+  // 桌面：TradingView 式的扁平工具栏——每组之间一条竖线，按钮无底色、悬停才出底，
+  // 选中的周期用品牌紫实底。实时价不放顶栏（图上图例和右侧详情卡都有）。
+  // Desktop: a TradingView-style flat toolbar — a rule between groups, buttons without a
+  // fill until hovered, the selected interval filled violet. No live price up here (the
+  // chart legend and the detail card both show it).
   return (
     <header className="pt-top">
       <AppMenu onLayout={p.onLayout} onKeys={p.onKeys} />
-      <button type="button" className="pt-sym" onClick={p.onSymbol} title={tt('charts.pro.cmd.symbolTip')}>
-        <SymAvatar symbol={p.symbol} />
-        <span className="pt-sym-name">{p.symbol || EMPTY}</span>
-        <IcChevron size={13} />
-      </button>
-      <ProPrice symbol={p.symbol} digits={p.digits} dayStats={p.dayStats} fallback={p.fallbackPrice} down={p.quotesDown} />
       <span className="pt-sep" aria-hidden />
-      <ProSegmented value={p.interval} options={ivOptions} onChange={p.onInterval} ariaLabel={tt('charts.pro.interval')} size="sm" className="pt-iv" />
+      <button type="button" className="pt-sym" onClick={p.onSymbol} title={tt('charts.pro.cmd.symbolTip')}>
+        <IcSearch size={15} />
+        <span className="pt-sym-name">{p.symbol || EMPTY}</span>
+      </button>
+      <span className="pt-sep" aria-hidden />
+      <div className="pt-ivs no-sb" role="radiogroup" aria-label={tt('charts.pro.interval')}>
+        {ivOptions.map((o) => (
+          <button key={o.value} type="button" role="radio" aria-checked={o.value === p.interval} className={o.value === p.interval ? 'on' : undefined} onClick={() => p.onInterval(o.value)}>
+            {o.label}
+          </button>
+        ))}
+      </div>
       <IntervalMenu value={p.interval} onChange={p.onInterval} favorites={p.favIntervals} onFavorites={p.onFavIntervals} />
+      <span className="pt-sep" aria-hidden />
       <ChartTypeMenu value={p.chartType} onChange={p.onChartType} />
       <span className="pt-sep" aria-hidden />
       <button type="button" className="pt-btn" onClick={p.onIndicators}>
-        <IcFx size={15} /><span>{tt('charts.indicators.short')}</span>
+        <IcFx size={16} /><span>{tt('charts.indicators.short')}</span>
       </button>
       <button type="button" className="pt-btn" onClick={p.onAlerts} title={`${tt('charts.alert.manager')} (Alt+A)`}>
-        <IcBell size={15} /><span>{tt('charts.pro.alerts')}</span>
+        <IcBell size={16} /><span>{tt('charts.pro.alerts')}</span>
         {p.alertCount > 0 && <b className="pt-count">{p.alertCount}</b>}
       </button>
 
       <div className="pt-top-r">
-        <button type="button" className="pt-search" onClick={p.onCommand}>
+        <button type="button" className="pt-search" onClick={p.onCommand} title={`${tt('charts.pro.cmd.open')} (${isMac ? '⌘' : 'Ctrl'}+K)`}>
           <IcSearch size={14} />
           <span>{tt('charts.pro.cmd.open')}</span>
           <kbd>{isMac ? '⌘' : 'Ctrl'} K</kbd>
         </button>
-        <button type="button" className="pt-icon" onClick={p.onShot} title={`${tt('charts.shot.save')} (Ctrl+Alt+S)`} aria-label={tt('charts.shot.save')}><IcCamera /></button>
+        <span className="pt-sep" aria-hidden />
         <button type="button" className="pt-icon" onClick={p.onSettings} title={tt('charts.settings.title')} aria-label={tt('charts.settings.title')}><IcGear /></button>
+        <button type="button" className="pt-icon" onClick={p.onShot} title={`${tt('charts.shot.save')} (Ctrl+Alt+S)`} aria-label={tt('charts.shot.save')}><IcCamera /></button>
         <button type="button" className={`pt-icon ${p.focus ? 'on' : ''}`} onClick={p.onFocus} aria-pressed={p.focus} title={tt(p.focus ? 'charts.pro.focusOff' : 'charts.pro.focusOn')} aria-label={tt('charts.pro.focus')}><IcFocus /></button>
         <button type="button" className="pt-icon" onClick={p.onFullscreen} title={tt(p.fullscreen ? 'charts.fullscreen.exit' : 'charts.fullscreen.enter')} aria-label={tt(p.fullscreen ? 'charts.fullscreen.exit' : 'charts.fullscreen.enter')}>
           {p.fullscreen ? <IcCollapse /> : <IcExpand />}
         </button>
-        <ProSegmented value="pro" options={layoutOptions} onChange={p.onLayout} ariaLabel={tt('charts.pro.layout')} size="sm" className="pt-layout" />
+        <span className="pt-sep" aria-hidden />
+        <button type="button" className="pt-btn pt-classic" onClick={() => p.onLayout('classic')} title={tt('charts.pro.toClassic')}>
+          <IcClassic size={15} /><span>{tt('charts.pro.classic')}</span>
+        </button>
       </div>
     </header>
   )

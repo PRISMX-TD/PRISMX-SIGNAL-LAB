@@ -120,6 +120,7 @@ import '../styles/chart-pro.css'
 import { useProPrefs, type ProLayout } from '../components/charts/pro/proPrefs'
 import ProTopBar from '../components/charts/pro/ProTopBar'
 import ProWidgets, { ProAlerts, ProDetails } from '../components/charts/pro/ProWidgets'
+import ProWatchlist from '../components/charts/pro/ProWatchlist'
 import ProCommand, { type ProAction, type ProCommandMode } from '../components/charts/pro/ProCommand'
 import { ProDock, ProIsland, ProTabBar, type IslandEvent, type ProTab } from '../components/charts/pro/ProChrome'
 import { IcBell, IcCamera, IcClassic, IcDock, IcExpand, IcFocus, IcFx, IcGear, IcKeyboard, IcList, IcPlus, IcSpark, IcTrade, IcCalendar } from '../components/charts/pro/icons'
@@ -1567,7 +1568,7 @@ export default function ChartsPage() {
           onWidget={(w) => updatePro({ widget: w, focus: false })}
           width={proPrefs.panelW}
           onWidth={(px) => updatePro({ panelW: px })}
-          watch={<WatchlistPanel className="flex min-h-0 flex-1 flex-col" symbols={activeSymbols} active={symbol} onSelect={pickSymbolPro} digitsFor={digitsFor} quotesDown={wsDisconnected} />}
+          watch={<ProWatchlist symbols={activeSymbols} active={symbol} onSelect={pickSymbolPro} digitsFor={digitsFor} quotesDown={wsDisconnected} />}
           details={<ProDetails symbol={symbol} digits={decimals} dayStats={dayStats} fallback={lastPrice} stale={stale} down={wsDisconnected} />}
           trade={<>{ticket()}<AccountSummary account={activeAccount} /></>}
           alerts={(

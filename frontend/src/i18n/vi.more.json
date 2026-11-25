@@ -1964,6 +1964,12 @@
           "weeks": "tuần",
           "months": "tháng"
         }
+      },
+      "wl": {
+        "symbol": "Mã",
+        "trend": "Xu hướng",
+        "last": "Giá",
+        "other": "Khác"
       }
     }
   },
