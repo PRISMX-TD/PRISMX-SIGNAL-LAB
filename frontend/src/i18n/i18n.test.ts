@@ -197,11 +197,14 @@ describe('locale core + on-demand split', () => {
   })
 
   it('zh and en split the same way', () => {
+    // 每份只建一次集合（在 filter 回调里重建会变成平方级，键多了要跑近 10 秒）
+    // Build each set once; rebuilding it inside the filter callback is quadratic (~10 s with today's key count)
     const base = (o: Record<string, unknown>) => new Set(Object.keys(o).map(strip))
-    expect([...base(zc)].filter((k) => !base(ec).has(k))).toEqual([])
-    expect([...base(ec)].filter((k) => !base(zc).has(k))).toEqual([])
-    expect([...base(zm)].filter((k) => !base(em).has(k))).toEqual([])
-    expect([...base(em)].filter((k) => !base(zm).has(k))).toEqual([])
+    const [zcB, ecB, zmB, emB] = [base(zc), base(ec), base(zm), base(em)]
+    expect([...zcB].filter((k) => !ecB.has(k))).toEqual([])
+    expect([...ecB].filter((k) => !zcB.has(k))).toEqual([])
+    expect([...zmB].filter((k) => !emB.has(k))).toEqual([])
+    expect([...emB].filter((k) => !zmB.has(k))).toEqual([])
   })
 
   it('every key the entry / Layout / public pages can mention is in the core bundle', () => {
