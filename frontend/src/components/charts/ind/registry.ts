@@ -1,7 +1,7 @@
-// 指标注册表（阶段 4 第一批，43 种）：每种指标的输入、默认样式、参考线、填充与计算。
+// 指标注册表（阶段 4 第一批 43 种 + 第二批 44 种）：每种指标的输入、默认样式、参考线、填充与计算。
 // 引擎、图例、添加对话框、设置对话框都只认这一份；加指标 = 这里加一项 + 五种语言的名字与说明。
 // 数学在 ./math.ts（TradingView 的公式口径）；四个合作作者的自定义指标沿用 utils/indicators.ts。
-// Indicator registry (phase 4 batch 1, 43 kinds): inputs, default styles, reference lines,
+// Indicator registry (phase 4: 43 kinds in batch 1 + 44 in batch 2): inputs, default styles, reference lines,
 // fills and compute for each. The engine, legend, add dialog and settings dialog all read
 // only this; adding one = an entry here + its name and description in five languages.
 // Math lives in ./math.ts (TradingView formulas); the four partner indicators keep using
@@ -10,9 +10,14 @@ import type { Candle } from '../../../api/types'
 import { kdj as kdjLegacy, parabolicSar, superTrend, xmaBand, maCandle, shenlong, wallZones } from '../../../utils/indicators'
 import { brokerOffsetSec, parseInterval } from '../intervals'
 import {
-  ac, ao, aroon, atr, bollinger, cci, dmi, donchian, envelope, fractals, ichimoku, keltner, ma, macd, mfi, mom, obv,
+  ac, alma, ao, aroon, atr, bollinger, cci, dmi, donchian, envelope, fractals, ichimoku, keltner, ma, macd, mfi, mom, obv,
   pivots, roc, rsi, stdev, stoch, stochRsi, vwapAnchored, willr, zigzag, type MaType,
 } from './math'
+import {
+  accDist, adr, bbPercent, bbWidth, bop, bullBear, chaikinOsc, chandeKroll, chandelier, choppiness, chopZone, cmf, cmo,
+  connorsRsi, coppock, crosses, dpo, efi, eom, fisher, histVol, kama, klinger, kst, linregChannel, massIndex, mcginley,
+  netVolume, ppo, priceChannel, pvt, rvi, smi, trix, tsi, twap, ulcer, ultimate, volStop, volumeOsc, vortex, type StopOut,
+} from './math2'
 import type { FillDef, HlineDef, IndDef, IndExtras, IndMarker, IndOutput, Inputs, InputDef, PlotDef } from './types'
 
 const num = (inp: Inputs, k: string) => Number(inp[k])
@@ -86,6 +91,51 @@ function maDef(id: string, abbr: string, type: MaType, len: number, color: strin
 
 const UPC = 'up'
 const DNC = 'down'
+
+// 第二批用到的小工具 / helpers for batch 2
+const RIBBON = ['#f5c451', '#fbbf24', '#fb923c', '#f87171', '#f472b6', '#c084fc', '#818cf8', '#38bdf8']
+// Chop Zone 九档：强涨 → 强跌（TV 配色）/ nine bands from strong up to strong down (TV colours)
+const CHOP_ZONE = ['#26c6da', '#43a047', '#a5d6a7', '#009688', '#fdd835', '#ffb74d', '#ff6d00', '#e91e63', '#d50000']
+
+// 单线副图振荡器 / single-line sub-pane oscillator
+function osc(
+  id: string, abbr: string, inputs: InputDef[], key: string, color: string, digits: IndDef['digits'], hlines: HlineDef[],
+  f: (bars: Candle[], inp: Inputs, src: (k: string) => (number | null)[]) => (number | null)[], group: IndDef['group'] = 'momentum',
+): IndDef {
+  return {
+    id, abbr, group, overlay: false, inputs,
+    plots: [line(key, color, key)],
+    hlines: hlines.length ? hlines : undefined,
+    digits,
+    compute: ({ bars }, inp, src) => ({ [key]: f(bars, inp, src) }),
+  }
+}
+
+// 止损类：多 / 空两条线，翻转处画箭头 / stop indicators: long / short lines with arrows at flips
+function stopDef(id: string, abbr: string, inputs: InputDef[], f: (bars: Candle[], inp: Inputs) => StopOut): IndDef {
+  return {
+    id, abbr, group: 'trend', overlay: true, inputs,
+    plots: [line('long', '#2ee07e', 'longStop', { gaps: true, width: 2 }), line('short', '#ff4d67', 'shortStop', { gaps: true, width: 2 })],
+    digits: 'price',
+    compute: ({ bars }, inp) => {
+      const r = f(bars, inp)
+      const markers: IndMarker[] = r.flips.map((x) => (x.dir > 0
+        ? { i: x.i, shape: 'arrowUp', position: 'belowBar', color: '#2ee07e' }
+        : { i: x.i, shape: 'arrowDown', position: 'aboveBar', color: '#ff4d67' }))
+      return { long: r.long, short: r.short, __x: { markers } }
+    },
+  }
+}
+
+// 四色柱下标（同 MACD）/ 4-colour column index (as MACD)
+function histIdx(h: (number | null)[]): (number | null)[] {
+  return h.map((v, i) => {
+    if (v == null) return null
+    const p = i > 0 ? h[i - 1] : null
+    if (v >= 0) return p != null && p > v ? 1 : 0
+    return p != null && p < v ? 2 : 3
+  })
+}
 
 const DEFS: IndDef[] = [
   maDef('sma', 'MA', 'sma', 20, '#f5c451'),
@@ -492,6 +542,306 @@ const DEFS: IndDef[] = [
       const zones = wallZones(bars).map((w) => ({ i: w.start, top: w.top, bottom: w.bottom, color: w.kind === 'res' ? 'f:res' : 'f:sup' }))
       return { ma1: ma('sma', cl, num(inp, 'ma1')), ma2: ma('sma', cl, num(inp, 'ma2')), ma3: ma('sma', cl, num(inp, 'ma3')), __x: { zones } }
     },
+  },
+
+  // ══ 第二批（2026-11-25）/ batch 2 ══
+  // ── 均线 / moving averages ──
+  {
+    id: 'alma', abbr: 'ALMA', group: 'ma', overlay: true,
+    inputs: [LEN(9), SRC(), MULT(0.85, 'almaOff'), MULT(6, 'sigma'), OFFSET],
+    plots: [line('ma', '#2dd4bf', 'ma', { width: 2 })],
+    digits: 'price', offsetInput: 'offset',
+    title: (inp) => `${inp.len} ${inp.almaOff} ${inp.sigma}`,
+    compute: (_c, inp, src) => ({ ma: alma(src('src'), num(inp, 'len'), num(inp, 'almaOff'), num(inp, 'sigma')) }),
+  },
+  maDef('lsma', 'LSMA', 'lsma', 25, '#e879f9'),
+  {
+    id: 'kama', abbr: 'KAMA', group: 'ma', overlay: true,
+    inputs: [LEN(10), LEN(2, 'fast', 100), LEN(30, 'slow', 500), SRC(), OFFSET],
+    plots: [line('ma', '#fb923c', 'ma', { width: 2 })],
+    digits: 'price', offsetInput: 'offset',
+    compute: (_c, inp, src) => ({ ma: kama(src('src'), num(inp, 'len'), num(inp, 'fast'), num(inp, 'slow')) }),
+  },
+  {
+    id: 'mcginley', abbr: 'McGinley', group: 'ma', overlay: true,
+    inputs: [LEN(14), SRC(), OFFSET],
+    plots: [line('ma', '#60a5fa', 'ma', { width: 2 })],
+    digits: 'price', offsetInput: 'offset',
+    compute: (_c, inp, src) => ({ ma: mcginley(src('src'), num(inp, 'len')) }),
+  },
+  {
+    id: 'maribbon', abbr: 'Ribbon', group: 'ma', overlay: true,
+    inputs: [LEN(20, 'len', 500), LEN(5, 'gap', 100), MA_T('ema'), SRC()],
+    plots: RIBBON.map((c, i) => line(`m${i + 1}`, c, `ma${i + 1}`)),
+    digits: 'price',
+    title: (inp) => `${inp.len} +${inp.gap}`,
+    compute: ({ bars }, inp, src) => {
+      const s = src('src')
+      const v = bars.map((b) => b.v)
+      return Object.fromEntries(RIBBON.map((_, i) => [`m${i + 1}`, ma(str(inp, 'maType') as MaType, s, num(inp, 'len') + i * num(inp, 'gap'), v)]))
+    },
+  },
+  {
+    id: 'macross', abbr: 'MA Cross', group: 'ma', overlay: true,
+    inputs: [LEN(9, 'fast', 500), LEN(21, 'slow', 1000), MA_T('sma'), SRC()],
+    plots: [line('fast', '#2ee07e', 'fast'), line('slow', '#ff4d67', 'slow')],
+    digits: 'price',
+    title: (inp) => `${inp.fast} ${inp.slow}`,
+    compute: ({ bars }, inp, src) => {
+      const s = src('src')
+      const v = bars.map((b) => b.v)
+      const t = str(inp, 'maType') as MaType
+      const f = ma(t, s, num(inp, 'fast'), v)
+      const sl = ma(t, s, num(inp, 'slow'), v)
+      const markers: IndMarker[] = crosses(f, sl).map((x) => ({ i: x.i, shape: 'circle', position: 'atPriceMiddle', price: f[x.i] as number, color: x.dir > 0 ? '#2ee07e' : '#ff4d67' }))
+      return { fast: f, slow: sl, __x: { markers } }
+    },
+  },
+
+  // ── 趋势 / trend ──
+  {
+    id: 'linreg', abbr: 'LinReg', group: 'trend', overlay: true, noTf: true,
+    inputs: [LEN(100, 'len', 2000), SRC(), MULT(2, 'devMult')],
+    plots: [line('basis', '#f5a623', 'basis'), line('upper', '#2962ff', 'upper'), line('lower', '#2962ff', 'lower')],
+    fills: [fill('bg', 'upper', 'lower', '#2962ff', 8)],
+    digits: 'price',
+    title: (inp) => `${inp.len} ${inp.devMult}`,
+    compute: (_c, inp, src) => linregChannel(src('src'), num(inp, 'len'), num(inp, 'devMult')),
+  },
+  {
+    id: 'pricechannel', abbr: 'PC', group: 'trend', overlay: true,
+    inputs: [LEN(20), OFFSET],
+    plots: [line('upper', '#ff4d67', 'upper'), line('lower', '#2ee07e', 'lower'), line('mid', '#94a3b8', 'mid', { dash: 'dashed' })],
+    digits: 'price', offsetInput: 'offset',
+    compute: ({ bars }, inp) => priceChannel(bars, num(inp, 'len')),
+  },
+  {
+    id: 'vortex', abbr: 'VI', group: 'trend', overlay: false,
+    inputs: [LEN(14)],
+    plots: [line('plus', '#2962ff', 'viPlus'), line('minus', '#ff4d67', 'viMinus')],
+    hlines: [hl('one', 1, '1')],
+    digits: 4,
+    compute: ({ bars }, inp) => vortex(bars, num(inp, 'len')),
+  },
+  stopDef('chandelier', 'CE', [LEN(22), MULT(3)], (bars, inp) => chandelier(bars, num(inp, 'len'), num(inp, 'mult'))),
+  stopDef('volstop', 'VStop', [LEN(20), MULT(2)], (bars, inp) => volStop(bars, num(inp, 'len'), num(inp, 'mult'))),
+  {
+    id: 'ckstop', abbr: 'CKS', group: 'trend', overlay: true,
+    inputs: [LEN(10, 'atrLen', 500), MULT(1), LEN(9, 'stopLen', 500)],
+    plots: [line('long', '#2ee07e', 'longStop'), line('short', '#ff4d67', 'shortStop')],
+    digits: 'price',
+    title: (inp) => `${inp.atrLen} ${inp.mult} ${inp.stopLen}`,
+    compute: ({ bars }, inp) => chandeKroll(bars, num(inp, 'atrLen'), num(inp, 'mult'), num(inp, 'stopLen')),
+  },
+
+  // ── 动量 / momentum ──
+  {
+    id: 'ppo', abbr: 'PPO', group: 'momentum', overlay: false,
+    inputs: [LEN(12, 'fast', 500), LEN(26, 'slow', 500), SRC(), LEN(9, 'signal', 200)],
+    plots: [
+      { key: 'hist', kind: 'columns', color: '#26a69a', colors: ['#26a69a', '#b2dfdb', '#ffcdd2', '#ff5252'], label: 'hist' },
+      line('ppo', '#2962ff', 'ppo'), line('signal', '#ff6d00', 'signal'),
+    ],
+    hlines: [hl('zero', 0, '0')],
+    digits: 2,
+    title: (inp) => `${inp.fast} ${inp.slow} ${inp.signal}`,
+    compute: (_c, inp, src) => {
+      const r = ppo(src('src'), num(inp, 'fast'), num(inp, 'slow'), num(inp, 'signal'))
+      return { ...r, 'hist#c': histIdx(r.hist) }
+    },
+  },
+  osc('trix', 'TRIX', [LEN(18), SRC()], 'trix', '#e91e63', 4, [hl('zero', 0, '0')], (_b, inp, src) => trix(src('src'), num(inp, 'len'))),
+  {
+    id: 'uo', abbr: 'UO', group: 'momentum', overlay: false,
+    inputs: [LEN(7, 'len1', 200), LEN(14, 'len2', 200), LEN(28, 'len3', 500)],
+    plots: [line('uo', '#f44336', 'uo')],
+    hlines: [hl('ob', 70), hl('os', 30)],
+    digits: 2,
+    title: (inp) => `${inp.len1} ${inp.len2} ${inp.len3}`,
+    compute: ({ bars }, inp) => ({ uo: ultimate(bars, num(inp, 'len1'), num(inp, 'len2'), num(inp, 'len3')) }),
+  },
+  osc('cmo', 'CMO', [LEN(9), SRC()], 'cmo', '#2962ff', 2, [hl('ob', 50), hl('zero', 0, '0'), hl('os', -50)], (_b, inp, src) => cmo(src('src'), num(inp, 'len'))),
+  osc('dpo', 'DPO', [LEN(21), SRC()], 'dpo', '#43a047', 'price', [hl('zero', 0, '0')], (_b, inp, src) => dpo(src('src'), num(inp, 'len'))),
+  {
+    id: 'fisher', abbr: 'Fisher', group: 'momentum', overlay: false,
+    inputs: [LEN(9)],
+    plots: [line('fisher', '#2962ff', 'fisher'), line('trigger', '#ff6d00', 'trigger')],
+    hlines: [hl('ob', 1.5, '1.5'), hl('zero', 0, '0'), hl('os', -1.5, '-1.5')],
+    digits: 4,
+    compute: ({ bars }, inp) => fisher(bars, num(inp, 'len')),
+  },
+  {
+    id: 'crsi', abbr: 'CRSI', group: 'momentum', overlay: false,
+    inputs: [LEN(3, 'rsiLen', 100), LEN(2, 'udLen', 100), LEN(100, 'rocLen', 500), SRC()],
+    plots: [line('crsi', '#2962ff', 'crsi')],
+    hlines: [hl('ob', 70), hl('mid', 50, '50'), hl('os', 30)],
+    fills: [fill('band', 'h:ob', 'h:os', '#2196f3', 8)],
+    digits: 2,
+    title: (inp) => `${inp.rsiLen} ${inp.udLen} ${inp.rocLen}`,
+    compute: (_c, inp, src) => ({ crsi: connorsRsi(src('src'), num(inp, 'rsiLen'), num(inp, 'udLen'), num(inp, 'rocLen')) }),
+  },
+  {
+    id: 'rvi', abbr: 'RVGI', group: 'momentum', overlay: false,
+    inputs: [LEN(10)],
+    plots: [line('rvi', '#43a047', 'rvi'), line('signal', '#ff5252', 'signal')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 4,
+    compute: ({ bars }, inp) => rvi(bars, num(inp, 'len')),
+  },
+  {
+    id: 'smi', abbr: 'SMI', group: 'momentum', overlay: false,
+    inputs: [LEN(10, 'kLen', 500), LEN(3, 'dLen', 100), LEN(3, 'emaLen', 100)],
+    plots: [line('smi', '#2962ff', 'smi'), line('signal', '#ff6d00', 'signal')],
+    hlines: [hl('ob', 40), hl('zero', 0, '0'), hl('os', -40)],
+    fills: [fill('band', 'h:ob', 'h:os', '#2196f3', 8)],
+    digits: 2,
+    title: (inp) => `${inp.kLen} ${inp.dLen} ${inp.emaLen}`,
+    compute: ({ bars }, inp) => smi(bars, num(inp, 'kLen'), num(inp, 'dLen'), num(inp, 'emaLen')),
+  },
+  {
+    id: 'tsi', abbr: 'TSI', group: 'momentum', overlay: false,
+    inputs: [LEN(25, 'longLen', 500), LEN(13, 'shortLen', 500), LEN(13, 'signal', 200), SRC()],
+    plots: [line('tsi', '#2962ff', 'tsi'), line('signal', '#e91e63', 'signal')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 2,
+    title: (inp) => `${inp.longLen} ${inp.shortLen} ${inp.signal}`,
+    compute: (_c, inp, src) => tsi(src('src'), num(inp, 'longLen'), num(inp, 'shortLen'), num(inp, 'signal')),
+  },
+  {
+    id: 'coppock', abbr: 'Coppock', group: 'momentum', overlay: false,
+    inputs: [LEN(10, 'wmaLen', 500), LEN(14, 'longRoc', 500), LEN(11, 'shortRoc', 500), SRC()],
+    plots: [line('coppock', '#2962ff', 'coppock')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 2,
+    title: (inp) => `${inp.wmaLen} ${inp.longRoc} ${inp.shortRoc}`,
+    compute: (_c, inp, src) => ({ coppock: coppock(src('src'), num(inp, 'wmaLen'), num(inp, 'longRoc'), num(inp, 'shortRoc')) }),
+  },
+  {
+    id: 'kst', abbr: 'KST', group: 'momentum', overlay: false,
+    inputs: [LEN(10, 'roc1', 500), LEN(15, 'roc2', 500), LEN(20, 'roc3', 500), LEN(30, 'roc4', 500),
+      LEN(10, 'sma1', 500), LEN(10, 'sma2', 500), LEN(10, 'sma3', 500), LEN(15, 'sma4', 500), LEN(9, 'signal', 200), SRC()],
+    plots: [line('kst', '#43a047', 'kst'), line('signal', '#ff5252', 'signal')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 2,
+    title: (inp) => `${inp.roc1} ${inp.roc2} ${inp.roc3} ${inp.roc4}`,
+    compute: (_c, inp, src) => kst(src('src'), [1, 2, 3, 4].map((k) => num(inp, `roc${k}`)), [1, 2, 3, 4].map((k) => num(inp, `sma${k}`)), num(inp, 'signal')),
+  },
+  {
+    id: 'bbpower', abbr: 'BBP', group: 'momentum', overlay: false,
+    inputs: [LEN(13)],
+    plots: [{ key: 'bbp', kind: 'columns', color: '#26a69a', colors: ['#26a69a', '#b2dfdb', '#ffcdd2', '#ff5252'], label: 'bbpower' }],
+    digits: 'price',
+    compute: ({ bars }, inp) => { const v = bullBear(bars, num(inp, 'len')); return { bbp: v, 'bbp#c': histIdx(v) } },
+  },
+  osc('bop', 'BOP', [], 'bop', '#ff5252', 3, [hl('zero', 0, '0')], (bars) => bop(bars)),
+
+  // ── 波动 / volatility ──
+  {
+    id: 'bbpct', abbr: '%B', group: 'volatility', overlay: false,
+    inputs: [LEN(20), SRC(), MULT(2)],
+    plots: [line('pctb', '#26a69a', 'pctb')],
+    hlines: [hl('ob', 1, '1'), hl('mid', 0.5, '0.5'), hl('os', 0, '0')],
+    fills: [fill('band', 'h:ob', 'h:os', '#26a69a', 8)],
+    digits: 3,
+    title: (inp) => `${inp.len} ${inp.mult}`,
+    compute: (_c, inp, src) => ({ pctb: bbPercent(src('src'), num(inp, 'len'), num(inp, 'mult')) }),
+  },
+  {
+    id: 'bbw', abbr: 'BBW', group: 'volatility', overlay: false,
+    inputs: [LEN(20), SRC(), MULT(2)],
+    plots: [line('bbw', '#2962ff', 'bbw')],
+    digits: 3,
+    title: (inp) => `${inp.len} ${inp.mult}`,
+    compute: (_c, inp, src) => ({ bbw: bbWidth(src('src'), num(inp, 'len'), num(inp, 'mult')) }),
+  },
+  {
+    id: 'hv', abbr: 'HV', group: 'volatility', overlay: false,
+    inputs: [LEN(10), SRC()],
+    plots: [line('hv', '#2962ff', 'hv')],
+    digits: 2,
+    compute: ({ interval }, inp, src) => {
+      const p = parseInterval(interval)
+      return { hv: histVol(src('src'), num(inp, 'len'), !p || p.unit === 'min' || p.unit === 'D' ? 1 : 7) }
+    },
+  },
+  {
+    id: 'chop', abbr: 'CHOP', group: 'volatility', overlay: false,
+    inputs: [LEN(14)],
+    plots: [line('chop', '#2962ff', 'chop')],
+    hlines: [hl('ob', 61.8, '61.8'), hl('os', 38.2, '38.2')],
+    fills: [fill('band', 'h:ob', 'h:os', '#2196f3', 8)],
+    digits: 2,
+    compute: ({ bars }, inp) => ({ chop: choppiness(bars, num(inp, 'len')) }),
+  },
+  {
+    id: 'chopzone', abbr: 'Chop Zone', group: 'volatility', overlay: false,
+    inputs: [],
+    plots: [{ key: 'cz', kind: 'columns', color: '#fdd835', colors: CHOP_ZONE, label: 'chopzone', noLegend: true }],
+    digits: 0,
+    title: () => '',
+    compute: ({ bars }) => { const r = chopZone(bars); return { cz: r.v, 'cz#c': r.c } },
+  },
+  osc('mass', 'Mass', [LEN(10)], 'mass', '#2962ff', 3, [hl('bulge', 27, '27')], (bars, inp) => massIndex(bars, num(inp, 'len')), 'volatility'),
+  osc('ulcer', 'Ulcer', [LEN(14), SRC()], 'ulcer', '#2962ff', 3, [], (_b, inp, src) => ulcer(src('src'), num(inp, 'len')), 'volatility'),
+  osc('adr', 'ADR', [LEN(14)], 'adr', '#2962ff', 'price', [], (bars, inp) => adr(bars, num(inp, 'len')), 'volatility'),
+
+  // ── 成交量（tick 量）/ volume (tick volume) ──
+  osc('ad', 'A/D', [], 'ad', '#999915', 0, [], (bars) => accDist(bars), 'volume'),
+  osc('cmf', 'CMF', [LEN(20)], 'cmf', '#43a047', 3, [hl('zero', 0, '0')], (bars, inp) => cmf(bars, num(inp, 'len')), 'volume'),
+  {
+    id: 'chaikinosc', abbr: 'ChaikinOsc', group: 'volume', overlay: false,
+    inputs: [LEN(3, 'fast', 200), LEN(10, 'slow', 500)],
+    plots: [line('co', '#ec407a', 'chaikinosc')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 0,
+    title: (inp) => `${inp.fast} ${inp.slow}`,
+    compute: ({ bars }, inp) => ({ co: chaikinOsc(bars, num(inp, 'fast'), num(inp, 'slow')) }),
+  },
+  osc('efi', 'EFI', [LEN(13)], 'efi', '#f44336', 'volume', [hl('zero', 0, '0')], (bars, inp) => efi(bars, num(inp, 'len')), 'volume'),
+  {
+    id: 'eom', abbr: 'EOM', group: 'volume', overlay: false,
+    inputs: [LEN(14), { key: 'divisor', kind: 'int', def: 10000, min: 1, max: 1_000_000_000 }],
+    plots: [line('eom', '#43a047', 'eom')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 'volume',
+    title: (inp) => `${inp.len} ${inp.divisor}`,
+    compute: ({ bars }, inp) => ({ eom: eom(bars, num(inp, 'len'), num(inp, 'divisor')) }),
+  },
+  {
+    id: 'klinger', abbr: 'KVO', group: 'volume', overlay: false,
+    inputs: [LEN(34, 'fast', 500), LEN(55, 'slow', 500), LEN(13, 'signal', 200)],
+    plots: [line('kvo', '#2962ff', 'kvo'), line('signal', '#43a047', 'signal')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 'volume',
+    title: (inp) => `${inp.fast} ${inp.slow} ${inp.signal}`,
+    compute: ({ bars }, inp) => klinger(bars, num(inp, 'fast'), num(inp, 'slow'), num(inp, 'signal')),
+  },
+  osc('pvt', 'PVT', [], 'pvt', '#2962ff', 'volume', [], (bars) => pvt(bars), 'volume'),
+  {
+    id: 'netvol', abbr: 'Net Vol', group: 'volume', overlay: false,
+    inputs: [],
+    plots: [{ key: 'nv', kind: 'columns', color: UPC, colors: [UPC, DNC], label: 'netvol' }],
+    hlines: [hl('zero', 0, '0')],
+    digits: 'volume',
+    title: () => '',
+    compute: ({ bars }) => { const v = netVolume(bars); return { nv: v, 'nv#c': v.map((x) => (x == null ? null : x >= 0 ? 0 : 1)) } },
+  },
+  {
+    id: 'volosc', abbr: 'VolOsc', group: 'volume', overlay: false,
+    inputs: [LEN(5, 'shortLen', 500), LEN(10, 'longLen', 500)],
+    plots: [line('vo', '#2962ff', 'volosc')],
+    hlines: [hl('zero', 0, '0')],
+    digits: 2,
+    title: (inp) => `${inp.shortLen} ${inp.longLen}`,
+    compute: ({ bars }, inp) => ({ vo: volumeOsc(bars, num(inp, 'shortLen'), num(inp, 'longLen')) }),
+  },
+  {
+    id: 'twap', abbr: 'TWAP', group: 'volume', overlay: true, noTf: true,
+    inputs: [{ key: 'anchor', kind: 'select', def: 'session', options: ['session', 'week', 'month'] }],
+    plots: [line('twap', '#e879f9', 'twap', { width: 2 })],
+    digits: 'price',
+    title: (inp) => String(inp.anchor),
+    compute: ({ bars, interval }, inp) => ({ twap: twap(bars, periodKeyOf(str(inp, 'anchor') === 'session' ? 'day' : str(inp, 'anchor'), interval)) }),
   },
 ]
 
