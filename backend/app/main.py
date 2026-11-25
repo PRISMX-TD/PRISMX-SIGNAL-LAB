@@ -408,10 +408,20 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 # still carries the CORS headers.
 app.add_middleware(BodyLimitMiddleware)
 
+
+def cors_origin_regex(*patterns: str | None) -> str | None:
+    """把几条放行正则合成一条（任一匹配即放行）；全空则 None。
+    Merge several allow regexes into one (any match passes); None when all are empty."""
+    parts = [f"(?:{p})" for p in patterns if p]
+    return "|".join(parts) or None
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    allow_origin_regex=settings.CORS_ORIGIN_REGEX,
+    # .env 里的额外正则 + 本项目 Vercel 预览，两者任一匹配即放行（见 config）。
+    # The .env extra regex plus this project's Vercel previews; either match is allowed (see config).
+    allow_origin_regex=cors_origin_regex(settings.CORS_ORIGIN_REGEX, settings.CORS_PREVIEW_ORIGIN_REGEX),
     # 全站鉴权只有 Bearer 头，一个 cookie 都不用（连 WebSocket 也是先 HTTP 升级再
     # 在首帧传 token），所以 allow_credentials 对我们没有任何收益，只是白留一条
     # 「浏览器愿意带上凭证跨域」的通道。白名单里还有 https://localhost（安卓 App 的

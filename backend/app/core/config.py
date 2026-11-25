@@ -550,15 +550,18 @@ class Settings(BaseSettings):
     # Extra exact preview origins (e.g. a fixed Vercel deploy). Empty by default;
     # configure in .env as needed. We no longer allow all *.vercel.app via regex,
     # which would let anyone deploy a frontend and make credentialed cross-origin calls.
-    # 2026-11-25 起默认放行本项目自己的 Vercel 预览地址（分支部署，形如
-    # prismx-signal-xxxx-prism-xs-projects-40ae1c34.vercel.app），好让分支上的改动直接用真实账号登录测试。
-    # 只认本团队后缀，不是整片 *.vercel.app；而且 allow_credentials=False、鉴权只走 Bearer 头，
-    # 别的页面即便被放行也拿不到用户的 token。预览页本身还有 Vercel 登录保护。
-    # Since 2026-11-25 this project's own Vercel preview URLs (branch deploys) are allowed by default,
-    # so a branch can be tested with a real account. Only this team's suffix, not all *.vercel.app;
-    # with allow_credentials=False and Bearer-only auth an allowed page still never gets a user's
-    # token, and the previews sit behind Vercel Authentication.
-    CORS_ORIGIN_REGEX: str | None = r"^https://prismx-signal-[a-z0-9-]+-prism-xs-projects-40ae1c34\.vercel\.app$"
+    CORS_ORIGIN_REGEX: str | None = None
+    # 本项目自己的 Vercel 预览地址（分支部署，形如 prismx-signal-xxxx-prism-xs-projects-40ae1c34.vercel.app），
+    # 2026-11-25 起放行，好让分支上的改动直接用真实账号登录测试。与上面的 CORS_ORIGIN_REGEX 是两项、
+    # main.py 里合并：服务器 .env 里配了 CORS_ORIGIN_REGEX 也不会把它盖掉。只认本团队后缀，不是整片
+    # *.vercel.app；allow_credentials=False、鉴权只走 Bearer 头，被放行的页面也拿不到用户的 token；
+    # 预览页本身还有 Vercel 登录保护。设成空串即关闭。
+    # This project's own Vercel preview URLs (branch deploys), allowed since 2026-11-25 so a branch can
+    # be tested with a real account. Separate from CORS_ORIGIN_REGEX and merged with it in main.py, so a
+    # CORS_ORIGIN_REGEX in the server's .env can't override it. Only this team's suffix, not all
+    # *.vercel.app; with allow_credentials=False and Bearer-only auth an allowed page never gets a
+    # user's token, and previews sit behind Vercel Authentication. Set to "" to turn it off.
+    CORS_PREVIEW_ORIGIN_REGEX: str = r"^https://prismx-signal-[a-z0-9-]+-prism-xs-projects-40ae1c34\.vercel\.app$"
 
     # 信号引擎 / Signal engine
     SIGNAL_INTERVAL_SECONDS: int = 15  # 信号生成节拍 / signal tick interval
