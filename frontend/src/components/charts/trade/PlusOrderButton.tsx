@@ -28,11 +28,17 @@ export default function PlusOrderButton({ chart, series, digits, quote, onPick, 
   const [at, setAt] = useState<{ y: number; x: number; price: number } | null>(null)
   const [menu, setMenu] = useState<{ y: number; x: number; price: number } | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  // 鼠标移到「+」上就离开了图表画布，图表会报「十字线没了」；这时要是把「+」藏掉，鼠标又落回
+  // 画布、「+」又出现……来回闪。所以指在「+」上时不理会这类事件，移出「+」再交还给十字线。
+  // Moving onto the "+" leaves the chart canvas, so the chart reports "no crosshair"; hiding
+  // the "+" then drops the mouse back on the canvas, which shows it again — a flicker loop.
+  // While the pointer is on the "+" those events are ignored; leaving it hands back to the crosshair.
+  const overRef = useRef(false)
 
   useEffect(() => {
     const onMove = (p: MouseEventParams) => {
       if (menu) return
-      if (!p.point || p.paneIndex !== 0) { setAt(null); return }
+      if (!p.point || p.paneIndex !== 0) { if (!overRef.current) setAt(null); return }
       const price = series.coordinateToPrice(p.point.y) as number | null
       if (price == null || !(price > 0)) { setAt(null); return }
       const w = chart.paneSize(0).width
@@ -71,8 +77,12 @@ export default function PlusOrderButton({ chart, series, digits, quote, onPick, 
           style={{ top: at.y - 9, left: at.x }}
           title={tt('charts.trade.plusTip')}
           aria-label={tt('charts.trade.plusTip')}
+          onPointerEnter={() => { overRef.current = true }}
+          // 移回画布时下一次十字线事件会马上把它放回去；移到价格轴或图外就该消失
+          // Back on the canvas the next crosshair event re-places it at once; over the axis or off the chart it should go
+          onPointerLeave={() => { overRef.current = false; setAt(null) }}
           onPointerDown={(e) => e.stopPropagation()}
-          onClick={() => setMenu(at)}
+          onClick={() => { overRef.current = false; setMenu(at) }}
         >
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
         </button>
