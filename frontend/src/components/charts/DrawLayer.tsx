@@ -21,9 +21,10 @@ import { registerBarTimes, xToTime, timeToX } from './draw/coords'
 import {
   type Drawing, type DrawType, type Tool, type MagnetMode, type Point, type StyleProps, type DrawTemplate,
   TOOL_META, TOOL_HOTKEYS, COLORS, STYLE_KEYS, DEFAULT_EMOJI, isDrawType, sanitizeDrawings, finishPoints, uid, styleOf,
-  pointsNeeded, isScreenAnchored,
+  pointsNeeded, isScreenAnchored, isPointer, BARS_PATTERN_MAX,
 } from './draw/model'
-import { DrawingsPrimitive, type DrawScene } from './draw/primitive'
+import { DrawingsPrimitive, type DrawScene, barsBetweenTimes, LASER_MS } from './draw/primitive'
+import { pickImageFile, compressImage } from './draw/image'
 import { anchorsOf, constrain45, inMarquee, dragHandle, type DrawLabels } from './draw/tools'
 import DrawFloatingBar from './draw/DrawFloatingBar'
 import DrawSettingsDialog, { type SettingsTab } from './draw/DrawSettingsDialog'
@@ -74,7 +75,7 @@ const UNDO_MAX = 50
 const NUDGE_MERGE_MS = 700
 
 // 画完直接打开文字编辑的工具 / tools that open the text editor right after they're placed
-const OPENS_TEXT = new Set<DrawType>(['text', 'anchoredText', 'note', 'pin', 'comment', 'callout', 'signpost'])
+const OPENS_TEXT = new Set<DrawType>(['text', 'anchoredText', 'note', 'pin', 'comment', 'callout', 'signpost', 'table'])
 
 const isTouchDevice = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0)
 // 触摸、以及粗指针设备上的笔，都没有「悬停」，改走「点一下选中」（见 subscribeClick）。
@@ -134,12 +135,20 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const [settings, setSettings] = useState<{ id: string; tab: SettingsTab } | null>(null)
   const [treeOpen, setTreeOpen] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const noticeTimer = useRef<number | undefined>(undefined)
+  const flash = useCallback((msg: string) => {
+    window.clearTimeout(noticeTimer.current)
+    setNotice(msg)
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 3500)
+  }, [])
+  useEffect(() => () => window.clearTimeout(noticeTimer.current), [])
   useBackToClose(confirmOpen, () => setConfirmOpen(false))
 
   // 收藏 / 模板 / 每种工具的默认样式（chartv2 偏好）/ favourites, templates, per-tool defaults (chartv2 prefs)
   const favorites = useMemo(() => {
     const raw = getPref<unknown>(CHART_PREFS_NS, 'drawFav', [])
-    return Array.isArray(raw) ? (raw.filter((x) => x === 'cursor' || x === 'cross' || isDrawType(x)) as Tool[]) : []
+    return Array.isArray(raw) ? (raw.filter((x) => isPointer(x) || isDrawType(x)) as Tool[]) : []
   }, [getPref])
   const toggleFavorite = useCallback((tl: Tool) => {
     setPref(CHART_PREFS_NS, 'drawFav', favorites.includes(tl) ? favorites.filter((x) => x !== tl) : [...favorites, tl])
@@ -415,7 +424,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (p) { p.temp = null; p.requestUpdate() }
     toolRef.current = tl
     setToolState(tl)
-    if (tl !== 'cursor' && tl !== 'cross') select([])
+    if (!isPointer(tl)) select([])
     // 工具栏的颜色点跟着显示这种工具上次的颜色 / the rail's colour dots show this tool's last colour
     if (isDrawType(tl)) { const c = defaultsRef.current[tl]?.color; if (c) setColor(c) }
   }, [select])
@@ -534,20 +543,63 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const base: Drawing = { ...last, id: uid(), type, pts, color: last.color || colorRef.current }
     if (last.levels) base.levels = last.levels.map((lv) => ({ ...lv }))
     if (type === 'emoji') base.text = DEFAULT_EMOJI
+    else if (type === 'table') base.text = String(t('charts.draw.tableDefault'))
     else if (OPENS_TEXT.has(type)) base.text = String(t('charts.draw.textDefault'))
     return base
   }, [t])
-  const finishCreate = useCallback((d: Drawing) => {
+  // 选图 → 压缩；失败给提示 / pick → squeeze; a notice on failure
+  const chooseImage = useCallback(async (): Promise<{ url: string; w: number; h: number } | null> => {
+    const f = await pickImageFile()
+    if (!f) return null
+    try {
+      const r = await compressImage(f)
+      if (!r) flash(String(t('charts.draw.imageTooBig')))
+      return r
+    } catch {
+      flash(String(t('charts.draw.imageBad')))
+      return null
+    }
+  }, [flash, t])
+  // 图片放进去，框的高度按图片比例调 / put the image in and fit the box height to its aspect ratio
+  const placeImage = useCallback((id: string, img: { url: string; w: number; h: number }) => {
+    const list = drawingsRef.current
+    const d = list.find((q) => q.id === id)
+    if (!d) return
+    let pts = d.pts
+    const a = timeToX(chart, d.pts[0].t), b = timeToX(chart, d.pts[1].t)
+    const ya = series.priceToCoordinate(d.pts[0].p), yb = series.priceToCoordinate(d.pts[1].p)
+    if (a != null && b != null && ya != null && yb != null && img.w > 0) {
+      const hpx = Math.abs(b - a) * (img.h / img.w)
+      const p1 = series.coordinateToPrice(ya + (yb >= ya ? hpx : -hpx)) as number | null
+      if (p1 != null) pts = [d.pts[0], { t: d.pts[1].t, p: p1 }]
+    }
+    commit(list.map((q) => (q.id === id ? { ...q, img: img.url, pts } : q)))
+  }, [chart, series, commit])
+  const finishCreate = useCallback((d0: Drawing) => {
     createRef.current = null
     const p = primRef.current
     if (p) p.temp = null
+    let d = d0
+    // K 线形态复制：把框住的 K 线拷下来（相对第一根开盘价），副本先叠在原处，拖走即可
+    // Bars pattern: copy the spanned bars (relative to the first open); the copy starts on top of the source
+    if (d.type === 'barsPattern') {
+      const t0 = Math.min(d.pts[0].t, d.pts[1].t), t1 = Math.max(d.pts[0].t, d.pts[1].t)
+      let src = barsBetweenTimes(series, chart, t0, t1)
+      if (src.length > BARS_PATTERN_MAX) src = src.slice(-BARS_PATTERN_MAX)
+      if (src.length < 2) { p?.requestUpdate(); flash(String(t('charts.draw.barsTooFew'))); return }
+      const base = src[0].o
+      const r = (v: number) => Number((v - base).toPrecision(8))
+      d = { ...d, bars: src.map((b) => [r(b.o), r(b.h), r(b.l), r(b.c)]), pts: [{ t: src[0].t, p: base }, { t: src[0].t, p: base }] }
+    }
     const done: Drawing = { ...d, pts: finishPoints(d.type, d.pts) }
     commit([...drawingsRef.current, done])
     select([done.id])
     if (!stayRef.current) setToolState('cursor')
     // 文字类工具画完直接打开文字编辑 / text tools open the text editor straight away
     if (OPENS_TEXT.has(done.type)) setSettings({ id: done.id, tab: 'text' })
-  }, [commit, select])
+    // 图片：框画好马上弹选图（还在抬手这个手势里）/ image: the chooser opens right away, still inside the release gesture
+    if (done.type === 'image') void chooseImage().then((img) => { if (img) placeImage(done.id, img) })
+  }, [commit, select, series, chart, flash, t, chooseImage, placeImage])
   // 折线 / 路径：去掉跟着鼠标的那个浮动点再完成（至少两个点）
   // Polyline / path: drop the floating point that follows the mouse, then finish (two points at least)
   const finishPoly = useCallback((closed = false) => {
@@ -563,6 +615,18 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     gestureRef.current = null
     showTemp()
   }, [showTemp])
+
+  // 江恩正方（固定）：按屏幕像素锁成正方形，keep = 不动的那个点 / Gann square fixed: kept square on screen, keep = the fixed point
+  const squared = useCallback((pts: Point[], keep: 0 | 1): Point[] => {
+    const a = pxOf(pts[keep]), b = pxOf(pts[1 - keep])
+    if (![a.x, a.y, b.x, b.y].every(Number.isFinite)) return pts
+    const side = Math.max(Math.abs(b.x - a.x), Math.abs(b.y - a.y))
+    const q = toPoint(a.x + Math.sign(b.x - a.x || 1) * side, a.y + Math.sign(b.y - a.y || 1) * side)
+    if (!q) return pts
+    const out = pts.map((x) => ({ ...x }))
+    out[1 - keep] = q
+    return out
+  }, [pxOf, toPoint])
 
   // 把正在放的那个点移到 (x, y) / move the point being placed to (x, y)
   const updateCreate = useCallback((x0: number, y0: number, shift: boolean) => {
@@ -590,8 +654,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       // 后面还没放的点先跟着当前点（通道先是一条线）/ points not placed yet follow this one (a channel starts flat)
       for (let k = c.step + 1; k < d.pts.length; k++) d.pts[k] = parallel ? { ...d.pts[0] } : { ...pt }
     }
+    if (d.type === 'gannSquareFixed' && c.step === 1) d.pts = squared(d.pts, 0)
     showTemp()
-  }, [snap, pxOf, series, toPoint, showTemp])
+  }, [snap, pxOf, series, toPoint, showTemp, squared])
 
   // 主图区高度（副图区不能画）/ main pane height (sub-panes can't be drawn on yet)
   const inMainPane = (y: number) => y <= chart.paneSize(0).height
@@ -608,7 +673,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     e.currentTarget.setPointerCapture?.(e.pointerId)
     setCtxMenu(null)
 
-    if (cur !== 'cursor' && cur !== 'cross') {
+    if (!isPointer(cur)) {
       if (!inMainPane(y)) return
       const type = cur as DrawType
       const meta = TOOL_META[type]
@@ -791,9 +856,10 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     }
     const pt = toPoint(s.x, s.y)
     if (!pt) return
-    const pts = dragHandle(d, g.handle, pt, g.orig)
+    let pts = dragHandle(d, g.handle, pt, g.orig)
+    if (d.type === 'gannSquareFixed') pts = squared(pts, g.handle === 0 ? 1 : 0)
     paint(list.map((q) => (q.id === g.id ? { ...q, pts } : q)))
-  }, [updateCreate, pxOf, toPoint, showTemp, commit, select, paint, shiftPts, snap, syncCrosshair])
+  }, [updateCreate, pxOf, toPoint, showTemp, commit, select, paint, shiftPts, snap, syncCrosshair, squared])
 
   const onUp = useCallback((e: RPointerEvent<HTMLDivElement>) => {
     const g = gestureRef.current
@@ -826,6 +892,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
             // 至少 120px，K 线很密（手机）时手柄和时间标签不会挤在一起
             // At least 120px so handles and time labels don't pile up when bars are dense (phones)
             const end = toPoint(a.x + Math.max(bs * 20, 120), a.y)
+            if (end) { d.pts[1] = end; finishCreate(d) } else cancelCreate()
+            return
+          }
+          // 图片：点一下放一个默认大小的框 / image: a click drops a default-sized box
+          if (d.type === 'image') {
+            const end = toPoint(a.x + 180, a.y + 120)
             if (end) { d.pts[1] = end; finishCreate(d) } else cancelCreate()
             return
           }
@@ -889,7 +961,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   // ──── 触屏：点一下选中 / touch: tap to select ────
   useEffect(() => {
     const onClick = (p: MouseEventParams) => {
-      if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
+      if (!isPointer(toolRef.current)) return
       if (!p.hoveredObjectId && !p.point) { select([]); return }
       if (!lastTouchRef.current || p.paneIndex !== 0) return
       const el = overlayRef.current
@@ -927,7 +999,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       sx = e.touches[0].clientX; sy = e.touches[0].clientY
       timer = setTimeout(() => {
         timer = null
-        if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
+        if (!isPointer(toolRef.current)) return
         const r = el.getBoundingClientRect()
         const hit = primRef.current?.hitAt(sx - r.left, sy - r.top)
         if (hit) { gestureRef.current = null; setDragging(false); select([hit.d.id]); setCtxMenu({ x: sx, y: sy }) }
@@ -1030,7 +1102,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       const p = last
       if (!p) return
       if (gestureRef.current) { el.style.pointerEvents = 'auto'; return }
-      if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') { el.style.pointerEvents = 'auto'; setCursorStyle('crosshair'); return }
+      if (!isPointer(toolRef.current)) { el.style.pointerEvents = 'auto'; setCursorStyle('crosshair'); return }
       const r = el.getBoundingClientRect()
       const x = p.x - r.left, y = p.y - r.top
       if (x < 0 || y < 0 || x > r.width || y > r.height) { el.style.pointerEvents = 'none'; setCursorStyle(''); setHover(null); return }
@@ -1050,7 +1122,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       }
     }
     const onHover = (e: PointerEvent) => {
-      if (gestureRef.current || (toolRef.current !== 'cursor' && toolRef.current !== 'cross')) {
+      if (toolRef.current === 'presenter' && !isTouchLike(e.pointerType)) pushLaser(e.clientX, e.clientY)
+      if (gestureRef.current || (!isPointer(toolRef.current))) {
         el.style.pointerEvents = 'auto'
         if (!gestureRef.current) setCursorStyle('crosshair')
         return
@@ -1073,6 +1146,28 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       under.dispatchEvent(new WheelEvent('wheel', e))
     }
     const onLeave = () => { if (!gestureRef.current && isChartAlive(chart)) chart.clearCrosshairPosition() }
+    // 演示光标：记下轨迹，动画帧里一直重画到轨迹淡完 / presenter: record the trail, repaint each frame until it fades
+    let laserFrame = 0
+    const tickLaser = () => {
+      laserFrame = 0
+      const p = primRef.current
+      if (!p) return
+      const now = performance.now()
+      p.laser = p.laser.filter((q, i, arr) => now - q.at < LASER_MS || i === arr.length - 1)
+      if (p.laser.length && now - p.laser[p.laser.length - 1].at > LASER_MS * 4) p.laser = []
+      p.requestUpdate()
+      if (p.laser.length) laserFrame = window.requestAnimationFrame(tickLaser)
+    }
+    const pushLaser = (cx: number, cy: number) => {
+      const p = primRef.current
+      if (!p) return
+      const r = el.getBoundingClientRect()
+      const x = cx - r.left, y = cy - r.top
+      if (x < 0 || y < 0 || x > r.width || y > chart.paneSize(0).height) return
+      p.laser.push({ x, y, at: performance.now() })
+      if (p.laser.length > 80) p.laser.shift()
+      if (!laserFrame) laserFrame = window.requestAnimationFrame(tickLaser)
+    }
     const onCtrl = (e: KeyboardEvent) => {
       if (e.key !== 'Control' && e.key !== 'Meta') return
       if (!last) return
@@ -1082,7 +1177,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const onPress = (e: PointerEvent) => { lastTouchRef.current = isTouchLike(e.pointerType) }
     const onRelease = (e: PointerEvent) => {
       if (!isTouchLike(e.pointerType) || gestureRef.current || touchSelRef.current) return
-      if (toolRef.current !== 'cursor' && toolRef.current !== 'cross') return
+      if (!isPointer(toolRef.current)) return
       el.style.pointerEvents = 'none'
     }
     window.addEventListener('pointermove', onHover, true)
@@ -1103,12 +1198,28 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       window.removeEventListener('keydown', onCtrl)
       window.removeEventListener('keyup', onCtrl)
       if (frame !== 0) window.cancelAnimationFrame(frame)
+      if (laserFrame) window.cancelAnimationFrame(laserFrame)
     }
   }, [chart])
 
+  // 演示光标：藏起系统光标和十字线，离开时还原 / presenter: hide the system cursor and the crosshair, restored on leave
+  useEffect(() => {
+    if (tool !== 'presenter' || !isChartAlive(chart)) return
+    const ch = chart.options().crosshair
+    const prev = { v: ch.vertLine.visible, h: ch.horzLine.visible, vl: ch.vertLine.labelVisible, hl: ch.horzLine.labelVisible }
+    chart.applyOptions({ crosshair: { vertLine: { visible: false, labelVisible: false }, horzLine: { visible: false, labelVisible: false } } })
+    host.classList.add('chart-presenter')
+    return () => {
+      host.classList.remove('chart-presenter')
+      const p = primRef.current
+      if (p) { p.laser = []; p.requestUpdate() }
+      if (isChartAlive(chart)) chart.applyOptions({ crosshair: { vertLine: { visible: prev.v, labelVisible: prev.vl }, horzLine: { visible: prev.h, labelVisible: prev.hl } } })
+    }
+  }, [tool, chart, host])
+
   useEffect(() => {
     const el = overlayRef.current; if (!el) return
-    if (tool !== 'cursor' && tool !== 'cross') { el.style.pointerEvents = 'auto'; setCursorStyle('crosshair') }
+    if (!isPointer(tool)) { el.style.pointerEvents = 'auto'; setCursorStyle('crosshair') }
     else { el.style.pointerEvents = 'none'; setCursorStyle('') }
   }, [tool])
 
@@ -1117,7 +1228,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     if (sel.length) return
     touchSelRef.current = false
     const el = overlayRef.current
-    if (el && !gestureRef.current && (toolRef.current === 'cursor' || toolRef.current === 'cross')) el.style.pointerEvents = 'none'
+    if (el && !gestureRef.current && (isPointer(toolRef.current))) el.style.pointerEvents = 'none'
   }, [sel])
 
   // ──── 设置弹窗：实时预览，确定才提交 / settings dialog: live preview, committed on OK ────
@@ -1158,13 +1269,13 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       <div
         ref={overlayRef}
         className="pointer-events-none absolute inset-1.5 z-10 touch-none"
-        style={{ display: visible ? '' : 'none', cursor: cursorStyle || (tool !== 'cursor' && tool !== 'cross' ? 'crosshair' : 'default') }}
+        style={{ display: visible ? '' : 'none', cursor: cursorStyle || (!isPointer(tool) ? 'crosshair' : 'default') }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}
         onContextMenu={(e) => {
           e.preventDefault()
           // 画到一半右键 = 取消这一笔 / a right-click mid-stroke cancels it
           if (createRef.current) { cancelCreate(); return }
-          if (tool !== 'cursor' && tool !== 'cross') return
+          if (!isPointer(tool)) return
           const { x, y } = localXY(e)
           const hit = primRef.current?.hitAt(x, y)
           if (hit) {
@@ -1245,9 +1356,12 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
           onCancel={cancelSettings}
           onSaveTemplate={(name, d) => saveTemplate(d.type, name, styleOf(d))}
           onDeleteTemplate={(name) => deleteTemplate(settingsDrawing.type, name)}
+          onPickImage={chooseImage}
           t={t}
         />
       )}
+
+      {notice && <div className="draw-notice" role="status">{notice}</div>}
 
       {confirmOpen && (
         <ConfirmModal title={t('charts.draw.clear')} message={t('charts.draw.clearConfirm', { symbol })} confirmLabel={t('charts.draw.clear')} danger center

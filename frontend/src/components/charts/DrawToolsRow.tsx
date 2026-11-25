@@ -95,6 +95,19 @@ export function DrawToolIcon({ tool }: { tool: Tool }) {
     case 'comment': return <svg {...S}><path d="M4 5h16v11H11l-5 4v-4H4z" /></svg>
     case 'signpost': return <svg {...S}><rect x="5" y="3" width="14" height="7" rx="1.5" /><path d="M12 10v11" /></svg>
     case 'flag': return <svg {...S}><path d="M6 21V4" /><path d="M6 4c4-2 7 2 12 0v8c-5 2-8-2-12 0" fill="currentColor" fillOpacity="0.25" /></svg>
+    // 第三批 / batch 3
+    case 'presenter': return <svg {...S}><path d="M4 20l7-7" opacity="0.5" /><circle cx="15" cy="9" r="3.5" fill="currentColor" fillOpacity="0.3" /><path d="M15 2.5v2M15 13.5v2M8.5 9h2M19.5 9h2" /></svg>
+    case 'fibSpiral': return <svg {...S}><path d="M12 12a2 2 0 012 2 3.2 3.2 0 01-3.2 3.2A5.2 5.2 0 015.6 12 8.4 8.4 0 0114 3.6 13 13 0 0121 9" /></svg>
+    case 'fibWedge': return <svg {...S}><path d="M4 20L20 8M4 20l14 1" /><path d="M10 15.5a7 7 0 01.6 5M14 12.5a11 11 0 011 8.5" /></svg>
+    case 'gannSquareFixed': return <svg {...S}><rect x="3" y="3" width="18" height="18" rx="1" /><path d="M3 21L21 3M3 21L21 12M3 21L12 3" opacity="0.7" /><path d="M3 12a9 9 0 019 9" /></svg>
+    case 'gannSquare': return <svg {...S}><rect x="3" y="5" width="18" height="14" rx="1" /><path d="M3 19L21 5M3 19L21 12M3 12h18M12 5v14" opacity="0.6" /></svg>
+    case 'barsPattern': return <svg {...S}><path d="M5 6v10M9 4v12M13 8v8" opacity="0.5" /><rect x="15" y="10" width="2.5" height="6" fill="currentColor" fillOpacity="0.3" /><rect x="19" y="8" width="2.5" height="7" fill="currentColor" fillOpacity="0.3" /><path d="M16.25 8v10M20.25 6v11" /></svg>
+    case 'ghostFeed': return <svg {...S}><path d="M3 18l6-8 5 5 7-9" strokeDasharray="2 2" opacity="0.6" /><rect x="5" y="11" width="2.5" height="5" /><rect x="11" y="10" width="2.5" height="4" /><rect x="17" y="6" width="2.5" height="5" /></svg>
+    case 'anchoredVwap': return <svg {...S}><path d="M5 4v16" strokeDasharray="2 2" /><path d="M5 14c4-1 6-6 9-6s4 3 7 2" /><circle cx="5" cy="14" r="1.6" fill="currentColor" /></svg>
+    case 'fixedRangeVP': return <svg {...S}><path d="M3 3v18M21 3v18" opacity="0.5" /><path d="M5 6h6M5 9h10M5 12h13M5 15h8M5 18h4" /></svg>
+    case 'anchoredVP': return <svg {...S}><path d="M5 3v18" /><circle cx="5" cy="12" r="1.6" fill="currentColor" /><path d="M7 6h6M7 9h10M7 12h13M7 15h8M7 18h4" /></svg>
+    case 'table': return <svg {...S}><rect x="3" y="5" width="18" height="14" rx="1.5" /><path d="M3 10h18M3 14.5h18M10 5v14" /></svg>
+    case 'image': return <svg {...S}><rect x="3" y="5" width="18" height="14" rx="1.5" /><circle cx="8.5" cy="10" r="1.5" /><path d="M21 16l-5-5-8 8" /></svg>
     case 'emoji': return <svg {...S}><circle cx="12" cy="12" r="9" /><path d="M8 14c1 2 2.5 3 4 3s3-1 4-3" /><path d="M9 9.5h.01M15 9.5h.01" strokeWidth="2.6" /></svg>
   }
 }

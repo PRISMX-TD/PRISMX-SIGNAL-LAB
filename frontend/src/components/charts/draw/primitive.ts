@@ -13,6 +13,7 @@ import type {
 import type { MainSeriesApi } from '../useChartEngine'
 import { type Drawing, visibleOn, isScreenAnchored } from './model'
 import { timeToX, barsBetween } from './coords'
+import type { Bar } from './paint'
 import {
   type DrawEnv, type DrawLabels, type Px, anchorsOf, anchorsValid, renderDrawing, handlesOf, hitDrawing,
   handleROf, tolOf,
@@ -103,9 +104,9 @@ export class DrawingsPrimitive {
         else if (d.type === 'vline') addT(d.pts[0].t, d.color)
         else if (d.type === 'crossline') { addP(d.pts[0].p, d.color); addT(d.pts[0].t, d.color) }
         else if (sel(d) && d.type !== 'brush' && d.type !== 'highlighter' && !isScreenAnchored(d.type)) {
-          const seenT = new Set<number>()
+          const seenT = new Set<number>(), seenP = new Set<number>()
           for (const pt of d.pts) {
-            addP(pt.p, d.color)
+            if (!seenP.has(pt.p)) { seenP.add(pt.p); addP(pt.p, d.color) }
             if (!seenT.has(pt.t)) { seenT.add(pt.t); addT(pt.t, d.color) }
           }
         }
@@ -155,8 +156,15 @@ export class DrawingsPrimitive {
         }
         return out
       },
+      ohlc: (t0, t1) => barsBetweenTimes(s, chart, t0, t1),
+      spacing: c.timeScale().options().barSpacing,
+      redraw: () => this.requestUpdate(),
     }
   }
+
+  // 演示光标的轨迹（屏幕坐标 + 时间戳），由 DrawLayer 推进来，画成渐隐的激光笔
+  // Presenter trail (screen coords + timestamps) pushed by DrawLayer, painted as a fading laser pointer
+  laser: { x: number; y: number; at: number }[] = []
 
   // 命中：自上而下（后画的在上面），先看手柄再看线身；锁定的也命中（可选中，不可拖）。
   // Hit test top-down (later = on top), handles before bodies; locked ones hit too (select, no drag).
@@ -227,6 +235,7 @@ export class DrawingsPrimitive {
       drawOne(d, this.selected.has(d.id) || (this.hover === d.id && !env.touch))
     }
     if (this.temp) drawOne(this.temp, true)
+    if (this.laser.length) paintLaser(ctx, this.laser)
     if (this.marquee) {
       const m = this.marquee
       ctx.save()
@@ -254,6 +263,48 @@ function paintHandles(ctx: CanvasRenderingContext2D, hs: Px[], d: Drawing, r: nu
     ctx.strokeStyle = d.locked ? '#94a3b8' : d.color
     ctx.fill()
     ctx.stroke()
+  }
+  ctx.restore()
+}
+
+// 主图数据里 [t0, t1] 之间的 K 线（含 tick 量）/ main-series bars in [t0, t1], tick volume included
+export function barsBetweenTimes(s: MainSeriesApi, chart: IChartApi, t0: number, t1: number): Bar[] {
+  const out: Bar[] = []
+  const data = s.data() as readonly { time: unknown; open?: number; high?: number; low?: number; close?: number; value?: number; volume?: number }[]
+  for (const b of data) {
+    const tt = typeof b.time === 'number' ? b.time : null
+    if (tt == null || tt < t0) continue
+    if (tt > t1) break
+    const c = b.close ?? b.value
+    if (c == null) continue
+    const x = timeToX(chart, tt)
+    out.push({ x: x ?? NaN, t: tt, o: b.open ?? c, h: b.high ?? c, l: b.low ?? c, c, v: b.volume ?? 0 })
+  }
+  return out
+}
+
+// 激光笔：越新的点越亮越粗，头上一个发光的红点 / laser pointer: newer points brighter and thicker, a glowing dot at the head
+export const LASER_MS = 700
+function paintLaser(ctx: CanvasRenderingContext2D, pts: { x: number; y: number; at: number }[]) {
+  const now = performance.now()
+  ctx.save()
+  ctx.lineCap = 'round'
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i]
+    const life = 1 - (now - b.at) / LASER_MS
+    if (life <= 0) continue
+    ctx.strokeStyle = `rgba(255, 64, 64, ${0.55 * life})`
+    ctx.lineWidth = 1.5 + 4 * life
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke()
+  }
+  const head = pts[pts.length - 1]
+  if (now - head.at < LASER_MS * 4) {
+    const g = ctx.createRadialGradient(head.x, head.y, 0, head.x, head.y, 14)
+    g.addColorStop(0, 'rgba(255, 90, 90, 0.95)')
+    g.addColorStop(0.35, 'rgba(255, 40, 40, 0.55)')
+    g.addColorStop(1, 'rgba(255, 40, 40, 0)')
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.arc(head.x, head.y, 14, 0, Math.PI * 2); ctx.fill()
   }
   ctx.restore()
 }

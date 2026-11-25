@@ -2516,3 +2516,8 @@
 .draw-emoji-grid > button:hover { background: var(--line-hi); }
 .draw-emoji-grid > button.on { background: rgb(var(--purple-rgb) / 0.28); box-shadow: inset 0 0 0 1px var(--purple); }
 .draw-emoji-grid > :not(button) { grid-column: 1 / -1; margin-top: 6px; }
+
+/* 演示光标：藏起系统光标 / presentation cursor hides the system cursor */
+.chart-presenter, .chart-presenter * { cursor: none !important; }
+/* 画线层的轻提示（图片太大等）/ drawing-layer notice (image too large, ...) */
+.draw-notice { position: absolute; left: 50%; bottom: 56px; z-index: var(--z-menu); max-width: calc(100% - 32px); padding: 8px 14px; border-radius: var(--r-tile); background: var(--surface-float); box-shadow: var(--shadow-float), inset 0 0 0 1px var(--line-hi); color: var(--text); font-size: 12px; transform: translateX(-50%); animation: term-fade var(--dur-fast) var(--ease-out) backwards; pointer-events: none; }

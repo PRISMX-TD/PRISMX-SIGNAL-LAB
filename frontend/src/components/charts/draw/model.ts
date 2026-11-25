@@ -24,8 +24,15 @@ export type DrawType =
   | 'highlighter' | 'arrowMarker' | 'arrowUp' | 'arrowDown'
   | 'rotatedRect' | 'path' | 'circle' | 'ellipse' | 'polyline' | 'triangle' | 'arc' | 'curve' | 'doubleCurve' | 'sector'
   | 'anchoredText' | 'note' | 'priceNote' | 'pin' | 'callout' | 'comment' | 'signpost' | 'flag' | 'emoji'
+  // 第三批（2026-11-25）/ batch 3
+  | 'fibSpiral' | 'fibWedge' | 'gannSquare' | 'gannSquareFixed'
+  | 'barsPattern' | 'ghostFeed' | 'anchoredVwap' | 'fixedRangeVP' | 'anchoredVP'
+  | 'table' | 'image'
 
-export type Tool = 'cursor' | 'cross' | DrawType
+// presenter = 演示光标（不是画线，鼠标后面拖一道激光笔的光）/ presenter = a laser-pointer cursor, not a drawing
+export type Tool = 'cursor' | 'cross' | 'presenter' | DrawType
+// 指针类工具（不画线，按光标模式处理点击 / 悬停）/ pointer tools (no drawing; clicks and hover act as the cursor)
+export const isPointer = (t: Tool): t is 'cursor' | 'cross' | 'presenter' => t === 'cursor' || t === 'cross' || t === 'presenter'
 export type LineStyle = 'solid' | 'dashed' | 'dotted'
 export type MagnetMode = 'off' | 'weak' | 'strong'
 
@@ -61,6 +68,18 @@ export interface Drawing {
   risk?: number
   // 折线：最后一点接回第一点（闭合后可填充）/ polyline closed back to its first point (fillable then)
   closed?: boolean
+  // 成交量分布的价格行数 / volume profile price rows
+  rows?: number
+  // 锚定 VWAP 画 ±1σ / ±2σ 带 / anchored VWAP draws the ±1σ / ±2σ bands
+  bands?: boolean
+  // K 线形态复制：上下翻转 / 左右镜像；bars = 复制下来的 [开, 高, 低, 收]（相对第一根开盘价）
+  // Bars pattern: flipped upside down / mirrored left-right; bars = copied [o, h, l, c] relative to the first open
+  flip?: boolean
+  mirror?: boolean
+  bars?: number[][]
+  // 图片（data URL，压缩到几十 KB）与不透明度 / image (a data URL squeezed to tens of KB) and opacity
+  img?: string
+  alpha?: number
   vis?: Vis
 }
 
@@ -149,6 +168,17 @@ export const TOOL_META: Record<DrawType, ToolMeta> = {
   signpost: { create: 'click', textual: true },
   flag: { create: 'click' },
   emoji: { create: 'click', textual: true },
+  fibSpiral: { create: 'drag' },
+  fibWedge: M(3, true),
+  gannSquare: { create: 'drag', fillable: true },
+  gannSquareFixed: { create: 'drag', fillable: true },
+  barsPattern: { create: 'drag' },
+  ghostFeed: { create: 'poly' },
+  anchoredVwap: { create: 'click' },
+  fixedRangeVP: { create: 'drag' },
+  anchoredVP: { create: 'click' },
+  table: { create: 'click', textual: true },
+  image: { create: 'drag' },
 }
 
 // 这种工具需要几个点（free / poly 至少 2 个）/ how many points a tool needs (free / poly: at least 2)
@@ -172,7 +202,7 @@ export const isDrawType = (s: unknown): s is DrawType => typeof s === 'string' &
 // sub-heading starts inside the flyout.
 export interface ToolGroup { id: string; tools: Tool[]; secs?: Partial<Record<Tool, string>> }
 export const TOOL_GROUPS: ToolGroup[] = [
-  { id: 'cursors', tools: ['cursor', 'cross'] },
+  { id: 'cursors', tools: ['cursor', 'cross', 'presenter'] },
   { id: 'lines', tools: ['trend', 'ray', 'info', 'extended', 'angle', 'hline', 'hray', 'vline', 'crossline'] },
   {
     id: 'channels',
@@ -181,7 +211,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
   },
   {
     id: 'fibs',
-    tools: ['fib', 'fibExt', 'fibChannel', 'fibTimeZone', 'fibFan', 'fibTime', 'fibCircles', 'fibArcs', 'gannFan', 'gannBox'],
+    tools: ['fib', 'fibExt', 'fibChannel', 'fibTimeZone', 'fibFan', 'fibTime', 'fibCircles', 'fibArcs', 'fibSpiral', 'fibWedge', 'gannFan', 'gannBox', 'gannSquareFixed', 'gannSquare'],
     secs: { fib: 'fib', gannFan: 'gann' },
   },
   {
@@ -189,7 +219,11 @@ export const TOOL_GROUPS: ToolGroup[] = [
     tools: ['xabcd', 'cypher', 'abcd', 'headShoulders', 'trianglePattern', 'threeDrives', 'elliottImpulse', 'elliottCorrection', 'elliottTriangle', 'elliottDouble', 'elliottTriple', 'cyclicLines', 'timeCycles', 'sineLine'],
     secs: { xabcd: 'patterns', elliottImpulse: 'elliott', cyclicLines: 'cycles' },
   },
-  { id: 'projection', tools: ['long', 'short', 'forecast'] },
+  {
+    id: 'projection',
+    tools: ['long', 'short', 'forecast', 'barsPattern', 'ghostFeed', 'anchoredVwap', 'fixedRangeVP', 'anchoredVP'],
+    secs: { long: 'projection', anchoredVwap: 'volume' },
+  },
   { id: 'measurers', tools: ['priceRange', 'dateRange', 'datePriceRange'] },
   {
     id: 'shapes',
@@ -198,7 +232,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
   },
   {
     id: 'texts',
-    tools: ['text', 'anchoredText', 'note', 'priceNote', 'pin', 'callout', 'comment', 'priceLabel', 'signpost', 'flag', 'emoji'],
+    tools: ['text', 'anchoredText', 'note', 'priceNote', 'pin', 'callout', 'comment', 'priceLabel', 'signpost', 'flag', 'emoji', 'table', 'image'],
   },
 ]
 export const ALL_TOOLS: Tool[] = TOOL_GROUPS.flatMap((g) => g.tools)
@@ -230,6 +264,8 @@ export const FIB_EXT_LEVELS: FibLevel[] = [
   { v: 0.618, on: true }, { v: 0.786, on: false }, { v: 1, on: true },
   { v: 1.618, on: true }, { v: 2.618, on: true }, { v: 3.618, on: false }, { v: 4.236, on: false },
 ]
+// 能显示的最多根数（K 线形态复制）/ at most this many bars are copied (bars pattern)
+export const BARS_PATTERN_MAX = 300
 const lv = (on: number[], off: number[] = []): FibLevel[] =>
   [...on.map((v) => ({ v, on: true })), ...off.map((v) => ({ v, on: false }))].sort((a, b) => a.v - b.v)
 // 带档位的工具各自的缺省档位 / default levels of each level-based tool
@@ -244,6 +280,9 @@ export const DEFAULT_LEVELS: Partial<Record<DrawType, FibLevel[]>> = {
   fibArcs: lv([0.236, 0.382, 0.5, 0.618, 0.786, 1]),
   gannBox: lv([0, 0.25, 0.382, 0.5, 0.618, 0.75, 1]),
   pitchfan: lv([0, 0.382, 0.5, 0.618, 1], [0.25, 0.75]),
+  fibWedge: lv([0.236, 0.382, 0.5, 0.618, 0.786, 1]),
+  gannSquare: lv([0, 0.25, 0.382, 0.5, 0.618, 0.75, 1]),
+  gannSquareFixed: lv([0, 0.125, 0.25, 0.375, 0.5, 0.625, 0.75, 0.875, 1]),
 }
 export const hasLevels = (t: DrawType): boolean => t in DEFAULT_LEVELS
 export const levelsOf = (d: Drawing): FibLevel[] => d.levels ?? DEFAULT_LEVELS[d.type] ?? FIB_RETRACE_LEVELS
@@ -275,7 +314,12 @@ export function sanitizeDrawings(raw: unknown): Drawing[] {
     const d = r as Drawing
     if (!isDrawType(d.type) || typeof d.id !== 'string' || !Array.isArray(d.pts) || d.pts.length === 0) continue
     if (!d.pts.every((p) => p && Number.isFinite(p.t) && Number.isFinite(p.p))) continue
-    out.push({ ...d, color: typeof d.color === 'string' ? d.color : COLORS[0] })
+    const clean: Drawing = { ...d, color: typeof d.color === 'string' ? d.color : COLORS[0] }
+    // 复制的 K 线、图片来自云端，形状不对就丢掉这一项 / copied bars and images come from the cloud: drop malformed ones
+    if (clean.bars !== undefined && !(Array.isArray(clean.bars) && clean.bars.length <= BARS_PATTERN_MAX
+      && clean.bars.every((b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite)))) delete clean.bars
+    if (clean.img !== undefined && !(typeof clean.img === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(clean.img))) delete clean.img
+    out.push(clean)
   }
   return out
 }
@@ -296,7 +340,7 @@ export function finishPoints(type: DrawType, pts: Point[]): Point[] {
 }
 
 // 样式字段（模板 / 默认样式只存这些，不存坐标和文字）/ style fields (templates & defaults keep only these)
-export const STYLE_KEYS = ['color', 'lineWidth', 'lineStyle', 'fill', 'extendLeft', 'extendRight', 'showLabel', 'levels', 'fontSize', 'textColor', 'account', 'risk'] as const
+export const STYLE_KEYS = ['color', 'lineWidth', 'lineStyle', 'fill', 'extendLeft', 'extendRight', 'showLabel', 'levels', 'fontSize', 'textColor', 'account', 'risk', 'rows', 'bands', 'alpha'] as const
 export type StyleProps = Partial<Pick<Drawing, typeof STYLE_KEYS[number]>>
 export function styleOf(d: Drawing): StyleProps {
   const out: Record<string, unknown> = {}

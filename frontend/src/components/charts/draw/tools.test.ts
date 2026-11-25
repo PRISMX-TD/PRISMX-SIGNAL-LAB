@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { finishPoints, sanitizeDrawings, visibleOn, visGroupOf, pointsNeeded, isScreenAnchored, TOOL_META, type Drawing } from './model'
 import { dragHandle, hitDrawing, handlesOf, inMarquee, constrain45, anchorsOf, renderDrawing, type DrawEnv } from './tools'
+import { volumeProfile, vwapSeries } from './ext/volume'
+import { patternBars, tableGrid, ghostBars } from './ext/misc'
+import { spiralPts } from './ext/advanced'
 
 // 线性坐标：t 每 60 秒 1px，价格每 1 元 1px（y 向下）/ linear coords: 1px per 60 s, 1px per unit price
 const env: DrawEnv = {
@@ -107,7 +110,12 @@ describe('draw tools, batch 2', () => {
     },
     set: (o, k, v) => { o[k] = v; return true },
   }) as unknown as CanvasRenderingContext2D
-  const envC: DrawEnv = { ...env, closes: (t0, t1) => Array.from({ length: 20 }, (_, i) => ({ x: (t0 + (t1 - t0) * i / 19) / 60, c: 100 + Math.sin(i) * 10 })) }
+  const envC: DrawEnv = {
+    ...env,
+    closes: (t0, t1) => Array.from({ length: 20 }, (_, i) => ({ x: (t0 + (t1 - t0) * i / 19) / 60, c: 100 + Math.sin(i) * 10 })),
+    ohlc: () => Array.from({ length: 30 }, (_, i) => ({ x: 100 + i * 5, t: (100 + i * 5) * 60, o: 100 + i, h: 103 + i, l: 98 + i, c: 101 + i, v: 10 + i })),
+    spacing: 5,
+  }
 
   it('every tool renders, hit-tests, exposes handles and drags without throwing', () => {
     for (const type of Object.keys(TOOL_META) as Drawing['type'][]) {
@@ -152,5 +160,67 @@ describe('draw tools, batch 2', () => {
     const d = { id: 'a', type: 'anchoredText', color: '#fff', text: 'x', pts: [{ t: 0.5, p: 0.25 }] } as Drawing
     expect(anchorsOf(d, env)).toEqual([{ x: 400, y: 100 }])
     expect(sanitizeDrawings([d])).toHaveLength(1)
+  })
+})
+
+describe('draw tools, batch 3', () => {
+  const bar = (i: number, o: number, h: number, l: number, c: number, v: number) => ({ x: i * 10, t: i * 600, o, h, l, c, v })
+  it('volume profile: POC on the busiest price, value area covers 70%', () => {
+    const bars = [bar(0, 10, 11, 10, 11, 1), bar(1, 11, 12, 11, 12, 1), bar(2, 12, 13, 12, 12.5, 50), bar(3, 12.5, 13, 12, 12.2, 50), bar(4, 13, 14, 13, 14, 1)]
+    const pr = volumeProfile(bars, 4)!
+    expect(pr.lo).toBe(10)
+    expect(pr.hi).toBe(14)
+    expect(pr.poc).toBe(2) // 12..13
+    const tot = pr.up.map((u, i) => u + pr.down[i])
+    const all = tot.reduce((a, b) => a + b, 0)
+    const va = tot.slice(pr.vaLo, pr.vaHi + 1).reduce((a, b) => a + b, 0)
+    expect(va / all).toBeGreaterThanOrEqual(0.7)
+    expect(all).toBeCloseTo(103, 6)
+  })
+  it('anchored VWAP is the volume-weighted typical price; zero volume counts each bar once', () => {
+    const s = vwapSeries([bar(0, 10, 12, 8, 10, 1), bar(1, 10, 22, 18, 20, 3)])
+    expect(s[0].v).toBeCloseTo(10)
+    expect(s[1].v).toBeCloseTo((10 * 1 + 20 * 3) / 4)
+    const z = vwapSeries([bar(0, 10, 12, 8, 10, 0), bar(1, 10, 22, 18, 20, 0)])
+    expect(z[1].v).toBeCloseTo(15)
+  })
+  it('bars pattern copy flips around the first open and mirrors in time', () => {
+    const d = mk('barsPattern', [[100, 100], [100, 100]], { bars: [[0, 2, -1, 1], [1, 5, 0, 4]] })
+    const plain = patternBars(d, px(d), { ...env, spacing: 10 })
+    expect(plain.map((b) => b.x)).toEqual([100, 110])
+    expect(plain[1].c).toBe(env.p2y(104))
+    const flipped = patternBars({ ...d, flip: true }, px(d), { ...env, spacing: 10 })
+    expect(flipped[1].c).toBe(env.p2y(96))
+    expect(flipped[1].h).toBe(env.p2y(100)) // low 0 → high after the flip
+    const mirrored = patternBars({ ...d, mirror: true }, px(d), { ...env, spacing: 10 })
+    expect(mirrored[0].o).toBe(env.p2y(104)) // the last bar comes first, open and close swapped
+  })
+  it('table splits rows on newlines and cells on |', () => {
+    const g = tableGrid(mk('table', [[1, 1]], { text: 'A | B | C' + String.fromCharCode(10) + '1 | 2' }))
+    expect(g.rows).toEqual([['A', 'B', 'C'], ['1', '2']])
+    expect(g.cols).toBe(3)
+    expect(g.h).toBe(g.rowH * 2)
+  })
+  it('fib spiral grows by φ every quarter turn', () => {
+    const pts = spiralPts([{ x: 400, y: 200 }, { x: 410, y: 200 }], env)
+    const r = pts.map((p) => Math.hypot(p.x - 400, p.y - 200))
+    expect(Math.max(...r)).toBeGreaterThan(800)
+    expect(Math.min(...r)).toBeLessThan(1.1)
+  })
+  it('ghost feed lays one candle per bar width along each leg', () => {
+    const g = ghostBars([{ x: 0, y: 100 }, { x: 50, y: 50 }, { x: 80, y: 90 }], { ...env, spacing: 10 })
+    expect(g).toHaveLength(8)
+    expect(g[4].c).toBeCloseTo(50)
+    expect(g[0].o).toBe(100)
+  })
+  it('sanitize drops malformed copied bars and non-image data URLs', () => {
+    const out = sanitizeDrawings([
+      { id: 'a', type: 'barsPattern', color: '#fff', pts: [{ t: 1, p: 1 }, { t: 1, p: 1 }], bars: [[1, 2, 3]] },
+      { id: 'b', type: 'image', color: '#fff', pts: [{ t: 1, p: 1 }, { t: 2, p: 2 }], img: 'javascript:alert(1)' },
+      { id: 'c', type: 'image', color: '#fff', pts: [{ t: 1, p: 1 }, { t: 2, p: 2 }], img: 'data:image/png;base64,AAAA' },
+    ])
+    expect(out[0].bars).toBeUndefined()
+    expect(out[1].img).toBeUndefined()
+    expect(out[2].img).toBe('data:image/png;base64,AAAA')
   })
 })

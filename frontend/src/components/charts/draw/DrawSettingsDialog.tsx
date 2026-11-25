@@ -13,11 +13,14 @@ import {
 } from './model'
 
 // 没有线宽 / 线型可调的工具（图标、气泡、文字块）/ tools without width / style (icons, bubbles, text blocks)
-const NO_LINE = new Set<DrawType>(['text', 'priceLabel', 'long', 'short', 'emoji', 'note', 'pin', 'flag', 'arrowUp', 'arrowDown', 'arrowMarker', 'comment', 'callout', 'signpost', 'anchoredText'])
+const NO_LINE = new Set<DrawType>(['text', 'priceLabel', 'long', 'short', 'emoji', 'note', 'pin', 'flag', 'arrowUp', 'arrowDown', 'arrowMarker', 'comment', 'callout', 'signpost', 'anchoredText',
+  'table', 'image', 'barsPattern', 'ghostFeed', 'fixedRangeVP', 'anchoredVP'])
+// 用 tick 量算的工具（设置里注明）/ tools computed from tick volume (noted in settings)
+const TICK_VOL = new Set<DrawType>(['anchoredVwap', 'fixedRangeVP', 'anchoredVP'])
 // 能左右延长的工具 / tools that extend left / right
 const EXTENDS = new Set<DrawType>(['channel', 'fib', 'fibExt', 'fibChannel', 'flatChannel', 'disjointChannel'])
 // 有读数 / 档位标签开关的工具 / tools with a labels switch
-const LABELED = new Set<DrawType>(['info', 'priceRange', 'dateRange', 'datePriceRange', 'long', 'short', 'forecast', 'gannFan'])
+const LABELED = new Set<DrawType>(['info', 'priceRange', 'dateRange', 'datePriceRange', 'long', 'short', 'forecast', 'gannFan', 'anchoredVwap', 'fixedRangeVP', 'anchoredVP'])
 // 坐标只给提示、不逐点列出的工具（点太多）/ tools whose coordinates aren't listed point by point
 const FREEHAND = new Set<DrawType>(['brush', 'highlighter'])
 import { StyleGlyph } from './DrawFloatingBar'
@@ -35,6 +38,8 @@ interface Props {
   onCancel: () => void
   onSaveTemplate: (name: string, d: Drawing) => void
   onDeleteTemplate: (name: string) => void
+  // 图片画线：选图并压缩，返回 data URL / image drawing: pick and squeeze, resolving to a data URL
+  onPickImage?: () => Promise<{ url: string; w: number; h: number } | null>
   t: (k: string, o?: Record<string, unknown>) => unknown
 }
 
@@ -141,6 +146,39 @@ export default function DrawSettingsDialog(p: Props) {
                 <Switch checked={!!d.closed} onChange={(v) => set({ closed: v })} aria-label={tt('charts.draw.closed')} />
               </Row>
             )}
+            {type === 'image' && (
+              <>
+                <Row label={tt('charts.draw.image')}>
+                  <button type="button" className="ind-btn" onClick={() => { void p.onPickImage?.().then((r) => { if (r) set({ img: r.url }) }) }}>
+                    {tt(d.img ? 'charts.draw.replaceImage' : 'charts.draw.pickImage')}
+                  </button>
+                </Row>
+                <Row label={tt('charts.draw.opacity')}>
+                  <Seg value={d.alpha ?? 1} label={tt('charts.draw.opacity')} options={[0.25, 0.5, 0.75, 1].map((v) => ({ v, label: `${Math.round(v * 100)}%` }))} onChange={(v) => set({ alpha: v })} />
+                </Row>
+              </>
+            )}
+            {(type === 'fixedRangeVP' || type === 'anchoredVP') && (
+              <Row label={tt('charts.draw.rows')}>
+                <Seg value={d.rows ?? 24} label={tt('charts.draw.rows')} options={[12, 24, 48, 96].map((v) => ({ v, label: String(v) }))} onChange={(v) => set({ rows: v })} />
+              </Row>
+            )}
+            {type === 'anchoredVwap' && (
+              <Row label={tt('charts.draw.bands')}>
+                <Switch checked={!!d.bands} onChange={(v) => set({ bands: v })} aria-label={tt('charts.draw.bands')} />
+              </Row>
+            )}
+            {type === 'barsPattern' && (
+              <>
+                <Row label={tt('charts.draw.flip')}>
+                  <Switch checked={!!d.flip} onChange={(v) => set({ flip: v })} aria-label={tt('charts.draw.flip')} />
+                </Row>
+                <Row label={tt('charts.draw.mirror')}>
+                  <Switch checked={!!d.mirror} onChange={(v) => set({ mirror: v })} aria-label={tt('charts.draw.mirror')} />
+                </Row>
+              </>
+            )}
+            {TICK_VOL.has(type) && <small>{tt('charts.draw.tickVolHint')}</small>}
             {type === 'regression' && (
               <Row label={tt('charts.draw.extendRight')}>
                 <Switch checked={!!d.extendRight} onChange={(v) => set({ extendRight: v })} aria-label={tt('charts.draw.extendRight')} />
@@ -201,7 +239,8 @@ export default function DrawSettingsDialog(p: Props) {
         }
         return (
           <>
-            <textarea className="ind-in wide draw-text-in" rows={4} maxLength={500} value={d.text ?? ''} autoFocus
+            {type === 'table' && <small>{tt('charts.draw.tableHint')}</small>}
+            <textarea className="ind-in wide draw-text-in" rows={type === 'table' ? 6 : 4} maxLength={type === 'table' ? 2000 : 500} value={d.text ?? ''} autoFocus
               aria-label={tt('charts.draw.text')} placeholder={tt('charts.draw.textPh')} onChange={(e) => set({ text: e.target.value })} />
             <Row label={tt('charts.draw.fontSize')}>
               <Seg value={fontSizeOf(d)} label={tt('charts.draw.fontSize')} options={[10, 12, 14, 18, 24, 32].map((n) => ({ v: n, label: String(n) }))} onChange={(v) => set({ fontSize: v })} />

@@ -5,19 +5,19 @@
 import { type Drawing, type FibLevel, fillOf, levelsOf, showLabelOf } from '../model'
 import {
   type DrawEnv, type Px, FONT, FAN_COLORS, distToSeg, extendSeg, rayEnd, stroke, guide, setDash, withAlpha, fillPoly,
-  pointInPoly, fmtRatio,
+  pointInPoly, fmtRatio, spacer,
 } from '../paint'
 import { type ToolDefs, nearest, hitOrInside } from './types'
 
 const onLevels = (d: Drawing): FibLevel[] => levelsOf(d).filter((l) => l.on).sort((a, b) => a.v - b.v)
 const colOf = (d: Drawing, l: FibLevel) => l.color || d.color
 
-function vLine(ctx: CanvasRenderingContext2D, d: Drawing, x: number, env: DrawEnv, col: string, label: string | null) {
+function vLine(ctx: CanvasRenderingContext2D, d: Drawing, x: number, env: DrawEnv, col: string, label: string | null, fit?: (a: number, b: number) => boolean) {
   ctx.strokeStyle = col
   ctx.lineWidth = d.lineWidth ?? 1
   setDash(ctx, d.lineStyle)
   ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, env.h); ctx.stroke()
-  if (label) {
+  if (label && (!fit || (ctx.font = FONT, fit(x + 2, x + 6 + ctx.measureText(label).width)))) {
     ctx.save(); ctx.setLineDash([]); ctx.font = FONT; ctx.fillStyle = col; ctx.textAlign = 'left'; ctx.textBaseline = 'top'
     ctx.fillText(label, x + 4, 6); ctx.restore()
   }
@@ -106,10 +106,11 @@ export const FIBS: ToolDefs = {
     render(ctx, d, px, env) {
       const dx = px[1].x - px[0].x
       guide(ctx, d.color, [px[0], px[1]])
+      const fit = spacer()
       for (const l of onLevels(d)) {
         const x = px[0].x + dx * l.v
         if (x < -2 || x > env.w + 2) continue
-        vLine(ctx, d, x, env, colOf(d, l), showLabelOf(d) ? fmtRatio(l.v) : null)
+        vLine(ctx, d, x, env, colOf(d, l), showLabelOf(d) ? fmtRatio(l.v) : null, fit)
       }
     },
     hit(d, px, env, x, y) {
@@ -144,10 +145,11 @@ export const FIBS: ToolDefs = {
     render(ctx, d, px, env) {
       const dx = px[1].x - px[0].x
       guide(ctx, d.color, [px[0], px[1], px[2]])
+      const fit = spacer()
       for (const l of onLevels(d)) {
         const x = px[2].x + dx * l.v
         if (x < -2 || x > env.w + 2) continue
-        vLine(ctx, d, x, env, colOf(d, l), showLabelOf(d) ? fmtRatio(l.v) : null)
+        vLine(ctx, d, x, env, colOf(d, l), showLabelOf(d) ? fmtRatio(l.v) : null, fit)
       }
     },
     hit(d, px, env, x, y) {
@@ -242,6 +244,7 @@ export const FIBS: ToolDefs = {
       const w = b.x2 - b.x1, h = b.y2 - b.y1
       if (fillOf(d)) { ctx.fillStyle = withAlpha(d.color, 0.06); ctx.fillRect(b.x1, b.y1, w, h) }
       ctx.font = FONT
+      const fitX = spacer(), fitY = spacer()
       for (const l of onLevels(d)) {
         const col = colOf(d, l)
         const x = px[0].x + (px[1].x - px[0].x) * l.v
@@ -249,9 +252,10 @@ export const FIBS: ToolDefs = {
         stroke(ctx, d, [{ x, y: b.y1 }, { x, y: b.y2 }], undefined, col)
         stroke(ctx, d, [{ x: b.x1, y }, { x: b.x2, y }], undefined, col)
         if (showLabelOf(d)) {
+          const txt = fmtRatio(l.v), tw = ctx.measureText(txt).width
           ctx.save(); ctx.setLineDash([]); ctx.fillStyle = col
-          ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(fmtRatio(l.v), x, b.y1 - 2)
-          ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(fmtRatio(l.v), b.x1 - 4, y)
+          if (fitX(x - tw / 2 - 2, x + tw / 2 + 2)) { ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillText(txt, x, b.y1 - 2) }
+          if (fitY(y - 7, y + 7)) { ctx.textAlign = 'right'; ctx.textBaseline = 'middle'; ctx.fillText(txt, b.x1 - 4, y) }
           ctx.restore()
         }
       }

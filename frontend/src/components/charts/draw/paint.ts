@@ -25,7 +25,14 @@ export interface DrawEnv {
   touch: boolean
   // 两个时间之间每根 K 线的 x 与收盘价（回归趋势用）/ x and close of each bar between two times (regression)
   closes?: (t0: number, t1: number) => { x: number; c: number }[]
+  // 两个时间之间每根 K 线的完整数据（含 tick 量；成交量分布、VWAP 用）/ full bars between two times, tick volume included
+  ohlc?: (t0: number, t1: number) => Bar[]
+  // 当前一根 K 线占多少像素 / pixels per bar right now
+  spacing?: number
+  // 异步资源（图片）到了之后请求重画 / ask for a repaint once an async resource (an image) arrives
+  redraw?: () => void
 }
+export interface Bar { x: number; t: number; o: number; h: number; l: number; c: number; v: number }
 
 export const UP = '#2ee07e'
 export const DOWN = '#ff4d67'
@@ -253,4 +260,13 @@ export function quadCtrl(a: Px, b: Px, c: Px, steps = 32): Px[] {
 export const mid = (a: Px, b: Px): Px => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 export const lerp = (a: Px, b: Px, t: number): Px => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t })
 // 把数字写得短一点（比例、档位）/ a short number (ratios, levels)
+// 一排标签防重叠：占位登记，挨得太近的就不画 / keeps a row of labels apart: claims spans, refuses overlapping ones
+export function spacer(): (a: number, b: number) => boolean {
+  const taken: [number, number][] = []
+  return (a, b) => {
+    if (taken.some(([s, e]) => a < e && b > s)) return false
+    taken.push([a, b])
+    return true
+  }
+}
 export const fmtRatio = (v: number) => (Math.round(v * 1000) / 1000).toString()
