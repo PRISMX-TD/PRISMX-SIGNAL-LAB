@@ -4,38 +4,25 @@
 // pixel anchors and an environment; the renderer and the interaction layer share one hit test.
 import {
   type Drawing, type Point, type DrawType, TOOL_META, fillOf, showLabelOf, fontSizeOf, levelsOf,
-  DEFAULT_ACCOUNT, DEFAULT_RISK,
+  DEFAULT_ACCOUNT, DEFAULT_RISK, pointsNeeded, isScreenAnchored,
 } from './model'
+import {
+  type Px, type DrawEnv, UP, DOWN, FONT, tolOf, ok, distToSeg, extendSeg, setDash, withAlpha, stroke, labelBox,
+  arrowHead, lineText, pct, signed, textWidth, pointInPoly,
+} from './paint'
+import { EXT } from './ext'
 
-export interface Px { x: number; y: number }
-export interface DrawLabels {
-  bars: string; rr: string; target: string; stop: string; qty: string; risk: string; pips: string
-  dur: (sec: number) => string
-}
-export interface DrawEnv {
-  w: number
-  h: number
-  t2x: (t: number) => number | null
-  p2y: (p: number) => number | null
-  y2p: (y: number) => number | null
-  fmtPrice: (p: number) => string
-  bars: (t1: number, t2: number) => number
-  pips: (dp: number) => number | null
-  qty: (riskAmount: number, slDist: number, ref: number) => number | null
-  L: DrawLabels
-  theme: { bg: string; text: string }
-  touch: boolean
-}
+export type { Px, DrawLabels, DrawEnv } from './paint'
 
-export const UP = '#2ee07e'
-export const DOWN = '#ff4d67'
-const FONT = '11px ui-monospace, SFMono-Regular, Menlo, monospace'
+// 第一批在本文件里画的工具 / the batch 1 tools painted in this file
+const BATCH1: Record<string, true> = Object.fromEntries(([
+  'trend', 'ray', 'info', 'extended', 'angle', 'hline', 'hray', 'vline', 'crossline', 'channel', 'fib', 'fibExt',
+  'long', 'short', 'priceRange', 'dateRange', 'datePriceRange', 'brush', 'arrow', 'rect', 'text', 'priceLabel',
+] as DrawType[]).map((t) => [t, true]))
+export { UP, DOWN, tolOf, handleROf, distToSeg, extendSeg, labelBox } from './paint'
 
-export const tolOf = (env: DrawEnv) => (env.touch ? 22 : 8)
-export const handleROf = (env: DrawEnv) => (env.touch ? 8 : 5)
-
-const ok = (n: number) => Number.isFinite(n)
 export function anchorsOf(d: Drawing, env: DrawEnv): Px[] {
+  if (isScreenAnchored(d.type)) return d.pts.map((pt) => ({ x: pt.t * env.w, y: pt.p * env.h }))
   return d.pts.map((pt) => ({ x: env.t2x(pt.t) ?? NaN, y: env.p2y(pt.p) ?? NaN }))
 }
 
@@ -43,28 +30,8 @@ export function anchorsOf(d: Drawing, env: DrawEnv): Px[] {
 export function anchorsValid(d: Drawing, px: Px[]): boolean {
   if (d.type === 'hline') return px.length > 0 && ok(px[0].y)
   if (d.type === 'vline') return px.length > 0 && ok(px[0].x)
-  const need = d.type === 'brush' ? 2 : d.type === 'channel' || d.type === 'fibExt' || d.type === 'long' || d.type === 'short' ? 3
-    : TOOL_META[d.type]?.create === 'click' ? 1 : 2
-  if (px.length < need) return false
+  if (px.length < pointsNeeded(d.type)) return false
   return px.every((p) => ok(p.x) && ok(p.y))
-}
-
-export function distToSeg(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
-  const dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy
-  let t = len2 === 0 ? 0 : ((px - ax) * dx + (py - ay) * dy) / len2
-  t = Math.max(0, Math.min(1, t))
-  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy))
-}
-
-// 线段按「左延 / 右延」伸到画布外 / extend a segment off-canvas to the left / right
-export function extendSeg(a: Px, b: Px, left: boolean, right: boolean, env: DrawEnv): [Px, Px] {
-  const dx = b.x - a.x, dy = b.y - a.y
-  const len = Math.hypot(dx, dy) || 1
-  const ext = (env.w + env.h) * 2
-  const ux = dx / len, uy = dy / len
-  const p = left ? { x: a.x - ux * ext, y: a.y - uy * ext } : a
-  const q = right ? { x: b.x + ux * ext, y: b.y + uy * ext } : b
-  return [p, q]
 }
 
 function lineExt(d: Drawing): [boolean, boolean] {
@@ -73,93 +40,6 @@ function lineExt(d: Drawing): [boolean, boolean] {
   return [!!d.extendLeft, !!d.extendRight]
 }
 
-function setDash(ctx: CanvasRenderingContext2D, s: Drawing['lineStyle']) {
-  if (s === 'dashed') ctx.setLineDash([8, 4])
-  else if (s === 'dotted') ctx.setLineDash([2, 3])
-  else ctx.setLineDash([])
-}
-
-function withAlpha(color: string, a: number): string {
-  if (/^#[0-9a-f]{6}$/i.test(color)) return color + Math.round(a * 255).toString(16).padStart(2, '0')
-  if (/^#[0-9a-f]{3}$/i.test(color)) return '#' + [...color.slice(1)].map((c) => c + c).join('') + Math.round(a * 255).toString(16).padStart(2, '0')
-  return color
-}
-
-function stroke(ctx: CanvasRenderingContext2D, d: Drawing, pts: Px[], width?: number) {
-  ctx.strokeStyle = d.color
-  ctx.lineWidth = width ?? d.lineWidth ?? 1
-  setDash(ctx, d.lineStyle)
-  ctx.beginPath()
-  pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)))
-  ctx.stroke()
-}
-
-// 圆角读数框 / rounded readout box
-export function labelBox(ctx: CanvasRenderingContext2D, lines: string[], cx: number, cy: number, bg: string, fg: string, anchor: 'center' | 'above' | 'below' | 'left' | 'right' = 'center') {
-  if (lines.length === 0) return
-  ctx.save()
-  ctx.font = FONT
-  ctx.setLineDash([])
-  const lh = 15
-  const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 14
-  const h = lines.length * lh + 8
-  let x = cx - w / 2, y = cy - h / 2
-  if (anchor === 'above') y = cy - h - 6
-  if (anchor === 'below') y = cy + 6
-  if (anchor === 'left') x = cx - w - 8
-  if (anchor === 'right') x = cx + 8
-  ctx.fillStyle = bg
-  ctx.beginPath()
-  ctx.roundRect?.(x, y, w, h, 4) ?? ctx.rect(x, y, w, h)
-  ctx.fill()
-  ctx.fillStyle = fg
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  lines.forEach((l, i) => ctx.fillText(l, x + w / 2, y + 4 + lh * i + lh / 2))
-  ctx.restore()
-}
-
-function arrowHead(ctx: CanvasRenderingContext2D, from: Px, to: Px, size: number, color: string) {
-  const ang = Math.atan2(to.y - from.y, to.x - from.x)
-  ctx.save()
-  ctx.setLineDash([])
-  ctx.fillStyle = color
-  ctx.beginPath()
-  ctx.moveTo(to.x, to.y)
-  ctx.lineTo(to.x - size * Math.cos(ang - Math.PI / 7), to.y - size * Math.sin(ang - Math.PI / 7))
-  ctx.lineTo(to.x - size * Math.cos(ang + Math.PI / 7), to.y - size * Math.sin(ang + Math.PI / 7))
-  ctx.closePath()
-  ctx.fill()
-  ctx.restore()
-}
-
-// 线上附注：沿线方向写在中点上方 / a note on a line: written along it, above the midpoint
-function lineText(ctx: CanvasRenderingContext2D, d: Drawing, a: Px, b: Px) {
-  if (!d.text) return
-  let ang = Math.atan2(b.y - a.y, b.x - a.x)
-  if (ang > Math.PI / 2) ang -= Math.PI
-  if (ang < -Math.PI / 2) ang += Math.PI
-  ctx.save()
-  ctx.translate((a.x + b.x) / 2, (a.y + b.y) / 2)
-  ctx.rotate(ang)
-  ctx.font = `${fontSizeOf(d)}px system-ui, sans-serif`
-  ctx.fillStyle = d.textColor || d.color
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'bottom'
-  ctx.setLineDash([])
-  ctx.fillText(d.text, 0, -4)
-  ctx.restore()
-}
-
-const pct = (from: number, to: number) => (from ? ((to - from) / Math.abs(from)) * 100 : 0)
-const signed = (n: number, s: string) => (n > 0 ? '+' : n < 0 ? '−' : '') + s
-
-// 估算文字宽（命中判定拿不到 ctx）：CJK 按 1 个字号，其它按 0.6 / estimated text width
-function textWidth(s: string, fs: number): number {
-  let w = 0
-  for (const ch of s) w += ch.charCodeAt(0) > 255 ? fs : fs * 0.6
-  return w
-}
 export function textBox(d: Drawing, a: Px): { x: number; y: number; w: number; h: number } {
   const fs = fontSizeOf(d)
   const lines = (d.text || ' ').split('\n')
@@ -189,10 +69,13 @@ function channelLines(d: Drawing, px: Px[], env: DrawEnv): { base: [Px, Px]; par
 }
 
 // ───────────────────────── 绘制 / render ─────────────────────────
-export function renderDrawing(ctx: CanvasRenderingContext2D, d: Drawing, px: Px[], env: DrawEnv) {
+// hot = 选中或悬停（注释 / 图钉这类只在这时展开文字）/ hot = selected or hovered (notes / pins expand then)
+export function renderDrawing(ctx: CanvasRenderingContext2D, d: Drawing, px: Px[], env: DrawEnv, hot = false) {
   const lw = d.lineWidth ?? 1
   const lbg = env.theme.bg === '#ffffff' ? 'rgba(19,23,34,0.85)' : 'rgba(30,34,45,0.92)'
   const lfg = '#e2e8f0'
+  // 第二批工具走各自文件 / batch 2 tools live in their own files
+  if (!(d.type in BATCH1)) { EXT[d.type]?.render(ctx, d, px, env, hot); ctx.setLineDash([]); return }
   switch (d.type) {
     case 'hline': {
       stroke(ctx, d, [{ x: 0, y: px[0].y }, { x: env.w, y: px[0].y }])
@@ -403,6 +286,8 @@ export function renderDrawing(ctx: CanvasRenderingContext2D, d: Drawing, px: Px[
 // 每个手柄的屏幕位置；拖手柄 i 由 dragHandle 换算回数据点。
 // Screen position of each handle; dragging handle i maps back through dragHandle.
 export function handlesOf(d: Drawing, px: Px[], env: DrawEnv): Px[] {
+  const ext = EXT[d.type]
+  if (ext) return ext.handles ? ext.handles(d, px, env) : px
   switch (d.type) {
     case 'hline': return [{ x: env.w / 2, y: px[0].y }]
     case 'vline': return [{ x: px[0].x, y: env.h / 2 }]
@@ -422,6 +307,8 @@ export function handlesOf(d: Drawing, px: Px[], env: DrawEnv): Px[] {
 
 export function dragHandle(d: Drawing, i: number, pt: Point, orig: Point[]): Point[] {
   const o = orig.map((p) => ({ ...p }))
+  const ext = EXT[d.type]
+  if (ext?.drag) return ext.drag(d, i, pt, o)
   switch (d.type) {
     case 'hline': return [{ t: o[0].t, p: pt.p }]
     case 'vline': return [{ t: pt.t, p: o[0].p }]
@@ -450,6 +337,8 @@ export function dragHandle(d: Drawing, i: number, pt: Point, orig: Point[]): Poi
 // ───────────────────────── 命中判定 / hit test ─────────────────────────
 // 返回距离（越小越近），没命中返回 null / distance (smaller = closer), null when missed
 export function hitDrawing(d: Drawing, px: Px[], env: DrawEnv, x: number, y: number): number | null {
+  const ext = EXT[d.type]
+  if (ext) return ext.hit(d, px, env, x, y)
   const tol = tolOf(env)
   const inBox = (bx: number, by: number, bw: number, bh: number) => x >= bx - tol / 2 && x <= bx + bw + tol / 2 && y >= by - tol / 2 && y <= by + bh + tol / 2
   const seg = (a: Px, b: Px) => distToSeg(x, y, a.x, a.y, b.x, b.y)
@@ -518,15 +407,6 @@ export function hitDrawing(d: Drawing, px: Px[], env: DrawEnv, x: number, y: num
     }
   }
   return null
-}
-
-function pointInPoly(x: number, y: number, poly: Px[]): boolean {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i], b = poly[j]
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside
-  }
-  return inside
 }
 
 // 框选：画线任一锚点落在框里就算选中 / marquee: any anchor inside the box selects the drawing

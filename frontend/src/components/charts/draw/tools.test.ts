@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { finishPoints, sanitizeDrawings, visibleOn, visGroupOf, type Drawing } from './model'
-import { dragHandle, hitDrawing, handlesOf, inMarquee, constrain45, type DrawEnv } from './tools'
+import { finishPoints, sanitizeDrawings, visibleOn, visGroupOf, pointsNeeded, isScreenAnchored, TOOL_META, type Drawing } from './model'
+import { dragHandle, hitDrawing, handlesOf, inMarquee, constrain45, anchorsOf, renderDrawing, type DrawEnv } from './tools'
 
 // 线性坐标：t 每 60 秒 1px，价格每 1 元 1px（y 向下）/ linear coords: 1px per 60 s, 1px per unit price
 const env: DrawEnv = {
@@ -92,5 +92,65 @@ describe('draw tools', () => {
     expect(Math.round(b.y)).toBe(0)
     const c = constrain45({ x: 0, y: 0 }, { x: 100, y: 90 })
     expect(Math.round(c.x)).toBe(Math.round(c.y))
+  })
+})
+
+describe('draw tools, batch 2', () => {
+  // 什么都接住的假 canvas：只为跑通每个工具的绘制路径 / a canvas stub that swallows every call
+  const ctx = new Proxy({} as Record<string | symbol, unknown>, {
+    get: (o, k) => {
+      if (k in o) return o[k]
+      if (k === 'measureText') return (s: string) => ({ width: String(s).length * 7 })
+      if (k === 'getLineDash') return () => []
+      if (k === 'createLinearGradient' || k === 'createRadialGradient') return () => ({ addColorStop: () => {} })
+      return () => {}
+    },
+    set: (o, k, v) => { o[k] = v; return true },
+  }) as unknown as CanvasRenderingContext2D
+  const envC: DrawEnv = { ...env, closes: (t0, t1) => Array.from({ length: 20 }, (_, i) => ({ x: (t0 + (t1 - t0) * i / 19) / 60, c: 100 + Math.sin(i) * 10 })) }
+
+  it('every tool renders, hit-tests, exposes handles and drags without throwing', () => {
+    for (const type of Object.keys(TOOL_META) as Drawing['type'][]) {
+      const cm = TOOL_META[type].create
+      const n = cm === 'poly' || cm === 'free' ? 4 : type === 'long' || type === 'short' ? 3 : pointsNeeded(type)
+      const d = isScreenAnchored(type)
+        ? { id: 'x', type, color: '#22d3ee', text: 'hi', pts: [{ t: 0.5, p: 0.3 }] } as Drawing
+        : mk(type, Array.from({ length: n }, (_, i) => [100 + i * 40, 100 + (i % 2 ? 60 : 0) + i * 5] as [number, number]), { text: 'hi' })
+      const p = anchorsOf(d, envC)
+      for (const hot of [false, true]) expect(() => renderDrawing(ctx, d, p, envC, hot), type).not.toThrow()
+      const h = hitDrawing(d, p, envC, p[0].x, p[0].y)
+      expect(h === null || Number.isFinite(h), type).toBe(true)
+      const hs = handlesOf(d, p, envC)
+      if (hs.length) expect(dragHandle(d, 0, { t: 5000, p: 120 }, d.pts).length, type).toBe(d.pts.length)
+    }
+  })
+  it('points needed per creation mode', () => {
+    expect(pointsNeeded('xabcd')).toBe(5)
+    expect(pointsNeeded('headShoulders')).toBe(7)
+    expect(pointsNeeded('elliottImpulse')).toBe(6)
+    expect(pointsNeeded('pitchfork')).toBe(3)
+    expect(pointsNeeded('emoji')).toBe(1)
+    expect(pointsNeeded('callout')).toBe(2)
+  })
+  it('pitchfork median ray is hittable far to the right', () => {
+    const d = mk('pitchfork', [[100, 100], [200, 150], [200, 50]])
+    expect(hitDrawing(d, px(d), env, 600, 300)).not.toBeNull()
+    expect(hitDrawing(d, px(d), env, 40, 40)).toBeNull()
+  })
+  it('xabcd legs are hittable', () => {
+    const d = mk('xabcd', [[100, 100], [150, 200], [200, 150], [250, 250], [300, 120]])
+    expect(hitDrawing(d, px(d), env, 125, 250)).not.toBeNull()
+    expect(hitDrawing(d, px(d), env, 700, 20)).toBeNull()
+  })
+  it('fib time zones sit on fibonacci multiples of the first gap', () => {
+    const d = mk('fibTimeZone', [[100, 100], [120, 100]])
+    expect(hitDrawing(d, px(d), env, 160, 200)).not.toBeNull() // 3 × 20
+    expect(hitDrawing(d, px(d), env, 200, 200)).not.toBeNull() // 5 × 20
+    expect(hitDrawing(d, px(d), env, 230, 200)).toBeNull()
+  })
+  it('anchored text stays at a fixed spot of the pane', () => {
+    const d = { id: 'a', type: 'anchoredText', color: '#fff', text: 'x', pts: [{ t: 0.5, p: 0.25 }] } as Drawing
+    expect(anchorsOf(d, env)).toEqual([{ x: 400, y: 100 }])
+    expect(sanitizeDrawings([d])).toHaveLength(1)
   })
 })

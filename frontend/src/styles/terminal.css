@@ -2506,3 +2506,13 @@
 /* 设置弹窗底部：样式自动记住的提示 / settings footer: auto-remember hint */
 .draw-remember-hint { font-size: 11px; color: var(--text-dim, #94a3b8); align-self: center; min-width: 0; }
 @media (max-width: 640px) { .draw-remember-hint { display: none; } }
+
+/* 画线工具浮层里的小分组标题 / sub-section headings inside the draw-tool flyouts */
+.chart-pop-sec { padding: 10px 8px 4px; font-size: 11px; font-weight: 600; color: var(--text-3); }
+.chart-pop-sec:first-child { padding-top: 2px; }
+/* 图标与表情的选择格 / emoji picker grid */
+.draw-emoji-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.draw-emoji-grid > button { height: 38px; padding: 0; border: 0; border-radius: var(--r-tile); background: var(--nest); font-size: 20px; line-height: 1; cursor: pointer; transition: background var(--dur-fast) var(--ease-out); }
+.draw-emoji-grid > button:hover { background: var(--line-hi); }
+.draw-emoji-grid > button.on { background: rgb(var(--purple-rgb) / 0.28); box-shadow: inset 0 0 0 1px var(--purple); }
+.draw-emoji-grid > :not(button) { grid-column: 1 / -1; margin-top: 6px; }

@@ -13,6 +13,17 @@ export type DrawType =
   | 'priceRange' | 'dateRange' | 'datePriceRange'
   | 'brush' | 'arrow' | 'rect'
   | 'text' | 'priceLabel'
+  // 第二批（2026-11-25）/ batch 2
+  | 'regression' | 'flatChannel' | 'disjointChannel'
+  | 'pitchfork' | 'schiffPitchfork' | 'modSchiffPitchfork' | 'insidePitchfork' | 'pitchfan'
+  | 'fibChannel' | 'fibTimeZone' | 'fibFan' | 'fibTime' | 'fibCircles' | 'fibArcs' | 'gannFan' | 'gannBox'
+  | 'xabcd' | 'cypher' | 'abcd' | 'headShoulders' | 'trianglePattern' | 'threeDrives'
+  | 'elliottImpulse' | 'elliottCorrection' | 'elliottTriangle' | 'elliottDouble' | 'elliottTriple'
+  | 'cyclicLines' | 'timeCycles' | 'sineLine'
+  | 'forecast'
+  | 'highlighter' | 'arrowMarker' | 'arrowUp' | 'arrowDown'
+  | 'rotatedRect' | 'path' | 'circle' | 'ellipse' | 'polyline' | 'triangle' | 'arc' | 'curve' | 'doubleCurve' | 'sector'
+  | 'anchoredText' | 'note' | 'priceNote' | 'pin' | 'callout' | 'comment' | 'signpost' | 'flag' | 'emoji'
 
 export type Tool = 'cursor' | 'cross' | DrawType
 export type LineStyle = 'solid' | 'dashed' | 'dotted'
@@ -48,12 +59,19 @@ export interface Drawing {
   // 多空仓位：账户规模、风险百分比 / position tools: account size, risk percent
   account?: number
   risk?: number
+  // 折线：最后一点接回第一点（闭合后可填充）/ polyline closed back to its first point (fillable then)
+  closed?: boolean
   vis?: Vis
 }
 
-export type CreateMode = 'click' | 'drag' | 'three' | 'free'
-export interface ToolMeta { create: CreateMode; textual?: boolean; lineLike?: boolean; fillable?: boolean }
+// 创建方式：click = 点一下；drag = 两点（拖或点两下）；multi = 固定 n 个点依次点；
+// free = 按住画（画笔 / 荧光笔）；poly = 点任意多个，双击 / 回车结束（折线、路径）。
+// Creation: click = one click; drag = two points (drag or click-click); multi = n points clicked in turn;
+// free = press and draw (brush / highlighter); poly = any number of clicks, double-click / Enter finishes.
+export type CreateMode = 'click' | 'drag' | 'multi' | 'free' | 'poly'
+export interface ToolMeta { create: CreateMode; n?: number; textual?: boolean; lineLike?: boolean; fillable?: boolean }
 
+const M = (n: number, fillable = false): ToolMeta => ({ create: 'multi', n, fillable })
 export const TOOL_META: Record<DrawType, ToolMeta> = {
   trend: { create: 'drag', lineLike: true },
   ray: { create: 'drag', lineLike: true },
@@ -64,9 +82,9 @@ export const TOOL_META: Record<DrawType, ToolMeta> = {
   hray: { create: 'click' },
   vline: { create: 'click' },
   crossline: { create: 'click' },
-  channel: { create: 'three', fillable: true },
+  channel: M(3, true),
   fib: { create: 'drag', fillable: true },
-  fibExt: { create: 'three', fillable: true },
+  fibExt: M(3, true),
   long: { create: 'drag', fillable: true },
   short: { create: 'drag', fillable: true },
   priceRange: { create: 'drag', fillable: true },
@@ -77,23 +95,111 @@ export const TOOL_META: Record<DrawType, ToolMeta> = {
   rect: { create: 'drag', fillable: true },
   text: { create: 'click', textual: true },
   priceLabel: { create: 'click' },
+  regression: { create: 'drag', fillable: true },
+  flatChannel: M(3, true),
+  disjointChannel: M(3, true),
+  pitchfork: M(3, true),
+  schiffPitchfork: M(3, true),
+  modSchiffPitchfork: M(3, true),
+  insidePitchfork: M(3, true),
+  pitchfan: M(3, true),
+  fibChannel: M(3, true),
+  fibTimeZone: { create: 'drag' },
+  fibFan: { create: 'drag', fillable: true },
+  fibTime: M(3),
+  fibCircles: { create: 'drag', fillable: true },
+  fibArcs: { create: 'drag' },
+  gannFan: { create: 'drag' },
+  gannBox: { create: 'drag', fillable: true },
+  xabcd: M(5, true),
+  cypher: M(5, true),
+  abcd: M(4),
+  headShoulders: M(7, true),
+  trianglePattern: M(4, true),
+  threeDrives: M(7),
+  elliottImpulse: M(6),
+  elliottCorrection: M(4),
+  elliottTriangle: M(6),
+  elliottDouble: M(4),
+  elliottTriple: M(6),
+  cyclicLines: { create: 'drag' },
+  timeCycles: { create: 'drag', fillable: true },
+  sineLine: { create: 'drag' },
+  forecast: { create: 'drag' },
+  highlighter: { create: 'free' },
+  arrowMarker: { create: 'drag' },
+  arrowUp: { create: 'click' },
+  arrowDown: { create: 'click' },
+  rotatedRect: M(3, true),
+  path: { create: 'poly' },
+  circle: { create: 'drag', fillable: true },
+  ellipse: { create: 'drag', fillable: true },
+  polyline: { create: 'poly', fillable: true },
+  triangle: M(3, true),
+  arc: M(3, true),
+  curve: M(3),
+  doubleCurve: M(3),
+  sector: M(3, true),
+  anchoredText: { create: 'click', textual: true },
+  note: { create: 'click', textual: true },
+  priceNote: { create: 'drag' },
+  pin: { create: 'click', textual: true },
+  callout: { create: 'drag', textual: true },
+  comment: { create: 'click', textual: true },
+  signpost: { create: 'click', textual: true },
+  flag: { create: 'click' },
+  emoji: { create: 'click', textual: true },
 }
+
+// 这种工具需要几个点（free / poly 至少 2 个）/ how many points a tool needs (free / poly: at least 2)
+export function pointsNeeded(t: DrawType): number {
+  const m = TOOL_META[t]
+  if (!m) return 2
+  if (m.create === 'click') return 1
+  if (m.create === 'multi') return m.n ?? 3
+  return 2
+}
+
+// 锚定文本按屏幕位置存（t / p 是画布宽高的 0~1 比例），不随图表平移缩放
+// Anchored text is stored in screen space (t / p are 0..1 fractions of the pane) and ignores pan / zoom
+export const isScreenAnchored = (t: DrawType): boolean => t === 'anchoredText'
 
 export const DRAW_TYPES = Object.keys(TOOL_META) as DrawType[]
 export const isDrawType = (s: unknown): s is DrawType => typeof s === 'string' && s in TOOL_META
 
-// 工具分组（左侧竖轨每组一个按钮，弹出组内工具；记住每组上次用的）。
-// Tool groups (one rail button per group with a flyout; each remembers its last tool).
-export interface ToolGroup { id: string; tools: Tool[] }
+// 工具分组（左侧竖轨每组一个按钮，弹出组内工具；记住每组上次用的）。secs = 组内小标题从哪个工具开始。
+// Tool groups (one rail button per group with a flyout; each remembers its last tool). secs = where a
+// sub-heading starts inside the flyout.
+export interface ToolGroup { id: string; tools: Tool[]; secs?: Partial<Record<Tool, string>> }
 export const TOOL_GROUPS: ToolGroup[] = [
   { id: 'cursors', tools: ['cursor', 'cross'] },
   { id: 'lines', tools: ['trend', 'ray', 'info', 'extended', 'angle', 'hline', 'hray', 'vline', 'crossline'] },
-  { id: 'channels', tools: ['channel'] },
-  { id: 'fibs', tools: ['fib', 'fibExt'] },
-  { id: 'projection', tools: ['long', 'short'] },
+  {
+    id: 'channels',
+    tools: ['channel', 'regression', 'flatChannel', 'disjointChannel', 'pitchfork', 'schiffPitchfork', 'modSchiffPitchfork', 'insidePitchfork', 'pitchfan'],
+    secs: { channel: 'channels', pitchfork: 'pitchforks' },
+  },
+  {
+    id: 'fibs',
+    tools: ['fib', 'fibExt', 'fibChannel', 'fibTimeZone', 'fibFan', 'fibTime', 'fibCircles', 'fibArcs', 'gannFan', 'gannBox'],
+    secs: { fib: 'fib', gannFan: 'gann' },
+  },
+  {
+    id: 'patterns',
+    tools: ['xabcd', 'cypher', 'abcd', 'headShoulders', 'trianglePattern', 'threeDrives', 'elliottImpulse', 'elliottCorrection', 'elliottTriangle', 'elliottDouble', 'elliottTriple', 'cyclicLines', 'timeCycles', 'sineLine'],
+    secs: { xabcd: 'patterns', elliottImpulse: 'elliott', cyclicLines: 'cycles' },
+  },
+  { id: 'projection', tools: ['long', 'short', 'forecast'] },
   { id: 'measurers', tools: ['priceRange', 'dateRange', 'datePriceRange'] },
-  { id: 'shapes', tools: ['rect', 'brush', 'arrow'] },
-  { id: 'texts', tools: ['text', 'priceLabel'] },
+  {
+    id: 'shapes',
+    tools: ['brush', 'highlighter', 'arrow', 'arrowMarker', 'arrowUp', 'arrowDown', 'rect', 'rotatedRect', 'path', 'circle', 'ellipse', 'polyline', 'triangle', 'arc', 'curve', 'doubleCurve', 'sector'],
+    secs: { brush: 'brushes', arrow: 'arrows', rect: 'shapes' },
+  },
+  {
+    id: 'texts',
+    tools: ['text', 'anchoredText', 'note', 'priceNote', 'pin', 'callout', 'comment', 'priceLabel', 'signpost', 'flag', 'emoji'],
+  },
 ]
 export const ALL_TOOLS: Tool[] = TOOL_GROUPS.flatMap((g) => g.tools)
 
@@ -124,7 +230,23 @@ export const FIB_EXT_LEVELS: FibLevel[] = [
   { v: 0.618, on: true }, { v: 0.786, on: false }, { v: 1, on: true },
   { v: 1.618, on: true }, { v: 2.618, on: true }, { v: 3.618, on: false }, { v: 4.236, on: false },
 ]
-export const levelsOf = (d: Drawing): FibLevel[] => d.levels ?? (d.type === 'fibExt' ? FIB_EXT_LEVELS : FIB_RETRACE_LEVELS)
+const lv = (on: number[], off: number[] = []): FibLevel[] =>
+  [...on.map((v) => ({ v, on: true })), ...off.map((v) => ({ v, on: false }))].sort((a, b) => a.v - b.v)
+// 带档位的工具各自的缺省档位 / default levels of each level-based tool
+export const DEFAULT_LEVELS: Partial<Record<DrawType, FibLevel[]>> = {
+  fib: FIB_RETRACE_LEVELS,
+  fibExt: FIB_EXT_LEVELS,
+  fibChannel: lv([0, 0.382, 0.618, 1, 1.618], [0.236, 0.5, 0.786, 2.618, 3.618, 4.236]),
+  fibTimeZone: lv([0, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89], [144, 233]),
+  fibFan: lv([0, 0.25, 0.382, 0.5, 0.618, 0.75, 1]),
+  fibTime: lv([0, 0.382, 0.5, 0.618, 1, 1.382, 1.618, 2, 2.618], [2.382, 3, 3.618, 4.236]),
+  fibCircles: lv([0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618], [2.618, 3.618, 4.236]),
+  fibArcs: lv([0.236, 0.382, 0.5, 0.618, 0.786, 1]),
+  gannBox: lv([0, 0.25, 0.382, 0.5, 0.618, 0.75, 1]),
+  pitchfan: lv([0, 0.382, 0.5, 0.618, 1], [0.25, 0.75]),
+}
+export const hasLevels = (t: DrawType): boolean => t in DEFAULT_LEVELS
+export const levelsOf = (d: Drawing): FibLevel[] => d.levels ?? DEFAULT_LEVELS[d.type] ?? FIB_RETRACE_LEVELS
 
 // 缺省值 / defaults
 export const fillOf = (d: Drawing): boolean => d.fill ?? !!TOOL_META[d.type]?.fillable
@@ -184,4 +306,11 @@ export function styleOf(d: Drawing): StyleProps {
 export interface DrawTemplate { name: string; style: StyleProps }
 
 // 文本 / 线上附注是否可编辑 / which tools take text
-export const takesText = (t: DrawType): boolean => t === 'text' || !!TOOL_META[t]?.lineLike || t === 'rect' || t === 'channel'
+const TEXT_TOOLS = new Set<DrawType>([
+  'rect', 'channel', 'rotatedRect', 'circle', 'ellipse', 'triangle', 'polyline', 'path', 'arrowMarker', 'arrowUp', 'arrowDown',
+  'forecast', 'priceNote',
+])
+export const takesText = (t: DrawType): boolean => !!TOOL_META[t]?.textual || !!TOOL_META[t]?.lineLike || TEXT_TOOLS.has(t)
+// 表情工具新建时的缺省表情 / the emoji a new emoji drawing starts with
+export const DEFAULT_EMOJI = '🚀'
+export const EMOJIS = ['🚀', '🔥', '⭐', '✅', '❌', '⚠️', '💰', '📈', '📉', '🎯', '🐂', '🐻', '👍', '👎', '❗', '❓', '💡', '⏰', '🔔', '📌', '😀', '😱', '🤔', '💎']

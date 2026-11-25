@@ -11,7 +11,7 @@ import type {
   ISeriesPrimitiveAxisView, PrimitivePaneViewZOrder,
 } from 'lightweight-charts'
 import type { MainSeriesApi } from '../useChartEngine'
-import { type Drawing, visibleOn } from './model'
+import { type Drawing, visibleOn, isScreenAnchored } from './model'
 import { timeToX, barsBetween } from './coords'
 import {
   type DrawEnv, type DrawLabels, type Px, anchorsOf, anchorsValid, renderDrawing, handlesOf, hitDrawing,
@@ -102,7 +102,7 @@ export class DrawingsPrimitive {
         if (d.type === 'hline' || d.type === 'hray') addP(d.pts[0].p, d.color)
         else if (d.type === 'vline') addT(d.pts[0].t, d.color)
         else if (d.type === 'crossline') { addP(d.pts[0].p, d.color); addT(d.pts[0].t, d.color) }
-        else if (sel(d) && d.type !== 'brush') {
+        else if (sel(d) && d.type !== 'brush' && d.type !== 'highlighter' && !isScreenAnchored(d.type)) {
           const seenT = new Set<number>()
           for (const pt of d.pts) {
             addP(pt.p, d.color)
@@ -124,6 +124,7 @@ export class DrawingsPrimitive {
   env(w?: number, h?: number): DrawEnv | null {
     const c = this._chart, s = this._series
     if (!c || !s) return null
+    const chart = c
     if (w == null || h == null) {
       const ps = c.paneSize(0)
       w = ps.width; h = ps.height
@@ -141,6 +142,19 @@ export class DrawingsPrimitive {
       L: sc.L,
       theme: sc.theme,
       touch: sc.touch,
+      closes: (t0, t1) => {
+        const out: { x: number; c: number }[] = []
+        const data = s.data() as readonly { time: unknown; close?: number; value?: number }[]
+        for (const b of data) {
+          const tt = typeof b.time === 'number' ? b.time : null
+          if (tt == null || tt < t0) continue
+          if (tt > t1) break
+          const c = b.close ?? b.value
+          const x = timeToX(chart, tt)
+          if (c != null && x != null) out.push({ x, c })
+        }
+        return out
+      },
     }
   }
 
@@ -204,7 +218,7 @@ export class DrawingsPrimitive {
       const px = anchorsOf(d, env)
       if (!anchorsValid(d, px)) return
       ctx.save()
-      renderDrawing(ctx, d, px, env)
+      renderDrawing(ctx, d, px, env, d === this.temp || this.selected.has(d.id) || this.hover === d.id)
       ctx.restore()
       if (showHandles) paintHandles(ctx, handlesOf(d, px, env), d, r, env.theme.bg, d.id === this.hover ? this.hoverHandle : -1)
     }

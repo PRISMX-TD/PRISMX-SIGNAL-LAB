@@ -5,7 +5,7 @@
 // single-line bar. Since 2026-11-25 (phase 2) tools are grouped: one button per group showing the
 // group's last-used tool; the corner chevron (or clicking the active button again) opens the whole
 // group, and the star in that list adds a tool to the favourites bar.
-import { useRef, useState, type RefObject } from 'react'
+import { Fragment, useRef, useState, type RefObject } from 'react'
 import type { DrawLayerHandle } from './DrawLayer'
 import { type Tool, TOOL_GROUPS, TOOL_HOTKEYS, COLORS } from './draw/model'
 import ChartPopover from './ChartPopover'
@@ -41,6 +41,61 @@ export function DrawToolIcon({ tool }: { tool: Tool }) {
     case 'rect': return <svg {...S}><rect x="4" y="6" width="16" height="12" rx="1" /></svg>
     case 'text': return <svg {...S}><path d="M5 6V4h14v2M12 4v16M9 20h6" /></svg>
     case 'priceLabel': return <svg {...S}><path d="M4 8a2 2 0 012-2h12a2 2 0 012 2v6a2 2 0 01-2 2h-8l-4 4v-4a2 2 0 01-2-2z" /><path d="M8 11h8" /></svg>
+    // 第二批 / batch 2
+    case 'regression': return <svg {...S}><path d="M3 17L21 7" /><path d="M3 21L21 11M3 13L21 3" strokeDasharray="2 2.5" opacity="0.6" /></svg>
+    case 'flatChannel': return <svg {...S}><path d="M3 18L21 6" /><path d="M3 20h18" /></svg>
+    case 'disjointChannel': return <svg {...S}><path d="M3 14L21 4" /><path d="M3 10l18 10" /></svg>
+    case 'pitchfork': return <svg {...S}><path d="M3 12h7" /><path d="M10 5v14" /><path d="M10 5h11M10 12h11M10 19h11" /></svg>
+    case 'schiffPitchfork': return <svg {...S}><path d="M3 15l7-3" /><path d="M10 5v14" /><path d="M10 5l11-3M10 12l11-3M10 19l11-3" /></svg>
+    case 'modSchiffPitchfork': return <svg {...S}><path d="M3 18l7-6" /><path d="M10 5v14" /><path d="M10 5l11-1M10 12l11-1M10 19l11-1" /></svg>
+    case 'insidePitchfork': return <svg {...S}><path d="M3 12h4" /><path d="M7 8v8" /><path d="M7 8h14M7 12h14M7 16h14" /></svg>
+    case 'pitchfan': return <svg {...S}><path d="M3 20L21 4M3 20l18-6M3 20l18 1M3 20L13 3" /></svg>
+    case 'fibChannel': return <svg {...S}><path d="M3 12L21 4M3 16L21 8M3 20L21 12" /><path d="M3 8L21 0" opacity="0.5" /></svg>
+    case 'fibTimeZone': return <svg {...S}><path d="M3 4v16M6 4v16M9 4v16M13 4v16M20 4v16" /></svg>
+    case 'fibFan': return <svg {...S}><path d="M3 20L21 4M3 20l18-8M3 20l18-3M3 20L12 4" /><path d="M21 4v16" opacity="0.4" /></svg>
+    case 'fibTime': return <svg {...S}><path d="M3 18l4-10 4 6" opacity="0.6" /><path d="M13 4v16M16 4v16M21 4v16" /></svg>
+    case 'fibCircles': return <svg {...S}><circle cx="12" cy="12" r="3" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="9.5" /></svg>
+    case 'fibArcs': return <svg {...S}><path d="M8 20a4 4 0 018 0M4 20a8 8 0 0116 0" /><path d="M2 21h20" opacity="0.5" /><path d="M12 20V6" opacity="0.6" /></svg>
+    case 'gannFan': return <svg {...S}><path d="M3 21L21 3M3 21l18-9M3 21l18-3M3 21L12 3M3 21L7 3" /></svg>
+    case 'gannBox': return <svg {...S}><rect x="3" y="3" width="18" height="18" rx="1" /><path d="M3 9h18M3 15h18M9 3v18M15 3v18" opacity="0.6" /><path d="M3 21L21 3" /></svg>
+    case 'xabcd': return <svg {...S}><path d="M2 18l5-12 4 8 5-10 6 14" /><path d="M2 18l9-4M11 14l11 4" opacity="0.4" /></svg>
+    case 'cypher': return <svg {...S}><path d="M2 16l5-10 4 6 6-8 5 14" /><path d="M2 16l15-12" opacity="0.4" /></svg>
+    case 'abcd': return <svg {...S}><path d="M3 18L9 6l5 8 7-10" /><circle cx="3" cy="18" r="1.4" /><circle cx="21" cy="4" r="1.4" /></svg>
+    case 'headShoulders': return <svg {...S}><path d="M2 18l4-8 3 5 3-11 3 11 3-5 4 8" /><path d="M2 15h20" strokeDasharray="2 2" opacity="0.6" /></svg>
+    case 'trianglePattern': return <svg {...S}><path d="M3 4l5 16 5-12 5 8" /><path d="M3 4l19 10M8 20l14-6" opacity="0.5" /></svg>
+    case 'threeDrives': return <svg {...S}><path d="M2 20l4-6 2 3 4-8 2 3 4-8 2 3" /></svg>
+    case 'elliottImpulse': return <svg {...S}><path d="M2 20l4-8 3 4 5-12 3 6 5-6" /><text x="13" y="24" fontSize="7" fill="currentColor" stroke="none">5</text></svg>
+    case 'elliottCorrection': return <svg {...S}><path d="M3 4l6 12 4-6 8 10" /><text x="15" y="9" fontSize="7" fill="currentColor" stroke="none">C</text></svg>
+    case 'elliottTriangle': return <svg {...S}><path d="M2 4l4 16 3-12 3 9 3-6 3 4 4-3" /></svg>
+    case 'elliottDouble': return <svg {...S}><path d="M3 4l6 12 4-6 8 10" /><text x="14" y="9" fontSize="7" fill="currentColor" stroke="none">Y</text></svg>
+    case 'elliottTriple': return <svg {...S}><path d="M2 4l4 10 3-5 4 9 3-5 6 8" /><text x="14" y="8" fontSize="7" fill="currentColor" stroke="none">Z</text></svg>
+    case 'cyclicLines': return <svg {...S}><path d="M4 3v18M10 3v18M16 3v18M22 3v18" /></svg>
+    case 'timeCycles': return <svg {...S}><path d="M2 18a4 4 0 018 0 4 4 0 018 0" /><path d="M18 18a2 2 0 014 0" /><path d="M1 18h22" opacity="0.4" /></svg>
+    case 'sineLine': return <svg {...S}><path d="M2 12c2.5-8 5.5-8 8 0s5.5 8 8 0 3-5 4-4" /></svg>
+    case 'forecast': return <svg {...S}><path d="M4 18L18 6" /><circle cx="4" cy="18" r="2" /><circle cx="18" cy="6" r="2" /><path d="M14 4h7v4" opacity="0.6" /></svg>
+    case 'highlighter': return <svg {...S}><path d="M4 17c3-1 4-6 7-6s3 5 6 5 3-6 5-8" strokeWidth="4" opacity="0.45" /></svg>
+    case 'arrowMarker': return <svg {...S}><path d="M3 15l10-10 2 4 6-1-6 6 1 6-4-2-9 3z" fill="currentColor" fillOpacity="0.25" /></svg>
+    case 'arrowUp': return <svg {...S}><path d="M12 3l6 7h-4v10h-4V10H6z" fill="currentColor" fillOpacity="0.25" /></svg>
+    case 'arrowDown': return <svg {...S}><path d="M12 21l6-7h-4V4h-4v10H6z" fill="currentColor" fillOpacity="0.25" /></svg>
+    case 'rotatedRect': return <svg {...S}><path d="M8 3l13 7-5 11L3 14z" /></svg>
+    case 'path': return <svg {...S}><path d="M3 18l6-9 5 6 6-9" /><path d="M16 6h4v4" /></svg>
+    case 'circle': return <svg {...S}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="1.2" /></svg>
+    case 'ellipse': return <svg {...S}><ellipse cx="12" cy="12" rx="9.5" ry="6" /></svg>
+    case 'polyline': return <svg {...S}><path d="M3 18L8 6l6 8 7-9v14z" /></svg>
+    case 'triangle': return <svg {...S}><path d="M12 4l9 16H3z" /></svg>
+    case 'arc': return <svg {...S}><path d="M3 18C6 6 18 6 21 18z" /></svg>
+    case 'curve': return <svg {...S}><path d="M3 18C6 6 18 6 21 18" /></svg>
+    case 'doubleCurve': return <svg {...S}><path d="M2 14c3-9 7-9 10 0s7 9 10 0" /></svg>
+    case 'sector': return <svg {...S}><path d="M5 19L5 5a14 14 0 0114 14z" /></svg>
+    case 'anchoredText': return <svg {...S}><path d="M6 7V5h12v2M12 5v12M9 17h6" /><path d="M3 21h4M17 21h4" /></svg>
+    case 'note': return <svg {...S}><rect x="4" y="4" width="16" height="16" rx="2" /><path d="M8 9h8M8 12h8M8 15h5" /></svg>
+    case 'priceNote': return <svg {...S}><circle cx="5" cy="19" r="1.8" /><path d="M6 18l6-7" /><rect x="11" y="5" width="11" height="6" rx="1" /></svg>
+    case 'pin': return <svg {...S}><circle cx="12" cy="8" r="4.5" /><path d="M12 12.5V21" /></svg>
+    case 'callout': return <svg {...S}><rect x="9" y="3" width="13" height="10" rx="1.5" /><path d="M12 13l-8 8 6-8" /></svg>
+    case 'comment': return <svg {...S}><path d="M4 5h16v11H11l-5 4v-4H4z" /></svg>
+    case 'signpost': return <svg {...S}><rect x="5" y="3" width="14" height="7" rx="1.5" /><path d="M12 10v11" /></svg>
+    case 'flag': return <svg {...S}><path d="M6 21V4" /><path d="M6 4c4-2 7 2 12 0v8c-5 2-8-2-12 0" fill="currentColor" fillOpacity="0.25" /></svg>
+    case 'emoji': return <svg {...S}><circle cx="12" cy="12" r="9" /><path d="M8 14c1 2 2.5 3 4 3s3-1 4-3" /><path d="M9 9.5h.01M15 9.5h.01" strokeWidth="2.6" /></svg>
   }
 }
 
@@ -100,8 +155,9 @@ export function DrawToolGroups({ drawLayerRef, bumpDraw, t, compact = false }: {
               <div className="chart-iv-grp">
                 <b>{String(t(`charts.draw.grp_${g.id}`))}</b>
               </div>
-              {g.tools.map((tl) => (
-                <div key={tl} className={`chart-pop-row ${cur === tl ? 'on' : ''}`}>
+              {g.tools.map((tl) => (<Fragment key={tl}>
+                {g.secs?.[tl] &&<div className="chart-pop-sec">{String(t(`charts.draw.sec_${g.secs[tl]}`))}</div>}
+                <div className={`chart-pop-row ${cur === tl ? 'on' : ''}`}>
                   <button type="button" className="chart-pop-item" onClick={() => pick(g.id, tl)}>
                     <DrawToolIcon tool={tl} /><span>{String(t(`charts.draw.${tl}`))}</span>{toolKeyHint(tl) && <small>{toolKeyHint(tl)}</small>}
                   </button>
@@ -111,7 +167,7 @@ export function DrawToolGroups({ drawLayerRef, bumpDraw, t, compact = false }: {
                     <svg width="13" height="13" viewBox="0 0 24 24" fill={favs.includes(tl) ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden><path d="M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z" /></svg>
                   </button>
                 </div>
-              ))}
+              </Fragment>))}
             </ChartPopover>
           </span>
         )

@@ -20,7 +20,8 @@ import { CHART_PREFS_NS } from './useChartPrefs'
 import { registerBarTimes, xToTime, timeToX } from './draw/coords'
 import {
   type Drawing, type DrawType, type Tool, type MagnetMode, type Point, type StyleProps, type DrawTemplate,
-  TOOL_META, TOOL_HOTKEYS, COLORS, STYLE_KEYS, isDrawType, sanitizeDrawings, finishPoints, uid, styleOf,
+  TOOL_META, TOOL_HOTKEYS, COLORS, STYLE_KEYS, DEFAULT_EMOJI, isDrawType, sanitizeDrawings, finishPoints, uid, styleOf,
+  pointsNeeded, isScreenAnchored,
 } from './draw/model'
 import { DrawingsPrimitive, type DrawScene } from './draw/primitive'
 import { anchorsOf, constrain45, inMarquee, dragHandle, type DrawLabels } from './draw/tools'
@@ -71,6 +72,9 @@ const CLICK_PX = 4
 const LONG_PRESS_SLOP = 10
 const UNDO_MAX = 50
 const NUDGE_MERGE_MS = 700
+
+// 画完直接打开文字编辑的工具 / tools that open the text editor right after they're placed
+const OPENS_TEXT = new Set<DrawType>(['text', 'anchoredText', 'note', 'pin', 'comment', 'callout', 'signpost'])
 
 const isTouchDevice = typeof window !== 'undefined' && (window.matchMedia?.('(pointer: coarse)').matches || navigator.maxTouchPoints > 0)
 // 触摸、以及粗指针设备上的笔，都没有「悬停」，改走「点一下选中」（见 subscribeClick）。
@@ -173,6 +177,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const appliedRef = useRef('')
   const symRef = useRef(symbol)
   const lastClickRef = useRef<{ id: string; time: number } | null>(null)
+  const polyClickRef = useRef<{ x: number; y: number; time: number } | null>(null)
   const touchSelRef = useRef(false)
   const lastTouchRef = useRef(false)
   const overlayRef = useRef<HTMLDivElement>(null)
@@ -183,6 +188,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     bars: String(t('charts.draw.lbl.bars')), rr: String(t('charts.draw.lbl.rr')), target: String(t('charts.draw.lbl.target')),
     stop: String(t('charts.draw.lbl.stop')), qty: String(t('charts.draw.lbl.qty')), risk: String(t('charts.draw.lbl.risk')),
     pips: String(t('charts.draw.lbl.pips')),
+    ls: String(t('charts.draw.lbl.ls')), hd: String(t('charts.draw.lbl.hd')), rs: String(t('charts.draw.lbl.rs')),
     dur: (sec: number) => {
       const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.round((sec % 3600) / 60)
       const parts: string[] = []
@@ -344,6 +350,11 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
 
   // 平移一组画线的点（像素位移换回时间 / 价格）/ shift a drawing's points by a pixel delta
   const shiftPts = useCallback((d: Drawing, orig: Point[], dx: number, dy: number): Point[] => orig.map((pt) => {
+    // 锚定文本存的是屏幕比例 / anchored text stores screen fractions
+    if (isScreenAnchored(d.type)) {
+      const ps = chart.paneSize(0)
+      return { t: Math.min(0.98, Math.max(0, pt.t + dx / (ps.width || 1))), p: Math.min(0.98, Math.max(0, pt.p + dy / (ps.height || 1))) }
+    }
     let tt = pt.t, pp = pt.p
     if (d.type !== 'hline' && dx !== 0) {
       const ox = timeToX(chart, pt.t)
@@ -522,7 +533,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const last = defaultsRef.current[type] ?? {}
     const base: Drawing = { ...last, id: uid(), type, pts, color: last.color || colorRef.current }
     if (last.levels) base.levels = last.levels.map((lv) => ({ ...lv }))
-    if (type === 'text') base.text = String(t('charts.draw.textDefault'))
+    if (type === 'emoji') base.text = DEFAULT_EMOJI
+    else if (OPENS_TEXT.has(type)) base.text = String(t('charts.draw.textDefault'))
     return base
   }, [t])
   const finishCreate = useCallback((d: Drawing) => {
@@ -533,8 +545,19 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     commit([...drawingsRef.current, done])
     select([done.id])
     if (!stayRef.current) setToolState('cursor')
-    if (done.type === 'text') setSettings({ id: done.id, tab: 'text' })
+    // 文字类工具画完直接打开文字编辑 / text tools open the text editor straight away
+    if (OPENS_TEXT.has(done.type)) setSettings({ id: done.id, tab: 'text' })
   }, [commit, select])
+  // 折线 / 路径：去掉跟着鼠标的那个浮动点再完成（至少两个点）
+  // Polyline / path: drop the floating point that follows the mouse, then finish (two points at least)
+  const finishPoly = useCallback((closed = false) => {
+    const c = createRef.current
+    if (!c || TOOL_META[c.d.type].create !== 'poly') return false
+    const pts = c.d.pts.slice(0, -1)
+    if (pts.length < 2) return false
+    finishCreate({ ...c.d, pts, ...(closed ? { closed: true } : {}) })
+    return true
+  }, [finishCreate])
   const cancelCreate = useCallback(() => {
     createRef.current = null
     gestureRef.current = null
@@ -551,7 +574,9 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       const a = pxOf(d.pts[0])
       if (Number.isFinite(a.x) && Number.isFinite(a.y)) ({ x, y } = constrain45(a, { x, y }))
     }
-    if (c.step === 2 && d.type === 'channel') {
+    const parallel = d.type === 'channel' || d.type === 'fibChannel'
+    if (c.step === 2 && parallel) {
+      // 通道第三点：鼠标到基线的价差就是通道宽 / channel point 3: its price gap to the base line is the width
       const a = pxOf(d.pts[0]), b = pxOf(d.pts[1])
       const lineY = b.x === a.x ? a.y : a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x)
       const pc = series.coordinateToPrice(y) as number | null
@@ -562,9 +587,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       const pt = toPoint(x, y)
       if (!pt) return
       d.pts[c.step] = pt
-      // 三点工具放第二个点时，第三个点先跟着（通道先是一条线，扩展先从第二点起）
-      // While placing point 2 of a three-point tool the third follows (a flat channel, an extension from p2)
-      if (c.step === 1 && TOOL_META[d.type].create === 'three') d.pts[2] = d.type === 'channel' ? { ...d.pts[0] } : { ...pt }
+      // 后面还没放的点先跟着当前点（通道先是一条线）/ points not placed yet follow this one (a channel starts flat)
+      for (let k = c.step + 1; k < d.pts.length; k++) d.pts[k] = parallel ? { ...d.pts[0] } : { ...pt }
     }
     showTemp()
   }, [snap, pxOf, series, toPoint, showTemp])
@@ -590,7 +614,21 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       const meta = TOOL_META[type]
       const c = createRef.current
       if (c) {
-        // 两点 / 三点工具的后续点击：落点 / follow-up click of a click-click / three-point tool
+        if (meta.create === 'poly') {
+          // 折线 / 路径：双击结束；点回第一个点 = 闭合（折线）/ polyline / path: double-click ends; back on point 1 closes
+          const now = Date.now()
+          const lastDown = polyClickRef.current
+          polyClickRef.current = { x, y, time: now }
+          if (lastDown && now - lastDown.time < 350 && Math.hypot(x - lastDown.x, y - lastDown.y) < 8) { if (!finishPoly()) cancelCreate(); return }
+          const first = pxOf(c.d.pts[0])
+          if (type === 'polyline' && c.d.pts.length >= 4 && Math.hypot(x - first.x, y - first.y) <= 8) { finishPoly(true); return }
+          updateCreate(x, y, e.shiftKey)
+          c.d.pts.push({ ...c.d.pts[c.d.pts.length - 1] })
+          c.step = c.d.pts.length - 1
+          showTemp()
+          return
+        }
+        // 多点工具的后续点击：落点 / follow-up click of a multi-point tool
         updateCreate(x, y, e.shiftKey)
         gestureRef.current = { k: 'create', pointerId: e.pointerId, startX: x, startY: y }
         return
@@ -602,7 +640,14 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
         const d = newDrawing(type, [pt])
         if (type === 'hline') d.pts = [{ t: 0, p: pt.p }]
         if (type === 'vline') d.pts = [{ t: pt.t, p: 0 }]
+        if (isScreenAnchored(type)) { const ps = chart.paneSize(0); d.pts = [{ t: s.x / (ps.width || 1), p: s.y / (ps.height || 1) }] }
         finishCreate(d)
+        return
+      }
+      if (meta.create === 'poly') {
+        polyClickRef.current = { x, y, time: Date.now() }
+        createRef.current = { d: newDrawing(type, [pt, { ...pt }]), step: 1 }
+        showTemp()
         return
       }
       if (meta.create === 'free') {
@@ -611,7 +656,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
         showTemp()
         return
       }
-      const pts = meta.create === 'three' ? [pt, { ...pt }, { ...pt }] : [pt, { ...pt }]
+      const pts = Array.from({ length: pointsNeeded(type) }, () => ({ ...pt }))
       createRef.current = { d: newDrawing(type, pts), step: 1 }
       gestureRef.current = { k: 'create', pointerId: e.pointerId, startX: x, startY: y }
       showTemp()
@@ -663,7 +708,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
       k: 'move', pointerId: e.pointerId, startX: x, startY: y, slop, active: false,
       ids: movable, orig, clone: multi, clickId: d.id, toggle: (multi || e.shiftKey) && inSel,
     }
-  }, [cancelCreate, updateCreate, snap, toPoint, newDrawing, finishCreate, showTemp, select]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cancelCreate, updateCreate, snap, toPoint, newDrawing, finishCreate, finishPoly, showTemp, select, pxOf, chart]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // 交互层接管指针时图表收不到移动事件，十字光标会停住：这里替它跟上（画线 / 拉手柄时跟着磁吸后的点）
   // While the layer holds the pointer the chart gets no moves and its crosshair freezes: drive it from
@@ -790,11 +835,13 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
           cancelCreate()
           return
         }
-        if (TOOL_META[d.type].create === 'three') { c.step = 2; showTemp(); return }
+        if (pointsNeeded(d.type) > 2) { c.step = 2; showTemp(); return }
         finishCreate(d)
         return
       }
-      if (c.step === 2) finishCreate(d)
+      // 多点工具：还没放够就等下一个点 / multi-point tools wait for the next point until all are placed
+      if (c.step + 1 < pointsNeeded(d.type)) { c.step += 1; showTemp(); return }
+      finishCreate(d)
       return
     }
     if (g.k === 'marquee') {
@@ -923,6 +970,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
         return
       }
       if (inTextField(e.target)) return
+      // 回车结束折线 / 路径 / Enter finishes a polyline / path
+      if (e.key === 'Enter' && createRef.current && TOOL_META[createRef.current.d.type].create === 'poly') { e.preventDefault(); finishPoly(); return }
       if (mod && !e.altKey && (e.key === 'z' || e.key === 'Z')) { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return }
       if (mod && !e.altKey && (e.key === 'y' || e.key === 'Y')) { e.preventDefault(); redo(); return }
       if (!inChartArea()) return
@@ -960,7 +1009,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     window.addEventListener('keydown', onKey)
     window.addEventListener('keydown', onArrow, true)
     return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keydown', onArrow, true) }
-  }, [host, chart, cancelCreate, select, undo, redo, deleteSelected, copySelected, paste, setTool, shiftPts, commit, commitNoHistory])
+  }, [host, chart, cancelCreate, select, undo, redo, deleteSelected, copySelected, paste, setTool, shiftPts, commit, commitNoHistory, finishPoly])
 
   // ──── 悬停：动态接管指针 + 光标样式 / hover: dynamic pointer-events + cursor ────
   // 交互层平时不接管指针（否则图表的拖动平移 / 滚轮缩放到不了底下），只有在拖、画、悬停在画线上、

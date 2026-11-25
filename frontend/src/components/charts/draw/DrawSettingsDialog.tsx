@@ -8,9 +8,18 @@ import ChartDialog from '../ChartDialog'
 import Switch from '../../Switch'
 import { ColorDot } from '../IndicatorSettingsModal'
 import {
-  type Drawing, type DrawTemplate, type FibLevel, type VisGroup, PALETTE, LINE_WIDTHS, TOOL_META,
-  levelsOf, fillOf, showLabelOf, fontSizeOf, takesText, DEFAULT_ACCOUNT, DEFAULT_RISK,
+  type Drawing, type DrawTemplate, type DrawType, type FibLevel, type VisGroup, PALETTE, LINE_WIDTHS, TOOL_META,
+  levelsOf, fillOf, showLabelOf, fontSizeOf, takesText, hasLevels, isScreenAnchored, EMOJIS, DEFAULT_ACCOUNT, DEFAULT_RISK,
 } from './model'
+
+// 没有线宽 / 线型可调的工具（图标、气泡、文字块）/ tools without width / style (icons, bubbles, text blocks)
+const NO_LINE = new Set<DrawType>(['text', 'priceLabel', 'long', 'short', 'emoji', 'note', 'pin', 'flag', 'arrowUp', 'arrowDown', 'arrowMarker', 'comment', 'callout', 'signpost', 'anchoredText'])
+// 能左右延长的工具 / tools that extend left / right
+const EXTENDS = new Set<DrawType>(['channel', 'fib', 'fibExt', 'fibChannel', 'flatChannel', 'disjointChannel'])
+// 有读数 / 档位标签开关的工具 / tools with a labels switch
+const LABELED = new Set<DrawType>(['info', 'priceRange', 'dateRange', 'datePriceRange', 'long', 'short', 'forecast', 'gannFan'])
+// 坐标只给提示、不逐点列出的工具（点太多）/ tools whose coordinates aren't listed point by point
+const FREEHAND = new Set<DrawType>(['brush', 'highlighter'])
 import { StyleGlyph } from './DrawFloatingBar'
 
 export type SettingsTab = 'style' | 'text' | 'inputs' | 'coords' | 'vis'
@@ -79,11 +88,12 @@ export default function DrawSettingsDialog(p: Props) {
   const type = d.type
   const meta = TOOL_META[type]
   const isPos = type === 'long' || type === 'short'
-  const isFib = type === 'fib' || type === 'fibExt'
+  const isFib = hasLevels(type)
   const tabs: SettingsTab[] = ['style']
   if (takesText(type)) tabs.push('text')
   if (isPos) tabs.push('inputs')
-  tabs.push('coords', 'vis')
+  if (!isScreenAnchored(type)) tabs.push('coords')
+  tabs.push('vis')
   const [tab, setTab] = useState<SettingsTab>(tabs.includes(p.initialTab) ? p.initialTab : 'style')
   const [tplName, setTplName] = useState('')
 
@@ -97,7 +107,7 @@ export default function DrawSettingsDialog(p: Props) {
 
   const ptLabel = (i: number) => {
     if (isPos) return tt(['charts.draw.lbl.entry', 'charts.draw.lbl.target', 'charts.draw.lbl.stop'][i] ?? 'charts.draw.lbl.point', { n: i + 1 })
-    if (type === 'channel' && i === 2) return tt('charts.draw.lbl.width')
+    if ((type === 'channel' || type === 'fibChannel') && i === 2) return tt('charts.draw.lbl.width')
     return tt('charts.draw.lbl.point', { n: i + 1 })
   }
 
@@ -111,7 +121,7 @@ export default function DrawSettingsDialog(p: Props) {
                 <ColorDot value={d.color} palette={PALETTE} label={tt('charts.draw.color')} onChange={(v) => set({ color: v })} />
               </Row>
             )}
-            {type !== 'text' && type !== 'priceLabel' && !isPos && (
+            {!NO_LINE.has(type) && (
               <>
                 <Row label={tt('charts.draw.width')}>
                   <Seg value={d.lineWidth ?? 1} label={tt('charts.draw.width')} options={LINE_WIDTHS.map((w) => ({ v: w, label: `${w}px` }))} onChange={(v) => set({ lineWidth: v })} />
@@ -126,7 +136,17 @@ export default function DrawSettingsDialog(p: Props) {
                 <Switch checked={fillOf(d)} onChange={(v) => set({ fill: v })} aria-label={tt('charts.draw.fill')} />
               </Row>
             )}
-            {(meta.lineLike || type === 'channel' || isFib) && type !== 'extended' && (
+            {type === 'polyline' && (
+              <Row label={tt('charts.draw.closed')}>
+                <Switch checked={!!d.closed} onChange={(v) => set({ closed: v })} aria-label={tt('charts.draw.closed')} />
+              </Row>
+            )}
+            {type === 'regression' && (
+              <Row label={tt('charts.draw.extendRight')}>
+                <Switch checked={!!d.extendRight} onChange={(v) => set({ extendRight: v })} aria-label={tt('charts.draw.extendRight')} />
+              </Row>
+            )}
+            {(meta.lineLike || EXTENDS.has(type)) && type !== 'extended' && (
               <>
                 <Row label={tt('charts.draw.extendLeft')}>
                   <Switch checked={!!d.extendLeft} onChange={(v) => set({ extendLeft: v })} aria-label={tt('charts.draw.extendLeft')} />
@@ -138,7 +158,7 @@ export default function DrawSettingsDialog(p: Props) {
                 )}
               </>
             )}
-            {(type === 'info' || isFib || isPos || type === 'priceRange' || type === 'dateRange' || type === 'datePriceRange') && (
+            {(LABELED.has(type) || isFib) && (
               <Row label={tt('charts.draw.showLabel')}>
                 <Switch checked={showLabelOf(d)} onChange={(v) => set({ showLabel: v })} aria-label={tt('charts.draw.showLabel')} />
               </Row>
@@ -167,6 +187,18 @@ export default function DrawSettingsDialog(p: Props) {
           </>
         )
       case 'text':
+        if (type === 'emoji') {
+          return (
+            <div className="draw-emoji-grid" role="radiogroup" aria-label={tt('charts.draw.emoji')}>
+              {EMOJIS.map((e) => (
+                <button key={e} type="button" role="radio" aria-checked={d.text === e} className={d.text === e ? 'on' : ''} onClick={() => set({ text: e })}>{e}</button>
+              ))}
+              <Row label={tt('charts.draw.fontSize')}>
+                <Seg value={fontSizeOf(d)} label={tt('charts.draw.fontSize')} options={[10, 14, 18, 24, 32].map((n) => ({ v: n, label: String(n) }))} onChange={(v) => set({ fontSize: v })} />
+              </Row>
+            </div>
+          )
+        }
         return (
           <>
             <textarea className="ind-in wide draw-text-in" rows={4} maxLength={500} value={d.text ?? ''} autoFocus
@@ -194,14 +226,14 @@ export default function DrawSettingsDialog(p: Props) {
               if (type === 'hline' && i > 0) return null
               const showT = type !== 'hline' && !(isPos && i > 0) && !(type === 'channel' && i === 2)
               const showP = type !== 'vline'
-              if (type === 'brush') return null
+              if (FREEHAND.has(type)) return null
               return (
                 <Row key={i} label={ptLabel(i)} hint={showT ? p.fmtTime(pt.t) : undefined}>
                   {showP ? <Num value={Number(pt.p.toFixed(p.digits))} width={120} label={ptLabel(i)} onChange={(v) => set({ pts: d.pts.map((x, k) => (k === i ? { ...x, p: v } : x)) })} /> : <span />}
                 </Row>
               )
             })}
-            {type === 'brush' && <small>{tt('charts.draw.brushCoords')}</small>}
+            {FREEHAND.has(type) && <small>{tt('charts.draw.brushCoords')}</small>}
           </>
         )
       case 'vis':
