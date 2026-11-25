@@ -561,6 +561,10 @@ export function useChartEngine(
   // leaving renko / line break / kagi / P&F (or changing their parameters) changes the bar count a
   // lot, and the old visible range would squeeze the new data into a sliver on the right, so the
   // view resets to the last 150 bars.
+  // 根数很少（点数图常见只有几列）时 fitContent 会把它们摊在左边、每根宽得离谱：改成按 60 根的
+  // 宽度靠右放，和 TradingView 一样。
+  // With very few bars (P&F often has only a handful of columns) fitContent leaves them oddly wide
+  // on the left, so they are laid out at a 60-bar width aligned right instead, as TradingView does.
   const shapeRef = useRef('')
   useEffect(() => {
     if (!seriesRef.current || candlesRef.current.length === 0) return
@@ -572,8 +576,10 @@ export function useChartEngine(
     const chart = chartRef.current
     if (!chart || !prev || prev === shape) return
     const n = barTimesRef.current.length
-    if (n <= 150) chart.timeScale().fitContent()
-    else chart.timeScale().setVisibleLogicalRange({ from: n - 150, to: n - 1 + (viewRef.current?.rightOffset ?? 5) })
+    const right = n - 1 + (viewRef.current?.rightOffset ?? 5)
+    if (n < 60) chart.timeScale().setVisibleLogicalRange({ from: n - 60, to: right })
+    else if (n <= 150) chart.timeScale().fitContent()
+    else chart.timeScale().setVisibleLogicalRange({ from: n - 150, to: right })
   }, [chartType, transformKey, renderAll, recomputeIndicators])
 
   // 水印：品种 + 周期，画在主图正中（设置 → 画布）/ watermark: symbol + interval centred on the main pane

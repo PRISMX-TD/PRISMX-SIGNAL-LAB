@@ -124,25 +124,33 @@ class MainRenderer implements ICustomSeriesPaneRenderer {
     const hr = scope.horizontalPixelRatio
     const vr = scope.verticalPixelRatio
     // 可见区间两侧各多画一根，平移时边缘不闪。/ One extra bar each side so edges don't flicker.
-    const from = Math.max(0, d.visibleRange.from - 1)
-    const to = Math.min(d.bars.length, d.visibleRange.to + 1)
+    const vf = Math.max(0, d.visibleRange.from)
+    const vt = Math.min(d.bars.length, d.visibleRange.to)
+    if (vt <= vf) return
+    const from = Math.max(0, vf - 1)
+    const to = Math.min(d.bars.length, vt + 1)
+    // 库只给可见区间内的 K 线算 x；区间外多取的那两根，x 要么是 NaN（从没进过屏幕），要么是上次
+    // 进屏幕时的旧值（拖动 / 缩放之后）。NaN 会被 canvas 静默丢掉（面积图底边变斜线），旧值会多画
+    // 一段往回折的线。所以区间外的 x 按等间距从区间两端外推。
+    // The library computes x only for bars inside the visible range; the two extra bars outside it
+    // carry either NaN (never on screen) or a stale x from their last time on screen (after a pan or
+    // zoom). Canvas silently drops NaN (the area fill's bottom edge turned diagonal) and a stale x
+    // draws a stray segment folding back, so x outside the range is extrapolated at even spacing.
+    const step = vt - vf >= 2 ? (d.bars[vt - 1].x - d.bars[vf].x) / (vt - 1 - vf) : d.barSpacing * (d.conflationFactor || 1)
+    const xAt = (i: number) => (i < vf ? d.bars[vf].x - (vf - i) * step : i >= vt ? d.bars[vt - 1].x + (i - vt + 1) * step : d.bars[i].x)
     const pts: Px[] = []
     for (let i = from; i < to; i++) {
       const b = d.bars[i]
       const bar = b.originalData
-      // 可见区间外多取的那一根，库可能还没给它算 x（NaN）。canvas 会静默丢掉带 NaN 的 lineTo，
-      // 面积图 / 基准线的封闭路径就少了左下角那个点，填充底边变成从第一个点斜拉到右下角。
-      // The extra bar outside the visible range may have no x yet (NaN). Canvas silently drops a
-      // lineTo with NaN, so the closed area / baseline path lost its bottom-left corner and the
-      // fill's bottom edge became a diagonal from the first point to the bottom right.
-      if (!bar || bar.close === undefined || !Number.isFinite(b.x)) continue
+      const x = xAt(i)
+      if (!bar || bar.close === undefined || !Number.isFinite(x)) continue
       const oy = p2c(bar.open)
       const hy = p2c(bar.high)
       const ly = p2c(bar.low)
       const cy = p2c(bar.close)
       if (oy == null || hy == null || ly == null || cy == null) continue
       const prev = i > 0 ? d.bars[i - 1]?.originalData : undefined
-      pts.push({ x: b.x * hr, o: oy * vr, h: hy * vr, l: ly * vr, c: cy * vr, bar, prevClose: prev && prev.close !== undefined ? prev.close : null })
+      pts.push({ x: x * hr, o: oy * vr, h: hy * vr, l: ly * vr, c: cy * vr, bar, prevClose: prev && prev.close !== undefined ? prev.close : null })
     }
     if (pts.length === 0) return
     const ctx = scope.context
