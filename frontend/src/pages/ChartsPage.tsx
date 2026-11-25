@@ -101,6 +101,8 @@ import {
   normalizeCandleColors, type CandleColors,
 } from '../components/charts/chartConfig'
 import { readStorage } from '../utils/safeStorage'
+import { isAppHidden } from '../utils/appVisibility'
+import { serverNowMs } from '../utils/serverClock'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/terminal.css'
 import { EMPTY } from '../utils/format'
@@ -233,9 +235,22 @@ function GearButton({ onClick, label }: { onClick: () => void; label: string }) 
 // new symbol's bid was stamped onto the old symbol's last bar, drawing one giant candle.
 function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { symbol: string; interval: string; engine: ReturnType<typeof useChartEngine>; liveBidRef: { current: number | null }; dataKeyRef: { current: string } }) {
   const bid = useGlobalQuote(symbol)?.bid ?? null
-  useEffect(() => { liveBidRef.current = null }, [symbol, liveBidRef])
+  // 上一次处理过的 bid。engine 每次渲染都是新对象，页面一重渲染本 effect 就重跑——只有 bid 真的
+  // 变了才算一跳。以前重跑也照样开新 bar：页面在后台时全站报价不更新（live.tsx 丢弃后台帧），
+  // 可页面仍在重渲染，每过一个边界就拿过期 bid 开一根 o=h=l=c 的 bar，图上一排横线、刷新才好
+  // （2026-11-25 用户截图）。
+  // The last bid handled. engine is a new object every render, so this effect re-runs whenever
+  // the page re-renders; only a real bid change counts as a tick. Re-runs used to open bars too:
+  // while hidden the site-wide quotes freeze (live.tsx drops background frames) but the page still
+  // re-renders, so each boundary opened an o=h=l=c bar from the stale bid — a row of flat dashes
+  // until refresh (2026-11-25 user report).
+  const handledBidRef = useRef<number | null>(null)
+  useEffect(() => { liveBidRef.current = null; handledBidRef.current = null }, [symbol, liveBidRef])
   useEffect(() => {
     liveBidRef.current = bid
+    const isTick = bid !== handledBidRef.current
+    handledBidRef.current = bid
+    if (!isTick || isAppHidden()) return
     const arr = engine.candlesRef.current
     const series = engine.seriesRef.current
     if (bid == null || !series || arr.length === 0 || dataKeyRef.current !== `${symbol}|${interval}`) return
@@ -243,7 +258,9 @@ function LiveBarSync({ symbol, interval, engine, liveBidRef, dataKeyRef }: { sym
     if (last.t !== engine.lastTimeRef.current) return
     const iv = intervalSeconds(interval)
     if (iv != null) {
-      const openT = Math.floor(Date.now() / 1000 / iv) * iv
+      // 用服务器校准过的时钟：手机时间不准时，Date.now() 会把新 bar 开早 / 开晚。
+      // Server-calibrated clock: a skewed device clock opened bars early / late with Date.now().
+      const openT = Math.floor(serverNowMs() / 1000 / iv) * iv
       // 只开紧挨着的下一根：差太多说明数据断档 / 休市，交给轮询。
       // Only the immediately next bar; a bigger gap means a data hole / closed market — leave it to the poll.
       if (openT === last.t + iv) {

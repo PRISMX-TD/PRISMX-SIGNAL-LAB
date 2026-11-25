@@ -16,6 +16,7 @@ import {
 import type { ChartEngine } from './useChartEngine'
 import { createChartFeed } from './derivedIntervals'
 import { keepIfEqual } from '../../store/keepIfEqual'
+import { olderBarsChanged, tailHasHole } from './tailRepair'
 import { netQuality } from '../../store/netQuality'
 import { isAppHidden } from '../../utils/appVisibility'
 import { startPolling } from '../../utils/usePollWhileVisible'
@@ -190,6 +191,12 @@ export function useChartData(symbol: string, interval: string, digits: number, e
     // edge stale. Request latest in parallel right away and join it as soon as history lands.
     let historyApplied = false
     let pendingLatest: Awaited<ReturnType<typeof chartApi.latest>> | null = null
+    // 服务器确认过的最新 bar 时间（历史 / 尾部重拉 / 轮询响应里出现过的）。LiveBarSync 凭报价在本地
+    // 先开的 bar 只推进 lastTimeRef、不推进它，缺口检测拿它比，才不会被本地假 bar 骗过（见 tailRepair）。
+    // Newest bar time the server has confirmed (history / tail refill / poll responses). Bars that
+    // LiveBarSync opens locally from quotes advance lastTimeRef but not this, so the hole check
+    // compares against it and isn't fooled by local fakes (see tailRepair).
+    let serverLastT = 0
 
     // 秒开：有快照先画出来。/ Instant paint from the snapshot when we have one.
     const snap = snapshotCache.get(snapKey)
@@ -213,6 +220,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         renderAll()
         if (dataKeyRef) dataKeyRef.current = `${symbol}|${interval}`
         lastTimeRef.current = r.bars[r.bars.length - 1].t
+        serverLastT = lastTimeRef.current
         setLastPrice(r.bars[r.bars.length - 1].c)
         hasMoreHistoryRef.current = r.hasMore
         recomputeIndicators()
@@ -350,6 +358,7 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         const range = chartRef.current?.timeScale().getVisibleLogicalRange()
         candlesRef.current = merged
         lastTimeRef.current = merged[merged.length - 1].t
+        serverLastT = lastTimeRef.current
         renderAll()
         recomputeIndicators()
         setDayStats((prev) => keepIfEqual(prev, dayStatsNow()))
@@ -369,10 +378,12 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         // History not back yet: stash it and join after history's setData (which would wipe it).
         pendingLatest = r
         if (!historyApplied) return
-        // 响应里最早那根与本地最后一根之间隔着整根以上的 bar：中间有洞，重拉尾部。
-        // A whole bar or more between our last bar and the response's first: a hole — refill.
-        const spacing = barSpacingSeconds(interval)
-        if (spacing != null && lastTimeRef.current > 0 && r.bars.length > 0 && r.bars[0].t > lastTimeRef.current + spacing) {
+        // 响应里最早那根与服务器确认过的最后一根之间隔着整根以上的 bar：中间有洞，重拉尾部。
+        // 以前拿本地最后一根比，本地凭过期报价开出的一排假 bar 会把洞「填上」，永远不重拉。
+        // A whole bar or more between the newest server-confirmed bar and the response's first:
+        // a hole — refill. Comparing against the local last bar let a row of fake bars opened from
+        // a stale quote "fill" the hole, so it never refilled.
+        if (tailHasHole(serverLastT || lastTimeRef.current, r.bars[0]?.t, barSpacingSeconds(interval))) {
           if (refillTail()) return
         }
         // 最新一根用券商 bid 做收盘价，免得每 2 秒被 K 线库的收盘价拽回去。
@@ -380,7 +391,21 @@ export function useChartData(symbol: string, interval: string, digits: number, e
         // 本地已按报价开了新 bar 时，响应里的上一根别再被钉上当前 bid。
         // Once a tick has opened the next bar locally, don't stamp the current bid onto the previous one.
         const bars = r.bars.map((b, i) => (i === r.bars.length - 1 && b.t >= lastTimeRef.current ? withLiveClose(b, liveBidRef?.current) : b))
+        // 比本地最后一根更早、且与本地不同的 bar（多半是本地凭报价先开、服务器这才给出真值的那根）：
+        // update() 改不了更早的 bar，以前只并进 candlesRef，图上一直画着旧的。合并后整段重画。
+        // Bars older than the local last one that differ from the local copy (usually one opened
+        // locally from quotes, now corrected by the server): update() can't touch earlier bars, so
+        // they used to reach candlesRef only while the chart kept the stale one. Repaint after merging.
+        const repaint = olderBarsChanged(candlesRef.current, bars, lastTimeRef.current)
         for (const b of bars) applyBar(b)
+        if (r.bars.length > 0) serverLastT = Math.max(serverLastT, r.bars[r.bars.length - 1].t)
+        // applyBar 已把更早的 bar 并进 candlesRef；图上要整段重画才看得到。
+        // applyBar already merged earlier bars into candlesRef; a full render makes them visible.
+        if (repaint) {
+          const range = chartRef.current?.timeScale().getVisibleLogicalRange()
+          renderAll()
+          if (!isFollowingLiveRef.current && range) chartRef.current?.timeScale().setVisibleLogicalRange(range)
+        }
         if (r.bars.length > 0) {
           setHasData(true)
           setLastPrice(bars[bars.length - 1].c)
