@@ -30,6 +30,8 @@ import DrawFloatingBar from './draw/DrawFloatingBar'
 import DrawSettingsDialog, { type SettingsTab } from './draw/DrawSettingsDialog'
 import DrawObjectTree from './draw/DrawObjectTree'
 import DrawFavoritesBar from './draw/DrawFavoritesBar'
+import { syncDrawingAlerts } from './alert/alertStore'
+import { drawingAlertable } from './alert/model'
 
 export type { Tool, MagnetMode } from './draw/model'
 
@@ -63,6 +65,8 @@ export interface DrawLayerHandle {
   toggleFavorite: (t: Tool) => void
   treeOpen: boolean
   toggleTree: () => void
+  // 当前品种的全部画线（警报弹窗编辑画线警报时找画线用）/ the symbol's drawings (the alert dialog looks drawings up)
+  getDrawings: () => Drawing[]
 }
 
 const MAGNET_WEAK_PX = 18
@@ -103,6 +107,8 @@ interface Props {
   // 多空仓位工具「转为订单」：按它的入场 / 止损 / 止盈开一张图上投影单（阶段 3）
   // A long/short drawing's "to order": opens a projected order from its entry / SL / TP (phase 3)
   onToOrder?: (o: { side: 'BUY' | 'SELL'; price: number; sl: number; tp: number }) => void
+  // 给选中的画线添加警报（阶段 5）/ add an alert on the selected drawing (phase 5)
+  onAlert?: (d: Drawing) => void
 }
 
 type Gesture =
@@ -114,7 +120,7 @@ type Gesture =
 
 interface Creating { d: Drawing; step: number }
 
-function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder }: Props, ref: React.Ref<DrawLayerHandle>) {
+function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval = '', fmtTime, theme, onStateChange, onToOrder, onAlert }: Props, ref: React.Ref<DrawLayerHandle>) {
   const { t } = useTranslation()
   const { getPref, setPref } = usePrefs()
 
@@ -269,6 +275,8 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
     const job = pendingRef.current
     if (!job) return
     pendingRef.current = null
+    // 画线挪了 / 删了，它身上的警报跟着改 / alerts on moved / deleted drawings follow them
+    syncDrawingAlerts(job.symbol, job.list)
     chartApi.saveDrawings(job.symbol, job.list)
       .then((r) => { lastSavedAtRef.current = r.updatedAt ?? null })
       .catch(() => { /* 下次改动会再存；本机缓存里还有 / the next edit saves again */ })
@@ -437,7 +445,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
   const toggleTree = useCallback(() => setTreeOpen((v) => !v), [])
   useImperativeHandle(ref, () => ({
     tool, setTool, color, setColor, selectedId: sel[0] ?? null, selectedCount: sel.length,
-    drawCount: drawings.length, lockedCount, stayInDraw, setStayInDraw, visible, setVisible,
+    drawCount: drawings.length, lockedCount, stayInDraw, setStayInDraw, visible, setVisible, getDrawings: () => drawingsRef.current,
     deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet,
     favorites, toggleFavorite, treeOpen, toggleTree,
   }), [tool, setTool, color, sel, drawings.length, lockedCount, stayInDraw, visible, deleteSelected, clearAll, applyColor, toggleLock, lockAll, unlockAll, undo, redo, magnet, setMagnet, favorites, toggleFavorite, treeOpen, toggleTree])
@@ -1304,6 +1312,7 @@ function DrawLayer({ chart, series, host, symbol, barTimes, digits = 2, interval
             const d = selDrawings[0]
             onToOrder({ side: d.type === 'long' ? 'BUY' : 'SELL', price: d.pts[0].p, tp: d.pts[1].p, sl: d.pts[2].p })
           } : undefined}
+          onAlert={onAlert && selDrawings.length === 1 && drawingAlertable(selDrawings[0]) ? () => onAlert(selDrawings[0]) : undefined}
           t={t}
         />
       )}

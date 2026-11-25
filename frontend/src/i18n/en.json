@@ -29,7 +29,8 @@
     "lucky_prize_delivered": "Your prize has been sent",
     "lucky_prize_cancelled": "Your prize was cancelled",
     "agent_tree_change": "An ambassador changed their downline ambassadors",
-    "agent_promoted": "You're now an ambassador · open your Ambassador Hub"
+    "agent_promoted": "You're now an ambassador · open your Ambassador Hub",
+    "chart_alert": "Chart alert triggered"
   },
   "nav": {
     "dashboard": "Dashboard",

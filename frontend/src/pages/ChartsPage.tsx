@@ -106,6 +106,13 @@ import { isAppHidden } from '../utils/appVisibility'
 import { serverNowMs } from '../utils/serverClock'
 // 本页专属样式：跟着本页 chunk 按需加载，不进首屏的全站 CSS（见 styles/index.css 文件头）。
 import '../styles/terminal.css'
+import '../styles/chart-alerts.css'
+import AlertLines from '../components/charts/alert/AlertLines'
+import AlertDialog, { type AlertInit } from '../components/charts/alert/AlertDialog'
+import AlertManager from '../components/charts/alert/AlertManager'
+import { useChartAlerts } from '../components/charts/alert/alertStore'
+import { onChartAlertFired } from '../utils/chartAlertEvents'
+import { useSearchParams } from 'react-router-dom'
 import { EMPTY } from '../utils/format'
 
 
@@ -602,6 +609,22 @@ export default function ChartsPage() {
     if (!activeSymbols.includes(symbol)) setSymbol(activeSymbols[0])
   }, [activeSymbols, symbol])
 
+  // /charts?symbol=XAUUSD（警报通知点进来）：云端偏好到了之后切过去，再把参数抹掉。
+  // 品种名大小写按活跃列表对齐（警报里存的是大写）。
+  // /charts?symbol=XAUUSD (from an alert notification): switch once cloud prefs are in, then drop
+  // the param. Case is matched against the active list (alerts store upper case).
+  const [searchParams, setSearchParams] = useSearchParams()
+  const wantSymbol = searchParams.get('symbol')
+  const pickSymbolLoose = useCallback((s: string) => {
+    const up = s.toUpperCase()
+    setSymbol(activeSymbols.find((x) => x.toUpperCase() === up) ?? s)
+  }, [activeSymbols])
+  useEffect(() => {
+    if (!wantSymbol || !loaded || activeSymbols.length === 0) return
+    pickSymbolLoose(wantSymbol)
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('symbol'); return n }, { replace: true })
+  }, [wantSymbol, loaded, activeSymbols.length, pickSymbolLoose, setSearchParams])
+
   useEffect(() => {
     if (!symbol) return // 尚未校正出有效品种前不写回偏好，避免用空字符串覆盖已保存的选择
                          // don't persist before a valid symbol is resolved, so we never overwrite a saved pref with ''
@@ -770,6 +793,18 @@ export default function ChartsPage() {
   const [rangeBusy, setRangeBusy] = useState(false)
   const chartBoxRef = useRef<HTMLDivElement>(null)
   const focusChart = useCallback(() => { chartBoxRef.current?.focus({ preventScroll: true }) }, [])
+
+  // ── 阶段 5：图表警报 / phase 5: chart alerts ──
+  // 新建 / 编辑弹窗的起点（null = 关）与管理器开关；触发时在图表页弹一条提示（站内通知 / 推送另由后端发）。
+  // The create / edit dialog's starting point (null = closed) and the manager; a fire toasts on the
+  // charts page (in-app notification / push are sent by the backend separately).
+  const [alertInit, setAlertInit] = useState<AlertInit | null>(null)
+  const [alertMgrOpen, setAlertMgrOpen] = useState(false)
+  const { alerts: chartAlerts } = useChartAlerts()
+  const activeAlertCount = useMemo(() => chartAlerts.filter((a) => a.status === 'active').length, [chartAlerts])
+  const openAlert = useCallback((init: AlertInit) => { setCtx(null); setAlertInit(init) }, [])
+  const alertBid = useCallback(() => quoteNow().bid, [quoteNow])
+  useEffect(() => onChartAlertFired((ev) => showToast(ev.message || ev.symbol, 'info')), [showToast])
   const setFavIntervals = useCallback((codes: string[]) => updatePrefs({ favIntervals: codes }), [updatePrefs])
   const setScaleMode = useCallback((m: ScaleMode) => updatePrefs({ scaleMode: m }), [updatePrefs])
   const autoScale = useCallback(() => { chartRef.current?.priceScale('right').applyOptions({ autoScale: true }) }, [chartRef])
@@ -866,6 +901,7 @@ export default function ChartsPage() {
     },
     screenshot: () => { void takeShot('save') },
     help: () => setKeysOpen(true),
+    alert: () => openAlert({ price: quoteNow().bid ?? undefined }),
   }, !isFullscreen)
 
   // 交易日分隔线 primitive / session-break primitive
@@ -914,6 +950,10 @@ export default function ChartsPage() {
         <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn" aria-label={String(t('charts.indicators.button'))}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 17l5-6 4 4 8-9" /><path d="M3 21h18" /></svg>
           {t('charts.indicators.short')}
+        </button>
+        <button type="button" onClick={() => setAlertMgrOpen(true)} className="term-tbr-btn alert-tb-btn" aria-label={String(t('charts.alert.manager'))}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z" /><path d="M10 21h4" /></svg>
+          {activeAlertCount > 0 && <b>{activeAlertCount}</b>}
         </button>
         <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
       </div>
@@ -1063,6 +1103,10 @@ export default function ChartsPage() {
                   <button type="button" className="term-tool-btn" onClick={() => void takeShot('save')} title={`${t('charts.shot.save')} (Ctrl+Alt+S)`} aria-label={String(t('charts.shot.save'))}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></svg>
                   </button>
+                  <button type="button" className="term-tool-btn alert-tb-btn" onClick={() => setAlertMgrOpen(true)} title={`${t('charts.alert.manager')} (Alt+A)`} aria-label={String(t('charts.alert.manager'))}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 16V11a6 6 0 0112 0v5l2 2H4z" /><path d="M10 21h4" /></svg>
+                    {activeAlertCount > 0 && <b>{activeAlertCount}</b>}
+                  </button>
                   <GearButton onClick={() => setChartSetOpen(true)} label={String(t('charts.settings.title'))} />
                   <button type="button" onClick={() => setSettingsOpen(true)} className="term-tbr-btn">
                     {t('charts.indicators.button')}
@@ -1159,8 +1203,9 @@ export default function ChartsPage() {
                 visible={showPositions}
               />
             )}
-            {drawReady && chartRef.current && seriesRef.current && isDesktop && showPositions && tradeLogin && (
-              <PlusOrderButton chart={chartRef.current} series={seriesRef.current} digits={decimals} quote={quoteNow} onPick={openDraft} />
+            {drawReady && chartRef.current && seriesRef.current && isDesktop && (
+              <PlusOrderButton chart={chartRef.current} series={seriesRef.current} digits={decimals} quote={quoteNow}
+                onPick={showPositions && tradeLogin ? openDraft : null} onAlert={(price) => openAlert({ price })} />
             )}
             {showCountdown && !priceBased && hasData && drawReady && chartRef.current && seriesRef.current && (
               <BarCountdown
@@ -1186,6 +1231,7 @@ export default function ChartsPage() {
                 theme={drawTheme}
                 onStateChange={bumpDraw}
                 onToOrder={(o) => openDraft(o.side, o.price, o.sl, o.tp)}
+                onAlert={(d) => openAlert({ drawing: d })}
               />
             )}
             {!hasData && <div className="term-chart-empty">{t('charts.empty')}</div>}
@@ -1212,6 +1258,19 @@ export default function ChartsPage() {
                 highLow={cprefs.lines.highLow}
                 prevClose={cprefs.lines.prevClose && !priceBased}
                 labels={{ bid: String(t('charts.lines.bid')), ask: String(t('charts.lines.ask')), high: String(t('charts.lines.high')), low: String(t('charts.lines.low')), prev: String(t('charts.lines.prev')) }}
+              />
+            )}
+            {drawReady && chartRef.current && seriesRef.current && (
+              <AlertLines
+                chart={chartRef.current}
+                series={seriesRef.current}
+                symbol={symbol}
+                digits={decimals}
+                bid={alertBid}
+                label={String(t('charts.alert.lineTitle'))}
+                dragTip={String(t('charts.alert.dragTip'))}
+                onEdit={(a) => openAlert({ edit: a })}
+                onError={(m) => showToast(m ? localizeApiError(m) : String(t('charts.alert.err.save')), 'error')}
               />
             )}
             {drawReady && chartRef.current && seriesRef.current && containerRef.current && (
@@ -1276,6 +1335,30 @@ export default function ChartsPage() {
         )}
         {gotoOpen && <GoToDateDialog timezone={cprefs.timezone} onGo={(ts) => { void goToTime(ts) }} onClose={() => { setGotoOpen(false); focusChart() }} />}
         {keysOpen && <ShortcutsDialog onClose={() => { setKeysOpen(false); focusChart() }} />}
+        {alertMgrOpen && (
+          <AlertManager
+            symbol={symbol}
+            bid={alertBid}
+            onNew={() => openAlert({ price: quoteNow().bid ?? undefined })}
+            onEdit={(a, clone) => openAlert({ edit: a, clone })}
+            onPickSymbol={pickSymbolLoose}
+            onToast={showToast}
+            onClose={() => { setAlertMgrOpen(false); focusChart() }}
+          />
+        )}
+        {alertInit && (
+          <AlertDialog
+            init={alertInit}
+            symbol={symbol}
+            digits={decimals}
+            chartInterval={interval}
+            indicators={shownList}
+            drawings={drawLayerRef.current?.getDrawings() ?? []}
+            bid={alertBid}
+            onClose={() => { setAlertInit(null); if (!alertMgrOpen) focusChart() }}
+            onSaved={(a, created) => showToast(String(t(created ? 'charts.alert.created' : 'charts.alert.saved', { msg: a.message })), 'success')}
+          />
+        )}
         {ctx && (
           <ChartContextMenu
             state={ctx}
@@ -1295,6 +1378,7 @@ export default function ChartsPage() {
               invert: cprefs.invertScale,
               setInvert: (v) => updatePrefs({ invertScale: v }),
               orderAt: tradeLogin ? openDraft : null,
+              alertAt: (price) => openAlert({ price }),
               orderLabel: (side, price) => {
                 const q = quoteNow()
                 return String(t(`order.pending.type.${side}_${autoEntryType(side, price, q.bid, q.ask)}`))

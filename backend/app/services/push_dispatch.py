@@ -246,11 +246,16 @@ EVENT_LUCKY_WHEEL = "lucky_wheel"
 # not in ALWAYS_ON_EVENTS; on by default via the whitelist: NULL means all on, and rev 54 appended it to
 # stored whitelists.
 EVENT_ECON_ALERT = "econ_alert"
+# 图表警报触发（rev 56）。每条警报是用户自己建的、自带「App 推送」开关，所以进 ALWAYS_ON_EVENTS：
+# 总开关、推送时段、会员等级照常生效，但不再看事件白名单。
+# A chart alert went off (rev 56). Each alert is user-created with its own push switch, so it is
+# always on: master switch, push window and plan still apply, the event whitelist does not.
+EVENT_CHART_ALERT = "chart_alert"
 EVENT_TYPES = {
     EVENT_ORDER_FILLED, EVENT_ORDER_REJECTED, EVENT_AUTO_MANAGE,
     EVENT_BRIDGE_OFFLINE, EVENT_ACCOUNT_REVOKED, EVENT_STRATEGY_SIGNAL,
     EVENT_BADGE_AWARDED, EVENT_ANNOUNCEMENT, EVENT_SUPPORT_REMINDER, EVENT_LUCKY_WHEEL,
-    EVENT_ECON_ALERT,
+    EVENT_ECON_ALERT, EVENT_CHART_ALERT,
 }
 
 # 只要通知总开关打开就一定推的事件（账户 / 交易 + 成就），不看事件白名单：通知

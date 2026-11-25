@@ -1658,7 +1658,7 @@ export interface AccountFunds {
 }
 
 export interface WSMessage {
-  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'ACCOUNT_FUNDS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'CHART_DRAWINGS_UPDATE' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
+  type: 'AUTH_OK' | 'AUTH_FAIL' | 'SIGNAL_NEW' | 'SIGNAL_EXPIRED' | 'ORDER_UPDATE' | 'POSITIONS' | 'ACCOUNTS_STATUS' | 'ACCOUNT_FUNDS' | 'QUOTES' | 'GLOBAL_QUOTES' | 'TREND_UPDATE' | 'PREFS_UPDATE' | 'CHART_DRAWINGS_UPDATE' | 'CHART_ALERTS_UPDATE' | 'CHART_ALERT_FIRED' | 'STRATEGY_SIGNAL' | 'CLOSED_TRADE_NEW' | 'PENDING_ORDERS' | 'ANNOUNCEMENT_NEW' | 'NOTIFICATION_NEW' | 'PUSH_FALLBACK' | 'PONG'
   data?: unknown
   // 仅 POSITIONS 携带 / only present on POSITIONS
   funds?: AccountFunds[]
@@ -1687,6 +1687,60 @@ export interface ChartDrawingSymbol {
   symbol: string
   count: number
   updatedAt: string | null
+}
+
+// 图表警报（后端 rev 56，表 chart_alerts）。spec 按 kind 不同：
+//   price：{level} 或 {lo, hi}（通道类）或 {value, bars}（按幅度移动）；
+//   drawing：{lines: [{t1,p1,t2,p2,extL,extR}], win?: [t1, t2], label}；
+//   indicator：{ind: {type, inputs, plot}, target: {kind:'value',v} | {kind:'band',lo,hi} | {kind:'plot',plot} | {kind:'price'}}。
+// 都可带 ref（建 / 改那一刻的价格，服务端拿它当「上一跳」）与 label（显示用）。
+// Chart alerts (backend rev 56). spec depends on kind (see above); ref = the price at create / edit
+// time (the server's first "previous tick"), label = display only.
+export type ChartAlertKind = 'price' | 'drawing' | 'indicator'
+export type ChartAlertCond =
+  | 'cross' | 'crossUp' | 'crossDown' | 'gt' | 'lt'
+  | 'enter' | 'exit' | 'inside' | 'outside'
+  | 'moveUp' | 'moveDown' | 'moveUpPct' | 'moveDownPct'
+export type ChartAlertTrigger = 'once' | 'bar' | 'close'
+export type ChartAlertStatus = 'active' | 'paused' | 'fired' | 'expired'
+export interface ChartAlertIn {
+  symbol: string
+  kind: ChartAlertKind
+  cond: ChartAlertCond
+  spec: Record<string, unknown>
+  trigger: ChartAlertTrigger
+  interval: string
+  message: string
+  push: boolean
+  email: boolean
+  expiresAt: string | null
+  drawingId: string | null
+  active: boolean
+}
+export interface ChartAlert extends Omit<ChartAlertIn, 'active'> {
+  id: string
+  status: ChartAlertStatus
+  fireCount: number
+  lastFiredAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+export interface ChartAlertLogItem {
+  id: string
+  alertId: string | null
+  symbol: string
+  price: number | null
+  message: string
+  firedAt: string
+}
+// WS CHART_ALERT_FIRED 的 data / the data of WS CHART_ALERT_FIRED
+export interface ChartAlertFired {
+  id: string
+  symbol: string
+  price: number
+  message: string
+  firedAt: string
+  status: ChartAlertStatus
 }
 
 // WS CHART_DRAWINGS_UPDATE 的 data，也是 window 事件 prismx:chart-drawings-update 的 detail。

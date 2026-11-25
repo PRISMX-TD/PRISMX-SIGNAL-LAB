@@ -18,6 +18,8 @@ export interface ChartHotkeyHandlers {
   zoom: (factor: number) => void
   screenshot: () => void
   help: () => void
+  // Alt+A：在现价添加警报 / Alt+A: add an alert at the current price
+  alert?: () => void
 }
 
 function inTextField(t: EventTarget | null): boolean {
@@ -45,6 +47,7 @@ export function useChartHotkeys(scopeRef: { current: HTMLElement | null }, handl
         const act: Record<string, () => void> = {
           KeyR: h.current.reset, KeyG: h.current.goto, KeyL: h.current.toggleLog, KeyP: h.current.togglePercent, KeyI: h.current.toggleInvert,
         }
+        if (h.current.alert) act.KeyA = h.current.alert
         const fn = act[e.code]
         if (fn) { e.preventDefault(); fn() }
         return

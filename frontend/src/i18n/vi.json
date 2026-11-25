@@ -29,7 +29,8 @@
     "lucky_prize_delivered": "Phần thưởng đã được gửi",
     "lucky_prize_cancelled": "Phần thưởng đã bị hủy",
     "agent_tree_change": "Một đại sứ đã thay đổi đại sứ cấp dưới",
-    "agent_promoted": "Bạn đã trở thành đại sứ · mở Trung tâm Đại sứ"
+    "agent_promoted": "Bạn đã trở thành đại sứ · mở Trung tâm Đại sứ",
+    "chart_alert": "Cảnh báo biểu đồ đã kích hoạt"
   },
   "nav": {
     "dashboard": "Tổng quan",

@@ -453,7 +453,13 @@ def _hash_legacy_api_tokens() -> None:
 #          rev 55 — chart drawings get their own table: chart_drawings via create_all (one row per user
 #          and symbol, unique (user_id, symbol)). No ADD COLUMN, no backfill (old drawings in the
 #          user_prefs chartDraw namespace are not moved by the backend; left to the frontend wiring).
-CURRENT_SCHEMA_REV = 55
+# rev 56 — 图表警报（2026-11-25）：新表 chart_alerts、chart_alert_logs（create_all 建表建索引）。新推送事件
+#          chart_alert 进 ALWAYS_ON_EVENTS（警报是用户逐条自己建的、每条带推送开关），不用补白名单。
+#          同 rev 55：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
+#          rev 56 — chart alerts: new tables chart_alerts and chart_alert_logs via create_all. The new push
+#          event chart_alert is always on (each alert is user-created with its own push switch), so no
+#          whitelist backfill. No ADD COLUMN, no backfill.
+CURRENT_SCHEMA_REV = 56
 
 _SCHEMA_REV_KEY = "schema_rev"
 

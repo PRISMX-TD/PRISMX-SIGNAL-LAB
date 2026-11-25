@@ -1,0 +1,122 @@
+/* 图表警报（阶段 5）：新建 / 编辑弹窗、管理器、图上的铃铛把手。材质沿用 .chart-dlg / .ind-*。
+   Chart alerts (phase 5): the create / edit dialog, the manager, the bell handles on the chart.
+   Same materials as .chart-dlg / .ind-*. */
+
+/* ── 弹窗 / dialog ── */
+.chart-dlg.alert-dlg { width: min(480px, 100%); }
+.alert-form { display: flex; flex-direction: column; gap: 14px; }
+.alert-row { display: grid; grid-template-columns: 76px minmax(0, 1fr); align-items: center; gap: 12px; font-size: 12px; color: var(--text-3); }
+.alert-row.top { align-items: start; }
+.alert-row.top > span { padding-top: 9px; }
+.alert-row select.ind-in { padding-right: 8px; cursor: pointer; }
+.alert-row select.ind-in:disabled { opacity: 1; cursor: default; color: var(--text-strong); }
+.alert-pair { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.alert-pair.wrap { flex-wrap: wrap; gap: 8px 16px; }
+.alert-pair > i { flex-shrink: 0; font-style: normal; color: var(--text-3); }
+.alert-pair .ind-in { min-width: 0; }
+.alert-pair .ind-in:not(.wide) { width: 64px; flex-shrink: 0; }
+.alert-in-unit { flex-shrink: 0; white-space: nowrap; }
+.alert-msg { height: auto; min-height: 56px; padding: 8px 12px; resize: vertical; font: 500 13px var(--font-sans); line-height: 1.45; }
+.alert-msg::placeholder { color: var(--text-3); }
+.alert-seg { flex-wrap: wrap; height: auto; min-height: 34px; justify-self: start; }
+.alert-chk { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.alert-chk input { width: 15px; height: 15px; margin: 0; accent-color: var(--purple); }
+.alert-chk input:disabled { opacity: 0.6; }
+.alert-err { flex: 1; min-width: 0; font-size: 12px; line-height: 1.4; color: var(--down); }
+.alert-dlg .chart-dlg-ft .ind-btn.primary { margin-left: 0; }
+.alert-dlg .chart-dlg-ft .ind-btn:first-of-type { margin-left: auto; }
+
+/* ── 管理器 / manager ── */
+.alert-mgr .chart-dlg-body { display: flex; flex-direction: column; padding-top: 12px; }
+.alert-tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+.alert-tabs > button {
+  height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.alert-tabs > button.on { background: var(--nest); color: var(--text-strong); }
+.alert-only { margin-left: auto; }
+.alert-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.alert-item { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.alert-item:last-child { border-bottom: 0; }
+.alert-main { flex: 1; min-width: 0; }
+.alert-top { display: flex; align-items: center; gap: 8px; }
+.alert-sym { padding: 0; border: 0; background: none; color: var(--text-strong); font: 600 13px var(--font-mono); cursor: pointer; }
+@media (hover: hover) and (pointer: fine) {
+  .alert-sym:hover { color: var(--purple-hi); }
+}
+.alert-st { padding: 1px 8px; border-radius: 999px; font-size: 11px; line-height: 18px; background: var(--nest); color: var(--text-3); }
+.alert-st.s-active { background: rgb(245 196 81 / 0.14); color: #f5c451; }
+.alert-st.s-fired { background: rgb(var(--up-rgb) / 0.12); color: var(--up); }
+.alert-item.s-fired .alert-msg-line, .alert-item.s-expired .alert-msg-line, .alert-item.s-paused .alert-msg-line { color: var(--text-3); }
+.alert-msg-line { margin: 4px 0 2px; font-size: 13px; line-height: 1.45; color: var(--text); overflow-wrap: anywhere; }
+.alert-meta { font-size: 11px; color: var(--text-3); }
+.alert-time { margin-left: auto; font: 500 11px var(--font-mono); color: var(--text-3); }
+.alert-price { flex-shrink: 0; font: 500 12px var(--font-mono); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.alert-acts { display: flex; flex-shrink: 0; gap: 2px; }
+.alert-act {
+  display: grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+.alert-act:disabled { opacity: 0.4; cursor: default; }
+.alert-act small { font-size: 11px; font-weight: 500; white-space: nowrap; }
+.alert-act.del.confirm { background: rgb(var(--down-rgb) / 0.14); color: var(--down); }
+@media (hover: hover) and (pointer: fine) {
+  .alert-act:hover:not(:disabled) { background: var(--nest); color: var(--text-strong); }
+  .alert-act.del:hover:not(:disabled) { color: var(--down); }
+}
+.alert-act:focus-visible { outline: 0; box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.alert-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 40px 16px; margin: 0; text-align: center; color: var(--text-3); }
+.alert-empty p { margin: 0; font-size: 13px; color: var(--text-2); }
+.alert-empty small { max-width: 36ch; font-size: 12px; line-height: 1.5; }
+.alert-count { font-size: 12px; color: var(--text-3); }
+.alert-mgr .chart-dlg-ft .ind-btn.primary { margin-left: 0; }
+.alert-mgr .chart-dlg-ft .alert-count { margin-right: auto; }
+
+/* ── 图上的铃铛把手 / bell handles on the chart ── */
+.alert-handle {
+  position: absolute;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: #f5c451;
+  color: #1c1406;
+  cursor: ns-resize;
+  touch-action: none;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+.alert-handle.off { background: #7c7f8f; color: #101116; }
+.alert-handle.drag { box-shadow: 0 0 0 3px rgb(245 196 81 / 0.3); }
+.alert-handle:focus-visible { outline: 2px solid var(--purple-hi); outline-offset: 2px; }
+
+/* 工具条铃铛上的生效数 / active count on the toolbar bell */
+.term-tool-btn.alert-tb-btn { display: inline-flex; align-items: center; justify-content: center; gap: 3px; width: auto; min-width: 30px; padding: 0 6px; }
+.alert-tb-btn b { font: 600 11px var(--font-mono); color: #f5c451; }
+.term-tbr-btn.alert-tb-btn { gap: 3px; padding: 0 8px; }
+
+@media (max-width: 767px) {
+  .alert-row { grid-template-columns: 64px minmax(0, 1fr); }
+  .alert-only { display: none; }
+  .alert-item { align-items: flex-start; }
+}

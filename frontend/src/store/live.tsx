@@ -2,7 +2,7 @@
 // Shared live state: EA status, signals, orders, positions.
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useState, useCallback, useRef, useSyncExternalStore, type ReactNode } from 'react'
 import type { BootstrapResponse } from '../api/client'
-import type { BrokerLock, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
+import type { BrokerLock, ChartAlertFired, MT5Account, Order, PendingOrder, Position, Quote, Signal, StrategySignal, Trend, WSMessage } from '../api/types'
 import { accountApi, bootstrapApi, getToken, orderApi, quoteApi, signalApi, strategyApi, symbolApi, trendApi } from '../api/client'
 import { useClientSocket } from './useClientSocket'
 import { applyAccountsStatus, applyAccountFunds } from './accountsStatus'
@@ -12,6 +12,7 @@ import { usePrefs } from './prefs'
 import { useAuth } from './auth'
 import { showFallbackNotification } from '../utils/fallbackNotify'
 import { emitChartDrawingsUpdate } from '../utils/chartDrawingsEvents'
+import { emitChartAlertFired, emitChartAlertsUpdate } from '../utils/chartAlertEvents'
 import { isAppHidden, onForeground, APP_BACKGROUND_EVENT, APP_FOREGROUND_EVENT } from '../utils/appVisibility'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 import { upsertOrderList } from './orderMerge'
@@ -860,6 +861,20 @@ export function LiveProvider({ children }: { children: ReactNode }) {
         emitChartDrawingsUpdate({
           symbol: d.symbol,
           updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt : null,
+        })
+        break
+      }
+      case 'CHART_ALERTS_UPDATE':
+        // 警报列表变了（本机或别的设备，或刚触发）：警报 store 自己重拉。
+        // The alert list changed (here, elsewhere, or a fire): the alert store refetches.
+        emitChartAlertsUpdate()
+        break
+      case 'CHART_ALERT_FIRED': {
+        const d = msg.data as Partial<ChartAlertFired> | undefined
+        if (!d || typeof d.id !== 'string' || typeof d.symbol !== 'string') break
+        emitChartAlertFired({
+          id: d.id, symbol: d.symbol, price: Number(d.price), message: String(d.message ?? ''),
+          firedAt: String(d.firedAt ?? ''), status: (d.status ?? 'active') as ChartAlertFired['status'],
         })
         break
       }

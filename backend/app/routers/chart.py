@@ -30,6 +30,7 @@ from app.services import candle_store, chart_store, quotes_store, shared_cache
 from app.services.connection_manager import manager
 from app.services.deps import get_current_user, get_current_user_id_light
 from app.services.strategy import live as strategy_live
+from app.services.chart_alerts import engine as chart_alerts
 
 logger = logging.getLogger("prismx.chart")
 
@@ -506,6 +507,9 @@ async def feed_candles(
             # production). The push half is async and awaited inside live after
             # the commit.
             await strategy_live.evaluate_new_candle(symbol, s.interval, new_ts)
+            # 图表警报的收盘类条件（rev 56）：自己兜住异常，不影响落库与策略。
+            # Close-based chart alerts (rev 56); swallows its own errors.
+            await chart_alerts.on_bars_closed(symbol, s.interval, new_ts)
     return {"ok": True}
 
 
@@ -544,6 +548,9 @@ async def feed_quotes(req: FeedQuotesRequest, x_ea_token: str | None = Header(de
     changed = await quotes_store.update_async(incoming)
     if changed:
         await manager.broadcast_to_clients({"type": "GLOBAL_QUOTES", "data": changed})
+        # 图表警报逐跳求值（rev 56）：纯内存判定，触发后的写库与通知另起任务，不拖这次请求。
+        # Per-tick chart alert evaluation (rev 56): in-memory checks; firing runs as its own task.
+        await chart_alerts.on_quotes(changed)
     return {"ok": True}
 
 

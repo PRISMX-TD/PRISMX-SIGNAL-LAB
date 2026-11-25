@@ -12,6 +12,7 @@ export const SHORTCUTS: { group: string; items: { keys: string[]; k: string }[] 
     { keys: ['0-9', 'A-Z'], k: 'quick' },
     { keys: [alt, 'R'], k: 'reset' },
     { keys: [alt, 'G'], k: 'goto' },
+    { keys: [alt, 'A'], k: 'alert' },
     { keys: [alt, 'L'], k: 'log' },
     { keys: [alt, 'P'], k: 'percent' },
     { keys: [alt, 'I'], k: 'invert' },

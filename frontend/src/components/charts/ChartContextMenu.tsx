@@ -29,6 +29,8 @@ export interface CtxActions {
   // Open a projected order at this price (null without an online account) and its type name.
   orderAt?: ((side: 'BUY' | 'SELL', price: number) => void) | null
   orderLabel?: (side: 'BUY' | 'SELL', price: number) => string
+  // 在这个价位添加警报（阶段 5）/ add an alert at this price (phase 5)
+  alertAt?: ((price: number) => void) | null
 }
 
 export default function ChartContextMenu({ state, onClose, actions, decimals }: { state: CtxState; onClose: () => void; actions: CtxActions; decimals: number }) {
@@ -79,6 +81,7 @@ export default function ChartContextMenu({ state, onClose, actions, decimals }: 
         <>
           {item(String(t('charts.ctx.reset')), a.reset, { kbd: 'Alt+R' })}
           {state.price != null && item(String(t('charts.ctx.copyPrice', { p: state.price.toFixed(decimals) })), () => a.copyPrice(state.price!))}
+          {state.price != null && state.price > 0 && a.alertAt && item(String(t('charts.alert.addAtPrice', { p: state.price.toFixed(decimals) })), () => a.alertAt!(state.price!), { kbd: 'Alt+A' })}
           {state.price != null && state.price > 0 && a.orderAt && a.orderLabel && (
             <>
               <hr />

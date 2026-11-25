@@ -4,7 +4,7 @@ import type { OpsStatus } from './types'
 import type { Signal, Order, OrderEntryType, CloseAllResult, User, MT5Account, Trend, PersonalWinRate, ClosedTrade, AdminUser, AdminPageStats, AdminNetQuality, AdminSystemStatus, AdminOverview, AdminPotentialCustomers, AdminTraderLevels, AdminTraderLevelUsers, AdminStrategyWinRate, AdminEmailGateSettings, AdminGuestPreview, AdminPricingSettings, AdminSocialSettings, AdminTrialSettings, AdminCandleSettings, AdminStrategySettings, AdminWinrateSettings, PlatformStrategy, TrialStatus, SimulateResult, UserRole, UserPlan, BrokerLock, AdminBrokerSettings, AutoManageSettings, Candle, SentimentRatio, Quote, StrategyPresets, UserStrategy, StrategyBacktestResult, StrategySignal, StrategyTemplateKey, StopLossMethod, TakeProfitMethod, StrategyCoverageResponse, StrategyPerformance, StrategySessionFilter, Ticket, TicketListItem, TicketCategory, TicketPriority, TicketStatus, InviteLink, InviteLinkCreate, InviteLinkPatch, InviteLinkListParams, PublicCompetitionPayload, CompetitionFunnel, CompetitionIntegrity, GamificationMe, GamificationWinRateSummary, ProfilePatch, ProfileOut, LeaderboardBoard, LeaderboardPayload, AdminLeaderboardPeriod, AdminBoardHistory, PublicProfile, GamificationSettings, GamificationSettingsPatch, CompetitionListGrouped, CompetitionDetail, CompetitionRegisterResult, CompetitionAdminRow, CompetitionCreate, CompetitionPatch, ParticipantAdminRow, ParticipantPatch, CompetitionSettleResult, AgentLink, AgentLinkUser, AgentLinkUsers, AgentOverview, AgentPlanChange, SocialLinks, StatsRangeQuery, GeoScope, AdminGeoDistribution, AdminUserIp, AdminIpUser } from './types'
 import type { PendingCompetition } from './types'
 import type { MarketStatus } from './types'
-import type { ChartDrawingSymbol, ChartDrawingsOut, ChartDrawingsSaved } from './types'
+import type { ChartAlert, ChartAlertIn, ChartAlertLogItem, ChartDrawingSymbol, ChartDrawingsOut, ChartDrawingsSaved } from './types'
 import type { LuckyAdminDraw, LuckyBatch, LuckyDraw, LuckyFulfillment, LuckyIssueBody, LuckyIssueResult, LuckyIssueRow, LuckyMode, LuckyPrizeInput, LuckyRankSource, LuckyRoundAdmin, LuckyRoundCreate, LuckyRoundDeleted, LuckyRoundDetail, LuckyRoundPatch, LuckySpinResult, LuckyState } from './luckyTypes'
 import type { Announcement, AnnouncementInput, AnnouncementList, AnnouncementPopup, NotificationFeed } from './types'
 import type { EmailAudienceInput, EmailAudienceSummary, EmailCampaign, EmailContentInput, EmailKind, EmailPickerQuery, EmailPickerUser, EmailPreview, EmailStatus } from './types'
@@ -814,6 +814,17 @@ export const chartApi = {
       body: JSON.stringify({ symbol, drawings }),
     }),
   drawingSymbols: () => request<{ symbols: ChartDrawingSymbol[] }>('/chart/drawings/symbols'),
+  // 图表警报（后端 rev 56）。每次写入后端推 WS CHART_ALERTS_UPDATE；触发时推 CHART_ALERT_FIRED。
+  // Chart alerts (backend rev 56). Writes push WS CHART_ALERTS_UPDATE; a fire pushes CHART_ALERT_FIRED.
+  listAlerts: () => request<{ alerts: ChartAlert[] }>('/chart/alerts'),
+  createAlert: (body: ChartAlertIn) =>
+    request<ChartAlert>('/chart/alerts', { method: 'POST', body: JSON.stringify(body) }),
+  updateAlert: (id: string, body: ChartAlertIn) =>
+    request<ChartAlert>(`/chart/alerts/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteAlerts: (ids: string[]) =>
+    request<{ deleted: number }>('/chart/alerts/delete', { method: 'POST', body: JSON.stringify({ ids }) }),
+  alertLog: (limit = 100) => request<{ log: ChartAlertLogItem[] }>(`/chart/alerts/log?limit=${limit}`),
+  clearAlertLog: () => request<{ ok: boolean }>('/chart/alerts/log', { method: 'DELETE' }),
 }
 
 // 下单 / Orders

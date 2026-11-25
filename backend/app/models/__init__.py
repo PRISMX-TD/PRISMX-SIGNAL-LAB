@@ -718,6 +718,68 @@ class ChartDrawing(Base):
     updated_at = Column(DateTime, nullable=False, default=_now)
 
 
+class ChartAlert(Base):
+    """图表警报（rev 56，2026-11-25）：用户在行情图表上建的价格 / 画线 / 指标警报，服务端求值。
+    Chart alerts (rev 56): price / drawing / indicator alerts created on the chart, evaluated server-side.
+
+    求值见 services/chart_alerts。价格与画线警报在 EA 报价入口逐跳判（触发方式 once / bar），收盘类
+    （trigger = close、指标警报、按幅度移动）在 K 线落库处判。spec 是条件参数的 JSON（价位、画线几何、
+    指标与参数），后端校验形状后原样存。seq 每次编辑或触发 +1：触发时按 (id, seq) 条件更新，多个 worker
+    同时判中同一次穿越也只会有一个写成功，不会重复通知。status：active / paused（用户停了）/ fired
+    （仅一次的已触发）/ expired（过了到期时间）。
+
+    Evaluation lives in services/chart_alerts. Price and drawing alerts are checked on every EA quote
+    push (trigger once / bar); close-based ones (trigger close, indicator alerts, moving-by conditions)
+    when closed bars are persisted. spec is the JSON of the condition's parameters, shape-checked and
+    stored as is. seq goes up on every edit or fire: a fire is a conditional update on (id, seq), so two
+    workers seeing the same crossing produce one notification. status: active / paused / fired (a
+    once-only alert that went off) / expired.
+    """
+    __tablename__ = "chart_alerts"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    symbol = Column(String(64), nullable=False)
+    # price / drawing / indicator
+    kind = Column(String(12), nullable=False)
+    # cross / crossUp / crossDown / gt / lt / enter / exit / inside / outside / moveUp / moveDown / moveUpPct / moveDownPct
+    cond = Column(String(12), nullable=False)
+    spec = Column(Text, nullable=False, default="{}")
+    # once / bar / close
+    trigger = Column(String(8), nullable=False, default="once")
+    # 收盘类与「每根 K 线一次」用的周期（1/5/15/60/240/D）/ interval for close-based and once-per-bar
+    interval = Column(String(4), nullable=False, default="15")
+    message = Column(String(200), nullable=False, default="")
+    notify_push = Column(Boolean, nullable=False, default=True)
+    notify_email = Column(Boolean, nullable=False, default=False)
+    status = Column(String(8), nullable=False, default="active", index=True)
+    expires_at = Column(DateTime, nullable=True)
+    # 画线警报对应的画线 id（前端删画线时一并删警报）/ the drawing a drawing alert follows
+    drawing_id = Column(String(64), nullable=True)
+    seq = Column(Integer, nullable=False, default=0)
+    fire_count = Column(Integer, nullable=False, default=0)
+    last_fired_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
+class ChartAlertLog(Base):
+    """图表警报的触发记录（rev 56）。alert_id 不设外键：警报删了，记录照样留着看。每个用户只留最近 300 条。
+    Chart alert fire log (rev 56). alert_id has no foreign key so the log outlives a deleted alert.
+    The latest 300 rows per user are kept."""
+    __tablename__ = "chart_alert_logs"
+    __table_args__ = (Index("ix_chart_alert_logs_user_fired", "user_id", "fired_at"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    alert_id = Column(String, nullable=True)
+    symbol = Column(String(64), nullable=False)
+    price = Column(Float, nullable=True)
+    message = Column(String(200), nullable=False, default="")
+    emailed = Column(Boolean, nullable=False, default=False)
+    fired_at = Column(DateTime, nullable=False, default=_now)
+
+
 class Trend(Base):
     """多周期趋势快照：每个品种一条，后来的覆盖前面的。
     Multi-timeframe trend snapshot: one row per symbol, latest overwrites previous.

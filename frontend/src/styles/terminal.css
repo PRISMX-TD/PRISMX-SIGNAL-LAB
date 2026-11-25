@@ -2951,7 +2951,8 @@
 }
 .inde-sel:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); outline: 2px solid transparent; }
 .inde-sel option, .inde-sel optgroup { background: var(--surface); color: var(--text); }
-.ind-in.wide { width: 96px; }
+/* 只在指标设置里收窄（全局 .ind-in.wide 是 100%，跳转日期 / 警报弹窗要用）/ narrowed only inside the indicator editor */
+.inde-body .ind-in.wide { width: 96px; }
 .inde-sep { height: 1px; margin: 8px 0; background: var(--line); }
 .inde-hint { margin: 4px 0 8px; font-size: 12px; line-height: 1.55; color: var(--text-3); }
 .inde-chk { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; color: var(--text-2); cursor: pointer; }

@@ -29,7 +29,8 @@
     "lucky_prize_delivered": "賞品を発送しました",
     "lucky_prize_cancelled": "賞品はキャンセルされました",
     "agent_tree_change": "アンバサダーが下位アンバサダーを変更しました",
-    "agent_promoted": "アンバサダーになりました。アンバサダーセンターを開いてください"
+    "agent_promoted": "アンバサダーになりました。アンバサダーセンターを開いてください",
+    "chart_alert": "チャートアラートが発動しました"
   },
   "nav": {
     "dashboard": "ホーム",

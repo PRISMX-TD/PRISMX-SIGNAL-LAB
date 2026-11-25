@@ -3,6 +3,8 @@
 // The "+" riding the crosshair at the price-axis edge: it offers the two orders that can rest
 // at that price (above the market: buy stop / sell limit; below: buy limit / sell stop), and
 // picking one opens a projected order on the chart. Mouse devices only.
+// 阶段 5 起菜单第一项是「在这个价位添加警报」；没有在线账户时只剩这一项。
+// Since phase 5 the first item adds an alert at that price; without an online account it's the only one.
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { IChartApi, MouseEventParams } from 'lightweight-charts'
@@ -15,10 +17,12 @@ interface Props {
   series: MainSeriesApi
   digits: number
   quote: () => { bid: number | null; ask: number | null }
-  onPick: (side: Side, price: number) => void
+  // 没有可下单账户时为 null（菜单只剩「添加警报」）/ null without a tradable account (the menu keeps only the alert item)
+  onPick: ((side: Side, price: number) => void) | null
+  onAlert?: (price: number) => void
 }
 
-export default function PlusOrderButton({ chart, series, digits, quote, onPick }: Props) {
+export default function PlusOrderButton({ chart, series, digits, quote, onPick, onAlert }: Props) {
   const { t } = useTranslation()
   const tt = (k: string, o?: Record<string, unknown>) => String(t(k, o))
   const [at, setAt] = useState<{ y: number; x: number; price: number } | null>(null)
@@ -52,7 +56,7 @@ export default function PlusOrderButton({ chart, series, digits, quote, onPick }
   const option = (side: Side, price: number) => {
     const type = autoEntryType(side, price, q.bid, q.ask)
     return (
-      <button key={side} type="button" role="menuitem" className={`chart-ctx-item ${side === 'BUY' ? 'up' : 'dn'}`} onClick={() => { setMenu(null); onPick(side, price) }}>
+      <button key={side} type="button" role="menuitem" className={`chart-ctx-item ${side === 'BUY' ? 'up' : 'dn'}`} onClick={() => { setMenu(null); onPick?.(side, price) }}>
         <span>{tt(`order.pending.type.${side}_${type}`)}</span><kbd>{price.toFixed(digits)}</kbd>
       </button>
     )
@@ -75,8 +79,13 @@ export default function PlusOrderButton({ chart, series, digits, quote, onPick }
       )}
       {menu && (
         <div ref={menuRef} className="chart-ctx chart-plus-menu" role="menu" style={{ top: menu.y + 12, left: Math.max(6, menu.x - 200) }}>
-          {option('BUY', menu.price)}
-          {option('SELL', menu.price)}
+          {onAlert && (
+            <button type="button" role="menuitem" className="chart-ctx-item" onClick={() => { setMenu(null); onAlert(menu.price) }}>
+              <span>{tt('charts.alert.addAt')}</span><kbd>{menu.price.toFixed(digits)}</kbd>
+            </button>
+          )}
+          {onPick && option('BUY', menu.price)}
+          {onPick && option('SELL', menu.price)}
         </div>
       )}
     </>
