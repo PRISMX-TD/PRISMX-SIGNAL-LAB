@@ -9,7 +9,7 @@ admin endpoints, as sentiment_store does.
 """
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -191,13 +191,34 @@ def _clean_values(raw) -> list[dict]:
     return out
 
 
+# 公布时间还没到却带着公布值的发布（2026-11-25）：Narwhal 会把同一期数据上一次的估值挂在下一次修正公布上
+# （例：美国 Q3 GDP 第二次估值 11-25 21:30 才公布，11-22 就标成已公布、公布值 = 首次估值 3.4%，
+# 预期 / 前值也是上一轮的）。这种行一律当作未公布：数字全丢，只留指标本身（重要度、补查都靠它），
+# 真正公布后由公布后补查重新拿到。留 5 分钟余量，防两边时钟差。
+# A release still in the future that already carries figures: Narwhal hangs the previous estimate
+# on the next revision (e.g. US Q3 GDP second estimate, due 11-25 13:30 UTC, marked published on
+# 11-22 with the advance figure; consensus / previous stale too). Treat it as not out yet: drop
+# every number, keep the measures (importance and post-release re-checks rely on them).
+EARLY_ACTUAL_GRACE = timedelta(minutes=5)
+_MEASURE_KEYS = ("measure", "concept", "unit", "transformation", "period")
+
+
+def _premature(status: str, at: datetime | None, values: list[dict], now: datetime) -> bool:
+    if at is None or at <= now + EARLY_ACTUAL_GRACE:
+        return False
+    return status == "published" or any(v.get("actual") not in (None, "") for v in values)
+
+
 def upsert_releases(db: Session, releases: list[dict], now: datetime | None = None) -> dict:
     """把 Narwhal 的发布写进库（不提交）。返回计数和「这一轮新出现公布值」的组。
-    Write Narwhal releases (no commit). Returns counts and the groups that gained an actual."""
+    还没到公布时间就带公布值的行按未公布入库（见 EARLY_ACTUAL_GRACE）。
+    Write Narwhal releases (no commit). Returns counts and the groups that gained an actual.
+    Rows carrying figures before their release time are stored as not yet published."""
     now = now or utcnow()
-    stats = {"seen": 0, "new": 0, "updated": 0, "newActuals": 0}
+    stats = {"seen": 0, "new": 0, "updated": 0, "newActuals": 0, "premature": 0}
     actual_groups: set[str] = set()
-    ids = [r.get("release_id") for r in releases if isinstance(r.get("release_id"), str)]
+    premature_groups: set[str] = set()
+    ids =[r.get("release_id") for r in releases if isinstance(r.get("release_id"), str)]
     existing = {row.id: row for row in db.query(EconRelease).filter(EconRelease.id.in_(ids)).all()} if ids else {}
     for r in releases:
         rid = r.get("release_id")
@@ -207,6 +228,13 @@ def upsert_releases(db: Session, releases: list[dict], now: datetime | None = No
         stats["seen"] += 1
         values = _clean_values(r.get("values"))
         at = _parse_at(r.get("at"))
+        status = str(r.get("status") or "scheduled")
+        premature = status != "cancelled" and _premature(status, at, values, now)
+        if premature:
+            values = [{k: v[k] for k in _MEASURE_KEYS if k in v} for v in values]
+            status = "scheduled"
+            stats["premature"] += 1
+            premature_groups.add(group_key(country, at, r.get("family"), str(r.get("name") or "")))
         has_actual = any(v.get("actual") not in (None, "") for v in values)
         row = existing.get(rid)
         if row is None:
@@ -214,7 +242,7 @@ def upsert_releases(db: Session, releases: list[dict], now: datetime | None = No
             db.add(row)
             existing[rid] = row
             stats["new"] += 1
-        elif (row.revision or 0) != int(r.get("revision") or 0) or row.status != r.get("status"):
+        elif (row.revision or 0) != int(r.get("revision") or 0) or row.status != status:
             stats["updated"] += 1
         row.revision = int(r.get("revision") or 0)
         row.currency = rules.CURRENCY.get(country)
@@ -223,7 +251,7 @@ def upsert_releases(db: Session, releases: list[dict], now: datetime | None = No
         row.family = r.get("family")
         row.topic = r.get("topic")
         row.period = r.get("period")
-        row.status = str(r.get("status") or "scheduled")
+        row.status = status
         row.at = at
         row.date = r.get("date") if isinstance(r.get("date"), str) else (at.date().isoformat() if at else None)
         row.indicative = r.get("date_basis") == "indicative"
@@ -235,10 +263,38 @@ def upsert_releases(db: Session, releases: list[dict], now: datetime | None = No
             stats["newActuals"] += 1
             if row.group_key:
                 actual_groups.add(row.group_key)
+        if premature:
+            # 以前按已公布存过的，把「看到公布值」的时间也清掉 / undo an earlier "published" store
+            row.actual_seen_at = None
         row.has_actual = has_actual
         row.fetched_at = now
     stats["actualGroups"] = sorted(actual_groups)
+    premature_groups.discard(None)
+    if premature_groups:
+        stats["stalePreviewsDropped"] = _drop_stale_previews(db, premature_groups)
     return stats
+
+
+def _drop_stale_previews(db: Session, keys: set[str]) -> int:
+    """提前公布的行把数字丢掉后，按旧预期写的预案就不对了：签名对不上的删掉（有新依据会重写，没有就不显示）。
+    签名一致的不动，所以每轮同步不会反复删、反复调模型。
+    Once a premature row loses its figures, a preview written against the stale consensus is wrong:
+    drop it when its signature no longer matches (rewritten if a basis remains, otherwise not shown).
+    Matching ones stay, so repeated syncs don't loop delete / regenerate."""
+    from app.models import EconPreview
+    from app.services.econ import previews   # previews 也引用 store，放函数里避免循环 / avoid a cycle
+
+    db.flush()
+    dropped = 0
+    for p in db.query(EconPreview).filter(EconPreview.group_key.in_(sorted(keys))).all():
+        members = db.query(EconRelease).filter(EconRelease.group_key == p.group_key).all()
+        if not members:
+            continue
+        basis, _ = previews.group_basis(members[0].country, members)
+        if p.consensus_sig != previews._signature(basis, members):
+            db.delete(p)
+            dropped += 1
+    return dropped
 
 
 def merged_values(rows: list[EconRelease]) -> list[dict]:
