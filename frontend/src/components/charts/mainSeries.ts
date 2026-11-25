@@ -130,7 +130,12 @@ class MainRenderer implements ICustomSeriesPaneRenderer {
     for (let i = from; i < to; i++) {
       const b = d.bars[i]
       const bar = b.originalData
-      if (!bar || bar.close === undefined) continue
+      // 可见区间外多取的那一根，库可能还没给它算 x（NaN）。canvas 会静默丢掉带 NaN 的 lineTo，
+      // 面积图 / 基准线的封闭路径就少了左下角那个点，填充底边变成从第一个点斜拉到右下角。
+      // The extra bar outside the visible range may have no x yet (NaN). Canvas silently drops a
+      // lineTo with NaN, so the closed area / baseline path lost its bottom-left corner and the
+      // fill's bottom edge became a diagonal from the first point to the bottom right.
+      if (!bar || bar.close === undefined || !Number.isFinite(b.x)) continue
       const oy = p2c(bar.open)
       const hy = p2c(bar.high)
       const ly = p2c(bar.low)
