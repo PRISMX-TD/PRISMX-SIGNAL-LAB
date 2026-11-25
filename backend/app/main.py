@@ -23,7 +23,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin, require_staff
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, persona, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, chart_drawings, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, persona, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -467,6 +467,9 @@ app.include_router(ea.router, prefix=settings.API_PREFIX)
 app.include_router(bridge.router, prefix=settings.API_PREFIX)
 app.include_router(gateway.router, prefix=settings.API_PREFIX)
 app.include_router(chart.router, prefix=settings.API_PREFIX)
+# 图表画线（rev 55）：每个用户每个品种一行，取代 prefs 的 chartDraw 命名空间
+# Chart drawings (rev 55): one row per user and symbol, replacing the prefs chartDraw namespace
+app.include_router(chart_drawings.router, prefix=settings.API_PREFIX)
 app.include_router(webhook.router, prefix=settings.API_PREFIX)
 app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)

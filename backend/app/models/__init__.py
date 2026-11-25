@@ -687,6 +687,37 @@ class UserPref(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class ChartDrawing(Base):
+    """图表画线（rev 55，2026-11-25），每个用户每个品种一行。
+    Chart drawings (rev 55), one row per (user, symbol).
+
+    以前画线存在 user_prefs 的 chartDraw 命名空间里（键 = 品种），那份文档每次登录都要整份读回来、
+    每次保存都要整份推给所有在线设备，总量还卡在 1MB。画线工具要扩到近百种，所以单独成表：
+    打开哪个品种只读哪个品种的那一行，保存只写那一行，推送只发「哪个品种变了」。
+    data 是画线对象数组的 JSON（后端不解析内容）；count 是数组长度，给品种列表用，免得为了
+    数个数去读 data。唯一约束 (user_id, symbol) 的索引同时承担按 user_id 查的需要（最左前缀），
+    不再单建 user_id 索引。
+
+    Drawings used to live in user_prefs under the chartDraw namespace (key = symbol): that document
+    is read back whole at every login, pushed whole to every online device on every save, and capped
+    at 1MB in total. With the drawing tools growing toward ~100 they get their own table: opening a
+    symbol reads only that symbol's row, a save writes only that row, and the push only says which
+    symbol changed. data is the JSON array of drawing objects (opaque to the backend); count is its
+    length, so the symbol list never has to read data. The unique (user_id, symbol) index also serves
+    lookups by user_id (leftmost prefix), so there is no separate user_id index.
+    """
+    __tablename__ = "chart_drawings"
+    __table_args__ = (UniqueConstraint("user_id", "symbol", name="uq_chart_drawings_user_symbol"),)
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    symbol = Column(String(64), nullable=False)
+    data = Column(Text, nullable=False, default="[]")
+    count = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
 class Trend(Base):
     """多周期趋势快照：每个品种一条，后来的覆盖前面的。
     Multi-timeframe trend snapshot: one row per symbol, latest overwrites previous.
