@@ -58,6 +58,12 @@ const I = {
   collapse: <path d="M5 12h14" />,
   expand: <path d="M5 8h14v8H5z" />,
 }
+// 主图指标图例收起与否：每个看图的人自己的习惯，存本机（读写失败就当展开）
+// Whether the main legend is folded: a per-viewer habit kept in this browser (read/write failures mean unfolded)
+const FOLD_KEY = 'prismx_indl_fold'
+const readFold = () => { try { return localStorage.getItem(FOLD_KEY) === '1' } catch { return false } }
+const writeFold = (v: boolean) => { try { localStorage.setItem(FOLD_KEY, v ? '1' : '0') } catch { /* 无痕模式等 / private mode etc. */ } }
+
 const Ico = ({ d }: { d: JSX.Element }) => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{d}</svg>
 )
@@ -83,6 +89,8 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
   const [menu, setMenu] = useState<string | null>(null)
   const [drag, setDrag] = useState<{ uid: string; y: number; target: string | null } | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  const [fold, setFoldState] = useState(readFold)
+  const setFold = (v: boolean) => { setFoldState(v); writeFold(v) }
 
   useEffect(() => {
     if (!menu && !active) return
@@ -209,11 +217,21 @@ function PaneLegends({ layout, list, boxes, legendStore, digits, candle, axisW, 
   const busyPane = list.find((i) => i.uid === active || i.uid === menu)?.pane ?? null
   return (
     <div ref={rootRef} className="indl-root">
-      {showRows && (
-        <div className="term-legend main indl">
-          {list.filter((i) => i.pane === 'main' || !boxes[i.pane]).map(row)}
-        </div>
-      )}
+      {showRows && (() => {
+        const mains = list.filter((i) => i.pane === 'main' || !boxes[i.pane])
+        if (mains.length === 0) return null
+        const label = String(t(fold ? 'charts.ind.ui.legendExpand' : 'charts.ind.ui.legendCollapse'))
+        return (
+          <div className="term-legend main indl">
+            {!fold && mains.map(row)}
+            {/* 收起 / 展开主图的指标行（收起时显示个数）/ fold or unfold the main pane's rows (the count shows while folded) */}
+            <button type="button" className={`indl-fold ${fold ? 'folded' : ''}`} aria-expanded={!fold} aria-label={label} title={label} onClick={() => setFold(!fold)}>
+              <Ico d={fold ? I.down : I.up} />
+              {fold && <span>{mains.length}</span>}
+            </button>
+          </div>
+        )
+      })()}
       {subs.map((p, k) => {
         const b = boxes[p.id]
         const collapsed = !!p.collapsed && maxPane !== p.id

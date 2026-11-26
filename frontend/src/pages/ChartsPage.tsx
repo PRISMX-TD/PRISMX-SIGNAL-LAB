@@ -27,6 +27,7 @@
 // watchlist / ticket / positions open as bottom sheets. The chart container is
 // always mounted — sheets overlay it, never unmount it.
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
+import { useOverflowHint } from '../utils/useOverflowHint'
 import type { LogicalRange, Time } from 'lightweight-charts'
 import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
@@ -441,14 +442,30 @@ export default function ChartsPage() {
   // Clicking the symbol name on desktop no longer opens that invisible watchlist sheet
   // either (it pushed a back-history entry, so the first Back did nothing visible).
   const isDesktop = useMediaQuery('(min-width: 1024px)')
-  // 专业版终端开关（存在 chartv2 / pro，跨设备同步）。两套外壳共用同一个图表容器：
-  // 下面所有外壳部件都是「条件槽位」，图表容器在 React 树里的位置不变，切换时不会重建图表。
-  // The pro terminal switch (chartv2 / pro, synced). Both shells share one chart container:
-  // every shell part below is a conditional slot, so the container keeps its place in the
-  // React tree and switching never rebuilds the chart.
+  // 专业版终端开关。两套外壳共用同一个图表容器：下面所有外壳部件都是「条件槽位」，图表容器在
+  // React 树里的位置不变，切换时不会重建图表。每次进页面都先是经典版（2026-11-26 用户要求），
+  // 专业版由用户自己切，不再记住；专业版的面板宽度等布局偏好仍存在 chartv2 / pro。
+  // The pro terminal switch. Both shells share one chart container: every shell part below is a
+  // conditional slot, so the container keeps its place in the React tree and switching never
+  // rebuilds the chart. The page always opens in the classic shell (user request 2026-11-26); the
+  // pro shell is the user's own switch and is no longer remembered. Its panel sizes etc. still
+  // live in chartv2 / pro.
   const [proPrefs, updatePro] = useProPrefs()
-  const pro = proPrefs.layout === 'pro'
-  const setLayout = useCallback((l: ProLayout) => updatePro({ layout: l }), [updatePro])
+  const [layout, setLayoutState] = useState<ProLayout>('classic')
+  const pro = layout === 'pro'
+  // 经典版工具条放不下时横向滚动：右缘渐隐提示，鼠标竖滚轮也能横滑
+  // Classic toolbar scrolls sideways when it doesn't fit: a right-edge fade as the cue, and a vertical wheel scrolls it too
+  const tbHint = useOverflowHint<HTMLDivElement>()
+  const tbRef = useCallback((el: HTMLDivElement | null) => {
+    tbHint(el)
+    if (!el) return
+    el.onwheel = (e) => {
+      if (Math.abs(e.deltaY) <= Math.abs(e.deltaX) || el.scrollWidth <= el.clientWidth + 1) return
+      e.preventDefault()
+      el.scrollLeft += e.deltaY
+    }
+  }, [tbHint])
+  const setLayout = useCallback((l: ProLayout) => setLayoutState(l), [])
   const [cmd, setCmd] = useState<ProCommandMode | null>(null)
   const [proDraw, setProDraw] = useState(false)
   useEffect(() => {
@@ -1262,7 +1279,7 @@ export default function ChartsPage() {
           {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
               Toolbar: intervals left; positions (mobile) · pen (mobile) · markers · indicators right */}
           {!isFullscreen && !pro && (
-            <div className="term-tb">
+            <div className="term-tb" ref={tbRef}>
               <IntervalSeg value={interval} onChange={setIntervalCode} codes={cprefs.favIntervals} />
               <IntervalMenu value={interval} onChange={setIntervalCode} favorites={cprefs.favIntervals} onFavorites={setFavIntervals} />
               <span className="term-toolbar-divider" aria-hidden />

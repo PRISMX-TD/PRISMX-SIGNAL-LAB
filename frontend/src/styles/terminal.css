@@ -434,6 +434,19 @@
   padding: 0 12px;
   border-bottom: 1px solid var(--line);
   min-width: 0;
+  /* 桌面窄窗口（右侧开着下单面板）放不下时横向滚动，不再把右边的按钮切掉。
+     Narrow desktop windows (order panel open) scroll sideways instead of clipping the right-hand buttons. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.term-tb::-webkit-scrollbar { display: none; }
+/* 手机端右侧按钮钉住（见下方媒体查询），不渐隐 / phones pin the right-hand buttons (media query below), no fade */
+@media (min-width: 1024px) {
+  .term-tb[data-more] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  }
 }
 .term-tf {
   display: inline-flex;
@@ -3116,6 +3129,30 @@
   .indl-btns button:hover, .indl-pane button:hover:not(:disabled) { color: var(--text-strong); background: rgba(127, 127, 127, 0.18); }
 }
 .indl-pane button:disabled { opacity: 0.3; cursor: default; }
+/* 主图图例的收起按钮：一个小方块，收起后旁边带指标个数 / the main legend's fold button, with the count while folded */
+.indl-fold {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  min-width: 24px;
+  margin-top: 2px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  color: var(--text-3);
+  font: 500 11px var(--font-mono);
+  pointer-events: auto;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.indl-fold svg { width: 12px; height: 12px; }
+.indl-fold:active { transform: scale(0.96); }
+@media (hover: hover) and (pointer: fine) {
+  .indl-fold:hover { color: var(--text-strong); border-color: var(--line-strong, var(--text-3)); }
+}
+.term-chart[data-ctheme="light"] .indl-fold { color: #787b86; border-color: #d1d4dc; background: rgba(255, 255, 255, 0.85); }
 .indl-menu {
   position: absolute;
   left: 0;
