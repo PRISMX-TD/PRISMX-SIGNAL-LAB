@@ -251,21 +251,25 @@ export class IndShapePrimitive {
         }
       }
     }
-    const hline = (price: number, color: string | undefined, dash: LineDash, extend?: boolean) => {
+    const hline = (key: 'poc' | 'vah' | 'val', price: number, color: string | undefined, def: LineDash, extend?: boolean) => {
       const y = this.y(price)
       if (y == null || !color) return
+      const st = d.lines?.[key]
+      const w = st?.width ?? 1
       ctx.strokeStyle = color
-      ctx.lineWidth = 1
-      ctx.setLineDash(DASHES[dash])
+      ctx.lineWidth = w
+      // 线宽大时虚线间隔跟着放大 / scale dash gaps with the width
+      ctx.setLineDash(DASHES[st?.dash ?? def].map((x) => x * Math.max(1, w * 0.75)))
       ctx.beginPath()
-      ctx.moveTo(left, Math.round(y) + 0.5)
-      ctx.lineTo(extend ? width : right, Math.round(y) + 0.5)
+      const yy = w % 2 === 1 ? Math.round(y) + 0.5 : Math.round(y)
+      ctx.moveTo(left, yy)
+      ctx.lineTo(extend ? width : right, yy)
       ctx.stroke()
       ctx.setLineDash([])
     }
-    hline(p.lo + (p.vah + 1) * p.step, d.vah, 'dotted', ext.vah)
-    hline(p.lo + p.val * p.step, d.val, 'dotted', ext.val)
-    hline(p.lo + (p.poc + 0.5) * p.step, d.poc, 'solid', ext.poc)
+    hline('vah', p.lo + (p.vah + 1) * p.step, d.vah, 'dotted', ext.vah)
+    hline('val', p.lo + p.val * p.step, d.val, 'dotted', ext.val)
+    hline('poc', p.lo + (p.poc + 0.5) * p.step, d.poc, 'solid', ext.poc)
   }
 
   private visibleProfile(ctx: Ctx, vp: NonNullable<ShapeScene['vp']>, width: number) {

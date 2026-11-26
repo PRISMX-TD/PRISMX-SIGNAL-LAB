@@ -67,7 +67,7 @@ describe('PVP-R indicator', () => {
     const days = new Set(bars.map((b) => brokerDay(b.t))).size
     expect(ps.length).toBe(Math.min(60, days))
     expect(ps[ps.length - 1].p.i2).toBe(bars.length - 1)
-    expect(ps[0]).toMatchObject({ mode: 'delta', anchor: 'left', width: 0.5, vah: 'f:vah', box: 'f:box', hist: true })
+    expect(ps[0]).toMatchObject({ mode: 'delta', anchor: 'left', width: 0.5, vah: 'p:vah', poc: 'p:poc', box: 'f:box', hist: true })
     const hidden = computeAll({ list: [inst('pvpr', { hideLive: true })], bars, interval: '15', digits: 2, priceBased: false, symbol: 'XAUUSD' })
     expect(hidden.get('pvpr')!.extras.profiles!.length).toBe(ps.length - 1)
   })

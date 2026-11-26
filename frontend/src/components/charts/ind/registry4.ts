@@ -78,7 +78,7 @@ function pvpr(ctx: Parameters<IndDef['compute']>[0], inp: Inputs): CompOut {
     const p = pvpProfile(toUnits(src, prev), hi, lo, { ...opt, i1: s, i2: e })
     profiles.push({
       p, anchor: str(inp, 'placement') === 'right' ? 'right' : 'left', width: num(inp, 'width') / 100,
-      up: 'f:up', dn: 'f:dn', vaUp: 'f:vaUp', vaDn: 'f:vaDn', poc: 'f:poc', vah: 'f:vah', val: 'f:val', box: 'f:box',
+      up: 'f:up', dn: 'f:dn', vaUp: 'f:vaUp', vaDn: 'f:vaDn', poc: 'p:poc', vah: 'p:vah', val: 'p:val', box: 'f:box',
       mode, hist: inp.showVP !== false,
       ext: { poc: inp.extPoc === true, vah: inp.extVah === true, val: inp.extVal === true },
     })
@@ -232,11 +232,11 @@ export const DEFS4: IndDef[] = [
       { key: 'width', kind: 'int', def: 50, min: 1, max: 100 },
       { key: 'placement', kind: 'select', def: 'left', options: ['left', 'right'] },
     ],
-    plots: [],
+    // VAH / VAL / POC 是图形线样式：颜色、粗细、线型都能在样式页改 / style-only lines: colour, width and dash are editable
+    plots: [shapeLine('vah', '#787b86', 'vah', 1, 'dotted'), shapeLine('val', '#787b86', 'val', 1, 'dotted'), shapeLine('poc', '#f23645', 'poc', 1, 'solid')],
     fills: [
       fill('up', '#26a69a', 20, 'upVol'), fill('dn', '#ab47bc', 20, 'downVol'),
       fill('vaUp', '#26a69a', 40, 'vaUp'), fill('vaDn', '#ab47bc', 40, 'vaDown'),
-      fill('vah', '#787b86', 100, 'vah'), fill('val', '#787b86', 100, 'val'), fill('poc', '#f23645', 100, 'poc'),
       fill('box', '#000000', 0, 'boxBg'),
     ],
     title: (inp) => `${TF_TEXT[str(inp, 'period')] ?? ''} ${inp.rowSize}`,

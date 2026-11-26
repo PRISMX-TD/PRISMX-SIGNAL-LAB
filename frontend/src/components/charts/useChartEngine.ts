@@ -383,11 +383,14 @@ export function useChartEngine(
     }
     const clear = 'rgba(0,0,0,0)'
     const tx = (t: string) => (t.startsWith('mk.') ? txt[t] ?? t.slice(3) : t)
-    const prof = <T extends { up: string; dn: string; vaUp: string; vaDn: string; poc: string; vah?: string; val?: string; box?: string }>(p: T): T =>
-      ({
+    const prof = <T extends { up: string; dn: string; vaUp: string; vaDn: string; poc: string; vah?: string; val?: string; box?: string }>(p: T): T => {
+      const lines: Record<string, { width: number; dash: LineDash }> = {}
+      for (const k of ['poc', 'vah', 'val'] as const) { const ps = shapePlot(p[k]); if (ps) lines[k] = { width: ps.width, dash: ps.dash } }
+      return {
         ...p, up: col(p.up) ?? clear, dn: col(p.dn) ?? clear, vaUp: col(p.vaUp) ?? clear, vaDn: col(p.vaDn) ?? clear, poc: col(p.poc) ?? '',
-        vah: col(p.vah) ?? undefined, val: col(p.val) ?? undefined, box: col(p.box) ?? undefined,
-      })
+        vah: col(p.vah) ?? undefined, val: col(p.val) ?? undefined, box: col(p.box) ?? undefined, lines,
+      }
+    }
     const pal = viewRef.current?.palette
     return {
       rects: (x.rects ?? []).flatMap((r) => {

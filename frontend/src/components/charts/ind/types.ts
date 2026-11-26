@@ -121,6 +121,8 @@ export interface IndExtras {
     p: Profile; anchor: 'left' | 'right'; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string
     mode?: 'updown' | 'total' | 'delta'; hist?: boolean; vah?: string; val?: string; box?: string
     ext?: { poc?: boolean; vah?: boolean; val?: boolean }
+    // 三条线的粗细与线型（颜色写 'p:<key>' 时由引擎从线样式填入）/ the lines' width and dash (filled from the plot style for 'p:<key>' colours)
+    lines?: Partial<Record<'poc' | 'vah' | 'val', { width: number; dash: LineDash }>>
   }[]
   // 可见范围成交量分布：画的时候按当前可见的 K 线现算，贴在窗格右边 / visible-range profile, computed at draw time, docked right
   vpVisible?: { rows: number; vaPct: number; width: number; up: string; dn: string; vaUp: string; vaDn: string; poc: string }
