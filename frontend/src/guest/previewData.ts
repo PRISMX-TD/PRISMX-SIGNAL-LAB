@@ -10,6 +10,7 @@ import type {
   AdminStrategyWinRate, CompetitionSummary, Quote, SentimentRatio, Signal, Trend,
 } from '../api/types'
 import { inviteApi, paymentApi, readRef } from '../api/client'
+import type { EconGroup } from '../api/econTypes'
 import { PublicHttpError, publicCompetitionApi, publicGetJson } from '../api/publicCompetition'
 import { usePollWhileVisible } from '../utils/usePollWhileVisible'
 
@@ -162,3 +163,7 @@ export function useGuestOffer(): GuestOffer {
   }, [])
   return offer
 }
+
+// 「今日财经」卡的公开数据（2026-11-26）：参数在服务端固定，预案只有标记没有正文。
+// The calendar card's public feed: parameters fixed server-side, previews as a marker only.
+export const loadGuestEcon = () => publicGetJson<{ public: boolean; items: EconGroup[] }>('/public/preview/econ')

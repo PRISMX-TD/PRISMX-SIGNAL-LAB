@@ -2,6 +2,7 @@
 
 - GET  /public/preview           实时快照（3 秒共享缓存，活跃信号价位已抹除，见 services/guest_preview）
 - GET  /public/preview/analysis  时段胜率卡要的策略分析（只含已公开策略），页面只取一次
+- GET  /public/preview/econ      「今日财经」卡（2026-11-26）：和登录用户同一份日历，固定参数，预案正文去掉
 - POST /public/preview/event     漏斗打点，永远 204
 
 开关关着时两个 GET 一律 404：功能没开就不对外吐任何快照，免得被人拿去当免费行情源。
@@ -14,13 +15,17 @@ checked outside the cache, so turning it off takes effect at once. The event end
 ignores the switch: with it off the home page is the landing page, whose views must be
 counted too or there is nothing to compare against.
 """
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.rate_limit import limiter
 from app.schemas import GuestPreviewEventIn
+from app.routers.econ import calendar_payload
 from app.services.deps import get_db
+from app.services.econ import rules, store
 from app.services.guest_preview import build_analysis_payload, build_preview_payload, record_event
 from app.services.settings_store import get_guest_preview_settings
 
@@ -51,3 +56,18 @@ def get_preview_analysis(request: Request, db: Session = Depends(get_db)):
 def post_event(request: Request, body: GuestPreviewEventIn, db: Session = Depends(get_db)):
     record_event(db, body.mode, body.step)
     return Response(status_code=204)
+
+
+# 「今日财经」卡（2026-11-26）：参数固定成仪表盘卡片那一组（从昨天起 10 天、橙红两级），
+# 和登录用户共用 60 秒缓存。预案正文是登录后的内容，这里只留「有预案」的标记。
+# 日历「对用户开放」关着时同样返回 public=False，卡片整张不显示。
+# The "today's calendar" card (2026-11-26): fixed to the dashboard card's parameters (ten days from
+# yesterday, orange and red) and sharing the signed-in 60s cache. Preview text stays behind login;
+# guests only get the "has a preview" marker. With "open to users" off it is public=False, no card.
+@router.get("/econ")
+@limiter.shared_limit(settings.RATE_LIMIT_GUEST_PREVIEW, scope="guest-preview")
+def get_preview_econ(request: Request, db: Session = Depends(get_db)):
+    _require_enabled(db)
+    start = store.utcnow().date() - timedelta(days=1)
+    out = calendar_payload(db, start, 10, rules.MEDIUM)
+    return {**out, "items": [{**g, "preview": {"status": "ok"} if g.get("preview") else None} for g in out["items"]]}

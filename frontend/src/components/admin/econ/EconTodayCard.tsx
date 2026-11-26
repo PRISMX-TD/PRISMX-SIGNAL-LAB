@@ -7,6 +7,8 @@
 // result, an arrow and a countdown on the next, a tag where a preview exists; any row opens the full
 // calendar at that entry. With nothing today it shows the next day that has data. Phones list only
 // what is still ahead.
+// 游客预览首页也放这张卡（2026-11-26）：传 source 换成公开接口 /public/preview/econ，点击由游客门拦成注册弹窗。
+// The guest preview home shows it too: `source` swaps in the public endpoint; clicks hit the guest gate.
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Link } from 'react-router-dom'
@@ -19,8 +21,15 @@ const REFRESH_MS = 5 * 60_000
 const SHOWN_LEVELS: ReadonlySet<number> = new Set([2, 3])
 
 type Entry = { g: EconGroup; row: Row; past: boolean }
+export type EconCardLoad = () => Promise<{ public: boolean; items: EconGroup[] }>
 
-export default function EconTodayCard() {
+// 后端按 UTC 日期切片：从昨天取 10 天。本地「今天」在里面；周末这一周没数据了，也够得到
+// 下一周的头几天，卡片就显示下一个有数据的日子
+// The backend slices by UTC date; ten days from yesterday cover local today and, at the weekend
+// when this week is done, the first days of next week, so the card shows the next day with data
+const signedInLoad: EconCardLoad = () => econApi.calendar(ymd(addDays(new Date(), -1)), 10, 2)
+
+export default function EconTodayCard({ source = signedInLoad }: { source?: EconCardLoad }) {
   const { t, i18n } = useTranslation()
   const zh = i18n.language.startsWith('zh')
   const [items, setItems] = useState<EconGroup[] | null>(null)
@@ -30,11 +39,7 @@ export default function EconTodayCard() {
     let alive = true
     const load = async () => {
       try {
-        // 后端按 UTC 日期切片：从昨天取 10 天。本地「今天」在里面；周末这一周没数据了，也够得到
-        // 下一周的头几天，卡片就显示下一个有数据的日子
-        // The backend slices by UTC date; ten days from yesterday cover local today and, at the weekend
-        // when this week is done, the first days of next week, so the card shows the next day with data
-        const cal = await econApi.calendar(ymd(addDays(new Date(), -1)), 10, 2)
+        const cal = await source()
         // 管理员关掉「对用户开放」时整张卡不显示 / hidden entirely while "open to users" is off
         if (alive) setItems(cal.public ? cal.items : null)
       } catch {
@@ -47,7 +52,7 @@ export default function EconTodayCard() {
       alive = false
       window.clearInterval(id)
     }
-  }, [])
+  }, [source])
 
   // 半分钟走一次「现在」：到点后行变暗、箭头换到下一项 / dimming and the arrow follow the clock
   useEffect(() => {

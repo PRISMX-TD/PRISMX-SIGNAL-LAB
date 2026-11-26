@@ -42,14 +42,8 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-@router.get("/calendar")
-def econ_calendar(
-    start: date | None = None,
-    days: int = Query(7, ge=1, le=14),
-    minImportance: int = Query(rules.LOW, ge=rules.LOW, le=rules.HIGH),
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+def calendar_payload(db: Session, start: date | None, days: int, minImportance: int) -> dict:
+    """登录用户和游客预览共用：参数校验 + 60 秒缓存 / shared by signed-in users and the guest preview."""
     today = store.utcnow().date()
     start = start or (today - timedelta(days=1))
     if abs((start - today).days) > MAX_SPAN_DAYS:
@@ -68,3 +62,14 @@ def econ_calendar(
         _cache.clear()
     _cache[key] = (now, out)
     return out
+
+
+@router.get("/calendar")
+def econ_calendar(
+    start: date | None = None,
+    days: int = Query(7, ge=1, le=14),
+    minImportance: int = Query(rules.LOW, ge=rules.LOW, le=rules.HIGH),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    return calendar_payload(db, start, days, minImportance)

@@ -45,6 +45,8 @@ function reasonOf(el: Element): GateReason {
   if (g === 'competition' || g === 'personal' || g === 'history') return { kind: g }
   if (el.closest('.dash-tk, .cmp-navlive')) return { kind: 'competition' }
   if (el.closest('.view-all-btn')) return { kind: 'nav', page: 'signals' }
+  // 今日财经卡的链接也带 dh-link，但不是时段胜率页 / the calendar card's links share dh-link but aren't the analysis page
+  if (el.closest('a[href^="/calendar"]')) return { kind: 'generic' }
   if (el.closest('.dh-link')) return { kind: 'nav', page: 'analysis' }
   return { kind: 'generic' }
 }
