@@ -1864,6 +1864,14 @@
 .chart-set small { font-size: 12px; color: var(--text-3); }
 .chart-set-sec { display: flex; flex-direction: column; gap: 12px; }
 .chart-set-sec .ind-seg { align-self: flex-start; }
+/* 成交量分布样式页：勾选 + 名称在左、取色在右；直方图的子项缩进，关掉直方图时变淡
+   Volume profile style tab: checkbox + name left, colour right; histogram sub-rows indented, dimmed when off */
+.chart-set-row.vp-row > .vp-chk { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; flex-shrink: 1; cursor: pointer; }
+.vp-chk input { width: 15px; height: 15px; margin: 0; accent-color: var(--purple-hi); cursor: pointer; flex-shrink: 0; }
+.vp-chk-pad { width: 15px; flex-shrink: 0; }
+.chart-set-row.vp-row.sub { padding-left: 25px; }
+.vp-group { display: flex; flex-direction: column; gap: inherit; }
+.vp-group.off { opacity: 0.45; }
 .chart-set-custom { display: flex; align-items: center; gap: 16px; }
 .chart-set-pick { display: inline-flex; align-items: center; gap: 8px; color: var(--text-2, var(--text)); }
 .chart-set-pick .ind-dot { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 3px rgba(255, 255, 255, 0.22); }

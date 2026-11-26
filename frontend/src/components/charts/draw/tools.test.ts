@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { finishPoints, sanitizeDrawings, visibleOn, visGroupOf, pointsNeeded, isScreenAnchored, TOOL_META, type Drawing } from './model'
 import { dragHandle, hitDrawing, handlesOf, inMarquee, constrain45, anchorsOf, renderDrawing, type DrawEnv } from './tools'
-import { volumeProfile, vwapSeries } from './ext/volume'
+import { volumeProfile, vwapSeries, valueAreaTv, developing, vpOf } from './ext/volume'
 import { patternBars, tableGrid, ghostBars } from './ext/misc'
 import { spiralPts } from './ext/advanced'
 
@@ -176,6 +176,40 @@ describe('draw tools, batch 3', () => {
     const va = tot.slice(pr.vaLo, pr.vaHi + 1).reduce((a, b) => a + b, 0)
     expect(va / all).toBeGreaterThanOrEqual(0.7)
     expect(all).toBeCloseTo(103, 6)
+  })
+  it('value area adds the bigger pair of rows each step, TradingView style', () => {
+    // POC = 4；上方两行 1+1 = 2，下方两行 3+3 = 6 → 先整对并入下方，再比 2 对 0 → 上方
+    // the pair below wins first (6 vs 2), then the pair above (2 vs 0)
+    const tot = [0, 0, 3, 3, 10, 1, 1, 0]
+    expect(valueAreaTv(tot, 4, 90)).toEqual([2, 5])
+    expect(valueAreaTv(tot, 4, 70)).toEqual([3, 4]) // 13 / 18 already ≥ 70%
+    // 够数就停，不硬凑满一对 / stops as soon as the goal is met
+    expect(valueAreaTv([1, 1, 10, 5, 0], 2, 70)).toEqual([2, 3])
+    expect(valueAreaTv([5], 0, 70)).toEqual([0, 0])
+  })
+  it('volume profile: ticks-per-row layout, custom value area %, developing POC', () => {
+    const bars = [bar(0, 10, 11, 10, 11, 1), bar(1, 11, 12, 11, 12, 1), bar(2, 12, 13, 12, 12.5, 50), bar(3, 12.5, 13, 12, 12.2, 50), bar(4, 13, 14, 13, 14, 1)]
+    const byTicks = volumeProfile(bars, { tick: 0.01, ticks: 50 })!
+    expect(byTicks.up.length).toBe(8) // 4 / 0.5
+    expect(byTicks.rowH).toBeCloseTo(0.5)
+    expect(volumeProfile(bars, { tick: 0.00001, ticks: 1 })!.up.length).toBe(400) // capped
+    const narrow = volumeProfile(bars, 4, 30)!
+    expect([narrow.vaLo, narrow.vaHi]).toEqual([2, 2])
+    const dev = developing(bars, volumeProfile(bars, 4)!, 70)
+    expect(dev).toHaveLength(5)
+    expect(dev[0].poc).toBeCloseTo(10.5) // only the first bar so far
+    expect(dev[4].poc).toBeCloseTo(12.5)
+  })
+  it('vpOf fills TradingView-like defaults and keeps saved values', () => {
+    const d = { id: 'v', type: 'fixedRangeVP', color: '#7c5cff', pts: [{ t: 0, p: 1 }, { t: 1, p: 1 }] } as Drawing
+    const o = vpOf(d)
+    expect(o).toMatchObject({ layout: 'rows', volume: 'updown', vaPct: 70, widthPct: 30, placement: 'left', hist: true })
+    expect(o.vah).toEqual({ on: true, color: '#3d7bff' })
+    expect(o.devPoc.on).toBe(false)
+    const s = vpOf({ ...d, vp: { placement: 'right', vaPct: 150, poc: { on: false, color: '#ff0000' } } })
+    expect(s.placement).toBe('right')
+    expect(s.vaPct).toBe(100)
+    expect(s.poc).toEqual({ on: false, color: '#ff0000' })
   })
   it('anchored VWAP is the volume-weighted typical price; zero volume counts each bar once', () => {
     const s = vwapSeries([bar(0, 10, 12, 8, 10, 1), bar(1, 10, 22, 18, 20, 3)])

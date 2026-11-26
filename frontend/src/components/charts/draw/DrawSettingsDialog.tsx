@@ -24,6 +24,7 @@ const LABELED = new Set<DrawType>(['info', 'priceRange', 'dateRange', 'datePrice
 // 坐标只给提示、不逐点列出的工具（点太多）/ tools whose coordinates aren't listed point by point
 const FREEHAND = new Set<DrawType>(['brush', 'highlighter'])
 import { StyleGlyph } from './DrawFloatingBar'
+import { VpInputs, VpStyle } from './VpSettings'
 
 export type SettingsTab = 'style' | 'text' | 'inputs' | 'coords' | 'vis'
 
@@ -94,7 +95,9 @@ export default function DrawSettingsDialog(p: Props) {
   const meta = TOOL_META[type]
   const isPos = type === 'long' || type === 'short'
   const isFib = hasLevels(type)
-  const tabs: SettingsTab[] = ['style']
+  // 成交量分布照 TradingView：「输入」在前、「样式」在后 / volume profiles follow TradingView: Inputs, then Style
+  const isVp = type === 'fixedRangeVP' || type === 'anchoredVP'
+  const tabs: SettingsTab[] = isVp ? ['inputs', 'style'] : ['style']
   if (takesText(type)) tabs.push('text')
   if (isPos) tabs.push('inputs')
   if (!isScreenAnchored(type)) tabs.push('coords')
@@ -119,6 +122,7 @@ export default function DrawSettingsDialog(p: Props) {
   const body = (() => {
     switch (tab) {
       case 'style':
+        if (isVp) return <VpStyle d={d} set={set} tt={tt} />
         return (
           <>
             {!isPos && (
@@ -157,11 +161,6 @@ export default function DrawSettingsDialog(p: Props) {
                   <Seg value={d.alpha ?? 1} label={tt('charts.draw.opacity')} options={[0.25, 0.5, 0.75, 1].map((v) => ({ v, label: `${Math.round(v * 100)}%` }))} onChange={(v) => set({ alpha: v })} />
                 </Row>
               </>
-            )}
-            {(type === 'fixedRangeVP' || type === 'anchoredVP') && (
-              <Row label={tt('charts.draw.rows')}>
-                <Seg value={d.rows ?? 24} label={tt('charts.draw.rows')} options={[12, 24, 48, 96].map((v) => ({ v, label: String(v) }))} onChange={(v) => set({ rows: v })} />
-              </Row>
             )}
             {type === 'anchoredVwap' && (
               <Row label={tt('charts.draw.bands')}>
@@ -251,6 +250,7 @@ export default function DrawSettingsDialog(p: Props) {
           </>
         )
       case 'inputs':
+        if (isVp) return <VpInputs d={d} set={set} tt={tt} />
         return (
           <>
             <Row label={tt('charts.draw.account')}><Num value={d.account ?? DEFAULT_ACCOUNT} min={1} max={1e12} label={tt('charts.draw.account')} width={120} onChange={(v) => set({ account: v })} /></Row>

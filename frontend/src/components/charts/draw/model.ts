@@ -38,6 +38,36 @@ export type MagnetMode = 'off' | 'weak' | 'strong'
 
 export interface Point { t: number; p: number }
 export interface FibLevel { v: number; on: boolean; color?: string }
+// 成交量分布的线：开关 + 颜色 / a volume-profile line: on/off + colour
+export interface VpLine { on: boolean; color: string }
+export interface VpOpts {
+  /** 行布局：按行数，或按每行几个最小跳动 / row layout: a row count, or ticks per row */
+  layout: 'rows' | 'ticks'
+  ticks: number
+  /** 成交量：上涨 / 下跌分开、总量、差值 / volume: up / down, total, delta */
+  volume: 'updown' | 'total' | 'delta'
+  /** 价值区占总量的百分比 / value area as % of total volume */
+  vaPct: number
+  /** 画直方图 / draw the histogram */
+  hist: boolean
+  /** 每行的量写在条末 / write each row's volume at the bar end */
+  values: boolean
+  valuesColor: string
+  /** 直方图最长占框宽的百分比 / longest bar as % of the box width */
+  widthPct: number
+  placement: 'left' | 'right'
+  up: string
+  down: string
+  vaUp: string
+  vaDown: string
+  vah: VpLine
+  val: VpLine
+  poc: VpLine
+  devPoc: VpLine
+  devVa: VpLine
+  /** 直方图框底色，空 = 不铺 / box background, empty = none */
+  boxBg: string
+}
 // 按周期显示：分钟 / 小时 / 日 / 周 / 月，缺省 = 全显示 / visibility per interval group, absent = all
 export type VisGroup = 'm' | 'h' | 'd' | 'w' | 'M'
 export type Vis = Partial<Record<VisGroup, boolean>>
@@ -70,6 +100,9 @@ export interface Drawing {
   closed?: boolean
   // 成交量分布的价格行数 / volume profile price rows
   rows?: number
+  // 成交量分布的其余设置（对标 TradingView 的 FRVP：输入 + 样式），缺省项见 draw/ext/volume.ts 的 vpOf
+  // The rest of the volume profile settings (after TradingView's FRVP inputs + style); defaults in vpOf
+  vp?: Partial<VpOpts>
   // 锚定 VWAP 画 ±1σ / ±2σ 带 / anchored VWAP draws the ±1σ / ±2σ bands
   bands?: boolean
   // K 线形态复制：上下翻转 / 左右镜像；bars = 复制下来的 [开, 高, 低, 收]（相对第一根开盘价）
@@ -319,6 +352,7 @@ export function sanitizeDrawings(raw: unknown): Drawing[] {
     if (clean.bars !== undefined && !(Array.isArray(clean.bars) && clean.bars.length <= BARS_PATTERN_MAX
       && clean.bars.every((b) => Array.isArray(b) && b.length === 4 && b.every(Number.isFinite)))) delete clean.bars
     if (clean.img !== undefined && !(typeof clean.img === 'string' && /^data:image\/(png|jpeg|webp);base64,/.test(clean.img))) delete clean.img
+    if (clean.vp !== undefined && (typeof clean.vp !== 'object' || clean.vp === null || Array.isArray(clean.vp))) delete clean.vp
     out.push(clean)
   }
   return out
@@ -340,7 +374,7 @@ export function finishPoints(type: DrawType, pts: Point[]): Point[] {
 }
 
 // 样式字段（模板 / 默认样式只存这些，不存坐标和文字）/ style fields (templates & defaults keep only these)
-export const STYLE_KEYS = ['color', 'lineWidth', 'lineStyle', 'fill', 'extendLeft', 'extendRight', 'showLabel', 'levels', 'fontSize', 'textColor', 'account', 'risk', 'rows', 'bands', 'alpha'] as const
+export const STYLE_KEYS = ['color', 'lineWidth', 'lineStyle', 'fill', 'extendLeft', 'extendRight', 'showLabel', 'levels', 'fontSize', 'textColor', 'account', 'risk', 'rows', 'bands', 'alpha', 'vp'] as const
 export type StyleProps = Partial<Pick<Drawing, typeof STYLE_KEYS[number]>>
 export function styleOf(d: Drawing): StyleProps {
   const out: Record<string, unknown> = {}
