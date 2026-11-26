@@ -459,7 +459,11 @@ def _hash_legacy_api_tokens() -> None:
 #          rev 56 — chart alerts: new tables chart_alerts and chart_alert_logs via create_all. The new push
 #          event chart_alert is always on (each alert is user-created with its own push switch), so no
 #          whitelist backfill. No ADD COLUMN, no backfill.
-CURRENT_SCHEMA_REV = 56
+# rev 57 — 图表布局（2026-11-27，图表阶段 6）：新表 chart_layouts（create_all 建表建索引，每个用户最多 30 份，
+#          data 是前端自定的布局 JSON）。同 rev 56：无 ADD COLUMN、无回填；+1 只为让老库走一次完整迁移。
+#          rev 57 — chart layouts (chart phase 6): new table chart_layouts via create_all (at most 30 per
+#          user, data is frontend-owned layout JSON). No ADD COLUMN, no backfill.
+CURRENT_SCHEMA_REV = 57
 
 _SCHEMA_REV_KEY = "schema_rev"
 

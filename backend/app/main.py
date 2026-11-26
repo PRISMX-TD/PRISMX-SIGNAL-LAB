@@ -23,7 +23,7 @@ from app.core.rate_limit import limiter
 from app.core.strategy_limits import user_limiter
 from app.services.deps import get_current_user, require_admin, require_staff
 from app.engine.signal_engine import signal_expiry_loop, signal_loop
-from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, chart_alerts, chart_drawings, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, persona, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
+from app.routers import account, admin, admin_activity, admin_econ, admin_geo, announcements, auth, automation, bootstrap, bridge, chart, chart_alerts, chart_drawings, chart_layouts, chart_market, competitions, ea, econ, email_automations, emails, gamification, gateway, invite, lucky_wheel, notifications, orders, payments, persona, public_competitions, public_preview, sentiment, share, signals, site, strategies, support, telemetry, tickets, trends, webhook, ws
 from app.routers.bridge import offline_monitor_loop
 from app.routers.gateway import gateway_positions_loop
 from app.routers.orders import stale_order_monitor_loop
@@ -481,6 +481,10 @@ app.include_router(chart.router, prefix=settings.API_PREFIX)
 # Chart drawings (rev 55): one row per user and symbol, replacing the prefs chartDraw namespace
 app.include_router(chart_drawings.router, prefix=settings.API_PREFIX)
 app.include_router(chart_alerts.router, prefix=settings.API_PREFIX)
+# 图表阶段 6：按范围 / 批量取 K 线、交易时段、品种规格、日内涨跌基准；图表布局（rev 57）
+# Chart phase 6: range / batch candles, sessions, spec, day refs; chart layouts (rev 57)
+app.include_router(chart_market.router, prefix=settings.API_PREFIX)
+app.include_router(chart_layouts.router, prefix=settings.API_PREFIX)
 app.include_router(webhook.router, prefix=settings.API_PREFIX)
 app.include_router(account.router, prefix=settings.API_PREFIX)
 app.include_router(notifications.router, prefix=settings.API_PREFIX)

@@ -718,6 +718,22 @@ class ChartDrawing(Base):
     updated_at = Column(DateTime, nullable=False, default=_now)
 
 
+class ChartLayout(Base):
+    """图表布局（rev 57，2026-11-27）：用户存的整套图表布局（多图分屏、各格品种 / 周期 / 指标等），
+    每个用户最多 30 份。data 是前端自定的 JSON（≤64KB，后端不解析内容）。
+    Chart layouts (rev 57): a user's saved chart layouts (multi-chart grid, each cell's symbol /
+    interval / indicators…), at most 30 per user. data is frontend-owned JSON (≤64KB, opaque here).
+    """
+    __tablename__ = "chart_layouts"
+
+    id = Column(String, primary_key=True, default=_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    name = Column(String(60), nullable=False)
+    data = Column(Text, nullable=False, default="{}")
+    created_at = Column(DateTime, nullable=False, default=_now)
+    updated_at = Column(DateTime, nullable=False, default=_now)
+
+
 class ChartAlert(Base):
     """图表警报（rev 56，2026-11-25）：用户在行情图表上建的价格 / 画线 / 指标警报，服务端求值。
     Chart alerts (rev 56): price / drawing / indicator alerts created on the chart, evaluated server-side.
