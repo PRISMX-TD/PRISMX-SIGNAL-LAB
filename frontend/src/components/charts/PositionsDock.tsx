@@ -20,6 +20,7 @@ import { clientOrderId, displaySymbol, isLotOnStep, localizeApiError,
          limitLotInput, lotStep, minLot, snapLot } from '../../api/utils'
 import { checkSlTp } from '../order/orderMath'
 import SymbolLogo from './pro/SymbolLogo'
+import DockHistory from './DockHistory'
 import { createIdempotencyKeys } from '../../utils/idempotencyKeys'
 import ConfirmModal from '../ConfirmModal'
 import PendingEditor, { type PendingEdit } from './PendingEditor'
@@ -54,7 +55,7 @@ interface Props {
   initialTab?: Tab
 }
 
-type Tab = 'positions' | 'orders'
+type Tab = 'positions' | 'orders' | 'history'
 
 // 待确认的危险动作。全平以前有 ConfirmModal、部分平仓与撤单直接发——同一行里
 // 危险度相当的三个动作确认级别却不一致，最容易误触的反而没拦。2026-09-19 统一成
@@ -488,8 +489,11 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
           <button type="button" role="tab" aria-selected={tab === 'orders'} tabIndex={tab === 'orders' ? 0 : -1} className={`term-dk-tab ${tab === 'orders' ? 'on' : ''}`} onClick={() => setTab('orders')}>
             {t('charts.dock.orders')} <b>{pendingOrders.length + inFlight.length}</b>
           </button>
+          <button type="button" role="tab" aria-selected={tab === 'history'} tabIndex={tab === 'history' ? 0 : -1} className={`term-dk-tab ${tab === 'history' ? 'on' : ''}`} onClick={() => setTab('history')}>
+            {t('charts.dock.history')}
+          </button>
         </div>
-        {positions.length > 0 && (
+        {tab !== 'history' && positions.length > 0 && (
           <span className="term-dk-sum">
             {t('charts.dock.colPnl')}
             <b className={pnlSum >= 0 ? 'up' : 'down'}>{pnlSum >= 0 ? '+' : ''}{pnlSum.toFixed(2)}</b>
@@ -513,7 +517,9 @@ function PositionsDock({ positions, orders, pendingOrders, digitsFor, onToast, c
       </div>
 
       <div className="term-dk-body no-sb">
-        {tab === 'positions' ? (
+        {tab === 'history' ? (
+          <DockHistory login={mt5Login} digitsFor={digitsFor} />
+        ) : tab === 'positions' ? (
           positions.length === 0 && !positionsLoaded ? (
             // 首帧持仓未到：两行骨架，形状贴近持仓行 / first frame pending: row-shaped skeletons
             <div aria-busy="true" aria-live="polite">

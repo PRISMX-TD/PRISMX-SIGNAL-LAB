@@ -1233,8 +1233,12 @@ export default function ChartsPage() {
           {/* 画线竖轨（桌面；全屏时换成悬浮工具栏）。引擎就绪前先占位，免得网格跳动。
               Draw rail (desktop; fullscreen uses the floating toolbar). A placeholder
               holds the column before the engine is ready so the grid doesn't jump. */}
+          {/* 经典版与专业版同一条 TradingView 式画线栏（2026-11-26 起；以前经典版是带颜色圆点的
+              DrawToolsRow 竖轨，颜色现在都在选中画线的浮动工具条里改）。
+              Classic and pro share the TradingView-style draw bar since 2026-11-26 (classic
+              used to have DrawToolsRow's rail with colour dots; colour lives in the floating bar). */}
           {!isFullscreen && (!pro || (isDesktop && !proPrefs.focus)) && (drawReady
-            ? (pro ? (
+            ? (
               <ProDrawRail
                 drawLayerRef={drawLayerRef}
                 bumpDraw={bumpDraw}
@@ -1252,7 +1256,7 @@ export default function ChartsPage() {
                 onShowPositions={setShowPositions}
                 onRemoveIndicators={removeAllIndicators}
               />
-            ) : <DrawToolsRow variant="rail" drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} measureOn={measureOn} onMeasure={() => setMeasureOn((v) => !v)} />)
+            )
             : <div className="term-rail" />)}
 
           {/* 工具条：周期钉左；右侧 持仓（手机）· 画笔（手机）· 持仓标记 · 添加指标
@@ -1456,7 +1460,7 @@ export default function ChartsPage() {
               <MeasureOverlay chart={chartRef.current} series={seriesRef.current} host={containerRef.current} armed={measureOn} onDone={doneMeasure} decimals={decimals} barTimes={getBarTimes} colors={candleColors} />
             )}
             {drawReady && chartRef.current && <BackToLatest chart={chartRef.current} />}
-            {pro && zoomOn && drawReady && (
+            {zoomOn && drawReady && (
               <ProZoomBox
                 chartRef={chartRef}
                 hostRef={containerRef}

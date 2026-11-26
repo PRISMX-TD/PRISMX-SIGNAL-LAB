@@ -770,6 +770,11 @@
     "dock": {
       "positions": "持仓",
       "orders": "挂单",
+      "history": "历史",
+      "noHistory": "暂无历史交易",
+      "noHistoryHint": "平仓后的交易会出现在这里。",
+      "loadMore": "加载更早的记录",
+      "loadingMore": "加载中…",
       "noPositions": "暂无持仓",
       "noOrders": "暂无挂单",
       "noPositionsHint": "用下单票下单，成交后持仓会出现在这里。",

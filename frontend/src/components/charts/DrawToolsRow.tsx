@@ -1,4 +1,6 @@
-// 画线工具：图标 + 两种排布。rail = 桌面图表左侧的竖轨；strip = 手机报价条第二行的单行横条。
+// 画线工具：图标 + 单行横条（手机报价条第二行、全屏）。桌面左侧竖轨 2026-11-26 起两套外壳都用
+// pro/ProDrawRail，这里只剩横条。
+// (The desktop rail moved to pro/ProDrawRail for both shells on 2026-11-26; only the strip remains.)
 // 2026-11-25（阶段 2）起工具按组排：每组一个按钮，显示该组上次用的工具，点小三角（或再点一次已选中的
 // 按钮）弹出组内全部工具；列表里的星标把工具加进收藏栏。
 // Draw tools: icons plus two layouts. rail = the desktop chart's left rail; strip = the phone's
@@ -195,20 +197,20 @@ export default function DrawToolsRow({
   drawLayerRef,
   bumpDraw,
   t,
-  variant = 'rail',
   measureOn,
   onMeasure,
 }: {
   drawLayerRef: RefObject<DrawLayerHandle>
   bumpDraw: () => void
   t: (key: string) => unknown
-  variant?: 'rail' | 'strip'
+  // 只剩横条一种（手机抽屉、全屏）；桌面竖轨 2026-11-26 起两套外壳都用 ProDrawRail
+  // Strip only (mobile sheet, fullscreen); the desktop rail is ProDrawRail in both shells since 2026-11-26
+  variant?: 'strip'
   // 测量（尺子）按钮：只有传了才显示 / the ruler button shows only when these are passed
   measureOn?: boolean
   onMeasure?: () => void
 }) {
-  const rail = variant === 'rail'
-  const Divider = () => (rail ? <hr /> : <span className="term-toolbar-divider" />)
+  const Divider = () => <span className="term-toolbar-divider" />
   const dl = drawLayerRef.current
   // 画线层挂上之前 ref 还是空的，此时按「可见」画 / before the layer mounts, treat drawings as visible
   const visible = dl?.visible ?? true
@@ -217,7 +219,7 @@ export default function DrawToolsRow({
   const hintRef = useOverflowHint<HTMLDivElement>()
 
   return (
-    <div ref={rail ? undefined : hintRef} className={rail ? 'term-rail no-sb' : 'term-tools-strip no-sb'} role="group" aria-label={String(t('charts.draw.tools'))}>
+    <div ref={hintRef} className="term-tools-strip no-sb" role="group" aria-label={String(t('charts.draw.tools'))}>
       <DrawToolGroups drawLayerRef={drawLayerRef} bumpDraw={bumpDraw} t={t} />
       {onMeasure && (
         <button

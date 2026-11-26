@@ -9,7 +9,7 @@ import { useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import ChartDialog from './ChartDialog'
 import Switch from '../Switch'
-import { ColorDot } from './ColorDot'
+import ColorPicker from './ind/ColorPicker'
 import { CANDLE_COLOR_PRESETS, CANDLE_SCHEMES, candleSchemeOf, type CandleColors, type CandleScheme } from './chartConfig'
 import { COLOR_PRESETS } from './indicatorSettings'
 import { PRICE_BASED_TYPES, templateOf, type ChartPrefs, type GridMode, type ScaleMode } from './chartPrefs'
@@ -105,11 +105,11 @@ export default function ChartSettingsDialog(p: Props) {
               />
               <div className="chart-set-custom">
                 <span className="chart-set-pick">
-                  <ColorDot value={p.candleColors.up} palette={CANDLE_COLOR_PRESETS} label={tt('charts.settings.upColor')} onChange={(v) => p.onCandleColors({ ...p.candleColors, up: v })} />
+                  <ColorPicker color={p.candleColors.up} presets={CANDLE_COLOR_PRESETS} label={tt('charts.settings.upColor')} onChange={(v) => p.onCandleColors({ ...p.candleColors, up: v })} />
                   {tt('charts.settings.upColor')}
                 </span>
                 <span className="chart-set-pick">
-                  <ColorDot value={p.candleColors.down} palette={CANDLE_COLOR_PRESETS} label={tt('charts.settings.downColor')} onChange={(v) => p.onCandleColors({ ...p.candleColors, down: v })} />
+                  <ColorPicker color={p.candleColors.down} presets={CANDLE_COLOR_PRESETS} label={tt('charts.settings.downColor')} onChange={(v) => p.onCandleColors({ ...p.candleColors, down: v })} />
                   {tt('charts.settings.downColor')}
                 </span>
                 {scheme === 'custom' && <em>{tt('charts.settings.custom')}</em>}
@@ -119,7 +119,7 @@ export default function ChartSettingsDialog(p: Props) {
             <Row label={tt('charts.cs.borders')}><Switch checked={prefs.candle.borders} onChange={(v) => set('candle', { ...prefs.candle, borders: v })} aria-label={tt('charts.cs.borders')} /></Row>
             <Row label={tt('charts.cs.wick')}><Switch checked={prefs.candle.wick} onChange={(v) => set('candle', { ...prefs.candle, wick: v })} aria-label={tt('charts.cs.wick')} /></Row>
             <Row label={tt('charts.cs.lineColor')} hint={tt('charts.cs.lineColorHint')}>
-              <ColorDot value={prefs.lineColor} palette={COLOR_PRESETS} label={tt('charts.cs.lineColor')} onChange={(v) => set('lineColor', v)} />
+              <ColorPicker color={prefs.lineColor} presets={COLOR_PRESETS} label={tt('charts.cs.lineColor')} onChange={(v) => set('lineColor', v)} />
             </Row>
             <Row label={tt('charts.cs.lineWidth')}>
               <Seg value={prefs.lineWidth} label={tt('charts.cs.lineWidth')} options={[1, 2, 3, 4].map((n) => ({ v: n, label: `${n}px` }))} onChange={(v) => set('lineWidth', v)} />
@@ -187,7 +187,7 @@ export default function ChartSettingsDialog(p: Props) {
             </Row>
             <Row label={tt('charts.cs.bg')} hint={tt('charts.cs.bgHint')}>
               <span className="chart-set-pick">
-                <ColorDot value={prefs.canvas.bg ?? '#09090b'} palette={['#09090b', '#0b0e14', '#131722', '#1e222d', '#ffffff', '#f8f9fd', '#fdf6e3', '#0c1a2a']} label={tt('charts.cs.bg')} onChange={(v) => set('canvas', { ...prefs.canvas, bg: v })} />
+                <ColorPicker color={prefs.canvas.bg ?? '#09090b'} presets={['#09090b', '#0b0e14', '#131722', '#1e222d', '#ffffff', '#f8f9fd', '#fdf6e3', '#0c1a2a']} label={tt('charts.cs.bg')} onChange={(v) => set('canvas', { ...prefs.canvas, bg: v })} />
                 {prefs.canvas.bg && <button type="button" className="chart-link" onClick={() => set('canvas', { ...prefs.canvas, bg: null })}>{tt('charts.cs.bgReset')}</button>}
               </span>
             </Row>

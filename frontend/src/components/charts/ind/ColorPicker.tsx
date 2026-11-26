@@ -1,7 +1,10 @@
-// 指标样式的取色器：10 × 8 的色板（一行灰阶 + 十种色相各七档明度）、任意十六进制色值、透明度滑块。
+// 取色器：10 × 8 的色板（一行灰阶 + 十种色相各七档明度）、任意十六进制色值、R / G / B 三格、透明度滑块。
+// 指标样式、画线设置、图表设置共用（2026-11-26 画线 / 图表设置从只有几个预设点的 ColorDot 换过来，
+// 那个色板挂在对话框滚动区里会被裁掉）。可选 presets：在大色板上面多一行该处常用的颜色。
 // 弹层 portal 到 body、按色块位置用 fixed 定位，放不下就翻到上方，免得被对话框的滚动区裁掉。
-// Indicator style colour picker: a 10 × 8 palette (a grey row plus ten hues at seven lightness
-// steps), any hex value and an opacity slider. The popover is portalled to body and positioned
+// Colour picker: a 10 × 8 palette (a grey row plus ten hues at seven lightness steps), any hex
+// value, R / G / B fields and an opacity slider. Shared by indicator, drawing and chart settings;
+// optional presets add a row of the colours that spot uses most above the big palette. The popover is portalled to body and positioned
 // fixed from the swatch (flipping above when there's no room) so the dialog's scroller can't clip it.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
@@ -26,6 +29,21 @@ export const PALETTE: string[] = [
 
 const HEX = /^#[0-9a-fA-F]{6}$/
 
+/** #rrggbbaa → { #rrggbb, 不透明度 % }；六位色不透明度 100 / split an 8-digit hex into colour + opacity % */
+export function splitAlpha(c: string): { color: string; opacity: number } {
+  if (/^#[0-9a-f]{8}$/i.test(c)) return { color: c.slice(0, 7).toLowerCase(), opacity: Math.round((parseInt(c.slice(7), 16) / 255) * 100) }
+  return { color: c, opacity: 100 }
+}
+/** 不透明度不足 100 才写成八位色，满不透明仍是六位（旧数据、旧版 App 照常读）/ 8-digit only below 100% */
+export function joinAlpha(color: string, opacity: number): string {
+  if (!HEX.test(color) || opacity >= 100) return color
+  return color.toLowerCase() + Math.round((Math.max(0, opacity) / 100) * 255).toString(16).padStart(2, '0')
+}
+
+const rgbOf = (hex: string): [number, number, number] | null =>
+  HEX.test(hex) ? [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)] : null
+const hexOf = (rgb: readonly number[]) => '#' + rgb.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0')).join('')
+
 export function Swatch({ color, opacity = 100 }: { color: string; opacity?: number }) {
   return (
     <span className="cp-sw" aria-hidden>
@@ -34,7 +52,7 @@ export function Swatch({ color, opacity = 100 }: { color: string; opacity?: numb
   )
 }
 
-export default function ColorPicker({ color, opacity, onChange, label, resolved }: {
+export default function ColorPicker({ color, opacity, onChange, label, resolved, presets }: {
   color: string
   opacity?: number
   // 第二个参数为 undefined 表示没有透明度 / undefined opacity = no slider
@@ -42,6 +60,8 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved 
   label: string
   // 'up' / 'down' 这种跟随色的实际显示值 / display value for follow colours like 'up' / 'down'
   resolved?: string
+  /** 大色板上面多一行常用色 / an extra row of common colours above the palette */
+  presets?: readonly string[]
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
@@ -56,7 +76,7 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved 
     if (!open || !btn.current) return
     const r = btn.current.getBoundingClientRect()
     const w = 268
-    const h = pop.current?.offsetHeight ?? 300
+    const h = pop.current?.offsetHeight ?? 360
     const left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left))
     const below = r.bottom + 6
     const top = below + h > window.innerHeight - 8 ? Math.max(8, r.top - h - 6) : below
@@ -83,6 +103,13 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved 
       </button>
       {open && createPortal(
         <div ref={pop} className="cp-pop" role="dialog" aria-label={label} style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
+          {presets && presets.length > 0 && (
+            <div className="cp-grid cp-pre">
+              {presets.map((c) => (
+                <button key={c} type="button" className={`cp-c ${c.toLowerCase() === shown.toLowerCase() ? 'on' : ''}`} style={{ background: c }} aria-label={c} onClick={() => onChange(c, opacity)} />
+              ))}
+            </div>
+          )}
           <div className="cp-grid">
             {PALETTE.map((c) => (
               <button key={c} type="button" className={`cp-c ${c.toLowerCase() === shown.toLowerCase() ? 'on' : ''}`} style={{ background: c }} aria-label={c} onClick={() => onChange(c, opacity)} />
@@ -103,10 +130,38 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved 
               }}
             />
           </div>
+          {/* R / G / B 三格：改任一格立刻生效 / editing any channel applies at once */}
+          <div className="cp-row cp-rgb">
+            {(['R', 'G', 'B'] as const).map((ch, i) => {
+              const rgb = rgbOf(HEX.test(hex) ? hex : shown) ?? [0, 0, 0]
+              return (
+                <label key={ch} className="cp-ch">
+                  <span>{ch}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={255}
+                    inputMode="numeric"
+                    value={rgb[i]}
+                    aria-label={ch}
+                    onChange={(e) => {
+                      const n = Number(e.target.value)
+                      if (!Number.isFinite(n)) return
+                      const next = [...rgb]
+                      next[i] = n
+                      const v = hexOf(next)
+                      setHex(v)
+                      onChange(v, opacity)
+                    }}
+                  />
+                </label>
+              )
+            })}
+          </div>
           {opacity != null && (
             <div className="cp-row">
               <span className="cp-k">{t('charts.ind.ui.opacity')}</span>
-              <input className="cp-range" type="range" min={0} max={100} step={5} value={opacity} aria-label={String(t('charts.ind.ui.opacity'))}
+              <input className="cp-range" type="range" min={0} max={100} step={1} value={opacity} aria-label={String(t('charts.ind.ui.opacity'))}
                 style={{ ['--cp-c' as string]: HEX.test(shown) ? shown : '#888888' }}
                 onChange={(e) => onChange(color, Number(e.target.value))} />
               <span className="cp-v">{opacity}%</span>
@@ -117,4 +172,11 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved 
       )}
     </>
   )
+}
+
+/** 颜色带透明度存成一个字符串（#rrggbb 或 #rrggbbaa）的场合：画线颜色等。
+ *  For places that store colour and opacity as one string (#rrggbb or #rrggbbaa), e.g. drawings. */
+export function AlphaColorPicker({ value, onChange, label, presets }: { value: string; onChange: (v: string) => void; label: string; presets?: readonly string[] }) {
+  const { color, opacity } = splitAlpha(value)
+  return <ColorPicker color={color} opacity={opacity} label={label} presets={presets} onChange={(c, o) => onChange(joinAlpha(c, o ?? 100))} />
 }

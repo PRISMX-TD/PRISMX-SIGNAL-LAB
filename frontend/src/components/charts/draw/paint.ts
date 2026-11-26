@@ -72,6 +72,8 @@ export function setDash(ctx: CanvasRenderingContext2D, s: Drawing['lineStyle']) 
 }
 
 export function withAlpha(color: string, a: number): string {
+  // 八位色自带透明度（设置里调过不透明度），再乘上这里的 a / an 8-digit colour already carries alpha; multiply
+  if (/^#[0-9a-f]{8}$/i.test(color)) return color.slice(0, 7) + Math.round((parseInt(color.slice(7), 16) / 255) * a * 255).toString(16).padStart(2, '0')
   if (/^#[0-9a-f]{6}$/i.test(color)) return color + Math.round(a * 255).toString(16).padStart(2, '0')
   if (/^#[0-9a-f]{3}$/i.test(color)) return '#' + [...color.slice(1)].map((c) => c + c).join('') + Math.round(a * 255).toString(16).padStart(2, '0')
   return color

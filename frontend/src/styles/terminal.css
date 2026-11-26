@@ -349,7 +349,8 @@
   display: grid;
   flex: 1;
   min-height: 0;
-  grid-template-columns: 44px minmax(0, 1fr);
+  /* 52px：经典版也用专业版那条画线栏（ProDrawRail）/ 52px: classic uses the pro draw bar too */
+  grid-template-columns: 52px minmax(0, 1fr);
   grid-template-rows: 40px minmax(0, 1fr);
 }
 .term-rail {
@@ -666,6 +667,24 @@
 .term-dk-empty { padding: 24px 12px; text-align: center; font-size: 12px; color: var(--text-3); }
 .term-dk-empty b { display: block; font-weight: 500; color: var(--text-2); }
 .term-dk-empty span { display: block; max-width: 40ch; margin: 4px auto 0; font-size: 12px; }
+/* 「历史」页签：没有操作列，最后一格让给盈亏；底部「加载更早的记录」 / history rows have no actions column */
+.term-pr.hist { grid-template-columns: minmax(0, 1.4fr) 1fr 1fr 1fr 1fr minmax(0, 1.1fr); }
+.term-pr.hist .term-pnl { text-align: right; }
+.term-dk-more {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  color: var(--text-2);
+  font-size: 12px;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  .term-dk-more:hover:not(:disabled) { color: var(--text-strong); background: rgba(255, 255, 255, 0.03); }
+}
+.term-dk-more:disabled { cursor: default; opacity: 0.6; }
 /* 持仓行：一行一仓，发丝线分隔。/ One position per hairline row. */
 .term-pr {
   display: grid;
@@ -1425,6 +1444,7 @@
   .term-pr .c-tp { grid-area: tp; }
   .term-pa { grid-area: pa; justify-content: flex-start; }
   .term-pr.pend { grid-template-areas: "id id id st" "pa pa pa pa"; }
+  .term-pr.hist { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-areas: "id id id pnl" "e c sl tp"; }
   /* 真实挂单行在窄屏收成三行：品种一行，触发价 / 止损 / 止盈一行，操作一行。 */
   .term-pr.pend.q { grid-template-areas: "id id id id" "en sl tp tp" "pa pa pa pa"; }
   .term-pr .c-en { grid-area: en; }
@@ -3029,6 +3049,13 @@
 .cp-cur i { display: block; width: 100%; height: 100%; }
 .cp-hex { flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 0; border-radius: var(--r-md); background: var(--nest); color: var(--text-strong); font: 500 13px var(--font-mono); text-transform: uppercase; outline: 0; box-shadow: inset 0 0 0 1px var(--line-control); }
 .cp-hex:focus { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.cp-pre { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line); justify-content: start; }
+.cp-rgb { gap: 6px; }
+.cp-ch { display: flex; align-items: center; flex: 1; min-width: 0; height: 30px; padding-left: 8px; border-radius: var(--r-md); background: var(--nest); box-shadow: inset 0 0 0 1px var(--line-control); }
+.cp-ch:focus-within { box-shadow: inset 0 0 0 1px var(--purple-hi); }
+.cp-ch span { font: 600 11px var(--font-mono); color: var(--text-3); }
+.cp-ch input { flex: 1; min-width: 0; height: 100%; padding: 0 6px; border: 0; background: none; color: var(--text-strong); font: 500 13px var(--font-mono); text-align: right; outline: 0; -moz-appearance: textfield; appearance: textfield; }
+.cp-ch input::-webkit-outer-spin-button, .cp-ch input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .cp-k { font-size: 12px; color: var(--text-3); white-space: nowrap; }
 .cp-range { flex: 1; min-width: 0; height: 18px; margin: 0; accent-color: var(--cp-c, var(--purple-hi)); cursor: pointer; }
 .cp-v { width: 38px; font: 500 12px var(--font-mono); color: var(--text-2); text-align: right; }

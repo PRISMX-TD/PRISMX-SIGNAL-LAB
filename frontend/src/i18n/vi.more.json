@@ -770,6 +770,11 @@
     "dock": {
       "positions": "Vị thế",
       "orders": "Lệnh chờ",
+      "history": "Lịch sử",
+      "noHistory": "Chưa có lịch sử giao dịch",
+      "noHistoryHint": "Các lệnh đã đóng sẽ hiển thị ở đây.",
+      "loadMore": "Tải giao dịch cũ hơn",
+      "loadingMore": "Đang tải…",
       "noPositions": "Không có vị thế mở",
       "noOrders": "Không có lệnh chờ",
       "noPositionsHint": "Đặt lệnh bằng phiếu lệnh; vị thế đã khớp sẽ hiện tại đây.",

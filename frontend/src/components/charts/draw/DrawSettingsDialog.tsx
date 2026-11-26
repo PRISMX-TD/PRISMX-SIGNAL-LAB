@@ -6,7 +6,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import ChartDialog from '../ChartDialog'
 import Switch from '../../Switch'
-import { ColorDot } from '../ColorDot'
+import { AlphaColorPicker } from '../ind/ColorPicker'
 import {
   type Drawing, type DrawTemplate, type DrawType, type FibLevel, type VisGroup, PALETTE, LINE_WIDTHS, TOOL_META,
   levelsOf, fillOf, showLabelOf, fontSizeOf, takesText, hasLevels, isScreenAnchored, EMOJIS, DEFAULT_ACCOUNT, DEFAULT_RISK,
@@ -123,7 +123,7 @@ export default function DrawSettingsDialog(p: Props) {
           <>
             {!isPos && (
               <Row label={tt('charts.draw.color')}>
-                <ColorDot value={d.color} palette={PALETTE} label={tt('charts.draw.color')} onChange={(v) => set({ color: v })} />
+                <AlphaColorPicker presets={PALETTE} value={d.color} label={tt('charts.draw.color')} onChange={(v) => set({ color: v })} />
               </Row>
             )}
             {!NO_LINE.has(type) && (
@@ -209,7 +209,7 @@ export default function DrawSettingsDialog(p: Props) {
                     <div key={i} className="draw-level">
                       <input type="checkbox" checked={l.on} aria-label={tt('charts.draw.levelOn', { v: l.v })} onChange={(e) => setLevels(levels.map((x, k) => (k === i ? { ...x, on: e.target.checked } : x)))} />
                       <Num value={l.v} width={72} label={tt('charts.draw.levelValue')} onChange={(v) => setLevels(levels.map((x, k) => (k === i ? { ...x, v } : x)))} />
-                      <ColorDot value={l.color || d.color} palette={PALETTE} label={tt('charts.draw.color')} onChange={(v) => setLevels(levels.map((x, k) => (k === i ? { ...x, color: v } : x)))} />
+                      <AlphaColorPicker presets={PALETTE} value={l.color || d.color} label={tt('charts.draw.color')} onChange={(v) => setLevels(levels.map((x, k) => (k === i ? { ...x, color: v } : x)))} />
                       <button type="button" className="chart-pop-star" aria-label={tt('charts.draw.levelRemove')} onClick={() => setLevels(levels.filter((_, k) => k !== i))}>
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6L6 18" /></svg>
                       </button>
@@ -246,7 +246,7 @@ export default function DrawSettingsDialog(p: Props) {
               <Seg value={fontSizeOf(d)} label={tt('charts.draw.fontSize')} options={[10, 12, 14, 18, 24, 32].map((n) => ({ v: n, label: String(n) }))} onChange={(v) => set({ fontSize: v })} />
             </Row>
             <Row label={tt('charts.draw.textColor')}>
-              <ColorDot value={d.textColor || d.color} palette={PALETTE} label={tt('charts.draw.textColor')} onChange={(v) => set({ textColor: v })} />
+              <AlphaColorPicker presets={PALETTE} value={d.textColor || d.color} label={tt('charts.draw.textColor')} onChange={(v) => set({ textColor: v })} />
             </Row>
           </>
         )

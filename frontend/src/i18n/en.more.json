@@ -770,6 +770,11 @@
     "dock": {
       "positions": "Positions",
       "orders": "Pending",
+      "history": "History",
+      "noHistory": "No trade history yet",
+      "noHistoryHint": "Closed trades will appear here.",
+      "loadMore": "Load older trades",
+      "loadingMore": "Loading…",
       "noPositions": "No open positions",
       "noOrders": "No pending orders",
       "noPositionsHint": "Place an order with the ticket; filled positions show up here.",

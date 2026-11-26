@@ -91,7 +91,7 @@ function sumOrNull(legs: ClosedTrade[], pick: (l: ClosedTrade) => number | null 
   return total
 }
 
-function groupPositions(trades: ClosedTrade[]): PositionRow[] {
+export function groupPositions(trades: ClosedTrade[]): PositionRow[] {
   // trades 已是最新在前；Map 按首次插入排序，所以仓位也按最后一腿的时间倒序
   // trades arrive newest first; Map keeps insertion order, so positions sort by their last leg
   const groups = new Map<string, ClosedTrade[]>()
