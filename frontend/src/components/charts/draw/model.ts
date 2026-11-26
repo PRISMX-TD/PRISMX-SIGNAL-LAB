@@ -374,6 +374,11 @@ export function finishPoints(type: DrawType, pts: Point[]): Point[] {
 }
 
 // 样式字段（模板 / 默认样式只存这些，不存坐标和文字）/ style fields (templates & defaults keep only these)
+// 没有线宽 / 线型可调的工具（图标、气泡、文字块、成交量分布）；设置弹窗和浮动工具条共用
+// Tools without width / style (icons, bubbles, text blocks, volume profiles); shared by the dialog and the quick bar
+export const NO_LINE = new Set<DrawType>(['text', 'priceLabel', 'long', 'short', 'emoji', 'note', 'pin', 'flag', 'arrowUp', 'arrowDown', 'arrowMarker', 'comment', 'callout', 'signpost', 'anchoredText',
+  'table', 'image', 'barsPattern', 'ghostFeed', 'fixedRangeVP', 'anchoredVP'])
+
 export const STYLE_KEYS = ['color', 'lineWidth', 'lineStyle', 'fill', 'extendLeft', 'extendRight', 'showLabel', 'levels', 'fontSize', 'textColor', 'account', 'risk', 'rows', 'bands', 'alpha', 'vp'] as const
 export type StyleProps = Partial<Pick<Drawing, typeof STYLE_KEYS[number]>>
 export function styleOf(d: Drawing): StyleProps {

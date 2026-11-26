@@ -9,12 +9,9 @@ import Switch from '../../Switch'
 import { AlphaColorPicker } from '../ind/ColorPicker'
 import {
   type Drawing, type DrawTemplate, type DrawType, type FibLevel, type VisGroup, PALETTE, LINE_WIDTHS, TOOL_META,
-  levelsOf, fillOf, showLabelOf, fontSizeOf, takesText, hasLevels, isScreenAnchored, EMOJIS, DEFAULT_ACCOUNT, DEFAULT_RISK,
+  levelsOf, fillOf, showLabelOf, fontSizeOf, takesText, hasLevels, isScreenAnchored, EMOJIS, DEFAULT_ACCOUNT, DEFAULT_RISK, NO_LINE,
 } from './model'
 
-// 没有线宽 / 线型可调的工具（图标、气泡、文字块）/ tools without width / style (icons, bubbles, text blocks)
-const NO_LINE = new Set<DrawType>(['text', 'priceLabel', 'long', 'short', 'emoji', 'note', 'pin', 'flag', 'arrowUp', 'arrowDown', 'arrowMarker', 'comment', 'callout', 'signpost', 'anchoredText',
-  'table', 'image', 'barsPattern', 'ghostFeed', 'fixedRangeVP', 'anchoredVP'])
 // 用 tick 量算的工具（设置里注明）/ tools computed from tick volume (noted in settings)
 const TICK_VOL = new Set<DrawType>(['anchoredVwap', 'fixedRangeVP', 'anchoredVP'])
 // 能左右延长的工具 / tools that extend left / right

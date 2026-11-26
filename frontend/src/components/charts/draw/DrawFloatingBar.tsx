@@ -5,7 +5,7 @@
 import { useRef, useState } from 'react'
 import ChartPopover from '../ChartPopover'
 import { AlphaColorPanel } from '../ind/ColorPicker'
-import { type Drawing, type LineStyle, PALETTE, LINE_WIDTHS } from './model'
+import { type Drawing, type LineStyle, PALETTE, LINE_WIDTHS, NO_LINE } from './model'
 
 interface Props {
   drawings: Drawing[]
@@ -59,7 +59,9 @@ export default function DrawFloatingBar({ drawings, onPatch, onSettings, onToggl
   const moreRef = useRef<HTMLButtonElement>(null)
   const first = drawings[0]
   const allLocked = drawings.every((d) => d.locked)
-  const linear = drawings.some((d) => d.type !== 'text' && d.type !== 'priceLabel' && d.type !== 'long' && d.type !== 'short')
+  // 线宽 / 线型只在选中项里有线可调时才出现（成交量分布、图标、文字块等没有）
+  // Width / style only show when a selected drawing actually has a line (not volume profiles, icons, text blocks…)
+  const linear = drawings.some((d) => !NO_LINE.has(d.type))
   const width = first.lineWidth ?? 1
   const style = first.lineStyle ?? 'solid'
   const close = () => setMenu(null)
