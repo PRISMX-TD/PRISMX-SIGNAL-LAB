@@ -2449,12 +2449,8 @@
 .draw-fbar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line); }
 .draw-fbar-count { padding: 0 6px; font: 500 12px var(--font-mono); color: var(--text-3); }
 
-.draw-palette { display: flex; flex-direction: column; gap: 8px; padding: 4px; }
-.draw-palette-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
-.draw-swatch { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18); }
-.draw-swatch.on { box-shadow: 0 0 0 2px var(--surface-float), 0 0 0 3px var(--text-strong); }
-.draw-palette-custom { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-3); cursor: pointer; }
-.draw-palette-custom input { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+/* 浮动工具条的颜色菜单：嵌入取色面板（.cp-*）/ floating bar colour menu: the embedded picker panel */
+.draw-cp { padding: 6px; }
 
 .draw-levels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 16px; }
 .draw-level { display: flex; align-items: center; gap: 8px; }

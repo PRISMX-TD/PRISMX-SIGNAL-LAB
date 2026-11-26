@@ -4,6 +4,7 @@
 // lock, clone, more (z-order / hide / object tree), delete. With a multi-selection it edits them all.
 import { useRef, useState } from 'react'
 import ChartPopover from '../ChartPopover'
+import { AlphaColorPanel } from '../ind/ColorPicker'
 import { type Drawing, type LineStyle, PALETTE, LINE_WIDTHS } from './model'
 
 interface Props {
@@ -40,18 +41,12 @@ export function StyleGlyph({ s, w = 18 }: { s: LineStyle; w?: number }) {
   )
 }
 
-export function ColorGrid({ value, onPick, t }: { value: string; onPick: (c: string) => void; t: Props['t'] }) {
+// 颜色菜单：与设置对话框同一套取色面板（常用色 + 大色板 + 色值 + R/G/B + 不透明度）
+// Colour menu: the same picker panel as the settings dialog (presets, palette, hex, R/G/B, opacity)
+export function ColorGrid({ value, onPick }: { value: string; onPick: (c: string) => void; t?: Props['t'] }) {
   return (
-    <div className="draw-palette">
-      <div className="draw-palette-grid">
-        {PALETTE.map((c) => (
-          <button key={c} type="button" className={`draw-swatch ${value.toLowerCase() === c ? 'on' : ''}`} style={{ background: c }} onClick={() => onPick(c)} aria-label={c} aria-pressed={value.toLowerCase() === c} />
-        ))}
-      </div>
-      <label className="draw-palette-custom">
-        <input type="color" value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#22d3ee'} onChange={(e) => onPick(e.target.value)} />
-        <span>{String(t('charts.draw.customColor'))}</span>
-      </label>
+    <div className="draw-cp">
+      <AlphaColorPanel value={value} presets={PALETTE} onChange={onPick} />
     </div>
   )
 }
@@ -106,7 +101,7 @@ export default function DrawFloatingBar({ drawings, onPatch, onSettings, onToggl
       <button ref={moreRef} type="button" className="draw-fbar-btn" title={tt('charts.draw.more')} aria-label={tt('charts.draw.more')} onClick={() => setMenu(menu === 'more' ? null : 'more')}>{I.more}</button>
       <button type="button" className="draw-fbar-btn danger" title={tt('charts.draw.delete')} aria-label={tt('charts.draw.delete')} onClick={onDelete}>{I.trash}</button>
 
-      <ChartPopover open={menu === 'color'} onClose={close} anchorRef={colorRef} width={196} label={tt('charts.draw.color')}>
+      <ChartPopover open={menu === 'color'} onClose={close} anchorRef={colorRef} width={268} label={tt('charts.draw.color')}>
         <ColorGrid value={first.color} onPick={(c) => onPatch({ color: c })} t={t} />
       </ChartPopover>
       <ChartPopover open={menu === 'width'} onClose={close} anchorRef={widthRef} width={120} label={tt('charts.draw.width')}>

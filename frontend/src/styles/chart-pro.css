@@ -665,10 +665,11 @@ svg.pt-ava { display: block; border-radius: 0; }
   border-radius: 4px;
   color: var(--text);
   font: 500 13px/1 var(--pt-font);
-  transition: background-color 0.6s var(--ease-out), color 0.6s var(--ease-out);
+  transition: color 0.6s var(--ease-out);
 }
-.pt-wr-px.up { color: var(--up); background: var(--up-bg); transition: none; }
-.pt-wr-px.down { color: var(--down); background: var(--down-bg); transition: none; }
+/* 跳价只变字色、不铺底色（2026-11-26）/ ticks recolour the text only, no background (2026-11-26) */
+.pt-wr-px.up { color: var(--up); transition: none; }
+.pt-wr-px.down { color: var(--down); transition: none; }
 .pt-wl.down .pt-wr-px { color: var(--text-3); background: none; }
 .pt-wr-fav { position: relative; z-index: 1; display: grid; place-items: center; }
 .pt-wr-fav .fav-star { opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }

@@ -52,6 +52,90 @@ export function Swatch({ color, opacity = 100 }: { color: string; opacity?: numb
   )
 }
 
+/** 取色面板本体（色板 + 色值 + R/G/B + 不透明度），弹层里和别的菜单里（画线浮动工具条）都用它。
+ *  The picker body (palettes + hex + R/G/B + opacity), used in the popover and embedded in other
+ *  menus such as the drawing floating bar. */
+export function ColorPanel({ color, opacity, onChange, resolved, presets }: {
+  color: string
+  opacity?: number
+  onChange: (color: string, opacity?: number) => void
+  resolved?: string
+  presets?: readonly string[]
+}) {
+  const { t } = useTranslation()
+  const shown = resolved ?? color
+  const [hex, setHex] = useState(shown)
+  useEffect(() => { setHex(shown) }, [shown])
+  return (
+    <>
+      {presets && presets.length > 0 && (
+        <div className="cp-grid cp-pre">
+          {presets.map((c) => (
+            <button key={c} type="button" className={`cp-c ${c.toLowerCase() === shown.toLowerCase() ? 'on' : ''}`} style={{ background: c }} aria-label={c} onClick={() => onChange(c, opacity)} />
+          ))}
+        </div>
+      )}
+      <div className="cp-grid">
+        {PALETTE.map((c) => (
+          <button key={c} type="button" className={`cp-c ${c.toLowerCase() === shown.toLowerCase() ? 'on' : ''}`} style={{ background: c }} aria-label={c} onClick={() => onChange(c, opacity)} />
+        ))}
+      </div>
+      <div className="cp-row">
+        <span className="cp-cur"><i style={{ background: HEX.test(hex) ? hex : shown }} /></span>
+        <input
+          className="cp-hex"
+          value={hex}
+          maxLength={7}
+          spellCheck={false}
+          aria-label={String(t('charts.ind.ui.hex'))}
+          onChange={(e) => {
+            const v = e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`
+            setHex(v)
+            if (HEX.test(v)) onChange(v.toLowerCase(), opacity)
+          }}
+        />
+      </div>
+      {/* R / G / B 三格：改任一格立刻生效 / editing any channel applies at once */}
+      <div className="cp-row cp-rgb">
+        {(['R', 'G', 'B'] as const).map((ch, i) => {
+          const rgb = rgbOf(HEX.test(hex) ? hex : shown) ?? [0, 0, 0]
+          return (
+            <label key={ch} className="cp-ch">
+              <span>{ch}</span>
+              <input
+                type="number"
+                min={0}
+                max={255}
+                inputMode="numeric"
+                value={rgb[i]}
+                aria-label={ch}
+                onChange={(e) => {
+                  const n = Number(e.target.value)
+                  if (!Number.isFinite(n)) return
+                  const next = [...rgb]
+                  next[i] = n
+                  const v = hexOf(next)
+                  setHex(v)
+                  onChange(v, opacity)
+                }}
+              />
+            </label>
+          )
+        })}
+      </div>
+      {opacity != null && (
+        <div className="cp-row">
+          <span className="cp-k">{t('charts.ind.ui.opacity')}</span>
+          <input className="cp-range" type="range" min={0} max={100} step={1} value={opacity} aria-label={String(t('charts.ind.ui.opacity'))}
+            style={{ ['--cp-c' as string]: HEX.test(shown) ? shown : '#888888' }}
+            onChange={(e) => onChange(color, Number(e.target.value))} />
+          <span className="cp-v">{opacity}%</span>
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function ColorPicker({ color, opacity, onChange, label, resolved, presets }: {
   color: string
   opacity?: number
@@ -63,14 +147,11 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved,
   /** 大色板上面多一行常用色 / an extra row of common colours above the palette */
   presets?: readonly string[]
 }) {
-  const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const btn = useRef<HTMLButtonElement>(null)
   const pop = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
   const shown = resolved ?? color
-  const [hex, setHex] = useState(shown)
-  useEffect(() => { setHex(shown) }, [shown])
 
   useLayoutEffect(() => {
     if (!open || !btn.current) return
@@ -103,70 +184,7 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved,
       </button>
       {open && createPortal(
         <div ref={pop} className="cp-pop" role="dialog" aria-label={label} style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}>
-          {presets && presets.length > 0 && (
-            <div className="cp-grid cp-pre">
-              {presets.map((c) => (
-                <button key={c} type="button" className={`cp-c ${c.toLowerCase() === shown.toLowerCase() ? 'on' : ''}`} style={{ background: c }} aria-label={c} onClick={() => onChange(c, opacity)} />
-              ))}
-            </div>
-          )}
-          <div className="cp-grid">
-            {PALETTE.map((c) => (
-              <button key={c} type="button" className={`cp-c ${c.toLowerCase() === shown.toLowerCase() ? 'on' : ''}`} style={{ background: c }} aria-label={c} onClick={() => onChange(c, opacity)} />
-            ))}
-          </div>
-          <div className="cp-row">
-            <span className="cp-cur"><i style={{ background: HEX.test(hex) ? hex : shown }} /></span>
-            <input
-              className="cp-hex"
-              value={hex}
-              maxLength={7}
-              spellCheck={false}
-              aria-label={String(t('charts.ind.ui.hex'))}
-              onChange={(e) => {
-                const v = e.target.value.startsWith('#') ? e.target.value : `#${e.target.value}`
-                setHex(v)
-                if (HEX.test(v)) onChange(v.toLowerCase(), opacity)
-              }}
-            />
-          </div>
-          {/* R / G / B 三格：改任一格立刻生效 / editing any channel applies at once */}
-          <div className="cp-row cp-rgb">
-            {(['R', 'G', 'B'] as const).map((ch, i) => {
-              const rgb = rgbOf(HEX.test(hex) ? hex : shown) ?? [0, 0, 0]
-              return (
-                <label key={ch} className="cp-ch">
-                  <span>{ch}</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={255}
-                    inputMode="numeric"
-                    value={rgb[i]}
-                    aria-label={ch}
-                    onChange={(e) => {
-                      const n = Number(e.target.value)
-                      if (!Number.isFinite(n)) return
-                      const next = [...rgb]
-                      next[i] = n
-                      const v = hexOf(next)
-                      setHex(v)
-                      onChange(v, opacity)
-                    }}
-                  />
-                </label>
-              )
-            })}
-          </div>
-          {opacity != null && (
-            <div className="cp-row">
-              <span className="cp-k">{t('charts.ind.ui.opacity')}</span>
-              <input className="cp-range" type="range" min={0} max={100} step={1} value={opacity} aria-label={String(t('charts.ind.ui.opacity'))}
-                style={{ ['--cp-c' as string]: HEX.test(shown) ? shown : '#888888' }}
-                onChange={(e) => onChange(color, Number(e.target.value))} />
-              <span className="cp-v">{opacity}%</span>
-            </div>
-          )}
+          <ColorPanel color={color} opacity={opacity} onChange={onChange} resolved={resolved} presets={presets} />
         </div>,
         document.body,
       )}
@@ -179,4 +197,10 @@ export default function ColorPicker({ color, opacity, onChange, label, resolved,
 export function AlphaColorPicker({ value, onChange, label, presets }: { value: string; onChange: (v: string) => void; label: string; presets?: readonly string[] }) {
   const { color, opacity } = splitAlpha(value)
   return <ColorPicker color={color} opacity={opacity} label={label} presets={presets} onChange={(c, o) => onChange(joinAlpha(c, o ?? 100))} />
+}
+
+/** 同上，嵌在别的菜单里的面板版 / the same, as an embeddable panel */
+export function AlphaColorPanel({ value, onChange, presets }: { value: string; onChange: (v: string) => void; presets?: readonly string[] }) {
+  const { color, opacity } = splitAlpha(value)
+  return <ColorPanel color={color} opacity={opacity} presets={presets} onChange={(c, o) => onChange(joinAlpha(c, o ?? 100))} />
 }
